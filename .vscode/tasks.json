@@ -318,7 +318,7 @@
         {
             "label": "pagespeed-apache-test",
             "type": "shell",
-            "command": " bazel test -c dbg --test_output=streamed //pagespeed/apache:apache_test",
+            "command": " bazel test -c dbg --test_output=streamed //test/pagespeed/apache:apache",
             "problemMatcher": [
                 "$gcc"
             ],
