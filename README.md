@@ -1,10 +1,6 @@
 # mod_pagespeed
 ![logo](https://www.gstatic.com/images/branding/product/2x/pagespeed_32dp.png)
 
-|CI|Status|
-|---|---|
-|Travis|[![Build Status](https://travis-ci.org/apache/incubator-pagespeed-mod.svg?branch=master)](https://travis-ci.org/apache/incubator-pagespeed-mod)|
-
 `mod_pagespeed` is an open-source Apache module created by Google to help Make the Web Faster by rewriting web pages to reduce latency and bandwidth.
 
 mod_pagespeed releases are available as [precompiled linux packages](https://modpagespeed.com/doc/download) or as [source](https://modpagespeed.com/doc/build_mod_pagespeed_from_source). (See [Release Notes](https://modpagespeed.com/doc/release_notes) for information about bugs fixed)
