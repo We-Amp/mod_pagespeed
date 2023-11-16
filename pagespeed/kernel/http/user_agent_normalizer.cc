@@ -105,7 +105,7 @@ GoogleString IEUserAgentNormalizer::Normalize(const GoogleString& in) const {
     // blow up their variety. We keep only parts that talk about the
     // renderer or platform
     GoogleString out;
-    match.CopyToString(&out);
+    out.assign(match.data(), match.size());
     StringPieceVector fragments;
     SplitStringUsingSubstr(Re2ToStringPiece(match2), "; ", &fragments);
     for (int i = 0, n = fragments.size(); i < n; ++i) {
