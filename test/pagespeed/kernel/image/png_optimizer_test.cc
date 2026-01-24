@@ -40,11 +40,7 @@ extern "C" {
 #include "external/libpng/png.h"
 #endif
 
-#ifdef USE_SYSTEM_ZLIB
-#include "zlib.h"
-#else
-#include "external/envoy/bazel/foreign_cc/zlib/include/zlib.h"
-#endif
+#include <zlib.h>  // Provided by @envoy//bazel:zlib
 }
 
 namespace {

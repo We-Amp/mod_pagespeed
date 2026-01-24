@@ -23,13 +23,8 @@
 #include <cstdlib>
 
 #include "base/logging.h"
-#ifdef USE_SYSTEM_ZLIB
-#include "zconf.h"  // NOLINT
-#include "zlib.h"   // NOLINT
-#else
-#include "external/envoy/bazel/foreign_cc/zlib/include/zconf.h"
-#include "external/envoy/bazel/foreign_cc/zlib/include/zlib.h"
-#endif
+#include <zconf.h>  // Provided by @envoy//bazel:zlib
+#include <zlib.h>   // Provided by @envoy//bazel:zlib
 #include "pagespeed/kernel/base/stack_buffer.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/writer.h"

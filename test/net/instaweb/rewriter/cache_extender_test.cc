@@ -704,7 +704,7 @@ TEST_F(CacheExtenderTest, ExtendIfShardedToHttps) {
 }
 
 TEST_F(CacheExtenderTest, ExtendIfShardedAndRewritingAndMappingHttps) {
-  // This test started out trying to unit test mod_pagespeed issue #400 by
+  // This test started out trying to unit test mod_pagespeed by
   // replicating the settings the poster used. They didn't work, basically
   // because the wildcard directive for *test.com conflicted with the later
   // non-wildcard ones. After much experimentation we came up with these

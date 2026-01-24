@@ -46,3 +46,55 @@ cc_library(
         "@mod_pagespeed//base:log_shim",
     ],
 )
+
+# Event dispatcher abstraction - unified event loop interface.
+# This is the core abstraction used by both Envoy and Apache backends.
+cc_library(
+    name = "event_dispatcher",
+    srcs = [
+        "dispatcher_sequence.cc",
+        "event_dispatcher.cc",
+    ],
+    hdrs = [
+        "dispatcher_sequence.h",
+        "event_dispatcher.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":thread",
+        "//pagespeed/kernel/base:pagespeed_base",
+        "@mod_pagespeed//base:log_shim",
+    ],
+)
+
+# Libevent-based dispatcher for standalone use (Apache).
+# Runs a background thread with a libevent event loop.
+# Note: Uses Envoy's libevent dependency via foreign_cc.
+cc_library(
+    name = "libevent_dispatcher",
+    srcs = ["libevent_dispatcher.cc"],
+    hdrs = ["libevent_dispatcher.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":event_dispatcher",
+        ":thread",
+        "//pagespeed/kernel/base:pagespeed_base",
+        "@envoy//bazel/foreign_cc:event",
+        "@mod_pagespeed//base:log_shim",
+    ],
+)
+
+# Scheduler backed by EventDispatcher.
+# Uses dispatcher timers instead of condvar waits.
+cc_library(
+    name = "event_scheduler",
+    srcs = ["event_scheduler.cc"],
+    hdrs = ["event_scheduler.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":event_dispatcher",
+        ":thread",
+        "//pagespeed/kernel/base:pagespeed_base",
+        "@mod_pagespeed//base:log_shim",
+    ],
+)

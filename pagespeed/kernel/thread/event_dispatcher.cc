@@ -6,9 +6,9 @@
  * to you under the Apache License, Version 2.0 (the
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
- * 
+ *
  *   http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
  * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
@@ -17,38 +17,34 @@
  * under the License.
  */
 
-#ifndef PAGESPEED_KERNEL_BASE_ATOMIC_BOOL_H_
-#define PAGESPEED_KERNEL_BASE_ATOMIC_BOOL_H_
+#include "pagespeed/kernel/thread/event_dispatcher.h"
 
-#include <atomic>
-
-#include "pagespeed/kernel/base/atomicops.h"
-#include "pagespeed/kernel/base/basictypes.h"
+#include "pagespeed/kernel/base/function.h"
 
 namespace net_instaweb {
 
-// A boolean flag that can be set atomically and be visible to other
-// threads. Please be extra careful with this --- it can go wrong in
-// incomprehensible  ways; most of the time, you probably want to use a mutex
-// instead.
-class AtomicBool {
- public:
-  // Guaranteed to be initialized to false.
-  AtomicBool() { set_value(false); }
+BasicEventTimer::BasicEventTimer(Function* function) : function_(function) {}
 
-  ~AtomicBool() {}
-
-  bool value() const {
-    return value_.load(std::memory_order_acquire);
+BasicEventTimer::~BasicEventTimer() {
+  // If function still exists and wasn't cancelled or run, cancel it.
+  if (function_ != nullptr) {
+    function_->CallCancel();
+    function_ = nullptr;
   }
+}
 
-  void set_value(bool v) { value_.store(v, std::memory_order_release); }
+void BasicEventTimer::Cancel() {
+  bool was_cancelled = cancelled_.exchange(true, std::memory_order_acq_rel);
+  if (!was_cancelled && function_ != nullptr) {
+    function_->CallCancel();
+    function_ = nullptr;
+  }
+}
 
- private:
-  std::atomic<bool> value_;
-  DISALLOW_COPY_AND_ASSIGN(AtomicBool);
-};
+Function* BasicEventTimer::ReleaseFunction() {
+  Function* f = function_;
+  function_ = nullptr;
+  return f;
+}
 
 }  // namespace net_instaweb
-
-#endif  // PAGESPEED_KERNEL_BASE_ATOMIC_BOOL_H_

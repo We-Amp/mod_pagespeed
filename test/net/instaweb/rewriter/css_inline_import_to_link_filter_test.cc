@@ -136,7 +136,7 @@ TEST_F(CssInlineImportToLinkFilterTest, ConvertStyleWithMultipleImports) {
       "</style>",
       "<link rel=\"stylesheet\" href=\"first.css\" media=\"screen\">"
       "<link rel=\"stylesheet\" href=\"third.css\" media=\"print\">");
-  // Example from modpagespeed issue #491. Note that all the attributes from
+  // Example from modpagespeed. Note that all the attributes from
   // the style are copied to the end of every link.
   ValidateStyleToLink(
       "<style type=\"text/css\" title=\"currentStyle\" media=\"screen\">"

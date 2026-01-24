@@ -34,9 +34,18 @@ class PageSpeedGLogSink : public google::LogSink {
  public:
   PageSpeedGLogSink();
 
+  // Override both send signatures to avoid hidden overload warning
   void send(google::LogSeverity severity, const char* full_filename,
             const char* base_filename, int line, const struct tm* tm_time,
-            const char* message, size_t message_len) override;
+            const char* message, size_t message_len) override {
+    send(severity, full_filename, base_filename, line, tm_time, message,
+         message_len, 0);
+  }
+
+  void send(google::LogSeverity severity, const char* full_filename,
+            const char* base_filename, int line, const struct tm* tm_time,
+            const char* message, size_t message_len,
+            google::int32 usecs) override;
 
   void setMinLogLevel(int) {
     // XXX(oschaaf): check callees and make this take effect.

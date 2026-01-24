@@ -2,6 +2,16 @@ load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
 
 licenses(["notice"])  # Apache 2
 
+# System test scripts and helpers
+filegroup(
+    name = "system_test_files",
+    srcs = [
+        "system_test.sh",
+        "system_test_helpers.sh",
+    ] + glob(["system_tests/*.sh"]),
+    visibility = ["//visibility:public"],
+)
+
 cc_library(
     name = "static_rewriter_lib",
     srcs = ["static_rewriter.cc"],

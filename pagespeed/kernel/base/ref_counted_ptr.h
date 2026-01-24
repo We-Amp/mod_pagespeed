@@ -57,7 +57,8 @@ class RefCounted {
 
  private:
   AtomicInt32 ref_count_;
-  DISALLOW_COPY_AND_ASSIGN(RefCounted<T>);
+  RefCounted(const RefCounted&) = delete;
+  RefCounted& operator=(const RefCounted&) = delete;
 };
 
 // Template class to help make reference-counted pointers.  You can use

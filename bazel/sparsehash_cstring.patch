@@ -1,0 +1,10 @@
+--- a/src/google/sparsetable
++++ b/src/google/sparsetable
+@@ -72,6 +72,7 @@
+ #include <vector>               // a sparsetable is a vector of groups
+ #include <google/sparsehash/libc_allocator_with_realloc.h>
+ #include <google/type_traits.h> // for true_type, integral_constant, etc.
++#include <cstring>              // for memset/memcpy - required by newer GCC
+
+ #if STDC_HEADERS
+ #include <string.h>             // for memcpy

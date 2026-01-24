@@ -2,6 +2,17 @@ load("@rules_cc//cc:defs.bzl", "cc_library")
 
 licenses(["notice"])  # Apache 2
 
+# Apache-specific system test scripts
+filegroup(
+    name = "system_test_files",
+    srcs = [
+        "gzip_test.sh",
+        "process_scope_test.sh",
+        "system_test.sh",
+    ] + glob(["system_tests/*.sh"]),
+    visibility = ["//visibility:public"],
+)
+
 cc_library(
     name = "apache",
     srcs = [
@@ -54,9 +65,12 @@ cc_library(
         "-Iexternal/serf/include/",
         "-Iexternal/serf/",
     ],
+    alwayslink = True,
     visibility = ["//visibility:public"],
     deps = [
         "//pagespeed/automatic",
+        "//pagespeed/kernel/thread:event_scheduler",
+        "//pagespeed/kernel/thread:libevent_dispatcher",
         "//pagespeed/system",
     ],
 )

@@ -254,3 +254,12 @@ cc_library(
     ],
     visibility = ["//visibility:public"],
 )
+
+# System-level test scripts for Apache/Nginx system tests
+filegroup(
+    name = "system_test_files",
+    srcs = [
+        "system_test.sh",
+    ] + glob(["system_tests/*.sh"]),
+    visibility = ["//visibility:public"],
+)

@@ -19,6 +19,23 @@
 
 // Contains SchedulerThread, used to run the Scheduler dispatch loop for
 // non-blocking servers.
+//
+// DEPRECATED: This class is deprecated. Use LibeventDispatcher with
+// EventScheduler instead, which provides the same functionality with a
+// unified EventDispatcher abstraction:
+//
+//   // Old way (deprecated):
+//   SchedulerThread* thread = new SchedulerThread(thread_system, scheduler);
+//   thread->Start();
+//
+//   // New way:
+//   auto dispatcher = std::make_unique<LibeventDispatcher>(thread_system, timer);
+//   auto scheduler = std::make_unique<EventScheduler>(thread_system, dispatcher.get());
+//   dispatcher->Start();
+//
+// The new approach allows sharing scheduling infrastructure between different
+// deployment modes (Apache uses LibeventDispatcher, Envoy uses
+// EnvoyDispatcherAdapter wrapping Envoy's native dispatcher).
 
 #ifndef PAGESPEED_KERNEL_THREAD_SCHEDULER_THREAD_H_
 #define PAGESPEED_KERNEL_THREAD_SCHEDULER_THREAD_H_

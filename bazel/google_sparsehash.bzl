@@ -12,6 +12,8 @@ cc_library(
         "src/google/sparsehash/sparsehashtable.h",
         "src/google/type_traits.h",
     ],
+    # Add cstring include for memset/memcpy - newer GCC requires explicit include
+    copts = ["-include", "cstring"],
     visibility = ["//visibility:public"],
     strip_include_prefix = "src/",
 

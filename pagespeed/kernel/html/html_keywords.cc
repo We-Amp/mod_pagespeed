@@ -21,6 +21,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstring>  // For memset/memcpy used by sparsehash
 #include <map>
 #include <utility>
 

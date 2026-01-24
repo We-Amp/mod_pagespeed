@@ -55,7 +55,8 @@ cc_library(
     deps = [
         "@apr",
         "@aprutil",
-        "@boringssl//:ssl"
+        "@boringssl//:ssl",
+        "@envoy//bazel:zlib",
     ],
 )
 """
