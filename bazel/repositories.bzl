@@ -1,4 +1,5 @@
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 load(":hiredis.bzl", "hiredis_build_rule")
 load(":jsoncpp.bzl", "jsoncpp_build_rule")
 load(":libpng.bzl", "libpng_build_rule")
@@ -12,6 +13,8 @@ load(":apr.bzl", "apr_build_rule")
 load(":aprutil.bzl", "aprutil_build_rule")
 load(":serf.bzl", "serf_build_rule")
 load(":closure_compiler.bzl", "closure_library_rules")
+load(":cyclone.bzl", "cyclone_build_rule")
+load(":libmemcached.bzl", "libmemcached_build_rule")
 
 ENVOY_COMMIT = "83082b0bf0db8a5b6bb3e691df387bf8566f072d"
 ENVOY_SHA = "71a2dc9186d1ef916a952aae8949953dc7ae6bbcce4415bdc2f3ffa0c1ec1427"
@@ -46,6 +49,10 @@ APRUTIL_COMMIT = "13ed779e56669007dffe9a27ffab3790b59cbfaa"
 APRUTIL_SHA = "9cf6d0e6fcc4783228dcee722897dadaadc601aef894c43a1e1514436eb4471a"
 SERF_COMMIT = "3a37fc11c49d4fa91c559ee0b387f7a23705d999"  # July 24th, 2020
 SERF_SHA = "0599b9a8ec8ea3ae260337fa84d8d335bd95ce54a236f7be24a8bddfd04a4840"
+
+# Cyclone Cache - high-performance disk cache with scan-resistant CLFUS algorithm
+# Requires C++23 - wrapper provides C ABI for C++20 consumers
+CYCLONE_COMMIT = "main"  # Use main branch - update to specific commit for production
 
 # Libevent - cross-platform event notification library
 # Used by LibeventDispatcher for standalone event loop (Apache deployments)
@@ -197,6 +204,16 @@ def mod_pagespeed_dependencies():
         sha256 = SERF_SHA,
     )
 
+    # Cyclone Cache - high-performance disk cache
+    # Uses new_local_repository for development with local checkout
+    # Note: The path /cyclone-cache is mounted via docker-compose.yml
+    # For non-Docker builds, change this to your local cyclone-cache path
+    native.new_local_repository(
+        name = "cyclone",
+        path = "/cyclone-cache",
+        build_file_content = cyclone_build_rule,
+    )
+
     # Note: libevent is provided by Envoy's build system.
     # For standalone Apache builds, use the system-installed libevent.
     # http_archive(
@@ -206,6 +223,14 @@ def mod_pagespeed_dependencies():
     #     sha256 = LIBEVENT_SHA,
     #     build_file = "@mod_pagespeed//bazel:libevent.BUILD",
     # )
+
+    # libmemcached - system-installed memcached client library
+    # Requires libmemcached-dev to be installed (apt-get install libmemcached-dev)
+    native.new_local_repository(
+        name = "libmemcached",
+        path = "/usr",
+        build_file_content = libmemcached_build_rule,
+    )
 
     http_archive(
         name = "closure_library",

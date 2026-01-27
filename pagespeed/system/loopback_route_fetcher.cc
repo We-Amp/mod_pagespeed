@@ -19,7 +19,9 @@
 
 #include "pagespeed/system/loopback_route_fetcher.h"
 
-#include "apr_network_io.h"
+#include <netinet/in.h>
+#include <sys/socket.h>
+
 #include "base/logging.h"
 #include "net/instaweb/http/public/async_fetch.h"
 #include "net/instaweb/http/public/request_context.h"
@@ -110,16 +112,19 @@ void LoopbackRouteFetcher::Fetch(const GoogleString& original_url,
   backend_fetcher_->Fetch(url, message_handler, fetch);
 }
 
-bool LoopbackRouteFetcher::IsLoopbackAddr(const apr_sockaddr_t* addr) {
-  if (addr->family == APR_INET) {
+bool LoopbackRouteFetcher::IsLoopbackAddr(const struct sockaddr* addr) {
+  if (addr->sa_family == AF_INET) {
+    const struct sockaddr_in* addr_v4 =
+        reinterpret_cast<const struct sockaddr_in*>(addr);
     // 127.0.0.0/8 is the IPv4 loopback.
-    // Note: is network byte order, so we can do char-wide indexing into it
-    // consistently (but not look at the whole thing).
+    // Network byte order, so char-wide indexing works consistently.
     const char* ipbytes =
-        reinterpret_cast<const char*>(&addr->sa.sin.sin_addr.s_addr);
+        reinterpret_cast<const char*>(&addr_v4->sin_addr.s_addr);
     return (ipbytes[0] == 127);
-  } else if (addr->family == APR_INET6) {
-    const in6_addr& addr_v6 = addr->sa.sin6.sin6_addr;
+  } else if (addr->sa_family == AF_INET6) {
+    const struct sockaddr_in6* addr_v6_sock =
+        reinterpret_cast<const struct sockaddr_in6*>(addr);
+    const struct in6_addr& addr_v6 = addr_v6_sock->sin6_addr;
 
     // There are a couple of ways we can see loopbacks in IPv6: as the
     // proper IPv6 loopback, ::1, or as "IPv4-compatible IPv6 address"

@@ -35,8 +35,8 @@
 #include "pagespeed/kernel/thread/pthread_shared_mem.h"
 
 namespace net_instaweb {
-EnvoyProcessContext::EnvoyProcessContext() : ProcessContext() {
-  SystemRewriteDriverFactory::InitApr();
+EnvoyProcessContext::EnvoyProcessContext()
+    : ProcessContext(), threads_started_(false) {
   EnvoyRewriteOptions::Initialize();
   EnvoyRewriteDriverFactory::Initialize();
   // net_instaweb::log_message_handler::Install();
@@ -45,6 +45,9 @@ EnvoyProcessContext::EnvoyProcessContext() : ProcessContext() {
   message_handler_ = std::make_unique<GoogleMessageHandler>();
   driver_factory_ = std::make_unique<EnvoyRewriteDriverFactory>(
       *this, ts, "" /*hostname, not used*/, -1 /*port, not used*/);
+  // Note: StartThreads() is NOT called here. It will be called either:
+  // 1. When InitializeEnvoyDispatcher() is called with an Envoy dispatcher
+  // 2. Lazily on first request via EnsureThreadsStarted()
   driver_factory_->Init();
   server_context_ = driver_factory()->MakeEnvoyServerContext("", -1);
 
@@ -88,6 +91,32 @@ EnvoyProcessContext::EnvoyProcessContext() : ProcessContext() {
   driver_factory()->ChildInit();
 
   proxy_fetch_factory_ = std::make_unique<ProxyFetchFactory>(server_context_);
+}
+
+void EnvoyProcessContext::InitializeEnvoyDispatcher(
+    Envoy::Event::Dispatcher* dispatcher) {
+  if (threads_started_) {
+    // Already started - can't change dispatcher after threads are running.
+    message_handler_->Message(
+        kWarning,
+        "InitializeEnvoyDispatcher called after threads already started");
+    return;
+  }
+  driver_factory_->SetEnvoyDispatcher(dispatcher);
+  driver_factory_->StartThreads();
+  threads_started_ = true;
+  message_handler_->Message(kInfo, "Initialized with Envoy-native dispatcher");
+}
+
+void EnvoyProcessContext::EnsureThreadsStarted() {
+  if (threads_started_) {
+    return;
+  }
+  // Fallback: start threads without Envoy dispatcher (uses SchedulerThread).
+  driver_factory_->StartThreads();
+  threads_started_ = true;
+  message_handler_->Message(
+      kInfo, "Started threads with fallback SchedulerThread");
 }
 
 }  // namespace net_instaweb

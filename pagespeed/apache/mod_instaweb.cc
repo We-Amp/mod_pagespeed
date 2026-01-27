@@ -1088,7 +1088,8 @@ int pagespeed_modify_request(request_rec* r) {
     apr_sockaddr_t* client_addr = c->remote_addr;
 #endif
 
-    if (LoopbackRouteFetcher::IsLoopbackAddr(client_addr)) {
+    if (LoopbackRouteFetcher::IsLoopbackAddr(
+            reinterpret_cast<const struct sockaddr*>(&client_addr->sa))) {
       // Rewrite the client IP in Apache's records to 224.0.0.0, which is a
       // multicast address that should hence not be used by anyone, and at the
       // very least is clearly not 127.0.0.1.

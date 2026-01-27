@@ -43,13 +43,14 @@
 #include "pagespeed/kernel/cache/cache_batcher.h"
 #include "pagespeed/kernel/cache/cache_stats.h"
 #include "pagespeed/kernel/cache/compressed_cache.h"
+#include "pagespeed/kernel/cache/cyclone_cache.h"
 #include "pagespeed/kernel/cache/fallback_cache.h"
 #include "pagespeed/kernel/cache/file_cache.h"
 #include "pagespeed/kernel/cache/purge_context.h"
 #include "pagespeed/kernel/cache/write_through_cache.h"
 #include "pagespeed/kernel/thread/queued_worker_pool.h"
 #include "pagespeed/kernel/thread/slow_worker.h"
-#include "pagespeed/system/apr_mem_cache.h"
+#include "pagespeed/system/memcached_cache.h"
 #include "pagespeed/system/external_server_spec.h"
 #include "pagespeed/system/redis_cache.h"
 #include "pagespeed/system/system_cache_path.h"
@@ -197,7 +198,7 @@ SystemCaches::ConstructExternalCacheInterfacesFromBlocking(
 SystemCaches::ExternalCacheInterfaces SystemCaches::NewMemcached(
     SystemRewriteOptions* config) {
   const ExternalClusterSpec& servers_specs = config->memcached_servers();
-  AprMemCache* mem_cache = new AprMemCache(
+  MemcachedCache* mem_cache = new MemcachedCache(
       servers_specs, thread_limit_, &cache_hasher_, factory_->statistics(),
       factory_->timer(), factory_->message_handler());
   factory_->TakeOwnership(mem_cache);
@@ -324,12 +325,12 @@ SystemCaches::ExternalCacheInterfaces SystemCaches::NewExternalCache(
     CacheInterface* file_cache = GetCache(config)->file_cache();
 
     result.async = new FallbackCache(result.async, file_cache,
-                                     AprMemCache::kValueSizeThreshold,
+                                     MemcachedCache::kValueSizeThreshold,
                                      factory_->message_handler());
     factory_->TakeOwnership(result.async);
 
     result.blocking = new FallbackCache(result.blocking, file_cache,
-                                        AprMemCache::kValueSizeThreshold,
+                                        MemcachedCache::kValueSizeThreshold,
                                         factory_->message_handler());
     factory_->TakeOwnership(result.blocking);
   }
@@ -645,6 +646,11 @@ void SystemCaches::RootInit() {
                                 f = path_cache_map_.end();
          q != f; ++q) {
       FileCache* file_cache = q->second->file_cache_backend();
+      // file_cache_backend() returns nullptr when using CycloneCache instead
+      // of FileCache. Skip registering snapshot file cache in that case.
+      if (file_cache == nullptr) {
+        continue;
+      }
       // It's fine to call RegisterSnapshotFileCache multiple times: it
       // considers all the inputs and picks the best one.
       cache_info->cache_backend->RegisterSnapshotFileCache(
@@ -703,9 +709,9 @@ void SystemCaches::ChildInit() {
   }
 
   // TODO(yeputons): think about moving StartUp() to some base class of
-  // RedisCache and AprMemCache and collapsing these two loops into one.
+  // RedisCache and MemcachedCache and collapsing these two loops into one.
   for (int i = 0, n = memcache_servers_.size(); i < n; ++i) {
-    AprMemCache* mem_cache = memcache_servers_[i];
+    MemcachedCache* mem_cache = memcache_servers_[i];
     // TODO(yeputons): looks like this line does not really "connect", but just
     // loads list of servers into apr_memcached and connects later. Maybe the
     // name should be fixed.
@@ -730,7 +736,7 @@ void SystemCaches::StopCacheActivity() {
 
   // Iterate through the map of ExternalCacheInterface objects constructed and
   // try to stop pending operations on async caches. Note that these are not
-  // typically AprMemCache* or RedisCache* objects, but instead are a hierarchy
+  // typically MemcachedCache* or RedisCache* objects, but instead are a hierarchy
   // of CacheStats*, CacheBatcher*, AsyncCache*, all of which must be stopped.
   for (auto item : external_caches_map_) {
     ExternalCacheInterfaces cache = item.second;
@@ -741,7 +747,8 @@ void SystemCaches::StopCacheActivity() {
 }
 
 void SystemCaches::InitStats(Statistics* statistics) {
-  AprMemCache::InitStats(statistics);
+  MemcachedCache::InitStats(statistics);
+  CycloneCache::InitStats(statistics);
   FileCache::InitStats(statistics);
   CacheStats::InitStats(SystemCachePath::kFileCache, statistics);
   CacheStats::InitStats(SystemCachePath::kLruCache, statistics);
@@ -775,7 +782,7 @@ void SystemCaches::PrintCacheStats(StatFlags flags, GoogleString* out) {
 
   if (flags & kIncludeMemcached) {
     for (int i = 0, n = memcache_servers_.size(); i < n; ++i) {
-      AprMemCache* mem_cache = memcache_servers_[i];
+      MemcachedCache* mem_cache = memcache_servers_[i];
       if (!mem_cache->GetStatus(out)) {
         StrAppend(out, "\nError getting memcached server status for ",
                   mem_cache->cluster_spec().ToString());

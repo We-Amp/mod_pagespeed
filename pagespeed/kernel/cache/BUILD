@@ -49,3 +49,17 @@ cc_library(
         "//pagespeed/kernel/util",
     ],
 )
+
+# CycloneCache - high-performance disk cache using the Cyclone library.
+# This is a separate target because it depends on the C++23 Cyclone wrapper.
+cc_library(
+    name = "cyclone_cache",
+    srcs = ["cyclone_cache.cc"],
+    hdrs = ["cyclone_cache.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":cache",
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/kernel/cache/cyclone:cyclone_wrapper",
+    ],
+)

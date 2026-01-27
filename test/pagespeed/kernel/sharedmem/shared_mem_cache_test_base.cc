@@ -460,6 +460,13 @@ void SharedMemCacheTestBase::TestRegisterSnapshotFileCache() {
                                     kSnapshotIntervalMs);
   CHECK_EQ(cache_->snapshot_path(), kSegment);
   CHECK_EQ(cache_->file_cache(), file_cache_wrapper_ksegment->file_cache());
+
+  // Test that passing nullptr doesn't crash (happens when using CycloneCache
+  // instead of FileCache).
+  cache_->RegisterSnapshotFileCache(nullptr, kSnapshotIntervalMs);
+  // The snapshot path should remain unchanged.
+  CHECK_EQ(cache_->snapshot_path(), kSegment);
+  CHECK_EQ(cache_->file_cache(), file_cache_wrapper_ksegment->file_cache());
 }
 
 void SharedMemCacheTestBase::TestCheckpointAndRestore() {

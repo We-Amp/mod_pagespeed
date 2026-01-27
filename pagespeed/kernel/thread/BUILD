@@ -2,14 +2,57 @@ load("@rules_cc//cc:defs.bzl", "cc_library")
 
 licenses(["notice"])  # Apache 2
 
+# Cross-platform threading using C++ standard library.
+# Use this for Envoy filter builds and Windows support.
 cc_library(
-    name = "thread",
+    name = "std_thread",
+    srcs = [
+        "std_condvar.cc",
+        "std_mutex.cc",
+        "std_rw_lock.cc",
+        "std_thread_system.cc",
+    ],
+    hdrs = [
+        "std_condvar.h",
+        "std_mutex.h",
+        "std_rw_lock.h",
+        "std_thread_system.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+        "@mod_pagespeed//base:log_shim",
+    ],
+)
+
+# POSIX-specific threading using pthreads.
+# Use this for Apache module and POSIX-only builds.
+cc_library(
+    name = "pthread_thread",
     srcs = [
         "pthread_condvar.cc",
         "pthread_mutex.cc",
         "pthread_rw_lock.cc",
         "pthread_shared_mem.cc",
         "pthread_thread_system.cc",
+    ],
+    hdrs = [
+        "pthread_condvar.h",
+        "pthread_mutex.h",
+        "pthread_rw_lock.h",
+        "pthread_shared_mem.h",
+        "pthread_thread_system.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+        "@mod_pagespeed//base:log_shim",
+    ],
+)
+
+cc_library(
+    name = "thread",
+    srcs = [
         "queued_alarm.cc",
         "queued_worker.cc",
         "queued_worker_pool.cc",
@@ -23,11 +66,6 @@ cc_library(
         "worker.cc",
     ],
     hdrs = [
-        "pthread_condvar.h",
-        "pthread_mutex.h",
-        "pthread_rw_lock.h",
-        "pthread_shared_mem.h",
-        "pthread_thread_system.h",
         "queued_alarm.h",
         "queued_worker.h",
         "queued_worker_pool.h",
@@ -42,6 +80,8 @@ cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        ":pthread_thread",
+        ":std_thread",
         "//pagespeed/kernel/base:pagespeed_base",
         "@mod_pagespeed//base:log_shim",
     ],

@@ -24,11 +24,12 @@
 #ifndef PAGESPEED_SYSTEM_LOOPBACK_ROUTE_FETCHER_H_
 #define PAGESPEED_SYSTEM_LOOPBACK_ROUTE_FETCHER_H_
 
+#include <netinet/in.h>
+#include <sys/socket.h>
+
 #include "net/instaweb/http/public/url_async_fetcher.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/string.h"
-
-struct apr_sockaddr_t;
 
 namespace net_instaweb {
 
@@ -59,7 +60,7 @@ class LoopbackRouteFetcher : public UrlAsyncFetcher {
              AsyncFetch* fetch) override;
 
   // Returns true if the given address is an IPv4 or IPv6 loopback.
-  static bool IsLoopbackAddr(const apr_sockaddr_t* addr);
+  static bool IsLoopbackAddr(const struct sockaddr* addr);
 
  private:
   const RewriteOptions* const options_;

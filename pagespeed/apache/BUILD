@@ -72,5 +72,6 @@ cc_library(
         "//pagespeed/kernel/thread:event_scheduler",
         "//pagespeed/kernel/thread:libevent_dispatcher",
         "//pagespeed/system",
+        "//pagespeed/system:system_apr",
     ],
 )

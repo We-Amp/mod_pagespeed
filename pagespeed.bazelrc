@@ -1,6 +1,8 @@
 # modifications for pagespeed over Envoy's stock config
 
-build --linkopt -ldl
+# POSIX-specific configuration (Linux, macOS)
+build:linux --linkopt -ldl
+build:macos --linkopt -ldl
 
 build:clang-asan --linkopt=-fno-sanitize=alignment
 build:asan --copt=-fno-sanitize=alignment
@@ -10,21 +12,85 @@ test --test_env=REDIS_PORT=6379
 test --test_env=MEMCACHED_PORT=11211
 test --test_env=HTTPS_TEST=1
 
-build --copt="-Iexternal/aprutil/include/"
-build --copt="-Iexternal/aprutil/include/private/"
-build --copt="-Iexternal/aprutil/include/arch/unix/"
-build --copt="-Iexternal/aprutil/"
-build --copt="-Ithird_party/aprutil/gen/arch/linux/x64/include/"
-build --copt="-Ithird_party/apr/gen/arch/linux/x64/include/"
-build --copt="-Iexternal/apr/include/"
-build --copt="-Iexternal/apr/include/arch/unix/"
-build --copt="-Iexternal/apr/"
-build --copt="-Iexternal/serf/include/"
-build --copt="-Iexternal/serf/"
-build --copt="-DPAGESPEED_SUPPORT_POSIX_SHARED_MEM=1"
+# POSIX-specific: APR/Serf includes for Apache module (not used on Windows)
+build:linux --copt="-Iexternal/aprutil/include/"
+build:linux --copt="-Iexternal/aprutil/include/private/"
+build:linux --copt="-Iexternal/aprutil/include/arch/unix/"
+build:linux --copt="-Iexternal/aprutil/"
+build:linux --copt="-Ithird_party/aprutil/gen/arch/linux/x64/include/"
+build:linux --copt="-Ithird_party/apr/gen/arch/linux/x64/include/"
+build:linux --copt="-Iexternal/apr/include/"
+build:linux --copt="-Iexternal/apr/include/arch/unix/"
+build:linux --copt="-Iexternal/apr/"
+build:linux --copt="-Iexternal/serf/include/"
+build:linux --copt="-Iexternal/serf/"
+build:linux --copt="-DPAGESPEED_SUPPORT_POSIX_SHARED_MEM=1"
+
+# macOS-specific: APR/Serf includes for Apache module
+build:macos --copt="-Iexternal/aprutil/include/"
+build:macos --copt="-Iexternal/aprutil/include/private/"
+build:macos --copt="-Iexternal/aprutil/include/arch/unix/"
+build:macos --copt="-Iexternal/aprutil/"
+build:macos --copt="-Ithird_party/aprutil/gen/arch/linux/x64/include/"
+build:macos --copt="-Ithird_party/apr/gen/arch/linux/x64/include/"
+build:macos --copt="-Iexternal/apr/include/"
+build:macos --copt="-Iexternal/apr/include/arch/unix/"
+build:macos --copt="-Iexternal/apr/"
+build:macos --copt="-Iexternal/serf/include/"
+build:macos --copt="-Iexternal/serf/"
+build:macos --copt="-DPAGESPEED_SUPPORT_POSIX_SHARED_MEM=1"
 
 build --action_env=ABSL_LEGACY_THREAD_ANNOTATIONS=1
 build --copt="-DABSL_LEGACY_THREAD_ANNOTATIONS=1"
 build --cxxopt="-DABSL_LEGACY_THREAD_ANNOTATIONS=1"
 
-build --action_env=BAZEL_CXXOPTS="-std=c++17"
+# =============================================================================
+# C++23 Support for Cyclone Cache
+# =============================================================================
+#
+# Cyclone Cache requires C++23 (for std::expected). The main codebase uses C++20.
+#
+# Build options:
+#   1. --config=gcc (recommended) - Uses GCC 13 with native C++23 support
+#   2. --config=clang-libstdcxx13 - Uses Clang with GCC 13's libstdc++
+#
+# Example:
+#   docker compose exec dev bazel build --config=gcc //...
+#   docker compose exec dev bazel build --config=clang-libstdcxx13 //...
+#
+# Architecture: C++20 code -> C ABI wrapper (C++23) -> Cyclone library (C++23)
+# See //pagespeed/kernel/cache/cyclone/BUILD for details.
+#
+# Technical details:
+# - Cyclone uses std::expected<T,E> which requires __cpp_concepts >= 202002L
+# - Clang 17 reports __cpp_concepts = 201907 (C++20 draft value)
+# - GCC 13's libstdc++ guards std::expected with __cpp_concepts >= 202002L
+# - Solution: Force the macro for Cyclone files when using Clang + GCC 13 libstdc++
+# =============================================================================
+
+# Note: BAZEL_CXXOPTS is NOT set here - we rely on .bazelrc config:linux/macos
+# to set the C++ standard. Setting BAZEL_CXXOPTS would conflict with per_file_copt.
+
+# Cyclone Cache requires C++23 - override the default standard for cyclone source files.
+build --per_file_copt=external/cyclone/.*\\.cpp@-std=c++23
+build --per_file_copt=pagespeed/kernel/cache/cyclone/.*\\.cc@-std=c++23
+
+# =============================================================================
+# Clang with GCC 13 libstdc++ configuration
+# =============================================================================
+# Use this config to build with Clang while still supporting Cyclone cache.
+# Clang 17's __cpp_concepts macro (201907) is lower than what GCC 13's libstdc++
+# requires for std::expected (202002L). We force the macro for Cyclone files.
+#
+# Note: This config is Linux-specific (aarch64). For x86_64, adjust the paths:
+#   -I/usr/include/x86_64-linux-gnu/c++/13
+#   -L/usr/lib/gcc/x86_64-linux-gnu/13
+# =============================================================================
+build:clang-libstdcxx13 --config=clang
+
+# Force __cpp_concepts=202002L and use GCC 13 libstdc++ for Cyclone files only
+build:clang-libstdcxx13 --per_file_copt=external/cyclone/.*\\.cpp@-D__cpp_concepts=202002L,-nostdinc++,-I/usr/include/c++/13,-I/usr/include/aarch64-linux-gnu/c++/13
+build:clang-libstdcxx13 --per_file_copt=pagespeed/kernel/cache/cyclone/.*\\.cc@-D__cpp_concepts=202002L,-nostdinc++,-I/usr/include/c++/13,-I/usr/include/aarch64-linux-gnu/c++/13
+
+# Link against GCC 13's libstdc++
+build:clang-libstdcxx13 --linkopt=-L/usr/lib/gcc/aarch64-linux-gnu/13

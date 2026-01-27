@@ -32,6 +32,7 @@
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/cache/cache_interface.h"
 #include "pagespeed/kernel/cache/cache_stats.h"
+#include "pagespeed/kernel/cache/cyclone_cache.h"
 #include "pagespeed/kernel/cache/file_cache.h"
 #include "pagespeed/kernel/cache/lru_cache.h"
 #include "pagespeed/kernel/cache/purge_context.h"
@@ -59,8 +60,10 @@ SystemCachePath::SystemCachePath(const StringPiece& path,
       shm_runtime_(shm_runtime),
       lock_manager_(nullptr),
       file_cache_backend_(nullptr),
+      cyclone_cache_backend_(nullptr),
       lru_cache_(nullptr),
       file_cache_(nullptr),
+      use_cyclone_cache_(config->use_cyclone_cache()),
       cache_flush_filename_(config->cache_flush_filename()),
       unplugged_(config->unplugged()),
       enable_cache_purge_(config->enable_cache_purge()),
@@ -109,35 +112,71 @@ SystemCachePath::SystemCachePath(const StringPiece& path,
     FallBackToFileBasedLocking();
   }
 
-  FileCache::CachePolicy* policy =
-      new FileCache::CachePolicy(factory->timer(), factory->hasher(),
-                                 config->file_cache_clean_interval_ms(),
-                                 config->file_cache_clean_size_kb() * 1024,
-                                 config->file_cache_clean_inode_limit());
-  file_cache_backend_ =
-      new FileCache(config->file_cache_path(), factory->file_system(),
-                    factory->thread_system(), nullptr, policy,
-                    factory->statistics(), factory->message_handler());
-  factory->TakeOwnership(file_cache_backend_);
-  file_cache_ = new CacheStats(kFileCache, file_cache_backend_,
-                               factory->timer(), factory->statistics());
-  factory->TakeOwnership(file_cache_);
+  // Create the disk cache backend - either CycloneCache or FileCache
+  if (use_cyclone_cache_) {
+    // Use CycloneCache for high-performance disk caching.
+    // CycloneCache handles its own eviction using scan-resistant CLFUS algorithm
+    // and does not need external cleaning workers.
+    CycloneCache::Config cyclone_config;
+    cyclone_config.cache_path = StrCat(config->file_cache_path(), "/cyclone.dat");
+    cyclone_config.cache_size_bytes = config->file_cache_clean_size_kb() * 1024;
+    // Use the LRU cache size setting for the RAM cache layer
+    cyclone_config.ram_cache_size_bytes = config->lru_cache_kb_per_process() * 1024;
+    cyclone_config.enable_checksum = true;
+    cyclone_config.num_segments = 0;  // Use default
 
-  if (config->lru_cache_kb_per_process() != 0) {
-    LRUCache* lru_cache =
-        new LRUCache(config->lru_cache_kb_per_process() * 1024);
-    factory->TakeOwnership(lru_cache);
+    cyclone_cache_backend_ = new CycloneCache(
+        cyclone_config, factory->statistics(), factory->message_handler());
+    factory->TakeOwnership(cyclone_cache_backend_);
+    file_cache_ = new CacheStats(kFileCache, cyclone_cache_backend_,
+                                 factory->timer(), factory->statistics());
+    factory->TakeOwnership(file_cache_);
 
-    // We only add the threadsafe-wrapper to the LRUCache.  The FileCache
-    // is naturally thread-safe because it's got no writable member variables.
-    // And surrounding that slower-running class with a mutex would likely
-    // cause contention.
-    ThreadsafeCache* ts_cache =
-        new ThreadsafeCache(lru_cache, factory->thread_system()->NewMutex());
-    factory->TakeOwnership(ts_cache);
-    lru_cache_ = new CacheStats(kLruCache, ts_cache, factory->timer(),
-                                factory->statistics());
-    factory->TakeOwnership(lru_cache_);
+    // When using CycloneCache with its integrated RAM cache, we skip creating
+    // a separate LRU cache to avoid duplicate caching.
+    if (cyclone_config.ram_cache_size_bytes > 0) {
+      factory->message_handler()->Message(
+          kInfo, "CycloneCache enabled with %lld byte RAM cache at %s",
+          static_cast<long long>(cyclone_config.ram_cache_size_bytes),
+          cyclone_config.cache_path.c_str());
+    } else {
+      factory->message_handler()->Message(
+          kInfo, "CycloneCache enabled at %s",
+          cyclone_config.cache_path.c_str());
+    }
+  } else {
+    // Use traditional FileCache with external cleaning worker.
+    FileCache::CachePolicy* policy =
+        new FileCache::CachePolicy(factory->timer(), factory->hasher(),
+                                   config->file_cache_clean_interval_ms(),
+                                   config->file_cache_clean_size_kb() * 1024,
+                                   config->file_cache_clean_inode_limit());
+    file_cache_backend_ =
+        new FileCache(config->file_cache_path(), factory->file_system(),
+                      factory->thread_system(), nullptr, policy,
+                      factory->statistics(), factory->message_handler());
+    factory->TakeOwnership(file_cache_backend_);
+    file_cache_ = new CacheStats(kFileCache, file_cache_backend_,
+                                 factory->timer(), factory->statistics());
+    factory->TakeOwnership(file_cache_);
+
+    // Create LRU cache only when using FileCache (not CycloneCache)
+    if (config->lru_cache_kb_per_process() != 0) {
+      LRUCache* lru_cache =
+          new LRUCache(config->lru_cache_kb_per_process() * 1024);
+      factory->TakeOwnership(lru_cache);
+
+      // We only add the threadsafe-wrapper to the LRUCache.  The FileCache
+      // is naturally thread-safe because it's got no writable member variables.
+      // And surrounding that slower-running class with a mutex would likely
+      // cause contention.
+      ThreadsafeCache* ts_cache =
+          new ThreadsafeCache(lru_cache, factory->thread_system()->NewMutex());
+      factory->TakeOwnership(ts_cache);
+      lru_cache_ = new CacheStats(kLruCache, ts_cache, factory->timer(),
+                                  factory->statistics());
+      factory->TakeOwnership(lru_cache_);
+    }
   }
 }
 
@@ -153,6 +192,12 @@ GoogleString SystemCachePath::CachePath(SystemRewriteOptions* config) {
 }
 
 void SystemCachePath::MergeConfig(const SystemRewriteOptions* config) {
+  // When using CycloneCache, file_cache_backend_ is null. CycloneCache
+  // handles its own cache policy internally, so we skip the merge.
+  if (file_cache_backend_ == nullptr) {
+    return;
+  }
+
   FileCache::CachePolicy* policy = file_cache_backend_->mutable_cache_policy();
 
   // For the interval, we take the smaller of the specified intervals, so
@@ -222,7 +267,9 @@ void SystemCachePath::ChildInit(SlowWorker* cache_clean_worker) {
       !shared_mem_lock_manager_->Attach()) {
     FallBackToFileBasedLocking();
   }
-  if (file_cache_backend_ != nullptr) {
+  // Set the cleaning worker for FileCache (not needed for CycloneCache which
+  // handles its own eviction internally).
+  if (file_cache_backend_ != nullptr && !use_cyclone_cache_) {
     file_cache_backend_->set_worker(cache_clean_worker);
   }
 

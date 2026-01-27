@@ -168,19 +168,19 @@ data2c_gen2_admin_css(
     opt = True,
 )
 
+# Core system library - APR-free.
+# Used by both Apache and Envoy deployments.
 cc_library(
     name = "system",
     srcs = [
         "add_headers_fetcher.cc",
         "admin_site.cc",
-        "apr_mem_cache.cc",
-        "apr_thread_compatible_pool.cc",
         "controller_manager.cc",
         "external_server_spec.cc",
         "in_place_resource_recorder.cc",
         "loopback_route_fetcher.cc",
+        "memcached_cache.cc",
         "redis_cache.cc",
-        "serf_url_async_fetcher.cc",
         "system_cache_path.cc",
         "system_caches.cc",
         "system_message_handler.cc",
@@ -213,15 +213,13 @@ cc_library(
     hdrs = [
         "add_headers_fetcher.h",
         "admin_site.h",
-        "apr_mem_cache.h",
-        "apr_thread_compatible_pool.h",
         "controller_manager.h",
         "controller_process.h",
         "external_server_spec.h",
         "in_place_resource_recorder.h",
         "loopback_route_fetcher.h",
+        "memcached_cache.h",
         "redis_cache.h",
-        "serf_url_async_fetcher.h",
         "system_cache_path.h",
         "system_caches.h",
         "system_message_handler.h",
@@ -236,11 +234,36 @@ cc_library(
         ":system_controller_process_h",
         "//net/instaweb/http",
         "//net/instaweb/rewriter",
+        "//pagespeed/kernel/cache:cyclone_cache",
         "//pagespeed/kernel/sharedmem",
         "//third_party/redis-crc",
+        "@hiredis",
+        "@libmemcached",
+    ],
+)
+
+# APR-dependent system components.
+# Only used by the Apache module. Contains Serf fetcher, APR memcached client,
+# and APR initialization utilities.
+cc_library(
+    name = "system_apr",
+    srcs = [
+        "apr_init.cc",
+        "apr_mem_cache.cc",
+        "apr_thread_compatible_pool.cc",
+        "serf_url_async_fetcher.cc",
+    ],
+    hdrs = [
+        "apr_init.h",
+        "apr_mem_cache.h",
+        "apr_thread_compatible_pool.h",
+        "serf_url_async_fetcher.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":system",
         "@apr",
         "@aprutil",
-        "@hiredis",
         "@serf",
     ],
 )
