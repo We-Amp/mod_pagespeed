@@ -109,7 +109,7 @@ void LoopbackRouteFetcher::Fetch(const GoogleString& original_url,
 
     // Note that we end up with host: containing the actual URL's host, but
     // the URL containing just our IP. This is technically wrong, but the
-    // Serf fetcher will interpret it in the way we want it to --- it will
+    // The fetcher will interpret it in the way we want it to --- it will
     // connect to our IP, pass only the path portion to the host, and
     // keep the host: header matching what's in the request_headers.
   }

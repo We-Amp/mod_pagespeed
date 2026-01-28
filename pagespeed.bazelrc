@@ -16,7 +16,7 @@ test --test_env=REDIS_PORT=6379
 test --test_env=MEMCACHED_PORT=11211
 test --test_env=HTTPS_TEST=1
 
-# POSIX-specific: APR/Serf includes for Apache module (not used on Windows)
+# POSIX-specific: APR includes for Apache module (not used on Windows)
 build:linux --copt="-Iexternal/aprutil/include/"
 build:linux --copt="-Iexternal/aprutil/include/private/"
 build:linux --copt="-Iexternal/aprutil/include/arch/unix/"
@@ -26,11 +26,9 @@ build:linux --copt="-Ithird_party/apr/gen/arch/linux/x64/include/"
 build:linux --copt="-Iexternal/apr/include/"
 build:linux --copt="-Iexternal/apr/include/arch/unix/"
 build:linux --copt="-Iexternal/apr/"
-build:linux --copt="-Iexternal/serf/include/"
-build:linux --copt="-Iexternal/serf/"
 build:linux --copt="-DPAGESPEED_SUPPORT_POSIX_SHARED_MEM=1"
 
-# macOS-specific: APR/Serf includes for Apache module
+# macOS-specific: APR includes for Apache module
 build:macos --copt="-Iexternal/aprutil/include/"
 build:macos --copt="-Iexternal/aprutil/include/private/"
 build:macos --copt="-Iexternal/aprutil/include/arch/unix/"
@@ -40,11 +38,9 @@ build:macos --copt="-Ithird_party/apr/gen/arch/linux/x64/include/"
 build:macos --copt="-Iexternal/apr/include/"
 build:macos --copt="-Iexternal/apr/include/arch/unix/"
 build:macos --copt="-Iexternal/apr/"
-build:macos --copt="-Iexternal/serf/include/"
-build:macos --copt="-Iexternal/serf/"
 build:macos --copt="-DPAGESPEED_SUPPORT_POSIX_SHARED_MEM=1"
 
-# Windows-specific: No POSIX shared memory, no APR/Serf
+# Windows-specific: No POSIX shared memory, no APR
 build:windows --copt="-DPAGESPEED_SUPPORT_POSIX_SHARED_MEM=0"
 
 build --action_env=ABSL_LEGACY_THREAD_ANNOTATIONS=1

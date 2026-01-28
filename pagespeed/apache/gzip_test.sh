@@ -60,7 +60,7 @@ fi
 
 start_test Efficacy of ModPagespeedFetchWithGzip
 
-# TODO(sligocki): The serf_fetch_bytes_count should be available on
+# TODO(sligocki): The curl_fetch_bytes_count should be available on
 # this vhost's pagespeed_admin/statistics page. Why isn't it?
 STATS=$OUTDIR/gzip_efficacy_stats
 $WGET_DUMP $GLOBAL_STATISTICS_URL > $STATS.1
@@ -73,7 +73,7 @@ echo $WGET -O /dev/null --save-headers "$EXAMPLE_BIG_CSS"
 $WGET -O /dev/null --save-headers "$EXAMPLE_BIG_CSS" 2>&1 \
   | head | grep "HTTP request sent, awaiting response... 200 OK"
 $WGET_DUMP $GLOBAL_STATISTICS_URL > $STATS.2
-check_stat_op $STATS.1 $STATS.2 serf_fetch_bytes_count 200 -gt
-check_stat_op $STATS.1 $STATS.2 serf_fetch_bytes_count 500 -lt
+check_stat_op $STATS.1 $STATS.2 curl_fetch_bytes_count 200 -gt
+check_stat_op $STATS.1 $STATS.2 curl_fetch_bytes_count 500 -lt
 
 check_failures_and_exit

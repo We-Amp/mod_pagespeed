@@ -17,7 +17,7 @@
 #
 # Note that this bug is dependent on seeing a resource for the first time in
 # the InPlaceResourceOptimization path, because in that flow we are caching
-# the response-headers from the server.  The reponse-headers from Serf never
+# the response-headers from the server.  The response-headers from the fetcher never
 # seem to include the Connection header.  So we have to cachebust the JS file.
 start_test Sane Connection header
 URL="$TEST_ROOT/normal.js?q=cachebust"

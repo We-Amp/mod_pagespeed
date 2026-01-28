@@ -84,30 +84,36 @@ void EnvoyRewriteOptions::Init() {
 }
 
 void EnvoyRewriteOptions::AddProperties() {
-  // Envoy-specific options.
-  add_envoy_option("", &EnvoyRewriteOptions::statistics_path_, "nsp",
+  // Envoy-specific options with default paths for admin endpoints.
+  add_envoy_option("/pagespeed_statistics",
+                   &EnvoyRewriteOptions::statistics_path_, "nsp",
                    kStatisticsPath, kServerScope,
-                   "Set the statistics path. Ex: /envoy_pagespeed_statistics",
+                   "Set the statistics path. Ex: /pagespeed_statistics", false);
+  add_envoy_option("/pagespeed_global_statistics",
+                   &EnvoyRewriteOptions::global_statistics_path_, "ngsp",
+                   kGlobalStatisticsPath, kProcessScopeStrict,
+                   "Set the global statistics path. Ex: /pagespeed_global_statistics",
                    false);
-  add_envoy_option(
-      "", &EnvoyRewriteOptions::global_statistics_path_, "ngsp",
-      kGlobalStatisticsPath, kProcessScopeStrict,
-      "Set the global statistics path. Ex: /envoy_pagespeed_global_statistics",
-      false);
-  add_envoy_option("", &EnvoyRewriteOptions::console_path_, "ncp", kConsolePath,
-                   kServerScope, "Set the console path. Ex: /pagespeed_console",
-                   false);
-  add_envoy_option("", &EnvoyRewriteOptions::messages_path_, "nmp",
-                   kMessagesPath, kServerScope,
-                   "Set the messages path.  Ex: /envoy_pagespeed_message",
-                   false);
-  add_envoy_option("", &EnvoyRewriteOptions::admin_path_, "nap", kAdminPath,
-                   kServerScope, "Set the admin path.  Ex: /pagespeed_admin",
-                   false);
-  add_envoy_option("", &EnvoyRewriteOptions::global_admin_path_, "ngap",
+  add_envoy_option("/pagespeed_console", &EnvoyRewriteOptions::console_path_,
+                   "ncp", kConsolePath, kServerScope,
+                   "Set the console path. Ex: /pagespeed_console", false);
+  add_envoy_option("/pagespeed_message", &EnvoyRewriteOptions::messages_path_,
+                   "nmp", kMessagesPath, kServerScope,
+                   "Set the messages path. Ex: /pagespeed_message", false);
+  add_envoy_option("/pagespeed_admin", &EnvoyRewriteOptions::admin_path_, "nap",
+                   kAdminPath, kServerScope,
+                   "Set the admin path. Ex: /pagespeed_admin", false);
+  add_envoy_option("/pagespeed_global_admin",
+                   &EnvoyRewriteOptions::global_admin_path_, "ngap",
                    kGlobalAdminPath, kProcessScopeStrict,
-                   "Set the global admin path.  Ex: /pagespeed_global_admin",
+                   "Set the global admin path. Ex: /pagespeed_global_admin",
                    false);
+
+  // Use native Envoy fetcher (default: true)
+  add_envoy_option(true, &EnvoyRewriteOptions::use_native_fetcher_, "unf",
+                   "UseNativeFetcher", kProcessScopeStrict,
+                   "Use Envoy native fetcher",
+                   true);
 
   MergeSubclassProperties(envoy_properties_);
 

@@ -48,7 +48,7 @@ class LoopbackRouteFetcher : public UrlAsyncFetcher {
   // Does not take ownership of anything. own_port is the port the incoming
   // request came in on, and own_ip is the same for the IP. If the
   // backend_fetcher does actual fetching (and is not merely simulating it for
-  // testing purposes) it should be the Serf fetcher, as others may not direct
+  // testing purposes) it should be the Curl fetcher, as others may not direct
   // requests this class produces properly.
   // (As this fetcher may produce requests that need to connect to some IP
   //  but have a Host: and URL from somewhere else).

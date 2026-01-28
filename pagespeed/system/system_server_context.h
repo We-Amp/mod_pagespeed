@@ -103,7 +103,7 @@ class SystemServerContext : public ServerContext {
   // verify initialization proceeded properly.
   bool initialized() const { return initialized_; }
 
-  // Normally we just fetch with the default UrlAsyncFetcher, generally serf,
+  // Normally we just fetch with the default UrlAsyncFetcher, generally curl,
   // but there are some cases where we need to do something more complex:
   //  - Local requests: requests for resources on this host should go directly
   //    to the local IP.

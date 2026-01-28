@@ -22,7 +22,7 @@
 // TODO(jmarantz): As it stands now the use of WgetUrlFetcher makes
 // any speed-tests with resource rewriting meaningless, as it's not
 // really async.  This test still makes sense for pure DOM-rewriting
-// filters.  Later we can switch to the Serf fetcher and a real async
+// filters.  Later we can switch to the Curl fetcher and a real async
 // flow.
 //
 // with --rewrite_level=PassThrough --rewriters=trim_urls I get:

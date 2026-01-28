@@ -410,7 +410,7 @@ pagespeed.Graphs.prototype.drawVisualization = function() {
                         pagespeed.Graphs.DisplayDiv.REALTIME);
   this.drawHistoryChart('lru_cache', 'LRU Cache RT',
                         pagespeed.Graphs.DisplayDiv.REALTIME);
-  this.drawHistoryChart('serf_fetch', 'Serf stats RT',
+  this.drawHistoryChart('curl_fetch', 'Curl stats RT',
                         pagespeed.Graphs.DisplayDiv.REALTIME);
   this.drawHistoryChart('rewrite', 'Rewrite stats RT',
                         pagespeed.Graphs.DisplayDiv.REALTIME);

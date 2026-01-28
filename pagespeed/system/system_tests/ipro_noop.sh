@@ -31,8 +31,8 @@ start_test Ipro transcode to webp, iterating with Noop
 #
 # As we are checking some statistics, try get the system to quiesce to reduce
 # flakiness from outstanding background rewrites triggered by tests above.
-echo -n Waiting for quiescence by checking serf_fetch_active_count ...
-while [ $(scrape_stat serf_fetch_active_count) -gt 0 ]; do
+echo -n Waiting for quiescence by checking curl_fetch_active_count ...
+while [ $(scrape_stat curl_fetch_active_count) -gt 0 ]; do
   echo -n .
   sleep .1
 done
@@ -47,20 +47,20 @@ URL1="${URL}&PageSpeedNoop=$RANDOM1"
 URL2="${URL}&PageSpeedNoop=$RANDOM2"
 fetch_until "$URL1" "grep -c image/webp" 1 --save-headers
 #NUM_REWRITES_URL1=$(scrape_stat image_rewrites)
-echo -n Waiting for quiescence by checking serf_fetch_active_count ...
+echo -n Waiting for quiescence by checking curl_fetch_active_count ...
 # The last check in this test was observed to flake. Let's see if waiting
 # for quiescence here stabilizes it.
 # TODO(oschaaf): It would be good to keep a count of active rewrite drivers as
-# well for this purpose. Serf is only one of the things that can finish
+# well for this purpose. The fetcher is only one of the things that can finish
 # asynchronously; slow rewrites can as well.
-while [ $(scrape_stat serf_fetch_active_count) -gt 0 ]; do
+while [ $(scrape_stat curl_fetch_active_count) -gt 0 ]; do
   echo -n .
   sleep .1
 done
 NUM_FETCHES_URL1=$(scrape_stat http_fetches)
 check $WGET -q $WGET_ARGS --save-headers "$URL2" -O $WGET_OUTPUT
 #NUM_REWRITES_URL2=$(scrape_stat image_rewrites)
-while [ $(scrape_stat serf_fetch_active_count) -gt 0 ]; do
+while [ $(scrape_stat curl_fetch_active_count) -gt 0 ]; do
   echo -n .
   sleep .1
 done

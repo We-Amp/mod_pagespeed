@@ -11,9 +11,9 @@ load(":optipng.bzl", "optipng_build_rule")
 load(":libjpeg_turbo.bzl", "libjpeg_turbo_build_rule")
 load(":apr.bzl", "apr_build_rule")
 load(":aprutil.bzl", "aprutil_build_rule")
-load(":serf.bzl", "serf_build_rule")
 load(":closure_compiler.bzl", "closure_library_rules")
 load(":cyclone.bzl", "cyclone_build_rule")
+load(":libcurl.bzl", "libcurl_build_rule")
 load(":libmemcached.bzl", "libmemcached_build_rule")
 
 ENVOY_COMMIT = "83082b0bf0db8a5b6bb3e691df387bf8566f072d"
@@ -47,8 +47,6 @@ APR_COMMIT = "901ece0cd7cec29c050c58451a801bb125d09b6e"  # July 24th, 2020
 APR_SHA = "372b6a3424d8a3abbbf216bf6058e949f7b9da95e9caa57a9f5e82fe7528ca40"
 APRUTIL_COMMIT = "13ed779e56669007dffe9a27ffab3790b59cbfaa"
 APRUTIL_SHA = "9cf6d0e6fcc4783228dcee722897dadaadc601aef894c43a1e1514436eb4471a"
-SERF_COMMIT = "3a37fc11c49d4fa91c559ee0b387f7a23705d999"  # July 24th, 2020
-SERF_SHA = "0599b9a8ec8ea3ae260337fa84d8d335bd95ce54a236f7be24a8bddfd04a4840"
 
 # Cyclone Cache - high-performance disk cache with scan-resistant CLFUS algorithm
 # Requires C++23 - wrapper provides C ABI for C++20 consumers
@@ -196,14 +194,6 @@ def mod_pagespeed_dependencies():
         sha256 = APRUTIL_SHA,
     )
 
-    http_archive(
-        name = "serf",
-        strip_prefix = "serf-%s" % SERF_COMMIT,
-        url = "https://github.com/apache/serf/archive/%s.tar.gz" % SERF_COMMIT,
-        build_file_content = serf_build_rule,
-        sha256 = SERF_SHA,
-    )
-
     # Cyclone Cache - high-performance disk cache
     # Uses new_local_repository for development with local checkout
     # Note: The path /cyclone-cache is mounted via docker-compose.yml
@@ -230,6 +220,14 @@ def mod_pagespeed_dependencies():
         name = "libmemcached",
         path = "/usr",
         build_file_content = libmemcached_build_rule,
+    )
+
+    # libcurl - system-installed HTTP client library
+    # Requires libcurl4-openssl-dev to be installed (apt-get install libcurl4-openssl-dev)
+    native.new_local_repository(
+        name = "curl",
+        path = "/usr",
+        build_file_content = libcurl_build_rule,
     )
 
     http_archive(

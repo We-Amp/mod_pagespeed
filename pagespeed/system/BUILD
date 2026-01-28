@@ -244,6 +244,26 @@ cc_library(
 
 
 cc_library(
+    name = "curl_fetcher",
+    srcs = [
+        "curl_fetch.cc",
+        "curl_url_async_fetcher.cc",
+    ],
+    hdrs = [
+        "curl_fetch.h",
+        "curl_url_async_fetcher.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//net/instaweb/http",
+        "//net/instaweb:net_instaweb_lib",
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/kernel/http",
+        "@curl",
+    ],
+)
+
+cc_library(
     name = "system_controller_process_h",
     srcs = [
     ],

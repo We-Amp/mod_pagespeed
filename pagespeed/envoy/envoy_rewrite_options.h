@@ -65,6 +65,10 @@ class EnvoyRewriteOptions : public SystemRewriteOptions {
     return global_admin_path_.value();
   }
 
+  // Returns true if the native Envoy-based HTTP fetcher should be used
+  // instead of alternative fetchers.
+  bool use_native_fetcher() const { return use_native_fetcher_.value(); }
+
  private:
   // Keeps the properties added by this subclass.  These are merged into
   // RewriteOptions::all_properties_ during Initialize().
@@ -93,6 +97,9 @@ class EnvoyRewriteOptions : public SystemRewriteOptions {
   Option<GoogleString> messages_path_;
   Option<GoogleString> admin_path_;
   Option<GoogleString> global_admin_path_;
+
+  // Use native Envoy fetcher
+  Option<bool> use_native_fetcher_;
 
   // Helper for ParseAndSetOptions.  Returns whether the two directives equal,
   // ignoring case.

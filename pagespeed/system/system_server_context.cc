@@ -309,7 +309,7 @@ void SystemServerContext::ApplySessionFetchers(const RequestContextPtr& request,
   // added: the last one added here is the first one applied and vice versa.
   //
   // Currently, we want AddHeadersFetcher running first, then
-  // LoopbackRouteFetcher (and then Serf).
+  // LoopbackRouteFetcher (and then the base fetcher).
   SystemRewriteOptions* options = global_system_rewrite_options();
   if (!options->disable_loopback_routing() && !options->slurping_enabled() &&
       !options->test_proxy()) {
