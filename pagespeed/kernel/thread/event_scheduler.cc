@@ -19,6 +19,8 @@
 
 #include "pagespeed/kernel/thread/event_scheduler.h"
 
+#include <memory>
+
 #include "pagespeed/kernel/base/function.h"
 #include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/thread/event_dispatcher.h"
@@ -61,16 +63,17 @@ void EventScheduler::AwaitWakeupUntilUs(int64 wakeup_time_us) {
   int64 generation = timer_generation_.fetch_add(1, std::memory_order_acq_rel) + 1;
 
   // Create a timer that will wake us up. We capture the generation so we can
-  // ignore stale callbacks. The timer owns the callback function.
-  dispatcher_->CreateTimerAtUs(
+  // ignore stale callbacks. The caller owns the returned EventTimer.
+  std::unique_ptr<EventTimer> timer(dispatcher_->CreateTimerAtUs(
       wakeup_time_us,
-      MakeFunction(this, &EventScheduler::OnWakeupTimer, generation));
+      MakeFunction(this, &EventScheduler::OnWakeupTimer, generation)));
 
   // Do the actual condvar wait. This will return when either:
   // - The timeout expires
   // - OnWakeupTimer signals via Wakeup()
   // - Some other code calls Signal()
   Scheduler::AwaitWakeupUntilUs(wakeup_time_us);
+  // Timer is auto-deleted here after the wait completes.
 }
 
 void EventScheduler::OnWakeupTimer(int64 generation) {

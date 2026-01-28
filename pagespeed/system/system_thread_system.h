@@ -18,18 +18,38 @@
  */
 
 //
-// A wrapper around PthreadThreadSystem that takes care of some signal masking
-// issues that arise in forking servers.  We prefer pthreads to APR as APR
-// mutex, etc., creation requires pools which are generally thread unsafe,
-// introducing some additional risks.
+// A wrapper around PthreadThreadSystem (POSIX) or StdThreadSystem (Windows)
+// that takes care of some signal masking issues that arise in forking servers.
 
 #ifndef PAGESPEED_SYSTEM_SYSTEM_THREAD_SYSTEM_H_
 #define PAGESPEED_SYSTEM_SYSTEM_THREAD_SYSTEM_H_
 
 #include "pagespeed/kernel/base/basictypes.h"
+
+#ifdef _WIN32
+#include "pagespeed/kernel/thread/std_thread_system.h"
+#else
 #include "pagespeed/kernel/thread/pthread_thread_system.h"
+#endif
 
 namespace net_instaweb {
+
+#ifdef _WIN32
+
+// Windows: No fork() or signal masking needed; thin wrapper around
+// StdThreadSystem.
+class SystemThreadSystem : public StdThreadSystem {
+ public:
+  SystemThreadSystem() {}
+  ~SystemThreadSystem() override {}
+
+  void PermitThreadStarting() {}
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(SystemThreadSystem);
+};
+
+#else  // !_WIN32
 
 class SystemThreadSystem : public PthreadThreadSystem {
  public:
@@ -50,6 +70,8 @@ class SystemThreadSystem : public PthreadThreadSystem {
 
   DISALLOW_COPY_AND_ASSIGN(SystemThreadSystem);
 };
+
+#endif  // _WIN32
 
 }  // namespace net_instaweb
 

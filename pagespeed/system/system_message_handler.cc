@@ -19,7 +19,11 @@
 
 #include "pagespeed/system/system_message_handler.h"
 
+#ifdef _WIN32
+#include <process.h>  // _getpid()
+#else
 #include <unistd.h>
+#endif
 
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/null_message_handler.h"
@@ -32,7 +36,11 @@ namespace net_instaweb {
 
 SystemMessageHandler::SystemMessageHandler(Timer* timer, AbstractMutex* mutex)
     : timer_(timer), mutex_(mutex), buffer_(nullptr) {
+#ifdef _WIN32
+  SetPidString(static_cast<int64>(_getpid()));
+#else
   SetPidString(static_cast<int64>(getpid()));
+#endif
 }
 
 SystemMessageHandler::~SystemMessageHandler() {}

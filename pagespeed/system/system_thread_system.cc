@@ -19,6 +19,8 @@
 
 #include "pagespeed/system/system_thread_system.h"
 
+#ifndef _WIN32
+
 #include <pthread.h>
 #include <signal.h>
 
@@ -50,3 +52,5 @@ void SystemThreadSystem::BeforeThreadRunHook() {
 }
 
 }  // namespace net_instaweb
+
+#endif  // !_WIN32

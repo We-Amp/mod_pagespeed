@@ -19,8 +19,13 @@
 
 #include "pagespeed/system/loopback_route_fetcher.h"
 
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
 #include <netinet/in.h>
 #include <sys/socket.h>
+#endif
 
 #include "base/logging.h"
 #include "net/instaweb/http/public/async_fetch.h"

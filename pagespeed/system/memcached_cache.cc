@@ -77,6 +77,7 @@ void MemcachedCache::InitStats(Statistics* statistics) {
 }
 
 bool MemcachedCache::Connect() {
+  std::lock_guard<std::mutex> lock(mutex_);
   if (memc_ != nullptr) {
     memcached_free(memc_);
     memc_ = nullptr;
@@ -145,6 +146,7 @@ void MemcachedCache::DecodeValueMatchingKeyAndCallCallback(
 }
 
 void MemcachedCache::Get(const GoogleString& key, Callback* callback) {
+  std::lock_guard<std::mutex> lock(mutex_);
   if (!IsHealthy()) {
     ValidateAndReportResult(key, CacheInterface::kNotFound, callback);
     return;
@@ -178,6 +180,7 @@ void MemcachedCache::Get(const GoogleString& key, Callback* callback) {
 }
 
 void MemcachedCache::MultiGet(MultiGetRequest* request) {
+  std::lock_guard<std::mutex> lock(mutex_);
   if (!IsHealthy()) {
     ReportMultiGetNotFound(request);
     return;
@@ -282,6 +285,7 @@ void MemcachedCache::PutHelper(const GoogleString& key,
 
 void MemcachedCache::PutWithKeyInValue(const GoogleString& key,
                                        const SharedString& key_and_value) {
+  std::lock_guard<std::mutex> lock(mutex_);
   if (!IsHealthy()) {
     return;
   }
@@ -289,6 +293,7 @@ void MemcachedCache::PutWithKeyInValue(const GoogleString& key,
 }
 
 void MemcachedCache::Put(const GoogleString& key, const SharedString& value) {
+  std::lock_guard<std::mutex> lock(mutex_);
   if (!IsHealthy()) {
     return;
   }
@@ -305,6 +310,7 @@ void MemcachedCache::Put(const GoogleString& key, const SharedString& value) {
 }
 
 void MemcachedCache::Delete(const GoogleString& key) {
+  std::lock_guard<std::mutex> lock(mutex_);
   if (!IsHealthy()) {
     return;
   }
@@ -323,6 +329,7 @@ void MemcachedCache::Delete(const GoogleString& key) {
 }
 
 bool MemcachedCache::GetStatus(GoogleString* buffer) {
+  std::lock_guard<std::mutex> lock(mutex_);
   if (memc_ == nullptr) {
     return false;
   }

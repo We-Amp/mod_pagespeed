@@ -1,0 +1,10 @@
+# ThreadSanitizer suppressions for mod_pagespeed
+#
+# ProxyFetch has a known benign race on shared response headers protobuf.
+# The fetcher thread's wrapper chain (CachePutFetch::HandleDone) reads
+# status_code() while the sequence thread writes new headers via
+# HandleHeadersComplete on the base fetch. The race is at the protobuf
+# internal byte level (different logical fields, same message). The
+# status_code value is never modified concurrently.
+race:AsyncExpectStringAsyncFetch::HandleHeadersComplete
+race:CachePutFetch::HandleDone

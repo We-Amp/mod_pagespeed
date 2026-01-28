@@ -19,7 +19,12 @@
 
 #include "pagespeed/kernel/util/hashed_nonce_generator.h"
 
+#ifdef _WIN32
+#include <process.h>  // _getpid()
+typedef int pid_t;
+#else
 #include <unistd.h>
+#endif
 
 #include "base/logging.h"
 #include "pagespeed/kernel/base/basictypes.h"
@@ -56,7 +61,11 @@ uint64 HashedNonceGenerator::NewNonceImpl() {
   // We look up the pid here and include it because we may have forked since
   // this HashedNonceGenerator was created, and we want to make sure the forked
   // values yield distinct nonce streams.
+#ifdef _WIN32
+  pid_t pid = _getpid();
+#else
   pid_t pid = getpid();
+#endif
   // We append data to key_, then hash the whole buffer.
   memcpy(&key_[key_size_], &counter_, sizeof(counter_));
   memcpy(&key_[key_size_ + sizeof(counter_)], &pid, sizeof(pid));

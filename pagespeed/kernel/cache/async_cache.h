@@ -58,7 +58,7 @@ class AsyncCache : public CacheInterface {
   // other users.
   //
   // Note that in the future we may try to add multi-threaded access
-  // to the underlying cache (e.g. AprMemCache supports this), so we
+  // to the underlying cache (e.g. MemcachedCache supports this), so we
   // take the pool as the constructor arg.
   AsyncCache(CacheInterface* cache, QueuedWorkerPool* pool);
   ~AsyncCache() override;

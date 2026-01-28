@@ -1,5 +1,9 @@
 # modifications for pagespeed over Envoy's stock config
 
+# Persistent caches on SSD for faster rebuilds
+build --disk_cache=/ssd-cache/disk-cache
+build --repository_cache=/ssd-cache/repo-cache
+
 # POSIX-specific configuration (Linux, macOS)
 build:linux --linkopt -ldl
 build:macos --linkopt -ldl
@@ -39,6 +43,9 @@ build:macos --copt="-Iexternal/apr/"
 build:macos --copt="-Iexternal/serf/include/"
 build:macos --copt="-Iexternal/serf/"
 build:macos --copt="-DPAGESPEED_SUPPORT_POSIX_SHARED_MEM=1"
+
+# Windows-specific: No POSIX shared memory, no APR/Serf
+build:windows --copt="-DPAGESPEED_SUPPORT_POSIX_SHARED_MEM=0"
 
 build --action_env=ABSL_LEGACY_THREAD_ANNOTATIONS=1
 build --copt="-DABSL_LEGACY_THREAD_ANNOTATIONS=1"
@@ -82,15 +89,15 @@ build --per_file_copt=pagespeed/kernel/cache/cyclone/.*\\.cc@-std=c++23
 # Clang 17's __cpp_concepts macro (201907) is lower than what GCC 13's libstdc++
 # requires for std::expected (202002L). We force the macro for Cyclone files.
 #
-# Note: This config is Linux-specific (aarch64). For x86_64, adjust the paths:
-#   -I/usr/include/x86_64-linux-gnu/c++/13
-#   -L/usr/lib/gcc/x86_64-linux-gnu/13
+# Note: This config includes both aarch64 and x86_64 paths. Non-existent
+# paths are silently ignored by the compiler, so this works on either arch.
 # =============================================================================
 build:clang-libstdcxx13 --config=clang
 
 # Force __cpp_concepts=202002L and use GCC 13 libstdc++ for Cyclone files only
-build:clang-libstdcxx13 --per_file_copt=external/cyclone/.*\\.cpp@-D__cpp_concepts=202002L,-nostdinc++,-I/usr/include/c++/13,-I/usr/include/aarch64-linux-gnu/c++/13
-build:clang-libstdcxx13 --per_file_copt=pagespeed/kernel/cache/cyclone/.*\\.cc@-D__cpp_concepts=202002L,-nostdinc++,-I/usr/include/c++/13,-I/usr/include/aarch64-linux-gnu/c++/13
+build:clang-libstdcxx13 --per_file_copt=external/cyclone/.*\\.cpp@-D__cpp_concepts=202002L,-nostdinc++,-I/usr/include/c++/13,-I/usr/include/aarch64-linux-gnu/c++/13,-I/usr/include/x86_64-linux-gnu/c++/13
+build:clang-libstdcxx13 --per_file_copt=pagespeed/kernel/cache/cyclone/.*\\.cc@-D__cpp_concepts=202002L,-nostdinc++,-I/usr/include/c++/13,-I/usr/include/aarch64-linux-gnu/c++/13,-I/usr/include/x86_64-linux-gnu/c++/13
 
-# Link against GCC 13's libstdc++
+# Link against GCC 13's libstdc++ (include both arch paths; non-existent is ignored)
 build:clang-libstdcxx13 --linkopt=-L/usr/lib/gcc/aarch64-linux-gnu/13
+build:clang-libstdcxx13 --linkopt=-L/usr/lib/gcc/x86_64-linux-gnu/13

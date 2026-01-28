@@ -80,11 +80,13 @@ cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
-        ":pthread_thread",
         ":std_thread",
         "//pagespeed/kernel/base:pagespeed_base",
         "@mod_pagespeed//base:log_shim",
-    ],
+    ] + select({
+        "@platforms//os:windows": [],
+        "//conditions:default": [":pthread_thread"],
+    }),
 )
 
 # Event dispatcher abstraction - unified event loop interface.

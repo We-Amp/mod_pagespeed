@@ -24,8 +24,13 @@
 #ifndef PAGESPEED_SYSTEM_LOOPBACK_ROUTE_FETCHER_H_
 #define PAGESPEED_SYSTEM_LOOPBACK_ROUTE_FETCHER_H_
 
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
 #include <netinet/in.h>
 #include <sys/socket.h>
+#endif
 
 #include "net/instaweb/http/public/url_async_fetcher.h"
 #include "pagespeed/kernel/base/basictypes.h"

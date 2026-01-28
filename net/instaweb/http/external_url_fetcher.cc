@@ -97,7 +97,11 @@ void ExternalUrlFetcher::Fetch(const GoogleString& url, MessageHandler* handler,
 
   handler->Message(kInfo, "%s --... %s\n", GetFetchLabel(), url.c_str());
   VLOG(2) << "Running: " << cmd;
+#ifdef _WIN32
+  FILE* cmd_stdout = _popen(cmd.c_str(), "r");
+#else
   FILE* cmd_stdout = popen(cmd.c_str(), "r");
+#endif
 
   bool ret = false;
   if (cmd_stdout == nullptr) {
@@ -106,7 +110,11 @@ void ExternalUrlFetcher::Fetch(const GoogleString& url, MessageHandler* handler,
   } else {
     HttpResponseParser parser(response_headers, fetch, handler);
     ret = parser.Parse(cmd_stdout);
+#ifdef _WIN32
+    int exit_status = _pclose(cmd_stdout);
+#else
     int exit_status = pclose(cmd_stdout);
+#endif
     if (exit_status != 0) {
       // The command failed.  Some (all?) commands do not always
       // (ever?) write appropriate headers when it fails, so invent

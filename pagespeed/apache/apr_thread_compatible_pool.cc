@@ -17,7 +17,7 @@
  * under the License.
  */
 
-#include "pagespeed/system/apr_thread_compatible_pool.h"
+#include "pagespeed/apache/apr_thread_compatible_pool.h"
 
 #include <cstddef>
 

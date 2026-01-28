@@ -21,6 +21,7 @@
 #define PAGESPEED_SYSTEM_MEMCACHED_CACHE_H_
 
 #include <cstddef>
+#include <mutex>
 #include <vector>
 
 #include "pagespeed/kernel/base/atomic_bool.h"
@@ -43,8 +44,6 @@ class Variable;
 
 // Memcached client using libmemcached. This is a blocking implementation
 // suitable for wrapping with AsyncCache.
-//
-// Drop-in replacement for AprMemCache with the same CacheInterface API.
 class MemcachedCache : public CacheInterface {
  public:
   static const size_t kValueSizeThreshold = 1 * 1000 * 1000;
@@ -93,6 +92,7 @@ class MemcachedCache : public CacheInterface {
                                              Callback* callback);
   void PutHelper(const GoogleString& key, const SharedString& key_and_value);
 
+  mutable std::mutex mutex_;
   ExternalClusterSpec cluster_spec_;
   bool valid_server_spec_;
   int timeout_us_;

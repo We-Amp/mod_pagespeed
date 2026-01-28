@@ -242,31 +242,6 @@ cc_library(
     ],
 )
 
-# APR-dependent system components.
-# Only used by the Apache module. Contains Serf fetcher, APR memcached client,
-# and APR initialization utilities.
-cc_library(
-    name = "system_apr",
-    srcs = [
-        "apr_init.cc",
-        "apr_mem_cache.cc",
-        "apr_thread_compatible_pool.cc",
-        "serf_url_async_fetcher.cc",
-    ],
-    hdrs = [
-        "apr_init.h",
-        "apr_mem_cache.h",
-        "apr_thread_compatible_pool.h",
-        "serf_url_async_fetcher.h",
-    ],
-    visibility = ["//visibility:public"],
-    deps = [
-        ":system",
-        "@apr",
-        "@aprutil",
-        "@serf",
-    ],
-)
 
 cc_library(
     name = "system_controller_process_h",

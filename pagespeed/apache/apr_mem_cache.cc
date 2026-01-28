@@ -17,7 +17,7 @@
  * under the License.
  */
 
-#include "pagespeed/system/apr_mem_cache.h"
+#include "pagespeed/apache/apr_mem_cache.h"
 
 #include <memory>
 
@@ -32,7 +32,7 @@
 #include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/cache/cache_interface.h"
 #include "pagespeed/kernel/cache/key_value_codec.h"
-#include "pagespeed/system/apr_thread_compatible_pool.h"
+#include "pagespeed/apache/apr_thread_compatible_pool.h"
 #include "third_party/aprutil/apr_memcache2.h"
 
 namespace net_instaweb {

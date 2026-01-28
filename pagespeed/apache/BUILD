@@ -13,6 +13,43 @@ filegroup(
     visibility = ["//visibility:public"],
 )
 
+# APR-dependent components: Serf fetcher, APR memcached client,
+# APR initialization utilities, and thread-compatible pool.
+cc_library(
+    name = "apache_apr",
+    srcs = [
+        "apr_init.cc",
+        "apr_mem_cache.cc",
+        "apr_thread_compatible_pool.cc",
+        "serf_url_async_fetcher.cc",
+    ],
+    hdrs = [
+        "apr_init.h",
+        "apr_mem_cache.h",
+        "apr_thread_compatible_pool.h",
+        "serf_url_async_fetcher.h",
+    ],
+    copts = [
+        "-Iexternal/aprutil/include/",
+        "-Iexternal/aprutil/include/arch/unix/",
+        "-Iexternal/aprutil/",
+        "-Ithird_party/aprutil/gen/arch/linux/x64/include/",
+        "-Ithird_party/apr/gen/arch/linux/x64/include/",
+        "-Iexternal/apr/include/",
+        "-Iexternal/apr/include/arch/unix/",
+        "-Iexternal/apr/",
+        "-Iexternal/serf/include/",
+        "-Iexternal/serf/",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pagespeed/system",
+        "@apr",
+        "@aprutil",
+        "@serf",
+    ],
+)
+
 cc_library(
     name = "apache",
     srcs = [
@@ -68,10 +105,10 @@ cc_library(
     alwayslink = True,
     visibility = ["//visibility:public"],
     deps = [
+        ":apache_apr",
         "//pagespeed/automatic",
         "//pagespeed/kernel/thread:event_scheduler",
         "//pagespeed/kernel/thread:libevent_dispatcher",
         "//pagespeed/system",
-        "//pagespeed/system:system_apr",
     ],
 )

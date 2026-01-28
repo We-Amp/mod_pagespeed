@@ -20,7 +20,11 @@
 #ifndef PAGESPEED_CONTROLLER_CONTEXT_REGISTRY_H_
 #define PAGESPEED_CONTROLLER_CONTEXT_REGISTRY_H_
 
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <unistd.h>
+#endif
 
 #include <memory>
 #include <unordered_set>
@@ -172,7 +176,11 @@ void ContextRegistry<ContextT>::CancelAllActive() {
       ctx->TryCancel();
     }
     mutex_->Unlock();
+#ifdef _WIN32
+    Sleep(0);  // yield to other threads.
+#else
     usleep(1);  // yield to other threads.
+#endif
   }
 }
 

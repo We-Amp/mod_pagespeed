@@ -17,8 +17,8 @@
  * under the License.
  */
 
-#ifndef PAGESPEED_SYSTEM_APR_THREAD_COMPATIBLE_POOL_H_
-#define PAGESPEED_SYSTEM_APR_THREAD_COMPATIBLE_POOL_H_
+#ifndef PAGESPEED_APACHE_APR_THREAD_COMPATIBLE_POOL_H_
+#define PAGESPEED_APACHE_APR_THREAD_COMPATIBLE_POOL_H_
 
 #include "apr_pools.h"
 
@@ -52,4 +52,4 @@ apr_pool_t* AprCreateThreadCompatiblePool(apr_pool_t* parent_pool);
 
 }  // namespace net_instaweb
 
-#endif  // PAGESPEED_SYSTEM_APR_THREAD_COMPATIBLE_POOL_H_
+#endif  // PAGESPEED_APACHE_APR_THREAD_COMPATIBLE_POOL_H_
