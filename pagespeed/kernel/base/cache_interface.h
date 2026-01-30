@@ -24,6 +24,7 @@
 
 #include "base/logging.h"
 #include "pagespeed/kernel/base/basictypes.h"
+#include "pagespeed/kernel/base/mapped_shared_string.h"
 #include "pagespeed/kernel/base/shared_string.h"
 #include "pagespeed/kernel/base/string.h"
 
@@ -43,8 +44,32 @@ class CacheInterface {
   class Callback {
    public:
     virtual ~Callback();
-    void set_value(const SharedString& value) { value_ = value; }
-    const SharedString& value() const { return value_; }
+
+    // Set a value from SharedString. The SharedString is wrapped in a
+    // MappedSharedString (owned mode, no zero-copy).
+    void set_value(const SharedString& value) {
+      value_ = MappedSharedString(value);
+    }
+
+    // Set a value from MappedSharedString. Use this for zero-copy paths
+    // where the data is backed by memory-mapped storage.
+    void set_value(const MappedSharedString& value) {
+      value_ = value;
+    }
+
+    // Returns the cached value as MappedSharedString.
+    // - Use value().Value() to get a StringPiece (zero-copy if mapped)
+    // - Use value().ToOwned() to get a SharedString (copies if mapped)
+    // - Use value().is_mapped() to check if data is memory-mapped
+    const MappedSharedString& value() const { return value_; }
+
+    // Convenience: returns the value as StringPiece.
+    // Equivalent to value().Value().
+    StringPiece value_as_string_piece() const { return value_.Value(); }
+
+    // Convenience: returns an owned SharedString.
+    // Equivalent to value().ToOwned(). Copies data if mapped.
+    SharedString value_as_shared_string() const { return value_.ToOwned(); }
 
     // These methods are meant for use of callback subclasses that wrap
     // around other callbacks. Normal cache implementations should
@@ -84,7 +109,7 @@ class CacheInterface {
     virtual void Done(KeyState state) = 0;
 
    private:
-    SharedString value_;
+    MappedSharedString value_;
   };
 
   // Helper class for use with implementations for which IsBlocking is true.
@@ -100,8 +125,7 @@ class CacheInterface {
     void Reset() {
       called_ = false;
       state_ = CacheInterface::kNotFound;
-      SharedString empty;
-      set_value(empty);
+      set_value(MappedSharedString());
     }
 
     void Done(CacheInterface::KeyState state) override {

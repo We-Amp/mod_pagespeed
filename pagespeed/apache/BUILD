@@ -45,8 +45,11 @@ cc_library(
     ],
 )
 
+# Core Apache library without mod_instaweb.cc.
+# Use this for tests to avoid the static ApacheProcessContext in mod_instaweb.cc
+# which conflicts with test infrastructure's RewriteTestBaseProcessContext.
 cc_library(
-    name = "apache",
+    name = "apache_core",
     srcs = [
         "apache_config.cc",
         "apache_fetch.cc",
@@ -62,7 +65,6 @@ cc_library(
         "instaweb_context.cc",
         "instaweb_handler.cc",
         "log_message_handler.cc",
-        "mod_instaweb.cc",
         "simple_buffered_apache_fetch.cc",
     ],
     hdrs = [
@@ -95,7 +97,6 @@ cc_library(
         "-Iexternal/apr/include/arch/unix/",
         "-Iexternal/apr/",
     ],
-    alwayslink = True,
     visibility = ["//visibility:public"],
     deps = [
         ":apache_apr",
@@ -104,5 +105,31 @@ cc_library(
         "//pagespeed/kernel/thread:libevent_dispatcher",
         "//pagespeed/system",
         "//pagespeed/system:curl_fetcher",
+    ],
+)
+
+# Full Apache library including mod_instaweb.cc (Apache module entry point).
+# This includes a static ApacheProcessContext that initializes the module.
+# For tests, use :apache_core instead to avoid ProcessContext conflicts.
+cc_library(
+    name = "apache",
+    srcs = [
+        "mod_instaweb.cc",
+    ],
+    copts = [
+        "-I/usr/include/apache2/",
+        "-Iexternal/aprutil/include/",
+        "-Iexternal/aprutil/include/arch/unix/",
+        "-Iexternal/aprutil/",
+        "-Ithird_party/aprutil/gen/arch/linux/x64/include/",
+        "-Ithird_party/apr/gen/arch/linux/x64/include/",
+        "-Iexternal/apr/include/",
+        "-Iexternal/apr/include/arch/unix/",
+        "-Iexternal/apr/",
+    ],
+    alwayslink = True,
+    visibility = ["//visibility:public"],
+    deps = [
+        ":apache_core",
     ],
 )

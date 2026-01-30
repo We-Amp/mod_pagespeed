@@ -84,7 +84,9 @@ class FallbackCallback : public CacheInterface::Callback {
       return true;  // The forwarding-marker in the small object cache is OK.
     } else if ((size >= 1) && (val[size - 1] == kInSmallObjectCache)) {
       // Link values together, but strip the marker from the new view.
-      SharedString new_value = value();
+      // ToOwned() is required because MappedSharedString doesn't support
+      // RemoveSuffix - we need to work with the owned SharedString.
+      SharedString new_value = value().ToOwned();
       new_value.RemoveSuffix(1);
       callback_->set_value(new_value);
       return callback_->DelegatedValidateCandidate(key, state);

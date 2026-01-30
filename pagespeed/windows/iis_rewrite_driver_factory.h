@@ -20,6 +20,8 @@
 #ifndef PAGESPEED_WINDOWS_IIS_REWRITE_DRIVER_FACTORY_H_
 #define PAGESPEED_WINDOWS_IIS_REWRITE_DRIVER_FACTORY_H_
 
+#include <memory>
+
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -28,6 +30,7 @@
 
 namespace net_instaweb {
 
+class GoogleMessageHandler;
 class MessageHandler;
 class ProcessContext;
 class ServerContext;
@@ -59,7 +62,14 @@ class IisRewriteDriverFactory : public SystemRewriteDriverFactory {
   // TODO(windows): Return a WinHttpUrlAsyncFetcher.
   UrlAsyncFetcher* AllocateFetcher(SystemRewriteOptions* config) override;
 
+  // Pure virtual implementations from RewriteDriverFactory.
+  MessageHandler* DefaultHtmlParseMessageHandler() override;
+  MessageHandler* DefaultMessageHandler() override;
+  ServerContext* NewDecodingServerContext() override;
+
  private:
+  std::unique_ptr<GoogleMessageHandler> message_handler_;
+
   DISALLOW_COPY_AND_ASSIGN(IisRewriteDriverFactory);
 };
 

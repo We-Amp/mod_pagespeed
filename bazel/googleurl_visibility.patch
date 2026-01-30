@@ -1,0 +1,80 @@
+diff --git a/build_config/BUILD b/build_config/BUILD
+index 1234567..abcdefg 100644
+--- a/build_config/BUILD
++++ b/build_config/BUILD
+@@ -1,5 +1,7 @@
+ load("//build_config:common_settings.bzl", "bool_flag")
+
++package(default_visibility = ["//visibility:public"])
++
+ licenses(["notice"])
+
+ config_setting(
+diff --git a/polyfills/third_party/perfetto/include/perfetto/tracing/traced_value.h b/polyfills/third_party/perfetto/include/perfetto/tracing/traced_value.h
+--- a/polyfills/third_party/perfetto/include/perfetto/tracing/traced_value.h
++++ b/polyfills/third_party/perfetto/include/perfetto/tracing/traced_value.h
+@@ -5,6 +5,8 @@
+
+ #ifndef POLYFILLS_THIRD_PARTY_PERFETTO_INCLUDE_PERFETTO_TRACING_TRACED_VALUE_H_
+ #define POLYFILLS_THIRD_PARTY_PERFETTO_INCLUDE_PERFETTO_TRACING_TRACED_VALUE_H_
++
++#include <string>
+
+ namespace perfetto {
+
+@@ -14,7 +16,10 @@ class TracedValue {
+ };
+
+ template <typename T>
+-void WriteIntoTracedValue(TracedValue context, T&& value) {}
++void WriteIntoTracedValue(TracedValue context, T&& value) {
++  (void)context;
++  (void)value;
++}
+
+ template <typename T, typename ResultType = void, class = void>
+ struct check_traced_value_support {
+diff --git a/base/containers/span.h b/base/containers/span.h
+--- a/base/containers/span.h
++++ b/base/containers/span.h
+@@ -125,7 +125,9 @@ using EnableIfSpanCompatibleContainerAndSpanIsDynamic =
+ template <size_t Extent>
+ class ExtentStorage {
+  public:
+-  constexpr explicit ExtentStorage(size_t size) noexcept {}
++  constexpr explicit ExtentStorage(size_t size) noexcept {
++    (void)size;
++  }
+   constexpr size_t size() const noexcept { return Extent; }
+ };
+
+diff --git a/base/numerics/safe_conversions.h b/base/numerics/safe_conversions.h
+--- a/base/numerics/safe_conversions.h
++++ b/base/numerics/safe_conversions.h
+@@ -44,6 +44,7 @@ template <typename Dst, typename Src, typename Enable = void>
+ struct IsValueInRangeFastOp {
+   static constexpr bool is_supported = false;
+   static constexpr bool Do(Src value) {
++    (void)value;
+     // Force a compile failure if instantiated.
+     return CheckOnFailure::template HandleFailure<bool>();
+   }
+@@ -163,6 +164,7 @@ template <typename Dst, typename Src, typename Enable = void>
+ struct SaturateFastOp {
+   static constexpr bool is_supported = false;
+   static constexpr Dst Do(Src value) {
++    (void)value;
+     // Force a compile failure if instantiated.
+     return CheckOnFailure::template HandleFailure<Dst>();
+   }
+diff --git a/base/numerics/clamped_math_impl.h b/base/numerics/clamped_math_impl.h
+--- a/base/numerics/clamped_math_impl.h
++++ b/base/numerics/clamped_math_impl.h
+@@ -36,6 +36,7 @@ template <typename T,
+           typename std::enable_if<std::is_integral<T>::value &&
+                                   !std::is_signed<T>::value>::type* = nullptr>
+ constexpr T SaturatedNegWrapper(T value) {
++  (void)value;
+   return T(0);
+ }
+

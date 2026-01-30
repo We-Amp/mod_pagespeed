@@ -25,6 +25,7 @@
 #include "base/logging.h"
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/abstract_shared_mem.h"
+#include "pagespeed/kernel/base/alignment_util.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/string_util.h"
 
@@ -33,10 +34,6 @@ namespace net_instaweb {
 namespace SharedMemCacheData {
 
 namespace {
-// Assumes align is power-of-2
-inline size_t AlignTo(size_t alignment, size_t in) {
-  return (in + (alignment - 1)) & ~(alignment - 1);
-}
 
 double percent(int64 portion, int64 total) {
   return static_cast<double>(portion) / static_cast<double>(total) * 100.0;
@@ -47,20 +44,22 @@ double percent(int64 portion, int64 total) {
 template <size_t kBlockSize>
 struct Sector<kBlockSize>::MemLayout {
   MemLayout(size_t mutex_size, size_t cache_entries, size_t data_blocks) {
-    // Check out alignment assumptions -- everything must be of a size
-    // that's multiple of 8. The exact sizes don't matter too much, but
-    // we check it anyway to avoid surprises.
-    CHECK_EQ(104u, sizeof(SectorHeader));
-    CHECK_EQ(48u, sizeof(CacheEntry));
+    // Structure sizes are verified by static_assert in the header file.
+    // The mutex must be placed at an aligned offset after SectorHeader.
+    // On Windows x64, CRITICAL_SECTION requires 16-byte alignment;
+    // on Linux/macOS, pthread_mutex_t requires 8-byte alignment.
+    mutex_offset = AlignForMutex(sizeof(SectorHeader));
 
-    header_bytes = AlignTo(8, sizeof(SectorHeader) + mutex_size);
-    block_successor_list_bytes = AlignTo(8, sizeof(BlockNum) * data_blocks);
+    // header_bytes includes space from start through end of mutex, aligned to 8
+    header_bytes = AlignTo8(mutex_offset + mutex_size);
+    block_successor_list_bytes = AlignTo8(sizeof(BlockNum) * data_blocks);
     size_t directory_size = sizeof(CacheEntry) * cache_entries;
-    metadata_bytes = AlignTo(
-        kBlockSize, header_bytes + directory_size + block_successor_list_bytes);
+    metadata_bytes = AlignOffset(
+        header_bytes + directory_size + block_successor_list_bytes, kBlockSize);
   }
 
-  size_t header_bytes;  // also offset to the block successor list.
+  size_t mutex_offset;    // offset where mutex is placed (after SectorHeader)
+  size_t header_bytes;    // also offset to the block successor list.
   size_t block_successor_list_bytes;
   size_t metadata_bytes;  // e.g. offset to the blocks.
 };
@@ -87,16 +86,18 @@ Sector<kBlockSize>::~Sector() {}
 
 template <size_t kBlockSize>
 bool Sector<kBlockSize>::Attach(MessageHandler* handler) {
-  mutex_.reset(
-      segment_->AttachToSharedMutex(sector_offset_ + sizeof(SectorHeader)));
+  // Compute the aligned mutex offset (same calculation as in MemLayout)
+  size_t mutex_offset = sector_offset_ + AlignForMutex(sizeof(SectorHeader));
+  mutex_.reset(segment_->AttachToSharedMutex(mutex_offset));
   return (mutex_.get() != nullptr);
 }
 
 template <size_t kBlockSize>
 bool Sector<kBlockSize>::Initialize(MessageHandler* handler)
     NO_THREAD_SAFETY_ANALYSIS {
-  if (!segment_->InitializeSharedMutex(sector_offset_ + sizeof(SectorHeader),
-                                       handler)) {
+  // Compute the aligned mutex offset (same calculation as in MemLayout)
+  size_t mutex_offset = sector_offset_ + AlignForMutex(sizeof(SectorHeader));
+  if (!segment_->InitializeSharedMutex(mutex_offset, handler)) {
     return false;
   }
 

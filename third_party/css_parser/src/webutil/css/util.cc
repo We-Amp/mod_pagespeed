@@ -19,6 +19,11 @@
 
 #include "third_party/css_parser/src/webutil/css/util.h"
 
+#ifdef _WIN32
+#include <string.h>
+#define strcasecmp _stricmp
+#endif
+
 #include "third_party/css_parser/src/strings/ascii_ctype.h"
 #include "third_party/css_parser/src/strings/memutil.h"
 #include "third_party/css_parser/src/strings/stringpiece_utils.h"

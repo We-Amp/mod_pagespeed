@@ -23,8 +23,15 @@
 
 #include "third_party/css_parser/src/webutil/html/htmlcolor.h"
 
+// _USE_MATH_DEFINES must be defined before including cmath to get M_PI on Windows
+#define _USE_MATH_DEFINES
 #include <cmath>
 #include <cstring>
+
+// M_PI may not be defined on Windows with clang-cl
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
 #include "absl/strings/str_format.h"
 #include "third_party/css_parser/src/strings/ascii_ctype.h"

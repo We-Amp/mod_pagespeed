@@ -16,6 +16,34 @@ load(":cyclone.bzl", "cyclone_build_rule")
 load(":libcurl.bzl", "libcurl_build_rule")
 load(":libmemcached.bzl", "libmemcached_build_rule")
 
+def _cyclone_repository_impl(repository_ctx):
+    """Repository rule for Cyclone that handles platform-specific paths."""
+    # Check environment variable first, then use platform-specific defaults
+    cyclone_path = repository_ctx.os.environ.get("CYCLONE_CACHE_PATH", "")
+
+    if not cyclone_path:
+        # Detect platform and use appropriate default path
+        if repository_ctx.os.name.startswith("windows"):
+            cyclone_path = "C:/build/cyclone-cache"
+        else:
+            cyclone_path = "/cyclone-cache"
+
+    # Symlink the src and include directories from cyclone
+    repository_ctx.symlink(cyclone_path + "/src", "src")
+    repository_ctx.symlink(cyclone_path + "/include", "include")
+
+    # Write the BUILD file
+    repository_ctx.file("BUILD.bazel", repository_ctx.attr.build_file_content)
+
+cyclone_repository = repository_rule(
+    implementation = _cyclone_repository_impl,
+    attrs = {
+        "build_file_content": attr.string(mandatory = True),
+    },
+    environ = ["CYCLONE_CACHE_PATH"],
+    local = True,
+)
+
 ENVOY_COMMIT = "83082b0bf0db8a5b6bb3e691df387bf8566f072d"
 ENVOY_SHA = "71a2dc9186d1ef916a952aae8949953dc7ae6bbcce4415bdc2f3ffa0c1ec1427"
 
@@ -195,12 +223,12 @@ def mod_pagespeed_dependencies():
     )
 
     # Cyclone Cache - high-performance disk cache
-    # Uses new_local_repository for development with local checkout
-    # Note: The path /cyclone-cache is mounted via docker-compose.yml
-    # For non-Docker builds, change this to your local cyclone-cache path
-    native.new_local_repository(
+    # Uses cyclone_repository rule that auto-detects platform:
+    #   - Windows: C:/build/cyclone-cache
+    #   - Linux/Docker: /cyclone-cache (mounted via docker-compose.yml)
+    # Override with CYCLONE_CACHE_PATH environment variable if needed
+    cyclone_repository(
         name = "cyclone",
-        path = "/cyclone-cache",
         build_file_content = cyclone_build_rule,
     )
 

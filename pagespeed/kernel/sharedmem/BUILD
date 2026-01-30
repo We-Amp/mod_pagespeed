@@ -13,7 +13,10 @@ cc_library(
         "shared_mem_cache_data.cc",
         "shared_mem_lock_manager.cc",
         "shared_mem_statistics.cc",
-    ],
+    ] + select({
+        "@platforms//os:windows": ["windows_shared_mem.cc"],
+        "//conditions:default": [],
+    }),
     hdrs = [
         "inprocess_shared_mem.h",
         "shared_circular_buffer.h",
@@ -22,7 +25,10 @@ cc_library(
         "shared_mem_cache_data.h",
         "shared_mem_lock_manager.h",
         "shared_mem_statistics.h",
-    ],
+    ] + select({
+        "@platforms//os:windows": ["windows_shared_mem.h"],
+        "//conditions:default": [],
+    }),
     visibility = ["//visibility:public"],
     deps = [
         ":shared_mem_cache_shapshot_proto_cc",

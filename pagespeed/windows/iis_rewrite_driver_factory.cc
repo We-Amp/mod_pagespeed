@@ -19,7 +19,10 @@
 
 #include "pagespeed/windows/iis_rewrite_driver_factory.h"
 
+#include <memory>
+
 #include "base/logging.h"
+#include "pagespeed/kernel/base/google_message_handler.h"
 #include "pagespeed/kernel/base/null_shared_mem.h"
 #include "pagespeed/system/system_rewrite_options.h"
 #include "pagespeed/system/system_server_context.h"
@@ -31,7 +34,8 @@ IisRewriteDriverFactory::IisRewriteDriverFactory(
     const ProcessContext& process_context, SystemThreadSystem* thread_system,
     StringPiece hostname, int port)
     : SystemRewriteDriverFactory(process_context, thread_system,
-                                 new NullSharedMem(), hostname, port) {}
+                                 new NullSharedMem(), hostname, port),
+      message_handler_(new GoogleMessageHandler()) {}
 
 IisRewriteDriverFactory::~IisRewriteDriverFactory() {}
 
@@ -50,6 +54,20 @@ UrlAsyncFetcher* IisRewriteDriverFactory::AllocateFetcher(
   LOG(WARNING) << "IisRewriteDriverFactory::AllocateFetcher: "
                << "resource fetching not yet implemented on Windows.";
   return nullptr;
+}
+
+MessageHandler* IisRewriteDriverFactory::DefaultHtmlParseMessageHandler() {
+  return message_handler_.get();
+}
+
+MessageHandler* IisRewriteDriverFactory::DefaultMessageHandler() {
+  return message_handler_.get();
+}
+
+ServerContext* IisRewriteDriverFactory::NewDecodingServerContext() {
+  ServerContext* sc = new SystemServerContext(this, hostname_identifier(), 80);
+  InitStubDecodingServerContext(sc);
+  return sc;
 }
 
 }  // namespace net_instaweb

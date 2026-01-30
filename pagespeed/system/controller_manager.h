@@ -24,6 +24,7 @@
 
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/message_handler.h"
+#include "pagespeed/kernel/base/thread.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/system/controller_process.h"
 
@@ -31,10 +32,13 @@ namespace net_instaweb {
 
 class SystemRewriteDriverFactory;
 
-#ifdef _WIN32
+#if defined(_WIN32) || defined(PAGESPEED_NO_FORK)
 
-// Windows stub: IIS manages process lifecycle, so fork-based controller
-// management is not needed. All methods are no-ops.
+// Stub implementation for platforms where fork-based process management is
+// not needed:
+// - Windows: IIS manages process lifecycle
+// - Envoy: Envoy handles process management
+// All methods are no-ops.
 class ControllerManager {
  public:
   static void ForkControllerProcess(
@@ -42,8 +46,8 @@ class ControllerManager {
       SystemRewriteDriverFactory* /*factory*/, ThreadSystem* /*thread_system*/,
       MessageHandler* handler) {
     handler->Message(kInfo,
-                     "ControllerManager: fork not supported on Windows, "
-                     "skipping controller process.");
+                     "ControllerManager: fork-based process management "
+                     "disabled, skipping controller process.");
   }
 
   static void DetachFromControllerProcess() {}
@@ -52,7 +56,7 @@ class ControllerManager {
   DISALLOW_COPY_AND_ASSIGN(ControllerManager);
 };
 
-#else  // !_WIN32
+#else  // Full fork-based implementation
 
 // Handles forking off a controller process, restarting it if it dies, and
 // shutting down the process if the host reloads config or shuts down.
@@ -126,7 +130,7 @@ class ControllerManager {
   DISALLOW_COPY_AND_ASSIGN(ControllerManager);
 };
 
-#endif  // _WIN32
+#endif  // defined(_WIN32) || defined(PAGESPEED_NO_FORK)
 
 }  // namespace net_instaweb
 

@@ -419,7 +419,7 @@ GoogleString HackCacheDescriptor(StringPiece name) {
   // a few keywords out of this to understand the main pointers.
   static const char* kCacheKeywords[] = {
       "Compressed",    "Async",     "SharedMemCache", "LRUCache",
-      "MemcachedCache", "AprMemCache", "FileCache", "RedisCache"};
+      "MemcachedCache", "AprMemCache", "CycloneCache", "RedisCache"};
   const char* delim = "";
   for (int i = 0, n = arraysize(kCacheKeywords); i < n; ++i) {
     if (name.find(kCacheKeywords[i]) != StringPiece::npos) {

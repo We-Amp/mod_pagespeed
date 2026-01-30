@@ -63,14 +63,21 @@ cc_library(
 cc_library(
     name = "cyclone_wrapper",
     srcs = ["cyclone_wrapper.cc"],
-    copts = [
-        "-std=c++23",
-        "-Wno-deprecated-declarations",
-        # Force-include <expected> as cyclone headers use std::expected
-        # but don't always include the header directly.
-        "-include",
-        "expected",
-    ],
+    copts = select({
+        "@platforms//os:windows": [
+            "/std:c++latest",
+            # Force-include <expected> as cyclone headers use std::expected
+            "/FIexpected",
+        ],
+        "//conditions:default": [
+            "-std=c++23",
+            "-Wno-deprecated-declarations",
+            # Force-include <expected> as cyclone headers use std::expected
+            # but don't always include the header directly.
+            "-include",
+            "expected",
+        ],
+    }),
     visibility = ["//pagespeed/kernel/cache:__pkg__"],
     deps = [
         ":cyclone_wrapper_hdrs",

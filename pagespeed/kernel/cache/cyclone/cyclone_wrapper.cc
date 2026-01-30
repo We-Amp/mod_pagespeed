@@ -25,8 +25,11 @@
 
 #include "pagespeed/kernel/cache/cyclone/cyclone_wrapper.h"
 
+#include <atomic>
 #include <cstring>
+#include <limits>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -47,12 +50,26 @@ struct CycloneCacheHandle {
   bool running = false;
 };
 
-// Internal structure that holds a read handle and the data copy.
-// We copy the data to provide a stable pointer that remains valid
-// until the handle is closed.
+// Internal structure that holds a read handle with reference counting.
+// Supports both zero-copy (mmap'd) access and a lazy data copy for compatibility.
 struct CycloneReadHandle {
   cyclone::ReadHandle handle;
-  std::vector<char> data_copy;
+  mutable std::vector<char> data_copy;  // Lazy copy - only populated on demand
+  mutable std::once_flag data_copy_flag;  // Thread-safe one-time initialization
+  const char* mapped_ptr = nullptr;  // Direct pointer to mmap'd data (zero-copy)
+  size_t data_size = 0;              // Size of the data
+  std::atomic<int> refcount{1};      // Reference count, starts at 1
+
+  // Lazily initialize data_copy from the mmap'd data.
+  // Thread-safe: uses std::call_once to ensure initialization happens exactly once.
+  const char* get_data_copy() const {
+    std::call_once(data_copy_flag, [this]() {
+      if (mapped_ptr != nullptr && data_size > 0) {
+        data_copy.assign(mapped_ptr, mapped_ptr + data_size);
+      }
+    });
+    return data_copy.data();
+  }
 };
 
 // Helper to set the thread-local error message.
@@ -185,6 +202,13 @@ CycloneError cyclone_cache_read(CycloneCacheHandle* cache,
   uint64_t len = handle->handle.content_length();
   auto content = handle->handle.content();
 
+  // Check for integer overflow on 32-bit systems where size_t is 32 bits
+  if (len > std::numeric_limits<size_t>::max()) {
+    delete handle;
+    SetLastError("Content length exceeds maximum addressable size");
+    return CYCLONE_INVALID_ARGUMENT;
+  }
+
   // Use content_length() as the authoritative size, not content.size()
   // content.size() might return the internal buffer size, not the actual data size
   size_t actual_size = static_cast<size_t>(len);
@@ -192,25 +216,59 @@ CycloneError cyclone_cache_read(CycloneCacheHandle* cache,
     actual_size = content.size();  // Safety check
   }
 
-  // Copy the data to provide a stable pointer.
-  handle->data_copy.assign(
-      reinterpret_cast<const char*>(content.data()),
-      reinterpret_cast<const char*>(content.data()) + actual_size);
+  handle->data_size = actual_size;
+
+  // Store the mmap'd pointer for zero-copy access.
+  // This pointer is valid as long as the ReadHandle is open.
+  if (!content.empty()) {
+    handle->mapped_ptr = reinterpret_cast<const char*>(content.data());
+  }
+
+  // data_copy is lazily initialized only when cyclone_read_handle_data()
+  // is called. This avoids unnecessary copying on the zero-copy path.
 
   *out_handle = handle;
   return CYCLONE_OK;
 }
 
 const char* cyclone_read_handle_data(const CycloneReadHandle* handle) {
-  return handle ? handle->data_copy.data() : nullptr;
+  return handle ? handle->get_data_copy() : nullptr;
+}
+
+const char* cyclone_read_handle_mapped_data(const CycloneReadHandle* handle) {
+  return handle ? handle->mapped_ptr : nullptr;
+}
+
+int cyclone_read_handle_has_mapped_data(const CycloneReadHandle* handle) {
+  return (handle && handle->mapped_ptr != nullptr) ? 1 : 0;
 }
 
 size_t cyclone_read_handle_size(const CycloneReadHandle* handle) {
-  return handle ? handle->data_copy.size() : 0;
+  return handle ? handle->data_size : 0;
+}
+
+void cyclone_read_handle_ref(CycloneReadHandle* handle) {
+  if (handle) {
+    handle->refcount.fetch_add(1, std::memory_order_relaxed);
+  }
+}
+
+void cyclone_read_handle_unref(CycloneReadHandle* handle) {
+  if (handle) {
+    // Use acq_rel to ensure all accesses to handle data happen-before deletion
+    if (handle->refcount.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+      delete handle;
+    }
+  }
+}
+
+int cyclone_read_handle_refcount(const CycloneReadHandle* handle) {
+  return handle ? handle->refcount.load(std::memory_order_relaxed) : 0;
 }
 
 void cyclone_read_handle_close(CycloneReadHandle* handle) {
-  delete handle;
+  // Legacy API - equivalent to unref
+  cyclone_read_handle_unref(handle);
 }
 
 CycloneError cyclone_cache_write(CycloneCacheHandle* cache,

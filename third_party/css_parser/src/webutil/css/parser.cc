@@ -91,9 +91,9 @@ Parser::Parser(const char* utf8text)
       unparseable_sections_seen_mask_(kNoError) {}
 
 Parser::Parser(CssStringPiece s)
-    : begin_(s.begin()),
+    : begin_(s.data()),
       in_(begin_),
-      end_(s.end()),
+      end_(s.data() + s.size()),
       quirks_mode_(true),
       preservation_mode_(false),
       max_function_depth_(kDefaultMaxFunctionDepth),

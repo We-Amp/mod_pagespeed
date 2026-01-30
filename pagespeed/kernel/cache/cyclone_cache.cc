@@ -19,12 +19,24 @@
 
 #include "pagespeed/kernel/cache/cyclone_cache.h"
 
+#include "pagespeed/kernel/base/mapped_shared_string.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/cache/cyclone/cyclone_wrapper.h"
 
 namespace net_instaweb {
+
+namespace {
+
+// Release callback for MappedSharedString that unrefs the Cyclone read handle.
+// This is called when the last reference to the mapped value is released.
+void ReleaseReadHandle(void* user_data) {
+  CycloneReadHandle* handle = static_cast<CycloneReadHandle*>(user_data);
+  cyclone_read_handle_unref(handle);
+}
+
+}  // namespace
 
 // Statistics variable names
 const char CycloneCache::kHits[] = "cyclone_cache_hits";
@@ -114,16 +126,35 @@ void CycloneCache::Get(const GoogleString& key, Callback* callback) {
 
   if (err == CYCLONE_OK && read_handle != nullptr) {
     // Cache hit - get the data
-    const char* data = cyclone_read_handle_data(read_handle);
     size_t size = cyclone_read_handle_size(read_handle);
 
-    // Set the value in the callback
-    SharedString value;
-    value.Assign(StringPiece(data, size));
-    callback->set_value(value);
+    // Check if zero-copy mmap'd path is available
+    if (cyclone_read_handle_has_mapped_data(read_handle)) {
+      // Zero-copy path: create a MappedSharedString that holds a reference
+      // to the read handle. The handle will be released when all references
+      // to the MappedSharedString are gone.
+      const char* mapped_data = cyclone_read_handle_mapped_data(read_handle);
 
-    // Close the read handle
-    cyclone_read_handle_close(read_handle);
+      // Increment refcount since MappedSharedString will take ownership
+      cyclone_read_handle_ref(read_handle);
+
+      MappedSharedString mapped_value = MappedSharedString::FromMappedView(
+          mapped_data, size, ReleaseReadHandle, read_handle);
+      callback->set_value(mapped_value);
+
+      // Close our reference to the read handle (decrements refcount).
+      // The MappedSharedString still holds a reference.
+      cyclone_read_handle_close(read_handle);
+    } else {
+      // Fall back to the copied data (e.g., RAM cache hits may not have mmap)
+      const char* data = cyclone_read_handle_data(read_handle);
+      SharedString value;
+      value.Assign(StringPiece(data, size));
+      callback->set_value(value);
+
+      // Close the read handle
+      cyclone_read_handle_close(read_handle);
+    }
 
     // Update statistics
     hits_->Add(1);

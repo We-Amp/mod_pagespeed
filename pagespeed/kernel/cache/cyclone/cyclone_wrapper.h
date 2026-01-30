@@ -143,8 +143,10 @@ int cyclone_cache_is_running(const CycloneCacheHandle* cache);
 // Read a value from the cache.
 //
 // On success (CYCLONE_OK), *out_handle will be set to a read handle that
-// provides access to the cached data. The caller must close the handle
-// with cyclone_read_handle_close() when done.
+// provides access to the cached data. The handle is created with a reference
+// count of 1. Use cyclone_read_handle_ref() to increment and
+// cyclone_read_handle_unref() to decrement. The handle is automatically
+// closed when the reference count reaches zero.
 //
 // Returns CYCLONE_NOT_FOUND if the key does not exist.
 // Returns CYCLONE_NOT_INITIALIZED if the cache is not running.
@@ -154,18 +156,58 @@ CycloneError cyclone_cache_read(CycloneCacheHandle* cache,
 
 // Get a pointer to the data in a read handle.
 //
-// The pointer is valid until the handle is closed with
-// cyclone_read_handle_close().
+// The pointer is valid until the handle's reference count reaches zero.
+// This returns a pointer to a copy of the data (for backward compatibility).
+// For zero-copy access, use cyclone_read_handle_mapped_data().
 //
 // Returns NULL if the handle is NULL.
 const char* cyclone_read_handle_data(const CycloneReadHandle* handle);
+
+// Get a pointer to the memory-mapped data in a read handle (zero-copy).
+//
+// This returns a direct pointer to the mmap'd data, avoiding a copy.
+// The pointer is valid as long as the handle's reference count is > 0.
+// May return NULL if the data is not available via mmap (e.g., RAM cache hit).
+// In that case, fall back to cyclone_read_handle_data().
+//
+// Returns NULL if the handle is NULL or mmap is not available.
+const char* cyclone_read_handle_mapped_data(const CycloneReadHandle* handle);
+
+// Check if the read handle has memory-mapped data available.
+//
+// Returns 1 if cyclone_read_handle_mapped_data() will return non-NULL.
+// Returns 0 otherwise.
+int cyclone_read_handle_has_mapped_data(const CycloneReadHandle* handle);
 
 // Get the size of the data in a read handle.
 //
 // Returns 0 if the handle is NULL.
 size_t cyclone_read_handle_size(const CycloneReadHandle* handle);
 
-// Close a read handle and release its resources.
+// Increment the reference count on a read handle.
+//
+// This allows multiple holders to share a read handle. The handle remains
+// valid until all references are released via cyclone_read_handle_unref().
+void cyclone_read_handle_ref(CycloneReadHandle* handle);
+
+// Decrement the reference count on a read handle.
+//
+// When the reference count reaches zero, the handle is automatically closed
+// and its resources are released. After this call, if the refcount reached
+// zero, the handle is invalid and must not be used.
+//
+// It is safe to call this with a NULL handle.
+void cyclone_read_handle_unref(CycloneReadHandle* handle);
+
+// Get the current reference count of a read handle (for debugging).
+//
+// Returns 0 if the handle is NULL.
+int cyclone_read_handle_refcount(const CycloneReadHandle* handle);
+
+// Close a read handle and release its resources (legacy API).
+//
+// This is equivalent to cyclone_read_handle_unref() and is provided for
+// backward compatibility. New code should use the ref/unref API.
 //
 // After this call, the handle is invalid and must not be used.
 // It is safe to call this with a NULL handle.

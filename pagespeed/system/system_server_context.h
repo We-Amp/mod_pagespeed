@@ -88,6 +88,10 @@ class SystemServerContext : public ServerContext {
   // Initialize this SystemServerContext to set up its admin site.
   void PostInitHook() override;
 
+  // SystemServerContext doesn't proxy HTML by default. Subclasses like
+  // ApacheServerContext override this to return true when appropriate.
+  bool ProxiesHtml() const override { return false; }
+
   static void InitStats(Statistics* statistics);
 
   // Called by SystemRewriteDriverFactory::ChildInit.  See documentation there.

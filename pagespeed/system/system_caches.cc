@@ -50,7 +50,9 @@
 #include "pagespeed/kernel/cache/write_through_cache.h"
 #include "pagespeed/kernel/thread/queued_worker_pool.h"
 #include "pagespeed/kernel/thread/slow_worker.h"
+#if PAGESPEED_ENABLE_MEMCACHED
 #include "pagespeed/system/memcached_cache.h"
+#endif
 #include "pagespeed/system/external_server_spec.h"
 #include "pagespeed/system/redis_cache.h"
 #include "pagespeed/system/system_cache_path.h"
@@ -105,16 +107,20 @@ void SystemCaches::ShutDown(MessageHandler* message_handler) {
   // The alternative scenario of exiting with pending I/O will often
   // crash and always leak memory. Note that if memcached crashes, as
   // opposed to hanging, it will probably not appear wedged.
+#if PAGESPEED_ENABLE_MEMCACHED
   if (memcached_pool_) {
     memcached_pool_->InitiateShutDown();
   }
+#endif
   if (redis_pool_) {
     redis_pool_->InitiateShutDown();
   }
+#if PAGESPEED_ENABLE_MEMCACHED
   if (memcached_pool_) {
     memcached_pool_->WaitForShutDownComplete();
     memcached_pool_.reset(nullptr);
   }
+#endif
   if (redis_pool_) {
     redis_pool_->WaitForShutDownComplete();
     redis_pool_.reset(nullptr);
@@ -152,7 +158,6 @@ SystemCachePath* SystemCaches::GetCache(SystemRewriteOptions* config) {
     factory_->TakeOwnership(system_cache_path);
   } else {
     system_cache_path = iter->second;
-    system_cache_path->MergeConfig(config);
   }
   return system_cache_path;
 }
@@ -195,6 +200,7 @@ SystemCaches::ConstructExternalCacheInterfacesFromBlocking(
   return result;
 }
 
+#if PAGESPEED_ENABLE_MEMCACHED
 SystemCaches::ExternalCacheInterfaces SystemCaches::NewMemcached(
     SystemRewriteOptions* config) {
   const ExternalClusterSpec& servers_specs = config->memcached_servers();
@@ -233,6 +239,7 @@ SystemCaches::ExternalCacheInterfaces SystemCaches::NewMemcached(
         kMemcachedAsync, kMemcachedBlocking);
   }
 }
+#endif  // PAGESPEED_ENABLE_MEMCACHED
 
 SystemCaches::ExternalCacheInterfaces SystemCaches::NewRedis(
     SystemRewriteOptions* config) {
@@ -269,6 +276,7 @@ SystemCaches::ExternalCacheInterfaces SystemCaches::NewRedis(
 SystemCaches::ExternalCacheInterfaces SystemCaches::NewExternalCache(
     SystemRewriteOptions* config) {
   bool use_redis = !config->redis_server().empty();
+#if PAGESPEED_ENABLE_MEMCACHED
   bool use_memcached = !config->memcached_servers().empty();
 
   if (use_redis && use_memcached) {
@@ -278,6 +286,10 @@ SystemCaches::ExternalCacheInterfaces SystemCaches::NewExternalCache(
         "Redis and ignore Memcached");
     use_memcached = false;
   }
+#else
+  // Memcached is not available on this platform.
+  bool use_memcached = false;
+#endif
 
   // Some unique signature to distinguish server configurations.
   GoogleString spec_signature;
@@ -288,10 +300,12 @@ SystemCaches::ExternalCacheInterfaces SystemCaches::NewExternalCache(
                IntegerToString(config->redis_reconnection_delay_ms()), ";",
                IntegerToString(config->redis_timeout_us()), ";",
                IntegerToString(config->redis_ttl_sec()));
+#if PAGESPEED_ENABLE_MEMCACHED
   } else if (use_memcached) {
     spec_signature = StrCat("m;", config->memcached_servers().ToString(), ";",
                             IntegerToString(config->memcached_threads()), ";",
                             IntegerToString(config->memcached_timeout_us()));
+#endif
   } else {
     return ExternalCacheInterfaces();
   }
@@ -304,14 +318,17 @@ SystemCaches::ExternalCacheInterfaces SystemCaches::NewExternalCache(
     // Was not in the map, should construct new one and store it.
     if (use_redis) {
       iterator->second = NewRedis(config);
+#if PAGESPEED_ENABLE_MEMCACHED
     } else if (use_memcached) {
       iterator->second = NewMemcached(config);
+#endif
     }
   }
 
   // Some per-VirtualHost modifications follow, we do not want to store them in
   // map.
   ExternalCacheInterfaces result = iterator->second;
+#if PAGESPEED_ENABLE_MEMCACHED
   if (use_memcached) {
     // Note that a distinct FallbackCache gets created for every VirtualHost
     // that employs memcached, even if the memcached and file-cache
@@ -334,6 +351,7 @@ SystemCaches::ExternalCacheInterfaces SystemCaches::NewExternalCache(
                                         factory_->message_handler());
     factory_->TakeOwnership(result.blocking);
   }
+#endif
   return result;
 }
 
@@ -617,46 +635,14 @@ void SystemCaches::RegisterConfig(SystemRewriteOptions* config) {
 }
 
 void SystemCaches::RootInit() {
-  const SystemRewriteOptions* global_options =
-      SystemRewriteOptions::DynamicCast(factory_->default_options());
   for (MetadataShmCacheMap::iterator p = metadata_shm_caches_.begin(),
                                      e = metadata_shm_caches_.end();
        p != e; ++p) {
     MetadataShmCacheInfo* cache_info = p->second;
 
-    // If we're using the default shared memory cache and different vhosts have
-    // set the FileCachePath differently, then where should we store the
-    // snapshots?  There's no good answer here, because the FileCachePath is the
-    // only path like this we require people to specify.  To handle this,
-    // SetPathForSnapshots expects to be called multiple times and uses the file
-    // cache matching its configured path, or if none match then whichever value
-    // comes first alphabetically.
-    //
-    // We don't need separate directories here for explicit and default shm
-    // caches, because if you set an explicit shm cache for a file cache path we
-    // don't create a default one for vhosts using that path.
-    //
-    // Note: we couldn't set the FileCache when constructing the shm cache
-    // because at the time we parsed the directive to construct the shm cache
-    // we might not have seen the file cache directive yet.
-    //
-    // Tell the shm cache about file caches and let it pick one to use for
-    // checkpointing.
-    for (PathCacheMap::iterator q = path_cache_map_.begin(),
-                                f = path_cache_map_.end();
-         q != f; ++q) {
-      FileCache* file_cache = q->second->file_cache_backend();
-      // file_cache_backend() returns nullptr when using CycloneCache instead
-      // of FileCache. Skip registering snapshot file cache in that case.
-      if (file_cache == nullptr) {
-        continue;
-      }
-      // It's fine to call RegisterSnapshotFileCache multiple times: it
-      // considers all the inputs and picks the best one.
-      cache_info->cache_backend->RegisterSnapshotFileCache(
-          file_cache,
-          global_options->shm_metadata_cache_checkpoint_interval_sec());
-    }
+    // CycloneCache replaces FileCache, so snapshot-based checkpointing via
+    // RegisterSnapshotFileCache is no longer available. The SHM cache will
+    // still function but won't persist across restarts.
 
     if (cache_info->cache_backend->Initialize()) {
       cache_info->initialized = true;
@@ -710,6 +696,7 @@ void SystemCaches::ChildInit() {
 
   // TODO(yeputons): think about moving StartUp() to some base class of
   // RedisCache and MemcachedCache and collapsing these two loops into one.
+#if PAGESPEED_ENABLE_MEMCACHED
   for (int i = 0, n = memcache_servers_.size(); i < n; ++i) {
     MemcachedCache* mem_cache = memcache_servers_[i];
     // TODO(yeputons): looks like this line does not really "connect", but just
@@ -720,6 +707,7 @@ void SystemCaches::ChildInit() {
       abort();  // TODO(jmarantz): is there a better way to exit?
     }
   }
+#endif
 
   for (RedisCache* redis_cache : redis_servers_) {
     redis_cache->StartUp();
@@ -747,14 +735,18 @@ void SystemCaches::StopCacheActivity() {
 }
 
 void SystemCaches::InitStats(Statistics* statistics) {
-  MemcachedCache::InitStats(statistics);
-  CycloneCache::InitStats(statistics);
   FileCache::InitStats(statistics);
+#if PAGESPEED_ENABLE_MEMCACHED
+  MemcachedCache::InitStats(statistics);
+#endif
+  CycloneCache::InitStats(statistics);
   CacheStats::InitStats(SystemCachePath::kFileCache, statistics);
   CacheStats::InitStats(SystemCachePath::kLruCache, statistics);
   CacheStats::InitStats(kShmCache, statistics);
+#if PAGESPEED_ENABLE_MEMCACHED
   CacheStats::InitStats(kMemcachedAsync, statistics);
   CacheStats::InitStats(kMemcachedBlocking, statistics);
+#endif
   CacheStats::InitStats(kRedisAsync, statistics);
   CacheStats::InitStats(kRedisBlocking, statistics);
   CompressedCache::InitStats(statistics);
@@ -780,6 +772,7 @@ void SystemCaches::PrintCacheStats(StatFlags flags, GoogleString* out) {
     }
   }
 
+#if PAGESPEED_ENABLE_MEMCACHED
   if (flags & kIncludeMemcached) {
     for (int i = 0, n = memcache_servers_.size(); i < n; ++i) {
       MemcachedCache* mem_cache = memcache_servers_[i];
@@ -789,6 +782,7 @@ void SystemCaches::PrintCacheStats(StatFlags flags, GoogleString* out) {
       }
     }
   }
+#endif
 
   if (flags & kIncludeRedis) {
     for (RedisCache* redis : redis_servers_) {

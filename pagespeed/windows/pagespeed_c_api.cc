@@ -29,11 +29,14 @@
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "pagespeed/kernel/base/google_message_handler.h"
 #include "pagespeed/kernel/base/message_handler.h"
+#include "pagespeed/kernel/base/null_mutex.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/string_writer.h"
 #include "pagespeed/kernel/http/google_url.h"
+#include "pagespeed/kernel/http/http_options.h"
 #include "pagespeed/kernel/http/request_headers.h"
+#include "pagespeed/opt/http/request_context.h"
 #include "pagespeed/system/system_rewrite_driver_factory.h"
 #include "pagespeed/system/system_rewrite_options.h"
 #include "pagespeed/system/system_server_context.h"
@@ -55,7 +58,7 @@ struct pagespeed_instance {
 
 struct pagespeed_request {
   pagespeed_instance* instance;
-  net_instaweb::GoogleString url;
+  GoogleString url;
   net_instaweb::RequestHeaders request_headers;
 };
 
@@ -112,7 +115,7 @@ int pagespeed_set_option(pagespeed_t ps, const char* name, const char* value) {
   }
   net_instaweb::RewriteOptions* options =
       ps->server_context->global_options()->Clone();
-  net_instaweb::GoogleString msg;
+  GoogleString msg;
   net_instaweb::RewriteOptions::OptionSettingResult result =
       options->ParseAndSetOptionFromName1(name, value, &msg,
                                           &ps->handler);
@@ -150,12 +153,18 @@ int pagespeed_rewrite_html(pagespeed_request_t req, const char* html_in,
     return PAGESPEED_ERROR;
   }
 
-  net_instaweb::GoogleString output;
+  GoogleString output;
   net_instaweb::StringWriter writer(&output);
 
+  // Create a RequestContext for this request.
+  net_instaweb::RequestContextPtr request_context(
+      new net_instaweb::RequestContext(
+          net_instaweb::kDefaultHttpOptionsForTests,
+          new net_instaweb::NullMutex(),
+          req->instance->factory->timer()));
+
   net_instaweb::RewriteDriver* driver =
-      req->instance->server_context->NewRewriteDriver(
-          req->instance->server_context->global_options()->Clone());
+      req->instance->server_context->NewRewriteDriver(request_context);
   driver->SetRequestHeaders(req->request_headers);
 
   net_instaweb::GoogleUrl gurl(req->url);
@@ -166,7 +175,7 @@ int pagespeed_rewrite_html(pagespeed_request_t req, const char* html_in,
 
   driver->SetWriter(&writer);
   driver->StartParse(gurl.Spec());
-  driver->ParseText(net_instaweb::StringPiece(html_in, html_in_len));
+  driver->ParseText(StringPiece(html_in, html_in_len));
   driver->FinishParse();
 
   // Copy output to a C-allocated buffer.

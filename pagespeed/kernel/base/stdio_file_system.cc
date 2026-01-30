@@ -20,16 +20,17 @@
 #include "pagespeed/kernel/base/stdio_file_system.h"
 
 #include <sys/stat.h>
-#include <utime.h>
-
 #include <cerrno>
+
 #ifdef WIN32
+#include <sys/utime.h>
 #include <direct.h>
 #include <io.h>
 #include <stdio.h>
 #include <string.h>
 #include <windows.h>
 #else
+#include <utime.h>
 #include <dirent.h>
 #include <unistd.h>
 #endif  // WIN32
@@ -333,26 +334,33 @@ FileSystem::OutputFile* StdioFileSystem::OpenTempFileHelper(
   char* template_name = new char[prefix_len + sizeof(mkstemp_hook)];
   memcpy(template_name, prefix.data(), prefix_len);
   memcpy(template_name + prefix_len, mkstemp_hook, sizeof(mkstemp_hook));
+  OutputFile* output_file = nullptr;
 #ifdef WIN32
-  int fd = _mktemp_s(template_name, prefix_len + sizeof(mkstemp_hook));
+  // _mktemp_s() only generates a unique filename, it doesn't open the file.
+  // It returns 0 on success (not a file descriptor like mkstemp).
+  errno_t err = _mktemp_s(template_name, prefix_len + sizeof(mkstemp_hook));
+  if (err != 0) {
+    message_handler->Error(template_name, 0, "generating temp filename: %s",
+                           strerror(err));
+  } else {
+    // Now open the file with the generated unique name
+    FILE* f = fopen(template_name, "w");
+    if (f == nullptr) {
+      message_handler->Error(template_name, 0, "opening temp file: %s",
+                             strerror(errno));
+    } else {
+      output_file = new StdioOutputFile(f, template_name, this);
+    }
+  }
 #else
   int fd = mkstemp(template_name);
-#endif  // WIN32
-  OutputFile* output_file = nullptr;
   if (fd < 0) {
     message_handler->Error(template_name, 0, "opening temp file: %s",
                            strerror(errno));
   } else {
-#ifdef WIN32
-    FILE* f = _fdopen(fd, "w");
-    if (f == NULL) {
-      _close(fd);
-#else
     FILE* f = fdopen(fd, "w");
     if (f == nullptr) {
       close(fd);
-#endif
-
       // If we failed to open the temp file, silently clean it before returning.
       message_handler->Error(template_name, 0, "re-opening temp file: %s",
                              strerror(errno));
@@ -362,6 +370,7 @@ FileSystem::OutputFile* StdioFileSystem::OpenTempFileHelper(
       output_file = new StdioOutputFile(f, template_name, this);
     }
   }
+#endif  // WIN32
 
   delete[] template_name;
   return output_file;

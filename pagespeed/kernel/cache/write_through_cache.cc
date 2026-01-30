@@ -57,7 +57,7 @@ class WriteThroughCallback : public CacheInterface::Callback {
   void Done(CacheInterface::KeyState state) override {
     if (state == CacheInterface::kAvailable) {
       if (trying_cache2_) {
-        write_through_cache_->PutInCache1(key_, value());
+        write_through_cache_->PutInCache1(key_, value().ToOwned());
       }
       callback_->DelegatedDone(state);
       delete this;
