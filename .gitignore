@@ -19,3 +19,15 @@ external/
 compile_commands.json
 clang.bazelrc
 .vscode/*.log
+build/lastchange.sh
+.claude/settings.local.json
+
+# Development scripts
+fix-ssh.ps1
+sshfix.bat
+llvm.sh
+
+# Temp files
+nul
+*.log
+!.vscode/*.log

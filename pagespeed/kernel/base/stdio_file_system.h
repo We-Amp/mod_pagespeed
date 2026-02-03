@@ -66,16 +66,6 @@ class StdioFileSystem : public FileSystem {
   BoolOrError Exists(const char* path, MessageHandler* handler) override;
   BoolOrError IsDir(const char* path, MessageHandler* handler) override;
 
-  BoolOrError TryLock(const StringPiece& lock_name,
-                      MessageHandler* handler) override;
-  BoolOrError TryLockWithTimeout(const StringPiece& lock_name, int64 timeout_ms,
-                                 const Timer* timer,
-                                 MessageHandler* handler) override;
-  bool BumpLockTimeout(const StringPiece& lock_name,
-                       MessageHandler* handler) override;
-
-  bool Unlock(const StringPiece& lock_name, MessageHandler* handler) override;
-
   InputFile* Stdin();
   OutputFile* Stdout();
   OutputFile* Stderr();

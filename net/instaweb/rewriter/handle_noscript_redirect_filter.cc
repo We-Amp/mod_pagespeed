@@ -65,14 +65,16 @@ void HandleNoscriptRedirectFilter::EndElement(HtmlElement* element) {
     // We insert the <link rel=canonical href=original_url> at the end of the
     // first head, if the first head did not already contain a
     // <link rel=canonical href=...>
-    // TODO(sriharis):  Get the query param stripped in driver in apache.
+    // Use AllExceptQuery() to strip PageSpeed-added query params like
+    // ?PageSpeed=noscript from the canonical URL.
     // TODO(sriharis):  Should we check all heads for
     // <link rel=canonical href=...> ?   If we want to do this then if there is
     // no such element, to insert our link element we might need to add a head
     // (since all heads might have been flushed already).
     HtmlCharactersNode* link_node = rewrite_driver_->NewCharactersNode(
         element,
-        absl::StrFormat(kLinkRelCanonicalFormatter, rewrite_driver_->url()));
+        absl::StrFormat(kLinkRelCanonicalFormatter,
+                        rewrite_driver_->google_url().AllExceptQuery()));
     rewrite_driver_->AppendChild(element, link_node);
     canonical_inserted_ = true;
   }

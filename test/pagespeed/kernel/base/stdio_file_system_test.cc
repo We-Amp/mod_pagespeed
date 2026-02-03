@@ -156,10 +156,4 @@ TEST_F(StdioFileSystemTest, TestMtime) { TestMtime(); }
 
 TEST_F(StdioFileSystemTest, TestDirInfo) { TestDirInfo(); }
 
-TEST_F(StdioFileSystemTest, TestLock) { TestLock(); }
-
-TEST_F(StdioFileSystemTest, TestLockTimeout) { TestLockTimeout(); }
-
-TEST_F(StdioFileSystemTest, TestLockBumping) { TestLockBumping(); }
-
 }  // namespace net_instaweb

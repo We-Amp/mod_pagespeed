@@ -438,8 +438,6 @@ class RewriteOptions {
   static const char kCompressMetadataCache[];
   static const char kFetcherProxy[];
   static const char kFetchHttps[];
-  static const char kFileCacheCleanInodeLimit[];
-  static const char kFileCacheCleanIntervalMs[];
   static const char kFileCacheCleanSizeKb[];
   static const char kFileCachePath[];
   static const char kLogDir[];
@@ -3107,6 +3105,15 @@ class RewriteOptions {
 
   // Marks the config as modified.
   void Modify();
+
+  // Clears the frozen and modified state. Called by derived class Clone()
+  // implementations after Merge() to ensure the cloned options are mutable.
+  // This is necessary because the source options may be frozen, but cloned
+  // options should always be unfrozen to allow configuration modifications.
+  void ClearFrozenAndModified() {
+    frozen_ = false;
+    modified_ = false;
+  }
 
   // Sets the global default value for 'x_header_value'.  Note that setting
   // this Option reaches through to the underlying property and sets the

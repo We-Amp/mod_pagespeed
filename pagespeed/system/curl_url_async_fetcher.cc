@@ -36,6 +36,36 @@
 #include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/http/response_headers.h"
 
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+
+namespace {
+void CurlFetchDebugLog(const char* msg) {
+  HANDLE hFile = CreateFileA(
+      "C:\\inetpub\\pagespeed\\curl_fetch_debug.log",
+      FILE_APPEND_DATA,
+      FILE_SHARE_READ | FILE_SHARE_WRITE,
+      NULL,
+      OPEN_ALWAYS,
+      FILE_ATTRIBUTE_NORMAL,
+      NULL);
+  if (hFile != INVALID_HANDLE_VALUE) {
+    DWORD written;
+    WriteFile(hFile, msg, strlen(msg), &written, NULL);
+    WriteFile(hFile, "\r\n", 2, &written, NULL);
+    CloseHandle(hFile);
+  }
+}
+}  // namespace
+#else
+namespace {
+void CurlFetchDebugLog(const char*) {}
+}  // namespace
+#endif
+
 namespace net_instaweb {
 
 const char CurlStats::kCurlFetchRequestCount[] = "curl_fetch_request_count";
@@ -178,6 +208,11 @@ void CurlUrlAsyncFetcher::ShutDown() {
 void CurlUrlAsyncFetcher::Fetch(const GoogleString& url,
                                 MessageHandler* message_handler,
                                 AsyncFetch* async_fetch) {
+  char buf[512];
+  snprintf(buf, sizeof(buf), "CurlUrlAsyncFetcher::Fetch called for url=%s",
+           url.c_str());
+  CurlFetchDebugLog(buf);
+
   if (shutdown_) {
     message_handler->Message(
         kWarning, "CurlUrlAsyncFetcher is shut down, cannot fetch: %s",
@@ -186,9 +221,53 @@ void CurlUrlAsyncFetcher::Fetch(const GoogleString& url,
     return;
   }
 
+  // On Windows/IIS, handle localhost URLs via file system to avoid
+  // self-referential fetch deadlock. The IIS module handles requests
+  // single-threaded per worker, so fetching from localhost via HTTP
+  // while a request is in progress will deadlock.
+#ifdef _WIN32
+  if (StringCaseStartsWith(url, "http://localhost") ||
+      StringCaseStartsWith(url, "http://127.0.0.1") ||
+      StringCaseStartsWith(url, "http://[::1]")) {
+    CurlFetchDebugLog("Attempting file system fallback for localhost URL");
+
+    // Try to read from file system if document_root is configured
+    if (!document_root_.empty()) {
+      GoogleString file_path;
+      if (LocalhostUrlToFilePath(url, &file_path)) {
+        char path_buf[512];
+        snprintf(path_buf, sizeof(path_buf), "Trying file path: %s",
+                 file_path.c_str());
+        CurlFetchDebugLog(path_buf);
+
+        if (ReadLocalFile(file_path, url, async_fetch, message_handler)) {
+          CurlFetchDebugLog("File read succeeded");
+          if (request_count_ != nullptr) {
+            request_count_->Add(1);
+          }
+          return;
+        }
+        CurlFetchDebugLog("File read failed, falling back to 404");
+      }
+    }
+
+    // Fallback to 404 if file system read fails
+    CurlFetchDebugLog("Skipping localhost URL (no file system fallback available)");
+    message_handler->Message(kWarning,
+                             "Cannot fetch localhost URL: %s",
+                             url.c_str());
+    async_fetch->response_headers()->set_status_code(HttpStatus::kNotFound);
+    async_fetch->HeadersComplete();
+    async_fetch->Done(false);
+    if (failure_count_ != nullptr) {
+      failure_count_->Add(1);
+    }
+    return;
+  }
+#endif
+
   // Reject HTTPS URLs when HTTPS is not enabled
-  if (!allow_https() && url.length() >= 6 &&
-      strncasecmp(url.c_str(), "https:", 6) == 0) {
+  if (!allow_https() && StringCaseStartsWith(url, "https:")) {
     message_handler->Message(kWarning,
                              "HTTPS fetching is disabled, cannot fetch: %s",
                              url.c_str());
@@ -228,15 +307,24 @@ void CurlUrlAsyncFetcher::Fetch(const GoogleString& url,
 }
 
 void CurlUrlAsyncFetcher::PollLoop() {
+  CurlFetchDebugLog("PollLoop: thread started");
+  int loop_count = 0;
   while (!shutdown_) {
     // Move pending fetches to active
+    int moved = 0;
     {
       ScopedMutex lock(mutex_);
       while (!pending_fetches_.empty()) {
         CurlFetch* fetch = pending_fetches_.RemoveOldest();
         active_fetches_.Add(fetch);
         curl_multi_add_handle(multi_handle_, fetch->curl_handle());
+        moved++;
       }
+    }
+    if (moved > 0) {
+      char buf[256];
+      snprintf(buf, sizeof(buf), "PollLoop: moved %d pending to active", moved);
+      CurlFetchDebugLog(buf);
     }
 
     // Drive transfers
@@ -254,6 +342,11 @@ void CurlUrlAsyncFetcher::PollLoop() {
         curl_easy_getinfo(easy, CURLINFO_PRIVATE, &fetch);
         curl_multi_remove_handle(multi_handle_, easy);
 
+        char buf[256];
+        snprintf(buf, sizeof(buf), "PollLoop: fetch complete result=%d",
+                 static_cast<int>(msg->data.result));
+        CurlFetchDebugLog(buf);
+
         {
           ScopedMutex lock(mutex_);
           active_fetches_.Remove(fetch);
@@ -266,7 +359,16 @@ void CurlUrlAsyncFetcher::PollLoop() {
     // Wait for activity or 100ms timeout
     int numfds;
     curl_multi_poll(multi_handle_, nullptr, 0, 100, &numfds);
+
+    // Periodic status log (every 100 loops = ~10 seconds)
+    if (++loop_count % 100 == 0) {
+      char buf[256];
+      snprintf(buf, sizeof(buf), "PollLoop: loop=%d still_running=%d",
+               loop_count, still_running);
+      CurlFetchDebugLog(buf);
+    }
   }
+  CurlFetchDebugLog("PollLoop: shutting down");
 
   // Drain pending fetches (under lock) then cancel them (without lock)
   std::vector<CurlFetch*> to_cancel;
@@ -428,5 +530,157 @@ void CurlUrlAsyncFetcher::ReportFetchSuccessStats(
     }
   }
 }
+
+#ifdef _WIN32
+bool CurlUrlAsyncFetcher::LocalhostUrlToFilePath(const GoogleString& url,
+                                                  GoogleString* file_path) const {
+  // Parse localhost URL to extract path
+  // Expected formats:
+  //   http://localhost:8080/path/to/file
+  //   http://127.0.0.1:8080/path/to/file
+  //   http://localhost/path/to/file (without port)
+
+  // Find the path part (after host:port)
+  size_t start = 0;
+  if (StringCaseStartsWith(url, "http://")) {
+    start = 7;
+  } else if (StringCaseStartsWith(url, "https://")) {
+    start = 8;
+  } else {
+    return false;
+  }
+
+  // Find the end of host:port (first / after protocol)
+  size_t path_start = url.find('/', start);
+  if (path_start == GoogleString::npos) {
+    return false;
+  }
+
+  StringPiece url_path(url.data() + path_start, url.size() - path_start);
+
+  // Remove query string if present
+  size_t query_pos = url_path.find('?');
+  if (query_pos != StringPiece::npos) {
+    url_path = url_path.substr(0, query_pos);
+  }
+
+  // Convert URL path to file system path
+  // Replace / with \ for Windows
+  GoogleString path_str(url_path.data(), url_path.size());
+  for (size_t i = 0; i < path_str.size(); ++i) {
+    if (path_str[i] == '/') {
+      path_str[i] = '\\';
+    }
+  }
+
+  // Combine with document root
+  *file_path = document_root_;
+  if (!file_path->empty() && file_path->back() != '\\' && !path_str.empty() && path_str[0] != '\\') {
+    *file_path += "\\";
+  }
+  *file_path += path_str;
+
+  return true;
+}
+
+bool CurlUrlAsyncFetcher::ReadLocalFile(const GoogleString& file_path,
+                                        const GoogleString& url,
+                                        AsyncFetch* async_fetch,
+                                        MessageHandler* handler) const {
+  char buf[512];
+  snprintf(buf, sizeof(buf), "ReadLocalFile: opening %s", file_path.c_str());
+  CurlFetchDebugLog(buf);
+
+  // Open the file
+  HANDLE hFile = CreateFileA(
+      file_path.c_str(),
+      GENERIC_READ,
+      FILE_SHARE_READ,
+      NULL,
+      OPEN_EXISTING,
+      FILE_ATTRIBUTE_NORMAL,
+      NULL);
+
+  if (hFile == INVALID_HANDLE_VALUE) {
+    DWORD error = GetLastError();
+    snprintf(buf, sizeof(buf), "ReadLocalFile: failed to open, error=%lu", error);
+    CurlFetchDebugLog(buf);
+    return false;
+  }
+
+  // Get file size
+  LARGE_INTEGER file_size;
+  if (!GetFileSizeEx(hFile, &file_size)) {
+    CloseHandle(hFile);
+    CurlFetchDebugLog("ReadLocalFile: failed to get file size");
+    return false;
+  }
+
+  // Read file content
+  std::vector<char> content(static_cast<size_t>(file_size.QuadPart));
+  DWORD bytes_read;
+  if (!ReadFile(hFile, content.data(), static_cast<DWORD>(content.size()),
+                &bytes_read, NULL) || bytes_read != content.size()) {
+    CloseHandle(hFile);
+    CurlFetchDebugLog("ReadLocalFile: failed to read file");
+    return false;
+  }
+  CloseHandle(hFile);
+
+  snprintf(buf, sizeof(buf), "ReadLocalFile: read %lu bytes", bytes_read);
+  CurlFetchDebugLog(buf);
+
+  // Determine content type from file extension
+  GoogleString content_type = "application/octet-stream";
+  size_t dot_pos = file_path.rfind('.');
+  if (dot_pos != GoogleString::npos) {
+    GoogleString ext = file_path.substr(dot_pos + 1);
+    // Convert to lowercase
+    for (size_t i = 0; i < ext.size(); ++i) {
+      ext[i] = tolower(ext[i]);
+    }
+
+    if (ext == "jpg" || ext == "jpeg") {
+      content_type = "image/jpeg";
+    } else if (ext == "png") {
+      content_type = "image/png";
+    } else if (ext == "gif") {
+      content_type = "image/gif";
+    } else if (ext == "webp") {
+      content_type = "image/webp";
+    } else if (ext == "css") {
+      content_type = "text/css";
+    } else if (ext == "js") {
+      content_type = "application/javascript";
+    } else if (ext == "html" || ext == "htm") {
+      content_type = "text/html";
+    } else if (ext == "pdf") {
+      content_type = "application/pdf";
+    } else if (ext == "svg") {
+      content_type = "image/svg+xml";
+    } else if (ext == "ico") {
+      content_type = "image/x-icon";
+    }
+  }
+
+  snprintf(buf, sizeof(buf), "ReadLocalFile: content_type=%s", content_type.c_str());
+  CurlFetchDebugLog(buf);
+
+  // Set response headers
+  async_fetch->response_headers()->set_status_code(200);
+  async_fetch->response_headers()->Add("Content-Type", content_type);
+  async_fetch->response_headers()->Add("Content-Length",
+      IntegerToString(static_cast<int64>(content.size())));
+  async_fetch->HeadersComplete();
+
+  // Write content
+  if (!content.empty()) {
+    async_fetch->Write(StringPiece(content.data(), content.size()), handler);
+  }
+
+  async_fetch->Done(true);
+  return true;
+}
+#endif  // _WIN32
 
 }  // namespace net_instaweb

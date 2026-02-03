@@ -55,8 +55,6 @@ class HtmlAttributeQuoteRemoval : public EmptyHtmlFilter {
  private:
   int total_quotes_removed_;
   HtmlParse* html_parse_;
-  bool needs_no_quotes_[256];  // lookup chars for quotability
-  // should be const, but C++ initializer rules are broken.
 
   DISALLOW_COPY_AND_ASSIGN(HtmlAttributeQuoteRemoval);
 };

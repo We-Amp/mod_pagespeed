@@ -1,5 +1,4 @@
-load("@rules_proto//proto:defs.bzl", "proto_library")
-load("@rules_cc//cc:defs.bzl", "cc_library", "cc_proto_library")
+load("@rules_cc//cc:defs.bzl", "cc_library")
 
 licenses(["notice"])  # Apache 2
 
@@ -31,19 +30,8 @@ cc_library(
     }),
     visibility = ["//visibility:public"],
     deps = [
-        ":shared_mem_cache_shapshot_proto_cc",
         "//pagespeed/kernel/base:pagespeed_base",
         "//pagespeed/kernel/cache",
         "//pagespeed/kernel/util",
     ],
-)
-
-proto_library(
-    name = "shared_mem_cache_shapshot_proto",
-    srcs = ["shared_mem_cache_snapshot.proto"],
-)
-
-cc_proto_library(
-    name = "shared_mem_cache_shapshot_proto_cc",
-    deps = [":shared_mem_cache_shapshot_proto"],
 )

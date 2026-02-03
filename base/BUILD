@@ -9,6 +9,5 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "@com_github_gabime_spdlog//:spdlog",
-        "@glog",
     ],
 )

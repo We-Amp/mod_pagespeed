@@ -419,11 +419,17 @@ void RewriteDriver::AddPreRenderFilters() {
     // that's necessary
     AppendOwnedPreRenderFilter(new ElideAttributesFilter(this));
   }
-  if (rewrite_options->Enabled(RewriteOptions::kExtendCacheCss) ||
-      rewrite_options->Enabled(RewriteOptions::kExtendCacheImages) ||
-      rewrite_options->Enabled(RewriteOptions::kExtendCachePdfs) ||
-      rewrite_options->Enabled(RewriteOptions::kExtendCacheScripts)) {
+  bool ext_cache_css = rewrite_options->Enabled(RewriteOptions::kExtendCacheCss);
+  bool ext_cache_img = rewrite_options->Enabled(RewriteOptions::kExtendCacheImages);
+  bool ext_cache_pdf = rewrite_options->Enabled(RewriteOptions::kExtendCachePdfs);
+  bool ext_cache_js = rewrite_options->Enabled(RewriteOptions::kExtendCacheScripts);
+  LOG(INFO) << "AddPreRenderFilters: ext_cache_css=" << ext_cache_css
+            << " ext_cache_img=" << ext_cache_img
+            << " ext_cache_pdf=" << ext_cache_pdf
+            << " ext_cache_js=" << ext_cache_js;
+  if (ext_cache_css || ext_cache_img || ext_cache_pdf || ext_cache_js) {
     // Extend the cache lifetime of resources.
+    LOG(INFO) << "AddPreRenderFilters: Enabling CacheExtender filter";
     EnableRewriteFilter(RewriteOptions::kCacheExtenderId);
   }
   if (rewrite_options->Enabled(RewriteOptions::kSpriteImages)) {

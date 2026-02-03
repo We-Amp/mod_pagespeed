@@ -45,6 +45,36 @@
 #include "pagespeed/kernel/http/request_headers.h"
 #include "pagespeed/kernel/http/response_headers.h"
 
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+
+namespace {
+void CacheableResourceDebugLog(const char* msg) {
+  HANDLE hFile = CreateFileA(
+      "C:\\inetpub\\pagespeed\\cacheable_resource_debug.log",
+      FILE_APPEND_DATA,
+      FILE_SHARE_READ | FILE_SHARE_WRITE,
+      NULL,
+      OPEN_ALWAYS,
+      FILE_ATTRIBUTE_NORMAL,
+      NULL);
+  if (hFile != INVALID_HANDLE_VALUE) {
+    DWORD written;
+    WriteFile(hFile, msg, strlen(msg), &written, NULL);
+    WriteFile(hFile, "\r\n", 2, &written, NULL);
+    CloseHandle(hFile);
+  }
+}
+}  // namespace
+#else
+namespace {
+void CacheableResourceDebugLog(const char*) {}
+}  // namespace
+#endif
+
 namespace net_instaweb {
 
 namespace {
@@ -434,6 +464,12 @@ CacheableResourceBase::LoadHttpCacheCallback::~LoadHttpCacheCallback() {}
 
 void CacheableResourceBase::LoadHttpCacheCallback::Done(
     HTTPCache::FindResult find_result) {
+  char buf[512];
+  snprintf(buf, sizeof(buf), "LoadHttpCacheCallback::Done: url=%s status=%d failure_details=%d",
+           resource_->url().c_str(), static_cast<int>(find_result.status),
+           static_cast<int>(find_result.failure_details));
+  CacheableResourceDebugLog(buf);
+
   MessageHandler* handler = resource_->message_handler();
 
   // Note, we pass lock_failure==false to the resource callbacks
@@ -444,6 +480,7 @@ void CacheableResourceBase::LoadHttpCacheCallback::Done(
   // should not delete it if they fail to lock.
   switch (find_result.status) {
     case HTTPCache::kFound:
+      CacheableResourceDebugLog("LoadHttpCacheCallback::Done: kFound - cache hit");
       resource_->hits_->Add(1);
       resource_->Link(http_value(), handler);
       resource_->response_headers()->CopyFrom(*response_headers());
@@ -483,6 +520,7 @@ void CacheableResourceBase::LoadHttpCacheCallback::Done(
       }
       break;
     case HTTPCache::kNotFound:
+      CacheableResourceDebugLog("LoadHttpCacheCallback::Done: kNotFound - cache miss, will fetch");
       resource_->misses_->Add(1);
       // If not, load it asynchronously.
       // Link the fallback value which can be used if the fetch fails.
@@ -494,9 +532,15 @@ void CacheableResourceBase::LoadHttpCacheCallback::Done(
 }
 
 void CacheableResourceBase::LoadHttpCacheCallback::LoadAndSaveToCache() {
+  char buf[512];
+  snprintf(buf, sizeof(buf), "LoadAndSaveToCache: url=%s is_background=%d",
+           resource_->url().c_str(), resource_->is_background_fetch() ? 1 : 0);
+  CacheableResourceDebugLog(buf);
+
   if (resource_->ShouldSkipBackgroundFetch()) {
     // Note that this isn't really a lock failure, but we treat them the same
     // way.
+    CacheableResourceDebugLog("LoadAndSaveToCache: skipping background fetch");
     resource_callback_->Done(true /* lock_failure */, false /* resource_ok */);
     return;
   }
@@ -511,7 +555,12 @@ void CacheableResourceBase::LoadHttpCacheCallback::LoadAndSaveToCache() {
   if (not_cacheable_policy_ == Resource::kLoadEvenIfNotCacheable) {
     cb->set_no_cache_ok(true);
   }
-  cb->Start(resource_->rewrite_driver()->async_fetcher());
+  UrlAsyncFetcher* fetcher = resource_->rewrite_driver()->async_fetcher();
+  snprintf(buf, sizeof(buf), "LoadAndSaveToCache: calling cb->Start with fetcher=%p",
+           static_cast<void*>(fetcher));
+  CacheableResourceDebugLog(buf);
+  cb->Start(fetcher);
+  CacheableResourceDebugLog("LoadAndSaveToCache: cb->Start() returned");
 }
 
 // HTTPCache::Callback which checks if we have a fresh response in the cache.
@@ -669,12 +718,19 @@ void CacheableResourceBase::RefreshIfImminentlyExpiring() {
 void CacheableResourceBase::LoadAndCallback(
     NotCacheablePolicy not_cacheable_policy,
     const RequestContextPtr& request_context, AsyncCallback* callback) {
+  char buf[512];
+  snprintf(buf, sizeof(buf), "LoadAndCallback: url=%s cache_key=%s policy=%d",
+           url().c_str(), cache_key().c_str(), static_cast<int>(not_cacheable_policy));
+  CacheableResourceDebugLog(buf);
+
   LoadHttpCacheCallback* cache_callback = new LoadHttpCacheCallback(
       request_context, not_cacheable_policy, callback, this);
 
   cache_callback->set_is_background(is_background_fetch());
+  CacheableResourceDebugLog("LoadAndCallback: calling http_cache()->Find");
   http_cache()->Find(cache_key(), rewrite_driver()->CacheFragment(),
                      message_handler(), cache_callback);
+  CacheableResourceDebugLog("LoadAndCallback: Find() initiated");
 }
 
 void CacheableResourceBase::Freshen(Resource::FreshenCallback* callback,

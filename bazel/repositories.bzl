@@ -13,20 +13,35 @@ load(":apr.bzl", "apr_build_rule")
 load(":aprutil.bzl", "aprutil_build_rule")
 load(":closure_compiler.bzl", "closure_library_rules")
 load(":cyclone.bzl", "cyclone_build_rule")
-load(":libcurl.bzl", "libcurl_build_rule")
+load(":libcurl.bzl", "libcurl_build_rule", "libcurl_linux_build_rule", "libcurl_windows_build_rule")
 load(":libmemcached.bzl", "libmemcached_build_rule")
 
 def _cyclone_repository_impl(repository_ctx):
-    """Repository rule for Cyclone that handles platform-specific paths."""
-    # Check environment variable first, then use platform-specific defaults
+    """Repository rule for Cyclone that handles platform-specific paths.
+
+    Cyclone source is located in order of preference:
+    1. CYCLONE_CACHE_PATH environment variable
+    2. Git submodule at third_party/cyclone-cache (relative to workspace)
+    3. Platform-specific default: C:/build/cyclone-cache (Windows) or /cyclone-cache (Linux)
+    """
+    # Check environment variable first
     cyclone_path = repository_ctx.os.environ.get("CYCLONE_CACHE_PATH", "")
 
     if not cyclone_path:
-        # Detect platform and use appropriate default path
-        if repository_ctx.os.name.startswith("windows"):
-            cyclone_path = "C:/build/cyclone-cache"
+        # Check for git submodule (relative to workspace root)
+        workspace_root = str(repository_ctx.workspace_root)
+        submodule_path = workspace_root + "/third_party/cyclone-cache"
+
+        # Test if submodule path exists and has src directory
+        result = repository_ctx.execute(["test", "-d", submodule_path + "/src"])
+        if result.return_code == 0:
+            cyclone_path = submodule_path
         else:
-            cyclone_path = "/cyclone-cache"
+            # Fall back to platform-specific default path
+            if repository_ctx.os.name.startswith("windows"):
+                cyclone_path = "C:/build/cyclone-cache"
+            else:
+                cyclone_path = "/cyclone-cache"
 
     # Symlink the src and include directories from cyclone
     repository_ctx.symlink(cyclone_path + "/src", "src")
@@ -41,6 +56,44 @@ cyclone_repository = repository_rule(
         "build_file_content": attr.string(mandatory = True),
     },
     environ = ["CYCLONE_CACHE_PATH"],
+    local = True,
+)
+
+def _curl_repository_impl(repository_ctx):
+    """Repository rule for libcurl that handles platform-specific paths.
+
+    On Linux: Uses system-installed libcurl from /usr
+    On Windows: Uses vcpkg-installed or pre-downloaded libcurl from C:/curl
+    """
+    is_windows = repository_ctx.os.name.startswith("windows")
+
+    if is_windows:
+        # Check environment variable first, then use default path
+        curl_path = repository_ctx.os.environ.get("CURL_PATH", "C:/curl")
+
+        # Symlink include directory
+        repository_ctx.symlink(curl_path + "/include", "include")
+
+        # Symlink lib directory (import libraries)
+        repository_ctx.symlink(curl_path + "/lib", "lib")
+
+        # Symlink bin directory (DLLs)
+        repository_ctx.symlink(curl_path + "/bin", "bin")
+
+        # Generate BUILD file
+        repository_ctx.file("BUILD.bazel", repository_ctx.attr.windows_build_file_content)
+    else:
+        # Linux: symlink from /usr
+        repository_ctx.symlink("/usr/include", "include")
+        repository_ctx.file("BUILD.bazel", repository_ctx.attr.linux_build_file_content)
+
+curl_repository = repository_rule(
+    implementation = _curl_repository_impl,
+    attrs = {
+        "linux_build_file_content": attr.string(mandatory = True),
+        "windows_build_file_content": attr.string(mandatory = True),
+    },
+    environ = ["CURL_PATH"],
     local = True,
 )
 
@@ -59,8 +112,6 @@ LIBWEBP_COMMIT = "1.2.0"  # Updated Jan 2026 - one major version bump without sh
 LIBWEBP_SHA = "d60608c45682fa1e5d41c3c26c199be5d0184084cd8a971a6fc54035f76487d3"
 GOOGLE_SPARSEHASH_COMMIT = "6ff8809259d2408cb48ae4fa694e80b15b151af3"
 GOOGLE_SPARSEHASH_SHA = "4ae105acb6b53f957b6005fa103a9fd342c39dbc7c87673663e782325b8296b3"
-GLOG_COMMIT = "0a2e5931bd5ff22fd3bf8999eb8ce776f159cda6"  # July 24th, 2020
-GLOG_SHA = "bae42ec37b50e156071f5b92d2ff09aa5ece56fd8c58d2175fc1ffea85137664"
 GFLAGS_COMMIT = "de1b8d3daa40b5b07208ec9e82f223d430e2ecc1"  # v2.3.0 - Updated Jan 2026
 GFLAGS_SHA = "b563851a60342abc35281fa9c684de7e9604a2bf1982c85035180b9ce3afa774"
 DRP_COMMIT = "21a7a0f0513b7adad7889ee68edcff49601e4a3a"
@@ -155,18 +206,10 @@ def mod_pagespeed_dependencies():
     )
 
     http_archive(
-        name = "glog",
-        strip_prefix = "glog-%s" % GLOG_COMMIT,
-        url = "https://github.com/google/glog/archive/%s.tar.gz" % GLOG_COMMIT,
-        sha256 = GLOG_SHA,
-    )
-
-    http_archive(
         name = "com_github_gflags_gflags",
         strip_prefix = "gflags-%s" % GFLAGS_COMMIT,
         url = "https://github.com/gflags/gflags/archive/%s.tar.gz" % GFLAGS_COMMIT,
         sha256 = GFLAGS_SHA,
-        # Patch removed - cstring fix may be included in 2.3.0
     )
 
     http_archive(
@@ -250,12 +293,15 @@ def mod_pagespeed_dependencies():
         build_file_content = libmemcached_build_rule,
     )
 
-    # libcurl - system-installed HTTP client library
-    # Requires libcurl4-openssl-dev to be installed (apt-get install libcurl4-openssl-dev)
-    native.new_local_repository(
+    # libcurl - HTTP client library
+    # Linux: Uses system-installed libcurl from /usr
+    #        Requires libcurl4-openssl-dev (apt-get install libcurl4-openssl-dev)
+    # Windows: Uses pre-installed libcurl from C:/curl
+    #          Set CURL_PATH env var to override location
+    curl_repository(
         name = "curl",
-        path = "/usr",
-        build_file_content = libcurl_build_rule,
+        linux_build_file_content = libcurl_linux_build_rule,
+        windows_build_file_content = libcurl_windows_build_rule,
     )
 
     http_archive(

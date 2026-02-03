@@ -1094,10 +1094,8 @@ TEST_F(RewriteOptionsTest, LookupNonBaseOptionByNameTest) {
   FailLookupOptionByName(RewriteOptions::kCompressMetadataCache);
   FailLookupOptionByName(RewriteOptions::kFetchHttps);
   FailLookupOptionByName(RewriteOptions::kFetcherProxy);
-  FailLookupOptionByName(RewriteOptions::kFileCacheCleanIntervalMs);
   FailLookupOptionByName(RewriteOptions::kFileCachePath);
   FailLookupOptionByName(RewriteOptions::kFileCacheCleanSizeKb);
-  FailLookupOptionByName(RewriteOptions::kFileCacheCleanInodeLimit);
   FailLookupOptionByName(RewriteOptions::kLogDir);
   FailLookupOptionByName(RewriteOptions::kLruCacheByteLimit);
   FailLookupOptionByName(RewriteOptions::kLruCacheKbPerProcess);

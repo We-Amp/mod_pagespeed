@@ -98,7 +98,7 @@ class FastWildcardGroup {
   // Don't generate a hash unless there are this many non-wildcard-only
   // patterns.  Exposed for testing purposes (we can't use FRIEND_TEST here for
   // open-source dependency reasons).
-  static const int kMinPatterns = 11;
+  static constexpr int kMinPatterns = 11;
 
   FastWildcardGroup() : rolling_hash_length_(kUncompiled) {}
   FastWildcardGroup(const FastWildcardGroup& src)
@@ -138,8 +138,8 @@ class FastWildcardGroup {
 
  private:
   // Special values for rolling hash size.
-  static const int32 kUncompiled = -1;
-  static const int32 kDontHash = 0;
+  static constexpr int32 kUncompiled = -1;
+  static constexpr int32 kDontHash = 0;
 
   void Uncompile();
   void Clear();

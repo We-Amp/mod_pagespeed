@@ -106,9 +106,6 @@ class FileSystemTest : public testing::Test {
   void TestAtime();
   void TestMtime();
   void TestDirInfo();
-  void TestLock();
-  void TestLockTimeout();
-  void TestLockBumping();
 
   GoogleMessageHandler handler_;
   GoogleString test_tmpdir_;

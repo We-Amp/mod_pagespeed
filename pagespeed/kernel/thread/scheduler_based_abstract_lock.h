@@ -51,7 +51,6 @@ class SchedulerBasedAbstractLock : public NamedLock {
 
  protected:
   friend class SharedMemLockManagerTestBase;
-  friend class FileSystemLockManagerTest;
 
   // If lock is held, return false, otherwise lock and return true.
   // Non-blocking.  Note that implementations of this and other similar 'try'

@@ -33,10 +33,11 @@
 #include "pagespeed/kernel/cache/cache_interface.h"
 #include "pagespeed/kernel/cache/cache_stats.h"
 #include "pagespeed/kernel/cache/cyclone_cache.h"
+#include "pagespeed/kernel/cache/lru_cache.h"
 #include "pagespeed/kernel/cache/purge_context.h"
 #include "pagespeed/kernel/cache/purge_set.h"
 #include "pagespeed/kernel/sharedmem/shared_mem_lock_manager.h"
-#include "pagespeed/kernel/util/file_system_lock_manager.h"
+#include "pagespeed/kernel/util/threadsafe_lock_manager.h"
 #include "pagespeed/system/system_rewrite_options.h"
 #include "pagespeed/system/system_server_context.h"
 
@@ -99,7 +100,15 @@ SystemCachePath::SystemCachePath(const StringPiece& path,
         factory->hasher(), factory->message_handler());
     lock_manager_ = shared_mem_lock_manager_.get();
   } else {
-    FallBackToFileBasedLocking();
+    factory->message_handler()->Message(
+        kWarning, "Shared memory locking disabled; inter-process coordination "
+                  "will not be available for path: %s", path_.c_str());
+    // Use ThreadSafeLockManager for single-process locking when shared memory
+    // is not available. This provides thread-safety but not inter-process
+    // coordination.
+    fallback_lock_manager_ =
+        std::make_unique<ThreadSafeLockManager>(factory->scheduler());
+    lock_manager_ = fallback_lock_manager_.get();
   }
 
   // Create the CycloneCache disk cache backend.
@@ -113,22 +122,49 @@ SystemCachePath::SystemCachePath(const StringPiece& path,
   cyclone_config.enable_checksum = true;
   cyclone_config.num_segments = 0;  // Use default
 
-  cache_backend_ = new CycloneCache(
+  CycloneCache* cyclone_cache = new CycloneCache(
       cyclone_config, factory->statistics(), factory->message_handler());
-  factory->TakeOwnership(cache_backend_);
-  file_cache_ = new CacheStats(kFileCache, cache_backend_,
-                               factory->timer(), factory->statistics());
-  factory->TakeOwnership(file_cache_);
+  factory->TakeOwnership(cyclone_cache);
 
-  if (cyclone_config.ram_cache_size_bytes > 0) {
-    factory->message_handler()->Message(
-        kInfo, "CycloneCache enabled with %lld byte RAM cache at %s",
-        static_cast<long long>(cyclone_config.ram_cache_size_bytes),
-        cyclone_config.cache_path.c_str());
+  // Check if CycloneCache started successfully
+  if (cyclone_cache->IsHealthy()) {
+    cache_backend_ = cyclone_cache;
+    file_cache_ = new CacheStats(kFileCache, cache_backend_,
+                                 factory->timer(), factory->statistics());
+    factory->TakeOwnership(file_cache_);
+
+    if (cyclone_config.ram_cache_size_bytes > 0) {
+      factory->message_handler()->Message(
+          kInfo, "CycloneCache enabled with %lld byte RAM cache at %s",
+          static_cast<long long>(cyclone_config.ram_cache_size_bytes),
+          cyclone_config.cache_path.c_str());
+    } else {
+      factory->message_handler()->Message(
+          kInfo, "CycloneCache enabled at %s",
+          cyclone_config.cache_path.c_str());
+    }
   } else {
+    // CycloneCache failed to start - fall back to LRU-only cache.
+    // This can happen on platforms where CycloneCache isn't fully supported
+    // (e.g., Windows) or when the cache directory isn't writable.
     factory->message_handler()->Message(
-        kInfo, "CycloneCache enabled at %s",
+        kWarning, "CycloneCache failed to start at %s. "
+                  "Falling back to LRU-only cache.",
         cyclone_config.cache_path.c_str());
+
+    // Create an LRU cache to use as the file_cache fallback.
+    // This means we won't have persistent disk caching, but rewriting
+    // will still work using the in-memory LRU cache.
+    int64 lru_size = config->lru_cache_kb_per_process() * 1024;
+    if (lru_size == 0) {
+      // Ensure at least some cache space if LRU was configured to 0
+      lru_size = 50 * 1024 * 1024;  // 50 MB default
+    }
+    fallback_lru_cache_ = std::make_unique<LRUCache>(lru_size);
+    cache_backend_ = fallback_lru_cache_.get();
+    file_cache_ = new CacheStats(kFileCache, cache_backend_,
+                                 factory->timer(), factory->statistics());
+    factory->TakeOwnership(file_cache_);
   }
 }
 
@@ -148,7 +184,15 @@ void SystemCachePath::RootInit() {
       kInfo, "Initializing shared memory for path: %s.", path_.c_str());
   if ((shared_mem_lock_manager_.get() != nullptr) &&
       !shared_mem_lock_manager_->Initialize()) {
-    FallBackToFileBasedLocking();
+    factory_->message_handler()->Message(
+        kError, "Failed to initialize shared memory lock manager for path: %s. "
+                "Falling back to in-process locking.",
+        path_.c_str());
+    shared_mem_lock_manager_.reset(nullptr);
+    // Fall back to ThreadSafeLockManager
+    fallback_lock_manager_ =
+        std::make_unique<ThreadSafeLockManager>(factory_->scheduler());
+    lock_manager_ = fallback_lock_manager_.get();
   }
 }
 
@@ -160,7 +204,15 @@ void SystemCachePath::ChildInit(SlowWorker* cache_clean_worker) {
       kInfo, "Reusing shared memory for path: %s.", path_.c_str());
   if ((shared_mem_lock_manager_.get() != nullptr) &&
       !shared_mem_lock_manager_->Attach()) {
-    FallBackToFileBasedLocking();
+    factory_->message_handler()->Message(
+        kError, "Failed to attach to shared memory lock manager for path: %s. "
+                "Falling back to in-process locking.",
+        path_.c_str());
+    shared_mem_lock_manager_.reset(nullptr);
+    // Fall back to ThreadSafeLockManager
+    fallback_lock_manager_ =
+        std::make_unique<ThreadSafeLockManager>(factory_->scheduler());
+    lock_manager_ = fallback_lock_manager_.get();
   }
   purge_context_ = std::make_unique<PurgeContext>(
       cache_flush_filename_, factory_->file_system(), factory_->timer(),
@@ -176,17 +228,6 @@ void SystemCachePath::GlobalCleanup(MessageHandler* handler) {
   if (shared_mem_lock_manager_.get() != nullptr) {
     shared_mem_lock_manager_->GlobalCleanup(shm_runtime_,
                                             LockManagerSegmentName(), handler);
-  }
-}
-
-void SystemCachePath::FallBackToFileBasedLocking() {
-  if ((shared_mem_lock_manager_.get() != nullptr) ||
-      (lock_manager_ == nullptr)) {
-    shared_mem_lock_manager_.reset(nullptr);
-    file_system_lock_manager_ = std::make_unique<FileSystemLockManager>(
-        factory_->file_system(), path_, factory_->scheduler(),
-        factory_->message_handler());
-    lock_manager_ = file_system_lock_manager_.get();
   }
 }
 

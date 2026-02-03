@@ -146,60 +146,64 @@ class LRUCacheBase {
   // Puts an object into the cache.  The value is copied using the assignment
   // operator.
   void Put(const GoogleString& key, const ValueType& new_value) {
-    // Just do one map operation, calling the awkward 'insert' which returns
-    // a pair.  The bool indicates whether a new value was inserted, and the
-    // iterator provides access to the element, whether it's new or old.
-    //
-    // If the key is already in the map, this will give us access to the value
-    // cell, and the uninitialized cell will not be used.
-    ListNode cell;
-    std::pair<typename Map::iterator, bool> iter_found =
-        map_.insert(typename Map::value_type(key, cell));
-    bool found = !iter_found.second;
-    typename Map::iterator map_iter = iter_found.first;
-    bool need_to_insert = true;
+    // Use find() first to check if the key exists, then decide whether to
+    // insert or update. This avoids creating a map entry that might need
+    // to be immediately erased if the value doesn't fit.
+    typename Map::iterator map_iter = map_.find(key);
+    bool found = (map_iter != map_.end());
+
     if (found) {
-      cell = map_iter->second;
+      ListNode cell = map_iter->second;
       KeyValuePair* key_value = *cell;
 
-      // Protect the element that we are rewriting by erasing
-      // it from the entry_list prior to calling EvictIfNecessary,
-      // which can't find it if it isn't in the list.
+      // Check if we should replace the existing value.
       if (!value_helper_->ShouldReplace(key_value->second, new_value)) {
-        need_to_insert = false;
-      } else {
-        if (value_helper_->Equal(new_value, key_value->second)) {
-          map_iter->second = Freshen(cell);
-          need_to_insert = false;
-          ++num_identical_reinserts_;
-        } else {
-          ++num_deletes_;
-          CHECK_GE(current_bytes_in_cache_, EntrySize(key_value));
-          current_bytes_in_cache_ -= EntrySize(key_value);
-          delete key_value;
-          lru_ordered_list_.erase(cell);
-        }
+        // Keep the existing value, do nothing.
+        return;
       }
-    }
 
-    if (need_to_insert) {
-      // At this point, if we were doing a replacement, then the value
-      // is removed from the list, so we can treat replacements and new
-      // insertions the same way.  In both cases, the new key is in the map
-      // as a result of the call to map_.insert above.
+      // Check if the new value is identical to the existing value.
+      if (value_helper_->Equal(new_value, key_value->second)) {
+        // Just freshen the entry, no need to replace.
+        map_iter->second = Freshen(cell);
+        ++num_identical_reinserts_;
+        return;
+      }
 
+      // Need to replace with a different value. Remove the old entry from
+      // the list (but keep the map entry for reuse). This protects the
+      // element from being evicted by EvictIfNecessary.
+      ++num_deletes_;
+      CHECK_GE(current_bytes_in_cache_, EntrySize(key_value));
+      current_bytes_in_cache_ -= EntrySize(key_value);
+      delete key_value;
+      lru_ordered_list_.erase(cell);
+
+      // Now try to insert the new value, reusing the existing map entry.
       if (EvictIfNecessary(key.size() + value_helper_->size(new_value))) {
-        // The new value fits.  Put it in the LRU-list.
+        // The new value fits. Put it in the LRU-list.
         KeyValuePair* kvp = new KeyValuePair(map_iter->first, new_value);
         lru_ordered_list_.push_front(kvp);
         map_iter->second = lru_ordered_list_.begin();
         ++num_inserts_;
       } else {
-        // The new value was too big to fit.  Remove it from the map.
-        // it's already removed from the list.  We have failed.  We
-        // could potentially log this somewhere or keep a stat.
+        // The new value was too big to fit. Remove the map entry too.
         map_.erase(map_iter);
       }
+    } else {
+      // Key not found - check if there's room for the new entry before
+      // inserting into the map.
+      size_t bytes_needed = key.size() + value_helper_->size(new_value);
+      if (EvictIfNecessary(bytes_needed)) {
+        // The new value fits. Insert into map and LRU-list.
+        KeyValuePair* kvp = new KeyValuePair(key, new_value);
+        lru_ordered_list_.push_front(kvp);
+        // Use the key from the KeyValuePair to avoid storing the key twice.
+        map_[kvp->first] = lru_ordered_list_.begin();
+        ++num_inserts_;
+      }
+      // If EvictIfNecessary returned false, the value was too big to fit
+      // in the cache at all. We simply don't insert it.
     }
   }
 
