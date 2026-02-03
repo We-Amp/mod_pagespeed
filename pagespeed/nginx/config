@@ -1,0 +1,140 @@
+#!/bin/bash
+# nginx module configuration for ngx_pagespeed
+#
+# This config file is used by nginx's configure script when using:
+#   ./configure --add-module=/path/to/mod_pagespeed/pagespeed/nginx
+#
+# Prerequisites:
+# 1. Build the PageSpeed static archive first:
+#    bazel build --config=clang-libstdcxx13 //pagespeed/nginx:ngx_pagespeed_archive
+#
+# 2. Set MOD_PAGESPEED_DIR to point to the mod_pagespeed source root:
+#    export MOD_PAGESPEED_DIR=/path/to/mod_pagespeed
+#
+# 3. Run nginx configure:
+#    ./configure --add-module=$MOD_PAGESPEED_DIR/pagespeed/nginx [other-options]
+
+# Get the directory where this config file resides
+ngx_addon_dir=${ngx_addon_dir:-$(dirname $0)}
+
+# Resolve MOD_PAGESPEED_DIR - either from environment or relative to this file
+if [ -z "$MOD_PAGESPEED_DIR" ]; then
+    # Go up two levels from pagespeed/nginx to get project root
+    MOD_PAGESPEED_DIR=$(cd "$ngx_addon_dir/../.." && pwd)
+fi
+
+# Bazel output directory (where the archive is built)
+BAZEL_BIN="$MOD_PAGESPEED_DIR/bazel-bin"
+
+# Check if the archive exists
+PAGESPEED_ARCHIVE="$BAZEL_BIN/pagespeed/nginx/libngx_pagespeed_archive.a"
+if [ ! -f "$PAGESPEED_ARCHIVE" ]; then
+    cat <<EOF >&2
+ERROR: PageSpeed archive not found at: $PAGESPEED_ARCHIVE
+
+Please build it first with:
+  cd $MOD_PAGESPEED_DIR
+  bazel build --config=clang-libstdcxx13 //pagespeed/nginx:ngx_pagespeed_archive
+
+EOF
+    exit 1
+fi
+
+# Module name
+ngx_addon_name=ngx_pagespeed
+
+# Source files - nginx will compile these
+# Note: The actual implementation is in the archive, these are just the nginx entry points
+NGX_PAGESPEED_SRCS="
+    $ngx_addon_dir/ngx_pagespeed.cc
+"
+
+# Header files
+NGX_PAGESPEED_INCS="
+    $ngx_addon_dir
+    $MOD_PAGESPEED_DIR
+    $MOD_PAGESPEED_DIR/third_party/css_parser/src
+    $MOD_PAGESPEED_DIR/third_party/domain_registry_provider/src
+"
+
+# Bazel external dependencies (headers)
+BAZEL_EXTERNAL="$MOD_PAGESPEED_DIR/bazel-mod_pagespeed/external"
+if [ -d "$BAZEL_EXTERNAL" ]; then
+    NGX_PAGESPEED_INCS="$NGX_PAGESPEED_INCS
+        $BAZEL_EXTERNAL/com_google_absl
+        $BAZEL_EXTERNAL/com_google_protobuf/src
+        $BAZEL_EXTERNAL/boringssl/src/include
+    "
+fi
+
+# Libraries to link
+# The archive contains all PageSpeed code statically linked
+NGX_PAGESPEED_LIBS="
+    $PAGESPEED_ARCHIVE
+    -lpthread
+    -ldl
+    -lrt
+    -lz
+    -lstdc++
+"
+
+# Add curl for the URL fetcher
+if pkg-config --exists libcurl 2>/dev/null; then
+    NGX_PAGESPEED_LIBS="$NGX_PAGESPEED_LIBS $(pkg-config --libs libcurl)"
+else
+    NGX_PAGESPEED_LIBS="$NGX_PAGESPEED_LIBS -lcurl"
+fi
+
+# Add hiredis for Redis cache support
+if pkg-config --exists hiredis 2>/dev/null; then
+    NGX_PAGESPEED_LIBS="$NGX_PAGESPEED_LIBS $(pkg-config --libs hiredis)"
+else
+    NGX_PAGESPEED_LIBS="$NGX_PAGESPEED_LIBS -lhiredis"
+fi
+
+# Register the module with nginx
+if test -n "$ngx_module_link"; then
+    # nginx 1.9.11+
+    ngx_module_type=HTTP_AUX_FILTER
+    ngx_module_name=ngx_pagespeed
+    ngx_module_srcs="$NGX_PAGESPEED_SRCS"
+    ngx_module_libs="$NGX_PAGESPEED_LIBS"
+    ngx_module_incs="$NGX_PAGESPEED_INCS"
+
+    . auto/module
+else
+    # older nginx
+    HTTP_AUX_FILTER_MODULES="$HTTP_AUX_FILTER_MODULES ngx_pagespeed"
+    NGX_ADDON_SRCS="$NGX_ADDON_SRCS $NGX_PAGESPEED_SRCS"
+    NGX_ADDON_DEPS="$NGX_ADDON_DEPS"
+    CORE_INCS="$CORE_INCS $NGX_PAGESPEED_INCS"
+    CORE_LIBS="$CORE_LIBS $NGX_PAGESPEED_LIBS"
+fi
+
+# Check for required C++17 support
+cat << END > $NGX_AUTOTEST.c
+#include <string_view>
+int main() {
+    std::string_view sv = "test";
+    return 0;
+}
+END
+
+ngx_test="$CC $CC_TEST_FLAGS $CC_AUX_FLAGS -std=c++17 \
+          -o $NGX_AUTOTEST $NGX_AUTOTEST.c"
+
+if $ngx_test >/dev/null 2>&1; then
+    NGX_PAGESPEED_CXXFLAGS="-std=c++17"
+else
+    cat <<EOF >&2
+WARNING: C++17 support not detected. PageSpeed requires C++17.
+Please use a compiler that supports C++17 (GCC 7+ or Clang 5+).
+EOF
+fi
+
+# Add C++ flags
+CFLAGS="$CFLAGS $NGX_PAGESPEED_CXXFLAGS"
+
+echo "ngx_pagespeed module configured successfully"
+echo "  MOD_PAGESPEED_DIR: $MOD_PAGESPEED_DIR"
+echo "  Archive: $PAGESPEED_ARCHIVE"
