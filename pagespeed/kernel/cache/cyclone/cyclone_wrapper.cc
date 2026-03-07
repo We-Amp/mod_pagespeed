@@ -36,6 +36,7 @@
 
 #include "cyclone/cache.hpp"
 #include "cyclone/config.hpp"
+#include "cyclone/error.hpp"
 #include "cyclone/key.hpp"
 
 // Thread-local storage for error messages.
@@ -72,6 +73,11 @@ struct CycloneReadHandle {
   }
 };
 
+// Convert a CacheError to a human-readable string.
+static std::string CacheErrorMessage(cyclone::CacheError err) {
+  return cyclone::make_error_code(err).message();
+}
+
 // Helper to set the thread-local error message.
 static void SetLastError(const std::string& msg) {
   g_last_error = msg;
@@ -106,7 +112,8 @@ CycloneCacheHandle* cyclone_cache_create(const CycloneCacheConfig* config) {
   // Create the cache instance
   auto result = cyclone::Cache::create(cc);
   if (!result) {
-    SetLastError("Failed to create cache instance");
+    SetLastError("Failed to create cache instance: " +
+                 CacheErrorMessage(result.error()));
     return nullptr;
   }
 
@@ -119,7 +126,8 @@ CycloneCacheHandle* cyclone_cache_create(const CycloneCacheConfig* config) {
 
   auto add_result = handle->impl->add_volume(vc);
   if (!add_result) {
-    SetLastError("Failed to add volume to cache");
+    SetLastError("Failed to add volume at '" + std::string(config->cache_path) +
+                 "': " + CacheErrorMessage(add_result.error()));
     return nullptr;
   }
 
@@ -149,7 +157,8 @@ CycloneError cyclone_cache_start(CycloneCacheHandle* cache) {
 
   auto result = cache->impl->start();
   if (!result) {
-    SetLastError("Failed to start cache");
+    SetLastError("Failed to start cache at '" + cache->cache_path + "': " +
+                 CacheErrorMessage(result.error()));
     return CYCLONE_INTERNAL_ERROR;
   }
 

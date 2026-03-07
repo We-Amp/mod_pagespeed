@@ -25,6 +25,7 @@
  * @{
  */
 
+
 #ifndef APU_H
 #define APU_H
 
@@ -36,26 +37,27 @@
  * to provide static linkage when the dynamic library may be unavailable.
  *
  * APU_DECLARE_STATIC and APU_DECLARE_EXPORT are left undefined when
- * including the APR-UTIL public headers, to import and link the symbols from
+ * including the APR-UTIL public headers, to import and link the symbols from 
  * the dynamic APR-UTIL library and assure appropriate indirection and calling
  * conventions at compile time.
  */
 
+#if defined(DOXYGEN) || !defined(WIN32)
 /**
  * The public APR-UTIL functions are declared with APU_DECLARE(), so they may
- * use the most appropriate calling convention.  Public APR functions with
+ * use the most appropriate calling convention.  Public APR functions with 
  * variable arguments must use APU_DECLARE_NONSTD().
  *
  * @fn APU_DECLARE(rettype) apr_func(args);
  */
-#define APU_DECLARE(type) type
+#define APU_DECLARE(type)            type
 /**
- * The public APR-UTIL functions using variable arguments are declared with
+ * The public APR-UTIL functions using variable arguments are declared with 
  * APU_DECLARE_NONSTD(), as they must use the C language calling convention.
  *
  * @fn APU_DECLARE_NONSTD(rettype) apr_func(args, ...);
  */
-#define APU_DECLARE_NONSTD(type) type
+#define APU_DECLARE_NONSTD(type)     type
 /**
  * The public APR-UTIL variables are declared with APU_DECLARE_DATA.
  * This assures the appropriate indirection is invoked at compile time.
@@ -65,12 +67,25 @@
  * declarations within headers to properly import the variable.
  */
 #define APU_DECLARE_DATA
+#elif defined(APU_DECLARE_STATIC)
+#define APU_DECLARE(type)            type __stdcall
+#define APU_DECLARE_NONSTD(type)     type __cdecl
+#define APU_DECLARE_DATA
+#elif defined(APU_DECLARE_EXPORT)
+#define APU_DECLARE(type)            __declspec(dllexport) type __stdcall
+#define APU_DECLARE_NONSTD(type)     __declspec(dllexport) type __cdecl
+#define APU_DECLARE_DATA             __declspec(dllexport)
+#else
+#define APU_DECLARE(type)            __declspec(dllimport) type __stdcall
+#define APU_DECLARE_NONSTD(type)     __declspec(dllimport) type __cdecl
+#define APU_DECLARE_DATA             __declspec(dllimport)
+#endif
 
 #if !defined(WIN32) || defined(APU_MODULE_DECLARE_STATIC)
 /**
  * Declare a dso module's exported module structure as APU_MODULE_DECLARE_DATA.
  *
- * Unless APU_MODULE_DECLARE_STATIC is defined at compile time, symbols
+ * Unless APU_MODULE_DECLARE_STATIC is defined at compile time, symbols 
  * declared with APU_MODULE_DECLARE_DATA are always exported.
  * @code
  * module APU_MODULE_DECLARE_DATA mod_tag
@@ -78,32 +93,36 @@
  */
 #define APU_MODULE_DECLARE_DATA
 #else
-#define APU_MODULE_DECLARE_DATA __declspec(dllexport)
+#define APU_MODULE_DECLARE_DATA           __declspec(dllexport)
 #endif
 
 /*
  * we always have SDBM (it's in our codebase)
  */
-#define APU_HAVE_SDBM 1
-#define APU_HAVE_GDBM 0
-#define APU_HAVE_NDBM 0
-#define APU_HAVE_DB 0
+#define APU_HAVE_SDBM   1
+#define APU_HAVE_GDBM   0
+#define APU_HAVE_NDBM   0
+#define APU_HAVE_DB     0
 
 #if APU_HAVE_DB
-#define APU_HAVE_DB_VERSION 0
+#define APU_HAVE_DB_VERSION    0
 #endif
 
-#define APU_HAVE_PGSQL 1
-#define APU_HAVE_MYSQL 0
-#define APU_HAVE_SQLITE3 1
-#define APU_HAVE_SQLITE2 0
-#define APU_HAVE_ORACLE 0
-#define APU_HAVE_FREETDS 0
-#define APU_HAVE_ODBC 0
+#define APU_HAVE_PGSQL         0
+#define APU_HAVE_MYSQL         0
+#define APU_HAVE_SQLITE3       1
+#define APU_HAVE_SQLITE2       0
+#define APU_HAVE_ORACLE        0
+#define APU_HAVE_ODBC          0
 
-#define APU_HAVE_APR_ICONV 0
-#define APU_HAVE_ICONV 1
-#define APR_HAS_XLATE (APU_HAVE_APR_ICONV || APU_HAVE_ICONV)
+#define APU_HAVE_CRYPTO        0
+#define APU_HAVE_OPENSSL       0
+#define APU_HAVE_NSS           0
+#define APU_HAVE_COMMONCRYPTO  0
+
+#define APU_HAVE_APR_ICONV     0
+#define APU_HAVE_ICONV         1
+#define APR_HAS_XLATE          (APU_HAVE_APR_ICONV || APU_HAVE_ICONV)
 
 #endif /* APU_H */
 /** @} */

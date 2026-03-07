@@ -19,41 +19,14 @@
 
 #include "pagespeed/kernel/cache/cyclone_cache.h"
 
+#include <cstdio>
+#include <sys/stat.h>
+
 #include "pagespeed/kernel/base/mapped_shared_string.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/cache/cyclone/cyclone_wrapper.h"
-
-#ifdef _WIN32
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <windows.h>
-
-namespace {
-void CycloneCacheDebugLog(const char* msg) {
-  HANDLE hFile = CreateFileA(
-      "C:\\inetpub\\pagespeed\\cyclone_cache_debug.log",
-      FILE_APPEND_DATA,
-      FILE_SHARE_READ | FILE_SHARE_WRITE,
-      NULL,
-      OPEN_ALWAYS,
-      FILE_ATTRIBUTE_NORMAL,
-      NULL);
-  if (hFile != INVALID_HANDLE_VALUE) {
-    DWORD written;
-    WriteFile(hFile, msg, strlen(msg), &written, NULL);
-    WriteFile(hFile, "\r\n", 2, &written, NULL);
-    CloseHandle(hFile);
-  }
-}
-}  // namespace
-#else
-namespace {
-void CycloneCacheDebugLog(const char*) {}
-}  // namespace
-#endif
 
 namespace net_instaweb {
 
@@ -94,13 +67,6 @@ CycloneCache::CycloneCache(const Config& config,
       cache_(nullptr),
       handler_(handler),
       is_shut_down_(false) {
-  char buf[512];
-  snprintf(buf, sizeof(buf), "CycloneCache ctor: path=%s size=%lld ram_size=%lld",
-           config_.cache_path.c_str(),
-           static_cast<long long>(config_.cache_size_bytes),
-           static_cast<long long>(config_.ram_cache_size_bytes));
-  CycloneCacheDebugLog(buf);
-
   // Initialize statistics variables
   hits_ = statistics->GetVariable(kHits);
   misses_ = statistics->GetVariable(kMisses);
@@ -109,6 +75,19 @@ CycloneCache::CycloneCache(const Config& config,
   failures_ = statistics->GetVariable(kFailures);
   bytes_read_ = statistics->GetVariable(kBytesRead);
   bytes_written_ = statistics->GetVariable(kBytesWritten);
+
+  // Remove stale 0-byte cache file from a previous failed initialization.
+  // A 0-byte file is not a valid Cyclone cache and will cause start() to fail.
+  struct stat st;
+  if (stat(config_.cache_path.c_str(), &st) == 0 && st.st_size == 0) {
+    handler_->Message(kInfo, "CycloneCache: Removing stale 0-byte cache file %s",
+                      config_.cache_path.c_str());
+    if (std::remove(config_.cache_path.c_str()) != 0) {
+      handler_->Message(kWarning,
+                        "CycloneCache: Failed to remove stale cache file %s",
+                        config_.cache_path.c_str());
+    }
+  }
 
   // Create the Cyclone cache configuration
   CycloneCacheConfig c_config;
@@ -119,28 +98,19 @@ CycloneCache::CycloneCache(const Config& config,
   c_config.num_segments = config_.num_segments;
 
   // Create the cache
-  CycloneCacheDebugLog("CycloneCache: calling cyclone_cache_create");
   cache_ = cyclone_cache_create(&c_config);
   if (cache_ == nullptr) {
     const char* error = cyclone_get_last_error();
-    snprintf(buf, sizeof(buf), "CycloneCache: create FAILED - error=%s",
-             error ? error : "unknown error");
-    CycloneCacheDebugLog(buf);
     handler_->Message(kError, "CycloneCache: Failed to create cache at %s: %s",
                       config_.cache_path.c_str(),
                       error ? error : "unknown error");
     return;
   }
-  CycloneCacheDebugLog("CycloneCache: cache created successfully");
 
   // Start the cache
-  CycloneCacheDebugLog("CycloneCache: calling cyclone_cache_start");
   CycloneError err = cyclone_cache_start(cache_);
   if (err != CYCLONE_OK) {
     const char* error = cyclone_get_last_error();
-    snprintf(buf, sizeof(buf), "CycloneCache: start FAILED - err=%d error=%s",
-             static_cast<int>(err), error ? error : "unknown error");
-    CycloneCacheDebugLog(buf);
     handler_->Message(kError, "CycloneCache: Failed to start cache at %s: %s",
                       config_.cache_path.c_str(),
                       error ? error : "unknown error");
@@ -148,7 +118,6 @@ CycloneCache::CycloneCache(const Config& config,
     cache_ = nullptr;
     return;
   }
-  CycloneCacheDebugLog("CycloneCache: cache started successfully");
 
   handler_->Message(kInfo, "CycloneCache: Started cache at %s "
                     "(size=%lld bytes, ram_cache=%lld bytes)",
@@ -252,18 +221,10 @@ void CycloneCache::Delete(const GoogleString& key) {
 }
 
 bool CycloneCache::IsHealthy() const {
-  char buf[256];
-  snprintf(buf, sizeof(buf), "CycloneCache::IsHealthy: is_shut_down=%d cache=%p",
-           is_shut_down_ ? 1 : 0, static_cast<const void*>(cache_));
-  CycloneCacheDebugLog(buf);
   if (is_shut_down_ || cache_ == nullptr) {
-    CycloneCacheDebugLog("CycloneCache::IsHealthy: returning false (shutdown or nullptr)");
     return false;
   }
-  int running = cyclone_cache_is_running(cache_);
-  snprintf(buf, sizeof(buf), "CycloneCache::IsHealthy: cyclone_cache_is_running=%d", running);
-  CycloneCacheDebugLog(buf);
-  return running != 0;
+  return cyclone_cache_is_running(cache_) != 0;
 }
 
 void CycloneCache::ShutDown() {

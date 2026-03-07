@@ -1,7 +1,5 @@
-/* include/private/apu_config.h.  Generated from apu_config.h.in by configure.
- */
-/* include/private/apu_config.h.in.  Generated from configure.in by autoheader.
- */
+/* include/private/apu_config.h.  Generated from apu_config.h.in by configure.  */
+/* include/private/apu_config.h.in.  Generated from configure.in by autoheader.  */
 
 /* Define if the system crypt() function is threadsafe */
 /* #undef APU_CRYPT_THREADSAFE */
@@ -15,23 +13,33 @@
 /* Define if the inbuf parm to iconv() is const char ** */
 /* #undef APU_ICONV_INBUF_CONST */
 
+/* Define that OpenSSL uses const buffers */
+/* #undef CRYPTO_OPENSSL_CONST_BUFFERS */
+
 /* Define if crypt_r has uses CRYPTD */
 /* #undef CRYPT_R_CRYPTD */
 
 /* Define if crypt_r uses struct crypt_data */
-#define CRYPT_R_STRUCT_CRYPT_DATA 1
+/* #undef CRYPT_R_STRUCT_CRYPT_DATA */
 
 /* Define if CODESET is defined in langinfo.h */
 #define HAVE_CODESET 1
 
-/* Define to 1 if you have the `crypt_r' function. */
-#define HAVE_CRYPT_R 1
+/* Define to 1 if you have the <CommonCrypto/CommonKeyDerivation.h> header
+   file. */
+/* #undef HAVE_COMMONCRYPTO_COMMONKEYDERIVATION_H */
+
+/* Define to 1 if you have the 'crypt_r' function. */
+/* #undef HAVE_CRYPT_R */
+
+/* Define to 1 if you have the <errmsg.h> header file. */
+/* #undef HAVE_ERRMSG_H */
 
 /* Define if expat.h is available */
 #define HAVE_EXPAT_H 1
 
-/* Define to 1 if you have the <freetds/sybdb.h> header file. */
-/* #undef HAVE_FREETDS_SYBDB_H */
+/* Define if explicit_bzero function is supported */
+/* #undef HAVE_EXPLICIT_BZERO */
 
 /* Define to 1 if you have the <iconv.h> header file. */
 #define HAVE_ICONV_H 1
@@ -51,11 +59,17 @@
 /* Define to 1 if you have the <ldap_ssl.h> header file. */
 /* #undef HAVE_LDAP_SSL_H */
 
-/* Define to 1 if you have the <libpq-fe.h> header file. */
-#define HAVE_LIBPQ_FE_H 1
+/* Define to 1 if you have the 'crypto' library (-lcrypto). */
+/* #undef HAVE_LIBCRYPTO */
 
-/* Define to 1 if you have the <memory.h> header file. */
-#define HAVE_MEMORY_H 1
+/* Define to 1 if you have the <libpq-fe.h> header file. */
+/* #undef HAVE_LIBPQ_FE_H */
+
+/* Define if memset_s function is supported */
+#define HAVE_MEMSET_S 1
+
+/* Define to 1 if you have the <mysql/errmsg.h> header file. */
+/* #undef HAVE_MYSQL_ERRMSG_H */
 
 /* Define to 1 if you have the <mysql.h> header file. */
 /* #undef HAVE_MYSQL_H */
@@ -75,8 +89,17 @@
 /* Define to 1 if you have the <my_sys.h> header file. */
 /* #undef HAVE_MY_SYS_H */
 
-/* Define to 1 if you have the `nl_langinfo' function. */
+/* Define to 1 if you have the 'nl_langinfo' function. */
 #define HAVE_NL_LANGINFO 1
+
+/* Define to 1 if you have the <nss.h> header file. */
+/* #undef HAVE_NSS_H */
+
+/* Define to 1 if you have the <nss/nss.h> header file. */
+/* #undef HAVE_NSS_NSS_H */
+
+/* Define to 1 if you have the <nss/pk11pub.h> header file. */
+/* #undef HAVE_NSS_PK11PUB_H */
 
 /* Define to 1 if you have the <oci.h> header file. */
 /* #undef HAVE_OCI_H */
@@ -84,8 +107,20 @@
 /* Define to 1 if you have the <odbc/sql.h> header file. */
 /* #undef HAVE_ODBC_SQL_H */
 
+/* Define to 1 if you have the 'OPENSSL_init_crypto' function. */
+/* #undef HAVE_OPENSSL_INIT_CRYPTO */
+
+/* Define to 1 if you have the <openssl/x509.h> header file. */
+/* #undef HAVE_OPENSSL_X509_H */
+
+/* Define to 1 if you have the <pk11pub.h> header file. */
+/* #undef HAVE_PK11PUB_H */
+
 /* Define to 1 if you have the <postgresql/libpq-fe.h> header file. */
 /* #undef HAVE_POSTGRESQL_LIBPQ_FE_H */
+
+/* Define to 1 if you have the <prerror.h> header file. */
+/* #undef HAVE_PRERROR_H */
 
 /* Define to 1 if you have the <sqlite3.h> header file. */
 #define HAVE_SQLITE3_H 1
@@ -99,6 +134,9 @@
 /* Define to 1 if you have the <stdint.h> header file. */
 #define HAVE_STDINT_H 1
 
+/* Define to 1 if you have the <stdio.h> header file. */
+#define HAVE_STDIO_H 1
+
 /* Define to 1 if you have the <stdlib.h> header file. */
 #define HAVE_STDLIB_H 1
 
@@ -108,9 +146,6 @@
 /* Define to 1 if you have the <string.h> header file. */
 #define HAVE_STRING_H 1
 
-/* Define to 1 if you have the <sybdb.h> header file. */
-/* #undef HAVE_SYBDB_H */
-
 /* Define to 1 if you have the <sys/stat.h> header file. */
 #define HAVE_SYS_STAT_H 1
 
@@ -119,6 +154,9 @@
 
 /* Define to 1 if you have the <unistd.h> header file. */
 #define HAVE_UNISTD_H 1
+
+/* Define if compiler handles weak symbols */
+#define HAVE_WEAK_SYMBOLS 1
 
 /* Define if xmlparse/xmlparse.h is available */
 /* #undef HAVE_XMLPARSE_XMLPARSE_H */
@@ -144,8 +182,13 @@
 /* Define to the one symbol short name of this package. */
 #define PACKAGE_TARNAME ""
 
+/* Define to the home page for this package. */
+#define PACKAGE_URL ""
+
 /* Define to the version of this package. */
 #define PACKAGE_VERSION ""
 
-/* Define to 1 if you have the ANSI C header files. */
+/* Define to 1 if all of the C89 standard headers exist (not just the ones
+   required in a freestanding environment). This macro is provided for
+   backward compatibility; new code need not use it. */
 #define STDC_HEADERS 1

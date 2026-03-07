@@ -1,9 +1,27 @@
 
 filegroup(
-    name = "apr_pagespeed",
+    name = "apr_pagespeed_linux",
     srcs = [
         "gen/arch/linux/x64/include/apr.h",
         "gen/arch/linux/x64/include/apr_private.h",
     ],
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "apr_pagespeed_mac",
+    srcs = [
+        "gen/arch/mac/x64/include/apr.h",
+        "gen/arch/mac/x64/include/apr_private.h",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "apr_pagespeed",
+    actual = select({
+        "@platforms//os:macos": ":apr_pagespeed_mac",
+        "//conditions:default": ":apr_pagespeed_linux",
+    }),
     visibility = ["//visibility:public"],
 )

@@ -90,16 +90,24 @@ cc_library(
         "include/apr_ldap_init.h",
         "include/apr_crypto.h",
     ],
-    copts = [
-      "-Ithird_party/aprutil/gen/arch/linux/x64/include/",
-      "-Ithird_party/aprutil/gen/arch/linux/x64/include/private",
-      "-Iexternal/aprutil/include/",
-      "-Iexternal/aprutil/include/private/",
-      "-Iexternal/aprutil/include/arch/unix/",
-      "-Iexternal/aprutil/",
-      "-Iexternal/apr/include/",
-      "-Iexternal/apr/include/arch/unix/",
-      "-Ithird_party/apr/gen/arch/linux/x64/include/",
+    copts = select({
+        "@platforms//os:macos": [
+            "-Ithird_party/aprutil/gen/arch/mac/x64/include/",
+            "-Ithird_party/aprutil/gen/arch/mac/x64/include/private",
+            "-Ithird_party/apr/gen/arch/mac/x64/include/",
+        ],
+        "//conditions:default": [
+            "-Ithird_party/aprutil/gen/arch/linux/x64/include/",
+            "-Ithird_party/aprutil/gen/arch/linux/x64/include/private",
+            "-Ithird_party/apr/gen/arch/linux/x64/include/",
+        ],
+    }) + [
+        "-Iexternal/aprutil/include/",
+        "-Iexternal/aprutil/include/private/",
+        "-Iexternal/aprutil/include/arch/unix/",
+        "-Iexternal/aprutil/",
+        "-Iexternal/apr/include/",
+        "-Iexternal/apr/include/arch/unix/",
     ],
     deps = [
         "@apr//:apr",
@@ -108,4 +116,4 @@ cc_library(
 )
 """
 
-# find | grep .h$ | while read line; do echo "\"$line\","; done 
+# find | grep .h$ | while read line; do echo "\"$line\","; done

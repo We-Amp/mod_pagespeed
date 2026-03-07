@@ -14,15 +14,38 @@
  * limitations under the License.
  */
 
-#ifndef APU_SELECT_DBM_H
-#define APU_SELECT_DBM_H
+#include "apu.h"        /* configuration data */
 
-/*
-** The following macros control what features APRUTIL will use
-*/
-#define APU_USE_SDBM 1
-#define APU_USE_NDBM 0
-#define APU_USE_GDBM 0
-#define APU_USE_DB 0
+/**
+ * @file apu_want.h
+ * @brief APR Standard Headers Support
+ *
+ * <PRE>
+ * Features:
+ *
+ *   APU_WANT_DB:       <db.h>
+ *
+ * Typical usage:
+ *
+ *   #define APU_WANT_DB
+ *   #include "apu_want.h"
+ *
+ * The appropriate headers will be included.
+ *
+ * Note: it is safe to use this in a header (it won't interfere with other
+ *       headers' or source files' use of apu_want.h)
+ * </PRE>
+ */
 
-#endif /* !APU_SELECT_DBM_H */
+/* --------------------------------------------------------------------- */
+
+#ifdef APU_WANT_DB
+
+#if APU_HAVE_DB
+#include <db.h>
+#endif
+
+#undef APU_WANT_DB
+#endif
+
+/* --------------------------------------------------------------------- */

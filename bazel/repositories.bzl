@@ -13,89 +13,6 @@ load(":apr.bzl", "apr_build_rule")
 load(":aprutil.bzl", "aprutil_build_rule")
 load(":closure_compiler.bzl", "closure_library_rules")
 load(":cyclone.bzl", "cyclone_build_rule")
-load(":libcurl.bzl", "libcurl_build_rule", "libcurl_linux_build_rule", "libcurl_windows_build_rule")
-load(":libmemcached.bzl", "libmemcached_build_rule")
-
-def _cyclone_repository_impl(repository_ctx):
-    """Repository rule for Cyclone that handles platform-specific paths.
-
-    Cyclone source is located in order of preference:
-    1. CYCLONE_CACHE_PATH environment variable
-    2. Git submodule at third_party/cyclone-cache (relative to workspace)
-    3. Platform-specific default: C:/build/cyclone-cache (Windows) or /cyclone-cache (Linux)
-    """
-    # Check environment variable first
-    cyclone_path = repository_ctx.os.environ.get("CYCLONE_CACHE_PATH", "")
-
-    if not cyclone_path:
-        # Check for git submodule (relative to workspace root)
-        workspace_root = str(repository_ctx.workspace_root)
-        submodule_path = workspace_root + "/third_party/cyclone-cache"
-
-        # Test if submodule path exists and has src directory
-        result = repository_ctx.execute(["test", "-d", submodule_path + "/src"])
-        if result.return_code == 0:
-            cyclone_path = submodule_path
-        else:
-            # Fall back to platform-specific default path
-            if repository_ctx.os.name.startswith("windows"):
-                cyclone_path = "C:/build/cyclone-cache"
-            else:
-                cyclone_path = "/cyclone-cache"
-
-    # Symlink the src and include directories from cyclone
-    repository_ctx.symlink(cyclone_path + "/src", "src")
-    repository_ctx.symlink(cyclone_path + "/include", "include")
-
-    # Write the BUILD file
-    repository_ctx.file("BUILD.bazel", repository_ctx.attr.build_file_content)
-
-cyclone_repository = repository_rule(
-    implementation = _cyclone_repository_impl,
-    attrs = {
-        "build_file_content": attr.string(mandatory = True),
-    },
-    environ = ["CYCLONE_CACHE_PATH"],
-    local = True,
-)
-
-def _curl_repository_impl(repository_ctx):
-    """Repository rule for libcurl that handles platform-specific paths.
-
-    On Linux: Uses system-installed libcurl from /usr
-    On Windows: Uses vcpkg-installed or pre-downloaded libcurl from C:/curl
-    """
-    is_windows = repository_ctx.os.name.startswith("windows")
-
-    if is_windows:
-        # Check environment variable first, then use default path
-        curl_path = repository_ctx.os.environ.get("CURL_PATH", "C:/curl")
-
-        # Symlink include directory
-        repository_ctx.symlink(curl_path + "/include", "include")
-
-        # Symlink lib directory (import libraries)
-        repository_ctx.symlink(curl_path + "/lib", "lib")
-
-        # Symlink bin directory (DLLs)
-        repository_ctx.symlink(curl_path + "/bin", "bin")
-
-        # Generate BUILD file
-        repository_ctx.file("BUILD.bazel", repository_ctx.attr.windows_build_file_content)
-    else:
-        # Linux: symlink from /usr
-        repository_ctx.symlink("/usr/include", "include")
-        repository_ctx.file("BUILD.bazel", repository_ctx.attr.linux_build_file_content)
-
-curl_repository = repository_rule(
-    implementation = _curl_repository_impl,
-    attrs = {
-        "linux_build_file_content": attr.string(mandatory = True),
-        "windows_build_file_content": attr.string(mandatory = True),
-    },
-    environ = ["CURL_PATH"],
-    local = True,
-)
 
 ENVOY_COMMIT = "83082b0bf0db8a5b6bb3e691df387bf8566f072d"
 ENVOY_SHA = "71a2dc9186d1ef916a952aae8949953dc7ae6bbcce4415bdc2f3ffa0c1ec1427"
@@ -122,19 +39,30 @@ OPTIPNG_COMMIT = "0.7.8"  # Updated Jan 2026 - security fix for GIF decoder buff
 OPTIPNG_SHA = "25a3bd68481f21502ccaa0f4c13f84dcf6b20338e4c4e8c51f2cefbd8513398c"
 LIBJPEG_TURBO_COMMIT = "ab7cd970a83609f98e8542cea8b81e8d92ddab83"  # July 24th, 2020
 LIBJPEG_TURBO_SHA = "3a6b383a957d87b4d60b67e2e1a950c695ee3016e817d04a13af05b9a98c6aea"
-APR_COMMIT = "901ece0cd7cec29c050c58451a801bb125d09b6e"  # July 24th, 2020
-APR_SHA = "372b6a3424d8a3abbbf216bf6058e949f7b9da95e9caa57a9f5e82fe7528ca40"
-APRUTIL_COMMIT = "13ed779e56669007dffe9a27ffab3790b59cbfaa"
-APRUTIL_SHA = "9cf6d0e6fcc4783228dcee722897dadaadc601aef894c43a1e1514436eb4471a"
+# APR 1.7.x branch head - Updated Feb 2026
+APR_COMMIT = "d7a4f5be56969ebb5d2f9d093e17eb39dd016693"
+APR_SHA = "5c56af0a8ad7dee32dc381620496f6ebbaa9bf64a470a4ad4fdb0eed84e87fc7"
+# APR-util 1.6.x branch head - Updated Feb 2026
+APRUTIL_COMMIT = "efbe77e09f0f3e872f2a1126d88d791ab4361b23"
+APRUTIL_SHA = "4ce5fead950705f6b33dcac5b7fae45f4295b80cb75a6a1378baaec896fd4fc1"
 
 # Cyclone Cache - high-performance disk cache with scan-resistant CLFUS algorithm
 # Requires C++23 - wrapper provides C ABI for C++20 consumers
-CYCLONE_COMMIT = "main"  # Use main branch - update to specific commit for production
+CYCLONE_COMMIT = "cb4c0ea497e546b5fd6c4f8f27d75faebdf5d07c"
 
 # Libevent - cross-platform event notification library
 # Used by LibeventDispatcher for standalone event loop (Apache deployments)
 LIBEVENT_VERSION = "2.1.12-stable"
 LIBEVENT_SHA = "92e6de1be9ec176428fd2367677e61ceffc2ee1cb119035037a27d346b0403bb"
+
+# libcurl - HTTP client library (built from source)
+LIBCURL_VERSION = "8.11.0"
+LIBCURL_SHA = "5a231145114589491fc52da118f9c7ef8abee885d1cb1ced99c7290e9a352f07"
+
+# libmemcached - memcached client library (built from source)
+# Using awesomized/libmemcached fork which is actively maintained
+LIBMEMCACHED_VERSION = "1.1.4"
+LIBMEMCACHED_SHA = "c477e1f6510e1dc698e84f3717ce690a8f65b94c616ecaa62306cce0f5e3116a"
 
 # NOTE: Closure isn't at the latest, because of that introcucing top level comments which
 # break tests, but more importantly, make generated js files appear as if they're apache
@@ -144,12 +72,23 @@ LIBEVENT_SHA = "92e6de1be9ec176428fd2367677e61ceffc2ee1cb119035037a27d346b0403bb
 # https://github.com/google/closure-library/commit/1fe1bd873b1b772cca7de983cbaf72ef4011de0b
 CLOSURE_LIBRARY_COMMIT = "20191111"  # July 27th, 2020 (latest release was 20200719)
 
+# Build file content for source archives used by rules_foreign_cc
+_ALL_SRCS_BUILD_FILE = """
+filegroup(
+    name = "all_srcs",
+    srcs = glob(["**"]),
+    visibility = ["//visibility:public"],
+)
+"""
+
 def mod_pagespeed_dependencies():
     http_archive(
         name = "envoy",
         strip_prefix = "envoy-%s" % ENVOY_COMMIT,
         url = "https://github.com/envoyproxy/envoy/archive/%s.tar.gz" % ENVOY_COMMIT,
         sha256 = ENVOY_SHA,
+        patches = ["//bazel:envoy_repo_yq_windows.patch"],
+        patch_args = ["-p1"],
     )
 
     http_archive(
@@ -266,42 +205,29 @@ def mod_pagespeed_dependencies():
     )
 
     # Cyclone Cache - high-performance disk cache
-    # Uses cyclone_repository rule that auto-detects platform:
-    #   - Windows: C:/build/cyclone-cache
-    #   - Linux/Docker: /cyclone-cache (mounted via docker-compose.yml)
-    # Override with CYCLONE_CACHE_PATH environment variable if needed
-    cyclone_repository(
+    git_repository(
         name = "cyclone",
+        remote = "git@github.com:We-Amp/cyclone-cache.git",
+        commit = CYCLONE_COMMIT,
         build_file_content = cyclone_build_rule,
     )
 
-    # Note: libevent is provided by Envoy's build system.
-    # For standalone Apache builds, use the system-installed libevent.
-    # http_archive(
-    #     name = "com_github_libevent_libevent",
-    #     strip_prefix = "libevent-%s" % LIBEVENT_VERSION,
-    #     url = "https://github.com/libevent/libevent/releases/download/release-%s/libevent-%s.tar.gz" % (LIBEVENT_VERSION, LIBEVENT_VERSION),
-    #     sha256 = LIBEVENT_SHA,
-    #     build_file = "@mod_pagespeed//bazel:libevent.BUILD",
-    # )
-
-    # libmemcached - system-installed memcached client library
-    # Requires libmemcached-dev to be installed (apt-get install libmemcached-dev)
-    native.new_local_repository(
-        name = "libmemcached",
-        path = "/usr",
-        build_file_content = libmemcached_build_rule,
+    # libcurl source - built via cmake in //bazel:curl
+    http_archive(
+        name = "curl_src",
+        strip_prefix = "curl-curl-%s" % LIBCURL_VERSION.replace(".", "_"),
+        url = "https://github.com/curl/curl/archive/refs/tags/curl-%s.tar.gz" % LIBCURL_VERSION.replace(".", "_"),
+        sha256 = LIBCURL_SHA,
+        build_file_content = _ALL_SRCS_BUILD_FILE,
     )
 
-    # libcurl - HTTP client library
-    # Linux: Uses system-installed libcurl from /usr
-    #        Requires libcurl4-openssl-dev (apt-get install libcurl4-openssl-dev)
-    # Windows: Uses pre-installed libcurl from C:/curl
-    #          Set CURL_PATH env var to override location
-    curl_repository(
-        name = "curl",
-        linux_build_file_content = libcurl_linux_build_rule,
-        windows_build_file_content = libcurl_windows_build_rule,
+    # libmemcached source - built via cmake in //bazel:libmemcached
+    http_archive(
+        name = "libmemcached_src",
+        strip_prefix = "libmemcached-%s" % LIBMEMCACHED_VERSION,
+        url = "https://github.com/awesomized/libmemcached/archive/refs/tags/%s.tar.gz" % LIBMEMCACHED_VERSION,
+        sha256 = LIBMEMCACHED_SHA,
+        build_file_content = _ALL_SRCS_BUILD_FILE,
     )
 
     http_archive(

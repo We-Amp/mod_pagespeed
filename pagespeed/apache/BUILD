@@ -2,6 +2,13 @@ load("@rules_cc//cc:defs.bzl", "cc_library")
 
 licenses(["notice"])  # Apache 2
 
+# Linker version script to hide internal symbols (especially BoringSSL)
+# from the shared library, preventing conflicts with mod_ssl's OpenSSL.
+exports_files(
+    ["mod_pagespeed.lds"],
+    visibility = ["//visibility:public"],
+)
+
 # Apache-specific system test scripts
 filegroup(
     name = "system_test_files",
