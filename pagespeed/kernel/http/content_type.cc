@@ -54,7 +54,7 @@ const ContentType kTypes[] = {
     // also fine; application/json, less so). Using the right MIME type
     // and charset is critical; never use text/plain or text/html, and
     // do not mistype utf-8 as utf8.
-    {"application/javascript", ".json", ContentType::kJson},
+    {"application/json", ".json", ContentType::kJson},
     {"application/javascript", ".map", ContentType::kSourceMap},
     {"application/pdf", ".pdf", ContentType::kPdf},  // RFC 3778
     {"application/octet-stream", ".bin", ContentType::kOctetStream},

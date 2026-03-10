@@ -59,8 +59,7 @@ class AdminSiteTest : public CustomRewriteTestBase<SystemRewriteOptions> {
   AdminSiteTest()
       : thread_system_(Platform::CreateThreadSystem()),
         options_(new SystemRewriteOptions(thread_system_.get())),
-        admin_site_(new AdminSite(factory()->static_asset_manager(), timer(),
-                                  message_handler())) {}
+        admin_site_(new AdminSite(timer(), message_handler())) {}
 
   virtual void SetUp() {
     CustomRewriteTestBase<SystemRewriteOptions>::SetUp();
@@ -86,29 +85,27 @@ class AdminSiteTest : public CustomRewriteTestBase<SystemRewriteOptions> {
   std::unique_ptr<AdminSite> admin_site_;
 };
 
-TEST_F(AdminSiteTest, ColorMessagesInHistoryPage) {
+TEST_F(AdminSiteTest, MessageHistoryReturnsJson) {
   EXPECT_EQ(message_handler(), admin_site_->MessageHandlerForTesting());
-  // Due to the size limit to the SharedCircularBuffer, the earliest message
-  // in the buffer may be incomplete. In order to always display complete
-  // messages on the history page, we simply ignore all the things before the
-  // first new line. So here we inject a useless line at the beginning to show
-  // that we throw out the first (possibly) incomplete line.
+  // Inject a line that gets thrown out (first line may be incomplete
+  // due to SharedCircularBuffer size limit).
   message_handler()->Message(kInfo, "Ignore the first line.");
   message_handler()->Message(kError, "Test for %s", "Errors");
   message_handler()->Message(kWarning, "Test for %s", "Warnings");
   message_handler()->Message(kInfo, "Test for %s", "Infos");
   GoogleString buffer;
   StringAsyncFetch fetch(rewrite_driver()->request_context(), &buffer);
-  static const char kColorTemplate[] = "color:%s; margin:0;";
-  // The value of the first argument AdminSite::AdminSource
-  // does not matter in this test. So we just test for kPageSpeedAdmin here.
   admin_site_->MessageHistoryHandler(*(rewrite_driver()->options()),
                                      AdminSite::kPageSpeedAdmin, &fetch);
-  EXPECT_THAT(buffer,
-              ::testing::HasSubstr(absl::StrFormat(kColorTemplate, "red")));
-  EXPECT_THAT(buffer,
-              ::testing::HasSubstr(absl::StrFormat(kColorTemplate, "brown")));
-  EXPECT_THAT(buffer, ::testing::HasSubstr("style=\"margin:0;\""));
+  // Verify JSON output contains severity levels.
+  EXPECT_THAT(buffer, ::testing::HasSubstr("\"severity\":\"error\""));
+  EXPECT_THAT(buffer, ::testing::HasSubstr("\"severity\":\"warning\""));
+  EXPECT_THAT(buffer, ::testing::HasSubstr("\"severity\":\"info\""));
+  EXPECT_THAT(buffer, ::testing::HasSubstr("\"messages\":["));
+  // Verify message content is present.
+  EXPECT_THAT(buffer, ::testing::HasSubstr("Test for Errors"));
+  EXPECT_THAT(buffer, ::testing::HasSubstr("Test for Warnings"));
+  EXPECT_THAT(buffer, ::testing::HasSubstr("Test for Infos"));
 }
 // TODO(xqyin): Add unit tests for other methods in AdminSite.
 

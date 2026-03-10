@@ -21,37 +21,7 @@
 
 #include <memory>
 
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#ifdef _WIN32
-#include <windows.h>
-#endif
-
 #include "base/logging.h"
-
-namespace {
-#ifdef _WIN32
-void SystemContextDebugLog(const char* msg) {
-  HANDLE hFile = CreateFileA(
-      "C:\\inetpub\\pagespeed\\system_context_debug.log",
-      FILE_APPEND_DATA,
-      FILE_SHARE_READ | FILE_SHARE_WRITE,
-      NULL,
-      OPEN_ALWAYS,
-      FILE_ATTRIBUTE_NORMAL,
-      NULL);
-  if (hFile != INVALID_HANDLE_VALUE) {
-    DWORD written;
-    WriteFile(hFile, msg, strlen(msg), &written, NULL);
-    WriteFile(hFile, "\r\n", 2, &written, NULL);
-    CloseHandle(hFile);
-  }
-}
-#else
-void SystemContextDebugLog(const char*) {}
-#endif
-}  // namespace
 #include "net/instaweb/http/public/url_async_fetcher.h"
 #include "net/instaweb/http/public/url_async_fetcher_stats.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
@@ -105,40 +75,7 @@ SystemServerContext::SystemServerContext(RewriteDriverFactory* factory,
       hostname_identifier_(StrCat(hostname, ":", IntegerToString(port))),
       system_caches_(nullptr),
       cache_path_(nullptr) {
-  SystemContextDebugLog("SystemServerContext: constructor body entered");
-  char buf[512];
-  snprintf(buf, sizeof(buf), "SystemServerContext: factory=%p",
-           static_cast<const void*>(factory));
-  SystemContextDebugLog(buf);
-  snprintf(buf, sizeof(buf), "SystemServerContext: hostname_identifier=%s",
-           hostname_identifier_.c_str());
-  SystemContextDebugLog(buf);
-
-  SystemContextDebugLog("SystemServerContext: calling global_options()");
-  RewriteOptions* opts = global_options();
-  snprintf(buf, sizeof(buf), "SystemServerContext: global_options=%p",
-           static_cast<void*>(opts));
-  SystemContextDebugLog(buf);
-
-  if (opts == nullptr) {
-    SystemContextDebugLog("SystemServerContext: global_options is NULL - skipping set_description");
-    return;
-  }
-
-  SystemContextDebugLog("SystemServerContext: doing dynamic_cast");
-  SystemRewriteOptions* sys_opts = dynamic_cast<SystemRewriteOptions*>(opts);
-  snprintf(buf, sizeof(buf), "SystemServerContext: sys_opts=%p",
-           static_cast<void*>(sys_opts));
-  SystemContextDebugLog(buf);
-
-  if (sys_opts == nullptr) {
-    SystemContextDebugLog("SystemServerContext: dynamic_cast returned NULL - CHECK would fail!");
-    // Don't call CHECK - let it proceed and log what happens
-  }
-
-  SystemContextDebugLog("SystemServerContext: calling global_system_rewrite_options()");
   global_system_rewrite_options()->set_description(hostname_identifier_);
-  SystemContextDebugLog("SystemServerContext: set_description done");
 }
 
 SystemServerContext::~SystemServerContext() {
@@ -268,8 +205,7 @@ SystemRewriteOptions* SystemServerContext::global_system_rewrite_options() {
 
 void SystemServerContext::PostInitHook() {
   ServerContext::PostInitHook();
-  admin_site_ = std::make_unique<AdminSite>(static_asset_manager(), timer(),
-                                            message_handler());
+  admin_site_ = std::make_unique<AdminSite>(timer(), message_handler());
 }
 
 void SystemServerContext::CreateLocalStatistics(
@@ -359,40 +295,13 @@ void SystemServerContext::ChildInit(SystemRewriteDriverFactory* factory) {
 
 void SystemServerContext::ApplySessionFetchers(const RequestContextPtr& request,
                                                RewriteDriver* driver) {
-  SystemContextDebugLog("ApplySessionFetchers: entry");
-  char dbgbuf[256];
-  snprintf(dbgbuf, sizeof(dbgbuf), "ApplySessionFetchers: request=%p driver=%p",
-           request.get(), static_cast<void*>(driver));
-  SystemContextDebugLog(dbgbuf);
-
-  SystemContextDebugLog("ApplySessionFetchers: getting driver options");
-  const RewriteOptions* raw_opts = driver->options();
-  snprintf(dbgbuf, sizeof(dbgbuf), "ApplySessionFetchers: raw_opts=%p",
-           static_cast<const void*>(raw_opts));
-  SystemContextDebugLog(dbgbuf);
-
-  SystemContextDebugLog("ApplySessionFetchers: doing DynamicCast");
   const SystemRewriteOptions* conf =
-      SystemRewriteOptions::DynamicCast(raw_opts);
-  snprintf(dbgbuf, sizeof(dbgbuf), "ApplySessionFetchers: conf=%p",
-           static_cast<const void*>(conf));
-  SystemContextDebugLog(dbgbuf);
-
-  if (conf == nullptr) {
-    SystemContextDebugLog("ApplySessionFetchers: conf is nullptr, CHECK will fail!");
-  }
+      SystemRewriteOptions::DynamicCast(driver->options());
   CHECK(conf != nullptr);
-  SystemContextDebugLog("ApplySessionFetchers: CHECK passed");
 
-  SystemContextDebugLog("ApplySessionFetchers: doing SystemRequestContext::DynamicCast");
   SystemRequestContext* system_request =
       SystemRequestContext::DynamicCast(request.get());
-  snprintf(dbgbuf, sizeof(dbgbuf), "ApplySessionFetchers: system_request=%p",
-           static_cast<void*>(system_request));
-  SystemContextDebugLog(dbgbuf);
-
   if (system_request == nullptr) {
-    SystemContextDebugLog("ApplySessionFetchers: system_request is null, returning early");
     return;  // decoding_driver has a null RequestContext.
   }
 
@@ -401,55 +310,20 @@ void SystemServerContext::ApplySessionFetchers(const RequestContextPtr& request,
   //
   // Currently, we want AddHeadersFetcher running first, then
   // LoopbackRouteFetcher (and then the base fetcher).
-  SystemContextDebugLog("ApplySessionFetchers: getting global_system_rewrite_options");
   SystemRewriteOptions* options = global_system_rewrite_options();
-  snprintf(dbgbuf, sizeof(dbgbuf), "ApplySessionFetchers: options=%p",
-           static_cast<void*>(options));
-  SystemContextDebugLog(dbgbuf);
-
-  SystemContextDebugLog("ApplySessionFetchers: checking loopback routing");
-  bool disable_loopback = options->disable_loopback_routing();
-  bool slurping = options->slurping_enabled();
-  bool test_proxy = options->test_proxy();
-  snprintf(dbgbuf, sizeof(dbgbuf), "ApplySessionFetchers: disable_loopback=%d slurping=%d test_proxy=%d",
-           disable_loopback, slurping, test_proxy);
-  SystemContextDebugLog(dbgbuf);
-
-  if (!disable_loopback && !slurping && !test_proxy) {
+  if (!options->disable_loopback_routing() && !options->slurping_enabled() &&
+      !options->test_proxy()) {
     // Note the port here is our port, not from the request, since
     // LoopbackRouteFetcher may decide we should be talking to ourselves.
-    SystemContextDebugLog("ApplySessionFetchers: getting local_ip");
-    GoogleString local_ip = system_request->local_ip();
-    snprintf(dbgbuf, sizeof(dbgbuf), "ApplySessionFetchers: local_ip=%s",
-             local_ip.c_str());
-    SystemContextDebugLog(dbgbuf);
-
-    SystemContextDebugLog("ApplySessionFetchers: getting local_port");
-    int local_port = system_request->local_port();
-    snprintf(dbgbuf, sizeof(dbgbuf), "ApplySessionFetchers: local_port=%d",
-             local_port);
-    SystemContextDebugLog(dbgbuf);
-
-    SystemContextDebugLog("ApplySessionFetchers: getting async_fetcher");
-    UrlAsyncFetcher* fetcher = driver->async_fetcher();
-    snprintf(dbgbuf, sizeof(dbgbuf), "ApplySessionFetchers: async_fetcher=%p",
-             static_cast<void*>(fetcher));
-    SystemContextDebugLog(dbgbuf);
-
-    SystemContextDebugLog("ApplySessionFetchers: creating LoopbackRouteFetcher");
     driver->SetSessionFetcher(new LoopbackRouteFetcher(
-        driver->options(), local_ip, local_port, fetcher));
-    SystemContextDebugLog("ApplySessionFetchers: LoopbackRouteFetcher set");
+        driver->options(), system_request->local_ip(),
+        system_request->local_port(), driver->async_fetcher()));
   }
 
-  SystemContextDebugLog("ApplySessionFetchers: checking custom fetch headers");
   if (driver->options()->num_custom_fetch_headers() > 0) {
-    SystemContextDebugLog("ApplySessionFetchers: creating AddHeadersFetcher");
     driver->SetSessionFetcher(
         new AddHeadersFetcher(driver->options(), driver->async_fetcher()));
-    SystemContextDebugLog("ApplySessionFetchers: AddHeadersFetcher set");
   }
-  SystemContextDebugLog("ApplySessionFetchers: done");
 }
 
 void SystemServerContext::CollapseConfigOverlaysAndComputeSignatures() {

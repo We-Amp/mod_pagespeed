@@ -140,9 +140,6 @@ class SystemServerContext : public ServerContext {
   void MessageHistoryHandler(const RewriteOptions& options,
                              AdminSite::AdminSource source, AsyncFetch* fetch);
 
-  // Deprecated handler for graphs in the PSOL console.
-  void StatisticsGraphsHandler(Writer* writer);
-
   // Handle a request for /pagespeed_admin/*, which is a launching
   // point for all the administrator pages including stats,
   // message-histogram, console, etc.

@@ -1,171 +1,111 @@
-load("@rules_cc//cc:defs.bzl", "cc_library")
-load("//bazel:closure_compiler.bzl", "closure_compiler_gen")
-load("//bazel:data2c.bzl", "data2c_gen2_admin_css", "data2c_gen2_admin_js")
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
+
+# =============================================================================
+# Admin Console SPA embedding
+# =============================================================================
+# The Svelte 5 SPA is built outside Bazel (pagespeed/system/console/build.sh)
+# and the output admin_console.html is checked in for hermetic builds.
+# This genrule converts it to a C++ string constant via data2c.
+genrule(
+    name = "html_admin_console",
+    srcs = ["console/admin_console.html"],
+    outs = ["html_admin_console.cc"],
+    cmd = "$(location //net/instaweb/js:data2c) --data_file=$< --c_file=$@ --varname=HTML_admin_console",
+    tools = ["//net/instaweb/js:data2c"],
+)
 
 licenses(["notice"])  # Apache 2
 
-closure_compiler_gen(
-    name = "caches_dbg",
-    entry_points = [
-        "goog:pagespeed.Caches",
-    ],
-    js_dir = "system",
-    js_src = "pagespeed/system/caches.js",
-    opt = False,
-)
+# =============================================================================
+# Common source file lists
+# =============================================================================
+# These lists are shared between system_envoy, system_windows, and system
+# targets to reduce duplication and ensure consistency.
 
-closure_compiler_gen(
-    name = "caches_opt",
-    entry_points = [
-        "goog:pagespeed.Caches",
-    ],
-    js_dir = "system",
-    js_src = "pagespeed/system/caches.js",
-    opt = True,
-)
+# Core source files used by all system library variants (envoy, windows, full).
+# Excludes controller_manager.cc (POSIX fork/signals) and memcached_cache.cc
+# (libmemcached is POSIX-only).
+SYSTEM_CORE_SRCS = [
+    "add_headers_fetcher.cc",
+    "admin_license_handler.cc",
+    "admin_site.cc",
+    "external_server_spec.cc",
+    "in_place_resource_recorder.cc",
+    "loopback_route_fetcher.cc",
+    "redis_cache.cc",
+    "system_cache_path.cc",
+    "system_caches.cc",
+    "system_message_handler.cc",
+    "system_request_context.cc",
+    "system_rewrite_driver_factory.cc",
+    "system_rewrite_options.cc",
+    "system_server_context.cc",
+    "system_thread_system.cc",
+]
 
-closure_compiler_gen(
-    name = "console_opt",
-    entry_points = [
-        "goog:pagespeed.Console",
-        "goog:pagespeed.statistics",
-    ],
-    externs = [
-        "pagespeed/system/js_externs.js",
-        "third_party/closure/externs/google_visualization_api.js",
-    ],
-    js_dir = "system",
-    js_src = "pagespeed/system/console.js",
-    opt = True,
-)
+# Generated admin assets used by all system library variants.
+# The old Closure Compiler CSS/JS assets have been replaced by the
+# Svelte 5 SPA (admin_console.html), embedded via data2c.
+SYSTEM_GENERATED_SRCS = [
+    ":html_admin_console",
+]
 
-closure_compiler_gen(
-    name = "console_dbg",
-    entry_points = [
-        "goog:pagespeed.Console",
-        "goog:pagespeed.statistics",
-    ],
-    externs = [
-        "pagespeed/system/js_externs.js",
-        "third_party/closure/externs/google_visualization_api.js",
-    ],
-    js_dir = "system",
-    js_src = "pagespeed/system/console.js",
-    opt = False,
-)
+# Core header files used by all system library variants.
+# These headers are public API for system library users.
+SYSTEM_CORE_HDRS = [
+    "add_headers_fetcher.h",
+    "admin_license_handler.h",
+    "admin_site.h",
+    "controller_manager.h",
+    "controller_process.h",
+    "external_server_spec.h",
+    "in_place_resource_recorder.h",
+    "loopback_route_fetcher.h",
+    "redis_cache.h",
+    "system_cache_path.h",
+    "system_caches.h",
+    "system_message_handler.h",
+    "system_request_context.h",
+    "system_rewrite_driver_factory.h",
+    "system_rewrite_options.h",
+    "system_server_context.h",
+    "system_thread_system.h",
+]
 
-closure_compiler_gen(
-    name = "graphs_dbg",
-    entry_points = [
-        "goog:pagespeed.Graphs",
-    ],
-    externs = [
-        "third_party/closure/externs/google_visualization_api.js",
-    ],
-    js_dir = "system",
-    js_src = "pagespeed/system/graphs.js",
-    opt = False,
-)
+# Core dependencies used by all system library variants.
+SYSTEM_CORE_DEPS = [
+    ":external_server_spec",
+    ":redis_cache",
+    ":system_controller_process_h",
+    "//net/instaweb/http",
+    "//net/instaweb/rewriter",
+    "//pagespeed/kernel/cache:cyclone_cache",
+    "//pagespeed/kernel/license_v2:license_file",
+    "//pagespeed/kernel/license_v2:license_token",
+    "//pagespeed/kernel/license_v2:license_verifier",
+    "//pagespeed/kernel/sharedmem",
+    "//third_party/redis-crc",
+    "@hiredis",
+]
 
-closure_compiler_gen(
-    name = "graphs_opt",
-    entry_points = [
-        "goog:pagespeed.Graphs",
+# =============================================================================
+# Admin license handler
+# =============================================================================
+# Handles /v1/license/* endpoints in the admin console.
+# Separate library because it depends on license_v2 (Ed25519).
+cc_library(
+    name = "admin_license_handler",
+    srcs = ["admin_license_handler.cc"],
+    hdrs = ["admin_license_handler.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//net/instaweb/http",
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/kernel/http",
+        "//pagespeed/kernel/license_v2:license_file",
+        "//pagespeed/kernel/license_v2:license_token",
+        "//pagespeed/kernel/license_v2:license_verifier",
     ],
-    externs = [
-        "third_party/closure/externs/google_visualization_api.js",
-    ],
-    js_dir = "system",
-    js_src = "pagespeed/system/graphs.js",
-    opt = True,
-)
-
-closure_compiler_gen(
-    name = "messages_dbg",
-    entry_points = [
-        "goog:pagespeed.Messages",
-    ],
-    js_dir = "system",
-    js_src = "pagespeed/system/messages.js",
-    opt = False,
-)
-
-closure_compiler_gen(
-    name = "messages_opt",
-    entry_points = [
-        "goog:pagespeed.Messages",
-    ],
-    js_dir = "system",
-    js_src = "pagespeed/system/messages.js",
-    opt = True,
-)
-
-closure_compiler_gen(
-    name = "statistics_dbg",
-    entry_points = [
-        "goog:pagespeed.Statistics",
-    ],
-    js_dir = "system",
-    js_src = "pagespeed/system/statistics.js",
-    opt = False,
-)
-
-closure_compiler_gen(
-    name = "statistics_opt",
-    entry_points = [
-        "goog:pagespeed.Statistics",
-    ],
-    js_dir = "system",
-    js_src = "pagespeed/system/statistics.js",
-    opt = True,
-)
-
-data2c_gen2_admin_js(
-    name = "data2c_generated",
-    srcs = [
-        "caches",
-        "console",
-        "graphs",
-        "messages",
-        "statistics",
-    ],
-    opt = False,
-)
-
-data2c_gen2_admin_js(
-    name = "data2c_generated",
-    srcs = [
-        "caches",
-        "console",
-        "graphs",
-        "messages",
-        "statistics",
-    ],
-    opt = True,
-)
-
-data2c_gen2_admin_css(
-    name = "data2c_generated",
-    srcs = [
-        "admin_site",
-        "caches",
-        "console",
-        "graphs",
-        "statistics",
-    ],
-    opt = False,
-)
-
-data2c_gen2_admin_css(
-    name = "data2c_generated",
-    srcs = [
-        "admin_site",
-        "caches",
-        "console",
-        "graphs",
-        "statistics",
-    ],
-    opt = True,
 )
 
 # =============================================================================
@@ -181,6 +121,33 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)
+
+# Circuit breaker for resource fetching reliability.
+# Implements the circuit breaker pattern with CLOSED, OPEN, and HALF_OPEN states.
+cc_library(
+    name = "circuit_breaker",
+    srcs = ["circuit_breaker.cc"],
+    hdrs = ["circuit_breaker.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)
+
+# Circuit breaker wrapper for URL fetching.
+# Wraps a UrlAsyncFetcher to apply circuit breaker logic.
+cc_library(
+    name = "circuit_breaker_fetcher",
+    srcs = ["circuit_breaker_fetcher.cc"],
+    hdrs = ["circuit_breaker_fetcher.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":circuit_breaker",
+        "//net/instaweb/http",
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/kernel/http",
     ],
 )
 
@@ -210,7 +177,7 @@ cc_library(
         ":external_server_spec",
         "//pagespeed/kernel/base:pagespeed_base",
         "//pagespeed/kernel/cache",
-        "@libmemcached",
+        "//bazel:libmemcached",
     ],
 )
 
@@ -219,8 +186,6 @@ cc_library(
 # =============================================================================
 # These can be loaded at runtime using dlopen/dlsym for configurations that
 # need specific cache backends without linking them into the main binary.
-
-load("@rules_cc//cc:defs.bzl", "cc_binary")
 
 cc_binary(
     name = "redis_cache.so",
@@ -249,76 +214,14 @@ cc_binary(
 # This reduces binary size and external dependencies.
 cc_library(
     name = "system_envoy",
-    srcs = [
-        "add_headers_fetcher.cc",
-        "admin_site.cc",
-        "external_server_spec.cc",
-        "in_place_resource_recorder.cc",
-        "loopback_route_fetcher.cc",
-        "redis_cache.cc",
-        "system_cache_path.cc",
-        "system_caches.cc",
-        "system_message_handler.cc",
-        "system_request_context.cc",
-        "system_rewrite_driver_factory.cc",
-        "system_rewrite_options.cc",
-        "system_server_context.cc",
-        "system_thread_system.cc",
-        ":css_data2c_generated_admin_site",
-        ":css_data2c_generated_admin_site_opt",
-        ":css_data2c_generated_caches",
-        ":css_data2c_generated_caches_opt",
-        ":css_data2c_generated_console",
-        ":css_data2c_generated_console_opt",
-        ":css_data2c_generated_graphs",
-        ":css_data2c_generated_graphs_opt",
-        ":css_data2c_generated_statistics",
-        ":css_data2c_generated_statistics_opt",
-        ":js_data2c_generated_caches",
-        ":js_data2c_generated_caches_opt",
-        ":js_data2c_generated_console",
-        ":js_data2c_generated_console_opt",
-        ":js_data2c_generated_graphs",
-        ":js_data2c_generated_graphs_opt",
-        ":js_data2c_generated_messages",
-        ":js_data2c_generated_messages_opt",
-        ":js_data2c_generated_statistics",
-        ":js_data2c_generated_statistics_opt",
-    ],
-    hdrs = [
-        "add_headers_fetcher.h",
-        "admin_site.h",
-        "controller_manager.h",
-        "controller_process.h",
-        "external_server_spec.h",
-        "in_place_resource_recorder.h",
-        "loopback_route_fetcher.h",
-        "redis_cache.h",
-        "system_cache_path.h",
-        "system_caches.h",
-        "system_message_handler.h",
-        "system_request_context.h",
-        "system_rewrite_driver_factory.h",
-        "system_rewrite_options.h",
-        "system_server_context.h",
-        "system_thread_system.h",
-    ],
+    srcs = SYSTEM_CORE_SRCS + SYSTEM_GENERATED_SRCS,
+    hdrs = SYSTEM_CORE_HDRS,
     copts = [
         "-DPAGESPEED_ENABLE_MEMCACHED=0",
         "-DPAGESPEED_NO_FORK",  # Use stub ControllerManager
     ],
     visibility = ["//visibility:public"],
-    deps = [
-        ":external_server_spec",
-        ":redis_cache",
-        ":system_controller_process_h",
-        "//net/instaweb/http",
-        "//net/instaweb/rewriter",
-        "//pagespeed/kernel/cache:cyclone_cache",
-        "//pagespeed/kernel/sharedmem",
-        "//third_party/redis-crc",
-        "@hiredis",
-    ],
+    deps = SYSTEM_CORE_DEPS,
 )
 
 # =============================================================================
@@ -332,76 +235,14 @@ cc_library(
 # Use this target for Windows IIS integration.
 cc_library(
     name = "system_windows",
-    srcs = [
-        "add_headers_fetcher.cc",
-        "admin_site.cc",
-        "external_server_spec.cc",
-        "in_place_resource_recorder.cc",
-        "loopback_route_fetcher.cc",
-        "redis_cache.cc",
-        "system_cache_path.cc",
-        "system_caches.cc",
-        "system_message_handler.cc",
-        "system_request_context.cc",
-        "system_rewrite_driver_factory.cc",
-        "system_rewrite_options.cc",
-        "system_server_context.cc",
-        "system_thread_system.cc",
-        ":css_data2c_generated_admin_site",
-        ":css_data2c_generated_admin_site_opt",
-        ":css_data2c_generated_caches",
-        ":css_data2c_generated_caches_opt",
-        ":css_data2c_generated_console",
-        ":css_data2c_generated_console_opt",
-        ":css_data2c_generated_graphs",
-        ":css_data2c_generated_graphs_opt",
-        ":css_data2c_generated_statistics",
-        ":css_data2c_generated_statistics_opt",
-        ":js_data2c_generated_caches",
-        ":js_data2c_generated_caches_opt",
-        ":js_data2c_generated_console",
-        ":js_data2c_generated_console_opt",
-        ":js_data2c_generated_graphs",
-        ":js_data2c_generated_graphs_opt",
-        ":js_data2c_generated_messages",
-        ":js_data2c_generated_messages_opt",
-        ":js_data2c_generated_statistics",
-        ":js_data2c_generated_statistics_opt",
-    ],
-    hdrs = [
-        "add_headers_fetcher.h",
-        "admin_site.h",
-        "controller_manager.h",
-        "controller_process.h",
-        "external_server_spec.h",
-        "in_place_resource_recorder.h",
-        "loopback_route_fetcher.h",
-        "redis_cache.h",
-        "system_cache_path.h",
-        "system_caches.h",
-        "system_message_handler.h",
-        "system_request_context.h",
-        "system_rewrite_driver_factory.h",
-        "system_rewrite_options.h",
-        "system_server_context.h",
-        "system_thread_system.h",
-    ],
+    srcs = SYSTEM_CORE_SRCS + SYSTEM_GENERATED_SRCS,
+    hdrs = SYSTEM_CORE_HDRS,
     copts = [
         "-DPAGESPEED_ENABLE_MEMCACHED=0",
         "-DPAGESPEED_NO_FORK",  # Redundant with _WIN32, but explicit for clarity
     ],
     visibility = ["//visibility:public"],
-    deps = [
-        ":external_server_spec",
-        ":redis_cache",
-        ":system_controller_process_h",
-        "//net/instaweb/http",
-        "//net/instaweb/rewriter",
-        "//pagespeed/kernel/cache:cyclone_cache",
-        "//pagespeed/kernel/sharedmem",
-        "//third_party/redis-crc",
-        "@hiredis",
-    ],
+    deps = SYSTEM_CORE_DEPS,
 )
 
 # =============================================================================
@@ -410,78 +251,21 @@ cc_library(
 
 # Core system library - APR-free.
 # Used by both Apache and Envoy deployments.
+# Includes controller_manager.cc and memcached_cache.cc which are excluded
+# from system_envoy and system_windows.
 cc_library(
     name = "system",
-    srcs = [
-        "add_headers_fetcher.cc",
-        "admin_site.cc",
+    srcs = SYSTEM_CORE_SRCS + SYSTEM_GENERATED_SRCS + [
         "controller_manager.cc",
-        "external_server_spec.cc",
-        "in_place_resource_recorder.cc",
-        "loopback_route_fetcher.cc",
         "memcached_cache.cc",
-        "redis_cache.cc",
-        "system_cache_path.cc",
-        "system_caches.cc",
-        "system_message_handler.cc",
-        "system_request_context.cc",
-        "system_rewrite_driver_factory.cc",
-        "system_rewrite_options.cc",
-        "system_server_context.cc",
-        "system_thread_system.cc",
-        ":css_data2c_generated_admin_site",
-        ":css_data2c_generated_admin_site_opt",
-        ":css_data2c_generated_caches",
-        ":css_data2c_generated_caches_opt",
-        ":css_data2c_generated_console",
-        ":css_data2c_generated_console_opt",
-        ":css_data2c_generated_graphs",
-        ":css_data2c_generated_graphs_opt",
-        ":css_data2c_generated_statistics",
-        ":css_data2c_generated_statistics_opt",
-        ":js_data2c_generated_caches",
-        ":js_data2c_generated_caches_opt",
-        ":js_data2c_generated_console",
-        ":js_data2c_generated_console_opt",
-        ":js_data2c_generated_graphs",
-        ":js_data2c_generated_graphs_opt",
-        ":js_data2c_generated_messages",
-        ":js_data2c_generated_messages_opt",
-        ":js_data2c_generated_statistics",
-        ":js_data2c_generated_statistics_opt",
     ],
-    hdrs = [
-        "add_headers_fetcher.h",
-        "admin_site.h",
-        "controller_manager.h",
-        "controller_process.h",
-        "external_server_spec.h",
-        "in_place_resource_recorder.h",
-        "loopback_route_fetcher.h",
+    hdrs = SYSTEM_CORE_HDRS + [
         "memcached_cache.h",
-        "redis_cache.h",
-        "system_cache_path.h",
-        "system_caches.h",
-        "system_message_handler.h",
-        "system_request_context.h",
-        "system_rewrite_driver_factory.h",
-        "system_rewrite_options.h",
-        "system_server_context.h",
-        "system_thread_system.h",
     ],
     visibility = ["//visibility:public"],
-    deps = [
-        ":external_server_spec",
+    deps = SYSTEM_CORE_DEPS + [
         ":memcached_cache",
-        ":redis_cache",
-        ":system_controller_process_h",
-        "//net/instaweb/http",
-        "//net/instaweb/rewriter",
-        "//pagespeed/kernel/cache:cyclone_cache",
-        "//pagespeed/kernel/sharedmem",
-        "//third_party/redis-crc",
-        "@hiredis",
-        "@libmemcached",
+        "//bazel:libmemcached",
     ],
 )
 
@@ -502,7 +286,7 @@ cc_library(
         "//net/instaweb:net_instaweb_lib",
         "//pagespeed/kernel/base:pagespeed_base",
         "//pagespeed/kernel/http",
-        "@curl",
+        "//bazel:curl",
     ],
 )
 

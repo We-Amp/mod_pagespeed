@@ -13,6 +13,7 @@ load(":apr.bzl", "apr_build_rule")
 load(":aprutil.bzl", "aprutil_build_rule")
 load(":closure_compiler.bzl", "closure_library_rules")
 load(":cyclone.bzl", "cyclone_build_rule")
+load(":ed25519.bzl", "ed25519_build_rule")
 
 ENVOY_COMMIT = "83082b0bf0db8a5b6bb3e691df387bf8566f072d"
 ENVOY_SHA = "71a2dc9186d1ef916a952aae8949953dc7ae6bbcce4415bdc2f3ffa0c1ec1427"
@@ -228,6 +229,15 @@ def mod_pagespeed_dependencies():
         url = "https://github.com/awesomized/libmemcached/archive/refs/tags/%s.tar.gz" % LIBMEMCACHED_VERSION,
         sha256 = LIBMEMCACHED_SHA,
         build_file_content = _ALL_SRCS_BUILD_FILE,
+    )
+
+    # orlp/ed25519 - compact Ed25519 implementation
+    http_archive(
+        name = "ed25519",
+        strip_prefix = "ed25519-b1f19fab4aebe607805620d25a5e42566ce46a0e",
+        url = "https://github.com/orlp/ed25519/archive/b1f19fab4aebe607805620d25a5e42566ce46a0e.tar.gz",
+        build_file_content = ed25519_build_rule,
+        sha256 = "",  # TODO: add sha256
     )
 
     http_archive(
