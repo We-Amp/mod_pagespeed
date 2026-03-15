@@ -12,10 +12,11 @@
 
 namespace net_instaweb {
 
-// Returns the default license file path.
-// On POSIX: /etc/modpagespeed/license.key
-// TODO: Add Windows implementation.
-std::filesystem::path LicenseFilePath();
+// Returns the license file path derived from the cache directory.
+// Places the license file in the parent of the cache path, e.g.
+// cache_path="/var/cache/mod_pagespeed" → "/var/cache/pagespeed.license"
+// Falls back to /etc/modpagespeed/license.key if cache_path is empty.
+std::filesystem::path LicenseFilePath(const GoogleString& cache_path = "");
 
 // Read the license token from the given file path.
 // Returns true on success, false if the file does not exist or cannot be read.

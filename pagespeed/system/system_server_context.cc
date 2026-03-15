@@ -39,6 +39,7 @@
 #include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/http/google_url.h"
 #include "pagespeed/kernel/sharedmem/shared_mem_statistics.h"
+#include "pagespeed/system/admin_license_handler.h"
 #include "pagespeed/system/add_headers_fetcher.h"
 #include "pagespeed/system/loopback_route_fetcher.h"
 #include "pagespeed/system/system_cache_path.h"
@@ -205,7 +206,16 @@ SystemRewriteOptions* SystemServerContext::global_system_rewrite_options() {
 
 void SystemServerContext::PostInitHook() {
   ServerContext::PostInitHook();
-  admin_site_ = std::make_unique<AdminSite>(timer(), message_handler());
+  admin_site_ = std::make_unique<AdminSite>(
+      timer(), thread_system(), message_handler(), DefaultSystemFetcher(),
+      global_system_rewrite_options()->file_cache_path());
+  // Set initial license state from what Init() loaded from disk,
+  // and register a callback to keep it updated.
+  if (admin_site_->license_handler() != nullptr) {
+    UpdateLicenseActive(admin_site_->license_handler()->IsLicenseValid());
+    admin_site_->license_handler()->set_license_state_callback(
+        [this](bool active) { UpdateLicenseActive(active); });
+  }
 }
 
 void SystemServerContext::CreateLocalStatistics(
@@ -391,13 +401,15 @@ void SystemServerContext::AdminPage(bool is_global,
                                     const GoogleUrl& stripped_gurl,
                                     const QueryParams& query_params,
                                     const RewriteOptions* options,
-                                    AsyncFetch* fetch) {
+                                    AsyncFetch* fetch,
+                                    StringPiece request_body) {
   Statistics* stats = is_global ? factory()->statistics() : statistics();
   admin_site_->AdminPage(is_global, stripped_gurl, query_params, options,
                          cache_path(), fetch, system_caches_,
                          filesystem_metadata_cache(), http_cache(),
                          metadata_cache(), page_property_cache(), this,
-                         statistics(), stats, global_system_rewrite_options());
+                         statistics(), stats, global_system_rewrite_options(),
+                         request_body);
 }
 
 void SystemServerContext::StatisticsPage(bool is_global,

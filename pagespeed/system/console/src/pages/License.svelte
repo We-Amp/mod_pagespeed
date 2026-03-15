@@ -1,24 +1,94 @@
 <script lang="ts">
-  import { AdminApiClient } from "$lib/api/client";
+  import { onMount } from "svelte";
+  import { AdminApiClient, ApiError } from "$lib/api/client";
   import { usePolling } from "$lib/api/polling.svelte";
   import {
     formatLicenseDate,
     getLicenseErrorMessage,
   } from "$lib/utils/license-utils";
 
-  const { basePath = "" }: { basePath?: string; isGlobal?: boolean } = $props();
+  const TERMS_VERSION = "1.0";
+
+  // isGlobal is passed by App.svelte to all page components (convention).
+  // On per-server admin, mutation endpoints (purchase, trial, apply) are disabled.
+  const { basePath = "", isGlobal = false }: { basePath?: string; isGlobal?: boolean } = $props();
   const api = new AdminApiClient(basePath);
   const license = usePolling(() => api.getLicenseStatus(), 30000);
 
+  // ── Manual key entry state ──────────────────────────────────
   let licenseKey = $state("");
   let applyLoading = $state(false);
   let applyMessage = $state<string | null>(null);
   let applyError = $state<string | null>(null);
 
+  // ── Shared terms acceptance ─────────────────────────────────
+  let termsAccepted = $state(false);
+  let termsError = $state(false);
+
+  // ── Popup checkout state ────────────────────────────────────
+  let checkoutNonce = $state<string | null>(null);
+  let checkoutPolling = $state(false);
+  let checkoutMessage = $state<string | null>(null);
+  let checkoutError = $state<string | null>(null);
+  let orderRefActivateInFlight = false;
+  let purchasePollTimer: ReturnType<typeof setInterval> | null = null;
+
+  // ── Trial flow state ────────────────────────────────────────
+  let trialEmail = $state("");
   let trialLoading = $state(false);
   let trialMessage = $state<string | null>(null);
   let trialError = $state<string | null>(null);
 
+  // ── Guards ─────────────────────────────────────────────────
+  let destroyed = false;
+  let activationComplete = false;
+  let cancelPolling = $state(false);
+
+  let autoClearTimers: ReturnType<typeof setTimeout>[] = [];
+
+  function autoClear(setter: () => void) {
+    const id = setTimeout(() => { if (!destroyed) setter(); }, 8000);
+    autoClearTimers.push(id);
+  }
+
+  // ── Derived status ──────────────────────────────────────────
+  let statusColor = $derived.by(() => {
+    if (!license.data) return "neutral";
+    if (license.data.expired) return "error";
+    if (license.data.licensed) {
+      if (license.data.expires) {
+        const daysLeft = (license.data.expires * 1000 - Date.now()) / (1000 * 60 * 60 * 24);
+        if (daysLeft <= 0) return "error";
+        if (daysLeft < 7) return "warning";
+      }
+      return "success";
+    }
+    return "error";
+  });
+
+  let statusLabel = $derived.by(() => {
+    if (!license.data) return "Unknown";
+    if (license.data.expired) return "Expired";
+    if (!license.data.licensed) return "Not Licensed";
+    if (daysRemaining !== null && daysRemaining <= 0) return "Expired";
+    if (daysRemaining !== null && daysRemaining <= 30) return `${daysRemaining} days remaining`;
+    return license.data.license_type
+      ? license.data.license_type.charAt(0).toUpperCase() + license.data.license_type.slice(1)
+      : "Licensed";
+  });
+
+  let daysRemaining = $derived.by(() => {
+    if (!license.data?.expires) return null;
+    const days = Math.ceil((license.data.expires * 1000 - Date.now()) / (1000 * 60 * 60 * 24));
+    return days;
+  });
+
+  // Only the global admin endpoint can manage licenses. The isGlobal prop is
+  // set by the router based on which admin endpoint is being served; the
+  // server's is_global field is not authoritative for UI gating.
+  let canManageLicense = $derived(isGlobal);
+
+  // ── Manual key apply ────────────────────────────────────────
   async function applyLicense() {
     if (!licenseKey.trim()) return;
     applyLoading = true;
@@ -28,7 +98,9 @@
       const result = await api.applyLicense(licenseKey.trim());
       if (result.success) {
         applyMessage = result.message ?? "License applied successfully.";
+        autoClear(() => { applyMessage = null; });
         licenseKey = "";
+        checkoutError = null;
         license.refresh();
       } else {
         applyError = result.error
@@ -42,54 +114,182 @@
     }
   }
 
+  // ── Popup checkout flow (aligned with 2.0 reference) ────────
+  function openCheckout() {
+    if (!termsAccepted) {
+      termsError = true;
+      return;
+    }
+    termsError = false;
+    checkoutMessage = null;
+    checkoutError = null;
+    cancelPolling = false;
+    activationComplete = false;
+
+    const nonce = typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : Array.from(crypto.getRandomValues(new Uint8Array(16)),
+          b => b.toString(16).padStart(2, '0')).join('').replace(
+          /(.{8})(.{4})(.{4})(.{4})(.{12})/, '$1-$2-$3-$4-$5');
+    checkoutNonce = nonce;
+    checkoutPolling = true;
+
+    const buyUrl = `https://modpagespeed.com/buy/?nonce=${nonce}&origin=${encodeURIComponent(window.location.origin)}`;
+    const win = window.open(buyUrl, "mps-checkout", "width=520,height=720,scrollbars=yes");
+    if (!win || win.closed) {
+      // Popup blocked — fall back to new tab (postMessage won't work, but polling will)
+      window.open(buyUrl, "_blank");
+    }
+
+    // Start nonce-based polling immediately (doesn't wait for postMessage)
+    startPurchasePolling(nonce);
+  }
+
+  function startPurchasePolling(nonce: string) {
+    stopPurchasePolling();
+    let pollCount = 0;
+    const maxPolls = 60; // 5 minutes at 5s intervals
+    purchasePollTimer = setInterval(async () => {
+      if (destroyed || cancelPolling) { stopPurchasePolling(); return; }
+      pollCount++;
+      if (pollCount > maxPolls) {
+        stopPurchasePolling();
+        checkoutPolling = false;
+        checkoutNonce = null;
+        checkoutError = "Could not retrieve license. You can paste your key manually below.";
+        return;
+      }
+      try {
+        const result = await api.activateLicense(nonce);
+        if (result.found && result.token) {
+          stopPurchasePolling();
+          await activateAndRecordConsent(result.token);
+        }
+      } catch (err) {
+        // Rate limit or server error — keep polling
+        if (err instanceof ApiError && err.status >= 400 && err.status < 500 && err.status !== 429) {
+          stopPurchasePolling();
+          checkoutPolling = false;
+          checkoutNonce = null;
+          checkoutError = err.message;
+        }
+      }
+    }, 5000);
+  }
+
+  function stopPurchasePolling() {
+    if (purchasePollTimer) {
+      clearInterval(purchasePollTimer);
+      purchasePollTimer = null;
+    }
+  }
+
+  // OrderRef fast-path: triggered by postMessage from checkout page.
+  // Retries 4x with backoff (FastSpring may not have settled the order yet).
+  function handlePostMessage(event: MessageEvent) {
+    if (event.origin !== "https://modpagespeed.com") return;
+    if (!event.data || typeof event.data !== "object") return;
+    if (event.data.type !== "mps-purchase-complete") return;
+    if (!checkoutNonce || event.data.nonce !== checkoutNonce) return;
+
+    const orderRef = event.data.orderRef;
+    if (typeof orderRef !== 'string' || !orderRef) return;
+    if (orderRefActivateInFlight) return;
+
+    orderRefActivateInFlight = true;
+    const savedNonce = checkoutNonce;
+    stopPurchasePolling(); // Avoid rate-limit collisions
+
+    (async () => {
+      const delays = [2000, 5000, 10000, 15000];
+      for (let i = 0; i < delays.length; i++) {
+        if (destroyed) return;
+        await new Promise(r => setTimeout(r, delays[i]));
+        try {
+          const result = await api.activateLicense(savedNonce, orderRef);
+          if (!destroyed && result.found && result.token) {
+            await activateAndRecordConsent(result.token);
+            return;
+          }
+        } catch { /* retry */ }
+      }
+      // All retries failed — restart nonce polling as fallback
+      if (!destroyed && checkoutPolling) {
+        startPurchasePolling(savedNonce);
+      }
+    })().finally(() => { orderRefActivateInFlight = false; });
+  }
+
+  // Shared activation + consent recording (used by both purchase and trial)
+  async function activateAndRecordConsent(token: string) {
+    if (destroyed || activationComplete) return;
+    activationComplete = true;
+    checkoutMessage = "License activated successfully!";
+    autoClear(() => { checkoutMessage = null; });
+    checkoutPolling = false;
+    checkoutNonce = null;
+    license.refresh();
+
+    // Record consent best-effort (after activation, like 2.0)
+    api.recordConsent(true).catch(() => { /* best-effort */ });
+  }
+
+  onMount(() => {
+    window.addEventListener("message", handlePostMessage);
+    return () => {
+      destroyed = true;
+      window.removeEventListener("message", handlePostMessage);
+      stopPurchasePolling();
+      autoClearTimers.forEach(clearTimeout);
+    };
+  });
+
+  function handleCancelPolling() {
+    cancelPolling = true;
+    stopPurchasePolling();
+    checkoutPolling = false;
+    checkoutNonce = null;
+  }
+
+  // ── Trial flow ──────────────────────────────────────────────
   async function startTrial() {
+    if (!trialEmail.trim() || !termsAccepted) return;
     trialLoading = true;
     trialMessage = null;
     trialError = null;
     try {
-      const result = await api.startTrial();
-      if (result.success) {
+      const result = await api.startTrial(
+        trialEmail.trim(),
+        new Date().toISOString(),
+        TERMS_VERSION,
+      );
+      if (destroyed) return;
+      if (result.success && result.token) {
+        trialMessage = "Trial activated successfully!";
+        autoClear(() => { trialMessage = null; });
+        trialEmail = "";
+        termsAccepted = false;
+        license.refresh();
+        // Record consent best-effort
+        api.recordConsent(true).catch(() => {});
+      } else if (result.success) {
         trialMessage = "Trial started successfully.";
+        autoClear(() => { trialMessage = null; });
         license.refresh();
       } else {
-        trialError = result.error
-          ? getLicenseErrorMessage(result.error)
-          : "Failed to start trial.";
+        trialError = result.error ?? "Failed to start trial.";
       }
     } catch (err) {
-      trialError = err instanceof Error ? err.message : String(err);
+      if (destroyed) return;
+      if (err instanceof ApiError && err.status === 429) {
+        trialError = "Too many requests. Please try again later.";
+      } else {
+        trialError = err instanceof Error ? err.message : String(err);
+      }
     } finally {
       trialLoading = false;
     }
   }
-
-  let statusColor = $derived.by(() => {
-    if (!license.data) return "neutral";
-    if (license.data.licensed) {
-      if (license.data.expires) {
-        const daysLeft = (license.data.expires * 1000 - Date.now()) / (1000 * 60 * 60 * 24);
-        if (daysLeft < 7) return "warning";
-      }
-      return "success";
-    }
-    return "error";
-  });
-
-  let statusLabel = $derived.by(() => {
-    if (!license.data) return "Unknown";
-    if (license.data.licensed) {
-      return license.data.license_type
-        ? license.data.license_type.charAt(0).toUpperCase() + license.data.license_type.slice(1)
-        : "Licensed";
-    }
-    return "Not Licensed";
-  });
-
-  let daysRemaining = $derived.by(() => {
-    if (!license.data?.expires) return null;
-    const days = Math.ceil((license.data.expires * 1000 - Date.now()) / (1000 * 60 * 60 * 24));
-    return days;
-  });
 </script>
 
 <div class="page">
@@ -105,7 +305,7 @@
   {:else if license.error}
     <div class="license-unavailable" data-testid="license-unavailable">
       <div class="unavailable-icon">
-        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <circle cx="12" cy="12" r="10"/>
           <line x1="12" y1="8" x2="12" y2="12"/>
           <line x1="12" y1="16" x2="12.01" y2="16"/>
@@ -132,12 +332,12 @@
       </div>
     </div>
   {:else if license.data}
-    <!-- Status Card -->
+    <!-- A. Status Card -->
     <div class="status-card">
       <div class="status-row">
-        <span class="status-badge badge-{statusColor}">{statusLabel}</span>
+        <span class="status-badge badge-{statusColor}" role="status">{statusLabel}</span>
         {#if daysRemaining !== null}
-          <span class="days-remaining" class:expiring-soon={daysRemaining !== null && daysRemaining < 7}>
+          <span class="days-remaining" class:expiring-soon={daysRemaining !== null && daysRemaining > 0 && daysRemaining < 7}>
             {#if daysRemaining > 0}
               {daysRemaining} day{daysRemaining === 1 ? "" : "s"} remaining
             {:else}
@@ -167,23 +367,115 @@
               <span class="detail-value">{formatLicenseDate(license.data.expires)}</span>
             </div>
           {/if}
-          {#if license.data.features && license.data.features.length > 0}
-            <div class="detail">
-              <span class="detail-label">Features</span>
-              <span class="detail-value">{license.data.features.join(", ")}</span>
-            </div>
-          {/if}
         </div>
       {/if}
 
       {#if license.data.error}
-        <div class="license-error">
+        <div class="license-error" role="alert">
           {getLicenseErrorMessage(license.data.error)}
         </div>
       {/if}
     </div>
 
-    <!-- Apply License Key -->
+    <!-- B. Purchase + Trial (not licensed or expired, global admin only) -->
+    {#if license.data.expired && canManageLicense}
+      <div class="section">
+        <div class="info-card">
+          <p>Your license has expired. Please renew or purchase a new license.</p>
+        </div>
+      </div>
+    {/if}
+    {#if (!license.data.licensed || license.data.expired) && canManageLicense}
+      <!-- Shared terms acceptance -->
+      <div class="section terms-section">
+        <label class="checkbox-label">
+          <input
+            type="checkbox"
+            bind:checked={termsAccepted}
+            onchange={() => { termsError = false; }}
+          />
+          <span>I agree to the <a href="https://modpagespeed.com/terms/" target="_blank" rel="noopener noreferrer">Terms of Service</a> and <a href="https://modpagespeed.com/privacy/" target="_blank" rel="noopener noreferrer">Privacy Policy</a></span>
+        </label>
+        {#if termsError}
+          <div class="feedback feedback-error" role="alert">Please accept the Terms of Service to continue.</div>
+        {/if}
+      </div>
+
+      <div class="section">
+        <h2>Purchase License</h2>
+        <div class="action-card">
+          <p>Get a commercial license for your domain. Includes a 14-day free trial.</p>
+          <button
+            class="btn btn-primary"
+            onclick={openCheckout}
+            disabled={checkoutPolling}
+          >
+            Buy Now
+          </button>
+
+          {#if checkoutPolling}
+            <div class="checkout-progress">
+              <span class="spinner" aria-hidden="true"></span>
+              <span>Waiting for purchase confirmation...</span>
+              <button class="btn btn-secondary btn-sm" onclick={handleCancelPolling}>Cancel</button>
+            </div>
+          {/if}
+
+          {#if checkoutMessage}
+            <div class="feedback feedback-success" role="alert">{checkoutMessage}</div>
+          {/if}
+          {#if checkoutError}
+            <div class="feedback feedback-error" role="alert">{checkoutError}</div>
+          {/if}
+        </div>
+      </div>
+
+      <!-- C. Trial Flow (when available) -->
+      {#if license.data.trial_available}
+        <div class="section">
+          <h2>Start Free Trial</h2>
+          <form class="trial-form" onsubmit={(e) => { e.preventDefault(); startTrial(); }}>
+            <label class="form-label" for="trial-email">Email Address</label>
+            <input
+              id="trial-email"
+              type="email"
+              class="form-input"
+              placeholder="you@example.com"
+              autocomplete="email"
+              bind:value={trialEmail}
+              required
+            />
+            <button
+              class="btn btn-primary"
+              type="submit"
+              disabled={trialLoading || !trialEmail.trim() || !termsAccepted}
+            >
+              {trialLoading ? "Starting Trial..." : "Start Trial"}
+            </button>
+            {#if !termsAccepted}
+              <p class="terms-hint">Please accept the terms above to continue.</p>
+            {/if}
+          </form>
+
+          {#if trialMessage}
+            <div class="feedback feedback-success" role="alert">{trialMessage}</div>
+          {/if}
+          {#if trialError}
+            <div class="feedback feedback-error" role="alert">{trialError}</div>
+          {/if}
+        </div>
+      {/if}
+    {:else if (!license.data.licensed || license.data.expired) && !canManageLicense}
+      <div class="section">
+        <div class="info-card">
+          <p>License management is available on the <strong>global admin</strong> endpoint.
+            Use <code>/pagespeed_global_admin/</code> to purchase, activate, or apply a license.</p>
+        </div>
+      </div>
+    {/if}
+
+    <!-- D. Manual Key Entry (global admin only) -->
+    {#if canManageLicense}
     <div class="section">
       <h2>Apply License Key</h2>
       <form class="key-form" onsubmit={(e) => { e.preventDefault(); applyLicense(); }}>
@@ -205,53 +497,14 @@
       </form>
 
       {#if applyMessage}
-        <div class="feedback feedback-success">{applyMessage}</div>
+        <div class="feedback feedback-success" role="alert">{applyMessage}</div>
       {/if}
       {#if applyError}
-        <div class="feedback feedback-error">{applyError}</div>
+        <div class="feedback feedback-error" role="alert">{applyError}</div>
       {/if}
     </div>
-
-    <!-- Trial & Purchase -->
-    {#if !license.data.licensed}
-      <div class="section">
-        <h2>Get Started</h2>
-        <div class="actions-row">
-          {#if license.data.trial_available}
-            <div class="action-card">
-              <h3>Free Trial</h3>
-              <p>Try ModPageSpeed with full features for 14 days.</p>
-              <button
-                class="btn btn-primary"
-                onclick={startTrial}
-                disabled={trialLoading}
-              >
-                {trialLoading ? "Starting..." : "Start Trial"}
-              </button>
-              {#if trialMessage}
-                <div class="feedback feedback-success">{trialMessage}</div>
-              {/if}
-              {#if trialError}
-                <div class="feedback feedback-error">{trialError}</div>
-              {/if}
-            </div>
-          {/if}
-
-          <div class="action-card">
-            <h3>Purchase License</h3>
-            <p>Get a commercial license for your domain.</p>
-            <a
-              href="https://modpagespeed.com/buy/"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="btn btn-primary buy-link"
-            >
-              Buy Now
-            </a>
-          </div>
-        </div>
-      </div>
     {/if}
+
   {/if}
 </div>
 
@@ -276,11 +529,6 @@
   h2 {
     font-size: var(--ps-font-size-lg);
     margin-bottom: var(--ps-space-md);
-  }
-
-  h3 {
-    font-size: var(--ps-font-size-base);
-    margin-bottom: var(--ps-space-sm);
   }
 
   .status-card {
@@ -376,7 +624,18 @@
     margin-bottom: var(--ps-space-xl);
   }
 
+  .terms-section {
+    margin-bottom: var(--ps-space-lg);
+  }
+
   .key-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ps-space-sm);
+    max-width: 500px;
+  }
+
+  .trial-form {
     display: flex;
     flex-direction: column;
     gap: var(--ps-space-sm);
@@ -405,6 +664,51 @@
     box-shadow: 0 0 0 2px var(--ps-primary-light);
   }
 
+  .checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: var(--ps-space-sm);
+    font-size: var(--ps-font-size-sm);
+    color: var(--ps-text);
+    cursor: pointer;
+  }
+
+  .checkbox-label a {
+    color: var(--ps-primary);
+    text-decoration: underline;
+  }
+
+  .terms-hint {
+    font-size: var(--ps-font-size-xs);
+    color: var(--ps-text-tertiary);
+    margin-top: var(--ps-space-xs);
+  }
+
+  .checkout-progress {
+    display: flex;
+    align-items: center;
+    gap: var(--ps-space-sm);
+    margin-top: var(--ps-space-md);
+    font-size: var(--ps-font-size-sm);
+    color: var(--ps-text-secondary);
+  }
+
+  .spinner {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border: 2px solid var(--ps-border);
+    border-top-color: var(--ps-primary);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
   .feedback {
     margin-top: var(--ps-space-sm);
     padding: var(--ps-space-sm) var(--ps-space-md);
@@ -430,6 +734,24 @@
     gap: var(--ps-space-lg);
   }
 
+  .info-card {
+    padding: var(--ps-space-lg);
+    border: 1px solid var(--ps-border);
+    border-radius: var(--ps-border-radius-lg);
+    background: var(--ps-bg-secondary);
+    font-size: var(--ps-font-size-sm);
+    color: var(--ps-text-secondary);
+    line-height: 1.6;
+  }
+
+  .info-card code {
+    background: var(--ps-bg-tertiary);
+    padding: 0.1em 0.4em;
+    border-radius: var(--ps-border-radius);
+    font-family: var(--ps-font-mono);
+    font-size: 0.9em;
+  }
+
   .action-card {
     padding: var(--ps-space-lg);
     border: 1px solid var(--ps-border);
@@ -441,12 +763,6 @@
     font-size: var(--ps-font-size-sm);
     color: var(--ps-text-secondary);
     margin-bottom: var(--ps-space-md);
-  }
-
-  .buy-link {
-    display: inline-block;
-    text-decoration: none;
-    text-align: center;
   }
 
   .btn {
@@ -480,6 +796,11 @@
 
   .btn-secondary:hover {
     background: var(--ps-surface-hover);
+  }
+
+  .btn-sm {
+    padding: var(--ps-space-xs) var(--ps-space-sm);
+    font-size: var(--ps-font-size-xs);
   }
 
   .loading {

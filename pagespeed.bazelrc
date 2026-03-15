@@ -1,8 +1,8 @@
 # modifications for pagespeed over Envoy's stock config
 
 # Persistent caches on SSD for faster rebuilds
-build --disk_cache=/ssd-cache/disk-cache
-build --repository_cache=/ssd-cache/repo-cache
+#build --disk_cache=/ssd-cache/disk-cache
+#build --repository_cache=/ssd-cache/repo-cache
 
 # POSIX-specific configuration (Linux, macOS)
 build:linux --linkopt -ldl
@@ -42,6 +42,10 @@ build:macos --copt="-DPAGESPEED_SUPPORT_POSIX_SHARED_MEM=1"
 
 # Windows-specific: No POSIX shared memory, no APR
 build:windows --copt="-DPAGESPEED_SUPPORT_POSIX_SHARED_MEM=0"
+
+# System test build: swap Ed25519 public key to zero-seed test key.
+# Use with: bazel build --config=testkey //:libmod_pagespeed.so
+build:testkey --copt=-DPAGESPEED_TEST_LICENSE_KEY
 
 build --action_env=ABSL_LEGACY_THREAD_ANNOTATIONS=1
 build --copt="-DABSL_LEGACY_THREAD_ANNOTATIONS=1"
@@ -97,3 +101,25 @@ build:clang-libstdcxx13 --per_file_copt=pagespeed/kernel/cache/cyclone/.*\\.cc@-
 # Link against GCC 13's libstdc++ (include both arch paths; non-existent is ignored)
 build:clang-libstdcxx13 --linkopt=-L/usr/lib/gcc/aarch64-linux-gnu/13
 build:clang-libstdcxx13 --linkopt=-L/usr/lib/gcc/x86_64-linux-gnu/13
+
+# =============================================================================
+# Offline build from vendored source tarball
+# =============================================================================
+# Use with source tarballs that include vendor/ directory (built by tools/vendor-deps.sh).
+# All http_archive deps are served from the repository cache; Cyclone is overridden
+# from its vendored source copy.
+#
+# Examples:
+#   Linux:   bazel build --config=vendored --config=clang-libstdcxx13 -c opt //:libmod_pagespeed.so
+#   Windows: bazel build --config=vendored --config=windows --config=clang-cl -c opt //pagespeed/iis:pagespeed_iis.dll
+# =============================================================================
+build:vendored --repository_cache=vendor/repo-cache
+build:vendored --override_repository=cyclone=vendor/cyclone
+
+# =============================================================================
+# Windows performance tuning for high-core-count machines
+# =============================================================================
+# The JVM may not detect all processor groups, causing Bazel to undercount
+# available CPUs. Explicitly advertise HOST_CPUS so scheduling uses all cores.
+# Limit --jobs below physical core count to avoid CreateProcessW OOM (error 8).
+build:windows --local_resources=cpu=HOST_CPUS

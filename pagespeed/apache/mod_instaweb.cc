@@ -368,11 +368,11 @@ class ScopedTimer {
 InstawebContext* build_context_for_request(request_rec* request) {
   ApacheServerContext* server_context =
       InstawebContext::ServerContextFromServerRec(request->server);
-  // Escape ASAP if we're in unplugged mode, or if in proxy_all_requests_mode,
-  // which does HTML rewriting in ProxyInterface rather than via an Apache
-  // filter.
+  // Escape ASAP if we're in unplugged mode, proxy_all_requests_mode, or
+  // license is not active.
   if (server_context->global_config()->unplugged() ||
-      server_context->global_config()->proxy_all_requests_mode()) {
+      server_context->global_config()->proxy_all_requests_mode() ||
+      !server_context->ShouldOptimize()) {
     return nullptr;
   }
 
@@ -1078,10 +1078,12 @@ int pagespeed_modify_request(request_rec* r) {
   // This method is based in part on mod_remoteip.
   conn_rec* c = r->connection;
 
-  // Detect local requests from us.
+  // Detect local requests from us. The curl fetcher produces user-agent
+  // strings like "CurlPagespeed (mod_pagespeed/1.1.0-beta.1-hash)", so
+  // we match on the kModPagespeedSubrequestUserAgent substring.
   const char* ua = apr_table_get(r->headers_in, HttpAttributes::kUserAgent);
   if (ua != nullptr &&
-      strstr(ua, " mod_pagespeed/" MOD_PAGESPEED_VERSION_STRING) != nullptr) {
+      strstr(ua, kModPagespeedSubrequestUserAgent) != nullptr) {
 #ifdef MPS_APACHE_24
     apr_sockaddr_t* client_addr = c->client_addr;
 #else

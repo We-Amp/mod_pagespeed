@@ -6,14 +6,26 @@ import type {
   CacheStructureResponse,
   PhysicalCachesResponse,
   PurgeResponse,
+  RawPurgeSetResponse,
   PurgeSetResponse,
   ConsoleResponse,
   MessagesResponse,
   LicenseStatusResponse,
   LicenseApplyResponse,
   ActivateResponse,
+  TrialResponse,
+  ConsentResponse,
   TimeRangeParams,
 } from "./types";
+
+export class ApiError extends Error {
+  status: number;
+  constructor(status: number, statusText: string) {
+    super(`HTTP ${status}: ${statusText}`);
+    this.status = status;
+    Object.setPrototypeOf(this, ApiError.prototype);
+  }
+}
 
 export class AdminApiClient {
   private basePath: string;
@@ -27,13 +39,13 @@ export class AdminApiClient {
     const response = await fetch(url);
 
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      throw new ApiError(response.status, response.statusText);
     }
 
     // Always try JSON first — the backend may serve JSON with a wrong
     // content-type (e.g. application/javascript instead of application/json).
     const text = await response.text();
-    return this.parseResponse<T>(text);
+    return this.parseResponse<T>(response.status, text);
   }
 
   private async post<T>(
@@ -43,29 +55,31 @@ export class AdminApiClient {
     const url = `${this.basePath}${path}`;
     const response = await fetch(url, {
       method: "POST",
-      headers: body ? { "Content-Type": "application/json" } : undefined,
+      headers: body
+        ? { "Content-Type": "application/json", "X-Requested-With": "XMLHttpRequest" }
+        : { "X-Requested-With": "XMLHttpRequest" },
       body: body ? JSON.stringify(body) : undefined,
     });
 
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      throw new ApiError(response.status, response.statusText);
     }
 
     const text = await response.text();
-    return this.parseResponse<T>(text);
+    return this.parseResponse<T>(response.status, text);
   }
 
   /**
    * Parse a response body as JSON, stripping any XSSI protection prefix
    * (e.g. ")]}'\n" or ")]}\n") that some endpoints prepend.
    */
-  private parseResponse<T>(text: string): T {
+  private parseResponse<T>(status: number, text: string): T {
     // Strip XSSI protection prefix if present.
     const stripped = text.replace(/^\)\]\}'?\s*\n/, "");
     try {
       return JSON.parse(stripped) as T;
     } catch {
-      return { raw: text } as unknown as T;
+      throw new ApiError(status, `Invalid JSON response: ${text.substring(0, 200)}`);
     }
   }
 
@@ -108,7 +122,51 @@ export class AdminApiClient {
   }
 
   async getPurgeSet(): Promise<PurgeSetResponse> {
-    return this.get<PurgeSetResponse>("/cache?purge_set");
+    const raw = await this.get<RawPurgeSetResponse>("/cache?new_set");
+    return AdminApiClient.parsePurgeSet(raw);
+  }
+
+  /**
+   * Parse the raw purge_set string from the backend into the structured
+   * format expected by the UI.
+   *
+   * Raw format: "Global@datestring\nurl1@datestring\nurl2@datestring\n..."
+   * Parsed:
+   *   - global_invalidation_timestamp_ms: unix-ms from the "Global@" line
+   *   - purge_set: array of URL strings from non-Global lines
+   */
+  private static parsePurgeSet(raw: RawPurgeSetResponse): PurgeSetResponse {
+    const result: PurgeSetResponse = {};
+    const rawStr = raw.purge_set;
+    if (typeof rawStr !== "string" || rawStr.length === 0) {
+      return result;
+    }
+
+    const lines = rawStr.split("\n").filter((l) => l.length > 0);
+    const urls: string[] = [];
+
+    for (const line of lines) {
+      const atIdx = line.lastIndexOf("@");
+      if (atIdx === -1) continue;
+
+      const key = line.substring(0, atIdx);
+      const dateStr = line.substring(atIdx + 1);
+
+      if (key === "Global") {
+        const ts = Date.parse(dateStr);
+        if (!isNaN(ts)) {
+          result.global_invalidation_timestamp_ms = ts;
+        }
+      } else {
+        urls.push(key);
+      }
+    }
+
+    if (urls.length > 0) {
+      result.purge_set = urls;
+    }
+
+    return result;
   }
 
   // ── Console ────────────────────────────────────────────────
@@ -157,17 +215,21 @@ export class AdminApiClient {
     return this.post<LicenseApplyResponse>("/v1/license/apply", { key });
   }
 
-  async activateLicense(key: string): Promise<ActivateResponse> {
-    return this.post<ActivateResponse>("/v1/license/activate", { key });
+  async activateLicense(nonce: string, orderRef?: string): Promise<ActivateResponse> {
+    const body: Record<string, unknown> = { nonce };
+    if (orderRef) body.order_ref = orderRef;
+    return this.post<ActivateResponse>("/v1/license/activate", body);
   }
 
-  async startTrial(): Promise<ActivateResponse> {
-    return this.post<ActivateResponse>("/v1/license/trial");
-  }
-
-  async recordConsent(accepted: boolean): Promise<LicenseApplyResponse> {
-    return this.post<LicenseApplyResponse>("/v1/license/consent", {
-      accepted,
+  async startTrial(email: string, termsAcceptedAt: string, termsVersion: string): Promise<TrialResponse> {
+    return this.post<TrialResponse>("/v1/license/trial", {
+      email,
+      terms_accepted_at: termsAcceptedAt,
+      terms_version: termsVersion,
     });
+  }
+
+  async recordConsent(accepted: boolean): Promise<ConsentResponse> {
+    return this.post<ConsentResponse>("/v1/license/consent", { accepted });
   }
 }

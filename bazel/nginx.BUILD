@@ -98,6 +98,12 @@ cc_library(
         ],
         "//conditions:default": [],
     }),
+    # Propagated to all dependents so ngx_event_openssl.h is included
+    # before ngx_http_ssl_module.h (which uses ngx_ssl_t).
+    defines = ["NGX_OPENSSL=1"],
+    # OpenSSL/BoringSSL headers needed when nginx is configured with
+    # --with-http_ssl_module (ngx_http_ssl_module.h uses ngx_ssl_t).
+    deps = ["@boringssl//:ssl"],
     # Link against pthread on Unix
     linkopts = select({
         "@platforms//os:windows": [],

@@ -207,10 +207,24 @@ bool HttpPageSpeedDecoderFilter::ComputeCustomOptions(
   return false;
 }
 
+// Helper to check if path matches a base path or starts with base path + "/"
+// This handles both exact match (/pagespeed_admin) and subpaths (/pagespeed_admin/config)
+static bool PathMatchesOrIsSubpath(StringPiece path, const GoogleString& base) {
+  if (path == base) {
+    return true;
+  }
+  // Check if path starts with base + "/"
+  if (path.size() > base.size() && path.starts_with(base) &&
+      path[base.size()] == '/') {
+    return true;
+  }
+  return false;
+}
+
 // Check if the path matches an admin endpoint and handle it.
 FilterHeadersStatus HttpPageSpeedDecoderFilter::MaybeHandleAdminRequest(
     const RequestHeaderMap& headers, const net_instaweb::GoogleUrl& gurl,
-    const net_instaweb::EnvoyRewriteOptions* options) {
+    const net_instaweb::EnvoyRewriteOptions* options, bool end_stream) {
   StringPiece path = gurl.PathSansQuery();
 
   // Parse query params from URL
@@ -218,11 +232,12 @@ FilterHeadersStatus HttpPageSpeedDecoderFilter::MaybeHandleAdminRequest(
   query_params.ParseFromUntrustedString(gurl.Query());
 
   // Determine if this is an admin path that requires authentication.
+  // Use prefix matching to handle subpaths like /pagespeed_admin/config
   bool is_admin_path =
       (path == options->statistics_path()) ||
       (path == options->global_statistics_path()) ||
-      (path == options->admin_path()) ||
-      (path == options->global_admin_path()) ||
+      PathMatchesOrIsSubpath(path, options->admin_path()) ||
+      PathMatchesOrIsSubpath(path, options->global_admin_path()) ||
       (path == options->console_path()) ||
       (path == options->messages_path());
 
@@ -249,11 +264,24 @@ FilterHeadersStatus HttpPageSpeedDecoderFilter::MaybeHandleAdminRequest(
     return HandleStatisticsRequest(true /* global */, query_params, options);
   }
 
-  // Check admin path
-  if (path == options->admin_path()) {
+  // Check admin path - use prefix matching to handle subpaths
+  if (PathMatchesOrIsSubpath(path, options->admin_path())) {
+    if (!end_stream) {
+      // POST request with body not yet received - buffer it.
+      pending_admin_dispatch_ = true;
+      pending_admin_is_global_ = false;
+      pending_admin_body_.clear();
+      return FilterHeadersStatus::StopIteration;
+    }
     return HandleAdminRequest(false /* local */, gurl, query_params, options);
   }
-  if (path == options->global_admin_path()) {
+  if (PathMatchesOrIsSubpath(path, options->global_admin_path())) {
+    if (!end_stream) {
+      pending_admin_dispatch_ = true;
+      pending_admin_is_global_ = true;
+      pending_admin_body_.clear();
+      return FilterHeadersStatus::StopIteration;
+    }
     return HandleAdminRequest(true /* global */, gurl, query_params, options);
   }
 
@@ -287,10 +315,11 @@ FilterHeadersStatus HttpPageSpeedDecoderFilter::HandleStatisticsRequest(
 FilterHeadersStatus HttpPageSpeedDecoderFilter::HandleAdminRequest(
     bool is_global, const net_instaweb::GoogleUrl& stripped_gurl,
     const net_instaweb::QueryParams& query_params,
-    const net_instaweb::RewriteOptions* options) {
+    const net_instaweb::RewriteOptions* options,
+    StringPiece request_body) {
   auto* fetch = new net_instaweb::EnvoyAdminFetch(server_context_, this);
   server_context_->AdminPage(is_global, stripped_gurl, query_params, options,
-                             fetch);
+                             fetch, request_body);
   return FilterHeadersStatus::StopIteration;
 }
 
@@ -609,10 +638,17 @@ FilterHeadersStatus HttpPageSpeedDecoderFilter::decodeHeaders(
       server_context_->global_options());
   if (envoy_options != nullptr) {
     FilterHeadersStatus admin_status =
-        MaybeHandleAdminRequest(headers, *pristine_url_, envoy_options);
+        MaybeHandleAdminRequest(headers, *pristine_url_, envoy_options,
+                                end_response);
     if (admin_status == FilterHeadersStatus::StopIteration) {
       return admin_status;
     }
+  }
+
+  // License enforcement: if license is not valid, pass through without
+  // optimization. Admin pages remain accessible (checked above).
+  if (!server_context_->ShouldOptimize()) {
+    return FilterHeadersStatus::Continue;
   }
 
   // Create request context with actual host from request headers.
@@ -708,8 +744,15 @@ FilterHeadersStatus HttpPageSpeedDecoderFilter::decodeHeaders(
   // FetchInPlaceResource will return kNotInCacheStatus and we'll record the
   // response for future optimization in the encode path.
   if (ShouldTryIpro(fetch_url, options_)) {
-    // Create a RewriteDriver for the IPRO lookup.
-    ipro_driver_ = server_context_->NewRewriteDriver(request_context);
+    // Create a RewriteDriver for the IPRO lookup, using custom options
+    // (from query params and request headers like PageSpeedFilters,
+    // CssFlattenMaxBytes) if they were computed.
+    if (custom_options_) {
+      ipro_driver_ = server_context_->NewCustomRewriteDriver(
+          custom_options_.release(), request_context);
+    } else {
+      ipro_driver_ = server_context_->NewRewriteDriver(request_context);
+    }
 
     // Copy request headers to the driver (required by FetchInPlaceResource).
     ipro_driver_->SetRequestHeaders(*base_fetch_->request_headers());
@@ -748,8 +791,34 @@ FilterHeadersStatus HttpPageSpeedDecoderFilter::decodeHeaders(
   return FilterHeadersStatus::Continue;
 }
 
-FilterDataStatus HttpPageSpeedDecoderFilter::decodeData(Buffer::Instance&,
-                                                        bool) {
+FilterDataStatus HttpPageSpeedDecoderFilter::decodeData(Buffer::Instance& data,
+                                                        bool end_stream) {
+  if (pending_admin_dispatch_) {
+    // Accumulate body data for a pending admin POST request.
+    // Safety limit: reject bodies larger than 8KB to prevent memory abuse.
+    static constexpr size_t kMaxAdminBodySize = 8192;
+    pending_admin_body_.append(data.toString());
+    data.drain(data.length());
+    if (pending_admin_body_.size() > kMaxAdminBodySize) {
+      pending_admin_dispatch_ = false;
+      pending_admin_body_.clear();
+      decoder_callbacks_->sendLocalReply(Http::Code::PayloadTooLarge,
+                                         "Request body too large", nullptr,
+                                         absl::nullopt, "");
+      return FilterDataStatus::StopIterationNoBuffer;
+    }
+    if (end_stream) {
+      pending_admin_dispatch_ = false;
+      // Re-parse query params from the stored URL.
+      net_instaweb::QueryParams query_params;
+      query_params.ParseFromUntrustedString(pristine_url_->Query());
+      HandleAdminRequest(pending_admin_is_global_, *pristine_url_, query_params,
+                         server_context_->global_options(),
+                         pending_admin_body_);
+      return FilterDataStatus::StopIterationNoBuffer;
+    }
+    return FilterDataStatus::StopIterationAndBuffer;
+  }
   return FilterDataStatus::Continue;
 }
 
@@ -969,6 +1038,12 @@ FilterHeadersStatus HttpPageSpeedDecoderFilter::encodeHeaders(
     // No options set - this is likely an admin response or local error.
     return FilterHeadersStatus::Continue;
   }
+
+  // License enforcement: if license is not valid, skip IPRO/HTML rewriting.
+  if (!server_context_->ShouldOptimize()) {
+    return FilterHeadersStatus::Continue;
+  }
+
   auto* envoy_options = net_instaweb::EnvoyRewriteOptions::DynamicCast(options_);
   bool pagespeed_enabled = options_->enabled();
   bool html_rewriting_enabled =

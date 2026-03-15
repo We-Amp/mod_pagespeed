@@ -20,6 +20,8 @@
 #ifndef PAGESPEED_SYSTEM_SYSTEM_SERVER_CONTEXT_H_
 #define PAGESPEED_SYSTEM_SYSTEM_SERVER_CONTEXT_H_
 
+#include <atomic>
+
 #include "net/instaweb/http/public/request_context.h"
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "pagespeed/kernel/base/abstract_mutex.h"
@@ -145,7 +147,8 @@ class SystemServerContext : public ServerContext {
   // message-histogram, console, etc.
   void AdminPage(bool is_global, const GoogleUrl& stripped_gurl,
                  const QueryParams& query_params, const RewriteOptions* options,
-                 AsyncFetch* fetch);
+                 AsyncFetch* fetch,
+                 StringPiece request_body = StringPiece());
 
   // Handle a request for the legacy /*_pagespeed_statistics page, which also
   // serves as a launching point for a subset of the admin pages.  Because the
@@ -156,6 +159,18 @@ class SystemServerContext : public ServerContext {
                       const RewriteOptions* options, AsyncFetch* fetch);
 
   AdminSite* admin_site() { return admin_site_.get(); }
+
+  // Returns true if the license is active and optimization should proceed.
+  // Lock-free (uses atomic bool) — safe to call on every request hot path.
+  bool ShouldOptimize() const {
+    return license_active_.load(std::memory_order_relaxed);
+  }
+
+  // Update the license_active_ flag. Called by the license handler after
+  // state changes (init, apply, renewal).
+  void UpdateLicenseActive(bool active) {
+    license_active_.store(active, std::memory_order_relaxed);
+  }
 
  protected:
   // Flush the cache by updating the cache flush timestamp in the global
@@ -209,6 +224,10 @@ class SystemServerContext : public ServerContext {
   void CheckLegacyGlobalCacheFlushFile();
 
   std::unique_ptr<AdminSite> admin_site_;
+
+  // Lock-free license enforcement flag. Updated by AdminLicenseHandler,
+  // checked by per-port request handlers on every request.
+  std::atomic<bool> license_active_{true};  // Default true until Init
 
   bool initialized_;
   bool use_per_vhost_statistics_;

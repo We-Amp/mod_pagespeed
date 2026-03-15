@@ -47,6 +47,7 @@
 #include "pagespeed/kernel/http/response_headers.h"
 #include "pagespeed/kernel/util/statistics_logger.h"
 #include "pagespeed/system/system_cache_path.h"
+#include "pagespeed/system/admin_license_handler.h"
 #include "pagespeed/system/system_caches.h"
 #include "pagespeed/system/system_rewrite_options.h"
 
@@ -57,6 +58,7 @@ extern const char* HTML_admin_console;
 
 namespace {
 
+// Note: duplicated in admin_license_handler.cc — consider extracting to a shared utility.
 GoogleString JsonEscape(StringPiece s) {
   GoogleString result;
   result.reserve(s.size() + 10);
@@ -129,9 +131,19 @@ class PurgeFetchCallbackGasket {
 
 }  // namespace
 
-AdminSite::AdminSite(Timer* timer, MessageHandler* message_handler)
+AdminSite::AdminSite(Timer* timer, ThreadSystem* thread_system,
+                     MessageHandler* message_handler,
+                     UrlAsyncFetcher* fetcher,
+                     const GoogleString& cache_path)
     : message_handler_(message_handler),
-      timer_(timer) {}
+      timer_(timer),
+      license_handler_(
+          new AdminLicenseHandler(timer, thread_system, message_handler,
+                                 fetcher, cache_path)) {
+  license_handler_->Init();
+}
+
+AdminSite::~AdminSite() = default;
 
 void AdminSite::ServeSpaConsole(AsyncFetch* fetch) {
   ResponseHeaders* headers = fetch->response_headers();
@@ -409,7 +421,8 @@ void AdminSite::AdminPage(
     CacheInterface* filesystem_metadata_cache, HTTPCache* http_cache,
     CacheInterface* metadata_cache, PropertyCache* page_property_cache,
     ServerContext* server_context, Statistics* statistics, Statistics* stats,
-    SystemRewriteOptions* global_system_rewrite_options) {
+    SystemRewriteOptions* global_system_rewrite_options,
+    StringPiece request_body) {
   // The handler is "pagespeed_admin", so we must dispatch off of
   // the remainder of the URL.
   StringPiece path = stripped_gurl.PathSansQuery();  // "/pagespeed_admin/foo"
@@ -429,6 +442,25 @@ void AdminSite::AdminPage(
     fetch->Write(json, message_handler_);
     fetch->Done(true);
   } else {
+    // Check for /v1/license/* API paths before leaf-based dispatch.
+    // The full path sans query looks like "/pagespeed_admin/v1/license/status".
+    StringPiece full_path = stripped_gurl.PathSansQuery();
+    StringPiece::size_type license_pos = full_path.find("/v1/license/");
+    if (license_pos != StringPiece::npos) {
+      // Extract the API path starting from /v1/license/...
+      StringPiece api_path = full_path.substr(license_pos);
+      if (!license_handler_->HandleRequest(api_path, request_body, is_global,
+                                            fetch)) {
+        fetch->response_headers()->SetStatusAndReason(HttpStatus::kNotFound);
+        fetch->response_headers()->Add(HttpAttributes::kContentType,
+                                       kContentTypeJson.mime_type());
+        GoogleString json = StrCat("{\"error\":\"Unknown license endpoint: ",
+                                   JsonEscape(api_path), "\"}");
+        fetch->Write(json, message_handler_);
+        fetch->Done(true);
+      }
+      return;
+    }
     StringPiece leaf = stripped_gurl.LeafSansQuery();
     if (leaf.empty()) {
       // Root path serves the SPA console.

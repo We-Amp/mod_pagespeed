@@ -108,6 +108,24 @@ cc_library(
     ],
 )
 
+# Test variant with zero-seed Ed25519 key for integration testing.
+# Tokens signed with CreateKeypair(seed=zeros) will verify successfully.
+cc_library(
+    name = "admin_license_handler_testkey",
+    testonly = True,
+    srcs = ["admin_license_handler.cc"],
+    hdrs = ["admin_license_handler.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//net/instaweb/http",
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/kernel/http",
+        "//pagespeed/kernel/license_v2:license_file",
+        "//pagespeed/kernel/license_v2:license_token",
+        "//pagespeed/kernel/license_v2:license_verifier_testkey",
+    ],
+)
+
 # =============================================================================
 # Fine-grained cache backend targets for faster incremental builds
 # =============================================================================

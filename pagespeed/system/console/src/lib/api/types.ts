@@ -60,7 +60,14 @@ export interface PurgeResponse {
   [key: string]: unknown;
 }
 
-/** GET /cache?purge_set */
+/** Raw response from GET /cache?new_set — the backend returns a single
+ *  newline-delimited string: "Global@datestring\nurl1@datestring\n..." */
+export interface RawPurgeSetResponse {
+  purge_set?: string;
+  [key: string]: unknown;
+}
+
+/** Parsed purge-set data used by the UI. */
 export interface PurgeSetResponse {
   purge_set?: string[];
   global_invalidation_timestamp_ms?: number;
@@ -91,10 +98,11 @@ export interface MessagesResponse {
 /** GET /v1/license/status */
 export interface LicenseStatusResponse {
   licensed: boolean;
+  is_global?: boolean;
   license_type?: string;
   expires?: number;
+  expired?: boolean;
   domain?: string;
-  features?: string[];
   trial_available?: boolean;
   error?: string;
   [key: string]: unknown;
@@ -111,7 +119,22 @@ export interface LicenseApplyResponse {
 /** POST /v1/license/activate */
 export interface ActivateResponse {
   success: boolean;
+  found: boolean;
   token?: string;
   error?: string;
   [key: string]: unknown;
+}
+
+/** POST /v1/license/trial */
+export interface TrialResponse {
+  success: boolean;
+  token?: string;
+  error?: string;
+  [key: string]: unknown;
+}
+
+/** POST /v1/license/consent */
+export interface ConsentResponse {
+  success: boolean;
+  error?: string;
 }

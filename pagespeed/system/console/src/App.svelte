@@ -1,6 +1,8 @@
 <script lang="ts">
   import { router, routes } from "$lib/router.svelte";
   import { detectBasePath } from "$lib/utils/base-path";
+  import { AdminApiClient } from "$lib/api/client";
+  import { onMount } from "svelte";
   import type { Component } from "svelte";
 
   const { basePath, isGlobal } = detectBasePath();
@@ -9,6 +11,19 @@
   let sidebarOpen = $state(false);
   let loadedComponent = $state<Component | null>(null);
   let loadError = $state<string | null>(null);
+  let showLicenseBanner = $state(false);
+  let bannerDismissed = $state(false);
+
+  const api = new AdminApiClient(basePath);
+
+  onMount(async () => {
+    try {
+      const status = await api.getLicenseStatus();
+      showLicenseBanner = !status.licensed;
+    } catch {
+      showLicenseBanner = true;
+    }
+  });
 
   // Reactively load the component when the route changes.
   $effect(() => {
@@ -31,9 +46,13 @@
     router.navigate(path);
     sidebarOpen = false;
   }
+
+  function dismissBanner() {
+    bannerDismissed = true;
+  }
 </script>
 
-<div class="layout">
+<div class="layout" class:has-banner={showLicenseBanner && !bannerDismissed}>
   <!-- Topbar -->
   <header class="topbar">
     <button class="menu-toggle" onclick={toggleSidebar} aria-label="Toggle menu">
@@ -43,6 +62,20 @@
     </button>
     <span class="topbar-title">{title}</span>
   </header>
+
+  <!-- License warning banner -->
+  {#if showLicenseBanner && !bannerDismissed}
+    <div class="license-banner">
+      <span class="license-banner-text">
+        No active license. <a href="#/license" class="license-banner-link">Manage license &rarr;</a>
+      </span>
+      <button class="license-banner-dismiss" onclick={dismissBanner} aria-label="Dismiss">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
+        </svg>
+      </button>
+    </div>
+  {/if}
 
   <!-- Sidebar -->
   <nav class="sidebar" class:open={sidebarOpen}>
@@ -86,7 +119,17 @@
       "sidebar content";
     grid-template-columns: var(--ps-sidebar-width) 1fr;
     grid-template-rows: var(--ps-topbar-height) 1fr;
-    height: 100%;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  .layout.has-banner {
+    grid-template-areas:
+      "topbar topbar"
+      "banner banner"
+      "sidebar content";
+    grid-template-rows: var(--ps-topbar-height) auto 1fr;
+    overflow: hidden;
   }
 
   .topbar {
@@ -162,6 +205,50 @@
     overflow-y: auto;
   }
 
+  .license-banner {
+    grid-area: banner;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--ps-space-sm);
+    padding: var(--ps-space-sm) var(--ps-space-md);
+    background: color-mix(in srgb, var(--ps-warning) 15%, var(--ps-bg));
+    border-bottom: 2px solid var(--ps-warning);
+    font-size: var(--ps-font-size-sm);
+    color: var(--ps-text);
+  }
+
+  .license-banner-text {
+    text-align: center;
+  }
+
+  .license-banner-link {
+    color: var(--ps-primary);
+    text-decoration: none;
+    font-weight: 500;
+  }
+
+  .license-banner-link:hover {
+    text-decoration: underline;
+  }
+
+  .license-banner-dismiss {
+    background: none;
+    border: none;
+    color: var(--ps-text-secondary);
+    cursor: pointer;
+    padding: var(--ps-space-xs);
+    border-radius: var(--ps-border-radius);
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+  }
+
+  .license-banner-dismiss:hover {
+    background: color-mix(in srgb, var(--ps-warning) 25%, var(--ps-bg));
+    color: var(--ps-text);
+  }
+
   .backdrop {
     display: none;
   }
@@ -181,6 +268,13 @@
       grid-template-columns: 1fr;
       grid-template-areas:
         "topbar"
+        "content";
+    }
+
+    .layout.has-banner {
+      grid-template-areas:
+        "topbar"
+        "banner"
         "content";
     }
 

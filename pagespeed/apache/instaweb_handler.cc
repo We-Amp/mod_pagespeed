@@ -826,6 +826,66 @@ bool InstawebHandler::parse_body_from_post(const request_rec* request,
   return true;
 }
 
+// Read the raw POST body without content-type validation.
+bool InstawebHandler::read_post_body(const request_rec* request,
+                                     GoogleString* data,
+                                     apr_status_t* ret) {
+  if (request->method_number != M_POST) {
+    *ret = HTTP_METHOD_NOT_ALLOWED;
+    return false;
+  }
+
+  int content_len = kMaxPostSizeBytes;
+  const char* content_len_str =
+      apr_table_get(request->headers_in, HttpAttributes::kContentLength);
+  if (content_len_str != nullptr) {
+    if (!StringToInt(content_len_str, &content_len)) {
+      *ret = HTTP_BAD_REQUEST;
+      return false;
+    }
+    if (static_cast<size_t>(content_len) > kMaxPostSizeBytes) {
+      *ret = HTTP_REQUEST_ENTITY_TOO_LARGE;
+      return false;
+    }
+  }
+
+  apr_bucket_brigade* bbin =
+      apr_brigade_create(request->pool, request->connection->bucket_alloc);
+  bool eos = false;
+  while (!eos) {
+    apr_status_t rv =
+        ap_get_brigade(request->input_filters, bbin, AP_MODE_READBYTES,
+                       APR_BLOCK_READ, content_len);
+    if (rv != APR_SUCCESS) {
+      *ret = HTTP_INTERNAL_SERVER_ERROR;
+      return false;
+    }
+    for (apr_bucket* bucket = APR_BRIGADE_FIRST(bbin);
+         bucket != APR_BRIGADE_SENTINEL(bbin);
+         bucket = APR_BUCKET_NEXT(bucket)) {
+      if (!APR_BUCKET_IS_METADATA(bucket)) {
+        const char* buf = nullptr;
+        size_t bytes = 0;
+        rv = apr_bucket_read(bucket, &buf, &bytes, APR_BLOCK_READ);
+        if (rv != APR_SUCCESS) {
+          *ret = HTTP_INTERNAL_SERVER_ERROR;
+          return false;
+        }
+        if (data->length() + bytes > kMaxPostSizeBytes) {
+          *ret = HTTP_REQUEST_ENTITY_TOO_LARGE;
+          return false;
+        }
+        data->append(buf, bytes);
+      } else if (APR_BUCKET_IS_EOS(bucket)) {
+        eos = true;
+        break;
+      }
+    }
+    apr_brigade_cleanup(bbin);
+  }
+  return true;
+}
+
 /* static */
 apr_status_t InstawebHandler::instaweb_beacon_handler(
     request_rec* request, ApacheServerContext* server_context) {
@@ -935,22 +995,48 @@ apr_status_t InstawebHandler::instaweb_handler(request_rec* request) {
   } else if (request_handler_str == kAdminHandler &&
              global_config->AdminAccessAllowed(gurl)) {
     InstawebHandler instaweb_handler(request);
+    // Read POST body for JSON API endpoints (e.g. /v1/license/*).
+    GoogleString request_body;
+    if (request->method_number == M_POST) {
+      apr_status_t body_ret;
+      if (!InstawebHandler::read_post_body(request, &request_body,
+                                           &body_ret)) {
+        request_body.clear();
+        ap_log_rerror(APLOG_MARK, APLOG_WARNING, body_ret, request,
+                      "Failed to read admin POST body (status=%d), "
+                      "proceeding with empty body", body_ret);
+      }
+    }
     // The fetch has to be buffered because if it's a cache lookup it could
     // complete asynchrously via the rewrite thread.
     server_context->AdminPage(
         false /* not global */, instaweb_handler.stripped_gurl(),
         instaweb_handler.query_params(), instaweb_handler.options(),
-        instaweb_handler.MakeFetch(true /* buffered */, "local-admin"));
+        instaweb_handler.MakeFetch(true /* buffered */, "local-admin"),
+        request_body);
     ret = APACHE_OK;
   } else if (request_handler_str == kGlobalAdminHandler &&
              global_config->GlobalAdminAccessAllowed(gurl)) {
     InstawebHandler instaweb_handler(request);
+    // Read POST body for JSON API endpoints (e.g. /v1/license/*).
+    GoogleString request_body;
+    if (request->method_number == M_POST) {
+      apr_status_t body_ret;
+      if (!InstawebHandler::read_post_body(request, &request_body,
+                                           &body_ret)) {
+        request_body.clear();
+        ap_log_rerror(APLOG_MARK, APLOG_WARNING, body_ret, request,
+                      "Failed to read global admin POST body (status=%d), "
+                      "proceeding with empty body", body_ret);
+      }
+    }
     // The fetch has to be buffered because if it's a cache lookup it could
     // complete asynchrously via the rewrite thread.
     server_context->AdminPage(
         true /* global */, instaweb_handler.stripped_gurl(),
         instaweb_handler.query_params(), instaweb_handler.options(),
-        instaweb_handler.MakeFetch(true /* buffered */, "global-admin"));
+        instaweb_handler.MakeFetch(true /* buffered */, "global-admin"),
+        request_body);
     ret = APACHE_OK;
   } else if (global_config->enable_cache_purge() &&
              !global_config->purge_method().empty() &&
@@ -992,6 +1078,9 @@ apr_status_t InstawebHandler::instaweb_handler(request_rec* request) {
 
     write_handler_response(output, request, kContentTypeJavascript, "public");
     ret = APACHE_OK;
+  } else if (!server_context->ShouldOptimize()) {
+    // License not active — skip all optimization but allow admin pages above.
+    return DECLINED;
   } else if (strcmp(request->handler, kGenerateResponseWithOptionsHandler) ==
                  0 &&
              request->uri != nullptr) {

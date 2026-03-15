@@ -87,6 +87,7 @@ extern ngx_module_t ngx_pagespeed;
 // http://lxr.evanmiller.org/http/source/http/ngx_http_request.h#L130
 #define  NGX_HTTP_PAGESPEED_BUFFERED 0x08
 #define  POST_BUF_READ_SIZE 65536
+#define  ADMIN_MAX_POST_SIZE 8192
 
 // Needed for SystemRewriteDriverFactory to use shared memory.
 #define PAGESPEED_SUPPORT_POSIX_SHARED_MEM
@@ -96,7 +97,6 @@ net_instaweb::NgxRewriteDriverFactory* active_driver_factory = NULL;
 
 namespace net_instaweb {
 
-const char* kInternalEtagName = "@psol-etag";
 // The process context takes care of proactively initialising
 // a few libraries for us, some of which are not thread-safe
 // when they are initialized lazily.
@@ -292,11 +292,14 @@ ngx_int_t ps_base_fetch_handler(ngx_http_request_t* r) {
 
     // Pass on error handling for non-success status codes to nginx for
     // responses where PSOL acts as a content generator (pagespeed resource,
-    // ipro hit, admin pages).
+    // ipro hit).
     // This generates nginx's default error responses, but also allows header
     // modules running after us to manipulate those responses.
+    // Admin pages generate their own error responses (JSON), so we must not
+    // delegate those to nginx's error handler.
     if (!status_ok && (ctx->base_fetch->base_fetch_type() != kHtmlTransform
-                       && ctx->base_fetch->base_fetch_type() != kIproLookup)) {
+                       && ctx->base_fetch->base_fetch_type() != kIproLookup
+                       && ctx->base_fetch->base_fetch_type() != kAdminPage)) {
       ps_release_base_fetch(ctx);
       ngx_http_filter_finalize_request(r, NULL, status_code);
       return NGX_DONE;
@@ -607,19 +610,9 @@ ngx_int_t copy_response_headers_to_ngx(
     value.data = reinterpret_cast<u_char*>(
         string_piece_to_pool_string(r->pool, value_gs.c_str()));
 
-    // To prevent the gzip module from clearing weak etags, we output them
-    // using a different name here. The etag header filter module runs behind
-    // the gzip compressors header filter, and will rename it to 'ETag'
-    if (StringCaseEqual(name_gs, "etag")
-        && StringCaseStartsWith(value_gs, "W/")) {
-      name.len = strlen(kInternalEtagName);
-      name.data = reinterpret_cast<u_char*>(
-          const_cast<char*>(kInternalEtagName));
-    } else {
-      name.len = name_gs.size();
-      name.data = reinterpret_cast<u_char*>(
-          string_piece_to_pool_string(r->pool, name_gs.c_str()));
-    }
+    name.len = name_gs.size();
+    name.data = reinterpret_cast<u_char*>(
+        string_piece_to_pool_string(r->pool, name_gs.c_str()));
 
     // In case string_piece_to_pool_string failed:
     if (name.data == NULL || value.data == NULL) {
@@ -685,6 +678,10 @@ ngx_int_t copy_response_headers_to_ngx(
     if (STR_EQ_LITERAL(name, "Date")) {
       headers_out->date = header;
     } else if (STR_EQ_LITERAL(name, "Etag")) {
+      // Set the shortcut so nginx can handle conditional requests (304).
+      // For .pagespeed. resources, gzip is disabled in the location block
+      // so it won't strip the ETag.  For IPRO responses, gzip may strip
+      // weak ETags, but IPRO ETag tests aren't run on nginx currently.
       headers_out->etag = header;
     } else if (STR_EQ_LITERAL(name, "Expires")) {
       headers_out->expires = header;
@@ -1841,6 +1838,10 @@ RequestRouting::Response ps_route_request(ngx_http_request_t* r) {
   return RequestRouting::kResource;
 }
 
+// Forward declaration — defined later in this file.
+bool ps_request_body_to_string_piece(
+    ngx_http_request_t* r, StringPiece* out);
+
 ngx_int_t ps_resource_handler(ngx_http_request_t* r,
                               bool html_rewrite,
                               RequestRouting::Response response_category) {
@@ -2024,13 +2025,27 @@ ngx_int_t ps_resource_handler(ngx_http_request_t* r,
           ctx->base_fetch);
     } else if (response_category == RequestRouting::kAdmin ||
                response_category == RequestRouting::kGlobalAdmin) {
+      // For POST requests, the body was read by ps_admin_body_handler
+      // before we got here.
+      StringPiece request_body;
+      if (r->method == NGX_HTTP_POST && r->request_body != NULL) {
+        ps_request_body_to_string_piece(r, &request_body);
+        if (request_body.size() > ADMIN_MAX_POST_SIZE) {
+          ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                        "admin POST body too large: %uz > %uz",
+                        request_body.size(),
+                        static_cast<size_t>(ADMIN_MAX_POST_SIZE));
+          return NGX_HTTP_REQUEST_ENTITY_TOO_LARGE;
+        }
+      }
       cfg_s->server_context->AdminPage(
           response_category == RequestRouting::kGlobalAdmin,
           url,
           query_params,
           custom_options == NULL ? cfg_s->server_context->config()
                                  : custom_options.get(),
-          ctx->base_fetch);
+          ctx->base_fetch,
+          request_body);
     } else if (response_category == RequestRouting::kCachePurge) {
       AdminSite* admin_site = cfg_s->server_context->admin_site();
       admin_site->PurgeHandler(url_string,
@@ -2296,20 +2311,6 @@ bool ps_has_stacked_content_encoding(ngx_http_request_t* r) {
 }
 
 ngx_int_t ps_etag_header_filter(ngx_http_request_t* r) {
-  u_char* etag = reinterpret_cast<u_char*>(
-      const_cast<char*>(kInternalEtagName));
-  ngx_table_elt_t* header;
-  NgxListIterator it(&(r->headers_out.headers.part));
-  while ((header = it.Next()) != NULL) {
-    if (header->key.len == strlen(kInternalEtagName) &&
-        !ngx_strncasecmp(header->key.data, etag, header->key.len)) {
-      header->key.data = reinterpret_cast<u_char*>(const_cast<char*>("ETag"));
-      header->key.len = 4;
-      r->headers_out.etag = header;
-      break;
-    }
-  }
-
   ps_request_ctx_t* ctx = ps_get_request_context(r);
 #if (NGX_HTTP_GZIP)
   if (ctx && ctx->psol_vary_accept_only) {
@@ -2417,6 +2418,10 @@ ngx_int_t ps_html_rewrite_header_filter(ngx_http_request_t* r) {
   }
   // Poll for cache flush on every request (polls are rate-limited).
   cfg_s->server_context->FlushCacheIfNecessary();
+
+  if (!cfg_s->server_context->ShouldOptimize()) {
+    return ngx_http_next_header_filter(r);
+  }
 
   ps_request_ctx_t* ctx = ps_get_request_context(r);
 
@@ -2982,6 +2987,17 @@ void ps_query_params_handler(ngx_http_request_t* r, StringPiece* data) {
   }
 }
 
+// Called after nginx reads the POST body for an admin request.
+// Delegates to ps_resource_handler which will find the body in
+// r->request_body and pass it to SystemServerContext::AdminPage.
+void ps_admin_body_handler(ngx_http_request_t* r) {
+  RequestRouting::Response response_category = ps_route_request(r);
+  ngx_int_t rc = ps_resource_handler(r, false, response_category);
+  if (rc != NGX_DONE) {
+    ngx_http_finalize_request(r, rc);
+  }
+}
+
 // Called after nginx reads the request body from the client.  For another
 // example processing request buffers, see ngx_http_form_input_module.c
 void ps_beacon_body_handler(ngx_http_request_t* r) {
@@ -3067,8 +3083,23 @@ ngx_int_t ps_content_handler(ngx_http_request_t* r) {
     case RequestRouting::kConsole:
     case RequestRouting::kAdmin:
     case RequestRouting::kGlobalAdmin:
+      if (r->method == NGX_HTTP_POST) {
+        // POST requests need the body read before we can handle them.
+        // Control flow continues in ps_admin_body_handler.
+        ngx_int_t rc = ngx_http_read_client_request_body(
+            r, ps_admin_body_handler);
+        if (rc >= NGX_HTTP_SPECIAL_RESPONSE) {
+          return rc;
+        }
+        return NGX_DONE;
+      }
+      return ps_resource_handler(
+          r, false /* html rewrite */, response_category);
     case RequestRouting::kCachePurge:
     case RequestRouting::kResource:
+      if (!cfg_s->server_context->ShouldOptimize()) {
+        return NGX_DECLINED;
+      }
       return ps_resource_handler(
           r, false /* html rewrite */, response_category);
   }

@@ -20,12 +20,15 @@
 #ifndef PAGESPEED_SYSTEM_ADMIN_SITE_H_
 #define PAGESPEED_SYSTEM_ADMIN_SITE_H_
 
+#include <memory>
+
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 
 namespace net_instaweb {
 
+class AdminLicenseHandler;
 class AsyncFetch;
 class CacheInterface;
 class GoogleUrl;
@@ -39,7 +42,9 @@ class Statistics;
 class SystemCachePath;
 class SystemCaches;
 class SystemRewriteOptions;
+class ThreadSystem;
 class Timer;
+class UrlAsyncFetcher;
 
 // Implements the /pagespeed_admin pages.
 // All handlers return JSON responses; the SPA console is served as a
@@ -54,9 +59,11 @@ class AdminSite {
   // in the top navigation bar.
   enum AdminSource { kPageSpeedAdmin, kStatistics, kOther };
 
-  AdminSite(Timer* timer, MessageHandler* message_handler);
+  AdminSite(Timer* timer, ThreadSystem* thread_system,
+            MessageHandler* message_handler, UrlAsyncFetcher* fetcher,
+            const GoogleString& cache_path);
 
-  ~AdminSite() {}
+  ~AdminSite();
 
   // Serves the embedded SPA console HTML.
   void ServeSpaConsole(AsyncFetch* fetch);
@@ -85,7 +92,8 @@ class AdminSite {
                  PropertyCache* page_property_cache,
                  ServerContext* server_context, Statistics* statistics,
                  Statistics* stats,
-                 SystemRewriteOptions* global_system_rewrite_options);
+                 SystemRewriteOptions* global_system_rewrite_options,
+                 StringPiece request_body = StringPiece());
 
   // Handle a request for the legacy /*_pagespeed_statistics page, which also
   // serves as a launching point for a subset of the admin pages.
@@ -145,12 +153,16 @@ class AdminSite {
   void PurgeHandler(StringPiece url, SystemCachePath* cache_path,
                     AsyncFetch* fetch);
 
+  // Return the license handler (e.g. for checking license state).
+  AdminLicenseHandler* license_handler() { return license_handler_.get(); }
+
   // Return the message handler for debugging use.
   MessageHandler* MessageHandlerForTesting() { return message_handler_; }
 
  private:
   MessageHandler* message_handler_;
   Timer* timer_;
+  std::unique_ptr<AdminLicenseHandler> license_handler_;
   DISALLOW_COPY_AND_ASSIGN(AdminSite);
 };
 

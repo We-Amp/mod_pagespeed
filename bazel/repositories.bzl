@@ -49,7 +49,12 @@ APRUTIL_SHA = "4ce5fead950705f6b33dcac5b7fae45f4295b80cb75a6a1378baaec896fd4fc1"
 
 # Cyclone Cache - high-performance disk cache with scan-resistant CLFUS algorithm
 # Requires C++23 - wrapper provides C ABI for C++20 consumers
-CYCLONE_COMMIT = "cb4c0ea497e546b5fd6c4f8f27d75faebdf5d07c"
+# Not pinned during development; pinned to a specific commit at release time.
+
+# ModPageSpeed 2.0 - canonical license crypto code (Ed25519 token/verifier/signer)
+# Used as a Bazel dependency to share license verification code across products.
+# Compiled with -DPAGESPEED_LICENSE_NAMESPACE=net_instaweb to match 1.1's namespace.
+MODPAGESPEED2_COMMIT = "94bb95bc65715eeb52814db1264befe28271dd66"
 
 # Libevent - cross-platform event notification library
 # Used by LibeventDispatcher for standalone event loop (Apache deployments)
@@ -209,8 +214,16 @@ def mod_pagespeed_dependencies():
     git_repository(
         name = "cyclone",
         remote = "git@github.com:We-Amp/cyclone-cache.git",
-        commit = CYCLONE_COMMIT,
+        branch = "main",
         build_file_content = cyclone_build_rule,
+    )
+
+    # ModPageSpeed 2.0 - canonical license crypto (Ed25519 verification)
+    git_repository(
+        name = "modpagespeed2",
+        remote = "git@github.com:We-Amp/pagespeed-optimizer.git",
+        commit = MODPAGESPEED2_COMMIT,
+        shallow_since = "2026-03-11",
     )
 
     # libcurl source - built via cmake in //bazel:curl
@@ -220,6 +233,8 @@ def mod_pagespeed_dependencies():
         url = "https://github.com/curl/curl/archive/refs/tags/curl-%s.tar.gz" % LIBCURL_VERSION.replace(".", "_"),
         sha256 = LIBCURL_SHA,
         build_file_content = _ALL_SRCS_BUILD_FILE,
+        patches = ["@mod_pagespeed//bazel:curl_boringssl_ssl_connect.patch"],
+        patch_args = ["-p1"],
     )
 
     # libmemcached source - built via cmake in //bazel:libmemcached
@@ -237,7 +252,7 @@ def mod_pagespeed_dependencies():
         strip_prefix = "ed25519-b1f19fab4aebe607805620d25a5e42566ce46a0e",
         url = "https://github.com/orlp/ed25519/archive/b1f19fab4aebe607805620d25a5e42566ce46a0e.tar.gz",
         build_file_content = ed25519_build_rule,
-        sha256 = "",  # TODO: add sha256
+        sha256 = "aedb26c46d3dc3b721ab37c5248d5c923142e4d56009a9605c470383f32ce77a",
     )
 
     http_archive(
