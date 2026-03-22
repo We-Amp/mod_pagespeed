@@ -87,11 +87,17 @@ class CycloneCache : public CacheInterface {
     // Set to 0 for the default value.
     int num_segments;
 
+    // Enable persistent directory for cache data to survive process restarts.
+    // When true, the directory (index) is mmap'd into the data file so that
+    // previously written entries are still reachable after a restart.
+    bool persist_directory;
+
     Config()
         : cache_size_bytes(100 * 1024 * 1024),  // 100 MB default
           ram_cache_size_bytes(0),               // No RAM cache by default
           enable_checksum(true),
-          num_segments(0) {}
+          num_segments(0),
+          persist_directory(true) {}
   };
 
   // Statistics variable names.

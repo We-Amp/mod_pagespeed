@@ -19,33 +19,6 @@
 
 #include "pagespeed/system/system_caches.h"
 
-#ifdef _WIN32
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <windows.h>
-namespace {
-void SCDebugLog(const char* msg) {
-  HANDLE hFile = CreateFileA(
-      "C:\\inetpub\\pagespeed\\system_caches_debug.log",
-      FILE_APPEND_DATA,
-      FILE_SHARE_READ | FILE_SHARE_WRITE,
-      NULL,
-      OPEN_ALWAYS,
-      FILE_ATTRIBUTE_NORMAL,
-      NULL);
-  if (hFile != INVALID_HANDLE_VALUE) {
-    DWORD written;
-    WriteFile(hFile, msg, strlen(msg), &written, NULL);
-    WriteFile(hFile, "\r\n", 2, &written, NULL);
-    CloseHandle(hFile);
-  }
-}
-}  // namespace
-#else
-namespace { void SCDebugLog(const char*) {} }
-#endif
-
 #include <cstddef>
 #include <cstdlib>
 #include <memory>
@@ -75,7 +48,6 @@ namespace { void SCDebugLog(const char*) {} }
 #include "pagespeed/kernel/cache/purge_context.h"
 #include "pagespeed/kernel/cache/write_through_cache.h"
 #include "pagespeed/kernel/thread/queued_worker_pool.h"
-#include "pagespeed/kernel/thread/slow_worker.h"
 #if PAGESPEED_ENABLE_MEMCACHED
 #include "pagespeed/system/memcached_cache.h"
 #endif
@@ -113,13 +85,6 @@ void SystemCaches::ShutDown(MessageHandler* message_handler) {
   }
 
   was_shut_down_ = true;
-
-  // Shut down the cache cleaning thread so we no longer have to worry about
-  // outstanding jobs in the slow_worker_ trying
-  // to access FileCache and similar objects we're about to blow away.
-  if (!is_root_process_) {
-    slow_worker_->ShutDown();
-  }
 
   // Take down any threads serving external caches, then wait for shut down to
   // complete and free memory. Note that this will block waiting for any
@@ -173,22 +138,16 @@ void SystemCaches::ShutDown(MessageHandler* message_handler) {
 }
 
 SystemCachePath* SystemCaches::GetCache(SystemRewriteOptions* config) {
-  SCDebugLog("SC: GetCache entered");
   GoogleString path = SystemCachePath::CachePath(config);
-  SCDebugLog("SC: GetCache - got path");
   SystemCachePath* system_cache_path = nullptr;
   std::pair<PathCacheMap::iterator, bool> result =
       path_cache_map_.insert(PathCacheMap::value_type(path, system_cache_path));
   PathCacheMap::iterator iter = result.first;
   if (result.second) {
-    SCDebugLog("SC: GetCache - creating new SystemCachePath");
     iter->second = system_cache_path =
         new SystemCachePath(path, config, factory_, shared_mem_runtime_);
-    SCDebugLog("SC: GetCache - SystemCachePath created");
     factory_->TakeOwnership(system_cache_path);
-    SCDebugLog("SC: GetCache - ownership taken");
   } else {
-    SCDebugLog("SC: GetCache - reusing existing cache");
     system_cache_path = iter->second;
   }
   return system_cache_path;
@@ -320,7 +279,7 @@ SystemCaches::ExternalCacheInterfaces SystemCaches::NewExternalCache(
   }
 #else
   // Memcached is not available on this platform.
-  bool use_memcached = false;
+  [[maybe_unused]] bool use_memcached = false;
 #endif
 
   // Some unique signature to distinguish server configurations.
@@ -501,21 +460,14 @@ void SystemCaches::SetupPcacheCohorts(ServerContext* server_context,
 
 void SystemCaches::SetupCaches(ServerContext* server_context,
                                bool enable_property_cache) {
-  SCDebugLog("SC: SetupCaches entered");
   SystemRewriteOptions* config =
       dynamic_cast<SystemRewriteOptions*>(server_context->global_options());
   DCHECK(config != nullptr);
-  SCDebugLog("SC: SetupCaches - calling GetCache");
   SystemCachePath* caches_for_path = GetCache(config);
-  SCDebugLog("SC: SetupCaches - GetCache done");
   CacheInterface* lru_cache = caches_for_path->lru_cache();
-  SCDebugLog("SC: SetupCaches - got lru_cache");
   CacheInterface* file_cache = caches_for_path->file_cache();
-  SCDebugLog("SC: SetupCaches - got file_cache");
-  SCDebugLog("SC: SetupCaches - calling GetShmMetadataCacheOrDefault");
   MetadataShmCacheInfo* shm_metadata_cache_info =
       GetShmMetadataCacheOrDefault(config);
-  SCDebugLog("SC: SetupCaches - GetShmMetadataCacheOrDefault done");
   CacheInterface* shm_metadata_cache =
       (shm_metadata_cache_info != nullptr)
           ? shm_metadata_cache_info->cache_to_use
@@ -524,9 +476,7 @@ void SystemCaches::SetupCaches(ServerContext* server_context,
   CacheInterface* http_l2 = file_cache;
   Statistics* stats = server_context->statistics();
 
-  SCDebugLog("SC: SetupCaches - calling NewExternalCache");
   ExternalCacheInterfaces external_cache = NewExternalCache(config);
-  SCDebugLog("SC: SetupCaches - NewExternalCache done");
   if (external_cache.async != nullptr) {
     CHECK(external_cache.blocking != nullptr);
 
@@ -567,7 +517,6 @@ void SystemCaches::SetupCaches(ServerContext* server_context,
 
   http_cache->set_max_cacheable_response_content_length(max_content_length);
   server_context->set_http_cache(http_cache);
-  SCDebugLog("SC: SetupCaches - http_cache set");
 
   // And now the metadata cache. If we only have one level, it will be in
   // metadata_l2, with metadata_l1 set to NULL.
@@ -655,22 +604,13 @@ void SystemCaches::SetupCaches(ServerContext* server_context,
     server_context->DeleteCacheOnDestruction(property_store_cache);
   }
   DCHECK(property_store_cache->IsBlocking());
-  SCDebugLog("SC: SetupCaches - calling MakePagePropertyCache");
   server_context->MakePagePropertyCache(
       server_context->CreatePropertyStore(property_store_cache));
-  SCDebugLog("SC: SetupCaches - MakePagePropertyCache done");
-  char buf[512];
-  snprintf(buf, sizeof(buf), "SC: SetupCaches - metadata_cache Name=%s IsHealthy=%d",
-           metadata_cache->Name().c_str(), metadata_cache->IsHealthy() ? 1 : 0);
-  SCDebugLog(buf);
   server_context->set_metadata_cache(metadata_cache);
-  SCDebugLog("SC: SetupCaches - calling SetupPcacheCohorts");
   SetupPcacheCohorts(server_context, enable_property_cache);
-  SCDebugLog("SC: SetupCaches - SetupPcacheCohorts done");
   SystemServerContext* system_server_context =
       dynamic_cast<SystemServerContext*>(server_context);
   system_server_context->SetCachePath(caches_for_path);
-  SCDebugLog("SC: SetupCaches complete");
 }
 
 void SystemCaches::RegisterConfig(SystemRewriteOptions* config) {
@@ -717,8 +657,6 @@ void SystemCaches::RootInit() {
 void SystemCaches::ChildInit() {
   is_root_process_ = false;
 
-  slow_worker_ = std::make_unique<SlowWorker>("slow_work_thread",
-                                              factory_->thread_system());
   for (MetadataShmCacheMap::iterator p = metadata_shm_caches_.begin(),
                                      e = metadata_shm_caches_.end();
        p != e; ++p) {
@@ -738,7 +676,7 @@ void SystemCaches::ChildInit() {
                               e = path_cache_map_.end();
        p != e; ++p) {
     SystemCachePath* cache = p->second;
-    cache->ChildInit(slow_worker_.get());
+    cache->ChildInit();
   }
 
   // TODO(yeputons): think about moving StartUp() to some base class of

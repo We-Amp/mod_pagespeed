@@ -318,15 +318,18 @@ class JavascriptFilter::Context : public SingleRewriteContext {
     bool ok = false;
     server_context->MergeNonCachingResponseHeaders(script_resource,
                                                    script_dest);
-    // Try to preserve original content type to avoid breaking upstream proxies
-    // and the like.
+    // Preserve original content type for the response (e.g. application/json
+    // for JSON inputs) so that IPRO serves the correct MIME type. But always
+    // use a .js cache key extension via ext_override — without this,
+    // SetType(kContentTypeJson) would produce a .json extension, creating a
+    // cache key mismatch with the .js URL that clients request.
     const ContentType* content_type = script_resource->type();
     if (content_type == nullptr || !content_type->IsJsLike()) {
       content_type = &kContentTypeJavascript;
     }
     if (Driver()->Write(ResourceVector(1, script_resource), script_out,
                         content_type, script_resource->charset(),
-                        script_dest.get())) {
+                        script_dest.get(), "js")) {
       ok = true;
     }
     return ok;

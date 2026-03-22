@@ -61,7 +61,6 @@ cc_library(
         "scheduler_sequence.cc",
         "scheduler_thread.cc",
         "sequence.cc",
-        "slow_worker.cc",
         "thread_synchronizer.cc",
         "worker.cc",
     ],
@@ -74,7 +73,6 @@ cc_library(
         "scheduler_sequence.h",
         "scheduler_thread.h",
         "sequence.h",
-        "slow_worker.h",
         "thread_synchronizer.h",  # XXX(oschaaf): check, for test?
         "worker.h",
     ],
@@ -121,7 +119,7 @@ cc_library(
         ":event_dispatcher",
         ":thread",
         "//pagespeed/kernel/base:pagespeed_base",
-        "@envoy//bazel/foreign_cc:event",
+        "//bazel:libevent",
         "@mod_pagespeed//base:log_shim",
     ],
 )
@@ -136,6 +134,31 @@ cc_library(
     deps = [
         ":event_dispatcher",
         ":thread",
+        "//pagespeed/kernel/base:pagespeed_base",
+        "@mod_pagespeed//base:log_shim",
+    ],
+)
+
+# Windows-native threading using Win32 primitives (CRITICAL_SECTION, SRWLOCK,
+# CONDITION_VARIABLE). Adopted from IISpeed per the design record.
+# Use this for IIS module builds on Windows.
+cc_library(
+    name = "win_thread",
+    srcs = [
+        "win_condvar.cc",
+        "win_mutex.cc",
+        "win_rw_lock.cc",
+        "win_thread_system.cc",
+    ],
+    hdrs = [
+        "win_condvar.h",
+        "win_mutex.h",
+        "win_rw_lock.h",
+        "win_thread_system.h",
+    ],
+    target_compatible_with = ["@platforms//os:windows"],
+    visibility = ["//visibility:public"],
+    deps = [
         "//pagespeed/kernel/base:pagespeed_base",
         "@mod_pagespeed//base:log_shim",
     ],

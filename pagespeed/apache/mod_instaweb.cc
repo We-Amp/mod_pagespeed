@@ -293,6 +293,14 @@ class ApacheProcessContext {
   }
 
   ~ApacheProcessContext() {
+    // Redirect LOG() to stderr before destroying the factory. Worker threads
+    // may still be executing tasks (e.g., InPlaceRewriteContext::Harvest) that
+    // call LOG() during the factory shutdown sequence. Without this, those
+    // LOG() calls crash in spdlog::logger::sink_it_() because spdlog's global
+    // logger (a Meyer's singleton) may already be destroyed by the time this
+    // static destructor runs (static destruction order fiasco).
+    pagespeed_logging::ShutDownLogging();
+
     // We must delete the factory before ProcessContext's dtor is called, which
     // terminates the protobuf libraries.  It is unsafe to free our structures
     // after the protobuf library has been shut down.

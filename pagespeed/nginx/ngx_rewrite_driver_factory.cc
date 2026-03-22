@@ -48,7 +48,6 @@
 #include "pagespeed/kernel/sharedmem/shared_mem_statistics.h"
 #include "pagespeed/kernel/thread/pthread_shared_mem.h"
 #include "pagespeed/kernel/thread/scheduler_thread.h"
-#include "pagespeed/kernel/thread/slow_worker.h"
 #include "pagespeed/kernel/util/threadsafe_lock_manager.h"
 #include "pagespeed/system/curl_url_async_fetcher.h"
 #include "pagespeed/system/in_place_resource_recorder.h"

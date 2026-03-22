@@ -109,6 +109,15 @@ CycloneCacheHandle* cyclone_cache_create(const CycloneCacheConfig* config) {
     cc.num_segments = config->num_segments;
   }
 
+  // Enable persistent directory so cached data survives process restarts.
+  // Single-process mode (process_index=0, total=1) — no partitioning,
+  // all stripes writable, but the directory is mmap'd into the file.
+  if (config->persist_directory) {
+    cc.multi_process_config.enabled = true;
+    cc.multi_process_config.process_index = 0;
+    cc.multi_process_config.total_processes = 1;
+  }
+
   // Create the cache instance
   auto result = cyclone::Cache::create(cc);
   if (!result) {

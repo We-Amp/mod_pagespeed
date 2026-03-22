@@ -52,6 +52,11 @@ class LogSink {
 void AddLogSink(LogSink* sink);
 void RemoveLogSink(LogSink* sink);
 
+// Signal that the process is shutting down. After this call, LOG() writes
+// to stderr instead of spdlog, avoiding crashes from the static destruction
+// order fiasco (spdlog's global logger may already be destroyed).
+void ShutDownLogging();
+
 // Internal: send to all registered sinks
 void SendToSinks(int severity, const char* full_filename,
                  const char* base_filename, int line, const char* message,

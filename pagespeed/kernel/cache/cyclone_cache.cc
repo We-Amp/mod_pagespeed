@@ -96,6 +96,7 @@ CycloneCache::CycloneCache(const Config& config,
   c_config.ram_cache_size_bytes = config_.ram_cache_size_bytes;
   c_config.enable_checksum = config_.enable_checksum ? 1 : 0;
   c_config.num_segments = config_.num_segments;
+  c_config.persist_directory = config_.persist_directory ? 1 : 0;
 
   // Create the cache
   cache_ = cyclone_cache_create(&c_config);

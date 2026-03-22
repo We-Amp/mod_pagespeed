@@ -1,4 +1,5 @@
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
+load(":system.bzl", "pagespeed_system_library", "SYSTEM_CORE_SRCS", "SYSTEM_GENERATED_SRCS", "SYSTEM_CORE_HDRS", "SYSTEM_CORE_DEPS")
 
 # =============================================================================
 # Admin Console SPA embedding
@@ -16,77 +17,9 @@ genrule(
 
 licenses(["notice"])  # Apache 2
 
-# =============================================================================
-# Common source file lists
-# =============================================================================
-# These lists are shared between system_envoy, system_windows, and system
-# targets to reduce duplication and ensure consistency.
-
-# Core source files used by all system library variants (envoy, windows, full).
-# Excludes controller_manager.cc (POSIX fork/signals) and memcached_cache.cc
-# (libmemcached is POSIX-only).
-SYSTEM_CORE_SRCS = [
-    "add_headers_fetcher.cc",
-    "admin_license_handler.cc",
-    "admin_site.cc",
-    "external_server_spec.cc",
-    "in_place_resource_recorder.cc",
-    "loopback_route_fetcher.cc",
-    "redis_cache.cc",
-    "system_cache_path.cc",
-    "system_caches.cc",
-    "system_message_handler.cc",
-    "system_request_context.cc",
-    "system_rewrite_driver_factory.cc",
-    "system_rewrite_options.cc",
-    "system_server_context.cc",
-    "system_thread_system.cc",
-]
-
-# Generated admin assets used by all system library variants.
-# The old Closure Compiler CSS/JS assets have been replaced by the
-# Svelte 5 SPA (admin_console.html), embedded via data2c.
-SYSTEM_GENERATED_SRCS = [
-    ":html_admin_console",
-]
-
-# Core header files used by all system library variants.
-# These headers are public API for system library users.
-SYSTEM_CORE_HDRS = [
-    "add_headers_fetcher.h",
-    "admin_license_handler.h",
-    "admin_site.h",
-    "controller_manager.h",
-    "controller_process.h",
-    "external_server_spec.h",
-    "in_place_resource_recorder.h",
-    "loopback_route_fetcher.h",
-    "redis_cache.h",
-    "system_cache_path.h",
-    "system_caches.h",
-    "system_message_handler.h",
-    "system_request_context.h",
-    "system_rewrite_driver_factory.h",
-    "system_rewrite_options.h",
-    "system_server_context.h",
-    "system_thread_system.h",
-]
-
-# Core dependencies used by all system library variants.
-SYSTEM_CORE_DEPS = [
-    ":external_server_spec",
-    ":redis_cache",
-    ":system_controller_process_h",
-    "//net/instaweb/http",
-    "//net/instaweb/rewriter",
-    "//pagespeed/kernel/cache:cyclone_cache",
-    "//pagespeed/kernel/license_v2:license_file",
-    "//pagespeed/kernel/license_v2:license_token",
-    "//pagespeed/kernel/license_v2:license_verifier",
-    "//pagespeed/kernel/sharedmem",
-    "//third_party/redis-crc",
-    "@hiredis",
-]
+# Common source file lists (SYSTEM_CORE_SRCS, SYSTEM_GENERATED_SRCS,
+# SYSTEM_CORE_HDRS, SYSTEM_CORE_DEPS) are loaded from system.bzl above.
+# Edit them there — that is the single source of truth.
 
 # =============================================================================
 # Admin license handler
@@ -97,6 +30,7 @@ cc_library(
     name = "admin_license_handler",
     srcs = ["admin_license_handler.cc"],
     hdrs = ["admin_license_handler.h"],
+    local_defines = ["PAGESPEED_SERVER=\\\"unknown\\\""],
     visibility = ["//visibility:public"],
     deps = [
         "//net/instaweb/http",
@@ -105,6 +39,7 @@ cc_library(
         "//pagespeed/kernel/license_v2:license_file",
         "//pagespeed/kernel/license_v2:license_token",
         "//pagespeed/kernel/license_v2:license_verifier",
+        "//pagespeed/kernel/license_v2:tracking_metadata",
     ],
 )
 
@@ -115,6 +50,7 @@ cc_library(
     testonly = True,
     srcs = ["admin_license_handler.cc"],
     hdrs = ["admin_license_handler.h"],
+    local_defines = ["PAGESPEED_SERVER=\\\"test\\\""],
     visibility = ["//visibility:public"],
     deps = [
         "//net/instaweb/http",
@@ -123,6 +59,7 @@ cc_library(
         "//pagespeed/kernel/license_v2:license_file",
         "//pagespeed/kernel/license_v2:license_token",
         "//pagespeed/kernel/license_v2:license_verifier_testkey",
+        "//pagespeed/kernel/license_v2:tracking_metadata",
     ],
 )
 
@@ -185,11 +122,13 @@ cc_library(
     ],
 )
 
-# Memcached cache backend. Depends on libmemcached.
+# Memcached cache backend. Depends on libmemcached (Linux-only; libmemcached
+# cannot build on macOS due to Envoy's -UDEBUG copt).
 cc_library(
     name = "memcached_cache",
     srcs = ["memcached_cache.cc"],
     hdrs = ["memcached_cache.h"],
+    target_compatible_with = ["@platforms//os:linux"],
     visibility = ["//visibility:public"],
     deps = [
         ":external_server_spec",
@@ -217,6 +156,7 @@ cc_binary(
     name = "memcached_cache.so",
     linkshared = True,
     linkstatic = True,
+    target_compatible_with = ["@platforms//os:linux"],
     visibility = ["//visibility:public"],
     deps = [":memcached_cache"],
 )
@@ -237,6 +177,8 @@ cc_library(
     copts = [
         "-DPAGESPEED_ENABLE_MEMCACHED=0",
         "-DPAGESPEED_NO_FORK",  # Use stub ControllerManager
+        "-DPAGESPEED_SERVER=\\\"envoy\\\"",
+        "-Wno-trigraphs",  # Generated html_admin_console.cc contains ??X sequences
     ],
     visibility = ["//visibility:public"],
     deps = SYSTEM_CORE_DEPS,
@@ -258,34 +200,27 @@ cc_library(
     copts = [
         "-DPAGESPEED_ENABLE_MEMCACHED=0",
         "-DPAGESPEED_NO_FORK",  # Redundant with _WIN32, but explicit for clarity
-    ],
-    visibility = ["//visibility:public"],
-    deps = SYSTEM_CORE_DEPS,
-)
-
-# =============================================================================
-# Main system library (backward-compatible)
-# =============================================================================
-
-# Core system library - APR-free.
-# Used by both Apache and Envoy deployments.
-# Includes controller_manager.cc and memcached_cache.cc which are excluded
-# from system_envoy and system_windows.
-cc_library(
-    name = "system",
-    srcs = SYSTEM_CORE_SRCS + SYSTEM_GENERATED_SRCS + [
-        "controller_manager.cc",
-        "memcached_cache.cc",
-    ],
-    hdrs = SYSTEM_CORE_HDRS + [
-        "memcached_cache.h",
+        "-DPAGESPEED_SERVER=\\\"iis\\\"",
+        "-Wno-trigraphs",  # Generated html_admin_console.cc contains ??X sequences
     ],
     visibility = ["//visibility:public"],
     deps = SYSTEM_CORE_DEPS + [
-        ":memcached_cache",
-        "//bazel:libmemcached",
+        "//pagespeed/kernel/thread:win_thread",
     ],
 )
+
+# =============================================================================
+# Main system library (nginx) and Apache variant
+# =============================================================================
+
+# Core system library - APR-free.
+# Includes controller_manager.cc and memcached_cache.cc which are excluded
+# from system_envoy and system_windows.
+# Generated via pagespeed_system_library() macro in system.bzl.
+pagespeed_system_library(name = "system", server_type = "nginx")
+
+# Apache-specific variant. Reports server_type="apache" to the license service.
+pagespeed_system_library(name = "system_apache", server_type = "apache")
 
 
 cc_library(

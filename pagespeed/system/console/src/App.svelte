@@ -6,7 +6,7 @@
   import type { Component } from "svelte";
 
   const { basePath, isGlobal } = detectBasePath();
-  const title = isGlobal ? "ModPageSpeed Global Admin" : "ModPageSpeed Admin";
+  const consoleLabel = isGlobal ? "Global Admin" : "Admin";
 
   let sidebarOpen = $state(false);
   let loadedComponent = $state<Component | null>(null);
@@ -60,7 +60,24 @@
         <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z" />
       </svg>
     </button>
-    <span class="topbar-title">{title}</span>
+    <span class="topbar-title">
+      <a href="https://modpagespeed.com" target="_blank" rel="noopener noreferrer" class="topbar-logo-link" aria-label="ModPageSpeed – visit modpagespeed.com">
+        <svg class="topbar-logo" viewBox="0 0 370 58" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <!-- Prompt chevron -->
+          <text class="logo-accent" x="0" y="30" font-family="'JetBrains Mono', 'SF Mono', 'Fira Code', monospace" font-weight="700" font-size="26">&#x276F;</text>
+          <!-- Name -->
+          <text x="24" y="30" font-family="Inter, system-ui, sans-serif" font-weight="700" font-size="32" fill="currentColor" letter-spacing="-1.2">mod_pagespeed</text>
+          <!-- Blinking cursor -->
+          <rect class="logo-accent logo-cursor" x="312" y="6" width="2.5" height="28" rx="1"/>
+          <!-- Green status dot -->
+          <circle cx="5" cy="49" r="3" fill="#059669"/>
+          <!-- Output line -->
+          <text class="logo-accent" x="14" y="53" font-family="'JetBrains Mono', 'SF Mono', monospace" font-weight="700" font-size="14">v1.1</text>
+          <text class="logo-muted" x="56" y="53" font-family="'JetBrains Mono', 'SF Mono', monospace" font-weight="600" font-size="14"> · running · we-amp.com</text>
+        </svg>
+      </a>
+      <span class="topbar-badge">{consoleLabel}</span>
+    </span>
   </header>
 
   <!-- License warning banner -->
@@ -144,8 +161,73 @@
   }
 
   .topbar-title {
+    display: flex;
+    align-items: center;
+    gap: var(--ps-space-xs, 4px);
     font-size: var(--ps-font-size-lg);
     font-weight: 500;
+  }
+
+  .topbar-logo-link {
+    display: flex;
+    align-items: center;
+    text-decoration: none;
+    color: inherit;
+    border-radius: var(--ps-border-radius);
+    transition: opacity 0.15s ease;
+  }
+
+  .topbar-logo-link:hover {
+    opacity: 0.85;
+  }
+
+  .topbar-logo {
+    height: 20px;
+    width: auto;
+  }
+
+  .logo-accent {
+    fill: #60a5fa;
+  }
+
+  .logo-muted {
+    fill: rgba(255, 255, 255, 0.5);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    .logo-accent {
+      fill: #1e3a5f;
+    }
+
+    .logo-muted {
+      fill: rgba(0, 0, 0, 0.4);
+    }
+  }
+
+  .logo-cursor {
+    animation: blink 1.2s ease-in-out infinite;
+  }
+
+  @keyframes blink {
+    0%, 100% { opacity: 0.9; }
+    50% { opacity: 0; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .logo-cursor {
+      animation: none;
+      opacity: 0.9;
+    }
+  }
+
+  .topbar-badge {
+    font-size: var(--ps-font-size-xs);
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: var(--ps-border-radius);
+    background: rgba(255, 255, 255, 0.15);
+    letter-spacing: 0.02em;
+    white-space: nowrap;
   }
 
   .menu-toggle {

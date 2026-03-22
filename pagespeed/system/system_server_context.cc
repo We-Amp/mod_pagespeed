@@ -131,14 +131,33 @@ void SystemServerContext::CheckLegacyGlobalCacheFlushFile() {
       if (cache_flush_filename.empty()) {
         cache_flush_filename = "cache.flush";
       }
-      if (cache_flush_filename[0] != '/') {
-        // Implementations must ensure the file cache path is an absolute path.
-        // mod_pagespeed checks in mod_instaweb.cc:pagespeed_post_config while
-        // ngx_pagespeed checks in ngx_pagespeed.cc:ps_merge_srv_conf.
-        DCHECK_EQ('/', global_system_rewrite_options()->file_cache_path()[0]);
-        cache_flush_filename =
-            StrCat(global_system_rewrite_options()->file_cache_path(), "/",
-                   cache_flush_filename);
+      if (cache_flush_filename[0] != '/'
+#ifdef _WIN32
+          && !(cache_flush_filename.size() >= 3 &&
+               cache_flush_filename[1] == ':' &&
+               (cache_flush_filename[2] == '\\' ||
+                cache_flush_filename[2] == '/'))
+#endif
+      ) {
+        // cache_flush_filename is relative — prepend file_cache_path.
+        // The path must be absolute and at least one subdirectory deep
+        // (not empty or filesystem root).
+        const GoogleString& fcp =
+            global_system_rewrite_options()->file_cache_path();
+#ifdef _WIN32
+        // Windows absolute: "X:\subdir" — drive letter + colon + sep + name.
+        DCHECK(fcp.size() >= 4 && fcp[1] == ':' &&
+               (fcp[2] == '\\' || fcp[2] == '/'))
+            << "file_cache_path must be an absolute path at least one "
+               "subdirectory deep, got: " << fcp;
+        cache_flush_filename = StrCat(fcp, "/", cache_flush_filename);
+#else
+        // Unix absolute: "/subdir" — starts with / and has more after it.
+        DCHECK(fcp.size() >= 2 && fcp[0] == '/')
+            << "file_cache_path must be an absolute path at least one "
+               "subdirectory deep, got: " << fcp;
+        cache_flush_filename = StrCat(fcp, "/", cache_flush_filename);
+#endif
       }
       int64 cache_flush_timestamp_sec;
       NullMessageHandler null_handler;

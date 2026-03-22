@@ -3,6 +3,7 @@
 #include "pagespeed/system/admin_license_handler.h"
 
 #include <chrono>
+#include <cstdio>
 #include <filesystem>
 #include <thread>
 
@@ -21,6 +22,7 @@
 #include "pagespeed/kernel/license_v2/license_file.h"
 #include "pagespeed/kernel/license_v2/license_token.h"
 #include "pagespeed/kernel/license_v2/license_verifier.h"
+#include "pagespeed/kernel/license_v2/tracking_metadata.h"
 
 namespace net_instaweb {
 
@@ -223,8 +225,11 @@ AdminLicenseHandler::~AdminLicenseHandler() {
   int waited_ms = 0;
   while (request_in_flight_.load(std::memory_order_acquire)) {
     if (waited_ms >= kDestructorTimeoutMs) {
-      LOG(ERROR) << "AdminLicenseHandler: timed out waiting for in-flight "
-                 << "fetch to complete during shutdown";
+      // Use fprintf instead of LOG() — the logging sink may already be torn
+      // down during process shutdown, causing a use-after-free crash.
+      fprintf(stderr,
+              "AdminLicenseHandler: timed out waiting for in-flight "
+              "fetch to complete during shutdown\n");
       break;
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(kPollIntervalMs));
@@ -250,7 +255,17 @@ void AdminLicenseHandler::Init() {
 
 bool AdminLicenseHandler::IsLicenseValid() const {
   std::lock_guard<std::mutex> lock(license_mu_);
-  return license_valid_ && !license_expired_;
+  if (license_valid_ && !license_expired_) return true;
+
+  // 72-hour grace period: if the token is valid but expired, allow
+  // optimization to continue for kGracePeriodSec after the expiry time.
+  if (license_valid_ && license_expired_ && license_expires_at_ > 0) {
+    int64_t now = std::chrono::duration_cast<std::chrono::seconds>(
+                      std::chrono::system_clock::now().time_since_epoch())
+                      .count();
+    if (now < license_expires_at_ + kGracePeriodSec) return true;
+  }
+  return false;
 }
 
 void AdminLicenseHandler::NotifyLicenseStateChange() {
@@ -263,6 +278,19 @@ bool AdminLicenseHandler::ApplyToken(StringPiece token, GoogleString* error) {
   LicenseResult result = VerifyLicenseToken(token);
   if (!result.valid) {
     *error = result.error;
+    return false;
+  }
+
+  // Verify the token authorizes this product.
+  if (!CheckProductAuthorization(result.payload, PAGESPEED_PRODUCT_ID)) {
+    GoogleString licensed_for;
+    for (size_t i = 0; i < result.payload.products.size(); ++i) {
+      if (i > 0) licensed_for += ", ";
+      licensed_for += result.payload.products[i];
+    }
+    *error = StrCat("license not valid for this product (licensed for: ",
+                    licensed_for.empty() ? "none" : licensed_for,
+                    ", running: ", PAGESPEED_PRODUCT_ID, ")");
     return false;
   }
 
@@ -589,12 +617,16 @@ void AdminLicenseHandler::HandleActivate(StringPiece request_body,
   // order_ref is optional — nonce-only polling doesn't include it.
   ExtractJsonStringField(request_body, "order_ref", &order_ref);
 
-  // Reconstruct sanitized JSON from scratch.
+  // Reconstruct sanitized JSON from scratch (including tracking metadata).
   GoogleString sanitized = StrCat("{\"nonce\":\"", JsonEscape(nonce), "\"");
   if (!order_ref.empty()) {
     StrAppend(&sanitized, ",\"order_ref\":\"", JsonEscape(order_ref), "\"");
   }
-  StrAppend(&sanitized, "}");
+  StrAppend(&sanitized,
+            ",\"server\":\"", PAGESPEED_SERVER,
+            "\",\"os\":\"", PAGESPEED_OS,
+            "\",\"arch\":\"", PAGESPEED_ARCH,
+            "\",\"distribution\":\"", PAGESPEED_DISTRIBUTION, "\"}");
 
   ProxyToLicenseService("/api/activate", sanitized,
                         true /* auto_apply_token */, fetch);
@@ -631,7 +663,11 @@ void AdminLicenseHandler::HandleTrial(StringPiece request_body,
   GoogleString sanitized = StrCat(
       "{\"email\":\"", JsonEscape(email),
       "\",\"terms_accepted_at\":\"", JsonEscape(terms_accepted_at),
-      "\",\"terms_version\":\"", JsonEscape(terms_version), "\"}");
+      "\",\"terms_version\":\"", JsonEscape(terms_version),
+      "\",\"server\":\"", PAGESPEED_SERVER,
+      "\",\"os\":\"", PAGESPEED_OS,
+      "\",\"arch\":\"", PAGESPEED_ARCH,
+      "\",\"distribution\":\"", PAGESPEED_DISTRIBUTION, "\"}");
 
   ProxyToLicenseService("/api/trial", sanitized,
                         true /* auto_apply_token */, fetch);
@@ -685,7 +721,12 @@ void AdminLicenseHandler::MaybeRenew() {
                     sid.substr(0, 8).c_str());
 
   // Build renewal request: POST current token to /api/renew.
-  GoogleString sanitized = StrCat("{\"token\":\"", JsonEscape(token), "\"}");
+  GoogleString sanitized = StrCat(
+      "{\"token\":\"", JsonEscape(token),
+      "\",\"server\":\"", PAGESPEED_SERVER,
+      "\",\"os\":\"", PAGESPEED_OS,
+      "\",\"arch\":\"", PAGESPEED_ARCH,
+      "\",\"distribution\":\"", PAGESPEED_DISTRIBUTION, "\"}");
   GoogleString url = StrCat(LicenseServiceUrl(), "/api/renew");
 
   // Create a "fire and forget" fetch — no client_fetch to forward to.

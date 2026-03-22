@@ -19,6 +19,8 @@
 
 #include "base/logging.h"
 
+#include <atomic>
+#include <cstdio>
 #include <cstdlib>
 #include <iostream>
 #include <mutex>
@@ -28,6 +30,12 @@
 #include "spdlog/spdlog.h"
 
 namespace pagespeed_logging {
+
+// Atomic flag set by ShutDownLogging(). Once true, LogMessage::~LogMessage()
+// writes to stderr instead of spdlog, avoiding crashes from the static
+// destruction order fiasco (spdlog's global logger may be destroyed before
+// our static ApacheProcessContext destructor runs).
+static std::atomic<bool> g_logging_shutdown{false};
 
 namespace {
 
@@ -70,9 +78,27 @@ void SendToSinks(int severity, const char* full_filename,
   }
 }
 
+void ShutDownLogging() {
+  g_logging_shutdown.store(true, std::memory_order_release);
+}
+
 LogMessage::~LogMessage() {
   std::string msg = stream_.str();
   const char* base_filename = GetBasename(file_);
+
+  if (g_logging_shutdown.load(std::memory_order_acquire)) {
+    // Process is shutting down — spdlog may already be destroyed.
+    // Write to stderr instead, which is always safe.
+    static const char* const kSeverityNames[] = {"INFO", "WARN", "ERROR",
+                                                  "FATAL"};
+    int idx = (severity_ >= 0 && severity_ <= 3) ? severity_ : 0;
+    fprintf(stderr, "[%s] [pagespeed] [%s:%d] %s\n", kSeverityNames[idx],
+            base_filename, line_, msg.c_str());
+    if (severity_ == logging::LOG_FATAL) {
+      std::abort();
+    }
+    return;
+  }
 
   // Send to spdlog
   constexpr char fmtstring[] = "[pagespeed] [{}:{}] {}";

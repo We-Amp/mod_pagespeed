@@ -29,6 +29,7 @@
 #include "pagespeed/kernel/license_v2/license_signer.h"
 #include "pagespeed/kernel/license_v2/license_token.h"
 #include "pagespeed/kernel/license_v2/license_verifier.h"
+#include "pagespeed/kernel/license_v2/tracking_metadata.h"
 #include "pagespeed/kernel/util/platform.h"
 #include "test/pagespeed/kernel/base/gmock.h"
 #include "test/pagespeed/kernel/base/gtest.h"
@@ -202,6 +203,7 @@ class AdminLicenseHandlerTest : public ::testing::Test {
     payload.exp = exp;
     payload.sid = sid.as_string();
     payload.kid = kid.as_string();
+    payload.products = {PAGESPEED_PRODUCT_ID};  // v3: authorize this product
     return SignLicenseToken(payload, public_key_, private_key_);
   }
 
@@ -269,6 +271,31 @@ TEST_F(AdminLicenseHandlerTest, StatusShowsExpiredToken) {
   EXPECT_EQ(200, status);
   EXPECT_THAT(body, ::testing::HasSubstr("\"licensed\":true"));
   EXPECT_THAT(body, ::testing::HasSubstr("\"expired\":true"));
+}
+
+TEST_F(AdminLicenseHandlerTest, RejectsTokenForWrongProduct) {
+  // Create a token authorized for the 2.0 optimizer line (not mps1).
+  int64_t far_future = 2000000000;
+  LicensePayload payload;
+  payload.sub = "wrong-product@example.com";
+  payload.iss = "modpagespeed.com";
+  payload.iat = 1706745600;
+  payload.plan = "pro";
+  payload.exp = far_future;
+  payload.kid = "k1";
+  payload.products = {"the 2.0 optimizer line"};  // This build is mps1 — should reject.
+  GoogleString token = SignLicenseToken(payload, public_key_, private_key_);
+
+  GoogleString json = StrCat("{\"key\":\"", token, "\"}");
+  GoogleString body;
+  int status = DoGlobalRequest("/v1/license/apply", json, &body);
+  EXPECT_EQ(200, status);  // HTTP 200 with success:false
+  EXPECT_THAT(body, ::testing::HasSubstr("\"success\":false"));
+  EXPECT_THAT(body, ::testing::HasSubstr("not valid for this product"));
+  EXPECT_THAT(body, ::testing::HasSubstr("the 2.0 optimizer line"));
+
+  // License should remain invalid.
+  EXPECT_FALSE(license_handler_.IsLicenseValid());
 }
 
 // ---------------------------------------------------------------------------
@@ -464,6 +491,15 @@ TEST_F(AdminLicenseHandlerTest, ActivateProxiesNonceAndOrderRef) {
   EXPECT_THAT(fetcher_.last_body(), ::testing::HasSubstr("\"nonce\":\"abc\""));
   EXPECT_THAT(fetcher_.last_body(),
               ::testing::HasSubstr("\"order_ref\":\"def\""));
+  // Tracking metadata.
+  EXPECT_THAT(fetcher_.last_body(),
+              ::testing::HasSubstr("\"server\":\"" PAGESPEED_SERVER "\""));
+  EXPECT_THAT(fetcher_.last_body(),
+              ::testing::HasSubstr("\"os\":\"" PAGESPEED_OS "\""));
+  EXPECT_THAT(fetcher_.last_body(),
+              ::testing::HasSubstr("\"arch\":\"" PAGESPEED_ARCH "\""));
+  EXPECT_THAT(fetcher_.last_body(),
+              ::testing::HasSubstr("\"distribution\":\"" PAGESPEED_DISTRIBUTION "\""));
 }
 
 TEST_F(AdminLicenseHandlerTest, ActivateRejectsMissingNonce) {
@@ -538,6 +574,15 @@ TEST_F(AdminLicenseHandlerTest, TrialProxiesEmailAndTerms) {
               ::testing::HasSubstr("\"terms_accepted_at\":\"2025-01-01"));
   EXPECT_THAT(fetcher_.last_body(),
               ::testing::HasSubstr("\"terms_version\":\"1.0\""));
+  // Tracking metadata.
+  EXPECT_THAT(fetcher_.last_body(),
+              ::testing::HasSubstr("\"server\":\"" PAGESPEED_SERVER "\""));
+  EXPECT_THAT(fetcher_.last_body(),
+              ::testing::HasSubstr("\"os\":\"" PAGESPEED_OS "\""));
+  EXPECT_THAT(fetcher_.last_body(),
+              ::testing::HasSubstr("\"arch\":\"" PAGESPEED_ARCH "\""));
+  EXPECT_THAT(fetcher_.last_body(),
+              ::testing::HasSubstr("\"distribution\":\"" PAGESPEED_DISTRIBUTION "\""));
 }
 
 TEST_F(AdminLicenseHandlerTest, TrialRejectsMissingEmail) {
@@ -770,6 +815,15 @@ TEST_F(AdminLicenseHandlerTest, MaybeRenewTriggersInWindow) {
   EXPECT_EQ(1, fetcher_.fetch_count());
   EXPECT_THAT(fetcher_.last_url(),
               ::testing::HasSubstr("/api/renew"));
+  // Tracking metadata in renewal request.
+  EXPECT_THAT(fetcher_.last_body(),
+              ::testing::HasSubstr("\"server\":\"" PAGESPEED_SERVER "\""));
+  EXPECT_THAT(fetcher_.last_body(),
+              ::testing::HasSubstr("\"os\":\"" PAGESPEED_OS "\""));
+  EXPECT_THAT(fetcher_.last_body(),
+              ::testing::HasSubstr("\"arch\":\"" PAGESPEED_ARCH "\""));
+  EXPECT_THAT(fetcher_.last_body(),
+              ::testing::HasSubstr("\"distribution\":\"" PAGESPEED_DISTRIBUTION "\""));
 }
 
 TEST_F(AdminLicenseHandlerTest, MaybeRenewTriggersForExpired) {
@@ -989,6 +1043,15 @@ TEST_F(AdminLicenseHandlerTest, TrialSanitizesFields) {
               ::testing::HasSubstr("\"terms_version\":"));
   EXPECT_THAT(fetcher_.last_body(),
               ::testing::Not(::testing::HasSubstr("\"extra\":")));
+  // Tracking metadata is always included.
+  EXPECT_THAT(fetcher_.last_body(),
+              ::testing::HasSubstr("\"server\":\""));
+  EXPECT_THAT(fetcher_.last_body(),
+              ::testing::HasSubstr("\"os\":\""));
+  EXPECT_THAT(fetcher_.last_body(),
+              ::testing::HasSubstr("\"arch\":\""));
+  EXPECT_THAT(fetcher_.last_body(),
+              ::testing::HasSubstr("\"distribution\":\""));
 }
 
 // ---------------------------------------------------------------------------

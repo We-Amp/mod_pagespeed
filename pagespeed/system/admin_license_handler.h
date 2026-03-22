@@ -118,6 +118,7 @@ class AdminLicenseHandler {
   static const int64_t kMinRenewalIntervalMs = 3600000;  // 1 hour
   // Renew when within 7 days of expiry.
   static const int64_t kRenewalWindowSec = 7 * 24 * 3600;
+  static const int64_t kGracePeriodSec = 72 * 3600;  // 72-hour grace period
 
   // Mutex protecting all license state fields below.
   // INVARIANT: Must NEVER be held across fetcher_->Fetch() calls

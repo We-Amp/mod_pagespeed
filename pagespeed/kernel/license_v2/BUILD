@@ -84,6 +84,14 @@ cc_library(
     ],
 )
 
+# Compile-time tracking metadata for license telemetry.
+# Header-only: OS, arch, distribution auto-detected; server set per-port.
+cc_library(
+    name = "tracking_metadata",
+    hdrs = ["tracking_metadata.h"],
+    visibility = ["//visibility:public"],
+)
+
 # License file I/O (1.1-specific, not shared from 2.0)
 cc_library(
     name = "license_file",
@@ -113,7 +121,7 @@ cc_test(
     srcs = ["license_token_test.cc"],
     deps = [
         ":license_token",
-        "@com_google_googletest//:gtest_main",
+        "@googletest//:gtest_main",
     ],
 )
 
@@ -126,7 +134,7 @@ cc_test(
         ":license_signer",
         ":license_token",
         ":license_verifier",
-        "@com_google_googletest//:gtest_main",
+        "@googletest//:gtest_main",
         "@ed25519",
     ],
 )

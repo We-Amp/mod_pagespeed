@@ -71,26 +71,25 @@ SystemCachePath::SystemCachePath(const StringPiece& path,
       cache_flush_filename_ = "cache.flush";
     }
   }
-  if (cache_flush_filename_[0] != '/') {
-    // Implementations must ensure the file cache path is an absolute path.
-    // mod_pagespeed checks in mod_instaweb.cc:pagespeed_post_config while
-    // ngx_pagespeed checks in ngx_pagespeed.cc:ps_merge_srv_conf.
-    // There is at least one example where this check is violated in
-    // ngx_pagespeed. Example:
-    // server {
-    //   pagespeed off;
-    //   pagespeed FileCachePath "/tmp";
-    //   location / {
-    //     pagespeed on;
-    //   }
-    // }
-    //
-    // Fixing this would require knowing if pagespeed is ever switched on within
-    // a deeper level of the block. When this is parsed, we just have knowledge
-    // of the higher-level server block.
+  if (cache_flush_filename_[0] != '/'
+#ifdef _WIN32
+      && !(cache_flush_filename_.size() >= 3 &&
+           cache_flush_filename_[1] == ':' &&
+           (cache_flush_filename_[2] == '\\' ||
+            cache_flush_filename_[2] == '/'))
+#endif
+  ) {
+    // cache_flush_filename_ is relative — prepend file_cache_path.
+    // There is at least one example where the file cache path check is
+    // violated in ngx_pagespeed (server-level pagespeed off with
+    // FileCachePath set, then pagespeed on in a location block).
     StringPiece path(config->file_cache_path());
     cache_flush_filename_ = StrCat(
-        path, (path.size() > 0 && strings::EndsWith(path, "/")) ? "" : "/",
+        path, (path.size() > 0 && (strings::EndsWith(path, "/")
+#ifdef _WIN32
+               || strings::EndsWith(path, "\\")
+#endif
+               )) ? "" : "/",
         cache_flush_filename_);
   }
 
@@ -196,7 +195,7 @@ void SystemCachePath::RootInit() {
   }
 }
 
-void SystemCachePath::ChildInit(SlowWorker* cache_clean_worker) {
+void SystemCachePath::ChildInit() {
   if (unplugged_) {
     return;
   }

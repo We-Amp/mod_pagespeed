@@ -82,6 +82,11 @@ typedef struct CycloneCacheConfig {
   // Set to 0 for the default value.
   // More segments allow more concurrent operations but use more memory.
   int num_segments;
+
+  // Enable persistent directory for cache data to survive process restarts.
+  // Set to non-zero to enable.
+  // When enabled, the cache directory is stored in the data file via mmap.
+  int persist_directory;
 } CycloneCacheConfig;
 
 // Statistics from the cache.

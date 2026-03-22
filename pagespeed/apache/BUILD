@@ -46,7 +46,7 @@ cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
-        "//pagespeed/system",
+        "//pagespeed/system:system_apache",
         "@apr",
         "@aprutil",
     ],
@@ -110,7 +110,7 @@ cc_library(
         "//pagespeed/automatic",
         "//pagespeed/kernel/thread:event_scheduler",
         "//pagespeed/kernel/thread:libevent_dispatcher",
-        "//pagespeed/system",
+        "//pagespeed/system:system_apache",
         "//pagespeed/system:curl_fetcher",
     ],
 )

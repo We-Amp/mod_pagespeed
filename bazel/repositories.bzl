@@ -15,8 +15,31 @@ load(":closure_compiler.bzl", "closure_library_rules")
 load(":cyclone.bzl", "cyclone_build_rule")
 load(":ed25519.bzl", "ed25519_build_rule")
 
-ENVOY_COMMIT = "83082b0bf0db8a5b6bb3e691df387bf8566f072d"
-ENVOY_SHA = "71a2dc9186d1ef916a952aae8949953dc7ae6bbcce4415bdc2f3ffa0c1ec1427"
+ENVOY_COMMIT = "4be216785e2ddfc5e3d6297a3afa109f7769bb0a"
+ENVOY_SHA = "2a24db9331e0ffe4679964d4747655a31155d525b71fc6ca2fcd731d56a65f9b"
+
+# Standalone zlib-ng — replaces @envoy//bazel:zlib for non-Envoy builds.
+ZLIB_NG_VERSION = "2.3.2"
+ZLIB_NG_SHA = "6a0561b50b8f5f6434a6a9e667a67026f2b2064a1ffa959c6b2dae320161c2a8"
+
+# Standalone BoringSSL — previously only an Envoy transitive dep.
+BORINGSSL_VERSION = "0.20250514.0"
+BORINGSSL_SHA = "71ef1eb84a035a033ad55867f89a141ddb2e5c5829dd4035ea7803bfff0257ed"
+
+# Phase 4: Standalone gRPC — pinned to exact Envoy version for ABI compatibility.
+GRPC_VERSION = "1.76.0"
+GRPC_SHA = "0af37b800953130b47c075b56683ee60bdc3eda3c37fc6004193f5b569758204"
+
+# Standalone googletest — previously only an Envoy transitive dep.
+GOOGLETEST_VERSION = "1.17.0"
+GOOGLETEST_SHA = "65fab701d9829d38cb77c14acdc431d2108bfdbf8979e40eb8ae567edf10b27c"
+
+# Standalone fmt + spdlog — previously only Envoy transitive deps.
+# Both are header-only libraries used by base/log_shim.
+FMT_VERSION = "12.1.0"
+FMT_SHA = "695fd197fa5aff8fc67b5f2bbc110490a875cdf7a41686ac8512fb480fa8ada7"
+SPDLOG_VERSION = "1.17.0"
+SPDLOG_SHA = "d8862955c6d74e5846b3f580b1605d2428b11d97a410d86e2fb13e857cd3a744"
 
 BROTLI_COMMIT = "028fb5a23661f123017c060daa546b55cf4bde29"  # v1.2.0 - Updated Jan 2026
 BROTLI_SHA = "0afe09a53c8bad9861c8dd1fc1284308d54f19d2979ba3541cfdcc9b05fe360f"
@@ -26,8 +49,8 @@ JSONCPP_COMMIT = "1.9.6"  # Updated Jan 2026
 JSONCPP_SHA = "f93b6dd7ce796b13d02c108bc9f79812245a82e577581c4c9aabe57075c90ea2"
 LIBPNG_COMMIT = "1.6.54"  # Updated Jan 2026 - security fixes
 LIBPNG_SHA = "ba7efce137409079989df4667706c339bebfbb10e9f413474718012a13c8cd4c"
-LIBWEBP_COMMIT = "1.2.0"  # Updated Jan 2026 - one major version bump without sharpyuv
-LIBWEBP_SHA = "d60608c45682fa1e5d41c3c26c199be5d0184084cd8a971a6fc54035f76487d3"
+LIBWEBP_COMMIT = "1.5.0"  # Updated Mar 2026 - CVE-2023-4863 fix (heap buffer overflow)
+LIBWEBP_SHA = "668c9aba45565e24c27e17f7aaf7060a399f7f31dba6c97a044e1feacb930f37"
 GOOGLE_SPARSEHASH_COMMIT = "6ff8809259d2408cb48ae4fa694e80b15b151af3"
 GOOGLE_SPARSEHASH_SHA = "4ae105acb6b53f957b6005fa103a9fd342c39dbc7c87673663e782325b8296b3"
 GFLAGS_COMMIT = "de1b8d3daa40b5b07208ec9e82f223d430e2ecc1"  # v2.3.0 - Updated Jan 2026
@@ -38,8 +61,8 @@ GIFLIB_COMMIT = "5.2.2"  # Updated Jan 2026
 GIFLIB_SHA = "be7ffbd057cadebe2aa144542fd90c6838c6a083b5e8a9048b8ee3b66b29d5fb"
 OPTIPNG_COMMIT = "0.7.8"  # Updated Jan 2026 - security fix for GIF decoder buffer overflow (CVE)
 OPTIPNG_SHA = "25a3bd68481f21502ccaa0f4c13f84dcf6b20338e4c4e8c51f2cefbd8513398c"
-LIBJPEG_TURBO_COMMIT = "ab7cd970a83609f98e8542cea8b81e8d92ddab83"  # July 24th, 2020
-LIBJPEG_TURBO_SHA = "3a6b383a957d87b4d60b67e2e1a950c695ee3016e817d04a13af05b9a98c6aea"
+LIBJPEG_TURBO_COMMIT = "d1f5f2393e0d51f840207342ae86e55a86443288"  # v3.1.0 - Updated Mar 2026 (was July 2020)
+LIBJPEG_TURBO_SHA = ""  # Chromium gitiles archives have non-deterministic checksums
 # APR 1.7.x branch head - Updated Feb 2026
 APR_COMMIT = "d7a4f5be56969ebb5d2f9d093e17eb39dd016693"
 APR_SHA = "5c56af0a8ad7dee32dc381620496f6ebbaa9bf64a470a4ad4fdb0eed84e87fc7"
@@ -54,7 +77,7 @@ APRUTIL_SHA = "4ce5fead950705f6b33dcac5b7fae45f4295b80cb75a6a1378baaec896fd4fc1"
 # ModPageSpeed 2.0 - canonical license crypto code (Ed25519 token/verifier/signer)
 # Used as a Bazel dependency to share license verification code across products.
 # Compiled with -DPAGESPEED_LICENSE_NAMESPACE=net_instaweb to match 1.1's namespace.
-MODPAGESPEED2_COMMIT = "94bb95bc65715eeb52814db1264befe28271dd66"
+MODPAGESPEED2_COMMIT = "bb5d5bb502f7f3aef1adfcf6b355cc2a305fc1a9"
 
 # Libevent - cross-platform event notification library
 # Used by LibeventDispatcher for standalone event loop (Apache deployments)
@@ -62,8 +85,8 @@ LIBEVENT_VERSION = "2.1.12-stable"
 LIBEVENT_SHA = "92e6de1be9ec176428fd2367677e61ceffc2ee1cb119035037a27d346b0403bb"
 
 # libcurl - HTTP client library (built from source)
-LIBCURL_VERSION = "8.11.0"
-LIBCURL_SHA = "5a231145114589491fc52da118f9c7ef8abee885d1cb1ced99c7290e9a352f07"
+LIBCURL_VERSION = "8.18.0"
+LIBCURL_SHA = "be4b1e146ddd84bbb57f081e5c7238eee794e40563976ba2c89a44c433da219c"
 
 # libmemcached - memcached client library (built from source)
 # Using awesomized/libmemcached fork which is actively maintained
@@ -87,7 +110,143 @@ filegroup(
 )
 """
 
+_ABSEIL_VERSION = "20260107.0"
+_ABSEIL_SHA = "4c124408da902be896a2f368042729655709db5e3004ec99f57e3e14439bc1b2"
+_ABSEIL_PATCHES = [
+    "//bazel:abseil.patch",
+    "//bazel:abseil_nullability.patch",
+]
+
 def mod_pagespeed_dependencies():
+    # Declare abseil under both names used in the dependency graph:
+    # - "com_google_absl": PageSpeed BUILD files, grpc_deps()
+    # - "abseil-cpp": gRPC internal refs, protobuf transitive deps
+    # Both must exist with identical content to satisfy Bazel's strict
+    # include checking on Windows (headers from either external/ dir
+    # must be matched by a declared dep).
+    for abseil_name in ["com_google_absl", "abseil-cpp"]:
+        http_archive(
+            name = abseil_name,
+            urls = ["https://github.com/abseil/abseil-cpp/archive/%s.tar.gz" % _ABSEIL_VERSION],
+            sha256 = _ABSEIL_SHA,
+            strip_prefix = "abseil-cpp-%s" % _ABSEIL_VERSION,
+            patches = _ABSEIL_PATCHES,
+            patch_args = ["-p1"],
+        )
+
+    # Phase 0: Standalone zlib-ng
+    http_archive(
+        name = "zlib_ng",
+        strip_prefix = "zlib-ng-%s" % ZLIB_NG_VERSION,
+        url = "https://github.com/zlib-ng/zlib-ng/archive/%s.tar.gz" % ZLIB_NG_VERSION,
+        sha256 = ZLIB_NG_SHA,
+        build_file = "//bazel:zlib_ng.BUILD",
+    )
+
+    # Phase 1: Standalone BoringSSL
+    http_archive(
+        name = "boringssl",
+        strip_prefix = "boringssl-%s" % BORINGSSL_VERSION,
+        url = "https://github.com/google/boringssl/archive/%s.tar.gz" % BORINGSSL_VERSION,
+        sha256 = BORINGSSL_SHA,
+    )
+
+    # Phase 2: Standalone libevent
+    http_archive(
+        name = "com_github_libevent_libevent",
+        strip_prefix = "libevent-%s" % LIBEVENT_VERSION,
+        url = "https://github.com/libevent/libevent/releases/download/release-%s/libevent-%s.tar.gz" % (LIBEVENT_VERSION, LIBEVENT_VERSION),
+        sha256 = LIBEVENT_SHA,
+        build_file_content = """
+filegroup(
+    name = "all_srcs",
+    srcs = glob(["**"]),
+    visibility = ["//visibility:public"],
+)
+filegroup(
+    name = "all",
+    srcs = glob(["**"]),
+    visibility = ["//visibility:public"],
+)
+""",
+    )
+
+    # Phase 4: Standalone gRPC — previously only an Envoy transitive dep.
+    # Patch fixes layering_check, missing includes, Apple builds, and
+    # third_party/BUILD wiring for our standalone BoringSSL/zlib-ng/c-ares.
+    http_archive(
+        name = "com_github_grpc_grpc",
+        strip_prefix = "grpc-%s" % GRPC_VERSION,
+        url = "https://github.com/grpc/grpc/archive/v%s.tar.gz" % GRPC_VERSION,
+        sha256 = GRPC_SHA,
+        patches = ["//bazel:grpc.patch"],
+        patch_args = ["-p1"],
+        # Redirect gRPC's internal @abseil-cpp refs to our canonical repo.
+        # Without this, gRPC targets add external/abseil-cpp/ to include paths,
+        # causing "undeclared inclusion" errors on Windows.
+        repo_mapping = {"@abseil-cpp": "@com_google_absl"},
+    )
+
+    # Standalone googletest — previously only an Envoy transitive dep.
+    http_archive(
+        name = "googletest",
+        strip_prefix = "googletest-%s" % GOOGLETEST_VERSION,
+        url = "https://github.com/google/googletest/releases/download/v%s/googletest-%s.tar.gz" % (GOOGLETEST_VERSION, GOOGLETEST_VERSION),
+        sha256 = GOOGLETEST_SHA,
+        # Redirect googletest's @abseil-cpp refs (activated by --define absl=1
+        # in .bazelrc) to our canonical repo. Without this, googletest adds
+        # external/abseil-cpp/ to include paths on Windows.
+        repo_mapping = {"@abseil-cpp": "@com_google_absl"},
+    )
+
+    # Pre-declare @re2 to prevent grpc_extra_deps()/protobuf from creating
+    # a duplicate alongside @com_googlesource_code_re2 (from grpc_deps).
+    # Both names must resolve to the same version.
+    _RE2_VERSION = "2022-04-01"
+    _RE2_SHA = "1ae8ccfdb1066a731bba6ee0881baad5efd2cd661acd9569b689f2586e1a50e9"
+    for re2_name in ["com_googlesource_code_re2", "re2"]:
+        http_archive(
+            name = re2_name,
+            strip_prefix = "re2-%s" % _RE2_VERSION,
+            urls = ["https://github.com/google/re2/archive/%s.tar.gz" % _RE2_VERSION],
+            sha256 = _RE2_SHA,
+        )
+
+    # Standalone fmt — header-only formatting library, dep of spdlog.
+    http_archive(
+        name = "fmt",
+        strip_prefix = "fmt-%s" % FMT_VERSION,
+        url = "https://github.com/fmtlib/fmt/releases/download/%s/fmt-%s.zip" % (FMT_VERSION, FMT_VERSION),
+        sha256 = FMT_SHA,
+        build_file_content = """
+cc_library(
+    name = "fmt",
+    hdrs = glob(["include/fmt/*.h"]),
+    includes = ["include"],
+    defines = ["FMT_HEADER_ONLY"],
+    visibility = ["//visibility:public"],
+)
+""",
+    )
+
+    # Standalone spdlog — header-only logging library, used by base/log_shim.
+    http_archive(
+        name = "spdlog",
+        strip_prefix = "spdlog-%s" % SPDLOG_VERSION,
+        url = "https://github.com/gabime/spdlog/archive/v%s.tar.gz" % SPDLOG_VERSION,
+        sha256 = SPDLOG_SHA,
+        build_file_content = """
+cc_library(
+    name = "spdlog",
+    hdrs = glob(["include/**/*.h"]),
+    includes = ["include"],
+    defines = ["SPDLOG_FMT_EXTERNAL", "SPDLOG_NO_EXCEPTIONS", "FMT_HEADER_ONLY"],
+    deps = ["@fmt"],
+    visibility = ["//visibility:public"],
+)
+""",
+    )
+
     http_archive(
         name = "envoy",
         strip_prefix = "envoy-%s" % ENVOY_COMMIT,
@@ -170,7 +329,8 @@ def mod_pagespeed_dependencies():
     http_archive(
         name = "giflib",
         strip_prefix = "giflib-%s" % GIFLIB_COMMIT,
-        url = "https://downloads.sourceforge.net/project/giflib/giflib-%s.tar.gz" % GIFLIB_COMMIT,
+        url = "https://sourceforge.net/projects/giflib/files/giflib-5.x/giflib-%s.tar.gz/download" % GIFLIB_COMMIT,
+        type = "tar.gz",
         build_file_content = giflib_build_rule,
         sha256 = GIFLIB_SHA,
     )
@@ -188,8 +348,7 @@ def mod_pagespeed_dependencies():
         url = "https://chromium.googlesource.com/chromium/deps/libjpeg_turbo/+archive/%s.tar.gz" % LIBJPEG_TURBO_COMMIT,
         build_file_content = libjpeg_turbo_build_rule,
         # NOTE: sha256 disabled because Chromium's gitiles generates archives dynamically
-        # with non-deterministic checksums. See TODO(oschaaf) comment above.
-        # sha256 = LIBJPEG_TURBO_SHA,
+        # with non-deterministic checksums.
     )
 
     http_archive(
@@ -213,7 +372,7 @@ def mod_pagespeed_dependencies():
     # Cyclone Cache - high-performance disk cache
     git_repository(
         name = "cyclone",
-        remote = "git@github.com:We-Amp/cyclone-cache.git",
+        remote = "https://github.com/We-Amp/cyclone-cache.git",
         branch = "main",
         build_file_content = cyclone_build_rule,
     )
@@ -221,9 +380,9 @@ def mod_pagespeed_dependencies():
     # ModPageSpeed 2.0 - canonical license crypto (Ed25519 verification)
     git_repository(
         name = "modpagespeed2",
-        remote = "git@github.com:We-Amp/pagespeed-optimizer.git",
+        remote = "https://github.com/We-Amp/pagespeed-optimizer.git",
         commit = MODPAGESPEED2_COMMIT,
-        shallow_since = "2026-03-11",
+        shallow_since = "2026-03-18",
     )
 
     # libcurl source - built via cmake in //bazel:curl
@@ -233,7 +392,7 @@ def mod_pagespeed_dependencies():
         url = "https://github.com/curl/curl/archive/refs/tags/curl-%s.tar.gz" % LIBCURL_VERSION.replace(".", "_"),
         sha256 = LIBCURL_SHA,
         build_file_content = _ALL_SRCS_BUILD_FILE,
-        patches = ["@mod_pagespeed//bazel:curl_boringssl_ssl_connect.patch"],
+        patches = ["@mod_pagespeed//bazel:curl_boringssl_ssl_connect_8_18.patch"],
         patch_args = ["-p1"],
     )
 

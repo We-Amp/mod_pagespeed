@@ -23,6 +23,7 @@
 #ifndef WEBUTIL_CSS_STRING_UTIL_H_
 #define WEBUTIL_CSS_STRING_UTIL_H_
 
+#include <ctype.h>
 #include <vector>
 
 #include "third_party/css_parser/src/strings/stringpiece.h"
