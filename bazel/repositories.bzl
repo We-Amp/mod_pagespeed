@@ -11,7 +11,6 @@ load(":optipng.bzl", "optipng_build_rule")
 load(":libjpeg_turbo.bzl", "libjpeg_turbo_build_rule")
 load(":apr.bzl", "apr_build_rule")
 load(":aprutil.bzl", "aprutil_build_rule")
-load(":closure_compiler.bzl", "closure_library_rules")
 load(":cyclone.bzl", "cyclone_build_rule")
 load(":ed25519.bzl", "ed25519_build_rule")
 
@@ -92,14 +91,6 @@ LIBCURL_SHA = "be4b1e146ddd84bbb57f081e5c7238eee794e40563976ba2c89a44c433da219c"
 # Using awesomized/libmemcached fork which is actively maintained
 LIBMEMCACHED_VERSION = "1.1.4"
 LIBMEMCACHED_SHA = "c477e1f6510e1dc698e84f3717ce690a8f65b94c616ecaa62306cce0f5e3116a"
-
-# NOTE: Closure isn't at the latest, because of that introcucing top level comments which
-# break tests, but more importantly, make generated js files appear as if they're apache
-# licenced. We're at the last revision before that change gets introduced.
-# Full context at:
-# https://github.com/google/closure-compiler/issues/3551, which got introcuded via
-# https://github.com/google/closure-library/commit/1fe1bd873b1b772cca7de983cbaf72ef4011de0b
-CLOSURE_LIBRARY_COMMIT = "20191111"  # July 27th, 2020 (latest release was 20200719)
 
 # Build file content for source archives used by rules_foreign_cc
 _ALL_SRCS_BUILD_FILE = """
@@ -414,10 +405,3 @@ cc_library(
         sha256 = "aedb26c46d3dc3b721ab37c5248d5c923142e4d56009a9605c470383f32ce77a",
     )
 
-    http_archive(
-        name = "closure_library",
-        strip_prefix = "closure-library-%s" % CLOSURE_LIBRARY_COMMIT,
-        url = "https://github.com/google/closure-library/archive/v%s.tar.gz" % CLOSURE_LIBRARY_COMMIT,
-        sha256 = "21400f56c5b8f9e2548facb30658e4a09fe1cbaba39440735441735d2f900e55",
-        build_file_content = closure_library_rules,
-    )
