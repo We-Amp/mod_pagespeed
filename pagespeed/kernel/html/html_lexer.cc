@@ -1007,8 +1007,6 @@ void HtmlLexer::Parse(const char* text, int size) {
   if (size_limit_ > 0 && num_bytes_parsed_ > size_limit_) {
     size_limit_exceeded_ = true;
   }
-  // TODO(nikhilmadan): Protect against an unbounded sequence of bytes within an
-  // element, probably by just aborting the parse completely.
 
   for (int i = 0; i < size; ++i) {
     if (skip_parsing_) {
@@ -1018,6 +1016,16 @@ void HtmlLexer::Parse(const char* text, int size) {
     char c = text[i];
     if (c == '\n') {
       ++line_;
+    }
+
+    // Guard against unbounded literal_ growth within a single element
+    // (e.g., a multi-GB <textarea>). If the size limit has been exceeded
+    // and the literal buffer is already large, stop parsing. This
+    // preserves the element-boundary behavior for normal-sized content
+    // while preventing OOM from pathological input.
+    if (size_limit_exceeded_ && literal_.size() > 10 * 1024 * 1024) {
+      skip_parsing_ = true;
+      return;
     }
 
     // By default we keep track of every byte as it comes in.

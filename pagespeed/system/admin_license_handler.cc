@@ -263,7 +263,13 @@ bool AdminLicenseHandler::IsLicenseValid() const {
     int64_t now = std::chrono::duration_cast<std::chrono::seconds>(
                       std::chrono::system_clock::now().time_since_epoch())
                       .count();
-    if (now < license_expires_at_ + kGracePeriodSec) return true;
+    // Overflow-safe grace period check: equivalent to
+    // now < license_expires_at_ + kGracePeriodSec but avoids overflow
+    // when license_expires_at_ is near INT64_MAX.
+    if (now <= license_expires_at_ ||
+        (now - license_expires_at_) < kGracePeriodSec) {
+      return true;
+    }
   }
   return false;
 }

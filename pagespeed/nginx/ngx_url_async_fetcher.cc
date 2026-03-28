@@ -142,12 +142,12 @@ namespace net_instaweb {
 
   // If there are still active requests, cancel them.
   void NgxUrlAsyncFetcher::CancelActiveFetches() {
-    // TODO(oschaaf): this seems tricky, this may end up calling
-    // FetchComplete, modifying the active fetches while we are looping
-    // it
-    for (NgxFetchPool::const_iterator p = active_fetches_.begin(),
-        e = active_fetches_.end(); p != e; ++p) {
-      NgxFetch* fetch = *p;
+    // Snapshot the active fetches before iterating. CallbackDone may
+    // trigger FetchComplete which removes the fetch from active_fetches_,
+    // invalidating iterators if we looped the pool directly.
+    std::vector<NgxFetch*> fetches_to_cancel(active_fetches_.begin(),
+                                              active_fetches_.end());
+    for (NgxFetch* fetch : fetches_to_cancel) {
       fetch->CallbackDone(false);
     }
   }

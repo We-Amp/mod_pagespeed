@@ -27,6 +27,8 @@ extern "C" {
 
 #include "ngx_event_connection.h"
 
+#include <unistd.h>
+
 #include "pagespeed/kernel/base/google_message_handler.h"
 #include "pagespeed/kernel/base/message_handler.h"
 
@@ -148,19 +150,36 @@ bool NgxEventConnection::WriteEvent(char type, void* sender) {
   data.sender = sender;
   data.connection = this;
 
+  // Retry with exponential backoff to avoid CPU spin when the pipe
+  // buffer is full. Starts at 100µs, doubles each
+  // retry, caps at ~100ms per sleep, gives up after 50 attempts
+  // (~6.5 seconds total worst case).
+  static constexpr int kMaxRetries = 50;
+  static constexpr useconds_t kInitialBackoffUs = 100;
+  static constexpr useconds_t kMaxBackoffUs = 100000;  // 100ms
+  int retries = 0;
+  useconds_t backoff_us = kInitialBackoffUs;
+
   while (true) {
     size = write(pipe_write_fd_,
                  static_cast<void*>(&data), sizeof(data));
     if (size == sizeof(data)) {
       return true;
     } else if (size == -1) {
-      // TODO(oschaaf): should we worry about spinning here?
-      if (ngx_errno == EINTR || ngx_errno == EAGAIN
-          || ngx_errno == EWOULDBLOCK) {
-        continue;
-      } else {
-        return false;
+      if (ngx_errno == EINTR) {
+        continue;  // EINTR: retry immediately, no backoff needed.
       }
+      if (ngx_errno == EAGAIN || ngx_errno == EWOULDBLOCK) {
+        if (++retries > kMaxRetries) {
+          return false;  // Pipe remains full after sustained backoff.
+        }
+        usleep(backoff_us);
+        if (backoff_us < kMaxBackoffUs) {
+          backoff_us *= 2;
+        }
+        continue;
+      }
+      return false;
     } else {
       CHECK(false) << "pagespeed: unexpected return value from write(): "
                    << size;

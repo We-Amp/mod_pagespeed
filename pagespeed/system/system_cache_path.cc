@@ -128,6 +128,8 @@ SystemCachePath::SystemCachePath(const StringPiece& path,
   // Check if CycloneCache started successfully
   if (cyclone_cache->IsHealthy()) {
     cache_backend_ = cyclone_cache;
+    // Register cyclone.dat so Apache's post_config chown sweep fixes ownership.
+    factory->AddCreatedDirectory(cyclone_config.cache_path);
     file_cache_ = new CacheStats(kFileCache, cache_backend_,
                                  factory->timer(), factory->statistics());
     factory->TakeOwnership(file_cache_);

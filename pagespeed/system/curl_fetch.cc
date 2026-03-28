@@ -30,70 +30,13 @@
 #include "pagespeed/kernel/http/response_headers.h"
 #include "pagespeed/system/curl_url_async_fetcher.h"
 
-#ifdef _WIN32
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <windows.h>
-
-namespace {
-void CurlFetchDebugLog(const char* msg) {
-  HANDLE hFile = CreateFileA(
-      "C:\\inetpub\\pagespeed\\curl_fetch_debug.log",
-      FILE_APPEND_DATA,
-      FILE_SHARE_READ | FILE_SHARE_WRITE,
-      NULL,
-      OPEN_ALWAYS,
-      FILE_ATTRIBUTE_NORMAL,
-      NULL);
-  if (hFile != INVALID_HANDLE_VALUE) {
-    DWORD written;
-    WriteFile(hFile, msg, strlen(msg), &written, NULL);
-    WriteFile(hFile, "\r\n", 2, &written, NULL);
-    CloseHandle(hFile);
-  }
-}
-}  // namespace
-#else
-namespace {
-void CurlFetchDebugLog(const char*) {}
-}  // namespace
-#endif
-
 namespace net_instaweb {
 
-#ifdef _WIN32
-// Curl debug callback to capture verbose output
-static int CurlDebugCallback(CURL* handle, curl_infotype type,
-                              char* data, size_t size, void* userp) {
-  (void)handle;
-  (void)userp;
-
-  // Only log text info, not data/SSL data
-  if (type == CURLINFO_TEXT ||
-      type == CURLINFO_HEADER_IN ||
-      type == CURLINFO_HEADER_OUT) {
-    char buf[1024];
-    const char* prefix = "";
-    switch (type) {
-      case CURLINFO_TEXT: prefix = "* "; break;
-      case CURLINFO_HEADER_IN: prefix = "< "; break;
-      case CURLINFO_HEADER_OUT: prefix = "> "; break;
-      default: break;
-    }
-    size_t log_size = (size > sizeof(buf) - 20) ? sizeof(buf) - 20 : size;
-    snprintf(buf, sizeof(buf), "CURL %s%.*s",
-             prefix, static_cast<int>(log_size), data);
-    // Remove trailing newlines
-    size_t len = strlen(buf);
-    while (len > 0 && (buf[len-1] == '\n' || buf[len-1] == '\r')) {
-      buf[--len] = '\0';
-    }
-    CurlFetchDebugLog(buf);
-  }
-  return 0;
-}
-#endif
+// Maximum sizes to prevent resource exhaustion from malicious origins.
+// Response body: 256 MB — covers all realistic web resources.
+// Header total: 1 MB — far beyond any legitimate response header set.
+static constexpr size_t kMaxResponseBodyBytes = 256 * 1024 * 1024;
+static constexpr size_t kMaxHeaderBytes = 1 * 1024 * 1024;
 
 CurlFetch::CurlFetch(const GoogleString& url, AsyncFetch* async_fetch,
                      MessageHandler* message_handler, Timer* timer)
@@ -106,6 +49,7 @@ CurlFetch::CurlFetch(const GoogleString& url, AsyncFetch* async_fetch,
       request_headers_list_(nullptr),
       headers_complete_(false),
       bytes_received_(0),
+      header_bytes_received_(0),
       fetch_start_ms_(timer->NowMs()),
       fetch_end_ms_(0) {}
 
@@ -151,60 +95,25 @@ bool CurlFetch::InitCurl(CurlUrlAsyncFetcher* fetcher) {
   }
 
   // SSL configuration
-  char debug_buf[512];
-  snprintf(debug_buf, sizeof(debug_buf),
-           "InitCurl: SSL config for url=%s allow_https=%d allow_self_signed=%d "
-           "allow_unknown_ca=%d",
-           url_.c_str(),
-           fetcher->allow_https() ? 1 : 0,
-           fetcher->allow_self_signed() ? 1 : 0,
-           fetcher->allow_unknown_certificate_authority() ? 1 : 0);
-  CurlFetchDebugLog(debug_buf);
-
   if (fetcher->allow_https()) {
     if (fetcher->allow_self_signed() ||
         fetcher->allow_unknown_certificate_authority()) {
-      CurlFetchDebugLog("InitCurl: SSL_VERIFYPEER=0 (permissive)");
       curl_easy_setopt(curl_handle_, CURLOPT_SSL_VERIFYPEER, 0L);
     } else {
-      CurlFetchDebugLog("InitCurl: SSL_VERIFYPEER=1 (strict)");
       curl_easy_setopt(curl_handle_, CURLOPT_SSL_VERIFYPEER, 1L);
     }
     curl_easy_setopt(curl_handle_, CURLOPT_SSL_VERIFYHOST, 2L);
 
-    // Always set cert paths when configured (even empty) to override
-    // system defaults. This ensures that if a bogus path is set,
-    // verification will actually fail rather than falling through to
-    // the system default cert store.
     if (!fetcher->ssl_certificates_dir().empty()) {
-      snprintf(debug_buf, sizeof(debug_buf), "InitCurl: CAPATH=%s",
-               fetcher->ssl_certificates_dir().c_str());
-      CurlFetchDebugLog(debug_buf);
       curl_easy_setopt(curl_handle_, CURLOPT_CAPATH,
                        fetcher->ssl_certificates_dir().c_str());
     }
-    // When cert dir is set but cert file is explicitly empty, set
-    // CAINFO to empty to prevent curl from using system default.
     if (!fetcher->ssl_certificates_file().empty()) {
-      snprintf(debug_buf, sizeof(debug_buf), "InitCurl: CAINFO=%s",
-               fetcher->ssl_certificates_file().c_str());
-      CurlFetchDebugLog(debug_buf);
       curl_easy_setopt(curl_handle_, CURLOPT_CAINFO,
                        fetcher->ssl_certificates_file().c_str());
     } else if (!fetcher->ssl_certificates_dir().empty()) {
-      // Explicit dir set with no file: disable default CAINFO
-      CurlFetchDebugLog("InitCurl: CAINFO='' (disabled)");
       curl_easy_setopt(curl_handle_, CURLOPT_CAINFO, "");
     }
-
-#ifdef _WIN32
-    // On Windows, enable verbose output for debugging SSL issues
-    if (StringCaseStartsWith(url_, "https:")) {
-      CurlFetchDebugLog("InitCurl: enabling CURLOPT_VERBOSE for HTTPS");
-      curl_easy_setopt(curl_handle_, CURLOPT_VERBOSE, 1L);
-      curl_easy_setopt(curl_handle_, CURLOPT_DEBUGFUNCTION, CurlDebugCallback);
-    }
-#endif
   }
 
   // Handle request method and body
@@ -375,6 +284,15 @@ size_t CurlFetch::HeaderCallback(char* buffer, size_t size, size_t nmemb,
     return total;
   }
 
+  // Reject responses with excessive total header size to prevent OOM.
+  fetch->header_bytes_received_ += total;
+  if (fetch->header_bytes_received_ > kMaxHeaderBytes) {
+    fetch->message_handler_->Message(
+        kWarning, "Response headers too large (>%zu bytes), aborting fetch for %s",
+        kMaxHeaderBytes, fetch->url_.c_str());
+    return 0;  // Returning 0 causes curl to abort with CURLE_WRITE_ERROR.
+  }
+
   StringPiece line(buffer, total);
   // Strip trailing \r\n
   while (line.ends_with("\n") || line.ends_with("\r")) {
@@ -420,6 +338,15 @@ size_t CurlFetch::WriteCallback(char* buffer, size_t size, size_t nmemb,
   }
 
   fetch->bytes_received_ += total;
+
+  // Reject responses that exceed the maximum body size to prevent OOM.
+  if (fetch->bytes_received_ > kMaxResponseBodyBytes) {
+    fetch->message_handler_->Message(
+        kWarning, "Response body too large (>%zu bytes), aborting fetch for %s",
+        kMaxResponseBodyBytes, fetch->url_.c_str());
+    return 0;  // Returning 0 causes curl to abort with CURLE_WRITE_ERROR.
+  }
+
   StringPiece data(buffer, total);
   fetch->async_fetch_->Write(data, fetch->message_handler_);
 
@@ -447,7 +374,7 @@ void CurlFetch::FixUserAgent() {
   }
   GoogleString version =
       StrCat(" (", kModPagespeedSubrequestUserAgent,
-             "/" MOD_PAGESPEED_VERSION_STRING "-" LASTCHANGE_STRING ")");
+             "/" MOD_PAGESPEED_FULL_VERSION_STRING "-" LASTCHANGE_STRING ")");
   if (!strings::EndsWith(StringPiece(user_agent), version)) {
     user_agent += version;
   }

@@ -77,6 +77,7 @@ class CurlFetch : public PoolElement<CurlFetch> {
   struct curl_slist* request_headers_list_;
   bool headers_complete_;
   size_t bytes_received_;
+  size_t header_bytes_received_;
   int64 fetch_start_ms_;
   int64 fetch_end_ms_;
 
