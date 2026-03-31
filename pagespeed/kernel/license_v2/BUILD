@@ -21,7 +21,7 @@ _PRODUCT_ID = "PAGESPEED_PRODUCT_ID=\\\"mps1\\\""
     name = "adapt_" + f.replace(".", "_"),
     srcs = ["@modpagespeed2//src/crypto:" + f],
     outs = [f],
-    cmd = "sed 's|#include \"src/crypto/|#include \"pagespeed/kernel/license_v2/|g' $< > $@",
+    cmd = "sed -e 's|#include \"src/crypto/|#include \"pagespeed/kernel/license_v2/|g' -e 's|#include \"lib/base/string_util.h\"|#include \"pagespeed/kernel/base/string_util.h\"|g' $< > $@",
 ) for f in [
     "license_token.h",
     "license_token.cc",
@@ -103,11 +103,9 @@ cc_library(
     ],
 )
 
-# CLI tool to generate a test token signed with the zero-seed keypair.
 cc_binary(
-    name = "generate_test_token",
-    testonly = True,
-    srcs = ["generate_test_token.cc"],
+    name = "generate_license_token",
+    srcs = ["generate_license_token.cc"],
     deps = [
         ":license_signer",
         ":license_token",
@@ -129,7 +127,6 @@ cc_test(
     name = "license_verifier_test",
     size = "small",
     srcs = ["license_verifier_test.cc"],
-    defines = ["PAGESPEED_TEST_LICENSE_KEY"],
     deps = [
         ":license_signer",
         ":license_token",

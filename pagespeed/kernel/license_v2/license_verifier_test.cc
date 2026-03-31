@@ -128,21 +128,24 @@ TEST_F(LicenseVerifierTest, V2TokenRoundTrip) {
   payload.iss = "modpagespeed.com";
   payload.iat = 1706745600;
   payload.plan = "pro";
-  payload.exp = 1999999999;  // Far future
+  payload.exp = 1769817600;  // iat + 2 years (max lifetime)
   payload.sid = "sub_abc123";
   payload.kid = "k1";
 
   GoogleString token = SignLicenseToken(payload, public_key_, private_key_);
   ASSERT_FALSE(token.empty());
 
-  LicenseResult result = VerifyLicenseTokenWithKey(token, public_key_);
+  // Pass explicit now_sec to avoid system clock dependency (exp may be in
+  // the past relative to the wall clock but not relative to our test time).
+  int64_t now_sec = 1706745600 + 86400;  // 1 day after iat
+  LicenseResult result = VerifyLicenseTokenWithKey(token, public_key_, now_sec);
   EXPECT_TRUE(result.valid) << "Error: " << result.error;
   EXPECT_EQ(result.payload.sub, "customer@example.com");
   EXPECT_EQ(result.payload.plan, "pro");
-  EXPECT_EQ(result.payload.exp, 1999999999);
+  EXPECT_EQ(result.payload.exp, 1769817600);
   EXPECT_EQ(result.payload.sid, "sub_abc123");
   EXPECT_EQ(result.payload.kid, "k1");
-  EXPECT_EQ(result.expires_at, 1999999999);
+  EXPECT_EQ(result.expires_at, 1769817600);
   EXPECT_FALSE(result.expired);
 }
 
@@ -186,13 +189,15 @@ TEST_F(LicenseVerifierTest, NotYetExpiredToken) {
   payload.iss = "modpagespeed.com";
   payload.iat = 1706745600;
   payload.plan = "pro";
-  payload.exp = 4102444800;  // Year 2100 -- far future
+  payload.exp = 1769817600;  // iat + 2 years (max lifetime)
 
   GoogleString token = SignLicenseToken(payload, public_key_, private_key_);
-  LicenseResult result = VerifyLicenseTokenWithKey(token, public_key_);
+  // Pass explicit now_sec to avoid system clock dependency.
+  int64_t now_sec = 1706745600 + 86400;  // 1 day after iat
+  LicenseResult result = VerifyLicenseTokenWithKey(token, public_key_, now_sec);
   EXPECT_TRUE(result.valid);
   EXPECT_FALSE(result.expired);
-  EXPECT_EQ(result.expires_at, 4102444800);
+  EXPECT_EQ(result.expires_at, 1769817600);
 }
 
 TEST_F(LicenseVerifierTest, NoExpFieldMeansNoExpiry) {
@@ -260,12 +265,14 @@ TEST_F(LicenseVerifierTest, V2TokenWithAllOptionalFields) {
   payload.iss = "modpagespeed.com";
   payload.iat = 1706745600;
   payload.plan = "enterprise";
-  payload.exp = 1999999999;
+  payload.exp = 1769817600;
   payload.sid = "sub_xyz789-abc";
   payload.kid = "k2";
 
   GoogleString token = SignLicenseToken(payload, public_key_, private_key_);
-  LicenseResult result = VerifyLicenseTokenWithKey(token, public_key_);
+  // Pass explicit now_sec to avoid system clock dependency.
+  int64_t now_sec = 1706745600 + 86400;  // 1 day after iat
+  LicenseResult result = VerifyLicenseTokenWithKey(token, public_key_, now_sec);
   EXPECT_TRUE(result.valid);
   EXPECT_EQ(result.payload.plan, "enterprise");
   EXPECT_EQ(result.payload.sid, "sub_xyz789-abc");
@@ -294,7 +301,7 @@ TEST_F(LicenseVerifierTest, IsZeroKeyCheckedViaVerifyLicenseToken) {
   LicenseResult result = VerifyLicenseToken(token);
   // Should fail (neither primary nor fallback key matches).
   EXPECT_FALSE(result.valid);
-  EXPECT_NE(result.error.find("invalid signature"), GoogleString::npos);
+  EXPECT_EQ(result.error, "invalid token");
 }
 
 // ---------- Token at boundary sizes ----------
@@ -483,27 +490,26 @@ TEST_F(LicenseVerifierTest, DualKeyNonSignatureErrorDoesNotFallback) {
 
   GoogleString token = SignLicenseToken(payload, public_key_, private_key_);
   // This token is signed with test keys (not embedded keys).
-  // VerifyLicenseToken will first try kPublicKey -> "invalid signature"
-  // Then try kPreviousPublicKey -> also "invalid signature"
-  // Neither will succeed, so result.error = "invalid signature".
+  // VerifyLicenseToken will try both embedded keys and fail, then
+  // normalize the error to "invalid token" (public API behavior).
   LicenseResult result = VerifyLicenseToken(token);
   EXPECT_FALSE(result.valid);
   // The test key doesn't match either embedded key.
-  EXPECT_EQ(result.error, "invalid signature");
+  EXPECT_EQ(result.error, "invalid token");
 }
 
 TEST_F(LicenseVerifierTest, VerifyLicenseTokenEmptyToken) {
   // Empty token through the public VerifyLicenseToken function.
   LicenseResult result = VerifyLicenseToken("");
   EXPECT_FALSE(result.valid);
-  EXPECT_EQ(result.error, "empty token");
+  EXPECT_EQ(result.error, "invalid token");
 }
 
 TEST_F(LicenseVerifierTest, VerifyLicenseTokenMalformedBase64) {
   // Non-signature error should not trigger fallback.
   LicenseResult result = VerifyLicenseToken("!!!invalid-base64!!!");
   EXPECT_FALSE(result.valid);
-  EXPECT_NE(result.error.find("base64url decode failed"), GoogleString::npos);
+  EXPECT_EQ(result.error, "invalid token");
 }
 
 // ---------- Truncated signature ----------
@@ -602,11 +608,69 @@ TEST_F(LicenseVerifierTest,
   GoogleString too_long(2049, 'B');
   LicenseResult result = VerifyLicenseToken(too_long);
   EXPECT_FALSE(result.valid);
-  EXPECT_NE(result.error.find("maximum length"), GoogleString::npos);
+  EXPECT_EQ(result.error, "invalid token");
 
   LicenseResult result2 = VerifyLicenseToken("!!!bad-base64!!!");
   EXPECT_FALSE(result2.valid);
-  EXPECT_NE(result2.error.find("base64url decode failed"), GoogleString::npos);
+  EXPECT_EQ(result2.error, "invalid token");
+}
+
+TEST_F(LicenseVerifierTest, ExpiryBeforeIssuance) {
+  LicensePayload payload;
+  payload.sub = "customer@example.com";
+  payload.iss = "modpagespeed.com";
+  payload.iat = 1706745600;
+  payload.plan = "pro";
+  payload.exp = 1706745599;  // 1 second before iat
+
+  GoogleString token = SignLicenseToken(payload, public_key_, private_key_);
+  LicenseResult result = VerifyLicenseTokenWithKey(token, public_key_);
+  EXPECT_FALSE(result.valid);
+  EXPECT_NE(result.error.find("token expiry precedes issuance"),
+            GoogleString::npos);
+}
+
+TEST_F(LicenseVerifierTest, TokenLifetimeExceedsMax) {
+  LicensePayload payload;
+  payload.sub = "customer@example.com";
+  payload.iss = "modpagespeed.com";
+  payload.iat = 1706745600;
+  payload.plan = "pro";
+  payload.exp = 1706745600 + 63072001;  // 1 second over 2-year max
+
+  GoogleString token = SignLicenseToken(payload, public_key_, private_key_);
+  LicenseResult result = VerifyLicenseTokenWithKey(token, public_key_);
+  EXPECT_FALSE(result.valid);
+  EXPECT_NE(result.error.find("token lifetime exceeds maximum"),
+            GoogleString::npos);
+}
+
+TEST_F(LicenseVerifierTest, NegativeIatRejected) {
+  LicensePayload payload;
+  payload.sub = "customer@example.com";
+  payload.iss = "modpagespeed.com";
+  payload.iat = -1;
+  payload.plan = "pro";
+  payload.exp = 1706745600;
+
+  GoogleString token = SignLicenseToken(payload, public_key_, private_key_);
+  LicenseResult result = VerifyLicenseTokenWithKey(token, public_key_);
+  EXPECT_FALSE(result.valid);
+  EXPECT_NE(result.error.find("negative timestamp"), GoogleString::npos);
+}
+
+TEST_F(LicenseVerifierTest, NegativeExpRejected) {
+  LicensePayload payload;
+  payload.sub = "customer@example.com";
+  payload.iss = "modpagespeed.com";
+  payload.iat = 1706745600;
+  payload.plan = "pro";
+  payload.exp = -1;
+
+  GoogleString token = SignLicenseToken(payload, public_key_, private_key_);
+  LicenseResult result = VerifyLicenseTokenWithKey(token, public_key_);
+  EXPECT_FALSE(result.valid);
+  EXPECT_NE(result.error.find("negative timestamp"), GoogleString::npos);
 }
 
 }  // namespace

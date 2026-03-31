@@ -14,6 +14,7 @@
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/string_writer.h"
+#include "pagespeed/system/json_utils.h"
 #include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/http/content_type.h"
 #include "pagespeed/kernel/http/http_names.h"
@@ -29,95 +30,6 @@ namespace net_instaweb {
 namespace {
 
 static const int kMaxRequestBodySize = 4096;
-
-// Simple JSON string escaping.
-// Note: duplicated in admin_site.cc — consider extracting to a shared utility.
-GoogleString JsonEscape(StringPiece s) {
-  GoogleString result;
-  result.reserve(s.size() + 10);
-  for (size_t i = 0; i < s.size(); ++i) {
-    char c = s[i];
-    switch (c) {
-      case '"':  result += "\\\""; break;
-      case '\\': result += "\\\\"; break;
-      case '\n': result += "\\n"; break;
-      case '\r': result += "\\r"; break;
-      case '\t': result += "\\t"; break;
-      default:
-        if (static_cast<unsigned char>(c) < 0x20) {
-          char buf[8];
-          snprintf(buf, sizeof(buf), "\\u%04x",
-                   static_cast<unsigned char>(c));
-          result += buf;
-        } else {
-          result += c;
-        }
-    }
-  }
-  return result;
-}
-
-// Extract a JSON string field from a simple JSON object.
-// This is a minimal parser; we don't pull in a full JSON library.
-bool ExtractJsonStringField(StringPiece json, StringPiece field_name,
-                            GoogleString* value) {
-  GoogleString search = StrCat("\"", field_name, "\"");
-  StringPiece::size_type pos = json.find(search);
-  if (pos == StringPiece::npos) return false;
-  pos += search.size();
-
-  // Skip whitespace and colon.
-  while (pos < json.size() && (json[pos] == ' ' || json[pos] == ':')) ++pos;
-  if (pos >= json.size() || json[pos] != '"') return false;
-  ++pos;
-
-  // Read until closing quote, handling escaped characters.
-  GoogleString result;
-  while (pos < json.size()) {
-    if (json[pos] == '\\' && pos + 1 < json.size()) {
-      char next = json[pos + 1];
-      switch (next) {
-        case '"':  result += '"'; break;
-        case '\\': result += '\\'; break;
-        case 'n':  result += '\n'; break;
-        case 'r':  result += '\r'; break;
-        case 't':  result += '\t'; break;
-        case '/':  result += '/'; break;
-        default:   result += '\\'; result += next; break;
-      }
-      pos += 2;
-      continue;
-    }
-    if (json[pos] == '"') break;
-    result += json[pos];
-    ++pos;
-  }
-  *value = result;
-  return true;
-}
-
-// Extract a JSON boolean field from a simple JSON object.
-bool ExtractJsonBoolField(StringPiece json, StringPiece field_name,
-                          bool* value) {
-  GoogleString search = StrCat("\"", field_name, "\"");
-  StringPiece::size_type pos = json.find(search);
-  if (pos == StringPiece::npos) return false;
-  pos += search.size();
-
-  // Skip whitespace and colon.
-  while (pos < json.size() && (json[pos] == ' ' || json[pos] == ':')) ++pos;
-  if (pos >= json.size()) return false;
-
-  if (json.substr(pos, 4) == "true") {
-    *value = true;
-    return true;
-  }
-  if (json.substr(pos, 5) == "false") {
-    *value = false;
-    return true;
-  }
-  return false;
-}
 
 // The default license service URL.  May be overridden for testing.
 // Test-only override; intentionally leaked at process exit.

@@ -24,12 +24,13 @@ focus on the narrow but important gap: proving the Apache module
 correctly wires everything together.
 
 Prerequisites:
-  - Apache running with mod_pagespeed (built with --config=testkey)
+  - Apache running with mod_pagespeed
   - pagespeed_global_admin handler configured
   - Test content at /mod_pagespeed_example/
+  - LICENSE_TOKEN env var set, or signing key at ~/.weamp/license-signing-key
 
 Run:
-  ./test/system/run_system_tests.sh --testkey -- test_license_apache.py -v
+  ./test/system/run_system_tests.sh -- test_license_apache.py -v
 """
 
 import json
@@ -69,24 +70,35 @@ def session():
 def test_token():
     """Generate a valid test license token using the C++ tool.
 
-    Requires generate_test_token to be built:
-      bazel build //pagespeed/kernel/license_v2:generate_test_token
+    Requires generate_license_token to be built:
+      bazel build //pagespeed/kernel/license_v2:generate_license_token
+
+    The binary needs --key (signing key path) and --sub (subscriber id).
+    Set PAGESPEED_SIGNING_KEY to override the default key location
+    (~/.weamp/license-signing-key).
     """
     token = os.environ.get("LICENSE_TOKEN")
     if token:
         return token
 
-    # Try to find the built binary.
+    # Try to find the built binary and a signing key.
     for path in [
-        "bazel-bin/pagespeed/kernel/license_v2/generate_test_token",
-        "/src/bazel-bin/pagespeed/kernel/license_v2/generate_test_token",
+        "bazel-bin/pagespeed/kernel/license_v2/generate_license_token",
+        "/src/bazel-bin/pagespeed/kernel/license_v2/generate_license_token",
     ]:
         if os.path.isfile(path):
-            result = subprocess.run([path], capture_output=True, text=True)
+            key_path = os.environ.get("PAGESPEED_SIGNING_KEY",
+                os.path.expanduser("~/.weamp/license-signing-key"))
+            if not os.path.isfile(key_path):
+                pytest.skip("No LICENSE_TOKEN set and no signing key at " + key_path)
+            result = subprocess.run(
+                [path, "--key", key_path, "--sub", "test@system-test.local",
+                 "--exp-duration", "3600"],
+                capture_output=True, text=True)
             if result.returncode == 0 and result.stdout.strip():
                 return result.stdout.strip()
 
-    pytest.skip("No test token available (set LICENSE_TOKEN or build generate_test_token)")
+    pytest.skip("No test token available (set LICENSE_TOKEN or build generate_license_token)")
 
 
 @pytest.fixture(scope="module")
@@ -97,12 +109,17 @@ def expired_token():
         return token
 
     for path in [
-        "bazel-bin/pagespeed/kernel/license_v2/generate_test_token",
-        "/src/bazel-bin/pagespeed/kernel/license_v2/generate_test_token",
+        "bazel-bin/pagespeed/kernel/license_v2/generate_license_token",
+        "/src/bazel-bin/pagespeed/kernel/license_v2/generate_license_token",
     ]:
         if os.path.isfile(path):
+            key_path = os.environ.get("PAGESPEED_SIGNING_KEY",
+                os.path.expanduser("~/.weamp/license-signing-key"))
+            if not os.path.isfile(key_path):
+                pytest.skip("No LICENSE_TOKEN_EXPIRED set and no signing key at " + key_path)
             result = subprocess.run(
-                [path, "--exp", "1000000000"],  # 2001-09-08, well in the past
+                [path, "--key", key_path, "--sub", "test@system-test.local",
+                 "--exp-duration", "1"],  # expires 1 second after iat
                 capture_output=True, text=True,
             )
             if result.returncode == 0 and result.stdout.strip():
@@ -220,7 +237,10 @@ class TestLicenseApply:
         assert r.status_code == 200
         data = r.json()
         assert data.get("success") is True
-        assert data.get("expires_at") == 1000000000  # well in the past
+        # Token was generated with --exp-duration 1, so expires_at is ~1 second
+        # after generation time — already in the past by the time we check.
+        assert data.get("expires_at") is not None
+        assert data["expires_at"] < time.time(), "expired token should have past expiry"
 
 
 # =============================================================================

@@ -6,8 +6,10 @@
 //
 // IMPORTANT: Token expiry uses the SYSTEM CLOCK (VerifyLicenseToken uses
 // now_sec=0 by default), while rate limiting and renewal window checks use
-// the MockTimer. Tests use absolute far-future timestamps (year 2100+) for
-// non-expired tokens and absolute past timestamps for expired tokens.
+// the MockTimer. Tests use far_future = iat + kMaxTokenLifetimeSec
+// (1806451200) for non-expired tokens. Expired-token tests use an older iat
+// (Jan 2024) with exp shortly after, satisfying exp >= iat while remaining
+// in the past per the system clock.
 
 #include "pagespeed/system/admin_license_handler.h"
 
@@ -195,11 +197,12 @@ class AdminLicenseHandlerTest : public ::testing::Test {
   }
 
   GoogleString MakeToken(StringPiece sub, StringPiece plan, int64_t exp,
-                         StringPiece sid = "", StringPiece kid = "k1") {
+                         StringPiece sid = "", StringPiece kid = "k1",
+                         int64_t iat = 1743379200) {
     LicensePayload payload;
     payload.sub = sub.as_string();
     payload.iss = "modpagespeed.com";
-    payload.iat = 1706745600;
+    payload.iat = iat;
     payload.plan = plan.as_string();
     payload.exp = exp;
     payload.sid = sid.as_string();
@@ -242,7 +245,7 @@ TEST_F(AdminLicenseHandlerTest, StatusReturnsUnlicensedByDefault) {
 }
 
 TEST_F(AdminLicenseHandlerTest, StatusReturnsLicensedAfterApply) {
-  int64_t far_future = 4102444800;  // Year 2100
+  int64_t far_future = 1806451200;  // iat + 2 years (max lifetime)
   ASSERT_TRUE(ApplyValidToken("test@example.com", "pro", far_future,
                               "sub_abc"));
   AdvancePastRateLimit();
@@ -258,8 +261,11 @@ TEST_F(AdminLicenseHandlerTest, StatusReturnsLicensedAfterApply) {
 }
 
 TEST_F(AdminLicenseHandlerTest, StatusShowsExpiredToken) {
-  int64_t past = 1000000001;  // Long ago per system clock
-  GoogleString token = MakeToken("test@example.com", "pro", past);
+  // Use iat in the past with exp shortly after — valid structure, but expired.
+  int64_t expired_iat = 1706745600;           // Jan 31, 2024
+  int64_t past = expired_iat + 86400;         // Feb 1, 2024
+  GoogleString token = MakeToken("test@example.com", "pro", past, "", "k1",
+                                 expired_iat);
   GoogleString json = StrCat("{\"key\":\"", token, "\"}");
   GoogleString apply_body;
   int apply_status = DoGlobalRequest("/v1/license/apply", json, &apply_body);
@@ -276,11 +282,11 @@ TEST_F(AdminLicenseHandlerTest, StatusShowsExpiredToken) {
 
 TEST_F(AdminLicenseHandlerTest, RejectsTokenForWrongProduct) {
   // Create a token authorized for the 2.0 optimizer line (not mps1).
-  int64_t far_future = 2000000000;
+  int64_t far_future = 1806451200;
   LicensePayload payload;
   payload.sub = "wrong-product@example.com";
   payload.iss = "modpagespeed.com";
-  payload.iat = 1706745600;
+  payload.iat = 1743379200;  // March 31, 2026
   payload.plan = "pro";
   payload.exp = far_future;
   payload.kid = "k1";
@@ -391,7 +397,7 @@ TEST_F(AdminLicenseHandlerTest, ApplyRejectsInvalidToken) {
 }
 
 TEST_F(AdminLicenseHandlerTest, ApplyAcceptsValidToken) {
-  int64_t far_future = 4102444800;
+  int64_t far_future = 1806451200;
   GoogleString token = MakeToken("customer@example.com", "enterprise",
                                  far_future, "sub_xyz");
   GoogleString json = StrCat("{\"key\":\"", token, "\"}");
@@ -404,7 +410,7 @@ TEST_F(AdminLicenseHandlerTest, ApplyAcceptsValidToken) {
 }
 
 TEST_F(AdminLicenseHandlerTest, ApplyAcceptsLicenseKeyField) {
-  int64_t far_future = 4102444800;
+  int64_t far_future = 1806451200;
   GoogleString token = MakeToken("customer@example.com", "pro", far_future);
   GoogleString json = StrCat("{\"license_key\":\"", token, "\"}");
   GoogleString body;
@@ -414,7 +420,7 @@ TEST_F(AdminLicenseHandlerTest, ApplyAcceptsLicenseKeyField) {
 }
 
 TEST_F(AdminLicenseHandlerTest, ApplyPersistsTokenToDisk) {
-  int64_t far_future = 4102444800;
+  int64_t far_future = 1806451200;
   GoogleString token = MakeToken("customer@example.com", "pro", far_future);
   GoogleString json = StrCat("{\"key\":\"", token, "\"}");
   GoogleString body;
@@ -467,7 +473,7 @@ TEST_F(AdminLicenseHandlerTest, ConsentRejectsOversizedBody) {
 TEST_F(AdminLicenseHandlerTest, ConsentDoesNotAutoApplyToken) {
   // Consent passes auto_apply_token=false.  Verify that even if the
   // response contains a "token" field, it is NOT applied.
-  int64_t far_future = 4102444800;
+  int64_t far_future = 1806451200;
   GoogleString token = MakeToken("sneaky@example.com", "pro", far_future);
   fetcher_.set_response_body(
       StrCat("{\"token\":\"", token, "\",\"ok\":true}"));
@@ -530,7 +536,7 @@ TEST_F(AdminLicenseHandlerTest, ActivateRejectsOversizedBody) {
 }
 
 TEST_F(AdminLicenseHandlerTest, ActivateAutoAppliesValidToken) {
-  int64_t far_future = 4102444800;
+  int64_t far_future = 1806451200;
   GoogleString token = MakeToken("activated@example.com", "pro", far_future);
   fetcher_.set_response_body(
       StrCat("{\"token\":\"", token, "\",\"message\":\"activated\"}"));
@@ -702,7 +708,7 @@ TEST_F(AdminLicenseHandlerTest, CallbackInvokedOnApply) {
         callback_invoked = true;
       });
 
-  int64_t far_future = 4102444800;
+  int64_t far_future = 1806451200;
   ASSERT_TRUE(ApplyValidToken("test@example.com", "pro", far_future));
   EXPECT_TRUE(callback_invoked);
   EXPECT_TRUE(callback_value);
@@ -727,8 +733,10 @@ TEST_F(AdminLicenseHandlerTest, CallbackReportsExpiredToken) {
         callback_invoked = true;
       });
 
-  int64_t past = 1000000001;
-  GoogleString token = MakeToken("test@example.com", "pro", past);
+  int64_t expired_iat = 1706745600;           // Jan 31, 2024
+  int64_t past = expired_iat + 86400;         // Feb 1, 2024
+  GoogleString token = MakeToken("test@example.com", "pro", past, "", "k1",
+                                 expired_iat);
   GoogleString json = StrCat("{\"key\":\"", token, "\"}");
   GoogleString body;
   DoGlobalRequest("/v1/license/apply", json, &body);
@@ -746,14 +754,17 @@ TEST_F(AdminLicenseHandlerTest, IsLicenseValidDefaultFalse) {
 }
 
 TEST_F(AdminLicenseHandlerTest, IsLicenseValidAfterValidToken) {
-  int64_t far_future = 4102444800;
+  int64_t far_future = 1806451200;
   ASSERT_TRUE(ApplyValidToken("test@example.com", "pro", far_future));
   EXPECT_TRUE(license_handler_.IsLicenseValid());
 }
 
 TEST_F(AdminLicenseHandlerTest, IsLicenseValidFalseForExpired) {
-  int64_t past = 1000000001;
-  GoogleString token = MakeToken("test@example.com", "pro", past);
+  // Use iat in the past with exp shortly after — valid structure, but expired.
+  int64_t expired_iat = 1706745600;           // Jan 31, 2024
+  int64_t past = expired_iat + 86400;         // Feb 1, 2024
+  GoogleString token = MakeToken("test@example.com", "pro", past, "", "k1",
+                                 expired_iat);
   GoogleString json = StrCat("{\"key\":\"", token, "\"}");
   GoogleString body;
   DoGlobalRequest("/v1/license/apply", json, &body);
@@ -771,7 +782,7 @@ TEST_F(AdminLicenseHandlerTest, MaybeRenewSkipsWithoutLicense) {
 }
 
 TEST_F(AdminLicenseHandlerTest, MaybeRenewSkipsWithoutSid) {
-  int64_t far_future = 4102444800;
+  int64_t far_future = 1806451200;
   GoogleString token = MakeToken("test@example.com", "pro", far_future, "");
   GoogleString json = StrCat("{\"key\":\"", token, "\"}");
   GoogleString apply_body;
@@ -785,7 +796,7 @@ TEST_F(AdminLicenseHandlerTest, MaybeRenewSkipsWithoutSid) {
 }
 
 TEST_F(AdminLicenseHandlerTest, MaybeRenewSkipsWhenNotInWindow) {
-  int64_t far_future = 4102444800;  // Year 2100
+  int64_t far_future = 1806451200;  // iat + 2 years (max lifetime)
   ASSERT_TRUE(ApplyValidToken("test@example.com", "pro", far_future,
                               "sub_active"));
   AdvancePastRateLimit();
@@ -800,7 +811,7 @@ TEST_F(AdminLicenseHandlerTest, MaybeRenewTriggersInWindow) {
   // Set mock timer to 3 days before a far-future expiry so the renewal
   // window (7 days) is triggered.  exp must be in the real future so the
   // system clock doesn't mark it expired.
-  int64_t exp = 4102444800;  // Year 2100
+  int64_t exp = 1806451200;  // iat + 2 years (max lifetime)
   int64_t three_days_before_ms =
       static_cast<int64_t>(exp - 3 * 24 * 3600) * 1000;
   mock_timer_.SetTimeUs(three_days_before_ms * 1000);
@@ -828,8 +839,10 @@ TEST_F(AdminLicenseHandlerTest, MaybeRenewTriggersInWindow) {
 }
 
 TEST_F(AdminLicenseHandlerTest, MaybeRenewTriggersForExpired) {
-  int64_t past = 1000000001;
-  GoogleString token = MakeToken("test@example.com", "pro", past, "sub_exp");
+  int64_t expired_iat = 1706745600;           // Jan 31, 2024
+  int64_t past = expired_iat + 86400;         // Feb 1, 2024
+  GoogleString token = MakeToken("test@example.com", "pro", past, "sub_exp",
+                                 "k1", expired_iat);
   GoogleString json = StrCat("{\"key\":\"", token, "\"}");
   GoogleString apply_body;
   DoGlobalRequest("/v1/license/apply", json, &apply_body);
@@ -844,7 +857,7 @@ TEST_F(AdminLicenseHandlerTest, MaybeRenewTriggersForExpired) {
 }
 
 TEST_F(AdminLicenseHandlerTest, MaybeRenewRateLimitsAtOneHour) {
-  int64_t exp = 4102444800;
+  int64_t exp = 1806451200;
   int64_t three_days_before_ms =
       static_cast<int64_t>(exp - 3 * 24 * 3600) * 1000;
   mock_timer_.SetTimeUs(three_days_before_ms * 1000);
@@ -871,7 +884,7 @@ TEST_F(AdminLicenseHandlerTest, MaybeRenewRateLimitsAtOneHour) {
 }
 
 TEST_F(AdminLicenseHandlerTest, MaybeRenewAppliesNewToken) {
-  int64_t exp = 4102444800;
+  int64_t exp = 1806451200;
   int64_t three_days_before_ms =
       static_cast<int64_t>(exp - 3 * 24 * 3600) * 1000;
   mock_timer_.SetTimeUs(three_days_before_ms * 1000);
@@ -881,7 +894,7 @@ TEST_F(AdminLicenseHandlerTest, MaybeRenewAppliesNewToken) {
   AdvancePastRateLimit();
   fetcher_.reset_fetch_count();
 
-  int64_t new_expiry = 4134067200;  // Year 2101
+  int64_t new_expiry = 1806451200;  // iat + 2 years (max lifetime)
   GoogleString renewed_token = MakeToken("test@example.com", "pro",
                                          new_expiry, "sub_active");
   fetcher_.set_response_body(
@@ -899,7 +912,7 @@ TEST_F(AdminLicenseHandlerTest, MaybeRenewAppliesNewToken) {
 // ---------------------------------------------------------------------------
 
 TEST_F(AdminLicenseHandlerTest, SidGuardRejectsMismatchedSid) {
-  int64_t exp = 4102444800;
+  int64_t exp = 1806451200;
   int64_t three_days_before_ms =
       static_cast<int64_t>(exp - 3 * 24 * 3600) * 1000;
   mock_timer_.SetTimeUs(three_days_before_ms * 1000);
@@ -910,7 +923,7 @@ TEST_F(AdminLicenseHandlerTest, SidGuardRejectsMismatchedSid) {
   AdvancePastRateLimit();
   fetcher_.reset_fetch_count();
 
-  int64_t new_expiry = 4134067200;
+  int64_t new_expiry = 1806451200;
   GoogleString wrong_sid_token = MakeToken("test@example.com", "pro",
                                            new_expiry, "sub_different");
   fetcher_.set_response_body(
@@ -923,7 +936,7 @@ TEST_F(AdminLicenseHandlerTest, SidGuardRejectsMismatchedSid) {
 }
 
 TEST_F(AdminLicenseHandlerTest, SidGuardAcceptsMatchingSid) {
-  int64_t exp = 4102444800;
+  int64_t exp = 1806451200;
   int64_t three_days_before_ms =
       static_cast<int64_t>(exp - 3 * 24 * 3600) * 1000;
   mock_timer_.SetTimeUs(three_days_before_ms * 1000);
@@ -933,7 +946,7 @@ TEST_F(AdminLicenseHandlerTest, SidGuardAcceptsMatchingSid) {
   AdvancePastRateLimit();
   fetcher_.reset_fetch_count();
 
-  int64_t new_expiry = 4134067200;
+  int64_t new_expiry = 1806451200;
   GoogleString matching_token = MakeToken("test@example.com", "pro",
                                           new_expiry, "sub_same");
   fetcher_.set_response_body(
@@ -950,7 +963,7 @@ TEST_F(AdminLicenseHandlerTest, SidGuardAcceptsMatchingSid) {
 // ---------------------------------------------------------------------------
 
 TEST_F(AdminLicenseHandlerTest, InitLoadsLicenseFromDisk) {
-  int64_t far_future = 4102444800;
+  int64_t far_future = 1806451200;
   GoogleString token = MakeToken("disk@example.com", "pro", far_future);
   std::filesystem::path license_path = LicenseFilePath(tmp_dir_);
   ASSERT_TRUE(WriteLicenseFile(license_path, token));
@@ -982,7 +995,7 @@ TEST_F(AdminLicenseHandlerTest, InitHandlesMissingFile) {
 TEST_F(AdminLicenseHandlerTest, StatusReloadsFromDiskWhenInvalid) {
   EXPECT_FALSE(license_handler_.IsLicenseValid());
 
-  int64_t far_future = 4102444800;
+  int64_t far_future = 1806451200;
   GoogleString token = MakeToken("reloaded@example.com", "pro", far_future);
   std::filesystem::path license_path = LicenseFilePath(tmp_dir_);
   ASSERT_TRUE(WriteLicenseFile(license_path, token));
@@ -995,7 +1008,7 @@ TEST_F(AdminLicenseHandlerTest, StatusReloadsFromDiskWhenInvalid) {
 
 TEST_F(AdminLicenseHandlerTest, StatusDoesNotReloadWhenAlreadyValid) {
   // Apply a valid token in memory.
-  int64_t far_future = 4102444800;
+  int64_t far_future = 1806451200;
   ASSERT_TRUE(ApplyValidToken("original@example.com", "pro", far_future));
   GoogleString original_token = license_handler_.license_token();
   AdvancePastRateLimit();

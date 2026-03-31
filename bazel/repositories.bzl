@@ -76,7 +76,7 @@ APRUTIL_SHA = "4ce5fead950705f6b33dcac5b7fae45f4295b80cb75a6a1378baaec896fd4fc1"
 # ModPageSpeed 2.0 - canonical license crypto code (Ed25519 token/verifier/signer)
 # Used as a Bazel dependency to share license verification code across products.
 # Compiled with -DPAGESPEED_LICENSE_NAMESPACE=net_instaweb to match 1.1's namespace.
-MODPAGESPEED2_COMMIT = "bb5d5bb502f7f3aef1adfcf6b355cc2a305fc1a9"
+MODPAGESPEED2_COMMIT = "b97ebc3206e8c4cfc816ff241fbd25fc984eb984"
 
 # Libevent - cross-platform event notification library
 # Used by LibeventDispatcher for standalone event loop (Apache deployments)
@@ -373,7 +373,7 @@ cc_library(
         name = "modpagespeed2",
         remote = "https://github.com/We-Amp/pagespeed-optimizer.git",
         commit = MODPAGESPEED2_COMMIT,
-        shallow_since = "2026-03-18",
+        shallow_since = "2026-03-31",
     )
 
     # libcurl source - built via cmake in //bazel:curl

@@ -20,7 +20,6 @@
 #include "pagespeed/system/admin_site.h"
 
 #include <cstddef>
-#include <cstdio>
 #include <memory>
 #include <set>
 #include <vector>
@@ -57,30 +56,6 @@ namespace net_instaweb {
 extern const char* HTML_admin_console;
 
 namespace {
-
-// Note: duplicated in admin_license_handler.cc — consider extracting to a shared utility.
-GoogleString JsonEscape(StringPiece s) {
-  GoogleString result;
-  result.reserve(s.size() + 10);
-  for (char c : s) {
-    switch (c) {
-      case '"':  result += "\\\""; break;
-      case '\\': result += "\\\\"; break;
-      case '\n': result += "\\n"; break;
-      case '\r': result += "\\r"; break;
-      case '\t': result += "\\t"; break;
-      default:
-        if (static_cast<unsigned char>(c) < 0x20) {
-          char buf[8];
-          snprintf(buf, sizeof(buf), "\\u%04x", static_cast<unsigned char>(c));
-          result += buf;
-        } else {
-          result += c;
-        }
-    }
-  }
-  return result;
-}
 
 void WriteJsonResponse(AsyncFetch* fetch, StringPiece json_body,
                        Timer* timer, MessageHandler* handler) {

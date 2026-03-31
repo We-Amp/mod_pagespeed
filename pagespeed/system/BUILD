@@ -22,6 +22,20 @@ licenses(["notice"])  # Apache 2
 # Edit them there — that is the single source of truth.
 
 # =============================================================================
+# JSON field extraction utilities (used by admin_license_handler).
+# JsonEscape() now lives in string_util.h.
+# =============================================================================
+cc_library(
+    name = "json_utils",
+    srcs = ["json_utils.cc"],
+    hdrs = ["json_utils.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)
+
+# =============================================================================
 # Admin license handler
 # =============================================================================
 # Handles /v1/license/* endpoints in the admin console.
@@ -33,6 +47,7 @@ cc_library(
     local_defines = ["PAGESPEED_SERVER=\\\"unknown\\\""],
     visibility = ["//visibility:public"],
     deps = [
+        ":json_utils",
         "//net/instaweb/http",
         "//pagespeed/kernel/base:pagespeed_base",
         "//pagespeed/kernel/http",
@@ -53,6 +68,7 @@ cc_library(
     local_defines = ["PAGESPEED_SERVER=\\\"test\\\""],
     visibility = ["//visibility:public"],
     deps = [
+        ":json_utils",
         "//net/instaweb/http",
         "//pagespeed/kernel/base:pagespeed_base",
         "//pagespeed/kernel/http",
