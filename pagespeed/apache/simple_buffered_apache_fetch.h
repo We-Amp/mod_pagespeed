@@ -71,7 +71,7 @@ class SimpleBufferedApacheFetch : public AsyncFetch {
  private:
   enum Op { kOpHeadersComplete, kOpWrite, kOpFlush, kOpDone };
 
-  typedef std::pair<Op, GoogleString> OpInfo;
+  using OpInfo = std::pair<Op, GoogleString>;
 
   // Blocks until there is an operation in the queue, and move it to *out.
   void WaitForOp(OpInfo* out) LOCKS_EXCLUDED(mutex_);

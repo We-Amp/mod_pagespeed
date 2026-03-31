@@ -41,7 +41,7 @@ namespace net_instaweb {
 
 namespace {
 
-typedef std::pair<RequestHeaders*, HeaderPredicateFn*> RequestPredicatePair;
+using RequestPredicatePair = std::pair<RequestHeaders*, HeaderPredicateFn*>;
 
 int AddAttributeCallback(void* rec, const char* key, const char* value) {
   RequestPredicatePair* rpp = static_cast<RequestPredicatePair*>(rec);

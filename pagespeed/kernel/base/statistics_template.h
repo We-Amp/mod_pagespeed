@@ -269,15 +269,15 @@ class StatisticsTemplate : public Statistics {
   }
 
  private:
-  typedef std::vector<Var*> VarVector;
-  typedef std::map<GoogleString, Var*> VarMap;
-  typedef std::vector<UpDown*> UpDownVector;
-  typedef std::map<GoogleString, UpDown*> UpDownMap;
-  typedef std::vector<Hist*> HistVector;
-  typedef std::map<GoogleString, Hist*> HistMap;
+  using VarVector = std::vector<Var*>;
+  using VarMap = std::map<GoogleString, Var*>;
+  using UpDownVector = std::vector<UpDown*>;
+  using UpDownMap = std::map<GoogleString, UpDown*>;
+  using HistVector = std::vector<Hist*>;
+  using HistMap = std::map<GoogleString, Hist*>;
 
-  typedef std::vector<TimedVar*> TimedVarVector;
-  typedef std::map<GoogleString, TimedVar*> TimedVarMap;
+  using TimedVarVector = std::vector<TimedVar*>;
+  using TimedVarMap = std::map<GoogleString, TimedVar*>;
   VarVector variables_;
   VarMap variable_map_;
   UpDownVector up_downs_;
@@ -362,10 +362,10 @@ class ScalarStatisticsTemplate
                                 TVarC> {
  public:
   // Add typedefs for template class args to make them visible to subclasses.
-  typedef VarTemplate<Impl> Var;
-  typedef UpDownTemplate<Impl> UpDown;
-  typedef HistC Hist;
-  typedef TVarC TVar;
+  using Var = VarTemplate<Impl>;
+  using UpDown = UpDownTemplate<Impl>;
+  using Hist = HistC;
+  using TVar = TVarC;
 
   ScalarStatisticsTemplate() {}
   ~ScalarStatisticsTemplate() override {}

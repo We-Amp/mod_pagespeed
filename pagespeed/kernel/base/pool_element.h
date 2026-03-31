@@ -35,7 +35,7 @@ namespace net_instaweb {
 template <class T>
 class PoolElement {
  public:
-  typedef typename std::list<T*>::iterator Position;
+  using Position = typename std::list<T*>::iterator;
 
   PoolElement() {}
 

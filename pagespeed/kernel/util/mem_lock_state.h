@@ -59,8 +59,8 @@ class MemLockState {
     bool operator()(const MemLock* a, const MemLock* b) const;
   };
 
-  typedef std::set<MemLock*, MemLockState::Comparator> WakeupOrderedLockSet;
-  typedef std::set<MemLock*, MemLockState::StealComparator> StealOrderedLockSet;
+  using WakeupOrderedLockSet = std::set<MemLock*, MemLockState::Comparator>;
+  using StealOrderedLockSet = std::set<MemLock*, MemLockState::StealComparator>;
 
   const GoogleString& name() const { return name_; }
 

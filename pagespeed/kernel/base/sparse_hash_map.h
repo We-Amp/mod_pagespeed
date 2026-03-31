@@ -20,6 +20,18 @@
 #ifndef PAGESPEED_KERNEL_BASE_SPARSE_HASH_MAP_H_
 #define PAGESPEED_KERNEL_BASE_SPARSE_HASH_MAP_H_
 
+// On Windows, BSD-style types (u_int16_t, u_int32_t) are not defined.
+// Define them here before including sparsehash which uses them.
+#ifdef _WIN32
+#include <cstdint>
+#ifndef u_int16_t
+using u_int16_t = uint16_t;
+#endif
+#ifndef u_int32_t
+using u_int32_t = uint32_t;
+#endif
+#endif
+
 #include "google/sparse_hash_map"
 namespace net_instaweb {
 using google::sparse_hash_map;

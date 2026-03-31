@@ -29,7 +29,7 @@
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/thread_annotations.h"
 #include "pagespeed/kernel/base/thread_system.h"
-#include "pagespeed/kernel/util/grpc.h"
+#include "pagespeed/controller/grpc.h"
 
 // RequestResultRpcClient manages the client portion of a gRPC connection. It is
 // the client-side counterpart to RequestResultRpcHandler. See class comments
@@ -122,8 +122,7 @@ class RpcHolder {
 template <typename RequestT, typename ResponseT, typename CallbackT>
 class RequestResultRpcClient {
  public:
-  typedef ::grpc::ClientAsyncReaderWriterInterface<RequestT, ResponseT>
-      ReaderWriter;
+using ReaderWriter = ::grpc::ClientAsyncReaderWriterInterface<RequestT, ResponseT>;
 
   RequestResultRpcClient(::grpc::CompletionQueue* queue,
                          ThreadSystem* thread_system, MessageHandler* handler,

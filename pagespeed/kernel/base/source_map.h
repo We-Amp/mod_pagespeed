@@ -55,7 +55,7 @@ struct Mapping {
         src_col(src_col_arg) {}
 };
 
-typedef std::vector<Mapping> MappingVector;
+using MappingVector = std::vector<Mapping>;
 
 // Encodes generated_url, source_url and mappings into encoded_source_map
 // which will be the contents of a JSON Source Map v3 file.

@@ -21,7 +21,7 @@
 
 #ifdef _WIN32
 #include <process.h>  // _getpid()
-typedef int pid_t;
+using pid_t = int;
 #else
 #include <unistd.h>
 #endif

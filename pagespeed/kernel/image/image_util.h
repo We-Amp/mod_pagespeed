@@ -76,7 +76,7 @@ enum PreferredLibwebpLevel {
 
 const uint8_t kAlphaOpaque = 255;
 const uint8_t kAlphaTransparent = 0;
-typedef uint8_t PixelRgbaChannels[RGBA_NUM_CHANNELS];
+using PixelRgbaChannels = uint8_t[RGBA_NUM_CHANNELS];
 
 // Packs four uint8_ts into a single uint32_t in the high-to-low order
 // given.
@@ -113,7 +113,7 @@ inline uint32_t GrayscaleToPackedArgb(const uint8_t luminance) {
 // Sizes that can be measured in units of pixels: width, height,
 // number of frames (a third dimension of the image), and indices into
 // the same.
-typedef uint32 size_px;
+using size_px = uint32;
 
 // Returns the MIME-type string corresponding to the given ImageFormat.
 const char* ImageFormatToMimeTypeString(ImageFormat image_type);

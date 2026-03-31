@@ -60,7 +60,7 @@ class RpcHandler
   virtual ~RpcHandler() {}
 
  protected:
-  typedef ::grpc::ServerAsyncReaderWriter<ResponseT, RequestT> ReaderWriterT;
+  using ReaderWriterT = ::grpc::ServerAsyncReaderWriter<ResponseT, RequestT>;
 
   RpcHandler(AsyncService* service, ::grpc::ServerCompletionQueue* cq);
 
@@ -92,7 +92,7 @@ class RpcHandler
     FINISHED,
   };
 
-  typedef RefCountedPtr<RpcHandler<AsyncService, RequestT, ResponseT>> RefPtrT;
+  using RefPtrT = RefCountedPtr<RpcHandler<AsyncService, RequestT, ResponseT>>;
 
   // Called once for every message received from the client.
   virtual void HandleRequest(const RequestT& req) = 0;

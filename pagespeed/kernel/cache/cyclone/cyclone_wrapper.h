@@ -41,8 +41,8 @@ extern "C" {
 #endif
 
 // Opaque handle types - actual structures are defined in the C++23 implementation
-typedef struct CycloneCacheHandle CycloneCacheHandle;
-typedef struct CycloneReadHandle CycloneReadHandle;
+using CycloneCacheHandle = struct CycloneCacheHandle;
+using CycloneReadHandle = struct CycloneReadHandle;
 
 // Error codes returned by Cyclone operations.
 // These map to the internal Cyclone error codes.

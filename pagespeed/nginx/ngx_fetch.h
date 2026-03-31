@@ -53,7 +53,7 @@ extern "C" {
 
 namespace net_instaweb {
 
-typedef bool (*response_handler_pt)(ngx_connection_t* c);
+using response_handler_pt = bool(*)(ngx_connection_t* c);
 
 class NgxUrlAsyncFetcher;
 class NgxConnection;
@@ -75,7 +75,7 @@ class NgxConnection : public PoolElement<NgxConnection> {
   void set_keepalive(bool k) { keepalive_ = keepalive_ && k; }
   bool keepalive() { return keepalive_; }
 
-  typedef Pool<NgxConnection> NgxConnectionPool;
+  using NgxConnectionPool = Pool<NgxConnection>;
 
   static NgxConnection* Connect(ngx_peer_connection_t* pc,
                                 MessageHandler* handler,

@@ -67,7 +67,7 @@ class SchedulerBasedAbstractLock : public NamedLock {
   virtual Scheduler* scheduler() const = 0;
 
  private:
-  typedef bool (SchedulerBasedAbstractLock::*TryLockMethod)(int64 steal_ms);
+  using TryLockMethod = bool (SchedulerBasedAbstractLock::*)(int64 steal_ms);
   bool TryLockIgnoreSteal(int64 steal_ignored);
   bool BusySpin(TryLockMethod try_lock, int64 steal_ms);
   void PollAndCallback(TryLockMethod try_lock, int64 steal_ms, int64 wait_ms,

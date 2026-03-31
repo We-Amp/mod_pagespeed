@@ -59,7 +59,7 @@ class InProcessSharedMem : public AbstractSharedMem {
   class DelegateMutex;
   class DelegateSegment;
   class Segment;
-  typedef std::map<GoogleString, Segment*> SegmentMap;
+  using SegmentMap = std::map<GoogleString, Segment*>;
 
   ThreadSystem* thread_system_;
   SegmentMap segments_;

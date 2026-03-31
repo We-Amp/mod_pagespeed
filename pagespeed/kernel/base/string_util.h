@@ -99,7 +99,7 @@ class StringPiece : public absl::string_view {
 void StringAppendV(std::string* dst, const char* format, va_list ap);
 
 // XXX(oschaaf): check(!!)
-typedef size_t stringpiece_ssize_type;
+using stringpiece_ssize_type = size_t;
 
 namespace strings {
 using absl::EndsWith;
@@ -117,15 +117,15 @@ namespace net_instaweb {
 
 struct StringCompareInsensitive;
 
-typedef std::map<GoogleString, GoogleString> StringStringMap;
-typedef std::map<GoogleString, int> StringIntMap;
-typedef std::set<GoogleString> StringSet;
-typedef std::set<GoogleString, StringCompareInsensitive> StringSetInsensitive;
-typedef std::vector<GoogleString> StringVector;
-typedef std::vector<StringPiece> StringPieceVector;
-typedef std::vector<const GoogleString*> ConstStringStarVector;
-typedef std::vector<GoogleString*> StringStarVector;
-typedef std::vector<const char*> CharStarVector;
+using StringStringMap = std::map<GoogleString, GoogleString>;
+using StringIntMap = std::map<GoogleString, int>;
+using StringSet = std::set<GoogleString>;
+using StringSetInsensitive = std::set<GoogleString, StringCompareInsensitive>;
+using StringVector = std::vector<GoogleString>;
+using StringPieceVector = std::vector<StringPiece>;
+using ConstStringStarVector = std::vector<const GoogleString*>;
+using StringStarVector = std::vector<GoogleString*>;
+using CharStarVector = std::vector<const char*>;
 
 inline GoogleString IntegerToString(const int i) { return absl::StrCat(i); }
 

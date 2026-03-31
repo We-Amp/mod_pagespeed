@@ -37,7 +37,7 @@ class ThreadSafeLockManager : public NamedLockManager {
  private:
   class Lock;
   class LockHolder;
-  typedef RefCountedPtr<LockHolder> LockHolderPtr;
+  using LockHolderPtr = RefCountedPtr<LockHolder>;
 
   LockHolderPtr lock_holder_;
 };

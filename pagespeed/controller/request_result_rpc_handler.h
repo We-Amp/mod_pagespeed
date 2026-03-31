@@ -49,7 +49,7 @@ template <typename HandlerT, typename ControllerT, typename AsyncServiceT,
 class RequestResultRpcHandler
     : public RpcHandler<AsyncServiceT, RequestT, ResponseT> {
  public:
-  typedef RefCountedPtr<RequestResultRpcHandler> RefPtr;
+  using RefPtr = RefCountedPtr<RequestResultRpcHandler>;
 
   ~RequestResultRpcHandler() override {}
 

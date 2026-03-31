@@ -147,7 +147,7 @@ class CacheInterface {
     GoogleString key;
     Callback* callback;
   };
-  typedef std::vector<KeyCallback> MultiGetRequest;
+  using MultiGetRequest = std::vector<KeyCallback>;
 
   static const char* KeyStateName(KeyState state);
 

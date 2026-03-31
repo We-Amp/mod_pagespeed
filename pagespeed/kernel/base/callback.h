@@ -56,8 +56,8 @@ class Callback1 {
 template <class C, class A1, bool DeleteAfterRun>
 class _MemberCallback_0_1 : public Callback1<A1> {
  public:
-  typedef void (C::*MemberSignature)(A1);
-  typedef Callback1<A1> base;
+  using MemberSignature = void (C::*)(A1);
+  using base = Callback1<A1>;
 
   _MemberCallback_0_1(C* object, MemberSignature member)
       : object_(object), member_(member) {}
@@ -91,24 +91,24 @@ typename _MemberCallback_0_1<T1, A1, false>::base* NewPermanentCallback(
 // Specified by TR1 [4.7.2] Reference modifications.
 template <typename T>
 struct remove_reference {
-  typedef T type;
+  using type = T;
 };
 template <typename T>
 struct remove_reference<T&> {
-  typedef T type;
+  using type = T;
 };
 
 template <typename T>
 struct ConstRef {
-  typedef typename remove_reference<T>::type base_type;
-  typedef const base_type& type;
+  using base_type = typename remove_reference<T>::type;
+  using type = const base_type&;
 };
 
 template <class T, class P1, class A1, bool DeleteAfterRun>
 class _MemberCallback_1_1 : public Callback1<A1> {
  public:
-  typedef Callback1<A1> base;
-  typedef void (T::*MemberSignature)(P1, A1);
+  using base = Callback1<A1>;
+  using MemberSignature = void (T::*)(P1, A1);
 
  private:
   T* object_;
@@ -177,8 +177,8 @@ class Callback2 {
 template <class C, class A1, class A2, bool DeleteAfterRun>
 class _MemberCallback_0_2 : public Callback2<A1, A2> {
  public:
-  typedef void (C::*MemberSignature)(A1, A2);
-  typedef Callback2<A1, A2> base;
+  using MemberSignature = void (C::*)(A1, A2);
+  using base = Callback2<A1, A2>;
 
   _MemberCallback_0_2(C* object, MemberSignature member)
       : object_(object), member_(member) {}
@@ -212,8 +212,8 @@ typename _MemberCallback_0_2<T1, A1, A2, false>::base* NewPermanentCallback(
 template <class T, class P1, class A1, class A2, bool DeleteAfterRun>
 class _MemberCallback_2_1 : public Callback2<A1, A2> {
  public:
-  typedef Callback2<A1, A2> base;
-  typedef void (T::*MemberSignature)(P1, A1, A2);
+  using base = Callback2<A1, A2>;
+  using MemberSignature = void (T::*)(P1, A1, A2);
 
  private:
   T* object_;

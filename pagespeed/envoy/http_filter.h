@@ -28,7 +28,8 @@ namespace Envoy {
 namespace Http {
 
 // Token bucket rate limiter for admin endpoint protection.
-// Thread-safe implementation using per-IP buckets.
+// Thread-safe implementation using per-IP buckets with sharded mutexes
+// to reduce contention under concurrent Envoy worker threads.
 class AdminRateLimiter {
  public:
   explicit AdminRateLimiter(int32_t max_requests_per_minute)
@@ -41,10 +42,12 @@ class AdminRateLimiter {
       return true;  // Rate limiting disabled
     }
 
-    std::lock_guard<std::mutex> lock(mutex_);
+    // Shard by IP hash to reduce mutex contention across Envoy threads.
+    size_t shard = std::hash<std::string>{}(client_ip) % kNumShards;
+    std::lock_guard<std::mutex> lock(shard_mutexes_[shard]);
 
     auto now = std::chrono::steady_clock::now();
-    auto& bucket = buckets_[client_ip];
+    auto& bucket = shard_buckets_[shard][client_ip];
 
     // Check if we need to refill the bucket (every minute).
     auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -70,9 +73,10 @@ class AdminRateLimiter {
     std::chrono::steady_clock::time_point last_refill;
   };
 
+  static constexpr size_t kNumShards = 16;
   int32_t max_requests_per_minute_;
-  std::mutex mutex_;
-  std::unordered_map<std::string, TokenBucket> buckets_;
+  std::mutex shard_mutexes_[kNumShards];
+  std::unordered_map<std::string, TokenBucket> shard_buckets_[kNumShards];
 };
 
 // Admin authentication configuration parsed from proto.
@@ -118,8 +122,7 @@ class HttpPageSpeedDecoderFilterConfig {
   std::unique_ptr<AdminRateLimiter> rate_limiter_;
 };
 
-typedef std::shared_ptr<HttpPageSpeedDecoderFilterConfig>
-    HttpPageSpeedDecoderFilterConfigSharedPtr;
+using HttpPageSpeedDecoderFilterConfigSharedPtr = std::shared_ptr<HttpPageSpeedDecoderFilterConfig>;
 
 class HttpPageSpeedDecoderFilter : public StreamFilter {
  public:

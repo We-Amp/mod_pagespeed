@@ -44,8 +44,8 @@ extern "C" {
 #endif
 
 // Opaque handles.
-typedef struct pagespeed_instance* pagespeed_t;
-typedef struct pagespeed_request* pagespeed_request_t;
+using pagespeed_t = struct pagespeed_instance*;
+using pagespeed_request_t = struct pagespeed_request*;
 
 // Return codes.
 #define PAGESPEED_OK 0

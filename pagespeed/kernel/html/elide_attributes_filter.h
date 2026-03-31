@@ -46,10 +46,10 @@ class ElideAttributesFilter : public EmptyHtmlFilter {
     bool requires_version_5;  // Default value only exists in (X)HTML 5.
   };
 
-  typedef std::set<HtmlName::Keyword> KeywordSet;
-  typedef std::map<HtmlName::Keyword, KeywordSet> KeywordSetMap;
-  typedef std::map<HtmlName::Keyword, AttrValue> ValueMap;
-  typedef std::map<HtmlName::Keyword, ValueMap> ValueMapMap;
+  using KeywordSet = std::set<HtmlName::Keyword>;
+  using KeywordSetMap = std::map<HtmlName::Keyword, KeywordSet>;
+  using ValueMap = std::map<HtmlName::Keyword, AttrValue>;
+  using ValueMapMap = std::map<HtmlName::Keyword, ValueMap>;
 
   HtmlParse* html_parse_;
   KeywordSetMap one_value_attrs_map_;  // tag/attrs with only one possible value

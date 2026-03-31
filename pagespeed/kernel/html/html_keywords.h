@@ -124,9 +124,9 @@ class HtmlKeywords {
                        MessageHandler* handler);
 
  private:
-  typedef int32 KeywordPair;  // Encoded via shift & OR.
-  typedef std::vector<KeywordPair> KeywordPairVec;
-  typedef std::vector<HtmlName::Keyword> KeywordVec;
+  using KeywordPair = int32;  // Encoded via shift & OR.
+  using KeywordPairVec = std::vector<KeywordPair>;
+  using KeywordVec = std::vector<HtmlName::Keyword>;
 
   HtmlKeywords();
   const char* UnescapeAttributeValue();
@@ -190,11 +190,9 @@ class HtmlKeywords {
   // My theory is that the maps are sufficiently small that the algorithmic
   // differences are not dominant, but keeping the data small helps the
   // processor cache behavior.
-  typedef sparse_hash_map<GoogleString, const char*, CaseFoldStringHash,
-                          CaseFoldStringEqual>
-      StringStringSparseHashMapInsensitive;
-  typedef sparse_hash_map<GoogleString, const char*, CasePreserveStringHash>
-      StringStringSparseHashMapSensitive;
+using StringStringSparseHashMapInsensitive = sparse_hash_map<GoogleString, const char*, CaseFoldStringHash, CaseFoldStringEqual>;
+using StringStringSparseHashMapSensitive =
+      sparse_hash_map<GoogleString, const char*, CasePreserveStringHash>;
 
   StringStringSparseHashMapInsensitive unescape_insensitive_map_;
   StringStringSparseHashMapSensitive unescape_sensitive_map_;

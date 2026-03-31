@@ -89,12 +89,12 @@ class PriorityQueue {
   void SanityCheckForTesting() const;
 
   // Map items onto their position in queue_.
-  typedef std::unordered_map<const T*, size_t, PtrHash, PtrEq> IndexMap;
+  using IndexMap = std::unordered_map<const T*, size_t, PtrHash, PtrEq>;
   IndexMap index_map_;
 
   // The actual max-heap. Stores the value so that it can look it back up in
   // index. queue_ is considered to own this pointer.
-  typedef std::pair<const T*, int64> QueueEntry;
+  using QueueEntry = std::pair<const T*, int64>;
   std::vector<QueueEntry> queue_;
 
   friend class PriorityQueueTest;

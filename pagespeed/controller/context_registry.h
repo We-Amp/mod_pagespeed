@@ -83,7 +83,7 @@ class ContextRegistry {
   bool Empty() const LOCKS_EXCLUDED(mutex_);
 
  private:
-  typedef std::unordered_set<ContextT*> ContextSet;
+  using ContextSet = std::unordered_set<ContextT*>;
 
   std::unique_ptr<ThreadSystem::CondvarCapableMutex> mutex_;
   std::unique_ptr<ThreadSystem::Condvar> condvar_ GUARDED_BY(mutex_);

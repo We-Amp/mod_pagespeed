@@ -156,7 +156,7 @@ class CurlUrlAsyncFetcher : public UrlAsyncFetcher {
   void PollLoop();
 
  protected:
-  typedef Pool<CurlFetch> CurlFetchPool;
+  using CurlFetchPool = Pool<CurlFetch>;
 
  private:
   static bool ParseHttpsOptions(StringPiece directive, uint32* options,

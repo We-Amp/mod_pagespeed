@@ -343,7 +343,7 @@ class ApacheProcessContext {
   ProcessContext process_context_;
   command_rec* apache_cmds_;
 
-  typedef std::map<const command_rec*, VHostHandling> VhostCommandHandlingMap;
+  using VhostCommandHandlingMap = std::map<const command_rec*, VHostHandling>;
   VhostCommandHandlingMap vhost_command_handling_map_;
   StringVector cmd_names_;
 };

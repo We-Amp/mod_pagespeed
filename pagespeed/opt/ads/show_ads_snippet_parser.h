@@ -31,7 +31,7 @@ namespace net_instaweb {
 // Class that parses showads snippets.
 class ShowAdsSnippetParser {
  public:
-  typedef std::map<GoogleString, GoogleString> AttributeMap;
+  using AttributeMap = std::map<GoogleString, GoogleString>;
 
   ShowAdsSnippetParser() {}
   ~ShowAdsSnippetParser() {}

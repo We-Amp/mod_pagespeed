@@ -111,7 +111,7 @@ class LRUCache : public CacheInterface {
       return true;
     }
   };
-  typedef LRUCacheBase<SharedString, SharedStringHelper> Base;
+  using Base = LRUCacheBase<SharedString, SharedStringHelper>;
 
   Base base_;
   bool is_healthy_;

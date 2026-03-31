@@ -32,8 +32,8 @@
 namespace net_instaweb {
 
 // TODO(sligocki): Get rid of these special cases.
-typedef google::protobuf::io::StringOutputStream StringOutputStream;
-typedef google::protobuf::io::ArrayInputStream ArrayInputStream;
+using StringOutputStream = google::protobuf::io::StringOutputStream;
+using ArrayInputStream = google::protobuf::io::ArrayInputStream;
 
 namespace protobuf {
 

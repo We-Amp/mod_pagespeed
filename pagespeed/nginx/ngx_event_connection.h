@@ -51,7 +51,7 @@ typedef struct {
 } ps_event_data;
 
 // Handler signature for receiving events
-typedef void (*callbackPtr)(const ps_event_data&);
+using callbackPtr = void(*)(const ps_event_data&);
 
 // Abstracts a connection to nginx through which events can be written.
 class NgxEventConnection {

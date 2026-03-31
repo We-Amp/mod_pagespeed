@@ -58,13 +58,12 @@ namespace net_instaweb {
 // ValueType must support copy-construction and assign-by-value.
 template <class ValueType, class ValueHelper>
 class LRUCacheBase {
-  typedef std::pair<GoogleString, ValueType> KeyValuePair;
-  typedef std::list<KeyValuePair*> EntryList;
+  using KeyValuePair = std::pair<GoogleString, ValueType>;
+  using EntryList = std::list<KeyValuePair*>;
   // STL guarantees lifetime of list iterators as long as the node is in list.
-  typedef typename EntryList::iterator ListNode;
+  using ListNode = typename EntryList::iterator;
 
-  typedef absl::flat_hash_map<GoogleString, ListNode, CasePreserveStringHash>
-      Map;
+using Map = absl::flat_hash_map<GoogleString, ListNode, CasePreserveStringHash>;
 
  public:
   class Iterator {

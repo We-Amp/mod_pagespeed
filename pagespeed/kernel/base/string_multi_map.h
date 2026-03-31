@@ -287,9 +287,9 @@ class StringMultiMap {
   // separate string-pair-vector owns the values as new'd GoogleString*.  We
   // use a pointer here to avoid the cost of string-copies as the vector is
   // resized.
-  typedef std::pair<StringPiece, GoogleString*> StringPair;  // owns the value
-  typedef std::set<SetEntry, EntryCompare> Set;
-  typedef std::vector<StringPair> StringPairVector;
+  using StringPair = std::pair<StringPiece, GoogleString*>;  // owns the value
+  using Set = std::set<SetEntry, EntryCompare>;
+  using StringPairVector = std::vector<StringPair>;
 
   Set set_;
   StringPairVector vector_;

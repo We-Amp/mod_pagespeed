@@ -25,7 +25,7 @@
 #include "base/logging.h"
 #include "pagespeed/kernel/base/basictypes.h"
 
-typedef uint8_t uint8;
+using uint8 = uint8_t;
 
 namespace net_instaweb {
 

@@ -151,7 +151,7 @@ class InlineSList {
     Iterator(const InlineSList<T>* list, T* prev) : IterBase(list, prev) {}
   };
 
-  typedef Iterator iterator;
+  using iterator = Iterator;
 
   // Read-only iterator type; cannot be used for deletion or to modify
   // the contained items.
@@ -178,7 +178,7 @@ class InlineSList {
     ConstIterator(const InlineSList<T>* list, T* prev) : IterBase(list, prev) {}
   };
 
-  typedef ConstIterator const_iterator;
+  using const_iterator = ConstIterator;
 
   InlineSList() : tail_(NULL) {}
 

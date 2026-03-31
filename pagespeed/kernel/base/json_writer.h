@@ -40,7 +40,7 @@ class HtmlElement;
 class MessageHandler;
 
 // Pair of panel json and start Element corresponding to the panel.
-typedef std::pair<HtmlElement*, Json::Value*> ElementJsonPair;
+using ElementJsonPair = std::pair<HtmlElement*, Json::Value*>;
 
 // Writes bytes to top json of the stack.
 class JsonWriter : public Writer {

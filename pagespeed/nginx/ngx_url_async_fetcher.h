@@ -96,7 +96,7 @@ class NgxUrlAsyncFetcher : public UrlAsyncFetcher {
     track_original_content_length_ = x;
   }
 
-  typedef Pool<NgxFetch> NgxFetchPool;
+  using NgxFetchPool = Pool<NgxFetch>;
 
   // AnyPendingFetches is accurate only at the time of call; this is
   // used conservatively during shutdown.  It counts fetches that have been
