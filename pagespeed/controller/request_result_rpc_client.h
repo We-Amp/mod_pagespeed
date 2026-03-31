@@ -122,7 +122,7 @@ class RpcHolder {
 template <typename RequestT, typename ResponseT, typename CallbackT>
 class RequestResultRpcClient {
  public:
-using ReaderWriter = ::grpc::ClientAsyncReaderWriterInterface<RequestT, ResponseT>;
+  using ReaderWriter = ::grpc::ClientAsyncReaderWriterInterface<RequestT, ResponseT>;
 
   RequestResultRpcClient(::grpc::CompletionQueue* queue,
                          ThreadSystem* thread_system, MessageHandler* handler,
