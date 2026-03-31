@@ -19,9 +19,10 @@
 
 #include "net/instaweb/rewriter/public/rewrite_stats.h"
 
+#include <memory>
+
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "pagespeed/kernel/base/statistics.h"
-#include "pagespeed/kernel/base/stl_util.h"
 #include "pagespeed/kernel/base/waveform.h"
 
 namespace net_instaweb {
@@ -212,14 +213,14 @@ RewriteStats::RewriteStats(bool has_waveforms, Statistics* stats,
   for (int i = 0; i < RewriteDriverFactory::kNumWorkerPools; ++i) {
     if (has_waveforms) {
       thread_queue_depths_.push_back(
-          new Waveform(thread_system, timer, kNumWaveformSamples,
-                       stats->GetUpDownCounter(kWaveFormCounters[i])));
+          std::make_unique<Waveform>(thread_system, timer, kNumWaveformSamples,
+                                     stats->GetUpDownCounter(kWaveFormCounters[i])));
     } else {
       thread_queue_depths_.push_back(nullptr);
     }
   }
 }
 
-RewriteStats::~RewriteStats() { STLDeleteElements(&thread_queue_depths_); }
+RewriteStats::~RewriteStats() = default;
 
 }  // namespace net_instaweb

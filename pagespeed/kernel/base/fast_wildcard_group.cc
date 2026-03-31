@@ -20,16 +20,15 @@
 #include "pagespeed/kernel/base/fast_wildcard_group.h"
 
 #include <algorithm>
+#include <memory>
 #include <vector>
 
 #include "base/logging.h"
 #include "pagespeed/kernel/base/atomic_int32.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/rolling_hash.h"
-#include "pagespeed/kernel/base/stl_util.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
-#include "pagespeed/kernel/base/wildcard.h"
 
 namespace net_instaweb {
 
@@ -79,7 +78,7 @@ void FastWildcardGroup::Uncompile() {
 
 void FastWildcardGroup::Clear() {
   Uncompile();
-  STLDeleteElements(&wildcards_);
+  wildcards_.clear();
   allow_.clear();
 }
 
@@ -96,7 +95,7 @@ void FastWildcardGroup::CompileNonTrivial() const {
   int32 rolling_hash_length = kMaxRollingHashWindow;
   for (int i = 0; i < static_cast<int>(wildcards_.size()); ++i) {
     longest_literal_strings.push_back(
-        LongestLiteralStringInWildcard(wildcards_[i]));
+        LongestLiteralStringInWildcard(wildcards_[i].get()));
     DCHECK_EQ(i + 1, static_cast<int>(longest_literal_strings.size()));
     int length = longest_literal_strings[i].size();
     if (length > 0) {
@@ -211,15 +210,13 @@ void FastWildcardGroup::Compile() const {
 
 void FastWildcardGroup::Allow(const StringPiece& expr) {
   Uncompile();
-  Wildcard* wildcard = new Wildcard(expr);
-  wildcards_.push_back(wildcard);
+  wildcards_.push_back(std::make_unique<Wildcard>(expr));
   allow_.push_back(true);
 }
 
 void FastWildcardGroup::Disallow(const StringPiece& expr) {
   Uncompile();
-  Wildcard* wildcard = new Wildcard(expr);
-  wildcards_.push_back(wildcard);
+  wildcards_.push_back(std::make_unique<Wildcard>(expr));
   allow_.push_back(false);
 }
 
@@ -329,7 +326,7 @@ void FastWildcardGroup::AppendFrom(const FastWildcardGroup& src) {
   Uncompile();
   CHECK_EQ(src.wildcards_.size(), src.allow_.size());
   for (int i = 0, n = src.wildcards_.size(); i < n; ++i) {
-    wildcards_.push_back(src.wildcards_[i]->Duplicate());
+    wildcards_.emplace_back(src.wildcards_[i]->Duplicate());
     allow_.push_back(src.allow_[i]);
   }
 }

@@ -20,6 +20,7 @@
 #ifndef NET_INSTAWEB_REWRITER_PUBLIC_REWRITE_STATS_H_
 #define NET_INSTAWEB_REWRITER_PUBLIC_REWRITE_STATS_H_
 
+#include <memory>
 #include <vector>
 
 #include "net/instaweb/rewriter/public/rewrite_driver_factory.h"
@@ -125,7 +126,7 @@ class RewriteStats {
   // Returns a waveform object for recording the current thread-queue depth.
   // Note: for servers that don't support waveforms, null will be returned.
   Waveform* thread_queue_depth(RewriteDriverFactory::WorkerPoolCategory pool) {
-    return thread_queue_depths_[pool];
+    return thread_queue_depths_[pool].get();
   }
 
   TimedVariable* num_rewrites_executed() { return num_rewrites_executed_; }
@@ -167,7 +168,7 @@ class RewriteStats {
   TimedVariable* num_rewrites_executed_;
   TimedVariable* num_rewrites_dropped_;
 
-  std::vector<Waveform*> thread_queue_depths_;
+  std::vector<std::unique_ptr<Waveform>> thread_queue_depths_;
 
   RewriteStats(const RewriteStats&) = delete;
   RewriteStats& operator=(const RewriteStats&) = delete;

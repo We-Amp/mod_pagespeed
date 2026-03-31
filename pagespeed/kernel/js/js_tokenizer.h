@@ -21,6 +21,7 @@
 #define PAGESPEED_KERNEL_JS_JS_TOKENIZER_H_
 
 #include <deque>
+#include <initializer_list>
 #include <utility>
 #include <vector>
 
@@ -148,6 +149,13 @@ class JsTokenizer {
                                      StringPiece* token_out);
   bool TryConsumeWhitespace(bool allow_semicolon_insertion,
                             JsKeywords::Type* type_out, StringPiece* token_out);
+
+  // Pops the parse stack until target is found, returning true on success.
+  // On error (an incompatible state is encountered), calls Error() and returns
+  // false.
+  bool PopToMatchingOpen(ParseState target,
+                         std::initializer_list<ParseState> error_states,
+                         StringPiece* token_out);
 
   // Sets error_ to true and returns an error token.
   JsKeywords::Type Error(StringPiece* token_out);

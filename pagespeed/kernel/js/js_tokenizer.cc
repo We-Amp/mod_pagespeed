@@ -481,22 +481,35 @@ JsKeywords::Type JsTokenizer::ConsumeOpenBrace(StringPiece* token_out) {
   return Emit(JsKeywords::kOperator, 1, token_out);
 }
 
+bool JsTokenizer::PopToMatchingOpen(
+    ParseState target, std::initializer_list<ParseState> error_states,
+    StringPiece* token_out) {
+  while (true) {
+    DCHECK(!parse_stack_.empty());
+    const ParseState state = parse_stack_.back();
+    if (state == target) {
+      parse_stack_.pop_back();
+      return true;
+    }
+    for (ParseState es : error_states) {
+      if (state == es) {
+        Error(token_out);
+        return false;
+      }
+    }
+    parse_stack_.pop_back();
+  }
+}
+
 JsKeywords::Type JsTokenizer::ConsumeCloseBrace(StringPiece* token_out) {
   DCHECK(!input_.empty());
   DCHECK_EQ('}', input_[0]);
   // Pop the most recent kOpenBrace (and everything above it) off the stack.
-  while (true) {
-    DCHECK(!parse_stack_.empty());
-    const ParseState state = parse_stack_.back();
-    if (state == kOpenBrace) {
-      parse_stack_.pop_back();
-      break;
-    } else if (state == kStartOfInput || state == kOpenBracket ||
-               state == kOpenParen || state == kBlockKeyword) {
-      return Error(token_out);
-    } else {
-      parse_stack_.pop_back();
-    }
+  if (!PopToMatchingOpen(kOpenBrace,
+                         {kStartOfInput, kOpenBracket, kOpenParen,
+                          kBlockKeyword},
+                         token_out)) {
+    return JsKeywords::kError;
   }
   // If the open brace was preceeded by a BlockHeader, we can pop that off the
   // stack at this point.  The presence of a BlockHeader means these braces
@@ -543,19 +556,11 @@ JsKeywords::Type JsTokenizer::ConsumeCloseBracket(StringPiece* token_out) {
   DCHECK(!input_.empty());
   DCHECK_EQ(']', input_[0]);
   // Pop the most recent kOpenBracket (and everything above it) off the stack.
-  while (true) {
-    DCHECK(!parse_stack_.empty());
-    const ParseState state = parse_stack_.back();
-    if (state == kOpenBracket) {
-      parse_stack_.pop_back();
-      break;
-    } else if (state == kStartOfInput || state == kOpenBrace ||
-               state == kOpenParen || state == kBlockKeyword ||
-               state == kBlockHeader) {
-      return Error(token_out);
-    } else {
-      parse_stack_.pop_back();
-    }
+  if (!PopToMatchingOpen(kOpenBracket,
+                         {kStartOfInput, kOpenBrace, kOpenParen,
+                          kBlockKeyword, kBlockHeader},
+                         token_out)) {
+    return JsKeywords::kError;
   }
   PushExpression();
   // Emit a token for the close bracket.
@@ -577,19 +582,11 @@ JsKeywords::Type JsTokenizer::ConsumeCloseParen(StringPiece* token_out) {
   DCHECK(!input_.empty());
   DCHECK_EQ(')', input_[0]);
   // Pop the most recent kOpenParen (and everything above it) off the stack.
-  while (true) {
-    DCHECK(!parse_stack_.empty());
-    const ParseState state = parse_stack_.back();
-    if (state == kOpenParen) {
-      parse_stack_.pop_back();
-      break;
-    } else if (state == kStartOfInput || state == kOpenBrace ||
-               state == kOpenBracket || state == kBlockKeyword ||
-               state == kBlockHeader) {
-      return Error(token_out);
-    } else {
-      parse_stack_.pop_back();
-    }
+  if (!PopToMatchingOpen(kOpenParen,
+                         {kStartOfInput, kOpenBrace, kOpenBracket,
+                          kBlockKeyword, kBlockHeader},
+                         token_out)) {
+    return JsKeywords::kError;
   }
   // If this is the closing paren of e.g. "if (...)", then we've just created a
   // kBlockHeader.  Otherwise, we've just created a kExpression.

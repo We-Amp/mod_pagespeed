@@ -36,21 +36,9 @@ genrule(
         "generated/.source-hash",
     ],
     outs = ["generated_js_verified.stamp"],
+    # Bazel runs genrule commands via bash on all platforms (including Windows
+    # via MSYS2/Git Bash).  MSYS2 ships sha256sum; macOS ships shasum instead.
     cmd = select({
-        "@platforms//os:windows": (
-            # Windows: use PowerShell for reliable SHA-256 comparison.
-            "powershell -NoProfile -Command \"" +
-            "$$bytes = [byte[]]@(); " +
-            " ".join(["$$bytes += [System.IO.File]::ReadAllBytes('$(execpath %s)');" % f for f in _JS_SOURCES]) +
-            " $$bytes += [System.IO.File]::ReadAllBytes('$(execpath //net/instaweb/js:js_utils.js)');" +
-            " $$bytes += [System.IO.File]::ReadAllBytes('$(execpath //net/instaweb/js:externs.js)');" +
-            " $$sha = [System.Security.Cryptography.SHA256]::Create();" +
-            " $$actual = -join ($$sha.ComputeHash($$bytes) | ForEach-Object { $$_.ToString('x2') });" +
-            " $$expected = (Get-Content '$(execpath generated/.source-hash)').Trim();" +
-            " if ($$actual -ne $$expected) { Write-Error 'Source JS changed but generated/ is stale. Run: tools/regenerate-rewriter-js.sh'; exit 1 };" +
-            " 'ok' | Out-File -Encoding ascii '$@'\"" +
-            ""
-        ),
         "@platforms//os:macos": (
             "ACTUAL=$$(cat " +
             " ".join(["$(execpath %s)" % f for f in _JS_SOURCES]) +
@@ -64,7 +52,6 @@ genrule(
             "echo ok > $@"
         ),
         "//conditions:default": (
-            # Linux: sha256sum (coreutils, always available)
             "ACTUAL=$$(cat " +
             " ".join(["$(execpath %s)" % f for f in _JS_SOURCES]) +
             " $(execpath //net/instaweb/js:js_utils.js)" +
@@ -199,6 +186,9 @@ cc_library(
         "usage_data_reporter.cc",
         ":csp_directive_gperf",
         ":rewrite_filter_names_gperf",
+    ],
+    textual_hdrs = [
+        "rewrite_options_properties.inc",
     ],
     hdrs = [
         "config/measurement_proxy_rewrite_options_manager.h",

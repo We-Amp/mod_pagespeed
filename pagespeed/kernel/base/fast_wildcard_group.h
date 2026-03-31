@@ -20,16 +20,16 @@
 #ifndef PAGESPEED_KERNEL_BASE_FAST_WILDCARD_GROUP_H_
 #define PAGESPEED_KERNEL_BASE_FAST_WILDCARD_GROUP_H_
 
+#include <memory>
 #include <vector>
 
 #include "pagespeed/kernel/base/atomic_int32.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/base/wildcard.h"
 
 namespace net_instaweb {
-
-class Wildcard;
 
 // This forms the basis of a wildcard selection mechanism, allowing
 // a user to issue a sequence of commands like:
@@ -150,7 +150,7 @@ class FastWildcardGroup {
   // To avoid having to new another structure we use parallel
   // vectors.  Note that vector<bool> is special-case implemented
   // in STL to be bit-packed.
-  std::vector<Wildcard*> wildcards_;
+  std::vector<std::unique_ptr<Wildcard>> wildcards_;
   std::vector<bool> allow_;  // parallel array (actually a bitvector)
 
   // Information that is computed during compilation.
