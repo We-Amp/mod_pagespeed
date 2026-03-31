@@ -23,7 +23,7 @@
 #include "base/logging.h"
 #include "pagespeed/kernel/base/function.h"
 #include "pagespeed/kernel/base/ref_counted_ptr.h"
-#include "pagespeed/kernel/util/grpc.h"
+#include "pagespeed/controller/grpc.h"
 
 namespace net_instaweb {
 
@@ -148,7 +148,8 @@ class RpcHandler
   State state_;
   bool write_outstanding_;
 
-  DISALLOW_COPY_AND_ASSIGN(RpcHandler);
+  RpcHandler(const RpcHandler&) = delete;
+  RpcHandler& operator=(const RpcHandler&) = delete;
 };
 
 template <typename AsyncService, typename RequestT, typename ResponseT>

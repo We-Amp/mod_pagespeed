@@ -49,7 +49,8 @@ class PushPreloadFilter : public CommonFilter {
   void DetermineEnabled(GoogleString* disabled_reason) override;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(PushPreloadFilter);
+  PushPreloadFilter(const PushPreloadFilter&) = delete;
+  PushPreloadFilter& operator=(const PushPreloadFilter&) = delete;
 };
 
 }  // namespace net_instaweb

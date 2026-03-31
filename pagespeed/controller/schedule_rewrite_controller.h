@@ -59,7 +59,8 @@ class ScheduleRewriteController {
   ScheduleRewriteController() {}
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(ScheduleRewriteController);
+  ScheduleRewriteController(const ScheduleRewriteController&) = delete;
+  ScheduleRewriteController& operator=(const ScheduleRewriteController&) = delete;
 };
 
 }  // namespace net_instaweb

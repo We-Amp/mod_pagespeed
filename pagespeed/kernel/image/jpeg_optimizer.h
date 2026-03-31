@@ -152,7 +152,8 @@ class JpegScanlineWriter : public ScanlineWriterInterface {
   Data* const data_;
   MessageHandler* message_handler_;
 
-  DISALLOW_COPY_AND_ASSIGN(JpegScanlineWriter);
+  JpegScanlineWriter(const JpegScanlineWriter&) = delete;
+  JpegScanlineWriter& operator=(const JpegScanlineWriter&) = delete;
 };
 
 }  // namespace image_compression

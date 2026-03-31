@@ -117,7 +117,8 @@ class CriticalSelectorFinder {
   TimedVariable* critical_selectors_expired_count_;
   TimedVariable* critical_selectors_not_found_count_;
 
-  DISALLOW_COPY_AND_ASSIGN(CriticalSelectorFinder);
+  CriticalSelectorFinder(const CriticalSelectorFinder&) = delete;
+  CriticalSelectorFinder& operator=(const CriticalSelectorFinder&) = delete;
 };
 
 class BeaconCriticalSelectorFinder : public CriticalSelectorFinder {

@@ -126,7 +126,8 @@ class SymbolTable {
   char* next_ptr_;  // Used for bump-pointer pooled allocation of strings.
   size_t string_bytes_allocated_;
 
-  DISALLOW_COPY_AND_ASSIGN(SymbolTable);
+  SymbolTable(const SymbolTable&) = delete;
+  SymbolTable& operator=(const SymbolTable&) = delete;
 };
 
 typedef SymbolTable<CaseFold> SymbolTableInsensitive;

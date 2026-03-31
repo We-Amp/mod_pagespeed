@@ -107,7 +107,8 @@ class UrlPartnership {
   // resolution.
   StringVector common_components_;
 
-  DISALLOW_COPY_AND_ASSIGN(UrlPartnership);
+  UrlPartnership(const UrlPartnership&) = delete;
+  UrlPartnership& operator=(const UrlPartnership&) = delete;
 };
 
 }  // namespace net_instaweb

@@ -100,7 +100,8 @@ class CriticalSelectorFilter::CssElement {
   bool inside_noscript_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(CssElement);
+  CssElement(const CssElement&) = delete;
+  CssElement& operator=(const CssElement&) = delete;
 };
 
 // Wrap CSS style blocks to move them later in the document.
@@ -132,7 +133,8 @@ class CriticalSelectorFilter::CssStyleElement
   CharactersNodeVector characters_nodes_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(CssStyleElement);
+  CssStyleElement(const CssStyleElement&) = delete;
+  CssStyleElement& operator=(const CssStyleElement&) = delete;
 };
 
 // Wrap CSS related elements so they can be moved later in the document.

@@ -71,7 +71,8 @@ class JsInlineFilter::Context : public InlineRewriteContext {
 
  private:
   JsInlineFilter* filter_;
-  DISALLOW_COPY_AND_ASSIGN(Context);
+  Context(const Context&) = delete;
+  Context& operator=(const Context&) = delete;
 };
 
 JsInlineFilter::JsInlineFilter(RewriteDriver* driver)

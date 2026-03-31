@@ -264,7 +264,8 @@ class GoogleUrl {
   bool is_web_valid_{false};
   bool is_web_or_data_valid_{false};
 
-  DISALLOW_COPY_AND_ASSIGN(GoogleUrl);
+  GoogleUrl(const GoogleUrl&) = delete;
+  GoogleUrl& operator=(const GoogleUrl&) = delete;
 };  // class GoogleUrl
 
 }  // namespace net_instaweb

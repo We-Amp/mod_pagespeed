@@ -73,7 +73,8 @@ class LoopbackRouteFetcher : public UrlAsyncFetcher {
   int own_port_;
   UrlAsyncFetcher* const backend_fetcher_;
 
-  DISALLOW_COPY_AND_ASSIGN(LoopbackRouteFetcher);
+  LoopbackRouteFetcher(const LoopbackRouteFetcher&) = delete;
+  LoopbackRouteFetcher& operator=(const LoopbackRouteFetcher&) = delete;
 };
 
 }  // namespace net_instaweb

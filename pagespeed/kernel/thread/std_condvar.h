@@ -49,7 +49,8 @@ class StdCondvar : public ThreadSystem::Condvar {
   StdMutex* mutex_;
   std::condition_variable condvar_;
 
-  DISALLOW_COPY_AND_ASSIGN(StdCondvar);
+  StdCondvar(const StdCondvar&) = delete;
+  StdCondvar& operator=(const StdCondvar&) = delete;
 };
 
 }  // namespace net_instaweb

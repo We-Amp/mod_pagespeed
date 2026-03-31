@@ -40,7 +40,8 @@ class ImageTestingPeer {
   }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(ImageTestingPeer);
+  ImageTestingPeer(const ImageTestingPeer&) = delete;
+  ImageTestingPeer& operator=(const ImageTestingPeer&) = delete;
 };
 
 }  // namespace net_instaweb

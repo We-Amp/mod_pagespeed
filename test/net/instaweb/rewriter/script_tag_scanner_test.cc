@@ -83,7 +83,8 @@ class ScriptTagScannerTest : public HtmlParseTestBase {
     std::vector<ScriptInfo> scripts_;
     ScriptTagScanner script_tag_scanner_;
 
-    DISALLOW_COPY_AND_ASSIGN(ScriptCollector);
+    ScriptCollector(const ScriptCollector&) = delete;
+    ScriptCollector& operator=(const ScriptCollector&) = delete;
   };
 
   struct TestSpec {
@@ -121,7 +122,8 @@ class ScriptTagScannerTest : public HtmlParseTestBase {
   ScriptCollector collector_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(ScriptTagScannerTest);
+  ScriptTagScannerTest(const ScriptTagScannerTest&) = delete;
+  ScriptTagScannerTest& operator=(const ScriptTagScannerTest&) = delete;
 };
 
 // Note: kNonScript is covered by the length counts,

@@ -28,7 +28,7 @@
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/function.h"
 #include "pagespeed/kernel/base/string.h"
-#include "pagespeed/kernel/util/grpc.h"
+#include "pagespeed/controller/grpc.h"
 
 namespace net_instaweb {
 
@@ -75,7 +75,8 @@ class ScheduleRewriteRpcHandler
   friend class RequestResultRpcHandler;
   friend class ScheduleRewriteRpcHandlerTest;
 
-  DISALLOW_COPY_AND_ASSIGN(ScheduleRewriteRpcHandler);
+  ScheduleRewriteRpcHandler(const ScheduleRewriteRpcHandler&) = delete;
+  ScheduleRewriteRpcHandler& operator=(const ScheduleRewriteRpcHandler&) = delete;
 };
 
 }  // namespace net_instaweb

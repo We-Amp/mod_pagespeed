@@ -49,7 +49,8 @@ class ChunkingWriter : public Writer {
   const int flush_limit_;
   int unflushed_bytes_;
 
-  DISALLOW_COPY_AND_ASSIGN(ChunkingWriter);
+  ChunkingWriter(const ChunkingWriter&) = delete;
+  ChunkingWriter& operator=(const ChunkingWriter&) = delete;
 };
 
 }  // namespace net_instaweb

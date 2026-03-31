@@ -53,7 +53,8 @@ class QueuedWorker : public Worker {
  private:
   bool IsPermitted(Function* closure) override;
 
-  DISALLOW_COPY_AND_ASSIGN(QueuedWorker);
+  QueuedWorker(const QueuedWorker&) = delete;
+  QueuedWorker& operator=(const QueuedWorker&) = delete;
 };
 
 }  // namespace net_instaweb

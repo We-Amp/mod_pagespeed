@@ -34,7 +34,7 @@ extern "C" {
 #ifdef USE_SYSTEM_LIBJPEG
 #include "jpeglib.h"  // NOLINT
 #else
-#include "external/libjpeg_turbo/jpeglib.h"
+#include "jpeglib.h"
 #endif
 }
 
@@ -252,7 +252,8 @@ class JpegOptimizer {
   MessageHandler* message_handler_;
   pagespeed::image_compression::JpegReader reader_;
 
-  DISALLOW_COPY_AND_ASSIGN(JpegOptimizer);
+  JpegOptimizer(const JpegOptimizer&) = delete;
+  JpegOptimizer& operator=(const JpegOptimizer&) = delete;
 };
 
 JpegOptimizer::JpegOptimizer(MessageHandler* handler)

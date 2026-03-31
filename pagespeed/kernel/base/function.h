@@ -106,7 +106,8 @@ class Function {
   bool cancel_called_;
   bool delete_after_callback_;
 
-  DISALLOW_COPY_AND_ASSIGN(Function);
+  Function(const Function&) = delete;
+  Function& operator=(const Function&) = delete;
 };
 
 // A Macro is recommended for making a readable call to a pointer-to-member

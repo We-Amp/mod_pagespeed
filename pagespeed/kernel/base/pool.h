@@ -122,7 +122,8 @@ class Pool {
  private:
   std::list<T*> contents_;
 
-  DISALLOW_COPY_AND_ASSIGN(Pool);
+  Pool(const Pool&) = delete;
+  Pool& operator=(const Pool&) = delete;
 };
 
 }  // namespace net_instaweb

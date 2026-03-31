@@ -56,7 +56,8 @@ class EnvoyEventTimer : public EventTimer {
   Envoy::Event::TimerPtr envoy_timer_;
   Function* function_;
 
-  DISALLOW_COPY_AND_ASSIGN(EnvoyEventTimer);
+  EnvoyEventTimer(const EnvoyEventTimer&) = delete;
+  EnvoyEventTimer& operator=(const EnvoyEventTimer&) = delete;
 };
 
 // Adapter that wraps Envoy's Event::Dispatcher to implement EventDispatcher.
@@ -84,7 +85,8 @@ class EnvoyDispatcherAdapter : public EventDispatcher {
   Envoy::Event::Dispatcher* envoy_dispatcher_;
   Timer* timer_;
 
-  DISALLOW_COPY_AND_ASSIGN(EnvoyDispatcherAdapter);
+  EnvoyDispatcherAdapter(const EnvoyDispatcherAdapter&) = delete;
+  EnvoyDispatcherAdapter& operator=(const EnvoyDispatcherAdapter&) = delete;
 };
 
 }  // namespace net_instaweb

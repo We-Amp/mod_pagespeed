@@ -87,7 +87,8 @@ class JsInlineFilter : public CommonFilter {
 
   Variable* num_js_inlined_;
 
-  DISALLOW_COPY_AND_ASSIGN(JsInlineFilter);
+  JsInlineFilter(const JsInlineFilter&) = delete;
+  JsInlineFilter& operator=(const JsInlineFilter&) = delete;
 };
 
 }  // namespace net_instaweb

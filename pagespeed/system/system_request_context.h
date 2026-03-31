@@ -62,7 +62,8 @@ class SystemRequestContext : public RequestContext {
   GoogleString local_ip_;
   GoogleString url_;
 
-  DISALLOW_COPY_AND_ASSIGN(SystemRequestContext);
+  SystemRequestContext(const SystemRequestContext&) = delete;
+  SystemRequestContext& operator=(const SystemRequestContext&) = delete;
 };
 
 }  // namespace net_instaweb

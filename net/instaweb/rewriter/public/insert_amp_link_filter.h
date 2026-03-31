@@ -55,7 +55,8 @@ class InsertAmpLinkFilter : public CommonFilter {
   // True if an AMP link has already been found in the document.
   bool amp_link_found_;
 
-  DISALLOW_COPY_AND_ASSIGN(InsertAmpLinkFilter);
+  InsertAmpLinkFilter(const InsertAmpLinkFilter&) = delete;
+  InsertAmpLinkFilter& operator=(const InsertAmpLinkFilter&) = delete;
 };
 
 }  // namespace net_instaweb

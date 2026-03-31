@@ -180,7 +180,8 @@ class ResourceCombiner {
   FRIEND_TEST(ResourceCombinerTest, TestRebaseRemove);
   FRIEND_TEST(ResourceCombinerTest, TestRebaseRemoveAdd);
 
-  DISALLOW_COPY_AND_ASSIGN(ResourceCombiner);
+  ResourceCombiner(const ResourceCombiner&) = delete;
+  ResourceCombiner& operator=(const ResourceCombiner&) = delete;
 };
 
 }  // namespace net_instaweb

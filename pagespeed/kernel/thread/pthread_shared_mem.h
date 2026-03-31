@@ -82,7 +82,8 @@ class PthreadSharedMem : public AbstractSharedMem {
   // created, before destroying the old one.
   size_t instance_number_;
 
-  DISALLOW_COPY_AND_ASSIGN(PthreadSharedMem);
+  PthreadSharedMem(const PthreadSharedMem&) = delete;
+  PthreadSharedMem& operator=(const PthreadSharedMem&) = delete;
 };
 
 }  // namespace net_instaweb

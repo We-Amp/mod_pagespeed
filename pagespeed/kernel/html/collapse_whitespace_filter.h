@@ -55,7 +55,8 @@ class CollapseWhitespaceFilter : public EmptyHtmlFilter {
   HtmlParse* html_parse_;
   std::vector<HtmlName::Keyword> keyword_stack_;
 
-  DISALLOW_COPY_AND_ASSIGN(CollapseWhitespaceFilter);
+  CollapseWhitespaceFilter(const CollapseWhitespaceFilter&) = delete;
+  CollapseWhitespaceFilter& operator=(const CollapseWhitespaceFilter&) = delete;
 };
 
 }  // namespace net_instaweb

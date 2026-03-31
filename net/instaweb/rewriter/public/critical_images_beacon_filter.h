@@ -77,7 +77,8 @@ class CriticalImagesBeaconFilter : public CommonFilter {
 
   bool added_beacon_js_;
 
-  DISALLOW_COPY_AND_ASSIGN(CriticalImagesBeaconFilter);
+  CriticalImagesBeaconFilter(const CriticalImagesBeaconFilter&) = delete;
+  CriticalImagesBeaconFilter& operator=(const CriticalImagesBeaconFilter&) = delete;
 };
 
 }  // namespace net_instaweb

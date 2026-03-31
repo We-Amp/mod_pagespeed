@@ -50,7 +50,8 @@ class StdThreadSystem : public ThreadSystem {
 
   ThreadImpl* NewThreadImpl(Thread* wrapper, ThreadFlags flags) override;
 
-  DISALLOW_COPY_AND_ASSIGN(StdThreadSystem);
+  StdThreadSystem(const StdThreadSystem&) = delete;
+  StdThreadSystem& operator=(const StdThreadSystem&) = delete;
 };
 
 }  // namespace net_instaweb

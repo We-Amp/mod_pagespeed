@@ -183,7 +183,8 @@ class AsyncFetch : public Writer {
   bool headers_complete_;
   int64 content_length_;
 
-  DISALLOW_COPY_AND_ASSIGN(AsyncFetch);
+  AsyncFetch(const AsyncFetch&) = delete;
+  AsyncFetch& operator=(const AsyncFetch&) = delete;
 };
 
 // Class to represent an Async fetch that collects the response-data into
@@ -247,7 +248,8 @@ class StringAsyncFetch : public AsyncFetch {
   bool success_;
   bool done_;
 
-  DISALLOW_COPY_AND_ASSIGN(StringAsyncFetch);
+  StringAsyncFetch(const StringAsyncFetch&) = delete;
+  StringAsyncFetch& operator=(const StringAsyncFetch&) = delete;
 };
 
 // Creates an AsyncFetch object using an existing Writer* object,
@@ -266,7 +268,8 @@ class AsyncFetchUsingWriter : public AsyncFetch {
 
  private:
   Writer* writer_;
-  DISALLOW_COPY_AND_ASSIGN(AsyncFetchUsingWriter);
+  AsyncFetchUsingWriter(const AsyncFetchUsingWriter&) = delete;
+  AsyncFetchUsingWriter& operator=(const AsyncFetchUsingWriter&) = delete;
 };
 
 // Creates an AsyncFetch object using an existing AsyncFetcher*,
@@ -311,7 +314,8 @@ class SharedAsyncFetch : public AsyncFetch {
 
  private:
   AsyncFetch* base_fetch_;
-  DISALLOW_COPY_AND_ASSIGN(SharedAsyncFetch);
+  SharedAsyncFetch(const SharedAsyncFetch&) = delete;
+  SharedAsyncFetch& operator=(const SharedAsyncFetch&) = delete;
 };
 
 // Creates a SharedAsyncFetch object using an existing AsyncFetch and a fallback
@@ -348,7 +352,8 @@ class FallbackSharedAsyncFetch : public SharedAsyncFetch {
   bool serving_fallback_;
   Variable* fallback_responses_served_;  // may be NULL.
 
-  DISALLOW_COPY_AND_ASSIGN(FallbackSharedAsyncFetch);
+  FallbackSharedAsyncFetch(const FallbackSharedAsyncFetch&) = delete;
+  FallbackSharedAsyncFetch& operator=(const FallbackSharedAsyncFetch&) = delete;
 };
 
 // Creates a SharedAsyncFetch object using an existing AsyncFetch and a cached
@@ -389,7 +394,8 @@ class ConditionalSharedAsyncFetch : public SharedAsyncFetch {
 
   Variable* num_conditional_refreshes_;  // may be NULL.
 
-  DISALLOW_COPY_AND_ASSIGN(ConditionalSharedAsyncFetch);
+  ConditionalSharedAsyncFetch(const ConditionalSharedAsyncFetch&) = delete;
+  ConditionalSharedAsyncFetch& operator=(const ConditionalSharedAsyncFetch&) = delete;
 };
 
 }  // namespace net_instaweb

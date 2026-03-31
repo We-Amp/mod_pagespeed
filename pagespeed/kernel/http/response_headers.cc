@@ -691,7 +691,8 @@ class InstawebCacheComputer : public CachingHeaders {
 
  private:
   const ResponseHeaders& response_headers_;
-  DISALLOW_COPY_AND_ASSIGN(InstawebCacheComputer);
+  InstawebCacheComputer(const InstawebCacheComputer&) = delete;
+  InstawebCacheComputer& operator=(const InstawebCacheComputer&) = delete;
 };
 
 }  // namespace

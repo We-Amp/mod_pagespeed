@@ -242,7 +242,8 @@ class Image {
   friend class ImageTestingPeer;
   friend class ImageTest;
 
-  DISALLOW_COPY_AND_ASSIGN(Image);
+  Image(const Image&) = delete;
+  Image& operator=(const Image&) = delete;
 };
 
 // Image owns none of its inputs.  All of the arguments to NewImage(...) (the

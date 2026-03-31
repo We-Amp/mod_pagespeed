@@ -259,7 +259,8 @@ class CssSummarizerBaseTest : public RewriteTestBase {
   const GoogleString head_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(CssSummarizerBaseTest);
+  CssSummarizerBaseTest(const CssSummarizerBaseTest&) = delete;
+  CssSummarizerBaseTest& operator=(const CssSummarizerBaseTest&) = delete;
 };
 
 TEST_F(CssSummarizerBaseTest, BasicOperation) {

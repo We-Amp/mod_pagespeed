@@ -64,7 +64,8 @@ class MeasurementProxyUrlNamer : public UrlNamer {
   GoogleString top_origin_;
   GoogleString password_;
 
-  DISALLOW_COPY_AND_ASSIGN(MeasurementProxyUrlNamer);
+  MeasurementProxyUrlNamer(const MeasurementProxyUrlNamer&) = delete;
+  MeasurementProxyUrlNamer& operator=(const MeasurementProxyUrlNamer&) = delete;
 };
 
 }  // namespace net_instaweb

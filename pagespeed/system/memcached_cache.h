@@ -107,7 +107,8 @@ class MemcachedCache : public CacheInterface {
   MessageHandler* message_handler_;
   Variable* last_error_;
 
-  DISALLOW_COPY_AND_ASSIGN(MemcachedCache);
+  MemcachedCache(const MemcachedCache&) = delete;
+  MemcachedCache& operator=(const MemcachedCache&) = delete;
 };
 
 }  // namespace net_instaweb

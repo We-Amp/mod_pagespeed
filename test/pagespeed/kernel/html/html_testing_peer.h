@@ -55,7 +55,8 @@ class HtmlTestingPeer {
   }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(HtmlTestingPeer);
+  HtmlTestingPeer(const HtmlTestingPeer&) = delete;
+  HtmlTestingPeer& operator=(const HtmlTestingPeer&) = delete;
 };
 
 }  // namespace net_instaweb

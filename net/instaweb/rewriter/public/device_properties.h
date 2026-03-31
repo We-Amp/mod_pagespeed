@@ -113,7 +113,8 @@ class DeviceProperties {
   mutable UserAgentMatcher::DeviceType device_type_;
   mutable LazyBool has_via_header_;
 
-  DISALLOW_COPY_AND_ASSIGN(DeviceProperties);
+  DeviceProperties(const DeviceProperties&) = delete;
+  DeviceProperties& operator=(const DeviceProperties&) = delete;
 };
 
 }  // namespace net_instaweb

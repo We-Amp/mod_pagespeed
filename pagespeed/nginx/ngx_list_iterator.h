@@ -45,7 +45,8 @@ class NgxListIterator {
   ngx_list_part_t* part_;
   ngx_uint_t index_within_part_;
 
-  DISALLOW_COPY_AND_ASSIGN(NgxListIterator);
+  NgxListIterator(const NgxListIterator&) = delete;
+  NgxListIterator& operator=(const NgxListIterator&) = delete;
 };
 
 }  // namespace net_instaweb

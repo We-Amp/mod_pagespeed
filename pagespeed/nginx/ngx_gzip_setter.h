@@ -117,7 +117,8 @@ class NgxGZipSetter {
   bool enabled() { return enabled_; }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(NgxGZipSetter);
+  NgxGZipSetter(const NgxGZipSetter&) = delete;
+  NgxGZipSetter& operator=(const NgxGZipSetter&) = delete;
 };
 
 extern NgxGZipSetter g_gzip_setter;

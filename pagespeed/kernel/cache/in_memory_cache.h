@@ -57,7 +57,8 @@ class InMemoryCache : public CacheInterface {
 
   bool is_shut_down_;
 
-  DISALLOW_COPY_AND_ASSIGN(InMemoryCache);
+  InMemoryCache(const InMemoryCache&) = delete;
+  InMemoryCache& operator=(const InMemoryCache&) = delete;
 };
 
 }  // namespace net_instaweb

@@ -50,7 +50,8 @@ class StdId : public ThreadSystem::ThreadId {
  private:
   std::thread::id id_;
 
-  DISALLOW_COPY_AND_ASSIGN(StdId);
+  StdId(const StdId&) = delete;
+  StdId& operator=(const StdId&) = delete;
 };
 
 }  // namespace
@@ -103,7 +104,8 @@ class StdThreadImpl : public ThreadSystem::ThreadImpl {
   ThreadSystem::ThreadFlags flags_;
   std::thread thread_;
 
-  DISALLOW_COPY_AND_ASSIGN(StdThreadImpl);
+  StdThreadImpl(const StdThreadImpl&) = delete;
+  StdThreadImpl& operator=(const StdThreadImpl&) = delete;
 };
 
 StdThreadSystem::StdThreadSystem() {}

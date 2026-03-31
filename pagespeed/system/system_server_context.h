@@ -262,7 +262,8 @@ class SystemServerContext : public ServerContext {
 
   SystemCachePath* cache_path_;
 
-  DISALLOW_COPY_AND_ASSIGN(SystemServerContext);
+  SystemServerContext(const SystemServerContext&) = delete;
+  SystemServerContext& operator=(const SystemServerContext&) = delete;
 };
 
 }  // namespace net_instaweb

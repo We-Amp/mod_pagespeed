@@ -43,7 +43,8 @@ class Writer {
   virtual bool Dump(Writer* writer, MessageHandler* message_handler);
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(Writer);
+  Writer(const Writer&) = delete;
+  Writer& operator=(const Writer&) = delete;
 };
 
 }  // namespace net_instaweb

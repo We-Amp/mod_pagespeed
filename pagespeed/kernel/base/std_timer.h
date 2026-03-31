@@ -36,7 +36,8 @@ class StdTimer : public Timer {
   void SleepUs(int64 us) override;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(StdTimer);
+  StdTimer(const StdTimer&) = delete;
+  StdTimer& operator=(const StdTimer&) = delete;
 };
 
 }  // namespace net_instaweb

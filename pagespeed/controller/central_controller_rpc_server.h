@@ -27,7 +27,7 @@
 #include "pagespeed/controller/schedule_rewrite_controller.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/string.h"
-#include "pagespeed/kernel/util/grpc.h"
+#include "pagespeed/controller/grpc.h"
 #include "pagespeed/system/controller_process.h"
 
 namespace net_instaweb {
@@ -65,7 +65,8 @@ class CentralControllerRpcServer : public ControllerProcess {
   std::unique_ptr<ScheduleRewriteController> rewrite_controller_;
   MessageHandler* handler_;
 
-  DISALLOW_COPY_AND_ASSIGN(CentralControllerRpcServer);
+  CentralControllerRpcServer(const CentralControllerRpcServer&) = delete;
+  CentralControllerRpcServer& operator=(const CentralControllerRpcServer&) = delete;
 };
 
 }  // namespace net_instaweb

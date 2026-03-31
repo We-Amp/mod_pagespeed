@@ -42,7 +42,8 @@ class CharsetUtilTest : public testing::Test {
   }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(CharsetUtilTest);
+  CharsetUtilTest(const CharsetUtilTest&) = delete;
+  CharsetUtilTest& operator=(const CharsetUtilTest&) = delete;
 };
 
 TEST_F(CharsetUtilTest, ProperBom) {

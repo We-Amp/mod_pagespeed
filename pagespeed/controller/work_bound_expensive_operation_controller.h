@@ -55,7 +55,8 @@ class WorkBoundExpensiveOperationController
   const int bound_;
   UpDownCounter* counter_;
 
-  DISALLOW_COPY_AND_ASSIGN(WorkBoundExpensiveOperationController);
+  WorkBoundExpensiveOperationController(const WorkBoundExpensiveOperationController&) = delete;
+  WorkBoundExpensiveOperationController& operator=(const WorkBoundExpensiveOperationController&) = delete;
 };
 
 }  // namespace net_instaweb

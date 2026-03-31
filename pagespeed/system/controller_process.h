@@ -63,7 +63,8 @@ class ControllerProcess {
   virtual void Stop() = 0;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(ControllerProcess);
+  ControllerProcess(const ControllerProcess&) = delete;
+  ControllerProcess& operator=(const ControllerProcess&) = delete;
 };
 
 }  // namespace net_instaweb

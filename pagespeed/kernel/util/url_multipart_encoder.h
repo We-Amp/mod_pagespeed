@@ -57,7 +57,8 @@ class UrlMultipartEncoder : public UrlSegmentEncoder {
  private:
   StringVector urls_;
 
-  DISALLOW_COPY_AND_ASSIGN(UrlMultipartEncoder);
+  UrlMultipartEncoder(const UrlMultipartEncoder&) = delete;
+  UrlMultipartEncoder& operator=(const UrlMultipartEncoder&) = delete;
 };
 
 }  // namespace net_instaweb

@@ -104,7 +104,8 @@ class ScriptLine : public RefCounted<ScriptLine> {
   RewriteOptions::OptionScope scope_;
   std::vector<ScriptArgIndex*> data_;
 
-  DISALLOW_COPY_AND_ASSIGN(ScriptLine);
+  ScriptLine(const ScriptLine&) = delete;
+  ScriptLine& operator=(const ScriptLine&) = delete;
 };
 
 class NgxRewriteOptions : public SystemRewriteOptions {
@@ -243,7 +244,8 @@ class NgxRewriteOptions : public SystemRewriteOptions {
 
   // TODO(jefftk): support fetch proxy in server and location blocks.
 
-  DISALLOW_COPY_AND_ASSIGN(NgxRewriteOptions);
+  NgxRewriteOptions(const NgxRewriteOptions&) = delete;
+  NgxRewriteOptions& operator=(const NgxRewriteOptions&) = delete;
 };
 
 }  // namespace net_instaweb

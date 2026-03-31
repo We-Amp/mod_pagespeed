@@ -81,7 +81,8 @@ class CurlFetch : public PoolElement<CurlFetch> {
   int64 fetch_start_ms_;
   int64 fetch_end_ms_;
 
-  DISALLOW_COPY_AND_ASSIGN(CurlFetch);
+  CurlFetch(const CurlFetch&) = delete;
+  CurlFetch& operator=(const CurlFetch&) = delete;
 };
 
 }  // namespace net_instaweb

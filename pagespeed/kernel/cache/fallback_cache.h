@@ -89,7 +89,8 @@ class FallbackCache : public CacheInterface {
   bool account_for_key_size_;
   MessageHandler* message_handler_;
 
-  DISALLOW_COPY_AND_ASSIGN(FallbackCache);
+  FallbackCache(const FallbackCache&) = delete;
+  FallbackCache& operator=(const FallbackCache&) = delete;
 };
 
 }  // namespace net_instaweb

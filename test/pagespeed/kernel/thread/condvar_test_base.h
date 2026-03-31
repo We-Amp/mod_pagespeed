@@ -20,6 +20,8 @@
 #ifndef PAGESPEED_KERNEL_THREAD_CONDVAR_TEST_BASE_H_
 #define PAGESPEED_KERNEL_THREAD_CONDVAR_TEST_BASE_H_
 
+#include <chrono>
+
 #include "base/logging.h"
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/basictypes.h"
@@ -168,16 +170,20 @@ class CondvarTestBase : public testing::Test {
   void LongTimeoutTest(int wait_ms) {
     iters_ = 0;
     StartHelper();
-    int64 start_ms = timer()->NowMs();
+    // Use steady_clock (monotonic) to match the clock domain that
+    // std::condition_variable::wait_for uses internally, avoiding
+    // flakes from system_clock NTP adjustments under sanitizer load.
+    auto start = std::chrono::steady_clock::now();
     {
       ScopedMutex lock(mutex_);
       condvar_->TimedWait(wait_ms);
     }
-    int64 end_ms = timer()->NowMs();
-
+    auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                          std::chrono::steady_clock::now() - start)
+                          .count();
     // This test should not be flaky even if it runs slowly, as we are
     // not placing an *upper* bound on the lock duration.
-    EXPECT_LE(wait_ms, end_ms - start_ms);
+    EXPECT_LE(wait_ms, elapsed_ms);
     FinishHelper();
   }
 
@@ -225,7 +231,8 @@ class CondvarTestBase : public testing::Test {
   bool init_called_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(CondvarTestBase);
+  CondvarTestBase(const CondvarTestBase&) = delete;
+  CondvarTestBase& operator=(const CondvarTestBase&) = delete;
 };
 
 }  // namespace net_instaweb

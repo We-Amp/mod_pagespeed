@@ -211,7 +211,8 @@ class ResourceSlot : public RefCounted<ResourceSlot> {
   // slot, to help us build a dependency graph between ResourceContexts.
   VectorDeque<RewriteContext*> contexts_;
 
-  DISALLOW_COPY_AND_ASSIGN(ResourceSlot);
+  ResourceSlot(const ResourceSlot&) = delete;
+  ResourceSlot& operator=(const ResourceSlot&) = delete;
 };
 
 // A dummy slot used in various cases where Rendering will be performed in
@@ -230,7 +231,8 @@ class NullResourceSlot : public ResourceSlot {
  private:
   GoogleString location_;
 
-  DISALLOW_COPY_AND_ASSIGN(NullResourceSlot);
+  NullResourceSlot(const NullResourceSlot&) = delete;
+  NullResourceSlot& operator=(const NullResourceSlot&) = delete;
 };
 
 // A resource-slot created for a Fetch has an empty Render method -- Render
@@ -248,7 +250,8 @@ class FetchResourceSlot : public ResourceSlot {
   ~FetchResourceSlot() override;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(FetchResourceSlot);
+  FetchResourceSlot(const FetchResourceSlot&) = delete;
+  FetchResourceSlot& operator=(const FetchResourceSlot&) = delete;
 };
 
 class HtmlResourceSlot : public ResourceSlot {
@@ -281,7 +284,8 @@ class HtmlResourceSlot : public ResourceSlot {
   int begin_line_number_;
   int end_line_number_;
 
-  DISALLOW_COPY_AND_ASSIGN(HtmlResourceSlot);
+  HtmlResourceSlot(const HtmlResourceSlot&) = delete;
+  HtmlResourceSlot& operator=(const HtmlResourceSlot&) = delete;
 };
 
 class HtmlResourceSlotComparator {

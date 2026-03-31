@@ -27,7 +27,7 @@
 #include "pagespeed/kernel/base/basictypes.h"
 
 #ifdef _WIN32
-#include "pagespeed/kernel/thread/std_thread_system.h"
+#include "pagespeed/kernel/thread/win_thread_system.h"
 #else
 #include "pagespeed/kernel/thread/pthread_thread_system.h"
 #endif
@@ -38,7 +38,7 @@ namespace net_instaweb {
 
 // Windows: No fork() or signal masking needed; thin wrapper around
 // StdThreadSystem.
-class SystemThreadSystem : public StdThreadSystem {
+class SystemThreadSystem : public WinThreadSystem {
  public:
   SystemThreadSystem() {}
   ~SystemThreadSystem() override {}
@@ -46,7 +46,8 @@ class SystemThreadSystem : public StdThreadSystem {
   void PermitThreadStarting() {}
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(SystemThreadSystem);
+  SystemThreadSystem(const SystemThreadSystem&) = delete;
+  SystemThreadSystem& operator=(const SystemThreadSystem&) = delete;
 };
 
 #else  // !_WIN32
@@ -68,7 +69,8 @@ class SystemThreadSystem : public PthreadThreadSystem {
  private:
   bool may_start_threads_;
 
-  DISALLOW_COPY_AND_ASSIGN(SystemThreadSystem);
+  SystemThreadSystem(const SystemThreadSystem&) = delete;
+  SystemThreadSystem& operator=(const SystemThreadSystem&) = delete;
 };
 
 #endif  // _WIN32

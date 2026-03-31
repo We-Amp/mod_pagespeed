@@ -35,7 +35,7 @@
 #include "pagespeed/kernel/base/thread_annotations.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/base/timer.h"
-#include "pagespeed/kernel/util/grpc.h"
+#include "pagespeed/controller/grpc.h"
 
 namespace net_instaweb {
 
@@ -112,7 +112,8 @@ class CentralControllerRpcClient : public CentralController {
   // This must be last so that it's destructed first.
   std::unique_ptr<GrpcClientThread> client_thread_ GUARDED_BY(mutex_);
 
-  DISALLOW_COPY_AND_ASSIGN(CentralControllerRpcClient);
+  CentralControllerRpcClient(const CentralControllerRpcClient&) = delete;
+  CentralControllerRpcClient& operator=(const CentralControllerRpcClient&) = delete;
 };
 
 }  // namespace net_instaweb

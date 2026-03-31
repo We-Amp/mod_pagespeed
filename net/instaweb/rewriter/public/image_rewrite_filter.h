@@ -367,7 +367,8 @@ class ImageRewriteFilter : public RewriteFilter {
   // Used to figure out which RenderDone() call is the last one.
   bool saw_end_document_;
 
-  DISALLOW_COPY_AND_ASSIGN(ImageRewriteFilter);
+  ImageRewriteFilter(const ImageRewriteFilter&) = delete;
+  ImageRewriteFilter& operator=(const ImageRewriteFilter&) = delete;
 };
 
 }  // namespace net_instaweb

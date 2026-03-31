@@ -61,7 +61,8 @@ class JsonWriter : public Writer {
   GoogleString buffer_;
   const std::vector<ElementJsonPair>* element_json_stack_;
 
-  DISALLOW_COPY_AND_ASSIGN(JsonWriter);
+  JsonWriter(const JsonWriter&) = delete;
+  JsonWriter& operator=(const JsonWriter&) = delete;
 };
 
 }  // namespace net_instaweb

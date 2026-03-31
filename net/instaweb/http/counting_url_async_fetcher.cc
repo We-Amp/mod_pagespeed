@@ -60,7 +60,8 @@ class CountingUrlAsyncFetcher::CountingFetch : public SharedAsyncFetch {
  private:
   CountingUrlAsyncFetcher* counter_;
 
-  DISALLOW_COPY_AND_ASSIGN(CountingFetch);
+  CountingFetch(const CountingFetch&) = delete;
+  CountingFetch& operator=(const CountingFetch&) = delete;
 };
 
 CountingUrlAsyncFetcher::~CountingUrlAsyncFetcher() {}

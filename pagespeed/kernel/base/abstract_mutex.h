@@ -63,7 +63,8 @@ class SCOPED_LOCKABLE ScopedMutex {
  private:
   AbstractMutex* mutex_;
 
-  DISALLOW_COPY_AND_ASSIGN(ScopedMutex);
+  ScopedMutex(const ScopedMutex&) = delete;
+  ScopedMutex& operator=(const ScopedMutex&) = delete;
 };
 // Catch bug where variable name is omitted with ScopedMutex, e.g.
 // ScopedMutex(&mu);

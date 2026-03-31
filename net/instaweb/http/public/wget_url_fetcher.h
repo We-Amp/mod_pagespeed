@@ -41,7 +41,8 @@ class WgetUrlFetcher : public ExternalUrlFetcher {
       const StringVector& escaped_headers) override;
   const char* GetFetchLabel() override;
 
-  DISALLOW_COPY_AND_ASSIGN(WgetUrlFetcher);
+  WgetUrlFetcher(const WgetUrlFetcher&) = delete;
+  WgetUrlFetcher& operator=(const WgetUrlFetcher&) = delete;
 };
 
 }  // namespace net_instaweb

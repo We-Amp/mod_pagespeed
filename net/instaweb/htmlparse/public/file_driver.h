@@ -70,7 +70,8 @@ class FileDriver {
   FileSystem* file_system_;
   int flush_byte_count_;
 
-  DISALLOW_COPY_AND_ASSIGN(FileDriver);
+  FileDriver(const FileDriver&) = delete;
+  FileDriver& operator=(const FileDriver&) = delete;
 };
 
 }  // namespace net_instaweb

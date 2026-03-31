@@ -187,7 +187,8 @@ class NgxBaseFetch : public AsyncFetch {
   bool detached_;
   bool suppress_;
 
-  DISALLOW_COPY_AND_ASSIGN(NgxBaseFetch);
+  NgxBaseFetch(const NgxBaseFetch&) = delete;
+  NgxBaseFetch& operator=(const NgxBaseFetch&) = delete;
 };
 
 }  // namespace net_instaweb

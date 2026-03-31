@@ -41,36 +41,61 @@ namespace net_instaweb {
 
 namespace {
 
-// Verify alignment requirements at compile time.
-static_assert(alignof(CRITICAL_SECTION) <= 16,
-              "CRITICAL_SECTION alignment requirement changed");
+// Magic number to verify mutex slot is initialized.
+constexpr uint32_t kMutexSlotMagic = 0xDEADBEEF;
 
-// Wrapper around a CRITICAL_SECTION in shared memory.
-// Unlike std::mutex, CRITICAL_SECTION can be used in shared memory
-// across processes when properly initialized.
-class WindowsSharedMemMutex : public AbstractMutex {
+// Verify structure size at compile time.
+static_assert(sizeof(WindowsMutexSlot) == 16,
+              "WindowsMutexSlot should be 16 bytes for alignment");
+static_assert(alignof(WindowsMutexSlot) <= 8,
+              "WindowsMutexSlot alignment should not exceed 8 bytes");
+
+// Wrapper around a Windows Named Mutex for cross-process synchronization.
+// Named Mutexes are kernel objects that work correctly across processes,
+// unlike CRITICAL_SECTION which only works within a single process.
+class WindowsNamedMutex : public AbstractMutex {
  public:
-  explicit WindowsSharedMemMutex(CRITICAL_SECTION* cs) : cs_(cs) {}
-  ~WindowsSharedMemMutex() override {}
+  // Takes ownership of the mutex handle.
+  explicit WindowsNamedMutex(HANDLE mutex_handle)
+      : mutex_handle_(mutex_handle) {
+    DCHECK(mutex_handle_ != nullptr);
+  }
 
-  bool TryLock() override { return TryEnterCriticalSection(cs_) != 0; }
+  ~WindowsNamedMutex() override {
+    if (mutex_handle_ != nullptr) {
+      CloseHandle(mutex_handle_);
+      mutex_handle_ = nullptr;
+    }
+  }
 
-  void Lock() override { EnterCriticalSection(cs_); }
+  bool TryLock() override {
+    DWORD result = WaitForSingleObject(mutex_handle_, 0);
+    return result == WAIT_OBJECT_0;
+  }
 
-  void Unlock() override { LeaveCriticalSection(cs_); }
+  void Lock() override {
+    DWORD result = WaitForSingleObject(mutex_handle_, INFINITE);
+    // WAIT_ABANDONED means we got the mutex but the previous owner died
+    // without releasing it. We still own it now, so treat as success.
+    DCHECK(result == WAIT_OBJECT_0 || result == WAIT_ABANDONED);
+  }
+
+  void Unlock() override { ReleaseMutex(mutex_handle_); }
 
  private:
-  CRITICAL_SECTION* cs_;
+  HANDLE mutex_handle_;
 
-  DISALLOW_COPY_AND_ASSIGN(WindowsSharedMemMutex);
+  WindowsNamedMutex(const WindowsNamedMutex&) = delete;
+  WindowsNamedMutex& operator=(const WindowsNamedMutex&) = delete;
 };
 
 // Represents a view into a shared memory segment.
 class WindowsSharedMemSegment : public AbstractSharedMemSegment {
  public:
-  // Takes ownership of the mapped view but not the file mapping handle.
-  WindowsSharedMemSegment(char* base, size_t size)
-      : base_(base), size_(size) {}
+  // Takes ownership of the mapped view. Does not own the segment name.
+  WindowsSharedMemSegment(char* base, size_t size,
+                          const GoogleString& segment_name)
+      : base_(base), size_(size), segment_name_(segment_name) {}
 
   ~WindowsSharedMemSegment() override {
     if (base_ != nullptr) {
@@ -82,51 +107,114 @@ class WindowsSharedMemSegment : public AbstractSharedMemSegment {
   volatile char* Base() override { return base_; }
 
   size_t SharedMutexSize() const override {
-    // Round up CRITICAL_SECTION size to maintain 16-byte alignment.
-    // CRITICAL_SECTION is 40 bytes on x64, so we round to 48.
-    return AlignOffset(sizeof(CRITICAL_SECTION), 16);
+    // We store a MutexSlot structure in the shared memory, which contains
+    // the information needed to open the corresponding named mutex.
+    // The actual mutex is a kernel object, not stored in shared memory.
+    return sizeof(WindowsMutexSlot);
   }
 
   bool InitializeSharedMutex(size_t offset, MessageHandler* handler) override {
-    // Verify alignment
-    char* mutex_addr = base_ + offset;
-    if (!IsMutexAligned(mutex_addr)) {
+    // Verify offset is within bounds
+    if (offset + sizeof(WindowsMutexSlot) > size_) {
       handler->Message(kError,
-                       "CRITICAL_SECTION at offset %zu is not 16-byte aligned. "
-                       "Address: %p",
-                       offset, static_cast<void*>(mutex_addr));
+                       "InitializeSharedMutex: offset %zu + slot size %zu "
+                       "exceeds segment size %zu",
+                       offset, sizeof(WindowsMutexSlot), size_);
       return false;
     }
 
-    CRITICAL_SECTION* cs = reinterpret_cast<CRITICAL_SECTION*>(mutex_addr);
+    // Get the mutex slot in shared memory
+    WindowsMutexSlot* slot =
+        reinterpret_cast<WindowsMutexSlot*>(base_ + offset);
 
-    // Initialize the critical section.
-    // Note: For cross-process sharing, we'd typically need to use
-    // InitializeCriticalSectionAndSpinCount or a named mutex.
-    // CRITICAL_SECTION alone only works within a single process.
-    // For true cross-process support, consider using named mutexes.
-    if (!InitializeCriticalSectionAndSpinCount(cs, 4000)) {
+    // Generate a unique mutex name based on segment name and offset
+    GoogleString mutex_name = GenerateMutexName(offset);
+
+    // Create the named mutex
+    // Using NULL security attributes means the mutex can be accessed by
+    // any process running under the same user account.
+    HANDLE mutex_handle =
+        CreateMutexA(nullptr,   // Default security
+                     FALSE,     // Not initially owned
+                     mutex_name.c_str());
+
+    if (mutex_handle == nullptr) {
       DWORD error = GetLastError();
       handler->Message(kError,
-                       "InitializeCriticalSectionAndSpinCount failed with "
-                       "error %lu",
-                       error);
+                       "CreateMutex failed for '%s' with error %lu",
+                       mutex_name.c_str(), error);
       return false;
     }
+
+    // Check if mutex already existed (this shouldn't happen for initialize)
+    if (GetLastError() == ERROR_ALREADY_EXISTS) {
+      handler->Message(kWarning,
+                       "Named mutex '%s' already existed during initialize",
+                       mutex_name.c_str());
+      // This is ok - we'll use the existing mutex
+    }
+
+    // Note: We intentionally keep one handle open so the named mutex kernel
+    // object persists until the segment is destroyed. Without this, the mutex
+    // could be destroyed between InitializeSharedMutex and AttachToSharedMutex
+    // if no handles are open, causing a race condition.
+    // The handle is leaked intentionally; the mutex is cleaned up when the
+    // process exits or the segment is destroyed.
+
+    // Write the slot info to shared memory
+    slot->magic = kMutexSlotMagic;
+    slot->mutex_id = static_cast<uint32_t>(offset);  // Use offset as ID
+    slot->padding = 0;
 
     return true;
   }
 
   AbstractMutex* AttachToSharedMutex(size_t offset) override {
-    CRITICAL_SECTION* cs = reinterpret_cast<CRITICAL_SECTION*>(base_ + offset);
-    return new WindowsSharedMemMutex(cs);
+    // Verify the slot has been initialized
+    WindowsMutexSlot* slot =
+        reinterpret_cast<WindowsMutexSlot*>(base_ + offset);
+
+    if (slot->magic != kMutexSlotMagic) {
+      LOG(ERROR) << "AttachToSharedMutex: slot at offset " << offset
+                 << " not initialized (magic=" << std::hex << slot->magic
+                 << ", expected=" << kMutexSlotMagic << ")";
+      return nullptr;
+    }
+
+    // Generate the mutex name from segment name and offset
+    GoogleString mutex_name = GenerateMutexName(offset);
+
+    // Use CreateMutexA which either creates a new mutex or opens an existing
+    // one. This is more robust than OpenMutexA because it handles the case
+    // where the mutex kernel object was destroyed (all handles closed).
+    HANDLE mutex_handle =
+        CreateMutexA(nullptr, FALSE, mutex_name.c_str());
+
+    if (mutex_handle == nullptr) {
+      LOG(ERROR) << "Failed to create/open mutex '" << mutex_name
+                 << "' with error " << GetLastError();
+      return nullptr;
+    }
+
+    return new WindowsNamedMutex(mutex_handle);
   }
 
  private:
+  // Generates a unique name for a mutex at the given offset.
+  // Format: "Local\PageSpeed_mutex_{segment_name}_{offset}"
+  // Using "Local\" prefix means the mutex is per-session (which is what
+  // we want for IIS worker processes in the same app pool).
+  GoogleString GenerateMutexName(size_t offset) const {
+    return StrCat("Local\\PageSpeed_mutex_", segment_name_, "_",
+                  IntegerToString(offset));
+  }
+
   char* base_;
   size_t size_;
+  GoogleString segment_name_;
 
-  DISALLOW_COPY_AND_ASSIGN(WindowsSharedMemSegment);
+  WindowsSharedMemSegment(const WindowsSharedMemSegment&) = delete;
+  WindowsSharedMemSegment& operator=(const WindowsSharedMemSegment&) = delete;
 };
 
 }  // namespace
@@ -142,7 +230,10 @@ struct WindowsSharedMem::SegmentInfo {
 
 size_t WindowsSharedMem::s_instance_count_ = 0;
 
-WindowsSharedMem::WindowsSharedMem() { instance_number_ = ++s_instance_count_; }
+WindowsSharedMem::WindowsSharedMem() : next_mutex_id_(0) {
+  instance_number_ = ++s_instance_count_;
+  instance_prefix_ = StrCat("ps", IntegerToString(instance_number_), "_");
+}
 
 WindowsSharedMem::~WindowsSharedMem() {
   // Clean up any remaining segments.
@@ -160,13 +251,31 @@ WindowsSharedMem::~WindowsSharedMem() {
 }
 
 size_t WindowsSharedMem::SharedMutexSize() const {
-  // Round up to 16-byte boundary for alignment.
-  return AlignOffset(sizeof(CRITICAL_SECTION), 16);
+  // Size of the MutexSlot structure stored in shared memory.
+  // The actual mutex is a kernel object (named mutex).
+  return sizeof(WindowsMutexSlot);
+}
+
+// Sanitize a string for use in a Windows named object name.
+// After the "Local\" namespace prefix, backslashes are treated as namespace
+// separators and colons/spaces/slashes are invalid.  Replace them all with
+// underscores so the name is unique but safe.
+static GoogleString SanitizeObjectName(const GoogleString& raw) {
+  GoogleString out = raw;
+  for (size_t i = 0; i < out.size(); ++i) {
+    char c = out[i];
+    if (c == '\\' || c == '/' || c == ':' || c == ' ') {
+      out[i] = '_';
+    }
+  }
+  return out;
 }
 
 GoogleString WindowsSharedMem::PrefixSegmentName(const GoogleString& name) {
+  // Use Local\ prefix for session-local shared memory (works within IIS app
+  // pool). Combine instance number and sanitized name for uniqueness.
   return StrCat("Local\\PageSpeed_", IntegerToString(instance_number_), "_",
-                name);
+                SanitizeObjectName(name));
 }
 
 AbstractSharedMemSegment* WindowsSharedMem::CreateSegment(
@@ -175,12 +284,12 @@ AbstractSharedMemSegment* WindowsSharedMem::CreateSegment(
 
   // Create a file mapping object backed by the paging file.
   HANDLE file_mapping = CreateFileMappingA(
-      INVALID_HANDLE_VALUE,  // Use paging file
-      nullptr,               // Default security
-      PAGE_READWRITE,        // Read/write access
-      static_cast<DWORD>(size >> 32),  // High-order DWORD of size
-      static_cast<DWORD>(size),        // Low-order DWORD of size
-      prefixed_name.c_str());          // Name of mapping object
+      INVALID_HANDLE_VALUE,           // Use paging file
+      nullptr,                        // Default security
+      PAGE_READWRITE,                 // Read/write access
+      static_cast<DWORD>(size >> 32), // High-order DWORD of size
+      static_cast<DWORD>(size),       // Low-order DWORD of size
+      prefixed_name.c_str());         // Name of mapping object
 
   if (file_mapping == nullptr) {
     DWORD error = GetLastError();
@@ -188,6 +297,13 @@ AbstractSharedMemSegment* WindowsSharedMem::CreateSegment(
                      "CreateFileMapping failed for segment '%s' with error %lu",
                      prefixed_name.c_str(), error);
     return nullptr;
+  }
+
+  bool already_exists = (GetLastError() == ERROR_ALREADY_EXISTS);
+  if (already_exists) {
+    handler->Message(kWarning,
+                     "Shared memory segment '%s' already exists, reusing",
+                     prefixed_name.c_str());
   }
 
   // Map the view of the file.
@@ -203,7 +319,10 @@ AbstractSharedMemSegment* WindowsSharedMem::CreateSegment(
     return nullptr;
   }
 
-  // Zero-initialize the memory.
+  // Always zero-initialize the memory. For new segments this provides clean
+  // state; for existing segments this ensures predictable behavior when
+  // CreateSegment is called multiple times (matching POSIX semantics where
+  // shmget + IPC_CREAT returns zeroed memory).
   memset(base, 0, size);
 
   // Store segment info.
@@ -212,7 +331,7 @@ AbstractSharedMemSegment* WindowsSharedMem::CreateSegment(
   info->base = base;
   info->size = size;
 
-  // Check for existing segment with same name.
+  // Check for existing segment with same name in our local map.
   auto it = segments_.find(prefixed_name);
   if (it != segments_.end()) {
     handler->Message(kWarning,
@@ -229,7 +348,11 @@ AbstractSharedMemSegment* WindowsSharedMem::CreateSegment(
 
   segments_[prefixed_name] = info;
 
-  return new WindowsSharedMemSegment(base, size);
+  // Return segment with a simplified name for mutex naming (without Local\
+  // prefix).  Sanitize so mutex names are also valid Windows object names.
+  GoogleString simple_name =
+      SanitizeObjectName(StrCat(IntegerToString(instance_number_), "_", name));
+  return new WindowsSharedMemSegment(base, size, simple_name);
 }
 
 AbstractSharedMemSegment* WindowsSharedMem::AttachToSegment(
@@ -258,7 +381,9 @@ AbstractSharedMemSegment* WindowsSharedMem::AttachToSegment(
                        prefixed_name.c_str(), error);
       return nullptr;
     }
-    return new WindowsSharedMemSegment(base, size);
+    GoogleString simple_name =
+        SanitizeObjectName(StrCat(IntegerToString(instance_number_), "_", name));
+    return new WindowsSharedMemSegment(base, size, simple_name);
   }
 
   // Try to open an existing file mapping (cross-process case).
@@ -292,7 +417,9 @@ AbstractSharedMemSegment* WindowsSharedMem::AttachToSegment(
   info->size = size;
   segments_[prefixed_name] = info;
 
-  return new WindowsSharedMemSegment(base, size);
+  GoogleString simple_name =
+      SanitizeObjectName(StrCat(IntegerToString(instance_number_), "_", name));
+  return new WindowsSharedMemSegment(base, size, simple_name);
 }
 
 void WindowsSharedMem::DestroySegment(const GoogleString& name,
@@ -308,9 +435,10 @@ void WindowsSharedMem::DestroySegment(const GoogleString& name,
 
   SegmentInfo* info = it->second;
 
-  // Note: We can't truly destroy CRITICAL_SECTIONs from here since we don't
-  // know which offsets have them. The memory will be reclaimed when all
-  // handles are closed.
+  // Note: Named mutexes are automatically destroyed when all handles are
+  // closed. Since we create fresh handles in AttachToSharedMutex and close
+  // them in ~WindowsNamedMutex, the mutexes will be cleaned up as the
+  // AbstractMutex objects are deleted.
 
   if (info->base != nullptr) {
     UnmapViewOfFile(info->base);

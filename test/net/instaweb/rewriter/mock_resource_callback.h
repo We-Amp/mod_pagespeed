@@ -56,7 +56,8 @@ class MockResourceCallback : public Resource::AsyncCallback {
   bool done_;
   WorkerTestBase::SyncPoint notify_;
 
-  DISALLOW_COPY_AND_ASSIGN(MockResourceCallback);
+  MockResourceCallback(const MockResourceCallback&) = delete;
+  MockResourceCallback& operator=(const MockResourceCallback&) = delete;
 };
 
 }  // namespace net_instaweb

@@ -121,7 +121,8 @@ class AtomicInt32 {
 
  private:
   std::atomic<int32> value_;
-  DISALLOW_COPY_AND_ASSIGN(AtomicInt32);
+  AtomicInt32(const AtomicInt32&) = delete;
+  AtomicInt32& operator=(const AtomicInt32&) = delete;
 };
 
 }  // namespace net_instaweb

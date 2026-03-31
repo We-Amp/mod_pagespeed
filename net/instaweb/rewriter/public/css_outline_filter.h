@@ -68,7 +68,8 @@ class CssOutlineFilter : public CommonFilter {
   size_t size_threshold_bytes_;
   // HTML strings interned into a symbol table.
 
-  DISALLOW_COPY_AND_ASSIGN(CssOutlineFilter);
+  CssOutlineFilter(const CssOutlineFilter&) = delete;
+  CssOutlineFilter& operator=(const CssOutlineFilter&) = delete;
 };
 
 }  // namespace net_instaweb

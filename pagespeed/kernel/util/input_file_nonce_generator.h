@@ -50,7 +50,8 @@ class InputFileNonceGenerator : public NonceGenerator {
   FileSystem* file_system_;
   MessageHandler* handler_;
 
-  DISALLOW_COPY_AND_ASSIGN(InputFileNonceGenerator);
+  InputFileNonceGenerator(const InputFileNonceGenerator&) = delete;
+  InputFileNonceGenerator& operator=(const InputFileNonceGenerator&) = delete;
 };
 
 }  // namespace net_instaweb

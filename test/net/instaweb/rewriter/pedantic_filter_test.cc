@@ -37,7 +37,8 @@ class PedanticFilterTest : public HtmlParseTestBase {
  private:
   PedanticFilter pedantic_filter_;
 
-  DISALLOW_COPY_AND_ASSIGN(PedanticFilterTest);
+  PedanticFilterTest(const PedanticFilterTest&) = delete;
+  PedanticFilterTest& operator=(const PedanticFilterTest&) = delete;
 };
 
 TEST_F(PedanticFilterTest, ChangeStyleWithNoType) {

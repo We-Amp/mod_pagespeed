@@ -134,7 +134,8 @@ class ImageOptimizer {
   std::unique_ptr<ScanlineWriterConfig> writer_config_;
   bool is_valid_ = true;
 
-  DISALLOW_COPY_AND_ASSIGN(ImageOptimizer);
+  ImageOptimizer(const ImageOptimizer&) = delete;
+  ImageOptimizer& operator=(const ImageOptimizer&) = delete;
 };
 
 }  // namespace image_compression

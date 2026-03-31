@@ -782,7 +782,8 @@ class ServerContext {
 
   std::shared_ptr<CentralController> central_controller_;
 
-  DISALLOW_COPY_AND_ASSIGN(ServerContext);
+  ServerContext(const ServerContext&) = delete;
+  ServerContext& operator=(const ServerContext&) = delete;
 };
 
 }  // namespace net_instaweb

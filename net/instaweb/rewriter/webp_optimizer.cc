@@ -43,7 +43,7 @@ extern "C" {
 #ifdef USE_SYSTEM_LIBJPEG
 #include "jpeglib.h"  // NOLINT
 #else
-#include "external/libjpeg_turbo/jpeglib.h"
+#include "jpeglib.h"
 #endif
 }
 
@@ -135,7 +135,8 @@ class WebpOptimizer {
   WebpProgressHook progress_hook_;
   void* progress_hook_data_;
 
-  DISALLOW_COPY_AND_ASSIGN(WebpOptimizer);
+  WebpOptimizer(const WebpOptimizer&) = delete;
+  WebpOptimizer& operator=(const WebpOptimizer&) = delete;
 };  // class WebpOptimizer
 
 WebpOptimizer::WebpOptimizer(MessageHandler* handler)

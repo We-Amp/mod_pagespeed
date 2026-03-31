@@ -45,7 +45,8 @@ class ExpensiveOperationController {
   ExpensiveOperationController() {}
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(ExpensiveOperationController);
+  ExpensiveOperationController(const ExpensiveOperationController&) = delete;
+  ExpensiveOperationController& operator=(const ExpensiveOperationController&) = delete;
 };
 
 }  // namespace net_instaweb

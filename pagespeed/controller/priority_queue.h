@@ -99,7 +99,8 @@ class PriorityQueue {
 
   friend class PriorityQueueTest;
 
-  DISALLOW_COPY_AND_ASSIGN(PriorityQueue);
+  PriorityQueue(const PriorityQueue&) = delete;
+  PriorityQueue& operator=(const PriorityQueue&) = delete;
 };
 
 template <typename T, typename Hash, typename Equal>

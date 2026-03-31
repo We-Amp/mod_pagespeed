@@ -620,7 +620,8 @@ class NonHttpResourceCallback : public Resource::AsyncCallback {
   RecordingFetch* async_fetch_;
   MessageHandler* message_handler_;
 
-  DISALLOW_COPY_AND_ASSIGN(NonHttpResourceCallback);
+  NonHttpResourceCallback(const NonHttpResourceCallback&) = delete;
+  NonHttpResourceCallback& operator=(const NonHttpResourceCallback&) = delete;
 };
 
 }  // namespace

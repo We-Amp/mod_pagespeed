@@ -83,7 +83,8 @@ class InsertDnsPrefetchFilter : public CommonFilter {
   // Whether this user agent supports dns prefetch filter.
   bool user_agent_supports_dns_prefetch_;
 
-  DISALLOW_COPY_AND_ASSIGN(InsertDnsPrefetchFilter);
+  InsertDnsPrefetchFilter(const InsertDnsPrefetchFilter&) = delete;
+  InsertDnsPrefetchFilter& operator=(const InsertDnsPrefetchFilter&) = delete;
 };
 
 }  // namespace net_instaweb

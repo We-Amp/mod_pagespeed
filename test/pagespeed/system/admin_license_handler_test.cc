@@ -81,7 +81,8 @@ class CapturingUrlAsyncFetcher : public UrlAsyncFetcher {
   bool simulate_success_ = true;
   int fetch_count_ = 0;
 
-  DISALLOW_COPY_AND_ASSIGN(CapturingUrlAsyncFetcher);
+  CapturingUrlAsyncFetcher(const CapturingUrlAsyncFetcher&) = delete;
+  CapturingUrlAsyncFetcher& operator=(const CapturingUrlAsyncFetcher&) = delete;
 };
 
 // Generate a unique temp directory name using random suffix.

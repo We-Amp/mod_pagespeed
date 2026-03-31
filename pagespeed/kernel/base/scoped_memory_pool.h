@@ -85,7 +85,8 @@ class ScopedMemoryPool {
   size_t default_block_size_;
   size_t bytes_allocated_;
 
-  DISALLOW_COPY_AND_ASSIGN(ScopedMemoryPool);
+  ScopedMemoryPool(const ScopedMemoryPool&) = delete;
+  ScopedMemoryPool& operator=(const ScopedMemoryPool&) = delete;
 };
 
 }  // namespace net_instaweb

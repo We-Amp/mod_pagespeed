@@ -75,7 +75,8 @@ class HttpDumpUrlAsyncWriter : public UrlAsyncFetcher {
   FileSystem* file_system_;
   bool accept_gzip_;
 
-  DISALLOW_COPY_AND_ASSIGN(HttpDumpUrlAsyncWriter);
+  HttpDumpUrlAsyncWriter(const HttpDumpUrlAsyncWriter&) = delete;
+  HttpDumpUrlAsyncWriter& operator=(const HttpDumpUrlAsyncWriter&) = delete;
 };
 
 }  // namespace net_instaweb

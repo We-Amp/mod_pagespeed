@@ -131,7 +131,8 @@ class StatisticsLogger {
   GoogleString logfile_name_;
   VariableMap variables_to_log_;
 
-  DISALLOW_COPY_AND_ASSIGN(StatisticsLogger);
+  StatisticsLogger(const StatisticsLogger&) = delete;
+  StatisticsLogger& operator=(const StatisticsLogger&) = delete;
 };
 
 // Handles reading the logfile created by StatisticsLogger.
@@ -163,7 +164,8 @@ class StatisticsLogfileReader {
   // Logfile buffer.
   GoogleString buffer_;
 
-  DISALLOW_COPY_AND_ASSIGN(StatisticsLogfileReader);
+  StatisticsLogfileReader(const StatisticsLogfileReader&) = delete;
+  StatisticsLogfileReader& operator=(const StatisticsLogfileReader&) = delete;
 };
 
 }  // namespace net_instaweb

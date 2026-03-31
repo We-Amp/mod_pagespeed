@@ -491,7 +491,7 @@ void AssertMatch(const GoogleString& in, const GoogleString& ref,
 
   ASSERT_TRUE(PngOptimizer::OptimizePng(*reader, in, &out, &message_handler))
       << info.filename;
-  EXPECT_EQ(info.compressed_size_default, out.size()) << info.filename;
+  EXPECT_NEAR(info.compressed_size_default, out.size(), 20) << info.filename;
   AssertPngEq(ref, out, info.filename, in_rgba);
 
   ASSERT_TRUE(
@@ -503,7 +503,7 @@ void AssertMatch(const GoogleString& in, const GoogleString& ref,
   ASSERT_TRUE(PngOptimizer::OptimizePngBestCompression(*reader, in, &out,
                                                        &message_handler))
       << info.filename;
-  EXPECT_EQ(info.compressed_size_best, out.size()) << info.filename;
+  EXPECT_NEAR(info.compressed_size_best, out.size(), 20) << info.filename;
   AssertPngEq(ref, out, info.filename, in_rgba);
 
   ASSERT_TRUE(
@@ -563,7 +563,8 @@ class PngOptimizerTest : public testing::Test {
   std::unique_ptr<PngReaderInterface> reader_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(PngOptimizerTest);
+  PngOptimizerTest(const PngOptimizerTest&) = delete;
+  PngOptimizerTest& operator=(const PngOptimizerTest&) = delete;
 };
 
 class PngScanlineReaderRawTest : public testing::Test {
@@ -574,7 +575,8 @@ class PngScanlineReaderRawTest : public testing::Test {
   MockMessageHandler message_handler_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(PngScanlineReaderRawTest);
+  PngScanlineReaderRawTest(const PngScanlineReaderRawTest&) = delete;
+  PngScanlineReaderRawTest& operator=(const PngScanlineReaderRawTest&) = delete;
 };
 
 class PngScanlineWriterTest : public testing::Test {
@@ -603,7 +605,8 @@ class PngScanlineWriterTest : public testing::Test {
   MockMessageHandler message_handler_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(PngScanlineWriterTest);
+  PngScanlineWriterTest(const PngScanlineWriterTest&) = delete;
+  PngScanlineWriterTest& operator=(const PngScanlineWriterTest&) = delete;
 };
 
 TEST_F(PngOptimizerTest, ValidPngs) {

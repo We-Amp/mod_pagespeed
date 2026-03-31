@@ -21,6 +21,10 @@
 
 #include <grpc++/alarm.h>
 #include <sys/stat.h>
+#ifdef _WIN32
+#include <direct.h>
+#define mkdir(path, mode) _mkdir(path)
+#endif
 
 #include <memory>
 
@@ -33,7 +37,7 @@
 #include "pagespeed/kernel/base/thread.h"
 #include "pagespeed/kernel/base/thread_annotations.h"
 #include "pagespeed/kernel/base/thread_system.h"
-#include "pagespeed/kernel/util/grpc.h"
+#include "pagespeed/controller/grpc.h"
 #include "pagespeed/kernel/util/platform.h"
 
 namespace net_instaweb {
@@ -108,7 +112,8 @@ void GrpcServerTest::QueueFunctionForServerThread(Function* func) {
     Function* func_ GUARDED_BY(mutex_);
     std::unique_ptr<::grpc::Alarm> alarm_ GUARDED_BY(mutex_);
 
-    DISALLOW_COPY_AND_ASSIGN(DelayedCallFunction);
+    DelayedCallFunction(const DelayedCallFunction&) = delete;
+    DelayedCallFunction& operator=(const DelayedCallFunction&) = delete;
   };
 
   // Schedule the call. This will clean itself up.

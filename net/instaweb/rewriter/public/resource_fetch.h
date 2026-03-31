@@ -116,7 +116,8 @@ class ResourceFetch : public SharedAsyncFetch {
   int redirect_count_;
   CleanupMode cleanup_mode_;
 
-  DISALLOW_COPY_AND_ASSIGN(ResourceFetch);
+  ResourceFetch(const ResourceFetch&) = delete;
+  ResourceFetch& operator=(const ResourceFetch&) = delete;
 };
 
 }  // namespace net_instaweb

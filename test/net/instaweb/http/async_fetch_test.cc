@@ -39,7 +39,8 @@ class TestSharedAsyncFetch : public SharedAsyncFetch {
   ~TestSharedAsyncFetch() override {}
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(TestSharedAsyncFetch);
+  TestSharedAsyncFetch(const TestSharedAsyncFetch&) = delete;
+  TestSharedAsyncFetch& operator=(const TestSharedAsyncFetch&) = delete;
 };
 
 // Tests the AsyncFetch class and some of its derivations.

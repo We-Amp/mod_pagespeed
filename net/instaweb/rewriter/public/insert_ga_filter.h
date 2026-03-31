@@ -233,7 +233,8 @@ class InsertGAFilter : public CommonFilter {
   // when it gets the end element event for the script.
   GoogleString postponed_script_body_;
 
-  DISALLOW_COPY_AND_ASSIGN(InsertGAFilter);
+  InsertGAFilter(const InsertGAFilter&) = delete;
+  InsertGAFilter& operator=(const InsertGAFilter&) = delete;
 };
 
 }  // namespace net_instaweb

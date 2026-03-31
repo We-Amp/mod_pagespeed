@@ -57,7 +57,8 @@ class ReflectingTestFetcher : public UrlAsyncFetcher {
   }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(ReflectingTestFetcher);
+  ReflectingTestFetcher(const ReflectingTestFetcher&) = delete;
+  ReflectingTestFetcher& operator=(const ReflectingTestFetcher&) = delete;
 };
 
 }  // namespace net_instaweb

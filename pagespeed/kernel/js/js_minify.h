@@ -84,7 +84,8 @@ class JsMinifyingTokenizer {
   net_instaweb::source_map::Mapping current_position_;
   net_instaweb::source_map::Mapping next_position_;
 
-  DISALLOW_COPY_AND_ASSIGN(JsMinifyingTokenizer);
+  JsMinifyingTokenizer(const JsMinifyingTokenizer&) = delete;
+  JsMinifyingTokenizer& operator=(const JsMinifyingTokenizer&) = delete;
 };
 
 // Minifies the given UTF8-encoded JavaScript code; returns true if the code

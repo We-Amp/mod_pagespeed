@@ -98,7 +98,8 @@ class RewriteTestBaseProcessContext : public ProcessContext {
   }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(RewriteTestBaseProcessContext);
+  RewriteTestBaseProcessContext(const RewriteTestBaseProcessContext&) = delete;
+  RewriteTestBaseProcessContext& operator=(const RewriteTestBaseProcessContext&) = delete;
 };
 RewriteTestBaseProcessContext rewrite_test_base_process_context;
 
@@ -615,17 +616,24 @@ void RewriteTestBase::TestServeFiles(const ContentType* content_type,
   lru_cache()->Clear();
   SetResponseWithDefaultHeaders(orig_name, *content_type, orig_content,
                                 100 /* ttl in seconds */);
+  // Save the fragment before FetchResource — ClearRewriteDriver() will
+  // change it after the fetch completes, but the cache entry was stored
+  // with this fragment.
+  GoogleString fetch_fragment = rewrite_driver_->CacheFragment();
   EXPECT_TRUE(FetchResource(kTestDomain, filter_id, rewritten_name,
                             rewritten_ext, &content));
   EXPECT_EQ(rewritten_content, content);
 
-  // Now we expect the cache entry to be there.
+  // Now we expect the cache entry to be there.  Use the fragment that
+  // was active when FetchResource stored the result (ClearRewriteDriver
+  // changes the fragment after each fetch).
   if (!filter->ComputeOnTheFly() && lru_cache()->IsHealthy()) {
     HTTPValue value;
     ResponseHeaders response_headers;
     EXPECT_EQ(kFoundResult,
-              HttpBlockingFind(expected_rewritten_path, http_cache, &value,
-                               &response_headers));
+              HttpBlockingFindWithFragment(expected_rewritten_path,
+                                          fetch_fragment, http_cache, &value,
+                                          &response_headers));
   }
 }
 
@@ -779,7 +787,8 @@ class CssCollector : public EmptyHtmlFilter {
  private:
   RewriteTestBase::CssLink::Vector* css_links_;
 
-  DISALLOW_COPY_AND_ASSIGN(CssCollector);
+  CssCollector(const CssCollector&) = delete;
+  CssCollector& operator=(const CssCollector&) = delete;
 };
 
 }  // namespace
@@ -1193,6 +1202,18 @@ HTTPCache::FindResult RewriteTestBase::HttpBlockingFind(
     ResponseHeaders* headers) {
   return HttpBlockingFindWithOptions(nullptr, key, http_cache, value_out,
                                      headers);
+}
+
+HTTPCache::FindResult RewriteTestBase::HttpBlockingFindWithFragment(
+    const GoogleString& key, const GoogleString& fragment,
+    HTTPCache* http_cache, HTTPValue* value_out,
+    ResponseHeaders* headers) {
+  HttpCallback callback(CreateRequestContext());
+  callback.set_response_headers(headers);
+  http_cache->Find(key, fragment, message_handler(), &callback);
+  CHECK(callback.done());
+  value_out->Link(callback.http_value());
+  return callback.result();
 }
 
 HTTPCache::FindResult RewriteTestBase::HttpBlockingFindStatus(

@@ -40,7 +40,8 @@ class CountingWriter : public Writer {
   int byte_count_;
   Writer* writer_;
 
-  DISALLOW_COPY_AND_ASSIGN(CountingWriter);
+  CountingWriter(const CountingWriter&) = delete;
+  CountingWriter& operator=(const CountingWriter&) = delete;
 };
 
 }  // namespace net_instaweb

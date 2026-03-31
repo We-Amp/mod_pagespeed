@@ -81,7 +81,8 @@ class WriteThroughCache : public CacheInterface {
   CacheInterface* cache2_;
   size_t cache1_size_limit_;
 
-  DISALLOW_COPY_AND_ASSIGN(WriteThroughCache);
+  WriteThroughCache(const WriteThroughCache&) = delete;
+  WriteThroughCache& operator=(const WriteThroughCache&) = delete;
 };
 
 }  // namespace net_instaweb

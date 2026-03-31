@@ -201,7 +201,8 @@ class InPlaceResourceRecorder : public Writer {
   bool cache_control_set_;
   GoogleString cache_control_;
 
-  DISALLOW_COPY_AND_ASSIGN(InPlaceResourceRecorder);
+  InPlaceResourceRecorder(const InPlaceResourceRecorder&) = delete;
+  InPlaceResourceRecorder& operator=(const InPlaceResourceRecorder&) = delete;
 };
 
 }  // namespace net_instaweb

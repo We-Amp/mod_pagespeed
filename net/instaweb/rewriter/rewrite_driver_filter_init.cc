@@ -116,7 +116,8 @@ class RemoveCommentsFilterOptions
  private:
   const RewriteOptions* options_;
 
-  DISALLOW_COPY_AND_ASSIGN(RemoveCommentsFilterOptions);
+  RemoveCommentsFilterOptions(const RemoveCommentsFilterOptions&) = delete;
+  RemoveCommentsFilterOptions& operator=(const RemoveCommentsFilterOptions&) = delete;
 };
 
 }  // namespace

@@ -78,7 +78,8 @@ class UrlAsyncFetcherStats::StatsAsyncFetch : public SharedAsyncFetch {
   int64 start_time_us_;
   int64 size_;
 
-  DISALLOW_COPY_AND_ASSIGN(StatsAsyncFetch);
+  StatsAsyncFetch(const StatsAsyncFetch&) = delete;
+  StatsAsyncFetch& operator=(const StatsAsyncFetch&) = delete;
 };
 
 UrlAsyncFetcherStats::UrlAsyncFetcherStats(StringPiece prefix,

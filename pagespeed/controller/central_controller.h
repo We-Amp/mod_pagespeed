@@ -54,7 +54,8 @@ class CentralController {
   CentralController();
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(CentralController);
+  CentralController(const CentralController&) = delete;
+  CentralController& operator=(const CentralController&) = delete;
 };
 
 }  // namespace net_instaweb

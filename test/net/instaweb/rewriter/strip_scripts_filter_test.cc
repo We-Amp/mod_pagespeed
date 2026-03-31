@@ -37,7 +37,8 @@ class StripScriptsFilterTest : public HtmlParseTestBase {
  private:
   StripScriptsFilter strip_scripts_filter_;
 
-  DISALLOW_COPY_AND_ASSIGN(StripScriptsFilterTest);
+  StripScriptsFilterTest(const StripScriptsFilterTest&) = delete;
+  StripScriptsFilterTest& operator=(const StripScriptsFilterTest&) = delete;
 };
 
 TEST_F(StripScriptsFilterTest, RemoveScriptSrc) {

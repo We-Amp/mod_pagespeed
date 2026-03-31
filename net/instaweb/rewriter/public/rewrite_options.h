@@ -721,7 +721,8 @@ class RewriteOptions {
     bool safe_to_print_;  // Safe to print in debug filter output.
     int index_;
 
-    DISALLOW_COPY_AND_ASSIGN(PropertyBase);
+    PropertyBase(const PropertyBase&) = delete;
+    PropertyBase& operator=(const PropertyBase&) = delete;
   };
 
   typedef std::vector<PropertyBase*> PropertyVector;
@@ -1019,7 +1020,8 @@ class RewriteOptions {
     typedef std::vector<AlternateOriginDomainSpec> AlternateOriginDomains;
     AlternateOriginDomains alternate_origin_domains_;
 
-    DISALLOW_COPY_AND_ASSIGN(ExperimentSpec);
+    ExperimentSpec(const ExperimentSpec&) = delete;
+    ExperimentSpec& operator=(const ExperimentSpec&) = delete;
   };
 
   // Represents the content type of user-defined url-valued attributes.
@@ -3012,7 +3014,8 @@ class RewriteOptions {
     T value_;
     const Property<T>* property_;
 
-    DISALLOW_COPY_AND_ASSIGN(OptionTemplateBase);
+    OptionTemplateBase(const OptionTemplateBase&) = delete;
+    OptionTemplateBase& operator=(const OptionTemplateBase&) = delete;
   };
 
   // Subclassing OptionTemplateBase so that the conversion functions that need
@@ -3044,7 +3047,8 @@ class RewriteOptions {
     }
 
    private:
-    DISALLOW_COPY_AND_ASSIGN(Option);
+    Option(const Option&) = delete;
+    Option& operator=(const Option&) = delete;
   };
 
  protected:
@@ -3182,7 +3186,8 @@ class RewriteOptions {
    private:
     ValueType default_value_;
 
-    DISALLOW_COPY_AND_ASSIGN(Property);
+    Property(const Property&) = delete;
+    Property& operator=(const Property&) = delete;
   };
 
   // Leaf subclass of Property<ValueType>, which is templated on the class of
@@ -3225,7 +3230,8 @@ class RewriteOptions {
    private:
     OptionOffset offset_;
 
-    DISALLOW_COPY_AND_ASSIGN(PropertyLeaf);
+    PropertyLeaf(const PropertyLeaf&) = delete;
+    PropertyLeaf& operator=(const PropertyLeaf&) = delete;
   };
 
  private:
@@ -4090,7 +4096,8 @@ class RewriteOptions {
   // usage within the class implementation, however.
   std::unique_ptr<ThreadSystem::ThreadId> last_thread_id_;
 
-  DISALLOW_COPY_AND_ASSIGN(RewriteOptions);
+  RewriteOptions(const RewriteOptions&) = delete;
+  RewriteOptions& operator=(const RewriteOptions&) = delete;
 };
 
 }  // namespace net_instaweb

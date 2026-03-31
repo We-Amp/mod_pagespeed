@@ -41,7 +41,8 @@ class PurgeSetTest : public testing::Test {
   PurgeSet purge_set_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(PurgeSetTest);
+  PurgeSetTest(const PurgeSetTest&) = delete;
+  PurgeSetTest& operator=(const PurgeSetTest&) = delete;
 };
 
 TEST_F(PurgeSetTest, Empty) { EXPECT_TRUE(purge_set_.empty()); }

@@ -48,7 +48,8 @@ class UserAgentSensitiveTestFetcher : public UrlAsyncFetcher {
  private:
   UrlAsyncFetcher* base_fetcher_;
 
-  DISALLOW_COPY_AND_ASSIGN(UserAgentSensitiveTestFetcher);
+  UserAgentSensitiveTestFetcher(const UserAgentSensitiveTestFetcher&) = delete;
+  UserAgentSensitiveTestFetcher& operator=(const UserAgentSensitiveTestFetcher&) = delete;
 };
 
 }  // namespace net_instaweb

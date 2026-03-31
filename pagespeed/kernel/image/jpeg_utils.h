@@ -49,7 +49,8 @@ class JpegUtils {
 
  private:
   JpegUtils();
-  DISALLOW_COPY_AND_ASSIGN(JpegUtils);
+  JpegUtils(const JpegUtils&) = delete;
+  JpegUtils& operator=(const JpegUtils&) = delete;
 };
 
 }  // namespace image_compression

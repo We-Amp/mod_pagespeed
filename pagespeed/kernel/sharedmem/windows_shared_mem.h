@@ -18,16 +18,26 @@
  */
 
 // Windows shared memory implementation using Memory Mapped Files
-// and CRITICAL_SECTION for inter-process synchronization.
+// and Named Mutexes for inter-process synchronization.
 //
-// IMPORTANT: CRITICAL_SECTION on Windows x64 requires 16-byte alignment.
-// This implementation ensures mutexes are placed at properly aligned offsets.
+// Unlike CRITICAL_SECTION (which only works within a single process),
+// Named Mutexes are kernel objects that properly support cross-process
+// synchronization. This is essential for IIS app pool worker processes
+// that need to share cache data.
+//
+// Design:
+// - Memory mapping: CreateFileMapping/MapViewOfFile for shared memory
+// - Synchronization: Named Mutexes (CreateMutex/OpenMutex)
+//
+// The mutex slot in shared memory stores a MutexSlot structure containing:
+// - Magic number to verify initialization
+// - Unique identifier used to construct the named mutex name
 //
 // Usage:
 // - Parent process calls CreateSegment() to create shared memory
+// - InitializeSharedMutex() creates a named mutex for each slot
 // - Child processes call AttachToSegment() to map the same memory
-// - Mutexes in shared memory are initialized with InitializeSharedMutex()
-//   and attached to with AttachToSharedMutex()
+// - AttachToSharedMutex() opens the existing named mutex
 //
 // Thread Safety:
 // - Segment creation/destruction is not thread-safe
@@ -39,6 +49,7 @@
 #ifdef _WIN32
 
 #include <cstddef>
+#include <cstdint>
 #include <map>
 
 #include "pagespeed/kernel/base/abstract_shared_mem.h"
@@ -49,6 +60,17 @@ namespace net_instaweb {
 
 class MessageHandler;
 
+// Structure stored in the shared memory slot where a mutex would go.
+// This provides the information needed to create/open the named mutex.
+struct WindowsMutexSlot {
+  // Magic number to verify the slot is initialized (0xDEADBEEF)
+  uint32_t magic;
+  // Unique identifier for this mutex (derived from segment name + offset)
+  uint32_t mutex_id;
+  // Padding to ensure proper alignment for next item
+  uint64_t padding;
+};
+
 // Windows shared memory implementation using Memory Mapped Files.
 // This enables inter-process communication for the shared memory cache
 // when running as an IIS native module.
@@ -57,9 +79,9 @@ class WindowsSharedMem : public AbstractSharedMem {
   WindowsSharedMem();
   ~WindowsSharedMem() override;
 
-  // Returns the size of a mutex in shared memory.
-  // On Windows x64, CRITICAL_SECTION is 40 bytes but we round up to 48
-  // to maintain 16-byte alignment for subsequent items.
+  // Returns the size of a mutex slot in shared memory.
+  // We store a MutexSlot structure (16 bytes) which is used to
+  // identify the named mutex for cross-process access.
   size_t SharedMutexSize() const override;
 
   // Creates a new shared memory segment with the given name and size.
@@ -90,10 +112,19 @@ class WindowsSharedMem : public AbstractSharedMem {
   static size_t s_instance_count_;
   size_t instance_number_;
 
+  // Counter for generating unique mutex IDs within this instance.
+  uint32_t next_mutex_id_;
+
   // Prefixes segment name with instance number.
   GoogleString PrefixSegmentName(const GoogleString& name);
 
-  DISALLOW_COPY_AND_ASSIGN(WindowsSharedMem);
+  // Gets the prefixed name for this instance (without modifying name).
+  // Used by segment classes to generate mutex names.
+  const GoogleString& GetInstancePrefix() const { return instance_prefix_; }
+  GoogleString instance_prefix_;
+
+  WindowsSharedMem(const WindowsSharedMem&) = delete;
+  WindowsSharedMem& operator=(const WindowsSharedMem&) = delete;
 };
 
 }  // namespace net_instaweb

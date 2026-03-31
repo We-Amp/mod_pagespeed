@@ -69,7 +69,8 @@ class AmpDocumentFilter : public EmptyHtmlFilter {
   bool saw_doctype_;
   std::unique_ptr<BoolCallback> discovered_;
 
-  DISALLOW_COPY_AND_ASSIGN(AmpDocumentFilter);
+  AmpDocumentFilter(const AmpDocumentFilter&) = delete;
+  AmpDocumentFilter& operator=(const AmpDocumentFilter&) = delete;
 };
 
 }  // namespace net_instaweb

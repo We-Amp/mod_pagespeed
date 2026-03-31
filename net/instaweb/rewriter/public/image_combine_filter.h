@@ -115,7 +115,8 @@ class ImageCombineFilter : public RewriteFilter {
   Context* context_;
   UrlMultipartEncoder encoder_;
 
-  DISALLOW_COPY_AND_ASSIGN(ImageCombineFilter);
+  ImageCombineFilter(const ImageCombineFilter&) = delete;
+  ImageCombineFilter& operator=(const ImageCombineFilter&) = delete;
 };
 
 }  // namespace net_instaweb

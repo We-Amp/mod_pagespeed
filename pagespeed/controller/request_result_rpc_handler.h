@@ -25,7 +25,7 @@
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/function.h"
 #include "pagespeed/kernel/base/ref_counted_ptr.h"
-#include "pagespeed/kernel/util/grpc.h"
+#include "pagespeed/controller/grpc.h"
 
 // RpcHandler for the case there the client uses a streaming RPC to the server
 // to attempt an operation, waits for response and then calls back to let the
@@ -145,7 +145,8 @@ class RequestResultRpcHandler
   friend class NotifyClientCallback;
   friend class RequestResultRpcHandlerTest;
 
-  DISALLOW_COPY_AND_ASSIGN(RequestResultRpcHandler);
+  RequestResultRpcHandler(const RequestResultRpcHandler&) = delete;
+  RequestResultRpcHandler& operator=(const RequestResultRpcHandler&) = delete;
 };
 
 template <typename HandlerT, typename ControllerT, typename AsyncServiceT,

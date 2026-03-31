@@ -69,7 +69,8 @@ class BrotliInflater {
   std::unique_ptr<BrotliDecoderStateStruct, void (*)(BrotliDecoderStateStruct*)>
       brotli_state_;
 
-  DISALLOW_COPY_AND_ASSIGN(BrotliInflater);
+  BrotliInflater(const BrotliInflater&) = delete;
+  BrotliInflater& operator=(const BrotliInflater&) = delete;
 };
 
 }  // namespace net_instaweb

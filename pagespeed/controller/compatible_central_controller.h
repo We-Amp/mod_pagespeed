@@ -41,7 +41,8 @@ class CompatibleCentralController : public InProcessCentralController {
   ~CompatibleCentralController() override;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(CompatibleCentralController);
+  CompatibleCentralController(const CompatibleCentralController&) = delete;
+  CompatibleCentralController& operator=(const CompatibleCentralController&) = delete;
 };
 
 }  // namespace net_instaweb

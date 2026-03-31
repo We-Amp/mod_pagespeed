@@ -107,7 +107,8 @@ class CachePropertyStore : public PropertyStore {
   Timer* timer_;
   Statistics* stats_;
   ThreadSystem* thread_system_;
-  DISALLOW_COPY_AND_ASSIGN(CachePropertyStore);
+  CachePropertyStore(const CachePropertyStore&) = delete;
+  CachePropertyStore& operator=(const CachePropertyStore&) = delete;
 };
 
 }  // namespace net_instaweb

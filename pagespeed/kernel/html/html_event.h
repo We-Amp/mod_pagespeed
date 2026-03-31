@@ -54,7 +54,8 @@ class HtmlEvent {
  private:
   int line_number_;
 
-  DISALLOW_COPY_AND_ASSIGN(HtmlEvent);
+  HtmlEvent(const HtmlEvent&) = delete;
+  HtmlEvent& operator=(const HtmlEvent&) = delete;
 };
 
 class HtmlStartDocumentEvent : public HtmlEvent {
@@ -64,7 +65,8 @@ class HtmlStartDocumentEvent : public HtmlEvent {
   GoogleString ToString() const override { return "StartDocument"; }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(HtmlStartDocumentEvent);
+  HtmlStartDocumentEvent(const HtmlStartDocumentEvent&) = delete;
+  HtmlStartDocumentEvent& operator=(const HtmlStartDocumentEvent&) = delete;
 };
 
 class HtmlEndDocumentEvent : public HtmlEvent {
@@ -74,7 +76,8 @@ class HtmlEndDocumentEvent : public HtmlEvent {
   GoogleString ToString() const override { return "EndDocument"; }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(HtmlEndDocumentEvent);
+  HtmlEndDocumentEvent(const HtmlEndDocumentEvent&) = delete;
+  HtmlEndDocumentEvent& operator=(const HtmlEndDocumentEvent&) = delete;
 };
 
 class HtmlStartElementEvent : public HtmlEvent {
@@ -91,7 +94,8 @@ class HtmlStartElementEvent : public HtmlEvent {
  private:
   HtmlElement* element_;
 
-  DISALLOW_COPY_AND_ASSIGN(HtmlStartElementEvent);
+  HtmlStartElementEvent(const HtmlStartElementEvent&) = delete;
+  HtmlStartElementEvent& operator=(const HtmlStartElementEvent&) = delete;
 };
 
 class HtmlEndElementEvent : public HtmlEvent {
@@ -108,7 +112,8 @@ class HtmlEndElementEvent : public HtmlEvent {
  private:
   HtmlElement* element_;
 
-  DISALLOW_COPY_AND_ASSIGN(HtmlEndElementEvent);
+  HtmlEndElementEvent(const HtmlEndElementEvent&) = delete;
+  HtmlEndElementEvent& operator=(const HtmlEndElementEvent&) = delete;
 };
 
 class HtmlLeafNodeEvent : public HtmlEvent {
@@ -117,7 +122,8 @@ class HtmlLeafNodeEvent : public HtmlEvent {
   HtmlNode* GetNode() override { return GetLeafNode(); }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(HtmlLeafNodeEvent);
+  HtmlLeafNodeEvent(const HtmlLeafNodeEvent&) = delete;
+  HtmlLeafNodeEvent& operator=(const HtmlLeafNodeEvent&) = delete;
 };
 
 class HtmlIEDirectiveEvent : public HtmlLeafNodeEvent {
@@ -133,7 +139,8 @@ class HtmlIEDirectiveEvent : public HtmlLeafNodeEvent {
  private:
   HtmlIEDirectiveNode* directive_;
 
-  DISALLOW_COPY_AND_ASSIGN(HtmlIEDirectiveEvent);
+  HtmlIEDirectiveEvent(const HtmlIEDirectiveEvent&) = delete;
+  HtmlIEDirectiveEvent& operator=(const HtmlIEDirectiveEvent&) = delete;
 };
 
 class HtmlCdataEvent : public HtmlLeafNodeEvent {
@@ -149,7 +156,8 @@ class HtmlCdataEvent : public HtmlLeafNodeEvent {
  private:
   HtmlCdataNode* cdata_;
 
-  DISALLOW_COPY_AND_ASSIGN(HtmlCdataEvent);
+  HtmlCdataEvent(const HtmlCdataEvent&) = delete;
+  HtmlCdataEvent& operator=(const HtmlCdataEvent&) = delete;
 };
 
 class HtmlCommentEvent : public HtmlLeafNodeEvent {
@@ -165,7 +173,8 @@ class HtmlCommentEvent : public HtmlLeafNodeEvent {
  private:
   HtmlCommentNode* comment_;
 
-  DISALLOW_COPY_AND_ASSIGN(HtmlCommentEvent);
+  HtmlCommentEvent(const HtmlCommentEvent&) = delete;
+  HtmlCommentEvent& operator=(const HtmlCommentEvent&) = delete;
 };
 
 class HtmlCharactersEvent : public HtmlLeafNodeEvent {
@@ -182,7 +191,8 @@ class HtmlCharactersEvent : public HtmlLeafNodeEvent {
  private:
   HtmlCharactersNode* characters_;
 
-  DISALLOW_COPY_AND_ASSIGN(HtmlCharactersEvent);
+  HtmlCharactersEvent(const HtmlCharactersEvent&) = delete;
+  HtmlCharactersEvent& operator=(const HtmlCharactersEvent&) = delete;
 };
 
 class HtmlDirectiveEvent : public HtmlLeafNodeEvent {
@@ -198,7 +208,8 @@ class HtmlDirectiveEvent : public HtmlLeafNodeEvent {
  private:
   HtmlDirectiveNode* directive_;
 
-  DISALLOW_COPY_AND_ASSIGN(HtmlDirectiveEvent);
+  HtmlDirectiveEvent(const HtmlDirectiveEvent&) = delete;
+  HtmlDirectiveEvent& operator=(const HtmlDirectiveEvent&) = delete;
 };
 
 }  // namespace net_instaweb

@@ -152,7 +152,8 @@ class CriticalCssBeaconFilterTestBase : public RewriteTestBase {
   }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(CriticalCssBeaconFilterTestBase);
+  CriticalCssBeaconFilterTestBase(const CriticalCssBeaconFilterTestBase&) = delete;
+  CriticalCssBeaconFilterTestBase& operator=(const CriticalCssBeaconFilterTestBase&) = delete;
 };
 
 // Standard test setup enables filter via RewriteOptions.
@@ -169,7 +170,8 @@ class CriticalCssBeaconFilterTest : public CriticalCssBeaconFilterTestBase {
   }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(CriticalCssBeaconFilterTest);
+  CriticalCssBeaconFilterTest(const CriticalCssBeaconFilterTest&) = delete;
+  CriticalCssBeaconFilterTest& operator=(const CriticalCssBeaconFilterTest&) = delete;
 };
 
 TEST_F(CriticalCssBeaconFilterTest, ExtractFromInlineStyle) {
@@ -355,7 +357,8 @@ class CriticalCssBeaconOnlyTest : public CriticalCssBeaconFilterTestBase {
  private:
   CriticalCssBeaconFilter* filter_;  // Owned by rewrite_driver()
 
-  DISALLOW_COPY_AND_ASSIGN(CriticalCssBeaconOnlyTest);
+  CriticalCssBeaconOnlyTest(const CriticalCssBeaconOnlyTest&) = delete;
+  CriticalCssBeaconOnlyTest& operator=(const CriticalCssBeaconOnlyTest&) = delete;
 };
 
 // Make sure we re-beacon if candidate data changes.

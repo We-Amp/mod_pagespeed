@@ -124,7 +124,8 @@ class HTTPValue : public Writer {
   // Member variable to keep the size of body in storage.
   int64 contents_size_;
 
-  DISALLOW_COPY_AND_ASSIGN(HTTPValue);
+  HTTPValue(const HTTPValue&) = delete;
+  HTTPValue& operator=(const HTTPValue&) = delete;
 };
 
 }  // namespace net_instaweb

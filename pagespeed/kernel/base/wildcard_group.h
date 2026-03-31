@@ -79,7 +79,8 @@ class WildcardGroup {
   // in STL to be bit-packed.
   std::vector<Wildcard*> wildcards_;
   std::vector<bool> allow_;  // parallel array (actually a bitvector)
-  DISALLOW_COPY_AND_ASSIGN(WildcardGroup);
+  WildcardGroup(const WildcardGroup&) = delete;
+  WildcardGroup& operator=(const WildcardGroup&) = delete;
 };
 
 }  // namespace net_instaweb

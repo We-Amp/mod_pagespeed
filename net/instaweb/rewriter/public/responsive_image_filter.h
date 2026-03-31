@@ -98,7 +98,8 @@ class ResponsiveImageFirstFilter : public CommonFilter {
   std::vector<double> densities_;
   ResponsiveImageCandidateMap candidate_map_;
 
-  DISALLOW_COPY_AND_ASSIGN(ResponsiveImageFirstFilter);
+  ResponsiveImageFirstFilter(const ResponsiveImageFirstFilter&) = delete;
+  ResponsiveImageFirstFilter& operator=(const ResponsiveImageFirstFilter&) = delete;
 };
 
 class ResponsiveImageSecondFilter : public CommonFilter {
@@ -133,7 +134,8 @@ class ResponsiveImageSecondFilter : public CommonFilter {
   // Was at least one srcset added? If not we don't insert zoom script.
   bool srcsets_added_;
 
-  DISALLOW_COPY_AND_ASSIGN(ResponsiveImageSecondFilter);
+  ResponsiveImageSecondFilter(const ResponsiveImageSecondFilter&) = delete;
+  ResponsiveImageSecondFilter& operator=(const ResponsiveImageSecondFilter&) = delete;
 };
 
 }  // namespace net_instaweb

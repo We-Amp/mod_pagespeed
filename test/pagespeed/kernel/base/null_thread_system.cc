@@ -43,7 +43,8 @@ class NullRWLock : public ThreadSystem::RWLock {
   void Unlock() override {}
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(NullRWLock);
+  NullRWLock(const NullRWLock&) = delete;
+  NullRWLock& operator=(const NullRWLock&) = delete;
 };
 
 class NullThreadId : public ThreadSystem::ThreadId {
@@ -65,7 +66,8 @@ class NullThreadId : public ThreadSystem::ThreadId {
   int id_;
   const NullThreadSystem* system_;
 
-  DISALLOW_COPY_AND_ASSIGN(NullThreadId);
+  NullThreadId(const NullThreadId&) = delete;
+  NullThreadId& operator=(const NullThreadId&) = delete;
 };
 
 }  // namespace

@@ -42,7 +42,8 @@ class PedanticFilter : public EmptyHtmlFilter {
   HtmlParse* html_parse_;
   ScriptTagScanner script_scanner_;
 
-  DISALLOW_COPY_AND_ASSIGN(PedanticFilter);
+  PedanticFilter(const PedanticFilter&) = delete;
+  PedanticFilter& operator=(const PedanticFilter&) = delete;
 };
 
 }  // namespace net_instaweb

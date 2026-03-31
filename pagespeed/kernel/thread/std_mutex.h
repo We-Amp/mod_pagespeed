@@ -45,7 +45,8 @@ class StdMutex : public ThreadSystem::CondvarCapableMutex {
 
   std::mutex mutex_;
 
-  DISALLOW_COPY_AND_ASSIGN(StdMutex);
+  StdMutex(const StdMutex&) = delete;
+  StdMutex& operator=(const StdMutex&) = delete;
 };
 
 }  // namespace net_instaweb

@@ -51,7 +51,8 @@ class FixReflowFilter : public EmptyHtmlFilter {
   // We do not own this.
   RewriteDriver* rewrite_driver_;
 
-  DISALLOW_COPY_AND_ASSIGN(FixReflowFilter);
+  FixReflowFilter(const FixReflowFilter&) = delete;
+  FixReflowFilter& operator=(const FixReflowFilter&) = delete;
 };
 
 }  // namespace net_instaweb

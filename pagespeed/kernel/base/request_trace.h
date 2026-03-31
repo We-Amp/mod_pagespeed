@@ -53,7 +53,8 @@ class RequestTrace {
  private:
   bool tracing_enabled_;
 
-  DISALLOW_COPY_AND_ASSIGN(RequestTrace);
+  RequestTrace(const RequestTrace&) = delete;
+  RequestTrace& operator=(const RequestTrace&) = delete;
 };
 
 }  // namespace net_instaweb

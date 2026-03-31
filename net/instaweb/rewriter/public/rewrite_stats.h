@@ -169,7 +169,8 @@ class RewriteStats {
 
   std::vector<Waveform*> thread_queue_depths_;
 
-  DISALLOW_COPY_AND_ASSIGN(RewriteStats);
+  RewriteStats(const RewriteStats&) = delete;
+  RewriteStats& operator=(const RewriteStats&) = delete;
 };
 
 }  // namespace net_instaweb

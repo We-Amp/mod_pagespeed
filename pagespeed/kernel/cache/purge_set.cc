@@ -107,7 +107,8 @@ class MergeContext {
   ConstStringStarVector keys_;
   std::vector<int64> values_;
 
-  DISALLOW_COPY_AND_ASSIGN(MergeContext);
+  MergeContext(const MergeContext&) = delete;
+  MergeContext& operator=(const MergeContext&) = delete;
 };
 
 }  // namespace

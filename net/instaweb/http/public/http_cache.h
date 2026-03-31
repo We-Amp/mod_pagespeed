@@ -244,7 +244,8 @@ class HTTPCache {
     int cache_level_;
     bool is_background_;
 
-    DISALLOW_COPY_AND_ASSIGN(Callback);
+    Callback(const Callback&) = delete;
+    Callback& operator=(const Callback&) = delete;
   };
 
   // Makes the cache ignore put requests that do not record successes.
@@ -437,7 +438,8 @@ class HTTPCache {
 
   GoogleString version_prefix_;
 
-  DISALLOW_COPY_AND_ASSIGN(HTTPCache);
+  HTTPCache(const HTTPCache&) = delete;
+  HTTPCache& operator=(const HTTPCache&) = delete;
 };
 
 }  // namespace net_instaweb

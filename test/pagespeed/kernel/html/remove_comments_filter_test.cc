@@ -45,7 +45,8 @@ class OptionsImpl : public RemoveCommentsFilter::OptionsInterface {
  private:
   FastWildcardGroup retain_comments_;
 
-  DISALLOW_COPY_AND_ASSIGN(OptionsImpl);
+  OptionsImpl(const OptionsImpl&) = delete;
+  OptionsImpl& operator=(const OptionsImpl&) = delete;
 };
 
 }  // namespace
@@ -67,7 +68,8 @@ class RemoveCommentsFilterTest : public HtmlParseTestBase {
   RemoveCommentsFilter remove_comments_filter_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(RemoveCommentsFilterTest);
+  RemoveCommentsFilterTest(const RemoveCommentsFilterTest&) = delete;
+  RemoveCommentsFilterTest& operator=(const RemoveCommentsFilterTest&) = delete;
 };
 
 TEST_F(RemoveCommentsFilterTest, NoComments) {

@@ -73,7 +73,8 @@ class HtmlMinifier {
   net_instaweb::CollapseWhitespaceFilter collapse_whitespace_filter_;
   net_instaweb::HtmlWriterFilter html_writer_filter_;
 
-  DISALLOW_COPY_AND_ASSIGN(HtmlMinifier);
+  HtmlMinifier(const HtmlMinifier&) = delete;
+  HtmlMinifier& operator=(const HtmlMinifier&) = delete;
 };
 
 HtmlMinifier::HtmlMinifier()

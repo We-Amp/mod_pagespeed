@@ -37,7 +37,8 @@ class ElideAttributesFilterTest : public HtmlParseTestBase {
  private:
   ElideAttributesFilter elide_attributes_filter_;
 
-  DISALLOW_COPY_AND_ASSIGN(ElideAttributesFilterTest);
+  ElideAttributesFilterTest(const ElideAttributesFilterTest&) = delete;
+  ElideAttributesFilterTest& operator=(const ElideAttributesFilterTest&) = delete;
 };
 
 TEST_F(ElideAttributesFilterTest, NoChanges) {

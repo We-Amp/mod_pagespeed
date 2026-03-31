@@ -376,7 +376,8 @@ class LRUCacheBase {
   Map map_;
   ValueHelper* value_helper_;
 
-  DISALLOW_COPY_AND_ASSIGN(LRUCacheBase);
+  LRUCacheBase(const LRUCacheBase&) = delete;
+  LRUCacheBase& operator=(const LRUCacheBase&) = delete;
 };
 
 }  // namespace net_instaweb

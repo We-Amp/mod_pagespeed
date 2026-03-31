@@ -116,7 +116,8 @@ class AsyncCache : public CacheInterface {
   AtomicBool stopped_;
   AtomicInt32 outstanding_operations_;
 
-  DISALLOW_COPY_AND_ASSIGN(AsyncCache);
+  AsyncCache(const AsyncCache&) = delete;
+  AsyncCache& operator=(const AsyncCache&) = delete;
 };
 
 }  // namespace net_instaweb

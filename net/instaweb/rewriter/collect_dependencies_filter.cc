@@ -192,7 +192,9 @@ class CollectDependenciesFilter::Context : public RewriteContext {
     return true;  // We don't alter the doc...
   }
 
-  void Render() override { Report(); }
+  void Render() override {
+    Report();
+  }
 
   void WillNotRender() override {
     {
@@ -269,7 +271,8 @@ class CollectDependenciesFilter::Context : public RewriteContext {
   DependencyType dep_type_;
   int dep_id_;
 
-  DISALLOW_COPY_AND_ASSIGN(Context);
+  Context(const Context&) = delete;
+  Context& operator=(const Context&) = delete;
 };
 
 CollectDependenciesFilter::CollectDependenciesFilter(RewriteDriver* driver)
@@ -306,12 +309,14 @@ void CollectDependenciesFilter::StartElementImpl(HtmlElement* element) {
         if (media != nullptr) {
           if (media->DecodedValueOrNull() == nullptr) {
             // Encoding weirdness with media attribute -> don't push
+            // skip CSS with null media
             continue;
           }
           StringVector media_vector;
           css_util::VectorizeMediaAttribute(media->DecodedValueOrNull(),
                                             &media_vector);
           if (!Context::DefinitelyNeededToRender(media_vector)) {
+            // skip CSS not needed to render
             continue;
           }
         }

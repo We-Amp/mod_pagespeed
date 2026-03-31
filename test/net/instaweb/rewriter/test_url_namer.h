@@ -75,7 +75,8 @@ class TestUrlNamer : public UrlNamer {
   static bool use_normal_encoding_;
   static ProxyExtent proxy_mode_;
 
-  DISALLOW_COPY_AND_ASSIGN(TestUrlNamer);
+  TestUrlNamer(const TestUrlNamer&) = delete;
+  TestUrlNamer& operator=(const TestUrlNamer&) = delete;
 };
 
 }  // namespace net_instaweb

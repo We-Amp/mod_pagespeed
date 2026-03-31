@@ -126,7 +126,8 @@ class PurgeFetchCallbackGasket {
   MessageHandler* message_handler_;
   GoogleString error_;
 
-  DISALLOW_COPY_AND_ASSIGN(PurgeFetchCallbackGasket);
+  PurgeFetchCallbackGasket(const PurgeFetchCallbackGasket&) = delete;
+  PurgeFetchCallbackGasket& operator=(const PurgeFetchCallbackGasket&) = delete;
 };
 
 }  // namespace

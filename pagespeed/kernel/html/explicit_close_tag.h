@@ -43,7 +43,8 @@ class ExplicitCloseTag : public EmptyHtmlFilter {
   const char* Name() const override { return "ExplicitCloseTag"; }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(ExplicitCloseTag);
+  ExplicitCloseTag(const ExplicitCloseTag&) = delete;
+  ExplicitCloseTag& operator=(const ExplicitCloseTag&) = delete;
 };
 
 }  // namespace net_instaweb

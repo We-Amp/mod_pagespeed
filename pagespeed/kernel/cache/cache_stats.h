@@ -87,7 +87,8 @@ class CacheStats : public CacheInterface {
   GoogleString prefix_;
   AtomicBool shutdown_;
 
-  DISALLOW_COPY_AND_ASSIGN(CacheStats);
+  CacheStats(const CacheStats&) = delete;
+  CacheStats& operator=(const CacheStats&) = delete;
 };
 
 }  // namespace net_instaweb

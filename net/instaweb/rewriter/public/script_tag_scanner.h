@@ -62,7 +62,8 @@ class ScriptTagScanner {
 
   bool IsJsMime(const GoogleString& type_str);
 
-  DISALLOW_COPY_AND_ASSIGN(ScriptTagScanner);
+  ScriptTagScanner(const ScriptTagScanner&) = delete;
+  ScriptTagScanner& operator=(const ScriptTagScanner&) = delete;
 };
 
 }  // namespace net_instaweb

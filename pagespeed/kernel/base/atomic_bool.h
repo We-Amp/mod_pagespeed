@@ -46,7 +46,8 @@ class AtomicBool {
 
  private:
   std::atomic<bool> value_;
-  DISALLOW_COPY_AND_ASSIGN(AtomicBool);
+  AtomicBool(const AtomicBool&) = delete;
+  AtomicBool& operator=(const AtomicBool&) = delete;
 };
 
 }  // namespace net_instaweb

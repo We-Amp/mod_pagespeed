@@ -79,7 +79,8 @@ class NgxEventConnection {
   ngx_fd_t pipe_write_fd_;
   ngx_fd_t pipe_read_fd_;
 
-  DISALLOW_COPY_AND_ASSIGN(NgxEventConnection);
+  NgxEventConnection(const NgxEventConnection&) = delete;
+  NgxEventConnection& operator=(const NgxEventConnection&) = delete;
 };
 
 }  // namespace net_instaweb

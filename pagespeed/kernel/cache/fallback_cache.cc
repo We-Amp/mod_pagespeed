@@ -101,7 +101,8 @@ class FallbackCallback : public CacheInterface::Callback {
   CacheInterface* large_object_cache_;
   bool validate_candidate_called_;
 
-  DISALLOW_COPY_AND_ASSIGN(FallbackCallback);
+  FallbackCallback(const FallbackCallback&) = delete;
+  FallbackCallback& operator=(const FallbackCallback&) = delete;
 };
 
 }  // namespace

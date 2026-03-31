@@ -155,32 +155,12 @@ class CurlUrlAsyncFetcher : public UrlAsyncFetcher {
   // Called by the poll thread. Public for access from the thread class.
   void PollLoop();
 
-  // Set the document root for file-based fallback of localhost URLs (Windows).
-  // When set, localhost URLs will be read from the file system instead of
-  // making HTTP requests, avoiding deadlock in single-threaded environments.
-  void SetDocumentRoot(StringPiece doc_root) {
-    doc_root.CopyToString(&document_root_);
-  }
-  const GoogleString& document_root() const { return document_root_; }
-
  protected:
   typedef Pool<CurlFetch> CurlFetchPool;
 
  private:
   static bool ParseHttpsOptions(StringPiece directive, uint32* options,
                                 GoogleString* error_message);
-
-#ifdef _WIN32
-  // Convert a localhost URL to a file system path using document_root_.
-  bool LocalhostUrlToFilePath(const GoogleString& url,
-                              GoogleString* file_path) const;
-
-  // Read a local file and send it to the AsyncFetch.
-  bool ReadLocalFile(const GoogleString& file_path,
-                     const GoogleString& url,
-                     AsyncFetch* async_fetch,
-                     MessageHandler* handler) const;
-#endif
 
   friend class CurlFetch;
 
@@ -195,7 +175,7 @@ class CurlUrlAsyncFetcher : public UrlAsyncFetcher {
   bool list_outstanding_urls_on_error_;
   ThreadSystem* thread_system_;
   MessageHandler* message_handler_;
-  AbstractMutex* mutex_;
+  std::unique_ptr<AbstractMutex> mutex_;
   std::unique_ptr<ThreadSystem::Thread> poll_thread_;
 
   Statistics* statistics_;
@@ -206,9 +186,6 @@ class CurlUrlAsyncFetcher : public UrlAsyncFetcher {
   GoogleString ssl_certificates_dir_;
   GoogleString ssl_certificates_file_;
   uint32 https_options_;
-
-  // Document root for file-based localhost URL handling (Windows)
-  GoogleString document_root_;
 
   // Statistics variables
   Variable* request_count_;
@@ -224,7 +201,8 @@ class CurlUrlAsyncFetcher : public UrlAsyncFetcher {
   Variable* ultimate_failure_;
   UpDownCounter* last_check_timestamp_ms_;
 
-  DISALLOW_COPY_AND_ASSIGN(CurlUrlAsyncFetcher);
+  CurlUrlAsyncFetcher(const CurlUrlAsyncFetcher&) = delete;
+  CurlUrlAsyncFetcher& operator=(const CurlUrlAsyncFetcher&) = delete;
 };
 
 }  // namespace net_instaweb

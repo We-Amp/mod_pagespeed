@@ -50,7 +50,8 @@ class MockHasher : public Hasher {
 
  private:
   GoogleString hash_value_;
-  DISALLOW_COPY_AND_ASSIGN(MockHasher);
+  MockHasher(const MockHasher&) = delete;
+  MockHasher& operator=(const MockHasher&) = delete;
 };
 
 }  // namespace net_instaweb

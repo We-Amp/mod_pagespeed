@@ -59,7 +59,8 @@ class CssUrlCounter : public CssTagScanner::Transformer {
 
   MessageHandler* handler_;
 
-  DISALLOW_COPY_AND_ASSIGN(CssUrlCounter);
+  CssUrlCounter(const CssUrlCounter&) = delete;
+  CssUrlCounter& operator=(const CssUrlCounter&) = delete;
 };
 
 }  // namespace net_instaweb

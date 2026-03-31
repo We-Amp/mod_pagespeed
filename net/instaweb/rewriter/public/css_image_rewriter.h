@@ -98,7 +98,8 @@ class CssImageRewriter {
   ImageCombineFilter* image_combiner_;
   ImageRewriteFilter* image_rewriter_;
 
-  DISALLOW_COPY_AND_ASSIGN(CssImageRewriter);
+  CssImageRewriter(const CssImageRewriter&) = delete;
+  CssImageRewriter& operator=(const CssImageRewriter&) = delete;
 };
 
 }  // namespace net_instaweb

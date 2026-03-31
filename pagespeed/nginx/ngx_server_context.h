@@ -74,7 +74,8 @@ class NgxServerContext : public SystemServerContext {
   // what index the "http2" var is, or NGX_ERROR.
   ngx_int_t ngx_http2_variable_index_;
 
-  DISALLOW_COPY_AND_ASSIGN(NgxServerContext);
+  NgxServerContext(const NgxServerContext&) = delete;
+  NgxServerContext& operator=(const NgxServerContext&) = delete;
 };
 
 }  // namespace net_instaweb

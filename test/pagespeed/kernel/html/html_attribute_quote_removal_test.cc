@@ -38,7 +38,8 @@ class HtmlAttributeQuoteRemovalTest : public HtmlParseTestBase {
  private:
   HtmlAttributeQuoteRemoval html_attribute_quote_removal_;
 
-  DISALLOW_COPY_AND_ASSIGN(HtmlAttributeQuoteRemovalTest);
+  HtmlAttributeQuoteRemovalTest(const HtmlAttributeQuoteRemovalTest&) = delete;
+  HtmlAttributeQuoteRemovalTest& operator=(const HtmlAttributeQuoteRemovalTest&) = delete;
 };
 
 TEST_F(HtmlAttributeQuoteRemovalTest, NoQuotesNoChange) {

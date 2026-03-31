@@ -125,7 +125,8 @@ class ImageUrlEncoder : public UrlSegmentEncoder {
                                 const RequestProperties& request_properties);
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(ImageUrlEncoder);
+  ImageUrlEncoder(const ImageUrlEncoder&) = delete;
+  ImageUrlEncoder& operator=(const ImageUrlEncoder&) = delete;
 };
 
 }  // namespace net_instaweb

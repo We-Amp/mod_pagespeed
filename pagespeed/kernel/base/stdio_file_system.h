@@ -90,7 +90,8 @@ class StdioFileSystem : public FileSystem {
   Variable* total_ops_;
   MessageHandler* message_handler_;  // Only set by TrackTiming, not by ctor.
 
-  DISALLOW_COPY_AND_ASSIGN(StdioFileSystem);
+  StdioFileSystem(const StdioFileSystem&) = delete;
+  StdioFileSystem& operator=(const StdioFileSystem&) = delete;
 };
 
 }  // namespace net_instaweb

@@ -64,7 +64,8 @@ class DownstreamCachePurger {
   // DownstreamCachePurger object per RewriteDriver.
   bool made_downstream_purge_attempt_;
 
-  DISALLOW_COPY_AND_ASSIGN(DownstreamCachePurger);
+  DownstreamCachePurger(const DownstreamCachePurger&) = delete;
+  DownstreamCachePurger& operator=(const DownstreamCachePurger&) = delete;
 };
 
 }  // namespace net_instaweb

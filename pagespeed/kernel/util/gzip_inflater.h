@@ -100,7 +100,8 @@ class GzipInflater {
   bool finished_;
   bool error_;
 
-  DISALLOW_COPY_AND_ASSIGN(GzipInflater);
+  GzipInflater(const GzipInflater&) = delete;
+  GzipInflater& operator=(const GzipInflater&) = delete;
 };
 
 }  // namespace net_instaweb

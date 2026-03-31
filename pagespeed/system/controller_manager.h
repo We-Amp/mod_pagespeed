@@ -53,7 +53,8 @@ class ControllerManager {
   static void DetachFromControllerProcess() {}
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(ControllerManager);
+  ControllerManager(const ControllerManager&) = delete;
+  ControllerManager& operator=(const ControllerManager&) = delete;
 };
 
 #else  // Full fork-based implementation
@@ -122,12 +123,14 @@ class ControllerManager {
     ControllerProcess* process_;
     bool parent_death_detected_;
 
-    DISALLOW_COPY_AND_ASSIGN(ProcessDeathWatcherThread);
+    ProcessDeathWatcherThread(const ProcessDeathWatcherThread&) = delete;
+    ProcessDeathWatcherThread& operator=(const ProcessDeathWatcherThread&) = delete;
   };
 
   static int controller_write_fd_;
 
-  DISALLOW_COPY_AND_ASSIGN(ControllerManager);
+  ControllerManager(const ControllerManager&) = delete;
+  ControllerManager& operator=(const ControllerManager&) = delete;
 };
 
 #endif  // defined(_WIN32) || defined(PAGESPEED_NO_FORK)

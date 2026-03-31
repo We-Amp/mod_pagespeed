@@ -62,7 +62,8 @@ class CssAbsolutify {
                                      bool handle_unparseable_sections,
                                      MessageHandler* handler);
 
-  DISALLOW_COPY_AND_ASSIGN(CssAbsolutify);
+  CssAbsolutify(const CssAbsolutify&) = delete;
+  CssAbsolutify& operator=(const CssAbsolutify&) = delete;
 };
 
 }  // namespace net_instaweb

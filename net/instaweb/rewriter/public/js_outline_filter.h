@@ -70,7 +70,8 @@ class JsOutlineFilter : public CommonFilter {
   size_t size_threshold_bytes_;
   ScriptTagScanner script_tag_scanner_;
 
-  DISALLOW_COPY_AND_ASSIGN(JsOutlineFilter);
+  JsOutlineFilter(const JsOutlineFilter&) = delete;
+  JsOutlineFilter& operator=(const JsOutlineFilter&) = delete;
 };
 
 }  // namespace net_instaweb

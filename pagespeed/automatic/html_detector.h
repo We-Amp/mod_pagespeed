@@ -94,7 +94,8 @@ class HtmlDetector {
   bool already_decided_;
   bool probable_html_;  // valid only if already_decided_.
 
-  DISALLOW_COPY_AND_ASSIGN(HtmlDetector);
+  HtmlDetector(const HtmlDetector&) = delete;
+  HtmlDetector& operator=(const HtmlDetector&) = delete;
 };
 
 }  // namespace net_instaweb

@@ -110,7 +110,8 @@ class CriticalCssBeaconFilter : public CssSummarizerBase {
   // Should these block critical CSS insertion?
   Variable* critical_css_skipped_due_to_charset_;
 
-  DISALLOW_COPY_AND_ASSIGN(CriticalCssBeaconFilter);
+  CriticalCssBeaconFilter(const CriticalCssBeaconFilter&) = delete;
+  CriticalCssBeaconFilter& operator=(const CriticalCssBeaconFilter&) = delete;
 };
 
 }  // namespace net_instaweb

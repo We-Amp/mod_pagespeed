@@ -21,7 +21,11 @@
 
 #pragma once
 
+#include <map>
+#include <memory>
+
 #include "pagespeed/envoy/envoy_message_handler.h"
+#include "pagespeed/envoy/envoy_vhost_config.h"
 #include "pagespeed/system/system_server_context.h"
 
 namespace net_instaweb {
@@ -48,6 +52,7 @@ class EnvoyServerContext : public SystemServerContext {
     return envoy_factory_;
   }
   SystemRequestContext* NewRequestContext();
+  SystemRequestContext* NewRequestContext(StringPiece hostname, int port);
 
   EnvoyMessageHandler* envoy_message_handler() {
     return dynamic_cast<EnvoyMessageHandler*>(message_handler());
@@ -55,9 +60,29 @@ class EnvoyServerContext : public SystemServerContext {
 
   GoogleString FormatOption(StringPiece option_name, StringPiece args) override;
 
+  // VirtualHost configuration support.
+  // Returns the VHost config manager for this server context.
+  EnvoyVHostConfigManager* vhost_config_manager() {
+    return &vhost_config_manager_;
+  }
+
+  // Find options for a given hostname. Returns nullptr if no VHost matches,
+  // in which case global_options() should be used.
+  const EnvoyRewriteOptions* FindOptionsForHost(StringPiece hostname) const;
+
+  // Get options for a request, taking VHost configuration into account.
+  // If a VHost matches the hostname, returns those options merged with global.
+  // Otherwise returns global_options().
+  // The returned pointer is valid for the lifetime of this server context.
+  const RewriteOptions* GetOptionsForHost(StringPiece hostname);
+
  private:
   EnvoyRewriteDriverFactory* envoy_factory_;
-  DISALLOW_COPY_AND_ASSIGN(EnvoyServerContext);
+  EnvoyVHostConfigManager vhost_config_manager_;
+  // Cache of merged options per hostname (for VHost support).
+  std::map<GoogleString, std::unique_ptr<EnvoyRewriteOptions>> merged_options_cache_;
+  EnvoyServerContext(const EnvoyServerContext&) = delete;
+  EnvoyServerContext& operator=(const EnvoyServerContext&) = delete;
 };
 
 }  // namespace net_instaweb

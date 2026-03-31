@@ -69,7 +69,8 @@ class HttpResponseParser {
   MessageHandler* handler_;
   ResponseHeadersParser parser_;
 
-  DISALLOW_COPY_AND_ASSIGN(HttpResponseParser);
+  HttpResponseParser(const HttpResponseParser&) = delete;
+  HttpResponseParser& operator=(const HttpResponseParser&) = delete;
 };
 
 }  // namespace net_instaweb

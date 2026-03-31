@@ -27,7 +27,7 @@
 #include "pagespeed/controller/rpc_handler.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/function.h"
-#include "pagespeed/kernel/util/grpc.h"
+#include "pagespeed/controller/grpc.h"
 
 namespace net_instaweb {
 
@@ -76,7 +76,8 @@ class ExpensiveOperationRpcHandler
   friend class RequestResultRpcHandler;
   friend class ExpensiveOperationRpcHandlerTest;
 
-  DISALLOW_COPY_AND_ASSIGN(ExpensiveOperationRpcHandler);
+  ExpensiveOperationRpcHandler(const ExpensiveOperationRpcHandler&) = delete;
+  ExpensiveOperationRpcHandler& operator=(const ExpensiveOperationRpcHandler&) = delete;
 };
 
 }  // namespace net_instaweb

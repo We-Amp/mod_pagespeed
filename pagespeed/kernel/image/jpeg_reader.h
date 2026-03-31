@@ -70,7 +70,8 @@ class JpegReader {
   jpeg_error_mgr* decompress_error_;
   MessageHandler* message_handler_;
 
-  DISALLOW_COPY_AND_ASSIGN(JpegReader);
+  JpegReader(const JpegReader&) = delete;
+  JpegReader& operator=(const JpegReader&) = delete;
 };
 
 // JpegScanlineReader decodes JPEG image. It returns a scanline (a row of
@@ -111,7 +112,8 @@ class JpegScanlineReader : public ScanlineReaderInterface {
   bool is_progressive_;
   MessageHandler* message_handler_;
 
-  DISALLOW_COPY_AND_ASSIGN(JpegScanlineReader);
+  JpegScanlineReader(const JpegScanlineReader&) = delete;
+  JpegScanlineReader& operator=(const JpegScanlineReader&) = delete;
 };
 
 }  // namespace image_compression

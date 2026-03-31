@@ -22,7 +22,7 @@
 #include <sys/stat.h>
 #include <cerrno>
 
-#ifdef WIN32
+#ifdef _WIN32
 #include <sys/utime.h>
 #include <direct.h>
 #include <io.h>
@@ -33,7 +33,7 @@
 #include <utime.h>
 #include <dirent.h>
 #include <unistd.h>
-#endif  // WIN32
+#endif  // _WIN32
 
 #include <cstddef>
 #include <cstdio>
@@ -104,7 +104,8 @@ class StdioFileHelper {
   int64 start_us_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(StdioFileHelper);
+  StdioFileHelper(const StdioFileHelper&) = delete;
+  StdioFileHelper& operator=(const StdioFileHelper&) = delete;
 };
 
 class StdioInputFile : public FileSystem::InputFile {
@@ -152,7 +153,8 @@ class StdioInputFile : public FileSystem::InputFile {
  private:
   StdioFileHelper file_helper_;
 
-  DISALLOW_COPY_AND_ASSIGN(StdioInputFile);
+  StdioInputFile(const StdioInputFile&) = delete;
+  StdioInputFile& operator=(const StdioInputFile&) = delete;
 };
 
 class StdioOutputFile : public FileSystem::OutputFile {
@@ -189,13 +191,17 @@ class StdioOutputFile : public FileSystem::OutputFile {
 
   bool SetWorldReadable(MessageHandler* message_handler) override {
     bool ret = true;
-#ifdef WIN32
+#ifdef _WIN32
     const char* filename = file_helper_.filename_.c_str();
-    ret = (_chmod(filename, _S_IREAD) == 0);
+    // Windows doesn't have group/other permissions. Use _S_IREAD | _S_IWRITE
+    // to match the Unix behavior (S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH)
+    // where the owner retains write access. Using _S_IREAD alone would make
+    // the file read-only, preventing subsequent writes.
+    ret = (_chmod(filename, _S_IREAD | _S_IWRITE) == 0);
 #else
     int fd = fileno(file_helper_.file_);
     ret = (fchmod(fd, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH) == 0);
-#endif  // WIN32
+#endif  // _WIN32
     if (!ret) {
       file_helper_.ReportError(message_handler, "setting world-readable");
     }
@@ -205,7 +211,8 @@ class StdioOutputFile : public FileSystem::OutputFile {
  private:
   StdioFileHelper file_helper_;
 
-  DISALLOW_COPY_AND_ASSIGN(StdioOutputFile);
+  StdioOutputFile(const StdioOutputFile&) = delete;
+  StdioOutputFile& operator=(const StdioOutputFile&) = delete;
 };
 
 StdioFileSystem::StdioFileSystem()
@@ -271,7 +278,7 @@ void StdioFileSystem::EndTimer(const char* filename, const char* operation,
 }
 
 int StdioFileSystem::MaxPathLength(const StringPiece& base) const {
-#ifdef WIN32
+#ifdef _WIN32
   return MAX_PATH;
 #else
   const int kMaxInt = std::numeric_limits<int>::max();
@@ -286,13 +293,13 @@ int StdioFileSystem::MaxPathLength(const StringPiece& base) const {
   } else {
     return limit;
   }
-#endif  // WIN32
+#endif  // _WIN32
 }
 
 FileSystem::InputFile* StdioFileSystem::OpenInputFile(
     const char* filename, MessageHandler* message_handler) {
   FileSystem::InputFile* input_file = nullptr;
-  FILE* f = fopen(filename, "r");
+  FILE* f = fopen(filename, "rb");
   if (f == nullptr) {
     message_handler->Error(filename, 0, "opening input file: %s",
                            strerror(errno));
@@ -308,7 +315,7 @@ FileSystem::OutputFile* StdioFileSystem::OpenOutputFileHelper(
   if (strcmp(filename, "-") == 0) {
     output_file = new StdioOutputFile(stdout, "<stdout>", this);
   } else {
-    const char* mode = append ? "a" : "w";
+    const char* mode = append ? "ab" : "wb";
     FILE* f = fopen(filename, mode);
     if (f == nullptr) {
       message_handler->Error(filename, 0, "opening output file: %s",
@@ -335,7 +342,7 @@ FileSystem::OutputFile* StdioFileSystem::OpenTempFileHelper(
   memcpy(template_name, prefix.data(), prefix_len);
   memcpy(template_name + prefix_len, mkstemp_hook, sizeof(mkstemp_hook));
   OutputFile* output_file = nullptr;
-#ifdef WIN32
+#ifdef _WIN32
   // _mktemp_s() only generates a unique filename, it doesn't open the file.
   // It returns 0 on success (not a file descriptor like mkstemp).
   errno_t err = _mktemp_s(template_name, prefix_len + sizeof(mkstemp_hook));
@@ -344,7 +351,7 @@ FileSystem::OutputFile* StdioFileSystem::OpenTempFileHelper(
                            strerror(err));
   } else {
     // Now open the file with the generated unique name
-    FILE* f = fopen(template_name, "w");
+    FILE* f = fopen(template_name, "wb");
     if (f == nullptr) {
       message_handler->Error(template_name, 0, "opening temp file: %s",
                              strerror(errno));
@@ -358,7 +365,7 @@ FileSystem::OutputFile* StdioFileSystem::OpenTempFileHelper(
     message_handler->Error(template_name, 0, "opening temp file: %s",
                            strerror(errno));
   } else {
-    FILE* f = fdopen(fd, "w");
+    FILE* f = fdopen(fd, "wb");
     if (f == nullptr) {
       close(fd);
       // If we failed to open the temp file, silently clean it before returning.
@@ -370,7 +377,7 @@ FileSystem::OutputFile* StdioFileSystem::OpenTempFileHelper(
       output_file = new StdioOutputFile(f, template_name, this);
     }
   }
-#endif  // WIN32
+#endif  // _WIN32
 
   delete[] template_name;
   return output_file;
@@ -398,12 +405,12 @@ bool StdioFileSystem::RenameFileHelper(const char* old_file,
 }
 
 bool StdioFileSystem::MakeDir(const char* path, MessageHandler* handler) {
-#ifdef WIN32
+#ifdef _WIN32
   bool ret = (_mkdir(path) == 0);
 #else
   // Mode 0777 makes the file use standard umask permissions.
   bool ret = (mkdir(path, 0777) == 0);
-#endif  // WIN32
+#endif  // _WIN32
   if (!ret) {
     handler->Message(kError, "Failed to make directory %s: %s", path,
                      strerror(errno));
@@ -412,11 +419,11 @@ bool StdioFileSystem::MakeDir(const char* path, MessageHandler* handler) {
 }
 
 bool StdioFileSystem::RemoveDir(const char* path, MessageHandler* handler) {
-#ifdef WIN32
+#ifdef _WIN32
   bool ret = (_rmdir(path) == 0);
 #else
   bool ret = (rmdir(path) == 0);
-#endif  // WIN32
+#endif  // _WIN32
   if (!ret) {
     handler->Message(kError, "Failed to remove directory %s: %s", path,
                      strerror(errno));
@@ -438,11 +445,11 @@ BoolOrError StdioFileSystem::IsDir(const char* path, MessageHandler* handler) {
   struct stat statbuf;
   BoolOrError ret(false);
   if (stat(path, &statbuf) == 0) {
-#ifdef WIN32
+#ifdef _WIN32
     ret.set((statbuf.st_mode & _S_IFDIR) != 0);
 #else
     ret.set(S_ISDIR(statbuf.st_mode));
-#endif                           // WIN32
+#endif                           // _WIN32
   } else if (errno != ENOENT) {  // Not an error if file doesn't exist.
     handler->Message(kError, "Failed to stat %s: %s", path, strerror(errno));
     ret.set_error();
@@ -452,28 +459,27 @@ BoolOrError StdioFileSystem::IsDir(const char* path, MessageHandler* handler) {
 
 bool StdioFileSystem::ListContents(const StringPiece& dir, StringVector* files,
                                    MessageHandler* handler) {
-#ifdef WIN32
-  const char kDirSeparator[] = "\\";
+#ifdef _WIN32
   std::string dir_string = dir.as_string();
-  if (!dir.ends_with(kDirSeparator)) {
-    dir_string.append(kDirSeparator);
-  }
+  // Normalize to forward slashes for consistency with the rest of the codebase.
+  std::replace(dir_string.begin(), dir_string.end(), '\\', '/');
+  EnsureEndsInSlash(&dir_string);
+  // FindFirstFileA needs backslash-separated paths
   std::string pattern = dir_string + "*";
-  std::wstring wpattern = std::wstring(pattern.begin(), pattern.end());
-  WIN32_FIND_DATA entry;
-  HANDLE iter = FindFirstFile(wpattern.c_str(), &entry);
+  std::replace(pattern.begin(), pattern.end(), '/', '\\');
+  WIN32_FIND_DATAA entry;
+  HANDLE iter = FindFirstFileA(pattern.c_str(), &entry);
   if (iter == INVALID_HANDLE_VALUE) {
     handler->Error(dir_string.c_str(), 0, "Failed to FindFirstFile: %s",
                    strerror(errno));
     return false;
   }
   do {
-    std::wstring wfilename(entry.cFileName);
-    std::string filename(wfilename.begin(), wfilename.end());  // This is dodgy.
+    std::string filename(entry.cFileName);
     if (filename != "." && filename != "..") {
       files->push_back(dir_string + filename);
     }
-  } while (FindNextFile(iter, &entry) != 0);
+  } while (FindNextFileA(iter, &entry) != 0);
   if (GetLastError() != ERROR_NO_MORE_FILES) {
     handler->Error(dir_string.c_str(), 0, "Failed to FindNextFile: %s",
                    strerror(errno));
@@ -510,7 +516,7 @@ bool StdioFileSystem::ListContents(const StringPiece& dir, StringVector* files,
     }
     return true;
   }
-#endif  // WIN32
+#endif  // _WIN32
 }
 
 bool StdioFileSystem::Stat(const StringPiece& path, struct stat* statbuf,
@@ -555,11 +561,11 @@ bool StdioFileSystem::Size(const StringPiece& path, int64* size,
   struct stat statbuf;
   bool ret = Stat(path, &statbuf, handler);
   if (ret) {
-#ifdef WIN32
+#ifdef _WIN32
     *size = statbuf.st_size;
 #else
     *size = statbuf.st_blocks * kBlockSize;
-#endif  // WIN32
+#endif  // _WIN32
   }
   return ret;
 }

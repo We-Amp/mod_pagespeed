@@ -273,7 +273,8 @@ class OutputResource : public Resource {
   // of caching we would like to be performed on them when written out.
   OutputResourceKind kind_;
 
-  DISALLOW_COPY_AND_ASSIGN(OutputResource);
+  OutputResource(const OutputResource&) = delete;
+  OutputResource& operator=(const OutputResource&) = delete;
 };
 
 }  // namespace net_instaweb

@@ -75,7 +75,8 @@ class AddInstrumentationFilter : public CommonFilter {
   bool added_head_script_;
   bool added_unload_script_;
 
-  DISALLOW_COPY_AND_ASSIGN(AddInstrumentationFilter);
+  AddInstrumentationFilter(const AddInstrumentationFilter&) = delete;
+  AddInstrumentationFilter& operator=(const AddInstrumentationFilter&) = delete;
 };
 
 }  // namespace net_instaweb

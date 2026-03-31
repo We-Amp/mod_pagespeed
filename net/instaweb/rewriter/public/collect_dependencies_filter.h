@@ -42,7 +42,8 @@ class CollectDependenciesFilter : public CommonFilter {
  private:
   class Context;
 
-  DISALLOW_COPY_AND_ASSIGN(CollectDependenciesFilter);
+  CollectDependenciesFilter(const CollectDependenciesFilter&) = delete;
+  CollectDependenciesFilter& operator=(const CollectDependenciesFilter&) = delete;
 };
 
 }  // namespace net_instaweb

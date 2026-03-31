@@ -124,7 +124,8 @@ class SrcSetSlotCollection : public RefCounted<SrcSetSlotCollection> {
   int begin_line_number_;
   int end_line_number_;
 
-  DISALLOW_COPY_AND_ASSIGN(SrcSetSlotCollection);
+  SrcSetSlotCollection(const SrcSetSlotCollection&) = delete;
+  SrcSetSlotCollection& operator=(const SrcSetSlotCollection&) = delete;
 };
 
 typedef RefCountedPtr<SrcSetSlotCollection> SrcSetSlotCollectionPtr;
@@ -158,7 +159,8 @@ class SrcSetSlot : public ResourceSlot {
   int index_;
   UrlRelativity url_relativity_;
 
-  DISALLOW_COPY_AND_ASSIGN(SrcSetSlot);
+  SrcSetSlot(const SrcSetSlot&) = delete;
+  SrcSetSlot& operator=(const SrcSetSlot&) = delete;
 };
 
 }  // namespace net_instaweb

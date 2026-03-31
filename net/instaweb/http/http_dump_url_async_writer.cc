@@ -150,7 +150,8 @@ class HttpDumpUrlAsyncWriter::DumpFetch : public StringAsyncFetch {
   HttpDumpUrlFetcher* dump_fetcher_;
   FileSystem* file_system_;
 
-  DISALLOW_COPY_AND_ASSIGN(DumpFetch);
+  DumpFetch(const DumpFetch&) = delete;
+  DumpFetch& operator=(const DumpFetch&) = delete;
 };
 
 HttpDumpUrlAsyncWriter::~HttpDumpUrlAsyncWriter() {}

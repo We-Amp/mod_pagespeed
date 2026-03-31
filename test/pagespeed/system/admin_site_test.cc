@@ -48,7 +48,8 @@ class SystemServerContextNoProxyHtml : public SystemServerContext {
   virtual bool ProxiesHtml() const { return false; }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(SystemServerContextNoProxyHtml);
+  SystemServerContextNoProxyHtml(const SystemServerContextNoProxyHtml&) = delete;
+  SystemServerContextNoProxyHtml& operator=(const SystemServerContextNoProxyHtml&) = delete;
 };
 
 class AdminSiteTest : public CustomRewriteTestBase<SystemRewriteOptions> {

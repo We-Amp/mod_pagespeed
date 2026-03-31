@@ -210,7 +210,8 @@ class HtmlKeywords {
   KeywordPairVec contained_;
   KeywordVec optionally_closed_;
 
-  DISALLOW_COPY_AND_ASSIGN(HtmlKeywords);
+  HtmlKeywords(const HtmlKeywords&) = delete;
+  HtmlKeywords& operator=(const HtmlKeywords&) = delete;
 };
 
 }  // namespace net_instaweb

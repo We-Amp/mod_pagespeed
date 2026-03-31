@@ -81,7 +81,8 @@ class EventScheduler : public Scheduler {
   // timer callback fires after we've moved on to a new timer.
   std::atomic<int64> timer_generation_;
 
-  DISALLOW_COPY_AND_ASSIGN(EventScheduler);
+  EventScheduler(const EventScheduler&) = delete;
+  EventScheduler& operator=(const EventScheduler&) = delete;
 };
 
 }  // namespace net_instaweb

@@ -162,7 +162,8 @@ class CssHierarchyTest : public RewriteTestBase {
   GoogleString nested_child2_css_;
   GoogleString flattened_css_;  // Flattened version of the entire hierarchy.
 
-  DISALLOW_COPY_AND_ASSIGN(CssHierarchyTest);
+  CssHierarchyTest(const CssHierarchyTest&) = delete;
+  CssHierarchyTest& operator=(const CssHierarchyTest&) = delete;
 };
 
 void CssHierarchyTest::InitializeCss(const StringPiece top_media,

@@ -251,7 +251,8 @@ class HtmlLexer {
   int64 num_bytes_parsed_;
   int64 size_limit_;
 
-  DISALLOW_COPY_AND_ASSIGN(HtmlLexer);
+  HtmlLexer(const HtmlLexer&) = delete;
+  HtmlLexer& operator=(const HtmlLexer&) = delete;
 };
 
 }  // namespace net_instaweb

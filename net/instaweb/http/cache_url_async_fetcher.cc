@@ -187,7 +187,8 @@ class CachePutFetch : public SharedAsyncFetch {
   ResponseHeaders saved_headers_;
   RequestHeaders::Properties req_properties_;
 
-  DISALLOW_COPY_AND_ASSIGN(CachePutFetch);
+  CachePutFetch(const CachePutFetch&) = delete;
+  CachePutFetch& operator=(const CachePutFetch&) = delete;
 };
 
 class CacheFindCallback : public HTTPCache::Callback {
@@ -222,7 +223,8 @@ class CacheFindCallback : public HTTPCache::Callback {
     CacheFindCallback* callback_;
     CacheUrlAsyncFetcher::AsyncOpHooks* async_op_hooks_;
 
-    DISALLOW_COPY_AND_ASSIGN(BackgroundFreshenFetch);
+    BackgroundFreshenFetch(const BackgroundFreshenFetch&) = delete;
+    BackgroundFreshenFetch& operator=(const BackgroundFreshenFetch&) = delete;
   };
 
   CacheFindCallback(const Hasher* lock_hasher, NamedLockManager* lock_manager,
@@ -552,7 +554,8 @@ class CacheFindCallback : public HTTPCache::Callback {
   int64 serve_stale_while_revalidate_threshold_sec_;
   Sequence* response_sequence_;
 
-  DISALLOW_COPY_AND_ASSIGN(CacheFindCallback);
+  CacheFindCallback(const CacheFindCallback&) = delete;
+  CacheFindCallback& operator=(const CacheFindCallback&) = delete;
 };
 
 }  // namespace

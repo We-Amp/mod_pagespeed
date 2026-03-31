@@ -163,7 +163,8 @@ class AprMemCache : public CacheInterface {
   // track the last time we sent a message for each of those.
   Variable* last_apr_error_;
 
-  DISALLOW_COPY_AND_ASSIGN(AprMemCache);
+  AprMemCache(const AprMemCache&) = delete;
+  AprMemCache& operator=(const AprMemCache&) = delete;
 };
 
 }  // namespace net_instaweb

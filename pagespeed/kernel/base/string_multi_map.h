@@ -294,7 +294,8 @@ class StringMultiMap {
   Set set_;
   StringPairVector vector_;
 
-  DISALLOW_COPY_AND_ASSIGN(StringMultiMap);
+  StringMultiMap(const StringMultiMap&) = delete;
+  StringMultiMap& operator=(const StringMultiMap&) = delete;
 };
 
 class StringMultiMapInsensitive
@@ -303,7 +304,8 @@ class StringMultiMapInsensitive
   StringMultiMapInsensitive() {}
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(StringMultiMapInsensitive);
+  StringMultiMapInsensitive(const StringMultiMapInsensitive&) = delete;
+  StringMultiMapInsensitive& operator=(const StringMultiMapInsensitive&) = delete;
 };
 
 class StringMultiMapSensitive : public StringMultiMap<StringCompareSensitive> {
@@ -311,7 +313,8 @@ class StringMultiMapSensitive : public StringMultiMap<StringCompareSensitive> {
   StringMultiMapSensitive() {}
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(StringMultiMapSensitive);
+  StringMultiMapSensitive(const StringMultiMapSensitive&) = delete;
+  StringMultiMapSensitive& operator=(const StringMultiMapSensitive&) = delete;
 };
 
 }  // namespace net_instaweb

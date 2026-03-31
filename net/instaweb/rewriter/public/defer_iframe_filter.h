@@ -85,7 +85,8 @@ class DeferIframeFilter : public CommonFilter {
   StaticAssetManager* static_asset_manager_;
   bool script_inserted_;
 
-  DISALLOW_COPY_AND_ASSIGN(DeferIframeFilter);
+  DeferIframeFilter(const DeferIframeFilter&) = delete;
+  DeferIframeFilter& operator=(const DeferIframeFilter&) = delete;
 };
 
 }  // namespace net_instaweb

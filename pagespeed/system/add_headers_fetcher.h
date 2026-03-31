@@ -51,7 +51,8 @@ class AddHeadersFetcher : public UrlAsyncFetcher {
   const RewriteOptions* const options_;
   UrlAsyncFetcher* const backend_fetcher_;
 
-  DISALLOW_COPY_AND_ASSIGN(AddHeadersFetcher);
+  AddHeadersFetcher(const AddHeadersFetcher&) = delete;
+  AddHeadersFetcher& operator=(const AddHeadersFetcher&) = delete;
 };
 
 }  // namespace net_instaweb

@@ -132,7 +132,8 @@ class CriticalSelectorFilter : public CssSummarizerBase {
   // True if flush early script to move links has been added.
   bool is_flush_script_added_;
 
-  DISALLOW_COPY_AND_ASSIGN(CriticalSelectorFilter);
+  CriticalSelectorFilter(const CriticalSelectorFilter&) = delete;
+  CriticalSelectorFilter& operator=(const CriticalSelectorFilter&) = delete;
 };
 
 }  // namespace net_instaweb

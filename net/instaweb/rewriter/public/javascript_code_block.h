@@ -131,7 +131,8 @@ class JavascriptRewriteConfig {
   // Number of scipts we failed to write out.
   Variable* failed_to_write_;
 
-  DISALLOW_COPY_AND_ASSIGN(JavascriptRewriteConfig);
+  JavascriptRewriteConfig(const JavascriptRewriteConfig&) = delete;
+  JavascriptRewriteConfig& operator=(const JavascriptRewriteConfig&) = delete;
 };
 
 // Object representing a block of Javascript code that might be a
@@ -254,7 +255,8 @@ class JavascriptCodeBlock {
 
   MessageHandler* handler_;
 
-  DISALLOW_COPY_AND_ASSIGN(JavascriptCodeBlock);
+  JavascriptCodeBlock(const JavascriptCodeBlock&) = delete;
+  JavascriptCodeBlock& operator=(const JavascriptCodeBlock&) = delete;
 };
 
 }  // namespace net_instaweb

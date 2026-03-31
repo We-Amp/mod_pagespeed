@@ -128,7 +128,8 @@ class CssTagScanner {
   MessageHandler* handler_;
   GoogleString reparse_;
 
-  DISALLOW_COPY_AND_ASSIGN(CssTagScanner);
+  CssTagScanner(const CssTagScanner&) = delete;
+  CssTagScanner& operator=(const CssTagScanner&) = delete;
 };
 
 // Transform URLs by:
@@ -158,7 +159,8 @@ class RewriteDomainTransformer : public CssTagScanner::Transformer {
 
   bool trim_urls_;
 
-  DISALLOW_COPY_AND_ASSIGN(RewriteDomainTransformer);
+  RewriteDomainTransformer(const RewriteDomainTransformer&) = delete;
+  RewriteDomainTransformer& operator=(const RewriteDomainTransformer&) = delete;
 };
 
 }  // namespace net_instaweb

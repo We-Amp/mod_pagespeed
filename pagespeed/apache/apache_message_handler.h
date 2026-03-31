@@ -58,7 +58,8 @@ class ApacheMessageHandler : public SystemMessageHandler {
   const server_rec* server_rec_;
   const GoogleString version_;
 
-  DISALLOW_COPY_AND_ASSIGN(ApacheMessageHandler);
+  ApacheMessageHandler(const ApacheMessageHandler&) = delete;
+  ApacheMessageHandler& operator=(const ApacheMessageHandler&) = delete;
 };
 
 }  // namespace net_instaweb

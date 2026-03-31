@@ -57,7 +57,8 @@ class CssMoveToHeadFilter : public CommonFilter {
 
   Variable* css_elements_moved_;
 
-  DISALLOW_COPY_AND_ASSIGN(CssMoveToHeadFilter);
+  CssMoveToHeadFilter(const CssMoveToHeadFilter&) = delete;
+  CssMoveToHeadFilter& operator=(const CssMoveToHeadFilter&) = delete;
 };
 
 }  // namespace net_instaweb

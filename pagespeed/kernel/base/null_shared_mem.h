@@ -55,7 +55,8 @@ class NullSharedMem : public AbstractSharedMem {
   bool IsDummy() override { return true; }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(NullSharedMem);
+  NullSharedMem(const NullSharedMem&) = delete;
+  NullSharedMem& operator=(const NullSharedMem&) = delete;
 };
 
 }  // namespace net_instaweb

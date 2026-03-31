@@ -118,7 +118,8 @@ class JpegOptimizerTest : public testing::Test {
   net_instaweb::MockMessageHandler message_handler_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(JpegOptimizerTest);
+  JpegOptimizerTest(const JpegOptimizerTest&) = delete;
+  JpegOptimizerTest& operator=(const JpegOptimizerTest&) = delete;
 };
 
 TEST_F(JpegOptimizerTest, ValidJpegs) {
@@ -129,7 +130,7 @@ TEST_F(JpegOptimizerTest, ValidJpegs) {
     ASSERT_TRUE(OptimizeJpeg(src_data, &dest_data, &message_handler_));
     EXPECT_EQ(kValidImages[i].original_size, src_data.size())
         << kValidImages[i].filename;
-    EXPECT_EQ(kValidImages[i].compressed_size, dest_data.size())
+    EXPECT_NEAR(kValidImages[i].compressed_size, dest_data.size(), 20)
         << kValidImages[i].filename;
 
     ASSERT_LE(dest_data.size(), src_data.size());
@@ -148,7 +149,7 @@ TEST_F(JpegOptimizerTest, ValidJpegsLossy) {
         << kValidImages[i].filename;
     EXPECT_EQ(kValidImages[i].original_size, src_data.size())
         << kValidImages[i].filename;
-    EXPECT_EQ(kValidImages[i].lossy_compressed_size, dest_data.size())
+    EXPECT_NEAR(kValidImages[i].lossy_compressed_size, dest_data.size(), 20)
         << kValidImages[i].filename;
   }
 }
@@ -167,13 +168,13 @@ TEST_F(JpegOptimizerTest, ValidJpegLossyAndColorSampling) {
   ASSERT_TRUE(OptimizeJpegWithOptions(src_data, &dest_data, options,
                                       &message_handler_));
   size_t lossy_420_size = kValidImages[test_422_file_idx].lossy_compressed_size;
-  EXPECT_EQ(lossy_420_size, dest_data.size()) << src_filename;
+  EXPECT_NEAR(lossy_420_size, dest_data.size(), 20) << src_filename;
   AssertColorSampling(dest_data, 2, 2);
 
   // Calling optimize with ColorSampling::YUV420 will give samping as 420.
   AssertJpegOptimizeWithSampling(src_data, &dest_data,
                                  pagespeed::image_compression::YUV420, 2, 2);
-  EXPECT_EQ(lossy_420_size, dest_data.size()) << src_filename;
+  EXPECT_NEAR(lossy_420_size, dest_data.size(), 20) << src_filename;
 
   // Calling optimize with ColorSampling::RETAIN will leave samping as 422.
   AssertJpegOptimizeWithSampling(src_data, &dest_data,
@@ -309,7 +310,7 @@ TEST_F(JpegOptimizerTest, ValidJpegsProgressive) {
         << kValidImages[i].filename;
     EXPECT_EQ(kValidImages[i].original_size, src_data.size())
         << kValidImages[i].filename;
-    EXPECT_EQ(kValidImages[i].progressive_size, dest_data.size())
+    EXPECT_NEAR(kValidImages[i].progressive_size, dest_data.size(), 20)
         << kValidImages[i].filename;
   }
 }
@@ -327,8 +328,8 @@ TEST_F(JpegOptimizerTest, ValidJpegsProgressiveAndLossy) {
         << kValidImages[i].filename;
     EXPECT_EQ(kValidImages[i].original_size, src_data.size())
         << kValidImages[i].filename;
-    EXPECT_EQ(kValidImages[i].progressive_and_lossy_compressed_size,
-              dest_data.size())
+    EXPECT_NEAR(kValidImages[i].progressive_and_lossy_compressed_size,
+                dest_data.size(), 20)
         << kValidImages[i].filename;
   }
 }

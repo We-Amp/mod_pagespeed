@@ -85,7 +85,8 @@ class InlineRewriteContext : public RewriteContext {
   HtmlElement* element_;
   HtmlElement::Attribute* src_;
 
-  DISALLOW_COPY_AND_ASSIGN(InlineRewriteContext);
+  InlineRewriteContext(const InlineRewriteContext&) = delete;
+  InlineRewriteContext& operator=(const InlineRewriteContext&) = delete;
 };
 
 }  // namespace net_instaweb

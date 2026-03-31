@@ -43,7 +43,8 @@ class PthreadRWLock : public ThreadSystem::RWLock {
   pthread_rwlock_t rwlock_;
   pthread_rwlockattr_t attr_;
 
-  DISALLOW_COPY_AND_ASSIGN(PthreadRWLock);
+  PthreadRWLock(const PthreadRWLock&) = delete;
+  PthreadRWLock& operator=(const PthreadRWLock&) = delete;
 };
 
 }  // namespace net_instaweb

@@ -251,7 +251,8 @@ class MultipleFrameReader {
   // The browser quirks mode to implement, if any.
   QuirksMode quirks_mode_;
 
-  DISALLOW_COPY_AND_ASSIGN(MultipleFrameReader);
+  MultipleFrameReader(const MultipleFrameReader&) = delete;
+  MultipleFrameReader& operator=(const MultipleFrameReader&) = delete;
 };
 
 // Interface for writing both animated and static images.
@@ -326,7 +327,8 @@ class MultipleFrameWriter {
   // Handles logging info, warning, and error messages.
   MessageHandler* message_handler_;
 
-  DISALLOW_COPY_AND_ASSIGN(MultipleFrameWriter);
+  MultipleFrameWriter(const MultipleFrameWriter&) = delete;
+  MultipleFrameWriter& operator=(const MultipleFrameWriter&) = delete;
 };
 
 #undef IF_OK_RUN

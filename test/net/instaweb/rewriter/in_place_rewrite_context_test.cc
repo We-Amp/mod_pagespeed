@@ -73,7 +73,8 @@ class FakeImageFilter : public FakeFilter {
 
    private:
     FakeImageFilter* filter_;
-    DISALLOW_COPY_AND_ASSIGN(Context);
+    Context(const Context&) = delete;
+    Context& operator=(const Context&) = delete;
   };
 
   explicit FakeImageFilter(RewriteDriver* rewrite_driver)
@@ -93,7 +94,8 @@ class FakeImageFilter : public FakeFilter {
 
  private:
   ImageType optimized_image_type_;
-  DISALLOW_COPY_AND_ASSIGN(FakeImageFilter);
+  FakeImageFilter(const FakeImageFilter&) = delete;
+  FakeImageFilter& operator=(const FakeImageFilter&) = delete;
 };
 
 class InPlaceRewriteContextTest : public RewriteTestBase {

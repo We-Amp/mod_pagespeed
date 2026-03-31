@@ -117,7 +117,8 @@ class LRUCache : public CacheInterface {
   bool is_healthy_;
   SharedStringHelper value_helper_;
 
-  DISALLOW_COPY_AND_ASSIGN(LRUCache);
+  LRUCache(const LRUCache&) = delete;
+  LRUCache& operator=(const LRUCache&) = delete;
 };
 
 }  // namespace net_instaweb

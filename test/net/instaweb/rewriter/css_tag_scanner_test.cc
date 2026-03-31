@@ -77,7 +77,8 @@ class CssTagScannerTest : public testing::Test {
   StringPieceVector nonstandard_attributes_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(CssTagScannerTest);
+  CssTagScannerTest(const CssTagScannerTest&) = delete;
+  CssTagScannerTest& operator=(const CssTagScannerTest&) = delete;
 };
 
 // This test verifies that we understand how Resolve works.
@@ -332,7 +333,8 @@ class RewriteDomainTransformerTest : public RewriteTestBase {
   GoogleUrl new_base_url_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(RewriteDomainTransformerTest);
+  RewriteDomainTransformerTest(const RewriteDomainTransformerTest&) = delete;
+  RewriteDomainTransformerTest& operator=(const RewriteDomainTransformerTest&) = delete;
 };
 
 TEST_F(RewriteDomainTransformerTest, Empty) { EXPECT_STREQ("", Transform("")); }
@@ -608,7 +610,8 @@ class FailTransformer : public CssTagScanner::Transformer {
   TransformStatus Transform(GoogleString* str) override { return kFailure; }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(FailTransformer);
+  FailTransformer(const FailTransformer&) = delete;
+  FailTransformer& operator=(const FailTransformer&) = delete;
 };
 
 TEST(FailTransformerTest, TransformUrlsFails) {

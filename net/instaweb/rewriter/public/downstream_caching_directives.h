@@ -86,7 +86,8 @@ class DownstreamCachingDirectives {
 
   GoogleString capabilities_to_be_supported_;
 
-  DISALLOW_COPY_AND_ASSIGN(DownstreamCachingDirectives);
+  DownstreamCachingDirectives(const DownstreamCachingDirectives&) = delete;
+  DownstreamCachingDirectives& operator=(const DownstreamCachingDirectives&) = delete;
 };
 
 }  // namespace net_instaweb

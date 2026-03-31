@@ -137,7 +137,8 @@ class QueryParams {
  private:
   StringMultiMapSensitive map_;
 
-  DISALLOW_COPY_AND_ASSIGN(QueryParams);
+  QueryParams(const QueryParams&) = delete;
+  QueryParams& operator=(const QueryParams&) = delete;
 };
 
 }  // namespace net_instaweb

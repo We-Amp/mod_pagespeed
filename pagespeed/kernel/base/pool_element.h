@@ -46,7 +46,8 @@ class PoolElement {
  private:
   Position pool_position_;
 
-  DISALLOW_COPY_AND_ASSIGN(PoolElement);
+  PoolElement(const PoolElement&) = delete;
+  PoolElement& operator=(const PoolElement&) = delete;
 };
 
 }  // namespace net_instaweb

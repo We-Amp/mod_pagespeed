@@ -56,7 +56,8 @@ class HTTPValueTest : public testing::Test {
   GoogleMessageHandler message_handler_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(HTTPValueTest);
+  HTTPValueTest(const HTTPValueTest&) = delete;
+  HTTPValueTest& operator=(const HTTPValueTest&) = delete;
 };
 
 TEST_F(HTTPValueTest, Empty) {

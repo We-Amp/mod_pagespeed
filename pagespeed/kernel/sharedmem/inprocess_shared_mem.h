@@ -64,7 +64,8 @@ class InProcessSharedMem : public AbstractSharedMem {
   ThreadSystem* thread_system_;
   SegmentMap segments_;
 
-  DISALLOW_COPY_AND_ASSIGN(InProcessSharedMem);
+  InProcessSharedMem(const InProcessSharedMem&) = delete;
+  InProcessSharedMem& operator=(const InProcessSharedMem&) = delete;
 };
 
 }  // namespace net_instaweb

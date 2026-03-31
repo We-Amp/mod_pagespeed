@@ -42,7 +42,8 @@ class LRUCacheTest : public CacheTestBase {
   LRUCache cache_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(LRUCacheTest);
+  LRUCacheTest(const LRUCacheTest&) = delete;
+  LRUCacheTest& operator=(const LRUCacheTest&) = delete;
 };
 
 // Simple flow of putting in an item, getting it, deleting it.

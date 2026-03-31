@@ -206,7 +206,8 @@ class LicenseProxyFetch : public StringAsyncFetch {
   Timer* timer_;
   MessageHandler* message_handler_;
 
-  DISALLOW_COPY_AND_ASSIGN(LicenseProxyFetch);
+  LicenseProxyFetch(const LicenseProxyFetch&) = delete;
+  LicenseProxyFetch& operator=(const LicenseProxyFetch&) = delete;
 };
 
 AdminLicenseHandler::AdminLicenseHandler(Timer* timer,

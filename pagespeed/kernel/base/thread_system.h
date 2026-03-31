@@ -54,7 +54,8 @@ class ThreadSystem {
     virtual Condvar* NewCondvar() = 0;
 
    private:
-    DISALLOW_COPY_AND_ASSIGN(CondvarCapableMutex);
+    CondvarCapableMutex(const CondvarCapableMutex&) = delete;
+    CondvarCapableMutex& operator=(const CondvarCapableMutex&) = delete;
   };
 
   // Interface for a Mutex with ReaderLocks().  It is possible for multiple
@@ -80,7 +81,8 @@ class ThreadSystem {
     virtual void DCheckReaderLocked();
 
    private:
-    DISALLOW_COPY_AND_ASSIGN(RWLock);
+    RWLock(const RWLock&) = delete;
+    RWLock& operator=(const RWLock&) = delete;
   };
 
   // Scoped reader-lock for using RWLock*.  Facilitates grabbing a
@@ -109,7 +111,8 @@ class ThreadSystem {
    private:
     RWLock* lock_;
 
-    DISALLOW_COPY_AND_ASSIGN(ScopedReader);
+    ScopedReader(const ScopedReader&) = delete;
+    ScopedReader& operator=(const ScopedReader&) = delete;
   };
 
   // Encapsulates a thread ID, whose type is dependent on the thread system
@@ -123,7 +126,8 @@ class ThreadSystem {
     virtual bool IsCurrentThread() const = 0;
 
    private:
-    DISALLOW_COPY_AND_ASSIGN(ThreadId);
+    ThreadId(const ThreadId&) = delete;
+    ThreadId& operator=(const ThreadId&) = delete;
   };
 
   enum ThreadFlags { kDetached = 0, kJoinable = 1 };
@@ -156,7 +160,8 @@ class ThreadSystem {
   friend class CheckingThreadSystem;
   virtual ThreadImpl* NewThreadImpl(Thread* wrapper, ThreadFlags flags) = 0;
 
-  DISALLOW_COPY_AND_ASSIGN(ThreadSystem);
+  ThreadSystem(const ThreadSystem&) = delete;
+  ThreadSystem& operator=(const ThreadSystem&) = delete;
 };
 
 // ThreadImpl is the class that's inherited off when implementing threading ---
@@ -172,7 +177,8 @@ class ThreadSystem::ThreadImpl {
   ThreadImpl() {}
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(ThreadImpl);
+  ThreadImpl(const ThreadImpl&) = delete;
+  ThreadImpl& operator=(const ThreadImpl&) = delete;
 };
 
 // Catch bug where variable name is omitted with ScopedReader, e.g.

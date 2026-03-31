@@ -77,7 +77,8 @@ class DedupInlinedImagesFilter : public CommonFilter {
   // # of times an inlined image was replaced with JS.
   Variable* num_dedup_inlined_images_candidates_replaced_;
 
-  DISALLOW_COPY_AND_ASSIGN(DedupInlinedImagesFilter);
+  DedupInlinedImagesFilter(const DedupInlinedImagesFilter&) = delete;
+  DedupInlinedImagesFilter& operator=(const DedupInlinedImagesFilter&) = delete;
 };
 
 }  // namespace net_instaweb

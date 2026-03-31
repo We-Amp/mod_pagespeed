@@ -140,7 +140,8 @@ class JsCombineFilterTest : public RewriteTestBase {
     GoogleString script_content_;  // contents of any script tag, if any.
     HtmlElement* active_script_;   // any script we're in.
 
-    DISALLOW_COPY_AND_ASSIGN(ScriptCollector);
+    ScriptCollector(const ScriptCollector&) = delete;
+    ScriptCollector& operator=(const ScriptCollector&) = delete;
   };
 
   void SetUp() override {

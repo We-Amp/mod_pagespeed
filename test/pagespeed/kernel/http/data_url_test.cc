@@ -86,7 +86,8 @@ class DataUrlTest : public testing::Test {
   GoogleString mixed_data_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(DataUrlTest);
+  DataUrlTest(const DataUrlTest&) = delete;
+  DataUrlTest& operator=(const DataUrlTest&) = delete;
 };
 
 TEST_F(DataUrlTest, TestDataPlain) {

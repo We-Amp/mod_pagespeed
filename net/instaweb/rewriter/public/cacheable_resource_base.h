@@ -130,7 +130,8 @@ class CacheableResourceBase : public Resource {
   Variable* recent_uncacheables_failure_;
   Variable* misses_;
 
-  DISALLOW_COPY_AND_ASSIGN(CacheableResourceBase);
+  CacheableResourceBase(const CacheableResourceBase&) = delete;
+  CacheableResourceBase& operator=(const CacheableResourceBase&) = delete;
 };
 
 }  // namespace net_instaweb

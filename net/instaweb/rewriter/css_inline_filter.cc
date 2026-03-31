@@ -96,7 +96,8 @@ class CssInlineFilter::Context : public InlineRewriteContext {
   GoogleUrl base_url_;
   GoogleString attrs_charset_;
 
-  DISALLOW_COPY_AND_ASSIGN(Context);
+  Context(const Context&) = delete;
+  Context& operator=(const Context&) = delete;
 };
 
 CssInlineFilter::CssInlineFilter(RewriteDriver* driver)

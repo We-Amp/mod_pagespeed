@@ -22,33 +22,6 @@
 #include <memory>
 
 #include "base/logging.h"
-
-#ifdef _WIN32
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <windows.h>
-namespace {
-void CacheExtenderDebugLog(const char* msg) {
-  HANDLE hFile = CreateFileA(
-      "C:\\inetpub\\pagespeed\\cache_extender_debug.log",
-      FILE_APPEND_DATA,
-      FILE_SHARE_READ | FILE_SHARE_WRITE,
-      NULL,
-      OPEN_ALWAYS,
-      FILE_ATTRIBUTE_NORMAL,
-      NULL);
-  if (hFile != INVALID_HANDLE_VALUE) {
-    DWORD written;
-    WriteFile(hFile, msg, strlen(msg), &written, NULL);
-    WriteFile(hFile, "\r\n", 2, &written, NULL);
-    CloseHandle(hFile);
-  }
-}
-}  // namespace
-#else
-#define CacheExtenderDebugLog(msg) ((void)0)
-#endif
 #include "net/instaweb/http/public/http_cache.h"
 #include "net/instaweb/rewriter/cached_result.pb.h"
 #include "net/instaweb/rewriter/public/domain_lawyer.h"
@@ -132,7 +105,8 @@ class CacheExtender::Context : public SingleRewriteContext {
  private:
   RewriteDriver::InputRole input_role_;
   CacheExtender* extender_;
-  DISALLOW_COPY_AND_ASSIGN(Context);
+  Context(const Context&) = delete;
+  Context& operator=(const Context&) = delete;
 };
 
 CacheExtender::CacheExtender(RewriteDriver* driver) : RewriteFilter(driver) {
@@ -197,41 +171,25 @@ bool CacheExtender::ShouldRewriteResource(const ResponseHeaders* headers,
 }
 
 void CacheExtender::StartElementImpl(HtmlElement* element) {
-  char buf[512];
-  snprintf(buf, sizeof(buf), "StartElementImpl: element=%s",
-           element->name_str().as_string().c_str());
-  CacheExtenderDebugLog(buf);
-
   resource_tag_scanner::UrlCategoryVector attributes;
   resource_tag_scanner::ScanElement(element, driver()->options(), &attributes);
 
-  snprintf(buf, sizeof(buf), "StartElementImpl: %zu URL attributes found",
-           attributes.size());
-  CacheExtenderDebugLog(buf);
   for (int i = 0, n = attributes.size(); i < n; ++i) {
     bool may_load = false;
     RewriteDriver::InputRole input_role = RewriteDriver::InputRole::kUnknown;
-    snprintf(buf, sizeof(buf), "StartElementImpl: attr[%d] category=%d",
-             i, static_cast<int>(attributes[i].category));
-    CacheExtenderDebugLog(buf);
 
     switch (attributes[i].category) {
       case semantic_type::kStylesheet:
         may_load = driver()->MayCacheExtendCss();
         input_role = RewriteDriver::InputRole::kStyle;
-        CacheExtenderDebugLog("StartElementImpl: kStylesheet, MayCacheExtendCss");
         break;
       case semantic_type::kImage:
         may_load = driver()->MayCacheExtendImages();
         input_role = RewriteDriver::InputRole::kImg;
-        snprintf(buf, sizeof(buf), "StartElementImpl: kImage, MayCacheExtendImages=%d",
-                 may_load ? 1 : 0);
-        CacheExtenderDebugLog(buf);
         break;
       case semantic_type::kScript:
         may_load = driver()->MayCacheExtendScripts();
         input_role = RewriteDriver::InputRole::kScript;
-        CacheExtenderDebugLog("StartElementImpl: kScript, MayCacheExtendScripts");
         break;
       default:
         // Does the url in the attribute end in .pdf, ignoring query params?
@@ -247,30 +205,19 @@ void CacheExtender::StartElementImpl(HtmlElement* element) {
         }
         break;
     }
-    snprintf(buf, sizeof(buf), "StartElementImpl: may_load=%d", may_load ? 1 : 0);
-    CacheExtenderDebugLog(buf);
     if (!may_load) {
-      CacheExtenderDebugLog("StartElementImpl: skipping (may_load=false)");
       continue;
     }
 
     // TODO(jmarantz): We ought to be able to domain-shard even if the
     // resources are non-cacheable or privately cacheable.
-    bool is_rewritable = driver()->IsRewritable(element);
-    snprintf(buf, sizeof(buf), "StartElementImpl: IsRewritable=%d", is_rewritable ? 1 : 0);
-    CacheExtenderDebugLog(buf);
-    if (is_rewritable) {
+    if (driver()->IsRewritable(element)) {
       const char* url_str = attributes[i].url->DecodedValueOrNull();
-      snprintf(buf, sizeof(buf), "StartElementImpl: Creating resource for url=%s",
-               url_str ? url_str : "(null)");
-      CacheExtenderDebugLog(buf);
       ResourcePtr input_resource(CreateInputResourceOrInsertDebugComment(
           url_str, input_role, element));
       if (input_resource.get() == nullptr) {
-        CacheExtenderDebugLog("StartElementImpl: input_resource is null, skipping");
         continue;
       }
-      CacheExtenderDebugLog("StartElementImpl: input_resource created successfully");
 
       GoogleUrl input_gurl(input_resource->url());
       if (server_context()->IsPagespeedResource(input_gurl)) {

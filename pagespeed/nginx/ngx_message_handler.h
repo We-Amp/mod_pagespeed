@@ -68,7 +68,8 @@ class NgxMessageHandler : public SystemMessageHandler {
   ngx_uint_t GetNgxLogLevel(MessageType type);
   ngx_log_t* log_;
 
-  DISALLOW_COPY_AND_ASSIGN(NgxMessageHandler);
+  NgxMessageHandler(const NgxMessageHandler&) = delete;
+  NgxMessageHandler& operator=(const NgxMessageHandler&) = delete;
 };
 
 }  // namespace net_instaweb

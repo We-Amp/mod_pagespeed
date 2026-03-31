@@ -46,7 +46,8 @@ class WriteThroughCacheTest : public CacheTestBase {
   }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(WriteThroughCacheTest);
+  WriteThroughCacheTest(const WriteThroughCacheTest&) = delete;
+  WriteThroughCacheTest& operator=(const WriteThroughCacheTest&) = delete;
 };
 
 // Simple flow of putting in an item, getting it, deleting it.

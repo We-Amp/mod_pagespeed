@@ -491,7 +491,8 @@ class UnverifiedCriticalSelectorFinder : public CriticalSelectorFinder {
   bool ShouldReplacePriorResult() const override { return true; }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(UnverifiedCriticalSelectorFinder);
+  UnverifiedCriticalSelectorFinder(const UnverifiedCriticalSelectorFinder&) = delete;
+  UnverifiedCriticalSelectorFinder& operator=(const UnverifiedCriticalSelectorFinder&) = delete;
 };
 
 // Test that unverified results apply.

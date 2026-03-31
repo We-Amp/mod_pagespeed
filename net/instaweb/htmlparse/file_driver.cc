@@ -72,7 +72,8 @@ class Rewriter : public Writer {
  private:
   HtmlParse* parser_;
 
-  DISALLOW_COPY_AND_ASSIGN(Rewriter);
+  Rewriter(const Rewriter&) = delete;
+  Rewriter& operator=(const Rewriter&) = delete;
 };
 
 }  // namespace

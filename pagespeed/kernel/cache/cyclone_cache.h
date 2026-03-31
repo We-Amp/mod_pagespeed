@@ -159,7 +159,8 @@ class CycloneCache : public CacheInterface {
   Variable* bytes_read_;
   Variable* bytes_written_;
 
-  DISALLOW_COPY_AND_ASSIGN(CycloneCache);
+  CycloneCache(const CycloneCache&) = delete;
+  CycloneCache& operator=(const CycloneCache&) = delete;
 };
 
 }  // namespace net_instaweb

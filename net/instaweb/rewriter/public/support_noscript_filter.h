@@ -63,7 +63,8 @@ class SupportNoscriptFilter : public EmptyHtmlFilter {
   RewriteDriver* rewrite_driver_;  // We do not own this.
   bool should_insert_noscript_;
 
-  DISALLOW_COPY_AND_ASSIGN(SupportNoscriptFilter);
+  SupportNoscriptFilter(const SupportNoscriptFilter&) = delete;
+  SupportNoscriptFilter& operator=(const SupportNoscriptFilter&) = delete;
 };
 
 }  // namespace net_instaweb

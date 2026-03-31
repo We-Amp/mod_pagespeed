@@ -78,9 +78,6 @@ typedef int8_t int8;
 // Lazily-initialized boolean value
 enum LazyBool { kNotSet = -1, kFalse = 0, kTrue = 1 };
 
-#define DISALLOW_COPY_AND_ASSIGN(TypeName) \
-  TypeName(const TypeName&);               \
-  void operator=(const TypeName&)
 
 // XXX(oschaaf): check licence. copied this in here because chromium dropped it.
 /*

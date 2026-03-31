@@ -56,7 +56,8 @@ class PthreadCondvarTest : public CondvarTestBase {
   PosixTimer timer_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(PthreadCondvarTest);
+  PthreadCondvarTest(const PthreadCondvarTest&) = delete;
+  PthreadCondvarTest& operator=(const PthreadCondvarTest&) = delete;
 };
 
 TEST_F(PthreadCondvarTest, TestStartup) { StartupTest(); }

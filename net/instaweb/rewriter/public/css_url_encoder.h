@@ -64,7 +64,8 @@ class CssUrlEncoder : public UrlSegmentEncoder {
                                 ResourceContext* resource_context);
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(CssUrlEncoder);
+  CssUrlEncoder(const CssUrlEncoder&) = delete;
+  CssUrlEncoder& operator=(const CssUrlEncoder&) = delete;
 };
 
 }  // namespace net_instaweb

@@ -80,7 +80,8 @@ class UrlAsyncFetcher {
  private:
   bool fetch_with_gzip_;
 
-  DISALLOW_COPY_AND_ASSIGN(UrlAsyncFetcher);
+  UrlAsyncFetcher(const UrlAsyncFetcher&) = delete;
+  UrlAsyncFetcher& operator=(const UrlAsyncFetcher&) = delete;
 };
 
 }  // namespace net_instaweb

@@ -162,7 +162,8 @@ class CategorizedRefcount {
   int total_refcount_;
   ObjectType* object_;
   AbstractMutex* mutex_;
-  DISALLOW_COPY_AND_ASSIGN(CategorizedRefcount);
+  CategorizedRefcount(const CategorizedRefcount&) = delete;
+  CategorizedRefcount& operator=(const CategorizedRefcount&) = delete;
 };
 
 }  // namespace net_instaweb

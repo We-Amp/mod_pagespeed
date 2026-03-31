@@ -51,7 +51,8 @@ class QueryParamsTest : public testing::Test {
   QueryParams query_params_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(QueryParamsTest);
+  QueryParamsTest(const QueryParamsTest&) = delete;
+  QueryParamsTest& operator=(const QueryParamsTest&) = delete;
 };
 
 TEST_F(QueryParamsTest, TestParseFromUrl) {

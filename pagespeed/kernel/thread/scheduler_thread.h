@@ -75,7 +75,8 @@ class SchedulerThread : public ThreadSystem::Thread {
   bool quit_;
   Scheduler* scheduler_;
 
-  DISALLOW_COPY_AND_ASSIGN(SchedulerThread);
+  SchedulerThread(const SchedulerThread&) = delete;
+  SchedulerThread& operator=(const SchedulerThread&) = delete;
 };
 
 }  // namespace net_instaweb

@@ -75,7 +75,8 @@ class UrlAsyncFetcherStats : public UrlAsyncFetcher {
   Variable* bytes_fetched_;
   Variable* approx_header_bytes_fetched_;
 
-  DISALLOW_COPY_AND_ASSIGN(UrlAsyncFetcherStats);
+  UrlAsyncFetcherStats(const UrlAsyncFetcherStats&) = delete;
+  UrlAsyncFetcherStats& operator=(const UrlAsyncFetcherStats&) = delete;
 };
 
 }  // namespace net_instaweb

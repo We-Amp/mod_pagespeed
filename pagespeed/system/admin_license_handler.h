@@ -146,7 +146,8 @@ class AdminLicenseHandler {
   friend class LicenseProxyFetch;
   friend class RenewalFetch;
 
-  DISALLOW_COPY_AND_ASSIGN(AdminLicenseHandler);
+  AdminLicenseHandler(const AdminLicenseHandler&) = delete;
+  AdminLicenseHandler& operator=(const AdminLicenseHandler&) = delete;
 };
 
 }  // namespace net_instaweb

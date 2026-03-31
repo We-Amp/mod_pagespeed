@@ -184,7 +184,8 @@ class JsTokenizer {
   bool start_of_line_;  // No non-whitespace/comment tokens on this line yet.
   bool error_;
 
-  DISALLOW_COPY_AND_ASSIGN(JsTokenizer);
+  JsTokenizer(const JsTokenizer&) = delete;
+  JsTokenizer& operator=(const JsTokenizer&) = delete;
 };
 
 // Structure to store RE2 patterns that can be shared by instances of
@@ -209,7 +210,8 @@ struct JsTokenizerPatterns {
   const RE2 line_continuation_pattern;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(JsTokenizerPatterns);
+  JsTokenizerPatterns(const JsTokenizerPatterns&) = delete;
+  JsTokenizerPatterns& operator=(const JsTokenizerPatterns&) = delete;
 };
 
 }  // namespace js

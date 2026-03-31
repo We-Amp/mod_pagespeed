@@ -127,7 +127,8 @@ class CacheStats::StatsCallback : public DelegatingCacheCallback {
   Timer* timer_;
   int64 start_time_us_;
 
-  DISALLOW_COPY_AND_ASSIGN(StatsCallback);
+  StatsCallback(const StatsCallback&) = delete;
+  StatsCallback& operator=(const StatsCallback&) = delete;
 };
 
 void CacheStats::Get(const GoogleString& key, Callback* callback) {

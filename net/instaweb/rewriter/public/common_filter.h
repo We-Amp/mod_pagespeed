@@ -200,7 +200,8 @@ class CommonFilter : public EmptyHtmlFilter {
   HtmlElement* end_body_point_;
   bool seen_base_;
 
-  DISALLOW_COPY_AND_ASSIGN(CommonFilter);
+  CommonFilter(const CommonFilter&) = delete;
+  CommonFilter& operator=(const CommonFilter&) = delete;
 };
 
 }  // namespace net_instaweb

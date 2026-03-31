@@ -55,7 +55,8 @@ class ElideAttributesFilter : public EmptyHtmlFilter {
   KeywordSetMap one_value_attrs_map_;  // tag/attrs with only one possible value
   ValueMapMap default_value_map_;      // tag/attrs with default values
 
-  DISALLOW_COPY_AND_ASSIGN(ElideAttributesFilter);
+  ElideAttributesFilter(const ElideAttributesFilter&) = delete;
+  ElideAttributesFilter& operator=(const ElideAttributesFilter&) = delete;
 };
 
 }  // namespace net_instaweb

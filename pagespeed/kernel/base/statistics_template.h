@@ -292,7 +292,8 @@ class StatisticsTemplate : public Statistics {
   StringVector up_down_names_;
   StringVector histogram_names_;
 
-  DISALLOW_COPY_AND_ASSIGN(StatisticsTemplate);
+  StatisticsTemplate(const StatisticsTemplate&) = delete;
+  StatisticsTemplate& operator=(const StatisticsTemplate&) = delete;
 };
 
 // Helper class to create Variable interface implementations given a
@@ -323,7 +324,8 @@ class VarTemplate : public Variable {
  private:
   Impl impl_;
 
-  DISALLOW_COPY_AND_ASSIGN(VarTemplate);
+  VarTemplate(const VarTemplate&) = delete;
+  VarTemplate& operator=(const VarTemplate&) = delete;
 };
 
 // Helper class to create UpDownCounter interface implementations given a
@@ -346,7 +348,8 @@ class UpDownTemplate : public UpDownCounter {
  private:
   Impl impl_;
 
-  DISALLOW_COPY_AND_ASSIGN(UpDownTemplate);
+  UpDownTemplate(const UpDownTemplate&) = delete;
+  UpDownTemplate& operator=(const UpDownTemplate&) = delete;
 };
 
 // A specialization of StatisticsTemplate for implementations where the

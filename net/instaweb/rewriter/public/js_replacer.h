@@ -87,7 +87,8 @@ class JsReplacer {
   std::vector<Pattern> patterns_;
   const pagespeed::js::JsTokenizerPatterns* js_tokenizer_patterns_;
 
-  DISALLOW_COPY_AND_ASSIGN(JsReplacer);
+  JsReplacer(const JsReplacer&) = delete;
+  JsReplacer& operator=(const JsReplacer&) = delete;
 };
 
 }  // namespace net_instaweb

@@ -132,7 +132,8 @@ class CssMinify {
   StringVector* url_collector_;
   bool in_css_calc_function_;
 
-  DISALLOW_COPY_AND_ASSIGN(CssMinify);
+  CssMinify(const CssMinify&) = delete;
+  CssMinify& operator=(const CssMinify&) = delete;
 };
 
 }  // namespace net_instaweb

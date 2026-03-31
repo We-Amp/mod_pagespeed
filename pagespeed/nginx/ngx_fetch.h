@@ -100,7 +100,8 @@ class NgxConnection : public PoolElement<NgxConnection> {
   u_char sockaddr_[NGX_SOCKADDRLEN];
   MessageHandler* handler_;
 
-  DISALLOW_COPY_AND_ASSIGN(NgxConnection);
+  NgxConnection(const NgxConnection&) = delete;
+  NgxConnection& operator=(const NgxConnection&) = delete;
 };
 
 class NgxFetch : public PoolElement<NgxFetch> {
@@ -205,7 +206,8 @@ class NgxFetch : public PoolElement<NgxFetch> {
   NgxConnection* connection_;
   ngx_resolver_ctx_t* resolver_ctx_;
 
-  DISALLOW_COPY_AND_ASSIGN(NgxFetch);
+  NgxFetch(const NgxFetch&) = delete;
+  NgxFetch& operator=(const NgxFetch&) = delete;
 };
 
 }  // namespace net_instaweb

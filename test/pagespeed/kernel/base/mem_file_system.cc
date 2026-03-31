@@ -74,7 +74,8 @@ class MemInputFile : public FileSystem::InputFile {
   const GoogleString filename_;
   int offset_;
 
-  DISALLOW_COPY_AND_ASSIGN(MemInputFile);
+  MemInputFile(const MemInputFile&) = delete;
+  MemInputFile& operator=(const MemInputFile&) = delete;
 };
 
 class MemOutputFile : public FileSystem::OutputFile {
@@ -114,7 +115,8 @@ class MemOutputFile : public FileSystem::OutputFile {
   const GoogleString filename_;
   GoogleString written_;
 
-  DISALLOW_COPY_AND_ASSIGN(MemOutputFile);
+  MemOutputFile(const MemOutputFile&) = delete;
+  MemOutputFile& operator=(const MemOutputFile&) = delete;
 };
 
 MemFileSystem::MemFileSystem(ThreadSystem* threads, Timer* timer)

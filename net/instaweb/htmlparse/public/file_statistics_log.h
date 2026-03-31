@@ -41,7 +41,8 @@ class FileStatisticsLog : public StatisticsLog {
   FileSystem::OutputFile* file_;
   MessageHandler* message_handler_;
 
-  DISALLOW_COPY_AND_ASSIGN(FileStatisticsLog);
+  FileStatisticsLog(const FileStatisticsLog&) = delete;
+  FileStatisticsLog& operator=(const FileStatisticsLog&) = delete;
 };
 
 }  // namespace net_instaweb

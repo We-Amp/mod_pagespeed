@@ -41,7 +41,8 @@ class StringWriter : public Writer {
  private:
   GoogleString* string_;
 
-  DISALLOW_COPY_AND_ASSIGN(StringWriter);
+  StringWriter(const StringWriter&) = delete;
+  StringWriter& operator=(const StringWriter&) = delete;
 };
 
 }  // namespace net_instaweb

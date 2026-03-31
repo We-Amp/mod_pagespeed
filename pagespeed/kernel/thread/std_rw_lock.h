@@ -60,7 +60,8 @@ class StdRWLock : public ThreadSystem::RWLock {
   int writers_waiting_;
   bool writer_active_;
 
-  DISALLOW_COPY_AND_ASSIGN(StdRWLock);
+  StdRWLock(const StdRWLock&) = delete;
+  StdRWLock& operator=(const StdRWLock&) = delete;
 };
 
 }  // namespace net_instaweb

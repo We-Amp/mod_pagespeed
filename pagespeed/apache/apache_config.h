@@ -116,7 +116,8 @@ class ApacheConfig : public SystemRewriteOptions {
   Option<GoogleString> measurement_proxy_root_;
   Option<GoogleString> measurement_proxy_password_;
 
-  DISALLOW_COPY_AND_ASSIGN(ApacheConfig);
+  ApacheConfig(const ApacheConfig&) = delete;
+  ApacheConfig& operator=(const ApacheConfig&) = delete;
 };
 
 }  // namespace net_instaweb

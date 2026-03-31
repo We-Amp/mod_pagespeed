@@ -50,7 +50,8 @@ class InlineSListElement {
   void set_next(T* new_next) { next_ = new_next; }
 
   T* next_;
-  DISALLOW_COPY_AND_ASSIGN(InlineSListElement);
+  InlineSListElement(const InlineSListElement&) = delete;
+  InlineSListElement& operator=(const InlineSListElement&) = delete;
 };
 
 // A simple linked list that's optimized for memory usage,
@@ -223,7 +224,8 @@ class InlineSList {
   // yet still have easy front-to-end traversal.
   T* tail_;
 
-  DISALLOW_COPY_AND_ASSIGN(InlineSList);
+  InlineSList(const InlineSList&) = delete;
+  InlineSList& operator=(const InlineSList&) = delete;
 };
 
 template <class T>

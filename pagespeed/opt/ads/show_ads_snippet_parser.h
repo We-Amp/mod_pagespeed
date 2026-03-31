@@ -46,7 +46,8 @@ class ShowAdsSnippetParser {
                    AttributeMap* parsed_attributes) const;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(ShowAdsSnippetParser);
+  ShowAdsSnippetParser(const ShowAdsSnippetParser&) = delete;
+  ShowAdsSnippetParser& operator=(const ShowAdsSnippetParser&) = delete;
 };
 
 }  // namespace net_instaweb

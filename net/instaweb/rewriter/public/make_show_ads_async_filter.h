@@ -126,7 +126,8 @@ class MakeShowAdsAsyncFilter : public CommonFilter {
   Variable* show_ads_snippets_not_converted_count_;
   Variable* show_ads_api_replaced_for_async_;
 
-  DISALLOW_COPY_AND_ASSIGN(MakeShowAdsAsyncFilter);
+  MakeShowAdsAsyncFilter(const MakeShowAdsAsyncFilter&) = delete;
+  MakeShowAdsAsyncFilter& operator=(const MakeShowAdsAsyncFilter&) = delete;
 };
 
 }  // namespace net_instaweb

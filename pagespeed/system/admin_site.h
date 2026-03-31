@@ -163,7 +163,8 @@ class AdminSite {
   MessageHandler* message_handler_;
   Timer* timer_;
   std::unique_ptr<AdminLicenseHandler> license_handler_;
-  DISALLOW_COPY_AND_ASSIGN(AdminSite);
+  AdminSite(const AdminSite&) = delete;
+  AdminSite& operator=(const AdminSite&) = delete;
 };
 
 }  // namespace net_instaweb

@@ -38,7 +38,8 @@ class NullStatisticsVariable {
   StringPiece GetName() const { return StringPiece(); }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(NullStatisticsVariable);
+  NullStatisticsVariable(const NullStatisticsVariable&) = delete;
+  NullStatisticsVariable& operator=(const NullStatisticsVariable&) = delete;
 };
 
 // Simple name/value pair statistics implementation.
@@ -50,7 +51,8 @@ class NullStatistics : public ScalarStatisticsTemplate<NullStatisticsVariable> {
   CountHistogram* NewHistogram(StringPiece name) override;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(NullStatistics);
+  NullStatistics(const NullStatistics&) = delete;
+  NullStatistics& operator=(const NullStatistics&) = delete;
 };
 
 }  // namespace net_instaweb

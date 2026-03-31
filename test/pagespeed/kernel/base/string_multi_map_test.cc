@@ -44,7 +44,8 @@ class StringMultiMapTest : public testing::Test {
   StringMultiMapInsensitive string_map_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(StringMultiMapTest);
+  StringMultiMapTest(const StringMultiMapTest&) = delete;
+  StringMultiMapTest& operator=(const StringMultiMapTest&) = delete;
 };
 
 TEST_F(StringMultiMapTest, TestAdd) {

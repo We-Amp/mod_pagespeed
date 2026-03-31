@@ -35,7 +35,8 @@ class InMemoryCacheTest : public CacheTestBase {
   InMemoryCache cache_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(InMemoryCacheTest);
+  InMemoryCacheTest(const InMemoryCacheTest&) = delete;
+  InMemoryCacheTest& operator=(const InMemoryCacheTest&) = delete;
 };
 
 // Simple flow of putting in an item, getting it, deleting it.

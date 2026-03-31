@@ -67,7 +67,8 @@ class FileLoadRuleRegexp : public FileLoadRule {
   // RE2s can't be copied, so we need to keep the string around.
   const GoogleString filename_regexp_str_;
 
-  DISALLOW_COPY_AND_ASSIGN(FileLoadRuleRegexp);
+  FileLoadRuleRegexp(const FileLoadRuleRegexp&) = delete;
+  FileLoadRuleRegexp& operator=(const FileLoadRuleRegexp&) = delete;
 };
 
 class FileLoadRuleLiteral : public FileLoadRule {
@@ -84,7 +85,8 @@ class FileLoadRuleLiteral : public FileLoadRule {
  private:
   const GoogleString filename_prefix_;
 
-  DISALLOW_COPY_AND_ASSIGN(FileLoadRuleLiteral);
+  FileLoadRuleLiteral(const FileLoadRuleLiteral&) = delete;
+  FileLoadRuleLiteral& operator=(const FileLoadRuleLiteral&) = delete;
 };
 
 }  // namespace net_instaweb

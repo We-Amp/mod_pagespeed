@@ -114,7 +114,8 @@ class FileSystemTest : public testing::Test {
   // Default file system block size is 4KB.
   static const int kBlockSize = 4096;
 
-  DISALLOW_COPY_AND_ASSIGN(FileSystemTest);
+  FileSystemTest(const FileSystemTest&) = delete;
+  FileSystemTest& operator=(const FileSystemTest&) = delete;
 };
 
 class CountingProgressNotifier : public FileSystem::ProgressNotifier {

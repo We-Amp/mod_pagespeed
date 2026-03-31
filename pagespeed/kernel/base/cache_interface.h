@@ -137,7 +137,8 @@ class CacheInterface {
     bool called_;
     CacheInterface::KeyState state_;
 
-    DISALLOW_COPY_AND_ASSIGN(SynchronousCallback);
+    SynchronousCallback(const SynchronousCallback&) = delete;
+    SynchronousCallback& operator=(const SynchronousCallback&) = delete;
   };
 
   // Vector of structures used to initiate a MultiGet.

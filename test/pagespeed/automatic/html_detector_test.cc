@@ -37,7 +37,8 @@ class HtmlDetectorTest : public testing::Test {
   HtmlDetector html_detector_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(HtmlDetectorTest);
+  HtmlDetectorTest(const HtmlDetectorTest&) = delete;
+  HtmlDetectorTest& operator=(const HtmlDetectorTest&) = delete;
 };
 
 TEST_F(HtmlDetectorTest, DetectHtml) {

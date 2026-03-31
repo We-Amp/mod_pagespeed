@@ -124,7 +124,8 @@ class RequestHeaders : public Headers<HttpRequestHeaders> {
   bool HasCookieValue(StringPiece cookie_name, StringPiece cookie_value) const;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(RequestHeaders);
+  RequestHeaders(const RequestHeaders&) = delete;
+  RequestHeaders& operator=(const RequestHeaders&) = delete;
 };
 
 }  // namespace net_instaweb

@@ -64,7 +64,8 @@ class Hasher {
  private:
   int max_chars_;  // limit on length of Hash/HashSizeInChars set by subclass.
 
-  DISALLOW_COPY_AND_ASSIGN(Hasher);
+  Hasher(const Hasher&) = delete;
+  Hasher& operator=(const Hasher&) = delete;
 };
 
 }  // namespace net_instaweb

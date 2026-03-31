@@ -63,7 +63,8 @@ class NotifyingFetch : public AsyncFetch {
   GoogleString url_;
   WorkerTestBase::SyncPoint* sync_;
 
-  DISALLOW_COPY_AND_ASSIGN(NotifyingFetch);
+  NotifyingFetch(const NotifyingFetch&) = delete;
+  NotifyingFetch& operator=(const NotifyingFetch&) = delete;
 };
 
 }  // namespace net_instaweb

@@ -224,7 +224,8 @@ class ApacheCachingHeaders : public CachingHeaders {
  private:
   request_rec* request_;
 
-  DISALLOW_COPY_AND_ASSIGN(ApacheCachingHeaders);
+  ApacheCachingHeaders(const ApacheCachingHeaders&) = delete;
+  ApacheCachingHeaders& operator=(const ApacheCachingHeaders&) = delete;
 };
 
 void DisableCacheControlHeader(request_rec* request) {

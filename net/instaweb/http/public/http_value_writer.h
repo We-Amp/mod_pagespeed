@@ -57,7 +57,8 @@ class HTTPValueWriter {
   HTTPValue* value_;
   HTTPCache* cache_;
   bool has_buffered_;
-  DISALLOW_COPY_AND_ASSIGN(HTTPValueWriter);
+  HTTPValueWriter(const HTTPValueWriter&) = delete;
+  HTTPValueWriter& operator=(const HTTPValueWriter&) = delete;
 };
 
 }  // namespace net_instaweb

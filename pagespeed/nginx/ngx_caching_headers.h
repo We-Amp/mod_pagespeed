@@ -55,7 +55,8 @@ class NgxCachingHeaders : public CachingHeaders {
  private:
   ngx_http_request_t* request_;
 
-  DISALLOW_COPY_AND_ASSIGN(NgxCachingHeaders);
+  NgxCachingHeaders(const NgxCachingHeaders&) = delete;
+  NgxCachingHeaders& operator=(const NgxCachingHeaders&) = delete;
 };
 
 }  // namespace net_instaweb

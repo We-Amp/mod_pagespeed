@@ -40,10 +40,9 @@ class UrlAsyncFetcher;
 
 // RewriteDriverFactory for IIS on Windows.
 //
-// This is a minimal implementation that wires up the system-level factory
-// with sensible defaults for a single-process IIS worker.  Resource fetching
-// is not yet implemented (AllocateFetcher returns nullptr); a future
-// WinHttpUrlAsyncFetcher will provide production-grade fetching.
+// This implementation wires up the system-level factory with sensible defaults
+// for IIS worker processes. Resource fetching uses CurlUrlAsyncFetcher, the
+// same approach used by the Envoy filter.
 class IisRewriteDriverFactory : public SystemRewriteDriverFactory {
  public:
   IisRewriteDriverFactory(const ProcessContext& process_context,
@@ -58,8 +57,7 @@ class IisRewriteDriverFactory : public SystemRewriteDriverFactory {
   SystemServerContext* MakeNewServerContext();
 
  protected:
-  // Returns nullptr — resource fetching is not yet implemented.
-  // TODO(windows): Return a WinHttpUrlAsyncFetcher.
+  // Returns a CurlUrlAsyncFetcher for resource fetching on Windows.
   UrlAsyncFetcher* AllocateFetcher(SystemRewriteOptions* config) override;
 
   // Pure virtual implementations from RewriteDriverFactory.
@@ -70,7 +68,8 @@ class IisRewriteDriverFactory : public SystemRewriteDriverFactory {
  private:
   std::unique_ptr<GoogleMessageHandler> message_handler_;
 
-  DISALLOW_COPY_AND_ASSIGN(IisRewriteDriverFactory);
+  IisRewriteDriverFactory(const IisRewriteDriverFactory&) = delete;
+  IisRewriteDriverFactory& operator=(const IisRewriteDriverFactory&) = delete;
 };
 
 }  // namespace net_instaweb

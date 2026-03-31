@@ -149,7 +149,8 @@ class NgxUrlAsyncFetcher : public UrlAsyncFetcher {
 
   NgxEventConnection* event_connection_;
 
-  DISALLOW_COPY_AND_ASSIGN(NgxUrlAsyncFetcher);
+  NgxUrlAsyncFetcher(const NgxUrlAsyncFetcher&) = delete;
+  NgxUrlAsyncFetcher& operator=(const NgxUrlAsyncFetcher&) = delete;
 };
 
 }  // namespace net_instaweb

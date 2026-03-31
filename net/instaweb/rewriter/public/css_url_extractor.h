@@ -41,7 +41,8 @@ class CssUrlExtractor : public CssTagScanner::Transformer {
  private:
   StringVector* out_urls_;
 
-  DISALLOW_COPY_AND_ASSIGN(CssUrlExtractor);
+  CssUrlExtractor(const CssUrlExtractor&) = delete;
+  CssUrlExtractor& operator=(const CssUrlExtractor&) = delete;
 };
 
 }  // namespace net_instaweb

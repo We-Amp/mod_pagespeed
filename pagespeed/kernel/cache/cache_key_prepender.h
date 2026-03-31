@@ -62,7 +62,8 @@ class CacheKeyPrepender : public CacheInterface {
 
   GoogleString AddPrefix(const GoogleString& key);
 
-  DISALLOW_COPY_AND_ASSIGN(CacheKeyPrepender);
+  CacheKeyPrepender(const CacheKeyPrepender&) = delete;
+  CacheKeyPrepender& operator=(const CacheKeyPrepender&) = delete;
 };
 
 }  // namespace net_instaweb

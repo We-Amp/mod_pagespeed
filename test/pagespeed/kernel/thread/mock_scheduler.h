@@ -72,7 +72,8 @@ class MockScheduler : public Scheduler {
   MockTimer* timer_;
   QueuedWorkerPool::SequenceSet workers_ GUARDED_BY(mutex());
 
-  DISALLOW_COPY_AND_ASSIGN(MockScheduler);
+  MockScheduler(const MockScheduler&) = delete;
+  MockScheduler& operator=(const MockScheduler&) = delete;
 };
 
 }  // namespace net_instaweb

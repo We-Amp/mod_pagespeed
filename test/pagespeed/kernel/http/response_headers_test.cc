@@ -226,7 +226,8 @@ class ResponseHeadersTest : public testing::Test {
   const GoogleString max_age_300_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(ResponseHeadersTest);
+  ResponseHeadersTest(const ResponseHeadersTest&) = delete;
+  ResponseHeadersTest& operator=(const ResponseHeadersTest&) = delete;
 };
 
 // Parse the headers from google.com

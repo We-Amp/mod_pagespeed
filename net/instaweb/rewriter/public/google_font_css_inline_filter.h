@@ -50,7 +50,8 @@ class GoogleFontCssInlineFilter : public CssInlineFilter {
   void ResetAndExplainReason(const char* reason, ResourcePtr* resource);
   void CheckIfFontServiceUrl(const GoogleUrl& url, bool* result);
 
-  DISALLOW_COPY_AND_ASSIGN(GoogleFontCssInlineFilter);
+  GoogleFontCssInlineFilter(const GoogleFontCssInlineFilter&) = delete;
+  GoogleFontCssInlineFilter& operator=(const GoogleFontCssInlineFilter&) = delete;
 };
 
 }  // namespace net_instaweb

@@ -343,7 +343,8 @@ class DisabledFilter : public EmptyHtmlFilter {
  private:
   GoogleString name_;
 
-  DISALLOW_COPY_AND_ASSIGN(DisabledFilter);
+  DisabledFilter(const DisabledFilter&) = delete;
+  DisabledFilter& operator=(const DisabledFilter&) = delete;
 };
 
 TEST_F(DebugFilterNoOtherFiltersTest, NoDisabledFiltersTest) {
