@@ -17,8 +17,6 @@
  * under the License.
  */
 
-
-
 // TODO(jefftk): share more of this code with apache's log_message_handler
 
 #include "log_message_handler.h"
@@ -40,7 +38,7 @@
 
 namespace {
 
-ngx_log_t* ngx_log = NULL;
+ngx_log_t* ngx_log = nullptr;
 
 ngx_uint_t GetNgxLogLevel(int severity) {
   switch (severity) {
@@ -70,14 +68,12 @@ bool LogMessageHandler(int severity, const char* file, int line,
   }
 
   ngx_log_error(this_log_level, ngx_log, 0, "[ngx_pagespeed %s] %s",
-                net_instaweb::kModPagespeedVersion,
-                message.c_str());
+                net_instaweb::kModPagespeedVersion, message.c_str());
 
   return true;
 }
 
 }  // namespace
-
 
 namespace net_instaweb {
 
@@ -86,9 +82,8 @@ namespace log_message_handler {
 // Log sink that routes to nginx error log
 class NgxGLogSink : public PageSpeedGLogSink {
  public:
-  void send(int severity, const char* full_filename,
-            const char* base_filename, int line, const char* message,
-            size_t message_len) override {
+  void send(int severity, const char* full_filename, const char* base_filename,
+            int line, const char* message, size_t message_len) override {
     LogMessageHandler(severity, base_filename, line,
                       std::string(message, message_len));
   }
@@ -107,9 +102,7 @@ void Install(ngx_log_t* log_in) {
   }
 }
 
-void ShutDown() {
-  ngx_glog_sink.reset();
-}
+void ShutDown() { ngx_glog_sink.reset(); }
 
 }  // namespace log_message_handler
 

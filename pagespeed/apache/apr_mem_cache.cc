@@ -23,6 +23,7 @@
 
 #include "apr_pools.h"  // NOLINT
 #include "base/logging.h"
+#include "pagespeed/apache/apr_thread_compatible_pool.h"
 #include "pagespeed/kernel/base/hasher.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/shared_string.h"
@@ -32,7 +33,6 @@
 #include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/cache/cache_interface.h"
 #include "pagespeed/kernel/cache/key_value_codec.h"
-#include "pagespeed/apache/apr_thread_compatible_pool.h"
 #include "third_party/aprutil/apr_memcache2.h"
 
 namespace net_instaweb {
@@ -108,8 +108,8 @@ bool AprMemCache::Connect() {
           pool_, spec.host.c_str(), spec.port, kDefaultServerMin,
           kDefaultServerSmax, thread_limit_, kDefaultServerTtlUs, &server);
       if ((status != APR_SUCCESS) ||
-          ((status =
-                apr_memcache2_add_server(memcached_, server) != APR_SUCCESS))) {
+          ((status =  // NOLINT(bugprone-assignment-in-if-condition)
+            apr_memcache2_add_server(memcached_, server) != APR_SUCCESS))) {
         char buf[kStackBufferSize];
         apr_strerror(status, buf, sizeof(buf));
         message_handler_->Message(

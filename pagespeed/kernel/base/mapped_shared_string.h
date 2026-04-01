@@ -102,9 +102,9 @@ class MappedSharedString {
   //   size: Size of the data in bytes
   //   release_callback: Function to call when releasing (may be nullptr)
   //   release_data: User data to pass to release_callback
-  static MappedSharedString FromMappedView(const char* data, size_t size,
-                                           MappedReleaseCallback release_callback,
-                                           void* release_data);
+  static MappedSharedString FromMappedView(
+      const char* data, size_t size, MappedReleaseCallback release_callback,
+      void* release_data);
 
   // Returns the value as a StringPiece.
   // The returned StringPiece is valid as long as this MappedSharedString

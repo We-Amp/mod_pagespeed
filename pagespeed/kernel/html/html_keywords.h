@@ -190,7 +190,9 @@ class HtmlKeywords {
   // My theory is that the maps are sufficiently small that the algorithmic
   // differences are not dominant, but keeping the data small helps the
   // processor cache behavior.
-  using StringStringSparseHashMapInsensitive = sparse_hash_map<GoogleString, const char*, CaseFoldStringHash, CaseFoldStringEqual>;
+  using StringStringSparseHashMapInsensitive =
+      sparse_hash_map<GoogleString, const char*, CaseFoldStringHash,
+                      CaseFoldStringEqual>;
   using StringStringSparseHashMapSensitive =
       sparse_hash_map<GoogleString, const char*, CasePreserveStringHash>;
 

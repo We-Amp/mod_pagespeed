@@ -61,7 +61,8 @@ bool DownstreamCachingDirectives::IsPropertySupported(
     const GoogleString& supported_capabilities) {
   if (*stored_property_support == kNotSet) {
     if (supported_capabilities ==
-        DownstreamCachingDirectives::kNoCapabilitiesSpecified) {
+        DownstreamCachingDirectives::
+            kNoCapabilitiesSpecified) {  // NOLINT(bugprone-branch-clone)
       *stored_property_support = kTrue;
     } else if (supported_capabilities == capability) {
       // Matches "ii" exactly.

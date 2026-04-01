@@ -212,9 +212,9 @@ RewriteStats::RewriteStats(bool has_waveforms, Statistics* stats,
 
   for (int i = 0; i < RewriteDriverFactory::kNumWorkerPools; ++i) {
     if (has_waveforms) {
-      thread_queue_depths_.push_back(
-          std::make_unique<Waveform>(thread_system, timer, kNumWaveformSamples,
-                                     stats->GetUpDownCounter(kWaveFormCounters[i])));
+      thread_queue_depths_.push_back(std::make_unique<Waveform>(
+          thread_system, timer, kNumWaveformSamples,
+          stats->GetUpDownCounter(kWaveFormCounters[i])));
     } else {
       thread_queue_depths_.push_back(nullptr);
     }

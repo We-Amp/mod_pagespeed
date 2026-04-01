@@ -1023,7 +1023,7 @@ void HtmlLexer::Parse(const char* text, int size) {
     // and the literal buffer is already large, stop parsing. This
     // preserves the element-boundary behavior for normal-sized content
     // while preventing OOM from pathological input.
-    if (size_limit_exceeded_ && literal_.size() > 10 * 1024 * 1024) {
+    if (size_limit_exceeded_ && literal_.size() > 10UL * 1024 * 1024) {
       skip_parsing_ = true;
       return;
     }
@@ -1048,7 +1048,7 @@ void HtmlLexer::Parse(const char* text, int size) {
       case TAG_CLOSE_NO_NAME:
         EvalTagCloseNoName(c);
         break;
-      case TAG_CLOSE:
+      case TAG_CLOSE:  // NOLINT(bugprone-branch-clone)
         EvalTagClose(c);
         break;
       case TAG_CLOSE_TERMINATE:

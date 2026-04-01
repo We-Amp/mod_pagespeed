@@ -51,7 +51,8 @@ class HandleNoscriptRedirectFilter : public EmptyHtmlFilter {
   bool canonical_inserted_;
 
   HandleNoscriptRedirectFilter(const HandleNoscriptRedirectFilter&) = delete;
-  HandleNoscriptRedirectFilter& operator=(const HandleNoscriptRedirectFilter&) = delete;
+  HandleNoscriptRedirectFilter& operator=(const HandleNoscriptRedirectFilter&) =
+      delete;
 };
 
 }  // namespace net_instaweb

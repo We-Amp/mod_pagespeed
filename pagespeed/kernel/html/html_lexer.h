@@ -167,7 +167,7 @@ class HtmlLexer {
   // Minimal i18n analysis.  With utf-8 and gb2312 we can do this
   // context-free, and thus the method can be static.  If we add
   // more encodings we may need to turn this into a non-static method.
-  static inline bool IsI18nChar(char c) { return (((c)&0x80) != 0); }
+  static inline bool IsI18nChar(char c) { return (((c) & 0x80) != 0); }
 
   // Determines whether a character can be used in a tag name as first char ...
   static inline bool IsLegalTagFirstChar(char c);

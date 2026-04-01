@@ -20,6 +20,7 @@
 #include "net/instaweb/spriter/libpng_image_library.h"
 
 #include <cerrno>
+#include <cstddef>
 
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -167,8 +168,9 @@ LibpngImageLibrary::Canvas::Canvas(ImageLibraryInterface* lib,
       height_(height) {
   rows_ = new png_bytep[height];
   for (int i = height - 1; i >= 0; i--) {
-    rows_[i] = new png_byte[width * BYTES_PER_PIXEL];
-    memset(rows_[i], 0, width * BYTES_PER_PIXEL);
+    rows_[i] =
+        new png_byte[static_cast<unsigned long>(width * BYTES_PER_PIXEL)];
+    memset(rows_[i], 0, static_cast<size_t>(width) * BYTES_PER_PIXEL);
   }
 }
 LibpngImageLibrary::Canvas::~Canvas() {
@@ -262,7 +264,7 @@ ImageLibraryInterface::Image* LibpngImageLibrary::ReadFromFile(
   png_read_update_info(png_struct, png_info);
   png_bytep* rows = new png_bytep[height];
   for (int i = height - 1; i >= 0; i--) {
-    rows[i] = new png_byte[width * BYTES_PER_PIXEL];
+    rows[i] = new png_byte[static_cast<unsigned long>(width * BYTES_PER_PIXEL)];
   }
   png_read_image(png_struct, rows);
   png_read_end(png_struct, png_info);

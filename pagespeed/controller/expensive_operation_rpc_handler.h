@@ -23,11 +23,11 @@
 #include "pagespeed/controller/controller.grpc.pb.h"
 #include "pagespeed/controller/controller.pb.h"
 #include "pagespeed/controller/expensive_operation_controller.h"
+#include "pagespeed/controller/grpc.h"
 #include "pagespeed/controller/request_result_rpc_handler.h"
 #include "pagespeed/controller/rpc_handler.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/function.h"
-#include "pagespeed/controller/grpc.h"
 
 namespace net_instaweb {
 
@@ -77,7 +77,8 @@ class ExpensiveOperationRpcHandler
   friend class ExpensiveOperationRpcHandlerTest;
 
   ExpensiveOperationRpcHandler(const ExpensiveOperationRpcHandler&) = delete;
-  ExpensiveOperationRpcHandler& operator=(const ExpensiveOperationRpcHandler&) = delete;
+  ExpensiveOperationRpcHandler& operator=(const ExpensiveOperationRpcHandler&) =
+      delete;
 };
 
 }  // namespace net_instaweb

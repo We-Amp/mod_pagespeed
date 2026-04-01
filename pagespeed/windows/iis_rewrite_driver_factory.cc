@@ -24,6 +24,7 @@
 #include "base/logging.h"
 #include "pagespeed/kernel/base/google_message_handler.h"
 #include "pagespeed/kernel/base/null_shared_mem.h"
+#include "pagespeed/system/curl_url_async_fetcher.h"
 #include "pagespeed/system/system_rewrite_options.h"
 #include "pagespeed/system/system_server_context.h"
 #include "pagespeed/system/system_thread_system.h"
@@ -49,11 +50,22 @@ SystemServerContext* IisRewriteDriverFactory::MakeNewServerContext() {
 }
 
 UrlAsyncFetcher* IisRewriteDriverFactory::AllocateFetcher(
-    SystemRewriteOptions* /*config*/) {
-  // TODO(windows): Implement WinHttpUrlAsyncFetcher and return it here.
-  LOG(WARNING) << "IisRewriteDriverFactory::AllocateFetcher: "
-               << "resource fetching not yet implemented on Windows.";
-  return nullptr;
+    SystemRewriteOptions* config) {
+  // Use curl-based fetcher for resource fetching on Windows.
+  // This is the same approach used by the Envoy filter.
+  CurlUrlAsyncFetcher* fetcher = new CurlUrlAsyncFetcher(
+      config->fetcher_proxy().c_str(), thread_system(), statistics(), timer(),
+      config->blocking_fetch_timeout_ms(), message_handler_.get());
+
+  fetcher->set_track_original_content_length(track_original_content_length());
+  fetcher->set_fetch_with_gzip(config->fetch_with_gzip());
+  fetcher->SetHttpsOptions(config->https_options());
+  fetcher->SetSslCertificatesDir(config->ssl_cert_directory());
+  fetcher->SetSslCertificatesFile(config->ssl_cert_file());
+
+  LOG(INFO) << "IisRewriteDriverFactory: Using curl-based fetcher for "
+            << "resource fetching";
+  return fetcher;
 }
 
 MessageHandler* IisRewriteDriverFactory::DefaultHtmlParseMessageHandler() {

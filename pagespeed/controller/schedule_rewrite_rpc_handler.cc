@@ -20,8 +20,8 @@
 #include "pagespeed/controller/schedule_rewrite_rpc_handler.h"
 
 #include "base/logging.h"
+#include "pagespeed/controller/grpc.h"
 #include "pagespeed/kernel/base/function.h"
-#include "pagespeed/kernel/util/grpc.h"
 
 namespace net_instaweb {
 

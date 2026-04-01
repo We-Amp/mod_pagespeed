@@ -24,10 +24,10 @@
 #include "pagespeed/controller/controller.grpc.pb.h"
 #include "pagespeed/controller/controller.pb.h"
 #include "pagespeed/controller/expensive_operation_callback.h"
+#include "pagespeed/controller/grpc.h"
 #include "pagespeed/controller/request_result_rpc_client.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/thread_system.h"
-#include "pagespeed/kernel/util/grpc.h"
 
 namespace net_instaweb {
 

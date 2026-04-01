@@ -193,7 +193,7 @@ bool InstawebHandler::IsCompressibleContentType(const char* content_type) {
     return false;
   }
   GoogleString type = content_type;
-  size_t separator_idx = type.find(";");
+  size_t separator_idx = type.find(';');
   if (separator_idx != GoogleString::npos) {
     type.erase(separator_idx);
   }
@@ -828,8 +828,7 @@ bool InstawebHandler::parse_body_from_post(const request_rec* request,
 
 // Read the raw POST body without content-type validation.
 bool InstawebHandler::read_post_body(const request_rec* request,
-                                     GoogleString* data,
-                                     apr_status_t* ret) {
+                                     GoogleString* data, apr_status_t* ret) {
   if (request->method_number != M_POST) {
     *ret = HTTP_METHOD_NOT_ALLOWED;
     return false;
@@ -999,12 +998,12 @@ apr_status_t InstawebHandler::instaweb_handler(request_rec* request) {
     GoogleString request_body;
     if (request->method_number == M_POST) {
       apr_status_t body_ret;
-      if (!InstawebHandler::read_post_body(request, &request_body,
-                                           &body_ret)) {
+      if (!InstawebHandler::read_post_body(request, &request_body, &body_ret)) {
         request_body.clear();
         ap_log_rerror(APLOG_MARK, APLOG_WARNING, body_ret, request,
                       "Failed to read admin POST body (status=%d), "
-                      "proceeding with empty body", body_ret);
+                      "proceeding with empty body",
+                      body_ret);
       }
     }
     // The fetch has to be buffered because if it's a cache lookup it could
@@ -1022,12 +1021,12 @@ apr_status_t InstawebHandler::instaweb_handler(request_rec* request) {
     GoogleString request_body;
     if (request->method_number == M_POST) {
       apr_status_t body_ret;
-      if (!InstawebHandler::read_post_body(request, &request_body,
-                                           &body_ret)) {
+      if (!InstawebHandler::read_post_body(request, &request_body, &body_ret)) {
         request_body.clear();
         ap_log_rerror(APLOG_MARK, APLOG_WARNING, body_ret, request,
                       "Failed to read global admin POST body (status=%d), "
-                      "proceeding with empty body", body_ret);
+                      "proceeding with empty body",
+                      body_ret);
       }
     }
     // The fetch has to be buffered because if it's a cache lookup it could

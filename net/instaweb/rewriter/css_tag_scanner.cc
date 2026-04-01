@@ -20,6 +20,7 @@
 #include "net/instaweb/rewriter/public/css_tag_scanner.h"
 
 #include <cstddef>
+#include <cstdint>
 
 #include "base/logging.h"
 #include "net/instaweb/rewriter/public/domain_rewrite_filter.h"
@@ -143,7 +144,7 @@ inline bool PopFirst(StringPiece* in, char* c) {
 // Since we handle incomplete input, in some cases we may not have enough of it
 // available to accept or reject a construct --- in which case the routines
 // will return kLexInterrupted.
-enum LexResult { kLexNo, kLexYes, kLexInterrupted };
+enum LexResult : std::uint8_t { kLexNo, kLexYes, kLexInterrupted };
 
 // If in starts with expected, returns kLexYes and consumes it.
 inline LexResult EatLiteral(CssTagScanner::InputPortion input_kind,

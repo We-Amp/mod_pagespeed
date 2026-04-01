@@ -38,6 +38,7 @@ const char kConsolePath[] = "ConsolePath";
 const char kMessagesPath[] = "MessagesPath";
 const char kAdminPath[] = "AdminPath";
 const char kGlobalAdminPath[] = "GlobalAdminPath";
+const char kHealthPath[] = "HealthPath";
 
 // These options are copied from mod_instaweb.cc, where APACHE_CONFIG_OPTIONX
 // indicates that they can not be set at the directory/location level. They set
@@ -55,12 +56,7 @@ const char* const server_only_options[] = {
                               // used"
     "BlockingRewriteRefererUrls", "CreateSharedMemoryMetadataCache",
     "LoadFromFile", "LoadFromFileMatch", "LoadFromFileRule",
-    "LoadFromFileRuleMatch", "UseNativeFetcher",
-    "NativeFetcherMaxKeepaliveRequests"};
-
-// Options that can only be used in the main (http) option scope.
-const char* const main_only_options[] = {"UseNativeFetcher",
-                                         "NativeFetcherMaxKeepaliveRequests"};
+    "LoadFromFileRuleMatch"};
 
 }  // namespace
 
@@ -81,6 +77,13 @@ void EnvoyRewriteOptions::Init() {
   DCHECK(envoy_properties_ != nullptr)
       << "Call EnvoyRewriteOptions::Initialize() before construction";
   InitializeOptions(envoy_properties_);
+
+  // Disable critical images beacon since Envoy doesn't have a beacon handler
+  // endpoint to receive the data. Without this, filters like lazyload_images
+  // will be disabled waiting for beacon data that will never arrive.
+  // When beaconing is disabled, CriticalImagesFinder::Available() returns
+  // kDisabled instead of kNoDataYet, allowing these filters to work.
+  set_critical_images_beacon_enabled(false);
 }
 
 void EnvoyRewriteOptions::AddProperties() {
@@ -89,11 +92,12 @@ void EnvoyRewriteOptions::AddProperties() {
                    &EnvoyRewriteOptions::statistics_path_, "nsp",
                    kStatisticsPath, kServerScope,
                    "Set the statistics path. Ex: /pagespeed_statistics", false);
-  add_envoy_option("/pagespeed_global_statistics",
-                   &EnvoyRewriteOptions::global_statistics_path_, "ngsp",
-                   kGlobalStatisticsPath, kProcessScopeStrict,
-                   "Set the global statistics path. Ex: /pagespeed_global_statistics",
-                   false);
+  add_envoy_option(
+      "/pagespeed_global_statistics",
+      &EnvoyRewriteOptions::global_statistics_path_, "ngsp",
+      kGlobalStatisticsPath, kProcessScopeStrict,
+      "Set the global statistics path. Ex: /pagespeed_global_statistics",
+      false);
   add_envoy_option("/pagespeed_console", &EnvoyRewriteOptions::console_path_,
                    "ncp", kConsolePath, kServerScope,
                    "Set the console path. Ex: /pagespeed_console", false);
@@ -103,17 +107,33 @@ void EnvoyRewriteOptions::AddProperties() {
   add_envoy_option("/pagespeed_admin", &EnvoyRewriteOptions::admin_path_, "nap",
                    kAdminPath, kServerScope,
                    "Set the admin path. Ex: /pagespeed_admin", false);
-  add_envoy_option("/pagespeed_global_admin",
-                   &EnvoyRewriteOptions::global_admin_path_, "ngap",
-                   kGlobalAdminPath, kProcessScopeStrict,
-                   "Set the global admin path. Ex: /pagespeed_global_admin",
-                   false);
+  add_envoy_option(
+      "/pagespeed_global_admin", &EnvoyRewriteOptions::global_admin_path_,
+      "ngap", kGlobalAdminPath, kProcessScopeStrict,
+      "Set the global admin path. Ex: /pagespeed_global_admin", false);
 
-  // Use native Envoy fetcher (default: true)
-  add_envoy_option(true, &EnvoyRewriteOptions::use_native_fetcher_, "unf",
-                   "UseNativeFetcher", kProcessScopeStrict,
-                   "Use Envoy native fetcher",
-                   true);
+  // HTML rewriting options.
+  // Enable HTML rewriting (default: true)
+  add_envoy_option(true, &EnvoyRewriteOptions::enable_html_rewriting_, "ehr",
+                   "EnableHtmlRewriting", kServerScope,
+                   "Enable HTML rewriting for responses", true);
+
+  // HTML rewrite deadline in milliseconds (default: 2000ms)
+  add_envoy_option(static_cast<int64>(2000),
+                   &EnvoyRewriteOptions::html_rewrite_deadline_ms_, "hrdm",
+                   "HtmlRewriteDeadlineMs", kServerScope,
+                   "Maximum time in ms to wait for HTML rewriting", true);
+
+  // Maximum HTML buffer size in bytes (default: 2MB)
+  add_envoy_option(static_cast<int64>(2 * 1024 * 1024),
+                   &EnvoyRewriteOptions::max_html_buffer_bytes_, "mhbb",
+                   "MaxHtmlBufferBytes", kServerScope,
+                   "Maximum size of HTML responses to rewrite", true);
+
+  // Health check endpoint path (default: /pagespeed/health)
+  add_envoy_option("/pagespeed/health", &EnvoyRewriteOptions::health_path_,
+                   "nhp", kHealthPath, kServerScope,
+                   "Set the health check path. Ex: /pagespeed/health", false);
 
   MergeSubclassProperties(envoy_properties_);
 
@@ -143,16 +163,8 @@ bool EnvoyRewriteOptions::IsDirective(StringPiece config_directive,
 
 RewriteOptions::OptionScope EnvoyRewriteOptions::GetOptionScope(
     StringPiece option_name) {
-  uint32_t i;
-  uint32_t size = sizeof(main_only_options) / sizeof(char*);
-  for (i = 0; i < size; i++) {
-    if (StringCaseEqual(main_only_options[i], option_name)) {
-      return kProcessScopeStrict;
-    }
-  }
-
-  size = sizeof(server_only_options) / sizeof(char*);
-  for (i = 0; i < size; i++) {
+  uint32_t size = sizeof(server_only_options) / sizeof(char*);
+  for (uint32_t i = 0; i < size; i++) {
     if (StringCaseEqual(server_only_options[i], option_name)) {
       return kServerScope;
     }

@@ -94,7 +94,7 @@ class EnvoyRewriteOptions : public SystemRewriteOptions {
   // Add an option to envoy_properties_
   template <class OptionClass>
   static void add_envoy_option(typename OptionClass::ValueType default_value,
-                               OptionClass EnvoyRewriteOptions::*offset,
+                               OptionClass EnvoyRewriteOptions::* offset,
                                const char* id, StringPiece option_name,
                                OptionScope scope, const char* help,
                                bool safe_to_print) {

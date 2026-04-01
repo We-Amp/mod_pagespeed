@@ -122,7 +122,8 @@ class HttpPageSpeedDecoderFilterConfig {
   std::unique_ptr<AdminRateLimiter> rate_limiter_;
 };
 
-using HttpPageSpeedDecoderFilterConfigSharedPtr = std::shared_ptr<HttpPageSpeedDecoderFilterConfig>;
+using HttpPageSpeedDecoderFilterConfigSharedPtr =
+    std::shared_ptr<HttpPageSpeedDecoderFilterConfig>;
 
 class HttpPageSpeedDecoderFilter : public StreamFilter {
  public:
@@ -141,8 +142,7 @@ class HttpPageSpeedDecoderFilter : public StreamFilter {
   void setDecoderFilterCallbacks(StreamDecoderFilterCallbacks&) override;
 
   // Http::StreamEncoderFilter
-  Filter1xxHeadersStatus encode1xxHeaders(
-      ResponseHeaderMap& headers) override {
+  Filter1xxHeadersStatus encode1xxHeaders(ResponseHeaderMap& headers) override {
     return Filter1xxHeadersStatus::Continue;
   };
 
@@ -238,7 +238,6 @@ class HttpPageSpeedDecoderFilter : public StreamFilter {
   // Returns true if the URL is eligible for IPRO lookup (images, CSS, JS).
   bool ShouldTryIpro(const net_instaweb::GoogleUrl& url,
                      const net_instaweb::RewriteOptions* options);
-
 
   const HttpPageSpeedDecoderFilterConfigSharedPtr config_;
   net_instaweb::EnvoyServerContext* server_context_{nullptr};

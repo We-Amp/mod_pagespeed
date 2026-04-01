@@ -17,29 +17,25 @@
 #ifndef WIN_CONDVAR_H
 #define WIN_CONDVAR_H
 
-
-#include "pagespeed/kernel/base/condvar.h"
 #include "pagespeed/kernel/base/basictypes.h"
+#include "pagespeed/kernel/base/condvar.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/thread/win_mutex.h"
- 
+
 namespace net_instaweb {
 
 class WinCondvar : public ThreadSystem::Condvar {
  public:
   // The mutex is owned by the caller and must outlive the condvar.
-  explicit WinCondvar(WinMutex* mutex)
-      : mutex_(mutex) {
-	Init();
-  }
+  explicit WinCondvar(WinMutex* mutex) : mutex_(mutex) { Init(); }
   virtual ~WinCondvar();
-	
+
   virtual WinMutex* mutex() const { return mutex_; }
 
   virtual void Signal();
   virtual void Broadcast();
   virtual void Wait();
-  virtual void TimedWait(int64 timeout_ms);  
+  virtual void TimedWait(int64 timeout_ms);
 
  private:
   void Init();

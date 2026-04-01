@@ -24,6 +24,7 @@
 
 #include <cerrno>
 #include <cstddef>
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <set>
@@ -100,7 +101,7 @@ namespace net_instaweb {
 namespace {
 
 // Passed to CheckGlobalOption
-enum VHostHandling { kTolerateInVHost, kErrorInVHost };
+enum VHostHandling : std::uint8_t { kTolerateInVHost, kErrorInVHost };
 
 // TODO(sligocki): Separate options parsing from all the other stuff here.
 // Instaweb directive names -- these must match
@@ -184,7 +185,7 @@ const char kModPagespeedImageWebpRecompressionQuality[] =
 const char kModPagespeedImageWebpRecompressionQualityForSmallScreens[] =
     "ModPagespeedImageWebpRecompressionQualityForSmallScreens";
 
-enum RewriteOperation { REWRITE, FLUSH, FINISH };
+enum RewriteOperation : std::uint8_t { REWRITE, FLUSH, FINISH };
 
 // TODO(sligocki): Move inside PSOL.
 // Check if pagespeed optimization rules applicable.

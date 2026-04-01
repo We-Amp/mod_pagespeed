@@ -113,7 +113,7 @@ void JsDisableFilter::InsertMetaTagForIE(HtmlElement* element) {
 }
 
 void JsDisableFilter::StartElementImpl(HtmlElement* element) {
-  if (element->keyword() == HtmlName::kHead) {
+  if (element->keyword() == HtmlName::kHead) {  // NOLINT(bugprone-branch-clone)
     if (!ie_meta_tag_written_) {
       InsertMetaTagForIE(element);
     }

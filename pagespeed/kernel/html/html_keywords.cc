@@ -313,7 +313,8 @@ StringPiece HtmlKeywords::UnescapeHelper(const StringPiece& escaped,
       if (ch == '&') {
         if (!found_ampersand) {
           found_ampersand = true;
-          buf->append(escaped.data(), i);
+          buf->append(escaped.data(),
+                      i);  // NOLINT(bugprone-suspicious-stringview-data-usage)
         }
         in_escape = true;
         escape.clear();
@@ -478,7 +479,7 @@ StringPiece HtmlKeywords::EscapeHelper(const StringPiece& unescaped,
         ((ch > 127) || (ch < 32) || (ch == '"') || (ch == '\'') ||
          (ch == '&') || (ch == '<') || (ch == '>'))) {
       char_to_escape.clear();
-      char_to_escape += ch;
+      char_to_escape += static_cast<char>(ch);
       StringStringSparseHashMapSensitive::const_iterator p =
           escape_map_.find(char_to_escape);
       if (p == escape_map_.end()) {

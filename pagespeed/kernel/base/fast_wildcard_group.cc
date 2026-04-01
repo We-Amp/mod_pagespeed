@@ -150,13 +150,16 @@ void FastWildcardGroup::CompileNonTrivial() const {
       // collision to favor collision-free hash tables.
       int max_start = literal.size() - rolling_hash_length;
       int start = 0;
-      uint64 rolling_hash =
-          RollingHash(literal.data(), start, rolling_hash_length);
+      uint64 rolling_hash = RollingHash(
+          literal.data(), start,
+          rolling_hash_length);  // NOLINT(bugprone-suspicious-stringview-data-usage)
       for (start = 1;
            start <= max_start && pattern_hash_index(rolling_hash) != kNoEntry;
            ++start) {
-        rolling_hash = NextRollingHash(literal.data(), start,
-                                       rolling_hash_length, rolling_hash);
+        rolling_hash = NextRollingHash(
+            literal.data(),
+            start,  // NOLINT(bugprone-suspicious-stringview-data-usage)
+            rolling_hash_length, rolling_hash);
       }
       // Now insert the entry, dealing with any collisions.
       rolling_hashes_[i] = rolling_hash;
@@ -275,7 +278,9 @@ bool FastWildcardGroup::Match(const StringPiece& str, bool allow) const {
   int rolling_end = str.size() - rolling_hash_length;
   if (max_effective_index < exit_effective_index && rolling_end >= 0) {
     // Do a Rabin-Karp rolling match through the string.
-    uint64 rolling_hash = RollingHash(str.data(), 0, rolling_hash_length);
+    uint64 rolling_hash = RollingHash(
+        str.data(), 0,
+        rolling_hash_length);  // NOLINT(bugprone-suspicious-stringview-data-usage)
     // Uses signed arithmetic for correct comparison below.
     for (int ofs = 0;
          max_effective_index < exit_effective_index && ofs <= rolling_end;) {
@@ -305,8 +310,9 @@ bool FastWildcardGroup::Match(const StringPiece& str, bool allow) const {
         }
       }
       if (++ofs <= rolling_end) {
-        rolling_hash =
-            NextRollingHash(str.data(), ofs, rolling_hash_length, rolling_hash);
+        rolling_hash = NextRollingHash(
+            str.data(), ofs, rolling_hash_length,
+            rolling_hash);  // NOLINT(bugprone-suspicious-stringview-data-usage)
       }
     }
   }

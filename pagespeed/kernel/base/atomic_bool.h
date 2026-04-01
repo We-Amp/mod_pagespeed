@@ -38,9 +38,7 @@ class AtomicBool {
 
   ~AtomicBool() {}
 
-  bool value() const {
-    return value_.load(std::memory_order_acquire);
-  }
+  bool value() const { return value_.load(std::memory_order_acquire); }
 
   void set_value(bool v) { value_.store(v, std::memory_order_release); }
 

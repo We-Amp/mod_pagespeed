@@ -63,7 +63,8 @@ class LRUCacheBase {
   // STL guarantees lifetime of list iterators as long as the node is in list.
   using ListNode = typename EntryList::iterator;
 
-  using Map = absl::flat_hash_map<GoogleString, ListNode, CasePreserveStringHash>;
+  using Map =
+      absl::flat_hash_map<GoogleString, ListNode, CasePreserveStringHash>;
 
  public:
   class Iterator {

@@ -17,7 +17,6 @@
  * under the License.
  */
 
-
 //
 // Simplifies iteration over nginx lists.
 //

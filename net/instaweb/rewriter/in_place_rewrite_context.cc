@@ -534,7 +534,8 @@ void InPlaceRewriteContext::RewriteSingle(const ResourcePtr& input,
         AddNestedContext(context);
         // Propagate the uncacheable resource rewriting settings.
         context->set_rewrite_uncacheable(rewrite_uncacheable());
-        if (!is_rewritten_ && !rewritten_hash_.empty()) {
+        if (!is_rewritten_ &&
+            !rewritten_hash_.empty()) {  // NOLINT(bugprone-branch-clone)
           // The in-place metadata was found but the rewritten resource is not.
           // Hence, make the nested rewrite skip the metadata and force a
           // rewrite.

@@ -46,7 +46,7 @@ using RequestPredicatePair = std::pair<RequestHeaders*, HeaderPredicateFn*>;
 int AddAttributeCallback(void* rec, const char* key, const char* value) {
   RequestPredicatePair* rpp = static_cast<RequestPredicatePair*>(rec);
   bool ok = true;
-  if (rpp->second != NULL) {
+  if (rpp->second != nullptr) {
     ok = false;  // Default to false if the predicate doesn't set *ok.
     rpp->second->Run(key, &ok);
   }
@@ -238,7 +238,7 @@ void DisableCacheControlHeader(request_rec* request) {
 void DisableCachingRelatedHeaders(request_rec* request) {
   // Turn off headers related to caching (but not Cache-Control) for the
   // HTTP requests.
-  StringPieceVector response_headers_to_remove =
+  const StringPieceVector& response_headers_to_remove =
       HttpAttributes::CachingHeadersToBeRemoved();
   for (int i = 0, n = response_headers_to_remove.size(); i < n; ++i) {
     apr_table_unset(request->headers_out,

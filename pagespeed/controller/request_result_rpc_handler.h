@@ -21,11 +21,11 @@
 #define PAGESPEED_CONTROLLER_REQUEST_RESULT_RPC_HANDLER_H_
 
 #include "base/logging.h"
+#include "pagespeed/controller/grpc.h"
 #include "pagespeed/controller/rpc_handler.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/function.h"
 #include "pagespeed/kernel/base/ref_counted_ptr.h"
-#include "pagespeed/controller/grpc.h"
 
 // RpcHandler for the case there the client uses a streaming RPC to the server
 // to attempt an operation, waits for response and then calls back to let the

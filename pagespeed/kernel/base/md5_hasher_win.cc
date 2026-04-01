@@ -23,10 +23,12 @@
 
 #include "pagespeed/kernel/base/md5_hasher.h"
 
-#ifdef WIN32
+#if defined(_WIN32) || defined(WIN32)
 
-#include <windows.h>
+// clang-format off
+#include <windows.h>  // Must precede bcrypt.h
 #include <bcrypt.h>
+// clang-format on
 
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -59,9 +61,9 @@ GoogleString MD5Hasher::RawHash(const StringPiece& content) const {
     return GoogleString();
   }
 
-  status = BCryptHashData(hHash,
-                          reinterpret_cast<PUCHAR>(const_cast<char*>(content.data())),
-                          static_cast<ULONG>(content.size()), 0);
+  status = BCryptHashData(
+      hHash, reinterpret_cast<PUCHAR>(const_cast<char*>(content.data())),
+      static_cast<ULONG>(content.size()), 0);
   if (!BCRYPT_SUCCESS(status)) {
     BCryptDestroyHash(hHash);
     BCryptCloseAlgorithmProvider(hAlg, 0);
@@ -83,4 +85,4 @@ int MD5Hasher::RawHashSizeInBytes() const { return kMD5HashLength; }
 
 }  // namespace net_instaweb
 
-#endif  // WIN32
+#endif  // _WIN32 || WIN32

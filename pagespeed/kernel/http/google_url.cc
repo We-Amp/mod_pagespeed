@@ -23,6 +23,7 @@
 
 #include <algorithm>  // for std::find
 #include <cstddef>
+#include <cstdint>
 #include <string>
 
 #include "base/logging.h"
@@ -160,7 +161,7 @@ GoogleUrl* GoogleUrl::CopyAndAddEscapedQueryParam(
 }
 
 size_t GoogleUrl::LeafEndPosition(const GURL& gurl) {
-  url::Parsed parsed = gurl.parsed_for_possibly_invalid_spec();
+  const url::Parsed& parsed = gurl.parsed_for_possibly_invalid_spec();
   if (parsed.path.is_valid()) {
     return parsed.path.end();
   }
@@ -187,7 +188,7 @@ size_t GoogleUrl::LeafEndPosition(const GURL& gurl) {
 size_t GoogleUrl::LeafEndPosition() const { return LeafEndPosition(*gurl_); }
 
 size_t GoogleUrl::LeafStartPosition(const GURL& gurl) {
-  url::Parsed parsed = gurl.parsed_for_possibly_invalid_spec();
+  const url::Parsed& parsed = gurl.parsed_for_possibly_invalid_spec();
   size_t start_reverse_search_from = npos;
   if (parsed.query.is_valid() && (parsed.query.begin > 0)) {
     // query includes '?', so start the search from the character
@@ -205,7 +206,7 @@ size_t GoogleUrl::LeafStartPosition() const {
 
 size_t GoogleUrl::PathStartPosition(const GURL& gurl) {
   const std::string& spec = gurl.spec();
-  url::Parsed parsed = gurl.parsed_for_possibly_invalid_spec();
+  const url::Parsed& parsed = gurl.parsed_for_possibly_invalid_spec();
   size_t origin_size = parsed.path.begin;
   if (!parsed.path.is_valid()) {
     origin_size = spec.size();
@@ -541,7 +542,7 @@ StringPiece GoogleUrl::Relativize(UrlRelativity url_relativity,
 namespace {
 
 // Parsing states for GoogleUrl::Unescape
-enum UnescapeState {
+enum UnescapeState : std::uint8_t {
   NORMAL,   // We are not in the middle of parsing an escape.
   ESCAPE1,  // We just parsed % .
   ESCAPE2   // We just parsed %X for some hex digit X.
@@ -681,7 +682,9 @@ GoogleString GoogleUrl::CanonicalizePath(StringPiece path) {
   in_range.begin = 0;
   in_range.len = path.size();
 
-  url::CanonicalizePath(path.data(), in_range, &output, &out_range);
+  url::CanonicalizePath(
+      path.data(), in_range, &output,
+      &out_range);  // NOLINT(bugprone-suspicious-stringview-data-usage)
   output.Complete();
   return buffer.substr(out_range.begin, out_range.len);
 }

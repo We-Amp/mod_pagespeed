@@ -58,8 +58,8 @@ struct Sector<kBlockSize>::MemLayout {
         header_bytes + directory_size + block_successor_list_bytes, kBlockSize);
   }
 
-  size_t mutex_offset;    // offset where mutex is placed (after SectorHeader)
-  size_t header_bytes;    // also offset to the block successor list.
+  size_t mutex_offset;  // offset where mutex is placed (after SectorHeader)
+  size_t header_bytes;  // also offset to the block successor list.
   size_t block_successor_list_bytes;
   size_t metadata_bytes;  // e.g. offset to the blocks.
 };

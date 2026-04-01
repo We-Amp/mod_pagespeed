@@ -47,16 +47,16 @@ typedef struct CycloneReadHandle CycloneReadHandle;
 // Error codes returned by Cyclone operations.
 // These map to the internal Cyclone error codes.
 typedef enum CycloneError {
-  CYCLONE_OK = 0,                    // Operation succeeded
-  CYCLONE_NOT_FOUND = 1,             // Key not found in cache
-  CYCLONE_ALREADY_EXISTS = 2,        // Key already exists (for create operations)
-  CYCLONE_INVALID_ARGUMENT = 3,      // Invalid argument provided
-  CYCLONE_PERMISSION_DENIED = 4,     // Permission denied
-  CYCLONE_RESOURCE_EXHAUSTED = 5,    // Cache is full, cannot allocate
-  CYCLONE_IO_ERROR = 6,              // I/O error during operation
-  CYCLONE_INTERNAL_ERROR = 7,        // Internal error
-  CYCLONE_UNAVAILABLE = 8,           // Service unavailable
-  CYCLONE_NOT_INITIALIZED = 9        // Cache not initialized or not running
+  CYCLONE_OK = 0,                  // Operation succeeded
+  CYCLONE_NOT_FOUND = 1,           // Key not found in cache
+  CYCLONE_ALREADY_EXISTS = 2,      // Key already exists (for create operations)
+  CYCLONE_INVALID_ARGUMENT = 3,    // Invalid argument provided
+  CYCLONE_PERMISSION_DENIED = 4,   // Permission denied
+  CYCLONE_RESOURCE_EXHAUSTED = 5,  // Cache is full, cannot allocate
+  CYCLONE_IO_ERROR = 6,            // I/O error during operation
+  CYCLONE_INTERNAL_ERROR = 7,      // Internal error
+  CYCLONE_UNAVAILABLE = 8,         // Service unavailable
+  CYCLONE_NOT_INITIALIZED = 9      // Cache not initialized or not running
 } CycloneError;
 
 // Configuration for creating a Cyclone cache instance.
@@ -91,15 +91,15 @@ typedef struct CycloneCacheConfig {
 
 // Statistics from the cache.
 typedef struct CycloneCacheStats {
-  uint64_t ram_cache_hits;       // Hits served from RAM cache
-  uint64_t ram_cache_misses;     // Misses in RAM cache
-  uint64_t disk_cache_hits;      // Hits served from disk cache
-  uint64_t disk_cache_misses;    // Misses in disk cache (key not found)
-  uint64_t bytes_read;           // Total bytes read from cache
-  uint64_t bytes_written;        // Total bytes written to cache
-  uint64_t evictions;            // Number of entries evicted
-  uint64_t current_size_bytes;   // Current size of cache on disk
-  uint64_t current_entries;      // Current number of entries in cache
+  uint64_t ram_cache_hits;      // Hits served from RAM cache
+  uint64_t ram_cache_misses;    // Misses in RAM cache
+  uint64_t disk_cache_hits;     // Hits served from disk cache
+  uint64_t disk_cache_misses;   // Misses in disk cache (key not found)
+  uint64_t bytes_read;          // Total bytes read from cache
+  uint64_t bytes_written;       // Total bytes written to cache
+  uint64_t evictions;           // Number of entries evicted
+  uint64_t current_size_bytes;  // Current size of cache on disk
+  uint64_t current_entries;     // Current number of entries in cache
 } CycloneCacheStats;
 
 // ============================================================================
@@ -155,9 +155,8 @@ int cyclone_cache_is_running(const CycloneCacheHandle* cache);
 //
 // Returns CYCLONE_NOT_FOUND if the key does not exist.
 // Returns CYCLONE_NOT_INITIALIZED if the cache is not running.
-CycloneError cyclone_cache_read(CycloneCacheHandle* cache,
-                                const char* key, size_t key_len,
-                                CycloneReadHandle** out_handle);
+CycloneError cyclone_cache_read(CycloneCacheHandle* cache, const char* key,
+                                size_t key_len, CycloneReadHandle** out_handle);
 
 // Get a pointer to the data in a read handle.
 //
@@ -230,17 +229,17 @@ void cyclone_read_handle_close(CycloneReadHandle* handle);
 // Returns CYCLONE_RESOURCE_EXHAUSTED if the cache is full and cannot
 // evict enough space.
 // Returns CYCLONE_NOT_INITIALIZED if the cache is not running.
-CycloneError cyclone_cache_write(CycloneCacheHandle* cache,
-                                 const char* key, size_t key_len,
-                                 const char* data, size_t data_len);
+CycloneError cyclone_cache_write(CycloneCacheHandle* cache, const char* key,
+                                 size_t key_len, const char* data,
+                                 size_t data_len);
 
 // Delete a key from the cache.
 //
 // Returns CYCLONE_OK on success.
 // Returns CYCLONE_NOT_FOUND if the key does not exist.
 // Returns CYCLONE_NOT_INITIALIZED if the cache is not running.
-CycloneError cyclone_cache_delete(CycloneCacheHandle* cache,
-                                  const char* key, size_t key_len);
+CycloneError cyclone_cache_delete(CycloneCacheHandle* cache, const char* key,
+                                  size_t key_len);
 
 // Check if a key exists in the cache.
 //
@@ -248,9 +247,8 @@ CycloneError cyclone_cache_delete(CycloneCacheHandle* cache,
 // or 0 if it does not.
 //
 // Returns CYCLONE_NOT_INITIALIZED if the cache is not running.
-CycloneError cyclone_cache_exists(CycloneCacheHandle* cache,
-                                  const char* key, size_t key_len,
-                                  int* exists);
+CycloneError cyclone_cache_exists(CycloneCacheHandle* cache, const char* key,
+                                  size_t key_len, int* exists);
 
 // ============================================================================
 // Statistics and Diagnostics

@@ -257,7 +257,7 @@ bool ResourceCombiner::WriteCombination(const ResourceVector& combine_resources,
   GoogleString combined_contents;
   StringWriter writer(&combined_contents);
   for (int i = 0, n = combine_resources.size(); written && (i < n); ++i) {
-    ResourcePtr input(combine_resources[i]);
+    const ResourcePtr& input(combine_resources[i]);
     written =
         WritePiece(i, n, input.get(), combination.get(), &writer, handler);
   }

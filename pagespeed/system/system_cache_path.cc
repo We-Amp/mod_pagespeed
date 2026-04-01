@@ -19,6 +19,7 @@
 
 #include "pagespeed/system/system_cache_path.h"
 
+#include <cstddef>
 #include <memory>
 
 #include "base/logging.h"
@@ -73,10 +74,9 @@ SystemCachePath::SystemCachePath(const StringPiece& path,
   }
   if (cache_flush_filename_[0] != '/'
 #ifdef _WIN32
-      && !(cache_flush_filename_.size() >= 3 &&
-           cache_flush_filename_[1] == ':' &&
-           (cache_flush_filename_[2] == '\\' ||
-            cache_flush_filename_[2] == '/'))
+      &&
+      !(cache_flush_filename_.size() >= 3 && cache_flush_filename_[1] == ':' &&
+        (cache_flush_filename_[2] == '\\' || cache_flush_filename_[2] == '/'))
 #endif
   ) {
     // cache_flush_filename_ is relative — prepend file_cache_path.
@@ -84,13 +84,16 @@ SystemCachePath::SystemCachePath(const StringPiece& path,
     // violated in ngx_pagespeed (server-level pagespeed off with
     // FileCachePath set, then pagespeed on in a location block).
     StringPiece path(config->file_cache_path());
-    cache_flush_filename_ = StrCat(
-        path, (path.size() > 0 && (strings::EndsWith(path, "/")
+    cache_flush_filename_ =
+        StrCat(path,
+               (path.size() > 0 && (strings::EndsWith(path, "/")
 #ifdef _WIN32
-               || strings::EndsWith(path, "\\")
+                                    || strings::EndsWith(path, "\\")
 #endif
-               )) ? "" : "/",
-        cache_flush_filename_);
+                                        ))
+                   ? ""
+                   : "/",
+               cache_flush_filename_);
   }
 
   if (config->use_shared_mem_locking()) {
@@ -100,8 +103,10 @@ SystemCachePath::SystemCachePath(const StringPiece& path,
     lock_manager_ = shared_mem_lock_manager_.get();
   } else {
     factory->message_handler()->Message(
-        kWarning, "Shared memory locking disabled; inter-process coordination "
-                  "will not be available for path: %s", path_.c_str());
+        kWarning,
+        "Shared memory locking disabled; inter-process coordination "
+        "will not be available for path: %s",
+        path_.c_str());
     // Use ThreadSafeLockManager for single-process locking when shared memory
     // is not available. This provides thread-safety but not inter-process
     // coordination.
@@ -117,7 +122,8 @@ SystemCachePath::SystemCachePath(const StringPiece& path,
   cyclone_config.cache_path = StrCat(config->file_cache_path(), "/cyclone.dat");
   cyclone_config.cache_size_bytes = config->file_cache_clean_size_kb() * 1024;
   // Use the LRU cache size setting for the RAM cache layer
-  cyclone_config.ram_cache_size_bytes = config->lru_cache_kb_per_process() * 1024;
+  cyclone_config.ram_cache_size_bytes =
+      config->lru_cache_kb_per_process() * 1024;
   cyclone_config.enable_checksum = true;
   cyclone_config.num_segments = 0;  // Use default
 
@@ -130,8 +136,8 @@ SystemCachePath::SystemCachePath(const StringPiece& path,
     cache_backend_ = cyclone_cache;
     // Register cyclone.dat so Apache's post_config chown sweep fixes ownership.
     factory->AddCreatedDirectory(cyclone_config.cache_path);
-    file_cache_ = new CacheStats(kFileCache, cache_backend_,
-                                 factory->timer(), factory->statistics());
+    file_cache_ = new CacheStats(kFileCache, cache_backend_, factory->timer(),
+                                 factory->statistics());
     factory->TakeOwnership(file_cache_);
 
     if (cyclone_config.ram_cache_size_bytes > 0) {
@@ -140,18 +146,17 @@ SystemCachePath::SystemCachePath(const StringPiece& path,
           static_cast<long long>(cyclone_config.ram_cache_size_bytes),
           cyclone_config.cache_path.c_str());
     } else {
-      factory->message_handler()->Message(
-          kInfo, "CycloneCache enabled at %s",
-          cyclone_config.cache_path.c_str());
+      factory->message_handler()->Message(kInfo, "CycloneCache enabled at %s",
+                                          cyclone_config.cache_path.c_str());
     }
   } else {
     // CycloneCache failed to start - fall back to LRU-only cache.
     // This can happen on platforms where CycloneCache isn't fully supported
     // (e.g., Windows) or when the cache directory isn't writable.
-    factory->message_handler()->Message(
-        kWarning, "CycloneCache failed to start at %s. "
-                  "Falling back to LRU-only cache.",
-        cyclone_config.cache_path.c_str());
+    factory->message_handler()->Message(kWarning,
+                                        "CycloneCache failed to start at %s. "
+                                        "Falling back to LRU-only cache.",
+                                        cyclone_config.cache_path.c_str());
 
     // Create an LRU cache to use as the file_cache fallback.
     // This means we won't have persistent disk caching, but rewriting
@@ -159,12 +164,12 @@ SystemCachePath::SystemCachePath(const StringPiece& path,
     int64 lru_size = config->lru_cache_kb_per_process() * 1024;
     if (lru_size == 0) {
       // Ensure at least some cache space if LRU was configured to 0
-      lru_size = 50 * 1024 * 1024;  // 50 MB default
+      lru_size = static_cast<int64>(50 * 1024 * 1024);  // 50 MB default
     }
     fallback_lru_cache_ = std::make_unique<LRUCache>(lru_size);
     cache_backend_ = fallback_lru_cache_.get();
-    file_cache_ = new CacheStats(kFileCache, cache_backend_,
-                                 factory->timer(), factory->statistics());
+    file_cache_ = new CacheStats(kFileCache, cache_backend_, factory->timer(),
+                                 factory->statistics());
     factory->TakeOwnership(file_cache_);
   }
 }
@@ -186,8 +191,9 @@ void SystemCachePath::RootInit() {
   if ((shared_mem_lock_manager_.get() != nullptr) &&
       !shared_mem_lock_manager_->Initialize()) {
     factory_->message_handler()->Message(
-        kError, "Failed to initialize shared memory lock manager for path: %s. "
-                "Falling back to in-process locking.",
+        kError,
+        "Failed to initialize shared memory lock manager for path: %s. "
+        "Falling back to in-process locking.",
         path_.c_str());
     shared_mem_lock_manager_.reset(nullptr);
     // Fall back to ThreadSafeLockManager
@@ -206,8 +212,9 @@ void SystemCachePath::ChildInit() {
   if ((shared_mem_lock_manager_.get() != nullptr) &&
       !shared_mem_lock_manager_->Attach()) {
     factory_->message_handler()->Message(
-        kError, "Failed to attach to shared memory lock manager for path: %s. "
-                "Falling back to in-process locking.",
+        kError,
+        "Failed to attach to shared memory lock manager for path: %s. "
+        "Falling back to in-process locking.",
         path_.c_str());
     shared_mem_lock_manager_.reset(nullptr);
     // Fall back to ThreadSafeLockManager

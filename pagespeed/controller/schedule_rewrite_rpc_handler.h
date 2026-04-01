@@ -22,13 +22,13 @@
 
 #include "pagespeed/controller/controller.grpc.pb.h"
 #include "pagespeed/controller/controller.pb.h"
+#include "pagespeed/controller/grpc.h"
 #include "pagespeed/controller/request_result_rpc_handler.h"
 #include "pagespeed/controller/rpc_handler.h"
 #include "pagespeed/controller/schedule_rewrite_controller.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/function.h"
 #include "pagespeed/kernel/base/string.h"
-#include "pagespeed/controller/grpc.h"
 
 namespace net_instaweb {
 
@@ -76,7 +76,8 @@ class ScheduleRewriteRpcHandler
   friend class ScheduleRewriteRpcHandlerTest;
 
   ScheduleRewriteRpcHandler(const ScheduleRewriteRpcHandler&) = delete;
-  ScheduleRewriteRpcHandler& operator=(const ScheduleRewriteRpcHandler&) = delete;
+  ScheduleRewriteRpcHandler& operator=(const ScheduleRewriteRpcHandler&) =
+      delete;
 };
 
 }  // namespace net_instaweb

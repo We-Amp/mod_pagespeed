@@ -17,7 +17,6 @@
  * under the License.
  */
 
-
 //
 // PageSpeed needs some way to talk to the internet and request resources.  For
 // example, if it's optimizing www.example.com/index.html and it sees html with
@@ -40,9 +39,10 @@ extern "C" {
 #include <ngx_http.h>
 }
 
-#include "ngx_url_async_fetcher.h"
 #include <vector>
+
 #include "net/instaweb/http/public/url_async_fetcher.h"
+#include "ngx_url_async_fetcher.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/pool.h"
 #include "pagespeed/kernel/base/string.h"
@@ -50,10 +50,9 @@ extern "C" {
 #include "pagespeed/kernel/http/response_headers_parser.h"
 #include "pagespeed/kernel/thread/pthread_mutex.h"
 
-
 namespace net_instaweb {
 
-using response_handler_pt = bool(*)(ngx_connection_t* c);
+using response_handler_pt = bool (*)(ngx_connection_t* c);
 
 class NgxUrlAsyncFetcher;
 class NgxConnection;
@@ -62,7 +61,7 @@ class NgxConnection : public PoolElement<NgxConnection> {
  public:
   NgxConnection(MessageHandler* handler, int max_keepalive_requests);
   ~NgxConnection();
-  void SetSock(u_char *sockaddr, socklen_t socklen) {
+  void SetSock(u_char* sockaddr, socklen_t socklen) {
     socklen_ = socklen;
     ngx_memcpy(&sockaddr_, sockaddr, socklen);
   }
@@ -106,10 +105,8 @@ class NgxConnection : public PoolElement<NgxConnection> {
 
 class NgxFetch : public PoolElement<NgxFetch> {
  public:
-  NgxFetch(const GoogleString& url,
-           AsyncFetch* async_fetch,
-           MessageHandler* message_handler,
-           ngx_log_t* log);
+  NgxFetch(const GoogleString& url, AsyncFetch* async_fetch,
+           MessageHandler* message_handler, ngx_log_t* log);
   ~NgxFetch();
 
   // Start the fetch.
@@ -135,15 +132,9 @@ class NgxFetch : public PoolElement<NgxFetch> {
   int get_minor_version() {
     return static_cast<int>(status_->http_version % 1000);
   }
-  int get_status_code() {
-    return static_cast<int>(status_->code);
-  }
-  ngx_event_t* timeout_event() {
-    return timeout_event_;
-  }
-  void set_timeout_event(ngx_event_t* x) {
-    timeout_event_ = x;
-  }
+  int get_status_code() { return static_cast<int>(status_->code); }
+  ngx_event_t* timeout_event() { return timeout_event_; }
+  void set_timeout_event(ngx_event_t* x) { timeout_event_ = x; }
   void release_resolver() {
     if (resolver_ctx_ != NULL && resolver_ctx_ != NGX_NO_RESOLVER) {
       ngx_resolve_name_done(resolver_ctx_);

@@ -22,10 +22,10 @@
 #include <thread>
 
 #include "pagespeed/kernel/base/basictypes.h"
+#include "pagespeed/kernel/base/std_timer.h"
 #include "pagespeed/kernel/base/thread.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/base/timer.h"
-#include "pagespeed/kernel/base/std_timer.h"
 #include "pagespeed/kernel/thread/std_mutex.h"
 #include "pagespeed/kernel/thread/std_rw_lock.h"
 

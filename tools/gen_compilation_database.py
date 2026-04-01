@@ -21,18 +21,28 @@ def generateCompilationDatabase(args):
       "--remote_download_outputs=all",
   ]
 
-  subprocess.check_call(["bazel", "build"] + bazel_options + [
+  result = subprocess.run(["bazel", "build"] + bazel_options + [
       "--aspects=@bazel_compdb//:aspects.bzl%compilation_database_aspect",
-      "--output_groups=compdb_files,header_files"
+      "--output_groups=compdb_files,header_files",
+      "--"  # separator: target patterns (including negations) follow here
   ] + args.bazel_targets)
+  if result.returncode != 0:
+    logging.warning("bazel build exited with code %d; collecting partial compdb", result.returncode)
 
+  # Filter out build-only flags that are not accepted by "bazel info"
+  info_options = [o for o in bazel_options if o not in ("--keep_going", "-k")]
   execroot = subprocess.check_output(["bazel", "info", "execution_root"] +
-                                     bazel_options).decode().strip()
+                                     info_options).decode().strip()
 
   compdb = []
   for compdb_file in Path(execroot).glob("**/*.compile_commands.json"):
-    compdb.extend(json.loads("[" + compdb_file.read_text().replace("__EXEC_ROOT__", execroot) +
-                             "]"))
+    content = compdb_file.read_text().replace("__EXEC_ROOT__", execroot).strip()
+    # bazel_compdb may output a JSON fragment (trailing comma) or a full JSON array
+    if content.startswith("["):
+      entries = json.loads(content)
+    else:
+      entries = json.loads("[" + content + "]")
+    compdb.extend(entries)
   return compdb
 
 
@@ -56,6 +66,20 @@ def isCompileTarget(target, args):
     if filename.startswith("external/"):
       return False
 
+  # Always exclude third_party — upstream code we don't own
+  if filename.startswith("third_party/"):
+    return False
+
+  # memcached_cache.cc requires libmemcached headers which only build on x64
+  if filename.endswith("pagespeed/system/memcached_cache.cc"):
+    return False
+
+  # admin_license_handler.cc uses PAGESPEED_SERVER/OS/ARCH/DISTRIBUTION macros
+  # that are passed as unquoted -D flags by Bazel, causing clang-tidy to see
+  # them as undeclared identifiers rather than string literals.
+  if filename.endswith("pagespeed/system/admin_license_handler.cc"):
+    return False
+
   return True
 
 
@@ -66,6 +90,8 @@ def modifyCompileCommand(target, args):
   # clang-tidy will misinterpret them.
   options = options.replace("-std=c++0x ", "")
   options = options.replace("-std=c++11 ", "")
+  # Strip GCC-only flags not understood by clang-tidy
+  options = options.replace("-fno-canonical-system-headers ", "")
 
   if args.vscode:
     # Visual Studio Code doesn't seem to like "-iquote". Replace it with

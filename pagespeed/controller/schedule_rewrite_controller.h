@@ -60,7 +60,8 @@ class ScheduleRewriteController {
 
  private:
   ScheduleRewriteController(const ScheduleRewriteController&) = delete;
-  ScheduleRewriteController& operator=(const ScheduleRewriteController&) = delete;
+  ScheduleRewriteController& operator=(const ScheduleRewriteController&) =
+      delete;
 };
 
 }  // namespace net_instaweb

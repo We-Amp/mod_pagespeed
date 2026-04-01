@@ -80,7 +80,8 @@ class EnvoyServerContext : public SystemServerContext {
   EnvoyRewriteDriverFactory* envoy_factory_;
   EnvoyVHostConfigManager vhost_config_manager_;
   // Cache of merged options per hostname (for VHost support).
-  std::map<GoogleString, std::unique_ptr<EnvoyRewriteOptions>> merged_options_cache_;
+  std::map<GoogleString, std::unique_ptr<EnvoyRewriteOptions>>
+      merged_options_cache_;
   EnvoyServerContext(const EnvoyServerContext&) = delete;
   EnvoyServerContext& operator=(const EnvoyServerContext&) = delete;
 };

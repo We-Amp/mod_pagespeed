@@ -129,7 +129,7 @@ class CriticalSelectorFilter::CssStyleElement
   }
 
  protected:
-  typedef std::vector<HtmlCharactersNode*> CharactersNodeVector;
+  using CharactersNodeVector = std::vector<HtmlCharactersNode*>;
   CharactersNodeVector characters_nodes_;
 
  private:
@@ -263,7 +263,7 @@ void CriticalSelectorFilter::RenderSummary(int pos, HtmlElement* element,
 
   element->DeleteAttribute(HtmlName::kMedia);
   bool drop_entire_element = false;
-  if (css_to_use->empty()) {
+  if (css_to_use->empty()) {  // NOLINT(bugprone-branch-clone)
     // Don't keep empty blocks around.
     drop_entire_element = true;
   } else if (summary.is_inside_noscript) {

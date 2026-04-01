@@ -78,7 +78,6 @@ using int8 = int8_t;
 // Lazily-initialized boolean value
 enum LazyBool { kNotSet = -1, kFalse = 0, kTrue = 1 };
 
-
 // XXX(oschaaf): check licence. copied this in here because chromium dropped it.
 /*
  * libjingle

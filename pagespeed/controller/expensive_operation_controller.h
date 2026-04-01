@@ -46,7 +46,8 @@ class ExpensiveOperationController {
 
  private:
   ExpensiveOperationController(const ExpensiveOperationController&) = delete;
-  ExpensiveOperationController& operator=(const ExpensiveOperationController&) = delete;
+  ExpensiveOperationController& operator=(const ExpensiveOperationController&) =
+      delete;
 };
 
 }  // namespace net_instaweb

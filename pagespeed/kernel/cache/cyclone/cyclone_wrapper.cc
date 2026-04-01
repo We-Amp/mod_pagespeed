@@ -57,9 +57,10 @@ struct CycloneReadHandle {
   cyclone::ReadHandle handle;
   mutable std::vector<char> data_copy;  // Lazy copy - only populated on demand
   mutable std::once_flag data_copy_flag;  // Thread-safe one-time initialization
-  const char* mapped_ptr = nullptr;  // Direct pointer to mmap'd data (zero-copy)
-  size_t data_size = 0;              // Size of the data
-  std::atomic<int> refcount{1};      // Reference count, starts at 1
+  const char* mapped_ptr =
+      nullptr;                   // Direct pointer to mmap'd data (zero-copy)
+  size_t data_size = 0;          // Size of the data
+  std::atomic<int> refcount{1};  // Reference count, starts at 1
 
   // Lazily initialize data_copy from the mmap'd data.
   // Thread-safe: uses std::call_once to ensure initialization happens exactly once.
@@ -79,14 +80,10 @@ static std::string CacheErrorMessage(cyclone::CacheError err) {
 }
 
 // Helper to set the thread-local error message.
-static void SetLastError(const std::string& msg) {
-  g_last_error = msg;
-}
+static void SetLastError(const std::string& msg) { g_last_error = msg; }
 
 // Helper to clear the thread-local error message.
-static void ClearLastError() {
-  g_last_error.clear();
-}
+static void ClearLastError() { g_last_error.clear(); }
 
 extern "C" {
 
@@ -166,8 +163,8 @@ CycloneError cyclone_cache_start(CycloneCacheHandle* cache) {
 
   auto result = cache->impl->start();
   if (!result) {
-    SetLastError("Failed to start cache at '" + cache->cache_path + "': " +
-                 CacheErrorMessage(result.error()));
+    SetLastError("Failed to start cache at '" + cache->cache_path +
+                 "': " + CacheErrorMessage(result.error()));
     return CYCLONE_INTERNAL_ERROR;
   }
 
@@ -186,8 +183,8 @@ int cyclone_cache_is_running(const CycloneCacheHandle* cache) {
   return (cache && cache->impl && cache->running) ? 1 : 0;
 }
 
-CycloneError cyclone_cache_read(CycloneCacheHandle* cache,
-                                const char* key, size_t key_len,
+CycloneError cyclone_cache_read(CycloneCacheHandle* cache, const char* key,
+                                size_t key_len,
                                 CycloneReadHandle** out_handle) {
   ClearLastError();
 
@@ -289,9 +286,9 @@ void cyclone_read_handle_close(CycloneReadHandle* handle) {
   cyclone_read_handle_unref(handle);
 }
 
-CycloneError cyclone_cache_write(CycloneCacheHandle* cache,
-                                 const char* key, size_t key_len,
-                                 const char* data, size_t data_len) {
+CycloneError cyclone_cache_write(CycloneCacheHandle* cache, const char* key,
+                                 size_t key_len, const char* data,
+                                 size_t data_len) {
   ClearLastError();
 
   if (!cache || !cache->impl || !cache->running) {
@@ -328,7 +325,8 @@ CycloneError cyclone_cache_write(CycloneCacheHandle* cache,
     std::memcpy(bytes.data(), data, data_len);
   }
 
-  auto write_result = handle_result->write_sync(std::span<const std::byte>(bytes));
+  auto write_result =
+      handle_result->write_sync(std::span<const std::byte>(bytes));
   if (!write_result) {
     // On write failure, abort the handle to prevent destructor issues
     handle_result->abort();
@@ -356,8 +354,8 @@ CycloneError cyclone_cache_write(CycloneCacheHandle* cache,
   return CYCLONE_OK;
 }
 
-CycloneError cyclone_cache_delete(CycloneCacheHandle* cache,
-                                  const char* key, size_t key_len) {
+CycloneError cyclone_cache_delete(CycloneCacheHandle* cache, const char* key,
+                                  size_t key_len) {
   ClearLastError();
 
   if (!cache || !cache->impl || !cache->running) {
@@ -382,9 +380,8 @@ CycloneError cyclone_cache_delete(CycloneCacheHandle* cache,
   return CYCLONE_OK;
 }
 
-CycloneError cyclone_cache_exists(CycloneCacheHandle* cache,
-                                  const char* key, size_t key_len,
-                                  int* exists) {
+CycloneError cyclone_cache_exists(CycloneCacheHandle* cache, const char* key,
+                                  size_t key_len, int* exists) {
   ClearLastError();
 
   if (!cache || !cache->impl || !cache->running) {

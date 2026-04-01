@@ -305,7 +305,8 @@ class StringMultiMapInsensitive
 
  private:
   StringMultiMapInsensitive(const StringMultiMapInsensitive&) = delete;
-  StringMultiMapInsensitive& operator=(const StringMultiMapInsensitive&) = delete;
+  StringMultiMapInsensitive& operator=(const StringMultiMapInsensitive&) =
+      delete;
 };
 
 class StringMultiMapSensitive : public StringMultiMap<StringCompareSensitive> {

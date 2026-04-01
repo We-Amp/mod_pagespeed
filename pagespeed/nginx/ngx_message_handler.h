@@ -17,19 +17,16 @@
  * under the License.
  */
 
-
-
-
 #ifndef NGX_MESSAGE_HANDLER_H_
 #define NGX_MESSAGE_HANDLER_H_
 
 extern "C" {
-  #include <ngx_auto_config.h>
+#include <ngx_auto_config.h>
 #if (NGX_THREADS)
-  #include <ngx_thread.h>
+#include <ngx_thread.h>
 #endif
-  #include <ngx_core.h>
-  #include <ngx_log.h>
+#include <ngx_core.h>
+#include <ngx_log.h>
 }
 
 #include <cstdarg>
@@ -61,8 +58,8 @@ class NgxMessageHandler : public SystemMessageHandler {
  protected:
   virtual void MessageSImpl(MessageType type, const GoogleString& message);
 
-  virtual void FileMessageSImpl(MessageType type, const char* file,
-                                int line, const GoogleString& message);
+  virtual void FileMessageSImpl(MessageType type, const char* file, int line,
+                                const GoogleString& message);
 
  private:
   ngx_uint_t GetNgxLogLevel(MessageType type);

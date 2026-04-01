@@ -147,8 +147,7 @@ class SystemServerContext : public ServerContext {
   // message-histogram, console, etc.
   void AdminPage(bool is_global, const GoogleUrl& stripped_gurl,
                  const QueryParams& query_params, const RewriteOptions* options,
-                 AsyncFetch* fetch,
-                 StringPiece request_body = StringPiece());
+                 AsyncFetch* fetch, StringPiece request_body = StringPiece());
 
   // Handle a request for the legacy /*_pagespeed_statistics page, which also
   // serves as a launching point for a subset of the admin pages.  Because the

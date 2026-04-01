@@ -77,8 +77,7 @@ void pagespeed_global_shutdown(void) {
   g_process_context = nullptr;
 }
 
-pagespeed_t pagespeed_create(const char* config_path,
-                             const char* cache_path) {
+pagespeed_t pagespeed_create(const char* config_path, const char* cache_path) {
   if (g_process_context == nullptr) {
     return nullptr;
   }
@@ -105,9 +104,7 @@ pagespeed_t pagespeed_create(const char* config_path,
   return ps;
 }
 
-void pagespeed_destroy(pagespeed_t ps) {
-  delete ps;
-}
+void pagespeed_destroy(pagespeed_t ps) { delete ps; }
 
 int pagespeed_set_option(pagespeed_t ps, const char* name, const char* value) {
   if (ps == nullptr || ps->server_context == nullptr) {
@@ -117,8 +114,7 @@ int pagespeed_set_option(pagespeed_t ps, const char* name, const char* value) {
       ps->server_context->global_options()->Clone();
   GoogleString msg;
   net_instaweb::RewriteOptions::OptionSettingResult result =
-      options->ParseAndSetOptionFromName1(name, value, &msg,
-                                          &ps->handler);
+      options->ParseAndSetOptionFromName1(name, value, &msg, &ps->handler);
   if (result != net_instaweb::RewriteOptions::kOptionOk) {
     delete options;
     return PAGESPEED_ERROR;
@@ -160,8 +156,7 @@ int pagespeed_rewrite_html(pagespeed_request_t req, const char* html_in,
   net_instaweb::RequestContextPtr request_context(
       new net_instaweb::RequestContext(
           net_instaweb::kDefaultHttpOptionsForTests,
-          new net_instaweb::NullMutex(),
-          req->instance->factory->timer()));
+          new net_instaweb::NullMutex(), req->instance->factory->timer()));
 
   net_instaweb::RewriteDriver* driver =
       req->instance->server_context->NewRewriteDriver(request_context);

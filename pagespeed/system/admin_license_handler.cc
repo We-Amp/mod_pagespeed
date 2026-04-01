@@ -14,7 +14,6 @@
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/string_writer.h"
-#include "pagespeed/system/json_utils.h"
 #include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/http/content_type.h"
 #include "pagespeed/kernel/http/http_names.h"
@@ -24,6 +23,7 @@
 #include "pagespeed/kernel/license_v2/license_token.h"
 #include "pagespeed/kernel/license_v2/license_verifier.h"
 #include "pagespeed/kernel/license_v2/tracking_metadata.h"
+#include "pagespeed/system/json_utils.h"
 
 namespace net_instaweb {
 
@@ -63,10 +63,9 @@ class LicenseProxyFetch : public StringAsyncFetch {
       // Upstream fetch failed -- return 502 to client.
       ResponseHeaders* headers = client_fetch_->response_headers();
       headers->set_status_code(HttpStatus::kBadGateway);
-      headers->Add(HttpAttributes::kContentType,
-                   kContentTypeJson.mime_type());
-      client_fetch_->Write(
-          "{\"error\":\"License service unavailable\"}", message_handler_);
+      headers->Add(HttpAttributes::kContentType, kContentTypeJson.mime_type());
+      client_fetch_->Write("{\"error\":\"License service unavailable\"}",
+                           message_handler_);
       client_fetch_->Done(true);
     } else {
       // Forward the upstream status code and body.
@@ -86,8 +85,7 @@ class LicenseProxyFetch : public StringAsyncFetch {
           GoogleString error;
           if (handler_->ApplyToken(token, &error)) {
             // Persist to disk (best-effort).
-            std::filesystem::path path =
-                LicenseFilePath(handler_->cache_path_);
+            std::filesystem::path path = LicenseFilePath(handler_->cache_path_);
             if (WriteLicenseFile(path, token)) {
               message_handler_->Message(kInfo, "License saved to %s",
                                         path.string().c_str());
@@ -127,8 +125,11 @@ AdminLicenseHandler::AdminLicenseHandler(Timer* timer,
                                          MessageHandler* handler,
                                          UrlAsyncFetcher* fetcher,
                                          const GoogleString& cache_path)
-    : timer_(timer), thread_system_(thread_system), handler_(handler),
-      fetcher_(fetcher), cache_path_(cache_path) {}
+    : timer_(timer),
+      thread_system_(thread_system),
+      handler_(handler),
+      fetcher_(fetcher),
+      cache_path_(cache_path) {}
 
 AdminLicenseHandler::~AdminLicenseHandler() {
   // Wait for any in-flight proxy fetch to complete before destroying.
@@ -157,8 +158,7 @@ void AdminLicenseHandler::Init() {
   if (ReadLicenseFile(path, &token)) {
     GoogleString error;
     if (ApplyToken(token, &error)) {
-      handler_->Message(kInfo, "License loaded from %s",
-                        path.string().c_str());
+      handler_->Message(kInfo, "License loaded from %s", path.string().c_str());
     } else {
       handler_->Message(kWarning, "Invalid license in %s: %s",
                         path.string().c_str(), error.c_str());
@@ -229,9 +229,8 @@ bool AdminLicenseHandler::ApplyToken(StringPiece token, GoogleString* error) {
 }
 
 bool AdminLicenseHandler::HandleRequest(StringPiece path,
-                                         StringPiece request_body,
-                                         bool is_global,
-                                         AsyncFetch* fetch) {
+                                        StringPiece request_body,
+                                        bool is_global, AsyncFetch* fetch) {
   if (path == "/v1/license/status") {
     HandleStatus(is_global, fetch);
     return true;
@@ -244,8 +243,7 @@ bool AdminLicenseHandler::HandleRequest(StringPiece path,
   const char* x_requested_with =
       req_headers->Lookup1(HttpAttributes::kXRequestedWith);
   if (content_type == nullptr ||
-      !StringCaseStartsWith(StringPiece(content_type),
-                            "application/json") ||
+      !StringCaseStartsWith(StringPiece(content_type), "application/json") ||
       x_requested_with == nullptr ||
       StringPiece(x_requested_with) != "XMLHttpRequest") {
     WriteJsonError(fetch, HttpStatus::kForbidden,
@@ -344,7 +342,7 @@ void AdminLicenseHandler::HandleStatus(bool is_global, AsyncFetch* fetch) {
 }
 
 void AdminLicenseHandler::HandleApply(StringPiece request_body,
-                                       AsyncFetch* fetch) {
+                                      AsyncFetch* fetch) {
   if (request_body.size() > kMaxRequestBodySize) {
     WriteJsonError(fetch, HttpStatus::kBadRequest,
                    "Request body too large (max 4KB)");
@@ -368,8 +366,8 @@ void AdminLicenseHandler::HandleApply(StringPiece request_body,
 
   GoogleString error;
   if (!ApplyToken(key, &error)) {
-    GoogleString json = StrCat("{\"success\":false,\"error\":\"",
-                               JsonEscape(error), "\"}");
+    GoogleString json =
+        StrCat("{\"success\":false,\"error\":\"", JsonEscape(error), "\"}");
     WriteJsonResponse(fetch, json);
     return;
   }
@@ -396,15 +394,14 @@ void AdminLicenseHandler::HandleApply(StringPiece request_body,
     StrAppend(&json, ",\"plan\":\"", JsonEscape(plan), "\"");
   }
   if (expires_at > 0) {
-    StrAppend(&json, ",\"expires_at\":",
-              Integer64ToString(expires_at));
+    StrAppend(&json, ",\"expires_at\":", Integer64ToString(expires_at));
   }
   StrAppend(&json, "}");
   WriteJsonResponse(fetch, json);
 }
 
 void AdminLicenseHandler::WriteJsonResponse(AsyncFetch* fetch,
-                                             StringPiece json) {
+                                            StringPiece json) {
   ResponseHeaders* headers = fetch->response_headers();
   headers->SetStatusAndReason(HttpStatus::kOK);
   headers->Add(HttpAttributes::kContentType, kContentTypeJson.mime_type());
@@ -417,7 +414,7 @@ void AdminLicenseHandler::WriteJsonResponse(AsyncFetch* fetch,
 }
 
 void AdminLicenseHandler::WriteJsonError(AsyncFetch* fetch, int status_code,
-                                          StringPiece error) {
+                                         StringPiece error) {
   ResponseHeaders* headers = fetch->response_headers();
   headers->set_status_code(status_code);
   headers->Add(HttpAttributes::kContentType, kContentTypeJson.mime_type());
@@ -450,8 +447,8 @@ void AdminLicenseHandler::SetLicenseServiceUrlForTesting(StringPiece url) {
 
 bool AdminLicenseHandler::AcquireRequestSlot() {
   bool expected = false;
-  if (request_in_flight_.compare_exchange_strong(
-          expected, true, std::memory_order_acq_rel)) {
+  if (request_in_flight_.compare_exchange_strong(expected, true,
+                                                 std::memory_order_acq_rel)) {
     // Acquired cleanly.  Record when we took the slot.
     last_request_start_ms_.store(timer_->NowMs(), std::memory_order_release);
     return true;
@@ -470,8 +467,8 @@ bool AdminLicenseHandler::AcquireRequestSlot() {
 
     // Retry the CAS after the force-reset.
     expected = false;
-    if (request_in_flight_.compare_exchange_strong(
-            expected, true, std::memory_order_acq_rel)) {
+    if (request_in_flight_.compare_exchange_strong(expected, true,
+                                                   std::memory_order_acq_rel)) {
       last_request_start_ms_.store(now_ms, std::memory_order_release);
       return true;
     }
@@ -520,7 +517,7 @@ void AdminLicenseHandler::ProxyToLicenseService(
 }
 
 void AdminLicenseHandler::HandleActivate(StringPiece request_body,
-                                          AsyncFetch* fetch) {
+                                         AsyncFetch* fetch) {
   if (request_body.size() > kMaxRequestBodySize) {
     WriteJsonError(fetch, HttpStatus::kBadRequest,
                    "Request body too large (max 4KB)");
@@ -541,18 +538,16 @@ void AdminLicenseHandler::HandleActivate(StringPiece request_body,
   if (!order_ref.empty()) {
     StrAppend(&sanitized, ",\"order_ref\":\"", JsonEscape(order_ref), "\"");
   }
-  StrAppend(&sanitized,
-            ",\"server\":\"", PAGESPEED_SERVER,
-            "\",\"os\":\"", PAGESPEED_OS,
-            "\",\"arch\":\"", PAGESPEED_ARCH,
+  StrAppend(&sanitized, ",\"server\":\"", PAGESPEED_SERVER, "\",\"os\":\"",
+            PAGESPEED_OS, "\",\"arch\":\"", PAGESPEED_ARCH,
             "\",\"distribution\":\"", PAGESPEED_DISTRIBUTION, "\"}");
 
-  ProxyToLicenseService("/api/activate", sanitized,
-                        true /* auto_apply_token */, fetch);
+  ProxyToLicenseService("/api/activate", sanitized, true /* auto_apply_token */,
+                        fetch);
 }
 
 void AdminLicenseHandler::HandleTrial(StringPiece request_body,
-                                       AsyncFetch* fetch) {
+                                      AsyncFetch* fetch) {
   if (request_body.size() > kMaxRequestBodySize) {
     WriteJsonError(fetch, HttpStatus::kBadRequest,
                    "Request body too large (max 4KB)");
@@ -572,24 +567,21 @@ void AdminLicenseHandler::HandleTrial(StringPiece request_body,
                    "Missing 'terms_accepted_at' field");
     return;
   }
-  if (!ExtractJsonStringField(request_body, "terms_version",
-                              &terms_version)) {
+  if (!ExtractJsonStringField(request_body, "terms_version", &terms_version)) {
     WriteJsonError(fetch, HttpStatus::kBadRequest,
                    "Missing 'terms_version' field");
     return;
   }
 
-  GoogleString sanitized = StrCat(
-      "{\"email\":\"", JsonEscape(email),
-      "\",\"terms_accepted_at\":\"", JsonEscape(terms_accepted_at),
-      "\",\"terms_version\":\"", JsonEscape(terms_version),
-      "\",\"server\":\"", PAGESPEED_SERVER,
-      "\",\"os\":\"", PAGESPEED_OS,
-      "\",\"arch\":\"", PAGESPEED_ARCH,
-      "\",\"distribution\":\"", PAGESPEED_DISTRIBUTION, "\"}");
+  GoogleString sanitized =
+      StrCat("{\"email\":\"", JsonEscape(email), "\",\"terms_accepted_at\":\"",
+             JsonEscape(terms_accepted_at), "\",\"terms_version\":\"",
+             JsonEscape(terms_version), "\",\"server\":\"", PAGESPEED_SERVER,
+             "\",\"os\":\"", PAGESPEED_OS, "\",\"arch\":\"", PAGESPEED_ARCH,
+             "\",\"distribution\":\"", PAGESPEED_DISTRIBUTION, "\"}");
 
-  ProxyToLicenseService("/api/trial", sanitized,
-                        true /* auto_apply_token */, fetch);
+  ProxyToLicenseService("/api/trial", sanitized, true /* auto_apply_token */,
+                        fetch);
 }
 
 void AdminLicenseHandler::MaybeRenew() {
@@ -641,10 +633,8 @@ void AdminLicenseHandler::MaybeRenew() {
 
   // Build renewal request: POST current token to /api/renew.
   GoogleString sanitized = StrCat(
-      "{\"token\":\"", JsonEscape(token),
-      "\",\"server\":\"", PAGESPEED_SERVER,
-      "\",\"os\":\"", PAGESPEED_OS,
-      "\",\"arch\":\"", PAGESPEED_ARCH,
+      "{\"token\":\"", JsonEscape(token), "\",\"server\":\"", PAGESPEED_SERVER,
+      "\",\"os\":\"", PAGESPEED_OS, "\",\"arch\":\"", PAGESPEED_ARCH,
       "\",\"distribution\":\"", PAGESPEED_DISTRIBUTION, "\"}");
   GoogleString url = StrCat(LicenseServiceUrl(), "/api/renew");
 
@@ -688,8 +678,8 @@ void AdminLicenseHandler::MaybeRenew() {
                 std::filesystem::path path =
                     LicenseFilePath(handler_->cache_path_);
                 if (WriteLicenseFile(path, token)) {
-                  message_handler_->Message(kInfo,
-                      "License auto-renewed and saved to %s",
+                  message_handler_->Message(
+                      kInfo, "License auto-renewed and saved to %s",
                       path.string().c_str());
                 }
               } else {
@@ -727,7 +717,7 @@ void AdminLicenseHandler::MaybeRenew() {
 }
 
 void AdminLicenseHandler::HandleConsent(StringPiece request_body,
-                                         AsyncFetch* fetch) {
+                                        AsyncFetch* fetch) {
   if (request_body.size() > kMaxRequestBodySize) {
     WriteJsonError(fetch, HttpStatus::kBadRequest,
                    "Request body too large (max 4KB)");
@@ -742,11 +732,11 @@ void AdminLicenseHandler::HandleConsent(StringPiece request_body,
     return;
   }
 
-  GoogleString sanitized = StrCat("{\"accepted\":",
-                                  accepted ? "true" : "false", "}");
+  GoogleString sanitized =
+      StrCat("{\"accepted\":", accepted ? "true" : "false", "}");
 
-  ProxyToLicenseService("/api/consent", sanitized,
-                        false /* auto_apply_token */, fetch);
+  ProxyToLicenseService("/api/consent", sanitized, false /* auto_apply_token */,
+                        fetch);
 }
 
 }  // namespace net_instaweb

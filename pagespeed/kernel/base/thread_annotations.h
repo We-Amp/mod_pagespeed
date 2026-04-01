@@ -19,8 +19,8 @@
 
 #pragma once
 
-#include "absl/base/thread_annotations.h"
 #include "absl/base/attributes.h"
+#include "absl/base/thread_annotations.h"
 
 // Define legacy thread annotation macros using ABSL_ prefixed versions
 // since ABSL_LEGACY_THREAD_ANNOTATIONS is no longer supported
@@ -78,7 +78,8 @@
 #endif
 
 #ifndef EXCLUSIVE_TRYLOCK_FUNCTION
-#define EXCLUSIVE_TRYLOCK_FUNCTION(...) ABSL_EXCLUSIVE_TRYLOCK_FUNCTION(__VA_ARGS__)
+#define EXCLUSIVE_TRYLOCK_FUNCTION(...) \
+  ABSL_EXCLUSIVE_TRYLOCK_FUNCTION(__VA_ARGS__)
 #endif
 
 #ifndef SHARED_TRYLOCK_FUNCTION

@@ -17,26 +17,21 @@
  * under the License.
  */
 
-
-
 extern "C" {
 
 #include <ngx_channel.h>
-
 }
-
-#include "ngx_event_connection.h"
 
 #include <unistd.h>
 
+#include "ngx_event_connection.h"
 #include "pagespeed/kernel/base/google_message_handler.h"
 #include "pagespeed/kernel/base/message_handler.h"
 
 namespace net_instaweb {
 
-  NgxEventConnection::NgxEventConnection(callbackPtr callback)
-    : event_handler_(callback) {
-}
+NgxEventConnection::NgxEventConnection(callbackPtr callback)
+    : event_handler_(callback) {}
 
 bool NgxEventConnection::Init(ngx_cycle_t* cycle) {
   int file_descriptors[2];
@@ -63,7 +58,8 @@ bool NgxEventConnection::Init(ngx_cycle_t* cycle) {
     // TODO(oschaaf): Consider implementing a queueing mechanism for retrying
     // failed writes.
 #ifdef F_SETPIPE_SZ
-    fcntl(pipe_write_fd_, F_SETPIPE_SZ, 200*1024 /* minimal amount of bytes */);
+    fcntl(pipe_write_fd_, F_SETPIPE_SZ,
+          200 * 1024 /* minimal amount of bytes */);
 #endif
     return true;
   }
@@ -77,8 +73,8 @@ bool NgxEventConnection::CreateNgxConnection(ngx_cycle_t* cycle,
   // pipe_fd (the read side of the pipe will end up as c->fd on the
   // underlying ngx_connection_t that gets created here)
   ngx_int_t rc = ngx_add_channel_event(cycle, pipe_fd, NGX_READ_EVENT,
-      &NgxEventConnection::ReadEventHandler);
-  return rc  == NGX_OK;
+                                       &NgxEventConnection::ReadEventHandler);
+  return rc == NGX_OK;
 }
 
 void NgxEventConnection::ReadEventHandler(ngx_event_t* ev) {
@@ -122,7 +118,7 @@ bool NgxEventConnection::ReadAndNotify(ngx_fd_t fd) {
     if (size == -1) {
       if (errno == EINTR) {
         continue;
-      // TODO(oschaaf): should we worry about spinning here?
+        // TODO(oschaaf): should we worry about spinning here?
       } else if (ngx_errno == EAGAIN || ngx_errno == EWOULDBLOCK) {
         return true;
       }
@@ -161,8 +157,7 @@ bool NgxEventConnection::WriteEvent(char type, void* sender) {
   useconds_t backoff_us = kInitialBackoffUs;
 
   while (true) {
-    size = write(pipe_write_fd_,
-                 static_cast<void*>(&data), sizeof(data));
+    size = write(pipe_write_fd_, static_cast<void*>(&data), sizeof(data));
     if (size == sizeof(data)) {
       return true;
     } else if (size == -1) {

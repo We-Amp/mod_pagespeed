@@ -94,7 +94,7 @@ class CycloneCache : public CacheInterface {
 
     Config()
         : cache_size_bytes(100 * 1024 * 1024),  // 100 MB default
-          ram_cache_size_bytes(0),               // No RAM cache by default
+          ram_cache_size_bytes(0),              // No RAM cache by default
           enable_checksum(true),
           num_segments(0),
           persist_directory(true) {}
@@ -111,8 +111,7 @@ class CycloneCache : public CacheInterface {
 
   // Creates a CycloneCache with the given configuration.
   // The cache is started during construction.
-  CycloneCache(const Config& config,
-               Statistics* statistics,
+  CycloneCache(const Config& config, Statistics* statistics,
                MessageHandler* handler);
 
   ~CycloneCache() override;

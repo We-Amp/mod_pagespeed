@@ -20,6 +20,7 @@
 #define WIN_MUTEX_H
 
 #include <Windows.h>
+
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/thread_system.h"
 
@@ -36,7 +37,6 @@ class WinMutex : public ThreadSystem::CondvarCapableMutex {
   virtual ThreadSystem::Condvar* NewCondvar();
 
  private:
-  
   friend class WinCondvar;
 
   //pthread_mutex_t mutex_;

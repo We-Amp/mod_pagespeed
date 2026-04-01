@@ -19,6 +19,8 @@
 
 #include "net/instaweb/rewriter/public/js_replacer.h"
 
+#include <cstdint>
+
 #include "base/logging.h"
 #include "pagespeed/kernel/js/js_keywords.h"
 
@@ -29,7 +31,7 @@ namespace net_instaweb {
 
 namespace {
 
-enum State {
+enum State : std::uint8_t {
   kStart,
   kSawIdent,
   kSawIdentDot,

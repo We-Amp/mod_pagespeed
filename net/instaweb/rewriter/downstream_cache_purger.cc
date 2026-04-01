@@ -65,8 +65,10 @@ class StringAsyncFetchWithAsyncCountUpdates : public StringAsyncFetch {
  private:
   RewriteDriver* driver_;
 
-  StringAsyncFetchWithAsyncCountUpdates(const StringAsyncFetchWithAsyncCountUpdates&) = delete;
-  StringAsyncFetchWithAsyncCountUpdates& operator=(const StringAsyncFetchWithAsyncCountUpdates&) = delete;
+  StringAsyncFetchWithAsyncCountUpdates(
+      const StringAsyncFetchWithAsyncCountUpdates&) = delete;
+  StringAsyncFetchWithAsyncCountUpdates& operator=(
+      const StringAsyncFetchWithAsyncCountUpdates&) = delete;
 };
 
 }  // namespace

@@ -99,7 +99,8 @@ class ResponsiveImageFirstFilter : public CommonFilter {
   ResponsiveImageCandidateMap candidate_map_;
 
   ResponsiveImageFirstFilter(const ResponsiveImageFirstFilter&) = delete;
-  ResponsiveImageFirstFilter& operator=(const ResponsiveImageFirstFilter&) = delete;
+  ResponsiveImageFirstFilter& operator=(const ResponsiveImageFirstFilter&) =
+      delete;
 };
 
 class ResponsiveImageSecondFilter : public CommonFilter {
@@ -135,7 +136,8 @@ class ResponsiveImageSecondFilter : public CommonFilter {
   bool srcsets_added_;
 
   ResponsiveImageSecondFilter(const ResponsiveImageSecondFilter&) = delete;
-  ResponsiveImageSecondFilter& operator=(const ResponsiveImageSecondFilter&) = delete;
+  ResponsiveImageSecondFilter& operator=(const ResponsiveImageSecondFilter&) =
+      delete;
 };
 
 }  // namespace net_instaweb

@@ -19,6 +19,7 @@
 
 #include "pagespeed/kernel/image/jpeg_utils.h"
 
+#include <cmath>
 #include <csetjmp>  // for longjmp
 // 'stdio.h' provides FILE for jpeglib (needed for certain builds)
 
@@ -30,7 +31,7 @@ extern "C" {
 #ifdef USE_SYSTEM_LIBJPEG
 #include "jpeglib.h"  // NOLINT
 #else
-#include "external/libjpeg_turbo/jpeglib.h"
+#include "jpeglib.h"
 #endif
 }
 
@@ -133,7 +134,7 @@ int JpegUtils::GetImageQualityFromImage(const void* image_data,
     // This computed quality is in the form of a fraction, so multiplying with
     // 100 and rounding off to nearest integer.
     double quality = quality_entries_sum * 100 / quality_entries_count;
-    return static_cast<int>(quality + 0.5);
+    return static_cast<int>(std::lround(quality));
   }
 
   return -1;

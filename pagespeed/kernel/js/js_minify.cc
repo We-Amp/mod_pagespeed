@@ -429,7 +429,8 @@ void Minifier<OutputConsumer>::Minify() {
       // Identifiers, keywords, and numeric literals:
       ConsumeNameOrNumber();
     } else if (ch == '<' &&
-               strings::StartsWith(input_.substr(index_), "<!--")) {
+               strings::StartsWith(input_.substr(index_),
+                                   "<!--")) {  // NOLINT(bugprone-branch-clone)
       // Treat <!-- as a line comment.  Note that the substr() here is very
       // efficient because input_ is a StringPiece, not a string.
       ConsumeLineComment();

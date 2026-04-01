@@ -17,16 +17,14 @@
  * under the License.
  */
 
-
-
 #ifndef LOG_MESSAGE_HANDLER_H_
 #define LOG_MESSAGE_HANDLER_H_
 
 extern "C" {
-  #include <ngx_config.h>
-  #include <ngx_core.h>
-  #include <ngx_http.h>
-  #include <ngx_log.h>
+#include <ngx_config.h>
+#include <ngx_core.h>
+#include <ngx_http.h>
+#include <ngx_log.h>
 }
 
 namespace net_instaweb {

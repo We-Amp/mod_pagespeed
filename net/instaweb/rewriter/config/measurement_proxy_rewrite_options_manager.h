@@ -59,8 +59,10 @@ class MeasurementProxyRewriteOptionsManager : public RewriteOptionsManager {
   GoogleString root_domain_;
   GoogleString password_;
 
-  MeasurementProxyRewriteOptionsManager(const MeasurementProxyRewriteOptionsManager&) = delete;
-  MeasurementProxyRewriteOptionsManager& operator=(const MeasurementProxyRewriteOptionsManager&) = delete;
+  MeasurementProxyRewriteOptionsManager(
+      const MeasurementProxyRewriteOptionsManager&) = delete;
+  MeasurementProxyRewriteOptionsManager& operator=(
+      const MeasurementProxyRewriteOptionsManager&) = delete;
 };
 
 }  // namespace net_instaweb

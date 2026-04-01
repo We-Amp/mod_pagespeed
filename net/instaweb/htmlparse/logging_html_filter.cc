@@ -70,7 +70,7 @@ void LoggingFilter::EndElement(HtmlElement* element) {
       ++stats_[NUM_BRIEF_CLOSED];
       break;
     }
-    case HtmlElement::INVISIBLE:
+    case HtmlElement::INVISIBLE:  // NOLINT(bugprone-branch-clone)
     case HtmlElement::UNCLOSED: {
       // We assumed unmatchedness at StartElement, so do nothing.
       break;

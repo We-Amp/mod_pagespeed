@@ -23,15 +23,14 @@
 
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/std_timer.h"
-#include "pagespeed/kernel/thread/win_rw_lock.h"
-#include "pagespeed/kernel/thread/win_mutex.h"
 #include "pagespeed/kernel/base/thread.h"
 #include "pagespeed/kernel/base/thread_system.h"
+#include "pagespeed/kernel/thread/win_mutex.h"
+#include "pagespeed/kernel/thread/win_rw_lock.h"
 
 namespace net_instaweb {
 
 class Timer;
-
 
 namespace {
 
@@ -59,13 +58,9 @@ class WinThreadId : public ThreadSystem::ThreadId {
 
 class WinThreadImpl : public ThreadSystem::ThreadImpl {
  public:
-  WinThreadImpl(WinThreadSystem* thread_system,
-                ThreadSystem::Thread* wrapper,
+  WinThreadImpl(WinThreadSystem* thread_system, ThreadSystem::Thread* wrapper,
                 ThreadSystem::ThreadFlags flags)
-      : thread_system_(thread_system),
-        wrapper_(wrapper),
-        flags_(flags) {
-  }
+      : thread_system_(thread_system), wrapper_(wrapper), flags_(flags) {}
 
   virtual ~WinThreadImpl() {
     // If the thread was detached and is still joinable, detach it now.
@@ -107,31 +102,24 @@ class WinThreadImpl : public ThreadSystem::ThreadImpl {
   WinThreadImpl& operator=(const WinThreadImpl&) = delete;
 };
 
-WinThreadSystem::WinThreadSystem() {
-}
+WinThreadSystem::WinThreadSystem() {}
 
-WinThreadSystem::~WinThreadSystem() {
-}
+WinThreadSystem::~WinThreadSystem() {}
 
 ThreadSystem::CondvarCapableMutex* WinThreadSystem::NewMutex() {
   return new WinMutex;
 }
 
-ThreadSystem::RWLock* WinThreadSystem::NewRWLock() {
-  return new WinRWLock;
-}
+ThreadSystem::RWLock* WinThreadSystem::NewRWLock() { return new WinRWLock; }
 
-void WinThreadSystem::BeforeThreadRunHook() {
-}
+void WinThreadSystem::BeforeThreadRunHook() {}
 
 ThreadSystem::ThreadImpl* WinThreadSystem::NewThreadImpl(
     ThreadSystem::Thread* wrapper, ThreadSystem::ThreadFlags flags) {
   return new WinThreadImpl(this, wrapper, flags);
 }
 
-Timer* WinThreadSystem::NewTimer() {
-  return new StdTimer;
-}
+Timer* WinThreadSystem::NewTimer() { return new StdTimer; }
 
 ThreadSystem::ThreadId* WinThreadSystem::GetThreadId() const {
   return new WinThreadId;

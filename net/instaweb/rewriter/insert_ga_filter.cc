@@ -155,7 +155,8 @@ InsertGAFilter::AnalyticsStatus InsertGAFilter::FindSnippetInScript(
   if (s.find(".google-analytics.com/urchin.js") != GoogleString::npos) {
     return kUnusableSnippetFound;  // urchin.js is too old.
   } else if (s.find(".google-analytics.com/ga.js") != GoogleString::npos ||
-             s.find("stats.g.doubleclick.net/dc.js") != GoogleString::npos) {
+             s.find("stats.g.doubleclick.net/dc.js") !=
+                 GoogleString::npos) {  // NOLINT(bugprone-branch-clone)
     // With the async snippet there is one part that first loads ga.js
     // (using [.google-analytics.com/ga.js], with initial dot) and then has the
     // ga_id (which we checked for above).
@@ -328,7 +329,8 @@ void InsertGAFilter::RewriteInlineScript(HtmlCharactersNode* characters) {
       }
       if (token_type == pagespeed::JsKeywords::kComment ||
           token_type == pagespeed::JsKeywords::kWhitespace ||
-          token_type == pagespeed::JsKeywords::kLineSeparator) {
+          token_type == pagespeed::JsKeywords::
+                            kLineSeparator) {  // NOLINT(bugprone-branch-clone)
         // All states allow these, so stay in the same state.  kLineSeparator is
         // specifically for newlines that don't trigger semicolon insertion.
       } else if (state == kInitial &&
@@ -342,7 +344,8 @@ void InsertGAFilter::RewriteInlineScript(HtmlCharactersNode* characters) {
         state = kGotGaFuncCall;
       } else if (state == kGotGaFuncCall &&
                  token_type == pagespeed::JsKeywords::kStringLiteral &&
-                 StringLiteralMatches(token, "create")) {
+                 StringLiteralMatches(
+                     token, "create")) {  // NOLINT(bugprone-branch-clone)
         state = kGotGaCreate;
       } else if (state == kGotGaFuncCall &&
                  token_type == pagespeed::JsKeywords::kStringLiteral &&

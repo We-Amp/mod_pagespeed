@@ -21,30 +21,6 @@
 
 #include "pagespeed/kernel/base/message_handler.h"
 
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <windows.h>
-
-namespace {
-void BufferingDebugLog(const char* msg) {
-  HANDLE hFile = CreateFileA(
-      "C:\\inetpub\\pagespeed\\buffering_debug.log",
-      FILE_APPEND_DATA,
-      FILE_SHARE_READ | FILE_SHARE_WRITE,
-      NULL,
-      OPEN_ALWAYS,
-      FILE_ATTRIBUTE_NORMAL,
-      NULL);
-  if (hFile != INVALID_HANDLE_VALUE) {
-    DWORD written;
-    WriteFile(hFile, msg, strlen(msg), &written, NULL);
-    WriteFile(hFile, "\r\n", 2, &written, NULL);
-    CloseHandle(hFile);
-  }
-}
-}  // namespace
-
 namespace net_instaweb {
 
 BufferingAsyncFetch::BufferingAsyncFetch(const RequestContextPtr& request_ctx)
@@ -53,21 +29,13 @@ BufferingAsyncFetch::BufferingAsyncFetch(const RequestContextPtr& request_ctx)
 BufferingAsyncFetch::~BufferingAsyncFetch() = default;
 
 bool BufferingAsyncFetch::HandleWrite(const StringPiece& content,
-                                       MessageHandler* handler) {
-  char buf[512];
-  snprintf(buf, sizeof(buf), "HandleWrite: content_size=%zu body_size_before=%zu",
-           content.size(), body_.size());
-  BufferingDebugLog(buf);
-
+                                      MessageHandler* handler) {
   if (content.empty()) {
-    BufferingDebugLog("HandleWrite: empty content, returning");
     return true;
   }
 
   std::lock_guard<std::mutex> lock(mutex_);
   content.AppendToString(&body_);
-  snprintf(buf, sizeof(buf), "HandleWrite: body_size_after=%zu", body_.size());
-  BufferingDebugLog(buf);
   return true;
 }
 

@@ -19,8 +19,9 @@
 
 #include "pagespeed/kernel/cache/cyclone_cache.h"
 
-#include <cstdio>
 #include <sys/stat.h>
+
+#include <cstdio>
 
 #include "pagespeed/kernel/base/mapped_shared_string.h"
 #include "pagespeed/kernel/base/message_handler.h"
@@ -60,8 +61,7 @@ void CycloneCache::InitStats(Statistics* statistics) {
   statistics->AddVariable(kBytesWritten);
 }
 
-CycloneCache::CycloneCache(const Config& config,
-                           Statistics* statistics,
+CycloneCache::CycloneCache(const Config& config, Statistics* statistics,
                            MessageHandler* handler)
     : config_(config),
       cache_(nullptr),
@@ -80,7 +80,8 @@ CycloneCache::CycloneCache(const Config& config,
   // A 0-byte file is not a valid Cyclone cache and will cause start() to fail.
   struct stat st;
   if (stat(config_.cache_path.c_str(), &st) == 0 && st.st_size == 0) {
-    handler_->Message(kInfo, "CycloneCache: Removing stale 0-byte cache file %s",
+    handler_->Message(kInfo,
+                      "CycloneCache: Removing stale 0-byte cache file %s",
                       config_.cache_path.c_str());
     if (std::remove(config_.cache_path.c_str()) != 0) {
       handler_->Message(kWarning,
@@ -120,16 +121,15 @@ CycloneCache::CycloneCache(const Config& config,
     return;
   }
 
-  handler_->Message(kInfo, "CycloneCache: Started cache at %s "
+  handler_->Message(kInfo,
+                    "CycloneCache: Started cache at %s "
                     "(size=%lld bytes, ram_cache=%lld bytes)",
                     config_.cache_path.c_str(),
                     static_cast<long long>(config_.cache_size_bytes),
                     static_cast<long long>(config_.ram_cache_size_bytes));
 }
 
-CycloneCache::~CycloneCache() {
-  ShutDown();
-}
+CycloneCache::~CycloneCache() { ShutDown(); }
 
 void CycloneCache::Get(const GoogleString& key, Callback* callback) {
   if (is_shut_down_ || cache_ == nullptr) {
@@ -138,8 +138,8 @@ void CycloneCache::Get(const GoogleString& key, Callback* callback) {
   }
 
   CycloneReadHandle* read_handle = nullptr;
-  CycloneError err = cyclone_cache_read(
-      cache_, key.data(), key.size(), &read_handle);
+  CycloneError err =
+      cyclone_cache_read(cache_, key.data(), key.size(), &read_handle);
 
   if (err == CYCLONE_OK && read_handle != nullptr) {
     // Cache hit - get the data
@@ -192,8 +192,8 @@ void CycloneCache::Put(const GoogleString& key, const SharedString& value) {
   }
 
   StringPiece data = value.Value();
-  CycloneError err = cyclone_cache_write(
-      cache_, key.data(), key.size(), data.data(), data.size());
+  CycloneError err = cyclone_cache_write(cache_, key.data(), key.size(),
+                                         data.data(), data.size());
 
   if (err == CYCLONE_OK) {
     inserts_->Add(1);
@@ -202,8 +202,7 @@ void CycloneCache::Put(const GoogleString& key, const SharedString& value) {
     failures_->Add(1);
     const char* error = cyclone_get_last_error();
     handler_->Message(kWarning, "CycloneCache: Write failed for key %s: %s",
-                      key.c_str(),
-                      error ? error : "unknown error");
+                      key.c_str(), error ? error : "unknown error");
   }
 }
 

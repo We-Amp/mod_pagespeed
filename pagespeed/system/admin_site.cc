@@ -45,8 +45,8 @@
 #include "pagespeed/kernel/http/query_params.h"
 #include "pagespeed/kernel/http/response_headers.h"
 #include "pagespeed/kernel/util/statistics_logger.h"
-#include "pagespeed/system/system_cache_path.h"
 #include "pagespeed/system/admin_license_handler.h"
+#include "pagespeed/system/system_cache_path.h"
 #include "pagespeed/system/system_caches.h"
 #include "pagespeed/system/system_rewrite_options.h"
 
@@ -57,8 +57,8 @@ extern const char* HTML_admin_console;
 
 namespace {
 
-void WriteJsonResponse(AsyncFetch* fetch, StringPiece json_body,
-                       Timer* timer, MessageHandler* handler) {
+void WriteJsonResponse(AsyncFetch* fetch, StringPiece json_body, Timer* timer,
+                       MessageHandler* handler) {
   fetch->response_headers()->SetStatusAndReason(HttpStatus::kOK);
   fetch->response_headers()->Add(HttpAttributes::kContentType,
                                  kContentTypeJson.mime_type());
@@ -108,14 +108,12 @@ class PurgeFetchCallbackGasket {
 }  // namespace
 
 AdminSite::AdminSite(Timer* timer, ThreadSystem* thread_system,
-                     MessageHandler* message_handler,
-                     UrlAsyncFetcher* fetcher,
+                     MessageHandler* message_handler, UrlAsyncFetcher* fetcher,
                      const GoogleString& cache_path)
     : message_handler_(message_handler),
       timer_(timer),
-      license_handler_(
-          new AdminLicenseHandler(timer, thread_system, message_handler,
-                                 fetcher, cache_path)) {
+      license_handler_(new AdminLicenseHandler(
+          timer, thread_system, message_handler, fetcher, cache_path)) {
   license_handler_->Init();
 }
 
@@ -227,7 +225,7 @@ void AdminSite::ConsoleJsonHandler(const QueryParams& params, AsyncFetch* fetch,
     }
   }
   console_logger->DumpJSON(dump_for_graphs, var_titles, start_time, end_time,
-                            granularity_ms, fetch, message_handler_);
+                           granularity_ms, fetch, message_handler_);
   fetch->Done(true);
 }
 
@@ -236,8 +234,8 @@ void AdminSite::PrintHistograms(AdminSource source, AsyncFetch* fetch,
   GoogleString histogram_text;
   StringWriter writer(&histogram_text);
   stats->RenderHistograms(&writer, message_handler_);
-  GoogleString json = StrCat("{\"histograms\":\"", JsonEscape(histogram_text),
-                             "\"}");
+  GoogleString json =
+      StrCat("{\"histograms\":\"", JsonEscape(histogram_text), "\"}");
   WriteJsonResponse(fetch, json, timer_, message_handler_);
 }
 
@@ -255,14 +253,14 @@ void AdminSite::PrintCaches(
     // Always use JSON format now.
     GoogleString ua;
     query_params.Lookup1Unescaped("user_agent", &ua);
-    server_context->ShowCacheHandler(
-        ServerContext::kFormatAsJson, url, ua,
-        query_params.Has("Delete"), fetch, options->Clone());
+    server_context->ShowCacheHandler(ServerContext::kFormatAsJson, url, ua,
+                                     query_params.Has("Delete"), fetch,
+                                     options->Clone());
   } else if ((source == kPageSpeedAdmin) &&
              query_params.Lookup1Unescaped("new_set", &url)) {
     GoogleString purge_set = options->PurgeSetString();
-    GoogleString json = StrCat("{\"purge_set\":\"", JsonEscape(purge_set),
-                               "\"}");
+    GoogleString json =
+        StrCat("{\"purge_set\":\"", JsonEscape(purge_set), "\"}");
     WriteJsonResponse(fetch, json, timer_, message_handler_);
   } else if ((source == kPageSpeedAdmin) &&
              query_params.Lookup1Unescaped("purge", &url)) {
@@ -275,9 +273,8 @@ void AdminSite::PrintCaches(
     } else if (url == "*") {
       PurgeHandler(url, cache_path, fetch);
     } else if (url.empty()) {
-      WriteJsonResponse(
-          fetch, "{\"success\":false,\"error\":\"Empty URL\"}",
-          timer_, message_handler_);
+      WriteJsonResponse(fetch, "{\"success\":false,\"error\":\"Empty URL\"}",
+                        timer_, message_handler_);
     } else {
       GoogleUrl origin(stripped_gurl.Origin());
       GoogleUrl resolved(origin, url);
@@ -305,15 +302,13 @@ void AdminSite::PrintCaches(
               JsonEscape(metadata_cache->Name()), "\"}");
 
     // Property Cache
-    StrAppend(&json, separator,
-              "{\"name\":\"Property Cache\",\"summary\":\"",
+    StrAppend(&json, separator, "{\"name\":\"Property Cache\",\"summary\":\"",
               JsonEscape(page_property_cache->property_store()->Name()), "\"}");
 
     // FileSystem Metadata Cache
-    GoogleString fsmdc_name =
-        (filesystem_metadata_cache == nullptr)
-            ? "none"
-            : filesystem_metadata_cache->Name();
+    GoogleString fsmdc_name = (filesystem_metadata_cache == nullptr)
+                                  ? "none"
+                                  : filesystem_metadata_cache->Name();
     StrAppend(&json, separator,
               "{\"name\":\"FileSystem Metadata Cache\",\"summary\":\"",
               JsonEscape(fsmdc_name), "\"}");
@@ -413,8 +408,8 @@ void AdminSite::AdminPage(
     response_headers->Add(HttpAttributes::kLocation, admin_with_slash);
     response_headers->Add(HttpAttributes::kContentType,
                           kContentTypeJson.mime_type());
-    GoogleString json = StrCat("{\"redirect\":\"", JsonEscape(admin_with_slash),
-                               "\"}");
+    GoogleString json =
+        StrCat("{\"redirect\":\"", JsonEscape(admin_with_slash), "\"}");
     fetch->Write(json, message_handler_);
     fetch->Done(true);
   } else {
@@ -426,7 +421,7 @@ void AdminSite::AdminPage(
       // Extract the API path starting from /v1/license/...
       StringPiece api_path = full_path.substr(license_pos);
       if (!license_handler_->HandleRequest(api_path, request_body, is_global,
-                                            fetch)) {
+                                           fetch)) {
         fetch->response_headers()->SetStatusAndReason(HttpStatus::kNotFound);
         fetch->response_headers()->Add(HttpAttributes::kContentType,
                                        kContentTypeJson.mime_type());
@@ -469,8 +464,8 @@ void AdminSite::AdminPage(
       fetch->response_headers()->SetStatusAndReason(HttpStatus::kNotFound);
       fetch->response_headers()->Add(HttpAttributes::kContentType,
                                      kContentTypeJson.mime_type());
-      GoogleString json = StrCat("{\"error\":\"Unknown admin page: ",
-                                 JsonEscape(leaf), "\"}");
+      GoogleString json =
+          StrCat("{\"error\":\"Unknown admin page: ", JsonEscape(leaf), "\"}");
       fetch->Write(json, message_handler_);
       fetch->Done(true);
     }

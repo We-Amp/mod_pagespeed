@@ -78,7 +78,8 @@ class CssInlineImportToLinkFilter : public EmptyHtmlFilter {
   Variable* counter_;
 
   CssInlineImportToLinkFilter(const CssInlineImportToLinkFilter&) = delete;
-  CssInlineImportToLinkFilter& operator=(const CssInlineImportToLinkFilter&) = delete;
+  CssInlineImportToLinkFilter& operator=(const CssInlineImportToLinkFilter&) =
+      delete;
 };
 
 }  // namespace net_instaweb

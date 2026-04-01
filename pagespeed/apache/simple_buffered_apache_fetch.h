@@ -88,7 +88,8 @@ class SimpleBufferedApacheFetch : public AsyncFetch {
   bool wait_called_ GUARDED_BY(mutex_);
 
   SimpleBufferedApacheFetch(const SimpleBufferedApacheFetch&) = delete;
-  SimpleBufferedApacheFetch& operator=(const SimpleBufferedApacheFetch&) = delete;
+  SimpleBufferedApacheFetch& operator=(const SimpleBufferedApacheFetch&) =
+      delete;
 };
 
 }  // namespace net_instaweb

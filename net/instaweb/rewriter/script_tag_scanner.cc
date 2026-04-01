@@ -79,7 +79,7 @@ ScriptTagScanner::ScriptClassification ScriptTagScanner::ParseScriptElement(
     check_lang_attr = true;
   } else {
     StringPiece type_str = type_attr->DecodedValueOrNull();
-    if (type_attr->decoding_error()) {
+    if (type_attr->decoding_error()) {        // NOLINT(bugprone-branch-clone)
       lang = kUnknownScript;                  // e.g. <script type=&#257;>
     } else if (type_str.data() == nullptr) {  // e.g. <script type>
       // If the type attribute is empty (no =) then fall back to the lang attr.

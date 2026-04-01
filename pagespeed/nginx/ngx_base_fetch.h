@@ -17,7 +17,6 @@
  * under the License.
  */
 
-
 //
 // Collects output from pagespeed and buffers it until nginx asks for it.
 // Notifies nginx via NgxEventConnection to call ReadCallback() when
@@ -59,13 +58,11 @@ extern "C" {
 
 #include <pthread.h>
 
-#include "ngx_pagespeed.h"
-
-#include "ngx_event_connection.h"
-#include "ngx_server_context.h"
-
 #include "net/instaweb/http/public/async_fetch.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
+#include "ngx_event_connection.h"
+#include "ngx_pagespeed.h"
+#include "ngx_server_context.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/http/headers.h"
 
@@ -85,8 +82,7 @@ class NgxBaseFetch : public AsyncFetch {
                NgxServerContext* server_context,
                const RequestContextPtr& request_ctx,
                PreserveCachingHeaders preserve_caching_headers,
-               NgxBaseFetchType base_fetch_type,
-               const RewriteOptions* options);
+               NgxBaseFetchType base_fetch_type, const RewriteOptions* options);
   virtual ~NgxBaseFetch();
 
   // Statically initializes event_connection, require for PSOL and nginx to
@@ -127,7 +123,10 @@ class NgxBaseFetch : public AsyncFetch {
   // sets detached_ to true and decrements the refcount. We need to know
   // this to be able to handle events which nginx request context has been
   // released while the event was in-flight.
-  void Detach() { detached_ = true; DecrementRefCount(); }
+  void Detach() {
+    detached_ = true;
+    DecrementRefCount();
+  }
 
   bool detached() { return detached_; }
 

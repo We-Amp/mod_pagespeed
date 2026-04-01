@@ -30,7 +30,7 @@ class Timer;
 
 class WinThreadSystem : public ThreadSystem {
  public:
-  WinThreadSystem ();
+  WinThreadSystem();
   virtual ~WinThreadSystem();
 
   virtual CondvarCapableMutex* NewMutex();

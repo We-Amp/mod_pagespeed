@@ -300,7 +300,10 @@ bool DomainRewriteFilter::ParseRefreshContent(StringPiece input,
   // See if there is any quoting.
   TrimLeadingWhitespace(&parse);
   // ... but regardless, the pre-URL + maybe-quotes portion ends here.
-  *before = StringPiece(input.data(), parse.data() - input.data());
+  *before = StringPiece(
+      input.data(),
+      parse.data() -
+          input.data());  // NOLINT(bugprone-suspicious-stringview-data-usage)
 
   char quote = ' ';  // used to mark no quote.
   if (parse.starts_with("'")) {

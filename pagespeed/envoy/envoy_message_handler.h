@@ -46,7 +46,9 @@ class EnvoyMessageHandler : public SystemMessageHandler {
   void SetStructuredLoggingEnabled(bool enabled);
 
   // Returns whether structured logging is currently enabled.
-  bool structured_logging_enabled() const { return structured_logging_enabled_; }
+  bool structured_logging_enabled() const {
+    return structured_logging_enabled_;
+  }
 
  protected:
   void MessageSImpl(MessageType type, const GoogleString& message) override;

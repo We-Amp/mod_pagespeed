@@ -19,11 +19,11 @@
 
 #include "pagespeed/system/memcached_cache.h"
 
+#include <libmemcached-1.0/memcached.h>
+
 #include <cstdlib>
 #include <map>
 #include <vector>
-
-#include <libmemcached-1.0/memcached.h>
 
 #include "base/logging.h"
 #include "pagespeed/kernel/base/hasher.h"
@@ -85,7 +85,8 @@ bool MemcachedCache::Connect() {
 
   memc_ = memcached_create(nullptr);
   if (memc_ == nullptr) {
-    message_handler_->Message(kError, "MemcachedCache: Failed to create client");
+    message_handler_->Message(kError,
+                              "MemcachedCache: Failed to create client");
     return false;
   }
 
@@ -165,9 +166,9 @@ void MemcachedCache::Get(const GoogleString& key, Callback* callback) {
   } else {
     if (rc != MEMCACHED_NOTFOUND) {
       RecordError();
-      message_handler_->Message(
-          kError, "MemcachedCache::Get error: %s on key %s",
-          memcached_strerror(memc_, rc), key.c_str());
+      message_handler_->Message(kError,
+                                "MemcachedCache::Get error: %s on key %s",
+                                memcached_strerror(memc_, rc), key.c_str());
       if (rc == MEMCACHED_TIMEOUT) {
         timeouts_->Add(1);
       }
@@ -238,9 +239,9 @@ void MemcachedCache::MultiGet(MultiGetRequest* request) {
         found[idx] = true;
         const char* data = memcached_result_value(result);
         size_t data_len = memcached_result_length(result);
-        DecodeValueMatchingKeyAndCallCallback(
-            (*request)[idx].key, data, data_len, "MultiGet",
-            (*request)[idx].callback);
+        DecodeValueMatchingKeyAndCallCallback((*request)[idx].key, data,
+                                              data_len, "MultiGet",
+                                              (*request)[idx].callback);
       }
     } else if (rc != MEMCACHED_END) {
       if (!error_recorded) {
@@ -267,9 +268,9 @@ void MemcachedCache::MultiGet(MultiGetRequest* request) {
 void MemcachedCache::PutHelper(const GoogleString& key,
                                const SharedString& key_and_value) {
   GoogleString hashed_key = hasher_->Hash(key);
-  memcached_return_t rc = memcached_set(
-      memc_, hashed_key.data(), hashed_key.size(),
-      key_and_value.data(), key_and_value.size(), 0, 0);
+  memcached_return_t rc =
+      memcached_set(memc_, hashed_key.data(), hashed_key.size(),
+                    key_and_value.data(), key_and_value.size(), 0, 0);
   if (rc != MEMCACHED_SUCCESS) {
     RecordError();
     int value_size =
@@ -319,9 +320,9 @@ void MemcachedCache::Delete(const GoogleString& key) {
       memcached_delete(memc_, hashed_key.data(), hashed_key.size(), 0);
   if (rc != MEMCACHED_SUCCESS && rc != MEMCACHED_NOTFOUND) {
     RecordError();
-    message_handler_->Message(
-        kError, "MemcachedCache::Delete error: %s on key %s",
-        memcached_strerror(memc_, rc), key.c_str());
+    message_handler_->Message(kError,
+                              "MemcachedCache::Delete error: %s on key %s",
+                              memcached_strerror(memc_, rc), key.c_str());
     if (rc == MEMCACHED_TIMEOUT) {
       timeouts_->Add(1);
     }
@@ -341,40 +342,49 @@ bool MemcachedCache::GetStatus(GoogleString* buffer) {
   for (uint32_t i = 0; i < server_count; ++i) {
     const memcached_instance_st* instance =
         memcached_server_instance_by_position(memc_, i);
-    StrAppend(buffer, "memcached server ",
-              memcached_server_name(instance), ":",
+    StrAppend(buffer, "memcached server ", memcached_server_name(instance), ":",
               IntegerToString(memcached_server_port(instance)));
     StrAppend(buffer, " version ", stats[i].version);
     StrAppend(buffer, " pid ", IntegerToString(stats[i].pid), " up ",
               IntegerToString(stats[i].uptime), " seconds\n");
-    StrAppend(buffer, "bytes:                 ",
-              Integer64ToString(stats[i].bytes), "\n");
-    StrAppend(buffer, "bytes_read:            ",
-              Integer64ToString(stats[i].bytes_read), "\n");
+    StrAppend(buffer,
+              "bytes:                 ", Integer64ToString(stats[i].bytes),
+              "\n");
+    StrAppend(buffer,
+              "bytes_read:            ", Integer64ToString(stats[i].bytes_read),
+              "\n");
     StrAppend(buffer, "bytes_written:         ",
               Integer64ToString(stats[i].bytes_written), "\n");
-    StrAppend(buffer, "cmd_get:               ",
-              Integer64ToString(stats[i].cmd_get), "\n");
-    StrAppend(buffer, "cmd_set:               ",
-              Integer64ToString(stats[i].cmd_set), "\n");
+    StrAppend(buffer,
+              "cmd_get:               ", Integer64ToString(stats[i].cmd_get),
+              "\n");
+    StrAppend(buffer,
+              "cmd_set:               ", Integer64ToString(stats[i].cmd_set),
+              "\n");
     StrAppend(buffer, "curr_connections:      ",
               IntegerToString(stats[i].curr_connections), "\n");
-    StrAppend(buffer, "curr_items:            ",
-              IntegerToString(stats[i].curr_items), "\n");
-    StrAppend(buffer, "evictions:             ",
-              Integer64ToString(stats[i].evictions), "\n");
-    StrAppend(buffer, "get_hits:              ",
-              Integer64ToString(stats[i].get_hits), "\n");
-    StrAppend(buffer, "get_misses:            ",
-              Integer64ToString(stats[i].get_misses), "\n");
+    StrAppend(buffer,
+              "curr_items:            ", IntegerToString(stats[i].curr_items),
+              "\n");
+    StrAppend(buffer,
+              "evictions:             ", Integer64ToString(stats[i].evictions),
+              "\n");
+    StrAppend(buffer,
+              "get_hits:              ", Integer64ToString(stats[i].get_hits),
+              "\n");
+    StrAppend(buffer,
+              "get_misses:            ", Integer64ToString(stats[i].get_misses),
+              "\n");
     StrAppend(buffer, "limit_maxbytes:        ",
               Integer64ToString(stats[i].limit_maxbytes), "\n");
-    StrAppend(buffer, "threads:               ",
-              IntegerToString(stats[i].threads), "\n");
+    StrAppend(buffer,
+              "threads:               ", IntegerToString(stats[i].threads),
+              "\n");
     StrAppend(buffer, "total_connections:     ",
               IntegerToString(stats[i].total_connections), "\n");
-    StrAppend(buffer, "total_items:           ",
-              IntegerToString(stats[i].total_items), "\n\n");
+    StrAppend(buffer,
+              "total_items:           ", IntegerToString(stats[i].total_items),
+              "\n\n");
   }
   memcached_stat_free(memc_, stats);
   return true;

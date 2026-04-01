@@ -22,6 +22,7 @@
 #include <csetjmp>
 // 'stdio.h' provides FILE for jpeglib (needed for certain builds)
 #include <algorithm>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 
@@ -307,8 +308,9 @@ bool JpegOptimizer::OptimizeLossy(jpeg_decompress_struct* jpeg_decompress,
   bool valid_jpeg = true;
 
   JSAMPROW row_pointer[1];
-  row_pointer[0] = static_cast<JSAMPLE*>(malloc(
-      jpeg_decompress->output_width * jpeg_decompress->output_components));
+  row_pointer[0] = static_cast<JSAMPLE*>(
+      malloc(static_cast<size_t>(jpeg_decompress->output_width) *
+             jpeg_decompress->output_components));
   while (jpeg_compress_.next_scanline < jpeg_compress_.image_height) {
     const JDIMENSION num_scanlines_read =
         jpeg_read_scanlines(jpeg_decompress, row_pointer, 1);

@@ -17,22 +17,19 @@
  * under the License.
  */
 
-
-
 #include "ngx_rewrite_options.h"
 
 extern "C" {
-  #include <ngx_config.h>
-  #include <ngx_core.h>
-  #include <ngx_http.h>
+#include <ngx_config.h>
+#include <ngx_core.h>
+#include <ngx_http.h>
 }
-
-#include "ngx_pagespeed.h"
-#include "ngx_rewrite_driver_factory.h"
 
 #include "net/instaweb/public/version.h"
 #include "net/instaweb/rewriter/public/file_load_policy.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
+#include "ngx_pagespeed.h"
+#include "ngx_rewrite_driver_factory.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/system/system_caches.h"
@@ -56,38 +53,35 @@ const char kGlobalAdminPath[] = "GlobalAdminPath";
 // compare.
 // TODO(oschaaf): this duplication is a short term solution.
 const char* const server_only_options[] = {
-  "FetcherTimeoutMs",
-  "FetchProxy",
-  "ForceCaching",
-  "GeneratedFilePrefix",
-  "ImgMaxRewritesAtOnce",
-  "InheritVHostConfig",
-  "InstallCrashHandler",
-  "MessageBufferSize",
-  "NumRewriteThreads",
-  "NumExpensiveRewriteThreads",
-  "StaticAssetPrefix",
-  "TrackOriginalContentLength",
-  "UsePerVHostStatistics",  // TODO(anupama): What to do about "No longer used"
-  "BlockingRewriteRefererUrls",
-  "CreateSharedMemoryMetadataCache",
-  "LoadFromFile",
-  "LoadFromFileMatch",
-  "LoadFromFileRule",
-  "LoadFromFileRuleMatch",
-  "UseNativeFetcher",
-  "NativeFetcherMaxKeepaliveRequests"
-};
+    "FetcherTimeoutMs",
+    "FetchProxy",
+    "ForceCaching",
+    "GeneratedFilePrefix",
+    "ImgMaxRewritesAtOnce",
+    "InheritVHostConfig",
+    "InstallCrashHandler",
+    "MessageBufferSize",
+    "NumRewriteThreads",
+    "NumExpensiveRewriteThreads",
+    "StaticAssetPrefix",
+    "TrackOriginalContentLength",
+    "UsePerVHostStatistics",  // TODO(anupama): What to do about "No longer used"
+    "BlockingRewriteRefererUrls",
+    "CreateSharedMemoryMetadataCache",
+    "LoadFromFile",
+    "LoadFromFileMatch",
+    "LoadFromFileRule",
+    "LoadFromFileRuleMatch",
+    "UseNativeFetcher",
+    "NativeFetcherMaxKeepaliveRequests"};
 
 // Options that can only be used in the main (http) option scope.
-const char* const main_only_options[] = {
-  "UseNativeFetcher",
-  "NativeFetcherMaxKeepaliveRequests"
-};
+const char* const main_only_options[] = {"UseNativeFetcher",
+                                         "NativeFetcherMaxKeepaliveRequests"};
 
 }  // namespace
 
-RewriteOptions::Properties* NgxRewriteOptions::ngx_properties_ = NULL;
+RewriteOptions::Properties* NgxRewriteOptions::ngx_properties_ = nullptr;
 
 NgxRewriteOptions::NgxRewriteOptions(const StringPiece& description,
                                      ThreadSystem* thread_system)
@@ -101,7 +95,7 @@ NgxRewriteOptions::NgxRewriteOptions(ThreadSystem* thread_system)
 }
 
 void NgxRewriteOptions::Init() {
-  DCHECK(ngx_properties_ != NULL)
+  DCHECK(ngx_properties_ != nullptr)
       << "Call NgxRewriteOptions::Initialize() before construction";
   clear_inherited_scripts_ = false;
   InitializeOptions(ngx_properties_);
@@ -109,36 +103,34 @@ void NgxRewriteOptions::Init() {
 
 void NgxRewriteOptions::AddProperties() {
   // Nginx-specific options.
-  add_ngx_option(
-      "", &NgxRewriteOptions::statistics_path_, "nsp", kStatisticsPath,
-      kServerScope, "Set the statistics path. Ex: /ngx_pagespeed_statistics",
-      false);
+  add_ngx_option("", &NgxRewriteOptions::statistics_path_, "nsp",
+                 kStatisticsPath, kServerScope,
+                 "Set the statistics path. Ex: /ngx_pagespeed_statistics",
+                 false);
   add_ngx_option(
       "", &NgxRewriteOptions::global_statistics_path_, "ngsp",
       kGlobalStatisticsPath, kProcessScopeStrict,
       "Set the global statistics path. Ex: /ngx_pagespeed_global_statistics",
       false);
-  add_ngx_option(
-      "", &NgxRewriteOptions::console_path_, "ncp", kConsolePath, kServerScope,
-      "Set the console path. Ex: /pagespeed_console", false);
-  add_ngx_option(
-      "", &NgxRewriteOptions::messages_path_, "nmp", kMessagesPath,
-      kServerScope, "Set the messages path.  Ex: /ngx_pagespeed_message",
-      false);
-  add_ngx_option(
-      "", &NgxRewriteOptions::admin_path_, "nap", kAdminPath,
-      kServerScope, "Set the admin path.  Ex: /pagespeed_admin", false);
-  add_ngx_option(
-      "", &NgxRewriteOptions::global_admin_path_, "ngap", kGlobalAdminPath,
-      kProcessScopeStrict,
-      "Set the global admin path.  Ex: /pagespeed_global_admin",
-      false);
+  add_ngx_option("", &NgxRewriteOptions::console_path_, "ncp", kConsolePath,
+                 kServerScope, "Set the console path. Ex: /pagespeed_console",
+                 false);
+  add_ngx_option("", &NgxRewriteOptions::messages_path_, "nmp", kMessagesPath,
+                 kServerScope,
+                 "Set the messages path.  Ex: /ngx_pagespeed_message", false);
+  add_ngx_option("", &NgxRewriteOptions::admin_path_, "nap", kAdminPath,
+                 kServerScope, "Set the admin path.  Ex: /pagespeed_admin",
+                 false);
+  add_ngx_option("", &NgxRewriteOptions::global_admin_path_, "ngap",
+                 kGlobalAdminPath, kProcessScopeStrict,
+                 "Set the global admin path.  Ex: /pagespeed_global_admin",
+                 false);
 
   MergeSubclassProperties(ngx_properties_);
 
   // Default properties are global but to set them the current API requires
   // a RewriteOptions instance and we're in a static method.
-  NgxRewriteOptions dummy_config(NULL);
+  NgxRewriteOptions dummy_config(nullptr);
   dummy_config.set_default_x_header_value(kModPagespeedVersion);
 }
 
@@ -211,9 +203,9 @@ RewriteOptions::OptionSettingResult NgxRewriteOptions::ParseAndSetOptions0(
 }
 
 RewriteOptions::OptionSettingResult
-    NgxRewriteOptions::ParseAndSetOptionFromName1(
-        StringPiece name, StringPiece arg,
-        GoogleString* msg, MessageHandler* handler) {
+NgxRewriteOptions::ParseAndSetOptionFromName1(StringPiece name, StringPiece arg,
+                                              GoogleString* msg,
+                                              MessageHandler* handler) {
   // FileCachePath needs error checking.
   if (StringCaseEqual(name, kFileCachePath)) {
     if (!StringCaseStartsWith(arg, "/")) {
@@ -222,14 +214,13 @@ RewriteOptions::OptionSettingResult
     }
   }
 
-  return SystemRewriteOptions::ParseAndSetOptionFromName1(
-      name, arg, msg, handler);
+  return SystemRewriteOptions::ParseAndSetOptionFromName1(name, arg, msg,
+                                                          handler);
 }
 
 template <class DriverFactoryT>
 RewriteOptions::OptionSettingResult ParseAndSetOptionHelper(
-    StringPiece option_value,
-    DriverFactoryT* driver_factory,
+    StringPiece option_value, DriverFactoryT* driver_factory,
     void (DriverFactoryT::*set_option_method)(bool)) {
   bool parsed_value;
   if (StringCaseEqual(option_value, "on") ||
@@ -248,12 +239,11 @@ RewriteOptions::OptionSettingResult ParseAndSetOptionHelper(
 
 namespace {
 
-const char* ps_error_string_for_option(
-    ngx_pool_t* pool, StringPiece directive, StringPiece warning) {
-  GoogleString msg =
-      StrCat("\"", directive, "\" ", warning);
+const char* ps_error_string_for_option(ngx_pool_t* pool, StringPiece directive,
+                                       StringPiece warning) {
+  GoogleString msg = StrCat("\"", directive, "\" ", warning);
   char* s = string_piece_to_pool_string(pool, msg);
-  if (s == NULL) {
+  if (s == nullptr) {
     return "failed to allocate memory";
   }
   return s;
@@ -264,9 +254,8 @@ const char* ps_error_string_for_option(
 // Very similar to apache/mod_instaweb::ParseDirective.
 const char* NgxRewriteOptions::ParseAndSetOptions(
     StringPiece* args, int n_args, ngx_pool_t* pool, MessageHandler* handler,
-    NgxRewriteDriverFactory* driver_factory,
-    RewriteOptions::OptionScope scope, ngx_conf_t* cf,
-    ProcessScriptVariablesMode script_mode) {
+    NgxRewriteDriverFactory* driver_factory, RewriteOptions::OptionScope scope,
+    ngx_conf_t* cf, ProcessScriptVariablesMode script_mode) {
   CHECK_GE(n_args, 1);
 
   StringPiece directive = args[0];
@@ -278,8 +267,8 @@ const char* NgxRewriteOptions::ParseAndSetOptions(
   }
 
   if (GetOptionScope(directive) > scope) {
-    return ps_error_string_for_option(
-        pool, directive, "cannot be set at this scope.");
+    return ps_error_string_for_option(pool, directive,
+                                      "cannot be set at this scope.");
   }
 
   bool compile_scripts = false;
@@ -318,7 +307,7 @@ const char* NgxRewriteOptions::ParseAndSetOptions(
   }
 
   ScriptLine* script_line;
-  script_line = NULL;
+  script_line = nullptr;
 
   if (n_args == 1 && StringCaseEqual(directive, "ClearInheritedScripts")) {
     clear_inherited_scripts_ = true;
@@ -326,7 +315,7 @@ const char* NgxRewriteOptions::ParseAndSetOptions(
   }
 
   if (compile_scripts) {
-    CHECK(cf != NULL);
+    CHECK(cf != nullptr);
     int i;
     // Skip the first arg which is always 'pagespeed'
     for (i = 1; i < n_args; i++) {
@@ -334,8 +323,8 @@ const char* NgxRewriteOptions::ParseAndSetOptions(
 
       script_source.len = args[i].as_string().length();
       std::string tmp = args[i].as_string();
-      script_source.data = reinterpret_cast<u_char*>(
-          const_cast<char*>(tmp.c_str()));
+      script_source.data =
+          reinterpret_cast<u_char*>(const_cast<char*>(tmp.c_str()));
 
       if (ngx_http_script_variables_count(&script_source) > 0) {
         ngx_http_script_compile_t* sc =
@@ -354,7 +343,7 @@ const char* NgxRewriteOptions::ParseAndSetOptions(
           return ps_error_string_for_option(
               pool, directive, "Failed to compile script variables");
         } else {
-          if (script_line == NULL) {
+          if (script_line == nullptr) {
             script_line = new ScriptLine(args, n_args, scope);
           }
           script_line->AddScriptAndArgIndex(sc, i);
@@ -362,7 +351,7 @@ const char* NgxRewriteOptions::ParseAndSetOptions(
       }
     }
 
-    if (script_line != NULL) {
+    if (script_line != nullptr) {
       script_lines_.push_back(RefCountedPtr<ScriptLine>(script_line));
       // We have found script variables in the current configuration line, and
       // prepared the associated rewriteoptions for that.
@@ -419,28 +408,21 @@ const char* NgxRewriteOptions::ParseAndSetOptions(
       result = ParseAndSetOptionFromName1(directive, arg, &msg, handler);
       if (result == RewriteOptions::kOptionNameUnknown) {
         result = driver_factory->ParseAndSetOption1(
-            directive,
-            arg,
-            scope >= RewriteOptions::kLegacyProcessScope,
-            &msg,
+            directive, arg, scope >= RewriteOptions::kLegacyProcessScope, &msg,
             handler);
       }
     }
   } else if (n_args == 3) {
-    result = ParseAndSetOptionFromName2(directive, args[1], args[2],
-                                        &msg, handler);
+    result =
+        ParseAndSetOptionFromName2(directive, args[1], args[2], &msg, handler);
     if (result == RewriteOptions::kOptionNameUnknown) {
       result = driver_factory->ParseAndSetOption2(
-          directive,
-          args[1],
-          args[2],
-          scope >= RewriteOptions::kLegacyProcessScope,
-          &msg,
-          handler);
+          directive, args[1], args[2],
+          scope >= RewriteOptions::kLegacyProcessScope, &msg, handler);
     }
   } else if (n_args == 4) {
-    result = ParseAndSetOptionFromName3(
-        directive, args[1], args[2], args[3], &msg, handler);
+    result = ParseAndSetOptionFromName3(directive, args[1], args[2], args[3],
+                                        &msg, handler);
   } else {
     result = RewriteOptions::kOptionNameUnknown;
   }
@@ -449,11 +431,11 @@ const char* NgxRewriteOptions::ParseAndSetOptions(
     case RewriteOptions::kOptionOk:
       return NGX_CONF_OK;
     case RewriteOptions::kOptionNameUnknown:
-      return ps_error_string_for_option(
-          pool, directive, "not recognized or too many arguments");
+      return ps_error_string_for_option(pool, directive,
+                                        "not recognized or too many arguments");
     case RewriteOptions::kOptionValueInvalid: {
       GoogleString full_directive;
-      for (int i = 0 ; i < n_args ; i++) {
+      for (int i = 0; i < n_args; i++) {
         StrAppend(&full_directive, i == 0 ? "" : " ", args[i]);
       }
       return ps_error_string_for_option(pool, full_directive, msg);
@@ -461,7 +443,7 @@ const char* NgxRewriteOptions::ParseAndSetOptions(
   }
 
   CHECK(false);
-  return NULL;
+  return nullptr;
 }
 
 // Execute all entries in the script_lines vector, and hand the result off to
@@ -473,7 +455,7 @@ bool NgxRewriteOptions::ExecuteScriptVariables(
 
   if (script_lines_.size() > 0) {
     std::vector<RefCountedPtr<ScriptLine> >::iterator it;
-    for (it = script_lines_.begin() ; it != script_lines_.end(); ++it) {
+    for (it = script_lines_.begin(); it != script_lines_.end(); ++it) {
       ScriptLine* script_line = it->get();
       StringPiece args[NGX_PAGESPEED_MAX_ARGS];
       std::vector<ScriptArgIndex*>::iterator cs_it;
@@ -494,32 +476,33 @@ bool NgxRewriteOptions::ExecuteScriptVariables(
         lengths = *script->lengths;
         values = *script->values;
 
-        if (ngx_http_script_run(r, &value, lengths->elts, 0, values->elts)
-            == NULL) {
+        if (ngx_http_script_run(r, &value, lengths->elts, 0, values->elts) ==
+            nullptr) {
           handler->Message(kError, "ngx_http_script_run error");
           script_error = true;
           break;
-        } else  {
+        } else {
           args[(*cs_it)->index()] = str_to_string_piece(value);
         }
       }
 
-      const char* status = ParseAndSetOptions(args, script_line->n_args(),
-          r->pool, handler, driver_factory, script_line->scope(), NULL /*cf*/,
-          ProcessScriptVariablesMode::kOff);
+      const char* status =
+          ParseAndSetOptions(args, script_line->n_args(), r->pool, handler,
+                             driver_factory, script_line->scope(),
+                             nullptr /*cf*/, ProcessScriptVariablesMode::kOff);
 
-      if (status != NULL) {
+      if (status != nullptr) {
         script_error = true;
-        handler->Message(kWarning,
-            "Error setting option value from script: '%s'", status);
+        handler->Message(
+            kWarning, "Error setting option value from script: '%s'", status);
         break;
       }
     }
   }
 
   if (script_error) {
-    handler->Message(kWarning,
-        "Script error(s) in configuration, disabling optimization");
+    handler->Message(
+        kWarning, "Script error(s) in configuration, disabling optimization");
     set_enabled(RewriteOptions::kEnabledOff);
     return false;
   }

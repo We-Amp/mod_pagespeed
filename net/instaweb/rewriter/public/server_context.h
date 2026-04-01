@@ -662,7 +662,7 @@ class ServerContext {
   // result is ignored. Startup fetches are only used for populating the cache.
   GoogleString FetchRemoteConfig(const GoogleString& url, int64 timeout_ms,
                                  bool on_startup,
-                                 RequestContextPtr request_ctx);
+                                 const RequestContextPtr& request_ctx);
 
   // These are normally owned by the RewriteDriverFactory that made 'this'.
   ThreadSystem* thread_system_;

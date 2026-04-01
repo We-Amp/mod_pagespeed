@@ -40,8 +40,8 @@ class AdminLicenseHandler {
   // Paths: /v1/license/status, /v1/license/apply, /v1/license/activate,
   //        /v1/license/trial, /v1/license/consent
   // Mutation endpoints (apply, activate, trial, consent) require is_global.
-  bool HandleRequest(StringPiece path, StringPiece request_body,
-                     bool is_global, AsyncFetch* fetch);
+  bool HandleRequest(StringPiece path, StringPiece request_body, bool is_global,
+                     AsyncFetch* fetch);
 
   // Get the current license token (may be empty).
   GoogleString license_token() const {
@@ -126,14 +126,15 @@ class AdminLicenseHandler {
   mutable std::mutex license_mu_;
 
   // License state — guarded by license_mu_.
-  GoogleString license_token_;       // guarded by license_mu_
-  bool license_valid_ = false;       // guarded by license_mu_
-  bool license_expired_ = false;     // guarded by license_mu_
-  int64_t license_expires_at_ = 0;   // guarded by license_mu_
-  GoogleString license_plan_;        // guarded by license_mu_
-  GoogleString license_sub_;         // guarded by license_mu_
-  GoogleString license_sid_;         // guarded by license_mu_ (FastSpring subscription ID)
-  int64_t license_iat_ = 0;         // guarded by license_mu_
+  GoogleString license_token_;      // guarded by license_mu_
+  bool license_valid_ = false;      // guarded by license_mu_
+  bool license_expired_ = false;    // guarded by license_mu_
+  int64_t license_expires_at_ = 0;  // guarded by license_mu_
+  GoogleString license_plan_;       // guarded by license_mu_
+  GoogleString license_sub_;        // guarded by license_mu_
+  GoogleString
+      license_sid_;  // guarded by license_mu_ (FastSpring subscription ID)
+  int64_t license_iat_ = 0;  // guarded by license_mu_
 
   // Notify listener of license state changes.
   void NotifyLicenseStateChange();

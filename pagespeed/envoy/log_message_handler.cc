@@ -43,19 +43,24 @@ class Logger : public Envoy::Logger::Loggable<Envoy::Logger::Id::main> {
     //absl::ConsumeSuffix(&message, "\n");
     switch (severity) {
       case logging::LOG_INFO:
-        ENVOY_LOG(info, "[pagespeed {}] {}", net_instaweb::kModPagespeedVersion, str);
+        ENVOY_LOG(info, "[pagespeed {}] {}", net_instaweb::kModPagespeedVersion,
+                  str);
         break;
       case logging::LOG_WARNING:
-        ENVOY_LOG(warn, "[pagespeed {}] {}", net_instaweb::kModPagespeedVersion, str);
+        ENVOY_LOG(warn, "[pagespeed {}] {}", net_instaweb::kModPagespeedVersion,
+                  str);
         break;
       case logging::LOG_ERROR:
-        ENVOY_LOG(error, "[pagespeed {}] {}", net_instaweb::kModPagespeedVersion, str);
+        ENVOY_LOG(error, "[pagespeed {}] {}",
+                  net_instaweb::kModPagespeedVersion, str);
         break;
       case logging::LOG_FATAL:
-        ENVOY_LOG(critical, "[pagespeed {}] {}", net_instaweb::kModPagespeedVersion, str);
+        ENVOY_LOG(critical, "[pagespeed {}] {}",
+                  net_instaweb::kModPagespeedVersion, str);
         break;
       default:  // For VLOG(s)
-        ENVOY_LOG(debug, "[pagespeed {}] {}", net_instaweb::kModPagespeedVersion, str);
+        ENVOY_LOG(debug, "[pagespeed {}] {}",
+                  net_instaweb::kModPagespeedVersion, str);
         break;
     }
     return true;

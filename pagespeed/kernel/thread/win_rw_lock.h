@@ -19,8 +19,11 @@
 #ifndef WIN_RW_LOCK_H
 #define WIN_RW_LOCK_H
 
-#include <windows.h>
+// clang-format off
+#include <windows.h>  // Must precede WinBase.h
 #include <WinBase.h>
+// clang-format on
+
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/thread_system.h"
 

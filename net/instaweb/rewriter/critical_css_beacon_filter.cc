@@ -168,7 +168,7 @@ void CriticalCssBeaconFilter::SummariesDone() {
         }
         break;
       }
-      case kSummarySlotRemoved:
+      case kSummarySlotRemoved:  // NOLINT(bugprone-branch-clone)
         // Another filter (likely combine CSS) has eliminated this CSS.
         continue;
       case kSummaryCssParseError:

@@ -1262,7 +1262,8 @@ bool ResponseHeaders::ApplySMaxAge(int s_maxage_sec,
       StringPiece existing_value_s = segment;
       existing_value_s.remove_prefix(STATIC_STRLEN("s-maxage="));
       int existing_value;
-      if (!StringToInt(existing_value_s, &existing_value)) {
+      if (!StringToInt(existing_value_s,
+                       &existing_value)) {  // NOLINT(bugprone-branch-clone)
         // Failed to parse existing s-maxage value; leave it alone.
       } else if (existing_value <= s_maxage_sec) {
         // It's already small enough, don't change this one.  But there might be

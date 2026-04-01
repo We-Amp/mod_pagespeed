@@ -361,7 +361,9 @@ GoogleString LocalStorageCacheFilter::GenerateHashFromUrlAndElement(
   const char* width = element->AttributeValue(HtmlName::kWidth);
   const char* height = element->AttributeValue(HtmlName::kHeight);
   if (width == nullptr && height == nullptr) {
-    url_to_hash.set(url.data(), url.size());
+    url_to_hash.set(
+        url.data(),
+        url.size());  // NOLINT(bugprone-suspicious-stringview-data-usage)
   } else {
     url.CopyToString(&backing_string);
     if (width != nullptr) {

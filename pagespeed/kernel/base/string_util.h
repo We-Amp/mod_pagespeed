@@ -474,13 +474,27 @@ inline GoogleString JsonEscape(StringPiece s) {
   out.reserve(s.size());
   for (char c : s) {
     switch (c) {
-      case '"':  out.append("\\\""); break;
-      case '\\': out.append("\\\\"); break;
-      case '\b': out.append("\\b"); break;
-      case '\f': out.append("\\f"); break;
-      case '\n': out.append("\\n"); break;
-      case '\r': out.append("\\r"); break;
-      case '\t': out.append("\\t"); break;
+      case '"':
+        out.append("\\\"");
+        break;
+      case '\\':
+        out.append("\\\\");
+        break;
+      case '\b':
+        out.append("\\b");
+        break;
+      case '\f':
+        out.append("\\f");
+        break;
+      case '\n':
+        out.append("\\n");
+        break;
+      case '\r':
+        out.append("\\r");
+        break;
+      case '\t':
+        out.append("\\t");
+        break;
       default:
         if (static_cast<unsigned char>(c) < 0x20) {
           char buf[8];

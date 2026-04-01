@@ -17,8 +17,6 @@
  * under the License.
  */
 
-
-
 // Manage pagespeed state across requests.  Compare to ApacheResourceManager.
 
 #ifndef NGX_SERVER_CONTEXT_H_
@@ -39,8 +37,8 @@ class SystemRequestContext;
 
 class NgxServerContext : public SystemServerContext {
  public:
-  NgxServerContext(
-      NgxRewriteDriverFactory* factory, StringPiece hostname, int port);
+  NgxServerContext(NgxRewriteDriverFactory* factory, StringPiece hostname,
+                   int port);
   virtual ~NgxServerContext();
 
   // We don't allow ProxyFetch to fetch HTML via MapProxyDomain. We will call

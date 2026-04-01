@@ -46,8 +46,10 @@ class RewrittenContentScanningFilter : public EmptyHtmlFilter {
  private:
   RewriteDriver* driver_;
   int num_proxied_rewritten_resources_;
-  RewrittenContentScanningFilter(const RewrittenContentScanningFilter&) = delete;
-  RewrittenContentScanningFilter& operator=(const RewrittenContentScanningFilter&) = delete;
+  RewrittenContentScanningFilter(const RewrittenContentScanningFilter&) =
+      delete;
+  RewrittenContentScanningFilter& operator=(
+      const RewrittenContentScanningFilter&) = delete;
 };
 
 }  // namespace net_instaweb

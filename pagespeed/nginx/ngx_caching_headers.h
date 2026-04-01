@@ -17,13 +17,11 @@
  * under the License.
  */
 
-
-
 #ifndef NGX_CACHING_HEADERS_H_
 #define NGX_CACHING_HEADERS_H_
 
 extern "C" {
-  #include <ngx_http.h>
+#include <ngx_http.h>
 }
 
 #include "pagespeed/kernel/base/basictypes.h"
@@ -36,9 +34,7 @@ namespace net_instaweb {
 class NgxCachingHeaders : public CachingHeaders {
  public:
   explicit NgxCachingHeaders(ngx_http_request_t* request)
-      : CachingHeaders(request->headers_out.status),
-        request_(request) {
-  }
+      : CachingHeaders(request->headers_out.status), request_(request) {}
 
   virtual bool Lookup(const StringPiece& key, StringPieceVector* values);
 

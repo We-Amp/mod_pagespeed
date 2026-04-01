@@ -20,19 +20,20 @@
 #include "pagespeed/kernel/base/stdio_file_system.h"
 
 #include <sys/stat.h>
+
 #include <cerrno>
 
 #ifdef _WIN32
-#include <sys/utime.h>
 #include <direct.h>
 #include <io.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/utime.h>
 #include <windows.h>
 #else
-#include <utime.h>
 #include <dirent.h>
 #include <unistd.h>
+#include <utime.h>
 #endif  // _WIN32
 
 #include <cstddef>

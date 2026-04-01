@@ -17,12 +17,9 @@
  * under the License.
  */
 
-
-
-
 #include "ngx_message_handler.h"
 
-#include <signal.h>
+#include <csignal>
 
 #include "net/instaweb/public/version.h"
 #include "pagespeed/kernel/base/abstract_mutex.h"
@@ -39,33 +36,31 @@ const char kModuleName[] = "ngx_pagespeed";
 
 // If set, the crash handler will use this to output a backtrace using
 // ngx_log_error.
-ngx_log_t* global_log = NULL;
+ngx_log_t* global_log = nullptr;
 
 }  // namespace
 
 extern "C" {
-  static void signal_handler(int sig) {
-    // Try to output the backtrace to the log file. Since this may end up
-    // crashing/deadlocking/etc. we set an alarm() to abort us if it comes to
-    // that.
-    alarm(2);
-    if (global_log != NULL) {
-      ngx_log_error(NGX_LOG_ALERT, global_log, 0, "Trapped signal [%d]\n%s",
-                    sig, net_instaweb::StackTraceString().c_str());
-    } else {
-      fprintf(stderr, "Trapped signal [%d]\n%s\n",
-              sig, net_instaweb::StackTraceString().c_str());
-    }
-    kill(getpid(), SIGKILL);
+static void signal_handler(int sig) {
+  // Try to output the backtrace to the log file. Since this may end up
+  // crashing/deadlocking/etc. we set an alarm() to abort us if it comes to
+  // that.
+  alarm(2);
+  if (global_log != nullptr) {
+    ngx_log_error(NGX_LOG_ALERT, global_log, 0, "Trapped signal [%d]\n%s", sig,
+                  net_instaweb::StackTraceString().c_str());
+  } else {
+    fprintf(stderr, "Trapped signal [%d]\n%s\n", sig,
+            net_instaweb::StackTraceString().c_str());
   }
+  kill(getpid(), SIGKILL);
+}
 }  // extern "C"
 
 namespace net_instaweb {
 
 NgxMessageHandler::NgxMessageHandler(Timer* timer, AbstractMutex* mutex)
-    : SystemMessageHandler(timer, mutex),
-      log_(NULL) {
-}
+    : SystemMessageHandler(timer, mutex), log_(nullptr) {}
 
 // Installs a signal handler for common crash signals, that tries to print
 // out a backtrace.
@@ -96,21 +91,22 @@ ngx_uint_t NgxMessageHandler::GetNgxLogLevel(MessageType type) {
 
 void NgxMessageHandler::MessageSImpl(MessageType type,
                                      const GoogleString& message) {
-  if (log_ != NULL) {
+  if (log_ != nullptr) {
     ngx_uint_t log_level = GetNgxLogLevel(type);
-    ngx_log_error(log_level, log_, 0/*ngx_err_t*/, "[%s %s] %s",
-                  kModuleName, kModPagespeedVersion, message.c_str());
+    ngx_log_error(log_level, log_, 0 /*ngx_err_t*/, "[%s %s] %s", kModuleName,
+                  kModPagespeedVersion, message.c_str());
   } else {
     GoogleMessageHandler::MessageSImpl(type, message);
   }
   AddMessageToBuffer(type, message);
 }
 
-void NgxMessageHandler::FileMessageSImpl(
-    MessageType type, const char* file, int line, const GoogleString& message) {
-  if (log_ != NULL) {
+void NgxMessageHandler::FileMessageSImpl(MessageType type, const char* file,
+                                         int line,
+                                         const GoogleString& message) {
+  if (log_ != nullptr) {
     ngx_uint_t log_level = GetNgxLogLevel(type);
-    ngx_log_error(log_level, log_, 0/*ngx_err_t*/, "[%s %s] %s:%d:%s",
+    ngx_log_error(log_level, log_, 0 /*ngx_err_t*/, "[%s %s] %s:%d:%s",
                   kModuleName, kModPagespeedVersion, file, line,
                   message.c_str());
   } else {

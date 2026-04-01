@@ -505,10 +505,9 @@ JsKeywords::Type JsTokenizer::ConsumeCloseBrace(StringPiece* token_out) {
   DCHECK(!input_.empty());
   DCHECK_EQ('}', input_[0]);
   // Pop the most recent kOpenBrace (and everything above it) off the stack.
-  if (!PopToMatchingOpen(kOpenBrace,
-                         {kStartOfInput, kOpenBracket, kOpenParen,
-                          kBlockKeyword},
-                         token_out)) {
+  if (!PopToMatchingOpen(
+          kOpenBrace, {kStartOfInput, kOpenBracket, kOpenParen, kBlockKeyword},
+          token_out)) {
     return JsKeywords::kError;
   }
   // If the open brace was preceeded by a BlockHeader, we can pop that off the
@@ -556,10 +555,10 @@ JsKeywords::Type JsTokenizer::ConsumeCloseBracket(StringPiece* token_out) {
   DCHECK(!input_.empty());
   DCHECK_EQ(']', input_[0]);
   // Pop the most recent kOpenBracket (and everything above it) off the stack.
-  if (!PopToMatchingOpen(kOpenBracket,
-                         {kStartOfInput, kOpenBrace, kOpenParen,
-                          kBlockKeyword, kBlockHeader},
-                         token_out)) {
+  if (!PopToMatchingOpen(
+          kOpenBracket,
+          {kStartOfInput, kOpenBrace, kOpenParen, kBlockKeyword, kBlockHeader},
+          token_out)) {
     return JsKeywords::kError;
   }
   PushExpression();
@@ -934,7 +933,7 @@ JsKeywords::Type JsTokenizer::ConsumePeriod(StringPiece* token_out) {
   DCHECK(!input_.empty());
   DCHECK_EQ('.', input_[0]);
   if (input_.size() >= 2) {
-    const int next = input_[1];
+    const int next = static_cast<unsigned char>(input_[1]);
     if (next >= '0' && next <= '9') {
       return ConsumeNumber(token_out);
     }
@@ -1004,7 +1003,7 @@ JsKeywords::Type JsTokenizer::ConsumeSlash(StringPiece* token_out) {
   // If the slash is immediately followed by a slash or star, it's a comment,
   // no matter what the current parse state is.
   if (input_.size() >= 2) {
-    const int next = input_[1];
+    const int next = static_cast<unsigned char>(input_[1]);
     if (next == '/') {
       return ConsumeLineComment(token_out);
     } else if (next == '*') {

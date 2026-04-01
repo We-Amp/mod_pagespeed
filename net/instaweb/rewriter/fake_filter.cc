@@ -56,8 +56,9 @@ void FakeFilter::Context::RewriteSingle(const ResourcePtr& input,
   }
 }
 
-void FakeFilter::Context::DoRewriteSingle(const ResourcePtr input,
-                                          OutputResourcePtr output) {
+void FakeFilter::Context::DoRewriteSingle(
+    const ResourcePtr input,     // NOLINT(performance-unnecessary-value-param)
+    OutputResourcePtr output) {  // NOLINT(performance-unnecessary-value-param)
   RewriteResult result = kRewriteFailed;
   GoogleString rewritten;
 

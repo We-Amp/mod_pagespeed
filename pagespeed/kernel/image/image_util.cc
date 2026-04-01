@@ -130,14 +130,18 @@ net_instaweb::ImageType ComputeImageType(const StringPiece& buf) {
         break;
       case 0x89:
         // Possible png.
-        if (StringPiece(buf.data(), kPngHeaderLength) ==
+        if (StringPiece(
+                buf.data(),
+                kPngHeaderLength) ==  // NOLINT(bugprone-suspicious-stringview-data-usage)
             StringPiece(kPngHeader, kPngHeaderLength)) {
           image_type = net_instaweb::IMAGE_PNG;
         }
         break;
       case 'G':
         // Possible gif.
-        if ((StringPiece(buf.data(), kGifHeaderLength) ==
+        if ((StringPiece(
+                 buf.data(),
+                 kGifHeaderLength) ==  // NOLINT(bugprone-suspicious-stringview-data-usage)
              StringPiece(kGifHeader, kGifHeaderLength)) &&
             (buf[kGifHeaderLength] == '7' || buf[kGifHeaderLength] == '9') &&
             buf[kGifHeaderLength + 1] == 'a') {

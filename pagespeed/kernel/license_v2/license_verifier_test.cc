@@ -426,9 +426,8 @@ TEST_F(LicenseVerifierTest, ValidSignatureMalformedJson) {
                reinterpret_cast<const unsigned char*>(private_key_.data()));
 
   // Build a token from the real signature + bad payload.
-  GoogleString token =
-      BuildToken(StringPiece(reinterpret_cast<const char*>(signature), 64),
-                 bad_payload);
+  GoogleString token = BuildToken(
+      StringPiece(reinterpret_cast<const char*>(signature), 64), bad_payload);
 
   LicenseResult result = VerifyLicenseTokenWithKey(token, public_key_);
   EXPECT_FALSE(result.valid);
@@ -446,9 +445,8 @@ TEST_F(LicenseVerifierTest, ValidSignatureTruncatedJson) {
                reinterpret_cast<const unsigned char*>(public_key_.data()),
                reinterpret_cast<const unsigned char*>(private_key_.data()));
 
-  GoogleString token =
-      BuildToken(StringPiece(reinterpret_cast<const char*>(signature), 64),
-                 bad_payload);
+  GoogleString token = BuildToken(
+      StringPiece(reinterpret_cast<const char*>(signature), 64), bad_payload);
 
   LicenseResult result = VerifyLicenseTokenWithKey(token, public_key_);
   EXPECT_FALSE(result.valid);

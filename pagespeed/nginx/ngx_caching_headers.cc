@@ -17,11 +17,9 @@
  * under the License.
  */
 
-
-
 #include "ngx_caching_headers.h"
-#include "ngx_list_iterator.h"
 
+#include "ngx_list_iterator.h"
 #include "ngx_pagespeed.h"
 
 namespace net_instaweb {
@@ -30,7 +28,7 @@ bool NgxCachingHeaders::Lookup(const StringPiece& key,
                                StringPieceVector* values) {
   ngx_table_elt_t* header;
   NgxListIterator it(&(request_->headers_out.headers.part));
-  while ((header = it.Next()) != NULL) {
+  while ((header = it.Next()) != nullptr) {
     if (header->hash != 0 && key == str_to_string_piece(header->key)) {
       // This will be called multiple times if there are multiple headers with
       // this name.  Each time it will append to values.

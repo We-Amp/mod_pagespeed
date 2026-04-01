@@ -28,13 +28,28 @@ bool ExtractJsonStringField(StringPiece json, StringPiece field_name,
     if (json[pos] == '\\' && pos + 1 < json.size()) {
       char next = json[pos + 1];
       switch (next) {
-        case '"':  result += '"'; break;
-        case '\\': result += '\\'; break;
-        case 'n':  result += '\n'; break;
-        case 'r':  result += '\r'; break;
-        case 't':  result += '\t'; break;
-        case '/':  result += '/'; break;
-        default:   result += '\\'; result += next; break;
+        case '"':
+          result += '"';
+          break;
+        case '\\':
+          result += '\\';
+          break;
+        case 'n':
+          result += '\n';
+          break;
+        case 'r':
+          result += '\r';
+          break;
+        case 't':
+          result += '\t';
+          break;
+        case '/':
+          result += '/';
+          break;
+        default:
+          result += '\\';
+          result += next;
+          break;
       }
       pos += 2;
       continue;

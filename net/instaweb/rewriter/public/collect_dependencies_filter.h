@@ -43,7 +43,8 @@ class CollectDependenciesFilter : public CommonFilter {
   class Context;
 
   CollectDependenciesFilter(const CollectDependenciesFilter&) = delete;
-  CollectDependenciesFilter& operator=(const CollectDependenciesFilter&) = delete;
+  CollectDependenciesFilter& operator=(const CollectDependenciesFilter&) =
+      delete;
 };
 
 }  // namespace net_instaweb

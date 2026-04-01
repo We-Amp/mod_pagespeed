@@ -118,7 +118,9 @@ void AsyncCache::Put(const GoogleString& key, const SharedString& value) {
   }
 }
 
-void AsyncCache::DoPut(GoogleString* key, const SharedString value) {
+void AsyncCache::DoPut(
+    GoogleString* key,
+    const SharedString value) {  // NOLINT(performance-unnecessary-value-param)
   if (IsHealthy()) {
     // TODO(jmarantz): Start timers at the beginning of each operation,
     // particularly this one, and use long delays as a !IsHealthy signal.
@@ -132,7 +134,9 @@ void AsyncCache::DoPut(GoogleString* key, const SharedString value) {
   outstanding_operations_.BarrierIncrement(-1);
 }
 
-void AsyncCache::CancelPut(GoogleString* key, const SharedString value) {
+void AsyncCache::CancelPut(
+    GoogleString* key,
+    const SharedString value) {  // NOLINT(performance-unnecessary-value-param)
   delete key;
   outstanding_operations_.BarrierIncrement(-1);
 }

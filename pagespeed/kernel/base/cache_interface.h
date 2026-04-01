@@ -53,9 +53,7 @@ class CacheInterface {
 
     // Set a value from MappedSharedString. Use this for zero-copy paths
     // where the data is backed by memory-mapped storage.
-    void set_value(const MappedSharedString& value) {
-      value_ = value;
-    }
+    void set_value(const MappedSharedString& value) { value_ = value; }
 
     // Returns the cached value as MappedSharedString.
     // - Use value().Value() to get a StringPiece (zero-copy if mapped)

@@ -17,32 +17,29 @@
  * under the License.
  */
 
-
-
 #include "ngx_server_context.h"
 
 extern "C" {
-  #include <ngx_http.h>
+#include <ngx_http.h>
 }
 
-#include "ngx_pagespeed.h"
+#include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "ngx_message_handler.h"
+#include "ngx_pagespeed.h"
 #include "ngx_rewrite_driver_factory.h"
 #include "ngx_rewrite_options.h"
-#include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "pagespeed/system/add_headers_fetcher.h"
 #include "pagespeed/system/loopback_route_fetcher.h"
 #include "pagespeed/system/system_request_context.h"
 
 namespace net_instaweb {
 
-NgxServerContext::NgxServerContext(
-    NgxRewriteDriverFactory* factory, StringPiece hostname, int port)
+NgxServerContext::NgxServerContext(NgxRewriteDriverFactory* factory,
+                                   StringPiece hostname, int port)
     : SystemServerContext(factory, hostname, port),
-      ngx_http2_variable_index_(NGX_ERROR) {
-}
+      ngx_http2_variable_index_(NGX_ERROR) {}
 
-NgxServerContext::~NgxServerContext() { }
+NgxServerContext::~NgxServerContext() {}
 
 NgxRewriteOptions* NgxServerContext::config() {
   return NgxRewriteOptions::DynamicCast(global_options());
@@ -55,14 +52,16 @@ SystemRequestContext* NgxServerContext::NewRequestContext(
   int local_port = 0;
 #if (NGX_HAVE_INET6)
   if (r->connection->local_sockaddr->sa_family == AF_INET6) {
-    local_port = ntohs(reinterpret_cast<struct sockaddr_in6*>(
-        r->connection->local_sockaddr)->sin6_port);
+    local_port = ntohs(
+        reinterpret_cast<struct sockaddr_in6*>(r->connection->local_sockaddr)
+            ->sin6_port);
     port_set = true;
   }
 #endif
   if (!port_set) {
-    local_port = ntohs(reinterpret_cast<struct sockaddr_in*>(
-        r->connection->local_sockaddr)->sin_port);
+    local_port = ntohs(
+        reinterpret_cast<struct sockaddr_in*>(r->connection->local_sockaddr)
+            ->sin_port);
   }
 
   ngx_str_t local_ip;
@@ -75,14 +74,14 @@ SystemRequestContext* NgxServerContext::NewRequestContext(
   }
 
   SystemRequestContext* ctx = new SystemRequestContext(
-      thread_system()->NewMutex(), timer(),
-      ps_determine_host(r), local_port, str_to_string_piece(local_ip));
+      thread_system()->NewMutex(), timer(), ps_determine_host(r), local_port,
+      str_to_string_piece(local_ip));
 
   // See if http2 is in use.
   if (ngx_http2_variable_index_ >= 0) {
     ngx_http_variable_value_t* val =
         ngx_http_get_indexed_variable(r, ngx_http2_variable_index_);
-    if (val != NULL && val->valid) {
+    if (val != nullptr && val->valid) {
       StringPiece str_val(reinterpret_cast<char*>(val->data), val->len);
       if (str_val == "h2" || str_val == "h2c") {
         ctx->set_using_http2(true);

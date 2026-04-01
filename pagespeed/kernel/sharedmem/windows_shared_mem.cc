@@ -133,15 +133,13 @@ class WindowsSharedMemSegment : public AbstractSharedMemSegment {
     // Create the named mutex
     // Using NULL security attributes means the mutex can be accessed by
     // any process running under the same user account.
-    HANDLE mutex_handle =
-        CreateMutexA(nullptr,   // Default security
-                     FALSE,     // Not initially owned
-                     mutex_name.c_str());
+    HANDLE mutex_handle = CreateMutexA(nullptr,  // Default security
+                                       FALSE,    // Not initially owned
+                                       mutex_name.c_str());
 
     if (mutex_handle == nullptr) {
       DWORD error = GetLastError();
-      handler->Message(kError,
-                       "CreateMutex failed for '%s' with error %lu",
+      handler->Message(kError, "CreateMutex failed for '%s' with error %lu",
                        mutex_name.c_str(), error);
       return false;
     }
@@ -187,8 +185,7 @@ class WindowsSharedMemSegment : public AbstractSharedMemSegment {
     // Use CreateMutexA which either creates a new mutex or opens an existing
     // one. This is more robust than OpenMutexA because it handles the case
     // where the mutex kernel object was destroyed (all handles closed).
-    HANDLE mutex_handle =
-        CreateMutexA(nullptr, FALSE, mutex_name.c_str());
+    HANDLE mutex_handle = CreateMutexA(nullptr, FALSE, mutex_name.c_str());
 
     if (mutex_handle == nullptr) {
       LOG(ERROR) << "Failed to create/open mutex '" << mutex_name
@@ -284,12 +281,12 @@ AbstractSharedMemSegment* WindowsSharedMem::CreateSegment(
 
   // Create a file mapping object backed by the paging file.
   HANDLE file_mapping = CreateFileMappingA(
-      INVALID_HANDLE_VALUE,           // Use paging file
-      nullptr,                        // Default security
-      PAGE_READWRITE,                 // Read/write access
-      static_cast<DWORD>(size >> 32), // High-order DWORD of size
-      static_cast<DWORD>(size),       // Low-order DWORD of size
-      prefixed_name.c_str());         // Name of mapping object
+      INVALID_HANDLE_VALUE,            // Use paging file
+      nullptr,                         // Default security
+      PAGE_READWRITE,                  // Read/write access
+      static_cast<DWORD>(size >> 32),  // High-order DWORD of size
+      static_cast<DWORD>(size),        // Low-order DWORD of size
+      prefixed_name.c_str());          // Name of mapping object
 
   if (file_mapping == nullptr) {
     DWORD error = GetLastError();
@@ -381,8 +378,8 @@ AbstractSharedMemSegment* WindowsSharedMem::AttachToSegment(
                        prefixed_name.c_str(), error);
       return nullptr;
     }
-    GoogleString simple_name =
-        SanitizeObjectName(StrCat(IntegerToString(instance_number_), "_", name));
+    GoogleString simple_name = SanitizeObjectName(
+        StrCat(IntegerToString(instance_number_), "_", name));
     return new WindowsSharedMemSegment(base, size, simple_name);
   }
 

@@ -17,8 +17,6 @@
  * under the License.
  */
 
-
-
 /*
  * NgxGZipSetter sets up gzip for pagespeed
  * with the following configuration:
@@ -62,7 +60,6 @@ extern "C" {
 #include <vector>
 
 #include "ngx_pagespeed.h"
-
 #include "pagespeed/kernel/base/basictypes.h"
 
 namespace net_instaweb {
@@ -71,7 +68,7 @@ namespace net_instaweb {
 // just saving the command will not work.
 class ngx_command_ctx {
  public:
-  ngx_command_ctx() : command_(NULL), module_(NULL) { }
+  ngx_command_ctx() : command_(NULL), module_(NULL) {}
   void* GetConfPtr(ngx_conf_t* cf);
   char* GetModuleConfPtr(ngx_conf_t* cf);
   ngx_command_t* command_;
@@ -100,14 +97,11 @@ class NgxGZipSetter {
   ~NgxGZipSetter();
   void Init(ngx_conf_t* cf);
 
-  void SetNgxConfFlag(ngx_conf_t* cf,
-                      ngx_command_ctx* command_ctx,
+  void SetNgxConfFlag(ngx_conf_t* cf, ngx_command_ctx* command_ctx,
                       ngx_flag_t value);
-  void SetNgxConfEnum(ngx_conf_t* cf,
-                      ngx_command_ctx* command_ctx,
+  void SetNgxConfEnum(ngx_conf_t* cf, ngx_command_ctx* command_ctx,
                       ngx_uint_t value);
-  void SetNgxConfBitmask(ngx_conf_t* cf,
-                         ngx_command_ctx* command_ctx,
+  void SetNgxConfBitmask(ngx_conf_t* cf, ngx_command_ctx* command_ctx,
                          ngx_uint_t value);
   void EnableGZipForLocation(ngx_conf_t* cf);
   gzs_enable_result SetGZipForLocation(ngx_conf_t* cf, bool value);

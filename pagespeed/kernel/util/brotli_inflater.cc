@@ -95,7 +95,7 @@ bool BrotliInflater::DecompressHelper(StringPiece in, MessageHandler* handler,
         // streamed.
         handler->Message(kWarning, "BROTLI_DECODER_RESULT_NEEDS_MORE_INPUT");
         return false;
-      case BROTLI_DECODER_RESULT_NEEDS_MORE_OUTPUT:
+      case BROTLI_DECODER_RESULT_NEEDS_MORE_OUTPUT:  // NOLINT(bugprone-branch-clone)
         // Need to flush the output buffer to the writer.
         break;
       case BROTLI_DECODER_RESULT_SUCCESS:

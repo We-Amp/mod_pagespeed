@@ -17,7 +17,6 @@
  * under the License.
  */
 
-
 //
 // Fetch the resources asynchronously in Nginx. The fetcher is called in
 // the rewrite thread.
@@ -31,20 +30,18 @@
 #define NET_INSTAWEB_NGX_URL_ASYNC_FETCHER_H_
 
 extern "C" {
-  #include <ngx_config.h>
-  #include <ngx_core.h>
+#include <ngx_config.h>
+#include <ngx_core.h>
 }
 
 #include <vector>
 
-#include "ngx_event_connection.h"
-
 #include "net/instaweb/http/public/url_async_fetcher.h"
+#include "ngx_event_connection.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/pool.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/thread_system.h"
-
 
 namespace net_instaweb {
 
@@ -56,11 +53,10 @@ class Variable;
 
 class NgxUrlAsyncFetcher : public UrlAsyncFetcher {
  public:
-  NgxUrlAsyncFetcher(
-      const char* proxy, ngx_log_t* log, ngx_msec_t resolver_timeout,
-      ngx_msec_t fetch_timeout, ngx_resolver_t* resolver,
-      int max_keepalive_requests, ThreadSystem* thread_system,
-      MessageHandler* handler);
+  NgxUrlAsyncFetcher(const char* proxy, ngx_log_t* log,
+                     ngx_msec_t resolver_timeout, ngx_msec_t fetch_timeout,
+                     ngx_resolver_t* resolver, int max_keepalive_requests,
+                     ThreadSystem* thread_system, MessageHandler* handler);
 
   ~NgxUrlAsyncFetcher();
 
@@ -76,8 +72,7 @@ class NgxUrlAsyncFetcher : public UrlAsyncFetcher {
 
   virtual bool SupportsHttps() const { return false; }
 
-  virtual void Fetch(const GoogleString& url,
-                     MessageHandler* message_handler,
+  virtual void Fetch(const GoogleString& url, MessageHandler* message_handler,
                      AsyncFetch* callback);
 
   bool StartFetch(NgxFetch* fetch);
@@ -102,22 +97,17 @@ class NgxUrlAsyncFetcher : public UrlAsyncFetcher {
   // used conservatively during shutdown.  It counts fetches that have been
   // requested by some thread, and can include fetches for which no action
   // has yet been taken (ie fetches that are not active).
-  virtual bool AnyPendingFetches() {
-    return !active_fetches_.empty();
-  }
+  virtual bool AnyPendingFetches() { return !active_fetches_.empty(); }
 
   // ApproximateNumActiveFetches can under- or over-count and is used only for
   // error reporting.
-  int ApproximateNumActiveFetches() {
-    return active_fetches_.size();
-  }
+  int ApproximateNumActiveFetches() { return active_fetches_.size(); }
 
   void CancelActiveFetches();
 
   // These must be accessed with mutex_ held.
   bool shutdown() const { return shutdown_; }
   void set_shutdown(bool s) { shutdown_ = s; }
-
 
  private:
   static void TimeoutHandler(ngx_event_t* tev);

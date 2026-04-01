@@ -42,15 +42,13 @@ inline constexpr size_t MutexAlignment() {
 #ifdef _WIN32
   return 16;  // CRITICAL_SECTION requires 16-byte alignment on x64
 #else
-  return 8;   // pthread_mutex_t requires 8-byte alignment
+  return 8;  // pthread_mutex_t requires 8-byte alignment
 #endif
 }
 
 // Returns the maximum alignment requirement for any shared memory component.
 // Currently this is determined by mutex alignment requirements.
-inline constexpr size_t SharedMemMaxAlignment() {
-  return MutexAlignment();
-}
+inline constexpr size_t SharedMemMaxAlignment() { return MutexAlignment(); }
 
 // Aligns 'offset' up to the next multiple of 'alignment'.
 // alignment must be a power of 2.
@@ -64,9 +62,7 @@ inline size_t AlignForMutex(size_t offset) {
 }
 
 // Aligns offset to 8-byte boundary (for int64, pointers, etc.)
-inline size_t AlignTo8(size_t offset) {
-  return AlignOffset(offset, 8);
-}
+inline size_t AlignTo8(size_t offset) { return AlignOffset(offset, 8); }
 
 // Checks if an address is properly aligned for a mutex.
 inline bool IsMutexAligned(const void* ptr) {

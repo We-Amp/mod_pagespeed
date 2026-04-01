@@ -117,7 +117,9 @@ class CollectDependenciesFilter::Context : public RewriteContext {
     if (!resource->HttpStatusOk()) {
       return;
     }
-    Css::Parser parser(resource->ExtractUncompressedContents().data());
+    Css::Parser parser(
+        resource->ExtractUncompressedContents()
+            .data());  // NOLINT(bugprone-suspicious-stringview-data-usage)
     parser.set_preservation_mode(true);
     // We avoid quirks-mode so that we do not "fix" something we shouldn't have.
     parser.set_quirks_mode(false);
@@ -192,9 +194,7 @@ class CollectDependenciesFilter::Context : public RewriteContext {
     return true;  // We don't alter the doc...
   }
 
-  void Render() override {
-    Report();
-  }
+  void Render() override { Report(); }
 
   void WillNotRender() override {
     {

@@ -57,7 +57,8 @@ class HtmlAttributeQuoteRemoval : public EmptyHtmlFilter {
   HtmlParse* html_parse_;
 
   HtmlAttributeQuoteRemoval(const HtmlAttributeQuoteRemoval&) = delete;
-  HtmlAttributeQuoteRemoval& operator=(const HtmlAttributeQuoteRemoval&) = delete;
+  HtmlAttributeQuoteRemoval& operator=(const HtmlAttributeQuoteRemoval&) =
+      delete;
 };
 
 }  // namespace net_instaweb

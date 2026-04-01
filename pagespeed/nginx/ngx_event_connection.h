@@ -17,7 +17,6 @@
  * under the License.
  */
 
-
 //
 // NgxEventConnection implements a means to send events from other threads to
 // nginx's event loop, and is implemented by a named pipe under the hood.
@@ -51,7 +50,7 @@ typedef struct {
 } ps_event_data;
 
 // Handler signature for receiving events
-using callbackPtr = void(*)(const ps_event_data&);
+using callbackPtr = void (*)(const ps_event_data&);
 
 // Abstracts a connection to nginx through which events can be written.
 class NgxEventConnection {
@@ -69,6 +68,7 @@ class NgxEventConnection {
   bool WriteEvent(void* sender);
   // Reads and processes what is available in the named pipe's buffer.
   void Drain();
+
  private:
   static bool CreateNgxConnection(ngx_cycle_t* cycle, ngx_fd_t pipe_fd);
   static void ReadEventHandler(ngx_event_t* e);

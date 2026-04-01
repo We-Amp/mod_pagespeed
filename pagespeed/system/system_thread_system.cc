@@ -22,7 +22,8 @@
 #ifndef _WIN32
 
 #include <pthread.h>
-#include <signal.h>
+
+#include <csignal>
 
 #include "base/logging.h"
 

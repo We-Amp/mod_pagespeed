@@ -1277,7 +1277,7 @@ class RewriteOptions {
   bool HasInlineUnauthorizedResourceType(
       semantic_type::Category category) const;
   void ClearInlineUnauthorizedResourceTypes();
-  void set_inline_unauthorized_resource_types(ResourceCategorySet x);
+  void set_inline_unauthorized_resource_types(const ResourceCategorySet& x);
 
   // Store size, md5 hash and canonical url for library recognition.
   bool RegisterLibrary(uint64 bytes, StringPiece md5_hash,
@@ -3055,7 +3055,7 @@ class RewriteOptions {
   // Adds a new Property to 'properties' (the last argument).
   template <class RewriteOptionsSubclass, class OptionClass>
   static void AddProperty(typename OptionClass::ValueType default_value,
-                          OptionClass RewriteOptionsSubclass::*offset,
+                          OptionClass RewriteOptionsSubclass::* offset,
                           const char* id, StringPiece option_name,
                           OptionScope scope, const char* help_text,
                           bool safe_to_print, Properties* properties) {
@@ -3210,7 +3210,7 @@ class RewriteOptions {
     // Fancy C++ pointers to members; a typesafe version of offsetof.  See
     // http://publib.boulder.ibm.com/infocenter/comphelp/v8v101/index.jsp?
     // topic=%2Fcom.ibm.xlcpp8a.doc%2Flanguage%2Fref%2Fcplr034.htm
-    typedef OptionClass RewriteOptionsSubclass::*OptionOffset;
+    typedef OptionClass RewriteOptionsSubclass::* OptionOffset;
     typedef typename OptionClass::ValueType ValueType;
 
     PropertyLeaf(ValueType default_value, OptionOffset offset, const char* id,
@@ -3374,7 +3374,7 @@ class RewriteOptions {
   // should be moved into RequestContext.
   template <class OptionClass>
   static void AddRequestProperty(typename OptionClass::ValueType default_value,
-                                 OptionClass RewriteOptions::*offset,
+                                 OptionClass RewriteOptions::* offset,
                                  const char* id, bool safe_to_print) {
     AddProperty(default_value, offset, id, kNullOption, kProcessScopeStrict,
                 NULL, safe_to_print, properties_);
@@ -3384,7 +3384,7 @@ class RewriteOptions {
   // SetOptionFromName.
   template <class OptionClass>
   static void AddBaseProperty(typename OptionClass::ValueType default_value,
-                              OptionClass RewriteOptions::*offset,
+                              OptionClass RewriteOptions::* offset,
                               const char* id, StringPiece option_name,
                               OptionScope scope, const char* help,
                               bool safe_to_print) {
@@ -3437,7 +3437,7 @@ class RewriteOptions {
   static GoogleString OptionSignature(const GoogleString& x,
                                       const Hasher* hasher);
   static GoogleString OptionSignature(RewriteLevel x, const Hasher* hasher);
-  static GoogleString OptionSignature(ResourceCategorySet x,
+  static GoogleString OptionSignature(const ResourceCategorySet& x,
                                       const Hasher* hasher);
   static GoogleString OptionSignature(const BeaconUrl& beacon_url,
                                       const Hasher* hasher);

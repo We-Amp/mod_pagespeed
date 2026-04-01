@@ -17,27 +17,24 @@
  * under the License.
  */
 
-
-
 // Manage configuration for pagespeed.  Compare to ApacheConfig.
 
 #ifndef NGX_REWRITE_OPTIONS_H_
 #define NGX_REWRITE_OPTIONS_H_
 
 extern "C" {
-  #include <ngx_config.h>
-  #include <ngx_core.h>
-  #include <ngx_http.h>
+#include <ngx_config.h>
+#include <ngx_core.h>
+#include <ngx_http.h>
 }
 
 #include <vector>
 
-#include "ngx_rewrite_driver_factory.h"
-
 #include "net/instaweb/rewriter/public/rewrite_options.h"
+#include "ngx_rewrite_driver_factory.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/ref_counted_ptr.h"
-#include "pagespeed/kernel/base/stl_util.h"          // for STLDeleteElements
+#include "pagespeed/kernel/base/stl_util.h"  // for STLDeleteElements
 #include "pagespeed/system/system_rewrite_options.h"
 
 #define NGX_PAGESPEED_MAX_ARGS 10
@@ -49,9 +46,9 @@ class NgxRewriteDriverFactory;
 class ScriptArgIndex {
  public:
   explicit ScriptArgIndex(ngx_http_script_compile_t* script, int index)
-    : script_(script), index_(index) {
-      CHECK(script != NULL);
-      CHECK(index > 0 && index < NGX_PAGESPEED_MAX_ARGS);
+      : script_(script), index_(index) {
+    CHECK(script != NULL);
+    CHECK(index > 0 && index < NGX_PAGESPEED_MAX_ARGS);
   }
 
   virtual ~ScriptArgIndex() {}
@@ -71,12 +68,10 @@ class ScriptLine : public RefCounted<ScriptLine> {
  public:
   explicit ScriptLine(StringPiece* args, int n_args,
                       RewriteOptions::OptionScope scope)
-    : n_args_(n_args),
-      scope_(scope) {
-
-      for (int i = 0; i < n_args; i++) {
-        args_[i] = args[i];
-      }
+      : n_args_(n_args), scope_(scope) {
+    for (int i = 0; i < n_args; i++) {
+      args_[i] = args[i];
+    }
   }
 
   virtual ~ScriptLine() {
@@ -87,16 +82,14 @@ class ScriptLine : public RefCounted<ScriptLine> {
   void AddScriptAndArgIndex(ngx_http_script_compile_t* script,
                             int script_index) {
     CHECK(script != NULL);
-    CHECK(script_index <  NGX_PAGESPEED_MAX_ARGS);
+    CHECK(script_index < NGX_PAGESPEED_MAX_ARGS);
     data_.push_back(new ScriptArgIndex(script, script_index));
   }
 
-  int n_args() { return n_args_;}
-  StringPiece* args() { return args_;}
+  int n_args() { return n_args_; }
+  StringPiece* args() { return args_; }
   RewriteOptions::OptionScope scope() { return scope_; }
-  std::vector<ScriptArgIndex*>& data() {
-    return data_;
-  }
+  std::vector<ScriptArgIndex*>& data() { return data_; }
 
  private:
   StringPiece args_[NGX_PAGESPEED_MAX_ARGS];
@@ -117,7 +110,7 @@ class NgxRewriteOptions : public SystemRewriteOptions {
   NgxRewriteOptions(const StringPiece& description,
                     ThreadSystem* thread_system);
   explicit NgxRewriteOptions(ThreadSystem* thread_system);
-  virtual ~NgxRewriteOptions() { }
+  virtual ~NgxRewriteOptions() {}
 
   // args is an array of n_args StringPieces together representing a directive.
   // For example:
@@ -134,13 +127,13 @@ class NgxRewriteOptions : public SystemRewriteOptions {
   // when compile_scripts is true, the rewrite_options will be prepared
   // for replacing any script $variables encountered in args. when false,
   // script variables will be substituted using the prepared rewrite options.
-  const char* ParseAndSetOptions(
-      StringPiece* args, int n_args, ngx_pool_t* pool, MessageHandler* handler,
-      NgxRewriteDriverFactory* driver_factory, OptionScope scope,
-      ngx_conf_t* cf, ProcessScriptVariablesMode script_mode);
-  bool ExecuteScriptVariables(
-      ngx_http_request_t* r, MessageHandler* handler,
-      NgxRewriteDriverFactory* driver_factory);
+  const char* ParseAndSetOptions(StringPiece* args, int n_args,
+                                 ngx_pool_t* pool, MessageHandler* handler,
+                                 NgxRewriteDriverFactory* driver_factory,
+                                 OptionScope scope, ngx_conf_t* cf,
+                                 ProcessScriptVariablesMode script_mode);
+  bool ExecuteScriptVariables(ngx_http_request_t* r, MessageHandler* handler,
+                              NgxRewriteDriverFactory* driver_factory);
   void CopyScriptLinesTo(NgxRewriteOptions* destination) const;
   void AppendScriptLinesTo(NgxRewriteOptions* destination) const;
 
@@ -158,15 +151,9 @@ class NgxRewriteOptions : public SystemRewriteOptions {
   const GoogleString& global_statistics_path() const {
     return global_statistics_path_.value();
   }
-  const GoogleString& console_path() const {
-    return console_path_.value();
-  }
-  const GoogleString& messages_path() const {
-    return messages_path_.value();
-  }
-  const GoogleString& admin_path() const {
-    return admin_path_.value();
-  }
+  const GoogleString& console_path() const { return console_path_.value(); }
+  const GoogleString& messages_path() const { return messages_path_.value(); }
+  const GoogleString& admin_path() const { return admin_path_.value(); }
   const GoogleString& global_admin_path() const {
     return global_admin_path_.value();
   }
@@ -192,12 +179,13 @@ class NgxRewriteOptions : public SystemRewriteOptions {
   // parsing code in RewriteOptions expects to write to a MessageHandler.  If
   // that happens we put a summary on msg so the user sees something, and the
   // detailed message goes to their log via handler.
-  OptionSettingResult ParseAndSetOptions0(
-      StringPiece directive, GoogleString* msg, MessageHandler* handler);
+  OptionSettingResult ParseAndSetOptions0(StringPiece directive,
+                                          GoogleString* msg,
+                                          MessageHandler* handler);
 
   virtual OptionSettingResult ParseAndSetOptionFromName1(
-      StringPiece name, StringPiece arg,
-      GoogleString* msg, MessageHandler* handler);
+      StringPiece name, StringPiece arg, GoogleString* msg,
+      MessageHandler* handler);
 
   // We may want to override 2- and 3-argument versions as well in the future,
   // but they are not needed yet.
@@ -213,13 +201,11 @@ class NgxRewriteOptions : public SystemRewriteOptions {
   void Init();
 
   // Add an option to ngx_properties_
-  template<class OptionClass>
+  template <class OptionClass>
   static void add_ngx_option(typename OptionClass::ValueType default_value,
-                             OptionClass NgxRewriteOptions::*offset,
-                             const char* id,
-                             StringPiece option_name,
-                             OptionScope scope,
-                             const char* help,
+                             OptionClass NgxRewriteOptions::* offset,
+                             const char* id, StringPiece option_name,
+                             OptionScope scope, const char* help,
                              bool safe_to_print) {
     AddProperty(default_value, offset, id, option_name, scope, help,
                 safe_to_print, ngx_properties_);

@@ -17,20 +17,17 @@
  * under the License.
  */
 
-
-
 #include "ngx_list_iterator.h"
 
 namespace net_instaweb {
 
-NgxListIterator::NgxListIterator(ngx_list_part_t* part) :
-    part_(part),
-    index_within_part_(0) {}
+NgxListIterator::NgxListIterator(ngx_list_part_t* part)
+    : part_(part), index_within_part_(0) {}
 
 ngx_table_elt_t* NgxListIterator::Next() {
   if (index_within_part_ >= part_->nelts) {
-    if (part_->next == NULL) {
-      return NULL;
+    if (part_->next == nullptr) {
+      return nullptr;
     }
     part_ = part_->next;
     index_within_part_ = 0;

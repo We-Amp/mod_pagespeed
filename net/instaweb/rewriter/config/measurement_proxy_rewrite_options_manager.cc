@@ -53,7 +53,7 @@ void MeasurementProxyRewriteOptionsManager::GetRewriteOptions(
 
   StringPiece config, config_domain, password;
   GoogleString res_url;
-  if (url.Origin() != root_domain_) {
+  if (url.Origin() != root_domain_) {  // NOLINT(bugprone-branch-clone)
     Force403(options);
   } else if (MeasurementProxyUrlNamer::DecodePathDetails(
                  url, &config, &config_domain, &password, &res_url)) {

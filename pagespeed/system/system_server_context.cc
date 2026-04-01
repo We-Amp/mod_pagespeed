@@ -39,8 +39,8 @@
 #include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/http/google_url.h"
 #include "pagespeed/kernel/sharedmem/shared_mem_statistics.h"
-#include "pagespeed/system/admin_license_handler.h"
 #include "pagespeed/system/add_headers_fetcher.h"
+#include "pagespeed/system/admin_license_handler.h"
 #include "pagespeed/system/loopback_route_fetcher.h"
 #include "pagespeed/system/system_cache_path.h"
 #include "pagespeed/system/system_caches.h"
@@ -133,10 +133,10 @@ void SystemServerContext::CheckLegacyGlobalCacheFlushFile() {
       }
       if (cache_flush_filename[0] != '/'
 #ifdef _WIN32
-          && !(cache_flush_filename.size() >= 3 &&
-               cache_flush_filename[1] == ':' &&
-               (cache_flush_filename[2] == '\\' ||
-                cache_flush_filename[2] == '/'))
+          &&
+          !(cache_flush_filename.size() >= 3 &&
+            cache_flush_filename[1] == ':' &&
+            (cache_flush_filename[2] == '\\' || cache_flush_filename[2] == '/'))
 #endif
       ) {
         // cache_flush_filename is relative — prepend file_cache_path.
@@ -149,13 +149,15 @@ void SystemServerContext::CheckLegacyGlobalCacheFlushFile() {
         DCHECK(fcp.size() >= 4 && fcp[1] == ':' &&
                (fcp[2] == '\\' || fcp[2] == '/'))
             << "file_cache_path must be an absolute path at least one "
-               "subdirectory deep, got: " << fcp;
+               "subdirectory deep, got: "
+            << fcp;
         cache_flush_filename = StrCat(fcp, "/", cache_flush_filename);
 #else
         // Unix absolute: "/subdir" — starts with / and has more after it.
         DCHECK(fcp.size() >= 2 && fcp[0] == '/')
             << "file_cache_path must be an absolute path at least one "
-               "subdirectory deep, got: " << fcp;
+               "subdirectory deep, got: "
+            << fcp;
         cache_flush_filename = StrCat(fcp, "/", cache_flush_filename);
 #endif
       }
@@ -423,12 +425,11 @@ void SystemServerContext::AdminPage(bool is_global,
                                     AsyncFetch* fetch,
                                     StringPiece request_body) {
   Statistics* stats = is_global ? factory()->statistics() : statistics();
-  admin_site_->AdminPage(is_global, stripped_gurl, query_params, options,
-                         cache_path(), fetch, system_caches_,
-                         filesystem_metadata_cache(), http_cache(),
-                         metadata_cache(), page_property_cache(), this,
-                         statistics(), stats, global_system_rewrite_options(),
-                         request_body);
+  admin_site_->AdminPage(
+      is_global, stripped_gurl, query_params, options, cache_path(), fetch,
+      system_caches_, filesystem_metadata_cache(), http_cache(),
+      metadata_cache(), page_property_cache(), this, statistics(), stats,
+      global_system_rewrite_options(), request_body);
 }
 
 void SystemServerContext::StatisticsPage(bool is_global,

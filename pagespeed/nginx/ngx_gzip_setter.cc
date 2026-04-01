@@ -17,8 +17,6 @@
  * under the License.
  */
 
-
-
 #include "ngx_gzip_setter.h"
 
 #include <ngx_conf_file.h>
@@ -28,74 +26,70 @@ namespace net_instaweb {
 NgxGZipSetter g_gzip_setter;
 
 extern "C" {
-  // These functions replace the setters for:
-  //   gzip
-  //   gzip_types
-  //   gzip_http_version
-  //   gzip_vary
-  //
-  // If these functions are called it means there is an explicit gzip
-  // configuration. The gzip configuration set by pagespeed is then rolled
-  // back and pagespeed will stop enabling gzip automatically.
-  char* ngx_gzip_redirect_conf_set_flag_slot(
-      ngx_conf_t* cf, ngx_command_t* cmd, void* conf) {
-    if (g_gzip_setter.enabled()) {
-      g_gzip_setter.RollBackAndDisable(cf);
-    }
-    char* ret = ngx_conf_set_flag_slot(cf, cmd, conf);
-    return ret;
+// These functions replace the setters for:
+//   gzip
+//   gzip_types
+//   gzip_http_version
+//   gzip_vary
+//
+// If these functions are called it means there is an explicit gzip
+// configuration. The gzip configuration set by pagespeed is then rolled
+// back and pagespeed will stop enabling gzip automatically.
+char* ngx_gzip_redirect_conf_set_flag_slot(ngx_conf_t* cf, ngx_command_t* cmd,
+                                           void* conf) {
+  if (g_gzip_setter.enabled()) {
+    g_gzip_setter.RollBackAndDisable(cf);
   }
-
-  char* ngx_gzip_redirect_http_types_slot(
-      ngx_conf_t* cf, ngx_command_t* cmd, void* conf) {
-    if (g_gzip_setter.enabled()) {
-      g_gzip_setter.RollBackAndDisable(cf);
-    }
-    char* ret = ngx_http_types_slot(cf, cmd, conf);
-    return ret;
-  }
-
-  char* ngx_gzip_redirect_conf_set_enum_slot(
-      ngx_conf_t* cf, ngx_command_t* cmd, void* conf) {
-    if (g_gzip_setter.enabled()) {
-      g_gzip_setter.RollBackAndDisable(cf);
-    }
-    char* ret = ngx_conf_set_enum_slot(cf, cmd, conf);
-    return ret;
-  }
-  char* ngx_gzip_redirect_conf_set_bitmask_slot(
-      ngx_conf_t* cf, ngx_command_t* cmd, void* conf) {
-    if (g_gzip_setter.enabled()) {
-      g_gzip_setter.RollBackAndDisable(cf);
-    }
-    char* ret = ngx_conf_set_bitmask_slot(cf, cmd, conf);
-    return ret;
-  }
+  char* ret = ngx_conf_set_flag_slot(cf, cmd, conf);
+  return ret;
 }
 
-NgxGZipSetter::NgxGZipSetter() : enabled_(0) { }
-NgxGZipSetter::~NgxGZipSetter() { }
+char* ngx_gzip_redirect_http_types_slot(ngx_conf_t* cf, ngx_command_t* cmd,
+                                        void* conf) {
+  if (g_gzip_setter.enabled()) {
+    g_gzip_setter.RollBackAndDisable(cf);
+  }
+  char* ret = ngx_http_types_slot(cf, cmd, conf);
+  return ret;
+}
+
+char* ngx_gzip_redirect_conf_set_enum_slot(ngx_conf_t* cf, ngx_command_t* cmd,
+                                           void* conf) {
+  if (g_gzip_setter.enabled()) {
+    g_gzip_setter.RollBackAndDisable(cf);
+  }
+  char* ret = ngx_conf_set_enum_slot(cf, cmd, conf);
+  return ret;
+}
+char* ngx_gzip_redirect_conf_set_bitmask_slot(ngx_conf_t* cf,
+                                              ngx_command_t* cmd, void* conf) {
+  if (g_gzip_setter.enabled()) {
+    g_gzip_setter.RollBackAndDisable(cf);
+  }
+  char* ret = ngx_conf_set_bitmask_slot(cf, cmd, conf);
+  return ret;
+}
+}
+
+NgxGZipSetter::NgxGZipSetter() : enabled_(false) {}
+NgxGZipSetter::~NgxGZipSetter() {}
 
 // Helper functions to determine signature.
 bool HasLocalConfig(ngx_command_t* command) {
-  return (!(command->type & (NGX_DIRECT_CONF|NGX_MAIN_CONF)) &&
+  return (!(command->type & (NGX_DIRECT_CONF | NGX_MAIN_CONF)) &&
           command->conf == NGX_HTTP_LOC_CONF_OFFSET);
 }
 bool IsNgxFlagCommand(ngx_command_t* command) {
-  return (command->set == ngx_conf_set_flag_slot &&
-          HasLocalConfig(command));
+  return (command->set == ngx_conf_set_flag_slot && HasLocalConfig(command));
 }
 bool IsNgxHttpTypesCommand(ngx_command_t* command) {
-  return (command->set == ngx_http_types_slot &&
-          HasLocalConfig(command));
+  return (command->set == ngx_http_types_slot && HasLocalConfig(command));
 }
 bool IsNgxEnumCommand(ngx_command_t* command) {
-  return (command->set == ngx_conf_set_enum_slot &&
-          HasLocalConfig(command));
+  return (command->set == ngx_conf_set_enum_slot && HasLocalConfig(command));
 }
 bool IsNgxBitmaskCommand(ngx_command_t* command) {
-  return (command->set == ngx_conf_set_bitmask_slot &&
-          HasLocalConfig(command));
+  return (command->set == ngx_conf_set_bitmask_slot && HasLocalConfig(command));
 }
 
 // Initialize the NgxGzipSetter.
@@ -108,10 +102,10 @@ void NgxGZipSetter::Init(ngx_conf_t* cf) {
 #if (NGX_HTTP_GZIP)
   bool gzip_signature_mismatch = false;
   bool other_signature_mismatch = false;
-  for (int m = 0; cf->cycle->modules[m] != NULL; m++) {
-    if (cf->cycle->modules[m]->commands != NULL) {
+  for (int m = 0; cf->cycle->modules[m] != nullptr; m++) {
+    if (cf->cycle->modules[m]->commands != nullptr) {
       for (int c = 0; cf->cycle->modules[m]->commands[c].name.len; c++) {
-        ngx_command_t* current_command =& cf->cycle->modules[m]->commands[c];
+        ngx_command_t* current_command = &cf->cycle->modules[m]->commands[c];
 
         // We look for the gzip command, and the exact signature we trust
         // this means configured as an config location offset
@@ -119,13 +113,13 @@ void NgxGZipSetter::Init(ngx_conf_t* cf) {
         // Also see:
         //   ngx_conf_handler in ngx_conf_file.c
         //   ngx_http_gzip_filter_commands in ngx_http_gzip_filter.c
-        if (gzip_command_.command_ == NULL &&
+        if (gzip_command_.command_ == nullptr &&
             STR_EQ_LITERAL(current_command->name, "gzip")) {
           if (IsNgxFlagCommand(current_command)) {
             current_command->set = ngx_gzip_redirect_conf_set_flag_slot;
             gzip_command_.command_ = current_command;
             gzip_command_.module_ = cf->cycle->modules[m];
-            enabled_ = 1;
+            enabled_ = true;
           } else {
             ngx_conf_log_error(
                 NGX_LOG_WARN, cf, 0,
@@ -192,37 +186,34 @@ void NgxGZipSetter::Init(ngx_conf_t* cf) {
       }
     }
   }
-  if (gzip_signature_mismatch) {
-    return;  // Already logged error.
+  if (gzip_signature_mismatch) {  // NOLINT(bugprone-branch-clone)
+    return;                       // Already logged error.
   } else if (!enabled_) {
     // Looked through all the available commands and didn't find the "gzip" one.
-    ngx_conf_log_error(
-        NGX_LOG_WARN, cf, 0, "pagespeed: cannot set gzip, command not found");
+    ngx_conf_log_error(NGX_LOG_WARN, cf, 0,
+                       "pagespeed: cannot set gzip, command not found");
     return;
   } else if (other_signature_mismatch) {
     return;  // Already logged error.
   } else if (!gzip_vary_command_.command_) {
-    ngx_conf_log_error(
-        NGX_LOG_WARN, cf, 0, "pagespeed: missing gzip_vary");
+    ngx_conf_log_error(NGX_LOG_WARN, cf, 0, "pagespeed: missing gzip_vary");
     return;
   } else if (!gzip_http_types_command_.command_) {
-    ngx_conf_log_error(
-        NGX_LOG_WARN, cf, 0, "pagespeed: missing gzip_types");
+    ngx_conf_log_error(NGX_LOG_WARN, cf, 0, "pagespeed: missing gzip_types");
     return;
   } else if (!gzip_http_version_command_.command_) {
-    ngx_conf_log_error(
-        NGX_LOG_WARN, cf, 0, "pagespeed: missing gzip_http_version");
+    ngx_conf_log_error(NGX_LOG_WARN, cf, 0,
+                       "pagespeed: missing gzip_http_version");
     return;
   } else if (!gzip_proxied_command_.command_) {
-    ngx_conf_log_error(
-        NGX_LOG_WARN, cf, 0, "pagespeed: missing gzip_proxied");
+    ngx_conf_log_error(NGX_LOG_WARN, cf, 0, "pagespeed: missing gzip_proxied");
     return;
   } else {
     return;  // Success.
   }
 #else
-  ngx_conf_log_error(
-      NGX_LOG_WARN, cf, 0, "pagespeed: gzip not compiled into nginx");
+  ngx_conf_log_error(NGX_LOG_WARN, cf, 0,
+                     "pagespeed: gzip not compiled into nginx");
   return;
 #endif
 }
@@ -236,8 +227,7 @@ char* ngx_command_ctx::GetModuleConfPtr(ngx_conf_t* cf) {
       ngx_http_conf_get_module_loc_conf(cf, (*(module_))));
 }
 
-void NgxGZipSetter::SetNgxConfFlag(ngx_conf_t* cf,
-                                   ngx_command_ctx* command_ctx,
+void NgxGZipSetter::SetNgxConfFlag(ngx_conf_t* cf, ngx_command_ctx* command_ctx,
                                    ngx_flag_t value) {
   ngx_flag_t* flag = reinterpret_cast<ngx_flag_t*>(command_ctx->GetConfPtr(cf));
   *flag = value;
@@ -245,8 +235,7 @@ void NgxGZipSetter::SetNgxConfFlag(ngx_conf_t* cf,
   ngx_flags_set_.push_back(flag);
 }
 
-void NgxGZipSetter::SetNgxConfEnum(ngx_conf_t* cf,
-                                   ngx_command_ctx* command_ctx,
+void NgxGZipSetter::SetNgxConfEnum(ngx_conf_t* cf, ngx_command_ctx* command_ctx,
                                    ngx_uint_t value) {
   ngx_uint_t* enum_to_set =
       reinterpret_cast<ngx_uint_t*>(command_ctx->GetConfPtr(cf));
@@ -265,20 +254,15 @@ void NgxGZipSetter::SetNgxConfBitmask(ngx_conf_t* cf,
 
 // These are the content types we want to compress.
 ngx_str_t gzip_http_types[] = {
-  ngx_string("application/ecmascript"),
-  ngx_string("application/javascript"),
-  ngx_string("application/json"),
-  ngx_string("application/pdf"),
-  ngx_string("application/postscript"),
-  ngx_string("application/x-javascript"),
-  ngx_string("image/svg+xml"),
-  ngx_string("text/css"),
-  ngx_string("text/csv"),
-  // ngx_string("text/html"),  // This is the default implied value.
-  ngx_string("text/javascript"),
-  ngx_string("text/plain"),
-  ngx_string("text/xml"),
-  ngx_null_string  // Indicates end of array.
+    ngx_string("application/ecmascript"), ngx_string("application/javascript"),
+    ngx_string("application/json"), ngx_string("application/pdf"),
+    ngx_string("application/postscript"),
+    ngx_string("application/x-javascript"), ngx_string("image/svg+xml"),
+    ngx_string("text/css"), ngx_string("text/csv"),
+    // ngx_string("text/html"),  // This is the default implied value.
+    ngx_string("text/javascript"), ngx_string("text/plain"),
+    ngx_string("text/xml"),
+    ngx_null_string  // Indicates end of array.
 };
 
 gzs_enable_result NgxGZipSetter::SetGZipForLocation(ngx_conf_t* cf,
@@ -312,8 +296,7 @@ void NgxGZipSetter::EnableGZipForLocation(ngx_conf_t* cf) {
     SetNgxConfEnum(cf, &gzip_http_version_command_, NGX_HTTP_VERSION_10);
   }
   if (gzip_proxied_command_.command_) {
-    SetNgxConfBitmask(
-        cf, &gzip_proxied_command_, NGX_HTTP_GZIP_PROXIED_ANY);
+    SetNgxConfBitmask(cf, &gzip_proxied_command_, NGX_HTTP_GZIP_PROXIED_ANY);
   }
 
   // This is actually the most prone to future API changes, because gzip_types
@@ -333,8 +316,8 @@ void NgxGZipSetter::AddGZipHTTPTypes(ngx_conf_t* cf) {
     }
 
     ngx_command_t* command = gzip_http_types_command_.command_;
-    char* gzip_conf = reinterpret_cast<char* >(
-        gzip_http_types_command_.GetModuleConfPtr(cf));
+    char* gzip_conf =
+        reinterpret_cast<char*>(gzip_http_types_command_.GetModuleConfPtr(cf));
 
     // Backup the old settings.
     ngx_str_t old_elt0 = reinterpret_cast<ngx_str_t*>(cf->args->elts)[0];
@@ -362,8 +345,8 @@ void NgxGZipSetter::AddGZipHTTPTypes(ngx_conf_t* cf) {
       // of a large multi server/location config with a lot of "pagespeed on"
       // directives.
       // Estimates are 300-400KB for 1000 times "pagespeed on".
-      d.data = reinterpret_cast<u_char*>(
-          ngx_pnalloc(cf->pool, http_types->len + 1));
+      d.data =
+          reinterpret_cast<u_char*>(ngx_pnalloc(cf->pool, http_types->len + 1));
       snprintf(reinterpret_cast<char*>(d.data), http_types->len + 1, "%s",
                reinterpret_cast<const char*>(http_types->data));
       d.len = http_types->len;
@@ -388,19 +371,19 @@ void NgxGZipSetter::RollBackAndDisable(ngx_conf_t* cf) {
                      "pagespeed: rollback gzip, explicit configuration");
   for (std::vector<ngx_flag_t*>::iterator i = ngx_flags_set_.begin();
        i != ngx_flags_set_.end(); ++i) {
-    *(*i)=NGX_CONF_UNSET;
+    *(*i) = NGX_CONF_UNSET;
   }
   for (std::vector<ngx_uint_t*>::iterator i = ngx_uint_set_.begin();
        i != ngx_uint_set_.end(); ++i) {
-    *(*i)=NGX_CONF_UNSET_UINT;
+    *(*i) = NGX_CONF_UNSET_UINT;
   }
   for (std::vector<void*>::iterator i = ngx_httptypes_set_.begin();
        i != ngx_httptypes_set_.end(); ++i) {
     ngx_array_t** type_array = reinterpret_cast<ngx_array_t**>(*i);
     ngx_array_destroy(*type_array);
-    *type_array = NULL;
+    *type_array = nullptr;
   }
-  enabled_ = 0;
+  enabled_ = false;
 }
 
 }  // namespace net_instaweb

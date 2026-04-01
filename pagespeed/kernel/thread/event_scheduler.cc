@@ -60,7 +60,8 @@ void EventScheduler::AwaitWakeupUntilUs(int64 wakeup_time_us) {
   }
 
   // Increment generation for this new timer.
-  int64 generation = timer_generation_.fetch_add(1, std::memory_order_acq_rel) + 1;
+  int64 generation =
+      timer_generation_.fetch_add(1, std::memory_order_acq_rel) + 1;
 
   // Create a timer that will wake us up. We capture the generation so we can
   // ignore stale callbacks. The caller owns the returned EventTimer.
@@ -77,21 +78,24 @@ void EventScheduler::AwaitWakeupUntilUs(int64 wakeup_time_us) {
 }
 
 void EventScheduler::OnWakeupTimer(int64 generation) {
-  // Check if this is a stale callback from an old timer.
-  // We need to acquire the mutex to call Wakeup() and to safely check generation.
-  ScopedMutex lock(mutex());
-
-  // Compare generation - if it doesn't match, this is a stale callback.
-  // This can happen if:
-  // 1. The condvar timed out and we've already moved on
-  // 2. AwaitWakeupUntilUs was called again with a new timer
-  // 3. The scheduler is being destroyed
-  if (generation != timer_generation_.load(std::memory_order_acquire)) {
-    return;  // Stale callback, ignore.
+  // IMPORTANT: Do NOT acquire the scheduler mutex here!
+  //
+  // With evthread_use_pthreads(), event_del() blocks until any currently-
+  // executing callback completes. The timer destructor in AwaitWakeupUntilUs
+  // calls event_del() while holding the scheduler mutex. If this callback
+  // also acquired the scheduler mutex, we'd deadlock when the condvar timeout
+  // and the libevent timer fire simultaneously:
+  //   Main thread: holds mutex → event_del() → waits for callback
+  //   Dispatcher:  callback → waits for mutex
+  //
+  // This is safe without the mutex because:
+  // 1. timer_generation_ is atomic - no lock needed for the check
+  // 2. pthread_cond_broadcast() is safe to call without the mutex
+  // 3. A "missed" broadcast (if no one is waiting) is harmless - the
+  //    condvar timeout in AwaitWakeupUntilUs handles that case
+  if (generation == timer_generation_.load(std::memory_order_acquire)) {
+    Wakeup();
   }
-
-  // Wake up anyone waiting in AwaitWakeupUntilUs.
-  Wakeup();
 }
 
 }  // namespace net_instaweb

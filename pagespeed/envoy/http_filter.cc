@@ -2,13 +2,12 @@
 
 #include <string>
 
+#include "absl/strings/match.h"
 #include "absl/strings/str_format.h"
-#include "openssl/crypto.h"  // For CRYPTO_memcmp (timing-safe comparison)
-
 #include "envoy/server/filter_config.h"
-#include "pagespeed/system/circuit_breaker.h"
 #include "net/instaweb/http/public/async_fetch.h"
 #include "net/instaweb/http/public/cache_url_async_fetcher.h"
+#include "net/instaweb/http/public/http_cache.h"
 #include "net/instaweb/http/public/request_context.h"
 #include "net/instaweb/public/global_constants.h"
 #include "net/instaweb/public/version.h"
@@ -22,9 +21,11 @@
 #include "net/instaweb/rewriter/public/rewrite_stats.h"
 #include "net/instaweb/rewriter/public/static_asset_manager.h"
 #include "net/instaweb/util/public/fallback_property_page.h"
+#include "openssl/crypto.h"  // For CRYPTO_memcmp (timing-safe comparison)
 #include "pagespeed/automatic/proxy_fetch.h"
 #include "pagespeed/envoy/envoy_admin_fetch.h"
 #include "pagespeed/envoy/envoy_async_fetch.h"
+#include "pagespeed/envoy/envoy_rewrite_driver_factory.h"
 #include "pagespeed/envoy/envoy_rewrite_options.h"
 #include "pagespeed/kernel/base/google_message_handler.h"
 #include "pagespeed/kernel/base/null_message_handler.h"
@@ -42,14 +43,13 @@
 #include "pagespeed/kernel/util/gzip_inflater.h"
 #include "pagespeed/kernel/util/statistics_logger.h"
 #include "pagespeed/system/admin_site.h"
+#include "pagespeed/system/circuit_breaker.h"
 #include "pagespeed/system/in_place_resource_recorder.h"
 #include "pagespeed/system/system_caches.h"
 #include "pagespeed/system/system_request_context.h"
 #include "pagespeed/system/system_rewrite_options.h"
 #include "pagespeed/system/system_server_context.h"
 #include "pagespeed/system/system_thread_system.h"
-#include "net/instaweb/http/public/http_cache.h"
-#include "pagespeed/envoy/envoy_rewrite_driver_factory.h"
 #include "source/common/network/utility.h"
 
 namespace Envoy {
@@ -65,7 +65,8 @@ HttpPageSpeedDecoderFilterConfig::HttpPageSpeedDecoderFilterConfig(
       val_(proto_config.val()),
       metrics_collector_(
           std::make_shared<net_instaweb::EnvoyMetricsCollector>(scope)),
-      rate_limiter_(std::make_unique<AdminRateLimiter>(100)) {  // Default 100 rpm
+      rate_limiter_(
+          std::make_unique<AdminRateLimiter>(100)) {  // Default 100 rpm
   // Parse admin authentication configuration from proto.
   if (proto_config.has_admin_auth()) {
     const auto& auth_config = proto_config.admin_auth();
@@ -153,8 +154,8 @@ bool HttpPageSpeedDecoderFilter::ComputeCustomOptions(
   if (pristine_url_ == nullptr || !pristine_url_->IsWebValid()) {
     return false;
   }
-  stripped_gurl_ = std::make_unique<net_instaweb::GoogleUrl>(
-      pristine_url_->Spec());
+  stripped_gurl_ =
+      std::make_unique<net_instaweb::GoogleUrl>(pristine_url_->Spec());
 
   // Get host from URL for VHost lookup.
   GoogleString hostname = pristine_url_->Host().as_string();
@@ -173,8 +174,8 @@ bool HttpPageSpeedDecoderFilter::ComputeCustomOptions(
   // This modifies stripped_gurl_ (removes PS params) and request_headers
   // (removes PS headers), and populates rewrite_query_ with parsed options.
   if (!server_context_->GetQueryOptions(
-          request_context, base_options, stripped_gurl_.get(),
-          request_headers, query_response_headers_.get(), &rewrite_query_)) {
+          request_context, base_options, stripped_gurl_.get(), request_headers,
+          query_response_headers_.get(), &rewrite_query_)) {
     // Invalid query params/headers - log warning and use defaults
     server_context_->message_handler()->Message(
         net_instaweb::kWarning,
@@ -238,8 +239,7 @@ FilterHeadersStatus HttpPageSpeedDecoderFilter::MaybeHandleAdminRequest(
       (path == options->global_statistics_path()) ||
       PathMatchesOrIsSubpath(path, options->admin_path()) ||
       PathMatchesOrIsSubpath(path, options->global_admin_path()) ||
-      (path == options->console_path()) ||
-      (path == options->messages_path());
+      (path == options->console_path()) || (path == options->messages_path());
 
   // Health path is intentionally excluded from auth - it's used for
   // load balancer health checks which typically don't support auth.
@@ -315,8 +315,7 @@ FilterHeadersStatus HttpPageSpeedDecoderFilter::HandleStatisticsRequest(
 FilterHeadersStatus HttpPageSpeedDecoderFilter::HandleAdminRequest(
     bool is_global, const net_instaweb::GoogleUrl& stripped_gurl,
     const net_instaweb::QueryParams& query_params,
-    const net_instaweb::RewriteOptions* options,
-    StringPiece request_body) {
+    const net_instaweb::RewriteOptions* options, StringPiece request_body) {
   auto* fetch = new net_instaweb::EnvoyAdminFetch(server_context_, this);
   server_context_->AdminPage(is_global, stripped_gurl, query_params, options,
                              fetch, request_body);
@@ -335,9 +334,8 @@ FilterHeadersStatus HttpPageSpeedDecoderFilter::HandleConsoleRequest(
 FilterHeadersStatus HttpPageSpeedDecoderFilter::HandleMessagesRequest(
     const net_instaweb::RewriteOptions* options) {
   auto* fetch = new net_instaweb::EnvoyAdminFetch(server_context_, this);
-  server_context_->MessageHistoryHandler(*options,
-                                         net_instaweb::AdminSite::kOther,
-                                         fetch);
+  server_context_->MessageHistoryHandler(
+      *options, net_instaweb::AdminSite::kOther, fetch);
   return FilterHeadersStatus::StopIteration;
 }
 
@@ -374,13 +372,27 @@ FilterHeadersStatus HttpPageSpeedDecoderFilter::HandleHealthRequest(
   GoogleString json_body = absl::StrCat(
       "{\n"
       "  \"status\": \"healthy\",\n"
-      "  \"version\": \"", net_instaweb::kModPagespeedVersion, "\",\n"
-      "  \"uptime_seconds\": ", absl::StrCat(uptime_seconds), ",\n"
+      "  \"version\": \"",
+      net_instaweb::kModPagespeedVersion,
+      "\",\n"
+      "  \"git_commit\": \"" LASTCHANGE_STRING
+      "\",\n"
+      "  \"uptime_seconds\": ",
+      absl::StrCat(uptime_seconds),
+      ",\n"
       "  \"cache\": {\n"
-      "    \"hit_rate\": ", absl::StrFormat("%.2f", hit_rate), ",\n"
-      "    \"hits\": ", absl::StrCat(cache_hits), ",\n"
-      "    \"misses\": ", absl::StrCat(cache_misses), ",\n"
-      "    \"size_bytes\": ", absl::StrCat(cache_size_bytes), "\n"
+      "    \"hit_rate\": ",
+      absl::StrFormat("%.2f", hit_rate),
+      ",\n"
+      "    \"hits\": ",
+      absl::StrCat(cache_hits),
+      ",\n"
+      "    \"misses\": ",
+      absl::StrCat(cache_misses),
+      ",\n"
+      "    \"size_bytes\": ",
+      absl::StrCat(cache_size_bytes),
+      "\n"
       "  }\n"
       "}\n");
 
@@ -491,7 +503,7 @@ HttpPageSpeedDecoderFilter::ValidateAdminAuth(const RequestHeaderMap& headers) {
 }
 
 void HttpPageSpeedDecoderFilter::RecordHtmlRewriteComplete(bool success,
-                                                            bool timeout) {
+                                                           bool timeout) {
   if (metrics_collector_ && html_rewrite_start_time_ms_ > 0) {
     int64_t latency_ms =
         server_context_->timer()->NowMs() - html_rewrite_start_time_ms_;
@@ -511,8 +523,7 @@ void HttpPageSpeedDecoderFilter::SendUnauthorizedResponse() {
   response_headers->Add(net_instaweb::HttpAttributes::kContentType,
                         "text/plain");
   // Add WWW-Authenticate header to indicate Bearer token authentication.
-  response_headers->Add("WWW-Authenticate",
-                        "Bearer realm=\"PageSpeed Admin\"");
+  response_headers->Add("WWW-Authenticate", "Bearer realm=\"PageSpeed Admin\"");
   response_headers->ComputeCaching();
 
   // Add security headers for admin endpoint.
@@ -637,9 +648,8 @@ FilterHeadersStatus HttpPageSpeedDecoderFilter::decodeHeaders(
   auto* envoy_options = net_instaweb::EnvoyRewriteOptions::DynamicCast(
       server_context_->global_options());
   if (envoy_options != nullptr) {
-    FilterHeadersStatus admin_status =
-        MaybeHandleAdminRequest(headers, *pristine_url_, envoy_options,
-                                end_response);
+    FilterHeadersStatus admin_status = MaybeHandleAdminRequest(
+        headers, *pristine_url_, envoy_options, end_response);
     if (admin_status == FilterHeadersStatus::StopIteration) {
       return admin_status;
     }
@@ -703,8 +713,7 @@ FilterHeadersStatus HttpPageSpeedDecoderFilter::decodeHeaders(
     if (server_context_->static_asset_manager()->GetAsset(
             file_name, &file_contents, &content_type, &cache_header)) {
       // Create response headers for the static asset
-      auto response_headers =
-          std::make_unique<net_instaweb::ResponseHeaders>();
+      auto response_headers = std::make_unique<net_instaweb::ResponseHeaders>();
       response_headers->SetStatusAndReason(net_instaweb::HttpStatus::kOK);
       response_headers->Add(net_instaweb::HttpAttributes::kContentType,
                             content_type.mime_type());
@@ -717,8 +726,7 @@ FilterHeadersStatus HttpPageSpeedDecoderFilter::decodeHeaders(
       return FilterHeadersStatus::StopIteration;
     } else {
       // Static asset not found - return 404
-      auto response_headers =
-          std::make_unique<net_instaweb::ResponseHeaders>();
+      auto response_headers = std::make_unique<net_instaweb::ResponseHeaders>();
       response_headers->SetStatusAndReason(net_instaweb::HttpStatus::kNotFound);
       sendReply(response_headers.get(), "Static asset not found");
       return FilterHeadersStatus::StopIteration;
@@ -733,8 +741,8 @@ FilterHeadersStatus HttpPageSpeedDecoderFilter::decodeHeaders(
     // images, etc.). Use ResourceFetch::Start to decode the URL, fetch the
     // original resources, apply optimizations, and return the result.
     // Note: ResourceFetch handles its own driver lifecycle.
-    net_instaweb::ResourceFetch::Start(
-        fetch_url, custom_options_.release(), server_context_, base_fetch_);
+    net_instaweb::ResourceFetch::Start(fetch_url, custom_options_.release(),
+                                       server_context_, base_fetch_);
     return FilterHeadersStatus::StopIteration;
   }
 
@@ -757,9 +765,9 @@ FilterHeadersStatus HttpPageSpeedDecoderFilter::decodeHeaders(
     // Copy request headers to the driver (required by FetchInPlaceResource).
     ipro_driver_->SetRequestHeaders(*base_fetch_->request_headers());
 
-    server_context_->message_handler()->Message(
-        net_instaweb::kInfo, "Trying IPRO lookup for %s",
-        fetch_url.spec_c_str());
+    server_context_->message_handler()->Message(net_instaweb::kInfo,
+                                                "Trying IPRO lookup for %s",
+                                                fetch_url.spec_c_str());
 
     // FetchInPlaceResource will:
     // 1. Check HTTPCache for an optimized version
@@ -881,8 +889,7 @@ void HttpPageSpeedDecoderFilter::prepareForIproRecording() {
   // a ResourceNotCacheable entry) so we need to get it into cache
   // (or at least a note that it cannot be cached stored there).
   recorder_ = new net_instaweb::InPlaceResourceRecorder(
-      request_context, recording_url.Spec(),
-      cache_fragment,
+      request_context, recording_url.Spec(), cache_fragment,
       base_fetch_->request_headers()->GetProperties(),
       options->ipro_max_response_bytes(),
       options->ipro_max_concurrent_recordings(), server_context_->http_cache(),
@@ -949,14 +956,22 @@ void HttpPageSpeedDecoderFilter::sendReply(
     // First, clear existing headers and copy from PageSpeed headers.
     stored_response_headers_->setStatus(response_headers->status_code());
 
-    // Remove all existing headers except :status, then add PageSpeed headers.
-    // This is needed because PageSpeed may have modified headers.
+    // Remove existing headers except :status and Envoy-injected headers,
+    // then add PageSpeed's rewritten headers. Envoy tracing/diagnostic
+    // headers (x-envoy-*, x-request-id) must be preserved for distributed
+    // tracing and observability.
     std::vector<LowerCaseString> to_remove;
     stored_response_headers_->iterate(
         [&to_remove](const HeaderEntry& entry) -> HeaderMap::Iterate {
-          if (entry.key().getStringView() != ":status") {
-            to_remove.push_back(LowerCaseString(std::string(entry.key().getStringView())));
+          absl::string_view key = entry.key().getStringView();
+          if (key == ":status") {
+            return HeaderMap::Iterate::Continue;  // Never remove.
           }
+          // Preserve Envoy-injected tracing and diagnostic headers.
+          if (absl::StartsWith(key, "x-envoy-") || key == "x-request-id") {
+            return HeaderMap::Iterate::Continue;
+          }
+          to_remove.push_back(LowerCaseString(std::string(key)));
           return HeaderMap::Iterate::Continue;
         });
     for (const auto& key : to_remove) {
@@ -1044,7 +1059,8 @@ FilterHeadersStatus HttpPageSpeedDecoderFilter::encodeHeaders(
     return FilterHeadersStatus::Continue;
   }
 
-  auto* envoy_options = net_instaweb::EnvoyRewriteOptions::DynamicCast(options_);
+  auto* envoy_options =
+      net_instaweb::EnvoyRewriteOptions::DynamicCast(options_);
   bool pagespeed_enabled = options_->enabled();
   bool html_rewriting_enabled =
       envoy_options != nullptr && envoy_options->enable_html_rewriting();
@@ -1087,8 +1103,8 @@ FilterHeadersStatus HttpPageSpeedDecoderFilter::encodeHeaders(
       // Use the actual port from the URL for correct resource fetching.
       int port = pristine_url_->EffectiveIntPort();
       net_instaweb::RequestContextPtr request_context(
-          server_context_->NewRequestContext(
-              pristine_url_->Host().as_string(), port));
+          server_context_->NewRequestContext(pristine_url_->Host().as_string(),
+                                             port));
       request_context->set_options(options_->ComputeHttpOptions());
 
       // Create EnvoyAsyncFetch to receive ProxyFetch output.
@@ -1145,25 +1161,18 @@ FilterHeadersStatus HttpPageSpeedDecoderFilter::encodeHeaders(
           const_cast<net_instaweb::RewriteOptions*>(driver->options());
       net_instaweb::ProxyFetchPropertyCallbackCollector* property_callback =
           net_instaweb::ProxyFetchFactory::InitiatePropertyCacheLookup(
-              false /* is_resource_fetch */,
-              *pristine_url_,
-              server_context_,
-              mutable_options,
-              envoy_async_fetch_.get());
+              false /* is_resource_fetch */, *pristine_url_, server_context_,
+              mutable_options, envoy_async_fetch_.get());
 
       // Create ProxyFetch to handle HTML parsing and rewriting.
       // This does NOT start a fetch - we feed data via HeadersComplete/Write/Done.
       proxy_fetch_ = proxy_fetch_factory_->CreateNewProxyFetch(
-          pristine_url_->Spec().as_string(),
-          envoy_async_fetch_.get(),
-          driver,
-          property_callback,
-          nullptr /* original_content_fetch */);
+          pristine_url_->Spec().as_string(), envoy_async_fetch_.get(), driver,
+          property_callback, nullptr /* original_content_fetch */);
 
       if (proxy_fetch_ == nullptr) {
         server_context_->message_handler()->Message(
-            net_instaweb::kWarning,
-            "Failed to create ProxyFetch for %s",
+            net_instaweb::kWarning, "Failed to create ProxyFetch for %s",
             pristine_url_->spec_c_str());
         envoy_async_fetch_.reset();
         return FilterHeadersStatus::Continue;
@@ -1199,8 +1208,7 @@ FilterHeadersStatus HttpPageSpeedDecoderFilter::encodeHeaders(
       // Record HTML rewrite start for metrics.
       if (metrics_collector_) {
         metrics_collector_->RecordHtmlRewriteStart();
-        html_rewrite_start_time_ms_ =
-            server_context_->timer()->NowMs();
+        html_rewrite_start_time_ms_ = server_context_->timer()->NowMs();
       }
 
       // Stop iteration - we'll buffer the body and send our own response.
@@ -1232,9 +1240,8 @@ FilterDataStatus HttpPageSpeedDecoderFilter::encodeData(Buffer::Instance& data,
     // Feed data to ProxyFetch.
     std::string data_str = data.toString();
     if (!data_str.empty()) {
-      proxy_fetch_->Write(
-          StringPiece(data_str.data(), data_str.size()),
-          server_context_->message_handler());
+      proxy_fetch_->Write(StringPiece(data_str.data(), data_str.size()),
+                          server_context_->message_handler());
     }
 
     // Consume the data - ProxyFetch is buffering it.
@@ -1266,11 +1273,12 @@ FilterDataStatus HttpPageSpeedDecoderFilter::encodeData(Buffer::Instance& data,
       if (sys_options != nullptr && response_headers_ != nullptr) {
         int s_maxage_sec = sys_options->EffectiveInPlaceSMaxAgeSec();
         if (s_maxage_sec != -1) {
-          const char* existing_cache_control =
-              response_headers_->Lookup1(net_instaweb::HttpAttributes::kCacheControl);
+          const char* existing_cache_control = response_headers_->Lookup1(
+              net_instaweb::HttpAttributes::kCacheControl);
           GoogleString updated_cache_control;
           if (net_instaweb::ResponseHeaders::ApplySMaxAge(
-                  s_maxage_sec, existing_cache_control, &updated_cache_control)) {
+                  s_maxage_sec, existing_cache_control,
+                  &updated_cache_control)) {
             // We're modifying the cache control header; save the original first.
             // This preserves directives like no-cache in the cached copy.
             recorder_->SaveCacheControl(existing_cache_control);

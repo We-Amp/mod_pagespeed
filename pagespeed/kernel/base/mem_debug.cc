@@ -128,9 +128,9 @@ void* operator new(size_t size, const std::nothrow_t&) __THROW {
   return debug_malloc(size);
 }
 
-void operator delete(void* ptr)__THROW { debug_free(ptr); }
+void operator delete(void* ptr) __THROW { debug_free(ptr); }
 
-void operator delete(void* ptr, const std::nothrow_t&)__THROW {
+void operator delete(void* ptr, const std::nothrow_t&) __THROW {
   debug_free(ptr);
 }
 

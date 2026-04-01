@@ -73,7 +73,8 @@ class EnvoyDispatcherAdapter : public EventDispatcher {
   // EventDispatcher interface
   void Post(Function* function) override;
   EventTimer* CreateTimer(int64 delay_us, Function* function) override;
-  EventTimer* CreateTimerAtUs(int64 wakeup_time_us, Function* function) override;
+  EventTimer* CreateTimerAtUs(int64 wakeup_time_us,
+                              Function* function) override;
   Timer* timer() const override { return timer_; }
   void InitiateShutdown() override;
   void WaitForShutdown() override;

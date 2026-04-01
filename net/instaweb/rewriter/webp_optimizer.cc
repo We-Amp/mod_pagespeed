@@ -195,7 +195,9 @@ bool WebpOptimizer::DoReadJpegPixels(J_COLOR_SPACE color_space,
   // Figure out critical dimensions of image, and allocate space for image data.
   width_ = jpeg_decompress->output_width;
   height_ = jpeg_decompress->output_height;
-  row_stride_ = width_ * jpeg_decompress->output_components * sizeof(*pixels_);
+  row_stride_ =
+      static_cast<unsigned long>(width_ * jpeg_decompress->output_components) *
+      sizeof(*pixels_);
 
   pixels_ = new uint8[row_stride_ * height_];
   // jpeglib expects to get an array of pointers to rows, so allocate one and

@@ -116,7 +116,7 @@ LogMessage::~LogMessage() {
       spdlog::critical(fmt::runtime(fmtstring), base_filename, line_, msg);
       // Also write to stderr for death tests (EXPECT_DEBUG_DEATH captures stderr)
       std::cerr << "[FATAL] [" << base_filename << ":" << line_ << "] " << msg
-                << std::endl;
+                << '\n';
       spdlog::dump_backtrace();
       break;
     default:

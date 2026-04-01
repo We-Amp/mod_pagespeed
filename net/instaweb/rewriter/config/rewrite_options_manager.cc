@@ -31,7 +31,7 @@ namespace net_instaweb {
 void RewriteOptionsManager::GetRewriteOptions(const GoogleUrl& url,
                                               const RequestHeaders& headers,
                                               OptionsCallback* done) {
-  done->Run(NULL);
+  done->Run(nullptr);
 }
 
 void RewriteOptionsManager::PrepareRequest(

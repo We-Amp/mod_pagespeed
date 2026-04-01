@@ -147,7 +147,7 @@ void CssImageRewriter::RewriteSlot(const ResourceSlotPtr& slot,
 }
 
 void CssImageRewriter::InheritChildImageInfo(RewriteContext* context) {
-  typedef ImageRewriteFilter::AssociatedImageInfoMap AssociatedImageInfoMap;
+  using AssociatedImageInfoMap = ImageRewriteFilter::AssociatedImageInfoMap;
   if (!context->Driver()->options()->Enabled(
           RewriteOptions::kExperimentCollectMobImageInfo)) {
     return;

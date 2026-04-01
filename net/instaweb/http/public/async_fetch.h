@@ -395,7 +395,8 @@ class ConditionalSharedAsyncFetch : public SharedAsyncFetch {
   Variable* num_conditional_refreshes_;  // may be NULL.
 
   ConditionalSharedAsyncFetch(const ConditionalSharedAsyncFetch&) = delete;
-  ConditionalSharedAsyncFetch& operator=(const ConditionalSharedAsyncFetch&) = delete;
+  ConditionalSharedAsyncFetch& operator=(const ConditionalSharedAsyncFetch&) =
+      delete;
 };
 
 }  // namespace net_instaweb

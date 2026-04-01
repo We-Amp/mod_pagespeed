@@ -49,30 +49,18 @@ extern ngx_module_t ngx_pagespeed_etag_filter;
 // The array is marked as extern "C" to ensure C linkage for compatibility.
 extern "C" {
 
-__attribute__((visibility("default")))
-ngx_module_t* ngx_modules[] = {
-    &ngx_pagespeed,
-    &ngx_pagespeed_etag_filter,
-    NULL
-};
+__attribute__((visibility("default"))) ngx_module_t* ngx_modules[] = {
+    &ngx_pagespeed, &ngx_pagespeed_etag_filter, nullptr};
 
 // Module names array (required by some nginx versions)
-__attribute__((visibility("default")))
-char* ngx_module_names[] = {
-    (char*)"ngx_pagespeed",
-    (char*)"ngx_pagespeed_etag_filter",
-    NULL
-};
+__attribute__((visibility("default"))) char* ngx_module_names[] = {
+    (char*)"ngx_pagespeed", (char*)"ngx_pagespeed_etag_filter", nullptr};
 
 // Module order string - determines when our filter runs relative to others.
 // This is used by nginx's dynamic module loader to insert the module
 // at the correct position in the filter chain.
 // Format: "module_name:position" where position is relative to other modules.
-__attribute__((visibility("default")))
-char* ngx_module_order[] = {
-    (char*)"ngx_pagespeed",
-    (char*)"ngx_pagespeed_etag_filter",
-    NULL
-};
+__attribute__((visibility("default"))) char* ngx_module_order[] = {
+    (char*)"ngx_pagespeed", (char*)"ngx_pagespeed_etag_filter", nullptr};
 
 }  // extern "C"

@@ -19,6 +19,8 @@
 
 #include "pagespeed/system/curl_fetch.h"
 
+#include <cstddef>
+
 #include "net/instaweb/http/public/async_fetch.h"
 #include "net/instaweb/public/global_constants.h"
 #include "net/instaweb/public/version.h"
@@ -35,8 +37,10 @@ namespace net_instaweb {
 // Maximum sizes to prevent resource exhaustion from malicious origins.
 // Response body: 256 MB — covers all realistic web resources.
 // Header total: 1 MB — far beyond any legitimate response header set.
-static constexpr size_t kMaxResponseBodyBytes = 256 * 1024 * 1024;
-static constexpr size_t kMaxHeaderBytes = 1 * 1024 * 1024;
+static constexpr size_t kMaxResponseBodyBytes =
+    static_cast<const size_t>(256 * 1024 * 1024);
+static constexpr size_t kMaxHeaderBytes =
+    static_cast<const size_t>(1 * 1024 * 1024);
 
 CurlFetch::CurlFetch(const GoogleString& url, AsyncFetch* async_fetch,
                      MessageHandler* message_handler, Timer* timer)
@@ -90,8 +94,7 @@ bool CurlFetch::InitCurl(CurlUrlAsyncFetcher* fetcher) {
 
   // Proxy
   if (!fetcher->proxy().empty()) {
-    curl_easy_setopt(curl_handle_, CURLOPT_PROXY,
-                     fetcher->proxy().c_str());
+    curl_easy_setopt(curl_handle_, CURLOPT_PROXY, fetcher->proxy().c_str());
   }
 
   // SSL configuration
@@ -131,8 +134,9 @@ bool CurlFetch::InitCurl(CurlUrlAsyncFetcher* fetcher) {
       case RequestHeaders::kPost:
         curl_easy_setopt(curl_handle_, CURLOPT_POST, 1L);
         if (!req_headers->message_body().empty()) {
-          curl_easy_setopt(curl_handle_, CURLOPT_POSTFIELDSIZE,
-                           static_cast<long>(req_headers->message_body().size()));
+          curl_easy_setopt(
+              curl_handle_, CURLOPT_POSTFIELDSIZE,
+              static_cast<long>(req_headers->message_body().size()));
           curl_easy_setopt(curl_handle_, CURLOPT_POSTFIELDS,
                            req_headers->message_body().c_str());
         } else {
@@ -142,8 +146,9 @@ bool CurlFetch::InitCurl(CurlUrlAsyncFetcher* fetcher) {
       case RequestHeaders::kPut:
         curl_easy_setopt(curl_handle_, CURLOPT_CUSTOMREQUEST, "PUT");
         if (!req_headers->message_body().empty()) {
-          curl_easy_setopt(curl_handle_, CURLOPT_POSTFIELDSIZE,
-                           static_cast<long>(req_headers->message_body().size()));
+          curl_easy_setopt(
+              curl_handle_, CURLOPT_POSTFIELDSIZE,
+              static_cast<long>(req_headers->message_body().size()));
           curl_easy_setopt(curl_handle_, CURLOPT_POSTFIELDS,
                            req_headers->message_body().c_str());
         }
@@ -154,8 +159,9 @@ bool CurlFetch::InitCurl(CurlUrlAsyncFetcher* fetcher) {
       case RequestHeaders::kPatch:
         curl_easy_setopt(curl_handle_, CURLOPT_CUSTOMREQUEST, "PATCH");
         if (!req_headers->message_body().empty()) {
-          curl_easy_setopt(curl_handle_, CURLOPT_POSTFIELDSIZE,
-                           static_cast<long>(req_headers->message_body().size()));
+          curl_easy_setopt(
+              curl_handle_, CURLOPT_POSTFIELDSIZE,
+              static_cast<long>(req_headers->message_body().size()));
           curl_easy_setopt(curl_handle_, CURLOPT_POSTFIELDS,
                            req_headers->message_body().c_str());
         }
@@ -179,8 +185,7 @@ bool CurlFetch::InitCurl(CurlUrlAsyncFetcher* fetcher) {
           StringCaseEqual(name, "Keep-Alive") ||
           StringCaseEqual(name, "Proxy-Connection") ||
           StringCaseEqual(name, "Transfer-Encoding") ||
-          StringCaseEqual(name, "TE") ||
-          StringCaseEqual(name, "Trailer") ||
+          StringCaseEqual(name, "TE") || StringCaseEqual(name, "Trailer") ||
           StringCaseEqual(name, "Upgrade") ||
           StringCaseEqual(name, "Content-Length")) {
         continue;
@@ -239,8 +244,7 @@ void CurlFetch::Done(CURLcode result) {
       async_fetch_->HeadersComplete();
     }
     // Track SSL certificate errors
-    if (result == CURLE_SSL_CERTPROBLEM ||
-        result == CURLE_SSL_CACERT ||
+    if (result == CURLE_SSL_CERTPROBLEM || result == CURLE_SSL_CACERT ||
         result == CURLE_PEER_FAILED_VERIFICATION ||
         result == CURLE_SSL_ISSUER_ERROR) {
       fetcher_->IncrementCertErrors();
@@ -255,14 +259,13 @@ void CurlFetch::Done(CURLcode result) {
   if (fetcher_->track_original_content_length() &&
       !async_fetch_->response_headers()->Has(
           HttpAttributes::kXOriginalContentLength)) {
-    async_fetch_->response_headers()->SetOriginalContentLength(
-        bytes_received_);
+    async_fetch_->response_headers()->SetOriginalContentLength(bytes_received_);
   }
 
   // Report stats before calling Done on the async_fetch
   fetcher_->ReportCompletedFetchStats(this);
-  fetcher_->ReportFetchSuccessStats(
-      completion_result, async_fetch_->response_headers(), this);
+  fetcher_->ReportFetchSuccessStats(completion_result,
+                                    async_fetch_->response_headers(), this);
 
   async_fetch_->Done(success);
   fetcher_->FetchComplete(this);
@@ -288,7 +291,8 @@ size_t CurlFetch::HeaderCallback(char* buffer, size_t size, size_t nmemb,
   fetch->header_bytes_received_ += total;
   if (fetch->header_bytes_received_ > kMaxHeaderBytes) {
     fetch->message_handler_->Message(
-        kWarning, "Response headers too large (>%zu bytes), aborting fetch for %s",
+        kWarning,
+        "Response headers too large (>%zu bytes), aborting fetch for %s",
         kMaxHeaderBytes, fetch->url_.c_str());
     return 0;  // Returning 0 causes curl to abort with CURLE_WRITE_ERROR.
   }

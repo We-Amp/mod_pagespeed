@@ -124,7 +124,8 @@ class ControllerManager {
     bool parent_death_detected_;
 
     ProcessDeathWatcherThread(const ProcessDeathWatcherThread&) = delete;
-    ProcessDeathWatcherThread& operator=(const ProcessDeathWatcherThread&) = delete;
+    ProcessDeathWatcherThread& operator=(const ProcessDeathWatcherThread&) =
+        delete;
   };
 
   static int controller_write_fd_;

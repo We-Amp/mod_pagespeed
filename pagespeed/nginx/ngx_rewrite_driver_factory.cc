@@ -17,18 +17,11 @@
  * under the License.
  */
 
-
-
 #include "ngx_rewrite_driver_factory.h"
 
 #include <cstdio>
 
 #include "log_message_handler.h"
-#include "ngx_message_handler.h"
-#include "ngx_rewrite_options.h"
-#include "ngx_server_context.h"
-#include "ngx_url_async_fetcher.h"
-
 #include "net/instaweb/http/public/rate_controller.h"
 #include "net/instaweb/http/public/rate_controlling_url_async_fetcher.h"
 #include "net/instaweb/http/public/wget_url_fetcher.h"
@@ -36,6 +29,10 @@
 #include "net/instaweb/rewriter/public/rewrite_driver_factory.h"
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "net/instaweb/util/public/property_cache.h"
+#include "ngx_message_handler.h"
+#include "ngx_rewrite_options.h"
+#include "ngx_server_context.h"
+#include "ngx_url_async_fetcher.h"
 #include "pagespeed/kernel/base/google_message_handler.h"
 #include "pagespeed/kernel/base/null_shared_mem.h"
 #include "pagespeed/kernel/base/posix_timer.h"
@@ -71,18 +68,19 @@ NgxRewriteDriverFactory::NgxRewriteDriverFactory(
     const ProcessContext& process_context,
     SystemThreadSystem* system_thread_system, StringPiece hostname, int port)
     : SystemRewriteDriverFactory(process_context, system_thread_system,
-        NULL /* default shared memory runtime */, hostname, port),
+                                 nullptr /* default shared memory runtime */,
+                                 hostname, port),
       threads_started_(false),
       ngx_message_handler_(
           new NgxMessageHandler(timer(), thread_system()->NewMutex())),
       ngx_html_parse_message_handler_(
           new NgxMessageHandler(timer(), thread_system()->NewMutex())),
-      log_(NULL),
+      log_(nullptr),
       resolver_timeout_(NGX_CONF_UNSET_MSEC),
       use_native_fetcher_(false),
       // 100 Aligns to nginx's server-side default.
       native_fetcher_max_keepalive_requests_(100),
-      ngx_shared_circular_buffer_(NULL),
+      ngx_shared_circular_buffer_(nullptr),
       hostname_(hostname.as_string()),
       port_(port),
       process_script_variables_mode_(ProcessScriptVariablesMode::kOff),
@@ -98,25 +96,19 @@ NgxRewriteDriverFactory::NgxRewriteDriverFactory(
 
 NgxRewriteDriverFactory::~NgxRewriteDriverFactory() {
   ShutDown();
-  ngx_shared_circular_buffer_ = NULL;
+  ngx_shared_circular_buffer_ = nullptr;
   STLDeleteElements(&uninitialized_server_contexts_);
 }
 
-Hasher* NgxRewriteDriverFactory::NewHasher() {
-  return new MD5Hasher;
-}
+Hasher* NgxRewriteDriverFactory::NewHasher() { return new MD5Hasher; }
 
 UrlAsyncFetcher* NgxRewriteDriverFactory::AllocateFetcher(
     SystemRewriteOptions* config) {
   if (use_native_fetcher_) {
     NgxUrlAsyncFetcher* fetcher = new NgxUrlAsyncFetcher(
-        config->fetcher_proxy().c_str(),
-        log_,
-        resolver_timeout_,
-        config->blocking_fetch_timeout_ms(),
-        resolver_,
-        native_fetcher_max_keepalive_requests_,
-        thread_system(),
+        config->fetcher_proxy().c_str(), log_, resolver_timeout_,
+        config->blocking_fetch_timeout_ms(), resolver_,
+        native_fetcher_max_keepalive_requests_, thread_system(),
         message_handler());
     ngx_url_async_fetchers_.push_back(fetcher);
     return fetcher;
@@ -148,9 +140,7 @@ FileSystem* NgxRewriteDriverFactory::DefaultFileSystem() {
   return new StdioFileSystem();
 }
 
-Timer* NgxRewriteDriverFactory::DefaultTimer() {
-  return new PosixTimer;
-}
+Timer* NgxRewriteDriverFactory::DefaultTimer() { return new PosixTimer; }
 
 NamedLockManager* NgxRewriteDriverFactory::DefaultLockManager() {
   // NGINX is typically single-process with event-driven workers.
@@ -175,7 +165,7 @@ RewriteOptions* NgxRewriteDriverFactory::NewRewriteOptionsForQuery() {
 }
 
 bool NgxRewriteDriverFactory::CheckResolver() {
-  if (use_native_fetcher_ && resolver_ == NULL) {
+  if (use_native_fetcher_ && resolver_ == nullptr) {
     return false;
   }
   return true;
@@ -196,7 +186,7 @@ ServerContext* NgxRewriteDriverFactory::NewDecodingServerContext() {
 
 ServerContext* NgxRewriteDriverFactory::NewServerContext() {
   LOG(DFATAL) << "MakeNgxServerContext should be used instead";
-  return NULL;
+  return nullptr;
 }
 
 void NgxRewriteDriverFactory::ShutDown() {
@@ -207,12 +197,12 @@ void NgxRewriteDriverFactory::ShutDown() {
 }
 
 void NgxRewriteDriverFactory::ShutDownMessageHandlers() {
-  ngx_message_handler_->set_buffer(NULL);
-  ngx_html_parse_message_handler_->set_buffer(NULL);
+  ngx_message_handler_->set_buffer(nullptr);
+  ngx_html_parse_message_handler_->set_buffer(nullptr);
   for (NgxMessageHandlerSet::iterator p =
            server_context_message_handlers_.begin();
        p != server_context_message_handlers_.end(); ++p) {
-    (*p)->set_buffer(NULL);
+    (*p)->set_buffer(nullptr);
   }
   server_context_message_handlers_.clear();
 }
@@ -232,13 +222,13 @@ void NgxRewriteDriverFactory::StartThreads() {
 void NgxRewriteDriverFactory::SetMainConf(NgxRewriteOptions* main_options) {
   // Propagate process-scope options from the copy we had during nginx option
   // parsing to our own.
-  if (main_options != NULL) {
+  if (main_options != nullptr) {
     default_options()->MergeOnlyProcessScopeOptions(*main_options);
   }
 }
 
-void NgxRewriteDriverFactory::LoggingInit(
-    ngx_log_t* log, bool may_install_crash_handler) {
+void NgxRewriteDriverFactory::LoggingInit(ngx_log_t* log,
+                                          bool may_install_crash_handler) {
   log_ = log;
   net_instaweb::log_message_handler::Install(log);
   if (may_install_crash_handler && install_crash_handler()) {
@@ -248,8 +238,7 @@ void NgxRewriteDriverFactory::LoggingInit(
   ngx_html_parse_message_handler_->set_log(log);
 }
 
-void NgxRewriteDriverFactory::SetCircularBuffer(
-    SharedCircularBuffer* buffer) {
+void NgxRewriteDriverFactory::SetCircularBuffer(SharedCircularBuffer* buffer) {
   ngx_shared_circular_buffer_ = buffer;
   ngx_message_handler_->set_buffer(buffer);
   ngx_html_parse_message_handler_->set_buffer(buffer);
@@ -257,8 +246,8 @@ void NgxRewriteDriverFactory::SetCircularBuffer(
 
 void NgxRewriteDriverFactory::SetServerContextMessageHandler(
     ServerContext* server_context, ngx_log_t* log) {
-  NgxMessageHandler* handler = new NgxMessageHandler(
-      timer(), thread_system()->NewMutex());
+  NgxMessageHandler* handler =
+      new NgxMessageHandler(timer(), thread_system()->NewMutex());
   handler->set_log(log);
   // The ngx_shared_circular_buffer_ will be NULL if MessageBufferSize hasn't
   // been raised from its default of 0.
@@ -294,8 +283,8 @@ void NgxRewriteDriverFactory::NameProcess(const char* name) {
   //    nginx: pagespeed $name
 
   char name_for_setproctitle[32];
-  snprintf(name_for_setproctitle, sizeof(name_for_setproctitle),
-           "pagespeed %s", name);
+  snprintf(name_for_setproctitle, sizeof(name_for_setproctitle), "pagespeed %s",
+           name);
   ngx_setproctitle(name_for_setproctitle);
 }
 

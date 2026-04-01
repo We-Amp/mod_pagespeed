@@ -262,12 +262,12 @@ void StatisticsLogger::InitStatsForTest() {
 void StatisticsLogger::AddVariable(StringPiece var_name) {
   VariableOrCounter var_or_counter;
   var_or_counter.first = statistics_->FindVariable(var_name);
-  if (var_or_counter.first == NULL) {
+  if (var_or_counter.first == nullptr) {
     // Use FindUpDownCounter instead of GetUpDownCounter to avoid CHECK failure
     // when statistics aren't registered (e.g., curl_fetch_* when using native
     // Envoy fetcher instead of Serf/Curl).
     var_or_counter.second = statistics_->FindUpDownCounter(var_name);
-    if (var_or_counter.second == NULL) {
+    if (var_or_counter.second == nullptr) {
       // Statistic not registered - skip it rather than crashing.
       return;
     }
@@ -322,8 +322,9 @@ void StatisticsLogger::DumpConsoleVarsToWriter(int64 current_time_ms,
        iter != variables_to_log_.end(); ++iter) {
     StringPiece var_name = iter->first;
     VariableOrCounter var_or_counter = iter->second;
-    int64 val = (var_or_counter.first != NULL) ? var_or_counter.first->Get()
-                                               : var_or_counter.second->Get();
+    int64 val = (var_or_counter.first != nullptr)
+                    ? var_or_counter.first->Get()
+                    : var_or_counter.second->Get();
     writer->Write(StrCat(var_name, ": ", Integer64ToString(val), "\n"),
                   message_handler_);
   }

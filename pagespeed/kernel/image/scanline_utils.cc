@@ -19,6 +19,8 @@
 
 #include "pagespeed/kernel/image/scanline_utils.h"
 
+#include <cstddef>
+
 #include "pagespeed/kernel/base/message_handler.h"
 
 namespace pagespeed {
@@ -54,8 +56,8 @@ bool ExpandPixelFormat(size_t num_pixels, PixelFormat src_format,
       GetNumChannelsFromPixelFormat(dst_format, handler);
   const int rgb_num_channels = GetNumChannelsFromPixelFormat(RGB_888, handler);
   const int opaque_channel = rgb_num_channels;
-  src_data += src_offset * src_num_channels;
-  dst_data += dst_offset * dst_num_channels;
+  src_data += static_cast<ptrdiff_t>(src_offset * src_num_channels);
+  dst_data += static_cast<ptrdiff_t>(dst_offset * dst_num_channels);
 
   bool is_ok = true;
   switch (dst_format) {

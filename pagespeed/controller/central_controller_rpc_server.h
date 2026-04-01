@@ -24,10 +24,10 @@
 
 #include "pagespeed/controller/controller.grpc.pb.h"
 #include "pagespeed/controller/expensive_operation_controller.h"
+#include "pagespeed/controller/grpc.h"
 #include "pagespeed/controller/schedule_rewrite_controller.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/string.h"
-#include "pagespeed/controller/grpc.h"
 #include "pagespeed/system/controller_process.h"
 
 namespace net_instaweb {
@@ -66,7 +66,8 @@ class CentralControllerRpcServer : public ControllerProcess {
   MessageHandler* handler_;
 
   CentralControllerRpcServer(const CentralControllerRpcServer&) = delete;
-  CentralControllerRpcServer& operator=(const CentralControllerRpcServer&) = delete;
+  CentralControllerRpcServer& operator=(const CentralControllerRpcServer&) =
+      delete;
 };
 
 }  // namespace net_instaweb

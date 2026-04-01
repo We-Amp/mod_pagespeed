@@ -17,18 +17,16 @@
  * under the License.
  */
 
-
-#include "ngx_pagespeed.h"  // Must come first, see comments in CollectHeaders.
-
-#include <unistd.h> //for usleep
-
 #include "ngx_base_fetch.h"
-#include "ngx_event_connection.h"
-#include "ngx_list_iterator.h"
+
+#include <unistd.h>  //for usleep
 
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/rewrite_stats.h"
+#include "ngx_event_connection.h"
+#include "ngx_list_iterator.h"
+#include "ngx_pagespeed.h"  // Must come first, see comments in CollectHeaders.
 #include "pagespeed/kernel/base/google_message_handler.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/posix_timer.h"
@@ -40,11 +38,10 @@ const char kHeadersComplete = 'H';
 const char kFlush = 'F';
 const char kDone = 'D';
 
-NgxEventConnection* NgxBaseFetch::event_connection = NULL;
+NgxEventConnection* NgxBaseFetch::event_connection = nullptr;
 int NgxBaseFetch::active_base_fetches = 0;
 
-NgxBaseFetch::NgxBaseFetch(StringPiece url,
-                           ngx_http_request_t* r,
+NgxBaseFetch::NgxBaseFetch(StringPiece url, ngx_http_request_t* r,
                            NgxServerContext* server_context,
                            const RequestContextPtr& request_ctx,
                            PreserveCachingHeaders preserve_caching_headers,
@@ -63,7 +60,7 @@ NgxBaseFetch::NgxBaseFetch(StringPiece url,
       preserve_caching_headers_(preserve_caching_headers),
       detached_(false),
       suppress_(false) {
-  if (pthread_mutex_init(&mutex_, NULL)) CHECK(0);
+  if (pthread_mutex_init(&mutex_, nullptr)) CHECK(0);
   __sync_add_and_fetch(&NgxBaseFetch::active_base_fetches, 1);
 }
 
@@ -73,13 +70,13 @@ NgxBaseFetch::~NgxBaseFetch() {
 }
 
 bool NgxBaseFetch::Initialize(ngx_cycle_t* cycle) {
-  CHECK(event_connection == NULL) << "event connection already set";
+  CHECK(event_connection == nullptr) << "event connection already set";
   event_connection = new NgxEventConnection(ReadCallback);
   return event_connection->Init(cycle);
 }
 
 void NgxBaseFetch::Terminate() {
-  if (event_connection != NULL) {
+  if (event_connection != nullptr) {
     GoogleMessageHandler handler;
     PosixTimer timer;
     int64 timeout_us = Timer::kSecondUs * 30;
@@ -87,7 +84,7 @@ void NgxBaseFetch::Terminate() {
     static unsigned int sleep_microseconds = 100;
 
     handler.Message(
-        kInfo,"NgxBaseFetch::Terminate rounding up %d active base fetches.",
+        kInfo, "NgxBaseFetch::Terminate rounding up %d active base fetches.",
         NgxBaseFetch::active_base_fetches);
 
     // Try to continue processing and get the active base fetch count to 0
@@ -100,19 +97,20 @@ void NgxBaseFetch::Terminate() {
 
     if (NgxBaseFetch::active_base_fetches != 0) {
       handler.Message(
-          kWarning,"NgxBaseFetch::Terminate timed out with %d active base fetches.",
+          kWarning,
+          "NgxBaseFetch::Terminate timed out with %d active base fetches.",
           NgxBaseFetch::active_base_fetches);
     }
 
     // Close down the named pipe.
     event_connection->Shutdown();
     delete event_connection;
-    event_connection = NULL;
+    event_connection = nullptr;
   }
 }
 
 const char* BaseFetchTypeToCStr(NgxBaseFetchType type) {
-  switch(type) {
+  switch (type) {
     case kPageSpeedResource:
       return "ps resource";
     case kHtmlTransform:
@@ -141,8 +139,8 @@ void NgxBaseFetch::ReadCallback(const ps_event_data& data) {
 
 #if (NGX_DEBUG)
   ngx_log_error(NGX_LOG_DEBUG, ngx_cycle->log, 0,
-     "pagespeed [%p] event: %c. bf:%p (%s) - refcnt:%d - det: %c", r,
-     data.type, base_fetch, type, refcount, detached ? 'Y': 'N');
+                "pagespeed [%p] event: %c. bf:%p (%s) - refcnt:%d - det: %c", r,
+                data.type, base_fetch, type, refcount, detached ? 'Y' : 'N');
 #endif
 
   // If we ended up destructing the base fetch, or the request context is
@@ -155,11 +153,11 @@ void NgxBaseFetch::ReadCallback(const ps_event_data& data) {
 
   // If our request context was zeroed, skip this event.
   // See https://github.com/apache/incubator-pagespeed-ngx/issues/1081
-  if (ctx == NULL) {
+  if (ctx == nullptr) {
     // Should not happen normally, when it does this message will cause our
     // system tests to fail.
     ngx_log_error(NGX_LOG_WARN, ngx_cycle->log, 0,
-        "pagespeed [%p] skipping event: request context gone", r);
+                  "pagespeed [%p] skipping event: request context gone", r);
     return;
   }
 
@@ -168,20 +166,22 @@ void NgxBaseFetch::ReadCallback(const ps_event_data& data) {
 
   // If someone changed our request context or NgxBaseFetch, skip processing.
   if (data.sender != ctx->base_fetch) {
-      ngx_log_error(NGX_LOG_WARN, ngx_cycle->log, 0,
-          "pagespeed [%p] skipping event: event originating from disassociated"
-          " NgxBaseFetch instance.", r);
-      return;
+    ngx_log_error(
+        NGX_LOG_WARN, ngx_cycle->log, 0,
+        "pagespeed [%p] skipping event: event originating from disassociated"
+        " NgxBaseFetch instance.",
+        r);
+    return;
   }
 
   int rc;
   bool run_posted = true;
   // If we are unlucky enough to have our connection finalized mid-ipro-lookup,
   // we must enter a different flow. Also see ps_in_place_check_header_filter().
-  if ((ctx->base_fetch->base_fetch_type_ != kIproLookup)
-      && r->connection->error) {
+  if ((ctx->base_fetch->base_fetch_type_ != kIproLookup) &&
+      r->connection->error) {
     ngx_log_error(NGX_LOG_DEBUG, ngx_cycle->log, 0,
-      "pagespeed [%p] request already finalized %d", r, r->count);
+                  "pagespeed [%p] request already finalized %d", r, r->count);
     rc = NGX_ERROR;
     run_posted = false;
   } else {
@@ -190,8 +190,8 @@ void NgxBaseFetch::ReadCallback(const ps_event_data& data) {
 
 #if (NGX_DEBUG)
   ngx_log_error(NGX_LOG_DEBUG, ngx_cycle->log, 0,
-                "pagespeed [%p] ps_base_fetch_handler() returned %d for %c",
-                r, rc, data.type);
+                "pagespeed [%p] ps_base_fetch_handler() returned %d for %c", r,
+                rc, data.type);
 #endif
 
   ngx_connection_t* c = r->connection;
@@ -203,16 +203,11 @@ void NgxBaseFetch::ReadCallback(const ps_event_data& data) {
   }
 }
 
-void NgxBaseFetch::Lock() {
-  pthread_mutex_lock(&mutex_);
-}
+void NgxBaseFetch::Lock() { pthread_mutex_lock(&mutex_); }
 
-void NgxBaseFetch::Unlock() {
-  pthread_mutex_unlock(&mutex_);
-}
+void NgxBaseFetch::Unlock() { pthread_mutex_unlock(&mutex_); }
 
-bool NgxBaseFetch::HandleWrite(const StringPiece& sp,
-                               MessageHandler* handler) {
+bool NgxBaseFetch::HandleWrite(const StringPiece& sp, MessageHandler* handler) {
   Lock();
   buffer_.append(sp.data(), sp.size());
   Unlock();
@@ -222,11 +217,11 @@ bool NgxBaseFetch::HandleWrite(const StringPiece& sp,
 // should only be called in nginx thread
 ngx_int_t NgxBaseFetch::CopyBufferToNginx(ngx_chain_t** link_ptr) {
   CHECK(!(done_called_ && last_buf_sent_))
-        << "CopyBufferToNginx() was called after the last buffer was sent";
+      << "CopyBufferToNginx() was called after the last buffer was sent";
 
   // there is no buffer to send
   if (!done_called_ && buffer_.empty()) {
-    *link_ptr = NULL;
+    *link_ptr = nullptr;
     return NGX_AGAIN;
   }
 
@@ -267,13 +262,22 @@ ngx_int_t NgxBaseFetch::CollectHeaders(ngx_http_headers_out_t* headers_out) {
   // on a 32-bit system off_t will be 4 bytes and we don't assign all the
   // bits of content_length_n. Sanity check that did not happen.
   // This could use static_assert, but this file is not built with --std=c++11.
-  bool sanity_check_off_t[sizeof(off_t) == 8 ? 1 : -1] __attribute__ ((unused));
+  bool sanity_check_off_t[sizeof(off_t) == 8 ? 1 : -1] __attribute__((unused));
 
-  const ResponseHeaders* pagespeed_headers = response_headers();
+  ResponseHeaders* pagespeed_headers = response_headers();
 
   if (content_length_known()) {
-     headers_out->content_length = NULL;
-     headers_out->content_length_n = content_length();
+    headers_out->content_length = nullptr;
+    headers_out->content_length_n = content_length();
+  }
+
+  // Add a weak ETag for .pagespeed. resource responses if PSOL didn't set one.
+  // Apache gets ETags from its built-in FileETag directive; nginx needs this
+  // explicitly for cache-extended resources.
+  if (base_fetch_type_ == kPageSpeedResource &&
+      !pagespeed_headers->Has(HttpAttributes::kEtag)) {
+    pagespeed_headers->Add(HttpAttributes::kEtag, "W/\"0\"");
+    pagespeed_headers->ComputeCaching();
   }
 
   return copy_response_headers_to_ngx(request_, *pagespeed_headers,

@@ -80,9 +80,7 @@ class AtomicInt32 {
   ~AtomicInt32() {}
 
   // Return the value currently stored.  Has acquire semantics (see above).
-  int32 value() const {
-    return value_.load(std::memory_order_acquire);
-  }
+  int32 value() const { return value_.load(std::memory_order_acquire); }
 
   // Store value.  Has release semantics (see above).
   void set_value(int32 value) {

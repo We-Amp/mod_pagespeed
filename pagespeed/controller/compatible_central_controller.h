@@ -42,7 +42,8 @@ class CompatibleCentralController : public InProcessCentralController {
 
  private:
   CompatibleCentralController(const CompatibleCentralController&) = delete;
-  CompatibleCentralController& operator=(const CompatibleCentralController&) = delete;
+  CompatibleCentralController& operator=(const CompatibleCentralController&) =
+      delete;
 };
 
 }  // namespace net_instaweb

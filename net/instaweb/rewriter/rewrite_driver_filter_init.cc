@@ -23,8 +23,6 @@
 // pulling in every filter implementation and their heavy dependencies
 // (image codecs, CSS parser, JS minifier, etc.).
 
-#include "net/instaweb/rewriter/public/rewrite_driver.h"
-
 #include <memory>
 
 #include "base/logging.h"
@@ -77,8 +75,9 @@
 #include "net/instaweb/rewriter/public/push_preload_filter.h"
 #include "net/instaweb/rewriter/public/redirect_on_size_limit_filter.h"
 #include "net/instaweb/rewriter/public/responsive_image_filter.h"
-#include "net/instaweb/rewriter/public/rewrite_driver_factory.h"
 #include "net/instaweb/rewriter/public/rewrite_context.h"
+#include "net/instaweb/rewriter/public/rewrite_driver.h"
+#include "net/instaweb/rewriter/public/rewrite_driver_factory.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/rewritten_content_scanning_filter.h"
 #include "net/instaweb/rewriter/public/server_context.h"
@@ -117,7 +116,8 @@ class RemoveCommentsFilterOptions
   const RewriteOptions* options_;
 
   RemoveCommentsFilterOptions(const RemoveCommentsFilterOptions&) = delete;
-  RemoveCommentsFilterOptions& operator=(const RemoveCommentsFilterOptions&) = delete;
+  RemoveCommentsFilterOptions& operator=(const RemoveCommentsFilterOptions&) =
+      delete;
 };
 
 }  // namespace
@@ -420,10 +420,14 @@ void RewriteDriver::AddPreRenderFilters() {
     // that's necessary
     AppendOwnedPreRenderFilter(new ElideAttributesFilter(this));
   }
-  bool ext_cache_css = rewrite_options->Enabled(RewriteOptions::kExtendCacheCss);
-  bool ext_cache_img = rewrite_options->Enabled(RewriteOptions::kExtendCacheImages);
-  bool ext_cache_pdf = rewrite_options->Enabled(RewriteOptions::kExtendCachePdfs);
-  bool ext_cache_js = rewrite_options->Enabled(RewriteOptions::kExtendCacheScripts);
+  bool ext_cache_css =
+      rewrite_options->Enabled(RewriteOptions::kExtendCacheCss);
+  bool ext_cache_img =
+      rewrite_options->Enabled(RewriteOptions::kExtendCacheImages);
+  bool ext_cache_pdf =
+      rewrite_options->Enabled(RewriteOptions::kExtendCachePdfs);
+  bool ext_cache_js =
+      rewrite_options->Enabled(RewriteOptions::kExtendCacheScripts);
   LOG(INFO) << "AddPreRenderFilters: ext_cache_css=" << ext_cache_css
             << " ext_cache_img=" << ext_cache_img
             << " ext_cache_pdf=" << ext_cache_pdf

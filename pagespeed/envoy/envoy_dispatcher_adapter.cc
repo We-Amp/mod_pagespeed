@@ -79,9 +79,7 @@ void EnvoyDispatcherAdapter::Post(Function* function) {
   }
 
   // Capture the function pointer and call it on the Envoy dispatcher thread.
-  envoy_dispatcher_->post([function]() {
-    function->CallRun();
-  });
+  envoy_dispatcher_->post([function]() { function->CallRun(); });
 }
 
 EventTimer* EnvoyDispatcherAdapter::CreateTimer(int64 delay_us,
@@ -99,8 +97,8 @@ EventTimer* EnvoyDispatcherAdapter::CreateTimer(int64 delay_us,
   // When the timer fires:
   // - We mark the timer's function as nullptr (so destructor won't cancel it)
   // - We call the function
-  Envoy::Event::TimerPtr envoy_timer = envoy_dispatcher_->createTimer(
-      [timer]() {
+  Envoy::Event::TimerPtr envoy_timer =
+      envoy_dispatcher_->createTimer([timer]() {
         // Timer fired - take the function from the timer.
         Function* f = timer->function_;
         timer->function_ = nullptr;  // Prevent double-call on destruction.

@@ -48,7 +48,8 @@ bool ExperimentMatcher::ClassifyIntoExperiment(
     // plus kNoExperiment.
     experiment_value = options->enroll_experiment_id();
     need_cookie = true;
-  } else if (experiment_value == experiment::kNoExperiment) {
+  } else if (experiment_value ==
+             experiment::kNoExperiment) {  // NOLINT(bugprone-branch-clone)
     // TODO(jefftk): They're assigned to the control group, but we don't handle
     // this right because we don't know if the cookie is stale.  For example,
     // they may have run one experiment on 5% of visitors and now be running one

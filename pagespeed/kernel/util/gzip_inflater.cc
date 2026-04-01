@@ -19,12 +19,13 @@
 
 #include "pagespeed/kernel/util/gzip_inflater.h"
 
+#include <zconf.h>  // Provided by @envoy//bazel:zlib
+#include <zlib.h>   // Provided by @envoy//bazel:zlib
+
 #include <cstddef>
 #include <cstdlib>
 
 #include "base/logging.h"
-#include <zconf.h>  // Provided by @envoy//bazel:zlib
-#include <zlib.h>   // Provided by @envoy//bazel:zlib
 #include "pagespeed/kernel/base/stack_buffer.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/writer.h"
@@ -399,7 +400,7 @@ bool GzipInflater::Inflate(StringPiece in, InflateType format, Writer* writer) {
       case Z_MEM_ERROR:
         inflateEnd(&strm);
         return false;
-      case Z_STREAM_END:
+      case Z_STREAM_END:  // NOLINT(bugprone-branch-clone)
         break;
       default:
         break;

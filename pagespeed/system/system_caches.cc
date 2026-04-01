@@ -363,7 +363,7 @@ bool SystemCaches::CreateShmMetadataCache(StringPiece name, int64 size_kb,
     // Make sure the size cap is not unusably low. In particular, with 2K
     // inlining thresholds, something like 3K is needed. (As of time of writing,
     // that required about 4.3MiB).
-    if (size_cap < 3 * 1024) {
+    if (size_cap < static_cast<int64>(3 * 1024)) {
       metadata_shm_caches_.erase(result.first);
       *error_msg = "Shared memory cache unusably small.";
       return false;
@@ -711,7 +711,7 @@ void SystemCaches::StopCacheActivity() {
   // try to stop pending operations on async caches. Note that these are not
   // typically MemcachedCache* or RedisCache* objects, but instead are a hierarchy
   // of CacheStats*, CacheBatcher*, AsyncCache*, all of which must be stopped.
-  for (auto item : external_caches_map_) {
+  for (const auto& item : external_caches_map_) {
     ExternalCacheInterfaces cache = item.second;
     cache.async->ShutDown();
   }
