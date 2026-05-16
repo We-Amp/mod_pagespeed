@@ -1,32 +1,52 @@
 # mod_pagespeed
-![logo](https://www.gstatic.com/images/branding/product/2x/pagespeed_32dp.png)
 
-`mod_pagespeed` is an open-source Apache module created by Google to help Make the Web Faster by rewriting web pages to reduce latency and bandwidth.
+**mod_pagespeed, maintained again.**
 
-mod_pagespeed releases are available as [precompiled linux packages](https://modpagespeed.com/doc/download) or as [source](https://modpagespeed.com/doc/build_mod_pagespeed_from_source). (See [Release Notes](https://modpagespeed.com/doc/release_notes) for information about bugs fixed)
+Google released its final version of mod_pagespeed in 2020. We-Amp picked it up. [**mod_pagespeed 1.1**](https://modpagespeed.com/1.1/) is the maintained continuation of the original open-source module — a drop-in replacement with the same configuration, the same filters, and the same behavior, plus ongoing security patches, the new [Cyclone Cache](https://modpagespeed.com/1.1/#cyclone), and direct support from the people who know the codebase best.
 
-mod_pagespeed is an open-source Apache module which automatically applies web performance best practices to pages, and associated assets (CSS, JavaScript, images) without requiring that you modify your existing content or workflow.
+The project is led by [Otto van der Schaaf](https://github.com/oschaaf), Apache PageSpeed committer and IPMC member, with 360+ pull requests across the upstream codebase.
 
-mod_pagespeed is built on PageSpeed Optimization Libraries, deployed across 100,000+ web-sites, and provided by popular hosting and CDN providers such as DreamHost, GoDaddy, EdgeCast, and others. There are 40+ available optimizations filters, which include:
+| | |
+|---|---|
+| **Install (Apache)** | [Quickstart →](https://modpagespeed.com/1.1/docs/getting-started/) |
+| **Install (IIS)** | [Quickstart →](https://modpagespeed.com/1.1/docs/getting-started/) |
+| **Download packages** | [.deb / .rpm / .msi →](https://modpagespeed.com/download/) |
+| **Upgrade from open-source** | [Migration guide →](https://modpagespeed.com/1.1/docs/upgrading-from-open-source/) |
+| **Pricing** | [$49/server/month — 14-day free trial →](https://modpagespeed.com/pricing/) |
+| **Support** | [Email the maintainer →](https://modpagespeed.com/contact/) |
 
-- Image optimization, compression, and resizing
-- CSS & JavaScript concatenation, minification, and inlining
-- Cache extension, domain sharding, and domain rewriting
-- Deferred loading of JavaScript and image resources
-- and many others...
+## What's in 1.1
 
-[![Demo](http://img.youtube.com/vi/8moGR2qf994/0.jpg)](http://www.youtube.com/watch?v=8moGR2qf994)
+- **Drop-in replacement.** Same configuration directives, same filters, same `mod_pagespeed.so` semantics. Your existing config keeps working.
+- **Security patches** for known CVEs that accumulated against the archived upstream.
+- **Cyclone Cache** — a new C++23 lock-free shared-memory cache that replaces the legacy file cache. No tuning required; warm-up is automatic.
+- **First-class IIS** — native module for Windows Server 2019 / 2022 with `.msi` installer.
+- **Modern build** — Bazel-based, pre-built binaries for Debian/Ubuntu (amd64 + arm64), RHEL-family (x86_64 + aarch64), and Windows.
+- **Direct maintainer support** included with every license.
 
-|  Try it 	|   [modpagespeed.com](https://modpagespeed.com)	|
-|---	|---	|
-| Slack | https://the-asf.slack.com/archives/CJTG9RH9U |
-| Read about it  |https://developers.google.com/speed/pagespeed/module   |
-| Download it  | https://modpagespeed.com/doc/download  |
-| Check announcements  |https://groups.google.com/group/mod-pagespeed-announce   |
-| Discuss it  | https://groups.google.com/group/mod-pagespeed-discuss  |
-|FAQ   | https://modpagespeed.com/doc/faq  |
+## Currently shipping
 
+| Platform | Status | Packages |
+|---|---|---|
+| **Apache** (amd64 + arm64) | GA | `.deb`, `.rpm`, `.so` |
+| **IIS** (Windows Server 2019/2022) | GA | `.msi` |
+| **nginx** | Coming soon | — |
+| **Envoy** | Coming soon | — |
 
-Curious to learn more about mod_pagespeed? Check out our GDL episode below, which covers the history of the project, an architectural overview of how mod_pagespeed works under the hood, and a number of operational tips and best practices for deploying mod_pagespeed.
+To be notified when nginx and Envoy ship, [sign up on the download page](https://modpagespeed.com/download/).
 
-[![GDL Episode](http://img.youtube.com/vi/6uCAdQSHhmA/0.jpg)](http://www.youtube.com/watch?v=6uCAdQSHhmA)
+## About this repository
+
+This repository exists as a public landing point for the mod_pagespeed project under We-Amp's stewardship. Active development happens in a separate repository; **all downloads, documentation, and support are at [modpagespeed.com](https://modpagespeed.com/1.1/)**.
+
+For issues or questions about a running deployment, please [contact the maintainer](https://modpagespeed.com/contact/) — that's the fastest path to a response.
+
+## License
+
+mod_pagespeed 1.1 is distributed under the [Business Source License 1.1](https://modpagespeed.com/license/). The first 14 days are a free trial — full features, automatic expiration. See [pricing](https://modpagespeed.com/pricing/) for license details.
+
+## Background
+
+mod_pagespeed was created at Google in 2010 and powered web performance optimization across hundreds of thousands of sites. After Google archived the project, We-Amp B.V. — a Dutch company founded by the former maintainer — continued active development under the mod_pagespeed 1.1 line, alongside a ground-up rewrite, [ModPageSpeed 2.0](https://modpagespeed.com/).
+
+Learn more about We-Amp's open-source work: [we-amp.com/open-source/](https://we-amp.com/open-source/).
