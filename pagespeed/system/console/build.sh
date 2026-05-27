@@ -13,6 +13,17 @@ if [ ! -d "node_modules" ]; then
   pnpm install --frozen-lockfile 2>/dev/null || npm install
 fi
 
+# Stamp the version into the SPA. Release builds set VITE_APP_VERSION
+# explicitly (to the release tag, e.g. v1.1.0-beta.6) so the stamp is exact
+# instead of being derived from `git describe` (which can produce a stale or
+# `-dirty` stamp when the SPA is built on a working tree that doesn't exactly
+# match a tag). For developer workflows we fall back to `git describe`, then
+# to "dev" if we're outside a git checkout. Picked up by Vite via
+# import.meta.env.VITE_APP_VERSION.
+VITE_APP_VERSION="${VITE_APP_VERSION:-$(git describe --tags --always --dirty 2>/dev/null || echo dev)}"
+export VITE_APP_VERSION
+echo "Stamping version: ${VITE_APP_VERSION}"
+
 echo "Building admin console SPA..."
 npx vite build
 

@@ -44,3 +44,16 @@ vendor/
 # Admin console SPA build artifacts
 pagespeed/system/console/node_modules/
 pagespeed/system/console/dist/
+
+# Report-only dependency scan output (tools/sbom/dep-scan.sh — the design record)
+sbom/scan/
+
+# Vendored-C/C++ CVE matcher cache + reports
+tools/dependency/.cve-cache/
+
+# Python bytecode (e.g. from tools/dependency importing tools/generate-sbom.py)
+__pycache__/
+*.pyc
+
+# the design record in-container nginx module build scratch tree (build_module_in_container.sh)
+.ngx-module-build/

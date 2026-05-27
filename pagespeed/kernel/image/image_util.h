@@ -128,6 +128,15 @@ const char* GetPixelFormatString(PixelFormat pixel_format);
 // given format.
 size_t GetBytesPerPixel(PixelFormat pixel_format);
 
+// Checked size_t multiplication. Returns false if a * b would overflow size_t.
+inline bool CheckedMulSize(size_t a, size_t b, size_t* result) {
+  if (a != 0 && b > static_cast<size_t>(-1) / a) {
+    return false;
+  }
+  *result = a * b;
+  return true;
+}
+
 // Returns format of the image by inspecting magic numbers (cetain values at
 // cetain bytes) in the file content. This method is super fast, but if a
 // random binary file happens to have the magic numbers, it will incorrectly

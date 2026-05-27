@@ -79,6 +79,14 @@ const char kStatisticsHandler[] = "mod_pagespeed_statistics";
 const char kConsoleHandler[] = "pagespeed_console";
 const char kGlobalStatisticsHandler[] = "mod_pagespeed_global_statistics";
 const char kMessageHandler[] = "mod_pagespeed_message";
+
+// Returns the textual client IP for `request`. Reads Apache 2.4's
+// useragent_ip (mod_remoteip-aware). 1.1 targets Apache 2.4 only; the
+// vendored httpd24 tree provides this field. Empty string if unavailable.
+const char* ClientIpForAdminWarning(request_rec* request) {
+  const char* ip = request->useragent_ip;
+  return ip != nullptr ? ip : "";
+}
 const char kLogRequestHeadersHandler[] = "mod_pagespeed_log_request_headers";
 const char kGenerateResponseWithOptionsHandler[] =
     "mod_pagespeed_response_options_handler";
@@ -356,10 +364,10 @@ void InstawebHandler::RemoveStrippedResponseHeadersFromApacheRequest() {
       ResponseHeaders tmp_err_resp_headers(options_->ComputeHttpOptions());
       ResponseHeaders tmp_resp_headers(options_->ComputeHttpOptions());
       ThreadSystem* thread_system = server_context_->thread_system();
-      std::unique_ptr<ApacheConfig> unused_opts1(
-          new ApacheConfig("unused_options1", thread_system));
-      std::unique_ptr<ApacheConfig> unused_opts2(
-          new ApacheConfig("unused_options2", thread_system));
+      std::unique_ptr<ApacheConfig> unused_opts1 =
+          std::make_unique<ApacheConfig>("unused_options1", thread_system);
+      std::unique_ptr<ApacheConfig> unused_opts2 =
+          std::make_unique<ApacheConfig>("unused_options2", thread_system);
 
       ApacheRequestToResponseHeaders(*request_, &tmp_resp_headers,
                                      &tmp_err_resp_headers);
@@ -526,7 +534,8 @@ void InstawebHandler::HandleAsProxyForAll() {
 
   // Note: we can't use MakeFetch here as we want ProxyInterface to create the
   // RewriteDriver.
-  std::unique_ptr<RequestHeaders> request_headers(new RequestHeaders());
+  std::unique_ptr<RequestHeaders> request_headers =
+      std::make_unique<RequestHeaders>();
   ApacheRequestToRequestHeaders(*request_, request_headers.get());
 
   // Do loop detection.
@@ -565,7 +574,8 @@ bool InstawebHandler::handle_as_resource(ApacheServerContext* server_context,
   }
 
   InstawebHandler instaweb_handler(request);
-  std::unique_ptr<RequestHeaders> request_headers(new RequestHeaders);
+  std::unique_ptr<RequestHeaders> request_headers =
+      std::make_unique<RequestHeaders>();
   const RewriteOptions* options = instaweb_handler.options();
 
   // Finally, do the actual handling.
@@ -977,6 +987,9 @@ apr_status_t InstawebHandler::instaweb_handler(request_rec* request) {
 
   if (request_handler_str == kStatisticsHandler &&
       global_config->StatisticsAccessAllowed(gurl)) {
+    WarnIfNonLoopbackAdminAccess(ClientIpForAdminWarning(request),
+                                 AdminHandlerFamily::kStatistics,
+                                 kStatisticsHandler, message_handler);
     InstawebHandler instaweb_handler(request);
     server_context->StatisticsPage(
         false /* not global */, instaweb_handler.query_params(),
@@ -985,6 +998,9 @@ apr_status_t InstawebHandler::instaweb_handler(request_rec* request) {
     return APACHE_OK;
   } else if (request_handler_str == kGlobalStatisticsHandler &&
              global_config->GlobalStatisticsAccessAllowed(gurl)) {
+    WarnIfNonLoopbackAdminAccess(ClientIpForAdminWarning(request),
+                                 AdminHandlerFamily::kGlobalStatistics,
+                                 kGlobalStatisticsHandler, message_handler);
     InstawebHandler instaweb_handler(request);
     server_context->StatisticsPage(
         true /* global */, instaweb_handler.query_params(),
@@ -993,6 +1009,9 @@ apr_status_t InstawebHandler::instaweb_handler(request_rec* request) {
     return APACHE_OK;
   } else if (request_handler_str == kAdminHandler &&
              global_config->AdminAccessAllowed(gurl)) {
+    WarnIfNonLoopbackAdminAccess(ClientIpForAdminWarning(request),
+                                 AdminHandlerFamily::kAdmin, kAdminHandler,
+                                 message_handler);
     InstawebHandler instaweb_handler(request);
     // Read POST body for JSON API endpoints (e.g. /v1/license/*).
     GoogleString request_body;
@@ -1016,6 +1035,9 @@ apr_status_t InstawebHandler::instaweb_handler(request_rec* request) {
     ret = APACHE_OK;
   } else if (request_handler_str == kGlobalAdminHandler &&
              global_config->GlobalAdminAccessAllowed(gurl)) {
+    WarnIfNonLoopbackAdminAccess(ClientIpForAdminWarning(request),
+                                 AdminHandlerFamily::kGlobalAdmin,
+                                 kGlobalAdminHandler, message_handler);
     InstawebHandler instaweb_handler(request);
     // Read POST body for JSON API endpoints (e.g. /v1/license/*).
     GoogleString request_body;
@@ -1054,6 +1076,9 @@ apr_status_t InstawebHandler::instaweb_handler(request_rec* request) {
     ret = APACHE_OK;
   } else if (request_handler_str == kConsoleHandler &&
              global_config->ConsoleAccessAllowed(gurl)) {
+    WarnIfNonLoopbackAdminAccess(ClientIpForAdminWarning(request),
+                                 AdminHandlerFamily::kConsole, kConsoleHandler,
+                                 message_handler);
     InstawebHandler instaweb_handler(request);
     server_context->ConsoleHandler(
         *instaweb_handler.options(), AdminSite::kOther,
@@ -1062,6 +1087,9 @@ apr_status_t InstawebHandler::instaweb_handler(request_rec* request) {
     ret = APACHE_OK;
   } else if (request_handler_str == kMessageHandler &&
              global_config->MessagesAccessAllowed(gurl)) {
+    WarnIfNonLoopbackAdminAccess(ClientIpForAdminWarning(request),
+                                 AdminHandlerFamily::kMessages, kMessageHandler,
+                                 message_handler);
     InstawebHandler instaweb_handler(request);
     server_context->MessageHistoryHandler(
         *instaweb_handler.options(), AdminSite::kOther,

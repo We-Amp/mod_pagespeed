@@ -82,17 +82,22 @@ cc_binary(
         "ngx_pagespeed_module.cc",
     ],
     copts = NGINX_COPTS + [
-        # Ensure symbols are visible by default for dlsym()
-        "-fvisibility=default",
+        # Hide all symbols by default; the version script controls exports
+        "-fvisibility=hidden",
     ],
     linkopts = [
-        # Export all symbols (needed for nginx to find ngx_modules via dlsym)
-        "-Wl,--export-dynamic",
+        # Version script: export only ngx_modules/ngx_module_names/ngx_module_order.
+        # Hides BoringSSL/curl/internal symbols to avoid conflicts with nginx's
+        # own libssl (system OpenSSL) loaded in the same process.
+        "-Wl,--version-script,$(location :ngx_pagespeed.lds)",
     ],
     linkshared = True,
     linkstatic = True,
     visibility = ["//visibility:public"],
-    deps = [":nginx_pagespeed"],
+    deps = [
+        ":nginx_pagespeed",
+        ":ngx_pagespeed.lds",
+    ],
 )
 
 # Alternative: Lighter weight version using system_envoy (no memcached, no fork)
@@ -153,10 +158,22 @@ cc_library(
 # Lite version as shared library
 cc_binary(
     name = "ngx_pagespeed_module_lite.so",
+    srcs = [
+        "ngx_pagespeed_module.cc",
+    ],
+    copts = NGINX_COPTS + [
+        "-fvisibility=hidden",
+    ],
+    linkopts = [
+        "-Wl,--version-script,$(location :ngx_pagespeed.lds)",
+    ],
     linkshared = True,
     linkstatic = True,
     visibility = ["//visibility:public"],
-    deps = [":nginx_pagespeed_lite"],
+    deps = [
+        ":nginx_pagespeed_lite",
+        ":ngx_pagespeed.lds",
+    ],
 )
 
 # =============================================================================
@@ -172,7 +189,16 @@ cc_binary(
 
 cc_library(
     name = "ngx_pagespeed_archive",
-    # Include all the nginx module sources
+    # All the nginx-module support sources EXCEPT ngx_pagespeed.cc.
+    #
+    # ngx_pagespeed.cc carries the `ngx_module_t ngx_pagespeed` definition and
+    # the module entry points, and it is compiled by nginx's OWN build via
+    # --add-dynamic-module (pagespeed/nginx/config lists it in NGX_PAGESPEED_SRCS).
+    # If the archive ALSO contained ngx_pagespeed.cc, the final module link would
+    # pull in two copies of every symbol it defines (process_context, the
+    # ngx_pagespeed struct, str_to_string_piece, ...) and fail with "multiple
+    # definition". So the archive provides only the supporting translation units;
+    # nginx compiles ngx_pagespeed.cc itself and links it against this archive.
     srcs = [
         "log_message_handler.cc",
         "ngx_base_fetch.cc",
@@ -182,7 +208,6 @@ cc_library(
         "ngx_gzip_setter.cc",
         "ngx_list_iterator.cc",
         "ngx_message_handler.cc",
-        "ngx_pagespeed.cc",
         "ngx_rewrite_driver_factory.cc",
         "ngx_rewrite_options.cc",
         "ngx_server_context.cc",

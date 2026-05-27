@@ -28,6 +28,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <set>
 #include <vector>
 
@@ -71,6 +72,7 @@
 #include "pagespeed/kernel/thread/pthread_shared_mem.h"
 #include "pagespeed/kernel/util/gzip_inflater.h"
 #include "pagespeed/kernel/util/statistics_logger.h"
+#include "pagespeed/system/admin_site.h"
 #include "pagespeed/system/in_place_resource_recorder.h"
 #include "pagespeed/system/system_caches.h"
 #include "pagespeed/system/system_request_context.h"
@@ -1724,6 +1726,110 @@ void ps_release_request_context(void* data) {
   delete ctx;
 }
 
+// Routes admin-style URLs: statistics, global statistics, console, messages,
+// admin, and global admin. Returns nullopt if the path doesn't match any.
+std::optional<RequestRouting::Response> ps_route_admin_url(
+    const GoogleUrl& url, const NgxRewriteOptions* options) {
+  const StringPiece path = url.PathSansQuery();
+  if (StringCaseEqual(path, options->statistics_path()) &&
+      options->StatisticsAccessAllowed(url)) {
+    return RequestRouting::kStatistics;
+  }
+  if (StringCaseEqual(path, options->global_statistics_path()) &&
+      options->GlobalStatisticsAccessAllowed(url)) {
+    return RequestRouting::kGlobalStatistics;
+  }
+  if (StringCaseEqual(path, options->console_path()) &&
+      options->ConsoleAccessAllowed(url)) {
+    return RequestRouting::kConsole;
+  }
+  if (StringCaseEqual(path, options->messages_path()) &&
+      options->MessagesAccessAllowed(url)) {
+    return RequestRouting::kMessages;
+  }
+  // The admin handlers get everything under a path (/path/*) while all the
+  // other handlers only get exact matches (/path). Match all paths starting
+  // with the handler path.
+  if (!options->admin_path().empty() &&
+      StringCaseStartsWith(path, options->admin_path()) &&
+      options->AdminAccessAllowed(url)) {
+    return RequestRouting::kAdmin;
+  }
+  if (!options->global_admin_path().empty() &&
+      StringCaseStartsWith(path, options->global_admin_path()) &&
+      options->GlobalAdminAccessAllowed(url)) {
+    return RequestRouting::kGlobalAdmin;
+  }
+  return std::nullopt;
+}
+
+bool ps_is_cache_purge_request(ngx_http_request_t* r,
+                               const NgxRewriteOptions* options) {
+  return options->enable_cache_purge() && !options->purge_method().empty() &&
+         options->purge_method() == str_to_string_piece(r->method_name);
+}
+
+bool ps_is_beacon_request(ngx_http_request_t* r, const GoogleUrl& url,
+                          const NgxRewriteOptions* options) {
+  const GoogleString& beacon_url =
+      ps_is_https(r) ? options->beacon_url().https : options->beacon_url().http;
+  return url.PathSansQuery() == StringPiece(beacon_url);
+}
+
+// Returns the textual client IP for `r`. nginx pre-populates
+// connection->addr_text on accept; copy that ngx_str_t into GoogleString.
+// Empty if unavailable.
+GoogleString ps_client_ip_for_admin_warning(ngx_http_request_t* r) {
+  if (r == nullptr || r->connection == nullptr) {
+    return GoogleString();
+  }
+  const ngx_str_t& addr = r->connection->addr_text;
+  if (addr.data == nullptr || addr.len == 0) {
+    return GoogleString();
+  }
+  return GoogleString(reinterpret_cast<const char*>(addr.data), addr.len);
+}
+
+// Emit the shared admin-exposure warning for an nginx admin request, mapping
+// the RequestRouting category to the AdminHandlerFamily + URL handler name.
+void ps_warn_admin_exposure(ngx_http_request_t* r,
+                            NgxServerContext* server_context,
+                            RequestRouting::Response category) {
+  AdminHandlerFamily family = AdminHandlerFamily::kAdmin;
+  const char* name = "pagespeed_admin";
+  switch (category) {
+    case RequestRouting::kStatistics:
+      family = AdminHandlerFamily::kStatistics;
+      name = "mod_pagespeed_statistics";
+      break;
+    case RequestRouting::kGlobalStatistics:
+      family = AdminHandlerFamily::kGlobalStatistics;
+      name = "mod_pagespeed_global_statistics";
+      break;
+    case RequestRouting::kConsole:
+      family = AdminHandlerFamily::kConsole;
+      name = "pagespeed_console";
+      break;
+    case RequestRouting::kMessages:
+      family = AdminHandlerFamily::kMessages;
+      name = "mod_pagespeed_message";
+      break;
+    case RequestRouting::kAdmin:
+      family = AdminHandlerFamily::kAdmin;
+      name = "pagespeed_admin";
+      break;
+    case RequestRouting::kGlobalAdmin:
+      family = AdminHandlerFamily::kGlobalAdmin;
+      name = "pagespeed_global_admin";
+      break;
+    default:
+      // Defensive: only the admin/statistics families should reach here.
+      break;
+  }
+  WarnIfNonLoopbackAdminAccess(ps_client_ip_for_admin_warning(r), family, name,
+                               server_context->message_handler());
+}
+
 // Set us up for processing a request.  Creates a request context and determines
 // which handler should deal with the request.
 RequestRouting::Response ps_route_request(ngx_http_request_t* r) {
@@ -1754,54 +1860,22 @@ RequestRouting::Response ps_route_request(ngx_http_request_t* r) {
 
   if (is_pagespeed_subrequest(r)) {
     return RequestRouting::kPagespeedSubrequest;
-  } else if (url.PathSansLeaf() == dynamic_cast<NgxRewriteDriverFactory*>(
-                                       cfg_s->server_context->factory())
-                                       ->static_asset_prefix()) {
+  }
+  if (url.PathSansLeaf() ==
+      dynamic_cast<NgxRewriteDriverFactory*>(cfg_s->server_context->factory())
+          ->static_asset_prefix()) {
     return RequestRouting::kStaticContent;
   }
 
   const NgxRewriteOptions* global_options = cfg_s->server_context->config();
 
-  StringPiece path = url.PathSansQuery();
-  if (StringCaseEqual(path, global_options->statistics_path()) &&
-      global_options->StatisticsAccessAllowed(url)) {
-    return RequestRouting::kStatistics;
-  } else if (StringCaseEqual(path, global_options->global_statistics_path()) &&
-             global_options->GlobalStatisticsAccessAllowed(url)) {
-    return RequestRouting::kGlobalStatistics;
-  } else if (StringCaseEqual(path, global_options->console_path()) &&
-             global_options->ConsoleAccessAllowed(url)) {
-    return RequestRouting::kConsole;
-  } else if (StringCaseEqual(path, global_options->messages_path()) &&
-             global_options->MessagesAccessAllowed(url)) {
-    return RequestRouting::kMessages;
-  } else if (
-      // The admin handlers get everything under a path (/path/*) while all the
-      // other handlers only get exact matches (/path).  So match all paths
-      // starting with the handler path.
-      !global_options->admin_path().empty() &&
-      StringCaseStartsWith(path, global_options->admin_path()) &&
-      global_options->AdminAccessAllowed(url)) {
-    return RequestRouting::kAdmin;
-  } else if (!global_options->global_admin_path().empty() &&
-             StringCaseStartsWith(path, global_options->global_admin_path()) &&
-             global_options->GlobalAdminAccessAllowed(url)) {
-    return RequestRouting::kGlobalAdmin;
-  } else if (global_options->enable_cache_purge() &&
-             !global_options->purge_method().empty() &&
-             (global_options->purge_method() ==
-              str_to_string_piece(r->method_name))) {
+  if (auto admin_response = ps_route_admin_url(url, global_options)) {
+    return *admin_response;
+  }
+  if (ps_is_cache_purge_request(r, global_options)) {
     return RequestRouting::kCachePurge;
   }
-
-  const GoogleString* beacon_url;
-  if (ps_is_https(r)) {
-    beacon_url = &(global_options->beacon_url().https);
-  } else {
-    beacon_url = &(global_options->beacon_url().http);
-  }
-
-  if (url.PathSansQuery() == StringPiece(*beacon_url)) {
+  if (ps_is_beacon_request(r, url, global_options)) {
     return RequestRouting::kBeacon;
   }
 
@@ -1847,8 +1921,10 @@ ngx_int_t ps_resource_handler(ngx_http_request_t* r, bool html_rewrite,
     return NGX_DECLINED;
   }
 
-  std::unique_ptr<RequestHeaders> request_headers(new RequestHeaders);
-  std::unique_ptr<ResponseHeaders> response_headers(new ResponseHeaders);
+  std::unique_ptr<RequestHeaders> request_headers =
+      std::make_unique<RequestHeaders>();
+  std::unique_ptr<ResponseHeaders> response_headers =
+      std::make_unique<ResponseHeaders>();
 
   copy_request_headers_from_ngx(r, request_headers.get());
   copy_response_headers_from_ngx(r, response_headers.get());
@@ -1964,6 +2040,12 @@ ngx_int_t ps_resource_handler(ngx_http_request_t* r, bool html_rewrite,
         cfg_s->server_context, ctx->base_fetch);
     return ps_async_wait_response(r);
   } else if (is_an_admin_handler) {
+    // Defense-in-depth: log one warning per handler family per process
+    // lifetime if a non-loopback client reaches an admin endpoint. The
+    // deploying admin's nginx config (allow 127.0.0.1; deny all;) is the
+    // real gate. See pagespeed/system/admin_site.h.
+    ps_warn_admin_exposure(r, cfg_s->server_context, response_category);
+
     ps_create_base_fetch(url.Spec(), ctx, request_context,
                          request_headers.release(), kAdminPage, options);
     QueryParams query_params;
@@ -2739,6 +2821,10 @@ ngx_int_t ps_simple_handler(ngx_http_request_t* r,
       break;
     }
     case RequestRouting::kMessages: {
+      // Defense-in-depth: warn once per process if a non-loopback client
+      // reaches the message-history endpoint. The web-server-layer ACL is
+      // expected to gate this; we only signal that it wasn't effective.
+      ps_warn_admin_exposure(r, server_context, response_category);
       GoogleString log;
       StringWriter log_writer(&log);
       if (!message_handler->Dump(&log_writer)) {

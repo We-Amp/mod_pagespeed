@@ -14,9 +14,13 @@
 
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
-# Current stable NGINX version (as of 2026)
-NGINX_VERSION = "1.26.3"
-NGINX_SHA256 = ""  # Set this after downloading
+# Informational constant — the actually-shipped nginx version comes from
+# docker/Dockerfile (SHA-pinned) and scripts/build_nginx_with_pagespeed.sh.
+# This constant has no consumers in the Bazel rules below (nginx_repository
+# uses NGINX_PATH/submodule/symlink, not http_archive). Keep aligned with
+# the build script + Dockerfile to avoid future audit confusion.
+NGINX_VERSION = "1.30.1"
+NGINX_SHA256 = ""  # Unused — http_archive path is not taken.
 
 def _nginx_repository_impl(repository_ctx):
     """Repository rule for NGINX that handles flexible source location.

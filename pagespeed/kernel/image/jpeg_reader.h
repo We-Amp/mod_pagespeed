@@ -21,6 +21,7 @@
 #define PAGESPEED_KERNEL_IMAGE_JPEG_READER_H_
 
 #include <cstddef>
+#include <memory>
 
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/image/image_util.h"
@@ -61,13 +62,15 @@ class JpegReader {
   explicit JpegReader(MessageHandler* handler);
   ~JpegReader();
 
-  jpeg_decompress_struct* decompress_struct() const { return jpeg_decompress_; }
+  jpeg_decompress_struct* decompress_struct() const {
+    return jpeg_decompress_.get();
+  }
 
   void PrepareForRead(const void* image_data, size_t image_length);
 
  private:
-  jpeg_decompress_struct* jpeg_decompress_;
-  jpeg_error_mgr* decompress_error_;
+  std::unique_ptr<jpeg_decompress_struct> jpeg_decompress_;
+  std::unique_ptr<jpeg_error_mgr> decompress_error_;
   MessageHandler* message_handler_;
 
   JpegReader(const JpegReader&) = delete;

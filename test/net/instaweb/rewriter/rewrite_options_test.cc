@@ -17,7 +17,11 @@
  * under the License.
  */
 
+#include <atomic>
+#include <memory>
+
 #include "net/instaweb/rewriter/public/rewrite_options.h"
+#include "pagespeed/kernel/base/thread_system.h"
 
 #include "net/instaweb/rewriter/public/domain_lawyer.h"
 #include "net/instaweb/rewriter/public/experiment_util.h"
@@ -100,11 +104,11 @@ class RewriteOptionsTest : public RewriteOptionsTestBase<RewriteOptions> {
                                                   StringPiece local_option_val,
                                                   bool expect_script,
                                                   bool expect_stylesheet) {
-    std::unique_ptr<RewriteOptions> new_options(
-        new RewriteOptions(&thread_system_));
+    std::unique_ptr<RewriteOptions> new_options =
+        std::make_unique<RewriteOptions>(&thread_system_);
     // Initialize global options.
-    std::unique_ptr<RewriteOptions> global_options(
-        new RewriteOptions(&thread_system_));
+    std::unique_ptr<RewriteOptions> global_options =
+        std::make_unique<RewriteOptions>(&thread_system_);
     if (!global_option_val.empty()) {
       RewriteOptions::ResourceCategorySet x;
       ASSERT_TRUE(RewriteOptions::ParseInlineUnauthorizedResourceType(
@@ -1367,7 +1371,8 @@ TEST_F(RewriteOptionsTest, ParseAndSetOptionFromName2) {
   EXPECT_EQ("/example/images/a.jpeg", file_out);
 
   // Domain lawyer options.
-  std::unique_ptr<RewriteOptions> options2(new RewriteOptions(&thread_system_));
+  std::unique_ptr<RewriteOptions> options2 =
+      std::make_unique<RewriteOptions>(&thread_system_);
   EXPECT_EQ(RewriteOptions::kOptionOk,
             options2->ParseAndSetOptionFromName2(
                 RewriteOptions::kMapOriginDomain, "localhost/example",
@@ -1378,7 +1383,8 @@ TEST_F(RewriteOptionsTest, ParseAndSetOptionFromName2) {
       "OriginDomain:http://localhost/example/\n",
       options2->domain_lawyer()->ToString());
 
-  std::unique_ptr<RewriteOptions> options3(new RewriteOptions(&thread_system_));
+  std::unique_ptr<RewriteOptions> options3 =
+      std::make_unique<RewriteOptions>(&thread_system_);
   // This is an option 2 or 3, so test 2 here and 3 below.
   EXPECT_EQ(RewriteOptions::kOptionOk,
             options3->ParseAndSetOptionFromName3(
@@ -1391,7 +1397,8 @@ TEST_F(RewriteOptionsTest, ParseAndSetOptionFromName2) {
       "ProxyDomain:http://mainsite.com/static/\n",
       options3->domain_lawyer()->ToString());
 
-  std::unique_ptr<RewriteOptions> options4(new RewriteOptions(&thread_system_));
+  std::unique_ptr<RewriteOptions> options4 =
+      std::make_unique<RewriteOptions>(&thread_system_);
   EXPECT_EQ(RewriteOptions::kOptionOk,
             options4->ParseAndSetOptionFromName2(
                 RewriteOptions::kMapRewriteDomain, "cdn.example.com",
@@ -1401,7 +1408,8 @@ TEST_F(RewriteOptionsTest, ParseAndSetOptionFromName2) {
       "http://cdn.example.com/ Auth\n",
       options4->domain_lawyer()->ToString());
 
-  std::unique_ptr<RewriteOptions> options5(new RewriteOptions(&thread_system_));
+  std::unique_ptr<RewriteOptions> options5 =
+      std::make_unique<RewriteOptions>(&thread_system_);
   EXPECT_EQ(
       RewriteOptions::kOptionOk,
       options5->ParseAndSetOptionFromName2(
@@ -1453,7 +1461,8 @@ TEST_F(RewriteOptionsTest, ParseAndSetOptionFromName3) {
   EXPECT_EQ("Invalid resource category: nonsense", msg);
 
   // Domain lawyer.
-  std::unique_ptr<RewriteOptions> options(new RewriteOptions(&thread_system_));
+  std::unique_ptr<RewriteOptions> options =
+      std::make_unique<RewriteOptions>(&thread_system_);
   EXPECT_EQ(RewriteOptions::kOptionOk,
             options->ParseAndSetOptionFromName3(
                 RewriteOptions::kMapProxyDomain, "myproxy.com/static",
@@ -2705,9 +2714,10 @@ TEST_F(RewriteOptionsTest, BandwidthMode) {
 
   // Now merge with an options-set with Core enabled many of these answers
   // change.
-  std::unique_ptr<RewriteOptions> core(new RewriteOptions(&thread_system_));
-  std::unique_ptr<RewriteOptions> vhost_core(
-      new RewriteOptions(&thread_system_));
+  std::unique_ptr<RewriteOptions> core =
+      std::make_unique<RewriteOptions>(&thread_system_);
+  std::unique_ptr<RewriteOptions> vhost_core =
+      std::make_unique<RewriteOptions>(&thread_system_);
   core->SetRewriteLevel(RewriteOptions::kCoreFilters);
 
   vhost_core->Merge(*vhost_options);
@@ -3024,6 +3034,189 @@ TEST_F(RewriteOptionsTest, OptionsToString) {
              "Invalidation Timestamp: Mon, 05 Apr 2010 18:51:26 GMT "
              "(1270493486000)\n"),
       options_.OptionsToString());
+}
+
+// Regression test for the SRWLock-recursive-acquisition defect that caused
+// /pagespeed_admin/config to RST under AppVerifier's SRWLock provider on
+// Windows.
+//
+// The defect: OptionsToString() took a shared lock on cache_purge_mutex_,
+// then called has_cache_invalidation_timestamp_ms() and
+// cache_invalidation_timestamp(), both of which reacquire the same lock
+// shared. Windows SRWLocks are NOT recursive — AppVerifier raises
+// STATUS_BREAKPOINT, which on the runner gets swallowed and abandons the
+// response.
+//
+// This test uses a RWLock that bans recursive shared acquisition and
+// invokes the call sites that historically recursed. Pre-fix: this test
+// fails with a fatal log. Post-fix: clean OptionsToString() run.
+namespace {
+
+// RWLock that detects recursive shared/exclusive acquisition by the same
+// thread — mirrors the contract of Windows SRWLock that AppVerifier
+// enforces. Backed by a non-recursive primitive.
+class NonRecursiveRWLock : public ThreadSystem::RWLock {
+ public:
+  NonRecursiveRWLock() = default;
+  ~NonRecursiveRWLock() override = default;
+
+  bool TryLock() override {
+    if (writer_held_.load() || readers_.load() > 0) return false;
+    writer_held_.store(true);
+    return true;
+  }
+  void Lock() override {
+    // Detect recursion: writer can't already be held.
+    CHECK(!writer_held_.load())
+        << "Recursive exclusive lock acquisition (SRWLock would deadlock)";
+    writer_held_.store(true);
+  }
+  void Unlock() override { writer_held_.store(false); }
+  bool ReaderTryLock() override {
+    if (writer_held_.load()) return false;
+    readers_.fetch_add(1);
+    return true;
+  }
+  void ReaderLock() override {
+    // Detect recursion: same-thread shared-while-shared is the AppVerifier
+    // SRWLock violation. We approximate by tracking total readers; since
+    // the rewrite_options unit test is single-threaded, any reader count >
+    // 0 here means recursion.
+    CHECK_EQ(0, readers_.load())
+        << "Recursive shared lock acquisition (SRWLock would deadlock under "
+           "AppVerifier; this was the /pagespeed_admin/config defect)";
+    readers_.fetch_add(1);
+  }
+  void ReaderUnlock() override { readers_.fetch_sub(1); }
+  void DCheckLocked() override { CHECK(writer_held_.load()); }
+  void DCheckReaderLocked() override {
+    CHECK(writer_held_.load() || readers_.load() > 0);
+  }
+
+ private:
+  std::atomic<bool> writer_held_{false};
+  std::atomic<int> readers_{0};
+};
+
+}  // namespace
+
+TEST_F(RewriteOptionsTest, OptionsToStringDoesNotRecursivelyAcquireSharedLock) {
+  // Install a non-recursive RWLock on cache_purge_mutex_, simulating
+  // WinRWLock's (Windows SRWLock) non-reentrant semantics.
+  options_.set_cache_invalidation_timestamp_mutex(new NonRecursiveRWLock());
+
+  // Establish a cache-invalidation timestamp so the "Invalidation Timestamp:"
+  // branch of OptionsToString — the one that historically recursed — runs.
+  EXPECT_TRUE(options_.UpdateCacheInvalidationTimestampMs(
+      MockTimer::kApr_5_2010_ms));
+
+  // Pre-fix: this CHECK-fails inside OptionsToString() because the block at
+  // rewrite_options.cc:3303 acquired the lock shared and then called
+  // has_cache_invalidation_timestamp_ms() / cache_invalidation_timestamp()
+  // which each re-acquired shared.
+  GoogleString output = options_.OptionsToString();
+  EXPECT_NE(GoogleString::npos, output.find("Invalidation Timestamp:"));
+}
+
+// Mode-tracking RWLock that records every acquisition mode. Used to assert
+// that ComputeSignature() — which writes `signature_` — acquires the
+// cache_purge_mutex_ as EXCLUSIVE, not shared. Holding a shared lock while
+// writing was the upstream-PageSpeed lock-discipline defect previously
+// annotated as SHARED_LOCKS_REQUIRED; it races concurrent writers on
+// `signature_` even when the platform-specific verifier instrumentation
+// doesn't directly flag it (see the deferred peer-defect list).
+namespace {
+
+class ModeTrackingRWLock : public ThreadSystem::RWLock {
+ public:
+  enum class Mode { kIdle, kShared, kExclusive };
+
+  ModeTrackingRWLock() = default;
+  ~ModeTrackingRWLock() override = default;
+
+  // Tracks every acquisition (most recent wins).
+  Mode last_mode() const { return last_mode_.load(); }
+  int exclusive_acquisitions() const { return exclusive_count_.load(); }
+  int shared_acquisitions() const { return shared_count_.load(); }
+
+  bool TryLock() override {
+    if (active_mode_.load() != Mode::kIdle) return false;
+    active_mode_.store(Mode::kExclusive);
+    last_mode_.store(Mode::kExclusive);
+    exclusive_count_.fetch_add(1);
+    return true;
+  }
+  void Lock() override {
+    CHECK_EQ(static_cast<int>(Mode::kIdle),
+             static_cast<int>(active_mode_.load()))
+        << "Recursive lock acquisition (SRWLock would deadlock)";
+    active_mode_.store(Mode::kExclusive);
+    last_mode_.store(Mode::kExclusive);
+    exclusive_count_.fetch_add(1);
+  }
+  void Unlock() override {
+    CHECK_EQ(static_cast<int>(Mode::kExclusive),
+             static_cast<int>(active_mode_.load()));
+    active_mode_.store(Mode::kIdle);
+  }
+  bool ReaderTryLock() override {
+    if (active_mode_.load() == Mode::kExclusive) return false;
+    active_mode_.store(Mode::kShared);
+    last_mode_.store(Mode::kShared);
+    shared_count_.fetch_add(1);
+    return true;
+  }
+  void ReaderLock() override {
+    CHECK_NE(static_cast<int>(Mode::kExclusive),
+             static_cast<int>(active_mode_.load()))
+        << "Cannot acquire shared while exclusive held (would deadlock)";
+    active_mode_.store(Mode::kShared);
+    last_mode_.store(Mode::kShared);
+    shared_count_.fetch_add(1);
+  }
+  void ReaderUnlock() override {
+    CHECK_EQ(static_cast<int>(Mode::kShared),
+             static_cast<int>(active_mode_.load()));
+    active_mode_.store(Mode::kIdle);
+  }
+  void DCheckLocked() override {
+    CHECK_NE(static_cast<int>(Mode::kIdle),
+             static_cast<int>(active_mode_.load()));
+  }
+  void DCheckReaderLocked() override {
+    CHECK_NE(static_cast<int>(Mode::kIdle),
+             static_cast<int>(active_mode_.load()));
+  }
+
+ private:
+  std::atomic<Mode> active_mode_{Mode::kIdle};
+  std::atomic<Mode> last_mode_{Mode::kIdle};
+  std::atomic<int> exclusive_count_{0};
+  std::atomic<int> shared_count_{0};
+};
+
+}  // namespace
+
+TEST_F(RewriteOptionsTest, ComputeSignatureAcquiresLockExclusive) {
+  // ComputeSignature() writes `signature_` (via ComputeSignatureLockHeld()).
+  // Pre-fix it acquired cache_purge_mutex_ as ScopedReader (shared), which
+  // races writers on `signature_` under multi-threaded use — the upstream-
+  // PageSpeed lock-discipline defect flagged in the deferred peer
+  // list.
+  ModeTrackingRWLock* lock = new ModeTrackingRWLock();
+  options_.set_cache_invalidation_timestamp_mutex(lock);
+
+  options_.ComputeSignature();
+
+  // Post-fix: signature was computed under exclusive lock.
+  EXPECT_EQ(static_cast<int>(ModeTrackingRWLock::Mode::kExclusive),
+            static_cast<int>(lock->last_mode()))
+      << "ComputeSignature must acquire cache_purge_mutex_ exclusive; "
+         "writing `signature_` under a shared lock races writers and trips "
+         "Windows AppVerifier.";
+  EXPECT_GE(lock->exclusive_acquisitions(), 1)
+      << "ComputeSignature acquired the lock zero times as exclusive — "
+         "still using ScopedReader (shared)?";
 }
 
 TEST_F(RewriteOptionsTest, ColorUtilTest) {

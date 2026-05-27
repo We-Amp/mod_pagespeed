@@ -547,7 +547,15 @@ bool StatisticsLogfileReader::ReadNextDataBlock(int64* timestamp,
       return true;
     }
     *timestamp = old_timestamp;
-
+    // No more "timestamp: " markers in the file: return false rather than
+    // letting offset = npos feed into the next loop iteration, where
+    // StringPiece(buffer_).substr(npos) would throw std::out_of_range and
+    // abort the worker. See regression tests
+    // StatisticsLoggerTest.{ReadNextDataBlockAllOutOfRange,
+    // DumpJsonRangeAfterAllEntriesDoesNotThrow}.
+    if (next_timestamp_pos == GoogleString::npos) {
+      return false;
+    }
     offset = next_timestamp_pos;
   }
   return false;

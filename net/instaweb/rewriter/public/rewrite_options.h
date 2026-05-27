@@ -23,6 +23,7 @@
 #include <bitset>
 #include <cstddef>
 #include <map>
+#include <memory>
 #include <set>
 #include <utility>
 #include <vector>
@@ -42,7 +43,6 @@
 #include "pagespeed/kernel/base/hasher.h"
 #include "pagespeed/kernel/base/md5_hasher.h"
 #include "pagespeed/kernel/base/proto_util.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/sha1_signature.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_hash.h"
@@ -2799,7 +2799,15 @@ class RewriteOptions {
   // Computing a signature "freezes" the class instance.  Attempting
   // to modify a RewriteOptions after freezing will DCHECK.
   void ComputeSignature() LOCKS_EXCLUDED(cache_purge_mutex_.get());
-  void ComputeSignatureLockHeld() SHARED_LOCKS_REQUIRED(cache_purge_mutex_);
+  // ComputeSignatureLockHeld() writes `signature_` and toggles
+  // `options_uniqueness_checked_`; the lock must be held exclusive. The
+  // previous SHARED_LOCKS_REQUIRED annotation was a defect: clang's
+  // thread-safety analyzer accepted a shared lock at the call site even
+  // though the body is write-shaped, which would race writers on
+  // `signature_`. All current callers (this file: ComputeSignature,
+  // UpdateCacheInvalidationTimestampMs, UpdateCachePurgeSet) hold the
+  // lock exclusive.
+  void ComputeSignatureLockHeld() EXCLUSIVE_LOCKS_REQUIRED(cache_purge_mutex_);
 
   // If you subclass RewriteOptions and store any configuration data that's not
   // an Option, use this hook to include the signature of your additional data.

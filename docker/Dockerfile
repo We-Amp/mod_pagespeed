@@ -96,8 +96,8 @@ RUN pip3 install --no-cache-dir --break-system-packages requests==2.32.4 pytest=
 
 # Download and configure nginx source (required for building ngx_pagespeed)
 # The nginx_repository bazel rule looks for source at /usr/local/src/nginx
-ENV NGINX_VERSION=1.26.3
-ENV NGINX_SHA256=69ee2b237744036e61d24b836668aad3040dda461fe6f570f1787eab570c75aa
+ENV NGINX_VERSION=1.30.1
+ENV NGINX_SHA256=99765000d974896b31ca5882d8c279ce3fe7ef6f5c6f9f0a967ed7fd3407f9cc
 RUN curl -fsSL "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" -o /tmp/nginx.tar.gz \
     && echo "${NGINX_SHA256}  /tmp/nginx.tar.gz" | sha256sum -c - \
     && tar -xzf /tmp/nginx.tar.gz -C /usr/local/src \

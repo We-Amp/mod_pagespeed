@@ -311,6 +311,10 @@ bool JpegOptimizer::OptimizeLossy(jpeg_decompress_struct* jpeg_decompress,
   row_pointer[0] = static_cast<JSAMPLE*>(
       malloc(static_cast<size_t>(jpeg_decompress->output_width) *
              jpeg_decompress->output_components));
+  if (row_pointer[0] == nullptr) {
+    PS_LOG_ERROR(message_handler_, "Failed to allocate JPEG scanline buffer");
+    return false;
+  }
   while (jpeg_compress_.next_scanline < jpeg_compress_.image_height) {
     const JDIMENSION num_scanlines_read =
         jpeg_read_scanlines(jpeg_decompress, row_pointer, 1);

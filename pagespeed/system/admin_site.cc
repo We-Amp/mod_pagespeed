@@ -19,6 +19,7 @@
 
 #include "pagespeed/system/admin_site.h"
 
+#include <atomic>
 #include <cstddef>
 #include <memory>
 #include <set>
@@ -511,6 +512,113 @@ void AdminSite::PurgeHandler(StringPiece url, SystemCachePath* cache_path,
     purge_context->SetCachePurgeGlobalTimestampMs(now_ms, callback);
   } else {
     purge_context->AddPurgeUrl(url, now_ms, callback);
+  }
+}
+
+// =============================================================================
+// Defense-in-depth: warn once per handler family if a non-loopback client
+// reaches one of the admin endpoints.  The deploying admin is expected to
+// gate /pagespeed_admin/* (and friends) at the web-server / WAF layer.  If
+// that gate is misconfigured or bypassed, we want a loud, one-shot signal
+// in the error log.  We never block — operators may have legitimately widened
+// access (CDN admin IP, ops VLAN); blocking would be wrong.
+// =============================================================================
+namespace {
+
+// One std::atomic<bool> per AdminHandlerFamily.  Flipped from false→true the
+// first time we log for that family; subsequent calls short-circuit.  Cleared
+// at process start (default-initialised to false).
+std::atomic<bool> g_admin_exposure_warned[static_cast<size_t>(
+    AdminHandlerFamily::kNumFamilies)] = {};
+
+}  // namespace
+
+bool IsLoopbackClientIp(StringPiece client_ip) {
+  if (client_ip.empty()) {
+    // Caller couldn't determine — treat as non-loopback so the warning fires.
+    return false;
+  }
+  if (client_ip == "localhost") {
+    return true;
+  }
+  if (client_ip == "::1") {
+    return true;
+  }
+  // IPv4-mapped or IPv4-compatible IPv6 loopback: ::ffff:127.x.y.z or
+  // ::127.x.y.z.  Just check the textual suffix after the last colon — if the
+  // resulting prefix is in the IPv4 loopback block (127.0.0.0/8) and the
+  // earlier parts contain only "0"s, "ffff", or colons, accept.
+  StringPiece::size_type last_colon = client_ip.rfind(':');
+  StringPiece v4_part = client_ip;
+  if (last_colon != StringPiece::npos) {
+    StringPiece prefix = client_ip.substr(0, last_colon);
+    // Normalise: only allow IPv4-mapped/compatible IPv6 — prefix must be one
+    // of "::ffff", "::ffff:0:0", "::", "0:0:0:0:0:0", "0:0:0:0:0:ffff", etc.
+    // Conservative check: prefix matches /^[0:f]+$/ (only zeros, colons, 'f').
+    for (char c : prefix) {
+      if (c != '0' && c != ':' && c != 'f' && c != 'F') {
+        return false;
+      }
+    }
+    v4_part = client_ip.substr(last_colon + 1);
+  }
+  // v4_part must be a dotted-quad starting with "127.".  We do a string
+  // check rather than full IPv4 parse — first octet "127" is enough for
+  // 127.0.0.0/8 loopback recognition, matching the LoopbackRouteFetcher
+  // semantics.
+  if (v4_part.starts_with("127.")) {
+    // Sanity: ensure the rest is digits+dots, no embedded whitespace etc.
+    for (char c : v4_part) {
+      if (c != '.' && (c < '0' || c > '9')) {
+        return false;
+      }
+    }
+    return true;
+  }
+  return false;
+}
+
+void WarnIfNonLoopbackAdminAccess(StringPiece client_ip,
+                                  AdminHandlerFamily family,
+                                  StringPiece handler_name,
+                                  MessageHandler* message_handler) {
+  if (IsLoopbackClientIp(client_ip)) {
+    return;
+  }
+  size_t idx = static_cast<size_t>(family);
+  if (idx >= static_cast<size_t>(AdminHandlerFamily::kNumFamilies)) {
+    return;
+  }
+  // CAS false→true; only the first arrival logs.
+  bool expected = false;
+  if (!g_admin_exposure_warned[idx].compare_exchange_strong(
+          expected, true, std::memory_order_relaxed)) {
+    return;
+  }
+  if (message_handler == nullptr) {
+    return;
+  }
+  // Display "(unknown)" if the port couldn't supply a client IP — still useful
+  // to operators (means the handler ran at all, which is itself the signal).
+  GoogleString ip_for_log(client_ip.empty() ? StringPiece("(unknown)")
+                                            : client_ip);
+  GoogleString name_for_log(handler_name.empty() ? StringPiece("(unknown)")
+                                                 : handler_name);
+  message_handler->Message(
+      kWarning,
+      "mod_pagespeed: admin handler '%s' received request from %s; "
+      "intended for loopback. Restrict access at the web-server layer "
+      "(Apache: <Location> Require local; nginx: allow 127.0.0.1; deny all; "
+      "IIS: InfoUrlsLocalOnly). See "
+      "https://www.modpagespeed.com/1.1/docs/admin-console/"
+      "#url-path-acls-are-brittle",
+      name_for_log.c_str(), ip_for_log.c_str());
+}
+
+void ResetAdminExposureWarningsForTesting() {
+  for (size_t i = 0; i < static_cast<size_t>(AdminHandlerFamily::kNumFamilies);
+       ++i) {
+    g_admin_exposure_warned[i].store(false, std::memory_order_relaxed);
   }
 }
 

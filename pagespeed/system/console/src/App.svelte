@@ -7,12 +7,12 @@
 
   const { basePath, isGlobal } = detectBasePath();
   const consoleLabel = isGlobal ? "Global Admin" : "Admin";
+  const appVersion = import.meta.env.VITE_APP_VERSION ?? "dev";
 
   let sidebarOpen = $state(false);
   let loadedComponent = $state<Component | null>(null);
   let loadError = $state<string | null>(null);
   let showLicenseBanner = $state(false);
-  let bannerDismissed = $state(false);
 
   const api = new AdminApiClient(basePath);
 
@@ -46,13 +46,9 @@
     router.navigate(path);
     sidebarOpen = false;
   }
-
-  function dismissBanner() {
-    bannerDismissed = true;
-  }
 </script>
 
-<div class="layout" class:has-banner={showLicenseBanner && !bannerDismissed}>
+<div class="layout" class:has-banner={showLicenseBanner}>
   <!-- Topbar -->
   <header class="topbar">
     <button class="menu-toggle" onclick={toggleSidebar} aria-label="Toggle menu">
@@ -62,35 +58,50 @@
     </button>
     <span class="topbar-title">
       <a href="https://modpagespeed.com" target="_blank" rel="noopener noreferrer" class="topbar-logo-link" aria-label="ModPageSpeed – visit modpagespeed.com">
-        <svg class="topbar-logo" viewBox="0 0 370 58" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <svg class="topbar-logo" viewBox="0 0 322 36" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
           <!-- Prompt chevron -->
           <text class="logo-accent" x="0" y="30" font-family="'JetBrains Mono', 'SF Mono', 'Fira Code', monospace" font-weight="700" font-size="26">&#x276F;</text>
           <!-- Name -->
           <text x="24" y="30" font-family="Inter, system-ui, sans-serif" font-weight="700" font-size="32" fill="currentColor" letter-spacing="-1.2">mod_pagespeed</text>
           <!-- Blinking cursor -->
           <rect class="logo-accent logo-cursor" x="312" y="6" width="2.5" height="28" rx="1"/>
-          <!-- Green status dot -->
-          <circle cx="5" cy="49" r="3" fill="#059669"/>
-          <!-- Output line -->
-          <text class="logo-accent" x="14" y="53" font-family="'JetBrains Mono', 'SF Mono', monospace" font-weight="700" font-size="14">v1.1</text>
-          <text class="logo-muted" x="56" y="53" font-family="'JetBrains Mono', 'SF Mono', monospace" font-weight="600" font-size="14"> · running · we-amp.com</text>
         </svg>
       </a>
+      <span class="topbar-subtitle">
+        <span class="topbar-version" title="Build version">{appVersion}</span>
+        <span class="topbar-subtitle-sep" aria-hidden="true">·</span>
+        <span class="topbar-running">running</span>
+        <span class="topbar-subtitle-sep" aria-hidden="true">·</span>
+        <a
+          href="https://we-amp.com"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="topbar-subtitle-link"
+          aria-label="We-Amp – visit we-amp.com"
+        >we-amp.com</a>
+      </span>
       <span class="topbar-badge">{consoleLabel}</span>
+      {#if showLicenseBanner}
+        <span class="topbar-pill-unlicensed" aria-label="License status: not licensed">Not Licensed</span>
+      {/if}
     </span>
   </header>
 
   <!-- License warning banner -->
-  {#if showLicenseBanner && !bannerDismissed}
-    <div class="license-banner">
+  {#if showLicenseBanner}
+    <div class="license-banner" role="alert">
+      <svg class="license-banner-icon" width="18" height="18" viewBox="0 0 24 24"
+           fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+        <line x1="12" y1="9" x2="12" y2="13"/>
+        <line x1="12" y1="17" x2="12.01" y2="17"/>
+      </svg>
       <span class="license-banner-text">
-        No active license. <a href="#/license" class="license-banner-link">Manage license &rarr;</a>
+        <strong>No active license.</strong>
+        <a href="#/license" class="license-banner-link"
+          >Purchase a license or apply a key in the License section&nbsp;&rarr;</a>
       </span>
-      <button class="license-banner-dismiss" onclick={dismissBanner} aria-label="Dismiss">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-          <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
-        </svg>
-      </button>
     </div>
   {/if}
 
@@ -190,17 +201,9 @@
     fill: #60a5fa;
   }
 
-  .logo-muted {
-    fill: rgba(255, 255, 255, 0.5);
-  }
-
   @media (prefers-color-scheme: dark) {
     .logo-accent {
       fill: #1e3a5f;
-    }
-
-    .logo-muted {
-      fill: rgba(0, 0, 0, 0.4);
     }
   }
 
@@ -220,6 +223,41 @@
     }
   }
 
+  .topbar-subtitle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: 8px;
+    font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+    font-size: var(--ps-font-size-xs);
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.55);
+    white-space: nowrap;
+  }
+
+  .topbar-version {
+    color: #60a5fa;
+    font-weight: 700;
+  }
+
+  .topbar-subtitle-sep {
+    opacity: 0.6;
+  }
+
+  .topbar-subtitle-link {
+    color: inherit;
+    text-decoration: none;
+    border-bottom: 1px solid transparent;
+    transition: border-color 0.15s, color 0.15s;
+  }
+
+  .topbar-subtitle-link:hover,
+  .topbar-subtitle-link:focus-visible {
+    border-bottom-color: rgba(255, 255, 255, 0.6);
+    color: rgba(255, 255, 255, 0.9);
+    outline: none;
+  }
+
   .topbar-badge {
     font-size: var(--ps-font-size-xs);
     font-weight: 600;
@@ -227,6 +265,18 @@
     border-radius: var(--ps-border-radius);
     background: rgba(255, 255, 255, 0.15);
     letter-spacing: 0.02em;
+    white-space: nowrap;
+  }
+
+  .topbar-pill-unlicensed {
+    font-size: var(--ps-font-size-xs);
+    font-weight: 700;
+    padding: 2px 10px;
+    border-radius: var(--ps-border-radius);
+    background: var(--ps-warning, #f59e0b);
+    color: #1f1300;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
     white-space: nowrap;
   }
 
@@ -314,21 +364,13 @@
     text-decoration: underline;
   }
 
-  .license-banner-dismiss {
-    background: none;
-    border: none;
-    color: var(--ps-text-secondary);
-    cursor: pointer;
-    padding: var(--ps-space-xs);
-    border-radius: var(--ps-border-radius);
-    display: flex;
-    align-items: center;
+  .license-banner-icon {
+    color: var(--ps-warning);
     flex-shrink: 0;
   }
 
-  .license-banner-dismiss:hover {
-    background: color-mix(in srgb, var(--ps-warning) 25%, var(--ps-bg));
-    color: var(--ps-text);
+  .license-banner-text strong {
+    font-weight: 600;
   }
 
   .backdrop {
@@ -362,6 +404,10 @@
 
     .menu-toggle {
       display: block;
+    }
+
+    .topbar-subtitle {
+      display: none;
     }
 
     .sidebar {

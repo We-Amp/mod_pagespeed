@@ -7,10 +7,8 @@
     getLicenseErrorMessage,
   } from "$lib/utils/license-utils";
 
-  const TERMS_VERSION = "1.0";
-
   // isGlobal is passed by App.svelte to all page components (convention).
-  // On per-server admin, mutation endpoints (purchase, trial, apply) are disabled.
+  // On per-server admin, mutation endpoints (purchase, apply) are disabled.
   const { basePath = "", isGlobal = false }: { basePath?: string; isGlobal?: boolean } = $props();
   const api = new AdminApiClient(basePath);
   const license = usePolling(() => api.getLicenseStatus(), 30000);
@@ -32,12 +30,6 @@
   let checkoutError = $state<string | null>(null);
   let orderRefActivateInFlight = false;
   let purchasePollTimer: ReturnType<typeof setInterval> | null = null;
-
-  // ── Trial flow state ────────────────────────────────────────
-  let trialEmail = $state("");
-  let trialLoading = $state(false);
-  let trialMessage = $state<string | null>(null);
-  let trialError = $state<string | null>(null);
 
   // ── Guards ─────────────────────────────────────────────────
   let destroyed = false;
@@ -115,7 +107,7 @@
   }
 
   // ── Popup checkout flow (aligned with 2.0 reference) ────────
-  function openCheckout() {
+  function openCheckout(period: "monthly" | "annual") {
     if (!termsAccepted) {
       termsError = true;
       return;
@@ -134,7 +126,8 @@
     checkoutNonce = nonce;
     checkoutPolling = true;
 
-    const buyUrl = `https://modpagespeed.com/buy/?nonce=${nonce}&origin=${encodeURIComponent(window.location.origin)}`;
+    const product = period === "annual" ? "mps1-pro-annual" : "mps1-pro-monthly";
+    const buyUrl = `https://modpagespeed.com/buy/?nonce=${nonce}&product=${product}&origin=${encodeURIComponent(window.location.origin)}`;
     const win = window.open(buyUrl, "mps-checkout", "width=520,height=720,scrollbars=yes");
     if (!win || win.closed) {
       // Popup blocked — fall back to new tab (postMessage won't work, but polling will)
@@ -220,7 +213,6 @@
     })().finally(() => { orderRefActivateInFlight = false; });
   }
 
-  // Shared activation + consent recording (used by both purchase and trial)
   async function activateAndRecordConsent(token: string) {
     if (destroyed || activationComplete) return;
     activationComplete = true;
@@ -249,46 +241,6 @@
     stopPurchasePolling();
     checkoutPolling = false;
     checkoutNonce = null;
-  }
-
-  // ── Trial flow ──────────────────────────────────────────────
-  async function startTrial() {
-    if (!trialEmail.trim() || !termsAccepted) return;
-    trialLoading = true;
-    trialMessage = null;
-    trialError = null;
-    try {
-      const result = await api.startTrial(
-        trialEmail.trim(),
-        new Date().toISOString(),
-        TERMS_VERSION,
-      );
-      if (destroyed) return;
-      if (result.success && result.token) {
-        trialMessage = "Trial activated successfully!";
-        autoClear(() => { trialMessage = null; });
-        trialEmail = "";
-        termsAccepted = false;
-        license.refresh();
-        // Record consent best-effort
-        api.recordConsent(true).catch(() => {});
-      } else if (result.success) {
-        trialMessage = "Trial started successfully.";
-        autoClear(() => { trialMessage = null; });
-        license.refresh();
-      } else {
-        trialError = result.error ?? "Failed to start trial.";
-      }
-    } catch (err) {
-      if (destroyed) return;
-      if (err instanceof ApiError && err.status === 429) {
-        trialError = "Too many requests. Please try again later.";
-      } else {
-        trialError = err instanceof Error ? err.message : String(err);
-      }
-    } finally {
-      trialLoading = false;
-    }
   }
 </script>
 
@@ -404,14 +356,23 @@
       <div class="section">
         <h2>Purchase License</h2>
         <div class="action-card">
-          <p>Get a commercial license for your domain. Includes a 14-day free trial.</p>
-          <button
-            class="btn btn-primary"
-            onclick={openCheckout}
-            disabled={checkoutPolling}
-          >
-            Buy Now
-          </button>
+          <p>Get a commercial license for your domain. Both plans start with a 14-day free trial — cancel before day 15 and pay nothing.</p>
+          <div class="buy-buttons">
+            <button
+              class="btn btn-primary"
+              onclick={() => openCheckout("monthly")}
+              disabled={checkoutPolling}
+            >
+              Buy Monthly
+            </button>
+            <button
+              class="btn btn-primary"
+              onclick={() => openCheckout("annual")}
+              disabled={checkoutPolling}
+            >
+              Buy Annual
+            </button>
+          </div>
 
           {#if checkoutPolling}
             <div class="checkout-progress">
@@ -429,42 +390,6 @@
           {/if}
         </div>
       </div>
-
-      <!-- C. Trial Flow (when available) -->
-      {#if license.data.trial_available}
-        <div class="section">
-          <h2>Start Free Trial</h2>
-          <form class="trial-form" onsubmit={(e) => { e.preventDefault(); startTrial(); }}>
-            <label class="form-label" for="trial-email">Email Address</label>
-            <input
-              id="trial-email"
-              type="email"
-              class="form-input"
-              placeholder="you@example.com"
-              autocomplete="email"
-              bind:value={trialEmail}
-              required
-            />
-            <button
-              class="btn btn-primary"
-              type="submit"
-              disabled={trialLoading || !trialEmail.trim() || !termsAccepted}
-            >
-              {trialLoading ? "Starting Trial..." : "Start Trial"}
-            </button>
-            {#if !termsAccepted}
-              <p class="terms-hint">Please accept the terms above to continue.</p>
-            {/if}
-          </form>
-
-          {#if trialMessage}
-            <div class="feedback feedback-success" role="alert">{trialMessage}</div>
-          {/if}
-          {#if trialError}
-            <div class="feedback feedback-error" role="alert">{trialError}</div>
-          {/if}
-        </div>
-      {/if}
     {:else if (!license.data.licensed || license.data.expired) && !canManageLicense}
       <div class="section">
         <div class="info-card">
@@ -635,11 +560,10 @@
     max-width: 500px;
   }
 
-  .trial-form {
+  .buy-buttons {
     display: flex;
-    flex-direction: column;
+    flex-wrap: wrap;
     gap: var(--ps-space-sm);
-    max-width: 500px;
   }
 
   .form-label {
@@ -676,12 +600,6 @@
   .checkbox-label a {
     color: var(--ps-primary);
     text-decoration: underline;
-  }
-
-  .terms-hint {
-    font-size: var(--ps-font-size-xs);
-    color: var(--ps-text-tertiary);
-    margin-top: var(--ps-space-xs);
   }
 
   .checkout-progress {
