@@ -594,7 +594,11 @@ class SystemCachesMemCacheTest : public SystemCachesExternalCacheTestBase {
                    << "the tests.  See install/run_program_with_memcached.sh";
         return cluster_spec_;
       }
-      cluster_spec_.servers.emplace_back("localhost", port);
+      const char* host = getenv("MEMCACHED_HOST");
+      if (host == nullptr) {
+        host = "localhost";
+      }
+      cluster_spec_.servers.emplace_back(host, port);
     }
     return cluster_spec_;
   }
@@ -783,7 +787,8 @@ class SystemCachesRedisCacheTest : public SystemCachesExternalCacheTestBase {
                    << "tests.  See install/run_program_with_redis.sh";
         return ExternalServerSpec();
       }
-      server_spec_.host = "localhost";
+      const char* host = getenv("REDIS_HOST");
+      server_spec_.host = (host != nullptr) ? host : "localhost";
       server_spec_.port = port;
     }
     return server_spec_;
