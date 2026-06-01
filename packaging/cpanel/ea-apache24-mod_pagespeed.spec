@@ -20,6 +20,18 @@
 AutoReq: no
 
 Name:    ea-apache24-mod_pagespeed
+# Epoch ranks ABOVE Version in RPM/dnf ordering — a higher epoch always wins
+# regardless of the version string. cPanel's own EA4 repo (EA4-c9) ships an
+# `ea-apache24-mod_pagespeed` built at Epoch=1 (their 1:1.13.35.2). With no
+# epoch (=0) on our package, `0:1.15.0` LOSES to cPanel's `1:1.13.35.2`, so a
+# plain `dnf install ea-apache24-mod_pagespeed` and the WHM EasyApache 4
+# "Customize" checkbox would silently install cPanel's stale 1.13.35.2 instead
+# of ours. Verified on a real cPanel rig 2026-06-01 (the epoch is in cPanel's
+# actual RPM header, not just repodata). Epoch:2 puts us above cPanel's 1 so
+# ours wins the default resolution. Never lower this; only raise it if cPanel
+# ever ships an epoch >= 2. See corp the design record (Epoch amendment) + the memory
+# note reference_ea4_epoch_conflict.
+Epoch:   2
 Version: %{mps_version}
 Release: %{mps_release}%{?dist}.cpanel
 Summary: mod_pagespeed 1.15 for cPanel EasyApache 4
@@ -138,6 +150,13 @@ if [ "$1" = "0" ] && [ -x /scripts/restartsrv_httpd ]; then
 fi
 
 %changelog
+* Mon Jun 01 2026 Otto van der Schaaf <oschaaf@we-amp.com> - 2:1.15.0-2.cpanel
+- Set Epoch: 2. cPanel's EA4 repo ships ea-apache24-mod_pagespeed at Epoch=1
+  (1:1.13.35.2), which outranks our epoch-less 1.15.0 in dnf — a plain
+  `dnf install ea-apache24-mod_pagespeed` / WHM EA4 "Customize" checkbox would
+  install cPanel's stale 1.13.35.2 instead of ours. Epoch:2 makes ours win the
+  default resolution. Verified on a real cPanel rig 2026-06-01.
+
 * Mon Jun 01 2026 Otto van der Schaaf <oschaaf@we-amp.com> - 1.15.0-0.cpanel
 - Renumber 1.1 -> 1.15: the maintained successor to Google's final
   mod_pagespeed 1.14.36.1. Repackages mod-pagespeed-1.15.0; the version field
