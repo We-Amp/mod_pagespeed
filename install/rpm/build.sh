@@ -45,12 +45,17 @@ stage_install_rpm() {
     cat "${BUILDDIR}/install/rpm/pagespeed.cpanel.conf" >> \
       "${STAGEDIR}${APACHE_CONFDIR}/${PAGESPEED_CONF_PREFIX}pagespeed.conf"
   fi
-  install -m 755 "${BUILDDIR}/js_minify" \
-    "${STAGEDIR}/usr/bin/pagespeed_js_minify"
   chmod 644 "${STAGEDIR}${APACHE_CONFDIR}/${PAGESPEED_CONF_PREFIX}pagespeed.conf"
-  install -m 644 \
-    "${BUILDDIR}/../../net/instaweb/genfiles/conf/pagespeed_libraries.conf" \
-    "${STAGEDIR}${APACHE_CONFDIR}/${PAGESPEED_CONF_PREFIX}pagespeed_libraries.conf"
+  # Install pagespeed_libraries.conf if available
+  # Try Bazel output path first, then legacy GYP path
+  local LIBRARIES_CONF="${BUILDDIR}/net/instaweb/genfiles/conf/pagespeed_libraries.conf"
+  if [ ! -f "${LIBRARIES_CONF}" ]; then
+    LIBRARIES_CONF="${BUILDDIR}/../../net/instaweb/genfiles/conf/pagespeed_libraries.conf"
+  fi
+  if [ -f "${LIBRARIES_CONF}" ]; then
+    install -m 644 "${LIBRARIES_CONF}" \
+      "${STAGEDIR}${APACHE_CONFDIR}/${PAGESPEED_CONF_PREFIX}pagespeed_libraries.conf"
+  fi
 }
 
 # Actually generate the package file.
@@ -70,15 +75,12 @@ do_package() {
   # If we specify a dependecy of foo.so below, we would depend on both the
   # 32 and 64-bit versions on a 64-bit machine. The current version of RPM
   # we use is too old and doesn't provide %{_isa}, so we do this manually.
-  if [ "$HOST_ARCH" = "x86_64" ] ; then
+  if [ "$HOST_ARCH" = "x86_64" ] || [ "$HOST_ARCH" = "aarch64" ] ; then
     local EMPTY_VERSION="()"
     local PKG_ARCH="(64bit)"
-  elif [ "$HOST_ARCH" = "i386" ] ; then
-    local EMPTY_VERSION=""
-    local PKG_ARCH=""
   fi
 
-  DEPENDS="httpd >= 2.2, \
+  DEPENDS="httpd >= 2.4, \
   at"
   if [ "$CPANEL" = true ]; then
     DEPENDS="ea-apache24 >= 2.4, \
@@ -115,7 +117,7 @@ cleanup() {
 usage() {
   echo "usage: $(basename $0) [-c channel] [-a target_arch] [-o 'dir'] [-b 'dir'] [-p]"
   echo "-c channel the package channel (unstable, beta, stable)"
-  echo "-a arch    package architecture (ia32 or x64)"
+  echo "-a arch    package architecture (x64 or arm64)"
   echo "-o dir     package output directory [${OUTPUTDIR}]"
   echo "-b dir     build input directory    [${BUILDDIR}]"
   echo "-p         cPanel EasyApache 4 build"
@@ -195,26 +197,30 @@ STAGEDIR=$(mktemp -d -t rpm.build.XXXXXX) || exit 1
 TMPFILEDIR=$(mktemp -d -t rpm.tmp.XXXXXX) || exit 1
 CHANNEL="beta"
 # Default target architecture to same as build host.
-if [ "$(uname -m)" = "x86_64" ]; then
-  TARGETARCH="x64"
-else
-  TARGETARCH="ia32"
-fi
+case "$(uname -m)" in
+  x86_64)  TARGETARCH="x64" ;;
+  aarch64) TARGETARCH="arm64" ;;
+  *)
+    echo "ERROR: Unsupported host architecture '$(uname -m)'." >&2
+    exit 1
+    ;;
+esac
 SPEC="${TMPFILEDIR}/mod-pagespeed.spec"
 CPANEL=false
 
 # call cleanup() on exit
 trap cleanup 0
 process_opts "$@"
-if [ ! "$BUILDDIR" ]; then
-  BUILDDIR=$(readlink -f "${SCRIPTDIR}/../../out/Release")
+if [ ! "${BUILDDIR:-}" ]; then
+  # Default: source tree root (Bazel build)
+  BUILDDIR=$(readlink -f "${SCRIPTDIR}/../..")
 fi
 
-source ${BUILDDIR}/install/common/installer.include
+source "${BUILDDIR}/install/common/installer.include"
 
 get_version_info
 
-source "${BUILDDIR}/install/common/mod-pagespeed.info"
+source "${BUILDDIR}/install/common/mod-pagespeed/mod-pagespeed.info"
 eval $(sed -e "s/^\([^=]\+\)=\(.*\)$/export \1='\2'/" \
   "${BUILDDIR}/install/common/BRANDING")
 
@@ -228,7 +234,6 @@ APACHE_USER="apache"
 COMMENT_OUT_DEFLATE=
 SSL_CERT_DIR="/etc/pki/tls/certs"
 SSL_CERT_FILE_COMMAND="ModPagespeedSslCertFile /etc/pki/tls/cert.pem"
-APACHE_MODULEDIR_IA32="/usr/lib/httpd/modules"
 APACHE_MODULEDIR_X64="/usr/lib64/httpd/modules"
 PAGESPEED_CONF_PREFIX=""
 
@@ -236,7 +241,6 @@ if [ "$CPANEL" = true ]; then
   APACHE_CONFDIR="/etc/apache2/conf.modules.d"
   APACHE_USER="nobody"
   PACKAGE="ea-apache24-$(echo $PACKAGE | tr - _)"
-  APACHE_MODULEDIR_IA32="/usr/lib/apache2/modules"
   APACHE_MODULEDIR_X64="/usr/lib64/apache2/modules"
   PAGESPEED_CONF_PREFIX="456_"
   COMMENT_OUT_CRON="\# "
@@ -246,14 +250,14 @@ fi
 cd "${OUTPUTDIR}"
 
 case "$TARGETARCH" in
-  ia32 )
-    export APACHE_MODULEDIR=$APACHE_MODULEDIR_IA32
-    export HOST_ARCH="i386"
-    stage_install_rpm
-    ;;
   x64 )
     export APACHE_MODULEDIR=$APACHE_MODULEDIR_X64
     export HOST_ARCH="x86_64"
+    stage_install_rpm
+    ;;
+  arm64 )
+    export APACHE_MODULEDIR=$APACHE_MODULEDIR_X64
+    export HOST_ARCH="aarch64"
     stage_install_rpm
     ;;
   * )

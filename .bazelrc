@@ -126,11 +126,9 @@ build:asan --copt -O1
 build:asan --copt -fno-optimize-sibling-calls
 
 # Clang ASAN/UBSAN
-build:clang-asan --config=clang
+build:clang-asan --config=clang-libstdcxx13
 build:clang-asan --config=asan
 build:clang-asan --linkopt -fuse-ld=lld
-build:clang-asan --linkopt --rtlib=compiler-rt
-build:clang-asan --linkopt --unwindlib=libgcc
 
 # macOS
 build:macos --cxxopt=-std=c++20 --host_cxxopt=-std=c++20
@@ -153,6 +151,7 @@ build:macos-asan --copt -DGRPC_BAZEL_BUILD
 build:macos-asan --dynamic_mode=off
 
 # Clang TSAN
+build:clang-tsan --config=clang-libstdcxx13
 build:clang-tsan --action_env=ENVOY_TSAN=1
 build:clang-tsan --config=sanitizer
 build:clang-tsan --define ENVOY_CONFIG_TSAN=1
@@ -412,6 +411,7 @@ build:compdb --build_tag_filters=-nocompdb
 
 # Windows build quirks
 build:windows --action_env=TMPDIR
+build:windows --action_env=PROGRAMFILES=C:/progra~1
 build:windows --define signal_trace=disabled
 build:windows --define hot_restart=disabled
 build:windows --define tcmalloc=disabled

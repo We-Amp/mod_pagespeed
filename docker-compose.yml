@@ -15,15 +15,10 @@ services:
     volumes:
       # Mount source code from host
       - .:/src
-      # Mount cyclone-cache for local development (rw to allow fixing bugs)
-      # Note: Update this path to match your local cyclone-cache checkout
-      - /home/builder/code/we-amp/trafficserver/cyclone-cache:/cyclone-cache
-      # Persistent caches on SSD (survives container rebuilds and bazel clean)
-      - /media/usbcssd/bazel-cache/disk-cache:/ssd-cache/disk-cache
-      - /media/usbcssd/bazel-cache/repo-cache:/ssd-cache/repo-cache
-      - /media/usbcssd/bazel-cache/output-base:/home/dev/.cache/bazel
-      # SSH agent forwarding for git access (private repos)
-      - ${SSH_AUTH_SOCK}:/ssh-agent
+      # Persistent Bazel cache (named volume, works on any machine)
+      - pagespeed-bazel-cache:/home/dev/.cache/bazel
+      # SSH agent forwarding (optional, for private repo fetches during dev)
+      - ${SSH_AUTH_SOCK:-/dev/null}:/ssh-agent
     environment:
       # Set PATH explicitly to avoid inheriting host PATH
       - PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -40,6 +35,11 @@ services:
     depends_on:
       - redis
       - memcached
+    # Allow personality() syscall for ThreadSanitizer (TSAN) ASLR control.
+    # Docker's default seccomp profile blocks personality(), causing TSAN
+    # to crash with "CHECK failed: tsan_platform_linux.cpp" in WSL2/Docker.
+    security_opt:
+      - seccomp:unconfined
     # IPC mode needed for shared memory support in some tests
     ipc: host
     # Increase ulimits for bazel
@@ -83,8 +83,8 @@ services:
       USERNAME: "Developer"
       PASSWORD: "ChangeMe1"
     volumes:
-      # Persistent VM storage (survives container rebuilds)
-      - /media/usbcssd/windows-vm/dockur-x64:/storage
+      # Persistent VM storage (named volume, works on any machine)
+      - pagespeed-windows-x64:/storage
       # OEM provisioning scripts (runs on first boot)
       - ./windows-dev/dockur-oem:/oem:ro
       # Note: Source code is cloned via git, not mounted via SMB
@@ -116,7 +116,7 @@ services:
       USERNAME: "Developer"
       PASSWORD: "ChangeMe1"
     volumes:
-      - /media/usbcssd/windows-vm/dockur-arm:/storage
+      - pagespeed-windows-arm:/storage
       - ./windows-dev/dockur-oem:/oem:ro
       # Note: Source code is cloned via git, not mounted via SMB
     devices:
@@ -129,3 +129,8 @@ services:
       - "33390:3389"   # RDP
       - "2223:22"      # SSH
     stop_grace_period: 2m
+
+volumes:
+  pagespeed-bazel-cache:
+  pagespeed-windows-x64:
+  pagespeed-windows-arm:

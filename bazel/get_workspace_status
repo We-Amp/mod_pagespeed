@@ -1,1 +1,5 @@
-# TODO(oschaaf): this is a stub. symlinking to envoy's copy fails here.
+#!/bin/bash
+# Workspace status script for Bazel.
+# Provides git-based version information to the build.
+echo "STABLE_GIT_COMMIT $(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+echo "GIT_TREE_STATUS $(git diff-index --quiet HEAD -- 2>/dev/null && echo clean || echo modified)"

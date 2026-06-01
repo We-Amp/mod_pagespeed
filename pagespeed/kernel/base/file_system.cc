@@ -181,6 +181,13 @@ bool FileSystem::RecursivelyMakeDir(const StringPiece& full_path_const,
   size_t old_pos = 0, new_pos;
   // Note that we intentionally start searching at pos = 1 to avoid having
   // subpath be "" on absolute paths.
+#if defined(_WIN32) || defined(WIN32)
+  // Skip drive letter prefix (e.g., "C:/") on Windows to avoid trying to
+  // create the drive root as a directory.
+  if (full_path.size() >= 3 && full_path[1] == ':' && full_path[2] == '/') {
+    old_pos = 2;
+  }
+#endif
   while ((new_pos = full_path.find('/', old_pos + 1)) != GoogleString::npos) {
     // Build up path, one segment at a time.
     subpath.append(full_path.data() + old_pos, new_pos - old_pos);

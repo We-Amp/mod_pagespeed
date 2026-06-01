@@ -33,7 +33,6 @@
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/base64_util.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/dynamic_annotations.h"  // RunningOnValgrind
 #include "pagespeed/kernel/base/hasher.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/null_message_handler.h"
@@ -315,9 +314,6 @@ const char RewriteOptions::kCacheFlushPollIntervalSec[] =
     "CacheFlushPollIntervalSec";
 const char RewriteOptions::kFetchHttps[] = "FetchHttps";
 const char RewriteOptions::kFetcherTimeOutMs[] = "FetcherTimeOutMs";
-const char RewriteOptions::kFileCacheCleanInodeLimit[] = "FileCacheInodeLimit";
-const char RewriteOptions::kFileCacheCleanIntervalMs[] =
-    "FileCacheCleanIntervalMs";
 const char RewriteOptions::kFileCacheCleanSizeKb[] = "FileCacheSizeKb";
 const char RewriteOptions::kFileCachePath[] = "FileCachePath";
 const char RewriteOptions::kLogDir[] = "LogDir";
@@ -494,7 +490,7 @@ const int RewriteOptions::kDefaultRewriteDeadlineMs = 10;
 #else
 const int RewriteOptions::kDefaultRewriteDeadlineMs = 20;
 #endif
-const int kValgrindWaitForRewriteMs = 1000;
+[[maybe_unused]] const int kValgrindWaitForRewriteMs = 1000;
 const int RewriteOptions::kDefaultPropertyCacheHttpStatusStabilityThreshold = 5;
 
 const int RewriteOptions::kDefaultMaxRewriteInfoLogSize = 150;
@@ -1145,19 +1141,6 @@ RewriteOptions::RewriteOptions(ThreadSystem* thread_system)
   // options are added by subclasses.  We could do this in the
   // destructor I suppose, but we defer it till ComputeSignature.
 #endif
-
-  // TODO(jmarantz): make rewrite_deadline changeable from the Factory based on
-  // the requirements of the testing system and the platform. This might also
-  // want to change based on how many Flushes there are, as each Flush can
-  // potentially add this much more latency.
-  if (RunningOnValgrind()) {
-    set_rewrite_deadline_ms(kValgrindWaitForRewriteMs);
-    set_in_place_rewrite_deadline_ms(kValgrindWaitForRewriteMs);
-    modified_ = false;
-#ifndef NDEBUG
-    last_thread_id_.reset();
-#endif
-  }
 
   InitializeOptions(properties_);
 
@@ -3624,8 +3607,7 @@ void RewriteOptions::MergeOnlyProcessScopeOptions(const RewriteOptions& src) {
 RewriteOptions* RewriteOptions::Clone() const {
   RewriteOptions* options = NewOptions();
   options->Merge(*this);
-  options->frozen_ = false;
-  options->modified_ = false;
+  options->ClearFrozenAndModified();
   return options;
 }
 
@@ -4250,8 +4232,13 @@ bool RewriteOptions::ModificationOK() const {
 }
 
 bool RewriteOptions::MergeOK() const {
-  return frozen_ || (last_thread_id_.get() == nullptr) ||
-         last_thread_id_->IsCurrentThread();
+  if (frozen_) {
+    return true;
+  }
+  if (last_thread_id_.get() == nullptr) {
+    return true;
+  }
+  return last_thread_id_->IsCurrentThread();
 }
 #endif
 

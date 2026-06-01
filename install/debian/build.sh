@@ -36,8 +36,6 @@ gen_substvars() {
   pushd "${SUBSTFILEDIR}" >/dev/null
   dpkg-shlibdeps "${STAGEDIR}${APACHE_MODULEDIR}/mod_pagespeed.so" \
   -O >> "${DEB_SUBST}" 2>/dev/null
-  dpkg-shlibdeps "${STAGEDIR}${APACHE_MODULEDIR}/mod_pagespeed_ap24.so" \
-  -O >> "${DEB_SUBST}" 2>/dev/null
   popd >/dev/null
 }
 
@@ -75,12 +73,17 @@ stage_install_debian() {
   chmod 644 "${STAGEDIR}${APACHE_CONFDIR}/pagespeed.load"
   process_template "${BUILDDIR}/install/common/pagespeed.conf.template" \
     "${STAGEDIR}${APACHE_CONFDIR}/pagespeed.conf"
-  install -m 755 "${BUILDDIR}/js_minify" \
-    "${STAGEDIR}/usr/bin/pagespeed_js_minify"
   chmod 644 "${STAGEDIR}${APACHE_CONFDIR}/pagespeed.conf"
-  install -m 644 \
-    "${BUILDDIR}/../../net/instaweb/genfiles/conf/pagespeed_libraries.conf" \
-    "${STAGEDIR}${APACHE_CONF_AVAILABLE_DIR}/pagespeed_libraries.conf"
+  # Install pagespeed_libraries.conf if available
+  # Try Bazel output path first, then legacy GYP path
+  local LIBRARIES_CONF="${BUILDDIR}/net/instaweb/genfiles/conf/pagespeed_libraries.conf"
+  if [ ! -f "${LIBRARIES_CONF}" ]; then
+    LIBRARIES_CONF="${BUILDDIR}/../../net/instaweb/genfiles/conf/pagespeed_libraries.conf"
+  fi
+  if [ -f "${LIBRARIES_CONF}" ]; then
+    install -m 644 "${LIBRARIES_CONF}" \
+      "${STAGEDIR}${APACHE_CONF_AVAILABLE_DIR}/pagespeed_libraries.conf"
+  fi
 }
 
 # Build the deb file within a fakeroot.
@@ -101,6 +104,7 @@ do_package() {
   echo "Packaging ${HOST_ARCH}..."
   PREDEPENDS="$COMMON_PREDEPS"
   DEPENDS="${COMMON_DEPS}"
+  PROVIDES="${PACKAGE}"
 
   # Generate Conflicts: and Replaces: headers for the other channel to get
   # dpkg to seamlessly switch channels on -i
@@ -142,7 +146,7 @@ cleanup() {
 usage() {
   echo "usage: $(basename $0) [-c channel] [-a target_arch] [-o 'dir'] [-b 'dir']"
   echo "-c channel the package channel (unstable, beta, stable)"
-  echo "-a arch    package architecture (ia32 or x64)"
+  echo "-a arch    package architecture (x64 or arm64)"
   echo "-o dir     package output directory [${OUTPUTDIR}]"
   echo "-b dir     build input directory    [${BUILDDIR}]"
   echo "-h         this help message"
@@ -216,25 +220,29 @@ DEB_CONTROL="${TMPFILEDIR}/control"
 DEB_SUBST="${SUBSTFILEDIR}/debian/substvars"
 CHANNEL="beta"
 # Default target architecture to same as build host.
-if [ "$(uname -m)" = "x86_64" ]; then
-  TARGETARCH="x64"
-else
-  TARGETARCH="ia32"
-fi
+case "$(uname -m)" in
+  x86_64)  TARGETARCH="x64" ;;
+  aarch64) TARGETARCH="arm64" ;;
+  *)
+    echo "ERROR: Unsupported host architecture '$(uname -m)'." >&2
+    exit 1
+    ;;
+esac
 
 # call cleanup() on exit
 trap cleanup 0
 process_opts "$@"
-if [ ! "$BUILDDIR" ]; then
-  BUILDDIR=$(readlink -f "${SCRIPTDIR}/../../out/Release")
+if [ ! "${BUILDDIR:-}" ]; then
+  # Default: source tree root (Bazel build)
+  BUILDDIR=$(readlink -f "${SCRIPTDIR}/../..")
 fi
 
-source ${BUILDDIR}/install/common/installer.include
+source "${BUILDDIR}/install/common/installer.include"
 
 get_version_info
 VERSIONFULL="${VERSION}-r${REVISION}"
 
-source "${BUILDDIR}/install/common/mod-pagespeed.info"
+source "${BUILDDIR}/install/common/mod-pagespeed/mod-pagespeed.info"
 eval $(sed -e "s/^\([^=]\+\)=\(.*\)$/export \1='\2'/" \
   "${BUILDDIR}/install/common/BRANDING")
 
@@ -264,13 +272,13 @@ SSL_CERT_DIR="/etc/ssl/certs"
 SSL_CERT_FILE_COMMAND=
 
 case "$TARGETARCH" in
-  ia32 )
-    stage_install_debian
-    do_package "i386"
-    ;;
   x64 )
     stage_install_debian
     do_package "amd64"
+    ;;
+  arm64 )
+    stage_install_debian
+    do_package "arm64"
     ;;
   * )
     echo

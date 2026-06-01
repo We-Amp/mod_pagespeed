@@ -20,11 +20,13 @@ pagespeed_cc_test_library(
         "-Iexternal/apr/include/",
         "-Iexternal/apr/include/arch/unix/",
         "-Iexternal/apr/",
-        "-Iexternal/serf/include/",
-        "-Iexternal/serf/",
     ],
+    target_compatible_with = ["@platforms//os:linux"],
     deps = [
-        "//pagespeed/apache",
+        # Use apache_core instead of apache to avoid the static
+        # ApacheProcessContext in mod_instaweb.cc which conflicts with
+        # the test infrastructure's RewriteTestBaseProcessContext.
+        "//pagespeed/apache:apache_core",
         "//test/net/instaweb/rewriter:test_base",
         "//test/pagespeed/kernel/base:kernel_test_util",
         "//test/pagespeed/kernel/util:util_test_base",
@@ -50,11 +52,35 @@ pagespeed_cc_test(
         "-Iexternal/apr/include/",
         "-Iexternal/apr/include/arch/unix/",
         "-Iexternal/apr/",
-        "-Iexternal/serf/include/",
-        "-Iexternal/serf/",
     ],
     data = ["//test/net/instaweb/rewriter:testdata"],
+    target_compatible_with = ["@platforms//os:linux"],
     deps = [
         "//test/pagespeed/apache:test_base",
+    ],
+)
+
+# APR-dependent system tests (moved from test/pagespeed/system/).
+# Tests APR-based memcached client implementation.
+pagespeed_cc_test(
+    name = "apache_apr",
+    srcs = [
+        "apr_mem_cache_test.cc",
+    ],
+    copts = [
+        "-Iexternal/aprutil/include/",
+        "-Iexternal/aprutil/include/arch/unix/",
+        "-Iexternal/aprutil/",
+        "-Ithird_party/aprutil/gen/arch/linux/x64/include/",
+        "-Ithird_party/apr/gen/arch/linux/x64/include/",
+        "-Iexternal/apr/include/",
+        "-Iexternal/apr/include/arch/unix/",
+        "-Iexternal/apr/",
+    ],
+    shard_count = 1,
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = [
+        "//pagespeed/apache:apache_apr",
+        "//test/pagespeed/system:test_base",
     ],
 )

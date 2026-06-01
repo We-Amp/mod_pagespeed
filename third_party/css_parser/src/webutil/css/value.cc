@@ -142,6 +142,7 @@ bool Value::Equals(const Value& other) const {
       return params_->Equals(*other.params_);
     default:
       LOG(FATAL) << "Unknown type:" << type_;
+      return false;  // Unreachable; silences -Wreturn-type warning.
   }
 }
 

@@ -1,22 +1,5 @@
-# Attempt to load mod_version if it wasn't loaded or compiled in (eg on Debian)
-<IfModule !mod_version.c>
-  LoadModule version_module @@APACHE_MODULEDIR@@/mod_version.so
-</IfModule>
-
-<IfVersion < 2.4>
-  LoadModule pagespeed_module @@APACHE_MODULEDIR@@/mod_pagespeed.so
-</IfVersion>
-<IfVersion >= 2.4.2>
-  # As default pagespeed.conf configuration uses old-style ACLs using
-  # 'allow' and 'deny', we load mod_access_compat in Apache 2.4. If that's a
-  # problem, the blocks using that can be converted to the newer 'Require'
-  # syntax.
-  <IfModule !access_compat_module>
-    LoadModule access_compat_module @@APACHE_MODULEDIR@@/mod_access_compat.so
-  </IfModule>
-
-  LoadModule pagespeed_module @@APACHE_MODULEDIR@@/mod_pagespeed_ap24.so
-</IfVersion>
+# Load mod_pagespeed for Apache 2.4+
+LoadModule pagespeed_module @@APACHE_MODULEDIR@@/mod_pagespeed.so
 
 # Only attempt to load mod_deflate if it hasn't been loaded already.
 <IfModule !mod_deflate.c>

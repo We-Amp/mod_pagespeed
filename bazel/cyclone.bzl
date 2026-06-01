@@ -59,11 +59,6 @@ cc_library(
     local_defines = select({
         "@platforms//os:windows": [
             "CYCLONE_PLATFORM_WINDOWS",
-            # ssize_t is POSIX, define it for Windows
-            "ssize_t=__int64",
-            # TODO: Cyclone has Windows compatibility issues with struct stat
-            # The _fstat function expects struct _stat64i32, but Cyclone uses struct stat
-            # This requires fixing in the Cyclone source code itself
         ],
         "//conditions:default": [],
     }),

@@ -105,7 +105,7 @@ get_version_info() {
   # a package with no version info, it won't prevent upgrading when
   # trying to install a properly versioned package (i.e. a proper
   # package will always be "newer").
-  VERSION="0.0.0.0"
+  VERSION="0.0.0"
   # Use epoch timestamp so packages with bogus versions still increment
   # and will upgrade older bogus-versioned packages.
   REVISION=$(date +"%s")
@@ -113,7 +113,31 @@ get_version_info() {
   # properly.
   OFFICIAL_BUILD=0
 
-  VERSIONFILE="${BUILDDIR}/installer/version.txt"
+  # Try Bazel-era VERSION file (in source tree)
+  local SRCDIR
+  SRCDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+  local SRC_VERSION_FILE="${SRCDIR}/net/instaweb/public/VERSION"
+
+  if [ -f "${SRC_VERSION_FILE}" ]; then
+    source "${SRC_VERSION_FILE}"
+    VERSION="${MAJOR}.${MINOR}.${BUILD}"
+    # Append PRERELEASE using tilde (sorts before release in both deb and rpm).
+    # "1.1.0~beta.1" < "1.1.0" in dpkg/rpm version ordering.
+    if [ -n "${PRERELEASE:-}" ]; then
+      VERSION="${MAJOR}.${MINOR}.${BUILD}~${PRERELEASE}"
+    fi
+    # LASTCHANGE is set in VERSION file for tarball builds (no .git directory).
+    # Fall back to git for development builds from a git checkout.
+    if [ -n "${LASTCHANGE:-}" ]; then
+      REVISION="${LASTCHANGE}"
+    else
+      REVISION="$(cd "${SRCDIR}" && git rev-parse --short HEAD 2>/dev/null || echo "0")"
+    fi
+    return
+  fi
+
+  # Legacy: GYP-era version.txt in build directory
+  local VERSIONFILE="${BUILDDIR}/installer/version.txt"
   if [ -f "${VERSIONFILE}" ]; then
     source "${VERSIONFILE}"
     VERSION="${MAJOR}.${MINOR}.${BUILD}.${PATCH}"
@@ -124,7 +148,20 @@ get_version_info() {
 stage_install_common() {
   echo "Staging common install files in '${STAGEDIR}'..."
 
-  # app and resources
-  install -m 644 -s "${BUILDDIR}/libmod_pagespeed.so" "${STAGEDIR}${APACHE_MODULEDIR}/mod_pagespeed.so"
-  install -m 644 -s "${BUILDDIR}/libmod_pagespeed_ap24.so" "${STAGEDIR}${APACHE_MODULEDIR}/mod_pagespeed_ap24.so"
+  local SRCDIR
+  SRCDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
+  # Bazel build output: single .so for Apache 2.4+
+  # Target is //:libmod_pagespeed.so → bazel-bin/libmod_pagespeed.so
+  local BAZEL_SO="${SRCDIR}/bazel-bin/libmod_pagespeed.so"
+
+  if [ -f "${BAZEL_SO}" ]; then
+    install -m 644 "${BAZEL_SO}" "${STAGEDIR}${APACHE_MODULEDIR}/mod_pagespeed.so"
+  elif [ -f "${BUILDDIR}/libmod_pagespeed.so" ]; then
+    # Legacy GYP path
+    install -m 644 -s "${BUILDDIR}/libmod_pagespeed.so" "${STAGEDIR}${APACHE_MODULEDIR}/mod_pagespeed.so"
+  else
+    echo "ERROR: mod_pagespeed.so not found at ${BAZEL_SO} or ${BUILDDIR}/libmod_pagespeed.so" >&2
+    exit 1
+  fi
 }

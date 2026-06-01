@@ -1,32 +1,96 @@
 # mod_pagespeed
-![logo](https://www.gstatic.com/images/branding/product/2x/pagespeed_32dp.png)
 
-`mod_pagespeed` is an open-source Apache module created by Google to help Make the Web Faster by rewriting web pages to reduce latency and bandwidth.
+Web performance optimization middleware that automatically applies 40+
+optimization filters to web pages, including image compression/resizing,
+CSS/JS minification, cache extension, and more.
 
-mod_pagespeed releases are available as [precompiled linux packages](https://modpagespeed.com/doc/download) or as [source](https://modpagespeed.com/doc/build_mod_pagespeed_from_source). (See [Release Notes](https://modpagespeed.com/doc/release_notes) for information about bugs fixed)
+Originally created by Google, now maintained by [We-Amp](https://we-amp.com).
 
-mod_pagespeed is an open-source Apache module which automatically applies web performance best practices to pages, and associated assets (CSS, JavaScript, images) without requiring that you modify your existing content or workflow.
+## Platforms
 
-mod_pagespeed is built on PageSpeed Optimization Libraries, deployed across 100,000+ web-sites, and provided by popular hosting and CDN providers such as DreamHost, GoDaddy, EdgeCast, and others. There are 40+ available optimizations filters, which include:
+| Platform | Module | Status |
+|----------|--------|--------|
+| **Apache 2.4+** | `mod_pagespeed.so` | Stable |
+| **Nginx 1.26/1.27** | `ngx_pagespeed_module.so` | Stable |
+| **Envoy** | `pagespeed_filter.so` / `envoy_pagespeed` | Experimental |
+| **IIS 10+** | `pagespeed_iis.dll` | Experimental |
 
-- Image optimization, compression, and resizing
-- CSS & JavaScript concatenation, minification, and inlining
-- Cache extension, domain sharding, and domain rewriting
+## Features
+
+- Image optimization: compression, resizing, format conversion (WebP)
+- CSS & JavaScript: concatenation, minification, inlining
+- Cache extension, domain sharding, domain rewriting
 - Deferred loading of JavaScript and image resources
-- and many others...
+- DNS prefetching, preload hints
+- 40+ configurable optimization filters
 
-[![Demo](http://img.youtube.com/vi/8moGR2qf994/0.jpg)](http://www.youtube.com/watch?v=8moGR2qf994)
+## Quick Start
 
-|  Try it 	|   [modpagespeed.com](https://modpagespeed.com)	|
-|---	|---	|
-| Slack | https://the-asf.slack.com/archives/CJTG9RH9U |
-| Read about it  |https://developers.google.com/speed/pagespeed/module   |
-| Download it  | https://modpagespeed.com/doc/download  |
-| Check announcements  |https://groups.google.com/group/mod-pagespeed-announce   |
-| Discuss it  | https://groups.google.com/group/mod-pagespeed-discuss  |
-|FAQ   | https://modpagespeed.com/doc/faq  |
+### Pre-built packages
 
+Download from the [Releases](https://github.com/we-amp/mod_pagespeed/releases)
+page, then see the per-platform installation guides:
 
-Curious to learn more about mod_pagespeed? Check out our GDL episode below, which covers the history of the project, an architectural overview of how mod_pagespeed works under the hood, and a number of operational tips and best practices for deploying mod_pagespeed.
+- [Apache](docs/install-apache.md)
+- [Nginx](docs/install-nginx.md)
+- [Envoy](docs/install-envoy.md)
+- [IIS](docs/install-iis.md)
 
-[![GDL Episode](http://img.youtube.com/vi/6uCAdQSHhmA/0.jpg)](http://www.youtube.com/watch?v=6uCAdQSHhmA)
+### Build from Source
+
+All builds run inside a Docker container (provides Clang, GCC 13, Bazel 7.x):
+
+```bash
+# Start development environment (includes Redis and Memcached)
+docker compose up -d
+docker compose exec dev bash
+
+# Build for your target platform
+bazel build --config=clang-libstdcxx13 //:libmod_pagespeed.so                   # Apache
+bazel build --config=clang-libstdcxx13 //pagespeed/nginx:ngx_pagespeed_module.so # Nginx
+bazel build --config=clang-libstdcxx13 //pagespeed/envoy:envoy_pagespeed         # Envoy
+
+# Run C++ unit tests
+bazel test --config=clang-libstdcxx13 \
+  --test_env=REDIS_PORT=6379 --test_env=REDIS_HOST=redis \
+  --test_env=MEMCACHED_PORT=11211 --test_env=MEMCACHED_HOST=memcached \
+  //test/pagespeed/... //test/net/...
+
+docker compose down
+```
+
+IIS builds require Windows with clang-cl:
+```powershell
+bazel build --config=windows --config=clang-cl //pagespeed/iis:pagespeed_iis.dll
+```
+
+See [CLAUDE.md](CLAUDE.md) for detailed build configuration options and
+architecture documentation.
+
+## System Tests
+
+```bash
+./test/system/run_system_tests.sh          # Apache
+./test/system/run_nginx_tests.sh           # Nginx
+./test/system/run_envoy_tests.sh           # Envoy
+./test/system/run_iis_tests.sh sanity      # IIS (from Linux, requires Windows VM)
+```
+
+## Documentation
+
+- [CHANGELOG.md](CHANGELOG.md) -- Release history
+- [RELEASE_NOTES.md](RELEASE_NOTES.md) -- Current release details
+- [CLAUDE.md](CLAUDE.md) -- Build system, architecture, and development guide
+- [docs/](docs/) -- Installation guides, platform limitations, test catalog
+
+## License
+
+Apache License 2.0. See [LICENSE](LICENSE) for details.
+
+## Links
+
+| | |
+|---|---|
+| Source | https://github.com/we-amp/mod_pagespeed |
+| Issues | https://github.com/we-amp/mod_pagespeed/issues |
+| Releases | https://github.com/we-amp/mod_pagespeed/releases |
