@@ -21,12 +21,12 @@
 #define PAGESPEED_KERNEL_BASE_MOCK_MESSAGE_HANDLER_H_
 
 #include <map>
+#include <memory>
 
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/fast_wildcard_group.h"
 #include "pagespeed/kernel/base/google_message_handler.h"
 #include "pagespeed/kernel/base/message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 
@@ -94,7 +94,8 @@ class MockMessageHandler : public MessageHandler {
   // This handler is only for internal use in Dump method.
   GoogleMessageHandler internal_handler_;
 
-  DISALLOW_COPY_AND_ASSIGN(MockMessageHandler);
+  MockMessageHandler(const MockMessageHandler&) = delete;
+  MockMessageHandler& operator=(const MockMessageHandler&) = delete;
 };
 
 }  // namespace net_instaweb

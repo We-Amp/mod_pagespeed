@@ -17,12 +17,13 @@
  * under the License.
  */
 
+#include <memory>
+
 #include "test/pagespeed/kernel/thread/mock_scheduler.h"
 
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/function.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/base/timer.h"
@@ -72,7 +73,8 @@ class ChainedAlarm : public Function {
   int* count_;
   bool advance_;
 
-  DISALLOW_COPY_AND_ASSIGN(ChainedAlarm);
+  ChainedAlarm(const ChainedAlarm&) = delete;
+  ChainedAlarm& operator=(const ChainedAlarm&) = delete;
 };
 
 }  // namespace
@@ -120,7 +122,8 @@ class MockSchedulerTest : public testing::Test {
   bool was_cancelled_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(MockSchedulerTest);
+  MockSchedulerTest(const MockSchedulerTest&) = delete;
+  MockSchedulerTest& operator=(const MockSchedulerTest&) = delete;
 };
 
 TEST_F(MockSchedulerTest, ScheduleOrdering) {

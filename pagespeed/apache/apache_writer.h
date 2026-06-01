@@ -20,8 +20,9 @@
 #ifndef PAGESPEED_APACHE_APACHE_WRITER_H_
 #define PAGESPEED_APACHE_APACHE_WRITER_H_
 
+#include <memory>
+
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/base/writer.h"
@@ -75,7 +76,8 @@ class ApacheWriter : public Writer {
   ThreadSystem* thread_system_;
   std::unique_ptr<ThreadSystem::ThreadId> apache_request_thread_;
 
-  DISALLOW_COPY_AND_ASSIGN(ApacheWriter);
+  ApacheWriter(const ApacheWriter&) = delete;
+  ApacheWriter& operator=(const ApacheWriter&) = delete;
 };
 
 }  // namespace net_instaweb

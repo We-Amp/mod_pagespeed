@@ -17,6 +17,8 @@
  * under the License.
  */
 
+#include <memory>
+
 #include "net/instaweb/rewriter/public/insert_dns_prefetch_filter.h"
 
 #include "base/logging.h"
@@ -25,7 +27,6 @@
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/server_context.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/string_writer.h"
@@ -155,7 +156,8 @@ class InsertDnsPrefetchFilterTest : public RewriteTestBase {
   ResponseHeaders headers_;
   std::unique_ptr<InsertDnsPrefetchFilter> filter_;
 
-  DISALLOW_COPY_AND_ASSIGN(InsertDnsPrefetchFilterTest);
+  InsertDnsPrefetchFilterTest(const InsertDnsPrefetchFilterTest&) = delete;
+  InsertDnsPrefetchFilterTest& operator=(const InsertDnsPrefetchFilterTest&) = delete;
 };
 
 TEST_F(InsertDnsPrefetchFilterTest, IgnoreDomainsInHead) {

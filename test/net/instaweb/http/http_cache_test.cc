@@ -28,7 +28,6 @@
 #include "net/instaweb/http/public/inflating_fetch.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/google_message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/string_writer.h"
@@ -247,7 +246,8 @@ class HTTPCacheTest : public testing::Test {
   GoogleMessageHandler message_handler_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(HTTPCacheTest);
+  HTTPCacheTest(const HTTPCacheTest&) = delete;
+  HTTPCacheTest& operator=(const HTTPCacheTest&) = delete;
 };
 
 // Simple flow of putting in an item, getting it.

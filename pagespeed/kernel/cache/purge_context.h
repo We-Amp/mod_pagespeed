@@ -20,11 +20,11 @@
 #ifndef PAGESPEED_KERNEL_CACHE_PURGE_CONTEXT_H_
 #define PAGESPEED_KERNEL_CACHE_PURGE_CONTEXT_H_
 
+#include <memory>
 #include <vector>
 
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/callback.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/timer.h"
@@ -54,8 +54,8 @@ class Variable;
 // then cache purging may be slower, but it will still work.
 class PurgeContext {
  public:
-  typedef Callback2<bool, StringPiece> PurgeCallback;
-  typedef Callback1<const CopyOnWrite<PurgeSet>&> PurgeSetCallback;
+  using PurgeCallback = Callback2<bool, StringPiece>;
+  using PurgeSetCallback = Callback1<const CopyOnWrite<PurgeSet>&>;
 
   // The source-of-truth of the purge data is kept in files.  These files
   // are checked for changes via stat every 5 seconds.
@@ -134,7 +134,7 @@ class PurgeContext {
  private:
   friend class PurgeContextTest;
 
-  typedef std::vector<PurgeCallback*> PurgeCallbackVector;
+  using PurgeCallbackVector = std::vector<PurgeCallback*>;
 
   // Having acquired the lock, merges all sources of purge information and
   // write the purge file.  This must be called with interprocess_lock_
@@ -253,7 +253,8 @@ class PurgeContext {
 
   std::unique_ptr<PurgeSetCallback> update_callback_;
 
-  DISALLOW_COPY_AND_ASSIGN(PurgeContext);
+  PurgeContext(const PurgeContext&) = delete;
+  PurgeContext& operator=(const PurgeContext&) = delete;
 };
 
 }  // namespace net_instaweb

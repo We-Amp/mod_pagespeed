@@ -20,9 +20,10 @@
 #ifndef PAGESPEED_KERNEL_HTML_HTML_ELEMENT_H_
 #define PAGESPEED_KERNEL_HTML_HTML_ELEMENT_H_
 
+#include <memory>
+
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/inline_slist.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/html/html_name.h"
@@ -173,7 +174,7 @@ class HtmlElement : public HtmlNode {
               QuoteStyle quote_style);
 
     static inline void CopyValue(const StringPiece& src,
-                                 scoped_array<char>* dst);
+                                 std::unique_ptr<char[]>* dst);
 
     HtmlName name_;
     QuoteStyle quote_style_ : 8;
@@ -188,7 +189,7 @@ class HtmlElement : public HtmlNode {
     // Note that it is acceptable to have 8-bit characters in escape
     // sequences (typically iso8859).  However we will not be able to
     // decode such attributes.
-    scoped_array<char> escaped_value_;
+    std::unique_ptr<char[]> escaped_value_;
 
     // An 8-bit representation of the escaped_value.  Escape sequences
     // that contain character-codes >= 256 are not decoded, and will
@@ -206,14 +207,15 @@ class HtmlElement : public HtmlNode {
     // Note that we do not decode non-ASCII characters but we can
     // represent them in escaped_value_.  We can get 8-bit characters
     // into decoded_value_ via &#129; etc.
-    mutable scoped_array<char> decoded_value_;
+    mutable std::unique_ptr<char[]> decoded_value_;
 
-    DISALLOW_COPY_AND_ASSIGN(Attribute);
+    Attribute(const Attribute&) = delete;
+    Attribute& operator=(const Attribute&) = delete;
   };
 
-  typedef InlineSList<Attribute> AttributeList;
-  typedef InlineSList<Attribute>::Iterator AttributeIterator;
-  typedef InlineSList<Attribute>::ConstIterator AttributeConstIterator;
+  using AttributeList = InlineSList<Attribute>;
+  using AttributeIterator = InlineSList<Attribute>::Iterator;
+  using AttributeConstIterator = InlineSList<Attribute>::ConstIterator;
 
   ~HtmlElement() override;
 
@@ -405,7 +407,8 @@ class HtmlElement : public HtmlNode {
 
   std::unique_ptr<Data> data_;
 
-  DISALLOW_COPY_AND_ASSIGN(HtmlElement);
+  HtmlElement(const HtmlElement&) = delete;
+  HtmlElement& operator=(const HtmlElement&) = delete;
 };
 
 }  // namespace net_instaweb

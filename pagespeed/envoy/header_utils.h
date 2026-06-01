@@ -1,5 +1,7 @@
 #pragma once
 
+#include <memory>
+
 #include "absl/strings/numbers.h"
 #include "envoy/http/header_map.h"
 #include "pagespeed/kernel/http/headers.h"

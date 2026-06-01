@@ -21,6 +21,7 @@
 
 #include <algorithm>  // for std::binary_search
 #include <cstddef>    // for size_t
+#include <memory>
 #include <set>
 
 #include "base/logging.h"  // for operator<<, etc
@@ -57,7 +58,6 @@
 #include "pagespeed/kernel/base/md5_hasher.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/named_lock_manager.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/stl_util.h"  // for STLDeleteElements
 #include "pagespeed/kernel/base/string.h"
@@ -179,7 +179,8 @@ class BeaconPropertyCallback : public PropertyPage {
   std::unique_ptr<StringSet> critical_css_selector_set_;
   std::unique_ptr<RenderedImages> rendered_images_set_;
   GoogleString nonce_;
-  DISALLOW_COPY_AND_ASSIGN(BeaconPropertyCallback);
+  BeaconPropertyCallback(const BeaconPropertyCallback&) = delete;
+  BeaconPropertyCallback& operator=(const BeaconPropertyCallback&) = delete;
 };
 
 }  // namespace
@@ -587,7 +588,7 @@ bool ServerContext::HandleBeacon(StringPiece params, StringPiece user_agent,
   if (query_params.Lookup1Unescaped(kBeaconEtsQueryParam, &query_param_str)) {
     int value = -1;
 
-    size_t index = query_param_str.find(":");
+    size_t index = query_param_str.find(':');
     if (index != GoogleString::npos && index < query_param_str.size()) {
       GoogleString load_time_str = query_param_str.substr(index + 1);
       if (!(StringToInt(load_time_str, &value) && value >= 0)) {
@@ -682,10 +683,12 @@ RewriteDriver* ServerContext::NewCustomRewriteDriver(
     RewriteOptions* options, const RequestContextPtr& request_ctx) {
   RewriteDriver* rewrite_driver = NewUnmanagedRewriteDriver(
       nullptr /* no pool as custom*/, options, request_ctx);
+
   {
     ScopedMutex lock(rewrite_drivers_mutex_.get());
     active_rewrite_drivers_.insert(rewrite_driver);
   }
+
   if (factory_ != nullptr) {
     factory_->ApplyPlatformSpecificConfiguration(rewrite_driver);
   }
@@ -701,15 +704,18 @@ RewriteDriver* ServerContext::NewUnmanagedRewriteDriver(
     const RequestContextPtr& request_ctx) {
   RewriteDriver* rewrite_driver = new RewriteDriver(
       message_handler_, file_system_, default_system_fetcher_);
+
   rewrite_driver->set_options_for_pool(pool, options);
   rewrite_driver->SetServerContext(this);
   rewrite_driver->ClearRequestProperties();
   rewrite_driver->set_request_context(request_ctx);
+
   // Set the initial reference, as the expectation is that the client
   // will need to call Cleanup() or FinishParse()
   rewrite_driver->AddUserReference();
 
   ApplySessionFetchers(request_ctx, rewrite_driver);
+
   return rewrite_driver;
 }
 
@@ -846,7 +852,11 @@ size_t ServerContext::num_active_rewrite_drivers() {
 
 RewriteOptions* ServerContext::global_options() {
   if (base_class_options_.get() == nullptr) {
-    base_class_options_.reset(factory_->default_options()->Clone());
+    RewriteOptions* def_opts = factory_->default_options();
+    if (def_opts == nullptr) {
+      return nullptr;
+    }
+    base_class_options_.reset(def_opts->Clone());
   }
   return base_class_options_.get();
 }
@@ -1197,9 +1207,9 @@ void ServerContext::ShowCacheHandler(Format format, StringPiece url,
   }
 }
 
-GoogleString ServerContext::FetchRemoteConfig(const GoogleString& url,
-                                              int64 timeout_ms, bool on_startup,
-                                              RequestContextPtr request_ctx) {
+GoogleString ServerContext::FetchRemoteConfig(
+    const GoogleString& url, int64 timeout_ms, bool on_startup,
+    const RequestContextPtr& request_ctx) {
   CHECK(!url.empty());
   // Set up the fetcher.
   GoogleString out_str;

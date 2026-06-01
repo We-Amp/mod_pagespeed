@@ -17,6 +17,8 @@
  * under the License.
  */
 
+#include <memory>
+
 #include "test/pagespeed/iis/iis_rewrite_test_base.h"
 
 #include "pagespeed/kernel/base/string_util.h"

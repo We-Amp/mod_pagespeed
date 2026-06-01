@@ -22,6 +22,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
+#include <memory>
 
 #include "base/logging.h"
 #include "pagespeed/kernel/base/function.h"

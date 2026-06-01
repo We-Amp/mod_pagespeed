@@ -29,7 +29,6 @@
 
 #include "base/logging.h"
 #include "pagespeed/kernel/base/proto_util.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_multi_map.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -521,7 +520,7 @@ bool Headers<Proto>::RemoveIfNotIn(const Headers& keep) {
   // and executing any partial removals.
   std::vector<bool> to_keep;
   bool ret = false;
-  typedef std::map<StringPiece, int> StringPieceBag;
+  using StringPieceBag = std::map<StringPiece, int>;
   using ValueBagMap = std::map<StringPiece, StringPieceBag>;
   ValueBagMap value_bag_map;
 
@@ -606,7 +605,7 @@ template <class Proto>
 void Headers<Proto>::UpdateFrom(const Headers<Proto>& other) {
   // Get set of names to remove.
   int n = other.NumAttributes();
-  scoped_array<StringPiece> removing_names(new StringPiece[n]);
+  std::unique_ptr<StringPiece[]> removing_names(new StringPiece[n]);
   for (int i = 0; i < n; ++i) {
     removing_names[i] = other.Name(i);
   }

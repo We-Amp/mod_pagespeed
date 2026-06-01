@@ -20,11 +20,11 @@
 #include "net/instaweb/rewriter/public/css_minify.h"
 
 #include <algorithm>
+#include <memory>
 #include <vector>
 
 #include "base/logging.h"
 #include "pagespeed/kernel/base/message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/writer.h"
 #include "third_party/css_parser/src/util/utf8/public/unicodetext.h"

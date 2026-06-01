@@ -40,7 +40,6 @@
 
 #include "base/logging.h"
 #include "net/instaweb/rewriter/google_analytics_snippet.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/stl_util.h"
 #include "pagespeed/kernel/base/string.h"
@@ -80,7 +79,9 @@ void ScriptEditor::NewContents(const StringPiece& replacement,
   } else {
     StringPiece old_contents = script_characters_node_->contents();
     contents->clear();
-    contents->append(old_contents.data(), pos_);
+    contents->append(
+        old_contents.data(),
+        pos_);  // NOLINT(bugprone-suspicious-stringview-data-usage)
     contents->append(replacement.data(), replacement.size());
     StringPiece suffix =
         old_contents.substr(pos_ + len_, old_contents.size() - pos_ - len_);
@@ -366,7 +367,7 @@ bool GoogleAnalyticsFilter::MatchSyncInit(StringPiece contents,
 bool GoogleAnalyticsFilter::MatchUnhandledCalls(
     StringPiece contents, GoogleString::size_type start_pos) const {
   // TODO(slamm): Use a more efficient multiple pattern algorithm
-  while (1) {
+  while (true) {
     GoogleString::size_type candidate_pos = contents.find("._");
     if (candidate_pos == GoogleString::npos) {
       break;

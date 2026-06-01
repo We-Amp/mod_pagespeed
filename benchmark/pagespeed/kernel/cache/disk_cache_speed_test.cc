@@ -17,7 +17,7 @@
  * under the License.
  */
 
-// Throughput benchmark comparing FileCache, LRU+FileCache, and CycloneCache.
+// Throughput benchmark for CycloneCache.
 //
 // Run with:
 //   bazel run --config=clang-libstdcxx13 //benchmark/pagespeed/kernel/cache:cache
@@ -30,24 +30,20 @@
 #include <cstdlib>
 #include <functional>
 #include <vector>
+#include <memory>
 
 #include "base/logging.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/cache_interface.h"
-#include "pagespeed/kernel/base/md5_hasher.h"
 #include "pagespeed/kernel/base/null_message_handler.h"
 #include "pagespeed/kernel/base/null_mutex.h"
-#include "pagespeed/kernel/base/posix_timer.h"
 #include "pagespeed/kernel/base/shared_string.h"
-#include "pagespeed/kernel/base/stdio_file_system.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/cache/cyclone_cache.h"
-#include "pagespeed/kernel/cache/file_cache.h"
 #include "pagespeed/kernel/cache/lru_cache.h"
 #include "pagespeed/kernel/cache/write_through_cache.h"
 #include "pagespeed/kernel/thread/pthread_thread_system.h"
-#include "pagespeed/kernel/thread/slow_worker.h"
 #include "pagespeed/kernel/util/simple_random.h"
 #include "pagespeed/kernel/util/simple_stats.h"
 #include "test/pagespeed/kernel/base/gtest.h"
@@ -144,31 +140,6 @@ void PrintResult(const char* label, int num_ops, int64 bytes, double secs) {
          mb_per_sec, secs);
 }
 
-// Factory functions for each cache type.
-struct FileCacheFactory {
-  TempDir dir;
-  PosixTimer timer;
-  MD5Hasher hasher;
-  PthreadThreadSystem thread_system;
-  SimpleStats stats;
-  StdioFileSystem file_system;
-  NullMessageHandler handler;
-  std::unique_ptr<SlowWorker> worker;
-  std::unique_ptr<FileCache> cache;
-
-  FileCacheFactory() : stats(&thread_system) {
-    FileCache::InitStats(&stats);
-    worker = std::make_unique<SlowWorker>("file_cache_clean", &thread_system);
-    // FileCache takes ownership of the CachePolicy, so use raw new
-    cache = std::make_unique<FileCache>(
-        dir.path(), &file_system, &thread_system, worker.get(),
-        new FileCache::CachePolicy(&timer, &hasher, 3600000, int64{1} << 30, 0),
-        &stats, &handler);
-  }
-  CacheInterface* get() { return cache.get(); }
-  static const char* name() { return "FileCache"; }
-};
-
 struct CycloneCacheFactory {
   TempDir dir;
   PthreadThreadSystem thread_system;
@@ -191,37 +162,27 @@ struct CycloneCacheFactory {
   static const char* name() { return "CycloneCache"; }
 };
 
-// LRU cache wrapping FileCache (the original production hierarchy).
-// This simulates WriteThroughCache(LRU, FileCache) which was the default.
-struct LruFileCacheFactory {
+// CycloneCache with RAM cache layer enabled.
+struct CycloneCacheWithRamFactory {
   TempDir dir;
-  PosixTimer timer;
-  MD5Hasher hasher;
   PthreadThreadSystem thread_system;
   SimpleStats stats;
-  StdioFileSystem file_system;
   NullMessageHandler handler;
-  std::unique_ptr<SlowWorker> worker;
-  std::unique_ptr<LRUCache> lru_cache;
-  std::unique_ptr<FileCache> file_cache;
-  std::unique_ptr<WriteThroughCache> write_through;
+  std::unique_ptr<CycloneCache> cache;
 
-  LruFileCacheFactory() : stats(&thread_system) {
-    FileCache::InitStats(&stats);
-    worker = std::make_unique<SlowWorker>("file_cache_clean", &thread_system);
-    // 64MB LRU cache (typical production config)
-    lru_cache = std::make_unique<LRUCache>(int64{64} << 20);
-    // FileCache takes ownership of the CachePolicy
-    file_cache = std::make_unique<FileCache>(
-        dir.path(), &file_system, &thread_system, worker.get(),
-        new FileCache::CachePolicy(&timer, &hasher, 3600000, int64{1} << 30, 0),
-        &stats, &handler);
-    // WriteThroughCache does not take ownership of the caches
-    write_through =
-        std::make_unique<WriteThroughCache>(lru_cache.get(), file_cache.get());
+  CycloneCacheWithRamFactory() : stats(&thread_system) {
+    CycloneCache::InitStats(&stats);
+    CycloneCache::Config config;
+    config.cache_path = StrCat(dir.path(), "/cyclone.dat");
+    config.cache_size_bytes = int64{1} << 30;
+    config.ram_cache_size_bytes = int64{64} << 20;  // 64MB RAM cache
+    config.enable_checksum = true;
+    config.num_segments = 0;
+    cache = std::make_unique<CycloneCache>(config, &stats, &handler);
+    CHECK(cache->IsHealthy()) << "CycloneCache failed to start";
   }
-  CacheInterface* get() { return write_through.get(); }
-  static const char* name() { return "LRU+FileCache"; }
+  CacheInterface* get() { return cache.get(); }
+  static const char* name() { return "CycloneCache+RAM"; }
 };
 
 template <typename CacheFactoryT>
@@ -278,15 +239,13 @@ void RunBenchmarkSuite(int payload_size) {
 TEST(DiskCacheBenchmark, SmallPayload) {
   printf("\n========== Disk Cache Benchmark (small payload) ==========\n");
   RunBenchmarkSuite<CycloneCacheFactory>(kSmallPayloadSize);
-  RunBenchmarkSuite<LruFileCacheFactory>(kSmallPayloadSize);
-  RunBenchmarkSuite<FileCacheFactory>(kSmallPayloadSize);
+  RunBenchmarkSuite<CycloneCacheWithRamFactory>(kSmallPayloadSize);
 }
 
 TEST(DiskCacheBenchmark, LargePayload) {
   printf("\n========== Disk Cache Benchmark (large payload) ==========\n");
   RunBenchmarkSuite<CycloneCacheFactory>(kLargePayloadSize);
-  RunBenchmarkSuite<LruFileCacheFactory>(kLargePayloadSize);
-  RunBenchmarkSuite<FileCacheFactory>(kLargePayloadSize);
+  RunBenchmarkSuite<CycloneCacheWithRamFactory>(kLargePayloadSize);
 }
 
 }  // namespace

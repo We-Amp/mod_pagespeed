@@ -22,7 +22,6 @@
 #include <memory>
 
 #include "pagespeed/kernel/base/function.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/util/mem_lock_manager.h"
 #include "pagespeed/kernel/util/platform.h"

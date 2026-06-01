@@ -33,9 +33,9 @@
 #define PAGESPEED_KERNEL_IMAGE_SCANLINE_INTERFACE_FRAME_ADAPTER_H_
 
 #include <cstddef>
+#include <memory>
 
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/image/image_frame_interface.h"
 #include "pagespeed/kernel/image/image_util.h"
@@ -82,7 +82,9 @@ class FrameToScanlineReaderAdapter : public ScanlineReaderInterface {
   ImageSpec image_spec_;
   FrameSpec frame_spec_;
 
-  DISALLOW_COPY_AND_ASSIGN(FrameToScanlineReaderAdapter);
+  FrameToScanlineReaderAdapter(const FrameToScanlineReaderAdapter&) = delete;
+  FrameToScanlineReaderAdapter& operator=(const FrameToScanlineReaderAdapter&) =
+      delete;
 };
 
 // The class FrameToScanlineWriterAdapter takes ownership of a
@@ -108,7 +110,9 @@ class FrameToScanlineWriterAdapter : public ScanlineWriterInterface {
   ImageSpec image_spec_;
   FrameSpec frame_spec_;
 
-  DISALLOW_COPY_AND_ASSIGN(FrameToScanlineWriterAdapter);
+  FrameToScanlineWriterAdapter(const FrameToScanlineWriterAdapter&) = delete;
+  FrameToScanlineWriterAdapter& operator=(const FrameToScanlineWriterAdapter&) =
+      delete;
 };
 
 ////////// Scanline API to MultipleFrame API adapters.
@@ -143,7 +147,9 @@ class ScanlineToFrameReaderAdapter : public MultipleFrameReader {
 
   std::unique_ptr<ScanlineReaderInterface> impl_;
 
-  DISALLOW_COPY_AND_ASSIGN(ScanlineToFrameReaderAdapter);
+  ScanlineToFrameReaderAdapter(const ScanlineToFrameReaderAdapter&) = delete;
+  ScanlineToFrameReaderAdapter& operator=(const ScanlineToFrameReaderAdapter&) =
+      delete;
 };
 
 // The class ScanlineToFrameWriterAdapter takes ownership of a
@@ -177,7 +183,9 @@ class ScanlineToFrameWriterAdapter : public MultipleFrameWriter {
   const void* config_;
   GoogleString* out_;
 
-  DISALLOW_COPY_AND_ASSIGN(ScanlineToFrameWriterAdapter);
+  ScanlineToFrameWriterAdapter(const ScanlineToFrameWriterAdapter&) = delete;
+  ScanlineToFrameWriterAdapter& operator=(const ScanlineToFrameWriterAdapter&) =
+      delete;
 };
 
 }  // namespace image_compression

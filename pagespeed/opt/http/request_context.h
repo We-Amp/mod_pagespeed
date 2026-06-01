@@ -20,12 +20,12 @@
 #ifndef PAGESPEED_OPT_HTTP_REQUEST_CONTEXT_H_
 #define PAGESPEED_OPT_HTTP_REQUEST_CONTEXT_H_
 
+#include <memory>
 #include <set>
 
 #include "base/logging.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/ref_counted_ptr.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/http/http_options.h"
@@ -40,7 +40,7 @@ class RequestTrace;
 class ThreadSystem;
 class Timer;
 
-typedef RefCountedPtr<RequestContext> RequestContextPtr;
+using RequestContextPtr = RefCountedPtr<RequestContext>;
 
 // A class which wraps state associated with a request.
 //
@@ -264,7 +264,8 @@ class RequestContext : public RefCounted<RequestContext> {
   bool options_set_;
   HttpOptions options_;
 
-  DISALLOW_COPY_AND_ASSIGN(RequestContext);
+  RequestContext(const RequestContext&) = delete;
+  RequestContext& operator=(const RequestContext&) = delete;
 };
 
 }  // namespace net_instaweb

@@ -28,7 +28,6 @@
 #include "net/instaweb/http/public/request_context.h"
 #include "net/instaweb/http/public/wait_url_async_fetcher.h"
 #include "pagespeed/kernel/base/null_message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/stl_util.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -78,7 +77,8 @@ class MockFetch : public AsyncFetch {
   bool done_;
   bool success_;
 
-  DISALLOW_COPY_AND_ASSIGN(MockFetch);
+  MockFetch(const MockFetch&) = delete;
+  MockFetch& operator=(const MockFetch&) = delete;
 };
 
 class RateControllingUrlAsyncFetcherTest : public ::testing::Test {

@@ -29,9 +29,10 @@
 #ifndef PAGESPEED_AUTOMATIC_PROXY_INTERFACE_H_
 #define PAGESPEED_AUTOMATIC_PROXY_INTERFACE_H_
 
+#include <memory>
+
 #include "net/instaweb/http/public/url_async_fetcher.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 
@@ -120,7 +121,8 @@ class ProxyInterface : public UrlAsyncFetcher {
 
   std::unique_ptr<ProxyFetchFactory> proxy_fetch_factory_;
 
-  DISALLOW_COPY_AND_ASSIGN(ProxyInterface);
+  ProxyInterface(const ProxyInterface&) = delete;
+  ProxyInterface& operator=(const ProxyInterface&) = delete;
 };
 
 }  // namespace net_instaweb

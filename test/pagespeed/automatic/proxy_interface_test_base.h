@@ -20,6 +20,8 @@
 #ifndef PAGESPEED_AUTOMATIC_PROXY_INTERFACE_TEST_BASE_H_
 #define PAGESPEED_AUTOMATIC_PROXY_INTERFACE_TEST_BASE_H_
 
+#include <memory>
+
 #include "net/instaweb/http/public/async_fetch.h"
 #include "net/instaweb/http/public/url_async_fetcher.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
@@ -28,7 +30,6 @@
 #include "pagespeed/automatic/proxy_interface.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/html/empty_html_filter.h"
@@ -71,7 +72,8 @@ class ProxyUrlNamer : public UrlNamer {
 
  private:
   bool authorized_;
-  DISALLOW_COPY_AND_ASSIGN(ProxyUrlNamer);
+  ProxyUrlNamer(const ProxyUrlNamer&) = delete;
+  ProxyUrlNamer& operator=(const ProxyUrlNamer&) = delete;
 };
 
 // Mock filter which gets passed to the new rewrite driver created in
@@ -97,7 +99,8 @@ class MockFilter : public EmptyHtmlFilter {
   RewriteDriver* driver_;
   int num_elements_;
   PropertyValue* num_elements_property_;
-  DISALLOW_COPY_AND_ASSIGN(MockFilter);
+  MockFilter(const MockFilter&) = delete;
+  MockFilter& operator=(const MockFilter&) = delete;
 };
 
 // Hook provided to TestRewriteDriverFactory to add a new filter when
@@ -113,7 +116,8 @@ class CreateFilterCallback
   }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(CreateFilterCallback);
+  CreateFilterCallback(const CreateFilterCallback&) = delete;
+  CreateFilterCallback& operator=(const CreateFilterCallback&) = delete;
 };
 
 // Subclass of AsyncFetch that adds a response header indicating whether the
@@ -139,7 +143,8 @@ class BackgroundFetchCheckingAsyncFetch : public SharedAsyncFetch {
 
  private:
   AsyncFetch* async_fetch_;
-  DISALLOW_COPY_AND_ASSIGN(BackgroundFetchCheckingAsyncFetch);
+  BackgroundFetchCheckingAsyncFetch(const BackgroundFetchCheckingAsyncFetch&) = delete;
+  BackgroundFetchCheckingAsyncFetch& operator=(const BackgroundFetchCheckingAsyncFetch&) = delete;
 };
 
 // Subclass of UrlAsyncFetcher that wraps the AsyncFetch with a
@@ -166,7 +171,8 @@ class BackgroundFetchCheckingUrlAsyncFetcher : public UrlAsyncFetcher {
  private:
   UrlAsyncFetcher* base_fetcher_;
   int num_background_fetches_;
-  DISALLOW_COPY_AND_ASSIGN(BackgroundFetchCheckingUrlAsyncFetcher);
+  BackgroundFetchCheckingUrlAsyncFetcher(const BackgroundFetchCheckingUrlAsyncFetcher&) = delete;
+  BackgroundFetchCheckingUrlAsyncFetcher& operator=(const BackgroundFetchCheckingUrlAsyncFetcher&) = delete;
 };
 
 class ProxyInterfaceTestBase : public RewriteTestBase {

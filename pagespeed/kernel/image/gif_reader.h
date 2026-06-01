@@ -20,9 +20,10 @@
 #ifndef PAGESPEED_KERNEL_IMAGE_GIF_READER_H_
 #define PAGESPEED_KERNEL_IMAGE_GIF_READER_H_
 
+#include <memory>
+
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/image/image_frame_interface.h"
 #include "pagespeed/kernel/image/image_util.h"
@@ -67,7 +68,8 @@ class GifReader : public PngReaderInterface {
 
  private:
   MessageHandler* message_handler_;
-  DISALLOW_COPY_AND_ASSIGN(GifReader);
+  GifReader(const GifReader&) = delete;
+  GifReader& operator=(const GifReader&) = delete;
 };
 
 // GifFrameReader decodes GIF images and outputs the raw pixel data,
@@ -221,14 +223,14 @@ class GifFrameReader : public MultipleFrameReader {
   int frame_transparent_index_;
 
   // Palette of the image, with 256 entries.
-  net_instaweb::scoped_array<PaletteRGBA> gif_palette_;
+  std::unique_ptr<PaletteRGBA[]> gif_palette_;
 
   // Buffer for holding the color (RGB or RGBA) for a row of pixels.
-  net_instaweb::scoped_array<GifByteType> frame_buffer_;
+  std::unique_ptr<GifByteType[]> frame_buffer_;
 
   // Buffer for holding the palette index for a row of pixels (for
   // non-progressive GIF) or for the entire image (for progressive GIF).
-  net_instaweb::scoped_array<GifByteType> frame_index_;
+  std::unique_ptr<GifByteType[]> frame_index_;
 
   // gif_struct_ stores a pointer to the input image stream. It also
   // keeps track of the length of data that giflib has read. It is
@@ -245,6 +247,12 @@ class GifFrameReader : public MultipleFrameReader {
   // int for the palette size.
   int frame_palette_size_;
 
+  // The number of pixels in the current frame (width * height),
+  // computed once via CheckedMulSize in PrepareNextFrame() and reused
+  // by DecodeNonProgressiveGif, FrameHasOutOfRangePixels, etc. to
+  // avoid recomputing in 32-bit arithmetic.
+  size_t frame_pixel_count_;
+
   // For frames that are either progressive or NOT in RGBA_8888
   // format, we set this flag in PrepareNextFrame() and then read the
   // entire frame to see whether there are any pixels with
@@ -254,7 +262,8 @@ class GifFrameReader : public MultipleFrameReader {
   // pixels.
   bool frame_eagerly_read_;
 
-  DISALLOW_COPY_AND_ASSIGN(GifFrameReader);
+  GifFrameReader(const GifFrameReader&) = delete;
+  GifFrameReader& operator=(const GifFrameReader&) = delete;
 };
 
 }  // namespace image_compression

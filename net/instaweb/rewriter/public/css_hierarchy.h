@@ -20,11 +20,11 @@
 #ifndef NET_INSTAWEB_REWRITER_PUBLIC_CSS_HIERARCHY_H_
 #define NET_INSTAWEB_REWRITER_PUBLIC_CSS_HIERARCHY_H_
 
+#include <memory>
 #include <vector>
 
 #include "net/instaweb/rewriter/public/resource.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/http/data_url.h"
@@ -339,7 +339,8 @@ class CssHierarchy {
   // For logging messages.
   MessageHandler* message_handler_;
 
-  DISALLOW_COPY_AND_ASSIGN(CssHierarchy);
+  CssHierarchy(const CssHierarchy&) = delete;
+  CssHierarchy& operator=(const CssHierarchy&) = delete;
 };
 
 }  // namespace net_instaweb

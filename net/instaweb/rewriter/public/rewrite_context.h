@@ -20,6 +20,7 @@
 #ifndef NET_INSTAWEB_REWRITER_PUBLIC_REWRITE_CONTEXT_H_
 #define NET_INSTAWEB_REWRITER_PUBLIC_REWRITE_CONTEXT_H_
 
+#include <memory>
 #include <set>
 #include <vector>
 
@@ -36,7 +37,6 @@
 #include "pagespeed/kernel/base/atomic_bool.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/function.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/http/google_url.h"
@@ -183,7 +183,9 @@ class RewriteContext {
                       CacheLookupResult* result) = 0;
 
    private:
-    DISALLOW_COPY_AND_ASSIGN(CacheLookupResultCallback);
+    CacheLookupResultCallback(const CacheLookupResultCallback&) = delete;
+    CacheLookupResultCallback& operator=(const CacheLookupResultCallback&) =
+        delete;
   };
 
   // Takes ownership of resource_context, which must be NULL or
@@ -676,7 +678,10 @@ class RewriteContext {
   void OutputCacheHit(bool write_partitions);
   void OutputCacheRevalidate(const InputInfoStarVector& to_revalidate);
   void OutputCacheMiss();
-  void ResourceFetchDone(bool success, ResourcePtr resource, int slot_index);
+  void ResourceFetchDone(
+      bool success,
+      ResourcePtr resource,  // NOLINT(performance-unnecessary-value-param)
+      int slot_index);
   void ResourceRevalidateDone(InputInfo* input_info, bool success);
   void LogMetadataCacheInfo(bool cache_ok, bool can_revalidate);
 
@@ -1041,7 +1046,8 @@ class RewriteContext {
   std::unique_ptr<ScheduleRewriteContext> schedule_rewrite_context_;
 
   Variable* const num_rewrites_abandoned_for_lock_contention_;
-  DISALLOW_COPY_AND_ASSIGN(RewriteContext);
+  RewriteContext(const RewriteContext&) = delete;
+  RewriteContext& operator=(const RewriteContext&) = delete;
 };
 
 }  // namespace net_instaweb

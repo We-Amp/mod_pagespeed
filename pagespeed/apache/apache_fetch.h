@@ -20,6 +20,8 @@
 #ifndef PAGESPEED_APACHE_FETCH_H_
 #define PAGESPEED_APACHE_FETCH_H_
 
+#include <memory>
+
 #include "net/instaweb/http/public/async_fetch.h"
 #include "net/instaweb/http/public/request_context.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
@@ -27,7 +29,6 @@
 #include "pagespeed/apache/apache_writer.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_annotations.h"
@@ -63,7 +64,7 @@ class ApacheFetch : public AsyncFetch {
   // send that to the client.  So for ipro we suppress reporting errors
   // in this flow.
   //
-  // TODO(jmarantz): consider allowing serf fetches in ipro when running as
+  // TODO(jmarantz): consider allowing fetches in ipro when running as
   // a reverse-proxy.
   void set_handle_error(bool x) { handle_error_ = x; }
 
@@ -115,7 +116,8 @@ class ApacheFetch : public AsyncFetch {
   RewriteDriver* driver_;
   Scheduler* scheduler_;
 
-  DISALLOW_COPY_AND_ASSIGN(ApacheFetch);
+  ApacheFetch(const ApacheFetch&) = delete;
+  ApacheFetch& operator=(const ApacheFetch&) = delete;
 };
 
 }  // namespace net_instaweb

@@ -21,10 +21,10 @@
 #define PAGESPEED_KERNEL_IMAGE_IMAGE_RESIZER_H_
 
 #include <cstddef>
+#include <memory>
 
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/image/image_util.h"
 #include "pagespeed/kernel/image/scanline_interface.h"
 #include "pagespeed/kernel/image/scanline_status.h"
@@ -101,17 +101,18 @@ class ScanlineResizer : public ScanlineReaderInterface {
   // Vertical resizer.
   std::unique_ptr<ResizeCol> resizer_y_;
 
-  net_instaweb::scoped_array<uint8> output_;
+  std::unique_ptr<uint8[]> output_;
   int width_;
   int height_;
   int elements_per_row_;
 
   // Buffer for storing the intermediate results.
-  net_instaweb::scoped_array<float> buffer_;
+  std::unique_ptr<float[]> buffer_;
   int bytes_per_buffer_row_;
   MessageHandler* message_handler_;
 
-  DISALLOW_COPY_AND_ASSIGN(ScanlineResizer);
+  ScanlineResizer(const ScanlineResizer&) = delete;
+  ScanlineResizer& operator=(const ScanlineResizer&) = delete;
 };
 
 }  // namespace image_compression

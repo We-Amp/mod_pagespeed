@@ -20,8 +20,9 @@
 #ifndef PAGESPEED_KERNEL_UTIL_NONCE_GENERATOR_TEST_BASE_H_
 #define PAGESPEED_KERNEL_UTIL_NONCE_GENERATOR_TEST_BASE_H_
 
+#include <memory>
+
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/util/nonce_generator.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 
@@ -44,7 +45,8 @@ class NonceGeneratorTestBase : public testing::Test {
   std::unique_ptr<NonceGenerator> other_generator_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(NonceGeneratorTestBase);
+  NonceGeneratorTestBase(const NonceGeneratorTestBase&) = delete;
+  NonceGeneratorTestBase& operator=(const NonceGeneratorTestBase&) = delete;
 };
 
 }  // namespace net_instaweb

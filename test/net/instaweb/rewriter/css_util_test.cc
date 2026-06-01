@@ -28,7 +28,6 @@
 #include "base/logging.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/google_message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/html/html_element.h"
@@ -51,7 +50,8 @@ class CssUtilTest : public testing::Test {
   GoogleMessageHandler message_handler_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(CssUtilTest);
+  CssUtilTest(const CssUtilTest&) = delete;
+  CssUtilTest& operator=(const CssUtilTest&) = delete;
 };
 
 TEST_F(CssUtilTest, TestGetDimensions) {

@@ -21,10 +21,10 @@
 #define PAGESPEED_KERNEL_SHAREDMEM_SHARED_MEM_LOCK_MANAGER_H_
 
 #include <cstddef>
+#include <memory>
 
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/named_lock_manager.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/thread/scheduler_based_abstract_lock.h"
@@ -93,7 +93,8 @@ class SharedMemLockManager : public NamedLockManager {
   MessageHandler* handler_;
   size_t lock_size_;
 
-  DISALLOW_COPY_AND_ASSIGN(SharedMemLockManager);
+  SharedMemLockManager(const SharedMemLockManager&) = delete;
+  SharedMemLockManager& operator=(const SharedMemLockManager&) = delete;
 };
 
 }  // namespace net_instaweb

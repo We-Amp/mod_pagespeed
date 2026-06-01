@@ -20,10 +20,10 @@
 #ifndef PAGESPEED_KERNEL_BASE_WAVEFORM_H_
 #define PAGESPEED_KERNEL_BASE_WAVEFORM_H_
 
+#include <memory>
 #include <utility>  // for pair
 
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string_util.h"
 
 namespace net_instaweb {
@@ -71,14 +71,14 @@ class Waveform {
               Writer* writer, MessageHandler* handler);
 
  private:
-  typedef std::pair<int64, double> TimeValue;
+  using TimeValue = std::pair<int64, double>;
 
   TimeValue* GetSample(int index);  // Must be called with mutex held.
   void AddHelper(double value);     // Must be called with mutex held.
 
   Timer* timer_;
   int capacity_;
-  scoped_array<TimeValue> samples_;
+  std::unique_ptr<TimeValue[]> samples_;
   int start_index_;
   int size_;
   int64 first_sample_timestamp_us_;
@@ -93,7 +93,8 @@ class Waveform {
   // May be NULL.
   UpDownCounter* metric_;
 
-  DISALLOW_COPY_AND_ASSIGN(Waveform);
+  Waveform(const Waveform&) = delete;
+  Waveform& operator=(const Waveform&) = delete;
 };
 
 }  // namespace net_instaweb

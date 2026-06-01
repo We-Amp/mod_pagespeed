@@ -31,7 +31,6 @@
 #include "pagespeed/kernel/base/file_system.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/null_message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/stack_buffer.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -181,7 +180,8 @@ class HttpResponseWriter : public Writer {
   ResponseHeaders* response_;
   std::unique_ptr<GzipInflater> inflater_;
 
-  DISALLOW_COPY_AND_ASSIGN(HttpResponseWriter);
+  HttpResponseWriter(const HttpResponseWriter&) = delete;
+  HttpResponseWriter& operator=(const HttpResponseWriter&) = delete;
 };
 
 void HttpDumpUrlFetcher::Fetch(const GoogleString& url, MessageHandler* handler,

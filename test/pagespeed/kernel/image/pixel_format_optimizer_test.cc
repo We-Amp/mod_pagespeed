@@ -17,11 +17,12 @@
  * under the License.
  */
 
+#include <memory>
+
 #include "pagespeed/kernel/image/pixel_format_optimizer.h"
 
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/null_mutex.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/image/png_optimizer.h"
 #include "test/pagespeed/kernel/base/gtest.h"
@@ -91,7 +92,8 @@ class PixelFormatOptimizerTest : public testing::Test {
   void* scanline_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(PixelFormatOptimizerTest);
+  PixelFormatOptimizerTest(const PixelFormatOptimizerTest&) = delete;
+  PixelFormatOptimizerTest& operator=(const PixelFormatOptimizerTest&) = delete;
 };
 
 // The optimizable image will be converted to a new image.

@@ -20,6 +20,7 @@
 #include "net/instaweb/rewriter/public/critical_images_finder.h"
 
 #include <map>
+#include <memory>
 
 #include "base/logging.h"
 #include "net/instaweb/http/public/request_context.h"
@@ -35,7 +36,6 @@
 #include "pagespeed/kernel/base/json.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/proto_util.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/http/google_url.h"
@@ -391,7 +391,7 @@ RenderedImages* CriticalImagesFinder::JsonMapToRenderedImagesMap(
       return nullptr;
     }
     // Put the extracted map into RenderedImages proto data.
-    RenderedImages* rendered_images = new RenderedImages();
+    std::unique_ptr<RenderedImages> rendered_images(new RenderedImages());
     Json::Value::Members imgs = json_rendered_image_map.getMemberNames();
     for (int i = 0, n = imgs.size(); i < n; ++i) {
       const GoogleString& img_src = imgs[i];
@@ -420,7 +420,7 @@ RenderedImages* CriticalImagesFinder::JsonMapToRenderedImagesMap(
         images->set_rendered_height(rendered_height);
       }
     }
-    return rendered_images;
+    return rendered_images.release();
   } catch (std::exception& e) {
     LOG(WARNING) << "Bad Json rendered image dimensions map";
     return nullptr;

@@ -17,6 +17,8 @@
  * under the License.
  */
 
+#include <memory>
+
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 
 #include "net/instaweb/http/public/async_fetch.h"
@@ -163,7 +165,8 @@ class RewriteDriverTest : public RewriteTestBase {
   }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(RewriteDriverTest);
+  RewriteDriverTest(const RewriteDriverTest&) = delete;
+  RewriteDriverTest& operator=(const RewriteDriverTest&) = delete;
 };
 
 namespace {
@@ -1623,7 +1626,8 @@ class InPlaceTest : public RewriteTestBase {
   }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(InPlaceTest);
+  InPlaceTest(const InPlaceTest&) = delete;
+  InPlaceTest& operator=(const InPlaceTest&) = delete;
 };
 
 TEST_F(InPlaceTest, FetchInPlaceResource) {
@@ -1891,7 +1895,8 @@ class RenderDoneCheckingFilter : public EmptyHtmlFilter {
  private:
   HtmlElement* element_;
   GoogleString src_;
-  DISALLOW_COPY_AND_ASSIGN(RenderDoneCheckingFilter);
+  RenderDoneCheckingFilter(const RenderDoneCheckingFilter&) = delete;
+  RenderDoneCheckingFilter& operator=(const RenderDoneCheckingFilter&) = delete;
 };
 
 TEST_F(RewriteDriverTest, RenderDoneTest) {

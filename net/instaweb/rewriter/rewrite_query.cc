@@ -21,6 +21,7 @@
 
 #include <algorithm>  // for std::binary_search
 #include <map>
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -35,7 +36,6 @@
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "pagespeed/kernel/base/message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_multi_map.h"
 #include "pagespeed/kernel/base/string_util.h"

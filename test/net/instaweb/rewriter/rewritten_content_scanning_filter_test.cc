@@ -25,7 +25,6 @@
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "net/instaweb/util/public/mock_property_page.h"
 #include "net/instaweb/util/public/property_cache.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "test/net/instaweb/rewriter/rewrite_test_base.h"
 #include "test/net/instaweb/rewriter/test_url_namer.h"
@@ -73,7 +72,8 @@ class RewrittenContentScanningFilterTest : public RewriteTestBase {
 
  private:
   std::unique_ptr<TestUrlNamer> url_namer_;
-  DISALLOW_COPY_AND_ASSIGN(RewrittenContentScanningFilterTest);
+  RewrittenContentScanningFilterTest(const RewrittenContentScanningFilterTest&) = delete;
+  RewrittenContentScanningFilterTest& operator=(const RewrittenContentScanningFilterTest&) = delete;
 };
 
 TEST_F(RewrittenContentScanningFilterTest, NoRewrittenResource) {

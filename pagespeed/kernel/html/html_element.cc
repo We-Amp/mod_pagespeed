@@ -20,9 +20,9 @@
 #include "pagespeed/kernel/html/html_element.h"
 
 #include <cstdio>
+#include <memory>
 
 #include "base/logging.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/html/html_event.h"
@@ -222,7 +222,7 @@ void HtmlElement::AddEscapedAttribute(const HtmlName& name,
 }
 
 void HtmlElement::Attribute::CopyValue(const StringPiece& src,
-                                       scoped_array<char>* dst) {
+                                       std::unique_ptr<char[]>* dst) {
   if (src.data() == nullptr) {
     // This case indicates attribute without value <tag attr>, as opposed
     // to data()=="", which implies an empty value <tag attr=>.
@@ -262,7 +262,6 @@ void HtmlElement::Attribute::SetValue(const StringPiece& decoded_value) {
 }
 
 void HtmlElement::Attribute::SetEscapedValue(const StringPiece& escaped_value) {
-  GoogleString buf;
   // Note that we execute the lines in this order in case value
   // is a substring of value_.  This copies the value just prior
   // to deallocation of the old value_.

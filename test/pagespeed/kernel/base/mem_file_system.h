@@ -21,12 +21,12 @@
 #define PAGESPEED_KERNEL_BASE_MEM_FILE_SYSTEM_H_
 
 #include <map>
+#include <memory>
 
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/callback.h"
 #include "pagespeed/kernel/base/file_system.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_annotations.h"
@@ -80,15 +80,6 @@ class MemFileSystem : public FileSystem {
             MessageHandler* handler) const override;
   BoolOrError Exists(const char* path, MessageHandler* handler) override;
   BoolOrError IsDir(const char* path, MessageHandler* handler) override;
-
-  BoolOrError TryLock(const StringPiece& lock_name,
-                      MessageHandler* handler) override;
-  BoolOrError TryLockWithTimeout(const StringPiece& lock_name, int64 timeout_ms,
-                                 const Timer* timer,
-                                 MessageHandler* handler) override;
-  bool BumpLockTimeout(const StringPiece& lock_name,
-                       MessageHandler* handler) override;
-  bool Unlock(const StringPiece& lock_name, MessageHandler* handler) override;
 
   // When atime is disabled, reading a file will not update its atime.
   void set_atime_enabled(bool enabled) {
@@ -171,8 +162,6 @@ class MemFileSystem : public FileSystem {
       SHARED_LOCKS_REQUIRED(all_else_mutex_);
 
   std::unique_ptr<AbstractMutex>
-      lock_map_mutex_;  // controls access to lock_map_
-  std::unique_ptr<AbstractMutex>
       all_else_mutex_;  // controls access to all else.
 
   // When disabled, OpenInputFile returns NULL.
@@ -192,9 +181,6 @@ class MemFileSystem : public FileSystem {
   std::map<GoogleString, int64> atime_map_ GUARDED_BY(all_else_mutex_);
   std::map<GoogleString, int64> mtime_map_ GUARDED_BY(all_else_mutex_);
   int temp_file_index_ GUARDED_BY(all_else_mutex_);
-  // lock_map_ holds times that locks were established (in ms).
-  // locking and unlocking don't advance time.
-  std::map<GoogleString, int64> lock_map_ GUARDED_BY(lock_map_mutex_);
   bool atime_enabled_ GUARDED_BY(all_else_mutex_);
 
   // Indicates whether MemFileSystem will advance mock time whenever
@@ -210,7 +196,8 @@ class MemFileSystem : public FileSystem {
   // Hook to run after a file-write.
   std::unique_ptr<FileCallback> write_callback_;
 
-  DISALLOW_COPY_AND_ASSIGN(MemFileSystem);
+  MemFileSystem(const MemFileSystem&) = delete;
+  MemFileSystem& operator=(const MemFileSystem&) = delete;
 };
 
 }  // namespace net_instaweb

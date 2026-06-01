@@ -24,7 +24,6 @@
 #include "net/instaweb/rewriter/public/javascript_library_identification.h"
 #include "pagespeed/kernel/base/google_message_handler.h"
 #include "pagespeed/kernel/base/md5_hasher.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_system.h"
@@ -255,7 +254,8 @@ class JsCodeBlockTest : public ::testing::Test,
   const char* after_compilation_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(JsCodeBlockTest);
+  JsCodeBlockTest(const JsCodeBlockTest&) = delete;
+  JsCodeBlockTest& operator=(const JsCodeBlockTest&) = delete;
 };
 
 TEST_P(JsCodeBlockTest, Config) {

@@ -17,6 +17,8 @@
  * under the License.
  */
 
+#include <memory>
+
 #include "test/net/instaweb/http/mock_url_fetcher.h"
 
 #include "net/instaweb/http/public/async_fetch.h"
@@ -24,7 +26,6 @@
 #include "net/instaweb/http/public/url_async_fetcher.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/google_message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/base/time_util.h"
@@ -67,7 +68,8 @@ class MockFetchContainer {
   ThreadSystem* thread_system_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(MockFetchContainer);
+  MockFetchContainer(const MockFetchContainer&) = delete;
+  MockFetchContainer& operator=(const MockFetchContainer&) = delete;
 };
 
 class MockUrlFetcherTest : public ::testing::Test {

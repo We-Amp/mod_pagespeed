@@ -17,12 +17,10 @@
  * under the License.
  */
 
-// Unit tests for EnvoyHtmlRewriter.
-// Note: These tests focus on the state machine and detection logic that can
-// be tested without the full Envoy infrastructure. Integration testing of
-// the full HTML rewriting path requires the system tests.
+// Unit tests for EnvoyRewriteOptions HTML rewriting settings.
+// Integration testing of the full HTML rewriting path requires the system tests.
 
-#include "pagespeed/envoy/envoy_html_rewriter.h"
+#include <memory>
 
 #include "gtest/gtest.h"
 #include "pagespeed/envoy/envoy_rewrite_options.h"

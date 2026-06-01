@@ -20,9 +20,10 @@
 #ifndef PAGESPEED_CONTROLLER_EXPENSIVE_OPERATION_CALLBACK_H_
 #define PAGESPEED_CONTROLLER_EXPENSIVE_OPERATION_CALLBACK_H_
 
+#include <memory>
+
 #include "pagespeed/controller/central_controller_callback.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/thread/sequence.h"
 
 // Callback classes to support ExpensiveOperation features in CentralController.
@@ -42,7 +43,9 @@ class ExpensiveOperationContext {
   ExpensiveOperationContext();
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(ExpensiveOperationContext);
+  ExpensiveOperationContext(const ExpensiveOperationContext&) = delete;
+  ExpensiveOperationContext& operator=(const ExpensiveOperationContext&) =
+      delete;
 };
 
 // Implementor interface to ExpensiveOperation features in CentralController.
@@ -58,7 +61,9 @@ class ExpensiveOperationCallback
       0;
   void CancelImpl() override = 0;
 
-  DISALLOW_COPY_AND_ASSIGN(ExpensiveOperationCallback);
+  ExpensiveOperationCallback(const ExpensiveOperationCallback&) = delete;
+  ExpensiveOperationCallback& operator=(const ExpensiveOperationCallback&) =
+      delete;
 };
 
 }  // namespace net_instaweb

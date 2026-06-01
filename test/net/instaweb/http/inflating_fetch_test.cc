@@ -29,7 +29,6 @@
 #include "net/instaweb/http/public/request_context.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/google_message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_system.h"
@@ -79,7 +78,8 @@ class MockFetch : public StringAsyncFetch {
   // If non-empty, EXPECT that each request must accept this encoding.
   GoogleString accept_encoding_;
 
-  DISALLOW_COPY_AND_ASSIGN(MockFetch);
+  MockFetch(const MockFetch&) = delete;
+  MockFetch& operator=(const MockFetch&) = delete;
 };
 
 class InflatingFetchTest : public testing::Test {

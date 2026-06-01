@@ -19,12 +19,18 @@
 
 #include "net/instaweb/rewriter/public/image_rewrite_filter.h"
 
+#ifndef _WIN32
 #include <sys/resource.h>
 #include <sys/time.h>
+
+#include <memory>
+#endif
 
 #include <algorithm>
 #include <climits>
 #include <cstdarg>
+#include <cstddef>
+#include <cstdint>
 #include <utility>
 #include <vector>
 
@@ -60,7 +66,6 @@
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/escaping.h"
 #include "pagespeed/kernel/base/message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -375,7 +380,7 @@ const char* MessageForInlineResult(InlineResult inline_result) {
 
 class ImageRewriteFilter::Context : public SingleRewriteContext {
  public:
-  enum class Place {
+  enum class Place : std::uint8_t {
     kCss,
     kFetch,
     kHtmlAttr,
@@ -435,7 +440,8 @@ class ImageRewriteFilter::Context : public SingleRewriteContext {
   bool in_noscript_element_;
   bool is_resized_using_rendered_dimensions_;
 
-  DISALLOW_COPY_AND_ASSIGN(Context);
+  Context(const Context&) = delete;
+  Context& operator=(const Context&) = delete;
 };
 
 class ImageRewriteFilter::Context::InvokeRewriteFunction
@@ -474,7 +480,8 @@ class ImageRewriteFilter::Context::InvokeRewriteFunction
   const ResourcePtr input_resource_;
   const OutputResourcePtr output_resource_;
 
-  DISALLOW_COPY_AND_ASSIGN(InvokeRewriteFunction);
+  InvokeRewriteFunction(const InvokeRewriteFunction&) = delete;
+  InvokeRewriteFunction& operator=(const InvokeRewriteFunction&) = delete;
 };
 
 // TODO(huibao): Move the logic for determining output format to a centralized
@@ -1960,8 +1967,9 @@ void ImageRewriteFilter::GetDimensions(
   // If the area of image using rendered dimensions is less than the dimensions
   // from the style or image tag attributes, then only resize using rendered
   // dimensions.
-  int64 rendered_area = rendered_width * rendered_height;
-  int64 image_attribute_area = page_dim->width() * page_dim->height();
+  int64 rendered_area = static_cast<int64>(rendered_width) * rendered_height;
+  int64 image_attribute_area =
+      static_cast<int64>(page_dim->width()) * page_dim->height();
   // Note: we check for image_attribute_area = 1 (-1 * -1 = 1) when we have
   // -1(unset) for both height and width from the image attributes.
   if (rendered_area != 0 &&

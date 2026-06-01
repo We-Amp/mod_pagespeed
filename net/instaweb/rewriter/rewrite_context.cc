@@ -60,7 +60,6 @@
 #include "pagespeed/kernel/base/named_lock_manager.h"
 #include "pagespeed/kernel/base/proto_util.h"
 #include "pagespeed/kernel/base/request_trace.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/shared_string.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/stl_util.h"
@@ -155,9 +154,20 @@ class FreshenMetadataUpdateManager {
     num_pending_freshens_++;
   }
 
+  // Returns a pointer into partitions_ for the caller to read/update.
+  // Thread safety: the mutex synchronizes the partitions_ pointer read
+  // (written by IncrementFreshens). The returned pointer is safe to use
+  // after the lock is released because:
+  //  1. Each callback accesses a unique (partition_index, input_index) pair,
+  //     so different callbacks write to separate heap-allocated sub-objects.
+  //  2. Cleanup() (which destroys partitions_ via delete this) requires
+  //     num_pending_freshens_ == 0, meaning every callback has already
+  //     called Done(). A callback still using its InputInfo* has not yet
+  //     called Done(), so the counter remains > 0 and Cleanup() cannot run.
   InputInfo* GetInputInfo(int partition_index, int input_index) {
+    ScopedMutex lock(mutex_.get());
+    DCHECK(partitions_ != nullptr);
     if (partition_index == kOtherDependencyPartitionIndex) {
-      // This is referring to the other dependency input info.
       return partitions_->mutable_other_dependency(input_index);
     }
     return partitions_->mutable_partition(partition_index)
@@ -170,6 +180,11 @@ class FreshenMetadataUpdateManager {
     return (num_pending_freshens_ == 0) && all_freshens_triggered_;
   }
 
+  // Called only when num_pending_freshens_ == 0 && all_freshens_triggered_,
+  // so no callback can still be using an InputInfo* from GetInputInfo().
+  // should_delete_cache_key_ is safe to read without the lock: the
+  // happens-before chain from the last Done() call (which released the
+  // mutex and set should_cleanup = true) guarantees visibility.
   void Cleanup() {
     if (should_delete_cache_key_) {
       // One of the resources changed. Delete the metadata.
@@ -799,18 +814,26 @@ class RewriteContext::FetchContext {
           // fetch path.
 
           response_headers->CopyFrom(*input_resource->response_headers());
-          const CachedResult* cached_result =
-              rewrite_context_->output_partition(0);
-          CHECK(cached_result != nullptr);
-          rewrite_context_->FixFetchFallbackHeaders(*cached_result,
-                                                    response_headers);
-          // Use the most conservative Cache-Control considering all inputs.
-          // Note that this is needed because FixFetchFallbackHeaders might
-          // actually relax things a bit if the input was no-cache.
-          AdjustCacheControl();
-          StringPiece contents = input_resource->ExtractUncompressedContents();
-          ok = rewrite_context_->SendFallbackResponse(
-              original_output_url_, contents, async_fetch_, handler_);
+          if (rewrite_context_->num_output_partitions() >= 1) {
+            // output_partition() returns &partitions_->partition(i) — address
+            // of a protobuf element, never null when index is in range.
+            const CachedResult* cached_result =
+                rewrite_context_->output_partition(0);
+            rewrite_context_->FixFetchFallbackHeaders(*cached_result,
+                                                      response_headers);
+            // Use the most conservative Cache-Control considering all inputs.
+            // Note that this is needed because FixFetchFallbackHeaders might
+            // actually relax things a bit if the input was no-cache.
+            AdjustCacheControl();
+            StringPiece contents =
+                input_resource->ExtractUncompressedContents();
+            ok = rewrite_context_->SendFallbackResponse(
+                original_output_url_, contents, async_fetch_, handler_);
+          } else {
+            handler_->Message(kWarning,
+                              "No output partitions for fallback fetch of %s",
+                              output_resource_->UrlEvenIfHashNotSet().c_str());
+          }
         } else {
           handler_->Warning(
               output_resource_->name().as_string().c_str(), 0,
@@ -860,9 +883,19 @@ class RewriteContext::FetchContext {
   void FetchFallbackDoneImpl(const StringPiece& contents,
                              const ResponseHeaders* headers) {
     async_fetch_->response_headers()->CopyFrom(*headers);
-    CHECK_EQ(1, rewrite_context_->num_output_partitions());
+    if (rewrite_context_->num_output_partitions() != 1) {
+      LOG(WARNING) << "FetchFallbackDoneImpl: expected 1 output partition, got "
+                   << rewrite_context_->num_output_partitions() << " for "
+                   << original_output_url_;
+      async_fetch_->response_headers()->SetStatusAndReason(
+          HttpStatus::kNotFound);
+      async_fetch_->HeadersComplete();
+      rewrite_context_->FetchCallbackDone(false);
+      return;
+    }
+    // output_partition() returns &partitions_->partition(i) — address of a
+    // protobuf element, never null when index is in range.
     const CachedResult* cached_result = rewrite_context_->output_partition(0);
-    CHECK(cached_result != nullptr);
     rewrite_context_->FixFetchFallbackHeaders(*cached_result,
                                               async_fetch_->response_headers());
     // Use the most conservative Cache-Control considering all inputs.

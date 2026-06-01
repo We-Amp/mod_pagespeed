@@ -22,6 +22,8 @@
 #ifndef PAGESPEED_APACHE_INSTAWEB_HANDLER_H_
 #define PAGESPEED_APACHE_INSTAWEB_HANDLER_H_
 
+#include <memory>
+
 #include "apr_pools.h"  // for apr_status_t
 #include "net/instaweb/http/public/request_context.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
@@ -29,7 +31,6 @@
 #include "net/instaweb/rewriter/public/rewrite_query.h"
 #include "pagespeed/apache/apache_fetch.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/http/content_type.h"
@@ -239,6 +240,11 @@ class InstawebHandler {
   static bool parse_body_from_post(const request_rec* request,
                                    GoogleString* data, apr_status_t* ret);
 
+  // Read the raw POST body without content-type validation.
+  // Used for JSON API endpoints (e.g. /v1/license/*).
+  static bool read_post_body(const request_rec* request, GoogleString* data,
+                             apr_status_t* ret);
+
   static apr_status_t instaweb_beacon_handler(
       request_rec* request, ApacheServerContext* server_context);
 
@@ -270,7 +276,8 @@ class InstawebHandler {
   RewriteQuery rewrite_query_;
   ApacheFetch* fetch_;
 
-  DISALLOW_COPY_AND_ASSIGN(InstawebHandler);
+  InstawebHandler(const InstawebHandler&) = delete;
+  InstawebHandler& operator=(const InstawebHandler&) = delete;
 };
 
 }  // namespace net_instaweb

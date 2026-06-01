@@ -22,9 +22,10 @@
 #ifndef PAGESPEED_KERNEL_HTML_HTML_PARSE_TEST_BASE_H_
 #define PAGESPEED_KERNEL_HTML_HTML_PARSE_TEST_BASE_H_
 
+#include <memory>
+
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/null_mutex.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/string_writer.h"
@@ -146,7 +147,8 @@ class HtmlParseTestBaseNoAlloc : public testing::Test {
   GoogleString doctype_string_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(HtmlParseTestBaseNoAlloc);
+  HtmlParseTestBaseNoAlloc(const HtmlParseTestBaseNoAlloc&) = delete;
+  HtmlParseTestBaseNoAlloc& operator=(const HtmlParseTestBaseNoAlloc&) = delete;
 };
 
 class HtmlParseTestBase : public HtmlParseTestBaseNoAlloc {
@@ -159,7 +161,8 @@ class HtmlParseTestBase : public HtmlParseTestBaseNoAlloc {
   HtmlParse html_parse_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(HtmlParseTestBase);
+  HtmlParseTestBase(const HtmlParseTestBase&) = delete;
+  HtmlParseTestBase& operator=(const HtmlParseTestBase&) = delete;
 };
 
 }  // namespace net_instaweb

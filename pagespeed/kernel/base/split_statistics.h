@@ -27,9 +27,10 @@
 #ifndef PAGESPEED_KERNEL_BASE_SPLIT_STATISTICS_H_
 #define PAGESPEED_KERNEL_BASE_SPLIT_STATISTICS_H_
 
+#include <memory>
+
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/statistics_template.h"
 #include "pagespeed/kernel/base/string_util.h"  // for StringPiece
@@ -59,7 +60,8 @@ class SplitUpDownCounter : public UpDownCounter {
  private:
   UpDownCounter* rw_;
   UpDownCounter* w_;
-  DISALLOW_COPY_AND_ASSIGN(SplitUpDownCounter);
+  SplitUpDownCounter(const SplitUpDownCounter&) = delete;
+  SplitUpDownCounter& operator=(const SplitUpDownCounter&) = delete;
 };
 
 class SplitVariable : public Variable {
@@ -77,7 +79,8 @@ class SplitVariable : public Variable {
  private:
   Variable* rw_;
   Variable* w_;
-  DISALLOW_COPY_AND_ASSIGN(SplitVariable);
+  SplitVariable(const SplitVariable&) = delete;
+  SplitVariable& operator=(const SplitVariable&) = delete;
 };
 
 // A histogram that forwards writes to two other Histogram objects,
@@ -119,7 +122,8 @@ class SplitHistogram : public Histogram {
   Histogram* rw_;
   Histogram* w_;
 
-  DISALLOW_COPY_AND_ASSIGN(SplitHistogram);
+  SplitHistogram(const SplitHistogram&) = delete;
+  SplitHistogram& operator=(const SplitHistogram&) = delete;
 };
 
 // A timed variable that forwards writes writes to two other TimedVariable
@@ -140,7 +144,8 @@ class SplitTimedVariable : public TimedVariable {
   TimedVariable* rw_;
   TimedVariable* w_;
 
-  DISALLOW_COPY_AND_ASSIGN(SplitTimedVariable);
+  SplitTimedVariable(const SplitTimedVariable&) = delete;
+  SplitTimedVariable& operator=(const SplitTimedVariable&) = delete;
 };
 
 class SplitStatistics
@@ -178,7 +183,8 @@ class SplitStatistics
   ThreadSystem* thread_system_;
   std::unique_ptr<Statistics> local_;
   Statistics* global_;
-  DISALLOW_COPY_AND_ASSIGN(SplitStatistics);
+  SplitStatistics(const SplitStatistics&) = delete;
+  SplitStatistics& operator=(const SplitStatistics&) = delete;
 };
 
 }  // namespace net_instaweb

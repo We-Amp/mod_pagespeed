@@ -22,6 +22,7 @@
 #include "pagespeed/opt/http/property_cache.h"
 
 #include <cstddef>
+#include <memory>
 
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/string.h"
@@ -140,7 +141,8 @@ class PropertyCacheTest : public testing::Test {
   const PropertyCache::Cohort* cohort_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(PropertyCacheTest);
+  PropertyCacheTest(const PropertyCacheTest&) = delete;
+  PropertyCacheTest& operator=(const PropertyCacheTest&) = delete;
 };
 
 TEST_F(PropertyCacheTest, TrackStability) {

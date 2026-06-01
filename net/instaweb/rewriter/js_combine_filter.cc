@@ -28,6 +28,7 @@
 #include "net/instaweb/rewriter/public/js_combine_filter.h"
 
 #include <map>
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -49,7 +50,6 @@
 #include "net/instaweb/rewriter/public/url_partnership.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/function.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/stl_util.h"
 #include "pagespeed/kernel/base/string.h"
@@ -175,7 +175,7 @@ class JsCombineFilter::JsCombiner : public ResourceCombiner {
   }
 
  private:
-  typedef std::map<const Resource*, JavascriptCodeBlock*> CodeBlockMap;
+  using CodeBlockMap = std::map<const Resource*, JavascriptCodeBlock*>;
 
   const ContentType* CombinationContentType() override {
     return &kContentTypeJavascript;
@@ -202,7 +202,8 @@ class JsCombineFilter::JsCombiner : public ResourceCombiner {
   std::unique_ptr<JavascriptRewriteConfig> config_;
   CodeBlockMap code_blocks_;
 
-  DISALLOW_COPY_AND_ASSIGN(JsCombiner);
+  JsCombiner(const JsCombiner&) = delete;
+  JsCombiner& operator=(const JsCombiner&) = delete;
 };
 
 class JsCombineFilter::Context : public RewriteContext {
@@ -368,7 +369,7 @@ class JsCombineFilter::Context : public RewriteContext {
             slot(partition->input(i).index())->set_disable_rendering(true);
           }
         }  // if (can_rewrite)
-      }    // if (partition_size > 1)
+      }  // if (partition_size > 1)
     }
   }
 
@@ -484,7 +485,7 @@ bool JsCombineFilter::JsCombiner::WritePiece(int index, int num_pieces,
 JavascriptCodeBlock* JsCombineFilter::JsCombiner::BlockForResource(
     const Resource* input) {
   std::pair<CodeBlockMap::iterator, bool> insert_result =
-      code_blocks_.insert(CodeBlockMap::value_type(input, NULL));
+      code_blocks_.insert(CodeBlockMap::value_type(input, nullptr));
 
   if (insert_result.second) {
     // Actually inserted, so we need a value.

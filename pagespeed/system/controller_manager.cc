@@ -28,6 +28,7 @@
 #include <cerrno>
 #include <csignal>
 #include <cstdlib>
+#include <memory>
 
 #include "base/logging.h"
 #include "pagespeed/kernel/base/string.h"

@@ -59,7 +59,6 @@
 #include "pagespeed/kernel/base/charset_util.h"
 #include "pagespeed/kernel/base/hasher.h"
 #include "pagespeed/kernel/base/message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -107,7 +106,9 @@ class SimpleAbsolutifyTransformer : public CssTagScanner::Transformer {
 
  private:
   const GoogleUrl* base_url_;
-  DISALLOW_COPY_AND_ASSIGN(SimpleAbsolutifyTransformer);
+  SimpleAbsolutifyTransformer(const SimpleAbsolutifyTransformer&) = delete;
+  SimpleAbsolutifyTransformer& operator=(const SimpleAbsolutifyTransformer&) =
+      delete;
 };
 
 // All of the options that can affect image optimization can also affect

@@ -22,6 +22,7 @@
 #include "net/instaweb/rewriter/public/server_context.h"
 
 #include <cstddef>  // for size_t
+#include <memory>
 
 #include "base/logging.h"
 #include "net/instaweb/http/public/async_fetch.h"
@@ -50,7 +51,6 @@
 #include "net/instaweb/util/public/property_cache.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/ref_counted_ptr.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_hash.h"
@@ -631,7 +631,8 @@ class MockRewriteFilter : public RewriteFilter {
   void EndElementImpl(HtmlElement* element) override {}
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(MockRewriteFilter);
+  MockRewriteFilter(const MockRewriteFilter&) = delete;
+  MockRewriteFilter& operator=(const MockRewriteFilter&) = delete;
 };
 
 class CreateMockRewriterCallback
@@ -644,7 +645,8 @@ class CreateMockRewriterCallback
   }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(CreateMockRewriterCallback);
+  CreateMockRewriterCallback(const CreateMockRewriterCallback&) = delete;
+  CreateMockRewriterCallback& operator=(const CreateMockRewriterCallback&) = delete;
 };
 
 class MockPlatformConfigCallback
@@ -657,7 +659,8 @@ class MockPlatformConfigCallback
 
  private:
   RewriteDriver** result_ptr_;
-  DISALLOW_COPY_AND_ASSIGN(MockPlatformConfigCallback);
+  MockPlatformConfigCallback(const MockPlatformConfigCallback&) = delete;
+  MockPlatformConfigCallback& operator=(const MockPlatformConfigCallback&) = delete;
 };
 
 // Tests that platform-specific configuration hook runs for various
@@ -1643,7 +1646,7 @@ TEST_F(ServerContextTest, PartlyFailedFetch) {
   SetFetchResponse(abs_url, non_cacheable, "foo");
 
   // We tell the fetcher to quash the zero-bytes writes, as that behavior
-  // (which Serf has) made the bug more severe, with not only
+  // (which some fetchers exhibit) made the bug more severe, with not only
   // loaded() and HttpStatusOk() lying, but also contents() crashing.
   mock_url_fetcher()->set_omit_empty_writes(true);
 

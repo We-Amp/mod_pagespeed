@@ -20,12 +20,13 @@
 //
 // Unit tests for AddHeadersFetcher.
 //
+#include <memory>
+
 #include "pagespeed/system/add_headers_fetcher.h"
 
 #include "net/instaweb/http/public/request_context.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "pagespeed/kernel/base/google_message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_system.h"  // for ThreadSystem
 #include "pagespeed/kernel/http/request_headers.h"

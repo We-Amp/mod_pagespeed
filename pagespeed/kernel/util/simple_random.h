@@ -20,9 +20,10 @@
 #ifndef PAGESPEED_KERNEL_UTIL_SIMPLE_RANDOM_H_
 #define PAGESPEED_KERNEL_UTIL_SIMPLE_RANDOM_H_
 
+#include <memory>
+
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 
 namespace net_instaweb {

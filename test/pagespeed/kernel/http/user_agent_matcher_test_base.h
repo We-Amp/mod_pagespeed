@@ -20,7 +20,8 @@
 #ifndef PAGESPEED_KERNEL_HTTP_USER_AGENT_MATCHER_TEST_BASE_H_
 #define PAGESPEED_KERNEL_HTTP_USER_AGENT_MATCHER_TEST_BASE_H_
 
-#include "pagespeed/kernel/base/scoped_ptr.h"
+#include <memory>
+
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/http/user_agent_matcher.h"
 #include "test/pagespeed/kernel/base/gtest.h"

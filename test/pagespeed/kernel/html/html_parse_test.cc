@@ -26,7 +26,6 @@
 
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/string_writer.h"
@@ -166,7 +165,8 @@ class AttrValuesSaverFilter : public EmptyHtmlFilter {
  private:
   GoogleString value_;
 
-  DISALLOW_COPY_AND_ASSIGN(AttrValuesSaverFilter);
+  AttrValuesSaverFilter(const AttrValuesSaverFilter&) = delete;
+  AttrValuesSaverFilter& operator=(const AttrValuesSaverFilter&) = delete;
 };
 
 TEST_F(HtmlParseTest, EscapedSingleQuote) {
@@ -1273,7 +1273,8 @@ class HandlerCalledFilter : public HtmlFilter {
  private:
   bool enabled_value_;
 
-  DISALLOW_COPY_AND_ASSIGN(HandlerCalledFilter);
+  HandlerCalledFilter(const HandlerCalledFilter&) = delete;
+  HandlerCalledFilter& operator=(const HandlerCalledFilter&) = delete;
 };
 
 class HandlerCalledTest : public HtmlParseTest {
@@ -1291,7 +1292,8 @@ class HandlerCalledTest : public HtmlParseTest {
   HandlerCalledFilter* second_event_listener_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(HandlerCalledTest);
+  HandlerCalledTest(const HandlerCalledTest&) = delete;
+  HandlerCalledTest& operator=(const HandlerCalledTest&) = delete;
 };
 
 // Check that StartDocument and EndDocument were called for filters.
@@ -1447,7 +1449,8 @@ class EventListManipulationTest : public HtmlParseTest {
   HtmlCharactersNode* node3_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(EventListManipulationTest);
+  EventListManipulationTest(const EventListManipulationTest&) = delete;
+  EventListManipulationTest& operator=(const EventListManipulationTest&) = delete;
 };
 
 TEST_F(EventListManipulationTest, TestReplace) {
@@ -1798,7 +1801,8 @@ class InsertCommentOnFirstDivFilter : public EmptyHtmlFilter {
   bool at_start_;
   bool first_;
 
-  DISALLOW_COPY_AND_ASSIGN(InsertCommentOnFirstDivFilter);
+  InsertCommentOnFirstDivFilter(const InsertCommentOnFirstDivFilter&) = delete;
+  InsertCommentOnFirstDivFilter& operator=(const InsertCommentOnFirstDivFilter&) = delete;
 };
 
 TEST_F(HtmlParseTestNoBody, CommentInsideFirstDiv) {
@@ -1927,7 +1931,8 @@ class AttributeManipulationTest : public HtmlParseTest {
   HtmlElement* node_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(AttributeManipulationTest);
+  AttributeManipulationTest(const AttributeManipulationTest&) = delete;
+  AttributeManipulationTest& operator=(const AttributeManipulationTest&) = delete;
 };
 
 TEST_F(AttributeManipulationTest, PropertiesAndDeserialize) {
@@ -2145,7 +2150,8 @@ class CountingCallbacksFilter : public EmptyHtmlFilter {
   int num_end_elements_;
   int num_char_elements_;
 
-  DISALLOW_COPY_AND_ASSIGN(CountingCallbacksFilter);
+  CountingCallbacksFilter(const CountingCallbacksFilter&) = delete;
+  CountingCallbacksFilter& operator=(const CountingCallbacksFilter&) = delete;
 };
 
 TEST_F(HtmlParseTest, BufferEventsOnEventListener) {
@@ -2276,7 +2282,8 @@ class DeleteNodesFilter : public CountingCallbacksFilter {
   int num_deleted_elements_;
   int flushes_preventing_delete_;
 
-  DISALLOW_COPY_AND_ASSIGN(DeleteNodesFilter);
+  DeleteNodesFilter(const DeleteNodesFilter&) = delete;
+  DeleteNodesFilter& operator=(const DeleteNodesFilter&) = delete;
 };
 
 class HtmlParseDeleteTest : public HtmlParseTest {
@@ -2387,7 +2394,8 @@ class EventListOrderTest : public HtmlParseTest {
   DeleteNodesFilter delete_nodes_filter_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(EventListOrderTest);
+  EventListOrderTest(const EventListOrderTest&) = delete;
+  EventListOrderTest& operator=(const EventListOrderTest&) = delete;
 };
 
 TEST_F(EventListOrderTest, DeleteSavingChildrenCalledOnOpen) {
@@ -2613,7 +2621,8 @@ class RestoreNodesFilter : public CountingCallbacksFilter {
   int num_deletes_;
   bool restore_on_open_;
 
-  DISALLOW_COPY_AND_ASSIGN(RestoreNodesFilter);
+  RestoreNodesFilter(const RestoreNodesFilter&) = delete;
+  RestoreNodesFilter& operator=(const RestoreNodesFilter&) = delete;
 };
 
 class HtmlRestoreTest : public HtmlParseTest {
@@ -2754,7 +2763,8 @@ class HtmlRestoreTest : public HtmlParseTest {
   bool expect_restored_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(HtmlRestoreTest);
+  HtmlRestoreTest(const HtmlRestoreTest&) = delete;
+  HtmlRestoreTest& operator=(const HtmlRestoreTest&) = delete;
 };
 
 TEST_F(HtmlRestoreTest, MoveAAfterB) {
@@ -3090,7 +3100,8 @@ class InsertScriptsFilter : public EmptyHtmlFilter {
   bool before_;
   bool external_;
 
-  DISALLOW_COPY_AND_ASSIGN(InsertScriptsFilter);
+  InsertScriptsFilter(const InsertScriptsFilter&) = delete;
+  InsertScriptsFilter& operator=(const InsertScriptsFilter&) = delete;
 };
 
 TEST_F(HtmlParseTestNoBody, InsertInlineScriptAfterStartOfHead) {

@@ -19,9 +19,10 @@
 
 // Unit tests for RequestContext.
 
+#include <memory>
+
 #include "pagespeed/opt/http/request_context.h"
 
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/util/platform.h"
 #include "test/pagespeed/kernel/base/gtest.h"
@@ -38,7 +39,8 @@ class RequestContextTest : public testing::Test {
 
  private:
   std::unique_ptr<ThreadSystem> thread_system_;
-  DISALLOW_COPY_AND_ASSIGN(RequestContextTest);
+  RequestContextTest(const RequestContextTest&) = delete;
+  RequestContextTest& operator=(const RequestContextTest&) = delete;
 };
 
 TEST_F(RequestContextTest, ViaHttp2) {

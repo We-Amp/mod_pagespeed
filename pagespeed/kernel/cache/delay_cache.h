@@ -32,10 +32,10 @@
 #define PAGESPEED_KERNEL_CACHE_DELAY_CACHE_H_
 
 #include <map>
+#include <memory>
 
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/shared_string.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -86,14 +86,15 @@ class DelayCache : public CacheInterface {
 
   void LookupComplete(DelayCallback* callback);
 
-  typedef std::map<GoogleString, DelayCallback*> DelayMap;
+  using DelayMap = std::map<GoogleString, DelayCallback*>;
 
   CacheInterface* cache_;
   std::unique_ptr<AbstractMutex> mutex_;
   StringSet delay_requests_;
   DelayMap delay_map_;
 
-  DISALLOW_COPY_AND_ASSIGN(DelayCache);
+  DelayCache(const DelayCache&) = delete;
+  DelayCache& operator=(const DelayCache&) = delete;
 };
 
 }  // namespace net_instaweb

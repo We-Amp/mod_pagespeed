@@ -20,9 +20,10 @@
 #ifndef PAGESPEED_KERNEL_SHAREDMEM_SHARED_MEM_STATISTICS_TEST_BASE_H_
 #define PAGESPEED_KERNEL_SHAREDMEM_SHARED_MEM_STATISTICS_TEST_BASE_H_
 
+#include <memory>
+
 #include "pagespeed/kernel/base/abstract_shared_mem.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/sharedmem/shared_mem_statistics.h"
@@ -92,7 +93,8 @@ class SharedMemStatisticsTestBase : public testing::Test {
   std::unique_ptr<AbstractSharedMem> shmem_runtime_;
   std::unique_ptr<MockTimer> timer_;
 
-  DISALLOW_COPY_AND_ASSIGN(SharedMemStatisticsTestBase);
+  SharedMemStatisticsTestBase(const SharedMemStatisticsTestBase&) = delete;
+  SharedMemStatisticsTestBase& operator=(const SharedMemStatisticsTestBase&) = delete;
 };
 
 template <typename ConcreteTestEnv>

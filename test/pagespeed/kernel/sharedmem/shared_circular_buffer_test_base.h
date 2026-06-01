@@ -20,10 +20,11 @@
 #ifndef PAGESPEED_KERNEL_SHAREDMEM_SHARED_CIRCULAR_BUFFER_TEST_BASE_H_
 #define PAGESPEED_KERNEL_SHAREDMEM_SHARED_CIRCULAR_BUFFER_TEST_BASE_H_
 
+#include <memory>
+
 #include "pagespeed/kernel/base/abstract_shared_mem.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/null_message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/base/mock_message_handler.h"
@@ -80,7 +81,8 @@ class SharedCircularBufferTestBase : public testing::Test {
   // Used to check buffer content in a child process.
   StringPiece expected_result_;
 
-  DISALLOW_COPY_AND_ASSIGN(SharedCircularBufferTestBase);
+  SharedCircularBufferTestBase(const SharedCircularBufferTestBase&) = delete;
+  SharedCircularBufferTestBase& operator=(const SharedCircularBufferTestBase&) = delete;
 };
 
 template <typename ConcreteTestEnv>

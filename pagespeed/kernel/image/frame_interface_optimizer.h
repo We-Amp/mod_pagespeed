@@ -21,9 +21,9 @@
 #define PAGESPEED_KERNEL_IMAGE_FRAME_INTERFACE_OPTIMIZER_H_
 
 #include <cstddef>
+#include <memory>
 
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/image/image_frame_interface.h"
 #include "pagespeed/kernel/image/image_util.h"
 #include "pagespeed/kernel/image/scanline_status.h"
@@ -86,12 +86,12 @@ class MultipleFramePaddingReader : public MultipleFrameReader {
   size_px current_scanline_idx_;
 
   // The current scanline being read in the current (padded) frame.
-  net_instaweb::scoped_array<uint8_t> current_scanline_;
+  std::unique_ptr<uint8_t[]> current_scanline_;
 
   // A template scanline consisting of purely the padding background
   // color. We copy this to current_scanline_ and overwrite the
   // appropriate locations with the contents of the non-padded frame.
-  net_instaweb::scoped_array<uint8_t> scanline_template_;
+  std::unique_ptr<uint8_t[]> scanline_template_;
 
   // The number of bytes per pixel in the current frame.
   size_t bytes_per_pixel_;
@@ -101,7 +101,9 @@ class MultipleFramePaddingReader : public MultipleFrameReader {
   // which contain the frame.
   uint8_t* foreground_scanline_start_byte_;
 
-  DISALLOW_COPY_AND_ASSIGN(MultipleFramePaddingReader);
+  MultipleFramePaddingReader(const MultipleFramePaddingReader&) = delete;
+  MultipleFramePaddingReader& operator=(const MultipleFramePaddingReader&) =
+      delete;
 };
 
 }  // namespace image_compression

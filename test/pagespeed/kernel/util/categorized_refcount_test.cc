@@ -20,10 +20,11 @@
 //
 // Unit tests for CategorizedRefcount
 
+#include <memory>
+
 #include "pagespeed/kernel/util/categorized_refcount.h"
 
 #include "pagespeed/kernel/base/abstract_mutex.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/util/platform.h"
 #include "test/pagespeed/kernel/base/gtest.h"

@@ -20,10 +20,11 @@
 #ifndef NET_INSTAWEB_HTTP_PUBLIC_ASYNC_FETCH_WITH_LOCK_H_
 #define NET_INSTAWEB_HTTP_PUBLIC_ASYNC_FETCH_WITH_LOCK_H_
 
+#include <memory>
+
 #include "net/instaweb/http/public/async_fetch.h"
 #include "net/instaweb/http/public/request_context.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 
@@ -125,7 +126,8 @@ class AsyncFetchWithLock : public AsyncFetch {
 
   friend class RewriteContextTest;
 
-  DISALLOW_COPY_AND_ASSIGN(AsyncFetchWithLock);
+  AsyncFetchWithLock(const AsyncFetchWithLock&) = delete;
+  AsyncFetchWithLock& operator=(const AsyncFetchWithLock&) = delete;
 };
 
 }  // namespace net_instaweb

@@ -20,8 +20,9 @@
 #ifndef PAGESPEED_KERNEL_HTML_REMOVE_COMMENTS_FILTER_H_
 #define PAGESPEED_KERNEL_HTML_REMOVE_COMMENTS_FILTER_H_
 
+#include <memory>
+
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/html/empty_html_filter.h"
 
@@ -50,7 +51,8 @@ class RemoveCommentsFilter : public EmptyHtmlFilter {
     virtual bool IsRetainedComment(const StringPiece& comment) const = 0;
 
    private:
-    DISALLOW_COPY_AND_ASSIGN(OptionsInterface);
+    OptionsInterface(const OptionsInterface&) = delete;
+    OptionsInterface& operator=(const OptionsInterface&) = delete;
   };
 
   explicit RemoveCommentsFilter(HtmlParse* html_parse)
@@ -71,7 +73,8 @@ class RemoveCommentsFilter : public EmptyHtmlFilter {
   HtmlParse* html_parse_;
   std::unique_ptr<const OptionsInterface> options_;
 
-  DISALLOW_COPY_AND_ASSIGN(RemoveCommentsFilter);
+  RemoveCommentsFilter(const RemoveCommentsFilter&) = delete;
+  RemoveCommentsFilter& operator=(const RemoveCommentsFilter&) = delete;
 };
 
 }  // namespace net_instaweb

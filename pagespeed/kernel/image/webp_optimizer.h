@@ -21,11 +21,11 @@
 #define PAGESPEED_KERNEL_IMAGE_WEBP_OPTIMIZER_H_
 
 #include <cstddef>
+#include <memory>
 
 #include "external/libwebp/src/webp/encode.h"
 #include "external/libwebp/src/webp/mux.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/image/image_frame_interface.h"
 #include "pagespeed/kernel/image/image_util.h"
@@ -46,7 +46,7 @@ struct WebpConfiguration : public ScanlineWriterConfig {
   // This contains a subset of the options in WebPConfig and
   // WebPPicture.
 
-  typedef bool (*WebpProgressHook)(int percent, void* user_data);
+  using WebpProgressHook = bool (*)(int percent, void* user_data);
 
   WebpConfiguration()
       : lossless(true),
@@ -211,7 +211,8 @@ class WebpFrameWriter : public MultipleFrameWriter {
   size_px kmin_;
   size_px kmax_;
 
-  DISALLOW_COPY_AND_ASSIGN(WebpFrameWriter);
+  WebpFrameWriter(const WebpFrameWriter&) = delete;
+  WebpFrameWriter& operator=(const WebpFrameWriter&) = delete;
 };
 
 // WebpScanlineReader decodes WebP images. It returns a scanline (a row of
@@ -259,11 +260,12 @@ class WebpScanlineReader : public ScanlineReaderInterface {
   bool was_initialized_;
 
   // Buffer for holding the decoded pixels.
-  net_instaweb::scoped_array<uint8_t> pixels_;
+  std::unique_ptr<uint8_t[]> pixels_;
 
   MessageHandler* message_handler_;
 
-  DISALLOW_COPY_AND_ASSIGN(WebpScanlineReader);
+  WebpScanlineReader(const WebpScanlineReader&) = delete;
+  WebpScanlineReader& operator=(const WebpScanlineReader&) = delete;
 };
 
 }  // namespace image_compression

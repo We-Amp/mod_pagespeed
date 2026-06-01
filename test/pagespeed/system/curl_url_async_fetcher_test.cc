@@ -32,7 +32,6 @@
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/stack_buffer.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/stl_util.h"
@@ -113,7 +112,8 @@ class CurlTestFetch : public AsyncFetch {
   bool success_;
   bool done_;
 
-  DISALLOW_COPY_AND_ASSIGN(CurlTestFetch);
+  CurlTestFetch(const CurlTestFetch&) = delete;
+  CurlTestFetch& operator=(const CurlTestFetch&) = delete;
 };
 
 }  // namespace
@@ -368,7 +368,8 @@ class CurlUrlAsyncFetcherTest : public ::testing::Test {
   int64 fetcher_timeout_ms_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(CurlUrlAsyncFetcherTest);
+  CurlUrlAsyncFetcherTest(const CurlUrlAsyncFetcherTest&) = delete;
+  CurlUrlAsyncFetcherTest& operator=(const CurlUrlAsyncFetcherTest&) = delete;
 };
 
 // ---- Basic fetch tests (matching Serf) ----
@@ -416,7 +417,7 @@ TEST_F(CurlUrlAsyncFetcherTest, FetchOneURLGzipped) {
         inflater.SetInput(contents(index).data(), contents(index).size()));
     ASSERT_TRUE(inflater.HasUnconsumedInput());
     int size = content_starts_[index].size();
-    scoped_array<char> buf(new char[size]);
+    std::unique_ptr<char[]> buf(new char[size]);
     ASSERT_EQ(size, inflater.InflateBytes(buf.get(), size));
     EXPECT_EQ(content_starts_[index], GoogleString(buf.get(), size));
   } else {
@@ -501,7 +502,11 @@ TEST_F(CurlUrlAsyncFetcherTest, Test204) {
   TestFetch(kNoContent, kNoContent);
   EXPECT_EQ(HttpStatus::kNoContent,
             response_headers(kNoContent)->status_code());
-  ValidateMonitoringStats(1, 0);
+  // Only assert on success count; failure count may be >0 if httpbin.org
+  // timed out before a FlakyRetry succeeded (each attempt increments the
+  // failure counter independently).
+  EXPECT_EQ(
+      1, statistics_->GetVariable(CurlStats::kCurlFetchUltimateSuccess)->Get());
 }
 
 // ---- HTTPS tests (matching Serf) ----
@@ -632,6 +637,52 @@ TEST_F(CurlUrlAsyncFetcherTest, TestPost) {
   EXPECT_EQ(HttpStatus::kOK, response_headers(index)->status_code());
   EXPECT_TRUE(contents(index).find("\"a\": \"b\"") != GoogleString::npos ||
               contents(index).find("a=b") != GoogleString::npos);
+}
+
+// ---- BoringSSL EAGAIN regression test ----
+//
+// On Linux, libcurl is linked against BoringSSL (shared with Envoy).
+// When curl_multi uses non-blocking sockets, SSL_connect() may return
+// SSL_ERROR_SYSCALL when the underlying BIO gets EAGAIN. Unlike OpenSSL,
+// BoringSSL does NOT translate this to SSL_ERROR_WANT_READ — it propagates
+// the raw SSL_ERROR_SYSCALL. Without our patch
+// (bazel/curl_boringssl_ssl_connect_8_18.patch), curl's ossl_connect_step2()
+// treats this as a fatal error and the TLS handshake fails.
+//
+// This test verifies that HTTPS fetches through curl_multi succeed on Linux,
+// which exercises the patched code path. Multiple concurrent fetches are used
+// to exercise the handshake path under realistic conditions.
+
+TEST_F(CurlUrlAsyncFetcherTest, TestBoringSSLEagainHandling) {
+  curl_fetcher_->SetHttpsOptions("enable");
+  EXPECT_TRUE(curl_fetcher_->SupportsHttps());
+
+  // Multiple concurrent HTTPS fetches — each one exercises the SSL_connect()
+  // handshake through curl_multi's non-blocking I/O path.
+  const int kNumFetches = 5;
+  int first_idx = -1;
+  for (int i = 0; i < kNumFetches; ++i) {
+    int idx = AddTestUrl(StrCat("https://", test_host_, "/html"),
+                         "<!DOCTYPE html>");
+    if (first_idx == -1) first_idx = idx;
+  }
+  int last_idx = first_idx + kNumFetches - 1;
+
+  StartFetches(first_idx, last_idx);
+  ASSERT_EQ(kNumFetches, WaitTillDone(first_idx, last_idx));
+
+  for (int i = first_idx; i <= last_idx; ++i) {
+    FlakyRetry(i);
+    ASSERT_TRUE(fetches_[i]->IsDone());
+    EXPECT_TRUE(fetches_[i]->success())
+        << "HTTPS fetch " << (i - first_idx)
+        << " failed — if linked against BoringSSL, this indicates the "
+           "SSL_ERROR_SYSCALL EAGAIN patch is missing from libcurl";
+    EXPECT_EQ(HttpStatus::kOK, response_headers(i)->status_code());
+  }
+
+  EXPECT_EQ(0,
+            statistics_->GetVariable(CurlStats::kCurlFetchCertErrors)->Get());
 }
 
 // ---- Shutdown test (curl-specific) ----

@@ -20,6 +20,7 @@
 #include "net/instaweb/http/public/http_cache.h"
 
 #include <algorithm>
+#include <memory>
 
 #include "base/logging.h"
 #include "net/instaweb/http/public/http_cache_failure.h"
@@ -28,7 +29,6 @@
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/hasher.h"
 #include "pagespeed/kernel/base/message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -142,7 +142,7 @@ class HTTPCacheCallback : public CacheInterface::Callback {
     ResponseHeaders* headers = callback_->response_headers();
     bool is_expired = false;
     if ((backend_state == CacheInterface::kAvailable) &&
-        callback_->http_value()->Link(value(), headers, handler_) &&
+        callback_->http_value()->Link(value().ToOwned(), headers, handler_) &&
         (http_cache_->force_caching_ ||
          headers->IsProxyCacheable(callback_->req_properties(),
                                    callback_->RespectVaryOnResources(),
@@ -260,7 +260,6 @@ class HTTPCacheCallback : public CacheInterface::Callback {
     } else if (!callback_->request_context()->accepts_gzip() &&
                headers->IsGzipped()) {
       HTTPValue new_value;
-      GoogleString inflated;
       if (InflatingFetch::UnGzipValueIfCompressed(
               *callback_->http_value(), headers, &new_value, handler_)) {
         callback_->http_value()->Link(&new_value);
@@ -288,7 +287,8 @@ class HTTPCacheCallback : public CacheInterface::Callback {
   int64 start_ms_;
   int cache_level_;
 
-  DISALLOW_COPY_AND_ASSIGN(HTTPCacheCallback);
+  HTTPCacheCallback(const HTTPCacheCallback&) = delete;
+  HTTPCacheCallback& operator=(const HTTPCacheCallback&) = delete;
 };
 
 void HTTPCache::Find(const GoogleString& key, const GoogleString& fragment,

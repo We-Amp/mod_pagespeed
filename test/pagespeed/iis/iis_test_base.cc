@@ -17,6 +17,8 @@
  * under the License.
  */
 
+#include <memory>
+
 #include "test/pagespeed/iis/iis_test_base.h"
 
 #include "net/instaweb/rewriter/public/rewrite_options.h"
@@ -81,6 +83,78 @@ std::unique_ptr<MockAppHostElement> IisTestBase::CreateConfig() {
 void IisTestBase::AdvanceTimeMs(int64 ms) {
   timer_->AdvanceMs(ms);
   scheduler_->AwaitQuiescence();
+}
+
+bool IisTestBase::IsAjaxHeaders(
+    const std::map<GoogleString, GoogleString>& headers) {
+  // Check X-Requested-With: XMLHttpRequest (case-insensitive value match).
+  // Note: MockHttpRequest stores header names in lowercase.
+  auto it = headers.find("x-requested-with");
+  if (it != headers.end() && !it->second.empty()) {
+    if (StringCaseEqual(it->second, "XMLHttpRequest")) {
+      return true;
+    }
+  }
+
+  // Check X-MicrosoftAjax (ASP.NET UpdatePanel/ScriptManager) - any non-empty value.
+  it = headers.find("x-microsoftajax");
+  if (it != headers.end() && !it->second.empty()) {
+    return true;
+  }
+
+  // Check X-Prototype-Version (Prototype.js) - any non-empty value.
+  it = headers.find("x-prototype-version");
+  if (it != headers.end() && !it->second.empty()) {
+    return true;
+  }
+
+  return false;
+}
+
+bool IisTestBase::IsRangeRequest(
+    const std::map<GoogleString, GoogleString>& headers) {
+  // Check Range header.
+  auto it = headers.find("range");
+  if (it != headers.end() && !it->second.empty()) {
+    return true;
+  }
+
+  // Check If-Range header.
+  it = headers.find("if-range");
+  if (it != headers.end() && !it->second.empty()) {
+    return true;
+  }
+
+  return false;
+}
+
+GoogleString IisTestBase::NormalizeUrlPort(const GoogleString& url) {
+  if (StringCaseStartsWith(url, "http://")) {
+    size_t host_start = 7;  // Length of "http://"
+    size_t colon_pos = url.find(':', host_start);
+    if (colon_pos != GoogleString::npos) {
+      size_t port_end = url.find('/', colon_pos);
+      if (port_end == GoogleString::npos) port_end = url.find('?', colon_pos);
+      if (port_end == GoogleString::npos) port_end = url.size();
+      GoogleString port = url.substr(colon_pos + 1, port_end - colon_pos - 1);
+      if (port == "80") {
+        return url.substr(0, colon_pos) + url.substr(port_end);
+      }
+    }
+  } else if (StringCaseStartsWith(url, "https://")) {
+    size_t host_start = 8;  // Length of "https://"
+    size_t colon_pos = url.find(':', host_start);
+    if (colon_pos != GoogleString::npos) {
+      size_t port_end = url.find('/', colon_pos);
+      if (port_end == GoogleString::npos) port_end = url.find('?', colon_pos);
+      if (port_end == GoogleString::npos) port_end = url.size();
+      GoogleString port = url.substr(colon_pos + 1, port_end - colon_pos - 1);
+      if (port == "443") {
+        return url.substr(0, colon_pos) + url.substr(port_end);
+      }
+    }
+  }
+  return url;
 }
 
 bool IisTestBase::IsPageSpeedUrl(const GoogleString& url) {

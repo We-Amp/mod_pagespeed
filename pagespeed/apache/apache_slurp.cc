@@ -38,7 +38,6 @@
 #include "pagespeed/kernel/base/condvar.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/ref_counted_ptr.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_system.h"
@@ -107,7 +106,7 @@ class StrippingFetch : public StringAsyncFetch {
     bool done = true;
     if (!success) {
       set_success(false);
-    } else if (stripped_) {
+    } else if (stripped_) {  // NOLINT(bugprone-branch-clone)
       // Second pass -- declare completion.
       set_success(true);
     } else if ((response_headers()->Lookup1(kModPagespeedHeader) != nullptr) ||
@@ -154,7 +153,8 @@ class StrippingFetch : public StringAsyncFetch {
   std::unique_ptr<ThreadSystem::CondvarCapableMutex> mutex_;
   std::unique_ptr<ThreadSystem::Condvar> condvar_;
 
-  DISALLOW_COPY_AND_ASSIGN(StrippingFetch);
+  StrippingFetch(const StrippingFetch&) = delete;
+  StrippingFetch& operator=(const StrippingFetch&) = delete;
 };
 
 }  // namespace

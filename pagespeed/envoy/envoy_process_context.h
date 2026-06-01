@@ -23,12 +23,12 @@
 
 #pragma once
 
+#include <memory>
 #include <vector>
 
 #include "net/instaweb/rewriter/public/process_context.h"
 #include "pagespeed/kernel/base/google_message_handler.h"
 #include "pagespeed/kernel/base/message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/system/external_server_spec.h"
 
@@ -67,21 +67,21 @@ struct EnvoyDomainShard {
 struct EnvoyCacheConfig {
   // Redis configuration
   ExternalServerSpec redis_server;
-  int64 redis_timeout_us = 0;  // 0 = use default
+  int64 redis_timeout_us = 0;             // 0 = use default
   int64 redis_reconnection_delay_ms = 0;  // 0 = use default
-  int redis_database_index = -1;  // -1 = not set
-  int redis_ttl_sec = -1;  // -1 = not set
+  int redis_database_index = -1;          // -1 = not set
+  int redis_ttl_sec = -1;                 // -1 = not set
 
   // Memcached configuration
   ExternalClusterSpec memcached_servers;
-  int memcached_threads = 0;  // 0 = use default
+  int memcached_threads = 0;       // 0 = use default
   int64 memcached_timeout_us = 0;  // 0 = use default
 
   // File cache configuration
   GoogleString file_cache_path;
   GoogleString log_dir;
   int64 lru_cache_kb_per_process = 0;  // 0 = use default
-  int64 file_cache_size_kb = 0;  // 0 = use default
+  int64 file_cache_size_kb = 0;        // 0 = use default
 
   // Domain configuration
   std::vector<GoogleString> authorized_domains;
@@ -105,7 +105,7 @@ class EnvoyProcessContext : public ProcessContext {
  public:
   explicit EnvoyProcessContext();
   explicit EnvoyProcessContext(const EnvoyCacheConfig& cache_config);
-  ~EnvoyProcessContext() override{};
+  ~EnvoyProcessContext() override {};
 
   MessageHandler* message_handler() { return message_handler_.get(); }
   EnvoyRewriteDriverFactory* driver_factory() { return driver_factory_.get(); }

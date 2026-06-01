@@ -21,6 +21,7 @@
 #define PAGESPEED_CONTROLLER_POPULARITY_CONTEST_SCHEDULE_REWRITE_CONTROLLER_H_
 
 #include <cstddef>
+#include <memory>
 #include <unordered_map>
 
 #include "pagespeed/controller/priority_queue.h"
@@ -28,7 +29,6 @@
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/function.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/thread_annotations.h"
@@ -137,9 +137,8 @@ class PopularityContestScheduleRewriteController
     }
   };
 
-  typedef std::unordered_map<const GoogleString*, Rewrite*, StringPtrHash,
-                             StringPtrEq>
-      RewriteMap;
+  using RewriteMap = std::unordered_map<const GoogleString*, Rewrite*,
+                                        StringPtrHash, StringPtrEq>;
 
   // Consider starting the next rewrite in queue_, depending on available
   // resources. Returns either nullptr or a Function which must be run
@@ -204,7 +203,10 @@ class PopularityContestScheduleRewriteController
 
   friend class PopularityContestScheduleRewriteControllerTest;
 
-  DISALLOW_COPY_AND_ASSIGN(PopularityContestScheduleRewriteController);
+  PopularityContestScheduleRewriteController(
+      const PopularityContestScheduleRewriteController&) = delete;
+  PopularityContestScheduleRewriteController& operator=(
+      const PopularityContestScheduleRewriteController&) = delete;
 };
 
 }  // namespace net_instaweb

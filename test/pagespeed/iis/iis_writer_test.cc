@@ -24,6 +24,8 @@
 // the exact sequence of IIS API calls.
 // Equivalent to Apache's apache_writer_test.cc.
 
+#include <memory>
+
 #include "test/pagespeed/iis/mock_iis.h"
 #include "test/pagespeed/iis/iis_test_base.h"
 

@@ -20,10 +20,11 @@
 #ifndef PAGESPEED_KERNEL_SHAREDMEM_SHARED_MEM_LOCK_MANAGER_TEST_BASE_H_
 #define PAGESPEED_KERNEL_SHAREDMEM_SHARED_MEM_LOCK_MANAGER_TEST_BASE_H_
 
+#include <memory>
+
 #include "pagespeed/kernel/base/abstract_shared_mem.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/md5_hasher.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/sharedmem/shared_mem_lock_manager.h"
 #include "test/pagespeed/kernel/base/gtest.h"
@@ -68,7 +69,8 @@ class SharedMemLockManagerTestBase : public testing::Test {
   std::unique_ptr<SharedMemLockManager>
       root_lock_manager_;  // used for init only.
 
-  DISALLOW_COPY_AND_ASSIGN(SharedMemLockManagerTestBase);
+  SharedMemLockManagerTestBase(const SharedMemLockManagerTestBase&) = delete;
+  SharedMemLockManagerTestBase& operator=(const SharedMemLockManagerTestBase&) = delete;
 };
 
 template <typename ConcreteTestEnv>

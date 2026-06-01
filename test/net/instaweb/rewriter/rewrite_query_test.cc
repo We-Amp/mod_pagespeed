@@ -17,6 +17,8 @@
  * under the License.
  */
 
+#include <memory>
+
 #include "net/instaweb/rewriter/public/rewrite_query.h"
 
 #include "base/logging.h"

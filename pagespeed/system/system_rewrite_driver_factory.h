@@ -28,10 +28,8 @@
 #include "net/instaweb/rewriter/public/rewrite_driver_factory.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "pagespeed/controller/central_controller.h"
-#include "pagespeed/controller/central_controller_rpc_client.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/hasher.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -75,10 +73,6 @@ class SystemRewriteDriverFactory : public RewriteDriverFactory {
                              StringPiece hostname, int port);
   ~SystemRewriteDriverFactory() override;
   void Init();
-
-  // If the server using this isn't using APR natively, call this to initialize
-  // the APR library.
-  static void InitApr();
 
   AbstractSharedMem* shared_mem_runtime() const {
     return shared_mem_runtime_.get();
@@ -192,11 +186,14 @@ class SystemRewriteDriverFactory : public RewriteDriverFactory {
     return track_original_content_length_;
   }
 
-  // When Serf gets a system error during polling, to avoid spamming
+  // When the fetcher gets a system error during polling, to avoid spamming
   // the log we just print the number of outstanding fetch URLs.  To
   // debug this it's useful to print the complete set of URLs, in
   // which case this should be turned on.
-  void list_outstanding_urls_on_error(bool x) {
+  bool list_outstanding_urls_on_error() const {
+    return list_outstanding_urls_on_error_;
+  }
+  void set_list_outstanding_urls_on_error(bool x) {
     list_outstanding_urls_on_error_ = x;
   }
 
@@ -290,13 +287,14 @@ class SystemRewriteDriverFactory : public RewriteDriverFactory {
   // so that SystemRewriteDriverFactory::ChildInit can iterate over all
   // the server contexts that need to be ChildInit'd, and so that we can free
   // them in the Root process that does not run ChildInit.
-  typedef std::set<SystemServerContext*> SystemServerContextSet;
+  using SystemServerContextSet = std::set<SystemServerContext*>;
   SystemServerContextSet uninitialized_server_contexts_;
 
-  // Allocates a serf fetcher.  Implementations may override this method to
-  // supply other kinds of fetchers.  For example, ngx_pagespeed may return
-  // either a serf fetcher or an nginx-native fetcher depending on options.
-  virtual UrlAsyncFetcher* AllocateFetcher(SystemRewriteOptions* config);
+  // Allocates a fetcher for the given config.  Implementations must override
+  // this method to supply an appropriate fetcher.  For example, the Apache
+  // module returns a Curl fetcher, while the Envoy filter returns an
+  // Envoy-native fetcher.
+  virtual UrlAsyncFetcher* AllocateFetcher(SystemRewriteOptions* config) = 0;
 
   FileSystem* DefaultFileSystem() override;
   NamedLockManager* DefaultLockManager() override;
@@ -362,13 +360,13 @@ class SystemRewriteDriverFactory : public RewriteDriverFactory {
   // fetcher (the thing that takes a thread) needs to know about various
   // options.  The inner cache is base_fetcher_map_ which GetBaseFetcher() uses
   // to keep track of what fetchers it has requested from AllocateFetcher().
-  // Base fetchers are all serf fetchers with various options unless an
+  // Base fetchers are all curl fetchers with various options unless an
   // implementation overrides AllocateFetcher() to return other kinds of
   // fetchers.  The outer cache is fetcher_map_, used by GetFetcher(), and is
   // fragmented on every option that affects fetching.  All of these fetchers
   // are either exactly as returned by GetBaseFetcher() or first wrapped in
   // slurping or rate-limiting.
-  typedef std::map<GoogleString, UrlAsyncFetcher*> FetcherMap;
+  using FetcherMap = std::map<GoogleString, UrlAsyncFetcher*>;
   FetcherMap base_fetcher_map_;
   FetcherMap fetcher_map_;
 
@@ -393,9 +391,11 @@ class SystemRewriteDriverFactory : public RewriteDriverFactory {
   int num_rewrite_threads_;
   int num_expensive_rewrite_threads_;
 
-  std::shared_ptr<CentralControllerRpcClient> central_controller_;
+  std::shared_ptr<CentralController> central_controller_;
 
-  DISALLOW_COPY_AND_ASSIGN(SystemRewriteDriverFactory);
+  SystemRewriteDriverFactory(const SystemRewriteDriverFactory&) = delete;
+  SystemRewriteDriverFactory& operator=(const SystemRewriteDriverFactory&) =
+      delete;
 };
 
 }  // namespace net_instaweb

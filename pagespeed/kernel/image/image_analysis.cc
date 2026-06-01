@@ -20,13 +20,14 @@
 #include "pagespeed/kernel/image/image_analysis.h"
 
 #include <algorithm>
+#include <climits>
 #include <cmath>
+#include <cstddef>
 #include <cstdlib>
 #include <memory>
 
 #include "base/logging.h"
 #include "pagespeed/kernel/base/message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/image/image_frame_interface.h"
 #include "pagespeed/kernel/image/jpeg_utils.h"
@@ -70,7 +71,9 @@ template <class T>
 void ComputeGradientFromLuminance(const T* luminance, int width, int height,
                                   int elements_per_line, float norm_factor,
                                   uint8_t* gradient) {
-  memset(gradient, 0, width * height * sizeof(gradient[0]));
+  memset(gradient, 0,
+         static_cast<size_t>(width) * static_cast<size_t>(height) *
+             sizeof(gradient[0]));
   norm_factor *= 0.25;  // Remove the magnification factor of Sobel filter (4).
   for (int y = 1; y < height - 1; ++y) {
     int in_idx = y * elements_per_line + 1;
@@ -115,8 +118,13 @@ bool SobelGradient(const uint8_t* image, int width, int height,
     ComputeGradientFromLuminance(image, width, height, bytes_per_line,
                                  norm_factor, gradient);
   } else {
-    int32_t* luminance =
-        static_cast<int32_t*>(malloc(width * height * sizeof(int32_t)));
+    size_t alloc_size;
+    if (!CheckedMulSize(static_cast<size_t>(width), static_cast<size_t>(height),
+                        &alloc_size) ||
+        !CheckedMulSize(alloc_size, sizeof(int32_t), &alloc_size)) {
+      return false;
+    }
+    int32_t* luminance = static_cast<int32_t*>(malloc(alloc_size));
     if (luminance == nullptr) {
       return false;
     }
@@ -128,7 +136,8 @@ bool SobelGradient(const uint8_t* image, int width, int height,
     // after applying the normalization factor.
     int32_t* out_pixel = luminance;
     for (int y = 0; y < height; ++y) {
-      const uint8_t* in_channel = image + y * bytes_per_line;
+      const uint8_t* in_channel =
+          image + static_cast<ptrdiff_t>(y * bytes_per_line);
       for (int x = 0; x < width; ++x) {
         *out_pixel = static_cast<int32_t>(in_channel[0]) +
                      static_cast<int32_t>(in_channel[1]) +
@@ -197,8 +206,12 @@ float PhotoMetric(const uint8_t* image, int width, int height,
                   MessageHandler* handler) {
   const float KMinMetric = 0;
 
-  uint8_t* gradient =
-      static_cast<uint8_t*>(malloc(width * height * sizeof(uint8_t)));
+  size_t gradient_size;
+  if (!CheckedMulSize(static_cast<size_t>(width), static_cast<size_t>(height),
+                      &gradient_size)) {
+    return KMinMetric;
+  }
+  uint8_t* gradient = static_cast<uint8_t*>(malloc(gradient_size));
   if (gradient == nullptr) {
     return KMinMetric;
   }
@@ -233,11 +246,20 @@ bool IsPhoto(ScanlineReaderInterface* reader, MessageHandler* handler) {
   const int width = reader->GetImageWidth();
   const int height = reader->GetImageHeight();
   const PixelFormat pixel_format = reader->GetPixelFormat();
-  const int bytes_per_line =
-      width * GetNumChannelsFromPixelFormat(pixel_format, handler);
-
-  uint8_t* image =
-      static_cast<uint8_t*>(malloc(bytes_per_line * height * sizeof(uint8_t)));
+  size_t bytes_per_line_sz;
+  if (!CheckedMulSize(static_cast<size_t>(width),
+                      GetNumChannelsFromPixelFormat(pixel_format, handler),
+                      &bytes_per_line_sz) ||
+      bytes_per_line_sz > static_cast<size_t>(INT_MAX)) {
+    return kDefaultReturnValue;
+  }
+  const int bytes_per_line = static_cast<int>(bytes_per_line_sz);
+  size_t image_size;
+  if (!CheckedMulSize(bytes_per_line_sz, static_cast<size_t>(height),
+                      &image_size)) {
+    return kDefaultReturnValue;
+  }
+  uint8_t* image = static_cast<uint8_t*>(malloc(image_size));
   if (image == nullptr) {
     return kDefaultReturnValue;
   }
@@ -249,7 +271,8 @@ bool IsPhoto(ScanlineReaderInterface* reader, MessageHandler* handler) {
       free(image);
       return kDefaultReturnValue;
     }
-    memcpy(image + y * bytes_per_line, scanline, bytes_per_line);
+    memcpy(image + static_cast<ptrdiff_t>(y * bytes_per_line), scanline,
+           bytes_per_line);
   }
 
   float metric = PhotoMetric(image, width, height, bytes_per_line, pixel_format,

@@ -20,6 +20,7 @@
 #ifndef PAGESPEED_CONTROLLER_NAMED_LOCK_SCHEDULE_REWRITE_CONTROLLER_H_
 #define PAGESPEED_CONTROLLER_NAMED_LOCK_SCHEDULE_REWRITE_CONTROLLER_H_
 
+#include <memory>
 #include <unordered_set>
 
 #include "absl/container/flat_hash_map.h"
@@ -28,7 +29,6 @@
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/function.h"
 #include "pagespeed/kernel/base/named_lock_manager.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_hash.h"
@@ -77,11 +77,12 @@ class NamedLockScheduleRewriteController : public ScheduleRewriteController {
     int pin_count;
 
    private:
-    DISALLOW_COPY_AND_ASSIGN(LockInfo);
+    LockInfo(const LockInfo&) = delete;
+    LockInfo& operator=(const LockInfo&) = delete;
   };
 
-  typedef absl::flat_hash_map<GoogleString, LockInfo*, CasePreserveStringHash>
-      LockMap;
+  using LockMap =
+      absl::flat_hash_map<GoogleString, LockInfo*, CasePreserveStringHash>;
 
   void LockObtained(Function* callback, const GoogleString key, NamedLock* lock)
       LOCKS_EXCLUDED(mutex_);
@@ -104,7 +105,10 @@ class NamedLockScheduleRewriteController : public ScheduleRewriteController {
   TimedVariable* locks_released_when_not_held_;
   UpDownCounter* locks_currently_held_;
 
-  DISALLOW_COPY_AND_ASSIGN(NamedLockScheduleRewriteController);
+  NamedLockScheduleRewriteController(
+      const NamedLockScheduleRewriteController&) = delete;
+  NamedLockScheduleRewriteController& operator=(
+      const NamedLockScheduleRewriteController&) = delete;
 };
 
 }  // namespace net_instaweb

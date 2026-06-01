@@ -21,6 +21,7 @@
 #define PAGESPEED_APACHE_HEADER_UTIL_H_
 
 #include <cstddef>
+#include <memory>
 
 #include "pagespeed/kernel/base/callback.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -37,7 +38,7 @@ class ResponseHeaders;
 // it wants to include the header.
 //
 // The StringPiece is the name of the header.
-typedef Callback2<StringPiece, bool*> HeaderPredicateFn;
+using HeaderPredicateFn = Callback2<StringPiece, bool*>;
 
 // Converts Apache header structure into RequestHeaders, selecting
 // only those for which the predicate sets its bool* argument to true.

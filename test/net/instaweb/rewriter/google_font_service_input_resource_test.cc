@@ -17,6 +17,8 @@
  * under the License.
  */
 
+#include <memory>
+
 #include "net/instaweb/rewriter/public/google_font_service_input_resource.h"
 
 #include "net/instaweb/http/public/counting_url_async_fetcher.h"
@@ -24,7 +26,6 @@
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "pagespeed/kernel/base/ref_counted_ptr.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/http/content_type.h"

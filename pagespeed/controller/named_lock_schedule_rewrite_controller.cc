@@ -20,6 +20,7 @@
 #include "pagespeed/controller/named_lock_schedule_rewrite_controller.h"
 
 #include <cstddef>
+#include <memory>
 
 #include "base/logging.h"
 #include "pagespeed/kernel/base/stl_util.h"
@@ -88,9 +89,10 @@ void NamedLockScheduleRewriteController::DeleteInfoIfUnused(
   }
 }
 
-void NamedLockScheduleRewriteController::LockObtained(Function* callback,
-                                                      const GoogleString key,
-                                                      NamedLock* named_lock) {
+void NamedLockScheduleRewriteController::LockObtained(
+    Function* callback,
+    const GoogleString key,  // NOLINT(performance-unnecessary-value-param)
+    NamedLock* named_lock) {
   locks_granted_->IncBy(1);
   locks_currently_held_->Add(1);
   bool shut_down;
@@ -118,9 +120,10 @@ void NamedLockScheduleRewriteController::LockObtained(Function* callback,
   }
 }
 
-void NamedLockScheduleRewriteController::LockFailed(Function* callback,
-                                                    const GoogleString key,
-                                                    NamedLock* named_lock) {
+void NamedLockScheduleRewriteController::LockFailed(
+    Function* callback,
+    const GoogleString key,  // NOLINT(performance-unnecessary-value-param)
+    NamedLock* named_lock) {
   locks_denied_->IncBy(1);
   bool shut_down;
   {

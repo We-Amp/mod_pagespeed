@@ -23,9 +23,10 @@
 #ifndef PAGESPEED_OPT_HTTP_PROPERTY_STORE_H_
 #define PAGESPEED_OPT_HTTP_PROPERTY_STORE_H_
 
+#include <memory>
+
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/callback.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/opt/http/abstract_property_store_get_callback.h"
 #include "pagespeed/opt/http/property_cache.h"
@@ -42,7 +43,7 @@ class Timer;
 // retrieve and put properties into the storage system.
 class PropertyStore {
  public:
-  typedef Callback1<bool> BoolCallback;
+  using BoolCallback = Callback1<bool>;
   PropertyStore();
   virtual ~PropertyStore();
 
@@ -87,7 +88,8 @@ class PropertyStore {
 
  private:
   bool enable_get_cancellation_;
-  DISALLOW_COPY_AND_ASSIGN(PropertyStore);
+  PropertyStore(const PropertyStore&) = delete;
+  PropertyStore& operator=(const PropertyStore&) = delete;
 };
 
 // This class manages the lookup for the properties in PropertyStore. It works
@@ -105,7 +107,7 @@ class PropertyStore {
 //   - DeleteWhenDone() works same as it works in non-cancellable mode.
 class PropertyStoreGetCallback : public AbstractPropertyStoreGetCallback {
  public:
-  typedef Callback1<bool> BoolCallback;
+  using BoolCallback = Callback1<bool>;
   PropertyStoreGetCallback(AbstractMutex* mutex, PropertyPage* page,
                            bool is_cancellable, BoolCallback* done,
                            Timer* timer);
@@ -144,7 +146,8 @@ class PropertyStoreGetCallback : public AbstractPropertyStoreGetCallback {
   Timer* timer_;
   int64 fast_finish_time_ms_;
 
-  DISALLOW_COPY_AND_ASSIGN(PropertyStoreGetCallback);
+  PropertyStoreGetCallback(const PropertyStoreGetCallback&) = delete;
+  PropertyStoreGetCallback& operator=(const PropertyStoreGetCallback&) = delete;
 };
 
 }  // namespace net_instaweb

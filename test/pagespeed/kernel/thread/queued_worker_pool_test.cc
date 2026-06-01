@@ -19,12 +19,13 @@
 
 // Unit-test for QueuedWorkerPool
 
+#include <memory>
+
 #include "pagespeed/kernel/thread/queued_worker_pool.h"
 
 #include "base/logging.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/function.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/thread/worker_test_base.h"
 
@@ -48,7 +49,8 @@ class QueuedWorkerPoolTest : public WorkerTestBase {
   }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(QueuedWorkerPoolTest);
+  QueuedWorkerPoolTest(const QueuedWorkerPoolTest&) = delete;
+  QueuedWorkerPoolTest& operator=(const QueuedWorkerPoolTest&) = delete;
 };
 
 // A function that, without protection of a mutex, increments a shared
@@ -74,7 +76,8 @@ class Increment : public Function {
   int expected_value_;
   int* count_;
 
-  DISALLOW_COPY_AND_ASSIGN(Increment);
+  Increment(const Increment&) = delete;
+  Increment& operator=(const Increment&) = delete;
 };
 
 // Tests that all the jobs queued in one sequence should run sequentially.
@@ -165,7 +168,8 @@ class MakeNewSequence : public Function {
   QueuedWorkerPool* pool_;
   QueuedWorkerPool::Sequence* sequence_;
 
-  DISALLOW_COPY_AND_ASSIGN(MakeNewSequence);
+  MakeNewSequence(const MakeNewSequence&) = delete;
+  MakeNewSequence& operator=(const MakeNewSequence&) = delete;
 };
 
 TEST_F(QueuedWorkerPoolTest, RestartSequenceFromFunction) {

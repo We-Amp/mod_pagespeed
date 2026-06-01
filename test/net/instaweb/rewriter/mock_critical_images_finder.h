@@ -20,11 +20,12 @@
 #ifndef NET_INSTAWEB_REWRITER_PUBLIC_MOCK_CRITICAL_IMAGES_FINDER_H_
 #define NET_INSTAWEB_REWRITER_PUBLIC_MOCK_CRITICAL_IMAGES_FINDER_H_
 
+#include <memory>
+
 #include "net/instaweb/rewriter/public/critical_images_finder.h"
 #include "net/instaweb/rewriter/rendered_image.pb.h"
 #include "net/instaweb/util/public/property_cache.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "test/net/instaweb/rewriter/critical_images_finder_test_base.h"
 
@@ -81,7 +82,8 @@ class MockCriticalImagesFinder : public TestCriticalImagesFinder {
   std::unique_ptr<StringSet> critical_images_;
   std::unique_ptr<StringSet> css_critical_images_;
   std::unique_ptr<RenderedImages> rendered_images_;
-  DISALLOW_COPY_AND_ASSIGN(MockCriticalImagesFinder);
+  MockCriticalImagesFinder(const MockCriticalImagesFinder&) = delete;
+  MockCriticalImagesFinder& operator=(const MockCriticalImagesFinder&) = delete;
 };
 
 }  // namespace net_instaweb

@@ -20,11 +20,12 @@
 #ifndef PAGESPEED_APACHE_APACHE_REWRITE_DRIVER_FACTORY_H_
 #define PAGESPEED_APACHE_APACHE_REWRITE_DRIVER_FACTORY_H_
 
+#include <memory>
+
 // Note: We must include apache_config.h to allow using ApacheConfig*
 // return-types for functions that return RewriteOptions* in base class.
 #include "pagespeed/apache/apache_config.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -37,13 +38,15 @@ namespace net_instaweb {
 
 class ApacheMessageHandler;
 class ApacheServerContext;
+class EventScheduler;
+class LibeventDispatcher;
 class MessageHandler;
 class ProcessContext;
 class ServerContext;
-class SchedulerThread;
 class SharedCircularBuffer;
-class SlowWorker;
+class SystemRewriteOptions;
 class Timer;
+class UrlAsyncFetcher;
 
 // Creates an Apache RewriteDriver.
 class ApacheRewriteDriverFactory : public SystemRewriteDriverFactory {
@@ -98,6 +101,8 @@ class ApacheRewriteDriverFactory : public SystemRewriteDriverFactory {
   int LookupThreadLimit() override;
 
  protected:
+  UrlAsyncFetcher* AllocateFetcher(SystemRewriteOptions* config) override;
+
   // Provide defaults.
   MessageHandler* DefaultHtmlParseMessageHandler() override;
   MessageHandler* DefaultMessageHandler() override;
@@ -120,8 +125,10 @@ class ApacheRewriteDriverFactory : public SystemRewriteDriverFactory {
  private:
   apr_pool_t* pool_;
   server_rec* server_rec_;
-  std::unique_ptr<SlowWorker> slow_worker_;
-  SchedulerThread* scheduler_thread_;  // cleaned up with defer_cleanup
+  // Event-based scheduling using LibeventDispatcher.
+  // LibeventDispatcher runs its own background event loop thread.
+  std::unique_ptr<LibeventDispatcher> event_dispatcher_;
+  std::unique_ptr<EventScheduler> event_scheduler_;
 
   // TODO(jmarantz): These options could be consolidated in a protobuf or
   // some other struct, which would keep them distinct from the rest of the
@@ -141,7 +148,9 @@ class ApacheRewriteDriverFactory : public SystemRewriteDriverFactory {
   // writes to the same shared memory which is owned by the factory.
   ApacheMessageHandler* apache_html_parse_message_handler_;
 
-  DISALLOW_COPY_AND_ASSIGN(ApacheRewriteDriverFactory);
+  ApacheRewriteDriverFactory(const ApacheRewriteDriverFactory&) = delete;
+  ApacheRewriteDriverFactory& operator=(const ApacheRewriteDriverFactory&) =
+      delete;
 };
 
 }  // namespace net_instaweb

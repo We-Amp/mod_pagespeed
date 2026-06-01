@@ -28,7 +28,6 @@
 #include "net/instaweb/rewriter/public/css_util.h"
 #include "net/instaweb/rewriter/public/resource.h"
 #include "pagespeed/kernel/base/message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/stl_util.h"
 #include "pagespeed/kernel/base/string.h"

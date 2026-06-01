@@ -19,6 +19,8 @@
 
 #include "pagespeed/kernel/cache/purge_context.h"
 
+#include <memory>
+
 #include "base/logging.h"
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/atomic_bool.h"
@@ -267,7 +269,7 @@ void PurgeContext::UpdateCachePurgeFile() {
   // interprocess_lock_.  Note that during 'modify' we need to
   // also grab mutex_, so we'll need to collect the serizlized
   // buffer and callback-list at the same time for atomicity.
-  GoogleString buffer, verify;
+  GoogleString buffer;
   ReadPurgeFile(&purges_from_file);  // read
   ModifyPurgeSet(&purges_from_file, &buffer, &callbacks, &return_purges,
                  &failures);      // modify

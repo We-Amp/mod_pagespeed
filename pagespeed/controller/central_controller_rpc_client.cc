@@ -19,6 +19,7 @@
 
 #include "pagespeed/controller/central_controller_rpc_client.h"
 
+#include <memory>
 #include <utility>
 
 #include "base/logging.h"
@@ -57,7 +58,8 @@ class CentralControllerRpcClient::GrpcClientThread
 
   ::grpc::CompletionQueue queue_;
 
-  DISALLOW_COPY_AND_ASSIGN(GrpcClientThread);
+  GrpcClientThread(const GrpcClientThread&) = delete;
+  GrpcClientThread& operator=(const GrpcClientThread&) = delete;
 };
 
 // Adapt ContextRegistry to ClientContext::GlobalCallbacks, which are a

@@ -20,10 +20,11 @@
 #ifndef PAGESPEED_APACHE_INSTAWEB_CONTEXT_H_
 #define PAGESPEED_APACHE_INSTAWEB_CONTEXT_H_
 
+#include <memory>
+
 #include "net/instaweb/http/public/request_context.h"
 #include "pagespeed/automatic/html_detector.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_writer.h"
 #include "pagespeed/kernel/http/content_type.h"
@@ -137,7 +138,8 @@ class InstawebContext {
   bool sent_headers_;
   bool populated_headers_;
 
-  DISALLOW_COPY_AND_ASSIGN(InstawebContext);
+  InstawebContext(const InstawebContext&) = delete;
+  InstawebContext& operator=(const InstawebContext&) = delete;
 };
 
 }  // namespace net_instaweb

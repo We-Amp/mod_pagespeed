@@ -25,6 +25,8 @@
 // of operations.
 // Equivalent to Apache's apache_fetch_test.cc.
 
+#include <memory>
+
 #include "test/pagespeed/iis/mock_iis.h"
 #include "test/pagespeed/iis/iis_test_base.h"
 

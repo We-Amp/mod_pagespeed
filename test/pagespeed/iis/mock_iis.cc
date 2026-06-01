@@ -17,6 +17,8 @@
  * under the License.
  */
 
+#include <memory>
+
 #include "test/pagespeed/iis/mock_iis.h"
 
 #include "pagespeed/kernel/base/string_util.h"

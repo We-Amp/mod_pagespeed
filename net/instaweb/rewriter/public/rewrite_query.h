@@ -20,11 +20,12 @@
 #ifndef NET_INSTAWEB_REWRITER_PUBLIC_REWRITE_QUERY_H_
 #define NET_INSTAWEB_REWRITER_PUBLIC_REWRITE_QUERY_H_
 
+#include <memory>
+
 #include "net/instaweb/http/public/request_context.h"
 #include "net/instaweb/rewriter/public/device_properties.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/gtest_prod.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/http/headers.h"
@@ -216,7 +217,8 @@ class RewriteQuery {
   QueryParams pagespeed_option_cookies_;
   std::unique_ptr<RewriteOptions> options_;
 
-  DISALLOW_COPY_AND_ASSIGN(RewriteQuery);
+  RewriteQuery(const RewriteQuery&) = delete;
+  RewriteQuery& operator=(const RewriteQuery&) = delete;
 };
 
 }  // namespace net_instaweb

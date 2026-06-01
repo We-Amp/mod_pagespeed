@@ -24,6 +24,7 @@
 
 #include <utility>
 #include <vector>
+#include <memory>
 
 #include "net/instaweb/http/public/http_cache.h"
 #include "net/instaweb/http/public/http_value.h"
@@ -48,7 +49,6 @@
 #include "test/pagespeed/kernel/base/mock_hasher.h"
 #include "test/pagespeed/kernel/base/mock_message_handler.h"
 // We need to include mock_timer.h to allow upcast to Timer*.
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"

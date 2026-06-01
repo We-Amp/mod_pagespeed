@@ -21,11 +21,11 @@
 #define NET_INSTAWEB_HTTP_PUBLIC_MOCK_URL_FETCHER_H_
 
 #include <map>
+#include <memory>
 
 #include "net/instaweb/http/public/url_async_fetcher.h"
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/http/response_headers.h"
@@ -198,7 +198,8 @@ class MockUrlFetcher : public UrlAsyncFetcher {
     GoogleString body_;
     bool success_;
 
-    DISALLOW_COPY_AND_ASSIGN(HttpResponse);
+    HttpResponse(const HttpResponse&) = delete;
+    HttpResponse& operator=(const HttpResponse&) = delete;
   };
   typedef std::map<const GoogleString, HttpResponse*> ResponseMap;
 
@@ -223,7 +224,8 @@ class MockUrlFetcher : public UrlAsyncFetcher {
   std::unique_ptr<ThreadSystem> thread_system_;  // Thread system for mutex.
   std::unique_ptr<AbstractMutex> mutex_;         // Mutex Protect.
 
-  DISALLOW_COPY_AND_ASSIGN(MockUrlFetcher);
+  MockUrlFetcher(const MockUrlFetcher&) = delete;
+  MockUrlFetcher& operator=(const MockUrlFetcher&) = delete;
 };
 
 }  // namespace net_instaweb

@@ -6,9 +6,9 @@
  * to you under the Apache License, Version 2.0 (the
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
- * 
+ *
  *   http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
  * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
@@ -22,10 +22,15 @@
 //
 #include "pagespeed/system/loopback_route_fetcher.h"
 
-#include <cstdlib>
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
 
-#include "apr_network_io.h"
-#include "apr_pools.h"
+#include <cstdlib>
+#include <cstring>
+#include <memory>
+
 #include "net/instaweb/http/public/request_context.h"
 #include "net/instaweb/rewriter/config/rewrite_options_manager.h"
 #include "net/instaweb/rewriter/public/domain_lawyer.h"
@@ -33,7 +38,6 @@
 #include "pagespeed/kernel/base/callback.h"
 #include "pagespeed/kernel/base/google_message_handler.h"
 #include "pagespeed/kernel/base/ref_counted_ptr.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/http/request_headers.h"
@@ -50,33 +54,41 @@ namespace {
 
 const char kOwnIp[] = "198.51.100.1";
 
+// RAII wrapper for addrinfo results from getaddrinfo.
+struct AddrInfoDeleter {
+  void operator()(struct addrinfo* ai) const {
+    if (ai != nullptr) {
+      freeaddrinfo(ai);
+    }
+  }
+};
+using AddrInfoPtr = std::unique_ptr<struct addrinfo, AddrInfoDeleter>;
+
+// Helper to resolve an IP address string to a sockaddr using getaddrinfo.
+// Returns the addrinfo (caller owns via unique_ptr), or nullptr on failure.
+AddrInfoPtr ResolveAddr(const char* ip, int family) {
+  struct addrinfo hints;
+  memset(&hints, 0, sizeof(hints));
+  hints.ai_family = family;
+  hints.ai_flags = AI_NUMERICHOST;
+  struct addrinfo* result = nullptr;
+  int err = getaddrinfo(ip, "80", &hints, &result);
+  if (err != 0) {
+    return nullptr;
+  }
+  return AddrInfoPtr(result);
+}
+
 class LoopbackRouteFetcherTest : public RewriteOptionsTestBase<RewriteOptions> {
  public:
   LoopbackRouteFetcherTest()
-      : pool_(nullptr),
-        thread_system_(Platform::CreateThreadSystem()),
+      : thread_system_(Platform::CreateThreadSystem()),
         options_(thread_system_.get()),
         loopback_route_fetcher_(&options_, kOwnIp, 42, &reflecting_fetcher_) {}
-
-  static void SetUpTestSuite() {
-    apr_initialize();
-    atexit(apr_terminate);
-  }
-
-  void SetUp() override { apr_pool_create(&pool_, nullptr); }
-
-  void TearDown() override { apr_pool_destroy(pool_); }
 
   void PrepareDone(bool ok) { EXPECT_TRUE(ok); }
 
  protected:
-  char* DumpAddr(apr_sockaddr_t* addr) {
-    char* dbg = nullptr;
-    apr_sockaddr_ip_get(&dbg, addr);
-    return dbg;  // it's in pool_
-  }
-
-  apr_pool_t* pool_;
   GoogleMessageHandler handler_;
   ReflectingTestFetcher reflecting_fetcher_;
   std::unique_ptr<ThreadSystem> thread_system_;
@@ -156,49 +168,41 @@ TEST_F(LoopbackRouteFetcherTest, LoopbackRouteFetcherWorks) {
 }
 
 TEST_F(LoopbackRouteFetcherTest, CanDetectSelfSrc) {
-  apr_sockaddr_t* loopback_1 = nullptr;
-  ASSERT_EQ(APR_SUCCESS, apr_sockaddr_info_get(&loopback_1, "127.0.0.1",
-                                               APR_INET, 80, 0, pool_));
+  AddrInfoPtr loopback_1 = ResolveAddr("127.0.0.1", AF_INET);
+  ASSERT_NE(nullptr, loopback_1.get());
 
-  apr_sockaddr_t* loopback_2 = nullptr;
-  ASSERT_EQ(APR_SUCCESS, apr_sockaddr_info_get(&loopback_2, "127.12.34.45",
-                                               APR_INET, 80, 0, pool_));
+  AddrInfoPtr loopback_2 = ResolveAddr("127.12.34.45", AF_INET);
+  ASSERT_NE(nullptr, loopback_2.get());
 
-  apr_sockaddr_t* loopback_3 = nullptr;
-  ASSERT_EQ(APR_SUCCESS,
-            apr_sockaddr_info_get(&loopback_3, "::1", APR_INET6, 80, 0, pool_));
+  AddrInfoPtr loopback_3 = ResolveAddr("::1", AF_INET6);
+  ASSERT_NE(nullptr, loopback_3.get());
 
-  apr_sockaddr_t* loopback_4 = nullptr;
-  ASSERT_EQ(APR_SUCCESS, apr_sockaddr_info_get(&loopback_4, "::FFFF:127.0.0.2",
-                                               APR_INET6, 80, 0, pool_));
+  AddrInfoPtr loopback_4 = ResolveAddr("::FFFF:127.0.0.2", AF_INET6);
+  ASSERT_NE(nullptr, loopback_4.get());
 
-  apr_sockaddr_t* not_loopback_1 = nullptr;
-  ASSERT_EQ(APR_SUCCESS, apr_sockaddr_info_get(&not_loopback_1, "128.0.0.1",
-                                               APR_INET, 80, 0, pool_));
+  AddrInfoPtr not_loopback_1 = ResolveAddr("128.0.0.1", AF_INET);
+  ASSERT_NE(nullptr, not_loopback_1.get());
 
-  apr_sockaddr_t* not_loopback_2 = nullptr;
-  ASSERT_EQ(APR_SUCCESS, apr_sockaddr_info_get(&not_loopback_2, "::1:1",
-                                               APR_INET6, 80, 0, pool_));
+  AddrInfoPtr not_loopback_2 = ResolveAddr("::1:1", AF_INET6);
+  ASSERT_NE(nullptr, not_loopback_2.get());
 
-  apr_sockaddr_t* not_loopback_3 = nullptr;
-  ASSERT_EQ(APR_SUCCESS,
-            apr_sockaddr_info_get(&not_loopback_3, "::1:FFFF:127.0.0.1",
-                                  APR_INET6, 80, 0, pool_));
+  AddrInfoPtr not_loopback_3 = ResolveAddr("::1:FFFF:127.0.0.1", AF_INET6);
+  ASSERT_NE(nullptr, not_loopback_3.get());
 
-  EXPECT_TRUE(LoopbackRouteFetcher::IsLoopbackAddr(loopback_1))
-      << DumpAddr(loopback_1);
-  EXPECT_TRUE(LoopbackRouteFetcher::IsLoopbackAddr(loopback_2))
-      << DumpAddr(loopback_2);
-  EXPECT_TRUE(LoopbackRouteFetcher::IsLoopbackAddr(loopback_3))
-      << DumpAddr(loopback_3);
-  EXPECT_TRUE(LoopbackRouteFetcher::IsLoopbackAddr(loopback_4))
-      << DumpAddr(loopback_4);
-  EXPECT_FALSE(LoopbackRouteFetcher::IsLoopbackAddr(not_loopback_1))
-      << DumpAddr(not_loopback_1);
-  EXPECT_FALSE(LoopbackRouteFetcher::IsLoopbackAddr(not_loopback_2))
-      << DumpAddr(not_loopback_2);
-  EXPECT_FALSE(LoopbackRouteFetcher::IsLoopbackAddr(not_loopback_3))
-      << DumpAddr(not_loopback_3);
+  EXPECT_TRUE(
+      LoopbackRouteFetcher::IsLoopbackAddr(loopback_1->ai_addr));
+  EXPECT_TRUE(
+      LoopbackRouteFetcher::IsLoopbackAddr(loopback_2->ai_addr));
+  EXPECT_TRUE(
+      LoopbackRouteFetcher::IsLoopbackAddr(loopback_3->ai_addr));
+  EXPECT_TRUE(
+      LoopbackRouteFetcher::IsLoopbackAddr(loopback_4->ai_addr));
+  EXPECT_FALSE(
+      LoopbackRouteFetcher::IsLoopbackAddr(not_loopback_1->ai_addr));
+  EXPECT_FALSE(
+      LoopbackRouteFetcher::IsLoopbackAddr(not_loopback_2->ai_addr));
+  EXPECT_FALSE(
+      LoopbackRouteFetcher::IsLoopbackAddr(not_loopback_3->ai_addr));
 }
 
 TEST_F(LoopbackRouteFetcherTest, ProxySuffix) {

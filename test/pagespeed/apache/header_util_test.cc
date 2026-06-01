@@ -17,6 +17,8 @@
  * under the License.
  */
 
+#include <memory>
+
 #include "pagespeed/apache/header_util.h"
 
 #include "http_request.h"  // NOLINT

@@ -23,9 +23,9 @@
 #define PAGESPEED_KERNEL_THREAD_THREAD_SYNCHRONIZER_H__
 
 #include <map>
+#include <memory>
 
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 
@@ -105,7 +105,7 @@ class ThreadSynchronizer {
 
  private:
   class SyncPoint;
-  typedef std::map<GoogleString, SyncPoint*> SyncMap;
+  using SyncMap = std::map<GoogleString, std::unique_ptr<SyncPoint>>;
 
   SyncPoint* GetSyncPoint(const GoogleString& key);
   void DoWait(const char* key);
@@ -120,7 +120,8 @@ class ThreadSynchronizer {
   std::unique_ptr<Timer> timer_;
   StringVector prefixes_;
 
-  DISALLOW_COPY_AND_ASSIGN(ThreadSynchronizer);
+  ThreadSynchronizer(const ThreadSynchronizer&) = delete;
+  ThreadSynchronizer& operator=(const ThreadSynchronizer&) = delete;
 };
 
 }  // namespace net_instaweb

@@ -26,7 +26,6 @@
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/html/empty_html_filter.h"
 #include "pagespeed/kernel/html/html_element.h"
@@ -71,7 +70,8 @@ class ResourceCollector : public EmptyHtmlFilter {
   CategoryVector* resource_category_;
   RewriteDriver* driver_;
 
-  DISALLOW_COPY_AND_ASSIGN(ResourceCollector);
+  ResourceCollector(const ResourceCollector&) = delete;
+  ResourceCollector& operator=(const ResourceCollector&) = delete;
 };
 
 class ResourceTagScannerTest : public RewriteTestBase {

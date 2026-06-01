@@ -27,6 +27,7 @@
 #include <map>
 #include <string>
 #include <vector>
+#include <memory>
 
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/string.h"
@@ -34,6 +35,11 @@
 #include "pagespeed/kernel/http/response_headers.h"
 
 #ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <winsock2.h>
+#include <windows.h>
 #include <httpserv.h>
 #else
 // Define minimal IIS types for cross-platform compilation of tests
@@ -62,18 +68,48 @@ struct HTTP_REQUEST {
   USHORT RawUrlLength;
 };
 
+struct HTTP_DATA_CHUNK;  // Forward declaration for HTTP_RESPONSE
+
 struct HTTP_RESPONSE {
   USHORT StatusCode;
   PCSTR pReason;
   USHORT ReasonLength;
+  USHORT EntityChunkCount;
+  HTTP_DATA_CHUNK* pEntityChunks;
 };
 
+// HTTP_DATA_CHUNK_TYPE enum (global, matching Windows IIS)
+enum HTTP_DATA_CHUNK_TYPE {
+  HttpDataChunkFromMemory = 0,
+  HttpDataChunkFromFileHandle = 1,
+  HttpDataChunkFromFragmentCache = 2,
+  HttpDataChunkFromFragmentCacheEx = 3,
+  HttpDataChunkMaximum = 4
+};
+
+// File handle byte range (matching Windows IIS HTTP_BYTE_RANGE)
+struct HTTP_BYTE_RANGE {
+  unsigned long long StartingOffset;
+  unsigned long long Length;
+};
+#define HTTP_BYTE_RANGE_TO_EOF ((unsigned long long)-1)
+
 struct HTTP_DATA_CHUNK {
-  enum { HttpDataChunkFromMemory } DataChunkType;
-  struct {
-    void* pBuffer;
-    ULONG BufferLength;
-  } FromMemory;
+  HTTP_DATA_CHUNK_TYPE DataChunkType;
+  union {
+    struct {
+      void* pBuffer;
+      ULONG BufferLength;
+    } FromMemory;
+    struct {
+      HTTP_BYTE_RANGE ByteRange;
+      void* FileHandle;  // HANDLE on Windows
+    } FromFileHandle;
+    struct {
+      USHORT FragmentNameLength;
+      PCWSTR pFragmentName;
+    } FromFragmentCache;
+  };
 };
 
 // Forward declarations for mock implementations
@@ -131,7 +167,8 @@ class MockHttpRequest {
   GoogleString remote_address_;
   std::map<GoogleString, GoogleString> headers_;
 
-  DISALLOW_COPY_AND_ASSIGN(MockHttpRequest);
+  MockHttpRequest(const MockHttpRequest&) = delete;
+  MockHttpRequest& operator=(const MockHttpRequest&) = delete;
 };
 
 // Mock HTTP Response for testing
@@ -218,7 +255,8 @@ class MockHttpResponse {
   GoogleString recorded_actions_;
   bool record_actions_;
 
-  DISALLOW_COPY_AND_ASSIGN(MockHttpResponse);
+  MockHttpResponse(const MockHttpResponse&) = delete;
+  MockHttpResponse& operator=(const MockHttpResponse&) = delete;
 };
 
 // Mock HTTP Context for testing
@@ -251,6 +289,10 @@ class MockHttpContext {
   void SetAuthenticatedUser(const GoogleString& user) { auth_user_ = user; }
   const GoogleString& GetAuthenticatedUser() const { return auth_user_; }
   bool IsAuthenticated() const { return !auth_user_.empty(); }
+
+  // Connection state (simulates IHttpConnection::IsConnected)
+  void SetConnected(bool connected) { connected_ = connected; }
+  bool IsConnected() const { return connected_; }
 
   // Simulate async completion
   void SetAsyncPending(bool pending);
@@ -286,13 +328,15 @@ class MockHttpContext {
   GoogleString app_path_;
   GoogleString physical_path_;
   GoogleString auth_user_;
+  bool connected_{true};
   bool async_pending_;
   REQUEST_NOTIFICATION_STATUS async_result_;
 
   // Action recording state
   GoogleString recorded_actions_;
 
-  DISALLOW_COPY_AND_ASSIGN(MockHttpContext);
+  MockHttpContext(const MockHttpContext&) = delete;
+  MockHttpContext& operator=(const MockHttpContext&) = delete;
 };
 
 // Mock App Host Element for config testing
@@ -321,7 +365,8 @@ class MockAppHostElement {
   std::map<GoogleString, GoogleString> attributes_;
   std::vector<MockAppHostElement*> children_;
 
-  DISALLOW_COPY_AND_ASSIGN(MockAppHostElement);
+  MockAppHostElement(const MockAppHostElement&) = delete;
+  MockAppHostElement& operator=(const MockAppHostElement&) = delete;
 };
 
 // Mock App Host Admin Manager for config testing
@@ -344,7 +389,8 @@ class MockAppHostAdminManager {
  private:
   std::map<GoogleString, MockAppHostElement*> sections_;
 
-  DISALLOW_COPY_AND_ASSIGN(MockAppHostAdminManager);
+  MockAppHostAdminManager(const MockAppHostAdminManager&) = delete;
+  MockAppHostAdminManager& operator=(const MockAppHostAdminManager&) = delete;
 };
 
 // Helper to create a mock context with common settings

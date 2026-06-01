@@ -24,6 +24,7 @@
 
 #include "net/instaweb/rewriter/public/css_combine_filter.h"
 
+#include <memory>
 #include <vector>
 
 #include "base/logging.h"
@@ -42,7 +43,6 @@
 #include "net/instaweb/rewriter/public/rewrite_result.h"
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "pagespeed/kernel/base/charset_util.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -339,7 +339,8 @@ class CssCombineFilter::Context : public RewriteContext {
   RewriteFilter* filter_;
   CssCombineFilter::CssCombiner combiner_;
   bool new_combination_;
-  DISALLOW_COPY_AND_ASSIGN(Context);
+  Context(const Context&) = delete;
+  Context& operator=(const Context&) = delete;
 };
 
 // TODO(jmarantz) We exhibit zero intelligence about which css files to

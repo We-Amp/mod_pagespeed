@@ -30,7 +30,6 @@
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/atomic_bool.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/shared_string.h"
 #include "pagespeed/kernel/base/stl_util.h"
 #include "pagespeed/kernel/base/string.h"
@@ -146,7 +145,8 @@ class AsyncCacheTest : public CacheTestBase {
     WorkerTestBase::SyncPoint* sync_point_;
     AtomicBool is_healthy_;
 
-    DISALLOW_COPY_AND_ASSIGN(SyncedLRUCache);
+    SyncedLRUCache(const SyncedLRUCache&) = delete;
+    SyncedLRUCache& operator=(const SyncedLRUCache&) = delete;
   };
 
   class AsyncCallback : public CacheTestBase::Callback {

@@ -20,6 +20,7 @@
 #include "net/instaweb/rewriter/public/url_partnership.h"
 
 #include <cstddef>
+#include <memory>
 
 #include "base/logging.h"
 #include "net/instaweb/rewriter/public/domain_lawyer.h"
@@ -28,7 +29,6 @@
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "net/instaweb/rewriter/public/url_namer.h"
 #include "pagespeed/kernel/base/message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/stl_util.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -194,8 +194,12 @@ GoogleString UrlPartnership::RelativePath(int index) const {
   GoogleString resolved_base = ResolvedBase();
   StringPiece spec = url_vector_[index]->Spec();
   CHECK_GE(spec.size(), resolved_base.size());
-  CHECK_EQ(StringPiece(spec.data(), resolved_base.size()),
-           StringPiece(resolved_base));
+  CHECK_EQ(
+      StringPiece(
+          spec.data(),
+          resolved_base
+              .size()),  // NOLINT(bugprone-suspicious-stringview-data-usage)
+      StringPiece(resolved_base));
   return GoogleString(spec.data() + resolved_base.size(),
                       spec.size() - resolved_base.size());
 }

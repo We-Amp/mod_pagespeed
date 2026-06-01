@@ -42,7 +42,6 @@
 #include "pagespeed/kernel/base/function.h"
 #include "pagespeed/kernel/base/null_message_handler.h"
 #include "pagespeed/kernel/base/ref_counted_ptr.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -321,7 +320,8 @@ class ProxyInterfaceTest : public ProxyInterfaceTestBase {
   const GoogleString max_age_300_s_maxage_10_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(ProxyInterfaceTest);
+  ProxyInterfaceTest(const ProxyInterfaceTest&) = delete;
+  ProxyInterfaceTest& operator=(const ProxyInterfaceTest&) = delete;
 };
 
 TEST_F(ProxyInterfaceTest, LoggingInfo) {
@@ -3509,7 +3509,8 @@ class ProxyInterfaceOriginPropertyPageTest : public ProxyInterfaceTest {
 
    private:
     RewriteDriver* driver_;
-    DISALLOW_COPY_AND_ASSIGN(PerOriginPageReaderFilter);
+    PerOriginPageReaderFilter(const PerOriginPageReaderFilter&) = delete;
+    PerOriginPageReaderFilter& operator=(const PerOriginPageReaderFilter&) = delete;
   };
 
   class PerOriginPageReaderFilterCreator
@@ -3523,7 +3524,8 @@ class ProxyInterfaceOriginPropertyPageTest : public ProxyInterfaceTest {
     }
 
    private:
-    DISALLOW_COPY_AND_ASSIGN(PerOriginPageReaderFilterCreator);
+    PerOriginPageReaderFilterCreator(const PerOriginPageReaderFilterCreator&) = delete;
+    PerOriginPageReaderFilterCreator& operator=(const PerOriginPageReaderFilterCreator&) = delete;
   };
 
   void SetUp() override {

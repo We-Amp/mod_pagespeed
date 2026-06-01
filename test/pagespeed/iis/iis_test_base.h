@@ -25,7 +25,6 @@
 #include "gtest/gtest.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/null_mutex.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_system.h"
@@ -107,6 +106,30 @@ class IisTestBase : public testing::Test {
       GoogleString* hash);
 
   // =========================================================================
+  // Request Classification Helpers
+  // =========================================================================
+
+  // Check if request headers indicate an AJAX request.
+  // Mirrors IsAjaxRequest() in iis_http_module.cc.
+  // Checks: X-Requested-With: XMLHttpRequest (case-insensitive),
+  //         X-MicrosoftAjax (any non-empty value),
+  //         X-Prototype-Version (any non-empty value).
+  static bool IsAjaxHeaders(
+      const std::map<GoogleString, GoogleString>& headers);
+
+  // Check if request headers indicate a Range request.
+  // Returns true if Range or If-Range header is present and non-empty.
+  static bool IsRangeRequest(
+      const std::map<GoogleString, GoogleString>& headers);
+
+  // =========================================================================
+  // URL Normalization Helpers
+  // =========================================================================
+
+  // Strip default port from URL (:80 for http, :443 for https).
+  static GoogleString NormalizeUrlPort(const GoogleString& url);
+
+  // =========================================================================
   // HTTP Status Helpers
   // =========================================================================
 
@@ -165,7 +188,8 @@ class IisTestBase : public testing::Test {
   std::unique_ptr<Statistics> statistics_;
   MockConfigBuilder config_builder_;
 
-  DISALLOW_COPY_AND_ASSIGN(IisTestBase);
+  IisTestBase(const IisTestBase&) = delete;
+  IisTestBase& operator=(const IisTestBase&) = delete;
 };
 
 // Convenience macro for IIS-only tests

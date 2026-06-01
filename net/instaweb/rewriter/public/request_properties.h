@@ -20,10 +20,11 @@
 #ifndef NET_INSTAWEB_REWRITER_PUBLIC_REQUEST_PROPERTIES_H_
 #define NET_INSTAWEB_REWRITER_PUBLIC_REQUEST_PROPERTIES_H_
 
+#include <memory>
+
 #include "net/instaweb/rewriter/public/device_properties.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/gtest_prod.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/http/user_agent_matcher.h"
 
@@ -89,7 +90,8 @@ class RequestProperties {
   mutable LazyBool supports_webp_lossless_alpha_;
   mutable LazyBool supports_webp_animated_;
 
-  DISALLOW_COPY_AND_ASSIGN(RequestProperties);
+  RequestProperties(const RequestProperties&) = delete;
+  RequestProperties& operator=(const RequestProperties&) = delete;
 };
 
 }  // namespace net_instaweb

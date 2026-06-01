@@ -24,8 +24,9 @@
 #ifndef PAGESPEED_KERNEL_BASE_THREAD_H_
 #define PAGESPEED_KERNEL_BASE_THREAD_H_
 
+#include <memory>
+
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_system.h"
@@ -86,7 +87,8 @@ class ThreadSystem::Thread {
   bool started_;
   bool join_called_;
 
-  DISALLOW_COPY_AND_ASSIGN(Thread);
+  Thread(const Thread&) = delete;
+  Thread& operator=(const Thread&) = delete;
 };
 
 }  // namespace net_instaweb

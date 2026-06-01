@@ -21,11 +21,11 @@
 #define NET_INSTAWEB_HTTP_PUBLIC_SIMULATED_DELAY_FETCHER_H_
 
 #include <map>
+#include <memory>
 
 #include "net/instaweb/http/public/url_async_fetcher.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/file_system.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_annotations.h"
@@ -80,7 +80,8 @@ class SimulatedDelayFetcher : public UrlAsyncFetcher {
   int request_log_outstanding_ GUARDED_BY(mutex_.get());
   FileSystem::OutputFile* request_log_ PT_GUARDED_BY(mutex_.get());
 
-  DISALLOW_COPY_AND_ASSIGN(SimulatedDelayFetcher);
+  SimulatedDelayFetcher(const SimulatedDelayFetcher&) = delete;
+  SimulatedDelayFetcher& operator=(const SimulatedDelayFetcher&) = delete;
 };
 
 }  // namespace net_instaweb

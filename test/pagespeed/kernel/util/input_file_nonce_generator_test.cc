@@ -23,7 +23,6 @@
 
 #include "pagespeed/kernel/base/google_message_handler.h"
 #include "pagespeed/kernel/base/null_mutex.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/stdio_file_system.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/util/nonce_generator_test_base.h"
@@ -31,6 +30,9 @@
 namespace net_instaweb {
 namespace {
 
+// InputFileNonceGenerator reads from /dev/urandom which doesn't exist on
+// Windows. These tests are only applicable on POSIX systems.
+#ifndef _WIN32
 class InputFileNonceGeneratorTest : public NonceGeneratorTestBase {
  protected:
   InputFileNonceGeneratorTest() {
@@ -53,6 +55,7 @@ TEST_F(InputFileNonceGeneratorTest, DifferentNonOverlap) {
 }
 
 TEST_F(InputFileNonceGeneratorTest, AllBitsUsed) { AllBitsUsed(); }
+#endif  // _WIN32
 
 }  // namespace
 }  // namespace net_instaweb

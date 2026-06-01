@@ -21,9 +21,9 @@
 
 #include <csetjmp>
 #include <cstdlib>
+#include <memory>
 
 #include "pagespeed/kernel/base/message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/image/frame_interface_optimizer.h"
 #include "pagespeed/kernel/image/gif_reader.h"
@@ -336,7 +336,11 @@ bool ReadImage(ImageFormat image_type, const void* image_buffer,
     return true;
   }
   *pixels = nullptr;
-  const size_t data_length = reader->GetImageHeight() * bytes_per_row4;
+  size_t data_length;
+  if (!CheckedMulSize(static_cast<size_t>(reader->GetImageHeight()),
+                      bytes_per_row4, &data_length)) {
+    return false;
+  }
   unsigned char* image_data = static_cast<unsigned char*>(malloc(data_length));
   if (image_data == nullptr) {
     return false;

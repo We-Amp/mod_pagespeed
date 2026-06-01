@@ -21,12 +21,12 @@
 #define PAGESPEED_KERNEL_CACHE_CACHE_BATCHER_H_
 
 #include <cstddef>
+#include <memory>
 #include <unordered_map>
 #include <vector>
 
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/shared_string.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -106,7 +106,7 @@ class CacheBatcher : public CacheInterface {
   void ShutDown() override;
 
  private:
-  typedef std::unordered_map<GoogleString, std::vector<Callback*>> CallbackMap;
+  using CallbackMap = std::unordered_map<GoogleString, std::vector<Callback*>>;
 
   class Group;
   class MultiCallback;
@@ -145,7 +145,8 @@ class CacheBatcher : public CacheInterface {
   CallbackMap queued_ GUARDED_BY(mutex_);
   bool shutdown_ GUARDED_BY(mutex_);
 
-  DISALLOW_COPY_AND_ASSIGN(CacheBatcher);
+  CacheBatcher(const CacheBatcher&) = delete;
+  CacheBatcher& operator=(const CacheBatcher&) = delete;
 };
 
 }  // namespace net_instaweb

@@ -20,12 +20,12 @@
 #ifndef NET_INSTAWEB_REWRITER_PUBLIC_CSS_SUMMARIZER_BASE_H_
 #define NET_INSTAWEB_REWRITER_PUBLIC_CSS_SUMMARIZER_BASE_H_
 
+#include <memory>
 #include <vector>
 
 #include "net/instaweb/rewriter/public/resource_slot.h"
 #include "net/instaweb/rewriter/public/rewrite_filter.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/html/html_element.h"
@@ -256,7 +256,8 @@ class CssSummarizerBase : public RewriteFilter {
   Variable* num_css_used_for_critical_css_computation_;
   Variable* num_css_not_used_for_critical_css_computation_;
 
-  DISALLOW_COPY_AND_ASSIGN(CssSummarizerBase);
+  CssSummarizerBase(const CssSummarizerBase&) = delete;
+  CssSummarizerBase& operator=(const CssSummarizerBase&) = delete;
 };
 
 }  // namespace net_instaweb

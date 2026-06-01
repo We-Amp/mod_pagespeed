@@ -34,10 +34,10 @@
 #endif
 
 #include <deque>
+#include <memory>
 
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/thread/sequence.h"
 
@@ -87,7 +87,8 @@ class DispatcherSequence : public Sequence {
   bool shutting_down_;      // True if InitiateShutdown() was called
   bool shutdown_complete_;  // True when all tasks have been cancelled
 
-  DISALLOW_COPY_AND_ASSIGN(DispatcherSequence);
+  DispatcherSequence(const DispatcherSequence&) = delete;
+  DispatcherSequence& operator=(const DispatcherSequence&) = delete;
 };
 
 }  // namespace net_instaweb

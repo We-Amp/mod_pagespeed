@@ -17,6 +17,8 @@
  * under the License.
  */
 
+#include <memory>
+
 #include "net/instaweb/http/public/url_async_fetcher_stats.h"
 
 #include "net/instaweb/http/public/request_context.h"
@@ -24,7 +26,6 @@
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/google_message_handler.h"
 #include "pagespeed/kernel/base/null_mutex.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/thread_system.h"
@@ -74,7 +75,8 @@ class StatsMaker {
   std::unique_ptr<SharedMemStatistics> stats_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(StatsMaker);
+  StatsMaker(const StatsMaker&) = delete;
+  StatsMaker& operator=(const StatsMaker&) = delete;
 };
 
 class UrlAsyncFetcherStatsTest : public testing::Test {
@@ -115,7 +117,8 @@ class UrlAsyncFetcherStatsTest : public testing::Test {
   UrlAsyncFetcherStats stats_fetcher_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(UrlAsyncFetcherStatsTest);
+  UrlAsyncFetcherStatsTest(const UrlAsyncFetcherStatsTest&) = delete;
+  UrlAsyncFetcherStatsTest& operator=(const UrlAsyncFetcherStatsTest&) = delete;
 };
 
 StatsMaker* UrlAsyncFetcherStatsTest::stats_maker_;

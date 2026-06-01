@@ -20,10 +20,11 @@
 #ifndef PAGESPEED_CONTROLLER_CENTRAL_CONTROLLER_CALLBACK_H_
 #define PAGESPEED_CONTROLLER_CENTRAL_CONTROLLER_CALLBACK_H_
 
+#include <memory>
+
 #include "base/logging.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/function.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/thread/sequence.h"
 
 namespace net_instaweb {
@@ -92,7 +93,9 @@ class CentralControllerCallback : public Function {
   Sequence* sequence_;
   std::unique_ptr<TransactionContext> context_;
 
-  DISALLOW_COPY_AND_ASSIGN(CentralControllerCallback);
+  CentralControllerCallback(const CentralControllerCallback&) = delete;
+  CentralControllerCallback& operator=(const CentralControllerCallback&) =
+      delete;
 };
 
 template <typename TransactionContext>

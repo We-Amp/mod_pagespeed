@@ -44,7 +44,6 @@
 #include "pagespeed/kernel/base/named_lock_manager.h"
 #include "pagespeed/kernel/base/null_mutex.h"
 #include "pagespeed/kernel/base/null_shared_mem.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/shared_string.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/stl_util.h"
@@ -134,7 +133,8 @@ class SystemServerContextNoProxyHtml : public SystemServerContext {
   bool ProxiesHtml() const override { return false; }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(SystemServerContextNoProxyHtml);
+  SystemServerContextNoProxyHtml(const SystemServerContextNoProxyHtml&) = delete;
+  SystemServerContextNoProxyHtml& operator=(const SystemServerContextNoProxyHtml&) = delete;
 };
 
 class SystemCachesTest : public CustomRewriteTestBase<SystemRewriteOptions> {

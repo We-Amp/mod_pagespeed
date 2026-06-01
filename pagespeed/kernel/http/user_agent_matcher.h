@@ -21,11 +21,11 @@
 #define PAGESPEED_KERNEL_HTTP_USER_AGENT_MATCHER_H_
 
 #include <map>
+#include <memory>
 #include <utility>
 
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/fast_wildcard_group.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/util/re2.h"
@@ -156,7 +156,8 @@ class UserAgentMatcher {
   std::unique_ptr<RE2> known_devices_pattern_;
   mutable map<GoogleString, pair<int, int> > screen_dimensions_map_;
 
-  DISALLOW_COPY_AND_ASSIGN(UserAgentMatcher);
+  UserAgentMatcher(const UserAgentMatcher&) = delete;
+  UserAgentMatcher& operator=(const UserAgentMatcher&) = delete;
 };
 
 }  // namespace net_instaweb

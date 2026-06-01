@@ -24,10 +24,11 @@
 #ifndef NET_INSTAWEB_REWRITER_PUBLIC_DATA_URL_INPUT_RESOURCE_H_
 #define NET_INSTAWEB_REWRITER_PUBLIC_DATA_URL_INPUT_RESOURCE_H_
 
+#include <memory>
+
 #include "net/instaweb/http/public/request_context.h"
 #include "net/instaweb/rewriter/public/resource.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/http/data_url.h"
@@ -86,7 +87,8 @@ class DataUrlInputResource : public Resource {
   const StringPiece encoded_contents_;  // substring of url.
   GoogleString decoded_contents_;
 
-  DISALLOW_COPY_AND_ASSIGN(DataUrlInputResource);
+  DataUrlInputResource(const DataUrlInputResource&) = delete;
+  DataUrlInputResource& operator=(const DataUrlInputResource&) = delete;
 };
 
 }  // namespace net_instaweb

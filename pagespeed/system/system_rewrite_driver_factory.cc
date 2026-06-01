@@ -19,34 +19,7 @@
 
 #include "pagespeed/system/system_rewrite_driver_factory.h"
 
-#ifdef _WIN32
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <windows.h>
-namespace {
-void SRDFDebugLog(const char* msg) {
-  HANDLE hFile = CreateFileA(
-      "C:\\inetpub\\pagespeed\\srdf_debug.log",
-      FILE_APPEND_DATA,
-      FILE_SHARE_READ | FILE_SHARE_WRITE,
-      NULL,
-      OPEN_ALWAYS,
-      FILE_ATTRIBUTE_NORMAL,
-      NULL);
-  if (hFile != INVALID_HANDLE_VALUE) {
-    DWORD written;
-    WriteFile(hFile, msg, strlen(msg), &written, NULL);
-    WriteFile(hFile, "\r\n", 2, &written, NULL);
-    CloseHandle(hFile);
-  }
-}
-}  // namespace
-#else
-namespace { void SRDFDebugLog(const char*) {} }
-#endif
-
-#ifndef _WIN32
+#ifdef __linux__
 #include <sys/prctl.h>
 #endif
 
@@ -69,8 +42,10 @@ namespace { void SRDFDebugLog(const char*) {} }
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "net/instaweb/rewriter/public/static_asset_manager.h"
 #include "net/instaweb/util/public/property_cache.h"
+#ifndef PAGESPEED_NO_FORK
 #include "pagespeed/controller/central_controller_rpc_client.h"
 #include "pagespeed/controller/central_controller_rpc_server.h"
+#endif
 #include "pagespeed/controller/popularity_contest_schedule_rewrite_controller.h"
 #include "pagespeed/controller/queued_expensive_operation_controller.h"
 #include "pagespeed/kernel/base/abstract_shared_mem.h"
@@ -84,7 +59,6 @@ namespace { void SRDFDebugLog(const char*) {} }
 #else
 #include "pagespeed/kernel/base/posix_timer.h"
 #endif
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/stdio_file_system.h"
 #include "pagespeed/kernel/base/string.h"
@@ -147,47 +121,33 @@ SystemRewriteDriverFactory::SystemRewriteDriverFactory(
       thread_counts_finalized_(false),
       num_rewrite_threads_(-1),
       num_expensive_rewrite_threads_(-1) {
-  SRDFDebugLog("SRDF: constructor body entered after member init");
-  SRDFDebugLog("SRDF: checking shared_mem_runtime");
   if (shared_mem_runtime == nullptr) {
-    SRDFDebugLog("SRDF: shared_mem_runtime is null, creating NullSharedMem");
 #if PAGESPEED_SUPPORT_POSIX_SHARED_MEM
     shared_mem_runtime = new PthreadSharedMem();
 #else
     shared_mem_runtime = new NullSharedMem();
 #endif
-    SRDFDebugLog("SRDF: created NullSharedMem");
   }
-  SRDFDebugLog("SRDF: about to reset shared_mem_runtime_");
   shared_mem_runtime_.reset(shared_mem_runtime);
-  SRDFDebugLog("SRDF: constructor complete");
 }
 
 // We need an Init() method to finish construction because we want to call
 // virtual methods that subclasses can override.
 void SystemRewriteDriverFactory::Init() {
-  SRDFDebugLog("SRDF: Init() entered");
   // Note: in Apache this must run after mod_pagespeed_register_hooks has
   // completed.  See http://httpd.apache.org/docs/2.4/developer/new_api_2_4.html
   // and search for ap_mpm_query.
-  SRDFDebugLog("SRDF: calling AutoDetectThreadCounts");
   AutoDetectThreadCounts();
-  SRDFDebugLog("SRDF: AutoDetectThreadCounts complete");
 
-  SRDFDebugLog("SRDF: calling LookupThreadLimit");
   int thread_limit = LookupThreadLimit();
-  SRDFDebugLog("SRDF: LookupThreadLimit complete");
   thread_limit += num_rewrite_threads() + num_expensive_rewrite_threads();
-  SRDFDebugLog("SRDF: about to create SystemCaches");
   caches_ = std::make_unique<SystemCaches>(this, shared_mem_runtime_.get(),
                                            thread_limit);
-  SRDFDebugLog("SRDF: Init() complete");
 }
 
 SystemRewriteDriverFactory::~SystemRewriteDriverFactory() {
   shared_mem_statistics_.reset(nullptr);
 }
-
 
 // Initializes global statistics object if needed, using factory to
 // help with the settings if needed.
@@ -247,7 +207,9 @@ void SystemRewriteDriverFactory::InitStats(Statistics* statistics) {
                                  statistics);
   InPlaceResourceRecorder::InitStats(statistics);
   RateController::InitStats(statistics);
+#ifndef PAGESPEED_NO_FORK
   CentralControllerRpcClient::InitStats(statistics);
+#endif
 
   statistics->AddVariable(kShutdownCount);
 }
@@ -264,14 +226,10 @@ NonceGenerator* SystemRewriteDriverFactory::DefaultNonceGenerator() {
 }
 
 void SystemRewriteDriverFactory::SetupCaches(ServerContext* server_context) {
-  SRDFDebugLog("SRDF: SetupCaches() entered");
   if (caches_ == nullptr) {
-    SRDFDebugLog("SRDF: SetupCaches - caches_ is NULL!");
     return;
   }
-  SRDFDebugLog("SRDF: SetupCaches - calling caches_->SetupCaches");
   caches_->SetupCaches(server_context, enable_property_cache());
-  SRDFDebugLog("SRDF: SetupCaches() complete");
 }
 
 void SystemRewriteDriverFactory::InitStaticAssetManager(
@@ -300,7 +258,7 @@ void SystemRewriteDriverFactory::ParentOrChildInit() {
 }
 
 void SystemRewriteDriverFactory::NameProcess(const char* name) {
-#ifndef _WIN32
+#ifdef __linux__
   // Set the process status.  This is what /proc/PID/status shows and what
   // "ps -a" gives you.  With PR_SET_NAME there's a max of 16 characters, so
   // abbreviate pagespeed as ps to be terse.
@@ -311,7 +269,7 @@ void SystemRewriteDriverFactory::NameProcess(const char* name) {
   // It's also possible to change argv[0], but this is a pain so currently we
   // only do this in nginx where they've written ngx_setproctitle to make it
   // easy.
-#endif  // !_WIN32
+#endif  // __linux__
 }
 
 void SystemRewriteDriverFactory::PrepareForkedProcess(const char* name) {
@@ -327,6 +285,7 @@ void SystemRewriteDriverFactory::PrepareControllerProcess() {
 
 void SystemRewriteDriverFactory::StartController(
     const SystemRewriteOptions& options) {
+#ifndef PAGESPEED_NO_FORK
   if (!options.controller_port().empty()) {
     std::unique_ptr<CentralControllerRpcServer> controller(
         new CentralControllerRpcServer(
@@ -344,6 +303,7 @@ void SystemRewriteDriverFactory::StartController(
     ControllerManager::ForkControllerProcess(
         std::move(controller), this, system_thread_system_, message_handler());
   }
+#endif
 }
 
 void SystemRewriteDriverFactory::RootInit() {
@@ -418,6 +378,7 @@ void SystemRewriteDriverFactory::ChildInit() {
 std::shared_ptr<CentralController>
 SystemRewriteDriverFactory::GetCentralController(
     NamedLockManager* lock_manager) {
+#ifndef PAGESPEED_NO_FORK
   const SystemRewriteOptions* conf =
       SystemRewriteOptions::DynamicCast(default_options());
   if (conf->controller_port().empty()) {
@@ -432,6 +393,9 @@ SystemRewriteDriverFactory::GetCentralController(
         thread_system(), timer(), statistics(), message_handler());
   }
   return central_controller_;
+#else
+  return RewriteDriverFactory::GetCentralController(lock_manager);
+#endif
 }
 
 // TODO(jmarantz): make this per-vhost.

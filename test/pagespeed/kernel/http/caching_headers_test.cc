@@ -21,7 +21,6 @@
 
 #include <memory>
 
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/http/http_names.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 
@@ -68,7 +67,8 @@ class TestCachingHeaders : public CachingHeaders {
   bool likely_static_resource_type_;
   bool cacheable_resource_status_code_;
 
-  DISALLOW_COPY_AND_ASSIGN(TestCachingHeaders);
+  TestCachingHeaders(const TestCachingHeaders&) = delete;
+  TestCachingHeaders& operator=(const TestCachingHeaders&) = delete;
 };
 
 class CachingHeadersTest : public testing::Test {

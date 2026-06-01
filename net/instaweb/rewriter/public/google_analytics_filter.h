@@ -49,10 +49,10 @@
 #ifndef NET_INSTAWEB_REWRITER_PUBLIC_GOOGLE_ANALYTICS_FILTER_H_
 #define NET_INSTAWEB_REWRITER_PUBLIC_GOOGLE_ANALYTICS_FILTER_H_
 
+#include <memory>
 #include <vector>
 
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/html/empty_html_filter.h"
@@ -97,7 +97,8 @@ class ScriptEditor {
   GoogleString::size_type len_;
 
   Type editor_type_;
-  DISALLOW_COPY_AND_ASSIGN(ScriptEditor);
+  ScriptEditor(const ScriptEditor&) = delete;
+  ScriptEditor& operator=(const ScriptEditor&) = delete;
 };
 
 // Filter <script> tags.
@@ -166,7 +167,8 @@ class GoogleAnalyticsFilter : public EmptyHtmlFilter {
   Variable* page_load_count_;
   Variable* rewritten_count_;
 
-  DISALLOW_COPY_AND_ASSIGN(GoogleAnalyticsFilter);
+  GoogleAnalyticsFilter(const GoogleAnalyticsFilter&) = delete;
+  GoogleAnalyticsFilter& operator=(const GoogleAnalyticsFilter&) = delete;
 };
 
 }  // namespace net_instaweb

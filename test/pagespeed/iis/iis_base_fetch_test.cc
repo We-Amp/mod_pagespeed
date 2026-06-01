@@ -25,6 +25,8 @@
 // 2. Documenting expected behavior and API contracts
 // 3. Verifying helper functions for response manipulation
 
+#include <memory>
+
 #include "gtest/gtest.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/http/response_headers.h"

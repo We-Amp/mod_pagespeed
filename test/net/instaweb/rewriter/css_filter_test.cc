@@ -19,6 +19,8 @@
 
 //     and sligocki@google.com (Shawn Ligocki)
 
+#include <memory>
+
 #include "net/instaweb/rewriter/public/css_filter.h"
 
 #include "net/instaweb/http/public/async_fetch.h"
@@ -33,7 +35,6 @@
 #include "pagespeed/kernel/base/abstract_mutex.h"  // for ScopedMutex
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"

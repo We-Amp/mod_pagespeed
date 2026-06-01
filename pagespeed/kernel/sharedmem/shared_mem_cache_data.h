@@ -6,9 +6,9 @@
  * to you under the Apache License, Version 2.0 (the
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
- * 
+ *
  *   http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
  * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
@@ -19,16 +19,27 @@
 
 // Data structure operation helpers for SharedMemCache. See the top of
 // shared_mem_cache.cc for data format descriptions.
+//
+// ALIGNMENT NOTES:
+// These structures are placed in shared memory and must have consistent
+// layout across different compilers and platforms. We use #pragma pack
+// to ensure consistent packing, and avoid bitfields which have
+// compiler-specific layout.
+//
+// Mutexes are placed at aligned offsets AFTER these structures (not inline)
+// to satisfy platform-specific alignment requirements:
+//   - Linux/macOS: pthread_mutex_t requires 8-byte alignment
+//   - Windows x64: CRITICAL_SECTION requires 16-byte alignment
 
 #ifndef PAGESPEED_KERNEL_SHAREDMEM_SHARED_MEM_CACHE_DATA_H_
 #define PAGESPEED_KERNEL_SHAREDMEM_SHARED_MEM_CACHE_DATA_H_
 
 #include <cstddef>  // for size_t
+#include <memory>
 #include <vector>
 
 #include "base/logging.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/thread_annotations.h"
 
@@ -41,13 +52,21 @@ class MessageHandler;
 
 namespace SharedMemCacheData {
 
-typedef int32 EntryNum;
-typedef int32 BlockNum;
-typedef std::vector<BlockNum> BlockVector;
+using EntryNum = int32;
+using BlockNum = int32;
+using BlockVector = std::vector<BlockNum>;
 
 const BlockNum kInvalidBlock = -1;
 const EntryNum kInvalidEntry = -1;
 const size_t kHashSize = 16;
+
+// Ensure consistent structure layout across compilers (MSVC, GCC, Clang).
+// We use 8-byte packing which matches the natural alignment of int64 members.
+#if defined(_MSC_VER)
+#pragma pack(push, 8)
+#elif defined(__GNUC__) || defined(__clang__)
+#pragma pack(push, 8)
+#endif
 
 struct SectorStats {
   SectorStats();
@@ -88,7 +107,9 @@ struct SectorHeader {
 
   SectorStats stats;
 
-  // mutex goes here.
+  // Note: The mutex is stored at an aligned offset AFTER this structure,
+  // not inline. The offset is computed using AlignForMutex() to satisfy
+  // platform-specific alignment requirements (16-byte on Windows x64).
 };
 
 struct CacheEntry {
@@ -104,14 +125,60 @@ struct CacheEntry {
 
   BlockNum first_block;
 
-  // When this is true, someone is trying to overwrite this entry.
-  bool creating : 1;
-
-  // Number of readers currently accessing the data.
-  uint32 open_count : 31;
+  // Flags field replaces bitfields for cross-platform consistency.
+  // Bitfield layout is compiler-specific, but this uint32 with accessor
+  // methods works identically on all platforms.
+  //
+  // Bit 0: creating - When true, someone is trying to overwrite this entry.
+  // Bits 1-31: open_count - Number of readers currently accessing the data.
+  uint32 flags;
 
   uint32 padding;  // ensures we're 8-aligned.
+
+  // Accessor methods for the flags field.
+  bool creating() const { return (flags & 1u) != 0; }
+  void set_creating(bool value) {
+    if (value) {
+      flags |= 1u;
+    } else {
+      flags &= ~1u;
+    }
+  }
+
+  uint32 open_count() const { return flags >> 1; }
+  void set_open_count(uint32 count) { flags = (flags & 1u) | (count << 1); }
+
+  void increment_open_count() {
+    // Increment by 2 since open_count is stored in bits 1-31
+    flags += 2u;
+  }
+
+  void decrement_open_count() {
+    // Decrement by 2 since open_count is stored in bits 1-31
+    flags -= 2u;
+  }
 };
+
+#if defined(_MSC_VER) || defined(__GNUC__) || defined(__clang__)
+#pragma pack(pop)
+#endif
+
+// Compile-time verification of structure sizes.
+// We use range checks rather than exact values since padding may vary slightly,
+// but the structures must remain within expected bounds for correct operation.
+static_assert(sizeof(SectorStats) >= 80 && sizeof(SectorStats) <= 96,
+              "SectorStats size outside expected range");
+static_assert(sizeof(SectorHeader) >= 96 && sizeof(SectorHeader) <= 112,
+              "SectorHeader size outside expected range");
+static_assert(sizeof(CacheEntry) >= 48 && sizeof(CacheEntry) <= 64,
+              "CacheEntry size outside expected range");
+
+// Verify alignment requirements
+static_assert(alignof(SectorStats) <= 8,
+              "SectorStats alignment exceeds 8 bytes");
+static_assert(alignof(SectorHeader) <= 8,
+              "SectorHeader alignment exceeds 8 bytes");
+static_assert(alignof(CacheEntry) <= 8, "CacheEntry alignment exceeds 8 bytes");
 
 // Helper for operating on a given sector's data structures; helping
 // access them, lay them out in memory, and initialize them. It does not
@@ -281,7 +348,8 @@ class Sector {
   char* blocks_base_;
   size_t sector_offset_;  // offset of the sector within the SHM segment
 
-  DISALLOW_COPY_AND_ASSIGN(Sector);
+  Sector(const Sector&) = delete;
+  Sector& operator=(const Sector&) = delete;
 };
 
 }  // namespace SharedMemCacheData

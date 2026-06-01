@@ -27,13 +27,14 @@
 // to allow this scheduling to occur, and this is called directly by the test
 // framework using MockTimer.
 
+#include <memory>
+
 #include "pagespeed/kernel/util/mem_lock_manager.h"
 
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/function.h"
 #include "pagespeed/kernel/base/google_message_handler.h"
 #include "pagespeed/kernel/base/named_lock_manager.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_system.h"
@@ -120,7 +121,8 @@ class MemLockManagerTest : public testing::Test {
   GoogleString log_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(MemLockManagerTest);
+  MemLockManagerTest(const MemLockManagerTest&) = delete;
+  MemLockManagerTest& operator=(const MemLockManagerTest&) = delete;
 };
 
 TEST_F(MemLockManagerTest, LockUnlock) {

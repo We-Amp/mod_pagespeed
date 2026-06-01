@@ -17,9 +17,10 @@
  * under the License.
  */
 
+#include <memory>
+
 #include "pagespeed/kernel/base/callback.h"
 
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 
 namespace net_instaweb {

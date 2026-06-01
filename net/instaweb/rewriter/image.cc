@@ -24,11 +24,7 @@
 #include <memory>
 
 extern "C" {
-#ifdef USE_SYSTEM_ZLIB
-#include "zlib.h"
-#else
-#include "external/envoy/bazel/foreign_cc/zlib/include/zlib.h"
-#endif
+#include <zlib.h>  // Provided by @envoy//bazel:zlib
 }  // extern "C"
 
 #include "base/logging.h"
@@ -39,7 +35,6 @@ extern "C" {
 #include "pagespeed/kernel/base/annotated_message_handler.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -329,7 +324,8 @@ class ImageImpl : public Image {
   GoogleString resize_debug_message_;
   GoogleString debug_message_url_;
 
-  DISALLOW_COPY_AND_ASSIGN(ImageImpl);
+  ImageImpl(const ImageImpl&) = delete;
+  ImageImpl& operator=(const ImageImpl&) = delete;
 };
 
 void ImageImpl::SetTransformToLowRes() {
@@ -1294,7 +1290,7 @@ bool ImageImpl::DrawImage(Image* image, int x, int y) {
   const size_t bytes_per_pixel =
       GetNumChannelsFromPixelFormat(output_pixel_format, handler_.get());
   const size_t bytes_per_scanline = canvas_width * bytes_per_pixel;
-  scoped_array<uint8> scanline(new uint8[bytes_per_scanline]);
+  std::unique_ptr<uint8[]> scanline(new uint8[bytes_per_scanline]);
 
   // Create a writer for writing the new canvas image.
   GoogleString canvas_image;

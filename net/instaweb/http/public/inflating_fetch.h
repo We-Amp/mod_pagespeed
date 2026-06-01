@@ -20,10 +20,11 @@
 #ifndef NET_INSTAWEB_HTTP_PUBLIC_INFLATING_FETCH_H_
 #define NET_INSTAWEB_HTTP_PUBLIC_INFLATING_FETCH_H_
 
+#include <memory>
+
 #include "net/instaweb/http/public/async_fetch.h"
 #include "net/instaweb/http/public/http_value.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/http/response_headers.h"
 #include "pagespeed/kernel/util/gzip_inflater.h"
@@ -98,7 +99,8 @@ class InflatingFetch : public SharedAsyncFetch {
   // gets reset.
   bool inflate_failure_;
 
-  DISALLOW_COPY_AND_ASSIGN(InflatingFetch);
+  InflatingFetch(const InflatingFetch&) = delete;
+  InflatingFetch& operator=(const InflatingFetch&) = delete;
 };
 
 }  // namespace net_instaweb

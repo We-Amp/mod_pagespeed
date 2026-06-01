@@ -20,9 +20,10 @@
 #ifndef PAGESPEED_CONTROLLER_SCHEDULE_REWRITE_CALLBACK_H_
 #define PAGESPEED_CONTROLLER_SCHEDULE_REWRITE_CALLBACK_H_
 
+#include <memory>
+
 #include "pagespeed/controller/central_controller_callback.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/thread/sequence.h"
 
@@ -44,7 +45,8 @@ class ScheduleRewriteContext {
   ScheduleRewriteContext();
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(ScheduleRewriteContext);
+  ScheduleRewriteContext(const ScheduleRewriteContext&) = delete;
+  ScheduleRewriteContext& operator=(const ScheduleRewriteContext&) = delete;
 };
 
 // Implementor interface to rewrite scheduling features in CentralController.
@@ -63,7 +65,8 @@ class ScheduleRewriteCallback
 
   GoogleString key_;
 
-  DISALLOW_COPY_AND_ASSIGN(ScheduleRewriteCallback);
+  ScheduleRewriteCallback(const ScheduleRewriteCallback&) = delete;
+  ScheduleRewriteCallback& operator=(const ScheduleRewriteCallback&) = delete;
 };
 
 }  // namespace net_instaweb

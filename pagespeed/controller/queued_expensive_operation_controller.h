@@ -20,13 +20,13 @@
 #ifndef PAGESPEED_CONTROLLER_QUEUED_EXPENSIVE_OPERATION_CONTROLLER_H_
 #define PAGESPEED_CONTROLLER_QUEUED_EXPENSIVE_OPERATION_CONTROLLER_H_
 
+#include <memory>
 #include <queue>
 
 #include "pagespeed/controller/expensive_operation_controller.h"
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/function.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/thread_annotations.h"
 #include "pagespeed/kernel/base/thread_system.h"
@@ -72,7 +72,10 @@ class QueuedExpensiveOperationController : public ExpensiveOperationController {
   UpDownCounter* queued_operations_counter_;
   TimedVariable* permitted_operations_counter_;
 
-  DISALLOW_COPY_AND_ASSIGN(QueuedExpensiveOperationController);
+  QueuedExpensiveOperationController(
+      const QueuedExpensiveOperationController&) = delete;
+  QueuedExpensiveOperationController& operator=(
+      const QueuedExpensiveOperationController&) = delete;
 };
 
 }  // namespace net_instaweb

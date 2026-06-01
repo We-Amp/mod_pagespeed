@@ -21,10 +21,10 @@
 #define PAGESPEED_OPT_LOGGING_LOG_RECORD_H_
 
 #include <map>
+#include <memory>
 
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/gtest_prod.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/http/image_types.pb.h"
@@ -254,7 +254,7 @@ class AbstractLogRecord {
   StringIntMap url_index_map_;
 
   // Stats collected from calls to LogRewrite.
-  typedef std::map<RewriterApplication::Status, int> RewriteStatusCountMap;
+  using RewriteStatusCountMap = std::map<RewriterApplication::Status, int>;
   struct RewriterStatsInternal {
     RewriterHtmlApplication::Status html_status;
 
@@ -264,10 +264,11 @@ class AbstractLogRecord {
     RewriterStatsInternal()
         : html_status(RewriterHtmlApplication::UNKNOWN_STATUS) {}
   };
-  typedef std::map<GoogleString, RewriterStatsInternal> RewriterStatsMap;
+  using RewriterStatsMap = std::map<GoogleString, RewriterStatsInternal>;
   RewriterStatsMap rewriter_stats_;
 
-  DISALLOW_COPY_AND_ASSIGN(AbstractLogRecord);
+  AbstractLogRecord(const AbstractLogRecord&) = delete;
+  AbstractLogRecord& operator=(const AbstractLogRecord&) = delete;
 };
 
 // Simple AbstractLogRecord implementation which owns a LoggingInfo protobuf.
@@ -337,7 +338,8 @@ class CopyOnWriteLogRecord : public LogRecord {
  private:
   LoggingInfo* logging_info_copy_;  // Not owned by us.
 
-  DISALLOW_COPY_AND_ASSIGN(CopyOnWriteLogRecord);
+  CopyOnWriteLogRecord(const CopyOnWriteLogRecord&) = delete;
+  CopyOnWriteLogRecord& operator=(const CopyOnWriteLogRecord&) = delete;
 };
 
 }  // namespace net_instaweb

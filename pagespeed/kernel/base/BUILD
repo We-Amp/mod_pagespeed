@@ -36,6 +36,7 @@ cc_library(
     hdrs = [
         "abstract_mutex.h",
         "abstract_shared_mem.h",
+        "alignment_util.h",
         "annotated_message_handler.h",
         "atom.h",
         "basictypes.h",
@@ -49,7 +50,6 @@ cc_library(
         "message_handler.h",
         "print_message_handler.h",
         "printf_format.h",
-        "scoped_ptr.h",
         "sparse_hash_map.h",
         "stack_buffer.h",
         "statistics.h",
@@ -77,7 +77,6 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//third_party/google-sparsehash:google_sparsehash_gen",
-        "@boringssl//:ssl",
         "@com_google_absl//absl/base",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:node_hash_map",
@@ -93,7 +92,43 @@ cc_library(
     hdrs = ["gtest_prod.h"],
     visibility = ["//visibility:public"],
     deps = [
-        "@com_google_googletest//:gtest",
+        "@googletest//:gtest",
+    ],
+)
+
+# Cross-platform timer using C++ standard library (std::chrono).
+# Use this for Envoy filter builds and Windows support.
+cc_library(
+    name = "std_timer",
+    srcs = ["std_timer.cc"],
+    hdrs = ["std_timer.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":pagespeed_base_core",
+    ],
+)
+
+# POSIX-specific timer using gettimeofday().
+# Not available on Windows; use std_timer instead.
+cc_library(
+    name = "posix_timer",
+    srcs = ["posix_timer.cc"],
+    hdrs = ["posix_timer.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":pagespeed_base_core",
+    ],
+)
+
+# Cross-platform memory pool abstraction.
+# Provides similar functionality to APR pools using standard C++.
+cc_library(
+    name = "scoped_memory_pool",
+    srcs = ["scoped_memory_pool.cc"],
+    hdrs = ["scoped_memory_pool.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":pagespeed_base_core",
     ],
 )
 
@@ -114,9 +149,8 @@ cc_library(
         "hasher.cc",
         "hostname_util.cc",
         "json_writer.cc",
-        "md5_hasher.cc",
+        "mapped_shared_string.cc",
         "named_lock_manager.cc",
-        "posix_timer.cc",
         "request_trace.cc",
         "rolling_hash.cc",
         "sha1_signature.cc",
@@ -129,7 +163,12 @@ cc_library(
         "waveform.cc",
         "wildcard.cc",
         "wildcard_group.cc",
-    ],
+    ] + select({
+        # On Windows, use BCrypt-based MD5 implementation (no boringssl dependency)
+        "@platforms//os:windows": ["md5_hasher_win.cc"],
+        # On other platforms, use boringssl-based MD5 implementation
+        "//conditions:default": ["md5_hasher.cc"],
+    }),
     hdrs = [
         "arena.h",
         "atomic_bool.h",
@@ -155,11 +194,11 @@ cc_library(
         "json.h",
         "json_writer.h",
         "manually_ref_counted.h",
+        "mapped_shared_string.h",
         "md5_hasher.h",
         "named_lock_manager.h",
         "pool.h",
         "pool_element.h",
-        "posix_timer.h",
         "proto_matcher.h",
         "proto_matcher_impl.h",
         "proto_util.h",
@@ -172,6 +211,8 @@ cc_library(
         "source_map.h",
         "split_statistics.h",
         "split_writer.h",
+        "std_timer.h",
+        "scoped_memory_pool.h",
         "string_multi_map.h",
         "thread.h",
         "waveform.h",
@@ -182,6 +223,17 @@ cc_library(
     deps = [
         ":gtest_prod",
         ":pagespeed_base_core",
+        ":scoped_memory_pool",
+        ":std_timer",
         "@jsoncpp",
-    ],
+        "@com_google_protobuf//:protobuf",
+    ] + select({
+        # On Windows: no boringssl, no posix_timer
+        "@platforms//os:windows": [],
+        # On other platforms: use boringssl for crypto and posix_timer
+        "//conditions:default": [
+            ":posix_timer",
+            "@boringssl//:ssl",
+        ],
+    }),
 )

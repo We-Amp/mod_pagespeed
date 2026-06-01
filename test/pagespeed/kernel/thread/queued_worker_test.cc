@@ -19,11 +19,12 @@
 
 // Unit-test for QueuedWorker
 
+#include <memory>
+
 #include "pagespeed/kernel/thread/queued_worker.h"
 
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/function.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/thread/worker_test_base.h"
 
@@ -40,7 +41,8 @@ class QueuedWorkerTest : public WorkerTestBase {
   std::unique_ptr<QueuedWorker> worker_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(QueuedWorkerTest);
+  QueuedWorkerTest(const QueuedWorkerTest&) = delete;
+  QueuedWorkerTest& operator=(const QueuedWorkerTest&) = delete;
 };
 
 // A closure that enqueues a new version of itself 'count' times, and
@@ -64,7 +66,8 @@ class ChainedTask : public Function {
   QueuedWorker* worker_;
   WorkerTestBase::SyncPoint* sync_;
 
-  DISALLOW_COPY_AND_ASSIGN(ChainedTask);
+  ChainedTask(const ChainedTask&) = delete;
+  ChainedTask& operator=(const ChainedTask&) = delete;
 };
 
 TEST_F(QueuedWorkerTest, BasicOperation) {

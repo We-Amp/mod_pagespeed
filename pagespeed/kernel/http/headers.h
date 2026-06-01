@@ -21,11 +21,11 @@
 #define PAGESPEED_KERNEL_HTTP_HEADERS_H_
 
 #include <map>
+#include <memory>
 #include <utility>
 
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/proto_util.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 
@@ -41,10 +41,10 @@ template <class Proto>
 class Headers {
  public:
   // typedef's for manipulating the cookie multimap.
-  typedef std::pair<StringPiece, StringPiece> ValueAndAttributes;
-  typedef std::multimap<StringPiece, ValueAndAttributes> CookieMultimap;
-  typedef std::multimap<StringPiece, ValueAndAttributes>::const_iterator
-      CookieMultimapConstIter;
+  using ValueAndAttributes = std::pair<StringPiece, StringPiece>;
+  using CookieMultimap = std::multimap<StringPiece, ValueAndAttributes>;
+  using CookieMultimapConstIter =
+      std::multimap<StringPiece, ValueAndAttributes>::const_iterator;
 
   Headers();
   virtual ~Headers();
@@ -242,7 +242,8 @@ class Headers {
   // being set multiple times though we don't necessarily handle that correctly.
   mutable std::unique_ptr<CookieMultimap> cookies_;
 
-  DISALLOW_COPY_AND_ASSIGN(Headers);
+  Headers(const Headers&) = delete;
+  Headers& operator=(const Headers&) = delete;
 };
 
 }  // namespace net_instaweb

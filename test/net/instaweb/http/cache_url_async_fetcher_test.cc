@@ -33,7 +33,6 @@
 #include "pagespeed/kernel/base/function.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/null_message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/statistics_template.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -47,8 +46,8 @@
 #include "pagespeed/kernel/http/response_headers.h"
 #include "pagespeed/kernel/thread/queued_worker_pool.h"
 #include "pagespeed/kernel/thread/thread_synchronizer.h"
-#include "pagespeed/kernel/util/file_system_lock_manager.h"
 #include "pagespeed/kernel/util/platform.h"
+#include "pagespeed/kernel/util/threadsafe_lock_manager.h"
 #include "pagespeed/kernel/util/simple_stats.h"
 #include "pagespeed/opt/logging/log_record.h"
 #include "test/net/instaweb/http/mock_url_fetcher.h"
@@ -123,7 +122,8 @@ class MockFetch : public AsyncFetch {
   bool* is_origin_cacheable_;
   bool cache_result_valid_;
 
-  DISALLOW_COPY_AND_ASSIGN(MockFetch);
+  MockFetch(const MockFetch&) = delete;
+  MockFetch& operator=(const MockFetch&) = delete;
 };
 
 class MockCacheUrlAsyncFetcherAsyncOpHooks
@@ -145,7 +145,8 @@ class MockCacheUrlAsyncFetcherAsyncOpHooks
 
  private:
   int count_;
-  DISALLOW_COPY_AND_ASSIGN(MockCacheUrlAsyncFetcherAsyncOpHooks);
+  MockCacheUrlAsyncFetcherAsyncOpHooks(const MockCacheUrlAsyncFetcherAsyncOpHooks&) = delete;
+  MockCacheUrlAsyncFetcherAsyncOpHooks& operator=(const MockCacheUrlAsyncFetcherAsyncOpHooks&) = delete;
 };
 
 class DelayedMockUrlFetcher : public MockUrlFetcher {
@@ -161,7 +162,8 @@ class DelayedMockUrlFetcher : public MockUrlFetcher {
 
  private:
   ThreadSynchronizer* sync_;
-  DISALLOW_COPY_AND_ASSIGN(DelayedMockUrlFetcher);
+  DelayedMockUrlFetcher(const DelayedMockUrlFetcher&) = delete;
+  DelayedMockUrlFetcher& operator=(const DelayedMockUrlFetcher&) = delete;
 };
 
 class CacheUrlAsyncFetcherTest : public ::testing::Test {
@@ -247,7 +249,7 @@ class CacheUrlAsyncFetcherTest : public ::testing::Test {
         counting_fetcher_(&mock_fetcher_),
         scheduler_(thread_system_.get(), &timer_),
         file_system_(thread_system_.get(), &timer_),
-        lock_manager_(&file_system_, GTestTempDir(), &scheduler_, &handler_) {
+        lock_manager_(&scheduler_) {
     HTTPCache::InitStats(&statistics_);
     http_cache_ = std::make_unique<HTTPCache>(&lru_cache_, &timer_,
                                               &mock_hasher_, &statistics_);
@@ -619,7 +621,7 @@ class CacheUrlAsyncFetcherTest : public ::testing::Test {
   CountingUrlAsyncFetcher counting_fetcher_;
   MockScheduler scheduler_;
   MemFileSystem file_system_;
-  FileSystemLockManager lock_manager_;
+  ThreadSafeLockManager lock_manager_;
   MockCacheUrlAsyncFetcherAsyncOpHooks mock_async_op_hooks_;
 };
 

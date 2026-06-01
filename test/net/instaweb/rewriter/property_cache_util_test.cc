@@ -17,6 +17,8 @@
  * under the License.
  */
 
+#include <memory>
+
 #include "net/instaweb/rewriter/public/property_cache_util.h"
 
 #include "net/instaweb/http/public/request_context.h"

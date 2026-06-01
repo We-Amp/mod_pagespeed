@@ -21,11 +21,11 @@
 #define PAGESPEED_KERNEL_BASE_STATISTICS_H_
 
 #include <map>
+#include <memory>
 
 #include "base/logging.h"
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_annotations.h"
@@ -245,7 +245,8 @@ class Histogram {
   void WriteRawHistogramData(Writer* writer, MessageHandler* handler);
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(Histogram);
+  Histogram(const Histogram&) = delete;
+  Histogram& operator=(const Histogram&) = delete;
 };
 
 // Trivial implementation. But Count() returns a meaningful value.
@@ -286,7 +287,8 @@ class CountHistogram : public Histogram {
   std::unique_ptr<AbstractMutex> mutex_;
   int count_ GUARDED_BY(mutex_);
 
-  DISALLOW_COPY_AND_ASSIGN(CountHistogram);
+  CountHistogram(const CountHistogram&) = delete;
+  CountHistogram& operator=(const CountHistogram&) = delete;
 };
 
 // TimedVariable is a statistic class returns the amount added in the
@@ -431,7 +433,8 @@ class Statistics {
   int64 LookupValue(StringPiece stat_name);
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(Statistics);
+  Statistics(const Statistics&) = delete;
+  Statistics& operator=(const Statistics&) = delete;
 };
 
 }  // namespace net_instaweb

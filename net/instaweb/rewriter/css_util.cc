@@ -19,9 +19,9 @@
 
 #include "net/instaweb/rewriter/public/css_util.h"
 
+#include <memory>
 #include <vector>
 
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/html/html_element.h"

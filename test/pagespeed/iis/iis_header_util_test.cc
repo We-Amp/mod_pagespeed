@@ -23,6 +23,8 @@
 // Tests use the mock IIS infrastructure for cross-platform testing.
 // Equivalent to Apache's header_util_test.cc.
 
+#include <memory>
+
 #include "test/pagespeed/iis/mock_iis.h"
 #include "test/pagespeed/iis/iis_test_base.h"
 

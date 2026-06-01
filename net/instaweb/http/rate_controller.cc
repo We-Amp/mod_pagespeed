@@ -20,6 +20,7 @@
 #include "net/instaweb/http/public/rate_controller.h"
 
 #include <cstddef>
+#include <memory>
 #include <queue>
 #include <utility>
 
@@ -54,7 +55,8 @@ struct DeferredFetch {
   MessageHandler* handler;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(DeferredFetch);
+  DeferredFetch(const DeferredFetch&) = delete;
+  DeferredFetch& operator=(const DeferredFetch&) = delete;
 };
 
 }  // namespace
@@ -158,7 +160,8 @@ class RateController::HostFetchInfo
   std::unique_ptr<AbstractMutex> mutex_;
   std::queue<DeferredFetch*> fetch_queue_ GUARDED_BY(mutex_);
 
-  DISALLOW_COPY_AND_ASSIGN(HostFetchInfo);
+  HostFetchInfo(const HostFetchInfo&) = delete;
+  HostFetchInfo& operator=(const HostFetchInfo&) = delete;
 };
 
 // Wrapper fetch that updates the count of outgoing fetches for the host when
@@ -205,7 +208,8 @@ class RateController::CustomFetch : public SharedAsyncFetch {
  private:
   HostFetchInfoPtr fetch_info_;
   RateController* controller_;
-  DISALLOW_COPY_AND_ASSIGN(CustomFetch);
+  CustomFetch(const CustomFetch&) = delete;
+  CustomFetch& operator=(const CustomFetch&) = delete;
 };
 
 RateController::RateController(int max_global_queue_size,

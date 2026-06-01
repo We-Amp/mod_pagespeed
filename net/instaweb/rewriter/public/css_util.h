@@ -25,10 +25,10 @@
 #ifndef NET_INSTAWEB_REWRITER_PUBLIC_CSS_UTIL_H_
 #define NET_INSTAWEB_REWRITER_PUBLIC_CSS_UTIL_H_
 
+#include <memory>
 #include <vector>
 
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 
@@ -90,7 +90,8 @@ class StyleExtractor {
   int width_px_;
   int height_px_;
   DimensionState state_;
-  DISALLOW_COPY_AND_ASSIGN(StyleExtractor);
+  StyleExtractor(const StyleExtractor&) = delete;
+  StyleExtractor& operator=(const StyleExtractor&) = delete;
 };
 
 // Utility functions for handling CSS media types as vectors of strings.

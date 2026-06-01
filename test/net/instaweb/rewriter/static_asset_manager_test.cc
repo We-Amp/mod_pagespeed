@@ -25,7 +25,6 @@
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/server_context.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/html/html_element.h"
 #include "pagespeed/kernel/html/html_filter.h"
@@ -71,7 +70,8 @@ class StaticAssetManagerTest : public RewriteTestBase {
     ScriptUsage GetScriptUsage() const override { return kWillInjectScripts; }
 
    private:
-    DISALLOW_COPY_AND_ASSIGN(AddStaticJsBeforeBr);
+    AddStaticJsBeforeBr(const AddStaticJsBeforeBr&) = delete;
+    AddStaticJsBeforeBr& operator=(const AddStaticJsBeforeBr&) = delete;
   };
 
   // Extracts the first comment sequences in a script that doesn't

@@ -21,28 +21,39 @@
 #define PAGESPEED_SYSTEM_SYSTEM_CACHES_H_
 
 #include <map>
+#include <memory>
 #include <vector>
 
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/cache_interface.h"
 #include "pagespeed/kernel/base/md5_hasher.h"
 #include "pagespeed/kernel/base/message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/sharedmem/shared_mem_cache.h"
 #include "pagespeed/system/redis_cache.h"
 #include "pagespeed/system/system_rewrite_options.h"
 
+// Memcached requires libmemcached which is not available on Windows.
+// Define PAGESPEED_ENABLE_MEMCACHED=0 to disable memcached support.
+#ifndef PAGESPEED_ENABLE_MEMCACHED
+#ifdef _WIN32
+#define PAGESPEED_ENABLE_MEMCACHED 0
+#else
+#define PAGESPEED_ENABLE_MEMCACHED 1
+#endif
+#endif
+
 namespace net_instaweb {
 
 class AbstractSharedMem;
-class AprMemCache;
+#if PAGESPEED_ENABLE_MEMCACHED
+class MemcachedCache;
+#endif
 class NamedLockManager;
 class QueuedWorkerPool;
 class RewriteDriverFactory;
 class ServerContext;
-class SlowWorker;
 class Statistics;
 class SystemCachePath;
 
@@ -141,7 +152,7 @@ class SystemCaches {
   SystemCachePath* GetCache(SystemRewriteOptions* config);
 
  private:
-  typedef SharedMemCache<64> MetadataShmCache;
+  using MetadataShmCache = SharedMemCache<64>;
   struct MetadataShmCacheInfo {
     MetadataShmCacheInfo()
         : cache_to_use(NULL), cache_backend(NULL), initialized(false) {}
@@ -184,7 +195,9 @@ class SystemCaches {
   // not be freed by the caller.
   //
   // The corresponding external cache should be enabled in the config.
+#if PAGESPEED_ENABLE_MEMCACHED
   ExternalCacheInterfaces NewMemcached(SystemRewriteOptions* config);
+#endif
   ExternalCacheInterfaces NewRedis(SystemRewriteOptions* config);
 
   // Either constructs a new external cache (memcached/redis) based on
@@ -208,8 +221,6 @@ class SystemCaches {
   void SetupPcacheCohorts(ServerContext* server_context,
                           bool enable_property_cache);
 
-  std::unique_ptr<SlowWorker> slow_worker_;
-
   RewriteDriverFactory* factory_;
   AbstractSharedMem* shared_mem_runtime_;
   int thread_limit_;
@@ -225,7 +236,7 @@ class SystemCaches {
   // first file-cache found configured to one address.
   //
   // TODO(jmarantz): Consider instantiating one LRUCache per process.
-  typedef std::map<GoogleString, SystemCachePath*> PathCacheMap;
+  using PathCacheMap = std::map<GoogleString, SystemCachePath*>;
   PathCacheMap path_cache_map_;
 
   // The QueuedWorkerPool for async cache-gets is shared among all memcached
@@ -234,15 +245,19 @@ class SystemCaches {
   // both memcached and Redis are enabled and one of them goes down, it blocks
   // requests to both servers. Actually, we have that problem already if there
   // different vhosts use different external cache servers.
+#if PAGESPEED_ENABLE_MEMCACHED
   std::unique_ptr<QueuedWorkerPool> memcached_pool_;
+#endif
   std::unique_ptr<QueuedWorkerPool> redis_pool_;
 
-  // Explicit lists of AprMemCache/RedisCache instances are stored individually,
+  // Explicit lists of MemcachedCache/RedisCache instances are stored individually,
   // as they require extra treatment during startup and shutdown.
   // TODO(yeputons): consider reducing to a single vector when these classes
   // have common base class. Potential problem: users may want to enable
   // statistics for only memcached or only Redis (see kIncludeMemcached flag).
-  std::vector<AprMemCache*> memcache_servers_;
+#if PAGESPEED_ENABLE_MEMCACHED
+  std::vector<MemcachedCache*> memcache_servers_;
+#endif
   std::vector<RedisCache*> redis_servers_;
 
   // As each external cache object typically holds a TCP connection, we do not
@@ -252,12 +267,12 @@ class SystemCaches {
   //
   // All ExternalCacheInterfaces pairs stored already include (depending on
   // options) instances of CacheBatcher, AsyncCache and CacheStats.
-  typedef std::map<GoogleString, ExternalCacheInterfaces> ExternalCachesMap;
+  using ExternalCachesMap = std::map<GoogleString, ExternalCacheInterfaces>;
   ExternalCachesMap external_caches_map_;
 
   // Map of any shared memory metadata caches we have + their CacheStats
   // wrappers. These are named explicitly to make configuration comprehensible.
-  typedef std::map<GoogleString, MetadataShmCacheInfo*> MetadataShmCacheMap;
+  using MetadataShmCacheMap = std::map<GoogleString, MetadataShmCacheInfo*>;
 
   // Note that entries here may be NULL in cases of config errors.
   MetadataShmCacheMap metadata_shm_caches_;
@@ -266,7 +281,8 @@ class SystemCaches {
 
   bool default_shm_metadata_cache_creation_failed_;
 
-  DISALLOW_COPY_AND_ASSIGN(SystemCaches);
+  SystemCaches(const SystemCaches&) = delete;
+  SystemCaches& operator=(const SystemCaches&) = delete;
 };
 
 }  // namespace net_instaweb

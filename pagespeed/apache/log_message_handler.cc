@@ -22,6 +22,7 @@
 #include <unistd.h>
 
 #include <limits>
+#include <memory>
 #include <string>
 
 #include "base/logging.h"
@@ -89,9 +90,8 @@ namespace net_instaweb {
 namespace log_message_handler {
 
 class ApacheGLogSink : public PageSpeedGLogSink {
-  void send(google::LogSeverity severity, const char* full_filename,
-            const char* base_filename, int line, const struct tm* tm_time,
-            const char* message, size_t message_len) override {
+  void send(int severity, const char* full_filename, const char* base_filename,
+            int line, const char* message, size_t message_len) override {
     LogMessageHandler(severity, base_filename, line,
                       std::string(message, message_len));
   }

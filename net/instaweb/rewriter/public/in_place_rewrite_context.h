@@ -20,6 +20,8 @@
 #ifndef NET_INSTAWEB_REWRITER_PUBLIC_IN_PLACE_REWRITE_CONTEXT_H_
 #define NET_INSTAWEB_REWRITER_PUBLIC_IN_PLACE_REWRITE_CONTEXT_H_
 
+#include <memory>
+
 #include "net/instaweb/http/public/async_fetch.h"
 #include "net/instaweb/http/public/http_value.h"
 #include "net/instaweb/http/public/http_value_writer.h"
@@ -32,7 +34,6 @@
 #include "net/instaweb/rewriter/public/single_rewrite_context.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/proto_util.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/http/content_type.h"
@@ -71,7 +72,9 @@ class InPlaceRewriteResourceSlot : public ResourceSlot {
   ~InPlaceRewriteResourceSlot() override;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(InPlaceRewriteResourceSlot);
+  InPlaceRewriteResourceSlot(const InPlaceRewriteResourceSlot&) = delete;
+  InPlaceRewriteResourceSlot& operator=(const InPlaceRewriteResourceSlot&) =
+      delete;
 };
 
 // Context that is used for an in-place rewrite.
@@ -181,7 +184,8 @@ class InPlaceRewriteContext : public SingleRewriteContext {
   // and let the origin itself serve the resource.
   bool proxy_mode_;
 
-  DISALLOW_COPY_AND_ASSIGN(InPlaceRewriteContext);
+  InPlaceRewriteContext(const InPlaceRewriteContext&) = delete;
+  InPlaceRewriteContext& operator=(const InPlaceRewriteContext&) = delete;
 };
 
 // Records the fetch into the provided resource and passes through events to the
@@ -236,7 +240,8 @@ class RecordingFetch : public SharedAsyncFetch {
   std::unique_ptr<ResponseHeaders> saved_headers_;
   Variable* in_place_oversized_opt_stream_;
   Variable* in_place_uncacheable_rewrites_;
-  DISALLOW_COPY_AND_ASSIGN(RecordingFetch);
+  RecordingFetch(const RecordingFetch&) = delete;
+  RecordingFetch& operator=(const RecordingFetch&) = delete;
 };
 
 }  // namespace net_instaweb

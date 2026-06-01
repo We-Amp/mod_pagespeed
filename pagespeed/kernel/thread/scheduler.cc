@@ -27,7 +27,6 @@
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/condvar.h"
 #include "pagespeed/kernel/base/function.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/thread_annotations.h"
 #include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/thread/scheduler_sequence.h"
@@ -57,7 +56,8 @@ class Scheduler::Alarm {
   int Compare(const Alarm* other) const {
     int cmp = 0;
     if (this != other) {
-      if (wakeup_time_us_ < other->wakeup_time_us_) {
+      if (wakeup_time_us_ <
+          other->wakeup_time_us_) {  // NOLINT(bugprone-branch-clone)
         cmp = -1;
       } else if (wakeup_time_us_ > other->wakeup_time_us_) {
         cmp = 1;
@@ -88,7 +88,8 @@ class Scheduler::Alarm {
   // as owned by it for purposes of cleanup, so any concurrent timeout will
   // know not to delete it.
   bool in_wait_dispatch_;
-  DISALLOW_COPY_AND_ASSIGN(Alarm);
+  Alarm(const Alarm&) = delete;
+  Alarm& operator=(const Alarm&) = delete;
 };
 
 namespace {
@@ -105,7 +106,7 @@ class FunctionAlarm : public Scheduler::Alarm {
   void CancelAlarm() override { DropMutexActAndCleanup(&Function::CallCancel); }
 
  private:
-  typedef void (Function::*FunctionAction)();
+  using FunctionAction = void (Function::*)();
   void DropMutexActAndCleanup(FunctionAction act) NO_THREAD_SAFETY_ANALYSIS {
     AbstractMutex* mutex = scheduler_->mutex();  // Save across delete.
     mutex->Unlock();
@@ -115,7 +116,8 @@ class FunctionAlarm : public Scheduler::Alarm {
   }
   Scheduler* scheduler_;
   Function* function_;
-  DISALLOW_COPY_AND_ASSIGN(FunctionAlarm);
+  FunctionAlarm(const FunctionAlarm&) = delete;
+  FunctionAlarm& operator=(const FunctionAlarm&) = delete;
 };
 
 }  // namespace
@@ -158,7 +160,8 @@ class Scheduler::CondVarTimeout : public Scheduler::Alarm {
  private:
   bool* set_on_timeout_;
   Scheduler* scheduler_;
-  DISALLOW_COPY_AND_ASSIGN(CondVarTimeout);
+  CondVarTimeout(const CondVarTimeout&) = delete;
+  CondVarTimeout& operator=(const CondVarTimeout&) = delete;
 };
 
 // Non-blocking condvar alarm.  Must run the passed-in callback on either
@@ -187,7 +190,8 @@ class Scheduler::CondVarCallbackTimeout : public Scheduler::Alarm {
  private:
   Function* callback_;
   Scheduler* scheduler_;
-  DISALLOW_COPY_AND_ASSIGN(CondVarCallbackTimeout);
+  CondVarCallbackTimeout(const CondVarCallbackTimeout&) = delete;
+  CondVarCallbackTimeout& operator=(const CondVarCallbackTimeout&) = delete;
 };
 
 // Comparison on Alarms.

@@ -19,10 +19,11 @@
 
 // Unit-test for ThreadSynchronizer
 
+#include <memory>
+
 #include "pagespeed/kernel/thread/thread_synchronizer.h"
 
 #include "pagespeed/kernel/base/function.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/thread/queued_worker_pool.h"

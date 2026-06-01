@@ -21,10 +21,10 @@
 #define PAGESPEED_KERNEL_SHAREDMEM_SHARED_MEM_TEST_BASE_H_
 
 #include <cstddef>
+#include <memory>
 
 #include "pagespeed/kernel/base/abstract_shared_mem.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/base/mock_message_handler.h"
 
@@ -58,7 +58,8 @@ class SharedMemTestEnv {
   virtual void ChildFailed() = 0;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(SharedMemTestEnv);
+  SharedMemTestEnv(const SharedMemTestEnv&) = delete;
+  SharedMemTestEnv& operator=(const SharedMemTestEnv&) = delete;
 };
 
 class SharedMemTestBase : public testing::Test {
@@ -126,7 +127,8 @@ class SharedMemTestBase : public testing::Test {
   std::unique_ptr<ThreadSystem> thread_system_;
   MockMessageHandler handler_;
 
-  DISALLOW_COPY_AND_ASSIGN(SharedMemTestBase);
+  SharedMemTestBase(const SharedMemTestBase&) = delete;
+  SharedMemTestBase& operator=(const SharedMemTestBase&) = delete;
 };
 
 // Passes in the SharedMemTestEnv to SharedMemTestBase via a template param

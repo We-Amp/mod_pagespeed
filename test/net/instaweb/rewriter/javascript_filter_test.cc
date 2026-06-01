@@ -19,6 +19,8 @@
 
 // Unit-test the javascript filter
 
+#include <memory>
+
 #include "net/instaweb/rewriter/public/javascript_filter.h"
 
 #include "net/instaweb/http/public/http_cache.h"

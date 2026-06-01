@@ -21,6 +21,7 @@
 
 #include <cstddef>  // for size_t
 #include <set>
+#include <memory>
 
 #include "pagespeed/kernel/base/function.h"
 #include "pagespeed/kernel/base/thread_annotations.h"

@@ -17,6 +17,8 @@
  * under the License.
  */
 
+#include <memory>
+
 #include "pagespeed/kernel/image/webp_optimizer.h"
 
 #include "base/logging.h"
@@ -150,7 +152,8 @@ class WebpScanlineOptimizerTest : public testing::Test {
   void* scanline_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(WebpScanlineOptimizerTest);
+  WebpScanlineOptimizerTest(const WebpScanlineOptimizerTest&) = delete;
+  WebpScanlineOptimizerTest& operator=(const WebpScanlineOptimizerTest&) = delete;
 };
 
 // Test both WebP writer and reader. It is done by encoding an image to WebP

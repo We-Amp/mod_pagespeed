@@ -20,12 +20,13 @@
 #ifndef PAGESPEED_KERNEL_BASE_NAMED_LOCK_TESTER_H_
 #define PAGESPEED_KERNEL_BASE_NAMED_LOCK_TESTER_H_
 
+#include <memory>
+
 #include "base/logging.h"
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/function.h"
 #include "pagespeed/kernel/base/named_lock_manager.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/thread_system.h"
 
 namespace net_instaweb {
@@ -156,7 +157,8 @@ class NamedLockTester {
   std::unique_ptr<Function> quiesce_;
   std::unique_ptr<NamedLock> lock_for_deletion_;
 
-  DISALLOW_COPY_AND_ASSIGN(NamedLockTester);
+  NamedLockTester(const NamedLockTester&) = delete;
+  NamedLockTester& operator=(const NamedLockTester&) = delete;
 };
 
 }  // namespace net_instaweb

@@ -30,7 +30,6 @@
 #include "pagespeed/automatic/proxy_fetch.h"
 #include "pagespeed/automatic/proxy_interface.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/cache/delay_cache.h"
@@ -116,7 +115,8 @@ class AsyncExpectStringAsyncFetch : public ExpectStringAsyncFetch {
   ThreadSynchronizer* sync_;
   bool log_flush_;
 
-  DISALLOW_COPY_AND_ASSIGN(AsyncExpectStringAsyncFetch);
+  AsyncExpectStringAsyncFetch(const AsyncExpectStringAsyncFetch&) = delete;
+  AsyncExpectStringAsyncFetch& operator=(const AsyncExpectStringAsyncFetch&) = delete;
 };
 
 }  // namespace

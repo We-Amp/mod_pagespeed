@@ -17,10 +17,11 @@
  * under the License.
  */
 
+#include <memory>
+
 #include "pagespeed/kernel/thread/scheduler_thread.h"
 
 #include "pagespeed/kernel/base/function.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/thread/scheduler.h"
@@ -47,7 +48,8 @@ class SchedulerThreadTest : public WorkerTestBase {
   SchedulerThread* scheduler_thread_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(SchedulerThreadTest);
+  SchedulerThreadTest(const SchedulerThreadTest&) = delete;
+  SchedulerThreadTest& operator=(const SchedulerThreadTest&) = delete;
 };
 
 TEST_F(SchedulerThreadTest, BasicOperation) {

@@ -20,9 +20,10 @@
 #ifndef NET_INSTAWEB_HTTP_PUBLIC_RATE_CONTROLLING_URL_ASYNC_FETCHER_H_
 #define NET_INSTAWEB_HTTP_PUBLIC_RATE_CONTROLLING_URL_ASYNC_FETCHER_H_
 
+#include <memory>
+
 #include "net/instaweb/http/public/url_async_fetcher.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 
 namespace net_instaweb {
@@ -61,7 +62,10 @@ class RateControllingUrlAsyncFetcher : public UrlAsyncFetcher {
   UrlAsyncFetcher* base_fetcher_;
   std::unique_ptr<RateController> rate_controller_;
 
-  DISALLOW_COPY_AND_ASSIGN(RateControllingUrlAsyncFetcher);
+  RateControllingUrlAsyncFetcher(const RateControllingUrlAsyncFetcher&) =
+      delete;
+  RateControllingUrlAsyncFetcher& operator=(
+      const RateControllingUrlAsyncFetcher&) = delete;
 };
 
 }  // namespace net_instaweb

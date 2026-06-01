@@ -20,7 +20,6 @@
 #include "pagespeed/kernel/cache/threadsafe_cache.h"
 
 #include "pagespeed/kernel/base/abstract_mutex.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/thread_annotations.h"
 #include "pagespeed/kernel/cache/cache_interface.h"
@@ -56,7 +55,11 @@ class ThreadsafeCallback : public DelegatingCacheCallback {
 
 }  // namespace
 
-void ThreadsafeCache::Get(const GoogleString& key, Callback* callback) {
+// The thread-safety analyzer can't follow the deferred unlock pattern:
+// the lock is acquired in ThreadsafeCallback's constructor and released
+// in its Done() callback which is invoked asynchronously by cache_->Get().
+void ThreadsafeCache::Get(const GoogleString& key,
+                          Callback* callback) NO_THREAD_SAFETY_ANALYSIS {
   ThreadsafeCallback* cb = new ThreadsafeCallback(mutex_.get(), callback);
   cache_->Get(key, cb);
 }

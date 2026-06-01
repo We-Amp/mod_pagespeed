@@ -24,7 +24,6 @@
 #include "base/logging.h"
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/atomic_int32.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -59,7 +58,8 @@ class CacheBatcher::Group {
   CacheBatcher* batcher_;
   AtomicInt32 outstanding_lookups_;
 
-  DISALLOW_COPY_AND_ASSIGN(Group);
+  Group(const Group&) = delete;
+  Group& operator=(const Group&) = delete;
 };
 
 class CacheBatcher::MultiCallback : public CacheInterface::Callback {
@@ -120,7 +120,8 @@ class CacheBatcher::MultiCallback : public CacheInterface::Callback {
   };
   std::vector<CallbackRecord> saved_;
 
-  DISALLOW_COPY_AND_ASSIGN(MultiCallback);
+  MultiCallback(const MultiCallback&) = delete;
+  MultiCallback& operator=(const MultiCallback&) = delete;
 };
 
 CacheBatcher::CacheBatcher(const Options& options, CacheInterface* cache,

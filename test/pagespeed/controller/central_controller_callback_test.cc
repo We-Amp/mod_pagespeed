@@ -17,11 +17,12 @@
  * under the License.
  */
 
+#include <memory>
+
 #include "pagespeed/controller/central_controller_callback.h"
 
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/function.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/thread/queued_worker_pool.h"
@@ -131,7 +132,8 @@ class CentralControllerCallbackTest : public WorkerTestBase {
   std::unique_ptr<QueuedWorkerPool> worker_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(CentralControllerCallbackTest);
+  CentralControllerCallbackTest(const CentralControllerCallbackTest&) = delete;
+  CentralControllerCallbackTest& operator=(const CentralControllerCallbackTest&) = delete;
 };
 
 TEST_F(CentralControllerCallbackTest, RegularRun) {

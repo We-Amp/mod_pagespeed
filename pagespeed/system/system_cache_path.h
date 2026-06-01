@@ -20,10 +20,10 @@
 #ifndef PAGESPEED_SYSTEM_SYSTEM_CACHE_PATH_H_
 #define PAGESPEED_SYSTEM_SYSTEM_CACHE_PATH_H_
 
+#include <memory>
 #include <set>
 
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_annotations.h"
@@ -34,15 +34,15 @@ namespace net_instaweb {
 class AbstractMutex;
 class AbstractSharedMem;
 class CacheInterface;
-class FileCache;
-class FileSystemLockManager;
+class CycloneCache;
+class LRUCache;
 class MessageHandler;
 class NamedLockManager;
 class PurgeContext;
 class PurgeSet;
 class RewriteDriverFactory;
 class SharedMemLockManager;
-class SlowWorker;
+class ThreadSafeLockManager;
 class SystemServerContext;
 class SystemRewriteOptions;
 
@@ -72,18 +72,14 @@ class SystemCachePath {
 
   // Access to backend for testing.  Do not use this directly in production
   // as it lacks statistics wrappers, etc.
-  FileCache* file_cache_backend() { return file_cache_backend_; }
+  // Returns the underlying cache (CycloneCache or fallback LRU).
+  CacheInterface* cache_backend() { return cache_backend_; }
   NamedLockManager* lock_manager() { return lock_manager_; }
 
   // See comments in SystemCaches for calling conventions on these.
   void RootInit();
-  void ChildInit(SlowWorker* cache_clean_worker);
+  void ChildInit();
   void GlobalCleanup(MessageHandler* handler);  // only called in root process
-
-  // When there are multiple configurations which specify the same cache
-  // path, we must merge the other settings: the cleaning interval, size, and
-  // inode count.
-  void MergeConfig(const SystemRewriteOptions* config);
 
   // Associates a ServerContext with this CachePath, enabling cache purges
   // to propagate into the ServerContext's global options.
@@ -101,29 +97,9 @@ class SystemCachePath {
   PurgeContext* purge_context() { return purge_context_.get(); }
 
  private:
-  typedef std::set<SystemServerContext*> ServerContextSet;
+  using ServerContextSet = std::set<SystemServerContext*>;
 
-  void FallBackToFileBasedLocking();
   GoogleString LockManagerSegmentName() const;
-
-  // Merge a value taken from a config file against the value already
-  // initialized in a cache policy, reporting a Warning if they were
-  // explicitly set and have conflicting values.  Whenever one of the
-  // values was taken from the options defaults, we select the explicit
-  // one without issuing a warning.
-  //
-  // For the interval, we take the minimum of the two values
-  // (take_larger==false), and for the sizes we take the larger
-  // (take_larger==true).
-  //
-  // If necessary, *policy_value is updated with the resolved value,
-  // which is computed from the old *policy_value and config_value.
-  //
-  // 'name' is used in a warning message printed whenever resolution was
-  // required.
-  void MergeEntries(int64 config_value, bool config_was_set, bool take_larger,
-                    const char* name, int64* policy_value,
-                    bool* has_explicit_policy);
 
   // Transmits cache-purge-set updates to all live server contexts.
   void UpdateCachePurgeSet(const CopyOnWrite<PurgeSet>& purge_set);
@@ -133,17 +109,16 @@ class SystemCachePath {
   RewriteDriverFactory* factory_;
   AbstractSharedMem* shm_runtime_;
   std::unique_ptr<SharedMemLockManager> shared_mem_lock_manager_;
-  std::unique_ptr<FileSystemLockManager> file_system_lock_manager_;
+  std::unique_ptr<ThreadSafeLockManager> fallback_lock_manager_;
   NamedLockManager* lock_manager_;
-  FileCache* file_cache_backend_;  // owned by file_cache_
+  CacheInterface* cache_backend_;  // Cyclone or fallback LRU, owned by factory
   CacheInterface* lru_cache_;
   CacheInterface* file_cache_;
+  std::unique_ptr<LRUCache>
+      fallback_lru_cache_;  // Used when CycloneCache fails
   GoogleString cache_flush_filename_;
   bool unplugged_;
   bool enable_cache_purge_;
-  bool clean_interval_explicitly_set_;
-  bool clean_size_explicitly_set_;
-  bool clean_inode_limit_explicitly_set_;
 
   std::unique_ptr<PurgeContext> purge_context_;
 

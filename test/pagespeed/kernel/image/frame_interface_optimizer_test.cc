@@ -22,6 +22,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <vector>
+#include <memory>
 
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/null_mutex.h"
@@ -156,11 +157,12 @@ class FakeReader : public MultipleFrameReader {
   size_px current_frame_;
   size_px next_frame_;
   size_px current_scanline_;
-  net_instaweb::scoped_array<uint8_t> scanline_;
+  std::unique_ptr<uint8_t[]> scanline_;
 
   State state_;
 
-  DISALLOW_COPY_AND_ASSIGN(FakeReader);
+  FakeReader(const FakeReader&) = delete;
+  FakeReader& operator=(const FakeReader&) = delete;
 };
 
 // Verifies that the pixels in the positions [start,end) all have the
@@ -316,7 +318,8 @@ class MultipleFramePaddingReaderTest : public testing::Test {
   MockMessageHandler message_handler_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(MultipleFramePaddingReaderTest);
+  MultipleFramePaddingReaderTest(const MultipleFramePaddingReaderTest&) = delete;
+  MultipleFramePaddingReaderTest& operator=(const MultipleFramePaddingReaderTest&) = delete;
 };
 
 TEST_F(MultipleFramePaddingReaderTest, ReaderPadsRGBA_8888) {

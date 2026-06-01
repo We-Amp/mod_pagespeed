@@ -27,7 +27,6 @@
 #include "pagespeed/apache/apache_config.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/system/system_server_context.h"
@@ -170,7 +169,8 @@ class ApacheServerContext : public SystemServerContext {
 
   std::unique_ptr<ProxyFetchFactory> proxy_fetch_factory_;
 
-  DISALLOW_COPY_AND_ASSIGN(ApacheServerContext);
+  ApacheServerContext(const ApacheServerContext&) = delete;
+  ApacheServerContext& operator=(const ApacheServerContext&) = delete;
 };
 
 }  // namespace net_instaweb

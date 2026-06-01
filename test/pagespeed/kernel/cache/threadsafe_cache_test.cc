@@ -20,10 +20,11 @@
 // Unit-test the threadsafe cache.  Creates an LRU-cache first, and then
 // wraps a thread-safe cache around that and a mutex
 
+#include <memory>
+
 #include "pagespeed/kernel/cache/threadsafe_cache.h"
 
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/shared_string.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/thread_system.h"
@@ -63,7 +64,8 @@ class ThreadsafeCacheTest : public testing::Test {
   ThreadsafeCache threadsafe_cache_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(ThreadsafeCacheTest);
+  ThreadsafeCacheTest(const ThreadsafeCacheTest&) = delete;
+  ThreadsafeCacheTest& operator=(const ThreadsafeCacheTest&) = delete;
 };
 
 TEST_F(ThreadsafeCacheTest, BasicOperation) {

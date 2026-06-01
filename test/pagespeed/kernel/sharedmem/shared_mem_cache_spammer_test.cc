@@ -20,11 +20,12 @@
 // Unit-test the threadsafe cache.  Creates an LRU-cache first, and then
 // wraps a thread-safe cache around that and a mutex
 
+#include <memory>
+
 #include "base/logging.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/google_message_handler.h"
 #include "pagespeed/kernel/base/md5_hasher.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/shared_string.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/thread_system.h"
@@ -96,7 +97,8 @@ class SharedMemCacheSpammerTest : public testing::Test {
   std::unique_ptr<ShmCache> cache_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(SharedMemCacheSpammerTest);
+  SharedMemCacheSpammerTest(const SharedMemCacheSpammerTest&) = delete;
+  SharedMemCacheSpammerTest& operator=(const SharedMemCacheSpammerTest&) = delete;
 };
 
 TEST_F(SharedMemCacheSpammerTest, BasicOperation) {

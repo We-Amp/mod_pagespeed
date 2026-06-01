@@ -23,6 +23,7 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <memory>
 
 #include "net/instaweb/rewriter/cached_result.pb.h"
 #include "net/instaweb/rewriter/public/image_data_lookup.h"
@@ -30,7 +31,6 @@
 #include "pagespeed/kernel/base/base64_util.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/function.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/statistics_template.h"
 #include "pagespeed/kernel/base/string.h"
@@ -423,7 +423,8 @@ class ImageTest : public ImageTestBase {
   std::unique_ptr<Image::CompressionOptions> options_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(ImageTest);
+  ImageTest(const ImageTest&) = delete;
+  ImageTest& operator=(const ImageTest&) = delete;
 };
 
 namespace {

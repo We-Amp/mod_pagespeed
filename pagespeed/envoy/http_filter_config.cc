@@ -1,3 +1,4 @@
+#include <memory>
 #include <string>
 
 #include "absl/status/statusor.h"
@@ -169,9 +170,8 @@ void applyDomainConfig(const pagespeed::DomainConfig& domains,
   // Add rewrite domain mappings.
   for (const auto& mapping : domains.rewrite_mappings()) {
     if (!mapping.to_domain().empty() && !mapping.from_domains().empty()) {
-      domain_lawyer->AddRewriteDomainMapping(mapping.to_domain(),
-                                              mapping.from_domains(),
-                                              message_handler);
+      domain_lawyer->AddRewriteDomainMapping(
+          mapping.to_domain(), mapping.from_domains(), message_handler);
     }
   }
 
@@ -196,8 +196,7 @@ void applyDomainConfig(const pagespeed::DomainConfig& domains,
 std::unique_ptr<EnvoyRewriteOptions> createVHostOptions(
     const pagespeed::VirtualHostConfig& vhost_config,
     ThreadSystem* thread_system, MessageHandler* message_handler) {
-  auto options =
-      std::make_unique<EnvoyRewriteOptions>(thread_system);
+  auto options = std::make_unique<EnvoyRewriteOptions>(thread_system);
 
   const auto& vhost_options = vhost_config.options();
 
@@ -205,14 +204,13 @@ std::unique_ptr<EnvoyRewriteOptions> createVHostOptions(
   if (!vhost_options.rewrite_level().empty()) {
     RewriteOptions::RewriteLevel level;
     if (RewriteOptions::ParseRewriteLevel(vhost_options.rewrite_level(),
-                                           &level)) {
+                                          &level)) {
       options->SetRewriteLevel(level);
       message_handler->Message(kInfo, "VHost %s: rewrite_level set to %s",
                                vhost_config.host_pattern().c_str(),
                                vhost_options.rewrite_level().c_str());
     } else {
-      message_handler->Message(kWarning,
-                               "VHost %s: Invalid rewrite_level: %s",
+      message_handler->Message(kWarning, "VHost %s: Invalid rewrite_level: %s",
                                vhost_config.host_pattern().c_str(),
                                vhost_options.rewrite_level().c_str());
     }
@@ -229,10 +227,9 @@ std::unique_ptr<EnvoyRewriteOptions> createVHostOptions(
   if (!vhost_options.enabled_filters().empty()) {
     StringPieceVector filters;
     SplitStringPieceToVector(vhost_options.enabled_filters(), ",", &filters,
-                              true);
+                             true);
     for (const auto& filter_name : filters) {
-      RewriteOptions::Filter filter =
-          RewriteOptions::LookupFilter(filter_name);
+      RewriteOptions::Filter filter = RewriteOptions::LookupFilter(filter_name);
       if (filter != RewriteOptions::kEndOfFilters) {
         options->EnableFilter(filter);
         message_handler->Message(kInfo, "VHost %s: Enabled filter: %s",
@@ -250,10 +247,9 @@ std::unique_ptr<EnvoyRewriteOptions> createVHostOptions(
   if (!vhost_options.disabled_filters().empty()) {
     StringPieceVector filters;
     SplitStringPieceToVector(vhost_options.disabled_filters(), ",", &filters,
-                              true);
+                             true);
     for (const auto& filter_name : filters) {
-      RewriteOptions::Filter filter =
-          RewriteOptions::LookupFilter(filter_name);
+      RewriteOptions::Filter filter = RewriteOptions::LookupFilter(filter_name);
       if (filter != RewriteOptions::kEndOfFilters) {
         options->DisableFilter(filter);
         message_handler->Message(kInfo, "VHost %s: Disabled filter: %s",
@@ -271,16 +267,15 @@ std::unique_ptr<EnvoyRewriteOptions> createVHostOptions(
   for (const auto& [key, value] : vhost_options.custom_options()) {
     GoogleString msg;
     RewriteOptions::OptionSettingResult result =
-        options->ParseAndSetOptionFromName1(key, value, &msg,
-                                            message_handler);
+        options->ParseAndSetOptionFromName1(key, value, &msg, message_handler);
     if (result == RewriteOptions::kOptionOk) {
       message_handler->Message(kInfo, "VHost %s: Set option %s = %s",
-                               vhost_config.host_pattern().c_str(),
-                               key.c_str(), value.c_str());
+                               vhost_config.host_pattern().c_str(), key.c_str(),
+                               value.c_str());
     } else {
-      message_handler->Message(kWarning, "VHost %s: Failed to set option %s: %s",
-                               vhost_config.host_pattern().c_str(),
-                               key.c_str(), msg.c_str());
+      message_handler->Message(
+          kWarning, "VHost %s: Failed to set option %s: %s",
+          vhost_config.host_pattern().c_str(), key.c_str(), msg.c_str());
     }
   }
 
@@ -304,7 +299,8 @@ void initializeVHosts(const pagespeed::Decoder& proto_config,
   message_handler->Message(kInfo, "Initializing %d virtual host configurations",
                            proto_config.virtual_hosts_size());
 
-  EnvoyVHostConfigManager* vhost_manager = server_context->vhost_config_manager();
+  EnvoyVHostConfigManager* vhost_manager =
+      server_context->vhost_config_manager();
 
   for (const auto& vhost_config : proto_config.virtual_hosts()) {
     if (vhost_config.host_pattern().empty()) {
@@ -313,21 +309,22 @@ void initializeVHosts(const pagespeed::Decoder& proto_config,
       continue;
     }
 
-    auto options = createVHostOptions(vhost_config, thread_system,
-                                       message_handler);
+    auto options =
+        createVHostOptions(vhost_config, thread_system, message_handler);
 
     message_handler->Message(kInfo, "Adding VHost: pattern='%s', priority=%d",
                              vhost_config.host_pattern().c_str(),
                              vhost_config.priority());
 
-    vhost_manager->AddVHost(vhost_config.host_pattern(), vhost_config.priority(),
-                            std::move(options));
+    vhost_manager->AddVHost(vhost_config.host_pattern(),
+                            vhost_config.priority(), std::move(options));
   }
 
   // Sort VHosts by priority for efficient lookup.
   vhost_manager->SortByPriority();
 
-  message_handler->Message(kInfo, "VirtualHost configuration complete: %zu hosts",
+  message_handler->Message(kInfo,
+                           "VirtualHost configuration complete: %zu hosts",
                            vhost_manager->size());
 }
 
@@ -350,7 +347,7 @@ EnvoyProcessContext& getProcessContext(const pagespeed::Decoder& proto_config) {
       // Default to enabled unless explicitly disabled.
       bool enabled = !proto_config.has_circuit_breaker() || cb.enabled();
       factory->SetCircuitBreakerConfig(enabled, cb.failure_threshold(),
-                                        cb.success_threshold(), cb.timeout_ms());
+                                       cb.success_threshold(), cb.timeout_ms());
     } else {
       // Circuit breaker disabled by default if not configured.
       factory->SetCircuitBreakerConfig(false, 0, 0, 0);

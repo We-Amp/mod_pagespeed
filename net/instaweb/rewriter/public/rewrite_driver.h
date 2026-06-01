@@ -21,6 +21,7 @@
 #define NET_INSTAWEB_REWRITER_PUBLIC_REWRITE_DRIVER_H_
 
 #include <map>
+#include <memory>
 #include <set>
 #include <vector>
 
@@ -52,7 +53,6 @@
 #include "pagespeed/kernel/base/function.h"
 #include "pagespeed/kernel/base/printf_format.h"
 #include "pagespeed/kernel/base/proto_util.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_annotations.h"
@@ -1143,9 +1143,13 @@ class RewriteDriver : public HtmlParse {
   //
   // Callers should take care that dangerous types like 'text/html' do not
   // sneak into content_type.
+  // If ext_override is non-empty, it overrides the file extension that
+  // SetType() would normally derive from the content type. This allows
+  // the response Content-Type and the cache key extension to differ,
+  // e.g. serving application/json content with a .js cache key extension.
   bool Write(const ResourceVector& inputs, const StringPiece& contents,
              const ContentType* type, StringPiece charset,
-             OutputResource* output);
+             OutputResource* output, StringPiece ext_override = StringPiece());
 
   void set_defer_instrumentation_script(bool x) {
     defer_instrumentation_script_ = x;
@@ -1326,6 +1330,10 @@ class RewriteDriver : public HtmlParse {
 
   void AddPreRenderFilters();
   void AddPostRenderFilters();
+
+  // Registers all built-in rewrite filters (CssFilter, ImageRewriteFilter,
+  // etc.) in SetServerContext(). Defined in rewrite_driver_filter_init.cc.
+  void RegisterBuiltinRewriteFilters();
 
   // Helper function to decode the pagespeed url.
   bool DecodeOutputResourceNameHelper(
@@ -1720,7 +1728,8 @@ class RewriteDriver : public HtmlParse {
   // Currently active Content-Security-Policy
   CspContext csp_context_;
 
-  DISALLOW_COPY_AND_ASSIGN(RewriteDriver);
+  RewriteDriver(const RewriteDriver&) = delete;
+  RewriteDriver& operator=(const RewriteDriver&) = delete;
 };
 
 // Subclass of HTTPCache::Callback that incorporates a given RewriteOptions'
@@ -1750,7 +1759,9 @@ class OptionsAwareHTTPCacheCallback : public HTTPCache::Callback {
  private:
   const RewriteOptions* rewrite_options_;
 
-  DISALLOW_COPY_AND_ASSIGN(OptionsAwareHTTPCacheCallback);
+  OptionsAwareHTTPCacheCallback(const OptionsAwareHTTPCacheCallback&) = delete;
+  OptionsAwareHTTPCacheCallback& operator=(
+      const OptionsAwareHTTPCacheCallback&) = delete;
 };
 
 }  // namespace net_instaweb

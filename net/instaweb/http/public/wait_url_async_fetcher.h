@@ -20,6 +20,7 @@
 #ifndef NET_INSTAWEB_HTTP_PUBLIC_WAIT_URL_ASYNC_FETCHER_H_
 #define NET_INSTAWEB_HTTP_PUBLIC_WAIT_URL_ASYNC_FETCHER_H_
 
+#include <memory>
 #include <set>
 #include <vector>
 
@@ -28,7 +29,6 @@
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 
 namespace net_instaweb {
@@ -67,7 +67,8 @@ class WaitUrlAsyncFetcher : public UrlAsyncFetcher {
   bool pass_through_mode_;
   std::unique_ptr<AbstractMutex> mutex_;
 
-  DISALLOW_COPY_AND_ASSIGN(WaitUrlAsyncFetcher);
+  WaitUrlAsyncFetcher(const WaitUrlAsyncFetcher&) = delete;
+  WaitUrlAsyncFetcher& operator=(const WaitUrlAsyncFetcher&) = delete;
 };
 
 }  // namespace net_instaweb
