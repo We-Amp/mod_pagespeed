@@ -1420,7 +1420,8 @@ void ImageRewriteFilter::ComputePreserveUrls(const RewriteOptions* options,
 
 void ImageRewriteFilter::BeginRewriteImageUrl(HtmlElement* element,
                                               HtmlElement::Attribute* src) {
-  std::unique_ptr<ResourceContext> resource_context(new ResourceContext);
+  std::unique_ptr<ResourceContext> resource_context =
+      std::make_unique<ResourceContext>();
   const RewriteOptions* options = driver()->options();
   bool is_resized_using_rendered_dimensions = false;
 
@@ -1481,7 +1482,8 @@ void ImageRewriteFilter::BeginRewriteSrcSet(HtmlElement* element,
       continue;
     }
 
-    std::unique_ptr<ResourceContext> resource_context(new ResourceContext);
+    std::unique_ptr<ResourceContext> resource_context =
+        std::make_unique<ResourceContext>();
     EncodeUserAgentIntoResourceContext(resource_context.get());
 
     Context* context =

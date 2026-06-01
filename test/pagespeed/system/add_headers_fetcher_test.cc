@@ -48,8 +48,8 @@ class AddHeadersFetcherTest : public RewriteOptionsTestBase<RewriteOptions> {
         options_(thread_system_.get()) {
     options_.AddCustomFetchHeader("Custom", "custom-header");
     options_.AddCustomFetchHeader("Extra", "extra-header");
-    add_headers_fetcher_.reset(
-        new AddHeadersFetcher(&options_, &reflecting_fetcher_));
+    add_headers_fetcher_ =
+        std::make_unique<AddHeadersFetcher>(&options_, &reflecting_fetcher_);
   }
 
  protected:

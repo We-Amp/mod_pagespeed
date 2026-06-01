@@ -198,8 +198,9 @@ class MultipleFramePaddingReaderTest : public testing::Test {
                            const std::vector<FrameSpec>& all_frames) {
     static const PixelRgbaChannels kTransparent = {0, 0, 0, kAlphaTransparent};
 
-    std::unique_ptr<MultipleFrameReader> padder(new MultipleFramePaddingReader(
-        new FakeReader(image_spec, all_frames, &message_handler_)));
+    std::unique_ptr<MultipleFrameReader> padder =
+        std::make_unique<MultipleFramePaddingReader>(
+            new FakeReader(image_spec, all_frames, &message_handler_));
 
     PixelRgbaChannels fg_color;
     FakeReader::GetForegroundColor(image_spec.bg_color, fg_color);

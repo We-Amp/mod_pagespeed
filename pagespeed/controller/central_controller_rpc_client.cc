@@ -91,8 +91,9 @@ class CentralControllerRpcClient::ClientRegistry
   // external is preventing clients from starting while you call this
   // (in this case it's state_ != RUNNING).
   void ReviveAfterShutdown() {
-    std::unique_ptr<ContextRegistry<::grpc::ClientContext>> registry(
-        new ContextRegistry<::grpc::ClientContext>(thread_system_));
+    std::unique_ptr<ContextRegistry<::grpc::ClientContext>> registry =
+        std::make_unique<ContextRegistry<::grpc::ClientContext>>(
+            thread_system_);
     registry_.swap(registry);
     CHECK(registry->Empty());
   }
@@ -202,8 +203,8 @@ void CentralControllerRpcClient::ConsiderConnecting(
       return;
     }
 
-    std::unique_ptr<GrpcClientThread> thread(
-        new GrpcClientThread(thread_system_));
+    std::unique_ptr<GrpcClientThread> thread =
+        std::make_unique<GrpcClientThread>(thread_system_);
     // We check fail if the thread fails to start at startup, but that's
     // probably not OK here. This should rarely fail.
     if (thread->Start()) {

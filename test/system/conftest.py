@@ -215,9 +215,28 @@ def rewritten_root(server_config: ServerConfig) -> str:
     return os.environ.get("PAGESPEED_REWRITTEN_ROOT", server_config.example_root)
 
 
+def _make_stats_capture(
+    stats_client: PageSpeedClient, server_config: ServerConfig
+) -> Callable[[], Dict[str, int]]:
+    """Create a stats-capture callable for the given client.
+
+    Helper used by both stats_snapshot and secondary_stats_snapshot fixtures.
+    """
+    # nginx admin endpoints don't work with ?PageSpeed=off, so disable it for nginx
+    disable_pagespeed = not (server_config.is_nginx or server_config.server_type == "envoy")
+
+    def _capture() -> Dict[str, int]:
+        return stats_client.get_statistics(
+            stats_path=server_config.stats_path,
+            disable_pagespeed=disable_pagespeed
+        )
+
+    return _capture
+
+
 @pytest.fixture
 def stats_snapshot(client: PageSpeedClient, server_config: ServerConfig) -> Callable[[], Dict[str, int]]:
-    """Factory fixture for capturing statistics snapshots.
+    """Factory fixture for capturing statistics snapshots from the primary vhost.
 
     Usage:
         def test_something(stats_snapshot):
@@ -231,16 +250,30 @@ def stats_snapshot(client: PageSpeedClient, server_config: ServerConfig) -> Call
     if not server_config.stats_enabled:
         pytest.skip("Statistics not enabled (set PAGESPEED_STATS_ENABLED=1)")
 
-    # nginx admin endpoints don't work with ?PageSpeed=off, so disable it for nginx
-    disable_pagespeed = not (server_config.is_nginx or server_config.server_type == "envoy")
+    return _make_stats_capture(client, server_config)
 
-    def _capture() -> Dict[str, int]:
-        return client.get_statistics(
-            stats_path=server_config.stats_path,
-            disable_pagespeed=disable_pagespeed
-        )
 
-    return _capture
+@pytest.fixture
+def secondary_stats_snapshot(
+    secondary_client: PageSpeedClient, server_config: ServerConfig
+) -> Callable[[], Dict[str, int]]:
+    """Factory fixture for capturing statistics snapshots from the secondary vhost.
+
+    With per-vhost statistics, the secondary vhost (used for IPRO tests) tracks
+    its own counters. Tests that send requests via secondary_client must read
+    stats from the same vhost to see correct deltas.
+
+    Usage:
+        def test_ipro(secondary_client, secondary_stats_snapshot):
+            old_stats = secondary_stats_snapshot()
+            secondary_client.get(url)
+            new_stats = secondary_stats_snapshot()
+            assert_stat_delta(old_stats, new_stats, "ipro_served", 1)
+    """
+    if not server_config.stats_enabled:
+        pytest.skip("Statistics not enabled (set PAGESPEED_STATS_ENABLED=1)")
+
+    return _make_stats_capture(secondary_client, server_config)
 
 
 @pytest.fixture
@@ -304,6 +337,22 @@ def webp_client(client: PageSpeedClient) -> PageSpeedClient:
 # Markers for test categorization
 def pytest_configure(config):
     """Register custom markers."""
+    # Scale pytest's per-test timeout by PAGESPEED_TEST_TIMEOUT_MULTIPLIER so
+    # slow environments (AppVerif + Page Heap, 5-50x slowdown) don't hit the
+    # 120s pytest ceiling before fetch_until's own multiplier-scaled retry
+    # loop has a chance to run. Without this, bumping the multiplier is a
+    # no-op for any test whose wall clock exceeds 120s.
+    raw_multiplier = os.environ.get("PAGESPEED_TEST_TIMEOUT_MULTIPLIER", "1.0")
+    try:
+        multiplier = float(raw_multiplier)
+        if multiplier <= 0:
+            multiplier = 1.0
+    except ValueError:
+        multiplier = 1.0
+    if multiplier > 1.0:
+        base_timeout = int(config.getini("timeout") or 120)
+        config.option.timeout = int(base_timeout * multiplier)
+
     config.addinivalue_line(
         "markers", "requires_secondary: test requires secondary server"
     )

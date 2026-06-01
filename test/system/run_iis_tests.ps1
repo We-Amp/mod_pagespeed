@@ -250,11 +250,15 @@ function Run-Tests {
     Write-Status "  Example Root: $env:PAGESPEED_EXAMPLE_ROOT" "Gray"
     Write-Status "  Cache Dir: $env:PAGESPEED_CACHE_DIR" "Gray"
 
-    # Build pytest arguments (-u forces unbuffered stdout/stderr for CI)
+    # Build pytest arguments (-u forces unbuffered stdout/stderr for CI).
+    # Collect from both automatic/ (cross-platform tests) and iis/ (IIS-specific
+    # tests gated by @pytest.mark.iis_only -- skipped automatically when
+    # PAGESPEED_SERVER_TYPE != "iis" via conftest.py's pytest_runtest_setup).
     $pytestArgs = @(
         "-u",
         "-m", "pytest",
         "$ScriptDir\automatic",
+        "$ScriptDir\iis",
         "-v",
         "--tb=short"
     )

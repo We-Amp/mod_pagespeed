@@ -396,7 +396,7 @@ bool CspSourceExpression::HasDefaultPortForScheme(const GoogleUrl& url) {
 }
 
 std::unique_ptr<CspSourceList> CspSourceList::Parse(StringPiece input) {
-  std::unique_ptr<CspSourceList> result(new CspSourceList);
+  std::unique_ptr<CspSourceList> result = std::make_unique<CspSourceList>();
 
   TrimCspWhitespace(&input);
   StringPieceVector tokens;

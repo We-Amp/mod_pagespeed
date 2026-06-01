@@ -71,7 +71,8 @@ class DispatcherSequenceTest : public testing::Test {
   void SetUp() override {
     thread_system_.reset(Platform::CreateThreadSystem());
     timer_.reset(thread_system_->NewTimer());
-    dispatcher_.reset(new LibeventDispatcher(thread_system_.get(), timer_.get()));
+    dispatcher_ = std::make_unique<LibeventDispatcher>(thread_system_.get(),
+                                                       timer_.get());
     ASSERT_TRUE(dispatcher_->Start());
     mutex_.reset(thread_system_->NewMutex());
   }

@@ -493,9 +493,10 @@ JavascriptCodeBlock* JsCombineFilter::JsCombiner::BlockForResource(
       config_.reset(JavascriptFilter::InitializeConfig(rewrite_driver_));
     }
 
-    std::unique_ptr<JavascriptCodeBlock> new_block(new JavascriptCodeBlock(
-        input->ExtractUncompressedContents(), config_.get(), input->url(),
-        rewrite_driver_->message_handler()));
+    std::unique_ptr<JavascriptCodeBlock> new_block =
+        std::make_unique<JavascriptCodeBlock>(
+            input->ExtractUncompressedContents(), config_.get(), input->url(),
+            rewrite_driver_->message_handler());
     new_block->Rewrite();
     insert_result.first->second = new_block.release();
   }

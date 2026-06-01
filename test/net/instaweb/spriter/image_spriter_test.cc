@@ -80,7 +80,8 @@ TEST(SpriterTest, ZeroImages) {
   FailOnImageLibError no_failures_allowed;
 
   std::unique_ptr<StrictMock<MockImageLibraryInterface::MockCanvas> >
-      mock_canvas(new StrictMock<MockImageLibraryInterface::MockCanvas>);
+      mock_canvas =
+          std::make_unique<StrictMock<MockImageLibraryInterface::MockCanvas>>();
 
   testing::StrictMock<MockImageLibraryInterface> mock_image_lib(
       kInBasePath, kOutBasePath, &no_failures_allowed);
@@ -116,10 +117,12 @@ TEST(SpriterTest, OneImage) {
   FailOnImageLibError no_failures_allowed;
 
   std::unique_ptr<StrictMock<MockImageLibraryInterface::MockCanvas> >
-      mock_canvas(new StrictMock<MockImageLibraryInterface::MockCanvas>);
+      mock_canvas =
+          std::make_unique<StrictMock<MockImageLibraryInterface::MockCanvas>>();
 
   std::unique_ptr<StrictMock<MockImageLibraryInterface::MockImage> >
-      mock_image_a(new StrictMock<MockImageLibraryInterface::MockImage>);
+      mock_image_a =
+          std::make_unique<StrictMock<MockImageLibraryInterface::MockImage>>();
 
   testing::StrictMock<MockImageLibraryInterface> mock_image_lib(
       kInBasePath, kOutBasePath, &no_failures_allowed);
@@ -169,13 +172,16 @@ TEST(SpriterTest, TwoImages) {
   FailOnImageLibError no_failures_allowed;
 
   std::unique_ptr<StrictMock<MockImageLibraryInterface::MockCanvas> >
-      mock_canvas(new StrictMock<MockImageLibraryInterface::MockCanvas>);
+      mock_canvas =
+          std::make_unique<StrictMock<MockImageLibraryInterface::MockCanvas>>();
 
   std::unique_ptr<StrictMock<MockImageLibraryInterface::MockImage> >
-      mock_image_a(new StrictMock<MockImageLibraryInterface::MockImage>);
+      mock_image_a =
+          std::make_unique<StrictMock<MockImageLibraryInterface::MockImage>>();
 
   std::unique_ptr<StrictMock<MockImageLibraryInterface::MockImage> >
-      mock_image_b(new StrictMock<MockImageLibraryInterface::MockImage>);
+      mock_image_b =
+          std::make_unique<StrictMock<MockImageLibraryInterface::MockImage>>();
 
   testing::StrictMock<MockImageLibraryInterface> mock_image_lib(
       kInBasePath, kOutBasePath, &no_failures_allowed);

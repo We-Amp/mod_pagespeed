@@ -125,7 +125,7 @@ class CspSourceExpression {
 
   const UrlData& url_data() const {
     if (url_data_.get() == nullptr) {
-      url_data_.reset(new UrlData());
+      url_data_ = std::make_unique<UrlData>();
     }
     return *url_data_.get();
   }
@@ -146,7 +146,7 @@ class CspSourceExpression {
 
   UrlData* mutable_url_data() {
     if (url_data_.get() == nullptr) {
-      url_data_.reset(new UrlData());
+      url_data_ = std::make_unique<UrlData>();
     }
     return url_data_.get();
   }

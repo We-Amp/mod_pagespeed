@@ -70,7 +70,7 @@ T* DecodeFromPropertyCache(const PropertyCache* cache,
     return NULL;
   }
 
-  std::unique_ptr<T> result(new T);
+  std::unique_ptr<T> result = std::make_unique<T>();
   ArrayInputStream input(property_value->value().data(),
                          property_value->value().size());
   if (!result->ParseFromZeroCopyStream(&input)) {

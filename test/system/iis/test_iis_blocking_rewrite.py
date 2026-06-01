@@ -78,7 +78,6 @@ class TestBlockingRewrite:
         response = client.get(
             f"{example_root}/extend_cache.html?PageSpeedFilters=rewrite_images",
             headers={"X-PSA-Blocking-Rewrite": "true"},
-            timeout=60.0  # May take longer due to blocking
         )
         assert_http_status(response, 200)
 
@@ -96,7 +95,6 @@ class TestBlockingRewrite:
         response = client.get(
             f"{example_root}/combine_css.html?PageSpeedFilters=combine_css",
             headers={"X-PSA-Blocking-Rewrite": "true"},
-            timeout=60.0
         )
         assert_http_status(response, 200)
 
@@ -108,7 +106,6 @@ class TestBlockingRewrite:
         response = client.get(
             f"{example_root}/combine_javascript.html?PageSpeedFilters=combine_javascript",
             headers={"X-PSA-Blocking-Rewrite": "true"},
-            timeout=60.0
         )
 
         if response.status == 200:
@@ -132,7 +129,6 @@ class TestBlockingRewrite:
         response = client.get(
             f"{example_root}/extend_cache.html?PageSpeedFilters=extend_cache_images",
             headers=headers,
-            timeout=60.0
         )
         assert_http_status(response, 200)
 
@@ -147,7 +143,6 @@ class TestBlockingRewrite:
                 "X-PSA-Blocking-Rewrite": "true",
                 "X-PSA-Blocking-Rewrite-Key": "wrong_key_12345"
             },
-            timeout=30.0
         )
 
         # Should either succeed (key not required) or return non-blocking
@@ -207,7 +202,6 @@ class TestBlockingRewriteStatistics:
         client.get(
             f"{example_root}/extend_cache.html?PageSpeedFilters=extend_cache_images",
             headers={"X-PSA-Blocking-Rewrite": "true"},
-            timeout=60.0
         )
 
         # Wait for stats to update
@@ -249,7 +243,6 @@ class TestBlockingRewriteStatistics:
             f"{example_root}/extend_cache.html"
             f"?PageSpeedFilters=extend_cache_images&ts={timestamp}",
             headers={"X-PSA-Blocking-Rewrite": "true"},
-            timeout=60.0
         )
 
         # Wait and get updated stats
@@ -289,7 +282,6 @@ class TestBlockingRewritePerformance:
         response = client.get(
             f"{example_root}/extend_cache.html?PageSpeedFilters=rewrite_images",
             headers={"X-PSA-Blocking-Rewrite": "true"},
-            timeout=120.0
         )
 
         elapsed = time.time() - start_time
@@ -311,7 +303,6 @@ class TestBlockingRewritePerformance:
         response1 = client.get(
             f"{example_root}/extend_cache.html"
             f"?PageSpeedFilters=rewrite_images&ts={timestamp}_nb",
-            timeout=60.0
         )
         time_non_blocking = time.time() - start1
 
@@ -321,7 +312,6 @@ class TestBlockingRewritePerformance:
             f"{example_root}/extend_cache.html"
             f"?PageSpeedFilters=rewrite_images&ts={timestamp}_b",
             headers={"X-PSA-Blocking-Rewrite": "true"},
-            timeout=120.0
         )
         time_blocking = time.time() - start2
 

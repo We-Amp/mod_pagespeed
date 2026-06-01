@@ -69,7 +69,7 @@ class TestConnectionErrors:
         """
         # Request a page - even if some background fetches fail,
         # the page should still be served
-        response = client.get(f"{test_root}/extend_cache.html", timeout=30.0)
+        response = client.get(f"{test_root}/extend_cache.html")
 
         # Page should load (not error out)
         assert response.status in (200, 304), (
@@ -83,7 +83,7 @@ class TestConnectionErrors:
         """Fetch timeouts should be handled gracefully."""
         # Request a page that may have slow resources
         start_time = time.time()
-        response = client.get(f"{test_root}/extend_cache.html", timeout=60.0)
+        response = client.get(f"{test_root}/extend_cache.html")
         elapsed = time.time() - start_time
 
         # Should complete within reasonable time (not hang indefinitely)
@@ -102,7 +102,6 @@ class TestConnectionErrors:
         for i in range(3):
             response = client.get(
                 f"{test_root}/extend_cache.html?iteration={i}",
-                timeout=30.0
             )
             # Each request should complete
             assert response.status in (200, 304, 500, 502, 503), (
@@ -187,9 +186,18 @@ class TestXssPrevention:
     def test_static_handler_escapes_path(
         self, client: PageSpeedClient, example_root: str
     ):
-        """Static file handler should escape malicious path content."""
-        # Request a static file path with HTML
-        malicious_path = f"{example_root}/<img src=x onerror=alert(1)>/test.css"
+        """Static file handler should escape malicious path content.
+
+        The payload includes spaces and angle brackets, which Python's
+        http.client rejects in raw URLs (InvalidURL: 'URL can't contain
+        control characters'). URL-encode the malicious component before
+        sending; the server still sees the decoded form for path
+        inspection and must escape it in any error response.
+        """
+        malicious_segment = urllib.parse.quote(
+            "<img src=x onerror=alert(1)>", safe=""
+        )
+        malicious_path = f"{example_root}/{malicious_segment}/test.css"
         response = client.get(malicious_path)
 
         if response.text:
@@ -358,12 +366,12 @@ class TestErrorRecovery:
         """Server should recover after a timeout."""
         # Make a request (which may or may not timeout)
         try:
-            response1 = client.get(f"{test_root}/extend_cache.html", timeout=5.0)
+            response1 = client.get(f"{test_root}/extend_cache.html")
         except Exception:
             pass  # Timeout is expected
 
         # Subsequent request should work
-        response2 = client.get(f"{test_root}/extend_cache.html", timeout=30.0)
+        response2 = client.get(f"{test_root}/extend_cache.html")
         assert response2.status in (200, 304), (
             f"Recovery request failed with status {response2.status}"
         )
@@ -379,7 +387,6 @@ class TestErrorRecovery:
             try:
                 response = client.get(
                     f"{test_root}/nonexistent{i}.html",
-                    timeout=10.0
                 )
                 responses.append(response)
             except Exception as e:

@@ -169,8 +169,9 @@ TEST_F(CentralControllerCallbackTest, CancelAfterRunRequeue) {
 
   // Create another worker pool/sequence that are shutdown. When the callback
   // is enqued onto this sequence, its Cancel should be immediately called.
-  std::unique_ptr<QueuedWorkerPool> worker2(new QueuedWorkerPool(
-      2, "central_controller_test2", thread_runtime_.get()));
+  std::unique_ptr<QueuedWorkerPool> worker2 =
+      std::make_unique<QueuedWorkerPool>(2, "central_controller_test2",
+                                         thread_runtime_.get());
   Sequence* sequence2 = worker2->NewSequence();
   worker2->ShutDown();
 
@@ -193,8 +194,9 @@ TEST_F(CentralControllerCallbackTest, CancelAfterCancelRequeue) {
 
   // Create another worker pool/sequence that are shutdown. When the callback
   // is enqued onto this sequence, its Cancel should be immediately called.
-  std::unique_ptr<QueuedWorkerPool> worker2(new QueuedWorkerPool(
-      2, "central_controller_test2", thread_runtime_.get()));
+  std::unique_ptr<QueuedWorkerPool> worker2 =
+      std::make_unique<QueuedWorkerPool>(2, "central_controller_test2",
+                                         thread_runtime_.get());
   Sequence* sequence2 = worker2->NewSequence();
   worker2->ShutDown();
 

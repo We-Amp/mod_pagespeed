@@ -120,7 +120,7 @@ class MessageHandler;
 
 template <class Proto>
 Headers<Proto>::Headers() {
-  proto_.reset(new Proto);
+  proto_ = std::make_unique<Proto>();
   Clear();
 }
 

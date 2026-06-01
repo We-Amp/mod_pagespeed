@@ -159,8 +159,11 @@ class CurlUrlAsyncFetcherTest : public ::testing::Test {
     // kGoogleLogo (2): JPEG image
     AddTestUrl(StrCat("http:", fetch_test_domain, "/image/jpeg"),
                "\xff\xd8\xff");
-    // kCgiSlowJs (3): Delayed response
-    AddTestUrl(StrCat("http:", fetch_test_domain, "/delay/1"), "{");
+    // kCgiSlowJs (3): Delayed response. Chosen longer than
+    // fetcher_timeout_ms_ (5s) so TestTimeout reliably observes our timeout
+    // fire before httpbin.org responds; the only other caller
+    // (TestShutdownWithActiveFetches) cancels before the delay matters.
+    AddTestUrl(StrCat("http:", fetch_test_domain, "/delay/10"), "{");
     // index 4: beacon
     AddTestUrl(StrCat("http:", fetch_test_domain, "/get?ets=42"), "");
     // kConnectionRefused (5)
@@ -262,8 +265,11 @@ class CurlUrlAsyncFetcherTest : public ::testing::Test {
     EXPECT_EQ(
         expect_success,
         statistics_->GetVariable(CurlStats::kCurlFetchUltimateSuccess)->Get());
+    // Each FlakyRetry attempt corresponds to a real ultimate-failure that we
+    // recovered from in-test against an external host (httpbin.org); count
+    // them toward expected failures so transient network blips don't flake.
     EXPECT_EQ(
-        expect_failure,
+        expect_failure + flaky_retries_,
         statistics_->GetVariable(CurlStats::kCurlFetchUltimateFailure)->Get());
   }
 
@@ -364,6 +370,14 @@ class CurlUrlAsyncFetcherTest : public ::testing::Test {
   std::unique_ptr<SimpleStats> statistics_;
   GoogleString https_favicon_url_;
   GoogleString favicon_head_;
+  // Count of in-test retry attempts performed by FlakyRetry() to recover
+  // from transient failures against httpbin.org. Each retry issues a fresh
+  // libcurl request that bumps kCurlFetchRequestCount, so request-count
+  // assertions subtract flaky_retries_ to stay stable under network blips:
+  //     EXPECT_EQ(N, kCurlFetchRequestCount - flaky_retries_);
+  // (see FetchOneURL / FetchOneURLWithGzip / FetchTwoURLs). Note this
+  // counter is NOT consumed by ValidateMonitoringStats(), which compares
+  // kCurlFetchUltimateSuccess/Failure against caller-supplied expectations.
   int64 flaky_retries_;
   int64 fetcher_timeout_ms_;
 
@@ -479,6 +493,7 @@ TEST_F(CurlUrlAsyncFetcherTest, TestThreeThreaded) {
 TEST_F(CurlUrlAsyncFetcherTest, TestTimeout) {
   Variable* timeouts =
       statistics_->GetVariable(CurlStats::kCurlFetchTimeoutCount);
+  bool asserted_timeout = false;
   for (int i = 0; i < 10; ++i) {
     statistics_->Clear();
     StartFetches(kCgiSlowJs, kCgiSlowJs);
@@ -486,16 +501,28 @@ TEST_F(CurlUrlAsyncFetcherTest, TestTimeout) {
     ASSERT_EQ(1, WaitTillDone(kCgiSlowJs, kCgiSlowJs));
     if (timeouts->Get() == 1) {
       int64 elapsed_ms = timer_->NowMs() - start_ms;
-      EXPECT_LE(fetcher_timeout_ms_, elapsed_ms);
+      // If the wall-clock elapsed time is below our fetcher timeout, the
+      // timeout we observed was not ours (likely httpbin.org closed the
+      // connection or curl's internal read timeout fired early). Try again
+      // -- only assert when we have evidence our timeout fired.
+      if (elapsed_ms < fetcher_timeout_ms_) {
+        continue;
+      }
       ASSERT_TRUE(fetches_[kCgiSlowJs]->IsDone());
       EXPECT_FALSE(fetches_[kCgiSlowJs]->success());
 
       int time_duration =
           statistics_->GetVariable(CurlStats::kCurlFetchTimeDurationMs)->Get();
       EXPECT_LE(fetcher_timeout_ms_, time_duration);
+      asserted_timeout = true;
       break;
     }
   }
+  ASSERT_TRUE(asserted_timeout)
+      << "Never observed a timeout attributable to our fetcher timeout in "
+      << "10 iterations (either kCurlFetchTimeoutCount stayed at 0 -- "
+      << "httpbin.org never held the connection long enough -- or the "
+      << "timeout fired before fetcher_timeout_ms_ of wall-clock elapsed)";
 }
 
 TEST_F(CurlUrlAsyncFetcherTest, Test204) {

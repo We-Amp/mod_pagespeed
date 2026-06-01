@@ -4,9 +4,11 @@
 //
 // Windows-only: depends on //pagespeed/iis:iis_module which requires Windows.
 
+#include <atomic>
 #include <functional>
 #include <map>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "gtest/gtest.h"
@@ -538,6 +540,84 @@ TEST_F(IisConfigurationTest, LoadFromFileMatchPathConversion) {
   // If parsing completes without crashing, the path was processed.
   // The actual path is stored in the rewrite options via SetOptionFromName.
   ParseAndGetConfig(config_text, "", &rwo);
+}
+
+// ==========================================================================
+// ConfigFactory concurrency test
+// ==========================================================================
+
+// Regression test for the SRWLock concurrent-mutation defect in
+// ConfigFactory::GetConfiguration, fixed. Pre-fix code used
+// `configurationFiles[path]` (std::map::operator[]) under an SRWLock held
+// in *shared* (reader) mode, which default-inserts a (key, nullptr) pair
+// when the key is absent. That is a mutating operation under a reader
+// lock; concurrent readers race and corrupt the map's internal red-black
+// tree, and AppVerifier's SRWLock / Locks providers raise verifier stops
+// against the corrupted lock — observed externally as
+// Connection_Abandoned_By_ReqQueue in HTTPERR + vrfcore.dll Application
+// Error events during automatic image-rewriting tests on win-appverif.
+//
+// The existing NonRecursiveRWLock unit test covers the
+// shared/exclusive contract at the lock level; this test exercises the
+// same defect at the ConfigFactory call site with high concurrency
+// (8 threads × 64 paths, mix of unique/shared/revisit keys to force
+// insert + find + race) so a regression to operator[] under shared lock
+// would surface as either a verifier stop, an STL-debug iterator
+// invariant violation, or silent corruption — all of which fail this
+// test deterministically when AppVerifier is enabled and probabilistically
+// without it.
+//
+// Each path resolves via LoadFile which fast-returns for nonexistent
+// files (CreateFileA → INVALID_HANDLE_VALUE), so no real file I/O occurs.
+TEST_F(IisConfigurationTest,
+       ConfigFactoryConcurrentGetConfigurationNoMapMutationUnderSharedLock) {
+  constexpr int kThreads = 8;
+  constexpr int kPathsPerThread = 64;
+
+  ConfigFactory factory;
+  std::atomic<bool> any_crash{false};
+  std::atomic<int> total_files{0};
+
+  std::vector<std::thread> threads;
+  threads.reserve(kThreads);
+  for (int t = 0; t < kThreads; ++t) {
+    threads.emplace_back([&, t]() {
+      try {
+        for (int p = 0; p < kPathsPerThread; ++p) {
+          // Mix of (a) per-thread unique paths (forces insert), (b) shared
+          // paths across threads (forces find/insert race), (c) revisits
+          // (forces hot-path find).
+          std::string path;
+          if (p % 3 == 0) {
+            path = "Z:\\nonexistent\\thread_" + std::to_string(t) +
+                   "_path_" + std::to_string(p) + ".config";
+          } else if (p % 3 == 1) {
+            path = "Z:\\nonexistent\\shared_path_" +
+                   std::to_string(p % 16) + ".config";
+          } else {
+            path = "Z:\\nonexistent\\shared_path_" +
+                   std::to_string((p - 1) % 16) + ".config";
+          }
+          ConfigurationFile* cf =
+              factory.GetConfiguration(path, &handler_, global_config_);
+          if (cf != nullptr) {
+            total_files.fetch_add(1, std::memory_order_relaxed);
+            // ReleaseRef matches the Addref inside GetConfiguration.
+            TestConfigFileRelease(cf);
+          }
+        }
+      } catch (...) {
+        any_crash.store(true);
+      }
+    });
+  }
+  for (auto& th : threads) {
+    th.join();
+  }
+
+  EXPECT_FALSE(any_crash.load())
+      << "GetConfiguration threw under concurrent load";
+  EXPECT_GT(total_files.load(), 0);
 }
 
 }  // namespace

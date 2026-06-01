@@ -61,8 +61,8 @@ class SpeedTestContext {
   SpeedTestContext() {
     StopBenchmarkTiming();
     RewriteDriverFactory::Initialize();
-    factory_.reset(new TestRewriteDriverFactory(
-        RewriteTestBase::process_context(), "/tmp", &fetcher_));
+    factory_ = std::make_unique<TestRewriteDriverFactory>(
+        RewriteTestBase::process_context(), "/tmp", &fetcher_);
     TestRewriteDriverFactory::InitStats(factory_->statistics());
     server_context_ = factory_->CreateServerContext();
     StartBenchmarkTiming();
@@ -131,8 +131,8 @@ static void BM_EmptyFilter(benchmark::State& state) {
   server_context->set_dom_cohort(dom_cohort);
 
   // Set up the driver to enable all filters.
-  std::unique_ptr<RewriteOptions> options(
-      new RewriteOptions(speed_test_context.factory()->thread_system()));
+  std::unique_ptr<RewriteOptions> options = std::make_unique<RewriteOptions>(
+      speed_test_context.factory()->thread_system());
   options->SetRewriteLevel(RewriteOptions::kAllFilters);
 
   GoogleString html;

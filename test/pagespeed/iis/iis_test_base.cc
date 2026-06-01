@@ -40,11 +40,12 @@ void IisTestBase::SetUp() {
   // Initialize RewriteOptions properties before any test uses them
   RewriteOptions::Initialize();
   thread_system_.reset(Platform::CreateThreadSystem());
-  message_handler_.reset(new MockMessageHandler(new NullMutex));
-  timer_.reset(new MockTimer(thread_system_->NewMutex(), 0));
-  scheduler_.reset(new MockScheduler(thread_system_.get(), timer_.get()));
-  hasher_.reset(new MockHasher);
-  statistics_.reset(new NullStatistics);
+  message_handler_ = std::make_unique<MockMessageHandler>(new NullMutex);
+  timer_ = std::make_unique<MockTimer>(thread_system_->NewMutex(), 0);
+  scheduler_ =
+      std::make_unique<MockScheduler>(thread_system_.get(), timer_.get());
+  hasher_ = std::make_unique<MockHasher>();
+  statistics_ = std::make_unique<NullStatistics>();
 }
 
 void IisTestBase::TearDown() {

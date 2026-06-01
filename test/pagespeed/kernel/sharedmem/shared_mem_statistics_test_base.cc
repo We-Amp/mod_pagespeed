@@ -97,10 +97,11 @@ bool SharedMemStatisticsTestBase::AddHistograms(SharedMemStatistics* stats) {
 }
 
 SharedMemStatistics* SharedMemStatisticsTestBase::ChildInit() {
-  std::unique_ptr<SharedMemStatistics> stats(new SharedMemStatistics(
-      kLogIntervalMs, kMaxLogfileSizeKb, kStatsLogFile, false /* no logging */,
-      kPrefix, shmem_runtime_.get(), &handler_, file_system_.get(),
-      timer_.get()));
+  std::unique_ptr<SharedMemStatistics> stats =
+      std::make_unique<SharedMemStatistics>(
+          kLogIntervalMs, kMaxLogfileSizeKb, kStatsLogFile,
+          false /* no logging */, kPrefix, shmem_runtime_.get(), &handler_,
+          file_system_.get(), timer_.get());
   if (!AddVars(stats.get()) || !AddHistograms(stats.get())) {
     test_env_->ChildFailed();
     return nullptr;

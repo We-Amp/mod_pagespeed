@@ -57,7 +57,8 @@ const char kEmptyValuePlaceholder[] = "\n";
 CriticalImagesInfo* CriticalImagesInfoFromPropertyValue(
     int percent_seen_for_critical, const PropertyValue* property_value) {
   DCHECK(property_value != nullptr);
-  std::unique_ptr<CriticalImagesInfo> info(new CriticalImagesInfo());
+  std::unique_ptr<CriticalImagesInfo> info =
+      std::make_unique<CriticalImagesInfo>();
   if (!CriticalImagesFinder::PopulateCriticalImagesFromPropertyValue(
           property_value, &info->proto)) {
     return nullptr;
@@ -391,7 +392,8 @@ RenderedImages* CriticalImagesFinder::JsonMapToRenderedImagesMap(
       return nullptr;
     }
     // Put the extracted map into RenderedImages proto data.
-    std::unique_ptr<RenderedImages> rendered_images(new RenderedImages());
+    std::unique_ptr<RenderedImages> rendered_images =
+        std::make_unique<RenderedImages>();
     Json::Value::Members imgs = json_rendered_image_map.getMemberNames();
     for (int i = 0, n = imgs.size(); i < n; ++i) {
       const GoogleString& img_src = imgs[i];

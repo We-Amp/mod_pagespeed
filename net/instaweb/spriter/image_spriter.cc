@@ -34,7 +34,8 @@ ImageSpriter::ImageSpriter(ImageLibraryInterface* image_lib)
     : image_lib_(image_lib) {}
 
 SpriterResult* ImageSpriter::Sprite(const SpriterInput& spriter_input) {
-  std::unique_ptr<SpriterResult> spriter_result(new SpriterResult);
+  std::unique_ptr<SpriterResult> spriter_result =
+      std::make_unique<SpriterResult>();
 
   spriter_result->set_id(spriter_input.id());
   spriter_result->set_output_base_path(

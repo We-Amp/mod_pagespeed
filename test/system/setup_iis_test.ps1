@@ -96,8 +96,46 @@ function Get-IISExpressProcess {
         Where-Object { $_.CommandLine -like "*$ConfigFile*" -or $_.Id -eq (Get-Content $PidFile -ErrorAction SilentlyContinue) }
 }
 
+function Reset-PageSpeedTestCache {
+    # Purge any persistent PageSpeed file cache from prior workflow runs on
+    # the same self-hosted Windows runner. mod_pagespeed's rewrite cache is
+    # keyed by input URL + content hash -- NOT by file mtime -- so a cached
+    # rewrite from a previous job hits on the same fixture bytes and serves
+    # back the prior job's embedded Last-Modified header, while origin
+    # (?PageSpeed=off) honestly serves the freshly-stamped fixture mtime.
+    # That divergence is the stale Last-Modified defect the purge prevents. The IIS Express
+    # cache lives under $env:TEMP and is not guaranteed to be cleaned
+    # between runs on persistent runners. Mirrors the symmetric purge in
+    # setup_iis_full.ps1 and the AppVerif-prep step of the Windows CI workflow.
+    #
+    # Best-effort but LOUD about partial failures: any locked-file / ACL
+    # error gets surfaced via Write-Status Yellow so a future regression
+    # turns the CI log yellow instead of failing silently. Idempotent and
+    # safe on cold runners (cache dir may not yet exist).
+    if (Test-Path $CacheDir) {
+        $purgeErr = $null
+        Remove-Item "$CacheDir\*" -Recurse -Force `
+            -ErrorAction SilentlyContinue -ErrorVariable purgeErr
+        if ($purgeErr -and $purgeErr.Count -gt 0) {
+            Write-Status ("Warning: purge of {0} had {1} error(s); first: {2}" -f `
+                $CacheDir, $purgeErr.Count, $purgeErr[0]) "Yellow"
+        } else {
+            Write-Status "Purged stale PageSpeed file cache at $CacheDir" "Gray"
+        }
+        $residual = Get-ChildItem -Path $CacheDir -Recurse -Force `
+            -ErrorAction SilentlyContinue | Measure-Object
+        if ($residual.Count -gt 0) {
+            Write-Status ("Warning: {0} still has {1} entries after purge" -f `
+                $CacheDir, $residual.Count) "Yellow"
+        }
+    }
+}
+
 function Initialize-TestEnvironment {
     Write-Status "Initializing test environment..."
+
+    # Purge stale PageSpeed file cache from prior runs (see Reset-PageSpeedTestCache for the rationale).
+    Reset-PageSpeedTestCache
 
     # Create directories
     @($TestRoot, $WebRoot, $CacheDir, $LogDir) | ForEach-Object {
@@ -134,6 +172,21 @@ function Initialize-TestEnvironment {
         Copy-Item $DoNotModifySource $destDoNotModify -Recurse
         Write-Status "Copied do_not_modify content" "Gray"
     }
+
+    # Refresh LastWriteTime on all copied fixture files so IIS emits a fresh
+    # Last-Modified header. See setup_iis_full.ps1 for the full rationale;
+    # mod_pagespeed propagates the origin Last-Modified into the rewritten
+    # resource, and stale fixture mtimes cause
+    # test_cache_extended_preserves_last_modified to see origin != extended.
+    $now = Get-Date
+    foreach ($contentRoot in @("$WebRoot\mod_pagespeed_example", "$WebRoot\mod_pagespeed_test", "$WebRoot\do_not_modify")) {
+        if (Test-Path $contentRoot) {
+            Get-ChildItem -Path $contentRoot -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object {
+                try { $_.LastWriteTime = $now } catch { }
+            }
+        }
+    }
+    Write-Status "Refreshed LastWriteTime on copied fixtures" "Gray"
 
     # Create a simple index.html for testing
     @"
@@ -284,6 +337,13 @@ function Start-IISExpressServer {
     $existing = Get-IISExpressProcess
     if ($existing) {
         Write-Status "IIS Express is already running (PID: $($existing.Id))" "Yellow"
+        # Even on this early-return path, we still need to purge the stale
+        # cache: a long-lived iisexpress.exe across workflow runs is exactly
+        # the scenario that produces the defect Last-Modified
+        # divergence. Initialize-TestEnvironment (which normally invokes
+        # Reset-PageSpeedTestCache) does not run on this path, so invoke
+        # the helper directly here.
+        Reset-PageSpeedTestCache
         return
     }
 

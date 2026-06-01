@@ -40,10 +40,12 @@
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/sharedmem/shared_circular_buffer.h"
+#include "pagespeed/kernel/thread/event_scheduler.h"
+#include "pagespeed/kernel/thread/libevent_dispatcher.h"
 #include "pagespeed/kernel/thread/pthread_shared_mem.h"
-#include "pagespeed/kernel/thread/scheduler_thread.h"
-#include "pagespeed/kernel/thread/slow_worker.h"
 #include "pagespeed/system/controller_manager.h"
+#include "pagespeed/system/curl_url_async_fetcher.h"
+#include "pagespeed/system/system_rewrite_options.h"
 
 namespace net_instaweb {
 
@@ -56,7 +58,6 @@ ApacheRewriteDriverFactory::ApacheRewriteDriverFactory(
                                  nullptr, /* default shared memory runtime */
                                  server->server_hostname, server->port),
       server_rec_(server),
-      scheduler_thread_(nullptr),
       version_(version.data(), version.size()),
       apache_message_handler_(new ApacheMessageHandler(
           server_rec_, version_, timer(), thread_system()->NewMutex())),
@@ -134,10 +135,17 @@ void ApacheRewriteDriverFactory::SetupCaches(ServerContext* server_context) {
 }
 
 void ApacheRewriteDriverFactory::SetNeedSchedulerThread() {
-  if (scheduler_thread_ == nullptr) {
-    scheduler_thread_ = new SchedulerThread(thread_system(), scheduler());
-    defer_cleanup(scheduler_thread_->MakeDeleter());
-    scheduler_thread_->Start();
+  if (event_dispatcher_ == nullptr) {
+    // Use LibeventDispatcher with EventScheduler instead of SchedulerThread.
+    // LibeventDispatcher runs libevent in a background thread, providing
+    // the same functionality as SchedulerThread but with a unified
+    // EventDispatcher abstraction.
+    event_dispatcher_ =
+        std::make_unique<LibeventDispatcher>(thread_system(), timer());
+    event_scheduler_ = std::make_unique<EventScheduler>(
+        thread_system(), event_dispatcher_.get());
+    bool ok = event_dispatcher_->Start();
+    CHECK(ok) << "Unable to start event dispatcher";
   }
 }
 
@@ -204,11 +212,26 @@ void ApacheRewriteDriverFactory::Initialize() {
   RewriteDriverFactory::Initialize();
 }
 
+UrlAsyncFetcher* ApacheRewriteDriverFactory::AllocateFetcher(
+    SystemRewriteOptions* config) {
+  CurlUrlAsyncFetcher* fetcher = new CurlUrlAsyncFetcher(
+      config->fetcher_proxy().c_str(), thread_system(), statistics(), timer(),
+      config->blocking_fetch_timeout_ms(), message_handler());
+  fetcher->set_list_outstanding_urls_on_error(list_outstanding_urls_on_error());
+  fetcher->set_fetch_with_gzip(config->fetch_with_gzip());
+  fetcher->set_track_original_content_length(track_original_content_length());
+  fetcher->SetHttpsOptions(config->https_options());
+  fetcher->SetSslCertificatesDir(config->ssl_cert_directory());
+  fetcher->SetSslCertificatesFile(config->ssl_cert_file());
+  return fetcher;
+}
+
 void ApacheRewriteDriverFactory::InitStats(Statistics* statistics) {
   // Init standard system stats.
   SystemRewriteDriverFactory::InitStats(statistics);
 
   // Init Apache-specific stats.
+  CurlUrlAsyncFetcher::InitStats(statistics);
   ApacheServerContext::InitStats(statistics);
 }
 

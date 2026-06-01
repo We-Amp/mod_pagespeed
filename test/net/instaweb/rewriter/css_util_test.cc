@@ -60,7 +60,7 @@ TEST_F(CssUtilTest, TestGetDimensions) {
   html_parse.AddAttribute(img, HtmlName::kStyle,
                           "height:50px;width:80px;border-width:0px;");
 
-  std::unique_ptr<StyleExtractor> extractor(new StyleExtractor(img));
+  std::unique_ptr<StyleExtractor> extractor = std::make_unique<StyleExtractor>(img);
   EXPECT_EQ(kHasBothDimensions, extractor->state());
   EXPECT_EQ(80, extractor->width());
   EXPECT_EQ(50, extractor->height());
@@ -99,7 +99,7 @@ TEST_F(CssUtilTest, TestAnyDimensions) {
   HtmlElement* img = html_parse.NewElement(nullptr, HtmlName::kImg);
   html_parse.AddAttribute(img, HtmlName::kStyle,
                           "width:80px;border-width:0px;");
-  std::unique_ptr<StyleExtractor> extractor(new StyleExtractor(img));
+  std::unique_ptr<StyleExtractor> extractor = std::make_unique<StyleExtractor>(img);
   EXPECT_TRUE(extractor->HasAnyDimensions());
   EXPECT_EQ(kHasWidthOnly, extractor->state());
 

@@ -157,8 +157,8 @@ TEST_F(SchedulerSequenceTest, RunOnRequestThreadThenSwitch) {
 
   // Now forward the sequence, including the outstanding increment to 11, and
   // any new tasks, to a pool-based sequence that runs in a separate thread.
-  std::unique_ptr<QueuedWorkerPool> pool(new QueuedWorkerPool(
-      2, "queued_worker_pool_test", thread_runtime_.get()));
+  std::unique_ptr<QueuedWorkerPool> pool = std::make_unique<QueuedWorkerPool>(
+      2, "queued_worker_pool_test", thread_runtime_.get());
   Sequence* pool_sequence = pool->NewSequence();
   {
     ScopedMutex lock(scheduler_.mutex());
