@@ -40,8 +40,9 @@ EnvoyBaseFetch::EnvoyBaseFetch(StringPiece url,
       url_(url.data(), url.size()),
       server_context_(server_context),
       options_(options),
-      preserve_caching_headers_(preserve_caching_headers),
-      decoder_(decoder) {}
+      preserve_caching_headers_(preserve_caching_headers) {
+  decoder_.store(decoder, std::memory_order_release);
+}
 
 bool EnvoyBaseFetch::HandleWrite(const StringPiece& sp, MessageHandler*) {
   buffer_.append(sp.data(), sp.size());
@@ -52,17 +53,51 @@ void EnvoyBaseFetch::HandleHeadersComplete() {
   int status_code = response_headers()->status_code();
   bool continue_decoding = false;
 
+  // Load the decoder pointer once with acquire semantics to ensure we see
+  // all writes made before any DetachDecoder() call.
+  auto* decoder = decoder_.load(std::memory_order_acquire);
+
+  // Check if decoder is still valid before accessing it.
+  // It may have been detached if the filter was destroyed.
+  if (decoder == nullptr) {
+    return;
+  }
+
   if (status_code == CacheUrlAsyncFetcher::kNotInCacheStatus) {
-    decoder_->prepareForIproRecording();
-    continue_decoding = true;
+    // Increment reference count before posting to ensure the object stays
+    // alive until the callback completes. The callback will decrement it.
+    IncrementRefCount();
+    // Post prepareForIproRecording to the dispatcher thread since this
+    // callback may be running on a PageSpeed worker thread, but the filter
+    // state must only be accessed from the main Envoy thread.
+    decoder->decoderCallbacks()->dispatcher().post([this]() {
+      // Re-check decoder_ inside the callback in case the filter was
+      // destroyed between posting and execution.
+      auto* dec = decoder_.load(std::memory_order_acquire);
+      if (dec != nullptr) {
+        dec->prepareForIproRecording();
+        dec->decoderCallbacks()->continueDecoding();
+      }
+      // Release the reference we took before posting.
+      DecrementRefCount();
+    });
   } else {
     have_ipro_response_ = !(status_code < 0 || status_code >= 400);
     continue_decoding = !have_ipro_response_;
-  }
 
-  if (continue_decoding) {
-    decoder_->decoderCallbacks()->dispatcher().post(
-        [this]() { decoder_->decoderCallbacks()->continueDecoding(); });
+    if (continue_decoding) {
+      // Increment reference count before posting to ensure the object stays
+      // alive until the callback completes. The callback will decrement it.
+      IncrementRefCount();
+      decoder->decoderCallbacks()->dispatcher().post([this]() {
+        auto* dec = decoder_.load(std::memory_order_acquire);
+        if (dec != nullptr) {
+          dec->decoderCallbacks()->continueDecoding();
+        }
+        // Release the reference we took before posting.
+        DecrementRefCount();
+      });
+    }
   }
 }
 
@@ -73,26 +108,60 @@ int EnvoyBaseFetch::DecrementRefCount() {
 }
 
 int EnvoyBaseFetch::IncrementRefCount() {
-  return __sync_add_and_fetch(&references_, 1);
+  // Use memory_order_acq_rel to ensure visibility of any writes made before
+  // the increment is visible to other threads, and that we see any writes
+  // made by other threads before their increments.
+  return references_.fetch_add(1, std::memory_order_acq_rel) + 1;
 }
 
 int EnvoyBaseFetch::DecrefAndDeleteIfUnreferenced() {
-  // Creates a full memory barrier.
-  int r = __sync_add_and_fetch(&references_, -1);
-  if (r == 0) {
+  // Use memory_order_acq_rel for the decrement to ensure:
+  // 1. All writes before the decrement are visible to other threads (release)
+  // 2. We see all writes made by other threads before their decrements (acquire)
+  int old_val = references_.fetch_sub(1, std::memory_order_acq_rel);
+  int new_val = old_val - 1;
+  if (new_val == 0) {
+    // Use acquire fence to ensure we see all writes made by other threads
+    // before we delete the object.
+    std::atomic_thread_fence(std::memory_order_acquire);
     delete this;
   }
-  return r;
+  return new_val;
 }
 
 void EnvoyBaseFetch::HandleDone(bool success) {
+  // Load the decoder pointer once with acquire semantics to ensure we see
+  // all writes made before any DetachDecoder() call.
+  auto* decoder = decoder_.load(std::memory_order_acquire);
+
+  // Check if decoder is still valid before accessing it.
+  if (decoder == nullptr) {
+    DecrefAndDeleteIfUnreferenced();
+    return;
+  }
+
   if (have_ipro_response_) {
+    // Increment reference count before posting to ensure the object stays
+    // alive until the callback completes. The callback will decrement it.
+    IncrementRefCount();
     if (!success) {
-      decoder_->decoderCallbacks()->dispatcher().post(
-          [this]() { decoder_->decoderCallbacks()->continueDecoding(); });
+      decoder->decoderCallbacks()->dispatcher().post([this]() {
+        auto* dec = decoder_.load(std::memory_order_acquire);
+        if (dec != nullptr) {
+          dec->decoderCallbacks()->continueDecoding();
+        }
+        // Release the reference we took before posting.
+        DecrementRefCount();
+      });
     } else {
-      decoder_->decoderCallbacks()->dispatcher().post(
-          [this]() { decoder_->sendReply(response_headers(), buffer_); });
+      decoder->decoderCallbacks()->dispatcher().post([this]() {
+        auto* dec = decoder_.load(std::memory_order_acquire);
+        if (dec != nullptr) {
+          dec->sendReply(response_headers(), buffer_);
+        }
+        // Release the reference we took before posting.
+        DecrementRefCount();
+      });
     }
   }
 

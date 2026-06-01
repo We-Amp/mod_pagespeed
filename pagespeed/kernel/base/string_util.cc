@@ -371,6 +371,24 @@ int CountCharacterMismatches(StringPiece s1, StringPiece s2) {
   return mismatches + std::abs(s1_length - s2_length);
 }
 
+bool ConstantTimeCompare(StringPiece a, StringPiece b) {
+  // Early return for length mismatch is acceptable here because the length
+  // of security tokens (like auth tokens or signatures) is typically fixed
+  // and known to attackers anyway. The critical protection is against
+  // byte-by-byte timing analysis of the content.
+  if (a.size() != b.size()) {
+    return false;
+  }
+  // Use volatile to prevent compiler optimizations that might short-circuit
+  // the comparison loop.
+  volatile unsigned char result = 0;
+  for (size_t i = 0; i < a.size(); ++i) {
+    result |= static_cast<unsigned char>(a[i]) ^
+              static_cast<unsigned char>(b[i]);
+  }
+  return result == 0;
+}
+
 void ParseShellLikeString(StringPiece input,
                           std::vector<GoogleString>* output) {
   output->clear();

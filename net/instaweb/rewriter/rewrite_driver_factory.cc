@@ -21,6 +21,33 @@
 
 #include <memory>
 
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+namespace {
+void RDFDebugLog(const char* msg) {
+  HANDLE hFile = CreateFileA(
+      "C:\\inetpub\\pagespeed\\rdf_debug.log",
+      FILE_APPEND_DATA,
+      FILE_SHARE_READ | FILE_SHARE_WRITE,
+      NULL,
+      OPEN_ALWAYS,
+      FILE_ATTRIBUTE_NORMAL,
+      NULL);
+  if (hFile != INVALID_HANDLE_VALUE) {
+    DWORD written;
+    WriteFile(hFile, msg, strlen(msg), &written, NULL);
+    WriteFile(hFile, "\r\n", 2, &written, NULL);
+    CloseHandle(hFile);
+  }
+}
+}  // namespace
+#else
+namespace { void RDFDebugLog(const char*) {} }
+#endif
+
 #include "base/logging.h"
 #include "net/instaweb/http/public/http_cache.h"
 #include "net/instaweb/http/public/http_dump_url_async_writer.h"
@@ -66,8 +93,8 @@
 #include "pagespeed/kernel/http/user_agent_normalizer.h"
 #include "pagespeed/kernel/thread/queued_worker_pool.h"
 #include "pagespeed/kernel/thread/scheduler.h"
-#include "pagespeed/kernel/util/file_system_lock_manager.h"
 #include "pagespeed/kernel/util/nonce_generator.h"
+#include "pagespeed/kernel/util/threadsafe_lock_manager.h"
 
 namespace net_instaweb {
 
@@ -90,10 +117,12 @@ RewriteDriverFactory::RewriteDriverFactory(
       statistics_(&null_statistics_),
       worker_pools_(kNumWorkerPools, nullptr),
       hostname_(GetHostname()) {
+  RDFDebugLog("RDF: member init complete, about to call InitializeDefaultOptions");
   // Pre-initializes the default options.  IMPORTANT: subclasses overridding
   // NewRewriteOptions() should re-call this method from their constructor
   // so that the correct rewrite_options_ object gets reset.
   InitializeDefaultOptions();
+  RDFDebugLog("RDF: InitializeDefaultOptions complete, constructor done");
 }
 
 void RewriteDriverFactory::InitializeDefaultOptions() {
@@ -326,8 +355,7 @@ RewriteDriverFactory::user_agent_normalizers() {
 }
 
 NamedLockManager* RewriteDriverFactory::DefaultLockManager() {
-  return new FileSystemLockManager(file_system(), LockFilePrefix(), scheduler(),
-                                   message_handler());
+  return new ThreadSafeLockManager(scheduler());
 }
 
 UrlNamer* RewriteDriverFactory::DefaultUrlNamer() { return new UrlNamer(); }
