@@ -26,7 +26,6 @@
 
 #ifdef _WIN32
 #include <perflib.h>
-#pragma comment(lib, "advapi32.lib")
 
 // PERF_DETAIL_* constants from winperf.h (not in perflib.h)
 #ifndef PERF_DETAIL_NOVICE

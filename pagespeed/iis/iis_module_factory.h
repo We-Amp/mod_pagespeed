@@ -1,193 +1,42 @@
-/*
- * Licensed to the Apache Software Foundation (ASF) under one
- * or more contributor license agreements.  See the NOTICE file
- * distributed with this work for additional information
- * regarding copyright ownership.  The ASF licenses this file
- * to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance
- * with the License.  You may obtain a copy of the License at
- *
- *   http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+#ifndef IIS_MODULE_FACTORY_H_
+#define IIS_MODULE_FACTORY_H_
 
-#ifndef PAGESPEED_IIS_IIS_MODULE_FACTORY_H_
-#define PAGESPEED_IIS_IIS_MODULE_FACTORY_H_
-
-// Windows headers - winsock2.h must come before windows.h and httpserv.h
-// to avoid redefinition errors with winsock.h
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <winsock2.h>
-#include <windows.h>
-
-// IIS Native Module API headers
 #include <httpserv.h>
+#include <unordered_map>
+#include "net/instaweb/rewriter/public/rewrite_driver.h"
+#include "pagespeed/iis/iis_process_context.h"
+#include "pagespeed/iis/iis_message_handler.h"
 
-#include <atomic>
-#include <map>
-#include <memory>
-#include <mutex>
-#include <shared_mutex>
 
-#include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/string.h"
-#include "net/instaweb/rewriter/public/process_context.h"
 
 namespace net_instaweb {
 
-class IisConfig;
-class IisRewriteDriverFactory;
-class IisServerContext;
-
-// IIS HTTP Module Factory implementing IHttpModuleFactory.
-//
-// This factory is responsible for:
-// 1. Creating IisHttpModule instances for each request
-// 2. Managing per-site ServerContexts (one per IIS site/application)
-// 3. Terminating the module when IIS recycles the app pool
-//
-// Per-site support (matching IISpeed pattern):
-// At startup, the factory creates a single default context with the root
-// (machine-level) config. Per-site contexts are created lazily on first
-// request via GetOrCreateContextForSite(), avoiding COM-based site
-// enumeration at startup which can crash the IIS worker process.
-// At request time, GetActiveContext() in IisHttpModule looks up the correct
-// context by the IIS application ID.
-class IisModuleFactory : public IHttpModuleFactory {
- public:
-  IisModuleFactory();
-  ~IisModuleFactory();
-
-  // Initialize the factory with IIS server context
-  HRESULT Initialize(IHttpServer* server);
-
-  // IHttpModuleFactory interface
-  HRESULT GetHttpModule(
-      CHttpModule** module,
-      IModuleAllocator* allocator) override;
-
-  void Terminate() override;
-
-  // Access a server context. Returns the first site context for code that
-  // does not have an IHttpContext (e.g. startup, shutdown). Falls back to
-  // nullptr if no contexts have been created yet.
-  IisServerContext* server_context();
-
-  // Look up the server context for a specific IIS application ID.
-  // Returns nullptr if no context exists for that app ID.
-  IisServerContext* GetContextForSite(const GoogleString& app_id);
-
-  // Look up or lazily create a server context for a site. If the app ID is
-  // not yet known (dynamically added site), a new context is created using
-  // the root configuration as a base.
-  IisServerContext* GetOrCreateContextForSite(
-      const GoogleString& app_id, const wchar_t* config_path);
-
-  // Access the driver factory
-  IisRewriteDriverFactory* factory() { return driver_factory_.get(); }
-
-  // Get the module ID for context storage (instance accessor)
-  HTTP_MODULE_ID module_id() const { return module_id_; }
-
-  // Set the module ID (called by RegisterModule)
-  void set_module_id(HTTP_MODULE_ID id) {
-    module_id_ = id;
-    s_module_id_ = id;  // Also set static for use in handlers
-  }
-
-  // Static accessor for use in handlers (IISpeed pattern).
-  // This avoids accessing module_factory_ which may not be set in all contexts.
-  static HTTP_MODULE_ID GetModuleId() { return s_module_id_; }
-
-  // Shutdown coordination: prevents crashes from in-flight requests during
-  // app pool recycle. OnBeginRequest checks IsShuttingDown() and calls
-  // IncrementActiveRequests(); CleanupStoredContext calls
-  // DecrementActiveRequests() when the request fully completes.
-  bool IsShuttingDown() const;
-  void IncrementActiveRequests();
-  void DecrementActiveRequests();
-
- protected:
-  // Hook for heavy system initialization (caches, threads, Redis, etc.).
-  // Called by Initialize() after creating the factory and server context.
-  // Override in tests to skip the slow Init/PostConfig/RootInit/ChildInit
-  // sequence that requires running services.
-  virtual HRESULT SetupSystemCaches();
-
- protected:
-  // Driver factory - protected so test subclasses can set up lightweight init
-  std::unique_ptr<IisRewriteDriverFactory> driver_factory_;
-
-  // Per-site server contexts, keyed by normalized IIS application ID.
-  // Each site gets its own ServerContext with root + site config merged.
-  // Raw pointers because ownership is shared with the factory's
-  // uninitialized_server_contexts_ set during init. Cleaned up in Terminate().
-  std::map<GoogleString, IisServerContext*> site_contexts_;
-
-  // Root config loaded from MACHINE/WEBROOT/APPHOST (machine-level).
-  // Used as the base for merging per-site configs and for creating
-  // contexts for dynamically added sites.
-  std::unique_ptr<IisConfig> root_config_;
-
- private:
-
-  IHttpServer* iis_server_;  // Not owned
-  bool initialized_;         // Whether Initialize() completed successfully
-  bool caches_initialized_;  // Whether SetupSystemCaches() ran full init
-
-  // Module ID for context storage via IHttpModuleContextContainer
-  HTTP_MODULE_ID module_id_ = nullptr;
-
-  // Static module ID for use in handlers (IISpeed pattern).
-  // This provides a single source of truth accessible without factory reference.
-  static HTTP_MODULE_ID s_module_id_;
-
-  // Process context must outlive the driver factory since the factory
-  // stores a pointer to data inside it (js_tokenizer_patterns).
-  std::unique_ptr<ProcessContext> process_context_;
-
-  // Protects site_contexts_ against concurrent read/write. GetContextForSite
-  // uses shared_lock (concurrent reads OK), GetOrCreateContextForSite uses
-  // unique_lock (exclusive write).
-  mutable std::shared_mutex site_contexts_mutex_;
-
-  // Shutdown coordination.
-  std::atomic<bool> shutting_down_{false};
-  std::atomic<int> active_request_count_{0};
-
-  DISALLOW_COPY_AND_ASSIGN(IisModuleFactory);
+class IisModuleFactory : public IHttpModuleFactory
+{
+public:
+	IisModuleFactory(std::string module_path,PCWSTR app_pool_name, IisMessageHandler* handler);
+	HRESULT GetHttpModule(OUT CHttpModule ** ppModule, IN IModuleAllocator * pAllocator);
+	void Terminate();
+	IisProcessContext* GetProcessContext(const GoogleString& site_app_id,std::string site_root, const GoogleString& app_url_base);
+	
+	MessageHandler *message_handler() {return message_handler_;}
+	static HTTP_MODULE_ID module_id()
+	{
+		return module_id_;
+	}
+	static void set_module_id(HTTP_MODULE_ID module_id)
+	{
+		module_id_ = module_id;
+	}
+private:
+	std::unordered_map<GoogleString, IisProcessContext*> site_contexts_;
+	
+	MessageHandler* message_handler_;
+	CRITICAL_SECTION mycs;
+	static HTTP_MODULE_ID module_id_;
+	std::wstring app_pool_name_;
+	std::string module_path_;
 };
+}
 
-// Global module that receives GL_APPLICATION_START notifications.
-// Per-site contexts are created lazily on first request. This handler
-// is retained for future per-site notifications.
-class IisGlobalModule : public CGlobalModule {
- public:
-  explicit IisGlobalModule(IisModuleFactory* factory) : factory_(factory) {}
-
-  GLOBAL_NOTIFICATION_STATUS OnGlobalApplicationStart(
-      IHttpApplicationStartProvider* provider) override;
-
-  void Terminate() override {}
-
- private:
-  IisModuleFactory* factory_;  // Not owned
-};
-
-}  // namespace net_instaweb
-
-// DLL entry point for IIS module registration
-extern "C" __declspec(dllexport) HRESULT __stdcall RegisterModule(
-    DWORD version,
-    IHttpModuleRegistrationInfo* info,
-    IHttpServer* server);
-
-#endif  // PAGESPEED_IIS_IIS_MODULE_FACTORY_H_
+#endif

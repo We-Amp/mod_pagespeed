@@ -23,7 +23,6 @@
 
 #ifdef _WIN32
 #include <windows.h>
-#pragma comment(lib, "advapi32.lib")
 #endif
 
 namespace net_instaweb {

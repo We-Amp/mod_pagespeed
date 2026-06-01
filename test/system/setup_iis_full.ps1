@@ -167,13 +167,19 @@ function Initialize-TestEnvironment {
     }
 
     # Remove stale web.config from previous runs. appcmd set config (called
-    # later in New-IISSite) triggers IIS to parse the site's web.config, and a
-    # leftover file with <pagespeed> will fail before the sectionGroup is
-    # registered. New-WebConfig writes a fresh one after module installation.
+    # later in New-IISSite) triggers IIS to parse the site's web.config.
+    # New-WebConfig writes a fresh one after module installation.
     $staleConfig = "$WebRoot\web.config"
     if (Test-Path $staleConfig) {
         Remove-Item $staleConfig -Force
         Write-Status "Removed stale web.config" "Gray"
+    }
+
+    # Also remove stale pagespeed.config from previous runs
+    $stalePagespeedConfig = "$WebRoot\pagespeed.config"
+    if (Test-Path $stalePagespeedConfig) {
+        Remove-Item $stalePagespeedConfig -Force
+        Write-Status "Removed stale pagespeed.config" "Gray"
     }
 
     # Copy test content
@@ -333,36 +339,10 @@ function New-IISSite {
 }
 
 function New-WebConfig {
-    Write-Status "Creating web.config..."
+    Write-Status "Creating web.config and pagespeed.config..."
 
-    $hasModule = (Test-Path $ModulePath) -and (-not $NoModule)
-
-    if ($hasModule) {
-        $pagespeedSection = @"
-    <pagespeed>
-      <settings enabled="true">
-        <cache fileCachePath="$CacheDir"
-               lruCacheSizeBytes="67108864" />
-        <filters enabledFilters="collapse_whitespace,combine_css,combine_javascript,extend_cache,inline_css,inline_javascript,rewrite_css,rewrite_images,rewrite_javascript" />
-        <images recompressQuality="85" webpQuality="80" />
-        <javascript libraries="43 1o978_K0_LNE5_ystNklf http://www.modpagespeed.com/rewrite_javascript.js" />
-        <admin enabled="true" path="/pagespeed_admin"
-               statisticsEnabled="true"
-               statisticsPath="/pagespeed_statistics" />
-      </settings>
-    </pagespeed>
-"@
-        Write-Status "PageSpeed module will be enabled" "Cyan"
-    } else {
-        $pagespeedSection = "  <!-- PageSpeed configuration not available (module not built) -->"
-        if ($NoModule) {
-            Write-Status "PageSpeed module disabled by -NoModule flag" "Yellow"
-        } else {
-            Write-Status "PageSpeed module not found at $ModulePath" "Yellow"
-            Write-Status "Tests will run without PageSpeed optimizations" "Yellow"
-        }
-    }
-
+    # Write web.config with IIS settings only (no <pagespeed> XML section).
+    # The IISpeed-adopted module reads pagespeed.config flat files.
     $webConfig = @"
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration>
@@ -391,9 +371,6 @@ function New-WebConfig {
       </requestFiltering>
     </security>
 
-
-$pagespeedSection
-
   </system.webServer>
 
 </configuration>
@@ -401,76 +378,55 @@ $pagespeedSection
 
     $webConfig | Set-Content "$WebRoot\web.config" -Encoding UTF8
     Write-Status "web.config written to $WebRoot\web.config" "Gray"
-}
 
-function Register-PageSpeedConfigSection {
-    # Register the pagespeed sectionGroup under system.webServer in applicationHost.config.
-    # Without this, IIS rejects <pagespeed> in web.config with:
-    #   "The configuration section 'pagespeed' cannot be read because it is
-    #    missing a section declaration"
-    # This mirrors what setup_iis_test.ps1 does for IIS Express (lines 170-172).
-    $appHostConfig = "$env:SystemRoot\System32\inetsrv\config\applicationHost.config"
-    if (-not (Test-Path $appHostConfig)) {
-        Write-Status "Warning: applicationHost.config not found at $appHostConfig" "Yellow"
-        return
-    }
+    # Generate pagespeed.config flat file (IISpeed format)
+    $hasModule = (Test-Path $ModulePath) -and (-not $NoModule)
 
-    $xml = New-Object System.Xml.XmlDocument
-    $xml.PreserveWhitespace = $true
-    $xml.Load($appHostConfig)
-    $configSections = $xml.configuration.configSections
-    if (-not $configSections) {
-        Write-Status "Warning: No configSections found in applicationHost.config" "Yellow"
-        return
-    }
+    if ($hasModule) {
+        $pagespeedConfig = @"
+pagespeed on
+pagespeed RewriteLevel CoreFilters
+pagespeed FileCachePath $CacheDir
+pagespeed Statistics on
+pagespeed StatisticsLogging on
+pagespeed EnableCachePurge on
+pagespeed RateLimitBackgroundFetches on
+pagespeed InPlaceResourceOptimization on
+pagespeed CriticalImagesBeaconEnabled false
+pagespeed BlockingRewriteKey psatest
+pagespeed Library 43 1o978_K0_LNE5_ystNklf http://www.modpagespeed.com/rewrite_javascript.js
+pagespeed MessageBufferSize 100000
+pagespeed AdminPath /pagespeed_admin
+pagespeed StatisticsPath /pagespeed_statistics
+pagespeed GlobalStatisticsPath /pagespeed_global_statistics
+pagespeed ConsolePath /pagespeed_console
+pagespeed MessagesPath /pagespeed_message
+pagespeed GlobalAdminPath /pagespeed_global_admin
+"@
 
-    # Find the system.webServer sectionGroup
-    $swsSectionGroup = $configSections.sectionGroup | Where-Object { $_.name -eq "system.webServer" }
-    if (-not $swsSectionGroup) {
-        Write-Status "Warning: system.webServer sectionGroup not found" "Yellow"
-        return
-    }
+        # Site-level config
+        $pagespeedConfig | Set-Content "$WebRoot\pagespeed.config" -Encoding UTF8
+        Write-Status "pagespeed.config written to $WebRoot\pagespeed.config" "Gray"
 
-    # Check if pagespeed sectionGroup already exists
-    $existing = $swsSectionGroup.sectionGroup | Where-Object { $_.name -eq "pagespeed" }
-    if ($existing) {
-        Write-Status "pagespeed sectionGroup already declared in applicationHost.config" "Gray"
-        return
-    }
+        # Server-level config at %ProgramData%\We-Amp\IISWebSpeed\
+        $serverConfigDir = "$env:ProgramData\We-Amp\IISWebSpeed"
+        if (-not (Test-Path $serverConfigDir)) {
+            New-Item -ItemType Directory -Path $serverConfigDir -Force | Out-Null
+            Write-Status "Created server config directory: $serverConfigDir" "Gray"
+        }
+        $pagespeedConfig | Set-Content "$serverConfigDir\pagespeed.config" -Encoding UTF8
+        Write-Status "pagespeed.config written to $serverConfigDir\pagespeed.config" "Gray"
 
-    # Add <sectionGroup name="pagespeed"><section name="settings" overrideModeDefault="Allow" /></sectionGroup>
-    $psSectionGroup = $xml.CreateElement("sectionGroup")
-    $psSectionGroup.SetAttribute("name", "pagespeed")
-    $settingsSection = $xml.CreateElement("section")
-    $settingsSection.SetAttribute("name", "settings")
-    $settingsSection.SetAttribute("overrideModeDefault", "Allow")
-    $psSectionGroup.AppendChild($settingsSection) | Out-Null
-    $swsSectionGroup.AppendChild($psSectionGroup) | Out-Null
-
-    $xml.Save($appHostConfig)
-    Write-Status "Registered pagespeed sectionGroup in applicationHost.config" "Green"
-}
-
-function Unregister-PageSpeedConfigSection {
-    # Remove the pagespeed sectionGroup from applicationHost.config
-    $appHostConfig = "$env:SystemRoot\System32\inetsrv\config\applicationHost.config"
-    if (-not (Test-Path $appHostConfig)) { return }
-
-    $xml = New-Object System.Xml.XmlDocument
-    $xml.PreserveWhitespace = $true
-    $xml.Load($appHostConfig)
-    $swsSectionGroup = $xml.configuration.configSections.sectionGroup |
-        Where-Object { $_.name -eq "system.webServer" }
-    if (-not $swsSectionGroup) { return }
-
-    $psSectionGroup = $swsSectionGroup.sectionGroup | Where-Object { $_.name -eq "pagespeed" }
-    if ($psSectionGroup) {
-        $swsSectionGroup.RemoveChild($psSectionGroup) | Out-Null
-        $xml.Save($appHostConfig)
-        Write-Status "Removed pagespeed sectionGroup from applicationHost.config" "Gray"
+        Write-Status "PageSpeed module will be enabled (flat-file config)" "Cyan"
+    } else {
+        if ($NoModule) {
+            Write-Status "PageSpeed module disabled by -NoModule flag" "Yellow"
+        } else {
+            Write-Status "PageSpeed module not found at $ModulePath" "Yellow"
+            Write-Status "Tests will run without PageSpeed optimizations" "Yellow"
+        }
     }
 }
-
 function Install-PageSpeedModule {
     if ($NoModule) {
         Write-Status "Skipping PageSpeed module installation (-NoModule)" "Yellow"
@@ -524,7 +480,6 @@ function Uninstall-PageSpeedModule {
         Write-Status "Unregistered PageSpeedModule" "Gray"
     } catch { }
 
-    Unregister-PageSpeedConfigSection
 
     $systemModulePath = "C:\Windows\System32\inetsrv\pagespeed_iis.dll"
     if (Test-Path $systemModulePath) {
@@ -723,11 +678,6 @@ function Uninstall-IISSite {
 function Install-IISSiteComplete {
     Install-IISComponents
     Initialize-TestEnvironment
-    # Register the pagespeed sectionGroup early — before New-IISSite, which
-    # uses appcmd set config and triggers IIS to parse any existing web.config.
-    if (-not $NoModule -and (Test-Path $ModulePath)) {
-        Register-PageSpeedConfigSection
-    }
     New-IISSite
     Install-PageSpeedModule
     New-WebConfig

@@ -1,132 +1,116 @@
-/*
- * Licensed to the Apache Software Foundation (ASF) under one
- * or more contributor license agreements.  See the NOTICE file
- * distributed with this work for additional information
- * regarding copyright ownership.  The ASF licenses this file
- * to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance
- * with the License.  You may obtain a copy of the License at
- *
- *   http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+#ifndef IIS_REWRITE_DRIVER_FACTORY_H_
+#define IIS_REWRITE_DRIVER_FACTORY_H_
 
-#ifndef PAGESPEED_IIS_IIS_REWRITE_DRIVER_FACTORY_H_
-#define PAGESPEED_IIS_IIS_REWRITE_DRIVER_FACTORY_H_
-
-#include <memory>
-
-#include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/base/scoped_ptr.h"
+#include "pagespeed/kernel/base/md5_hasher.h"
 #include "pagespeed/system/system_rewrite_driver_factory.h"
+#include <vector>
 
 namespace net_instaweb {
 
+class AbstractSharedMem;
+class AprMemCache;
+class AsyncCache;
 class CacheInterface;
-class IisConfig;
-class IisMessageHandler;
+class AbstractSharedMem;
+class IisAsyncUrlFetcher;
+class IisProcessContext;
+class IisRewriteOptions;
 class IisServerContext;
-class MessageHandler;
-class ProcessContext;
-class RewriteOptions;
-class ServerContext;
+class IisMessageHandler;
 class SharedCircularBuffer;
+class SharedMemStatistics;
+class SharedMemRefererStatistics;
+class SlowWorker;
 class Statistics;
-class SystemRewriteOptions;
-class SystemThreadSystem;
-class UrlAsyncFetcher;
+class StaticAssetManager;
 
-// RewriteDriverFactory for IIS on Windows.
-//
-// This factory creates RewriteDriver instances for IIS requests and manages:
-// - CurlUrlAsyncFetcher for resource fetching
-// - Cyclone cache for disk caching
-// - IIS-specific server context
-//
-// This is the new IIS-specific factory that lives in pagespeed/iis/.
-// It differs from pagespeed/windows/iis_rewrite_driver_factory.h by:
-// - Using IisServerContext instead of SystemServerContext
-// - Supporting IIS-specific configuration
-// - Integrating with the IIS module lifecycle
 class IisRewriteDriverFactory : public SystemRewriteDriverFactory {
  public:
-  IisRewriteDriverFactory(const ProcessContext& process_context,
-                          SystemThreadSystem* thread_system,
-                          const StringPiece& hostname,
-                          int port);
-  ~IisRewriteDriverFactory() override;
 
-  // Initialize statistics variables
-  void NonStaticInitStats(Statistics* statistics) override;
+  IisRewriteDriverFactory(IisProcessContext* process_context, std::wstring app_pool_name, SystemThreadSystem* thread_system, AbstractSharedMem* shm_runtime);
+  virtual ~IisRewriteDriverFactory();
 
-  // Create an IIS-specific server context
-  IisServerContext* MakeIisServerContext(std::unique_ptr<IisConfig> config);
+  virtual Hasher* NewHasher();
+  virtual UrlAsyncFetcher* AllocateFetcher(SystemRewriteOptions* config);
+  virtual MessageHandler* DefaultHtmlParseMessageHandler();
+  virtual MessageHandler* DefaultMessageHandler();
+  virtual FileSystem* DefaultFileSystem();
+  virtual Timer* DefaultTimer();
+  void StartThreads();
+  //virtual QueuedWorkerPool* CreateWorkerPool(WorkerPoolCategory name);
+  virtual NamedLockManager* DefaultLockManager();
+  virtual NonceGenerator* DefaultNonceGenerator();
+  virtual RewriteOptions* NewRewriteOptions();
 
-  // Apply IIS configuration to default options (filters, etc.)
-  void ApplyIisConfig(const IisConfig& config);
+  ServerContext* NewServerContext();
+  virtual void ShutDown();
 
-  // Apply system-level configuration from IisConfig (cache, fetcher settings)
-  // These settings are in SystemRewriteOptions, not RewriteOptions
-  void ApplySystemConfig(const IisConfig* config);
+  // We use a beacon handler to collect data for critical images,
+  // css, etc., so filters should be configured accordingly.
+  virtual bool UseBeaconResultsInFilters() const {
+    return true;
+  }
 
-  // Shutdown cleanup
-  void ShutDown();
+  virtual void NonStaticInitStats(Statistics* statistics) {
+    InitStats(statistics);
+  }  
+  // Provides an optional hook for customizing the RewriteDriver object
+  // using the options set on it. This is called before
+  // RewriteDriver::AddFilters() and AddPlatformSpecificRewritePasses().
+  virtual void ApplyPlatformSpecificConfiguration(RewriteDriver* driver) {;}
+  // Provides an optional hook for adding rewrite passes to the HTML filter
+  // chain.  This should be used for filters that are specific to a particular
+  // RewriteDriverFactory implementation.
+  virtual void AddPlatformSpecificRewritePasses(RewriteDriver* driver);
+  static void InitStats(Statistics* statistics);
+  IisServerContext* MakeIisServerContext(const GoogleString& site_app_id, unsigned int port);
+  virtual void ShutDownMessageHandlers();
+  virtual void SetCircularBuffer(SharedCircularBuffer* buffer);
+  
+  virtual ServerContext* NewDecodingServerContext();
+	  
 
-  // Getters for hostname and port
-  const GoogleString& hostname() const { return hostname_; }
-  int port() const { return port_; }
+  void SetServerContextMessageHandler(ServerContext* server_context);
+	bool use_per_vhost_statistics() const {
+		return use_per_vhost_statistics_;
+	}
+	void set_use_per_vhost_statistics(bool x) {
+		use_per_vhost_statistics_ = x;
+	}
+	bool use_native_fetcher() {
+		return use_native_fetcher_;
+	}
+	void set_use_native_fetcher(bool x) {
+		use_native_fetcher_ = x;
+	} 
 
- protected:
-  // Create CurlUrlAsyncFetcher for resource fetching
-  UrlAsyncFetcher* AllocateFetcher(SystemRewriteOptions* config) override;
+	int expires();
+	void reset_expired();
+protected:
+  virtual QueuedWorkerPool* CreateWorkerPool(WorkerPoolCategory pool,
+                                             StringPiece name);
 
-  // Pure virtual implementations
-  MessageHandler* DefaultHtmlParseMessageHandler() override;
-  MessageHandler* DefaultMessageHandler() override;
-  ServerContext* NewDecodingServerContext() override;
+  virtual void ShutDownFetchers();
+private:
+  std::wstring app_pool_name_;
+  bool use_per_vhost_statistics_;
+  bool use_native_fetcher_;
+  GoogleString site_app_id_;
 
-  // Override to return SystemRewriteOptions (required for SystemServerContext)
-  RewriteOptions* NewRewriteOptions() override;
-
-  // Override DefaultLockManager to provide a ThreadSafeLockManager for IIS.
-  // IIS is single-process multi-threaded (like Envoy), so ThreadSafeLockManager
-  // provides appropriate in-process thread coordination.
-  NamedLockManager* DefaultLockManager() override;
-
-  // Override DefaultAsyncUrlFetcher to provide a CurlUrlAsyncFetcher for IIS.
-  UrlAsyncFetcher* DefaultAsyncUrlFetcher() override;
-
-  // Override DefaultNonceGenerator to use Windows-compatible random generation.
-  // SystemRewriteDriverFactory::DefaultNonceGenerator() tries to open /dev/urandom
-  // which doesn't exist on Windows.
-  NonceGenerator* DefaultNonceGenerator() override;
-
-  // Override SetupCaches to initialize ProxyFetchFactory after cache setup.
-  // This follows the Apache pattern where ProxyFetchFactory is created during
-  // cache initialization.
-  void SetupCaches(ServerContext* server_context) override;
-
-  // Wire SharedCircularBuffer to message handlers (called during RootInit).
-  void SetCircularBuffer(SharedCircularBuffer* buffer) override;
-
-  // Disconnect message handlers from SharedCircularBuffer during shutdown.
-  void ShutDownMessageHandlers() override;
-
- private:
+  // Owned by the superclass.
+  // TODO(jefftk): merge the nginx and apache ways of doing this.
+  SharedCircularBuffer* iis_shared_circular_buffer_;
   IisMessageHandler* iis_message_handler_;
   IisMessageHandler* iis_html_parse_message_handler_;
-  GoogleString hostname_;
-  int port_;
-
+  typedef std::set<IisMessageHandler*> IisMessageHandlerSet;
+  IisMessageHandlerSet server_context_message_handlers_;
+  std::vector<IisAsyncUrlFetcher*> native_fetchers_;
+  bool shut_down_;
+  time_t created_at_;
   DISALLOW_COPY_AND_ASSIGN(IisRewriteDriverFactory);
 };
 
-}  // namespace net_instaweb
+} // namespace net_instaweb
 
-#endif  // PAGESPEED_IIS_IIS_REWRITE_DRIVER_FACTORY_H_
+#endif  // IIS_REWRITE_DRIVER_FACTORY_H_

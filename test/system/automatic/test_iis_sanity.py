@@ -71,7 +71,7 @@ class TestIisSanity:
     @pytest.mark.iis_only
     def test_admin_endpoint(self, client: PageSpeedClient, server_config):
         """Admin endpoint should respond."""
-        response = client.get(server_config.admin_path)
+        response = client.get(server_config.admin_path.rstrip("/") + "/")
         # May return 200 or 403 depending on auth config
         assert response.status in (200, 403), f"Unexpected status: {response.status}"
 

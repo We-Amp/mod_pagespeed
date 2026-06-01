@@ -3,113 +3,76 @@ load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
 licenses(["notice"])  # Apache 2
 
 # =============================================================================
-# IIS Native Module for PageSpeed
+# IIS Native Module for PageSpeed — IISpeed adoption
 # =============================================================================
-# This module provides direct C++ integration with IIS (no C ABI boundary).
 # Build with: bazel build --config=windows --config=clang-cl //pagespeed/iis:pagespeed_iis
 
 # =============================================================================
-# Platform-independent utilities (can be tested on Linux)
+# Core IIS module library (IISpeed-based)
 # =============================================================================
 
-# HTTP chunked transfer encoding decoder
-# This is platform-independent and can be built/tested on any platform.
-cc_library(
-    name = "iis_dechunker",
-    srcs = ["iis_dechunker.cc"],
-    hdrs = ["iis_dechunker.h"],
-    visibility = ["//visibility:public"],
-    deps = [
-        "//pagespeed/kernel/base:pagespeed_base",
-    ],
-)
-
-# Content decoder for gzip/deflate
-# This is platform-independent and can be built/tested on any platform.
-cc_library(
-    name = "iis_content_decoder",
-    srcs = ["iis_content_decoder.cc"],
-    hdrs = ["iis_content_decoder.h"],
-    visibility = ["//visibility:public"],
-    deps = [
-        "//pagespeed/kernel/base:pagespeed_base",
-        "@envoy//bazel:zlib",
-    ],
-)
-
-# Streaming fetch for HTML flushing support
-# Platform-independent version for testing on Linux (uses mock IIS)
-# The real implementation is included in iis_module for Windows.
-cc_library(
-    name = "iis_streaming_fetch",
-    srcs = ["iis_streaming_fetch.cc"],
-    hdrs = [
-        "iis_streaming_fetch.h",
-        "iis_flush_notification.h",
-    ],
-    testonly = True,  # Uses mock_iis which is testonly
-    visibility = ["//visibility:public"],
-    deps = [
-        "//net/instaweb/http",
-        "//pagespeed/kernel/base:pagespeed_base",
-        "//test/pagespeed/iis:mock_iis",
-    ],
-)
-
-# =============================================================================
-# IIS-specific module (Windows only)
-# =============================================================================
-
-# Core IIS module library
 cc_library(
     name = "iis_module",
     srcs = [
-        "iis_admin_handler.cc",
-        "iis_async_fetch.cc",
-        "iis_base_fetch.cc",
-        "iis_beacon_handler.cc",
-        "iis_config.cc",
-        "iis_content_decoder.cc",
-        "iis_dechunker.cc",
-        "iis_event_log.cc",
-        "iis_http_module.cc",
-        "iis_inplace_resource_handler.cc",
-        "iis_message_handler.cc",
-        "iis_module_factory.cc",
-        "iis_perf_counters.cc",
-        "iis_rewrite_driver_factory.cc",
-        "iis_server_context.cc",
-        "iis_streaming_fetch.cc",
-        "iis_utils.cc",
-        "license_validator.cc",
+        # IISpeed module sources
+        "iis_http_module.cpp",
+        "iis_module_factory.cpp",
+        "iis_module_request_context.cpp",
+        "iis_module_base_fetch.cpp",
+        "iis_module_misc.cpp",
+        # IISpeed shared sources
+        "iis_process_context.cpp",
+        "iis_request_context.cpp",
+        "iis_psol_request_context.cpp",
+        "iis_server_context.cpp",
+        "iis_message_handler.cpp",
+        "log_message_handler.cpp",
+        "iis_rewrite_driver_factory.cpp",
+        "iis_rewrite_options.cpp",
+        "iis_configuration.cpp",
+        "iis_global_constants.cpp",
+        "iis_base_fetch.cpp",
+        "iis_async_url_fetcher.cpp",
+        "asyncwinhttp.cpp",
+        "iis_misc.cpp",
+        # IISpeed utilities
+        "util.cpp",
+        "FileCheck.cpp",
     ],
     hdrs = [
-        "iis_admin_handler.h",
-        "iis_async_fetch.h",
-        "iis_base_fetch.h",
-        "iis_beacon_handler.h",
-        "iis_config.h",
-        "iis_content_decoder.h",
-        "iis_dechunker.h",
-        "iis_event_log.h",
-        "iis_flush_notification.h",
+        # IISpeed headers
         "iis_http_module.h",
-        "iis_inplace_resource_handler.h",
-        "iis_message_handler.h",
         "iis_module_factory.h",
-        "iis_perf_counters.h",
-        "iis_rewrite_driver_factory.h",
+        "iis_module_request_context.h",
+        "iis_module_base_fetch.h",
+        "iis_module_misc.h",
+        "iis_process_context.h",
+        "iis_request_context.h",
+        "iis_psol_request_context.h",
         "iis_server_context.h",
-        "iis_streaming_fetch.h",
-        "iis_utils.h",
-        "license_validator.h",
+        "iis_message_handler.h",
+        "log_message_handler.h",
+        "iis_rewrite_driver_factory.h",
+        "iis_rewrite_options.h",
+        "iis_configuration.h",
+        "iis_global_constants.h",
+        "iis_base_fetch.h",
+        "iis_async_url_fetcher.h",
+        "asyncwinhttp.h",
+        "dechunker.h",
+        "iis_misc.h",
+        "iis_debugging_string_writer.h",
+        "util.h",
+        "FileCheck.h",
     ],
     defines = [
         "PAGESPEED_IIS_MODULE",
+        "_WINSOCKAPI_",
     ],
     target_compatible_with = ["@platforms//os:windows"],
     visibility = ["//visibility:public"],
     deps = [
+        "//net/instaweb:net_instaweb_lib",
         "//net/instaweb/http",
         "//net/instaweb/rewriter",
         "//pagespeed/automatic",
@@ -119,14 +82,24 @@ cc_library(
         "//pagespeed/kernel/http",
         "//pagespeed/kernel/image",
         "//pagespeed/kernel/sharedmem",
-        "//pagespeed/system:curl_fetcher",
+        "//pagespeed/kernel/thread:win_thread",
         "//pagespeed/system:system_windows",
-        "@envoy//bazel:zlib",  # For content decompression (gzip/deflate)
+        "@com_googlesource_code_re2//:re2",
+        "@zlib_ng//:zlib_ng",
     ],
+    linkopts = select({
+        "@platforms//os:windows": [
+            "winhttp.lib",
+            "advapi32.lib",
+            "shlwapi.lib",
+            "ws2_32.lib",
+            "bcrypt.lib",
+        ],
+        "//conditions:default": [],
+    }),
 )
 
 # IIS module as shared library (DLL)
-# Uses cc_binary with linkshared=True to produce pagespeed_iis.dll
 cc_binary(
     name = "pagespeed_iis.dll",
     srcs = ["dll_main.cc"],
@@ -135,24 +108,23 @@ cc_binary(
     target_compatible_with = ["@platforms//os:windows"],
     visibility = ["//visibility:public"],
     deps = [":iis_module"],
-    # Export RegisterModule for IIS native module loading
     linkopts = select({
         "@platforms//os:windows": ["/EXPORT:RegisterModule"],
         "//conditions:default": [],
     }),
 )
 
-# For now, also provide a static library target for testing
-cc_library(
-    name = "iis_module_static",
-    visibility = ["//visibility:public"],
-    deps = [":iis_module"],
-)
-
 # Performance counter manifest for Windows perfmon.exe integration
-# See iis_perf_counters.cc for installation instructions
 filegroup(
     name = "perf_counter_manifest",
     srcs = ["pagespeed_counters.man"],
+    visibility = ["//visibility:public"],
+)
+
+# Platform-independent dechunker (header-only).
+# Can be tested on any platform.
+cc_library(
+    name = "iis_dechunker",
+    hdrs = ["dechunker.h"],
     visibility = ["//visibility:public"],
 )

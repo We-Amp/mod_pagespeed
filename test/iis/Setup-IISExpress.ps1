@@ -198,7 +198,7 @@ $ModuleSection
         </modules>
 
         <handlers>
-            <add name="StaticFile" path="*" verb="*" modules="StaticFileModule,DefaultDocumentModule,DirectoryListingModule" resourceType="Either" requireAccess="Read" />
+            <add name="StaticFile" path="*" verb="*" modules="StaticFileModule,DefaultDocumentModule,DirectoryListingModule" resourceType="Unspecified" requireAccess="Read" />
         </handlers>
 
         <staticContent>
