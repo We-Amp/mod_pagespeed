@@ -23,6 +23,7 @@
 #define NET_INSTAWEB_REWRITER_PUBLIC_SERVER_CONTEXT_H_
 
 #include <cstddef>  // for size_t
+#include <memory>
 #include <set>
 #include <utility>
 #include <vector>
@@ -43,7 +44,6 @@
 #include "pagespeed/kernel/base/hasher.h"
 #include "pagespeed/kernel/base/md5_hasher.h"
 #include "pagespeed/kernel/base/ref_counted_ptr.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_system.h"
@@ -578,6 +578,13 @@ class ServerContext {
   // be set to 'false' as that command is intended only for reosurces, not
   // for HTML.
   virtual bool ProxiesHtml() const = 0;
+
+  // the design record: whether the active license grants the agent_optimize entitlement.
+  // The base context (tests / PSOL-core, which have no licensing) returns false;
+  // SystemServerContext overrides it with the real, license-derived value. The
+  // shared AgentOptimizeVaryFilter dispatches through this virtual so it never
+  // has to downcast to the system layer.
+  virtual bool IsAgentOptimizeEntitled() const { return false; }
 
   // Makes a new RequestProperties.
   RequestProperties* NewRequestProperties();

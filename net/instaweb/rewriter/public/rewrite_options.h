@@ -251,6 +251,7 @@ class RewriteOptions {
   static const char kAcceptInvalidSignatures[];
   static const char kAccessControlAllowOrigins[];
   static const char kAddOptionsToUrls[];
+  static const char kAgentOptimize[];
   static const char kAllowLoggingUrlsInLogRecord[];
   static const char kAllowOptionsToBeSetByCookies[];
   static const char kAllowVaryOn[];
@@ -1925,6 +1926,13 @@ class RewriteOptions {
 
   void set_respect_vary(bool x) { set_option(x, &respect_vary_); }
   bool respect_vary() const { return respect_vary_.value(); }
+
+  // the design record: agent_optimize negotiation toggle (OFF by default). On 1.1 this
+  // only enables Accept: text/markdown recognition + Vary: Accept on HTML; it
+  // never changes the body (no markdown render). Gated additionally by the
+  // agent_optimize license entitlement at request time.
+  void set_agent_optimize(bool x) { set_option(x, &agent_optimize_); }
+  bool agent_optimize() const { return agent_optimize_.value(); }
 
   void set_respect_x_forwarded_proto(bool x) {
     set_option(x, &respect_x_forwarded_proto_);
@@ -3677,6 +3685,7 @@ class RewriteOptions {
   Option<bool> lowercase_html_names_;
   Option<bool> always_rewrite_css_;  // For tests/debugging.
   Option<bool> respect_vary_;
+  Option<bool> agent_optimize_;  // the design record
   Option<bool> respect_x_forwarded_proto_;
   Option<bool> flush_html_;
   // If set to true, ProxyFetch will request a flush on its RewriteDriver when

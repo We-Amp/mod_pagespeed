@@ -82,14 +82,17 @@
       </span>
       <span class="topbar-badge">{consoleLabel}</span>
       {#if showLicenseBanner}
-        <span class="topbar-pill-unlicensed" aria-label="License status: not licensed">Not Licensed</span>
+        <!-- the design record: soft enforcement — amber warning, not a red error. -->
+        <span class="topbar-pill-unlicensed" aria-label="License status: unlicensed (optimization running)">Unlicensed</span>
       {/if}
     </span>
   </header>
 
   <!-- License warning banner -->
+  <!-- the design record: soft enforcement — amber warning, not a red error. Optimization
+       keeps running while unlicensed; this only nudges toward activating. -->
   {#if showLicenseBanner}
-    <div class="license-banner" role="alert">
+    <div class="license-banner" role="status">
       <svg class="license-banner-icon" width="18" height="18" viewBox="0 0 24 24"
            fill="none" stroke="currentColor" stroke-width="2"
            stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -98,7 +101,7 @@
         <line x1="12" y1="17" x2="12.01" y2="17"/>
       </svg>
       <span class="license-banner-text">
-        <strong>No active license.</strong>
+        <strong>Unlicensed — optimization is running; activate a license to remove the warning.</strong>
         <a href="#/license" class="license-banner-link"
           >Purchase a license or apply a key in the License section&nbsp;&rarr;</a>
       </span>

@@ -869,6 +869,7 @@ TEST_F(RewriteOptionsTest, LookupOptionByNameTest) {
       RewriteOptions::kAcceptInvalidSignatures,
       RewriteOptions::kAccessControlAllowOrigins,
       RewriteOptions::kAddOptionsToUrls,
+      RewriteOptions::kAgentOptimize,
       RewriteOptions::kAllowLoggingUrlsInLogRecord,
       RewriteOptions::kAllowOptionsToBeSetByCookies,
       RewriteOptions::kAllowVaryOn,
@@ -3576,6 +3577,48 @@ TEST_F(RewriteOptionsTest, SupportSaveData) {
   EXPECT_FALSE(options_.HasValidSaveDataQualities());
   EXPECT_TRUE(options_.AllowVaryOnSaveData());
   EXPECT_FALSE(options_.SupportSaveData());
+}
+
+// the design record P4: the agent_optimize toggle round-trips and merges.
+TEST_F(RewriteOptionsTest, AgentOptimizeOptionRoundTrip) {
+  EXPECT_FALSE(options_.agent_optimize());  // OFF by default.
+  options_.set_agent_optimize(true);
+  EXPECT_TRUE(options_.agent_optimize());
+
+  NullMessageHandler handler;
+  GoogleString msg;
+  RewriteOptions fresh(&thread_system_);
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            fresh.ParseAndSetOptionFromName1("AgentOptimize", "on", &msg,
+                                             &handler));
+  EXPECT_TRUE(fresh.agent_optimize());
+  EXPECT_TRUE(msg.empty());
+
+  // Merge propagates an explicitly-set value.
+  RewriteOptions dest(&thread_system_);
+  EXPECT_FALSE(dest.agent_optimize());
+  dest.Merge(fresh);
+  EXPECT_TRUE(dest.agent_optimize());
+}
+
+// the design record P4 config-parity: 2.0-only render directives are rejected at parse
+// time on 1.1 (no headless browser) with a helpful message — one shared
+// rejection point, so all four ports error identically.
+TEST_F(RewriteOptionsTest, RenderOnlyDirectivesRejectedOn11) {
+  NullMessageHandler handler;
+  for (const char* name :
+       {"AgentMarkdownRender", "AgentRenderTimeout", "AgentRenderAllowHosts"}) {
+    GoogleString msg;
+    EXPECT_EQ(RewriteOptions::kOptionValueInvalid,
+              options_.ParseAndSetOptionFromName1(name, "x", &msg, &handler))
+        << name;
+    EXPECT_NE(GoogleString::npos, msg.find("2.0")) << name << ": " << msg;
+  }
+  // The real toggle is NOT mistaken for a render-only directive.
+  GoogleString ok_msg;
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromName1("AgentOptimize", "on", &ok_msg,
+                                                &handler));
 }
 
 }  // namespace net_instaweb

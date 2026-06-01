@@ -978,6 +978,14 @@ apr_status_t InstawebHandler::instaweb_handler(request_rec* request) {
     return DECLINED;  // URL not valid, let someone other module handle.
   }
 
+  // Loopback determination for StrictAdminAccess (opt-in, default off). Uses
+  // the validated client connection IP (mod_remoteip-aware useragent_ip), NOT
+  // the client-controlled Host header. When StrictAdminAccess is off this value
+  // is ignored by the *AccessAllowed overloads below, preserving today's
+  // default-open behavior exactly.
+  const bool client_is_loopback =
+      IsLoopbackClientIp(ClientIpForAdminWarning(request));
+
   if (global_config->proxy_all_requests_mode() && gurl.IsWebValid()) {
     InstawebHandler instaweb_handler(request);
     // TODO(morlovich): Still export stats and the like?
@@ -986,7 +994,7 @@ apr_status_t InstawebHandler::instaweb_handler(request_rec* request) {
   }
 
   if (request_handler_str == kStatisticsHandler &&
-      global_config->StatisticsAccessAllowed(gurl)) {
+      global_config->StatisticsAccessAllowed(gurl, client_is_loopback)) {
     WarnIfNonLoopbackAdminAccess(ClientIpForAdminWarning(request),
                                  AdminHandlerFamily::kStatistics,
                                  kStatisticsHandler, message_handler);
@@ -997,7 +1005,8 @@ apr_status_t InstawebHandler::instaweb_handler(request_rec* request) {
         instaweb_handler.MakeFetch(false /* unbuffered */, "local-stats"));
     return APACHE_OK;
   } else if (request_handler_str == kGlobalStatisticsHandler &&
-             global_config->GlobalStatisticsAccessAllowed(gurl)) {
+             global_config->GlobalStatisticsAccessAllowed(gurl,
+                                                          client_is_loopback)) {
     WarnIfNonLoopbackAdminAccess(ClientIpForAdminWarning(request),
                                  AdminHandlerFamily::kGlobalStatistics,
                                  kGlobalStatisticsHandler, message_handler);
@@ -1008,7 +1017,7 @@ apr_status_t InstawebHandler::instaweb_handler(request_rec* request) {
         instaweb_handler.MakeFetch(false /* unbuffered */, "global-stats"));
     return APACHE_OK;
   } else if (request_handler_str == kAdminHandler &&
-             global_config->AdminAccessAllowed(gurl)) {
+             global_config->AdminAccessAllowed(gurl, client_is_loopback)) {
     WarnIfNonLoopbackAdminAccess(ClientIpForAdminWarning(request),
                                  AdminHandlerFamily::kAdmin, kAdminHandler,
                                  message_handler);
@@ -1034,7 +1043,8 @@ apr_status_t InstawebHandler::instaweb_handler(request_rec* request) {
         request_body);
     ret = APACHE_OK;
   } else if (request_handler_str == kGlobalAdminHandler &&
-             global_config->GlobalAdminAccessAllowed(gurl)) {
+             global_config->GlobalAdminAccessAllowed(gurl,
+                                                     client_is_loopback)) {
     WarnIfNonLoopbackAdminAccess(ClientIpForAdminWarning(request),
                                  AdminHandlerFamily::kGlobalAdmin,
                                  kGlobalAdminHandler, message_handler);
@@ -1075,7 +1085,7 @@ apr_status_t InstawebHandler::instaweb_handler(request_rec* request) {
         instaweb_handler.MakeFetch(true /* buffered */, "purge"));
     ret = APACHE_OK;
   } else if (request_handler_str == kConsoleHandler &&
-             global_config->ConsoleAccessAllowed(gurl)) {
+             global_config->ConsoleAccessAllowed(gurl, client_is_loopback)) {
     WarnIfNonLoopbackAdminAccess(ClientIpForAdminWarning(request),
                                  AdminHandlerFamily::kConsole, kConsoleHandler,
                                  message_handler);
@@ -1086,7 +1096,7 @@ apr_status_t InstawebHandler::instaweb_handler(request_rec* request) {
         instaweb_handler.MakeFetch(false /* unbuffered */, "console"));
     ret = APACHE_OK;
   } else if (request_handler_str == kMessageHandler &&
-             global_config->MessagesAccessAllowed(gurl)) {
+             global_config->MessagesAccessAllowed(gurl, client_is_loopback)) {
     WarnIfNonLoopbackAdminAccess(ClientIpForAdminWarning(request),
                                  AdminHandlerFamily::kMessages, kMessageHandler,
                                  message_handler);
@@ -1105,9 +1115,6 @@ apr_status_t InstawebHandler::instaweb_handler(request_rec* request) {
 
     write_handler_response(output, request, kContentTypeJavascript, "public");
     ret = APACHE_OK;
-  } else if (!server_context->ShouldOptimize()) {
-    // License not active — skip all optimization but allow admin pages above.
-    return DECLINED;
   } else if (strcmp(request->handler, kGenerateResponseWithOptionsHandler) ==
                  0 &&
              request->uri != nullptr) {

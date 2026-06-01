@@ -30,7 +30,8 @@ void PrintUsage(const char* argv0) {
   std::cerr << "Usage: " << argv0
             << " --key <path> --sub <email>"
                " [--exp <unix_timestamp> | --exp-duration <seconds>]"
-               " [--products <comma-separated>]\n"
+               " [--products <comma-separated>]"
+               " [--entitlements <comma-separated>]\n"
             << "\n"
             << "  --key <path>              REQUIRED. Path to 32-byte Ed25519 "
                "seed file.\n"
@@ -40,7 +41,9 @@ void PrintUsage(const char* argv0) {
             << "  --exp-duration <seconds>  Expiry relative to now (mutually "
                "exclusive with --exp).\n"
             << "  --products <list>         Comma-separated product list "
-               "(default: mps1,the 2.0 optimizer line).\n";
+               "(default: mps1,the 2.0 optimizer line).\n"
+            << "  --entitlements <list>     Comma-separated feature "
+               "entitlements.\n";
 }
 
 std::vector<GoogleString> SplitComma(const char* s) {
@@ -61,6 +64,7 @@ int main(int argc, char* argv[]) {
   const char* key_path = nullptr;
   const char* sub = nullptr;
   const char* products_str = nullptr;
+  const char* entitlements_str = nullptr;
   int64_t exp = 0;
   bool has_exp = false;
   int64_t exp_duration = 0;
@@ -79,6 +83,8 @@ int main(int argc, char* argv[]) {
       has_exp_duration = true;
     } else if (strcmp(argv[i], "--products") == 0 && i + 1 < argc) {
       products_str = argv[++i];
+    } else if (strcmp(argv[i], "--entitlements") == 0 && i + 1 < argc) {
+      entitlements_str = argv[++i];
     } else {
       std::cerr << "Error: unknown flag '" << argv[i] << "'\n\n";
       PrintUsage(argv[0]);
@@ -139,6 +145,12 @@ int main(int argc, char* argv[]) {
     payload.products = SplitComma(products_str);
   } else {
     payload.products = {"mps1", "the 2.0 optimizer line"};
+  }
+
+  // the design record: entitlements have NO default — absent = empty = no gated features
+  // (opt-in safe default, unlike products).
+  if (entitlements_str != nullptr) {
+    payload.entitlements = SplitComma(entitlements_str);
   }
 
   if (has_exp) {

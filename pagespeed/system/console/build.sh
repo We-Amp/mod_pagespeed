@@ -39,3 +39,9 @@ echo "Built dist/index.html (${SIZE} bytes)"
 # Copy to the checked-in location for Bazel
 cp dist/index.html admin_console.html
 echo "Copied to admin_console.html for Bazel embedding"
+
+# Record a hash of the build-determining source so CI's drift-guard can detect
+# a stale checked-in bundle without an (unreproducible) rebuild. The version
+# stamp is intentionally excluded. See check-no-drift.sh.
+bash "$SCRIPT_DIR/console-srchash.sh" > admin_console.html.srchash
+echo "Wrote admin_console.html.srchash"

@@ -8,26 +8,36 @@ load(":google_sparsehash.bzl", "google_sparsehash_build_rule")
 load(":drp.bzl", "drp_build_rule")
 load(":giflib.bzl", "giflib_build_rule")
 load(":optipng.bzl", "optipng_build_rule")
-load(":libjpeg_turbo.bzl", "libjpeg_turbo_build_rule")
 load(":apr.bzl", "apr_build_rule")
 load(":aprutil.bzl", "aprutil_build_rule")
 load(":cyclone.bzl", "cyclone_build_rule")
 load(":ed25519.bzl", "ed25519_build_rule")
 
-ENVOY_COMMIT = "4be216785e2ddfc5e3d6297a3afa109f7769bb0a"
-ENVOY_SHA = "2a24db9331e0ffe4679964d4747655a31155d525b71fc6ca2fcd731d56a65f9b"
+# the design record / CVE matcher: every vendored C/C++ dep below carries a CPE +
+# release_date annotation in tools/dependency/cpe-map.yaml, scanned daily
+# against NVD by tools/dependency/cve_scan.py. tools/dependency/validate-deps.py
+# fails CI on any dep here that lacks an entry (or an explicit cpe: "N/A" +
+# justification) — a new C/C++ dep cannot land unscanned. When you add or bump a
+# dep, update its cpe-map.yaml release_date.
+
+ENVOY_COMMIT = "5afe27fb338b16d5bb06b3a7198bcd581b4e3dee"  # v1.37.2 - CVE-2026-26308/09/10/11/30 cluster (2026-03-10)
+ENVOY_SHA = "1e09d596cee1ee1ca12b5dacb59ecf6459bba873ffa0c05ffd0f06b2ffebd465"
 
 # Standalone zlib-ng — replaces @envoy//bazel:zlib for non-Envoy builds.
 ZLIB_NG_VERSION = "2.3.2"
 ZLIB_NG_SHA = "6a0561b50b8f5f6434a6a9e667a67026f2b2064a1ffa959c6b2dae320161c2a8"
 
 # Standalone BoringSSL — previously only an Envoy transitive dep.
-BORINGSSL_VERSION = "0.20250514.0"
-BORINGSSL_SHA = "71ef1eb84a035a033ad55867f89a141ddb2e5c5829dd4035ea7803bfff0257ed"
+# Bumped May 2026: ~12 months of upstream drift (post-quantum + hardening rolls).
+BORINGSSL_VERSION = "0.20260508.0"
+BORINGSSL_SHA = "de3371d3fe085afd34778a4c988fb7840b9c92cb21504e674f33ebefd98edc00"
 
-# Phase 4: Standalone gRPC — pinned to exact Envoy version for ABI compatibility.
-GRPC_VERSION = "1.76.0"
-GRPC_SHA = "0af37b800953130b47c075b56683ee60bdc3eda3c37fc6004193f5b569758204"
+# Phase 4: Standalone gRPC — pinned for ABI compatibility with Envoy v1.37.2.
+# Bumped May 2026 from 1.76.0 (~2 minor releases of upstream drift; the 1.78
+# series picked up the `<string>` / `<limits>` / `<algorithm>` include cleanups
+# we previously carried in bazel/grpc.patch — 3 hunks dropped on re-port).
+GRPC_VERSION = "1.78.1"
+GRPC_SHA = "961a44a2a5a50670e58f5e887c17fe70529253da23802245326d681f6d8d1ba6"
 
 # Standalone googletest — previously only an Envoy transitive dep.
 GOOGLETEST_VERSION = "1.17.0"
@@ -46,8 +56,8 @@ HIREDIS_COMMIT = "1.3.0"  # Updated Jan 2026 - major version upgrade
 HIREDIS_SHA = "25cee4500f359cf5cad3b51ed62059aadfc0939b05150c1f19c7e2829123631c"
 JSONCPP_COMMIT = "1.9.6"  # Updated Jan 2026
 JSONCPP_SHA = "f93b6dd7ce796b13d02c108bc9f79812245a82e577581c4c9aabe57075c90ea2"
-LIBPNG_COMMIT = "1.6.54"  # Updated Jan 2026 - security fixes
-LIBPNG_SHA = "ba7efce137409079989df4667706c339bebfbb10e9f413474718012a13c8cd4c"
+LIBPNG_COMMIT = "1.6.58"  # Updated May 2026 - 4 point releases of parser hardening
+LIBPNG_SHA = "a9d4df463d36a6e5f9c29bd6f4967312d17e996c1854f3511f833924eb1993cf"
 LIBWEBP_COMMIT = "1.5.0"  # Updated Mar 2026 - CVE-2023-4863 fix (heap buffer overflow)
 LIBWEBP_SHA = "668c9aba45565e24c27e17f7aaf7060a399f7f31dba6c97a044e1feacb930f37"
 GOOGLE_SPARSEHASH_COMMIT = "6ff8809259d2408cb48ae4fa694e80b15b151af3"
@@ -60,8 +70,11 @@ GIFLIB_COMMIT = "5.2.2"  # Updated Jan 2026
 GIFLIB_SHA = "be7ffbd057cadebe2aa144542fd90c6838c6a083b5e8a9048b8ee3b66b29d5fb"
 OPTIPNG_COMMIT = "0.7.8"  # Updated Jan 2026 - security fix for GIF decoder buffer overflow (CVE)
 OPTIPNG_SHA = "25a3bd68481f21502ccaa0f4c13f84dcf6b20338e4c4e8c51f2cefbd8513398c"
-LIBJPEG_TURBO_COMMIT = "d1f5f2393e0d51f840207342ae86e55a86443288"  # v3.1.0 - Updated Mar 2026 (was July 2020)
-LIBJPEG_TURBO_SHA = ""  # Chromium gitiles archives have non-deterministic checksums
+# Upstream libjpeg-turbo tag — May 2026 bump from Chromium-fork v3.1.0 to upstream v3.1.4.1.
+# Native Bazel BUILD file at bazel/libjpeg_turbo.BUILD emulates configure_file() for
+# src/jconfig.h, src/jconfigint.h, src/jversion.h via sed-based genrules.
+LIBJPEG_TURBO_VERSION = "3.1.4.1"
+LIBJPEG_TURBO_SHA = "a7da42b640377c2a9a9665e2c4b0ea60cd5599afb48c2521e6df0c9dc9d15a25"
 # APR 1.7.x branch head - Updated Feb 2026
 APR_COMMIT = "d7a4f5be56969ebb5d2f9d093e17eb39dd016693"
 APR_SHA = "5c56af0a8ad7dee32dc381620496f6ebbaa9bf64a470a4ad4fdb0eed84e87fc7"
@@ -73,10 +86,10 @@ APRUTIL_SHA = "4ce5fead950705f6b33dcac5b7fae45f4295b80cb75a6a1378baaec896fd4fc1"
 # Requires C++23 - wrapper provides C ABI for C++20 consumers
 # Not pinned during development; pinned to a specific commit at release time.
 
-# ModPageSpeed 2.0 - canonical license crypto code (Ed25519 token/verifier/signer)
-# Used as a Bazel dependency to share license verification code across products.
-# Compiled with -DPAGESPEED_LICENSE_NAMESPACE=net_instaweb to match 1.1's namespace.
-MODPAGESPEED2_COMMIT = "b97ebc3206e8c4cfc816ff241fbd25fc984eb984"
+# Cyclone Cache - pinned at release time. This commit carries the
+# fork-safe Cache::stop() fix that stops Apache children
+# and the nginx master hanging in Cyclone teardown on graceful recycle/reload.
+CYCLONE_COMMIT = "9ab0305fa5b78ba1a19025f0ac6251ba89981919"
 
 # Libevent - cross-platform event notification library
 # Used by LibeventDispatcher for standalone event loop (Apache deployments)
@@ -84,8 +97,8 @@ LIBEVENT_VERSION = "2.1.12-stable"
 LIBEVENT_SHA = "92e6de1be9ec176428fd2367677e61ceffc2ee1cb119035037a27d346b0403bb"
 
 # libcurl - HTTP client library (built from source)
-LIBCURL_VERSION = "8.18.0"
-LIBCURL_SHA = "be4b1e146ddd84bbb57f081e5c7238eee794e40563976ba2c89a44c433da219c"
+LIBCURL_VERSION = "8.20.0"
+LIBCURL_SHA = "738fe8ae973a6f171b4e7cf7146edd19894e19f09cd45a3b673ebdba3549a435"
 
 # libmemcached - memcached client library (built from source)
 # Using awesomized/libmemcached fork which is actively maintained
@@ -101,8 +114,8 @@ filegroup(
 )
 """
 
-_ABSEIL_VERSION = "20260107.0"
-_ABSEIL_SHA = "4c124408da902be896a2f368042729655709db5e3004ec99f57e3e14439bc1b2"
+_ABSEIL_VERSION = "20260107.1"
+_ABSEIL_SHA = "4314e2a7cbac89cac25a2f2322870f343d81579756ceff7f431803c2c9090195"
 _ABSEIL_PATCHES = [
     "//bazel:abseil.patch",
     "//bazel:abseil_nullability.patch",
@@ -140,6 +153,10 @@ def mod_pagespeed_dependencies():
         strip_prefix = "boringssl-%s" % BORINGSSL_VERSION,
         url = "https://github.com/google/boringssl/archive/%s.tar.gz" % BORINGSSL_VERSION,
         sha256 = BORINGSSL_SHA,
+        # Add CRYPTO_thread_local_cleanup() so pagespeed_iis.dll can release
+        # the BoringSSL TLS slot on DLL unload (issue one change).
+        patches = ["@mod_pagespeed//bazel:boringssl_dll_unload_tls_cleanup.patch"],
+        patch_args = ["-p1"],
     )
 
     # Phase 2: Standalone libevent
@@ -193,8 +210,11 @@ filegroup(
     # Pre-declare @re2 to prevent grpc_extra_deps()/protobuf from creating
     # a duplicate alongside @com_googlesource_code_re2 (from grpc_deps).
     # Both names must resolve to the same version.
-    _RE2_VERSION = "2022-04-01"
-    _RE2_SHA = "1ae8ccfdb1066a731bba6ee0881baad5efd2cd661acd9569b689f2586e1a50e9"
+    # Bumped May 2026 from 2022-04-01 (~4 years of upstream drift); parity
+    # with MPS 2.0 which already runs this version. The Windows strict-deps
+    # fallout from this bump is fixed independently in test/pagespeed/kernel/util/BUILD.
+    _RE2_VERSION = "2025-11-05"
+    _RE2_SHA = "87f6029d2f6de8aa023654240a03ada90e876ce9a4676e258dd01ea4c26ffd67"
     for re2_name in ["com_googlesource_code_re2", "re2"]:
         http_archive(
             name = re2_name,
@@ -336,10 +356,10 @@ cc_library(
 
     http_archive(
         name = "libjpeg_turbo",
-        url = "https://chromium.googlesource.com/chromium/deps/libjpeg_turbo/+archive/%s.tar.gz" % LIBJPEG_TURBO_COMMIT,
-        build_file_content = libjpeg_turbo_build_rule,
-        # NOTE: sha256 disabled because Chromium's gitiles generates archives dynamically
-        # with non-deterministic checksums.
+        strip_prefix = "libjpeg-turbo-%s" % LIBJPEG_TURBO_VERSION,
+        url = "https://github.com/libjpeg-turbo/libjpeg-turbo/archive/refs/tags/%s.tar.gz" % LIBJPEG_TURBO_VERSION,
+        build_file = "//bazel:libjpeg_turbo.BUILD",
+        sha256 = LIBJPEG_TURBO_SHA,
     )
 
     http_archive(
@@ -364,16 +384,8 @@ cc_library(
     git_repository(
         name = "cyclone",
         remote = "https://github.com/We-Amp/cyclone-cache.git",
-        branch = "main",
+        commit = CYCLONE_COMMIT,
         build_file_content = cyclone_build_rule,
-    )
-
-    # ModPageSpeed 2.0 - canonical license crypto (Ed25519 verification)
-    git_repository(
-        name = "modpagespeed2",
-        remote = "https://github.com/We-Amp/pagespeed-optimizer.git",
-        commit = MODPAGESPEED2_COMMIT,
-        shallow_since = "2026-03-31",
     )
 
     # libcurl source - built via cmake in //bazel:curl
@@ -383,7 +395,7 @@ cc_library(
         url = "https://github.com/curl/curl/archive/refs/tags/curl-%s.tar.gz" % LIBCURL_VERSION.replace(".", "_"),
         sha256 = LIBCURL_SHA,
         build_file_content = _ALL_SRCS_BUILD_FILE,
-        patches = ["@mod_pagespeed//bazel:curl_boringssl_ssl_connect_8_18.patch"],
+        patches = ["@mod_pagespeed//bazel:curl_boringssl_ssl_connect_8_20.patch"],
         patch_args = ["-p1"],
     )
 

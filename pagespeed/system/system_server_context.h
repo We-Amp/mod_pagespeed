@@ -21,12 +21,12 @@
 #define PAGESPEED_SYSTEM_SYSTEM_SERVER_CONTEXT_H_
 
 #include <atomic>
+#include <memory>
 
 #include "net/instaweb/http/public/request_context.h"
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/writer.h"
@@ -161,6 +161,11 @@ class SystemServerContext : public ServerContext {
 
   // Returns true if the license is active and optimization should proceed.
   // Lock-free (uses atomic bool) — safe to call on every request hot path.
+  //
+  // the design record: under soft enforcement this is now a pure SIGNAL only — callers
+  // no longer gate core optimization on it; they emit the soft warn header
+  // instead. The agent_optimize entitlement (IsAgentOptimizeEntitled) stays
+  // hard-gated and is unaffected.
   bool ShouldOptimize() const {
     return license_active_.load(std::memory_order_relaxed);
   }
@@ -169,6 +174,36 @@ class SystemServerContext : public ServerContext {
   // state changes (init, apply, renewal).
   void UpdateLicenseActive(bool active) {
     license_active_.store(active, std::memory_order_relaxed);
+  }
+
+  // the design record (R5, cold-start suppression): true once the first license
+  // check/poll has completed. The soft "x-pagespeed-warn: unlicensed" header
+  // is emitted iff (LicenseCheckedOnce() && !ShouldOptimize()), so it stays
+  // suppressed until we have actually checked the license at least once.
+  // Lock-free — safe on the request hot path. Default true (fail-open) so
+  // paid installs never flash the warning during respawn / app-pool recycle.
+  bool LicenseCheckedOnce() const {
+    return license_checked_once_.load(std::memory_order_relaxed);
+  }
+
+  // Mark that the first license check/poll has completed. Called from
+  // PostInitHook right after the initial UpdateLicenseActive() seed.
+  void MarkLicenseChecked() {
+    license_checked_once_.store(true, std::memory_order_relaxed);
+  }
+
+  // the design record: true only when the active license grants the agent_optimize
+  // entitlement (license-valid AND the entitlement claim). Lock-free — safe on
+  // the request hot path. Default false (opt-in), unlike license_active_.
+  // Overrides ServerContext::IsAgentOptimizeEntitled (the base returns false).
+  bool IsAgentOptimizeEntitled() const override {
+    return agent_optimize_entitled_.load(std::memory_order_relaxed);
+  }
+
+  // Update the agent_optimize entitlement flag. Called by the license handler
+  // on the same state-change path as UpdateLicenseActive (init, apply, renewal).
+  void UpdateAgentOptimizeEntitled(bool entitled) {
+    agent_optimize_entitled_.store(entitled, std::memory_order_relaxed);
   }
 
  protected:
@@ -227,6 +262,14 @@ class SystemServerContext : public ServerContext {
   // Lock-free license enforcement flag. Updated by AdminLicenseHandler,
   // checked by per-port request handlers on every request.
   std::atomic<bool> license_active_{true};  // Default true until Init
+  // the design record (R5): true once the first license check/poll has completed.
+  // Default true (fail-open) so paid installs never flash the soft warn header
+  // during respawn / app-pool recycle; PostInitHook re-affirms it after the
+  // initial seed. Separate atomic — never overloads license_active_.
+  std::atomic<bool> license_checked_once_{true};
+  // the design record: default false (opt-in) — the agent_optimize entitlement must be
+  // explicitly granted by an applied license token.
+  std::atomic<bool> agent_optimize_entitled_{false};
 
   bool initialized_;
   bool use_per_vhost_statistics_;

@@ -11,6 +11,7 @@ const pages = [
   { hash: "#/messages", name: "messages" },
   { hash: "#/graphs", name: "graphs" },
   { hash: "#/license", name: "license" },
+  { hash: "#/about", name: "about" },
 ];
 
 for (const p of pages) {

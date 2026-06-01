@@ -6,7 +6,6 @@
 # This populates:
 #   <vendor-dir>/repo-cache    - Bazel repository cache (all http_archive deps)
 #   <vendor-dir>/cyclone       - Cyclone Cache source (git_repository)
-#   <vendor-dir>/modpagespeed2 - ModPageSpeed 2.0 crypto code (git_repository)
 #
 # After running this, builds can use --config=vendored for fully offline builds:
 #   bazel build --config=vendored --config=clang-libstdcxx13 //...
@@ -25,7 +24,6 @@ fi
 
 REPO_CACHE="$VENDOR_DIR/repo-cache"
 CYCLONE_DIR="$VENDOR_DIR/cyclone"
-MPS2_DIR="$VENDOR_DIR/modpagespeed2"
 
 mkdir -p "$REPO_CACHE"
 
@@ -38,7 +36,7 @@ VENDOR_OUTPUT_BASE="$(mktemp -d /tmp/bazel-vendor-XXXXXX)"
 trap 'chmod -R u+w "$VENDOR_OUTPUT_BASE" 2>/dev/null; rm -rf "$VENDOR_OUTPUT_BASE"' EXIT
 
 # -----------------------------------------------------------------------
-# 1. Vendor git_repository deps FIRST (Cyclone, ModPageSpeed 2.0)
+# 1. Vendor git_repository deps FIRST (Cyclone)
 #    These must exist before bazel fetch so we can use --override_repository
 #    to bypass git clones and unblock http_archive dependency resolution.
 # -----------------------------------------------------------------------
@@ -79,26 +77,6 @@ else:
     raise SystemExit('ERROR: Could not extract cyclone_build_rule from bazel/cyclone.bzl')
 " > "$CYCLONE_DIR/BUILD.bazel"
 
-echo "==> Vendoring ModPageSpeed 2.0..."
-MPS2_COMMIT=$(grep 'MODPAGESPEED2_COMMIT' bazel/repositories.bzl | head -1 | sed 's/.*"\(.*\)".*/\1/' || true)
-
-if [ -z "$MPS2_COMMIT" ]; then
-    echo "ERROR: Could not extract MODPAGESPEED2_COMMIT from bazel/repositories.bzl" >&2
-    exit 1
-fi
-
-rm -rf "$MPS2_DIR"
-echo "    ModPageSpeed 2.0 commit: $MPS2_COMMIT"
-git clone git@github.com:We-Amp/pagespeed-optimizer.git "$MPS2_DIR"
-(cd "$MPS2_DIR" && git checkout "$MPS2_COMMIT")
-
-# Remove .git to save space and avoid nested repo issues
-rm -rf "$MPS2_DIR/.git"
-
-# Unlike Cyclone, modpagespeed2 uses its own BUILD files — no injection needed.
-# Create WORKSPACE matching what git_repository generates.
-echo 'workspace(name = "modpagespeed2")' > "$MPS2_DIR/WORKSPACE"
-
 # -----------------------------------------------------------------------
 # 2. Fetch all http_archive deps into the repository cache.
 #    Use --override_repository for the git_repository deps we just vendored
@@ -115,7 +93,6 @@ echo "==> Fetching dependencies into repository cache..."
 
 OVERRIDE_FLAGS=(
     --override_repository=cyclone="$CYCLONE_DIR"
-    --override_repository=modpagespeed2="$MPS2_DIR"
 )
 
 # Fetch deps for the Apache module — this pulls in the bulk of http_archive deps

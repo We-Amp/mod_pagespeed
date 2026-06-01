@@ -55,13 +55,16 @@
       }
       return "success";
     }
-    return "error";
+    // the design record soft enforcement: unlicensed keeps the optimization core running,
+    // so it is an amber warning (matching the topbar pill in App.svelte), not a
+    // red error. Red stays reserved for the genuinely-expired case.
+    return "warning";
   });
 
   let statusLabel = $derived.by(() => {
     if (!license.data) return "Unknown";
     if (license.data.expired) return "Expired";
-    if (!license.data.licensed) return "Not Licensed";
+    if (!license.data.licensed) return "Unlicensed";
     if (daysRemaining !== null && daysRemaining <= 0) return "Expired";
     if (daysRemaining !== null && daysRemaining <= 30) return `${daysRemaining} days remaining`;
     return license.data.license_type
@@ -329,7 +332,7 @@
       {/if}
     </div>
 
-    <!-- B. Purchase + Trial (not licensed or expired, global admin only) -->
+    <!-- B. Purchase (not licensed or expired, global admin only) -->
     {#if license.data.expired && canManageLicense}
       <div class="section">
         <div class="info-card">
@@ -356,7 +359,7 @@
       <div class="section">
         <h2>Purchase License</h2>
         <div class="action-card">
-          <p>Get a commercial license for your domain. Both plans start with a 14-day free trial — cancel before day 15 and pay nothing.</p>
+          <p>The optimizer runs unlicensed (with a warning); a commercial license is required for production use. Monthly and annual subscriptions are billed immediately — cancel anytime.</p>
           <div class="buy-buttons">
             <button
               class="btn btn-primary"

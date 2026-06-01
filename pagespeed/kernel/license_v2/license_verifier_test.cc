@@ -671,5 +671,86 @@ TEST_F(LicenseVerifierTest, NegativeExpRejected) {
   EXPECT_NE(result.error.find("negative timestamp"), GoogleString::npos);
 }
 
+// ---------- v4 entitlements[] golden / format-lock ----------
+//
+// The license token wire format is a SINGLE source of truth shared with
+// ModPageSpeed 2.0: the same token, signed once by the TypeScript
+// license service, must verify byte-identically in both products. These tests
+// lock the v4 entitlements[] serialization (field order, emission rules) so a
+// drift cannot silently break cross-product verification. The crypto source is
+// vendored from 2.0; this is the 1.1-side guard.
+
+TEST_F(LicenseVerifierTest, EntitlementsWireFormatLock) {
+  // Locks the exact serialized JSON, including the signature-critical field
+  // order. The TS signer (crypto.ts) MUST match this.
+  LicensePayload payload;
+  payload.sub = "fmt@example.com";
+  payload.iss = "modpagespeed.com";
+  payload.iat = 1706745600;
+  payload.plan = "pro";
+  payload.exp = 1769817600;
+  payload.products = {"mps1", "the 2.0 optimizer line"};
+  payload.max_instances = 4;
+  payload.entitlements = {"agent_optimize"};
+
+  EXPECT_EQ(SerializePayload(payload),
+            "{\"sub\":\"fmt@example.com\",\"iss\":\"modpagespeed.com\","
+            "\"iat\":1706745600,\"plan\":\"pro\",\"exp\":1769817600,"
+            "\"products\":[\"mps1\",\"the 2.0 optimizer line\"],\"max_instances\":4,"
+            "\"entitlements\":[\"agent_optimize\"]}");
+}
+
+TEST_F(LicenseVerifierTest, EntitlementsRoundTripAndCheck) {
+  LicensePayload payload;
+  payload.sub = "ent@example.com";
+  payload.iss = "modpagespeed.com";
+  payload.iat = 1706745600;
+  payload.plan = "enterprise";
+  payload.entitlements = {"agent_optimize"};
+
+  GoogleString token = SignLicenseToken(payload, public_key_, private_key_);
+  LicenseResult result = VerifyLicenseTokenWithKey(token, public_key_);
+  ASSERT_TRUE(result.valid) << "Error: " << result.error;
+  ASSERT_EQ(result.payload.entitlements.size(), 1u);
+  EXPECT_EQ(result.payload.entitlements[0], "agent_optimize");
+  EXPECT_TRUE(CheckEntitlement(result.payload, "agent_optimize"));
+  EXPECT_FALSE(CheckEntitlement(result.payload, "nonexistent"));
+}
+
+TEST_F(LicenseVerifierTest, NoEntitlementsIsAbsentAndEmpty) {
+  // v3 byte-compatibility: a token without entitlements emits no entitlements
+  // key (so it is byte-identical to a pre-v4 token) and parses back to an empty
+  // list -- absence-tolerant.
+  LicensePayload payload;
+  payload.sub = "noent@example.com";
+  payload.iss = "modpagespeed.com";
+  payload.iat = 1706745600;
+  payload.plan = "pro";
+
+  EXPECT_EQ(SerializePayload(payload).find("entitlements"), GoogleString::npos);
+
+  GoogleString token = SignLicenseToken(payload, public_key_, private_key_);
+  LicenseResult result = VerifyLicenseTokenWithKey(token, public_key_);
+  ASSERT_TRUE(result.valid) << "Error: " << result.error;
+  EXPECT_TRUE(result.payload.entitlements.empty());
+  EXPECT_FALSE(CheckEntitlement(result.payload, "agent_optimize"));
+}
+
+TEST_F(LicenseVerifierTest, PayloadJsonEscapingIsLocked) {
+  // SerializePayload escapes its string fields via JsonEscape -- a helper in
+  // string_util.h that is itself a copy of 2.0's. It transforms the
+  // *signed* bytes, so lock 1.1's escaping here: a 1.1-side change that altered
+  // the signed payload would break cross-product verification.
+  LicensePayload payload;
+  payload.sub = "a\"b\\c\td";  // quote, backslash, tab
+  payload.iss = "modpagespeed.com";
+  payload.iat = 1706745600;
+  payload.plan = "pro";
+
+  EXPECT_EQ(SerializePayload(payload),
+            "{\"sub\":\"a\\\"b\\\\c\\td\",\"iss\":\"modpagespeed.com\","
+            "\"iat\":1706745600,\"plan\":\"pro\"}");
+}
+
 }  // namespace
 }  // namespace net_instaweb

@@ -18,10 +18,10 @@ test.describe("App shell", () => {
     await expect(page.locator(".topbar-title")).toHaveText("PageSpeed Admin");
   });
 
-  test("sidebar has all 8 nav items", async ({ page }) => {
+  test("sidebar has all 9 nav items", async ({ page }) => {
     await page.goto(BASE);
     const items = page.locator(".nav-item");
-    await expect(items).toHaveCount(8);
+    await expect(items).toHaveCount(9);
     const labels = await items.allTextContents();
     expect(labels).toEqual([
       "Statistics",
@@ -32,6 +32,7 @@ test.describe("App shell", () => {
       "Messages",
       "Graphs",
       "License",
+      "About",
     ]);
   });
 
@@ -309,6 +310,7 @@ test("no JavaScript errors navigating through all pages", async ({ page }) => {
     "#/messages",
     "#/graphs",
     "#/license",
+    "#/about",
   ];
 
   await page.goto(BASE);

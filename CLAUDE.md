@@ -2,994 +2,608 @@
 
 This file provides context and guidance for contributors (human and AI-assisted) working in this repository.
 
+## Related Repositories
+
+This repo is part of the We-Amp B.V. product family. Cross-repo context:
+
+- **ModPageSpeed 2.0** (`We-Amp/pagespeed-optimizer`) — modern successor, shares Ed25519 licensing tokens
+- **Cyclone Cache** (`We-Amp/cyclone-cache`) — shared cache library, vendored at `vendor/cyclone/`
+
+## Table of Contents
+- [Project Overview](#project-overview)
+- [Build System](#build-system)
+- [Code Architecture](#code-architecture)
+- [Testing](#testing)
+- [Code Style](#code-style)
+- [Envoy Filter](#envoy-filter)
+- [Windows/IIS Development](#windowsiis-development)
+
 ## Project Overview
 
-mod_pagespeed is an open-source web performance optimization middleware originally created by Google. It automatically applies 40+ optimization filters (image compression/resizing, CSS/JS minification, cache extension, etc.) to web pages without requiring content modifications.
+mod_pagespeed is a web performance optimization middleware originally created by Google. It automatically applies 40+ optimization filters (image compression/resizing, CSS/JS minification, cache extension, etc.) to web pages.
 
-The project supports three deployment modes:
+**Deployment modes:**
 - **Apache module** (`mod_instaweb`) - Traditional Apache HTTP Server integration
-- **Envoy filter** - Modern proxy-based deployment using Envoy
-- **Windows/IIS** (experimental) - IIS native module with direct C++ integration
+- **Envoy filter** - Modern proxy-based deployment
+- **Windows/IIS** - Native IIS module (actively developed)
 
 ## Build System
 
-**Bazel 7.x** is the build system. The project uses WORKSPACE-based dependency management (bzlmod is disabled via `.bazelrc`).
+**Bazel 7.x** with WORKSPACE-based dependencies (bzlmod disabled via `.bazelrc`).
 
-### Docker Development Environment (Required)
+### Docker Development (Required)
 
-All builds and testing **must** be done inside the Docker development environment. Do not attempt to build natively on the host (e.g. the host Clang is too old for C++23).
-
-The `docker-compose.yml` mounts volumes for:
-- Source code at `/src`
-- Cyclone cache source at `/cyclone-cache` (from host: `/home/builder/code/we-amp/trafficserver/cyclone-cache`)
-- SSD-backed Bazel caches at `/ssd-cache/` (from host: `/media/usbcssd/bazel-cache/`)
+All builds must run inside the Docker container. The host toolchain is too old for C++23.
 
 ```bash
-# Start the environment (includes Redis and Memcached)
+# Start environment (includes Redis and Memcached)
 docker compose up -d
-
-# Enter the dev container
 docker compose exec dev bash
 
-# Inside container - build everything
+# Inside container - preferred config uses Clang with GCC 13's libstdc++
 bazel build --config=clang-libstdcxx13 //...
 
-# Inside container - run all C++ unit tests (with cache backends)
+# Run C++ unit tests
 bazel test --config=clang-libstdcxx13 \
   --test_env=REDIS_PORT=6379 --test_env=REDIS_HOST=redis \
   --test_env=MEMCACHED_PORT=11211 --test_env=MEMCACHED_HOST=memcached \
   //test/pagespeed/... //test/net/...
 
-# Stop when done
 docker compose down
 ```
 
-**Preferred compiler config: `--config=clang-libstdcxx13`** (Clang with GCC 13's libstdc++). This provides the best combination of build diagnostics and C++23 support.
+**Build configs:**
+| Config | Description |
+|--------|-------------|
+| `--config=clang-libstdcxx13` | **Preferred** - Clang + GCC 13 libstdc++ (C++23 support) |
+| `--config=gcc` | GCC 13 native (works, slower diagnostics) |
+| `--config=clang-asan` | Address sanitizer |
+| `--config=clang-tsan` | Thread sanitizer |
+| `--config=ci-linux-arm64` | ARM64 Linux (Docker on Apple Silicon or native ARM64); CI: `linux-arm64-build` job |
 
-Other build configs (less preferred):
-- `--config=gcc` - GCC 13 with native C++23 support (works but slower diagnostics)
-- `--config=clang` - **Will fail** to build Cyclone (Clang 17's `__cpp_concepts` macro doesn't meet libstdc++ 13's requirement for `std::expected`)
-
-### Windows Builds
-
-Windows builds can be done either directly on Windows or via SSH from a Linux workstation.
-
-#### Direct Windows Development (Preferred)
-
-The Windows VM uses a local git clone at `C:\pagespeed`. This avoids network path issues with Bazel.
+**Windows ASan**: `--config=win-asan` requires the LLVM ASan runtime DLL on PATH at test runtime:
 
 ```powershell
-# Sync latest changes
-cd C:\pagespeed
-git pull --recurse-submodules
+$env:PATH = "C:\Program Files\LLVM\lib\clang\21\lib\windows;$env:PATH"
+bazelisk test --config=vendored --config=windows --config=clang-cl --config=win-asan //test/pagespeed/iis/...
+```
 
-# Build the IIS module
+ASan in IIS context requires `halt_on_error=0` (set in `dll_main.cc`) because `w3wp.exe` handles many requests and a halt would kill the process pool. ASan logs are written to `C:\pagespeed_asan*`.
+
+**Important:** Do NOT use `--jobs` to limit parallelism. Bazel manages resources automatically. Restricting jobs causes massive slowdowns especially for sanitizer builds.
+
+**Build dependencies note:**
+- **libcurl** is linked against BoringSSL on Linux for HTTPS support (same BoringSSL instance used by Envoy, no symbol conflicts)
+- **Cyclone cache** uses HTTPS URL for broader Docker compatibility (SSH auth not always available)
+
+### Key Targets
+
+```bash
+# Envoy filter
+bazel build --config=clang-libstdcxx13 //pagespeed/envoy:envoy_pagespeed      # Standalone binary (~212MB)
+bazel build --config=clang-libstdcxx13 //pagespeed/envoy:pagespeed_filter.so  # Shared library (~113MB)
+
+# Apache module
+bazel build --config=clang-libstdcxx13 //:libmod_pagespeed.so
+```
+
+## Code Architecture
+
+### Core Components (`pagespeed/`)
+
+| Directory | Purpose |
+|-----------|---------|
+| `kernel/` | Foundation: base utilities, HTML parsing, HTTP, caching, image processing, threading |
+| `apache/` | Apache module integration |
+| `envoy/` | Envoy filter (uses libcurl for fetching, not Envoy's HTTP client) |
+| `iis/` | IIS native module |
+| `system/` | System abstractions (admin UI, cache backends) |
+| `automatic/` | ProxyFetch - standalone rewriting engine shared by all deployment modes |
+| `controller/` | gRPC-based optimization coordination |
+
+### Key Abstractions
+
+- **RewriteDriver** - Per-request optimization coordinator
+- **RewriteDriverFactory** - Creates drivers, manages server-wide state
+- **ProxyFetch** (`pagespeed/automatic/proxy_fetch.h`) - HTML rewriting engine used by Apache, Envoy, and IIS
+- **ProcessContext** - Global singleton for domain registry, HTML keywords (must be constructed exactly once per process)
+
+### Logging System
+
+Custom glog-compatible logging in `base/logging.h` (at repo root, not under pagespeed/):
+- `LOG(INFO/WARNING/ERROR/FATAL)`, `VLOG(level)`, `CHECK(condition)`, `DCHECK` variants
+- Apache routes to error log via `pagespeed/apache/log_message_handler.cc`
+- Envoy uses spdlog directly
+
+### Dependencies
+
+- Envoy HTTP proxy libraries, Protocol Buffers, gRPC
+- APR/APRUtil/Serf (Apache module only)
+- libjpeg-turbo, libpng, libwebp, giflib (image optimization)
+- Brotli (compression)
+- Cyclone Cache (high-performance disk cache, requires C++23)
+- Python 3 (DRP code generation), Node.js (Closure Compiler via npx)
+
+## Testing
+
+### IIS Testing Strategy
+
+IIS test coverage follows Apache's "golden standard" patterns. All IIS tests should mirror Apache test infrastructure and patterns.
+
+**Test Hierarchy:**
+1. **C++ Unit Tests** (`test/pagespeed/iis/`) - Fast, isolated component tests
+2. **Python Integration Tests** (`test/iis/`) - HTTP-level filter verification
+3. **System Tests** - Full end-to-end with running IIS server
+
+**Test File Locations:**
+| Type | Location | Purpose |
+|------|----------|---------|
+| C++ unit tests | `test/pagespeed/iis/*.cc` | Mock-based component testing |
+| Python integration | `test/iis/test_*.py` | Filter behavior verification |
+| Test fixtures | `test/iis/testsite/` | HTML/CSS/JS test content |
+| Shared framework | `test/system/pagespeed_test_framework/` | Client, assertions |
+
+**Key Test Patterns (from Apache):**
+```python
+# Pattern 1: fetch_until for async optimization
+response = client.fetch_until_contains(url, pattern=r'\.pagespeed\.', timeout=30.0)
+
+# Pattern 2: Statistics delta checking
+old_stats = stats_snapshot()
+client.get(url)
+new_stats = stats_snapshot()
+assert_stat_delta(old_stats, new_stats, "image_rewrites", 1)
+
+# Pattern 3: Blocking rewrite for deterministic testing
+response = client.get(url, headers={"X-PSA-Blocking-Rewrite": "psatest"})
+
+# Pattern 4: WebP negotiation
+response = client.with_webp().get(url)
+```
+
+**Pytest Markers:**
+- `@pytest.mark.ipro` - IPRO (In-Place Resource Optimization) tests
+- `@pytest.mark.html_rewrite` - HTML rewriting tests
+- `@pytest.mark.slow` - Long-running stress tests
+- `@pytest.mark.iis_only` - IIS-specific tests (not shared)
+
+### C++ Unit Tests
+
+```bash
+bazel test --config=clang-libstdcxx13 \
+  --test_env=REDIS_PORT=6379 --test_env=REDIS_HOST=redis \
+  --test_env=MEMCACHED_PORT=11211 --test_env=MEMCACHED_HOST=memcached \
+  //test/pagespeed/... //test/net/...
+```
+
+**Latest results (Linux):** 46 passed, 14 skipped (IIS/Windows)
+
+**Latest results (Windows):** Kernel: 20 passed, 1 skipped. Net: 3 passed, rewriter shards 8-9 timeout (pre-existing, test too large for default timeout).
+
+Tests mirror source layout: `test/pagespeed/kernel/base/` tests `pagespeed/kernel/base/`.
+
+### System Tests (Integration)
+
+Require a running server:
+
+```bash
+# Apache system tests
+./test/system/run_system_tests.sh
+./test/system/run_system_tests.sh -k sanity  # Specific tests
+
+# Envoy system tests
+./test/system/run_envoy_tests.sh
+
+# Nginx system tests
+./test/system/run_nginx_tests.sh
+
+# IIS system tests (from Linux host, requires Windows VM)
+./test/system/run_iis_tests.sh sanity
+```
+
+### Test Infrastructure Notes
+
+- Apache tests use `//pagespeed/apache:apache_core` (excludes `mod_instaweb.cc`) to avoid ProcessContext conflicts
+- TSAN suppressions: `tools/tsan_suppressions.txt`
+- Tests use 10 shards by default
+- See `docs/test-catalog.md` for comprehensive skip/xpass documentation per platform
+
+## Code Style
+
+- **C++20** standard (C++23 for Cyclone cache files via `per_file_copt`)
+- Google C++ style (`.clang-format`)
+- 80-column line limit
+
+## Envoy Filter
+
+### Features
+
+- **IPRO** (In-Place Resource Optimization) for CSS/JS/images
+- **HTML rewriting** via ProxyFetch (same engine as Apache/IIS)
+- **libcurl fetcher** (`CurlUrlAsyncFetcher`) - independent of Envoy's ClusterManager
+
+### Architecture
+
+```
+Client Request → decodeHeaders() → Origin Response → encodeHeaders() (detect HTML)
+    → CreateNewProxyFetch() → encodeData() (stream to ProxyFetch)
+    → Done() → EnvoyAsyncFetch::HandleDone() → dispatcher_.post() → sendReply()
+```
+
+ProxyFetch runs on worker threads; `EnvoyAsyncFetch` bridges to Envoy's dispatcher thread via `shared_from_this()` and atomic flags.
+
+### Production Configuration
+
+See `pagespeed-envoy.yaml` for complete example including:
+- Admin authentication (`admin_auth` with token, IP allowlist, rate limiting)
+- Circuit breaker for resource fetching
+- Redis cache backend
+- Prometheus metrics at `/stats/prometheus`
+- Health endpoint at `/pagespeed/health`
+
+**Key metrics:** `pagespeed.html_rewrites_total`, `pagespeed.ipro_cache_hits`, `pagespeed.rewrite_latency_ms`
+
+### Envoy System Test Status
+
+**Latest results:** 190 passed, 19 skipped, 0 failed
+
+The 19 skipped tests are documented limitations (marked `@pytest.mark.not_envoy`):
+- **Statistics** (1 test) - `resource_404_count` not tracked
+- **IPRO cache headers** (~2 tests) - Different cache header behavior
+- **CssFlattenMaxBytes header** (1 test) - Header handling differs
+- **Query params header** (1 test) - PageSpeedFilters header not respected for IPRO
+- **Other** (~14 tests) - Content-Length, HTTPS combination
+
+Run tests:
+```bash
+./test/system/run_envoy_tests.sh automatic/ -v  # All automatic tests
+./test/system/run_envoy_tests.sh -k sanity      # Quick sanity check
+```
+
+See `ENVOY_TEST_PROGRESS.md` for detailed tracking.
+
+### Apache System Test Status
+
+**Latest results:** 195 passed, 14 skipped, 0 failed
+
+### Nginx System Test Status
+
+**Latest results:** 192 passed, 17 skipped, 0 failed
+
+The 17 skipped tests include all `not_envoy` tests, plus nginx-specific skips.
+See `docs/test-catalog.md` for details.
+
+Run tests:
+```bash
+./test/system/run_nginx_tests.sh
+```
+
+### Nginx Thread Model
+
+The nginx module uses a Unix pipe (`NgxEventConnection` in `pagespeed/nginx/ngx_event_connection.cc`) for cross-thread signaling. PSOL worker threads write to `pipe_write_fd_` to signal nginx's event loop, which calls `ReadCallback` on the nginx thread.
+
+**Rules:**
+- Never call nginx C API functions (`ngx_http_*`) directly from a PSOL worker thread. Only call them from the event loop thread (inside `ReadCallback` or functions it calls).
+- New filter header modifications that need to reach nginx must be buffered and transmitted via the pipe mechanism, not via direct nginx API calls.
+- The pipe capacity matters on high-throughput systems — a full pipe causes silent dropped events.
+
+### Known Differences from Apache
+
+| Issue | Cause |
+|-------|-------|
+| `combine_css` timeouts | Async worker pool coordination in streaming architecture |
+| IPRO cache lifetime | Fixed: static file server now omits explicit Cache-Control (matching Apache), so PSOL uses `implicit_cache_ttl_ms` |
+| IPRO ETag format | Fixed: PSOL core correctly sets `PSA-aj` ETag via `FixFetchFallbackHeaders` |
+| `X-PSA-Blocking-Rewrite` | Supported via `blocking_rewrite_key` config option |
+| Version shows placeholders | Missing genrule for `version.h.in` processing |
+
+**`combine_css` timeout details**: Nginx streams response chunks through `OnSendResponse` → `NgxBaseFetch::Write()` → ProxyFetch. When ProxyFetch needs to fetch sub-resources (CSS files to combine) before it can emit output, and the sub-resource fetch takes longer than nginx's `send_timeout`, nginx terminates the connection. The fix pattern is to pre-fetch all sub-resources before beginning the response, then reply with the combined output.
+
+## Windows/IIS Development
+
+### Quick Start (Direct Windows)
+
+```powershell
+cd C:\pagespeed
+git pull
+
+# Build IIS module (requires clang-cl)
 bazel build --config=windows --config=clang-cl //pagespeed/iis:pagespeed_iis.dll
 
-# Build core libraries
-bazel build --config=windows --config=clang-cl //pagespeed/kernel/base:pagespeed_base
-bazel build --config=windows --config=clang-cl //pagespeed/system:system_windows
-
-# Run unit tests
-bazel test --config=windows --config=clang-cl //test/pagespeed/kernel/base:string_util_test
-```
-
-**First-time setup:** After VM provisioning, add the SSH key to GitHub:
-```powershell
-cat ~/.ssh/id_ed25519.pub
-# Copy output and add to GitHub Settings > SSH Keys
-```
-
-**IIS Module Installation:**
-```powershell
-# Stop IIS, copy DLL, register module, start IIS
+# Install in IIS
 Stop-Service -Name W3SVC
 Copy-Item bazel-bin/pagespeed/iis/pagespeed_iis.dll C:\inetpub\pagespeed\ -Force
 New-WebGlobalModule -Name PageSpeedModule -Image 'C:\inetpub\pagespeed\pagespeed_iis.dll'
 Start-Service -Name W3SVC
 ```
 
-**Running IIS Tests:**
-```bash
-# Set port and run pytest
-PAGESPEED_PORT=8080 python -m pytest test/iis/test_sanity.py -v
+### Vendored/Offline Builds (from Source Tarball)
+
+Release tarballs include all dependencies for offline builds (no SSH key or network access needed):
+
+```powershell
+# Extract the source tarball
+tar xf mod_pagespeed-1.0.0.tar.gz
+cd mod_pagespeed-1.0.0
+
+# Build IIS module from vendored deps
+bazel build --config=vendored --config=windows --config=clang-cl -c opt //pagespeed/iis:pagespeed_iis.dll
+
+# Package
+.\install\iis\build_iis_package.ps1 -OutputDir C:\output
 ```
 
-#### Remote Windows Development (via SSH)
+The `--config=vendored` flag uses the `vendor/repo-cache` repository cache and the vendored Cyclone source. The tarball is produced by `tools/vendor-deps.sh` in CI. The `git_repository` dep (Cyclone) is vendored — no SSH keys or network access needed.
 
-For development from a Linux workstation using **dockur/windows** containers:
+### Remote Development (Linux → Windows VM)
 
 ```bash
-# Start Windows x64 VM (first boot takes 15-30 min for installation + provisioning)
+# Start Windows VM (first boot: 15-30 min)
 ./windows-dev/start-windows-dev.sh
-
-# Wait for SSH to become available
 ./windows-dev/wait-for-windows.sh
 
-# Build on Windows via SSH
+# Build via SSH
 ./windows-dev/build-on-windows.sh //pagespeed/iis:pagespeed_iis.dll
 
-# Interactive PowerShell session
+# Interactive shell
 ./windows-dev/build-on-windows.sh --shell
-
-# Stop the VM when done
-docker compose --profile windows-x64 down
 ```
 
-**Requirements for remote development:**
-- Linux workstation with KVM support (`/dev/kvm` accessible)
-- Docker and Docker Compose
-- ~100GB SSD space at `/media/usbcssd/windows-vm/`
-- 16GB+ RAM available for the Windows VM
+**Connection:** `ssh -p 2222 Developer@localhost` (password: `ChangeMe1`)
 
-**Connection Details:**
-| VM | SSH | Web VNC | RDP |
-|----|-----|---------|-----|
-| Windows x64 | `ssh -p 2222 Developer@localhost` | http://localhost:8006 | localhost:33389 |
-| Windows ARM64 | `ssh -p 2223 Developer@localhost` | http://localhost:8007 | localhost:33390 |
+**SSH Agent Required:** Set `SSH_AUTH_SOCK` before running Windows build commands.
 
-**Credentials:** Username `Developer`, Password `ChangeMe1`
+### IIS Module Architecture
 
-**SSH Agent Requirement:** The Windows build scripts use SSH key authentication. Claude Code needs the SSH_AUTH_SOCK environment variable to access the user's SSH agent. Ask the user for their SSH_AUTH_SOCK path (e.g., `export SSH_AUTH_SOCK=/tmp/ssh-XXXXXXFUpMth/agent.2898308`) before running Windows build commands.
+| Component | Purpose |
+|-----------|---------|
+| `iis_http_module.cc` | CHttpModule for IIS request pipeline |
+| `iis_module_factory.cc` | RegisterModule entry point, manages single server context |
+| `iis_server_context.cc` | Server-wide state (one per app pool) |
+| `iis_config.cc` | web.config XML parsing |
+| `iis_async_fetch.cc` | AsyncFetch adapter for ProxyFetch |
 
-**Key Windows targets:**
+**Note:** The IIS module uses a single `IisServerContext` for all requests within an application pool. This simplified architecture avoids lifetime management issues that can occur with per-site contexts.
+
+### Build Status
+
+| Target | Status |
+|--------|--------|
+| `//pagespeed/kernel/base:pagespeed_base` | Builds |
+| `//pagespeed/system:system_windows` | Builds |
+| `//pagespeed/iis:pagespeed_iis.dll` | Builds, fully functional (IPRO + HTML rewriting) |
+
+### Running IIS Tests
+
+#### C++ Unit Tests (on Windows)
+
+```powershell
+# Build and run all IIS unit tests
+bazel test --config=windows --config=clang-cl //test/pagespeed/iis:all
 ```
-//pagespeed/system:system_windows     # System library (no memcached/fork)
-//pagespeed/windows:pagespeed_c_api   # C API for IIS integration
-//pagespeed/windows:iis_rewrite_driver_factory  # IIS factory
+
+#### Python Integration Tests (on Windows)
+
+```powershell
+cd test\iis
+
+# Setup IIS Express with the built module (auto-detects bazel-bin DLL)
+powershell -ExecutionPolicy Bypass -File Setup-IISExpress.ps1 -Port 8080
+
+# Start IIS Express in background
+powershell -ExecutionPolicy Bypass -File Start-IISExpress.ps1 -Background -Wait -Port 8080
+
+# Run all tests
+cmd /c "set PAGESPEED_PORT=8080& set IIS_EXPRESS=1& set PAGESPEED_TEST_ROOT=& set PAGESPEED_EXAMPLE_ROOT=& python -m pytest test/iis/ -v"
+
+# Run specific test category
+cmd /c "set PAGESPEED_PORT=8080& set IIS_EXPRESS=1& set PAGESPEED_TEST_ROOT=& set PAGESPEED_EXAMPLE_ROOT=& python -m pytest test/iis/ -m ipro -v"
+
+# Run stress tests (slower)
+cmd /c "set PAGESPEED_PORT=8080& set IIS_EXPRESS=1& set PAGESPEED_TEST_ROOT=& set PAGESPEED_EXAMPLE_ROOT=& python -m pytest test/iis/test_stress.py -v"
+
+# Stop IIS Express when done
+powershell -ExecutionPolicy Bypass -File Stop-IISExpress.ps1
 ```
 
-**Platform-specific implementations:**
-| Component | Windows | Linux/macOS |
-|-----------|---------|-------------|
-| Crypto (MD5) | BCrypt API | BoringSSL |
-| Threading | StdThreadSystem | StdThreadSystem + pthread |
-| Shared Memory | NullSharedMem | PthreadSharedMem |
+**Important environment variables:**
+- `PAGESPEED_PORT` - Port where IIS/IIS Express is running (8080 for IIS Express)
+- `IIS_EXPRESS=1` - Set when testing against IIS Express
+- `PAGESPEED_TEST_ROOT=` - Must be empty (not `/`) to avoid double-slash URLs
+- `PAGESPEED_EXAMPLE_ROOT=` - Must be empty (not `/`) to avoid double-slash URLs
+
+**web.config Configuration:**
+- If PageSpeedModule is registered globally via `New-WebGlobalModule`, the site's `web.config` must NOT add the module again
+- A duplicate module entry causes 500.19 errors with "Cannot add duplicate collection entry"
+- Minimal web.config should be empty `<configuration></configuration>` or removed entirely
+
+**Module Freshness:**
+- After rebuilding the DLL, IIS must be restarted to pick up changes
+- Use: `Stop-Service W3SVC; Copy-Item ...; Start-Service W3SVC`
+- Or recycle the app pool: `Restart-WebAppPool DefaultAppPool`
+
+**Note:** If full IIS has a site on the same port, it will handle requests instead of IIS Express. Check with `Get-Website` in PowerShell and verify the physical path with `netstat -ano | grep :8080`.
+
+#### System Tests from Linux Host
+
+```bash
+./test/system/run_iis_tests.sh --no-module sanity  # Baseline without module
+./test/system/run_iis_tests.sh sanity              # With PageSpeed module
+```
+
+Tests in `test/iis/` (26 Python files):
+- **Sanity**: `test_sanity.py`, `test_admin.py`
+- **HTML rewriting**: `test_html_rewrite.py`, `test_html_rewrite_crash.py`
+- **Filter-specific**: `test_extend_cache.py`, `test_defer_js.py`, `test_lazyload.py`, `test_combiners.py`, `test_css_minify.py`, `test_js_minify.py`, `test_flatten_imports.py`, `test_inliners.py`, `test_preload.py`, `test_responsive.py`, `test_webp.py`, `test_move_css.py`, `test_local_storage.py`
+- **HTTP/Images**: `test_headers.py`, `test_image_resize.py`, `test_html_optimization.py`, `test_dns_prefetch.py`, `test_cache_control.py`
+- **IPRO**: `test_ipro.py`
+- **Stress/Error**: `test_stress.py`, `test_error_recovery.py`
+
+C++ unit tests in `test/pagespeed/iis/` (19 files):
+- Core: `iis_config_test.cc`, `iis_server_context_test.cc`, `iis_module_factory_test.cc`
+- HTTP: `iis_http_module_test.cc`, `iis_header_util_test.cc`, `iis_base_fetch_test.cc`
+- Streaming: `iis_streaming_fetch_test.cc`, `iis_dechunker_test.cc`, `iis_content_decoder_test.cc`
+- Integration: `iis_rewrite_integration_test.cc`, `iis_html_flushing_integration_test.cc`
+
+### Platform Differences
+
+| Component | Windows/IIS | Linux/Apache |
+|-----------|-------------|--------------|
+| Crypto | BCrypt API | BoringSSL |
+| Shared Memory | InProcessSharedMem (per-process; cross-process not implemented) | PthreadSharedMem |
 | External Cache | Redis only | Redis + Memcached |
-
-**Current Build Status (February 2026):**
-| Target | Status | Notes |
-|--------|--------|-------|
-| `//pagespeed/kernel/base:pagespeed_base` | ✅ Builds | Core utilities, threading, file system |
-| `//pagespeed/kernel/http` | ✅ Builds | Requires clang-cl for googleurl |
-| `//pagespeed/system:system_windows` | ✅ Builds | Requires clang-cl |
-| `//pagespeed/windows:pagespeed_c_api` | ✅ Builds | Requires clang-cl |
-| `//pagespeed/iis:pagespeed_iis.dll` | ⚠️ Builds but crashes | DLL builds, loads in IIS, crashes during initialization |
-
-**IIS Module Status:**
-- **DLL builds successfully** with `--config=windows --config=clang-cl`
-- **Minimal module works** (RegisterModule returning S_OK loads and runs)
-- **Full initialization crashes** with 0xc0000409 (STATUS_STACK_BUFFER_OVERRUN)
-- **Root cause**: Likely in SystemRewriteDriverFactory initialization or ProcessContext lifecycle
-
-**Known Issues:**
-1. **googleurl requires clang-cl** - The provisioning script installs LLVM automatically.
-2. **yq junction bug** - After `bazel clean --expunge`, run `bazel fetch @yq_windows_amd64//:yq_toolchain` then copy the yq directory to fix broken junctions.
-3. **Python UTF-8 encoding** - DRP genrule requires `PYTHONUTF8=1` (automatically set in `bazel/drp.bzl`).
-4. **Cyclone cache source** - Available as git submodule at `third_party/cyclone-cache`. Run `git submodule update --init` if missing.
-5. **IIS module initialization crash** - Full PageSpeed initialization crashes; needs debugging with WinDbg to identify specific cause.
-
-See `windows-dev/README.md` for detailed documentation including troubleshooting and manual setup options.
-
-### Key Commands
-
-All commands below are run **inside the Docker container** (`docker compose exec dev bash`). The source tree is mounted at `/src` inside the container.
-
-```bash
-# Build everything
-bazel build --config=clang-libstdcxx13 //...
-
-# Build just the Envoy filter binary (standalone Envoy with PageSpeed)
-bazel build --config=clang-libstdcxx13 //pagespeed/envoy:envoy_pagespeed
-
-# Build the PageSpeed filter as a shared library (for use with standard Envoy)
-bazel build --config=clang-libstdcxx13 //pagespeed/envoy:pagespeed_filter.so
-
-# Run all C++ unit tests (excludes Python system tests that need Apache)
-bazel test --config=clang-libstdcxx13 \
-  --test_env=REDIS_PORT=6379 --test_env=REDIS_HOST=redis \
-  --test_env=MEMCACHED_PORT=11211 --test_env=MEMCACHED_HOST=memcached \
-  //test/pagespeed/... //test/net/...
-
-# Run a specific test
-bazel test --config=clang-libstdcxx13 //test/pagespeed/kernel/base:string_util_test
-
-# Run tests with debug output (as used in CI)
-bazel test --config=clang-libstdcxx13 \
-  --test_env=REDIS_PORT=6379 --test_env=REDIS_HOST=redis \
-  --test_env=MEMCACHED_PORT=11211 --test_env=MEMCACHED_HOST=memcached \
-  -c dbg --test_output=streamed //test/pagespeed/... //test/net/...
-
-# Build and test everything (must exclude Python system tests)
-bazel test --config=clang-libstdcxx13 \
-  --test_env=REDIS_PORT=6379 --test_env=REDIS_HOST=redis \
-  --test_env=MEMCACHED_PORT=11211 --test_env=MEMCACHED_HOST=memcached \
-  //... -- -//test/system/...
-
-# Other build configurations (less preferred)
-bazel build --config=gcc //...               # GCC 13
-bazel build --config=clang-asan //...        # ASAN sanitizer
-bazel build --config=clang-tsan //...        # TSAN sanitizer
-
-# Standard test exclusions (Python system tests require running Apache)
-# Use //test/pagespeed/... //test/net/... instead of //test/... to avoid these
-EXCL="-//test/system/..."
-
-# Run tests with sanitizers (include exclusions and cache backends)
-bazel test --keep_going --config=clang-asan \
-  --test_env=REDIS_PORT=6379 --test_env=REDIS_HOST=redis \
-  --test_env=MEMCACHED_PORT=11211 --test_env=MEMCACHED_HOST=memcached \
-  --test_output=errors //test/... -- $EXCL
-
-bazel test --keep_going --config=clang-tsan \
-  --test_env=REDIS_PORT=6379 --test_env=REDIS_HOST=redis \
-  --test_env=MEMCACHED_PORT=11211 --test_env=MEMCACHED_HOST=memcached \
-  --test_output=errors //test/... -- $EXCL
-```
-
-TSAN suppressions are in `tools/tsan_suppressions.txt` and referenced from `.bazelrc`.
-
-Tests require Redis (port 6379) and Memcached (port 11211) for full coverage. In the Docker environment, pass the following test environment variables to connect to the containerized services:
-- `--test_env=REDIS_PORT=6379 --test_env=REDIS_HOST=redis`
-- `--test_env=MEMCACHED_PORT=11211 --test_env=MEMCACHED_HOST=memcached`
-
-Tests use default sharding of 10 shards.
-
-**Note on memory requirements**: Building the Envoy binary requires significant memory. With constrained memory (e.g., Docker containers with limited RAM), use `--jobs=2` to `--jobs=4` and exclude the heavy integration test:
-```bash
-bazel build --config=clang-libstdcxx13 --jobs=4 //pagespeed/envoy:envoy_pagespeed
-bazel build --config=clang-libstdcxx13 --jobs=2 //... -- -//pagespeed/envoy:http_filter_integration_test
-```
-The Bazel server may crash (exit code 14 / "Socket closed") if memory is exhausted during linking. If this happens, reduce `--jobs` and re-run — cached actions will be reused.
-
-## Code Architecture
-
-### Core Components (`pagespeed/`)
-
-- **kernel/** - Foundation layer with platform abstractions
-  - `base/` - Core utilities (strings, statistics, threading, file systems)
-  - `html/` - HTML parsing and filter infrastructure
-  - `http/` - HTTP protocol handling, content types, headers
-  - `cache/` - Caching backends (LRU, file, memcached, redis)
-  - `image/` - Image processing and optimization
-  - `js/` - JavaScript handling
-  - `thread/` - Threading primitives
-  - `sharedmem/` - POSIX shared memory support
-
-- **apache/** - Apache HTTP Server module integration
-  - `mod_instaweb.cc` - Main Apache module hooks (contains static `ApacheProcessContext`)
-  - `instaweb_handler.cc` - Request/response handling
-  - Build targets:
-    - `:apache` - Full library including `mod_instaweb.cc` (for Apache module builds)
-    - `:apache_core` - Core library without `mod_instaweb.cc` (for tests)
-    - `:apache_apr` - APR-dependent components (memcached client, pool utilities)
-
-- **envoy/** - Envoy proxy filter integration
-  - Protocol buffer definitions for configuration
-  - Envoy-specific driver factory and fetch implementations
-  - Uses libcurl for resource fetching (not Envoy's native HTTP client)
-  - Optimized dependencies: uses `filter_config_interface` instead of `main_common_lib`
-    to avoid pulling in QUIC, HTTP/3, gRPC implementations (62% reduction in deps)
-
-- **system/** - System-level abstractions (admin UI, controller management)
-  - `system` - Full system library (memcached, Redis, fork-based controller)
-  - `system_envoy` - Optimized for Envoy (Redis only, no fork, no memcached)
-  - `system_windows` - Windows cross-compilation (same deps as system_envoy)
-
-- **windows/** - Windows/IIS integration (experimental)
-  - `pagespeed_c_api` - C ABI for IIS native modules
-  - `iis_rewrite_driver_factory` - IIS-specific factory with CurlUrlAsyncFetcher
-
-- **iis/** - IIS native module implementation
-  - `iis_http_module` - CHttpModule implementation for IIS request pipeline
-  - `iis_module_factory` - IIS module factory (RegisterModule entry point)
-  - `iis_server_context` - Per-application-pool state management
-  - `iis_request_context` - Per-request state and response handling
-  - `iis_async_fetch` - AsyncFetch adapter for ProxyFetch output (blocking wait pattern)
-  - `iis_config` - web.config XML configuration parsing
-  - `iis_admin_handler` - Admin UI endpoints (/pagespeed_admin, /pagespeed_statistics)
-  - `license_validator` - Commercial license key validation
-
-- **controller/** - Central optimization coordination (gRPC-based)
-
-- **automatic/** - Standalone rewriting (static rewriter, proxy interface)
-
-- **opt/** - Specialized optimizations (ads, HTTP, logging)
-
-### Test Structure
-
-Tests mirror the source layout under `test/`:
-```
-test/pagespeed/kernel/base/  -> pagespeed/kernel/base/
-test/pagespeed/kernel/html/  -> pagespeed/kernel/html/
-```
-
-Test macros are defined in `bazel/pagespeed_test.bzl`:
-- `pagespeed_cc_test()` - Standard unit tests
-- `pagespeed_cc_test_library()` - Test helper libraries
-- `pagespeed_cc_benchmark()` - Performance benchmarks
-
-### Types of Tests
-
-The project has two types of tests:
-
-#### C++ Unit Tests (`//test/pagespeed/...`)
-
-Unit tests that test internal code without requiring a running server:
-
-```bash
-# Run all C++ unit tests
-bazel test --config=clang-libstdcxx13 \
-  --test_env=REDIS_PORT=6379 --test_env=REDIS_HOST=redis \
-  --test_env=MEMCACHED_PORT=11211 --test_env=MEMCACHED_HOST=memcached \
-  //test/pagespeed/...
-```
-
-#### Python System Tests (`//test/system/...`)
-
-Integration tests that require a running Apache server with mod_pagespeed:
-
-```bash
-# Inside Docker container - run full system test workflow:
-# 1. Builds libmod_pagespeed.so
-# 2. Installs and configures Apache with mod_pagespeed
-# 3. Runs Python pytest tests against the server
-./test/system/run_system_tests.sh
-
-# Run specific tests
-./test/system/run_system_tests.sh -k sanity              # Run sanity tests only
-./test/system/run_system_tests.sh automatic/test_extend_cache.py  # Specific file
-
-# Options
-./test/system/run_system_tests.sh --build-only           # Just build the module
-./test/system/run_system_tests.sh --skip-build           # Skip build, run tests
-./test/system/run_system_tests.sh --keep-running         # Keep Apache running after
-```
-
-The system tests are in `test/system/automatic/` and test specific PageSpeed filters against a live server. They use the pytest framework with custom assertions in `test/system/pagespeed_test_framework/`.
-
-#### IIS System Tests (Windows)
-
-Integration tests can also run against IIS on the Windows VM. These tests use the same pytest framework but connect to IIS instead of Apache.
-
-**Prerequisites:**
-- Windows VM running (`docker compose --profile windows-x64 up -d`)
-- SSH agent with keys (`SSH_AUTH_SOCK` environment variable set)
-- Source code accessible on Windows (via SMB mount at `C:\pagespeed`)
-
-**Quick Start:**
-```bash
-# Set SSH agent socket (get path from your SSH agent)
-export SSH_AUTH_SOCK=/tmp/ssh-XXX/agent.123
-
-# Run baseline tests (without PageSpeed module)
-./test/system/run_iis_tests.sh --no-module sanity
-
-# Set up IIS only (no tests)
-./test/system/run_iis_tests.sh --build-only --no-module
-
-# Run with verbose output
-./test/system/run_iis_tests.sh --no-module -v sanity
-
-# Keep IIS running after tests (for debugging)
-./test/system/run_iis_tests.sh --no-module --keep-running sanity
-```
-
-**Running Tests with PageSpeed Module:**
-```bash
-# First, build the IIS module on Windows
-./windows-dev/build-on-windows.sh //pagespeed/iis:pagespeed_iis_dll
-
-# Install the module in IIS
-ssh -p 2222 Developer@localhost \
-  'powershell -File C:\pagespeed\test\system\install_pagespeed_module.ps1'
-
-# Run tests with module
-./test/system/run_iis_tests.sh sanity
-```
-
-**Test Scripts:**
-| Script | Purpose |
-|--------|---------|
-| `test/system/run_iis_tests.sh` | Main entry point (runs from Linux host) |
-| `test/system/setup_iis_full.ps1` | Full IIS setup (site, app pool, content) |
-| `test/system/install_pagespeed_module.ps1` | Install PageSpeed module in IIS |
-
-**Test Markers:**
-- `@pytest.mark.iis_only` - Test only runs on IIS
-- `@pytest.mark.not_iis` - Test skipped on IIS
-- `@pytest.mark.requires_stats` - Test requires statistics endpoint
-
-**Environment Variables (set automatically by run_iis_tests.sh):**
-```
-PAGESPEED_HOST=localhost
-PAGESPEED_PORT=8080
-PAGESPEED_SERVER_TYPE=iis
-PAGESPEED_STATS_ENABLED=0  (or 1 with module)
-PAGESPEED_EXAMPLE_ROOT=/mod_pagespeed_example
-PAGESPEED_TEST_ROOT=/mod_pagespeed_test
-```
-
-#### Test Infrastructure Notes
-
-**ProcessContext and Static Initialization:**
-The `ProcessContext` class manages global initialization (domain registry, HTML keywords, etc.) and must be constructed exactly once per process. However, test binaries may link code with static `ProcessContext` instances:
-- `RewriteTestBaseProcessContext` in test infrastructure (`test/net/instaweb/rewriter/rewrite_test_base.cc`)
-- `ApacheProcessContext` in `mod_instaweb.cc` (which has a `ProcessContext` member)
-
-To avoid conflicts, Apache tests use `//pagespeed/apache:apache_core` instead of `//pagespeed/apache` - this excludes `mod_instaweb.cc` and its static `ApacheProcessContext`.
-
-**Libevent Test Sharding:**
-Tests using `LibeventDispatcher` (in `//test/pagespeed/kernel/thread:event_dispatcher_test`) don't work well with Bazel's test sharding. The test uses `shard_count = 1` to ensure all tests run in a single process and avoid resource contention between parallel event loops.
-
-### Key Dependencies
-
-The project builds on Envoy's infrastructure and uses:
-- Envoy HTTP proxy libraries (used by Envoy filter for HTTP fetching)
-- APR/APRUtil/Serf (Apache portable runtime - used by Apache module only)
-- Protocol Buffers / gRPC
-- libjpeg-turbo, libpng, libwebp (image optimization)
-- Brotli (compression)
-- Google Test (testing)
-- DRP (Domain Registry Provider) - public suffix validation
-- Cyclone Cache - High-performance disk cache (requires C++23, needs GCC 13+)
-
-**Build-time requirements:**
-- Python 3 - Required for DRP registry tables code generation
-- Java JRE - Required for Closure Compiler
-
-### Logging System
-
-The project uses a custom logging implementation in `base/logging.h` that provides glog-compatible macros without the glog dependency:
-
-- **LOG(severity)** - Standard logging (INFO, WARNING, ERROR, FATAL, DFATAL)
-- **VLOG(level)** / **DVLOG(level)** - Verbose logging (debug builds only for DVLOG)
-- **CHECK(condition)** / **CHECK_EQ/NE/LT/LE/GT/GE** - Runtime assertions
-- **DCHECK** variants - Debug-only checks
-
-**Key files:**
-- `base/logging.h` - Macro definitions and LogMessage class
-- `base/logging.cc` - Implementation with spdlog integration
-- `pagespeed/kernel/util/gflags.h` - Minimal gflags replacement for CLI tools
-
-**Log sinks:** Different deployment modes register custom log sinks:
-- Apache: `pagespeed/apache/log_message_handler.cc` routes to Apache error log
-- Envoy: Uses spdlog directly (Envoy's logging framework)
-
-**Command-line flags:** The `gflags.h` replacement provides basic `--flag=value` parsing for build tools like `data2c`. It doesn't support all gflags features but handles the common cases.
-
-### Fine-Grained Build Targets
-
-The project provides fine-grained build targets for faster incremental builds. Use these when working on specific components to avoid recompiling unrelated code.
-
-#### System Library (`pagespeed/system/`)
-
-| Target | Description | External Deps |
-|--------|-------------|---------------|
-| `:system` | Full system library (backward-compatible) | hiredis, libmemcached |
-| `:system_envoy` | Envoy-optimized (no memcached, no fork) | hiredis |
-| `:system_windows` | Windows-compatible (no memcached/fork) | hiredis |
-| `:redis_cache` | Redis cache backend only | hiredis |
-| `:memcached_cache` | Memcached cache backend only | libmemcached |
-| `:external_server_spec` | Server spec utilities | none |
-| `:circuit_breaker` | Circuit breaker state machine | none |
-| `:circuit_breaker_fetcher` | Fetcher wrapper with circuit breaker | none |
-
-```bash
-# Build specific cache backend (faster iteration)
-bazel build --config=clang-libstdcxx13 //pagespeed/system:redis_cache
-bazel build --config=clang-libstdcxx13 //pagespeed/system:memcached_cache
-
-# Run specific cache backend tests
-bazel test --config=clang-libstdcxx13 \
-  --test_env=REDIS_PORT=6379 --test_env=REDIS_HOST=redis \
-  //test/pagespeed/system:redis_cache_test
-bazel test --config=clang-libstdcxx13 \
-  --test_env=MEMCACHED_PORT=11211 --test_env=MEMCACHED_HOST=memcached \
-  //test/pagespeed/system:memcached_cache_test
-
-# Run system tests without external cache backends
-bazel test --config=clang-libstdcxx13 //test/pagespeed/system:system_core_test
-bazel test --config=clang-libstdcxx13 //test/pagespeed/system:external_server_spec_test
-```
-
-#### Image Library (`pagespeed/kernel/image/`)
-
-| Target | Description | External Deps |
-|--------|-------------|---------------|
-| `:image` | Full image library (backward-compatible) | all codecs |
-| `:image_base` | Common interfaces | libwebp (for format detection) |
-| `:jpeg` | JPEG codec | libjpeg-turbo |
-| `:png` | PNG codec | libpng, optipng |
-| `:webp` | WebP codec | libwebp |
-| `:gif` | GIF codec (depends on :png) | giflib |
-| `:image_converter` | Format conversion orchestrator | all codecs |
-| `:frame_processing` | Animation support | none |
-| `:image_analysis` | Quality analysis | jpeg |
-| `:image_resizer` | Image scaling | none |
-| `:image_optimizer` | High-level optimization API | all |
-
-```bash
-# Build specific image codec (faster iteration)
-bazel build --config=clang-libstdcxx13 //pagespeed/kernel/image:jpeg
-bazel build --config=clang-libstdcxx13 //pagespeed/kernel/image:png
-bazel build --config=clang-libstdcxx13 //pagespeed/kernel/image:webp
-
-# Test specific codec
-bazel test --config=clang-libstdcxx13 //test/pagespeed/kernel/image:jpeg_test
-bazel test --config=clang-libstdcxx13 //test/pagespeed/kernel/image:png_test
-bazel test --config=clang-libstdcxx13 //test/pagespeed/kernel/image:webp_test
-bazel test --config=clang-libstdcxx13 //test/pagespeed/kernel/image:gif_test
-```
-
-## Code Style
-
-- C++20 standard (required by Envoy dependencies)
-- Google C++ style (see `.clang-format`)
-- 80-column line limit
-
-## Envoy HTTP Fetcher
-
-For Envoy deployments, resource fetching uses libcurl (`CurlUrlAsyncFetcher`).
-This operates independently of Envoy's ClusterManager infrastructure, providing
-reliable HTTP/HTTPS fetching without TLS initialization issues.
-
-**Features:**
-- Full HTTP method support (GET, POST, PUT, DELETE, PATCH, PURGE, etc.)
-- Automatic gzip inflation for compressed responses
-- Configurable timeout (uses `FetcherTimeoutMs` setting)
-- HTTPS support with configurable SSL certificates
-
-**Code locations:**
-- `pagespeed/envoy/envoy_rewrite_driver_factory.cc` - AllocateFetcher() creates CurlUrlAsyncFetcher
-- `pagespeed/system/curl_url_async_fetcher.cc` - libcurl-based fetcher implementation
-
-## Envoy Build Artifacts
-
-Two build targets are available for the Envoy filter:
-
-| Target | Size | Description |
-|--------|------|-------------|
-| `//pagespeed/envoy:envoy_pagespeed` | ~212 MB | Standalone Envoy binary with PageSpeed filter |
-| `//pagespeed/envoy:pagespeed_filter.so` | ~113 MB (stripped) | Shared library for use with standard Envoy |
-
-The shared library registers itself via static initialization when loaded. It can be used with a standard Envoy binary via `LD_PRELOAD` or extension loading mechanisms.
-
-**Optimized dependencies:** The filter uses `filter_config_interface` instead of `main_common_lib`, avoiding QUIC, HTTP/3, and gRPC implementations. This reduces Envoy package dependencies from 137 to 52 packages.
-
-## Envoy Filter Status
-
-The Envoy filter supports both **IPRO (In-Place Resource Optimization)** for CSS/JS/images and **HTML rewriting** for HTML responses.
-
-### HTML Rewriting
-
-HTML rewriting uses **ProxyFetch** (`pagespeed/automatic/proxy_fetch.h`), the same battle-tested engine used by Apache and IIS. This ensures consistent behavior across all deployment modes.
-
-#### Architecture
-
-The Envoy implementation uses `CreateNewProxyFetch()` (not `StartNewProxyFetch()`) because Envoy already has the response body from the upstream filter chain - it doesn't need ProxyFetch to fetch from origin.
-
-```
-Request Flow:
-  Client Request
-       │
-       ▼
-  decodeHeaders() ──► Setup request context, options
-       │
-       ▼
-  Origin Server Response (via Envoy upstream)
-       │
-       ▼
-  encodeHeaders() ──► Detect HTML via Content-Type
-       │              ├──► Create EnvoyAsyncFetch (receives output)
-       │              ├──► Create RewriteDriver
-       │              ├──► InitiatePropertyCacheLookup()
-       │              └──► proxy_fetch_ = CreateNewProxyFetch()
-       │                   └──► proxy_fetch_->HeadersComplete()
-       ▼
-  encodeData() ──────► proxy_fetch_->Write(data)
-       │              └──► ProxyFetch buffers and parses on worker threads
-       ▼
-  end_stream ────────► proxy_fetch_->Done(true)
-       │              └──► ProxyFetch completes parsing, calls EnvoyAsyncFetch
-       ▼
-  EnvoyAsyncFetch::HandleDone()
-       │              └──► dispatcher_.post() to main thread
-       ▼
-  sendReply() ───────► Rewritten HTML to client
-```
-
-#### Threading Model
-
-ProxyFetch uses worker threads (`QueuedWorkerPool::Sequence`) for HTML parsing while Envoy runs on its dispatcher thread. `EnvoyAsyncFetch` bridges these:
-
-```
-Envoy Dispatcher Thread              ProxyFetch Worker Thread
-───────────────────────              ────────────────────────
-encodeHeaders()
-  └─ CreateNewProxyFetch()
-encodeData()
-  └─ proxy_fetch_->Write()  ───►     ExecuteQueued()
-                                       └─ ParseText()
-proxy_fetch_->Done()        ───►     FinishParseAsync()
-                                       └─ HandleDone()
-                            ◄───     dispatcher_.post()
-SendFinalResponse()
-  └─ filter_->sendReply()
-```
-
-`EnvoyAsyncFetch` uses `shared_from_this()` and atomic flags to safely handle the case where the Envoy filter is destroyed while ProxyFetch is still processing.
-
-#### Comparison with Apache and IIS
-
-| Aspect | Apache | IIS | Envoy |
-|--------|--------|-----|-------|
-| ProxyFetch method | `StartNewProxyFetch()` | `CreateNewProxyFetch()` | `CreateNewProxyFetch()` |
-| Data source | Fetcher (origin) | IIS buffer (complete) | Filter chain (streaming) |
-| Wait pattern | Blocking | Blocking | Non-blocking (dispatcher.post) |
-| Property cache | Full integration | Not used | Full integration |
-
-#### Activation Requirements
-
-HTML rewriting activates by default when **both** conditions are met:
-1. PageSpeed is enabled (not disabled via `PageSpeed=off`)
-2. `EnableHtmlRewriting` is `on` (default)
-
-This matches Apache behavior where HTML is rewritten automatically. IPRO (In-Place Resource Optimization) for CSS/JS/images goes through a separate code path and does not conflict with HTML rewriting.
-
-You can optionally customize filters via query parameters:
-
-```bash
-# HTML is rewritten by default - no query params needed
-curl "http://localhost:8080/page.html"
-
-# Override filters via query params
-curl "http://localhost:8080/page.html?PageSpeedFilters=collapse_whitespace"
-
-# Multiple filters
-curl "http://localhost:8080/page.html?PageSpeedFilters=combine_css,combine_javascript,rewrite_images"
-```
-
-#### Configuration Options
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `EnableHtmlRewriting` | `on` | Enable/disable HTML rewriting capability |
-
-Standard PageSpeed options (inherited from Apache) also apply, including filter configuration, domain mapping, and caching settings.
-
-#### Fallback Behavior
-
-The rewriter gracefully degrades in these scenarios:
-
-| Scenario | Behavior |
-|----------|----------|
-| Content not HTML | Pass through original |
-| Non-2xx status | Pass through original |
-| ProxyFetch creation fails | Pass through original |
-| Write to ProxyFetch fails | Pass through original |
-
-#### Resource Fetching During Rewriting
-
-When HTML rewriting triggers sub-resource fetches (e.g., for inlining CSS), the `CurlUrlAsyncFetcher` handles these requests independently of Envoy's ClusterManager. This is critical because:
-- RewriteDriver worker threads cannot access Envoy's ClusterManager (main thread only)
-- libcurl operates on its own thread pool, avoiding deadlocks
-
-#### Code Locations
-
-| File | Purpose |
-|------|---------|
-| `pagespeed/automatic/proxy_fetch.h` | ProxyFetch class (shared with Apache/IIS) |
-| `pagespeed/envoy/envoy_async_fetch.h` | Adapter receiving ProxyFetch output |
-| `pagespeed/envoy/envoy_async_fetch.cc` | Thread-safe dispatcher posting |
-| `pagespeed/envoy/http_filter.cc` | HTML detection, ProxyFetch setup (lines 782-1001) |
-| `pagespeed/envoy/envoy_rewrite_options.cc` | Option registration |
-
-#### Testing
-
-```bash
-# All Envoy filter tests
-bazel test --config=clang-libstdcxx13 //test/pagespeed/envoy/...
-```
-
-#### Debugging
-
-Look for these log messages:
-- `"Starting HTML rewriting for %s"` - Rewriting initiated
-- `"Failed to create ProxyFetch for %s"` - ProxyFetch creation failed
-- `"HTML rewriting failed for %s"` - Rewriting error
-
-**Envoy config:** See `pagespeed-envoy.yaml` for the Envoy v3 API configuration template.
-
-### Production Deployment
-
-This section covers production-ready features for deploying the PageSpeed Envoy filter in production environments.
-
-#### Configuration Options
-
-The filter supports several production-oriented configuration options via the `pagespeed.Decoder` proto:
-
-| Option | Type | Description |
-|--------|------|-------------|
-| `admin_auth` | `AdminAuthConfig` | Token-based authentication for admin endpoints |
-| `circuit_breaker` | `CircuitBreakerConfig` | Circuit breaker for resource fetching reliability |
-| `redis` | `RedisConfig` | External Redis cache configuration |
-| `file_cache_path` | `string` | Path for disk cache (default: `/tmp/envoy_pagespeed_cache/`) |
-| `lru_cache_kb_per_process` | `int64` | In-memory LRU cache size in KB (default: 512000 = 500MB) |
-| `file_cache_size_kb` | `int64` | Disk cache size limit in KB (default: 10240000 = 10GB) |
-
-**AdminAuthConfig options:**
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `enabled` | `bool` | `false` | Enable authentication for admin endpoints |
-| `token` | `string` | (required) | Bearer token for `Authorization` header |
-| `allowed_ips` | `repeated string` | (all) | IP ranges in CIDR notation (e.g., `10.0.0.0/8`) |
-| `rate_limit_rpm` | `int32` | `100` | Rate limit in requests per minute (0 = disabled) |
-
-#### Prometheus Metrics Integration
-
-The PageSpeed filter exports metrics via Envoy's stats system, which are available at:
-- `/stats` - All Envoy stats including PageSpeed metrics
-- `/stats/prometheus` - Prometheus-compatible format
-
-**PageSpeed-specific metrics:**
-
-| Metric | Type | Description |
-|--------|------|-------------|
-| `pagespeed.requests_total` | Counter | Total requests processed |
-| `pagespeed.html_rewrites_total` | Counter | Successful HTML rewrites |
-| `pagespeed.html_rewrites_failed` | Counter | Failed HTML rewrites |
-| `pagespeed.html_rewrites_timeout` | Counter | HTML rewrites that timed out |
-| `pagespeed.ipro_cache_hits` | Counter | IPRO cache hits |
-| `pagespeed.ipro_cache_misses` | Counter | IPRO cache misses |
-| `pagespeed.ipro_served_total` | Counter | Resources served via IPRO |
-| `pagespeed.ipro_not_rewritable` | Counter | Non-rewritable resources |
-| `pagespeed.active_html_rewrites` | Gauge | Currently active HTML rewrites |
-| `pagespeed.rewrite_latency_ms` | Histogram | HTML rewrite latency distribution |
-
-**Recommended alerts:**
-
-```yaml
-# Alert if HTML rewrite error rate exceeds 5%
-- alert: PageSpeedHighErrorRate
-  expr: rate(pagespeed_html_rewrites_failed[5m]) / rate(pagespeed_html_rewrites_total[5m]) > 0.05
-  for: 5m
-  labels:
-    severity: warning
-
-# Alert if rewrite latency p99 exceeds deadline
-- alert: PageSpeedHighLatency
-  expr: histogram_quantile(0.99, rate(pagespeed_rewrite_latency_ms_bucket[5m])) > 2000
-  for: 5m
-  labels:
-    severity: warning
-
-# Alert on cache hit rate drops
-- alert: PageSpeedLowCacheHitRate
-  expr: rate(pagespeed_ipro_cache_hits[5m]) / (rate(pagespeed_ipro_cache_hits[5m]) + rate(pagespeed_ipro_cache_misses[5m])) < 0.7
-  for: 15m
-  labels:
-    severity: info
-```
-
-#### Health Check Endpoint
-
-The filter provides a configurable health check endpoint for load balancer integration:
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `HealthPath` | `/pagespeed/health` | Health check endpoint path |
-
-The health endpoint returns JSON with status, version, uptime, and cache statistics:
-
-```json
-{
-  "status": "healthy",
-  "version": "1.15.0.0",
-  "uptime_seconds": 3600,
-  "cache": {
-    "hit_rate": 0.85,
-    "hits": 1000,
-    "misses": 177,
-    "size_bytes": 104857600
-  }
-}
-```
-
-**Note:** The health endpoint is intentionally excluded from admin authentication to allow load balancers to perform health checks without authentication tokens. However, it does receive security headers (X-Frame-Options, etc.) and restrictive Cache-Control to prevent caching of health status.
-
-Configure in PageSpeed options:
-```
-# Custom health check path
-HealthPath /health
-```
-
-#### Circuit Breaker
-
-The filter includes a circuit breaker for resource fetching to prevent cascade failures.
-
-**CircuitBreakerConfig options:**
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `enabled` | `bool` | `false` | Enable circuit breaker for resource fetching |
-| `failure_threshold` | `int32` | `5` | Consecutive failures before opening circuit |
-| `success_threshold` | `int32` | `2` | Consecutive successes to close circuit |
-| `timeout_ms` | `int64` | `30000` | Time in OPEN state before testing (HALF_OPEN) |
-
-**Circuit breaker states:**
-- **CLOSED**: Normal operation, requests allowed
-- **OPEN**: Circuit tripped, requests blocked with 503 status
-- **HALF_OPEN**: Testing recovery with limited requests
-
-**Graceful degradation:** When the circuit breaker is OPEN, responses include the header `X-PageSpeed-Degraded: circuit-breaker-open` to indicate the system is operating in degraded mode.
-
-**Configuration example:**
-```yaml
-circuit_breaker:
-  enabled: true
-  failure_threshold: 5
-  success_threshold: 2
-  timeout_ms: 30000
-```
-
-#### Security Headers
-
-The PageSpeed filter adds security headers to **admin endpoints only**, not to user-facing content (HTML rewrites, IPRO cache hits). This ensures optimized resources maintain proper cacheability.
-
-**Admin endpoints that receive security headers:**
-- Health check (`/pagespeed/health`)
-- Statistics (`/pagespeed_statistics`)
-- Console (`/pagespeed_console`)
-- Admin pages (`/pagespeed_admin`)
-- Authentication errors (401, 429 responses)
-
-**Security headers added to admin responses:**
-
-| Header | Value | Purpose |
-|--------|-------|---------|
-| `X-Frame-Options` | `SAMEORIGIN` | Prevents clickjacking |
-| `X-Content-Type-Options` | `nosniff` | Prevents MIME sniffing |
-| `X-XSS-Protection` | `1; mode=block` | Legacy XSS protection |
-| `Content-Security-Policy` | `default-src 'self'; script-src 'self' 'unsafe-inline'` | Restricts resource loading |
-| `Cache-Control` | `private, no-store, no-cache, must-revalidate` | Prevents caching of admin data |
-
-**User-facing content (IPRO, HTML rewrites):**
-- Receives cache headers set by PageSpeed optimization (e.g., `max-age=31536000, public`)
-- Does NOT receive security headers or restrictive cache directives
-- This is intentional to ensure CDNs and browsers can properly cache optimized resources
-
-#### Security Best Practices
-
-For production deployments:
-
-1. **Enable admin authentication:**
-   ```yaml
-   admin_auth:
-     enabled: true
-     token: "your-secure-token-here"
-     allowed_ips:
-       - "10.0.0.0/8"      # Internal network
-       - "192.168.0.0/16"  # Private network
-     rate_limit_rpm: 60
+| Version Header | `X-PageSpeed` | `X-PageSpeed` |
+| Config Format | web.config XML | httpd.conf directives |
+
+### Current Test Coverage (IIS)
+
+Core tests verified passing:
+- `test_sanity.py`: 6/6 (100%) - Basic connectivity, headers
+- `test_admin.py`: 11/11 (100%) - Admin UI, health checks
+- `test_ipro.py`: 15/15 (100%) - IPRO optimization
+- `test_html_rewrite.py`: 34/34 (100%) - HTML filter tests
+- `test_combiners.py`: 17/17 (100%) - CSS/JS combining
+- `test_cache_control.py`: 8/8 (100%) - Cache headers
+- `test_headers.py`: 13/13 (100%) - HTTP response headers
+- `test_preload.py`: 15/15 (100%) - Preload hints (requires warm pcache)
+- `test_dns_prefetch.py`: 9/9 (100%) - DNS prefetch (requires warm pcache)
+- Full suite: 350/356 passed (5 skipped, 1 timing-dependent)
+
+### Build Performance on High-Core Machines (>64 cores)
+
+Windows splits processors into groups of 64. By default, Bazel's JVM and all
+child processes are confined to one group. On a 128-thread machine this means
+half the cores sit idle. Two local fixes are needed (both go in `user.bazelrc`,
+which is gitignored):
+
+1. **JDK upgrade**: Install JDK 21.0.6+ (e.g. `winget install Azul.Zulu.21.JDK`)
+   and add to `user.bazelrc`:
+   ```
+   startup --server_javabase="C:/Program Files/Zulu/zulu-21"
+   startup --host_jvm_args=-XX:+UseAllWindowsProcessorGroups
    ```
 
-2. **Restrict admin access by IP:** Use `allowed_ips` to limit admin endpoint access to internal networks only.
-
-3. **Use rate limiting:** Set `rate_limit_rpm` to prevent abuse of admin endpoints.
-
-4. **Secure the Envoy admin interface:** Configure Envoy's admin interface on a separate port and restrict access:
-   ```yaml
-   admin:
-     address:
-       socket_address:
-         address: 127.0.0.1  # Localhost only
-         port_value: 9901
+2. **Move output_base to ReFS/Dev Drive**: Bazel's default output_base on C:
+   (NTFS) causes MFT lock contention with many concurrent compilations. Add:
+   ```
+   startup --output_base=D:/_bazel
    ```
 
-5. **Configure appropriate cache sizes:** Set `lru_cache_kb_per_process` and `file_cache_size_kb` based on available memory and disk.
+3. **Minifilters**: Run `fltmc filters` (admin) and check for `bindflt` — it
+   can add up to 3x overhead on file metadata operations. Unload with
+   `fltmc unload bindflt`. Also consider unloading `wcifs` and `CldFlt`.
 
-6. **Monitor key metrics:** Set up alerts for error rates, latency, and cache hit rates (see Prometheus section above).
+4. **Job count**: Use `--jobs=96` on 128-thread machines to avoid Windows
+   `CreateProcessW` OOM errors. The `--local_resources=cpu=HOST_CPUS` in
+   `pagespeed.bazelrc` already advertises all cores for scheduling.
 
-#### Example Production Configuration
+### Known Issues
 
-See `pagespeed-envoy.yaml` for a complete example with production settings including:
-- Admin authentication
-- Redis cache backend
-- Prometheus metrics exposure
-- Health check endpoint
-- Security-hardened Envoy admin
+1. **googleurl requires clang-cl** - LLVM installed automatically by provisioning
+2. **Git Bash path conversion** - When running pytest from Git Bash, paths like `/` get converted to Windows paths. Use `cmd /c` to run tests with environment variables
+3. **yq symlink on Windows** - Fixed via `bazel/envoy_repo_yq_windows.patch`. Windows CreateProcessW cannot execute symlinks, so the patch uses the direct path to `@yq_windows_amd64//:yq.exe`
+4. **Winsock header ordering** - On Windows, `winsock2.h` must be included BEFORE `windows.h` and `httpserv.h` to avoid redefinition errors (fd_set, timeval, hostent)
+5. **clang-cl defines `_WIN32` not `WIN32`** - Use `#if defined(_WIN32) || defined(WIN32)` for Windows-specific code
+6. **IIS static files lack Cache-Control** - IIS serves static CSS/JS without Cache-Control headers by default; IPRO-processed resources get proper cache headers
+7. **Noscript insertion for old browsers** - PageSpeed adds noscript fallback tags for older user-agents (e.g., Chrome 6), which can increase HTML size
+8. **IIS `allowDoubleEscaping` required** - Combined resource URLs contain `+` characters (e.g., `a.css+b.css.pagespeed.cc.HASH.css`) which trigger IIS RequestFilteringModule 404.11 errors. Set `<requestFiltering allowDoubleEscaping="true" />` in `applicationhost.config` or `web.config`. The `Setup-IISExpress.ps1` script configures this automatically
+9. **IIS `Clear()` clears headers AND body** - `IHttpResponse::Clear()` clears both response headers and entity body, not just the body. Headers set before `Clear()` in `OnSendResponse` will not survive. Headers must be set after `Clear()` or in `HandleDone()`/`HandleHeadersComplete()`
+10. **IIS Express vs full IIS port conflict** - If full IIS (W3SVC, PID 4) is running on the same port, it handles requests instead of IIS Express. Stop W3SVC/WAS before starting IIS Express: `Stop-Service W3SVC -Force; Stop-Service WAS -Force`. Verify with `netstat -ano | grep :8080`
+11. **IIS Express `allowDefinition` must use `AppHostOnly`** - When full IIS is also installed, `allowDefinition="MachineOnly"` in IIS Express's `applicationhost.config` causes startup failure ("Configuration section can only be set in machine.config"). Use `AppHostOnly` instead
 
-### Envoy vs Apache: Known Differences
+See `windows-dev/README.md` for detailed troubleshooting.
 
-The Envoy filter has some behavioral differences compared to Apache's mod_pagespeed. These are documented here for reference and are covered by skip markers in the test suite.
+### CI-Specific Notes
 
-#### Filter Behavior Differences
+The Windows CI runs as a GitHub Actions runner **service** (not interactive), which has a minimal environment:
 
-| Filter | Issue | Root Cause |
-|--------|-------|------------|
-| `combine_css` | Times out waiting for CSS combination | Async worker pool coordination in ProxyFetch streaming architecture |
-| `flatten_css_imports` | `CssInlineImportToLinkFilter` misses some style elements | HTML parsing stream timing in non-blocking model |
-| `extend_cache_css` | Resource fetch times out | Async fetch via CurlUrlAsyncFetcher doesn't complete in time |
+- **`--config=clang-cl` is required** — googleurl `#error`s on plain MSVC. The CI workflow must use `--config=vendored --config=windows --config=clang-cl`.
+- **`--incompatible_strict_action_env`** (`.bazelrc` line 29) sanitizes the environment. Env vars like `PROGRAMFILES` must be set explicitly with a value in `--action_env=VAR=value`, not just forwarded with `--action_env=VAR`.
+- **PATH must include Python and Git tools** — the service doesn't inherit the interactive user's PATH. Python must come before Git's `usr/bin` (Git ships a broken `python3` stub). Set per-step in the CI workflow.
+- **`--workspace_status_command`** — the tarball has no `.git` directory, so the default workspace status script (`bazel/get_workspace_status`) fails. Override with `--workspace_status_command="cmd /c echo."` for Windows.
+- **Runner services** run as Windows services managed via `sc.exe`, set to `start=auto` for boot persistence.
 
-#### IPRO Cache Header Preservation
+## IIS Platform Internals
 
-**Issue:** Tests `test_extend_cache_preserves_no_cache` and `test_rewrite_javascript_preserves_no_cache` fail because Envoy's IPRO doesn't preserve `no-cache` from upstream.
+Critical knowledge for anyone modifying IIS module code. These constraints are not obvious from the code structure alone.
 
-**Root Cause:** Apache calls `recorder->SaveCacheControl()` in `mod_instaweb.cc:808-819` before modifying headers for s-maxage. Envoy never calls this method (`http_filter.cc:1181-1193` has a TODO comment).
+### String Encoding
 
-**Impact:** Cached resources lose their original `no-cache` directive.
+The helpers `s2ws()` and `ws2s()` in `iis_misc.cpp` and `util.cpp` use `CP_ACP` (ANSI Code Page) — they are only correct on US English / Latin-locale Windows. On any machine with a non-Latin ANSI code page (e.g., Asian-locale Windows Server), these conversions silently corrupt Unicode characters in paths and host names.
 
-#### Statistics Tracking
+**Rule**: All new string conversions between `std::wstring` (IIS APIs) and `std::string`/`GoogleString` (PSOL) must use `CP_UTF8`. Use `WideCharToMultiByte(CP_UTF8, ...)` and `MultiByteToWideChar(CP_UTF8, ...)` directly. The URL conversion helpers in `iis_utils.cc` and the inline conversion in `iis_http_module.cpp` are the correct models.
 
-**Issue:** `resource_404_count` statistic not tracked on Envoy.
+### IIS Request Lifecycle
 
-**Root Cause:** Apache uses `ApacheServerContext::ReportResourceNotFound()` to increment this counter. Envoy's `EnvoyServerContext` doesn't have an equivalent error handler.
+- **`RQ_NOTIFICATION_PENDING`** is a destructive commitment: returning this means IIS will not complete the request normally. The module must call `IndicateCompletion()` or `PostCompletion()` exactly once.
+- **`http_context_`** is nulled immediately after `IndicateCompletion()` (`iis_module_base_fetch.cpp`). Any code that accesses `http_context_` after that call on any thread will crash.
+- **`OnAsyncCompletion`** is called on a thread pool thread, not the original IIS thread. PSOL objects (`RewriteDriver`, `ProxyFetch`) are NOT thread-safe — do not access them from async callbacks without synchronization.
+- **Multiple `OnSendResponse` calls**: IIS fires this potentially multiple times for chunked responses. Check `HTTP_SEND_RESPONSE_FLAG_MORE_DATA` to determine if more data is coming.
 
-#### Request Header Handling
+### Header-Before-Body Constraint
 
-**Issue:** `X-PSA-Blocking-Rewrite-Mode` header is ignored.
+IIS modules in `RQ_SEND_RESPONSE` see response headers at the same time as (or just before) the first body chunk, but cannot re-transmit headers after they have been sent. Any filter that conditionally modifies HTTP response headers based on HTML body analysis must be disabled for IIS.
 
-**Root Cause:** Envoy's ProxyFetch model is fundamentally non-blocking. This Apache-specific header has no effect because Envoy doesn't check it in `http_filter.cc`.
+Currently, `convert_meta_tags` is forbidden for this reason (`iis_rewrite_driver_factory.cpp:91`). If adding new filters that modify `Content-Type`, `Vary`, or custom headers based on body scanning, add them to the `ForbidFiltersByCommaSeparatedList` call.
 
-#### Version Header
+### Frozen RewriteOptions
 
-**Issue:** Version header shows `@MAJOR@.@MINOR@...` placeholders instead of actual version.
+After `RewriteOptions` are initialized from the configuration file, they are frozen (immutable). Any attempt to modify options after initialization (e.g., via COM API or runtime reconfiguration) will silently fail — the options object rejects mutations after freeze. This affects:
+- Dynamic filter enable/disable at runtime
+- Any attempt to change options from `OnBeginRequest` based on per-request conditions
+- COM API calls that try to modify page speed settings after app pool start
 
-**Root Cause:** Missing Bazel genrule to process `version.h.in` template. The GYP build system handled this, but Bazel treats `version.h` as a static file.
+Per-request option overrides (e.g., from query parameters) work through a different mechanism (`determine_options` in `iis_misc.cpp`) that creates a request-scoped copy, not by mutating the frozen global options.
 
-**Files:**
-- `net/instaweb/public/version.h.in` - Template with placeholders
-- `net/instaweb/public/VERSION` - Actual version values (1.15.0.0)
-- `net/instaweb/public/version.h` - Static file needing substitution
+### Shared Memory (Correction)
 
-#### Architectural Context
+The IIS module currently uses `InProcessSharedMem`, NOT `WindowsSharedMem`. Each `w3wp.exe` worker process has independent statistics — there is no cross-process statistics sharing on IIS. `WindowsSharedMem` exists in the codebase (`pagespeed/kernel/sharedmem/windows_shared_mem.h`) but is not wired in.
 
-The fundamental difference is architectural:
-- **Apache**: Synchronous request/response model - filters can block and wait for completion
-- **Envoy**: Non-blocking, streaming architecture - ProxyFetch runs on worker threads with async callbacks
+### App Pool Identity and Permissions
 
-This means some Apache behaviors that depend on blocking/waiting cannot be directly replicated in Envoy without significant changes to the filter coordination model.
+The IIS module runs as `IIS AppPool\<PoolName>` (`ApplicationPoolIdentity`) by default. This account has no rights to:
+- `%ProgramData%\We-Amp\IISWebSpeed\` (config directory)
+- Any custom `FileCachePath` directory
 
-### Cyclone Cache Build Rule
+Grant `IIS_IUSRS` `ReadAndExecute` on the config directory and `Modify` on the cache directory. The cache path write test in `IisProcessContext::GetServerContext()` passes in dev (where the machine account is used) but fails in production without these permissions.
 
-The Cyclone cache external dependency build rule is in `bazel/cyclone.bzl`. If the upstream Cyclone repo adds new source directories, the `srcs` and `hdrs` globs must be updated to include them.
+### `__x_` Header Prefix Convention
 
-### Zero-Copy Cache Integration
+Headers prefixed with `__x_` in `PopulateResponseHeaders()` are internal IIS-specific bookmarks for cache-related headers (Expires, ETag, Last-Modified) that must survive PSOL processing and be re-applied to the final response. Do not add new uses of this prefix without understanding the full header-replay path in `IisModuleBaseFetch::HandleHeadersComplete()`.
 
-The Cyclone cache supports zero-copy reads via memory-mapped I/O. When reading from the disk cache, data can be accessed directly through the mmap'd region without copying into a separate buffer.
+### DllMain Loader Lock
 
-**Key classes:**
-- `MappedSharedString` (`pagespeed/kernel/base/mapped_shared_string.h`) - Holds either an owned `SharedString` or a borrowed view into mmap'd memory
-- `CacheInterface::Callback` (`pagespeed/kernel/base/cache_interface.h`) - Uses `MappedSharedString` as its value storage
+`ProcessContext` is constructed in `DllMain(DLL_PROCESS_ATTACH)` (`dll_main.cc`), which runs under the Windows loader lock. Do NOT:
+- Call any PSOL API that triggers dynamic library loading from inside `DllMain`
+- Add initialization to `DllMain` that allocates resources requiring other DLLs
+- Use static constructors in translation units linked into the IIS DLL that load DLLs
 
-**Using cached values:**
-```cpp
-// In a CacheInterface::Callback subclass:
-void Done(KeyState state) override {
-  if (state == kAvailable) {
-    // Zero-copy access - returns StringPiece pointing to mmap'd memory
-    StringPiece data = value().Value();
+Apache creates `ProcessContext` in `ap_hook_pre_config` (no loader lock). Envoy creates `ProcessContext` lazily via `EnvoyProcessContext` constructor (in `http_filter_config.cc`). The IIS path is the most constrained.
 
-    // Check if this is a zero-copy path
-    if (value().is_mapped()) {
-      // Data is mmap'd - avoid holding reference too long
-    }
+### Port 80 Hardcoding (Known Limitation)
 
-    // If you need owned data (copies if mapped):
-    SharedString owned = value().ToOwned();
-  }
-}
-```
+`IisRewriteDriverFactory` is constructed with hardcoded port `80` (`iis_rewrite_driver_factory.cpp`). For HTTPS listeners on port 443 or non-standard ports, the loopback fetch URL constructed by `LoopbackRouteFetcher` will use the wrong port for IPRO resource back-fetching. This is a known bug (see `TODO: fix port!` in `iis_server_context.cpp:32`).
 
-**Current limitations:**
-- **HTTPValue does not benefit from zero-copy:** The `HTTPValue::Link()` method requires a `SharedString`, so HTTP cache hits call `value().ToOwned()` which copies the data. True zero-copy for HTTP caching would require modifying `HTTPValue` to use `MappedSharedString` internally.
-- **RAM cache hits are not zero-copy:** Only disk cache hits provide mmap'd access. RAM cache hits use the traditional copy path.
+## Supplementary Documentation
 
-**Testing with sanitizers:**
-```bash
-# Run with Thread Sanitizer to verify thread-safety
-bazel test --config=clang-tsan //test/pagespeed/kernel/cache:cache
-bazel test --config=clang-tsan //test/pagespeed/kernel/base:base_test --test_filter="*MappedSharedString*"
-```
+- `windows-dev/README.md` - Detailed Windows/IIS setup
+- `pagespeed-envoy.yaml` - Production Envoy configuration
+- `test/system/README.md` - System test framework
+- `pagespeed/envoy/README.md` - Envoy filter internals
+- `ENVOY_TEST_PROGRESS.md` - Envoy test validation tracking and known limitations
+- `docs/plans/` - Historical planning documents (Envoy, IIS, nginx, WASM)
+
+## Git Workflow Rules
+
+- Always verify current branch with `git branch --show-current` before committing.
+- Never use `git commit --amend` unless the user explicitly requests it.
+- Always `git push` after committing unless told otherwise.
+- When working across branches, confirm the target branch with the user before committing.
+
+## Debugging Methodology
+
+- Read the full error output before hypothesizing a cause.
+- For IIS/Windows crashes: request WinDbg or crash dump analysis first, not indirect breadcrumb approaches.
+- For CI failures: check the full error output before hypothesizing; do not assume a cause without evidence.
+- When a fix fails in CI, analyze WHY it failed before trying another approach — do not iterate blindly.
+- Verify hypotheses with evidence before acting on them.

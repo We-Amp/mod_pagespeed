@@ -110,6 +110,29 @@ echo "============================================================"
 #    clang-libstdcxx13 bazelrc hardcoded paths (/usr/include/c++/13,
 #    /usr/lib/gcc/x86_64-linux-gnu/13) already match.
 # ---------------------------------------------------------------------------
+
+# Pinned bazelisk launcher used when no bazel/bazelisk is already present.
+# Pin the exact version and verify its sha256 (fail-closed) rather than
+# fetching the mutable "latest" URL and exec'ing it unverified as the release
+# build toolchain. Update both values together when bumping.
+BAZELISK_VERSION="v1.29.0"
+BAZELISK_SHA256="5a408715e932c0250d28bd84555f12edbf70117de42f9181691c736eacc4a992"
+
+install_bazelisk() {
+  if command -v "${BAZEL}" >/dev/null 2>&1; then
+    return 0
+  fi
+  local url="https://github.com/bazelbuild/bazelisk/releases/download/${BAZELISK_VERSION}/bazelisk-linux-amd64"
+  wget -qO /usr/local/bin/bazelisk "${url}"
+  if ! echo "${BAZELISK_SHA256}  /usr/local/bin/bazelisk" | sha256sum -c - >/dev/null 2>&1; then
+    echo "ERROR: bazelisk ${BAZELISK_VERSION} checksum mismatch; refusing to use it" >&2
+    rm -f /usr/local/bin/bazelisk
+    exit 1
+  fi
+  chmod +x /usr/local/bin/bazelisk
+  BAZEL=bazelisk
+}
+
 install_deps_noble() {
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq
@@ -120,13 +143,8 @@ install_deps_noble() {
     zlib1g-dev libpcre3-dev libssl-dev \
     python3 unzip zip gperf bison flex \
     dpkg-dev fakeroot >/dev/null
-  # bazelisk if bazel/bazelisk not already provided.
-  if ! command -v "${BAZEL}" >/dev/null 2>&1; then
-    wget -qO /usr/local/bin/bazelisk \
-      https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-amd64
-    chmod +x /usr/local/bin/bazelisk
-    BAZEL=bazelisk
-  fi
+  # bazelisk (pinned + checksum-verified) if bazel/bazelisk not already provided.
+  install_bazelisk
 }
 
 install_deps_el9() {
@@ -139,12 +157,8 @@ install_deps_el9() {
     zlib-devel pcre-devel openssl-devel \
     python3 unzip zip gperf bison flex \
     rpm-build tar gzip make >/dev/null
-  if ! command -v "${BAZEL}" >/dev/null 2>&1; then
-    wget -qO /usr/local/bin/bazelisk \
-      https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-amd64
-    chmod +x /usr/local/bin/bazelisk
-    BAZEL=bazelisk
-  fi
+  # bazelisk (pinned + checksum-verified) if bazel/bazelisk not already provided.
+  install_bazelisk
 }
 
 if [ "${SKIP_DEPS:-}" != "1" ]; then
@@ -157,7 +171,7 @@ fi
 
 # ---------------------------------------------------------------------------
 # 2. Per-distro Bazel toolchain flags.
-#    Common: --config=vendored (offline, repo-cache + cyclone/modpagespeed2
+#    Common: --config=vendored (offline, repo-cache + cyclone
 #    override) + -c opt.
 #    noble: --config=clang-libstdcxx13 works as-is (its hardcoded GCC-13 paths
 #           are noble's apt paths).

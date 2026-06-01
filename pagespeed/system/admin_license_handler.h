@@ -50,11 +50,29 @@ class AdminLicenseHandler {
   }
 
   // Check if the current license is valid and not expired.
+  // Expiry is always re-derived from the current wall-clock time, so a
+  // long-running process does not keep optimizing indefinitely past a token's
+  // exp (see IsLicenseTimeValid).
   bool IsLicenseValid() const;
 
+  // the design record: true only if the license is valid AND grants the agent_optimize
+  // entitlement. A valid license without the entitlement returns false (the
+  // feature is off, base optimization unaffected). Re-derives expiry like
+  // IsLicenseValid.
+  bool IsAgentOptimizeEntitled() const;
+
+  // Pure expiry predicate, factored out for testing: returns true if a license
+  // whose absolute expiry is |expires_at| (unix seconds; <= 0 means "never
+  // expires", a v1 token) is still valid at wall-clock |now_sec|, including the
+  // |grace_sec| grace window after expiry.
+  static bool IsLicenseTimeValid(int64_t expires_at, int64_t now_sec,
+                                 int64_t grace_sec);
+
   // Set a callback invoked whenever license validity changes.
-  // Used by SystemServerContext to update its atomic license_active_ flag.
-  void set_license_state_callback(std::function<void(bool)> cb) {
+  // Used by SystemServerContext to update its atomic license_active_ flag and
+  // its agent_optimize_entitled_ flag. Args: (license_active,
+  // agent_optimize_entitled).
+  void set_license_state_callback(std::function<void(bool, bool)> cb) {
     license_state_callback_ = std::move(cb);
   }
 
@@ -135,6 +153,12 @@ class AdminLicenseHandler {
   GoogleString
       license_sid_;  // guarded by license_mu_ (FastSpring subscription ID)
   int64_t license_iat_ = 0;  // guarded by license_mu_
+  // the design record: whether the applied token's entitlements include "agent_optimize".
+  bool license_agent_optimize_ = false;  // guarded by license_mu_
+
+  // Validity predicate assuming license_mu_ is already held (avoids a recursive
+  // lock when IsAgentOptimizeEntitled composes validity + entitlement).
+  bool IsLicenseValidLocked() const;
 
   // Notify listener of license state changes.
   void NotifyLicenseStateChange();
@@ -142,7 +166,8 @@ class AdminLicenseHandler {
   // IMPORTANT: Must be set during initialization (PostInitHook) before any
   // requests are served. Not protected by a mutex — relies on happens-before
   // from server startup sequencing. Must not be modified after Init.
-  std::function<void(bool)> license_state_callback_;
+  // the design record: args are (license_active, agent_optimize_entitled).
+  std::function<void(bool, bool)> license_state_callback_;
 
   friend class LicenseProxyFetch;
   friend class RenewalFetch;

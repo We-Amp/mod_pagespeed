@@ -1,41 +1,25 @@
 # Copyright (c) 2024-2026 We-Amp B.V.
 #
-# License crypto code: canonical source is in ModPageSpeed 2.0 (src/crypto/).
-# We compile from @modpagespeed2 using:
-#   - local_defines to set PAGESPEED_LICENSE_NAMESPACE=net_instaweb
-#     (the 2.0 source supports this macro natively)
-#   - genrule to rewrite include paths (src/crypto/ -> pagespeed/kernel/license_v2/)
+# License crypto code: canonical source is in ModPageSpeed 2.0 (src/crypto/),
+# VENDORED here as checked-in source under pagespeed/kernel/license_v2/. The six files carry a GENERATED banner and are produced by
+# tools/sync-crypto.sh, which applies the same #include-path rewrite the old
+# genrule did from a pinned 2.0 commit. The namespace is set at compile time via
+# the PAGESPEED_LICENSE_NAMESPACE=net_instaweb -D flag (the 2.0 source supports
+# this macro natively), so the compiled bytes are unchanged.
 #
-# To update: bump MODPAGESPEED2_COMMIT in bazel/repositories.bzl.
-# If 2.0 adds new files to src/crypto/, update the genrule list and
-# exports_files in @modpagespeed2//src/crypto:BUILD.
+# To update: bump PINNED_MPS2_COMMIT in tools/sync-crypto.sh, re-run it, and
+# commit. Drift is caught by the crypto-drift CI check.
 
 load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 
 _LICENSE_NS = "PAGESPEED_LICENSE_NAMESPACE=net_instaweb"
 _PRODUCT_ID = "PAGESPEED_PRODUCT_ID=\\\"mps1\\\""
 
-# Adapt 2.0 source files: only rewrite #include paths.
-# Namespace is handled at compile time via -D flag (defines, propagates to dependents).
-[genrule(
-    name = "adapt_" + f.replace(".", "_"),
-    srcs = ["@modpagespeed2//src/crypto:" + f],
-    outs = [f],
-    cmd = "sed -e 's|#include \"src/crypto/|#include \"pagespeed/kernel/license_v2/|g' -e 's|#include \"lib/base/string_util.h\"|#include \"pagespeed/kernel/base/string_util.h\"|g' $< > $@",
-) for f in [
-    "license_token.h",
-    "license_token.cc",
-    "license_verifier.h",
-    "license_verifier.cc",
-    "license_signer.h",
-    "license_signer.cc",
-]]
-
 # License token serialization (no crypto dependency)
 cc_library(
     name = "license_token",
-    srcs = [":adapt_license_token_cc"],
-    hdrs = [":adapt_license_token_h"],
+    srcs = ["license_token.cc"],
+    hdrs = ["license_token.h"],
     defines = [_LICENSE_NS, _PRODUCT_ID],
     visibility = ["//visibility:public"],
     deps = [
@@ -47,8 +31,8 @@ cc_library(
 # License verifier (Ed25519 signature check)
 cc_library(
     name = "license_verifier",
-    srcs = [":adapt_license_verifier_cc"],
-    hdrs = [":adapt_license_verifier_h"],
+    srcs = ["license_verifier.cc"],
+    hdrs = ["license_verifier.h"],
     defines = [_LICENSE_NS, _PRODUCT_ID],
     visibility = ["//visibility:public"],
     deps = [
@@ -61,8 +45,8 @@ cc_library(
 cc_library(
     name = "license_verifier_testkey",
     testonly = True,
-    srcs = [":adapt_license_verifier_cc"],
-    hdrs = [":adapt_license_verifier_h"],
+    srcs = ["license_verifier.cc"],
+    hdrs = ["license_verifier.h"],
     defines = [_LICENSE_NS, "PAGESPEED_TEST_LICENSE_KEY", _PRODUCT_ID],
     visibility = ["//visibility:public"],
     deps = [
@@ -74,8 +58,8 @@ cc_library(
 # License signer (for key generation and testing only)
 cc_library(
     name = "license_signer",
-    srcs = [":adapt_license_signer_cc"],
-    hdrs = [":adapt_license_signer_h"],
+    srcs = ["license_signer.cc"],
+    hdrs = ["license_signer.h"],
     defines = [_LICENSE_NS, _PRODUCT_ID],
     visibility = ["//visibility:public"],
     deps = [

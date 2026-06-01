@@ -166,30 +166,49 @@ void AdminLicenseHandler::Init() {
   }
 }
 
+bool AdminLicenseHandler::IsLicenseTimeValid(int64_t expires_at,
+                                             int64_t now_sec,
+                                             int64_t grace_sec) {
+  // A v1 token with no expiry is always valid.
+  if (expires_at <= 0) return true;
+  // Not yet expired.
+  if (now_sec <= expires_at) return true;
+  // Expired: allow optimization to continue during the grace window.
+  // Overflow-safe form of now_sec < expires_at + grace_sec (now_sec is past
+  // expires_at here, so the subtraction is non-negative).
+  return (now_sec - expires_at) < grace_sec;
+}
+
+bool AdminLicenseHandler::IsLicenseValidLocked() const {
+  if (!license_valid_) return false;
+
+  // Always re-derive expiry from the current wall clock rather than trusting
+  // the apply-time license_expired_ flag. Otherwise a token that was valid
+  // when applied would keep optimizing forever (until restart / disk reload /
+  // successful renewal), defeating the time-bounded licensing model — even
+  // long after the token's exp has passed.
+  int64_t now_sec = std::chrono::duration_cast<std::chrono::seconds>(
+                        std::chrono::system_clock::now().time_since_epoch())
+                        .count();
+  return IsLicenseTimeValid(license_expires_at_, now_sec, kGracePeriodSec);
+}
+
 bool AdminLicenseHandler::IsLicenseValid() const {
   std::lock_guard<std::mutex> lock(license_mu_);
-  if (license_valid_ && !license_expired_) return true;
+  return IsLicenseValidLocked();
+}
 
-  // 72-hour grace period: if the token is valid but expired, allow
-  // optimization to continue for kGracePeriodSec after the expiry time.
-  if (license_valid_ && license_expired_ && license_expires_at_ > 0) {
-    int64_t now = std::chrono::duration_cast<std::chrono::seconds>(
-                      std::chrono::system_clock::now().time_since_epoch())
-                      .count();
-    // Overflow-safe grace period check: equivalent to
-    // now < license_expires_at_ + kGracePeriodSec but avoids overflow
-    // when license_expires_at_ is near INT64_MAX.
-    if (now <= license_expires_at_ ||
-        (now - license_expires_at_) < kGracePeriodSec) {
-      return true;
-    }
-  }
-  return false;
+bool AdminLicenseHandler::IsAgentOptimizeEntitled() const {
+  // the design record: the served entitlement = license valid AND the agent_optimize
+  // claim. An expired license (license gate dominates) or a valid license
+  // without the claim both yield false.
+  std::lock_guard<std::mutex> lock(license_mu_);
+  return IsLicenseValidLocked() && license_agent_optimize_;
 }
 
 void AdminLicenseHandler::NotifyLicenseStateChange() {
   if (license_state_callback_) {
-    license_state_callback_(IsLicenseValid());
+    license_state_callback_(IsLicenseValid(), IsAgentOptimizeEntitled());
   }
 }
 
@@ -223,6 +242,10 @@ bool AdminLicenseHandler::ApplyToken(StringPiece token, GoogleString* error) {
     license_sub_ = result.payload.sub;
     license_sid_ = result.payload.sid;
     license_iat_ = result.payload.iat;
+    // the design record: re-evaluated on every apply/renew (same posture as the product
+    // check). Absent entitlement = false = feature off; never a token reject.
+    license_agent_optimize_ =
+        CheckEntitlement(result.payload, "agent_optimize");
   }
   NotifyLicenseStateChange();
   return true;

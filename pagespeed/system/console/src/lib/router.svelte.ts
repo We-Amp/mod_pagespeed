@@ -56,6 +56,12 @@ export const routes: Route[] = [
     icon: "key",
     component: () => import("../pages/License.svelte"),
   },
+  {
+    path: "#/about",
+    label: "About",
+    icon: "info-circle",
+    component: () => import("../pages/About.svelte"),
+  },
 ];
 
 function getHash(): string {

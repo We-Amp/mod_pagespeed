@@ -1729,22 +1729,23 @@ void ps_release_request_context(void* data) {
 // Routes admin-style URLs: statistics, global statistics, console, messages,
 // admin, and global admin. Returns nullopt if the path doesn't match any.
 std::optional<RequestRouting::Response> ps_route_admin_url(
-    const GoogleUrl& url, const NgxRewriteOptions* options) {
+    const GoogleUrl& url, const NgxRewriteOptions* options,
+    bool client_is_loopback) {
   const StringPiece path = url.PathSansQuery();
   if (StringCaseEqual(path, options->statistics_path()) &&
-      options->StatisticsAccessAllowed(url)) {
+      options->StatisticsAccessAllowed(url, client_is_loopback)) {
     return RequestRouting::kStatistics;
   }
   if (StringCaseEqual(path, options->global_statistics_path()) &&
-      options->GlobalStatisticsAccessAllowed(url)) {
+      options->GlobalStatisticsAccessAllowed(url, client_is_loopback)) {
     return RequestRouting::kGlobalStatistics;
   }
   if (StringCaseEqual(path, options->console_path()) &&
-      options->ConsoleAccessAllowed(url)) {
+      options->ConsoleAccessAllowed(url, client_is_loopback)) {
     return RequestRouting::kConsole;
   }
   if (StringCaseEqual(path, options->messages_path()) &&
-      options->MessagesAccessAllowed(url)) {
+      options->MessagesAccessAllowed(url, client_is_loopback)) {
     return RequestRouting::kMessages;
   }
   // The admin handlers get everything under a path (/path/*) while all the
@@ -1752,12 +1753,12 @@ std::optional<RequestRouting::Response> ps_route_admin_url(
   // with the handler path.
   if (!options->admin_path().empty() &&
       StringCaseStartsWith(path, options->admin_path()) &&
-      options->AdminAccessAllowed(url)) {
+      options->AdminAccessAllowed(url, client_is_loopback)) {
     return RequestRouting::kAdmin;
   }
   if (!options->global_admin_path().empty() &&
       StringCaseStartsWith(path, options->global_admin_path()) &&
-      options->GlobalAdminAccessAllowed(url)) {
+      options->GlobalAdminAccessAllowed(url, client_is_loopback)) {
     return RequestRouting::kGlobalAdmin;
   }
   return std::nullopt;
@@ -1869,7 +1870,14 @@ RequestRouting::Response ps_route_request(ngx_http_request_t* r) {
 
   const NgxRewriteOptions* global_options = cfg_s->server_context->config();
 
-  if (auto admin_response = ps_route_admin_url(url, global_options)) {
+  // Strict-admin gate (opt-in, default off): decide loopback from the validated
+  // connection IP, never the client-controlled Host header. With
+  // StrictAdminAccess disabled the 3-arg AccessAllowed() overloads behave
+  // exactly like the 2-arg forms, so this is a no-op for existing configs.
+  const bool client_is_loopback =
+      IsLoopbackClientIp(ps_client_ip_for_admin_warning(r));
+  if (auto admin_response =
+          ps_route_admin_url(url, global_options, client_is_loopback)) {
     return *admin_response;
   }
   if (ps_is_cache_purge_request(r, global_options)) {
@@ -2452,9 +2460,10 @@ ngx_int_t ps_html_rewrite_header_filter(ngx_http_request_t* r) {
   // Poll for cache flush on every request (polls are rate-limited).
   cfg_s->server_context->FlushCacheIfNecessary();
 
-  if (!cfg_s->server_context->ShouldOptimize()) {
-    return ngx_http_next_header_filter(r);
-  }
+  // the design record: soft enforcement — optimization always proceeds regardless of
+  // license state. The unlicensed state is signalled softly via the
+  // "x-pagespeed-warn: unlicensed" header added on the optimized HTML path
+  // (see ps_set_buffered below), not by declining to optimize here.
 
   ps_request_ctx_t* ctx = ps_get_request_context(r);
 
@@ -3117,9 +3126,8 @@ ngx_int_t ps_content_handler(ngx_http_request_t* r) {
                                  response_category);
     case RequestRouting::kCachePurge:
     case RequestRouting::kResource:
-      if (!cfg_s->server_context->ShouldOptimize()) {
-        return NGX_DECLINED;
-      }
+      // the design record: soft enforcement — serve optimized resources regardless of
+      // license state (no longer declines when unlicensed).
       return ps_resource_handler(r, false /* html rewrite */,
                                  response_category);
   }

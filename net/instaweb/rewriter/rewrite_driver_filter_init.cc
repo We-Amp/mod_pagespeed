@@ -29,6 +29,7 @@
 #include "net/instaweb/rewriter/public/add_head_filter.h"
 #include "net/instaweb/rewriter/public/add_ids_filter.h"
 #include "net/instaweb/rewriter/public/add_instrumentation_filter.h"
+#include "net/instaweb/rewriter/public/agent_optimize_vary_filter.h"
 #include "net/instaweb/rewriter/public/base_tag_filter.h"
 #include "net/instaweb/rewriter/public/cache_extender.h"
 #include "net/instaweb/rewriter/public/collect_dependencies_filter.h"
@@ -489,6 +490,12 @@ void RewriteDriver::AddPostRenderFilters() {
   }
   if (rewrite_options->Enabled(RewriteOptions::kConvertMetaTags)) {
     AddOwnedPostRenderFilter(new MetaTagFilter(this));
+  }
+  // the design record: when agent_optimize is on, advertise Vary: Accept on HTML for an
+  // entitled Accept: text/markdown request (no body change — 1.1 never renders
+  // markdown). Entitlement + Accept are checked inside the filter.
+  if (rewrite_options->agent_optimize()) {
+    AddOwnedPostRenderFilter(new AgentOptimizeVaryFilter(this));
   }
   if (rewrite_options->Enabled(RewriteOptions::kDisableJavascript)) {
     // kDeferIframe filter should never be turned on when either defer_js

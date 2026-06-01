@@ -16,6 +16,7 @@
 #include <atomic>
 #include <filesystem>
 #include <random>
+#include <memory>
 
 #include "net/instaweb/http/public/async_fetch.h"
 #include "net/instaweb/http/public/request_context.h"
@@ -409,6 +410,53 @@ TEST_F(AdminLicenseHandlerTest, ApplyAcceptsValidToken) {
   EXPECT_TRUE(license_handler_.IsLicenseValid());
 }
 
+// the design record P4: the agent_optimize entitlement is parsed from the token and gates
+// IsAgentOptimizeEntitled() (= license-valid AND the claim). A token WITHOUT the
+// entitlement is still a valid license (soft check, never a reject); a token
+// WITH it flips the gate on — and a renewed/re-applied token that drops it
+// flips the gate back off.
+TEST_F(AdminLicenseHandlerTest, AgentOptimizeEntitlementGate) {
+  const int64_t kIat = 1743379200;
+  const int64_t kExp = 1806451200;  // iat + 2 years (max lifetime).
+
+  // Apply a signed token (with/without the entitlement) via the public
+  // /v1/license/apply path (ApplyToken itself is private).
+  auto apply = [&](bool with_entitlement) {
+    LicensePayload payload;
+    payload.sub = "customer@example.com";
+    payload.iss = "modpagespeed.com";
+    payload.iat = kIat;
+    payload.plan = "enterprise";
+    payload.exp = kExp;
+    payload.products = {PAGESPEED_PRODUCT_ID};
+    if (with_entitlement) {
+      payload.entitlements = {"agent_optimize"};
+    }
+    GoogleString token = SignLicenseToken(payload, public_key_, private_key_);
+    GoogleString json = StrCat("{\"key\":\"", token, "\"}");
+    GoogleString body;
+    int status = DoGlobalRequest("/v1/license/apply", json, &body);
+    return status == 200 &&
+           body.find("\"success\":true") != GoogleString::npos;
+  };
+
+  // No entitlement: valid license, but agent_optimize gate is off.
+  ASSERT_TRUE(apply(false));
+  EXPECT_TRUE(license_handler_.IsLicenseValid());
+  EXPECT_FALSE(license_handler_.IsAgentOptimizeEntitled());
+
+  // With entitlement: gate flips on.
+  ASSERT_TRUE(apply(true));
+  EXPECT_TRUE(license_handler_.IsLicenseValid());
+  EXPECT_TRUE(license_handler_.IsAgentOptimizeEntitled());
+
+  // Re-apply (renewal) a token that drops the entitlement: gate flips off,
+  // license still valid.
+  ASSERT_TRUE(apply(false));
+  EXPECT_TRUE(license_handler_.IsLicenseValid());
+  EXPECT_FALSE(license_handler_.IsAgentOptimizeEntitled());
+}
+
 TEST_F(AdminLicenseHandlerTest, ApplyAcceptsLicenseKeyField) {
   int64_t far_future = 1806451200;
   GoogleString token = MakeToken("customer@example.com", "pro", far_future);
@@ -703,7 +751,7 @@ TEST_F(AdminLicenseHandlerTest, CallbackInvokedOnApply) {
   bool callback_value = false;
   bool callback_invoked = false;
   license_handler_.set_license_state_callback(
-      [&](bool valid) {
+      [&](bool valid, bool /*agent_optimize*/) {
         callback_value = valid;
         callback_invoked = true;
       });
@@ -717,7 +765,7 @@ TEST_F(AdminLicenseHandlerTest, CallbackInvokedOnApply) {
 TEST_F(AdminLicenseHandlerTest, CallbackNotInvokedForBadToken) {
   bool callback_invoked = false;
   license_handler_.set_license_state_callback(
-      [&](bool valid) { callback_invoked = true; });
+      [&](bool valid, bool /*agent_optimize*/) { callback_invoked = true; });
 
   GoogleString body;
   DoGlobalRequest("/v1/license/apply", "{\"key\":\"invalid\"}", &body);
@@ -728,7 +776,7 @@ TEST_F(AdminLicenseHandlerTest, CallbackReportsExpiredToken) {
   bool callback_value = true;
   bool callback_invoked = false;
   license_handler_.set_license_state_callback(
-      [&](bool valid) {
+      [&](bool valid, bool /*agent_optimize*/) {
         callback_value = valid;
         callback_invoked = true;
       });
@@ -1143,6 +1191,47 @@ TEST_F(AdminLicenseHandlerTest, CsrfSkippedForStatusEndpoint) {
   int status = DoRequestNoCsrf("/v1/license/status", "", true, &body);
   EXPECT_EQ(200, status);
   EXPECT_THAT(body, ::testing::HasSubstr("\"licensed\":"));
+}
+
+// ---------------------------------------------------------------------------
+// IsLicenseTimeValid: expiry must be re-derived from "now" on every check.
+// Regression for the audit finding (2026-05-29) where IsLicenseValid trusted a
+// cached apply-time flag and so kept a once-valid token valid forever.
+// ---------------------------------------------------------------------------
+
+static const int64_t kGrace = 72 * 3600;  // mirrors kGracePeriodSec
+
+TEST(IsLicenseTimeValidTest, NoExpiryTokenIsAlwaysValid) {
+  // expires_at <= 0 means a v1 token with no expiry: valid at any time.
+  EXPECT_TRUE(AdminLicenseHandler::IsLicenseTimeValid(0, 0, kGrace));
+  EXPECT_TRUE(AdminLicenseHandler::IsLicenseTimeValid(0, 9999999999LL, kGrace));
+}
+
+TEST(IsLicenseTimeValidTest, ValidBeforeAndAtExpiry) {
+  const int64_t exp = 2000000000;  // some fixed future instant
+  EXPECT_TRUE(
+      AdminLicenseHandler::IsLicenseTimeValid(exp, exp - 86400, kGrace));
+  EXPECT_TRUE(AdminLicenseHandler::IsLicenseTimeValid(exp, exp, kGrace));
+}
+
+TEST(IsLicenseTimeValidTest, ValidWithinGraceWindowAfterExpiry) {
+  const int64_t exp = 2000000000;
+  EXPECT_TRUE(AdminLicenseHandler::IsLicenseTimeValid(exp, exp + 1, kGrace));
+  EXPECT_TRUE(
+      AdminLicenseHandler::IsLicenseTimeValid(exp, exp + kGrace - 1, kGrace));
+}
+
+TEST(IsLicenseTimeValidTest, InvalidPastGraceWindow) {
+  // This is the case the old code got wrong: a token whose exp (and grace)
+  // are now in the past must be rejected, regardless of how it looked at
+  // apply time.
+  const int64_t exp = 2000000000;
+  EXPECT_FALSE(
+      AdminLicenseHandler::IsLicenseTimeValid(exp, exp + kGrace, kGrace));
+  EXPECT_FALSE(
+      AdminLicenseHandler::IsLicenseTimeValid(exp, exp + kGrace + 1, kGrace));
+  EXPECT_FALSE(AdminLicenseHandler::IsLicenseTimeValid(
+      exp, exp + 365LL * 24 * 3600, kGrace));
 }
 
 }  // namespace

@@ -234,8 +234,27 @@ void SystemServerContext::PostInitHook() {
   // and register a callback to keep it updated.
   if (admin_site_->license_handler() != nullptr) {
     UpdateLicenseActive(admin_site_->license_handler()->IsLicenseValid());
+    // the design record (R5): the first license check has now completed — from here on
+    // the soft warn header is allowed to emit when unlicensed. Re-affirms the
+    // fail-open default so the predicate is deterministic.
+    MarkLicenseChecked();
+    // the design record: seed + track the agent_optimize entitlement on the same path.
+    UpdateAgentOptimizeEntitled(
+        admin_site_->license_handler()->IsAgentOptimizeEntitled());
     admin_site_->license_handler()->set_license_state_callback(
-        [this](bool active) { UpdateLicenseActive(active); });
+        [this](bool active, bool agent_optimize) {
+          UpdateLicenseActive(active);
+          UpdateAgentOptimizeEntitled(agent_optimize);
+        });
+    // the design record (D4): one-time startup WARNING when running unlicensed at init.
+    // Emitted here (the single license-check site) to avoid double-logging.
+    if (!admin_site_->license_handler()->IsLicenseValid()) {
+      message_handler()->Message(
+          kWarning,
+          "WeAmp PageSpeed is running UNLICENSED. Optimization is active; "
+          "responses carry X-PageSpeed-Warn: unlicensed. Activate a license "
+          "to remove the warning and unlock support + premium features.");
+    }
   }
 }
 

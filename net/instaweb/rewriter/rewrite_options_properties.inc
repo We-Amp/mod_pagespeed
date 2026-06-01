@@ -197,6 +197,10 @@
   X(false, respect_vary_, "rv", kRespectVary, kDirectoryScope, \
     "Whether to respect Vary headers for resources. " \
     "Vary is always respected for HTML.", true) \
+  X(false, agent_optimize_, "ao", kAgentOptimize, kDirectoryScope, \
+    "the design record: recognize Accept: text/markdown agent requests, license/" \
+    "entitlement-gate them, and add Vary: Accept on HTML. 1.1 always serves " \
+    "optimized HTML (no markdown render).", true) \
   X(false, respect_x_forwarded_proto_, "rxfp", \
     kRespectXForwardedProto, kDirectoryScope, \
     "Whether to respect the X-Forwarded-Proto header.", true) \

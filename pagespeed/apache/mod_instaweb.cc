@@ -49,7 +49,6 @@
 // clang-format on
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -377,11 +376,12 @@ class ScopedTimer {
 InstawebContext* build_context_for_request(request_rec* request) {
   ApacheServerContext* server_context =
       InstawebContext::ServerContextFromServerRec(request->server);
-  // Escape ASAP if we're in unplugged mode, proxy_all_requests_mode, or
-  // license is not active.
+  // Escape ASAP if we're in unplugged mode or proxy_all_requests_mode.
+  // the design record: soft enforcement — license state no longer gates optimization
+  // here; the unlicensed state is signalled softly via a response header on
+  // the optimized path instead.
   if (server_context->global_config()->unplugged() ||
-      server_context->global_config()->proxy_all_requests_mode() ||
-      !server_context->ShouldOptimize()) {
+      server_context->global_config()->proxy_all_requests_mode()) {
     return nullptr;
   }
 
@@ -511,6 +511,17 @@ InstawebContext* build_context_for_request(request_rec* request) {
     // context object.
     context->Finish();
     return nullptr;
+  }
+
+  // the design record (D2): soft enforcement — on the optimized HTML path, when running
+  // unlicensed (live signal), add the soft warn header. Read at serve time from
+  // the LIVE license atomic (ShouldOptimize), keyed on the same atomic that
+  // encodes the grace window (R6); suppressed until the first license check
+  // completes (R5, LicenseCheckedOnce). Added to request->headers_out (the
+  // transport map) only — never to a cached artifact, Vary, or cache-key.
+  if (server_context->LicenseCheckedOnce() &&
+      !server_context->ShouldOptimize()) {
+    apr_table_add(request->headers_out, "x-pagespeed-warn", "unlicensed");
   }
 
   // Set X-Mod-Pagespeed header.
