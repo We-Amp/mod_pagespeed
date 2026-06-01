@@ -319,6 +319,8 @@ class DomainLawyer {
   // .suffix.net so we can optimize them.  This can be implemented by
   // integrating the proxy_suffix into MapRewriteDomain and MapOriginDomain,
   // as a variation on MapProxyDomain.
+  void set_authorize_all_domains(bool v) { authorize_all_domains_ = v; }
+
   void set_proxy_suffix(const GoogleString& suffix) { proxy_suffix_ = suffix; }
   const GoogleString& proxy_suffix() const { return proxy_suffix_; }
 

@@ -130,6 +130,23 @@ class IisModuleFactory : public IHttpModuleFactory {
   DISALLOW_COPY_AND_ASSIGN(IisModuleFactory);
 };
 
+// Global module that receives GL_APPLICATION_START notifications.
+// Per-site JS library loading has moved to SetupSystemCaches() via
+// IisConfig::LoadAllSiteLibraries(). This handler is retained for
+// future per-site notifications.
+class IisGlobalModule : public CGlobalModule {
+ public:
+  explicit IisGlobalModule(IisModuleFactory* factory) : factory_(factory) {}
+
+  GLOBAL_NOTIFICATION_STATUS OnGlobalApplicationStart(
+      IHttpApplicationStartProvider* provider) override;
+
+  void Terminate() override {}
+
+ private:
+  IisModuleFactory* factory_;  // Not owned
+};
+
 }  // namespace net_instaweb
 
 // DLL entry point for IIS module registration

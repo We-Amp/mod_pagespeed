@@ -161,8 +161,9 @@ TEST_F(HtmlDetectorTest, ForceDecisionNotHtml) {
 class IisHtmlRewriterTest : public IisTestBase {
  protected:
   // Constants matching IisHtmlRewriter private constants
-  static const size_t kMaxBufferBytes = 2 * 1024 * 1024;  // 2MB
-  static const int kRewriteDeadlineMs = 2000;  // 2 seconds
+  static constexpr size_t kMaxBufferBytes = 2 * 1024 * 1024;  // 2MB
+  // Match RewriteOptions::kDefaultRewriteDeadlineMs (20ms in debug builds).
+  static constexpr int kRewriteDeadlineMs = 20;
 
   // Helper to check if content would be detected as HTML
   static bool WouldDetectAsHtml(const StringPiece& content) {
@@ -181,10 +182,10 @@ TEST_F(IisHtmlRewriterTest, MaxBufferBytesIsReasonable) {
   EXPECT_EQ(2u * 1024 * 1024, kMaxBufferBytes);
 }
 
-TEST_F(IisHtmlRewriterTest, RewriteDeadlineIsReasonable) {
-  // Verify the deadline constant
-  // 2 seconds is reasonable for HTML rewriting
-  EXPECT_EQ(2000, kRewriteDeadlineMs);
+TEST_F(IisHtmlRewriterTest, RewriteDeadlineMatchesModPagespeed) {
+  // IIS rewrite deadline must match RewriteOptions::kDefaultRewriteDeadlineMs.
+  // Debug builds use 20ms; release builds use 10ms.
+  EXPECT_EQ(20, kRewriteDeadlineMs);
 }
 
 // ============================================================================

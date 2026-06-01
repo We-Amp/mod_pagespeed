@@ -140,7 +140,9 @@ function Initialize-TestEnvironment {
     Write-Status "Initializing test environment..."
 
     # Create directories
-    @($WebRoot, $CacheDir, $LogDir) | ForEach-Object {
+    # Include C:\PageSpeed\cache as a safety net — IisConfig defaults to this
+    # path if config parsing fails (iis_config.cc:428).
+    @($WebRoot, $CacheDir, $LogDir, "C:\PageSpeed", "C:\PageSpeed\cache") | ForEach-Object {
         if (-not (Test-Path $_)) {
             New-Item -ItemType Directory -Path $_ -Force | Out-Null
             Write-Status "Created directory: $_" "Gray"
@@ -150,19 +152,28 @@ function Initialize-TestEnvironment {
     # Set permissions on cache and log directories
     # IIS app pools run as IIS AppPool\<pool-name> or as IUSR
     try {
-        $acl = Get-Acl $CacheDir
         $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
             "IIS_IUSRS", "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")
-        $acl.AddAccessRule($rule)
-        Set-Acl $CacheDir $acl
 
-        $acl = Get-Acl $LogDir
-        $acl.AddAccessRule($rule)
-        Set-Acl $LogDir $acl
+        foreach ($dir in @($CacheDir, $LogDir, "C:\PageSpeed\cache")) {
+            $acl = Get-Acl $dir
+            $acl.AddAccessRule($rule)
+            Set-Acl $dir $acl
+        }
 
         Write-Status "Set IIS_IUSRS permissions on cache/log directories" "Gray"
     } catch {
         Write-Status "Warning: Could not set permissions: $_" "Yellow"
+    }
+
+    # Remove stale web.config from previous runs. appcmd set config (called
+    # later in New-IISSite) triggers IIS to parse the site's web.config, and a
+    # leftover file with <pagespeed> will fail before the sectionGroup is
+    # registered. New-WebConfig writes a fresh one after module installation.
+    $staleConfig = "$WebRoot\web.config"
+    if (Test-Path $staleConfig) {
+        Remove-Item $staleConfig -Force
+        Write-Status "Removed stale web.config" "Gray"
     }
 
     # Copy test content
@@ -191,6 +202,23 @@ function Initialize-TestEnvironment {
         if (Test-Path $destDoNotModify) { Remove-Item $destDoNotModify -Recurse -Force }
         Copy-Item $DoNotModifySource $destDoNotModify -Recurse
         Write-Status "Copied do_not_modify content" "Gray"
+    }
+
+    # Create per-directory web.config files to match Apache's debug.conf.
+    # Apache sets Cache-Control: no-cache for the no_cache/ directory.
+    $noCacheDir = "$WebRoot\mod_pagespeed_test\no_cache"
+    if (Test-Path $noCacheDir) {
+        @"
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+  <system.webServer>
+    <staticContent>
+      <clientCache cacheControlMode="DisableCache" />
+    </staticContent>
+  </system.webServer>
+</configuration>
+"@ | Set-Content "$noCacheDir\web.config" -Encoding UTF8
+        Write-Status "Created no-cache web.config for $noCacheDir" "Gray"
     }
 
     # Create a simple index.html for testing
@@ -231,6 +259,22 @@ function Install-IISComponents {
                 Install-WindowsFeature -Name Web-Stat-Compression,Web-Dyn-Compression | Out-Null
             }
         } catch { }
+    }
+
+    # Raise http.sys URL segment length limit. Default is 260 (MAX_PATH),
+    # which is too short for PageSpeed combined resource URLs that concatenate
+    # many filenames into a single path segment (e.g., a+b+c+d.pagespeed.cc.X.css).
+    $httpParams = "HKLM:\SYSTEM\CurrentControlSet\Services\HTTP\Parameters"
+    $current = Get-ItemProperty -Path $httpParams -Name "UrlSegmentMaxLength" -ErrorAction SilentlyContinue
+    if (-not $current -or $current.UrlSegmentMaxLength -lt 4096) {
+        Set-ItemProperty -Path $httpParams -Name "UrlSegmentMaxLength" -Value 4096 -Type DWord
+        Write-Status "Set http.sys UrlSegmentMaxLength=4096" "Gray"
+        # http.sys is a kernel driver — use net stop/start which handles it
+        # more reliably than Stop-Service (which can leave it in StopPending).
+        & net stop http /y 2>$null
+        Start-Sleep -Seconds 2
+        & net start http 2>$null
+        Write-Status "Restarted HTTP service for registry change" "Gray"
     }
 
     # Ensure services are running
@@ -294,35 +338,22 @@ function New-WebConfig {
     $hasModule = (Test-Path $ModulePath) -and (-not $NoModule)
 
     if ($hasModule) {
-        $modulesSection = @"
-    <modules>
-      <add name="PageSpeedModule" />
-    </modules>
-"@
         $pagespeedSection = @"
-  <pagespeed>
-    <settings
-        enabled="true"
-        fileCachePath="$($CacheDir.Replace('\', '\\'))"
-        logPath="$($LogDir.Replace('\', '\\'))"
-        rewriteLevel="CoreFilters"
-        statisticsEnabled="true"
-        adminEnabled="true"
-        adminPath="/pagespeed_admin"
-        statisticsPath="/pagespeed_statistics">
-      <filters enabledFilters="collapse_whitespace,combine_css,combine_javascript,extend_cache,inline_css,inline_javascript,rewrite_css,rewrite_images,rewrite_javascript" />
-      <images recompressQuality="85" webpQuality="80" jpegQuality="85" progressiveJpeg="true" />
-      <cache lruCacheSizeBytes="67108864" httpCacheCompressionLevel="9" />
-    </settings>
-  </pagespeed>
+    <pagespeed>
+      <settings enabled="true">
+        <cache fileCachePath="$CacheDir"
+               lruCacheSizeBytes="67108864" />
+        <filters enabledFilters="collapse_whitespace,combine_css,combine_javascript,extend_cache,inline_css,inline_javascript,rewrite_css,rewrite_images,rewrite_javascript" />
+        <images recompressQuality="85" webpQuality="80" />
+        <javascript libraries="43 1o978_K0_LNE5_ystNklf http://www.modpagespeed.com/rewrite_javascript.js" />
+        <admin enabled="true" path="/pagespeed_admin"
+               statisticsEnabled="true"
+               statisticsPath="/pagespeed_statistics" />
+      </settings>
+    </pagespeed>
 "@
         Write-Status "PageSpeed module will be enabled" "Cyan"
     } else {
-        $modulesSection = @"
-    <modules>
-      <!-- PageSpeed module not installed -->
-    </modules>
-"@
         $pagespeedSection = "  <!-- PageSpeed configuration not available (module not built) -->"
         if ($NoModule) {
             Write-Status "PageSpeed module disabled by -NoModule flag" "Yellow"
@@ -353,17 +384,91 @@ function New-WebConfig {
       </customHeaders>
     </httpProtocol>
 
-$modulesSection
+    <!-- Required for PageSpeed combined resource URLs containing '+' -->
+    <security>
+      <requestFiltering allowDoubleEscaping="true">
+        <requestLimits maxUrl="16384" maxQueryString="8192" />
+      </requestFiltering>
+    </security>
 
-  </system.webServer>
 
 $pagespeedSection
+
+  </system.webServer>
 
 </configuration>
 "@
 
     $webConfig | Set-Content "$WebRoot\web.config" -Encoding UTF8
     Write-Status "web.config written to $WebRoot\web.config" "Gray"
+}
+
+function Register-PageSpeedConfigSection {
+    # Register the pagespeed sectionGroup under system.webServer in applicationHost.config.
+    # Without this, IIS rejects <pagespeed> in web.config with:
+    #   "The configuration section 'pagespeed' cannot be read because it is
+    #    missing a section declaration"
+    # This mirrors what setup_iis_test.ps1 does for IIS Express (lines 170-172).
+    $appHostConfig = "$env:SystemRoot\System32\inetsrv\config\applicationHost.config"
+    if (-not (Test-Path $appHostConfig)) {
+        Write-Status "Warning: applicationHost.config not found at $appHostConfig" "Yellow"
+        return
+    }
+
+    $xml = New-Object System.Xml.XmlDocument
+    $xml.PreserveWhitespace = $true
+    $xml.Load($appHostConfig)
+    $configSections = $xml.configuration.configSections
+    if (-not $configSections) {
+        Write-Status "Warning: No configSections found in applicationHost.config" "Yellow"
+        return
+    }
+
+    # Find the system.webServer sectionGroup
+    $swsSectionGroup = $configSections.sectionGroup | Where-Object { $_.name -eq "system.webServer" }
+    if (-not $swsSectionGroup) {
+        Write-Status "Warning: system.webServer sectionGroup not found" "Yellow"
+        return
+    }
+
+    # Check if pagespeed sectionGroup already exists
+    $existing = $swsSectionGroup.sectionGroup | Where-Object { $_.name -eq "pagespeed" }
+    if ($existing) {
+        Write-Status "pagespeed sectionGroup already declared in applicationHost.config" "Gray"
+        return
+    }
+
+    # Add <sectionGroup name="pagespeed"><section name="settings" overrideModeDefault="Allow" /></sectionGroup>
+    $psSectionGroup = $xml.CreateElement("sectionGroup")
+    $psSectionGroup.SetAttribute("name", "pagespeed")
+    $settingsSection = $xml.CreateElement("section")
+    $settingsSection.SetAttribute("name", "settings")
+    $settingsSection.SetAttribute("overrideModeDefault", "Allow")
+    $psSectionGroup.AppendChild($settingsSection) | Out-Null
+    $swsSectionGroup.AppendChild($psSectionGroup) | Out-Null
+
+    $xml.Save($appHostConfig)
+    Write-Status "Registered pagespeed sectionGroup in applicationHost.config" "Green"
+}
+
+function Unregister-PageSpeedConfigSection {
+    # Remove the pagespeed sectionGroup from applicationHost.config
+    $appHostConfig = "$env:SystemRoot\System32\inetsrv\config\applicationHost.config"
+    if (-not (Test-Path $appHostConfig)) { return }
+
+    $xml = New-Object System.Xml.XmlDocument
+    $xml.PreserveWhitespace = $true
+    $xml.Load($appHostConfig)
+    $swsSectionGroup = $xml.configuration.configSections.sectionGroup |
+        Where-Object { $_.name -eq "system.webServer" }
+    if (-not $swsSectionGroup) { return }
+
+    $psSectionGroup = $swsSectionGroup.sectionGroup | Where-Object { $_.name -eq "pagespeed" }
+    if ($psSectionGroup) {
+        $swsSectionGroup.RemoveChild($psSectionGroup) | Out-Null
+        $xml.Save($appHostConfig)
+        Write-Status "Removed pagespeed sectionGroup from applicationHost.config" "Gray"
+    }
 }
 
 function Install-PageSpeedModule {
@@ -380,14 +485,21 @@ function Install-PageSpeedModule {
 
     Write-Status "Installing PageSpeed native module..."
 
+    # Uninstall existing module first to release the DLL lock, then stop
+    # IIS so w3wp unloads the DLL before we overwrite it.
+    try { Invoke-AppCmd uninstall module PageSpeedModule 2>$null } catch { }
+    try { Invoke-AppCmd delete module PageSpeedModule 2>$null } catch { }
+    Stop-Service W3SVC -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 1
+
     # Copy DLL to system location
     $systemModulePath = "C:\Windows\System32\inetsrv\pagespeed_iis.dll"
     Copy-Item $ModulePath $systemModulePath -Force
     Write-Status "Copied module to $systemModulePath" "Gray"
 
-    # Clean up any existing registration (both global and site-level)
-    try { Invoke-AppCmd uninstall module PageSpeedModule 2>$null } catch { }
-    try { Invoke-AppCmd delete module PageSpeedModule 2>$null } catch { }
+    # Restart IIS services
+    Start-Service WAS -ErrorAction SilentlyContinue
+    Start-Service W3SVC -ErrorAction SilentlyContinue
 
     try {
         # Install as global native module (/add:true enables it for all sites)
@@ -411,6 +523,8 @@ function Uninstall-PageSpeedModule {
         Invoke-AppCmd uninstall module PageSpeedModule 2>$null
         Write-Status "Unregistered PageSpeedModule" "Gray"
     } catch { }
+
+    Unregister-PageSpeedConfigSection
 
     $systemModulePath = "C:\Windows\System32\inetsrv\pagespeed_iis.dll"
     if (Test-Path $systemModulePath) {
@@ -609,6 +723,11 @@ function Uninstall-IISSite {
 function Install-IISSiteComplete {
     Install-IISComponents
     Initialize-TestEnvironment
+    # Register the pagespeed sectionGroup early — before New-IISSite, which
+    # uses appcmd set config and triggers IIS to parse any existing web.config.
+    if (-not $NoModule -and (Test-Path $ModulePath)) {
+        Register-PageSpeedConfigSection
+    }
     New-IISSite
     Install-PageSpeedModule
     New-WebConfig

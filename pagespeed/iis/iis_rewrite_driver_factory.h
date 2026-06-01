@@ -78,10 +78,9 @@ class IisRewriteDriverFactory : public SystemRewriteDriverFactory {
   // Shutdown cleanup
   void ShutDown();
 
-  // Getters for hostname, port, and document root
+  // Getters for hostname and port
   const GoogleString& hostname() const { return hostname_; }
   int port() const { return port_; }
-  const GoogleString& document_root() const { return document_root_; }
 
  protected:
   // Create CurlUrlAsyncFetcher for resource fetching
@@ -124,10 +123,6 @@ class IisRewriteDriverFactory : public SystemRewriteDriverFactory {
   IisMessageHandler* iis_html_parse_message_handler_;
   GoogleString hostname_;
   int port_;
-  // Document root for localhost resource fetches on Windows.
-  // CurlUrlAsyncFetcher uses this to read files directly instead of HTTP
-  // requests to avoid deadlock when IIS serves localhost resources.
-  GoogleString document_root_;
 
   DISALLOW_COPY_AND_ASSIGN(IisRewriteDriverFactory);
 };

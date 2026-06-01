@@ -269,46 +269,13 @@ bool IisAdminHandler::HandleRequest(IHttpContext* context,
         }
       }
 
-      // If the browser requested /pagespeed_admin without a trailing slash,
-      // send a 301 redirect to /pagespeed_admin/ so that relative links in
-      // the admin UI (e.g. <a href='statistics'>) resolve correctly.
-      // Without this redirect the browser resolves them against / instead
-      // of /pagespeed_admin/.
-      if (subpath.empty() && query_string.empty()) {
-        GoogleUrl original_gurl(url);
-        if (original_gurl.IsWebValid()) {
-          GoogleString redirect_url =
-              StrCat(original_gurl.Origin(), admin_prefix, "/");
-          IHttpResponse* response = context->GetResponse();
-          response->Clear();
-          response->SetStatus(301, "Moved Permanently");
-          response->SetHeader(
-              "Location", redirect_url.c_str(),
-              static_cast<USHORT>(redirect_url.size()), TRUE);
-          GoogleString ct("text/html");
-          response->SetHeader(
-              "Content-Type", ct.c_str(),
-              static_cast<USHORT>(ct.size()), TRUE);
-          GoogleString body = StrCat(
-              "<html><body>Moved to <a href=\"", redirect_url, "\">",
-              redirect_url, "</a></body></html>");
-          char length_buf[32];
-          snprintf(length_buf, sizeof(length_buf), "%zu", body.size());
-          response->SetHeader(
-              "Content-Length", length_buf,
-              static_cast<USHORT>(strlen(length_buf)), TRUE);
-          if (!body.empty()) {
-            HTTP_DATA_CHUNK chunk;
-            chunk.DataChunkType = HttpDataChunkFromMemory;
-            chunk.FromMemory.pBuffer = const_cast<char*>(body.data());
-            chunk.FromMemory.BufferLength = static_cast<ULONG>(body.size());
-            DWORD bytes_sent = 0;
-            BOOL completion_expected = FALSE;
-            response->WriteEntityChunks(&chunk, 1, FALSE, FALSE,
-                                        &bytes_sent, &completion_expected);
-          }
-          return true;
-        }
+      // Treat /pagespeed_admin (no trailing slash) as /pagespeed_admin/
+      // to match Apache behavior which serves the admin page directly
+      // without a 301 redirect. Also fix the effective_url so AdminSite
+      // sees the trailing-slash URL and doesn't generate its own 301.
+      if (subpath.empty()) {
+        subpath = "/";
+        effective_url = StrCat(effective_url, "/");
       }
     }
 

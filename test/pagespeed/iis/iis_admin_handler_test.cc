@@ -349,7 +349,12 @@ TEST_F(ConfigIntegrationTest, HtmlRewritingDefaults) {
 
   // Check HTML rewriting defaults
   EXPECT_TRUE(config.html_rewriting_enabled());
-  EXPECT_EQ(2000, config.html_rewrite_deadline_ms());
+  // Must match RewriteOptions::kDefaultRewriteDeadlineMs (20ms debug, 10ms release).
+#ifdef NDEBUG
+  EXPECT_EQ(10, config.html_rewrite_deadline_ms());
+#else
+  EXPECT_EQ(20, config.html_rewrite_deadline_ms());
+#endif
   EXPECT_EQ(2 * 1024 * 1024, config.max_html_buffer_bytes());
 #endif
 }
