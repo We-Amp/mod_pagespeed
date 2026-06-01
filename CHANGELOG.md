@@ -5,6 +5,19 @@ All notable changes to mod_pagespeed are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.15.0] - 2026-06-01
+
+### Changed
+
+- **Version line renumbered 1.1 -> 1.15**. mod_pagespeed 1.15 is the
+  maintained continuation of the Apache-lineage codebase and the direct successor
+  to Google's final mod_pagespeed release (1.14.36.1); the prior "1.1" numbering
+  read as older than Google's line on package/version surfaces. This is a
+  version-identity change with no functional change from the 1.1.0 line. Package
+  names (`mod-pagespeed`, `nginx-module-pagespeed`, `ea-apache24-mod_pagespeed`)
+  and the runtime behavior are unchanged; the `X-Mod-Pagespeed` header now reports
+  `1.15.0.0`.
+
 ## [1.1.0-beta.1] - 2026-02-25
 
 First release under We-Amp stewardship. This is a complete modernization of

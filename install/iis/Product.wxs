@@ -3,18 +3,25 @@
   WiX v5 MSI installer for We-Amp PageSpeed IIS module.
 
   Build:
-    wix build install\iis\Product.wxs -ext WixToolset.Util.wixext ^
-        -d ProductVersion=1.1.0 -d DisplayVersion=1.1.0-beta.1 ^
+    wix build install\iis\Product.wxs ^
+        -d ProductVersion=1.15.0 -d DisplayVersion=1.15.0-beta.1 ^
         -d UpgradeCode=77EA515C-A077-4D56-B92A-58E65D713423 ^
         -d BinDir=bazel-bin\pagespeed\iis -d SrcDir=. ^
-        -arch x64 -o pagespeed-iis-1.1.0-beta.1-win-x64.msi
+        -arch x64 -o pagespeed-iis-1.15.0-beta.1-win-x64.msi
 
   Architecture notes:
     - W3SVC stop/start uses <ServiceControl> (MSI-native, no CA).
-    - appcmd module register/unregister uses Type 50 deferred exe CAs
-      (Windows Installer's built-in exe launcher — does NOT depend on
-      Wix4UtilCA_X64 / WixQuietExec64). This avoids the C/C++ runtime
-      dependency that broke stock Windows Server 2016 installs.
+    - appcmd module register/unregister + icacls ACL grants use Type 34
+      deferred exe CAs (Windows Installer's built-in exe launcher — does
+      NOT depend on Wix4UtilCA_X64 / WixQuietExec64). This avoids the
+      C/C++ runtime dependency that broke stock Windows Server 2016
+      installs. We deliberately do NOT use util:PermissionEx for the
+      cache + logs dir ACLs: upstream WiX v5.0.2 emits it as
+      Wix4SchedSecureObjects + Wix4ExecSecureObjects references that
+      pull Wix4UtilCA_X64.dll (CRT-dependent) into the Binary table,
+      reintroducing the exact failure mode the Type-34 CAs were chosen
+      to avoid. The deferred icacls CAs (GrantCacheAcl / GrantLogAcl)
+      below are the sole ACL mechanism, by design.
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
 
@@ -44,6 +51,18 @@
     <!-- Add/Remove Programs metadata -->
     <Property Id="ARPURLINFOABOUT" Value="https://modpagespeed.com" />
     <Property Id="ARPHELPLINK" Value="https://modpagespeed.com" />
+
+    <!-- Force overwrite on every install/upgrade transaction.
+         Default REINSTALLMODE is "omus" — "o" means "overwrite if the source
+         is newer than the destination". With pagespeed_iis.dll embedding
+         VS_VERSION_INFO (1.15.0.<beta-num>), the upgrade scenarios already
+         compare correctly. But if a customer ever ends up with a file on
+         disk that doesn't match its component-cache state (manual replace,
+         antivirus quarantine, corrupted prior install), MSI would silently
+         leave it in place. "amus" forces always-overwrite, eliminating that
+         class of silent-no-op. The cost is a few extra disk writes on
+         no-change reinstalls, which is negligible. -->
+    <Property Id="REINSTALLMODE" Value="amus" />
 
     <!-- Detect IIS via registry -->
     <Property Id="IISMAJORVERSION">
@@ -88,8 +107,6 @@
           <Directory Id="CACHEDIR" Name="cache" />
           <Directory Id="LOGDIR" Name="logs" />
         </Directory>
-        <!-- Legacy directory name that pagespeed_iis.dll reads config from. -->
-        <Directory Id="IISWEBSPEEDDIR" Name="IISWebSpeed" />
       </Directory>
     </StandardDirectory>
 
@@ -172,18 +189,29 @@
                       Wait="yes" />
     </Component>
 
-    <!-- Cache directory — created with default inheritance. ACL for
-         IIS_IUSRS write access is applied post-install via runtime
-         bootstrap (module first-run creates subdirs under SYSTEM), or
-         by admin post-install if stricter ACLs are needed.
-         Permanent="yes" preserves cache on uninstall. -->
+    <!-- Cache directory — IIS_IUSRS + NETWORK SERVICE get Modify via the
+         GrantCacheAcl deferred icacls CA (locale-safe via well-known SIDs,
+         no Wix4UtilCA CRT dependency; see comment block on the CA below).
+         The AppPool worker writes per-vhost subdirs under this path;
+         icacls is invoked with (OI)(CI) so children inherit. Permanent="yes"
+         preserves the directory AND its ACLs across uninstall, so a
+         repeated icacls /grant on the same SID is a no-op (the OS de-dupes
+         identical ACEs rather than appending). Without this grant the
+         v1.1.0 IIS module fails to start with "FileCachePath not writable"
+         on first request and serves the diagnostic page instead of
+         running. -->
     <Component Id="CacheDirComp" Directory="CACHEDIR"
                Guid="A1B2C3D4-1001-4000-8000-000000000001"
                KeyPath="yes" Permanent="yes">
       <CreateFolder />
     </Component>
 
-    <!-- Log directory — same policy as cache. -->
+    <!-- Log directory — same deferred-icacls approach as cache, but the
+         GrantLogAcl CA grants only (RX,W) (read/execute/write) rather than
+         M (modify), so the worker can append to logs but not delete them;
+         rotation is admin-driven. Permanent="yes" preserves the directory
+         AND its ACLs across uninstall (identical SIDs are de-duped on
+         repeat install, not appended). -->
     <Component Id="LogDirComp" Directory="LOGDIR"
                Guid="A1B2C3D4-1001-4000-8000-000000000002"
                KeyPath="yes" Permanent="yes">
@@ -192,8 +220,16 @@
 
     <!-- Default pagespeed.config. NeverOverwrite preserves admin edits
          across upgrades; Permanent leaves the file on uninstall so a
-         reinstall picks up existing customizations. -->
-    <Component Id="PagespeedConfig" Directory="IISWEBSPEEDDIR"
+         reinstall picks up existing customizations.
+
+         Filed into PAGESPEEDDATA (C:\ProgramData\We-Amp\PageSpeed\)
+         alongside the cache + logs subdirectories — one canonical product
+         directory. The legacy C:\ProgramData\We-Amp\IISWebSpeed\ path is
+         no longer created by fresh installs; iis_module_factory.cpp keeps
+         a runtime fallback on it for upgrade-from-IISpeed and
+         upgrade-from-1.1-pre-this-change customers whose config survives
+         via NeverOverwrite. -->
+    <Component Id="PagespeedConfig" Directory="PAGESPEEDDATA"
                Guid="A1B2C3D4-1001-4000-8000-000000000004"
                NeverOverwrite="yes" Permanent="yes">
       <File Id="pagespeed.config"
@@ -283,6 +319,38 @@
                   Impersonate="no"
                   Return="ignore" />
 
+    <!-- ACL grants on cache + logs dirs, using well-known SIDs
+         S-1-5-32-568 (IIS_IUSRS) + S-1-5-20 (NETWORK SERVICE) which are
+         locale-independent (avoids the localized-account-name failure
+         mode on de-DE / fr-FR / ja-JP Windows). icacls.exe lives in
+         C:\Windows\System32 (= SystemFolder), so Directory="SystemFolder"
+         + ExeCommand starting with "icacls.exe ..." resolves to a
+         literal absolute path at exec time — matches the existing
+         RegisterModule pattern above which uses "inetsrv\appcmd.exe"
+         relative to the same SystemFolder. No cmd.exe /c wrapper:
+         Type-34 launches the exe directly (no shell, no extra process
+         layer), same as RegisterModule. The [CACHEDIR] / [LOGDIR]
+         expansion already appends a trailing "\"; icacls accepts that
+         form, so we don't add a redundant trailing "." or anything else.
+         NETWORK SERVICE is granted as secondary for legacy AppPool
+         models that don't run under ApplicationPoolIdentity.
+
+         Return="ignore": icacls failures are masked because the new
+         X-Pagespeed-Init-Status: cache-path-not-writable diagnostic
+         page surfaces this failure mode loudly to localhost admin on
+         first request, providing a louder signal than a deferred-CA
+         hard-fail mid-install (which would roll back the entire MSI
+         and leave the customer with no module at all). -->
+    <CustomAction Id="GrantCacheAcl"
+                  Directory="SystemFolder"
+                  ExeCommand='icacls.exe "[CACHEDIR]" /grant "*S-1-5-32-568:(OI)(CI)M" /grant "*S-1-5-20:(OI)(CI)M"'
+                  Execute="deferred" Impersonate="no" Return="ignore" />
+
+    <CustomAction Id="GrantLogAcl"
+                  Directory="SystemFolder"
+                  ExeCommand='icacls.exe "[LOGDIR]" /grant "*S-1-5-32-568:(OI)(CI)(RX,W)" /grant "*S-1-5-20:(OI)(CI)(RX,W)"'
+                  Execute="deferred" Impersonate="no" Return="ignore" />
+
     <InstallExecuteSequence>
       <!-- Defensive w3wp kill: scheduled AFTER StopServices (which runs the
            WAS+W3SVC <ServiceControl> Stop rows from IisServiceControl) and
@@ -293,6 +361,18 @@
       <Custom Action="CleanRegistration" After="InstallFiles"
               Condition="NOT Installed OR REINSTALL" />
       <Custom Action="RegisterModule" After="CleanRegistration"
+              Condition="NOT Installed OR REINSTALL" />
+      <!-- ACL grants on cache + logs dirs via well-known SIDs (locale-
+           independent). Sole ACL mechanism: util:PermissionEx was
+           considered and rejected because WiX v5.0.2 emits it as
+           Wix4SchedSecureObjects / Wix4ExecSecureObjects references
+           that pull Wix4UtilCA_X64.dll (CRT-dependent) into the MSI
+           Binary table — the exact failure mode the Type-34 deferred-
+           exe CAs are designed to avoid. See the GrantCacheAcl
+           CustomAction comment block above. -->
+      <Custom Action="GrantCacheAcl" After="RegisterModule"
+              Condition="NOT Installed OR REINSTALL" />
+      <Custom Action="GrantLogAcl" After="GrantCacheAcl"
               Condition="NOT Installed OR REINSTALL" />
       <!-- Uninstall: remove IIS module registration before files go away. -->
       <Custom Action="UnregisterModule" Before="RemoveFiles"

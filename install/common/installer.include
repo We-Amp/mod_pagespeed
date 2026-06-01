@@ -120,7 +120,7 @@ get_version_info() {
     source "${SRC_VERSION_FILE}"
     VERSION="${MAJOR}.${MINOR}.${BUILD}"
     # Append PRERELEASE using tilde (sorts before release in both deb and rpm).
-    # "1.1.0~beta.1" < "1.1.0" in dpkg/rpm version ordering.
+    # "1.15.0~beta.1" < "1.15.0" in dpkg/rpm version ordering.
     if [ -n "${PRERELEASE:-}" ]; then
       VERSION="${MAJOR}.${MINOR}.${BUILD}~${PRERELEASE}"
     fi

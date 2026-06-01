@@ -1,3 +1,26 @@
+# mod_pagespeed 1.15.0 Release Notes
+
+**Release date:** 2026-06-01
+**Status:** Stable
+
+## Overview
+
+mod_pagespeed 1.15.0 renumbers the maintained Apache-lineage line from 1.1 to
+1.15. 1.15 is the direct successor to Google's final mod_pagespeed
+release (1.14.36.1) and reads as the newest maintained build on the package and
+version surfaces (dnf/yum/apt, WHM EasyApache 4) where the prior "1.1" numbering
+looked older than Google's line.
+
+This is a version-identity change: there is **no functional change** from the
+1.1.0 line. Package names (`mod-pagespeed`, `nginx-module-pagespeed`,
+`ea-apache24-mod_pagespeed`) and repository channels are unchanged, so existing
+install commands keep working. The `X-Mod-Pagespeed` response header now reports
+`1.15.0.0`. For the full change history see [CHANGELOG.md](CHANGELOG.md).
+
+---
+
+_Historical release notes for earlier releases follow._
+
 # mod_pagespeed 1.1.0-beta.1 Release Notes
 
 **Release date:** 2026-02-25

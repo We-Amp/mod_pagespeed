@@ -55,6 +55,7 @@ namespace net_instaweb {
 // TODO(jmarantz): Use consistent naming from semantic_type.h for all option
 // names that reference css/styles/js/scripts etc. such as CssPreserveUrls.
 const char RewriteOptions::kAddOptionsToUrls[] = "AddOptionsToUrls";
+const char RewriteOptions::kAgentOptimize[] = "AgentOptimize";
 const char RewriteOptions::kAcceptInvalidSignatures[] =
     "AcceptInvalidSignatures";
 const char RewriteOptions::kAccessControlAllowOrigins[] =
@@ -2102,6 +2103,31 @@ RewriteOptions::OptionSettingResult RewriteOptions::FormatSetOptionMessage(
   return result;
 }
 
+namespace {
+
+// the design record config-parity: directives that require markdown RENDERING. These are
+// 2.0-only (1.1 has no headless browser). 1.1 rejects them at config-parse time
+// with a helpful message rather than silently ignoring them, so a config that
+// is shared with — or ported from — 2.0 fails loudly on all four 1.1 ports
+// identically. The set tracks 2.0's render layer; extend it as 2.0 names render
+// directives (the names below are anticipated, pending 2.0 alignment).
+const char* const kRenderOnlyDirectiveNames[] = {
+    "AgentMarkdownRender",
+    "AgentRenderTimeout",
+    "AgentRenderAllowHosts",
+};
+
+bool IsRenderOnlyDirectiveName(StringPiece name) {
+  for (const char* d : kRenderOnlyDirectiveNames) {
+    if (StringCaseEqual(name, d)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+}  // namespace
+
 RewriteOptions::OptionSettingResult RewriteOptions::ParseAndSetOptionFromName1(
     StringPiece name, StringPiece arg, GoogleString* msg,
     MessageHandler* handler) {
@@ -2194,6 +2220,14 @@ RewriteOptions::ParseAndSetOptionFromNameWithScope(
     EnableBlockingRewriteForRefererUrlPattern(arg);
   } else if (StringCaseEqual(name, kPermitIdsForCssCombining)) {
     AddCssCombiningWildcard(arg);
+  } else if (IsRenderOnlyDirectiveName(name)) {
+    // the design record config-parity: render-only directives are 2.0-only. Reject loudly
+    // so a shared/ported config fails at parse time instead of silently no-op.
+    *msg = StrCat("Directive '", name,
+                  "' requires markdown rendering, which is unavailable in "
+                  "mod_pagespeed 1.15 (no headless browser). Use ModPageSpeed "
+                  "2.0.");
+    result = RewriteOptions::kOptionValueInvalid;
   } else {
     result = RewriteOptions::kOptionNameUnknown;
   }
@@ -2962,7 +2996,16 @@ void RewriteOptions::Freeze() {
 }
 
 void RewriteOptions::ComputeSignature() {
-  ThreadSystem::ScopedReader read_lock(cache_purge_mutex_.get());
+  // Lock-discipline fix: ComputeSignatureLockHeld() writes `signature_`
+  // (and toggles `options_uniqueness_checked_` under DEBUG); acquiring the
+  // cache_purge_mutex_ shared here races writers on `signature_`. The
+  // sibling write-path callers at UpdateCacheInvalidationTimestampMs /
+  // UpdateCachePurgeSet already hold the lock exclusive when calling
+  // ComputeSignatureLockHeld(); align this entry point with them. The
+  // header annotation on ComputeSignatureLockHeld is updated to
+  // EXCLUSIVE_LOCKS_REQUIRED in lockstep so clang's thread-safety
+  // analyzer reflects the actual contract.
+  ScopedMutex write_lock(cache_purge_mutex_.get());
   ComputeSignatureLockHeld();
 }
 
@@ -3300,9 +3343,22 @@ GoogleString RewriteOptions::OptionsToString() const {
   }
 
   {
+    // SRWLock-safety: read directly off purge_set_ under one shared lock.
+    //
+    // Previously this block called has_cache_invalidation_timestamp_ms() and
+    // cache_invalidation_timestamp(), both of which acquire the same
+    // cache_purge_mutex_ in shared mode. Windows SRWLocks are NOT recursive
+    // (see MSDN AcquireSRWLockShared): a thread that already holds a shared
+    // lock and reacquires it shared again may deadlock and, more relevantly
+    // here, will be flagged by AppVerifier's SRWLock provider with
+    // STATUS_BREAKPOINT. With manifests unregistered on the runner that
+    // breakpoint surfaces as a swallowed SEH exception, abandoning the
+    // /pagespeed_admin/config response (HTTP.SYS logs
+    // Connection_Abandoned_By_ReqQueue). See the design record bisect.
     ThreadSystem::ScopedReader read_lock(cache_purge_mutex_.get());
-    if (has_cache_invalidation_timestamp_ms()) {
-      int64 cache_invalidation_ms = cache_invalidation_timestamp();
+    if (purge_set_->has_global_invalidation_timestamp_ms()) {
+      int64 cache_invalidation_ms =
+          purge_set_->global_invalidation_timestamp_ms();
       GoogleString time_string;
       if ((cache_invalidation_ms > 0) &&
           ConvertTimeToString(cache_invalidation_ms, &time_string)) {
