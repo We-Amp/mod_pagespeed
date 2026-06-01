@@ -41,33 +41,6 @@ namespace net_instaweb {
 
 namespace {
 
-// Simple JSON string escaping.
-GoogleString JsonEscape(const GoogleString& input) {
-  GoogleString output;
-  output.reserve(input.size() + 10);
-  for (char c : input) {
-    switch (c) {
-      case '"':  output += "\\\""; break;
-      case '\\': output += "\\\\"; break;
-      case '\b': output += "\\b"; break;
-      case '\f': output += "\\f"; break;
-      case '\n': output += "\\n"; break;
-      case '\r': output += "\\r"; break;
-      case '\t': output += "\\t"; break;
-      default:
-        if (static_cast<unsigned char>(c) < 0x20) {
-          char buf[8];
-          snprintf(buf, sizeof(buf), "\\u%04x", static_cast<unsigned char>(c));
-          output += buf;
-        } else {
-          output += c;
-        }
-        break;
-    }
-  }
-  return output;
-}
-
 // Get appropriate HTTP reason phrase for status code.
 const char* GetReasonPhrase(int status_code) {
   switch (status_code) {
@@ -81,19 +54,6 @@ const char* GetReasonPhrase(int status_code) {
     case 500: return "Internal Server Error";
     default: return "Unknown";
   }
-}
-
-// Constant-time comparison to prevent timing attacks on token validation.
-bool ConstantTimeCompare(const GoogleString& a, const GoogleString& b) {
-  if (a.size() != b.size()) {
-    return false;
-  }
-  volatile unsigned char result = 0;
-  for (size_t i = 0; i < a.size(); ++i) {
-    result |= static_cast<unsigned char>(a[i]) ^
-              static_cast<unsigned char>(b[i]);
-  }
-  return result == 0;
 }
 
 // AsyncFetch adapter that buffers the response and signals completion.
@@ -183,6 +143,17 @@ bool IisAdminHandler::HandleRequest(IHttpContext* context,
             size_t url_pos = path.find("url=");
             if (url_pos != GoogleString::npos) {
               GoogleString purge_url = path.substr(url_pos + 4);
+              // Extract only up to the first '&' delimiter.
+              size_t amp_pos = purge_url.find('&');
+              if (amp_pos != GoogleString::npos) {
+                purge_url = purge_url.substr(0, amp_pos);
+              }
+              // Enforce max URL length to prevent log flooding / memory abuse.
+              static const size_t kMaxPurgeUrlLength = 2048;
+              if (purge_url.size() > kMaxPurgeUrlLength) {
+                SendErrorResponse(context, 400, "Purge URL exceeds maximum length");
+                return true;
+              }
               return HandleCachePurge(context, server_context, purge_url);
             }
           }
@@ -332,6 +303,29 @@ bool IisAdminHandler::HandleRequest(IHttpContext* context,
           }
         }
       }
+      // Forward the request headers the AdminLicenseHandler CSRF gate
+      // inspects. Without this, the gate rejects every mutation endpoint
+      // (apply, activate, trial, consent) because Lookup1 returns nullptr
+      // on an empty RequestHeaders. The 57 AdminLicenseHandler unit tests
+      // synthesize these headers directly on AsyncFetch; production IIS
+      // never did, until this loop. Two-header copy is the minimum to
+      // unblock licensing; a full HTTP_REQUEST::Headers enumeration is a
+      // sensible future hardening but unnecessary for any backend code
+      // path that currently reads request_headers.
+      if (admin_request != nullptr) {
+        USHORT hlen = 0;
+        PCSTR ct = admin_request->GetHeader("Content-Type", &hlen);
+        if (ct != nullptr && hlen > 0) {
+          admin_fetch.request_headers()->Add(
+              HttpAttributes::kContentType, StringPiece(ct, hlen));
+        }
+        hlen = 0;
+        PCSTR xrw = admin_request->GetHeader("X-Requested-With", &hlen);
+        if (xrw != nullptr && hlen > 0) {
+          admin_fetch.request_headers()->Add(
+              HttpAttributes::kXRequestedWith, StringPiece(xrw, hlen));
+        }
+      }
       server_context->AdminPage(
           is_global, gurl, query_params,
           server_context->global_options(), &admin_fetch, request_body);
@@ -409,21 +403,26 @@ bool IisAdminHandler::IsAuthorized(IHttpContext* context,
     return false;
   }
 
-  // If authentication is not required, allow access from localhost.
-  if (!config->admin_auth_required()) {
+  // When token auth is required, a valid token is ALWAYS required.
+  // The IP allow-list provides no bypass — an allow-listed IP without
+  // a valid token must still be denied.
+  if (config->admin_auth_required()) {
     GoogleString client_ip = GetClientIp(context, server_context);
     if (IsIpAllowed(client_ip, server_context)) {
-      return true;
+      LOG(WARNING) << "PageSpeed Admin: IP " << client_ip
+                   << " is allow-listed but admin_auth_required=true; "
+                   << "token required.";
     }
+    return ValidateToken(context, server_context);
   }
 
-  // Check if request is from an allowed IP.
+  // Token auth is not required: allow-listed IPs get direct access.
   GoogleString client_ip = GetClientIp(context, server_context);
   if (IsIpAllowed(client_ip, server_context)) {
     return true;
   }
 
-  // Check for authentication token.
+  // Not on allow-list but a valid token still grants access.
   return ValidateToken(context, server_context);
 }
 

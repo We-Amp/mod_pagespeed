@@ -19,6 +19,8 @@
 
 #include "pagespeed/envoy/envoy_base_fetch.h"
 
+#include <memory>
+
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/rewrite_stats.h"
@@ -26,6 +28,7 @@
 #include "pagespeed/kernel/base/google_message_handler.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/posix_timer.h"
+#include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/response_headers.h"
 
 namespace net_instaweb {
@@ -64,13 +67,18 @@ void EnvoyBaseFetch::HandleHeadersComplete() {
   }
 
   if (status_code == CacheUrlAsyncFetcher::kNotInCacheStatus) {
-    // Increment reference count before posting to ensure the object stays
-    // alive until the callback completes. The callback will decrement it.
+    // Increment the refcount and hand ownership of the matching decrement to
+    // a shared_ptr with a custom deleter. Capturing the shared_ptr by value
+    // into the lambda ensures DecrementRefCount() fires whether the lambda
+    // runs or is destroyed while still queued (e.g. dispatcher tear-down),
+    // preventing leaks.
     IncrementRefCount();
+    std::shared_ptr<EnvoyBaseFetch> self(
+        this, [](EnvoyBaseFetch* f) { f->DecrementRefCount(); });
     // Post prepareForIproRecording to the dispatcher thread since this
     // callback may be running on a PageSpeed worker thread, but the filter
     // state must only be accessed from the main Envoy thread.
-    decoder->decoderCallbacks()->dispatcher().post([this]() {
+    decoder->decoderCallbacks()->dispatcher().post([this, self]() {
       // Re-check decoder_ inside the callback in case the filter was
       // destroyed between posting and execution.
       auto* dec = decoder_.load(std::memory_order_acquire);
@@ -78,24 +86,26 @@ void EnvoyBaseFetch::HandleHeadersComplete() {
         dec->prepareForIproRecording();
         dec->decoderCallbacks()->continueDecoding();
       }
-      // Release the reference we took before posting.
-      DecrementRefCount();
     });
   } else {
-    have_ipro_response_ = !(status_code < 0 || status_code >= 400);
-    continue_decoding = !have_ipro_response_;
+    bool ipro = !(status_code < 0 || status_code >= 400);
+    have_ipro_response_.store(ipro, std::memory_order_release);
+    continue_decoding = !ipro;
+
+    // Track 404s for .pagespeed. resource fetches in statistics.
+    if (status_code == HttpStatus::kNotFound) {
+      server_context_->rewrite_stats()->resource_404_count()->Add(1);
+    }
 
     if (continue_decoding) {
-      // Increment reference count before posting to ensure the object stays
-      // alive until the callback completes. The callback will decrement it.
       IncrementRefCount();
-      decoder->decoderCallbacks()->dispatcher().post([this]() {
+      std::shared_ptr<EnvoyBaseFetch> self(
+          this, [](EnvoyBaseFetch* f) { f->DecrementRefCount(); });
+      decoder->decoderCallbacks()->dispatcher().post([this, self]() {
         auto* dec = decoder_.load(std::memory_order_acquire);
         if (dec != nullptr) {
           dec->decoderCallbacks()->continueDecoding();
         }
-        // Release the reference we took before posting.
-        DecrementRefCount();
       });
     }
   }
@@ -140,27 +150,23 @@ void EnvoyBaseFetch::HandleDone(bool success) {
     return;
   }
 
-  if (have_ipro_response_) {
-    // Increment reference count before posting to ensure the object stays
-    // alive until the callback completes. The callback will decrement it.
+  if (have_ipro_response_.load(std::memory_order_acquire)) {
     IncrementRefCount();
+    std::shared_ptr<EnvoyBaseFetch> self(
+        this, [](EnvoyBaseFetch* f) { f->DecrementRefCount(); });
     if (!success) {
-      decoder->decoderCallbacks()->dispatcher().post([this]() {
+      decoder->decoderCallbacks()->dispatcher().post([this, self]() {
         auto* dec = decoder_.load(std::memory_order_acquire);
         if (dec != nullptr) {
           dec->decoderCallbacks()->continueDecoding();
         }
-        // Release the reference we took before posting.
-        DecrementRefCount();
       });
     } else {
-      decoder->decoderCallbacks()->dispatcher().post([this]() {
+      decoder->decoderCallbacks()->dispatcher().post([this, self]() {
         auto* dec = decoder_.load(std::memory_order_acquire);
         if (dec != nullptr) {
           dec->sendReply(response_headers(), buffer_);
         }
-        // Release the reference we took before posting.
-        DecrementRefCount();
       });
     }
   }

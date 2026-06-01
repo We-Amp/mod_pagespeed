@@ -136,12 +136,90 @@ function Invoke-AppCmd {
     & $appcmd @args 2>&1
 }
 
+function Reset-PageSpeedTestCache {
+    # Recycle the IIS app pool first, then purge the on-disk PageSpeed file
+    # cache. Order matters: a w3wp from a prior workflow job may still be
+    # running on a persistent Windows runner and holding file handles on cache entries. If we
+    # purge before the recycle, Remove-Item partially fails on locked files
+    # (silently, under -ErrorAction SilentlyContinue) and the w3wp may also
+    # service one more request in the gap, rewriting cache entries with the
+    # prior job's Last-Modified header before the recycle drops the
+    # in-memory LRU. Recycle first -> brief sleep so w3wp exits -> then
+    # purge.
+    #
+    # mod_pagespeed's rewrite cache is keyed by input URL + content hash --
+    # NOT by file mtime -- so a cached rewrite from a previous job hits on
+    # the same Puzzle.jpg bytes and serves back the prior job's embedded
+    # Last-Modified header, while origin (?PageSpeed=off) honestly serves
+    # the freshly-stamped fixture mtime. That divergence is the root cause
+    # of.
+    #
+    # Cache paths purged:
+    #   - $CacheDir                                  (test config: C:\pagespeed_cache)
+    #   - C:\ProgramData\We-Amp\PageSpeed\cache      (shipped default in
+    #     install/iis/pagespeed.config line 17 -- safety net in case a
+    #     misconfigured run falls back to the production default)
+    #   - C:\PageSpeed\cache                         (legacy IISpeed XML
+    #     schema default, installer/pagespeed_schema.xml line 29)
+    #
+    # The whole block is best-effort but LOUD about partial failures:
+    # purge errors get surfaced via Write-Status Yellow so a future
+    # ACL/lock regression turns the CI log yellow instead of failing
+    # silently. Idempotent and safe on cold first-job runners.
+
+    # Step 1: recycle app pool (drops in-memory rewrite cache + releases
+    # file handles so the subsequent Remove-Item can complete).
+    try {
+        Import-Module WebAdministration -ErrorAction SilentlyContinue
+        if (Get-Command Restart-WebAppPool -ErrorAction SilentlyContinue) {
+            Restart-WebAppPool -Name $AppPoolName -ErrorAction SilentlyContinue
+            Write-Status "Recycled app pool: $AppPoolName" "Gray"
+            # Brief drain so w3wp finishes any in-flight request and exits
+            # before we touch the cache files it might still be writing.
+            Start-Sleep -Seconds 2
+        }
+    } catch { }
+
+    # Step 2: purge stale on-disk cache. Loud on partial failure.
+    foreach ($staleCache in @($CacheDir,
+                              "C:\ProgramData\We-Amp\PageSpeed\cache",
+                              "C:\PageSpeed\cache")) {
+        if (Test-Path $staleCache) {
+            $purgeErr = $null
+            Remove-Item "$staleCache\*" -Recurse -Force `
+                -ErrorAction SilentlyContinue -ErrorVariable purgeErr
+            if ($purgeErr -and $purgeErr.Count -gt 0) {
+                Write-Status ("Warning: purge of {0} had {1} error(s); first: {2}" -f `
+                    $staleCache, $purgeErr.Count, $purgeErr[0]) "Yellow"
+            } else {
+                Write-Status "Purged stale PageSpeed file cache at $staleCache" "Gray"
+            }
+            # Defensive post-check: if residual entries remain, surface it
+            # so a future lock/ACL regression that bypasses the error stream
+            # still shows up yellow in CI logs.
+            $residual = Get-ChildItem -Path $staleCache -Recurse -Force `
+                -ErrorAction SilentlyContinue | Measure-Object
+            if ($residual.Count -gt 0) {
+                Write-Status ("Warning: {0} still has {1} entries after purge" -f `
+                    $staleCache, $residual.Count) "Yellow"
+            }
+        }
+    }
+}
+
 function Initialize-TestEnvironment {
     Write-Status "Initializing test environment..."
 
+    # Recycle app pool + purge stale PageSpeed file cache from prior runs.
+    # See Reset-PageSpeedTestCache for the full rationale.
+    Reset-PageSpeedTestCache
+
     # Create directories
-    # Include C:\PageSpeed\cache as a safety net — IisConfig defaults to this
-    # path if config parsing fails (iis_config.cc:428).
+    # Include C:\PageSpeed\cache as a safety net -- the legacy IISpeed XML
+    # schema (installer/pagespeed_schema.xml line 29) defaults
+    # fileCachePath to this path. The shipped install/iis/pagespeed.config
+    # uses C:\ProgramData\We-Amp\PageSpeed\cache instead, but cold runners
+    # may have either present.
     @($WebRoot, $CacheDir, $LogDir, "C:\PageSpeed", "C:\PageSpeed\cache") | ForEach-Object {
         if (-not (Test-Path $_)) {
             New-Item -ItemType Directory -Path $_ -Force | Out-Null
@@ -210,6 +288,27 @@ function Initialize-TestEnvironment {
         Write-Status "Copied do_not_modify content" "Gray"
     }
 
+    # Refresh LastWriteTime on all copied fixture files so IIS emits a fresh
+    # Last-Modified header. The release tarball / repo checkout can deliver
+    # files with stale mtimes (e.g. the build date of a prior release baked
+    # into the Hyper-V snapshot). mod_pagespeed's extend_cache filter
+    # propagates the input's Last-Modified into the rewritten resource for
+    # single-input on-the-fly transforms (RewriteDriver::Write +
+    # ServerContext::SetDefaultLongCacheHeaders); when the file is old enough
+    # that mod_pagespeed treats the cache entry as stale and re-rewrites with
+    # a current-time Last-Modified, test_cache_extended_preserves_last_modified
+    # sees origin (file mtime) != extended (now) and fails. Refreshing the
+    # mtime to install-time anchors both sides to the same recent timestamp.
+    $now = Get-Date
+    foreach ($contentRoot in @("$WebRoot\mod_pagespeed_example", "$WebRoot\mod_pagespeed_test", "$WebRoot\do_not_modify")) {
+        if (Test-Path $contentRoot) {
+            Get-ChildItem -Path $contentRoot -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object {
+                try { $_.LastWriteTime = $now } catch { }
+            }
+        }
+    }
+    Write-Status "Refreshed LastWriteTime on copied fixtures" "Gray"
+
     # Create per-directory web.config files to match Apache's debug.conf.
     # Apache sets Cache-Control: no-cache for the no_cache/ directory.
     $noCacheDir = "$WebRoot\mod_pagespeed_test\no_cache"
@@ -275,7 +374,7 @@ function Install-IISComponents {
     if (-not $current -or $current.UrlSegmentMaxLength -lt 4096) {
         Set-ItemProperty -Path $httpParams -Name "UrlSegmentMaxLength" -Value 4096 -Type DWord
         Write-Status "Set http.sys UrlSegmentMaxLength=4096" "Gray"
-        # http.sys is a kernel driver — use net stop/start which handles it
+        # http.sys is a kernel driver -- use net stop/start which handles it
         # more reliably than Stop-Service (which can leave it in StopPending).
         & net stop http /y 2>$null
         Start-Sleep -Seconds 2
@@ -312,6 +411,13 @@ function New-IISSite {
     # Configure app pool settings
     Invoke-AppCmd set apppool $AppPoolName /processModel.identityType:ApplicationPoolIdentity | Out-Null
     Invoke-AppCmd set apppool $AppPoolName /autoStart:true | Out-Null
+
+    # Disable idle timeout and periodic recycling for test stability.
+    # Without these, the pool may shut down or recycle mid-test, especially
+    # under slow conditions like Application Verifier + Page Heap.
+    Invoke-AppCmd set apppool $AppPoolName /processModel.idleTimeout:00:00:00 | Out-Null
+    Invoke-AppCmd set apppool $AppPoolName /recycling.periodicRestart.time:00:00:00 | Out-Null
+    Invoke-AppCmd set apppool $AppPoolName /failure.rapidFailProtection:false | Out-Null
 
     # Create site
     Write-Status "Creating site: $SiteName on port $Port" "Gray"
@@ -417,6 +523,15 @@ pagespeed GlobalAdminPath /pagespeed_global_admin
         $pagespeedConfig | Set-Content "$serverConfigDir\pagespeed.config" -Encoding UTF8
         Write-Status "pagespeed.config written to $serverConfigDir\pagespeed.config" "Gray"
 
+        # Copy pagespeed.config to the no_cache test directory so the module
+        # recognises it even when IIS treats it as a separate application
+        # context due to its local web.config (observed on Windows 10).
+        $noCacheDir = "$WebRoot\mod_pagespeed_test\no_cache"
+        if (Test-Path $noCacheDir) {
+            Copy-Item "$WebRoot\pagespeed.config" "$noCacheDir\pagespeed.config" -Force
+            Write-Status "Copied pagespeed.config to $noCacheDir" "Gray"
+        }
+
         Write-Status "PageSpeed module will be enabled (flat-file config)" "Cyan"
     } else {
         if ($NoModule) {
@@ -442,15 +557,33 @@ function Install-PageSpeedModule {
     Write-Status "Installing PageSpeed native module..."
 
     # Uninstall existing module first to release the DLL lock, then stop
-    # IIS so w3wp unloads the DLL before we overwrite it.
+    # IIS completely (WAS + W3SVC) and wait for w3wp to exit before overwrite.
     try { Invoke-AppCmd uninstall module PageSpeedModule 2>$null } catch { }
     try { Invoke-AppCmd delete module PageSpeedModule 2>$null } catch { }
     Stop-Service W3SVC -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 1
+    Stop-Service WAS -Force -ErrorAction SilentlyContinue
+    # Wait for w3wp.exe to fully exit (it holds the DLL lock)
+    Get-Process w3wp -ErrorAction SilentlyContinue | ForEach-Object {
+        Write-Status "Waiting for w3wp (PID $($_.Id)) to exit..." "Gray"
+        $_ | Wait-Process -Timeout 15 -ErrorAction SilentlyContinue
+    }
 
-    # Copy DLL to system location
+    # Copy DLL to system location with retry (defender/prefetch can hold brief locks)
     $systemModulePath = "C:\Windows\System32\inetsrv\pagespeed_iis.dll"
-    Copy-Item $ModulePath $systemModulePath -Force
+    $copied = $false
+    for ($attempt = 1; $attempt -le 5; $attempt++) {
+        try {
+            Copy-Item $ModulePath $systemModulePath -Force
+            $copied = $true
+            break
+        } catch {
+            Write-Status "Copy attempt $attempt failed: $_ -- retrying in 2s..." "Yellow"
+            Start-Sleep -Seconds 2
+        }
+    }
+    if (-not $copied) {
+        throw "Failed to copy $ModulePath to $systemModulePath after 5 attempts"
+    }
     Write-Status "Copied module to $systemModulePath" "Gray"
 
     # Restart IIS services
@@ -505,29 +638,125 @@ function Start-IISSite {
         Invoke-AppCmd start site $SiteName | Out-Null
     } catch { }
 
-    # Wait for server to be ready
-    Write-Status "Waiting for server to be ready..."
-    $maxWait = 30
+    # Wait for server to be ready.
+    # When the PageSpeed module is installed, use /pagespeed_admin/ as the
+    # readiness endpoint -- it is handled exclusively by the module, so:
+    #   404 -> module DLL not yet loaded by IIS
+    #   200 + X-Pagespeed-Init-Status header -> module loaded but its
+    #     ProcessContext init failed (cache-path, post-config, etc.) and it
+    #     is serving the local-only diagnostic page. Either still warming
+    #     up, or we hit a real failure that needs operator attention; treat
+    #     as not-ready and keep polling until either the header disappears
+    #     (success path) or the budget expires.
+    #   200 + admin HTML (no X-Pagespeed-Init-Status) -> module fully
+    #     initialized, ready for tests.
+    # This avoids a race under Application Verifier + Page Heap where IIS
+    # serves static files on "/" before the module is active, making the
+    # readiness check pass while the module is still initializing.
+    $hasModule = (Test-Path $ModulePath) -and (-not $NoModule)
+    $readinessUrl = if ($hasModule) {
+        "http://localhost:$Port/pagespeed_admin/"
+    } else {
+        "http://localhost:$Port/"
+    }
+    Write-Status "Waiting for server to be ready ($readinessUrl)..."
+    # Budget raised from 60 to 180 attempts. The readiness CONDITION is
+    # unchanged -- we still only declare ready when /pagespeed_admin/ returns
+    # 200 WITHOUT an X-Pagespeed-Init-Status header (i.e. ProcessContext init
+    # actually succeeded). The larger budget only gives a heavily-loaded
+    # shared Windows runner (several runners share one box) more wall-clock for a slow-but-eventually-successful init,
+    # instead of `exit 1`-ing the whole job at 60s. A genuinely broken init
+    # (header never clears, or DLL never loads) still fails -- just later --
+    # so this does not mask a real init regression. (IIS init-load flake.)
+    $maxWait = 180
     $waited = 0
+    # Track readiness with an explicit flag rather than inferring it from
+    # `$waited -ge $maxWait` -- otherwise a success on the very last attempt
+    # (where $waited == $maxWait at break) would be misread as a timeout.
+    $ready = $false
     while ($waited -lt $maxWait) {
         Start-Sleep -Seconds 1
         $waited++
 
         try {
-            $response = Invoke-WebRequest -Uri "http://localhost:$Port/" -UseBasicParsing -TimeoutSec 2 -ErrorAction SilentlyContinue
+            $response = Invoke-WebRequest -Uri $readinessUrl -UseBasicParsing -TimeoutSec 2 -ErrorAction SilentlyContinue
             if ($response.StatusCode -eq 200) {
-                Write-Status "Server is ready on port $Port!" "Green"
+                # The init-status header is only present on the local-only
+                # diagnostic page (X-Pagespeed-Init-Status: cache-path-empty
+                # | cache-path-missing | cache-path-not-writable |
+                # post-config-failed | startup-failed). If the header is
+                # set, the module is up but init has not (yet) succeeded.
+                $initStatus = $null
+                if ($response.Headers -and $response.Headers.ContainsKey("X-Pagespeed-Init-Status")) {
+                    $initStatus = $response.Headers["X-Pagespeed-Init-Status"]
+                }
+                if ($initStatus) {
+                    if ($waited % 5 -eq 0) {
+                        Write-Status "Module still initializing or init failed (X-Pagespeed-Init-Status=$initStatus, attempt $waited/$maxWait)..." "Yellow"
+                    }
+                    continue
+                }
+                Write-Status "Server is ready on port $Port (after $waited attempts)!" "Green"
+                $ready = $true
                 break
             }
         } catch {
-            # Server not ready yet
+            # Server not ready yet (404 = module not loaded, connection refused = IIS starting)
+            if ($waited % 5 -eq 0) {
+                Write-Status "Still waiting for module to load (attempt $waited/$maxWait)..." "Yellow"
+            }
         }
     }
 
-    if ($waited -ge $maxWait) {
+    if (-not $ready) {
         Write-Status "Timeout waiting for server to start" "Red"
         Get-ServerStatus
         exit 1
+    }
+
+    # Warm up the rewrite pipeline before the test suite starts.
+    #
+    # The readiness gate above only confirms ProcessContext init succeeded
+    # (the admin diagnostic page no longer carries X-Pagespeed-Init-Status).
+    # It does NOT confirm the *rewrite* path is warm: the first request that
+    # actually exercises a filter pays a one-time cost (rewrite-driver setup,
+    # first file-cache writes, PSOL worker spin-up). On a loaded runner that
+    # cold cost has been observed to push the CSS-combiner / flatten cluster
+    # of tests past their 30s (x multiplier) fetch_until budgets -- the named
+    # "init slow under load" flake (7-12 of 326 tests TimeoutError at 60s
+    # while the server still returns 200).
+    #
+    # We prime that path ONCE here, outside any per-test budget, by polling
+    # the canonical combine_css example until it actually rewrites. This is
+    # best-effort: it asserts NOTHING and never fails setup. If the module
+    # is genuinely broken, the readiness gate above and the tests themselves
+    # still fail exactly as before -- so this cannot hide a real regression;
+    # it only removes the cold-start tax from the first few real tests.
+    if ($hasModule) {
+        $warmUrl = "http://localhost:$Port/mod_pagespeed_example/combine_css.html?PageSpeedFilters=combine_css"
+        Write-Status "Warming up rewrite pipeline ($warmUrl)..."
+        $warmAttempts = 30
+        $warmed = $false
+        for ($w = 1; $w -le $warmAttempts; $w++) {
+            try {
+                $wr = Invoke-WebRequest -Uri $warmUrl -UseBasicParsing -TimeoutSec 5 -ErrorAction SilentlyContinue
+                # `.pagespeed.cc.` / `.pagespeed.cf.` in the body means the
+                # combiner has produced a rewritten resource -- the pipeline
+                # is hot. Match the same evidence the test asserts on.
+                if ($wr -and $wr.StatusCode -eq 200 -and ($wr.Content -match '\.pagespeed\.(cc|cf)\.')) {
+                    $warmed = $true
+                    Write-Status "Rewrite pipeline warm (after $w probe(s))." "Green"
+                    break
+                }
+            } catch { }
+            Start-Sleep -Seconds 1
+        }
+        if (-not $warmed) {
+            # Non-fatal: the suite still runs (each test has its own
+            # multiplier-scaled fetch_until budget). We only log so a slow
+            # warm-up is visible in the setup log when triaging.
+            Write-Status "Warm-up did not observe a rewritten resource within $warmAttempts probe(s); continuing (tests have their own budgets)." "Yellow"
+        }
     }
 
     # Display environment variables for tests
@@ -678,8 +907,8 @@ function Uninstall-IISSite {
 function Install-IISSiteComplete {
     Install-IISComponents
     Initialize-TestEnvironment
-    New-IISSite
     Install-PageSpeedModule
+    New-IISSite
     New-WebConfig
     Start-IISSite
 }

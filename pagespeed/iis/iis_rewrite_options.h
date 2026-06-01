@@ -50,6 +50,23 @@ class IisRewriteOptions : public SystemRewriteOptions {
   const GoogleString& global_admin_path() const {
 	  return global_admin_path_.value();
   }
+  // the design record §5: default-on; opt-out via `AutoCreateCachePath off` in
+  // pagespeed.config. Read by IisProcessContext::GetServerContext after
+  // the per-site options merge and consumed by
+  // IisRewriteDriverFactory::EnsureDirectoryWritable. When off, the
+  // legacy GetFileAttributesA existence check (kCachePathMissing) is
+  // the only behaviour — no mkdir, no ACL touch.
+  bool auto_create_cache_path() const {
+	  return auto_create_cache_path_.value();
+  }
+  // the design record §Operational + the referenced issue: default-on; opt-out via
+  // `AutoCreateLogDir off` in pagespeed.config. Mirrors
+  // auto_create_cache_path() but gates the LogDir parallel auto-create
+  // flow. When off, the LogDir is left untouched at startup (no mkdir,
+  // no ACL touch, no diagnostic page on absence — legacy behaviour).
+  bool auto_create_log_dir() const {
+	  return auto_create_log_dir_.value();
+  }
 
  private:
   OptionSettingResult ParseAndSetOptions0(
@@ -83,10 +100,13 @@ class IisRewriteOptions : public SystemRewriteOptions {
   Option<GoogleString> messages_path_;
   Option<GoogleString> admin_path_;
   Option<GoogleString> global_admin_path_;
+  Option<bool> auto_create_cache_path_;
+  Option<bool> auto_create_log_dir_;
 
   bool IsDirective(StringPiece config_directive, StringPiece compare_directive);
 
-  DISALLOW_COPY_AND_ASSIGN(IisRewriteOptions);
+  IisRewriteOptions(const IisRewriteOptions&) = delete;
+  IisRewriteOptions& operator=(const IisRewriteOptions&) = delete;
 };
 
 } // namespace net_instaweb

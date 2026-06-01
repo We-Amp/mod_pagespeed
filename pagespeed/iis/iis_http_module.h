@@ -195,7 +195,15 @@ public:
         );
 
 private:
-	IisModuleRequestContext* CreateRequestContext(IHttpContext *pHttpContext,std::string site_root,char *url,int url_len,GoogleUrl *gurl);
+	// failed_pc (out): on NULL-return, populated with the IisProcessContext
+	// whose initialization failed if one exists (e.g. cache-path unwritable),
+	// or nullptr if no process context could even be constructed. The
+	// local-only diagnostic page in OnBeginRequest uses this to render a
+	// per-failure-mode error with the resolved cache path + worker identity
+	// instead of the legacy generic "missing configuration" message.
+	IisModuleRequestContext* CreateRequestContext(IHttpContext *pHttpContext,
+	    std::string site_root, char *url, int url_len, GoogleUrl *gurl,
+	    IisProcessContext** failed_pc);
 	void WritePre(StringPiece str, Writer* writer, MessageHandler* handler);
 	void HideAcceptEncodingIfNeeded(IN IHttpContext* pHttpContext);
 	void RestoreAcceptEncoding(IN IHttpContext* pHttpContext);
@@ -205,7 +213,8 @@ private:
 
 	IisModuleFactory *module_creator_;
 	IisProcessContext* process_context__;
-	DISALLOW_COPY_AND_ASSIGN(IisHttpModule);	
+	IisHttpModule(const IisHttpModule&) = delete;
+	IisHttpModule& operator=(const IisHttpModule&) = delete;
 };
 
 

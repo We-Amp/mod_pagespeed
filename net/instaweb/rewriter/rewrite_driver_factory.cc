@@ -52,7 +52,6 @@
 #include "pagespeed/kernel/base/hostname_util.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/named_lock_manager.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/sha1_signature.h"
 #include "pagespeed/kernel/base/stl_util.h"
 #include "pagespeed/kernel/base/string.h"
@@ -346,8 +345,8 @@ CriticalImagesFinder* RewriteDriverFactory::DefaultCriticalImagesFinder(
   const PropertyCache::Cohort* cohort = server_context->beacon_cohort();
   NonceGenerator* nonce = nonce_generator();
   Statistics* stats = statistics();
-  BeaconCriticalImagesFinder* finder = new BeaconCriticalImagesFinder(
-      cohort, nonce, stats);
+  BeaconCriticalImagesFinder* finder =
+      new BeaconCriticalImagesFinder(cohort, nonce, stats);
   return finder;
 }
 
@@ -697,6 +696,16 @@ void RewriteDriverFactory::ShutDown() {
 
 void RewriteDriverFactory::AddCreatedDirectory(const GoogleString& dir) {
   created_directories_.insert(dir);
+}
+
+bool RewriteDriverFactory::EnsureDirectoryWritable(
+    const GoogleString& /*path*/, GoogleString* /*error_message*/,
+    uint32_t /*acl_mask*/) {
+  // POSIX default: directive-parser mkdir already covered the path,
+  // and ownership/permissions were established at mkdir time via the
+  // process umask. The |acl_mask| parameter is Win32-specific and is
+  // ignored here. IIS overrides this.
+  return true;
 }
 
 void RewriteDriverFactory::InitStats(Statistics* statistics) {

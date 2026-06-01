@@ -47,6 +47,31 @@ IisProcessContext* IisModuleFactory::GetProcessContext(const GoogleString& site_
 	IisProcessContext *old_context=NULL;
 
 
+	// Config-path resolution.
+	//
+	// Canonical-vs-fallback order (directory, not filename):
+	//   1. %ProgramData%\We-Amp\PageSpeed\        (canonical 1.1+)
+	//   2. %ProgramData%\We-Amp\IISWebSpeed\      (legacy fallback)
+	//
+	// Within each directory we still try CONFIGFILE_PRIMARY
+	// ("pagespeed.config") before CONFIGFILE_FALLBACK
+	// ("iiswebspeed.config") — that two-name fallback is the
+	// upgrade-from-IISpeed-1.0 contract and is independent of the
+	// directory move below.
+	//
+	// Why canonical-first: fresh 1.1 installs file
+	// pagespeed.config into PageSpeed\ alongside the cache + logs
+	// subdirectories — one canonical product directory. The MSI no
+	// longer creates IISWebSpeed\ at all (Product.wxs IISWEBSPEEDDIR
+	// declaration was removed).
+	//
+	// Why the IISWebSpeed\ fallback stays: upgrade-from-IISpeed and
+	// upgrade-from-1.1-pre-this-change customers retain their config
+	// at IISWebSpeed\ via NeverOverwrite="yes" on Product.wxs:228.
+	// Detecting existence with GetFileAttributesA on each candidate is
+	// cheap (one syscall per startup) and avoids a deferred-CA
+	// filesystem migration during the MSI transaction.
+	//
 	// TODO(oschaaf): deduplicate this code accross the code base
 	// and speed it up / cache it (only needs to be determined at startup).
 	CHAR szPath[MAX_PATH];
@@ -57,14 +82,39 @@ IisProcessContext* IisModuleFactory::GetProcessContext(const GoogleString& site_
 		0,
 		szPath)))
 	{
-		config_path.append(szPath);
-		config_path.append("\\We-Amp\\IISWebSpeed\\");
-		config_path.append(CONFIGFILE_PRIMARY);
-		// Check if primary config exists, fall back to legacy name
-		if (GetFileAttributesA(config_path.c_str()) == INVALID_FILE_ATTRIBUTES) {
-			config_path = std::string(szPath);
-			config_path.append("\\We-Amp\\IISWebSpeed\\");
-			config_path.append(CONFIGFILE_FALLBACK);
+		const std::string pdata(szPath);
+		// Candidate directories in canonical-first order. Trailing
+		// backslash included so the CONFIGFILE_* append below joins
+		// cleanly.
+		static const char* const kDirs[] = {
+			"\\We-Amp\\PageSpeed\\",      // canonical 1.1+
+			"\\We-Amp\\IISWebSpeed\\",    // legacy upgrade fallback
+		};
+		bool found = false;
+		for (const char* dir : kDirs) {
+			std::string candidate = pdata + dir + CONFIGFILE_PRIMARY;
+			if (GetFileAttributesA(candidate.c_str()) != INVALID_FILE_ATTRIBUTES) {
+				config_path = candidate;
+				found = true;
+				break;
+			}
+			candidate = pdata + dir + CONFIGFILE_FALLBACK;
+			if (GetFileAttributesA(candidate.c_str()) != INVALID_FILE_ATTRIBUTES) {
+				config_path = candidate;
+				found = true;
+				break;
+			}
+		}
+		if (!found) {
+			// Nothing exists yet — return the canonical path so the
+			// downstream parser surfaces a sensible "not found"
+			// message pointing at where the config _should_ live.
+			config_path = pdata + kDirs[0] + CONFIGFILE_PRIMARY;
+		}
+		if (message_handler_) {
+			message_handler_->Message(kInfo,
+				"IisModuleFactory: resolved config path: %s",
+				config_path.c_str());
 		}
 	}
 

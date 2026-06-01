@@ -1,0 +1,41 @@
+Add CRYPTO_thread_local_cleanup() to release the BoringSSL thread-local TLS
+slot when the consuming DLL is unloaded before process exit.
+
+BoringSSL holds a process-wide TlsAlloc()'d slot for the lifetime of the
+process. That model is wrong when BoringSSL is statically linked into a
+DLL that gets loaded and unloaded inside a longer-lived host (e.g.
+pagespeed_iis.dll inside an IIS w3wp.exe worker). AppVerifier flags the
+unfreed slot at FreeLibrary as AVRF_TLS_LEAK; absent the verifier, every
+DLL recycle quietly leaks one TLS index.
+
+This patch adds a small extern "C" cleanup function the host can call from
+its DllMain DLL_PROCESS_DETACH path. After the call BoringSSL's
+thread-local APIs become permanent no-ops in this process, which is the
+correct behavior since the DLL is on its way out.
+
+Refs https://github.com/We-Amp/mod_pagespeed/issues/59
+
+--- a/crypto/thread_win.cc
++++ b/crypto/thread_win.cc
+@@ -68,6 +68,21 @@ static void thread_local_init(void) {
+   g_thread_local_failed = (g_thread_local_key == TLS_OUT_OF_INDEXES);
+ }
+
++// Release the process-wide TLS slot allocated lazily by thread_local_init.
++// Intended for hosts that load BoringSSL inside a DLL that gets unloaded
++// before process exit (e.g. an IIS native module). After this call, the
++// per-thread BoringSSL APIs become no-ops in this process. Safe to call
++// even if thread_local_init never ran. See:
++//   https://github.com/We-Amp/mod_pagespeed/issues/59
++extern "C" void CRYPTO_thread_local_cleanup(void) {
++  if (g_thread_local_failed) {
++    return;
++  }
++  TlsFree(g_thread_local_key);
++  g_thread_local_key = TLS_OUT_OF_INDEXES;
++  g_thread_local_failed = 1;
++}
++
+ static void NTAPI thread_local_destructor(PVOID module, DWORD reason,
+                                           PVOID reserved) {
+   // Only free memory on |DLL_THREAD_DETACH|, not |DLL_PROCESS_DETACH|. In

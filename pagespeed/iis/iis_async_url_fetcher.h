@@ -29,8 +29,20 @@ public:
 	virtual void Fetch(const GoogleString& url,
                      MessageHandler* message_handler,
                      AsyncFetch* fetch);
+
+	// Derive the host string used for the outbound WinHTTP request.
+	// Returns explicit_host_header if non-null; otherwise extracts
+	// HostAndPort from `url`. Extracted as a static helper so its
+	// lifetime contract (returns by value to give the caller a stable
+	// std::string) is testable without WinHTTP. See comment in
+	// iis_async_url_fetcher.cpp for the dangling-pointer bug this
+	// replaces, and iis_async_url_fetcher_test.cc for the regression
+	// guard.
+	static GoogleString DeriveHost(const char* explicit_host_header,
+	                               const GoogleString& url);
+
 	// Since the underlying fetcher is blocking, there can never be
-	// any outstanding fetches.  
+	// any outstanding fetches.
 	virtual int Poll(int64 max_wait_ms);
 
 	void set_fetcher_supports_https(bool val) { fetcher_supports_https_ = val; }

@@ -2,7 +2,15 @@
 #include <cstdio>
 #include <stdlib.h>
 
+#ifndef _WINSOCKAPI_
+#define _WINSOCKAPI_
+#endif
+#include <Windows.h>
+#include <accctrl.h>
+#include <aclapi.h>
+#include <sddl.h>
 
+#include "pagespeed/kernel/base/file_system.h"
 #include "pagespeed/kernel/http/content_type.h"
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
@@ -21,7 +29,6 @@
 #include "pagespeed/kernel/cache/threadsafe_cache.h"
 #include "pagespeed/kernel/thread/scheduler_thread.h"
 #include "pagespeed/kernel/sharedmem/shared_circular_buffer.h"
-#include "pagespeed/kernel/thread/slow_worker.h"
 #include "pagespeed/kernel/sharedmem/shared_mem_statistics.h"
 #include "pagespeed/kernel/sharedmem/shared_mem_lock_manager.h"
 #include "pagespeed/system/system_caches.h"
@@ -42,9 +49,142 @@
 #include <bcrypt.h>
 
 namespace net_instaweb {
+
+namespace {
+
+// Format a Win32 error code into a human-readable, single-line message.
+// Mirrors the helper in iis_process_context.cpp (kept local here to
+// avoid a public dependency-direction edge between sibling .cpp files
+// in the same cc_library).
+GoogleString FactoryWin32ErrorString(DWORD code) {
+	LPSTR buf = nullptr;
+	DWORD flags = FORMAT_MESSAGE_ALLOCATE_BUFFER
+		| FORMAT_MESSAGE_FROM_SYSTEM
+		| FORMAT_MESSAGE_IGNORE_INSERTS;
+	DWORD len = FormatMessageA(flags, nullptr, code,
+		MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+		reinterpret_cast<LPSTR>(&buf), 0, nullptr);
+	if (len == 0 || buf == nullptr) {
+		return StrCat("win32 error ", IntegerToString(static_cast<int>(code)));
+	}
+	GoogleString out(buf, len);
+	LocalFree(buf);
+	while (!out.empty() &&
+		   (out.back() == '\r' || out.back() == '\n' ||
+		    out.back() == ' '  || out.back() == '.')) {
+		out.pop_back();
+	}
+	if (out.empty()) {
+		return StrCat("win32 error ", IntegerToString(static_cast<int>(code)));
+	}
+	return out;
+}
+
+// the design record §3b: prefix scope guardrail. Canonicalize via
+// GetFullPathNameW (resolves "." / ".." / relative segments BUT does
+// NOT resolve symlinks / junctions — that's why the reparse-point
+// check in §3d is also mandatory) and require the result to begin
+// (case-insensitive) with one of the supplied hardcoded prefixes.
+// Operator cannot widen the prefix via config — by design.
+//
+// Shared between IsPathInAutoCreatePrefixImpl (cache) and
+// IsLogDirInAutoCreatePrefixImpl (logs); the only difference is the
+// prefix list passed in.
+bool IsPathInPrefixListImpl(const GoogleString& path,
+                            const wchar_t* const* prefixes,
+                            size_t n_prefixes) {
+	std::wstring wpath = s2ws(path);
+	if (wpath.empty()) return false;
+
+	// Resolve to a canonical absolute Win32 path. Buffer up to
+	// MAX_PATH initially, retry once on overflow (paths above MAX_PATH
+	// without the \\?\ prefix can still be passed here — be defensive).
+	wchar_t small_buf[MAX_PATH];
+	DWORD needed = GetFullPathNameW(wpath.c_str(), MAX_PATH, small_buf, nullptr);
+	std::wstring full;
+	if (needed == 0) {
+		return false;
+	} else if (needed < MAX_PATH) {
+		full.assign(small_buf);
+	} else {
+		std::vector<wchar_t> big(needed + 1);
+		DWORD again = GetFullPathNameW(wpath.c_str(),
+			static_cast<DWORD>(big.size()), big.data(), nullptr);
+		if (again == 0 || again >= big.size()) return false;
+		full.assign(big.data(), again);
+	}
+
+	// Hardcoded prefix scope. The trailing backslash on each prefix
+	// is mandatory: we must not accept the bare ...\cache (or ...\logs)
+	// directory itself — only paths strictly underneath. Comparison is
+	// case-insensitive per Windows filesystem semantics.
+	for (size_t i = 0; i < n_prefixes; ++i) {
+		const wchar_t* prefix = prefixes[i];
+		size_t plen = wcslen(prefix);
+		if (full.size() > plen &&
+		    _wcsnicmp(full.c_str(), prefix, plen) == 0) {
+			return true;
+		}
+	}
+	return false;
+}
+
+// the design record §3b: prefix scope guardrail for the cache tree. See
+// IsPathInPrefixListImpl above for the canonicalize+compare shape.
+//
+// thin wrapper IisRewriteDriverFactory::IsPathInAutoCreatePrefix
+// exposes this through the cross-port RewriteDriverFactory virtual so
+// IisProcessContext::GetServerContext can branch on prefix membership
+// without string-matching the EnsureDirectoryWritable error message.
+bool IsPathInAutoCreatePrefixImpl(const GoogleString& path) {
+	static const wchar_t* kCachePrefixes[] = {
+		L"C:\\ProgramData\\We-Amp\\PageSpeed\\cache\\",
+		L"C:\\ProgramData\\We-Amp\\IISWebSpeed\\cache\\",
+	};
+	return IsPathInPrefixListImpl(path, kCachePrefixes,
+		sizeof(kCachePrefixes) / sizeof(kCachePrefixes[0]));
+}
+
+// the design record §Operational + the referenced issue: prefix scope guardrail for
+// the logs tree. Same shape as IsPathInAutoCreatePrefixImpl above but
+// with the logs-tree prefixes. Out-of-prefix LogDir values cause the
+// caller in IisProcessContext::GetServerContext to skip auto-create
+// entirely (no mkdir, no diagnostic page) — preserving legacy
+// behaviour for operator-customized LogDir locations.
+bool IsLogDirInAutoCreatePrefixImpl(const GoogleString& path) {
+	static const wchar_t* kLogPrefixes[] = {
+		L"C:\\ProgramData\\We-Amp\\PageSpeed\\logs\\",
+		L"C:\\ProgramData\\We-Amp\\IISWebSpeed\\logs\\",
+	};
+	return IsPathInPrefixListImpl(path, kLogPrefixes,
+		sizeof(kLogPrefixes) / sizeof(kLogPrefixes[0]));
+}
+
+// RAII wrapper for a Win32 HANDLE so the auto-create probe / ACL
+// sequence can early-return without leaking the handle from (d).
+class ScopedHandle {
+public:
+	explicit ScopedHandle(HANDLE h = INVALID_HANDLE_VALUE) : h_(h) {}
+	~ScopedHandle() {
+		if (h_ != nullptr && h_ != INVALID_HANDLE_VALUE) {
+			CloseHandle(h_);
+		}
+	}
+	HANDLE get() const { return h_; }
+	bool valid() const {
+		return h_ != nullptr && h_ != INVALID_HANDLE_VALUE;
+	}
+	ScopedHandle(const ScopedHandle&) = delete;
+	ScopedHandle& operator=(const ScopedHandle&) = delete;
+private:
+	HANDLE h_;
+};
+
+}  // namespace
+
 	  // namespace
 
-	class CacheInterface;	
+	class CacheInterface;
 	class FileSystem;
 	class Hasher;
 	class MessageHandler;
@@ -63,8 +203,9 @@ namespace net_instaweb {
 		thread_system, 
 		//WEAMPKS: 1.9 NULL is default shared memory
 		shm_runtime,
-		"foo.com", 
+		"foo.com",
 		80),
+	 process_context_(process_context),
 	 app_pool_name_(app_pool_name),
 	 use_per_vhost_statistics_(true),
 	 use_native_fetcher_(process_context->settings()->use_native_fetcher),
@@ -143,6 +284,264 @@ namespace net_instaweb {
 			shut_down_ = true;
 			SystemRewriteDriverFactory::ShutDown();
 		}
+	}
+
+	// the design record §3b + IIS prefix-scope predicate (cache).
+	// Thin wrapper over the file-scope helper so the cross-port virtual
+	// on RewriteDriverFactory can be overridden without exposing the
+	// Win32-specific implementation in the header.
+	bool IisRewriteDriverFactory::IsPathInAutoCreatePrefix(
+		const GoogleString& path) {
+		return IsPathInAutoCreatePrefixImpl(path);
+	}
+
+	// the design record §Operational + the referenced issue IIS prefix-scope predicate
+	// (logs). Parallel to IsPathInAutoCreatePrefix but matches the
+	// logs-tree prefixes. Caller in iis_process_context.cpp gates on
+	// this BEFORE delegating to EnsureDirectoryWritable, so the
+	// out-of-prefix case stays silent (no mkdir, no diagnostic page) —
+	// legacy LogDir behaviour preserved for operator-customized
+	// LogDir locations.
+	bool IisRewriteDriverFactory::IsLogDirInAutoCreatePrefix(
+		const GoogleString& path) {
+		return IsLogDirInAutoCreatePrefixImpl(path);
+	}
+
+	// the design record §3f cache-path ACL mask: Modify, mirroring
+	// Product.wxs GrantCacheAcl. Returned as uint32_t (not DWORD) to
+	// keep the header platform-neutral; identical underlying values.
+	uint32_t IisRewriteDriverFactory::CachePathAclMask() const {
+		return FILE_GENERIC_READ | FILE_GENERIC_WRITE |
+			FILE_GENERIC_EXECUTE | DELETE;
+	}
+
+	// the design record §Operational + the referenced issue LogDir ACL mask: RX+W
+	// (no DELETE), mirroring Product.wxs GrantLogAcl. Workers append
+	// to logs but admin owns rotation, so DELETE is intentionally
+	// withheld — matches the WiX-side narrower grant.
+	uint32_t IisRewriteDriverFactory::LogDirAclMask() const {
+		return FILE_GENERIC_READ | FILE_GENERIC_WRITE |
+			FILE_GENERIC_EXECUTE;
+	}
+
+	// the design record §3 IIS implementation. See header for sequence overview.
+	// Caller (IisProcessContext::GetServerContext) is expected to gate
+	// on IsPathInAutoCreatePrefix() / IsLogDirInAutoCreatePrefix() FIRST
+	// and skip this hook for out-of-prefix paths — removed
+	// the prior in-hook prefix re-check / string-matched dispatch.
+	// Failure modes that still surface here (return false + populated
+	// |error_message|):
+	//   - empty path                              (caller bug)
+	//   - RecursivelyMakeDir fails                (disk full, EDR, etc.)
+	//   - reparse-point planted at the result     (security event)
+	//   - writability probe AND ACL grant both    (broken inheritance +
+	//     fail                                     EDR blocking DACL write)
+	// |acl_mask|: granular access mask applied to the worker SID on the
+	// conditional ACL leg (step f). Value 0 means "use the cache
+	// default" (Modify), matching legacy cache callers. The LogDir
+	// caller passes LogDirAclMask() = RX+W (no DELETE),
+	// mirroring Product.wxs GrantLogAcl.
+	bool IisRewriteDriverFactory::EnsureDirectoryWritable(
+		const GoogleString& path, GoogleString* error_message,
+		uint32_t acl_mask) {
+		auto set_err = [&](const GoogleString& m) {
+			if (error_message != nullptr) *error_message = m;
+		};
+
+		if (path.empty()) {
+			set_err("EnsureDirectoryWritable called with empty path");
+			return false;
+		}
+
+		// Resolve |acl_mask|=0 (the sentinel-default for "use this
+		// implementation's default") to the cache-path Modify mask —
+		// preserves the legacy single-caller behaviour without
+		// requiring the cache call site to be touched. The LogDir
+		// caller passes LogDirAclMask() (RX+W, no DELETE) explicitly.
+		const DWORD effective_acl_mask = (acl_mask != 0)
+			? static_cast<DWORD>(acl_mask)
+			: static_cast<DWORD>(CachePathAclMask());
+
+		// (c) cheap belt: cross-port mkdir. Apache uses the same
+		// primitive at directive-parse time (apache_server_context.cc:80).
+		// RecursivelyMakeDir treats ERROR_ALREADY_EXISTS as success, so
+		// concurrent worker startups race safely (§3g).
+		if (!file_system()->RecursivelyMakeDir(path, message_handler())) {
+			DWORD gle = GetLastError();
+			set_err(StrCat("RecursivelyMakeDir failed: ",
+				FactoryWin32ErrorString(gle)));
+			return false;
+		}
+
+		// (d) reparse-point check on the resulting path. Open with
+		// FILE_FLAG_OPEN_REPARSE_POINT so we don't traverse a
+		// junction-plant; FILE_FLAG_BACKUP_SEMANTICS so we can open
+		// a directory. WRITE_DAC + READ_CONTROL on the handle so the
+		// same handle is reusable for the conditional ACL apply in (f).
+		std::wstring wpath = s2ws(path);
+		ScopedHandle dir_handle(::CreateFileW(
+			wpath.c_str(),
+			GENERIC_READ | WRITE_DAC | READ_CONTROL,
+			FILE_SHARE_READ | FILE_SHARE_WRITE,
+			nullptr,
+			OPEN_EXISTING,
+			FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS,
+			nullptr));
+		if (!dir_handle.valid()) {
+			DWORD gle = GetLastError();
+			set_err(StrCat("CreateFileW(reparse-check) failed: ",
+				FactoryWin32ErrorString(gle)));
+			return false;
+		}
+
+		FILE_ATTRIBUTE_TAG_INFO tag_info = {0};
+		if (::GetFileInformationByHandleEx(dir_handle.get(),
+			    FileAttributeTagInfo, &tag_info, sizeof(tag_info))) {
+			if (tag_info.ReparseTag != 0) {
+				set_err(StrCat(
+					"reparse-point detected at ", path,
+					" (ReparseTag=0x",
+					IntegerToString(static_cast<int>(tag_info.ReparseTag)),
+					"); refusing to auto-create"));
+				return false;
+			}
+		} else {
+			// Non-fatal: log + continue. The reparse-point attack
+			// class we're closing requires NTFS in the first place,
+			// and the canonical product tree is always on NTFS, so
+			// any failure here is most likely a permissions edge
+			// case (which the writability probe in (e) will catch).
+			DWORD gle = GetLastError();
+			message_handler()->Message(kWarning,
+				"GetFileInformationByHandleEx(FileAttributeTagInfo) "
+				"failed on %s: %s (continuing)", path.c_str(),
+				FactoryWin32ErrorString(gle).c_str());
+		}
+
+		// (e) writability probe. Re-uses the same primitive the legacy
+		// post-existence-check uses at iis_process_context.cpp
+		// OpenTempFile path (returns OutputFile* — has Write/Flush;
+		// the base File* does not). Common case: probe succeeds under
+		// inherited installer ACLs, no SetSecurityInfo call.
+		auto probe_writable = [&](GoogleString* probe_err) -> bool {
+			GoogleString tc = path;
+			if (!tc.empty() && tc.back() != '\\' && tc.back() != '/') {
+				tc += "\\";
+			}
+			FileSystem::OutputFile* tempfile = file_system()->OpenTempFile(
+				tc, message_handler());
+			if (tempfile == nullptr) {
+				if (probe_err != nullptr) {
+					*probe_err = FactoryWin32ErrorString(GetLastError());
+				}
+				return false;
+			}
+			GoogleString fn = tempfile->filename();
+			bool ok = true;
+			GoogleString first_err;
+			if (!tempfile->Write("probe", message_handler())) {
+				first_err = FactoryWin32ErrorString(GetLastError());
+				ok = false;
+			} else if (!tempfile->Flush(message_handler())) {
+				first_err = FactoryWin32ErrorString(GetLastError());
+				ok = false;
+			}
+			if (!file_system()->Close(tempfile, message_handler())) {
+				if (first_err.empty()) {
+					first_err = FactoryWin32ErrorString(GetLastError());
+				}
+				ok = false;
+			}
+			file_system()->RemoveFile(fn.c_str(), message_handler());
+			if (!ok && probe_err != nullptr) *probe_err = first_err;
+			return ok;
+		};
+
+		GoogleString first_probe_err;
+		if (probe_writable(&first_probe_err)) {
+			return true;
+		}
+
+		// (f) conditional suspenders: ACL grant via SetSecurityInfo on
+		// the retained handle from (d). Skip if SID capture failed at
+		// ctor (no way to build an ACE) — surface the probe failure
+		// instead.
+		PSID worker_sid = process_context_ != nullptr
+			? process_context_->worker_sid()
+			: nullptr;
+		if (worker_sid == nullptr) {
+			set_err(StrCat(
+				"writability probe failed (",
+				first_probe_err.empty() ? GoogleString("no error") : first_probe_err,
+				") and worker SID is unavailable for conditional ACL grant"));
+			return false;
+		}
+
+		// Construct an EXPLICIT_ACCESS_W directly. the design record §3f spec
+		// calls `BuildExplicitAccessWithSidW(...)` — that helper is
+		// not in the Windows SDK aclapi.h (only the *Name* and *Sid*
+		// (no W suffix) overloads exist, and the Sid overload takes
+		// the PSID via TRUSTEE.ptstrName cast). The structure init
+		// is straightforward and avoids any signature ambiguity.
+		// Mask is parameterized: |effective_acl_mask| resolves to
+		// CachePathAclMask() (Modify = RX+W+DELETE) for cache callers,
+		// or LogDirAclMask() (RX+W, no DELETE) for the LogDir caller
+		// per the referenced issue. Either way, no WRITE_DAC / WRITE_OWNER,
+		// so the worker can never re-ACL the tree.
+		EXPLICIT_ACCESS_W ea = {0};
+		ea.grfAccessPermissions = effective_acl_mask;
+		ea.grfAccessMode = GRANT_ACCESS;
+		ea.grfInheritance = NO_INHERITANCE;
+		ea.Trustee.TrusteeForm = TRUSTEE_IS_SID;
+		ea.Trustee.TrusteeType = TRUSTEE_IS_UNKNOWN;
+		// TRUSTEE_W.ptstrName is LPWSTR by type but for TRUSTEE_IS_SID
+		// it is reinterpreted as PSID per the Win32 ACL APIs contract.
+		ea.Trustee.ptstrName = reinterpret_cast<LPWSTR>(worker_sid);
+
+		PACL new_dacl = nullptr;
+		DWORD se = SetEntriesInAclW(1, &ea, nullptr, &new_dacl);
+		if (se != ERROR_SUCCESS) {
+			set_err(StrCat(
+				"writability probe failed (",
+				first_probe_err.empty() ? GoogleString("no error") : first_probe_err,
+				") and SetEntriesInAclW failed: ",
+				FactoryWin32ErrorString(se)));
+			return false;
+		}
+
+		// PROTECTED_DACL is mandatory: without it, inherited ACEs flow
+		// through and a broader inherited grant would defeat the
+		// Modify-only guarantee on our explicit ACE.
+		DWORD si = SetSecurityInfo(
+			dir_handle.get(),
+			SE_KERNEL_OBJECT,
+			DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+			nullptr, nullptr, new_dacl, nullptr);
+		if (new_dacl != nullptr) {
+			LocalFree(new_dacl);
+			new_dacl = nullptr;
+		}
+		if (si != ERROR_SUCCESS) {
+			set_err(StrCat(
+				"writability probe failed (",
+				first_probe_err.empty() ? GoogleString("no error") : first_probe_err,
+				") and SetSecurityInfo failed: ",
+				FactoryWin32ErrorString(si)));
+			return false;
+		}
+
+		// Re-probe. Persistent failure → both errors surface.
+		GoogleString second_probe_err;
+		if (probe_writable(&second_probe_err)) {
+			return true;
+		}
+		set_err(StrCat(
+			"writability probe failed before ACL grant (",
+			first_probe_err.empty() ? GoogleString("no error") : first_probe_err,
+			"); ACL grant succeeded but post-grant probe still failed (",
+			second_probe_err.empty() ? GoogleString("no error") : second_probe_err,
+			")"));
+		return false;
 	}
 
 	ServerContext* IisRewriteDriverFactory::NewDecodingServerContext() {

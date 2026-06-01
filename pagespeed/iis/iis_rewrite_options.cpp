@@ -38,6 +38,8 @@ const char kConsolePath[] = "ConsolePath";
 const char kMessagesPath[] = "MessagesPath";
 const char kAdminPath[] = "AdminPath";
 const char kGlobalAdminPath[] = "GlobalAdminPath";
+const char kAutoCreateCachePath[] = "AutoCreateCachePath";
+const char kAutoCreateLogDir[] = "AutoCreateLogDir";
 
 // TODO(oschaaf): 1.9 -> use these options server only stuff below.
 
@@ -120,11 +122,33 @@ void IisRewriteOptions::AddProperties() {
 		"/pagespeed_global_admin", &IisRewriteOptions::global_admin_path_, "ngap", kGlobalAdminPath,
 		kProcessScopeStrict, "Set the global admin path.  Ex: /pagespeed_global_admin",
 		false);
+	// the design record §5: default-on auto-create of the per-site cache subdir
+	// under either C:\ProgramData\We-Amp\PageSpeed\cache\ or
+	// C:\ProgramData\We-Amp\IISWebSpeed\cache\ (hardcoded prefix scope
+	// in the factory override). Operator opt-out via
+	// `pagespeed AutoCreateCachePath off`.
+	add_iis_option(
+		true, &IisRewriteOptions::auto_create_cache_path_, "nacp",
+		kAutoCreateCachePath, kProcessScopeStrict,
+		"Auto-create the per-site cache subdirectory if missing (on|off, default on).",
+		false);
+	// the design record §Operational + the referenced issue: default-on auto-create of
+	// the LogDir under either C:\ProgramData\We-Amp\PageSpeed\logs\ or
+	// C:\ProgramData\We-Amp\IISWebSpeed\logs\ (hardcoded prefix scope
+	// in the factory override). Operator opt-out via
+	// `pagespeed AutoCreateLogDir off`. ACL grant on the conditional
+	// suspenders leg is RX+W (no DELETE), narrower than the cache grant,
+	// mirroring Product.wxs GrantLogAcl.
+	add_iis_option(
+		true, &IisRewriteOptions::auto_create_log_dir_, "nacl",
+		kAutoCreateLogDir, kProcessScopeStrict,
+		"Auto-create the LogDir if missing (on|off, default on).",
+		false);
 
 	MergeSubclassProperties(iis_properties_);
 	IisRewriteOptions dummy_config(NULL);
   
-  dummy_config.set_default_x_header_value(MOD_PAGESPEED_VERSION_STRING  "." IISPEED_RELEASE_NUMBER_STRING);
+  dummy_config.set_default_x_header_value(kModPagespeedVersion);
 }
 
 void IisRewriteOptions::Initialize() {

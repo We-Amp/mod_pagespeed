@@ -13,9 +13,8 @@
 extern bool REDUCE_LOG;
 
 static const size_t ERROR_BUFFER_SIZE=1024*16;
-#define IISPEED_RELEASE_NUMBER_STRING "4"
 
-static HTTP_DATA_CHUNK emptydatachunk;
+static HTTP_DATA_CHUNK emptydatachunk = {};
 static const char emptystring[]="";
 
 static const char *httpKnownHeadersAscii[]={

@@ -20,6 +20,7 @@
 #ifndef NET_INSTAWEB_REWRITER_PUBLIC_REWRITE_DRIVER_FACTORY_H_
 #define NET_INSTAWEB_REWRITER_PUBLIC_REWRITE_DRIVER_FACTORY_H_
 
+#include <cstdint>
 #include <memory>
 #include <set>
 #include <vector>
@@ -29,7 +30,6 @@
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/function.h"
 #include "pagespeed/kernel/base/null_statistics.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -269,6 +269,79 @@ class RewriteDriverFactory {
   // Registers the directory as having been created by us.
   void AddCreatedDirectory(const GoogleString& dir);
 
+  // Server-context init-time prefix-scope predicate. Called by
+  // IisProcessContext::GetServerContext BEFORE EnsureDirectoryWritable so
+  // the caller can route out-of-prefix paths directly to kCachePathMissing
+  // (the operator-manual-mkdir path) without depending on string-matching
+  // an error message returned from the writable hook. Default: true (POSIX
+  // ports' directive-parse-time mkdir takes the entire FileCachePath
+  // unconditionally — there is no prefix scope to enforce). IIS overrides
+  // to require the canonical "PageSpeed\\cache\\" or
+  // "IISWebSpeed\\cache\\" prefix; see iis_rewrite_driver_factory.cpp.
+  //
+  // See the design record, the referenced issue.
+  virtual bool IsPathInAutoCreatePrefix(const GoogleString& path) {
+    return true;
+  }
+
+  // Server-context init-time prefix-scope predicate for the LogDir
+  // parallel auto-create flow. Called by
+  // IisProcessContext::GetServerContext BEFORE EnsureDirectoryWritable
+  // on the resolved LogDir. Default: true (POSIX ports' directive-time
+  // mkdir already covers the path, no prefix to enforce). IIS overrides
+  // to require the canonical "PageSpeed\\logs\\" or "IISWebSpeed\\logs\\"
+  // prefix, mirroring IsPathInAutoCreatePrefix() for cache but with the
+  // logs-tree prefixes. Kept as a separate virtual (rather than an enum
+  // parameter on IsPathInAutoCreatePrefix) so the caller's intent is
+  // clear at the call site and POSIX overrides remain trivial defaults.
+  //
+  // See the design record §Operational, the referenced issue.
+  virtual bool IsLogDirInAutoCreatePrefix(const GoogleString& path) {
+    return true;
+  }
+
+  // Server-context init-time hook. Called by IisProcessContext::GetServerContext
+  // after the per-site cache path is resolved AND has been confirmed in-prefix
+  // by IsPathInAutoCreatePrefix() above. Default: success (POSIX ports
+  // mkdir the FileCachePath at config-parse time in their directive handlers
+  // — Apache's mod_instaweb.cc:977 init_dir, nginx's ngx_pagespeed.cc:911
+  // ps_init_dir — so no further action is needed). IIS overrides because its
+  // per-site <site_app_id>/ subdirectory is computed post-config from runtime
+  // IIS state, which is not visible at directive-parse time.
+  //
+  // Contract: |path| is a DIRECTORY the implementation will create if missing.
+  // Callers MUST NOT pass a file path (e.g. Cyclone's
+  // system_cache_path.cc:122 <file_cache_path>/cyclone.dat data file is a
+  // FILE and is wired through AddCreatedDirectory only for Apache's chown
+  // sweep — it must not be passed through this hook).
+  //
+  // Caller contract: out-of-prefix gating is the caller's responsibility
+  // via IsPathInAutoCreatePrefix() — implementations may assume the path
+  // is in scope and need not re-check.
+  //
+  // On failure, |error_message| (if non-null) is populated with a
+  // platform-appropriate diagnostic. On success, |error_message| is
+  // unchanged.
+  //
+  // |acl_mask| is the access mask the implementation should grant to
+  // the worker identity on the conditional ACL-grant path (when the
+  // initial writability probe fails). Value 0 (the default) means
+  // "use the implementation's own default" — for the IIS override
+  // this resolves to Modify (FILE_GENERIC_READ|WRITE|EXECUTE|DELETE),
+  // matching the cache-directory grant in Product.wxs (GrantCacheAcl).
+  // The LogDir caller passes IisRewriteDriverFactory::LogDirAclMask()
+  // which is RX+W (no DELETE), mirroring Product.wxs GrantLogAcl:
+  // workers append to logs but admin owns rotation. The type is
+  // uint32_t (not Win32 DWORD) to keep the base header
+  // platform-neutral; the IIS override casts internally. POSIX
+  // overrides ignore the parameter — directive-parse-time mkdir has
+  // already established ownership/permissions via umask.
+  //
+  // See the design record, the referenced issue.
+  virtual bool EnsureDirectoryWritable(const GoogleString& path,
+                                       GoogleString* error_message,
+                                       uint32_t acl_mask = 0);
+
   // Creates a new empty RewriteOptions object, with no default settings.
   // Generally configurations go factory's default_options() ->
   // ServerContext::global_options() -> RewriteDriverFactory,
@@ -501,7 +574,8 @@ class RewriteDriverFactory {
   // The hostname we're running on. Used to set the same field in ServerContext.
   GoogleString hostname_;
 
-  DISALLOW_COPY_AND_ASSIGN(RewriteDriverFactory);
+  RewriteDriverFactory(const RewriteDriverFactory&) = delete;
+  RewriteDriverFactory& operator=(const RewriteDriverFactory&) = delete;
 };
 
 // Helper for users of RewriterDriverFactory::defer_cleanup --- instantiates
@@ -514,7 +588,8 @@ class RewriteDriverFactory::Deleter : public Function {
 
  private:
   T* obj_;
-  DISALLOW_COPY_AND_ASSIGN(Deleter);
+  Deleter(const Deleter&) = delete;
+  Deleter& operator=(const Deleter&) = delete;
 };
 
 }  // namespace net_instaweb

@@ -1,9 +1,9 @@
 #ifndef IIS_REWRITE_DRIVER_FACTORY_H_
 #define IIS_REWRITE_DRIVER_FACTORY_H_
 
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/md5_hasher.h"
 #include "pagespeed/system/system_rewrite_driver_factory.h"
+#include <cstdint>
 #include <vector>
 
 namespace net_instaweb {
@@ -21,7 +21,6 @@ class IisMessageHandler;
 class SharedCircularBuffer;
 class SharedMemStatistics;
 class SharedMemRefererStatistics;
-class SlowWorker;
 class Statistics;
 class StaticAssetManager;
 
@@ -30,6 +29,61 @@ class IisRewriteDriverFactory : public SystemRewriteDriverFactory {
 
   IisRewriteDriverFactory(IisProcessContext* process_context, std::wstring app_pool_name, SystemThreadSystem* thread_system, AbstractSharedMem* shm_runtime);
   virtual ~IisRewriteDriverFactory();
+
+  // the design record §3b +: IIS-specific override of the cross-port
+  // prefix-scope predicate. Canonicalizes |path| via GetFullPathNameW
+  // and case-insensitively requires it to begin with one of the
+  // hardcoded prefixes:
+  //   C:\ProgramData\We-Amp\PageSpeed\cache\   (canonical 1.1 path)
+  //   C:\ProgramData\We-Amp\IISWebSpeed\cache\ (legacy upgrade path)
+  // POSIX ports inherit the base "always true" (their directive parser
+  // mkdirs the entire FileCachePath unconditionally — no prefix scope
+  // to enforce).
+  bool IsPathInAutoCreatePrefix(const GoogleString& path) override;
+
+  // the design record §Operational + the referenced issue: IIS-specific prefix-scope
+  // predicate for the LogDir auto-create flow. Same canonicalize +
+  // case-insensitive comparison shape as IsPathInAutoCreatePrefix
+  // above, but the hardcoded prefixes target the logs tree:
+  //   C:\ProgramData\We-Amp\PageSpeed\logs\    (canonical 1.1 path)
+  //   C:\ProgramData\We-Amp\IISWebSpeed\logs\  (legacy upgrade path)
+  // Out-of-prefix LogDir values fall through unchanged (no auto-create,
+  // no diagnostic page — legacy behaviour).
+  bool IsLogDirInAutoCreatePrefix(const GoogleString& path) override;
+
+  // the design record §3: IIS-specific implementation of the cross-port
+  // server-context init-time filesystem-prep hook. Sequence:
+  //   (c) cheap belt: mkdir  — RecursivelyMakeDir (same primitive Apache
+  //                            uses at directive-parse time)
+  //   (d) reparse-point check on the resulting path, handle retained
+  //   (e) writability probe  — OpenTempFile, success short-circuits
+  //   (f) conditional ACL    — explicit DACL via SetSecurityInfo on the
+  //                            retained handle (PROTECTED_DACL); access
+  //                            mask = |acl_mask| if non-zero, else
+  //                            CachePathAclMask() (Modify).
+  // POSIX ports inherit the base no-op (their directive parser already
+  // covers the FileCachePath). Out-of-prefix gating is enforced by the
+  // caller via IsPathInAutoCreatePrefix() / IsLogDirInAutoCreatePrefix()
+  // above — this hook may assume the path is in scope. Failures return
+  // false with a populated |error_message|.
+  bool EnsureDirectoryWritable(const GoogleString& path,
+                               GoogleString* error_message,
+                               uint32_t acl_mask = 0) override;
+
+  // the design record §3f cache-path ACL mask: Modify
+  // (FILE_GENERIC_READ | FILE_GENERIC_WRITE | FILE_GENERIC_EXECUTE |
+  // DELETE), mirroring Product.wxs GrantCacheAcl. Returned as uint32_t
+  // to keep the header platform-neutral; implementation in the .cpp
+  // casts to DWORD where needed.
+  uint32_t CachePathAclMask() const;
+
+  // the design record §Operational + the referenced issue LogDir ACL mask: RX+W
+  // (FILE_GENERIC_READ | FILE_GENERIC_WRITE | FILE_GENERIC_EXECUTE,
+  // NO DELETE), mirroring Product.wxs GrantLogAcl. Narrower than
+  // CachePathAclMask() because workers append to logs but admin owns
+  // rotation. Caller in iis_process_context.cpp passes this mask to
+  // EnsureDirectoryWritable for the LogDir flow.
+  uint32_t LogDirAclMask() const;
 
   virtual Hasher* NewHasher();
   virtual UrlAsyncFetcher* AllocateFetcher(SystemRewriteOptions* config);
@@ -93,6 +147,12 @@ protected:
 
   virtual void ShutDownFetchers();
 private:
+  // Non-owning back-pointer to the process context that constructed us.
+  // Used by EnsureDirectoryWritable to read the cached worker SID
+  // captured at IisProcessContext ctor (before the worker token handle
+  // was closed). PSID buffer lives in the process context — the factory
+  // just reads through. No copy, no LocalFree.
+  IisProcessContext* process_context_;
   std::wstring app_pool_name_;
   bool use_per_vhost_statistics_;
   bool use_native_fetcher_;
@@ -103,12 +163,13 @@ private:
   SharedCircularBuffer* iis_shared_circular_buffer_;
   IisMessageHandler* iis_message_handler_;
   IisMessageHandler* iis_html_parse_message_handler_;
-  typedef std::set<IisMessageHandler*> IisMessageHandlerSet;
+  using IisMessageHandlerSet = std::set<IisMessageHandler*>;
   IisMessageHandlerSet server_context_message_handlers_;
   std::vector<IisAsyncUrlFetcher*> native_fetchers_;
   bool shut_down_;
   time_t created_at_;
-  DISALLOW_COPY_AND_ASSIGN(IisRewriteDriverFactory);
+  IisRewriteDriverFactory(const IisRewriteDriverFactory&) = delete;
+  IisRewriteDriverFactory& operator=(const IisRewriteDriverFactory&) = delete;
 };
 
 } // namespace net_instaweb

@@ -39,6 +39,10 @@
 #include <cstdio>
 #include <google/protobuf/stubs/common.h>
 
+// Release BoringSSL's process-wide TLS slot on DLL unload.
+// Defined by the boringssl_dll_unload_tls_cleanup.patch we apply to @boringssl.
+extern "C" void CRYPTO_thread_local_cleanup(void);
+
 // ASan runtime configuration for IIS testing.
 // Embedded in the DLL so IIS worker processes pick up these options
 // automatically without requiring environment variable configuration.
@@ -136,11 +140,24 @@ BOOL APIENTRY DllMain(HMODULE hModule,
 
       net_instaweb::IisRewriteOptions::Terminate();
       net_instaweb::IisRewriteDriverFactory::Terminate();
+
+      // Counterpart of the DLL_PROCESS_ATTACH allocation above. Before this
+      // delete, every IIS app-pool recycle leaked the ProcessContext and
+      // tripped AppVerifier's Leak provider with Sig[8]=0x900 (ALLOCATION).
+      // Must run before ShutdownProtobufLibrary so ~ProcessContext can still
+      // touch protobuf state during its own teardown.
+      delete net_instaweb::IisProcessContext::PSOL_PROCESS_CONTEXT;
+      net_instaweb::IisProcessContext::PSOL_PROCESS_CONTEXT = NULL;
+
       google::protobuf::ShutdownProtobufLibrary();
       net_instaweb::HtmlKeywords::ShutDown();
 
       delete net_instaweb::message_handler;
       net_instaweb::message_handler = NULL;
+
+      // Release BoringSSL's process-wide TLS slot. Must come
+      // after any code path that could still touch BoringSSL thread locals.
+      CRYPTO_thread_local_cleanup();
       break;
 
     case DLL_THREAD_ATTACH:

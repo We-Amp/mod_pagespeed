@@ -654,7 +654,8 @@ class JoinCollectionTest : public testing::Test {
   }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(JoinCollectionTest);
+  JoinCollectionTest(const JoinCollectionTest&) = delete;
+  JoinCollectionTest& operator=(const JoinCollectionTest&) = delete;
 };
 
 TEST_F(JoinCollectionTest, BasicSequence) {
@@ -866,6 +867,47 @@ TEST(IsAsciiTest, IsNonControlAscii) {
   for (int i = 0, n = STATIC_STRLEN(unicode); i < n; ++i) {
     EXPECT_FALSE(IsNonControlAscii(unicode[i])) << unicode[i];
   }
+}
+
+// ========================= ConstantTimeCompare Tests =========================
+
+TEST(ConstantTimeCompareTest, EqualStrings) {
+  EXPECT_TRUE(ConstantTimeCompare("secret", "secret"));
+}
+
+TEST(ConstantTimeCompareTest, DifferentContentSameLength) {
+  EXPECT_FALSE(ConstantTimeCompare("secret", "secreX"));
+}
+
+TEST(ConstantTimeCompareTest, ShorterA_LongerB) {
+  EXPECT_FALSE(ConstantTimeCompare("abc", "abcd"));
+}
+
+TEST(ConstantTimeCompareTest, LongerA_ShorterB) {
+  EXPECT_FALSE(ConstantTimeCompare("abcd", "abc"));
+}
+
+TEST(ConstantTimeCompareTest, BothEmpty) {
+  EXPECT_TRUE(ConstantTimeCompare("", ""));
+}
+
+TEST(ConstantTimeCompareTest, OneEmptyOneNot) {
+  EXPECT_FALSE(ConstantTimeCompare("", "x"));
+  EXPECT_FALSE(ConstantTimeCompare("x", ""));
+}
+
+TEST(ConstantTimeCompareTest, PrefixVsLonger) {
+  GoogleString with_nul("secret\0", 7);
+  EXPECT_FALSE(ConstantTimeCompare("secret", StringPiece(with_nul)));
+}
+
+TEST(ConstantTimeCompareTest, LengthMultipleOf256NullBytes) {
+  // The main loop zero-pads the shorter input, so comparing "" against
+  // 256 null bytes would produce result==0 without the size-difference
+  // fold loop. This test exercises that guard.
+  GoogleString nulls(256, '\0');
+  EXPECT_FALSE(ConstantTimeCompare("", StringPiece(nulls)));
+  EXPECT_FALSE(ConstantTimeCompare(StringPiece(nulls), ""));
 }
 
 }  // namespace

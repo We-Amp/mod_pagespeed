@@ -1,6 +1,46 @@
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
+load("//bazel:version.bzl", "version_header")
 
 licenses(["notice"])  # Apache 2
+
+# Generate Windows resource (.rc) file embedding VS_VERSION_INFO into
+# pagespeed_iis.dll. Without this, the DLL ships with empty FileVersion /
+# ProductVersion metadata, which (a) makes Get-FileVersionInfo return
+# nothing for CI diagnostics and the day-2 baseline probe, and (b)
+# causes Windows Installer's REINSTALLMODE=omus default "overwrite-if-
+# newer" logic to silently skip pagespeed_iis.dll replacement on upgrade
+# whenever the on-disk file has been modified outside MSI (e.g.,
+# manual deploy, antivirus quarantine). The .rc encodes FILEVERSION as
+# 1.1.0.<beta-number> for betas (strictly increasing) and 1.1.0.65535
+# for finals (sorts above all betas). The accompanying REINSTALLMODE=amus
+# in install/iis/Product.wxs is belt-and-braces against future scenarios
+# where version comparison would still fall back to no-op.
+version_header(
+    name = "pagespeed_iis_rc_gen",
+    template = "pagespeed_iis.rc.in",
+    version_file = "//net/instaweb:public/VERSION",
+    out = "pagespeed_iis.rc",
+)
+
+# Compile the generated .rc to a .res via the Windows SDK resource
+# compiler. compile_rc.bat handles rc.exe discovery across runner
+# configurations (one host ships SDK 10.0.22621.0, another ships
+# 10.0.14393.0 through 10.0.26100.0; rc.exe is not on PATH by default
+# on either). cmd_bat (cmd.exe) is used rather than the default bash
+# to avoid msys path translation munging the Windows-style paths
+# rc.exe expects. Tagged no-remote-cache because the rc.exe output is
+# host-toolchain-dependent.
+genrule(
+    name = "pagespeed_iis_res_gen",
+    srcs = [
+        ":pagespeed_iis_rc_gen",
+        "compile_rc.bat",
+    ],
+    outs = ["pagespeed_iis.res"],
+    cmd_bat = "$(location compile_rc.bat) $(OUTS) $(location :pagespeed_iis_rc_gen)",
+    target_compatible_with = ["@platforms//os:windows"],
+    tags = ["no-remote-cache"],
+)
 
 # =============================================================================
 # IIS Native Module for PageSpeed — IISpeed adoption
@@ -62,6 +102,7 @@ cc_library(
         "dechunker.h",
         "iis_misc.h",
         "iis_debugging_string_writer.h",
+        "iis_config_util.h",
         "util.h",
         "FileCheck.h",
     ],
@@ -103,13 +144,20 @@ cc_library(
 cc_binary(
     name = "pagespeed_iis.dll",
     srcs = ["dll_main.cc"],
+    additional_linker_inputs = [":pagespeed_iis_res_gen"],
     defines = ["PAGESPEED_DLL_EXPORT"],
     linkshared = True,
     target_compatible_with = ["@platforms//os:windows"],
     visibility = ["//visibility:public"],
     deps = [":iis_module"],
     linkopts = select({
-        "@platforms//os:windows": ["/EXPORT:RegisterModule"],
+        "@platforms//os:windows": [
+            "/EXPORT:RegisterModule",
+            # lld-link accepts .res files as positional inputs; embeds the
+            # VS_VERSION_INFO resource into pagespeed_iis.dll. $(location)
+            # resolves to the genrule's .res output.
+            "$(location :pagespeed_iis_res_gen)",
+        ],
         "//conditions:default": [],
     }),
 )
@@ -118,6 +166,14 @@ cc_binary(
 filegroup(
     name = "perf_counter_manifest",
     srcs = ["pagespeed_counters.man"],
+    visibility = ["//visibility:public"],
+)
+
+# Platform-independent config tokenizer (header-only).
+# Extracted from iis_configuration.cpp for cross-platform testing.
+cc_library(
+    name = "iis_config_util",
+    hdrs = ["iis_config_util.h"],
     visibility = ["//visibility:public"],
 )
 

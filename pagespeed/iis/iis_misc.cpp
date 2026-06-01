@@ -242,8 +242,22 @@ namespace net_instaweb
 			  0,
 			  szPath)))
 		  {
+			  // Mirror iis_module_factory.cpp's canonical-vs-
+			  // fallback resolution — PageSpeed\ first (fresh 1.1+
+			  // installs), IISWebSpeed\ as upgrade fallback. Probe
+			  // existence in the canonical dir; only fall back to
+			  // the legacy dir when the canonical one has nothing,
+			  // to avoid pushing a stale candidate the loader would
+			  // then log as not-found.
 			  std::string pdata_path(szPath);
-			  paths.push_back(FindConfigFile(pdata_path + "\\We-Amp\\IISWebSpeed\\"));
+			  std::string canonical = pdata_path + "\\We-Amp\\PageSpeed\\";
+			  std::string legacy    = pdata_path + "\\We-Amp\\IISWebSpeed\\";
+			  if (GetFileAttributesA((canonical + CONFIGFILE_PRIMARY).c_str()) != INVALID_FILE_ATTRIBUTES
+			      || GetFileAttributesA((canonical + CONFIGFILE_FALLBACK).c_str()) != INVALID_FILE_ATTRIBUTES) {
+				  paths.push_back(FindConfigFile(canonical));
+			  } else {
+				  paths.push_back(FindConfigFile(legacy));
+			  }
 		  }
 
 		  if (filename!="")

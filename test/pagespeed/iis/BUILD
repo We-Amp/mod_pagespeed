@@ -174,6 +174,16 @@ pagespeed_cc_test(
 # Tests for Phase 1 critical fixes
 # These tests are platform-independent and can run on Linux.
 
+# Config tokenizer - parses IIS config file lines
+# Platform-independent test (header-only, no Windows deps)
+pagespeed_cc_test(
+    name = "iis_config_util_test",
+    srcs = ["iis_config_util_test.cc"],
+    deps = [
+        "//pagespeed/iis:iis_config_util",
+    ],
+)
+
 # Dechunker - HTTP chunked transfer encoding decoder
 # Platform-independent test
 pagespeed_cc_test(
@@ -257,6 +267,32 @@ pagespeed_cc_test(
     name = "iis_module_factory_test",
     tags = ["manual"],  # Old 1.1 API; needs rewrite for IISpeed adoption
     srcs = ["iis_module_factory_test.cc"],
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        "//pagespeed/iis:iis_module",
+    ],
+)
+
+# ConfigurationFile parsing tests (Phases 2-5)
+# Tests ParseConfigText extraction, bug exposure, functionality, and edge cases.
+# Windows-only: depends on iis_module which requires Windows headers.
+pagespeed_cc_test(
+    name = "iis_configuration_test",
+    srcs = ["iis_configuration_test.cc"],
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        "//pagespeed/iis:iis_module",
+    ],
+)
+
+# Regression test for IisAsyncUrlFetcher::DeriveHost lifetime contract.
+# Windows-only because iis_async_url_fetcher.h pulls in <Windows.h> and
+# <winhttp.h> via asyncwinhttp.h. The test itself exercises only the
+# platform-independent host-derivation helper, but linking the symbol
+# requires the Windows-only iis_module library.
+pagespeed_cc_test(
+    name = "iis_async_url_fetcher_test",
+    srcs = ["iis_async_url_fetcher_test.cc"],
     target_compatible_with = ["@platforms//os:windows"],
     deps = [
         "//pagespeed/iis:iis_module",

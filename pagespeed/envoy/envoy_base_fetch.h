@@ -79,13 +79,16 @@ class EnvoyBaseFetch : public AsyncFetch {
   // across threads, and memory_order_acquire for the final read before delete.
   std::atomic<int> references_{2};
   PreserveCachingHeaders preserve_caching_headers_;
-  // Set to true just before the Envoy side releases its reference
-  bool have_ipro_response_{false};
+  // Whether we have an IPRO response (cache hit with valid status).
+  // Atomic: written in HandleHeadersComplete (network thread),
+  // read in HandleDone (possibly different thread).
+  std::atomic<bool> have_ipro_response_{false};
   // Atomic pointer to avoid race between worker threads and dispatcher thread.
   // Use memory_order_acquire for loads, memory_order_release for stores.
   std::atomic<Envoy::Http::HttpPageSpeedDecoderFilter*> decoder_{nullptr};
 
-  DISALLOW_COPY_AND_ASSIGN(EnvoyBaseFetch);
+  EnvoyBaseFetch(const EnvoyBaseFetch&) = delete;
+  EnvoyBaseFetch& operator=(const EnvoyBaseFetch&) = delete;
 };
 
 }  // namespace net_instaweb
