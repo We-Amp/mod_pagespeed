@@ -22,6 +22,8 @@ services:
       - /media/usbcssd/bazel-cache/disk-cache:/ssd-cache/disk-cache
       - /media/usbcssd/bazel-cache/repo-cache:/ssd-cache/repo-cache
       - /media/usbcssd/bazel-cache/output-base:/home/dev/.cache/bazel
+      # SSH agent forwarding for git access (private repos)
+      - ${SSH_AUTH_SOCK}:/ssh-agent
     environment:
       # Set PATH explicitly to avoid inheriting host PATH
       - PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -33,6 +35,8 @@ services:
       - MEMCACHED_HOST=memcached
       # Home directory for dev user
       - HOME=/home/dev
+      # SSH agent forwarding
+      - SSH_AUTH_SOCK=/ssh-agent
     depends_on:
       - redis
       - memcached

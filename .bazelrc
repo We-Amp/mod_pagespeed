@@ -137,6 +137,10 @@ build:macos --cxxopt=-std=c++20 --host_cxxopt=-std=c++20
 build:macos --action_env=PATH=/opt/homebrew/bin:/opt/local/bin:/usr/local/bin:/usr/bin:/bin
 build:macos --host_action_env=PATH=/opt/homebrew/bin:/opt/local/bin:/usr/local/bin:/usr/bin:/bin
 build:macos --define tcmalloc=disabled
+# Enable aligned allocation (required by absl)
+build:macos --copt=-faligned-allocation --host_copt=-faligned-allocation
+# Suppress 'register' keyword errors from gperf-generated code (deprecated in C++17)
+build:macos --copt=-Wno-register --host_copt=-Wno-register
 
 # macOS ASAN/UBSAN
 build:macos-asan --config=asan
@@ -414,6 +418,7 @@ build:windows --define tcmalloc=disabled
 build:windows --define wasm=disabled
 build:windows --define manual_stamp=manual_stamp
 build:windows --cxxopt="/std:c++20"
+build:windows --host_cxxopt="/std:c++20"
 build:windows --output_groups=+pdb_file
 # Windows PageSpeed: Exclude Apache module (POSIX-only), use cross-platform Std* implementations
 build:windows --define=apache_module=false

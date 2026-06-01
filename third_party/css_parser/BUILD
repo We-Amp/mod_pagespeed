@@ -123,6 +123,7 @@ cc_library(
     ] + glob(["src/util/gtl/*.h"]),
     copts = [
         "-funsigned-char",
+        "-Wno-register",  # gperf-generated code uses deprecated 'register' keyword
     ],
     visibility = ["//visibility:public"],
     deps = [

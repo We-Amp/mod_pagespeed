@@ -15,17 +15,17 @@ def pagespeed_cc_benchmark(
         coverage = True,
         local = False,
         size = "medium"):
-    test_lib_tags = []
     cc_test(
         name = name,
         copts = copts,
         linkstatic = True,
         srcs = srcs,
-        deps = deps + ["//test/pagespeed/kernel/base:pagespeed_gtest"],
+        deps = deps + ["//test:main", "//test/pagespeed/kernel/base:pagespeed_gtest"],
         local = local,
         shard_count = 1,
         size = size,
         data = data,
+        tags = tags + ["manual"],  # Skip benchmarks in default build
     )
 
 
@@ -43,21 +43,26 @@ def pagespeed_cc_test(
         shard_count = 10,
         coverage = True,
         local = False,
-        size = "medium"):
+        size = "medium",
+        target_compatible_with = None):
     test_lib_tags = []
-    cc_test(
-        name = name,
-        copts = copts,
-        linkstatic = True,
-        srcs = srcs,
-        deps = [
+    kwargs = {
+        "name": name,
+        "copts": copts,
+        "linkstatic": True,
+        "srcs": srcs,
+        "deps": [
             repository + "//test:main",
         ] + deps + ["//test/pagespeed/kernel/base:pagespeed_gtest"],
-        local = local,
-        shard_count = shard_count,
-        size = size,
-        data = data,
-    )
+        "local": local,
+        "shard_count": shard_count,
+        "size": size,
+        "data": data,
+        "tags": tags,
+    }
+    if target_compatible_with != None:
+        kwargs["target_compatible_with"] = target_compatible_with
+    cc_test(**kwargs)
 
 def _pagespeed_cc_test_infrastructure_library(
         name,

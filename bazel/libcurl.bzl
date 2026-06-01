@@ -1,40 +1,36 @@
 # libcurl build rules for PageSpeed
 #
-# On Linux: Uses system-installed libcurl from /usr
-# On Windows: Uses pre-downloaded curl from C:/curl
+# Builds libcurl from source using cmake via rules_foreign_cc
 
-# Build rule for Linux (system curl at /usr)
-libcurl_linux_build_rule = """
-cc_library(
-    name = "curl",
-    hdrs = glob(["include/curl/**/*.h", "include/x86_64-linux-gnu/curl/**/*.h"]),
-    includes = ["include", "include/x86_64-linux-gnu"],
-    linkopts = ["-lcurl"],
+load("@rules_foreign_cc//foreign_cc:defs.bzl", "cmake")
+
+def libcurl_from_source():
+    """Creates the cmake build target for libcurl."""
+    cmake(
+        name = "curl",
+        lib_source = "@curl_src//:all_srcs",
+        out_static_libs = ["libcurl.a"],
+        cache_entries = {
+            "BUILD_CURL_EXE": "OFF",
+            "BUILD_SHARED_LIBS": "OFF",
+            "BUILD_TESTING": "OFF",
+            "CURL_DISABLE_LDAP": "ON",
+            "CURL_DISABLE_LDAPS": "ON",
+            "CURL_USE_LIBSSH2": "OFF",
+            "CURL_USE_LIBPSL": "OFF",
+            "HTTP_ONLY": "ON",
+            "ENABLE_UNIX_SOCKETS": "ON",
+            # Use system SSL
+            "CURL_USE_OPENSSL": "ON",
+        },
+        visibility = ["//visibility:public"],
+    )
+
+# Build file content for the curl source archive
+curl_src_build_file = """
+filegroup(
+    name = "all_srcs",
+    srcs = glob(["**"]),
     visibility = ["//visibility:public"],
 )
 """
-
-# Build rule for Windows (pre-built curl at C:/curl)
-# Expects:
-#   - include/curl/*.h  (headers)
-#   - lib/libcurl.lib   (import library - created from .def file)
-#   - bin/libcurl.dll   (runtime DLL)
-libcurl_windows_build_rule = """
-cc_import(
-    name = "curl_import",
-    interface_library = "lib/libcurl.lib",
-    shared_library = "bin/libcurl.dll",
-    visibility = ["//visibility:private"],
-)
-
-cc_library(
-    name = "curl",
-    hdrs = glob(["include/curl/**/*.h"]),
-    includes = ["include"],
-    visibility = ["//visibility:public"],
-    deps = [":curl_import"],
-)
-"""
-
-# Legacy build rule (kept for backward compatibility)
-libcurl_build_rule = libcurl_linux_build_rule

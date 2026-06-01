@@ -6,6 +6,7 @@ cc_library(
         'atomic/unix/builtins.c',
         'atomic/unix/ia32.c',
         'atomic/unix/mutex.c',
+        'atomic/unix/mutex64.c',
         'dso/unix/dso.c',
         'file_io/unix/buffer.c',
         'file_io/unix/copy.c',
@@ -138,17 +139,23 @@ cc_library(
         "include/apr_strings.h",
         "include/apr_random.h",
     ],
-    copts = [
-        "-Ithird_party/apr/gen/arch/linux/x64/include/",
+    copts = select({
+        "@platforms//os:macos": ["-Ithird_party/apr/gen/arch/mac/x64/include/"],
+        "//conditions:default": ["-Ithird_party/apr/gen/arch/linux/x64/include/"],
+    }) + [
         "-Iexternal/apr/random/unix",
         "-Iexternal/apr/include/",
         "-Iexternal/apr/include/arch/unix/",
         "-Iexternal/apr/",
         "-Wno-int-conversion",
         "-Wno-implicit-function-declaration",
-        "-Dpthread_mutexattr_setrobust_np=pthread_mutexattr_setrobust",
-        "-Dpthread_mutex_consistent_np=pthread_mutex_consistent",
-    ],
+    ] + select({
+        "@platforms//os:macos": [],
+        "//conditions:default": [
+            "-Dpthread_mutexattr_setrobust_np=pthread_mutexattr_setrobust",
+            "-Dpthread_mutex_consistent_np=pthread_mutex_consistent",
+        ],
+    }),
     visibility = ["//visibility:public"],
 )
 """
