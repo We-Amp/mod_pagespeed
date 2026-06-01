@@ -187,8 +187,12 @@ class TestLazyloadBlankGif:
             pytest.skip("Could not find blank GIF URL in response")
 
         gif_url = match.group(1)
-        if not gif_url.startswith("/"):
-            gif_url = f"/{gif_url}"
+        # Handle both absolute URLs (http://...) and relative URLs
+        if gif_url.startswith("http://") or gif_url.startswith("https://"):
+            from urllib.parse import urlparse
+            gif_url = urlparse(gif_url).path
+        elif not gif_url.startswith("/"):
+            gif_url = f"{example_root}/{gif_url}"
 
         # Fetch the blank GIF
         gif_response = client.get(gif_url)

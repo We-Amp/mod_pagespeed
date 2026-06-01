@@ -93,18 +93,21 @@ class TestCssSpriteImagesExternal:
             pytest.skip("Could not find rewritten CSS URL")
 
         css_url = match.group(1)
-        if not css_url.startswith("/"):
-            css_url = f"/{css_url}"
+        # Handle both absolute URLs (http://...) and relative URLs
+        if css_url.startswith("http://") or css_url.startswith("https://"):
+            from urllib.parse import urlparse
+            css_url = urlparse(css_url).path
+        elif not css_url.startswith("/"):
+            css_url = f"{example_root}/{css_url}"
 
-        # Fetch the CSS and check for sprite reference
-        css_response = client.get(css_url)
-        assert_http_status(css_response, 200)
-
-        assert_contains(
-            css_response,
-            r"ic\.pagespeed\.is",
-            "CSS should contain sprite reference",
+        # The sprite may take time to generate. Retry fetching the CSS
+        # until we see the sprite reference.
+        css_response = client.fetch_until_contains(
+            css_url,
+            pattern=r"ic\.pagespeed\.is",
+            timeout=30.0,
         )
+        assert_http_status(css_response, 200)
 
 
 if __name__ == "__main__":

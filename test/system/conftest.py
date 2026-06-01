@@ -19,7 +19,7 @@ setup from the bash system_test_helpers.sh.
 
 Environment Variables:
     PAGESPEED_HOST: Primary server hostname (default: localhost)
-    PAGESPEED_PORT: Primary server port (default: 8080)
+    PAGESPEED_PORT: Primary server port (default: 80 for Apache)
     PAGESPEED_HTTPS_HOST: HTTPS server hostname
     PAGESPEED_HTTPS_PORT: HTTPS server port (default: 8443)
     PAGESPEED_SECONDARY_HOST: Secondary server for proxy tests
@@ -87,7 +87,7 @@ def server_config() -> ServerConfig:
     """
     return ServerConfig(
         host=os.environ.get("PAGESPEED_HOST", "localhost"),
-        port=int(os.environ.get("PAGESPEED_PORT", "8080")),
+        port=int(os.environ.get("PAGESPEED_PORT", "80")),
         https_host=os.environ.get("PAGESPEED_HTTPS_HOST"),
         https_port=int(os.environ.get("PAGESPEED_HTTPS_PORT", "8443")),
         secondary_host=os.environ.get("PAGESPEED_SECONDARY_HOST"),

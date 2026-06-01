@@ -67,7 +67,7 @@ SharedDynamicStringMapTestBase::SharedDynamicStringMapTestBase(
     // We fill the rest of the string with random lower-case letters
     // -1 so there's room for the terminating null character
     while (string.length() < kStringSize - 1) {
-      string.push_back(random() % 26 + 'a');
+      string.push_back(rand() % 26 + 'a');
     }
     strings_.push_back(string);
   }

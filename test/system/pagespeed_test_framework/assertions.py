@@ -28,6 +28,7 @@ def assert_contains(
     content: Union[str, bytes, Response],
     pattern: str,
     msg: str = "",
+    flags: int = 0,
 ) -> None:
     """Assert that content contains the pattern (regex).
 
@@ -37,6 +38,7 @@ def assert_contains(
         content: String, bytes, or Response to search
         pattern: Regex pattern to find
         msg: Optional message for assertion failure
+        flags: Regex flags (e.g., re.DOTALL, re.IGNORECASE)
 
     Raises:
         AssertionError: If pattern not found
@@ -48,7 +50,7 @@ def assert_contains(
     else:
         text = content
 
-    match = re.search(pattern, text)
+    match = re.search(pattern, text, flags)
     if not match:
         prefix = f"{msg}: " if msg else ""
         # Show snippet of content for debugging

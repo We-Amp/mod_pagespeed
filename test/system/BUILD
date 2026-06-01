@@ -3,6 +3,43 @@ licenses(["notice"])  # Apache 2
 load("//bazel:pagespeed_python_test.bzl", "pagespeed_py_test")
 
 # =============================================================================
+# System Test Runner
+# =============================================================================
+#
+# Complete system test workflow: builds module, starts Apache, runs tests.
+#
+# Run with:
+#   bazel run //test/system:run_system_tests
+#
+# Or run directly in Docker:
+#   ./test/system/run_system_tests.sh
+#
+# Options:
+#   --build-only    Only build, don't run tests
+#   --skip-build    Skip building, run tests only
+#   --keep-running  Keep Apache running after tests
+#
+# Examples:
+#   bazel run //test/system:run_system_tests -- -k sanity
+#   bazel run //test/system:run_system_tests -- automatic/test_extend_cache.py
+
+sh_binary(
+    name = "run_system_tests",
+    srcs = ["run_system_tests.sh"],
+    data = [
+        "//:libmod_pagespeed.so",
+        "setup_apache_test.sh",
+        "conftest.py",
+        "//install:mod_pagespeed_example",
+        "//install:mod_pagespeed_test",
+        "//install:do_not_modify",
+        "//test/system/automatic:all_test_files",
+        "//test/system/pagespeed_test_framework:framework_files",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+# =============================================================================
 # Bash System Tests (Legacy)
 # =============================================================================
 #
@@ -52,7 +89,11 @@ sh_test(
 # Filegroup for individual test scripts that can be run
 filegroup(
     name = "system_test_scripts",
-    srcs = ["apache_system_test.sh"],
+    srcs = [
+        "apache_system_test.sh",
+        "run_system_tests.sh",
+        "setup_apache_test.sh",
+    ],
     visibility = ["//visibility:public"],
 )
 

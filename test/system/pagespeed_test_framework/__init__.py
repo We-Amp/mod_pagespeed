@@ -40,6 +40,7 @@ from pagespeed_test_framework.assertions import (
     assert_header_contains,
     assert_stat_delta,
     assert_stat_increased,
+    assert_file_size,
 )
 from pagespeed_test_framework.stats import (
     parse_statistics,
@@ -59,6 +60,7 @@ __all__ = [
     "assert_header_contains",
     "assert_stat_delta",
     "assert_stat_increased",
+    "assert_file_size",
     # Stats
     "parse_statistics",
     "get_stat",

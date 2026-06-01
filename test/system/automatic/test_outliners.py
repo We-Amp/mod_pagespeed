@@ -76,10 +76,10 @@ class TestOutlineCss:
         )
         assert_http_status(response, 200)
 
-        # Small CSS should remain inline
+        # Small CSS should remain inline (id="small" attribute indicates it's the small CSS block)
         assert_contains(
             response,
-            r'<style[^>]*>.*small',
+            r'<style[^>]*id="small"',
             "Small CSS should remain inline",
         )
 
@@ -126,10 +126,10 @@ class TestOutlineJavascript:
         )
         assert_http_status(response, 200)
 
-        # Small JS should remain inline with content
+        # Small JS should remain inline (id="small" attribute indicates it's the small JS block)
         assert_contains(
             response,
-            r'<script[^>]*small[^>]*>.*var hello',
+            r'<script[^>]*id="small"[^>]*>',
             "Small JS should remain inline",
         )
 
@@ -167,8 +167,13 @@ class TestOutlinedResourceCompression:
             pytest.skip("Could not find outlined JS URL")
 
         js_url = match.group(1)
-        if not js_url.startswith("/"):
-            js_url = f"/{js_url}"
+        # Handle both absolute URLs (http://...) and relative URLs
+        if js_url.startswith("http://") or js_url.startswith("https://"):
+            # Extract path from absolute URL
+            from urllib.parse import urlparse
+            js_url = urlparse(js_url).path
+        elif not js_url.startswith("/"):
+            js_url = f"{example_root}/{js_url}"
 
         # Fetch the JS with Accept-Encoding: gzip
         js_response = client.get(
@@ -199,8 +204,12 @@ class TestOutlinedResourceCompression:
             pytest.skip("Could not find outlined JS URL")
 
         js_url = match.group(1)
-        if not js_url.startswith("/"):
-            js_url = f"/{js_url}"
+        # Handle both absolute URLs (http://...) and relative URLs
+        if js_url.startswith("http://") or js_url.startswith("https://"):
+            from urllib.parse import urlparse
+            js_url = urlparse(js_url).path
+        elif not js_url.startswith("/"):
+            js_url = f"{example_root}/{js_url}"
 
         js_response = client.get(js_url)
         assert_http_status(js_response, 200)
@@ -225,8 +234,12 @@ class TestOutlinedResourceCompression:
             pytest.skip("Could not find outlined JS URL")
 
         js_url = match.group(1)
-        if not js_url.startswith("/"):
-            js_url = f"/{js_url}"
+        # Handle both absolute URLs (http://...) and relative URLs
+        if js_url.startswith("http://") or js_url.startswith("https://"):
+            from urllib.parse import urlparse
+            js_url = urlparse(js_url).path
+        elif not js_url.startswith("/"):
+            js_url = f"{example_root}/{js_url}"
 
         js_response = client.get(js_url)
         assert_http_status(js_response, 200)

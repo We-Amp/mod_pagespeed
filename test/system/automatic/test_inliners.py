@@ -20,6 +20,8 @@ Ported from: pagespeed/automatic/system_tests/inliners.sh
 These tests verify that the inline_css and inline_javascript filters work.
 """
 
+import re
+
 import pytest
 
 from pagespeed_test_framework import (
@@ -45,7 +47,7 @@ class TestInlineCss:
 
         The test page has 5 link tags, 3 of which are small enough to inline.
         """
-        url = f"{example_root}/inline_css.html?PageSpeedFilters=+inline_css"
+        url = f"{example_root}/inline_css.html?PageSpeedFilters=inline_css"
 
         # Wait until we see 3 inline style tags
         response = client.fetch_until_count(
@@ -70,7 +72,7 @@ class TestInlineJavascript:
         self, client: PageSpeedClient, example_root: str
     ):
         """inline_javascript should inline small JS files."""
-        url = f"{example_root}/inline_javascript.html?PageSpeedFilters=+inline_javascript"
+        url = f"{example_root}/inline_javascript.html?PageSpeedFilters=inline_javascript"
 
         # Wait until we see the inlined document.write call
         response = client.fetch_until_contains(
@@ -81,7 +83,8 @@ class TestInlineJavascript:
 
         assert_http_status(response, 200)
         # The JavaScript should be inlined directly in the HTML
-        assert_contains(response, r'<script[^>]*>.*document\.write')
+        # (may be wrapped in CDATA comments)
+        assert_contains(response, r'<script[^>]*>.*document\.write', flags=re.DOTALL)
 
 
 class TestGzipEncodedResources:
@@ -102,6 +105,7 @@ class TestGzipEncodedResources:
         inline the binary compressed data. Debug mode should show
         comments explaining this.
         """
+        # Note: +debug ADDS debug to CoreFilters so we get inline_css+inline_javascript+debug
         url = f"{test_root}/gzip_precompressed/?PageSpeedFilters=+debug"
 
         # Wait until we see 2 "gzip-encoded" debug messages

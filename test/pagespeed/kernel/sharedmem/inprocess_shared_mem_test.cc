@@ -22,7 +22,12 @@
 
 #include "pagespeed/kernel/sharedmem/inprocess_shared_mem.h"
 
+#ifdef _WIN32
+#include <windows.h>
+#define usleep(us) Sleep((us) / 1000)
+#else
 #include <unistd.h>
+#endif
 
 #include <vector>
 

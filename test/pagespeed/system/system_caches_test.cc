@@ -22,13 +22,10 @@
 #include "pagespeed/system/system_caches.h"
 
 #include <cstdlib>
+#include <filesystem>
 #include <memory>
 #include <vector>
 
-#include "apr_poll.h"
-#include "apr_pools.h"
-#include "apr_thread_proc.h"
-#include "apr_version.h"
 #include "base/logging.h"
 #include "net/instaweb/http/public/async_fetch.h"
 #include "net/instaweb/http/public/http_cache.h"
@@ -58,7 +55,7 @@
 #include "pagespeed/kernel/cache/cache_stats.h"
 #include "pagespeed/kernel/cache/compressed_cache.h"
 #include "pagespeed/kernel/cache/fallback_cache.h"
-#include "pagespeed/kernel/cache/file_cache.h"
+#include "pagespeed/kernel/cache/cyclone_cache.h"
 #include "pagespeed/kernel/cache/lru_cache.h"
 #include "pagespeed/kernel/cache/threadsafe_cache.h"
 #include "pagespeed/kernel/cache/write_through_cache.h"
@@ -71,7 +68,7 @@
 #include "pagespeed/kernel/util/platform.h"
 #include "pagespeed/kernel/util/simple_random.h"
 #include "pagespeed/system/admin_site.h"
-#include "pagespeed/system/apr_mem_cache.h"
+#include "pagespeed/system/memcached_cache.h"
 #include "pagespeed/system/external_server_spec.h"
 #include "pagespeed/system/system_cache_path.h"
 #include "pagespeed/system/system_rewrite_options.h"
@@ -91,9 +88,41 @@ namespace net_instaweb {
 
 namespace {
 
-const char kCachePath[] = "/mem/path/";
-const char kAltCachePath[] = "/mem/path_alt/";
-const char kAltCachePath2[] = "/mem/path_alt2/";
+// Helper to create a unique temp directory for cache tests.
+GoogleString MakeTempCacheDir(const char* suffix) {
+  GoogleString tmpl = StrCat("/tmp/ps_cache_test_", suffix, "_XXXXXX");
+  char* dir = mkdtemp(tmpl.data());
+  CHECK(dir != nullptr) << "Failed to create temp dir: " << tmpl;
+  return GoogleString(dir) + "/";
+}
+
+// Cache paths are created per-process to avoid test interference.
+// These are initialized once and cleaned up via atexit.
+struct TestCachePaths {
+  GoogleString path;
+  GoogleString alt_path;
+  GoogleString alt_path2;
+
+  TestCachePaths()
+      : path(MakeTempCacheDir("main")),
+        alt_path(MakeTempCacheDir("alt")),
+        alt_path2(MakeTempCacheDir("alt2")) {}
+
+  ~TestCachePaths() {
+    std::filesystem::remove_all(path);
+    std::filesystem::remove_all(alt_path);
+    std::filesystem::remove_all(alt_path2);
+  }
+};
+
+TestCachePaths& GetTestPaths() {
+  static TestCachePaths paths;
+  return paths;
+}
+
+#define kCachePath GetTestPaths().path.c_str()
+#define kAltCachePath GetTestPaths().alt_path.c_str()
+#define kAltCachePath2 GetTestPaths().alt_path2.c_str()
 const char kUrl1[] = "http://example.com/a.css";
 const char kUrl2[] = "http://example.com/b.css";
 
@@ -173,10 +202,6 @@ class SystemCachesTest : public CustomRewriteTestBase<SystemRewriteOptions> {
   }
 
   void SetUp() override {
-    // TODO(jcrowell) factor out apr_initialize/terminate to share in static
-    // constructor similar to rewrite_test_base.cc.
-    apr_initialize();
-    atexit(apr_terminate);
     SetUpSystemCaches();
     CustomRewriteTestBase<SystemRewriteOptions>::SetUp();
   }
@@ -312,7 +337,7 @@ class SystemCachesTest : public CustomRewriteTestBase<SystemRewriteOptions> {
     return ThreadsafeCache::FormatName(LRUCache::FormatName());
   }
 
-  GoogleString FileCacheName() { return FileCache::FormatName(); }
+  GoogleString FileCacheName() { return CycloneCache::FormatName(); }
 
   GoogleString FileCacheWithStats() {
     return Stats("file_cache", FileCacheName());
@@ -374,6 +399,9 @@ class SystemCachesTest : public CustomRewriteTestBase<SystemRewriteOptions> {
 };
 
 TEST_F(SystemCachesTest, BasicFileAndLruCache) {
+  // CycloneCache integrates its own RAM cache, so setting lru_cache_kb_per_process
+  // configures CycloneCache's ram_cache_size_bytes instead of creating a
+  // separate LRU + WriteThrough layer.
   options_->set_file_cache_path(kCachePath);
   options_->set_use_shared_mem_locking(false);
   options_->set_lru_cache_kb_per_process(100);
@@ -382,11 +410,9 @@ TEST_F(SystemCachesTest, BasicFileAndLruCache) {
 
   std::unique_ptr<ServerContext> server_context(
       SetupServerContext(options_.release()));
-  EXPECT_STREQ(Compressed(WriteThrough(Stats("lru_cache", ThreadsafeLRU()),
-                                       FileCacheWithStats())),
+  EXPECT_STREQ(Compressed(FileCacheWithStats()),
                server_context->metadata_cache()->Name());
-  EXPECT_STREQ(HttpCache(WriteThrough(Stats("lru_cache", ThreadsafeLRU()),
-                                      FileCacheWithStats())),
+  EXPECT_STREQ(HttpCache(FileCacheWithStats()),
                server_context->http_cache()->Name());
   EXPECT_TRUE(server_context->filesystem_metadata_cache() == nullptr);
 }
@@ -423,11 +449,9 @@ TEST_F(SystemCachesTest, UnusableShmAndLru) {
 
   std::unique_ptr<ServerContext> server_context(
       SetupServerContext(options_.release()));
-  EXPECT_STREQ(Compressed(WriteThrough(Stats("lru_cache", ThreadsafeLRU()),
-                                       FileCacheWithStats())),
+  EXPECT_STREQ(Compressed(FileCacheWithStats()),
                server_context->metadata_cache()->Name());
-  EXPECT_STREQ(HttpCache(WriteThrough(Stats("lru_cache", ThreadsafeLRU()),
-                                      FileCacheWithStats())),
+  EXPECT_STREQ(HttpCache(FileCacheWithStats()),
                server_context->http_cache()->Name());
   EXPECT_TRUE(server_context->filesystem_metadata_cache() == nullptr);
 }
@@ -449,8 +473,7 @@ TEST_F(SystemCachesTest, BasicShmAndLru) {
                                    FileCacheWithStats())),
                server_context->metadata_cache()->Name());
   // HTTP cache is unaffected.
-  EXPECT_STREQ(HttpCache(WriteThrough(Stats("lru_cache", ThreadsafeLRU()),
-                                      FileCacheWithStats())),
+  EXPECT_STREQ(HttpCache(FileCacheWithStats()),
                server_context->http_cache()->Name());
   EXPECT_TRUE(server_context->filesystem_metadata_cache() == nullptr);
 }
@@ -499,8 +522,7 @@ TEST_F(SystemCachesTest, DoubleShmCreate) {
                                    FileCacheWithStats())),
                server_context->metadata_cache()->Name());
   // HTTP cache is unaffected.
-  EXPECT_STREQ(HttpCache(WriteThrough(Stats("lru_cache", ThreadsafeLRU()),
-                                      FileCacheWithStats())),
+  EXPECT_STREQ(HttpCache(FileCacheWithStats()),
                server_context->http_cache()->Name());
   EXPECT_TRUE(server_context->filesystem_metadata_cache() == nullptr);
 }
@@ -548,8 +570,12 @@ class SystemCachesExternalCacheTestBase : public SystemCachesTest {
     CacheInterface* cache = server_context->metadata_cache();
     SimpleRandom random(new NullMutex);
     GoogleString value = random.GenerateHighEntropyString(20000);
+    // For external caches (Redis/Memcached), we set expecting_evictions=true
+    // because the async nature of these caches means keys may not be
+    // immediately available after a Put. Multiple threads writing to the
+    // same keys can also cause transient unavailability.
     CacheSpammer::RunTests(4 /* num_threads */, 200 /* iters */,
-                           200 /* inserts */, false /* expecting_evictions */,
+                           200 /* inserts */, true /* expecting_evictions */,
                            do_deletes, value.c_str(), cache,
                            thread_system_.get());
   }
@@ -606,14 +632,14 @@ class SystemCachesMemCacheTest : public SystemCachesExternalCacheTestBase {
   GoogleString AssembledAsyncCacheWithStats() override {
     return Fallback(
         Batcher(Stats(SystemCaches::kMemcachedAsync,
-                      AsyncCache::FormatName(AprMemCache::FormatName())),
+                      AsyncCache::FormatName(MemcachedCache::FormatName())),
                 1, 1000),
         FileCacheWithStats());
   }
 
   GoogleString AssembledBlockingCacheWithStats() override {
     return Fallback(
-        Stats(SystemCaches::kMemcachedBlocking, AprMemCache::FormatName()),
+        Stats(SystemCaches::kMemcachedBlocking, MemcachedCache::FormatName()),
         FileCacheWithStats());
   }
 
@@ -644,11 +670,9 @@ void SystemCachesExternalCacheTestBase::TestBasicCacheAndLru() {
 
   std::unique_ptr<ServerContext> server_context(
       SetupServerContext(options_.release()));
-  EXPECT_STREQ(Compressed(WriteThrough(Stats("lru_cache", ThreadsafeLRU()),
-                                       AssembledAsyncCacheWithStats())),
+  EXPECT_STREQ(Compressed(AssembledAsyncCacheWithStats()),
                server_context->metadata_cache()->Name());
-  EXPECT_STREQ(HttpCache(WriteThrough(Stats("lru_cache", ThreadsafeLRU()),
-                                      AssembledAsyncCacheWithStats())),
+  EXPECT_STREQ(HttpCache(AssembledAsyncCacheWithStats()),
                server_context->http_cache()->Name());
   ASSERT_TRUE(server_context->filesystem_metadata_cache() != nullptr);
   EXPECT_TRUE(server_context->filesystem_metadata_cache()->IsBlocking());
@@ -678,8 +702,7 @@ void SystemCachesExternalCacheTestBase::TestBasicCacheLruShm() {
                    Stats("shm_cache", SharedMemCache<64>::FormatName()),
                    AssembledAsyncCacheWithStats())),
                server_context->metadata_cache()->Name());
-  EXPECT_STREQ(HttpCache(WriteThrough(Stats("lru_cache", ThreadsafeLRU()),
-                                      AssembledAsyncCacheWithStats())),
+  EXPECT_STREQ(HttpCache(AssembledAsyncCacheWithStats()),
                server_context->http_cache()->Name());
 }
 
@@ -731,12 +754,12 @@ void SystemCachesMemCacheTest::TestBasicMemCacheAndNoLru(
   GoogleString mem_cache;
   if (num_threads_expected == 0) {
     mem_cache =
-        Batcher(Stats(SystemCaches::kMemcachedAsync, AprMemCache::FormatName()),
+        Batcher(Stats(SystemCaches::kMemcachedAsync, MemcachedCache::FormatName()),
                 1, 1000);
   } else {
     mem_cache =
         Batcher(Stats(SystemCaches::kMemcachedAsync,
-                      AsyncCache::FormatName(AprMemCache::FormatName())),
+                      AsyncCache::FormatName(MemcachedCache::FormatName())),
                 num_threads_expected, 1000);
   }
 
@@ -1033,12 +1056,10 @@ void SystemCachesExternalCacheTestBase::TestCacheShare() {
   STLDeleteElements(&servers);
 }
 
-TEST_F(SystemCachesTest, FileCacheSettings) {
-  // Make sure we apply the various file cache settings right.
+TEST_F(SystemCachesTest, CacheSettings) {
+  // Make sure the cache path and hierarchy are set up correctly.
   options_->set_file_cache_path(kCachePath);
-  options_->set_file_cache_clean_interval_ms(3 * Timer::kHourMs);
   options_->set_file_cache_clean_size_kb(1024);
-  options_->set_file_cache_clean_inode_limit(50000);
   options_->set_use_shared_mem_locking(false);
   options_->set_lru_cache_kb_per_process(0);
   options_->set_default_shared_memory_cache_kb(0);
@@ -1053,42 +1074,27 @@ TEST_F(SystemCachesTest, FileCacheSettings) {
   EXPECT_STREQ(Pcache(Compressed(FileCacheWithStats())),
                server_context->page_property_cache()->property_store()->Name());
 
-  FileCache* file_cache =
-      dynamic_cast<FileCache*>(SkipWrappers(server_context->metadata_cache()));
-  ASSERT_TRUE(file_cache != nullptr);
-  EXPECT_EQ(kCachePath, file_cache->path());
-  EXPECT_EQ(3 * Timer::kHourMs, file_cache->cache_policy()->clean_interval_ms);
-  // Note: this is in bytes, the setting is in kb.
-  EXPECT_EQ(1024 * 1024, file_cache->cache_policy()->target_size_bytes);
-  EXPECT_EQ(50000, file_cache->cache_policy()->target_inode_count);
-  EXPECT_TRUE(file_cache->worker() != nullptr);
+  CycloneCache* cache =
+      dynamic_cast<CycloneCache*>(SkipWrappers(server_context->metadata_cache()));
+  ASSERT_TRUE(cache != nullptr);
+  EXPECT_EQ(1024 * 1024, cache->config().cache_size_bytes);
 }
 
 TEST_F(SystemCachesTest, LruCacheSettings) {
-  // Test that we apply LRU cache settings right.
+  // CycloneCache integrates its own RAM cache, so lru_cache_kb_per_process
+  // configures CycloneCache's ram_cache_size_bytes. There is no separate
+  // WriteThroughCache or LRUCache layer.
   options_->set_file_cache_path(kCachePath);
   options_->set_lru_cache_kb_per_process(1024);
-  options_->set_lru_cache_byte_limit(500);
   options_->set_default_shared_memory_cache_kb(0);
   PrepareWithConfig(options_.get());
   std::unique_ptr<ServerContext> server_context(
       SetupServerContext(options_.release()));
 
-  WriteThroughCache* write_through = dynamic_cast<WriteThroughCache*>(
-      SkipWrappers(server_context->metadata_cache()));
-  ASSERT_TRUE(write_through != nullptr);
-  EXPECT_EQ(500, write_through->cache1_limit());
-
-  LRUCache* lru_cache =
-      dynamic_cast<LRUCache*>(SkipWrappers(write_through->cache1()));
-  ASSERT_TRUE(lru_cache != nullptr);
-  EXPECT_EQ(1024 * 1024, lru_cache->max_bytes_in_cache());
-
-  // Also on the HTTP cache
-  WriteThroughCache* http_write_through =
-      dynamic_cast<WriteThroughCache*>(server_context->http_cache()->cache());
-  ASSERT_TRUE(http_write_through != nullptr);
-  EXPECT_EQ(500, http_write_through->cache1_limit());
+  CycloneCache* cache =
+      dynamic_cast<CycloneCache*>(SkipWrappers(server_context->metadata_cache()));
+  ASSERT_TRUE(cache != nullptr);
+  EXPECT_EQ(1024 * 1024, cache->config().ram_cache_size_bytes);
 }
 
 void SystemCachesExternalCacheTestBase::TestStatsStringMinimal() {
@@ -1223,45 +1229,6 @@ TEST_F(SystemCachesTest, FileCacheNoConflictTwoPaths) {
   EXPECT_EQ(0, message_handler()->MessagesOfType(kWarning));
 }
 
-TEST_F(SystemCachesTest, FileCacheFullConflictTwoPaths) {
-  options_->set_file_cache_path(kCachePath);
-  options_->set_file_cache_clean_size_kb(10);
-  options_->set_file_cache_clean_inode_limit(20);
-  options_->set_file_cache_clean_interval_ms(1000);
-  SystemCachePath* path1 = system_caches_->GetCache(options_.get());
-  SystemRewriteOptions options2(thread_system_.get());
-  options2.set_file_cache_path(kCachePath);
-  options2.set_file_cache_clean_size_kb(11);       // wins
-  options2.set_file_cache_clean_inode_limit(19);   // loses
-  options2.set_file_cache_clean_interval_ms(999);  // wins
-  SystemCachePath* path2 = system_caches_->GetCache(&options2);
-  ASSERT_EQ(path1, path2);
-  FileCache* file_cache = path1->file_cache_backend();
-  const FileCache::CachePolicy* policy = file_cache->cache_policy();
-  EXPECT_EQ(11 * 1024, policy->target_size_bytes);
-  EXPECT_EQ(20, policy->target_inode_count);
-  EXPECT_EQ(999, policy->clean_interval_ms);
-  EXPECT_EQ(3, message_handler()->MessagesOfType(kWarning));
-}
-
-TEST_F(SystemCachesTest, FileCacheNoConflictOnDefaults) {
-  options_->set_file_cache_path(kCachePath);
-  options_->set_file_cache_clean_inode_limit(20);
-  options_->set_file_cache_clean_interval_ms(1000);
-  SystemCachePath* path1 = system_caches_->GetCache(options_.get());
-  SystemRewriteOptions options2(thread_system_.get());
-  options2.set_file_cache_path(kCachePath);
-  options2.set_file_cache_clean_size_kb(11);  // wins
-  SystemCachePath* path2 = system_caches_->GetCache(&options2);
-  ASSERT_EQ(path1, path2);
-  FileCache* file_cache = path1->file_cache_backend();
-  const FileCache::CachePolicy* policy = file_cache->cache_policy();
-  EXPECT_EQ(11 * 1024, policy->target_size_bytes);
-  EXPECT_EQ(20, policy->target_inode_count);
-  EXPECT_EQ(1000, policy->clean_interval_ms);
-  EXPECT_EQ(0, message_handler()->MessagesOfType(kWarning));
-}
-
 TEST_F(SystemCachesTest, PurgeUrl) {
   options_->set_enable_cache_purge(true);
   SystemServerContext* server_context = PopulateCacheForPurgeTest();
@@ -1353,12 +1320,10 @@ TEST_F(SystemCachesTest, BrokenShmFallbackShmAndLru) {
   std::unique_ptr<ServerContext> server_context(
       SetupServerContext(options_.release()));
   // We don't use the LRU when shm cache is on.
-  EXPECT_STREQ(Compressed(WriteThrough(Stats("lru_cache", ThreadsafeLRU()),
-                                       FileCacheWithStats())),
+  EXPECT_STREQ(Compressed(FileCacheWithStats()),
                server_context->metadata_cache()->Name());
   // HTTP cache is unaffected.
-  EXPECT_STREQ(HttpCache(WriteThrough(Stats("lru_cache", ThreadsafeLRU()),
-                                      FileCacheWithStats())),
+  EXPECT_STREQ(HttpCache(FileCacheWithStats()),
                server_context->http_cache()->Name());
 }
 
@@ -1402,11 +1367,9 @@ void SystemCachesExternalCacheTestBase::TestBrokenShmFallbackCacheLruShm() {
   std::unique_ptr<ServerContext> server_context(
       SetupServerContext(options_.release()));
   // For metadata, we fallback to external cache behind shmcache.
-  EXPECT_STREQ(Compressed(WriteThrough(Stats("lru_cache", ThreadsafeLRU()),
-                                       AssembledAsyncCacheWithStats())),
+  EXPECT_STREQ(Compressed(AssembledAsyncCacheWithStats()),
                server_context->metadata_cache()->Name());
-  EXPECT_STREQ(HttpCache(WriteThrough(Stats("lru_cache", ThreadsafeLRU()),
-                                      AssembledAsyncCacheWithStats())),
+  EXPECT_STREQ(HttpCache(AssembledAsyncCacheWithStats()),
                server_context->http_cache()->Name());
   EXPECT_STREQ(Pcache(Compressed(AssembledBlockingCacheWithStats())),
                server_context->page_property_cache()->property_store()->Name());

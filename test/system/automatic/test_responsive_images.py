@@ -163,6 +163,7 @@ class TestRewriteSrcset:
         self, client: PageSpeedClient, test_root: str
     ):
         """Existing srcset attributes should be rewritten."""
+        # Note: +rewrite_images,+debug ADDS both to CoreFilters
         url = f"{test_root}/image_rewriting/srcset.html?PageSpeedFilters=+rewrite_images,+debug"
 
         response = client.fetch_until_count(
@@ -188,12 +189,14 @@ class TestRewriteDataSrcset:
         self, client: PageSpeedClient, test_root: str
     ):
         """data-srcset attributes should be rewritten."""
+        # Note: +rewrite_images,+debug ADDS both to CoreFilters
         url = f"{test_root}/image_rewriting/data-srcset.html?PageSpeedFilters=+rewrite_images,+debug"
 
+        # The data-srcset attribute should be rewritten with optimized images
         response = client.fetch_until_count(
             url,
-            pattern=r"srcset.*xPuzzle.*1x.*xCuppa.*2x",
-            expected_count=2,
+            pattern=r"data-srcset.*xPuzzle.*1x.*xCuppa.*2x",
+            expected_count=1,
             timeout=30.0,
         )
         assert_http_status(response, 200)

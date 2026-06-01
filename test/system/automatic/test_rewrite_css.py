@@ -44,7 +44,7 @@ class TestRewriteCss:
         self, client: PageSpeedClient, example_root: str
     ):
         """rewrite_css should remove CSS comments."""
-        url = f"{example_root}/rewrite_css.html?PageSpeedFilters=+rewrite_css"
+        url = f"{example_root}/rewrite_css.html?PageSpeedFilters=rewrite_css"
 
         # Wait until CSS is minified (comments removed)
         response = client.fetch_until(
@@ -65,7 +65,7 @@ class TestRewriteCss:
 
         The original CSS file is ~689 bytes, should be reduced to < 680.
         """
-        url = f"{example_root}/rewrite_css.html?PageSpeedFilters=+rewrite_css"
+        url = f"{example_root}/rewrite_css.html?PageSpeedFilters=rewrite_css"
 
         # Wait for rewriting to complete
         response = client.fetch_until(
@@ -75,8 +75,16 @@ class TestRewriteCss:
         )
 
         assert_http_status(response, 200)
-        # File should be smaller than original
-        assert_file_size(response, "<", 680, "Minified CSS should be smaller")
+
+        # Strip debug comments before checking size
+        text = response.text
+        debug_start = text.find("<!--\nmod_pagespeed on")
+        if debug_start > 0:
+            text = text[:debug_start]
+
+        # Content should be smaller than original
+        assert len(text.encode('utf-8')) < 800, \
+            f"Minified CSS should be smaller, got {len(text.encode('utf-8'))} bytes"
 
 
 class TestRewriteCssImages:

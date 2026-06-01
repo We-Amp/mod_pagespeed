@@ -108,7 +108,11 @@ class TestIfModifiedSince:
             pytest.skip("Could not find cache-extended image URL")
 
         image_url = match.group(1)
-        if not image_url.startswith("/"):
+        # Handle both absolute URLs (http://...) and relative URLs
+        if image_url.startswith("http://") or image_url.startswith("https://"):
+            from urllib.parse import urlparse
+            image_url = urlparse(image_url).path
+        elif not image_url.startswith("/"):
             image_url = f"{example_root}/{image_url}"
 
         # Request with If-Modified-Since in the future
@@ -160,7 +164,11 @@ class TestLastModifiedMatch:
             pytest.skip("Could not find cache-extended image URL")
 
         image_url = match.group(1)
-        if not image_url.startswith("/"):
+        # Handle both absolute URLs (http://...) and relative URLs
+        if image_url.startswith("http://") or image_url.startswith("https://"):
+            from urllib.parse import urlparse
+            image_url = urlparse(image_url).path
+        elif not image_url.startswith("/"):
             image_url = f"{example_root}/{image_url}"
 
         extended_response = client.get(image_url)

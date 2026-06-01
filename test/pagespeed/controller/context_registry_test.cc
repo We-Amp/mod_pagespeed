@@ -19,7 +19,12 @@
 
 #include "pagespeed/controller/context_registry.h"
 
+#ifdef _WIN32
+#include <windows.h>
+#define usleep(us) Sleep((us) / 1000)
+#else
 #include <unistd.h>
+#endif
 
 #include <memory>
 #include <vector>

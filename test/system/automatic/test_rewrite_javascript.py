@@ -80,8 +80,12 @@ class TestRewriteJavascript:
             pytest.skip("Could not find rewritten JS URL")
 
         js_url = match.group(1)
-        if not js_url.startswith("/"):
-            js_url = f"/{js_url}"
+        # Handle both absolute URLs (http://...) and relative URLs
+        if js_url.startswith("http://") or js_url.startswith("https://"):
+            from urllib.parse import urlparse
+            js_url = urlparse(js_url).path
+        elif not js_url.startswith("/"):
+            js_url = f"{example_root}/{js_url}"
 
         js_response = client.get(js_url)
         assert_http_status(js_response, 200)
@@ -148,8 +152,12 @@ class TestRewriteJavascript:
             pytest.skip("Could not find rewritten JS URL")
 
         js_url = match.group(1)
-        if not js_url.startswith("/"):
-            js_url = f"/{js_url}"
+        # Handle both absolute URLs (http://...) and relative URLs
+        if js_url.startswith("http://") or js_url.startswith("https://"):
+            from urllib.parse import urlparse
+            js_url = urlparse(js_url).path
+        elif not js_url.startswith("/"):
+            js_url = f"{example_root}/{js_url}"
 
         js_response = client.get(js_url)
         assert_http_status(js_response, 200)

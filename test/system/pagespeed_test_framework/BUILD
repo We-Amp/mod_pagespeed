@@ -38,3 +38,10 @@ py_test(
     deps = [":pagespeed_test_framework"],
     python_version = "PY3",
 )
+
+# Filegroup for all framework files (used by run_system_tests.sh)
+filegroup(
+    name = "framework_files",
+    srcs = glob(["*.py"]),
+    visibility = ["//visibility:public"],
+)
