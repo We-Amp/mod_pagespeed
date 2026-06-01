@@ -31,7 +31,7 @@
 #include "pagespeed/kernel/base/proto_util.h"
 #include "pagespeed/kernel/base/string.h"
 #include "test/pagespeed/kernel/thread/worker_test_base.h"
-#include "pagespeed/kernel/util/grpc.h"
+#include "pagespeed/controller/grpc.h"
 
 using testing::_;
 using testing::DoAll;

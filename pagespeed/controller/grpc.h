@@ -17,8 +17,8 @@
  * under the License.
  */
 
-#ifndef PAGESPEED_KERNEL_UTIL_GRPC_H_
-#define PAGESPEED_KERNEL_UTIL_GRPC_H_
+#ifndef PAGESPEED_CONTROLLER_GRPC_H_
+#define PAGESPEED_CONTROLLER_GRPC_H_
 
 #ifdef OK
 #error You must include include httpd.h via apache_httpd_includes.h
@@ -29,4 +29,4 @@
 
 #include <grpc++/grpc++.h>
 
-#endif  // PAGESPEED_KERNEL_UTIL_GRPC_H_
+#endif  // PAGESPEED_CONTROLLER_GRPC_H_

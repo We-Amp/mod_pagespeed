@@ -27,7 +27,7 @@ cc_library(
         "win32.h",
     ],
     linkopts = select({
-        "@platforms//os:windows": ["-lws2_32"],
+        "@platforms//os:windows": ["ws2_32.lib"],
         "//conditions:default": [],
     }),
     visibility = ["//visibility:public"],

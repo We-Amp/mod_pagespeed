@@ -26,7 +26,7 @@
 #include "pagespeed/kernel/base/proto_util.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/thread/sequence.h"
-#include "pagespeed/kernel/util/grpc.h"
+#include "pagespeed/controller/grpc.h"
 #include "test/pagespeed/kernel/base/gmock.h"
 #include "test/pagespeed/kernel/thread/worker_test_base.h"
 

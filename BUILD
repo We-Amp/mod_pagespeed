@@ -12,8 +12,17 @@ cc_binary(
 
 cc_binary(
     name = "libmod_pagespeed.so",
+    linkopts = [
+        # Version script hides all symbols except pagespeed_module (the Apache
+        # module entry point). This prevents BoringSSL symbols linked into
+        # mod_pagespeed from conflicting with system OpenSSL in mod_ssl.
+        "-Wl,--version-script,$(location //pagespeed/apache:mod_pagespeed.lds)",
+    ],
     linkshared = 1,
     linkstatic = 1,
     visibility = ["//visibility:public"],
-    deps = ["//pagespeed/apache"],
+    deps = [
+        "//pagespeed/apache",
+        "//pagespeed/apache:mod_pagespeed.lds",
+    ],
 )

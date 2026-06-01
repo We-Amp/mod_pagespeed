@@ -5,7 +5,7 @@ licenses(["notice"])  # Apache 2
 cc_library(
     name = "util_re2",
     hdrs = ["re2.h"],
-    deps = ["@com_googlesource_code_re2//:re2"],
+    deps = ["@re2//:re2"],
     visibility = ["//visibility:public"],
 )
 
@@ -15,7 +15,6 @@ cc_library(
     name = "util",
     srcs = [
         "brotli_inflater.cc",
-        "file_system_lock_manager.cc",
         "gflags.cc",
         "gzip_inflater.cc",
         "hashed_nonce_generator.cc",
@@ -38,9 +37,7 @@ cc_library(
         "brotli_inflater.h",
         "categorized_refcount.h",
         "copy_on_write.h",
-        "file_system_lock_manager.h",
         "gflags.h",
-        "grpc.h",
         "gzip_inflater.h",
         "hashed_nonce_generator.h",
         "input_file_nonce_generator.h",
@@ -67,7 +64,7 @@ cc_library(
         "//pagespeed/kernel/thread",
         "@brotli//:brotlidec",
         "@brotli//:brotlienc",
-        "@com_github_grpc_grpc//:grpc++",
-        "@envoy//bazel/foreign_cc:zlib",
+        "@com_github_gflags_gflags//:gflags",
+        "@zlib_ng//:zlib_ng",
     ],
 )

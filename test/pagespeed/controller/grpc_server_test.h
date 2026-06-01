@@ -26,7 +26,7 @@
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/thread.h"
 #include "pagespeed/kernel/base/thread_system.h"
-#include "pagespeed/kernel/util/grpc.h"
+#include "pagespeed/controller/grpc.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 
 namespace net_instaweb {

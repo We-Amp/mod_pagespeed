@@ -27,7 +27,9 @@ pagespeed_cc_test_library(
     ],
     deps = [
         "//pagespeed/kernel/base:pagespeed_base_core",
-        "@com_google_googletest//:gtest",
+        "@abseil-cpp//absl/flags:flag",
+        "@abseil-cpp//absl/flags:reflection",
+        "@googletest//:gtest",
     ],
 )
 
@@ -69,6 +71,7 @@ pagespeed_cc_test(
     shard_count = 1,
     deps = [
         ":kernel_test_util",
+        "//pagespeed/kernel/base:std_timer",
         "//pagespeed/kernel/sharedmem",
     ],
 )

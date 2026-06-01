@@ -25,7 +25,7 @@
 #include "pagespeed/controller/controller.pb.h"
 #include "pagespeed/kernel/base/function.h"
 #include "pagespeed/kernel/base/string.h"
-#include "pagespeed/kernel/util/grpc.h"
+#include "pagespeed/controller/grpc.h"
 #include "test/pagespeed/controller/grpc_server_test.h"
 #include "test/pagespeed/kernel/base/gmock.h"
 #include "test/pagespeed/kernel/base/gtest.h"
