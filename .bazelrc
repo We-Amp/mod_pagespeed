@@ -19,6 +19,9 @@ build:macos --copt -UDEBUG                                                      
 # Startup options cannot be selected via config.
 startup --host_jvm_args=-Xmx3g
 
+# Disable bzlmod to use WORKSPACE dependencies only
+common --noenable_bzlmod
+
 run --color=yes
 
 build --color=yes
@@ -62,7 +65,8 @@ common --experimental_allow_tags_propagation
 # (Workaround for https://github.com/bazelbuild/rules_foreign_cc/issues/421)
 build:linux --copt=-fPIC
 build:linux --copt=-Wno-deprecated-declarations
-build:linux --cxxopt=-std=c++17 --host_cxxopt=-std=c++17
+build:linux --copt=-Wno-dangling-reference
+build:linux --cxxopt=-std=c++20 --host_cxxopt=-std=c++20
 build:linux --conlyopt=-fexceptions
 build:linux --fission=dbg,opt
 build:linux --features=per_object_debug_info
@@ -74,6 +78,7 @@ build --define absl=1
 
 # Disable ICU linking for googleurl.
 build --@com_googlesource_googleurl//build_config:system_icu=0
+build --@googleurl//build_config:system_icu=0
 
 # Common flags for sanitizers
 build:sanitizer --define tcmalloc=disabled
@@ -85,6 +90,8 @@ build:sanitizer --test_tag_filters=-no_san
 build:clang --action_env=BAZEL_COMPILER=clang
 build:clang --action_env=CC=clang --action_env=CXX=clang++
 build:clang --linkopt=-fuse-ld=lld
+# Don't error on GCC-specific warning flags like -Wno-dangling-reference
+build:clang --copt=-Wno-unknown-warning-option
 
 # Flags for Clang + PCH
 build:clang-pch --spawn_strategy=local
@@ -92,6 +99,8 @@ build:clang-pch --define=ENVOY_CLANG_PCH=1
 
 # Use gold linker for gcc compiler.
 build:gcc --linkopt=-fuse-ld=gold
+# GCC 13 has full C++23 support including std::expected
+build:gcc --action_env=CC=gcc-13 --action_env=CXX=g++-13
 
 # Basic ASAN/UBSAN that works for gcc
 build:asan --action_env=ENVOY_ASAN=1
@@ -124,7 +133,7 @@ build:clang-asan --linkopt --rtlib=compiler-rt
 build:clang-asan --linkopt --unwindlib=libgcc
 
 # macOS
-build:macos --cxxopt=-std=c++17 --host_cxxopt=-std=c++17
+build:macos --cxxopt=-std=c++20 --host_cxxopt=-std=c++20
 build:macos --action_env=PATH=/opt/homebrew/bin:/opt/local/bin:/usr/local/bin:/usr/bin:/bin
 build:macos --host_action_env=PATH=/opt/homebrew/bin:/opt/local/bin:/usr/local/bin:/usr/bin:/bin
 build:macos --define tcmalloc=disabled
@@ -153,7 +162,7 @@ build:clang-tsan --test_tag_filters=-no_san,-no_tsan
 build:clang-tsan --copt -DEVENT__DISABLE_DEBUG_MODE
 # https://github.com/abseil/abseil-cpp/issues/760
 # https://github.com/google/sanitizers/issues/953
-build:clang-tsan --test_env="TSAN_OPTIONS=report_atomic_races=0"
+build:clang-tsan --test_env="TSAN_OPTIONS=report_atomic_races=0:detect_deadlocks=0:suppressions=/src/tools/tsan_suppressions.txt"
 
 # Clang MSAN - this is the base config for remote-msan and docker-msan. To run this config without
 # our build image, follow https://github.com/google/sanitizers/wiki/MemorySanitizerLibcxxHowTo
@@ -404,8 +413,10 @@ build:windows --define hot_restart=disabled
 build:windows --define tcmalloc=disabled
 build:windows --define wasm=disabled
 build:windows --define manual_stamp=manual_stamp
-build:windows --cxxopt="/std:c++17"
+build:windows --cxxopt="/std:c++20"
 build:windows --output_groups=+pdb_file
+# Windows PageSpeed: Exclude Apache module (POSIX-only), use cross-platform Std* implementations
+build:windows --define=apache_module=false
 
 # TODO(wrowe,sunjayBhatia): Resolve bugs upstream in curl and rules_foreign_cc
 # See issue https://github.com/bazelbuild/rules_foreign_cc/issues/301
@@ -446,9 +457,53 @@ build:windows --features=fully_static_link
 build:windows --features=static_link_msvcrt
 build:windows --dynamic_mode=off
 
+# Zig cross-compilation from Linux to Windows (MinGW ABI).
+# Requires hermetic_cc_toolchain in WORKSPACE — see bazel/zig_toolchain.bzl.
+# Usage: bazel build --config=zig-windows //pagespeed/windows:pagespeed_c_api
+#
+# NOTE: Does NOT inherit from build:windows because that uses MSVC-style flags
+# (e.g., /std:c++20) which Zig doesn't understand. Zig uses GCC-style flags.
+build:zig-windows --incompatible_enable_cc_toolchain_resolution
+build:zig-windows --platforms=@zig_sdk//platform:windows_amd64
+build:zig-windows --extra_toolchains=@zig_sdk//toolchain:windows_amd64
+# Host toolchain uses Linux GCC-13 for tools (default gcc is too old for C++20)
+# Must set action_env for both host and target; Bazel's toolchain detection uses these
+build:zig-windows --action_env=CC=gcc-13
+build:zig-windows --action_env=CXX=g++-13
+build:zig-windows --host_action_env=CC=gcc-13
+build:zig-windows --host_action_env=CXX=g++-13
+build:zig-windows --host_cxxopt=-std=c++20
+# C++ standard for cross-compiled code (Zig uses GCC-style flags, not MSVC)
+build:zig-windows --cxxopt=-std=c++20
+# Windows-specific defines (copied from build:windows but without MSVC flags)
+build:zig-windows --define signal_trace=disabled
+build:zig-windows --define hot_restart=disabled
+build:zig-windows --define tcmalloc=disabled
+build:zig-windows --define wasm=disabled
+build:zig-windows --define=apache_module=false
+build:zig-windows --copt=-DCARES_STATICLIB
+build:zig-windows --copt=-DNGHTTP2_STATICLIB
+build:zig-windows --copt=-DCURL_STATICLIB
+build:zig-windows --enable_runfiles=yes
+build:zig-windows --dynamic_mode=off
+# Windows API level (Windows 7+) and common defines
+build:zig-windows --copt=-D_WIN32_WINNT=0x0601
+build:zig-windows --copt=-DNOMINMAX
+build:zig-windows --copt=-DWIN32_LEAN_AND_MEAN
+# Define WIN32 for code that checks it (Zig/MinGW only defines _WIN32)
+build:zig-windows --copt=-DWIN32
+# Note: Boringssl is NOT used on Windows - we use Windows BCrypt API instead.
+# This avoids pthread issues with Zig's MinGW target.
+# No POSIX shared memory on Windows
+build:zig-windows --copt=-DPAGESPEED_SUPPORT_POSIX_SHARED_MEM=0
+# Disable POSIX-only memcached backend
+build:zig-windows --define=enable_memcached=false
+
 try-import %workspace%/clang.bazelrc
-try-import %workspace%/user.bazelrc
 try-import %workspace%/local_tsan.bazelrc
 
 ###### modifications for pagespeed
 import %workspace%/pagespeed.bazelrc
+
+# User overrides (imported last so they can override pagespeed.bazelrc settings)
+try-import %workspace%/user.bazelrc

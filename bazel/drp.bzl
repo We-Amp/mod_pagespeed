@@ -8,7 +8,12 @@ genrule(
     outs = [
         "registry_tables_genfiles/registry_tables.h"
     ],
-    cmd = ("python2 ./$(location src/registry_tables_generator/registry_tables_generator.py) ./$(location src/third_party/effective_tld_names/effective_tld_names.dat) $@ $@_test")
+    # PYTHONUTF8=1 required on Windows to read files with non-ASCII characters (e.g., IDN domain names)
+    # Use bash env var syntax since genrules run through bash on all platforms
+    cmd = select({
+        "@bazel_tools//src/conditions:windows": "PYTHONUTF8=1 python3 ./$(location src/registry_tables_generator/registry_tables_generator.py) ./$(location src/third_party/effective_tld_names/effective_tld_names.dat) $@ $@_test",
+        "//conditions:default": "python3 ./$(location src/registry_tables_generator/registry_tables_generator.py) ./$(location src/third_party/effective_tld_names/effective_tld_names.dat) $@ $@_test",
+    }),
 )
 
 cc_library(

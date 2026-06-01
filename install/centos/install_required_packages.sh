@@ -67,7 +67,8 @@ else
   # Note that wget of git doesn't work on CentOS 5 due to it having an ancient
   # OpenSSL. You need to manually scp up the contents of $GIT_SRC_URL from
   # shell_utils.sh.
-  src_packages+=(python2.7 wget git)
+  src_packages+=(wget git)
+  # Note: Python 3 is required for build scripts
   if "$additional_dev_packages"; then
     src_packages+=(memcached)
   fi

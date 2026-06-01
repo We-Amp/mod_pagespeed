@@ -145,6 +145,9 @@ cc_library(
         "-Iexternal/apr/include/arch/unix/",
         "-Iexternal/apr/",
         "-Wno-int-conversion",
+        "-Wno-implicit-function-declaration",
+        "-Dpthread_mutexattr_setrobust_np=pthread_mutexattr_setrobust",
+        "-Dpthread_mutex_consistent_np=pthread_mutex_consistent",
     ],
     visibility = ["//visibility:public"],
 )

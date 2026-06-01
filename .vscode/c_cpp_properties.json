@@ -1,30 +1,30 @@
 {
   "configurations": [
     {
-      "name": "WSL",
-      "intelliSenseMode": "clang-x64",
-      "compilerPath": "/usr/bin/clang",
+      "name": "Linux",
+      "intelliSenseMode": "linux-clang-x64",
+      "compilerPath": "/usr/bin/clang++",
       "includePath": [
         "${workspaceFolder}",
-        "${workspaceFolder}//bazel-incubator-pagespeed-mod/**",
+        "${workspaceFolder}/bazel-mod_pagespeed/external/**",
+        "${workspaceFolder}/bazel-bin/**",
         "/usr/local/include",
         "/usr/include/x86_64-linux-gnu",
         "/usr/include"
       ],
-      "defines": [],
+      "defines": [
+        "__linux__",
+        "NDEBUG"
+      ],
       "browse": {
         "path": [
           "${workspaceFolder}",
-          "${workspaceFolder}//bazel-incubator-pagespeed-mod/**",
-          "/usr/local/include",
-          "/usr/include/x86_64-linux-gnu",
-          "/usr/include"
+          "${workspaceFolder}/bazel-mod_pagespeed/external/**"
         ],
-        "limitSymbolsToIncludedHeaders": true,
-        "databaseFilename": "compile_commands.json"
+        "limitSymbolsToIncludedHeaders": true
       },
-      "cStandard": "c11",
-      "cppStandard": "c++17",
+      "cStandard": "c17",
+      "cppStandard": "c++20",
       "compileCommands": "${workspaceFolder}/compile_commands.json"
     }
   ],

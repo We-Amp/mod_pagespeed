@@ -72,8 +72,9 @@ WGET_SHA256SUM=7578ed0974e12caa71120581fa3962ee5a69f7175ddc3d6a6db0ecdcba65b572
 MEMCACHED_VERSION=1.4.20
 MEMCACHED_SHA256SUM=25d121408eed0b1522308ff3520819b130f04ba0554c68a673af23a915a54018
 
-PYTHON_VERSION=2.7.8
-PYTHON_SHA256SUM=74d70b914da4487aa1d97222b29e9554d042f825f26cb2b93abd20fdda56b557
+# Python 2 is no longer needed - use system Python 3
+# PYTHON_VERSION=2.7.8
+# PYTHON_SHA256SUM=74d70b914da4487aa1d97222b29e9554d042f825f26cb2b93abd20fdda56b557
 
 REDIS_VERSION=3.2.4
 REDIS_SHA256SUM=2ad042c5a6c508223adeb9c91c6b1ae091394b4026f73997281e28914c9369f1
@@ -82,7 +83,7 @@ GIT_SRC_URL=https://kernel.org/pub/software/scm/git/git-$GIT_VERSION.tar.gz
 WGET_SRC_URL=https://ftp.gnu.org/gnu/wget/wget-$WGET_VERSION.tar.gz
 # This is available on https, but CentOS 6's wget doesn't like the cert.
 MEMCACHED_SRC_URL=http://www.memcached.org/files/memcached-$MEMCACHED_VERSION.tar.gz
-PYTHON_SRC_URL=https://www.python.org/ftp/python/$PYTHON_VERSION/Python-$PYTHON_VERSION.tgz
+# PYTHON_SRC_URL=https://www.python.org/ftp/python/$PYTHON_VERSION/Python-$PYTHON_VERSION.tgz
 REDIS_SRC_URL=http://download.redis.io/releases/redis-$REDIS_VERSION.tar.gz
 
 # Usage: install_from_src [package] [...]
@@ -99,16 +100,10 @@ function install_from_src() {
       git) [ "$(lsb_release -is)" = "CentOS" ] && yum -y install curl-devel;
            install_src_tarball $GIT_SRC_URL $GIT_SHA256SUM ;;
       memcached) install_src_tarball $MEMCACHED_SRC_URL $MEMCACHED_SHA256SUM ;;
-      python2.7)
-        install_src_tarball $PYTHON_SRC_URL $PYTHON_SHA256SUM altinstall
-        # On Centos5, yum needs /usr/bin/python to be 2.4 but gclient needs
-        # python on the path to be 2.6 or later.
-        if [ "$(lsb_release -is)" = "CentOS" ] && \
-           version_compare "$(lsb_release -rs)" -lt 6; then
-          for dir in $HOME ~$SUDO_USER; do
-            mkdir -p $dir/bin && ln -sf /usr/local/bin/python2.7 $dir/bin/python
-          done
-        fi ;;
+      # python2.7 is no longer needed - use system Python 3
+      # python2.7)
+      #   install_src_tarball $PYTHON_SRC_URL $PYTHON_SHA256SUM altinstall
+      #   ...
       wget) install_src_tarball $WGET_SRC_URL $WGET_SHA256SUM ;;
       redis-server) install_src_tarball $REDIS_SRC_URL $REDIS_SHA256SUM ;;
       *) echo "Internal error: Unknown source package: $pkg" >&2; return 1 ;;

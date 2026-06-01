@@ -1,0 +1,53 @@
+{
+  // Editor settings
+  "editor.tabSize": 2,
+  "editor.insertSpaces": true,
+  "editor.rulers": [80],
+  "editor.formatOnSave": false,
+  "editor.trimAutoWhitespace": true,
+  "files.trimTrailingWhitespace": true,
+  "files.insertFinalNewline": true,
+
+  // C++ settings
+  "C_Cpp.default.cppStandard": "c++20",
+  "C_Cpp.default.compileCommands": "${workspaceFolder}/bazel-bin/compile_commands.json",
+  "C_Cpp.clang_format_style": "file",
+  "C_Cpp.clang_format_fallbackStyle": "Google",
+
+  // File associations
+  "files.associations": {
+    "*.h": "cpp",
+    "*.cc": "cpp",
+    "*.inc": "cpp",
+    "BUILD": "starlark",
+    "WORKSPACE": "starlark",
+    "*.bzl": "starlark",
+    "*.bazelrc": "shellscript"
+  },
+
+  // Search exclusions
+  "search.exclude": {
+    "**/bazel-*": true,
+    "**/node_modules": true,
+    "**/.git": true
+  },
+
+  // File watcher exclusions
+  "files.watcherExclude": {
+    "**/bazel-*/**": true,
+    "**/.git/objects/**": true
+  },
+
+  // Python settings (for system tests)
+  "python.defaultInterpreterPath": "/usr/bin/python3",
+  "[python]": {
+    "editor.tabSize": 4
+  },
+
+  // Terminal settings
+  "terminal.integrated.defaultProfile.linux": "bash",
+
+  // Bazel settings
+  "bazel.buildifierExecutable": "/usr/bin/buildifier",
+  "bazel.enableCodeLens": true
+}

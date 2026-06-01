@@ -38,8 +38,9 @@ cc_library(
             "pngstruct.h",
             ":copy_prebuild_header",
     ],
-    deps = ["@envoy//bazel/foreign_cc:zlib"],
-    defines = [              
+    includes = ["."],
+    deps = ["@envoy//bazel:zlib"],
+    defines = [
               # We end up including setjmp.h directly, but libpng
               # doesn't like that. This define tells libpng to not
               # complain about our inclusion of setjmp.h.
@@ -50,6 +51,10 @@ cc_library(
               # behavior.
               # Hence, we define it ourselves for version >= 1.4.0
               'PNG_FREE_ME_SUPPORTED',
+
+              # Disable ARM NEON optimizations since we don't compile
+              # the NEON assembly files
+              'PNG_ARM_NEON_OPT=0',
             ],
     visibility = ["//visibility:public"],
 )
