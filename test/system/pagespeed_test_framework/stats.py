@@ -19,6 +19,7 @@ and extracting counter values. It mirrors the scrape_* functions from
 the bash system_test_helpers.sh.
 """
 
+import json
 import re
 from typing import Dict, Optional
 
@@ -40,6 +41,16 @@ def parse_statistics(content: str) -> Dict[str, int]:
         Dictionary mapping stat names to integer values
     """
     stats: Dict[str, int] = {}
+
+    # Try JSON format first (mod_pagespeed returns JSON from statistics handler)
+    stripped = content.strip()
+    if stripped.startswith("{"):
+        try:
+            data = json.loads(stripped)
+            if "variables" in data and isinstance(data["variables"], dict):
+                return {k: int(v) for k, v in data["variables"].items()}
+        except (json.JSONDecodeError, ValueError):
+            pass  # Fall through to line-based parsing
 
     for line in content.splitlines():
         # Match patterns like:

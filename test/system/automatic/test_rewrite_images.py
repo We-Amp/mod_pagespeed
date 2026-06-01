@@ -72,15 +72,10 @@ class TestRewriteImages:
 
         assert_http_status(response, 200)
 
-    @pytest.mark.not_envoy
-    @pytest.mark.not_nginx  # Uses X-PSA-Blocking-Rewrite which doesn't work in streaming architecture
     def test_data_pagespeed_no_transform(
         self, client: PageSpeedClient, example_root: str
     ):
         """data-pagespeed-no-transform attribute should prevent rewriting.
-
-        Skipped on Envoy/nginx: Image rewriting filter behavior differs in streaming
-        architectures. The attribute stripping times out.
 
         Bash original:
             fetch_until $URL 'grep -c "images/disclosure_open_plus.png"' 1
@@ -102,7 +97,6 @@ class TestRewriteImages:
             url,
             pattern=r"images/disclosure_open_plus\.png",
             timeout=30.0,
-            headers={"X-PSA-Blocking-Rewrite": "psatest"},
         )
         assert_http_status(response, 200)
 
@@ -114,7 +108,6 @@ class TestRewriteImages:
             pattern=r"data-pagespeed-no-transform[/>\s]",
             expected_count=0,
             timeout=30.0,
-            headers={"X-PSA-Blocking-Rewrite": "psatest"},
         )
         assert_http_status(response, 200)
 
@@ -221,7 +214,6 @@ class TestRewrittenImageHeaders:
         assert "Accept-Encoding" not in vary, \
             f"Images should not have Vary: Accept-Encoding, got: {vary}"
 
-    @pytest.mark.not_nginx  # nginx doesn't add ETag to .pagespeed. resources
     def test_rewritten_image_has_etag(
         self, client: PageSpeedClient, example_root: str
     ):

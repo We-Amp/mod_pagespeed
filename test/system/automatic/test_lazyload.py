@@ -34,8 +34,6 @@ from pagespeed_test_framework import (
 )
 
 
-@pytest.mark.not_nginx  # nginx streaming architecture doesn't support X-PSA-Blocking-Rewrite
-@pytest.mark.not_envoy  # Envoy streaming architecture doesn't support X-PSA-Blocking-Rewrite
 class TestLazyloadImages:
     """Tests for the lazyload_images filter.
 
@@ -55,17 +53,12 @@ class TestLazyloadImages:
         """Lazyload should swap src with data-pagespeed-lazy-src."""
         url = f"{example_root}/lazyload_images.html?PageSpeedFilters=lazyload_images"
 
-        response = client.get(
+        response = client.fetch_until_contains(
             url,
-            headers={"X-PSA-Blocking-Rewrite": "psatest"},
+            pattern=r'data-pagespeed-lazy-src="images/Puzzle2\.jpg"',
+            timeout=30.0,
         )
         assert_http_status(response, 200)
-
-        assert_contains(
-            response,
-            r'data-pagespeed-lazy-src="images/Puzzle2\.jpg"',
-            "Image src should be swapped to data-pagespeed-lazy-src",
-        )
 
     def test_lazyload_swaps_srcset_attribute(
         self, client: PageSpeedClient, example_root: str
@@ -73,17 +66,12 @@ class TestLazyloadImages:
         """Lazyload should swap srcset with data-pagespeed-lazy-srcset."""
         url = f"{example_root}/lazyload_images.html?PageSpeedFilters=lazyload_images"
 
-        response = client.get(
+        response = client.fetch_until_contains(
             url,
-            headers={"X-PSA-Blocking-Rewrite": "psatest"},
+            pattern=r'data-pagespeed-lazy-srcset="images/Puzzle\.jpg 2x"',
+            timeout=30.0,
         )
         assert_http_status(response, 200)
-
-        assert_contains(
-            response,
-            r'data-pagespeed-lazy-srcset="images/Puzzle\.jpg 2x"',
-            "Image srcset should be swapped to data-pagespeed-lazy-srcset",
-        )
 
     def test_lazyload_injects_init_script(
         self, client: PageSpeedClient, example_root: str
@@ -91,21 +79,14 @@ class TestLazyloadImages:
         """Lazyload should inject initialization script."""
         url = f"{example_root}/lazyload_images.html?PageSpeedFilters=lazyload_images"
 
-        response = client.get(
+        response = client.fetch_until_contains(
             url,
-            headers={"X-PSA-Blocking-Rewrite": "psatest"},
+            pattern=r"pagespeed\.lazyLoadInit",
+            timeout=30.0,
         )
         assert_http_status(response, 200)
 
-        assert_contains(
-            response,
-            r"pagespeed\.lazyLoadInit",
-            "Lazyload init script should be injected",
-        )
 
-
-@pytest.mark.not_nginx  # nginx streaming architecture doesn't support X-PSA-Blocking-Rewrite
-@pytest.mark.not_envoy  # Envoy streaming architecture doesn't support X-PSA-Blocking-Rewrite
 class TestLazyloadOptimizeMode:
     """Tests for lazyload_images in optimize mode.
 
@@ -124,17 +105,12 @@ class TestLazyloadOptimizeMode:
         """Lazyload JS should be minified in optimize mode (no comments)."""
         url = f"{example_root}/lazyload_images.html?PageSpeedFilters=lazyload_images"
 
-        response = client.get(
+        response = client.fetch_until_contains(
             url,
-            headers={"X-PSA-Blocking-Rewrite": "psatest"},
+            pattern=r"pagespeed\.lazyLoad",
+            timeout=30.0,
         )
         assert_http_status(response, 200)
-
-        assert_contains(
-            response,
-            r"pagespeed\.lazyLoad",
-            "Lazyload JS should be present",
-        )
 
         # Check for absence of block comments (indicating minification)
         # Note: This is a loose check since the JS may have some comments
@@ -146,21 +122,14 @@ class TestLazyloadOptimizeMode:
         """Lazyload should include noscript fallback."""
         url = f"{example_root}/lazyload_images.html?PageSpeedFilters=lazyload_images"
 
-        response = client.get(
+        response = client.fetch_until_contains(
             url,
-            headers={"X-PSA-Blocking-Rewrite": "psatest"},
+            pattern=r"PageSpeed=noscript",
+            timeout=30.0,
         )
         assert_http_status(response, 200)
 
-        assert_contains(
-            response,
-            r"PageSpeed=noscript",
-            "Lazyload should have noscript fallback",
-        )
 
-
-@pytest.mark.not_nginx  # nginx streaming architecture doesn't support X-PSA-Blocking-Rewrite
-@pytest.mark.not_envoy  # Envoy streaming architecture doesn't support X-PSA-Blocking-Rewrite
 class TestLazyloadBlankGif:
     """Tests for the blank GIF placeholder image.
 
@@ -180,9 +149,11 @@ class TestLazyloadBlankGif:
         """Blank GIF placeholder should be served with long cache."""
         url = f"{example_root}/lazyload_images.html?PageSpeedFilters=lazyload_images"
 
-        response = client.get(
+        # Wait for lazyload rewriting to complete
+        response = client.fetch_until_contains(
             url,
-            headers={"X-PSA-Blocking-Rewrite": "psatest"},
+            pattern=r'src="[^"]*1\.[^"]*\.gif"',
+            timeout=30.0,
         )
         assert_http_status(response, 200)
 
@@ -211,8 +182,6 @@ class TestLazyloadBlankGif:
             f"Blank GIF should have 1 year cache, got: {cache_control}"
 
 
-@pytest.mark.not_nginx  # nginx streaming architecture doesn't support X-PSA-Blocking-Rewrite
-@pytest.mark.not_envoy  # Envoy streaming architecture doesn't support X-PSA-Blocking-Rewrite
 class TestLazyloadDebugMode:
     """Tests for lazyload_images in debug mode.
 
@@ -232,17 +201,12 @@ class TestLazyloadDebugMode:
         """Debug mode should still include lazyload JS."""
         url = f"{example_root}/lazyload_images.html?PageSpeedFilters=lazyload_images,debug"
 
-        response = client.get(
+        response = client.fetch_until_contains(
             url,
-            headers={"X-PSA-Blocking-Rewrite": "psatest"},
+            pattern=r"pagespeed\.lazyLoad",
+            timeout=30.0,
         )
         assert_http_status(response, 200)
-
-        assert_contains(
-            response,
-            r"pagespeed\.lazyLoad",
-            "Debug mode should have lazyload JS",
-        )
 
     def test_lazyload_debug_mode_no_goog_require(
         self, client: PageSpeedClient, example_root: str
@@ -250,9 +214,11 @@ class TestLazyloadDebugMode:
         """Debug mode should not have goog.require (resolved by Closure)."""
         url = f"{example_root}/lazyload_images.html?PageSpeedFilters=lazyload_images,debug"
 
-        response = client.get(
+        # First wait for rewriting to complete by checking for positive indicator
+        response = client.fetch_until_contains(
             url,
-            headers={"X-PSA-Blocking-Rewrite": "psatest"},
+            pattern=r"pagespeed\.lazyLoad",
+            timeout=30.0,
         )
         assert_http_status(response, 200)
 
@@ -268,17 +234,12 @@ class TestLazyloadDebugMode:
         """Debug mode should still have noscript fallback."""
         url = f"{example_root}/lazyload_images.html?PageSpeedFilters=lazyload_images,debug"
 
-        response = client.get(
+        response = client.fetch_until_contains(
             url,
-            headers={"X-PSA-Blocking-Rewrite": "psatest"},
+            pattern=r"PageSpeed=noscript",
+            timeout=30.0,
         )
         assert_http_status(response, 200)
-
-        assert_contains(
-            response,
-            r"PageSpeed=noscript",
-            "Debug mode should have noscript fallback",
-        )
 
 
 if __name__ == "__main__":

@@ -205,8 +205,6 @@ class TestDeferJavascript:
         assert_contains(response, r'PageSpeed=noscript')
 
 
-@pytest.mark.not_nginx  # Filter times out in nginx streaming architecture
-@pytest.mark.not_envoy  # Filter times out in Envoy streaming architecture
 class TestLazyloadImages:
     """Tests for the lazyload_images filter.
 
@@ -233,8 +231,6 @@ class TestLazyloadImages:
         assert_http_status(response, 200)
 
 
-@pytest.mark.not_nginx  # nginx streaming architecture doesn't support X-PSA-Blocking-Rewrite
-@pytest.mark.not_envoy  # Envoy streaming architecture doesn't support X-PSA-Blocking-Rewrite
 class TestFlattenCssImports:
     """Tests for the flatten_css_imports filter.
 
@@ -245,15 +241,12 @@ class TestFlattenCssImports:
         """flatten_css_imports should inline @import rules."""
         url = f"{example_root}/flatten_css_imports.html?PageSpeedFilters=flatten_css_imports"
 
-        response = client.get(
+        response = client.fetch_until_contains(
             url,
-            headers={"X-PSA-Blocking-Rewrite": "psatest"},
+            pattern=r"<style>\.yellow",
+            timeout=30.0,
         )
         assert_http_status(response, 200)
-
-        # After flattening, the CSS link should be replaced with inline style
-        # containing the flattened CSS from the imported files
-        assert_contains(response, r"<style>\.yellow")
 
 
 if __name__ == "__main__":

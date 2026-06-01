@@ -143,6 +143,7 @@ class TestCombineJavascript:
             url,
             condition=lambda r: len(re.findall(r'src=', r.text)) <= 4,
             timeout=30.0,
+            headers={"X-PSA-Blocking-Rewrite": "psatest"},
         )
 
         assert_http_status(response, 200)

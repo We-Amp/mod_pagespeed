@@ -222,7 +222,7 @@ run_tests() {
     #   minification, etc.) and should pass on all server types.
     # - envoy/ contains Envoy-specific tests for features unique to the Envoy filter.
     if [ ${#PYTEST_ARGS[@]} -eq 0 ]; then
-        PYTEST_ARGS=("automatic/" "envoy/" "-v")
+        PYTEST_ARGS=("automatic/" "system/" "envoy/" "-v")
     fi
 
     # Install pytest if needed

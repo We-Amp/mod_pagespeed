@@ -216,8 +216,8 @@ class TestNginxStatistics:
     def test_statistics_endpoint(self, client: PageSpeedClient, server_config):
         """Verify /pagespeed_statistics works and contains expected stats.
 
-        The statistics endpoint should return a text response containing
-        statistic names and their values in name: value format.
+        The statistics endpoint should return a parseable response containing
+        statistic names and their values.
 
         Note: Unlike Apache, nginx admin endpoints don't work with ?PageSpeed=off
         because the module declines to handle any requests when disabled.
@@ -225,12 +225,11 @@ class TestNginxStatistics:
         response = client.get(server_config.stats_path)
         assert_http_status(response, 200)
 
-        # Should contain statistics in name: value format
-        assert_contains(
-            response,
-            r"\w+:\s*\d+",
-            "Statistics should contain name: value pairs"
+        # Should contain parseable statistics (handles both JSON and text formats)
+        stats = client.get_statistics(
+            stats_path=server_config.stats_path, disable_pagespeed=False
         )
+        assert len(stats) > 0, "Statistics endpoint should return parseable stats"
 
     @pytest.mark.nginx_only
     @pytest.mark.requires_stats

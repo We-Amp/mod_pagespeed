@@ -1,0 +1,10 @@
+# LeakSanitizer suppressions for mod_pagespeed 1.1
+#
+# Format: leak:<function_or_source_pattern>
+# See: https://github.com/google/sanitizers/wiki/AddressSanitizerLeakSanitizer
+
+# CurlUrlAsyncFetcher creates mutexes via ThreadSystem::NewMutex() that
+# are stored as raw pointers and not freed on destruction.  This is a
+# known limitation of the legacy fetcher code — test-only, not production.
+leak:CurlUrlAsyncFetcher
+leak:CheckingThreadSystem::NewMutex

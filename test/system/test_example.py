@@ -65,16 +65,11 @@ class TestBasicFunctionality:
         assert_not_contains(response, r"\.pagespeed\.")
 
 
-@pytest.mark.not_envoy
-@pytest.mark.not_nginx  # CSS combination times out in streaming architecture
 class TestCssCombining:
     """CSS combining filter tests.
 
-    Skipped on Envoy/nginx: CSS combination times out waiting for the combined
-    CSS URL to appear. The filter may not be completing optimization within
-    the test timeout in streaming architectures.
-
     Bash original: pagespeed/automatic/system_tests/combine_css.sh
+        test_filter combine_css combines 4 CSS files
     """
 
     def test_combine_css_basic(self, client: PageSpeedClient, example_root: str):
@@ -82,33 +77,31 @@ class TestCssCombining:
 
         Bash equivalent:
             test_filter combine_css combines 4 CSS files
-            fetch_until $URL 'fgrep -c .pagespeed.cc.' 1
+            fetch_until $URL 'fgrep -c text/css' 1
         """
-        url = f"{example_root}/combine_css.html?PageSpeedFilters=+combine_css"
+        url = f"{example_root}/combine_css.html?PageSpeedFilters=combine_css"
 
-        # Wait for CSS to be combined (async optimization)
-        response = client.fetch_until_contains(
+        # Wait for CSS to be combined — 4 CSS links should be combined into 1
+        response = client.fetch_until_count(
             url,
-            pattern=r"\.pagespeed\.cc\.",
+            pattern=r"text/css",
+            expected_count=1,
             timeout=30.0,
         )
 
         assert_http_status(response, 200)
-        assert_contains(response, r"\.pagespeed\.cc\.", "CSS should be combined")
 
     def test_combine_css_count(self, client: PageSpeedClient, example_root: str):
-        """Verify multiple CSS files are combined into fewer requests.
+        """Verify the combined CSS URL uses the pagespeed.cc filter code.
 
         Bash equivalent:
-            fetch_until $URL 'grep -c pagespeed.cc' 4
+            fetch_until $URL 'fgrep -c .pagespeed.cc.' 1
         """
-        url = f"{example_root}/combine_css.html?PageSpeedFilters=+combine_css"
+        url = f"{example_root}/combine_css.html?PageSpeedFilters=combine_css"
 
-        # The page has 4 CSS files that should be combined
-        response = client.fetch_until_count(
+        response = client.fetch_until_contains(
             url,
-            pattern=r"pagespeed\.cc",
-            expected_count=1,  # All should combine into 1
+            pattern=r"\.pagespeed\.cc\.",
             timeout=30.0,
         )
 
@@ -141,7 +134,6 @@ class TestImageRewriting:
 
 
 @pytest.mark.not_nginx  # nginx streaming architecture doesn't support X-PSA-Blocking-Rewrite
-@pytest.mark.not_envoy  # Envoy streaming architecture doesn't support X-PSA-Blocking-Rewrite
 class TestBlockingRewrite:
     """Blocking rewrite tests.
 
@@ -224,19 +216,15 @@ class TestCacheFlushing:
 class TestHeaders:
     """HTTP header tests."""
 
-    @pytest.mark.not_envoy
-    @pytest.mark.not_nginx  # Depends on combine_css filter which times out
     def test_cache_control_headers(self, client: PageSpeedClient, example_root: str):
         """Verify Cache-Control headers on optimized resources.
-
-        Skipped on Envoy/nginx: Depends on combine_css filter which times out.
 
         Bash equivalent:
             OUT=$($WGET_DUMP $REWRITTEN_URL)
             check_from "$OUT" fgrep "Cache-Control"
         """
         # First get a page to trigger optimization
-        url = f"{example_root}/combine_css.html?PageSpeedFilters=+combine_css"
+        url = f"{example_root}/combine_css.html?PageSpeedFilters=combine_css"
         response = client.fetch_until_contains(url, r"\.pagespeed\.cc\.")
 
         # Extract the rewritten CSS URL and fetch it

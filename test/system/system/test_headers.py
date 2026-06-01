@@ -59,8 +59,8 @@ class TestPageSpeedHeader:
         assert header_value, \
             "Expected X-Mod-Pagespeed or X-Page-Speed header"
 
-        # Header should contain version number (e.g., 1.13.35.2-0)
-        version_pattern = r"\d+\.\d+\.\d+\.\d+-\d+"
+        # Header should contain version number (e.g., 1.1.0-beta.1 or 1.13.35.2-0)
+        version_pattern = r"\d+\.\d+\.\d+[\w.\-]*"
         assert re.search(version_pattern, header_value), \
             f"Header should contain version number, got: {header_value}"
 
@@ -86,8 +86,6 @@ class TestDefaultFiltering:
         assert_http_status(response, 200)
 
 
-@pytest.mark.not_nginx  # nginx IPRO ETag implementation differs - PSA-aj pattern not produced
-@pytest.mark.not_envoy  # Envoy IPRO ETag implementation differs - PSA-aj pattern not produced
 class TestIproEtag:
     """Tests for IPRO ETag handling.
 
@@ -194,13 +192,10 @@ class TestResource404:
     """
 
     @pytest.mark.requires_stats
-    @pytest.mark.not_envoy
     def test_404_increments_stat(
         self, client: PageSpeedClient, stats_snapshot
     ):
-        """404 responses should increment resource_404_count stat.
-
-        Skipped on Envoy: Envoy doesn't track resource_404_count statistic."""
+        """404 responses should increment resource_404_count stat."""
         old_stats = stats_snapshot()
         old_404_count = old_stats.get("resource_404_count", 0)
 

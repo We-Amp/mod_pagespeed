@@ -30,7 +30,6 @@ from pagespeed_test_framework import (
 )
 
 
-@pytest.mark.not_nginx  # nginx uses chunked encoding and adds Cache-Control: private
 class TestContentLength:
     """Tests for Content-Length header on PageSpeed resources.
 
@@ -88,6 +87,7 @@ class TestContentLength:
         assert content_length, \
             "Rewritten resource should have Content-Length header"
 
+    @pytest.mark.not_nginx  # Nginx may use chunked for intermediate resource responses
     def test_rewritten_resource_not_chunked(
         self, client: PageSpeedClient, example_root: str
     ):
@@ -128,16 +128,16 @@ class TestContentLength:
             assert "chunked" not in transfer_encoding.lower(), \
                 "Rewritten resource should not use chunked encoding"
 
+    @pytest.mark.not_nginx  # CSS with image refs stays private due to hash churn
     def test_rewritten_resource_not_private(
         self, client: PageSpeedClient, example_root: str
     ):
-        """Rewritten resources should not have private cache control.
+        """Rewritten resources should not have private cache control once stable.
 
-        This test was previously skipped because AddSecurityHeaders() was
-        adding Cache-Control: private to all responses including IPRO cache
-        hits. Fixed by splitting security headers: user-facing resources use
-        AddSecurityHeaders() (no cache restriction), admin endpoints use
-        AddAdminSecurityHeaders() (with private, no-store, no-cache).
+        During optimization, intermediate results may be served with
+        Cache-Control: private (e.g., when input resources haven't been
+        fully fetched yet). Once optimization stabilizes, the rewritten
+        resource should be publicly cacheable.
         """
         url = f"{example_root}/rewrite_css_images.html?PageSpeedFilters=rewrite_css"
 
@@ -165,15 +165,19 @@ class TestContentLength:
         elif not css_url.startswith("/"):
             css_url = f"{example_root}/{css_url}"
 
-        # Fetch the rewritten CSS resource
-        css_response = client.get(css_url)
-        assert_http_status(css_response, 200)
+        # Wait for the resource to stabilize - intermediate results may
+        # have Cache-Control: private until the input resource is fully
+        # fetched and determined to be proxy-cacheable.
+        def check_not_private(resp):
+            cc = resp.header("Cache-Control")
+            return resp.status == 200 and (not cc or "private" not in cc.lower())
 
-        # Should not have private cache control
-        cache_control = css_response.header("Cache-Control")
-        if cache_control:
-            assert "private" not in cache_control.lower(), \
-                "Rewritten resource should not have private cache control"
+        css_response = client.fetch_until(
+            css_url,
+            condition=check_not_private,
+            timeout=30.0,
+        )
+        assert_http_status(css_response, 200)
 
 
 if __name__ == "__main__":

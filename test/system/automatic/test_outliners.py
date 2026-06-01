@@ -34,8 +34,6 @@ from pagespeed_test_framework import (
 )
 
 
-@pytest.mark.not_nginx  # nginx streaming architecture doesn't support X-PSA-Blocking-Rewrite
-@pytest.mark.not_envoy  # Envoy streaming architecture doesn't support X-PSA-Blocking-Rewrite
 class TestOutlineCss:
     """Tests for the outline_css filter.
 
@@ -53,18 +51,12 @@ class TestOutlineCss:
         """Large inline styles should be outlined to external files."""
         url = f"{example_root}/outline_css.html?PageSpeedFilters=outline_css"
 
-        response = client.get(
+        response = client.fetch_until_contains(
             url,
-            headers={"X-PSA-Blocking-Rewrite": "psatest"},
+            pattern=r'<link[^>]*text/css[^>]*large',
+            timeout=30.0,
         )
         assert_http_status(response, 200)
-
-        # Large CSS should be outlined (converted to link tag)
-        assert_contains(
-            response,
-            r'<link[^>]*text/css[^>]*large',
-            "Large CSS should be outlined to external link",
-        )
 
     def test_small_css_not_outlined(
         self, client: PageSpeedClient, example_root: str
@@ -72,9 +64,11 @@ class TestOutlineCss:
         """Small inline styles should remain inline."""
         url = f"{example_root}/outline_css.html?PageSpeedFilters=outline_css"
 
-        response = client.get(
+        # Wait for outlining to complete (large CSS outlined)
+        response = client.fetch_until_contains(
             url,
-            headers={"X-PSA-Blocking-Rewrite": "psatest"},
+            pattern=r'<link[^>]*text/css[^>]*large',
+            timeout=30.0,
         )
         assert_http_status(response, 200)
 
@@ -86,8 +80,6 @@ class TestOutlineCss:
         )
 
 
-@pytest.mark.not_nginx  # nginx streaming architecture doesn't support X-PSA-Blocking-Rewrite
-@pytest.mark.not_envoy  # Envoy streaming architecture doesn't support X-PSA-Blocking-Rewrite
 class TestOutlineJavascript:
     """Tests for the outline_javascript filter.
 
@@ -105,18 +97,12 @@ class TestOutlineJavascript:
         """Large inline scripts should be outlined to external files."""
         url = f"{example_root}/outline_javascript.html?PageSpeedFilters=outline_javascript"
 
-        response = client.get(
+        response = client.fetch_until_contains(
             url,
-            headers={"X-PSA-Blocking-Rewrite": "psatest"},
+            pattern=r'<script[^>]*large[^>]*src=',
+            timeout=30.0,
         )
         assert_http_status(response, 200)
-
-        # Large JS should be outlined (converted to script with src)
-        assert_contains(
-            response,
-            r'<script[^>]*large[^>]*src=',
-            "Large JS should be outlined to external script",
-        )
 
     def test_small_js_not_outlined(
         self, client: PageSpeedClient, example_root: str
@@ -124,9 +110,11 @@ class TestOutlineJavascript:
         """Small inline scripts should remain inline."""
         url = f"{example_root}/outline_javascript.html?PageSpeedFilters=outline_javascript"
 
-        response = client.get(
+        # Wait for outlining to complete (large JS outlined)
+        response = client.fetch_until_contains(
             url,
-            headers={"X-PSA-Blocking-Rewrite": "psatest"},
+            pattern=r'<script[^>]*large[^>]*src=',
+            timeout=30.0,
         )
         assert_http_status(response, 200)
 
@@ -138,8 +126,11 @@ class TestOutlineJavascript:
         )
 
 
-@pytest.mark.not_nginx  # nginx streaming architecture doesn't support X-PSA-Blocking-Rewrite
-@pytest.mark.not_envoy  # Envoy streaming architecture doesn't support X-PSA-Blocking-Rewrite
+@pytest.mark.not_nginx(
+    reason="Outlined resources cannot be reconstructed on cache miss "
+    "(outline filter is an HtmlFilter, not a RewriteFilter); "
+    "nginx resource handler returns 404 when the cache lookup fails"
+)
 class TestOutlinedResourceCompression:
     """Tests for compression and caching of outlined resources.
 
@@ -161,9 +152,10 @@ class TestOutlinedResourceCompression:
         """Outlined JS should be served with gzip compression."""
         url = f"{example_root}/outline_javascript.html?PageSpeedFilters=outline_javascript"
 
-        response = client.get(
+        response = client.fetch_until_contains(
             url,
-            headers={"X-PSA-Blocking-Rewrite": "psatest"},
+            pattern=r'src="[^"]*\.pagespeed\.[^"]*\.js"',
+            timeout=30.0,
         )
         assert_http_status(response, 200)
 
@@ -181,9 +173,14 @@ class TestOutlinedResourceCompression:
         elif not js_url.startswith("/"):
             js_url = f"{example_root}/{js_url}"
 
-        # Fetch the JS with Accept-Encoding: gzip
-        js_response = client.get(
+        # The outlined resource may not be in cache yet; poll until available.
+        def check_200(resp):
+            return resp.status == 200
+
+        js_response = client.fetch_until(
             js_url,
+            condition=check_200,
+            timeout=30.0,
             headers={"Accept-Encoding": "gzip"},
         )
         assert_http_status(js_response, 200)
@@ -199,9 +196,10 @@ class TestOutlinedResourceCompression:
         """Outlined JS should have ETag header."""
         url = f"{example_root}/outline_javascript.html?PageSpeedFilters=outline_javascript"
 
-        response = client.get(
+        response = client.fetch_until_contains(
             url,
-            headers={"X-PSA-Blocking-Rewrite": "psatest"},
+            pattern=r'src="[^"]*\.pagespeed\.[^"]*\.js"',
+            timeout=30.0,
         )
 
         # Extract the outlined JS URL
@@ -217,7 +215,10 @@ class TestOutlinedResourceCompression:
         elif not js_url.startswith("/"):
             js_url = f"{example_root}/{js_url}"
 
-        js_response = client.get(js_url)
+        def check_200(resp):
+            return resp.status == 200
+
+        js_response = client.fetch_until(js_url, condition=check_200, timeout=30.0)
         assert_http_status(js_response, 200)
 
         etag = js_response.header("ETag")
@@ -226,12 +227,20 @@ class TestOutlinedResourceCompression:
     def test_outlined_js_has_last_modified(
         self, client: PageSpeedClient, example_root: str
     ):
-        """Outlined JS should have Last-Modified header."""
+        """Outlined JS should have Last-Modified header.
+
+        The blocking rewrite creates the outlined JS resource in cache.
+        On cold cache, the first HTML request triggers outline creation;
+        the subsequent JS fetch should find it. We use fetch_until for
+        the HTML to ensure outlining has completed.
+        """
         url = f"{example_root}/outline_javascript.html?PageSpeedFilters=outline_javascript"
 
-        response = client.get(
+        # Use fetch_until to ensure the outliner has run and produced a JS URL
+        response = client.fetch_until_contains(
             url,
-            headers={"X-PSA-Blocking-Rewrite": "psatest"},
+            pattern=r'\.pagespeed\.[^"]*\.js',
+            timeout=30.0,
         )
 
         # Extract the outlined JS URL
@@ -247,7 +256,10 @@ class TestOutlinedResourceCompression:
         elif not js_url.startswith("/"):
             js_url = f"{example_root}/{js_url}"
 
-        js_response = client.get(js_url)
+        def check_200(resp):
+            return resp.status == 200
+
+        js_response = client.fetch_until(js_url, condition=check_200, timeout=30.0)
         assert_http_status(js_response, 200)
 
         last_modified = js_response.header("Last-Modified")

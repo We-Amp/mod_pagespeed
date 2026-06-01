@@ -13,7 +13,7 @@
 #   --help          Show this help message
 #
 # Examples:
-#   ./test/system/run_nginx_tests.sh                    # Run all tests (automatic/ + nginx/)
+#   ./test/system/run_nginx_tests.sh                    # Run all tests (automatic/ + system/ + nginx/)
 #   ./test/system/run_nginx_tests.sh -k sanity          # Run only sanity tests
 #   ./test/system/run_nginx_tests.sh automatic/         # Run only automatic/ tests
 #   ./test/system/run_nginx_tests.sh nginx/             # Run only nginx/ tests
@@ -22,6 +22,7 @@
 #
 # Test Directories:
 #   automatic/ - Golden standard tests shared with Apache (core PageSpeed functionality)
+#   system/    - Cross-server tests (IPRO ETag, 404 stats, etc.)
 #   nginx/     - NGINX-specific tests for features unique to the NGINX module
 
 set -e
@@ -71,7 +72,7 @@ Pytest arguments:
   Any additional arguments are passed to pytest.
 
 Examples:
-  $0                                    # Run all tests (automatic/ + nginx/)
+  $0                                    # Run all tests (automatic/ + system/ + nginx/)
   $0 -k sanity                          # Run only sanity tests
   $0 automatic/                         # Run only automatic/ tests
   $0 nginx/                             # Run only nginx/ tests
@@ -85,6 +86,8 @@ Test Directories:
   automatic/  Golden standard tests shared with Apache. These test core PageSpeed
               functionality (cache extension, image optimization, CSS/JS minification)
               and should pass on all server types.
+  system/     Cross-server tests (IPRO ETag, 404 stats, etc.) shared across server
+              types, with not_nginx/not_envoy markers for incompatible tests.
   nginx/      NGINX-specific tests for features unique to the ngx_pagespeed module.
 
 Environment Variables:
@@ -104,6 +107,7 @@ NO_MODULE=false
 BAZEL_CONFIG="${BAZEL_CONFIG:---config=clang-libstdcxx13}"
 BAZEL_JOBS="${BAZEL_JOBS:-}"
 NGINX_PORT="${NGINX_PORT:-8080}"
+NGINX_HTTPS_PORT="${NGINX_HTTPS_PORT:-8443}"
 PYTEST_ARGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -153,12 +157,17 @@ done
 
 # Configuration
 NGINX_BINARY="${NGINX_BINARY:-/usr/local/src/nginx/objs/nginx}"
-MODULE_PATH="$PROJECT_ROOT/bazel-bin/pagespeed/nginx/ngx_pagespeed_module.so"
+MODULE_PATH="${MODULE_PATH:-$PROJECT_ROOT/bazel-bin/pagespeed/nginx/ngx_pagespeed_module.so}"
 NGINX_CONFIG_DIR="${NGINX_CONFIG_DIR:-/tmp/nginx_pagespeed_test}"
 NGINX_PID_FILE="$NGINX_CONFIG_DIR/nginx.pid"
 NGINX_LOG_DIR="$NGINX_CONFIG_DIR/logs"
 NGINX_CACHE_DIR="${PAGESPEED_CACHE_DIR:-/tmp/pagespeed_cache}"
 NGINX_CONFIG_FILE="$NGINX_CONFIG_DIR/nginx.conf"
+
+# TLS configuration
+TLS_CERT_DIR="$NGINX_CONFIG_DIR/certs"
+TLS_CERT_FILE="$TLS_CERT_DIR/server.crt"
+TLS_KEY_FILE="$TLS_CERT_DIR/server.key"
 
 # Build the module
 build_module() {
@@ -208,6 +217,41 @@ check_module() {
     fi
     log_info "Found ngx_pagespeed module at $MODULE_PATH"
     return 0
+}
+
+# Generate self-signed TLS certificates for HTTPS testing
+generate_tls_certs() {
+    log_info "Generating self-signed TLS certificates..."
+
+    mkdir -p "$TLS_CERT_DIR"
+
+    # Check if certs already exist and are valid
+    if [ -f "$TLS_CERT_FILE" ] && [ -f "$TLS_KEY_FILE" ]; then
+        if openssl x509 -checkend 86400 -noout -in "$TLS_CERT_FILE" 2>/dev/null; then
+            log_info "TLS certificates already exist and are valid"
+            return 0
+        fi
+        log_info "Existing certificates expired, regenerating..."
+    fi
+
+    # Generate self-signed certificate valid for 365 days
+    openssl req -x509 -newkey rsa:2048 \
+        -keyout "$TLS_KEY_FILE" \
+        -out "$TLS_CERT_FILE" \
+        -days 365 \
+        -nodes \
+        -subj "/C=US/ST=Test/L=Test/O=PageSpeed/CN=localhost" \
+        -addext "subjectAltName=DNS:localhost,DNS:127.0.0.1,IP:127.0.0.1" \
+        2>/dev/null
+
+    if [ $? -eq 0 ]; then
+        log_info "TLS certificates generated:"
+        log_info "  Certificate: $TLS_CERT_FILE"
+        log_info "  Private key: $TLS_KEY_FILE"
+    else
+        log_error "Failed to generate TLS certificates"
+        return 1
+    fi
 }
 
 # Setup directories
@@ -355,6 +399,14 @@ EOF
     # Message buffer for testing
     pagespeed MessageBufferSize 100000;
 
+    # Disable Critical Images Beacon so that lazyload_images,
+    # inline_preview_images, and other beacon-dependent filters work
+    # without requiring real browser beacon data (matches Apache/Envoy).
+    pagespeed CriticalImagesBeaconEnabled false;
+
+    # Configure canonicalize_javascript_libraries filter (matches Apache)
+    pagespeed Library 43 1o978_K0_LNE5_ystNklf http://www.modpagespeed.com/rewrite_javascript.js;
+
 EOF
     fi
 
@@ -379,6 +431,10 @@ EOF
         # handler and no extraneous headers get set.
         location ~ "\.pagespeed\.([a-z]\.)?[a-z]{2}\.[^.]{10}\.[^.]+" {
             add_header "" "";
+            # Disable nginx gzip for .pagespeed. resources. These resources
+            # have known content length set by PageSpeed. Nginx's gzip module
+            # would strip Content-Length and use chunked encoding instead.
+            gzip off;
         }
         location ~ "^/pagespeed_static/" { }
         location ~ "^/ngx_pagespeed_beacon\$" { }
@@ -389,6 +445,12 @@ EOF
         location /pagespeed_statistics { }
         location /pagespeed_global_statistics { }
 
+        # Serve files in no_cache/ with Cache-Control: no-cache
+        # Matches Apache's debug.conf.template configuration
+        location ~ /no_cache/ {
+            add_header Cache-Control "no-cache" always;
+        }
+
 EOF
     fi
 
@@ -398,6 +460,70 @@ EOF
             try_files \$uri \$uri/ =404;
         }
     }
+
+EOF
+
+    # Add HTTPS server block if TLS certs are available
+    if [ -f "$TLS_CERT_FILE" ] && [ -f "$TLS_KEY_FILE" ]; then
+        cat >> "$NGINX_CONFIG_FILE" << EOF
+    server {
+        listen $NGINX_HTTPS_PORT ssl;
+        server_name localhost;
+
+        ssl_certificate $TLS_CERT_FILE;
+        ssl_certificate_key $TLS_KEY_FILE;
+
+        root $DOC_ROOT;
+        index index.html;
+
+EOF
+
+        # Add PageSpeed server-level config for HTTPS if module is enabled
+        if [ "$NO_MODULE" = false ]; then
+            cat >> "$NGINX_CONFIG_FILE" << EOF
+        # Enable PageSpeed for this server
+        pagespeed on;
+        pagespeed RewriteLevel CoreFilters;
+
+        # Allow fetching HTTPS resources with self-signed certificates.
+        # Required for CSS combination over HTTPS in test environments.
+        pagespeed FetchHttps enable,allow_self_signed;
+
+        # Ensure requests for pagespeed optimized resources go to the pagespeed
+        # handler and no extraneous headers get set.
+        location ~ "\.pagespeed\.([a-z]\.)?[a-z]{2}\.[^.]{10}\.[^.]+" {
+            add_header "" "";
+            gzip off;
+        }
+        location ~ "^/pagespeed_static/" { }
+        location ~ "^/ngx_pagespeed_beacon\$" { }
+
+        # Admin and statistics endpoints
+        location ~ "^/pagespeed_admin" { }
+        location ~ "^/pagespeed_global_admin" { }
+        location /pagespeed_statistics { }
+        location /pagespeed_global_statistics { }
+
+        # Serve files in no_cache/ with Cache-Control: no-cache
+        location ~ /no_cache/ {
+            add_header Cache-Control "no-cache" always;
+        }
+
+EOF
+        fi
+
+        cat >> "$NGINX_CONFIG_FILE" << EOF
+        # Serve static files
+        location / {
+            try_files \$uri \$uri/ =404;
+        }
+    }
+
+EOF
+    fi
+
+    # Close the http block
+    cat >> "$NGINX_CONFIG_FILE" << EOF
 }
 EOF
 
@@ -455,7 +581,10 @@ start_nginx() {
     fi
 
     log_info "NGINX is running:"
-    log_info "  HTTP: http://localhost:$NGINX_PORT"
+    log_info "  HTTP:  http://localhost:$NGINX_PORT"
+    if [ -f "$TLS_CERT_FILE" ] && [ -f "$TLS_KEY_FILE" ]; then
+        log_info "  HTTPS: https://localhost:$NGINX_HTTPS_PORT"
+    fi
     if [ "$NO_MODULE" = false ]; then
         log_info "  Admin: http://localhost:$NGINX_PORT/pagespeed_admin"
         log_info "  Stats: http://localhost:$NGINX_PORT/pagespeed_statistics"
@@ -505,6 +634,7 @@ setup_nginx() {
     check_module || return 1
     setup_directories
     setup_test_content
+    generate_tls_certs || return 1
     generate_nginx_config
     start_nginx || return 1
 
@@ -526,6 +656,12 @@ run_tests() {
     export PAGESPEED_TEST_ROOT="${PAGESPEED_TEST_ROOT:-/mod_pagespeed_test}"
     export PAGESPEED_CACHE_DIR="${NGINX_CACHE_DIR}"
 
+    # HTTPS configuration for TLS tests
+    if [ -f "$TLS_CERT_FILE" ] && [ -f "$TLS_KEY_FILE" ]; then
+        export PAGESPEED_HTTPS_HOST="${PAGESPEED_HTTPS_HOST:-localhost}"
+        export PAGESPEED_HTTPS_PORT="${NGINX_HTTPS_PORT:-${PAGESPEED_HTTPS_PORT:-8443}}"
+    fi
+
     if [ "$NO_MODULE" = true ]; then
         export PAGESPEED_STATS_ENABLED=0
     else
@@ -533,21 +669,29 @@ run_tests() {
     fi
 
     log_info "Test server: http://$PAGESPEED_HOST:$PAGESPEED_PORT (NGINX)"
+    if [ -n "${PAGESPEED_HTTPS_HOST:-}" ]; then
+        log_info "HTTPS server: https://$PAGESPEED_HTTPS_HOST:$PAGESPEED_HTTPS_PORT"
+    fi
     if [ "$NO_MODULE" = true ]; then
         log_info "Mode: Baseline (no PageSpeed module)"
     else
         log_info "Mode: PageSpeed module enabled"
     fi
 
-    # Default to running both automatic/ and nginx/ test directories if they exist:
+    # Default to running automatic/, system/, and nginx/ test directories if they exist:
     # - automatic/ contains the golden standard tests shared with Apache. These test
     #   core PageSpeed functionality (cache extension, image optimization, CSS/JS
     #   minification, etc.) and should pass on all server types.
+    # - system/ contains cross-server tests (IPRO ETag, 404 stats, etc.) that are
+    #   shared across server types (with not_nginx/not_envoy markers as needed).
     # - nginx/ contains NGINX-specific tests for features unique to the NGINX module.
     if [ ${#PYTEST_ARGS[@]} -eq 0 ]; then
         PYTEST_ARGS=("-v")
         if [ -d "$SCRIPT_DIR/automatic" ]; then
             PYTEST_ARGS+=("automatic/")
+        fi
+        if [ -d "$SCRIPT_DIR/system" ]; then
+            PYTEST_ARGS+=("system/")
         fi
         if [ -d "$SCRIPT_DIR/nginx" ]; then
             PYTEST_ARGS+=("nginx/")

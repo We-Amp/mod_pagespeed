@@ -41,7 +41,6 @@ class TestEnvoyFilterLoading:
         response = client.get(f"{example_root}/")
         assert_http_status(response, 200)
 
-    @pytest.mark.xfail(reason="X-Page-Speed header causes crashes during local reply - needs investigation")
     def test_pagespeed_header_present(
         self, client: PageSpeedClient, example_root: str
     ):

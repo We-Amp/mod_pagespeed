@@ -568,6 +568,14 @@ class RewriteTestBase : public RewriteOptionsTestBase {
                                          HTTPValue* value_out,
                                          ResponseHeaders* headers);
 
+
+  // Like HttpBlockingFind but uses an explicit cache fragment instead of
+  // rewrite_driver_->CacheFragment().  Needed when ClearRewriteDriver()
+  // may have changed the fragment since the cache entry was stored.
+  HTTPCache::FindResult HttpBlockingFindWithFragment(
+      const GoogleString& key, const GoogleString& fragment,
+      HTTPCache* http_cache, HTTPValue* value_out,
+      ResponseHeaders* headers);
   // The same as the above function, but doesn't need an HTTPValue or
   // ResponseHeaders.
   HTTPCache::FindResult HttpBlockingFindStatus(const GoogleString& key,

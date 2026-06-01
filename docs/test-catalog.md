@@ -30,10 +30,9 @@ bazel test --config=clang-libstdcxx13 \
 
 | Status | Count | Notes |
 |--------|-------|-------|
-| Passed | 271 | After test fixes (was 191 with 4 failures) |
-| Skipped | 224 | Envoy/nginx-only, HTTPS, IIS, secondary host |
-| Failed (pre-existing) | 5 | See [Apache Known Failures](#apache-known-failures) |
-| xfailed | 1 | |
+| Passed | 195 | |
+| Skipped | 14 | HTTPS, IIS, secondary host |
+| Failed | 0 | |
 
 ### Envoy System Tests
 
@@ -43,9 +42,8 @@ bazel test --config=clang-libstdcxx13 \
 
 | Status | Count | Notes |
 |--------|-------|-------|
-| Passed | 175 | |
-| Skipped | 60 | See [Envoy Skips](#envoy-skips) |
-| xpassed | 1 | `test_pagespeed_header_present` — marked xfail but now passes |
+| Passed | 189 | |
+| Skipped | 20 | See [Envoy Skips](#envoy-skips) |
 | Failed | 0 | |
 
 ### Nginx System Tests
@@ -56,79 +54,38 @@ bazel test --config=clang-libstdcxx13 \
 
 | Status | Count | Notes |
 |--------|-------|-------|
-| Passed | 200 | |
-| Skipped | 72 | Shared `not_envoy`/`not_nginx` + nginx-specific skips |
+| Passed | 169 | |
+| Skipped | 40 | Shared `not_envoy`/`not_nginx` + nginx-specific skips |
 | Failed | 0 | |
 
 ---
 
-## Apache Known Failures
-
-These failures are pre-existing and not regressions:
-
-| Test | File | Issue |
-|------|------|-------|
-| `test_resources_not_private_cache` | test_headers.py | Intermittent — depends on downstream cache config adding `Cache-Control: private` to HTML responses which propagates to resource headers |
-| `test_outlined_js_has_last_modified` | test_outliners.py | 404 on outlined JS resource — outlined resource not found |
-| `test_combine_css_basic` | test_example.py | CSS combination timeout — async optimization too slow |
-| `test_combine_css_count` | test_example.py | CSS combination timeout — same root cause |
-| `test_cache_control_headers` | test_example.py | Depends on combine_css which times out |
-
 ---
 
-## Envoy Skips (~60 tests)
+## Envoy Skips (~20 tests)
 
-### Streaming Architecture Limitations
+Most streaming architecture limitations (X-PSA-Blocking-Rewrite) were resolved by converting tests
+to use `fetch_until_contains`/`fetch_until_count` polling instead of blocking rewrite headers.
 
-Tests skipped because Envoy uses non-blocking streaming ProxyFetch that doesn't support `X-PSA-Blocking-Rewrite`:
+### Remaining Envoy Skips
 
 | Category | Tests | Marker | Reason |
 |----------|-------|--------|--------|
-| Local Storage Cache | ~8 | `not_envoy` | Requires blocking rewrite for deterministic results |
-| Flatten CSS Imports | ~4 | `not_envoy` | Requires blocking rewrite |
-| Lazyload Images | ~8 | `not_envoy` | Filter times out in streaming architecture |
-| Outliners (CSS + JS) | ~7 | `not_envoy` | Requires blocking rewrite |
-| WebP Optimization | ~4 | `not_envoy` | Requires blocking rewrite |
-| Defer Images | ~2 | `not_envoy` | Requires blocking rewrite |
 | Combine CSS (test_example.py) | ~3 | `not_envoy` | CSS combination times out |
-| Blocking Rewrite Stats | 1 | `not_envoy` | Requires blocking rewrite |
-
-### Filter Timeouts
-
-| Category | Tests | Reason |
-|----------|-------|--------|
-| Inline Preview Images | ~3 | Filter times out in streaming architecture |
-| CSS Sprite External | ~1 | CSS sprite generation times out |
-| Canonicalize JS | ~1 | Filter times out |
-
-### Feature Gaps
-
-| Category | Tests | Reason |
-|----------|-------|--------|
-| IPRO Short Cache Lifetime | 1 | Returns `max-age=3598` instead of `<1000` — different cache timing |
-| Query Params Header Disable | 1 | `PageSpeedFilters` header not respected for IPRO resource requests |
-| Resource 404 Count | 1 | Envoy doesn't track `resource_404_count` statistic |
-| IPRO ETag Format | ~2 | Doesn't produce `PSA-aj` ETag pattern like Apache |
-| Rel Canonical IPRO | ~2 | IPRO doesn't produce `PSA-aj` ETag pattern |
-| data-pagespeed-no-transform | 1 | Image rewriting filter behavior differs |
-
-### HTTPS Conditional Skips
-
-| Category | Tests | Reason |
-|----------|-------|--------|
-| HTTPS CSS Combination | 3 | `test_https.py` — CSS combination times out over HTTPS |
-
-### Envoy xpassed (1 test)
-
-| Test | File | Notes |
-|------|------|-------|
-| `test_pagespeed_header_present` | envoy/test_envoy_sanity.py | Marked `xfail` (X-Page-Speed header crashes during local reply) but now passes. Consider removing the xfail marker. |
+| Blocking Rewrite Stats | 1 | `not_envoy` | Tests blocking rewrite concept itself |
+| CssFlattenMaxBytes header | 1 | `not_envoy` | Header handling differs |
+| Query Params Header Disable | 1 | `not_envoy` | `PageSpeedFilters` header not respected for IPRO |
+| IPRO Short Cache Lifetime | 1 | `not_envoy` | Different cache timing behavior |
+| Resource 404 Count | 1 | `not_envoy` | Envoy doesn't track `resource_404_count` statistic |
+| IPRO ETag Format | ~2 | `not_envoy` | Doesn't produce `PSA-aj` ETag pattern like Apache |
+| Rel Canonical IPRO | ~2 | `not_envoy` | IPRO doesn't produce `PSA-aj` ETag pattern |
+| HTTPS CSS Combination | 3 | `not_envoy` | `test_https.py` — CSS combination times out over HTTPS |
 
 ---
 
-## Nginx Skips
+## Nginx Skips (~26 tests)
 
-Nginx shares the same streaming architecture limitations as Envoy, plus additional nginx-specific issues.
+Nginx shares all Envoy skip markers, plus additional nginx-specific issues.
 
 ### Shared with Envoy (all `not_envoy` tests are also `not_nginx`)
 
@@ -138,9 +95,7 @@ All tests marked `not_envoy` above are also marked `not_nginx`.
 
 | Category | Tests | File | Reason |
 |----------|-------|------|--------|
-| Content-Length | ~2 | test_content_length.py | Nginx uses chunked encoding and adds `Cache-Control: private` |
-| No-Cache Resources | ~2 | test_no_cache.py | Nginx IPRO doesn't preserve no-cache headers |
-| Rewritten Image ETag | 1 | test_rewrite_images.py | Nginx doesn't add ETag to `.pagespeed.` resources |
+| ~~No-Cache Resources~~ | ~~2~~ | ~~test_no_cache.py~~ | Fixed: nginx config now sets Cache-Control: no-cache for /no_cache/ directory |
 
 ---
 

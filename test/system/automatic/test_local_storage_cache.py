@@ -33,8 +33,6 @@ from pagespeed_test_framework import (
 )
 
 
-@pytest.mark.not_nginx  # nginx streaming architecture doesn't support X-PSA-Blocking-Rewrite
-@pytest.mark.not_envoy  # Envoy streaming architecture doesn't support X-PSA-Blocking-Rewrite
 class TestLocalStorageCacheOptimizeMode:
     """Tests for local_storage_cache in optimize mode.
 
@@ -58,17 +56,12 @@ class TestLocalStorageCacheOptimizeMode:
         """local_storage_cache should inject init function."""
         url = f"{example_root}/local_storage_cache.html?PageSpeedFilters=local_storage_cache,inline_css,inline_images"
 
-        response = client.get(
+        response = client.fetch_until_contains(
             url,
-            headers={"X-PSA-Blocking-Rewrite": "psatest"},
+            pattern=r"pagespeed\.localStorageCacheInit\(\)",
+            timeout=30.0,
         )
         assert_http_status(response, 200)
-
-        assert_contains(
-            response,
-            r"pagespeed\.localStorageCacheInit\(\)",
-            "Should inject localStorageCacheInit function",
-        )
 
     def test_local_storage_cache_adds_lsc_attributes(
         self, client: PageSpeedClient, example_root: str
@@ -76,16 +69,13 @@ class TestLocalStorageCacheOptimizeMode:
         """local_storage_cache should add data-pagespeed-lsc-url attributes."""
         url = f"{example_root}/local_storage_cache.html?PageSpeedFilters=local_storage_cache,inline_css,inline_images"
 
-        response = client.get(
+        response = client.fetch_until_count(
             url,
-            headers={"X-PSA-Blocking-Rewrite": "psatest"},
+            pattern=r'data-pagespeed-lsc-url=',
+            expected_count=2,
+            timeout=30.0,
         )
         assert_http_status(response, 200)
-
-        # Count LSC URL attributes
-        lsc_count = len(re.findall(r'data-pagespeed-lsc-url=', response.text))
-        assert lsc_count == 2, \
-            f"Expected 2 data-pagespeed-lsc-url attributes, found {lsc_count}"
 
     def test_local_storage_cache_inlines_css(
         self, client: PageSpeedClient, example_root: str
@@ -93,17 +83,12 @@ class TestLocalStorageCacheOptimizeMode:
         """CSS should be inlined with local_storage_cache."""
         url = f"{example_root}/local_storage_cache.html?PageSpeedFilters=local_storage_cache,inline_css,inline_images"
 
-        response = client.get(
+        response = client.fetch_until_contains(
             url,
-            headers={"X-PSA-Blocking-Rewrite": "psatest"},
+            pattern=r"yellow.*background-color:.*yellow",
+            timeout=30.0,
         )
         assert_http_status(response, 200)
-
-        assert_contains(
-            response,
-            r"yellow.*background-color:.*yellow",
-            "CSS should be inlined",
-        )
 
     def test_local_storage_cache_inlines_images(
         self, client: PageSpeedClient, example_root: str
@@ -111,17 +96,12 @@ class TestLocalStorageCacheOptimizeMode:
         """Images should be inlined as data URIs."""
         url = f"{example_root}/local_storage_cache.html?PageSpeedFilters=local_storage_cache,inline_css,inline_images"
 
-        response = client.get(
+        response = client.fetch_until_contains(
             url,
-            headers={"X-PSA-Blocking-Rewrite": "psatest"},
+            pattern=r'<img src="data:image/png;base64',
+            timeout=30.0,
         )
         assert_http_status(response, 200)
-
-        assert_contains(
-            response,
-            r'<img src="data:image/png;base64',
-            "Images should be inlined as data URIs",
-        )
 
     def test_local_storage_cache_preserves_alt(
         self, client: PageSpeedClient, example_root: str
@@ -129,17 +109,12 @@ class TestLocalStorageCacheOptimizeMode:
         """Image alt attributes should be preserved."""
         url = f"{example_root}/local_storage_cache.html?PageSpeedFilters=local_storage_cache,inline_css,inline_images"
 
-        response = client.get(
+        response = client.fetch_until_contains(
             url,
-            headers={"X-PSA-Blocking-Rewrite": "psatest"},
+            pattern=r'<img.*alt="A cup of joe"',
+            timeout=30.0,
         )
         assert_http_status(response, 200)
-
-        assert_contains(
-            response,
-            r'<img.*alt="A cup of joe"',
-            "Image alt attribute should be preserved",
-        )
 
     def test_local_storage_cache_has_noscript(
         self, client: PageSpeedClient, example_root: str
@@ -147,21 +122,14 @@ class TestLocalStorageCacheOptimizeMode:
         """Should have noscript fallback."""
         url = f"{example_root}/local_storage_cache.html?PageSpeedFilters=local_storage_cache,inline_css,inline_images"
 
-        response = client.get(
+        response = client.fetch_until_contains(
             url,
-            headers={"X-PSA-Blocking-Rewrite": "psatest"},
+            pattern=r"PageSpeed=noscript",
+            timeout=30.0,
         )
         assert_http_status(response, 200)
 
-        assert_contains(
-            response,
-            r"PageSpeed=noscript",
-            "Should have noscript fallback",
-        )
 
-
-@pytest.mark.not_nginx  # nginx streaming architecture doesn't support X-PSA-Blocking-Rewrite
-@pytest.mark.not_envoy  # Envoy streaming architecture doesn't support X-PSA-Blocking-Rewrite
 class TestLocalStorageCacheDebugMode:
     """Tests for local_storage_cache in debug mode.
 
@@ -182,17 +150,12 @@ class TestLocalStorageCacheDebugMode:
         """Debug mode should still have init function."""
         url = f"{example_root}/local_storage_cache.html?PageSpeedFilters=local_storage_cache,inline_css,inline_images,debug"
 
-        response = client.get(
+        response = client.fetch_until_contains(
             url,
-            headers={"X-PSA-Blocking-Rewrite": "psatest"},
+            pattern=r"pagespeed\.localStorageCacheInit\(\)",
+            timeout=30.0,
         )
         assert_http_status(response, 200)
-
-        assert_contains(
-            response,
-            r"pagespeed\.localStorageCacheInit\(\)",
-            "Debug mode should have init function",
-        )
 
     def test_debug_mode_no_goog_require(
         self, client: PageSpeedClient, example_root: str
@@ -200,9 +163,11 @@ class TestLocalStorageCacheDebugMode:
         """Debug mode should not have unresolved goog.require."""
         url = f"{example_root}/local_storage_cache.html?PageSpeedFilters=local_storage_cache,inline_css,inline_images,debug"
 
-        response = client.get(
+        # Wait for rewriting to complete by checking for positive indicator
+        response = client.fetch_until_contains(
             url,
-            headers={"X-PSA-Blocking-Rewrite": "psatest"},
+            pattern=r"pagespeed\.localStorageCacheInit\(\)",
+            timeout=30.0,
         )
         assert_http_status(response, 200)
 
@@ -213,8 +178,6 @@ class TestLocalStorageCacheDebugMode:
         )
 
 
-@pytest.mark.not_nginx  # nginx streaming architecture doesn't support X-PSA-Blocking-Rewrite
-@pytest.mark.not_envoy  # Envoy streaming architecture doesn't support X-PSA-Blocking-Rewrite
 class TestLocalStorageCacheCookie:
     """Tests for local_storage_cache with cookie indicating cached resources.
 
@@ -238,10 +201,11 @@ class TestLocalStorageCacheCookie:
         """With cache cookie, inlined data should not be sent."""
         url = f"{example_root}/local_storage_cache.html?PageSpeedFilters=local_storage_cache,inline_css,inline_images"
 
-        # First request to get the hashes
-        response1 = client.get(
+        # First request: wait for rewriting to complete and get the hashes
+        response1 = client.fetch_until_contains(
             url,
-            headers={"X-PSA-Blocking-Rewrite": "psatest"},
+            pattern=r'data-pagespeed-lsc-hash="[^"]*"',
+            timeout=30.0,
         )
         assert_http_status(response1, 200)
 
@@ -253,11 +217,13 @@ class TestLocalStorageCacheCookie:
         # Create the cookie with hashes
         cookie_value = "!".join(hashes)
 
-        # Second request with cookie set
-        response2 = client.get(
+        # Second request with cookie set - wait for rewriting to complete
+        # then check that inlining is skipped
+        response2 = client.fetch_until_contains(
             url,
+            pattern=r"pagespeed\.localStorageCacheInit\(\)",
+            timeout=30.0,
             headers={
-                "X-PSA-Blocking-Rewrite": "psatest",
                 "Cookie": f"_GPSLSC={cookie_value}",
             },
         )

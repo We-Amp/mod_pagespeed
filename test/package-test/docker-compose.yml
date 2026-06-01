@@ -1,0 +1,44 @@
+# Package testing for mod_pagespeed release artifacts.
+#
+# Validates .deb, .rpm, and nginx tarball packages by installing them
+# on fresh, production-representative distro containers and running
+# the existing system test suite.
+#
+# Usage:
+#   # Copy packages into the build context
+#   cp release-artifacts/*.deb release-artifacts/*.rpm \
+#      release-artifacts/ngx_pagespeed*.tar.gz \
+#      test/package-test/packages/
+#
+#   # Run all package tests
+#   docker compose -f test/package-test/docker-compose.yml up \
+#       --build --abort-on-container-exit
+#
+#   # Run individually
+#   docker compose -f test/package-test/docker-compose.yml run \
+#       --rm --build test-ubuntu-apache
+
+services:
+  test-ubuntu-apache:
+    build:
+      context: .
+      dockerfile: Dockerfile.ubuntu-apache
+    init: true
+    volumes:
+      - ../..:/src:ro
+
+  test-rocky-apache:
+    build:
+      context: .
+      dockerfile: Dockerfile.rocky-apache
+    init: true
+    volumes:
+      - ../..:/src:ro
+
+  test-ubuntu-nginx:
+    build:
+      context: .
+      dockerfile: Dockerfile.ubuntu-nginx
+    init: true
+    volumes:
+      - ../..:/src:ro

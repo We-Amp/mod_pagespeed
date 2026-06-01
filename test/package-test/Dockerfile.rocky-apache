@@ -1,0 +1,24 @@
+FROM rockylinux:9
+
+ENV DISTRO_FAMILY=rhel
+
+# Install httpd and test dependencies
+RUN dnf install -y --allowerasing \
+    httpd \
+    curl \
+    python3 \
+    python3-pip \
+    at \
+    && dnf clean all
+
+# Install pytest
+RUN pip3 install --no-cache-dir pytest pytest-timeout
+
+# Install the .rpm package
+COPY packages/*.rpm /tmp/
+RUN dnf install -y /tmp/*.rpm && dnf clean all
+
+COPY run-apache-tests.sh /usr/local/bin/run-tests.sh
+RUN chmod +x /usr/local/bin/run-tests.sh
+
+ENTRYPOINT ["/usr/local/bin/run-tests.sh"]

@@ -92,6 +92,13 @@ struct EnvoyCacheConfig {
   // JavaScript library canonicalization entries.
   // Format: "size_bytes md5_hash canonical_url"
   std::vector<GoogleString> libraries;
+
+  // Key for X-PSA-Blocking-Rewrite header support.
+  GoogleString blocking_rewrite_key;
+
+  // HTTPS fetch options (e.g., "enable,allow_self_signed").
+  // Empty string means use default ("enable").
+  GoogleString fetch_https_options;
 };
 
 class EnvoyProcessContext : public ProcessContext {

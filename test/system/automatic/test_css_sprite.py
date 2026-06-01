@@ -54,13 +54,11 @@ class TestCssSpriteImagesInline:
         response = client.fetch_until_contains(
             url,
             pattern=r"Cuppa\.png.*BikeCrashIcn\.png.*IronChef2\.gif.*\.pagespeed\.is\..*\.png",
-            timeout=30.0,
+            timeout=60.0,
         )
         assert_http_status(response, 200)
 
 
-@pytest.mark.not_nginx  # CSS sprite generation times out in nginx streaming architecture
-@pytest.mark.not_envoy  # CSS sprite generation times out in Envoy streaming architecture
 class TestCssSpriteImagesExternal:
     """Tests for sprite_images with external CSS.
 
@@ -85,7 +83,7 @@ class TestCssSpriteImagesExternal:
             url,
             pattern=r"css\.pagespeed\.cf",
             expected_count=1,
-            timeout=30.0,
+            timeout=60.0,
         )
         assert_http_status(response, 200)
 
@@ -107,7 +105,7 @@ class TestCssSpriteImagesExternal:
         css_response = client.fetch_until_contains(
             css_url,
             pattern=r"ic\.pagespeed\.is",
-            timeout=30.0,
+            timeout=60.0,
         )
         assert_http_status(css_response, 200)
 

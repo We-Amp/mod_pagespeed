@@ -31,8 +31,6 @@ from pagespeed_test_framework import (
 )
 
 
-@pytest.mark.not_nginx  # nginx streaming architecture doesn't support X-PSA-Blocking-Rewrite
-@pytest.mark.not_envoy  # Envoy streaming architecture doesn't support X-PSA-Blocking-Rewrite
 class TestFlattenCssImportsDefault:
     """Tests for flatten_css_imports with default settings.
 
@@ -52,9 +50,11 @@ class TestFlattenCssImportsDefault:
         """With default limit, @import statements should be flattened."""
         url = f"{example_root}/flatten_css_imports.html?PageSpeedFilters=flatten_css_imports,rewrite_css"
 
-        response = client.get(
+        # Wait for CSS rewriting to complete - imported content should appear
+        response = client.fetch_until_contains(
             url,
-            headers={"X-PSA-Blocking-Rewrite": "psatest"},
+            pattern=r"yellow.*background-color:",
+            timeout=30.0,
         )
         assert_http_status(response, 200)
 
@@ -71,21 +71,14 @@ class TestFlattenCssImportsDefault:
         """Flattened CSS should include content from imported files."""
         url = f"{example_root}/flatten_css_imports.html?PageSpeedFilters=flatten_css_imports,rewrite_css"
 
-        response = client.get(
+        response = client.fetch_until_contains(
             url,
-            headers={"X-PSA-Blocking-Rewrite": "psatest"},
+            pattern=r"yellow.*background-color:",
+            timeout=30.0,
         )
         assert_http_status(response, 200)
 
-        # Imported CSS content should be present
-        assert_contains(
-            response,
-            r"yellow.*background-color:",
-            "Imported CSS content should be included",
-        )
 
-
-@pytest.mark.not_nginx  # nginx streaming architecture doesn't support X-PSA-Blocking-Rewrite
 class TestFlattenCssImportsTinyLimit:
     """Tests for flatten_css_imports with tiny byte limit.
 
@@ -106,36 +99,29 @@ class TestFlattenCssImportsTinyLimit:
         """With tiny limit, @import statements should not be flattened."""
         url = f"{example_root}/flatten_css_imports.html?PageSpeedFilters=flatten_css_imports,rewrite_css"
 
-        response = client.get(
+        response = client.fetch_until_contains(
             url,
+            pattern=r"@import",
+            timeout=30.0,
             headers={
-                "X-PSA-Blocking-Rewrite": "psatest",
                 "PageSpeedCssFlattenMaxBytes": "5",
             },
         )
         assert_http_status(response, 200)
 
-        # @import should remain
-        assert_contains(
-            response,
-            r"@import",
-            "@import should remain with tiny limit",
-        )
-
-    @pytest.mark.not_envoy
+    @pytest.mark.not_envoy(reason="Envoy does not apply CssFlattenMaxBytes header to resource requests")
     def test_tiny_limit_excludes_imported_content(
         self, client: PageSpeedClient, example_root: str
     ):
-        """With tiny limit, imported CSS content should not be inlined.
-
-        Skipped on Envoy: CssFlattenMaxBytes header handling differs.
-        """
+        """With tiny limit, imported CSS content should not be inlined."""
         url = f"{example_root}/flatten_css_imports.html?PageSpeedFilters=flatten_css_imports,rewrite_css"
 
-        response = client.get(
+        # Wait for the page to be processed (we should see @import remain)
+        response = client.fetch_until_contains(
             url,
+            pattern=r"@import",
+            timeout=30.0,
             headers={
-                "X-PSA-Blocking-Rewrite": "psatest",
                 "PageSpeedCssFlattenMaxBytes": "5",
             },
         )
@@ -149,7 +135,6 @@ class TestFlattenCssImportsTinyLimit:
         )
 
 
-@pytest.mark.not_nginx  # nginx streaming architecture doesn't support X-PSA-Blocking-Rewrite
 class TestFlattenCssImportsMediumLimit:
     """Tests for flatten_css_imports with medium byte limit.
 
@@ -170,10 +155,11 @@ class TestFlattenCssImportsMediumLimit:
         """With medium limit, some @import statements may remain."""
         url = f"{example_root}/flatten_css_imports.html?PageSpeedFilters=flatten_css_imports,rewrite_css"
 
-        response = client.get(
+        response = client.fetch_until_contains(
             url,
+            pattern=r"@import",
+            timeout=30.0,
             headers={
-                "X-PSA-Blocking-Rewrite": "psatest",
                 "PageSpeedCssFlattenMaxBytes": "50",
             },
         )

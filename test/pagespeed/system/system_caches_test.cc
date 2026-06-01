@@ -64,8 +64,8 @@
 #include "pagespeed/kernel/http/response_headers.h"
 #include "pagespeed/kernel/sharedmem/inprocess_shared_mem.h"
 #include "pagespeed/kernel/sharedmem/shared_mem_lock_manager.h"
-#include "pagespeed/kernel/util/file_system_lock_manager.h"
 #include "pagespeed/kernel/util/platform.h"
+#include "pagespeed/kernel/util/threadsafe_lock_manager.h"
 #include "pagespeed/kernel/util/simple_random.h"
 #include "pagespeed/system/admin_site.h"
 #include "pagespeed/system/memcached_cache.h"
@@ -837,7 +837,9 @@ class SystemCachesRedisCacheTest : public SystemCachesExternalCacheTestBase {
 
 ADD_EXTERNAL_CACHE_TESTS(SystemCachesRedisCacheTest)
 
-TEST_F(SystemCachesTest, BasicFileLockManager) {
+TEST_F(SystemCachesTest, FallbackLockManagerWhenShmDisabled) {
+  // When use_shared_mem_locking is false, a ThreadSafeLockManager is used
+  // as a fallback for single-process locking.
   options_->set_file_cache_path(kCachePath);
   options_->set_use_shared_mem_locking(false);
   options_->set_lru_cache_kb_per_process(100);
@@ -845,7 +847,7 @@ TEST_F(SystemCachesTest, BasicFileLockManager) {
   NamedLockManager* named_locks =
       system_caches_->GetLockManager(options_.get());
   EXPECT_TRUE(named_locks != nullptr);
-  EXPECT_TRUE(dynamic_cast<FileSystemLockManager*>(named_locks) != nullptr);
+  EXPECT_TRUE(dynamic_cast<ThreadSafeLockManager*>(named_locks) != nullptr);
 }
 
 TEST_F(SystemCachesTest, BasicShmLockManager) {
@@ -1224,6 +1226,7 @@ TEST_F(SystemCachesTest, FileCacheNoConflictTwoPaths) {
   options_->set_file_cache_path(kCachePath);
   SystemCachePath* path1 = system_caches_->GetCache(options_.get());
   SystemRewriteOptions options2(thread_system_.get());
+  options2.set_file_cache_path(kAltCachePath);
   SystemCachePath* path2 = system_caches_->GetCache(&options2);
   EXPECT_NE(path1, path2);
   EXPECT_EQ(0, message_handler()->MessagesOfType(kWarning));
@@ -1292,7 +1295,8 @@ TEST_F(SystemCachesTest, InvalidateWithPurgeDisabled) {
                                  &value, &headers));
 }
 
-TEST_F(SystemCachesTest, BrokenShmFallbackShmLockManager) {
+TEST_F(SystemCachesTest, BrokenShmFallbackToThreadSafe) {
+  // When shared memory fails, ThreadSafeLockManager is used as a fallback.
   BreakShm();
   options_->set_file_cache_path(kCachePath);
   options_->set_use_shared_mem_locking(true);
@@ -1300,10 +1304,9 @@ TEST_F(SystemCachesTest, BrokenShmFallbackShmLockManager) {
   PrepareWithConfig(options_.get());
   NamedLockManager* named_locks =
       system_caches_->GetLockManager(options_.get());
+  // Falls back to ThreadSafeLockManager for single-process locking.
   EXPECT_TRUE(named_locks != nullptr);
-
-  // Actually file system based here, due to fallback.
-  EXPECT_TRUE(dynamic_cast<FileSystemLockManager*>(named_locks) != nullptr);
+  EXPECT_TRUE(dynamic_cast<ThreadSafeLockManager*>(named_locks) != nullptr);
 }
 
 TEST_F(SystemCachesTest, BrokenShmFallbackShmAndLru) {

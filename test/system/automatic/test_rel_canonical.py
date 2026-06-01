@@ -33,8 +33,6 @@ from pagespeed_test_framework import (
 )
 
 
-@pytest.mark.not_nginx  # nginx IPRO doesn't produce PSA-aj ETag pattern
-@pytest.mark.not_envoy  # Envoy IPRO doesn't produce PSA-aj ETag pattern
 class TestRelCanonicalIPRO:
     """Tests that IPRO resources do NOT have rel=canonical headers.
 
@@ -56,10 +54,17 @@ class TestRelCanonicalIPRO:
         # Use random query param to avoid caching
         url = f"{example_root}/images/Puzzle.jpg?a={random.randint(1, 100000)}"
 
-        # Wait for IPRO to complete (indicated by PSA-aj in ETag)
+        # Wait for IPRO optimization to complete. Original Puzzle.jpg is ~15KB;
+        # IPRO-optimized version is smaller. We detect completion by checking
+        # either the PSA-aj ETag pattern OR reduced response size.
+        # On nginx, gzip may strip weak ETags from IPRO responses, so we
+        # also check response size as a fallback.
         response = client.fetch_until(
             url,
-            condition=lambda r: "PSA-aj" in r.header("ETag", ""),
+            condition=lambda r: (
+                "PSA-aj" in r.header("ETag", "") or
+                (r.status == 200 and len(r.body) < 14000)
+            ),
             timeout=30.0,
         )
         assert_http_status(response, 200)

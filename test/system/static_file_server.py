@@ -102,6 +102,31 @@ class StaticFileHandler(http.server.SimpleHTTPRequestHandler):
         # Default to binary
         return 'application/octet-stream'
 
+    def _get_cache_headers(self, path):
+        """Return cache headers matching Apache's debug.conf.template config.
+
+        Apache does NOT set Cache-Control for most static files by default.
+        Only specific directories get explicit Cache-Control headers.
+        Resources without explicit Cache-Control but with Last-Modified are
+        considered implicitly cacheable by PSOL (using implicit_cache_ttl_ms,
+        default 300s).
+        """
+        headers = {}
+        # Last-Modified for all files (Apache sends this by default)
+        stat = os.stat(path)
+        import email.utils
+        last_modified = email.utils.formatdate(stat.st_mtime, usegmt=True)
+        headers['Last-Modified'] = last_modified
+
+        # Match Apache's per-directory Cache-Control settings from
+        # install/debug.conf.template
+        if '/no_cache/' in self.path:
+            headers['Cache-Control'] = 'no-cache'
+        # No default Cache-Control for other paths — matches Apache behavior.
+        # PSOL will use implicit_cache_ttl_ms (300s) for IPRO resources.
+
+        return headers
+
     def do_GET(self):
         """Handle GET requests."""
         # Translate the path
@@ -126,8 +151,9 @@ class StaticFileHandler(http.server.SimpleHTTPRequestHandler):
             self.send_response(200)
             self.send_header('Content-Type', self.guess_type(path))
             self.send_header('Content-Length', len(content))
-            # Add cache headers for testing
-            self.send_header('Cache-Control', 'public, max-age=3600')
+            # Add cache headers matching Apache's configuration
+            for name, value in self._get_cache_headers(path).items():
+                self.send_header(name, value)
             self.end_headers()
             self.wfile.write(content)
 
@@ -151,7 +177,9 @@ class StaticFileHandler(http.server.SimpleHTTPRequestHandler):
             self.send_response(200)
             self.send_header('Content-Type', self.guess_type(path))
             self.send_header('Content-Length', stat.st_size)
-            self.send_header('Cache-Control', 'public, max-age=3600')
+            # Match GET behavior for cache headers
+            for name, value in self._get_cache_headers(path).items():
+                self.send_header(name, value)
             self.end_headers()
 
         except IOError as e:

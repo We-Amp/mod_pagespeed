@@ -213,6 +213,11 @@ static_resources:
                       "@type": type.googleapis.com/pagespeed.Decoder
                       key: "x-pagespeed"
                       val: "enabled"
+                      # Key for X-PSA-Blocking-Rewrite header support.
+                      blocking_rewrite_key: "psatest"
+                      # Allow fetching HTTPS resources with self-signed certs
+                      # (needed for CSS combination over HTTPS in tests).
+                      fetch_https_options: "enable,allow_self_signed"
                       # JavaScript library canonicalization for testing.
                       # Format: "size_bytes md5_hash canonical_url"
                       libraries:
@@ -284,6 +289,8 @@ static_resources:
                       "@type": type.googleapis.com/pagespeed.Decoder
                       key: "x-pagespeed"
                       val: "enabled"
+                      blocking_rewrite_key: "psatest"
+                      fetch_https_options: "enable,allow_self_signed"
                       libraries:
                         - "43 1o978_K0_LNE5_ystNklf http://www.modpagespeed.com/rewrite_javascript.js"
                   - name: envoy.filters.http.router

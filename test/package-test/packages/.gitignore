@@ -1,0 +1,5 @@
+# Package files are copied here for docker build context.
+# They should not be committed to the repository.
+*.deb
+*.rpm
+*.tar.gz

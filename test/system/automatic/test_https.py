@@ -64,23 +64,19 @@ class TestHttpsBasic:
           fetch_until $URL 'fgrep -c css+' 1 --no-check-certificate
     """
 
-    @pytest.mark.not_envoy
+    @pytest.mark.not_envoy(reason="Envoy HTTPS listener does not rewrite HTML (needs PageSpeed filter per-listener init)")
+    @pytest.mark.not_nginx(reason="Nginx HTTPS CSS combination requires FetchHttps with self-signed cert support")
     def test_https_css_combination(
         self, https_client: PageSpeedClient, https_example_root: str
     ):
-        """CSS combination should work over HTTPS.
-
-        Skipped on Envoy: CSS combination over HTTPS times out. The HTTPS
-        listener works (test_https_pagespeed_header passes) but filter
-        behavior differs. Needs investigation.
-        """
+        """CSS combination should work over HTTPS."""
         url = f"{https_example_root}/combine_css.html"
 
-        response = https_client.fetch_until_count(
+        response = https_client.fetch_until_contains(
             url,
             pattern=r"css\+",
-            expected_count=1,
             timeout=30.0,
+            headers={"X-PSA-Blocking-Rewrite": "psatest"},
         )
         assert_http_status(response, 200)
 
@@ -105,14 +101,12 @@ class TestHttpsBasic:
         assert mod_pagespeed or page_speed, \
             "Expected X-Mod-Pagespeed or X-Page-Speed header over HTTPS"
 
-    @pytest.mark.not_envoy
+    @pytest.mark.not_envoy(reason="Envoy HTTPS listener does not rewrite HTML (needs PageSpeed filter per-listener init)")
+    @pytest.mark.not_nginx(reason="Nginx HTTPS CSS combination requires FetchHttps with self-signed cert support")
     def test_https_combined_css_with_filters(
         self, https_client: PageSpeedClient, https_example_root: str
     ):
         """Combined CSS URL should be generated correctly with filters.
-
-        Skipped on Envoy: CSS combination over HTTPS times out.
-        See test_https_css_combination for details.
 
         Bash original::
 
@@ -138,14 +132,12 @@ class TestHttpsBasic:
             "Combined CSS URL should include all CSS files",
         )
 
-    @pytest.mark.not_envoy
+    @pytest.mark.not_envoy(reason="Envoy HTTPS listener does not rewrite HTML (needs PageSpeed filter per-listener init)")
+    @pytest.mark.not_nginx(reason="Nginx HTTPS CSS combination requires FetchHttps with self-signed cert support")
     def test_https_combined_css_preserves_relativity(
         self, https_client: PageSpeedClient, https_example_root: str
     ):
         """Combined CSS URL should preserve relativity without trim_urls.
-
-        Skipped on Envoy: CSS combination over HTTPS times out.
-        See test_https_css_combination for details.
 
         Bash original::
 

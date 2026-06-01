@@ -9,6 +9,7 @@
 #   --build-only    Only build the module, don't run tests
 #   --skip-build    Skip building, assume module is already built
 #   --keep-running  Keep Apache running after tests
+#   --testkey       Build with test license key and pre-seed a test token
 #   --help          Show this help message
 #
 # Examples:
@@ -55,6 +56,7 @@ Options:
   --build-only    Only build the module, don't run tests
   --skip-build    Skip building, assume module is already built
   --keep-running  Keep Apache running after tests (for debugging)
+  --testkey       Build with test license key and pre-seed a test token
   --gcc           Use GCC 13 for building (recommended for Cyclone cache)
   --help          Show this help message
 
@@ -80,6 +82,7 @@ EOF
 BUILD_ONLY=false
 SKIP_BUILD=false
 KEEP_RUNNING=false
+USE_TESTKEY=false
 BAZEL_CONFIG="${BAZEL_CONFIG:---config=gcc}"
 PYTEST_ARGS=()
 
@@ -97,6 +100,10 @@ while [[ $# -gt 0 ]]; do
             KEEP_RUNNING=true
             shift
             ;;
+        --testkey)
+            USE_TESTKEY=true
+            shift
+            ;;
         --gcc)
             BAZEL_CONFIG="--config=gcc"
             shift
@@ -112,17 +119,45 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# Validate flag combinations
+if [ "$USE_TESTKEY" = true ] && [ "$SKIP_BUILD" = true ]; then
+    log_error "--testkey requires building; cannot be used with --skip-build"
+    exit 1
+fi
+
 # Build the module
 build_module() {
     log_step "Building mod_pagespeed module..."
     cd "$PROJECT_ROOT"
 
-    if ! bazel build $BAZEL_CONFIG //:libmod_pagespeed.so; then
+    local build_opts="$BAZEL_CONFIG"
+    if [ "$USE_TESTKEY" = true ]; then
+        build_opts="$build_opts --config=testkey"
+        log_info "Building with test license key (--config=testkey)"
+    fi
+
+    if ! bazel build $build_opts //:libmod_pagespeed.so; then
         log_error "Failed to build mod_pagespeed module"
         exit 1
     fi
 
     log_info "Module built successfully: bazel-bin/libmod_pagespeed.so"
+
+    # Generate and export a test license token for the testkey build.
+    if [ "$USE_TESTKEY" = true ]; then
+        log_step "Building test token generator..."
+        if ! bazel build $BAZEL_CONFIG //pagespeed/kernel/license_v2:generate_test_token; then
+            log_error "Failed to build generate_test_token"
+            exit 1
+        fi
+        export LICENSE_TOKEN
+        LICENSE_TOKEN=$("$PROJECT_ROOT/bazel-bin/pagespeed/kernel/license_v2/generate_test_token")
+        if [ -z "$LICENSE_TOKEN" ]; then
+            log_error "generate_test_token produced empty output"
+            exit 1
+        fi
+        log_info "Test license token generated"
+    fi
 }
 
 # Setup and start Apache
@@ -153,11 +188,21 @@ run_tests() {
     export PAGESPEED_HOST="${PAGESPEED_HOST:-localhost}"
     export PAGESPEED_PORT="${PAGESPEED_PORT:-80}"
 
+    # HTTPS configuration for TLS tests
+    export PAGESPEED_HTTPS_HOST="${PAGESPEED_HTTPS_HOST:-localhost}"
+    export PAGESPEED_HTTPS_PORT="${PAGESPEED_HTTPS_PORT:-8443}"
+
+    # Secondary server for IPRO caching tests
+    export PAGESPEED_SECONDARY_HOST="${PAGESPEED_SECONDARY_HOST:-localhost}"
+    export PAGESPEED_SECONDARY_PORT="${PAGESPEED_SECONDARY_PORT:-8081}"
+
     log_info "Test server: http://$PAGESPEED_HOST:$PAGESPEED_PORT"
+    log_info "HTTPS server: https://$PAGESPEED_HTTPS_HOST:$PAGESPEED_HTTPS_PORT"
+    log_info "Secondary server: http://$PAGESPEED_SECONDARY_HOST:$PAGESPEED_SECONDARY_PORT"
 
     # Default to running all automatic tests if no specific tests specified
     if [ ${#PYTEST_ARGS[@]} -eq 0 ]; then
-        PYTEST_ARGS=("automatic/" "-v")
+        PYTEST_ARGS=("automatic/" "system/" "-v")
     fi
 
     # Install pytest if needed

@@ -223,4 +223,20 @@ message Decoder {
     // an MD5 hash. If the hash matches a registered library, the URL is
     // rewritten to the canonical version.
     repeated string libraries = 22;
+
+    // Key for X-PSA-Blocking-Rewrite header support.
+    // When set, requests with "X-PSA-Blocking-Rewrite: <key>" will wait for
+    // all rewrites to complete before sending the response, instead of
+    // streaming partially-optimized HTML. The header value must match this key.
+    // Example: "psatest"
+    string blocking_rewrite_key = 23;
+
+    // HTTPS fetch options for the curl-based resource fetcher.
+    // Comma-separated list of keywords controlling HTTPS certificate
+    // verification when fetching sub-resources (e.g., for CSS combination).
+    // Keywords: enable, disable, allow_self_signed,
+    //   allow_unknown_certificate_authority, allow_certificate_not_yet_valid
+    // Default: "enable" (HTTPS enabled with strict certificate verification).
+    // Example: "enable,allow_self_signed" for self-signed certificates.
+    string fetch_https_options = 24;
 }

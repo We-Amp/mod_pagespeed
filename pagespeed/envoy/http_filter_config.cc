@@ -136,6 +136,16 @@ EnvoyCacheConfig protoToCacheConfig(const pagespeed::Decoder& proto_config) {
     }
   }
 
+  // Blocking rewrite key
+  if (!proto_config.blocking_rewrite_key().empty()) {
+    config.blocking_rewrite_key = proto_config.blocking_rewrite_key();
+  }
+
+  // HTTPS fetch options
+  if (!proto_config.fetch_https_options().empty()) {
+    config.fetch_https_options = proto_config.fetch_https_options();
+  }
+
   return config;
 }
 
