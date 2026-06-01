@@ -23,12 +23,11 @@
 // IIS Native Module API headers
 #include <httpserv.h>
 
-#include <memory>
-
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/shared_string.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/http/request_headers.h"
+#include "net/instaweb/http/public/request_context.h"
 
 namespace net_instaweb {
 
@@ -36,7 +35,6 @@ class IisAsyncFetch;
 class ProxyFetch;
 class ProxyFetchFactory;
 class IisModuleFactory;
-class IisRequestContext;
 class IisServerContext;
 class InPlaceResourceRecorder;
 
@@ -67,29 +65,61 @@ class IisHttpModule : public CHttpModule {
   // Per-request context stored in IIS's module context container.
   // Inherits from IHttpStoredContext so it can be stored/retrieved via
   // IHttpContext::GetModuleContextContainer().
-  // This class holds all per-request state.
+  // This class holds all per-request state (following Envoy's pattern of
+  // storing everything in the filter context rather than a separate class).
+  //
+  // The "empty" context pattern (from IISpeed): some requests don't need
+  // PageSpeed processing (subrequests, admin paths, etc.). For these, we create
+  // an "empty" context that just marks the request as pass-through, avoiding
+  // null checks and preventing re-creation on subsequent handler calls.
   class IisModuleContext : public IHttpStoredContext {
    public:
-    // Constructor and destructor defined in .cc file to allow incomplete types
-    // with unique_ptr
+    // Constructor for empty (pass-through) context
     IisModuleContext();
+
+    // Constructor for full context with server context
+    explicit IisModuleContext(IisServerContext* ctx);
+
     ~IisModuleContext();
 
-    // Required by IHttpStoredContext - called by IIS when cleaning up
-    void CleanupStoredContext() override { delete this; }
+    // Required by IHttpStoredContext - called by IIS when cleaning up.
+    // Implements IISpeed cleanup pattern with explicit ordering.
+    void CleanupStoredContext() override;
 
-    IisServerContext* active_context_;
-    std::unique_ptr<IisRequestContext> request_context_;
+    // Check if this is an empty (pass-through) context
+    bool empty() const { return empty_; }
+
+    // Mark this context as empty (for late conversion to pass-through)
+    void set_empty(bool empty) { empty_ = empty; }
+
+   private:
+    // Empty context flag (IISpeed pattern)
+    bool empty_{true};
+
+   public:
+    // Server context for this request
+    IisServerContext* active_context_{nullptr};
+
+    // Request info
+    GoogleString url_;
+    int64 start_time_ms_{0};
+    RequestContextPtr request_context_;
 
     // ProxyFetch-based HTML rewriting.
-    // IisAsyncFetch receives output from ProxyFetch.
-    std::unique_ptr<IisAsyncFetch> iis_async_fetch_;
+    // IisAsyncFetch uses reference counting for safe lifetime management.
+    // Do NOT use unique_ptr - call Detach() to release IIS's reference.
+    // The fetch self-deletes when Detach() is called.
+    IisAsyncFetch* iis_async_fetch_{nullptr};
     // ProxyFetch handles HTML parsing and rewriting on worker threads.
-    // Note: ProxyFetch deletes itself after Done() is called.
+    // Note: ProxyFetch self-deletes after Done() is called and IT OWNS
+    // the RewriteDriver, so we don't need a separate driver_ member.
     ProxyFetch* proxy_fetch_{nullptr};
+    // Flag to track if async fetch was passed to ProxyFetch.
+    // Used by destructor to know whether to wait for HandleDone().
+    bool proxy_fetch_started_{false};
 
     // Cache lookup results
-    bool cache_hit_;
+    bool cache_hit_{false};
     SharedString cached_content_;
     GoogleString cached_content_type_;
 
@@ -97,9 +127,31 @@ class IisHttpModule : public CHttpModule {
     // When a non-.pagespeed. resource URL is requested and IPRO is enabled,
     // we record the response body and cache it for future optimization.
     // The recorder is self-deleting after DoneAndSetHeaders() is called.
-    InPlaceResourceRecorder* ipro_recorder_;  // Not owned after creation
-    bool ipro_recording_started_;
+    InPlaceResourceRecorder* ipro_recorder_{nullptr};
+    bool ipro_recording_started_{false};
     RequestHeaders::Properties ipro_request_properties_;
+
+    // Accept-Encoding header management.
+    // We save and remove Accept-Encoding in OnBeginRequest to get uncompressed
+    // content from the backend. The saved value can be restored in OnEndRequest
+    // if needed.
+    GoogleString saved_accept_encoding_;
+    bool accept_encoding_hidden_{false};
+
+    // Fetch count for runaway recursion prevention.
+    int fetch_count_{0};
+    static constexpr int kMaxFetchCount = 250;
+
+    // Check if we've exceeded the fetch limit
+    bool IncrementAndCheckFetchCount() {
+      ++fetch_count_;
+      if (fetch_count_ > kMaxFetchCount) {
+        return false;  // Too many fetches
+      }
+      return true;
+    }
+
+    int fetch_count() const { return fetch_count_; }
   };
 
 
@@ -110,6 +162,10 @@ class IisHttpModule : public CHttpModule {
   explicit IisHttpModule(IisServerContext* server_context);
 
   ~IisHttpModule() override;
+
+  // Called by IIS to clean up the module. Required when using regular new
+  // instead of IIS's module allocator.
+  void Dispose() override { delete this; }
 
   // IIS request pipeline events
   REQUEST_NOTIFICATION_STATUS OnBeginRequest(
@@ -158,6 +214,17 @@ class IisHttpModule : public CHttpModule {
   REQUEST_NOTIFICATION_STATUS HandleHtmlRewriting(
       IHttpContext* context,
       ISendResponseProvider* provider);
+
+  // Perform HTML rewriting with async IIS completion (IISpeed pattern).
+  // Returns RQ_NOTIFICATION_PENDING; HandleDone calls IndicateCompletion.
+  // Uses IisStreamingFetch to send content from worker thread.
+  REQUEST_NOTIFICATION_STATUS HandleHtmlRewritingStreaming(
+      IHttpContext* context,
+      ISendResponseProvider* provider,
+      IisModuleContext* module_ctx,
+      IisServerContext* active_context,
+      const GoogleString& url,
+      const GoogleString& original_body);
 
   // Check if response is an IPRO-eligible resource (CSS, JS, or image)
   bool IsIproEligibleResponse(IHttpContext* context);

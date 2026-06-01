@@ -23,10 +23,7 @@
 // IIS Native Module API headers
 #include <httpserv.h>
 
-#include <list>
-#include <map>
 #include <memory>
-#include <mutex>
 
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/string.h"
@@ -42,14 +39,8 @@ class IisServerContext;
 //
 // This factory is responsible for:
 // 1. Creating IisHttpModule instances for each request
-// 2. Managing per-site IisServerContext instances for multi-site support
+// 2. Managing the single IisServerContext for all requests
 // 3. Terminating the module when IIS recycles the app pool
-//
-// Multi-site support:
-// Each IIS site/application can have its own web.config with PageSpeed settings.
-// The factory maintains a cache of server contexts per site, keyed by the
-// application path. This allows different sites to have different optimization
-// settings while sharing the underlying driver factory.
 class IisModuleFactory : public IHttpModuleFactory {
  public:
   IisModuleFactory();
@@ -65,68 +56,40 @@ class IisModuleFactory : public IHttpModuleFactory {
 
   void Terminate() override;
 
-  // Get or create a server context for the given IIS context.
-  // The context is cached by site/application path.
-  IisServerContext* GetServerContext(IHttpContext* context);
-
-  // Access the default server context (for backward compatibility)
+  // Access the server context
   IisServerContext* server_context() { return default_context_.get(); }
 
   // Access the driver factory
   IisRewriteDriverFactory* factory() { return driver_factory_.get(); }
 
-  // Get the module ID for context storage
+  // Get the module ID for context storage (instance accessor)
   HTTP_MODULE_ID module_id() const { return module_id_; }
 
   // Set the module ID (called by RegisterModule)
-  void set_module_id(HTTP_MODULE_ID id) { module_id_ = id; }
+  void set_module_id(HTTP_MODULE_ID id) {
+    module_id_ = id;
+    s_module_id_ = id;  // Also set static for use in handlers
+  }
 
-  // Invalidate cached configuration for a site
-  void InvalidateSiteConfig(const GoogleString& site_id);
-
-  // Invalidate all cached configurations
-  void InvalidateAllConfigs();
-
-  // Default maximum number of site contexts to cache before evicting oldest.
-  // Can be overridden via max_site_contexts configuration.
-  static constexpr size_t kDefaultMaxSiteContexts = 100;
+  // Static accessor for use in handlers (IISpeed pattern).
+  // This avoids accessing module_factory_ which may not be set in all contexts.
+  static HTTP_MODULE_ID GetModuleId() { return s_module_id_; }
 
  private:
-  // Evict oldest site contexts when cache exceeds max_site_contexts_.
-  // Must be called while holding site_contexts_mutex_.
-  void EvictOldestIfNeeded();
-
-  // Update LRU tracking for a site. Moves the site to the front of the LRU
-  // list (most recently used). Must be called while holding site_contexts_mutex_.
-  void TouchLru(const GoogleString& site_id);
-  // Get a unique identifier for the site/application
-  GoogleString GetSiteId(IHttpContext* context);
-
-  // Create a new server context for a site
-  IisServerContext* CreateServerContext(const GoogleString& site_id,
-                                          std::unique_ptr<IisConfig> config);
-
-  // Shared driver factory for all sites
+  // Driver factory
   std::unique_ptr<IisRewriteDriverFactory> driver_factory_;
 
-  // Default server context for backward compatibility
+  // Server context for all requests
   std::unique_ptr<IisServerContext> default_context_;
-
-  // Per-site server context cache
-  std::map<GoogleString, std::unique_ptr<IisServerContext>> site_contexts_;
-  std::mutex site_contexts_mutex_;
-
-  // LRU eviction support:
-  // - site_contexts_lru_: ordered list with most recently used at front
-  // - lru_positions_: maps site_id to its position in site_contexts_lru_ for O(1) updates
-  std::list<GoogleString> site_contexts_lru_;
-  std::map<GoogleString, std::list<GoogleString>::iterator> lru_positions_;
-  size_t max_site_contexts_ = kDefaultMaxSiteContexts;
 
   IHttpServer* iis_server_;  // Not owned
 
   // Module ID for context storage via IHttpModuleContextContainer
   HTTP_MODULE_ID module_id_ = nullptr;
+
+  // Static module ID for use in handlers (IISpeed pattern).
+  // This provides a single source of truth accessible without factory reference.
+  static HTTP_MODULE_ID s_module_id_;
 
   // Process context must outlive the driver factory since the factory
   // stores a pointer to data inside it (js_tokenizer_patterns).

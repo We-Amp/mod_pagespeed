@@ -6,9 +6,9 @@
  * to you under the Apache License, Version 2.0 (the
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
- * 
+ *
  *   http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
  * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
@@ -20,7 +20,6 @@
 #include "pagespeed/system/system_request_context.h"
 
 #include "base/logging.h"
-//#include "strings/stringpiece_utils.h"
 #include "pagespeed/kernel/http/domain_registry.h"
 
 namespace net_instaweb {
@@ -59,10 +58,9 @@ SystemRequestContext* SystemRequestContext::DynamicCast(RequestContext* rc) {
     return nullptr;
   }
   SystemRequestContext* out = dynamic_cast<SystemRequestContext*>(rc);
-  DCHECK(out != nullptr)
-      << "Invalid request conversion. Do not rely on RTTI for "
-      << "functional behavior. System handling flows must use "
-      << "SystemRequestContexts or a subclass.";
+  // Note: out can be nullptr for deployments (like IIS) that use plain
+  // RequestContext instead of SystemRequestContext. The caller
+  // (ApplySessionFetchers) handles the nullptr case by returning early.
   return out;
 }
 

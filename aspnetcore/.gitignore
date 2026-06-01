@@ -1,0 +1,14 @@
+# Build outputs
+bin/
+obj/
+
+# NuGet packages
+*.nupkg
+
+# IDE
+.vs/
+*.user
+*.suo
+
+# Test binary (copied for manual testing)
+envoy_pagespeed

@@ -24,6 +24,7 @@ pagespeed_cc_test_library(
         ":mock_iis",
         "//net/instaweb/rewriter:rewriter",
         "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/kernel/http:http",
         "//pagespeed/kernel/thread:thread",
         "//pagespeed/kernel/util:util",
         "//test/pagespeed/kernel/base:kernel_test_util",
@@ -173,5 +174,68 @@ pagespeed_cc_test(
         "//net/instaweb/rewriter:rewriter",
         "//pagespeed/kernel/base:pagespeed_base",
         "//pagespeed/kernel/http:http",
+    ],
+)
+
+# Tests for Phase 1 critical fixes
+# These tests are platform-independent and can run on Linux.
+
+# Dechunker - HTTP chunked transfer encoding decoder
+# Platform-independent test
+pagespeed_cc_test(
+    name = "iis_dechunker_test",
+    srcs = ["iis_dechunker_test.cc"],
+    deps = [
+        "//pagespeed/iis:iis_dechunker",
+    ],
+)
+
+# ContentDecoder - gzip/deflate decompression
+# Platform-independent test (uses zlib)
+pagespeed_cc_test(
+    name = "iis_content_decoder_test",
+    srcs = ["iis_content_decoder_test.cc"],
+    deps = [
+        "//pagespeed/iis:iis_content_decoder",
+    ],
+)
+
+# IisStreamingFetch - Streaming AsyncFetch with HTTP_DATA_CHUNK support
+# Platform-independent test (mock IIS types used on Linux)
+pagespeed_cc_test(
+    name = "iis_streaming_fetch_test",
+    srcs = ["iis_streaming_fetch_test.cc"],
+    deps = [
+        ":mock_iis",
+        "//pagespeed/iis:iis_streaming_fetch",
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/kernel/util:util",
+        "//pagespeed/opt/http:http",
+    ],
+)
+
+# FlushNotification - Custom IIS notification for flush events
+# Platform-independent test (uses mock notification class on Linux)
+pagespeed_cc_test(
+    name = "iis_flush_notification_test",
+    srcs = ["iis_flush_notification_test.cc"],
+    deps = [
+        "//pagespeed/iis:iis_streaming_fetch",  # includes iis_flush_notification.h
+    ],
+)
+
+# HTML flushing end-to-end integration test
+# Combines IisStreamingFetch with mock IIS infrastructure to verify
+# the complete HTML flushing flow works correctly.
+# Platform-independent test (mock IIS types used on Linux)
+pagespeed_cc_test(
+    name = "iis_html_flushing_integration_test",
+    srcs = ["iis_html_flushing_integration_test.cc"],
+    deps = [
+        ":mock_iis",
+        "//pagespeed/iis:iis_streaming_fetch",
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/kernel/util:util",
+        "//pagespeed/opt/http:http",
     ],
 )

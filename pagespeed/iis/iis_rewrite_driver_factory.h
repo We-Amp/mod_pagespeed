@@ -93,6 +93,24 @@ class IisRewriteDriverFactory : public SystemRewriteDriverFactory {
   // Override to return SystemRewriteOptions (required for SystemServerContext)
   RewriteOptions* NewRewriteOptions() override;
 
+  // Override DefaultLockManager to provide a ThreadSafeLockManager for IIS.
+  // IIS is single-process multi-threaded (like Envoy), so ThreadSafeLockManager
+  // provides appropriate in-process thread coordination.
+  NamedLockManager* DefaultLockManager() override;
+
+  // Override DefaultAsyncUrlFetcher to provide a CurlUrlAsyncFetcher for IIS.
+  UrlAsyncFetcher* DefaultAsyncUrlFetcher() override;
+
+  // Override DefaultNonceGenerator to use Windows-compatible random generation.
+  // SystemRewriteDriverFactory::DefaultNonceGenerator() tries to open /dev/urandom
+  // which doesn't exist on Windows.
+  NonceGenerator* DefaultNonceGenerator() override;
+
+  // Override SetupCaches to initialize ProxyFetchFactory after cache setup.
+  // This follows the Apache pattern where ProxyFetchFactory is created during
+  // cache initialization.
+  void SetupCaches(ServerContext* server_context) override;
+
  private:
   std::unique_ptr<GoogleMessageHandler> message_handler_;
   GoogleString hostname_;

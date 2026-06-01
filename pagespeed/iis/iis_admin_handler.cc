@@ -80,6 +80,23 @@ const char* GetReasonPhrase(int status_code) {
     default: return "Unknown";
   }
 }
+
+// Constant-time comparison to prevent timing attacks on token validation.
+// Standard string comparison leaks information about which character differs
+// based on timing. This implementation always compares all bytes.
+bool ConstantTimeCompare(const GoogleString& a, const GoogleString& b) {
+  if (a.size() != b.size()) {
+    return false;
+  }
+  // Use volatile to prevent compiler optimizations that could introduce
+  // timing variations based on the data being compared.
+  volatile unsigned char result = 0;
+  for (size_t i = 0; i < a.size(); ++i) {
+    result |= static_cast<unsigned char>(a[i]) ^
+              static_cast<unsigned char>(b[i]);
+  }
+  return result == 0;
+}
 }  // namespace
 
 bool IisAdminHandler::HandleRequest(IHttpContext* context,
