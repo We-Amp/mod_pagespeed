@@ -39,7 +39,7 @@ IPHONE_USER_AGENT = (
 
 
 class TestInlinePreviewImagesOptimize:
-    """Tests for inline_preview_images in optimize mode.
+    r"""Tests for inline_preview_images in optimize mode.
 
     Bash original::
 

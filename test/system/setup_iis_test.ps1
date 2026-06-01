@@ -184,6 +184,7 @@ function New-IISExpressConfig {
                 adminPath="/pagespeed_admin">
                 <filters enabledFilters="collapse_whitespace,combine_css,combine_javascript,extend_cache,inline_css,inline_javascript,rewrite_css,rewrite_images,rewrite_javascript" />
                 <images recompressQuality="85" webpQuality="80" jpegQuality="85" progressiveJpeg="true" />
+                <javascript libraries="43 1o978_K0_LNE5_ystNklf http://www.modpagespeed.com/rewrite_javascript.js" />
                 <cache lruCacheSizeBytes="67108864" httpCacheCompressionLevel="9" />
             </settings>
         </pagespeed>
@@ -298,6 +299,18 @@ function Start-IISExpressServer {
 
     Write-Status "Starting IIS Express on port $Port..."
 
+    # Detect Session 0 (Windows services) -- IIS Express does not work in Session 0
+    # because it requires an interactive user session for its networking stack.
+    $sessionId = [System.Diagnostics.Process]::GetCurrentProcess().SessionId
+    if ($sessionId -eq 0) {
+        Write-Status "WARNING: Running in Session 0 (service context). IIS Express may not work." "Yellow"
+        Write-Status "Consider using Full IIS (setup_iis_full.ps1) instead, which runs as a Windows Service." "Yellow"
+    }
+
+    # Log file for IIS Express stdout/stderr (avoids buffer deadlock)
+    $stdoutLog = "$LogDir\iisexpress_stdout.log"
+    $stderrLog = "$LogDir\iisexpress_stderr.log"
+
     # Start IIS Express
     $startInfo = New-Object System.Diagnostics.ProcessStartInfo
     $startInfo.FileName = $iisExpress
@@ -310,7 +323,23 @@ function Start-IISExpressServer {
     $process = [System.Diagnostics.Process]::Start($startInfo)
     $process.Id | Set-Content $PidFile
 
-    Write-Status "IIS Express started with PID: $($process.Id)" "Green"
+    # Start async readers to prevent buffer deadlock (classic .NET Process antipattern).
+    # When stdout/stderr buffers fill and nobody reads them, the child process blocks and exits.
+    $process.BeginOutputReadLine()
+    $process.BeginErrorReadLine()
+
+    # Capture output to log files for diagnostics.
+    # Use script-scoped variables so the event handler script blocks can access them.
+    $script:iisOutputLines = [System.Collections.Concurrent.ConcurrentBag[string]]::new()
+    $script:iisErrorLines = [System.Collections.Concurrent.ConcurrentBag[string]]::new()
+    Register-ObjectEvent -InputObject $process -EventName OutputDataReceived -Action {
+        if ($EventArgs.Data) { $script:iisOutputLines.Add($EventArgs.Data) }
+    } | Out-Null
+    Register-ObjectEvent -InputObject $process -EventName ErrorDataReceived -Action {
+        if ($EventArgs.Data) { $script:iisErrorLines.Add($EventArgs.Data) }
+    } | Out-Null
+
+    Write-Status "IIS Express started with PID: $($process.Id) (Session: $sessionId)" "Green"
 
     # Wait for server to be ready
     Write-Status "Waiting for server to be ready..."
@@ -332,8 +361,20 @@ function Start-IISExpressServer {
 
         # Check if process is still running
         if ($process.HasExited) {
-            Write-Status "IIS Express exited unexpectedly!" "Red"
+            Write-Status "IIS Express exited unexpectedly! (exit code: $($process.ExitCode))" "Red"
             Write-Status "Check logs at: $LogDir" "Yellow"
+            # Dump captured stdout/stderr for diagnostics
+            Start-Sleep -Milliseconds 500  # Allow async readers to flush
+            if ($script:iisOutputLines.Count -gt 0) {
+                Write-Status "=== IIS Express stdout ===" "Yellow"
+                $script:iisOutputLines | ForEach-Object { Write-Status "  $_" "Gray" }
+                ($script:iisOutputLines -join "`n") | Set-Content $stdoutLog
+            }
+            if ($script:iisErrorLines.Count -gt 0) {
+                Write-Status "=== IIS Express stderr ===" "Yellow"
+                $script:iisErrorLines | ForEach-Object { Write-Status "  $_" "Gray" }
+                ($script:iisErrorLines -join "`n") | Set-Content $stderrLog
+            }
             exit 1
         }
     }
@@ -358,12 +399,13 @@ function Stop-IISExpressServer {
     Write-Status "Stopping IIS Express..."
 
     # Try to get process from PID file
+    # Note: Do NOT use $pid -- it is a read-only automatic variable in PowerShell.
     if (Test-Path $PidFile) {
-        $pid = Get-Content $PidFile
-        $process = Get-Process -Id $pid -ErrorAction SilentlyContinue
+        $savedPid = Get-Content $PidFile
+        $process = Get-Process -Id $savedPid -ErrorAction SilentlyContinue
         if ($process) {
             $process | Stop-Process -Force
-            Write-Status "Stopped IIS Express (PID: $pid)" "Green"
+            Write-Status "Stopped IIS Express (PID: $savedPid)" "Green"
         }
         Remove-Item $PidFile -Force
     }

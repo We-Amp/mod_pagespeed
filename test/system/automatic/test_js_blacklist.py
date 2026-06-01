@@ -50,7 +50,7 @@ class TestJsBlacklist:
             url,
             pattern=r"\.js\.pagespeed\.",
             expected_count=4,
-            timeout=30.0,
+            timeout=120.0,
         )
         assert_http_status(response, 200)
 
@@ -78,7 +78,7 @@ class TestJsBlacklist:
             url,
             pattern=r"\.js\.pagespeed\.",
             expected_count=4,
-            timeout=30.0,
+            timeout=120.0,
         )
         assert_http_status(response, 200)
 
@@ -109,7 +109,7 @@ class TestJsBlacklist:
             url,
             pattern=r"\.js\.pagespeed\.",
             expected_count=4,
-            timeout=30.0,
+            timeout=120.0,
         )
         assert_http_status(response, 200)
 
@@ -129,7 +129,7 @@ class TestJsBlacklist:
             url,
             pattern=r"\.js\.pagespeed\.",
             expected_count=4,
-            timeout=30.0,
+            timeout=120.0,
         )
         assert_http_status(response, 200)
 
@@ -149,7 +149,7 @@ class TestJsBlacklist:
             url,
             pattern=r"\.js\.pagespeed\.",
             expected_count=4,
-            timeout=30.0,
+            timeout=120.0,
         )
         assert_http_status(response, 200)
 

@@ -88,7 +88,7 @@ class TestLazyloadImages:
 
 
 class TestLazyloadOptimizeMode:
-    """Tests for lazyload_images in optimize mode.
+    r"""Tests for lazyload_images in optimize mode.
 
     Bash original::
 
@@ -183,7 +183,7 @@ class TestLazyloadBlankGif:
 
 
 class TestLazyloadDebugMode:
-    """Tests for lazyload_images in debug mode.
+    r"""Tests for lazyload_images in debug mode.
 
     Bash original::
 

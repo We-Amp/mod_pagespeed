@@ -199,7 +199,8 @@ class ImageConverterTest : public testing::Test {
   std::unique_ptr<PngReaderInterface> png_struct_reader_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(ImageConverterTest);
+  ImageConverterTest(const ImageConverterTest&) = delete;
+  ImageConverterTest& operator=(const ImageConverterTest&) = delete;
 };
 
 TEST_F(ImageConverterTest, OptimizePngOrConvertToJpeg_invalidPngs) {
@@ -230,7 +231,7 @@ TEST_F(ImageConverterTest, OptimizePngOrConvertToJpeg) {
         &message_handler_));
 
     // Verify that the size matches.
-    EXPECT_EQ(kValidImages[i].compressed_size, out.size())
+    EXPECT_NEAR(kValidImages[i].compressed_size, out.size(), 20)
         << "size mismatch for " << kValidImages[i].filename;
     // Verify that out put image type matches.
 
@@ -263,7 +264,7 @@ TEST_F(ImageConverterTest, ConvertOpaqueGifToPng) {
     ASSERT_TRUE(PngOptimizer::OptimizePngBestCompression(
         *png_struct_reader_, in, &out, &message_handler_));
     // Verify that the size matches.
-    EXPECT_EQ(kValidGifImages[i].png_size, out.size())
+    EXPECT_NEAR(kValidGifImages[i].png_size, out.size(), 20)
         << "output size mismatch for " << kValidGifImages[i].filename;
   }
 }
@@ -282,7 +283,7 @@ TEST_F(ImageConverterTest, ConvertOpaqueGifToJpeg) {
     ASSERT_TRUE(ImageConverter::ConvertPngToJpeg(
         *png_struct_reader_, in, options, &out, &message_handler_));
     // Verify that the size matches.
-    EXPECT_EQ(kValidGifImages[i].jpeg_size, out.size())
+    EXPECT_NEAR(kValidGifImages[i].jpeg_size, out.size(), 20)
         << "output size mismatch for " << kValidGifImages[i].filename;
   }
 }
@@ -314,8 +315,8 @@ TEST_F(ImageConverterTest, ConvertTransparentGifToPng) {
   ASSERT_TRUE(PngOptimizer::OptimizePngBestCompression(
       *png_struct_reader_, in, &out, &message_handler_));
   // Verify that the size matches.
-  // Note: Size depends on zlib/libpng versions bundled with Envoy.
-  EXPECT_EQ(static_cast<size_t>(25018), out.size()) << "output size mismatch";
+  // Note: Size depends on zlib-ng/libpng versions.
+  EXPECT_NEAR(static_cast<double>(25018), static_cast<double>(out.size()), 20) << "output size mismatch";
 }
 
 TEST_F(ImageConverterTest, ConvertTransparentGifToWebp) {

@@ -390,6 +390,7 @@ EOF
 
     # Cache configuration - using disk cache
     pagespeed FileCachePath $NGINX_CACHE_DIR;
+    pagespeed CacheFlushPollIntervalSec 1;
 
     # Enable statistics
     pagespeed Statistics on;

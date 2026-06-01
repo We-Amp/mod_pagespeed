@@ -75,39 +75,37 @@ class TestCssSpriteImagesExternal:
     def test_external_css_sprite_images(
         self, client: PageSpeedClient, example_root: str
     ):
-        """External CSS should contain sprite references."""
+        """External CSS should contain sprite references.
+
+        The original bash test uses ``fetch_until -save -recursive`` which
+        re-downloads the HTML **and** linked resources on every retry.  This
+        is important because the ``.pagespeed.cf.<hash>`` URL contains a
+        content hash — once sprite optimization completes the hash changes,
+        so we must re-extract the CSS URL from the HTML on each attempt.
+        """
         url = f"{example_root}/sprite_images.html?PageSpeedFilters=rewrite_css,sprite_images"
 
-        # First wait for CSS to be rewritten
-        response = client.fetch_until_count(
-            url,
-            pattern=r"css\.pagespeed\.cf",
-            expected_count=1,
-            timeout=60.0,
-        )
+        def html_has_sprited_css(response):
+            """Check if the HTML links to a CSS file that contains sprites."""
+            match = re.search(
+                r'href="([^"]*\.pagespeed\.cf\.[^"]*\.css)"', response.text
+            )
+            if not match:
+                return False
+            css_url = match.group(1)
+            if css_url.startswith(("http://", "https://")):
+                from urllib.parse import urlparse
+                css_url = urlparse(css_url).path
+            elif not css_url.startswith("/"):
+                css_url = f"{example_root}/{css_url}"
+            css_response = client.get(css_url)
+            return (
+                css_response.status == 200
+                and re.search(r"ic\.pagespeed\.is", css_response.text) is not None
+            )
+
+        response = client.fetch_until(url, html_has_sprited_css, timeout=120.0)
         assert_http_status(response, 200)
-
-        # Extract the CSS URL
-        match = re.search(r'href="([^"]*\.pagespeed\.cf\.[^"]*\.css)"', response.text)
-        if not match:
-            pytest.skip("Could not find rewritten CSS URL")
-
-        css_url = match.group(1)
-        # Handle both absolute URLs (http://...) and relative URLs
-        if css_url.startswith("http://") or css_url.startswith("https://"):
-            from urllib.parse import urlparse
-            css_url = urlparse(css_url).path
-        elif not css_url.startswith("/"):
-            css_url = f"{example_root}/{css_url}"
-
-        # The sprite may take time to generate. Retry fetching the CSS
-        # until we see the sprite reference.
-        css_response = client.fetch_until_contains(
-            css_url,
-            pattern=r"ic\.pagespeed\.is",
-            timeout=60.0,
-        )
-        assert_http_status(css_response, 200)
 
 
 if __name__ == "__main__":

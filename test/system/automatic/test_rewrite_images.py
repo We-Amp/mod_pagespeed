@@ -238,8 +238,11 @@ class TestRewrittenImageHeaders:
         if not img_url.startswith("/") and not img_url.startswith("http"):
             img_url = f"{example_root}/{img_url}"
 
-        img_response = client.get(img_url)
-        assert_http_status(img_response, 200)
+        img_response = client.fetch_until(
+            img_url,
+            condition=lambda r: r.is_ok() and r.header("ETag") != "",
+            timeout=60.0,
+        )
 
         etag = img_response.header("ETag")
         assert etag, "Rewritten images should have ETag header"

@@ -121,10 +121,19 @@ http {
     pagespeed StatisticsPath /pagespeed_statistics;
     pagespeed GlobalStatisticsPath /pagespeed_global_statistics;
     pagespeed FileCachePath $CACHE_DIR;
+    pagespeed CacheFlushPollIntervalSec 1;
     pagespeed Statistics on;
     pagespeed StatisticsLogging on;
     pagespeed LogDir $LOG_DIR;
     pagespeed MessageBufferSize 100000;
+
+    # Disable Critical Images Beacon so that lazyload_images,
+    # inline_preview_images, and other beacon-dependent filters work
+    # without requiring real browser beacon data (matches CI config).
+    pagespeed CriticalImagesBeaconEnabled false;
+
+    # Configure canonicalize_javascript_libraries filter (matches CI config)
+    pagespeed Library 43 1o978_K0_LNE5_ystNklf http://www.modpagespeed.com/rewrite_javascript.js;
 
     server {
         listen $NGINX_PORT;
@@ -137,6 +146,13 @@ http {
 
         location ~ "\.pagespeed\.([a-z]\.)?[a-z]{2}\.[^.]{10}\.[^.]+" {
             add_header "" "";
+            # Disable nginx gzip for .pagespeed. resources (matches CI config)
+            gzip off;
+        }
+
+        # Serve files in no_cache/ with Cache-Control: no-cache (matches CI config)
+        location ~ /no_cache/ {
+            add_header Cache-Control "no-cache" always;
         }
         location ~ "^/pagespeed_static/" { }
         location ~ "^/ngx_pagespeed_beacon\$" { }

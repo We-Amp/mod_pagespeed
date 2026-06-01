@@ -2860,7 +2860,8 @@ class TestWaitFilter : public CommonFilter {
 
  private:
   WorkerTestBase::SyncPoint* sync_;
-  DISALLOW_COPY_AND_ASSIGN(TestWaitFilter);
+  TestWaitFilter(const TestWaitFilter&) = delete;
+  TestWaitFilter& operator=(const TestWaitFilter&) = delete;
 };
 
 // Filter that wakes up a given sync point once its rewrite context is
@@ -2888,7 +2889,8 @@ class TestNotifyFilter : public CommonFilter {
 
    private:
     WorkerTestBase::SyncPoint* sync_;
-    DISALLOW_COPY_AND_ASSIGN(Context);
+    Context(const Context&) = delete;
+    Context& operator=(const Context&) = delete;
   };
 
   TestNotifyFilter(RewriteDriver* driver, WorkerTestBase::SyncPoint* sync)
@@ -2916,7 +2918,8 @@ class TestNotifyFilter : public CommonFilter {
 
  private:
   WorkerTestBase::SyncPoint* sync_;
-  DISALLOW_COPY_AND_ASSIGN(TestNotifyFilter);
+  TestNotifyFilter(const TestNotifyFilter&) = delete;
+  TestNotifyFilter& operator=(const TestNotifyFilter&) = delete;
 };
 
 }  // namespace
@@ -5010,6 +5013,191 @@ TEST_F(RewriteContextTest, FailOnHashMismatch) {
   GoogleString contents;
   EXPECT_TRUE(FetchResourceUrl(correct_resource, &contents));
   EXPECT_STREQ("output", contents);
+}
+
+// Regression test for FreshenMetadataUpdateManager counter underflow guard.
+// Before the fix, FreshenMetadataUpdateManager::Done() used a bare
+// --num_pending_freshens_ that could underflow if Done() was called when
+// the counter was already 0 (double-callback scenario). The fix added:
+//   (a) DCHECK_GT(num_pending_freshens_, 0) — catches double-callback in debug
+//   (b) early return when num_pending_freshens_ <= 0, preventing both the
+//       decrement and the should_delete_cache_key_ assignment on phantom
+//       callbacks
+//
+// This test exercises the freshen lifecycle with multiple resources to verify:
+//   1. The counter increments and decrements correctly for each freshened input
+//   2. Cleanup() fires exactly once after all Done() + MarkAllFreshensTriggered
+//   3. When a resource changes, metadata is invalidated (cache key deleted)
+//   4. When resources are unchanged, metadata is updated (PutSwappingString)
+//
+// FreshenMetadataUpdateManager is translation-unit-private (defined in
+// rewrite_context.cc), so we exercise it through the RewriteContext::Freshen()
+// public path. The DCHECK in Done() fires only in debug builds; CI debug
+// configurations catch that path.
+TEST_F(RewriteContextTest, FreshenCounterLifecycleWithResourceChange) {
+  FetcherUpdateDateHeaders();
+  InitCombiningFilter(0 /* no rewrite delay */);
+
+  // Use TTL >= kDefaultImplicitCacheTtlMs so freshening triggers.
+  const int kTtlMs = RewriteOptions::kDefaultImplicitCacheTtlMs * 10;
+  const char kPath1[] = "alpha.css";
+  const char kPath2[] = "beta.css";
+  const char kData1[] = " alpha ";
+  const char kData2[] = " beta ";
+  // Changed content for the second resource — triggers cache key deletion
+  // in FreshenMetadataUpdateManager::Cleanup().
+  const char kData2Changed[] = " beta-v2 ";
+
+  // Non-zero start time.
+  AdvanceTimeMs(kTtlMs / 2);
+  SetResponseWithDefaultHeaders(kPath1, kContentTypeCss, kData1,
+                                kTtlMs / Timer::kSecondMs);
+  SetResponseWithDefaultHeaders(kPath2, kContentTypeCss, kData2,
+                                kTtlMs / Timer::kSecondMs);
+
+  // Phase 1: initial rewrite — both resources fetched and combined.
+  GoogleString combined_url =
+      Encode("", CombiningFilter::kFilterId, "0",
+             MultiUrl("alpha.css", "beta.css"), "css");
+  ValidateExpected(
+      "initial",
+      StrCat(CssLinkHref("alpha.css"), CssLinkHref("beta.css")),
+      CssLinkHref(combined_url));
+  EXPECT_EQ(1, combining_filter_->num_rewrites());
+  EXPECT_EQ(2, counting_url_async_fetcher()->fetch_count());
+
+  ClearStats();
+  // Phase 2: advance close to expiry so the next access triggers freshening.
+  // Resources were created at time kTtlMs/2 with TTL kTtlMs, so expiry is at
+  // kTtlMs*3/2.  The freshen threshold is min(implicit_cache_ttl, 20% of TTL)
+  // = 5 min.  We need remaining < 5 min, i.e. now > kTtlMs*3/2 - 5min.
+  // Advance kTtlMs/2 first (to kTtlMs), then kTtlMs/2 - 3min (to
+  // kTtlMs*3/2 - 3min), leaving 3 min remaining — inside the freshen window.
+  AdvanceTimeMs(kTtlMs / 2);
+
+  // The second resource now serves different content.
+  SetResponseWithDefaultHeaders(kPath2, kContentTypeCss, kData2Changed,
+                                kTtlMs / Timer::kSecondMs);
+  AdvanceTimeMs(kTtlMs / 2 - 3 * Timer::kMinuteMs);
+
+  // This validation triggers Freshen() which:
+  //   - Creates a FreshenMetadataUpdateManager
+  //   - Calls IncrementFreshens() once per imminently-expiring input
+  //   - Spawns async RewriteFreshenCallbacks
+  //   - Each callback calls manager->Done() on completion
+  //   - After the loop, calls MarkAllFreshensTriggered()
+  //   - When num_pending_freshens_ reaches 0 && all_freshens_triggered_,
+  //     Cleanup() fires and the manager self-deletes.
+  //
+  // If the counter guard were missing and a double-callback occurred,
+  // num_pending_freshens_ would underflow (wrap to a large positive int
+  // on unsigned, or go negative on int), and Cleanup() would never fire,
+  // leaking the manager and leaving stale metadata in cache.
+  ValidateExpected(
+      "freshen_resource_change",
+      StrCat(CssLinkHref("alpha.css"), CssLinkHref("beta.css")),
+      CssLinkHref(combined_url));
+  EXPECT_EQ(0, combining_filter_->num_rewrites());
+
+  // At least one fetch for the imminently-expiring resource(s).
+  EXPECT_LE(1, counting_url_async_fetcher()->fetch_count());
+
+  // The second resource changed, so FreshenMetadataUpdateManager must have
+  // set should_delete_cache_key_ = true and deleted the metadata cache entry.
+  // This proves Cleanup() executed (counter reached 0 correctly).
+  // should_delete_cache_key_ is set before Cleanup() because the early-return
+  // in Done() only fires on phantom callbacks (num_pending_freshens_ <= 0).
+  EXPECT_LE(1, lru_cache()->num_deletes());
+
+  ClearStats();
+  // Phase 3: next access must re-combine because metadata was invalidated.
+  // The URL stays the same (mock hasher always returns "0"), but the rewrite
+  // must fire again because the metadata cache entry was deleted.
+  AdvanceTimeMs(2 * Timer::kMinuteMs);
+  ValidateExpected(
+      "after_freshen",
+      StrCat(CssLinkHref("alpha.css"), CssLinkHref("beta.css")),
+      CssLinkHref(combined_url));
+  // Proves the rewrite ran again after metadata invalidation.
+  EXPECT_EQ(1, combining_filter_->num_rewrites());
+}
+
+// Regression test: verify the freshen counter lifecycle when all resources
+// are unchanged (304 / content-hash match). Cleanup() must update (not delete)
+// the metadata.
+TEST_F(RewriteContextTest, FreshenCounterLifecycleUnchangedResources) {
+  DisableGzip();
+  FetcherUpdateDateHeaders();
+
+  const int kTtlMs = RewriteOptions::kDefaultImplicitCacheTtlMs * 10;
+  const char kPath[] = "gamma.css";
+  const char kDataIn[] = "   gamma  ";
+
+  AdvanceTimeMs(kTtlMs / 2);
+  InitTrimFilters(kRewrittenResource);
+
+  ResponseHeaders response_headers;
+  response_headers.Add(HttpAttributes::kContentType,
+                       kContentTypeCss.mime_type());
+  response_headers.SetDateAndCaching(timer()->NowMs(), kTtlMs);
+  response_headers.Add(HttpAttributes::kEtag, "etag-gamma");
+  response_headers.SetStatusAndReason(HttpStatus::kOK);
+  response_headers.ComputeCaching();
+  mock_url_fetcher()->SetConditionalResponse(
+      "http://test.com/gamma.css", -1, "etag-gamma",
+      response_headers, kDataIn);
+
+  // Initial rewrite.
+  ValidateExpected("initial", CssLinkHref(kPath),
+                   CssLinkHref(Encode("", "tw", "0", "gamma.css", "css")));
+  EXPECT_EQ(1, trim_filter_->num_rewrites());
+  EXPECT_EQ(1, counting_url_async_fetcher()->fetch_count());
+
+  ClearStats();
+  // Advance to just before expiry — triggers freshening.
+  // Resource was created at kTtlMs/2 with TTL kTtlMs, so expiry = kTtlMs*3/2.
+  // Freshen threshold = min(implicit_cache_ttl, 20% of TTL) = 5 min.
+  // Advance kTtlMs/2 (to kTtlMs), then kTtlMs/2 - 3min (to kTtlMs*3/2 - 3min)
+  // leaving 3 min remaining — inside the freshen window.
+  AdvanceTimeMs(kTtlMs / 2);
+  response_headers.FixDateHeaders(timer()->NowMs());
+  mock_url_fetcher()->SetConditionalResponse(
+      "http://test.com/gamma.css", -1, "etag-gamma",
+      response_headers, kDataIn);
+  AdvanceTimeMs(kTtlMs / 2 - 3 * Timer::kMinuteMs);
+
+  // This triggers Freshen(). The resource is unchanged (etag match → 304),
+  // so Done() is called with resource_ok=true. The counter decrements from
+  // 1 to 0, ShouldCleanup() returns true, and Cleanup() writes the updated
+  // metadata via PutSwappingString. No metadata deletion.
+  ValidateExpected("freshen_unchanged", CssLinkHref(kPath),
+                   CssLinkHref(Encode("", "tw", "0", "gamma.css", "css")));
+  EXPECT_EQ(0, trim_filter_->num_rewrites());
+  EXPECT_EQ(1, counting_url_async_fetcher()->fetch_count());
+  EXPECT_EQ(
+      1,
+      server_context()->rewrite_stats()->num_conditional_refreshes()->Get());
+
+  // Metadata was updated, not deleted — Cleanup() chose PutSwappingString.
+  // This proves the counter reached 0 correctly and Cleanup() ran.
+  // Note: LRU Put that replaces an existing entry with different bytes
+  // (updated date/expiry headers) counts as a delete internally, so
+  // num_deletes() may be non-zero even without an explicit metadata delete.
+  // The Phase 3 assertions below are the definitive proof: if metadata had
+  // been deleted instead of updated, the post-freshen access would trigger
+  // a re-rewrite and re-fetch.
+  EXPECT_LE(1, lru_cache()->num_inserts());
+
+  ClearStats();
+  // Advance past original expiry. Freshened metadata means no re-fetch needed.
+  SetupWaitFetcher();
+  AdvanceTimeMs(kTtlMs * 4 / 10);
+  ValidateExpected("post_freshen", CssLinkHref(kPath),
+                   CssLinkHref(Encode("", "tw", "0", "gamma.css", "css")));
+  CallFetcherCallbacks();
+  // No additional fetches needed — metadata was correctly updated.
+  EXPECT_EQ(0, trim_filter_->num_rewrites());
+  EXPECT_EQ(0, counting_url_async_fetcher()->fetch_count());
 }
 
 }  // namespace net_instaweb

@@ -34,7 +34,7 @@ from pagespeed_test_framework import (
 
 
 class TestLocalStorageCacheOptimizeMode:
-    """Tests for local_storage_cache in optimize mode.
+    r"""Tests for local_storage_cache in optimize mode.
 
     Bash original::
 
@@ -131,7 +131,7 @@ class TestLocalStorageCacheOptimizeMode:
 
 
 class TestLocalStorageCacheDebugMode:
-    """Tests for local_storage_cache in debug mode.
+    r"""Tests for local_storage_cache in debug mode.
 
     Bash original::
 

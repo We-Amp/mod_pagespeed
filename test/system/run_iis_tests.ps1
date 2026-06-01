@@ -17,12 +17,16 @@
 
 <#
 .SYNOPSIS
-    Run PageSpeed integration tests against IIS Express.
+    Run PageSpeed integration tests against IIS Express or Full IIS.
 
 .DESCRIPTION
-    This script builds the PageSpeed IIS module, sets up IIS Express,
+    This script builds the PageSpeed IIS module, sets up IIS (Express or Full),
     and runs the Python integration test suite. It mirrors the functionality
     of run_system_tests.sh for Apache and run_envoy_tests.sh for Envoy.
+
+    By default it uses IIS Express, which works for interactive sessions.
+    Use -UseFullIIS for CI/service contexts (Session 0) where IIS Express
+    cannot run because it requires an interactive desktop session.
 
 .PARAMETER TestFilter
     pytest filter expression (e.g., "sanity" or "test_extend_cache")
@@ -34,19 +38,25 @@
     Skip building the module, just run tests
 
 .PARAMETER KeepRunning
-    Keep IIS Express running after tests complete
+    Keep IIS running after tests complete
 
 .PARAMETER Verbose
     Show verbose test output
 
 .PARAMETER Port
-    Port for IIS Express (default: 8080)
+    Port for IIS to listen on (default: 8080)
+
+.PARAMETER UseFullIIS
+    Use Full IIS (Windows Service) instead of IIS Express.
+    Required when running from a Windows service (Session 0), e.g. GitHub Actions
+    self-hosted runners installed as services. IIS Express cannot start in Session 0.
 
 .EXAMPLE
     .\run_iis_tests.ps1
     .\run_iis_tests.ps1 -TestFilter "sanity"
     .\run_iis_tests.ps1 -BuildOnly
     .\run_iis_tests.ps1 -SkipBuild -KeepRunning
+    .\run_iis_tests.ps1 -SkipBuild -UseFullIIS -Verbose   # CI mode
 #>
 
 param(
@@ -55,6 +65,7 @@ param(
     [switch]$SkipBuild,
     [switch]$KeepRunning,
     [switch]$Verbose,
+    [switch]$UseFullIIS,
     [int]$Port = 8080
 )
 
@@ -115,17 +126,27 @@ function Test-Prerequisites {
         Write-Status "Bazel: $($bazel.Source)" "Gray"
     }
 
-    # Check for IIS Express
-    $iisExpress = "${env:ProgramFiles}\IIS Express\iisexpress.exe"
-    if (-not (Test-Path $iisExpress)) {
-        $iisExpress = "${env:ProgramFiles(x86)}\IIS Express\iisexpress.exe"
+    if ($UseFullIIS) {
+        # Check for Full IIS (W3SVC service)
+        $w3svc = Get-Service -Name W3SVC -ErrorAction SilentlyContinue
+        if (-not $w3svc) {
+            Write-Status "Full IIS (W3SVC) not found! Install the Web-Server Windows feature." "Red"
+            exit 1
+        }
+        Write-Status "Full IIS: W3SVC service present (Status: $($w3svc.Status))" "Gray"
+    } else {
+        # Check for IIS Express
+        $iisExpress = "${env:ProgramFiles}\IIS Express\iisexpress.exe"
+        if (-not (Test-Path $iisExpress)) {
+            $iisExpress = "${env:ProgramFiles(x86)}\IIS Express\iisexpress.exe"
+        }
+        if (-not (Test-Path $iisExpress)) {
+            Write-Status "IIS Express not found!" "Red"
+            Write-Status "Download from: https://www.microsoft.com/en-us/download/details.aspx?id=48264" "Yellow"
+            exit 1
+        }
+        Write-Status "IIS Express: $iisExpress" "Gray"
     }
-    if (-not (Test-Path $iisExpress)) {
-        Write-Status "IIS Express not found!" "Red"
-        Write-Status "Download from: https://www.microsoft.com/en-us/download/details.aspx?id=48264" "Yellow"
-        exit 1
-    }
-    Write-Status "IIS Express: $iisExpress" "Gray"
 }
 
 function Build-PageSpeedModule {
@@ -140,7 +161,8 @@ function Build-PageSpeedModule {
             "build",
             "--config=windows",
             "--config=clang-cl",
-            "//pagespeed/iis:pagespeed_iis.dll"
+            "//pagespeed/iis:pagespeed_iis.dll",
+            "//pagespeed/kernel/license_v2:generate_license_token"
         )
 
         & bazel @buildArgs
@@ -154,15 +176,36 @@ function Build-PageSpeedModule {
 
         $dllPath = "$SourceRoot\bazel-bin\pagespeed\iis\pagespeed_iis.dll"
         Write-Status "Module ready at: $dllPath" "Gray"
+
+        # Generate test license token and pre-seed the license file.
+        # Write to both the default cache path parent (C:\PageSpeed) and the
+        # configured fileCachePath parent (C:\) to cover both code paths.
+        $tokenBin = "$SourceRoot\bazel-bin\pagespeed\kernel\license_v2\generate_license_token.exe"
+        if (Test-Path $tokenBin) {
+            $keyPath = if ($env:PAGESPEED_SIGNING_KEY) { $env:PAGESPEED_SIGNING_KEY } else { "$env:USERPROFILE\.weamp\license-signing-key" }
+            if (-not (Test-Path $keyPath)) {
+                Write-Warning "No signing key at $keyPath - set LICENSE_TOKEN env var instead"
+            } else {
+                $token = & $tokenBin --key $keyPath --sub "test@system-test.local" --exp-duration 3600
+                @("C:\PageSpeed\pagespeed.license", "C:\pagespeed.license") | ForEach-Object {
+                    Set-Content -Path $_ -Value $token -NoNewline
+                    Write-Status "Test license written to $_" "Green"
+                }
+            }
+        }
     } finally {
         Pop-Location
     }
 }
 
 function Start-TestServer {
-    Write-Banner "Starting IIS Express Test Server"
-
-    & "$ScriptDir\setup_iis_test.ps1" -Action start -Port $Port -SourceRoot $SourceRoot
+    if ($UseFullIIS) {
+        Write-Banner "Setting up Full IIS Test Server"
+        & "$ScriptDir\setup_iis_full.ps1" -Action install -Port $Port -SourceRoot $SourceRoot
+    } else {
+        Write-Banner "Starting IIS Express Test Server"
+        & "$ScriptDir\setup_iis_test.ps1" -Action start -Port $Port -SourceRoot $SourceRoot
+    }
 
     if ($LASTEXITCODE -ne 0) {
         Write-Status "Failed to start test server!" "Red"
@@ -172,7 +215,11 @@ function Start-TestServer {
 
 function Stop-TestServer {
     Write-Status "Stopping test server..."
-    & "$ScriptDir\setup_iis_test.ps1" -Action stop -SourceRoot $SourceRoot
+    if ($UseFullIIS) {
+        & "$ScriptDir\setup_iis_full.ps1" -Action stop -SourceRoot $SourceRoot
+    } else {
+        & "$ScriptDir\setup_iis_test.ps1" -Action stop -SourceRoot $SourceRoot
+    }
 }
 
 function Run-Tests {
@@ -184,11 +231,17 @@ function Run-Tests {
     $env:PAGESPEED_TEST_ROOT = "/mod_pagespeed_test"
     $env:PAGESPEED_EXAMPLE_ROOT = "/mod_pagespeed_example"
     $env:PAGESPEED_REWRITTEN_ROOT = "/mod_pagespeed_example"
-    $env:PAGESPEED_CACHE_DIR = "$env:TEMP\pagespeed_iis_test\cache"
+    if ($UseFullIIS) {
+        $env:PAGESPEED_CACHE_DIR = "C:\pagespeed_cache"
+    } else {
+        $env:PAGESPEED_CACHE_DIR = "$env:TEMP\pagespeed_iis_test\cache"
+    }
     $env:PAGESPEED_STATS_ENABLED = "1"
     $env:PAGESPEED_SERVER_TYPE = "iis"
     $env:PAGESPEED_STATS_PATH = "/pagespeed_statistics"
     $env:PAGESPEED_ADMIN_PATH = "/pagespeed_admin"
+    # Force unbuffered output so CI runners see pytest progress in real-time
+    $env:PYTHONUNBUFFERED = "1"
 
     Write-Status "Test configuration:" "Cyan"
     Write-Status "  Host: $env:PAGESPEED_HOST" "Gray"
@@ -197,8 +250,9 @@ function Run-Tests {
     Write-Status "  Example Root: $env:PAGESPEED_EXAMPLE_ROOT" "Gray"
     Write-Status "  Cache Dir: $env:PAGESPEED_CACHE_DIR" "Gray"
 
-    # Build pytest arguments
+    # Build pytest arguments (-u forces unbuffered stdout/stderr for CI)
     $pytestArgs = @(
+        "-u",
         "-m", "pytest",
         "$ScriptDir\automatic",
         "-v",
@@ -228,7 +282,7 @@ function Run-Tests {
         $python = Get-Command python3 -ErrorAction SilentlyContinue
     }
 
-    & $python.Source @pytestArgs
+    & $python.Source @pytestArgs | Out-Host
     $testResult = $LASTEXITCODE
 
     return $testResult
@@ -236,7 +290,11 @@ function Run-Tests {
 
 # Main execution
 try {
-    Write-Banner "PageSpeed IIS Integration Tests"
+    if ($UseFullIIS) {
+        Write-Banner "PageSpeed IIS Integration Tests (Full IIS)"
+    } else {
+        Write-Banner "PageSpeed IIS Integration Tests (IIS Express)"
+    }
 
     Test-Prerequisites
 
@@ -267,6 +325,10 @@ try {
         Stop-TestServer
     } else {
         Write-Status "Keeping server running (--KeepRunning specified)" "Yellow"
-        Write-Status "Stop with: .\setup_iis_test.ps1 stop" "Yellow"
+        if ($UseFullIIS) {
+            Write-Status "Stop with: .\setup_iis_full.ps1 stop" "Yellow"
+        } else {
+            Write-Status "Stop with: .\setup_iis_test.ps1 stop" "Yellow"
+        }
     }
 }

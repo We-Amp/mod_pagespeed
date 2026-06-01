@@ -115,6 +115,12 @@ class FreshenMetadataUpdateManager {
     bool should_cleanup = false;
     {
       ScopedMutex lock(mutex_.get());
+      DCHECK_GT(num_pending_freshens_, 0)
+          << "Done() called with no pending freshens -- "
+             "possible double-callback or use-after-free";
+      if (num_pending_freshens_ <= 0) {
+        return;  // Phantom callback; DCHECK catches in debug builds.
+      }
       --num_pending_freshens_;
       if (!lock_failure && !resource_ok) {
         should_delete_cache_key_ = true;
@@ -189,7 +195,9 @@ class FreshenMetadataUpdateManager {
   bool all_freshens_triggered_;
   bool should_delete_cache_key_;
 
-  DISALLOW_COPY_AND_ASSIGN(FreshenMetadataUpdateManager);
+  FreshenMetadataUpdateManager(const FreshenMetadataUpdateManager&) = delete;
+  FreshenMetadataUpdateManager& operator=(const FreshenMetadataUpdateManager&) =
+      delete;
 };
 
 // Two callback classes for completed caches & fetches.  These gaskets
@@ -239,7 +247,7 @@ class RewriteContext::OutputCacheCallback : public CacheInterface::Callback {
     // used as we update cache_result_->cache_ok directly.
     CacheLookupResult candidate_cache_result;
     bool local_cache_ok =
-        TryDecodeCacheResult(state, value(), &candidate_cache_result);
+        TryDecodeCacheResult(state, value().Value(), &candidate_cache_result);
 
     // cache_ok determines whether or not a second level cache is looked up. If
     // this is a stale rewrite, ensure there is an additional look up in the
@@ -362,8 +370,7 @@ class RewriteContext::OutputCacheCallback : public CacheInterface::Callback {
   //
   // Will return false with result->can_revalidate = false if the cached result
   // is entirely unsalvageable.
-  bool TryDecodeCacheResult(CacheInterface::KeyState state,
-                            const SharedString& value,
+  bool TryDecodeCacheResult(CacheInterface::KeyState state, StringPiece val_str,
                             CacheLookupResult* result) {
     bool* can_revalidate = &(result->can_revalidate);
     InputInfoStarVector* revalidate = &(result->revalidate);
@@ -379,7 +386,6 @@ class RewriteContext::OutputCacheCallback : public CacheInterface::Callback {
     }
     // We've got a hit on the output metadata; the contents should
     // be a protobuf.  Try to parse it.
-    StringPiece val_str = value.Value();
     ArrayInputStream input(val_str.data(), val_str.size());
     if (partitions->ParseFromZeroCopyStream(&input) &&
         IsOtherDependencyValid(partitions, is_stale_rewrite)) {
@@ -499,7 +505,8 @@ class RewriteContext::HTTPCacheCallback : public OptionsAwareHTTPCacheCallback {
  private:
   RewriteContext* rewrite_context_;
   HTTPCacheResultHandlerFunction function_;
-  DISALLOW_COPY_AND_ASSIGN(HTTPCacheCallback);
+  HTTPCacheCallback(const HTTPCacheCallback&) = delete;
+  HTTPCacheCallback& operator=(const HTTPCacheCallback&) = delete;
 };
 
 // Common code for invoking RewriteContext::ResourceFetchDone for use
@@ -584,7 +591,9 @@ class RewriteContext::ResourceReconstructCallback
   RewriteDriver* driver_;
   ResourceCallbackUtils delegate_;
   OutputResourcePtr resource_;
-  DISALLOW_COPY_AND_ASSIGN(ResourceReconstructCallback);
+  ResourceReconstructCallback(const ResourceReconstructCallback&) = delete;
+  ResourceReconstructCallback& operator=(const ResourceReconstructCallback&) =
+      delete;
 };
 
 // Callback used when we re-check validity of cached results by contents.
@@ -640,7 +649,8 @@ class RewriteContext::RewriteFreshenCallback
   int input_index_;
   FreshenMetadataUpdateManager* manager_;
 
-  DISALLOW_COPY_AND_ASSIGN(RewriteFreshenCallback);
+  RewriteFreshenCallback(const RewriteFreshenCallback&) = delete;
+  RewriteFreshenCallback& operator=(const RewriteFreshenCallback&) = delete;
 };
 
 // This class encodes a few data members used for responding to
@@ -755,7 +765,6 @@ class RewriteContext::FetchContext {
       return;
     }
 
-    GoogleString output;
     bool ok = false;
     ResponseHeaders* response_headers = async_fetch_->response_headers();
     if (success_) {
@@ -806,7 +815,9 @@ class RewriteContext::FetchContext {
           handler_->Warning(
               output_resource_->name().as_string().c_str(), 0,
               "Resource based on %s but cannot access the original",
-              input_resource->UrlForDebug().c_str());
+              input_resource.get() != nullptr
+                  ? input_resource->UrlForDebug().c_str()
+                  : "(null resource)");
         }
       }
     }
@@ -921,7 +932,8 @@ class RewriteContext::FetchContext {
   bool skip_fetch_rewrite_;
   Variable* const num_deadline_alarm_invocations_;
 
-  DISALLOW_COPY_AND_ASSIGN(FetchContext);
+  FetchContext(const FetchContext&) = delete;
+  FetchContext& operator=(const FetchContext&) = delete;
 };
 
 // Helper for running filter's Rewrite method in low-priority rewrite thread,
@@ -1585,6 +1597,10 @@ void RewriteContext::FetchInputs() {
           bool ret = nested_driver->FetchResource(resource->url(), callback);
           DCHECK(ret);
         } else {
+          // Clean up the cloned driver if decoding failed. handled_internally
+          // remains false, so FetchInputs() falls through to
+          // resource->LoadAsync() below which provides the correct async
+          // recovery path.
           nested_driver->Cleanup();
         }
       }
@@ -1611,8 +1627,10 @@ void RewriteContext::FetchInputs() {
   Activate();  // TODO(jmarantz): remove.
 }
 
-void RewriteContext::ResourceFetchDone(bool success, ResourcePtr resource,
-                                       int slot_index) {
+void RewriteContext::ResourceFetchDone(
+    bool success,
+    ResourcePtr resource,  // NOLINT(performance-unnecessary-value-param)
+    int slot_index) {
   CHECK_LT(0, outstanding_fetches_);
   --outstanding_fetches_;
 
@@ -2057,13 +2075,13 @@ void RewriteContext::Propagate(RenderOp render_op) {
           ResourcePtr resource(outputs_[p]);
           slot->SetResource(resource);
           if (slot->need_aggregate_input_info()) {
-            for (int i = 0; i < partitions_->other_dependency_size(); ++i) {
-              const InputInfo& other_dep = partitions_->other_dependency(p);
+            for (int j = 0; j < partitions_->other_dependency_size(); ++j) {
+              const InputInfo& other_dep = partitions_->other_dependency(j);
               slot->ReportInput(other_dep);
             }
 
-            for (int i = 0; i < partition->input_size(); ++i) {
-              const InputInfo& own_dep = partition->input(i);
+            for (int j = 0; j < partition->input_size(); ++j) {
+              const InputInfo& own_dep = partition->input(j);
               slot->ReportInput(own_dep);
             }
           }
@@ -2336,8 +2354,10 @@ ResourcePtr RewriteContext::CreateUrlResource(const StringPiece& input_url) {
 // Determine whether the input info is imminently expiring and needs to
 // be freshened. Freshens the resource and update metadata if required.
 void RewriteContext::CheckAndFreshenResource(
-    const InputInfo& input_info, ResourcePtr resource, int partition_index,
-    int input_index, FreshenMetadataUpdateManager* freshen_manager) {
+    const InputInfo& input_info,
+    ResourcePtr resource,  // NOLINT(performance-unnecessary-value-param)
+    int partition_index, int input_index,
+    FreshenMetadataUpdateManager* freshen_manager) {
   if (stale_rewrite_ ||
       ((input_info.type() == InputInfo::CACHED) &&
        input_info.has_expiration_time_ms() && input_info.has_date_ms() &&
@@ -2541,9 +2561,11 @@ bool RewriteContext::PrepareFetch(const OutputResourcePtr& output_resource,
 }
 
 bool RewriteContext::LookupMetadataForOutputResourceImpl(
-    OutputResourcePtr output_resource, const GoogleUrl& gurl,
-    RewriteContext* rewrite_context, RewriteDriver* driver,
-    GoogleString* error_out, CacheLookupResultCallback* callback) {
+    OutputResourcePtr
+        output_resource,  // NOLINT(performance-unnecessary-value-param)
+    const GoogleUrl& gurl, RewriteContext* rewrite_context,
+    RewriteDriver* driver, GoogleString* error_out,
+    CacheLookupResultCallback* callback) {
   std::unique_ptr<RewriteContext> context(rewrite_context);
 
   StringAsyncFetch dummy_fetch(driver->request_context());
@@ -2741,10 +2763,33 @@ void RewriteContext::FixFetchFallbackHeaders(const CachedResult& cached_result,
   // minimum of headers->cache_ttl_ms() and headers->implicit_cache_ttl_ms().
   int64 date_ms = headers->date_ms();
   int64 min_cache_expiry_time_ms = headers->cache_ttl_ms() + date_ms;
-  for (int i = 0, n = partitions_->partition_size(); i < n; ++i) {
-    const CachedResult& partition = partitions_->partition(i);
-    for (int j = 0, m = partition.input_size(); j < m; ++j) {
-      const InputInfo& input_info = partition.input(j);
+  // Try to read expiration times from the slot resources' response headers
+  // rather than from the CachedResult protobuf, because during a live rewrite
+  // the CachedResult may be concurrently modified by the rewrite thread
+  // (protobuf messages are not thread-safe for concurrent read/write even on
+  // different fields). The slot resources are read-only at this point.
+  //
+  // However, when serving from cached metadata (second fetch), the slot
+  // resources may not be loaded, so we fall back to reading from the
+  // CachedResult which was deserialized from cache (no concurrent writer).
+  bool used_slots = false;
+  for (int j = 0, m = num_slots(); j < m; ++j) {
+    ResourcePtr resource(slot(j)->resource());
+    if (resource->loaded() && resource->HttpStatusOk()) {
+      used_slots = true;
+      int64 input_expiration_time_ms =
+          resource->response_headers()->CacheExpirationTimeMs();
+      if (input_expiration_time_ms > 0) {
+        min_cache_expiry_time_ms =
+            std::min(input_expiration_time_ms, min_cache_expiry_time_ms);
+      }
+    }
+  }
+  if (!used_slots) {
+    // Slots not loaded (cached metadata path) - safe to read from
+    // cached_result since there is no concurrent writer.
+    for (int j = 0, m = cached_result.input_size(); j < m; ++j) {
+      const InputInfo& input_info = cached_result.input(j);
       if (input_info.type() == InputInfo::CACHED &&
           input_info.has_expiration_time_ms()) {
         int64 input_expiration_time_ms = input_info.expiration_time_ms();
