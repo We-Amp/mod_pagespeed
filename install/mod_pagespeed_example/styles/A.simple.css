@@ -1,0 +1,5 @@
+/* Simple CSS file for testing pass-through behavior */
+.simple {
+  color: red;
+  font-size: 14px;
+}
