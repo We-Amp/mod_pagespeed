@@ -2,3 +2,6 @@
 # across platforms. This is critical because StdioFileSystem uses binary mode
 # for reliable reads, so line endings must be normalized at the git level.
 * text=auto eol=lf
+
+# Prevent CRLF corruption of the CI commit SHA stamp on Windows checkouts.
+GIT_COMMIT text eol=lf

@@ -130,7 +130,7 @@ cc_library(
         ":utf",
         "//pagespeed/kernel/base:gtest_prod",
         "//third_party/google-sparsehash:google_sparsehash_gen",
-        "@abseil-cpp//absl/strings:str_format",
+        "@com_google_absl//absl/strings:str_format",
         "@mod_pagespeed//base:log_shim",
     ],
 )

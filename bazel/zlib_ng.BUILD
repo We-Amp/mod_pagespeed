@@ -109,13 +109,13 @@ cc_library(
         "arch/generic/chunk_permute_table.h",
         "arch/generic/compare256_p.h",
         "arch/generic/generic_functions.h",
-        # Generated files.
-        ":zconf_gen",
-        ":zlib_name_mangling_gen",
+        # Generated files (zconf_gen and zlib_name_mangling_gen are in hdrs).
         ":gzread_gen",
     ],
     hdrs = [
+        ":zconf_gen",
         ":zlib_gen",
+        ":zlib_name_mangling_gen",
     ],
     copts = select({
         "@platforms//os:windows": [

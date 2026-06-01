@@ -78,7 +78,6 @@ build --define absl=1
 
 # Disable ICU linking for googleurl.
 build --@com_googlesource_googleurl//build_config:system_icu=0
-build --@googleurl//build_config:system_icu=0
 
 # Common flags for sanitizers
 build:sanitizer --define tcmalloc=disabled
@@ -209,8 +208,9 @@ build:coverage --test_timeout=390,750,1500,5700
 build:coverage --define=dynamic_link_tests=true
 build:coverage --define=ENVOY_CONFIG_COVERAGE=1
 build:coverage --cxxopt="-DENVOY_CONFIG_COVERAGE=1"
-build:coverage --coverage_support=@envoy//bazel/coverage:coverage_support
-build:coverage --test_env=CC_CODE_COVERAGE_SCRIPT=external/envoy/bazel/coverage/collect_cc_coverage.sh  # unique
+# Envoy-only: requires WORKSPACE.envoy (see scripts/use-envoy-workspace.sh)
+# build:coverage --coverage_support=@envoy//bazel/coverage:coverage_support
+# build:coverage --test_env=CC_CODE_COVERAGE_SCRIPT=external/envoy/bazel/coverage/collect_cc_coverage.sh
 build:coverage --test_env=HEAPCHECK=
 build:coverage --combined_report=lcov
 build:coverage --strategy=TestRunner=sandboxed,local
@@ -222,7 +222,8 @@ build:coverage --instrumentation_filter="//source(?!/common/quic/platform)[/:],/
 build:test-coverage --test_arg="-l trace"
 build:test-coverage --test_arg="--log-path /dev/null"
 build:fuzz-coverage --config=plain-fuzzer
-build:fuzz-coverage --run_under=@envoy//bazel/coverage:fuzz_coverage_wrapper.sh
+# Envoy-only: requires WORKSPACE.envoy (see scripts/use-envoy-workspace.sh)
+# build:fuzz-coverage --run_under=@envoy//bazel/coverage:fuzz_coverage_wrapper.sh
 
 # Remote execution: https://docs.bazel.build/versions/master/remote-execution.html
 build:rbe-toolchain --action_env=BAZEL_DO_NOT_DETECT_CPP_TOOLCHAIN=1
@@ -461,6 +462,44 @@ build:windows --features=compiler_param_file
 build:windows --features=fully_static_link
 build:windows --features=static_link_msvcrt
 build:windows --dynamic_mode=off
+
+# Windows AddressSanitizer via clang-cl
+# Detects heap/stack buffer overflows, use-after-free, use-after-return.
+# Uses clang-cl (not MSVC cl.exe) because the codebase and its dependencies
+# (drp, abseil) rely on GCC/Clang extensions (__inline__, sanitizer headers)
+# that MSVC does not support. Use alongside --config=clang-cl.
+# Scope ASan instrumentation to project sources only — not external deps.
+# rules_foreign_cc (curl cmake) fails if ASan flags leak into CMake's
+# configure test binaries (__asan_init undefined). Using per_file_copt
+# restricts -fsanitize=address to project and third_party sources.
+build:win-asan --per_file_copt=//pagespeed/.*,//net/.*,//third_party/.*,//test/.*@-fsanitize=address
+build:win-asan --per_file_copt=//pagespeed/.*,//net/.*,//third_party/.*,//test/.*@-fno-sanitize=vptr
+build:win-asan --per_file_copt=//pagespeed/.*,//net/.*,//third_party/.*,//test/.*@-fno-sanitize=function
+build:win-asan --per_file_copt=//pagespeed/.*,//net/.*,//third_party/.*,//test/.*@-fno-sanitize-blacklist
+build:win-asan --linkopt=-fsanitize=address
+build:win-asan --linkopt=-fno-sanitize=vptr,function
+# MSVC toolchain auto-injects stl_asan.lib (ASan-annotated STL) but the x64
+# version is missing from this installation. Not needed with clang's ASan runtime.
+build:win-asan --linkopt=/NODEFAULTLIB:stl_asan.lib
+build:win-asan --linkopt=/INCREMENTAL:NO
+build:win-asan --linkopt=/DEBUG
+build:win-asan --strip=never
+build:win-asan --build_tag_filters=-no_san
+build:win-asan --test_tag_filters=-no_san
+build:win-asan --copt=-DADDRESS_SANITIZER=1
+build:win-asan --copt=-D__SANITIZE_ADDRESS__
+# ASan needs -O1 for reasonable performance (default /Od is very slow)
+build:win-asan --copt=-O1
+# ASan needs the dynamic CRT (static CRT is incompatible with ASan DLL model)
+build:win-asan --features=-fully_static_link
+build:win-asan --features=-static_link_msvcrt
+build:win-asan --dynamic_mode=off
+
+# Windows MSVC /analyze static analysis
+# Zero-cost compile-time detection of null derefs, buffer overruns, UB patterns.
+# Can be added to regular Windows builds (no separate pass needed).
+build:win-analyze --copt=/analyze
+build:win-analyze --copt=/analyze:external-
 
 # Zig cross-compilation from Linux to Windows (MinGW ABI).
 # Requires hermetic_cc_toolchain in WORKSPACE — see bazel/zig_toolchain.bzl.

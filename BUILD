@@ -2,6 +2,8 @@ load("@rules_cc//cc:defs.bzl", "cc_binary")
 
 licenses(["notice"])  # Apache 2
 
+exports_files(["GIT_COMMIT"])
+
 cc_binary(
     name = "mod_pagespeed",
     deps = [

@@ -62,7 +62,7 @@ cc_library(
         "src/jdmrgext.c",
         "src/jstdhuff.c",
     ],
-    copts = ["-DBITS_IN_JSAMPLE=16"],
+    copts = ["-DBITS_IN_JSAMPLE=16", "-DNO_GETENV", "-DNO_PUTENV"],
     includes = ["src"],
     deps = [":libjpeg_headers"],
 )
@@ -128,7 +128,7 @@ cc_library(
         "src/jdmrgext.c",
         "src/jstdhuff.c",
     ],
-    copts = ["-DBITS_IN_JSAMPLE=12"],
+    copts = ["-DBITS_IN_JSAMPLE=12", "-DNO_GETENV", "-DNO_PUTENV"],
     includes = ["src"],
     deps = [":libjpeg_headers"],
 )
@@ -220,6 +220,7 @@ cc_library(
         "src/jdmrgext.c",
         "src/jstdhuff.c",
     ],
+    copts = ["-DNO_GETENV", "-DNO_PUTENV"],
     includes = ["src"],
     deps = [
         ":libjpeg_headers",

@@ -27,8 +27,8 @@ pagespeed_cc_test_library(
     ],
     deps = [
         "//pagespeed/kernel/base:pagespeed_base_core",
-        "@abseil-cpp//absl/flags:flag",
-        "@abseil-cpp//absl/flags:reflection",
+        "@com_google_absl//absl/flags:flag",
+        "@com_google_absl//absl/flags:reflection",
         "@googletest//:gtest",
     ],
 )

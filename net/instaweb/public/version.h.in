@@ -29,6 +29,7 @@
 // Changelist Information
 
 #define LASTCHANGE_STRING "@LASTCHANGE@"
+#define GIT_COMMIT_FULL_STRING "@GIT_COMMIT_FULL@"
 
 namespace net_instaweb {
 

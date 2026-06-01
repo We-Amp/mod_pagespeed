@@ -296,11 +296,3 @@ index 13a4714d4b..f1a2c3e4d8 100644
      tags = ["manual"],
  )
 
-@@ -82,7 +76,7 @@ alias(
-
- alias(
-     name = "cares",
--    actual = "@com_github_cares_cares//:ares",
-+    actual = "@c-ares//:ares",
-     tags = ["manual"],
- )
