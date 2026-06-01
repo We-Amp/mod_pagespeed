@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Rewrite JavaScript Test</title>
+    <link rel="stylesheet" href="styles/main.css">
+    <script>
+        // This inline JavaScript should be minified by PageSpeed
+        function greet(name) {
+            var greeting = "Hello, " + name + "!";
+            console.log(greeting);
+            return greeting;
+        }
+
+        function calculate(a, b) {
+            var sum = a + b;
+            var diff = a - b;
+            var product = a * b;
+            return {
+                sum: sum,
+                difference: diff,
+                product: product
+            };
+        }
+    </script>
+</head>
+<body>
+    <h1>Rewrite JavaScript Test</h1>
+    <p>This page has inline JavaScript that should be minified.</p>
+    <div id="output"></div>
+    <script>
+        document.getElementById('output').textContent = greet('World');
+    </script>
+</body>
+</html>

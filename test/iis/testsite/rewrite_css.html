@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Rewrite CSS Test</title>
+    <style>
+        /* This inline CSS should be minified by PageSpeed */
+        body {
+            font-family: Arial, sans-serif;
+            margin:     20px;
+            padding:    10px;
+        }
+        .container {
+            width:   100%;
+            max-width:   960px;
+            margin:   0  auto;
+        }
+        .box {
+            border: 1px solid #ccc;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Rewrite CSS Test</h1>
+    <div class="container">
+        <div class="box">
+            <p>This page has inline CSS that should be minified.</p>
+        </div>
+    </div>
+</body>
+</html>

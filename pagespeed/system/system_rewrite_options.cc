@@ -28,7 +28,6 @@
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/base/timer.h"
-#include "pagespeed/system/serf_url_async_fetcher.h"
 
 namespace net_instaweb {
 
@@ -173,25 +172,10 @@ void SystemRewriteOptions::AddProperties() {
   AddSystemProperty(true, &SystemRewriteOptions::use_shared_mem_locking_,
                     "ausml", RewriteOptions::kUseSharedMemLocking,
                     "Use shared memory for internal named lock service", true);
-  AddSystemProperty(
-      Timer::kHourMs, &SystemRewriteOptions::file_cache_clean_interval_ms_,
-      "afcci", RewriteOptions::kFileCacheCleanIntervalMs,
-      "Set the interval (in ms) for cleaning the file cache, -1 to disable "
-      "cleaning",
-      true);
   AddSystemProperty(100 * 1024 /* 100 megabytes */,
                     &SystemRewriteOptions::file_cache_clean_size_kb_, "afc",
                     RewriteOptions::kFileCacheCleanSizeKb,
                     "Set the target size (in kilobytes) for file cache", true);
-  // Default to no inode limit so that existing installations are not affected.
-  // pagespeed.conf.template contains suggested limit for new installations.
-  // TODO(morlovich): Inject this as an argument, since we want a different
-  // default for ngx_pagespeed?
-  AddSystemProperty(0, &SystemRewriteOptions::file_cache_clean_inode_limit_,
-                    "afcl", RewriteOptions::kFileCacheCleanInodeLimit,
-                    "Set the target number of inodes for the file cache; 0 "
-                    "means no limit",
-                    true);
   AddSystemProperty(0, &SystemRewriteOptions::lru_cache_byte_limit_, "alcb",
                     RewriteOptions::kLruCacheByteLimit,
                     "Set the maximum byte size entry to store in the "
@@ -223,7 +207,9 @@ void SystemRewriteOptions::AddProperties() {
   AddSystemProperty(
       "enable", &SystemRewriteOptions::https_options_, "fhs", kFetchHttps,
       "Controls direct fetching of HTTPS resources."
-      "  Value is comma-separated list of keywords: " SERF_HTTPS_KEYWORDS,
+      "  Value is comma-separated list of keywords: "
+      "enable,disable,allow_self_signed,"
+      "allow_unknown_certificate_authority,allow_certificate_not_yet_valid",
       false);
   AddSystemProperty("", &SystemRewriteOptions::ssl_cert_directory_, "assld",
                     RewriteOptions::kSslCertDirectory,
@@ -314,7 +300,6 @@ void SystemRewriteOptions::AddProperties() {
                     "this is set to PURGE, but you must ensure that only "
                     "authorized clients have access to this method.",
                     false);
-
   AddSystemProperty("", &SystemRewriteOptions::static_assets_to_cdn_, "sacdn",
                     kStaticAssetCDN, kProcessScopeStrict,
                     "Configures serving of helper scripts from external "
@@ -340,12 +325,27 @@ void SystemRewriteOptions::AddProperties() {
 
 SystemRewriteOptions* SystemRewriteOptions::Clone() const {
   SystemRewriteOptions* options = NewOptions();
+  if (options == nullptr) {
+    return nullptr;
+  }
+
   options->Merge(*this);
+
+  // Reset frozen_ and modified_ after Merge, just like base class Clone() does.
+  // This is critical because the source options may be frozen (e.g., factory's
+  // default_options), but the cloned options must be unfrozen to allow
+  // configuration modifications.
+  options->ClearFrozenAndModified();
+
   return options;
 }
 
 SystemRewriteOptions* SystemRewriteOptions::NewOptions() const {
-  return new SystemRewriteOptions("new_options", thread_system());
+  ThreadSystem* ts = thread_system();
+  if (ts == nullptr) {
+    return nullptr;
+  }
+  return new SystemRewriteOptions("new_options", ts);
 }
 
 const SystemRewriteOptions* SystemRewriteOptions::DynamicCast(
@@ -385,11 +385,23 @@ bool SystemRewriteOptions::ControllerPortOption::SetFromString(
 
 bool SystemRewriteOptions::HttpsOptions::SetFromString(
     StringPiece value, GoogleString* error_detail) {
-  bool success = SerfUrlAsyncFetcher::ValidateHttpsOptions(value, error_detail);
-  if (success) {
-    set(value.as_string());
+  StringPieceVector keywords;
+  SplitStringPieceToVector(value, ",", &keywords, true);
+  for (int i = 0, n = keywords.size(); i < n; ++i) {
+    StringPiece keyword = keywords[i];
+    if (keyword != "enable" && keyword != "disable" &&
+        keyword != "allow_self_signed" &&
+        keyword != "allow_unknown_certificate_authority" &&
+        keyword != "allow_certificate_not_yet_valid") {
+      StrAppend(error_detail, "Invalid HTTPS keyword: ", keyword,
+                ", legal options are: enable,disable,allow_self_signed,"
+                "allow_unknown_certificate_authority,"
+                "allow_certificate_not_yet_valid");
+      return false;
+    }
   }
-  return success;
+  set(value.as_string());
+  return true;
 }
 
 bool SystemRewriteOptions::StaticAssetCDNOptions::SetFromString(

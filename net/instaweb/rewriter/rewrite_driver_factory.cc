@@ -21,33 +21,6 @@
 
 #include <memory>
 
-#ifdef _WIN32
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <windows.h>
-namespace {
-void RDFDebugLog(const char* msg) {
-  HANDLE hFile = CreateFileA(
-      "C:\\inetpub\\pagespeed\\rdf_debug.log",
-      FILE_APPEND_DATA,
-      FILE_SHARE_READ | FILE_SHARE_WRITE,
-      NULL,
-      OPEN_ALWAYS,
-      FILE_ATTRIBUTE_NORMAL,
-      NULL);
-  if (hFile != INVALID_HANDLE_VALUE) {
-    DWORD written;
-    WriteFile(hFile, msg, strlen(msg), &written, NULL);
-    WriteFile(hFile, "\r\n", 2, &written, NULL);
-    CloseHandle(hFile);
-  }
-}
-}  // namespace
-#else
-namespace { void RDFDebugLog(const char*) {} }
-#endif
-
 #include "base/logging.h"
 #include "net/instaweb/http/public/http_cache.h"
 #include "net/instaweb/http/public/http_dump_url_async_writer.h"
@@ -73,7 +46,6 @@ namespace { void RDFDebugLog(const char*) {} }
 #include "pagespeed/controller/in_process_central_controller.h"
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/checking_thread_system.h"
-#include "pagespeed/kernel/base/dynamic_annotations.h"  // RunningOnValgrind
 #include "pagespeed/kernel/base/file_system.h"
 #include "pagespeed/kernel/base/function.h"
 #include "pagespeed/kernel/base/hasher.h"
@@ -117,12 +89,10 @@ RewriteDriverFactory::RewriteDriverFactory(
       statistics_(&null_statistics_),
       worker_pools_(kNumWorkerPools, nullptr),
       hostname_(GetHostname()) {
-  RDFDebugLog("RDF: member init complete, about to call InitializeDefaultOptions");
   // Pre-initializes the default options.  IMPORTANT: subclasses overridding
   // NewRewriteOptions() should re-call this method from their constructor
   // so that the correct rewrite_options_ object gets reset.
   InitializeDefaultOptions();
-  RDFDebugLog("RDF: InitializeDefaultOptions complete, constructor done");
 }
 
 void RewriteDriverFactory::InitializeDefaultOptions() {
@@ -373,8 +343,12 @@ CriticalImagesFinder* RewriteDriverFactory::DefaultCriticalImagesFinder(
     ServerContext* server_context) {
   // TODO(pulkitg): Don't create BeaconCriticalImagesFinder if beacon cohort is
   // not added.
-  return new BeaconCriticalImagesFinder(server_context->beacon_cohort(),
-                                        nonce_generator(), statistics());
+  const PropertyCache::Cohort* cohort = server_context->beacon_cohort();
+  NonceGenerator* nonce = nonce_generator();
+  Statistics* stats = statistics();
+  BeaconCriticalImagesFinder* finder = new BeaconCriticalImagesFinder(
+      cohort, nonce, stats);
+  return finder;
 }
 
 CriticalSelectorFinder* RewriteDriverFactory::DefaultCriticalSelectorFinder(
@@ -486,10 +460,13 @@ void RewriteDriverFactory::InitServerContext(ServerContext* server_context) {
   }
   SetupCaches(server_context);
   if (server_context->lock_manager() == nullptr) {
-    server_context->set_lock_manager(lock_manager());
+    NamedLockManager* lm = lock_manager();
+    server_context->set_lock_manager(lm);
   }
-  if (!server_context->has_default_system_fetcher()) {
-    server_context->set_default_system_fetcher(ComputeUrlAsyncFetcher());
+  bool has_fetcher = server_context->has_default_system_fetcher();
+  if (!has_fetcher) {
+    UrlAsyncFetcher* fetcher = ComputeUrlAsyncFetcher();
+    server_context->set_default_system_fetcher(fetcher);
   }
 
   server_context->set_central_controller(
@@ -507,8 +484,8 @@ void RewriteDriverFactory::InitServerContext(ServerContext* server_context) {
   server_context->set_signature(signature());
   server_context->set_message_handler(message_handler());
   server_context->set_static_asset_manager(static_asset_manager());
-  server_context->set_critical_images_finder(
-      DefaultCriticalImagesFinder(server_context));
+  CriticalImagesFinder* cif = DefaultCriticalImagesFinder(server_context);
+  server_context->set_critical_images_finder(cif);
   server_context->set_critical_selector_finder(
       DefaultCriticalSelectorFinder(server_context));
   server_context->set_hostname(hostname_);
@@ -686,7 +663,7 @@ void RewriteDriverFactory::ShutDown() {
   }
 
   // Now get active RewriteDrivers for each manager to wrap up.
-  int timeout_secs = RunningOnValgrind() ? 20 : 5;
+  int timeout_secs = 5;
   int64 cutoff_time_ms = timer_->NowMs() + timeout_secs * Timer::kSecondMs;
 
   for (ServerContextSet::iterator p = server_contexts_.begin();

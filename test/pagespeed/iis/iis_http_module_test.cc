@@ -18,6 +18,8 @@
  */
 
 // Unit tests for IisHttpModule - IIS CHttpModule implementation.
+// Uses common helpers from IisTestBase for status checking, content type
+// detection, and PageSpeed URL manipulation.
 
 #include "gtest/gtest.h"
 #include "test/pagespeed/iis/iis_test_base.h"
@@ -25,27 +27,43 @@
 
 namespace net_instaweb {
 
+// IisHttpModuleTest now uses helpers from IisTestBase:
+// - IsPageSpeedUrl(), CreatePageSpeedUrl(), DecodePageSpeedUrl()
+// - IsHtmlContentType(), IsSuccessStatus(), ShouldRewriteStatus()
 class IisHttpModuleTest : public IisTestBase {
  protected:
   void SetUp() override {
     IisTestBase::SetUp();
   }
 
-  // Helper to check if content type indicates HTML
-  static bool IsHtmlContentType(const GoogleString& content_type) {
-    return content_type.find("text/html") != GoogleString::npos ||
-           content_type.find("application/xhtml+xml") != GoogleString::npos;
-  }
-
-  // Helper to check if response status indicates a successful response
-  static bool IsSuccessStatus(USHORT status) {
-    return status >= 200 && status < 300;
-  }
-
-  // Helper to check if response should be rewritten based on status
-  static bool ShouldRewriteStatus(USHORT status) {
-    // Only rewrite 200 OK responses
-    return status == 200;
+  // Collect body from mock chunks.
+  // Mirrors the chunk collection logic in iis_http_module.cc's
+  // HandleHtmlRewriting() and RecordIproResponseData().
+  static GoogleString CollectChunkBody(
+      const std::vector<HTTP_DATA_CHUNK>& chunks) {
+    GoogleString body;
+    for (size_t i = 0; i < chunks.size(); ++i) {
+      const HTTP_DATA_CHUNK* chunk = &chunks[i];
+      if (chunk->DataChunkType == HttpDataChunkFromMemory) {
+        body.append(
+            static_cast<const char*>(chunk->FromMemory.pBuffer),
+            chunk->FromMemory.BufferLength);
+      } else if (chunk->DataChunkType == HttpDataChunkFromFragmentCache ||
+                 chunk->DataChunkType == HttpDataChunkFromFragmentCacheEx) {
+        // Fragment cache chunks cannot be read without IIS APIs.
+        // Log and skip, same as production code.
+        LOG(WARNING) << "PageSpeed: Skipping fragment cache chunk (type="
+                     << chunk->DataChunkType << ")";
+      } else if (chunk->DataChunkType == HttpDataChunkFromFileHandle) {
+        // File handle chunks require platform-specific I/O.
+        // On non-Windows, log and skip.
+        LOG(WARNING) << "PageSpeed: Skipping file handle chunk";
+      } else {
+        LOG(WARNING) << "PageSpeed: Unknown chunk type "
+                     << chunk->DataChunkType << " - skipping";
+      }
+    }
+    return body;
   }
 };
 
@@ -659,6 +677,293 @@ TEST_F(IisHttpModuleTest, CacheHitServesFromCache) {
 TEST_F(IisHttpModuleTest, CacheMissQueueOptimization) {
   // Note: Full test requires Windows IIS module with cache backend
   // Would verify cache misses trigger background optimization
+}
+
+// ============================================================================
+// Response Chunk Type Tests
+// ============================================================================
+
+TEST_F(IisHttpModuleTest, CollectsMemoryChunks) {
+  std::vector<HTTP_DATA_CHUNK> chunks;
+  HTTP_DATA_CHUNK chunk;
+  chunk.DataChunkType = HttpDataChunkFromMemory;
+  const char* data = "Hello World";
+  chunk.FromMemory.pBuffer = const_cast<char*>(data);
+  chunk.FromMemory.BufferLength = 11;
+  chunks.push_back(chunk);
+
+  EXPECT_EQ("Hello World", CollectChunkBody(chunks));
+}
+
+TEST_F(IisHttpModuleTest, CollectsMultipleMemoryChunks) {
+  std::vector<HTTP_DATA_CHUNK> chunks;
+
+  HTTP_DATA_CHUNK c1;
+  c1.DataChunkType = HttpDataChunkFromMemory;
+  const char* d1 = "Hello ";
+  c1.FromMemory.pBuffer = const_cast<char*>(d1);
+  c1.FromMemory.BufferLength = 6;
+  chunks.push_back(c1);
+
+  HTTP_DATA_CHUNK c2;
+  c2.DataChunkType = HttpDataChunkFromMemory;
+  const char* d2 = "World";
+  c2.FromMemory.pBuffer = const_cast<char*>(d2);
+  c2.FromMemory.BufferLength = 5;
+  chunks.push_back(c2);
+
+  EXPECT_EQ("Hello World", CollectChunkBody(chunks));
+}
+
+TEST_F(IisHttpModuleTest, SkipsFragmentCacheChunksGracefully) {
+  std::vector<HTTP_DATA_CHUNK> chunks;
+
+  HTTP_DATA_CHUNK c1;
+  c1.DataChunkType = HttpDataChunkFromMemory;
+  const char* d1 = "Before";
+  c1.FromMemory.pBuffer = const_cast<char*>(d1);
+  c1.FromMemory.BufferLength = 6;
+  chunks.push_back(c1);
+
+  HTTP_DATA_CHUNK c2;
+  c2.DataChunkType = HttpDataChunkFromFragmentCache;
+  // Fragment cache chunk - should be handled gracefully (skipped with warning)
+  c2.FromFragmentCache.FragmentNameLength = 0;
+  c2.FromFragmentCache.pFragmentName = nullptr;
+  chunks.push_back(c2);
+
+  HTTP_DATA_CHUNK c3;
+  c3.DataChunkType = HttpDataChunkFromMemory;
+  const char* d3 = "After";
+  c3.FromMemory.pBuffer = const_cast<char*>(d3);
+  c3.FromMemory.BufferLength = 5;
+  chunks.push_back(c3);
+
+  // Should collect memory chunks and log warning for fragment cache
+  GoogleString body = CollectChunkBody(chunks);
+  EXPECT_TRUE(body.find("Before") != GoogleString::npos);
+  EXPECT_TRUE(body.find("After") != GoogleString::npos);
+}
+
+TEST_F(IisHttpModuleTest, SkipsFragmentCacheExChunksGracefully) {
+  std::vector<HTTP_DATA_CHUNK> chunks;
+
+  HTTP_DATA_CHUNK c1;
+  c1.DataChunkType = HttpDataChunkFromMemory;
+  const char* d1 = "Start";
+  c1.FromMemory.pBuffer = const_cast<char*>(d1);
+  c1.FromMemory.BufferLength = 5;
+  chunks.push_back(c1);
+
+  HTTP_DATA_CHUNK c2;
+  c2.DataChunkType = HttpDataChunkFromFragmentCacheEx;
+  c2.FromFragmentCache.FragmentNameLength = 0;
+  c2.FromFragmentCache.pFragmentName = nullptr;
+  chunks.push_back(c2);
+
+  HTTP_DATA_CHUNK c3;
+  c3.DataChunkType = HttpDataChunkFromMemory;
+  const char* d3 = "End";
+  c3.FromMemory.pBuffer = const_cast<char*>(d3);
+  c3.FromMemory.BufferLength = 3;
+  chunks.push_back(c3);
+
+  // Should collect memory chunks and skip fragment cache ex
+  GoogleString body = CollectChunkBody(chunks);
+  EXPECT_EQ("StartEnd", body);
+}
+
+TEST_F(IisHttpModuleTest, SkipsFileHandleChunksOnNonWindows) {
+  std::vector<HTTP_DATA_CHUNK> chunks;
+
+  HTTP_DATA_CHUNK c1;
+  c1.DataChunkType = HttpDataChunkFromMemory;
+  const char* d1 = "Memory";
+  c1.FromMemory.pBuffer = const_cast<char*>(d1);
+  c1.FromMemory.BufferLength = 6;
+  chunks.push_back(c1);
+
+  HTTP_DATA_CHUNK c2;
+  c2.DataChunkType = HttpDataChunkFromFileHandle;
+  c2.FromFileHandle.FileHandle = nullptr;
+#ifdef _WIN32
+  c2.FromFileHandle.ByteRange.StartingOffset.QuadPart = 0;
+  c2.FromFileHandle.ByteRange.Length.QuadPart = 0;
+#else
+  c2.FromFileHandle.ByteRange.StartingOffset = 0;
+  c2.FromFileHandle.ByteRange.Length = 0;
+#endif
+  chunks.push_back(c2);
+
+  // File handle chunk skipped on non-Windows, memory chunk collected
+  GoogleString body = CollectChunkBody(chunks);
+  EXPECT_EQ("Memory", body);
+}
+
+TEST_F(IisHttpModuleTest, SkipsUnknownChunkTypes) {
+  std::vector<HTTP_DATA_CHUNK> chunks;
+
+  HTTP_DATA_CHUNK c1;
+  c1.DataChunkType = HttpDataChunkFromMemory;
+  const char* d1 = "Known";
+  c1.FromMemory.pBuffer = const_cast<char*>(d1);
+  c1.FromMemory.BufferLength = 5;
+  chunks.push_back(c1);
+
+  HTTP_DATA_CHUNK c2;
+  c2.DataChunkType = HttpDataChunkMaximum;  // Invalid/unknown type
+  chunks.push_back(c2);
+
+  GoogleString body = CollectChunkBody(chunks);
+  EXPECT_EQ("Known", body);
+}
+
+TEST_F(IisHttpModuleTest, CollectsEmptyChunkList) {
+  std::vector<HTTP_DATA_CHUNK> chunks;
+  EXPECT_EQ("", CollectChunkBody(chunks));
+}
+
+TEST_F(IisHttpModuleTest, CollectsZeroLengthMemoryChunk) {
+  std::vector<HTTP_DATA_CHUNK> chunks;
+
+  HTTP_DATA_CHUNK c1;
+  c1.DataChunkType = HttpDataChunkFromMemory;
+  c1.FromMemory.pBuffer = nullptr;
+  c1.FromMemory.BufferLength = 0;
+  chunks.push_back(c1);
+
+  EXPECT_EQ("", CollectChunkBody(chunks));
+}
+
+// ============================================================================
+// AJAX Detection Tests (Fix 1)
+// ============================================================================
+
+TEST_F(IisHttpModuleTest, DetectsXhrAjaxRequest) {
+  auto context = CreateContext("/page.html");
+  context->request()->SetHeader("X-Requested-With", "XMLHttpRequest");
+  EXPECT_TRUE(IsAjaxHeaders(context->request()->headers()));
+}
+
+TEST_F(IisHttpModuleTest, DetectsMicrosoftAjaxRequest) {
+  auto context = CreateContext("/page.html");
+  context->request()->SetHeader("X-MicrosoftAjax", "Delta=true");
+  EXPECT_TRUE(IsAjaxHeaders(context->request()->headers()));
+}
+
+TEST_F(IisHttpModuleTest, DetectsPrototypeAjaxRequest) {
+  auto context = CreateContext("/page.html");
+  context->request()->SetHeader("X-Prototype-Version", "1.7.3");
+  EXPECT_TRUE(IsAjaxHeaders(context->request()->headers()));
+}
+
+TEST_F(IisHttpModuleTest, NonAjaxRequestNotDetected) {
+  auto context = CreateContext("/page.html");
+  context->request()->SetHeader("Accept", "text/html");
+  EXPECT_FALSE(IsAjaxHeaders(context->request()->headers()));
+}
+
+TEST_F(IisHttpModuleTest, XhrCaseInsensitive) {
+  auto context = CreateContext("/page.html");
+  context->request()->SetHeader("X-Requested-With", "xmlhttprequest");
+  EXPECT_TRUE(IsAjaxHeaders(context->request()->headers()));
+}
+
+// ============================================================================
+// Range Request Detection Tests (Fix 2)
+// ============================================================================
+
+TEST_F(IisHttpModuleTest, DetectsRangeRequest) {
+  auto context = CreateContext("/video.mp4");
+  context->request()->SetHeader("Range", "bytes=0-1023");
+  EXPECT_TRUE(IsRangeRequest(context->request()->headers()));
+}
+
+TEST_F(IisHttpModuleTest, DetectsIfRangeRequest) {
+  auto context = CreateContext("/video.mp4");
+  context->request()->SetHeader("If-Range", "\"abc123\"");
+  EXPECT_TRUE(IsRangeRequest(context->request()->headers()));
+}
+
+TEST_F(IisHttpModuleTest, DetectsRangeAndIfRange) {
+  auto context = CreateContext("/video.mp4");
+  context->request()->SetHeader("Range", "bytes=0-1023");
+  context->request()->SetHeader("If-Range", "\"abc123\"");
+  EXPECT_TRUE(IsRangeRequest(context->request()->headers()));
+}
+
+TEST_F(IisHttpModuleTest, NonRangeRequestNotDetected) {
+  auto context = CreateContext("/page.html");
+  context->request()->SetHeader("Accept", "text/html");
+  EXPECT_FALSE(IsRangeRequest(context->request()->headers()));
+}
+
+// ============================================================================
+// URL Port Normalization Tests (Fix 5)
+// ============================================================================
+
+TEST_F(IisHttpModuleTest, StripsPort80FromHttp) {
+  EXPECT_EQ("http://example.com/page.html",
+            NormalizeUrlPort("http://example.com:80/page.html"));
+}
+
+TEST_F(IisHttpModuleTest, StripsPort443FromHttps) {
+  EXPECT_EQ("https://example.com/page.html",
+            NormalizeUrlPort("https://example.com:443/page.html"));
+}
+
+TEST_F(IisHttpModuleTest, KeepsNonDefaultPort) {
+  EXPECT_EQ("http://example.com:8080/page.html",
+            NormalizeUrlPort("http://example.com:8080/page.html"));
+}
+
+TEST_F(IisHttpModuleTest, KeepsHttpsNonDefaultPort) {
+  EXPECT_EQ("https://example.com:8443/page.html",
+            NormalizeUrlPort("https://example.com:8443/page.html"));
+}
+
+TEST_F(IisHttpModuleTest, NoPortNoChange) {
+  EXPECT_EQ("http://example.com/page.html",
+            NormalizeUrlPort("http://example.com/page.html"));
+}
+
+TEST_F(IisHttpModuleTest, DoesNotStripPort443FromHttp) {
+  EXPECT_EQ("http://example.com:443/page.html",
+            NormalizeUrlPort("http://example.com:443/page.html"));
+}
+
+TEST_F(IisHttpModuleTest, DoesNotStripPort80FromHttps) {
+  EXPECT_EQ("https://example.com:80/page.html",
+            NormalizeUrlPort("https://example.com:80/page.html"));
+}
+
+TEST_F(IisHttpModuleTest, StripsPortWithQueryString) {
+  EXPECT_EQ("http://example.com/page?q=1",
+            NormalizeUrlPort("http://example.com:80/page?q=1"));
+}
+
+// ============================================================================
+// Client Disconnection Check Tests (Fix 6)
+// ============================================================================
+
+TEST_F(IisHttpModuleTest, MockConnectionDefaultsToConnected) {
+  auto context = CreateContext("/page.html");
+  // By default, mock connections should be connected
+  EXPECT_TRUE(context->IsConnected());
+}
+
+TEST_F(IisHttpModuleTest, DisconnectedClientDetected) {
+  auto context = CreateContext("/page.html");
+  context->SetConnected(false);
+  EXPECT_FALSE(context->IsConnected());
+}
+
+TEST_F(IisHttpModuleTest, ReconnectedClientDetected) {
+  auto context = CreateContext("/page.html");
+  context->SetConnected(false);
+  EXPECT_FALSE(context->IsConnected());
+  context->SetConnected(true);
+  EXPECT_TRUE(context->IsConnected());
 }
 
 }  // namespace net_instaweb

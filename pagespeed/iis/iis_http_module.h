@@ -20,11 +20,18 @@
 #ifndef PAGESPEED_IIS_IIS_HTTP_MODULE_H_
 #define PAGESPEED_IIS_IIS_HTTP_MODULE_H_
 
+// Windows headers - winsock2.h must come before windows.h and httpserv.h
+// to avoid redefinition errors with winsock.h
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <winsock2.h>
+#include <windows.h>
+
 // IIS Native Module API headers
 #include <httpserv.h>
 
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/shared_string.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/http/request_headers.h"
 #include "net/instaweb/http/public/request_context.h"
@@ -97,6 +104,10 @@ class IisHttpModule : public CHttpModule {
     bool empty_{true};
 
    public:
+    // Module factory reference for shutdown coordination.
+    // Set in OnBeginRequest when the request is tracked.
+    IisModuleFactory* module_factory_{nullptr};
+
     // Server context for this request
     IisServerContext* active_context_{nullptr};
 
@@ -118,11 +129,6 @@ class IisHttpModule : public CHttpModule {
     // Used by destructor to know whether to wait for HandleDone().
     bool proxy_fetch_started_{false};
 
-    // Cache lookup results
-    bool cache_hit_{false};
-    SharedString cached_content_;
-    GoogleString cached_content_type_;
-
     // IPRO background recording state.
     // When a non-.pagespeed. resource URL is requested and IPRO is enabled,
     // we record the response body and cache it for future optimization.
@@ -130,13 +136,6 @@ class IisHttpModule : public CHttpModule {
     InPlaceResourceRecorder* ipro_recorder_{nullptr};
     bool ipro_recording_started_{false};
     RequestHeaders::Properties ipro_request_properties_;
-
-    // Accept-Encoding header management.
-    // We save and remove Accept-Encoding in OnBeginRequest to get uncompressed
-    // content from the backend. The saved value can be restored in OnEndRequest
-    // if needed.
-    GoogleString saved_accept_encoding_;
-    bool accept_encoding_hidden_{false};
 
     // Fetch count for runaway recursion prevention.
     int fetch_count_{0};
@@ -198,13 +197,6 @@ class IisHttpModule : public CHttpModule {
       IHttpContext* context,
       const GoogleString& path);
 
-  // Serve optimized content from cache.
-  // Called when cache lookup succeeds in OnResolveRequestCache.
-  REQUEST_NOTIFICATION_STATUS ServeFromCache(
-      IHttpContext* context,
-      const SharedString& cached_content,
-      const char* content_type);
-
   // Check if response is HTML and should be rewritten
   bool ShouldRewriteResponse(IHttpContext* context);
 
@@ -245,6 +237,12 @@ class IisHttpModule : public CHttpModule {
 
   // Finish IPRO recording and cache the resource.
   void FinishIproRecording(IHttpContext* context, bool success);
+
+  // Collect response body from IIS HTTP_DATA_CHUNK array.
+  // Handles memory chunks, file handle chunks (with byte ranges),
+  // and logs warnings for fragment cache and unknown chunk types.
+  GoogleString CollectResponseBody(IHttpContext* context,
+                                   HTTP_RESPONSE* raw_response);
 
   // Get request URL from IIS context
   GoogleString GetRequestUrl(IHttpContext* context);

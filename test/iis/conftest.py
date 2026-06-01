@@ -42,6 +42,7 @@ Usage:
 import os
 import sys
 import pathlib
+import time
 
 import pytest
 
@@ -90,9 +91,9 @@ def server_config() -> ServerConfig:
             if os.environ.get("PAGESPEED_SECONDARY_PORT")
             else None
         ),
-        # IIS test site uses standard paths
-        test_root=os.environ.get("PAGESPEED_TEST_ROOT", "/mod_pagespeed_test"),
-        example_root=os.environ.get("PAGESPEED_EXAMPLE_ROOT", "/mod_pagespeed_example"),
+        # IIS test site uses root paths (no /mod_pagespeed_example prefix)
+        test_root=os.environ.get("PAGESPEED_TEST_ROOT", ""),
+        example_root=os.environ.get("PAGESPEED_EXAMPLE_ROOT", ""),
         cache_dir=os.environ.get("PAGESPEED_CACHE_DIR", "C:\\PageSpeed\\cache"),
         stats_path=os.environ.get("PAGESPEED_STATS_PATH", "/pagespeed_statistics"),
         admin_path=os.environ.get("PAGESPEED_ADMIN_PATH", "/pagespeed_admin"),
@@ -141,6 +142,12 @@ def admin_path(server_config: ServerConfig) -> str:
 
 
 @pytest.fixture(scope="session")
+def global_admin_path(server_config: ServerConfig) -> str:
+    """Return the URL to the PageSpeed global admin UI."""
+    return f"{server_config.primary_url}/pagespeed_global_admin"
+
+
+@pytest.fixture(scope="session")
 def statistics_path(server_config: ServerConfig) -> str:
     """Return the URL to the PageSpeed statistics endpoint."""
     return f"{server_config.primary_url}/pagespeed_statistics"
@@ -169,6 +176,29 @@ def flush_iis_cache(iis_cache_dir: pathlib.Path):
         time.sleep(1.5)  # Wait for cache flush to be detected
 
     return _flush
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _warm_pcache(client):
+    """Pre-warm the property cache for pcache-dependent filters.
+
+    Filters like hint_preload_subresources and insert_dns_prefetch need two
+    requests: the first populates the property cache, the second reads from it.
+    This fixture makes warm-up requests at session start so that individual
+    tests don't hit a cold pcache on first run.
+    """
+    warmup_urls = [
+        "/hint_preload_subresources.html?PageSpeedFilters=hint_preload_subresources",
+        "/pages/dns_prefetch.html?PageSpeedFilters=insert_dns_prefetch",
+    ]
+
+    for url in warmup_urls:
+        try:
+            client.get(url)    # Request 1: populates pcache
+            time.sleep(1)      # Wait for sync LRU write
+            client.get(url)    # Request 2: verifies pcache read works
+        except Exception:
+            pass  # Don't fail; individual tests use fetch_until as fallback
 
 
 # Skip tests based on server configuration

@@ -29,13 +29,14 @@
 namespace net_instaweb {
 
 class CacheInterface;
-class GoogleMessageHandler;
 class IisConfig;
+class IisMessageHandler;
 class IisServerContext;
 class MessageHandler;
 class ProcessContext;
 class RewriteOptions;
 class ServerContext;
+class SharedCircularBuffer;
 class Statistics;
 class SystemRewriteOptions;
 class SystemThreadSystem;
@@ -77,9 +78,10 @@ class IisRewriteDriverFactory : public SystemRewriteDriverFactory {
   // Shutdown cleanup
   void ShutDown();
 
-  // Getters for hostname and port (needed by IisServerContext)
+  // Getters for hostname, port, and document root
   const GoogleString& hostname() const { return hostname_; }
   int port() const { return port_; }
+  const GoogleString& document_root() const { return document_root_; }
 
  protected:
   // Create CurlUrlAsyncFetcher for resource fetching
@@ -111,10 +113,21 @@ class IisRewriteDriverFactory : public SystemRewriteDriverFactory {
   // cache initialization.
   void SetupCaches(ServerContext* server_context) override;
 
+  // Wire SharedCircularBuffer to message handlers (called during RootInit).
+  void SetCircularBuffer(SharedCircularBuffer* buffer) override;
+
+  // Disconnect message handlers from SharedCircularBuffer during shutdown.
+  void ShutDownMessageHandlers() override;
+
  private:
-  std::unique_ptr<GoogleMessageHandler> message_handler_;
+  IisMessageHandler* iis_message_handler_;
+  IisMessageHandler* iis_html_parse_message_handler_;
   GoogleString hostname_;
   int port_;
+  // Document root for localhost resource fetches on Windows.
+  // CurlUrlAsyncFetcher uses this to read files directly instead of HTTP
+  // requests to avoid deadlock when IIS serves localhost resources.
+  GoogleString document_root_;
 
   DISALLOW_COPY_AND_ASSIGN(IisRewriteDriverFactory);
 };

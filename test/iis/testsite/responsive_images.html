@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Responsive Images Test</title>
+</head>
+<body>
+    <h1>Responsive Images Test</h1>
+    <p>This page tests the responsive_images filter which adds srcset attributes.</p>
+
+    <h2>Thumbnail Image (256x192 display size)</h2>
+    <p>An 1023x766 image displayed in a 256x192 thumbnail. PageSpeed
+      will resize it and also serve with a srcset for other sizes.</p>
+    <img src="images/Puzzle.jpg" width="256" height="192" alt="Puzzle thumbnail">
+
+    <h2>Full Size Image (1023x766 - no scaling)</h2>
+    <p>An 1023x766 image displayed at full size. PageSpeed may recompress it,
+      but will not add a srcset.</p>
+    <img src="images/Puzzle.jpg" width="1023" height="766" alt="Puzzle full size">
+
+    <h2>Two-thirds Scale Image (682x511 display size)</h2>
+    <p>An 1023x766 image displayed at 682x511 (2/3 scale). PageSpeed will
+      resize it and also serve a 1.5x version in srcset.</p>
+    <img src="images/Puzzle.jpg" width="682" height="511" alt="Puzzle 2/3 scale">
+
+    <h2>Small PNG Image</h2>
+    <p>A 65x70 image displayed at 10x10. PageSpeed will resize it and add
+      a srcset for other sizes.</p>
+    <img src="images/Cuppa.png" width="10" height="10" alt="Cuppa PNG small">
+
+    <h2>Image with data-pagespeed-no-transform</h2>
+    <p>An image with data-pagespeed-no-transform. PageSpeed will not
+      transform this file.</p>
+    <img src="images/disclosure_open_plus.png" width="11" height="13" data-pagespeed-no-transform alt="No transform image">
+</body>
+</html>

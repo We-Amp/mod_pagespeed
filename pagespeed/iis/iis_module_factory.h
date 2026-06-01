@@ -20,9 +20,18 @@
 #ifndef PAGESPEED_IIS_IIS_MODULE_FACTORY_H_
 #define PAGESPEED_IIS_IIS_MODULE_FACTORY_H_
 
+// Windows headers - winsock2.h must come before windows.h and httpserv.h
+// to avoid redefinition errors with winsock.h
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <winsock2.h>
+#include <windows.h>
+
 // IIS Native Module API headers
 #include <httpserv.h>
 
+#include <atomic>
 #include <memory>
 
 #include "pagespeed/kernel/base/basictypes.h"
@@ -75,14 +84,33 @@ class IisModuleFactory : public IHttpModuleFactory {
   // This avoids accessing module_factory_ which may not be set in all contexts.
   static HTTP_MODULE_ID GetModuleId() { return s_module_id_; }
 
- private:
-  // Driver factory
+  // Shutdown coordination: prevents crashes from in-flight requests during
+  // app pool recycle. OnBeginRequest checks IsShuttingDown() and calls
+  // IncrementActiveRequests(); CleanupStoredContext calls
+  // DecrementActiveRequests() when the request fully completes.
+  bool IsShuttingDown() const;
+  void IncrementActiveRequests();
+  void DecrementActiveRequests();
+
+ protected:
+  // Hook for heavy system initialization (caches, threads, Redis, etc.).
+  // Called by Initialize() after creating the factory and server context.
+  // Override in tests to skip the slow Init/PostConfig/RootInit/ChildInit
+  // sequence that requires running services.
+  virtual HRESULT SetupSystemCaches();
+
+ protected:
+  // Driver factory - protected so test subclasses can set up lightweight init
   std::unique_ptr<IisRewriteDriverFactory> driver_factory_;
 
   // Server context for all requests
   std::unique_ptr<IisServerContext> default_context_;
 
+ private:
+
   IHttpServer* iis_server_;  // Not owned
+  bool initialized_;         // Whether Initialize() completed successfully
+  bool caches_initialized_;  // Whether SetupSystemCaches() ran full init
 
   // Module ID for context storage via IHttpModuleContextContainer
   HTTP_MODULE_ID module_id_ = nullptr;
@@ -94,6 +122,10 @@ class IisModuleFactory : public IHttpModuleFactory {
   // Process context must outlive the driver factory since the factory
   // stores a pointer to data inside it (js_tokenizer_patterns).
   std::unique_ptr<ProcessContext> process_context_;
+
+  // Shutdown coordination.
+  std::atomic<bool> shutting_down_{false};
+  std::atomic<int> active_request_count_{0};
 
   DISALLOW_COPY_AND_ASSIGN(IisModuleFactory);
 };

@@ -22,6 +22,14 @@
 
 #ifdef _WIN32
 
+// Windows headers - winsock2.h must come before windows.h and httpserv.h
+// to avoid redefinition errors with winsock.h
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <winsock2.h>
+#include <windows.h>
+
 #include <httpserv.h>
 
 #include "pagespeed/kernel/base/string.h"
