@@ -32,7 +32,10 @@
 #include <httpserv.h>
 
 #include <atomic>
+#include <map>
 #include <memory>
+#include <mutex>
+#include <shared_mutex>
 
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/string.h"
@@ -48,8 +51,16 @@ class IisServerContext;
 //
 // This factory is responsible for:
 // 1. Creating IisHttpModule instances for each request
-// 2. Managing the single IisServerContext for all requests
+// 2. Managing per-site ServerContexts (one per IIS site/application)
 // 3. Terminating the module when IIS recycles the app pool
+//
+// Per-site support (matching IISpeed pattern):
+// At startup, the factory creates a single default context with the root
+// (machine-level) config. Per-site contexts are created lazily on first
+// request via GetOrCreateContextForSite(), avoiding COM-based site
+// enumeration at startup which can crash the IIS worker process.
+// At request time, GetActiveContext() in IisHttpModule looks up the correct
+// context by the IIS application ID.
 class IisModuleFactory : public IHttpModuleFactory {
  public:
   IisModuleFactory();
@@ -65,8 +76,20 @@ class IisModuleFactory : public IHttpModuleFactory {
 
   void Terminate() override;
 
-  // Access the server context
-  IisServerContext* server_context() { return default_context_.get(); }
+  // Access a server context. Returns the first site context for code that
+  // does not have an IHttpContext (e.g. startup, shutdown). Falls back to
+  // nullptr if no contexts have been created yet.
+  IisServerContext* server_context();
+
+  // Look up the server context for a specific IIS application ID.
+  // Returns nullptr if no context exists for that app ID.
+  IisServerContext* GetContextForSite(const GoogleString& app_id);
+
+  // Look up or lazily create a server context for a site. If the app ID is
+  // not yet known (dynamically added site), a new context is created using
+  // the root configuration as a base.
+  IisServerContext* GetOrCreateContextForSite(
+      const GoogleString& app_id, const wchar_t* config_path);
 
   // Access the driver factory
   IisRewriteDriverFactory* factory() { return driver_factory_.get(); }
@@ -103,8 +126,16 @@ class IisModuleFactory : public IHttpModuleFactory {
   // Driver factory - protected so test subclasses can set up lightweight init
   std::unique_ptr<IisRewriteDriverFactory> driver_factory_;
 
-  // Server context for all requests
-  std::unique_ptr<IisServerContext> default_context_;
+  // Per-site server contexts, keyed by normalized IIS application ID.
+  // Each site gets its own ServerContext with root + site config merged.
+  // Raw pointers because ownership is shared with the factory's
+  // uninitialized_server_contexts_ set during init. Cleaned up in Terminate().
+  std::map<GoogleString, IisServerContext*> site_contexts_;
+
+  // Root config loaded from MACHINE/WEBROOT/APPHOST (machine-level).
+  // Used as the base for merging per-site configs and for creating
+  // contexts for dynamically added sites.
+  std::unique_ptr<IisConfig> root_config_;
 
  private:
 
@@ -123,6 +154,11 @@ class IisModuleFactory : public IHttpModuleFactory {
   // stores a pointer to data inside it (js_tokenizer_patterns).
   std::unique_ptr<ProcessContext> process_context_;
 
+  // Protects site_contexts_ against concurrent read/write. GetContextForSite
+  // uses shared_lock (concurrent reads OK), GetOrCreateContextForSite uses
+  // unique_lock (exclusive write).
+  mutable std::shared_mutex site_contexts_mutex_;
+
   // Shutdown coordination.
   std::atomic<bool> shutting_down_{false};
   std::atomic<int> active_request_count_{0};
@@ -131,9 +167,8 @@ class IisModuleFactory : public IHttpModuleFactory {
 };
 
 // Global module that receives GL_APPLICATION_START notifications.
-// Per-site JS library loading has moved to SetupSystemCaches() via
-// IisConfig::LoadAllSiteLibraries(). This handler is retained for
-// future per-site notifications.
+// Per-site contexts are created lazily on first request. This handler
+// is retained for future per-site notifications.
 class IisGlobalModule : public CGlobalModule {
  public:
   explicit IisGlobalModule(IisModuleFactory* factory) : factory_(factory) {}

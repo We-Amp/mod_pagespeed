@@ -113,8 +113,9 @@ class TestableIisModuleFactory : public IisModuleFactory {
   HRESULT SetupSystemCaches() override {
     // Create a minimal server context without the heavy cache/thread setup.
     auto config = std::make_unique<IisConfig>();
-    default_context_.reset(
-        driver_factory_->MakeIisServerContext(std::move(config)));
+    IisServerContext* ctx =
+        driver_factory_->MakeIisServerContext(std::move(config));
+    site_contexts_["__test__"] = ctx;
     return S_OK;
   }
 };
