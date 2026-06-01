@@ -26,7 +26,6 @@
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/dynamic_annotations.h"  // RunningOnValgrind
 #include "pagespeed/kernel/base/hasher.h"
 #include "pagespeed/kernel/base/null_mutex.h"
 #include "pagespeed/kernel/base/statistics.h"
@@ -1041,10 +1040,6 @@ TEST_F(CssRecompressImagesInStyleAttributes, RecompressAndStyleEnabled) {
 }
 
 TEST_F(CssRecompressImagesInStyleAttributes, RecompressAndWebpAndStyleEnabled) {
-  if (RunningOnValgrind()) {  // Too slow under vg.
-    return;
-  }
-
   AddFileToMockFetcher(StrCat(kTestDomain, "foo.jpg"), kPuzzleJpgFile,
                        kContentTypeJpeg, 100);
   options()->EnableFilter(RewriteOptions::kConvertJpegToWebp);
@@ -1060,10 +1055,6 @@ TEST_F(CssRecompressImagesInStyleAttributes, RecompressAndWebpAndStyleEnabled) {
 
 TEST_F(CssRecompressImagesInStyleAttributes,
        RecompressAndWebpLosslessAndStyleEnabled) {
-  if (RunningOnValgrind()) {  // Too slow under vg.
-    return;
-  }
-
   AddFileToMockFetcher(StrCat(kTestDomain, "foo.jpg"), kPuzzleJpgFile,
                        kContentTypeJpeg, 100);
   options()->EnableFilter(RewriteOptions::kConvertJpegToWebp);

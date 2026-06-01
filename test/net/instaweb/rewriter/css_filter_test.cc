@@ -32,7 +32,6 @@
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "pagespeed/kernel/base/abstract_mutex.h"  // for ScopedMutex
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/dynamic_annotations.h"  // RunningOnValgrind
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
@@ -2001,10 +2000,6 @@ TEST_F(CssFilterTest, DontAbsolutifyEmptyUrl) {
 }
 
 TEST_F(CssFilterTest, WebpRewriting) {
-  if (RunningOnValgrind()) {  // Too slow under vg.
-    return;
-  }
-
   options()->ClearSignatureForTesting();
   options()->EnableFilter(RewriteOptions::kConvertJpegToWebp);
   options()->EnableFilter(RewriteOptions::kRewriteCss);
@@ -2017,10 +2012,6 @@ TEST_F(CssFilterTest, WebpRewriting) {
 }
 
 TEST_F(CssFilterTest, WebpLaRewriting) {
-  if (RunningOnValgrind()) {  // Too slow under vg.
-    return;
-  }
-
   options()->ClearSignatureForTesting();
   options()->EnableFilter(RewriteOptions::kConvertJpegToWebp);
   options()->EnableFilter(RewriteOptions::kRewriteCss);
@@ -2033,10 +2024,6 @@ TEST_F(CssFilterTest, WebpLaRewriting) {
 }
 
 TEST_F(CssFilterTest, WebpLaWithFlagRewriting) {
-  if (RunningOnValgrind()) {  // Too slow under vg.
-    return;
-  }
-
   options()->ClearSignatureForTesting();
   options()->EnableFilter(RewriteOptions::kConvertToWebpLossless);
   options()->EnableFilter(RewriteOptions::kConvertJpegToWebp);
@@ -2063,10 +2050,6 @@ TEST_F(CssFilterTest, NoWebpRewritingFromJpgIfDisabled) {
 }
 
 TEST_F(CssFilterTest, WebpRewritingFromJpgWithWebpFlagWebpLaUa) {
-  if (RunningOnValgrind()) {  // Too slow under vg.
-    return;
-  }
-
   options()->ClearSignatureForTesting();
   options()->EnableFilter(RewriteOptions::kConvertJpegToWebp);
   options()->EnableFilter(RewriteOptions::kRecompressJpeg);
@@ -2081,10 +2064,6 @@ TEST_F(CssFilterTest, WebpRewritingFromJpgWithWebpFlagWebpLaUa) {
 }
 
 TEST_F(CssFilterTest, WebpRewritingFromJpgWithWebpFlagWebpUa) {
-  if (RunningOnValgrind()) {  // Too slow under vg.
-    return;
-  }
-
   options()->ClearSignatureForTesting();
   options()->EnableFilter(RewriteOptions::kConvertJpegToWebp);
   options()->EnableFilter(RewriteOptions::kRecompressJpeg);

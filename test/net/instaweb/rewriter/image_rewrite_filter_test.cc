@@ -44,7 +44,6 @@
 #include "pagespeed/controller/work_bound_expensive_operation_controller.h"
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/dynamic_annotations.h"  // RunningOnValgrind
 #include "pagespeed/kernel/base/md5_hasher.h"           // for MD5Hasher
 #include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
@@ -1374,9 +1373,6 @@ TEST_F(ImageRewriteTest, ImgTagWithComputeStatistics) {
 }
 
 TEST_F(ImageRewriteTest, ImgTagWebp) {
-  if (RunningOnValgrind()) {
-    return;
-  }
   // We use the webp testing user agent; real webp-capable user agents are
   // tested as part of user_agent_matcher_test and are likely to remain in flux
   // over time.
@@ -1385,9 +1381,6 @@ TEST_F(ImageRewriteTest, ImgTagWebp) {
 }
 
 TEST_F(ImageRewriteTest, ImgTagWebpLa) {
-  if (RunningOnValgrind()) {
-    return;
-  }
   // We use the webp testing user agent; real webp-capable user agents are
   // tested as part of user_agent_matcher_test and are likely to remain in flux
   // over time.
@@ -1402,9 +1395,6 @@ TEST_F(ImageRewriteTest, InputTag) {
 }
 
 TEST_F(ImageRewriteTest, InputTagWebp) {
-  if (RunningOnValgrind()) {
-    return;
-  }
   // We use the webp testing user agent; real webp-capable user agents are
   // tested as part of user_agent_matcher_test and are likely to remain in flux
   // over time.
@@ -1413,9 +1403,6 @@ TEST_F(ImageRewriteTest, InputTagWebp) {
 }
 
 TEST_F(ImageRewriteTest, InputTagWebpLa) {
-  if (RunningOnValgrind()) {
-    return;
-  }
   // We use the webp-la testing user agent; real webp-capable user agents are
   // tested as part of user_agent_matcher_test and are likely to remain in flux
   // over time.
@@ -1490,9 +1477,6 @@ TEST_F(ImageRewriteTest, PngToJpegUnhealthy) {
 }
 
 TEST_F(ImageRewriteTest, PngToWebpWithWebpUa) {
-  if (RunningOnValgrind()) {
-    return;
-  }
   // Make sure we convert png to webp if user agent permits.
   // We lower compression quality to ensure the webp is smaller.
   options()->EnableFilter(RewriteOptions::kConvertPngToJpeg);
@@ -1511,9 +1495,6 @@ TEST_F(ImageRewriteTest, PngToWebpWithWebpUa) {
 }
 
 TEST_F(ImageRewriteTest, PngToWebpWithWebpLaUa) {
-  if (RunningOnValgrind()) {
-    return;
-  }
   // Make sure we convert png to webp if user agent permits.
   // We lower compression quality to ensure the webp is smaller.
   options()->EnableFilter(RewriteOptions::kConvertPngToJpeg);
@@ -1532,9 +1513,6 @@ TEST_F(ImageRewriteTest, PngToWebpWithWebpLaUa) {
 }
 
 TEST_F(ImageRewriteTest, PngToWebpWithWebpLaUaAndFlag) {
-  if (RunningOnValgrind()) {
-    return;
-  }
   // Make sure we convert png to webp if user agent permits.
   // We lower compression quality to ensure the webp is smaller.
   options()->EnableFilter(RewriteOptions::kConvertPngToJpeg);
@@ -1579,10 +1557,6 @@ TEST_F(ImageRewriteTest, PngToWebpWithWebpLaUaAndFlag) {
 // The settings are the same as "PngToWebpWithWebpLaUaAndFlag" except
 // WebP lossless user agent. So conversion falls back to PNG.
 TEST_F(ImageRewriteTest, PngFallbackToPngLackOfWebpLaUa) {
-  if (RunningOnValgrind()) {
-    return;
-  }
-
   options()->EnableFilter(RewriteOptions::kConvertPngToJpeg);
   options()->EnableFilter(RewriteOptions::kConvertJpegToWebp);
   options()->EnableFilter(RewriteOptions::kInsertImageDimensions);
@@ -1603,9 +1577,6 @@ TEST_F(ImageRewriteTest, PngFallbackToPngLackOfWebpLaUa) {
 }
 
 TEST_F(ImageRewriteTest, PngToWebpWithWebpLaUaAndFlagTimesOut) {
-  if (RunningOnValgrind()) {
-    return;
-  }
   // Make sure we convert png to webp if user agent permits.
   // We lower compression quality to ensure the webp is smaller.
   options()->EnableFilter(RewriteOptions::kConvertPngToJpeg);
@@ -3397,10 +3368,6 @@ TEST_F(ImageRewriteTest, ProgressiveJpegThresholds) {
 }
 
 TEST_F(ImageRewriteTest, CacheControlHeaderCheckForNonWebpUA) {
-  if (RunningOnValgrind()) {  // Too slow under vg.
-    return;
-  }
-
   GoogleString initial_image_url = StrCat(kTestDomain, kPuzzleJpgFile);
   const GoogleString kHtmlInput = StrCat("<img src='", initial_image_url, "'>");
   options()->EnableFilter(RewriteOptions::kConvertJpegToWebp);
@@ -4060,50 +4027,30 @@ TEST_F(ImageRewriteTest, JpegExceedResolutionLimit) {
 }
 
 TEST_F(ImageRewriteTest, PngInResolutionLimit) {
-  if (RunningOnValgrind()) {
-    return;
-  }
-
   TestResolutionLimit(kResolutionLimitBytes, kResolutionLimitPngFile,
                       kContentTypePng, true /*try_webp*/, true /*try_resize*/,
                       true /*expect_rewritten*/);
 }
 
 TEST_F(ImageRewriteTest, PngInResolutionLimitNoResizing) {
-  if (RunningOnValgrind()) {
-    return;
-  }
-
   TestResolutionLimit(kResolutionLimitBytes, kResolutionLimitPngFile,
                       kContentTypePng, true /*try_webp*/, false /*try_resize*/,
                       true /*expect_rewritten*/);
 }
 
 TEST_F(ImageRewriteTest, JpegInResolutionLimit) {
-  if (RunningOnValgrind()) {
-    return;
-  }
-
   TestResolutionLimit(kResolutionLimitBytes, kResolutionLimitJpegFile,
                       kContentTypeJpeg, true /*try_webp*/, true /*try_resize*/,
                       true /*expect_rewritten*/);
 }
 
 TEST_F(ImageRewriteTest, JpegInResolutionLimitNoResizing) {
-  if (RunningOnValgrind()) {
-    return;
-  }
-
   TestResolutionLimit(kResolutionLimitBytes, kResolutionLimitJpegFile,
                       kContentTypeJpeg, true /*try_webp*/, false /*try_resize*/,
                       true /*expect_rewritten*/);
 }
 
 TEST_F(ImageRewriteTest, AnimatedGifToWebpWithWebpAnimatedUa) {
-  if (RunningOnValgrind()) {
-    return;
-  }
-
   options()->EnableFilter(RewriteOptions::kInsertImageDimensions);
   options()->EnableFilter(RewriteOptions::kConvertToWebpAnimated);
   options()->set_image_recompress_quality(85);
@@ -4120,10 +4067,6 @@ TEST_F(ImageRewriteTest, AnimatedGifToWebpWithWebpAnimatedUa) {
 }
 
 TEST_F(ImageRewriteTest, AnimatedGifToWebpWithWebpLaUa) {
-  if (RunningOnValgrind()) {
-    return;
-  }
-
   options()->EnableFilter(RewriteOptions::kInsertImageDimensions);
   options()->EnableFilter(RewriteOptions::kConvertToWebpAnimated);
   options()->set_image_recompress_quality(85);
@@ -4139,10 +4082,6 @@ TEST_F(ImageRewriteTest, AnimatedGifToWebpWithWebpLaUa) {
 }
 
 TEST_F(ImageRewriteTest, AnimatedGifToWebpNotEnabled) {
-  if (RunningOnValgrind()) {
-    return;
-  }
-
   options()->EnableFilter(RewriteOptions::kInsertImageDimensions);
   options()->EnableFilter(RewriteOptions::kConvertToWebpLossless);
   options()->set_image_recompress_quality(85);
@@ -4158,10 +4097,6 @@ TEST_F(ImageRewriteTest, AnimatedGifToWebpNotEnabled) {
 }
 
 TEST_F(ImageRewriteTest, GifToWebpLosslessWithWebpAnimatedUa) {
-  if (RunningOnValgrind()) {
-    return;
-  }
-
   options()->EnableFilter(RewriteOptions::kInsertImageDimensions);
   options()->EnableFilter(RewriteOptions::kConvertGifToPng);
   options()->EnableFilter(RewriteOptions::kConvertPngToJpeg);
@@ -4222,10 +4157,6 @@ TEST_F(ImageRewriteTest, AnimatedNoCacheReuse) {
 // To make sure that we don't have cache collision, each image is fetched twice,
 // with other image fetching in between.
 TEST_F(ImageRewriteTest, IproAllowAuto) {
-  if (RunningOnValgrind()) {
-    return;
-  }
-
   SetupIproTests("Auto");
   rewrite_driver()->AddFilters();
 
@@ -4245,10 +4176,6 @@ TEST_F(ImageRewriteTest, IproAllowAuto) {
 
 // Test when we can vary on "Accept,Save-Data".
 TEST_F(ImageRewriteTest, IproAllowSaveDataAccept) {
-  if (RunningOnValgrind()) {
-    return;
-  }
-
   SetupIproTests("Accept,Save-Data");
   rewrite_driver()->AddFilters();
   IproFetchAndValidateWithHeaders(
@@ -4258,10 +4185,6 @@ TEST_F(ImageRewriteTest, IproAllowSaveDataAccept) {
 
 // Test when we can vary on "User-Agent".
 TEST_F(ImageRewriteTest, IproAllowUserAgent) {
-  if (RunningOnValgrind()) {
-    return;
-  }
-
   SetupIproTests("User-Agent");
   rewrite_driver()->AddFilters();
   IproFetchAndValidateWithHeaders(
@@ -4271,10 +4194,6 @@ TEST_F(ImageRewriteTest, IproAllowUserAgent) {
 
 // Test when we can vary on "Accept".
 TEST_F(ImageRewriteTest, IproAllowAccept) {
-  if (RunningOnValgrind()) {
-    return;
-  }
-
   SetupIproTests("Accept");
   rewrite_driver()->AddFilters();
   IproFetchAndValidateWithHeaders(
@@ -4284,10 +4203,6 @@ TEST_F(ImageRewriteTest, IproAllowAccept) {
 
 // Test when we can vary on "Save-Data".
 TEST_F(ImageRewriteTest, IproAllowSaveData) {
-  if (RunningOnValgrind()) {
-    return;
-  }
-
   SetupIproTests("Save-Data");
   rewrite_driver()->AddFilters();
   IproFetchAndValidateWithHeaders(
@@ -4297,10 +4212,6 @@ TEST_F(ImageRewriteTest, IproAllowSaveData) {
 
 // Test when we cannot vary on anything.
 TEST_F(ImageRewriteTest, IproAllowNone) {
-  if (RunningOnValgrind()) {
-    return;
-  }
-
   SetupIproTests("None");
   rewrite_driver()->AddFilters();
   IproFetchAndValidateWithHeaders(
@@ -4310,10 +4221,6 @@ TEST_F(ImageRewriteTest, IproAllowNone) {
 
 // Test when the qualities for Save-Data are undefined.
 TEST_F(ImageRewriteTest, IproAllowAutoNoSaveDataQualities) {
-  if (RunningOnValgrind()) {
-    return;
-  }
-
   SetupIproTests("Auto");
   options()->set_image_jpeg_quality_for_save_data(-1);
   options()->set_image_webp_quality_for_save_data(-1);
@@ -4325,10 +4232,6 @@ TEST_F(ImageRewriteTest, IproAllowAutoNoSaveDataQualities) {
 
 // Test when the qualities for Save-Data are the same as the regular ones.
 TEST_F(ImageRewriteTest, IproAllowAutoUnusedSaveDataQualities) {
-  if (RunningOnValgrind()) {
-    return;
-  }
-
   SetupIproTests("Auto");
   options()->set_image_jpeg_quality_for_save_data(
       options()->ImageJpegQuality());
@@ -4342,10 +4245,6 @@ TEST_F(ImageRewriteTest, IproAllowAutoUnusedSaveDataQualities) {
 
 // Test when the qualities for small screen are undefined.
 TEST_F(ImageRewriteTest, IproAllowAutoNoSmallScreenQualities) {
-  if (RunningOnValgrind()) {
-    return;
-  }
-
   SetupIproTests("Auto");
   options()->set_image_jpeg_recompress_quality_for_small_screens(-1);
   options()->set_image_webp_recompress_quality_for_small_screens(-1);
@@ -4358,10 +4257,6 @@ TEST_F(ImageRewriteTest, IproAllowAutoNoSmallScreenQualities) {
 // Test when neither the qualities for Save-Data nor those for small screens
 // are undefined.
 TEST_F(ImageRewriteTest, IproAllowAutoNoSmallScreenSaveDataQualities) {
-  if (RunningOnValgrind()) {
-    return;
-  }
-
   SetupIproTests("Auto");
   options()->set_image_jpeg_quality_for_save_data(-1);
   options()->set_image_webp_quality_for_save_data(-1);

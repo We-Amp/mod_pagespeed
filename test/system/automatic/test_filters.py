@@ -205,15 +205,15 @@ class TestDeferJavascript:
         assert_contains(response, r'PageSpeed=noscript')
 
 
-@pytest.mark.skip(reason="lazyload_images requires Critical Images Beacon data - filter returns kNoDataYet without beacon warmup")
 class TestLazyloadImages:
     """Tests for the lazyload_images filter.
 
     Ported from: pagespeed/automatic/system_tests/lazyload_images.sh
 
-    Note: This filter requires the Critical Images Beacon to have collected
-    data about which images are above/below the fold. Without this data,
-    the filter is disabled to ensure good above-the-fold loading.
+    Note: The Critical Images Beacon is disabled in both Envoy and Apache
+    test configurations, which allows this filter to work without beacon warmup.
+    When beaconing is disabled, CriticalImagesFinder::Available() returns
+    kDisabled instead of kNoDataYet, so the filter proceeds normally.
     """
 
     def test_lazyload_images_injects_script(

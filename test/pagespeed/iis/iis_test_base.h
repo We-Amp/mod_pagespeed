@@ -24,12 +24,15 @@
 
 #include "gtest/gtest.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/mock_message_handler.h"
-#include "pagespeed/kernel/base/mock_timer.h"
 #include "pagespeed/kernel/base/null_mutex.h"
 #include "pagespeed/kernel/base/scoped_ptr.h"
+#include "pagespeed/kernel/base/string.h"
+#include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_system.h"
-#include "pagespeed/kernel/thread/mock_scheduler.h"
+#include "pagespeed/kernel/http/response_headers.h"
+#include "test/pagespeed/kernel/base/mock_message_handler.h"
+#include "test/pagespeed/kernel/base/mock_timer.h"
+#include "test/pagespeed/kernel/thread/mock_scheduler.h"
 #include "pagespeed/kernel/util/platform.h"
 #include "test/pagespeed/iis/mock_iis.h"
 #include "test/pagespeed/kernel/base/mock_hasher.h"
@@ -44,6 +47,13 @@ class Statistics;
 // Base class for IIS module unit tests.
 // Provides common test infrastructure including mock IIS context,
 // message handler, timer, and thread system.
+//
+// This class consolidates common test patterns to reduce code duplication:
+// - HTTP context creation via CreateContext()
+// - Response header manipulation helpers
+// - Content type detection helpers
+// - HTTP status helpers
+// - PageSpeed URL creation/decoding helpers
 class IisTestBase : public testing::Test {
  protected:
   IisTestBase();
@@ -52,7 +62,7 @@ class IisTestBase : public testing::Test {
   void SetUp() override;
   void TearDown() override;
 
-  // Create a mock HTTP context with the given URL
+  // Create a mock HTTP context with the given URL (GET method, no headers)
   std::unique_ptr<MockHttpContext> CreateContext(const GoogleString& url);
 
   // Create a mock HTTP context with full customization
@@ -76,6 +86,10 @@ class IisTestBase : public testing::Test {
   // Helper to advance mock timer
   void AdvanceTimeMs(int64 ms);
 
+  // =========================================================================
+  // PageSpeed URL Helpers
+  // =========================================================================
+
   // Helper to check if a URL is a PageSpeed resource URL
   static bool IsPageSpeedUrl(const GoogleString& url);
 
@@ -91,6 +105,56 @@ class IisTestBase : public testing::Test {
       GoogleString* original_url,
       GoogleString* filter_id,
       GoogleString* hash);
+
+  // =========================================================================
+  // HTTP Status Helpers
+  // =========================================================================
+
+  // Get the HTTP reason phrase for a status code
+  static const char* GetReasonPhrase(int status);
+
+  // Check if status code indicates a successful response (2xx)
+  static bool IsSuccessStatus(int status) {
+    return status >= 200 && status < 300;
+  }
+
+  // Check if response should be rewritten based on status (only 200 OK)
+  static bool ShouldRewriteStatus(int status) {
+    return status == 200;
+  }
+
+  // =========================================================================
+  // Content Type Helpers
+  // =========================================================================
+
+  // Check if content type indicates HTML (text/html or application/xhtml+xml)
+  static bool IsHtmlContentType(const GoogleString& content_type) {
+    return content_type.find("text/html") != GoogleString::npos ||
+           content_type.find("application/xhtml+xml") != GoogleString::npos;
+  }
+
+  // =========================================================================
+  // Response Header Helpers
+  // =========================================================================
+
+  // Initialize standard response headers for testing
+  // Sets status 200, HTTP/1.1, Content-Type: text/plain
+  static void InitStandardResponseHeaders(ResponseHeaders* headers);
+
+  // Output ResponseHeaders to a mock response, filtering hop-by-hop headers
+  // Skips Transfer-Encoding and Content-Length (IIS handles these)
+  static void OutputResponseHeaders(const ResponseHeaders& headers,
+                                    MockHttpResponse* response);
+
+  // =========================================================================
+  // Response Writing Helpers
+  // =========================================================================
+
+  // Write data to mock response and return success
+  static bool WriteToResponse(MockHttpResponse* response, StringPiece data);
+
+  // Flush mock response
+  static bool FlushResponse(MockHttpResponse* response, bool final_flush);
 
  private:
   std::unique_ptr<MockMessageHandler> message_handler_;

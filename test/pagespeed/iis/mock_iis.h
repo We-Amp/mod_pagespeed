@@ -135,6 +135,7 @@ class MockHttpRequest {
 };
 
 // Mock HTTP Response for testing
+// Includes action recording for verifying IIS API call sequences.
 class MockHttpResponse {
  public:
   MockHttpResponse();
@@ -170,7 +171,42 @@ class MockHttpResponse {
   // Simulate IIS WriteEntityChunks
   HRESULT WriteEntityChunks(const char* data, size_t length);
 
+  // Simulate IIS Flush
+  HRESULT Flush(bool final_flush);
+
+  // =========================================================================
+  // Action Recording API (similar to Apache's MockApache::ActionsSinceLastCall)
+  // =========================================================================
+  //
+  // These methods track all API calls made to this response object,
+  // enabling tests to verify exact call sequences.
+  //
+  // Example usage in tests:
+  //   response->SetStatus(200, "OK");
+  //   response->SetHeader("Content-Type", "text/html");
+  //   response->WriteEntityChunks("hello", 5);
+  //   EXPECT_EQ("SetStatus(200, OK) SetHeader(Content-Type, text/html) "
+  //             "WriteEntityChunks(5 bytes)",
+  //             response->ActionsSinceLastCall());
+
+  // Returns all recorded actions since the last call to this method,
+  // then clears the action buffer. Actions are space-separated.
+  GoogleString ActionsSinceLastCall();
+
+  // Returns all recorded actions without clearing the buffer.
+  const GoogleString& AllActions() const { return recorded_actions_; }
+
+  // Clears all recorded actions.
+  void ClearRecordedActions();
+
+  // Enable or disable action recording (enabled by default).
+  void set_record_actions(bool record) { record_actions_ = record; }
+  bool record_actions() const { return record_actions_; }
+
  private:
+  // Record an action to the action buffer.
+  void RecordAction(const GoogleString& action);
+
   USHORT status_;
   GoogleString status_reason_;
   std::map<GoogleString, GoogleString> headers_;
@@ -178,10 +214,15 @@ class MockHttpResponse {
   ResponseHeaders response_headers_;
   bool completed_;
 
+  // Action recording state
+  GoogleString recorded_actions_;
+  bool record_actions_;
+
   DISALLOW_COPY_AND_ASSIGN(MockHttpResponse);
 };
 
 // Mock HTTP Context for testing
+// Includes action recording for tracking context-level operations.
 class MockHttpContext {
  public:
   MockHttpContext();
@@ -212,13 +253,32 @@ class MockHttpContext {
   bool IsAuthenticated() const { return !auth_user_.empty(); }
 
   // Simulate async completion
-  void SetAsyncPending(bool pending) { async_pending_ = pending; }
+  void SetAsyncPending(bool pending);
   bool IsAsyncPending() const { return async_pending_; }
 
   void CompleteAsync(REQUEST_NOTIFICATION_STATUS status);
   REQUEST_NOTIFICATION_STATUS GetAsyncResult() const { return async_result_; }
 
+  // =========================================================================
+  // Action Recording API
+  // =========================================================================
+
+  // Returns all recorded actions (from both context and response),
+  // then clears both action buffers.
+  GoogleString ActionsSinceLastCall();
+
+  // Returns all actions without clearing.
+  GoogleString AllActions() const;
+
+  // Clears all recorded actions (including response actions).
+  void ClearRecordedActions();
+
+  // Enable or disable action recording on this context and response.
+  void set_record_actions(bool record);
+
  private:
+  void RecordAction(const GoogleString& action);
+
   MockHttpRequest request_;
   MockHttpResponse response_;
   DWORD site_id_;
@@ -228,6 +288,9 @@ class MockHttpContext {
   GoogleString auth_user_;
   bool async_pending_;
   REQUEST_NOTIFICATION_STATUS async_result_;
+
+  // Action recording state
+  GoogleString recorded_actions_;
 
   DISALLOW_COPY_AND_ASSIGN(MockHttpContext);
 };

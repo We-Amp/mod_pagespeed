@@ -63,7 +63,8 @@ class TestCompression:
         check_from "$OUT" fgrep -qi 'Content-Encoding: gzip'
     """
 
-    def test_gzip_compression_enabled(self, client: PageSpeedClient, example_root: str):
+    @pytest.mark.not_iis  # IIS gzip requires explicit configuration
+    def test_gzip_compression_enabled(self, client: PageSpeedClient, example_root: str, server_config):
         """Server should return gzip-compressed responses when requested."""
         response = client.get(
             f"{example_root}/",

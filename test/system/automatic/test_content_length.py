@@ -124,11 +124,17 @@ class TestContentLength:
             assert "chunked" not in transfer_encoding.lower(), \
                 "Rewritten resource should not use chunked encoding"
 
-    @pytest.mark.skip(reason="Cache-Control: private is set in current environment - may be IPRO behavior difference")
     def test_rewritten_resource_not_private(
         self, client: PageSpeedClient, example_root: str
     ):
-        """Rewritten resources should not have private cache control."""
+        """Rewritten resources should not have private cache control.
+
+        This test was previously skipped because AddSecurityHeaders() was
+        adding Cache-Control: private to all responses including IPRO cache
+        hits. Fixed by splitting security headers: user-facing resources use
+        AddSecurityHeaders() (no cache restriction), admin endpoints use
+        AddAdminSecurityHeaders() (with private, no-store, no-cache).
+        """
         url = f"{example_root}/rewrite_css_images.html?PageSpeedFilters=rewrite_css"
 
         # First wait for the CSS to be rewritten

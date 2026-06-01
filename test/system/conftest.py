@@ -28,6 +28,9 @@ Environment Variables:
     PAGESPEED_STATS_ENABLED: Whether statistics are enabled (default: 1)
     PAGESPEED_TEST_ROOT: Root path for test pages (default: /mod_pagespeed_test)
     PAGESPEED_EXAMPLE_ROOT: Root path for example pages (default: /mod_pagespeed_example)
+    PAGESPEED_STATS_PATH: Path to statistics endpoint (default: /mod_pagespeed_statistics)
+    PAGESPEED_ADMIN_PATH: Path to admin endpoint (default: /pagespeed_admin)
+    PAGESPEED_SERVER_TYPE: Server type: apache, envoy, or iis (default: auto-detect)
 """
 
 import os
@@ -62,6 +65,13 @@ class ServerConfig:
     example_root: str
     cache_dir: str
 
+    # Statistics and admin paths
+    stats_path: str
+    admin_path: str
+
+    # Server type
+    server_type: str  # "apache", "envoy", "iis", or "auto"
+
     # Features
     stats_enabled: bool
 
@@ -77,6 +87,17 @@ class ServerConfig:
             return f"https://{self.https_host}:{self.https_port}"
         return None
 
+    @property
+    def is_iis(self) -> bool:
+        """Check if running against IIS."""
+        return self.server_type == "iis"
+
+    @property
+    def is_windows(self) -> bool:
+        """Check if cache directory is on Windows."""
+        # Windows paths start with drive letter or use backslashes
+        return (len(self.cache_dir) > 1 and self.cache_dir[1] == ':') or '\\' in self.cache_dir
+
 
 @pytest.fixture(scope="session")
 def server_config() -> ServerConfig:
@@ -85,6 +106,16 @@ def server_config() -> ServerConfig:
     This fixture reads configuration from environment variables to allow
     tests to run against different server setups.
     """
+    server_type = os.environ.get("PAGESPEED_SERVER_TYPE", "auto")
+
+    # Auto-detect statistics path based on server type
+    if server_type in ("iis", "envoy"):
+        default_stats_path = "/pagespeed_statistics"
+        default_admin_path = "/pagespeed_admin"
+    else:
+        default_stats_path = "/mod_pagespeed_statistics"
+        default_admin_path = "/pagespeed_admin"
+
     return ServerConfig(
         host=os.environ.get("PAGESPEED_HOST", "localhost"),
         port=int(os.environ.get("PAGESPEED_PORT", "80")),
@@ -99,6 +130,9 @@ def server_config() -> ServerConfig:
         test_root=os.environ.get("PAGESPEED_TEST_ROOT", "/mod_pagespeed_test"),
         example_root=os.environ.get("PAGESPEED_EXAMPLE_ROOT", "/mod_pagespeed_example"),
         cache_dir=os.environ.get("PAGESPEED_CACHE_DIR", "/var/cache/pagespeed"),
+        stats_path=os.environ.get("PAGESPEED_STATS_PATH", default_stats_path),
+        admin_path=os.environ.get("PAGESPEED_ADMIN_PATH", default_admin_path),
+        server_type=server_type,
         stats_enabled=os.environ.get("PAGESPEED_STATS_ENABLED", "1") == "1",
     )
 
@@ -193,16 +227,18 @@ def stats_snapshot(client: PageSpeedClient, server_config: ServerConfig) -> Call
         pytest.skip("Statistics not enabled (set PAGESPEED_STATS_ENABLED=1)")
 
     def _capture() -> Dict[str, int]:
-        return client.get_statistics()
+        return client.get_statistics(stats_path=server_config.stats_path)
 
     return _capture
 
 
 @pytest.fixture
-def flush_cache(server_config: ServerConfig) -> Callable[[], None]:
+def flush_cache(server_config: ServerConfig, client: PageSpeedClient) -> Callable[[], None]:
     """Fixture to flush the PageSpeed cache.
 
     Equivalent to: touch $MOD_PAGESPEED_CACHE/cache.flush in bash tests
+
+    For IIS, we use the admin API to flush cache if the file touch method doesn't work.
 
     Usage:
         def test_cache(flush_cache):
@@ -211,16 +247,31 @@ def flush_cache(server_config: ServerConfig) -> Callable[[], None]:
     """
 
     def _flush() -> None:
+        # Try file-based cache flush first
         cache_flush_path = pathlib.Path(server_config.cache_dir) / "cache.flush"
 
-        if not cache_flush_path.parent.exists():
-            pytest.skip(f"Cache directory not found: {server_config.cache_dir}")
+        try:
+            if cache_flush_path.parent.exists():
+                # Touch the cache.flush file
+                cache_flush_path.touch()
+                # Wait for cache flush to be detected (poll interval)
+                time.sleep(1.5)
+                return
+        except (OSError, PermissionError):
+            # File method didn't work, try admin API for IIS
+            pass
 
-        # Touch the cache.flush file
-        cache_flush_path.touch()
+        # Try admin API endpoint for cache flush (works for IIS)
+        if server_config.is_iis:
+            try:
+                flush_url = f"{server_config.admin_path}?cache_flush=1"
+                client.get(flush_url)
+                time.sleep(1.0)
+                return
+            except Exception:
+                pass
 
-        # Wait for cache flush to be detected (poll interval)
-        time.sleep(1.5)
+        pytest.skip(f"Cannot flush cache: directory not found: {server_config.cache_dir}")
 
     return _flush
 
@@ -249,23 +300,71 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "slow: test takes a long time to run"
     )
+    config.addinivalue_line(
+        "markers", "apache_only: test only runs on Apache"
+    )
+    config.addinivalue_line(
+        "markers", "envoy_only: test only runs on Envoy"
+    )
+    config.addinivalue_line(
+        "markers", "iis_only: test only runs on IIS with PageSpeed module"
+    )
+    config.addinivalue_line(
+        "markers", "not_iis: test does not run on IIS (missing feature)"
+    )
+    config.addinivalue_line(
+        "markers", "not_envoy: test does not run on Envoy (missing feature)"
+    )
+    config.addinivalue_line(
+        "markers", "requires_module: test requires PageSpeed module to be installed"
+    )
 
 
 # Skip tests based on server configuration
 def pytest_runtest_setup(item):
     """Skip tests based on markers and server configuration."""
-    server_cfg = item.funcargs.get("server_config")
-    if server_cfg is None:
-        return
+    # Get server_type from environment since fixtures aren't resolved yet
+    server_type = os.environ.get("PAGESPEED_SERVER_TYPE", "auto")
+    secondary_host = os.environ.get("PAGESPEED_SECONDARY_HOST")
+    https_host = os.environ.get("PAGESPEED_HTTPS_HOST")
+    stats_enabled = os.environ.get("PAGESPEED_STATS_ENABLED", "1") == "1"
 
     if item.get_closest_marker("requires_secondary"):
-        if not server_cfg.secondary_host:
+        if not secondary_host:
             pytest.skip("Secondary server not configured")
 
     if item.get_closest_marker("requires_https"):
-        if not server_cfg.https_host:
+        if not https_host:
             pytest.skip("HTTPS server not configured")
 
     if item.get_closest_marker("requires_stats"):
-        if not server_cfg.stats_enabled:
+        if not stats_enabled:
             pytest.skip("Statistics not enabled")
+
+    # Server-type specific markers
+    if item.get_closest_marker("apache_only"):
+        if server_type not in ("apache", "auto"):
+            pytest.skip("Test only runs on Apache")
+
+    if item.get_closest_marker("envoy_only"):
+        if server_type not in ("envoy", "auto"):
+            pytest.skip("Test only runs on Envoy")
+
+    if item.get_closest_marker("iis_only"):
+        if server_type != "iis":
+            pytest.skip("Test only runs on IIS")
+        # iis_only tests also require the module to be installed
+        if not stats_enabled:
+            pytest.skip("Test requires PageSpeed module (stats not enabled)")
+
+    if item.get_closest_marker("not_iis"):
+        if server_type == "iis":
+            pytest.skip("Test not supported on IIS")
+
+    if item.get_closest_marker("not_envoy"):
+        if server_type == "envoy":
+            pytest.skip("Test not supported on Envoy")
+
+    if item.get_closest_marker("requires_module"):
+        if not stats_enabled:
+            pytest.skip("Test requires PageSpeed module (stats not enabled)")

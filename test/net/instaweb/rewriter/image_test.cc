@@ -29,7 +29,6 @@
 #include "net/instaweb/rewriter/public/image_url_encoder.h"
 #include "pagespeed/kernel/base/base64_util.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/dynamic_annotations.h"  // RunningOnValgrind
 #include "pagespeed/kernel/base/function.h"
 #include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
@@ -441,10 +440,6 @@ TEST_F(ImageTest, InputWebpTest) {
 }
 
 TEST_F(ImageTest, WebpLowResTest) {
-  // FYI: Takes ~20000 ms to run under Valgrind.
-  if (RunningOnValgrind()) {
-    return;
-  }
   Image::CompressionOptions* options = new Image::CompressionOptions();
   options->recompress_webp = true;
   options->preferred_webp = WEBP_LOSSY;
@@ -456,10 +451,6 @@ TEST_F(ImageTest, WebpLowResTest) {
 }
 
 TEST_F(ImageTest, WebpLaLowResTest) {
-  // FYI: This test will also probably take very long to run under Valgrind.
-  if (RunningOnValgrind()) {
-    return;
-  }
   Image::CompressionOptions* options = new Image::CompressionOptions();
   options->recompress_webp = true;
   options->preferred_webp = WEBP_LOSSLESS;
@@ -479,10 +470,6 @@ TEST_F(ImageTest, PngTest) {
 }
 
 TEST_F(ImageTest, PngToWebpTest) {
-  // FYI: This test will also probably take very long to run under Valgrind.
-  if (RunningOnValgrind()) {
-    return;
-  }
   ConversionVarChecker conversion_var_checker(options_.get());
   options_->webp_quality = 75;
   CheckImageFromFile(
@@ -497,10 +484,6 @@ TEST_F(ImageTest, PngToWebpTest) {
 }
 
 TEST_F(ImageTest, PngToWebpFailToJpegDueToPreferredTest) {
-  // FYI: This test will also probably take very long to run under Valgrind.
-  if (RunningOnValgrind()) {
-    return;
-  }
   ConversionVarChecker conversion_var_checker(options_.get());
   options_->preferred_webp = WEBP_NONE;
   options_->webp_quality = 75;
@@ -518,10 +501,6 @@ TEST_F(ImageTest, PngToWebpFailToJpegDueToPreferredTest) {
 }
 
 TEST_F(ImageTest, PngToWebpLaTest) {
-  // FYI: This test will also probably take very long to run under Valgrind.
-  if (RunningOnValgrind()) {
-    return;
-  }
   ConversionVarChecker conversion_var_checker(options_.get());
   options_->webp_quality = 75;
   CheckImageFromFile(
@@ -537,10 +516,6 @@ TEST_F(ImageTest, PngToWebpLaTest) {
 }
 
 TEST_F(ImageTest, PngAlphaFailToWebpLossyTest) {
-  // FYI: This test will also probably take very long to run under Valgrind.
-  if (RunningOnValgrind()) {
-    return;
-  }
   Image::CompressionOptions* options = new Image::CompressionOptions;
   ConversionVarChecker conversion_var_checker(options);
   options->preferred_webp = WEBP_LOSSY;
@@ -568,10 +543,6 @@ TEST_F(ImageTest, PngAlphaFailToWebpLossyTest) {
 }
 
 TEST_F(ImageTest, PngAlphaToWebpLaTest) {
-  // FYI: This test will also probably take very long to run under Valgrind.
-  if (RunningOnValgrind()) {
-    return;
-  }
   Image::CompressionOptions* options = new Image::CompressionOptions;
   ConversionVarChecker conversion_var_checker(options);
   options->preferred_webp = WEBP_LOSSLESS;
@@ -595,10 +566,6 @@ TEST_F(ImageTest, PngAlphaToWebpLaTest) {
 }
 
 TEST_F(ImageTest, PngAlphaToWebpTestFailsBecauseTooManyTries) {
-  // FYI: This test will also probably take very long to run under Valgrind.
-  if (RunningOnValgrind()) {
-    return;
-  }
   Image::CompressionOptions* options = new Image::CompressionOptions;
   ConversionVarChecker conversion_var_checker(options);
   options->preferred_webp = WEBP_LOSSLESS;
@@ -626,10 +593,6 @@ TEST_F(ImageTest, PngAlphaToWebpTestFailsBecauseTooManyTries) {
 // This tests that we compress the alpha channel on the webp. If we
 // don't on this image, it becomes larger than the original.
 TEST_F(ImageTest, PngLargeAlphaToWebpLaTest) {
-  // FYI: This test will also probably take very long to run under Valgrind.
-  if (RunningOnValgrind()) {
-    return;
-  }
   Image::CompressionOptions* options = new Image::CompressionOptions;
   ConversionVarChecker conversion_var_checker(options);
   options->preferred_webp = WEBP_LOSSLESS;
@@ -656,10 +619,6 @@ TEST_F(ImageTest, PngLargeAlphaToWebpLaTest) {
 // Same image and settings that succeed in PngLargeAlphaToWebpTest,
 // should fail when using a very short timeout.
 TEST_F(ImageTest, PngLargeAlphaToWebpTimesOutToPngTest) {
-  // FYI: This test will also probably take very long to run under Valgrind.
-  if (RunningOnValgrind()) {
-    return;
-  }
   Image::CompressionOptions* options = new Image::CompressionOptions;
   ConversionVarChecker conversion_var_checker(options);
   options->preferred_webp = WEBP_LOSSLESS;
@@ -698,10 +657,6 @@ TEST_F(ImageTest, PngLargeAlphaToWebpTimesOutToPngTest) {
 // Same image and settings that succeed in PngLargeAlphaToWebpTest,
 // should succeed if processing is really fast.
 TEST_F(ImageTest, PngLargeAlphaToWebpDoesNotTimeOutTest) {
-  // FYI: This test will also probably take very long to run under Valgrind.
-  if (RunningOnValgrind()) {
-    return;
-  }
   Image::CompressionOptions* options = new Image::CompressionOptions;
   ConversionVarChecker conversion_var_checker(options);
   options->preferred_webp = WEBP_LOSSLESS;
@@ -793,10 +748,6 @@ TEST_F(ImageTest, GifToJpegTest) {
 }
 
 TEST_F(ImageTest, GifToWebpTest) {
-  // FYI: This test will also probably take very long to run under Valgrind.
-  if (RunningOnValgrind()) {
-    return;
-  }
   ConversionVarChecker conversion_var_checker(options_.get());
   options_->webp_quality = 25;
   CheckImageFromFile(kIronChef, IMAGE_GIF, IMAGE_WEBP,
@@ -811,10 +762,6 @@ TEST_F(ImageTest, GifToWebpTest) {
 }
 
 TEST_F(ImageTest, GifToWebpLaTest) {
-  // FYI: This test will also probably take very long to run under Valgrind.
-  if (RunningOnValgrind()) {
-    return;
-  }
   ConversionVarChecker conversion_var_checker(options_.get());
   options_->webp_quality = 75;
   CheckImageFromFile(kTransparent, IMAGE_GIF, IMAGE_WEBP_LOSSLESS_OR_ALPHA,
@@ -985,10 +932,6 @@ TEST_F(ImageTest, JpegRetainExifDataTest) {
 }
 
 TEST_F(ImageTest, WebpTest) {
-  // FYI: Takes ~70000 ms to run under Valgrind.
-  if (RunningOnValgrind()) {
-    return;
-  }
   options_->webp_quality = 75;
   CheckImageFromFile(kPuzzle, IMAGE_JPEG, IMAGE_WEBP,
                      8,     // Min bytes to bother checking file type at all.
@@ -1030,10 +973,6 @@ TEST_F(ImageTest, JpegToWebpTimesOutTest) {
 }
 
 TEST_F(ImageTest, JpegToWebpDoesNotTimeOutTest) {
-  // FYI: This test will probably take very long to run under Valgrind.
-  if (RunningOnValgrind()) {
-    return;
-  }
   Image::CompressionOptions* options = new Image::CompressionOptions;
   ConversionVarChecker conversion_var_checker(options);
   options->recompress_jpeg = true;
@@ -1066,10 +1005,6 @@ TEST_F(ImageTest, JpegToWebpDoesNotTimeOutTest) {
 }
 
 TEST_F(ImageTest, WebpNonLaFromJpgTest) {
-  // FYI: Takes ~70000 ms to run under Valgrind.
-  if (RunningOnValgrind()) {
-    return;
-  }
   ConversionVarChecker conversion_var_checker(options_.get());
   options_->webp_quality = 75;
   // Note that jpeg->webp cannot return a lossless webp.
@@ -1259,11 +1194,6 @@ void SetBaseJpegOptions(Image::CompressionOptions* options) {
 }
 
 TEST_F(ImageTest, IgnoreTimeoutWhenFinishingWebp) {
-  // FYI: This test will also probably take very long to run under Valgrind.
-  if (RunningOnValgrind()) {
-    return;
-  }
-
   // Get the jpeg reference image
   Image::CompressionOptions* jpeg_options = new Image::CompressionOptions;
   SetBaseJpegOptions(jpeg_options);
@@ -1345,10 +1275,6 @@ TEST_F(ImageTest, IgnoreTimeoutWhenFinishingWebp) {
 }
 
 TEST_F(ImageTest, AnimatedGifToWebpTest) {
-  // FYI: This test will also probably take very long to run under Valgrind.
-  if (RunningOnValgrind()) {
-    return;
-  }
   ConversionVarChecker conversion_var_checker(options_.get());
   options_->webp_animated_quality = 25;
   options_->allow_webp_animated = true;

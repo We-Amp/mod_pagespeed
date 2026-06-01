@@ -23,6 +23,23 @@
 
 namespace net_instaweb {
 
+namespace {
+
+// Helper to join strings with a separator
+GoogleString JoinStrings(const std::vector<GoogleString>& strings,
+                         const GoogleString& separator) {
+  GoogleString result;
+  for (size_t i = 0; i < strings.size(); ++i) {
+    if (i > 0) {
+      result.append(separator);
+    }
+    result.append(strings[i]);
+  }
+  return result;
+}
+
+}  // namespace
+
 // MockHttpRequest implementation
 MockHttpRequest::MockHttpRequest()
     : method_("GET"),
@@ -47,7 +64,9 @@ void MockHttpRequest::SetMethod(const GoogleString& method) {
 
 void MockHttpRequest::SetHeader(const GoogleString& name,
                                  const GoogleString& value) {
-  headers_[LowerString(name)] = value;
+  GoogleString lower_name = name;
+  LowerString(&lower_name);
+  headers_[lower_name] = value;
 }
 
 void MockHttpRequest::SetQueryString(const GoogleString& query) {
@@ -59,7 +78,9 @@ void MockHttpRequest::SetRemoteAddress(const GoogleString& addr) {
 }
 
 GoogleString MockHttpRequest::GetHeader(const GoogleString& name) const {
-  auto it = headers_.find(LowerString(name));
+  GoogleString lower_name = name;
+  LowerString(&lower_name);
+  auto it = headers_.find(lower_name);
   if (it != headers_.end()) {
     return it->second;
   }
@@ -70,7 +91,8 @@ GoogleString MockHttpRequest::GetHeader(const GoogleString& name) const {
 MockHttpResponse::MockHttpResponse()
     : status_(200),
       status_reason_("OK"),
-      completed_(false) {
+      completed_(false),
+      record_actions_(true) {
 }
 
 MockHttpResponse::~MockHttpResponse() {
@@ -79,20 +101,24 @@ MockHttpResponse::~MockHttpResponse() {
 void MockHttpResponse::SetStatus(USHORT status, const GoogleString& reason) {
   status_ = status;
   status_reason_ = reason;
+  RecordAction(StrCat("SetStatus(", IntegerToString(status), ", ", reason, ")"));
 }
 
 void MockHttpResponse::SetHeader(const GoogleString& name,
                                   const GoogleString& value) {
   headers_[name] = value;
   response_headers_.Replace(name, value);
+  RecordAction(StrCat("SetHeader(", name, ", ", value, ")"));
 }
 
 void MockHttpResponse::AppendBody(const StringPiece& data) {
   data.AppendToString(&body_);
+  RecordAction(StrCat("AppendBody(", IntegerToString(data.size()), " bytes)"));
 }
 
 void MockHttpResponse::ClearBody() {
   body_.clear();
+  RecordAction("ClearBody()");
 }
 
 GoogleString MockHttpResponse::GetHeader(const GoogleString& name) const {
@@ -105,7 +131,32 @@ GoogleString MockHttpResponse::GetHeader(const GoogleString& name) const {
 
 HRESULT MockHttpResponse::WriteEntityChunks(const char* data, size_t length) {
   body_.append(data, length);
+  RecordAction(StrCat("WriteEntityChunks(", IntegerToString(length), " bytes)"));
   return S_OK;
+}
+
+HRESULT MockHttpResponse::Flush(bool final_flush) {
+  RecordAction(StrCat("Flush(", final_flush ? "final" : "partial", ")"));
+  return S_OK;
+}
+
+void MockHttpResponse::RecordAction(const GoogleString& action) {
+  if (record_actions_) {
+    if (!recorded_actions_.empty()) {
+      recorded_actions_.append(" ");
+    }
+    recorded_actions_.append(action);
+  }
+}
+
+GoogleString MockHttpResponse::ActionsSinceLastCall() {
+  GoogleString result = recorded_actions_;
+  recorded_actions_.clear();
+  return result;
+}
+
+void MockHttpResponse::ClearRecordedActions() {
+  recorded_actions_.clear();
 }
 
 // MockHttpContext implementation
@@ -121,9 +172,72 @@ MockHttpContext::MockHttpContext()
 MockHttpContext::~MockHttpContext() {
 }
 
+void MockHttpContext::SetAsyncPending(bool pending) {
+  async_pending_ = pending;
+  RecordAction(StrCat("SetAsyncPending(", pending ? "true" : "false", ")"));
+}
+
 void MockHttpContext::CompleteAsync(REQUEST_NOTIFICATION_STATUS status) {
   async_pending_ = false;
   async_result_ = status;
+  const char* status_str = "CONTINUE";
+  switch (status) {
+    case RQ_NOTIFICATION_PENDING:
+      status_str = "PENDING";
+      break;
+    case RQ_NOTIFICATION_FINISH_REQUEST:
+      status_str = "FINISH_REQUEST";
+      break;
+    default:
+      status_str = "CONTINUE";
+      break;
+  }
+  RecordAction(StrCat("CompleteAsync(", status_str, ")"));
+}
+
+void MockHttpContext::RecordAction(const GoogleString& action) {
+  if (!recorded_actions_.empty()) {
+    recorded_actions_.append(" ");
+  }
+  recorded_actions_.append("[Context]");
+  recorded_actions_.append(action);
+}
+
+GoogleString MockHttpContext::ActionsSinceLastCall() {
+  // Combine context and response actions
+  GoogleString result;
+  if (!recorded_actions_.empty()) {
+    result = recorded_actions_;
+    recorded_actions_.clear();
+  }
+  GoogleString response_actions = response_.ActionsSinceLastCall();
+  if (!response_actions.empty()) {
+    if (!result.empty()) {
+      result.append(" ");
+    }
+    result.append(response_actions);
+  }
+  return result;
+}
+
+GoogleString MockHttpContext::AllActions() const {
+  GoogleString result = recorded_actions_;
+  if (!response_.AllActions().empty()) {
+    if (!result.empty()) {
+      result.append(" ");
+    }
+    result.append(response_.AllActions());
+  }
+  return result;
+}
+
+void MockHttpContext::ClearRecordedActions() {
+  recorded_actions_.clear();
+  response_.ClearRecordedActions();
+}
+
+void MockHttpContext::set_record_actions(bool record) {
+  response_.set_record_actions(record);
 }
 
 // MockAppHostElement implementation
@@ -370,10 +484,10 @@ std::unique_ptr<MockAppHostElement> MockConfigBuilder::Build() {
       settings->AddChildElement(filters);
     }
     if (!enabled_filters_.empty()) {
-      filters->SetAttribute("enabledFilters", JoinString(enabled_filters_, ","));
+      filters->SetAttribute("enabledFilters", JoinStrings(enabled_filters_, ","));
     }
     if (!disabled_filters_.empty()) {
-      filters->SetAttribute("disabledFilters", JoinString(disabled_filters_, ","));
+      filters->SetAttribute("disabledFilters", JoinStrings(disabled_filters_, ","));
     }
   }
   return std::move(root_);

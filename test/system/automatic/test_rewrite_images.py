@@ -72,7 +72,6 @@ class TestRewriteImages:
 
         assert_http_status(response, 200)
 
-    @pytest.mark.skip(reason="data-pagespeed-no-transform attribute not stripped in current environment - bash test uses fetch_until with retry")
     def test_data_pagespeed_no_transform(
         self, client: PageSpeedClient, example_root: str
     ):
@@ -81,29 +80,31 @@ class TestRewriteImages:
         Bash original:
             fetch_until $URL 'grep -c "images/disclosure_open_plus.png"' 1
             fetch_until $URL 'grep -c "data-pagespeed-no-transform"' 0
+
+        The attribute stripping happens during HTML rewriting, which may be
+        asynchronous. Use fetch_until pattern to wait for rewriting to complete.
         """
         url = f"{example_root}/rewrite_images.html?PageSpeedFilters=rewrite_images"
 
-        # With blocking rewrite, verify no-transform images are preserved
-        response = client.get(
+        # Wait for the no-transform image to appear (verifies image is preserved)
+        response = client.fetch_until_contains(
             url,
+            pattern=r"images/disclosure_open_plus\.png",
+            timeout=30.0,
             headers={"X-PSA-Blocking-Rewrite": "psatest"},
         )
         assert_http_status(response, 200)
 
-        # The no-transform image should keep its original URL
-        assert_contains(
-            response,
-            r"images/disclosure_open_plus\.png",
-            "No-transform image should keep original URL",
+        # Wait for the attribute to be stripped (count should be 0)
+        # Use fetch_until with a condition that checks the attribute is gone
+        response = client.fetch_until_count(
+            url,
+            pattern=r"data-pagespeed-no-transform",
+            expected_count=0,
+            timeout=30.0,
+            headers={"X-PSA-Blocking-Rewrite": "psatest"},
         )
-
-        # The data-pagespeed-no-transform attribute should be stripped
-        assert_not_contains(
-            response,
-            r"data-pagespeed-no-transform",
-            "No-transform attribute should be stripped",
-        )
+        assert_http_status(response, 200)
 
 
 class TestRewrittenImageHeaders:

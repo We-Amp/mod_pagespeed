@@ -88,7 +88,6 @@ class TestContentLength:
         assert "chunked" not in transfer_encoding.lower(), \
             "Should not use chunked transfer encoding"
 
-    @pytest.mark.skip(reason="Cache-Control: private is set in current environment - may be IPRO behavior difference")
     def test_resources_not_private_cache(
         self, client: PageSpeedClient, example_root: str
     ):
@@ -96,6 +95,10 @@ class TestContentLength:
 
         Bash original:
             check_not_from "$OUT" grep "^Cache-Control:.*private"
+
+        This test was previously skipped because AddSecurityHeaders() was
+        adding Cache-Control: private to all responses. Fixed by using
+        AddAdminSecurityHeaders() only for admin endpoints.
         """
         # Get a page that has a rewritten CSS resource
         page_url = f"{example_root}/rewrite_css_images.html?PageSpeedFilters=rewrite_css"

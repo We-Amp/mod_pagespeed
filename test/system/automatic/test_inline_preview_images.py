@@ -117,10 +117,16 @@ class TestInlinePreviewImagesDebug:
             user_agent=IPHONE_USER_AGENT,
         )
 
+        # Note: The original bash test used "grep -c" which counts LINES (3 lines),
+        # but Python's regex.findall counts total MATCHES (4 occurrences).
+        # The pattern appears on 3 lines, but one line has it twice:
+        #   Line 1: "pagespeed.delayImagesInit = function()"
+        #   Line 2: "pagespeed.delayImagesInit = pagespeed.delayImagesInit"  (2 matches)
+        #   Line 3: "pagespeed.delayImagesInit()"
         response = mobile_client.fetch_until_count(
             url,
             pattern=r"pagespeed\.delayImagesInit",
-            expected_count=3,
+            expected_count=4,  # Total matches (bash grep -c counted 3 lines)
             timeout=30.0,
         )
         assert_http_status(response, 200)

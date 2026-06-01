@@ -20,7 +20,6 @@
 #include <cstddef>
 
 #include "net/instaweb/rewriter/public/rewrite_options.h"
-#include "pagespeed/kernel/base/dynamic_annotations.h"  // RunningOnValgrind
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/cache/lru_cache.h"
@@ -213,9 +212,6 @@ TEST_F(CssEmbeddedConfigTest, InlineImageToCssSmallTranscode) {
   options()->set_image_webp_recompress_quality(60);
   options()->EnableFilter(RewriteOptions::kConvertJpegToWebp);
   AddFilterAndSetup(RewriteOptions::kInlineImages);
-  if (RunningOnValgrind()) {  // Too slow under vg; must call Setup first.
-    return;
-  }
   SetupForWebp();
   AddFileToMockFetcher(StrCat(kTestDomain, kPuzzleJpgFile), kPuzzleJpgFile,
                        kContentTypeJpeg, 100);

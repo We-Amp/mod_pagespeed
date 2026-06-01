@@ -1,0 +1,181 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Licensed to the Apache Software Foundation (ASF) under one
+  or more contributor license agreements.  See the NOTICE file
+  distributed with this work for additional information
+  regarding copyright ownership.  The ASF licenses this file
+  to you under the Apache License, Version 2.0 (the
+  "License"); you may not use this file except in compliance
+  with the License.  You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing,
+  software distributed under the License is distributed on an
+  "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+  KIND, either express or implied.  See the License for the
+  specific language governing permissions and limitations
+  under the License.
+
+  PageSpeed IIS Module Performance Counter Manifest
+
+  This manifest defines performance counters for the PageSpeed IIS module
+  that can be viewed in Windows Performance Monitor (perfmon.exe).
+
+  INSTALLATION:
+  1. Copy pagespeed_iis.dll to a permanent location (e.g., C:\Program Files\PageSpeed\)
+  2. Update the 'applicationIdentity' path below to match
+  3. Run as Administrator:
+       lodctr /m:pagespeed_counters.man
+  4. Restart the Performance Counter service:
+       net stop pla && net start pla
+     Or restart the computer.
+
+  UNINSTALLATION:
+  1. Run as Administrator:
+       unlodctr /m:pagespeed_counters.man
+
+  GUID VALUES (must match iis_perf_counters.cc):
+  - Provider GUID: {E3F17D2E-A7B3-4C5F-9D21-3B8E6A1F4C9D}
+  - Counter Set GUID: {F4A28D3E-B8C4-5D6A-AE32-4C9F7B2E5D0E}
+-->
+<instrumentationManifest
+    xmlns="http://schemas.microsoft.com/win/2004/08/events"
+    xmlns:win="http://manifests.microsoft.com/win/2004/08/windows/events"
+    xmlns:xs="http://www.w3.org/2001/XMLSchema">
+
+  <instrumentation>
+    <counters
+        xmlns="http://schemas.microsoft.com/win/2005/12/counters"
+        schemaVersion="2.0">
+
+      <!--
+        PageSpeed Performance Counter Provider
+
+        The applicationIdentity must point to the actual DLL location.
+        Update this path when installing the module.
+      -->
+      <provider
+          symbol="PageSpeedProvider"
+          applicationIdentity="%SystemRoot%\System32\inetsrv\pagespeed_iis.dll"
+          providerType="userMode"
+          providerGuid="{E3F17D2E-A7B3-4C5F-9D21-3B8E6A1F4C9D}">
+
+        <!--
+          PageSpeed Counter Set
+
+          Single instance counter set containing all PageSpeed metrics.
+        -->
+        <counterSet
+            symbol="PageSpeedCounterSet"
+            guid="{F4A28D3E-B8C4-5D6A-AE32-4C9F7B2E5D0E}"
+            uri="Microsoft.PageSpeed.Counters"
+            name="PageSpeed"
+            description="PageSpeed IIS Module Performance Counters"
+            instances="single">
+
+          <!--
+            Counter definitions
+
+            Counter IDs must match PageSpeedCounterId enum in iis_perf_counters.cc:
+            - kCounterRequestsProcessed = 0
+            - kCounterHtmlRewrites = 1
+            - kCounterCacheHits = 2
+            - kCounterCacheMisses = 3
+            - kCounterIproRequests = 4
+            - kCounterErrors = 5
+            - kCounterTotalRewriteTimeMs = 6
+            - kCounterRewriteCount = 7
+
+            Counter types:
+            - perf_counter_large_rawcount (0x00010100): 64-bit instantaneous value
+          -->
+
+          <!-- Counter 0: Requests Processed -->
+          <counter
+              id="0"
+              uri="Microsoft.PageSpeed.Counters.RequestsProcessed"
+              name="Requests Processed"
+              description="Total number of HTTP requests processed by PageSpeed"
+              type="perf_counter_large_rawcount"
+              detailLevel="standard">
+          </counter>
+
+          <!-- Counter 1: HTML Rewrites -->
+          <counter
+              id="1"
+              uri="Microsoft.PageSpeed.Counters.HtmlRewrites"
+              name="HTML Rewrites"
+              description="Total number of HTML pages rewritten by PageSpeed"
+              type="perf_counter_large_rawcount"
+              detailLevel="standard">
+          </counter>
+
+          <!-- Counter 2: Cache Hits -->
+          <counter
+              id="2"
+              uri="Microsoft.PageSpeed.Counters.CacheHits"
+              name="Cache Hits"
+              description="Number of optimized resources served from cache"
+              type="perf_counter_large_rawcount"
+              detailLevel="standard">
+          </counter>
+
+          <!-- Counter 3: Cache Misses -->
+          <counter
+              id="3"
+              uri="Microsoft.PageSpeed.Counters.CacheMisses"
+              name="Cache Misses"
+              description="Number of cache misses requiring optimization"
+              type="perf_counter_large_rawcount"
+              detailLevel="standard">
+          </counter>
+
+          <!-- Counter 4: IPRO Requests -->
+          <counter
+              id="4"
+              uri="Microsoft.PageSpeed.Counters.IproRequests"
+              name="IPRO Requests"
+              description="In-Place Resource Optimization requests processed"
+              type="perf_counter_large_rawcount"
+              detailLevel="standard">
+          </counter>
+
+          <!-- Counter 5: Errors -->
+          <counter
+              id="5"
+              uri="Microsoft.PageSpeed.Counters.Errors"
+              name="Errors"
+              description="Number of errors encountered during optimization"
+              type="perf_counter_large_rawcount"
+              detailLevel="standard">
+          </counter>
+
+          <!-- Counter 6: Total Rewrite Time (ms) -->
+          <counter
+              id="6"
+              uri="Microsoft.PageSpeed.Counters.TotalRewriteTimeMs"
+              name="Total Rewrite Time (ms)"
+              description="Cumulative time spent rewriting pages in milliseconds"
+              type="perf_counter_large_rawcount"
+              detailLevel="advanced">
+          </counter>
+
+          <!-- Counter 7: Rewrite Count -->
+          <counter
+              id="7"
+              uri="Microsoft.PageSpeed.Counters.RewriteCount"
+              name="Rewrite Count"
+              description="Number of rewrites completed (for average calculation)"
+              type="perf_counter_large_rawcount"
+              detailLevel="advanced">
+          </counter>
+
+        </counterSet>
+
+      </provider>
+
+    </counters>
+  </instrumentation>
+
+</instrumentationManifest>

@@ -19,9 +19,11 @@
 
 #include "test/pagespeed/iis/iis_test_base.h"
 
+#include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "pagespeed/kernel/base/null_statistics.h"
 #include "pagespeed/kernel/base/string_util.h"
-#include "pagespeed/kernel/thread/mock_scheduler.h"
+#include "pagespeed/kernel/http/http_names.h"
+#include "test/pagespeed/kernel/thread/mock_scheduler.h"
 #include "pagespeed/kernel/util/platform.h"
 
 namespace net_instaweb {
@@ -33,6 +35,8 @@ IisTestBase::~IisTestBase() {
 }
 
 void IisTestBase::SetUp() {
+  // Initialize RewriteOptions properties before any test uses them
+  RewriteOptions::Initialize();
   thread_system_.reset(Platform::CreateThreadSystem());
   message_handler_.reset(new MockMessageHandler(new NullMutex));
   timer_.reset(new MockTimer(thread_system_->NewMutex(), 0));
@@ -135,6 +139,58 @@ bool IisTestBase::DecodePageSpeedUrl(
     *original_url = base;
   }
 
+  return true;
+}
+
+const char* IisTestBase::GetReasonPhrase(int status) {
+  switch (status) {
+    case 200: return "OK";
+    case 201: return "Created";
+    case 204: return "No Content";
+    case 301: return "Moved Permanently";
+    case 302: return "Found";
+    case 304: return "Not Modified";
+    case 400: return "Bad Request";
+    case 401: return "Unauthorized";
+    case 403: return "Forbidden";
+    case 404: return "Not Found";
+    case 500: return "Internal Server Error";
+    case 502: return "Bad Gateway";
+    case 503: return "Service Unavailable";
+    default: return "Unknown";
+  }
+}
+
+void IisTestBase::InitStandardResponseHeaders(ResponseHeaders* headers) {
+  headers->set_status_code(200);
+  headers->set_major_version(1);
+  headers->set_minor_version(1);
+  headers->MergeContentType("text/plain");
+}
+
+void IisTestBase::OutputResponseHeaders(const ResponseHeaders& headers,
+                                        MockHttpResponse* response) {
+  response->SetStatus(headers.status_code(),
+                      GetReasonPhrase(headers.status_code()));
+
+  for (int i = 0; i < headers.NumAttributes(); ++i) {
+    const GoogleString& name = headers.Name(i);
+    const GoogleString& value = headers.Value(i);
+    // Skip headers that IIS handles (hop-by-hop headers)
+    if (name != HttpAttributes::kTransferEncoding &&
+        name != HttpAttributes::kContentLength) {
+      response->SetHeader(name, value);
+    }
+  }
+}
+
+bool IisTestBase::WriteToResponse(MockHttpResponse* response, StringPiece data) {
+  response->WriteEntityChunks(data.data(), data.size());
+  return true;
+}
+
+bool IisTestBase::FlushResponse(MockHttpResponse* response, bool final_flush) {
+  response->Flush(final_flush);
   return true;
 }
 

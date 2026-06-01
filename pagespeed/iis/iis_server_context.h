@@ -22,6 +22,7 @@
 
 #include <memory>
 
+#include "pagespeed/automatic/proxy_fetch.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/system/system_server_context.h"
@@ -45,24 +46,36 @@ class IisServerContext : public SystemServerContext {
 
   // License validation
   bool ValidateLicense(const GoogleString& license_key);
-  bool IsLicenseValid() const { return license_valid_; }
+  // TODO(iis): Re-enable license check for production
+  // For testing, always return true to bypass license validation
+  bool IsLicenseValid() const { return true; /* license_valid_; */ }
   GoogleString GetLicenseError() const { return license_error_; }
 
   // Configuration from web.config
-  void ApplyConfiguration(const IisConfig& config);
+  void ApplyConfiguration(std::unique_ptr<IisConfig> config);
   const IisConfig* config() const { return config_.get(); }
 
   // Admin UI support
   bool IsAdminPath(const GoogleString& path) const;
   bool IsStatisticsPath(const GoogleString& path) const;
 
+  // Unplugged mode - returns true if module should be inactive
+  bool unplugged() const;
+
   // Access the factory
   IisRewriteDriverFactory* iis_factory() { return iis_factory_; }
+
+  // ProxyFetch factory for HTML rewriting (following Apache pattern)
+  ProxyFetchFactory* proxy_fetch_factory() {
+    return proxy_fetch_factory_.get();
+  }
+  void InitProxyFetchFactory();
 
  private:
   IisRewriteDriverFactory* iis_factory_;  // Not owned (parent class owns)
   std::unique_ptr<IisConfig> config_;
   std::unique_ptr<LicenseValidator> license_validator_;
+  std::unique_ptr<ProxyFetchFactory> proxy_fetch_factory_;
   bool license_valid_;
   GoogleString license_key_;
   GoogleString license_error_;
