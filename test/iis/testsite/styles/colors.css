@@ -1,0 +1,41 @@
+/* Color definitions for PageSpeed IIS test site */
+
+:root {
+    --primary-color: #007bff;
+    --secondary-color: #6c757d;
+    --success-color: #28a745;
+    --danger-color: #dc3545;
+    --warning-color: #ffc107;
+    --info-color: #17a2b8;
+}
+
+.box {
+    padding: 20px;
+    margin: 10px;
+    border-radius: 4px;
+    display: inline-block;
+    min-width: 100px;
+    text-align: center;
+}
+
+.box.red {
+    background-color: #dc3545;
+    color: white;
+}
+
+.box.green {
+    background-color: #28a745;
+    color: white;
+}
+
+.box.blue {
+    background-color: #007bff;
+    color: white;
+}
+
+.text-primary { color: var(--primary-color); }
+.text-secondary { color: var(--secondary-color); }
+.text-success { color: var(--success-color); }
+.text-danger { color: var(--danger-color); }
+.text-warning { color: var(--warning-color); }
+.text-info { color: var(--info-color); }
