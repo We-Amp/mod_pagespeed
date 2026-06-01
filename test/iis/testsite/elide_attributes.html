@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Elide Attributes Test</title>
+    <script type="text/javascript" src="scripts/example.js"></script>
+    <link rel="stylesheet" type="text/css" href="styles/main.css">
+</head>
+<body>
+    <h1>Elide Attributes Test</h1>
+    <p>This page tests the elide_attributes filter.</p>
+
+    <!-- Boolean attributes that should have values elided -->
+    <form>
+        <input type="text" name="username" required="required">
+        <input type="checkbox" name="remember" checked="checked">
+        <input type="text" name="disabled_field" disabled="disabled">
+        <button type="submit" autofocus="autofocus">Submit</button>
+    </form>
+
+    <!-- Default type attributes that can be elided -->
+    <script type="text/javascript">
+        console.log("Inline script with default type");
+    </script>
+
+    <style type="text/css">
+        .test { color: blue; }
+    </style>
+
+    <!-- Input type defaults -->
+    <input type="text" name="text_input">
+
+    <!-- Select with selected attribute -->
+    <select name="choice">
+        <option value="a">Option A</option>
+        <option value="b" selected="selected">Option B</option>
+        <option value="c">Option C</option>
+    </select>
+
+    <!-- Textarea with readonly -->
+    <textarea readonly="readonly">Read only content</textarea>
+
+    <!-- Audio/video with controls -->
+    <audio controls="controls" autoplay="autoplay" loop="loop" muted="muted">
+        <source src="audio.mp3" type="audio/mpeg">
+    </audio>
+</body>
+</html>

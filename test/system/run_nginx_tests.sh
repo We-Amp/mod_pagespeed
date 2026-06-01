@@ -152,12 +152,12 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Configuration
-NGINX_BINARY="${NGINX_BINARY:-/usr/sbin/nginx}"
+NGINX_BINARY="${NGINX_BINARY:-/usr/local/src/nginx/objs/nginx}"
 MODULE_PATH="$PROJECT_ROOT/bazel-bin/pagespeed/nginx/ngx_pagespeed_module.so"
 NGINX_CONFIG_DIR="${NGINX_CONFIG_DIR:-/tmp/nginx_pagespeed_test}"
 NGINX_PID_FILE="$NGINX_CONFIG_DIR/nginx.pid"
 NGINX_LOG_DIR="$NGINX_CONFIG_DIR/logs"
-NGINX_CACHE_DIR="${PAGESPEED_CACHE_DIR:-/var/cache/pagespeed}"
+NGINX_CACHE_DIR="${PAGESPEED_CACHE_DIR:-/tmp/pagespeed_cache}"
 NGINX_CONFIG_FILE="$NGINX_CONFIG_DIR/nginx.conf"
 
 # Build the module
@@ -412,13 +412,14 @@ start_nginx() {
     stop_nginx_process
 
     # Test configuration
-    if ! "$NGINX_BINARY" -t -c "$NGINX_CONFIG_FILE" 2>&1; then
+    # Use -p to set prefix (for temp dirs) and -e for initial error log
+    if ! "$NGINX_BINARY" -t -p "$NGINX_CONFIG_DIR" -e "$NGINX_LOG_DIR/error.log" -c "$NGINX_CONFIG_FILE" 2>&1; then
         log_error "NGINX configuration test failed"
         return 1
     fi
 
     # Start NGINX
-    if ! "$NGINX_BINARY" -c "$NGINX_CONFIG_FILE" 2>&1; then
+    if ! "$NGINX_BINARY" -p "$NGINX_CONFIG_DIR" -e "$NGINX_LOG_DIR/error.log" -c "$NGINX_CONFIG_FILE" 2>&1; then
         log_error "Failed to start NGINX"
         log_info "Checking error log..."
         tail -30 "$NGINX_LOG_DIR/error.log" 2>/dev/null || true

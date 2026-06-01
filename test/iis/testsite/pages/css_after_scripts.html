@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>CSS After Scripts Test</title>
+    <!-- Script comes first -->
+    <script src="../scripts/example.js"></script>
+    <!-- CSS comes after script - should be reordered by move_css_above_scripts -->
+    <link rel="stylesheet" href="../styles/yellow.css">
+</head>
+<body>
+    <h1>CSS After Scripts Test</h1>
+    <p>This page has CSS links after script tags for testing move_css_above_scripts.</p>
+
+    <div class="content">
+        <p>Content area.</p>
+    </div>
+</body>
+</html>

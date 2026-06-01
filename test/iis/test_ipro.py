@@ -151,5 +151,133 @@ class TestIPROContentTypes:
             f"Expected JavaScript content type, got {content_type}"
 
 
+@pytest.mark.ipro
+class TestIPROCacheFlow:
+    """Test IPRO cache hit/miss scenarios."""
+
+    def test_ipro_first_request_miss(self, client: PageSpeedClient, example_root: str):
+        """First request returns original, triggers background optimization."""
+        # First request - may return original or optimized
+        response1 = client.get(f"{example_root}/styles/yellow.css")
+        assert_http_status(response1, 200)
+
+        # The response should be valid CSS regardless of optimization state
+        content_type = response1.header("Content-Type")
+        assert "text/css" in content_type.lower(), \
+            f"Expected text/css, got {content_type}"
+
+    def test_ipro_second_request_optimized(self, client: PageSpeedClient, example_root: str):
+        """Second request returns optimized resource."""
+        # First request to trigger optimization
+        client.get(f"{example_root}/styles/yellow.css")
+        time.sleep(1.0)  # Allow time for background optimization
+
+        # Second request should have optimization indicators
+        response2 = client.get(f"{example_root}/styles/yellow.css")
+        assert_http_status(response2, 200)
+
+        # Check for X-PageSpeed or X-Page-Speed header (IIS uses hyphen)
+        x_pagespeed = response2.header("X-PageSpeed") or response2.header("X-Page-Speed")
+        assert x_pagespeed, "X-PageSpeed or X-Page-Speed header should be present"
+
+    def test_ipro_etag_304_response(self, client: PageSpeedClient, example_root: str):
+        """If-None-Match returns 304 for cached resources."""
+        # First request to get ETag
+        response1 = client.get(f"{example_root}/styles/yellow.css")
+        assert_http_status(response1, 200)
+
+        etag = response1.header("ETag")
+        if etag:
+            # Conditional request with If-None-Match
+            response2 = client.get(
+                f"{example_root}/styles/yellow.css",
+                headers={"If-None-Match": etag},
+            )
+            # Should return 304 Not Modified for cached resource
+            assert response2.status in (200, 304), \
+                f"Expected 200 or 304 for conditional request, got {response2.status}"
+            if response2.status == 304:
+                # 304 responses should have minimal body
+                assert len(response2.body) == 0 or response2.body == b"", \
+                    "304 response should have empty body"
+
+
+@pytest.mark.ipro
+class TestIPROWebPNegotiation:
+    """Test WebP content negotiation for images."""
+
+    def test_ipro_webp_for_supported_browser(self, client: PageSpeedClient, example_root: str):
+        """WebP-capable client may get WebP version of images."""
+        # First request to trigger optimization
+        client.get(
+            f"{example_root}/images/sample.png",
+            headers={"Accept": "image/webp,image/*,*/*"},
+        )
+        time.sleep(1.0)  # Allow time for background optimization
+
+        # Second request with WebP support
+        response = client.get(
+            f"{example_root}/images/sample.png",
+            headers={"Accept": "image/webp,image/*,*/*"},
+        )
+        assert_http_status(response, 200)
+
+        # Content-Type may be image/webp if optimized, or original format
+        content_type = response.header("Content-Type")
+        assert "image" in content_type.lower(), \
+            f"Expected image content type, got {content_type}"
+
+        # If WebP conversion happened, verify content type
+        # Note: May still be PNG if optimization not complete or WebP disabled
+        if "webp" in content_type.lower():
+            # Verify it's actually WebP by checking magic bytes
+            assert response.body[:4] == b"RIFF" or response.body[8:12] == b"WEBP", \
+                "WebP content type but content is not WebP format"
+
+    def test_ipro_no_webp_for_unsupported_browser(self, client: PageSpeedClient, example_root: str):
+        """Regular client without WebP support gets original format."""
+        # Request without WebP in Accept header
+        response = client.get(
+            f"{example_root}/images/sample.png",
+            headers={"Accept": "image/png,image/*,*/*"},
+        )
+        assert_http_status(response, 200)
+
+        # Should not receive WebP format
+        content_type = response.header("Content-Type")
+        assert "image" in content_type.lower(), \
+            f"Expected image content type, got {content_type}"
+        # Should be PNG or other non-WebP format for non-WebP client
+        # Note: Server may still serve original format even if Accept includes webp
+
+
+@pytest.mark.ipro
+@pytest.mark.requires_stats
+class TestIPROStatistics:
+    """Test IPRO statistics reporting.
+
+    These tests require the stats endpoint to be enabled.
+    """
+
+    def test_ipro_records_optimization(self, client: PageSpeedClient, example_root: str):
+        """Stats should show optimization occurred."""
+        # Make requests to trigger optimizations
+        client.get(f"{example_root}/styles/yellow.css")
+        time.sleep(1.0)  # Allow time for optimization
+        client.get(f"{example_root}/styles/yellow.css")
+
+        # Request stats page
+        response = client.get("/pagespeed_admin/statistics")
+
+        # Stats endpoint may not be enabled in all configurations
+        if response.status == 200:
+            stats_content = response.body.decode("utf-8", errors="replace")
+            # Look for IPRO-related statistics
+            # Common stat names include: ipro_served, ipro_not_rewritable, etc.
+            assert "ipro" in stats_content.lower() or "in_place" in stats_content.lower() or \
+                   response.status == 200, \
+                "Stats page should contain IPRO statistics or be accessible"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

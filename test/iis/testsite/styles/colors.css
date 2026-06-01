@@ -1,5 +1,4 @@
 /* Color definitions for PageSpeed IIS test site */
-
 :root {
     --primary-color: #007bff;
     --secondary-color: #6c757d;
@@ -8,7 +7,6 @@
     --warning-color: #ffc107;
     --info-color: #17a2b8;
 }
-
 .box {
     padding: 20px;
     margin: 10px;
@@ -17,25 +15,32 @@
     min-width: 100px;
     text-align: center;
 }
-
-.box.red {
-    background-color: #dc3545;
-    color: white;
-}
-
-.box.green {
-    background-color: #28a745;
-    color: white;
-}
-
-.box.blue {
-    background-color: #007bff;
-    color: white;
-}
-
+.box.red { background-color: #dc3545; color: white; }
+.box.green { background-color: #28a745; color: white; }
+.box.blue { background-color: #007bff; color: white; }
 .text-primary { color: var(--primary-color); }
 .text-secondary { color: var(--secondary-color); }
 .text-success { color: var(--success-color); }
 .text-danger { color: var(--danger-color); }
-.text-warning { color: var(--warning-color); }
-.text-info { color: var(--info-color); }
+.bg-primary { background-color: var(--primary-color); color: #fff; }
+.bg-secondary { background-color: var(--secondary-color); color: #fff; }
+.bg-success { background-color: var(--success-color); color: #fff; }
+.bg-danger { background-color: var(--danger-color); color: #fff; }
+.alert {
+    padding: 12px 20px;
+    margin-bottom: 16px;
+    border: 1px solid transparent;
+    border-radius: 4px;
+}
+.alert-primary { color: #004085; background-color: #cce5ff; }
+.alert-success { color: #155724; background-color: #d4edda; }
+.alert-danger { color: #721c24; background-color: #f8d7da; }
+.badge {
+    display: inline-block;
+    padding: 4px 8px;
+    font-size: 0.75em;
+    font-weight: 700;
+    border-radius: 10px;
+}
+.badge-primary { background-color: var(--primary-color); color: #fff; }
+.badge-success { background-color: var(--success-color); color: #fff; }

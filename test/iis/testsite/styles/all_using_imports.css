@@ -1,0 +1,15 @@
+/* Test CSS file that uses @import rules */
+@import url("yellow.css");
+@import url("colors.css");
+@import url("layout.css");
+
+/* Main styles */
+body {
+    margin: 0;
+    padding: 20px;
+}
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+}

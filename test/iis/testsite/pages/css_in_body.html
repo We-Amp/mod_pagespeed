@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>CSS In Body Test</title>
+</head>
+<body>
+    <h1>CSS In Body Test</h1>
+    <p>This page has CSS links in the body section for testing move_css_to_head.</p>
+
+    <!-- These CSS links should be moved to head by move_css_to_head filter -->
+    <link rel="stylesheet" href="../styles/yellow.css">
+    <link rel="stylesheet" href="../styles/main.css">
+
+    <div class="content">
+        <p>Content that comes after the CSS links.</p>
+    </div>
+
+    <!-- Another CSS link further down -->
+    <link rel="stylesheet" href="../styles/navigation.css">
+
+    <p>More content after additional CSS.</p>
+</body>
+</html>

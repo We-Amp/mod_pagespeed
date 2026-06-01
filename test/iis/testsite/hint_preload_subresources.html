@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Hint Preload Subresources Test</title>
+    <!-- This CSS file uses @import rules to load additional stylesheets -->
+    <link rel="stylesheet" href="styles/all_using_imports.css">
+</head>
+<body>
+    <h1>Hint Preload Subresources Test</h1>
+    <p>This page tests the hint_preload_subresources filter.</p>
+    <p>The filter should add Link headers with rel=preload hints for:</p>
+    <ul>
+        <li>The main CSS file (all_using_imports.css)</li>
+        <li>All @imported CSS files (yellow.css, colors.css, layout.css)</li>
+        <li>The JavaScript file below</li>
+    </ul>
+    <p>Images should NOT get preload hints.</p>
+    <img src="images/Puzzle.jpg" alt="Test image - should not be preloaded">
+
+    <script src="scripts/example.js"></script>
+</body>
+</html>

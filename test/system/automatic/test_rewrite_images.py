@@ -88,6 +88,12 @@ class TestRewriteImages:
 
         The attribute stripping happens during HTML rewriting, which may be
         asynchronous. Use fetch_until pattern to wait for rewriting to complete.
+
+        Note: The original bash test matched "data-pagespeed-no-transform" which
+        also appears in the image's title text. After rewriting, the HTML attribute
+        is stripped but the title text remains. We use a pattern that specifically
+        matches the HTML attribute form (followed by / or >) to avoid matching
+        the title text.
         """
         url = f"{example_root}/rewrite_images.html?PageSpeedFilters=rewrite_images"
 
@@ -101,10 +107,11 @@ class TestRewriteImages:
         assert_http_status(response, 200)
 
         # Wait for the attribute to be stripped (count should be 0)
-        # Use fetch_until with a condition that checks the attribute is gone
+        # Match the HTML attribute form: data-pagespeed-no-transform followed by
+        # / or > (not the same string in the title text which is followed by .)
         response = client.fetch_until_count(
             url,
-            pattern=r"data-pagespeed-no-transform",
+            pattern=r"data-pagespeed-no-transform[/>\s]",
             expected_count=0,
             timeout=30.0,
             headers={"X-PSA-Blocking-Rewrite": "psatest"},

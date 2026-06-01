@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Malformed HTML Test Page</title>
+    <link rel="stylesheet" href="styles/main.css">
+</head>
+<body>
+    <h1>Malformed HTML Test Page
+    <!-- Missing closing tag for h1 -->
+
+    <div class="unclosed-div">
+        <p>This paragraph is inside an unclosed div.
+        <!-- Missing closing tag for p -->
+
+        <span>Unclosed span
+        <!-- Missing closing tag for span -->
+
+        <ul>
+            <li>Item 1
+            <li>Item 2
+            <li>Item 3
+            <!-- List items without closing tags -->
+        </ul>
+
+    <!-- div is never closed -->
+
+    <p>Another paragraph with <b>bold <i>and italic</b></i> with mismatched nesting.</p>
+
+    <table>
+        <tr>
+            <td>Cell 1
+            <td>Cell 2
+            <!-- No closing td tags -->
+        </tr>
+        <tr>
+            <td>Cell 3</td>
+            <td>Cell 4</td>
+        <!-- No closing tr -->
+    </table>
+
+    <a href="http://example.com>Link with unclosed quote in attribute</a>
+
+    <img src="images/Puzzle.jpg" alt="Test image>
+
+    <!-- Completely malformed tag -->
+    <div class="test" data-value="foo bar =>
+        Content after malformed attribute
+    </div>
+
+    <!-- Self-closing tags used incorrectly -->
+    <div/>Content after self-closing div<br>
+
+    <!-- Missing doctype (not an issue since we have it, but nested badly) -->
+    <html>
+        <head></head>
+        <body>Nested HTML</body>
+    </html>
+
+    <!-- Script tag without closing -->
+    <script>
+        var x = 1;
+        // This script tag is never closed
+
+    <p>Content after unclosed script (invalid)</p>
+
+    <!-- Style tag without proper closing -->
+    <style>
+        .test { color: red;
+        /* Unclosed CSS rule */
+
+    <footer>
+        <p>End of malformed document.
+    </footer>
+
+<!-- Missing closing body and html tags -->

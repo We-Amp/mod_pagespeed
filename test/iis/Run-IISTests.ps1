@@ -10,7 +10,7 @@
     1. IIS-specific tests (test/iis/) - Tests specific to IIS integration
     2. Shared automatic tests (test/system/automatic/) - Cross-platform tests
 
-.PARAMETER Host
+.PARAMETER ServerHost
     The hostname of the IIS server. Default: localhost
 
 .PARAMETER Port
@@ -64,7 +64,7 @@
 #>
 
 param(
-    [string]$Host = "localhost",
+    [string]$ServerHost = "localhost",  # Renamed from $Host to avoid PowerShell reserved variable
     [int]$Port = 0,  # 0 means auto-detect: 8080 for IIS Express, 80 for IIS
     [switch]$UseHttps,
     [switch]$UseIISExpress,
@@ -177,7 +177,7 @@ function Wait-ForIIS {
     Write-Step "Waiting for IIS to be ready..."
 
     $scheme = if ($UseHttps) { "https" } else { "http" }
-    $url = "${scheme}://${Host}:${Port}/"
+    $url = "${scheme}://${ServerHost}:${Port}/"
 
     $maxAttempts = 30
     $attempt = 0
@@ -239,12 +239,13 @@ function Run-Tests {
     Write-Step "Running integration tests..."
 
     # Set environment variables
-    $env:PAGESPEED_HOST = $Host
+    $env:PAGESPEED_HOST = $ServerHost
     $env:PAGESPEED_PORT = $Port
     $env:PAGESPEED_HTTPS = if ($UseHttps) { "1" } else { "0" }
     $env:IIS_EXPRESS = if ($UseIISExpress) { "1" } else { "0" }
-    $env:PAGESPEED_TEST_ROOT = "/"
-    $env:PAGESPEED_EXAMPLE_ROOT = "/"
+    # Use empty string (not "/") to avoid double-slash in URLs
+    $env:PAGESPEED_TEST_ROOT = ""
+    $env:PAGESPEED_EXAMPLE_ROOT = ""
     $env:PAGESPEED_STATS_ENABLED = "1"
 
     # Determine which test directories to run
@@ -307,7 +308,7 @@ function Main {
 
     $serverMode = if ($UseIISExpress) { "IIS Express" } else { "Full IIS" }
     Write-Info "Server mode: $serverMode"
-    Write-Info "Target: http://${Host}:${Port}/"
+    Write-Info "Target: http://${ServerHost}:${Port}/"
 
     # Check Python
     if (-not (Test-Python)) {
