@@ -112,6 +112,7 @@ void IisAsyncUrlFetcher::StopFetch(IisAsyncWorker *worker)
 {
 	EnterCriticalSection(&cs);
 	if (this->shutting_down_) {
+		LeaveCriticalSection(&cs);
 		return;
 	}
 	asyncworkers.remove(worker);
@@ -125,6 +126,7 @@ void IisAsyncUrlFetcher::ShutDown()
 
 	EnterCriticalSection(&cs);
 	if (this->shutting_down_) {
+		LeaveCriticalSection(&cs);
 		return;
 	}
 

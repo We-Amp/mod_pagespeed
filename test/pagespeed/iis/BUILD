@@ -298,3 +298,16 @@ pagespeed_cc_test(
         "//pagespeed/iis:iis_module",
     ],
 )
+
+# GetIPString(SOCKADDR*) unit tests. Windows-only (winsock2 types); the helper
+# was split out of iis_http_module.cpp into //pagespeed/iis:iis_ip_string
+# precisely so it could be linked and tested here in isolation (the previous
+# free function had no header declaration and was buried in iis_module).
+pagespeed_cc_test(
+    name = "iis_get_ip_string_test",
+    srcs = ["iis_get_ip_string_test.cc"],
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        "//pagespeed/iis:iis_ip_string",
+    ],
+)

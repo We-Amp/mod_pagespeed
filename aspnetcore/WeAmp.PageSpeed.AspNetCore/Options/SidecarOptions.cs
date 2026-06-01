@@ -49,10 +49,14 @@ public class SidecarOptions
     public int AdminPort { get; set; } = 9901;
 
     /// <summary>
-    /// Address to bind the admin interface to. Default: "0.0.0.0" (all interfaces).
-    /// Set to "127.0.0.1" to restrict to localhost only.
+    /// Address to bind the Envoy admin interface to. Default: "127.0.0.1" (loopback only).
+    /// The admin interface is unauthenticated and exposes powerful endpoints
+    /// (/quitquitquit, /config_dump, runtime modification), so it must not be
+    /// exposed to untrusted networks. The sidecar only ever contacts it over
+    /// loopback (graceful-shutdown POST), so loopback is sufficient. Widen this
+    /// only if you understand the exposure.
     /// </summary>
-    public string AdminBindAddress { get; set; } = "0.0.0.0";
+    public string AdminBindAddress { get; set; } = "127.0.0.1";
 
     /// <summary>
     /// Path to envoy_pagespeed binary. If not set, searches PATH and well-known locations.

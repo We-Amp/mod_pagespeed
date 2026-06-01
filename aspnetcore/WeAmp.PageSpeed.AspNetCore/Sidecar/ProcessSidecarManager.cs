@@ -124,7 +124,8 @@ public class ProcessSidecarManager : ISidecarManager, IDisposable
         }
 
         // Stop process
-        if (_process != null && !_process.HasExited)
+        var process = CurrentProcess();
+        if (process != null && !process.HasExited)
         {
             var opts = _options.Value;
             try
@@ -138,12 +139,12 @@ public class ProcessSidecarManager : ISidecarManager, IDisposable
 
                 try
                 {
-                    await _process.WaitForExitAsync(timeoutCts.Token);
+                    await process.WaitForExitAsync(timeoutCts.Token);
                 }
                 catch (OperationCanceledException)
                 {
                     _logger.LogWarning("Graceful shutdown timed out, killing process");
-                    _process.Kill(entireProcessTree: true);
+                    process.Kill(entireProcessTree: true);
                 }
             }
             catch (Exception ex)
@@ -151,7 +152,7 @@ public class ProcessSidecarManager : ISidecarManager, IDisposable
                 _logger.LogWarning(ex, "Error during graceful shutdown, killing process");
                 try
                 {
-                    _process.Kill(entireProcessTree: true);
+                    process.Kill(entireProcessTree: true);
                 }
                 catch
                 {
@@ -233,39 +234,70 @@ public class ProcessSidecarManager : ISidecarManager, IDisposable
         return null;
     }
 
-    private void StartProcess(string binaryPath)
+    /// <summary>
+    /// Builds the <see cref="ProcessStartInfo"/> for launching envoy_pagespeed.
+    /// Each argument is added to <see cref="ProcessStartInfo.ArgumentList"/> so the
+    /// runtime quotes/escapes every token individually; the raw
+    /// <see cref="ProcessStartInfo.Arguments"/> string is never used (it performs
+    /// no escaping, letting a config path with spaces or a crafted
+    /// AdditionalArguments entry inject extra flags).
+    /// </summary>
+    internal static ProcessStartInfo BuildStartInfo(string binaryPath, string configPath, SidecarOptions sidecar)
     {
-        var opts = _options.Value;
-
-        var args = new List<string>
-        {
-            "-c", _configPath!,
-            "--log-level", "info",
-            "--use-dynamic-base-id"
-        };
-
-        args.AddRange(opts.Sidecar.AdditionalArguments);
-
         var startInfo = new ProcessStartInfo
         {
             FileName = binaryPath,
-            Arguments = string.Join(" ", args),
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             CreateNoWindow = true
         };
 
-        foreach (var (key, value) in opts.Sidecar.EnvironmentVariables)
+        // Add each token to ArgumentList so the runtime quotes/escapes them
+        // individually. Never assign ProcessStartInfo.Arguments (no escaping).
+        startInfo.ArgumentList.Add("-c");
+        startInfo.ArgumentList.Add(configPath);
+        startInfo.ArgumentList.Add("--log-level");
+        startInfo.ArgumentList.Add("info");
+        startInfo.ArgumentList.Add("--use-dynamic-base-id");
+
+        foreach (var arg in sidecar.AdditionalArguments)
+        {
+            startInfo.ArgumentList.Add(arg);
+        }
+
+        foreach (var (key, value) in sidecar.EnvironmentVariables)
         {
             startInfo.Environment[key] = value;
         }
 
-        _logger.LogDebug("Starting {Binary} {Args}", binaryPath, startInfo.Arguments);
+        return startInfo;
+    }
 
-        _process = new Process { StartInfo = startInfo };
+    // Returns the current process under the lock. _process is written by
+    // StartProcess (from StartAsync and the monitor's restart path) and read
+    // from several threads, so all access is synchronized via _lock; callers
+    // snapshot once into a local and use that.
+    private Process? CurrentProcess()
+    {
+        lock (_lock)
+        {
+            return _process;
+        }
+    }
 
-        _process.OutputDataReceived += (sender, e) =>
+    private void StartProcess(string binaryPath)
+    {
+        var opts = _options.Value;
+
+        var startInfo = BuildStartInfo(binaryPath, _configPath!, opts.Sidecar);
+
+        _logger.LogDebug("Starting {Binary} {Args}", binaryPath,
+            string.Join(" ", startInfo.ArgumentList));
+
+        var process = new Process { StartInfo = startInfo };
+
+        process.OutputDataReceived += (sender, e) =>
         {
             if (!string.IsNullOrEmpty(e.Data))
             {
@@ -273,7 +305,7 @@ public class ProcessSidecarManager : ISidecarManager, IDisposable
             }
         };
 
-        _process.ErrorDataReceived += (sender, e) =>
+        process.ErrorDataReceived += (sender, e) =>
         {
             if (!string.IsNullOrEmpty(e.Data))
             {
@@ -282,15 +314,27 @@ public class ProcessSidecarManager : ISidecarManager, IDisposable
             }
         };
 
-        if (!_process.Start())
+        if (!process.Start())
         {
+            process.Dispose();
             throw new InvalidOperationException("Failed to start envoy_pagespeed process");
         }
 
-        _process.BeginOutputReadLine();
-        _process.BeginErrorReadLine();
+        process.BeginOutputReadLine();
+        process.BeginErrorReadLine();
 
-        _logger.LogDebug("Started envoy_pagespeed with PID {Pid}", _process.Id);
+        // Publish the new process and dispose the previous one (e.g. on an
+        // auto-restart) so its OS handle and stdout/stderr read pumps aren't
+        // leaked once per restart.
+        Process? previous;
+        lock (_lock)
+        {
+            previous = _process;
+            _process = process;
+        }
+        previous?.Dispose();
+
+        _logger.LogDebug("Started envoy_pagespeed with PID {Pid}", process.Id);
     }
 
     private async Task WaitForHealthyAsync(int timeoutMs, CancellationToken cancellationToken)
@@ -304,10 +348,11 @@ public class ProcessSidecarManager : ISidecarManager, IDisposable
 
         while (!timeoutCts.Token.IsCancellationRequested)
         {
-            if (_process?.HasExited == true)
+            var process = CurrentProcess();
+            if (process?.HasExited == true)
             {
                 throw new InvalidOperationException(
-                    $"envoy_pagespeed process exited with code {_process.ExitCode}");
+                    $"envoy_pagespeed process exited with code {process.ExitCode}");
             }
 
             if (await CheckHealthAsync(timeoutCts.Token))
@@ -341,10 +386,11 @@ public class ProcessSidecarManager : ISidecarManager, IDisposable
                 await Task.Delay(opts.Sidecar.HealthCheckIntervalMs, cancellationToken);
 
                 // Check if process is still running
-                if (_process?.HasExited == true)
+                var process = CurrentProcess();
+                if (process?.HasExited == true)
                 {
                     _logger.LogWarning("Sidecar process exited unexpectedly with code {ExitCode}",
-                        _process.ExitCode);
+                        process.ExitCode);
                     await HandleProcessExitAsync(cancellationToken);
                     continue;
                 }
@@ -459,6 +505,12 @@ public class ProcessSidecarManager : ISidecarManager, IDisposable
 
     public void Dispose()
     {
+        Task? monitorTask;
+        lock (_lock)
+        {
+            monitorTask = _monitorTask;
+        }
+
         try
         {
             _monitorCts?.Cancel();
@@ -467,22 +519,46 @@ public class ProcessSidecarManager : ISidecarManager, IDisposable
         {
             // Already disposed
         }
+
+        // Wait for the monitor loop to observe cancellation and unwind before
+        // tearing down the process. Otherwise it can relaunch the child (via
+        // HandleProcessExitAsync) or touch a Process we're about to dispose,
+        // leaving an orphaned envoy_pagespeed process.
+        if (monitorTask != null)
+        {
+            try
+            {
+                monitorTask.Wait(TimeSpan.FromSeconds(5));
+            }
+            catch (AggregateException)
+            {
+                // OperationCanceledException from the cancelled loop is expected.
+            }
+        }
+
         _monitorCts?.Dispose();
 
-        if (_process != null)
+        Process? process;
+        lock (_lock)
         {
-            if (!_process.HasExited)
+            process = _process;
+            _process = null;
+        }
+
+        if (process != null)
+        {
+            if (!process.HasExited)
             {
                 try
                 {
-                    _process.Kill(entireProcessTree: true);
+                    process.Kill(entireProcessTree: true);
                 }
                 catch
                 {
                     // Process may have already exited
                 }
             }
-            _process.Dispose();
+            process.Dispose();
         }
 
         // Clean up config file

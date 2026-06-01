@@ -165,14 +165,14 @@ void SystemRewriteOptions::AddProperties() {
   // Takes about 0.1s to parse 1MB file for modpagespeed.com/pagespeed_console
   // TODO(sligocki): Increase once we have a better method for reading
   // historical data.
-  AddSystemProperty(1 * 1024 /* 1 Megabytes */,
+  AddSystemProperty(1L * 1024 /* 1 Megabytes */,
                     &SystemRewriteOptions::statistics_logging_max_file_size_kb_,
                     "aslfs", RewriteOptions::kStatisticsLoggingMaxFileSizeKb,
                     "Max size for statistics logging file.", false);
   AddSystemProperty(true, &SystemRewriteOptions::use_shared_mem_locking_,
                     "ausml", RewriteOptions::kUseSharedMemLocking,
                     "Use shared memory for internal named lock service", true);
-  AddSystemProperty(100 * 1024 /* 100 megabytes */,
+  AddSystemProperty(100L * 1024 /* 100 megabytes */,
                     &SystemRewriteOptions::file_cache_clean_size_kb_, "afc",
                     RewriteOptions::kFileCacheCleanSizeKb,
                     "Set the target size (in kilobytes) for file cache", true);
@@ -266,11 +266,21 @@ void SystemRewriteOptions::AddProperties() {
                     "Disable security checks that prohibit fetching from "
                     "hostnames mod_pagespeed does not know about",
                     false);
+  AddSystemProperty(false, &SystemRewriteOptions::strict_admin_access_, "saa",
+                    "StrictAdminAccess", kProcessScopeStrict,
+                    "OPT-IN, default off. When on, the admin, statistics, "
+                    "console, message and license API handlers deny "
+                    "non-loopback clients unless an explicit *Domains "
+                    "allowlist is configured. The loopback decision uses the "
+                    "validated client connection IP, not the Host header. "
+                    "When off (default) access checks behave exactly as "
+                    "before.",
+                    false);
   AddSystemProperty(false, &SystemRewriteOptions::fetch_with_gzip_, "afg",
                     "FetchWithGzip", kLegacyProcessScope,
                     "Request http content from origin servers using gzip",
                     true);
-  AddSystemProperty(1024 * 1024 * 10, /* 10 Megabytes */
+  AddSystemProperty(1024L * 1024 * 10, /* 10 Megabytes */
                     &SystemRewriteOptions::ipro_max_response_bytes_, "imrb",
                     "IproMaxResponseBytes", kLegacyProcessScope,
                     "Limit allowed size of IPRO responses. "
@@ -279,7 +289,7 @@ void SystemRewriteOptions::AddProperties() {
   AddSystemProperty(10, &SystemRewriteOptions::ipro_max_concurrent_recordings_,
                     "imcr", "IproMaxConcurrentRecordings", kLegacyProcessScope,
                     "Limit allowed number of IPRO recordings", true);
-  AddSystemProperty(1024 * 50, /* 50 Megabytes */
+  AddSystemProperty(1024L * 50, /* 50 Megabytes */
                     &SystemRewriteOptions::default_shared_memory_cache_kb_,
                     "dsmc", "DefaultSharedMemoryCacheKB", kLegacyProcessScope,
                     "Size of the default shared memory cache used by all "
@@ -556,6 +566,33 @@ bool SystemRewriteOptions::AllowDomain(
     return true;  // Allow unless they disallowed anything.
   }
   // Otherwise, allow only if this host is whitelisted.
+  return wildcard_group.Match(host.as_string(), false /* default deny */);
+}
+
+bool SystemRewriteOptions::AllowDomain(const GoogleUrl& url,
+                                       const FastWildcardGroup& wildcard_group,
+                                       bool client_is_loopback) const {
+  if (!strict_admin_access_.value()) {
+    // Default (opt-out) path: behave exactly as the two-argument form. The
+    // client_is_loopback signal is intentionally ignored so there is zero
+    // behavior change for deployments that have not opted in.
+    return AllowDomain(url, wildcard_group);
+  }
+
+  // Strict mode. If the operator configured an explicit allowlist we honor it
+  // unchanged (Host match, default-deny) so deliberately-widened access keeps
+  // working. The only behavior change strict mode makes is to the previously
+  // default-OPEN case: an empty allowlist no longer means "allow everyone" --
+  // it means "loopback only", decided from the validated client IP rather than
+  // the client-controlled Host header.
+  if (wildcard_group.empty()) {
+    return client_is_loopback;
+  }
+  StringPiece host = url.Host();
+  if (host.empty()) {
+    DCHECK(false);
+    return false;
+  }
   return wildcard_group.Match(host.as_string(), false /* default deny */);
 }
 

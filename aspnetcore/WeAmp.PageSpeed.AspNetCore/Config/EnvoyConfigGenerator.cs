@@ -31,6 +31,21 @@ public class EnvoyConfigGenerator
         if (!string.IsNullOrEmpty(configDir))
         {
             Directory.CreateDirectory(configDir);
+            // The config holds secrets (admin token, Redis creds); keep its
+            // directory owner-only on Unix. Best-effort: the directory may be a
+            // pre-existing shared location we don't own.
+            if (!OperatingSystem.IsWindows())
+            {
+                try
+                {
+                    File.SetUnixFileMode(configDir,
+                        UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Could not restrict permissions on config directory {Dir}", configDir);
+                }
+            }
         }
 
         // Ensure cache and log directories exist
@@ -50,7 +65,7 @@ public class EnvoyConfigGenerator
             .Build();
 
         var yaml = serializer.Serialize(config);
-        File.WriteAllText(configPath, yaml);
+        WriteSecretFile(configPath, yaml);
 
         _logger.LogInformation("Generated Envoy configuration at {ConfigPath}", configPath);
 
@@ -427,5 +442,37 @@ public class EnvoyConfigGenerator
         var bytes = new byte[32];
         RandomNumberGenerator.Fill(bytes);
         return Convert.ToHexString(bytes).ToLowerInvariant();
+    }
+
+    /// <summary>
+    /// Writes a file that contains secrets (the admin bearer token and any
+    /// Redis credentials) with owner-only permissions on Unix. The file is
+    /// created 0600 atomically (no world-readable window), and any pre-existing
+    /// file at the path is re-restricted after the truncating write.
+    /// </summary>
+    private static void WriteSecretFile(string path, string contents)
+    {
+        var streamOptions = new FileStreamOptions
+        {
+            Mode = FileMode.Create,
+            Access = FileAccess.Write,
+        };
+        if (!OperatingSystem.IsWindows())
+        {
+            streamOptions.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        }
+
+        using (var stream = new FileStream(path, streamOptions))
+        using (var writer = new StreamWriter(stream))
+        {
+            writer.Write(contents);
+        }
+
+        // FileMode.Create reuses an existing file's permissions, so also clamp
+        // explicitly in case a previous run left a looser file at this path.
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
     }
 }

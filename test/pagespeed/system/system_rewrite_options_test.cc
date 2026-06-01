@@ -20,9 +20,10 @@
 #include "pagespeed/system/system_rewrite_options.h"
 
 #include <functional>
+#include <memory>
 
 #include "pagespeed/kernel/base/google_message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
+#include "pagespeed/kernel/http/google_url.h"
 #include "test/net/instaweb/rewriter/rewrite_options_test_base.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/base/null_thread_system.h"
@@ -143,6 +144,9 @@ TEST_F(SystemRewriteOptionsTest, StaticAssetCdn) {
       msg);
   EXPECT_FALSE(options_.has_static_assets_to_cdn());
 
+  // ParseAndSetOptionFromName1 *appends* to msg, so reset it between calls to
+  // assert on just this call's message.
+  msg.clear();
   result = options_.ParseAndSetOptionFromName1(
       SystemRewriteOptions::kStaticAssetCDN, "foo.com, Weird", &msg, &handler_);
   EXPECT_EQ(result, RewriteOptions::kOptionValueInvalid);
@@ -152,6 +156,7 @@ TEST_F(SystemRewriteOptionsTest, StaticAssetCdn) {
       msg);
   EXPECT_FALSE(options_.has_static_assets_to_cdn());
 
+  msg.clear();
   result = options_.ParseAndSetOptionFromName1(
       SystemRewriteOptions::kStaticAssetCDN,
       "//foo.com, ADD_INSTRUMENTATION_JS, BLANK_GIF", &msg, &handler_);
@@ -304,6 +309,102 @@ TEST_F(SystemRewriteOptionsTest, RedisTimeoutInitValue) {
 TEST_F(SystemRewriteOptionsTest, RedisTimeout) {
   TestIntOption(SystemRewriteOptions::kRedisTimeoutUs,
                 &SystemRewriteOptions::redis_timeout_us);
+}
+
+// ---------------------------------------------------------------------------
+// StrictAdminAccess (opt-in, default off) gating predicate.
+// ---------------------------------------------------------------------------
+
+// The directive defaults to off and round-trips through the option parser.
+TEST_F(SystemRewriteOptionsTest, StrictAdminAccessDefaultsOff) {
+  EXPECT_FALSE(options_.strict_admin_access());
+
+  GoogleString msg;
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromName1("StrictAdminAccess", "on", &msg,
+                                                &handler_));
+  EXPECT_TRUE(options_.strict_admin_access());
+  EXPECT_EQ("", msg);
+
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromName1("StrictAdminAccess", "off",
+                                                &msg, &handler_));
+  EXPECT_FALSE(options_.strict_admin_access());
+}
+
+// With strict mode OFF (the default) the three-argument AllowDomain() and the
+// two-argument AdminAccessAllowed() must behave exactly like the legacy forms:
+// default-OPEN when no allowlist is configured, regardless of client IP.
+TEST_F(SystemRewriteOptionsTest, StrictAdminAccessOffIsUnchanged) {
+  ASSERT_FALSE(options_.strict_admin_access());
+  GoogleUrl gurl("http://evil.example.com/pagespeed_admin/");
+  ASSERT_TRUE(gurl.IsWebValid());
+
+  // Legacy two-arg form: default-open.
+  EXPECT_TRUE(options_.AdminAccessAllowed(gurl));
+
+  // New strict-aware forms collapse to the legacy behavior when off, even for
+  // a non-loopback client.
+  EXPECT_TRUE(options_.AdminAccessAllowed(gurl, /*client_is_loopback=*/false));
+  EXPECT_TRUE(options_.AdminAccessAllowed(gurl, /*client_is_loopback=*/true));
+}
+
+// With strict mode ON and no allowlist configured, only loopback clients are
+// allowed; non-loopback clients are denied. The host in the URL (which is
+// derived from the client-controlled Host header) does not grant access.
+TEST_F(SystemRewriteOptionsTest, StrictAdminAccessOnEmptyAllowlist) {
+  GoogleString msg;
+  ASSERT_EQ(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromName1("StrictAdminAccess", "on", &msg,
+                                                &handler_));
+  ASSERT_TRUE(options_.strict_admin_access());
+
+  GoogleUrl gurl("http://localhost/pagespeed_admin/");
+  ASSERT_TRUE(gurl.IsWebValid());
+
+  EXPECT_TRUE(options_.AdminAccessAllowed(gurl, /*client_is_loopback=*/true));
+  EXPECT_FALSE(options_.AdminAccessAllowed(gurl, /*client_is_loopback=*/false));
+
+  // All handler families share the same gate; spot-check the others.
+  EXPECT_FALSE(
+      options_.StatisticsAccessAllowed(gurl, /*client_is_loopback=*/false));
+  EXPECT_FALSE(
+      options_.ConsoleAccessAllowed(gurl, /*client_is_loopback=*/false));
+  EXPECT_FALSE(
+      options_.MessagesAccessAllowed(gurl, /*client_is_loopback=*/false));
+  EXPECT_FALSE(
+      options_.GlobalAdminAccessAllowed(gurl, /*client_is_loopback=*/false));
+  EXPECT_FALSE(options_.GlobalStatisticsAccessAllowed(
+      gurl, /*client_is_loopback=*/false));
+}
+
+// With strict mode ON and an explicit allowlist configured, the allowlist is
+// honored unchanged (default-deny Host match) regardless of the loopback flag,
+// so operators who deliberately widened access keep it.
+TEST_F(SystemRewriteOptionsTest, StrictAdminAccessOnExplicitAllowlist) {
+  GoogleString msg;
+  ASSERT_EQ(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromName1("StrictAdminAccess", "on", &msg,
+                                                &handler_));
+  ASSERT_EQ(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromName2(
+                "AdminDomains", "allow", "admin.example.com", &msg, &handler_));
+
+  GoogleUrl allowed("http://admin.example.com/pagespeed_admin/");
+  GoogleUrl denied("http://other.example.com/pagespeed_admin/");
+  ASSERT_TRUE(allowed.IsWebValid());
+  ASSERT_TRUE(denied.IsWebValid());
+
+  // Allowlisted host is permitted even from a non-loopback client.
+  EXPECT_TRUE(
+      options_.AdminAccessAllowed(allowed, /*client_is_loopback=*/false));
+  // Non-allowlisted host is denied even though the allowlist is non-empty;
+  // loopback does not auto-grant once an explicit allowlist exists, matching
+  // the legacy default-deny semantics for a configured allowlist.
+  EXPECT_FALSE(
+      options_.AdminAccessAllowed(denied, /*client_is_loopback=*/false));
+  EXPECT_FALSE(
+      options_.AdminAccessAllowed(denied, /*client_is_loopback=*/true));
 }
 
 }  // namespace net_instaweb

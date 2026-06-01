@@ -19,7 +19,7 @@
 
 // Unit-test the memcache interface.
 
-#include "pagespeed/system/apr_mem_cache.h"
+#include "pagespeed/apache/apr_mem_cache.h"
 
 #include <unistd.h>
 
@@ -36,7 +36,6 @@
 #include "pagespeed/kernel/base/md5_hasher.h"
 #include "pagespeed/kernel/base/null_mutex.h"
 #include "pagespeed/kernel/base/posix_timer.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/stack_buffer.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
@@ -85,8 +84,8 @@ class AprMemCacheTest : public CacheTestBase {
   }
 
   // Establishes a connection to a memcached instance; either one
-  // on localhost:$MEMCACHED_PORT or, if non-empty, the one in
-  // cluster_spec_.
+  // on $MEMCACHED_HOST:$MEMCACHED_PORT (defaulting to localhost) or,
+  // if non-empty, the one in cluster_spec_.
   bool ConnectToMemcached(bool use_md5_hasher) {
     // See install/run_program_with_memcached.sh where this environment
     // variable is established during development testing flows.
@@ -103,7 +102,11 @@ class AprMemCacheTest : public CacheTestBase {
         // Does not fail the test.
         return false;
       }
-      cluster_spec_.servers = {ExternalServerSpec("localhost", port)};
+      const char* host = getenv("MEMCACHED_HOST");
+      if (host == nullptr) {
+        host = "localhost";
+      }
+      cluster_spec_.servers = {ExternalServerSpec(host, port)};
     }
     Hasher* hasher = &mock_hasher_;
     if (use_md5_hasher) {
@@ -253,7 +256,13 @@ TEST_F(AprMemCacheTest, StatsTest) {
 
   GoogleString buf;
   ASSERT_TRUE(servers_->GetStatus(&buf));
-  EXPECT_TRUE(buf.find("memcached server localhost:") != GoogleString::npos);
+  // Check for expected hostname (from env or default "localhost")
+  const char* expected_host = getenv("MEMCACHED_HOST");
+  if (expected_host == nullptr) {
+    expected_host = "localhost";
+  }
+  EXPECT_TRUE(buf.find(StrCat("memcached server ", expected_host, ":")) !=
+              GoogleString::npos);
   EXPECT_TRUE(buf.find(" pid ") != GoogleString::npos);
   EXPECT_TRUE(buf.find("\nbytes_read: ") != GoogleString::npos);
   EXPECT_TRUE(buf.find("\ncurr_connections: ") != GoogleString::npos);
@@ -562,15 +571,16 @@ TEST_F(AprMemCacheTest, HangingMultigetTest) {
   // Test that we do not hang in the case of corrupted responses from memcached,
   // as seen in bug report 1048
   // https://github.com/apache/incubator-pagespeed-mod/issues/1048
-  std::unique_ptr<FakeMemcacheServerThread> thread(new FakeMemcacheServerThread(
-      fake_memcache_listen_port_, thread_system_.get()));
+  std::unique_ptr<FakeMemcacheServerThread> thread =
+      std::make_unique<FakeMemcacheServerThread>(fake_memcache_listen_port_,
+                                                 thread_system_.get());
   ASSERT_TRUE(thread->Start());
   apr_port_t port = thread->GetListeningPort();
   ExternalClusterSpec spec;
   spec.servers = {ExternalServerSpec("localhost", port)};
-  std::unique_ptr<AprMemCache> cache(
-      new AprMemCache(spec, 3 /* maximal number of client connections */,
-                      &mock_hasher_, &statistics_, &timer_, &handler_));
+  std::unique_ptr<AprMemCache> cache = std::make_unique<AprMemCache>(
+      spec, 3 /* maximal number of client connections */, &mock_hasher_,
+      &statistics_, &timer_, &handler_);
   static const char k1[] = "hello";
   static const char k2[] = "hi";
   BlockingCallback cb1(thread_system_.get());

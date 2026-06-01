@@ -29,8 +29,7 @@ std::filesystem::path LicenseFilePath(const GoogleString& cache_path) {
     // (strips the slash but stays at the same level), so we must strip
     // any trailing separator before calling parent_path().
     GoogleString s(cache_path);
-    while (s.size() > 1 && (s.back() == '/' || s.back() == '\\'))
-      s.pop_back();
+    while (s.size() > 1 && (s.back() == '/' || s.back() == '\\')) s.pop_back();
     std::filesystem::path p(s);
     return p.parent_path() / "pagespeed.license";
   }
@@ -82,12 +81,29 @@ bool WriteLicenseFile(const std::filesystem::path& path, StringPiece token) {
               std::to_string(tmp_counter.fetch_add(1));
 
   {
-    std::ofstream file(tmp_path, std::ios::out | std::ios::binary | std::ios::trunc);
+    std::ofstream file(tmp_path,
+                       std::ios::out | std::ios::binary | std::ios::trunc);
     if (!file.is_open()) return false;
     file.write(token.data(), token.size());
     file.put('\n');
     if (!file.good()) return false;
   }
+
+  // Restrict to owner-only (0600) on the TEMP file, before publishing it via
+  // rename, so the final path is never group/other-readable (it holds a bearer
+  // token). rename() preserves the inode's mode, so the published file inherits
+  // 0600. Best-effort: non-fatal if this fails (e.g. on Windows).
+  std::filesystem::permissions(
+      tmp_path,
+      std::filesystem::perms::owner_read | std::filesystem::perms::owner_write,
+      std::filesystem::perm_options::replace, ec);
+#if !defined(_WIN32) && !defined(WIN32)
+  if (ec) {
+    LOG(WARNING) << "Failed to set 0600 permissions on license file "
+                 << tmp_path.string() << ": " << ec.message();
+    ec.clear();
+  }
+#endif
 
   // Atomic rename (POSIX: rename() is atomic on same filesystem;
   // Windows: std::filesystem::rename uses MoveFileExW internally).
@@ -97,19 +113,6 @@ bool WriteLicenseFile(const std::filesystem::path& path, StringPiece token) {
     std::filesystem::remove(tmp_path, ec);
     return false;
   }
-
-  // Restrict file permissions to owner-only (0600).
-  // Best-effort: non-fatal if this fails (e.g. on Windows).
-  std::filesystem::permissions(
-      path,
-      std::filesystem::perms::owner_read | std::filesystem::perms::owner_write,
-      std::filesystem::perm_options::replace, ec);
-#if !defined(_WIN32) && !defined(WIN32)
-  if (ec) {
-    LOG(WARNING) << "Failed to set 0600 permissions on license file "
-                 << path.string() << ": " << ec.message();
-  }
-#endif
 
   return true;
 }

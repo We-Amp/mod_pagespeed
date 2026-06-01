@@ -66,9 +66,13 @@ public class PageSpeedSidecarHostedService : IHostedLifecycleService, IDisposabl
 
             if (_sidecarManager.AdminToken != null)
             {
+                // Never log the token value — it is a bearer credential and logs
+                // are shipped/retained/broadly readable. Retrieve it
+                // programmatically via ISidecarManager.AdminToken instead.
                 _logger.LogInformation(
-                    "Admin token: {Token} (use with 'Authorization: Bearer <token>' header)",
-                    _sidecarManager.AdminToken);
+                    "Admin endpoints require a bearer token ({Length}-char credential). " +
+                    "Retrieve it via ISidecarManager.AdminToken; do not log it.",
+                    _sidecarManager.AdminToken.Length);
             }
         }
 

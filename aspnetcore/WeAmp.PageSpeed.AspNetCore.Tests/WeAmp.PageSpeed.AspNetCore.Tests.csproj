@@ -24,6 +24,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\WeAmp.PageSpeed.AspNetCore\WeAmp.PageSpeed.AspNetCore.csproj" />
   </ItemGroup>
 

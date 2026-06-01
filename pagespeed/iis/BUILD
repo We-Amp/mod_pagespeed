@@ -113,6 +113,7 @@ cc_library(
     target_compatible_with = ["@platforms//os:windows"],
     visibility = ["//visibility:public"],
     deps = [
+        ":iis_ip_string",
         "//net/instaweb:net_instaweb_lib",
         "//net/instaweb/http",
         "//net/instaweb/rewriter",
@@ -136,6 +137,26 @@ cc_library(
             "ws2_32.lib",
             "bcrypt.lib",
         ],
+        "//conditions:default": [],
+    }),
+)
+
+# Socket-address -> printable IP string helper, split out of iis_http_module.cpp
+# so it can be unit-tested in isolation (it is otherwise buried in the big
+# iis_module library behind the IIS runtime headers, with no header declaration
+# a test could link against). Windows-only (winsock2 / ws2_32 inet_ntop).
+cc_library(
+    name = "iis_ip_string",
+    srcs = ["iis_ip_string.cc"],
+    hdrs = ["iis_ip_string.h"],
+    defines = ["_WINSOCKAPI_"],
+    target_compatible_with = ["@platforms//os:windows"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+    ],
+    linkopts = select({
+        "@platforms//os:windows": ["ws2_32.lib"],
         "//conditions:default": [],
     }),
 )

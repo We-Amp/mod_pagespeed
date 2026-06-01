@@ -31,7 +31,6 @@
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/shared_string.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
@@ -70,7 +69,7 @@ namespace net_instaweb {
 //
 // http://redis.io/topics/cluster-spec explains this all.
 //
-// TODO(yeputons): consider extracting a common interface with AprMemCache.
+// TODO(yeputons): consider extracting a common interface with MemcachedCache.
 // TODO(yeputons): consider making Redis-reported errors treated as failures.
 // TODO(yeputons): add redis AUTH command support.
 class RedisCache : public CacheInterface {
@@ -126,7 +125,7 @@ class RedisCache : public CacheInterface {
       }
     }
   };
-  typedef std::unique_ptr<redisReply, RedisReplyDeleter> RedisReply;
+  using RedisReply = std::unique_ptr<redisReply, RedisReplyDeleter>;
 
   struct RedisContextDeleter {
     void operator()(redisContext* ptr) {
@@ -135,7 +134,7 @@ class RedisCache : public CacheInterface {
       }
     }
   };
-  typedef std::unique_ptr<redisContext, RedisContextDeleter> RedisContext;
+  using RedisContext = std::unique_ptr<redisContext, RedisContextDeleter>;
 
   class Connection {
    public:
@@ -180,6 +179,18 @@ class RedisCache : public CacheInterface {
     bool EnsureDatabaseSelection() EXCLUSIVE_LOCKS_REQUIRED(redis_mutex_)
         LOCKS_EXCLUDED(state_mutex_);
 
+    // Issues a command on the already-established connection WITHOUT
+    // (re-)ensuring the connection or selecting the database.  RedisCommand()
+    // funnels every command through EnsureConnectionAndDatabaseSelection(), so
+    // issuing the SELECT from EnsureDatabaseSelection() via RedisCommand()
+    // recursed back into database selection and overflowed the stack whenever
+    // a database index was configured.  Callers must hold redis_mutex_ and
+    // have a live connection (EnsureConnection() already succeeded).
+    RedisReply RedisCommandOnConnection(const char* format, va_list args)
+        EXCLUSIVE_LOCKS_REQUIRED(redis_mutex_);
+    RedisReply RedisCommandOnConnection(const char* format, ...)
+        EXCLUSIVE_LOCKS_REQUIRED(redis_mutex_);
+
     RedisContext TryConnect() LOCKS_EXCLUDED(redis_mutex_, state_mutex_);
 
     void LogRedisContextError(redisContext* redis, const char* cause);
@@ -198,9 +209,18 @@ class RedisCache : public CacheInterface {
     // should re-select it on reconnection
     const int database_index_;
 
-    DISALLOW_COPY_AND_ASSIGN(Connection);
+    // Whether the SELECT for database_index_ has already been issued on the
+    // current connection.  EnsureDatabaseSelection() runs before every command
+    // (via EnsureConnectionAndDatabaseSelection()), but the database only needs
+    // to be selected ONCE per connection -- re-issuing SELECT before each
+    // command both wastes a round-trip and corrupts the request stream.  Reset
+    // to false whenever a new connection is established (EnsureConnection()).
+    bool database_selected_ GUARDED_BY(redis_mutex_);
+
+    Connection(const Connection&) = delete;
+    Connection& operator=(const Connection&) = delete;
   };
-  typedef std::map<GoogleString, std::unique_ptr<Connection>> ConnectionsMap;
+  using ConnectionsMap = std::map<GoogleString, std::unique_ptr<Connection>>;
 
   struct ClusterMapping {
     // We only ever add connections, so it's ok for us to save raw pointers.
@@ -234,7 +254,7 @@ class RedisCache : public CacheInterface {
 
   // Must not be called under Connection::GetOperationLock(), that will cause
   // lock inversion and potential theoretical deadlock.
-  Connection* GetOrCreateConnection(ExternalServerSpec spec,
+  Connection* GetOrCreateConnection(const ExternalServerSpec& spec,
                                     const int database_index);
 
   // Ask redis what keys should go to which servers.
@@ -273,7 +293,8 @@ class RedisCache : public CacheInterface {
   const int ttl_sec_;
 
   friend class RedisCacheTest;
-  DISALLOW_COPY_AND_ASSIGN(RedisCache);
+  RedisCache(const RedisCache&) = delete;
+  RedisCache& operator=(const RedisCache&) = delete;
 };
 
 }  // namespace net_instaweb
