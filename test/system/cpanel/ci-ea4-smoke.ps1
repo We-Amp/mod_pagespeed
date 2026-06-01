@@ -230,7 +230,7 @@ function Stop-VmHard {
 # trap will not fire on the OpenSSH "Permanently added" stderr noise. We
 # exit 1 from the trap so the trap-then-keep-going PS default does not
 # silently swallow the failure.
-trap { Stop-VmHard; exit 1 }
+trap { if (Get-Command Stop-VmHard -ErrorAction SilentlyContinue) { Stop-VmHard }; exit 1 }
 
 function Get-GuestIp {
     param([string]$Mac, [int]$TimeoutSec = 180)

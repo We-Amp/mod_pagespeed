@@ -202,11 +202,23 @@ fi
 POST_PIDS="$(pgrep -d, -x httpd 2>/dev/null || true)"
 log "httpd pids pre/post restart: '${PRE_PIDS}' -> '${POST_PIDS}'"
 
+# --- SIGPIPE-safe module-presence check ---
+# `$EA4_HTTPD_BIN -M | grep -q pagespeed_module` is UNSAFE under `set -o pipefail`:
+# grep -q exits on the first match and closes the pipe, so httpd -M (a large
+# cPanel module list) gets SIGPIPE (exit 141); pipefail propagates 141, which
+# both FALSELY reports "not loaded" and trips `set -e`. Capture once, match
+# in-shell with no pipe for the producer to choke on.
+pagespeed_module_loaded() {
+    local mods
+    mods="$("$EA4_HTTPD_BIN" -M 2>/dev/null)" || true
+    case "$mods" in (*pagespeed_module*) return 0 ;; (*) return 1 ;; esac
+}
+
 # --- Phase 3: Verify the module loads and serves the X-Mod-Pagespeed header ---
 log "=== Phase 3: Module loaded + header asserted ==="
 # `httpd -M` prints loaded modules. pagespeed_module must be there.
-if ! $EA4_HTTPD_BIN -M 2>/dev/null | grep -q 'pagespeed_module'; then
-    log "Loaded modules:"; $EA4_HTTPD_BIN -M 2>/dev/null | head -30
+if ! pagespeed_module_loaded; then
+    log "Loaded modules:"; $EA4_HTTPD_BIN -M 2>/dev/null | head -30 || true
     fail "pagespeed_module not loaded"
 fi
 log "pagespeed_module loaded OK"
@@ -247,6 +259,74 @@ if ! echo "$HDR_VALUE" | grep -qF "$EXPECTED_VERSION_STRING"; then
 fi
 log "Version assertion passed"
 
+# --- Phase 3b: Absent-.so degradation ---
+# With the module .so missing, the <IfFile>-guarded LoadModule in
+# 490_mod_pagespeed.conf must be skipped, and the <IfModule pagespeed_module>
+# directive block in pagespeed.conf must go inert, so httpd starts as PLAIN
+# Apache (site unoptimized) instead of refusing to start. WITHOUT the <IfFile>
+# guard this restart fails — httpd will not parse a LoadModule pointing at a
+# missing file. This phase is the RED/GREEN for the guard added.
+log "=== Phase 3b: Absent-.so degradation (<IfFile> fail-safe) ==="
+SO_PATH=/etc/apache2/modules/mod_pagespeed.so
+SO_BAK=/tmp/ea4-smoke/mod_pagespeed.so.absent-test
+mv "$SO_PATH" "$SO_BAK" || fail "could not move $SO_PATH aside for absent-.so test"
+log "Moved module .so aside; restarting httpd with the file absent"
+
+# Decisive diagnostic: does the FULL httpd config still PARSE with the .so
+# absent? If <IfFile> works, this prints "Syntax OK"; if something references
+# the module outside a guard, it errors here. Captured before the restart so
+# the cause is unambiguous (restartsrv hides httpd -t output elsewhere).
+log "httpd -t (config parse with .so absent):"
+"$EA4_HTTPD_BIN" -t 2>&1 | sed 's/^/    [httpd -t] /' || true
+
+# NB: cPanel's restartsrv_httpd can return nonzero even when httpd comes up
+# fine — it runs post-restart health checks that flag a guarded-but-absent
+# module. Its exit code is unreliable (Phase 2 notes the same), so the
+# AUTHORITATIVE success signal is whether httpd actually listens + serves.
+# Capture its full output (not /dev/null) so a refusal-to-start is visible.
+RESTART_OUT="$(/scripts/restartsrv_httpd 2>&1 || true)"
+log "restartsrv_httpd output (.so absent):"
+printf '%s\n' "$RESTART_OUT" | sed 's/^/    [restartsrv] /'
+LISTEN_OK=0
+for attempt in $(seq 1 30); do
+    if ss -tln '( sport = :80 )' 2>/dev/null | grep -q ':80 ' \
+       && curl -s -o /dev/null --max-time 2 http://localhost/ 2>/dev/null; then
+        LISTEN_OK=1
+        log "  attempt ${attempt}/30: httpd up + serving with .so absent"
+        break
+    fi
+    sleep 1
+done
+if [ "$LISTEN_OK" != "1" ]; then
+    log "httpd did NOT come up with the module .so absent"
+    mv "$SO_BAK" "$SO_PATH" 2>/dev/null || true
+    /scripts/restartsrv_httpd >/dev/null 2>&1 || true
+    fail "absent-.so degradation FAILED: httpd down — the <IfFile> guard is not working"
+fi
+# Degraded correctly: module must NOT be loaded, and no PageSpeed header.
+if pagespeed_module_loaded; then
+    mv "$SO_BAK" "$SO_PATH" 2>/dev/null || true
+    fail "pagespeed_module still loaded with .so absent (unexpected)"
+fi
+if grep -qiE '^X-Mod-Pagespeed|^X-Page-Speed' <<<"$(curl -sI --max-time 5 http://localhost/ 2>/dev/null || true)"; then
+    mv "$SO_BAK" "$SO_PATH" 2>/dev/null || true
+    fail "X-Mod-Pagespeed header present with .so absent (module unexpectedly active)"
+fi
+log "Degraded to plain Apache: httpd up, module unloaded, no PageSpeed header"
+
+# Restore the module + restart so Phase 4 starts from the installed state.
+mv "$SO_BAK" "$SO_PATH" || fail "could not restore $SO_PATH after absent-.so test"
+/scripts/restartsrv_httpd >/dev/null 2>&1 || fail "httpd restart after restoring .so failed"
+LISTEN_OK=0
+for attempt in $(seq 1 30); do
+    if ss -tln '( sport = :80 )' 2>/dev/null | grep -q ':80 '; then LISTEN_OK=1; break; fi
+    sleep 1
+done
+[ "$LISTEN_OK" = "1" ] || fail "httpd did not come back up after restoring the .so"
+pagespeed_module_loaded \
+    || fail "pagespeed_module not reloaded after restoring the .so"
+log "Module restored + reloaded; resuming"
+
 # --- Phase 4: Uninstall and verify clean removal ---
 log "=== Phase 4: dnf remove + verify clean ==="
 EA4_AUTO_RELOAD=0 dnf remove -y ea-apache24-mod_pagespeed 2>&1 | tail -10
@@ -269,10 +349,10 @@ for attempt in $(seq 1 20); do
 done
 [ "$LISTEN_OK" = "1" ] || fail "Apache did not come back up after uninstall + restart"
 
-if $EA4_HTTPD_BIN -M 2>/dev/null | grep -q 'pagespeed_module'; then
+if pagespeed_module_loaded; then
     fail "pagespeed_module still loaded after uninstall"
 fi
-if curl -sI --max-time 5 http://localhost/ 2>/dev/null | grep -qiE '^X-Mod-Pagespeed|^X-Page-Speed'; then
+if grep -qiE '^X-Mod-Pagespeed|^X-Page-Speed' <<<"$(curl -sI --max-time 5 http://localhost/ 2>/dev/null || true)"; then
     fail "X-Mod-Pagespeed header still present after uninstall"
 fi
 log "Module fully removed"

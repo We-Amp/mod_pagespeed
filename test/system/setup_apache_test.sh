@@ -209,6 +209,26 @@ EOF
     # Set ServerName to avoid warning
     echo "ServerName localhost" | sudo tee "$APACHE_CONF_DIR/conf-available/servername.conf" > /dev/null
 
+    # Pin a SMALL prefork MPM so the Cyclone background-thread leak regression
+    # test (test_graceful_restart_no_thread_leak) surfaces quickly: with a tight
+    # ServerLimit/MaxRequestWorkers, a child that cannot exit on graceful (because
+    # a joinable Cyclone HitTracker thread keeps it alive) exhausts the scoreboard
+    # within a handful of graceful cycles and Apache logs AH03490. prefork gives a
+    # 1:1 process-to-slot mapping so the leak is directly observable as lingering
+    # apache2 child PIDs. See pagespeed/system StopCacheBackgroundThreads.
+    sudo a2dismod mpm_event mpm_worker 2>/dev/null || true
+    sudo a2enmod mpm_prefork 2>/dev/null || true
+    sudo tee "$APACHE_CONF_DIR/mods-available/mpm_prefork.conf" > /dev/null << 'EOF'
+<IfModule mpm_prefork_module>
+    StartServers            2
+    MinSpareServers         1
+    MaxSpareServers         3
+    ServerLimit             6
+    MaxRequestWorkers       6
+    MaxConnectionsPerChild  0
+</IfModule>
+EOF
+
     # Configure HTTPS VirtualHost if TLS certs are available
     if [ -f "$TLS_CERT_FILE" ] && [ -f "$TLS_KEY_FILE" ]; then
         log_info "Configuring HTTPS VirtualHost on port $APACHE_HTTPS_PORT..."

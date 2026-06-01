@@ -389,6 +389,11 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "requires_module: test requires PageSpeed module to be installed"
     )
+    config.addinivalue_line(
+        "markers",
+        "process_leak: process-level worker/child lifecycle regression test "
+        "(graceful restart / reload); needs server control env vars",
+    )
 
 
 # Skip tests based on server configuration

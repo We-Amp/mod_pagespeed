@@ -9,7 +9,7 @@
 #   --build-only    Only build the module, don't run tests
 #   --skip-build    Skip building, assume module is already built
 #   --keep-running  Keep Apache running after tests
-#   --testkey       Build with test license key and pre-seed a test token
+#   --license       Build token generator and pre-seed a test license token
 #   --help          Show this help message
 #
 # Examples:
@@ -56,7 +56,7 @@ Options:
   --build-only    Only build the module, don't run tests
   --skip-build    Skip building, assume module is already built
   --keep-running  Keep Apache running after tests (for debugging)
-  --testkey       Build with test license key and pre-seed a test token
+  --license       Build token generator and pre-seed a test license token
   --gcc           Use GCC 13 for building (recommended for Cyclone cache)
   --help          Show this help message
 
@@ -82,7 +82,7 @@ EOF
 BUILD_ONLY=false
 SKIP_BUILD=false
 KEEP_RUNNING=false
-USE_TESTKEY=false
+USE_LICENSE=false
 BAZEL_CONFIG="${BAZEL_CONFIG:---config=gcc}"
 PYTEST_ARGS=()
 
@@ -100,8 +100,8 @@ while [[ $# -gt 0 ]]; do
             KEEP_RUNNING=true
             shift
             ;;
-        --testkey)
-            USE_TESTKEY=true
+        --license)
+            USE_LICENSE=true
             shift
             ;;
         --gcc)
@@ -120,8 +120,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Validate flag combinations
-if [ "$USE_TESTKEY" = true ] && [ "$SKIP_BUILD" = true ]; then
-    log_error "--testkey requires building; cannot be used with --skip-build"
+if [ "$USE_LICENSE" = true ] && [ "$SKIP_BUILD" = true ]; then
+    log_error "--license requires building; cannot be used with --skip-build"
     exit 1
 fi
 
@@ -131,10 +131,6 @@ build_module() {
     cd "$PROJECT_ROOT"
 
     local build_opts="$BAZEL_CONFIG"
-    if [ "$USE_TESTKEY" = true ]; then
-        build_opts="$build_opts --config=testkey"
-        log_info "Building with test license key (--config=testkey)"
-    fi
 
     if ! bazel build $build_opts //:libmod_pagespeed.so; then
         log_error "Failed to build mod_pagespeed module"
@@ -143,17 +139,23 @@ build_module() {
 
     log_info "Module built successfully: bazel-bin/libmod_pagespeed.so"
 
-    # Generate and export a test license token for the testkey build.
-    if [ "$USE_TESTKEY" = true ]; then
+    # Generate and export a test license token using a local signing key.
+    if [ "$USE_LICENSE" = true ]; then
         log_step "Building test token generator..."
-        if ! bazel build $BAZEL_CONFIG //pagespeed/kernel/license_v2:generate_test_token; then
-            log_error "Failed to build generate_test_token"
+        if ! bazel build $BAZEL_CONFIG //pagespeed/kernel/license_v2:generate_license_token; then
+            log_error "Failed to build generate_license_token"
+            exit 1
+        fi
+        local key_path="${PAGESPEED_SIGNING_KEY:-$HOME/.weamp/license-signing-key}"
+        if [ ! -f "$key_path" ]; then
+            log_error "No signing key at $key_path — set PAGESPEED_SIGNING_KEY or place key there"
             exit 1
         fi
         export LICENSE_TOKEN
-        LICENSE_TOKEN=$("$PROJECT_ROOT/bazel-bin/pagespeed/kernel/license_v2/generate_test_token")
+        LICENSE_TOKEN=$("$PROJECT_ROOT/bazel-bin/pagespeed/kernel/license_v2/generate_license_token" \
+            --key "$key_path" --sub "test@system-test.local" --exp-duration 3600)
         if [ -z "$LICENSE_TOKEN" ]; then
-            log_error "generate_test_token produced empty output"
+            log_error "generate_license_token produced empty output"
             exit 1
         fi
         log_info "Test license token generated"
@@ -195,6 +197,13 @@ run_tests() {
     # Secondary server for IPRO caching tests
     export PAGESPEED_SECONDARY_HOST="${PAGESPEED_SECONDARY_HOST:-localhost}"
     export PAGESPEED_SECONDARY_PORT="${PAGESPEED_SECONDARY_PORT:-8081}"
+
+    # Apache control + error-log paths for the graceful-restart thread-leak
+    # regression test (test_graceful_restart_no_thread_leak). The test issues
+    # `sudo $PAGESPEED_APACHE_CTL graceful` and greps the error log for AH03490.
+    export PAGESPEED_SERVER_TYPE="${PAGESPEED_SERVER_TYPE:-apache}"
+    export PAGESPEED_APACHE_CTL="${PAGESPEED_APACHE_CTL:-apache2ctl}"
+    export PAGESPEED_APACHE_ERROR_LOG="${PAGESPEED_APACHE_ERROR_LOG:-/var/log/apache2/error.log}"
 
     log_info "Test server: http://$PAGESPEED_HOST:$PAGESPEED_PORT"
     log_info "HTTPS server: https://$PAGESPEED_HTTPS_HOST:$PAGESPEED_HTTPS_PORT"
