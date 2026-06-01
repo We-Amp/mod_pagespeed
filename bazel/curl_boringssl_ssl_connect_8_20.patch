@@ -1,0 +1,20 @@
+--- a/lib/vtls/openssl.c
++++ b/lib/vtls/openssl.c
+@@ -4177,6 +4177,17 @@
+       return CURLE_AGAIN;
+     }
+ #endif
++    if(SSL_ERROR_SYSCALL == detail && octx->io_result == CURLE_AGAIN) {
++      /* BoringSSL returns SSL_ERROR_SYSCALL when the custom BIO gets
++         EAGAIN during SSL_connect(). Unlike OpenSSL, it does not
++         translate this to SSL_ERROR_WANT_READ. Check io_result to see
++         if this was a retriable situation and let the multi handle
++         retry. Non-EAGAIN SYSCALL errors fall through to the untreated
++         error handler below. */
++      CURL_TRC_CF(data, cf, "SSL_connect() SYSCALL with CURLE_AGAIN, retry");
++      connssl->io_need = CURL_SSL_IO_NEED_RECV;
++      return CURLE_AGAIN;
++    }
+     else {
+       /* untreated error */
+       sslerr_t errdetail;

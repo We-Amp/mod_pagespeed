@@ -7,7 +7,7 @@
 #------------------------------------------------------------------------------
 Summary         : @@SHORTDESC@@
 License         : Apache Software License
-Name            : @@PACKAGE@@-@@CHANNEL@@
+Name            : @@PACKAGE@@
 Version         : @@VERSION@@
 Release         : @@REVISION@@
 Group           : System Environment/Daemons
@@ -22,7 +22,6 @@ Packager        : @@MAINTNAME@@ <@@MAINTMAIL@@>
 
 Provides        : @@PROVIDES@@ = %{version}
 Requires        : @@DEPENDS@@
-Conflicts       : @@REPLACES@@
 
 #------------------------------------------------------------------------------
 #   Description
@@ -70,7 +69,6 @@ rm -rf "$RPM_BUILD_ROOT"
 @@APACHE_MODULEDIR@@/mod_pagespeed.so
 %config(noreplace) @@APACHE_CONFDIR@@/@@PAGESPEED_CONF_PREFIX@@pagespeed.conf
 %config(noreplace) @@APACHE_CONFDIR@@/@@PAGESPEED_CONF_PREFIX@@pagespeed_libraries.conf
-@@COMMENT_OUT_CRON@@/etc/cron.daily/@@PACKAGE@@
 %attr(-, @@APACHE_USER@@, @@APACHE_USER@@) @@MOD_PAGESPEED_CACHE@@
 %attr(-, @@APACHE_USER@@, @@APACHE_USER@@) @@MOD_PAGESPEED_LOG@@
 
@@ -81,57 +79,12 @@ rm -rf "$RPM_BUILD_ROOT"
 
 exit 0
 
-
-
-
 #------------------------------------------------------------------------------
 #   Post install script
 #------------------------------------------------------------------------------
 %post
 
-@@include@@../common/rpm.include
-
-MODPAGESPEED_ENABLE_UPDATES=@@MODPAGESPEED_ENABLE_UPDATES@@
-
-DEFAULTS_FILE="/etc/default/@@PACKAGE@@"
-if [ -n "${MODPAGESPEED_ENABLE_UPDATES}" -a ! -e "$DEFAULTS_FILE" ]; then
-  echo 'repo_add_once="true"' > "$DEFAULTS_FILE"
-fi
-
-if [ -e "$DEFAULTS_FILE" ]; then
-. "$DEFAULTS_FILE"
-
-if [ "$repo_add_once" = "true" ]; then
-  determine_rpm_package_manager
-
-  case $PACKAGEMANAGER in
-  "yum")
-    install_yum
-    ;;
-  "urpmi")
-    install_urpmi
-    ;;
-  "yast")
-    install_yast
-    ;;
-  esac
-fi
-
-# Some package managers have locks that prevent everything from being
-# configured at install time, so wait a bit then kick the cron job to do
-# whatever is left. Probably the db will be unlocked by then, but if not, the
-# cron job will keep retrying.
-# Do this with 'at' instead of a backgrounded shell because zypper waits on all
-# sub-shells to finish before it finishes, which is exactly the opposite of
-# what we want here. Also preemptively start atd because for some reason it's
-# not always running, which kind of defeats the purpose of having 'at' as a
-# required LSB command.
-service atd start
-echo "sh /etc/cron.daily/@@PACKAGE@@" | at now + 2 minute
-fi
-
 exit 0
-
 
 #------------------------------------------------------------------------------
 #   Pre uninstallation script
@@ -139,29 +92,13 @@ exit 0
 %preun
 
 if [ "$1" -eq "0" ]; then
-  mode="uninstall"
-elif [ "$1" -eq "1" ]; then
-  mode="upgrade"
+  # Uninstall: disable the module so Apache doesn't crash on restart.
+  # RPM has no a2dismod; comment out the LoadModule directive.
+  if [ -f @@APACHE_CONFDIR@@/@@PAGESPEED_CONF_PREFIX@@pagespeed.conf ]; then
+    sed -i 's/^LoadModule pagespeed_module/#LoadModule pagespeed_module/' \
+      @@APACHE_CONFDIR@@/@@PAGESPEED_CONF_PREFIX@@pagespeed.conf
+  fi
 fi
-
-@@include@@../common/rpm.include
-
-# On Debian we only remove when we purge. However, RPM has no equivalent to
-# dpkg --purge, so this is all disabled.
-#
-#determine_rpm_package_manager
-#
-#case $PACKAGEMANAGER in
-#"yum")
-#  remove_yum
-#  ;;
-#"urpmi")
-#  remove_urpmi
-#  ;;
-#"yast")
-#  remove_yast
-#  ;;
-#esac
 
 exit 0
 

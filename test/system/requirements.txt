@@ -1,0 +1,17 @@
+# Python dependencies for PageSpeed system tests
+#
+# Install with: pip install -r requirements.txt
+#
+# Note: For Bazel-based testing, these are not automatically installed.
+# They are provided for local development and testing outside of Bazel.
+
+# Testing framework
+# Pin matches docker/Dockerfile to ensure CI / local / package-test resolve the same version.
+pytest==8.3.5
+
+# pytest plugins
+pytest-timeout==2.3.1    # Test timeout support
+pytest-xdist==3.6.1      # Parallel test execution (optional)
+
+# Note: The pagespeed_test_framework itself only uses Python standard library
+# (http.client, gzip, ssl, etc.) and does not require any external packages.

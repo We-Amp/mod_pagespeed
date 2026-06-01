@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+  <system.webServer>
+    <!-- PageSpeed module is registered globally by the MSI installer. -->
+    <!-- Do NOT add it here again or you'll get 500.19 errors. -->
+
+    <!-- Required for PageSpeed combined resource URLs containing '+' -->
+    <security>
+      <requestFiltering allowDoubleEscaping="true" />
+    </security>
+  </system.webServer>
+</configuration>

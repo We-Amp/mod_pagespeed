@@ -166,13 +166,86 @@ bazel test --config=clang-asan //test/...
 - **Style Guide**: Google C++ Style Guide
 - **Line Limit**: 80 columns
 - **Formatting**: Use `.clang-format` in repository root
+- **CI Toolchain**: `clang-format-20` (must match exactly to avoid CI churn)
 
-Format code before committing:
+Reformat everything in scope in one shot:
 ```bash
-clang-format -i path/to/file.cc
+tools/fix-format.sh
 ```
 
+Or reformat a single file:
+```bash
+clang-format-20 -i path/to/file.cc
+```
+
+### Optional: pre-commit hook
+
+Install the in-tree pre-commit hook to catch formatting violations locally
+before CI does. Run once per clone:
+
+```bash
+tools/install-hooks.sh
+```
+
+This sets `core.hooksPath` to `.githooks/`, which runs `clang-format-20
+--dry-run --Werror` on staged `pagespeed/` and `net/` sources (excluding
+`pagespeed/iis/`) on every commit. Bypass once with `git commit --no-verify`.
+If `clang-format-20` is not on PATH the hook prints a warning and skips.
+
 ## Common Issues
+
+### Host environment leaking into Docker builds (M4/BISON_PKGDATADIR)
+
+If you have `m4` or `bison` installed locally (e.g., in `~/.local/bin`), their environment variables (`M4`, `BISON_PKGDATADIR`) can leak into the Bazel sandbox via `rules_foreign_cc`, causing the `libmemcached` CMake build to fail with errors like:
+
+```
+/usr/bin/flex: fatal internal error, exec of /home/user/.local/bin/m4 failed
+```
+
+**Fix:** Create a `user.bazelrc` (gitignored) to override these:
+
+```bash
+cat > user.bazelrc << 'EOF'
+# Fix for Docker container builds: override host-leaked env vars
+build --action_env=M4=/usr/bin/m4
+build --action_env=BISON_PKGDATADIR=/usr/share/bison
+build --action_env=PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+EOF
+```
+
+### Accessing Apache from the host (port publishing)
+
+By default the dev container has no published ports, so Apache running inside it isn't reachable from the host browser. Create a `docker-compose.override.yml` (gitignored) to publish ports:
+
+```yaml
+# Publish Apache ports for browser access
+# Note: network_mode: host does NOT work on Docker Desktop (WSL2/macOS) —
+# it maps to the Docker VM's network, not the actual host.
+services:
+  dev:
+    ports:
+      - "8081:8081"   # Apache secondary vhost (use if port 80 is taken by IIS)
+      - "8443:8443"   # Apache HTTPS
+```
+
+Then `docker compose up -d dev` and access the admin console at `http://localhost:8081/pagespeed_admin/`.
+
+### SSH agent forwarding for Docker builds
+
+The dev container clones its dependencies (e.g., the Cyclone cache library) from their public repositories over HTTPS, so no credentials are needed. If you build against private forks over SSH, start an SSH agent before `docker compose up`:
+
+```bash
+eval "$(ssh-agent -s)"
+ssh-add ~/.ssh/id_ed25519
+export SSH_AUTH_SOCK
+docker compose up -d dev
+```
+
+If you see "Host key verification failed" inside the container, add GitHub's key:
+
+```bash
+docker compose exec dev bash -c "mkdir -p ~/.ssh && ssh-keyscan github.com >> ~/.ssh/known_hosts"
+```
 
 ### libjpeg_turbo checksum errors
 

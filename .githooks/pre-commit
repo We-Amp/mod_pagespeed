@@ -1,0 +1,58 @@
+#!/bin/sh
+# Runs clang-format-20 --dry-run --Werror on staged C/C++ files in the same
+# scope as the CI "clang-format check" step in the CI workflow.
+#
+# Install once: tools/install-hooks.sh
+# Bypass for one commit: git commit --no-verify
+
+set -eu
+
+STAGED=$(
+  git diff --cached --name-only --diff-filter=ACMR \
+    | grep -E '^(pagespeed|net)/.*\.(cc|cpp|h|hpp)$' \
+    | grep -v '^pagespeed/iis/' \
+    || true
+)
+
+if [ -z "$STAGED" ]; then
+  exit 0
+fi
+
+CF_BIN=""
+for c in clang-format-20 clang-format; do
+  if command -v "$c" >/dev/null 2>&1; then
+    CF_BIN="$c"
+    break
+  fi
+done
+
+if [ -z "$CF_BIN" ]; then
+  echo "pre-commit: clang-format-20 not found on PATH; skipping format check." >&2
+  echo "            Install clang-format-20 to match CI; bypass with --no-verify." >&2
+  exit 0
+fi
+
+if [ "$CF_BIN" != "clang-format-20" ]; then
+  echo "pre-commit: CI uses clang-format-20; falling back to '$CF_BIN'." >&2
+  echo "            Results may differ; a passing hook does not guarantee a passing CI lint." >&2
+fi
+
+# --dry-run --Werror prints a diagnostic and exits non-zero on any violation.
+# Iterate per-file so the output names the offender directly.
+FAILED=0
+for f in $STAGED; do
+  if ! "$CF_BIN" --dry-run --Werror "$f"; then
+    FAILED=1
+  fi
+done
+
+if [ "$FAILED" -ne 0 ]; then
+  echo "" >&2
+  echo "pre-commit: clang-format violations above. Fix with:" >&2
+  echo "    tools/fix-format.sh           # reformat all in-scope sources" >&2
+  echo "    $CF_BIN -i <file>             # reformat one file" >&2
+  echo "Then 'git add' the changes and commit again (or --no-verify to bypass)." >&2
+  exit 1
+fi
+
+exit 0

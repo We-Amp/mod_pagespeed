@@ -166,8 +166,8 @@ build:clang-tsan --copt -DEVENT__DISABLE_DEBUG_MODE
 # https://github.com/google/sanitizers/issues/953
 build:clang-tsan --test_env="TSAN_OPTIONS=report_atomic_races=0:detect_deadlocks=0:suppressions=/src/tools/tsan_suppressions.txt"
 
-# Clang MSAN - this is the base config for remote-msan and docker-msan. To run this config without
-# our build image, follow https://github.com/google/sanitizers/wiki/MemorySanitizerLibcxxHowTo
+# Clang MSAN - to run this config without our build image, follow
+# https://github.com/google/sanitizers/wiki/MemorySanitizerLibcxxHowTo
 # with libc++ instruction and provide corresponding `--copt` and `--linkopt` as well.
 build:clang-msan --action_env=ENVOY_MSAN=1
 build:clang-msan --config=sanitizer
@@ -225,150 +225,10 @@ build:fuzz-coverage --config=plain-fuzzer
 # Envoy-only: requires WORKSPACE.envoy (see scripts/use-envoy-workspace.sh)
 # build:fuzz-coverage --run_under=@envoy//bazel/coverage:fuzz_coverage_wrapper.sh
 
-# Remote execution: https://docs.bazel.build/versions/master/remote-execution.html
-build:rbe-toolchain --action_env=BAZEL_DO_NOT_DETECT_CPP_TOOLCHAIN=1
-
-build:rbe-toolchain-clang --config=rbe-toolchain
-build:rbe-toolchain-clang --platforms=@envoy_build_tools//toolchains:rbe_linux_clang_platform
-build:rbe-toolchain-clang --host_platform=@envoy_build_tools//toolchains:rbe_linux_clang_platform
-build:rbe-toolchain-clang --crosstool_top=@envoy_build_tools//toolchains/configs/linux/clang/cc:toolchain
-build:rbe-toolchain-clang --extra_toolchains=@envoy_build_tools//toolchains/configs/linux/clang/config:cc-toolchain
-build:rbe-toolchain-clang --action_env=CC=clang --action_env=CXX=clang++ --action_env=PATH=/usr/sbin:/usr/bin:/sbin:/bin:/opt/llvm/bin
-
-build:rbe-toolchain-clang-libc++ --config=rbe-toolchain
-build:rbe-toolchain-clang-libc++ --platforms=@envoy_build_tools//toolchains:rbe_linux_clang_libcxx_platform
-build:rbe-toolchain-clang-libc++ --host_platform=@envoy_build_tools//toolchains:rbe_linux_clang_libcxx_platform
-build:rbe-toolchain-clang-libc++ --crosstool_top=@envoy_build_tools//toolchains/configs/linux/clang_libcxx/cc:toolchain
-build:rbe-toolchain-clang-libc++ --extra_toolchains=@envoy_build_tools//toolchains/configs/linux/clang_libcxx/config:cc-toolchain
-build:rbe-toolchain-clang-libc++ --action_env=CC=clang --action_env=CXX=clang++ --action_env=PATH=/usr/sbin:/usr/bin:/sbin:/bin:/opt/llvm/bin
-build:rbe-toolchain-clang-libc++ --action_env=CXXFLAGS=-stdlib=libc++
-build:rbe-toolchain-clang-libc++ --action_env=LDFLAGS=-stdlib=libc++
-build:rbe-toolchain-clang-libc++ --define force_libcpp=enabled
-
-# Do not inherit from "clang-asan" to avoid picking up flags from local clang.bazelrc.
-build:rbe-toolchain-asan --config=asan
-build:rbe-toolchain-asan --linkopt -fuse-ld=lld
-build:rbe-toolchain-asan --action_env=ENVOY_UBSAN_VPTR=1
-build:rbe-toolchain-asan --copt=-fsanitize=vptr,function
-build:rbe-toolchain-asan --linkopt=-fsanitize=vptr,function
-build:rbe-toolchain-asan --linkopt='-L/opt/llvm/lib/clang/14.0.0/lib/x86_64-unknown-linux-gnu'
-build:rbe-toolchain-asan --linkopt=-l:libclang_rt.ubsan_standalone.a
-build:rbe-toolchain-asan --linkopt=-l:libclang_rt.ubsan_standalone_cxx.a
-
-build:rbe-toolchain-msan --linkopt=-L/opt/libcxx_msan/lib
-build:rbe-toolchain-msan --linkopt=-Wl,-rpath,/opt/libcxx_msan/lib
-build:rbe-toolchain-msan --config=clang-msan
-
-build:rbe-toolchain-tsan --linkopt=-L/opt/libcxx_tsan/lib
-build:rbe-toolchain-tsan --linkopt=-Wl,-rpath,/opt/libcxx_tsan/lib
-build:rbe-toolchain-tsan --config=clang-tsan
-
-build:rbe-toolchain-gcc --config=rbe-toolchain
-build:rbe-toolchain-gcc --platforms=@envoy_build_tools//toolchains:rbe_linux_gcc_platform
-build:rbe-toolchain-gcc --host_platform=@envoy_build_tools//toolchains:rbe_linux_gcc_platform
-build:rbe-toolchain-gcc --crosstool_top=@envoy_build_tools//toolchains/configs/linux/gcc/cc:toolchain
-build:rbe-toolchain-gcc --extra_toolchains=@envoy_build_tools//toolchains/configs/linux/gcc/config:cc-toolchain
-
-build:rbe-toolchain-msvc-cl --host_platform=@envoy_build_tools//toolchains:rbe_windows_msvc_cl_platform
-build:rbe-toolchain-msvc-cl --platforms=@envoy_build_tools//toolchains:rbe_windows_msvc_cl_platform
-build:rbe-toolchain-msvc-cl --crosstool_top=@envoy_build_tools//toolchains/configs/windows/msvc-cl/cc:toolchain
-build:rbe-toolchain-msvc-cl --extra_toolchains=@envoy_build_tools//toolchains/configs/windows/msvc-cl/config:cc-toolchain
-
-build:rbe-toolchain-clang-cl --host_platform=@envoy_build_tools//toolchains:rbe_windows_clang_cl_platform
-build:rbe-toolchain-clang-cl --platforms=@envoy_build_tools//toolchains:rbe_windows_clang_cl_platform
-build:rbe-toolchain-clang-cl --crosstool_top=@envoy_build_tools//toolchains/configs/windows/clang-cl/cc:toolchain
-build:rbe-toolchain-clang-cl --extra_toolchains=@envoy_build_tools//toolchains/configs/windows/clang-cl/config:cc-toolchain
-
-build:remote --spawn_strategy=remote,sandboxed,local
-build:remote --strategy=Javac=remote,sandboxed,local
-build:remote --strategy=Closure=remote,sandboxed,local
-build:remote --strategy=Genrule=remote,sandboxed,local
-build:remote --remote_timeout=7200
-build:remote --google_default_credentials=true
-build:remote --remote_download_toplevel
-build:remote --nobuild_runfile_links
-
-# Windows bazel does not allow sandboxed as a spawn strategy
-build:remote-windows --spawn_strategy=remote,local
-build:remote-windows --strategy=Javac=remote,local
-build:remote-windows --strategy=Closure=remote,local
-build:remote-windows --strategy=Genrule=remote,local
-build:remote-windows --remote_timeout=7200
-build:remote-windows --google_default_credentials=true
-build:remote-windows --remote_download_toplevel
-
-build:remote-clang --config=remote
-build:remote-clang --config=rbe-toolchain-clang
-
-build:remote-clang-libc++ --config=remote
-build:remote-clang-libc++ --config=rbe-toolchain-clang-libc++
-
-build:remote-gcc --config=remote
-build:remote-gcc --config=rbe-toolchain-gcc
-
-build:remote-asan --config=remote
-build:remote-asan --config=rbe-toolchain-clang-libc++
-build:remote-asan --config=rbe-toolchain-asan
-
-build:remote-msan --config=remote
-build:remote-msan --config=rbe-toolchain-clang-libc++
-build:remote-msan --config=rbe-toolchain-msan
-
-build:remote-tsan --config=remote
-build:remote-tsan --config=rbe-toolchain-clang-libc++
-build:remote-tsan --config=rbe-toolchain-tsan
-
-build:remote-msvc-cl --config=remote-windows
-build:remote-msvc-cl --config=msvc-cl
-build:remote-msvc-cl --config=rbe-toolchain-msvc-cl
-
-build:remote-clang-cl --config=remote-windows
-build:remote-clang-cl --config=clang-cl
-build:remote-clang-cl --config=rbe-toolchain-clang-cl
-
-# Docker sandbox
-# NOTE: Update this from https://github.com/envoyproxy/envoy-build-tools/blob/main/toolchains/rbe_toolchains_config.bzl#L8
-build:docker-sandbox --experimental_docker_image=envoyproxy/envoy-build-ubuntu:41c5a05d708972d703661b702a63ef5060125c33
-build:docker-sandbox --spawn_strategy=docker
-build:docker-sandbox --strategy=Javac=docker
-build:docker-sandbox --strategy=Closure=docker
-build:docker-sandbox --strategy=Genrule=docker
-build:docker-sandbox --define=EXECUTOR=remote
-build:docker-sandbox --experimental_docker_verbose
-build:docker-sandbox --experimental_enable_docker_sandbox
-
-build:docker-clang --config=docker-sandbox
-build:docker-clang --config=rbe-toolchain-clang
-
-build:docker-clang-libc++ --config=docker-sandbox
-build:docker-clang-libc++ --config=rbe-toolchain-clang-libc++
-
-build:docker-gcc --config=docker-sandbox
-build:docker-gcc --config=rbe-toolchain-gcc
-
-build:docker-asan --config=docker-sandbox
-build:docker-asan --config=rbe-toolchain-clang-libc++
-build:docker-asan --config=rbe-toolchain-asan
-
-build:docker-msan --config=docker-sandbox
-build:docker-msan --config=rbe-toolchain-clang-libc++
-build:docker-msan --config=rbe-toolchain-msan
-
-build:docker-tsan --config=docker-sandbox
-build:docker-tsan --config=rbe-toolchain-clang-libc++
-build:docker-tsan --config=rbe-toolchain-tsan
-
 # CI configurations
-build:remote-ci --remote_cache=grpcs://remotebuildexecution.googleapis.com
-build:remote-ci --remote_executor=grpcs://remotebuildexecution.googleapis.com
-build:remote-ci --config=ci
 # Note this config is used by mobile CI also.
 build:ci --noshow_progress
 build:ci --noshow_loading_progress
-
-# Build Event Service
-build:google-bes --bes_backend=grpcs://buildeventservice.googleapis.com
-build:google-bes --bes_results_url=https://source.cloud.google.com/results/invocations/
 
 # Fuzz builds
 
@@ -476,10 +336,14 @@ build:win-asan --per_file_copt=//pagespeed/.*,//net/.*,//third_party/.*,//test/.
 build:win-asan --per_file_copt=//pagespeed/.*,//net/.*,//third_party/.*,//test/.*@-fno-sanitize=vptr
 build:win-asan --per_file_copt=//pagespeed/.*,//net/.*,//third_party/.*,//test/.*@-fno-sanitize=function
 build:win-asan --per_file_copt=//pagespeed/.*,//net/.*,//third_party/.*,//test/.*@-fno-sanitize-blacklist
-build:win-asan --linkopt=-fsanitize=address
-build:win-asan --linkopt=-fno-sanitize=vptr,function
-# MSVC toolchain auto-injects stl_asan.lib (ASan-annotated STL) but the x64
-# version is missing from this installation. Not needed with clang's ASan runtime.
+# Link clang's ASan runtime explicitly. Bazel invokes lld-link directly (not
+# via clang-cl driver), so -fsanitize=address as a linkopt is meaningless.
+# We must pass the .lib files and their search path directly.
+# Use 8.3 short path to avoid spaces in LIBPATH (bazelrc can't quote linkopt values)
+build:win-asan --linkopt=/LIBPATH:C:/PROGRA~1/LLVM/lib/clang/21/lib/windows
+build:win-asan --linkopt=clang_rt.asan_dynamic-x86_64.lib
+build:win-asan --linkopt=clang_rt.asan_dynamic_runtime_thunk-x86_64.lib
+# Suppress MSVC's stl_asan.lib (x64 version not installed, not needed with clang runtime)
 build:win-asan --linkopt=/NODEFAULTLIB:stl_asan.lib
 build:win-asan --linkopt=/INCREMENTAL:NO
 build:win-asan --linkopt=/DEBUG
@@ -488,6 +352,8 @@ build:win-asan --build_tag_filters=-no_san
 build:win-asan --test_tag_filters=-no_san
 build:win-asan --copt=-DADDRESS_SANITIZER=1
 build:win-asan --copt=-D__SANITIZE_ADDRESS__
+# Test binaries need the ASan runtime DLL on PATH at runtime.
+build:win-asan --test_env=PATH=C:\\PROGRA~1\\LLVM\\lib\\clang\\21\\lib\\windows;C:\\PROGRA~1\\LLVM\\bin;C:\\Windows\\System32
 # ASan needs -O1 for reasonable performance (default /Od is very slow)
 build:win-asan --copt=-O1
 # ASan needs the dynamic CRT (static CRT is incompatible with ASan DLL model)

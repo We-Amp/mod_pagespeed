@@ -22,7 +22,7 @@ gen_changelog() {
 # Create the Debian control file needed by dpkg-deb.
 gen_control() {
   dpkg-gencontrol -v"${VERSIONFULL}" -c"${DEB_CONTROL}" -l"${DEB_CHANGELOG}" \
-  -f"${DEB_FILES}" -p"${PACKAGE}-${CHANNEL}" -P"${STAGEDIR}" -T"${DEB_SUBST}" \
+  -f"${DEB_FILES}" -p"${PACKAGE}" -P"${STAGEDIR}" -T"${DEB_SUBST}" \
   -O > "${STAGEDIR}/DEBIAN/control"
   rm -f "${DEB_CONTROL}"
 }
@@ -43,7 +43,6 @@ gen_substvars() {
 prep_staging_debian() {
   prep_staging_common
   install -m 755 -d "${STAGEDIR}/DEBIAN" \
-    "${STAGEDIR}/etc/cron.daily" \
     "${STAGEDIR}${APACHE_CONF_AVAILABLE_DIR}" \
     "${STAGEDIR}/usr/bin"
 }
@@ -53,9 +52,6 @@ stage_install_debian() {
   prep_staging_debian
   stage_install_common
   echo "Staging Debian install files in '${STAGEDIR}'..."
-  process_template "${BUILDDIR}/install/common/repo.cron" \
-    "${STAGEDIR}/etc/cron.daily/${PACKAGE}"
-  chmod 755 "${STAGEDIR}/etc/cron.daily/${PACKAGE}"
   process_template "${BUILDDIR}/install/debian/postinst" \
     "${STAGEDIR}/DEBIAN/postinst"
   chmod 755 "${STAGEDIR}/DEBIAN/postinst"
@@ -67,7 +63,6 @@ stage_install_debian() {
   chmod 755 "${STAGEDIR}/DEBIAN/postrm"
   install -m 644 "${BUILDDIR}/install/debian/conffiles" \
     "${STAGEDIR}/DEBIAN/conffiles"
-  echo "/etc/cron.daily/${PACKAGE}" >> "${STAGEDIR}/DEBIAN/conffiles"
   process_template "${BUILDDIR}/install/common/pagespeed.load.template" \
     "${STAGEDIR}${APACHE_CONFDIR}/pagespeed.load"
   chmod 644 "${STAGEDIR}${APACHE_CONFDIR}/pagespeed.load"
@@ -105,24 +100,8 @@ do_package() {
   PREDEPENDS="$COMMON_PREDEPS"
   DEPENDS="${COMMON_DEPS}"
   PROVIDES="${PACKAGE}"
-
-  # Generate Conflicts: and Replaces: headers for the other channel to get
-  # dpkg to seamlessly switch channels on -i
-  case $CHANNEL in
-  stable )
-    CONFLICTS=mod-pagespeed-beta
-    ;;
-  beta )
-    CONFLICTS=mod-pagespeed-stable
-    ;;
-  * )
-    echo
-    echo "ERROR: '$CHANNEL' is not a valid channel type."
-    echo
-    exit 1
-    ;;
-  esac
-  REPLACES="${CONFLICTS}"
+  CONFLICTS=""
+  REPLACES=""
 
   gen_changelog
   process_template "${SCRIPTDIR}/control.template" "${DEB_CONTROL}"
@@ -144,30 +123,12 @@ cleanup() {
 }
 
 usage() {
-  echo "usage: $(basename $0) [-c channel] [-a target_arch] [-o 'dir'] [-b 'dir']"
-  echo "-c channel the package channel (unstable, beta, stable)"
+  echo "usage: $(basename $0) [-a target_arch] [-o 'dir'] [-b 'dir']"
   echo "-a arch    package architecture (x64 or arm64)"
   echo "-o dir     package output directory [${OUTPUTDIR}]"
   echo "-b dir     build input directory    [${BUILDDIR}]"
+  echo "-c channel (ignored, kept for backward compatibility)"
   echo "-h         this help message"
-}
-
-# Check that the channel name is one of the allowable ones.
-verify_channel() {
-  case $CHANNEL in
-    stable )
-      CHANNEL=stable
-      ;;
-    testing|beta )
-      CHANNEL=beta
-      ;;
-    * )
-      echo
-      echo "ERROR: '$CHANNEL' is not a valid channel type."
-      echo
-      exit 1
-      ;;
-  esac
 }
 
 process_opts() {
@@ -247,7 +208,6 @@ eval $(sed -e "s/^\([^=]\+\)=\(.*\)$/export \1='\2'/" \
   "${BUILDDIR}/install/common/BRANDING")
 
 REPOCONFIG=""
-verify_channel
 
 # Some Debian packaging tools want these set.
 export DEBFULLNAME="${MAINTNAME}"

@@ -18,7 +18,7 @@ gen_spec() {
 # Setup the installation directory hierachy in the package staging area.
 prep_staging_rpm() {
   prep_staging_common
-  install -m 755 -d "${STAGEDIR}/etc/cron.daily" "${STAGEDIR}/usr/bin"
+  install -m 755 -d "${STAGEDIR}/usr/bin"
 }
 
 # Put the package contents in the staging area.
@@ -26,12 +26,6 @@ stage_install_rpm() {
   prep_staging_rpm
   stage_install_common
   echo "Staging RPM install files in '${STAGEDIR}'..."
-  if [ "$CPANEL" = false ]; then
-    process_template "${BUILDDIR}/install/common/rpmrepo.cron" \
-      "${STAGEDIR}/etc/cron.daily/${PACKAGE}"
-    chmod 755 "${STAGEDIR}/etc/cron.daily/${PACKAGE}"
-  fi
-
   # For CentOS, the load and conf files are combined into a single
   # 'conf' file. So we install the load template as the conf file, and
   # then concatenate the actual conf file.
@@ -62,15 +56,7 @@ stage_install_rpm() {
 do_package() {
   echo "Packaging ${HOST_ARCH}..."
   PROVIDES="${PACKAGE}"
-  local REPS="$REPLACES"
   REPLACES=""
-  for rep in $REPS; do
-    if [ -z "$REPLACES" ]; then
-      REPLACES="$PACKAGE-$rep"
-    else
-      REPLACES="$REPLACES $PACKAGE-$rep"
-    fi
-  done
 
   # If we specify a dependecy of foo.so below, we would depend on both the
   # 32 and 64-bit versions on a 64-bit machine. The current version of RPM
@@ -80,8 +66,7 @@ do_package() {
     local PKG_ARCH="(64bit)"
   fi
 
-  DEPENDS="httpd >= 2.4, \
-  at"
+  DEPENDS="httpd >= 2.4"
   if [ "$CPANEL" = true ]; then
     DEPENDS="ea-apache24 >= 2.4, \
     ea-apache24-mod_version >= 2.4"
@@ -100,7 +85,7 @@ do_package() {
     --define "_topdir $RPMBUILD_DIR" \
     --define "_binary_payload w9.bzdio" \
     "${SPEC}"
-  PKGNAME="${PACKAGE}-${CHANNEL}-${VERSION}-${REVISION}"
+  PKGNAME="${PACKAGE}-${VERSION}-${REVISION}"
   mv "$RPMBUILD_DIR/RPMS/$HOST_ARCH/${PKGNAME}.${HOST_ARCH}.rpm" "${OUTPUTDIR}"
   # Make sure the package is world-readable, otherwise it causes problems when
   # copied to share drive.
@@ -115,37 +100,13 @@ cleanup() {
 }
 
 usage() {
-  echo "usage: $(basename $0) [-c channel] [-a target_arch] [-o 'dir'] [-b 'dir'] [-p]"
-  echo "-c channel the package channel (unstable, beta, stable)"
+  echo "usage: $(basename $0) [-a target_arch] [-o 'dir'] [-b 'dir'] [-p]"
   echo "-a arch    package architecture (x64 or arm64)"
   echo "-o dir     package output directory [${OUTPUTDIR}]"
   echo "-b dir     build input directory    [${BUILDDIR}]"
   echo "-p         cPanel EasyApache 4 build"
+  echo "-c channel (ignored, kept for backward compatibility)"
   echo "-h         this help message"
-}
-
-# Check that the channel name is one of the allowable ones.
-verify_channel() {
-  case $CHANNEL in
-    stable )
-      CHANNEL=stable
-      REPLACES="unstable beta"
-      ;;
-    unstable|dev|alpha )
-      CHANNEL=unstable
-      REPLACES="stable beta"
-      ;;
-    testing|beta )
-      CHANNEL=beta
-      REPLACES="unstable stable"
-      ;;
-    * )
-      echo
-      echo "ERROR: '$CHANNEL' is not a valid channel type."
-      echo
-      exit 1
-      ;;
-  esac
 }
 
 process_opts() {
@@ -161,7 +122,6 @@ process_opts() {
         ;;
       c )
         CHANNEL="$OPTARG"
-        verify_channel
         ;;
       a )
         TARGETARCH="$OPTARG"
@@ -225,7 +185,6 @@ eval $(sed -e "s/^\([^=]\+\)=\(.*\)$/export \1='\2'/" \
   "${BUILDDIR}/install/common/BRANDING")
 
 REPOCONFIG=""
-verify_channel
 
 APACHE_CONFDIR="/etc/httpd/conf.d"
 MOD_PAGESPEED_CACHE="/var/cache/mod_pagespeed"

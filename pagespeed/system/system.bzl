@@ -91,6 +91,7 @@ SYSTEM_CORE_HDRS = [
 
 SYSTEM_CORE_DEPS = [
     ":external_server_spec",
+    ":json_utils",
     ":redis_cache",
     ":system_controller_process_h",
     "//net/instaweb/http",
