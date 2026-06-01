@@ -6,9 +6,9 @@
  * to you under the Apache License, Version 2.0 (the
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
- * 
+ *
  *   http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
  * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
@@ -19,7 +19,36 @@
 
 #include "pagespeed/system/system_rewrite_driver_factory.h"
 
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+namespace {
+void SRDFDebugLog(const char* msg) {
+  HANDLE hFile = CreateFileA(
+      "C:\\inetpub\\pagespeed\\srdf_debug.log",
+      FILE_APPEND_DATA,
+      FILE_SHARE_READ | FILE_SHARE_WRITE,
+      NULL,
+      OPEN_ALWAYS,
+      FILE_ATTRIBUTE_NORMAL,
+      NULL);
+  if (hFile != INVALID_HANDLE_VALUE) {
+    DWORD written;
+    WriteFile(hFile, msg, strlen(msg), &written, NULL);
+    WriteFile(hFile, "\r\n", 2, &written, NULL);
+    CloseHandle(hFile);
+  }
+}
+}  // namespace
+#else
+namespace { void SRDFDebugLog(const char*) {} }
+#endif
+
+#ifndef _WIN32
 #include <sys/prctl.h>
+#endif
 
 #include <algorithm>  // for min
 #include <cstdio>
@@ -29,7 +58,6 @@
 #include <set>
 #include <utility>  // for pair
 
-#include "apr_general.h"
 #include "base/logging.h"
 #include "net/instaweb/http/public/http_dump_url_async_writer.h"
 #include "net/instaweb/http/public/http_dump_url_fetcher.h"
@@ -51,7 +79,11 @@
 #include "pagespeed/kernel/base/md5_hasher.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/null_shared_mem.h"
+#ifdef _WIN32
+#include "pagespeed/kernel/base/std_timer.h"
+#else
 #include "pagespeed/kernel/base/posix_timer.h"
+#endif
 #include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/stdio_file_system.h"
@@ -61,14 +93,15 @@
 #include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/sharedmem/shared_circular_buffer.h"
 #include "pagespeed/kernel/sharedmem/shared_mem_statistics.h"
+#if PAGESPEED_SUPPORT_POSIX_SHARED_MEM
 #include "pagespeed/kernel/thread/pthread_shared_mem.h"
+#endif
 #include "pagespeed/kernel/thread/queued_worker_pool.h"
 #include "pagespeed/kernel/util/input_file_nonce_generator.h"
 #include "pagespeed/kernel/util/nonce_generator.h"
 #include "pagespeed/system/controller_manager.h"
 #include "pagespeed/system/controller_process.h"
 #include "pagespeed/system/in_place_resource_recorder.h"
-#include "pagespeed/system/serf_url_async_fetcher.h"
 #include "pagespeed/system/system_caches.h"
 #include "pagespeed/system/system_rewrite_options.h"
 #include "pagespeed/system/system_server_context.h"
@@ -114,38 +147,47 @@ SystemRewriteDriverFactory::SystemRewriteDriverFactory(
       thread_counts_finalized_(false),
       num_rewrite_threads_(-1),
       num_expensive_rewrite_threads_(-1) {
+  SRDFDebugLog("SRDF: constructor body entered after member init");
+  SRDFDebugLog("SRDF: checking shared_mem_runtime");
   if (shared_mem_runtime == nullptr) {
-#ifdef PAGESPEED_SUPPORT_POSIX_SHARED_MEM
+    SRDFDebugLog("SRDF: shared_mem_runtime is null, creating NullSharedMem");
+#if PAGESPEED_SUPPORT_POSIX_SHARED_MEM
     shared_mem_runtime = new PthreadSharedMem();
 #else
     shared_mem_runtime = new NullSharedMem();
 #endif
+    SRDFDebugLog("SRDF: created NullSharedMem");
   }
+  SRDFDebugLog("SRDF: about to reset shared_mem_runtime_");
   shared_mem_runtime_.reset(shared_mem_runtime);
+  SRDFDebugLog("SRDF: constructor complete");
 }
 
 // We need an Init() method to finish construction because we want to call
 // virtual methods that subclasses can override.
 void SystemRewriteDriverFactory::Init() {
+  SRDFDebugLog("SRDF: Init() entered");
   // Note: in Apache this must run after mod_pagespeed_register_hooks has
   // completed.  See http://httpd.apache.org/docs/2.4/developer/new_api_2_4.html
   // and search for ap_mpm_query.
+  SRDFDebugLog("SRDF: calling AutoDetectThreadCounts");
   AutoDetectThreadCounts();
+  SRDFDebugLog("SRDF: AutoDetectThreadCounts complete");
 
+  SRDFDebugLog("SRDF: calling LookupThreadLimit");
   int thread_limit = LookupThreadLimit();
+  SRDFDebugLog("SRDF: LookupThreadLimit complete");
   thread_limit += num_rewrite_threads() + num_expensive_rewrite_threads();
+  SRDFDebugLog("SRDF: about to create SystemCaches");
   caches_ = std::make_unique<SystemCaches>(this, shared_mem_runtime_.get(),
                                            thread_limit);
+  SRDFDebugLog("SRDF: Init() complete");
 }
 
 SystemRewriteDriverFactory::~SystemRewriteDriverFactory() {
   shared_mem_statistics_.reset(nullptr);
 }
 
-void SystemRewriteDriverFactory::InitApr() {
-  apr_initialize();
-  atexit(apr_terminate);
-}
 
 // Initializes global statistics object if needed, using factory to
 // help with the settings if needed.
@@ -197,7 +239,6 @@ void SystemRewriteDriverFactory::InitStats(Statistics* statistics) {
   RewriteDriverFactory::InitStats(statistics);
 
   // Init System-specific stats.
-  SerfUrlAsyncFetcher::InitStats(statistics);
   StdioFileSystem::InitStats(statistics);
   SystemCaches::InitStats(statistics);
   PropertyCache::InitCohortStats(RewriteDriver::kBeaconCohort, statistics);
@@ -223,7 +264,14 @@ NonceGenerator* SystemRewriteDriverFactory::DefaultNonceGenerator() {
 }
 
 void SystemRewriteDriverFactory::SetupCaches(ServerContext* server_context) {
+  SRDFDebugLog("SRDF: SetupCaches() entered");
+  if (caches_ == nullptr) {
+    SRDFDebugLog("SRDF: SetupCaches - caches_ is NULL!");
+    return;
+  }
+  SRDFDebugLog("SRDF: SetupCaches - calling caches_->SetupCaches");
   caches_->SetupCaches(server_context, enable_property_cache());
+  SRDFDebugLog("SRDF: SetupCaches() complete");
 }
 
 void SystemRewriteDriverFactory::InitStaticAssetManager(
@@ -252,6 +300,7 @@ void SystemRewriteDriverFactory::ParentOrChildInit() {
 }
 
 void SystemRewriteDriverFactory::NameProcess(const char* name) {
+#ifndef _WIN32
   // Set the process status.  This is what /proc/PID/status shows and what
   // "ps -a" gives you.  With PR_SET_NAME there's a max of 16 characters, so
   // abbreviate pagespeed as ps to be terse.
@@ -262,6 +311,7 @@ void SystemRewriteDriverFactory::NameProcess(const char* name) {
   // It's also possible to change argv[0], but this is a pain so currently we
   // only do this in nginx where they've written ngx_setproctitle to make it
   // easy.
+#endif  // !_WIN32
 }
 
 void SystemRewriteDriverFactory::PrepareForkedProcess(const char* name) {
@@ -454,7 +504,7 @@ SystemRewriteDriverFactory::ParseAndSetOption1(StringPiece option,
     set_install_crash_handler(is_on);
     return parsed_as_bool;
   } else if (StringCaseEqual(option, kListOutstandingUrlsOnError)) {
-    list_outstanding_urls_on_error(is_on);
+    set_list_outstanding_urls_on_error(is_on);
     return parsed_as_bool;
   } else if (StringCaseEqual(option, kTrackOriginalContentLength)) {
     set_track_original_content_length(is_on);
@@ -482,7 +532,8 @@ SystemRewriteDriverFactory::ParseAndSetOption1(StringPiece option,
     return parsed_as_int;
   }
 
-  LOG(FATAL) << "Unknown options should have been handled in scope checking.";
+  LOG(ERROR) << "Unknown option '" << option << "' should have been handled "
+             << "in scope checking; ignoring";
   return RewriteOptions::kOptionNameUnknown;
 }
 
@@ -679,22 +730,6 @@ UrlAsyncFetcher* SystemRewriteDriverFactory::GetFetcher(
   return iter->second;
 }
 
-UrlAsyncFetcher* SystemRewriteDriverFactory::AllocateFetcher(
-    SystemRewriteOptions* config) {
-  SerfUrlAsyncFetcher* serf = new SerfUrlAsyncFetcher(
-      config->fetcher_proxy().c_str(),
-      nullptr,  // Do not use the Factory pool so we can control deletion.
-      thread_system(), statistics(), timer(),
-      config->blocking_fetch_timeout_ms(), message_handler());
-  serf->set_list_outstanding_urls_on_error(list_outstanding_urls_on_error_);
-  serf->set_fetch_with_gzip(config->fetch_with_gzip());
-  serf->set_track_original_content_length(track_original_content_length_);
-  serf->SetHttpsOptions(config->https_options());
-  serf->SetSslCertificatesDir(config->ssl_cert_directory());
-  serf->SetSslCertificatesFile(config->ssl_cert_file());
-  return serf;
-}
-
 UrlAsyncFetcher* SystemRewriteDriverFactory::GetBaseFetcher(
     SystemRewriteOptions* config) {
   GoogleString cache_key = GetFetcherKey(false, config);
@@ -718,7 +753,11 @@ FileSystem* SystemRewriteDriverFactory::DefaultFileSystem() {
 
 Hasher* SystemRewriteDriverFactory::NewHasher() { return new MD5Hasher(); }
 
+#ifdef _WIN32
+Timer* SystemRewriteDriverFactory::DefaultTimer() { return new StdTimer(); }
+#else
 Timer* SystemRewriteDriverFactory::DefaultTimer() { return new PosixTimer(); }
+#endif
 
 NamedLockManager* SystemRewriteDriverFactory::DefaultLockManager() {
   LOG(DFATAL) << "Locks are owned by SystemCachePath, not the factory";

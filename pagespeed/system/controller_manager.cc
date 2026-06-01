@@ -19,6 +19,8 @@
 
 #include "pagespeed/system/controller_manager.h"
 
+#ifndef _WIN32
+
 #include <poll.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -29,6 +31,7 @@
 
 #include "base/logging.h"
 #include "pagespeed/kernel/base/string.h"
+#include "pagespeed/system/system_rewrite_driver_factory.h"
 
 namespace net_instaweb {
 
@@ -46,8 +49,11 @@ ControllerManager::ProcessDeathWatcherThread::ProcessDeathWatcherThread(
       parent_death_detected_(false) {
   int fds[2];
   if (pipe(fds) < 0) {
-    LOG(FATAL) << "ProcessDeathWatcherThread: pipe failed: " << strerror(errno);
-    exit(1);  // NOTREACHED
+    LOG(ERROR) << "ProcessDeathWatcherThread: pipe failed: " << strerror(errno)
+               << "; death watcher will be disabled";
+    // Leave stop_read_fd_ and stop_write_fd_ as -1, Run() will detect this
+    // and exit early via CHECK_GE.
+    return;
   }
   stop_read_fd_ = fds[0];
   stop_write_fd_ = fds[1];
@@ -107,8 +113,9 @@ void ControllerManager::ProcessDeathWatcherThread::Run() {
         handler_->Message(
             kInfo, "Root process is starting a new controller; shutting down.");
       } else {
-        LOG(FATAL) << "Status of " << status << " doesn't make sense";
-        exit(1);  // NOTREACHED
+        LOG(ERROR) << "Status of " << status << " doesn't make sense; "
+                   << "treating as root process exit signal";
+        // Fall through to process_->Stop() below
       }
       // Note that it is possible that ControllerProcess::Run has already exited
       // at this point. However, the API requires that calling Stop() is still
@@ -300,3 +307,5 @@ void ControllerManager::ForkControllerProcess(
 }
 
 }  // namespace net_instaweb
+
+#endif  // !_WIN32

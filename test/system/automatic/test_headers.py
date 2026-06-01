@@ -33,6 +33,7 @@ from pagespeed_test_framework import (
 )
 
 
+@pytest.mark.not_nginx  # nginx may use chunked encoding instead of Content-Length
 class TestContentLength:
     """Tests for Content-Length header on resources.
 

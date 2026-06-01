@@ -247,7 +247,7 @@ $pagespeedConfigSection
         </staticContent>
 
         <modules>
-            <!-- PageSpeed module will be loaded here when available -->
+            <!-- PageSpeed module enabled via globalModules native registration -->
         </modules>
 
         <globalModules>

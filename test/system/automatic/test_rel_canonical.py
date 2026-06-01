@@ -33,6 +33,8 @@ from pagespeed_test_framework import (
 )
 
 
+@pytest.mark.not_nginx  # nginx IPRO doesn't produce PSA-aj ETag pattern
+@pytest.mark.not_envoy  # Envoy IPRO doesn't produce PSA-aj ETag pattern
 class TestRelCanonicalIPRO:
     """Tests that IPRO resources do NOT have rel=canonical headers.
 

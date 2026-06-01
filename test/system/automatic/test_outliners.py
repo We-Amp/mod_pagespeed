@@ -34,6 +34,8 @@ from pagespeed_test_framework import (
 )
 
 
+@pytest.mark.not_nginx  # nginx streaming architecture doesn't support X-PSA-Blocking-Rewrite
+@pytest.mark.not_envoy  # Envoy streaming architecture doesn't support X-PSA-Blocking-Rewrite
 class TestOutlineCss:
     """Tests for the outline_css filter.
 
@@ -84,6 +86,8 @@ class TestOutlineCss:
         )
 
 
+@pytest.mark.not_nginx  # nginx streaming architecture doesn't support X-PSA-Blocking-Rewrite
+@pytest.mark.not_envoy  # Envoy streaming architecture doesn't support X-PSA-Blocking-Rewrite
 class TestOutlineJavascript:
     """Tests for the outline_javascript filter.
 
@@ -134,6 +138,8 @@ class TestOutlineJavascript:
         )
 
 
+@pytest.mark.not_nginx  # nginx streaming architecture doesn't support X-PSA-Blocking-Rewrite
+@pytest.mark.not_envoy  # Envoy streaming architecture doesn't support X-PSA-Blocking-Rewrite
 class TestOutlinedResourceCompression:
     """Tests for compression and caching of outlined resources.
 

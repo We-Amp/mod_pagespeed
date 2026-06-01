@@ -31,6 +31,8 @@ from pagespeed_test_framework import (
 )
 
 
+@pytest.mark.not_nginx  # nginx streaming architecture doesn't support X-PSA-Blocking-Rewrite
+@pytest.mark.not_envoy  # Envoy streaming architecture doesn't support X-PSA-Blocking-Rewrite
 class TestFlattenCssImportsDefault:
     """Tests for flatten_css_imports with default settings.
 
@@ -83,6 +85,7 @@ class TestFlattenCssImportsDefault:
         )
 
 
+@pytest.mark.not_nginx  # nginx streaming architecture doesn't support X-PSA-Blocking-Rewrite
 class TestFlattenCssImportsTinyLimit:
     """Tests for flatten_css_imports with tiny byte limit.
 
@@ -119,10 +122,14 @@ class TestFlattenCssImportsTinyLimit:
             "@import should remain with tiny limit",
         )
 
+    @pytest.mark.not_envoy
     def test_tiny_limit_excludes_imported_content(
         self, client: PageSpeedClient, example_root: str
     ):
-        """With tiny limit, imported CSS content should not be inlined."""
+        """With tiny limit, imported CSS content should not be inlined.
+
+        Skipped on Envoy: CssFlattenMaxBytes header handling differs.
+        """
         url = f"{example_root}/flatten_css_imports.html?PageSpeedFilters=flatten_css_imports,rewrite_css"
 
         response = client.get(
@@ -142,6 +149,7 @@ class TestFlattenCssImportsTinyLimit:
         )
 
 
+@pytest.mark.not_nginx  # nginx streaming architecture doesn't support X-PSA-Blocking-Rewrite
 class TestFlattenCssImportsMediumLimit:
     """Tests for flatten_css_imports with medium byte limit.
 

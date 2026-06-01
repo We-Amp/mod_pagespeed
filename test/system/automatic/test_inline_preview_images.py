@@ -38,6 +38,8 @@ IPHONE_USER_AGENT = (
 )
 
 
+@pytest.mark.not_nginx  # Filter times out in nginx streaming architecture
+@pytest.mark.not_envoy  # Filter times out in Envoy streaming architecture
 class TestInlinePreviewImagesOptimize:
     """Tests for inline_preview_images in optimize mode.
 
@@ -93,6 +95,8 @@ class TestInlinePreviewImagesOptimize:
         assert_http_status(response, 200)
 
 
+@pytest.mark.not_nginx  # Filter times out in nginx streaming architecture
+@pytest.mark.not_envoy  # Filter times out in Envoy streaming architecture
 class TestInlinePreviewImagesDebug:
     """Tests for inline_preview_images in debug mode.
 

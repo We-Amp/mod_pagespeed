@@ -376,7 +376,7 @@ int64 Statistics::LookupValue(StringPiece stat_name) {
   if (tvar != nullptr) {
     return tvar->Get(TimedVariable::START);
   }
-  LOG(FATAL) << "Could not find stat: " << stat_name;
+  LOG(ERROR) << "Could not find stat: " << stat_name << " (returning 0)";
   return 0;
 }
 

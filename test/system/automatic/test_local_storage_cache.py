@@ -33,6 +33,8 @@ from pagespeed_test_framework import (
 )
 
 
+@pytest.mark.not_nginx  # nginx streaming architecture doesn't support X-PSA-Blocking-Rewrite
+@pytest.mark.not_envoy  # Envoy streaming architecture doesn't support X-PSA-Blocking-Rewrite
 class TestLocalStorageCacheOptimizeMode:
     """Tests for local_storage_cache in optimize mode.
 
@@ -158,6 +160,8 @@ class TestLocalStorageCacheOptimizeMode:
         )
 
 
+@pytest.mark.not_nginx  # nginx streaming architecture doesn't support X-PSA-Blocking-Rewrite
+@pytest.mark.not_envoy  # Envoy streaming architecture doesn't support X-PSA-Blocking-Rewrite
 class TestLocalStorageCacheDebugMode:
     """Tests for local_storage_cache in debug mode.
 
@@ -209,6 +213,8 @@ class TestLocalStorageCacheDebugMode:
         )
 
 
+@pytest.mark.not_nginx  # nginx streaming architecture doesn't support X-PSA-Blocking-Rewrite
+@pytest.mark.not_envoy  # Envoy streaming architecture doesn't support X-PSA-Blocking-Rewrite
 class TestLocalStorageCacheCookie:
     """Tests for local_storage_cache with cookie indicating cached resources.
 

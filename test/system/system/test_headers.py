@@ -86,6 +86,8 @@ class TestDefaultFiltering:
         assert_http_status(response, 200)
 
 
+@pytest.mark.not_nginx  # nginx IPRO ETag implementation differs - PSA-aj pattern not produced
+@pytest.mark.not_envoy  # Envoy IPRO ETag implementation differs - PSA-aj pattern not produced
 class TestIproEtag:
     """Tests for IPRO ETag handling.
 
@@ -192,10 +194,13 @@ class TestResource404:
     """
 
     @pytest.mark.requires_stats
+    @pytest.mark.not_envoy
     def test_404_increments_stat(
         self, client: PageSpeedClient, stats_snapshot
     ):
-        """404 responses should increment resource_404_count stat."""
+        """404 responses should increment resource_404_count stat.
+
+        Skipped on Envoy: Envoy doesn't track resource_404_count statistic."""
         old_stats = stats_snapshot()
         old_404_count = old_stats.get("resource_404_count", 0)
 

@@ -119,55 +119,73 @@ const HtmlElement::Attribute* HtmlElement::FindAttribute(
 
 GoogleString HtmlElement::ToString() const {
   GoogleString buf;
-  StrAppend(&buf, "<", data_->name_.value());
+
+  // Estimate size to reduce allocations: tag name + attributes + closing +
+  // line numbers. Most elements are small, but reserve a reasonable baseline.
+  size_t estimated_size = 64;  // Base estimate for small elements
+  StringPiece tag_name = data_->name_.value();
+  estimated_size += tag_name.size() * 2;  // Tag appears up to twice
+  for (AttributeConstIterator iter = attributes().begin();
+       iter != attributes().end(); ++iter) {
+    const Attribute& attribute = *iter;
+    estimated_size += attribute.name_str().size() + 4;  // name + ' =' + quotes
+    const char* escaped = attribute.escaped_value();
+    if (escaped != nullptr) {
+      estimated_size += strlen(escaped);
+    }
+  }
+  buf.reserve(estimated_size);
+
+  StrAppend(&buf, "<", tag_name);
 
   for (AttributeConstIterator iter = attributes().begin();
        iter != attributes().end(); ++iter) {
     const Attribute& attribute = *iter;
-    StrAppend(&buf, " ", attribute.name_str());
     const char* value = attribute.DecodedValueOrNull();
     if (attribute.decoding_error()) {
       // This is a debug method; not used in serialization.
-      buf += "<DECODING ERROR>";
+      StrAppend(&buf, " ", attribute.name_str(), "<DECODING ERROR>");
     } else if (value != nullptr) {
-      buf += "=";
       const char* quote = attribute.quote_str();
-      buf += quote;
-      buf += value;
-      buf += quote;
+      StrAppend(&buf, " ", attribute.name_str(), "=", quote, value, quote);
+    } else {
+      StrAppend(&buf, " ", attribute.name_str());
     }
   }
+
   switch (data_->style_) {
     case AUTO_CLOSE:
-      buf += "> (not yet closed)";
+      StrAppend(&buf, "> (not yet closed)");
       break;
     case IMPLICIT_CLOSE:
-      buf += ">";
+      StrAppend(&buf, ">");
       break;
     case EXPLICIT_CLOSE:
-      StrAppend(&buf, "></", data_->name_.value(), ">");
+      StrAppend(&buf, "></", tag_name, ">");
       break;
     case BRIEF_CLOSE:
-      buf += "/>";
+      StrAppend(&buf, "/>");
       break;
     case UNCLOSED:
-      buf += "> (unclosed)";
+      StrAppend(&buf, "> (unclosed)");
       break;
     case INVISIBLE:
-      buf += "> (invisible)";
+      StrAppend(&buf, "> (invisible)");
       break;
   }
-  if ((data_->begin_line_number_ != Data::kMaxLineNumber) ||
-      (data_->end_line_number_ != Data::kMaxLineNumber)) {
-    buf += " ";
-    if (data_->begin_line_number_ != Data::kMaxLineNumber) {
-      buf += IntegerToString(data_->begin_line_number_);
-    }
-    buf += "...";
-    if (data_->end_line_number_ != Data::kMaxLineNumber) {
-      buf += IntegerToString(data_->end_line_number_);
-    }
+
+  const bool has_begin_line =
+      (data_->begin_line_number_ != Data::kMaxLineNumber);
+  const bool has_end_line = (data_->end_line_number_ != Data::kMaxLineNumber);
+  if (has_begin_line && has_end_line) {
+    StrAppend(&buf, " ", data_->begin_line_number_, "...",
+              data_->end_line_number_);
+  } else if (has_begin_line) {
+    StrAppend(&buf, " ", data_->begin_line_number_, "...");
+  } else if (has_end_line) {
+    StrAppend(&buf, " ...", data_->end_line_number_);
   }
+
   return buf;
 }
 

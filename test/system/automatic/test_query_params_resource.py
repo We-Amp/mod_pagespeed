@@ -57,10 +57,14 @@ class TestQueryParamsInResourceFlow:
         )
         assert_http_status(response, 200)
 
+    @pytest.mark.not_envoy
     def test_headers_can_disable_rewriting(
         self, client: PageSpeedClient, rewritten_root: str
     ):
         """Headers can disable image rewriting.
+
+        Skipped on Envoy: PageSpeedFilters header not respected for resource
+        requests. The filter doesn't check this header for IPRO requests.
 
         Bash original::
 

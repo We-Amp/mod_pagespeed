@@ -31,6 +31,7 @@ from pagespeed_test_framework import (
 )
 
 
+@pytest.mark.not_nginx  # nginx IPRO doesn't preserve no-cache headers
 class TestNoCacheResources:
     """Tests for handling resources with Cache-Control: no-cache.
 
@@ -38,6 +39,9 @@ class TestNoCacheResources:
         echo Test that we can rewrite resources that are served with
         echo Cache-Control: no-cache with on-the-fly filters.
         test_filter extend_cache with no-cache js origin
+
+    Note: nginx's IPRO implementation does not preserve no-cache headers.
+    This is a known limitation and not tested by upstream ngx_pagespeed.
     """
 
     def test_extend_cache_preserves_no_cache(

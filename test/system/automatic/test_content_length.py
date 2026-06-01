@@ -30,6 +30,7 @@ from pagespeed_test_framework import (
 )
 
 
+@pytest.mark.not_nginx  # nginx uses chunked encoding and adds Cache-Control: private
 class TestContentLength:
     """Tests for Content-Length header on PageSpeed resources.
 
@@ -42,6 +43,9 @@ class TestContentLength:
         check_from "$OUT" grep "^Content-Length:"
         check_not_from "$OUT" grep "^Transfer-Encoding: chunked"
         check_not_from "$OUT" grep "^Cache-Control:.*private"
+
+    Note: nginx may use chunked encoding and add Cache-Control: private.
+    These are nginx-specific behaviors that differ from Apache.
     """
 
     def test_rewritten_resource_has_content_length(

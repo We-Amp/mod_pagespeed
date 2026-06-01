@@ -205,6 +205,8 @@ class TestDeferJavascript:
         assert_contains(response, r'PageSpeed=noscript')
 
 
+@pytest.mark.not_nginx  # Filter times out in nginx streaming architecture
+@pytest.mark.not_envoy  # Filter times out in Envoy streaming architecture
 class TestLazyloadImages:
     """Tests for the lazyload_images filter.
 
@@ -231,6 +233,8 @@ class TestLazyloadImages:
         assert_http_status(response, 200)
 
 
+@pytest.mark.not_nginx  # nginx streaming architecture doesn't support X-PSA-Blocking-Rewrite
+@pytest.mark.not_envoy  # Envoy streaming architecture doesn't support X-PSA-Blocking-Rewrite
 class TestFlattenCssImports:
     """Tests for the flatten_css_imports filter.
 

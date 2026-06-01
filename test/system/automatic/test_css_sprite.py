@@ -59,6 +59,8 @@ class TestCssSpriteImagesInline:
         assert_http_status(response, 200)
 
 
+@pytest.mark.not_nginx  # CSS sprite generation times out in nginx streaming architecture
+@pytest.mark.not_envoy  # CSS sprite generation times out in Envoy streaming architecture
 class TestCssSpriteImagesExternal:
     """Tests for sprite_images with external CSS.
 

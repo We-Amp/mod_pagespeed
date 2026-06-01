@@ -30,7 +30,7 @@ Environment Variables:
     PAGESPEED_EXAMPLE_ROOT: Root path for example pages (default: /mod_pagespeed_example)
     PAGESPEED_STATS_PATH: Path to statistics endpoint (default: /mod_pagespeed_statistics)
     PAGESPEED_ADMIN_PATH: Path to admin endpoint (default: /pagespeed_admin)
-    PAGESPEED_SERVER_TYPE: Server type: apache, envoy, or iis (default: auto-detect)
+    PAGESPEED_SERVER_TYPE: Server type: apache, envoy, iis, or nginx (default: auto-detect)
 """
 
 import os
@@ -70,7 +70,7 @@ class ServerConfig:
     admin_path: str
 
     # Server type
-    server_type: str  # "apache", "envoy", "iis", or "auto"
+    server_type: str  # "apache", "envoy", "iis", "nginx", or "auto"
 
     # Features
     stats_enabled: bool
@@ -93,6 +93,11 @@ class ServerConfig:
         return self.server_type == "iis"
 
     @property
+    def is_nginx(self) -> bool:
+        """Check if running against nginx."""
+        return self.server_type == "nginx"
+
+    @property
     def is_windows(self) -> bool:
         """Check if cache directory is on Windows."""
         # Windows paths start with drive letter or use backslashes
@@ -109,7 +114,7 @@ def server_config() -> ServerConfig:
     server_type = os.environ.get("PAGESPEED_SERVER_TYPE", "auto")
 
     # Auto-detect statistics path based on server type
-    if server_type in ("iis", "envoy"):
+    if server_type in ("iis", "envoy", "nginx"):
         default_stats_path = "/pagespeed_statistics"
         default_admin_path = "/pagespeed_admin"
     else:
@@ -226,8 +231,14 @@ def stats_snapshot(client: PageSpeedClient, server_config: ServerConfig) -> Call
     if not server_config.stats_enabled:
         pytest.skip("Statistics not enabled (set PAGESPEED_STATS_ENABLED=1)")
 
+    # nginx admin endpoints don't work with ?PageSpeed=off, so disable it for nginx
+    disable_pagespeed = not (server_config.is_nginx or server_config.server_type == "envoy")
+
     def _capture() -> Dict[str, int]:
-        return client.get_statistics(stats_path=server_config.stats_path)
+        return client.get_statistics(
+            stats_path=server_config.stats_path,
+            disable_pagespeed=disable_pagespeed
+        )
 
     return _capture
 
@@ -270,6 +281,11 @@ def flush_cache(server_config: ServerConfig, client: PageSpeedClient) -> Callabl
                 return
             except Exception:
                 pass
+
+        # nginx uses the same file-based flush as Apache (touch cache.flush)
+        # If we get here and it's nginx, the file method already failed above
+        if server_config.is_nginx:
+            pytest.skip(f"Cannot flush cache: directory not found or not writable: {server_config.cache_dir}")
 
         pytest.skip(f"Cannot flush cache: directory not found: {server_config.cache_dir}")
 
@@ -314,6 +330,12 @@ def pytest_configure(config):
     )
     config.addinivalue_line(
         "markers", "not_envoy: test does not run on Envoy (missing feature)"
+    )
+    config.addinivalue_line(
+        "markers", "nginx_only: test only runs on nginx"
+    )
+    config.addinivalue_line(
+        "markers", "not_nginx: test does not run on nginx (missing feature)"
     )
     config.addinivalue_line(
         "markers", "requires_module: test requires PageSpeed module to be installed"
@@ -364,6 +386,14 @@ def pytest_runtest_setup(item):
     if item.get_closest_marker("not_envoy"):
         if server_type == "envoy":
             pytest.skip("Test not supported on Envoy")
+
+    if item.get_closest_marker("nginx_only"):
+        if server_type != "nginx":
+            pytest.skip("Test only runs on nginx")
+
+    if item.get_closest_marker("not_nginx"):
+        if server_type == "nginx":
+            pytest.skip("Test not supported on nginx")
 
     if item.get_closest_marker("requires_module"):
         if not stats_enabled:

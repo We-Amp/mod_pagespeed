@@ -34,6 +34,8 @@ from pagespeed_test_framework import (
 )
 
 
+@pytest.mark.not_nginx  # nginx streaming architecture doesn't support X-PSA-Blocking-Rewrite
+@pytest.mark.not_envoy  # Envoy streaming architecture doesn't support X-PSA-Blocking-Rewrite
 class TestLazyloadImages:
     """Tests for the lazyload_images filter.
 
@@ -102,6 +104,8 @@ class TestLazyloadImages:
         )
 
 
+@pytest.mark.not_nginx  # nginx streaming architecture doesn't support X-PSA-Blocking-Rewrite
+@pytest.mark.not_envoy  # Envoy streaming architecture doesn't support X-PSA-Blocking-Rewrite
 class TestLazyloadOptimizeMode:
     """Tests for lazyload_images in optimize mode.
 
@@ -155,6 +159,8 @@ class TestLazyloadOptimizeMode:
         )
 
 
+@pytest.mark.not_nginx  # nginx streaming architecture doesn't support X-PSA-Blocking-Rewrite
+@pytest.mark.not_envoy  # Envoy streaming architecture doesn't support X-PSA-Blocking-Rewrite
 class TestLazyloadBlankGif:
     """Tests for the blank GIF placeholder image.
 
@@ -205,6 +211,8 @@ class TestLazyloadBlankGif:
             f"Blank GIF should have 1 year cache, got: {cache_control}"
 
 
+@pytest.mark.not_nginx  # nginx streaming architecture doesn't support X-PSA-Blocking-Rewrite
+@pytest.mark.not_envoy  # Envoy streaming architecture doesn't support X-PSA-Blocking-Rewrite
 class TestLazyloadDebugMode:
     """Tests for lazyload_images in debug mode.
 

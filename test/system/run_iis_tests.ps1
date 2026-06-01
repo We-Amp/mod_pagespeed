@@ -134,13 +134,13 @@ function Build-PageSpeedModule {
     Push-Location $SourceRoot
     try {
         # Build the IIS module
-        Write-Status "Building //pagespeed/iis:pagespeed_iis_dll..."
+        Write-Status "Building //pagespeed/iis:pagespeed_iis.dll..."
 
         $buildArgs = @(
             "build",
             "--config=windows",
             "--config=clang-cl",
-            "//pagespeed/iis:pagespeed_iis_dll"
+            "//pagespeed/iis:pagespeed_iis.dll"
         )
 
         & bazel @buildArgs
@@ -152,14 +152,8 @@ function Build-PageSpeedModule {
 
         Write-Status "Build successful!" "Green"
 
-        # Copy the built DLL to a known location
-        $dllSource = "$SourceRoot\bazel-bin\pagespeed\iis\pagespeed_iis_dll.dll"
-        $dllDest = "$SourceRoot\bazel-bin\pagespeed\iis\pagespeed_iis.dll"
-
-        if (Test-Path $dllSource) {
-            Copy-Item $dllSource $dllDest -Force
-            Write-Status "Module ready at: $dllDest" "Gray"
-        }
+        $dllPath = "$SourceRoot\bazel-bin\pagespeed\iis\pagespeed_iis.dll"
+        Write-Status "Module ready at: $dllPath" "Gray"
     } finally {
         Pop-Location
     }
