@@ -13,7 +13,6 @@ import type {
   LicenseStatusResponse,
   LicenseApplyResponse,
   ActivateResponse,
-  TrialResponse,
   ConsentResponse,
   TimeRangeParams,
 } from "./types";
@@ -219,14 +218,6 @@ export class AdminApiClient {
     const body: Record<string, unknown> = { nonce };
     if (orderRef) body.order_ref = orderRef;
     return this.post<ActivateResponse>("/v1/license/activate", body);
-  }
-
-  async startTrial(email: string, termsAcceptedAt: string, termsVersion: string): Promise<TrialResponse> {
-    return this.post<TrialResponse>("/v1/license/trial", {
-      email,
-      terms_accepted_at: termsAcceptedAt,
-      terms_version: termsVersion,
-    });
   }
 
   async recordConsent(accepted: boolean): Promise<ConsentResponse> {

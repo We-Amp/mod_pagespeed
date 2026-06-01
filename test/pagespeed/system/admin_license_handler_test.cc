@@ -241,7 +241,6 @@ TEST_F(AdminLicenseHandlerTest, StatusReturnsUnlicensedByDefault) {
   int status = DoGlobalRequest("/v1/license/status", "", &body);
   EXPECT_EQ(200, status);
   EXPECT_THAT(body, ::testing::HasSubstr("\"licensed\":false"));
-  EXPECT_THAT(body, ::testing::HasSubstr("\"trial_available\":true"));
   EXPECT_THAT(body, ::testing::HasSubstr("\"is_global\":true"));
 }
 
@@ -316,8 +315,6 @@ TEST_F(AdminLicenseHandlerTest, StatusAvailableOnLocalAdmin) {
   EXPECT_EQ(200, status);
   EXPECT_THAT(body, ::testing::HasSubstr("\"licensed\":false"));
   EXPECT_THAT(body, ::testing::HasSubstr("\"is_global\":false"));
-  EXPECT_THAT(body,
-              ::testing::Not(::testing::HasSubstr("\"trial_available\":true")));
 }
 
 TEST_F(AdminLicenseHandlerTest, ApplyBlockedOnLocalAdmin) {
@@ -331,17 +328,6 @@ TEST_F(AdminLicenseHandlerTest, ActivateBlockedOnLocalAdmin) {
   GoogleString body;
   int status = DoLocalRequest("/v1/license/activate",
                               "{\"nonce\":\"abc\"}", &body);
-  EXPECT_EQ(403, status);
-  EXPECT_THAT(body, ::testing::HasSubstr("global admin"));
-}
-
-TEST_F(AdminLicenseHandlerTest, TrialBlockedOnLocalAdmin) {
-  GoogleString body;
-  int status = DoLocalRequest(
-      "/v1/license/trial",
-      "{\"email\":\"a@b.com\",\"terms_accepted_at\":\"t\","
-      "\"terms_version\":\"1\"}",
-      &body);
   EXPECT_EQ(403, status);
   EXPECT_THAT(body, ::testing::HasSubstr("global admin"));
 }
@@ -607,78 +593,6 @@ TEST_F(AdminLicenseHandlerTest, ActivateAutoApplyFailsForInvalidToken) {
   EXPECT_EQ(200, status);
   EXPECT_THAT(body, ::testing::HasSubstr("\"message\":\"activated\""));
   EXPECT_FALSE(license_handler_.IsLicenseValid());
-}
-
-// ---------------------------------------------------------------------------
-// HandleTrial tests
-// ---------------------------------------------------------------------------
-
-TEST_F(AdminLicenseHandlerTest, TrialProxiesEmailAndTerms) {
-  GoogleString body;
-  int status = DoGlobalRequest(
-      "/v1/license/trial",
-      "{\"email\":\"test@example.com\","
-      "\"terms_accepted_at\":\"2025-01-01T00:00:00Z\","
-      "\"terms_version\":\"1.0\"}",
-      &body);
-  EXPECT_EQ(200, status);
-  EXPECT_EQ("http://test.example.com/api/trial", fetcher_.last_url());
-  EXPECT_THAT(fetcher_.last_body(),
-              ::testing::HasSubstr("\"email\":\"test@example.com\""));
-  EXPECT_THAT(fetcher_.last_body(),
-              ::testing::HasSubstr("\"terms_accepted_at\":\"2025-01-01"));
-  EXPECT_THAT(fetcher_.last_body(),
-              ::testing::HasSubstr("\"terms_version\":\"1.0\""));
-  // Tracking metadata.
-  EXPECT_THAT(fetcher_.last_body(),
-              ::testing::HasSubstr("\"server\":\"" PAGESPEED_SERVER "\""));
-  EXPECT_THAT(fetcher_.last_body(),
-              ::testing::HasSubstr("\"os\":\"" PAGESPEED_OS "\""));
-  EXPECT_THAT(fetcher_.last_body(),
-              ::testing::HasSubstr("\"arch\":\"" PAGESPEED_ARCH "\""));
-  EXPECT_THAT(fetcher_.last_body(),
-              ::testing::HasSubstr("\"distribution\":\"" PAGESPEED_DISTRIBUTION "\""));
-}
-
-TEST_F(AdminLicenseHandlerTest, TrialRejectsMissingEmail) {
-  GoogleString body;
-  int status = DoGlobalRequest(
-      "/v1/license/trial",
-      "{\"terms_accepted_at\":\"2025-01-01T00:00:00Z\","
-      "\"terms_version\":\"1.0\"}",
-      &body);
-  EXPECT_EQ(400, status);
-  EXPECT_THAT(body, ::testing::HasSubstr("Missing 'email' field"));
-}
-
-TEST_F(AdminLicenseHandlerTest, TrialRejectsMissingTermsAcceptedAt) {
-  GoogleString body;
-  int status = DoGlobalRequest(
-      "/v1/license/trial",
-      "{\"email\":\"test@example.com\","
-      "\"terms_version\":\"1.0\"}",
-      &body);
-  EXPECT_EQ(400, status);
-  EXPECT_THAT(body, ::testing::HasSubstr("Missing 'terms_accepted_at' field"));
-}
-
-TEST_F(AdminLicenseHandlerTest, TrialRejectsMissingTermsVersion) {
-  GoogleString body;
-  int status = DoGlobalRequest(
-      "/v1/license/trial",
-      "{\"email\":\"test@example.com\","
-      "\"terms_accepted_at\":\"2025-01-01T00:00:00Z\"}",
-      &body);
-  EXPECT_EQ(400, status);
-  EXPECT_THAT(body, ::testing::HasSubstr("Missing 'terms_version' field"));
-}
-
-TEST_F(AdminLicenseHandlerTest, TrialRejectsOversizedBody) {
-  GoogleString big_body(5000, 'x');
-  GoogleString body;
-  int status = DoGlobalRequest("/v1/license/trial", big_body, &body);
-  EXPECT_EQ(400, status);
-  EXPECT_THAT(body, ::testing::HasSubstr("Request body too large"));
 }
 
 // ---------------------------------------------------------------------------
@@ -1088,32 +1002,6 @@ TEST_F(AdminLicenseHandlerTest, ActivateSanitizesInjectionAttempt) {
   EXPECT_THAT(fetcher_.last_body(), ::testing::HasSubstr("\"nonce\":\""));
   EXPECT_THAT(fetcher_.last_body(),
               ::testing::Not(::testing::HasSubstr("\"evil\":")));
-}
-
-TEST_F(AdminLicenseHandlerTest, TrialSanitizesFields) {
-  GoogleString body;
-  int status = DoGlobalRequest(
-      "/v1/license/trial",
-      "{\"email\":\"a@b.com\",\"terms_accepted_at\":\"t\","
-      "\"terms_version\":\"1\",\"extra\":\"ignored\"}",
-      &body);
-  EXPECT_EQ(200, status);
-  EXPECT_THAT(fetcher_.last_body(), ::testing::HasSubstr("\"email\":"));
-  EXPECT_THAT(fetcher_.last_body(),
-              ::testing::HasSubstr("\"terms_accepted_at\":"));
-  EXPECT_THAT(fetcher_.last_body(),
-              ::testing::HasSubstr("\"terms_version\":"));
-  EXPECT_THAT(fetcher_.last_body(),
-              ::testing::Not(::testing::HasSubstr("\"extra\":")));
-  // Tracking metadata is always included.
-  EXPECT_THAT(fetcher_.last_body(),
-              ::testing::HasSubstr("\"server\":\""));
-  EXPECT_THAT(fetcher_.last_body(),
-              ::testing::HasSubstr("\"os\":\""));
-  EXPECT_THAT(fetcher_.last_body(),
-              ::testing::HasSubstr("\"arch\":\""));
-  EXPECT_THAT(fetcher_.last_body(),
-              ::testing::HasSubstr("\"distribution\":\""));
 }
 
 // ---------------------------------------------------------------------------

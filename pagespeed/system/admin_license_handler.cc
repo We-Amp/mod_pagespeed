@@ -277,7 +277,7 @@ bool AdminLicenseHandler::HandleRequest(StringPiece path,
   // Mutation endpoints require the global admin endpoint.
   if (!is_global) {
     if (path == "/v1/license/apply" || path == "/v1/license/activate" ||
-        path == "/v1/license/trial" || path == "/v1/license/consent") {
+        path == "/v1/license/consent") {
       WriteJsonError(fetch, HttpStatus::kForbidden,
                      "License management is only available on the global "
                      "admin endpoint (/pagespeed_global_admin/)");
@@ -292,10 +292,6 @@ bool AdminLicenseHandler::HandleRequest(StringPiece path,
   }
   if (path == "/v1/license/activate") {
     HandleActivate(request_body, fetch);
-    return true;
-  }
-  if (path == "/v1/license/trial") {
-    HandleTrial(request_body, fetch);
     return true;
   }
   if (path == "/v1/license/consent") {
@@ -355,10 +351,6 @@ void AdminLicenseHandler::HandleStatus(bool is_global, AsyncFetch* fetch) {
     if (!sub.empty()) {
       StrAppend(&json, ",\"domain\":\"", JsonEscape(sub), "\"");
     }
-  }
-  // Trial is always available if not licensed (global admin only).
-  if (!valid && is_global) {
-    StrAppend(&json, ",\"trial_available\":true");
   }
   StrAppend(&json, "}");
   WriteJsonResponse(fetch, json);
@@ -566,44 +558,6 @@ void AdminLicenseHandler::HandleActivate(StringPiece request_body,
             "\",\"distribution\":\"", PAGESPEED_DISTRIBUTION, "\"}");
 
   ProxyToLicenseService("/api/activate", sanitized, true /* auto_apply_token */,
-                        fetch);
-}
-
-void AdminLicenseHandler::HandleTrial(StringPiece request_body,
-                                      AsyncFetch* fetch) {
-  if (request_body.size() > kMaxRequestBodySize) {
-    WriteJsonError(fetch, HttpStatus::kBadRequest,
-                   "Request body too large (max 4KB)");
-    return;
-  }
-
-  // Extract and sanitize: only "email", "terms_accepted_at",
-  // "terms_version" fields.
-  GoogleString email, terms_accepted_at, terms_version;
-  if (!ExtractJsonStringField(request_body, "email", &email)) {
-    WriteJsonError(fetch, HttpStatus::kBadRequest, "Missing 'email' field");
-    return;
-  }
-  if (!ExtractJsonStringField(request_body, "terms_accepted_at",
-                              &terms_accepted_at)) {
-    WriteJsonError(fetch, HttpStatus::kBadRequest,
-                   "Missing 'terms_accepted_at' field");
-    return;
-  }
-  if (!ExtractJsonStringField(request_body, "terms_version", &terms_version)) {
-    WriteJsonError(fetch, HttpStatus::kBadRequest,
-                   "Missing 'terms_version' field");
-    return;
-  }
-
-  GoogleString sanitized =
-      StrCat("{\"email\":\"", JsonEscape(email), "\",\"terms_accepted_at\":\"",
-             JsonEscape(terms_accepted_at), "\",\"terms_version\":\"",
-             JsonEscape(terms_version), "\",\"server\":\"", PAGESPEED_SERVER,
-             "\",\"os\":\"", PAGESPEED_OS, "\",\"arch\":\"", PAGESPEED_ARCH,
-             "\",\"distribution\":\"", PAGESPEED_DISTRIBUTION, "\"}");
-
-  ProxyToLicenseService("/api/trial", sanitized, true /* auto_apply_token */,
                         fetch);
 }
 

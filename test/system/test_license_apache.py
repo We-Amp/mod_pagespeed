@@ -268,34 +268,6 @@ class TestShouldOptimize:
 
 
 # =============================================================================
-# 4. Trial endpoint — POST /pagespeed_global_admin/v1/license/trial
-# =============================================================================
-
-
-@pytest.mark.license
-class TestLicenseTrial:
-    """POST /v1/license/trial — proxy to license service."""
-
-    def test_trial_blocked_on_local_admin(self, base_url, session):
-        """Trial on local admin returns 403."""
-        r = session.post(
-            f"{base_url}{LOCAL_ADMIN}/v1/license/trial",
-            json={"email": "test@test.com", "terms_accepted_at": "2026-03-16", "terms_version": "2026-02"},
-            headers=CSRF_HEADERS,
-        )
-        assert r.status_code == 403
-
-    def test_trial_requires_csrf(self, base_url, session):
-        """Trial without CSRF headers returns 403."""
-        r = session.post(
-            f"{base_url}{GLOBAL_ADMIN}/v1/license/trial",
-            data=json.dumps({"email": "test@test.com"}),
-            headers={"Content-Type": "text/plain"},
-        )
-        assert r.status_code == 403
-
-
-# =============================================================================
 # 5. Activate endpoint — POST /pagespeed_global_admin/v1/license/activate
 # =============================================================================
 

@@ -2,7 +2,7 @@
 
 // License HTTP handlers for the admin console.
 // Provides /v1/license/status, /v1/license/apply, /v1/license/activate,
-// /v1/license/trial, and /v1/license/consent endpoints.
+// and /v1/license/consent endpoints.
 
 #ifndef PAGESPEED_SYSTEM_ADMIN_LICENSE_HANDLER_H_
 #define PAGESPEED_SYSTEM_ADMIN_LICENSE_HANDLER_H_
@@ -38,8 +38,8 @@ class AdminLicenseHandler {
 
   // Route a license API request.  Returns true if the path was handled.
   // Paths: /v1/license/status, /v1/license/apply, /v1/license/activate,
-  //        /v1/license/trial, /v1/license/consent
-  // Mutation endpoints (apply, activate, trial, consent) require is_global.
+  //        /v1/license/consent
+  // Mutation endpoints (apply, activate, consent) require is_global.
   bool HandleRequest(StringPiece path, StringPiece request_body, bool is_global,
                      AsyncFetch* fetch);
 
@@ -83,7 +83,6 @@ class AdminLicenseHandler {
   void HandleStatus(bool is_global, AsyncFetch* fetch);
   void HandleApply(StringPiece request_body, AsyncFetch* fetch);
   void HandleActivate(StringPiece request_body, AsyncFetch* fetch);
-  void HandleTrial(StringPiece request_body, AsyncFetch* fetch);
   void HandleConsent(StringPiece request_body, AsyncFetch* fetch);
 
   // Attempt license renewal if within renewal window.

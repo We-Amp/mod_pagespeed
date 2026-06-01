@@ -103,7 +103,6 @@ export interface LicenseStatusResponse {
   expires?: number;
   expired?: boolean;
   domain?: string;
-  trial_available?: boolean;
   error?: string;
   [key: string]: unknown;
 }
@@ -120,14 +119,6 @@ export interface LicenseApplyResponse {
 export interface ActivateResponse {
   success: boolean;
   found: boolean;
-  token?: string;
-  error?: string;
-  [key: string]: unknown;
-}
-
-/** POST /v1/license/trial */
-export interface TrialResponse {
-  success: boolean;
   token?: string;
   error?: string;
   [key: string]: unknown;
