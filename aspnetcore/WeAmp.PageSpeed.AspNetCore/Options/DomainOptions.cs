@@ -6,23 +6,32 @@ namespace WeAmp.PageSpeed.AspNetCore.Options;
 public class DomainOptions
 {
     /// <summary>
-    /// Domains authorized for rewriting.
-    /// Wildcards (*, ?) allowed. Example: ["*.example.com", "localhost"]
+    /// Domains authorized for CROSS-ORIGIN rewriting (e.g. a CDN or a separate asset
+    /// host). Emitted as <c>pagespeed Domain &lt;d&gt;</c>. A request's OWN same-origin
+    /// resources are ALWAYS authorized by the module without listing the serving host
+    /// here, so this is NOT required for normal optimization. In the Inverse sidecar
+    /// the middleware does NOT gate on this list by default (forward-all); it is the
+    /// strict allowlist only when <see cref="SidecarOptions.RestrictToAuthorizedHosts"/>
+    /// is enabled. Wildcards (*, ?) allowed. Example: ["cdn.example.com"]. The
+    /// [localhost, 127.0.0.1] default is a harmless seed (inert for same-origin).
     /// </summary>
     public List<string> AuthorizedDomains { get; set; } = ["localhost", "127.0.0.1"];
 
     /// <summary>
-    /// CDN domain mappings (rewrite URLs to use CDN).
+    /// CDN domain mappings (rewrite URLs to use CDN). PREVIEW: not yet emitted by the
+    /// nginx sidecar — when set it is ignored with a startup warning.
     /// </summary>
     public List<RewriteDomainMapping> RewriteMappings { get; set; } = [];
 
     /// <summary>
-    /// Origin domain mappings (fetch from different origin).
+    /// Origin domain mappings (fetch from different origin). PREVIEW: not yet emitted
+    /// by the nginx sidecar — when set it is ignored with a startup warning.
     /// </summary>
     public List<OriginDomainMapping> OriginMappings { get; set; } = [];
 
     /// <summary>
-    /// Domain sharding configuration.
+    /// Domain sharding configuration. PREVIEW: not yet emitted by the nginx sidecar —
+    /// when set it is ignored with a startup warning.
     /// </summary>
     public List<DomainShard> Shards { get; set; } = [];
 }

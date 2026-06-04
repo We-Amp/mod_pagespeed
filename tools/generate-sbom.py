@@ -126,6 +126,14 @@ CPP_DEPS = [
      "holder": "Orson Peters", "repo": "orlp/ed25519", "purl_version": None},
     {"name": "cyclone", "version": {"literal": "main"}, "license": "BUSL-1.1",
      "holder": "We-Amp B.V.", "repo": "We-Amp/cyclone-cache", "purl_version": None},
+    # Bundled matched-pair nginx for the design record ASP.NET Core sidecar (1.30 stable
+    # branch). Version is NOT a repositories.bzl constant (nginx is built from upstream
+    # source, not a Bazel http_archive), so it is pinned inline as a literal. Keep this
+    # lockstep with DEF_NGINX_VER (focal path) in install/nginx/build_module_in_container.sh
+    # — the load-bearing pin the sidecar binary is actually built from.
+    {"name": "nginx", "version": {"literal": "1.30.2"}, "license": "BSD-2-Clause",
+     "holder": "Nginx, Inc. / F5", "repo": None,
+     "download": "https://nginx.org/", "purl_version": None},
 ]
 
 # ---------------------------------------------------------------------------

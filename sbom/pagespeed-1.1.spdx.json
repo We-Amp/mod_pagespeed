@@ -3,9 +3,9 @@
   "dataLicense": "CC0-1.0",
   "SPDXID": "SPDXRef-DOCUMENT",
   "name": "pagespeed-1.1",
-  "documentNamespace": "https://spdx.org/spdxdocs/pagespeed-1.1-2026-06-01T14:47:21Z",
+  "documentNamespace": "https://spdx.org/spdxdocs/pagespeed-1.1-2026-06-03T06:31:21Z",
   "creationInfo": {
-    "created": "2026-06-01T14:47:21Z",
+    "created": "2026-06-03T06:31:21Z",
     "creators": [
       "Tool: generate-sbom.py-1.0",
       "Organization: We-Amp B.V."
@@ -482,6 +482,18 @@
       ]
     },
     {
+      "SPDXID": "SPDXRef-Package-nginx",
+      "name": "nginx",
+      "versionInfo": "1.30.2",
+      "supplier": "Organization: Nginx, Inc. / F5",
+      "downloadLocation": "https://nginx.org/",
+      "filesAnalyzed": false,
+      "licenseConcluded": "BSD-2-Clause",
+      "licenseDeclared": "BSD-2-Clause",
+      "copyrightText": "Copyright Nginx, Inc. / F5",
+      "externalRefs": []
+    },
+    {
       "SPDXID": "SPDXRef-Package-svelte",
       "name": "svelte",
       "versionInfo": "5.55.9",
@@ -653,6 +665,11 @@
       "spdxElementId": "SPDXRef-Package-pagespeed-1.1",
       "relationshipType": "DEPENDS_ON",
       "relatedSpdxElement": "SPDXRef-Package-cyclone"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-pagespeed-1.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-nginx"
     },
     {
       "spdxElementId": "SPDXRef-Package-pagespeed-1.1",

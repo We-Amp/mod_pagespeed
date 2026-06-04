@@ -43,15 +43,12 @@ public class PageSpeedSidecarHostedService : IHostedLifecycleService, IDisposabl
             return;
         }
 
-        try
-        {
-            await _sidecarManager.StartAsync(cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to start PageSpeed sidecar");
-            // Don't prevent app startup, but log the error
-        }
+        // Fail-fast: a sidecar that cannot start is a hard error — do
+        // NOT swallow it and let the app come up without optimization. The manager
+        // config-tests the generated nginx.conf (nginx -t, captured stderr) and waits
+        // for the health endpoint before reporting Running, so an exception here is
+        // genuinely fatal.
+        await _sidecarManager.StartAsync(cancellationToken);
     }
 
     public Task StartedAsync(CancellationToken cancellationToken)

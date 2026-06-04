@@ -1,7 +1,7 @@
 namespace WeAmp.PageSpeed.AspNetCore.Sidecar;
 
 /// <summary>
-/// Manages the PageSpeed Envoy sidecar lifecycle.
+/// Manages the PageSpeed nginx sidecar lifecycle.
 /// </summary>
 public interface ISidecarManager
 {

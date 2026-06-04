@@ -1,8 +1,11 @@
+using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
 using WeAmp.PageSpeed.AspNetCore.Config;
 using WeAmp.PageSpeed.AspNetCore.HealthChecks;
+using WeAmp.PageSpeed.AspNetCore.Internal;
 using WeAmp.PageSpeed.AspNetCore.Options;
 using WeAmp.PageSpeed.AspNetCore.Sidecar;
 
@@ -14,8 +17,10 @@ namespace WeAmp.PageSpeed.AspNetCore.DependencyInjection;
 public static class PageSpeedServiceCollectionExtensions
 {
     /// <summary>
-    /// Adds PageSpeed optimization middleware with default configuration.
-    /// Uses Process sidecar mode (spawns envoy_pagespeed as a child process).
+    /// Adds PageSpeed optimization with default configuration. Defaults to the
+    /// Inverse topology (Kestrel is the public front door; the bundled nginx runs
+    /// loopback-only behind it as an optimize-proxy). Use
+    /// <see cref="AddPageSpeedProcess"/> for the classic front-proxy topology.
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <returns>The service collection for chaining.</returns>
@@ -25,8 +30,8 @@ public static class PageSpeedServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Adds PageSpeed optimization middleware with custom configuration.
-    /// Uses Process sidecar mode (spawns envoy_pagespeed as a child process).
+    /// Adds PageSpeed optimization with custom configuration. The mode flows from
+    /// <see cref="SidecarOptions.Mode"/> (default <see cref="SidecarMode.Inverse"/>).
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <param name="configure">Configuration action.</param>
@@ -43,8 +48,9 @@ public static class PageSpeedServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Adds PageSpeed optimization middleware with configuration from IConfiguration.
-    /// Uses Process sidecar mode (spawns envoy_pagespeed as a child process).
+    /// Adds PageSpeed optimization with configuration from IConfiguration. The mode
+    /// flows from <c>PageSpeed:Sidecar:Mode</c> (default
+    /// <see cref="SidecarMode.Inverse"/>).
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <param name="configuration">The configuration section.</param>
@@ -61,8 +67,50 @@ public static class PageSpeedServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Adds PageSpeed optimization middleware for connecting to an externally-managed Envoy sidecar.
-    /// Use this mode when Envoy is managed by Kubernetes or another orchestrator.
+    /// Adds PageSpeed optimization in the Inverse topology (convenience; mirrors
+    /// <see cref="AddPageSpeedExternal"/>). Kestrel is the public front door and
+    /// the bundled nginx runs loopback-only behind it. Equivalent to
+    /// <c>AddPageSpeed(o =&gt; { o.Sidecar.Mode = SidecarMode.Inverse; ... })</c>.
+    /// </summary>
+    public static IServiceCollection AddPageSpeedInverse(
+        this IServiceCollection services,
+        Action<PageSpeedOptions>? configure = null)
+    {
+        services.AddOptions<PageSpeedOptions>()
+            .Configure(opts =>
+            {
+                opts.Sidecar.Mode = SidecarMode.Inverse;
+                configure?.Invoke(opts);
+            })
+            .ValidateOnStart();
+
+        return services.AddPageSpeedCore<ProcessSidecarManager>();
+    }
+
+    /// <summary>
+    /// Adds PageSpeed optimization in the classic front-proxy topology (Process):
+    /// the bundled nginx is the PUBLIC front door, Kestrel is the private origin.
+    /// The explicit escape hatch from the new Inverse default.
+    /// </summary>
+    public static IServiceCollection AddPageSpeedProcess(
+        this IServiceCollection services,
+        Action<PageSpeedOptions>? configure = null)
+    {
+        services.AddOptions<PageSpeedOptions>()
+            .Configure(opts =>
+            {
+                opts.Sidecar.Mode = SidecarMode.Process;
+                configure?.Invoke(opts);
+            })
+            .ValidateOnStart();
+
+        return services.AddPageSpeedCore<ProcessSidecarManager>();
+    }
+
+    /// <summary>
+    /// Adds PageSpeed optimization for connecting to an externally-managed nginx
+    /// reverse proxy (operator-run; the package does not spawn or manage it).
+    /// k8s/replica topologies are out of scope.
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <param name="configure">Configuration action.</param>
@@ -88,9 +136,46 @@ public static class PageSpeedServiceCollectionExtensions
         // Add HTTP client factory for health checks
         services.AddHttpClient();
 
+        // Validate options eagerly at host build. The .ValidateOnStart() calls in the
+        // public AddPageSpeed* overloads are a no-op without a registered validator;
+        // this rejects the unsupported Docker mode and out-of-range/colliding ports
+        // with a clear message instead of an opaque nginx startup crash.
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IValidateOptions<PageSpeedOptions>, PageSpeedOptionsValidator>());
+
         // Add core services
-        services.TryAddSingleton<EnvoyConfigGenerator>();
+        services.TryAddSingleton<NginxConfigGenerator>();
+        // Rendezvous singleton: the single source of truth for the Kestrel origin
+        // that both the Kestrel configurator and the nginx config generator read.
+        services.TryAddSingleton<InternalSidecarEndpoint>();
         services.TryAddSingleton<ISidecarManager, TSidecarManager>();
+
+        // Pin Kestrel to the internal sidecar RAW-ORIGIN (UDS or loopback in
+        // Process; forced loopback-TCP + marker tag in Inverse) and publish it
+        // into InternalSidecarEndpoint so the generated nginx proxy_pass and the
+        // Kestrel bind never disagree. No-op for Docker/External modes.
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IConfigureOptions<KestrelServerOptions>, SidecarKestrelConfigureOptions>());
+
+        // INVERSE public-bind, kept SEPARATE from the raw-origin configurator so a
+        // bug in one cannot widen the other (review fix). Auto-binds the public
+        // port only when Sidecar.OwnPublicPort is set; otherwise the operator owns
+        // the public bind. No-op outside Inverse.
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IConfigureOptions<KestrelServerOptions>, PublicKestrelConfigureOptions>());
+
+        // INVERSE forward path: YARP's IHttpForwarder + a singleton loopback
+        // HttpMessageInvoker + the InverseForwardTransformer behind the
+        // IPageSpeedForwarder testability seam. Streaming, no buffering.
+        services.AddHttpForwarder();
+        services.TryAddSingleton(sp =>
+        {
+            var opts = sp.GetRequiredService<IOptions<PageSpeedOptions>>().Value;
+            return new LoopbackHttpMessageInvoker(
+                TimeSpan.FromMilliseconds(Math.Max(1, opts.Sidecar.HealthCheckTimeoutMs)));
+        });
+        services.TryAddSingleton<InverseForwardTransformer>();
+        services.TryAddSingleton<IPageSpeedForwarder, HttpForwarderAdapter>();
 
         // Add hosted service for lifecycle management
         services.AddHostedService<PageSpeedSidecarHostedService>();

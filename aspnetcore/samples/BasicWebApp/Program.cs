@@ -2,61 +2,72 @@ using WeAmp.PageSpeed.AspNetCore.DependencyInjection;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add PageSpeed middleware - reads configuration from appsettings.json
+// PageSpeed (mod_pagespeed 1.15) — reads PageSpeed:* from appsettings.json. The
+// DEFAULT topology is now Inverse: THIS Kestrel app is the public front door (it
+// owns the public socket/TLS/auth/routing) and the bundled (nginx +
+// ngx_pagespeed.so) matched pair runs LOOPBACK-ONLY behind it as an optimize-proxy
+//. The middleware streams optimizable responses to nginx, which
+// proxy_pass-es back to a private raw-origin Kestrel endpoint where the middleware
+// bypasses itself.
+//
+// In Inverse the operator MAY own the public bind (the common edge-TLS case):
+// configure your public endpoint via --urls / UseUrls / Kestrel:Endpoints, or set
+// PageSpeed:Sidecar:OwnPublicPort=true to let the package auto-bind ListenPort.
+// (For the classic front-proxy topology where nginx owns the public port, use
+// AddPageSpeedProcess() instead.)
 builder.Services.AddPageSpeed(builder.Configuration);
 
 var app = builder.Build();
 
-// Optional: Use PageSpeed middleware (currently a no-op, reserved for future features)
+// Inverse: UsePageSpeed() is the real request-path middleware. Place it AFTER
+// routing/auth (Kestrel owns auth) and BEFORE endpoint mapping; place it BEFORE any
+// UseForwardedHeaders so the loopback transport-peer assertion reads the
+// un-rewritten Connection.RemoteIpAddress.
+//
+// NOTE on compression: if you add ResponseCompression middleware, order it AFTER
+// UsePageSpeed (or scope it off the raw-origin path) so nginx receives identity-
+// encoded HTML. The generated nginx config also forces Accept-Encoding identity on
+// the nginx->raw-origin hop as a backstop.
 app.UsePageSpeed();
-
-// Map health check endpoints
 app.MapHealthChecks("/health");
 app.MapPageSpeedHealthCheck("/health/pagespeed");
 app.MapPageSpeedInfo("/pagespeed/info");
 
-// Sample endpoints
+// Origin HTML referencing an EXTERNAL stylesheet so PageSpeed fetches, minifies
+// and inlines it (CoreFilters: rewrite_css + inline_css). Prove optimization via
+// the minified <style> + the X-Page-Speed header + css_filter_* stats — NEVER a
+// ".pagespeed." substring (it false-positives on page text; the design record S0 Finding #2).
 app.MapGet("/", () => Results.Content("""
     <!DOCTYPE html>
     <html>
     <head>
-        <title>PageSpeed Test Page</title>
-        <style>
-            body { font-family: Arial, sans-serif; margin: 40px; }
-            h1 { color: #333; }
-            .info { background: #f0f0f0; padding: 20px; border-radius: 8px; }
-            pre { background: #272822; color: #f8f8f2; padding: 15px; border-radius: 4px; overflow-x: auto; }
-        </style>
+        <title>the design record nginx sidecar sample</title>
+        <link rel="stylesheet" href="/style.css">
     </head>
     <body>
-        <h1>PageSpeed ASP.NET Core Middleware Test</h1>
-        <div class="info">
-            <p>This page is being optimized by PageSpeed via Envoy sidecar.</p>
-            <p>Check the following endpoints:</p>
-            <ul>
-                <li><a href="/health">/health</a> - Overall health check</li>
-                <li><a href="/health/pagespeed">/health/pagespeed</a> - PageSpeed-specific health</li>
-                <li><a href="/pagespeed/info">/pagespeed/info</a> - Sidecar status and admin info</li>
-            </ul>
-        </div>
-        <h2>How It Works</h2>
-        <p>The PageSpeed sidecar runs as a separate process:</p>
-        <pre>
-    Client Request (port 8080)
-           ↓
-    Envoy + PageSpeed Filter
-           ↓
-    Optimized Request → Kestrel (port 5000)
-           ↓
-    Response flows back through PageSpeed
-           ↓
-    Optimized HTML/CSS/JS/Images → Client
-        </pre>
-        <p>Look for <code>.pagespeed.</code> in resource URLs to verify optimization is active.</p>
+        <h1>mod_pagespeed 1.1 as an ASP.NET Core nginx sidecar</h1>
+        <p>If optimization is active, the stylesheet is fetched, minified and
+        inlined into this page.</p>
+        <ul>
+            <li><a href="/health">/health</a> — overall health check</li>
+            <li><a href="/health/pagespeed">/health/pagespeed</a> — PageSpeed-specific health</li>
+            <li><a href="/pagespeed/info">/pagespeed/info</a> — sidecar status (never the admin token)</li>
+        </ul>
     </body>
     </html>
     """, "text/html"));
 
+// A cacheable, whitespace-heavy stylesheet PageSpeed can minify + inline.
+app.MapGet("/style.css", (HttpContext ctx) =>
+{
+    ctx.Response.Headers.CacheControl = "public, max-age=600";
+    return Results.Content(
+        "body   {   color :   #333 ;   font-family :   Arial , sans-serif ;   margin :   40px ;   }\n" +
+        "h1     {   color :   #00aa77 ;   }\n",
+        "text/css");
+});
+
+// An API path excluded from optimization (PageSpeed:ExcludePaths).
 app.MapGet("/api/data", () => new { message = "API endpoints bypass PageSpeed", timestamp = DateTime.UtcNow });
 
 app.Run();

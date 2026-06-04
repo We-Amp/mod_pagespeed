@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using WeAmp.PageSpeed.AspNetCore.Internal;
 using WeAmp.PageSpeed.AspNetCore.Options;
 using WeAmp.PageSpeed.AspNetCore.Sidecar;
 
@@ -14,9 +15,23 @@ namespace WeAmp.PageSpeed.AspNetCore.DependencyInjection;
 public static class PageSpeedApplicationBuilderExtensions
 {
     /// <summary>
-    /// Adds PageSpeed middleware to the request pipeline.
-    /// This is optional - the sidecar runs independently.
-    /// Currently a no-op but reserved for future request interception features.
+    /// Adds the PageSpeed request-path middleware to the pipeline.
+    ///
+    /// <para>In <see cref="SidecarMode.Inverse"/> (the default) this activates the
+    /// real <see cref="PageSpeedInverseMiddleware"/>: Kestrel is the public front
+    /// door and this middleware streams optimizable requests over loopback to the
+    /// bundled nginx optimize-proxy, bypassing itself for the private raw-origin
+    /// leg (the loop break).</para>
+    ///
+    /// <para>PIPELINE PLACEMENT (Inverse): place AFTER
+    /// <c>UseRouting/UseAuthentication/UseAuthorization</c> (Kestrel owns auth) and
+    /// BEFORE endpoint mapping; the loop-break + hop-ceiling short-circuit private-
+    /// origin traffic early regardless. Place BEFORE <c>UseForwardedHeaders</c> so
+    /// the loopback transport-peer assertion reads the un-rewritten
+    /// <c>Connection.RemoteIpAddress</c>.</para>
+    ///
+    /// <para>For Process/External/Docker this is a no-op: nginx is the front door
+    /// there (the package runs the sidecar independently).</para>
     /// </summary>
     /// <param name="app">The application builder.</param>
     /// <returns>The application builder for chaining.</returns>
@@ -29,12 +44,16 @@ public static class PageSpeedApplicationBuilderExtensions
             return app;
         }
 
-        // Currently no middleware needed - the sidecar operates as a reverse proxy
-        // This extension point is reserved for future features like:
-        // - Request routing based on ExcludePaths
-        // - Response header inspection
-        // - Metrics collection
+        if (options.Sidecar.Mode == SidecarMode.Inverse)
+        {
+            // The real request-path middleware: Kestrel is the public front door,
+            // nginx is the loopback optimize-proxy behind it.
+            app.UseMiddleware<PageSpeedInverseMiddleware>();
+            return app;
+        }
 
+        // Process/External/Docker: nginx is the public front door; no request-path
+        // middleware is needed (the sidecar runs as a reverse proxy independently).
         return app;
     }
 
@@ -68,25 +87,37 @@ public static class PageSpeedApplicationBuilderExtensions
     {
         app.MapGet(pattern, (
             ISidecarManager sidecarManager,
-            IOptions<PageSpeedOptions> options) =>
+            IOptions<PageSpeedOptions> options,
+            InternalSidecarEndpoint endpoint) =>
         {
             var opts = options.Value;
+            var inverse = opts.Sidecar.Mode == SidecarMode.Inverse;
+
+            // In Inverse, nginx listens loopback-only on NginxLoopbackPort (NOT
+            // Sidecar.ListenPort, which is now the public Kestrel port). The
+            // admin/health URLs live behind that private port. In Process the
+            // public nginx port is Sidecar.ListenPort.
+            var adminPort = inverse && endpoint.NginxLoopbackPort > 0
+                ? endpoint.NginxLoopbackPort
+                : opts.Sidecar.ListenPort;
 
             return Results.Ok(new
             {
                 enabled = opts.Enabled,
+                mode = opts.Sidecar.Mode.ToString(),
                 state = sidecarManager.State.ToString(),
                 ports = new
                 {
-                    listen = opts.Sidecar.ListenPort,
-                    origin = opts.Sidecar.OriginPort,
-                    admin = opts.Sidecar.AdminPort
+                    publicPort = opts.Sidecar.ListenPort,
+                    nginxLoopback = inverse ? endpoint.NginxLoopbackPort : 0,
+                    rawOrigin = inverse ? endpoint.RawOriginLoopbackPort : opts.Sidecar.OriginPort
                 },
+                allowPublicAdmin = inverse ? opts.Sidecar.AllowPublicAdmin : (bool?)null,
                 adminEndpoints = new
                 {
-                    health = $"http://localhost:{opts.Sidecar.ListenPort}/pagespeed/health",
-                    admin = $"http://localhost:{opts.Sidecar.ListenPort}/pagespeed_admin",
-                    statistics = $"http://localhost:{opts.Sidecar.ListenPort}/pagespeed_statistics"
+                    health = $"http://localhost:{adminPort}/pagespeed/health",
+                    admin = $"http://localhost:{adminPort}/pagespeed_admin",
+                    statistics = $"http://localhost:{adminPort}/pagespeed_statistics"
                 },
                 restartCount = sidecarManager.RestartCount,
                 error = sidecarManager.ErrorMessage

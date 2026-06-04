@@ -3,110 +3,59 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using WeAmp.PageSpeed.AspNetCore.Config;
+using WeAmp.PageSpeed.AspNetCore.Internal;
 using WeAmp.PageSpeed.AspNetCore.Options;
 using WeAmp.PageSpeed.AspNetCore.Sidecar;
 using Xunit;
-using YamlDotNet.Serialization;
 
 namespace WeAmp.PageSpeed.AspNetCore.Tests;
 
 /// <summary>
-/// Security-hardening regression tests for the sidecar manager and config
-/// generator (see corp codebase audit 2026-05-29).
+/// Security-hardening regression tests for the nginx sidecar manager and config
+/// generator (corp codebase audit 2026-05-29; the design record D8).
 /// </summary>
 public class SidecarSecurityTests
 {
-    private readonly EnvoyConfigGenerator _generator =
-        new(NullLogger<EnvoyConfigGenerator>.Instance);
-
-    // Walks the generated YAML to the Envoy admin interface bind address:
-    // admin -> address -> socket_address -> address.
-    private static string GetAdminBindAddress(string yaml)
+    private static NginxConfigGenerator NewGenerator()
     {
-        var root = new DeserializerBuilder().Build()
-            .Deserialize<Dictionary<string, object>>(yaml);
-        var admin = (Dictionary<object, object>)root["admin"];
-        var address = (Dictionary<object, object>)admin["address"];
-        var socket = (Dictionary<object, object>)address["socket_address"];
-        return (string)socket["address"];
+        var endpoint = new InternalSidecarEndpoint();
+        endpoint.SetPort(5000);
+        return new NginxConfigGenerator(NullLogger<NginxConfigGenerator>.Instance, endpoint);
     }
 
-    // ---- Fix: Envoy admin interface must bind loopback by default ----
-    // The admin interface is unauthenticated and exposes /quitquitquit (DoS)
-    // and /config_dump (leaks the bearer token + Redis creds). Binding it to
-    // all interfaces by default exposes that control plane to the network.
-
-    [Fact]
-    public void SidecarOptions_AdminBindAddress_DefaultsToLoopback()
-    {
-        new SidecarOptions().AdminBindAddress.Should().Be("127.0.0.1");
-    }
-
-    [Fact]
-    public void GenerateConfig_DefaultOptions_BindsAdminInterfaceToLoopback()
-    {
-        var (yaml, _) = _generator.GenerateConfigYaml(new PageSpeedOptions());
-        GetAdminBindAddress(yaml).Should().Be("127.0.0.1");
-    }
-
-    [Fact]
-    public void GenerateConfig_ExplicitAdminBind_IsHonored()
-    {
-        var options = new PageSpeedOptions
-        {
-            Sidecar = new SidecarOptions { AdminBindAddress = "10.1.2.3" }
-        };
-        var (yaml, _) = _generator.GenerateConfigYaml(options);
-        GetAdminBindAddress(yaml).Should().Be("10.1.2.3");
-    }
-
-    // ---- Fix: subprocess args must use ArgumentList, not the unescaped string ----
+    // ---- subprocess args use ArgumentList, never the unescaped string ----
     // ProcessStartInfo.Arguments performs no quoting/escaping, so a config path
-    // with a space or a crafted AdditionalArguments entry could inject extra
-    // flags into envoy_pagespeed. ArgumentList quotes each token individually.
+    // with a space could inject extra flags. ArgumentList quotes each token.
 
     [Fact]
     public void BuildStartInfo_UsesArgumentList_NotTheRawArgumentsString()
     {
-        var sidecar = new SidecarOptions();
         var psi = ProcessSidecarManager.BuildStartInfo(
-            "/usr/local/bin/envoy_pagespeed", "/tmp/cfg.yaml", sidecar);
+            "/opt/ps/nginx", "/opt/ps/run/nginx.conf", new PageSpeedOptions());
 
-        psi.Arguments.Should().BeNullOrEmpty(
-            "the unescaped Arguments string must not be used");
-        psi.ArgumentList.Should().ContainInOrder(
-            "-c", "/tmp/cfg.yaml", "--log-level", "info", "--use-dynamic-base-id");
+        psi.Arguments.Should().BeNullOrEmpty("the unescaped Arguments string must not be used");
+        psi.ArgumentList.Should().ContainInOrder("-p", "/opt/ps/run", "-c", "/opt/ps/run/nginx.conf", "-g", "daemon off;");
     }
 
     [Fact]
     public void BuildStartInfo_ConfigPathWithSpaces_StaysASingleToken()
     {
         var psi = ProcessSidecarManager.BuildStartInfo(
-            "/usr/local/bin/envoy_pagespeed", "/tmp/with space/cfg.yaml", new SidecarOptions());
+            "/opt/ps/nginx", "/tmp/with space/nginx.conf", new PageSpeedOptions());
 
-        psi.ArgumentList.Should().Contain("/tmp/with space/cfg.yaml");
+        psi.ArgumentList.Should().Contain("/tmp/with space/nginx.conf");
     }
 
     [Fact]
-    public void BuildStartInfo_AdditionalArguments_AreNotSplitOnSpaces()
+    public void BuildQuitStartInfo_UsesArgumentList_ForGracefulStop()
     {
-        var sidecar = new SidecarOptions
-        {
-            // A single argument value that contains a space must remain one token,
-            // not be re-split into "--concurrency" + "4" + injected "-c" "/evil.yaml".
-            AdditionalArguments = { "--concurrency 4", "-c /evil.yaml" }
-        };
-        var psi = ProcessSidecarManager.BuildStartInfo(
-            "/usr/local/bin/envoy_pagespeed", "/tmp/cfg.yaml", sidecar);
+        var psi = ProcessSidecarManager.BuildQuitStartInfo("/opt/ps/nginx", "/opt/ps/run/nginx.conf");
 
-        psi.ArgumentList.Should().Contain("--concurrency 4");
-        psi.ArgumentList.Should().Contain("-c /evil.yaml");
+        psi.Arguments.Should().BeNullOrEmpty();
+        psi.ArgumentList.Should().ContainInOrder("-p", "/opt/ps/run", "-c", "/opt/ps/run/nginx.conf", "-s", "quit");
     }
 
-    // ---- Fix: generated config holds secrets, must not be world-readable ----
-    // GenerateConfigFile serializes admin_auth.token and Redis credentials.
-    // File.WriteAllText created it with the umask default (commonly 0644), so
-    // any local user could read the token. Create it owner-only (0600).
+    // ---- generated config holds the admin bearer token, must be 0600 ----
 
     [Fact]
     public void GenerateConfigFile_WritesConfigOwnerReadableOnly()
@@ -117,20 +66,23 @@ public class SidecarSecurityTests
         }
 
         var dir = Path.Combine(Path.GetTempPath(), "psec_" + Guid.NewGuid().ToString("N"));
-        var path = Path.Combine(dir, "pagespeed-envoy.yaml");
+        var path = Path.Combine(dir, "nginx.conf");
         try
         {
             var options = new PageSpeedOptions
             {
+                // Pin to Process: the default flipped to Inverse, which requires the
+                // nginx loopback port pinned on the endpoint; this 0600-mode check is
+                // mode-independent.
+                Sidecar = new SidecarOptions { Mode = SidecarMode.Process },
                 Cache = new CacheOptions
                 {
-                    // Keep cache/log dirs inside our scratch dir so the test is self-contained.
                     FileCachePath = Path.Combine(dir, "cache"),
                     LogDirectory = Path.Combine(dir, "logs")
                 }
             };
 
-            _generator.GenerateConfigFile(options, path);
+            NewGenerator().GenerateConfigFile(options, path);
 
             File.Exists(path).Should().BeTrue();
             var mode = File.GetUnixFileMode(path);
@@ -140,7 +92,7 @@ public class SidecarSecurityTests
                 UnixFileMode.OtherRead | UnixFileMode.OtherWrite | UnixFileMode.OtherExecute;
 
             (mode & groupOther).Should().Be(UnixFileMode.None,
-                "the config file holds the admin token and must not be group/other readable");
+                "the config file embeds the admin bearer token and must not be group/other readable");
             (mode & UnixFileMode.UserRead).Should().Be(UnixFileMode.UserRead);
         }
         finally
@@ -149,10 +101,26 @@ public class SidecarSecurityTests
         }
     }
 
-    // ---- Fix: admin bearer token must not be written to logs ----
-    // StartedAsync logged the token verbatim at Information level; application
-    // logs are shipped/retained/readable by more principals than should hold a
-    // credential.
+    // ---- admin endpoints bind loopback-only by default ----
+    // ngx_pagespeed has no native admin auth; the generated nginx ACL IS the gate
+    //.
+
+    [Fact]
+    public void GeneratedConfig_AdminEndpoints_AreLoopbackOnlyAndBearerGated()
+    {
+        var prefix = Path.Combine(Path.GetTempPath(), "psec_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var (conf, _) = NewGenerator().GenerateConfig(
+                new PageSpeedOptions { Sidecar = new SidecarOptions { Mode = SidecarMode.Process } }, prefix);
+            conf.Should().Contain("allow 127.0.0.1/32;");
+            conf.Should().Contain("deny all;");
+            conf.Should().Contain("if ($admin_ok = 0) { return 403; }");
+        }
+        finally { try { Directory.Delete(prefix, true); } catch { } }
+    }
+
+    // ---- admin bearer token must not be written to logs ----
 
     [Fact]
     public async Task StartedAsync_DoesNotLogTheAdminTokenValue()
@@ -171,10 +139,7 @@ public class SidecarSecurityTests
             "the admin bearer token must never be written to logs");
     }
 
-    // ---- Fix: process lifecycle / thread-safety hardening ----
-    // Dispose now snapshots state under the lock and waits for the monitor
-    // task. Calling it before StartAsync (no process, no monitor) must be safe
-    // and idempotent.
+    // ---- process lifecycle / thread-safety hardening ----
 
     [Fact]
     public void Dispose_BeforeStart_IsSafeAndIdempotent()
@@ -182,12 +147,27 @@ public class SidecarSecurityTests
         var manager = new ProcessSidecarManager(
             NullLogger<ProcessSidecarManager>.Instance,
             Microsoft.Extensions.Options.Options.Create(new PageSpeedOptions()),
-            new EnvoyConfigGenerator(NullLogger<EnvoyConfigGenerator>.Instance),
-            new StubHttpClientFactory());
+            NewGenerator(),
+            new StubHttpClientFactory(),
+            new InternalSidecarEndpoint());
 
         Action dispose = () => manager.Dispose();
         dispose.Should().NotThrow();
         dispose.Should().NotThrow();  // idempotent
+    }
+
+    [Fact]
+    public async Task StopAsync_WhenNotStarted_IsSafe()
+    {
+        var manager = new ProcessSidecarManager(
+            NullLogger<ProcessSidecarManager>.Instance,
+            Microsoft.Extensions.Options.Options.Create(new PageSpeedOptions()),
+            NewGenerator(),
+            new StubHttpClientFactory(),
+            new InternalSidecarEndpoint());
+
+        await manager.Invoking(m => m.StopAsync(CancellationToken.None)).Should().NotThrowAsync();
+        manager.State.Should().Be(SidecarState.Stopped);
     }
 
     private sealed class StubHttpClientFactory : System.Net.Http.IHttpClientFactory

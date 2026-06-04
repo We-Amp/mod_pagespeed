@@ -1,22 +1,28 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <!-- the design record D5: ship net8.0;net10.0 (mirrors 2.0). Defaults to net8.0 so the
+         in-tree build stays green on net9-only dev/CI boxes; the release pipeline
+         flips on the second TFM with -p:IncludeNet10=true on a box that has the .NET
+         10 SDK (see the sidecar NuGet lane). The TargetFrameworks values
+         are LITERAL (not a passed list) so MSBuild's multi-target outer/inner split
+         works and we avoid command-line ';' escaping. -->
+    <TargetFrameworks>net8.0</TargetFrameworks>
+    <TargetFrameworks Condition="'$(IncludeNet10)' == 'true'">net8.0;net10.0</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>12.0</LangVersion>
+    <RootNamespace>WeAmp.PageSpeed.AspNetCore</RootNamespace>
 
-    <!-- Package metadata -->
-    <PackageId>WeAmp.PageSpeed.AspNetCore</PackageId>
-    <Version>1.0.0-preview.1</Version>
-    <Authors>WeAmp</Authors>
-    <Company>WeAmp</Company>
-    <Description>ASP.NET Core middleware for PageSpeed web optimization. Wraps Envoy+PageSpeed as an easy-to-use sidecar with automatic configuration generation, health checks, and ASP.NET Core logging integration.</Description>
-    <PackageTags>pagespeed;aspnetcore;middleware;performance;optimization;envoy</PackageTags>
-    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
-    <PackageProjectUrl>https://github.com/we-amp/mod_pagespeed</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/we-amp/mod_pagespeed</RepositoryUrl>
-    <RepositoryType>git</RepositoryType>
+    <!-- Customer-facing NuGet id: DISTINCT from the shipped 2.0
+         `WeAmp.PageSpeed.AspNetCore` (collision = publish bug). A distinct AssemblyName
+         keeps the shipped DLL distinct too; the namespace stays WeAmp.PageSpeed.AspNetCore
+         (the .NET API surface AddPageSpeed()/UsePageSpeed() is intentionally consistent). -->
+    <PackageId>WeAmp.PageSpeed.Sidecar</PackageId>
+    <AssemblyName>WeAmp.PageSpeed.Sidecar</AssemblyName>
+    <Title>WeAmp.PageSpeed.Sidecar for ASP.NET Core — mod_pagespeed 1.15 with a bundled nginx optimize-proxy</Title>
+    <Description>mod_pagespeed 1.15 for ASP.NET Core. The default Inverse topology makes your Kestrel app the public front door (you own the socket/TLS/auth) with a bundled, matched nginx + ngx_pagespeed running loopback-only behind it as an optimize-proxy — the middleware streams optimizable responses to it (image recompression, CSS/JS minification, critical CSS, Core-Web-Vitals-oriented HTML rewriting). The classic front-proxy topology (Process — nginx fronts your app) and connecting to an operator-managed nginx (External) remain available. Wire it in with AddPageSpeed() and UsePageSpeed(); the package generates its own nginx config, manages the process lifecycle, and exposes health checks. Linux-only (linux-x64, linux-arm64); on Windows use the IIS module, on macOS or containers without nginx use WeAmp.PageSpeed.AspNetCore (ModPageSpeed 2.0). Commercial license, BYOL; optimization runs unlicensed for evaluation with an X-PageSpeed-Warn header.</Description>
+    <PackageTags>pagespeed mod-pagespeed mod_pagespeed nginx ngx-pagespeed aspnetcore sidecar reverse-proxy web-performance core-web-vitals image-optimization critical-css weamp</PackageTags>
 
     <!-- Build settings -->
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
@@ -25,10 +31,24 @@
 
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <!-- the design record INVERSE: YARP supplies IHttpForwarder for the streaming loopback
+         forward from the public Kestrel front door to the bundled nginx
+         optimize-proxy. 2.3.0 targets net8.0 (forward-compatible with the
+         conditional net10.0 TFM via roll-forward). Flag for the SBOM/CVE map per
+         the design record BR-4 alongside the bundled nginx. -->
+    <PackageReference Include="Yarp.ReverseProxy" Version="2.3.0" />
   </ItemGroup>
 
+  <!-- the design record: auto-pull the native engine, mirroring 2.0's AspNetCore->PageSpeed->
+       NativeAssets dependency chain. A ProjectReference becomes a NuGet <dependency>
+       at pack time (same version), so `dotnet add package WeAmp.PageSpeed.Sidecar`
+       brings the matched nginx + module automatically — a thin-only install no longer
+       builds green then dies at runtime (NM-2). ReferenceOutputAssembly=false: the
+       native package has no managed output (IncludeBuildOutput=false) — we want the
+       package dependency only, not a compile-time assembly reference, and the native
+       binaries stay in their own package (not duplicated into this one). -->
   <ItemGroup>
-    <PackageReference Include="YamlDotNet" Version="16.2.1" />
+    <ProjectReference Include="../WeAmp.PageSpeed.Sidecar.NativeAssets.Linux/WeAmp.PageSpeed.Sidecar.NativeAssets.Linux.csproj" />
   </ItemGroup>
 
   <ItemGroup>
