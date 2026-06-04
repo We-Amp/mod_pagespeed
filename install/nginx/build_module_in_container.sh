@@ -46,7 +46,7 @@
 set -euo pipefail
 if [ "${VERBOSE:-}" ]; then set -x; fi
 
-DISTRO="${1:?usage: $0 <noble|el9> [-o out.so]}"
+DISTRO="${1:?usage: $0 <noble|el9|bullseye|bookworm|trixie|jammy> [-o out.so]}"
 shift || true
 
 SCRIPTDIR="$(cd "$(dirname "$0")" && pwd)"
@@ -68,9 +68,27 @@ done
 case "${DISTRO}" in
   noble) DEF_NGINX_VER="1.24.0"
          DEF_NGINX_SHA256="77a2541637b92a621e3ee76776c8b7b40cf6d707e69ba53a940283e30ff2f55d" ;;
+  # focal is the design record SIDECAR portable path ONLY (not a distro-stock package
+  # target). Its nginx is bumped to the 1.30 stable branch for GA: newer branch, smaller CVE backlog than 1.24.0 (2023).
+  # sha256 captured from nginx.org/download/nginx-1.30.2.tar.gz 2026-06-03.
+  focal) DEF_NGINX_VER="1.30.2"
+         DEF_NGINX_SHA256="7df3090907fca3cc0e456d6dc00ceb230da74ea88026ceff0affc29dbbd9ac4c" ;;
   el9)   DEF_NGINX_VER="1.20.1"
          DEF_NGINX_SHA256="e462e11533d5c30baa05df7652160ff5979591d291736cfa5edb9fd2edb48c49" ;;
-  *) echo "ERROR: unknown distro '${DISTRO}' (want noble|el9)" >&2; exit 1 ;;
+  # the design record P3 — Debian/Ubuntu distro-stock prebuilt nginx-module-pagespeed
+  # targets. Each pins the EXACT nginx version of that distro's stock `nginx`
+  # package so the module's embedded module->version + NGX_MODULE_SIGNATURE match
+  # what the host's apt-installed nginx loads (the ABI contract; M0-proven pins).
+  # sha256s captured from nginx.org/download 2026-06-04.
+  bullseye) DEF_NGINX_VER="1.18.0"
+            DEF_NGINX_SHA256="4c373e7ab5bf91d34a4f11a0c9496561061ba5eee6020db272a17a7228d35f99" ;;
+  bookworm) DEF_NGINX_VER="1.22.1"
+            DEF_NGINX_SHA256="9ebb333a9e82b952acd3e2b4aeb1d4ff6406f72491bab6cd9fe69f0dea737f31" ;;
+  trixie)   DEF_NGINX_VER="1.26.3"
+            DEF_NGINX_SHA256="69ee2b237744036e61d24b836668aad3040dda461fe6f570f1787eab570c75aa" ;;
+  jammy)    DEF_NGINX_VER="1.18.0"
+            DEF_NGINX_SHA256="4c373e7ab5bf91d34a4f11a0c9496561061ba5eee6020db272a17a7228d35f99" ;;
+  *) echo "ERROR: unknown distro '${DISTRO}' (want noble|focal|el9|bullseye|bookworm|trixie|jammy)" >&2; exit 1 ;;
 esac
 NGINX_SRC_VERSION="${NGINX_SRC_VERSION:-${DEF_NGINX_VER}}"
 # Resolve the sha256 to verify against. If the caller pinned NGINX_SRC_SHA256
@@ -91,6 +109,56 @@ BAZEL="${BAZEL:-}"
 if [ -z "${BAZEL}" ]; then
   if command -v bazelisk >/dev/null 2>&1; then BAZEL=bazelisk; else BAZEL=bazel; fi
 fi
+
+# Optional nginx HTTP modules compiled into BOTH the pre-configure (@nginx ABI
+# source) and the module/binary build, kept identical so the matched pair stays
+# ABI-consistent (D3). The sidecar's generated config is HTTP-only — it emits no
+# ssl/http2 directives — so the PORTABLE focal build OMITS the ssl + http_v2
+# modules. That drops the nginx binary's libssl/libcrypto NEEDED entries, so a
+# single binary runs on both OpenSSL-1.1 hosts (Debian 11) and OpenSSL-3 hosts
+# (Debian 12+) — the SONAME split that would otherwise block the glibc-2.31 reach
+# goal. noble/el9 (distro-stock parity) keep them.
+NGX_HTTP_MODULES=( --with-http_ssl_module --with-http_v2_module )
+if [ "${DISTRO}" = "focal" ]; then NGX_HTTP_MODULES=(); fi
+
+# ---------------------------------------------------------------------------
+# Distro family classification.
+#
+# DEB_STATIC_STDCXX: the Debian/Ubuntu distro-stock targets (bullseye, bookworm,
+# trixie, jammy) — plus the pre-existing portable focal — all build the module
+# with the focal recipe: clang as the COMPILER, GCC-13's libstdc++ as the C++
+# stdlib, and the module .so STATICALLY linking libstdc++/libgcc so it carries NO
+# libstdc++.so.6 / GLIBCXX_* runtime dependency. That static link is essential on
+# the older targets because the libstdc++-13 we build against is NEWER than the
+# distro's stock libstdc++ (esp. bullseye glibc-2.31 / bookworm 2.36, where the
+# GCC-13 headers+static archive are sideloaded from the trixie .deb — see
+# install_deps_debian_common). With the static link the ONLY ABI floor that
+# survives into the produced .so is glibc, and building inside the target
+# container caps that at the target's own glibc.
+#
+# DEB_TRIPLET: the multiarch triplet (x86_64-linux-gnu | aarch64-linux-gnu),
+# derived (NEVER hardcoded) so the same recipe builds amd64 AND arm64.
+case "${DISTRO}" in
+  bullseye|bookworm|trixie|jammy) DEB_STATIC_STDCXX=1 ;;
+  *) DEB_STATIC_STDCXX=0 ;;
+esac
+
+# Derive the Debian multiarch triplet (x86_64-linux-gnu | aarch64-linux-gnu)
+# WITHOUT hardcoding the arch. Prefer dpkg-architecture (needs dpkg-dev), fall
+# back to `gcc -dumpmachine`-style mapping from `dpkg --print-architecture` so it
+# also works BEFORE the build deps are installed.
+deb_triplet() {
+  local t
+  t="$(dpkg-architecture -qDEB_HOST_MULTIARCH 2>/dev/null || true)"
+  if [ -z "${t}" ]; then
+    case "$(dpkg --print-architecture 2>/dev/null || uname -m)" in
+      amd64|x86_64)        t="x86_64-linux-gnu" ;;
+      arm64|aarch64)       t="aarch64-linux-gnu" ;;
+      *) echo "ERROR: cannot derive multiarch triplet for $(uname -m)" >&2; return 1 ;;
+    esac
+  fi
+  printf '%s' "${t}"
+}
 
 echo "============================================================"
 echo "the design record in-container module build"
@@ -114,18 +182,30 @@ echo "============================================================"
 # Pinned bazelisk launcher used when no bazel/bazelisk is already present.
 # Pin the exact version and verify its sha256 (fail-closed) rather than
 # fetching the mutable "latest" URL and exec'ing it unverified as the release
-# build toolchain. Update both values together when bumping.
+# build toolchain. The launcher asset is arch-specific, so the same recipe can
+# build the matched (nginx + module) pair on both linux-amd64 and linux-arm64
+#. Update the version and BOTH per-arch checksums
+# together when bumping.
 BAZELISK_VERSION="v1.29.0"
-BAZELISK_SHA256="5a408715e932c0250d28bd84555f12edbf70117de42f9181691c736eacc4a992"
+BAZELISK_SHA256_AMD64="5a408715e932c0250d28bd84555f12edbf70117de42f9181691c736eacc4a992"
+BAZELISK_SHA256_ARM64="e20e8b0f4f240091b7a55bf17b9398bd4f40ee70ae0208dff95dd4c445fb4010"
 
 install_bazelisk() {
   if command -v "${BAZEL}" >/dev/null 2>&1; then
     return 0
   fi
-  local url="https://github.com/bazelbuild/bazelisk/releases/download/${BAZELISK_VERSION}/bazelisk-linux-amd64"
+  # Select the launcher asset + checksum for the build container's architecture.
+  local arch asset sha
+  arch="$(uname -m)"
+  case "${arch}" in
+    x86_64|amd64)  asset="bazelisk-linux-amd64"; sha="${BAZELISK_SHA256_AMD64}" ;;
+    aarch64|arm64) asset="bazelisk-linux-arm64"; sha="${BAZELISK_SHA256_ARM64}" ;;
+    *) echo "ERROR: unsupported architecture '${arch}' for bazelisk ${BAZELISK_VERSION}" >&2; exit 1 ;;
+  esac
+  local url="https://github.com/bazelbuild/bazelisk/releases/download/${BAZELISK_VERSION}/${asset}"
   wget -qO /usr/local/bin/bazelisk "${url}"
-  if ! echo "${BAZELISK_SHA256}  /usr/local/bin/bazelisk" | sha256sum -c - >/dev/null 2>&1; then
-    echo "ERROR: bazelisk ${BAZELISK_VERSION} checksum mismatch; refusing to use it" >&2
+  if ! echo "${sha}  /usr/local/bin/bazelisk" | sha256sum -c - >/dev/null 2>&1; then
+    echo "ERROR: bazelisk ${BAZELISK_VERSION} (${asset}) checksum mismatch; refusing to use it" >&2
     rm -f /usr/local/bin/bazelisk
     exit 1
   fi
@@ -147,6 +227,45 @@ install_deps_noble() {
   install_bazelisk
 }
 
+install_deps_focal() {
+  # Ubuntu 20.04 (glibc 2.31) build base for the PORTABLE sidecar pair.
+  # Building here gives the module a glibc-2.31 floor — focal's glibc headers do
+  # NOT emit the __isoc23_* GLIBC_2.38 redirects that the noble (glibc 2.39) base
+  # bakes in — and combined with -static-libstdc++/-static-libgcc on the module
+  # link (step 6, focal-only LD_OPT) the .so carries NO libstdc++ runtime dep, so
+  # it loads on Debian 11/12, Ubuntu 20.04+, RHEL/Alma 8/9, Amazon Linux 2023.
+  # focal's stock toolchain is too old for the C++20/23 PSOL/Cyclone graph, so add
+  # the LLVM apt repo (clang) + the toolchain PPA (g++-13 -> the libstdc++-13
+  # headers/libs the clang-libstdcxx13 bazel config expects at /usr/{include/c++,
+  # lib/gcc/<triple>}/13).
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -qq
+  apt-get install -y --no-install-recommends \
+    ca-certificates curl wget gnupg lsb-release software-properties-common \
+    build-essential \
+    zlib1g-dev libpcre3-dev libssl-dev \
+    python3 unzip zip gperf bison flex \
+    dpkg-dev fakeroot >/dev/null
+  # g++-13 / libstdc++-13 from the Ubuntu toolchain PPA (focal ships g++-9).
+  add-apt-repository -y ppa:ubuntu-toolchain-r/test >/dev/null
+  apt-get update -qq
+  apt-get install -y --no-install-recommends g++-13 gcc-13 libstdc++-13-dev >/dev/null
+  # clang/lld/llvm from apt.llvm.org (focal's stock clang predates C++20/23 support).
+  local CLANG_VER=18
+  wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh
+  chmod +x /tmp/llvm.sh
+  /tmp/llvm.sh ${CLANG_VER} >/dev/null 2>&1
+  apt-get install -y --no-install-recommends \
+    clang-${CLANG_VER} lld-${CLANG_VER} llvm-${CLANG_VER} >/dev/null
+  # The clang-libstdcxx13 bazel config + nginx make invoke clang/clang++/ld.lld by
+  # bare name; apt.llvm.org installs versioned binaries only.
+  update-alternatives --install /usr/bin/clang   clang   /usr/bin/clang-${CLANG_VER}   100
+  update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-${CLANG_VER} 100
+  ln -sf "/usr/bin/ld.lld-${CLANG_VER}" /usr/bin/ld.lld
+  # bazelisk (pinned + checksum-verified) if bazel/bazelisk not already provided.
+  install_bazelisk
+}
+
 install_deps_el9() {
   # --allowerasing: almalinux:9 ships curl-minimal, which conflicts with the full
   # `curl` package; allow dnf to swap it rather than abort on "conflicting requests".
@@ -161,11 +280,232 @@ install_deps_el9() {
   install_bazelisk
 }
 
+# --- the design record P3 Debian/Ubuntu distro-stock targets -------------------------
+# Shared apt baseline: ca-certs/build tools/nginx build-deps. NO g++/clang here;
+# the per-distro function adds the C++23 toolchain (sources differ per distro).
+install_deps_debian_common() {
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -qq
+  apt-get install -y --no-install-recommends \
+    ca-certificates curl wget gnupg lsb-release \
+    build-essential make \
+    zlib1g-dev libssl-dev \
+    python3 unzip zip gperf bison flex \
+    dpkg-dev fakeroot >/dev/null
+  # PCRE dev headers for nginx. Older distros (bullseye/bookworm/jammy) ship the
+  # legacy libpcre3-dev (PCRE 8.x); trixie DROPPED it and ships only libpcre2-dev
+  # (nginx >= 1.21.5 prefers PCRE2 anyway). Install whichever the distro provides.
+  if apt-get install -y --no-install-recommends libpcre3-dev >/dev/null 2>&1; then
+    echo "    PCRE: libpcre3-dev"
+  elif apt-get install -y --no-install-recommends libpcre2-dev >/dev/null 2>&1; then
+    echo "    PCRE: libpcre2-dev"
+  else
+    echo "ERROR: neither libpcre3-dev nor libpcre2-dev is installable on ${DISTRO}" >&2
+    exit 1
+  fi
+}
+
+# Install a modern clang (C++23-capable) from apt.llvm.org and alias the bare
+# clang/clang++/ld.lld names the clang-libstdcxx13 config + nginx make expect.
+# The clang BINARY links against the container's own glibc, so it runs on the
+# target distro (this is why clang — not g++-13 — is the compiler on the
+# old-glibc targets where a native g++-13 either doesn't exist [bullseye] or
+# would drag a newer libc6 [bookworm]).
+install_llvm_clang() {
+  local CLANG_VER="$1"
+  apt-get install -y --no-install-recommends software-properties-common >/dev/null
+  wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh
+  chmod +x /tmp/llvm.sh
+  /tmp/llvm.sh "${CLANG_VER}" >/dev/null 2>&1
+  apt-get install -y --no-install-recommends \
+    clang-${CLANG_VER} lld-${CLANG_VER} llvm-${CLANG_VER} >/dev/null
+  update-alternatives --install /usr/bin/clang   clang   /usr/bin/clang-${CLANG_VER}   100
+  update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-${CLANG_VER} 100
+  ln -sf "/usr/bin/ld.lld-${CLANG_VER}" /usr/bin/ld.lld
+}
+
+# Sideload GCC-13's libstdc++ (headers + the static libstdc++.a) WITHOUT
+# installing it through apt — apt would pull the donor's libc6-dev and upgrade
+# the whole container's glibc, destroying the old-glibc target's floor (verified:
+# trixie libstdc++-13-dev Depends: libc6-dev>=2.41 -> would bump bullseye 2.31 /
+# bookworm 2.36 to 2.41). We only need the C++ stdlib headers + the static
+# archive, which `dpkg-deb -x /` lays down at exactly the paths
+# --config=clang-libstdcxx13 hardcodes (/usr/include/c++/13,
+# /usr/include/<triplet>/c++/13, /usr/lib/gcc/<triplet>/13). clang supplies its
+# own builtin C headers, so no gcc-13 binary is needed at all.
+#
+# WHICH gcc-13 libstdc++ (the binding constraint, the design record P3 / the EA4 lesson):
+# the CURRENT trixie gcc-13 (13.3.0) was compiled against glibc >= 2.38, so its
+# libstdc++.a's eh_alloc.o/debug.o reference __isoc23_strtoul@GLIBC_2.38. Static-
+# linking THAT into the module would (a) HARD-FAIL the link on bullseye (glibc
+# 2.31 has no __isoc23_strtoul — surfaces first as the libmemcached `memcapable`
+# foreign_cc exe link error) and (b) push the .so's glibc floor to 2.38, breaking
+# the bullseye 2.31 + bookworm 2.36 targets. So we pin the LAST gcc-13 libstdc++
+# uploaded BEFORE the glibc-2.38 __isoc23 cutover — Debian snapshot 13.2.0-11
+# (built vs glibc 2.37) — which references plain strtoul and whose worst-case
+# (no-gc-sections) glibc floor is 2.14. Verified 2026-06-04: 13.2.0-11 has 0
+# __isoc23 refs; the very next upload 13.3.0-1 has 2. snapshot.debian.org by-hash
+# URLs are permanent + content-addressed; we ALSO sha256-verify the .deb.
+LIBSTDCXX13_SNAPSHOT_VER="13.2.0-11"
+LIBSTDCXX13_SNAP_HASH_amd64="70b041d0254e9becb2c5e72048344e90d3e81caf"
+LIBSTDCXX13_SNAP_HASH_arm64="bcef351fec8d9fab7aef66359f9b42cb8af0536a"
+LIBSTDCXX13_SNAP_SHA256_amd64="df64df8c345c06edad7f0e7a4291341539c8d2eb6a5d75f6c9d9fb83b27e6a50"
+LIBSTDCXX13_SNAP_SHA256_arm64="a07a0db3fbb2a72594349e6e37f8ed11ea622a7f229a1bc7286fc87cf9c7bf97"
+sideload_libstdcxx13_pinned() {
+  local triplet debarch snaphash snapsha url deb
+  triplet="$(deb_triplet)"
+  debarch="$(dpkg --print-architecture)"
+  case "${debarch}" in
+    amd64) snaphash="${LIBSTDCXX13_SNAP_HASH_amd64}"; snapsha="${LIBSTDCXX13_SNAP_SHA256_amd64}" ;;
+    arm64) snaphash="${LIBSTDCXX13_SNAP_HASH_arm64}"; snapsha="${LIBSTDCXX13_SNAP_SHA256_arm64}" ;;
+    *) echo "ERROR: no pinned libstdc++-13 snapshot for arch '${debarch}'" >&2; exit 1 ;;
+  esac
+  url="https://snapshot.debian.org/file/${snaphash}"
+  deb="/tmp/libstdc++-13-dev.deb"
+  echo "    sideloading GCC-13 libstdc++ ${LIBSTDCXX13_SNAPSHOT_VER} (pre-isoc23, glibc-safe) from ${url}"
+  wget -qO "${deb}" "${url}"
+  echo "${snapsha}  ${deb}" | sha256sum -c - \
+    || { echo "ERROR: pinned libstdc++-13 .deb sha256 mismatch (got $(sha256sum "${deb}" | awk '{print $1}'), expected ${snapsha})" >&2; exit 1; }
+  # Extract into / — lands /usr/include/c++/13, /usr/include/<triplet>/c++/13,
+  # /usr/lib/gcc/<triplet>/13/libstdc++.a at the standard paths. No glibc touched.
+  dpkg-deb -x "${deb}" /
+  [ -f "/usr/lib/gcc/${triplet}/13/libstdc++.a" ] \
+    || { echo "ERROR: sideloaded libstdc++.a missing at /usr/lib/gcc/${triplet}/13" >&2; exit 1; }
+  [ -f "/usr/include/${triplet}/c++/13/bits/c++config.h" ] \
+    || { echo "ERROR: sideloaded c++config.h missing at /usr/include/${triplet}/c++/13" >&2; exit 1; }
+}
+
+# bullseye-only: the GCC-13 libstdc++ we sideload was built against glibc >= 2.37
+# and references two libc symbols that bullseye's glibc 2.31 does NOT provide, so
+# a static link of it on bullseye leaves them undefined -> dlopen() fails on stock
+# nginx (and/or the link itself fails). Both are libstdc++-internal:
+#   1. __libc_single_threaded  (glibc 2.32; ios.o/ios_init.o single-thread fast
+#      path in std::ios_base). Shim = a weak `char ... = 0;` ("assume
+#      multi-threaded" -> libstdc++ always takes the locked path; correct, only
+#      loses the single-thread optimisation).
+#   2. arc4random              (glibc 2.36; random.o, std::random_device's default
+#      entropy source). Shim = a real implementation over getrandom(2) (present on
+#      bullseye glibc 2.31), so std::random_device keeps yielding real CSPRNG
+#      entropy. arc4random_buf/_uniform provided too for completeness.
+# We ar BOTH shim objects INTO the sideloaded libstdc++.a, so every link that
+# pulls libstdc++ resolves them locally and NO >2.31 libc symbol leaks into the
+# .so — the module's floor stays at bullseye's glibc 2.31. (bookworm/jammy/trixie
+# all provide these natively, so no shim there.) The shim symbols are weak, so
+# they're harmless no-ops if ever linked where libc already provides them.
+embed_bullseye_libc_compat_shims() {
+  local triplet liba
+  triplet="$(deb_triplet)"
+  liba="/usr/lib/gcc/${triplet}/13/libstdc++.a"
+  [ -f "${liba}" ] || { echo "ERROR: libstdc++.a not present for shim at ${liba}" >&2; exit 1; }
+  cat > /tmp/bullseye_libc_compat_shim.c <<'CSHIM'
+/* glibc-2.31 (bullseye) compatibility shims for the GCC-13 libstdc++ we sideload
+   (built vs glibc >= 2.37). All weak: a no-op override if libc provides them. */
+#include <stddef.h>
+#include <stdint.h>
+#include <sys/random.h>
+
+/* glibc 2.32 std::ios_base single-thread fast path. 0 = assume multi-threaded. */
+__attribute__((weak)) char __libc_single_threaded = 0;
+
+/* glibc 2.36 arc4random family (std::random_device entropy). Implement over
+   getrandom(2) [glibc 2.25+, present on bullseye]; block until satisfied. */
+static void ps_getrandom_full(void *buf, size_t n) {
+    unsigned char *p = (unsigned char *)buf;
+    while (n > 0) {
+        ssize_t r = getrandom(p, n, 0);
+        if (r < 0) { /* fall back deterministically rather than spin forever */
+            for (size_t i = 0; i < n; i++) p[i] = (unsigned char)i;
+            return;
+        }
+        p += r; n -= (size_t)r;
+    }
+}
+__attribute__((weak)) uint32_t arc4random(void) {
+    uint32_t v; ps_getrandom_full(&v, sizeof v); return v;
+}
+__attribute__((weak)) void arc4random_buf(void *buf, size_t n) {
+    ps_getrandom_full(buf, n);
+}
+__attribute__((weak)) uint32_t arc4random_uniform(uint32_t upper) {
+    if (upper < 2) return 0;
+    uint32_t min = -upper % upper, r;   /* rejection sampling, unbiased */
+    do { r = arc4random(); } while (r < min);
+    return r % upper;
+}
+CSHIM
+  clang -c -fPIC -O2 -o /tmp/bullseye_libc_compat_shim.o /tmp/bullseye_libc_compat_shim.c
+  ar r "${liba}" /tmp/bullseye_libc_compat_shim.o
+  ranlib "${liba}"
+  echo "    embedded bullseye glibc-2.31 compat shims (__libc_single_threaded + arc4random*) into ${liba}"
+}
+
+install_deps_trixie() {
+  # debian:13 — stock g++-13 (13.3.0) + stock clang-19 are both C++23-capable and
+  # already lay libstdc++-13 down at the standard paths. The simplest target.
+  install_deps_debian_common
+  apt-get install -y --no-install-recommends \
+    g++-13 gcc-13 libstdc++-13-dev \
+    clang lld llvm >/dev/null
+  install_bazelisk
+}
+
+install_deps_bookworm() {
+  # debian:12 (glibc 2.36) — stock g++ is 12; there is no native g++-13 (not in
+  # bookworm-backports either) and the trixie g++-13 would upgrade libc6 to 2.41.
+  # Compiler = clang-18 from apt.llvm.org (runs on bookworm's 2.36); C++ stdlib =
+  # the PINNED pre-isoc23 GCC-13 libstdc++ snapshot 13.2.0-11 (headers + static
+  # archive only, no glibc bump; its glibc floor is 2.14 << 2.36). The module link
+  # static-links libstdc++ (DEB_STATIC_STDCXX), so the .so floor stays bookworm's
+  # glibc 2.36 — verified by the post-build GLIBC-floor check.
+  install_deps_debian_common
+  install_llvm_clang 18
+  sideload_libstdcxx13_pinned
+  install_bazelisk
+}
+
+install_deps_bullseye() {
+  # debian:11 (glibc 2.31) — the hardest target: stock g++ is 10, there is NO
+  # g++-13 anywhere in bullseye/bullseye-backports (backports tops out below 13),
+  # and stock clang is 11 (too old for C++23). Compiler = clang-18 from
+  # apt.llvm.org (its binary links bullseye's glibc 2.31, so it runs); C++ stdlib
+  # = the PINNED pre-isoc23 GCC-13 libstdc++ snapshot 13.2.0-11 (headers + static
+  # archive only — a CURRENT trixie 13.3 libstdc++.a references
+  # __isoc23_strtoul@GLIBC_2.38 which neither links nor loads on glibc 2.31; the
+  # 13.2.0-11 archive references plain strtoul, worst-case floor 2.14). Static
+  # libstdc++ link keeps the produced .so at bullseye's glibc 2.31.
+  install_deps_debian_common
+  install_llvm_clang 18
+  sideload_libstdcxx13_pinned
+  embed_bullseye_libc_compat_shims
+  install_bazelisk
+}
+
+install_deps_jammy() {
+  # ubuntu:22.04 (glibc 2.35) — stock g++ is 11. g++-13 IS available for jammy
+  # from the Ubuntu toolchain PPA (built FOR jammy, so its libstdc++ targets glibc
+  # 2.35, not a newer libc), so install it natively (no trixie sideload needed).
+  # Stock clang (14) is borderline for C++23, so use clang-18 from apt.llvm.org.
+  install_deps_debian_common
+  # add-apt-repository lives in software-properties-common (not in the common
+  # baseline); install it before adding the toolchain PPA.
+  apt-get install -y --no-install-recommends software-properties-common >/dev/null
+  add-apt-repository -y ppa:ubuntu-toolchain-r/test >/dev/null
+  apt-get update -qq
+  apt-get install -y --no-install-recommends g++-13 gcc-13 libstdc++-13-dev >/dev/null
+  install_llvm_clang 18
+  install_bazelisk
+}
+
 if [ "${SKIP_DEPS:-}" != "1" ]; then
   echo "==> installing build deps (${DISTRO})"
   case "${DISTRO}" in
-    noble) install_deps_noble ;;
-    el9)   install_deps_el9 ;;
+    noble)    install_deps_noble ;;
+    focal)    install_deps_focal ;;
+    el9)      install_deps_el9 ;;
+    bullseye) install_deps_bullseye ;;
+    bookworm) install_deps_bookworm ;;
+    trixie)   install_deps_trixie ;;
+    jammy)    install_deps_jammy ;;
   esac
 fi
 
@@ -272,8 +612,7 @@ fi
   cd "${NGX_SRC}"
   PATH="${NGX_PRECFG_PATH}" ./configure \
     --with-compat \
-    --with-http_ssl_module \
-    --with-http_v2_module \
+    "${NGX_HTTP_MODULES[@]}" \
     --with-threads
 )
 [ -f "${NGX_SRC}/objs/ngx_auto_config.h" ] || {
@@ -323,6 +662,18 @@ if [ "${DISTRO}" = "el9" ]; then
   # clang-21's default layering_check/header-modules trip on abseil's deps under
   # libstdc++ ("module ... does not depend on a module exporting <cstddef>"); these
   # are header-hygiene lints, not codegen — disable them.
+  BAZEL_FLAGS+=(
+    "--config=clang-libstdcxx13"
+    "--features=-layering_check"
+    "--features=-parse_headers"
+    "--features=-use_header_modules"
+  )
+elif [ "${DEB_STATIC_STDCXX}" = "1" ]; then
+  # the design record P3 Debian/Ubuntu distro-stock targets. GCC-13 libstdc++ already sits
+  # at the standard paths --config=clang-libstdcxx13 hardcodes (native on
+  # trixie/jammy, sideloaded from the trixie .deb on bullseye/bookworm). The
+  # modern apt.llvm.org clang (18) enforces the same layering_check/header-modules
+  # lints el9's clang-21 trips on under abseil+libstdc++, so disable them too.
   BAZEL_FLAGS+=(
     "--config=clang-libstdcxx13"
     "--features=-layering_check"
@@ -482,13 +833,91 @@ export PAGESPEED_PSOL_ARCHIVE="${MERGED}"
 
 (
   cd "${NGX_SRC}"
-  ./configure \
-    --add-dynamic-module="${SRCDIR}/pagespeed/nginx" \
-    --with-compat \
-    --with-http_ssl_module \
-    --with-http_v2_module \
-    --with-threads \
+  CONFIGURE_ARGS=(
+    --add-dynamic-module="${SRCDIR}/pagespeed/nginx"
+    --with-compat
+    "${NGX_HTTP_MODULES[@]}"
+    --with-threads
     --with-cc-opt="${CC_OPT}"
+  )
+  if [ "${DISTRO}" = "focal" ]; then
+    # Link the module with gcc-13 (matches the bazel objects' libstdc++-13 ABI;
+    # focal's default cc=gcc-9 would pull libstdc++-9 and mis-resolve the C++23
+    # std symbols) and static-link the C++ runtime so the produced .so carries NO
+    # libstdc++.so.6 / libgcc_s.so.1 NEEDED — it then loads on hosts with an older
+    # libstdc++ (Debian 11 etc.). The glibc floor is set by focal's glibc 2.31.
+    export CC=gcc-13
+    CONFIGURE_ARGS+=( --with-ld-opt="-static-libstdc++ -static-libgcc" )
+  elif [ "${DEB_STATIC_STDCXX}" = "1" ]; then
+    # the design record P3 distro-stock targets. We do NOT override CC here: nginx's
+    # configure pollutes the global CFLAGS with the module config's `-std=c++17`
+    # and then runs C probes (int-size etc.) with it. The stock gcc CC (from
+    # build-essential) merely WARNS on -std=c++17 for a .c probe (like focal's
+    # gcc-13 and noble's gcc do), whereas clang as CC hard-ERRORS ("can not detect
+    # int size"). So the C probes + the glue (ngx_pagespeed.cc, a .cc -> compiled
+    # as C++17) use stock gcc; that is link-compatible with the clang-built archive
+    # (same Itanium C++ ABI + the static libstdc++-13 satisfies both). The static
+    # C++ runtime + clang++ link compiler are injected ONLY on the module .so link
+    # rule via the post-configure sed below (NOT via --with-ld-opt, whose configure
+    # probe links a C test and would reject the C++-only -static-libstdc++).
+    :
+  fi
+  ./configure "${CONFIGURE_ARGS[@]}"
+  if [ "${DISTRO}" = "focal" ]; then
+    # The engine's module config (pagespeed/nginx/config) appends an explicit
+    # `-lstdc++` to the module link, which forces a DYNAMIC libstdc++.so.6
+    # (GLIBCXX_3.4.32) dependency and DEFEATS --with-ld-opt -static-libstdc++ (the
+    # gcc driver honors -static-libstdc++ only for its IMPLICIT libstdc++, never an
+    # explicit -l). Re-point ONLY the module .so link rule at g++-13 (which links
+    # libstdc++ implicitly) and drop the explicit -lstdc++, so -static-libstdc++ /
+    # -static-libgcc statically link the PIC libstdc++/libgcc -> the produced .so
+    # carries NO libstdc++/libgcc_s NEEDED and no GLIBCXX_* version requirement.
+    # The nginx C binary link is untouched (it has no -lstdc++). (Done post-configure
+    # so the shared engine config stays intact for the distro noble/el9 builds.)
+    sed -i \
+      -e 's#[$][(]LINK[)] -o objs/ngx_pagespeed[.]so#g++-13 -o objs/ngx_pagespeed.so#' \
+      -e 's# -lstdc++##g' \
+      objs/Makefile
+  elif [ "${DEB_STATIC_STDCXX}" = "1" ]; then
+    # Link the module .so with clang++ (matches the clang-compiled object graph;
+    # the only C++23 driver available on the old-glibc targets). We must STATIC-
+    # link the C++ runtime so the .so carries NO libstdc++.so.6/GLIBCXX_* NEEDED.
+    #
+    # The naive `-static-libstdc++` does NOT work here: this is a `-shared` link,
+    # where the linker is happy to LEAVE C++ runtime symbols undefined (resolved
+    # at load by the host's libstdc++) rather than pull them from the implicit
+    # libstdc++.a. The result is a .so with undefined _ZSt28__throw_bad_array_
+    # new_lengthv / basic_string::_M_replace_cold etc. that fails dlopen() in
+    # stock nginx (whose system libstdc++.so.6 is OLDER and lacks them). Instead
+    # we (a) link with clang++, (b) DROP the engine config's dynamic `-lstdc++`,
+    # and (c) inject the EXPLICIT static libstdc++.a + libsupc++.a (wrapped in a
+    # --start-group with -Bstatic so the linker re-scans and PULLS every needed
+    # member, even for a -shared output) plus -static-libgcc. The version script
+    # then hides all those pulled symbols -> the .so is self-contained, exports
+    # only ngx_module*, and its floor is pure glibc (the target distro's).
+    # C++-runtime link strategy (verified empirically, this is the crux of P3):
+    #  - `-nostdlib++` suppresses clang's IMPLICIT libstdc++ entirely. Without it,
+    #    clang appends its own `-lstdc++`, which (a) on a -shared link stays DYNAMIC
+    #    -> a libstdc++.so.6 NEEDED + GLIBCXX_* floor, and (b) is auto-detected from
+    #    the NEWEST FULL gcc install = stock g++-10/12 (the WRONG, older libstdc++).
+    #  - We then provide the C++ runtime EXPLICITLY as the GCC-13 static archives
+    #    wrapped in -Bstatic --start-group libstdc++.a libsupc++.a --end-group
+    #    -Bdynamic. The group FORCE-PULLS every member the -shared link would
+    #    otherwise leave undefined (e.g. __throw_bad_array_new_length in functexcept.o
+    #    and basic_string::_M_replace_cold), which is exactly what makes the .so
+    #    dlopen-clean on stock nginx whose system libstdc++.so.6 is older.
+    #  - GCCDIR is pinned to the GCC-13 dir (native on trixie/jammy, sideloaded on
+    #    bullseye/bookworm) — NOT clang's -print-file-name, which returns the stock
+    #    g++-10/12 path (the sideloaded gcc-13 is a libstdc++-only tree with no
+    #    crt*.o, so clang does not treat it as a gcc toolchain and ignores it).
+    # The engine config's dynamic `-lstdc++` is replaced by this group in-place.
+    GCCDIR="/usr/lib/gcc/$(deb_triplet)/13"
+    [ -f "${GCCDIR}/libstdc++.a" ] || { echo "ERROR: GCC-13 static libstdc++.a not found at ${GCCDIR}" >&2; exit 1; }
+    sed -i \
+      -e "s#[\$][(]LINK[)] -o objs/ngx_pagespeed[.]so#clang++ -nostdlib++ -static-libgcc -o objs/ngx_pagespeed.so#" \
+      -e "s# -lstdc++# -Wl,-Bstatic,--start-group,${GCCDIR}/libstdc++.a,${GCCDIR}/libsupc++.a,--end-group,-Bdynamic#g" \
+      objs/Makefile
+  fi
   make modules
 )
 
@@ -510,6 +939,42 @@ if command -v strings >/dev/null 2>&1; then
   fi
 fi
 "${SCRIPTDIR}/assert_symbol_hygiene.sh" "${OUT_SO}"
+
+# ---------------------------------------------------------------------------
+# 7b. glibc-floor check. For the Debian/Ubuntu
+#     distro-stock targets, assert (a) NO libstdc++.so.6 / libgcc_s NEEDED (the
+#     static link took) and (b) the highest GLIBC_x.y symbol the .so references
+#     is <= the target distro's glibc floor, so it loads on a STOCK host. Builds
+#     INSIDE the target container already cap glibc at the target's version; this
+#     verifies the static libstdc++ archive didn't sneak a newer GLIBC ref in.
+# ---------------------------------------------------------------------------
+if [ "${DEB_STATIC_STDCXX}" = "1" ]; then
+  case "${DISTRO}" in
+    bullseye) GLIBC_FLOOR="2.31" ;;
+    jammy)    GLIBC_FLOOR="2.35" ;;
+    bookworm) GLIBC_FLOOR="2.36" ;;
+    trixie)   GLIBC_FLOOR="2.41" ;;
+    *)        GLIBC_FLOOR="" ;;
+  esac
+  echo "=== the design record P3 glibc-floor check (${DISTRO}, floor ${GLIBC_FLOOR}) ==="
+  NEEDED_CXX="$(readelf -d "${OUT_SO}" 2>/dev/null | awk '/\(NEEDED\)/{gsub(/[][]/,"",$NF);print $NF}' | grep -iE '^lib(stdc\+\+|gcc_s)' || true)"
+  if [ -n "${NEEDED_CXX}" ]; then
+    echo "FAIL: module has a C++ runtime NEEDED (static link did not take):" >&2
+    echo "${NEEDED_CXX}" | sed 's/^/   /' >&2
+    exit 1
+  fi
+  echo "OK: no libstdc++/libgcc_s in NEEDED (statically linked)."
+  MAXGLIBC="$(objdump -T "${OUT_SO}" 2>/dev/null | grep -oE 'GLIBC_[0-9]+\.[0-9]+(\.[0-9]+)?' | sed 's/GLIBC_//' | sort -V | tail -1)"
+  echo "    max GLIBC symbol ref: ${MAXGLIBC:-<none>} (floor ${GLIBC_FLOOR})"
+  if [ -n "${MAXGLIBC}" ] && [ -n "${GLIBC_FLOOR}" ]; then
+    HIGHEST="$(printf '%s\n%s\n' "${MAXGLIBC}" "${GLIBC_FLOOR}" | sort -V | tail -1)"
+    if [ "${HIGHEST}" != "${GLIBC_FLOOR}" ]; then
+      echo "FAIL: max GLIBC ref ${MAXGLIBC} EXCEEDS the ${DISTRO} floor ${GLIBC_FLOOR} — would not load on a stock host." >&2
+      exit 1
+    fi
+    echo "OK: max GLIBC ref ${MAXGLIBC} <= floor ${GLIBC_FLOOR}."
+  fi
+fi
 
 echo "============================================================"
 echo "Built ABI-correct module for ${DISTRO}: ${OUT_SO}"

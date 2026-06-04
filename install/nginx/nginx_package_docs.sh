@@ -71,7 +71,7 @@ CONF
 # --- README -----------------------------------------------------------------
 if [ "${PKGFMT}" = "deb" ]; then
   MODPATH="/usr/lib/nginx/modules/"
-  LOADNOTE="On stock Ubuntu 24.04 (noble) nginx, this package's \`load_module\`
+  LOADNOTE="On stock Debian/Ubuntu nginx, this package's \`load_module\`
 snippet is auto-enabled via \`/etc/nginx/modules-enabled/\` — no manual edit.
 If you run nginx from the nginx.org repo (which does NOT auto-include
 \`modules-enabled/\`), add \`load_module modules/ngx_pagespeed_module.so;\` to
@@ -147,9 +147,8 @@ version, and \`--with-compat\` does **not** relax this. This package is built
 against and **pinned to stock nginx ${NGINX_VER}** for this distribution, and
 will only load into that nginx. A routine security update that keeps the same
 nginx upstream version is fine; a distro nginx **minor rebase** requires a new
-package build. If you run a different nginx (e.g. nginx.org stable/mainline),
-build from source using the tarball + \`build_nginx_with_pagespeed.sh\`, or
-request a pinned build.
+package build. For an nginx version we do not yet package, request a pinned
+build (contact us); otherwise use your distro's stock nginx.
 
 ## More Information
 

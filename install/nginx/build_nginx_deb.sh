@@ -67,7 +67,24 @@ fi
 BUILDDIR="${SRCDIR}"
 source "${SRCDIR}/install/common/installer.include"
 get_version_info
-VERSIONFULL="${VERSION}-r${REVISION}"
+
+# the design record P3: per-suite version suffix. Each distro ships a DISTINCT .so (exact
+# stock-nginx ABI + glibc floor), so the .deb version MUST encode the suite:
+# apt/aptly identify a package by name+version+arch, and two suites sharing those
+# three with different .so bytes would collide in the aptly pool and serve the
+# wrong module. Derive the codename from the build container's /etc/os-release
+# (this script runs INSIDE the target-distro container, after
+# build_module_in_container.sh) and append ~<codename>. The corp publish
+# classifier (classify_deb_suite) routes each .deb to dists/<codename> by this
+# suffix. ~<codename> is the conventional Debian "sorts-lower" separator, so a
+# routine +rN reship (e.g. 1.15.0-r2~bookworm > 1.15.0-r1~bookworm) upgrades
+# cleanly within a suite.
+CODENAME="${CODENAME:-}"
+if [ -z "${CODENAME}" ] && [ -r /etc/os-release ]; then
+  CODENAME="$(. /etc/os-release 2>/dev/null && echo "${VERSION_CODENAME:-}")"
+fi
+[ -n "${CODENAME}" ] || { echo "ERROR: cannot determine distro codename (set CODENAME or run inside the target-distro container)" >&2; exit 1; }
+VERSIONFULL="${VERSION}-r${REVISION}~${CODENAME}"
 
 PACKAGE="nginx-module-pagespeed"   # D2: SEO-parity name (NOT mod-pagespeed-nginx)
 MAINTNAME="mod_pagespeed developers"

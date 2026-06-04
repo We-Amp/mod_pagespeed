@@ -101,7 +101,9 @@ cc_library(
         "//pagespeed/kernel/util",
         "//pagespeed/system:system_controller_process_h",
         # Full gRPC++ runtime (not just codegen stubs) — needed for
-        # ServerContextBase RTTI used by the RPC server/client.
-        "@com_github_grpc_grpc//:grpc++",
+        # ServerContextBase RTTI used by the RPC server/client. The controller
+        # speaks only InsecureServer/ChannelCredentials over a local socket, so
+        # link the _unsecure runtime and skip gRPC's TLS/ALTS/credentials glue.
+        "@com_github_grpc_grpc//:grpc++_unsecure",
     ],
 )

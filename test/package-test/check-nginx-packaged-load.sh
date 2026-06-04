@@ -46,8 +46,8 @@
 #
 # Usage (inside the container):
 #   check-nginx-packaged-load.sh <distro> <package-path>
-#     <distro>       = noble | el9
-#     <package-path> = path to the freshly built .deb (noble) / .rpm (el9)
+#     <distro>       = noble | bullseye | bookworm | trixie | jammy | el9
+#     <package-path> = path to the freshly built .deb (Debian/Ubuntu) / .rpm (el9)
 #
 # Exit codes:
 #   0  module loads cleanly against distro-stock nginx
@@ -59,7 +59,7 @@ set -euo pipefail
 
 die() { echo "::error::$*" >&2; exit "${2:-1}"; }
 
-[[ $# -eq 2 ]] || die "usage: $0 <noble|el9> <package-path>" 1
+[[ $# -eq 2 ]] || die "usage: $0 <noble|bullseye|bookworm|trixie|jammy|el9> <package-path>" 1
 DISTRO="$1"
 PKG="$2"
 [[ -f "$PKG" ]] || die "package not found: $PKG" 1
@@ -118,7 +118,10 @@ echo "==> the design record GATE 1: packaged-nginx load-check (distro=$DISTRO)"
 echo "    package: $PKG"
 
 case "$DISTRO" in
-  noble)
+  # the design record P3: all Debian/Ubuntu deb suites take the same apt install path —
+  # stock packaged nginx auto-includes the .deb's modules-enabled load_module
+  # snippet, so the gate logic below is identical across them.
+  noble|bullseye|bookworm|trixie|jammy)
     install_stock_nginx_apt
     cp "$PKG" "./$(basename "$PKG")"
     install_pkg_apt
@@ -128,7 +131,7 @@ case "$DISTRO" in
     install_pkg_dnf
     ;;
   *)
-    die "unknown distro '$DISTRO' (want noble|el9)" 1
+    die "unknown distro '$DISTRO' (want noble|bullseye|bookworm|trixie|jammy|el9)" 1
     ;;
 esac
 
