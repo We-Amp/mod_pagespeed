@@ -51,6 +51,15 @@ build --action_env=ABSL_LEGACY_THREAD_ANNOTATIONS=1
 build --copt="-DABSL_LEGACY_THREAD_ANNOTATIONS=1"
 build --cxxopt="-DABSL_LEGACY_THREAD_ANNOTATIONS=1"
 
+# Drop gRPC's xDS / service-mesh stack from EVERY build and test. The central-
+# controller RPC uses gRPC for local (Unix-socket) IPC only — it never speaks xDS.
+# Without this, gRPC's xds_client unconditionally compiles the entire Envoy
+# data-plane protobuf API (~214 envoy_* / protoc_gen_validate libs, ~470 targets)
+# into every nginx/Apache/IIS artifact and unit-test binary, for a feature no port
+# uses. Verified via cquery: this prunes the whole envoy.* proto tree. Applied at
+# base scope (not build:ci) so dev, vendored, windows and arm64 builds all benefit.
+build --define=grpc_no_xds=true
+
 # =============================================================================
 # C++23 Support for Cyclone Cache
 # =============================================================================

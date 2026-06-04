@@ -169,8 +169,12 @@ http {
 EOF
 
 # ── Step 5: Test configuration ──────────────────────────────────────────────
+# NOTE: do NOT pass `-e <errlog>` here — that CLI flag was added in nginx 1.19.5
+# and stock nginx on Debian 11 / Ubuntu 22.04 is 1.18.0, which rejects it
+# ("nginx: invalid option: e"). The generated config already sets
+# `error_log $LOG_DIR/error.log` in the main context, so `-e` is redundant.
 log_info "Testing nginx configuration..."
-if ! "$NGINX_BINARY" -t -p "$WORK_DIR" -e "$LOG_DIR/error.log" -c "$CONFIG_FILE" 2>&1; then
+if ! "$NGINX_BINARY" -t -p "$WORK_DIR" -c "$CONFIG_FILE" 2>&1; then
     log_error "nginx configuration test failed"
     exit 1
 fi
@@ -178,7 +182,7 @@ log_info "Configuration OK"
 
 # ── Step 6: Start nginx ────────────────────────────────────────────────────
 log_info "Starting nginx..."
-"$NGINX_BINARY" -p "$WORK_DIR" -e "$LOG_DIR/error.log" -c "$CONFIG_FILE"
+"$NGINX_BINARY" -p "$WORK_DIR" -c "$CONFIG_FILE"
 sleep 2
 
 # Wait for nginx to respond

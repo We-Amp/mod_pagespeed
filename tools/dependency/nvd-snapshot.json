@@ -2482,6 +2482,929 @@
     }
    }
   ],
+  "cpe:2.3:a:f5:nginx": [
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Buffer underflow in src/http/ngx_http_parse.c in nginx 0.1.0 through 0.5.37, 0.6.x before 0.6.39, 0.7.x before 0.7.62, and 0.8.x before 0.8.15 allows remote attackers to execute arbitrary code via crafted HTTP requests."
+      }
+     ],
+     "id": "CVE-2009-2629",
+     "metrics": {
+      "cvssMetricV2": [
+       {
+        "baseSeverity": "HIGH",
+        "cvssData": {
+         "baseScore": 7.5,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2009-09-15T22:30:00.233"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "The TLS protocol, and the SSL protocol 3.0 and possibly earlier, as used in Microsoft Internet Information Services (IIS) 7.0, mod_ssl in the Apache HTTP Server 2.2.14 and earlier, OpenSSL before 0.9.8l, GnuTLS 2.8.5 and earlier, Mozilla Network Security Services (NSS) 3.12.4 and earlier, multiple Cisco products, and other products, does not properly associate renegotiation handshakes with an existing connection, which allows man-in-the-middle attackers to insert data into HTTPS sessions, and possibly other types of sessions protected by TLS or SSL, by sending an unauthenticated request that is processed retroactively by a server in a post-renegotiation context, related to a \"plaintext injection\" attack, aka the \"Project Mogul\" issue."
+      }
+     ],
+     "id": "CVE-2009-3555",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 9.8,
+         "baseSeverity": "CRITICAL"
+        }
+       }
+      ]
+     },
+     "published": "2009-11-09T17:30:00.407"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "src/http/ngx_http_parse.c in nginx (aka Engine X) 0.1.0 through 0.4.14, 0.5.x before 0.5.38, 0.6.x before 0.6.39, 0.7.x before 0.7.62, and 0.8.x before 0.8.14 allows remote attackers to cause a denial of service (NULL pointer dereference and worker process crash) via a long URI."
+      }
+     ],
+     "id": "CVE-2009-3896",
+     "metrics": {
+      "cvssMetricV2": [
+       {
+        "baseSeverity": "MEDIUM",
+        "cvssData": {
+         "baseScore": 5.0,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2009-11-24T17:30:00.377"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Directory traversal vulnerability in src/http/modules/ngx_http_dav_module.c in nginx (aka Engine X) before 0.7.63, and 0.8.x before 0.8.17, allows remote authenticated users to create or overwrite arbitrary files via a .. (dot dot) in the Destination HTTP header for the WebDAV (1) COPY or (2) MOVE method."
+      }
+     ],
+     "id": "CVE-2009-3898",
+     "metrics": {
+      "cvssMetricV2": [
+       {
+        "baseSeverity": "MEDIUM",
+        "cvssData": {
+         "baseScore": 4.9,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2009-11-24T17:30:00.437"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "nginx 0.7.64 writes data to a log file without sanitizing non-printable characters, which might allow remote attackers to modify a window's title, or possibly execute arbitrary commands or overwrite files, via an HTTP request containing an escape sequence for a terminal emulator."
+      }
+     ],
+     "id": "CVE-2009-4487",
+     "metrics": {
+      "cvssMetricV2": [
+       {
+        "baseSeverity": "MEDIUM",
+        "cvssData": {
+         "baseScore": 6.8,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2010-01-13T20:30:00.357"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "nginx 0.8 before 0.8.40 and 0.7 before 0.7.66, when running on Windows, allows remote attackers to obtain source code or unparsed content of arbitrary files under the web document root by appending ::$DATA to the URI."
+      }
+     ],
+     "id": "CVE-2010-2263",
+     "metrics": {
+      "cvssMetricV2": [
+       {
+        "baseSeverity": "MEDIUM",
+        "cvssData": {
+         "baseScore": 5.0,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2010-06-15T14:04:24.313"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "nginx 0.8.36 allows remote attackers to cause a denial of service (crash) via certain encoded directory traversal sequences that trigger memory corruption, as demonstrated using the \"%c0.%c0.\" sequence."
+      }
+     ],
+     "id": "CVE-2010-2266",
+     "metrics": {
+      "cvssMetricV2": [
+       {
+        "baseSeverity": "MEDIUM",
+        "cvssData": {
+         "baseScore": 5.0,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2010-06-15T14:04:24.420"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "OpenSSL before 0.9.8q, and 1.0.x before 1.0.0c, when SSL_OP_NETSCAPE_REUSE_CIPHER_CHANGE_BUG is enabled, does not properly prevent modification of the ciphersuite in the session cache, which allows remote attackers to force the downgrade to an unintended cipher via vectors involving sniffing network traffic to discover a session identifier."
+      }
+     ],
+     "id": "CVE-2010-4180",
+     "metrics": {
+      "cvssMetricV2": [
+       {
+        "baseSeverity": "MEDIUM",
+        "cvssData": {
+         "baseScore": 4.3,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2010-12-06T21:05:48.687"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Heap-based buffer overflow in compression-pointer processing in core/ngx_resolver.c in nginx before 1.0.10 allows remote resolvers to cause a denial of service (daemon crash) or possibly have unspecified other impact via a long response."
+      }
+     ],
+     "id": "CVE-2011-4315",
+     "metrics": {
+      "cvssMetricV2": [
+       {
+        "baseSeverity": "MEDIUM",
+        "cvssData": {
+         "baseScore": 6.8,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2011-12-08T20:55:01.000"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "nginx/Windows 1.3.x before 1.3.1 and 1.2.x before 1.2.1 allows remote attackers to bypass intended access restrictions and access restricted files via (1) a trailing . (dot) or (2) certain \"$index_allocation\" sequences in a request."
+      }
+     ],
+     "id": "CVE-2011-4963",
+     "metrics": {
+      "cvssMetricV2": [
+       {
+        "baseSeverity": "MEDIUM",
+        "cvssData": {
+         "baseScore": 5.0,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2012-07-26T19:55:00.980"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "nginx http proxy module does not verify peer identity of https origin server which could facilitate man-in-the-middle attack (MITM)"
+      }
+     ],
+     "id": "CVE-2011-4968",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 4.8,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2019-11-19T16:15:11.070"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Use-after-free vulnerability in nginx before 1.0.14 and 1.1.x before 1.1.17 allows remote HTTP servers to obtain sensitive information from process memory via a crafted backend response, in conjunction with a client request."
+      }
+     ],
+     "id": "CVE-2012-1180",
+     "metrics": {
+      "cvssMetricV2": [
+       {
+        "baseSeverity": "MEDIUM",
+        "cvssData": {
+         "baseScore": 5.0,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2012-04-17T21:55:01.227"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Buffer overflow in ngx_http_mp4_module.c in the ngx_http_mp4_module module in nginx 1.0.7 through 1.0.14 and 1.1.3 through 1.1.18, when the mp4 directive is used, allows remote attackers to cause a denial of service (memory overwrite) or possibly execute arbitrary code via a crafted MP4 file."
+      }
+     ],
+     "id": "CVE-2012-2089",
+     "metrics": {
+      "cvssMetricV2": [
+       {
+        "baseSeverity": "MEDIUM",
+        "cvssData": {
+         "baseScore": 6.8,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2012-04-17T21:55:01.353"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "The default configuration of nginx, possibly 1.3.13 and earlier, uses world-readable permissions for the (1) access.log and (2) error.log files, which allows local users to obtain sensitive information by reading the files."
+      }
+     ],
+     "id": "CVE-2013-0337",
+     "metrics": {
+      "cvssMetricV2": [
+       {
+        "baseSeverity": "HIGH",
+        "cvssData": {
+         "baseScore": 7.5,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2013-10-27T00:55:03.713"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "The ngx_http_parse_chunked function in http/ngx_http_parse.c in nginx 1.3.9 through 1.4.0 allows remote attackers to cause a denial of service (crash) and execute arbitrary code via a chunked Transfer-Encoding request with a large chunk size, which triggers an integer signedness error and a stack-based buffer overflow."
+      }
+     ],
+     "id": "CVE-2013-2028",
+     "metrics": {
+      "cvssMetricV2": [
+       {
+        "baseSeverity": "HIGH",
+        "cvssData": {
+         "baseScore": 7.5,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2013-07-20T03:37:20.730"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "http/modules/ngx_http_proxy_module.c in nginx 1.1.4 through 1.2.8 and 1.3.0 through 1.4.0, when proxy_pass is used with untrusted HTTP servers, allows remote attackers to cause a denial of service (crash) and obtain sensitive information from worker process memory via a crafted proxy response, a similar vulnerability to CVE-2013-2028."
+      }
+     ],
+     "id": "CVE-2013-2070",
+     "metrics": {
+      "cvssMetricV2": [
+       {
+        "baseSeverity": "MEDIUM",
+        "cvssData": {
+         "baseScore": 5.8,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2013-07-20T03:37:25.247"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "nginx 0.8.41 through 1.4.3 and 1.5.x before 1.5.7 allows remote attackers to bypass intended restrictions via an unescaped space character in a URI."
+      }
+     ],
+     "id": "CVE-2013-4547",
+     "metrics": {
+      "cvssMetricV2": [
+       {
+        "baseSeverity": "HIGH",
+        "cvssData": {
+         "baseScore": 7.5,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2013-11-23T18:55:04.687"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "The SPDY implementation in the ngx_http_spdy_module module in nginx 1.5.10 before 1.5.11, when running on a 32-bit platform, allows remote attackers to execute arbitrary code via a crafted request."
+      }
+     ],
+     "id": "CVE-2014-0088",
+     "metrics": {
+      "cvssMetricV2": [
+       {
+        "baseSeverity": "HIGH",
+        "cvssData": {
+         "baseScore": 7.5,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2014-04-29T14:38:49.920"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Heap-based buffer overflow in the SPDY implementation in nginx 1.3.15 before 1.4.7 and 1.5.x before 1.5.12 allows remote attackers to execute arbitrary code via a crafted request."
+      }
+     ],
+     "id": "CVE-2014-0133",
+     "metrics": {
+      "cvssMetricV2": [
+       {
+        "baseSeverity": "HIGH",
+        "cvssData": {
+         "baseScore": 7.5,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2014-03-28T15:55:08.607"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "The STARTTLS implementation in mail/ngx_mail_smtp_handler.c in the SMTP proxy in nginx 1.5.x and 1.6.x before 1.6.1 and 1.7.x before 1.7.4 does not properly restrict I/O buffering, which allows man-in-the-middle attackers to insert commands into encrypted SMTP sessions by sending a cleartext command that is processed after TLS is in place, related to a \"plaintext command injection\" attack, a similar issue to CVE-2011-0411."
+      }
+     ],
+     "id": "CVE-2014-3556",
+     "metrics": {
+      "cvssMetricV2": [
+       {
+        "baseSeverity": "MEDIUM",
+        "cvssData": {
+         "baseScore": 6.8,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2014-12-29T20:59:03.943"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "nginx 0.5.6 through 1.7.4, when using the same shared ssl_session_cache or ssl_session_ticket_key for multiple servers, can reuse a cached SSL session for an unrelated context, which allows remote attackers with certain privileges to conduct \"virtual host confusion\" attacks."
+      }
+     ],
+     "id": "CVE-2014-3616",
+     "metrics": {
+      "cvssMetricV2": [
+       {
+        "baseSeverity": "MEDIUM",
+        "cvssData": {
+         "baseScore": 4.3,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2014-12-08T11:59:03.390"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "The resolver in nginx before 1.8.1 and 1.9.x before 1.9.10 allows remote attackers to cause a denial of service (invalid pointer dereference and worker process crash) via a crafted UDP DNS response."
+      }
+     ],
+     "id": "CVE-2016-0742",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 7.5,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2016-02-15T19:59:00.107"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Use-after-free vulnerability in the resolver in nginx 0.6.18 through 1.8.0 and 1.9.x before 1.9.10 allows remote attackers to cause a denial of service (worker process crash) or possibly have unspecified other impact via a crafted DNS response related to CNAME response processing."
+      }
+     ],
+     "id": "CVE-2016-0746",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 9.8,
+         "baseSeverity": "CRITICAL"
+        }
+       }
+      ]
+     },
+     "published": "2016-02-15T19:59:01.157"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "The resolver in nginx before 1.8.1 and 1.9.x before 1.9.10 does not properly limit CNAME resolution, which allows remote attackers to cause a denial of service (worker process resource consumption) via vectors related to arbitrary name resolution."
+      }
+     ],
+     "id": "CVE-2016-0747",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 5.3,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2016-02-15T19:59:02.123"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "The nginx package before 1.6.2-5+deb8u3 on Debian jessie, the nginx packages before 1.4.6-1ubuntu3.6 on Ubuntu 14.04 LTS, before 1.10.0-0ubuntu0.16.04.3 on Ubuntu 16.04 LTS, and before 1.10.1-0ubuntu1.1 on Ubuntu 16.10, and the nginx ebuild before 1.10.2-r3 on Gentoo allow local users with access to the web server user account to gain root privileges via a symlink attack on the error log."
+      }
+     ],
+     "id": "CVE-2016-1247",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 7.8,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2016-11-29T17:59:00.167"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "os/unix/ngx_files.c in nginx before 1.10.1 and 1.11.x before 1.11.1 allows remote attackers to cause a denial of service (NULL pointer dereference and worker process crash) via a crafted request, involving writing a client request body to a temporary file."
+      }
+     ],
+     "id": "CVE-2016-4450",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 7.5,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2016-06-07T14:06:14.200"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "NGINX before 1.13.6 has a buffer overflow for years that exceed four digits, as demonstrated by a file with a modification date in 1969 that causes an integer overflow (or a false modification date far in the future), when encountered by the autoindex module."
+      }
+     ],
+     "id": "CVE-2017-20005",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 9.8,
+         "baseSeverity": "CRITICAL"
+        }
+       }
+      ]
+     },
+     "published": "2021-06-06T22:15:08.417"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Nginx versions since 0.5.6 up to and including 1.13.2 are vulnerable to integer overflow vulnerability in nginx range filter module resulting into leak of potentially sensitive information triggered by specially crafted request."
+      }
+     ],
+     "id": "CVE-2017-7529",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 7.5,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2017-07-13T13:29:00.220"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "nginx before versions 1.15.6 and 1.14.1 has a vulnerability in the implementation of HTTP/2 that can allow for excessive memory consumption. This issue affects nginx compiled with the ngx_http_v2_module (not compiled by default) if the 'http2' option of the 'listen' directive is used in a configuration file."
+      }
+     ],
+     "id": "CVE-2018-16843",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 7.5,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2018-11-07T14:29:00.777"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "nginx before versions 1.15.6 and 1.14.1 has a vulnerability in the implementation of HTTP/2 that can allow for excessive CPU usage. This issue affects nginx compiled with the ngx_http_v2_module (not compiled by default) if the 'http2' option of the 'listen' directive is used in a configuration file."
+      }
+     ],
+     "id": "CVE-2018-16844",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 7.5,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2018-11-07T14:29:00.837"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "nginx before versions 1.15.6, 1.14.1 has a vulnerability in the ngx_http_mp4_module, which might allow an attacker to cause infinite loop in a worker process, cause a worker process crash, or might result in worker process memory disclosure by using a specially crafted mp4 file. The issue only affects nginx if it is built with the ngx_http_mp4_module (the module is not built by default) and the .mp4. directive is used in the configuration file. Further, the attack is only possible if an attacker is able to trigger processing of a specially crafted mp4 file with the ngx_http_mp4_module."
+      }
+     ],
+     "id": "CVE-2018-16845",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 6.1,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2018-11-07T14:29:00.883"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "NGINX before 1.17.7, with certain error_page configurations, allows HTTP request smuggling, as demonstrated by the ability of an attacker to read unauthorized web pages in environments where NGINX is being fronted by a load balancer."
+      }
+     ],
+     "id": "CVE-2019-20372",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 5.3,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2020-01-09T21:15:12.027"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Some HTTP/2 implementations are vulnerable to window size manipulation and stream prioritization manipulation, potentially leading to a denial of service. The attacker requests a large amount of data from a specified resource over multiple streams. They manipulate window size and stream priority to force the server to queue the data in 1-byte chunks. Depending on how efficiently this data is queued, this can consume excess CPU, memory, or both."
+      }
+     ],
+     "id": "CVE-2019-9511",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 7.5,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2019-08-13T21:15:12.223"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Some HTTP/2 implementations are vulnerable to resource loops, potentially leading to a denial of service. The attacker creates multiple request streams and continually shuffles the priority of the streams in a way that causes substantial churn to the priority tree. This can consume excess CPU."
+      }
+     ],
+     "id": "CVE-2019-9513",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 7.5,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2019-08-13T21:15:12.380"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Some HTTP/2 implementations are vulnerable to a header leak, potentially leading to a denial of service. The attacker sends a stream of headers with a 0-length header name and 0-length header value, optionally Huffman encoded into 1-byte or greater headers. Some implementations allocate memory for these headers and keep the allocation alive until the session dies. This can consume excess memory."
+      }
+     ],
+     "id": "CVE-2019-9516",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 6.5,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2019-08-13T21:15:12.583"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "A security issue in nginx resolver was identified, which might allow an attacker who is able to forge UDP packets from the DNS server to cause 1-byte memory overwrite, resulting in worker process crash or potential other impact."
+      }
+     ],
+     "id": "CVE-2021-23017",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 7.7,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2021-06-01T13:15:07.853"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "ALPACA is an application layer protocol content confusion attack, exploiting TLS servers implementing different protocols but using compatible certificates, such as multi-domain or wildcard certificates. A MiTM attacker having access to victim's traffic at the TCP/IP layer can redirect traffic from one subdomain to another, resulting in a valid TLS session. This breaks the authentication of TLS and cross-protocol attacks may be possible where the behavior of one protocol service may compromise the other at the application layer."
+      }
+     ],
+     "id": "CVE-2021-3618",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 7.4,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2022-03-23T20:15:09.833"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "NGINX Open Source before versions 1.23.2 and 1.22.1, NGINX Open Source Subscription before versions R2 P1 and R1 P1, and NGINX Plus before versions R27 P1 and R26 P1 have a vulnerability in the module ngx_http_mp4_module that might allow a local attacker to corrupt NGINX worker memory, resulting in its termination or potential other impact using a specially crafted audio or video file. The issue affects only NGINX products that are built with the ngx_http_mp4_module, when the mp4 directive is used in the configuration file. Further, the attack is possible only if an attacker can trigger processing of a specially crafted audio or video file with the module ngx_http_mp4_module."
+      }
+     ],
+     "id": "CVE-2022-41741",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 7.0,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2022-10-19T22:15:12.647"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "NGINX Open Source before versions 1.23.2 and 1.22.1, NGINX Open Source Subscription before versions R2 P1 and R1 P1, and NGINX Plus before versions R27 P1 and R26 P1 have a vulnerability in the module ngx_http_mp4_module that might allow a local attacker to cause a worker process crash, or might result in worker process memory disclosure by using a specially crafted audio or video file. The issue affects only NGINX products that are built with the module ngx_http_mp4_module, when the mp4 directive is used in the configuration file. Further, the attack is possible only if an attacker can trigger processing of a specially crafted audio or video file with the module ngx_http_mp4_module."
+      }
+     ],
+     "id": "CVE-2022-41742",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 7.1,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2022-10-19T22:15:12.717"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "The HTTP/2 protocol allows a denial of service (server resource consumption) because request cancellation can reset many streams quickly, as exploited in the wild in August through October 2023."
+      }
+     ],
+     "id": "CVE-2023-44487",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 7.5,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2023-10-10T14:15:10.883"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "When multiple server blocks are configured to share the same IP address and port, an attacker can use session resumption to bypass client certificate authentication requirements on these servers. This vulnerability arises when  TLS Session Tickets https://nginx.org/en/docs/http/ngx_http_ssl_module.html#ssl_session_ticket_key  are used and/or the  SSL session cache https://nginx.org/en/docs/http/ngx_http_ssl_module.html#ssl_session_cache  are used in the default server and the default server is performing client certificate authentication.\u00a0\u00a0  Note: Software versions which have reached End of Technical Support (EoTS) are not evaluated."
+      }
+     ],
+     "id": "CVE-2025-23419",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 4.3,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2025-02-05T18:15:33.347"
+    }
+   }
+  ],
   "cpe:2.3:a:fmt:fmt": [
    {
     "cve": {
@@ -2527,6 +3450,316 @@
       ]
      },
      "published": "2025-06-16T22:16:41.250"
+    }
+   }
+  ],
+  "cpe:2.3:a:giflib_project:giflib": [
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Heap-based buffer overflow in giffix.c in giffix in giflib 5.1.1 allows attackers to cause a denial of service (program crash) via crafted image and logical screen width fields in a GIF file."
+      }
+     ],
+     "id": "CVE-2015-7555",
+     "metrics": {
+      "cvssMetricV30": [
+       {
+        "cvssData": {
+         "baseScore": 5.5,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2016-04-13T15:59:03.103"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Multiple use-after-free and double-free vulnerabilities in gifcolor.c in GIFLIB 5.1.2 have unspecified impact and attack vectors."
+      }
+     ],
+     "id": "CVE-2016-3177",
+     "metrics": {
+      "cvssMetricV30": [
+       {
+        "cvssData": {
+         "baseScore": 9.8,
+         "baseSeverity": "CRITICAL"
+        }
+       }
+      ]
+     },
+     "published": "2017-01-23T21:59:01.267"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Heap-based buffer overflow in util/gif2rgb.c in gif2rgb in giflib 5.1.2 allows remote attackers to cause a denial of service (application crash) via the background color index in a GIF file."
+      }
+     ],
+     "id": "CVE-2016-3977",
+     "metrics": {
+      "cvssMetricV30": [
+       {
+        "cvssData": {
+         "baseScore": 5.5,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2016-04-21T14:59:02.250"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "The DGifDecompressLine function in dgif_lib.c in GIFLIB (possibly version 3.0.x), as later shipped in cgif.c in sam2p 0.49.4, has a heap-based buffer overflow because a certain CrntCode array index is not checked. This will lead to a denial of service or possibly unspecified other impact."
+      }
+     ],
+     "id": "CVE-2018-11489",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 8.8,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2018-05-26T18:29:00.213"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "The DGifDecompressLine function in dgif_lib.c in GIFLIB (possibly version 3.0.x), as later shipped in cgif.c in sam2p 0.49.4, has a heap-based buffer overflow because a certain \"Private->RunningCode - 2\" array index is not checked. This will lead to a denial of service or possibly unspecified other impact."
+      }
+     ],
+     "id": "CVE-2018-11490",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 8.8,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2018-05-26T18:29:00.277"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "In GIFLIB before 2019-02-16, a malformed GIF file triggers a divide-by-zero exception in the decoder function DGifSlurp in dgif_lib.c if the height field of the ImageSize data structure is equal to zero."
+      }
+     ],
+     "id": "CVE-2019-15133",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 6.5,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2019-08-17T18:15:10.767"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "An issue was discovered in giflib through 5.1.4. DumpScreen2RGB in gif2rgb.c has a heap-based buffer over-read."
+      }
+     ],
+     "id": "CVE-2020-23922",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 7.1,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2021-04-21T18:15:08.347"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "A memory leak (out-of-memory) in gif2rgb in util/gif2rgb.c in giflib 5.1.4 allows remote attackers trigger an out of memory exception or denial of service via a gif format file."
+      }
+     ],
+     "id": "CVE-2021-40633",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 8.8,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2022-06-14T11:15:10.470"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "There is a heap-buffer-overflow in GIFLIB 5.2.1 function DumpScreen2RGB() in gif2rgb.c:298:45."
+      }
+     ],
+     "id": "CVE-2022-28506",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 5.5,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2022-04-25T13:15:49.727"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "giflib v5.2.1 was discovered to contain a segmentation fault via the component getarg.c."
+      }
+     ],
+     "id": "CVE-2023-39742",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 5.5,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2023-08-25T14:15:09.763"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Buffer Overflow vulnerability in GifLib Project GifLib v.5.2.1 allows a local attacker to obtain sensitive information via the DumpSCreen2RGB function in gif2rgb.c"
+      }
+     ],
+     "id": "CVE-2023-48161",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 7.1,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2023-11-22T06:15:43.123"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Giflib Project v5.2.2 is vulnerable to a heap buffer overflow via gif2rgb."
+      }
+     ],
+     "id": "CVE-2024-45993",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 6.5,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2024-09-30T17:15:04.473"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Giflib contains a double-free vulnerability that is the result of a shallow copy in GifMakeSavedImage and incorrect error handling. The conditions needed to trigger this vulnerability are difficult but may be possible."
+      }
+     ],
+     "id": "CVE-2026-23868",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 5.1,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2026-03-10T20:16:25.517"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Buffer Overflow vulnerability in giflib v.5.2.2 allows a remote attacker to cause a denial of service via the EGifGCBToExtension overwriting an existing Graphic Control Extension block without validating its allocated size."
+      }
+     ],
+     "id": "CVE-2026-26740",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 8.2,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2026-03-18T18:16:26.220"
     }
    }
   ],
@@ -6524,6 +7757,1353 @@
     }
    }
   ],
+  "cpe:2.3:a:libpng:libpng": [
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "The Portable Network Graphics library (libpng) 1.0.15 and earlier allows attackers to cause a denial of service (crash) via a malformed PNG image file that triggers an error that causes an out-of-bounds read when creating the error message."
+      }
+     ],
+     "id": "CVE-2004-0421",
+     "metrics": {
+      "cvssMetricV2": [
+       {
+        "baseSeverity": "MEDIUM",
+        "cvssData": {
+         "baseScore": 5.0,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2004-08-18T04:00:00.000"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Memory leak in pngwutil.c in libpng 1.2.13beta1, and other versions before 1.2.15beta3, allows context-dependent attackers to cause a denial of service (memory leak or segmentation fault) via a JPEG image containing an iCCP chunk with a negative embedded profile length."
+      }
+     ],
+     "id": "CVE-2006-7244",
+     "metrics": {
+      "cvssMetricV2": [
+       {
+        "baseSeverity": "MEDIUM",
+        "cvssData": {
+         "baseScore": 5.0,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2011-08-31T23:55:00.973"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Off-by-one error in ICC profile chunk handling in the png_set_iCCP function in pngset.c in libpng before 1.0.29 beta1 and 1.2.x before 1.2.21 beta1 allows remote attackers to cause a denial of service (crash) via a crafted PNG image that prevents a name field from being NULL terminated."
+      }
+     ],
+     "id": "CVE-2007-5266",
+     "metrics": {
+      "cvssMetricV2": [
+       {
+        "baseSeverity": "MEDIUM",
+        "cvssData": {
+         "baseScore": 4.3,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2007-10-08T21:17:00.000"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Off-by-one error in ICC profile chunk handling in the png_set_iCCP function in pngset.c in libpng before 1.2.22 beta1 allows remote attackers to cause a denial of service (crash) via a crafted PNG image, due to an incorrect fix for CVE-2007-5266."
+      }
+     ],
+     "id": "CVE-2007-5267",
+     "metrics": {
+      "cvssMetricV2": [
+       {
+        "baseSeverity": "MEDIUM",
+        "cvssData": {
+         "baseScore": 4.3,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2007-10-08T21:17:00.000"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "pngrtran.c in libpng before 1.0.29 and 1.2.x before 1.2.21 use (1) logical instead of bitwise operations and (2) incorrect comparisons, which might allow remote attackers to cause a denial of service (crash) via a crafted PNG image."
+      }
+     ],
+     "id": "CVE-2007-5268",
+     "metrics": {
+      "cvssMetricV2": [
+       {
+        "baseSeverity": "MEDIUM",
+        "cvssData": {
+         "baseScore": 4.3,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2007-10-08T21:17:00.000"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Certain chunk handlers in libpng before 1.0.29 and 1.2.x before 1.2.21 allow remote attackers to cause a denial of service (crash) via crafted (1) pCAL (png_handle_pCAL), (2) sCAL (png_handle_sCAL), (3) tEXt (png_push_read_tEXt), (4) iTXt (png_handle_iTXt), and (5) ztXT (png_handle_ztXt) chunking in PNG images, which trigger out-of-bounds read operations."
+      }
+     ],
+     "id": "CVE-2007-5269",
+     "metrics": {
+      "cvssMetricV2": [
+       {
+        "baseSeverity": "MEDIUM",
+        "cvssData": {
+         "baseScore": 5.0,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2007-10-08T21:17:00.000"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "libpng 1.0.6 through 1.0.32, 1.2.0 through 1.2.26, and 1.4.0beta01 through 1.4.0beta19 allows context-dependent attackers to cause a denial of service (crash) and possibly execute arbitrary code via a PNG file with zero length \"unknown\" chunks, which trigger an access of uninitialized memory."
+      }
+     ],
+     "id": "CVE-2008-1382",
+     "metrics": {
+      "cvssMetricV2": [
+       {
+        "baseSeverity": "HIGH",
+        "cvssData": {
+         "baseScore": 7.5,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2008-04-14T16:05:00.000"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Multiple off-by-one errors in libpng before 1.2.32beta01, and 1.4 before 1.4.0beta34, allow context-dependent attackers to cause a denial of service (crash) or have unspecified other impact via a PNG image with crafted zTXt chunks, related to (1) the png_push_read_zTXt function in pngread.c, and possibly related to (2) pngtest.c."
+      }
+     ],
+     "id": "CVE-2008-3964",
+     "metrics": {
+      "cvssMetricV2": [
+       {
+        "baseSeverity": "MEDIUM",
+        "cvssData": {
+         "baseScore": 4.3,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2008-09-11T01:13:47.633"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "The png_check_keyword function in pngwutil.c in libpng before 1.0.42, and 1.2.x before 1.2.34, might allow context-dependent attackers to set the value of an arbitrary memory location to zero via vectors involving creation of crafted PNG files with keywords, related to an implicit cast of the '\\0' character constant to a NULL pointer.  NOTE: some sources incorrectly report this as a double free vulnerability."
+      }
+     ],
+     "id": "CVE-2008-5907",
+     "metrics": {
+      "cvssMetricV2": [
+       {
+        "baseSeverity": "MEDIUM",
+        "cvssData": {
+         "baseScore": 5.0,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2009-01-15T17:30:00.453"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Memory leak in the png_handle_tEXt function in pngrutil.c in libpng before 1.2.33 rc02 and 1.4.0 beta36 allows context-dependent attackers to cause a denial of service (memory exhaustion) via a crafted PNG file."
+      }
+     ],
+     "id": "CVE-2008-6218",
+     "metrics": {
+      "cvssMetricV2": [
+       {
+        "baseSeverity": "HIGH",
+        "cvssData": {
+         "baseScore": 7.1,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2009-02-20T17:30:03.157"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "The PNG reference library (aka libpng) before 1.0.43, and 1.2.x before 1.2.35, as used in pngcrush and other applications, allows context-dependent attackers to cause a denial of service (application crash) or possibly execute arbitrary code via a crafted PNG file that triggers a free of an uninitialized pointer in (1) the png_read_png function, (2) pCAL chunk handling, or (3) setup of 16-bit gamma tables."
+      }
+     ],
+     "id": "CVE-2009-0040",
+     "metrics": {
+      "cvssMetricV2": [
+       {
+        "baseSeverity": "MEDIUM",
+        "cvssData": {
+         "baseScore": 6.8,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2009-02-22T22:30:00.203"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "libpng before 1.2.37 does not properly parse 1-bit interlaced images with width values that are not divisible by 8, which causes libpng to include uninitialized bits in certain rows of a PNG file and might allow remote attackers to read portions of sensitive memory via \"out-of-bounds pixels\" in the file."
+      }
+     ],
+     "id": "CVE-2009-2042",
+     "metrics": {
+      "cvssMetricV2": [
+       {
+        "baseSeverity": "MEDIUM",
+        "cvssData": {
+         "baseScore": 4.3,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2009-06-12T20:30:00.203"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Memory leak in the embedded_profile_len function in pngwutil.c in libpng before 1.2.39beta5 allows context-dependent attackers to cause a denial of service (memory leak or segmentation fault) via a JPEG image containing an iCCP chunk with a negative embedded profile length.  NOTE: this is due to an incomplete fix for CVE-2006-7244."
+      }
+     ],
+     "id": "CVE-2009-5063",
+     "metrics": {
+      "cvssMetricV2": [
+       {
+        "baseSeverity": "MEDIUM",
+        "cvssData": {
+         "baseScore": 5.0,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2011-08-31T23:55:01.020"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "The png_decompress_chunk function in pngrutil.c in libpng 1.0.x before 1.0.53, 1.2.x before 1.2.43, and 1.4.x before 1.4.1 does not properly handle compressed ancillary-chunk data that has a disproportionately large uncompressed representation, which allows remote attackers to cause a denial of service (memory and CPU consumption, and application hang) via a crafted PNG file, as demonstrated by use of the deflate compression method on data composed of many occurrences of the same character, related to a \"decompression bomb\" attack."
+      }
+     ],
+     "id": "CVE-2010-0205",
+     "metrics": {
+      "cvssMetricV2": [
+       {
+        "baseSeverity": "MEDIUM",
+        "cvssData": {
+         "baseScore": 4.3,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2010-03-03T19:30:00.493"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Buffer overflow in pngpread.c in libpng before 1.2.44 and 1.4.x before 1.4.3, as used in progressive applications, might allow remote attackers to execute arbitrary code via a PNG image that triggers an additional data row."
+      }
+     ],
+     "id": "CVE-2010-1205",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 9.8,
+         "baseSeverity": "CRITICAL"
+        }
+       }
+      ]
+     },
+     "published": "2010-06-30T18:30:01.333"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Memory leak in pngrutil.c in libpng before 1.2.44, and 1.4.x before 1.4.3, allows remote attackers to cause a denial of service (memory consumption and application crash) via a PNG image containing malformed Physical Scale (aka sCAL) chunks."
+      }
+     ],
+     "id": "CVE-2010-2249",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 6.5,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2010-06-30T18:30:01.847"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "pngrtran.c in libpng 1.5.x before 1.5.1 allows remote attackers to cause a denial of service (application crash) or possibly execute arbitrary code via a crafted palette-based PNG image that triggers a buffer overflow, related to the png_do_expand_palette function, the png_do_rgb_to_gray function, and an integer underflow.  NOTE: some of these details are obtained from third party information."
+      }
+     ],
+     "id": "CVE-2011-0408",
+     "metrics": {
+      "cvssMetricV2": [
+       {
+        "baseSeverity": "MEDIUM",
+        "cvssData": {
+         "baseScore": 6.8,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2011-01-18T18:03:08.423"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "The png_format_buffer function in pngerror.c in libpng 1.0.x before 1.0.55, 1.2.x before 1.2.45, 1.4.x before 1.4.8, and 1.5.x before 1.5.4 allows remote attackers to cause a denial of service (application crash) via a crafted PNG image that triggers an out-of-bounds read during the copying of error-message data.  NOTE: this vulnerability exists because of a CVE-2004-0421 regression. NOTE: this is called an off-by-one error by some sources."
+      }
+     ],
+     "id": "CVE-2011-2501",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 6.5,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2011-07-17T20:55:01.483"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Buffer overflow in libpng 1.0.x before 1.0.55, 1.2.x before 1.2.45, 1.4.x before 1.4.8, and 1.5.x before 1.5.4, when used by an application that calls the png_rgb_to_gray function but not the png_set_expand function, allows remote attackers to overwrite memory with an arbitrary amount of data, and possibly have unspecified other impact, via a crafted PNG image."
+      }
+     ],
+     "id": "CVE-2011-2690",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 8.8,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2011-07-17T20:55:01.530"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "The png_err function in pngerror.c in libpng 1.0.x before 1.0.55, 1.2.x before 1.2.45, 1.4.x before 1.4.8, and 1.5.x before 1.5.4 makes a function call using a NULL pointer argument instead of an empty-string argument, which allows remote attackers to cause a denial of service (application crash) via a crafted PNG image."
+      }
+     ],
+     "id": "CVE-2011-2691",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 6.5,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2011-07-17T20:55:01.577"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "The png_handle_sCAL function in pngrutil.c in libpng 1.0.x before 1.0.55, 1.2.x before 1.2.45, 1.4.x before 1.4.8, and 1.5.x before 1.5.4 does not properly handle invalid sCAL chunks, which allows remote attackers to cause a denial of service (memory corruption and application crash) or possibly have unspecified other impact via a crafted PNG image that triggers the reading of uninitialized memory."
+      }
+     ],
+     "id": "CVE-2011-2692",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 8.8,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2011-07-17T20:55:01.623"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Integer signedness error in the png_inflate function in pngrutil.c in libpng before 1.4.10beta01, as used in Google Chrome before 17.0.963.83 and other products, allows remote attackers to cause a denial of service (application crash) or possibly execute arbitrary code via a crafted PNG file, a different vulnerability than CVE-2011-3026."
+      }
+     ],
+     "id": "CVE-2011-3045",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 8.8,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2012-03-22T16:55:01.160"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "The png_set_text_2 function in pngset.c in libpng 1.0.x before 1.0.59, 1.2.x before 1.2.49, 1.4.x before 1.4.11, and 1.5.x before 1.5.10 allows remote attackers to cause a denial of service (crash) or execute arbitrary code via a crafted text chunk in a PNG image file, which triggers a memory allocation failure that is not properly handled, leading to a heap-based buffer overflow."
+      }
+     ],
+     "id": "CVE-2011-3048",
+     "metrics": {
+      "cvssMetricV2": [
+       {
+        "baseSeverity": "MEDIUM",
+        "cvssData": {
+         "baseScore": 6.8,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2012-05-29T20:55:04.993"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Off-by-one error in the png_formatted_warning function in pngerror.c in libpng 1.5.4 through 1.5.7 might allow remote attackers to cause a denial of service (application crash) and possibly execute arbitrary code via unspecified vectors, which trigger a stack-based buffer overflow."
+      }
+     ],
+     "id": "CVE-2011-3464",
+     "metrics": {
+      "cvssMetricV2": [
+       {
+        "baseSeverity": "HIGH",
+        "cvssData": {
+         "baseScore": 7.5,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2012-07-22T17:55:01.163"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "The png_push_read_zTXt function in pngpread.c in libpng 1.0.x before 1.0.58, 1.2.x before 1.2.48, 1.4.x before 1.4.10, and 1.5.x before 1.5.10 allows remote attackers to cause a denial of service (out-of-bounds read) via a large avail_in field value in a PNG image."
+      }
+     ],
+     "id": "CVE-2012-3425",
+     "metrics": {
+      "cvssMetricV2": [
+       {
+        "baseSeverity": "MEDIUM",
+        "cvssData": {
+         "baseScore": 4.3,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2012-08-13T20:55:09.207"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "The png_do_expand_palette function in libpng before 1.6.8 allows remote attackers to cause a denial of service (NULL pointer dereference and application crash) via (1) a PLTE chunk of zero bytes or (2) a NULL palette, related to pngrtran.c and pngset.c."
+      }
+     ],
+     "id": "CVE-2013-6954",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 6.5,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2014-01-12T18:34:55.893"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Integer overflow in the png_set_unknown_chunks function in libpng/pngset.c in libpng before 1.5.14beta08 allows context-dependent attackers to cause a denial of service (segmentation fault and crash) via a crafted image, which triggers a heap-based buffer overflow."
+      }
+     ],
+     "id": "CVE-2013-7353",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 6.5,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2014-05-06T14:55:05.010"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Multiple integer overflows in libpng before 1.5.14rc03 allow remote attackers to cause a denial of service (crash) via a crafted image to the (1) png_set_sPLT or (2) png_set_text_2 function, which triggers a heap-based buffer overflow."
+      }
+     ],
+     "id": "CVE-2013-7354",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 6.5,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2014-05-06T14:55:05.043"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "The png_push_read_chunk function in pngpread.c in the progressive decoder in libpng 1.6.x through 1.6.9 allows remote attackers to cause a denial of service (infinite loop and CPU consumption) via an IDAT chunk with a length of zero."
+      }
+     ],
+     "id": "CVE-2014-0333",
+     "metrics": {
+      "cvssMetricV2": [
+       {
+        "baseSeverity": "MEDIUM",
+        "cvssData": {
+         "baseScore": 5.0,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2014-02-27T20:55:04.850"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Heap-based buffer overflow in the png_combine_row function in libpng before 1.5.21 and 1.6.x before 1.6.16, when running on 64-bit systems, might allow context-dependent attackers to execute arbitrary code via a \"very wide interlaced\" PNG image."
+      }
+     ],
+     "id": "CVE-2014-9495",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 8.8,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2015-01-10T19:59:00.047"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Buffer overflow in the png_read_IDAT_data function in pngrutil.c in libpng before 1.5.21 and 1.6.x before 1.6.16 allows context-dependent attackers to execute arbitrary code via IDAT data with a large width, a different vulnerability than CVE-2014-9495."
+      }
+     ],
+     "id": "CVE-2015-0973",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 8.8,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2015-01-18T18:59:03.020"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "The png_convert_to_rfc1123 function in png.c in libpng 1.0.x before 1.0.64, 1.2.x before 1.2.54, and 1.4.x before 1.4.17 allows remote attackers to obtain sensitive process memory information via crafted tIME chunk data in an image file, which triggers an out-of-bounds read."
+      }
+     ],
+     "id": "CVE-2015-7981",
+     "metrics": {
+      "cvssMetricV2": [
+       {
+        "baseSeverity": "MEDIUM",
+        "cvssData": {
+         "baseScore": 5.0,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2015-11-24T20:59:15.017"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Multiple buffer overflows in the (1) png_set_PLTE and (2) png_get_PLTE functions in libpng before 1.0.64, 1.1.x and 1.2.x before 1.2.54, 1.3.x and 1.4.x before 1.4.17, 1.5.x before 1.5.24, and 1.6.x before 1.6.19 allow remote attackers to cause a denial of service (application crash) or possibly have unspecified other impact via a small bit-depth value in an IHDR (aka image header) chunk in a PNG image."
+      }
+     ],
+     "id": "CVE-2015-8126",
+     "metrics": {
+      "cvssMetricV2": [
+       {
+        "baseSeverity": "HIGH",
+        "cvssData": {
+         "baseScore": 7.5,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2015-11-13T03:59:05.917"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Buffer overflow in the png_set_PLTE function in libpng before 1.0.65, 1.1.x and 1.2.x before 1.2.55, 1.3.x, 1.4.x before 1.4.18, 1.5.x before 1.5.25, and 1.6.x before 1.6.20 allows remote attackers to cause a denial of service (application crash) or possibly have unspecified other impact via a small bit-depth value in an IHDR (aka image header) chunk in a PNG image.  NOTE: this vulnerability exists because of an incomplete fix for CVE-2015-8126."
+      }
+     ],
+     "id": "CVE-2015-8472",
+     "metrics": {
+      "cvssMetricV30": [
+       {
+        "cvssData": {
+         "baseScore": 7.3,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2016-01-21T15:59:00.117"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Integer underflow in the png_check_keyword function in pngwutil.c in libpng 0.90 through 0.99, 1.0.x before 1.0.66, 1.1.x and 1.2.x before 1.2.56, 1.3.x and 1.4.x before 1.4.19, and 1.5.x before 1.5.26 allows remote attackers to have unspecified impact via a space character as a keyword in a PNG image, which triggers an out-of-bounds read."
+      }
+     ],
+     "id": "CVE-2015-8540",
+     "metrics": {
+      "cvssMetricV30": [
+       {
+        "cvssData": {
+         "baseScore": 8.8,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2016-04-14T14:59:03.287"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "The png_set_text_2 function in libpng 0.71 before 1.0.67, 1.2.x before 1.2.57, 1.4.x before 1.4.20, 1.5.x before 1.5.28, and 1.6.x before 1.6.27 allows context-dependent attackers to cause a NULL pointer dereference vectors involving loading a text chunk into a png structure, removing the text, and then adding another text chunk to the structure."
+      }
+     ],
+     "id": "CVE-2016-10087",
+     "metrics": {
+      "cvssMetricV30": [
+       {
+        "cvssData": {
+         "baseScore": 7.5,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2017-01-30T22:59:00.280"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Unspecified vulnerability in libpng before 1.6.20, as used in Android 4.x before 4.4.4, 5.0.x before 5.0.2, 5.1.x before 5.1.1, and 6.x before 2016-07-01, allows attackers to gain privileges via a crafted application, as demonstrated by obtaining Signature or SignatureOrSystem access, aka internal bug 23265085."
+      }
+     ],
+     "id": "CVE-2016-3751",
+     "metrics": {
+      "cvssMetricV30": [
+       {
+        "cvssData": {
+         "baseScore": 7.8,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2016-07-11T01:59:51.870"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "libpng before 1.6.32 does not properly check the length of chunks against the user limit."
+      }
+     ],
+     "id": "CVE-2017-12652",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 9.8,
+         "baseSeverity": "CRITICAL"
+        }
+       }
+      ]
+     },
+     "published": "2019-07-10T15:15:10.993"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "In libpng 1.6.34, a wrong calculation of row_factor in the png_check_chunk_length function (pngrutil.c) may trigger an integer overflow and resultant divide-by-zero while processing a crafted PNG file, leading to a denial of service."
+      }
+     ],
+     "id": "CVE-2018-13785",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 6.5,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2018-07-09T13:29:00.443"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "An issue has been found in libpng 1.6.34. It is a SEGV in the function png_free_data in png.c, related to the recommended error handling for png_read_image."
+      }
+     ],
+     "id": "CVE-2018-14048",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 6.5,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2018-07-13T16:29:00.377"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "An issue has been found in third-party PNM decoding associated with libpng 1.6.35. It is a stack-based buffer overflow in the function get_token in pnm2png.c in pnm2png."
+      }
+     ],
+     "id": "CVE-2018-14550",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 8.8,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2019-07-10T12:15:10.750"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "png_create_info_struct in png.c in libpng 1.6.36 has a memory leak, as demonstrated by pngcp. NOTE: a third party has stated \"I don't think it is libpng's job to free this buffer."
+      }
+     ],
+     "id": "CVE-2019-6129",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 6.5,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2019-01-11T05:29:01.640"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "png_image_free in png.c in libpng 1.6.x before 1.6.37 has a use-after-free because png_image_free_function is called under png_safe_execute."
+      }
+     ],
+     "id": "CVE-2019-7317",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 5.3,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2019-02-04T08:29:00.447"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "A heap overflow flaw was found in libpngs' pngimage.c program. This flaw allows an attacker with local network access to pass a specially crafted PNG file to the pngimage utility, causing an application to crash, leading to a denial of service."
+      }
+     ],
+     "id": "CVE-2021-4214",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 5.5,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2022-08-24T16:15:10.037"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Buffer Overflow vulnerability in libpng 1.6.43-1.6.46 allows a local attacker to cause a denial of service via the pngimage with AddressSanitizer (ASan), the program leaks memory in various locations, eventually leading to high memory usage and causing the program to become unresponsive"
+      }
+     ],
+     "id": "CVE-2025-28162",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 5.5,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2026-01-27T16:16:14.630"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Buffer Overflow vulnerability in libpng 1.6.43-1.6.46 allows a local attacker to cause a denial of service via png_create_read_struct() function."
+      }
+     ],
+     "id": "CVE-2025-28164",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 5.5,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2026-01-27T16:16:14.760"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "LIBPNG is a reference library for use in applications that read, create, and manipulate PNG (Portable Network Graphics) raster image files. Prior to version 1.6.51, a heap buffer over-read vulnerability exists in libpng's png_do_quantize function when processing PNG files with malformed palette indices. The vulnerability occurs when palette_lookup array bounds are not validated against externally-supplied image data, allowing an attacker to craft a PNG file with out-of-range palette indices that trigger out-of-bounds memory access. This issue has been patched in version 1.6.51."
+      }
+     ],
+     "id": "CVE-2025-64505",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 6.1,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2025-11-25T00:15:47.133"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "LIBPNG is a reference library for use in applications that read, create, and manipulate PNG (Portable Network Graphics) raster image files. From version 1.6.0 to before 1.6.51, a heap buffer over-read vulnerability exists in libpng's png_write_image_8bit function when processing 8-bit images through the simplified write API with convert_to_8bit enabled. The vulnerability affects 8-bit grayscale+alpha, RGB/RGBA, and images with incomplete row data. A conditional guard incorrectly allows 8-bit input to enter code expecting 16-bit input, causing reads up to 2 bytes beyond allocated buffer boundaries. This issue has been patched in version 1.6.51."
+      }
+     ],
+     "id": "CVE-2025-64506",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 6.1,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2025-11-25T00:15:47.300"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "LIBPNG is a reference library for use in applications that read, create, and manipulate PNG (Portable Network Graphics) raster image files. From version 1.6.0 to before 1.6.51, an out-of-bounds read vulnerability exists in png_image_read_composite when processing palette images with PNG_FLAG_OPTIMIZE_ALPHA enabled. The palette compositing code in png_init_read_transformations incorrectly applies background compositing during premultiplication, violating the invariant component \u2264 alpha \u00d7 257 required by the simplified PNG API. This issue has been patched in version 1.6.51."
+      }
+     ],
+     "id": "CVE-2025-64720",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 7.1,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2025-11-25T00:15:47.460"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "LIBPNG is a reference library for use in applications that read, create, and manipulate PNG (Portable Network Graphics) raster image files. From version 1.6.0 to before 1.6.51, there is a heap buffer overflow vulnerability in the libpng simplified API function png_image_finish_read when processing 16-bit interlaced PNGs with 8-bit output format. Attacker-crafted interlaced PNG files cause heap writes beyond allocated buffer bounds. This issue has been patched in version 1.6.51."
+      }
+     ],
+     "id": "CVE-2025-65018",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 7.1,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2025-11-25T00:15:47.610"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "LIBPNG is a reference library for use in applications that read, create, and manipulate PNG (Portable Network Graphics) raster image files. Prior to 1.6.52, an out-of-bounds read vulnerability in libpng's simplified API allows reading up to 1012 bytes beyond the png_sRGB_base[512] array when processing valid palette PNG images with partial transparency and gamma correction. The PNG files that trigger this vulnerability are valid per the PNG specification; the bug is in libpng's internal state management. Upgrade to libpng 1.6.52 or later."
+      }
+     ],
+     "id": "CVE-2025-66293",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 7.1,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2025-12-03T21:15:53.060"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "LIBPNG is a reference library for use in applications that read, create, and manipulate PNG (Portable Network Graphics) raster image files. From 1.6.51 to 1.6.53, there is a heap buffer over-read in the libpng simplified API function png_image_finish_read when processing interlaced 16-bit PNGs with 8-bit output format and non-minimal row stride. This is a regression introduced by the fix for CVE-2025-65018. This vulnerability is fixed in 1.6.54."
+      }
+     ],
+     "id": "CVE-2026-22695",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 6.1,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2026-01-12T23:15:52.597"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "LIBPNG is a reference library for use in applications that read, create, and manipulate PNG (Portable Network Graphics) raster image files. From 1.6.26 to 1.6.53, there is an integer truncation in the libpng simplified write API functions png_write_image_16bit and png_write_image_8bit causes heap buffer over-read when the caller provides a negative row stride (for bottom-up image layouts) or a stride exceeding 65535 bytes. The bug was introduced in libpng 1.6.26 (October 2016) by casts added to silence compiler warnings on 16-bit systems. This vulnerability is fixed in 1.6.54."
+      }
+     ],
+     "id": "CVE-2026-22801",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 6.8,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2026-01-12T23:15:52.907"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "LIBPNG is a reference library for use in applications that read, create, and manipulate PNG (Portable Network Graphics) raster image files. Prior to 1.6.55, an out-of-bounds read vulnerability exists in the png_set_quantize() API function. When the function is called with no histogram and the number of colors in the palette is more than twice the maximum supported by the user's display, certain palettes will cause the function to enter into an infinite loop that reads past the end of an internal heap-allocated buffer. The images that trigger this vulnerability are valid per the PNG specification. This vulnerability is fixed in 1.6.55."
+      }
+     ],
+     "id": "CVE-2026-25646",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 8.1,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2026-02-10T18:16:37.817"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "LIBPNG is a reference library for use in applications that read, create, and manipulate PNG (Portable Network Graphics) raster image files. In versions 1.2.1 through 1.6.55, `png_set_tRNS` and `png_set_PLTE` each alias a heap-allocated buffer between `png_struct` and `png_info`, sharing a single allocation across two structs with independent lifetimes. The `trans_alpha` aliasing has been present since at least libpng 1.0, and the `palette` aliasing since at least 1.2.1. Both affect all prior release lines `png_set_tRNS` sets `png_ptr->trans_alpha = info_ptr->trans_alpha` (256-byte buffer) and `png_set_PLTE` sets `info_ptr->palette = png_ptr->palette` (768-byte buffer). In both cases, calling `png_free_data` (with `PNG_FREE_TRNS` or `PNG_FREE_PLTE`) frees the buffer through `info_ptr` while the corresponding `png_ptr` pointer remains dangling. Subsequent row-transform functions dereference and, in some code paths, write to the freed memory. A second call to `png_set_tRNS` or `png_set_PLTE` has the same effect, because both functions call `png_free_data` internally before reallocating the `info_ptr` buffer. Version 1.6.56 fixes the issue."
+      }
+     ],
+     "id": "CVE-2026-33416",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 7.5,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2026-03-26T17:16:38.443"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "LIBPNG is a reference library for use in applications that read, create, and manipulate PNG (Portable Network Graphics) raster image files. In versions 1.6.36 through 1.6.55, an out-of-bounds read and write exists in libpng's ARM/AArch64 Neon-optimized palette expansion path. When expanding 8-bit paletted rows to RGB or RGBA, the Neon loop processes a final partial chunk without verifying that enough input pixels remain. Because the implementation works backward from the end of the row, the final iteration dereferences pointers before the start of the row buffer (OOB read) and writes expanded pixel data to the same underflowed positions (OOB write). This is reachable via normal decoding of attacker-controlled PNG input if Neon is enabled. Version 1.6.56 fixes the issue."
+      }
+     ],
+     "id": "CVE-2026-33636",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 7.6,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2026-03-26T17:16:41.477"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "LIBPNG is a reference library for use in applications that read, create, and manipulate PNG (Portable Network Graphics) raster image files. From 1.0.9 to before 1.6.57, passing a pointer obtained from png_get_PLTE, png_get_tRNS, or png_get_hIST back into the corresponding setter on the same png_struct/png_info pair causes the setter to read from freed memory and copy its contents into the replacement buffer. The setter frees the internal buffer before copying from the caller-supplied pointer, which now dangles. The freed region may contain stale data (producing silently corrupted chunk metadata) or data from subsequent heap allocations (leaking unrelated heap contents into the chunk struct). This vulnerability is fixed in 1.6.57."
+      }
+     ],
+     "id": "CVE-2026-34757",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 5.1,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2026-04-09T15:16:11.003"
+    }
+   }
+  ],
+  "cpe:2.3:a:optipng:optipng": [
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Buffer overflow in the BMP reader in OptiPNG 0.6 and 0.6.1 allows user-assisted attackers to execute arbitrary code via a crafted BMP image, related to an \"array overflow.\""
+      }
+     ],
+     "id": "CVE-2008-5101",
+     "metrics": {
+      "cvssMetricV2": [
+       {
+        "baseSeverity": "HIGH",
+        "cvssData": {
+         "baseScore": 9.3,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2008-11-17T18:18:47.967"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Use-after-free vulnerability in opngreduc.c in OptiPNG Hg and 0.7.x before 0.7.3 might allow remote attackers to execute arbitrary code via unspecified vectors related to \"palette reduction.\""
+      }
+     ],
+     "id": "CVE-2012-4432",
+     "metrics": {
+      "cvssMetricV2": [
+       {
+        "baseSeverity": "HIGH",
+        "cvssData": {
+         "baseScore": 7.5,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2012-10-01T03:26:16.353"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "The bmp_read_rows function in pngxtern/pngxrbmp.c in OptiPNG before 0.7.6 allows remote attackers to cause a denial of service (invalid memory write and crash) via a series of delta escapes in a crafted BMP image."
+      }
+     ],
+     "id": "CVE-2016-2191",
+     "metrics": {
+      "cvssMetricV30": [
+       {
+        "cvssData": {
+         "baseScore": 6.5,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2016-04-13T16:59:11.130"
+    }
+   }
+  ],
   "cpe:2.3:a:redislabs:hiredis": [
    {
     "cve": {
@@ -6547,9 +9127,341 @@
      "published": "2020-01-16T04:15:11.617"
     }
    }
+  ],
+  "cpe:2.3:a:webmproject:libwebp": [
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Multiple integer overflows in libwebp allows attackers to have unspecified impact via unknown vectors."
+      }
+     ],
+     "id": "CVE-2016-9085",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 3.3,
+         "baseSeverity": "LOW"
+        }
+       }
+      ]
+     },
+     "published": "2017-02-03T15:59:00.727"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "In libwebp 0.5.1, there is a double free bug in libwebpmux."
+      }
+     ],
+     "id": "CVE-2016-9969",
+     "metrics": {
+      "cvssMetricV30": [
+       {
+        "cvssData": {
+         "baseScore": 7.5,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2019-05-23T18:29:00.327"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "A heap-based buffer overflow was found in libwebp in versions before 1.0.1 in GetLE16()."
+      }
+     ],
+     "id": "CVE-2018-25009",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 9.1,
+         "baseSeverity": "CRITICAL"
+        }
+       }
+      ]
+     },
+     "published": "2021-05-21T17:15:08.007"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "A heap-based buffer overflow was found in libwebp in versions before 1.0.1 in ApplyFilter()."
+      }
+     ],
+     "id": "CVE-2018-25010",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 9.1,
+         "baseSeverity": "CRITICAL"
+        }
+       }
+      ]
+     },
+     "published": "2021-05-21T17:15:08.050"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "A heap-based buffer overflow was found in libwebp in versions before 1.0.1 in PutLE16()."
+      }
+     ],
+     "id": "CVE-2018-25011",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 9.8,
+         "baseSeverity": "CRITICAL"
+        }
+       }
+      ]
+     },
+     "published": "2021-05-21T17:15:08.090"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "A heap-based buffer overflow was found in libwebp in versions before 1.0.1 in GetLE24()."
+      }
+     ],
+     "id": "CVE-2018-25012",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 9.1,
+         "baseSeverity": "CRITICAL"
+        }
+       }
+      ]
+     },
+     "published": "2021-05-21T17:15:08.127"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "A heap-based buffer overflow was found in libwebp in versions before 1.0.1 in ShiftBytes()."
+      }
+     ],
+     "id": "CVE-2018-25013",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 9.1,
+         "baseSeverity": "CRITICAL"
+        }
+       }
+      ]
+     },
+     "published": "2021-05-21T17:15:08.163"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "A use of uninitialized value was found in libwebp in versions before 1.0.1 in ReadSymbol()."
+      }
+     ],
+     "id": "CVE-2018-25014",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 9.8,
+         "baseSeverity": "CRITICAL"
+        }
+       }
+      ]
+     },
+     "published": "2021-05-21T17:15:08.203"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "A flaw was found in libwebp in versions before 1.0.1. A heap-based buffer overflow in function WebPDecodeRGBInto is possible due to an invalid check for buffer size. The highest threat from this vulnerability is to data confidentiality and integrity as well as system availability."
+      }
+     ],
+     "id": "CVE-2020-36328",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 9.8,
+         "baseSeverity": "CRITICAL"
+        }
+       }
+      ]
+     },
+     "published": "2021-05-21T17:15:08.270"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "A flaw was found in libwebp in versions before 1.0.1. A use-after-free was found due to a thread being killed too early. The highest threat from this vulnerability is to data confidentiality and integrity as well as system availability."
+      }
+     ],
+     "id": "CVE-2020-36329",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 9.8,
+         "baseSeverity": "CRITICAL"
+        }
+       }
+      ]
+     },
+     "published": "2021-05-21T17:15:08.313"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "A flaw was found in libwebp in versions before 1.0.1. An out-of-bounds read was found in function ChunkVerifyAndAssign. The highest threat from this vulnerability is to data confidentiality and to the service availability."
+      }
+     ],
+     "id": "CVE-2020-36330",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 9.1,
+         "baseSeverity": "CRITICAL"
+        }
+       }
+      ]
+     },
+     "published": "2021-05-21T17:15:08.353"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "A flaw was found in libwebp in versions before 1.0.1. An out-of-bounds read was found in function ChunkAssignData. The highest threat from this vulnerability is to data confidentiality and to the service availability."
+      }
+     ],
+     "id": "CVE-2020-36331",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 9.1,
+         "baseSeverity": "CRITICAL"
+        }
+       }
+      ]
+     },
+     "published": "2021-05-21T17:15:08.397"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "A flaw was found in libwebp in versions before 1.0.1. When reading a file libwebp allocates an excessive amount of memory. The highest threat from this vulnerability is to the service availability."
+      }
+     ],
+     "id": "CVE-2020-36332",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 7.5,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2021-05-21T17:15:08.443"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "There exists a use after free/double free in libwebp. An attacker can use the\u00a0ApplyFiltersAndEncode() function and loop through to free best.bw and assign best = trial pointer. The second loop will then return 0 because of an Out of memory error in VP8 encoder, the pointer is still assigned to trial and the AddressSanitizer will attempt a double free."
+      }
+     ],
+     "id": "CVE-2023-1999",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 5.3,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2023-06-20T12:15:09.600"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Heap buffer overflow in libwebp in Google Chrome prior to 116.0.5845.187 and libwebp 1.3.2 allowed a remote attacker to perform an out of bounds memory write via a crafted HTML page. (Chromium security severity: Critical)"
+      }
+     ],
+     "id": "CVE-2023-4863",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 8.8,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2023-09-12T15:15:24.327"
+    }
+   }
   ]
  },
- "generated": "2026-06-01T13:29:31Z",
+ "generated": "2026-06-04T10:55:01Z",
  "schema": 1,
  "source": "https://services.nvd.nist.gov/rest/json/cves/2.0"
 }
