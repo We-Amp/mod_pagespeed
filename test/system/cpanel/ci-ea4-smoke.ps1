@@ -52,8 +52,8 @@
 param(
     [Parameter(Mandatory=$true)][string]$RpmPath,
     [Parameter(Mandatory=$true)][string]$TokenPath,
-    # EL8 dropped 2026-05-21 — see release.yml ea4-build matrix comment.
-    [Parameter(Mandatory=$true)][ValidateSet('el9')][string]$Os,
+    # EL8 revived — see release.yml ea4-build matrix comment.
+    [Parameter(Mandatory=$true)][ValidateSet('el9','el8')][string]$Os,
     [string]$ReleaseTag = $env:RELEASE_TAG,
     [string]$ExpectedVersionString = "",
     # Path on the host of the bash smoke script that runs inside the guest.

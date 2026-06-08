@@ -1,7 +1,17 @@
 %global mps_version 1.15.0
 %global mps_release 1
 %global upstream_rpm mod-pagespeed-%{mps_version}-%{mps_release}.x86_64.rpm
-%global upstream_url https://packages.modpagespeed.com/yum/el9/x86_64/Packages/%{upstream_rpm}
+# The stock upstream RPM filename carries NO dist tag (it is the same artifact
+# regardless of which glibc floor it was built against). The EA4 build cell
+# (release.yml) PRE-PLACES the matching stock RPM into rpmbuild's SOURCES/ from
+# the per-floor CI artifact (x64 for el9, x64-el8 for el8), so Source1's URL is
+# only a documented fallback for manual rebuilds. It is parameterized by
+# %{upstream_dist} (default el9) so `rpmbuild --define "upstream_dist el8"`
+# points at the el8 stock tree if one is published. The OUTPUT rpm's .elN dist
+# tag comes independently from %{?dist} (set by the build container's OS) — see
+# the el8/el9 ea4-build matrix in release.yml.
+%global upstream_dist el9
+%global upstream_url https://packages.modpagespeed.com/yum/%{upstream_dist}/x86_64/Packages/%{upstream_rpm}
 
 # Repackager spec — we don't build from source, so no debug subpackage to
 # auto-generate. Default RHEL/AlmaLinux 9 macros enable -debugsource which

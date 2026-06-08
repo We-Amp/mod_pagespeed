@@ -33,13 +33,25 @@ Builds on the same Hyper-V-on-a-Windows-host pattern as the IIS rig
 
 ## Scope
 
-EL9 only. EL8 cPanel was dropped on 2026-05-21 — the upstream mod_pagespeed
-binary is built once against Ubuntu's glibc (≥ 2.34) and will not load on
-EL8's glibc 2.28. A companion `ea4-cpanel-elevate-test` job (EL8 → EL9
-cpanel-elevate) used to live alongside this smoke rig; it was removed at
-the same time because it had no path forward without an EL8 RPM.
-Reintroducing EL8 requires a second `linux-release-build` cell with an EL8
-base image — deferred.
+EL9 + **EL8**. EL8 cPanel was dropped on 2026-05-21
+(the dev-image Apache `.so` is built against Ubuntu glibc ≥ 2.34 and would not
+load on EL8's glibc 2.28) and **revived** once `apache-el8-build` could rebuild
+`//:libmod_pagespeed.so` against EL8 glibc 2.28 (almalinux:8 + gcc-toolset-13,
+static libstdc++, floor-gated ≤ 2.28). The `ea4-cpanel-smoke` matrix is now
+`[el9, el8]`; the el8 cell runs against `CP-EL8-base` / `01-cpanel-clean-el8`
+(both still present on the rig host — only the matrix cell had been removed).
+`ci-ea4-smoke.ps1` accepts `-Os el8`.
+
+**el8 is a REQUIRED peer of el9** (owner decision 2026-06-08), not an optional
+add-on: the release refuses to publish a partial (el9-only) EA4 set and the
+prod-promote refuses an `ea4/el9` tree without a matching `ea4/el8` tree (see
+the design record P4 "Required-peer enforcement").
+
+**CloudLinux caveat:** the el8 smoke validates stock-EA4 Apache on AlmaLinux 8.
+CloudLinux 8's `cl-ea4`-patched Apache + `mod_lsapi` + PHP Selector is a
+**tracked follow-up** (needs a CloudLinux license/VM) — Gate-2 (AlmaLinux 8)
+gates the el8 prod-promote; Gate-3 (real CloudLinux) is validated separately
+and does NOT block the el8 prod-promote.
 
 ## Operator workflow
 
