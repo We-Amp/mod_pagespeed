@@ -2,56 +2,15 @@
 
 **Status: Experimental**
 
-## Requirements
+## Availability
 
-- Linux x86_64
-- 32GB+ RAM for building from source
+The Envoy HTTP filter is **experimental** and **not packaged for external
+install** — no pre-built artifact is published (no apt/dnf package, container
+image, or download). It can be built from the public mod_pagespeed
+source tree (see `DEVELOPER.md`). **Contact us** for setup guidance.
 
-## Install Pre-built
-
-### Standalone binary
-
-```bash
-tar xzf envoy-pagespeed-1.1.0-beta.1-linux-x86_64.tar.gz
-cd envoy-pagespeed-1.1.0-beta.1
-
-# Edit the sample config for your environment
-vi pagespeed-envoy.yaml.sample
-
-# Create cache directory
-sudo mkdir -p /var/cache/pagespeed
-sudo chown $(whoami) /var/cache/pagespeed
-
-./envoy_pagespeed -c pagespeed-envoy.yaml.sample
-```
-
-### Shared library with existing Envoy
-
-The shared library can be used with an existing Envoy deployment. Copy it
-to a location Envoy can load:
-
-```bash
-tar xzf envoy-pagespeed-1.1.0-beta.1-linux-x86_64.tar.gz
-sudo cp envoy-pagespeed-1.1.0-beta.1/pagespeed_filter.so /usr/local/lib/
-```
-
-Configure your Envoy to load the PageSpeed filter in its configuration.
-The standalone binary is recommended for most deployments.
-
-## Build from Source
-
-```bash
-docker compose up -d
-docker compose exec dev bash
-
-# Standalone binary (~212MB)
-bazel build --config=clang-libstdcxx13 --jobs=4 //pagespeed/envoy:envoy_pagespeed
-
-# Shared library (~113MB)
-bazel build --config=clang-libstdcxx13 --jobs=4 //pagespeed/envoy:pagespeed_filter.so
-```
-
-Use `--jobs=2` to `--jobs=4` if memory-constrained.
+The reference below documents how the filter is configured once a build is in
+place.
 
 ## Configuration
 
@@ -82,7 +41,7 @@ http_filters:
 
 ```bash
 curl -I http://localhost:8080/
-# Should show: X-PageSpeed: 1.1.0-beta.1
+# Should show an X-PageSpeed: <version> response header
 ```
 
 ## Key Metrics

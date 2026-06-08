@@ -28,13 +28,25 @@ Originally created by Google, now maintained by [We-Amp](https://we-amp.com).
 
 ### Pre-built packages
 
-Download from the [Releases](https://github.com/we-amp/mod_pagespeed/releases)
-page, then see the per-platform installation guides:
+All packages and installers are on the
+[downloads page](https://modpagespeed.com/1.1/docs/downloads/): signed apt/dnf
+packages for Apache (`mod-pagespeed`) and Nginx (`nginx-module-pagespeed`) via
+`packages.modpagespeed.com`, and the signed IIS MSI. Then see the per-platform
+installation guides:
 
 - [Apache](docs/install-apache.md)
 - [Nginx](docs/install-nginx.md)
-- [Envoy](docs/install-envoy.md)
 - [IIS](docs/install-iis.md)
+- [Envoy](docs/install-envoy.md) — experimental
+
+### Configuration and operations
+
+Full product documentation lives on modpagespeed.com:
+
+- [Filter selection](https://modpagespeed.com/1.1/docs/filter-selection/) -- rewrite levels and per-filter enable/disable
+- [Filter reference](https://modpagespeed.com/1.1/docs/filter-reference/) -- what each filter does and which level enables it
+- [Configuration](https://modpagespeed.com/1.1/docs/configuration/) -- directives and baseline setup
+- [Admin console](https://modpagespeed.com/1.1/docs/admin-console/) -- statistics, cache inspection, and purging
 
 ### Build from Source
 
@@ -93,4 +105,4 @@ Apache License 2.0. See [LICENSE](LICENSE) for details.
 |---|---|
 | Source | https://github.com/we-amp/mod_pagespeed |
 | Issues | https://github.com/we-amp/mod_pagespeed/issues |
-| Releases | https://github.com/we-amp/mod_pagespeed/releases |
+| Downloads | https://modpagespeed.com/1.1/docs/downloads/ |

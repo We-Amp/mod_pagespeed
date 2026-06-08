@@ -2,39 +2,35 @@
 
 ## Requirements
 
-- Nginx 1.30.x (stable) or 1.29.x (mainline)
-- Linux x86_64
+- A supported Linux distribution running its **stock** nginx package
+  (Debian 11/12/13, Ubuntu 22.04/24.04, AlmaLinux/RHEL/Rocky 9).
+- `x86_64` or `arm64`.
 
-## Install Pre-built Module
+The prebuilt module is a dynamic nginx module, and nginx pins dynamic modules to
+the **exact** nginx version they were built against (down to the patch;
+`--with-compat` does not relax this). The published packages are therefore built
+against each distribution's **stock** nginx. If you run a *custom* nginx —
+including the **nginx.org** repository's `nginx` (e.g. the 1.30.x stable line) —
+no published package matches it, and the module **cannot be built from source
+externally** because the PageSpeed module source is not public. Use your
+distribution's stock nginx.
 
-```bash
-tar xzf ngx_pagespeed-1.1.0-beta.1-linux-x86_64.tar.gz
-sudo cp ngx_pagespeed-1.1.0-beta.1/ngx_pagespeed_module.so /usr/lib/nginx/modules/
-```
+## Install
 
-Add to `nginx.conf` (before the `http` block):
-```nginx
-load_module modules/ngx_pagespeed_module.so;
-```
-
-## Build from Source
-
-### Using the build script
-
-```bash
-./scripts/build_nginx_with_pagespeed.sh --nginx-version=1.30.1
-```
-
-### Using Bazel (inside Docker)
+Add the We-Amp package repository (once), then install. All release artifacts are
+also listed on the [downloads page](https://modpagespeed.com/1.1/docs/downloads/).
 
 ```bash
-docker compose up -d
-docker compose exec dev bash
+curl -fsSL https://packages.modpagespeed.com/install.sh | sudo sh
 
-bazel build --config=clang-libstdcxx13 //pagespeed/nginx:ngx_pagespeed_module.so
+sudo apt install nginx-module-pagespeed     # Debian / Ubuntu
+sudo dnf install nginx-module-pagespeed     # RHEL / AlmaLinux / Rocky 9
 
-# Module is at: bazel-bin/pagespeed/nginx/ngx_pagespeed_module.so
+sudo nginx -t && sudo systemctl reload nginx
 ```
+
+On stock nginx the package's `load_module` directive is auto-enabled, so no
+manual `nginx.conf` edit is needed.
 
 ## Configuration
 
@@ -48,7 +44,9 @@ http {
         listen 80;
         server_name example.com;
 
-        # Enable PageSpeed
+        # Enable PageSpeed. This activates the CoreFilters rewrite level by
+        # default (29 optimization filters, including combine_css,
+        # combine_javascript, and rewrite_images).
         pagespeed on;
         pagespeed FileCachePath /var/cache/ngx_pagespeed;
 
@@ -56,10 +54,11 @@ http {
         pagespeed AdminPath /pagespeed_admin;
         pagespeed StatisticsPath /pagespeed_statistics;
 
-        # Enable filters
-        pagespeed EnableFilters combine_css,combine_javascript;
-        pagespeed EnableFilters rewrite_images;
-        pagespeed EnableFilters collapse_whitespace;
+        # Enable additional filters outside the default CoreFilters set.
+        # collapse_whitespace, insert_image_dimensions, and defer_javascript
+        # are NOT in CoreFilters and must be enabled explicitly.
+        # See filter-reference.md for filter membership.
+        pagespeed EnableFilters collapse_whitespace,insert_image_dimensions;
 
         # Ensure PageSpeed resource requests are handled
         location ~ "\.pagespeed\.([a-z]\.)?[a-z]{2}\.[^.]{10}\.[^.]+" {
@@ -88,7 +87,7 @@ sudo chown www-data:www-data /var/cache/ngx_pagespeed
 sudo nginx -t
 sudo systemctl restart nginx
 curl -I http://localhost/
-# Should show: X-PageSpeed: 1.1.0-beta.1
+# Should show an X-PageSpeed: <version> response header
 ```
 
 ## System Tests
@@ -108,3 +107,13 @@ Expected: 169 pass, 40 skip, 0 fail.
 - Chunked encoding differences affect Content-Length tests
 
 See [test-catalog.md](test-catalog.md) for full details.
+
+## Next steps: configuration & operations
+
+By default (`pagespeed on;`) the `CoreFilters` rewrite level is active, which enables 29 optimization filters automatically; a bare `pagespeed on;` is not a no-op. To enable additional filters not in CoreFilters (for example `collapse_whitespace` or `defer_javascript`), use `pagespeed EnableFilters`. To enable all non-dangerous filters, use `pagespeed RewriteLevel AllFilters`. For a smaller footprint, use `pagespeed RewriteLevel OptimizeForBandwidth`, or `pagespeed RewriteLevel PassThrough` to disable all default optimization.
+
+Full configuration and operations documentation lives on modpagespeed.com:
+
+- [Filter selection](https://modpagespeed.com/1.1/docs/filter-selection/) — rewrite levels and per-filter enable/disable
+- [Filter reference](https://modpagespeed.com/1.1/docs/filter-reference/) — what each filter does and which level enables it
+- [Admin console](https://modpagespeed.com/1.1/docs/admin-console/) — statistics, cache inspection, and cache purging

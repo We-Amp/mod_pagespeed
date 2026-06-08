@@ -5,54 +5,30 @@
 - Apache 2.4+
 - Linux x86_64 (Ubuntu 22.04+, Debian 12+, RHEL 9+, Rocky 9+)
 
-## Install from Package
+## Install
 
-### Ubuntu/Debian (.deb)
-
-```bash
-sudo dpkg -i mod-pagespeed-beta_1.1.0-beta.1_amd64.deb
-sudo apt-get -f install  # resolve dependencies if needed
-```
-
-The package automatically:
-- Installs `mod_pagespeed.so` to `/usr/lib/apache2/modules/`
-- Creates config files in `/etc/apache2/mods-available/`
-- Creates cache directory at `/var/cache/mod_pagespeed/`
-
-Enable the module:
-```bash
-sudo a2enmod pagespeed
-sudo systemctl restart apache2
-```
-
-### RHEL/Rocky (.rpm)
+Add the We-Amp package repository (once), then install. Direct `.deb` / `.rpm` /
+`.so` downloads (amd64 + arm64) are also on the
+[downloads page](https://modpagespeed.com/1.1/docs/downloads/).
 
 ```bash
-sudo rpm -i mod-pagespeed-beta-1.1.0-beta.1.x86_64.rpm
-sudo systemctl restart httpd
+curl -fsSL https://packages.modpagespeed.com/install.sh | sudo sh
+
+sudo apt install mod-pagespeed     # Debian / Ubuntu
+sudo dnf install mod-pagespeed     # RHEL / AlmaLinux / Rocky 9
 ```
 
-The package installs:
-- Module to `/usr/lib64/httpd/modules/mod_pagespeed.so`
-- Config to `/etc/httpd/conf.d/pagespeed.conf`
-
-## Build from Source
+The package installs `mod_pagespeed.so` (`/usr/lib/apache2/modules/` on
+Debian/Ubuntu, `/usr/lib64/httpd/modules/` on EL9), its config, and the cache
+directory at `/var/cache/mod_pagespeed/`. Enable and restart:
 
 ```bash
-docker compose up -d
-docker compose exec dev bash
-
-bazel build --config=clang-libstdcxx13 //:libmod_pagespeed.so
-
-# Module is at: bazel-bin/libmod_pagespeed.so
+sudo a2enmod pagespeed && sudo systemctl restart apache2   # Debian/Ubuntu
+sudo systemctl restart httpd                               # EL9
 ```
 
-Install manually:
-```bash
-sudo cp bazel-bin/libmod_pagespeed.so /usr/lib/apache2/modules/mod_pagespeed.so
-sudo mkdir -p /var/cache/mod_pagespeed /var/log/pagespeed
-sudo chown www-data:www-data /var/cache/mod_pagespeed /var/log/pagespeed
-```
+> Building from source uses the public mod_pagespeed source tree (see
+> `DEVELOPER.md`); the published packages are the supported path for most users.
 
 ## Configuration
 
@@ -65,21 +41,42 @@ LoadModule pagespeed_module /usr/lib/apache2/modules/mod_pagespeed.so
     ModPagespeedFileCachePath "/var/cache/mod_pagespeed/"
     ModPagespeedLogDir "/var/log/pagespeed"
 
-    # SSL certificates for outbound HTTPS fetching
+    # Required only for outbound HTTPS fetching of subresources from other
+    # origins; omit if all resources are served over HTTP.
     ModPagespeedSslCertDirectory /etc/ssl/certs
 
-    # Enable specific filters
-    ModPagespeedEnableFilters combine_css,combine_javascript
-    ModPagespeedEnableFilters rewrite_images
+    # Add filters beyond the default CoreFilters set. collapse_whitespace
+    # (HTML minification) is NOT part of CoreFilters and must be enabled here.
+    # combine_css, combine_javascript, and image rewriting are already active
+    # via the default CoreFilters level — no EnableFilters directive needed.
     ModPagespeedEnableFilters collapse_whitespace
+
+    # Admin and statistics endpoints (restrict access in production).
+    ModPagespeedAdminDomains localhost
+    ModPagespeedStatisticsDomains localhost
 </IfModule>
 ```
+
+`ModPagespeed on` enables the CoreFilters rewrite level by default, which
+includes 29 filters covering CSS/JavaScript minification and
+combining, image optimization, and caching. The module is not a no-op after
+this single directive; CoreFilters is already active. Use
+`ModPagespeedEnableFilters` to add filters beyond the default set (for example,
+`collapse_whitespace`, which CoreFilters does not include), and
+`ModPagespeedDisableFilters` to turn off individual default filters. To change
+the whole set at once, set `ModPagespeedRewriteLevel` to `CoreFilters` (the
+default), `OptimizeForBandwidth`, `PassThrough`, or `AllFilters`.
+
+The `ModPagespeedAdminDomains` and `ModPagespeedStatisticsDomains` directives
+gate the `/pagespeed_admin` and `/pagespeed_statistics` endpoints. They are
+shown here scoped to `localhost`; in production, restrict access with a firewall
+or ACL rather than relying on these directives alone.
 
 ## Verification
 
 ```bash
 curl -I http://localhost/
-# Should show: X-PageSpeed: 1.1.0-beta.1
+# Should show an X-PageSpeed: <version> response header
 ```
 
 ## System Tests
@@ -90,3 +87,11 @@ curl -I http://localhost/
 ```
 
 Expected: 195 pass, 14 skip, 0 fail.
+
+## Next steps: configuration & operations
+
+Full configuration and operations documentation lives on modpagespeed.com:
+
+- [Filter selection](https://modpagespeed.com/1.1/docs/filter-selection/) — rewrite levels and per-filter enable/disable
+- [Filter reference](https://modpagespeed.com/1.1/docs/filter-reference/) — what each filter does and which level enables it
+- [Admin console](https://modpagespeed.com/1.1/docs/admin-console/) — statistics, cache inspection, and cache purging

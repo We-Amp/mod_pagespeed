@@ -8,37 +8,14 @@
 - IIS 10+
 - Visual C++ Redistributable 2022
 
-## Install Pre-built
+## Install
 
-```powershell
-# Extract package
-Expand-Archive pagespeed-iis-1.1.0-beta.1-win-x64.zip C:\inetpub\pagespeed
+Download the signed installer **`pagespeed-iis-<version>-win-x64.msi`** from the
+[downloads page](https://modpagespeed.com/1.1/docs/downloads/) and run it — it
+installs the native module (`pagespeed_iis.dll`) and registers it with IIS.
 
-# Stop IIS
-Stop-Service -Name W3SVC
-
-# Register the module globally
-New-WebGlobalModule -Name PageSpeedModule -Image 'C:\inetpub\pagespeed\pagespeed_iis.dll'
-
-# Start IIS
-Start-Service -Name W3SVC
-```
-
-## Build from Source
-
-On a Windows machine with Bazel and clang-cl:
-
-```powershell
-bazel build --config=windows --config=clang-cl //pagespeed/iis:pagespeed_iis.dll
-```
-
-Or via the remote development setup from Linux:
-
-```bash
-./windows-dev/start-windows-dev.sh
-./windows-dev/wait-for-windows.sh
-./windows-dev/build-on-windows.sh //pagespeed/iis:pagespeed_iis.dll
-```
+> Building from source requires the (private) mod_pagespeed source tree and a
+> Windows build toolchain; it is not available to external users.
 
 ## Configuration
 
@@ -73,7 +50,7 @@ development guide.
 
 ```powershell
 curl.exe -I http://localhost/
-# Should show: X-PageSpeed: 1.1.0-beta.1
+# Should show an X-PageSpeed: <version> response header
 ```
 
 ## Updating
