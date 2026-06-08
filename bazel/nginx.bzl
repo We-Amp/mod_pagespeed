@@ -27,7 +27,7 @@ load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 # (tools/dependency/cpe-map.yaml + tools/generate-sbom.py) sources the sidecar's
 # version from that build script's DEF_NGINX_VER (the load-bearing pin), NOT this
 # informational constant.
-NGINX_VERSION = "1.30.1"
+NGINX_VERSION = "1.30.2"  # tracks docker/Dockerfile (CVE-2026-9256: 1.30.1 -> 1.30.2)
 NGINX_SHA256 = ""  # Unused — http_archive path is not taken.
 
 def _nginx_repository_impl(repository_ctx):

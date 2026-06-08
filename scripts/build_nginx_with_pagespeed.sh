@@ -6,7 +6,7 @@
 #   ./scripts/build_nginx_with_pagespeed.sh [options]
 #
 # Options:
-#   --nginx-version=VERSION  NGINX version to download (default: 1.30.1)
+#   --nginx-version=VERSION  NGINX version to download (default: 1.30.2)
 #   --nginx-src=PATH         Use existing nginx source at PATH
 #   --prefix=PATH            Install prefix (default: /tmp/nginx-pagespeed)
 #   --build-dir=PATH         Build directory (default: /tmp/nginx-build)
@@ -48,7 +48,7 @@ show_help() {
 }
 
 # Default values
-NGINX_VERSION="1.30.1"
+NGINX_VERSION="1.30.2"  # CVE-2026-9256: 1.30.1 -> 1.30.2 (1.30 stable)
 NGINX_SRC=""
 PREFIX="/tmp/nginx-pagespeed"
 BUILD_DIR="/tmp/nginx-build"
