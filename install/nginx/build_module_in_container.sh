@@ -143,6 +143,53 @@ case "${DISTRO}" in
   *) DEB_STATIC_STDCXX=0 ;;
 esac
 
+# ---------------------------------------------------------------------------
+# NGX_SRC_MODE — where the @nginx ABI source comes from.
+#
+# distro  : `apt-get source nginx` — the DISTRO's OWN patched nginx tree, pinned
+#           to the exact stock candidate the host runs. REQUIRED for the
+#           Debian/Ubuntu distro-stock targets because a distro security update
+#           can change the layout of core request structs WITHOUT bumping the
+#           upstream version: Ubuntu shipped CVE-2026-49975 (HTTP/2 max_headers)
+#           as nginx 1.24.0-2ubuntu7.10 (noble) / 1.18.0-6ubuntu14.13 (jammy) on
+#           2026-06-05, inserting `ngx_uint_t count` mid-struct into
+#           ngx_http_headers_in_t — which is embedded BY VALUE in
+#           ngx_http_request_t, so every downstream field offset shifts 8 bytes.
+#           A module compiled against vanilla nginx.org 1.24.0 then reads garbage
+#           request state and the worker SPINS forever on the first optimizing
+#           request (a SILENT hang; `nginx -t` still passes because the
+#           module->version + NGX_MODULE_SIGNATURE match, and --with-compat does
+#           NOT pad ngx_http_headers_in_t). Building against the distro's patched
+#           source makes the module's offsets match the stock nginx it dlopen's.
+# vanilla : nginx.org release tarball (sha256-pinned). Kept for everything that
+#           is NOT a confirmed-drifting target:
+#           - bullseye/bookworm/trixie (Debian): Debian deliberately keeps the
+#             HTTP/2 max_headers fix OUT of the core structs — it relocated the
+#             counter into a separate ngx_http_header_count_module "to avoid
+#             potential ABI breakage and keep all 3rd-party modules compatible
+#             without recompilation" — so vanilla-built modules stay ABI-correct
+#             and the proven-passing Debian builds are left untouched.
+#           - focal: the design record sidecar PORTABLE build (a newer 1.30 branch,
+#             not a distro-stock package).
+#           - el9: stock nginx is the frozen AlmaLinux AppStream stream, which
+#             does not backport core-struct changes the way Canonical does.
+#           (All four validated unaffected 2026-06-08; see the design record P4.)
+#
+# Only the two UBUNTU suites need distro-source: Canonical (unlike Debian) shipped
+# CVE-2026-49975 by editing the core request structs in place, in BOTH noble
+# (1.24.0-2ubuntu7.10) and jammy (1.18.0-6ubuntu14.13) on 2026-06-05.
+#
+# NOTE (residual): a prebuilt dynamic module is only ABI-safe against the nginx
+# revision it was built against. If Ubuntu ships ANOTHER struct-changing security
+# revision AFTER this build, a customer who upgrades nginx past it hits the same
+# silent hang. A LOUD runtime ABI guard (refuse-to-load on mismatch) is the
+# durable backstop — tracked as an the design record follow-up, not in this fix.
+case "${DISTRO}" in
+  noble|jammy) NGX_SRC_MODE="distro" ;;
+  *)           NGX_SRC_MODE="vanilla" ;;
+esac
+NGX_SRC_MODE="${NGX_SRC_MODE_OVERRIDE:-${NGX_SRC_MODE}}"
+
 # Derive the Debian multiarch triplet (x86_64-linux-gnu | aarch64-linux-gnu)
 # WITHOUT hardcoding the arch. Prefer dpkg-architecture (needs dpkg-dev), fall
 # back to `gcc -dumpmachine`-style mapping from `dpkg --print-architecture` so it
@@ -303,6 +350,26 @@ install_deps_debian_common() {
     echo "ERROR: neither libpcre3-dev nor libpcre2-dev is installable on ${DISTRO}" >&2
     exit 1
   fi
+}
+
+# Enable deb-src across BOTH apt source formats so `apt-get source nginx` works:
+#   - deb822 (.sources): ubuntu:24.04 ubuntu.sources, debian:12/13 debian.sources
+#   - classic one-line:  ubuntu:22.04, debian:11 /etc/apt/sources.list
+# apt verifies the fetched source against the repo's GPG-signed Release (.dsc +
+# per-file checksums), so this carries the same supply-chain trust as the
+# vanilla path's hardcoded tarball sha256.
+enable_deb_src() {
+  local f
+  for f in /etc/apt/sources.list.d/*.sources; do
+    [ -e "${f}" ] || continue
+    sed -i -E 's/^(Types:[[:space:]]+deb)[[:space:]]*$/\1 deb-src/' "${f}"
+  done
+  if [ -f /etc/apt/sources.list ] && grep -qE '^[[:space:]]*deb[[:space:]]' /etc/apt/sources.list \
+     && ! grep -qE '^[[:space:]]*deb-src[[:space:]]' /etc/apt/sources.list; then
+    sed -nE 's/^[[:space:]]*deb[[:space:]]+(.*)$/deb-src \1/p' /etc/apt/sources.list \
+      >> /etc/apt/sources.list
+  fi
+  apt-get update -qq
 }
 
 # Install a modern clang (C++23-capable) from apt.llvm.org and alias the bare
@@ -584,18 +651,42 @@ fi
 # ---------------------------------------------------------------------------
 NGX_BUILD_DIR="${SRCDIR}/.ngx-module-build/${DISTRO}"
 NGX_SRC="${NGX_BUILD_DIR}/nginx-${NGINX_SRC_VERSION}"
-echo "==> fetch + pre-configure target nginx ${NGINX_SRC_VERSION} (for @nginx ABI match)"
+echo "==> fetch + pre-configure target nginx (mode=${NGX_SRC_MODE}) for @nginx ABI match"
 rm -rf "${NGX_BUILD_DIR}"
 mkdir -p "${NGX_BUILD_DIR}"
-NGX_TARBALL="${NGX_BUILD_DIR}/nginx-${NGINX_SRC_VERSION}.tar.gz"
-wget -qO "${NGX_TARBALL}" "https://nginx.org/download/nginx-${NGINX_SRC_VERSION}.tar.gz"
-# Supply-chain pin: ALWAYS verify the downloaded tarball against the
-# resolved sha256 (per-distro default or explicit NGINX_SRC_SHA256). Hard-fail
-# on mismatch — a tampered/corrupt download must never reach the build.
-echo "==> verifying nginx tarball sha256 (${NGINX_SRC_SHA256})"
-echo "${NGINX_SRC_SHA256}  ${NGX_TARBALL}" | sha256sum -c - \
-  || { echo "ERROR: nginx tarball sha256 mismatch (got $(sha256sum "${NGX_TARBALL}" | awk '{print $1}'), expected ${NGINX_SRC_SHA256})" >&2; exit 1; }
-tar -xzf "${NGX_TARBALL}" -C "${NGX_BUILD_DIR}"
+if [ "${NGX_SRC_MODE}" = "distro" ]; then
+  # the design record P4 ABI-drift fix — build against the DISTRO's OWN patched nginx
+  # source so the module's struct offsets match the stock nginx it dlopen's
+  # (see the NGX_SRC_MODE block near the top for the CVE-2026-49975 root cause).
+  enable_deb_src
+  # Pin to the EXACT stock candidate the smoke (and customers) run, so the
+  # build<->runtime ABI pairing is deterministic within this release.
+  NGX_PKG_VER="$(apt-cache policy nginx-core 2>/dev/null | awk '/Candidate:/{print $2}')"
+  [ -n "${NGX_PKG_VER}" ] || NGX_PKG_VER="$(apt-cache policy nginx 2>/dev/null | awk '/Candidate:/{print $2}')"
+  [ -n "${NGX_PKG_VER}" ] || { echo "ERROR: cannot determine stock nginx candidate version on ${DISTRO}" >&2; exit 1; }
+  # Upstream version = strip the Debian revision (after first '-') and any epoch.
+  NGINX_SRC_VERSION="${NGX_PKG_VER%%-*}"; NGINX_SRC_VERSION="${NGINX_SRC_VERSION#*:}"
+  NGX_SRC="${NGX_BUILD_DIR}/nginx-${NGINX_SRC_VERSION}"
+  echo "==> apt-get source nginx=${NGX_PKG_VER} (upstream ${NGINX_SRC_VERSION}) on ${DISTRO}"
+  # dpkg-source (format 3.0 quilt) applies the distro patch series during extract.
+  ( cd "${NGX_BUILD_DIR}" && { apt-get source "nginx=${NGX_PKG_VER}" || apt-get source nginx; } )
+  if [ ! -d "${NGX_SRC}/src" ]; then
+    # Fall back to whatever nginx-* tree dpkg-source actually unpacked.
+    NGX_SRC="$(find "${NGX_BUILD_DIR}" -maxdepth 1 -type d -name 'nginx-*' 2>/dev/null | sort | head -1)"
+  fi
+  [ -d "${NGX_SRC}/src" ] || { echo "ERROR: apt-get source did not unpack an nginx source tree under ${NGX_BUILD_DIR}" >&2; exit 1; }
+  echo "    distro nginx source: ${NGX_SRC} (apt-verified .dsc; NGINX_VERSION $(awk -F'"' '/define NGINX_VERSION/{print $2}' "${NGX_SRC}/src/core/nginx.h"))"
+else
+  NGX_TARBALL="${NGX_BUILD_DIR}/nginx-${NGINX_SRC_VERSION}.tar.gz"
+  wget -qO "${NGX_TARBALL}" "https://nginx.org/download/nginx-${NGINX_SRC_VERSION}.tar.gz"
+  # Supply-chain pin: ALWAYS verify the downloaded tarball against the
+  # resolved sha256 (per-distro default or explicit NGINX_SRC_SHA256). Hard-fail
+  # on mismatch — a tampered/corrupt download must never reach the build.
+  echo "==> verifying nginx tarball sha256 (${NGINX_SRC_SHA256})"
+  echo "${NGINX_SRC_SHA256}  ${NGX_TARBALL}" | sha256sum -c - \
+    || { echo "ERROR: nginx tarball sha256 mismatch (got $(sha256sum "${NGX_TARBALL}" | awk '{print $1}'), expected ${NGINX_SRC_SHA256})" >&2; exit 1; }
+  tar -xzf "${NGX_TARBALL}" -C "${NGX_BUILD_DIR}"
+fi
 # First configure WITHOUT the module: generates objs/ngx_auto_config.h with the
 # SAME feature flags the runtime stock nginx uses (mirrors docker/Dockerfile +
 # the step-6 make-modules configure). The module add is deferred to step 6
