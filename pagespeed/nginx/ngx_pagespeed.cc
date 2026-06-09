@@ -3203,6 +3203,73 @@ void ps_html_rewrite_fix_headers_filter_init() {
 
 using fix_headers::ps_html_rewrite_fix_headers_filter_init;
 
+// ---------------------------------------------------------------------------
+// Runtime nginx-ABI guard.
+//
+// nginx's dynamic-module load check (NGX_MODULE_SIGNATURE + module->version)
+// makes the module and the running nginx agree on TYPE SIZES and build options,
+// but NOT on the field layout of core request structs. A distro can insert a
+// field into e.g. ngx_http_headers_in_t in a security update WITHOUT changing
+// the upstream version or the compat signature -- Ubuntu's CVE-2026-49975 did
+// exactly this (+ngx_uint_t count), shifting every ngx_http_request_t field
+// after headers_in -- including r->phase_handler -- by 8 bytes. A module built
+// against the pre-patch layout then reads r->phase_handler at the wrong offset,
+// mis-installs its content checker, and the worker SPINS forever (silent hang).
+// `nginx -t` still passes, so nothing catches it at load time.
+//
+// This module is built against the distro's own patched nginx source so offsets match at ship time; this guard is the backstop for AFTER ship,
+// when a customer upgrades nginx past the revision we built against.
+//
+// We cannot reject at load time: nginx exposes neither its struct layout nor
+// its distro revision at runtime, and we cannot change the running nginx's load
+// check. We CAN detect it at the first request, cheaply and safely. When nginx
+// invokes ps_preaccess_handler via ngx_http_core_generic_phase, r->phase_handler
+// MUST index this very handler's slot (ph[r->phase_handler].handler ==
+// ps_preaccess_handler). cmcf->phase_engine lives in the core MAIN conf and
+// r->ctx sits before headers_in, so both read correctly even under the shift --
+// only r->phase_handler (a request field after headers_in) is wrong. If the
+// index no longer points back at us, the layout has drifted: we degrade the
+// whole module to pass-through (return NGX_DECLINED, letting nginx's generic
+// phase advance its OWN phase_handler) and log once. No hang; one clear,
+// actionable log line instead of a wedged worker.
+ngx_int_t ps_preaccess_handler(ngx_http_request_t* r);  // fwd decl for the guard
+
+bool g_ps_abi_mismatch = false;
+
+// Bounded: walk to the NULL-checker terminator so a wild (shifted) index can
+// never read out of bounds. Real phase engines have ~a dozen entries.
+bool ps_phase_index_is_ours(ngx_http_phase_handler_t* ph, ngx_uint_t i) {
+  if (ph == nullptr) {
+    return false;
+  }
+  ngx_uint_t n = 0;
+  while (ph[n].checker != nullptr) {
+    if (++n > 4096) {  // sanity cap; never reached by a real phase engine
+      return false;
+    }
+  }
+  return i < n && ph[i].handler == ps_preaccess_handler;
+}
+
+void ps_report_abi_mismatch(ngx_http_request_t* r) {
+  if (g_ps_abi_mismatch) {
+    return;  // already reported + degraded this worker
+  }
+  g_ps_abi_mismatch = true;
+  ngx_log_error(NGX_LOG_ALERT, r->connection->log, 0,
+                "ngx_pagespeed: nginx ABI mismatch detected -- r->phase_handler "
+                "does not index this module's handler, so the running nginx's "
+                "core request-struct layout differs from this module's build "
+                "target (nginx %s; the running nginx's exact build is not "
+                "introspectable at runtime). This typically means a distro "
+                "security update changed nginx's struct layout without a version "
+                "bump (see the design record / CVE-2026-49975). PageSpeed optimization is "
+                "now DISABLED (pass-through) on this worker to prevent a worker "
+                "hang. Reinstall nginx-module-pagespeed built for your current "
+                "nginx, or contact We-Amp.",
+                NGINX_VERSION);
+}
+
 // preaccess_handler should be at generic phase before try_files
 ngx_int_t ps_preaccess_handler(ngx_http_request_t* r) {
   ngx_http_core_main_conf_t* cmcf;
@@ -3215,6 +3282,23 @@ ngx_int_t ps_preaccess_handler(ngx_http_request_t* r) {
   ph = cmcf->phase_engine.handlers;
 
   i = r->phase_handler;
+
+  // Runtime nginx-ABI guard -- BEFORE touching the phase engine.
+  // If the running nginx's request-struct layout has drifted from our build
+  // target, i (= r->phase_handler, read at this module's offset) no longer
+  // points at our own slot; proceeding would corrupt the phase engine and hang
+  // the worker. Degrade to pass-through instead. nginx's generic-phase checker
+  // (which called us) then advances its OWN r->phase_handler correctly.
+  //
+  // Note: on a healthy worker this runs only on the FIRST request -- once we
+  // install ps_phase_handler below (ph[i].checker), nginx invokes that checker
+  // directly on later requests and this handler is not re-entered. The layout
+  // is fixed for the worker's lifetime, and g_ps_abi_mismatch latches the
+  // degraded state for every subsequent request, so checking once is sufficient.
+  if (g_ps_abi_mismatch || !ps_phase_index_is_ours(ph, i)) {
+    ps_report_abi_mismatch(r);
+    return NGX_DECLINED;
+  }
 
 // move handlers before try_files && content phase
 // As of nginx 1.13.4 we will be right before the try_files module
@@ -3412,6 +3496,15 @@ ngx_int_t ps_init_child_process(ngx_cycle_t* cycle) {
   if (cfg_m == nullptr || cfg_m->driver_factory == nullptr) {
     return NGX_OK;
   }
+
+  // Build-provenance breadcrumb: records the nginx version this
+  // module was compiled against, so an operator debugging an ABI-guard
+  // pass-through (see ps_report_abi_mismatch) can see at a glance what to
+  // rebuild against. Cheap: one NOTICE line per worker at startup.
+  ngx_log_error(NGX_LOG_NOTICE, cycle->log, 0,
+                "ngx_pagespeed: worker init, built against nginx %s "
+                "(runtime ABI guard active)",
+                NGINX_VERSION);
 
   if (!NgxBaseFetch::Initialize(cycle)) {
     return NGX_ERROR;

@@ -146,23 +146,30 @@ esac
 # ---------------------------------------------------------------------------
 # NGX_SRC_MODE — where the @nginx ABI source comes from.
 #
-# distro  : `apt-get source nginx` — the DISTRO's OWN patched nginx tree, pinned
-#           to the exact stock candidate the host runs. REQUIRED for the
-#           Debian/Ubuntu distro-stock targets because a distro security update
-#           can change the layout of core request structs WITHOUT bumping the
-#           upstream version: Ubuntu shipped CVE-2026-49975 (HTTP/2 max_headers)
-#           as nginx 1.24.0-2ubuntu7.10 (noble) / 1.18.0-6ubuntu14.13 (jammy) on
-#           2026-06-05, inserting `ngx_uint_t count` mid-struct into
-#           ngx_http_headers_in_t — which is embedded BY VALUE in
-#           ngx_http_request_t, so every downstream field offset shifts 8 bytes.
-#           A module compiled against vanilla nginx.org 1.24.0 then reads garbage
-#           request state and the worker SPINS forever on the first optimizing
-#           request (a SILENT hang; `nginx -t` still passes because the
-#           module->version + NGX_MODULE_SIGNATURE match, and --with-compat does
-#           NOT pad ngx_http_headers_in_t). Building against the distro's patched
-#           source makes the module's offsets match the stock nginx it dlopen's.
-# vanilla : nginx.org release tarball (sha256-pinned). Kept for everything that
-#           is NOT a confirmed-drifting target:
+# distro  : the DISTRO's OWN patched nginx tree, pinned to the exact stock
+#           candidate the host runs (deb: `apt-get source nginx`; el9: AlmaLinux's
+#           signed nginx SRPM via `dnf download --source` + `rpmbuild -bp`).
+#           REQUIRED for the Ubuntu suites because a distro security update can
+#           change the layout of core request structs WITHOUT bumping the upstream
+#           version: Ubuntu shipped CVE-2026-49975 (HTTP/2 max_headers) as nginx
+#           1.24.0-2ubuntu7.10 (noble) / 1.18.0-6ubuntu14.13 (jammy) on 2026-06-05,
+#           inserting `ngx_uint_t count` mid-struct into ngx_http_headers_in_t —
+#           which is embedded BY VALUE in ngx_http_request_t, so every downstream
+#           field offset shifts 8 bytes. A module compiled against vanilla
+#           nginx.org 1.24.0 then reads garbage request state and the worker SPINS
+#           forever on the first optimizing request (a SILENT hang; `nginx -t`
+#           still passes because the module->version + NGX_MODULE_SIGNATURE match,
+#           and --with-compat does NOT pad ngx_http_headers_in_t). Building against
+#           the distro's patched source makes the module's offsets match.
+#           - noble/jammy (Ubuntu): the confirmed-drifting targets (above).
+#           - el9 (AlmaLinux): NOT drifting today — stock nginx is the frozen
+#             AppStream stream and does NOT backport the CVE-2026-49975 core-struct
+#             change. el9 uses distro-source for deb PARITY + FUTURE-PROOFING: if
+#             Alma ever backports a struct change, the distro-source build captures
+#             it automatically; vanilla would silently drift. (Not an active-
+#             incident fix.)
+# vanilla : nginx.org release tarball (sha256-pinned). Kept for the targets that
+#           are not distro-stock or are ABI-safe by the distro's design:
 #           - bullseye/bookworm/trixie (Debian): Debian deliberately keeps the
 #             HTTP/2 max_headers fix OUT of the core structs — it relocated the
 #             counter into a separate ngx_http_header_count_module "to avoid
@@ -171,22 +178,23 @@ esac
 #             and the proven-passing Debian builds are left untouched.
 #           - focal: the design record sidecar PORTABLE build (a newer 1.30 branch,
 #             not a distro-stock package).
-#           - el9: stock nginx is the frozen AlmaLinux AppStream stream, which
-#             does not backport core-struct changes the way Canonical does.
-#           (All four validated unaffected 2026-06-08; see the design record P4.)
+#           (Debian suites validated unaffected 2026-06-08; see the design record P4/P5.)
 #
-# Only the two UBUNTU suites need distro-source: Canonical (unlike Debian) shipped
-# CVE-2026-49975 by editing the core request structs in place, in BOTH noble
-# (1.24.0-2ubuntu7.10) and jammy (1.18.0-6ubuntu14.13) on 2026-06-05.
+# Canonical (unlike Debian) shipped CVE-2026-49975 by editing the core request
+# structs in place, in BOTH noble (1.24.0-2ubuntu7.10) and jammy
+# (1.18.0-6ubuntu14.13) on 2026-06-05; el9 joins distro-source for parity.
 #
 # NOTE (residual): a prebuilt dynamic module is only ABI-safe against the nginx
-# revision it was built against. If Ubuntu ships ANOTHER struct-changing security
-# revision AFTER this build, a customer who upgrades nginx past it hits the same
-# silent hang. A LOUD runtime ABI guard (refuse-to-load on mismatch) is the
-# durable backstop — tracked as an the design record follow-up, not in this fix.
+# revision it was built against. If a distro ships ANOTHER struct-changing
+# security revision AFTER this build, a customer who upgrades nginx past it would
+# hit the same drift. The backstop is the runtime ABI guard in ngx_pagespeed.cc
+# (ps_preaccess_handler / ps_report_abi_mismatch, the design record P5): it cannot refuse
+# to LOAD (nginx exposes neither its struct layout nor its distro revision at
+# runtime), but it detects the drift on the first request and degrades the module
+# to pass-through + one ALERT log instead of silently hanging the worker.
 case "${DISTRO}" in
-  noble|jammy) NGX_SRC_MODE="distro" ;;
-  *)           NGX_SRC_MODE="vanilla" ;;
+  noble|jammy|el9) NGX_SRC_MODE="distro" ;;
+  *)               NGX_SRC_MODE="vanilla" ;;
 esac
 NGX_SRC_MODE="${NGX_SRC_MODE_OVERRIDE:-${NGX_SRC_MODE}}"
 
@@ -322,7 +330,7 @@ install_deps_el9() {
     clang lld llvm \
     zlib-devel pcre-devel openssl-devel \
     python3 unzip zip gperf bison flex \
-    rpm-build tar gzip make >/dev/null
+    rpm-build dnf-plugins-core tar gzip make >/dev/null
   # bazelisk (pinned + checksum-verified) if bazel/bazelisk not already provided.
   install_bazelisk
 }
@@ -654,7 +662,47 @@ NGX_SRC="${NGX_BUILD_DIR}/nginx-${NGINX_SRC_VERSION}"
 echo "==> fetch + pre-configure target nginx (mode=${NGX_SRC_MODE}) for @nginx ABI match"
 rm -rf "${NGX_BUILD_DIR}"
 mkdir -p "${NGX_BUILD_DIR}"
-if [ "${NGX_SRC_MODE}" = "distro" ]; then
+if [ "${NGX_SRC_MODE}" = "distro" ] && [ "${DISTRO}" = "el9" ]; then
+  # the design record P4 ABI-drift fix, el9 (rpm/dnf analog of the deb apt-get-source path).
+  # Build against AlmaLinux 9's OWN signed, patched nginx SOURCE rpm so the
+  # module's struct offsets match the stock nginx it dlopen's. el9 stock nginx is
+  # the frozen AppStream stream and does NOT backport the CVE-2026-49975 core-
+  # struct change today, so this is deb parity + future-proofing (if Alma ever
+  # backports a struct change the distro-source build captures it; vanilla would
+  # silently drift). The fetched SRPM is GPG-signed by the Alma 9 release key
+  # (Key ID d36cb86cb86b3716) — trust equal-or-stronger than the vanilla tarball
+  # sha256 pin; we fail-closed on `rpm -K ... signatures OK`.
+  rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-AlmaLinux-9 2>/dev/null || true
+  # x86_64-only: the served el9 yum tree is x86_64 (el9-arm64 is an the design record P2
+  # gap); if el9-arm64 is ever added, derive the arch instead of the .x86_64
+  # literal (cf. deb_triplet). Pin the EXACT stock candidate the smoke (and
+  # customers) run. repoquery %{version} is already epoch-free; the NVR selects.
+  NGX_PKG_VER="$(dnf repoquery --latest-limit 1 --qf '%{version}-%{release}' nginx.x86_64 2>/dev/null | head -1)"
+  NGINX_SRC_VERSION="$(dnf repoquery --latest-limit 1 --qf '%{version}' nginx.x86_64 2>/dev/null | head -1)"
+  [ -n "${NGX_PKG_VER}" ] && [ -n "${NGINX_SRC_VERSION}" ] || { echo "ERROR: cannot determine stock nginx candidate version on el9" >&2; exit 1; }
+  echo "==> dnf download --source nginx-${NGX_PKG_VER} (upstream ${NGINX_SRC_VERSION}) on el9"
+  mkdir -p "${NGX_BUILD_DIR}/srpm"
+  dnf download --source "nginx-${NGX_PKG_VER}" --destdir "${NGX_BUILD_DIR}/srpm"
+  NGX_SRPM="$(ls "${NGX_BUILD_DIR}/srpm/"*.src.rpm 2>/dev/null | head -1)"
+  [ -n "${NGX_SRPM}" ] || { echo "ERROR: dnf download --source produced no .src.rpm under ${NGX_BUILD_DIR}/srpm" >&2; exit 1; }
+  # Supply-chain gate: the SRPM must carry a verified GPG signature, not just a
+  # digest. `rpm -K` prints 'digests signatures OK' only when the Alma key is
+  # trusted; 'digests OK' alone (NOKEY) is a hard fail.
+  echo "==> verifying AlmaLinux nginx SRPM signature (rpm -K)"
+  rpm -K "${NGX_SRPM}" | grep -q 'signatures OK' \
+    || { echo "ERROR: AlmaLinux nginx SRPM ${NGX_SRPM} is not GPG-signed/trusted: $(rpm -K "${NGX_SRPM}")" >&2; exit 1; }
+  # Install the SRPM + run %prep (rpmbuild -bp) to apply AlmaLinux's full patch
+  # series. --nodeps: %prep needs none of nginx's BuildRequires (perl/gd/geoip).
+  rpm -i "${NGX_SRPM}"
+  rpmbuild -bp --nodeps "${HOME}/rpmbuild/SPECS/nginx.spec"
+  # The prepped tree lands under ~/rpmbuild/BUILD, NOT NGX_BUILD_DIR. EXACT-name
+  # match (nginx-${NGINX_SRC_VERSION}) — never a glob — because %prep leaves a
+  # nested FULL copy named nginx-<EVR>-src INSIDE the top-level tree.
+  NGX_SRC="$(find "${HOME}/rpmbuild/BUILD" -maxdepth 2 -type d -name "nginx-${NGINX_SRC_VERSION}" 2>/dev/null | sort | head -1)"
+  [ -n "${NGX_SRC}" ] && [ -d "${NGX_SRC}/src" ] && [ -x "${NGX_SRC}/configure" ] \
+    || { echo "ERROR: rpmbuild -bp did not produce a prepped nginx-${NGINX_SRC_VERSION} tree under ${HOME}/rpmbuild/BUILD" >&2; exit 1; }
+  echo "    distro nginx source: ${NGX_SRC} (Alma-signed SRPM; NGINX_VERSION $(awk -F'"' '/define NGINX_VERSION/{print $2}' "${NGX_SRC}/src/core/nginx.h"))"
+elif [ "${NGX_SRC_MODE}" = "distro" ]; then
   # the design record P4 ABI-drift fix — build against the DISTRO's OWN patched nginx
   # source so the module's struct offsets match the stock nginx it dlopen's
   # (see the NGX_SRC_MODE block near the top for the CVE-2026-49975 root cause).

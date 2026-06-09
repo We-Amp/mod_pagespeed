@@ -74,7 +74,12 @@ echo "<html><body><h1>PageSpeed nginx Package Test</h1></body></html>" > "$DOC_R
 log_info "Generating nginx configuration..."
 
 cat > "$CONFIG_FILE" << EOF
-worker_processes auto;
+# worker_processes 1 (NOT auto) so this smoke DETERMINISTICALLY catches an
+# nginx-ABI struct-drift worker hang. With 'auto' (== CPU count,
+# e.g. 128 on the build box) a wedged worker is masked: fresh workers serve the
+# first requests before any single one spins, so the optimizing suite can pass
+# even while the module is silently hanging. A single worker has nowhere to hide.
+worker_processes 1;
 pid $PID_FILE;
 error_log $LOG_DIR/error.log info;
 
