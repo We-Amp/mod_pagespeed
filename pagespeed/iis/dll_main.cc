@@ -27,6 +27,8 @@
 
 #include "pagespeed/kernel/html/html_keywords.h"
 #include "net/instaweb/rewriter/public/process_context.h"
+#include "pagespeed/kernel/base/thread_system.h"
+#include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/system/system_thread_system.h"
 #include "pagespeed/iis/iis_message_handler.h"
 #include "pagespeed/iis/iis_rewrite_driver_factory.h"
@@ -65,6 +67,13 @@ std::string modulePath;
 std::string moduleFilename;
 IisMessageHandler* message_handler = NULL;
 ConfigFactory* cf = NULL;
+// Backing thread system + timer for `message_handler`. Held in globals so
+// DLL_PROCESS_DETACH can free them: SystemMessageHandler owns its mutex (via
+// unique_ptr) but NOT its Timer (its dtor is empty), and nothing owned the
+// thread system — so every app-pool recycle leaked both and tripped
+// AppVerifier's Leak provider (stop 0x900) at FreeLibrary/unload.
+ThreadSystem* dll_thread_system = NULL;
+Timer* dll_timer = NULL;
 
 }  // namespace net_instaweb
 
@@ -123,9 +132,12 @@ BOOL APIENTRY DllMain(HMODULE hModule,
 
       // Create thread system and message handler.
       // SystemThreadSystem uses WinThreadSystem on Windows.
-      auto ts = new net_instaweb::SystemThreadSystem();
-      net_instaweb::message_handler =
-          new net_instaweb::IisMessageHandler(ts->NewTimer(), ts->NewMutex());
+      // Keep the thread system + timer in globals so DLL_PROCESS_DETACH can free
+      // them (message_handler owns only the mutex). See dll_thread_system above.
+      net_instaweb::dll_thread_system = new net_instaweb::SystemThreadSystem();
+      net_instaweb::dll_timer = net_instaweb::dll_thread_system->NewTimer();
+      net_instaweb::message_handler = new net_instaweb::IisMessageHandler(
+          net_instaweb::dll_timer, net_instaweb::dll_thread_system->NewMutex());
 
       net_instaweb::log_message_handler::Install(net_instaweb::message_handler);
       net_instaweb::IisRewriteDriverFactory::Initialize();
@@ -154,6 +166,15 @@ BOOL APIENTRY DllMain(HMODULE hModule,
 
       delete net_instaweb::message_handler;
       net_instaweb::message_handler = NULL;
+
+      // Free the thread system + timer created for message_handler. The handler
+      // is already gone (it owned only the mutex, via unique_ptr), so the timer
+      // and thread system now have no live users. Delete the timer before the
+      // thread system that minted it.
+      delete net_instaweb::dll_timer;
+      net_instaweb::dll_timer = NULL;
+      delete net_instaweb::dll_thread_system;
+      net_instaweb::dll_thread_system = NULL;
 
       // Release BoringSSL's process-wide TLS slot. Must come
       // after any code path that could still touch BoringSSL thread locals.

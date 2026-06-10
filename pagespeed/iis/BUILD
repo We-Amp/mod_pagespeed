@@ -42,6 +42,15 @@ genrule(
     tags = ["no-remote-cache"],
 )
 
+# Header-only helper for the OnSendResponse "leave" completion path. Kept free
+# of IIS/Windows headers (pure template) so the use-after-free invariant it
+# encodes is unit-testable on every platform, not just Windows.
+cc_library(
+    name = "iis_proxy_fetch_completion",
+    hdrs = ["iis_proxy_fetch_completion.h"],
+    visibility = ["//visibility:public"],
+)
+
 # =============================================================================
 # IIS Native Module for PageSpeed — IISpeed adoption
 # =============================================================================
@@ -114,6 +123,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":iis_ip_string",
+        ":iis_proxy_fetch_completion",
         "//net/instaweb:net_instaweb_lib",
         "//net/instaweb/http",
         "//net/instaweb/rewriter",

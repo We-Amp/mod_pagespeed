@@ -134,6 +134,18 @@ pagespeed_cc_test(
     ],
 )
 
+# Platform-independent regression test for the OnSendResponse "leave" path
+# use-after-free (intermittent w3wp crash caught by AppVerifier/Page Heap).
+# No IIS/Windows deps, so it runs on the Linux CI lanes too.
+pagespeed_cc_test(
+    name = "iis_proxy_fetch_completion_test",
+    srcs = ["iis_proxy_fetch_completion_test.cc"],
+    deps = [
+        "//pagespeed/iis:iis_proxy_fetch_completion",
+        "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)
+
 pagespeed_cc_test(
     name = "iis_fetch_lifecycle_test",
     srcs = ["iis_fetch_lifecycle_test.cc"],

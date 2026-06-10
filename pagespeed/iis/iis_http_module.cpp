@@ -35,6 +35,7 @@
 #include "pagespeed/kernel/base/statistics.h"
 
 #include "pagespeed/iis/iis_global_constants.h"
+#include "pagespeed/iis/iis_proxy_fetch_completion.h"
 #include "pagespeed/iis/iis_process_context.h"
 #include "pagespeed/iis/iis_rewrite_driver_factory.h"
 #include "pagespeed/iis/iis_misc.h"
@@ -992,9 +993,11 @@ namespace net_instaweb
 			// stop rewriting for disconnected clients.
 			if (innerContext->proxy_fetch() != NULL) {
 				log(pHttpContext, "SendResponse -> Connection not connected - bail");
-				innerContext->proxy_fetch()->Done(true);
-				innerContext->set_proxy_fetch(NULL);
-				innerContext->set_leave(true);
+				// proxy_fetch()->Done() can synchronously tear the request down
+				// and free innerContext (HandleDone -> IndicateCompletion ->
+				// CleanupStoredContext). Clear state first, Done() last, never
+				// touch innerContext afterwards. See iis_proxy_fetch_completion.h.
+				FinishProxyFetchAndLeave<IisInnerRequestContext, ProxyFetch>(innerContext);
 				return RQ_NOTIFICATION_PENDING;
 			}
 		}
@@ -1540,10 +1543,15 @@ namespace net_instaweb
 				if (!more_data)/*not chunked, seen final chunk*/
 				{
 					log(pHttpContext, "OnSendResponse: call proxy_fetch->Done(), return pending");
+					// set_pending() must precede Done(): it reads innerContext's
+					// base_fetch, and Done() can synchronously free innerContext.
 					request_context->base_fetch()->set_pending(true);
-					innerContext->proxy_fetch()->Done(true);
-					innerContext->set_proxy_fetch(NULL);
-					innerContext->set_leave(true);
+					// proxy_fetch()->Done() can synchronously run the request
+					// teardown (HandleDone -> IndicateCompletion ->
+					// CleanupStoredContext) which deletes innerContext. Clear state
+					// first, Done() last, and touch neither innerContext nor
+					// request_context afterwards. See iis_proxy_fetch_completion.h.
+					FinishProxyFetchAndLeave<IisInnerRequestContext, ProxyFetch>(innerContext);
 					return RQ_NOTIFICATION_PENDING;
 				}
 				else {
