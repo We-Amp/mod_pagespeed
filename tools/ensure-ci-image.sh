@@ -97,9 +97,33 @@ prepull_base_images() {
   return "$rc"
 }
 
-# Build the dev image: authenticate, pre-pull bases (fail fast on a registry
-# stall), then build under a bounded timeout so nothing can hang the job.
+# Some self-hosted runners (notably headless macOS) have a docker `credsStore`
+# (e.g. "desktop" / "osxkeychain") whose credential helper HANGS when invoked
+# without an interactive session -- so even an ANONYMOUS pull of a PUBLIC base
+# image stalls until the timeout kills it:
+#   error getting credentials - err: signal: terminated, out: ``
+# (observed repeatedly on mac-x64-auxiliary -> Apache System Tests "Ensure
+# Docker image"; Docker Desktop's GUI exits seconds after launch on that box, so
+# docker-credential-desktop has no backend to talk to and blocks). Point
+# DOCKER_CONFIG at an ephemeral, credsStore-free config so docker never consults
+# the host keychain for anonymous pulls; a DOCKERHUB_TOKEN login (if any) then
+# writes its auth into THIS clean config as base64, which works headless.
+# No-op when the active config has no credsStore (e.g. the Linux runners).
+neutralize_hanging_credstore() {
+  local active_cfg="${DOCKER_CONFIG:-$HOME/.docker}/config.json"
+  grep -q '"credsStore"' "$active_cfg" 2>/dev/null || return 0
+  local clean
+  clean="$(mktemp -d)"
+  printf '{}\n' > "${clean}/config.json"
+  export DOCKER_CONFIG="$clean"
+  echo "ensure-ci-image: active docker config has a credsStore; using clean DOCKER_CONFIG=${DOCKER_CONFIG} to avoid a headless credential-helper hang"
+}
+
+# Build the dev image: dodge a hanging host credsStore, authenticate, pre-pull
+# bases (fail fast on a registry stall), then build under a bounded timeout so
+# nothing can hang the job.
 build_image() {
+  neutralize_hanging_credstore
   docker_login_if_creds
   prepull_base_images || return 1
   if ! _timeout "$IMAGE_BUILD_TIMEOUT" docker build -t "$IMAGE" "$DOCKER_DIR"; then

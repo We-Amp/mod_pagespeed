@@ -101,7 +101,13 @@ FETCH_BACKOFF="${FETCH_BACKOFF:-3}"
 SSH_OPTS="${SSH_OPTS:--o StrictHostKeyChecking=accept-new -o BatchMode=yes}"
 
 if [ -z "${CI_HUB_HOST:-}" ]; then
-  CI_HUB_HOST="$(getent hosts cache-host 2>/dev/null | awk '{print $1}' || true)"
+  # `exit` after the first line: cache-host resolves to MULTIPLE IPs on some
+  # runners (ci-pool sees both the live and a stale address -- cache-host has two
+  # interfaces). Without it `awk '{print $1}'` emits two newline-joined IPs, so
+  # the ssh/rsync host becomes "ip1\nip2" -> "hostname contains invalid
+  # characters" and EVERY cache-host fetch fails (observed: burst linux-build
+  # Extract tarball). Any one resolved IP reaches the host.
+  CI_HUB_HOST="$(getent hosts cache-host 2>/dev/null | awk '{print $1; exit}' || true)"
   : "${CI_HUB_HOST:=192.0.2.20}"
 fi
 

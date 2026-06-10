@@ -42,6 +42,13 @@
 #   BAZEL               bazel/bazelisk binary (default: bazel, else bazelisk)
 #   GCC13_PREFIX        el9 gcc-toolset-13 prefix (default /opt/rh/gcc-toolset-13/root/usr)
 #   SKIP_DEPS=1         skip the apt/dnf build-dep install (deps already present)
+#   BAZEL_CPUS          optional CPU cap for the Bazel build: adds
+#                       --local_cpu_resources=N --jobs=N so peak RSS stays
+#                       ~1.5 GB x N, letting several per-distro legs share one box
+#                       (release.yml fan-out). Unset = use all host cores (prior
+#                       behavior, uncapped).
+#   MAKE_JOBS           parallelism for the nginx `make modules` link
+#                       (default: BAZEL_CPUS if set, else nproc).
 
 set -euo pipefail
 if [ "${VERBOSE:-}" ]; then set -x; fi
@@ -836,6 +843,16 @@ fi
 # execution_root" failure). Apply it uniformly via BAZEL_STARTUP.
 BAZEL_STARTUP=( "--output_user_root=/tmp/bazel-out" )
 
+# Optional CPU cap (release.yml fan-out): BAZEL_CPUS limits Bazel's local CPU
+# resources + concurrent actions so peak RSS stays ~1.5 GB x BAZEL_CPUS, letting
+# several legs share one box. Unset = use all host cores (prior behavior).
+if [ -n "${BAZEL_CPUS:-}" ]; then
+  # --jobs caps concurrent actions (the hard RSS limiter); --local_resources=cpu
+  # is the non-deprecated successor to --local_cpu_resources (which warns on
+  # current Bazel). Both bound the build to BAZEL_CPUS parallel compiles.
+  BAZEL_FLAGS+=( "--local_resources=cpu=${BAZEL_CPUS}" "--jobs=${BAZEL_CPUS}" )
+fi
+
 echo "==> bazel build ngx_pagespeed_module.so (forces full PSOL graph)"
 "${BAZEL}" "${BAZEL_STARTUP[@]}" build "${BAZEL_FLAGS[@]}" \
   -- //pagespeed/nginx:ngx_pagespeed_module.so //pagespeed/nginx:ngx_pagespeed_archive
@@ -1057,7 +1074,7 @@ export PAGESPEED_PSOL_ARCHIVE="${MERGED}"
       -e "s# -lstdc++# -Wl,-Bstatic,--start-group,${GCCDIR}/libstdc++.a,${GCCDIR}/libsupc++.a,--end-group,-Bdynamic#g" \
       objs/Makefile
   fi
-  make modules
+  make -j"${MAKE_JOBS:-${BAZEL_CPUS:-$(nproc)}}" modules
 )
 
 BUILT_SO="${NGX_SRC}/objs/ngx_pagespeed.so"

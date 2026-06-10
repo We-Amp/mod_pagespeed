@@ -3232,7 +3232,8 @@ using fix_headers::ps_html_rewrite_fix_headers_filter_init;
 // whole module to pass-through (return NGX_DECLINED, letting nginx's generic
 // phase advance its OWN phase_handler) and log once. No hang; one clear,
 // actionable log line instead of a wedged worker.
-ngx_int_t ps_preaccess_handler(ngx_http_request_t* r);  // fwd decl for the guard
+ngx_int_t ps_preaccess_handler(
+    ngx_http_request_t* r);  // fwd decl for the guard
 
 bool g_ps_abi_mismatch = false;
 
@@ -3256,18 +3257,19 @@ void ps_report_abi_mismatch(ngx_http_request_t* r) {
     return;  // already reported + degraded this worker
   }
   g_ps_abi_mismatch = true;
-  ngx_log_error(NGX_LOG_ALERT, r->connection->log, 0,
-                "ngx_pagespeed: nginx ABI mismatch detected -- r->phase_handler "
-                "does not index this module's handler, so the running nginx's "
-                "core request-struct layout differs from this module's build "
-                "target (nginx %s; the running nginx's exact build is not "
-                "introspectable at runtime). This typically means a distro "
-                "security update changed nginx's struct layout without a version "
-                "bump (see the design record / CVE-2026-49975). PageSpeed optimization is "
-                "now DISABLED (pass-through) on this worker to prevent a worker "
-                "hang. Reinstall nginx-module-pagespeed built for your current "
-                "nginx, or contact We-Amp.",
-                NGINX_VERSION);
+  ngx_log_error(
+      NGX_LOG_ALERT, r->connection->log, 0,
+      "ngx_pagespeed: nginx ABI mismatch detected -- r->phase_handler "
+      "does not index this module's handler, so the running nginx's "
+      "core request-struct layout differs from this module's build "
+      "target (nginx %s; the running nginx's exact build is not "
+      "introspectable at runtime). This typically means a distro "
+      "security update changed nginx's struct layout without a version "
+      "bump (see the design record / CVE-2026-49975). PageSpeed optimization is "
+      "now DISABLED (pass-through) on this worker to prevent a worker "
+      "hang. Reinstall nginx-module-pagespeed built for your current "
+      "nginx, or contact We-Amp.",
+      NGINX_VERSION);
 }
 
 // preaccess_handler should be at generic phase before try_files
