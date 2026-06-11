@@ -242,6 +242,9 @@ bool AdminLicenseHandler::ApplyToken(StringPiece token, GoogleString* error) {
     license_sub_ = result.payload.sub;
     license_sid_ = result.payload.sid;
     license_iat_ = result.payload.iat;
+    // the design record: display-only; empty on legacy scopeless tokens (R9/R10).
+    license_scope_ = result.payload.scope;
+    license_domain_ = result.payload.domain;
     // the design record: re-evaluated on every apply/renew (same posture as the product
     // check). Absent entitlement = false = feature off; never a token reject.
     license_agent_optimize_ =
@@ -326,6 +329,8 @@ void AdminLicenseHandler::HandleStatus(bool is_global, AsyncFetch* fetch) {
   int64_t expires_at;
   GoogleString plan;
   GoogleString sub;
+  GoogleString scope;
+  GoogleString site_domain;
   {
     std::lock_guard<std::mutex> lock(license_mu_);
     valid = license_valid_;
@@ -333,6 +338,8 @@ void AdminLicenseHandler::HandleStatus(bool is_global, AsyncFetch* fetch) {
     expires_at = license_expires_at_;
     plan = license_plan_;
     sub = license_sub_;
+    scope = license_scope_;
+    site_domain = license_domain_;
   }
 
   GoogleString json = "{";
@@ -349,7 +356,15 @@ void AdminLicenseHandler::HandleStatus(bool is_global, AsyncFetch* fetch) {
       StrAppend(&json, ",\"expired\":true");
     }
     if (!sub.empty()) {
+      // NOTE: "domain" is the subscriber EMAIL (legacy key name, kept for
+      // console compatibility). the design record site domain is "site_domain".
       StrAppend(&json, ",\"domain\":\"", JsonEscape(sub), "\"");
+    }
+    if (!scope.empty()) {
+      StrAppend(&json, ",\"scope\":\"", JsonEscape(scope), "\"");
+    }
+    if (!site_domain.empty()) {
+      StrAppend(&json, ",\"site_domain\":\"", JsonEscape(site_domain), "\"");
     }
   }
   StrAppend(&json, "}");
@@ -398,10 +413,14 @@ void AdminLicenseHandler::HandleApply(StringPiece request_body,
 
   GoogleString plan;
   int64_t expires_at;
+  GoogleString scope;
+  GoogleString site_domain;
   {
     std::lock_guard<std::mutex> lock(license_mu_);
     plan = license_plan_;
     expires_at = license_expires_at_;
+    scope = license_scope_;
+    site_domain = license_domain_;
   }
 
   GoogleString json = "{\"success\":true,\"message\":\"License applied\"";
@@ -410,6 +429,12 @@ void AdminLicenseHandler::HandleApply(StringPiece request_body,
   }
   if (expires_at > 0) {
     StrAppend(&json, ",\"expires_at\":", Integer64ToString(expires_at));
+  }
+  if (!scope.empty()) {
+    StrAppend(&json, ",\"scope\":\"", JsonEscape(scope), "\"");
+  }
+  if (!site_domain.empty()) {
+    StrAppend(&json, ",\"site_domain\":\"", JsonEscape(site_domain), "\"");
   }
   StrAppend(&json, "}");
   WriteJsonResponse(fetch, json);

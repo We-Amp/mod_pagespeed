@@ -26,12 +26,18 @@
 
 namespace {
 
+// the design record: minting paths self-police a 720-day lifetime ceiling. The verifier
+// enforces 730 days (kMaxTokenLifetimeSec) and silently rejects beyond it; the
+// 10-day margin keeps hand-minted tokens from ever brushing the verifier cap.
+constexpr int64_t kMaxMintLifetimeSec = 720LL * 24 * 3600;
+
 void PrintUsage(const char* argv0) {
   std::cerr << "Usage: " << argv0
             << " --key <path> --sub <email>"
                " [--exp <unix_timestamp> | --exp-duration <seconds>]"
                " [--products <comma-separated>]"
-               " [--entitlements <comma-separated>]\n"
+               " [--entitlements <comma-separated>]"
+               " [--plan <plan>] [--scope <scope> --domain <domain>]\n"
             << "\n"
             << "  --key <path>              REQUIRED. Path to 32-byte Ed25519 "
                "seed file.\n"
@@ -43,7 +49,17 @@ void PrintUsage(const char* argv0) {
             << "  --products <list>         Comma-separated product list "
                "(default: mps1,the 2.0 optimizer line).\n"
             << "  --entitlements <list>     Comma-separated feature "
-               "entitlements.\n";
+               "entitlements.\n"
+            << "  --plan <plan>             Plan label embedded in the token "
+               "(default: production).\n"
+            << "  --scope <scope>           License scope: one of "
+               "community, site, org, host. Default: none (legacy "
+               "scopeless token).\n"
+            << "  --domain <domain>         Registrable domain the scope "
+               "binds to. Required for community/site/host scopes; not "
+               "allowed for org.\n"
+            << "\n"
+            << "  Lifetime is capped at 720 days from now.\n";
 }
 
 std::vector<GoogleString> SplitComma(const char* s) {
@@ -65,6 +81,9 @@ int main(int argc, char* argv[]) {
   const char* sub = nullptr;
   const char* products_str = nullptr;
   const char* entitlements_str = nullptr;
+  const char* plan = nullptr;
+  const char* scope = nullptr;
+  const char* domain = nullptr;
   int64_t exp = 0;
   bool has_exp = false;
   int64_t exp_duration = 0;
@@ -85,6 +104,12 @@ int main(int argc, char* argv[]) {
       products_str = argv[++i];
     } else if (strcmp(argv[i], "--entitlements") == 0 && i + 1 < argc) {
       entitlements_str = argv[++i];
+    } else if (strcmp(argv[i], "--plan") == 0 && i + 1 < argc) {
+      plan = argv[++i];
+    } else if (strcmp(argv[i], "--scope") == 0 && i + 1 < argc) {
+      scope = argv[++i];
+    } else if (strcmp(argv[i], "--domain") == 0 && i + 1 < argc) {
+      domain = argv[++i];
     } else {
       std::cerr << "Error: unknown flag '" << argv[i] << "'\n\n";
       PrintUsage(argv[0]);
@@ -104,6 +129,37 @@ int main(int argc, char* argv[]) {
   }
   if (has_exp && has_exp_duration) {
     std::cerr << "Error: --exp and --exp-duration are mutually exclusive.\n\n";
+    PrintUsage(argv[0]);
+    return 1;
+  }
+
+  // the design record scope/domain pairing rules. Scopeless tokens stay valid (R9/R10:
+  // legacy tokens classify licensed; scope is never a verify-fail condition).
+  if (scope != nullptr) {
+    const bool valid_scope =
+        strcmp(scope, "community") == 0 || strcmp(scope, "site") == 0 ||
+        strcmp(scope, "org") == 0 || strcmp(scope, "host") == 0;
+    if (!valid_scope) {
+      std::cerr << "Error: --scope must be one of community, site, org, "
+                   "host (got '"
+                << scope << "').\n\n";
+      PrintUsage(argv[0]);
+      return 1;
+    }
+    if (strcmp(scope, "org") == 0) {
+      if (domain != nullptr) {
+        std::cerr << "Error: --domain is not allowed with --scope org "
+                     "(org licenses are organization-wide).\n\n";
+        PrintUsage(argv[0]);
+        return 1;
+      }
+    } else if (domain == nullptr || domain[0] == '\0') {
+      std::cerr << "Error: --scope " << scope << " requires --domain.\n\n";
+      PrintUsage(argv[0]);
+      return 1;
+    }
+  } else if (domain != nullptr) {
+    std::cerr << "Error: --domain requires --scope.\n\n";
     PrintUsage(argv[0]);
     return 1;
   }
@@ -139,7 +195,13 @@ int main(int argc, char* argv[]) {
   payload.sub = sub;
   payload.iss = "modpagespeed.com";
   payload.iat = now;
-  payload.plan = "production";
+  payload.plan = (plan != nullptr) ? plan : "production";
+  if (scope != nullptr) {
+    payload.scope = scope;
+  }
+  if (domain != nullptr) {
+    payload.domain = domain;
+  }
 
   if (products_str != nullptr) {
     payload.products = SplitComma(products_str);
@@ -160,6 +222,28 @@ int main(int argc, char* argv[]) {
   } else {
     // Default: 1 year from now.
     payload.exp = now + static_cast<int64_t>(365 * 24 * 3600);
+  }
+
+  // exp == 0 is the verifier's never-expiring escape hatch (it skips both
+  // the lifetime cap and expiry when exp is absent/zero). The mint tool is
+  // the only police for the design record's 720-day rule, so refuse to mint it.
+  if (payload.exp <= 0) {
+    std::cerr << "Error: --exp " << payload.exp
+              << " would mint a never-expiring token (the verifier skips "
+                 "expiry when exp is 0); refusing under the design record "
+                 "720-day mint-side cap.\n";
+    return 1;
+  }
+
+  // the design record mint-side lifetime cap. Hard error, not a clamp: a silently
+  // shortened token would surprise whoever hand-minted it.
+  if (payload.exp - now > kMaxMintLifetimeSec) {
+    std::cerr << "Error: token lifetime exceeds the 720-day mint-side cap "
+                 ". Requested "
+              << (payload.exp - now) / (24LL * 3600)
+              << " days from now; the verifier rejects tokens minted for "
+                 "more than 730 days regardless.\n";
+    return 1;
   }
 
   std::cout << net_instaweb::SignLicenseToken(payload, public_key, private_key);

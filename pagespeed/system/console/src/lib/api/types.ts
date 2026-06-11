@@ -102,7 +102,12 @@ export interface LicenseStatusResponse {
   license_type?: string;
   expires?: number;
   expired?: boolean;
+  /** Subscriber email (legacy key name — not the site domain). */
   domain?: string;
+  /** the design record license scope: community | site | org | host. Absent on legacy tokens. */
+  scope?: string;
+  /** the design record registrable domain the scope binds to. Absent on legacy tokens. */
+  site_domain?: string;
   error?: string;
   [key: string]: unknown;
 }

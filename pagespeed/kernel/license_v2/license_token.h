@@ -1,7 +1,7 @@
 // GENERATED — DO NOT EDIT BY HAND.
 // Vendored from ModPageSpeed 2.0 src/crypto/license_token.h by tools/sync-crypto.sh.
 // Canonical source: github.com/We-Amp/pagespeed-optimizer src/crypto/.
-// Synced from commit ebc48ef98186a07300b2f42576e8a14602525368.
+// Synced from commit 9621667d9af6cd397deff98aa3e2ea1e1677c812.
 // To update: bump PINNED_MPS2_COMMIT in tools/sync-crypto.sh and re-run it.
 // Drift guard: the crypto-drift CI check. See the design record.
 
@@ -43,6 +43,13 @@ struct LicensePayload {
   // LicensePayload designated-initializer (tests) lists `.entitlements`
   // explicitly to satisfy -Wmissing-designated-field-initializers.
   std::vector<std::string> entitlements;
+  // Licensing scope class (v5, the design record: "community"|"site"|"org"|"host") and
+  // the licensed domain for site/host scopes.  Additive + absence-tolerant: a
+  // pre-v5 token parses with empty strings and classifies licensed unchanged
+  //.  Display/telemetry only — scope MUST NEVER become a
+  // verify-fail condition; engines stay scope-blind.
+  std::string scope;   // v5, optional
+  std::string domain;  // v5, optional
 };
 
 // Encode bytes to base64url (no padding).

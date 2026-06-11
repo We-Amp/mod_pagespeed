@@ -154,6 +154,10 @@ class AdminLicenseHandler {
   int64_t license_iat_ = 0;  // guarded by license_mu_
   // the design record: whether the applied token's entitlements include "agent_optimize".
   bool license_agent_optimize_ = false;  // guarded by license_mu_
+  // the design record: display-only scope/domain from the token (empty on legacy
+  // scopeless tokens; never a verify-fail condition — R9/R10).
+  GoogleString license_scope_;   // guarded by license_mu_
+  GoogleString license_domain_;  // guarded by license_mu_
 
   // Validity predicate assuming license_mu_ is already held (avoids a recursive
   // lock when IsAgentOptimizeEntitled composes validity + entitlement).

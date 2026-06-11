@@ -1,7 +1,7 @@
 // GENERATED — DO NOT EDIT BY HAND.
 // Vendored from ModPageSpeed 2.0 src/crypto/license_token.cc by tools/sync-crypto.sh.
 // Canonical source: github.com/We-Amp/pagespeed-optimizer src/crypto/.
-// Synced from commit ebc48ef98186a07300b2f42576e8a14602525368.
+// Synced from commit 9621667d9af6cd397deff98aa3e2ea1e1677c812.
 // To update: bump PINNED_MPS2_COMMIT in tools/sync-crypto.sh and re-run it.
 // Drift guard: the crypto-drift CI check. See the design record.
 
@@ -304,6 +304,15 @@ std::string SerializePayload(const LicensePayload& payload) {
     }
     absl::StrAppend(&json, "]");
   }
+  // v5: scope then domain, after entitlements.  Emitted only when
+  // non-empty, so a scopeless payload serializes byte-identical to v4 (the
+  // signature covers these bytes — TS crypto.ts MUST emit in this exact order).
+  if (!payload.scope.empty()) {
+    absl::StrAppend(&json, ",\"scope\":\"", JsonEscape(payload.scope), "\"");
+  }
+  if (!payload.domain.empty()) {
+    absl::StrAppend(&json, ",\"domain\":\"", JsonEscape(payload.domain), "\"");
+  }
   absl::StrAppend(&json, "}");
   return json;
 }
@@ -323,6 +332,10 @@ bool ParsePayload(std::string_view json, LicensePayload* payload) {
   if (payload->max_instances < 0) payload->max_instances = 0;
   // Optional v4 field — absence parses clean (empty list).
   ExtractJsonStringArray(json, "entitlements", &payload->entitlements);
+  // Optional v5 fields — absence parses clean (empty strings), so
+  // legacy tokens classify licensed unchanged (R9/R10).
+  ExtractJsonString(json, "scope", &payload->scope);
+  ExtractJsonString(json, "domain", &payload->domain);
   return true;
 }
 

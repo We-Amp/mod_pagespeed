@@ -26,12 +26,10 @@ set -euo pipefail
 # Canonical ModPageSpeed 2.0 commit the vendored crypto is synced from.
 # Bump this (and re-run the script) whenever 2.0's shared crypto changes.
 #
-# RELEASE-GATE: this currently points at an UNMERGED 2.0 feat/agent-optimize
-# commit that carries the additive entitlements[] claim + CheckEntitlement
-#. When 2.0 feat/agent-optimize merges to master, re-point this to
-# the merged master commit and re-run; the diff is expected to be empty (the
-# merge does not change src/crypto/).
-PINNED_MPS2_COMMIT="ebc48ef98186a07300b2f42576e8a14602525368"
+# Points at the 2.0 main commit carrying the additive scope/domain payload
+# fields. the design record entitlements[] claim this previously
+# gated on has merged to 2.0 main.
+PINNED_MPS2_COMMIT="9621667d9af6cd397deff98aa3e2ea1e1677c812"
 
 SRC_REPO="${1:-}"
 if [[ -z "$SRC_REPO" ]]; then

@@ -129,7 +129,7 @@
     checkoutNonce = nonce;
     checkoutPolling = true;
 
-    const product = period === "annual" ? "mps1-pro-annual" : "mps1-pro-monthly";
+    const product = period === "annual" ? "business-site-annual" : "business-site-monthly";
     const buyUrl = `https://modpagespeed.com/buy/?nonce=${nonce}&product=${product}&origin=${encodeURIComponent(window.location.origin)}`;
     const win = window.open(buyUrl, "mps-checkout", "width=520,height=720,scrollbars=yes");
     if (!win || win.closed) {
@@ -312,8 +312,22 @@
           {/if}
           {#if license.data.domain}
             <div class="detail">
-              <span class="detail-label">Domain</span>
+              <!-- "domain" in the status JSON is the subscriber email (legacy
+                   key name); the design record site domain is "site_domain". -->
+              <span class="detail-label">Account</span>
               <span class="detail-value">{license.data.domain}</span>
+            </div>
+          {/if}
+          {#if license.data.scope}
+            <div class="detail">
+              <span class="detail-label">Scope</span>
+              <span class="detail-value">{license.data.scope}</span>
+            </div>
+          {/if}
+          {#if license.data.site_domain}
+            <div class="detail">
+              <span class="detail-label">Site</span>
+              <span class="detail-value">{license.data.site_domain}</span>
             </div>
           {/if}
           {#if license.data.expires}
@@ -359,7 +373,7 @@
       <div class="section">
         <h2>Purchase License</h2>
         <div class="action-card">
-          <p>The optimizer runs unlicensed (with a warning); a commercial license is required for production use. Monthly and annual subscriptions are billed immediately — cancel anytime.</p>
+          <p>The optimizer runs unlicensed (with a warning); a commercial license is required for production use. Buying here starts a Business subscription: the configured price/year or the configured price/month, licensed per site, unlimited servers for that site. Billed immediately; cancel anytime.</p>
           <div class="buy-buttons">
             <button
               class="btn btn-primary"
@@ -375,6 +389,14 @@
             >
               Buy Annual
             </button>
+            <a
+              href="https://modpagespeed.com/pricing/"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="btn btn-secondary"
+            >
+              Compare plans and pricing
+            </a>
           </div>
 
           {#if checkoutPolling}
@@ -693,6 +715,11 @@
     font-size: var(--ps-font-size-sm);
     cursor: pointer;
     white-space: nowrap;
+  }
+
+  a.btn {
+    text-decoration: none;
+    display: inline-block;
   }
 
   .btn:disabled {

@@ -199,7 +199,8 @@ class AdminLicenseHandlerTest : public ::testing::Test {
 
   GoogleString MakeToken(StringPiece sub, StringPiece plan, int64_t exp,
                          StringPiece sid = "", StringPiece kid = "k1",
-                         int64_t iat = 1743379200) {
+                         int64_t iat = 1743379200, StringPiece scope = "",
+                         StringPiece domain = "") {
     LicensePayload payload;
     payload.sub = sub.as_string();
     payload.iss = "modpagespeed.com";
@@ -209,6 +210,8 @@ class AdminLicenseHandlerTest : public ::testing::Test {
     payload.sid = sid.as_string();
     payload.kid = kid.as_string();
     payload.products = {PAGESPEED_PRODUCT_ID};  // v3: authorize this product
+    payload.scope = scope.as_string();          // the design record v5 (optional)
+    payload.domain = domain.as_string();        // the design record v5 (optional)
     return SignLicenseToken(payload, public_key_, private_key_);
   }
 
@@ -258,6 +261,46 @@ TEST_F(AdminLicenseHandlerTest, StatusReturnsLicensedAfterApply) {
   EXPECT_THAT(body, ::testing::HasSubstr("\"domain\":\"test@example.com\""));
   EXPECT_THAT(body,
               ::testing::Not(::testing::HasSubstr("\"expired\":true")));
+}
+
+TEST_F(AdminLicenseHandlerTest, StatusEmitsScopeAndSiteDomainWhenPresent) {
+  // the design record v5: a scoped token surfaces "scope" + "site_domain" in status.
+  // "domain" stays the subscriber email (legacy key name).
+  int64_t far_future = 1806451200;
+  GoogleString token =
+      MakeToken("biz@example.com", "business", far_future, "sub_biz", "k1",
+                1743379200, "site", "example.com");
+  GoogleString body;
+  GoogleString json = StrCat("{\"key\":\"", token, "\"}");
+  ASSERT_EQ(200, DoGlobalRequest("/v1/license/apply", json, &body));
+  ASSERT_THAT(body, ::testing::HasSubstr("\"success\":true"));
+  EXPECT_THAT(body, ::testing::HasSubstr("\"scope\":\"site\""));
+  EXPECT_THAT(body, ::testing::HasSubstr("\"site_domain\":\"example.com\""));
+  AdvancePastRateLimit();
+
+  // StringAsyncFetch appends; clear so the status assertions below cannot be
+  // satisfied by leftover apply-response bytes.
+  body.clear();
+  int status = DoGlobalRequest("/v1/license/status", "", &body);
+  EXPECT_EQ(200, status);
+  EXPECT_THAT(body, ::testing::HasSubstr("\"licensed\":true"));
+  EXPECT_THAT(body, ::testing::HasSubstr("\"scope\":\"site\""));
+  EXPECT_THAT(body, ::testing::HasSubstr("\"site_domain\":\"example.com\""));
+  EXPECT_THAT(body, ::testing::HasSubstr("\"domain\":\"biz@example.com\""));
+}
+
+TEST_F(AdminLicenseHandlerTest, StatusOmitsScopeForLegacyScopelessToken) {
+  // R9/R10: legacy scopeless tokens classify licensed; no scope keys appear.
+  int64_t far_future = 1806451200;
+  ASSERT_TRUE(ApplyValidToken("legacy@example.com", "pro", far_future));
+  AdvancePastRateLimit();
+
+  GoogleString body;
+  int status = DoGlobalRequest("/v1/license/status", "", &body);
+  EXPECT_EQ(200, status);
+  EXPECT_THAT(body, ::testing::HasSubstr("\"licensed\":true"));
+  EXPECT_THAT(body, ::testing::Not(::testing::HasSubstr("\"scope\"")));
+  EXPECT_THAT(body, ::testing::Not(::testing::HasSubstr("\"site_domain\"")));
 }
 
 TEST_F(AdminLicenseHandlerTest, StatusShowsExpiredToken) {
