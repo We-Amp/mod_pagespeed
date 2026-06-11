@@ -3403,6 +3403,28 @@
      },
      "published": "2025-02-05T18:15:33.347"
     }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Memory Allocation with Excessive Size Value vulnerability in Apache HTTP Server's mod_http leads to denial of service via malicious HTTP requests.  This issue affects Apache HTTP Server: from 2.4.17 through 2.4.67."
+      }
+     ],
+     "id": "CVE-2026-49975",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 7.5,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2026-06-08T16:16:44.223"
+    }
    }
   ],
   "cpe:2.3:a:fmt:fmt": [
@@ -9461,7 +9483,7 @@
    }
   ]
  },
- "generated": "2026-06-04T10:55:01Z",
+ "generated": "2026-06-11T12:03:32Z",
  "schema": 1,
  "source": "https://services.nvd.nist.gov/rest/json/cves/2.0"
 }
