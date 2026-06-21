@@ -75,9 +75,12 @@ class WinHTTP
 	int resolveTimeout,connectTimeout,sendTimeout,receiveTimeout,totalTimeout;
 	char *tempbuf;
 	WinHTTPEvents *eventhandler;
+	bool allow_self_signed_;
 public:
 	WinHTTP();
 	void SetEventHandler(WinHTTPEvents *eventhandler) {this->eventhandler=eventhandler;}
+	// Relax TLS cert validation for https requests (FetchHttps allow_self_signed).
+	void SetAllowSelfSigned(bool v) { allow_self_signed_ = v; }
 	void SetUserAgent(std::string useragent);
 	void SetUserAgent(std::wstring useragent);
 

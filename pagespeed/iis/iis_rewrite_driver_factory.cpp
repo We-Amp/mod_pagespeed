@@ -578,9 +578,15 @@ private:
 
 	UrlAsyncFetcher* IisRewriteDriverFactory::AllocateFetcher(
 		SystemRewriteOptions* config) {
+		// FetchHttps allow_self_signed: the curl-based system fetcher parses
+		// the https_options string; the WinHTTP fetcher has no curl, so detect
+		// the token here and pass it through to relax TLS validation when set.
+		bool allow_self_signed = config != NULL &&
+			config->https_options().find("allow_self_signed") != GoogleString::npos;
 		if (use_native_fetcher_) {
 			message_handler()->Message(kInfo, "Allocating native fetcher");
 			IisAsyncUrlFetcher* f = new IisAsyncUrlFetcher();
+			f->set_allow_self_signed(allow_self_signed);
 			native_fetchers_.push_back(f);
 			return f;
 		}
@@ -588,6 +594,7 @@ private:
 			message_handler()->Message(kInfo, "Allocating default fetcher");
 			// WinHTTP is the only fetcher on Windows (no curl)
 			IisAsyncUrlFetcher* f = new IisAsyncUrlFetcher();
+			f->set_allow_self_signed(allow_self_signed);
 			native_fetchers_.push_back(f);
 			return f;
 		}

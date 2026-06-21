@@ -99,18 +99,6 @@ pagespeed_cc_test(
             ],
 )
 
-pagespeed_cc_test(
-    name = "iis_admin_handler_test",
-    tags = ["manual"],  # Old 1.1 API; needs rewrite for IISpeed adoption
-    srcs = ["iis_admin_handler_test.cc"],
-    target_compatible_with = ["@platforms//os:windows"],
-    deps = [
-        ":iis_test_base",
-        ":mock_iis",
-        "//pagespeed/iis:iis_module",
-            ],
-)
-
 # New tests added for TEST_PARITY_PLAN.md
 
 pagespeed_cc_test(

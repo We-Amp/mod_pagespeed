@@ -52,7 +52,7 @@ void IisAsyncWorker::Cancel()
 }
 
 
-IisAsyncUrlFetcher::IisAsyncUrlFetcher():UrlAsyncFetcher(),fetcher_supports_https_(true)
+IisAsyncUrlFetcher::IisAsyncUrlFetcher():UrlAsyncFetcher(),fetcher_supports_https_(true),allow_self_signed_(false)
 {
 	InitializeCriticalSection(&cs);
 }

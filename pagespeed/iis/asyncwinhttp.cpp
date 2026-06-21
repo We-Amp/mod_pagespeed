@@ -28,6 +28,7 @@ WinHTTP::WinHTTP()
 	totalTimeout=75000;
 	eventhandler=NULL;
 	status=WinHTTPStatus::NotStarted;
+	allow_self_signed_=false;
 }
 void WinHTTP::SetUserAgent(std::string useragent)
 {
@@ -387,7 +388,16 @@ bool WinHTTP::GetUrl(std::string url, std::string host)
 		connectSession=WinHttpConnect(session,server.c_str(),port,0);
 		if (connectSession)
 		{
-			requestHandle=WinHttpOpenRequest(connectSession,L"GET",urlpath.c_str(),NULL,NULL,NULL,WINHTTP_FLAG_REFRESH);
+			// Use TLS for https URLs. WinHttpCrackUrl populated urlComp.nScheme;
+			// without WINHTTP_FLAG_SECURE the request goes out as cleartext on
+			// the TLS port and the fetch fails -- so the module could not fetch
+			// any https-origin sub-resource (loopback or remote).
+			DWORD requestFlags=WINHTTP_FLAG_REFRESH;
+			if (urlComp.nScheme==INTERNET_SCHEME_HTTPS)
+			{
+				requestFlags|=WINHTTP_FLAG_SECURE;
+			}
+			requestHandle=WinHttpOpenRequest(connectSession,L"GET",urlpath.c_str(),NULL,NULL,NULL,requestFlags);
 			if (host != "") {
 				std::wstring w_host = s2ws(host);
 				w_host = L"Host: " + w_host;
@@ -396,6 +406,18 @@ bool WinHTTP::GetUrl(std::string url, std::string host)
 			}
 			if (requestHandle)
 			{
+				// When configured (FetchHttps allow_self_signed), relax TLS
+				// validation for https requests -- mirrors the curl-based system
+				// fetcher's allow_self_signed on nginx/Apache. Off by default, so
+				// production https origins are validated normally.
+				if (allow_self_signed_ && (requestFlags & WINHTTP_FLAG_SECURE))
+				{
+					DWORD secFlags = SECURITY_FLAG_IGNORE_UNKNOWN_CA |
+						SECURITY_FLAG_IGNORE_CERT_CN_INVALID |
+						SECURITY_FLAG_IGNORE_CERT_DATE_INVALID |
+						SECURITY_FLAG_IGNORE_CERT_WRONG_USAGE;
+					WinHttpSetOption(requestHandle, WINHTTP_OPTION_SECURITY_FLAGS, &secFlags, sizeof(secFlags));
+				}
 				std::list<std::wstring>::iterator itheaders=headers.begin();
 				std::list<std::wstring>::iterator itvalues=headervalues.begin();
 				while(itheaders!=headers.end())

@@ -41,7 +41,7 @@ namespace net_instaweb {
 //
 // Returns an empty string for a null pointer, for an all-zero IPv4 / unspecified
 // IPv6 address (callers treat that as "connect back on 127.0.0.1"), and for an
-// unrecognized address family.  Mirrors GetClientIp() in iis_admin_handler.cc.
+// unrecognized address family.
 GoogleString GetIPString(SOCKADDR* addr);
 
 }  // namespace net_instaweb

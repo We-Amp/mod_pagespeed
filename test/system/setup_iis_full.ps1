@@ -67,6 +67,9 @@ $AppPoolName = "PageSpeedTestPool"
 $WebRoot = "C:\inetpub\pagespeed_test"
 $CacheDir = "C:\pagespeed_cache"
 $LogDir = "C:\pagespeed_logs"
+# HTTPS test binding. Full IIS only -- run_iis_tests.ps1 exports the
+# matching PAGESPEED_HTTPS_PORT for the pytest HTTPS suite.
+$HttpsPort = 8443
 
 # Auto-detect source root if not provided
 if (-not $SourceRoot) {
@@ -444,6 +447,108 @@ function New-IISSite {
     Write-Status "IIS site configured successfully" "Green"
 }
 
+function New-HttpsBinding {
+    # Add an HTTPS binding on $HttpsPort with a self-signed localhost cert so the
+    # IIS system tests can exercise the PageSpeed module over TLS.
+    #
+    # CI runs Full IIS (run_iis_tests.ps1 -UseFullIIS), so HTTPS coverage is
+    # wired here only; IIS Express (setup_iis_test.ps1) stays HTTP-only.
+    #
+    # The server-side HTTPS listener the tests hit needs three things:
+    #   1. a cert in LocalMachine\My bound to the port via netsh sslcert;
+    #   2. read access on the cert PRIVATE KEY for the IIS worker identity --
+    #      without it SChannel cannot present the credential and the handshake
+    #      fails (event 36870 / SEC_E_NO_CREDENTIALS);
+    #   3. trust in LocalMachine\Root (+ an IP:127.0.0.1 SAN).
+    # (3) and the IP SAN are forward-looking: the module's WinHTTP sub-resource
+    # fetcher (asyncwinhttp.cpp) currently omits WINHTTP_FLAG_SECURE and cannot
+    # fetch over TLS, so HTTPS *resource rewriting* is not exercised here yet
+    #. These tests cover the HTTPS
+    # *listener*: serving, headers, and the admin endpoint over TLS.
+    Write-Status "Configuring HTTPS binding on port $HttpsPort..." "Gray"
+
+    $certFriendlyName = "PageSpeedTestHttps"
+
+    # Reuse a non-expired test cert if one already exists (idempotent across
+    # repeated installs on a shared CI runner); otherwise mint a fresh one.
+    $cert = Get-ChildItem "Cert:\LocalMachine\My" -ErrorAction SilentlyContinue |
+        Where-Object { $_.FriendlyName -eq $certFriendlyName -and $_.NotAfter -gt (Get-Date) } |
+        Select-Object -First 1
+
+    if (-not $cert) {
+        Write-Status "Creating self-signed certificate ($certFriendlyName)..." "Gray"
+        $cert = New-SelfSignedCertificate `
+            -CertStoreLocation "Cert:\LocalMachine\My" `
+            -FriendlyName $certFriendlyName `
+            -Subject "CN=localhost" `
+            -TextExtension @("2.5.29.17={text}DNS=localhost&IPAddress=127.0.0.1") `
+            -KeyUsage DigitalSignature, KeyEncipherment `
+            -NotAfter (Get-Date).AddYears(5)
+    } else {
+        Write-Status "Reusing existing self-signed certificate (thumbprint $($cert.Thumbprint))" "Gray"
+    }
+
+    $thumb = $cert.Thumbprint
+
+    # Grant the IIS worker identity read on the cert's private key so SChannel
+    # can present it during the server-side TLS handshake. New-SelfSignedCertificate
+    # ACLs the CNG key to SYSTEM + Administrators only; IIS_IUSRS covers all
+    # app-pool identities. Best-effort: a failure surfaces as failing HTTPS
+    # tests, not a broken install. (Redirect, don't pipe, to keep $LASTEXITCODE.)
+    try {
+        $rsaKey = [System.Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($cert)
+        if ($rsaKey -and $rsaKey.Key -and $rsaKey.Key.UniqueName) {
+            $keyPath = Join-Path $env:ProgramData ("Microsoft\Crypto\Keys\" + $rsaKey.Key.UniqueName)
+            & icacls $keyPath /grant "IIS_IUSRS:(R)" > $null 2>&1
+            if ($LASTEXITCODE -eq 0) {
+                Write-Status "Granted IIS_IUSRS read on the cert private key" "Gray"
+            } else {
+                Write-Status "WARNING: icacls grant on private key returned exit $LASTEXITCODE" "Yellow"
+            }
+        } else {
+            Write-Status "WARNING: could not resolve cert private-key path for ACL grant" "Yellow"
+        }
+    } catch {
+        Write-Status "WARNING: private-key ACL grant failed: $_" "Yellow"
+    }
+
+    # Trust the cert in LocalMachine\Root (forward-looking -- see header). Removed
+    # again by Uninstall-IISSite so a shared runner is not left mutated.
+    $rootStore = New-Object System.Security.Cryptography.X509Certificates.X509Store("Root", "LocalMachine")
+    try {
+        $rootStore.Open("ReadWrite")
+        if (-not ($rootStore.Certificates | Where-Object { $_.Thumbprint -eq $thumb })) {
+            $rootStore.Add($cert)
+            Write-Status "Added test certificate to LocalMachine\Root (trusted)" "Gray"
+        }
+    } finally {
+        $rootStore.Close()
+    }
+
+    # Add the HTTPS site binding (empty host header -> matches all, no SNI).
+    # -join '' coerces appcmd's output to a single string so -notmatch is a
+    # regex test (not an array filter) regardless of how many bindings exist.
+    $bindings = (Invoke-AppCmd list site $SiteName /text:bindings 2>$null) -join ''
+    if ($bindings -notmatch "https/\*:${HttpsPort}:") {
+        Invoke-AppCmd set site $SiteName /+"bindings.[protocol='https',bindingInformation='*:${HttpsPort}:']" | Out-Null
+        Write-Status "Added https binding *:${HttpsPort}: to $SiteName" "Gray"
+    }
+
+    # Bind the cert to the port in HTTP.SYS. Idempotent: delete any stale
+    # registration first (a shared runner may carry one from a prior run). The
+    # appid is the well-known IIS Manager GUID -- any valid GUID works. Use
+    # redirection (not a pipe to Out-Null) so $LASTEXITCODE reflects netsh --
+    # piping a native command to a cmdlet leaves $LASTEXITCODE stale (PS #19848).
+    $appId = "{4dc3e181-e14b-4a21-b022-59fc669b0914}"
+    & netsh http delete sslcert ipport=0.0.0.0:$HttpsPort > $null 2>&1
+    $sslAddOut = & netsh http add sslcert ipport=0.0.0.0:$HttpsPort certhash=$thumb appid=$appId certstorename=MY 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Status "WARNING: netsh add sslcert failed (exit $LASTEXITCODE) for 0.0.0.0:$HttpsPort -- $sslAddOut" "Yellow"
+    } else {
+        Write-Status "Bound certificate $thumb to 0.0.0.0:$HttpsPort" "Green"
+    }
+}
+
 function New-WebConfig {
     Write-Status "Creating web.config and pagespeed.config..."
 
@@ -498,6 +603,7 @@ pagespeed StatisticsLogging on
 pagespeed EnableCachePurge on
 pagespeed RateLimitBackgroundFetches on
 pagespeed InPlaceResourceOptimization on
+pagespeed FetchHttps enable,allow_self_signed
 pagespeed CriticalImagesBeaconEnabled false
 pagespeed BlockingRewriteKey psatest
 pagespeed Library 43 1o978_K0_LNE5_ystNklf http://www.modpagespeed.com/rewrite_javascript.js
@@ -886,6 +992,23 @@ function Uninstall-IISSite {
 
     Stop-IISSite
 
+    # Remove the HTTPS test artifacts so a shared runner is not left
+    # mutated: the HTTP.SYS sslcert registration (not removed by deleting the
+    # site), and the self-signed cert from BOTH LocalMachine\My and \Root.
+    try {
+        & netsh http delete sslcert ipport=0.0.0.0:$HttpsPort > $null 2>&1
+    } catch { }
+    foreach ($storeName in @("My", "Root")) {
+        try {
+            $store = New-Object System.Security.Cryptography.X509Certificates.X509Store($storeName, "LocalMachine")
+            $store.Open("ReadWrite")
+            $store.Certificates |
+                Where-Object { $_.FriendlyName -eq "PageSpeedTestHttps" } |
+                ForEach-Object { $store.Remove($_) }
+            $store.Close()
+        } catch { }
+    }
+
     # Remove site
     try {
         Invoke-AppCmd delete site $SiteName 2>$null | Out-Null
@@ -909,6 +1032,7 @@ function Install-IISSiteComplete {
     Initialize-TestEnvironment
     Install-PageSpeedModule
     New-IISSite
+    New-HttpsBinding
     New-WebConfig
     Start-IISSite
 }

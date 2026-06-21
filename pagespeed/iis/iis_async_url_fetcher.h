@@ -21,6 +21,7 @@ class IisAsyncUrlFetcher: public UrlAsyncFetcher
 	CRITICAL_SECTION cs;
 	std::list<IisAsyncWorker *> asyncworkers;
 	bool fetcher_supports_https_;
+	bool allow_self_signed_;
 public:
 	IisAsyncUrlFetcher();
 	void StopFetch(IisAsyncWorker *worker);
@@ -47,6 +48,11 @@ public:
 
 	void set_fetcher_supports_https(bool val) { fetcher_supports_https_ = val; }
 
+	// FetchHttps allow_self_signed: when set, the WinHTTP fetcher relaxes TLS
+	// cert validation for https sub-resource fetches (off by default).
+	bool allow_self_signed() const { return allow_self_signed_; }
+	void set_allow_self_signed(bool val) { allow_self_signed_ = val; }
+
 	bool shutting_down_;
 	virtual void ShutDown();
 
@@ -70,6 +76,7 @@ public:
 	bool GetUrl(GoogleString url, const char* host)
 	{
 		CHECK(host != NULL);
+		client.SetAllowSelfSigned(fetcher->allow_self_signed());
 		bool res = client.GetUrl(std::string(url.c_str()), std::string(host == NULL ? "" : host));
 		messagehandler->Message(kInfo, "Request to [%s] with host header [%s] -> %s", url.c_str(), host, res ? "OK":"Fail");
 		return res;

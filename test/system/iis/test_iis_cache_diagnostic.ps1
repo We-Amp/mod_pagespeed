@@ -13,7 +13,8 @@
 # whole pattern is worthless if a future regression silently drops the
 # header, so this test pins the header-emission contract.
 #
-# Provisions a known-failure-mode (FileCachePath = "") by editing the
+# Provisions a known-failure-mode (FileCachePath line DELETED, so
+# file_cache_path() falls back to its empty default) by editing the
 # shipped pagespeed.config, recycles the IIS app pool to force module
 # re-init, asserts the header, then restores the original config and
 # confirms the healthy state returns.
@@ -142,23 +143,42 @@ function Restore-Config {
 trap { Restore-Config; break }
 
 try {
-    # --- Provision: rewrite FileCachePath to an empty value ---
-    # Preserve all other config lines; only flip the FileCachePath directive.
+    # --- Provision: DELETE the FileCachePath directive entirely ---
+    # Preserve all other config lines; only remove the FileCachePath line.
     # Matches BOTH the canonical "pagespeed FileCachePath ..." and the
     # legacy "ModPagespeedFileCachePath ..." spellings -- the shipped
     # pagespeed.config uses the canonical form, but upgrade-from-IISpeed
-    # installs may still have the legacy form. Without the alternation,
-    # the regex never matches, the fallback appends a SECOND directive,
-    # and the original "pagespeed FileCachePath ..." line keeps a valid
-    # value -> module never enters kCachePathEmpty -> test times out.
-    Write-Host "=== Provisioning failure mode (FileCachePath = empty) ==="
+    # installs may still have the legacy form.
+    #
+    # Why delete the line instead of setting FileCachePath ""? The IIS
+    # config tokenizer (pagespeed/iis/iis_config_util.h) DROPS empty
+    # quoted tokens: it only pushes a token when tmp.size() != 0, so
+    # `pagespeed FileCachePath ""` tokenizes to just ["FileCachePath"]
+    # (n_args == 1). iis_configuration.cpp's `tokens.size() == 2` guard
+    # then never runs the path setter, and ParseAndSetOptions routes the
+    # 1-arg directive to ParseAndSetOptions0 (which only knows
+    # diagnose/on/off/unplugged) -> kOptionNameUnknown -> FileCachePath
+    # is never set -> file_cache_path() keeps its prior/default value and
+    # the module never enters kCachePathEmpty.
+    #
+    # Deleting the directive entirely is a genuinely reachable "admin
+    # removed the line" case: with no FileCachePath directive, the
+    # SystemRewriteOptions file_cache_path_ property keeps its registered
+    # default of "" (pagespeed/system/system_rewrite_options.cc:93), so
+    # iis_process_context.cpp:282 `if (cache_path.empty())` fires
+    # InitFailureKind::kCachePathEmpty -> X-Pagespeed-Init-Status:
+    # cache-path-empty (iis_http_module.cpp:490-491).
+    Write-Host "=== Provisioning failure mode (FileCachePath line deleted) ==="
+    # Drop the whole FileCachePath line (including its trailing newline so
+    # we don't leave a blank line behind).
     $patched = $originalContent -replace `
-        '(?m)^\s*(?:ModPagespeed|pagespeed\s+)FileCachePath\s+.*$', `
-        'pagespeed FileCachePath ""'
+        '(?m)^\s*(?:ModPagespeed|pagespeed\s+)FileCachePath\s+.*\r?\n?', `
+        ''
     if ($patched -eq $originalContent) {
-        # Directive missing entirely - inject one so the module sees an
-        # empty value rather than the default fallback.
-        $patched = $originalContent + "`npagespeed FileCachePath `"`"`n"
+        # Directive was already absent -> the module already sees the
+        # empty default; nothing to remove. The assertion below will
+        # still validate kCachePathEmpty fires.
+        Write-Host "::warning::No FileCachePath directive found to remove; config already has none. Proceeding - the empty default should still trip kCachePathEmpty."
     }
     Set-Content -LiteralPath $ConfigPath -Value $patched -NoNewline
     Recycle-AppPool -pool $AppPool

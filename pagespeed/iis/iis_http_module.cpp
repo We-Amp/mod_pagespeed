@@ -321,9 +321,6 @@ namespace net_instaweb
 	REQUEST_NOTIFICATION_STATUS
 		IisHttpModule::OnBeginRequestPageSpeed(IN IHttpContext * pHttpContext, IN IHttpEventProvider * pProvider)
 	{
-		auto cp = pHttpContext->GetResponse()->GetCachePolicy();
-		bool isCached = cp->IsCached();
-
 		// oschaaf: state is to keep it thread safe
 		std::mbstate_t state = std::mbstate_t();
 		auto request = pHttpContext->GetRootContext()->GetRequest();
@@ -948,7 +945,6 @@ namespace net_instaweb
 			return RQ_NOTIFICATION_CONTINUE;
 		}
 
-		auto* inner_ctx = request_context->GetInnerContext();
 		// the design record: soft enforcement — do NOT bail on the optimized response
 		// path when unlicensed. Optimization always proceeds; the unlicensed
 		// state is signalled softly via the "x-pagespeed-warn: unlicensed"
@@ -962,7 +958,11 @@ namespace net_instaweb
 		}
 		auto innerContext = request_context->GetInnerContext();
 
-		DCHECK(request_context);
+		if (innerContext == nullptr) {
+			log(pHttpContext, "OnSendResponse - no innerContext, bail");
+			return RQ_NOTIFICATION_CONTINUE;
+		}
+
 		log(pHttpContext, "OnSendResponse: [%s]", innerContext->url());
 		innerContext->set_send_response_seen(true);
 
@@ -1061,17 +1061,20 @@ namespace net_instaweb
 
 				pHttpResponse->DisableKernelCache();
 				auto cp = pHttpResponse->GetCachePolicy();
-				bool isCached = cp->IsCached();
 				auto kcp = cp->GetKernelCachePolicy();
-				kcp->Policy = HttpCachePolicyNocache;
-				kcp->SecondsToLive = 0;
+				if (kcp) {
+					kcp->Policy = HttpCachePolicyNocache;
+					kcp->SecondsToLive = 0;
+				}
 				auto vbh = cp->GetVaryByHeaders();
 				auto vbq = cp->GetVaryByQueryStrings();
 				auto vbv = cp->GetVaryByValue();
 				auto kcis = cp->GetKernelCacheInvalidatorSet();
 
 				auto ucp = cp->GetUserCachePolicy();
-				ucp->Policy = HttpCachePolicyNocache;
+				if (ucp) {
+					ucp->Policy = HttpCachePolicyNocache;
+				}
 
 				
 			}

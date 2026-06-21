@@ -13,9 +13,20 @@
 # This test proves the fallback path works: with the canonical config
 # absent and a distinctive directive in the legacy config, the module
 # loads the legacy config. The distinctive directive used is
-# `pagespeed Statistics off`, which removes /pagespeed_statistics from
-# the served endpoints -- the test asserts that endpoint 404s under the
-# legacy-only state and 200s after restore.
+# `pagespeed off`: when the module is disabled it never runs PSOL
+# on the response, so the X-Page-Speed version header is NOT emitted
+# (the engine adds X-Page-Speed only when it actually optimizes a
+# response -- see iis_http_module.cpp:1199, which short-circuits the
+# response path with "pagespeed disabled" when options->enabled() is
+# false, and :1219 which treats an existing X-Page-Speed header as proof
+# the content was already rewritten). The test asserts X-Page-Speed is
+# ABSENT under the legacy-only `pagespeed off` state and present again
+# after restore. This is a far stronger "config reloaded" signal than
+# the old `Statistics off -> /pagespeed_statistics 404` assertion, which
+# was invalid: the IIS module never gates the stats endpoint on
+# statistics_enabled() (Statistics controls collection, not endpoint
+# availability), so that endpoint stayed 200 and the poll always timed
+# out.
 #
 # Pre-conditions (asserted; test aborts cleanly if absent):
 #   - PageSpeed IIS module already installed + registered
@@ -110,14 +121,19 @@ Copy-Item -LiteralPath $CanonicalConfig -Destination $stash -Force
 
 try {
     # Read canonical config as the basis for the legacy variant so we
-    # don't drift wildly from prod-shipped defaults -- only flip the
-    # one distinctive directive.
+    # don't drift wildly from prod-shipped defaults -- only flip the one
+    # distinctive directive: the master `pagespeed on` enable switch
+    # becomes `pagespeed off`. When off, the module short-circuits
+    # the response path and never emits the X-Page-Speed header, which is
+    # the observable we assert below. The regex only matches the bare
+    # master switch ("pagespeed on" on its own line) -- not multi-token
+    # directives like "pagespeed Statistics on" or "pagespeed RewriteLevel
+    # ...", which keep more tokens after "pagespeed".
     $legacyContent = (Get-Content -LiteralPath $CanonicalConfig -Raw) `
-        -replace '(?m)^\s*pagespeed\s+Statistics\s+on\s*$', 'pagespeed Statistics off' `
-        -replace '(?m)^\s*pagespeed\s+StatisticsLogging\s+on\s*$', 'pagespeed StatisticsLogging off'
+        -replace '(?m)^\s*pagespeed\s+on\s*$', 'pagespeed off'
 
-    if ($legacyContent -notmatch 'pagespeed\s+Statistics\s+off') {
-        Write-Error "Canonical config did not contain 'pagespeed Statistics on' -- cannot derive distinctive legacy variant"
+    if ($legacyContent -notmatch '(?m)^\s*pagespeed\s+off\s*$') {
+        Write-Error "Canonical config did not contain a bare 'pagespeed on' master switch -- cannot derive distinctive legacy variant"
         exit 2
     }
 
@@ -134,21 +150,26 @@ try {
     Write-Host "[fallback-test] Recycling AppPool $AppPool"
     Recycle-AppPool -pool $AppPool
 
-    # Module re-init can take a beat -- poll the stats endpoint.
-    Write-Host "[fallback-test] Asserting Statistics is off (legacy config loaded)"
-    $ok = Wait-For -timeoutSec $PollSeconds -desc "Statistics off via legacy fallback" -cond {
-        $r = Get-PsResponse -u $StatsUrl
-        # Legacy config has `Statistics off` -- endpoint should 404.
-        # (Healthy baseline: 200.)
-        return ($r -and $r.StatusCode -eq 404)
+    # Module re-init can take a beat -- poll for the X-Page-Speed header
+    # to disappear. With the legacy config's `pagespeed off`, the module
+    # never optimizes the response and never adds X-Page-Speed; its
+    # absence is a strong "legacy config loaded" signal (the healthy
+    # baseline above already confirmed the header is present with the
+    # canonical config).
+    Write-Host "[fallback-test] Asserting pagespeed is off (legacy config loaded -> X-Page-Speed absent)"
+    $ok = Wait-For -timeoutSec $PollSeconds -desc "X-Page-Speed absent via legacy fallback (pagespeed off)" -cond {
+        $h = Get-PsHeaders -u $Url
+        # The request itself must succeed (a healthy 200 origin response);
+        # what changes is that PSOL no longer stamps X-Page-Speed on it.
+        return ($h -ne $null -and -not $h['X-Page-Speed'])
     }
     if (-not $ok) {
-        $r = Get-PsResponse -u $StatsUrl
-        $code = if ($r) { $r.StatusCode } else { "<no response>" }
-        Write-Error "Fallback did not take effect: $StatsUrl returned $code (expected 404 because legacy config has Statistics off)"
+        $h = Get-PsHeaders -u $Url
+        $obs = if ($h -and $h['X-Page-Speed']) { $h['X-Page-Speed'] } elseif ($null -eq $h) { "<no response>" } else { "<absent>" }
+        Write-Error "Fallback did not take effect: $Url still reports X-Page-Speed='$obs' (expected absent because legacy config has 'pagespeed off')"
         exit 1
     }
-    Write-Host "[fallback-test] PASS: legacy IISWebSpeed\pagespeed.config was loaded"
+    Write-Host "[fallback-test] PASS: legacy IISWebSpeed\pagespeed.config was loaded (X-Page-Speed absent under 'pagespeed off')"
 
 } finally {
     # --- Teardown: restore canonical, drop legacy, recycle -----------
@@ -165,9 +186,11 @@ try {
     }
     Write-Host "[fallback-test] Recycling AppPool $AppPool to restore healthy state"
     Recycle-AppPool -pool $AppPool
-    Wait-For -timeoutSec $PollSeconds -desc "stats endpoint 200 after restore" -cond {
-        $r = Get-PsResponse -u $StatsUrl
-        return ($r -and $r.StatusCode -eq 200)
+    # Healthy state is restored when the canonical `pagespeed on` config
+    # is loaded again and PSOL resumes stamping X-Page-Speed.
+    Wait-For -timeoutSec $PollSeconds -desc "X-Page-Speed present again after restore" -cond {
+        $h = Get-PsHeaders -u $Url
+        return ($h -ne $null -and $h['X-Page-Speed'])
     } | Out-Null
 }
 

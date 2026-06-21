@@ -240,6 +240,15 @@ function Run-Tests {
     $env:PAGESPEED_SERVER_TYPE = "iis"
     $env:PAGESPEED_STATS_PATH = "/pagespeed_statistics"
     $env:PAGESPEED_ADMIN_PATH = "/pagespeed_admin"
+    # HTTPS coverage is wired into the Full IIS harness only
+    # (setup_iis_full.ps1 adds an https binding + self-signed cert on 8443).
+    # IIS Express (setup_iis_test.ps1) stays HTTP-only, so leave HTTPS
+    # unconfigured there -- the HTTPS tests self-skip when PAGESPEED_HTTPS_HOST
+    # is unset (module-level skipif).
+    if ($UseFullIIS) {
+        $env:PAGESPEED_HTTPS_HOST = "localhost"
+        $env:PAGESPEED_HTTPS_PORT = "8443"
+    }
     # Force unbuffered output so CI runners see pytest progress in real-time
     $env:PYTHONUNBUFFERED = "1"
 
@@ -271,11 +280,16 @@ function Run-Tests {
         $pytestArgs += @("-s", "--capture=no")
     }
 
-    # Add markers to skip tests that require features not yet implemented
-    # These can be removed as features are added to the IIS module
+    # Skip secondary-cache tests: the IIS harness is single-site with no
+    # secondary vhost.
+    #
+    # IIS HTTPS coverage: iis/test_iis_https.py (listener + resource rewriting
+    # over TLS) plus the cross-platform automatic/test_https.py, both enabled by
+    # PAGESPEED_HTTPS_HOST under -UseFullIIS. They self-skip when HTTPS is
+    # unconfigured (e.g. IIS Express) via a module-level skipif. Sub-resource
+    # rewriting over TLS works via the WINHTTP_FLAG_SECURE fix.
     $pytestArgs += @(
-        "--deselect=automatic/test_https.py",  # HTTPS not configured yet
-        "-m", "not requires_secondary and not requires_https"
+        "-m", "not requires_secondary"
     )
 
     Write-Status "Running: python $($pytestArgs -join ' ')" "Gray"

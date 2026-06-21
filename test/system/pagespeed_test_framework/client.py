@@ -176,7 +176,11 @@ class PageSpeedClient:
         """
         self.host = host
         self.port = port
-        self.timeout = timeout
+        # Scale by PAGESPEED_TEST_TIMEOUT_MULTIPLIER like fetch_until -- AppVerifier
+        # runs are 3-50x slower. Keep the raw value so derived clients
+        # (e.g. with_webp) re-scale exactly once instead of double-scaling.
+        self._raw_timeout = timeout
+        self.timeout = timeout * _TIMEOUT_MULTIPLIER
         self.user_agent = user_agent
         self.use_https = use_https
 
@@ -535,9 +539,12 @@ class PageSpeedClient:
         the Accept: image/webp header.
         """
         return PageSpeedClient(
+            # Pass the RAW (unscaled) timeout: the constructor applies
+            # _TIMEOUT_MULTIPLIER itself, so handing it self.timeout (already
+            # scaled) would double-scale. See PageSpeedClient.__init__.
             host=self.host,
             port=self.port,
-            timeout=self.timeout,
+            timeout=self._raw_timeout,
             user_agent=WEBP_USER_AGENT,
             use_https=self.use_https,
         )

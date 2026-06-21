@@ -192,10 +192,22 @@ try {
     }
     Write-Host "Got HTTP $($response.StatusCode) from $Url."
 
-    # Assert: no failure-mode headers.
-    if ($response.Headers["X-Pagespeed-Init-Status"]) {
-        throw ("Positive path: expected NO X-Pagespeed-Init-Status header, " +
-               "got '$($response.Headers['X-Pagespeed-Init-Status'])'.")
+    # Assert: no failure-mode headers. The very first request after
+    # Start-W3SVC + Recycle-AppPool races the module init: a freshly
+    # recycled w3wp transiently emits X-Pagespeed-Init-Status:
+    # cache-path-missing (the per-site cache subdir auto-creates ON the
+    # first request, so request #1 races init) before/during the
+    # init-time auto-create, then clears within a few seconds. A
+    # one-shot check on the first response flakes; poll for the header to
+    # be ABSENT instead, mirroring the post-restore sanity-check idiom
+    # used later in this same file.
+    $cleared = Wait-ForHeader -u $Url -name "X-Pagespeed-Init-Status" `
+                              -expectPresent $false -timeoutSec $PollSeconds
+    if ($cleared -eq [string]::Empty) {
+        $h = Get-PsHeaders -u $Url
+        $obs = if ($h) { $h["X-Pagespeed-Init-Status"] } else { "<no response>" }
+        throw ("Positive path: X-Pagespeed-Init-Status did not clear within " +
+               "${PollSeconds}s; observed '$obs'.")
     }
 
     # Assert: LogDir exists and is a real directory (not a reparse
