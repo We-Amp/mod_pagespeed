@@ -59,7 +59,7 @@ set -euo pipefail
 
 die() { echo "::error::$*" >&2; exit "${2:-1}"; }
 
-[[ $# -eq 2 ]] || die "usage: $0 <noble|bullseye|bookworm|trixie|jammy|el9> <package-path>" 1
+[[ $# -eq 2 ]] || die "usage: $0 <noble|bullseye|bookworm|trixie|jammy|el9|el10> <package-path>" 1
 DISTRO="$1"
 PKG="$2"
 [[ -f "$PKG" ]] || die "package not found: $PKG" 1
@@ -126,12 +126,15 @@ case "$DISTRO" in
     cp "$PKG" "./$(basename "$PKG")"
     install_pkg_apt
     ;;
-  el9)
+  el9|el10)
+    # el9 + el10 take the identical dnf path: stock AppStream nginx
+    # (el9 -> 1.20.1, el10 -> 1.26.x) + the dist-tagged module RPM. The load
+    # snippet ships under /usr/share/nginx/modules/ on both.
     install_stock_nginx_dnf
     install_pkg_dnf
     ;;
   *)
-    die "unknown distro '$DISTRO' (want noble|bullseye|bookworm|trixie|jammy|el9)" 1
+    die "unknown distro '$DISTRO' (want noble|bullseye|bookworm|trixie|jammy|el9|el10)" 1
     ;;
 esac
 

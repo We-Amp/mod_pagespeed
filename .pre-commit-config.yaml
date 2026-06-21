@@ -18,3 +18,12 @@ repos:
         # pagespeed/iis/ uses Windows-specific include ordering that conflicts
         # with SortIncludes:true in Google style (winsock2.h before windows.h)
         exclude: '^(third_party|pagespeed/iis)/'
+
+  - repo: local
+    hooks:
+      - id: doc-version-literals
+        name: Doc version-literal drift (CLAUDE.md/AGENTS.md vs clang-format pin)
+        entry: tools/ci/check_doc_commands.sh
+        language: script
+        pass_filenames: false
+        files: '^(CLAUDE\.md|AGENTS\.md|\.pre-commit-config\.yaml)$'

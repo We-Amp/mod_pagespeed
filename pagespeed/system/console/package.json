@@ -18,7 +18,7 @@
     "svelte-check": "^4.0.0",
     "typescript": "^5.7.0",
     "uplot": "^1.6.31",
-    "vite": "^6.4.2",
+    "vite": "^6.4.3",
     "vite-plugin-singlefile": "^2.0.0",
     "vitest": "^4.1.8"
   },

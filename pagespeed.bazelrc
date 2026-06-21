@@ -118,6 +118,28 @@ build:clang-libstdcxx13 --linkopt=-L/usr/lib/gcc/aarch64-linux-gnu/13
 build:clang-libstdcxx13 --linkopt=-L/usr/lib/gcc/x86_64-linux-gnu/13
 
 # =============================================================================
+# Clang with GCC 15 libstdc++ configuration (EL10 native build — the design record)
+# =============================================================================
+# Identical in shape to clang-libstdcxx13 but pointing at GCC 15's libstdc++,
+# for the EL10 (RHEL/Rocky/AlmaLinux/CloudLinux 10) leg
+# (install/rpm/build_apache_el10_in_container.sh). EL10 ships gcc-toolset-15 (not
+# -13), so the /usr/include/c++/13 + /usr/lib/gcc/.../13 paths the clang-libstdcxx13
+# config hardcodes do not exist; the el10 recipe's symlink dance maps gt-15's
+# libstdc++ into the /15 paths below. The system clang on el10 is 21 (>= the
+# clang-20 abseil absl_nonnull requirement), so no LLVM sideload is needed.
+# Non-existent paths are silently ignored, so this is safe on either arch.
+# =============================================================================
+build:clang-libstdcxx15 --config=clang
+
+# Force __cpp_concepts=202002L and use GCC 15 libstdc++ for Cyclone files only
+build:clang-libstdcxx15 --per_file_copt=external/cyclone/.*\\.cpp@-D__cpp_concepts=202002L,-nostdinc++,-I/usr/include/c++/15,-I/usr/include/aarch64-linux-gnu/c++/15,-I/usr/include/x86_64-linux-gnu/c++/15
+build:clang-libstdcxx15 --per_file_copt=pagespeed/kernel/cache/cyclone/.*\\.cc@-D__cpp_concepts=202002L,-nostdinc++,-I/usr/include/c++/15,-I/usr/include/aarch64-linux-gnu/c++/15,-I/usr/include/x86_64-linux-gnu/c++/15
+
+# Link against GCC 15's libstdc++ (include both arch paths; non-existent is ignored)
+build:clang-libstdcxx15 --linkopt=-L/usr/lib/gcc/aarch64-linux-gnu/15
+build:clang-libstdcxx15 --linkopt=-L/usr/lib/gcc/x86_64-linux-gnu/15
+
+# =============================================================================
 # Offline build from vendored source tarball
 # =============================================================================
 # Use with source tarballs that include vendor/ directory (built by tools/vendor-deps.sh).

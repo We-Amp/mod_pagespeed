@@ -75,12 +75,20 @@ do_package() {
   libstdc++ >= 4.1.2"
   gen_spec
 
-  # Create temporary rpmbuild dirs.
+  # Create temporary rpmbuild dirs. Keep the buildroot (%install staging) DISTINCT
+  # from %_builddir (BUILD). On EL10's rpm 4.20 the build tree is auto-removed in a
+  # post-%clean "rmbuild" stage that chdir's into %_builddir; with buildroot==_builddir
+  # (both .../BUILD) the spec's `%clean: rm -rf $RPM_BUILD_ROOT` deletes the dir rmbuild
+  # then needs -> "Bad exit status from ... (rmbuild)" and the build fails AFTER the rpm
+  # is already written. el8/el9's older rpm tolerated the alias; el10 does not. Pointing
+  # --buildroot at its own dir is the correct convention and also silences the %install
+  # `getcwd: cannot access parent directories` warnings (the old alias deleted its cwd).
   RPMBUILD_DIR=$(mktemp -d -t rpmbuild.XXXXXX) || exit 1
   mkdir -p "$RPMBUILD_DIR/BUILD"
+  mkdir -p "$RPMBUILD_DIR/BUILDROOT"
   mkdir -p "$RPMBUILD_DIR/RPMS"
 
-  rpmbuild --buildroot="$RPMBUILD_DIR/BUILD" -bb \
+  rpmbuild --buildroot="$RPMBUILD_DIR/BUILDROOT" -bb \
     --target="$HOST_ARCH" --rmspec \
     --define "_topdir $RPMBUILD_DIR" \
     --define "_binary_payload w9.bzdio" \

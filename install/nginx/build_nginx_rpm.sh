@@ -13,7 +13,7 @@
 # + the el9-targeted .so).
 #
 # Usage:
-#   ./install/nginx/build_nginx_rpm.sh [-o output_dir] [-s module.so] [-a x86_64]
+#   ./install/nginx/build_nginx_rpm.sh [-o output_dir] [-s module.so] [-a x86_64|aarch64]
 #
 # Inputs:
 #   -s  prebuilt ngx_pagespeed_module.so (el9-targeted).
@@ -30,32 +30,50 @@ SRCDIR=$(readlink -f "${SCRIPTDIR}/../..")
 OUTPUTDIR="${PWD}"
 SO_PATH=""
 HOST_ARCH="x86_64"
+# Distro dist-tag stamped into the .rpm name + Release (.el9 default; the el10 leg
+# passes -d .el10, the design record). Drives corp classify_rpm_tree's `.elN.` self-routing
+# in the default publish run — so the el10 nginx module needs NO separate publish
+# invocation (unlike the dist-tagless stock Apache RPM).
+DIST="${DIST:-.el9}"
 
 usage() {
-  echo "usage: $(basename "$0") [-o output_dir] [-s module.so] [-a x86_64]"
+  echo "usage: $(basename "$0") [-o output_dir] [-s module.so] [-a x86_64] [-d .el9]"
   echo "  -o dir     .rpm output directory       [${OUTPUTDIR}]"
-  echo "  -s file    prebuilt ngx_pagespeed_module.so (el9-targeted)"
+  echo "  -s file    prebuilt ngx_pagespeed_module.so (built vs the matching stock nginx)"
   echo "  -a arch    rpm architecture            [${HOST_ARCH}]"
+  echo "  -d dist    rpm dist tag (.el9 | .el10)  [${DIST}]"
   echo "  -h         this help"
 }
 
-while getopts ":o:s:a:h" opt; do
+while getopts ":o:s:a:d:h" opt; do
   case $opt in
     o) OUTPUTDIR=$(readlink -f "$OPTARG"); mkdir -p "${OUTPUTDIR}" ;;
     s) SO_PATH=$(readlink -f "$OPTARG") ;;
     a) HOST_ARCH="$OPTARG" ;;
+    d) DIST="$OPTARG" ;;
     h) usage; exit 0 ;;
     :) echo "'-$OPTARG' needs an argument."; usage; exit 1 ;;
     *) echo "invalid option: -$OPTARG"; usage; exit 1 ;;
   esac
 done
 
+# Normalize the arch token so callers can pass the Apache build.sh convention
+# (x64/arm64, as release.yml's run_leg does for the .deb suites) OR the rpm-native
+# names (x86_64/aarch64). Default stays x86_64 (byte-identical to pre-arm64).
+case "${HOST_ARCH}" in
+  x64|amd64)       HOST_ARCH="x86_64" ;;
+  arm64)           HOST_ARCH="aarch64" ;;
+  x86_64|aarch64)  ;;
+  *) echo "ERROR: unsupported -a arch '${HOST_ARCH}' (use x86_64/aarch64 or x64/arm64)" >&2; exit 1 ;;
+esac
+
 if [ -z "${SO_PATH}" ]; then
   SO_PATH="${SRCDIR}/bazel-bin/pagespeed/nginx/ngx_pagespeed_module.so"
 fi
 if [ ! -f "${SO_PATH}" ]; then
   echo "ERROR: ngx_pagespeed_module.so not found at ${SO_PATH}" >&2
-  echo "Build it inside almalinux:9 against el9's stock nginx 1.20.1 first." >&2
+  echo "Build it inside the matching almalinux container (el9 -> stock nginx 1.20.1," >&2
+  echo "el10 -> stock nginx 1.26.x) via build_module_in_container.sh first." >&2
   exit 1
 fi
 
@@ -91,16 +109,19 @@ NGINX_EPOCH="${NGINX_EPOCH:-2}"
 # epoch:version satisfies it (routine security re-revs); a minor rebase (1.22/1.24)
 # does NOT — caught by the build-time load-check, then a +rN reship.
 NGINX_DEP="nginx = ${NGINX_EPOCH}:${NGINX_UPSTREAM_VERSION}"
-DIST=".el9"
+# DIST is set from -d (default .el9) near the top — do NOT re-hardcode it here, or
+# the el10 leg would silently produce a .el9-tagged RPM that mis-routes to el9/.
 
 echo "Packaging ${PACKAGE} ${VERSION}-${REVISION}${DIST} (${HOST_ARCH}); pin: Requires ${NGINX_DEP}"
 
-# --- el9 module-load layout -------------------------------------------------
-# Stock el9 nginx.conf includes /usr/share/nginx/modules/*.conf from the main
-# context AND /etc/nginx/conf.d/*.conf from http{}. load_module must be in the
-# MAIN context (before http{}), so we drop the snippet under
-# /usr/share/nginx/modules/ — exactly where nginx.org's el9 module RPMs put it
-# (e.g. nginx-module-njs ships /usr/share/nginx/modules/njs.conf).
+# --- RHEL-family (el9/el10) module-load layout ------------------------------
+# Derive the RHEL major (9|10) from DIST (.el9 -> 9, .el10 -> 10) for the shipped
+# README + load-snippet wording. Stock el9/el10 nginx.conf includes
+# /usr/share/nginx/modules/*.conf from the main context AND /etc/nginx/conf.d/*.conf
+# from http{}. load_module must be in the MAIN context (before http{}), so we drop
+# the snippet under /usr/share/nginx/modules/ — exactly where nginx.org's module
+# RPMs put it (e.g. nginx-module-njs ships /usr/share/nginx/modules/njs.conf).
+DISTRO_MAJOR="${DIST##*el}"; DISTRO_MAJOR="${DISTRO_MAJOR:-9}"
 NGINX_MODULEDIR="/usr/lib64/nginx/modules"
 NGINX_LOADDIR="/usr/share/nginx/modules"
 NGINX_DOCDIR="/usr/share/doc/${PACKAGE}"
@@ -123,14 +144,14 @@ install -m 644 "${SO_PATH}" "${STAGEDIR}${NGINX_MODULEDIR}/ngx_pagespeed_module.
 # path dlopen-fails. nginx.org's own el9 module RPMs use the absolute path too.
 cat > "${STAGEDIR}${NGINX_LOADDIR}/mod-pagespeed.conf" <<SNIP
 # ngx_pagespeed dynamic module (We-Amp mod_pagespeed 1.15).
-# Auto-included by stock el9 nginx via the main-context
+# Auto-included by stock el${DISTRO_MAJOR} nginx via the main-context
 # \`include /usr/share/nginx/modules/*.conf;\` (loads before http{}).
 load_module "${NGINX_MODULEDIR}/ngx_pagespeed_module.so";
 SNIP
 chmod 644 "${STAGEDIR}${NGINX_LOADDIR}/mod-pagespeed.conf"
 
 "${SCRIPTDIR}/nginx_package_docs.sh" "${STAGEDIR}${NGINX_DOCDIR}" "${VERSION}" "rpm" \
-  "${NGINX_UPSTREAM_VERSION}"
+  "${NGINX_UPSTREAM_VERSION}" "${DISTRO_MAJOR}"
 
 # --- D4 symbol-leak assertion (deterministic gate, also wired in CI) --------
 "${SCRIPTDIR}/assert_symbol_hygiene.sh" \
@@ -174,8 +195,15 @@ fi
 
 # --- build the .rpm ---------------------------------------------------------
 RPMBUILD_DIR=$(mktemp -d -t rpmbuild.XXXXXX)
-mkdir -p "${RPMBUILD_DIR}/BUILD" "${RPMBUILD_DIR}/RPMS"
-rpmbuild --buildroot="${RPMBUILD_DIR}/BUILD" -bb \
+# Keep the buildroot (%install staging) DISTINCT from %_builddir (BUILD). On EL10's
+# rpm 4.20 the build tree is auto-removed in a post-%clean "rmbuild" stage that
+# chdir's into %_builddir; with buildroot==_builddir (both .../BUILD) the spec's
+# `%clean: rm -rf $RPM_BUILD_ROOT` deletes the dir rmbuild then needs -> "Bad exit
+# status from ... (rmbuild)" AFTER the rpm is already written. el8/el9's older rpm
+# tolerated the alias; el10 does not. Pointing --buildroot at its own dir is the
+# correct convention (mirrors install/rpm/build.sh) and silences %install getcwd noise.
+mkdir -p "${RPMBUILD_DIR}/BUILD" "${RPMBUILD_DIR}/BUILDROOT" "${RPMBUILD_DIR}/RPMS"
+rpmbuild --buildroot="${RPMBUILD_DIR}/BUILDROOT" -bb \
   --target="${HOST_ARCH}" --rmspec \
   --define "_topdir ${RPMBUILD_DIR}" \
   --define "_binary_payload w9.bzdio" \

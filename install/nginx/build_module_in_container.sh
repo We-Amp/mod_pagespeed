@@ -53,7 +53,7 @@
 set -euo pipefail
 if [ "${VERBOSE:-}" ]; then set -x; fi
 
-DISTRO="${1:?usage: $0 <noble|el9|bullseye|bookworm|trixie|jammy> [-o out.so]}"
+DISTRO="${1:?usage: $0 <noble|el9|el10|bullseye|bookworm|trixie|jammy> [-o out.so]}"
 shift || true
 
 SCRIPTDIR="$(cd "$(dirname "$0")" && pwd)"
@@ -82,6 +82,13 @@ case "${DISTRO}" in
          DEF_NGINX_SHA256="7df3090907fca3cc0e456d6dc00ceb230da74ea88026ceff0affc29dbbd9ac4c" ;;
   el9)   DEF_NGINX_VER="1.20.1"
          DEF_NGINX_SHA256="e462e11533d5c30baa05df7652160ff5979591d291736cfa5edb9fd2edb48c49" ;;
+  # el10 (AlmaLinux/RHEL/Rocky/CloudLinux 10, the design record): distro-source mode like
+  # el9 — this literal is only a pre-resolution fallback; the SRPM branch below
+  # overwrites NGINX_SRC_VERSION from `dnf repoquery` (AlmaLinux 10 AppStream
+  # ships non-modular nginx 1.26.3-1.el10 today). sha256 = the verified
+  # nginx.org/download/nginx-1.26.3.tar.gz hash (same pin as trixie).
+  el10)  DEF_NGINX_VER="1.26.3"
+         DEF_NGINX_SHA256="69ee2b237744036e61d24b836668aad3040dda461fe6f570f1787eab570c75aa" ;;
   # the design record P3 — Debian/Ubuntu distro-stock prebuilt nginx-module-pagespeed
   # targets. Each pins the EXACT nginx version of that distro's stock `nginx`
   # package so the module's embedded module->version + NGX_MODULE_SIGNATURE match
@@ -95,7 +102,7 @@ case "${DISTRO}" in
             DEF_NGINX_SHA256="69ee2b237744036e61d24b836668aad3040dda461fe6f570f1787eab570c75aa" ;;
   jammy)    DEF_NGINX_VER="1.18.0"
             DEF_NGINX_SHA256="4c373e7ab5bf91d34a4f11a0c9496561061ba5eee6020db272a17a7228d35f99" ;;
-  *) echo "ERROR: unknown distro '${DISTRO}' (want noble|focal|el9|bullseye|bookworm|trixie|jammy)" >&2; exit 1 ;;
+  *) echo "ERROR: unknown distro '${DISTRO}' (want noble|focal|el9|el10|bullseye|bookworm|trixie|jammy)" >&2; exit 1 ;;
 esac
 NGINX_SRC_VERSION="${NGINX_SRC_VERSION:-${DEF_NGINX_VER}}"
 # Resolve the sha256 to verify against. If the caller pinned NGINX_SRC_SHA256
@@ -200,8 +207,8 @@ esac
 # runtime), but it detects the drift on the first request and degrades the module
 # to pass-through + one ALERT log instead of silently hanging the worker.
 case "${DISTRO}" in
-  noble|jammy|el9) NGX_SRC_MODE="distro" ;;
-  *)               NGX_SRC_MODE="vanilla" ;;
+  noble|jammy|el9|el10) NGX_SRC_MODE="distro" ;;
+  *)                    NGX_SRC_MODE="vanilla" ;;
 esac
 NGX_SRC_MODE="${NGX_SRC_MODE_OVERRIDE:-${NGX_SRC_MODE}}"
 
@@ -338,6 +345,34 @@ install_deps_el9() {
     zlib-devel pcre-devel openssl-devel \
     python3 unzip zip gperf bison flex \
     rpm-build dnf-plugins-core tar gzip make >/dev/null
+  # bazelisk (pinned + checksum-verified) if bazel/bazelisk not already provided.
+  install_bazelisk
+}
+
+install_deps_el10() {
+  # el10 (almalinux:10, the design record): gcc-toolset-15 (gt-15 libstdc++, C++23-complete
+  # for Cyclone; base gcc is 14.x) + system clang-21 (AppStream — already >= the
+  # clang-20 abseil absl_nonnull floor, so NO sideload) + pcre2-devel (el10 dropped
+  # pcre1). gperf/bison/flex + some -devel live in CRB on el10, so enable it first.
+  # Mirrors install_deps_el9 with the -13->-15 / pcre->pcre2 / CRB substitutions
+  # proven by build_apache_el10_in_container.sh.
+  dnf install -y --setopt=install_weak_deps=False dnf-plugins-core >/dev/null
+  dnf config-manager --set-enabled crb 2>/dev/null \
+    || dnf config-manager --enable crb 2>/dev/null || true
+  # gnupg2 is REQUIRED on el10 (NOT optional): the AlmaLinux nginx.spec %prep runs
+  # %{gpgverify}, which shells out to gpg2 to verify the upstream nginx tarball
+  # signature. The almalinux:10 BASE image does NOT ship gpg2 (almalinux:9 does, as
+  # a transitive dep — which is why install_deps_el9 never needed it), so without
+  # this the el10 distro-source `rpmbuild -bp` fails at %prep with
+  # "gpgverify: gpg2: command not found" and the el10 nginx module silently never
+  # builds (the leg is soft). Verified in a real almalinux:10 container.
+  dnf install -y --allowerasing --setopt=install_weak_deps=False \
+    ca-certificates curl wget gnupg2 \
+    gcc-toolset-15 \
+    clang lld llvm \
+    zlib-devel pcre2-devel openssl-devel \
+    python3 unzip zip gperf bison flex \
+    rpm-build dnf-plugins-core tar gzip make which file >/dev/null
   # bazelisk (pinned + checksum-verified) if bazel/bazelisk not already provided.
   install_bazelisk
 }
@@ -584,6 +619,7 @@ if [ "${SKIP_DEPS:-}" != "1" ]; then
     noble)    install_deps_noble ;;
     focal)    install_deps_focal ;;
     el9)      install_deps_el9 ;;
+    el10)     install_deps_el10 ;;
     bullseye) install_deps_bullseye ;;
     bookworm) install_deps_bookworm ;;
     trixie)   install_deps_trixie ;;
@@ -669,25 +705,27 @@ NGX_SRC="${NGX_BUILD_DIR}/nginx-${NGINX_SRC_VERSION}"
 echo "==> fetch + pre-configure target nginx (mode=${NGX_SRC_MODE}) for @nginx ABI match"
 rm -rf "${NGX_BUILD_DIR}"
 mkdir -p "${NGX_BUILD_DIR}"
-if [ "${NGX_SRC_MODE}" = "distro" ] && [ "${DISTRO}" = "el9" ]; then
-  # the design record P4 ABI-drift fix, el9 (rpm/dnf analog of the deb apt-get-source path).
-  # Build against AlmaLinux 9's OWN signed, patched nginx SOURCE rpm so the
-  # module's struct offsets match the stock nginx it dlopen's. el9 stock nginx is
-  # the frozen AppStream stream and does NOT backport the CVE-2026-49975 core-
-  # struct change today, so this is deb parity + future-proofing (if Alma ever
-  # backports a struct change the distro-source build captures it; vanilla would
-  # silently drift). The fetched SRPM is GPG-signed by the Alma 9 release key
-  # (Key ID d36cb86cb86b3716) — trust equal-or-stronger than the vanilla tarball
-  # sha256 pin; we fail-closed on `rpm -K ... signatures OK`.
-  rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-AlmaLinux-9 2>/dev/null || true
-  # x86_64-only: the served el9 yum tree is x86_64 (el9-arm64 is an the design record P2
-  # gap); if el9-arm64 is ever added, derive the arch instead of the .x86_64
-  # literal (cf. deb_triplet). Pin the EXACT stock candidate the smoke (and
-  # customers) run. repoquery %{version} is already epoch-free; the NVR selects.
-  NGX_PKG_VER="$(dnf repoquery --latest-limit 1 --qf '%{version}-%{release}' nginx.x86_64 2>/dev/null | head -1)"
-  NGINX_SRC_VERSION="$(dnf repoquery --latest-limit 1 --qf '%{version}' nginx.x86_64 2>/dev/null | head -1)"
-  [ -n "${NGX_PKG_VER}" ] && [ -n "${NGINX_SRC_VERSION}" ] || { echo "ERROR: cannot determine stock nginx candidate version on el9" >&2; exit 1; }
-  echo "==> dnf download --source nginx-${NGX_PKG_VER} (upstream ${NGINX_SRC_VERSION}) on el9"
+if [ "${NGX_SRC_MODE}" = "distro" ] && { [ "${DISTRO}" = "el9" ] || [ "${DISTRO}" = "el10" ]; }; then
+  # the design record P4 ABI-drift fix, el9 + el10 — the rpm/dnf analog of the deb
+  # apt-get-source path. Build against AlmaLinux's OWN signed, patched nginx
+  # SOURCE rpm so the module's struct offsets match the stock nginx it dlopen's.
+  # el9/el10 stock nginx is the frozen AppStream stream and does NOT backport the
+  # CVE-2026-49975 core-struct change today, so this is deb parity + future-
+  # proofing (if Alma ever backports a struct change the distro-source build
+  # captures it; vanilla would silently drift). The fetched SRPM is GPG-signed by
+  # the AlmaLinux release key — trust equal-or-stronger than the vanilla tarball
+  # sha256 pin; we fail-closed on `rpm -K ... signatures OK`. The key path is
+  # versioned per distro: RPM-GPG-KEY-AlmaLinux-9 (el9) vs -10 (el10).
+  rpm --import "/etc/pki/rpm-gpg/RPM-GPG-KEY-AlmaLinux-${DISTRO#el}" 2>/dev/null || true
+  # Derive the host RPM arch (x86_64 | aarch64) so elN-arm64 resolves its OWN stock
+  # nginx candidate. AlmaLinux 9/10 aarch64 ships the same stock nginx epoch:version as
+  # x86_64, so the build_nginx_rpm.sh pin holds. Pin the EXACT stock candidate the
+  # smoke (and customers) run. repoquery %{version} is already epoch-free; NVR selects.
+  NGX_RPM_ARCH="$(rpm --eval '%{_arch}')"
+  NGX_PKG_VER="$(dnf repoquery --latest-limit 1 --qf '%{version}-%{release}' "nginx.${NGX_RPM_ARCH}" 2>/dev/null | head -1)"
+  NGINX_SRC_VERSION="$(dnf repoquery --latest-limit 1 --qf '%{version}' "nginx.${NGX_RPM_ARCH}" 2>/dev/null | head -1)"
+  [ -n "${NGX_PKG_VER}" ] && [ -n "${NGINX_SRC_VERSION}" ] || { echo "ERROR: cannot determine stock nginx candidate version on ${DISTRO}" >&2; exit 1; }
+  echo "==> dnf download --source nginx-${NGX_PKG_VER} (upstream ${NGINX_SRC_VERSION}) on ${DISTRO}"
   mkdir -p "${NGX_BUILD_DIR}/srpm"
   dnf download --source "nginx-${NGX_PKG_VER}" --destdir "${NGX_BUILD_DIR}/srpm"
   NGX_SRPM="$(ls "${NGX_BUILD_DIR}/srpm/"*.src.rpm 2>/dev/null | head -1)"
@@ -753,6 +791,10 @@ fi
 NGX_PRECFG_PATH="${PATH}"
 if [ "${DISTRO}" = "el9" ]; then
   NGX_PRECFG_PATH="${GCC13_PREFIX:-/opt/rh/gcc-toolset-13/root/usr}/bin:${PATH}"
+elif [ "${DISTRO}" = "el10" ]; then
+  # el10 install_deps_el10 installs gcc-toolset-15 (not base gcc as cc); prepend
+  # the toolset bin so nginx ./configure finds a C compiler.
+  NGX_PRECFG_PATH="${GCC15_PREFIX:-/opt/rh/gcc-toolset-15/root/usr}/bin:${PATH}"
 fi
 (
   cd "${NGX_SRC}"
@@ -779,8 +821,8 @@ if [ "${DISTRO}" = "el9" ]; then
   # Put gcc-toolset-13 on PATH so its tools/libs are found.
   export PATH="${GCC13_PREFIX}/bin:${PATH}"
   # Make el9 build with the EXACT SAME --config=clang-libstdcxx13 as noble/CI, by
-  # SYMLINKING gcc-toolset-13's libstdc++ into the STANDARD Linux x86_64 paths that
-  # config hardcodes (/usr/include/c++/13 + /usr/lib/gcc/x86_64-linux-gnu/13).
+  # SYMLINKING gcc-toolset-13's libstdc++ into the STANDARD Linux multiarch paths
+  # that config hardcodes (/usr/include/c++/13 + /usr/lib/gcc/<triplet>/13).
   # WHY: gcc-toolset-13 lives at a non-standard prefix, so the obvious
   # alternative (--config=clang + clang --gcc-install-dir=<toolset>) makes clang-21
   # report the toolset's libstdc++ headers via ABSOLUTE paths NOT in the toolchain's
@@ -791,20 +833,25 @@ if [ "${DISTRO}" = "el9" ]; then
   # standard paths sidesteps BOTH: clang finds libstdc++ as a builtin (no
   # --gcc-install-dir, no absolute-path guard), and the proven clang-libstdcxx13
   # path is reused verbatim — giving the glibc-2.34/libstdc++-13 floor el9 needs.
-  mkdir -p /usr/include/c++ /usr/lib/gcc/x86_64-linux-gnu /usr/include/x86_64-linux-gnu/c++
+  # ARCH: derive both triplets so el9-arm64 wires the aarch64 paths. deb_triplet()
+  # falls back to uname -m on el9 (no dpkg) -> x86_64-linux-gnu | aarch64-linux-gnu;
+  # gcc-toolset-13 names its target subdir <arch>-redhat-linux.
+  EL9_DEB_TRIPLET="$(deb_triplet)"
+  EL9_RH_TRIPLET="$(rpm --eval '%{_arch}')-redhat-linux"
+  mkdir -p /usr/include/c++ "/usr/lib/gcc/${EL9_DEB_TRIPLET}" "/usr/include/${EL9_DEB_TRIPLET}/c++"
   ln -sfn "${GCC13_PREFIX}/include/c++/13" /usr/include/c++/13
   # Symlink the WHOLE toolset gcc/13 dir to the standard path; this exposes
   # libstdc++.a/.so + the c++config target headers in one shot. (Do NOT also
   # symlink individual libs INTO this dir afterwards — they'd resolve through the
   # dir symlink back onto themselves and `ln` would abort with "same file" under
   # set -e.)
-  ln -sfn "${GCC13_PREFIX}/lib/gcc/x86_64-redhat-linux/13" /usr/lib/gcc/x86_64-linux-gnu/13
+  ln -sfn "${GCC13_PREFIX}/lib/gcc/${EL9_RH_TRIPLET}/13" "/usr/lib/gcc/${EL9_DEB_TRIPLET}/13"
   # Cyclone's per_file_copt (clang-libstdcxx13) uses -nostdinc++ and hardcodes the
-  # Ubuntu multiarch target-config dir -I/usr/include/x86_64-linux-gnu/c++/13 (where
+  # multiarch target-config dir -I/usr/include/<triplet>/c++/13 (where
   # <bits/c++config.h> lives). gcc-toolset-13 names its target subdir
-  # x86_64-redhat-linux INSIDE c++/13, so point the Ubuntu path at it; without this
-  # cyclone fails "'bits/c++config.h' file not found".
-  ln -sfn "${GCC13_PREFIX}/include/c++/13/x86_64-redhat-linux" /usr/include/x86_64-linux-gnu/c++/13
+  # <arch>-redhat-linux INSIDE c++/13, so point the multiarch path at it; without
+  # this cyclone fails "'bits/c++config.h' file not found".
+  ln -sfn "${GCC13_PREFIX}/include/c++/13/${EL9_RH_TRIPLET}" "/usr/include/${EL9_DEB_TRIPLET}/c++/13"
   # clang-21's default layering_check/header-modules trip on abseil's deps under
   # libstdc++ ("module ... does not depend on a module exporting <cstddef>"); these
   # are header-hygiene lints, not codegen — disable them.
@@ -814,6 +861,47 @@ if [ "${DISTRO}" = "el9" ]; then
     "--features=-parse_headers"
     "--features=-use_header_modules"
   )
+elif [ "${DISTRO}" = "el10" ]; then
+  # el10: a /15 clone of the el9 arm. el10 ships gcc-toolset-15 (base
+  # gcc is 14.x), so the -13 paths (/usr/include/c++/13, /usr/lib/gcc/.../13) do
+  # NOT exist — el10 MUST NOT fall through to the el9 -13 arm or the `else`/-13
+  # default (that would fail "bits/c++config.h not found" at cyclone's
+  # per_file_copt). It gets its OWN gcc-toolset-15 symlink dance +
+  # --config=clang-libstdcxx15. The three symlink targets + the bazelrc
+  # clang-libstdcxx15 config exactly match the proven
+  # build_apache_el10_in_container.sh dance (its lines 103-107).
+  GCC15_PREFIX="${GCC15_PREFIX:-/opt/rh/gcc-toolset-15/root/usr}"
+  if [ ! -d "${GCC15_PREFIX}" ]; then
+    echo "ERROR: gcc-toolset-15 not found at ${GCC15_PREFIX}" >&2
+    exit 1
+  fi
+  # Process-global PATH export (NOT a local NGX_PRECFG_PATH): step-6 `make
+  # modules` runs in a subshell that does not re-export PATH, so toolset-15 must
+  # be on PATH globally or make picks base gcc-14 (wrong toolchain / ABI drift).
+  export PATH="${GCC15_PREFIX}/bin:${PATH}"
+  mkdir -p /usr/include/c++ /usr/lib/gcc/x86_64-linux-gnu /usr/include/x86_64-linux-gnu/c++
+  ln -sfn "${GCC15_PREFIX}/include/c++/15" /usr/include/c++/15
+  ln -sfn "${GCC15_PREFIX}/lib/gcc/x86_64-redhat-linux/15" /usr/lib/gcc/x86_64-linux-gnu/15
+  ln -sfn "${GCC15_PREFIX}/include/c++/15/x86_64-redhat-linux" /usr/include/x86_64-linux-gnu/c++/15
+  BAZEL_FLAGS+=(
+    "--config=clang-libstdcxx15"
+    "--features=-layering_check"
+    "--features=-parse_headers"
+    "--features=-use_header_modules"
+  )
+  # KNOWN INTRODUCTION-PHASE GAP (the design record D8): like el9 (gt-13), el10
+  # builds the module against gt-15's libstdc++ but DEB_STATIC_STDCXX=0, so the
+  # module .so links libstdc++ DYNAMICALLY. The sibling Apache el10 build instead
+  # force-statics libstdc++ + hard floor-gates it (build_apache_el10_in_container.sh
+  # floor_gate), because gt-15's libstdc++ is newer than el10 stock gcc-14's runtime
+  # — a dynamic GLIBCXX NEEDED could exceed what a stock el10 host ships. The el9
+  # analog (gt-13 dynamic) loads fine on stock el9, so this is LIKELY fine on el10,
+  # but it is NOT statically proven here and there is NO blocking gate: the DETECTION
+  # is the (currently soft/continue-on-error) el10 dlopen load-check + the D8 real-
+  # host smoke. DO NOT promote the el10 nginx channel to prod, nor harden the el10
+  # nginx legs to blocking, until D8 confirms the module dlopens on stock AlmaLinux
+  # 10. If D8 shows a GLIBCXX gap, static-link libstdc++ here like the focal/
+  # DEB_STATIC_STDCXX path (and add a floor-gate mirroring the Apache build).
 elif [ "${DEB_STATIC_STDCXX}" = "1" ]; then
   # the design record P3 Debian/Ubuntu distro-stock targets. GCC-13 libstdc++ already sits
   # at the standard paths --config=clang-libstdcxx13 hardcodes (native on

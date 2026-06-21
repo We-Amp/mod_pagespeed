@@ -9,13 +9,14 @@
 # exact-version pinning is mandatory), and to state BYOL + the cache-dir
 # auto-create note.
 #
-# Usage: nginx_package_docs.sh <docdir> <version> <deb|rpm> <nginx_upstream_ver>
+# Usage: nginx_package_docs.sh <docdir> <version> <deb|rpm> <nginx_upstream_ver> [<distro_major>]
 set -euo pipefail
 
 DOCDIR="$1"
 VERSION="$2"
 PKGFMT="$3"             # deb | rpm
 NGINX_VER="$4"          # exact stock nginx version this module is pinned to
+DISTRO_MAJOR="${5:-9}"  # RHEL-family major (9|10) for the rpm README wording; deb ignores it
 
 mkdir -p "${DOCDIR}"
 
@@ -79,7 +80,7 @@ the top of \`/etc/nginx/nginx.conf\` yourself."
   INSTALLCMD="sudo apt install nginx-module-pagespeed"
 else
   MODPATH="/usr/lib64/nginx/modules/"
-  LOADNOTE="On stock AlmaLinux/RHEL/Rocky 9 nginx, this package drops a
+  LOADNOTE="On stock AlmaLinux/RHEL/Rocky ${DISTRO_MAJOR} nginx, this package drops a
 \`load_module\` snippet under \`/usr/share/nginx/modules/\` which stock nginx
 auto-includes from the main context — no manual edit. If you run nginx from the
 nginx.org repo, ensure your \`nginx.conf\` includes

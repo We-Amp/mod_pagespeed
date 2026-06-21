@@ -340,7 +340,7 @@ build:win-asan --per_file_copt=//pagespeed/.*,//net/.*,//third_party/.*,//test/.
 # via clang-cl driver), so -fsanitize=address as a linkopt is meaningless.
 # We must pass the .lib files and their search path directly.
 # Use 8.3 short path to avoid spaces in LIBPATH (bazelrc can't quote linkopt values)
-build:win-asan --linkopt=/LIBPATH:C:/PROGRA~1/LLVM/lib/clang/21/lib/windows
+build:win-asan --linkopt=/LIBPATH:C:/PROGRA~1/LLVM/lib/clang/19/lib/windows
 build:win-asan --linkopt=clang_rt.asan_dynamic-x86_64.lib
 build:win-asan --linkopt=clang_rt.asan_dynamic_runtime_thunk-x86_64.lib
 # Suppress MSVC's stl_asan.lib (x64 version not installed, not needed with clang runtime)
@@ -353,7 +353,7 @@ build:win-asan --test_tag_filters=-no_san
 build:win-asan --copt=-DADDRESS_SANITIZER=1
 build:win-asan --copt=-D__SANITIZE_ADDRESS__
 # Test binaries need the ASan runtime DLL on PATH at runtime.
-build:win-asan --test_env=PATH=C:\\PROGRA~1\\LLVM\\lib\\clang\\21\\lib\\windows;C:\\PROGRA~1\\LLVM\\bin;C:\\Windows\\System32
+build:win-asan --test_env=PATH=C:\\PROGRA~1\\LLVM\\lib\\clang\\19\\lib\\windows;C:\\PROGRA~1\\LLVM\\bin;C:\\Windows\\System32
 # ASan needs -O1 for reasonable performance (default /Od is very slow)
 build:win-asan --copt=-O1
 # ASan needs the dynamic CRT (static CRT is incompatible with ASan DLL model)

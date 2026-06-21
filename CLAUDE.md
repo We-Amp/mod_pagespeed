@@ -7,16 +7,20 @@ This file provides context and guidance for contributors (human and AI-assisted)
 This repo is part of the We-Amp B.V. product family. Cross-repo context:
 
 - **ModPageSpeed 2.0** (`We-Amp/pagespeed-optimizer`) — modern successor, shares Ed25519 licensing tokens
+  - Customer-facing 1.1 docs live there at `website/src/content/docs-1.1/` (published to modpagespeed.com/1.1/docs/), NOT in this repo. `docs/*.md` here is internal/developer-facing.
 - **Cyclone Cache** (`We-Amp/cyclone-cache`) — shared cache library, vendored at `vendor/cyclone/`
 
 ## Table of Contents
 - [Project Overview](#project-overview)
 - [Build System](#build-system)
+- [Two Source Trees](#two-source-trees)
 - [Code Architecture](#code-architecture)
 - [Testing](#testing)
 - [Code Style](#code-style)
 - [Envoy Filter](#envoy-filter)
 - [Windows/IIS Development](#windowsiis-development)
+- [IIS Platform Internals](#iis-platform-internals)
+- [Git Workflow Rules](#git-workflow-rules)
 
 ## Project Overview
 
@@ -64,11 +68,15 @@ docker compose down
 **Windows ASan**: `--config=win-asan` requires the LLVM ASan runtime DLL on PATH at test runtime:
 
 ```powershell
-$env:PATH = "C:\Program Files\LLVM\lib\clang\21\lib\windows;$env:PATH"
+# The Windows CI runner installs/uses LLVM 19, so the ASan runtime lives under clang\19.
+# Verify the LLVM version actually installed on your Windows box and adjust the path to match.
+$env:PATH = "C:\Program Files\LLVM\lib\clang\19\lib\windows;$env:PATH"
 bazelisk test --config=vendored --config=windows --config=clang-cl --config=win-asan //test/pagespeed/iis/...
 ```
 
 ASan in IIS context requires `halt_on_error=0` (set in `dll_main.cc`) because `w3wp.exe` handles many requests and a halt would kill the process pool. ASan logs are written to `C:\pagespeed_asan*`.
+
+**LLVM version divergence:** the Linux dev container and CI use **clang-20** (`docker/Dockerfile`, `clang-format-20`/`clang-tidy-20`). The Windows side uses **LLVM 19**, pre-installed on the Windows build machines. The Windows CI lanes (Windows Build, Windows Unit Tests, IIS System Tests, Windows ASan — maintainer-side) prepend the `C:\Program Files\LLVM\lib\clang\19\lib\windows` ASan runtime dir, and `.bazelrc` `build:win-asan` (lines ~343 and ~356) uses that same `LLVM\lib\clang\19\lib\windows` runtime path. The CI jobs and `.bazelrc` agree on the clang 19 runtime, so `win-asan` resolves the correct ASan runtime both in CI and on a local Windows box with LLVM 19 installed.
 
 **Important:** Do NOT use `--jobs` to limit parallelism. Bazel manages resources automatically. Restricting jobs causes massive slowdowns especially for sanitizer builds.
 
@@ -78,14 +86,50 @@ ASan in IIS context requires `halt_on_error=0` (set in `dll_main.cc`) because `w
 
 ### Key Targets
 
+One canonical build command per port:
+
 ```bash
+# Apache module
+bazel build --config=clang-libstdcxx13 //:libmod_pagespeed.so
+
+# Nginx module
+bazel build --config=clang-libstdcxx13 //pagespeed/nginx:ngx_pagespeed_module.so
+
 # Envoy filter
 bazel build --config=clang-libstdcxx13 //pagespeed/envoy:envoy_pagespeed      # Standalone binary (~212MB)
 bazel build --config=clang-libstdcxx13 //pagespeed/envoy:pagespeed_filter.so  # Shared library (~113MB)
 
-# Apache module
-bazel build --config=clang-libstdcxx13 //:libmod_pagespeed.so
+# IIS module (Windows only — see Windows/IIS Development)
+bazel build --config=windows --config=clang-cl //pagespeed/iis:pagespeed_iis.dll
 ```
+
+Building the Envoy targets requires the Envoy WORKSPACE — see [WORKSPACE Swap](#workspace-swap) below.
+
+### WORKSPACE Swap
+
+`WORKSPACE` is swapped in place. The default (lean) `WORKSPACE` supports Apache,
+nginx, and IIS. For Envoy, run `scripts/use-envoy-workspace.sh` to activate the
+Envoy dependency graph, and `scripts/use-envoy-workspace.sh --lean` to restore.
+
+The canonical Envoy dependency graph lives in `WORKSPACE.envoy` — edit THAT for
+Envoy deps, not the active `WORKSPACE` (the script overwrites it on swap).
+`WORKSPACE.lean.bak` is the backup the script writes when activating Envoy.
+
+## Two Source Trees
+
+The engine spans two top-level source trees. Knowing which one owns a change is
+the most common orientation mistake in this repo.
+
+| Tree | Holds | Notes |
+|------|-------|-------|
+| `net/instaweb/` | ~57 rewriter filters (`net/instaweb/rewriter/*_filter.cc`, e.g. `cache_extender.cc`, `add_instrumentation_filter.cc`) plus their support code, `RewriteDriver`, and `RewriteOptions` (`net/instaweb/rewriter/rewrite_driver.cc`, `rewrite_options.cc`) — `net/instaweb/rewriter/` holds ~133 `.cc` in all | Legacy `net_instaweb::` namespace. To add or edit a rewriter filter, work HERE, not under `pagespeed/`. |
+| `net/instaweb/{htmlparse,http,util,spriter}/` | Legacy HTML-parse / HTTP / util / image-spriter support | — |
+| `net/instaweb/genfiles/` | Generated gperf/Closure outputs (minified `*_opt.js` / `*_dbg.js` bundles) | **GENERATED — DO NOT EDIT BY HAND.** `net/instaweb/genfiles/rewriter/*.js` are minified Closure output (30 bundles) and carry no in-file DO-NOT-EDIT marker. Edit the source `.js` and regenerate via `tools/regenerate-rewriter-js.sh`; the generated set is hash-guarded by `net/instaweb/rewriter/generated/.source-hash` (run `tools/regenerate-rewriter-js.sh --check-hash` to detect staleness). |
+| `pagespeed/` | Modern subsystems: port adapters (`apache/`, `nginx/`, `envoy/`, `iis/`), `kernel/`, `system/`, `automatic/`, `controller/` | See [Code Architecture](#code-architecture). |
+| `base/logging.h` | glog-compatible logging | At repo root, not under `pagespeed/` (see [Logging System](#logging-system)). |
+
+There is no `rewriter/` directory under `pagespeed/` — an agent told "add a filter"
+must look under `net/instaweb/rewriter/`.
 
 ## Code Architecture
 
@@ -100,6 +144,8 @@ bazel build --config=clang-libstdcxx13 //:libmod_pagespeed.so
 | `system/` | System abstractions (admin UI, cache backends) |
 | `automatic/` | ProxyFetch - standalone rewriting engine shared by all deployment modes |
 | `controller/` | gRPC-based optimization coordination |
+
+The admin console is a Svelte/Vite single-page app under `pagespeed/system/console/`. Its compiled output, `pagespeed/system/console/admin_console.html`, is a **GENERATED single-file Vite bundle — DO NOT EDIT BY HAND.** Edit the SPA source under `pagespeed/system/console/src/` and rebuild via `pagespeed/system/console/build.sh`; the checked-in bundle is guarded by the `console-drift` CI job (`pagespeed/system/console/check-no-drift.sh`) against `pagespeed/system/console/admin_console.html.srchash`.
 
 ### Key Abstractions
 
@@ -176,15 +222,17 @@ bazel test --config=clang-libstdcxx13 \
   //test/pagespeed/... //test/net/...
 ```
 
-**Latest results (Linux):** 46 passed, 14 skipped (IIS/Windows)
-
-**Latest results (Windows):** Kernel: 20 passed, 1 skipped. Net: 3 passed, rewriter shards 8-9 timeout (pre-existing, test too large for default timeout).
+On Linux, IIS/Windows-only tests are skipped. On Windows, rewriter shards 8-9 may time out (pre-existing, test too large for the default timeout). For current pass/skip counts per platform, see `docs/test-catalog.md`.
 
 Tests mirror source layout: `test/pagespeed/kernel/base/` tests `pagespeed/kernel/base/`.
 
 ### System Tests (Integration)
 
-Require a running server:
+Require a running server.
+
+There are two `run_system_tests.sh`: `test/system/run_system_tests.sh` is the real
+runner (change test logic THERE); `scripts/run_system_tests.sh` is a Docker
+convenience wrapper that builds the Apache module and drives the real runner.
 
 ```bash
 # Apache system tests
@@ -213,6 +261,19 @@ Require a running server:
 - **C++20** standard (C++23 for Cyclone cache files via `per_file_copt`)
 - Google C++ style (`.clang-format`)
 - 80-column line limit
+
+### Linting & Formatting (match CI locally)
+
+These scripts run inside the dev container and reproduce the CI `clang-format
+check` and clang-tidy steps exactly (both pinned to version 20). Run them before
+pushing to avoid a CI round-trip:
+
+| Command | Does |
+|---------|------|
+| `tools/fix-format.sh` | Reformats all in-scope C/C++ sources under `pagespeed/` and `net/` with `clang-format-20`, matching CI's scope (excludes `pagespeed/iis/*` and vendored files carrying the `DO NOT EDIT BY HAND` banner). |
+| `clang-format-20 -i <file>` | Reformat a single file. |
+| `tools/tidyup.sh [--fix]` | Runs `clang-tidy-20` (`run-clang-tidy-20`); `--fix` applies auto-fixes. |
+| `tools/install-hooks.sh` | One-time per clone: points `core.hooksPath` at `.githooks/` (pre-commit format check). Bypass once with `git commit --no-verify`. |
 
 ## Envoy Filter
 
@@ -245,14 +306,14 @@ See `pagespeed-envoy.yaml` for complete example including:
 
 ### Envoy System Test Status
 
-**Latest results:** 190 passed, 19 skipped, 0 failed
+Run `./test/system/run_envoy_tests.sh`; see `docs/test-catalog.md` for current pass/skip counts.
 
-The 19 skipped tests are documented limitations (marked `@pytest.mark.not_envoy`):
-- **Statistics** (1 test) - `resource_404_count` not tracked
-- **IPRO cache headers** (~2 tests) - Different cache header behavior
-- **CssFlattenMaxBytes header** (1 test) - Header handling differs
-- **Query params header** (1 test) - PageSpeedFilters header not respected for IPRO
-- **Other** (~14 tests) - Content-Length, HTTPS combination
+The Envoy skips are documented limitations (marked `@pytest.mark.not_envoy`):
+- **Statistics** - `resource_404_count` not tracked
+- **IPRO cache headers** - Different cache header behavior
+- **CssFlattenMaxBytes header** - Header handling differs
+- **Query params header** - PageSpeedFilters header not respected for IPRO
+- **Other** - Content-Length, HTTPS combination
 
 Run tests:
 ```bash
@@ -264,14 +325,13 @@ See `ENVOY_TEST_PROGRESS.md` for detailed tracking.
 
 ### Apache System Test Status
 
-**Latest results:** 195 passed, 14 skipped, 0 failed
+Run `./test/system/run_system_tests.sh`; see `docs/test-catalog.md` for current pass/skip counts.
 
 ### Nginx System Test Status
 
-**Latest results:** 192 passed, 17 skipped, 0 failed
+Run `./test/system/run_nginx_tests.sh`; see `docs/test-catalog.md` for current pass/skip counts.
 
-The 17 skipped tests include all `not_envoy` tests, plus nginx-specific skips.
-See `docs/test-catalog.md` for details.
+The nginx skips include all `not_envoy` tests, plus nginx-specific skips.
 
 Run tests:
 ```bash
@@ -323,8 +383,8 @@ Release tarballs include all dependencies for offline builds (no SSH key or netw
 
 ```powershell
 # Extract the source tarball
-tar xf mod_pagespeed-1.0.0.tar.gz
-cd mod_pagespeed-1.0.0
+tar xf mod_pagespeed-<version>.tar.gz
+cd mod_pagespeed-<version>
 
 # Build IIS module from vendored deps
 bazel build --config=vendored --config=windows --config=clang-cl -c opt //pagespeed/iis:pagespeed_iis.dll
@@ -355,15 +415,10 @@ The `--config=vendored` flag uses the `vendor/repo-cache` repository cache and t
 
 ### IIS Module Architecture
 
-| Component | Purpose |
-|-----------|---------|
-| `iis_http_module.cc` | CHttpModule for IIS request pipeline |
-| `iis_module_factory.cc` | RegisterModule entry point, manages single server context |
-| `iis_server_context.cc` | Server-wide state (one per app pool) |
-| `iis_config.cc` | web.config XML parsing |
-| `iis_async_fetch.cc` | AsyncFetch adapter for ProxyFetch |
+See `pagespeed/iis/CLAUDE.md` for the authoritative file map (key files, request-pipeline notifications, state-machine flags). Two facts worth restating here:
 
-**Note:** The IIS module uses a single `IisServerContext` for all requests within an application pool. This simplified architecture avoids lifetime management issues that can occur with per-site contexts.
+- **Config format:** `pagespeed.config` (primary) / `iiswebspeed.config` (fallback) — a flat file parsed with RE2 match rules (`iis_configuration.cpp`/`.h`). `web.config` is module registration only (`New-WebGlobalModule` + `requestFiltering`), not PageSpeed configuration.
+- **Single server context:** The IIS module uses a single `IisServerContext` for all requests within an application pool. This simplified architecture avoids lifetime management issues that can occur with per-site contexts.
 
 ### Build Status
 
@@ -439,7 +494,7 @@ Tests in `test/iis/` (26 Python files):
 - **IPRO**: `test_ipro.py`
 - **Stress/Error**: `test_stress.py`, `test_error_recovery.py`
 
-C++ unit tests in `test/pagespeed/iis/` (19 files):
+C++ unit tests in `test/pagespeed/iis/` (`*_test.cc`, e.g.):
 - Core: `iis_config_test.cc`, `iis_server_context_test.cc`, `iis_module_factory_test.cc`
 - HTTP: `iis_http_module_test.cc`, `iis_header_util_test.cc`, `iis_base_fetch_test.cc`
 - Streaming: `iis_streaming_fetch_test.cc`, `iis_dechunker_test.cc`, `iis_content_decoder_test.cc`
@@ -453,21 +508,11 @@ C++ unit tests in `test/pagespeed/iis/` (19 files):
 | Shared Memory | InProcessSharedMem (per-process; cross-process not implemented) | PthreadSharedMem |
 | External Cache | Redis only | Redis + Memcached |
 | Version Header | `X-PageSpeed` | `X-PageSpeed` |
-| Config Format | web.config XML | httpd.conf directives |
+| Config Format | `pagespeed.config` / `iiswebspeed.config` (flat file, RE2 rules); `web.config` = module registration only | httpd.conf directives |
 
 ### Current Test Coverage (IIS)
 
-Core tests verified passing:
-- `test_sanity.py`: 6/6 (100%) - Basic connectivity, headers
-- `test_admin.py`: 11/11 (100%) - Admin UI, health checks
-- `test_ipro.py`: 15/15 (100%) - IPRO optimization
-- `test_html_rewrite.py`: 34/34 (100%) - HTML filter tests
-- `test_combiners.py`: 17/17 (100%) - CSS/JS combining
-- `test_cache_control.py`: 8/8 (100%) - Cache headers
-- `test_headers.py`: 13/13 (100%) - HTTP response headers
-- `test_preload.py`: 15/15 (100%) - Preload hints (requires warm pcache)
-- `test_dns_prefetch.py`: 9/9 (100%) - DNS prefetch (requires warm pcache)
-- Full suite: 350/356 passed (5 skipped, 1 timing-dependent)
+Run `./test/system/run_iis_tests.sh sanity` (Linux host + Windows VM) or the per-suite pytest invocations below; see `docs/test-catalog.md` for current pass/skip counts per platform. Coverage spans connectivity/headers (`test_sanity.py`), admin UI/health (`test_admin.py`), IPRO (`test_ipro.py`), HTML rewriting (`test_html_rewrite.py`), combiners (`test_combiners.py`), cache headers (`test_cache_control.py`, `test_headers.py`), and preload/DNS-prefetch hints (`test_preload.py`, `test_dns_prefetch.py` — both require a warm pcache).
 
 ### Build Performance on High-Core Machines (>64 cores)
 
@@ -544,7 +589,7 @@ The helpers `s2ws()` and `ws2s()` in `iis_misc.cpp` and `util.cpp` use `CP_ACP` 
 
 IIS modules in `RQ_SEND_RESPONSE` see response headers at the same time as (or just before) the first body chunk, but cannot re-transmit headers after they have been sent. Any filter that conditionally modifies HTTP response headers based on HTML body analysis must be disabled for IIS.
 
-Currently, `convert_meta_tags` is forbidden for this reason (`iis_rewrite_driver_factory.cpp:91`). If adding new filters that modify `Content-Type`, `Vary`, or custom headers based on body scanning, add them to the `ForbidFiltersByCommaSeparatedList` call.
+Currently, `convert_meta_tags` is forbidden for this reason (the `ForbidFiltersByCommaSeparatedList` call in `iis_rewrite_driver_factory.cpp`). If adding new filters that modify `Content-Type`, `Vary`, or custom headers based on body scanning, add them to that call.
 
 ### Frozen RewriteOptions
 
@@ -580,21 +625,34 @@ Headers prefixed with `__x_` in `PopulateResponseHeaders()` are internal IIS-spe
 
 Apache creates `ProcessContext` in `ap_hook_pre_config` (no loader lock). Envoy creates `ProcessContext` lazily via `EnvoyProcessContext` constructor (in `http_filter_config.cc`). The IIS path is the most constrained.
 
+### Two IisRewriteDriverFactory Files (edit the live one)
+
+There are TWO files named `iis_rewrite_driver_factory`. Editing the wrong one
+leaves the build green while the real code is untouched.
+
+- **LIVE:** `pagespeed/iis/iis_rewrite_driver_factory.cpp` (721 lines) — the IIS-module factory. `ForbidFiltersByCommaSeparatedList` (see [Header-Before-Body Constraint](#header-before-body-constraint)) and the port-80 hardcoding below live here. Make IIS-module changes HERE.
+- **BUILD-INERT:** `pagespeed/windows/iis_rewrite_driver_factory.cc` (85 lines) — a separate experimental C-API DLL factory. Its `pagespeed/windows/BUILD` target is `tags = ["manual"]`, so it is excluded from `//pagespeed/...` builds. Do not edit it for IIS-module changes.
+
 ### Port 80 Hardcoding (Known Limitation)
 
-`IisRewriteDriverFactory` is constructed with hardcoded port `80` (`iis_rewrite_driver_factory.cpp`). For HTTPS listeners on port 443 or non-standard ports, the loopback fetch URL constructed by `LoopbackRouteFetcher` will use the wrong port for IPRO resource back-fetching. This is a known bug (see `TODO: fix port!` in `iis_server_context.cpp:32`).
+`IisRewriteDriverFactory` is constructed with hardcoded port `80` (`pagespeed/iis/iis_rewrite_driver_factory.cpp` — the live factory, see above). For HTTPS listeners on port 443 or non-standard ports, the loopback fetch URL constructed by `LoopbackRouteFetcher` will use the wrong port for IPRO resource back-fetching. This is a known bug (see `TODO: fix port!` in `iis_server_context.cpp:32`).
 
 ## Supplementary Documentation
 
+- `DEVELOPER.md` - Contributor setup: Docker dev container, native Linux deps, single-test examples, common build issues
+- `docs/GLOSSARY.md` - Load-bearing terms (PSOL, IPRO, instaweb, ProxyFetch, DomainLawyer, beacon, CLFUS)
+- `docs/README.md` - Index of the `docs/` tree
 - `windows-dev/README.md` - Detailed Windows/IIS setup
 - `pagespeed-envoy.yaml` - Production Envoy configuration
-- `test/system/README.md` - System test framework
+- `test/system/pagespeed_test_framework/` - Shared system-test framework (client, assertions)
+- `test/system/cpanel/README.md` - cPanel system-test notes
 - `pagespeed/envoy/README.md` - Envoy filter internals
 - `ENVOY_TEST_PROGRESS.md` - Envoy test validation tracking and known limitations
 - `docs/plans/` - Historical planning documents (Envoy, IIS, nginx, WASM)
 
 ## Git Workflow Rules
 
+- The default/canonical branch is `master`, NOT `main`. Branch from `master`, open PRs against `master`, and never assume `main` exists.
 - Always verify current branch with `git branch --show-current` before committing.
 - Never use `git commit --amend` unless the user explicitly requests it.
 - Always `git push` after committing unless told otherwise.
