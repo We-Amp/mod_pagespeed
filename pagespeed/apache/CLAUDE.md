@@ -39,7 +39,7 @@ Registered in `mod_pagespeed_register_hooks()`:
 
 ## How Apache Differs from IIS/Envoy/Nginx
 
-- **Most mature**: reference implementation, largest test suite (195 passed, 14 skipped)
+- **Most mature**: reference implementation, largest test suite
 - **Synchronous filter model**: Apache bucket brigades allow buffered or streaming operation
 - **APR memory pools**: strings allocated from request pool, freed on request completion
 - **Shared memory**: real cross-process shared memory via `PthreadSharedMem` (unlike IIS which uses `InProcessSharedMem`)
@@ -61,7 +61,7 @@ Apache initializes twice (config check + real startup). The factory is destroyed
 # Inside Docker dev container
 bazel build --config=clang-libstdcxx13 //:libmod_pagespeed.so
 
-# System tests (195 passed, 14 skipped)
+# System tests (see docs/test-catalog.md for current pass/skip counts)
 ./test/system/run_system_tests.sh
 ./test/system/run_system_tests.sh -k sanity
 ```

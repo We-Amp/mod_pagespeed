@@ -44,13 +44,13 @@ Two pipe instances exist: one for `NgxBaseFetch` (response delivery) and one per
 
 ```bash
 # Inside Docker dev container
-bazel build --config=clang-libstdcxx13 //pagespeed/nginx:ngx_pagespeed.so
+bazel build --config=clang-libstdcxx13 //pagespeed/nginx:ngx_pagespeed_module.so
 ```
 
 ## Test
 
 ```bash
-# System tests (192 passed, 17 skipped)
+# System tests (see docs/test-catalog.md for current pass/skip counts)
 ./test/system/run_nginx_tests.sh
 
 # Run specific test

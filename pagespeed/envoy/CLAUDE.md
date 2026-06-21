@@ -54,7 +54,7 @@ bazel build --config=clang-libstdcxx13 //pagespeed/envoy:pagespeed_filter.so  # 
 ./test/system/run_envoy_tests.sh -k sanity # quick check
 ```
 
-Latest results: 190 passed, 19 skipped, 0 failed.
+See `docs/test-catalog.md` for current pass/skip counts.
 
 ## Threading Model
 

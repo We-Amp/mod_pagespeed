@@ -1,87 +1,45 @@
-# PageSpeed WASM Documentation
+# Documentation
 
-> Documentation for the PageSpeed WASM proxy filter and optimization service.
+Developer- and operator-facing documentation for mod_pagespeed (the C++ Apache /
+nginx / Envoy / IIS optimization engine). For an architecture overview and the
+build/test workflow, start at the root [`CLAUDE.md`](../CLAUDE.md). Customer-facing
+1.1 docs are not here — they live in the `pagespeed-optimizer` repo at
+`website/src/content/docs-1.1/` (published to modpagespeed.com/1.1/docs/).
 
-## Quick Links
+## Orientation
 
-| Document | Description |
-|----------|-------------|
-| [PAGESPEED_WASM_PLAN.md](../PAGESPEED_WASM_PLAN.md) | Master implementation plan |
-| [WASM_ARCHITECTURE.md](WASM_ARCHITECTURE.md) | Technical architecture overview |
-| [WASM_HTML_PARSER.md](WASM_HTML_PARSER.md) | HTML parser design for WASM |
-| [BUSINESS_MODEL.md](BUSINESS_MODEL.md) | Monetization and go-to-market strategy |
-| [DECISIONS.md](DECISIONS.md) | Key technical decisions and rationale |
-| [ROADMAP.md](ROADMAP.md) | Timeline and milestones |
+| Document | Purpose |
+|----------|---------|
+| [GLOSSARY.md](GLOSSARY.md) | Load-bearing terms (PSOL, IPRO, instaweb, ProxyFetch, DomainLawyer, beacon, CLFUS). |
+| [../CLAUDE.md](../CLAUDE.md) | Architecture, build system, two source trees, testing, IIS internals. |
+| [../DEVELOPER.md](../DEVELOPER.md) | Contributor setup: Docker dev container, native Linux deps, single-test examples. |
 
-## Project Overview
+## Install
 
-PageSpeed WASM is a modern web performance optimization solution that runs as a proxy-wasm filter across multiple platforms (Envoy, nginx, Apache Traffic Server).
+| Document | Purpose |
+|----------|---------|
+| [install-apache.md](install-apache.md) | Installing mod_pagespeed for Apache. |
+| [install-nginx.md](install-nginx.md) | Installing PageSpeed for nginx. |
+| [install-envoy.md](install-envoy.md) | Installing PageSpeed for Envoy. |
+| [install-iis.md](install-iis.md) | Installing PageSpeed for IIS. |
+| [recommended-configuration.md](recommended-configuration.md) | Recommended baseline configuration. |
 
-### Architecture
+## Reference
 
-```
-┌─────────────────────┐     ┌─────────────────────┐
-│  WASM Edge Filter   │────▶│ Optimization Service │
-│  (15-25 MB)         │     │ (Native C++)         │
-│                     │     │                      │
-│  - HTML parsing     │     │  - Image processing  │
-│  - URL rewriting    │     │  - CSS/JS minify     │
-│  - Tag injection    │     │  - Critical CSS      │
-│  - Caching (Redis)  │     │  - Caching (Cyclone) │
-└─────────────────────┘     └──────────────────────┘
-```
+| Document | Purpose |
+|----------|---------|
+| [filter-reference.md](filter-reference.md) | Filter reference. |
+| [test-catalog.md](test-catalog.md) | Per-platform test pass/skip catalog. |
+| [envoy-limitations.md](envoy-limitations.md) | Known Envoy limitations. |
+| [iis-limitations.md](iis-limitations.md) | Known IIS limitations. |
+| [operations-monitoring.md](operations-monitoring.md) | Operations and monitoring. |
+| [the design record-autocreate-doc-snippet.md] | AutoCreateCachePath / AutoCreateLogDir directive snippets. |
 
-### Target Market
+## Plans and historical
 
-- SME websites and WordPress users
-- a freemium pricing model
-- Self-hosted option for enterprise
+These are point-in-time planning and release documents — read them as history,
+not as current spec.
 
-### Key Differentiators
-
-1. **Multi-platform**: Works on Envoy, nginx, ATS
-2. **Self-hosted option**: For compliance-sensitive customers
-3. **Active development**: Google abandoned mod_pagespeed
-4. **WordPress first**: Deep CMS integration
-
-## Getting Started
-
-### For Developers
-
-1. Read [WASM_ARCHITECTURE.md](WASM_ARCHITECTURE.md) for technical overview
-2. Review [DECISIONS.md](DECISIONS.md) for design rationale
-3. Check [ROADMAP.md](ROADMAP.md) for current priorities
-
-### For Business
-
-1. Read [BUSINESS_MODEL.md](BUSINESS_MODEL.md) for strategy
-2. Review [ROADMAP.md](ROADMAP.md) for timeline
-3. Check [PAGESPEED_WASM_PLAN.md](../PAGESPEED_WASM_PLAN.md) for full plan
-
-## Code Locations
-
-| Component | Path | Status |
-|-----------|------|--------|
-| Proto definitions | `pagespeed/service/pagespeed_service.proto` | Created |
-| Service BUILD | `pagespeed/service/BUILD` | Created |
-| WASM components | `pagespeed/wasm/` | Planned |
-| WordPress plugin | `integrations/wordpress/` | Planned |
-
-## Document Conventions
-
-- **Decision Records**: Use DECISIONS.md format
-- **Architecture**: Use C4 model diagrams
-- **API Docs**: Proto files are source of truth
-- **Roadmap**: Update weekly during active development
-
-## Contributing
-
-1. Read existing documentation first
-2. Follow decision-making process in DECISIONS.md
-3. Update ROADMAP.md when completing milestones
-4. Keep WASM_ARCHITECTURE.md current with changes
-
-## Contact
-
-- GitHub Issues: For bugs and feature requests
-- Discussions: For questions and ideas
+- [plans/](plans/) — historical planning documents (Apache/APR, Envoy, IIS, nginx, WASM, zero-copy cache).
+- [PACKAGE_REPO_PLAN.md](PACKAGE_REPO_PLAN.md), [release-build-parallelization.md](release-build-parallelization.md), [release-plan-1.1.0-beta.1.md](release-plan-1.1.0-beta.1.md), [WINDOWS_SHARED_MEM_ALIGNMENT_PLAN.md](WINDOWS_SHARED_MEM_ALIGNMENT_PLAN.md) — release and feature plans.
+- [ROADMAP.md](ROADMAP.md), [DECISIONS.md](DECISIONS.md), [BUSINESS_MODEL.md](BUSINESS_MODEL.md), [WASM_ARCHITECTURE.md](WASM_ARCHITECTURE.md), [WASM_HTML_PARSER.md](WASM_HTML_PARSER.md) — **HISTORICAL.** An aspirational "PageSpeed WASM" exploration that was never implemented in this repo. The paths they reference (`pagespeed/wasm/`, `pagespeed/service/`, `integrations/wordpress/`) do not exist. Each carries a banner at the top.

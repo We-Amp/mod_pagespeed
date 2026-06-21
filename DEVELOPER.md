@@ -29,16 +29,15 @@ check-services
 Inside the container:
 
 ```bash
-# Build everything
-bazel build //...
+# Build everything (preferred config — needed for the Cyclone cache files)
+bazel build --config=clang-libstdcxx13 //...
 
 # Build specific components
-bazel build //pagespeed/kernel/...
-bazel build //pagespeed/apache/...
-bazel build //pagespeed/envoy/...
+bazel build --config=clang-libstdcxx13 //pagespeed/kernel/...
+bazel build --config=clang-libstdcxx13 //pagespeed/apache/...
+bazel build --config=clang-libstdcxx13 //pagespeed/envoy/...
 
-# Build with specific compiler
-bazel build --config=clang //...
+# Build with GCC instead of Clang
 bazel build --config=gcc //...
 ```
 
@@ -122,20 +121,33 @@ Same as inside Docker container - see [Building](#building) section above.
 
 ## Project Structure
 
+There are two top-level source trees — see [Two Source Trees](CLAUDE.md#two-source-trees)
+in CLAUDE.md. Rewriter filters live under `net/instaweb/`, NOT `pagespeed/`.
+
 ```
 mod_pagespeed/
-├── pagespeed/              # Main source code
+├── net/instaweb/           # Rewriter filters + RewriteDriver/RewriteOptions
+│   ├── rewriter/           # ~57 rewriter filters + RewriteDriver/RewriteOptions + support code
+│   ├── htmlparse/          # Legacy HTML-parse support
+│   ├── http/               # Legacy HTTP support
+│   ├── util/               # Legacy util support
+│   └── genfiles/           # Generated gperf/Closure outputs (do NOT hand-edit)
+├── pagespeed/              # Modern subsystems
 │   ├── kernel/             # Core utilities and abstractions
 │   │   ├── base/           # Strings, threading, statistics
-│   │   ├── cache/          # Cache backends (LRU, file, memcached, redis)
-│   │   ├── html/           # HTML parsing and filters
+│   │   ├── cache/          # Cache backends (LRU, file, memcached, redis, Cyclone)
+│   │   ├── html/           # HTML parsing (HtmlParse) and filters
 │   │   ├── http/           # HTTP protocol handling
 │   │   ├── image/          # Image optimization
 │   │   └── thread/         # Threading primitives
 │   ├── apache/             # Apache module (mod_instaweb)
+│   ├── nginx/              # Nginx module
 │   ├── envoy/              # Envoy filter
-│   ├── system/             # System-level abstractions
+│   ├── iis/                # IIS native module (live factory)
+│   ├── automatic/          # ProxyFetch — shared rewriting engine
+│   ├── system/             # System-level abstractions (admin UI, cache backends)
 │   └── controller/         # gRPC coordination service
+├── base/                   # glog-compatible logging (base/logging.h)
 ├── test/                   # Tests (mirrors source structure)
 ├── bazel/                  # Bazel build rules and dependencies
 ├── third_party/            # Third-party code and patches
@@ -148,21 +160,22 @@ Available Bazel configurations (use with `--config=<name>`):
 
 | Config | Description |
 |--------|-------------|
-| `clang` | Build with Clang compiler |
-| `gcc` | Build with GCC compiler |
+| `clang-libstdcxx13` | **Preferred** — Clang with GCC 13's libstdc++; required to compile the Cyclone cache files. Bare `--config=clang` fails on Cyclone (Clang's `__cpp_concepts` is below the value GCC 13's libstdc++ requires for `std::expected`); `--config=gcc` builds Cyclone natively. |
+| `clang` | Clang compiler (base config; `clang-libstdcxx13` extends it) |
+| `gcc` | GCC 13 native — also builds Cyclone (C++23), slower diagnostics |
 | `clang-asan` | Clang with AddressSanitizer |
 | `clang-tsan` | Clang with ThreadSanitizer |
 | `clang-msan` | Clang with MemorySanitizer |
 
 Example:
 ```bash
-bazel build --config=clang-asan //...
+bazel build --config=clang-libstdcxx13 //...
 bazel test --config=clang-asan //test/...
 ```
 
 ## Code Style
 
-- **C++ Standard**: C++17
+- **C++ Standard**: C++20 (C++23 for Cyclone cache files via `per_file_copt`)
 - **Style Guide**: Google C++ Style Guide
 - **Line Limit**: 80 columns
 - **Formatting**: Use `.clang-format` in repository root
