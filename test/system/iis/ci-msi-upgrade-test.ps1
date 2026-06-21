@@ -481,7 +481,11 @@ Write-Host ""
 Write-Host "=== Step 5b: the design record port fixtures ==="
 $portFixtureScript = {
     param([string[]]$fixtures)
-    $ErrorActionPreference = 'Stop'
+    # Continue (not Stop): a fixture's native stderr / non-zero exit must NOT raise
+    # a terminating NativeCommandError (Windows PowerShell 5.1 behaviour under
+    # 'Stop'), which would escape this scriptblock and fail the gating job before
+    # the per-fixture handling runs. These the design record fixtures are non-gating.
+    $ErrorActionPreference = 'Continue'
     $failed = @()
     foreach ($f in $fixtures) {
         $path = "C:\artifacts\port-fixtures\$f"
@@ -490,10 +494,20 @@ $portFixtureScript = {
             continue
         }
         Write-Host "--- Running $f ---"
-        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $path
-        if ($LASTEXITCODE -ne 0) {
+        # 2>&1 | Out-Host merges the child's stderr into the success stream so a
+        # failing fixture never produces an error record; try/catch is a final net.
+        $code = 1
+        try {
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $path 2>&1 | Out-Host
+            $code = $LASTEXITCODE
+        } catch {
+            Write-Host "::warning::port fixture $f raised: $($_.Exception.Message) (non-gating)"
+            $failed += $f
+            continue
+        }
+        if ($code -ne 0) {
             # Best-effort: warn, don't fail the gating MSI-upgrade job.
-            Write-Host "::warning::port fixture $f failed with exit code $LASTEXITCODE (non-gating)"
+            Write-Host "::warning::port fixture $f failed with exit code $code (non-gating)"
             $failed += $f
             continue
         }
