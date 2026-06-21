@@ -51,7 +51,16 @@ docker run --rm --init $PLAT_ARG \
     R=/tmp/ps; mkdir -p "$R/logs" "$R/cache" "$R/www"
     cp /p/nginx /tmp/nginx; chmod +x /tmp/nginx
     # license token (if supplied) goes next to the cache, where the worker reads it.
-    if [ "$HAVE_LICENSE" = "1" ]; then cp /lic/pagespeed.license "$R/pagespeed.license"; fi
+    # chmod 644: cp preserves the SOURCE mode, and runner-staged tokens are 0600
+    # root-owned — unreadable by the nginx WORKER (user "nobody"; only the master
+    # runs as root). A 0600 source made the licensed smoke fail with a perfectly
+    # valid token (warn persisted; 2026-06-12) while a 0644 copy
+    # of the SAME bytes passed. The worker must be able to read its license, as
+    # in any real install.
+    if [ "$HAVE_LICENSE" = "1" ]; then
+      cp /lic/pagespeed.license "$R/pagespeed.license"
+      chmod 644 "$R/pagespeed.license"
+    fi
     printf "body{ color : red ; margin : 1px ; }\n" > "$R/www/s.css"
     printf "<!doctype html><html><head><link rel=stylesheet href=/s.css></head><body>hi</body></html>" > "$R/www/index.html"
 
@@ -103,12 +112,39 @@ CONF
     fi
 
     # 4. LICENSE — token supplied => NO unlicensed warning; none => warning expected.
+    #
+    # POLL until the license state SETTLES instead of asserting the first
+    # optimized response: at worker start there is a short window between the
+    # first license check completing (which enables the warn header) and the
+    # file-token apply propagating to the serve-time license atomic
+    # (ShouldOptimize). On an idle box the window closes before the first
+    # X-Page-Speed response; under post-build CI load it can stay open for a
+    # few responses — that race failed the 1.15.0.1 pair build twice on the
+    # mac-arm64 runner (2026-06-12) while the same .so passed 3/3 when run
+    # idle. The window exists in every build incl. shipped GA (verified
+    # against the 1.15.0 GCS pair); it is within the design record soft-enforcement
+    # semantics, so the smoke must tolerate it, not gate on it.
     WARN=$(echo "$HDRS" | grep -i "^X-PageSpeed-Warn:" || true)
     if [ "$HAVE_LICENSE" = "1" ]; then
-      [ -z "$WARN" ] || { echo "  >>> LICENSE FAILED (unexpected warn with a valid token): $WARN"; exit 1; }
+      for i in $(seq 1 15); do
+        [ -z "$WARN" ] && break
+        sleep 1
+        HDRS=$(curl -fsS -D - -o /dev/null "http://127.0.0.1:8099/" 2>/dev/null || true)
+        echo "$HDRS" | grep -iq "^X-Page-Speed:" || continue  # only judge optimized responses
+        WARN=$(echo "$HDRS" | grep -i "^X-PageSpeed-Warn:" || true)
+      done
+      [ -z "$WARN" ] || { echo "  >>> LICENSE FAILED (warn persisted after settle window with a valid token): $WARN"; exit 1; }
       echo "    LICENSE: no unlicensed warning with a valid token"
     else
-      # eval mode: a soft warning is expected; do not hard-fail if absent across versions.
+      # eval mode: a soft warning is expected; poll symmetrically (the warn is
+      # suppressed until the first license check completes), but do not
+      # hard-fail if absent across versions.
+      for i in $(seq 1 15); do
+        [ -n "$WARN" ] && break
+        sleep 1
+        HDRS=$(curl -fsS -D - -o /dev/null "http://127.0.0.1:8099/" 2>/dev/null || true)
+        WARN=$(echo "$HDRS" | grep -i "^X-PageSpeed-Warn:" || true)
+      done
       [ -n "$WARN" ] && echo "    LICENSE(eval): soft warning present: $WARN" || echo "    LICENSE(eval): (no warn header surfaced)"
     fi
 
