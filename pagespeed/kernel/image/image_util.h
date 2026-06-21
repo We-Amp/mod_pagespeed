@@ -186,6 +186,37 @@ struct ScanlineWriterConfig {
   virtual ~ScanlineWriterConfig();
 };
 
+// the design record: Conservative, signature-only detection of a C2PA / Content-Credentials
+// provenance manifest in raw image bytes (JPEG, PNG, WebP, GIF). This NEVER parses,
+// validates, or re-emits the manifest -- it only scans for well-known marker/box
+// signatures so the image-rewrite path can pass a manifest-bearing image through
+// unmodified instead of recompressing (which would strip the manifest). A false
+// positive only costs a skipped optimization (fail-safe); a false negative degrades
+// to the current strip behavior. Intended to run once per image.
+bool ImageHasC2paManifest(StringPiece bytes);
+
+// the design record: detects specifically the XMP-carried Content-Credentials form ("cr:" inside
+// an XMP packet). For JPEG this lives in APP1 (shared with EXIF), so the codec carries
+// it only when EXIF/APP1 is retained -- the rewrite gate uses this to skip-not-strip a
+// manifest the codec cannot guarantee carrying. Subset of ImageHasC2paManifest.
+bool ImageHasXmpC2pa(StringPiece bytes);
+
+// the design record Level A (carry-through), PNG only. Walks a PNG chunk stream (8-byte
+// signature -> length-prefixed chunks) and returns the VERBATIM byte ranges
+// (views into `bytes`) of every C2PA carrier chunk ("caBX") and linked XMP chunk
+// ("iTXt"), in original file order. Each range is the WHOLE chunk (4-byte length,
+// 4-byte type, data, 4-byte original CRC carried as-is). The returned StringPieces
+// alias `bytes`, so the original buffer must outlive them; the carry path splices
+// these unmodified bytes into the recompressed PNG, never decoding or re-authoring
+// the manifest. Returns empty on any structural anomaly, an
+// unrecognized format, or when no carrier is found -- on which the caller MUST
+// fall back to Level B (detect-and-skip) rather than emit a stripped image.
+//
+// (JPEG needs no equivalent: jpeg_optimizer.cc already carries APP11/JUMBF through
+// a recompress via libjpeg's marker API, with correct marker ordering and
+// multi-segment support, whenever preserve_c2pa is set.)
+net_instaweb::StringPieceVector ExtractPngC2paChunks(StringPiece bytes);
+
 }  // namespace image_compression
 
 }  // namespace pagespeed

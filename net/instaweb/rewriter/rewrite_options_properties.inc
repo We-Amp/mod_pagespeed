@@ -212,6 +212,23 @@
   X(false, image_preserve_urls_, "ipu", \
     kImagePreserveURLs, kDirectoryScope, \
     "Disable the rewriting of Image URLs.", true) \
+  X(true, preserve_image_provenance_, "pip", \
+    kPreserveImageProvenance, kDirectoryScope, \
+    "Preserve C2PA/Content-Credentials provenance metadata (JPEG APP11/JUMBF) " \
+    "through image optimization. On by default; independent of EXIF stripping.", \
+    true) \
+  X(false, image_provenance_carry_, "ipc", \
+    kImageProvenanceCarry, kDirectoryScope, \
+    "the design record Level A carry-through: when true (and PreserveImageProvenance is "\
+    "on), PNG images carrying a C2PA / Content Credentials manifest are "\
+    "recompressed AND their original manifest chunks (caBX/iTXt) are carried "\
+    "into the optimized output unmodified, keeping both the byte savings and "\
+    "the provenance. (Manifest-bearing JPEGs already carry their APP11/JUMBF "\
+    "through recompression under PreserveImageProvenance.) Cases where the "\
+    "carrier cannot be preserved byte-exactly -- resize, format conversion "\
+    "(PNG->JPEG/WebP), GIF, or extraction failure -- fall back to the default "\
+    "detect-and-skip (Level B) pass-through. No effect when "\
+    "PreserveImageProvenance is false.", true) \
   X(false, js_preserve_urls_, "jpu", \
     kJsPreserveURLs, kDirectoryScope, \
     "Disable the rewriting of Javascript URLs.", true) \

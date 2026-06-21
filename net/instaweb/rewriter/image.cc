@@ -789,6 +789,45 @@ bool ImageImpl::ComputeOutputContents() {
       contents = original_contents_;
     }
 
+    // the design record C2PA / Content-Credentials preserve-by-default fallback.
+    // The JPEG codec carries the APP11/JUMBF manifest THROUGH a recompress
+    // (jpeg_optimizer.cc), but only for a JPEG that is not resized and stays JPEG:
+    // the resize path re-encodes via the ScanlineWriter (which copies no markers),
+    // and the JPEG->WebP / PNG / GIF encoders do not carry the manifest at all. For
+    // every path the codec cannot cover, fail safe -- pass the ORIGINAL bytes through
+    // byte-for-byte (skip optimization) rather than silently strip provenance. This
+    // only detects and preserves; it never parses, validates, or re-emits the
+    // manifest. Tradeoff: a manifest-bearing image is not resized or
+    // format-converted under the default; opt out with `PreserveImageProvenance off`.
+    // Computed once here so the byte scan does not run per format branch.
+    const bool has_c2pa =
+        options_.get() != nullptr && options_->preserve_c2pa &&
+        pagespeed::image_compression::ImageHasC2paManifest(original_contents_);
+    // The JPEG codec carry (jpeg_optimizer.cc) preserves the APP11/JUMBF form, but a
+    // Content-Credentials manifest carried in XMP lives in APP1 (shared with EXIF) and
+    // survives a recompress only when EXIF/APP1 is retained -- which is FALSE under
+    // StripImageMetaData, a DEFAULT CoreFilters / optimize-for-bandwidth filter. So a
+    // non-resized JPEG carrying the XMP form that would be stripped must also fall back
+    // to skip-not-strip, or provenance would be silently lost.
+    const bool xmp_would_strip =
+        has_c2pa && !options_->retain_exif_data &&
+        pagespeed::image_compression::ImageHasXmpC2pa(original_contents_);
+    // the design record Level A (opt-in, ImageProvenanceCarry): a non-resized PNG carrying a
+    // manifest is NOT skipped -- it is recompressed and its caBX/iTXt chunks are
+    // spliced back into the optimized output below. The PNG optimizer strips
+    // ancillary chunks, so unlike the JPEG codec (jpeg_optimizer.cc, which already
+    // carries APP11/JUMBF through a recompress) it cannot preserve the manifest on
+    // its own. The carry flag is therefore PNG-only here; every other manifest
+    // case still falls back to skip-not-strip below.
+    const bool png_carry = has_c2pa && options_->c2pa_carry && !resized &&
+                           image_type() == IMAGE_PNG;
+    if (has_c2pa && !png_carry &&
+        (resized || image_type() != IMAGE_JPEG || xmp_would_strip)) {
+      output_contents_ = original_contents_.as_string();
+      output_valid_ = true;
+      return true;
+    }
+
     // Take image contents and re-compress them.
     // The basic logic is this:
     // * low_quality_enabled_ acts as though convert_gif_to_png and
@@ -826,7 +865,10 @@ bool ImageImpl::ComputeOutputContents() {
         ok = false;
         break;
       case IMAGE_JPEG:
-        if (MayConvert() && options_->convert_jpeg_to_webp &&
+        // the design record: a manifest-bearing JPEG must not be converted to WebP (WebP
+        // carries no APP11/JUMBF). !has_c2pa skips the conversion so it falls through
+        // to the JPEG recompress branch below, where the codec preserves the manifest.
+        if (MayConvert() && options_->convert_jpeg_to_webp && !has_c2pa &&
             (options_->preferred_webp != WEBP_NONE)) {
           ok = ConvertJpegToWebp(string_for_image, options_->webp_quality,
                                  &output_contents_);
@@ -871,6 +913,47 @@ bool ImageImpl::ComputeOutputContents() {
             options_->convert_gif_to_png /* fall_back_to_png */, kGifString,
             current_image_type, Image::ConversionVariables::FROM_GIF);
         break;
+    }
+    // the design record Level A PNG carry-through: splice the ORIGINAL caBX/iTXt manifest
+    // chunks into the recompressed PNG, immediately before the trailing IEND
+    // chunk. Fail-safe to Level B (serve the original bytes byte-for-byte) on ANY
+    // anomaly -- the PNG was converted to another format (the PNG carrier no
+    // longer fits), recompression failed, extraction found no carrier, or the
+    // output has no well-formed IEND -- so a manifest is never silently dropped.
+    // The bytes are never parsed or re-authored.
+    if (png_carry) {
+      bool carried = false;
+      if (ok && image_type() == IMAGE_PNG) {
+        const StringPieceVector chunks =
+            pagespeed::image_compression::ExtractPngC2paChunks(
+                original_contents_);
+        const size_t n = output_contents_.size();
+        // The trailing IEND chunk is exactly 12 bytes:
+        // length(4) + "IEND"(4) + CRC(4); its type sits at offset n-8.
+        if (!chunks.empty() && n >= 12 &&
+            output_contents_.compare(n - 8, 4, "IEND") == 0) {
+          GoogleString carrier;
+          for (const StringPiece& chunk : chunks) {
+            chunk.AppendToString(&carrier);
+          }
+          // Splice unless the recompressed output already contains these EXACT
+          // carrier bytes (the PNG optimizer strips ancillary chunks, so it
+          // normally has not -- this guards only against a future chunk-preserving
+          // optimizer double-adding them). This is a content-EXACT check on the
+          // full carrier, never a short signature scan, so a chance token
+          // collision in the compressed IDAT cannot mistakenly skip the splice
+          // and silently strip the manifest.
+          if (output_contents_.find(carrier) == GoogleString::npos) {
+            output_contents_.insert(n - 12, carrier);
+          }
+          carried = true;
+        }
+      }
+      if (!carried) {
+        output_contents_ = original_contents_.as_string();
+        image_type_ = IMAGE_PNG;
+        ok = true;
+      }
     }
     output_valid_ = ok;
   }
@@ -1189,6 +1272,7 @@ void ImageImpl::ConvertToJpegOptions(const Image::CompressionOptions& options,
   int input_quality = GetJpegQualityFromImage(original_contents_);
   jpeg_options->retain_color_profile = options.retain_color_profile;
   jpeg_options->retain_exif_data = options.retain_exif_data;
+  jpeg_options->preserve_c2pa = options.preserve_c2pa;
   int output_quality = EstimateQualityForResizedJpeg();
 
   if (options.jpeg_quality > 0) {

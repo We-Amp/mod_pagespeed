@@ -35,6 +35,7 @@ cc_library(
         "ngx_rewrite_options.cc",
         "ngx_server_context.cc",
         "ngx_url_async_fetcher.cc",
+        "ngx_webbotauth_handler.cc",
     ],
     hdrs = [
         "log_message_handler.h",
@@ -50,6 +51,7 @@ cc_library(
         "ngx_rewrite_options.h",
         "ngx_server_context.h",
         "ngx_url_async_fetcher.h",
+        "ngx_webbotauth_handler.h",
     ],
     copts = NGINX_COPTS,
     visibility = ["//visibility:public"],
@@ -65,6 +67,8 @@ cc_library(
         "//pagespeed/kernel/thread",
         "//pagespeed/system",
         "//pagespeed/system:curl_fetcher",
+        "//pagespeed/kernel/webbotauth:webbotauth_core",
+        "//pagespeed/kernel/webbotauth:webbotauth_warmer",
         "@nginx//:nginx",
     ],
 )
@@ -118,6 +122,7 @@ cc_library(
         "ngx_rewrite_options.cc",
         "ngx_server_context.cc",
         "ngx_url_async_fetcher.cc",
+        "ngx_webbotauth_handler.cc",
     ],
     hdrs = [
         "log_message_handler.h",
@@ -133,6 +138,7 @@ cc_library(
         "ngx_rewrite_options.h",
         "ngx_server_context.h",
         "ngx_url_async_fetcher.h",
+        "ngx_webbotauth_handler.h",
     ],
     copts = NGINX_COPTS + [
         "-DPAGESPEED_ENABLE_MEMCACHED=0",
@@ -151,6 +157,8 @@ cc_library(
         "//pagespeed/kernel/thread",
         "//pagespeed/system:system_envoy",
         "//pagespeed/system:curl_fetcher",
+        "//pagespeed/kernel/webbotauth:webbotauth_core",
+        "//pagespeed/kernel/webbotauth:webbotauth_warmer",
         "@nginx//:nginx",
     ],
 )
@@ -212,6 +220,7 @@ cc_library(
         "ngx_rewrite_options.cc",
         "ngx_server_context.cc",
         "ngx_url_async_fetcher.cc",
+        "ngx_webbotauth_handler.cc",
     ],
     hdrs = [
         "log_message_handler.h",
@@ -227,6 +236,7 @@ cc_library(
         "ngx_rewrite_options.h",
         "ngx_server_context.h",
         "ngx_url_async_fetcher.h",
+        "ngx_webbotauth_handler.h",
     ],
     copts = NGINX_COPTS,
     # Force static linking to create a self-contained archive
@@ -246,6 +256,8 @@ cc_library(
         "//pagespeed/kernel/thread",
         "//pagespeed/system",
         "//pagespeed/system:curl_fetcher",
+        "//pagespeed/kernel/webbotauth:webbotauth_core",
+        "//pagespeed/kernel/webbotauth:webbotauth_warmer",
         "@nginx//:nginx",
     ],
 )

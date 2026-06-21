@@ -19,6 +19,10 @@
 
 #include "pagespeed/kernel/image/image_util.h"
 
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+
 #include "external/libwebp/src/webp/decode.h"
 #include "pagespeed/kernel/base/countdown_timer.h"
 #include "pagespeed/kernel/base/message_handler.h"
@@ -190,6 +194,133 @@ bool ConversionTimeoutHandler::Continue(int percent, void* user_data) {
 }
 
 ScanlineWriterConfig::~ScanlineWriterConfig() {}
+
+// the design record C2PA / Content-Credentials provenance detector. Conservative, signature-only
+// substring scan over the raw original bytes. It intentionally does NOT decode the
+// container, validate a signature, or re-serialize anything. Two carrier classes are distinguished because
+// the JPEG codec can carry only one of them through a recompress:
+//   * JUMBF/box form -- FourCCs "jumb"/"jumd"/"c2pa" (JPEG APP11 + generic containers)
+//     and the PNG C2PA chunk type "caBX". For JPEG this lives in APP11, which the codec
+//     carries verbatim under preserve_c2pa.
+//   * XMP form -- the "cr:" Content-Credentials namespace inside an XMP packet. For JPEG
+//     this lives in APP1 (shared with EXIF), so the codec carries it only when EXIF/APP1
+//     is retained; otherwise the rewrite gate must skip-not-strip (see image.cc).
+namespace {
+bool ContainsToken(StringPiece haystack, StringPiece needle) {
+  if (needle.empty() || haystack.size() < needle.size()) {
+    return false;
+  }
+  const size_t limit = haystack.size() - needle.size();
+  for (size_t i = 0; i <= limit; ++i) {
+    if (memcmp(haystack.data() + i, needle.data(), needle.size()) == 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// JUMBF/box-form C2PA: FourCCs that live in the JPEG APP11 segment or the PNG caBX
+// chunk -- the form the codec carry (jpeg_optimizer.cc) preserves verbatim.
+bool HasJumbfC2pa(StringPiece bytes) {
+  static const char* const kC2paMarkers[] = {"jumb", "jumd", "c2pa", "caBX"};
+  for (const char* marker : kC2paMarkers) {
+    if (ContainsToken(bytes, marker)) {
+      return true;
+    }
+  }
+  return false;
+}
+}  // namespace
+
+bool ImageHasXmpC2pa(StringPiece bytes) {
+  // Require enough bytes to plausibly carry a manifest token.
+  if (bytes.size() < 12) {
+    return false;
+  }
+  // The "cr:" namespace prefix only counts when it appears alongside an XMP packet
+  // marker, to avoid false positives on unrelated binary data.
+  return ContainsToken(bytes, "cr:") &&
+         (ContainsToken(bytes, "xpacket") ||
+          ContainsToken(bytes, "adobe.com/xap") ||
+          ContainsToken(bytes, "contentauth"));
+}
+
+bool ImageHasC2paManifest(StringPiece bytes) {
+  // Require enough bytes to plausibly carry a manifest token.
+  if (bytes.size() < 12) {
+    return false;
+  }
+  return HasJumbfC2pa(bytes) || ImageHasXmpC2pa(bytes);
+}
+
+namespace {
+
+// Reads a big-endian unsigned 32-bit value from `p` (4 bytes must be available).
+uint32_t ReadBE32(const char* p) {
+  return (static_cast<uint32_t>(static_cast<uint8_t>(p[0])) << 24) |
+         (static_cast<uint32_t>(static_cast<uint8_t>(p[1])) << 16) |
+         (static_cast<uint32_t>(static_cast<uint8_t>(p[2])) << 8) |
+         static_cast<uint32_t>(static_cast<uint8_t>(p[3]));
+}
+
+}  // namespace
+
+net_instaweb::StringPieceVector ExtractPngC2paChunks(StringPiece bytes) {
+  // the design record Level A: capture the verbatim bytes of the C2PA carrier chunk
+  // ("caBX") and the linked XMP chunk ("iTXt"). Whole chunks (length + type +
+  // data + ORIGINAL CRC) are returned as views into `bytes` so the carry path
+  // splices them unmodified; the original CRC is carried as-is, never recomputed
+  // (the chunk data and its CRC travel together, so the CRC stays self-consistent
+  // even though the chunk is relocated). The bytes are never decoded or
+  // re-authored. Returns empty on any structural anomaly, on which
+  // the caller MUST fall back to Level B (detect-and-skip) rather than emit a
+  // stripped image.
+  net_instaweb::StringPieceVector chunks;
+  static const unsigned char kPngSig[8] = {0x89, 'P',  'N',  'G',
+                                           0x0D, 0x0A, 0x1A, 0x0A};
+  const size_t size = bytes.size();
+  if (size < 8 + 12) {  // signature + at least one minimal chunk header + CRC.
+    return chunks;
+  }
+  const char* data = bytes.data();
+  if (memcmp(data, kPngSig, 8) != 0) {
+    return chunks;  // Not a PNG; caller falls back to Level B.
+  }
+  size_t pos = 8;
+  bool iend_seen = false;
+  while (pos + 8 <= size) {  // need length(4) + type(4) at minimum.
+    const uint32_t data_len = ReadBE32(data + pos);
+    const size_t chunk_total = static_cast<size_t>(12) + data_len;
+    // Guard against overflow and buffer overrun. On any structural anomaly,
+    // discard ANY partial result and return empty so the caller falls back to
+    // Level B (serve the original) rather than carrying a partial manifest.
+    if (data_len > size || pos + chunk_total > size) {
+      return net_instaweb::StringPieceVector();
+    }
+    const char* type = data + pos + 4;
+    const StringPiece whole(data + pos, chunk_total);
+    // The C2PA box chunk ("caBX") is always a carrier; an "iTXt" is carried only
+    // when it actually holds the Content-Credentials XMP packet ("cr:" + an XMP
+    // marker), never an arbitrary text iTXt chunk.
+    const bool is_carrier =
+        (memcmp(type, "caBX", 4) == 0) ||
+        (memcmp(type, "iTXt", 4) == 0 && ImageHasXmpC2pa(whole));
+    if (is_carrier) {
+      chunks.push_back(whole);
+    }
+    if (memcmp(type, "IEND", 4) == 0) {
+      iend_seen = true;
+      break;  // IEND terminates the stream.
+    }
+    pos += chunk_total;
+  }
+  if (!iend_seen) {
+    // Ran off the end without a terminating IEND: a structural anomaly. Fail
+    // safe to empty so the caller serves the original (Level B).
+    return net_instaweb::StringPieceVector();
+  }
+  return chunks;
+}
 
 }  // namespace image_compression
 

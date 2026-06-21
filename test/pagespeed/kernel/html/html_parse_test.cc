@@ -34,6 +34,7 @@
 #include "pagespeed/kernel/html/html_element.h"
 #include "pagespeed/kernel/html/html_event.h"
 #include "pagespeed/kernel/html/html_filter.h"
+#include "pagespeed/kernel/html/html_lexer.h"
 #include "pagespeed/kernel/html/html_name.h"
 #include "pagespeed/kernel/html/html_node.h"
 #include "pagespeed/kernel/html/html_writer_filter.h"
@@ -404,6 +405,32 @@ TEST_F(HtmlParseTestNoBodyNoHtml, SizeLimit) {
       "<table><tr><td>blah</td></tr></table>"
       "</html>";
   CheckOutput(121, 160, input, output_with_break_in_td_text);
+}
+
+// Pathologically deep element nesting (e.g. <div> x 50,000) must not be able
+// to grow the lexer's element_stack_ without bound.  Once HtmlLexer hits
+// kMaxNestingDepth it stops parsing the remainder of the document, so the
+// serialized output is truncated well short of the input nesting.
+TEST_F(HtmlParseTestNoBodyNoHtml, MaxNestingDepthGuard) {
+  const int kDepth = HtmlLexer::kMaxNestingDepth;
+  const int kInputDivs = kDepth + 1000;
+
+  GoogleString input;
+  for (int i = 0; i < kInputDivs; ++i) {
+    input += "<div>";
+  }
+  for (int i = 0; i < kInputDivs; ++i) {
+    input += "</div>";
+  }
+
+  Parse("deep_nesting", input);
+
+  // The guard tripped: we did not serialize all kInputDivs open tags.  Without
+  // the cap the output would contain exactly kInputDivs "<div>" substrings.
+  const int open_divs = CountSubstring(output_buffer_, "<div>");
+  EXPECT_LT(open_divs, kInputDivs);
+  // We stop at the cap, so the depth never materially exceeds it.
+  EXPECT_LE(open_divs, kDepth);
 }
 
 TEST_F(HtmlParseTest, OpenBracketAfterSpace) {

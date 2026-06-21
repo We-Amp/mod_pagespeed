@@ -15,6 +15,7 @@
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/license_v2/license_file.h"
 
 namespace net_instaweb {
 
@@ -158,6 +159,15 @@ class AdminLicenseHandler {
   // scopeless tokens; never a verify-fail condition — R9/R10).
   GoogleString license_scope_;   // guarded by license_mu_
   GoogleString license_domain_;  // guarded by license_mu_
+  // the read outcome of the on-disk license file when it exists but
+  // could not be turned into a valid token (e.g. EACCES from a root-owned 0600
+  // file, or an empty/oversized file). Used to surface an honest
+  // "license_file_error" cause in /v1/license/status; the errno/uid detail is
+  // logged by ReadLicenseFile. Does not affect licensed-state validity. Only
+  // recomputed on the !valid reload path, so it is consulted only when the
+  // in-memory license is not valid (see HandleStatus).
+  LicenseFileReadStatus license_file_status_ =
+      LicenseFileReadStatus::kAbsent;  // guarded by license_mu_
 
   // Validity predicate assuming license_mu_ is already held (avoids a recursive
   // lock when IsAgentOptimizeEntitled composes validity + entitlement).

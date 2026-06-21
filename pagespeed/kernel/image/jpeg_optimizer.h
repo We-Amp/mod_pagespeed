@@ -66,6 +66,7 @@ struct JpegCompressionOptions : public ScanlineWriterConfig {
       : progressive(false),
         retain_color_profile(false),
         retain_exif_data(false),
+        preserve_c2pa(true),
         lossy(false) {}
 
   ~JpegCompressionOptions() override;
@@ -80,6 +81,12 @@ struct JpegCompressionOptions : public ScanlineWriterConfig {
 
   // If set to 'true' any exif information is retained.
   bool retain_exif_data;
+
+  // If set to 'true' (the default) C2PA / Content-Credentials provenance
+  // manifests (carried in JPEG APP11 / JUMBF markers) are preserved through
+  // optimization. Independent of retain_exif_data: stripping EXIF for size
+  // does not discard provenance unless this is explicitly turned off.
+  bool preserve_c2pa;
 
   // Whether or not to use lossy compression.
   bool lossy;

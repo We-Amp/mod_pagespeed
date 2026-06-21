@@ -318,6 +318,7 @@ class RewriteOptions {
   static const char kImageLimitResizeAreaPercent[];
   static const char kImageMaxRewritesAtOnce[];
   static const char kImagePreserveURLs[];
+  static const char kImageProvenanceCarry[];
   static const char kImageRecompressionQuality[];
   static const char kImageResolutionLimitBytes[];
   static const char kImageWebpQualityForSaveData[];
@@ -369,6 +370,7 @@ class RewriteOptions {
   static const char kObliviousPagespeedUrls[];
   static const char kOptionCookiesDurationMs[];
   static const char kOverrideCachingTtlMs[];
+  static const char kPreserveImageProvenance[];
   static const char kPreserveSubresourceHints[];
   static const char kPreserveUrlRelativity[];
   static const char kPrivateNotVaryForIE[];
@@ -2132,6 +2134,24 @@ class RewriteOptions {
   }
   void set_image_preserve_urls(bool x) { set_option(x, &image_preserve_urls_); }
 
+  // Preserve C2PA/Content-Credentials provenance (JPEG APP11/JUMBF) through
+  // image optimization. On by default; opt out with `PreserveImageProvenance
+  // off`. Independent of image metadata (EXIF) stripping.
+  bool preserve_image_provenance() const {
+    return preserve_image_provenance_.value();
+  }
+  void set_preserve_image_provenance(bool x) {
+    set_option(x, &preserve_image_provenance_);
+  }
+
+  // the design record Level A: when true (and preserve_image_provenance() is on), JPEG and
+  // PNG manifest-bearing images are recompressed with their original C2PA
+  // manifest bytes carried into the output unmodified. No effect unless
+  // preserve_image_provenance() is also true.
+  bool image_provenance_carry() const {
+    return image_provenance_carry_.value();
+  }
+
   bool js_preserve_urls() const {
     return CheckBandwidthOption(js_preserve_urls_);
   }
@@ -3583,6 +3603,8 @@ class RewriteOptions {
   Option<bool> css_preserve_urls_;
   Option<bool> js_preserve_urls_;
   Option<bool> image_preserve_urls_;
+  Option<bool> preserve_image_provenance_;
+  Option<bool> image_provenance_carry_;
 
   Option<int64> image_inline_max_bytes_;
   Option<int64> js_inline_max_bytes_;

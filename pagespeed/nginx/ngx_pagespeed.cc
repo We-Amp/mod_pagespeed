@@ -56,6 +56,7 @@
 #include "ngx_rewrite_driver_factory.h"
 #include "ngx_rewrite_options.h"
 #include "ngx_server_context.h"
+#include "ngx_webbotauth_handler.h"
 #include "pagespeed/automatic/proxy_fetch.h"
 #include "pagespeed/kernel/base/google_message_handler.h"
 #include "pagespeed/kernel/base/null_message_handler.h"
@@ -72,6 +73,7 @@
 #include "pagespeed/kernel/thread/pthread_shared_mem.h"
 #include "pagespeed/kernel/util/gzip_inflater.h"
 #include "pagespeed/kernel/util/statistics_logger.h"
+#include "pagespeed/kernel/webbotauth/key_directory_warmer.h"
 #include "pagespeed/system/admin_site.h"
 #include "pagespeed/system/in_place_resource_recorder.h"
 #include "pagespeed/system/system_caches.h"
@@ -1339,6 +1341,20 @@ StringPiece ps_determine_host(ngx_http_request_t* r) {
   return host;
 }
 
+// External-linkage accessor, defined here (OUTSIDE the anonymous namespace
+// below) so other translation units -- the Web-Bot-Auth glue in
+// ngx_webbotauth_handler.cc -- can link against it. Mirrors the file-local
+// ps_get_srv_config lookup but must NOT live in the anonymous namespace, or the
+// dynamic module .so would dlopen with an undefined ps_get_server_context.
+NgxServerContext* ps_get_server_context(ngx_http_request_t* r) {
+  ps_srv_conf_t* cfg_s = static_cast<ps_srv_conf_t*>(
+      ngx_http_get_module_srv_conf(r, ngx_pagespeed));
+  if (cfg_s == nullptr) {
+    return nullptr;
+  }
+  return cfg_s->server_context;
+}
+
 namespace {
 
 GoogleString ps_determine_url(ngx_http_request_t* r) {
@@ -1409,6 +1425,7 @@ ps_srv_conf_t* ps_get_srv_config(ngx_http_request_t* r) {
   return static_cast<ps_srv_conf_t*>(
       ngx_http_get_module_srv_conf(r, ngx_pagespeed));
 }
+
 ps_loc_conf_t* ps_get_loc_config(ngx_http_request_t* r) {
   return static_cast<ps_loc_conf_t*>(
       ngx_http_get_module_loc_conf(r, ngx_pagespeed));
@@ -3338,6 +3355,18 @@ ngx_int_t ps_pre_init(ngx_conf_t* cf) {
   // Setup an intervention setter for gzip configuration and check
   // gzip configuration command signatures.
   g_gzip_setter.Init(cf);
+
+  // Register $x_verified_bot unconditionally so it always resolves (e.g. in
+  // log_format / add_header) even before any pagespeed directive is parsed.
+  // The get-handler is a no-op (not_found) unless WebBotAuth is enabled.
+  ngx_str_t xvb_name = ngx_string("x_verified_bot");
+  ngx_http_variable_t* xvb_var =
+      ngx_http_add_variable(cf, &xvb_name, NGX_HTTP_VAR_CHANGEABLE);
+  if (xvb_var == nullptr) {
+    return NGX_ERROR;
+  }
+  xvb_var->get_handler = ps_x_verified_bot_variable;
+
   return NGX_OK;
 }
 
@@ -3382,6 +3411,32 @@ ngx_int_t ps_init(ngx_conf_t* cf) {
       return NGX_ERROR;
     }
     *h = ps_preaccess_handler;
+
+    // Observe-only Web-Bot-Auth classifier, default-off. Runs in
+    // the same phase; early-returns NGX_DECLINED unless WebBotAuth is enabled.
+    ngx_http_handler_pt* wba_h = static_cast<ngx_http_handler_pt*>(
+        ngx_array_push(&cmcf->phases[phase].handlers));
+    if (wba_h == nullptr) {
+      return NGX_ERROR;
+    }
+    *wba_h = ps_webbotauth_preaccess_handler;
+
+    // RSL-CAP enforcement, default-off. Runs in the same phase
+    // AFTER the observe-only A1 classifier; early-returns NGX_DECLINED unless
+    // RslCapEnforcement is enabled, otherwise maps the validator verdict to an
+    // inline 401/402.
+    ngx_http_handler_pt* rce_h = static_cast<ngx_http_handler_pt*>(
+        ngx_array_push(&cmcf->phases[phase].handlers));
+    if (rce_h == nullptr) {
+      return NGX_ERROR;
+    }
+    *rce_h = ps_rsl_cap_preaccess_handler;
+
+    // Index $x_verified_bot so the preaccess handler can store the verdict once
+    // (computed-once); the variable get-handler then reads the stored value.
+    ngx_str_t xvb_index_name = ngx_string("x_verified_bot");
+    ps_webbotauth_set_var_index(
+        ngx_http_get_variable_index(cf, &xvb_index_name));
   }
 
   return NGX_OK;
@@ -3481,13 +3536,134 @@ ngx_int_t ps_init_module(ngx_cycle_t* cycle) {
   return NGX_OK;
 }
 
+// the design record A2: this worker's background key-directory warmers (one per configured
+// remote directory). Each forked nginx worker has its own copy (fork semantics);
+// stopped+joined in ps_exit_child_process BEFORE the factory tears down the
+// fetcher/cache they borrow. Populated in ps_init_child_process.
+std::vector<std::unique_ptr<webbotauth::KeyDirectoryWarmer> >
+    g_key_directory_warmers;
+
 void ps_exit_child_process(ngx_cycle_t* cycle) {
   ps_main_conf_t* cfg_m = static_cast<ps_main_conf_t*>(
       ngx_http_cycle_get_module_main_conf(cycle, ngx_pagespeed));
+  // the design record A2: stop+join the warmer threads BEFORE the factory tears down the
+  // fetcher/cache they borrow. Each Stop() signals quit and joins.
+  for (size_t i = 0; i < g_key_directory_warmers.size(); ++i) {
+    g_key_directory_warmers[i]->Stop();
+  }
+  g_key_directory_warmers.clear();
   NgxBaseFetch::Terminate();
   if (cfg_m != nullptr && cfg_m->driver_factory != nullptr) {
     cfg_m->driver_factory->ShutDown();
   }
+}
+
+// Parse the operator refresh-seconds string. Empty/invalid -> 3600; clamped to
+// a sane [60s, 86400s] window.
+int64_t ParseWarmRefreshSec(const GoogleString& s) {
+  int64_t v = 0;
+  if (s.empty() || !StringToInt64(s, &v) || v <= 0) {
+    v = 3600;
+  }
+  if (v < 60) v = 60;
+  if (v > 86400) v = 86400;
+  return v;
+}
+
+// Parse a comma-separated SSRF allowlist of https origins.
+std::set<GoogleString> ParseWarmAllowlist(StringPiece spec) {
+  std::set<GoogleString> out;
+  StringPieceVector parts;
+  SplitStringPieceToVector(spec, ",", &parts, true /* omit_empty */);
+  for (size_t i = 0; i < parts.size(); ++i) {
+    StringPiece p = parts[i];
+    TrimWhitespace(&p);
+    if (!p.empty()) {
+      out.insert(GoogleString(p.data(), p.size()));
+    }
+  }
+  return out;
+}
+
+// If a feature's remote key directory is fully configured, create + start a
+// warmer for (realm,host,url). No-op when not configured (default-off). Dedups
+// by (realm, cache-storage, host, url) within this worker via *seen. Requires
+// the curl fetcher (the native nginx fetcher cannot complete a blocking fetch
+// off the event loop) and a blocking metadata cache (the cache-only request
+// reader can only read a blocking cache).
+void MaybeStartKeyDirectoryWarmer(
+    NgxRewriteDriverFactory* factory, NgxServerContext* server_context,
+    const GoogleString& realm, const GoogleString& host,
+    const GoogleString& url, const GoogleString& allowlist_spec,
+    const GoogleString& refresh_spec, std::set<GoogleString>* seen) {
+  if (host.empty() || url.empty() || allowlist_spec.empty()) {
+    return;  // default-off: warm-fetch not configured
+  }
+  MessageHandler* handler = factory->message_handler();
+  if (factory->use_native_fetcher()) {
+    if (handler != nullptr) {
+      handler->Message(kWarning,
+                       "webbotauth A2: key-directory warm-fetch requires the "
+                       "curl fetcher (UseNativeFetcher off); skipping %s",
+                       url.c_str());
+    }
+    return;
+  }
+  CacheInterface* cache = server_context->metadata_cache();
+  UrlAsyncFetcher* fetcher = server_context->DefaultSystemFetcher();
+  if (cache == nullptr || fetcher == nullptr) {
+    return;
+  }
+  // The cache-only request reader only consults a BLOCKING cache; on a
+  // non-blocking metadata cache (e.g. an external memcached/redis backend) the
+  // warmed keys would never be read, so skip rather than fetch uselessly.
+  if (!cache->IsBlocking()) {
+    if (handler != nullptr) {
+      handler->Message(
+          kWarning,
+          "webbotauth A2: key-directory warm-fetch needs a blocking "
+          "metadata cache; skipping %s",
+          url.c_str());
+    }
+    return;
+  }
+  // Dedup per (realm, cache storage, host, url): vhosts that share a
+  // FileCachePath share the metadata cache so one warmer suffices, while vhosts
+  // with distinct cache paths each get their own (otherwise a second vhost's
+  // cache would never be warmed).
+  GoogleString cache_id;
+  NgxRewriteOptions* opt = server_context->config();
+  if (opt != nullptr) {
+    cache_id = opt->file_cache_path();
+  }
+  const GoogleString dedup_key =
+      StrCat(realm, "\n", cache_id, "\n", host, "\n", url);
+  if (!seen->insert(dedup_key).second) {
+    return;  // already warming this directory into this cache in this worker
+  }
+
+  webbotauth::KeyDirectoryWarmer::Config config;
+  config.realm = realm;
+  config.host = host;
+  config.url = url;
+  config.allowlist = ParseWarmAllowlist(allowlist_spec);
+  config.refresh_sec = ParseWarmRefreshSec(refresh_spec);
+  // The entry TTL must outlast a full refresh cycle (interval + jitter + fetch
+  // latency) so keys written this cycle are still valid when the next cycle
+  // refreshes them -- otherwise the cache-only path fails closed in the gap.
+  // WarmKeyDirectoryCache clamps this to [kTtlMinSec, kTtlMaxSec].
+  config.positive_ttl_sec = config.refresh_sec * 2 + 300;
+  // Per-worker jitter so workers don't stampede the directory simultaneously.
+  config.jitter_sec = static_cast<int64_t>(ngx_pid) % 30;
+
+  std::unique_ptr<webbotauth::KeyDirectoryWarmer> warmer(
+      new webbotauth::KeyDirectoryWarmer(config, fetcher, cache,
+                                         server_context->thread_system(),
+                                         server_context->timer(), handler));
+  if (!warmer->Start()) {
+    return;  // unique_ptr cleans up; never started so no Join needed
+  }
+  g_key_directory_warmers.push_back(std::move(warmer));
 }
 
 // Called when nginx forks worker processes.  No threads should be started
@@ -3525,6 +3701,8 @@ ngx_int_t ps_init_child_process(ngx_cycle_t* cycle) {
 
   // Iterate over all configured server{} blocks, and find our context in it,
   // so we can create and set a ProxyFetchFactory for it.
+  std::set<GoogleString>
+      warmer_seen;  // the design record A2: dedup (host,url) per worker
   for (s = 0; s < cmcf->servers.nelts; s++) {
     ps_srv_conf_t* cfg_s = static_cast<ps_srv_conf_t*>(
         cscfp[s]->ctx->srv_conf[ngx_pagespeed.ctx_index]);
@@ -3536,6 +3714,27 @@ ngx_int_t ps_init_child_process(ngx_cycle_t* cycle) {
           cscfp[s]->ctx->loc_conf[ngx_http_core_module.ctx_index]);
       cfg_m->driver_factory->SetServerContextMessageHandler(
           cfg_s->server_context, clcf->error_log);
+
+      // the design record A2: start the background key-directory warmer(s) for any server
+      // whose feature is enabled AND has a remote directory configured. No-op
+      // (default-safe) otherwise. The curl fetcher's poll thread is already up
+      // by here (created during ChildInit), which the blocking fetch relies on.
+      NgxRewriteOptions* opt = cfg_s->server_context->config();
+      if (opt != nullptr && opt->web_bot_auth()) {
+        MaybeStartKeyDirectoryWarmer(
+            cfg_m->driver_factory, cfg_s->server_context, "wba",
+            opt->web_bot_auth_directory_host(),
+            opt->web_bot_auth_key_directory_url(),
+            opt->web_bot_auth_key_directory_allowlist(),
+            opt->web_bot_auth_key_directory_refresh_sec(), &warmer_seen);
+      }
+      if (opt != nullptr && opt->rsl_cap_enforcement()) {
+        MaybeStartKeyDirectoryWarmer(
+            cfg_m->driver_factory, cfg_s->server_context, "rsl",
+            opt->rsl_cap_directory_host(), opt->rsl_cap_key_directory_url(),
+            opt->rsl_cap_key_directory_allowlist(),
+            opt->rsl_cap_key_directory_refresh_sec(), &warmer_seen);
+      }
     }
   }
 

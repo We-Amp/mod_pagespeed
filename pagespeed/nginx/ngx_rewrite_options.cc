@@ -44,6 +44,25 @@ const char kConsolePath[] = "ConsolePath";
 const char kMessagesPath[] = "MessagesPath";
 const char kAdminPath[] = "AdminPath";
 const char kGlobalAdminPath[] = "GlobalAdminPath";
+const char kWebBotAuth[] = "WebBotAuth";
+const char kWebBotAuthTelemetry[] = "WebBotAuthTelemetry";
+const char kWebBotAuthDirectoryHost[] = "WebBotAuthDirectoryHost";
+const char kWebBotAuthVerifiedBots[] = "WebBotAuthVerifiedBots";
+const char kWebBotAuthKeyDirectoryFile[] = "WebBotAuthKeyDirectoryFile";
+const char kWebBotAuthKeyDirectoryUrl[] = "WebBotAuthKeyDirectoryUrl";
+const char kWebBotAuthKeyDirectoryAllowlist[] =
+    "WebBotAuthKeyDirectoryAllowlist";
+const char kWebBotAuthKeyDirectoryRefreshSec[] =
+    "WebBotAuthKeyDirectoryRefreshSec";
+const char kRslCapEnforcement[] = "RslCapEnforcement";
+const char kRslCapKeyDirectoryFile[] = "RslCapKeyDirectoryFile";
+const char kRslCapDirectoryHost[] = "RslCapDirectoryHost";
+const char kRslCapRequestedLicense[] = "RslCapRequestedLicense";
+const char kRslCapRequestedScope[] = "RslCapRequestedScope";
+const char kRslCapIssuer[] = "RslCapIssuer";
+const char kRslCapKeyDirectoryUrl[] = "RslCapKeyDirectoryUrl";
+const char kRslCapKeyDirectoryAllowlist[] = "RslCapKeyDirectoryAllowlist";
+const char kRslCapKeyDirectoryRefreshSec[] = "RslCapKeyDirectoryRefreshSec";
 
 // These options are copied from mod_instaweb.cc, where APACHE_CONFIG_OPTIONX
 // indicates that they can not be set at the directory/location level. They set
@@ -125,6 +144,128 @@ void NgxRewriteOptions::AddProperties() {
                  kGlobalAdminPath, kProcessScopeStrict,
                  "Set the global admin path.  Ex: /pagespeed_global_admin",
                  false);
+
+  // the design record A1 Web-Bot-Auth (observe-only RFC 9421 verifier). All default off /
+  // empty: zero behavior change unless the operator opts in.
+  add_ngx_option(false, &NgxRewriteOptions::web_bot_auth_, "wba", kWebBotAuth,
+                 kServerScope,
+                 "Enable observe-only Web-Bot-Auth (RFC 9421) request "
+                 "classification, surfaced as $x_verified_bot. Never blocks. "
+                 "Default off.",
+                 false);
+  add_ngx_option(
+      false, &NgxRewriteOptions::web_bot_auth_telemetry_, "wbat",
+      kWebBotAuthTelemetry, kServerScope,
+      "Count verified/signed-agent requests in the opt-in "
+      "web_bot_auth_verified_signed_requests statistic. Default off.",
+      false);
+  add_ngx_option(
+      "", &NgxRewriteOptions::web_bot_auth_directory_host_, "wbadh",
+      kWebBotAuthDirectoryHost, kServerScope,
+      "The signer directory's host identity: the warm-fetch cache key, paired with WebBotAuthKeyDirectoryUrl. Ignored by the local-file "
+      "static provider. Never request-derived. Default empty.",
+      false);
+  add_ngx_option("", &NgxRewriteOptions::web_bot_auth_verified_bots_, "wbavb",
+                 kWebBotAuthVerifiedBots, kServerScope,
+                 "Verified-bot registry: comma-separated keyid=name pairs.",
+                 false);
+  add_ngx_option("", &NgxRewriteOptions::web_bot_auth_key_directory_file_,
+                 "wbakdf", kWebBotAuthKeyDirectoryFile, kServerScope,
+                 "Path to a local JWKS file (the signer's published key "
+                 "directory, copied locally by the operator) used to verify "
+                 "signatures. A1 v1: no network fetch. Default empty.",
+                 false);
+  // the design record A2 network warm-fetch (default empty => off; A1 v1 behavior intact).
+  add_ngx_option(
+      "", &NgxRewriteOptions::web_bot_auth_key_directory_url_, "wbakdu",
+      kWebBotAuthKeyDirectoryUrl, kServerScope,
+      "HTTPS URL of the signer's JWKS directory, fetched off-request by a "
+      "background thread and cached; the request path reads cache-only and "
+      "never fetches. Requires WebBotAuthKeyDirectoryAllowlist and "
+      "WebBotAuthDirectoryHost. Default empty (no network fetch).",
+      false);
+  add_ngx_option(
+      "", &NgxRewriteOptions::web_bot_auth_key_directory_allowlist_, "wbakda",
+      kWebBotAuthKeyDirectoryAllowlist, kServerScope,
+      "SSRF allowlist: comma-separated https origins (scheme://host[:port]) "
+      "the "
+      "warm-fetch may contact. Empty => warm-fetch disabled (fail-closed). "
+      "Default empty.",
+      false);
+  add_ngx_option(
+      "", &NgxRewriteOptions::web_bot_auth_key_directory_refresh_sec_, "wbakdr",
+      kWebBotAuthKeyDirectoryRefreshSec, kServerScope,
+      "Warm-fetch refresh interval in seconds (clamped). Empty => default "
+      "3600. Default empty.",
+      false);
+
+  // the design record A3 RSL-CAP enforcement (PAID; demand-gated). All default off /
+  // empty: zero behavior change unless the operator explicitly opts in. When
+  // enabled, the validator verdict maps to an inline 401/402; the engine never
+  // settles/meters money.
+  add_ngx_option(false, &NgxRewriteOptions::rsl_cap_enforcement_, "rce",
+                 kRslCapEnforcement, kServerScope,
+                 "Enable RSL-CAP capability-token enforcement: an "
+                 "Authorization: License token is validated and the verdict is "
+                 "mapped to an inline 401/402. Never settles/meters. Default "
+                 "off.",
+                 false);
+  add_ngx_option("", &NgxRewriteOptions::rsl_cap_key_directory_file_, "rckdf",
+                 kRslCapKeyDirectoryFile, kServerScope,
+                 "Path to a local JWKS file (the issuer's published key "
+                 "directory, copied locally by the operator) used to resolve "
+                 "RSL-CAP signing keys. v1: synchronous, no network fetch. "
+                 "Default empty.",
+                 false);
+  add_ngx_option(
+      "", &NgxRewriteOptions::rsl_cap_directory_host_, "rcdh",
+      kRslCapDirectoryHost, kServerScope,
+      "Operator-mapped issuer directory host passed to the key "
+      "provider (plane-split, never request-derived). Ignored by the "
+      "v1 static-file provider; used by the follow-up network "
+      "provider. Default empty.",
+      false);
+  add_ngx_option("", &NgxRewriteOptions::rsl_cap_requested_license_, "rcrl",
+                 kRslCapRequestedLicense, kServerScope,
+                 "License id this route requires; a token must grant it (and "
+                 "the requested scope) to be authorized, else 402. Default "
+                 "empty.",
+                 false);
+  add_ngx_option(
+      "", &NgxRewriteOptions::rsl_cap_requested_scope_, "rcrs",
+      kRslCapRequestedScope, kServerScope,
+      "Scope this route requires; a token must grant it (and the "
+      "requested license) to be authorized, else 402. Default empty.",
+      false);
+  add_ngx_option("", &NgxRewriteOptions::rsl_cap_issuer_, "rci", kRslCapIssuer,
+                 kServerScope,
+                 "Optional issuer pin: when set, an otherwise-authorized token "
+                 "whose iss != this value is rejected (401). Use when a "
+                 "directory host may serve multiple issuers. Default empty.",
+                 false);
+  // the design record A2 network warm-fetch for the RSL-CAP issuer directory (mirrors the
+  // WebBotAuth* warm-fetch options; default empty => v1 static-file behavior).
+  add_ngx_option(
+      "", &NgxRewriteOptions::rsl_cap_key_directory_url_, "rckdu",
+      kRslCapKeyDirectoryUrl, kServerScope,
+      "HTTPS URL of the issuer's JWKS directory, fetched off-request by a "
+      "background thread and cached; the request path reads cache-only. "
+      "Requires RslCapKeyDirectoryAllowlist and RslCapDirectoryHost. Default "
+      "empty (no network fetch).",
+      false);
+  add_ngx_option(
+      "", &NgxRewriteOptions::rsl_cap_key_directory_allowlist_, "rckda",
+      kRslCapKeyDirectoryAllowlist, kServerScope,
+      "SSRF allowlist: comma-separated https origins the RSL-CAP warm-fetch "
+      "may "
+      "contact. Empty => warm-fetch disabled (fail-closed). Default empty.",
+      false);
+  add_ngx_option(
+      "", &NgxRewriteOptions::rsl_cap_key_directory_refresh_sec_, "rckdr",
+      kRslCapKeyDirectoryRefreshSec, kServerScope,
+      "RSL-CAP warm-fetch refresh interval in seconds (clamped). Empty => "
+      "default 3600. Default empty.",
+      false);
 
   MergeSubclassProperties(ngx_properties_);
 

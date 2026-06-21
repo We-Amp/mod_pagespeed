@@ -22,6 +22,7 @@
 #include "net/instaweb/rewriter/public/image.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <cstdlib>
 #include <memory>
 
@@ -1138,7 +1139,7 @@ TEST_F(ImageTest, ResizeTo) {
   ImageDim new_dim;
   new_dim.set_width(10);
   new_dim.set_height(10);
-  image->ResizeTo(new_dim);
+  ASSERT_TRUE(image->ResizeTo(new_dim));
 
   ExpectEmptyOutput(image.get());
   ExpectContentType(IMAGE_JPEG, image.get());
@@ -1292,4 +1293,563 @@ TEST_F(ImageTest, AnimatedGifToWebpTest) {
 }
 
 }  // namespace
+
+// ----------------------------------------------------------------------------
+// the design record: C2PA / Content-Credentials preserve-by-default (best-of consolidation).
+//
+// Two mechanisms, exercised through ImageImpl::ComputeOutputContents():
+//  * Codec carry (jpeg_optimizer.cc): a JPEG that is recompressed but NOT resized
+//    and NOT format-converted keeps its APP11/JUMBF manifest THROUGH the re-encode
+//    (optimize AND preserve).
+//  * Detect-and-skip fallback (the gate): for paths the codec cannot carry -- resize
+//    (any format), JPEG->WebP, PNG/GIF -- a manifest-bearing image is served from the
+//    ORIGINAL bytes byte-for-byte (skip-not-strip). Detection is a conservative byte
+//    scan, so a spliced marker suffices and the tests stay hermetic (no real signing).
+// ----------------------------------------------------------------------------
+
+namespace {
+
+// Splices a minimal JUMBF/C2PA stub into an APP11 (0xFF 0xEB) JPEG segment right
+// after the SOI marker (0xFF 0xD8). The JPEG decoder ignores the unknown APP11
+// segment, so the recompress path still yields a valid JPEG (without the
+// segment) when preservation is off.
+GoogleString SpliceC2paApp11IntoJpeg(const GoogleString& jpeg) {
+  EXPECT_GE(jpeg.size(), static_cast<size_t>(2));
+  EXPECT_EQ('\xFF', jpeg[0]);
+  EXPECT_EQ('\xD8', jpeg[1]);
+  const GoogleString payload =
+      "JP"
+      "jumb"
+      "jumd"
+      "c2pa";
+  const size_t seg_len = payload.size() + 2;  // +2 for the length field itself.
+  GoogleString out;
+  out.append(jpeg.data(), 2);  // SOI.
+  out.push_back('\xFF');       // APP11 marker...
+  out.push_back('\xEB');       // ...0xFF 0xEB.
+  out.push_back(static_cast<char>((seg_len >> 8) & 0xFF));
+  out.push_back(static_cast<char>(seg_len & 0xFF));
+  out.append(payload);
+  out.append(jpeg.data() + 2, jpeg.size() - 2);  // Rest of the original JPEG.
+  return out;
+}
+
+// ---- the design record Level A PNG carry-through fixtures ----
+// The detector + ExtractPngC2paChunks key off a "jumb"/"jumd"/"c2pa" JUMBF byte
+// signature inside a caBX chunk, so a spliced stub trips them without any real
+// signing -- the tests stay hermetic.
+
+// CRC-32 (ISO 3309 / PNG) over a byte range. PNG chunk CRCs cover the 4-byte type
+// plus the data; a real CRC keeps the spliced caBX chunk valid so libpng decodes
+// the image cleanly (a bad ancillary-chunk CRC would warn under the strict
+// handler).
+uint32_t PngCrc32(const char* data, size_t len) {
+  uint32_t crc = 0xFFFFFFFFu;
+  for (size_t i = 0; i < len; ++i) {
+    crc ^= static_cast<unsigned char>(data[i]);
+    for (int b = 0; b < 8; ++b) {
+      crc = (crc >> 1) ^ (0xEDB88320u & (~(crc & 1u) + 1u));
+    }
+  }
+  return crc ^ 0xFFFFFFFFu;
+}
+
+void AppendBE32(uint32_t v, GoogleString* out) {
+  out->push_back(static_cast<char>((v >> 24) & 0xFF));
+  out->push_back(static_cast<char>((v >> 16) & 0xFF));
+  out->push_back(static_cast<char>((v >> 8) & 0xFF));
+  out->push_back(static_cast<char>(v & 0xFF));
+}
+
+// Builds a valid caBX (C2PA box) PNG chunk carrying the JUMBF signature, framed
+// as length(BE32) + "caBX" + data + crc(BE32). `extra_data_bytes` pads the chunk
+// data so a large (>64KB) single-chunk manifest can be exercised. The exact bytes
+// are what ExtractPngC2paChunks captures and the carry path must re-insert.
+GoogleString MakeCaBxChunk(size_t extra_data_bytes) {
+  GoogleString type_and_data;
+  type_and_data.append("caBX");                    // PNG C2PA chunk type.
+  type_and_data.append("JP");                      // JUMBF superbox tag.
+  type_and_data.append("jumb");                    // detector token.
+  type_and_data.append("jumd");                    // detector token.
+  type_and_data.append("c2pa");                    // detector token.
+  type_and_data.append(extra_data_bytes, '\x7E');  // opaque manifest padding.
+  const uint32_t data_len = static_cast<uint32_t>(type_and_data.size() - 4);
+  GoogleString chunk;
+  AppendBE32(data_len, &chunk);
+  chunk.append(type_and_data);
+  AppendBE32(PngCrc32(type_and_data.data(), type_and_data.size()), &chunk);
+  return chunk;
+}
+
+// Splices a caBX C2PA chunk into a PNG immediately after the IHDR chunk (the first
+// chunk after the 8-byte signature), where ancillary chunks legitimately live.
+// The unknown caBX chunk is ignored by the decoder, so the image still
+// recompresses to a valid (smaller) PNG that has dropped the chunk when carry is
+// off.
+GoogleString SpliceC2paCaBxIntoPng(const GoogleString& png,
+                                   size_t extra_bytes) {
+  static const char kSig[8] = {'\x89', 'P', 'N', 'G', '\r', '\n', '\x1A', '\n'};
+  EXPECT_GE(png.size(), static_cast<size_t>(8 + 25));
+  EXPECT_EQ(0, memcmp(png.data(), kSig, 8));
+  // IHDR is the first chunk: 4 (len) + 4 (type) + 13 (data) + 4 (crc) = 25.
+  const size_t ihdr_end = 8 + 25;
+  EXPECT_EQ(0, memcmp(png.data() + 12, "IHDR", 4));  // type at sig+8+4.
+  GoogleString out;
+  out.append(png.data(), ihdr_end);        // signature + IHDR.
+  out.append(MakeCaBxChunk(extra_bytes));  // spliced caBX.
+  out.append(png.data() + ihdr_end,
+             png.size() - ihdr_end);  // rest (IDAT..IEND).
+  return out;
+}
+
+// Builds a valid iTXt PNG chunk carrying a Content-Credentials XMP packet
+// (keyword "XML:com.adobe.xmp", an xpacket marker, and the "cr:" namespace) --
+// the XMP form of a C2PA manifest, with NO caBX box. Trips ImageHasXmpC2pa.
+GoogleString MakeXmpItxtChunk() {
+  GoogleString type_and_data;
+  type_and_data.append("iTXt");
+  type_and_data.append("XML:com.adobe.xmp");  // standard XMP iTXt keyword.
+  type_and_data.append(
+      " <?xpacket begin?> cr:provenance contentauth </xpacket>");
+  const uint32_t data_len = static_cast<uint32_t>(type_and_data.size() - 4);
+  GoogleString chunk;
+  AppendBE32(data_len, &chunk);
+  chunk.append(type_and_data);
+  AppendBE32(PngCrc32(type_and_data.data(), type_and_data.size()), &chunk);
+  return chunk;
+}
+
+GoogleString SpliceXmpItxtIntoPng(const GoogleString& png) {
+  static const char kSig[8] = {'\x89', 'P', 'N', 'G', '\r', '\n', '\x1A', '\n'};
+  EXPECT_GE(png.size(), static_cast<size_t>(8 + 25));
+  EXPECT_EQ(0, memcmp(png.data(), kSig, 8));
+  const size_t ihdr_end = 8 + 25;
+  EXPECT_EQ(0, memcmp(png.data() + 12, "IHDR", 4));
+  GoogleString out;
+  out.append(png.data(), ihdr_end);  // signature + IHDR.
+  out.append(MakeXmpItxtChunk());    // spliced XMP iTXt.
+  out.append(png.data() + ihdr_end, png.size() - ihdr_end);  // rest.
+  return out;
+}
+
+}  // namespace
+
+TEST_F(ImageTest, PreserveC2paJpegRecompressKeepsManifest) {
+  // The optimize-AND-preserve fast path: a non-resized JPEG is genuinely
+  // recompressed, and the codec carries the APP11/JUMBF manifest into the output.
+  GoogleString original;
+  ASSERT_TRUE(
+      file_system_.ReadFile(StrCat(GTestSrcDir(), kTestData, kPuzzle).c_str(),
+                            &original, &message_handler_));
+  const GoogleString with_c2pa = SpliceC2paApp11IntoJpeg(original);
+
+  Image::CompressionOptions* options = new Image::CompressionOptions();
+  options->recompress_jpeg = true;
+  EXPECT_TRUE(options->preserve_c2pa);  // Default-on.
+  ImagePtr image(NewImage(with_c2pa, "c2pa-recompress", GTestTempDir(), options,
+                          &timer_, &message_handler_));
+  const GoogleString out(image->Contents().data(), image->Contents().size());
+
+  // Recompressed (not a byte-identical skip) AND the manifest survives.
+  EXPECT_NE(with_c2pa, out);
+  EXPECT_NE(GoogleString::npos, out.find("c2pa"));
+  ExpectContentType(IMAGE_JPEG, image.get());  // Stayed JPEG.
+}
+
+TEST_F(ImageTest, PreserveC2paOffStripsOnRecompress) {
+  // The opt-out: with preserve OFF the codec carry is disabled, so recompression
+  // strips the manifest (legacy behavior). Proves the ON path is non-tautological.
+  GoogleString original;
+  ASSERT_TRUE(
+      file_system_.ReadFile(StrCat(GTestSrcDir(), kTestData, kPuzzle).c_str(),
+                            &original, &message_handler_));
+  const GoogleString with_c2pa = SpliceC2paApp11IntoJpeg(original);
+  ASSERT_TRUE(pagespeed::image_compression::ImageHasC2paManifest(with_c2pa));
+
+  Image::CompressionOptions* on_options = new Image::CompressionOptions();
+  on_options->recompress_jpeg = true;
+  EXPECT_TRUE(on_options->preserve_c2pa);  // Default-on.
+  ImagePtr on(NewImage(with_c2pa, "c2pa-on", GTestTempDir(), on_options,
+                       &timer_, &message_handler_));
+  const GoogleString on_out(on->Contents().data(), on->Contents().size());
+
+  Image::CompressionOptions* off_options = new Image::CompressionOptions();
+  off_options->recompress_jpeg = true;
+  off_options->preserve_c2pa = false;
+  ImagePtr off(NewImage(with_c2pa, "c2pa-off", GTestTempDir(), off_options,
+                        &timer_, &message_handler_));
+  const GoogleString off_out(off->Contents().data(), off->Contents().size());
+
+  EXPECT_NE(GoogleString::npos, on_out.find("c2pa"));   // ON preserves.
+  EXPECT_EQ(GoogleString::npos, off_out.find("c2pa"));  // OFF strips.
+  EXPECT_NE(on_out, off_out);
+}
+
+TEST_F(ImageTest, PreserveC2paNoOpOnCleanImage) {
+  // On a manifest-free image the gate and the codec carry must both be pure no-ops:
+  // preserve ON and preserve OFF must produce byte-identical output.
+  GoogleString original;
+  ASSERT_TRUE(
+      file_system_.ReadFile(StrCat(GTestSrcDir(), kTestData, kPuzzle).c_str(),
+                            &original, &message_handler_));
+
+  Image::CompressionOptions* on_options = new Image::CompressionOptions();
+  EXPECT_TRUE(on_options->preserve_c2pa);  // Default-on.
+  on_options->recompress_jpeg = true;
+  ImagePtr on(NewImage(original, "clean-on", GTestTempDir(), on_options,
+                       &timer_, &message_handler_));
+  const GoogleString on_out(on->Contents().data(), on->Contents().size());
+
+  Image::CompressionOptions* off_options = new Image::CompressionOptions();
+  off_options->recompress_jpeg = true;
+  off_options->preserve_c2pa = false;
+  ImagePtr off(NewImage(original, "clean-off", GTestTempDir(), off_options,
+                        &timer_, &message_handler_));
+  const GoogleString off_out(off->Contents().data(), off->Contents().size());
+
+  EXPECT_EQ(off_out, on_out);
+  EXPECT_EQ(GoogleString::npos, on_out.find("c2pa"));
+}
+
+TEST_F(ImageTest, PreserveC2paXmpJpegSkipsWhenExifStripped) {
+  // Regression (review blocker): an XMP-carried Content-Credentials manifest in a JPEG
+  // lives in APP1 (shared with EXIF). The codec carry only handles APP11/JUMBF, so when
+  // EXIF stripping is on (the DEFAULT CoreFilters posture, retain_exif_data=false) a
+  // plain recompress would drop the APP1/XMP manifest. The gate must skip-not-strip.
+  GoogleString original;
+  ASSERT_TRUE(
+      file_system_.ReadFile(StrCat(GTestSrcDir(), kTestData, kPuzzle).c_str(),
+                            &original, &message_handler_));
+  ASSERT_GE(original.size(), static_cast<size_t>(2));
+  // Splice an APP1 (0xFF 0xE1) XMP segment carrying the Content-Credentials namespace
+  // right after the SOI. No JUMBF FourCC, so it is detected ONLY via the XMP path. The
+  // decoder skips the unknown APP1 during decode. (No "c2pa"/"jumb" tokens on purpose.)
+  const GoogleString xmp_payload =
+      "http://ns.adobe.com/xap/1.0/ "
+      "<?xpacket begin=\"\"?><x:xmpmeta><rdf:Description "
+      "cr:provenance=\"urn:uuid:test\"/></x:xmpmeta><?xpacket end=\"w\"?>";
+  const size_t seg_len = xmp_payload.size() + 2;  // +2 for the length field.
+  GoogleString with_xmp;
+  with_xmp.append(original.data(), 2);  // SOI.
+  with_xmp.push_back('\xFF');
+  with_xmp.push_back('\xE1');  // APP1.
+  with_xmp.push_back(static_cast<char>((seg_len >> 8) & 0xFF));
+  with_xmp.push_back(static_cast<char>(seg_len & 0xFF));
+  with_xmp.append(xmp_payload);
+  with_xmp.append(original.data() + 2, original.size() - 2);
+  ASSERT_TRUE(pagespeed::image_compression::ImageHasXmpC2pa(with_xmp));
+
+  // EXIF stripping ON (retain_exif_data=false) + preserve ON: gate skip-not-strips.
+  Image::CompressionOptions* on_options = new Image::CompressionOptions();
+  on_options->recompress_jpeg = true;
+  on_options->retain_exif_data = false;    // StripImageMetaData posture.
+  EXPECT_TRUE(on_options->preserve_c2pa);  // Default-on.
+  ImagePtr on(NewImage(with_xmp, "xmp-on", GTestTempDir(), on_options, &timer_,
+                       &message_handler_));
+  const GoogleString on_out(on->Contents().data(), on->Contents().size());
+  EXPECT_EQ(with_xmp, on_out);  // Served original byte-identical (gate fired).
+  EXPECT_NE(GoogleString::npos, on_out.find("cr:provenance"));
+
+  // preserve OFF + EXIF stripping: recompress drops the APP1/XMP manifest (the legacy
+  // strip). Confirms the ON path is non-tautological.
+  Image::CompressionOptions* off_options = new Image::CompressionOptions();
+  off_options->recompress_jpeg = true;
+  off_options->retain_exif_data = false;
+  off_options->preserve_c2pa = false;
+  ImagePtr off(NewImage(with_xmp, "xmp-off", GTestTempDir(), off_options,
+                        &timer_, &message_handler_));
+  const GoogleString off_out(off->Contents().data(), off->Contents().size());
+  EXPECT_NE(with_xmp, off_out);  // Recompressed.
+  EXPECT_EQ(GoogleString::npos,
+            off_out.find("cr:provenance"));  // XMP stripped.
+}
+
+TEST_F(ImageTest, PreserveC2paResizedJpegSkipsToOriginal) {
+  // The codec cannot carry the manifest through a resize (the ScanlineWriter copies
+  // no markers), so the fallback serves the ORIGINAL bytes un-resized.
+  GoogleString original;
+  ASSERT_TRUE(
+      file_system_.ReadFile(StrCat(GTestSrcDir(), kTestData, kPuzzle).c_str(),
+                            &original, &message_handler_));
+  const GoogleString with_c2pa = SpliceC2paApp11IntoJpeg(original);
+
+  Image::CompressionOptions* options = new Image::CompressionOptions();
+  options->recompress_jpeg = true;
+  EXPECT_TRUE(options->preserve_c2pa);  // Default-on.
+  ImagePtr image(NewImage(with_c2pa, "c2pa-resize", GTestTempDir(), options,
+                          &timer_, &message_handler_));
+  ImageDim new_dim;
+  new_dim.set_width(10);
+  new_dim.set_height(10);
+  ASSERT_TRUE(image->ResizeTo(new_dim));
+  const GoogleString out(image->Contents().data(), image->Contents().size());
+
+  // Gate fired: byte-identical to the manifest-bearing original, manifest intact.
+  EXPECT_EQ(with_c2pa, out);
+  EXPECT_NE(GoogleString::npos, out.find("c2pa"));
+}
+
+TEST_F(ImageTest, PreserveC2paResizedOffAllowsResize) {
+  // With preservation OFF the operator opts into legacy behavior: the image is
+  // resized (and the manifest stripped) -- the gate must NOT fire.
+  GoogleString original;
+  ASSERT_TRUE(
+      file_system_.ReadFile(StrCat(GTestSrcDir(), kTestData, kPuzzle).c_str(),
+                            &original, &message_handler_));
+  const GoogleString with_c2pa = SpliceC2paApp11IntoJpeg(original);
+
+  Image::CompressionOptions* options = new Image::CompressionOptions();
+  options->recompress_jpeg = true;
+  options->preserve_c2pa = false;
+  ImagePtr image(NewImage(with_c2pa, "c2pa-resize-off", GTestTempDir(), options,
+                          &timer_, &message_handler_));
+  ImageDim new_dim;
+  new_dim.set_width(10);
+  new_dim.set_height(10);
+  ASSERT_TRUE(image->ResizeTo(new_dim));
+  const GoogleString out(image->Contents().data(), image->Contents().size());
+
+  // Gate bypassed: output differs from the original and the manifest is gone.
+  EXPECT_NE(with_c2pa, out);
+  EXPECT_EQ(GoogleString::npos, out.find("c2pa"));
+}
+
+TEST_F(ImageTest, PreserveC2paJpegToWebpStaysJpeg) {
+  // WebP carries no APP11/JUMBF, so a manifest-bearing JPEG must NOT be converted to
+  // WebP under the default -- it stays a (recompressed) JPEG that keeps the manifest.
+  GoogleString original;
+  ASSERT_TRUE(
+      file_system_.ReadFile(StrCat(GTestSrcDir(), kTestData, kPuzzle).c_str(),
+                            &original, &message_handler_));
+  const GoogleString with_c2pa = SpliceC2paApp11IntoJpeg(original);
+
+  Image::CompressionOptions* options = new Image::CompressionOptions();
+  options->recompress_jpeg = true;
+  options->convert_jpeg_to_webp = true;
+  options->preferred_webp = WEBP_LOSSY;
+  EXPECT_TRUE(options->preserve_c2pa);  // Default-on.
+  ImagePtr image(NewImage(with_c2pa, "c2pa-webp", GTestTempDir(), options,
+                          &timer_, &message_handler_));
+  const GoogleString out(image->Contents().data(), image->Contents().size());
+
+  // Stayed JPEG (not WebP), manifest intact.
+  EXPECT_EQ(ContentType::kJpeg, image->content_type()->type());
+  EXPECT_NE(GoogleString::npos, out.find("c2pa"));
+
+  // Contrast: preservation OFF does not keep the manifest (whether it converts to
+  // WebP or strips on recompress), proving the ON path's skip is real.
+  Image::CompressionOptions* off_options = new Image::CompressionOptions();
+  off_options->recompress_jpeg = true;
+  off_options->convert_jpeg_to_webp = true;
+  off_options->preferred_webp = WEBP_LOSSY;
+  off_options->preserve_c2pa = false;
+  ImagePtr off(NewImage(with_c2pa, "c2pa-webp-off", GTestTempDir(), off_options,
+                        &timer_, &message_handler_));
+  const GoogleString off_out(off->Contents().data(), off->Contents().size());
+  // The OFF arm actually converts to WebP, proving the ON arm's kJpeg result is the
+  // !has_c2pa guard suppressing a conversion that would otherwise have succeeded.
+  EXPECT_EQ(ContentType::kWebp, off->content_type()->type());
+  EXPECT_EQ(GoogleString::npos, off_out.find("c2pa"));
+  EXPECT_NE(out, off_out);
+}
+
+// ---- the design record Level A: PNG carry-through (ImageProvenanceCarry) ----
+// JPEG carry is already covered by the PreserveC2pa* tests above (jpeg_optimizer
+// carries APP11/JUMBF through a recompress via libjpeg's marker API). These tests
+// cover the PNG path the carry flag adds: recompress AND re-splice the original
+// caBX/iTXt chunks (the PNG optimizer strips ancillary chunks, so it cannot carry
+// the manifest on its own).
+
+TEST_F(ImageTest, CarryC2paPngRecompressesKeepsManifestAndDecodes) {
+  GoogleString original;
+  ASSERT_TRUE(file_system_.ReadFile(
+      StrCat(GTestSrcDir(), kTestData, kBikeCrash).c_str(), &original,
+      &message_handler_));
+  const GoogleString with_c2pa = SpliceC2paCaBxIntoPng(original, /*extra=*/0);
+  ASSERT_TRUE(pagespeed::image_compression::ImageHasC2paManifest(with_c2pa));
+  // The exact original caBX chunk bytes the carry path must re-insert verbatim.
+  const StringPieceVector chunks =
+      pagespeed::image_compression::ExtractPngC2paChunks(with_c2pa);
+  ASSERT_EQ(static_cast<size_t>(1), chunks.size());
+  const GoogleString carrier(chunks[0].data(), chunks[0].size());
+
+  Image::CompressionOptions* options = new Image::CompressionOptions();
+  options->recompress_png = true;
+  EXPECT_TRUE(options->preserve_c2pa);  // Level B floor, default-on.
+  options->c2pa_carry = true;           // Level A opt-in.
+  ImagePtr image(NewImage(with_c2pa, "carry-png", GTestTempDir(), options,
+                          &timer_, &message_handler_));
+  const GoogleString out(image->Contents().data(), image->Contents().size());
+
+  // Recompressed (NOT the Level-B byte-identical skip) and stayed PNG ...
+  EXPECT_NE(with_c2pa, out);
+  EXPECT_EQ(IMAGE_PNG, image->image_type());
+  // ... and the ORIGINAL caBX chunk (incl. its CRC) is carried verbatim (D3).
+  EXPECT_NE(GoogleString::npos, out.find(carrier));
+
+  // Decodability: the spliced output re-reads as a valid PNG with the original
+  // dimensions -- a corrupt chunk stream would not.
+  ImagePtr reread(NewImage(out, "carry-png-reread", GTestTempDir(),
+                           new Image::CompressionOptions(), &timer_,
+                           &message_handler_));
+  EXPECT_EQ(IMAGE_PNG, reread->image_type());
+  ImageDim dim;
+  dim.Clear();
+  reread->Dimensions(&dim);
+  EXPECT_TRUE(ImageUrlEncoder::HasValidDimensions(dim));
+  EXPECT_EQ(100, dim.width());
+  EXPECT_EQ(100, dim.height());
+
+  // Stronger decodability: fully re-optimize the carried output with BOTH carry
+  // and the preserve floor OFF, which forces a complete decode and strips all
+  // ancillary chunks. The PngReader must walk past the spliced caBX to the IDAT
+  // pixels and re-emit; on success the now-unknown caBX is dropped. If the chunk
+  // stream were malformed the recompress would fail and the original
+  // (manifest-bearing) bytes would come back -- so a manifest-free result proves
+  // the spliced PNG decoded cleanly end to end.
+  Image::CompressionOptions* reopt_opts = new Image::CompressionOptions();
+  reopt_opts->recompress_png = true;
+  reopt_opts->preserve_c2pa = false;  // allow the strip (force a real decode).
+  ImagePtr reopt(NewImage(out, "carry-png-reopt", GTestTempDir(), reopt_opts,
+                          &timer_, &message_handler_));
+  const GoogleString reopt_out(reopt->Contents().data(),
+                               reopt->Contents().size());
+  EXPECT_EQ(IMAGE_PNG, reopt->image_type());
+  EXPECT_FALSE(pagespeed::image_compression::ImageHasC2paManifest(reopt_out));
+}
+
+TEST_F(ImageTest, CarryC2paXmpItxtPngCarriesAndDecodes) {
+  // XMP-form manifest (iTXt with cr:, NO caBX box): has_c2pa fires via the XMP
+  // path, png_carry triggers, and the iTXt is carried verbatim into the
+  // recompressed output.
+  GoogleString original;
+  ASSERT_TRUE(file_system_.ReadFile(
+      StrCat(GTestSrcDir(), kTestData, kBikeCrash).c_str(), &original,
+      &message_handler_));
+  const GoogleString with_xmp = SpliceXmpItxtIntoPng(original);
+  ASSERT_TRUE(pagespeed::image_compression::ImageHasC2paManifest(with_xmp));
+  const StringPieceVector chunks =
+      pagespeed::image_compression::ExtractPngC2paChunks(with_xmp);
+  ASSERT_EQ(static_cast<size_t>(1), chunks.size());
+  const GoogleString carrier(chunks[0].data(), chunks[0].size());
+
+  Image::CompressionOptions* options = new Image::CompressionOptions();
+  options->recompress_png = true;
+  options->c2pa_carry = true;
+  ImagePtr image(NewImage(with_xmp, "carry-png-xmp", GTestTempDir(), options,
+                          &timer_, &message_handler_));
+  const GoogleString out(image->Contents().data(), image->Contents().size());
+
+  EXPECT_NE(with_xmp, out);  // recompressed, not a skip.
+  EXPECT_EQ(IMAGE_PNG, image->image_type());
+  EXPECT_NE(GoogleString::npos,
+            out.find(carrier));  // XMP iTXt carried verbatim.
+}
+
+TEST_F(ImageTest, CarryC2paPngOffSkipsToOriginal) {
+  // Carry OFF (default) but the preserve floor ON: a manifest-bearing PNG is
+  // served byte-for-byte (Level-B skip), NOT recompressed -- and NOT stripped.
+  GoogleString original;
+  ASSERT_TRUE(file_system_.ReadFile(
+      StrCat(GTestSrcDir(), kTestData, kBikeCrash).c_str(), &original,
+      &message_handler_));
+  const GoogleString with_c2pa = SpliceC2paCaBxIntoPng(original, 0);
+
+  Image::CompressionOptions* options = new Image::CompressionOptions();
+  options->recompress_png = true;
+  EXPECT_TRUE(options->preserve_c2pa);
+  EXPECT_FALSE(options->c2pa_carry);  // default off.
+  ImagePtr image(NewImage(with_c2pa, "carry-png-off", GTestTempDir(), options,
+                          &timer_, &message_handler_));
+  const GoogleString out(image->Contents().data(), image->Contents().size());
+  EXPECT_EQ(with_c2pa, out);  // byte-identical skip.
+}
+
+TEST_F(ImageTest, CarryC2paPngToJpegFallsBackToSkip) {
+  // Carry ON but the PNG converts to JPEG: the PNG caBX carrier cannot be spliced
+  // into a JPEG, so fail-safe to Level-B (serve the ORIGINAL PNG byte-for-byte,
+  // manifest intact) rather than emit a JPEG with corrupt PNG chunks or a
+  // stripped manifest. Regression guard for the cross-format splice bug.
+  GoogleString original;
+  ASSERT_TRUE(file_system_.ReadFile(
+      StrCat(GTestSrcDir(), kTestData, kBikeCrash).c_str(), &original,
+      &message_handler_));
+  const GoogleString with_c2pa = SpliceC2paCaBxIntoPng(original, 0);
+
+  Image::CompressionOptions* options = new Image::CompressionOptions();
+  options->recompress_png = true;
+  options->convert_png_to_jpeg = true;
+  options->jpeg_quality = 85;
+  EXPECT_TRUE(options->preserve_c2pa);
+  options->c2pa_carry = true;
+  ImagePtr image(NewImage(with_c2pa, "carry-png2jpeg", GTestTempDir(), options,
+                          &timer_, &message_handler_));
+  const GoogleString out(image->Contents().data(), image->Contents().size());
+
+  // Served the ORIGINAL PNG (Level-B skip): stayed PNG, byte-identical.
+  EXPECT_EQ(IMAGE_PNG, image->image_type());
+  EXPECT_EQ(with_c2pa, out);
+}
+
+TEST_F(ImageTest, CarryC2paPngCleanImageRecompresses) {
+  // Carry ON but NO manifest: ordinary optimization (the carry gate is a no-op).
+  GoogleString original;
+  ASSERT_TRUE(file_system_.ReadFile(
+      StrCat(GTestSrcDir(), kTestData, kBikeCrash).c_str(), &original,
+      &message_handler_));
+  ASSERT_FALSE(pagespeed::image_compression::ImageHasC2paManifest(original));
+
+  Image::CompressionOptions* options = new Image::CompressionOptions();
+  options->recompress_png = true;
+  options->c2pa_carry = true;
+  ImagePtr image(NewImage(original, "carry-png-clean", GTestTempDir(), options,
+                          &timer_, &message_handler_));
+  const GoogleString out(image->Contents().data(), image->Contents().size());
+  EXPECT_EQ(IMAGE_PNG, image->image_type());
+  // No manifest appeared, and the output is a valid (re-readable) PNG.
+  EXPECT_FALSE(pagespeed::image_compression::ImageHasC2paManifest(out));
+  ImagePtr reread(NewImage(out, "carry-png-clean-reread", GTestTempDir(),
+                           new Image::CompressionOptions(), &timer_,
+                           &message_handler_));
+  EXPECT_EQ(IMAGE_PNG, reread->image_type());
+  ImageDim dim;
+  dim.Clear();
+  reread->Dimensions(&dim);
+  EXPECT_TRUE(ImageUrlEncoder::HasValidDimensions(dim));
+}
+
+TEST_F(ImageTest, CarryC2paLargePngManifestCarriesAndDecodes) {
+  // A large (>64KB) single caBX chunk carries verbatim -- PNG chunk lengths are
+  // 32-bit, so there is no 64KB-per-segment limit like JPEG APP markers -- and
+  // the output still decodes.
+  GoogleString original;
+  ASSERT_TRUE(file_system_.ReadFile(
+      StrCat(GTestSrcDir(), kTestData, kBikeCrash).c_str(), &original,
+      &message_handler_));
+  const size_t kBig = 80 * 1024;  // > 64KB of manifest payload.
+  const GoogleString with_c2pa = SpliceC2paCaBxIntoPng(original, kBig);
+  const StringPieceVector chunks =
+      pagespeed::image_compression::ExtractPngC2paChunks(with_c2pa);
+  ASSERT_EQ(static_cast<size_t>(1), chunks.size());
+  EXPECT_GT(chunks[0].size(), kBig);
+  const GoogleString carrier(chunks[0].data(), chunks[0].size());
+
+  Image::CompressionOptions* options = new Image::CompressionOptions();
+  options->recompress_png = true;
+  options->c2pa_carry = true;
+  ImagePtr image(NewImage(with_c2pa, "carry-png-big", GTestTempDir(), options,
+                          &timer_, &message_handler_));
+  const GoogleString out(image->Contents().data(), image->Contents().size());
+  EXPECT_NE(GoogleString::npos, out.find(carrier));  // carried verbatim.
+
+  ImagePtr reread(NewImage(out, "carry-png-big-reread", GTestTempDir(),
+                           new Image::CompressionOptions(), &timer_,
+                           &message_handler_));
+  EXPECT_EQ(IMAGE_PNG, reread->image_type());
+  ImageDim dim;
+  dim.Clear();
+  reread->Dimensions(&dim);
+  EXPECT_TRUE(ImageUrlEncoder::HasValidDimensions(dim));
+}
+
 }  // namespace net_instaweb

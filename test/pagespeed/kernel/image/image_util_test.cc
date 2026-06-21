@@ -19,7 +19,10 @@
 
 #include "pagespeed/kernel/image/image_util.h"
 
+#include <cstdint>
+
 #include "pagespeed/kernel/base/string.h"
+#include "pagespeed/kernel/base/string_util.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/image/test_utils.h"
 
@@ -129,6 +132,118 @@ TEST(ImageUtilTest, ImageFormat) {
 
   ASSERT_TRUE(ReadTestFileWithExt(kWebpTestDir, kWebpIccXmpImage, &buffer));
   EXPECT_EQ(net_instaweb::IMAGE_WEBP, ComputeImageType(buffer));
+}
+
+// the design record: the C2PA / Content-Credentials provenance detector.
+TEST(ImageUtilTest, C2paManifestDetection) {
+  using pagespeed::image_compression::ImageHasC2paManifest;
+  using pagespeed::image_compression::ImageHasXmpC2pa;
+
+  // JUMBF/box FourCCs (JPEG APP11 + generic containers) and the PNG caBX chunk type.
+  EXPECT_TRUE(ImageHasC2paManifest("xxxxxxxxjumbxxxx"));
+  EXPECT_TRUE(ImageHasC2paManifest("padding..jumd..padding"));
+  EXPECT_TRUE(ImageHasC2paManifest("padding-c2pa-padding"));
+  EXPECT_TRUE(ImageHasC2paManifest("\x89PNG\r\n....caBX....IEND"));
+  EXPECT_FALSE(ImageHasXmpC2pa("padding-c2pa-padding"));  // not the XMP form
+
+  // XMP Content-Credentials form: "cr:" only counts alongside an XMP packet marker.
+  EXPECT_TRUE(ImageHasXmpC2pa("<?xpacket?> cr:provenance bytes"));
+  EXPECT_TRUE(ImageHasXmpC2pa("ns http://ns.adobe.com/xap/ ... cr:foo"));
+  EXPECT_TRUE(ImageHasXmpC2pa("contentauth ... cr:thing"));
+  EXPECT_TRUE(ImageHasC2paManifest("<?xpacket?> cr:provenance bytes"));
+
+  // Load-bearing false-positive guard: a bare "cr:" with no XMP marker is NOT a match.
+  EXPECT_FALSE(ImageHasXmpC2pa("style: color: red; cr: not provenance at all"));
+  EXPECT_FALSE(
+      ImageHasC2paManifest("style: color: red; cr: not provenance at all"));
+
+  // Too-short buffers and clean content return false.
+  EXPECT_FALSE(ImageHasC2paManifest("c2pa"));  // < 12 bytes
+  EXPECT_FALSE(
+      ImageHasC2paManifest("a perfectly ordinary caption, no markers"));
+}
+
+// the design record Level A: PNG carrier-chunk extractor (the JPEG path needs no extractor;
+// jpeg_optimizer carries APP11/JUMBF via libjpeg's marker API).
+TEST(ImageUtilTest, ExtractPngC2paChunks) {
+  using pagespeed::image_compression::ExtractPngC2paChunks;
+
+  auto be32 = [](uint32_t v, GoogleString* o) {
+    o->push_back(static_cast<char>((v >> 24) & 0xFF));
+    o->push_back(static_cast<char>((v >> 16) & 0xFF));
+    o->push_back(static_cast<char>((v >> 8) & 0xFF));
+    o->push_back(static_cast<char>(v & 0xFF));
+  };
+  // Frames a whole PNG chunk: length(BE32) + type + data + CRC(BE32). The
+  // extractor does not verify the CRC, so a dummy value is fine here.
+  auto chunk = [&](const GoogleString& type, const GoogleString& data) {
+    GoogleString c;
+    be32(static_cast<uint32_t>(data.size()), &c);
+    c.append(type);
+    c.append(data);
+    be32(0, &c);  // dummy CRC.
+    return c;
+  };
+  const GoogleString sig("\x89PNG\r\n\x1a\n", 8);
+  const GoogleString ihdr = chunk("IHDR", GoogleString(13, '\0'));
+  const GoogleString cabx = chunk("caBX", "JPjumbjumdc2pa-manifest-bytes");
+  // A Content-Credentials XMP packet (cr: + an xpacket marker) -> carried.
+  const GoogleString itxt =
+      chunk("iTXt", "XML:com.adobe.xmp <?xpacket?> cr:provenance");
+  // A plain, non-C2PA iTXt (no cr:/XMP marker) -> NOT carried.
+  const GoogleString plain_itxt =
+      chunk("iTXt", "Comment plain caption, no provenance here");
+  const GoogleString iend = chunk("IEND", "");
+
+  // Valid PNG with caBX + C2PA iTXt -> both captured, in order, as whole chunks.
+  {
+    const GoogleString png = sig + ihdr + cabx + itxt + iend;
+    const net_instaweb::StringPieceVector got = ExtractPngC2paChunks(png);
+    ASSERT_EQ(static_cast<size_t>(2), got.size());
+    EXPECT_EQ(cabx, GoogleString(got[0].data(), got[0].size()));
+    EXPECT_EQ(itxt, GoogleString(got[1].data(), got[1].size()));
+  }
+  // A non-C2PA iTXt alongside caBX is NOT carried (scoped to the manifest).
+  {
+    const GoogleString png = sig + ihdr + cabx + plain_itxt + iend;
+    const net_instaweb::StringPieceVector got = ExtractPngC2paChunks(png);
+    ASSERT_EQ(static_cast<size_t>(1), got.size());
+    EXPECT_EQ(cabx, GoogleString(got[0].data(), got[0].size()));
+  }
+  // Two caBX chunks -> both captured in order.
+  {
+    const GoogleString cabx2 = chunk("caBX", "JPjumbc2pa-second-manifest-box");
+    const GoogleString png = sig + ihdr + cabx + cabx2 + iend;
+    const net_instaweb::StringPieceVector got = ExtractPngC2paChunks(png);
+    ASSERT_EQ(static_cast<size_t>(2), got.size());
+    EXPECT_EQ(cabx, GoogleString(got[0].data(), got[0].size()));
+    EXPECT_EQ(cabx2, GoogleString(got[1].data(), got[1].size()));
+  }
+  // No carrier chunks present -> empty.
+  {
+    const GoogleString png = sig + ihdr + iend;
+    EXPECT_TRUE(ExtractPngC2paChunks(png).empty());
+  }
+  // Not a PNG (corrupt signature) -> empty (fail-safe).
+  {
+    GoogleString bad = sig + ihdr + cabx + iend;
+    bad[1] = 'X';
+    EXPECT_TRUE(ExtractPngC2paChunks(bad).empty());
+  }
+  // No terminating IEND -> empty, NOT a partial result (structural anomaly).
+  {
+    const GoogleString png = sig + ihdr + cabx;  // walks off the end, no IEND.
+    EXPECT_TRUE(ExtractPngC2paChunks(png).empty());
+  }
+  // Truncated chunk (a length that overruns the buffer) -> empty, NOT a partial
+  // result: a structural anomaly must fail safe to Level B.
+  {
+    GoogleString png = sig + ihdr;
+    be32(0x00FFFFFF, &png);  // caBX claims ~16MB of data...
+    png.append("caBX");
+    png.append("only-a-few-bytes");  // ...but the buffer ends here.
+    EXPECT_TRUE(ExtractPngC2paChunks(png).empty());
+  }
 }
 
 }  // namespace

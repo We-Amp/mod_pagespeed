@@ -17,17 +17,17 @@
  * under the License.
  */
 
+#include "net/instaweb/rewriter/public/rewrite_options.h"
+
 #include <atomic>
 #include <memory>
-
-#include "net/instaweb/rewriter/public/rewrite_options.h"
-#include "pagespeed/kernel/base/thread_system.h"
 
 #include "net/instaweb/rewriter/public/domain_lawyer.h"
 #include "net/instaweb/rewriter/public/experiment_util.h"
 #include "pagespeed/kernel/base/google_message_handler.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/null_message_handler.h"
+#include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/http/google_url.h"
 #include "pagespeed/kernel/http/request_headers.h"
 #include "test/net/instaweb/rewriter/rewrite_options_test_base.h"
@@ -934,6 +934,8 @@ TEST_F(RewriteOptionsTest, LookupOptionByNameTest) {
       RewriteOptions::kImageLimitResizeAreaPercent,
       RewriteOptions::kImageMaxRewritesAtOnce,
       RewriteOptions::kImagePreserveURLs,
+      RewriteOptions::kPreserveImageProvenance,
+      RewriteOptions::kImageProvenanceCarry,
       RewriteOptions::kImageRecompressionQuality,
       RewriteOptions::kImageResolutionLimitBytes,
       RewriteOptions::kImageWebpQualityForSaveData,
@@ -3108,8 +3110,8 @@ TEST_F(RewriteOptionsTest, OptionsToStringDoesNotRecursivelyAcquireSharedLock) {
 
   // Establish a cache-invalidation timestamp so the "Invalidation Timestamp:"
   // branch of OptionsToString — the one that historically recursed — runs.
-  EXPECT_TRUE(options_.UpdateCacheInvalidationTimestampMs(
-      MockTimer::kApr_5_2010_ms));
+  EXPECT_TRUE(
+      options_.UpdateCacheInvalidationTimestampMs(MockTimer::kApr_5_2010_ms));
 
   // Pre-fix: this CHECK-fails inside OptionsToString() because the block at
   // rewrite_options.cc:3303 acquired the lock shared and then called
@@ -3588,9 +3590,9 @@ TEST_F(RewriteOptionsTest, AgentOptimizeOptionRoundTrip) {
   NullMessageHandler handler;
   GoogleString msg;
   RewriteOptions fresh(&thread_system_);
-  EXPECT_EQ(RewriteOptions::kOptionOk,
-            fresh.ParseAndSetOptionFromName1("AgentOptimize", "on", &msg,
-                                             &handler));
+  EXPECT_EQ(
+      RewriteOptions::kOptionOk,
+      fresh.ParseAndSetOptionFromName1("AgentOptimize", "on", &msg, &handler));
   EXPECT_TRUE(fresh.agent_optimize());
   EXPECT_TRUE(msg.empty());
 

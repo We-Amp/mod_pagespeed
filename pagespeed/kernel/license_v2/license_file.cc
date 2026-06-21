@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cerrno>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -39,16 +41,77 @@ std::filesystem::path LicenseFilePath(const GoogleString& cache_path) {
 
 static constexpr uintmax_t kMaxLicenseFileSize = 2048;
 
-bool ReadLicenseFile(const std::filesystem::path& path, GoogleString* token) {
+namespace {
+
+// Effective uid of the worker, for the diagnostic message. On Windows there is
+// no uid concept; report -1 so the log line stays uniform.
+long EffectiveUid() {
+#if defined(_WIN32) || defined(WIN32)
+  return -1;
+#else
+  return static_cast<long>(geteuid());
+#endif
+}
+
+// Emit the single actionable WARNING for a license file that exists but could
+// not be read. |reason| is a human-readable cause (typically strerror(errno)).
+// Keeping this in one place ensures every "present but unreadable" path logs an
+// operator-facing line, not just a silent false.
+void LogUnreadable(const std::filesystem::path& path, const char* reason) {
+  LOG(WARNING) << "license file " << path.string()
+               << " exists but is unreadable by the worker (uid="
+               << EffectiveUid() << "): " << reason
+               << " — fix ownership/permissions (a root-owned 0600 file is "
+                  "invisible to a non-root worker)";
+}
+
+}  // namespace
+
+bool ReadLicenseFile(const std::filesystem::path& path, GoogleString* token,
+                     LicenseFileReadStatus* status) {
+  auto set_status = [status](LicenseFileReadStatus s) {
+    if (status != nullptr) *status = s;
+  };
+
   std::error_code ec;
-  if (!std::filesystem::exists(path, ec)) return false;
+  if (!std::filesystem::exists(path, ec)) {
+    // A missing file is the normal unlicensed state — not an error, no log.
+    set_status(LicenseFileReadStatus::kAbsent);
+    return false;
+  }
 
   // Reject unexpectedly large files (license tokens are small JWTs).
   uintmax_t file_size = std::filesystem::file_size(path, ec);
-  if (ec || file_size > kMaxLicenseFileSize) return false;
+  if (ec) {
+    LogUnreadable(path, ec.message().c_str());
+    set_status(LicenseFileReadStatus::kUnreadable);
+    return false;
+  }
+  if (file_size > kMaxLicenseFileSize) {
+    LogUnreadable(path, "file is larger than the maximum license token size");
+    set_status(LicenseFileReadStatus::kTooLarge);
+    return false;
+  }
+
+  // Open via fopen() first so errno reliably reflects the failure cause
+  // (std::ifstream does not guarantee errno is set on failure). The most common
+  // real-world failure here is EACCES on a root-owned 0600 file under a
+  // non-root worker, which previously surfaced as a silent UNLICENSED banner.
+  errno = 0;
+  std::FILE* probe = std::fopen(path.string().c_str(), "rb");
+  if (probe == nullptr) {
+    LogUnreadable(path, std::strerror(errno));
+    set_status(LicenseFileReadStatus::kUnreadable);
+    return false;
+  }
+  std::fclose(probe);
 
   std::ifstream file(path, std::ios::in | std::ios::binary);
-  if (!file.is_open()) return false;
+  if (!file.is_open()) {
+    LogUnreadable(path, "open failed");
+    set_status(LicenseFileReadStatus::kUnreadable);
+    return false;
+  }
 
   GoogleString content((std::istreambuf_iterator<char>(file)),
                        std::istreambuf_iterator<char>());
@@ -56,12 +119,21 @@ bool ReadLicenseFile(const std::filesystem::path& path, GoogleString* token) {
   // Trim whitespace (tokens should not have leading/trailing whitespace).
   auto start = content.find_first_not_of(" \t\n\r");
   if (start == GoogleString::npos) {
+    // File present but empty/whitespace-only: still operator-actionable (a
+    // truncated or never-populated license file), so report it as kEmpty.
     token->clear();
+    LogUnreadable(path, "file is empty");
+    set_status(LicenseFileReadStatus::kEmpty);
     return false;
   }
   auto end = content.find_last_not_of(" \t\n\r");
   *token = content.substr(start, end - start + 1);
+  set_status(LicenseFileReadStatus::kOk);
   return true;
+}
+
+bool ReadLicenseFile(const std::filesystem::path& path, GoogleString* token) {
+  return ReadLicenseFile(path, token, /*status=*/nullptr);
 }
 
 bool WriteLicenseFile(const std::filesystem::path& path, StringPiece token) {

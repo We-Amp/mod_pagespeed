@@ -42,6 +42,7 @@ namespace net_instaweb {
 
 class GzipInflater;
 class NgxBaseFetch;
+class NgxServerContext;
 class ProxyFetch;
 class RewriteDriver;
 class RequestHeaders;
@@ -125,6 +126,11 @@ ngx_int_t copy_response_headers_to_ngx(
     PreserveCachingHeaders preserve_caching_headers);
 
 StringPiece ps_determine_host(ngx_http_request_t* r);
+
+// Returns the NgxServerContext for this request, or nullptr if pagespeed is not
+// active for it. Thin accessor so other translation units (e.g. the Web-Bot-Auth
+// glue) can reach the server context without seeing the ps_srv_conf_t internals.
+NgxServerContext* ps_get_server_context(ngx_http_request_t* r);
 
 namespace ps_base_fetch {
 

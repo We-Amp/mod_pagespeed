@@ -155,7 +155,8 @@ void AdminLicenseHandler::Init() {
   // Try to read license from the default file path.
   GoogleString token;
   std::filesystem::path path = LicenseFilePath(cache_path_);
-  if (ReadLicenseFile(path, &token)) {
+  LicenseFileReadStatus read_status = LicenseFileReadStatus::kAbsent;
+  if (ReadLicenseFile(path, &token, &read_status)) {
     GoogleString error;
     if (ApplyToken(token, &error)) {
       handler_->Message(kInfo, "License loaded from %s", path.string().c_str());
@@ -163,6 +164,18 @@ void AdminLicenseHandler::Init() {
       handler_->Message(kWarning, "Invalid license in %s: %s",
                         path.string().c_str(), error.c_str());
     }
+  } else if (read_status != LicenseFileReadStatus::kAbsent) {
+    // The file exists but could not be turned into a token (unreadable —
+    // e.g. a root-owned 0600 file under a non-root worker — or empty/oversized).
+    // ReadLicenseFile already logged the cause; surface it on the handler's
+    // message channel too, and remember the cause so /v1/license/status can
+    // report it.
+    handler_->Message(kWarning,
+                      "License file %s exists but is unreadable by this worker "
+                      "— check ownership/permissions (see preceding warning)",
+                      path.string().c_str());
+    std::lock_guard<std::mutex> lock(license_mu_);
+    license_file_status_ = read_status;
   }
 }
 
@@ -311,12 +324,19 @@ void AdminLicenseHandler::HandleStatus(bool is_global, AsyncFetch* fetch) {
   if (!IsLicenseValid()) {
     GoogleString token;
     std::filesystem::path path = LicenseFilePath(cache_path_);
-    if (ReadLicenseFile(path, &token)) {
+    LicenseFileReadStatus read_status = LicenseFileReadStatus::kAbsent;
+    if (ReadLicenseFile(path, &token, &read_status)) {
       GoogleString error;
       if (ApplyToken(token, &error)) {
         handler_->Message(kInfo, "License reloaded from %s",
                           path.string().c_str());
       }
+    }
+    // Record the file read outcome so the response can expose the cause
+    //. ReadLicenseFile already logged the detail.
+    {
+      std::lock_guard<std::mutex> lock(license_mu_);
+      license_file_status_ = read_status;
     }
   }
 
@@ -331,6 +351,7 @@ void AdminLicenseHandler::HandleStatus(bool is_global, AsyncFetch* fetch) {
   GoogleString sub;
   GoogleString scope;
   GoogleString site_domain;
+  LicenseFileReadStatus file_status;
   {
     std::lock_guard<std::mutex> lock(license_mu_);
     valid = license_valid_;
@@ -340,6 +361,7 @@ void AdminLicenseHandler::HandleStatus(bool is_global, AsyncFetch* fetch) {
     sub = license_sub_;
     scope = license_scope_;
     site_domain = license_domain_;
+    file_status = license_file_status_;
   }
 
   GoogleString json = "{";
@@ -366,6 +388,24 @@ void AdminLicenseHandler::HandleStatus(bool is_global, AsyncFetch* fetch) {
     if (!site_domain.empty()) {
       StrAppend(&json, ",\"site_domain\":\"", JsonEscape(site_domain), "\"");
     }
+  }
+  // when a license file is present but unusable, expose the cause so
+  // the console can show an actionable hint rather than only the generic
+  // UNLICENSED state. Reported ONLY when not licensed: license_file_status_ is
+  // recomputed solely on the !valid reload path, so a valid in-memory license
+  // (e.g. one applied via /v1/license/apply after a failed disk read) would
+  // otherwise emit a stale, self-contradictory error. The code reflects the
+  // real cause (EACCES is a permission error; EMPTY/TOO_LARGE are not) so the
+  // hint does not misdirect the operator toward a permissions fix.
+  if (!valid && file_status != LicenseFileReadStatus::kOk &&
+      file_status != LicenseFileReadStatus::kAbsent) {
+    const char* code = "EACCES";
+    if (file_status == LicenseFileReadStatus::kEmpty) {
+      code = "EMPTY";
+    } else if (file_status == LicenseFileReadStatus::kTooLarge) {
+      code = "TOO_LARGE";
+    }
+    StrAppend(&json, ",\"license_file_error\":\"", code, "\"");
   }
   StrAppend(&json, "}");
   WriteJsonResponse(fetch, json);

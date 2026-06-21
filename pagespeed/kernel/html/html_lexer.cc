@@ -704,6 +704,16 @@ void HtmlLexer::EmitTagOpen(bool allow_implicit_close) {
   if (size_limit_exceeded_) {
     skip_parsing_ = true;
   }
+
+  // Guard against pathologically deep nesting (e.g. <div> x 50,000), which
+  // would otherwise grow element_stack_ without bound.  Once we hit the cap we
+  // stop parsing the remainder of the document, mirroring the size_limit_
+  // behavior above.  We still push this element so the stack stays consistent
+  // for the close-out in FinishParse().
+  if (static_cast<int>(element_stack_.size()) >= kMaxNestingDepth) {
+    skip_parsing_ = true;
+  }
+
   element_stack_.push_back(element_);
   if (IsLiteralTag(element_->keyword())) {
     state_ =

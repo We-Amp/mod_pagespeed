@@ -119,3 +119,14 @@ cc_test(
         "@ed25519",
     ],
 )
+
+cc_test(
+    name = "license_file_test",
+    size = "small",
+    srcs = ["license_file_test.cc"],
+    deps = [
+        ":license_file",
+        "//pagespeed/kernel/base:pagespeed_base",
+        "@googletest//:gtest_main",
+    ],
+)

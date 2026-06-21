@@ -886,6 +886,13 @@ Image::CompressionOptions* ImageRewriteFilter::ImageOptionsForLoadedResource(
       !options->Enabled(RewriteOptions::kStripImageColorProfile);
   image_options->retain_exif_data =
       !options->Enabled(RewriteOptions::kStripImageMetaData);
+  // C2PA/Content-Credentials provenance is preserved by default (turn off only via
+  // PreserveImageProvenance). The APP11/JUMBF form is carried by the JPEG codec
+  // independent of EXIF stripping; the XMP form lives in APP1 (shared with EXIF), so
+  // when EXIF is stripped the rewrite gate (image.cc) skip-not-strips it instead of
+  // recompressing (which would drop the APP1/XMP manifest).
+  image_options->preserve_c2pa = options->preserve_image_provenance();
+  image_options->c2pa_carry = options->image_provenance_carry();
   image_options->retain_color_sampling =
       !options->Enabled(RewriteOptions::kJpegSubsampling);
   image_options->webp_conversion_timeout_ms = options->image_webp_timeout_ms();
@@ -1234,9 +1241,12 @@ RewriteResult ImageRewriteFilter::RewriteLoadedResourceImpl(
     image_options->recompress_webp = true;
 
     // Since these are replaced with their high res versions, stripping
-    // them off for low res images will further reduce bytes.
+    // them off for low res images will further reduce bytes. Provenance on a
+    // throwaway low-res placeholder is meaningless; the high-res version that
+    // actually replaces it preserves C2PA via the main path.
     image_options->retain_color_profile = false;
     image_options->retain_exif_data = false;
+    image_options->preserve_c2pa = false;
     image_options->retain_color_sampling = false;
     image_options->jpeg_num_progressive_scans =
         options->image_jpeg_num_progressive_scans();

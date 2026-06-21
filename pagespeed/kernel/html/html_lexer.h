@@ -96,6 +96,13 @@ class HtmlLexer {
   // that we should parse.
   bool size_limit_exceeded() const { return size_limit_exceeded_; }
 
+  // Maximum allowed HTML element nesting depth.  Pathologically deep nesting
+  // (e.g. tens of thousands of nested <div> tags) would otherwise grow
+  // element_stack_ without bound.  Once this depth is reached we stop parsing
+  // the remainder of the document, the same way we do when size_limit_ is
+  // exceeded.  This is a sane cap far above what any real document needs.
+  static const int kMaxNestingDepth = 512;
+
  private:
   // Most of these routines expect c to be the last character of literal_
   inline void EvalStart(char c);

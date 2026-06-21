@@ -153,6 +153,80 @@ class NgxRewriteOptions : public SystemRewriteOptions {
   }
   const GoogleString& console_path() const { return console_path_.value(); }
   const GoogleString& messages_path() const { return messages_path_.value(); }
+
+  // the design record A1 Web-Bot-Auth (observe-only, default off).
+  bool web_bot_auth() const { return web_bot_auth_.value(); }
+  bool web_bot_auth_telemetry() const {
+    return web_bot_auth_telemetry_.value();
+  }
+  const GoogleString& web_bot_auth_directory_host() const {
+    return web_bot_auth_directory_host_.value();
+  }
+  const GoogleString& web_bot_auth_verified_bots() const {
+    return web_bot_auth_verified_bots_.value();
+  }
+  // Path to a local JWKS file (the signer's published key directory, copied
+  // locally by the operator). A1 v1 verifies against this file; automatic
+  // network refresh is a follow-up.
+  const GoogleString& web_bot_auth_key_directory_file() const {
+    return web_bot_auth_key_directory_file_.value();
+  }
+  // the design record A2 network warm-fetch (all default empty => off; A1 v1 behavior is
+  // preserved exactly when unset). The operator maps the signer's directory_host
+  // to a JWKS `Url` that a background thread fetches off-request, SSRF-guarded by
+  // the `Allowlist` of https origins; resolved keys are cached and read
+  // cache-only on the request path. Warm-fetch is active only when the url AND
+  // the allowlist AND web_bot_auth_directory_host are all non-empty.
+  const GoogleString& web_bot_auth_key_directory_url() const {
+    return web_bot_auth_key_directory_url_.value();
+  }
+  const GoogleString& web_bot_auth_key_directory_allowlist() const {
+    return web_bot_auth_key_directory_allowlist_.value();
+  }
+  const GoogleString& web_bot_auth_key_directory_refresh_sec() const {
+    return web_bot_auth_key_directory_refresh_sec_.value();
+  }
+
+  // the design record A3 RSL-CAP enforcement (PAID, default OFF / empty). The nginx layer
+  // maps the validator verdict to an inline 401/402; it NEVER settles/meters
+  // money. All inputs are operator config (plane-split), never request-derived.
+  bool rsl_cap_enforcement() const { return rsl_cap_enforcement_.value(); }
+  // Path to a local JWKS file (the issuer's published key directory, copied
+  // locally by the operator). v1 resolves keys synchronously from this file,
+  // mirroring A1; the SSRF-guarded network-fetch provider is a tracked follow-up
+  // (its async fetch cannot complete inline in an nginx phase handler).
+  const GoogleString& rsl_cap_key_directory_file() const {
+    return rsl_cap_key_directory_file_.value();
+  }
+  // Operator-mapped issuer directory host passed to the key provider's GetKey
+  // (plane-split; ignored by the static-file provider, used by the follow-up
+  // network provider). Never request-derived.
+  const GoogleString& rsl_cap_directory_host() const {
+    return rsl_cap_directory_host_.value();
+  }
+  // The license id and scope this route requires; a token must grant both to be
+  // authorized (else 402). Empty means "no specific grant required".
+  const GoogleString& rsl_cap_requested_license() const {
+    return rsl_cap_requested_license_.value();
+  }
+  const GoogleString& rsl_cap_requested_scope() const {
+    return rsl_cap_requested_scope_.value();
+  }
+  // Optional issuer pin (hardening): when non-empty, an otherwise-authorized
+  // token whose `iss` != this value is rejected (401). Use when a directory_host
+  // may serve more than one issuer.
+  const GoogleString& rsl_cap_issuer() const { return rsl_cap_issuer_.value(); }
+  // the design record A2 network warm-fetch for the RSL-CAP issuer directory (mirrors the
+  // web_bot_auth_* options above; default empty => off, v1 static-file behavior).
+  const GoogleString& rsl_cap_key_directory_url() const {
+    return rsl_cap_key_directory_url_.value();
+  }
+  const GoogleString& rsl_cap_key_directory_allowlist() const {
+    return rsl_cap_key_directory_allowlist_.value();
+  }
+  const GoogleString& rsl_cap_key_directory_refresh_sec() const {
+    return rsl_cap_key_directory_refresh_sec_.value();
+  }
   const GoogleString& admin_path() const { return admin_path_.value(); }
   const GoogleString& global_admin_path() const {
     return global_admin_path_.value();
@@ -217,6 +291,29 @@ class NgxRewriteOptions : public SystemRewriteOptions {
   Option<GoogleString> messages_path_;
   Option<GoogleString> admin_path_;
   Option<GoogleString> global_admin_path_;
+
+  // the design record A1 Web-Bot-Auth options (default off / empty).
+  Option<bool> web_bot_auth_;
+  Option<bool> web_bot_auth_telemetry_;
+  Option<GoogleString> web_bot_auth_directory_host_;
+  Option<GoogleString> web_bot_auth_verified_bots_;
+  Option<GoogleString> web_bot_auth_key_directory_file_;
+  // the design record A2 network warm-fetch options (default empty / off).
+  Option<GoogleString> web_bot_auth_key_directory_url_;
+  Option<GoogleString> web_bot_auth_key_directory_allowlist_;
+  Option<GoogleString> web_bot_auth_key_directory_refresh_sec_;
+
+  // the design record A3 RSL-CAP enforcement options (PAID, default off / empty).
+  Option<bool> rsl_cap_enforcement_;
+  Option<GoogleString> rsl_cap_key_directory_file_;
+  Option<GoogleString> rsl_cap_directory_host_;
+  Option<GoogleString> rsl_cap_requested_license_;
+  Option<GoogleString> rsl_cap_requested_scope_;
+  Option<GoogleString> rsl_cap_issuer_;
+  // the design record A2 network warm-fetch options for the RSL-CAP issuer directory.
+  Option<GoogleString> rsl_cap_key_directory_url_;
+  Option<GoogleString> rsl_cap_key_directory_allowlist_;
+  Option<GoogleString> rsl_cap_key_directory_refresh_sec_;
 
   bool clear_inherited_scripts_;
   std::vector<RefCountedPtr<ScriptLine> > script_lines_;

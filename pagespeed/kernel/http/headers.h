@@ -46,6 +46,13 @@ class Headers {
   using CookieMultimapConstIter =
       std::multimap<StringPiece, ValueAndAttributes>::const_iterator;
 
+  // Maximum number of headers we will store.  A response carrying tens of
+  // thousands of small headers would otherwise exhaust memory via unbounded
+  // growth of the protobuf repeated field (a DoS via crafted upstream
+  // content).  Add() silently drops headers beyond this cap.  This is far
+  // above what any legitimate HTTP message needs.
+  static const int kMaxHeaders = 1000;
+
   Headers();
   virtual ~Headers();
 

@@ -15,8 +15,13 @@
 
 #include <atomic>
 #include <filesystem>
-#include <random>
+#include <fstream>
 #include <memory>
+#include <random>
+
+#if !defined(_WIN32) && !defined(WIN32)
+#include <unistd.h>  // geteuid() for the unreadable-file diagnostic test
+#endif
 
 #include "net/instaweb/http/public/async_fetch.h"
 #include "net/instaweb/http/public/request_context.h"
@@ -1009,6 +1014,103 @@ TEST_F(AdminLicenseHandlerTest, StatusReloadsFromDiskWhenInvalid) {
   DoGlobalRequest("/v1/license/status", "", &body);
   EXPECT_THAT(body, ::testing::HasSubstr("\"licensed\":true"));
   EXPECT_TRUE(license_handler_.IsLicenseValid());
+}
+
+// a license file that exists but cannot be read (e.g. a root-owned
+// 0600 file under a non-root worker) must surface "license_file_error" in the
+// status response instead of looking exactly like an absent file. Skipped on
+// Windows (no POSIX perm bits) and when running as root (root bypasses them).
+TEST_F(AdminLicenseHandlerTest, StatusReportsUnreadableLicenseFile) {
+#if defined(_WIN32) || defined(WIN32)
+  GTEST_SKIP() << "POSIX permission semantics not applicable on Windows";
+#else
+  if (geteuid() == 0) {
+    GTEST_SKIP() << "running as root bypasses file permission bits";
+  }
+  int64_t far_future = 1806451200;
+  GoogleString token = MakeToken("locked@example.com", "pro", far_future);
+  std::filesystem::path license_path = LicenseFilePath(tmp_dir_);
+  ASSERT_TRUE(WriteLicenseFile(license_path, token));
+
+  // Make the file unreadable: open() will fail with EACCES.
+  std::error_code ec;
+  std::filesystem::permissions(license_path, std::filesystem::perms::none,
+                               std::filesystem::perm_options::replace, ec);
+  ASSERT_FALSE(ec) << ec.message();
+
+  GoogleString body;
+  int status = DoGlobalRequest("/v1/license/status", "", &body);
+  EXPECT_EQ(200, status);
+  EXPECT_THAT(body, ::testing::HasSubstr("\"licensed\":false"));
+  EXPECT_THAT(body, ::testing::HasSubstr("\"license_file_error\":\"EACCES\""));
+
+  // Restore perms so the fixture teardown can clean up.
+  std::filesystem::permissions(license_path, std::filesystem::perms::owner_all,
+                               std::filesystem::perm_options::replace, ec);
+#endif
+}
+
+// 280-h1: once a valid license is applied in memory, the status response must
+// NOT keep reporting a stale license_file_error. The unreadable flag is only
+// recomputed on the !valid reload path, so a license applied via
+// /v1/license/apply after a failed on-disk read would otherwise leave a
+// self-contradictory licensed:true + license_file_error in the same response.
+TEST_F(AdminLicenseHandlerTest, LicenseFileErrorClearsOnceLicensed) {
+#if defined(_WIN32) || defined(WIN32)
+  GTEST_SKIP() << "POSIX permission semantics not applicable on Windows";
+#else
+  if (geteuid() == 0) {
+    GTEST_SKIP() << "running as root bypasses file permission bits";
+  }
+  int64_t far_future = 1806451200;
+  std::filesystem::path license_path = LicenseFilePath(tmp_dir_);
+  ASSERT_TRUE(WriteLicenseFile(
+      license_path, MakeToken("locked@example.com", "pro", far_future)));
+
+  // Make the file unreadable so the first status poll records the error.
+  std::error_code ec;
+  std::filesystem::permissions(license_path, std::filesystem::perms::none,
+                               std::filesystem::perm_options::replace, ec);
+  ASSERT_FALSE(ec) << ec.message();
+  GoogleString body1;
+  DoGlobalRequest("/v1/license/status", "", &body1);
+  ASSERT_THAT(body1, ::testing::HasSubstr("\"license_file_error\""));
+
+  // Restore perms and apply a valid token in memory.
+  std::filesystem::permissions(license_path, std::filesystem::perms::owner_all,
+                               std::filesystem::perm_options::replace, ec);
+  AdvancePastRateLimit();
+  ASSERT_TRUE(ApplyValidToken("locked@example.com", "pro", far_future));
+  AdvancePastRateLimit();
+
+  // Now licensed: the response must not contradict itself with a stale error.
+  GoogleString body2;
+  DoGlobalRequest("/v1/license/status", "", &body2);
+  EXPECT_THAT(body2, ::testing::HasSubstr("\"licensed\":true"));
+  EXPECT_THAT(body2,
+              ::testing::Not(::testing::HasSubstr("\"license_file_error\"")));
+#endif
+}
+
+// 280-h2: a present-but-empty license file is reported with an honest cause, not
+// a hardcoded "EACCES" (which misdirects the operator to a permissions fix). The
+// empty-file path is reachable with normal read permissions, so no root/perms
+// gymnastics are needed and the test runs on every platform.
+TEST_F(AdminLicenseHandlerTest, EmptyLicenseFileIsNotReportedAsEacces) {
+  std::filesystem::path license_path = LicenseFilePath(tmp_dir_);
+  {
+    std::ofstream f(license_path, std::ios::out | std::ios::trunc);
+    ASSERT_TRUE(f.is_open());
+    f << "   \n\t ";  // whitespace-only -> treated as empty
+  }
+
+  GoogleString body;
+  int status = DoGlobalRequest("/v1/license/status", "", &body);
+  EXPECT_EQ(200, status);
+  EXPECT_THAT(body, ::testing::HasSubstr("\"licensed\":false"));
+  // The cause is an empty file, not a permission error.
+  EXPECT_THAT(body, ::testing::HasSubstr("\"license_file_error\":\"EMPTY\""));
+  EXPECT_THAT(body, ::testing::Not(::testing::HasSubstr("EACCES")));
 }
 
 TEST_F(AdminLicenseHandlerTest, StatusDoesNotReloadWhenAlreadyValid) {

@@ -101,6 +101,8 @@ class Image {
           retain_color_profile(false),
           retain_color_sampling(false),
           retain_exif_data(false),
+          preserve_c2pa(true),
+          c2pa_carry(false),
           use_transparent_for_blank_image(false),
           jpeg_num_progressive_scans(
               RewriteOptions::kDefaultImageJpegNumProgressiveScans),
@@ -128,6 +130,17 @@ class Image {
     bool retain_color_profile;
     bool retain_color_sampling;
     bool retain_exif_data;
+    // Preserve C2PA/Content-Credentials provenance (APP11/JUMBF) through
+    // optimization. Defaults true; independent of retain_exif_data.
+    bool preserve_c2pa;
+    // the design record Level A: when true (and preserve_c2pa is also true), JPEG and PNG
+    // manifest-bearing images are recompressed with their ORIGINAL manifest
+    // bytes carried (spliced) into the output unmodified, keeping both the byte
+    // savings and the provenance. When false (default), or for formats/inputs
+    // where carry cannot be honored byte-exactly, the image falls back to
+    // Level B (detect-and-skip, byte-identical pass-through). Never re-emits a
+    // modified manifest.
+    bool c2pa_carry;
     bool use_transparent_for_blank_image;
     int64 jpeg_num_progressive_scans;
     int64 webp_conversion_timeout_ms;

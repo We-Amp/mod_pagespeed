@@ -156,6 +156,7 @@ const char RewriteOptions::kImageLimitResizeAreaPercent[] =
     "ImageLimitResizeAreaPercent";
 const char RewriteOptions::kImageMaxRewritesAtOnce[] = "ImageMaxRewritesAtOnce";
 const char RewriteOptions::kImagePreserveURLs[] = "ImagePreserveURLs";
+const char RewriteOptions::kImageProvenanceCarry[] = "ImageProvenanceCarry";
 const char RewriteOptions::kImageRecompressionQuality[] =
     "ImageRecompressionQuality";
 const char RewriteOptions::kImageResolutionLimitBytes[] =
@@ -233,6 +234,8 @@ const char RewriteOptions::kObliviousPagespeedUrls[] = "ObliviousPagespeedUrls";
 const char RewriteOptions::kOptionCookiesDurationMs[] =
     "OptionCookiesDurationMs";
 const char RewriteOptions::kOverrideCachingTtlMs[] = "OverrideCachingTtlMs";
+const char RewriteOptions::kPreserveImageProvenance[] =
+    "PreserveImageProvenance";
 const char RewriteOptions::kPreserveSubresourceHints[] =
     "PreserveSubresourceHints";
 const char RewriteOptions::kPreserveUrlRelativity[] = "PreserveUrlRelativity";

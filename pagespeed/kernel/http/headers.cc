@@ -325,6 +325,14 @@ void SplitValues(StringPiece name, StringPiece comma_separated_values,
 
 template <class Proto>
 void Headers<Proto>::Add(const StringPiece& name, const StringPiece& value) {
+  // Guard against unbounded growth of the protobuf repeated field from crafted
+  // input carrying a pathological number of headers.  Once we hit the cap we
+  // silently drop further headers rather than risk exhausting memory.
+  if (proto_->header_size() >= kMaxHeaders) {
+    LOG(WARNING) << "Dropping header '" << name
+                 << "': exceeded maximum header count (" << kMaxHeaders << ")";
+    return;
+  }
   NameValue* name_value = proto_->add_header();
   name_value->set_name(name.data(), name.size());
   name_value->set_value(value.data(), value.size());

@@ -43,6 +43,7 @@ using pagespeed::image_compression::kJpegTestDir;
 using pagespeed::image_compression::OptimizeJpeg;
 using pagespeed::image_compression::OptimizeJpegWithOptions;
 using pagespeed::image_compression::ReadTestFileWithExt;
+using pagespeed_testing::image_compression::GetC2paMarker;
 using pagespeed_testing::image_compression::GetColorProfileMarker;
 using pagespeed_testing::image_compression::GetExifDataMarker;
 using pagespeed_testing::image_compression::
@@ -263,6 +264,83 @@ TEST_F(JpegOptimizerTest, ValidJpegRetainExifData) {
   ASSERT_TRUE(OptimizeJpegWithOptions(src_data, &dest_data, options,
                                       &message_handler_));
   ASSERT_FALSE(IsJpegSegmentPresent(dest_data, GetExifDataMarker()));
+}
+
+// Synthesizes a JPEG carrying a C2PA / Content-Credentials provenance manifest
+// in an APP11 / JUMBF segment by injecting one right after the SOI marker.
+// libjpeg treats APP11 as an opaque application segment, so only a well-formed
+// 2-byte length is required; the payload is a JUMBF-shaped blob with a
+// recognizable sentinel. A real manifest can span multiple APP11 markers when
+// it exceeds ~64KB; one segment is sufficient to exercise the passthrough.
+static GoogleString InjectApp11C2paSegment(const GoogleString& jpeg) {
+  GoogleString payload;
+  payload.append("JP");  // APP11 common identifier.
+  const char kBoxHeader[] = {0x00, 0x01, 0x00, 0x00, 0x00, 0x01};
+  payload.append(kBoxHeader, sizeof(kBoxHeader));  // box instance + packet seq.
+  payload.append("jumbc2paC2PA-PRESERVE-SENTINEL");  // opaque JUMBF-ish blob.
+
+  const size_t seg_len = payload.size() + 2;  // length field counts itself.
+  GoogleString segment;
+  segment.push_back(static_cast<char>(0xFF));
+  segment.push_back(static_cast<char>(0xEB));  // APP11 marker.
+  segment.push_back(static_cast<char>((seg_len >> 8) & 0xFF));
+  segment.push_back(static_cast<char>(seg_len & 0xFF));
+  segment.append(payload);
+  // Insert immediately after the SOI marker (the leading 0xFF 0xD8).
+  return jpeg.substr(0, 2) + segment + jpeg.substr(2);
+}
+
+// C2PA/Content-Credentials provenance in the APP11/JUMBF form is preserved by default
+// and stripped only when preserve_c2pa is explicitly false; this APP11 carry is
+// independent of EXIF retention. (The XMP/APP1 form is handled at the rewrite gate, not
+// in the codec -- see image.cc / image_test.cc.) This asserts marker SURVIVAL through
+// recompress, not cryptographic validity: recompression rewrites the pixel bytes a hard
+// binding hashes, so a carried manifest is present but not re-verified.
+TEST_F(JpegOptimizerTest, ValidJpegPreserveC2pa) {
+  GoogleString clean_data;
+  ReadTestFileWithExt(kJpegTestDir, "sjpeg3.jpg", &clean_data);
+  const GoogleString src_data = InjectApp11C2paSegment(clean_data);
+
+  GoogleString dest_data;
+  JpegCompressionOptions options;
+
+  // The synthesized source carries the C2PA APP11 segment.
+  ASSERT_TRUE(IsJpegSegmentPresent(src_data, GetC2paMarker()));
+
+  // Lossless: preserve on (the default) keeps it; off strips it.
+  options.preserve_c2pa = true;
+  ASSERT_TRUE(OptimizeJpegWithOptions(src_data, &dest_data, options,
+                                      &message_handler_));
+  EXPECT_TRUE(IsJpegSegmentPresent(dest_data, GetC2paMarker()));
+
+  options.preserve_c2pa = false;
+  dest_data.clear();
+  ASSERT_TRUE(OptimizeJpegWithOptions(src_data, &dest_data, options,
+                                      &message_handler_));
+  EXPECT_FALSE(IsJpegSegmentPresent(dest_data, GetC2paMarker()));
+
+  // Lossy: same behavior.
+  options.lossy = true;
+  options.preserve_c2pa = true;
+  dest_data.clear();
+  ASSERT_TRUE(OptimizeJpegWithOptions(src_data, &dest_data, options,
+                                      &message_handler_));
+  EXPECT_TRUE(IsJpegSegmentPresent(dest_data, GetC2paMarker()));
+
+  options.preserve_c2pa = false;
+  dest_data.clear();
+  ASSERT_TRUE(OptimizeJpegWithOptions(src_data, &dest_data, options,
+                                      &message_handler_));
+  EXPECT_FALSE(IsJpegSegmentPresent(dest_data, GetC2paMarker()));
+
+  // Independence from EXIF stripping: stripping EXIF must NOT drop C2PA.
+  options.lossy = false;
+  options.preserve_c2pa = true;
+  options.retain_exif_data = false;
+  dest_data.clear();
+  ASSERT_TRUE(OptimizeJpegWithOptions(src_data, &dest_data, options,
+                                      &message_handler_));
+  EXPECT_TRUE(IsJpegSegmentPresent(dest_data, GetC2paMarker()));
 }
 
 TEST_F(JpegOptimizerTest, ValidJpegLossyWithNProgressiveScans) {

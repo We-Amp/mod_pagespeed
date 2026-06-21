@@ -17,9 +17,11 @@
  * under the License.
  */
 
-#include <memory>
-
 #include "net/instaweb/rewriter/public/image_rewrite_filter.h"
+
+#include <cstdint>
+#include <cstring>
+#include <memory>
 
 #include "net/instaweb/http/public/async_fetch.h"
 #include "net/instaweb/http/public/counting_url_async_fetcher.h"
@@ -46,7 +48,7 @@
 #include "pagespeed/controller/work_bound_expensive_operation_controller.h"
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/md5_hasher.h"           // for MD5Hasher
+#include "pagespeed/kernel/base/md5_hasher.h"  // for MD5Hasher
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -62,6 +64,7 @@
 #include "pagespeed/kernel/http/http_options.h"
 #include "pagespeed/kernel/http/response_headers.h"
 #include "pagespeed/kernel/http/semantic_type.h"
+#include "pagespeed/kernel/image/image_util.h"
 #include "pagespeed/opt/logging/enums.pb.h"
 #include "pagespeed/opt/logging/log_record.h"
 #include "test/net/instaweb/http/log_record_test_helper.h"
@@ -4337,6 +4340,147 @@ TEST_F(ImageRewriteTest, RenderCsp) {
              "<img src=\"uploads/b.png\">"
              "<!--PageSpeed output (by ImageRewrite) not permitted by "
              "Content Security Policy-->"));
+}
+
+namespace {
+
+// PNG C2PA test fixtures, mirrored from image_test.cc and kept local to this
+// translation unit. They build a manifest-bearing PNG with a stub caBX chunk
+// (no real signing) so the carry tests below stay hermetic. See the design record Level A.
+
+// CRC-32 (ISO 3309 / PNG) over a byte range; a valid CRC keeps the spliced caBX
+// chunk well-formed so libpng decodes the image cleanly.
+uint32_t PngCrc32(const char* data, size_t len) {
+  uint32_t crc = 0xFFFFFFFFu;
+  for (size_t i = 0; i < len; ++i) {
+    crc ^= static_cast<unsigned char>(data[i]);
+    for (int b = 0; b < 8; ++b) {
+      crc = (crc >> 1) ^ (0xEDB88320u & (~(crc & 1u) + 1u));
+    }
+  }
+  return crc ^ 0xFFFFFFFFu;
+}
+
+void AppendBE32(uint32_t v, GoogleString* out) {
+  out->push_back(static_cast<char>((v >> 24) & 0xFF));
+  out->push_back(static_cast<char>((v >> 16) & 0xFF));
+  out->push_back(static_cast<char>((v >> 8) & 0xFF));
+  out->push_back(static_cast<char>(v & 0xFF));
+}
+
+// Builds a valid caBX (C2PA box) PNG chunk carrying the JUMBF signature, framed
+// as length(BE32) + "caBX" + data + crc(BE32).
+GoogleString MakeCaBxChunk(size_t extra_data_bytes) {
+  GoogleString type_and_data;
+  type_and_data.append("caBX");                    // PNG C2PA chunk type.
+  type_and_data.append("JP");                      // JUMBF superbox tag.
+  type_and_data.append("jumb");                    // detector token.
+  type_and_data.append("jumd");                    // detector token.
+  type_and_data.append("c2pa");                    // detector token.
+  type_and_data.append(extra_data_bytes, '\x7E');  // opaque manifest padding.
+  const uint32_t data_len = static_cast<uint32_t>(type_and_data.size() - 4);
+  GoogleString chunk;
+  AppendBE32(data_len, &chunk);
+  chunk.append(type_and_data);
+  AppendBE32(PngCrc32(type_and_data.data(), type_and_data.size()), &chunk);
+  return chunk;
+}
+
+// Splices a caBX C2PA chunk into a PNG immediately after the IHDR chunk, where
+// ancillary chunks legitimately live. The unknown caBX is ignored by the decoder
+// and stripped by the PNG optimizer, so the carry path must re-insert it.
+GoogleString SpliceC2paCaBxIntoPng(const GoogleString& png,
+                                   size_t extra_bytes) {
+  static const char kSig[8] = {'\x89', 'P', 'N', 'G', '\r', '\n', '\x1A', '\n'};
+  EXPECT_GE(png.size(), static_cast<size_t>(8 + 25));
+  EXPECT_EQ(0, memcmp(png.data(), kSig, 8));
+  // IHDR is the first chunk: 4 (len) + 4 (type) + 13 (data) + 4 (crc) = 25.
+  const size_t ihdr_end = 8 + 25;
+  EXPECT_EQ(0, memcmp(png.data() + 12, "IHDR", 4));  // type at sig+8+4.
+  GoogleString out;
+  out.append(png.data(), ihdr_end);        // signature + IHDR.
+  out.append(MakeCaBxChunk(extra_bytes));  // spliced caBX.
+  out.append(png.data() + ihdr_end,
+             png.size() - ihdr_end);  // rest (IDAT..IEND).
+  return out;
+}
+
+}  // namespace
+
+// the design record Level A: the C2PA carry-through must survive the full image-rewrite
+// pipeline driven by the RewriteOptions flag (ImageProvenanceCarry), not just the
+// codec in isolation. image_test.cc covers Image::CompressionOptions::c2pa_carry
+// directly; these two tests cover the options -> ImageRewriteFilter -> Image
+// wiring by fetching a manifest-bearing PNG back through the rewriter.
+TEST_F(ImageRewriteTest, CarryC2paPngThroughPipelineKeepsManifest) {
+  GoogleString original;
+  ASSERT_TRUE(LoadFile(kBikePngFile, &original));
+  const GoogleString with_c2pa =
+      SpliceC2paCaBxIntoPng(original, /*extra_bytes=*/0);
+  ASSERT_TRUE(pagespeed::image_compression::ImageHasC2paManifest(with_c2pa));
+  // The exact original caBX chunk bytes (incl. CRC) the carry path must carry.
+  const StringPieceVector chunks =
+      pagespeed::image_compression::ExtractPngC2paChunks(with_c2pa);
+  ASSERT_EQ(static_cast<size_t>(1), chunks.size());
+  const GoogleString carrier(chunks[0].data(), chunks[0].size());
+
+  SetResponseWithDefaultHeaders("carry.png", kContentTypePng, with_c2pa, 100);
+
+  // The Level-B preserve floor is on by default; opt into Level-A carry via the
+  // OPTION (the wiring under test), not by touching the Image directly.
+  EXPECT_TRUE(options()->preserve_image_provenance());
+  // image_provenance_carry() has no convenience setter; set it via its directive
+  // name, which also exercises the real operator-config parse path.
+  ASSERT_EQ(RewriteOptions::kOptionOk,
+            options()->SetOptionFromName(RewriteOptions::kImageProvenanceCarry,
+                                         "on"));
+  // Recompress PNG ONLY (NOT convert_png_to_jpeg): the carry path requires the
+  // image to stay a PNG; a format conversion deliberately falls back to the
+  // original (that fallback is covered by image_test.cc).
+  options()->EnableFilter(RewriteOptions::kRecompressPng);
+  rewrite_driver()->AddFilters();
+
+  GoogleString out;
+  ASSERT_TRUE(FetchResourceUrl(
+      Encode(kTestDomain, "ic", "0", "carry.png", "png"), &out));
+
+  // The pipeline recompressed the PNG (not the byte-identical Level-B skip) ...
+  EXPECT_NE(with_c2pa, out);
+  EXPECT_LT(out.size(), with_c2pa.size());
+  // ... and carried the original caBX chunk (bytes + CRC) through verbatim.
+  EXPECT_NE(GoogleString::npos, out.find(carrier))
+      << "carried manifest chunk not found in rewritten output";
+  // Stronger than a substring match: the output still parses as a structurally
+  // valid PNG whose chunk walk yields a C2PA manifest (i.e. the caBX landed as a
+  // real chunk, not stray bytes inside IDAT).
+  EXPECT_TRUE(pagespeed::image_compression::ImageHasC2paManifest(out));
+}
+
+TEST_F(ImageRewriteTest, C2paPngCarryOffSkipsToOriginalThroughPipeline) {
+  GoogleString original;
+  ASSERT_TRUE(LoadFile(kBikePngFile, &original));
+  const GoogleString with_c2pa =
+      SpliceC2paCaBxIntoPng(original, /*extra_bytes=*/0);
+  ASSERT_TRUE(pagespeed::image_compression::ImageHasC2paManifest(with_c2pa));
+
+  SetResponseWithDefaultHeaders("nocarry.png", kContentTypePng, with_c2pa, 100);
+
+  // Carry left at its default (off); the Level-B floor (on by default) must then
+  // serve the manifest-bearing PNG byte-identical (skip-not-strip). This proves
+  // the filter actually reads the option: same pipeline, opposite outcome.
+  EXPECT_FALSE(options()->image_provenance_carry());
+  EXPECT_TRUE(options()->preserve_image_provenance());
+  // Same single-filter setup as the carry-on test, so the only difference is the
+  // option: PNG recompression with no format conversion.
+  options()->EnableFilter(RewriteOptions::kRecompressPng);
+  rewrite_driver()->AddFilters();
+
+  GoogleString out;
+  ASSERT_TRUE(FetchResourceUrl(
+      Encode(kTestDomain, "ic", "0", "nocarry.png", "png"), &out));
+
+  // Byte-identical: not recompressed, manifest intact.
+  EXPECT_EQ(with_c2pa, out);
 }
 
 }  // namespace net_instaweb

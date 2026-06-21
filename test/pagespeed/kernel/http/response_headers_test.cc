@@ -2320,4 +2320,29 @@ TEST_F(ResponseHeadersTest, TestHopByHopSanitization) {
   EXPECT_EQ("HTTP/1.0 0 (null)\r\nbar: baz\r\n\r\n", headers2.ToString());
 }
 
+// Crafted input carrying a pathological number of headers must not be able to
+// grow the protobuf without bound: Add() caps the stored header count at
+// kMaxHeaders and silently drops the overflow.
+TEST_F(ResponseHeadersTest, MaxHeaderCountGuard) {
+  const int kMax = ResponseHeaders::kMaxHeaders;
+  ResponseHeaders headers;
+
+  // Add well past the cap.
+  const int kOverflow = kMax + 500;
+  for (int i = 0; i < kOverflow; ++i) {
+    headers.Add(StrCat("X-Header-", IntegerToString(i)), "v");
+  }
+
+  // The guard must have tripped: we stored exactly kMaxHeaders, not kOverflow.
+  EXPECT_EQ(kMax, headers.NumAttributes());
+  EXPECT_LT(headers.NumAttributes(), kOverflow);
+
+  // Headers added before the cap are retained; ones past it are dropped.
+  ConstStringStarVector values;
+  EXPECT_TRUE(headers.Lookup("X-Header-0", &values));
+  EXPECT_FALSE(
+      headers.Lookup(StrCat("X-Header-", IntegerToString(kOverflow - 1)),
+                     &values));
+}
+
 }  // namespace net_instaweb

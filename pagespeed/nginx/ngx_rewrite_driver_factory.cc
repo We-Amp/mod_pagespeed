@@ -33,6 +33,7 @@
 #include "ngx_rewrite_options.h"
 #include "ngx_server_context.h"
 #include "ngx_url_async_fetcher.h"
+#include "ngx_webbotauth_handler.h"
 #include "pagespeed/kernel/base/google_message_handler.h"
 #include "pagespeed/kernel/base/null_shared_mem.h"
 #include "pagespeed/kernel/base/posix_timer.h"
@@ -267,6 +268,7 @@ void NgxRewriteDriverFactory::InitStats(Statistics* statistics) {
   NgxServerContext::InitStats(statistics);
   InPlaceResourceRecorder::InitStats(statistics);
   CurlUrlAsyncFetcher::InitStats(statistics);
+  ps_webbotauth_init_stats(statistics);
 }
 
 void NgxRewriteDriverFactory::PrepareForkedProcess(const char* name) {
