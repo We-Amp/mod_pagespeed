@@ -10,7 +10,7 @@
 # To update: bump PINNED_MPS2_COMMIT in tools/sync-crypto.sh, re-run it, and
 # commit. Drift is caught by the crypto-drift CI check.
 
-load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
+load("@rules_cc//cc:defs.bzl", "cc_library")
 
 _LICENSE_NS = "PAGESPEED_LICENSE_NAMESPACE=net_instaweb"
 _PRODUCT_ID = "PAGESPEED_PRODUCT_ID=\\\"mps1\\\""
@@ -94,39 +94,5 @@ cc_binary(
         ":license_signer",
         ":license_token",
         "//pagespeed/kernel/base:pagespeed_base",
-    ],
-)
-
-cc_test(
-    name = "license_token_test",
-    size = "small",
-    srcs = ["license_token_test.cc"],
-    deps = [
-        ":license_token",
-        "@googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "license_verifier_test",
-    size = "small",
-    srcs = ["license_verifier_test.cc"],
-    deps = [
-        ":license_signer",
-        ":license_token",
-        ":license_verifier",
-        "@googletest//:gtest_main",
-        "@ed25519",
-    ],
-)
-
-cc_test(
-    name = "license_file_test",
-    size = "small",
-    srcs = ["license_file_test.cc"],
-    deps = [
-        ":license_file",
-        "//pagespeed/kernel/base:pagespeed_base",
-        "@googletest//:gtest_main",
     ],
 )

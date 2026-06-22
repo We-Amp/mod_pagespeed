@@ -357,9 +357,13 @@ TEST_F(VerifierTest, UnsupportedComponentIsUnknown) {
   req.authority = kAuthority;
   req.path = "/";
   req.directory_host = kTestHost;
-  req.signature_input =
+  // RequestView fields are non-owning StringPieces, so back the header value
+  // with storage that outlives the VerifyAndClassify call (assigning a StrCat
+  // temporary directly would leave signature_input dangling).
+  GoogleString sig_input =
       StrCat("sig1=(\"@method\" \"@query\");created=", Integer64ToString(now_),
              ";keyid=\"", kTestKeyId, "\";alg=\"ed25519\"");
+  req.signature_input = sig_input;
   // Any non-empty signature; parse fails before crypto.
   req.signature = "sig1=:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=:";
 
@@ -376,10 +380,12 @@ TEST_F(VerifierTest, NonEd25519AlgIsUnknown) {
   req.authority = kAuthority;
   req.path = "/";
   req.directory_host = kTestHost;
-  req.signature_input =
+  // Non-owning StringPiece field: keep the value alive past the verify call.
+  GoogleString sig_input =
       StrCat("sig1=(\"@method\" \"@authority\" \"@path\");created=",
              Integer64ToString(now_), ";keyid=\"", kTestKeyId,
              "\";alg=\"rsa-pss-sha512\"");
+  req.signature_input = sig_input;
   req.signature = "sig1=:AAAA:";
 
   FakeKeyDirectoryProvider provider(kTestHost, kTestKeyId, pub_);
@@ -393,9 +399,11 @@ TEST_F(VerifierTest, ShortSignatureIsUnknown) {
   RequestView req;
   GoogleString si, s;
   BuildSignedRequest(now_, &req, &si, &s);
-  // Replace with a 10-byte signature.
+  // Replace with a 10-byte signature. Reuse the persistent `s` storage so the
+  // non-owning req.signature StringPiece does not dangle on a StrCat temporary.
   GoogleString shortsig(10, '\x01');
-  req.signature = StrCat("sig1=:", Base64Encode(shortsig), ":");
+  s = StrCat("sig1=:", Base64Encode(shortsig), ":");
+  req.signature = s;
 
   FakeKeyDirectoryProvider provider(kTestHost, kTestKeyId, pub_);
   VerifiedBotRegistry registry;

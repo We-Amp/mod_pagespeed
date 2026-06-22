@@ -1,4 +1,4 @@
-load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -79,99 +79,6 @@ cc_library(
         "//pagespeed/kernel/base:pagespeed_base",
         "//pagespeed/kernel/http:http",
         "//pagespeed/opt/http:http",
-    ],
-)
-
-# Hermetic, offline unit test. Mints its own Ed25519 keypair with @ed25519
-# (ed25519_create_keypair / ed25519_sign), injects a fake key directory, and
-# asserts the four success-bar cases plus robustness cases. Depends ONLY on the
-# core library -- no network, no nginx, no serf, no Cyclone.
-cc_test(
-    name = "verifier_test",
-    size = "small",
-    srcs = ["verifier_test.cc"],
-    deps = [
-        ":webbotauth_core",
-        "@ed25519",
-        "@googletest//:gtest_main",
-        "//pagespeed/kernel/base:pagespeed_base",
-    ],
-)
-
-# Hermetic, offline unit test for the in-memory local-JWKS provider (A1 v1).
-cc_test(
-    name = "static_key_directory_test",
-    size = "small",
-    srcs = ["static_key_directory_test.cc"],
-    deps = [
-        ":webbotauth_core",
-        "@googletest//:gtest_main",
-        "//pagespeed/kernel/base:pagespeed_base",
-    ],
-)
-
-# Hermetic, offline unit test for the RSL-CAP capability-token validator (the
-# PAID enforcement sibling of the FREE verifier). Mints its own Ed25519
-# keypairs, hand-assembles tokens, and injects a fake KeyDirectoryProvider --
-# no network, no nginx, no serf, no Cyclone. Depends ONLY on the core library.
-cc_test(
-    name = "rsl_cap_validator_test",
-    size = "small",
-    srcs = ["rsl_cap_validator_test.cc"],
-    deps = [
-        ":webbotauth_core",
-        "@ed25519",
-        "@googletest//:gtest_main",
-        "//pagespeed/kernel/base:pagespeed_base",
-    ],
-)
-
-# Hermetic, offline unit tests for the design record A2 cache layer:
-# WarmKeyDirectoryCache, CachedKeyDirectoryProvider read-through vs cache-only,
-# ChainedKeyDirectoryProvider, and ExtractAllEd25519Keys. Uses a real in-memory
-# blocking LRUCache; no network, no nginx, no threads.
-cc_test(
-    name = "key_directory_test",
-    size = "small",
-    srcs = ["key_directory_test.cc"],
-    deps = [
-        ":webbotauth_core",
-        "@googletest//:gtest_main",
-        "//pagespeed/kernel/base:pagespeed_base",
-        "//pagespeed/kernel/cache:cache",
-    ],
-)
-
-# Hermetic SSRF-guard test for the network-fetch provider (the trust boundary
-# from #211, previously untested). Pure predicates + the fail-closed branches of
-# GetKey that return before any fetch -- so no real fetcher is needed.
-cc_test(
-    name = "net_fetch_key_directory_test",
-    size = "small",
-    srcs = ["net_fetch_key_directory_test.cc"],
-    deps = [
-        ":webbotauth_netfetch",
-        "@googletest//:gtest_main",
-        "//pagespeed/kernel/base:pagespeed_base",
-        "//pagespeed/opt/http:http",
-    ],
-)
-
-# Test for the A2 warmer's synchronous fetch+populate cycle, driven by an
-# inline fake fetcher (the dedicated thread is not started).
-cc_test(
-    name = "key_directory_warmer_test",
-    size = "small",
-    srcs = ["key_directory_warmer_test.cc"],
-    deps = [
-        ":webbotauth_core",
-        ":webbotauth_warmer",
-        "@googletest//:gtest_main",
-        "//net/instaweb/http:http",
-        "//pagespeed/kernel/base:pagespeed_base",
-        "//pagespeed/kernel/cache:cache",
-        "//pagespeed/kernel/http:http",
-        "//pagespeed/kernel/util:util",
     ],
 )
 

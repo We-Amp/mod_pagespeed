@@ -81,7 +81,7 @@ TEST_F(LicenseFileTest, EmptyFileIsUnreadable) {
   GoogleString token = "untouched";
   LicenseFileReadStatus status = LicenseFileReadStatus::kAbsent;
   EXPECT_FALSE(ReadLicenseFile(path_, &token, &status));
-  EXPECT_EQ(status, LicenseFileReadStatus::kUnreadable);
+  EXPECT_EQ(status, LicenseFileReadStatus::kEmpty);
   EXPECT_TRUE(token.empty());
 }
 
@@ -90,7 +90,7 @@ TEST_F(LicenseFileTest, OversizedFileIsUnreadable) {
   GoogleString token;
   LicenseFileReadStatus status = LicenseFileReadStatus::kAbsent;
   EXPECT_FALSE(ReadLicenseFile(path_, &token, &status));
-  EXPECT_EQ(status, LicenseFileReadStatus::kUnreadable);
+  EXPECT_EQ(status, LicenseFileReadStatus::kTooLarge);
 }
 
 // The core case: a file that exists but is not readable by the
