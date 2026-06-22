@@ -50,6 +50,6 @@ mod_pagespeed 1.15 is distributed under the [Business Source License 1.1](https:
 
 ## Background
 
-mod_pagespeed was created at Google in 2010 and powered web performance optimization across hundreds of thousands of sites. After Google archived the project, We-Amp B.V. — a Dutch company that helped build and maintain ngx_pagespeed and mod_pagespeed — continued active development in the Apache PageSpeed incubator project and after that under the mod_pagespeed 1.15 line, alongside a ground-up rewrite, [ModPageSpeed 2.0](https://modpagespeed.com/).
+mod_pagespeed was created at Google in 2010 and powered web performance optimization across hundreds of thousands of sites. We-Amp's role is documented in primary sources: the [Apache Incubator PageSpeed proposal](https://cwiki.apache.org/confluence/display/INCUBATOR/PageSpeedProposal) lists We-Amp B.V. as a founding committer organization alongside Google, and [Google's 2013 ngx_pagespeed announcement](https://developers.googleblog.com/en/speed-up-your-sites-with-pagespeed-for-nginx/) named We-Amp among the module's contributors. After Google archived the project, We-Amp B.V. continued active development in the Apache PageSpeed incubator project and after that under the mod_pagespeed 1.15 line, alongside a ground-up rewrite, [ModPageSpeed 2.0](https://modpagespeed.com/).
 
 Learn more about We-Amp's open-source work: [we-amp.com/open-source/](https://we-amp.com/open-source/).
