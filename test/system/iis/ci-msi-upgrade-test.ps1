@@ -196,16 +196,28 @@ if ($OldMsiPath) {
 # (Step 5b below) against the freshly-installed module to pin the auto-
 # create + diagnostic-page + config-fallback contracts on each release.
 #
-# All four fixtures are re-wired now that those fixes are in:
-#   - test_iis_cache_diagnostic.ps1: now DELETES the FileCachePath
-#     line (empty default -> kCachePathEmpty) instead of the empty-quoted
-#     rewrite that the config tokenizer silently dropped.
-#   - test_iis_cache_autocreate.ps1 + test_iis_logdir_autocreate.ps1
-#    : positive-path assertion now polls Wait-ForHeader
-#     -expectPresent $false, tolerating the first-request init transient.
-#   - test_iis_config_fallback.ps1: distinctive legacy directive is
-#     now `pagespeed off` (asserted via X-Page-Speed header absence)
-#     instead of the invalid `Statistics off -> /pagespeed_statistics 404`.
+# Fixture gating status (live-VM verified 2026-06-22 on the Windows Server 2016 IIS base image):
+#   - test_iis_cache_diagnostic.ps1: GATING. Fixed + VM-validated. It
+#     now edits the config the MODULE actually reads at request time
+#     (FindConfigFile(<site physical path>) = ...\wwwroot\pagespeed.config,
+#     NOT the ProgramData copy the old fixture edited) and provisions a
+#     REACHABLE failure: an explicit out-of-auto-create-prefix, non-existent
+#     FileCachePath -> X-Pagespeed-Init-Status: cache-path-missing. (Verified
+#     on the VM that `FileCachePath ""`, deleting the directive, AND emptying
+#     the whole file all FAIL to trip a failure mode -- the module falls back
+#     to a working default cache path -- so cache-path-empty is unreachable
+#     via a config edit; cache-path-missing is the reliable contract.)
+#   - test_iis_cache_autocreate.ps1 + test_iis_logdir_autocreate.ps1:
+#     GATING. Fixed + VM-validated 2026-06-22. autocreate was REWRITTEN for the
+#     CYCLONE cache (assert cache root + cyclone.dat auto-init + healthy, plus a
+#     cache-path-missing negative; the old per-site-subdir/ACL + create-failed
+#     assertions tested the obsolete pre-Cyclone file-cache). logdir keeps its
+#     positive LogDir auto-create contract; its log-dir-create-failed negative is
+#     RETIRED (a denied LogDir is non-fatal on v1.15.0 — VM-verified).
+#   - test_iis_config_fallback.ps1: still NON-GATING. It tests the
+#     ProgramData canonical->legacy FACTORY fallback, but request-time options
+#     come from FindConfigFile(<wwwroot>) — entangled with the config-resolution
+#     duality; fix once that settles which config governs what.
 $portFixtures = @(
     'test_iis_cache_diagnostic.ps1',
     'test_iis_cache_autocreate.ps1',
@@ -480,20 +492,24 @@ Write-Host "Smoke step complete (any warnings above indicate license-tolerant sk
 Write-Host ""
 Write-Host "=== Step 5b: the design record port fixtures ==="
 $portFixtureScript = {
-    param([string[]]$fixtures)
+    param($spec)
+    $fixtures = @($spec.fixtures)
+    $gating   = [bool]$spec.gating
     # Continue (not Stop): a fixture's native stderr / non-zero exit must NOT raise
     # a terminating NativeCommandError (Windows PowerShell 5.1 behaviour under
-    # 'Stop'), which would escape this scriptblock and fail the gating job before
-    # the per-fixture handling runs. These the design record fixtures are non-gating.
+    # 'Stop') before the per-fixture handling runs. For GATING fixtures we capture
+    # the exit code and then `throw` (which, with the host's EAP=Stop, runs
+    # Restore-CleanState and fails the job — verified); non-gating fixtures warn.
     $ErrorActionPreference = 'Continue'
     $failed = @()
     foreach ($f in $fixtures) {
         $path = "C:\artifacts\port-fixtures\$f"
         if (-not (Test-Path -LiteralPath $path)) {
+            if ($gating) { throw "GATING port fixture missing on VM: $path" }
             Write-Host "::warning::fixture missing on VM: $path - skipping"
             continue
         }
-        Write-Host "--- Running $f ---"
+        Write-Host "--- Running $f (gating=$gating) ---"
         # 2>&1 | Out-Host merges the child's stderr into the success stream so a
         # failing fixture never produces an error record; try/catch is a final net.
         $code = 1
@@ -501,12 +517,13 @@ $portFixtureScript = {
             & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $path 2>&1 | Out-Host
             $code = $LASTEXITCODE
         } catch {
+            if ($gating) { throw "GATING port fixture $f raised: $($_.Exception.Message)" }
             Write-Host "::warning::port fixture $f raised: $($_.Exception.Message) (non-gating)"
             $failed += $f
             continue
         }
         if ($code -ne 0) {
-            # Best-effort: warn, don't fail the gating MSI-upgrade job.
+            if ($gating) { throw "GATING port fixture $f FAILED with exit code $code" }
             Write-Host "::warning::port fixture $f failed with exit code $code (non-gating)"
             $failed += $f
             continue
@@ -518,9 +535,33 @@ $portFixtureScript = {
         Write-Host "::warning::the design record port fixtures with non-zero exit (non-gating): $($failed -join ', ')"
     }
 }
-Invoke-Command -VMName $VMName -Credential $cred -ScriptBlock $portFixtureScript `
-    -ArgumentList (,$portFixtures)
-Write-Host "the design record port fixtures complete (any failures above are non-gating warnings)."
+# These fixtures are GATING (fixed + VM-validated). config_fallback
+# stays non-gating pending the config-resolution duality work.
+$gatingFixtures    = @(
+    'test_iis_cache_diagnostic.ps1',
+    'test_iis_cache_autocreate.ps1',
+    'test_iis_logdir_autocreate.ps1'
+)
+$nonGatingFixtures = @($portFixtures | Where-Object { $gatingFixtures -notcontains $_ })
+# Wrap the GATING call in its own try/catch: on a gating failure we want a clean,
+# immediate fail with a clear message - NOT a cascade. The script-scope trap has
+# no `break`, so without this the gating throw would revert the VM and then resume
+# into the non-gating fixtures + Step 6 uninstall against the just-reverted VM,
+# burying the real "GATING port fixture FAILED" message under revert/uninstall
+# noise. Catch -> Restore-CleanState -> exit 1 short-circuits that.
+try {
+    Invoke-Command -VMName $VMName -Credential $cred -ScriptBlock $portFixtureScript `
+        -ArgumentList @{ fixtures = $gatingFixtures; gating = $true }
+} catch {
+    Write-Host "::error::GATING IIS port fixture failed: $($_.Exception.Message)"
+    Restore-CleanState
+    exit 1
+}
+if ($nonGatingFixtures.Count -gt 0) {
+    Invoke-Command -VMName $VMName -Credential $cred -ScriptBlock $portFixtureScript `
+        -ArgumentList @{ fixtures = $nonGatingFixtures; gating = $false }
+}
+Write-Host "the design record port fixtures complete (GATING: cache-diagnostic, cache-autocreate, logdir; NON-gating: config_fallback)."
 
 # --- Step 6: Uninstall ---
 Write-Host "Uninstalling..."

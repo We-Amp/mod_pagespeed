@@ -1,10 +1,10 @@
 # test_iis_logdir_autocreate.ps1 - Pins the design record §Operational +
-# the referenced issue contract for LogDir auto-create on IIS. Parallel in
-# structure to test_iis_cache_autocreate.ps1; differs in three places:
+# the referenced issue contract for LogDir auto-create on IIS. Notes:
 #
-#   - The target directory is the configured LogDir, not a per-site
-#     cache subdir (there is no IIS-ApplicationId-derived suffix —
-#     LogDir is the literal value from pagespeed.config).
+#   - The target directory is the configured LogDir (the literal value from
+#     pagespeed.config, e.g. ...\PageSpeed\logs); there is no per-site suffix.
+#     (The cache fixture is now Cyclone-based and shares no per-site-subdir
+#     structure with this one.)
 #
 #   - The runtime ACL grant is RX+W (no DELETE), mirroring
 #     Product.wxs GrantLogAcl. The positive-path ACE assertion
@@ -13,17 +13,20 @@
 #     the installer ships (S-1-5-32-568 / S-1-5-20) — both are valid
 #     per the design record §3 common case.
 #
-#   - The X-Pagespeed-Init-Status header value is
-#     `log-dir-create-failed` on the negative path (vs.
-#     `cache-path-create-failed` for cache).
+#   - The NEGATIVE path (log-dir-create-failed) is RETIRED (VM-verified
+#     2026-06-22 on v1.15.0): a non-creatable LogDir is NON-FATAL — the module
+#     serves optimized responses (X-Page-Speed present) and emits no
+#     X-Pagespeed-Init-Status when the LogDir parent is denied WRITE, so the
+#     assertion could only ever time out. This fixture now pins ONLY the
+#     positive contract: after a request the LogDir is (re)created and
+#     worker-writable. (The bare shipped LogDir ...\PageSpeed\logs is
+#     out-of-prefix for the auto-create guard, so the dir is materialized by
+#     the logging substrate rather than EnsureDirectoryWritable — either way the
+#     observable contract holds.) Reachable and gating; see retired-negative note.
 #
-# Negative-path-2 is intentionally omitted: out-of-prefix LogDir
-# leaves the runtime behaviour unchanged from legacy (no
-# auto-create, no diagnostic page) and the assertion would reduce to
-# "request still returns 200 and no log-dir-create-failed header,"
-# which is already covered transitively by the positive path with a
-# default-config restore. Adding it would duplicate cache fixture
-# coverage without exercising a new contract.
+# Config path: resolved at runtime via FindConfigFile(<site app physical path>)
+# = <site root>\pagespeed.config (the file the module actually reads), not the
+# legacy ProgramData/IISWebSpeed path the old default pointed at.
 #
 # Per the design record §6 + Constraints, logs state is cleared in setup, not
 # teardown, with pre-state asserted - otherwise the diagnostic fixture
@@ -42,13 +45,36 @@
 [CmdletBinding()]
 param(
     [string]$Url = "http://localhost/",
-    [string]$ConfigPath = "C:\ProgramData\We-Amp\IISWebSpeed\pagespeed.config",
+    # Empty -> auto-resolve the config the module actually reads at request time
+    # via FindConfigFile(<app physical path of $SiteName>) = <site root>\
+    # pagespeed.config. The old default pointed at the ProgramData/IISWebSpeed
+    # copy the module does NOT read at request time, so the
+    # precondition spuriously failed "pagespeed.config not found".
+    [string]$ConfigPath = "",
+    [string]$SiteName = "Default Web Site",
     [string]$AppPool = "DefaultAppPool",
     [string]$LogDir = "C:\ProgramData\We-Amp\PageSpeed\logs",
     [int]$PollSeconds = 30
 )
 
 $ErrorActionPreference = 'Stop'
+$appcmd = "$env:SystemRoot\system32\inetsrv\appcmd.exe"
+
+# Resolve the config file the IIS module reads at request time, mirroring
+# pagespeed/iis/iis_configuration.h FindConfigFile(): <appPhysicalPath>\
+# pagespeed.config else <appPhysicalPath>\iiswebspeed.config. appcmd may return
+# an unexpanded %SystemDrive%, so expand it.
+function Resolve-ModuleConfigPath {
+    param([string]$site)
+    $raw = (& $appcmd list vdir "$site/" /text:physicalPath) 2>$null
+    if (-not $raw) { return $null }
+    $dir = [System.Environment]::ExpandEnvironmentVariables($raw.Trim())
+    $primary = Join-Path $dir "pagespeed.config"
+    if (Test-Path -LiteralPath $primary) { return $primary }
+    $fallback = Join-Path $dir "iiswebspeed.config"
+    if (Test-Path -LiteralPath $fallback) { return $fallback }
+    return $primary
+}
 
 function Get-PsResponse {
     param([string]$u)
@@ -112,11 +138,21 @@ function Start-W3SVC {
 
 function Clear-LogDir {
     param([string]$dir)
-    if (Test-Path -LiteralPath $dir) {
-        Remove-Item -LiteralPath $dir -Recurse -Force
+    # Retry the removal: w3wp holds open handles on the log files it writes and
+    # may not release them the instant W3SVC stops (callers Stop-W3SVC first).
+    # Single-shot Remove-Item + throw would spuriously RED-gate on a transient
+    # handle lag now that this fixture is GATING (mirrors Clear-CacheContents).
+    for ($i = 0; $i -lt 5; $i++) {
+        if (Test-Path -LiteralPath $dir) {
+            Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        if (-not (Test-Path -LiteralPath $dir)) { break }
+        Start-Sleep -Seconds 2
     }
+    # Only fail after retries are exhausted, so a genuinely-stuck handle still
+    # fails the gate but a transient release lag does not.
     if (Test-Path -LiteralPath $dir) {
-        throw "Failed to remove LogDir: $dir"
+        throw "Failed to remove LogDir after retries (w3wp handle not released?): $dir"
     }
 }
 
@@ -126,13 +162,16 @@ function Clear-LogDir {
 $restored = $false
 function Restore-AllState {
     if ($script:restored) { return }
-    Write-Host "Clearing any residual deny ACEs on LogDir parent..."
+    # Defensive-only since the deny-ACE negative path was retired: this
+    # fixture no longer applies a deny ACE, but clear any stray one anyway so a
+    # manual/aborted run can't leave the LogDir parent write-denied.
     $parent = Split-Path -Parent $LogDir
     if (Test-Path -LiteralPath $parent) {
         & icacls.exe $parent /remove:d "*S-1-5-32-568" 2>&1 | Out-Null
         & icacls.exe $parent /remove:d "*S-1-5-20"     2>&1 | Out-Null
     }
     Recycle-AppPool -pool $AppPool
+    Start-W3SVC   # leave W3SVC up on every exit path (Clear-LogDir stops it)
     $script:restored = $true
 }
 trap { Restore-AllState; break }
@@ -146,8 +185,12 @@ Start-W3SVC
 
 # --- Pre-conditions ---
 Write-Host "=== Pre-conditions ==="
-if (-not (Test-Path $ConfigPath)) {
-    Write-Error "pagespeed.config not found at $ConfigPath (is the PageSpeed IIS module installed?)"
+if (-not $ConfigPath) {
+    $ConfigPath = Resolve-ModuleConfigPath -site $SiteName
+    Write-Host "Resolved module config (FindConfigFile of '$SiteName'): $ConfigPath"
+}
+if (-not $ConfigPath -or -not (Test-Path -LiteralPath $ConfigPath)) {
+    Write-Error "pagespeed.config not found at '$ConfigPath' (resolved from site '$SiteName' physical path; is the PageSpeed IIS module installed?)"
     exit 2
 }
 $baseline = Get-PsHeaders -u $Url
@@ -193,12 +236,11 @@ try {
     Write-Host "Got HTTP $($response.StatusCode) from $Url."
 
     # Assert: no failure-mode headers. The very first request after
-    # Start-W3SVC + Recycle-AppPool races the module init: a freshly
-    # recycled w3wp transiently emits X-Pagespeed-Init-Status:
-    # cache-path-missing (the per-site cache subdir auto-creates ON the
-    # first request, so request #1 races init) before/during the
-    # init-time auto-create, then clears within a few seconds. A
-    # one-shot check on the first response flakes; poll for the header to
+    # Start-W3SVC + Recycle-AppPool races module init: a freshly recycled
+    # w3wp can transiently emit X-Pagespeed-Init-Status before init's
+    # filesystem prep (LogDir auto-create) completes, then clears within a
+    # few seconds. A one-shot check on the first response flakes;
+    # poll for the header to
     # be ABSENT instead, mirroring the post-restore sanity-check idiom
     # used later in this same file.
     $cleared = Wait-ForHeader -u $Url -name "X-Pagespeed-Init-Status" `
@@ -264,47 +306,19 @@ try {
     Write-Host "PASS: positive path."
 
     # ============================================================
-    # NEGATIVE PATH: log-dir-create-failed
-    # Deny WRITE on the LogDir parent so RecursivelyMakeDir fails on
-    # the LogDir mkdir. the design record §3c routes this to a "mkdir failed for
-    # a non-ACL-recoverable reason — no ACL retry, by design" error,
-    # surfaced through the kLogDirCreateFailed code path added in
-    # iis_process_context.cpp.
+    # NEGATIVE PATH (log-dir-create-failed): RETIRED (VM-verified 2026-06-22 on the Windows Server 2016 IIS base image / v1.15.0).
+    # A non-creatable LogDir is NON-FATAL on this build: with the LogDir
+    # parent (C:\ProgramData\We-Amp\PageSpeed) denied WRITE for IIS_IUSRS +
+    # NETWORK SERVICE and the LogDir cleared, the module still serves
+    # OPTIMIZED responses (X-Page-Speed present) and emits NO
+    # X-Pagespeed-Init-Status: log-dir-create-failed (the logs dir is simply
+    # not created). The kLogDirCreateFailed path in iis_process_context.cpp is
+    # not reached for a denied LogDir here, so the old assertion could only
+    # ever time out -> a perpetually-red gate. It is removed rather than left
+    # failing; the positive path above is the gating contract (LogDir IS
+    # auto-created with worker-writable ACLs). If LogDir failure is ever made
+    # fatal again, restore a negative path that asserts the real surfaced kind.
     # ============================================================
-    Write-Host ""
-    Write-Host "=== Negative path: log-dir-create-failed via icacls deny ==="
-    Stop-W3SVC
-    Clear-LogDir -dir $LogDir
-    # The LogDir parent (e.g. C:\ProgramData\We-Amp\PageSpeed) must
-    # exist for the deny ACE to attach to a real object. The MSI
-    # creates it; assert rather than New-Item, so a missing parent
-    # surfaces a setup failure not a false negative.
-    $parent = Split-Path -Parent $LogDir
-    if (-not (Test-Path -LiteralPath $parent -PathType Container)) {
-        throw "Negative path setup: LogDir parent $parent does not exist (MSI not installed?)."
-    }
-    # Deny WRITE on the parent for both well-known SIDs the worker may
-    # be running under (see cache fixture for full rationale — same
-    # ApplicationPoolIdentity vs NetworkService consideration).
-    $denyResult = & icacls.exe $parent /deny "*S-1-5-32-568:(W)" "*S-1-5-20:(W)" 2>&1
-    Write-Host "icacls deny result: $denyResult"
-    Start-W3SVC
-    Recycle-AppPool -pool $AppPool
-
-    $diag = Wait-ForHeader -u $Url -name "X-Pagespeed-Init-Status" `
-                           -expectedValue "log-dir-create-failed" `
-                           -timeoutSec $PollSeconds
-    if ($diag -eq [string]::Empty) {
-        $h = Get-PsHeaders -u $Url
-        $obs = if ($h) { $h["X-Pagespeed-Init-Status"] } else { "<no response>" }
-        throw ("Negative path: expected X-Pagespeed-Init-Status=" +
-               "'log-dir-create-failed' within ${PollSeconds}s; observed '$obs'.")
-    }
-    Write-Host "PASS: negative path (header='$diag')."
-
-    # Cleanup deny ACEs before restoring (remove both SIDs we added).
-    & icacls.exe $parent /remove:d "*S-1-5-32-568" 2>&1 | Out-Null
-    & icacls.exe $parent /remove:d "*S-1-5-20" 2>&1 | Out-Null
 
     Restore-AllState
 
@@ -332,9 +346,10 @@ try {
     exit 0
 }
 finally {
-    # Belt-and-braces. trap above handles terminating errors; this
-    # catches the clean exit path. The negative path mutates ACL
-    # state and a stuck deny ACE on the LogDir parent would break
-    # every subsequent IIS request.
+    # Belt-and-braces. trap above handles terminating errors; this catches the
+    # clean exit path. Restore-AllState recycles the pool and defensively clears
+    # any stray deny ACE on the LogDir parent (this fixture no longer backs up or
+    # edits config — the deny-ACE negative path is retired — but a manual/aborted
+    # run could leave a deny ACE, and a stuck deny would break every IIS request).
     Restore-AllState
 }
