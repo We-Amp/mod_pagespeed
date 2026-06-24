@@ -232,18 +232,42 @@ function Stop-VmHard {
 # silently swallow the failure.
 trap { if (Get-Command Stop-VmHard -ErrorAction SilentlyContinue) { Stop-VmHard }; exit 1 }
 
+# Bounded TCP/22 reachability probe. Test-NetConnection's dead-host timeout is
+# slow + not controllable, so connect directly with an explicit short timeout.
+function Test-Tcp22 {
+    param([string]$Ip, [int]$TimeoutMs = 2000)
+    $client = New-Object System.Net.Sockets.TcpClient
+    try {
+        $iar = $client.BeginConnect($Ip, 22, $null, $null)
+        if (-not $iar.AsyncWaitHandle.WaitOne($TimeoutMs)) { return $false }
+        $client.EndConnect($iar); return $true
+    } catch { return $false } finally { $client.Close() }
+}
+
 function Get-GuestIp {
+    # Discover the guest's CURRENT IP by MAC from the host neighbor table, but
+    # only ever return an address that actually answers on TCP/22. After a host
+    # reboot the Hyper-V Default Switch re-randomizes its /20, so the neighbor
+    # table can carry STALE `Permanent` entries from a prior boot's lease whose
+    # IPs still fall inside the new /20. A plain `Select -First 1` would then hand
+    # back a DEAD address and Wait-Ssh would time out against a non-existent host
+    # (the v1.15.0+r14 el8/el9 smoke failure: host rebooted, switch moved to
+    # 192.0.2.0/24, two Permanent ARP entries per MAC, the stale one sorted
+    # first). Liveness-gating discovery is reboot-proof: try Reachable/Stale
+    # before Permanent, and only return an IP that responds on 22.
     param([string]$Mac, [int]$TimeoutSec = 180)
     $macFmt = ($Mac -replace '(..)','$1-').TrimEnd('-')
     $deadline = (Get-Date).AddSeconds($TimeoutSec)
     while ((Get-Date) -lt $deadline) {
-        $n = Get-NetNeighbor -InterfaceAlias '*Default*' -AddressFamily IPv4 -ErrorAction SilentlyContinue |
-             Where-Object { $_.LinkLayerAddress -eq $macFmt -and $_.IPAddress -ne '0.0.0.0' } |
-             Select-Object -First 1
-        if ($n) { return $n.IPAddress }
+        $cands = Get-NetNeighbor -InterfaceAlias '*Default*' -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+                 Where-Object { $_.LinkLayerAddress -eq $macFmt -and $_.IPAddress -ne '0.0.0.0' } |
+                 Sort-Object { switch ([string]$_.State) { 'Reachable' {0} 'Stale' {1} 'Permanent' {2} default {3} } }
+        foreach ($c in $cands) {
+            if (Test-Tcp22 -Ip $c.IPAddress) { return $c.IPAddress }
+        }
         Start-Sleep -Seconds 3
     }
-    throw "Timed out after ${TimeoutSec}s waiting for guest IP (MAC $macFmt) in host ARP table"
+    throw "Timed out after ${TimeoutSec}s waiting for a LIVE guest IP (MAC $macFmt, answering TCP/22) in host neighbor table"
 }
 
 function Wait-Ssh {

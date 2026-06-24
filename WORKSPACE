@@ -12,12 +12,22 @@ load("//bazel:nginx.bzl", "nginx_dependencies")
 
 nginx_dependencies()
 
-# googleurl — used by pagespeed/kernel/http for URL parsing.
-# Originally an Envoy dep, but referenced directly by core PageSpeed code.
+# googleurl — used by pagespeed/kernel/http for URL parsing (parses
+# attacker-controllable href/src/url()). Originally an Envoy dep, but
+# referenced directly by core PageSpeed code. Fully encapsulated behind the
+# GoogleUrl wrapper.
+# Snapshot e6c272102e (Aug 2025) - re-pinned from the stale undated Nov 2022
+# snapshot (dd4080fe) to pull in upstream Chromium URL-parser fixes and record
+# a dated snapshot. Source switched from the quiche-envoy-integration GCS
+# bucket (which only mirrors Envoy-pinned commits) to the canonical
+# github.com/google/gurl mirror that Envoy itself now uses.
+# This is the newest snapshot for which bazel/googleurl_visibility.patch still
+# applies cleanly (the Nov 2025 HEAD 94ff147 drifted; see openQuestions).
 http_archive(
     name = "com_googlesource_googleurl",
-    sha256 = "fc694942e8a7491dcc1dde1bddf48a31370a1f46fef862bc17acf07c34dc6325",
-    urls = ["https://storage.googleapis.com/quiche-envoy-integration/dd4080fec0b443296c0ed0036e1e776df8813aa7.tar.gz"],
+    sha256 = "9b998fea702bfcfa7d8e763389e56a1e889f718a11ada6b7c4e8c77b43d5a999",
+    strip_prefix = "gurl-e6c272102e0554e02c1bb317edff927ee56c7d0b",
+    urls = ["https://github.com/google/gurl/archive/e6c272102e0554e02c1bb317edff927ee56c7d0b.tar.gz"],
     patches = ["//bazel:googleurl_visibility.patch"],
     patch_args = ["-p1"],
     patch_cmds = [

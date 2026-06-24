@@ -19,7 +19,7 @@ here -- everything is portable.
 | `license_v2/` | V2 license file format and verification |
 | `sharedmem/` | Shared-memory abstractions: `InProcessSharedMem`, `SharedCircularBuffer`, `SharedMemStatistics`, `SharedMemLockManager` |
 | `thread/` | Threading primitives: `PthreadSharedMem`, `SchedulerThread`, `EventScheduler`, `EventDispatcher`, `QueuedWorkerPool` |
-| `util/` | Platform helpers, `NonceGenerator`, `CopyOnWrite`, `BrotliInflater`, `Gzip`, `ReEncoder` |
+| `util/` | Platform helpers, `NonceGenerator`, `CopyOnWrite`, `Gzip`, `ReEncoder` |
 
 ## Key Abstractions
 

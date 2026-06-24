@@ -89,16 +89,17 @@ cc_library(
     ],
 )
 
-# GIF codec - depends on giflib and PNG (GIF output uses PNG structures).
+# GIF codec - DECODE only. Depends on giflib's decoder (dgiflib) and PNG
+# (GIF output uses PNG structures). The product only decodes GIF; the giflib
+# encoder (egiflib) is NOT linked here — it is only reachable from gif_square,
+# which is test-only (see :gif_square_testonly below).
 cc_library(
     name = "gif",
     srcs = [
         "gif_reader.cc",
-        "gif_square.cc",
     ],
     hdrs = [
         "gif_reader.h",
-        "gif_square.h",
     ],
     visibility = ["//visibility:public"],
     deps = [
@@ -106,6 +107,22 @@ cc_library(
         ":png",
         "//pagespeed/kernel/base:pagespeed_base",
         "@giflib//:dgiflib",
+    ],
+)
+
+# GIF encoder helper - TEST ONLY. gif_square writes square GIFs via giflib's
+# encoder (egiflib) and is used solely by gif_reader_test to synthesize test
+# fixtures. Keeping it (and egiflib) out of the shipping :gif library means the
+# product never links the GIF encoder.
+cc_library(
+    name = "gif_square_testonly",
+    testonly = True,
+    srcs = ["gif_square.cc"],
+    hdrs = ["gif_square.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":image_base",
+        "//pagespeed/kernel/base:pagespeed_base",
         "@giflib//:egiflib",
     ],
 )
@@ -250,7 +267,6 @@ cc_library(
     hdrs = [
         "frame_interface_optimizer.h",
         "gif_reader.h",
-        "gif_square.h",
         "image_analysis.h",
         "image_converter.h",
         "image_frame_interface.h",

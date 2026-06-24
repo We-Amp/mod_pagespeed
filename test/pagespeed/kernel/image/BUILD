@@ -83,6 +83,9 @@ pagespeed_cc_test(
     deps = [
         ":image_test_base",
         "//pagespeed/kernel/image:gif",
+        # gif_reader_test synthesizes fixtures via gif_square (giflib encoder),
+        # which is test-only and no longer part of the shipping :gif library.
+        "//pagespeed/kernel/image:gif_square_testonly",
     ],
 )
 
@@ -173,5 +176,8 @@ pagespeed_cc_test(
     data = TEST_DATA,
     deps = [
         ":image_test_base",
+        # The glob sweeps in gif_reader_test.cc, which includes gif_square.h
+        # (the test-only giflib-encoder helper, no longer in the shipping :gif).
+        "//pagespeed/kernel/image:gif_square_testonly",
     ],
 )

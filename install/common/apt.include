@@ -14,14 +14,42 @@ apt_config_val() {
   fi
 }
 
-# TODO(oschaaf): The repository signing key should go here
+# We-Amp B.V. repository signing key (rsa4096, F50D6054F10712A0,
+# packages@we-amp.com). Mirrors https://packages.modpagespeed.com/pubkey.gpg,
+# the key that signs the .deb/.rpm repositories.
 install_key() {
   APT_KEY="`which apt-key 2> /dev/null`"
   if [ -x "$APT_KEY" ]; then
     "$APT_KEY" add - >/dev/null 2>&1 <<KEYDATA
 -----BEGIN PGP PUBLIC KEY BLOCK-----
------END PGP PUBLIC KEY BLOCK-----
------BEGIN PGP PUBLIC KEY BLOCK-----
+
+mQINBGoAQG4BEAC2qUQ7gQXT2AWTVRUYWSsru52OScSNuI10BHzFrHUnig23Swxd
+pE5AxKp/md22SAbOKZWL1dB3qXEizc8/r1QSiM3N77xZWgry0jF/ymQXOJkJBqPg
+hIFIXloIS1AkqOi02KHb+/FxB+ElPgJ2cT7xotuvCxhGvmocRTLmmF8q6SGTdIMt
+Epq5a1cBquQffgUngaScx41gw/i+gUT1R8kud6CbaEitt3kJJUSHx5yKHYzUFQW5
+3Mkn0W1jjx+q43gWDZ8mhPNAvGFcQvc09u8h37stsZvu6wSI5AcuXawLdfj2ziMD
+ivtLncJeYSf9m5IKOZKUQw3cx33kS/1tRgb5VQBVuNC+7KDZcQzcpdl9dl3EAzI8
+ktcFLEzERcXW6ABq5Yke1JJ3S8Nt4xk0nHWIRBk46ZjvnzOsq5GNSdPTuHJwaf+p
+WZUlwer1LnqlQC8tqPgVNi5yqFJuNXI08SGDn7FyR7pIfvdqYeuG8uywFWZZHCFO
+jLVrgGXxXRw1AcCfyrFrshAbx7TVz0MSd5MfdrixbKff7dYpHIv3Cn3S75sXyNo9
+17a8aYr9QzbBb3LrmaKdqAPMcjrBXPAAhsZ21hAj8OIXmygT8p54UrOO/UODdo2p
+xzkupKbttP5jWXLSQqenTviZh1gEnW1U070EmBNEUIiVZCBb6XVgUyarUQARAQAB
+tDNXZS1BbXAgQi5WLiAoUGFja2FnZSBTaWduaW5nKSA8cGFja2FnZXNAd2UtYW1w
+LmNvbT6JAnMEEwEIAF0WIQTfAOKWvpFBzqVBE0b1DWBU8QcSoAUCagBAbhsUgAAA
+AAAEAA5tYW51MiwyLjUrMS4xMiwwLDMCGwMFCQlmAYAFCwkIBwICIgIGFQoJCAsC
+BBYCAwECHgcCF4AACgkQ9Q1gVPEHEqB/7g/8Cid3bGoVbz0+chxZsa8GciULrt52
+A4wS3/p6LMIjxQ/CP3Okf/OTSs+/JVWwiBW8swSbZCEXmwx+HL64s3TtCBQYb/EW
+rMgIny3WxwwrXTSCxZrPQSHOcwUpWuPOSjBBao6ILISPjAuTKuFnTzA89IwR07/6
+mim/UTJUr2NcdbzZC6+rVgbAKapisilIuANlK86WEs4zeuvuGguSLUnRcLHWouXN
+FIoJC9JHI/qat2j635rw5ubYnes30L8xHqw0OLKa3x1E3gZ/MBI0tvNIykZMYsRe
+B0SkS2tOwqH+C10moDeAjHw2wVXaPPxKQtGmR1LVxB8odAQzicXBBLz0ITfNGkrO
+wbw1UjBSWkJY/vPvoZrKJkabXviE0RjBffKFllUCFKrSTC2QdJuiHRgK/LGcX8x4
+dpJREpIHqIYMzbIBXeB5YBsXV2Og3qHM9B3qmw8PQlrkmOs1MVahu6wsgRPcAwoM
+8mQ3Xt2pyzJ7+XLrcSSFk3vZl5it/MQSgl8n+HgUIgfWkkQpybkBZJbDYquwal1M
+FjiK9Txui7d4Q0N7CAtFEMW7L3aKI5g6K7wkKxDeFluxOiBb5SsurFU4HkDKC5Fo
+oElt5FSMDYsiPl/0VVPZWrKrdUAT2Tg6Lg+YBrWTT76y+hCej3cELodad17ombua
+cxoIAbLR55iBZGQ=
+=6pA8
 -----END PGP PUBLIC KEY BLOCK-----
 KEYDATA
   fi

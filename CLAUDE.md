@@ -166,7 +166,6 @@ Custom glog-compatible logging in `base/logging.h` (at repo root, not under page
 - Envoy HTTP proxy libraries, Protocol Buffers, gRPC
 - APR/APRUtil/Serf (Apache module only)
 - libjpeg-turbo, libpng, libwebp, giflib (image optimization)
-- Brotli (compression)
 - Cyclone Cache (high-performance disk cache, requires C++23)
 - Python 3 (DRP code generation), Node.js (Closure Compiler via npx)
 

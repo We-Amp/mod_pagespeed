@@ -365,8 +365,12 @@ TEST_F(CspMatchSourceTest, Path) {
   CheckMatch(false, "www.example.com/css/pretty.css", "http://whatever",
              "http://www.example.com/css/ugly.css");
 
-  // %-escapes are also supported.
-  CheckMatch(true, "www.example.com/%63ss/", "http://whatever",
+  // %-escapes are preserved verbatim (not decoded) per the WHATWG URL Standard:
+  // upstream googleurl removed the IE-era unreserved-decode (crbug.com/1509295).
+  // Two differently-encoded-but-equivalent paths therefore no longer collapse to
+  // a match. This is fail-closed for mod_pagespeed: a CSP-path non-match only
+  // causes it to decline rewriting the resource, never to over-authorize.
+  CheckMatch(false, "www.example.com/%63ss/", "http://whatever",
              "http://www.example.com/c%73s/pretty.css");
 
   // Paths are case sensitive.

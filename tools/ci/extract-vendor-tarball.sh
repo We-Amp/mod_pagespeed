@@ -101,13 +101,14 @@ FETCH_BACKOFF="${FETCH_BACKOFF:-3}"
 SSH_OPTS="${SSH_OPTS:--o StrictHostKeyChecking=accept-new -o BatchMode=yes}"
 
 if [ -z "${CI_HUB_HOST:-}" ]; then
-  # `exit` after the first line: cache-host resolves to MULTIPLE IPs on some
-  # runners (ci-pool sees both the live and a stale address -- cache-host has two
-  # interfaces). Without it `awk '{print $1}'` emits two newline-joined IPs, so
-  # the ssh/rsync host becomes "ip1\nip2" -> "hostname contains invalid
-  # characters" and EVERY cache-host fetch fails (observed: burst linux-build
-  # Extract tarball). Any one resolved IP reaches the host.
-  CI_HUB_HOST="$(getent hosts cache-host 2>/dev/null | awk '{print $1; exit}' || true)"
+  # cache-host can resolve to MULTIPLE A-records: a live address AND stale ones
+  # from old DHCP leases / extra interfaces (a dead 192.0.2.20 was seen on
+  # ci-pool, and on ci-builder 2026-06-23). The old idiom
+  # `awk '{print $1; exit}'` took the FIRST address and assumed any resolved IP
+  # reached the host -- false when a stale address sorts first, so the fetch died
+  # "No route to host". resolve-cache-host.sh probes TCP/22 and returns the
+  # first *reachable* address; the := keeps the known-good default as a net.
+  CI_HUB_HOST="$(bash "$(dirname "${BASH_SOURCE[0]}")/resolve-cache-host.sh")"
   : "${CI_HUB_HOST:=192.0.2.20}"
 fi
 

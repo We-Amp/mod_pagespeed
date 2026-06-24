@@ -9,12 +9,9 @@ cc_library(
     visibility = ["//visibility:public"],
 )
 
-# Brotli isn't used, and building is disabled for it
-# because the dep. build broke.
 cc_library(
     name = "util",
     srcs = [
-        "brotli_inflater.cc",
         "gflags.cc",
         "gzip_inflater.cc",
         "hashed_nonce_generator.cc",
@@ -34,7 +31,6 @@ cc_library(
         "url_to_filename_encoder.cc",
     ],
     hdrs = [
-        "brotli_inflater.h",
         "categorized_refcount.h",
         "copy_on_write.h",
         "gflags.h",
@@ -62,8 +58,6 @@ cc_library(
         "//pagespeed/kernel/html",
         "//pagespeed/kernel/http",
         "//pagespeed/kernel/thread",
-        "@brotli//:brotlidec",
-        "@brotli//:brotlienc",
         "@com_github_gflags_gflags//:gflags",
         "@zlib_ng//:zlib_ng",
     ],
