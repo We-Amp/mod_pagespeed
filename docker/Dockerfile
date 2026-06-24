@@ -44,7 +44,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # Required for some builds
     gperf \
     uuid-dev \
-    # Python 3 for drp registry_tables_generator.py and system tests
+    # Python 3 for libpsl psl-make-dafsa (PSL table generator) and system tests
     python3-pip \
     python3-distutils \
     # Java for closure compiler

@@ -73,6 +73,33 @@ build:linux --features=per_object_debug_info
 build:linux --action_env=BAZEL_LINKLIBS=-l%:libstdc++.a
 build:linux --action_env=BAZEL_LINKOPTS=-lm
 
+# --- Binary hardening ---------------------------------------
+# Opt-in config applied to RELEASE/shipped builds (NOT sanitizer builds — see
+# the FORTIFY=0 override on :sanitizer). The shipped artifacts are SHARED
+# OBJECTS (libmod_pagespeed.so, ngx_pagespeed_module.so): already -fPIC
+# (build:linux) and ET_DYN, so -pie/-fPIE do NOT apply to them. We add:
+#   - _FORTIFY_SOURCE=2  : fortified libc calls (needs optimization; pair w/ -c opt)
+#   - stack-protector-strong : stack canaries on at-risk frames
+#   - full RELRO + BIND_NOW  : GOT/PLT read-only, resolve at load (no lazy clobber)
+# Verified to land on the linked .so (readelf): GNU_RELRO segment, FLAGS_1 NOW,
+# __stack_chk_fail, and _FORTIFY_SOURCE _chk symbols. These four are what
+# tools/assert-binary-hardening.sh asserts on each shipped .so at release time.
+build:hardening --copt=-D_FORTIFY_SOURCE=2
+build:hardening --copt=-fstack-protector-strong
+build:hardening --linkopt=-Wl,-z,relro
+build:hardening --linkopt=-Wl,-z,now
+# Branch-protection is arch-specific and BEST-EFFORT: the compiler instruments
+# OUR code (x86-64 endbr / arm64 BTI landing pads + PAC), but the binary-level
+# CET/BTI *enforcement* GNU-property note is only set when EVERY statically
+# linked object (libstdc++.a, vendored C) is also branch-protection-compiled —
+# which they are not — so readelf will not show the note. arm64 PAC still
+# enforces intrinsically. Kept for the per-object hardening + forward-compat; the
+# release-time assertion does NOT hard-fail on the absent note. Compose per arch:
+#   x86-64 : --config=hardening --config=hardening-cet
+#   arm64  : --config=hardening --config=hardening-bti
+build:hardening-cet --copt=-fcf-protection=full
+build:hardening-bti --copt=-mbranch-protection=standard
+
 # We already have absl in the build, define absl=1 to tell googletest to use absl for backtrace.
 build --define absl=1
 
@@ -84,6 +111,11 @@ build:sanitizer --define tcmalloc=disabled
 build:sanitizer --linkopt -ldl
 build:sanitizer --build_tag_filters=-no_san
 build:sanitizer --test_tag_filters=-no_san
+# _FORTIFY_SOURCE requires optimization and conflicts with ASan/MSan interceptors
+# (false positives / build warnings). Force it OFF under every sanitizer so the
+# :hardening config (FORTIFY=2) can never compose badly with a sanitizer build.
+# This is the ONLY place FORTIFY is disabled; shipped builds get FORTIFY=2.
+build:sanitizer --copt=-D_FORTIFY_SOURCE=0
 
 # Common flags for Clang
 build:clang --action_env=BAZEL_COMPILER=clang
@@ -326,7 +358,7 @@ build:windows --dynamic_mode=off
 # Windows AddressSanitizer via clang-cl
 # Detects heap/stack buffer overflows, use-after-free, use-after-return.
 # Uses clang-cl (not MSVC cl.exe) because the codebase and its dependencies
-# (drp, abseil) rely on GCC/Clang extensions (__inline__, sanitizer headers)
+# (abseil, libpsl) rely on GCC/Clang extensions (__inline__, sanitizer headers)
 # that MSVC does not support. Use alongside --config=clang-cl.
 # Scope ASan instrumentation to project sources only — not external deps.
 # rules_foreign_cc (curl cmake) fails if ASan flags leak into CMake's

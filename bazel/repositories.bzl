@@ -5,7 +5,7 @@ load(":jsoncpp.bzl", "jsoncpp_build_rule")
 load(":libpng.bzl", "libpng_build_rule")
 load(":libwebp.bzl", "libwebp_build_rule")
 load(":google_sparsehash.bzl", "google_sparsehash_build_rule")
-load(":drp.bzl", "drp_build_rule")
+load(":libpsl.bzl", "libpsl_build_rule")
 load(":giflib.bzl", "giflib_build_rule")
 load(":optipng.bzl", "optipng_build_rule")
 load(":apr.bzl", "apr_build_rule")
@@ -50,8 +50,6 @@ FMT_SHA = "695fd197fa5aff8fc67b5f2bbc110490a875cdf7a41686ac8512fb480fa8ada7"
 SPDLOG_VERSION = "1.17.0"
 SPDLOG_SHA = "d8862955c6d74e5846b3f580b1605d2428b11d97a410d86e2fb13e857cd3a744"
 
-BROTLI_COMMIT = "028fb5a23661f123017c060daa546b55cf4bde29"  # v1.2.0 - Updated Jan 2026
-BROTLI_SHA = "0afe09a53c8bad9861c8dd1fc1284308d54f19d2979ba3541cfdcc9b05fe360f"
 HIREDIS_COMMIT = "1.3.0"  # Updated Jan 2026 - major version upgrade
 HIREDIS_SHA = "25cee4500f359cf5cad3b51ed62059aadfc0939b05150c1f19c7e2829123631c"
 JSONCPP_COMMIT = "1.9.6"  # Updated Jan 2026
@@ -64,8 +62,12 @@ GOOGLE_SPARSEHASH_COMMIT = "6ff8809259d2408cb48ae4fa694e80b15b151af3"
 GOOGLE_SPARSEHASH_SHA = "4ae105acb6b53f957b6005fa103a9fd342c39dbc7c87673663e782325b8296b3"
 GFLAGS_COMMIT = "de1b8d3daa40b5b07208ec9e82f223d430e2ecc1"  # v2.3.0 - Updated Jan 2026
 GFLAGS_SHA = "b563851a60342abc35281fa9c684de7e9604a2bf1982c85035180b9ce3afa774"
-DRP_COMMIT = "21a7a0f0513b7adad7889ee68edcff49601e4a3a"
-DRP_SHA = "9cc8b9a34a73d0e00ff404a4a75a5f386edd9f6d70a9afee5a76a2f41536fab1"
+# libpsl — maintained Public Suffix List library. Replaces the dead
+# Apache-incubator domain_registry_provider ("drp"); same Mozilla PSL dataset,
+# built builtin-only with no IDNA runtime. Release dist tarball (ships a
+# pre-generated include/libpsl.h; we still generate suffixes_dafsa.h + config.h).
+LIBPSL_VERSION = "0.21.5"
+LIBPSL_SHA = "1dcc9ceae8b128f3c0b3f654decd0e1e891afc6ff81098f227ef260449dae208"
 GIFLIB_COMMIT = "5.2.2"  # Updated Jan 2026
 GIFLIB_SHA = "be7ffbd057cadebe2aa144542fd90c6838c6a083b5e8a9048b8ee3b66b29d5fb"
 OPTIPNG_COMMIT = "0.7.8"  # Updated Jan 2026 - security fix for GIF decoder buffer overflow (CVE)
@@ -268,15 +270,6 @@ cc_library(
     )
 
     http_archive(
-        name = "brotli",
-        strip_prefix = "brotli-%s" % BROTLI_COMMIT,
-        url = "https://github.com/google/brotli/archive/%s.tar.gz" % BROTLI_COMMIT,
-        sha256 = BROTLI_SHA,
-        patch_args = ["-p1"],
-        patches = ["@mod_pagespeed//external:brotli.patch"],
-    )
-
-    http_archive(
         name = "hiredis",
         strip_prefix = "hiredis-%s" % HIREDIS_COMMIT,
         url = "https://github.com/redis/hiredis/archive/v%s.tar.gz" % HIREDIS_COMMIT,
@@ -328,13 +321,11 @@ cc_library(
     )
 
     http_archive(
-        name = "drp",
-        url = "https://github.com/apache/incubator-pagespeed-drp/archive/%s.tar.gz" % DRP_COMMIT,
-        build_file_content = drp_build_rule,
-        strip_prefix = "incubator-pagespeed-drp-%s" % DRP_COMMIT,
-        sha256 = DRP_SHA,
-        patches = ["@mod_pagespeed//bazel:drp_python3.patch"],
-        patch_args = ["-p1"],
+        name = "libpsl",
+        url = "https://github.com/rockdaboot/libpsl/releases/download/%s/libpsl-%s.tar.gz" % (LIBPSL_VERSION, LIBPSL_VERSION),
+        build_file_content = libpsl_build_rule,
+        strip_prefix = "libpsl-%s" % LIBPSL_VERSION,
+        sha256 = LIBPSL_SHA,
     )
 
     http_archive(

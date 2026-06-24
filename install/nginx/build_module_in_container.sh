@@ -1054,7 +1054,7 @@ while IFS= read -r d; do
   [ -d "${abs}" ] && CC_OPT="${CC_OPT} -I${abs}"
 done < "${WORK}/incdirs_raw.txt"
 # Source-tree includes the config also adds.
-CC_OPT="${CC_OPT} -I${SRCDIR} -I${SRCDIR}/third_party/css_parser/src -I${SRCDIR}/third_party/domain_registry_provider/src"
+CC_OPT="${CC_OPT} -I${SRCDIR} -I${SRCDIR}/third_party/css_parser/src"
 # nginx's module Makefile uses -Werror; the glue trips override/unused-set
 # warnings the Bazel build silenced. -Wno-error keeps make from failing on them.
 CC_OPT="${CC_OPT} -Wno-error -std=c++17"

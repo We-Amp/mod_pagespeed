@@ -398,6 +398,54 @@ TEST_F(RateControllingUrlAsyncFetcherTest,
   STLDeleteContainerPointers(fetch_vector.begin(), fetch_vector.end());
 }
 
+TEST_F(RateControllingUrlAsyncFetcherTest, ShutdownDrainsDeepQueueIteratively) {
+  // Regression test for unbounded recursion in RateController::CustomFetch.
+  //
+  // On shutdown, a completing fetch drains the per-host queue by creating a
+  // wrapper for the next queued fetch and calling Done(false) on it
+  // synchronously. Done() dispatches straight to HandleDone(), which pops and
+  // Done()s the *next* queued fetch, and so on -- one C++ stack frame per
+  // queued fetch. With the default config a single slow host can queue
+  // ~2000 fetches (500 * requests_per_host), so a shutdown under load could
+  // recurse deep enough to overflow the worker-thread stack and crash the
+  // process. This test queues a far deeper backlog than any stack can hold
+  // recursively and requires the drain to complete.
+  const int kOutgoing = 2;
+  const int kQueueDepth = 100000;
+
+  // max_global_queue_size must be >= per-host queued threshold; size both to
+  // hold the entire backlog so nothing is load-shed.
+  RateControllingUrlAsyncFetcher deep_fetcher(
+      counting_fetcher_.get(), kQueueDepth + kOutgoing, kOutgoing, kQueueDepth,
+      thread_system_.get(), &stats_);
+
+  std::vector<std::unique_ptr<MockFetch>> fetches;
+  fetches.reserve(kQueueDepth + kOutgoing);
+  for (int i = 0; i < kQueueDepth + kOutgoing; ++i) {
+    fetches.push_back(std::make_unique<MockFetch>(
+        RequestContext::NewTestRequestContext(thread_system_.get()),
+        /*is_background_fetch=*/true));
+    deep_fetcher.Fetch(domain1_url1_, &handler_, fetches.back().get());
+  }
+
+  // kOutgoing fetches are in flight; the remainder are queued for the host.
+  EXPECT_EQ(kQueueDepth, global_fetch_queue_size());
+
+  // Shut down, then complete the in-flight fetches. Completing the first one
+  // triggers the shutdown drain of the entire per-host queue. Pre-fix this
+  // recurses kQueueDepth deep and overflows the stack; post-fix it drains
+  // iteratively without growing the stack.
+  deep_fetcher.ShutDown();
+  wait_fetcher_->CallCallbacks();
+
+  // Every fetch is accounted for: the queued ones were dropped on shutdown,
+  // the in-flight ones completed, and the global queue is fully drained.
+  for (const auto& fetch : fetches) {
+    EXPECT_TRUE(fetch->done());
+  }
+  EXPECT_EQ(0, global_fetch_queue_size());
+}
+
 }  // namespace
 
 }  // namespace net_instaweb

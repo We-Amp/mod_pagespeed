@@ -182,26 +182,50 @@ class RateController::CustomFetch : public SharedAsyncFetch {
     // outstanding fetches for the host is less than the threshold.
     DeferredFetch* deferred_fetch =
         fetch_info_->PopNextFetchAndIncrementCountIfWithinThreshold();
-    if (deferred_fetch != nullptr) {
+    if (deferred_fetch == nullptr) {
+      controller_->DeleteFetchInfoIfPossible(fetch_info_);
+      delete this;
+      return;
+    }
+
+    if (!controller_->is_shut_down()) {
+      // Normal path: trigger the single dequeued fetch through the base
+      // fetcher. Its eventual completion drives the next dequeue, so the queue
+      // drains one fetch per completion rather than recursively from here.
       DCHECK_GT(controller_->current_global_fetch_queue_size_->Get(), 0);
       controller_->current_global_fetch_queue_size_->Add(-1);
-      // Trigger a fetch for the queued up request.
       CustomFetch* wrapper_fetch =
           new CustomFetch(fetch_info_, deferred_fetch->fetch, controller_);
-
-      if (controller_->is_shut_down()) {
-        deferred_fetch->handler->Message(
-            kWarning, "RateController: drop deferred fetch of %s on shutdown",
-            deferred_fetch->url.c_str());
-        wrapper_fetch->Done(false);
-      } else {
-        deferred_fetch->fetcher->Fetch(deferred_fetch->url,
-                                       deferred_fetch->handler, wrapper_fetch);
-      }
+      deferred_fetch->fetcher->Fetch(deferred_fetch->url,
+                                     deferred_fetch->handler, wrapper_fetch);
       delete deferred_fetch;
-    } else {
-      controller_->DeleteFetchInfoIfPossible(fetch_info_);
+      delete this;
+      return;
     }
+
+    // Shutdown path: drop every fetch queued for this host. Previously each
+    // dropped fetch was wrapped in a CustomFetch whose Done(false) re-entered
+    // HandleDone, recursing once per queued fetch -- a single host can queue
+    // ~2000 fetches by default (500 * requests_per_host), so a shutdown under
+    // load could overflow the stack and crash. Drain iteratively here instead
+    // so the stack stays flat regardless of queue depth. Failing the deferred
+    // fetch directly is equivalent to the wrapper's
+    // SharedAsyncFetch::HandleDone(false), which just forwards Done(false) to
+    // the same fetch.
+    while (deferred_fetch != nullptr) {
+      DCHECK_GT(controller_->current_global_fetch_queue_size_->Get(), 0);
+      controller_->current_global_fetch_queue_size_->Add(-1);
+      deferred_fetch->handler->Message(
+          kWarning, "RateController: drop deferred fetch of %s on shutdown",
+          deferred_fetch->url.c_str());
+      deferred_fetch->fetch->Done(false);
+      // Release the outbound slot that PopNext... reserved for this fetch.
+      fetch_info_->decrement_num_outbound_fetches();
+      delete deferred_fetch;
+      deferred_fetch =
+          fetch_info_->PopNextFetchAndIncrementCountIfWithinThreshold();
+    }
+    controller_->DeleteFetchInfoIfPossible(fetch_info_);
     delete this;
   }
 

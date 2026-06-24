@@ -23,9 +23,9 @@
 // <img src="//images.example.com/cat.jpg"> and images.example.com is authorized
 // for rewriting in the config, then it needs to fetch cat.jpg from
 // images.example.com and optimize it.  In apache (always) and nginx (by
-// default) we use a fetcher called "serf".  This works fine, but it does run
-// its own event loop.  To be more efficient, this is a "native" fetcher that
-// uses nginx's event loop.
+// default) we use a libcurl-based fetcher (CurlUrlAsyncFetcher).  This works
+// fine, but it runs its own event loop.  To be more efficient, this is a
+// "native" fetcher that uses nginx's event loop.
 //
 // The fetch is started by the main thread. It will fetch the remote resource
 // from the specific url asynchronously.

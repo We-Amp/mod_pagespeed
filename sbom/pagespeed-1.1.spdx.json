@@ -3,9 +3,9 @@
   "dataLicense": "CC0-1.0",
   "SPDXID": "SPDXRef-DOCUMENT",
   "name": "pagespeed-1.1",
-  "documentNamespace": "https://spdx.org/spdxdocs/pagespeed-1.1-2026-06-03T06:31:21Z",
+  "documentNamespace": "https://spdx.org/spdxdocs/pagespeed-1.1-2026-06-24T12:48:58Z",
   "creationInfo": {
-    "created": "2026-06-03T06:31:21Z",
+    "created": "2026-06-24T12:48:58Z",
     "creators": [
       "Tool: generate-sbom.py-1.0",
       "Organization: We-Amp B.V."
@@ -188,24 +188,6 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-Package-brotli",
-      "name": "brotli",
-      "versionInfo": "028fb5a23661f123017c060daa546b55cf4bde29",
-      "supplier": "Organization: Google Inc.",
-      "downloadLocation": "https://github.com/google/brotli",
-      "filesAnalyzed": false,
-      "licenseConcluded": "MIT",
-      "licenseDeclared": "MIT",
-      "copyrightText": "Copyright Google Inc.",
-      "externalRefs": [
-        {
-          "referenceCategory": "PACKAGE-MANAGER",
-          "referenceType": "purl",
-          "referenceLocator": "pkg:github/google/brotli@v1.2.0"
-        }
-      ]
-    },
-    {
       "SPDXID": "SPDXRef-Package-hiredis",
       "name": "hiredis",
       "versionInfo": "1.3.0",
@@ -314,20 +296,20 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-Package-drp",
-      "name": "drp",
-      "versionInfo": "21a7a0f0513b7adad7889ee68edcff49601e4a3a",
-      "supplier": "Organization: The Apache Software Foundation",
-      "downloadLocation": "https://github.com/apache/incubator-pagespeed-drp",
+      "SPDXID": "SPDXRef-Package-libpsl",
+      "name": "libpsl",
+      "versionInfo": "0.21.5",
+      "supplier": "Organization: Tim Ruehsen and contributors",
+      "downloadLocation": "https://github.com/rockdaboot/libpsl",
       "filesAnalyzed": false,
-      "licenseConcluded": "Apache-2.0",
-      "licenseDeclared": "Apache-2.0",
-      "copyrightText": "Copyright The Apache Software Foundation",
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "copyrightText": "Copyright Tim Ruehsen and contributors",
       "externalRefs": [
         {
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
-          "referenceLocator": "pkg:github/apache/incubator-pagespeed-drp@21a7a0f0513b7adad7889ee68edcff49601e4a3a"
+          "referenceLocator": "pkg:github/rockdaboot/libpsl@0.21.5"
         }
       ]
     },
@@ -584,11 +566,6 @@
     {
       "spdxElementId": "SPDXRef-Package-pagespeed-1.1",
       "relationshipType": "DEPENDS_ON",
-      "relatedSpdxElement": "SPDXRef-Package-brotli"
-    },
-    {
-      "spdxElementId": "SPDXRef-Package-pagespeed-1.1",
-      "relationshipType": "DEPENDS_ON",
       "relatedSpdxElement": "SPDXRef-Package-hiredis"
     },
     {
@@ -619,7 +596,7 @@
     {
       "spdxElementId": "SPDXRef-Package-pagespeed-1.1",
       "relationshipType": "DEPENDS_ON",
-      "relatedSpdxElement": "SPDXRef-Package-drp"
+      "relatedSpdxElement": "SPDXRef-Package-libpsl"
     },
     {
       "spdxElementId": "SPDXRef-Package-pagespeed-1.1",

@@ -91,10 +91,6 @@ deps:
     cpe: "cpe:2.3:a:envoyproxy:envoy"          # NVD: 95 CVEs
     release_date: "2026-04-10"                  # commit 5afe27fb == v1.37.2 tag; commit committer.date + tag both 2026-04-10. (The "2026-03-10" in repositories.bzl is the CVE-2026-26308/09/10/11/30 cluster *publish* date, NOT the release; v1.37.2 fixes that cluster — those 5 CVEs affect <=1.37.0, fixed in 1.37.1.)
 
-  brotli:
-    cpe: "cpe:2.3:a:google:brotli"             # NVD: 1 CVE
-    release_date: "2025-10-27"                  # commit 028fb5a == v1.2.0 tag — GitHub release published 2025-10-27 (earlier than the "Jan 2026" bzl bump comment, which is when WE bumped, not when upstream shipped)
-
   hiredis:
     cpe: "cpe:2.3:a:redislabs:hiredis"         # NVD: 1 CVE
     release_date: "2025-04-23"                  # v1.3.0 — GitHub release published 2025-04-23
@@ -121,10 +117,10 @@ deps:
     justification: "gflags has no NVD CPE; command-line flag parsing lib, no public CVEs"
     release_date: "2018-11-11"                  # v2.3.0 (de1b8d3)
 
-  drp:
+  libpsl:
     cpe: "N/A"
-    justification: "apache/incubator-pagespeed-drp (domain registry provider data) has no NVD CPE"
-    release_date: "2017-01-01"                  # 21a7a0f (long-frozen pin)
+    justification: "rockdaboot/libpsl (Public Suffix List parser) has no NVD CPE; replaced the dead apache/incubator-pagespeed-drp (SEC drp->libpsl)"
+    release_date: "2024-01-13"                  # 0.21.5 release (GitHub release date)
 
   giflib:
     cpe: "cpe:2.3:a:giflib_project:giflib"     # NVD: 14 CVEs

@@ -85,7 +85,6 @@ NGX_PAGESPEED_INCS="
     $ngx_addon_dir
     $MOD_PAGESPEED_DIR
     $MOD_PAGESPEED_DIR/third_party/css_parser/src
-    $MOD_PAGESPEED_DIR/third_party/domain_registry_provider/src
 "
 
 # Header include directories for the PageSpeed dependency graph.

@@ -610,7 +610,7 @@ class SystemCachesMemCacheTest : public SystemCachesExternalCacheTestBase {
 
   ExternalClusterSpec ServerSpec() {
     if (cluster_spec_.empty()) {
-      // This matches the logic in apr_mem_cache_test.
+      // This matches the logic in memcached_cache_test.
       const char* port_string = getenv("MEMCACHED_PORT");
       int port;
       if (port_string == nullptr || !StringToInt(port_string, &port)) {
@@ -800,7 +800,7 @@ class SystemCachesRedisCacheTest : public SystemCachesExternalCacheTestBase {
   // the base class.
   ExternalServerSpec ServerSpec() {
     if (server_spec_.empty()) {
-      // This matches the logic in apr_mem_cache_test.
+      // This matches the logic in memcached_cache_test.
       const char* port_string = getenv("REDIS_PORT");
       int port;
       if (port_string == nullptr || !StringToInt(port_string, &port)) {

@@ -3,7 +3,6 @@ aprutil_build_rule = """
 cc_library(
     name = "aprutil",
     srcs = [
-        "@mod_pagespeed//third_party/aprutil:aprutil_pagespeed_memcache_c",
         'buckets/apr_brigade.c',
         'buckets/apr_buckets.c',
         'buckets/apr_buckets_alloc.c',
@@ -30,7 +29,8 @@ cc_library(
         'hooks/apr_hooks.c',
         #'ldap/apr_ldap_stub.c',
         #'ldap/apr_ldap_url.c',
-        'memcache/apr_memcache.c',
+        # memcache/apr_memcache.c removed: mod_pagespeed's memcached path uses
+        # libmemcached (//pagespeed/system MemcachedCache), not apr-util memcache.
         'misc/apr_date.c',
         'misc/apr_queue.c',
         'misc/apr_reslist.c',
@@ -71,7 +71,6 @@ cc_library(
         "include/apr_hooks.h",
         "include/apr_date.h",
         "include/apr_reslist.h",
-        "include/apr_memcache.h",
         "include/apr_uuid.h",
         "include/apr_base64.h",
         "include/apr_sha1.h",

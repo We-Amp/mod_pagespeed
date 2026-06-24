@@ -181,20 +181,6 @@ pagespeed_cc_test(
     ],
 )
 
-# Single-server AprMemCache tests (distinct from memcached_cache_test).  Was
-# orphaned.  Uses the TCP test helpers + ExternalServerSpec; self-skips via
-# InitMemcachedOrSkip() when $MEMCACHED_PORT is unset (see
-# install/run_program_with_memcached.sh).
-pagespeed_cc_test(
-    name = "apr_mem_cache_single_server_test",
-    srcs = ["apr_mem_cache_test.cc"],
-    shard_count = 1,
-    target_compatible_with = ["@platforms//os:linux"],
-    deps = [
-        "//test/pagespeed/system:test_base",
-    ],
-)
-
 # System core tests - tests that don't require Redis/Memcached
 pagespeed_cc_test(
     name = "system_core_test",

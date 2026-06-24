@@ -11,9 +11,6 @@
     /* Apache API symbols */
     ap_*;
 
-    /* Serf HTTP client */
-    serf_*;
-
     /* gRPC RTTI/vtable symbols needed by the controller's RPC layer.
        typeinfo/typestring must remain global for C++ RTTI to work
        correctly within the shared library. */

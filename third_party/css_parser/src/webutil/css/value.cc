@@ -19,6 +19,9 @@
 
 #include "third_party/css_parser/src/webutil/css/value.h"
 
+#include <cmath>
+#include <limits>
+
 #include "base/logging.h"
 #include "third_party/css_parser/src/strings/memutil.h"
 #include "third_party/css_parser/src/util/gtl/stl_util.h"
@@ -295,6 +298,20 @@ Value::Unit Value::GetDimension() const {
 
 int Value::GetIntegerValue() const {
   DCHECK_EQ(type_, NUMBER);
+  // Saturate the double->int conversion. Converting a double that is NaN or
+  // outside int's representable range is undefined behaviour (UBSan
+  // float-cast-overflow). Untrusted author CSS can reach here with such a value
+  // — e.g. rgb(99999999999,0,0) flows num_=1e11 into ValueToRGB. For any
+  // in-range, non-NaN value this is identical to the original cast.
+  if (std::isnan(num_)) {
+    return 0;
+  }
+  if (num_ >= static_cast<double>(std::numeric_limits<int>::max())) {
+    return std::numeric_limits<int>::max();
+  }
+  if (num_ <= static_cast<double>(std::numeric_limits<int>::min())) {
+    return std::numeric_limits<int>::min();
+  }
   return static_cast<int>(num_);
 }
 

@@ -9,7 +9,6 @@
 namespace net_instaweb {
 
 class AbstractSharedMem;
-class AprMemCache;
 class AsyncCache;
 class CacheInterface;
 class AbstractSharedMem;

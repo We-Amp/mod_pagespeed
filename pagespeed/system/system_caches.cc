@@ -92,8 +92,8 @@ void SystemCaches::ShutDown(MessageHandler* message_handler) {
   // shutdown and wait for it instead of simple calling ShutDown().
   //
   // In case of memcached it can possibly require kill -9 to restart Apache if
-  // memcached is permanently hung. In pracice, the patches made in
-  // src/third_party/aprutil/apr_memcache2.c make that very unlikely.
+  // memcached is permanently hung. In practice, the libmemcached-backed
+  // MemcachedCache I/O timeouts make that very unlikely.
   //
   // The alternative scenario of exiting with pending I/O will often
   // crash and always leak memory. Note that if memcached crashes, as

@@ -78,12 +78,16 @@ Files: src/third_party/closure_library/*
 Copyright: 2006-2013 The Closure Library Authors
 License: Apache-2.0
 
-Files: src/third_party/domain_registry_provider/*
-Copyright: 2011 Google Inc.
-License: Apache-2.0
+Files: external/libpsl/* (https://github.com/rockdaboot/libpsl)
+Copyright: 2014-2024 Tim Ruehsen and the libpsl contributors
+License: MIT
 
-Files: src/third_party/domain_registry_provider/src/third_party/effective_tld_names/*
-Copyright: 2007–16 Mozilla Foundation
+Files: external/libpsl/src/psl-make-dafsa, external/libpsl/src/lookup_string_in_fixed_set.c
+Copyright: 2014 The Chromium Authors
+License: BSD-3-Clause
+
+Files: external/libpsl/list/public_suffix_list.dat (Mozilla Public Suffix List)
+Copyright: Mozilla Foundation and contributors
 License: MPL-2.0
 
 Files: src/third_party/google-sparsehash/*

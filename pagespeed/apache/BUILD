@@ -20,25 +20,21 @@ filegroup(
     visibility = ["//visibility:public"],
 )
 
-# APR-dependent components: APR memcached client,
-# APR initialization utilities, and thread-compatible pool.
+# APR initialization utilities and thread-compatible pool.
+# (The APR memcached client lived here but was removed once the live
+# memcached path moved to libmemcached via //pagespeed/system MemcachedCache;
+# these remaining components use only @apr core, not @aprutil.)
 cc_library(
     name = "apache_apr",
     srcs = [
         "apr_init.cc",
-        "apr_mem_cache.cc",
         "apr_thread_compatible_pool.cc",
     ],
     hdrs = [
         "apr_init.h",
-        "apr_mem_cache.h",
         "apr_thread_compatible_pool.h",
     ],
     copts = [
-        "-Iexternal/aprutil/include/",
-        "-Iexternal/aprutil/include/arch/unix/",
-        "-Iexternal/aprutil/",
-        "-Ithird_party/aprutil/gen/arch/linux/x64/include/",
         "-Ithird_party/apr/gen/arch/linux/x64/include/",
         "-Iexternal/apr/include/",
         "-Iexternal/apr/include/arch/unix/",
@@ -48,7 +44,6 @@ cc_library(
     deps = [
         "//pagespeed/system:system_apache",
         "@apr",
-        "@aprutil",
     ],
 )
 
@@ -112,6 +107,10 @@ cc_library(
         "//pagespeed/kernel/thread:libevent_dispatcher",
         "//pagespeed/system:system_apache",
         "//pagespeed/system:curl_fetcher",
+        # @aprutil supplies the bucket-brigade glue (apr_brigade_create in
+        # instaweb_context.cc) and the httpd util_filter API; it is no longer
+        # for memcached. Declared here because apache_apr no longer pulls it.
+        "@aprutil",
     ],
 )
 
