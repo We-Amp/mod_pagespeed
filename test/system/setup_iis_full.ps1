@@ -393,19 +393,21 @@ function Install-IISComponents {
 function New-IISSite {
     Write-Status "Configuring IIS site..."
 
-    # Delete existing site if present
-    $existingSite = Invoke-AppCmd list site $SiteName 2>$null
-    if ($existingSite) {
-        Write-Status "Removing existing site: $SiteName" "Gray"
-        Invoke-AppCmd delete site $SiteName | Out-Null
-    }
+    # Idempotent clean slate: unconditionally delete any pre-existing site and
+    # app pool before recreating them, so each run starts from a known-clean
+    # site definition. `appcmd add site` is a no-op when the site already
+    # exists, so without a delete first an orphaned binding from a prior run
+    # (classically an https/*:$HttpsPort binding left behind by an interrupted
+    # New-HttpsBinding) would be reused and intermittently block site start.
+    # `appcmd delete` just emits a (swallowed) "not found" error when the object
+    # is absent, so this is safe on a cold first run too. Delete unconditionally
+    # rather than list-then-delete: Invoke-AppCmd merges appcmd's "not found"
+    # stderr into its output (2>&1), so a list-based guard is unreliable anyway.
+    Write-Status "Removing any pre-existing site: $SiteName" "Gray"
+    Invoke-AppCmd delete site $SiteName | Out-Null
 
-    # Delete existing app pool if present
-    $existingPool = Invoke-AppCmd list apppool $AppPoolName 2>$null
-    if ($existingPool) {
-        Write-Status "Removing existing app pool: $AppPoolName" "Gray"
-        Invoke-AppCmd delete apppool $AppPoolName | Out-Null
-    }
+    Write-Status "Removing any pre-existing app pool: $AppPoolName" "Gray"
+    Invoke-AppCmd delete apppool $AppPoolName | Out-Null
 
     # Create app pool with no managed code (for native module only)
     Write-Status "Creating application pool: $AppPoolName" "Gray"
@@ -429,14 +431,23 @@ function New-IISSite {
     # Assign app pool to site
     Invoke-AppCmd set site $SiteName /applicationDefaults.applicationPool:$AppPoolName | Out-Null
 
-    # Configure MIME types for modern formats
+    # Configure MIME types for modern formats. Delete any inherited/duplicate
+    # mapping FIRST, then re-add ours. IIS10 ships a .woff2 default
+    # (application/font-woff2) in APPHOST, so a bare /+ add throws the noisy
+    # "Cannot add duplicate collection entry" error and leaves a
+    # non-deterministic mimeType. The /- delete is a swallowed no-op when the
+    # extension is absent, so this is idempotent on a clean site too and yields
+    # a deterministic mimeType with no duplicate-entry noise.
     Write-Status "Configuring MIME types..." "Gray"
-    try {
-        Invoke-AppCmd set config $SiteName /section:staticContent /+"[fileExtension='.webp',mimeType='image/webp']" 2>$null
-    } catch { }
-    try {
-        Invoke-AppCmd set config $SiteName /section:staticContent /+"[fileExtension='.woff2',mimeType='font/woff2']" 2>$null
-    } catch { }
+    foreach ($mime in @(
+        @{ Ext = '.webp';  Type = 'image/webp' },
+        @{ Ext = '.woff2'; Type = 'font/woff2' }
+    )) {
+        $delArg = "/-[fileExtension='" + $mime.Ext + "']"
+        $addArg = "/+[fileExtension='" + $mime.Ext + "',mimeType='" + $mime.Type + "']"
+        Invoke-AppCmd set config $SiteName /section:staticContent $delArg | Out-Null
+        Invoke-AppCmd set config $SiteName /section:staticContent $addArg | Out-Null
+    }
 
     # Enable static and dynamic compression for the site
     Write-Status "Configuring compression..." "Gray"
@@ -540,12 +551,33 @@ function New-HttpsBinding {
     # redirection (not a pipe to Out-Null) so $LASTEXITCODE reflects netsh --
     # piping a native command to a cmdlet leaves $LASTEXITCODE stale (PS #19848).
     $appId = "{4dc3e181-e14b-4a21-b022-59fc669b0914}"
-    & netsh http delete sslcert ipport=0.0.0.0:$HttpsPort > $null 2>&1
-    $sslAddOut = & netsh http add sslcert ipport=0.0.0.0:$HttpsPort certhash=$thumb appid=$appId certstorename=MY 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        Write-Status "WARNING: netsh add sslcert failed (exit $LASTEXITCODE) for 0.0.0.0:$HttpsPort -- $sslAddOut" "Yellow"
-    } else {
+    # Retry the sslcert bind: this is the actual flake source. On a shared CI
+    # runner the 0.0.0.0:$HttpsPort registration is contended (concurrent jobs /
+    # a racing delete+add), so a single attempt fails intermittently -- and a
+    # certless https binding then makes `appcmd start site` fail. Retrying
+    # absorbs the transient case; deleting any stale registration before each
+    # add keeps it idempotent. (Redirect, don't pipe, to keep $LASTEXITCODE --
+    # PS #19848.)
+    $sslBound = $false
+    $sslAddOut = ""
+    for ($sslAttempt = 1; $sslAttempt -le 3; $sslAttempt++) {
+        & netsh http delete sslcert ipport=0.0.0.0:$HttpsPort > $null 2>&1
+        $sslAddOut = & netsh http add sslcert ipport=0.0.0.0:$HttpsPort certhash=$thumb appid=$appId certstorename=MY 2>&1
+        if ($LASTEXITCODE -eq 0) { $sslBound = $true; break }
+        Write-Status "WARNING: netsh add sslcert attempt $sslAttempt/3 failed (exit $LASTEXITCODE) for 0.0.0.0:$HttpsPort -- $sslAddOut" "Yellow"
+        Start-Sleep -Seconds 2
+    }
+    if ($sslBound) {
         Write-Status "Bound certificate $thumb to 0.0.0.0:$HttpsPort" "Green"
+    } else {
+        # Persistent failure (not transient): the https/*:$HttpsPort binding
+        # would be certless and block site start. Fail HERE with the true root
+        # cause rather than letting Start-IISSite report it as a downstream
+        # symptom. The tests need HTTPS (run_iis_tests.ps1 sets
+        # PAGESPEED_HTTPS_PORT under -UseFullIIS), so do NOT silently drop it.
+        throw ("netsh add sslcert failed after 3 attempts for 0.0.0.0:$HttpsPort " +
+               "(last: $sslAddOut). The https/*:$HttpsPort binding would be certless " +
+               "and block site start -- aborting at the root cause.")
     }
 }
 
@@ -734,15 +766,57 @@ function Start-IISSite {
     Start-Service WAS -ErrorAction SilentlyContinue
     Start-Service W3SVC -ErrorAction SilentlyContinue
 
-    # Start app pool
-    try {
-        Invoke-AppCmd start apppool $AppPoolName | Out-Null
-    } catch { }
+    # Start app pool. Capture the output (Invoke-AppCmd already merges appcmd's
+    # stderr into its output) so we can surface it if the start fails.
+    $poolStartOut = Invoke-AppCmd start apppool $AppPoolName
 
-    # Start site
-    try {
-        Invoke-AppCmd start site $SiteName | Out-Null
-    } catch { }
+    # Start the site, WITH RETRY. `appcmd start site` intermittently fails with
+    # hresult 0x80070020 (ERROR_SHARING_VIOLATION -- "the process cannot access
+    # the file because it is being used by another process") when a port in the
+    # site bindings (http/*:$Port or https/*:$HttpsPort) is still held by a
+    # draining w3wp / a not-yet-released HTTP.sys reservation from a prior run on
+    # the same runner. That hold is TRANSIENT -- the port frees as the prior
+    # worker exits -- so retry with backoff rather than failing on the first
+    # attempt. Assert state:Started via `appcmd list site` (same idiom as
+    # Get-ServerStatus -- no WebAdministration dependency) before the readiness
+    # loop; otherwise a Stopped site sends us into the 180s readiness loop
+    # polling a port that never binds, then reports a useless "Cannot connect".
+    $maxStartAttempts = 6
+    $siteState = $null
+    $siteStartOut = ""
+    for ($startAttempt = 1; $startAttempt -le $maxStartAttempts; $startAttempt++) {
+        $siteStartOut = Invoke-AppCmd start site $SiteName
+        $siteList = Invoke-AppCmd list site $SiteName
+        $siteState = $null
+        if ("$siteList" -match "state:(\w+)") { $siteState = $matches[1] }
+        if ($siteState -eq "Started") { break }
+        Write-Status ("start site attempt $startAttempt/${maxStartAttempts}: state=$siteState " +
+                      "(appcmd: $siteStartOut) -- likely a transient port/resource conflict, retrying in 3s") "Yellow"
+        Start-Sleep -Seconds 3
+    }
+    if ($siteState -ne "Started") {
+        Write-Status "Site '$SiteName' failed to reach Started after $maxStartAttempts attempts (state: $siteState)" "Red"
+        Write-Status "  appcmd start apppool output: $poolStartOut" "Red"
+        Write-Status "  appcmd start site output: $siteStartOut" "Red"
+        $siteBindings = (Invoke-AppCmd list site $SiteName /text:bindings) -join ' '
+        Write-Status "  current bindings: $siteBindings" "Red"
+        # Identify what holds the bound ports so a persistent (non-transient)
+        # conflict is diagnosable from the CI log alone. ($pid is a PowerShell
+        # automatic variable -- use $opid for the owning process id.)
+        foreach ($p in @($Port, $HttpsPort)) {
+            $holders = Get-NetTCPConnection -LocalPort $p -ErrorAction SilentlyContinue | ForEach-Object {
+                $opid = $_.OwningProcess
+                $pname = (Get-Process -Id $opid -ErrorAction SilentlyContinue).Name
+                "PID $opid ($pname) state=$($_.State)"
+            }
+            if ($holders) { Write-Status ("  port ${p} held by: " + ($holders -join '; ')) "Red" }
+            else { Write-Status "  port ${p}: no listener (binding/cert failure, not a port conflict)" "Red" }
+        }
+        throw ("IIS site '$SiteName' did not reach Started after $maxStartAttempts attempts (state: $siteState). " +
+               "Last appcmd start output: $siteStartOut. A binding could not bind -- a port in use " +
+               "(see holder diagnostics above) or a certless https/*:$HttpsPort binding. Aborting fast.")
+    }
+    Write-Status "Site '$SiteName' is Started; proceeding to readiness check" "Green"
 
     # Wait for server to be ready.
     # When the PageSpeed module is installed, use /pagespeed_admin/ as the
