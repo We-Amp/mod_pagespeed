@@ -13,6 +13,16 @@
   let loadedComponent = $state<Component | null>(null);
   let loadError = $state<string | null>(null);
   let showLicenseBanner = $state(false);
+  // the design record: over-cap is INDEPENDENT of licensed — a fully licensed (scope=site)
+  // install can be optimizing outside its licensed site. Tracked separately so
+  // it surfaces even when showLicenseBanner is false. They are mutually
+  // exclusive in practice (over-cap requires an active license).
+  let showOverCapBanner = $state(false);
+
+  // the design record nudge target: the same /buy/ page the License section uses, with
+  // UTM so over-cap-driven buy intent is attributable (mirrors the 2.0 console).
+  const OVER_CAP_CTA_URL =
+    "https://modpagespeed.com/buy/?utm_source=console&utm_medium=in-product&utm_campaign=over-cap";
 
   const api = new AdminApiClient(basePath);
 
@@ -20,6 +30,7 @@
     try {
       const status = await api.getLicenseStatus();
       showLicenseBanner = !status.licensed;
+      showOverCapBanner = !!status.over_cap;
     } catch {
       showLicenseBanner = true;
     }
@@ -48,7 +59,7 @@
   }
 </script>
 
-<div class="layout" class:has-banner={showLicenseBanner}>
+<div class="layout" class:has-banner={showLicenseBanner || showOverCapBanner}>
   <!-- Topbar -->
   <header class="topbar">
     <button class="menu-toggle" onclick={toggleSidebar} aria-label="Toggle menu">
@@ -85,6 +96,10 @@
         <!-- the design record: soft enforcement — amber warning, not a red error. -->
         <span class="topbar-pill-unlicensed" aria-label="License status: unlicensed (optimization running)">Unlicensed</span>
       {/if}
+      {#if showOverCapBanner}
+        <!-- the design record: informational accent pill — licensed, just over its site. -->
+        <span class="topbar-pill-overcap" aria-label="License status: optimizing outside the licensed site">Over-cap</span>
+      {/if}
     </span>
   </header>
 
@@ -104,6 +119,29 @@
         <strong>Unlicensed — optimization is running; activate a license to remove the warning.</strong>
         <a href="#/license" class="license-banner-link"
           >Purchase a license or apply a key in the License section&nbsp;&rarr;</a>
+      </span>
+    </div>
+  {/if}
+
+  <!-- Over-cap banner -->
+  <!-- the design record: a licensed (scope=site) install optimizing outside its licensed
+       site. Informational accent nudge — NOT a warning/error; optimization
+       keeps running. Independent of the unlicensed banner (mutually exclusive
+       in practice). -->
+  {#if showOverCapBanner}
+    <div class="license-banner license-banner-overcap" role="status">
+      <svg class="license-banner-icon" width="18" height="18" viewBox="0 0 24 24"
+           fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="10"/>
+        <line x1="12" y1="16" x2="12" y2="12"/>
+        <line x1="12" y1="8" x2="12.01" y2="8"/>
+      </svg>
+      <span class="license-banner-text">
+        <strong>This install is optimizing a site outside your licensed domain — optimization continues.</strong>
+        <a href={OVER_CAP_CTA_URL} target="_blank" rel="noopener"
+           class="license-banner-link"
+          >Claim a license slot for each additional site&nbsp;&rarr;</a>
       </span>
     </div>
   {/if}
@@ -283,6 +321,19 @@
     white-space: nowrap;
   }
 
+  /* the design record: informational accent, not the amber unlicensed warning. */
+  .topbar-pill-overcap {
+    font-size: var(--ps-font-size-xs);
+    font-weight: 700;
+    padding: 2px 10px;
+    border-radius: var(--ps-border-radius);
+    background: var(--ps-info, #2563eb);
+    color: #ffffff;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
   .menu-toggle {
     display: none;
     background: none;
@@ -370,6 +421,16 @@
   .license-banner-icon {
     color: var(--ps-warning);
     flex-shrink: 0;
+  }
+
+  /* the design record: over-cap is an informational accent nudge, not an amber warning. */
+  .license-banner-overcap {
+    background: color-mix(in srgb, var(--ps-info, #2563eb) 12%, var(--ps-bg));
+    border-bottom: 2px solid var(--ps-info, #2563eb);
+  }
+
+  .license-banner-overcap .license-banner-icon {
+    color: var(--ps-info, #2563eb);
   }
 
   .license-banner-text strong {

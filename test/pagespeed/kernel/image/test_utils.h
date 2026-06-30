@@ -116,12 +116,11 @@ struct GoldImageCompressionInfo : public ImageCompressionInfo {
   bool transparency;
 };
 
-// Note: the compressed_size_best / compressed_size_default fields are
-// INFORMATIONAL ONLY and are no longer asserted as exact goldens. @zlib_ng is
-// built with WITH_OPTIM + WITH_NEW_STRATEGIES (bazel/zlib_ng.BUILD) and selects
-// its deflate path by runtime CPU-feature dispatch, so the exact compressed
-// byte count is non-deterministic run-to-run on a single CPU. png_optimizer_test
-// asserts PNG validity + pixel-equality rather than exact sizes.
+// Note: compressed_size_best / compressed_size_default are exact deflate byte
+// counts pinned to the vendored @libpng / @optipng / @zlib_ng. The build links a
+// single deflate (zlib-ng; @zlib is aliased to @zlib_ng, bazel/zlib_compat.bzl),
+// so the output is deterministic and arch-invariant -- regenerate these values
+// only when those deps bump.
 const GoldImageCompressionInfo kValidGifImages[] = {
     GoldImageCompressionInfo("basi0g01", 153, 166, 165, 32, 32, 8, 3, 1, 3,
                              false),

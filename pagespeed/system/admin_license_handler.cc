@@ -388,6 +388,12 @@ void AdminLicenseHandler::HandleStatus(bool is_global, AsyncFetch* fetch) {
     if (!site_domain.empty()) {
       StrAppend(&json, ",\"site_domain\":\"", JsonEscape(site_domain), "\"");
     }
+    // the design record: over-cap is a soft, display-only flag — read LIVE from the
+    // server context (never mirrored). Emitted only when set; it can only be
+    // true for an active scope=site license optimizing off its licensed domain.
+    if (over_cap_getter_ && over_cap_getter_()) {
+      StrAppend(&json, ",\"over_cap\":true");
+    }
   }
   // when a license file is present but unusable, expose the cause so
   // the console can show an actionable hint rather than only the generic

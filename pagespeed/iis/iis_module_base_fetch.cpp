@@ -436,6 +436,30 @@ int IisModuleBaseFetch::CollectHeaders()
 		r->SetHeader("x-pagespeed-warn", "unlicensed",
 			(USHORT)strlen("unlicensed"), TRUE);
 	}
+	// the design record: over-cap detection on the optimized HTML path, keyed on the
+	// request Host. Runs for ANY license state — an active scope=site license
+	// can be over-cap even while fully licensed, so this is independent of the
+	// unlicensed gate above. Self-guards (a no-op unless a site policy is armed)
+	// and never gates optimization.
+	if (fetch_type_ == FetchType::kHtml)
+	{
+		USHORT host_len = 0;
+		PCSTR host = http_context_->GetRequest()->GetHeader("Host", &host_len);
+		if (host != nullptr && host_len > 0)
+		{
+			ctx_->server_context()->MaybeFlagOverCap(
+				StringPiece(host, host_len));
+		}
+		// the design record: emit the soft over-cap warn header (a sibling
+		// x-pagespeed-warn value, appended not replaced; mutually exclusive in
+		// practice with "unlicensed" above, since over-cap requires an active
+		// site license). Display/telemetry only.
+		if (ctx_->server_context()->IsOverCap())
+		{
+			r->SetHeader("x-pagespeed-warn", "over-cap",
+				(USHORT)strlen("over-cap"), FALSE);
+		}
+	}
 	if (fetch_type_ == FetchType::kInPlace || fetch_type_ == FetchType::kResource)
 	{
 		r->DeleteHeader("Content-MD5");

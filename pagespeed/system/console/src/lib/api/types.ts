@@ -108,6 +108,13 @@ export interface LicenseStatusResponse {
   scope?: string;
   /** the design record registrable domain the scope binds to. Absent on legacy tokens. */
   site_domain?: string;
+  /**
+   * the design record: true when an active scope=site license is observed optimizing a
+   * host OUTSIDE its licensed site (over-cap). Soft/display-only — never gates
+   * optimization. Emitted only when true, and independent of `licensed` (a
+   * fully licensed install can be over-cap).
+   */
+  over_cap?: boolean;
   error?: string;
   [key: string]: unknown;
 }

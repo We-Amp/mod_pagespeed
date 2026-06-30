@@ -19,7 +19,11 @@
 
 #include "pagespeed/system/system_server_context.h"
 
+#include <algorithm>
+#include <cctype>
 #include <memory>
+#include <mutex>
+#include <string>
 
 #include "base/logging.h"
 #include "net/instaweb/http/public/url_async_fetcher.h"
@@ -42,6 +46,7 @@
 #include "pagespeed/system/add_headers_fetcher.h"
 #include "pagespeed/system/admin_license_handler.h"
 #include "pagespeed/system/loopback_route_fetcher.h"
+#include "pagespeed/system/over_cap_match.h"
 #include "pagespeed/system/system_cache_path.h"
 #include "pagespeed/system/system_caches.h"
 #include "pagespeed/system/system_request_context.h"
@@ -241,11 +246,25 @@ void SystemServerContext::PostInitHook() {
     // the design record: seed + track the agent_optimize entitlement on the same path.
     UpdateAgentOptimizeEntitled(
         admin_site_->license_handler()->IsAgentOptimizeEntitled());
+    // the design record: seed + track the over-cap policy on the same state-change path.
+    // The callback re-reads the (just-updated) scope/domain from the handler,
+    // so a single source of truth (the license handler) feeds both the gate
+    // and the over-cap policy.
+    UpdateOverCapPolicy(admin_site_->license_handler()->IsLicenseValid(),
+                        admin_site_->license_handler()->license_scope(),
+                        admin_site_->license_handler()->license_domain());
     admin_site_->license_handler()->set_license_state_callback(
         [this](bool active, bool agent_optimize) {
           UpdateLicenseActive(active);
           UpdateAgentOptimizeEntitled(agent_optimize);
+          UpdateOverCapPolicy(active,
+                              admin_site_->license_handler()->license_scope(),
+                              admin_site_->license_handler()->license_domain());
         });
+    // the design record: the status JSON reads the over-cap flag LIVE from this context
+    // (single source of truth) rather than mirroring it into the handler.
+    admin_site_->license_handler()->set_over_cap_getter(
+        [this]() { return IsOverCap(); });
     // the design record (D4): one-time startup WARNING when running unlicensed at init.
     // Emitted here (the single license-check site) to avoid double-logging.
     if (!admin_site_->license_handler()->IsLicenseValid()) {
@@ -255,6 +274,85 @@ void SystemServerContext::PostInitHook() {
           "responses carry X-PageSpeed-Warn: unlicensed. Activate a license "
           "to remove the warning and unlock support + premium features.");
     }
+  }
+}
+
+void SystemServerContext::UpdateOverCapPolicy(bool active, StringPiece scope,
+                                              StringPiece domain) {
+  // the design record: arm over-cap detection ONLY for an active scope=="site" license
+  // with a non-empty domain. Every other case (unlicensed, community, org,
+  // host, scopeless legacy, or a site token without a domain) disarms it.
+  const bool site_scoped = active && scope == "site" && !domain.empty();
+  GoogleString lowered;
+  domain.CopyToString(&lowered);
+  LowerString(&lowered);  // hot-path compare is case-stable
+  {
+    std::lock_guard<std::mutex> lock(over_cap_mutex_);
+    over_cap_domain_.swap(lowered);
+    over_cap_site_scoped_.store(site_scoped, std::memory_order_relaxed);
+    // Re-evaluate from scratch on every license change so a re-pointed or
+    // downgraded license can never carry a stale latch. Release-store so a
+    // lock-free IsOverCap() acquire-load observes the reset (the mutex unlock
+    // alone does not synchronize with lock-free readers).
+    over_cap_.store(false, std::memory_order_release);
+  }
+}
+
+void SystemServerContext::MaybeFlagOverCap(StringPiece hostname) {
+  // the design record — over-cap is a SOFT, display/telemetry-only signal. This never
+  // gates optimization, never alters the response, and never touches
+  // license_active_.
+  //
+  // Hot-path short-circuits, cheapest first:
+  //   1. already latched          → one relaxed atomic load, done.
+  //   2. no active site-scope policy → one relaxed atomic load, done (the
+  //      common case: unlicensed / community / org / host / scopeless / no
+  //      domain). Neither path takes over_cap_mutex_.
+  if (over_cap_.load(std::memory_order_relaxed)) return;
+  if (!over_cap_site_scoped_.load(std::memory_order_relaxed)) return;
+
+  // Normalize this request's host: strip any ":port", lowercase.
+  GoogleString host;
+  hostname.CopyToString(&host);
+  if (const size_t colon = host.find(':'); colon != GoogleString::npos) {
+    host.resize(colon);
+  }
+  LowerString(&host);
+
+  // Only real external FQDNs count, and the licensed domain + its sub-domains
+  // are exempt. Conservative: anything ambiguous is treated as in-scope.
+  if (!IsExternalFqdn(host)) return;
+
+  // Rare transition: first off-license host under the current policy. Serialize
+  // with UpdateOverCapPolicy (which publishes a new domain + resets the latch
+  // under the same lock) and RE-CHECK the policy under the lock — the gate read
+  // above may be stale if a license change raced in. This is the guard 2.0's
+  // adversarial review hardened: never latch a false positive against a policy
+  // that has since changed (e.g. site → org, or re-pointed to this very host).
+  std::lock_guard<std::mutex> lock(over_cap_mutex_);
+  if (!over_cap_site_scoped_.load(std::memory_order_relaxed)) return;
+  if (HostnameMatchesLicensedDomain(host, over_cap_domain_)) return;
+  if (over_cap_.load(std::memory_order_relaxed)) return;  // already latched
+  // Release-store so a lock-free IsOverCap() acquire-load (the per-port warn
+  // header + status JSON) observes the latch on weak-memory CPUs without taking
+  // over_cap_mutex_.
+  over_cap_.store(true, std::memory_order_release);
+
+  // Rate-limited WARNING (also effectively one-shot via the latch above). Mirror
+  // the design record unlicensed-warning cadence for log-shape consistency.
+  const int64 now_us = timer()->NowUs();
+  int64_t prev_us = last_over_cap_warn_us_.load(std::memory_order_relaxed);
+  constexpr int64_t kWarnIntervalUs = int64_t{60} * 1000 * 1000;  // 1 minute
+  if (now_us - prev_us >= kWarnIntervalUs &&
+      last_over_cap_warn_us_.compare_exchange_strong(
+          prev_us, now_us, std::memory_order_relaxed)) {
+    message_handler()->Message(
+        kWarning,
+        "License scope=site for domain '%s' but this install is optimizing "
+        "'%s', which is outside the licensed site. Optimization continues "
+        "(soft flag, the design record/092/105) — claim a license slot for each "
+        "additional site to clear this notice.",
+        over_cap_domain_.c_str(), host.c_str());
   }
 }
 

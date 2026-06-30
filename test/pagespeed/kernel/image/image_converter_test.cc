@@ -229,11 +229,10 @@ TEST_F(ImageConverterTest, OptimizePngOrConvertToJpeg) {
         *png_struct_reader_, in, options, &out, &is_out_png,
         &message_handler_));
 
-    // The exact deflate size is non-deterministic (zlib-ng SIMD/scalar
-    // dispatch), so assert a sanity bound rather than an exact byte count.
-    EXPECT_GT(out.size(), 0u) << kValidImages[i].filename;
-    EXPECT_LE(out.size(), 2 * in.size() + 256)
-        << "unexpectedly large output for " << kValidImages[i].filename;
+    // Deterministic now that a single deflate (zlib-ng) is linked; assert the
+    // exact size again.
+    EXPECT_NEAR(kValidImages[i].compressed_size, out.size(), 20)
+        << "size mismatch for " << kValidImages[i].filename;
     // Verify that out put image type matches.
 
     EXPECT_EQ(kValidImages[i].is_png, is_out_png)
@@ -264,11 +263,10 @@ TEST_F(ImageConverterTest, ConvertOpaqueGifToPng) {
         << "input size mismatch for " << kValidGifImages[i].filename;
     ASSERT_TRUE(PngOptimizer::OptimizePngBestCompression(
         *png_struct_reader_, in, &out, &message_handler_));
-    // PNG deflate size is non-deterministic (zlib-ng SIMD/scalar dispatch);
-    // assert a sanity bound rather than an exact byte count.
-    EXPECT_GT(out.size(), 0u) << kValidGifImages[i].filename;
-    EXPECT_LE(out.size(), 2 * in.size() + 256)
-        << "unexpectedly large output for " << kValidGifImages[i].filename;
+    // Deterministic now that a single deflate (zlib-ng) is linked; assert the
+    // exact size again.
+    EXPECT_NEAR(kValidGifImages[i].png_size, out.size(), 20)
+        << "output size mismatch for " << kValidGifImages[i].filename;
   }
 }
 
@@ -317,11 +315,10 @@ TEST_F(ImageConverterTest, ConvertTransparentGifToPng) {
   EXPECT_EQ(static_cast<size_t>(55800), in.size()) << "input size mismatch";
   ASSERT_TRUE(PngOptimizer::OptimizePngBestCompression(
       *png_struct_reader_, in, &out, &message_handler_));
-  // PNG deflate size is non-deterministic (zlib-ng SIMD/scalar dispatch);
-  // assert the re-encoded PNG is smaller than the source GIF rather than
-  // pinning an exact byte count.
-  EXPECT_GT(out.size(), 0u);
-  EXPECT_LT(out.size(), in.size()) << "output not smaller than source";
+  // Deterministic now that a single deflate (zlib-ng) is linked; assert the
+  // exact size again. Size depends on the @zlib_ng / @libpng versions.
+  EXPECT_NEAR(static_cast<double>(25018), static_cast<double>(out.size()), 20)
+      << "output size mismatch";
 }
 
 TEST_F(ImageConverterTest, ConvertTransparentGifToWebp) {

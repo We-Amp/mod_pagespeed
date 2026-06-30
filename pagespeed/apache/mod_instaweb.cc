@@ -524,6 +524,22 @@ InstawebContext* build_context_for_request(request_rec* request) {
     apr_table_add(request->headers_out, "x-pagespeed-warn", "unlicensed");
   }
 
+  // the design record: over-cap detection on the optimized HTML path, keyed on the
+  // request Host. Runs for ANY license state — an active scope=site license can
+  // be over-cap even while fully licensed, so this is independent of the
+  // unlicensed gate above. Self-guards (a no-op unless a site policy is armed)
+  // and never gates optimization.
+  if (const char* host =
+          apr_table_get(request->headers_in, HttpAttributes::kHost)) {
+    server_context->MaybeFlagOverCap(host);
+  }
+  // the design record: emit the soft over-cap warn header (a sibling x-pagespeed-warn
+  // value; mutually exclusive in practice with "unlicensed" above, since
+  // over-cap requires an active site license). Display/telemetry only.
+  if (server_context->IsOverCap()) {
+    apr_table_add(request->headers_out, "x-pagespeed-warn", "over-cap");
+  }
+
   // Set X-Mod-Pagespeed header.
   // TODO(sligocki): Move inside PSOL.
   apr_table_set(request->headers_out, kModPagespeedHeader,
@@ -1228,6 +1244,14 @@ void mod_pagespeed_register_hooks(apr_pool_t* pool) {
 apr_status_t pagespeed_child_exit(void* data) {
   ApacheServerContext* server_context = static_cast<ApacheServerContext*>(data);
   if (server_context->PoolDestroyed()) {
+    // Route logging to stderr before tearing down the factory/worker pools and
+    // the Apache log pool. The spdlog path is already crash-safe via the
+    // process-immortal held logger; this additionally protects the
+    // registered-sink path (SendToSinks -> ApacheGLogSink -> ap_log_perror on
+    // the Apache pool) from a worker that LOG()s while that pool is being torn
+    // down. Runs during apr pool cleanup, i.e. before C++ static destructors.
+    pagespeed_logging::ShutDownLogging();
+
     // When the last server context is destroyed, it's important that we also
     // clean up the factory, so we don't end up with dangling pointers in case
     // we are not unloaded fully on a config check (e.g. on Ubuntu 11).

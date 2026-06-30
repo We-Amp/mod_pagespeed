@@ -50,6 +50,19 @@ class AdminLicenseHandler {
     return license_token_;
   }
 
+  // the design record: the design record scope/domain of the current token (empty on legacy
+  // scopeless tokens). Used by SystemServerContext to publish the over-cap
+  // policy on the license state-change path. Display-only — never a verify
+  // condition (R9/R10).
+  GoogleString license_scope() const {
+    std::lock_guard<std::mutex> lock(license_mu_);
+    return license_scope_;
+  }
+  GoogleString license_domain() const {
+    std::lock_guard<std::mutex> lock(license_mu_);
+    return license_domain_;
+  }
+
   // Check if the current license is valid and not expired.
   // Expiry is always re-derived from the current wall-clock time, so a
   // long-running process does not keep optimizing indefinitely past a token's
@@ -75,6 +88,15 @@ class AdminLicenseHandler {
   // agent_optimize_entitled).
   void set_license_state_callback(std::function<void(bool, bool)> cb) {
     license_state_callback_ = std::move(cb);
+  }
+
+  // the design record: live getter for the over-cap flag, emitted in the status JSON.
+  // Set by SystemServerContext to read its own over_cap_ atomic — a LIVE read,
+  // never a mirrored copy (the snapshot mirror raced SetLicenseStatus in 2.0's
+  // review; reading live from the single source of truth avoids it). Set during
+  // Init like the state callback; relies on startup happens-before.
+  void set_over_cap_getter(std::function<bool()> cb) {
+    over_cap_getter_ = std::move(cb);
   }
 
   // Override the license service URL for testing.
@@ -181,6 +203,10 @@ class AdminLicenseHandler {
   // from server startup sequencing. Must not be modified after Init.
   // the design record: args are (license_active, agent_optimize_entitled).
   std::function<void(bool, bool)> license_state_callback_;
+
+  // the design record: live getter for the over-cap flag (set during Init like the state
+  // callback; relies on startup happens-before, not modified after Init).
+  std::function<bool()> over_cap_getter_;
 
   friend class LicenseProxyFetch;
   friend class RenewalFetch;

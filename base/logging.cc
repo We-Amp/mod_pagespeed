@@ -23,6 +23,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <iostream>
+#include <memory>
 #include <mutex>
 #include <vector>
 
@@ -36,6 +37,27 @@ namespace pagespeed_logging {
 // destruction order fiasco (spdlog's global logger may be destroyed before
 // our static ApacheProcessContext destructor runs).
 static std::atomic<bool> g_logging_shutdown{false};
+
+// Returns a process-immortal spdlog logger. The strong reference is
+// captured once on first use and intentionally LEAKED, so the logger object
+// outlives ALL static destruction — including spdlog's own registry singleton —
+// and therefore stays valid for any worker thread that is still draining work
+// and may LOG() during process shutdown. Access is lock-free after the first
+// call (a function-local-static acquire load), unlike the spdlog::default_logger()
+// free function, which locks spdlog's registry mutex on every call, and unlike
+// spdlog::info()/warn()/... which re-fetch the registry's raw default logger
+// (the object torn down first in the static-destruction-order fiasco).
+static spdlog::logger* HeldLogger() {
+  // The strong reference is captured once and never freed, so the logger object
+  // (and its sinks) stay immortal for the process lifetime. The heap shared_ptr
+  // is kept REACHABLE through this static pointer, so LeakSanitizer treats it as
+  // a live root — intentional immortality, not a reported leak. (Returning
+  // ->get() into the static instead would orphan the shared_ptr and LSan flags
+  // it: a 16-byte "direct leak".)
+  static std::shared_ptr<spdlog::logger>* const held =
+      new std::shared_ptr<spdlog::logger>(spdlog::default_logger());
+  return held->get();
+}
 
 namespace {
 
@@ -79,6 +101,10 @@ void SendToSinks(int severity, const char* full_filename,
 }
 
 void ShutDownLogging() {
+  // Route subsequent LOG()s to stderr. This guards the registered-sink path
+  // (SendToSinks -> ApacheGLogSink -> ap_log_perror on the Apache pool), which
+  // is NOT covered by the immortal spdlog logger above. The spdlog path is safe
+  // regardless of this flag because HeldLogger() never dies.
   g_logging_shutdown.store(true, std::memory_order_release);
 }
 
@@ -100,27 +126,32 @@ LogMessage::~LogMessage() {
     return;
   }
 
-  // Send to spdlog
+  // Emit through the immortal held logger via a raw pointer: lock-free, and
+  // valid even if spdlog's registry singleton has already been destroyed during
+  // shutdown.
+  spdlog::logger* logger = HeldLogger();
+
+  // Send to spdlog (via the held logger, never the registry free functions).
   constexpr char fmtstring[] = "[pagespeed] [{}:{}] {}";
   switch (severity_) {
     case logging::LOG_INFO:
-      spdlog::info(fmt::runtime(fmtstring), base_filename, line_, msg);
+      logger->info(fmt::runtime(fmtstring), base_filename, line_, msg);
       break;
     case logging::LOG_WARNING:
-      spdlog::warn(fmt::runtime(fmtstring), base_filename, line_, msg);
+      logger->warn(fmt::runtime(fmtstring), base_filename, line_, msg);
       break;
     case logging::LOG_ERROR:
-      spdlog::error(fmt::runtime(fmtstring), base_filename, line_, msg);
+      logger->error(fmt::runtime(fmtstring), base_filename, line_, msg);
       break;
     case logging::LOG_FATAL:
-      spdlog::critical(fmt::runtime(fmtstring), base_filename, line_, msg);
+      logger->critical(fmt::runtime(fmtstring), base_filename, line_, msg);
       // Also write to stderr for death tests (EXPECT_DEBUG_DEATH captures stderr)
       std::cerr << "[FATAL] [" << base_filename << ":" << line_ << "] " << msg
                 << '\n';
-      spdlog::dump_backtrace();
+      logger->dump_backtrace();
       break;
     default:
-      spdlog::info(fmt::runtime(fmtstring), base_filename, line_, msg);
+      logger->info(fmt::runtime(fmtstring), base_filename, line_, msg);
       break;
   }
 

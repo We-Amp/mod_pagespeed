@@ -36,6 +36,21 @@ cc_library(
 )
 
 # =============================================================================
+# the design record over-cap host matching (PSL-free, header-only).
+# Reimplemented byte-faithful from ModPageSpeed 2.0 (NOT vendored — these live
+# in the engine, not the crypto sync boundary). Standalone so both the system
+# library and over_cap_match_test depend on a single owner.
+# =============================================================================
+cc_library(
+    name = "over_cap_match",
+    hdrs = ["over_cap_match.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)
+
+# =============================================================================
 # Admin license handler
 # =============================================================================
 # Handles /v1/license/* endpoints in the admin console.

@@ -73,5 +73,6 @@ pagespeed_cc_test(
         ":kernel_test_util",
         "//pagespeed/kernel/base:std_timer",
         "//pagespeed/kernel/sharedmem",
+        "@spdlog//:spdlog",  # logging_shutdown_race_test.cc includes spdlog sinks directly
     ],
 )

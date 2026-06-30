@@ -58,14 +58,22 @@ SimpleSelector* SimpleSelector::NewBinaryAttribute(Type type,
 
 static const char kClassText[] = "class";
 SimpleSelector* SimpleSelector::NewClass(const UnicodeText& classname) {
-  static const UnicodeText kClass =
-      UTF8ToUnicodeText(kClassText, strlen(kClassText));
+  // Immortal/leaked static: never destroyed, so a rewrite worker
+  // thread still parsing CSS during process exit cannot read a freed
+  // UnicodeText. Plain function-local statics are torn down by
+  // __run_exit_handlers on the main thread while worker threads are still
+  // running (the same worker-vs-static-destruction shutdown race as the spdlog
+  // logger; this CSS-parser sibling was found by the shutdown stress harness).
+  static const UnicodeText& kClass =
+      *new UnicodeText(UTF8ToUnicodeText(kClassText, strlen(kClassText)));
   return new SimpleSelector(SimpleSelector::CLASS, kClass, classname);
 }
 
 static const char kIdText[] = "id";
 SimpleSelector* SimpleSelector::NewId(const UnicodeText& id) {
-  static const UnicodeText kId = UTF8ToUnicodeText(kIdText, strlen(kIdText));
+  // Immortal/leaked static — see NewClass above.
+  static const UnicodeText& kId =
+      *new UnicodeText(UTF8ToUnicodeText(kIdText, strlen(kIdText)));
   return new SimpleSelector(SimpleSelector::ID, kId, id);
 }
 

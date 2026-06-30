@@ -300,18 +300,17 @@ void AssertReadersMatch(ScanlineReaderInterface* reader1,
 // These images were obtained from
 // http://www.libpng.org/pub/png/pngsuite.html
 //
-// The compressed_size_default / compressed_size_best fields below are
-// INFORMATIONAL ONLY -- they are no longer asserted as exact goldens.
-// @libpng links @zlib_ng built with WITH_OPTIM + WITH_NEW_STRATEGIES (see
-// bazel/libpng.bzl, bazel/zlib_ng.BUILD), which selects its deflate
-// implementation by runtime CPU-feature dispatch. The SIMD and scalar
-// longest_match/compare256 paths emit different (both valid) deflate streams,
-// and which path runs varies run-to-run on a single CPU -- so the exact
-// compressed byte count is non-deterministic and no single golden can pass
-// reliably (this is the root cause of the historical ValidPngs/ValidGifs
-// flake). Correctness is asserted structurally instead: a valid, re-readable
-// PNG with matching dimensions / bit depth / color type, plus pixel-equality
-// via AssertPngEq. The recorded sizes are kept only as a rough reference.
+// GOLDENS: compressed_size_default and compressed_size_best are exact deflate
+// byte counts pinned to the vendored @libpng / @optipng / @zlib_ng. The build
+// now links a SINGLE deflate (zlib-ng): @zlib is aliased to @zlib_ng
+// (bazel/zlib_compat.bzl), removing the duplicate stock-zlib that previously
+// made the size depend on link composition -- the real cause of the historical
+// ValidPngs/ValidGifs "flake" (it was an ODR/link-order effect, NOT zlib-ng SIMD
+// nondeterminism; zlib-ng here is built generic-only, no SIMD -- bazel/
+// zlib_ng.BUILD). Output is now deterministic and arch-invariant (x86_64 ==
+// arm64), so the sizes are asserted exactly again. Regenerate these values if
+// @libpng/@optipng/@zlib_ng bump (instrument the EXPECT_NEAR in AssertMatch to
+// dump out.size()).
 ImageCompressionInfo kValidImages[] = {
     ImageCompressionInfo("basi0g01", 217, 208, 213, 32, 32, 1, 0, 1, 0),
     ImageCompressionInfo("basi0g02", 154, 154, 157, 32, 32, 2, 0, 2, 0),
@@ -504,9 +503,9 @@ void AssertMatch(const GoogleString& in, const GoogleString& ref,
 
   ASSERT_TRUE(PngOptimizer::OptimizePng(*reader, in, &out, &message_handler))
       << info.filename;
-  // Exact size is non-deterministic (zlib-ng SIMD/scalar deflate dispatch);
-  // require non-empty output and rely on AssertPngEq below for correctness.
-  EXPECT_GT(out.size(), 0u) << info.filename;
+  // Deterministic now that a single deflate (zlib-ng) is linked (see goldens
+  // note above); assert the exact compressed size again.
+  EXPECT_NEAR(info.compressed_size_default, out.size(), 20) << info.filename;
   AssertPngEq(ref, out, info.filename, in_rgba);
 
   ASSERT_TRUE(
@@ -518,9 +517,7 @@ void AssertMatch(const GoogleString& in, const GoogleString& ref,
   ASSERT_TRUE(PngOptimizer::OptimizePngBestCompression(*reader, in, &out,
                                                        &message_handler))
       << info.filename;
-  // Exact size is non-deterministic (zlib-ng SIMD/scalar deflate dispatch);
-  // require non-empty output and rely on AssertPngEq below for correctness.
-  EXPECT_GT(out.size(), 0u) << info.filename;
+  EXPECT_NEAR(info.compressed_size_best, out.size(), 20) << info.filename;
   AssertPngEq(ref, out, info.filename, in_rgba);
 
   ASSERT_TRUE(

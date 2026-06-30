@@ -248,6 +248,18 @@ pagespeed_cc_test(
     ],
 )
 
+# the design record over-cap matcher unit tests (PSL-free, pure header — no server
+# context needed, so a lightweight standalone target).
+pagespeed_cc_test(
+    name = "over_cap_match_test",
+    srcs = ["over_cap_match_test.cc"],
+    shard_count = 1,
+    deps = [
+        "//pagespeed/system:over_cap_match",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+    ],
+)
+
 # =============================================================================
 # Backward-compatible aggregate test target
 # =============================================================================
