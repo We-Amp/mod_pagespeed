@@ -12,6 +12,7 @@ load(":apr.bzl", "apr_build_rule")
 load(":aprutil.bzl", "aprutil_build_rule")
 load(":cyclone.bzl", "cyclone_build_rule")
 load(":ed25519.bzl", "ed25519_build_rule")
+load(":zlib_compat.bzl", "zlib_ng_alias_repository")
 
 # the design record / CVE matcher: every vendored C/C++ dep below carries a CPE +
 # release_date annotation in tools/dependency/cpe-map.yaml, scanned daily
@@ -20,8 +21,8 @@ load(":ed25519.bzl", "ed25519_build_rule")
 # justification) — a new C/C++ dep cannot land unscanned. When you add or bump a
 # dep, update its cpe-map.yaml release_date.
 
-ENVOY_COMMIT = "5afe27fb338b16d5bb06b3a7198bcd581b4e3dee"  # v1.37.2 - CVE-2026-26308/09/10/11/30 cluster (2026-03-10)
-ENVOY_SHA = "1e09d596cee1ee1ca12b5dacb59ecf6459bba873ffa0c05ffd0f06b2ffebd465"
+ENVOY_COMMIT = "f97695a50e11f5ff6719e129a466bf9204b64a7f"  # v1.37.5 - 2026-06-26 CVE batch (defense-in-depth; mpp's compiled extension set was already unaffected — see tools/dependency/cve-ignore.yaml). ABI-compat pins (gRPC/BoringSSL/zlib-ng below) unchanged v1.37.2->v1.37.5.
+ENVOY_SHA = "b517189c09755bcf24a0e04376f4f329df83aad03ed014857a506c74ce9c103f"
 
 # Standalone zlib-ng — replaces @envoy//bazel:zlib for non-Envoy builds.
 ZLIB_NG_VERSION = "2.3.2"
@@ -148,6 +149,14 @@ def mod_pagespeed_dependencies():
         sha256 = ZLIB_NG_SHA,
         build_file = "//bazel:zlib_ng.BUILD",
     )
+
+    # Collapse the duplicate deflate: alias @zlib -> @zlib_ng so protobuf's
+    # gzip_stream and grpc link the SAME single zlib-ng as libpng/kernel/util,
+    # instead of dragging in a second (stock madler) zlib. Declared here, before
+    # grpc_deps()/protobuf_deps() in WORKSPACE, so their maybe()-guarded madler
+    # @zlib is skipped. Fixes the ODR/UB two-deflate hazard (was the PngOptimizer
+    # golden "flake"). See bazel/zlib_compat.bzl.
+    zlib_ng_alias_repository(name = "zlib")
 
     # Phase 1: Standalone BoringSSL
     http_archive(

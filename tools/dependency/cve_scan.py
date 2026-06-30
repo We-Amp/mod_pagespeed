@@ -52,6 +52,7 @@ import json
 import os
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
@@ -71,6 +72,11 @@ NVD_API = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 # NVD asks unauthenticated callers to keep to ~5 requests per rolling 30s.
 NVD_SLEEP_SECONDS = 7.0
 NVD_PAGE_SIZE = 2000  # NVD 2.0 max resultsPerPage
+# NVD rate-limits (HTTP 429) and intermittently 503s. Without backoff a single
+# 429 used to drop a CPE silently from the rebuilt snapshot (the 19->4->0
+# degradation incident). Retry with exponential backoff, honoring Retry-After.
+NVD_MAX_RETRIES = 6
+NVD_BACKOFF_BASE_SECONDS = 8.0
 
 SEVERITY_FLOOR = {"low": 0.1, "medium": 4.0, "high": 7.0, "critical": 9.0}
 
@@ -208,9 +214,59 @@ def _finish_ignore(entry, ignores, errors):
 # ---------------------------------------------------------------------------
 # NVD fetch + cache
 # ---------------------------------------------------------------------------
+class NvdUnreachable(RuntimeError):
+    """Raised when NVD cannot be reached / refresh cannot complete.
+
+    Distinct from a generic RuntimeError (e.g. the no-shrink guard tripping on a
+    real data regression) so the daily REPORT-ONLY job can soft-skip on a
+    transient upstream outage (rate-limit/503/network) without reddening, while
+    genuine logic errors still fail loudly. Subclasses RuntimeError so any caller
+    that already fails closed on RuntimeError keeps that behavior. main() maps
+    ONLY this exception to exit code 3 (NVD unreachable / refresh skipped).
+    """
+
+
 def cache_path(cpe):
     safe = cpe.replace(":", "_").replace("*", "x").replace("/", "_")
     return os.path.join(CACHE_DIR, f"nvd_{safe}.json")
+
+
+def _nvd_get(url, headers):
+    """GET an NVD URL, retrying on 429/503 with exponential backoff.
+
+    Raises NvdUnreachable after NVD_MAX_RETRIES so a persistently-failing fetch
+    surfaces as a distinct, recognizable error (caller fails closed / the daily
+    report-only job soft-skips) rather than silently dropping a CPE.
+    """
+    last_exc = None
+    for attempt in range(NVD_MAX_RETRIES):
+        req = urllib.request.Request(url, headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                return json.loads(resp.read().decode())
+        except urllib.error.HTTPError as exc:
+            last_exc = exc
+            if exc.code not in (429, 503):
+                raise
+            retry_after = exc.headers.get("Retry-After") if exc.headers else None
+            try:
+                delay = float(retry_after) if retry_after else None
+            except ValueError:
+                delay = None
+            if delay is None:
+                delay = NVD_BACKOFF_BASE_SECONDS * (2 ** attempt)
+            print(f"  NVD {exc.code} for {url} — retry {attempt + 1}/"
+                  f"{NVD_MAX_RETRIES} in {delay:.0f}s", file=sys.stderr)
+            time.sleep(delay)
+        except urllib.error.URLError as exc:
+            last_exc = exc
+            delay = NVD_BACKOFF_BASE_SECONDS * (2 ** attempt)
+            print(f"  NVD network error for {url} ({exc}) — retry "
+                  f"{attempt + 1}/{NVD_MAX_RETRIES} in {delay:.0f}s",
+                  file=sys.stderr)
+            time.sleep(delay)
+    raise NvdUnreachable(f"NVD fetch failed after {NVD_MAX_RETRIES} retries: "
+                         f"{url} ({last_exc})")
 
 
 def fetch_nvd(cpe, refresh=False, offline=False):
@@ -241,9 +297,7 @@ def fetch_nvd(cpe, refresh=False, offline=False):
             "startIndex": start,
         })
         url = f"{NVD_API}?{params}"
-        req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            data = json.loads(resp.read().decode())
+        data = _nvd_get(url, headers)
         vulns.extend(data.get("vulnerabilities", []))
         total = data.get("totalResults", 0)
         start += data.get("resultsPerPage", 0)
@@ -320,8 +374,30 @@ def minimize_vuln(v):
     return {"cve": out_cve}
 
 
-def build_snapshot(cpe_to_vulns, path=SNAPSHOT_PATH):
-    """Write the deterministic compact snapshot from {cpe: [raw vulns]}."""
+def build_snapshot(cpe_to_vulns, path=SNAPSHOT_PATH, allow_shrink=False):
+    """Write the deterministic compact snapshot from {cpe: [raw vulns]}.
+
+    No-shrink guard: refuse to overwrite an existing snapshot with one covering
+    FEWER CPEs unless allow_shrink=True. A live rebuild that lost CPEs to NVD
+    rate-limiting (or a removed dep) must not silently replace a complete mirror
+    with a degraded one — that is exactly how the committed snapshot decayed
+    19->4->0 CPEs and blinded the gate. A legitimate CPE removal passes
+    --allow-snapshot-shrink explicitly.
+    """
+    new_cpes = set(cpe_to_vulns)
+    if not allow_shrink and os.path.exists(path):
+        try:
+            old_cpes = set(load_snapshot(path))
+        except Exception:  # noqa: BLE001  (unreadable/old-schema -> no guard)
+            old_cpes = set()
+        missing = old_cpes - new_cpes
+        if missing:
+            raise RuntimeError(
+                f"refusing to shrink snapshot {path}: {len(new_cpes)} CPEs "
+                f"would replace {len(old_cpes)} — dropping {sorted(missing)}. "
+                f"Likely an NVD fetch failure (a CPE silently lost). Re-run, or "
+                f"pass --allow-snapshot-shrink if the CPE was intentionally "
+                f"removed.")
     snap = {
         "schema": SNAPSHOT_SCHEMA,
         "generated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -441,6 +517,12 @@ def scan(deps_subset=None, severity="medium", refresh=False, offline=False,
                 vulns = fetch_nvd(cpe, refresh=refresh, offline=offline)
                 if collect is not None:
                     collect[cpe] = vulns
+        except NvdUnreachable:
+            # Upstream outage (rate-limit/503/network): abandon the live refresh
+            # immediately rather than burning the full backoff budget on every
+            # remaining CPE and then silently shrinking the snapshot. main()
+            # maps this to a soft-skip (exit 3); the committed snapshot is kept.
+            raise
         except Exception as exc:  # noqa: BLE001  (report-only: never crash)
             results.append({"dep": name, "version": version, "cpe": cpe,
                             "release_date": rel, "error": str(exc),
@@ -530,10 +612,17 @@ def main():
                     help="after a (live/cache) scan, write the compact snapshot "
                          f"to this path (default: {SNAPSHOT_PATH}). Used by the "
                          "daily cron to refresh the committed mirror.")
+    ap.add_argument("--allow-snapshot-shrink", action="store_true",
+                    help="permit --build-snapshot to write FEWER CPEs than the "
+                         "existing committed snapshot (default: refused — a "
+                         "shrink is almost always an NVD fetch failure). Use "
+                         "only for an intentional CPE removal.")
     ap.add_argument("--fail-on", choices=list(SEVERITY_FLOOR), default=None,
                     help="RATCHET TOGGLE: exit nonzero if any finding at/above "
                          "this severity exists (default: unset = report-only). "
-                         "Flip the per-PR job to blocking by setting this.")
+                         "Flip the per-PR job to blocking by setting this. "
+                         "Fail-closed: also exits nonzero if any dep could not "
+                         "be evaluated (missing from snapshot / fetch error).")
     ap.add_argument("--json", default=DEFAULT_REPORT,
                     help=f"write JSON report here (default: {DEFAULT_REPORT})")
     args = ap.parse_args()
@@ -548,9 +637,22 @@ def main():
             return 2
 
     collect = {} if args.build_snapshot else None
-    results, _ = scan(deps_subset=set(args.dep) or None, severity=args.severity,
-                      refresh=args.refresh, offline=args.offline,
-                      snapshot=snapshot, collect=collect)
+    try:
+        results, _ = scan(deps_subset=set(args.dep) or None,
+                          severity=args.severity, refresh=args.refresh,
+                          offline=args.offline, snapshot=snapshot,
+                          collect=collect)
+    except NvdUnreachable as exc:
+        # Soft-skip (exit 3): NVD was unreachable/rate-limited and the live
+        # refresh could not complete. The committed snapshot is left untouched;
+        # the caller (the daily report-only job) treats exit 3 as a warning, not
+        # a failure, and skips committing a partial/empty snapshot. Genuine logic
+        # errors do NOT reach here — they keep raising / returning nonzero below.
+        print(f"\nNVD unreachable: {exc}", file=sys.stderr)
+        print("Snapshot refresh could not complete; the committed snapshot is "
+              "retained unchanged. (exit 3 = report-only soft-skip)",
+              file=sys.stderr)
+        return 3
     total = print_table(results, args.severity, fail_on=args.fail_on)
 
     os.makedirs(os.path.dirname(args.json) or ".", exist_ok=True)
@@ -564,13 +666,40 @@ def main():
     print(f"\nJSON report: {args.json}")
 
     if args.build_snapshot:
-        snap = build_snapshot(collect, args.build_snapshot)
+        try:
+            snap = build_snapshot(collect, args.build_snapshot,
+                                  allow_shrink=args.allow_snapshot_shrink)
+        except NvdUnreachable as exc:  # defensive: scan() raises first in practice
+            print(f"\nNVD unreachable: {exc}", file=sys.stderr)
+            print("Committed snapshot retained unchanged. "
+                  "(exit 3 = report-only soft-skip)", file=sys.stderr)
+            return 3
+        except RuntimeError as exc:
+            # Genuine data regression (the no-shrink guard tripping on a real CPE
+            # loss / removal that was NOT caused by an upstream outage) or another
+            # build error. This MUST fail loudly — it is exactly the degradation
+            # the guard exists to catch. Exit 1, not the soft-skip 3.
+            print(f"\nERROR: snapshot build failed: {exc}", file=sys.stderr)
+            return 1
         n_cves = sum(len(v) for v in snap["cpes"].values())
         print(f"Snapshot written: {args.build_snapshot} "
               f"({len(snap['cpes'])} CPEs, {n_cves} CVEs)")
 
-    # Ratchet: only --fail-on makes findings fatal. Default stays report-only.
-    if args.fail_on and total > 0:
+    # Ratchet: only --fail-on makes the gate blocking. Default stays report-only.
+    if args.fail_on:
+        # Fail-closed: a dep we could not evaluate (CPE missing from the
+        # snapshot, NVD fetch error, no cpe-map entry) is an UNKNOWN, not a
+        # pass. Treating it as clean is exactly how an empty/degraded snapshot
+        # silently disabled this gate. A blocking run must be able to evaluate
+        # every dep.
+        unevaluated = [r["dep"] for r in results if r.get("error")]
+        if unevaluated:
+            print(f"\nFAIL (fail-closed): {len(unevaluated)} dep(s) could not be "
+                  f"evaluated under --fail-on: {', '.join(unevaluated)}. "
+                  f"The snapshot is incomplete or NVD was unreachable — refusing "
+                  f"to report clean. Rebuild the snapshot (--refresh "
+                  f"--build-snapshot) and retry.", file=sys.stderr)
+            return 1
         # Re-evaluate at the requested gate severity (independent of --severity).
         gate_floor = SEVERITY_FLOOR[args.fail_on]
         gate_hits = sum(

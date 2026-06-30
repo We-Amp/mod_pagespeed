@@ -89,7 +89,7 @@ deps:
 
   envoy:
     cpe: "cpe:2.3:a:envoyproxy:envoy"          # NVD: 95 CVEs
-    release_date: "2026-04-10"                  # commit 5afe27fb == v1.37.2 tag; commit committer.date + tag both 2026-04-10. (The "2026-03-10" in repositories.bzl is the CVE-2026-26308/09/10/11/30 cluster *publish* date, NOT the release; v1.37.2 fixes that cluster — those 5 CVEs affect <=1.37.0, fixed in 1.37.1.)
+    release_date: "2026-06-23"                  # commit f97695a5 == v1.37.5 tag (GitHub release published 2026-06-23). Bumped from v1.37.2 (2026-04-10) for the 2026-06-26 envoy CVE batch — defense-in-depth; mpp compiles none of the affected extensions (14 entries in cve-ignore.yaml). NOTE v1.37.5 (06-23) predates the batch's 06-26 disclosure, so the date heuristic still flags those 14 — the suppressions remain required even with the fix-carrying version.
 
   hiredis:
     cpe: "cpe:2.3:a:redislabs:hiredis"         # NVD: 1 CVE

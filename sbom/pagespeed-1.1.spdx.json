@@ -3,9 +3,9 @@
   "dataLicense": "CC0-1.0",
   "SPDXID": "SPDXRef-DOCUMENT",
   "name": "pagespeed-1.1",
-  "documentNamespace": "https://spdx.org/spdxdocs/pagespeed-1.1-2026-06-24T12:48:58Z",
+  "documentNamespace": "https://spdx.org/spdxdocs/pagespeed-1.1-2026-06-30T10:38:23Z",
   "creationInfo": {
-    "created": "2026-06-24T12:48:58Z",
+    "created": "2026-06-30T10:38:23Z",
     "creators": [
       "Tool: generate-sbom.py-1.0",
       "Organization: We-Amp B.V."
@@ -172,7 +172,7 @@
     {
       "SPDXID": "SPDXRef-Package-envoy",
       "name": "envoy",
-      "versionInfo": "5afe27fb338b16d5bb06b3a7198bcd581b4e3dee",
+      "versionInfo": "f97695a50e11f5ff6719e129a466bf9204b64a7f",
       "supplier": "Organization: The Envoy Project Authors",
       "downloadLocation": "https://github.com/envoyproxy/envoy",
       "filesAnalyzed": false,
@@ -183,7 +183,7 @@
         {
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
-          "referenceLocator": "pkg:github/envoyproxy/envoy@v1.37.2"
+          "referenceLocator": "pkg:github/envoyproxy/envoy@v1.37.5"
         }
       ]
     },
