@@ -172,6 +172,14 @@ build:remote-cache --remote_cache=http://cache-host:9090
 build:remote-cache --remote_upload_local_results=true
 build:remote-cache --remote_timeout=120
 build:windows --remote_cache=http://cache-host:9090
+# Windows is a read-only remote-cache consumer (no --remote_upload_local_results).
+# The on-demand output prefetcher writes a temp file then renames it into bazel-out;
+# on Windows that rename/open intermittently loses a race and fails with
+# "permission denied" on freshly-materialized generated headers (e.g. protobuf
+# _virtual_includes/*.pb.h) — bazelbuild/bazel#25800, #9072. Retry transient
+# cache errors instead of failing the action. The ASan job, which loses this
+# race most often, drops the remote cache entirely (see build:win-asan below).
+build:windows --experimental_remote_cache_eviction_retries=5
 
 # =============================================================================
 # CI configuration
