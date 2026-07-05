@@ -44,6 +44,21 @@ cc_library(
     ],
 )
 
+# Web Bot Auth opt-in counter store:
+# a fixed-layout, memory-mapped, cross-process counter file (per-signer slot
+# table + coarse verify-latency histogram + a boot identity) that the nginx
+# module maps and the /.well-known/webbotauth-counter endpoint reads. Kept
+# SEPARATE from :webbotauth_core so the hermetic verifier core stays free of the
+# mmap/platform code; its only dep is pagespeed_base.
+cc_library(
+    name = "webbotauth_counter",
+    srcs = ["webbotauth_counter_store.cc"],
+    hdrs = ["webbotauth_counter_store.h"],
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)
+
 # Production network-fetch key-directory provider (the network-trust model:
 # host allowlist + SSRF guard + timeout + size cap). Pulls the engine URL
 # fetcher + http stack and is wired into the nginx server context in a later,

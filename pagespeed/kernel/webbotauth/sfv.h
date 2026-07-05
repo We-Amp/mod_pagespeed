@@ -6,11 +6,17 @@
 // subset required to read the HTTP Message Signatures (RFC 9421)
 // `Signature-Input` and `Signature` headers.  We deliberately do NOT implement
 // the full RFC 8941 grammar -- only enough to:
-//   * parse the `Signature-Input` value: a Dictionary whose member is an Inner
-//     List of sf-string component identifiers plus parameters (created,
-//     keyid, alg, expires).
+//   * parse the `Signature-Input` value: a Dictionary of one or more Inner
+//     Lists of sf-string component identifiers plus parameters (created,
+//     keyid, alg, expires, nonce, tag).
 //   * parse the `Signature` value: a Dictionary whose member is a Byte Sequence
 //     (base64 inside colons, `:...:`).
+//
+// Kept in sync manually with pagespeed-optimizer src/crypto/webbotauth/sfv.h (this
+// change upstreams the optimizer line: bounded multi-member `Signature-Input`
+// dictionaries (ParseSignatureInputDict) and component-parameter tolerance
+// (any_component_params), both needed for Web Bot Auth tag selection when a
+// request carries several RFC 9421 signatures, e.g. CDN + bot).
 //
 // Anything we cannot parse causes the caller to fail closed (Verdict::kUnknown).
 // This parser NEVER throws and NEVER reads out of bounds.
@@ -18,6 +24,7 @@
 #ifndef PAGESPEED_KERNEL_WEBBOTAUTH_SFV_H_
 #define PAGESPEED_KERNEL_WEBBOTAUTH_SFV_H_
 
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
@@ -47,12 +54,37 @@ struct SfvInnerList {
   std::vector<GoogleString> components;
   // Parameters in original order.
   std::vector<SfvParam> params;
+  // True when ANY component carried its own parameters (e.g.
+  // `"@query-param";name="x"`). The parse stays total (so an unselected
+  // dictionary member with component params cannot poison the whole header),
+  // but the parameter content is NOT retained: the header parser must reject
+  // such a member if it is the one selected for verification.
+  bool any_component_params = false;
 };
 
-// Parse a Signature-Input header value into (label -> inner list). We only
-// support the single-label case (RFC 9421 typically uses one label such as
-// `sig1`). Returns true iff exactly one dictionary member was found and parsed
-// and it was an inner list with parameters. `label` receives the member name.
+// One `label=(inner list)` member of a Signature-Input dictionary.
+struct SfvDictMember {
+  GoogleString label;
+  SfvInnerList inner;
+};
+
+// Hostile-input bound: the maximum number of Signature-Input dictionary
+// members we are willing to parse. Real requests carry one or two signatures
+// (bot + CDN); anything beyond this is rejected outright (caller -> kUnknown).
+constexpr size_t kMaxSignatureInputMembers = 8;
+
+// Parse a Signature-Input header value into its ordered dictionary members
+// (label -> inner list). Bounded by kMaxSignatureInputMembers; duplicate
+// labels are rejected (RFC 8941 says last-wins, but a duplicate label in
+// signature material is hostile/ambiguous input, so we fail closed instead).
+//
+// On any malformed input returns false (caller -> kUnknown). Never throws.
+bool ParseSignatureInputDict(StringPiece value,
+                             std::vector<SfvDictMember>* out);
+
+// Single-label convenience wrapper (the original entry point): returns true
+// iff exactly one dictionary member was found, it parsed, and none of its
+// components carried parameters. `label` receives the member name.
 //
 // On any malformed input returns false (caller -> kUnknown). Never throws.
 bool ParseSignatureInput(StringPiece value, GoogleString* label,

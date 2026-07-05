@@ -159,6 +159,11 @@ class NgxRewriteOptions : public SystemRewriteOptions {
   bool web_bot_auth_telemetry() const {
     return web_bot_auth_telemetry_.value();
   }
+  // the design record Bar-A opt-in counter mode (experimental): "off" (default/empty) |
+  // "private" | "public". Gates the /.well-known/webbotauth-counter endpoint.
+  const GoogleString& web_bot_auth_public_counter() const {
+    return web_bot_auth_public_counter_.value();
+  }
   const GoogleString& web_bot_auth_directory_host() const {
     return web_bot_auth_directory_host_.value();
   }
@@ -295,6 +300,7 @@ class NgxRewriteOptions : public SystemRewriteOptions {
   // the design record A1 Web-Bot-Auth options (default off / empty).
   Option<bool> web_bot_auth_;
   Option<bool> web_bot_auth_telemetry_;
+  Option<GoogleString> web_bot_auth_public_counter_;
   Option<GoogleString> web_bot_auth_directory_host_;
   Option<GoogleString> web_bot_auth_verified_bots_;
   Option<GoogleString> web_bot_auth_key_directory_file_;

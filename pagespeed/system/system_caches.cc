@@ -547,26 +547,41 @@ void SystemCaches::SetupCaches(ServerContext* server_context,
       // InputInfo in ../rewriter/cached_result.proto).
       server_context->set_filesystem_metadata_cache(shm_metadata_cache);
 
-      // We checkpoint the shm cache when running with external caches, and
-      // restore it (to local shm only) on restart.  Not checkpointing in this
-      // case would also be defensible, but the implementation complexity would
-      // be very high.  For example, you might have two vhosts that both use the
-      // default-enabled shared memory metadata cache, but only one has an
-      // external cache enabled.
+      // Durability here comes from the external L2 cache itself: shared memory
+      // is a volatile L1 in front of it, and any entry not resident in shm
+      // after a restart is re-fetched from the external cache on demand.
     } else {
-      // For persistence across restarts, we checkpoint the shm_metadata_cache
-      // to disk every so often, and restore it on restart. This means we don't
-      // need to write most objects through to the file cache, just ones too big
-      // to store in the SHM cache.
-      FallbackCache* metadata_fallback = new FallbackCache(
-          shm_metadata_cache, file_cache,
-          shm_metadata_cache_info->cache_backend->MaxValueSize(),
-          factory_->message_handler());
-      // SharedMemCache uses hash-produced fixed size keys internally, so its
-      // value size limit isn't affected by key length changes.
-      metadata_fallback->set_account_for_key_size(false);
-      server_context->DeleteCacheOnDestruction(metadata_fallback);
-      metadata_l2 = metadata_fallback;
+      // Persist metadata across restarts by writing every entry through to the
+      // Cyclone-backed disk cache, while serving hot reads from shared memory.
+      // The shared-memory cache is the fast L1; Cyclone is the durable L2 and
+      // source of truth, so a restart (deploy, crash, cache re-root) does not
+      // discard optimization decisions and force re-derivation on first hit.
+      // Entries larger than the shm value cap skip L1 and live in Cyclone only;
+      // small entries land in both. The WriteThroughCache is assembled below,
+      // from metadata_l1/metadata_l2, once l1_size_limit is set.
+      metadata_l1 = shm_metadata_cache;
+      metadata_l2 = file_cache;
+      l1_size_limit = shm_metadata_cache_info->cache_backend->MaxValueSize();
+
+      // Give the property store the same arrangement: shared memory is the
+      // fast L1 for property lookups; Cyclone is the durable L2 so
+      // beacon-derived page properties (critical images/selectors, dom stats)
+      // survive restarts instead of waiting for beacons to re-arrive over live
+      // traffic. This is a separate WriteThroughCache instance from the
+      // metadata one assembled below, so each gets its own CompressedCache
+      // wrap when compress_metadata_cache is on. Values over the shm cap skip
+      // L1 and live in Cyclone only. Unlike FallbackCache there is no
+      // account_for_key_size(false) equivalent, so the key counts against the
+      // L1 limit too; SharedMemCache uses hash-produced fixed-size keys
+      // internally, so the slight over-counting only steers a few
+      // borderline-sized values to Cyclone alone -- same as the metadata
+      // cache above, and harmless.
+      WriteThroughCache* pcache_write_through =
+          new WriteThroughCache(shm_metadata_cache, file_cache);
+      pcache_write_through->set_cache1_limit(
+          shm_metadata_cache_info->cache_backend->MaxValueSize());
+      server_context->DeleteCacheOnDestruction(pcache_write_through);
+      property_store_cache = pcache_write_through;
 
       // TODO(jmarantz): do we really want to use the shm-cache as a
       // pcache?  The potential for inconsistent data across a

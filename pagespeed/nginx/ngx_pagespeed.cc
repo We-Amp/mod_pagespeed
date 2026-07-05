@@ -27,12 +27,14 @@
 #include "ngx_pagespeed.h"
 
 #include <cstdint>
+#include <cstdlib>
 #include <memory>
 #include <optional>
 #include <set>
 #include <vector>
 
 #include "absl/strings/str_format.h"
+#include "log_message_handler.h"
 #include "net/instaweb/http/public/async_fetch.h"
 #include "net/instaweb/http/public/cache_url_async_fetcher.h"
 #include "net/instaweb/http/public/request_context.h"
@@ -74,6 +76,7 @@
 #include "pagespeed/kernel/util/gzip_inflater.h"
 #include "pagespeed/kernel/util/statistics_logger.h"
 #include "pagespeed/kernel/webbotauth/key_directory_warmer.h"
+#include "pagespeed/kernel/webbotauth/webbotauth_counter_store.h"
 #include "pagespeed/system/admin_site.h"
 #include "pagespeed/system/in_place_resource_recorder.h"
 #include "pagespeed/system/system_caches.h"
@@ -756,6 +759,10 @@ enum Response : std::uint8_t {
   kGlobalAdmin,
   kPagespeedSubrequest,
   kErrorResponse,
+  // the design record Bar-A opt-in counter (experimental): GET/HEAD
+  // /.well-known/webbotauth-counter when the mode is non-off. Off (default) never
+  // matches -> the request falls through to normal handling (404).
+  kWebBotAuthCounter,
   kResource,
 };
 }  // namespace RequestRouting
@@ -1328,8 +1335,14 @@ StringPiece ps_determine_host(ngx_http_request_t* r) {
   if (host.size() == 0) {
     // If host is unspecified, perhaps because of a pure HTTP 1.0 "GET /path",
     // fall back to server IP address.  Based on ngx_http_variable_server_addr.
+    // The buffer must come from r->pool, not the stack: callers read the
+    // returned StringPiece after this frame is gone.
     ngx_str_t s;
-    u_char addr[NGX_SOCKADDR_STRLEN];
+    u_char* addr =
+        static_cast<u_char*>(ngx_pnalloc(r->pool, NGX_SOCKADDR_STRLEN));
+    if (addr == nullptr) {
+      return host;
+    }
     s.len = NGX_SOCKADDR_STRLEN;
     s.data = addr;
     ngx_int_t rc = ngx_connection_local_sockaddr(r->connection, &s, 0);
@@ -1902,6 +1915,20 @@ RequestRouting::Response ps_route_request(ngx_http_request_t* r) {
   }
   if (ps_is_beacon_request(r, url, global_options)) {
     return RequestRouting::kBeacon;
+  }
+
+  // the design record Bar-A opt-in counter endpoint (experimental). Only match GET/HEAD
+  // when the mode is non-off; POST/other methods and mode==off fall through to
+  // normal handling (so they 404). The token/coarse-vs-exact/hide decision is
+  // made in the handler. The fixed well-known path is not an operator option.
+  {
+    const GoogleString& counter_mode =
+        global_options->web_bot_auth_public_counter();
+    if ((counter_mode == "public" || counter_mode == "private") &&
+        (r->method & (NGX_HTTP_GET | NGX_HTTP_HEAD)) &&
+        url.PathSansQuery() == "/.well-known/webbotauth-counter") {
+      return RequestRouting::kWebBotAuthCounter;
+    }
   }
 
   return RequestRouting::kResource;
@@ -3121,6 +3148,18 @@ ngx_int_t ps_content_handler(ngx_http_request_t* r) {
       return NGX_DECLINED;
     case RequestRouting::kBeacon:
       return ps_beacon_handler(r);
+    case RequestRouting::kWebBotAuthCounter: {
+      // the design record Bar-A opt-in counter (experimental). Build the coarse/exact doc
+      // (or hide it) in the webbotauth handler, then emit it. Hiding (mode
+      // private + no valid token) declines -> normal 404. HEAD is honored by
+      // send_out_headers_and_body (r->header_only sends headers, no body).
+      ResponseHeaders response_headers;
+      GoogleString body;
+      if (!ps_webbotauth_counter_build_response(r, &response_headers, &body)) {
+        return NGX_DECLINED;
+      }
+      return send_out_headers_and_body(r, response_headers, body);
+    }
     case RequestRouting::kStaticContent:
     case RequestRouting::kMessages:
       return ps_simple_handler(r, cfg_s->server_context, response_category);
@@ -3421,10 +3460,11 @@ ngx_int_t ps_init(ngx_conf_t* cf) {
     }
     *wba_h = ps_webbotauth_preaccess_handler;
 
-    // RSL-CAP enforcement, default-off. Runs in the same phase
-    // AFTER the observe-only A1 classifier; early-returns NGX_DECLINED unless
-    // RslCapEnforcement is enabled, otherwise maps the validator verdict to an
-    // inline 401/402.
+    // RSL-CAP enforcement, default-off. Registered last, and
+    // nginx installs same-phase handlers in REVERSE registration order, so
+    // this runs FIRST in the phase (before the observe-only A1 classifier
+    // above); early-returns NGX_DECLINED unless RslCapEnforcement is enabled,
+    // otherwise maps the validator verdict to an inline 401/402.
     ngx_http_handler_pt* rce_h = static_cast<ngx_http_handler_pt*>(
         ngx_array_push(&cmcf->phases[phase].handlers));
     if (rce_h == nullptr) {
@@ -3528,6 +3568,61 @@ ngx_int_t ps_init_module(ngx_cycle_t* cycle) {
 
     cfg_m->driver_factory->LoggingInit(cycle->log, true);
     cfg_m->driver_factory->RootInit();
+
+    // the design record Bar-A opt-in counter (experimental): map (or create on first run)
+    // the shared counter file HERE in the master, before workers fork, so the
+    // MAP_SHARED region is inherited by every worker and they all increment the
+    // same physical counters. Only when some server has Web Bot Auth enabled or
+    // a non-off counter mode (no file is created when the feature is unused).
+    // The path is PAGESPEED_WEB_BOT_AUTH_COUNTER_FILE if set (read from the
+    // master's launch environment), else derived from the first configured
+    // FileCachePath (a guaranteed nginx-writable directory).
+    {
+      bool want_counter = false;
+      GoogleString cache_dir;
+      for (s = 0; s < cmcf->servers.nelts; s++) {
+        ps_srv_conf_t* cfg_s = static_cast<ps_srv_conf_t*>(
+            cscfp[s]->ctx->srv_conf[ngx_pagespeed.ctx_index]);
+        if (cfg_s->server_context == nullptr) {
+          continue;
+        }
+        NgxRewriteOptions* opt = cfg_s->server_context->config();
+        if (opt == nullptr) {
+          continue;
+        }
+        const GoogleString& mode = opt->web_bot_auth_public_counter();
+        if (opt->web_bot_auth() || mode == "public" || mode == "private") {
+          want_counter = true;
+        }
+        if (cache_dir.empty() && !opt->file_cache_path().empty()) {
+          cache_dir = opt->file_cache_path();
+        }
+      }
+      if (want_counter) {
+        GoogleString counter_path;
+        const char* env_file = getenv("PAGESPEED_WEB_BOT_AUTH_COUNTER_FILE");
+        if (env_file != nullptr && env_file[0] != '\0') {
+          counter_path = env_file;
+        } else if (!cache_dir.empty()) {
+          counter_path = webbotauth::WebBotAuthCounterPath(
+              std::string(cache_dir.data(), cache_dir.size()));
+        }
+        if (!counter_path.empty()) {
+          ps_webbotauth_counter_map(counter_path);
+        } else {
+          // The feature is enabled but no path resolved (no FileCachePath on any
+          // server AND PAGESPEED_WEB_BOT_AUTH_COUNTER_FILE unset): the endpoint
+          // will serve an all-zero document. Tell the operator.
+          ngx_log_error(
+              NGX_LOG_WARN, cycle->log, 0,
+              "pagespeed: web-bot-auth opt-in counter is enabled but "
+              "no counter file path could be resolved (set "
+              "FileCachePath or "
+              "PAGESPEED_WEB_BOT_AUTH_COUNTER_FILE); the endpoint will "
+              "serve an all-zero document");
+        }
+      }
+    }
   } else {
     delete cfg_m->driver_factory;
     cfg_m->driver_factory = nullptr;
@@ -3556,6 +3651,16 @@ void ps_exit_child_process(ngx_cycle_t* cycle) {
   if (cfg_m != nullptr && cfg_m->driver_factory != nullptr) {
     cfg_m->driver_factory->ShutDown();
   }
+  // Route any further LOG() to stderr and drop the NgxGLogSink (the nginx
+  // counterpart of Apache's pagespeed_child_exit shutdown ordering).
+  // Placement differs from Apache deliberately: cycle->log stays valid for the
+  // whole hook, so teardown diagnostics above still reach the error log. The
+  // hazard window this closes is AFTER the hook — a worker thread the factory
+  // shutdown did not join that LOG()s after the cycle pool is destroyed. (The
+  // spdlog path is already safe via the immortal held logger; the
+  // flag protects the registered-sink path into ngx_log.)
+  pagespeed_logging::ShutDownLogging();
+  log_message_handler::ShutDown();
 }
 
 // Parse the operator refresh-seconds string. Empty/invalid -> 3600; clamped to
@@ -3687,6 +3792,12 @@ ngx_int_t ps_init_child_process(ngx_cycle_t* cycle) {
   if (!NgxBaseFetch::Initialize(cycle)) {
     return NGX_ERROR;
   }
+
+  // the design record Bar-A opt-in counter (experimental): read the SECRET bearer token
+  // gating the exact counter document from this worker's environment (populated
+  // by nginx's `env` directive). Never logged as a value. The counter file was
+  // already mapped by the master (ps_init_module) and inherited across fork.
+  ps_webbotauth_counter_read_token();
 
   // ChildInit() will initialise all ServerContexts, which we need to
   // create ProxyFetchFactories below

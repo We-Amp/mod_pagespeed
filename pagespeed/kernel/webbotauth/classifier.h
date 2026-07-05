@@ -19,7 +19,16 @@ namespace net_instaweb {
 namespace webbotauth {
 
 enum class Verdict {
-  kHuman,        // no Signature-Input/Signature headers at all
+  // No web-bot-auth signature material: either the request carries no
+  // Signature-Input/Signature headers at all, or it carries parseable
+  // signature material with NO member tagged "web-bot-auth" (some other
+  // signing scheme -- classified exactly as if unsigned, never invalid).
+  // LOAD-BEARING INVARIANT (the nginx wiring depends on it): after the
+  // wiring's no-material short-circuit, kHuman is reachable ONLY via the
+  // untagged/other-tag path -- do not add other kHuman returns to
+  // VerifyAndClassify without revisiting the wiring's label/counter logic.
+  // (Upstreamed from the optimizer line.)
+  kHuman,
   kSignedAgent,  // valid Ed25519 signature; keyid NOT in verified-bot map
   kVerifiedBot,  // valid signature AND keyid present in operator verified-bot map
   kUnknown,      // any failure: malformed, unsupported, bad sig, fetch/SSRF
@@ -41,6 +50,16 @@ class VerifiedBotRegistry {
 
   // Returns true and sets *bot_name if the keyid is a known verified bot.
   bool Lookup(StringPiece keyid, GoogleString* bot_name) const;
+
+  // Iterate every registered (keyid, bot_name) pair. Used by the opt-in counter
+  // endpoint to join operator-assigned names against the
+  // per-signer slots by keyid hash. Read-only; order is the map's.
+  template <typename Fn>
+  void ForEach(Fn&& fn) const {
+    for (const auto& entry : map_) {
+      fn(StringPiece(entry.first), StringPiece(entry.second));
+    }
+  }
 
   bool empty() const { return map_.empty(); }
 

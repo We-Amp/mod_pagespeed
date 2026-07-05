@@ -31,6 +31,21 @@ pagespeed_cc_test(
     ],
 )
 
+# the design record Bar-A opt-in counter store: FNV-1a-64 keyid hash (asserted cross-engine
+# compatible with the 2.0 optimizer line), lock-free slot claim + overflow (single-threaded and
+# under 8-thread contention), latency bucketing, boot-identity minting, and the
+# mmap open/create/self-heal round-trip. Uses a temp file; no network.
+pagespeed_cc_test(
+    name = "webbotauth_counter_store_test",
+    size = "small",
+    srcs = ["webbotauth_counter_store_test.cc"],
+    shard_count = 1,
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/kernel/webbotauth:webbotauth_counter",
+    ],
+)
+
 # Pure in-memory JWKS string parsing. No @ed25519 needed (uses the 43-'A'
 # base64url = 32 zero bytes trick). No network/threads/filesystem/clock.
 pagespeed_cc_test(

@@ -46,6 +46,7 @@ const char kAdminPath[] = "AdminPath";
 const char kGlobalAdminPath[] = "GlobalAdminPath";
 const char kWebBotAuth[] = "WebBotAuth";
 const char kWebBotAuthTelemetry[] = "WebBotAuthTelemetry";
+const char kWebBotAuthPublicCounter[] = "WebBotAuthPublicCounter";
 const char kWebBotAuthDirectoryHost[] = "WebBotAuthDirectoryHost";
 const char kWebBotAuthVerifiedBots[] = "WebBotAuthVerifiedBots";
 const char kWebBotAuthKeyDirectoryFile[] = "WebBotAuthKeyDirectoryFile";
@@ -157,7 +158,23 @@ void NgxRewriteOptions::AddProperties() {
       false, &NgxRewriteOptions::web_bot_auth_telemetry_, "wbat",
       kWebBotAuthTelemetry, kServerScope,
       "Count verified/signed-agent requests in the opt-in "
-      "web_bot_auth_verified_signed_requests statistic. Default off.",
+      "web_bot_auth_verified_signed_requests statistic (and non-web-bot-auth "
+      "signature material in web_bot_auth_other_signature_requests). "
+      "Default off.",
+      false);
+  // the design record Bar-A (experimental): opt-in verified-crawl counter mode. One of
+  // off (default) | private | public; gates the well-known counter endpoint
+  // /.well-known/webbotauth-counter. NON-secret; the gating bearer token is a
+  // SEPARATE secret carried via the PAGESPEED_WEB_BOT_AUTH_COUNTER_TOKEN env
+  // var, NEVER a directive (a directive would land in world-readable config).
+  add_ngx_option(
+      "", &NgxRewriteOptions::web_bot_auth_public_counter_, "wbapc",
+      kWebBotAuthPublicCounter, kServerScope,
+      "Opt-in verified-crawl counter mode (experimental): off (default) | "
+      "private | public. Enabling a non-off mode publishes a discoverable "
+      "marker at /.well-known/webbotauth-counter; the exact document is gated "
+      "by the PAGESPEED_WEB_BOT_AUTH_COUNTER_TOKEN env bearer token. Default "
+      "off (endpoint invisible).",
       false);
   add_ngx_option(
       "", &NgxRewriteOptions::web_bot_auth_directory_host_, "wbadh",

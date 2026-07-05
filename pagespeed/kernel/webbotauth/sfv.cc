@@ -1,10 +1,15 @@
 // Copyright 2026 We-Amp B.V.
 // Licensed under the Apache License, Version 2.0 (the "License").
+//
+// Kept in sync manually with pagespeed-optimizer src/crypto/webbotauth/sfv.cc
+// (this change upstreams the optimizer line: bounded multi-member Signature-Input
+// dictionary parsing + component-parameter tolerance, see sfv.h).
 
 #include "pagespeed/kernel/webbotauth/sfv.h"
 
 #include <cctype>
 #include <cstdlib>
+#include <utility>
 
 #include "pagespeed/kernel/webbotauth/base64.h"
 
@@ -12,6 +17,17 @@ namespace net_instaweb {
 namespace webbotauth {
 
 namespace {
+
+// PARSER LAXNESS (intentional, fail-closed): this parser accepts a handful
+// of inputs strict RFC 8941 would reject -- adjacent inner-list items
+// without a separating SP, HTAB where the grammar wants SP, bytes >= 0x80
+// inside sf-strings, leading-zero integers, unchecked base64 padding
+// counts.  All of them are harmless by construction: the verifier
+// re-serializes the parsed structure STRICTLY and verifies over that
+// serialization, so any input whose strict re-serialization differs from
+// what the signer signed yields a signature-base mismatch and the request
+// fail-closes to kUnknown at crypto time.  Laxness here can never widen
+// trust.
 
 // A tiny forward cursor over a StringPiece. All accessors are bounds-checked.
 class Scanner {
@@ -160,16 +176,15 @@ bool ParseInnerList(Scanner* sc, SfvInnerList* out) {
     } else {
       return false;  // we require quoted component identifiers
     }
-    // A component may carry its own params (e.g. ;name=...); for the supported
-    // derived components (@method/@authority/@path) there are none, and any
-    // present params make it an unsupported component which the header_parser
-    // will reject. We skip over per-item params here to keep parsing total.
+    // A component may carry its own params (e.g. ;name=...). We do not
+    // support component parameters, but the parse stays TOTAL: an unselected
+    // dictionary member with component params must not poison the whole
+    // header. The parameter content is dropped; the flag lets the header
+    // parser reject the member if it is the one selected for verification.
     std::vector<SfvParam> item_params;
     if (!ParseParams(sc, &item_params)) return false;
     if (!item_params.empty()) {
-      // Mark the component as carrying params by appending a sentinel the
-      // header parser treats as unsupported. Simplest: reject now.
-      return false;
+      out->any_component_params = true;
     }
     out->components.push_back(comp);
     sc->SkipSpaces();
@@ -181,23 +196,43 @@ bool ParseInnerList(Scanner* sc, SfvInnerList* out) {
 
 }  // namespace
 
+bool ParseSignatureInputDict(StringPiece value,
+                             std::vector<SfvDictMember>* out) {
+  out->clear();
+  Scanner sc(value);
+  while (true) {
+    sc.SkipSpaces();
+    SfvDictMember member;
+    // dictionary member: key "=" inner-list
+    if (!ParseKey(&sc, &member.label)) return false;
+    if (!sc.Consume('=')) return false;
+    if (!ParseInnerList(&sc, &member.inner)) return false;
+    // Duplicate labels are ambiguous signature material (RFC 8941 last-wins
+    // does not apply cleanly to signatures): fail closed. The scan is
+    // quadratic but bounded by kMaxSignatureInputMembers.
+    for (const SfvDictMember& prev : *out) {
+      if (prev.label == member.label) return false;
+    }
+    if (out->size() >= kMaxSignatureInputMembers) return false;
+    out->push_back(std::move(member));
+    sc.SkipSpaces();
+    if (sc.Eof()) return true;
+    // Another dictionary member must follow a comma; anything else is
+    // trailing garbage.
+    if (!sc.Consume(',')) return false;
+  }
+}
+
 bool ParseSignatureInput(StringPiece value, GoogleString* label,
                          SfvInnerList* out) {
-  Scanner sc(value);
-  sc.SkipSpaces();
-  // dictionary member: key "=" inner-list
-  GoogleString key;
-  if (!ParseKey(&sc, &key)) return false;
-  if (!sc.Consume('=')) return false;
-  if (!ParseInnerList(&sc, out)) return false;
-  sc.SkipSpaces();
-  // Only the single-label case is supported: reject a trailing dictionary
-  // separator (another member) -> kUnknown.
-  if (!sc.Eof()) {
-    if (sc.Peek() == ',') return false;  // multiple labels unsupported
-    return false;                        // trailing garbage
-  }
-  *label = key;
+  std::vector<SfvDictMember> members;
+  if (!ParseSignatureInputDict(value, &members)) return false;
+  if (members.size() != 1) return false;  // single-label contract
+  // Preserve the original single-label contract: components carrying their
+  // own parameters are unsupported here.
+  if (members[0].inner.any_component_params) return false;
+  *label = std::move(members[0].label);
+  *out = std::move(members[0].inner);
   return true;
 }
 

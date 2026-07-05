@@ -36,6 +36,7 @@
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "net/instaweb/util/public/cache_property_store.h"
+#include "net/instaweb/util/public/mock_property_page.h"
 #include "net/instaweb/util/public/property_cache.h"
 #include "net/instaweb/util/public/property_store.h"
 #include "pagespeed/kernel/base/abstract_shared_mem.h"
@@ -202,6 +203,17 @@ class SystemCachesTest : public CustomRewriteTestBase<SystemRewriteOptions> {
   }
 
   void SetUp() override {
+    // The cache directories are created once per process (mkdtemp) and shared
+    // across every test here.  Metadata now writes through to the on-disk
+    // Cyclone cache, so without this an entry written by an earlier test would
+    // persist on disk and leak into a later test that reuses the same path
+    // (e.g. FileShare's write to the alt path being visible to ShmShare).  Wipe
+    // the directory contents before each test to keep tests isolated.
+    for (const char* dir : {kCachePath, kAltCachePath, kAltCachePath2}) {
+      for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+        std::filesystem::remove_all(entry.path());
+      }
+    }
     SetUpSystemCaches();
     CustomRewriteTestBase<SystemRewriteOptions>::SetUp();
   }
@@ -217,6 +229,18 @@ class SystemCachesTest : public CustomRewriteTestBase<SystemRewriteOptions> {
     system_caches_->ShutDown(factory()->message_handler());
 
     shared_mem_ = std::make_unique<NullSharedMem>();
+    SetUpSystemCaches();
+  }
+
+  // Simulates a process restart: tears down the caches and installs a fresh,
+  // empty shared-memory segment, while leaving on-disk cache directories
+  // untouched.  Anything that only lived in shared memory before the restart is
+  // gone; anything written through to the on-disk Cyclone cache survives.
+  void RestartPreservingDisk() {
+    system_caches_->StopCacheActivity();
+    system_caches_->ShutDown(factory()->message_handler());
+
+    shared_mem_ = std::make_unique<InProcessSharedMem>(thread_system_.get());
     SetUpSystemCaches();
   }
 
@@ -468,9 +492,10 @@ TEST_F(SystemCachesTest, BasicShmAndLru) {
 
   std::unique_ptr<ServerContext> server_context(
       SetupServerContext(options_.release()));
-  // We don't use the LRU when shm cache is on.
-  EXPECT_STREQ(Compressed(Fallback(Stats("shm_cache", "SharedMemCache<64>"),
-                                   FileCacheWithStats())),
+  // We don't use the LRU when shm cache is on.  Metadata writes through to the
+  // on-disk Cyclone cache so it survives a restart; shm is the read-fast L1.
+  EXPECT_STREQ(Compressed(WriteThrough(Stats("shm_cache", "SharedMemCache<64>"),
+                                       FileCacheWithStats())),
                server_context->metadata_cache()->Name());
   // HTTP cache is unaffected.
   EXPECT_STREQ(HttpCache(FileCacheWithStats()),
@@ -490,9 +515,10 @@ TEST_F(SystemCachesTest, BasicShmAndNoLru) {
 
   std::unique_ptr<ServerContext> server_context(
       SetupServerContext(options_.release()));
-  // We don't use the LRU when shm cache is on.
-  EXPECT_STREQ(Compressed(Fallback(Stats("shm_cache", "SharedMemCache<64>"),
-                                   FileCacheWithStats())),
+  // We don't use the LRU when shm cache is on.  Metadata writes through to the
+  // on-disk Cyclone cache so it survives a restart; shm is the read-fast L1.
+  EXPECT_STREQ(Compressed(WriteThrough(Stats("shm_cache", "SharedMemCache<64>"),
+                                       FileCacheWithStats())),
                server_context->metadata_cache()->Name());
   // HTTP cache is unaffected.
   EXPECT_STREQ(HttpCache(FileCacheWithStats()),
@@ -517,9 +543,10 @@ TEST_F(SystemCachesTest, DoubleShmCreate) {
 
   std::unique_ptr<ServerContext> server_context(
       SetupServerContext(options_.release()));
-  // We don't use the LRU when shm cache is on.
-  EXPECT_STREQ(Compressed(Fallback(Stats("shm_cache", "SharedMemCache<64>"),
-                                   FileCacheWithStats())),
+  // We don't use the LRU when shm cache is on.  Metadata writes through to the
+  // on-disk Cyclone cache so it survives a restart; shm is the read-fast L1.
+  EXPECT_STREQ(Compressed(WriteThrough(Stats("shm_cache", "SharedMemCache<64>"),
+                                       FileCacheWithStats())),
                server_context->metadata_cache()->Name());
   // HTTP cache is unaffected.
   EXPECT_STREQ(HttpCache(FileCacheWithStats()),
@@ -937,8 +964,8 @@ TEST_F(SystemCachesTest, ShmShare) {
   std::vector<ServerContext*> servers;
   for (int i = 0; i < 3; ++i) {
     servers.push_back(SetupServerContext(configs[i]));
-    EXPECT_STREQ(Compressed(Fallback(Stats("shm_cache", "SharedMemCache<64>"),
-                                     FileCacheWithStats())),
+    EXPECT_STREQ(Compressed(WriteThrough(Stats("shm_cache", "SharedMemCache<64>"),
+                                         FileCacheWithStats())),
                  servers[i]->metadata_cache()->Name());
   }
 
@@ -985,14 +1012,14 @@ TEST_F(SystemCachesTest, ShmDefault) {
   for (int i = 0; i < 3; ++i) {
     servers.push_back(SetupServerContext(configs[i]));
   }
-  EXPECT_STREQ(Compressed(Fallback(Stats("shm_cache", "SharedMemCache<64>"),
-                                   FileCacheWithStats())),
+  EXPECT_STREQ(Compressed(WriteThrough(Stats("shm_cache", "SharedMemCache<64>"),
+                                       FileCacheWithStats())),
                servers[0]->metadata_cache()->Name());
-  EXPECT_STREQ(Compressed(Fallback(Stats("shm_cache", "SharedMemCache<64>"),
-                                   FileCacheWithStats())),
+  EXPECT_STREQ(Compressed(WriteThrough(Stats("shm_cache", "SharedMemCache<64>"),
+                                       FileCacheWithStats())),
                servers[1]->metadata_cache()->Name());
-  EXPECT_STREQ(Compressed(Fallback(Stats("shm_cache", "SharedMemCache<64>"),
-                                   FileCacheWithStats())),
+  EXPECT_STREQ(Compressed(WriteThrough(Stats("shm_cache", "SharedMemCache<64>"),
+                                       FileCacheWithStats())),
                servers[2]->metadata_cache()->Name());
 
   // This is only about metadata cache.
@@ -1004,6 +1031,136 @@ TEST_F(SystemCachesTest, ShmDefault) {
   TestGet(servers[2]->metadata_cache(), "b", CacheInterface::kNotFound, "");
 
   STLDeleteElements(&servers);
+}
+
+// Regression test: metadata must survive a process restart.
+//
+// In the default configuration (shared-memory metadata cache, no external
+// cache) small metadata used to live in shared memory only, so a restart threw
+// it away and every resource was re-optimized on its first request afterwards.
+// The metadata cache now writes through to the on-disk Cyclone cache, so
+// entries persist.  We write a small value, restart with a fresh (empty)
+// shared-memory segment while leaving the disk cache in place, and confirm the
+// value is still readable -- which it can only be if it was written through to
+// disk.  Under the old FallbackCache wiring this Get would return kNotFound.
+TEST_F(SystemCachesTest, ShmMetadataPersistsAcrossRestart) {
+  GoogleString error_msg;
+  EXPECT_TRUE(system_caches_->CreateShmMetadataCache(
+      kCachePath, kUsableMetadataCacheSize, &error_msg));
+
+  options_->set_file_cache_path(kCachePath);
+  options_->set_use_shared_mem_locking(false);
+  options_->set_lru_cache_kb_per_process(0);
+  PrepareWithConfig(options_.get());
+
+  {
+    std::unique_ptr<ServerContext> server_context(
+        SetupServerContext(options_.release()));
+    // Small enough to sit under the shm value cap -- exactly the case the old
+    // FallbackCache kept in shared memory only.
+    TestPut(server_context->metadata_cache(), "persist", "value");
+    TestGet(server_context->metadata_cache(), "persist",
+            CacheInterface::kAvailable, "value");
+  }
+
+  // Simulate a restart: shared memory comes back empty, but the on-disk Cyclone
+  // cache at kCachePath is untouched.
+  RestartPreservingDisk();
+
+  EXPECT_TRUE(system_caches_->CreateShmMetadataCache(
+      kCachePath, kUsableMetadataCacheSize, &error_msg));
+  std::unique_ptr<SystemRewriteOptions> options2(
+      new SystemRewriteOptions(thread_system_.get()));
+  options2->set_file_cache_path(kCachePath);
+  options2->set_use_shared_mem_locking(false);
+  options2->set_lru_cache_kb_per_process(0);
+  PrepareWithConfig(options2.get());
+
+  std::unique_ptr<ServerContext> restarted(
+      SetupServerContext(options2.release()));
+  // Served from the persistent Cyclone cache even though shm started empty.
+  TestGet(restarted->metadata_cache(), "persist", CacheInterface::kAvailable,
+          "value");
+}
+
+// Regression test: page properties must survive a process restart.
+//
+// The property store shares the metadata cache's shm/Cyclone wiring, so it has
+// the same failure mode: small property values used to live in shared memory
+// only (FallbackCache) and were dropped on restart.  That data -- critical
+// images/selectors, dom stats -- is beacon-derived, so unlike metadata it can't
+// be recomputed locally; it only comes back once live traffic beacons again.
+// The property store now writes through to the on-disk Cyclone cache.  We write
+// a property, restart with a fresh (empty) shared-memory segment while leaving
+// the disk cache in place, and confirm the property is still readable.  Under
+// the old FallbackCache wiring the post-restart Read finds nothing.
+TEST_F(SystemCachesTest, PropertyCachePersistsAcrossRestart) {
+  const char kPageUrl[] = "http://www.example.com/page.html";
+  const char kOptionsHash[] = "hash";
+  const char kCacheKeySuffix[] = "suffix";
+  const char kPropertyName[] = "critical_images";
+  const char kPropertyValue[] = "beacon-derived value";
+
+  GoogleString error_msg;
+  EXPECT_TRUE(system_caches_->CreateShmMetadataCache(
+      kCachePath, kUsableMetadataCacheSize, &error_msg));
+
+  options_->set_file_cache_path(kCachePath);
+  options_->set_use_shared_mem_locking(false);
+  options_->set_lru_cache_kb_per_process(0);
+  PrepareWithConfig(options_.get());
+
+  {
+    std::unique_ptr<ServerContext> server_context(
+        SetupServerContext(options_.release()));
+    // The property store gets its own shm/Cyclone write-through, separate from
+    // the metadata cache's.
+    EXPECT_STREQ(
+        Pcache(Compressed(WriteThrough(Stats("shm_cache", "SharedMemCache<64>"),
+                                       FileCacheWithStats()))),
+        server_context->page_property_cache()->property_store()->Name());
+
+    PropertyCache* pcache = server_context->page_property_cache();
+    const PropertyCache::Cohort* cohort =
+        pcache->GetCohort(RewriteDriver::kDomCohort);
+    ASSERT_TRUE(cohort != nullptr);
+    // Small enough to sit under the shm value cap -- exactly the case the old
+    // FallbackCache kept in shared memory only.
+    MockPropertyPage page(thread_system_.get(), pcache, kPageUrl, kOptionsHash,
+                          kCacheKeySuffix);
+    pcache->Read(&page);
+    page.UpdateValue(cohort, kPropertyName, kPropertyValue);
+    page.WriteCohort(cohort);
+  }
+
+  // Simulate a restart: shared memory comes back empty, but the on-disk Cyclone
+  // cache at kCachePath is untouched.
+  RestartPreservingDisk();
+
+  EXPECT_TRUE(system_caches_->CreateShmMetadataCache(
+      kCachePath, kUsableMetadataCacheSize, &error_msg));
+  std::unique_ptr<SystemRewriteOptions> options2(
+      new SystemRewriteOptions(thread_system_.get()));
+  options2->set_file_cache_path(kCachePath);
+  options2->set_use_shared_mem_locking(false);
+  options2->set_lru_cache_kb_per_process(0);
+  PrepareWithConfig(options2.get());
+
+  std::unique_ptr<ServerContext> restarted(
+      SetupServerContext(options2.release()));
+  PropertyCache* pcache = restarted->page_property_cache();
+  const PropertyCache::Cohort* cohort =
+      pcache->GetCohort(RewriteDriver::kDomCohort);
+  ASSERT_TRUE(cohort != nullptr);
+  MockPropertyPage page(thread_system_.get(), pcache, kPageUrl, kOptionsHash,
+                        kCacheKeySuffix);
+  pcache->Read(&page);
+  // Served from the persistent Cyclone cache even though shm started empty.
+  EXPECT_TRUE(page.valid());
+  PropertyValue* property = page.GetProperty(cohort, kPropertyName);
+  ASSERT_TRUE(property != nullptr);
+  EXPECT_TRUE(property->has_value());
+  EXPECT_STREQ(kPropertyValue, property->value());
 }
 
 void SystemCachesExternalCacheTestBase::TestCacheShare() {

@@ -18,8 +18,20 @@
 // Usage:
 //   webbotauth_sign_tool --emit=jwks   --kid=K
 //   webbotauth_sign_tool --emit=headers --kid=K --method=GET \
-//       --authority=localhost --path=/wba-probe [--created=UNIXSEC] [--tamper]
+//       --authority=localhost --path=/wba-probe [--created=UNIXSEC] \
+//       [--expires=UNIXSEC] [--nonce=N] [--tag=web-bot-auth] \
+//       [--components=@authority,signature-agent] \
+//       [--field=signature-agent="https://..."] [--tamper]
 //   --emit=all prints labeled lines for jwks + headers.
+//
+// --components selects the covered components (comma-separated; lowercase
+// names are RFC 9421 field components). --field (repeatable, name=value)
+// supplies the request field values the signature base covers -- e.g. the
+// scanner probe's Signature-Agent sf-string. --tag defaults to
+// "web-bot-auth" (the verifier only selects tagged signatures); pass --tag=
+// to omit it, or another value to mint non-web-bot-auth material for tests.
+// (Upstreamed from the optimizer line. the 2.0 optimizer line's --emit=keystore has no analog here: the
+// 1.15 harness pre-seeds keys via the JWKS file that --emit=jwks prints.)
 //
 // For the AgentPass A3 (RSL-CAP) enforcement smoke it can also mint a signed
 // capability token (same deterministic key the JWKS publishes):
@@ -35,6 +47,8 @@
 #include <cstring>
 #include <ctime>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "ed25519.h"
 #include "pagespeed/kernel/base/string.h"
@@ -135,6 +149,11 @@ int Run(int argc, char** argv) {
   GoogleString path = "/wba-probe";
   GoogleString kid = "test-key-1";
   GoogleString created_str;
+  GoogleString expires_str;
+  GoogleString nonce;
+  GoogleString tag = "web-bot-auth";  // the tag the verifier selects on
+  GoogleString components_spec = "@method,@authority,@path";
+  std::vector<std::pair<GoogleString, GoogleString>> field_values;
   bool tamper = false;
   // RSL-CAP token fields (used by --emit=rslcap). All operator-supplied at mint
   // time; the smoke drives them. lic/scope are comma-separated lists.
@@ -158,6 +177,21 @@ int Run(int argc, char** argv) {
       kid = v;
     } else if (FlagValue(argv[i], "--created=", &v)) {
       created_str = v;
+    } else if (FlagValue(argv[i], "--expires=", &v)) {
+      expires_str = v;
+    } else if (FlagValue(argv[i], "--nonce=", &v)) {
+      nonce = v;
+    } else if (FlagValue(argv[i], "--tag=", &v)) {
+      tag = v;  // empty value omits the tag param entirely
+    } else if (FlagValue(argv[i], "--components=", &v)) {
+      components_spec = v;
+    } else if (FlagValue(argv[i], "--field=", &v)) {
+      GoogleString::size_type eq = v.find('=');
+      if (eq == GoogleString::npos) {
+        fprintf(stderr, "--field expects name=value: %s\n", argv[i]);
+        return 2;
+      }
+      field_values.emplace_back(v.substr(0, eq), v.substr(eq + 1));
     } else if (FlagValue(argv[i], "--iss=", &v)) {
       iss = v;
     } else if (FlagValue(argv[i], "--sub=", &v)) {
@@ -207,13 +241,27 @@ int Run(int argc, char** argv) {
 
     // Build @signature-params exactly as the header and the signature base must
     // agree on, using the library serializer (component order + params order).
+    // Scanner-probe param order: created, expires, keyid, alg, nonce, tag.
     SfvInnerList list;
-    list.components = {"@method", "@authority", "@path"};
+    StringPieceVector components;
+    SplitStringPieceToVector(components_spec, ",", &components,
+                             true /* omit_empty */);
+    for (StringPiece c : components) {
+      list.components.push_back(GoogleString(c.data(), c.size()));
+    }
     SfvParam created_p;
     created_p.name = "created";
     created_p.type = SfvParam::kInteger;
     created_p.int_value = created;
     list.params.push_back(created_p);
+    if (!expires_str.empty()) {
+      SfvParam expires_p;
+      expires_p.name = "expires";
+      expires_p.type = SfvParam::kInteger;
+      expires_p.int_value =
+          static_cast<int64_t>(strtoll(expires_str.c_str(), nullptr, 10));
+      list.params.push_back(expires_p);
+    }
     SfvParam keyid_p;
     keyid_p.name = "keyid";
     keyid_p.type = SfvParam::kString;
@@ -224,6 +272,20 @@ int Run(int argc, char** argv) {
     alg_p.type = SfvParam::kString;
     alg_p.str_value = "ed25519";
     list.params.push_back(alg_p);
+    if (!nonce.empty()) {
+      SfvParam nonce_p;
+      nonce_p.name = "nonce";
+      nonce_p.type = SfvParam::kString;
+      nonce_p.str_value = nonce;
+      list.params.push_back(nonce_p);
+    }
+    if (!tag.empty()) {
+      SfvParam tag_p;
+      tag_p.name = "tag";
+      tag_p.type = SfvParam::kString;
+      tag_p.str_value = tag;
+      list.params.push_back(tag_p);
+    }
 
     GoogleString params = SerializeSignatureParams(list);
 
@@ -231,7 +293,19 @@ int Run(int argc, char** argv) {
     brv.method = method;
     brv.authority = authority;
     brv.path = path;
-    GoogleString base = BuildSignatureBase(brv, list.components, params);
+    for (const std::pair<GoogleString, GoogleString>& fv : field_values) {
+      HeaderField field;
+      field.name = fv.first;
+      field.value = fv.second;
+      brv.fields.push_back(field);
+    }
+    GoogleString base;
+    if (!BuildSignatureBase(brv, list.components, params, &base)) {
+      fprintf(stderr,
+              "cannot build signature base: a covered component is not "
+              "supported or has no --field value\n");
+      return 2;
+    }
 
     unsigned char sig[64];
     ed25519_sign(sig, reinterpret_cast<const unsigned char*>(base.data()),

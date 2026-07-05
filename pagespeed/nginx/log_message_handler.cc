@@ -102,7 +102,17 @@ void Install(ngx_log_t* log_in) {
   }
 }
 
-void ShutDown() { ngx_glog_sink.reset(); }
+void ShutDown() {
+  if (ngx_glog_sink != nullptr) {
+    // Unregister BEFORE destroying: the automatic removal runs in the BASE
+    // class dtor (~PageSpeedLogSink), so during ~NgxGLogSink a concurrent
+    // SendToSinks could still virtual-dispatch into a half-destroyed object.
+    // RemoveLogSink serializes with in-flight send() under g_sinks_mutex;
+    // the second removal from the base dtor is then a harmless no-op.
+    pagespeed_logging::RemoveLogSink(ngx_glog_sink.get());
+  }
+  ngx_glog_sink.reset();
+}
 
 }  // namespace log_message_handler
 

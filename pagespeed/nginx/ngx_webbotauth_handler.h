@@ -20,6 +20,7 @@
 namespace net_instaweb {
 
 class Statistics;
+class ResponseHeaders;
 
 // PREACCESS/PRECONTENT phase handler. When WebBotAuth is enabled, classifies
 // the request and (when WebBotAuthTelemetry is enabled) increments the opt-in
@@ -45,7 +46,8 @@ ngx_int_t ps_x_verified_bot_variable(ngx_http_request_t* r,
                                      ngx_http_variable_value_t* v,
                                      uintptr_t data);
 
-// Registers the opt-in telemetry counter. Called from
+// Registers the opt-in telemetry counters (verified/signed-agent requests +
+// non-web-bot-auth "other signature" requests). Called from
 // NgxRewriteDriverFactory::InitStats.
 void ps_webbotauth_init_stats(Statistics* statistics);
 
@@ -53,6 +55,30 @@ void ps_webbotauth_init_stats(Statistics* statistics);
 // ngx_http_get_variable_index at postconfiguration) so the preaccess handler
 // can store the computed verdict once. Called from ps_init.
 void ps_webbotauth_set_var_index(ngx_int_t index);
+
+// the design record Bar-A opt-in counter (EXPERIMENTAL, default off).
+//
+// Map (or, on first run, create) the shared memory-mapped counter file at
+// `path` ONCE, in the master before workers fork; the MAP_SHARED region is then
+// inherited by every forked worker. Idempotent and a no-op if `path` is empty or
+// the file is already mapped. Called from ps_init_module.
+void ps_webbotauth_counter_map(const GoogleString& path);
+
+// Read the SECRET bearer token gating the exact counter document from the
+// PAGESPEED_WEB_BOT_AUTH_COUNTER_TOKEN environment variable into process memory.
+// Logs nothing sensitive (the value is NEVER logged). Called from
+// ps_init_child_process.
+void ps_webbotauth_counter_read_token();
+
+// Build the /.well-known/webbotauth-counter response for a GET/HEAD request that
+// the router classified as RequestRouting::kWebBotAuthCounter (mode non-off).
+// Returns true and fills *headers + *body with the coarse or token-gated exact
+// document; returns false to HIDE the endpoint (mode private + no valid token),
+// so the caller returns NGX_DECLINED and the request falls through to a normal
+// 404. Reflects ZERO request data; carries no version/build identifiers.
+bool ps_webbotauth_counter_build_response(ngx_http_request_t* r,
+                                          ResponseHeaders* headers,
+                                          GoogleString* body);
 
 }  // namespace net_instaweb
 
