@@ -3,8 +3,11 @@ FROM ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive
 ENV DISTRO_FAMILY=debian
 
-# Install Apache and test dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Install Apache and test dependencies.
+# apt-get upgrade patches the base-image packages baked into ubuntu:22.04 (which
+# `apt install` alone leaves untouched) — clears the fixable OS CVEs the
+# dependency scan flags. Remaining medium+ are jammy `fix: none` (no upstream patch).
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
     apache2 \
     ca-certificates \
     curl \

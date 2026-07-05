@@ -1,0 +1,24 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://we-amp.com/vex/pagespeed-1.1",
+  "author": "We-Amp B.V.",
+  "role": "vendor",
+  "timestamp": "2026-07-02T09:58:54Z",
+  "version": 1,
+  "statements": [
+    {
+      "vulnerability": { "name": "CVE-2026-42055" },
+      "products": [ { "@id": "pkg:generic/nginx@1.30.3" } ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "Fixed in nginx 1.30.3 (and 1.31.2). The bundled matched-pair nginx IS 1.30.3 — the 1.30 stable-branch release that carries the fix. grype false-positive: the NVD CPE range (>= 1.13.10, < 1.31.2) sweeps the entire 1.30.x branch and does not carve out the 1.30.3 backport. Re-evaluate/update the pinned version when the bundled nginx (DEF_NGINX_VER, focal path in install/nginx/build_module_in_container.sh) is next bumped."
+    },
+    {
+      "vulnerability": { "name": "CVE-2026-48142" },
+      "products": [ { "@id": "pkg:generic/nginx@1.30.3" } ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "Fixed in nginx 1.30.3 (and 1.31.2). The bundled matched-pair nginx IS 1.30.3. grype false-positive: the NVD CPE range (< 1.31.2) does not carve out the 1.30.3 backport. Re-evaluate the pinned version on the next bundled-nginx bump."
+    }
+  ]
+}

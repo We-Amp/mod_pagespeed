@@ -66,7 +66,11 @@ pagespeed_cc_test(
     name = "base_test",
     srcs = glob(
         ["*_test.cc"],
-        exclude = glob(["*speed_test.cc"]),
+        exclude = glob(["*speed_test.cc"]) + [
+            # Own binary: it tears down spdlog + sets the sticky
+            # logging-shutdown flag, poisoning any test after it.
+            "logging_shutdown_tsan_race_test.cc",
+        ],
     ),
     shard_count = 1,
     deps = [
@@ -74,5 +78,17 @@ pagespeed_cc_test(
         "//pagespeed/kernel/base:std_timer",
         "//pagespeed/kernel/sharedmem",
         "@spdlog//:spdlog",  # logging_shutdown_race_test.cc includes spdlog sinks directly
+    ],
+)
+
+# authoritative TSan verdict on the shutdown logging race.
+# Isolated binary — see the exclusion in base_test above.
+pagespeed_cc_test(
+    name = "logging_shutdown_tsan_race_test",
+    srcs = ["logging_shutdown_tsan_race_test.cc"],
+    shard_count = 1,
+    deps = [
+        ":kernel_test_util",
+        "@spdlog//:spdlog",
     ],
 )
