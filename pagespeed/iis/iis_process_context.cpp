@@ -181,8 +181,24 @@ IisProcessContext::IisProcessContext(
 IisServerContext* IisProcessContext::GetServerContext(const GoogleString& site_app_id, const char * hostname,
 	unsigned int port, const char * config_path)
 {
-	if (!ok_) { 
-		CHECK(false) << "Forbidden code path - the process context is not OK. Check it before requesting a server context.";
+	// Serialize the whole one-time init. Before this lock, two
+	// request threads hitting a fresh worker could BOTH see driver_factory_
+	// == NULL, both construct a factory + mutex (clobbering each other's
+	// members mid-init: thread A's later driver_factory_-> calls resolve to
+	// B's factory, whose pending-init list does not contain A's server
+	// context), and publish a ServerContext whose decoding_driver_ was never
+	// initialized -- AV in IsPagespeedResource ~6s after worker start. The
+	// unlocked else-branch read of server_context_ had the same hole.
+	std::lock_guard<std::mutex> init_lock(init_mutex_);
+
+	if (!ok_) {
+		// A prior (or concurrent, now-completed) initialization attempt
+		// failed after our caller's ok() check. Not a programming error --
+		// under recycle stress this is a routine lost race, so surface NULL
+		// (the caller renders the diagnostic page) instead of CHECK-failing,
+		// which fail-fasted the whole worker (the 0xc0000409 ucrtbase
+		// cluster seen under recycle stress).
+		return NULL;
 	}
 
 	if (driver_factory_ == NULL) {
@@ -475,9 +491,12 @@ IisServerContext* IisProcessContext::GetServerContext(const GoogleString& site_a
 void IisProcessContext::Shutdown()
 {
 	// TODO: looks like barrierincrement has become unnessecary
-	if (stopped_.BarrierIncrement(1) == 1) 
+	if (stopped_.BarrierIncrement(1) == 1)
 	{
-		server_context_mutex_->Lock();
+		// server_context_mutex_ is created lazily by the first
+		// GetServerContext call; a context whose site never served a request
+		// reaches Shutdown with it still NULL.
+		if (server_context_mutex_ != NULL) server_context_mutex_->Lock();
 		message_handler_->Message( net_instaweb::kInfo, "delete driver factory");
 	
 		if (driver_factory_ != NULL) 
@@ -502,9 +521,11 @@ void IisProcessContext::Shutdown()
 		message_handler_ = NULL;
 
 
-		server_context_mutex_->Unlock();
-		delete server_context_mutex_;
-		server_context_mutex_= NULL;
+		if (server_context_mutex_ != NULL) {
+			server_context_mutex_->Unlock();
+			delete server_context_mutex_;
+			server_context_mutex_= NULL;
+		}
 	}
 }
 

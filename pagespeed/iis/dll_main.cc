@@ -25,6 +25,7 @@
 #include <windows.h>
 #include <httpserv.h>
 
+#include "base/logging.h"
 #include "pagespeed/kernel/html/html_keywords.h"
 #include "net/instaweb/rewriter/public/process_context.h"
 #include "pagespeed/kernel/base/thread_system.h"
@@ -51,8 +52,11 @@ extern "C" void CRYPTO_thread_local_cleanup(void);
 #if defined(__SANITIZE_ADDRESS__) || \
     (defined(__has_feature) && __has_feature(address_sanitizer))
 extern "C" const char* __asan_default_options() {
+  // log_path must be quoted: the ASan flag parser splits on ':', so a bare
+  // drive-letter colon aborts the runtime at init ("expected '='", exit 1) —
+  // under IIS that is a silent w3wp crash-loop with no dump and no log.
   return "halt_on_error=0"
-         ":log_path=C:\\pagespeed_asan"
+         ":log_path='C:\\pagespeed_asan'"
          ":detect_leaks=0";
 }
 #endif
@@ -164,6 +168,30 @@ BOOL APIENTRY DllMain(HMODULE hModule,
       google::protobuf::ShutdownProtobufLibrary();
       net_instaweb::HtmlKeywords::ShutDown();
 
+      // Route any further LOG() to stderr (IIS counterpart of
+      // Apache's child-exit ordering). Placed here, not at the top
+      // of DETACH, so teardown diagnostics above keep flowing through the
+      // sink while the message handler is still alive. What this closes:
+      // the handler is deleted next, and this DLL's static destructors run
+      // after DllMain returns — on the FreeLibrary detach (lpReserved ==
+      // NULL) a straggler thread that survived app-pool drain must not LOG()
+      // into either. On process-termination detach (lpReserved != NULL) the
+      // OS has already terminated every other thread, so the flag only
+      // guards teardown code below.
+      pagespeed_logging::ShutDownLogging();
+      if (lpReserved == NULL) {
+        // Unregister IisLogSink and null its global_message_handler BEFORE
+        // deleting the handler it dereferences. Deinstall() previously had
+        // no caller, so the sink kept a dangling handler pointer after
+        // this delete. RemoveLogSink serializes with in-flight SendToSinks
+        // under g_sinks_mutex, so this is safe against live threads.
+        //
+        // Skipped on process termination: threads were killed at arbitrary
+        // points and one could have died holding g_sinks_mutex — taking it
+        // here could hang DllMain. With the flag set, nothing reaches the
+        // sink, so the dangling pointer below is unreachable anyway.
+        net_instaweb::log_message_handler::Deinstall();
+      }
       delete net_instaweb::message_handler;
       net_instaweb::message_handler = NULL;
 

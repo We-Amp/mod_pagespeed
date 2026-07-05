@@ -3,7 +3,8 @@
 
 
 #include <atomic>
-#include <string> 
+#include <mutex>
+#include <string>
 #include <vector>
 
 #ifndef _WINSOCKAPI_
@@ -108,6 +109,14 @@ namespace net_instaweb
 		static ProcessContext* PSOL_PROCESS_CONTEXT;
 
 	private:
+		// Serializes the one-time initialization in GetServerContext:
+		// IIS dispatches requests to a fresh worker on many threadpool
+		// threads at once, and the old unsynchronized driver_factory_
+		// check-then-act let two threads run the init branch concurrently,
+		// clobbering each other's factory/mutex members mid-init and
+		// publishing a ServerContext whose decoding_driver_ was never set
+		// (AV in IsPagespeedResource on a ~6s-old w3wp).
+		std::mutex init_mutex_;
 		const GoogleString site_app_id_;
 		std::atomic<DWORD> reference_count_;
 		HTTP_MODULE_ID module_id_;

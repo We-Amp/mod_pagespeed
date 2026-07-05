@@ -812,9 +812,41 @@ function Start-IISSite {
             if ($holders) { Write-Status ("  port ${p} held by: " + ($holders -join '; ')) "Red" }
             else { Write-Status "  port ${p}: no listener (binding/cert failure, not a port conflict)" "Red" }
         }
+        # "port: no listener" above is necessary-but-not-sufficient. The dominant
+        # flake on a long-uptime runner is HTTP.sys failing to bind the IPv6
+        # wildcard transport [::]:$HttpsPort ("...the IP Listen-Only list may
+        # contain a reference to an interface which may not exist..."), which
+        # DISABLES the whole site (System-log Event 15005 + IIS-W3SVC 1004). It
+        # survives `net stop/start http`, sslcert re-adds, and binding tweaks --
+        # only an OS reboot re-initialises HTTP.sys's transport/interface state.
+        # Detect and NAME it so this is not misdiagnosed as a transient conflict.
+        $wedge = $false
+        try {
+            $evts = Get-WinEvent -FilterHashtable @{LogName='System'; StartTime=(Get-Date).AddMinutes(-5)} -MaxEvents 80 -ErrorAction Stop |
+                Where-Object { $_.ProviderName -match 'HttpEvent|IIS-W3SVC' -and
+                    ($_.Message -match "transport for \[::\]:$HttpsPort" -or
+                     $_.Message -match "register the URL prefix https://\*:$HttpsPort") }
+            foreach ($e in ($evts | Select-Object -First 4)) {
+                Write-Status ("  http.sys/W3SVC event $($e.Id): " + (($e.Message -split "`r?`n")[0])) "Red"
+            }
+            $wedge = [bool]$evts
+        } catch { }
+        if ($wedge) {
+            Write-Status "  ROOT CAUSE: HTTP.sys IPv6 transport wedge on [::]:$HttpsPort -- this runner needs a REBOOT (net stop/start http, sslcert re-add and binding tweaks do NOT clear it)." "Red"
+            # Opt-in self-heal: reboot the runner so the NEXT run gets a healthy
+            # HTTP.sys. Off by default -- rebooting a shared build box is the
+            # operator's call (set PAGESPEED_IIS_REBOOT_ON_WEDGE=1 to enable, e.g.
+            # a scheduled nightly reboot is the lower-blast-radius alternative).
+            if ($env:PAGESPEED_IIS_REBOOT_ON_WEDGE -eq '1') {
+                Write-Status "  PAGESPEED_IIS_REBOOT_ON_WEDGE=1 -- rebooting the runner to self-heal (this job fails; the next run gets a clean HTTP.sys)." "Yellow"
+                Start-Process shutdown.exe -ArgumentList @('/r','/t','10','/c','PageSpeed IIS: HTTP.sys [::] transport wedge -- auto-reboot to self-heal') -NoNewWindow
+            }
+        }
         throw ("IIS site '$SiteName' did not reach Started after $maxStartAttempts attempts (state: $siteState). " +
-               "Last appcmd start output: $siteStartOut. A binding could not bind -- a port in use " +
-               "(see holder diagnostics above) or a certless https/*:$HttpsPort binding. Aborting fast.")
+               "Last appcmd start output: $siteStartOut. " +
+               $(if ($wedge) { "ROOT CAUSE: HTTP.sys cannot bind the IPv6 transport [::]:$HttpsPort -- the runner needs a REBOOT (reboot-class flake; not a transient conflict). " }
+                 else { "A binding could not bind -- a port in use (see holder diagnostics above) or a certless https/*:$HttpsPort binding. " }) +
+               "Aborting fast.")
     }
     Write-Status "Site '$SiteName' is Started; proceeding to readiness check" "Green"
 
