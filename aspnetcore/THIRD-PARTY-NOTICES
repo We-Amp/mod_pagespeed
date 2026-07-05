@@ -16,7 +16,7 @@ This software is based in part on the work of the Independent JPEG Group.
 BUNDLED NATIVE BINARIES (shipped as files in the package)
 ===============================================================================
 
-nginx 1.30.2  (the bundled reverse-proxy executable, built without an SSL module —
+nginx 1.30.3  (the bundled reverse-proxy executable, built without an SSL module —
                no libssl/libcrypto host dependency)
   License: BSD-2-Clause
   Copyright (c) 2002-2024 Igor Sysoev

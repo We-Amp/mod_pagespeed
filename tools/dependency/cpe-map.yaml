@@ -171,9 +171,9 @@ deps:
   nginx:
     cpe: "cpe:2.3:a:f5:nginx"                    # NVD: nginx tracked under vendor f5 (legacy nginx:nginx also exists)
     # Bundled matched-pair nginx for the design record sidecar (D3). SHIPPED version is
-    # DEF_NGINX_VER (focal path) in install/nginx/build_module_in_container.sh = 1.30.2,
+    # DEF_NGINX_VER (focal path) in install/nginx/build_module_in_container.sh = 1.30.3,
     # the 1.30 stable branch (GA bump 2026-06-03 from 1.24.0 — newer branch, smaller CVE
     # backlog). nginx is the ONE dep whose version is not a repositories.bzl constant, so
-    # generate-sbom.py pins it as {"literal": "1.30.2"}; keep that literal lockstep with
+    # generate-sbom.py pins it as {"literal": "1.30.3"}; keep that literal lockstep with
     # DEF_NGINX_VER (focal) when the bundled nginx is bumped.
-    release_date: "2026-05-22"                   # nginx 1.30.2 stable — upstream release 2026-05-22 (nginx.org CHANGES-1.30)
+    release_date: "2026-06-17"                   # nginx 1.30.3 stable — upstream release 2026-06-17 (nginx.org CHANGES-1.30; security: CVE-2026-42055, CVE-2026-48142)

@@ -129,7 +129,7 @@ CPP_DEPS = [
     # source, not a Bazel http_archive), so it is pinned inline as a literal. Keep this
     # lockstep with DEF_NGINX_VER (focal path) in install/nginx/build_module_in_container.sh
     # — the load-bearing pin the sidecar binary is actually built from.
-    {"name": "nginx", "version": {"literal": "1.30.2"}, "license": "BSD-2-Clause",
+    {"name": "nginx", "version": {"literal": "1.30.3"}, "license": "BSD-2-Clause",
      "holder": "Nginx, Inc. / F5", "repo": None,
      "download": "https://nginx.org/", "purl_version": None},
 ]

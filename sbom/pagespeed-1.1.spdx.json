@@ -3,9 +3,9 @@
   "dataLicense": "CC0-1.0",
   "SPDXID": "SPDXRef-DOCUMENT",
   "name": "pagespeed-1.1",
-  "documentNamespace": "https://spdx.org/spdxdocs/pagespeed-1.1-2026-06-30T10:38:23Z",
+  "documentNamespace": "https://spdx.org/spdxdocs/pagespeed-1.1-2026-07-02T08:26:53Z",
   "creationInfo": {
-    "created": "2026-06-30T10:38:23Z",
+    "created": "2026-07-02T08:26:53Z",
     "creators": [
       "Tool: generate-sbom.py-1.0",
       "Organization: We-Amp B.V."
@@ -466,7 +466,7 @@
     {
       "SPDXID": "SPDXRef-Package-nginx",
       "name": "nginx",
-      "versionInfo": "1.30.2",
+      "versionInfo": "1.30.3",
       "supplier": "Organization: Nginx, Inc. / F5",
       "downloadLocation": "https://nginx.org/",
       "filesAnalyzed": false,

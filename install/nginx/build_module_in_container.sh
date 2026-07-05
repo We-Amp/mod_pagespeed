@@ -77,9 +77,9 @@ case "${DISTRO}" in
          DEF_NGINX_SHA256="77a2541637b92a621e3ee76776c8b7b40cf6d707e69ba53a940283e30ff2f55d" ;;
   # focal is the design record SIDECAR portable path ONLY (not a distro-stock package
   # target). Its nginx is bumped to the 1.30 stable branch for GA: newer branch, smaller CVE backlog than 1.24.0 (2023).
-  # sha256 captured from nginx.org/download/nginx-1.30.2.tar.gz 2026-06-03.
-  focal) DEF_NGINX_VER="1.30.2"
-         DEF_NGINX_SHA256="7df3090907fca3cc0e456d6dc00ceb230da74ea88026ceff0affc29dbbd9ac4c" ;;
+  # sha256 captured from nginx.org/download/nginx-1.30.3.tar.gz 2026-06-17 (security bump 1.30.2 -> 1.30.3: CVE-2026-42055).
+  focal) DEF_NGINX_VER="1.30.3"
+         DEF_NGINX_SHA256="e5823dc6f45610993def93ebf6cfce68264af4958c77e874b7d20f3709001b8f" ;;
   el9)   DEF_NGINX_VER="1.20.1"
          DEF_NGINX_SHA256="e462e11533d5c30baa05df7652160ff5979591d291736cfa5edb9fd2edb48c49" ;;
   # el10 (AlmaLinux/RHEL/Rocky/CloudLinux 10, the design record): distro-source mode like
