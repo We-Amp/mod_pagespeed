@@ -18,7 +18,7 @@ The project is led by [Otto van der Schaaf](https://github.com/oschaaf), Apache 
 ## What's in 1.15
 
 - **Drop-in replacement.** Same configuration directives, same filters, same `mod_pagespeed.so` semantics. Your existing config keeps working.
-- **Security patches** for known CVEs that accumulated against the archived upstream.
+- **Security patches** for known CVEs that accumulated against the archived upstream + much more. Hardened builds. Active supply chain management.
 - **Cyclone Cache** — a new C++23 lock-free shared-memory cache that replaces the legacy file cache. No tuning required; warm-up is automatic.
 - **First-class IIS** — native module for Windows Server 2019+ (IIS 10+, 64-bit only) with `.msi` installer.
 - **Modern build** — Bazel-based, pre-built binaries for Debian/Ubuntu (amd64 + arm64), RHEL-family (x86_64 + aarch64), and Windows.
