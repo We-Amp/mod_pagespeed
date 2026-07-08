@@ -13,7 +13,6 @@ The project is led by [Otto van der Schaaf](https://github.com/oschaaf), Apache 
 | **Install (IIS)** | [Quickstart →](https://modpagespeed.com/1.1/docs/getting-started/) |
 | **Download packages** | [.deb / .rpm / .msi →](https://modpagespeed.com/download/) |
 | **Upgrade from open-source** | [Migration guide →](https://modpagespeed.com/1.1/docs/upgrading-from-open-source/) |
-| **Pricing** | [$49/server/month — free to evaluate, license for production →](https://modpagespeed.com/pricing/) |
 | **Support** | [Email the maintainer →](https://modpagespeed.com/contact/) |
 
 ## What's in 1.15
