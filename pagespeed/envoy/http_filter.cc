@@ -688,8 +688,7 @@ FilterHeadersStatus HttpPageSpeedDecoderFilter::decodeHeaders(
           : *pristine_url_;
 
   base_fetch_ = new net_instaweb::EnvoyBaseFetch(
-      fetch_url.Spec(), server_context_, request_context,
-      net_instaweb::kDontPreserveHeaders, options_, this);
+      fetch_url.Spec(), server_context_, request_context, options_, this);
 
   // Copy request headers to base_fetch (use already parsed headers)
   for (int i = 0; i < ps_request_headers->NumAttributes(); ++i) {
@@ -1107,8 +1106,7 @@ FilterHeadersStatus HttpPageSpeedDecoderFilter::encodeHeaders(
 
       // Create EnvoyAsyncFetch to receive ProxyFetch output.
       envoy_async_fetch_ = std::make_shared<net_instaweb::EnvoyAsyncFetch>(
-          request_context, this, encoder_callbacks_->dispatcher(),
-          server_context_);
+          request_context, this, encoder_callbacks_->dispatcher());
 
       // Copy request headers to the async fetch (required by ProxyFetch).
       if (decoder_callbacks_ != nullptr) {

@@ -45,7 +45,6 @@ class EnvoyBaseFetch : public AsyncFetch {
  public:
   EnvoyBaseFetch(StringPiece url, EnvoyServerContext* server_context,
                  const RequestContextPtr& request_ctx,
-                 PreserveCachingHeaders preserve_caching_headers,
                  const RewriteOptions* options,
                  Envoy::Http::HttpPageSpeedDecoderFilter* decoder);
 
@@ -78,7 +77,6 @@ class EnvoyBaseFetch : public AsyncFetch {
   // Uses memory_order_acq_rel for modifications to ensure visibility
   // across threads, and memory_order_acquire for the final read before delete.
   std::atomic<int> references_{2};
-  PreserveCachingHeaders preserve_caching_headers_;
   // Whether we have an IPRO response (cache hit with valid status).
   // Atomic: written in HandleHeadersComplete (network thread),
   // read in HandleDone (possibly different thread).

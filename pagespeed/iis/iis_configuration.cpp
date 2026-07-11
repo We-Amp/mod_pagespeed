@@ -92,6 +92,9 @@ class ConfigurationFile:public ReferenceCounter
 	                     std::function<std::string(const std::string&)> expand_env)
 	{
 		IisRewriteOptions *currewriteoptions=NULL;
+		// item 3: options appearing after a match rule are per-request (matched)
+		// scope; process/server-only directives are rejected there.
+		bool seen_match_rule=false;
 
 		// Make a mutable copy with null terminator. This copies the buffer
 		// even when LoadFile already provides a mutable one — intentional,
@@ -133,7 +136,13 @@ class ConfigurationFile:public ReferenceCounter
 				while(*ptr && *ptr!='\n' && *ptr!='\r') ptr++;
 				if (mode==1)
 				{
-					matchLines.push_back(new ConfigLine(std::string(startline,endid-startline),std::string(value,ptr-value),mode));
+					ConfigLine *matchline=new ConfigLine(std::string(startline,endid-startline),std::string(value,ptr-value),mode);
+					if (!matchline->valuematch.ok())
+					{
+						mh->Message(kWarning, "Invalid config match regex [%s]: %s", matchline->valuematch.pattern().c_str(), matchline->valuematch.error().c_str());
+					}
+					matchLines.push_back(matchline);
+					seen_match_rule=true;
 				}
 				else
 					if (mode==2) //fix
@@ -168,7 +177,10 @@ class ConfigurationFile:public ReferenceCounter
 							currentLine->mode|=4;
 						else
 						if (option=="!")
+						{
+							mh->Message(kWarning, "The '!' directive is not supported and has no effect; ignoring.");
 							currentLine->mode|=2;
+						}
 						else
 						if (StringCaseEqual(option,"filters"))
 							currewriteoptions->AdjustFiltersByCommaSeparatedList(svalue,mh);
@@ -178,9 +190,9 @@ class ConfigurationFile:public ReferenceCounter
 						else
 						if (StringCaseEqual(option.substr(0,7), "header_"))
 							currewriteoptions->AddCustomFetchHeader(option.substr(7),svalue);
-						else if (StringCaseEqual(option.substr(0, strlen("pagespeed")),"pagespeed")
-							|| StringCaseEqual(option.substr(0, strlen("iispeed")),"iispeed")
-							|| StringCaseEqual(option.substr(0, strlen("ModPagespeed")),"ModPagespeed")
+						else if (StringCaseEqual(option,"pagespeed")
+							|| StringCaseEqual(option,"iispeed")
+							|| StringCaseEqual(option,"ModPagespeed")
 							)
 						{
 							vector<string> tokens = tokenize(svalue, isspace);
@@ -244,13 +256,44 @@ class ConfigurationFile:public ReferenceCounter
 							// the call itself handles debug output emission
 
 							if (!skip_option_parsing) {
-								currewriteoptions->ParseAndSetOptions(tokens, mh, global_config);
+								// item 3: reject process/server-scoped directives inside a
+								// matched (per-request) block; warn and ignore.
+								StringPiece scope_directive;
+								if (!tokens.empty()) {
+									scope_directive = tokens[0];
+									StringPiece mod_pagespeed_prefix("ModPagespeed");
+									if (StringCaseStartsWith(scope_directive, mod_pagespeed_prefix)) {
+										scope_directive.remove_prefix(mod_pagespeed_prefix.size());
+									}
+								}
+								if (seen_match_rule && !tokens.empty() &&
+									currewriteoptions->GetOptionScope(scope_directive) >
+										RewriteOptions::kDirectoryScope) {
+									mh->Message(kWarning, "Directive [%s] cannot be set inside a match block; ignoring.", svalue.c_str());
+								} else {
+									currewriteoptions->ParseAndSetOptions(tokens, mh, global_config);
+								}
 							}
 						}
 						else
 						{
-							GoogleString msg;
-							currewriteoptions->SetOptionFromName(StringPiece(option),GoogleString(svalue),&msg);
+							StringPiece scope_directive(option);
+							StringPiece mod_pagespeed_prefix("ModPagespeed");
+							if (StringCaseStartsWith(scope_directive, mod_pagespeed_prefix)) {
+								scope_directive.remove_prefix(mod_pagespeed_prefix.size());
+							}
+							if (seen_match_rule &&
+								currewriteoptions->GetOptionScope(scope_directive) >
+									RewriteOptions::kDirectoryScope) {
+								mh->Message(kWarning, "Directive [%s] cannot be set inside a match block; ignoring.", option.c_str());
+							} else {
+								GoogleString msg;
+								RewriteOptions::OptionSettingResult r =
+									currewriteoptions->SetOptionFromName(StringPiece(option),GoogleString(svalue),&msg);
+								if (r != RewriteOptions::kOptionOk) {
+									mh->Message(kWarning, "Failed to set option [%s]: %s", option.c_str(), msg.c_str());
+								}
+							}
 						}
 					}
 			}

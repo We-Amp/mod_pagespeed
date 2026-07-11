@@ -76,12 +76,11 @@ class EnvoyAsyncFetch : public BufferingAsyncFetch,
                         public std::enable_shared_from_this<EnvoyAsyncFetch> {
  public:
   // Creates an adapter for sending ProxyFetch output to the Envoy filter.
-  // Does NOT take ownership of filter or server_context.
+  // Does NOT take ownership of filter.
   // dispatcher is used to post work from worker threads to the main thread.
   EnvoyAsyncFetch(const RequestContextPtr& request_ctx,
                   Envoy::Http::HttpPageSpeedDecoderFilter* filter,
-                  Envoy::Event::Dispatcher& dispatcher,
-                  EnvoyServerContext* server_context);
+                  Envoy::Event::Dispatcher& dispatcher);
 
   ~EnvoyAsyncFetch() override;
 
@@ -119,7 +118,6 @@ class EnvoyAsyncFetch : public BufferingAsyncFetch,
   // Not owned - may outlive us if properly destroyed via MarkFilterDestroyed.
   Envoy::Http::HttpPageSpeedDecoderFilter* filter_;
   Envoy::Event::Dispatcher& dispatcher_;
-  EnvoyServerContext* server_context_;
 
   // State flags.
   std::atomic<bool> filter_destroyed_{false};

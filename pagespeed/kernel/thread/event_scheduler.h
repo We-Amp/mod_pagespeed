@@ -17,20 +17,39 @@
  * under the License.
  */
 
-// EventScheduler is a Scheduler implementation that uses an EventDispatcher
-// for timer operations instead of condition variable waits. This allows the
-// Scheduler to integrate with event-driven systems like Envoy without needing
-// a separate SchedulerThread.
+// EventScheduler is a Scheduler whose alarms are driven by an
+// EventDispatcher's event loop, so they fire on time even when no thread is
+// blocked in the scheduler. The base Scheduler runs alarms only
+// opportunistically: when some thread happens to call into it (e.g. a
+// SchedulerBlockingFunction waiter) or when a dedicated SchedulerThread
+// polls ProcessAlarmsOrWaitUs(). EventScheduler replaces the dedicated
+// thread: whenever the earliest alarm deadline moves earlier
+// (EarliestWakeupChangedMutexHeld), it posts a pump to the dispatcher; the
+// pump runs due alarms via RunAlarms() on the dispatcher thread and keeps a
+// one-shot dispatcher timer armed at the next deadline.
 //
-// The key insight is that Scheduler's ProcessAlarmsOrWaitUs() calls
-// AwaitWakeupUntilUs() to block until a timeout. By overriding this method
-// to use the dispatcher's timer system, we can eliminate the need for a
-// separate thread and integrate directly with the event loop.
+// The dispatcher may be attached after construction (AttachDispatcher) to
+// accommodate factories whose scheduler is created lazily, before the event
+// loop exists. Until a dispatcher is attached, behavior is identical to the
+// base Scheduler (alarms fire opportunistically); attaching pumps any
+// already-scheduled alarms.
+//
+// Shutdown contract: call DetachDispatcher() before the dispatcher stops
+// being able to run posted callbacks, at a point where no dispatcher
+// callback is concurrently executing (i.e. after the dispatcher's event
+// loop has quiesced, or from the dispatcher thread itself). After detach,
+// pump callbacks still queued in the dispatcher become no-ops. Detach is
+// terminal: re-attach is not supported.
+//
+// Alarm callbacks execute on the dispatcher thread, so they must honor the
+// Scheduler contract of being lightweight and short-lived; anything
+// expensive must be handed off to a worker.
 
 #ifndef PAGESPEED_KERNEL_THREAD_EVENT_SCHEDULER_H_
 #define PAGESPEED_KERNEL_THREAD_EVENT_SCHEDULER_H_
 
 #include <atomic>
+#include <memory>
 
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/thread/scheduler.h"
@@ -42,44 +61,67 @@ class EventTimer;
 class ThreadSystem;
 class Timer;
 
-// A Scheduler that uses an EventDispatcher for timer operations.
-// Unlike the base Scheduler (which uses condition variable waits),
-// EventScheduler integrates with an external event loop.
-//
-// Usage:
-//   EventDispatcher* dispatcher = ...;  // EnvoyDispatcherAdapter or LibeventDispatcher
-//   EventScheduler scheduler(thread_system, dispatcher);
-//   // Now use scheduler normally - no SchedulerThread needed for Envoy.
-//
-// For event-driven systems (Envoy), the dispatcher provides the event loop,
-// and the scheduler's alarms are handled via the dispatcher's timer system.
-// For Apache with LibeventDispatcher, the dispatcher runs its own background
-// thread with a libevent loop.
 class EventScheduler : public Scheduler {
  public:
-  // Creates an EventScheduler using the given dispatcher.
-  // The dispatcher must outlive this scheduler.
+  // Creates an EventScheduler already attached to the given dispatcher.
+  // The dispatcher must outlive this scheduler (see shutdown contract above).
   EventScheduler(ThreadSystem* thread_system, EventDispatcher* dispatcher);
+
+  // Creates an EventScheduler with no dispatcher yet; behaves exactly like
+  // the base Scheduler until AttachDispatcher() is called. Use this when the
+  // scheduler must be created before the event loop exists.
+  EventScheduler(ThreadSystem* thread_system, Timer* timer);
+
   ~EventScheduler() override;
 
+  // Attaches the dispatcher that will drive alarms, and pumps any alarms
+  // scheduled before the attach. May be called at most once, and only if
+  // this scheduler was constructed without a dispatcher.
+  void AttachDispatcher(EventDispatcher* dispatcher);
+
+  // Stops driving alarms; queued pump callbacks become no-ops and the armed
+  // pump timer is cancelled. Must be called while the dispatcher object is
+  // still alive but with its event loop quiesced (or from the dispatcher
+  // thread). Safe to call when never attached, and idempotent.
+  void DetachDispatcher();
+
  protected:
-  // Override to use the dispatcher's timer instead of condvar wait.
-  // This is called from ProcessAlarmsOrWaitUs() when the scheduler needs
-  // to wait for the next alarm.
-  void AwaitWakeupUntilUs(int64 wakeup_time_us) override;
+  // Scheduler override: called with the scheduler mutex held whenever the
+  // earliest alarm deadline moves earlier. Requests a pump; must not block.
+  void EarliestWakeupChangedMutexHeld(int64 wakeup_time_us) override;
 
  private:
-  // Callback invoked when the wakeup timer fires.
-  // The generation parameter is used to ignore stale timer callbacks.
-  void OnWakeupTimer(int64 generation);
+  class PumpFunction;
 
-  EventDispatcher* dispatcher_;
+  // Posts a (coalesced) pump to the dispatcher, if one is attached.
+  void RequestPump();
 
-  // Generation counter to handle stale timer callbacks.
-  // Each new timer gets the current generation; callbacks check if their
-  // generation matches before signaling. This avoids races where an old
-  // timer callback fires after we've moved on to a new timer.
-  std::atomic<int64> timer_generation_;
+  // Runs on the dispatcher thread: runs due alarms and re-arms the pump
+  // timer for the next deadline.
+  void PumpOnDispatcherThread();
+
+  // Null until attached, null again after detach.
+  std::atomic<EventDispatcher*> dispatcher_;
+
+  // Coalesces RequestPump() posts: set when a pump has been posted and not
+  // yet started, cleared at pump start so later deadline changes re-post.
+  std::atomic<bool> pump_posted_;
+
+  // Cleared on detach/destruction; pump callbacks that were already queued
+  // in the dispatcher check it before touching this object.
+  std::shared_ptr<std::atomic<bool>> alive_;
+
+  // The one-shot timer armed at the next alarm deadline. Created, replaced
+  // and destroyed on the dispatcher thread only (except in DetachDispatcher,
+  // whose contract guarantees the loop is quiesced).
+  std::unique_ptr<EventTimer> pump_timer_;
+
+  // The previously armed timer, kept alive for one extra pump: a pump may be
+  // executing from pump_timer_'s own callback, and destroying an EventTimer
+  // from inside its own callback is not guaranteed safe by every backend.
+  // Pumps are serialized on the dispatcher thread, so by the time the NEXT
+  // pump destroys this, its callback frame has finished.
+  std::unique_ptr<EventTimer> retired_pump_timer_;
 
   EventScheduler(const EventScheduler&) = delete;
   EventScheduler& operator=(const EventScheduler&) = delete;

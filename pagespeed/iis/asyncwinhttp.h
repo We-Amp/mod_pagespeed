@@ -74,6 +74,7 @@ class WinHTTP
 	DWORD starttime;
 	int resolveTimeout,connectTimeout,sendTimeout,receiveTimeout,totalTimeout;
 	char *tempbuf;
+	DWORD tempbufSize;
 	WinHTTPEvents *eventhandler;
 	bool allow_self_signed_;
 public:

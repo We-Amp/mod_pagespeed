@@ -373,6 +373,10 @@ public class NginxConfigGenerator
             _logger.LogWarning(
                 "PageSpeed:Domains rewrite/origin/shard mappings are configured but not emitted by the nginx sidecar " +
                 "in this preview; they are ignored.");
+        if (o.VirtualHosts.Count > 0)
+            _logger.LogWarning(
+                "PageSpeed:VirtualHosts are configured but per-virtual-host config is not emitted by the nginx sidecar " +
+                "in this preview; they are ignored.");
     }
 
     private static string ResolveCacheDir(PageSpeedOptions o, string prefix) =>

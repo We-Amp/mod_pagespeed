@@ -68,6 +68,11 @@ class IisAsyncWorker :public ASyncWinHTTP::WinHTTPEvents
 	MessageHandler *messagehandler;
 	HttpResponseParser *parser;
 	std::vector<char> myData;
+	GoogleString url_;  // retained so a failed completion can name the URL
+	// Content bytes actually delivered to OnData. A completion that reports Ok but
+	// delivered nothing is what PSOL classifies as kFetchStatusEmpty, and it costs the
+	// parent page five minutes of un-rewritten HTML. Count them so it cannot be silent.
+	int64 content_bytes_;
 public:
 	IisAsyncWorker(net_instaweb::IisAsyncUrlFetcher * fetcher, AsyncFetch *fetch, MessageHandler* messagehandler);
 	virtual void OnData(const char *data, int length, WinHTTPContentType type);// the data
@@ -76,6 +81,7 @@ public:
 	bool GetUrl(GoogleString url, const char* host)
 	{
 		CHECK(host != NULL);
+		url_ = url;
 		client.SetAllowSelfSigned(fetcher->allow_self_signed());
 		bool res = client.GetUrl(std::string(url.c_str()), std::string(host == NULL ? "" : host));
 		messagehandler->Message(kInfo, "Request to [%s] with host header [%s] -> %s", url.c_str(), host, res ? "OK":"Fail");

@@ -83,6 +83,18 @@ ApacheRewriteDriverFactory::~ApacheRewriteDriverFactory() {
   // clean up properly.
   ShutDown();
 
+  // Quiesce the dispatcher's event loop, then detach the scheduler from it
+  // BEFORE the dispatcher member is destroyed: the scheduler (owned by the
+  // base factory) outlives the dispatcher, and detaching releases its pump
+  // timers while the libevent base they reference is still alive.
+  if (event_dispatcher_ != nullptr) {
+    event_dispatcher_->InitiateShutdown();
+    event_dispatcher_->WaitForShutdown();
+    if (event_scheduler_ != nullptr) {
+      event_scheduler_->DetachDispatcher();
+    }
+  }
+
   apr_pool_destroy(pool_);
 
   // We still have registered a pool deleter here, right?  This seems risky...
@@ -134,18 +146,29 @@ void ApacheRewriteDriverFactory::SetupCaches(ServerContext* server_context) {
   apache_server_context->InitProxyFetchFactory();
 }
 
+Scheduler* ApacheRewriteDriverFactory::CreateScheduler() {
+  // Called lazily via RewriteDriverFactory::scheduler(), which owns the
+  // result. Created unattached; SetNeedSchedulerThread() attaches the
+  // libevent dispatcher when configuration requires driven alarms.
+  DCHECK(event_scheduler_ == nullptr);
+  event_scheduler_ = new EventScheduler(thread_system(), timer());
+  return event_scheduler_;
+}
+
 void ApacheRewriteDriverFactory::SetNeedSchedulerThread() {
   if (event_dispatcher_ == nullptr) {
-    // Use LibeventDispatcher with EventScheduler instead of SchedulerThread.
     // LibeventDispatcher runs libevent in a background thread, providing
     // the same functionality as SchedulerThread but with a unified
-    // EventDispatcher abstraction.
+    // EventDispatcher abstraction. Attaching it to the EventScheduler makes
+    // the event loop drive alarm delivery, so alarms fire on time even with
+    // no thread blocked in the scheduler.
     event_dispatcher_ =
         std::make_unique<LibeventDispatcher>(thread_system(), timer());
-    event_scheduler_ = std::make_unique<EventScheduler>(
-        thread_system(), event_dispatcher_.get());
     bool ok = event_dispatcher_->Start();
     CHECK(ok) << "Unable to start event dispatcher";
+    scheduler();  // Ensure the scheduler exists (created via CreateScheduler).
+    CHECK(event_scheduler_ != nullptr);
+    event_scheduler_->AttachDispatcher(event_dispatcher_.get());
   }
 }
 

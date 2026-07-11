@@ -176,7 +176,7 @@ RewriteOptions::OptionScope EnvoyRewriteOptions::GetOptionScope(
   for (OptionBaseVector::const_iterator it = all_options().begin();
        it != all_options().end(); ++it) {
     RewriteOptions::OptionBase* option = *it;
-    if (option->option_name() == option_name) {
+    if (StringCaseEqual(option->option_name(), option_name)) {
       // We treat kLegacyProcessScope as kProcessScopeStrict, failing to start
       // if an option is out of place.
       return option->scope() == kLegacyProcessScope ? kProcessScopeStrict

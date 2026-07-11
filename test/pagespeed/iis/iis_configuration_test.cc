@@ -194,6 +194,38 @@ TEST_F(IisConfigurationTest, MatchRuleBasic) {
   EXPECT_TRUE(rwo.Enabled(RewriteOptions::kCombineCss));
 }
 
+// Item 3: a server-scope option (StatisticsPath) inside a matched
+// (per-request) block must be rejected, leaving the default value.
+TEST_F(IisConfigurationTest, ServerScopedOptionInMatchBlockIgnored) {
+  std::string config_text =
+      "host:example\\.com\n"
+      "pagespeed StatisticsPath /custom_stats\n";
+
+  ConfigurationFile* cf = Parse(config_text);
+  std::map<std::string, std::string> input;
+  input["host"] = "example.com";
+  input["config"] = "request";
+  IisRewriteOptions rwo(nullptr);
+  TestConfigFileGetConfig(cf, input, rwo);
+  TestConfigFileRelease(cf);
+
+  EXPECT_NE("/custom_stats", rwo.statistics_path())
+      << "server-scope StatisticsPath must be ignored inside a match block";
+}
+
+// Item 3 positive control: the same server-scope option applies in the base
+// (non-matched) config, and a directory-scope filter in a match block still
+// works (covered by MatchRuleBasic).
+TEST_F(IisConfigurationTest, ServerScopedOptionInBaseApplies) {
+  std::string config_text = "pagespeed StatisticsPath /custom_stats\n";
+
+  IisRewriteOptions rwo(nullptr);
+  ParseAndGetConfig(config_text, "", &rwo);
+
+  EXPECT_EQ("/custom_stats", rwo.statistics_path())
+      << "server-scope StatisticsPath applies in the base config";
+}
+
 // MatchRuleNoMatch: host regex doesn't match, filter not enabled.
 TEST_F(IisConfigurationTest, MatchRuleNoMatch) {
   std::string config_text =

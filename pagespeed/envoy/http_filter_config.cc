@@ -3,6 +3,8 @@
 
 #include "absl/status/statusor.h"
 #include "envoy/registry/registry.h"
+#include "google/protobuf/io/coded_stream.h"
+#include "google/protobuf/io/zero_copy_stream_impl_lite.h"
 #include "http_filter.h"
 #include "net/instaweb/rewriter/public/domain_lawyer.h"
 #include "net/instaweb/rewriter/public/process_context.h"
@@ -27,6 +29,26 @@ namespace Configuration {
 
 namespace {
 EnvoyProcessContext* g_process_context = nullptr;
+// Serialized proto the singleton was first initialized from, plus a latch so we
+// warn at most once when a later filter instance supplies a differing config.
+std::string g_process_context_proto;
+bool g_process_context_mismatch_warned = false;
+
+// Serializes proto_config deterministically so two configs can be compared for
+// equality without being sensitive to map-field iteration order (the plain
+// SerializeAsString output is unspecified for protos containing maps, such as
+// VirtualHostOptions.custom_options).
+std::string SerializeConfigDeterministic(
+    const pagespeed::Decoder& proto_config) {
+  std::string out;
+  {
+    google::protobuf::io::StringOutputStream string_stream(&out);
+    google::protobuf::io::CodedOutputStream coded_stream(&string_stream);
+    coded_stream.SetSerializationDeterministic(true);
+    proto_config.SerializeToCodedStream(&coded_stream);
+  }
+  return out;
+}
 
 // Convert proto config to cache config struct.
 EnvoyCacheConfig protoToCacheConfig(const pagespeed::Decoder& proto_config) {
@@ -216,12 +238,16 @@ std::unique_ptr<EnvoyRewriteOptions> createVHostOptions(
     }
   }
 
-  // Note: 'enabled' field is handled separately in the filter by checking
-  // if options->enabled(). The default is true. If set to false, we disable
-  // all filters by setting level to PassThrough.
-  // Actually, RewriteOptions has an 'enabled_' flag we should use instead.
-  // For now, we'll set the level to PassThrough if disabled.
-  // TODO(oschaaf): Add proper enabled flag support.
+  // 'enabled' (presence-aware): when explicitly set to false, disable all
+  // optimization for matching hosts via the RewriteOptions enabled flag, which
+  // the filter honors at decodeHeaders time (options->enabled()). When unset,
+  // leave the inherited/default value (enabled) untouched.
+  if (vhost_options.has_enabled() && !vhost_options.enabled()) {
+    options->set_enabled(RewriteOptions::kEnabledOff);
+    message_handler->Message(kInfo,
+                             "VHost %s: optimization disabled (enabled=false)",
+                             vhost_config.host_pattern().c_str());
+  }
 
   // Enable specific filters.
   if (!vhost_options.enabled_filters().empty()) {
@@ -344,14 +370,20 @@ EnvoyProcessContext& getProcessContext(const pagespeed::Decoder& proto_config) {
     EnvoyRewriteDriverFactory* factory = g_process_context->driver_factory();
     if (proto_config.has_circuit_breaker()) {
       const auto& cb = proto_config.circuit_breaker();
-      // Default to enabled unless explicitly disabled.
-      bool enabled = !proto_config.has_circuit_breaker() || cb.enabled();
+      // Presence-aware default: when the breaker is configured but 'enabled'
+      // is left unset, honor the proto's documented Default: true.
+      bool enabled = !cb.has_enabled() || cb.enabled();
       factory->SetCircuitBreakerConfig(enabled, cb.failure_threshold(),
                                        cb.success_threshold(), cb.timeout_ms());
     } else {
       // Circuit breaker disabled by default if not configured.
       factory->SetCircuitBreakerConfig(false, 0, 0, 0);
     }
+
+    // Remember the config that initialized the singleton so createFilter can
+    // detect a later filter instance that carries a different proto. This runs
+    // once, at first-init; the per-request path below stays serialization-free.
+    g_process_context_proto = SerializeConfigDeterministic(proto_config);
   }
   return *g_process_context;
 }
@@ -396,6 +428,24 @@ class HttpPageSpeedDecoderFilterConfig : public NamedHttpFilterConfigFactory {
     // Initialize the Envoy dispatcher on first filter config.
     // This enables native event loop integration.
     initializeDispatcher(context, proto_config);
+
+    // The process context singleton is initialized from the FIRST filter config
+    // only (initializeDispatcher above records it). A later filter config with
+    // a different proto is silently ignored; surface that once so a
+    // misconfiguration is visible. This runs per filter-config, not per
+    // request, and compares deterministic serializations so map fields don't
+    // cause spurious mismatches.
+    if (!g_process_context_mismatch_warned &&
+        SerializeConfigDeterministic(proto_config) != g_process_context_proto) {
+      g_process_context_mismatch_warned = true;
+      getProcessContext(proto_config)
+          .message_handler()
+          ->Message(
+              kWarning,
+              "PageSpeed process context was already initialized from the "
+              "first filter config; a later filter instance supplied a "
+              "different configuration, which is being ignored.");
+    }
 
     // Create the filter config with the stats scope for Prometheus metrics.
     Http::HttpPageSpeedDecoderFilterConfigSharedPtr config =

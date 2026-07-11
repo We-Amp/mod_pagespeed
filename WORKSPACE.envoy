@@ -2,6 +2,33 @@ workspace(name = "mod_pagespeed")
 
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
+# Override com_github_libevent_libevent with the Envoy-pinned snapshot.
+# mod_pagespeed_dependencies() registers vanilla libevent (sufficient for the
+# lean workspace), but Envoy's own event loop requires its patched snapshot
+# (event2/watch.h "prepare"/"check" watchers); envoy_dependencies() would
+# skip its registration because the name already exists. Define it here,
+# BEFORE mod_pagespeed_dependencies() (whose maybe()-wrapped registration
+# then defers to this one). Keep the sha in sync with Envoy's
+# bazel/repository_locations.bzl entry when bumping ENVOY_COMMIT.
+http_archive(
+    name = "com_github_libevent_libevent",
+    strip_prefix = "libevent-62c152d9a7cd264b993dad730c4163c6ede2e0a3",
+    urls = ["https://github.com/libevent/libevent/archive/62c152d9a7cd264b993dad730c4163c6ede2e0a3.tar.gz"],
+    sha256 = "4c80e5fe044ce5f8055b20a2f141ee32ec2614000f3e95d2aa81611a4c8f5213",
+    build_file_content = """
+filegroup(
+    name = "all_srcs",
+    srcs = glob(["**"]),
+    visibility = ["//visibility:public"],
+)
+filegroup(
+    name = "all",
+    srcs = glob(["**"]),
+    visibility = ["//visibility:public"],
+)
+""",
+)
+
 load("//bazel:repositories.bzl", "mod_pagespeed_dependencies")
 
 mod_pagespeed_dependencies()

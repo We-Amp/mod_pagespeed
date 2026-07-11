@@ -21,6 +21,7 @@ WinHTTP::WinHTTP()
 	connectSession=NULL;
 	firstError=0;
 	tempbuf=NULL;
+	tempbufSize=0;
 	resolveTimeout=32000;
 	connectTimeout=30000;
 	sendTimeout=35000;
@@ -137,15 +138,35 @@ void WinHTTP::OnHeadersAvailable()
 	if (eventhandler) 
 		eventhandler->OnData(headers.c_str(),strlen(headers.c_str()),Headers);
 	delete [] lpOutBuffer;
-	 
-	WinHttpQueryDataAvailable(requestHandle,&_bytes);  
-	
+
+	// Async session: the available-byte count arrives via
+	// WINHTTP_CALLBACK_STATUS_DATA_AVAILABLE, so lpdwNumberOfBytesAvailable must be
+	// NULL -- WinHTTP does not write it, and would race the callback if it did.
+	if (!WinHttpQueryDataAvailable(requestHandle,NULL))
+	{
+		SetError(1014,GetLastError());
+		CleanUp();
+	}
 }	
 void WinHTTP::OnIntermediateResponse() {}
 void WinHTTP::OnReadComplete(char *buffer,DWORD length) 
 {
 	if (!TotalTimeValid()) return;
-	//std::cout << "read complete " << length << std::endl;
+	// This is the data path for an async handle: `buffer` is the buffer handed to
+	// WinHttpReadData and `length` is how much of it WinHTTP actually filled.
+	if (length==0)
+	{
+		// End of the response body.
+		status=WinHTTPStatus::Ok;
+		CleanUp();
+		return;
+	}
+	if (eventhandler) eventhandler->OnData(buffer,length,Content);
+	if (!WinHttpQueryDataAvailable(requestHandle,NULL))
+	{
+		SetError(1014,GetLastError());
+		CleanUp();
+	}
 }
 void WinHTTP::OnReceivingResponse() {
 	if (!TotalTimeValid()) return;
@@ -202,13 +223,22 @@ void WinHTTP::OnDataAvailable(DWORD bytes)
 		return;
 	}
 	if (!TotalTimeValid()) return;
-	//std::cout << "data available" << bytes << std::endl;
-	char *temp=new char [bytes];
-	DWORD bytesRead;
-	WinHttpReadData(requestHandle,(LPVOID) temp,bytes,&bytesRead);
-	if (eventhandler) eventhandler->OnData(temp,bytesRead,Content);
-	delete [] temp;
-	WinHttpQueryDataAvailable(requestHandle,&_bytes);
+	// WINHTTP_FLAG_ASYNC: WinHttpReadData completes asynchronously. The buffer must
+	// outlive this call and stay untouched until WINHTTP_CALLBACK_STATUS_READ_COMPLETE
+	// (-> OnReadComplete) reports the real byte count; lpdwNumberOfBytesRead is never
+	// filled in and must be NULL. Reading it, and freeing the buffer here, handed PSOL
+	// an empty (or garbage) response body whenever the read did not complete inline.
+	if (tempbufSize < bytes)
+	{
+		delete [] tempbuf;
+		tempbuf = new char[bytes];
+		tempbufSize = bytes;
+	}
+	if (!WinHttpReadData(requestHandle,(LPVOID) tempbuf,bytes,NULL))
+	{
+		SetError(1013,GetLastError());
+		CleanUp();
+	}
 		
 }
 void WinHTTP::OnHandleCreated(HINTERNET handle) 
@@ -488,6 +518,11 @@ WinHTTP::~WinHTTP()
 		WaitForSingleObject(endEvent,INFINITE);
 	//}
 	CloseHandle(endEvent);
+	// Only safe after the endEvent wait: a cancelled in-flight WinHttpReadData may
+	// still own this buffer.
+	delete [] tempbuf;
+	tempbuf=NULL;
+	tempbufSize=0;
 	
 }
 

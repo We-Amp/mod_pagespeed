@@ -18,7 +18,7 @@ inline std::vector<std::string> tokenize(const std::string& s,
 
   for (size_t i = 0; i < s.size(); i++) {
     char current = s[i];
-    if (fp(s[i]) && !instring) {
+    if (fp(static_cast<unsigned char>(s[i])) && !instring) {
       if (tmp.size()) {
         r.push_back(tmp);
         tmp = "";

@@ -222,6 +222,46 @@ function Stop-TestServer {
     }
 }
 
+function Show-FailureEvidence {
+    # On failure, snapshot the module's in-process diagnostics BEFORE teardown
+    # recycles the worker: statistics and the message buffer live in w3wp's
+    # memory and are unrecoverable once Stop-TestServer runs. The fetch counters
+    # go to the console unconditionally -- they distinguish a real fetch failure
+    # feeding the 5-minute negative cache (recent_fetch_failure climbing) from a
+    # rewrite that merely ran out of fetch_until budget (flat counters). Full
+    # pages are written only when PAGESPEED_EVIDENCE_DIR is set (CI points it at
+    # the directory its evidence artifact uploads).
+    $base = "http://localhost:$Port"
+    $evidenceDir = $env:PAGESPEED_EVIDENCE_DIR
+
+    try {
+        $resp = Invoke-WebRequest -Uri "$base/pagespeed_statistics" -UseBasicParsing -TimeoutSec 15
+        if ($evidenceDir) {
+            New-Item -ItemType Directory -Path $evidenceDir -Force | Out-Null
+            Set-Content -Path (Join-Path $evidenceDir "stats-on-failure.txt") -Value $resp.Content
+        }
+        $vars = ($resp.Content | ConvertFrom-Json).variables
+        Write-Status "Fetch-path counters at failure:" "Yellow"
+        $vars.PSObject.Properties |
+            Where-Object { $_.Name -match 'fetch|remember' } |
+            ForEach-Object { Write-Status ("  {0} = {1}" -f $_.Name, $_.Value) "Yellow" }
+    } catch {
+        Write-Status "Could not capture /pagespeed_statistics: $($_.Exception.Message)" "Yellow"
+    }
+
+    if ($evidenceDir) {
+        try {
+            # NOT /pagespeed_message: the module routes that path but has no
+            # handler for it (falls through to the static handler, 404). The
+            # AdminSite page is the one that serves the in-memory buffer.
+            $resp = Invoke-WebRequest -Uri "$base/pagespeed_admin/message_history" -UseBasicParsing -TimeoutSec 15
+            Set-Content -Path (Join-Path $evidenceDir "messages-on-failure.txt") -Value $resp.Content
+        } catch {
+            Write-Status "Could not capture message_history: $($_.Exception.Message)" "Yellow"
+        }
+    }
+}
+
 function Run-Tests {
     Write-Banner "Running Integration Tests"
 
@@ -335,6 +375,7 @@ try {
     } else {
         Write-Banner "Some Tests Failed"
         Write-Status "FAILURE (exit code: $testResult)" "Red"
+        Show-FailureEvidence
     }
 
     exit $testResult

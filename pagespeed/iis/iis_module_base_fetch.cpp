@@ -15,6 +15,10 @@
 #include "pagespeed/iis/iis_message_handler.h"
 #include "pagespeed/iis/iis_misc.h"
 #include "pagespeed/iis/iis_server_context.h"
+#include "pagespeed/iis/iis_module_request_context.h"
+#include "pagespeed/iis/iis_request_context.h"
+#include "pagespeed/kernel/base/statistics.h"
+#include "pagespeed/kernel/http/content_type.h"
 #include <algorithm>    // std::transform
 
 
@@ -36,6 +40,15 @@ IisModuleBaseFetch::IisModuleBaseFetch(IHttpContext* http_context, FetchType fet
 	, flush_html_(false)
 	, ctx_(ctx)
 	, handler_(handler)
+	, zc_data_(NULL)
+	, zc_size_(0)
+	, zc_has_borrowed_(false)
+	, zc_aliased_counted_(false)
+	, zc_active_(false)
+	, zc_aliased_stat_(NULL)
+	, zc_copied_out_stat_(NULL)
+	, zc_renew_fail_stat_(NULL)
+	, zc_aborted_stat_(NULL)
 	
 {
 	lastwritetime=0;
@@ -259,6 +272,456 @@ bool IisModuleBaseFetch::HandleWrite(const StringPiece& sp,
 	//http_context_->GetResponse()->WriteEntityChunkByReference(dataChunk);
 	*/
 	return true;
+}
+
+// ==== Zero-copy aliased serve (CycloneZeroCopyServe, the design record) =============
+
+// Guards that must disqualify aliasing at write time.  Runs on the PSOL
+// delivery thread while the request is parked (single-operator invariant:
+// OnBeginRequest returned RQ_NOTIFICATION_PENDING, so nothing else touches
+// the IHttpContext), the same contract the existing HandleWrite/SendData/
+// CollectHeaders calls rely on.
+bool IisModuleBaseFetch::ZeroCopyGuardsAllowAlias()
+{
+	IHttpRequest* req = http_context_->GetRequest();
+	if (req == NULL)
+	{
+		return false;
+	}
+	// GET only: HEAD keeps the legacy path (no entity aliasing), anything
+	// else never reaches the resource serve anyway.
+	PCSTR method = req->GetHttpMethod();
+	if (method == NULL || !StringCaseEqual(method, "GET"))
+	{
+		return false;
+	}
+	// Range / If-Range: a partial response must never alias (sub-range
+	// chunk bookkeeping is not modeled).  Structurally excluded already --
+	// OnBeginRequestPageSpeed bails on Range/If-Range before any base fetch
+	// exists -- this is belt-and-braces.
+	USHORT len = 0;
+	PCSTR hdr = req->GetHeader("Range", &len);
+	if (hdr != NULL && len > 0)
+	{
+		return false;
+	}
+	len = 0;
+	hdr = req->GetHeader("If-Range", &len);
+	if (hdr != NULL && len > 0)
+	{
+		return false;
+	}
+	// IIS dynamic compression: if the client advertises Accept-Encoding,
+	// the compression module may read/transform the response body on its
+	// own schedule; alias only content types that are absent from IIS's
+	// default compressible-type lists (raster images; note image/svg+xml
+	// IS compressible and must not alias, hence an explicit allowlist
+	// instead of an image/* prefix test).  Everything else -- notably the
+	// rewritten CSS/JS that IIS would gzip -- keeps the copying path.
+	len = 0;
+	hdr = req->GetHeader("Accept-Encoding", &len);
+	if (hdr != NULL && len > 0)
+	{
+		const ContentType* ct = response_headers()->DetermineContentType();
+		if (ct == NULL)
+		{
+			return false;
+		}
+		switch (ct->type())
+		{
+		case ContentType::kPng:
+		case ContentType::kGif:
+		case ContentType::kJpeg:
+		case ContentType::kWebp:
+			break;
+		default:
+			return false;
+		}
+	}
+	// A response that already carries Content-Encoding is served verbatim
+	// either way; nothing extra to check for it here (the engine's
+	// InflatingFetch force-copies whenever inflation is needed).
+	//
+	// KNOWN LIMITATIONS of this experimental option (document with the
+	// option): (a) a third-party SEND_RESPONSE module that RETAINS a
+	// pointer into entity chunks past the flush that delivered them reads
+	// outside the per-chunk verify window; (b) an administrator who adds a
+	// raster-image type to IIS's compressible-type lists re-enables
+	// compression on a type this allowlist aliases.  Both sit outside what
+	// the serve-side barrier can observe.
+	return true;
+}
+
+// Every downstream ULONG/DWORD cast (HTTP_DATA_CHUNK BufferLength,
+// AllocateRequestMemory) is bounded by declining spans above this size in
+// WriteMapped, so a truncation-driven heap overwrite is unreachable.  The
+// copying fallback (HandleWrite) chunks with no full-size cast, so it is
+// safe for any size.
+static const size_t kZcMaxServeBytes = size_t{1} << 30;  // 1GB, ULONG-safe
+
+bool IisModuleBaseFetch::WriteMapped(const StringPiece& mmap_sp,
+                                     const MappedSharedString& keepalive,
+                                     MessageHandler* handler)
+{
+	// Only the '.pagespeed.' resource serve is wired for aliasing; the
+	// engine calls HeadersComplete() before WriteMapped on that path
+	// (rewrite_driver.cc CacheCallback::DeliverDone), so a missing
+	// headers-complete means an unexpected caller: decline.
+	bool decline = fetch_type_ != FetchType::kResource ||
+	               http_context_ == NULL || !headers_complete() ||
+	               mmap_sp.size() > kZcMaxServeBytes ||
+	               !ZeroCopyGuardsAllowAlias();
+	if (!decline)
+	{
+		Lock();
+		if (zc_has_borrowed_)
+		{
+			// Never expected: a mapped serve is a single WriteMapped.
+			// Fall through to the copying path release-safely rather
+			// than drop bytes.
+			decline = true;
+		}
+		else
+		{
+			zc_data_ = mmap_sp.data();
+			zc_size_ = mmap_sp.size();
+			zc_has_borrowed_ = true;
+			zc_pin_ = keepalive;  // refcount bump on the read handle
+		}
+		Unlock();
+		if (!decline)
+		{
+			log("zero-copy: recorded borrowed span (%d bytes)",
+			    (int)mmap_sp.size());
+			return true;
+		}
+	}
+	// Declined: the copying fallback memcpys out of the MAPPED region
+	// (HandleWrite -> request-pool blocks), so it needs the same
+	// copy-then-verify discipline as every other copy that leaves the
+	// region -- a ceiling-forced wrap can race the memcpy.  Probe the
+	// lease AFTER the copy and fail the fetch on kTorn so a torn copy is
+	// never served as a complete 200 (the fetch fails, no body is sent).
+	// kCopyNow (region intact) and kLeasesOff (no protection) keep the
+	// verified/unprotected copy, matching the aliased path's rules.
+	bool ok = Write(mmap_sp, handler);
+	if (ok && keepalive.RenewLeaseStrict() == LeaseRenewal::kTorn)
+	{
+		log("zero-copy: fallback copy torn (epoch moved), failing fetch");
+		ok = false;
+	}
+	return ok;
+}
+
+// Kicks off the chunked aliased serve from HandleDone (PSOL thread).  From
+// the first async flush on, completion signaling belongs to the serve:
+// either an inline drive finishes synchronously here (then this method
+// calls IndicateCompletion), or OnZeroCopyCompletion finishes it from the
+// module's OnAsyncCompletion.
+void IisModuleBaseFetch::StartZeroCopyServe()
+{
+	log("zero-copy serve: start (%d bytes)", (int)zc_size_);
+	// Statistics (same variable names as the nginx sink; registered
+	// centrally in RewriteDriverFactory::InitStats).
+	IisModuleRequestContext* rc =
+	    IisModuleRequestContext::GetRequestContext(http_context_);
+	if (rc != NULL && rc->GetInnerContext() != NULL)
+	{
+		Statistics* stats =
+		    rc->GetInnerContext()->server_context()->statistics();
+		if (stats != NULL)
+		{
+			zc_aliased_stat_ = stats->FindVariable("zerocopy_serve_aliased");
+			zc_copied_out_stat_ =
+			    stats->FindVariable("zerocopy_serve_copied_out");
+			zc_renew_fail_stat_ =
+			    stats->FindVariable("zerocopy_serve_renew_fail_reset");
+			zc_aborted_stat_ = stats->FindVariable("zerocopy_serve_aborted");
+		}
+	}
+	// HTTP.sys must never capture aliased bytes into the shared kernel
+	// response cache: a ceiling-forced wrap racing the send would poison a
+	// cache entry served to every client for its TTL, and no post-hoc
+	// verification can un-cache it.  CollectHeaders arms kernel TTL caching
+	// for long-max-age resources; disarm it for this response before the
+	// first flush sends the headers.  (Mirrors the HTML-path disarm in
+	// OnSendResponse.)
+	IHttpResponse* r = http_context_->GetResponse();
+	r->DisableKernelCache();
+	auto cp = r->GetCachePolicy();
+	if (cp != NULL)
+	{
+		auto kcp = cp->GetKernelCachePolicy();
+		if (kcp)
+		{
+			kcp->Policy = HttpCachePolicyNocache;
+			kcp->SecondsToLive = 0;
+		}
+		auto ucp = cp->GetUserCachePolicy();
+		if (ucp)
+		{
+			ucp->Policy = HttpCachePolicyNocache;
+		}
+	}
+	zc_planner_.reset(new IisZeroCopyServePlanner(zc_size_));
+	zc_has_borrowed_ = false;  // ownership moved to the planner/driver
+	zc_active_.store(true, std::memory_order_release);
+	ZcDrive d = DriveZeroCopyServe();
+	if (d == ZcDrive::kPending)
+	{
+		// An async flush is in flight; OnZeroCopyCompletion resumes on an
+		// IIS thread-pool thread.  Do not touch serve state past this
+		// point.
+		return;
+	}
+	// Finished or aborted synchronously on this thread.  We are outside a
+	// notification handler (OnBeginRequest returned PENDING long ago), so
+	// resume the pipeline explicitly, exactly like the legacy HandleDone.
+	IHttpContext* http_context = http_context_;
+	http_context_ = NULL;
+	zc_active_.store(false, std::memory_order_release);
+	http_context->IndicateCompletion(RQ_NOTIFICATION_FINISH_REQUEST);
+}
+
+// The submit loop.  Runs on exactly one thread at a time (PSOL thread for
+// the initial drive, then whichever IIS completion thread resumes it);
+// strict submit -> completion alternation means no lock is needed over the
+// serve state.
+IisModuleBaseFetch::ZcDrive IisModuleBaseFetch::DriveZeroCopyServe()
+{
+	IHttpResponse* response = http_context_->GetResponse();
+	while (true)
+	{
+		if (zc_planner_->done())
+		{
+			// Every aliased chunk passed its post-exposure verification and
+			// the (always-copied) tail is queued by reference in request-
+			// pool memory; IIS sends it while finishing the request.  The
+			// pin can be dropped: no aliased byte remains unsent.
+			zc_pin_ = MappedSharedString();
+			log("zero-copy serve: complete (%d bytes)", (int)zc_size_);
+			http_context_->SetRequestHandled();
+			return ZcDrive::kFinished;
+		}
+		// the design record submit-time decision.  RenewLeaseStrict re-stamps the
+		// read lease (keeping NORMAL wraps blocked for a fresh T while the
+		// client keeps up -- the between-chunks renewal) AND Dekker-
+		// revalidates the borrow; NsUntilForcedWrap is the ceiling-forced
+		// wrap deadline that ignores leases.  Because a chunk's in-flight
+		// window is client-paced (unbounded), ANY finite deadline forces
+		// the copy path -- a time margin cannot prove safety here.
+		const LeaseRenewal renew = zc_pin_.RenewLeaseStrict();
+		const bool pressure = zc_pin_.NsUntilForcedWrap() != UINT64_MAX;
+		const IisZeroCopyServePlanner::Next n =
+		    zc_planner_->PlanNext(renew, pressure);
+		if (n.step == IisZeroCopyServePlanner::Step::kAbort)
+		{
+			// Epoch moved: the remaining source bytes are gone.  A copy
+			// fallback is impossible -- fail closed.
+			return AbortZeroCopyServe("lease epoch moved (region overwritten)",
+			                           true /* epoch_torn */);
+		}
+		if (n.step == IisZeroCopyServePlanner::Step::kCopyTail)
+		{
+			char* owned =
+			    (char*)http_context_->AllocateRequestMemory((DWORD)n.length);
+			if (owned == NULL)
+			{
+				return AbortZeroCopyServe("tail copy allocation failed",
+			                           false /* epoch_torn */);
+			}
+			memcpy(owned, zc_data_ + n.offset, n.length);
+			// Copy-then-verify, never check-then-copy: a ceiling-forced
+			// wrap ignores the fresh lease and can overwrite the region
+			// DURING the memcpy above.  Re-verify the epoch AFTER the copy;
+			// only kTorn (epoch moved) aborts -- kCopyNow (wrap in flight,
+			// region intact) and kLeasesOff (no lease protection) serve the
+			// copy, so leases-off never turns serves into resets.
+			if (zc_pin_.RenewLeaseStrict() == LeaseRenewal::kTorn)
+			{
+				return AbortZeroCopyServe("epoch moved during tail copy-out",
+				                           true /* epoch_torn */);
+			}
+			zc_pin_ = MappedSharedString();  // verified owned bytes: unpin
+			HTTP_DATA_CHUNK* chunk = new HTTP_DATA_CHUNK();
+			chunk->DataChunkType = HttpDataChunkFromMemory;
+			chunk->FromMemory.pBuffer = owned;
+			chunk->FromMemory.BufferLength = (ULONG)n.length;
+			chunks_.push_back(chunk);  // struct freed in ~IisModuleBaseFetch
+			HRESULT hr = response->WriteEntityChunkByReference(chunk);
+			if (FAILED(hr))
+			{
+				return AbortZeroCopyServe("queueing the copied tail failed",
+				                           false /* epoch_torn */);
+			}
+			zc_planner_->Advance(n.length);
+			if (zc_copied_out_stat_ != NULL)
+			{
+				zc_copied_out_stat_->Add(1);
+			}
+			continue;  // next iteration: done() -> kFinished
+		}
+		// kAliasChunk: point HTTP.sys straight at the mmap bytes and flush
+		// asynchronously.  The flush completion is the per-chunk barrier:
+		// HTTP.sys guarantees the buffer is not read again after it.
+		HTTP_DATA_CHUNK* chunk = new HTTP_DATA_CHUNK();
+		chunk->DataChunkType = HttpDataChunkFromMemory;
+		chunk->FromMemory.pBuffer =
+		    (PVOID)const_cast<char*>(zc_data_ + n.offset);
+		chunk->FromMemory.BufferLength = (ULONG)n.length;
+		chunks_.push_back(chunk);
+		HRESULT hr = response->WriteEntityChunkByReference(chunk);
+		if (FAILED(hr))
+		{
+			// Nothing new in flight; the response chunk queue is wedged, so
+			// a copy retry through the same queue cannot help.  Fail
+			// closed.
+			return AbortZeroCopyServe("queueing an aliased chunk failed",
+			                           false /* epoch_torn */);
+		}
+		zc_planner_->Advance(n.length);
+		if (!zc_aliased_counted_)
+		{
+			zc_aliased_counted_ = true;
+			if (zc_aliased_stat_ != NULL)
+			{
+				zc_aliased_stat_->Add(1);  // once per aliased serve
+			}
+		}
+		// Publish every serve-state write above (planner offset, chunk
+		// bookkeeping) before the async submit: the completion thread's
+		// dispatch acquire-loads zc_active_ (HasActiveZeroCopyServe) and
+		// synchronizes with this release-store, so all writes sequenced
+		// before it are visible on that thread.  (Belt-and-braces: the
+		// kernel submit/completion round trip is itself a synchronizing
+		// event -- the same assumption every OVERLAPPED pattern rests on.)
+		zc_active_.store(true, std::memory_order_release);
+		// MERGE GATE (M1): this async Flush is initiated from a PSOL
+		// thread while the request is parked in RQ_BEGIN_REQUEST, relying
+		// on IIS routing its completion to the module's OnAsyncCompletion.
+		// That matches the documented IIS async-module pattern, but this
+		// module has NO in-tree precedent for it; before any merge it must
+		// be validated on IIS with an integration test: slow client +
+		// AppVerifier + a canary that rewrites the mapped region after
+		// each completion and asserts byte-identity-or-reset.
+		DWORD sent = 0;
+		BOOL completion_expected = FALSE;
+		hr = response->Flush(TRUE /*fAsync*/, TRUE /*fMoreData*/, &sent,
+		                     &completion_expected);
+		if (FAILED(hr))
+		{
+			// The aliased chunk may be partially on the wire; state is
+			// unknowable.  Fail closed.
+			return AbortZeroCopyServe("async flush of an aliased chunk failed",
+			                           false /* epoch_torn */);
+		}
+		if (completion_expected)
+		{
+			// KNOWN LIMITATION (availability, not correctness): the lease
+			// is renewed only between chunks.  A client that drains one
+			// chunk slower than the lease term on a stripe with concurrent
+			// write churn lapses the lease mid-flight; a normal wrap can
+			// then overwrite the in-flight region, and the post-exposure
+			// verify converts that serve into a connection reset where the
+			// copy path would have served it.  Fix direction if the reset
+			// rate ever matters: a <=3T/4 renewal timer armed while a
+			// flush is pending (not implemented, to keep this experimental
+			// diff bounded).
+			return ZcDrive::kPending;  // OnZeroCopyCompletion resumes
+		}
+		// Completed inline: HTTP.sys already consumed the buffer.  Post-
+		// exposure verification (the TOCTOU rule: verify AFTER the window
+		// closes): if the epoch moved while the kernel read the region, the
+		// bytes on the wire may be torn; the body cannot be complete yet
+		// (the copied tail is still pending), so abort truncates it.
+		if (!IisZeroCopyServePlanner::SentBytesTrustworthy(
+		        zc_pin_.RenewLeaseStrict()))
+		{
+			return AbortZeroCopyServe("epoch moved during inline aliased send",
+			                           true /* epoch_torn */);
+		}
+	}
+}
+
+IisModuleBaseFetch::ZcDrive IisModuleBaseFetch::AbortZeroCopyServe(
+    const char* reason, bool epoch_torn)
+{
+	log("zero-copy serve: ABORT: %s", reason);
+	// Stat split: zerocopy_serve_renew_fail_reset keeps its nginx-
+	// compatible meaning (epoch moved / torn borrow -> reset);
+	// allocation/submit-HRESULT aborts count separately.
+	if (epoch_torn)
+	{
+		if (zc_renew_fail_stat_ != NULL)
+		{
+			zc_renew_fail_stat_->Add(1);
+		}
+	}
+	else if (zc_aborted_stat_ != NULL)
+	{
+		zc_aborted_stat_->Add(1);
+	}
+	zc_pin_ = MappedSharedString();
+	if (http_context_ != NULL)
+	{
+		// Content-Length already went out with the headers; the client must
+		// never see a complete body assembled from an overwritten region.
+		// Reset the connection so the partial transfer is discarded and
+		// never cached downstream.
+		IHttpResponse* r = http_context_->GetResponse();
+		if (r != NULL)
+		{
+			r->CloseConnection();
+		}
+		http_context_->SetRequestHandled();
+	}
+	return ZcDrive::kAborted;
+}
+
+REQUEST_NOTIFICATION_STATUS IisModuleBaseFetch::OnZeroCopyCompletion(
+    HRESULT completion_status)
+{
+	// IIS thread-pool thread.  Strict alternation with the submit path (the
+	// previous submit returned kPending and nothing touches serve state
+	// until its completion arrives), so no lock is taken here.
+	ZcDrive d;
+	if (FAILED(completion_status))
+	{
+		// Client disconnect / transport error mid-serve.  The pin MUST
+		// still be released on this path; there is nobody left to serve.
+		log("zero-copy serve: completion error 0x%08x, finishing",
+		    (unsigned)completion_status);
+		zc_pin_ = MappedSharedString();
+		if (http_context_ != NULL)
+		{
+			http_context_->SetRequestHandled();
+		}
+		d = ZcDrive::kAborted;
+	}
+	else if (!IisZeroCopyServePlanner::SentBytesTrustworthy(
+	             zc_pin_.RenewLeaseStrict()))
+	{
+		// Post-exposure verification of the chunk HTTP.sys just finished
+		// reading (verify AFTER the exposure window, the copy-then-verify
+		// rule).  kTorn: the sent bytes may be torn; the body is not
+		// complete (tail still pending), so the reset truncates it.
+		d = AbortZeroCopyServe("epoch moved during aliased send",
+		                       true /* epoch_torn */);
+	}
+	else
+	{
+		d = DriveZeroCopyServe();
+	}
+	if (d == ZcDrive::kPending)
+	{
+		return RQ_NOTIFICATION_PENDING;
+	}
+	zc_active_.store(false, std::memory_order_release);
+	http_context_ = NULL;
+	// We are inside OnAsyncCompletion for the parked RQ_BEGIN_REQUEST:
+	// returning FINISH here resumes and finishes the request without an
+	// IndicateCompletion call.
+	return RQ_NOTIFICATION_FINISH_REQUEST;
 }
 
 int IisModuleBaseFetch::CollectHeaders() 
@@ -586,6 +1049,76 @@ void IisModuleBaseFetch::HandleDone(bool success)
 	alive=0;
 	donetime=GetTickCount();	
 	log("handle done [%s]!", success? "true" : "false");
+	if (zc_has_borrowed_)
+	{
+		// Zero-copy aliased serve (CycloneZeroCopyServe): WriteMapped
+		// recorded the borrowed mmap span instead of copying it.
+		if (success && http_context_ != NULL &&
+		    fetch_type_ == FetchType::kResource && chunks_.empty() &&
+		    currentblockpos == 0)
+		{
+			// The expected shape: a single WriteMapped, no other body
+			// bytes.  Hand the serve to the async chunked driver; it owns
+			// completion signaling (IndicateCompletion / notification
+			// return) from here on.  This fetch object stays alive through
+			// the whole drain: the inner request context holds the last
+			// reference until CleanupStoredContext at request teardown,
+			// which is also the backstop release point for the pin.
+			StartZeroCopyServe();
+			ReleaseRef();
+			return;
+		}
+		// Never expected: mixed Write()+WriteMapped output, a failed
+		// fetch, or no context.  Degrade release-safely to the classic
+		// copying serve (copy-then-verify; on a torn copy the body is
+		// dropped rather than serving wrong bytes).  An empty mapped span
+		// has nothing to copy and must not fail a producible response.
+		zc_has_borrowed_ = false;
+		bool copy_ok = (zc_size_ == 0);
+		if (success && http_context_ != NULL && zc_size_ > 0)
+		{
+			// zc_size_ <= kZcMaxServeBytes (WriteMapped bound), so the
+			// DWORD/ULONG casts below cannot truncate.
+			char* owned =
+			    (char*)http_context_->AllocateRequestMemory((DWORD)zc_size_);
+			if (owned != NULL)
+			{
+				memcpy(owned, zc_data_, zc_size_);
+				// Verify AFTER the memcpy (copy-then-verify): only kTorn
+				// (epoch moved) invalidates the copy.
+				copy_ok =
+				    zc_pin_.RenewLeaseStrict() != LeaseRenewal::kTorn;
+				if (copy_ok)
+				{
+					Lock();
+					// Body order: any unflushed Write() bytes precede the
+					// mapped bytes chronologically, but SendData appends
+					// currentblock AFTER chunks_ -- flush it into chunks_
+					// FIRST so the mapped copy cannot be emitted out of
+					// order on this (unexpected) mixed path.
+					if (currentblock && currentblockpos)
+					{
+						AddChunk(currentblock, currentblockpos, false);
+						currentblock = 0;
+						currentblocksize = 0;
+						currentblockpos = 0;
+					}
+					HTTP_DATA_CHUNK* chunk = new HTTP_DATA_CHUNK();
+					chunk->DataChunkType = HttpDataChunkFromMemory;
+					chunk->FromMemory.pBuffer = owned;
+					chunk->FromMemory.BufferLength = (ULONG)zc_size_;
+					chunks_.push_back(chunk);
+					Unlock();
+				}
+			}
+		}
+		zc_pin_ = MappedSharedString();
+		if (success && !copy_ok)
+		{
+			log("zero-copy: degrade copy failed, failing the fetch");
+			success = false;
+		}
+	}
 	if (success) {
 		SendData(NULL, false);
 	}

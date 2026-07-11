@@ -68,6 +68,17 @@ pagespeed_cc_test(
     ],
 )
 
+# Cross-platform: the zero-copy serve decision core is header-only pure
+# logic (no IIS/Windows headers), so its safety rules run everywhere.
+pagespeed_cc_test(
+    name = "iis_zerocopy_serve_test",
+    srcs = ["iis_zerocopy_serve_test.cc"],
+    deps = [
+        "//pagespeed/iis:iis_zerocopy_serve",
+        "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)
+
 pagespeed_cc_test(
     name = "iis_base_fetch_test",
     srcs = ["iis_base_fetch_test.cc"],

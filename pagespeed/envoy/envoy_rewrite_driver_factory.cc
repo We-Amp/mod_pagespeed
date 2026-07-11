@@ -83,6 +83,7 @@ EnvoyRewriteDriverFactory::EnvoyRewriteDriverFactory(
       port_(port),
       shut_down_(false),
       envoy_dispatcher_(nullptr),
+      event_scheduler_(nullptr),
       start_time_ms_(0) {
   // Record start time before any other initialization.
   start_time_ms_ = timer()->NowMs();
@@ -226,8 +227,12 @@ void EnvoyRewriteDriverFactory::ShutDown() {
 
     SystemRewriteDriverFactory::ShutDown();
 
-    // Clean up event scheduler and dispatcher after base class shutdown.
-    event_scheduler_.reset();
+    // Detach the scheduler from the dispatcher before destroying the
+    // adapter; the scheduler itself is owned (and later destroyed) by the
+    // base factory.
+    if (event_scheduler_ != nullptr) {
+      event_scheduler_->DetachDispatcher();
+    }
     event_dispatcher_.reset();
   }
 }
@@ -250,22 +255,32 @@ void EnvoyRewriteDriverFactory::SetEnvoyDispatcher(
   envoy_dispatcher_ = dispatcher;
 }
 
+Scheduler* EnvoyRewriteDriverFactory::CreateScheduler() {
+  // Called lazily via RewriteDriverFactory::scheduler(), which owns the
+  // result. Created unattached because the Envoy dispatcher may not be known
+  // yet; StartThreads() attaches it (or starts a SchedulerThread fallback).
+  DCHECK(event_scheduler_ == nullptr);
+  event_scheduler_ = new EventScheduler(thread_system(), timer());
+  return event_scheduler_;
+}
+
 void EnvoyRewriteDriverFactory::StartThreads() {
   if (threads_started_) {
     return;
   }
 
+  // Ensure the scheduler exists (created via CreateScheduler above).
+  scheduler();
+  CHECK(event_scheduler_ != nullptr);
+
   if (envoy_dispatcher_ != nullptr) {
-    // Use Envoy's native dispatcher for scheduling.
-    // This eliminates the need for a separate SchedulerThread.
+    // Use Envoy's native dispatcher for scheduling: attach it to the
+    // EventScheduler so the event loop drives alarm delivery (rewrite
+    // deadlines, fetch timeouts) without a dedicated SchedulerThread.
     event_dispatcher_ =
         std::make_unique<EnvoyDispatcherAdapter>(envoy_dispatcher_, timer());
-    event_scheduler_ = std::make_unique<EventScheduler>(
-        thread_system(), event_dispatcher_.get());
-    // Note: EventScheduler uses dispatcher timers for wakeups, but the
-    // scheduler's ProcessAlarmsOrWaitUs() is still driven by calls from
-    // PageSpeed code. The dispatcher provides the timer backend.
-    LOG(INFO) << "Using Envoy-native scheduling via EventScheduler";
+    event_scheduler_->AttachDispatcher(event_dispatcher_.get());
+    LOG(INFO) << "Scheduler alarms driven by Envoy dispatcher";
   } else {
     // Fallback: Use traditional SchedulerThread approach.
     // This is used when no Envoy dispatcher is available (e.g., unit tests).

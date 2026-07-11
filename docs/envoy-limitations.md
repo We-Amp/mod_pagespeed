@@ -42,10 +42,13 @@ differences, not bugs:
 
 ## Known Functional Limitations
 
-### combine_css Timeouts
-The `combine_css` filter may timeout due to async worker pool coordination in
-the streaming architecture. CSS files that require multiple fetches are
-particularly affected.
+### combine_css Timeouts (fixed)
+The `combine_css` filter could time out because scheduler alarms (rewrite
+deadlines, nested fetch timeouts) had no guaranteed driver on Envoy: they
+only fired when some thread happened to call into the scheduler. Fixed by
+wiring the EventScheduler to the Envoy dispatcher: the
+event loop now drives alarm delivery, so deadlines fire on time even with
+no blocked waiter.
 
 ### IPRO Cache Lifetime
 When serving IPRO-optimized resources, Envoy returns the upstream `max-age`
@@ -62,7 +65,7 @@ show placeholder values. The release builds include the git hash.
 
 ## Test Results
 
-**Latest:** 189 passed, 20 skipped, 0 failed
+**Latest:** 225 passed, 25 skipped, 0 failed
 
 Run tests:
 ```bash

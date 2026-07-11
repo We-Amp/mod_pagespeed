@@ -1579,6 +1579,32 @@ namespace net_instaweb
 		IN IHttpCompletionInfo * pCompletionInfo
 		)
 	{
+		// Zero-copy aliased serve (CycloneZeroCopyServe): the per-chunk
+		// async flush completions of the resource serve land here (the
+		// request is parked in RQ_BEGIN_REQUEST -- hence the notification
+		// check, a cheap guard against any spurious completion from a
+		// different pipeline stage); route them to the serve driver.  The
+		// base fetch is guaranteed alive: the inner request context holds
+		// a reference until CleanupStoredContext, which cannot run while a
+		// notification/completion is outstanding.
+		if (dwNotification == RQ_BEGIN_REQUEST)
+		{
+			IisModuleRequestContext* request_context =
+			    IisModuleRequestContext::GetRequestContext(pHttpContext);
+			if (request_context != NULL &&
+			    request_context->GetInnerContext() != NULL)
+			{
+				IisModuleBaseFetch* bf = request_context->base_fetch();
+				if (bf != NULL && bf->HasActiveZeroCopyServe())
+				{
+					HRESULT completion_status =
+					    (pCompletionInfo != NULL)
+					        ? pCompletionInfo->GetCompletionStatus()
+					        : S_OK;
+					return bf->OnZeroCopyCompletion(completion_status);
+				}
+			}
+		}
 		if (NULL != pCompletionInfo)
 		{
 			// Create strings for completion information.

@@ -20,81 +20,123 @@
 #include "pagespeed/kernel/thread/event_scheduler.h"
 
 #include <memory>
+#include <utility>
 
+#include "base/logging.h"
+#include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/function.h"
 #include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/thread/event_dispatcher.h"
 
 namespace net_instaweb {
 
+// The pump callback, used both for dispatcher posts and as the pump timer's
+// callback. Holds the alive token so a pump that was queued before
+// DetachDispatcher()/destruction degrades to a no-op instead of touching a
+// dead scheduler.
+class EventScheduler::PumpFunction : public Function {
+ public:
+  PumpFunction(EventScheduler* scheduler,
+               std::shared_ptr<std::atomic<bool>> alive)
+      : scheduler_(scheduler), alive_(std::move(alive)) {}
+
+ protected:
+  void Run() override {
+    if (alive_->load(std::memory_order_acquire)) {
+      scheduler_->PumpOnDispatcherThread();
+    }
+  }
+  void Cancel() override {}
+
+ private:
+  EventScheduler* scheduler_;
+  std::shared_ptr<std::atomic<bool>> alive_;
+};
+
 EventScheduler::EventScheduler(ThreadSystem* thread_system,
                                EventDispatcher* dispatcher)
     : Scheduler(thread_system, dispatcher->timer()),
       dispatcher_(dispatcher),
-      timer_generation_(0) {}
+      pump_posted_(false),
+      alive_(std::make_shared<std::atomic<bool>>(true)) {}
 
-EventScheduler::~EventScheduler() {
-  // Increment generation to ignore any pending callbacks.
-  timer_generation_.fetch_add(1, std::memory_order_release);
+EventScheduler::EventScheduler(ThreadSystem* thread_system, Timer* timer)
+    : Scheduler(thread_system, timer),
+      dispatcher_(nullptr),
+      pump_posted_(false),
+      alive_(std::make_shared<std::atomic<bool>>(true)) {}
+
+EventScheduler::~EventScheduler() { DetachDispatcher(); }
+
+void EventScheduler::AttachDispatcher(EventDispatcher* dispatcher) {
+  CHECK(dispatcher != nullptr);
+  CHECK(alive_->load(std::memory_order_acquire))
+      << "AttachDispatcher after DetachDispatcher";
+  EventDispatcher* previous =
+      dispatcher_.exchange(dispatcher, std::memory_order_acq_rel);
+  CHECK(previous == nullptr) << "AttachDispatcher called twice";
+  // Catch up: alarms may have been scheduled while unattached, with nothing
+  // driving them. A spurious pump (no alarms pending) is harmless.
+  RequestPump();
 }
 
-void EventScheduler::AwaitWakeupUntilUs(int64 wakeup_time_us) {
-  // This is called with the scheduler mutex held. The base implementation
-  // does a timed condvar wait. We create a timer that will signal the condvar
-  // when it fires.
-  //
-  // Key insight: We still use the condvar wait from the base class. The timer
-  // just provides an additional signal path. If the condvar times out naturally,
-  // the timer callback will be a no-op (wrong generation). If the timer fires
-  // first, it signals the condvar and we wake up early.
-  //
-  // This allows the EventScheduler to work with both single-threaded and
-  // multi-threaded dispatchers.
+void EventScheduler::DetachDispatcher() {
+  alive_->store(false, std::memory_order_release);
+  dispatcher_.store(nullptr, std::memory_order_release);
+  // Contract: the dispatcher's loop is quiesced (or we're on its thread),
+  // so cancelling the timers here cannot race their callbacks.
+  pump_timer_.reset();
+  retired_pump_timer_.reset();
+}
 
-  mutex()->DCheckLocked();
+void EventScheduler::EarliestWakeupChangedMutexHeld(int64 wakeup_time_us) {
+  // Called with the scheduler mutex held, from any thread that inserts an
+  // alarm. Post() is non-blocking for all EventDispatcher implementations,
+  // so this cannot deadlock against the pump (which takes the mutex).
+  RequestPump();
+}
 
-  int64 now_us = timer()->NowUs();
-  if (wakeup_time_us <= now_us) {
-    // No need to wait.
+void EventScheduler::RequestPump() {
+  EventDispatcher* dispatcher = dispatcher_.load(std::memory_order_acquire);
+  if (dispatcher == nullptr) {
+    return;  // Not attached: base Scheduler semantics apply.
+  }
+  if (!pump_posted_.exchange(true, std::memory_order_acq_rel)) {
+    dispatcher->Post(new PumpFunction(this, alive_));
+  }
+}
+
+void EventScheduler::PumpOnDispatcherThread() {
+  // Clear the coalescing flag before running alarms, so a deadline change
+  // that happens during RunAlarms() (alarm callbacks may drop the scheduler
+  // mutex and insert new alarms) posts a fresh pump rather than being lost.
+  pump_posted_.store(false, std::memory_order_release);
+
+  EventDispatcher* dispatcher = dispatcher_.load(std::memory_order_acquire);
+  if (dispatcher == nullptr || dispatcher->IsShuttingDown()) {
     return;
   }
 
-  // Increment generation for this new timer.
-  int64 generation =
-      timer_generation_.fetch_add(1, std::memory_order_acq_rel) + 1;
+  int64 next_wakeup_us = 0;
+  {
+    ScopedMutex lock(mutex());
+    next_wakeup_us = RunAlarms(nullptr);
+  }
 
-  // Create a timer that will wake us up. We capture the generation so we can
-  // ignore stale callbacks. The caller owns the returned EventTimer.
-  std::unique_ptr<EventTimer> timer(dispatcher_->CreateTimerAtUs(
-      wakeup_time_us,
-      MakeFunction(this, &EventScheduler::OnWakeupTimer, generation)));
-
-  // Do the actual condvar wait. This will return when either:
-  // - The timeout expires
-  // - OnWakeupTimer signals via Wakeup()
-  // - Some other code calls Signal()
-  Scheduler::AwaitWakeupUntilUs(wakeup_time_us);
-  // Timer is auto-deleted here after the wait completes.
-}
-
-void EventScheduler::OnWakeupTimer(int64 generation) {
-  // IMPORTANT: Do NOT acquire the scheduler mutex here!
-  //
-  // With evthread_use_pthreads(), event_del() blocks until any currently-
-  // executing callback completes. The timer destructor in AwaitWakeupUntilUs
-  // calls event_del() while holding the scheduler mutex. If this callback
-  // also acquired the scheduler mutex, we'd deadlock when the condvar timeout
-  // and the libevent timer fire simultaneously:
-  //   Main thread: holds mutex → event_del() → waits for callback
-  //   Dispatcher:  callback → waits for mutex
-  //
-  // This is safe without the mutex because:
-  // 1. timer_generation_ is atomic - no lock needed for the check
-  // 2. pthread_cond_broadcast() is safe to call without the mutex
-  // 3. A "missed" broadcast (if no one is waiting) is harmless - the
-  //    condvar timeout in AwaitWakeupUntilUs handles that case
-  if (generation == timer_generation_.load(std::memory_order_acquire)) {
-    Wakeup();
+  // Re-arm the one-shot timer at the next deadline. This pump may itself be
+  // running from pump_timer_'s callback, so the current timer is cancelled
+  // and retired rather than destroyed: destruction is deferred to the next
+  // pump, by which point its callback frame has finished (pumps are
+  // serialized on the dispatcher thread). Cancelling from within the timer's
+  // own callback is safe in both backends, and a retired-but-unfired timer
+  // that slips through only triggers a harmless extra pump.
+  if (pump_timer_ != nullptr) {
+    pump_timer_->Cancel();
+  }
+  retired_pump_timer_ = std::move(pump_timer_);
+  if (next_wakeup_us != 0) {
+    pump_timer_.reset(dispatcher->CreateTimerAtUs(
+        next_wakeup_us, new PumpFunction(this, alive_)));
   }
 }
 

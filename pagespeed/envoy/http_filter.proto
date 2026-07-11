@@ -89,7 +89,8 @@ message AdminAuthConfig {
 // Protects against cascade failures when upstream services are unavailable.
 message CircuitBreakerConfig {
     // Whether circuit breaker is enabled. Default: true.
-    bool enabled = 1;
+    // Presence-aware (proto3 optional): when unset, treated as enabled.
+    optional bool enabled = 1;
 
     // Number of consecutive failures before opening the circuit. Default: 5.
     int32 failure_threshold = 2;
@@ -135,7 +136,8 @@ message VirtualHostOptions {
 
     // Whether PageSpeed is enabled for this host. Default: true.
     // Set to false to disable all optimization for matching hosts.
-    bool enabled = 2;
+    // Presence-aware (proto3 optional): when unset, treated as enabled.
+    optional bool enabled = 2;
 
     // Enable specific filters (comma-separated filter names).
     // Example: "rewrite_css,rewrite_javascript,recompress_images"

@@ -19,8 +19,9 @@
 
 #include "pagespeed/kernel/thread/event_scheduler.h"
 
-#include <vector>
+#include <atomic>
 #include <memory>
+#include <vector>
 
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/function.h"
@@ -55,9 +56,7 @@ class EventSchedulerTest : public WorkerTestBase {
         dispatcher_(new LibeventDispatcher(thread_system_.get(), timer_.get())),
         scheduler_(thread_system_.get(), dispatcher_.get()) {}
 
-  void SetUp() override {
-    ASSERT_TRUE(dispatcher_->Start());
-  }
+  void SetUp() override { ASSERT_TRUE(dispatcher_->Start()); }
 
   void TearDown() override {
     dispatcher_->InitiateShutdown();
@@ -88,9 +87,12 @@ TEST_F(EventSchedulerTest, AlarmsGetRun) {
   int counter = 0;
 
   // Add alarms with different delays.
-  scheduler_.AddAlarmAtUs(start_us + 10 * Timer::kMsUs, new SchedulerCountFunction(&counter));
-  scheduler_.AddAlarmAtUs(start_us + 20 * Timer::kMsUs, new SchedulerCountFunction(&counter));
-  scheduler_.AddAlarmAtUs(start_us + 30 * Timer::kMsUs, new SchedulerCountFunction(&counter));
+  scheduler_.AddAlarmAtUs(start_us + 10 * Timer::kMsUs,
+                          new SchedulerCountFunction(&counter));
+  scheduler_.AddAlarmAtUs(start_us + 20 * Timer::kMsUs,
+                          new SchedulerCountFunction(&counter));
+  scheduler_.AddAlarmAtUs(start_us + 30 * Timer::kMsUs,
+                          new SchedulerCountFunction(&counter));
 
   // Wait for all alarms to fire.
   QuiesceAlarms(1 * Timer::kSecondUs);
@@ -163,7 +165,7 @@ TEST_F(EventSchedulerTest, BlockingTimedWait) {
 
   int64 elapsed_us = timer_->NowUs() - start_us;
   // Should have waited approximately 50ms.
-  EXPECT_GE(elapsed_us, 40 * Timer::kMsUs);  // Allow some slack.
+  EXPECT_GE(elapsed_us, 40 * Timer::kMsUs);   // Allow some slack.
   EXPECT_LE(elapsed_us, 200 * Timer::kMsUs);  // But not too much.
 }
 
@@ -173,7 +175,8 @@ TEST_F(EventSchedulerTest, Signal) {
   // TimedWait with a callback that will be run when Signal is called.
   {
     ScopedMutex lock(scheduler_.mutex());
-    scheduler_.TimedWaitMs(10 * 1000, new SchedulerCountFunction(&counter));  // Long timeout.
+    scheduler_.TimedWaitMs(
+        10 * 1000, new SchedulerCountFunction(&counter));  // Long timeout.
     scheduler_.Signal();  // Signal immediately.
   }
 
@@ -183,6 +186,86 @@ TEST_F(EventSchedulerTest, Signal) {
 
 TEST_F(EventSchedulerTest, TimerAccessor) {
   EXPECT_EQ(dispatcher_->timer(), scheduler_.timer());
+}
+
+// Alarm callback that records firing for a thread polling from outside the
+// scheduler (alarms fire on the dispatcher thread in these tests).
+class AtomicCountFunction : public Function {
+ public:
+  explicit AtomicCountFunction(std::atomic<int>* counter) : counter_(counter) {}
+
+ protected:
+  void Run() override { counter_->fetch_add(1, std::memory_order_acq_rel); }
+  void Cancel() override {}
+
+ private:
+  std::atomic<int>* counter_;
+};
+
+// Polls until *counter >= expected or timeout_us elapses; returns the final
+// counter value. Deliberately never calls into the scheduler: these tests
+// verify the dispatcher drives alarms with NO waiting thread.
+int AwaitCount(Timer* timer, std::atomic<int>* counter, int expected,
+               int64 timeout_us) {
+  int64 end_us = timer->NowUs() + timeout_us;
+  while (counter->load(std::memory_order_acquire) < expected &&
+         timer->NowUs() < end_us) {
+    timer->SleepUs(2 * Timer::kMsUs);
+  }
+  return counter->load(std::memory_order_acquire);
+}
+
+// The core regression test for the half-wired integration: an alarm must
+// fire on time even though no thread ever blocks in the scheduler (no
+// ProcessAlarmsOrWaitUs poller, no SchedulerThread, no blocked waiter).
+TEST_F(EventSchedulerTest, AlarmsFireWithoutWaiter) {
+  std::atomic<int> counter(0);
+  scheduler_.AddAlarmAtUs(timer_->NowUs() + 20 * Timer::kMsUs,
+                          new AtomicCountFunction(&counter));
+  EXPECT_EQ(1, AwaitCount(timer_.get(), &counter, 1, 2 * Timer::kSecondUs));
+}
+
+// Adding an alarm EARLIER than the currently-armed deadline must re-arm the
+// pump: the early alarm fires promptly, not at the stale far deadline.
+TEST_F(EventSchedulerTest, EarlierAlarmRearmsPump) {
+  std::atomic<int> counter(0);
+  Scheduler::Alarm* far_alarm =
+      scheduler_.AddAlarmAtUs(timer_->NowUs() + 60 * Timer::kSecondUs,
+                              new AtomicCountFunction(&counter));
+  scheduler_.AddAlarmAtUs(timer_->NowUs() + 20 * Timer::kMsUs,
+                          new AtomicCountFunction(&counter));
+  EXPECT_EQ(1, AwaitCount(timer_.get(), &counter, 1, 2 * Timer::kSecondUs));
+  {
+    ScopedMutex lock(scheduler_.mutex());
+    EXPECT_TRUE(scheduler_.CancelAlarm(far_alarm));
+  }
+}
+
+// The attach-later pattern used by the Apache and Envoy factories: alarms
+// scheduled while unattached (when the scheduler behaves like the base
+// class) must be picked up and driven once a dispatcher is attached.
+TEST(EventSchedulerAttachTest, AlarmsBeforeAttachFireAfterAttach) {
+  std::unique_ptr<ThreadSystem> thread_system(Platform::CreateThreadSystem());
+  std::unique_ptr<Timer> timer(thread_system->NewTimer());
+  EventScheduler scheduler(thread_system.get(), timer.get());
+
+  std::atomic<int> counter(0);
+  scheduler.AddAlarmAtUs(timer->NowUs() + 10 * Timer::kMsUs,
+                         new AtomicCountFunction(&counter));
+
+  // Unattached and nothing ever blocks in the scheduler: past-due alarms
+  // have no driver.
+  timer->SleepUs(100 * Timer::kMsUs);
+  EXPECT_EQ(0, counter.load(std::memory_order_acquire));
+
+  LibeventDispatcher dispatcher(thread_system.get(), timer.get());
+  ASSERT_TRUE(dispatcher.Start());
+  scheduler.AttachDispatcher(&dispatcher);
+  EXPECT_EQ(1, AwaitCount(timer.get(), &counter, 1, 2 * Timer::kSecondUs));
+
+  dispatcher.InitiateShutdown();
+  dispatcher.WaitForShutdown();
+  scheduler.DetachDispatcher();
 }
 
 }  // namespace

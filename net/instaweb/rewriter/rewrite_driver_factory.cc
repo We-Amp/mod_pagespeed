@@ -710,6 +710,25 @@ bool RewriteDriverFactory::EnsureDirectoryWritable(
 
 void RewriteDriverFactory::InitStats(Statistics* statistics) {
   HTTPCache::InitStats(statistics);
+  // the design record CycloneZeroCopyServe observability (0 when the flag is off):
+  // aliased = serves that took the zero-copy aliased path; copied_out =
+  // serves whose aliased tail was copied out before a reachable
+  // ceiling-forced wrap or an in-flight wrap on the stripe (the read-side
+  // degradation signal); renew_fail_reset = serves reset because the borrow
+  // epoch moved (a wrap committed) between read and send — the fail-closed
+  // torn-body guard.  A nonzero renew_fail_reset rate is the operator's
+  // signal that a stripe is hot enough to warrant tuning.  ring_refills
+  // counts windows served through the h2/h3 bounded-copy ring; a
+  // ring serve shows aliased=0, copied_out=0, ring_refills>0, and a
+  // mid-stream degrade additionally bumps copied_out.
+  statistics->AddVariable("zerocopy_serve_aliased");
+  statistics->AddVariable("zerocopy_serve_copied_out");
+  statistics->AddVariable("zerocopy_serve_renew_fail_reset");
+  // IIS sink: aliased-serve aborts NOT caused by a torn borrow
+  // (allocation / submit failures); torn borrows stay in
+  // zerocopy_serve_renew_fail_reset so its meaning matches nginx.
+  statistics->AddVariable("zerocopy_serve_aborted");
+  statistics->AddVariable("zerocopy_serve_ring_refills");
   RewriteDriver::InitStats(statistics);
   RewriteStats::InitStats(statistics);
   CacheBatcher::InitStats(statistics);

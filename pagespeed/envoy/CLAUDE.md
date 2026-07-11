@@ -39,13 +39,21 @@ virtual host overrides, circuit breaker, and admin authentication.
 
 ## Build Notes
 
-Building the Envoy filter requires `WORKSPACE.envoy` (symlinked or copied
-over `WORKSPACE`). Key targets:
+Activate the Envoy workspace with `./scripts/use-envoy-workspace.sh` — it
+swaps `WORKSPACE.envoy` over `WORKSPACE` AND empties `.bazelignore` (the
+lean build ignores `pagespeed/envoy`, which otherwise makes these packages
+"deleted" in the Envoy workspace too). Restore with `--lean`. Build with
+`--config=envoy-filter` (clang + libstdc++, googleurl without system ICU):
 
 ```
-bazel build --config=clang-libstdcxx13 //pagespeed/envoy:envoy_pagespeed      # standalone binary
-bazel build --config=clang-libstdcxx13 //pagespeed/envoy:pagespeed_filter.so  # shared library
+bazel build --config=envoy-filter //pagespeed/envoy:envoy_pagespeed      # standalone binary
+bazel build --config=envoy-filter //pagespeed/envoy:pagespeed_filter.so  # shared library
 ```
+
+`WORKSPACE.envoy` pre-defines `com_github_libevent_libevent` with Envoy's
+patched snapshot (`event2/watch.h`); the lean workspace's vanilla libevent
+registration is `maybe()`-wrapped so it defers. Keep that pin in sync when
+bumping `ENVOY_COMMIT`.
 
 ## Testing
 
@@ -59,7 +67,12 @@ See `docs/test-catalog.md` for current pass/skip counts.
 ## Threading Model
 
 ProxyFetch and rewrite workers run on PSOL thread pools. Completion is
-signaled back to Envoy's main thread via `dispatcher_.post()`.
+signaled back to Envoy's main thread via `dispatcher_.post()`. Scheduler
+alarms (rewrite deadlines, fetch timeouts) are driven by the Envoy
+dispatcher: `EnvoyRewriteDriverFactory::CreateScheduler()` returns an
+`EventScheduler`, and `StartThreads()` attaches the dispatcher adapter so
+the event loop pumps `RunAlarms()` — alarm callbacks run ON the dispatcher
+thread and must stay cheap.
 `EnvoyAsyncFetch` uses `shared_from_this()` to prevent use-after-free when
 posting lambdas to the dispatcher thread. `EnvoyBaseFetch` uses a manual
 `std::atomic<int> references_` refcount (initial value 2: one for Envoy,

@@ -14,6 +14,7 @@ IisAsyncWorker::IisAsyncWorker(IisAsyncUrlFetcher * fetcher,AsyncFetch *fetch,Me
 	parser=new HttpResponseParser(fetch->response_headers(),fetch,messagehandler);
 	client.SetEventHandler(this);
 	this->fetch=fetch;
+	content_bytes_=0;
 	this->fetcher=fetcher;
 	this->messagehandler=messagehandler;
 }
@@ -25,6 +26,9 @@ IisAsyncWorker::~IisAsyncWorker()
 
 void IisAsyncWorker::OnData(const char *data,int length,WinHTTPContentType type)
 {
+	if (type==Content) {
+		content_bytes_ += length;
+	}
 	parser->ParseChunk(StringPiece(data,length));
 	/*for (int i=0;i<length;i++)
 	
@@ -40,6 +44,21 @@ void IisAsyncWorker::OnCompleted(WinHTTPStatus status)
 		std::string html(myData.begin(), myData.end());
 		parser->ParseChunk(StringPiece(html.c_str(), html.size()));
 	}*/
+	// A failed sub-resource fetch is remembered by PSOL for up to 300s
+	// (kRememberFetchFailedTtlSec / kRememberEmptyTtlSec), during which the parent HTML
+	// serves un-rewritten. Never let either shape of failure be silent.
+	//
+	// The empty-body case is the one that hurts: WinHTTP reports Ok, so nothing downstream
+	// looks wrong, but PSOL classifies the 0-byte response as kFetchStatusEmpty and caches
+	// that failure for five minutes.
+	if (status != Ok) {
+		messagehandler->Message(kWarning,
+		    "Native fetch of [%s] failed: WinHTTP status=%d", url_.c_str(), (int)status);
+	} else if (content_bytes_ == 0) {
+		messagehandler->Message(kWarning,
+		    "Native fetch of [%s] returned an empty body (WinHTTP Ok, 0 content bytes); "
+		    "PSOL will cache this as a failure", url_.c_str());
+	}
 	fetch->Done(status==Ok);
 	fetcher->StopFetch(this);	
 }

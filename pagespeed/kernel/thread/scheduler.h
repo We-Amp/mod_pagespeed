@@ -187,6 +187,17 @@ class Scheduler {
   // are no timers currently active.
   virtual void AwaitWakeupUntilUs(int64 wakeup_time_us);
 
+  // Hook invoked, with mutex held, whenever the earliest outstanding-alarm
+  // deadline moves earlier (including insertion into an empty alarm set).
+  // Subclasses that integrate with an external event loop can override this
+  // to (re)arm a loop timer that drives RunAlarms(); see EventScheduler.
+  // The default implementation does nothing: the base class relies on the
+  // condvar broadcast in InsertAlarmAtUsMutexHeld to wake a blocked waiter,
+  // and on some thread (e.g. SchedulerThread) calling ProcessAlarmsOrWaitUs.
+  //
+  // Implementations must not block and must not re-enter the scheduler.
+  virtual void EarliestWakeupChangedMutexHeld(int64 wakeup_time_us) {}
+
   bool running_waiting_alarms() const { return running_waiting_alarms_; }
 
  private:

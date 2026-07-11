@@ -36,14 +36,12 @@ namespace net_instaweb {
 EnvoyBaseFetch::EnvoyBaseFetch(StringPiece url,
                                EnvoyServerContext* server_context,
                                const RequestContextPtr& request_ctx,
-                               PreserveCachingHeaders preserve_caching_headers,
                                const RewriteOptions* options,
                                Envoy::Http::HttpPageSpeedDecoderFilter* decoder)
     : AsyncFetch(request_ctx),
       url_(url.data(), url.size()),
       server_context_(server_context),
-      options_(options),
-      preserve_caching_headers_(preserve_caching_headers) {
+      options_(options) {
   decoder_.store(decoder, std::memory_order_release);
 }
 

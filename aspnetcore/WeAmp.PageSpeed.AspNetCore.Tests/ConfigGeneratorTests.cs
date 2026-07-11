@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using WeAmp.PageSpeed.AspNetCore.Config;
 using WeAmp.PageSpeed.AspNetCore.Internal;
@@ -565,5 +566,65 @@ public class ConfigGeneratorTests
         var conf = GenerateInverse(new PageSpeedOptions { ExcludePaths = ["^/api/"] }, nginxLoopbackPort: 5100).Conf;
         conf.Should().Contain("location ~ \"^/api/\" {");
         conf.Should().Contain("proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;");
+    }
+
+    // ---- unmapped-surface warnings (WarnUnmappedOptions) ----------------
+
+    // Minimal ILogger that records warning-level messages so we can assert the
+    // "dropped surface gets a note" contract without a mocking framework.
+    private sealed class CapturingLogger<T> : ILogger<T>
+    {
+        public readonly List<string> Warnings = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state,
+            Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            if (logLevel == LogLevel.Warning)
+            {
+                Warnings.Add(formatter(state, exception));
+            }
+        }
+    }
+
+    private static List<string> WarningsFor(PageSpeedOptions options)
+    {
+        if (options.Sidecar.Mode == SidecarMode.Inverse)
+        {
+            options.Sidecar.Mode = SidecarMode.Process;
+        }
+        var logger = new CapturingLogger<NginxConfigGenerator>();
+        var endpoint = new InternalSidecarEndpoint();
+        endpoint.SetPort(5000);
+        var prefix = Path.Combine(Path.GetTempPath(), "psgen_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            new NginxConfigGenerator(logger, endpoint).GenerateConfig(options, prefix);
+        }
+        finally
+        {
+            try { Directory.Delete(prefix, recursive: true); } catch { /* best effort */ }
+        }
+        return logger.Warnings;
+    }
+
+    [Fact]
+    public void WarnUnmappedOptions_VirtualHostsConfigured_LogsWarning()
+    {
+        var warnings = WarningsFor(new PageSpeedOptions
+        {
+            VirtualHosts = [new VirtualHostOptions { HostPattern = "*.example.com" }]
+        });
+        warnings.Should().Contain(w => w.Contains("VirtualHosts"));
+    }
+
+    [Fact]
+    public void WarnUnmappedOptions_NoVirtualHosts_NoWarning()
+    {
+        var warnings = WarningsFor(new PageSpeedOptions());
+        warnings.Should().NotContain(w => w.Contains("VirtualHosts"));
     }
 }

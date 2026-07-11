@@ -441,6 +441,15 @@ build:zig-windows --copt=-DPAGESPEED_SUPPORT_POSIX_SHARED_MEM=0
 # Disable POSIX-only memcached backend
 build:zig-windows --define=enable_memcached=false
 
+# Envoy-workspace filter builds (WORKSPACE.envoy; scripts/use-envoy-workspace.sh).
+# googleurl's ICU IDNA variant needs system ICU headers the dev images lack;
+# the lean workspace already pins system_icu=0 globally.
+build:envoy-filter --config=clang-libstdcxx13
+build:envoy-filter --@googleurl//build_config:system_icu=0
+# Selects the EXT_BUILD_DEPS spelling the Envoy rules_foreign_cc pin accepts
+# (//bazel:rules_foreign_cc_envoy_pin config_setting).
+build:envoy-filter --define=rules_foreign_cc_pin=envoy
+
 try-import %workspace%/clang.bazelrc
 try-import %workspace%/local_tsan.bazelrc
 

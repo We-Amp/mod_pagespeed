@@ -172,8 +172,9 @@ class TestEnvoyStatistics:
         response = client.get(f"{server_config.stats_path}?PageSpeed=off")
         assert_http_status(response, 200)
 
-        # Should contain some statistics (name: value format)
-        assert_contains(response, r"\w+:\s*\d+")
+        # Should contain some statistics: either the plain-text
+        # 'name: value' format or the JSON '"name": value' format.
+        assert_contains(response, r"\"?\w+\"?:\s*\d+")
 
     @pytest.mark.requires_stats
     def test_statistics_parsing(

@@ -169,6 +169,35 @@ bool IisRewriteOptions::IsDirective(StringPiece config_directive,
   return StringCaseEqual(config_directive, compare_directive);
 }
 
+RewriteOptions::OptionScope IisRewriteOptions::GetOptionScope(
+    StringPiece option_name) {
+  size_t size = sizeof(main_only_options) / sizeof(char*);
+  for (size_t i = 0; i < size; i++) {
+    if (StringCaseEqual(main_only_options[i], option_name)) {
+      return kProcessScopeStrict;
+    }
+  }
+
+  size = sizeof(server_only_options) / sizeof(char*);
+  for (size_t i = 0; i < size; i++) {
+    if (StringCaseEqual(server_only_options[i], option_name)) {
+      return kServerScope;
+    }
+  }
+
+  for (OptionBaseVector::const_iterator it = all_options().begin();
+       it != all_options().end(); ++it) {
+    RewriteOptions::OptionBase* option = *it;
+    if (StringCaseEqual(option->option_name(), option_name)) {
+      // We treat kLegacyProcessScope as kProcessScopeStrict, matching the
+      // nginx port.
+      return option->scope() == kLegacyProcessScope ? kProcessScopeStrict
+                                                    : option->scope();
+    }
+  }
+  return kDirectoryScope;
+}
+
 RewriteOptions::OptionSettingResult IisRewriteOptions::ParseAndSetOptions0(
     StringPiece directive, GoogleString* msg, MessageHandler* handler) {
   if (IsDirective(directive, "diagnose")) {
@@ -207,6 +236,11 @@ RewriteOptions::OptionSettingResult
 		  logToEventLogSet=true;
 		  logToEventLog=false;
 	  }
+	  else
+	  {
+		  *msg = "must be on or off";
+		  return RewriteOptions::kOptionValueInvalid;
+	  }
 	  return RewriteOptions::kOptionOk;
   }
   else
@@ -214,7 +248,7 @@ RewriteOptions::OptionSettingResult
     // On Windows, paths start with a drive letter (e.g., "C:\..."), not "/".
     // Accept both forward-slash and drive-letter paths.
     if (!StringCaseStartsWith(arg, "/") &&
-        !(arg.size() >= 2 && isalpha(arg[0]) && arg[1] == ':')) {
+        !(arg.size() >= 2 && isalpha(static_cast<unsigned char>(arg[0])) && arg[1] == ':')) {
       *msg = "must start with a slash or drive letter";
       return RewriteOptions::kOptionValueInvalid;
     }
@@ -351,11 +385,11 @@ IisRewriteOptions::ParseAndSetOptions(
     case RewriteOptions::kOptionOk:
       return NULL;
     case RewriteOptions::kOptionNameUnknown:
-		handler->Message(kWarning, JoinString(args, ' ').c_str());
+		handler->Message(kWarning, "%s", JoinString(args, ' ').c_str());
       return "unknown option";
     case RewriteOptions::kOptionValueInvalid: {
-		handler->Message(kWarning, JoinString(args, ' ').c_str());
-      return "Invalid value"; 
+		handler->Message(kWarning, "%s", JoinString(args, ' ').c_str());
+      return "Invalid value";
     }
   }
 

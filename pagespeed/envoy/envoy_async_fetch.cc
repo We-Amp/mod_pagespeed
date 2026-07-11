@@ -27,11 +27,10 @@ namespace net_instaweb {
 EnvoyAsyncFetch::EnvoyAsyncFetch(
     const RequestContextPtr& request_ctx,
     Envoy::Http::HttpPageSpeedDecoderFilter* filter,
-    Envoy::Event::Dispatcher& dispatcher, EnvoyServerContext* server_context)
+    Envoy::Event::Dispatcher& dispatcher)
     : BufferingAsyncFetch(request_ctx),
       filter_(filter),
-      dispatcher_(dispatcher),
-      server_context_(server_context) {}
+      dispatcher_(dispatcher) {}
 
 EnvoyAsyncFetch::~EnvoyAsyncFetch() {
   // Nothing to clean up - all resources are either owned elsewhere or

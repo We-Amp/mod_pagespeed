@@ -309,13 +309,16 @@ void Scheduler::InsertAlarmAtUsMutexHeld(int64 wakeup_time_us,
   alarm->wakeup_time_us_ = wakeup_time_us;
   alarm->index_ = ++index_;
 
-  if (broadcast_on_wakeup_change) {
-    bool wakeup_time_changed =
-        outstanding_alarms_.empty() ||
-        (wakeup_time_us < (*outstanding_alarms_.begin())->wakeup_time_us_);
-    if (wakeup_time_changed) {
+  bool wakeup_time_changed =
+      outstanding_alarms_.empty() ||
+      (wakeup_time_us < (*outstanding_alarms_.begin())->wakeup_time_us_);
+  if (wakeup_time_changed) {
+    if (broadcast_on_wakeup_change) {
       condvar_->Broadcast();
     }
+    // Regardless of the broadcast, external-event-loop schedulers need to
+    // know the earliest deadline moved so they can re-arm their loop timer.
+    EarliestWakeupChangedMutexHeld(wakeup_time_us);
   }
 
   outstanding_alarms_.insert(alarm);

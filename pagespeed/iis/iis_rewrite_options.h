@@ -31,6 +31,13 @@ class IisRewriteOptions : public SystemRewriteOptions {
   const char* ParseAndSetOptions(
       std::vector<std::string> args, MessageHandler* handler, global_settings& global_config);
 
+  // Returns the tightest scope an option may be set at, mirroring the nginx
+  // port's NgxRewriteOptions::GetOptionScope. Names are matched
+  // case-insensitively (option setting is case-insensitive). Used to reject
+  // process/server-scoped directives that appear inside per-request (matched)
+  // config blocks.
+  RewriteOptions::OptionScope GetOptionScope(StringPiece option_name);
+
   virtual IisRewriteOptions* Clone() const;
   const GoogleString& statistics_path() const {
 	  return statistics_path_.value();

@@ -65,6 +65,12 @@ class EnvoyRewriteDriverFactory : public SystemRewriteDriverFactory {
   RewriteOptions* NewRewriteOptionsForQuery() override;
   ServerContext* NewDecodingServerContext() override;
 
+  // Returns an EventScheduler so that, once StartThreads() attaches the
+  // Envoy dispatcher, alarms are driven by the event loop rather than
+  // firing only opportunistically. Called lazily (possibly before
+  // SetEnvoyDispatcher()), hence the attach-later pattern.
+  Scheduler* CreateScheduler() override;
+
   // Initializes all the statistics objects created transitively by
   // EnvoyRewriteDriverFactory, including envoy-specific and
   // platform-independent statistics.
@@ -132,11 +138,13 @@ class EnvoyRewriteDriverFactory : public SystemRewriteDriverFactory {
   int port_;
   bool shut_down_;
 
-  // Envoy dispatcher integration. When envoy_dispatcher_ is set, we use
-  // EventScheduler with EnvoyDispatcherAdapter instead of SchedulerThread.
+  // Envoy dispatcher integration. When envoy_dispatcher_ is set,
+  // StartThreads() attaches the EnvoyDispatcherAdapter to the EventScheduler
+  // (created by CreateScheduler and owned by the base factory) so the Envoy
+  // event loop drives scheduler alarms instead of a SchedulerThread.
   Envoy::Event::Dispatcher* envoy_dispatcher_;
   std::unique_ptr<EnvoyDispatcherAdapter> event_dispatcher_;
-  std::unique_ptr<EventScheduler> event_scheduler_;
+  EventScheduler* event_scheduler_;  // Owned by RewriteDriverFactory.
 
   // Time when the factory was created, for uptime calculation.
   int64 start_time_ms_;

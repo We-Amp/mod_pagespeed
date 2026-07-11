@@ -51,6 +51,19 @@ cc_library(
     visibility = ["//visibility:public"],
 )
 
+# Decision core for the zero-copy aliased serve (CycloneZeroCopyServe,
+# the design record): chunking, copy-out and abort policy.  Header-only and free of
+# IIS/Windows headers (same pattern as iis_proxy_fetch_completion) so the
+# safety rules are unit-testable on every platform.
+cc_library(
+    name = "iis_zerocopy_serve",
+    hdrs = ["iis_zerocopy_serve.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)
+
 # =============================================================================
 # IIS Native Module for PageSpeed — IISpeed adoption
 # =============================================================================
@@ -124,6 +137,7 @@ cc_library(
     deps = [
         ":iis_ip_string",
         ":iis_proxy_fetch_completion",
+        ":iis_zerocopy_serve",
         "//net/instaweb:net_instaweb_lib",
         "//net/instaweb/http",
         "//net/instaweb/rewriter",

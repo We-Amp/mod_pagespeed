@@ -87,9 +87,11 @@ class ApacheRewriteDriverFactory : public SystemRewriteDriverFactory {
   static void Initialize();
   static void Terminate();
 
-  // Called by any ApacheServerContext whose configuration requires use of
-  // a scheduler thread. This will actually start one, so should only be
-  // called from child processes.
+  // Called by any ApacheServerContext whose configuration requires alarms
+  // to fire without a waiting thread (proxy_all_requests_mode). Starts the
+  // libevent dispatcher and attaches it to the EventScheduler so the event
+  // loop drives alarm delivery. Starts a thread, so should only be called
+  // from child processes.
   void SetNeedSchedulerThread();
 
   // Needed by mod_instaweb.cc:ParseDirective().
@@ -115,6 +117,11 @@ class ApacheRewriteDriverFactory : public SystemRewriteDriverFactory {
 
   void ParentOrChildInit() override;
 
+  // Returns an EventScheduler so that SetNeedSchedulerThread() can attach
+  // the libevent dispatcher to it; until (and unless) that happens it
+  // behaves exactly like the base Scheduler.
+  Scheduler* CreateScheduler() override;
+
   void SetupMessageHandlers() override;
   void ShutDownMessageHandlers() override;
 
@@ -126,9 +133,11 @@ class ApacheRewriteDriverFactory : public SystemRewriteDriverFactory {
   apr_pool_t* pool_;
   server_rec* server_rec_;
   // Event-based scheduling using LibeventDispatcher.
-  // LibeventDispatcher runs its own background event loop thread.
+  // LibeventDispatcher runs its own background event loop thread; once
+  // SetNeedSchedulerThread() attaches it, it drives the EventScheduler's
+  // alarms (created by CreateScheduler, owned by the base factory).
   std::unique_ptr<LibeventDispatcher> event_dispatcher_;
-  std::unique_ptr<EventScheduler> event_scheduler_;
+  EventScheduler* event_scheduler_ = nullptr;  // Owned by RewriteDriverFactory.
 
   // TODO(jmarantz): These options could be consolidated in a protobuf or
   // some other struct, which would keep them distinct from the rest of the
