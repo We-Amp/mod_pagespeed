@@ -166,8 +166,7 @@ def extract_beacon_params(html: str) -> Optional[Dict[str, str]]:
         r"'([^']*)',\s*"  # path
         r"'([^']*)',\s*"  # url
         r"'([^']*)',\s*"  # hash
-        r"'([^']*)'\s*"   # nonce
-        r"\)"
+        r"'([^']*)'"  # nonce; the live snippet passes a 5th arg (selectors)
     )
     match = re.search(pattern, html)
     if match:

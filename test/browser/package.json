@@ -1,0 +1,11 @@
+{
+  "name": "pagespeed-browser-tests",
+  "private": true,
+  "description": "Headless-Chromium integration tests for shipped client JS assets",
+  "scripts": {
+    "test": "node critical_css_beacon_test.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.58.2"
+  }
+}

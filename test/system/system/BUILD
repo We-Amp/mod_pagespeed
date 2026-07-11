@@ -31,6 +31,7 @@ load("//bazel:pagespeed_python_test.bzl", "pagespeed_py_test", "pagespeed_py_tes
 pagespeed_py_test_suite(
     name = "all",
     srcs = [
+        "test_critical_css_beacon.py",
         "test_headers.py",
         "test_ipro.py",
     ],

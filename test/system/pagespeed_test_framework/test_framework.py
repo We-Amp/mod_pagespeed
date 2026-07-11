@@ -364,6 +364,22 @@ pagespeed.criticalCssBeaconInit('/beacon', 'http%3A%2F%2Fexample.com', 'abc123',
         assert params["hash"] == "abc123"
         assert params["nonce"] == "nonce456"
 
+    def test_extract_beacon_params_with_selector_list(self):
+        """extract_beacon_params handles the live 5-arg snippet.
+
+        The server-injected call passes the candidate selector array as a
+        fifth argument after the nonce.
+        """
+        html = ("pagespeed.criticalCssBeaconInit('/mod_pagespeed_beacon',"
+                "'http://example.com/a.html?q=1','oh1','n2',"
+                "['.big','.blue']);")
+        params = extract_beacon_params(html)
+        assert params is not None
+        assert params["path"] == "/mod_pagespeed_beacon"
+        assert params["url"] == "http://example.com/a.html?q=1"
+        assert params["hash"] == "oh1"
+        assert params["nonce"] == "n2"
+
     def test_extract_beacon_params_not_found(self):
         """extract_beacon_params returns None when no beacon."""
         html = "<html><body>No beacon here</body></html>"

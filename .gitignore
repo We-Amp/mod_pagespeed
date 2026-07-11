@@ -57,3 +57,4 @@ __pycache__/
 
 # the design record in-container nginx module build scratch tree (build_module_in_container.sh)
 .ngx-module-build/
+test/browser/node_modules/
