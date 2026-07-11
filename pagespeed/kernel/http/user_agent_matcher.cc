@@ -404,6 +404,70 @@ bool UserAgentMatcher::SupportsLazyloadImages(StringPiece user_agent) const {
   return supports_lazyload_images_.Match(user_agent, true);
 }
 
+namespace {
+
+// Parses the version number that immediately follows 'token' in 'user_agent'
+// as "<major>[.<minor>...]". Returns true and sets *major and *minor (0 when
+// no minor component is present) on success; returns false if 'token' is
+// absent or not followed by a digit.
+bool ParseVersionAfterToken(StringPiece user_agent, StringPiece token,
+                            int* major, int* minor) {
+  size_t pos = user_agent.find(token);
+  if (pos == StringPiece::npos) {
+    return false;
+  }
+  pos += token.size();
+  size_t end = pos;
+  while (end < user_agent.size() && user_agent[end] >= '0' &&
+         user_agent[end] <= '9') {
+    ++end;
+  }
+  if (end == pos || !StringToInt(user_agent.substr(pos, end - pos), major)) {
+    return false;
+  }
+  *minor = 0;
+  if (end < user_agent.size() && user_agent[end] == '.') {
+    size_t minor_start = end + 1;
+    size_t minor_end = minor_start;
+    while (minor_end < user_agent.size() && user_agent[minor_end] >= '0' &&
+           user_agent[minor_end] <= '9') {
+      ++minor_end;
+    }
+    if (minor_end > minor_start) {
+      StringToInt(user_agent.substr(minor_start, minor_end - minor_start),
+                  minor);
+    }
+  }
+  return true;
+}
+
+}  // namespace
+
+bool UserAgentMatcher::SupportsNativeLazyLoading(StringPiece user_agent) const {
+  int major = 0;
+  int minor = 0;
+  // Chromium-based browsers (Chrome, Edge, Opera) all carry a
+  // "Chrome/<version>" token and support loading="lazy" from 77 on. iOS
+  // Chrome (CriOS) is a WebKit shell and intentionally not matched here; it
+  // falls through to the conservative default below.
+  if (ParseVersionAfterToken(user_agent, "Chrome/", &major, &minor)) {
+    return major >= 77;
+  }
+  if (ParseVersionAfterToken(user_agent, "Firefox/", &major, &minor)) {
+    return major >= 75;
+  }
+  // Safari reports its version in a separate "Version/<major>.<minor>" token
+  // ahead of the "Safari/" token; loading="lazy" shipped in 15.4. Chromium
+  // user agents also contain "Safari/" but no "Version/" token, and they
+  // were already handled above.
+  if (user_agent.find("Safari/") != StringPiece::npos &&
+      ParseVersionAfterToken(user_agent, "Version/", &major, &minor)) {
+    return major > 15 || (major == 15 && minor >= 4);
+  }
+  // Unknown user agent: fall back to the script-based implementation.
+  return false;
+}
+
 bool UserAgentMatcher::SupportsDnsPrefetch(
     const StringPiece& user_agent) const {
   return supports_dns_prefetch_.Match(user_agent, false);

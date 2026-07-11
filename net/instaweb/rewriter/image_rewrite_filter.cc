@@ -41,6 +41,7 @@
 #include "net/instaweb/rewriter/cached_result.pb.h"
 #include "net/instaweb/rewriter/public/critical_images_beacon_filter.h"
 #include "net/instaweb/rewriter/public/critical_images_finder.h"
+#include "net/instaweb/rewriter/public/csp.h"
 #include "net/instaweb/rewriter/public/css_url_encoder.h"
 #include "net/instaweb/rewriter/public/css_util.h"
 #include "net/instaweb/rewriter/public/domain_rewrite_filter.h"
@@ -57,6 +58,7 @@
 #include "net/instaweb/rewriter/public/rewrite_context.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
+#include "net/instaweb/rewriter/public/rewrite_stats.h"
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "net/instaweb/rewriter/public/single_rewrite_context.h"
 #include "net/instaweb/rewriter/public/srcset_slot.h"
@@ -366,6 +368,11 @@ const char* MessageForInlineResult(InlineResult inline_result) {
       break;
     case INLINE_SHORTCUT:
       message = "The image was not inlined because it is a shortcut icon.";
+      break;
+    case INLINE_DISALLOWED_BY_CSP:
+      message =
+          "The image was not inlined because the Content-Security-Policy "
+          "on the page does not permit data: images.";
       break;
     case INLINE_INTERNAL_ERROR:
       message =
@@ -2029,6 +2036,17 @@ InlineResult ImageRewriteFilter::TryInline(bool is_html, bool is_critical,
   // inlining. After this point, we may skip inlining an image, but not
   // because of properties of the image.
   const RewriteOptions* options = driver()->options();
+
+  // In CSP, host sources and '*' do not match data: URLs, so inlining
+  // is only permitted when the governing source list (img-src, falling
+  // back to default-src) explicitly allows the data: scheme. This also
+  // covers images inlined into CSS, which reach here via
+  // FinishRewriteCssImageUrl.
+  if (!driver()->content_security_policy().PermitsDataImage()) {
+    server_context()->rewrite_stats()->csp_blocked_rewrites()->Add(1);
+    return INLINE_DISALLOWED_BY_CSP;
+  }
+
   if (options->cache_small_images_unrewritten()) {
     // Skip rewriting, record the URL for storage in the property cache,
     // suppress future rewrites to this slot, and return immediately.

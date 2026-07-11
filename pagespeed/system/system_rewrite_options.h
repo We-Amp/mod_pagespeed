@@ -82,6 +82,15 @@ class SystemRewriteOptions : public RewriteOptions {
   void set_file_cache_clean_size_kb(int64 x) {
     set_option(x, &file_cache_clean_size_kb_);
   }
+  int file_cache_small_tier_percent() const {
+    return file_cache_small_tier_percent_.value();
+  }
+  bool has_file_cache_small_tier_percent() const {
+    return file_cache_small_tier_percent_.was_set();
+  }
+  void set_file_cache_small_tier_percent(int x) {
+    set_option(x, &file_cache_small_tier_percent_);
+  }
   int64 lru_cache_byte_limit() const { return lru_cache_byte_limit_.value(); }
   void set_lru_cache_byte_limit(int64 x) {
     set_option(x, &lru_cache_byte_limit_);
@@ -103,6 +112,25 @@ class SystemRewriteOptions : public RewriteOptions {
   }
   void set_compress_metadata_cache(bool x) {
     set_option(x, &compress_metadata_cache_);
+  }
+  bool cyclone_zero_copy() const { return cyclone_zero_copy_.value(); }
+  void set_cyclone_zero_copy(bool x) { set_option(x, &cyclone_zero_copy_); }
+  bool cyclone_zero_copy_serve() const {
+    return cyclone_zero_copy_serve_.value();
+  }
+  // Whether CycloneZeroCopyServe was explicitly configured (as opposed to
+  // taking the default).  The Apache aliased serve is opt-in experimental:
+  // it activates only on an explicit "CycloneZeroCopyServe on", mirroring
+  // the nginx rollout posture of shipping the sink default-off first.
+  bool has_cyclone_zero_copy_serve() const {
+    return cyclone_zero_copy_serve_.was_set();
+  }
+  void set_cyclone_zero_copy_serve(bool x) {
+    set_option(x, &cyclone_zero_copy_serve_);
+  }
+  int64 cyclone_ram_cache_kb() const { return cyclone_ram_cache_kb_.value(); }
+  void set_cyclone_ram_cache_kb(int64 x) {
+    set_option(x, &cyclone_ram_cache_kb_);
   }
   bool statistics_enabled() const { return statistics_enabled_.value(); }
   void set_statistics_enabled(bool x) { set_option(x, &statistics_enabled_); }
@@ -476,6 +504,17 @@ class SystemRewriteOptions : public RewriteOptions {
   Option<bool> statistics_logging_enabled_;
   Option<bool> use_shared_mem_locking_;
   Option<bool> compress_metadata_cache_;
+  // Zero-copy serving of memory-mapped cache hits (Cyclone).  Experimental,
+  // default off.
+  Option<bool> cyclone_zero_copy_;
+  // Zero-copy ALIASED serve: carry the mmap bytes into the port output
+  // buffer by reference instead of copying (nginx IPRO; default off).
+  Option<bool> cyclone_zero_copy_serve_;
+  // Size (KB) of Cyclone's internal RAM cache tier, decoupled from the
+  // PSOL LRU cache.  0 (default) disables the RAM tier (serve reads from the
+  // mmap volume); -1 inherits LRUCacheKbPerProcess (legacy coupling);
+  // >0 sets that many KB.
+  Option<int64> cyclone_ram_cache_kb_;
 
   Option<bool> slurp_read_only_;
   Option<bool> test_proxy_;
@@ -506,6 +545,7 @@ class SystemRewriteOptions : public RewriteOptions {
 
   Option<int64> slow_file_latency_threshold_us_;
   Option<int64> file_cache_clean_size_kb_;
+  Option<int> file_cache_small_tier_percent_;
   Option<int64> lru_cache_byte_limit_;
   Option<int64> lru_cache_kb_per_process_;
   Option<int64> statistics_logging_interval_ms_;

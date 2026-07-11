@@ -34,6 +34,7 @@
 #include "net/instaweb/rewriter/public/single_rewrite_context.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/proto_util.h"
+#include "pagespeed/kernel/base/shared_string.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/http/content_type.h"
@@ -207,6 +208,30 @@ class RecordingFetch : public SharedAsyncFetch {
   bool HandleFlush(MessageHandler* handler) override;
   // Implements SharedAsyncFetch::HandleDone().
   void HandleDone(bool success) override;
+
+  // A zero-copy aliased serve must NOT bypass IPRO recording: de-alias
+  // with the design record verified copy, then run the copying Write() so
+  // HandleWrite records the bytes for optimization.  The verify (after the
+  // memcpy) matters doubly here: recorded bytes are written back into the
+  // cache, so a torn borrow would otherwise become PERSISTENT poisoning,
+  // not just one bad response.  Torn => fail the write (recording aborts).
+  bool WriteMapped(const StringPiece& mmap_sp,
+                   const MappedSharedString& keepalive,
+                   MessageHandler* handler) override {
+    GoogleString owned;
+    if (!CopyMappedVerified(mmap_sp, keepalive, &owned)) {
+      return false;
+    }
+    return Write(owned, handler);
+  }
+
+  // A shared-storage serve must not bypass IPRO recording either: force
+  // the copying HandleWrite instead of forwarding the reference.
+  bool HandleWriteShared(const StringPiece& content,
+                         const SharedString& /*storage*/,
+                         MessageHandler* handler) override {
+    return HandleWrite(content, handler);
+  }
 
  private:
   void FreeDriver();

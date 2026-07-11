@@ -240,10 +240,18 @@ bool CanMediaAffectScreen(const StringPiece& media) {
     // (but causes CSS2 to not use this rule).
     StartsWithWord("only", &current);
     bool initial_not = StartsWithWord("not", &current);
-    if (StartsWithWord("screen", &current) || StartsWithWord("all", &current) ||
-        current.empty() || current[0] == '(') {
+    bool screen_medium =
+        StartsWithWord("screen", &current) || StartsWithWord("all", &current);
+    if (screen_medium || current.empty() || current[0] == '(') {
       // Affects screen, unless there was an initial not.
       if (!initial_not) {
+        return true;
+      }
+      // "not" negates the entire media query, not just the media type, so a
+      // negated query with a condition ("not screen and (color)") is still
+      // true on screens where the condition fails. Only a bare "not screen"
+      // or "not all" can never affect a screen.
+      if (screen_medium && !current.empty()) {
         return true;
       }
     } else if (initial_not) {

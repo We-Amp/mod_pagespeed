@@ -29,6 +29,7 @@
 #include "net/instaweb/http/public/request_context.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/google_message_handler.h"
+#include "pagespeed/kernel/base/shared_string.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_system.h"
@@ -148,6 +149,22 @@ TEST_F(InflatingFetchTest, AutoInflate) {
   // size early enough).
   EXPECT_FALSE(
       mock_fetch_->response_headers()->Has(HttpAttributes::kContentLength));
+  EXPECT_TRUE(mock_fetch_->done());
+  EXPECT_TRUE(mock_fetch_->success());
+}
+
+// Gzipped bytes delivered over the shared-storage write path must still be
+// inflated for the wrapped fetch, not forwarded by reference.
+TEST_F(InflatingFetchTest, AutoInflateWriteShared) {
+  inflating_fetch_->response_headers()->Add(HttpAttributes::kContentEncoding,
+                                            HttpAttributes::kGzip);
+  inflating_fetch_->response_headers()->SetStatusAndReason(HttpStatus::kOK);
+  GoogleString gzipped(gzipped_data_.data(), gzipped_data_.size());
+  SharedString storage(gzipped);
+  inflating_fetch_->WriteShared(storage.Value(), storage, &message_handler_);
+  inflating_fetch_->Done(true);
+  EXPECT_EQ(kClearData, mock_fetch_->buffer())
+      << "data should be auto-inflated.";
   EXPECT_TRUE(mock_fetch_->done());
   EXPECT_TRUE(mock_fetch_->success());
 }

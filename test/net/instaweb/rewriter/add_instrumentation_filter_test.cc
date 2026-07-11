@@ -123,6 +123,41 @@ TEST_F(AddInstrumentationFilterTest, ScriptInjection) {
               GoogleString::npos);
 }
 
+TEST_F(AddInstrumentationFilterTest, CspForbidsInlineScript) {
+  // Under a script-src policy without 'unsafe-inline' the browser would
+  // block both the head timing script and the onload beacon script, so
+  // neither may be injected.
+  AddFilters();
+  ParseUrl(GetTestUrl(),
+           "<head><meta http-equiv=\"Content-Security-Policy\" "
+           "content=\"script-src *;\"></head><body></body>");
+  EXPECT_EQ(
+      0, statistics()
+             ->GetVariable(
+                 AddInstrumentationFilter::kInstrumentationScriptAddedCount)
+             ->Get());
+  EXPECT_EQ(GoogleString::npos, output_buffer_.find("mod_pagespeed_start"));
+  EXPECT_EQ(GoogleString::npos,
+            output_buffer_.find("pagespeed.addInstrumentationInit"));
+}
+
+TEST_F(AddInstrumentationFilterTest, CspAllowsInlineScript) {
+  // With 'unsafe-inline' permitted the filter behaves as usual.
+  AddFilters();
+  ParseUrl(GetTestUrl(),
+           "<head><meta http-equiv=\"Content-Security-Policy\" "
+           "content=\"script-src * 'unsafe-inline';\"></head>"
+           "<body></body>");
+  EXPECT_EQ(
+      1, statistics()
+             ->GetVariable(
+                 AddInstrumentationFilter::kInstrumentationScriptAddedCount)
+             ->Get());
+  EXPECT_TRUE(output_buffer_.find(
+                  CreateInitString(options()->beacon_url().http, "load", "")) !=
+              GoogleString::npos);
+}
+
 TEST_F(AddInstrumentationFilterTest, ScriptInjectionWithNavigation) {
   report_unload_time_ = true;
   RunInjection();

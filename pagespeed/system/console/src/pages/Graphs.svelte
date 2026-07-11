@@ -1,6 +1,7 @@
 <script lang="ts">
   import { AdminApiClient } from "$lib/api/client";
   import type { ConsoleResponse, TimeRangeParams } from "$lib/api/types";
+  import RefreshNotice from "$lib/RefreshNotice.svelte";
 
   const { basePath = "" }: { basePath?: string; isGlobal?: boolean } = $props();
   const api = new AdminApiClient(basePath);
@@ -155,9 +156,10 @@
 
   {#if loading && !data}
     <p class="loading">Loading graph data...</p>
-  {:else if error}
+  {:else if error && !data}
     <p class="error">{error}</p>
   {:else if data}
+    <RefreshNotice error={error} />
     {#if (data.graphs?.length ?? 0) > 0}
       <div class="toolbar">
         <input
@@ -196,7 +198,7 @@
                 </svg>
               </div>
               <details class="data-details">
-                <summary>Raw data ({graph.data.length} points)</summary>
+                <summary>Raw data ({graph.data.length} point{graph.data.length === 1 ? "" : "s"})</summary>
                 <pre class="data-block">{JSON.stringify(graph.data, null, 2)}</pre>
               </details>
             </div>

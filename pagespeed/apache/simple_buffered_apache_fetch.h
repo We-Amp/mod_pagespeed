@@ -29,6 +29,7 @@
 #include "pagespeed/apache/apache_writer.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/condvar.h"
+#include "pagespeed/kernel/base/mapped_shared_string.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -60,6 +61,15 @@ class SimpleBufferedApacheFetch : public AsyncFetch {
 
   bool IsCachedResultValid(const ResponseHeaders& headers) override
       LOCKS_EXCLUDED(mutex_);
+
+  // Zero-copy serve of a mapped cache value (CycloneZeroCopyServe, the design record):
+  // this fetch always buffers, so it de-aliases with the verified copy
+  // (copy-then-verify) and buffers the owned bytes; a torn borrow fails the
+  // write instead of buffering garbage.  Never forwards a raw mapped
+  // pointer.
+  bool WriteMapped(const StringPiece& mmap_sp,
+                   const MappedSharedString& keepalive,
+                   MessageHandler* handler) override;
 
  protected:
   void HandleHeadersComplete() override LOCKS_EXCLUDED(mutex_);

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { AdminApiClient } from "$lib/api/client";
   import { usePolling } from "$lib/api/polling.svelte";
+  import RefreshNotice from "$lib/RefreshNotice.svelte";
 
   const { basePath = "" }: { basePath?: string; isGlobal?: boolean } = $props();
   const api = new AdminApiClient(basePath);
@@ -10,13 +11,6 @@
   let showWarning = $state(true);
   let showInfo = $state(true);
   let showFatal = $state(true);
-
-  const severityOrder: Record<string, number> = {
-    fatal: 0,
-    error: 1,
-    warning: 2,
-    info: 3,
-  };
 
   /**
    * Parse a timestamp from the message text.
@@ -49,9 +43,9 @@
       .filter((m) => visibleSeverities.has(m.severity))
       .map((m) => ({ ...m, _ts: parseTimestampFromMessage(m) }))
       .sort((a, b) => {
-        // Most recent first.
-        if (a._ts !== b._ts) return b._ts - a._ts;
-        return (severityOrder[a.severity] ?? 99) - (severityOrder[b.severity] ?? 99);
+        // Most recent first; preserve the server's order for equal timestamps
+        // (stable sort) instead of reshuffling same-second lines by severity.
+        return b._ts - a._ts;
       });
   });
 
@@ -109,9 +103,10 @@
 
   {#if messages.loading}
     <p class="loading">Loading messages...</p>
-  {:else if messages.error}
+  {:else if messages.error && !messages.data}
     <p class="error">{messages.error.message}</p>
   {:else}
+    <RefreshNotice error={messages.error} />
     <div class="filters">
       <span class="filter-label">Filter by severity:</span>
       <label class="filter-checkbox">

@@ -185,6 +185,13 @@ void CriticalCssBeaconFilter::SummariesDone() {
         continue;
     }
   }
+  // The beacon bootstrap (selector list plus init call) is an inline
+  // script the page's CSP may forbid; in that case skip beaconing before
+  // consuming a nonce, and the critical-selector finder keeps following
+  // its usual no-data path.
+  if (!CspPermitsInlineScript()) {
+    return;
+  }
   BeaconMetadata metadata =
       driver()
           ->server_context()

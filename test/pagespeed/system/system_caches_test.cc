@@ -367,6 +367,13 @@ class SystemCachesTest : public CustomRewriteTestBase<SystemRewriteOptions> {
     return Stats("file_cache", FileCacheName());
   }
 
+  // Small-object-tier view over the same Cyclone cache, with its own stats
+  // label.  This is what metadata_l2 and the property store's L2 point at
+  // whenever FileCacheSmallTierPercent > 0 (the default is 10).
+  GoogleString SmallTierFileCacheWithStats() {
+    return Stats("file_cache_small", CycloneCache::FormatSmallTierName());
+  }
+
   GoogleString Pcache(StringPiece cache) {
     return CachePropertyStore::FormatName3(
         RewriteDriver::kBeaconCohort,
@@ -423,9 +430,9 @@ class SystemCachesTest : public CustomRewriteTestBase<SystemRewriteOptions> {
 };
 
 TEST_F(SystemCachesTest, BasicFileAndLruCache) {
-  // CycloneCache integrates its own RAM cache, so setting lru_cache_kb_per_process
-  // configures CycloneCache's ram_cache_size_bytes instead of creating a
-  // separate LRU + WriteThrough layer.
+  // CycloneCache integrates its own optional RAM tier (CycloneRamCacheKb),
+  // so setting lru_cache_kb_per_process never creates a separate
+  // LRU + WriteThrough layer.
   options_->set_file_cache_path(kCachePath);
   options_->set_use_shared_mem_locking(false);
   options_->set_lru_cache_kb_per_process(100);
@@ -495,7 +502,7 @@ TEST_F(SystemCachesTest, BasicShmAndLru) {
   // We don't use the LRU when shm cache is on.  Metadata writes through to the
   // on-disk Cyclone cache so it survives a restart; shm is the read-fast L1.
   EXPECT_STREQ(Compressed(WriteThrough(Stats("shm_cache", "SharedMemCache<64>"),
-                                       FileCacheWithStats())),
+                                       SmallTierFileCacheWithStats())),
                server_context->metadata_cache()->Name());
   // HTTP cache is unaffected.
   EXPECT_STREQ(HttpCache(FileCacheWithStats()),
@@ -518,7 +525,7 @@ TEST_F(SystemCachesTest, BasicShmAndNoLru) {
   // We don't use the LRU when shm cache is on.  Metadata writes through to the
   // on-disk Cyclone cache so it survives a restart; shm is the read-fast L1.
   EXPECT_STREQ(Compressed(WriteThrough(Stats("shm_cache", "SharedMemCache<64>"),
-                                       FileCacheWithStats())),
+                                       SmallTierFileCacheWithStats())),
                server_context->metadata_cache()->Name());
   // HTTP cache is unaffected.
   EXPECT_STREQ(HttpCache(FileCacheWithStats()),
@@ -546,7 +553,7 @@ TEST_F(SystemCachesTest, DoubleShmCreate) {
   // We don't use the LRU when shm cache is on.  Metadata writes through to the
   // on-disk Cyclone cache so it survives a restart; shm is the read-fast L1.
   EXPECT_STREQ(Compressed(WriteThrough(Stats("shm_cache", "SharedMemCache<64>"),
-                                       FileCacheWithStats())),
+                                       SmallTierFileCacheWithStats())),
                server_context->metadata_cache()->Name());
   // HTTP cache is unaffected.
   EXPECT_STREQ(HttpCache(FileCacheWithStats()),
@@ -965,7 +972,7 @@ TEST_F(SystemCachesTest, ShmShare) {
   for (int i = 0; i < 3; ++i) {
     servers.push_back(SetupServerContext(configs[i]));
     EXPECT_STREQ(Compressed(WriteThrough(Stats("shm_cache", "SharedMemCache<64>"),
-                                         FileCacheWithStats())),
+                                         SmallTierFileCacheWithStats())),
                  servers[i]->metadata_cache()->Name());
   }
 
@@ -1013,13 +1020,13 @@ TEST_F(SystemCachesTest, ShmDefault) {
     servers.push_back(SetupServerContext(configs[i]));
   }
   EXPECT_STREQ(Compressed(WriteThrough(Stats("shm_cache", "SharedMemCache<64>"),
-                                       FileCacheWithStats())),
+                                       SmallTierFileCacheWithStats())),
                servers[0]->metadata_cache()->Name());
   EXPECT_STREQ(Compressed(WriteThrough(Stats("shm_cache", "SharedMemCache<64>"),
-                                       FileCacheWithStats())),
+                                       SmallTierFileCacheWithStats())),
                servers[1]->metadata_cache()->Name());
   EXPECT_STREQ(Compressed(WriteThrough(Stats("shm_cache", "SharedMemCache<64>"),
-                                       FileCacheWithStats())),
+                                       SmallTierFileCacheWithStats())),
                servers[2]->metadata_cache()->Name());
 
   // This is only about metadata cache.
@@ -1043,6 +1050,12 @@ TEST_F(SystemCachesTest, ShmDefault) {
 // shared-memory segment while leaving the disk cache in place, and confirm the
 // value is still readable -- which it can only be if it was written through to
 // disk.  Under the old FallbackCache wiring this Get would return kNotFound.
+//
+// Note: metadata_l2 is the small-object-tier view of the Cyclone cache.  At the
+// default cache size the tier is active, so this exercises restart persistence
+// through the small-tier view; SmallTierCacheSettings covers the below-floor
+// fallback-to-default routing and MetadataSurvivesPayloadChurn covers churn
+// survival.
 TEST_F(SystemCachesTest, ShmMetadataPersistsAcrossRestart) {
   GoogleString error_msg;
   EXPECT_TRUE(system_caches_->CreateShmMetadataCache(
@@ -1094,6 +1107,10 @@ TEST_F(SystemCachesTest, ShmMetadataPersistsAcrossRestart) {
 // a property, restart with a fresh (empty) shared-memory segment while leaving
 // the disk cache in place, and confirm the property is still readable.  Under
 // the old FallbackCache wiring the post-restart Read finds nothing.
+//
+// Note: like ShmMetadataPersistsAcrossRestart, the property store's L2 is the
+// small-object-tier view, active at the default cache size, so this exercises
+// restart persistence through the small-tier view.
 TEST_F(SystemCachesTest, PropertyCachePersistsAcrossRestart) {
   const char kPageUrl[] = "http://www.example.com/page.html";
   const char kOptionsHash[] = "hash";
@@ -1117,7 +1134,7 @@ TEST_F(SystemCachesTest, PropertyCachePersistsAcrossRestart) {
     // the metadata cache's.
     EXPECT_STREQ(
         Pcache(Compressed(WriteThrough(Stats("shm_cache", "SharedMemCache<64>"),
-                                       FileCacheWithStats()))),
+                                       SmallTierFileCacheWithStats()))),
         server_context->page_property_cache()->property_store()->Name());
 
     PropertyCache* pcache = server_context->page_property_cache();
@@ -1240,10 +1257,11 @@ TEST_F(SystemCachesTest, CacheSettings) {
 }
 
 TEST_F(SystemCachesTest, LruCacheSettings) {
-  // CycloneCache integrates its own RAM cache, so lru_cache_kb_per_process
-  // configures CycloneCache's ram_cache_size_bytes. There is no separate
+  // CycloneRamCacheKb -1 opts into the legacy coupling: Cyclone's RAM tier
+  // is sized from lru_cache_kb_per_process. There is no separate
   // WriteThroughCache or LRUCache layer.
   options_->set_file_cache_path(kCachePath);
+  options_->set_cyclone_ram_cache_kb(-1);
   options_->set_lru_cache_kb_per_process(1024);
   options_->set_default_shared_memory_cache_kb(0);
   PrepareWithConfig(options_.get());
@@ -1254,6 +1272,217 @@ TEST_F(SystemCachesTest, LruCacheSettings) {
       dynamic_cast<CycloneCache*>(SkipWrappers(server_context->metadata_cache()));
   ASSERT_TRUE(cache != nullptr);
   EXPECT_EQ(1024 * 1024, cache->config().ram_cache_size_bytes);
+}
+
+TEST_F(SystemCachesTest, RamTierDefaultsOff) {
+  // By default (CycloneRamCacheKb 0) the RAM tier stays off even when
+  // lru_cache_kb_per_process is set: reads come from the memory-mapped
+  // volume, so a per-process RAM copy would only duplicate the OS page
+  // cache.
+  options_->set_file_cache_path(kCachePath);
+  options_->set_lru_cache_kb_per_process(1024);
+  options_->set_default_shared_memory_cache_kb(0);
+  PrepareWithConfig(options_.get());
+  std::unique_ptr<ServerContext> server_context(
+      SetupServerContext(options_.release()));
+
+  CycloneCache* cache =
+      dynamic_cast<CycloneCache*>(SkipWrappers(server_context->metadata_cache()));
+  ASSERT_TRUE(cache != nullptr);
+  EXPECT_EQ(0, cache->config().ram_cache_size_bytes);
+}
+
+TEST_F(SystemCachesTest, SmallTierCacheSettings) {
+  // FileCacheSmallTierPercent must reach the Cyclone config.
+  options_->set_file_cache_path(kCachePath);
+  options_->set_file_cache_small_tier_percent(30);
+  // Pin a cache size below the ~256 MB two-volume floor so the inactive-tier
+  // assertion below is deterministic regardless of the product default.
+  options_->set_file_cache_clean_size_kb(100 * 1024);  // 100 MB, below floor.
+  options_->set_use_shared_mem_locking(false);
+  options_->set_lru_cache_kb_per_process(0);
+  options_->set_default_shared_memory_cache_kb(0);
+  SystemRewriteOptions* options = options_.get();
+  PrepareWithConfig(options);
+
+  std::unique_ptr<ServerContext> server_context(
+      SetupServerContext(options_.release()));
+  CycloneCache* cache = dynamic_cast<CycloneCache*>(
+      system_caches_->GetCache(options)->cache_backend());
+  ASSERT_TRUE(cache != nullptr);
+  EXPECT_EQ(30, cache->config().small_tier_percent);
+  // This cache is below the ~256 MB two-volume floor, so the tier itself stays
+  // inactive and small-tier operations fall back to default routing inside
+  // Cyclone even though the percent is set.
+  EXPECT_FALSE(cache->small_tier_active());
+}
+
+TEST_F(SystemCachesTest, SmallTierPercentClampedHigh) {
+  // There is no framework-level bounds validation on the directive, so
+  // out-of-range values are clamped where the Cyclone config is built.
+  options_->set_file_cache_path(kCachePath);
+  options_->set_file_cache_small_tier_percent(200);  // Clamped to 50.
+  options_->set_use_shared_mem_locking(false);
+  options_->set_lru_cache_kb_per_process(0);
+  options_->set_default_shared_memory_cache_kb(0);
+  SystemRewriteOptions* options = options_.get();
+  PrepareWithConfig(options);
+
+  std::unique_ptr<ServerContext> server_context(
+      SetupServerContext(options_.release()));
+  CycloneCache* cache = dynamic_cast<CycloneCache*>(
+      system_caches_->GetCache(options)->cache_backend());
+  ASSERT_TRUE(cache != nullptr);
+  EXPECT_EQ(50, cache->config().small_tier_percent);
+}
+
+TEST_F(SystemCachesTest, SmallTierDisabledFallsBackToDefaultWiring) {
+  // Negative values clamp to 0 == disabled: small_tier_file_cache() aliases
+  // the default file cache, so the metadata cache composition reverts to the
+  // plain "file_cache" stats label.
+  GoogleString error_msg;
+  EXPECT_TRUE(system_caches_->CreateShmMetadataCache(
+      kCachePath, kUsableMetadataCacheSize, &error_msg));
+
+  options_->set_file_cache_path(kCachePath);
+  options_->set_file_cache_small_tier_percent(-7);  // Clamped to 0.
+  options_->set_use_shared_mem_locking(false);
+  options_->set_lru_cache_kb_per_process(0);
+  SystemRewriteOptions* options = options_.get();
+  PrepareWithConfig(options);
+
+  std::unique_ptr<ServerContext> server_context(
+      SetupServerContext(options_.release()));
+  EXPECT_STREQ(Compressed(WriteThrough(Stats("shm_cache", "SharedMemCache<64>"),
+                                       FileCacheWithStats())),
+               server_context->metadata_cache()->Name());
+  EXPECT_STREQ(Pcache(Compressed(WriteThrough(
+                   Stats("shm_cache", "SharedMemCache<64>"),
+                   FileCacheWithStats()))),
+               server_context->page_property_cache()->property_store()->Name());
+  CycloneCache* cache = dynamic_cast<CycloneCache*>(
+      system_caches_->GetCache(options)->cache_backend());
+  ASSERT_TRUE(cache != nullptr);
+  EXPECT_EQ(0, cache->config().small_tier_percent);
+  EXPECT_FALSE(cache->small_tier_active());
+}
+
+// The reason the small tier exists: metadata and property-cache entries write
+// through to Cyclone for restart-warmth, but when they share a volume with
+// HTTP payloads, payload churn evicts them wholesale.  Size the cache so the
+// small tier is ACTIVE, write metadata + a page property, churn HTTP payloads
+// well past the default volume's capacity, and confirm the small entries are
+// still served after a restart while the churned payloads were evicted.
+//
+// Sizing: the small volume floor is one 128 MB stripe (+64-byte header) and
+// the default volume needs the same floor, so 264 MB total yields a ~128 MB
+// small volume (10% of 264 MB is below the floor, so it gets the floor) and a
+// ~136 MB default volume.  The volume files are created sparse, so the
+// apparent 264 MB costs only what the churn actually writes (~200 MB).
+TEST_F(SystemCachesTest, MetadataSurvivesPayloadChurn) {
+  const char kPageUrl[] = "http://www.example.com/churn_page.html";
+  const char kOptionsHash[] = "hash";
+  const char kCacheKeySuffix[] = "suffix";
+  const char kPropertyName[] = "critical_images";
+  const char kPropertyValue[] = "beacon-derived value";
+  const int kChurnEntries = 200;                  // ~200 MB of payload churn,
+  const int kChurnEntryBytes = 1024 * 1024;       // ~1.5x the default volume.
+  const int64 kCacheSizeKb = 264 * 1024;          // 264 MB total.
+
+  GoogleString error_msg;
+  EXPECT_TRUE(system_caches_->CreateShmMetadataCache(
+      kCachePath, kUsableMetadataCacheSize, &error_msg));
+
+  options_->set_file_cache_path(kCachePath);
+  options_->set_file_cache_clean_size_kb(kCacheSizeKb);
+  options_->set_use_shared_mem_locking(false);
+  options_->set_lru_cache_kb_per_process(0);
+  SystemRewriteOptions* options = options_.get();
+  PrepareWithConfig(options);
+
+  GoogleString first_churn_url;
+  {
+    std::unique_ptr<ServerContext> server_context(
+        SetupServerContext(options_.release()));
+    // Metadata routes via the small tier...
+    EXPECT_STREQ(
+        Compressed(WriteThrough(Stats("shm_cache", "SharedMemCache<64>"),
+                                SmallTierFileCacheWithStats())),
+        server_context->metadata_cache()->Name());
+    // ...and this cache is big enough that the tier is actually active
+    // (physically separate volume), unlike the default-sized tests.
+    CycloneCache* cyclone = dynamic_cast<CycloneCache*>(
+        system_caches_->GetCache(options)->cache_backend());
+    ASSERT_TRUE(cyclone != nullptr);
+    ASSERT_TRUE(cyclone->small_tier_active());
+
+    // The entries that must survive: a metadata entry and a page property.
+    TestPut(server_context->metadata_cache(), "persist", "value");
+    PropertyCache* pcache = server_context->page_property_cache();
+    const PropertyCache::Cohort* cohort =
+        pcache->GetCohort(RewriteDriver::kDomCohort);
+    ASSERT_TRUE(cohort != nullptr);
+    MockPropertyPage page(thread_system_.get(), pcache, kPageUrl, kOptionsHash,
+                          kCacheKeySuffix);
+    pcache->Read(&page);
+    page.UpdateValue(cohort, kPropertyName, kPropertyValue);
+    page.WriteCohort(cohort);
+
+    // Churn: write far more (incompressible) HTTP payload than the default
+    // volume can hold, forcing it to wrap and evict.  Reusing one payload
+    // body across 200 URLs relies on Cyclone being key-addressed; under any
+    // content-addressed/dedup store the identical bodies would collapse to
+    // one entry and mask the wrap this test depends on.
+    SimpleRandom random(new NullMutex);
+    GoogleString payload = random.GenerateHighEntropyString(kChurnEntryBytes);
+    for (int i = 0; i < kChurnEntries; ++i) {
+      GoogleString url = StrCat("http://churn.example.com/payload_",
+                                IntegerToString(i), ".bin");
+      if (i == 0) {
+        first_churn_url = url;
+      }
+      TestHttpPut(server_context->http_cache(), url, "fragment", payload);
+    }
+  }
+
+  // Restart with an empty shared-memory segment: anything still readable now
+  // comes from the on-disk volumes.  Same size and percent, so the volume
+  // geometry guard keeps the existing files.
+  RestartPreservingDisk();
+
+  EXPECT_TRUE(system_caches_->CreateShmMetadataCache(
+      kCachePath, kUsableMetadataCacheSize, &error_msg));
+  std::unique_ptr<SystemRewriteOptions> options2(
+      new SystemRewriteOptions(thread_system_.get()));
+  options2->set_file_cache_path(kCachePath);
+  options2->set_file_cache_clean_size_kb(kCacheSizeKb);
+  options2->set_use_shared_mem_locking(false);
+  options2->set_lru_cache_kb_per_process(0);
+  PrepareWithConfig(options2.get());
+
+  std::unique_ptr<ServerContext> restarted(
+      SetupServerContext(options2.release()));
+
+  // The churn really did overflow the default volume: its earliest payload
+  // was evicted...
+  TestHttpGet(restarted->http_cache(), first_churn_url, "fragment",
+              kNotFoundResult, "");
+
+  // ...but the metadata and property entries in the small volume survived.
+  TestGet(restarted->metadata_cache(), "persist", CacheInterface::kAvailable,
+          "value");
+  PropertyCache* pcache = restarted->page_property_cache();
+  const PropertyCache::Cohort* cohort =
+      pcache->GetCohort(RewriteDriver::kDomCohort);
+  ASSERT_TRUE(cohort != nullptr);
+  MockPropertyPage page(thread_system_.get(), pcache, kPageUrl, kOptionsHash,
+                        kCacheKeySuffix);
+  pcache->Read(&page);
+  EXPECT_TRUE(page.valid());
+  PropertyValue* property = page.GetProperty(cohort, kPropertyName);
+  ASSERT_TRUE(property != nullptr);
+  EXPECT_TRUE(property->has_value());
+  EXPECT_STREQ(kPropertyValue, property->value());
 }
 
 void SystemCachesExternalCacheTestBase::TestStatsStringMinimal() {

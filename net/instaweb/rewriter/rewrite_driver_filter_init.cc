@@ -154,6 +154,7 @@ void RewriteDriver::InitStats(Statistics* statistics) {
   JavascriptFilter::InitStats(statistics);
   JsCombineFilter::InitStats(statistics);
   JsInlineFilter::InitStats(statistics);
+  LazyloadImagesFilter::InitStats(statistics);
   LocalStorageCacheFilter::InitStats(statistics);
   MakeShowAdsAsyncFilter::InitStats(statistics);
   MetaTagFilter::InitStats(statistics);

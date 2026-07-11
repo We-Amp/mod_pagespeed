@@ -856,6 +856,9 @@ class ImageCombineFilter::Context : public RewriteContext {
               static_cast<SpriteFutureSlot*>(slot(slot_index).get());
           SpriteFuture* future = sprite_slot->future();
           const spriter::Rect* clip_rect = url_to_clip_rect[future->old_url()];
+          if (clip_rect == nullptr) {
+            continue;
+          }
           // Check against original image dimensions.
           // If these are smaller than the div we're putting the image
           // into then we can't sprite this declaraion
@@ -863,28 +866,30 @@ class ImageCombineFilter::Context : public RewriteContext {
               clip_rect->height() < future->height()) {
             continue;
           }
-          if (clip_rect != nullptr) {
-            DCHECK(css_base_url_.IsAnyValid());
-            GoogleString new_url;
-            if (css_base_url_.IsAnyValid()) {
-              new_url = ResourceSlot::RelativizeOrPassthrough(
-                  filter_->driver()->options(), partition->url(),
-                  sprite_slot->url_relativity(), css_base_url_);
-            } else {
-              new_url = partition->url();
-            }
-
-            future->Realize(new_url.c_str(), clip_rect->x_pos(),
-                            clip_rect->y_pos());
-            MessageHandler* handler = filter_->driver()->message_handler();
-            handler->Message(kInfo, "Inserted sprite, url: %s\n",
-                             new_url.c_str());
-            replaced_urls.insert(future->old_url());
-            sprite_slot->set_may_sprite(true);
+          DCHECK(css_base_url_.IsAnyValid());
+          GoogleString new_url;
+          if (css_base_url_.IsAnyValid()) {
+            new_url = ResourceSlot::RelativizeOrPassthrough(
+                filter_->driver()->options(), partition->url(),
+                sprite_slot->url_relativity(), css_base_url_);
+          } else {
+            new_url = partition->url();
           }
+
+          future->Realize(new_url.c_str(), clip_rect->x_pos(),
+                          clip_rect->y_pos());
+          MessageHandler* handler = filter_->driver()->message_handler();
+          handler->Message(kInfo, "Inserted sprite, url: %s\n",
+                           new_url.c_str());
+          replaced_urls.insert(future->old_url());
+          sprite_slot->set_may_sprite(true);
         }
         int sprited = replaced_urls.size();
-        filter_->AddFilesReducedStat(sprited - 1);
+        // When every input was skipped (null clip rect or too-small image)
+        // nothing was sprited; don't record a negative reduction.
+        if (sprited > 0) {
+          filter_->AddFilesReducedStat(sprited - 1);
+        }
       }
     }
     Reset();

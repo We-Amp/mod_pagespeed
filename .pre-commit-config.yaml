@@ -16,8 +16,9 @@ repos:
       - id: clang-format
         types_or: [c, c++]
         # pagespeed/iis/ uses Windows-specific include ordering that conflicts
-        # with SortIncludes:true in Google style (winsock2.h before windows.h)
-        exclude: '^(third_party|pagespeed/iis)/'
+        # with SortIncludes:true in Google style (winsock2.h before windows.h).
+        # net/instaweb/rewriter/generated/ is data2c output, never hand-formatted.
+        exclude: '^(third_party|pagespeed/iis|net/instaweb/rewriter/generated)/'
 
   - repo: local
     hooks:

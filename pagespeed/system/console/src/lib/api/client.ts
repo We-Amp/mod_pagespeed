@@ -38,7 +38,7 @@ export class AdminApiClient {
     const response = await fetch(url);
 
     if (!response.ok) {
-      throw new ApiError(response.status, response.statusText);
+      throw await this.errorFromResponse(response);
     }
 
     // Always try JSON first — the backend may serve JSON with a wrong
@@ -61,11 +61,31 @@ export class AdminApiClient {
     });
 
     if (!response.ok) {
-      throw new ApiError(response.status, response.statusText);
+      throw await this.errorFromResponse(response);
     }
 
     const text = await response.text();
     return this.parseResponse<T>(response.status, text);
+  }
+
+  /**
+   * Build an ApiError from a non-2xx response, preferring the backend's JSON
+   * `error` field over the bare status text. Admin handlers put the actionable
+   * message in the body (e.g. "console_logger must be enabled to use '?json'",
+   * CSRF/rate-limit reasons, "License management is only available on the
+   * global admin endpoint"), so surfacing it turns "HTTP 404" into a fix.
+   */
+  private async errorFromResponse(response: Response): Promise<ApiError> {
+    let detail = response.statusText;
+    try {
+      const text = await response.text();
+      const stripped = text.replace(/^\)\]\}'?\s*\n/, "");
+      const body = JSON.parse(stripped) as { error?: unknown };
+      if (typeof body.error === "string" && body.error) detail = body.error;
+    } catch {
+      // Non-JSON or unreadable body: keep the status text.
+    }
+    return new ApiError(response.status, detail);
   }
 
   /**
@@ -121,7 +141,7 @@ export class AdminApiClient {
   }
 
   async getPurgeSet(): Promise<PurgeSetResponse> {
-    const raw = await this.get<RawPurgeSetResponse>("/cache?new_set");
+    const raw = await this.get<RawPurgeSetResponse>("/cache?new_set=");
     return AdminApiClient.parsePurgeSet(raw);
   }
 

@@ -30,8 +30,30 @@ extern "C" {
 
 namespace net_instaweb {
 
+namespace {
+
+// Events read per read() syscall while draining the pipe. Writes are atomic
+// multiples of sizeof(ps_event_data), so a read never returns a partial
+// event.
+const int kReadBatchSize = 32;
+
+// Bound on reader-side overflow flush passes per event-loop wakeup, so
+// sustained writers cannot starve the event loop; see FlushOverflow().
+const int kMaxOverflowFlushCycles = 4;
+
+// Internal wake-marker event type (sender == nullptr, never dispatched).
+const char kWakeMarkerType = 'W';
+
+}  // namespace
+
 NgxEventConnection::NgxEventConnection(callbackPtr callback)
-    : event_handler_(callback) {}
+    : event_handler_(callback), overflow_mode_(false) {
+  pthread_mutex_init(&write_mutex_, nullptr);
+}
+
+NgxEventConnection::~NgxEventConnection() {
+  pthread_mutex_destroy(&write_mutex_);
+}
 
 bool NgxEventConnection::Init(ngx_cycle_t* cycle) {
   int file_descriptors[2];
@@ -100,37 +122,63 @@ void NgxEventConnection::ReadEventHandler(ngx_event_t* ev) {
   }
 }
 
-// Deserialize ps_event_data's from the pipe as they become available.
-// Subsequently do some bookkeeping, cleanup, and error checking to keep
-// the mess out of ps_base_fetch_handler.
+// Deserialize ps_event_data's from the pipe as they become available and
+// dispatch them strictly in write order.
+//
+// Historically this read (and dispatched) a single event per event-loop
+// wakeup, out of fear that re-entrant calls would process events out of
+// order. That re-entrancy does not exist: Drain() is only called from
+// NgxBaseFetch::Terminate() at worker shutdown, and the receiving callbacks
+// (which end in ngx_http_finalize_request / ngx_http_run_posted_requests)
+// never dispatch new event-loop events. Draining in batches means one epoll
+// wakeup handles everything the pipe holds instead of one wakeup (plus an
+// ngx_handle_read_event call) per event.
+//
+// Events whose base fetch got released while they sat in this batch are
+// skipped by the receiving callback via its existing refcount/request-context
+// checks, exactly as when they sat unread in the pipe.
 bool NgxEventConnection::ReadAndNotify(ngx_fd_t fd) {
+  NgxEventConnection* connection = nullptr;
   while (true) {
-    // We read only one ps_event_data at a time for now:
-    // We can end up recursing all the way and end up calling ourselves here.
-    // If that happens in the middle of looping over multiple ps_event_data's we
-    // have obtained with read(), the results from the next read() will make us
-    // process events out of order. Which can give headaches.
-    // Alternatively, we could maintain a queue to make sure we process in
-    // sequence
-    ps_event_data data;
-    ngx_int_t size = read(fd, static_cast<void*>(&data), sizeof(data));
+    ps_event_data events[kReadBatchSize];
+    ngx_int_t size = read(fd, static_cast<void*>(events), sizeof(events));
 
     if (size == -1) {
       if (errno == EINTR) {
         continue;
-        // TODO(oschaaf): should we worry about spinning here?
-      } else if (ngx_errno == EAGAIN || ngx_errno == EWOULDBLOCK) {
-        return true;
       }
-    }
-
-    if (size <= 0) {
+      if (ngx_errno == EAGAIN || ngx_errno == EWOULDBLOCK) {
+        break;  // Pipe fully drained.
+      }
       return false;
     }
-
-    data.connection->event_handler_(data);
-    return true;
+    if (size == 0) {
+      return false;  // Write end closed.
+    }
+    CHECK(size % static_cast<ngx_int_t>(sizeof(ps_event_data)) == 0)
+        << "pagespeed: partial event read from pipe: " << size;
+    ngx_int_t count = size / sizeof(ps_event_data);
+    for (ngx_int_t i = 0; i < count; i++) {
+      DCHECK(connection == nullptr || connection == events[i].connection)
+          << "pagespeed: one pipe must carry one connection's events";
+      connection = events[i].connection;
+      DispatchEvent(events[i]);
+    }
   }
+  // With the pipe drained, deliver anything that overflowed while it was
+  // full. If we read no events at all (spurious wakeup) any queued overflow
+  // is picked up via its guaranteed wake marker instead.
+  if (connection != nullptr) {
+    connection->FlushOverflow();
+  }
+  return true;
+}
+
+void NgxEventConnection::DispatchEvent(const ps_event_data& data) {
+  if (data.sender == nullptr) {
+    return;  // Internal wake marker, see FlushOverflow().
+  }
+  data.connection->event_handler_(data);
 }
 
 bool NgxEventConnection::WriteEvent(void* sender) {
@@ -138,7 +186,6 @@ bool NgxEventConnection::WriteEvent(void* sender) {
 }
 
 bool NgxEventConnection::WriteEvent(char type, void* sender) {
-  ssize_t size = 0;
   ps_event_data data;
 
   ngx_memzero(&data, sizeof(data));
@@ -146,47 +193,85 @@ bool NgxEventConnection::WriteEvent(char type, void* sender) {
   data.sender = sender;
   data.connection = this;
 
-  // Retry with exponential backoff to avoid CPU spin when the pipe
-  // buffer is full. Starts at 100µs, doubles each
-  // retry, caps at ~100ms per sleep, gives up after 50 attempts
-  // (~6.5 seconds total worst case).
-  static constexpr int kMaxRetries = 50;
-  static constexpr useconds_t kInitialBackoffUs = 100;
-  static constexpr useconds_t kMaxBackoffUs = 100000;  // 100ms
-  int retries = 0;
-  useconds_t backoff_us = kInitialBackoffUs;
-
-  while (true) {
-    size = write(pipe_write_fd_, static_cast<void*>(&data), sizeof(data));
-    if (size == sizeof(data)) {
-      return true;
-    } else if (size == -1) {
-      if (ngx_errno == EINTR) {
-        continue;  // EINTR: retry immediately, no backoff needed.
-      }
-      if (ngx_errno == EAGAIN || ngx_errno == EWOULDBLOCK) {
-        if (++retries > kMaxRetries) {
-          return false;  // Pipe remains full after sustained backoff.
-        }
-        usleep(backoff_us);
-        if (backoff_us < kMaxBackoffUs) {
-          backoff_us *= 2;
-        }
-        continue;
-      }
-      return false;
-    } else {
-      CHECK(false) << "pagespeed: unexpected return value from write(): "
-                   << size;
+  // When the pipe buffer is full, queue the event instead of blocking this
+  // (PSOL) thread in a usleep backoff that could stall it for seconds and
+  // ultimately drop the event. The event loop is guaranteed to
+  // wake up -- the pipe is full -- and FlushOverflow() delivers the queue
+  // after the pipe's contents. Ordering invariant: while the queue is
+  // non-empty no new event may enter the pipe, otherwise it would be
+  // delivered ahead of older queued events.
+  pthread_mutex_lock(&write_mutex_);
+  bool result;
+  if (overflow_mode_) {
+    overflow_.push_back(data);
+    result = true;
+  } else {
+    result = TryWriteToPipe(data);
+    if (!result && (ngx_errno == EAGAIN || ngx_errno == EWOULDBLOCK)) {
+      overflow_mode_ = true;
+      overflow_.push_back(data);
+      result = true;
     }
   }
-  CHECK(false) << "Should not get here";
-  return false;
+  pthread_mutex_unlock(&write_mutex_);
+  return result;
+}
+
+bool NgxEventConnection::TryWriteToPipe(const ps_event_data& data) {
+  while (true) {
+    ssize_t size = write(pipe_write_fd_, &data, sizeof(data));
+    if (size == static_cast<ssize_t>(sizeof(data))) {
+      return true;
+    }
+    if (size == -1) {
+      if (ngx_errno == EINTR) {
+        continue;
+      }
+      return false;  // ngx_errno tells the caller why.
+    }
+    // A pipe write of less than PIPE_BUF bytes is atomic; a short write
+    // cannot happen.
+    CHECK(false) << "pagespeed: unexpected return value from write(): " << size;
+  }
+}
+
+void NgxEventConnection::FlushOverflow() {
+  // Deliver queued events in bounded passes: writers may keep appending
+  // while we dispatch, and an unbounded loop here would starve the event
+  // loop. If the queue is still non-empty after the last pass, write an
+  // internal wake marker (the pipe has room again -- writers in overflow
+  // mode do not touch it) so another wakeup finishes the job.
+  for (int cycle = 0; cycle < kMaxOverflowFlushCycles; cycle++) {
+    std::deque<ps_event_data> batch;
+    pthread_mutex_lock(&write_mutex_);
+    if (overflow_.empty()) {
+      overflow_mode_ = false;
+      pthread_mutex_unlock(&write_mutex_);
+      return;
+    }
+    batch.swap(overflow_);
+    pthread_mutex_unlock(&write_mutex_);
+    for (std::deque<ps_event_data>::const_iterator it = batch.begin();
+         it != batch.end(); ++it) {
+      DispatchEvent(*it);
+    }
+  }
+  ps_event_data marker;
+  ngx_memzero(&marker, sizeof(marker));
+  marker.type = kWakeMarkerType;
+  marker.sender = nullptr;
+  marker.connection = this;
+  pthread_mutex_lock(&write_mutex_);
+  // If even this write fails the queue is still delivered on the next
+  // natural wakeup; nothing is lost.
+  (void)TryWriteToPipe(marker);
+  pthread_mutex_unlock(&write_mutex_);
 }
 
 // Reads and processes what is available in the pipe.
 void NgxEventConnection::Drain() {
   NgxEventConnection::ReadAndNotify(pipe_read_fd_);
+  FlushOverflow();
 }
 
 void NgxEventConnection::Shutdown() {

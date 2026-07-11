@@ -1,6 +1,7 @@
 <script lang="ts">
   import { AdminApiClient } from "$lib/api/client";
   import { usePolling } from "$lib/api/polling.svelte";
+  import RefreshNotice from "$lib/RefreshNotice.svelte";
 
   const { basePath = "" }: { basePath?: string; isGlobal?: boolean } = $props();
   const api = new AdminApiClient(basePath);
@@ -75,9 +76,10 @@
 
   {#if stats.loading}
     <p class="loading">Loading statistics...</p>
-  {:else if stats.error}
+  {:else if stats.error && !stats.data}
     <p class="error">{stats.error.message}</p>
   {:else}
+    <RefreshNotice error={stats.error} />
     <div class="toolbar">
       <input
         type="text"

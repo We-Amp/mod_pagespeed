@@ -20,6 +20,7 @@
 #ifndef NET_INSTAWEB_REWRITER_PUBLIC_REWRITE_DRIVER_H_
 #define NET_INSTAWEB_REWRITER_PUBLIC_REWRITE_DRIVER_H_
 
+#include <atomic>
 #include <map>
 #include <memory>
 #include <set>
@@ -1218,8 +1219,20 @@ class RewriteDriver : public HtmlParse {
   void SetIsAmpDocument(bool is_amp);
   bool is_amp_document() const { return is_amp_; }
 
-  const CspContext& content_security_policy() const { return csp_context_; }
-  CspContext* mutable_content_security_policy() { return &csp_context_; }
+  // The currently active Content-Security-Policy. The returned
+  // reference stays valid for the rest of the request even if a later
+  // <meta> tag publishes a newer version (superseded versions are
+  // retained), so it is safe to consult from rewrite threads.
+  const CspContext& content_security_policy() const {
+    return *csp_context_snapshot_.load(std::memory_order_acquire);
+  }
+  // Publishes a new CSP context version consisting of the current
+  // policies plus 'policy' (copy-on-write; null is ignored). Must only
+  // be called from the HTML-parse thread.
+  void AddCspPolicy(std::unique_ptr<CspPolicy> policy);
+  // Resets the CSP context to empty. Must only be called from the
+  // HTML-parse thread, and not while rewrites are in flight.
+  void ClearCspPolicies();
   bool IsLoadPermittedByCsp(const GoogleUrl& url, InputRole role);
   bool IsLoadPermittedByCsp(const GoogleUrl& url, CspDirective role);
 
@@ -1725,8 +1738,18 @@ class RewriteDriver : public HtmlParse {
   // Any PageSpeed option cookies from the original request.
   GoogleString pagespeed_option_cookies_;
 
-  // Currently active Content-Security-Policy
-  CspContext csp_context_;
+  // Currently active Content-Security-Policy, stored copy-on-write.
+  // HTML-parse-thread events (response headers at StartDocument, <meta>
+  // tags mid-document) publish a fresh immutable CspContext version via
+  // AddCspPolicy/ClearCspPolicies instead of mutating in place, because
+  // rewrite threads read the context concurrently (e.g.
+  // RewriteContext::AreOutputsAllowedByCsp when a rewrite outlives its
+  // flush window, or CreateInputResource from nested CSS rewrites).
+  // Superseded versions are retained until Clear() so a reference
+  // obtained earlier stays valid. csp_context_versions_ is only touched
+  // on the HTML-parse thread; readers go through the atomic snapshot.
+  std::vector<std::unique_ptr<CspContext>> csp_context_versions_;
+  std::atomic<const CspContext*> csp_context_snapshot_{nullptr};
 
   RewriteDriver(const RewriteDriver&) = delete;
   RewriteDriver& operator=(const RewriteDriver&) = delete;

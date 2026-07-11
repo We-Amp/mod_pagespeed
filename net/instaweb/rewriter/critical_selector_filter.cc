@@ -69,11 +69,28 @@ void Compact(VectorType* cl) {
   cl->erase(new_end, cl->end());
 }
 
+// Cheaply identifies @keyframes at-rules (including vendor-prefixed forms
+// like @-webkit-keyframes) held whole inside an unparsed region.
+bool IsKeyframesRegion(StringPiece bytes) {
+  TrimLeadingWhitespace(&bytes);
+  if (!bytes.starts_with("@")) {
+    return false;
+  }
+  bytes.remove_prefix(1);
+  if (bytes.starts_with("-")) {
+    // Skip a vendor prefix, e.g. the "-webkit-" in "@-webkit-keyframes".
+    stringpiece_ssize_type end_of_prefix = bytes.find('-', 1);
+    if (end_of_prefix == StringPiece::npos) {
+      return false;
+    }
+    bytes.remove_prefix(end_of_prefix + 1);
+  }
+  return StringCaseStartsWith(bytes, "keyframes");
+}
+
 }  // namespace
 
 const char CriticalSelectorFilter::kNoscriptStylesClass[] = "psa_add_styles";
-
-// TODO(morlovich): Check charset like CssInlineFilter::ShouldInline().
 
 // Wrap CSS elements to move them later in the document.
 // A simple list of elements is insufficient because link tags and style tags
@@ -141,19 +158,35 @@ class CriticalSelectorFilter::CssStyleElement
 CriticalSelectorFilter::CriticalSelectorFilter(RewriteDriver* driver)
     : CssSummarizerBase(driver),
       saw_end_document_(false),
-      any_rendered_(false),
-      is_flush_script_added_(false) {}
+      any_rendered_(false) {}
 
 CriticalSelectorFilter::~CriticalSelectorFilter() {}
 
 void CriticalSelectorFilter::Summarize(Css::Stylesheet* stylesheet,
                                        GoogleString* out) const {
+  // The critical subset is inlined into the page, where an @import would
+  // still trigger a synchronous, render-blocking fetch. No rule in the
+  // critical subset can depend on it: imported files' selectors were never
+  // beacon candidates. The deferred full copy of the CSS retains the import.
+  STLDeleteElements(&stylesheet->mutable_imports());
+
   for (int ruleset_index = 0, num_rulesets = stylesheet->rulesets().size();
        ruleset_index < num_rulesets; ++ruleset_index) {
     Css::Ruleset* r = stylesheet->mutable_rulesets().at(ruleset_index);
     if (r->type() == Css::Ruleset::UNPARSED_REGION) {
-      // Couldn't parse this as a rule, leave unaltered. Hopefully it's not
-      // too big..
+      // Couldn't parse this as a rule. @keyframes end up here whole under
+      // preservation mode; animations don't affect first paint and their
+      // keyframe lists can be large, so drop them from the critical subset
+      // (the deferred full copy retains them). Everything else is kept
+      // unaltered to be conservative — notably @font-face, which shapes
+      // text from the first paint on. Hopefully it's not too big..
+      CssStringPiece region_bytes =
+          r->unparsed_region()->bytes_in_original_buffer();
+      if (IsKeyframesRegion(
+              StringPiece(region_bytes.data(), region_bytes.size()))) {
+        delete r;
+        stylesheet->mutable_rulesets()[ruleset_index] = nullptr;
+      }
       continue;
     }
 
@@ -235,6 +268,26 @@ void CriticalSelectorFilter::RenderSummary(int pos, HtmlElement* element,
     }
   }
 
+  // Inlining bytes whose charset differs from the page's can garble them
+  // (e.g. non-UTF-8 content: strings) --- the equivalent of
+  // CssInlineFilter::ShouldInline()'s charset check. A pure-ASCII critical
+  // subset is charset-agnostic, so it is still safe. Otherwise leave this
+  // stylesheet alone; as with WillNotRenderSummary, the full CSS was
+  // remembered above so the page stays intact.
+  if (summary.is_external && !summary.charset.empty() &&
+      !StringCaseEqual(driver()->containing_charset(), summary.charset)) {
+    bool has_non_ascii = false;
+    for (int i = 0, n = css_to_use->size(); i < n; ++i) {
+      if (static_cast<unsigned char>((*css_to_use)[i]) >= 0x80) {
+        has_non_ascii = true;
+        break;
+      }
+    }
+    if (has_non_ascii) {
+      return;
+    }
+  }
+
   // Update the DOM --- either an existing style element, or replace link
   // with style.
   if (char_node != nullptr) {
@@ -248,6 +301,20 @@ void CriticalSelectorFilter::RenderSummary(int pos, HtmlElement* element,
   } else {
     HtmlElement* style_element =
         driver()->NewElement(nullptr, HtmlName::kStyle);
+    // Carry over attributes the page may depend on: id (stylesheet toggling
+    // by script), title (stylesheet-set semantics), and data-*. media is
+    // reconstructed below; the link-specific attributes (href, rel, type,
+    // charset) don't apply to a style element.
+    const HtmlElement::AttributeList& link_attrs = element->attributes();
+    for (HtmlElement::AttributeConstIterator i(link_attrs.begin());
+         i != link_attrs.end(); ++i) {
+      const HtmlElement::Attribute& attr = *i;
+      if (attr.keyword() == HtmlName::kId ||
+          attr.keyword() == HtmlName::kTitle ||
+          StringCaseStartsWith(attr.name_str(), "data-")) {
+        style_element->AddAttribute(attr);
+      }
+    }
     driver()->InsertNodeBeforeNode(element, style_element);
 
     HtmlCharactersNode* content =
@@ -327,7 +394,6 @@ void CriticalSelectorFilter::StartDocumentImpl() {
   DCHECK(css_elements_.empty());
   saw_end_document_ = false;
   any_rendered_ = false;
-  is_flush_script_added_ = false;
 }
 
 void CriticalSelectorFilter::EndDocument() {

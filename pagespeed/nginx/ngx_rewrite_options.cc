@@ -333,7 +333,7 @@ RewriteOptions::OptionScope NgxRewriteOptions::GetOptionScope(
   for (OptionBaseVector::const_iterator it = all_options().begin();
        it != all_options().end(); ++it) {
     RewriteOptions::OptionBase* option = *it;
-    if (option->option_name() == option_name) {
+    if (StringCaseEqual(option->option_name(), option_name)) {
       // We treat kLegacyProcessScope as kProcessScopeStrict, failing to start
       // if an option is out of place.
       return option->scope() == kLegacyProcessScope ? kProcessScopeStrict
@@ -477,19 +477,23 @@ const char* NgxRewriteOptions::ParseAndSetOptions(
     int i;
     // Skip the first arg which is always 'pagespeed'
     for (i = 1; i < n_args; i++) {
-      ngx_str_t script_source;
-
-      script_source.len = args[i].as_string().length();
+      // Pool-allocate the source ngx_str_t (and its data) so it outlives this
+      // loop iteration: sc is pool-allocated and stashed in script_line_ for
+      // deferred execution, and sc->source must not dangle into the loop-local
+      // std::string.
       std::string tmp = args[i].as_string();
-      script_source.data =
-          reinterpret_cast<u_char*>(const_cast<char*>(tmp.c_str()));
+      ngx_str_t* script_source =
+          reinterpret_cast<ngx_str_t*>(ngx_palloc(cf->pool, sizeof(ngx_str_t)));
+      script_source->len = tmp.length();
+      script_source->data =
+          reinterpret_cast<u_char*>(string_piece_to_pool_string(cf->pool, tmp));
 
-      if (ngx_http_script_variables_count(&script_source) > 0) {
+      if (ngx_http_script_variables_count(script_source) > 0) {
         ngx_http_script_compile_t* sc =
             reinterpret_cast<ngx_http_script_compile_t*>(
                 ngx_pcalloc(cf->pool, sizeof(ngx_http_script_compile_t)));
         sc->cf = cf;
-        sc->source = &script_source;
+        sc->source = script_source;
         sc->lengths = reinterpret_cast<ngx_array_t**>(
             ngx_pcalloc(cf->pool, sizeof(ngx_array_t*)));
         sc->values = reinterpret_cast<ngx_array_t**>(
@@ -539,7 +543,7 @@ const char* NgxRewriteOptions::ParseAndSetOptions(
       } else {
         result = RewriteOptions::kOptionValueInvalid;
       }
-    } else if (StringCaseEqual("ProcessScriptVariables", args[0])) {
+    } else if (StringCaseEqual("ProcessScriptVariables", directive)) {
       if (scope == RewriteOptions::kProcessScopeStrict) {
         ProcessScriptVariablesMode mode;
         if (StringCaseEqual(arg, "all")) {

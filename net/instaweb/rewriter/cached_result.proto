@@ -145,6 +145,12 @@ message CachedResult {
 
   // Used by CollectDependenciesFilter
   repeated Dependency collected_dependency = 26;
+
+  // Charset the stylesheet summarized into inlined_data declared for itself
+  // (Content-Type header, @charset rule, or BOM, in that order). Empty when
+  // it declares nothing and thus inherits the enclosing page's charset.
+  // Used by CssSummarizerBase.
+  optional string inlined_data_charset = 27;
 }
 
 // Contains the mapping of input URLs to output URLs.  In the general

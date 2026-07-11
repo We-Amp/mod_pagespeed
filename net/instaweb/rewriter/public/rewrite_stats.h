@@ -42,6 +42,7 @@ class RewriteStats {
   static const char kNumResourceFetchFailures[];
   static const char kResourceUrlDomainAcceptances[];
   static const char kResourceUrlDomainRejections[];
+  static const char kCspBlockedRewrites[];
 
   // Variable tracking number of downstream cache purges issued.
   static const char kDownstreamCachePurgeAttempts[];
@@ -78,6 +79,7 @@ class RewriteStats {
   Variable* resource_url_domain_rejections() {
     return resource_url_domain_rejections_;
   }
+  Variable* csp_blocked_rewrites() { return csp_blocked_rewrites_; }
   Variable* slurp_404_count() { return slurp_404_count_; }
   Variable* succeeded_filter_resource_fetches() {
     return succeeded_filter_resource_fetches_;
@@ -86,6 +88,9 @@ class RewriteStats {
   // Note: page_load_count is a misnomer, it is really beacon count.
   // TODO(sligocki): Rename to something more clear.
   Variable* page_load_count() { return page_load_count_; }
+  // Number of beacon POSTs that arrived flagged as truncated: the client
+  // overflowed its payload budget and dropped part of its data.
+  Variable* beacon_overflow_count() { return beacon_overflow_count_; }
   Variable* fallback_responses_served() { return fallback_responses_served_; }
 
   Variable* num_proactively_freshen_user_facing_request() {
@@ -141,10 +146,12 @@ class RewriteStats {
   Variable* num_cache_control_rewritable_resources_;
   Variable* num_cache_control_not_rewritable_resources_;
   Variable* num_flushes_;
+  Variable* beacon_overflow_count_;
   Variable* page_load_count_;
   Variable* resource_404_count_;
   Variable* resource_url_domain_acceptances_;
   Variable* resource_url_domain_rejections_;
+  Variable* csp_blocked_rewrites_;
   Variable* slurp_404_count_;
   Variable* succeeded_filter_resource_fetches_;
   Variable* total_page_load_ms_;

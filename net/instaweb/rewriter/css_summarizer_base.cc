@@ -69,9 +69,10 @@ class CssSummarizerBase::Context : public SingleRewriteContext {
   void SetupExternalRewrite(HtmlElement* element);
 
  protected:
+  // Delegates the CSP decision to the filter: a subclass that inlines CSS
+  // into the page must not render when the policy forbids inline styles.
   bool PolicyPermitsRendering() const override {
-    // Subclasses are responsible for dealing with CSP.
-    return true;
+    return filter_->PolicyPermitsRendering();
   }
 
   void Render() override;
@@ -168,6 +169,17 @@ void CssSummarizerBase::Context::Render() {
       // the slot, as it may have been changed by an earlier filter.
       if (summary_info.is_external) {
         summary_info.base = slot(0)->resource()->url();
+        // The resource-declared charset was captured at summarization time
+        // (the contents aren't loaded on a metadata cache hit); the charset
+        // attribute on the link is only visible here.
+        summary_info.charset = result.inlined_data_charset();
+        if (summary_info.charset.empty() && element_ != nullptr) {
+          const char* attrs_charset =
+              element_->AttributeValue(HtmlName::kCharset);
+          if (attrs_charset != nullptr) {
+            summary_info.charset = attrs_charset;
+          }
+        }
       }
       // TODO(sligocki): text_ could easily be out of date. We should use the
       // ResourceSlot to render the result.
@@ -202,10 +214,8 @@ void CssSummarizerBase::Context::RewriteSingle(
 
   // Load stylesheet w/o expanding background attributes and preserving as
   // much content as possible from the original document.
-  // XXX(oschaaf): css
   CssStringPiece tmp(input_contents.data(), input_contents.size());
   Css::Parser parser(tmp);
-  // Css::Parser parser(input_contents);
   parser.set_preservation_mode(true);
 
   // We avoid quirks-mode so that we do not "fix" something we shouldn't have.
@@ -219,6 +229,9 @@ void CssSummarizerBase::Context::RewriteSingle(
     result->clear_inlined_data();
   } else {
     filter_->Summarize(stylesheet.get(), result->mutable_inlined_data());
+    result->set_inlined_data_charset(RewriteFilter::GetCharsetForStylesheet(
+        input_resource.get(), StringPiece() /* attribute_charset */,
+        StringPiece() /* enclosing_charset */));
   }
   if (CssInlineFilter::HasClosingStyleTag(result->inlined_data())) {
     result->clear_inlined_data();

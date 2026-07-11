@@ -472,6 +472,11 @@ void Minifier<OutputConsumer>::Minify() {
       ChangeToken(kMinusMinusToken);
       output_.append("--");
       index_ += 2;
+    } else if (ch == '`') {
+      // Template literals are not handled by this minifier; minifying their
+      // bodies as ordinary code would corrupt the output, so treat them as
+      // unparseable input and bail.
+      error_ = true;
     } else {
       // Copy other characters over verbatim, but make sure not to join two +
       // tokens into ++ or two - tokens into --, or to join ++ and + into +++

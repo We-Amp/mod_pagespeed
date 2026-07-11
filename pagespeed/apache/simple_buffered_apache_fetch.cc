@@ -110,6 +110,16 @@ void SimpleBufferedApacheFetch::HandleDone(bool success) {
   notify_->Signal();
 }
 
+bool SimpleBufferedApacheFetch::WriteMapped(const StringPiece& mmap_sp,
+                                            const MappedSharedString& keepalive,
+                                            MessageHandler* handler) {
+  GoogleString owned;
+  if (!CopyMappedVerified(mmap_sp, keepalive, &owned)) {
+    return false;  // Torn borrow: no correct bytes to buffer.
+  }
+  return Write(owned, handler);
+}
+
 bool SimpleBufferedApacheFetch::HandleWrite(const StringPiece& sp,
                                             MessageHandler* handler) {
   ScopedMutex lock(mutex_.get());

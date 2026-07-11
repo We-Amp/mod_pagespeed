@@ -28,6 +28,9 @@
 #include "pagespeed/kernel/base/null_statistics.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/base/thread_system.h"
+#include "pagespeed/kernel/util/platform.h"
+#include "pagespeed/kernel/util/simple_stats.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/cache/cache_test_base.h"
 
@@ -69,6 +72,21 @@ class CycloneCacheTest : public CacheTestBase {
   }
 
   CacheInterface* Cache() override { return cache_.get(); }
+
+  // Creates a second cache (own path) with a small-object tier carve-out.
+  std::unique_ptr<CycloneCache> MakeTieredCache(int64 size_bytes,
+                                                int small_tier_percent,
+                                                const char* suffix) {
+    CycloneCache::Config config;
+    config.cache_path = StrCat(cache_path_, "_", suffix);
+    config.cache_size_bytes = size_bytes;
+    config.ram_cache_size_bytes = 0;
+    config.enable_checksum = true;
+    config.num_segments = 0;
+    config.small_tier_percent = small_tier_percent;
+    return std::make_unique<CycloneCache>(config, stats_.get(),
+                                          handler_.get());
+  }
 
   bool IsHealthyTest() {
     return cache_ != nullptr && cache_->IsHealthy();
@@ -497,6 +515,152 @@ TEST_F(CycloneCacheTest, DataLostWithoutPersistDirectory) {
   // Data should be gone — the directory was only in RAM.
   CheckNotFound("volatile_key1");
   CheckNotFound("volatile_key2");
+}
+
+// With a cache far below the ~256 MB two-volume floor, the small tier must
+// report inactive and small-tier operations must fall back to the default
+// keyspace -- i.e. the view is always safe to use.
+TEST_F(CycloneCacheTest, SmallTierInactiveFallsBackToDefault) {
+  if (!IsHealthyTest()) {
+    GTEST_SKIP() << "CycloneCache not available";
+  }
+  std::unique_ptr<CycloneCache> cache =
+      MakeTieredCache(10 * 1024 * 1024, 10, "tier_inactive");
+  ASSERT_TRUE(cache->IsHealthy());
+  EXPECT_EQ(10, cache->config().small_tier_percent);
+  EXPECT_FALSE(cache->small_tier_active());
+
+  CacheInterface* view = cache->small_tier_view();
+  EXPECT_EQ("CycloneCache(small_tier)", view->Name());
+  EXPECT_EQ(cache.get(), view->Backend());
+  EXPECT_TRUE(view->IsBlocking());
+
+  // A write through the view lands in the default keyspace when the tier is
+  // inactive: readable through the plain interface and vice versa.
+  CheckPut(view, "fallback_key", "fallback_value");
+  CheckGet(cache.get(), "fallback_key", "fallback_value");
+  CheckPut(cache.get(), "default_key", "default_value");
+  CheckGet(view, "default_key", "default_value");
+
+  cache->ShutDown();
+}
+
+// With a cache large enough to host both volumes, the tiers are physically
+// separate keyspaces: the same key refers to two independent entries.
+// The volume files are sparse, so the apparent 320 MB costs only the few
+// bytes actually written.
+TEST_F(CycloneCacheTest, SmallTierActiveSeparateKeyspace) {
+  if (!IsHealthyTest()) {
+    GTEST_SKIP() << "CycloneCache not available";
+  }
+  std::unique_ptr<CycloneCache> cache = MakeTieredCache(
+      static_cast<int64>(320) * 1024 * 1024, 10, "tier_active");
+  ASSERT_TRUE(cache->IsHealthy());
+  ASSERT_TRUE(cache->small_tier_active());
+
+  CacheInterface* view = cache->small_tier_view();
+
+  // The directory is persistent and the cache file survives reruns, so clear
+  // both tiers' copies of the key before asserting on visibility.
+  cache->Delete("shared_key");
+  view->Delete("shared_key");
+
+  // Entry written through the view is not visible in the default tier.
+  CheckPut(view, "shared_key", "small_value");
+  CheckGet(view, "shared_key", "small_value");
+  CheckNotFound(cache.get(), "shared_key");
+
+  // And the same key written to the default tier stays independent.
+  CheckPut(cache.get(), "shared_key", "default_value");
+  CheckGet(cache.get(), "shared_key", "default_value");
+  CheckGet(view, "shared_key", "small_value");
+
+  // Deletes are tier-scoped, too.
+  view->Delete("shared_key");
+  CheckNotFound(view, "shared_key");
+  CheckGet(cache.get(), "shared_key", "default_value");
+
+  cache->ShutDown();
+}
+
+// ============================================================================
+// RAM-Tier Statistics Tests
+// ============================================================================
+
+// Every hit is attributed to exactly one tier, so cyclone_cache_ram_hits +
+// cyclone_cache_disk_hits must equal cyclone_cache_hits.  Whether the RAM
+// tier populates on a read-through is a Cyclone policy detail, so only the
+// sum is asserted here; the tier-off test below pins the disk side.
+TEST_F(CycloneCacheTest, RamTierHitStatsSumToHits) {
+  if (!IsHealthyTest()) {
+    GTEST_SKIP() << "CycloneCache not available";
+  }
+  std::unique_ptr<ThreadSystem> thread_system(Platform::CreateThreadSystem());
+  SimpleStats stats(thread_system.get());
+  CycloneCache::InitStats(&stats);
+
+  CycloneCache::Config config;
+  config.cache_path = StrCat(cache_path_, "_ram_stats");
+  config.cache_size_bytes = 10 * 1024 * 1024;
+  config.ram_cache_size_bytes = 1024 * 1024;
+  config.enable_checksum = true;
+  config.num_segments = 0;
+  CycloneCache cache(config, &stats, handler_.get());
+  ASSERT_TRUE(cache.IsHealthy());
+
+  CheckPut(&cache, "ram_stats_key", "ram_stats_value");
+  const int64 kGets = 5;
+  for (int i = 0; i < kGets; ++i) {
+    CheckGet(&cache, "ram_stats_key", "ram_stats_value");
+  }
+
+  EXPECT_EQ(kGets, stats.GetVariable(CycloneCache::kHits)->Get());
+  EXPECT_EQ(kGets, stats.GetVariable(CycloneCache::kRamHits)->Get() +
+                       stats.GetVariable(CycloneCache::kDiskHits)->Get());
+
+  cache.ShutDown();
+}
+
+// With the RAM tier disabled, every hit is a disk hit: cyclone_cache_ram_hits
+// stays 0 and cyclone_cache_disk_hits accounts for all of them.
+TEST_F(CycloneCacheTest, RamTierHitStatsZeroWhenTierDisabled) {
+  if (!IsHealthyTest()) {
+    GTEST_SKIP() << "CycloneCache not available";
+  }
+  std::unique_ptr<ThreadSystem> thread_system(Platform::CreateThreadSystem());
+  SimpleStats stats(thread_system.get());
+  CycloneCache::InitStats(&stats);
+
+  CycloneCache::Config config;
+  config.cache_path = StrCat(cache_path_, "_no_ram_stats");
+  config.cache_size_bytes = 10 * 1024 * 1024;
+  config.ram_cache_size_bytes = 0;
+  config.enable_checksum = true;
+  config.num_segments = 0;
+  CycloneCache cache(config, &stats, handler_.get());
+  ASSERT_TRUE(cache.IsHealthy());
+
+  CheckPut(&cache, "disk_stats_key", "disk_stats_value");
+  const int64 kGets = 3;
+  for (int i = 0; i < kGets; ++i) {
+    CheckGet(&cache, "disk_stats_key", "disk_stats_value");
+  }
+
+  EXPECT_EQ(kGets, stats.GetVariable(CycloneCache::kHits)->Get());
+  EXPECT_EQ(0, stats.GetVariable(CycloneCache::kRamHits)->Get());
+  EXPECT_EQ(kGets, stats.GetVariable(CycloneCache::kDiskHits)->Get());
+
+  cache.ShutDown();
+}
+
+// The tier defaults to off in the adapter Config: behavior and reporting are
+// identical to a pre-tier cache.
+TEST_F(CycloneCacheTest, SmallTierOffByDefault) {
+  if (!IsHealthyTest()) {
+    GTEST_SKIP() << "CycloneCache not available";
+  }
+  EXPECT_EQ(0, cache_->config().small_tier_percent);
+  EXPECT_FALSE(cache_->small_tier_active());
 }
 
 }  // namespace net_instaweb

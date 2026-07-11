@@ -17,12 +17,13 @@
  * under the License.
  */
 
-#include <memory>
-
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
+
+#include <memory>
 
 #include "net/instaweb/http/public/async_fetch.h"
 #include "net/instaweb/http/public/counting_url_async_fetcher.h"
+#include "net/instaweb/http/public/http_cache.h"
 #include "net/instaweb/http/public/logging_proto_impl.h"
 #include "net/instaweb/http/public/wait_url_async_fetcher.h"
 #include "net/instaweb/rewriter/public/domain_lawyer.h"
@@ -54,6 +55,7 @@
 #include "pagespeed/kernel/http/request_headers.h"
 #include "pagespeed/kernel/http/semantic_type.h"
 #include "pagespeed/opt/logging/log_record.h"
+#include "test/net/instaweb/http/mapped_backend_cache.h"
 #include "test/net/instaweb/http/mock_url_fetcher.h"
 #include "test/net/instaweb/rewriter/mock_resource_callback.h"
 #include "test/net/instaweb/rewriter/rewrite_test_base.h"
@@ -486,6 +488,57 @@ TEST_F(RewriteDriverTest, TestCacheUse) {
   EXPECT_TRUE(TryFetchResource(css_minified_url));
   EXPECT_EQ(cold_num_inserts, lru_cache()->num_inserts());
   EXPECT_EQ(0, lru_cache()->num_identical_reinserts());
+}
+
+// Flag-on variant of the warm cache-hit serving path with a memory-mapped
+// backend (CycloneZeroCopy): CacheCallback::DeliverDone extracts contents
+// from a mapped HTTPValue, links it into the OutputResource (which collapses
+// the borrow to owned bytes via HTTPValue::share()), and only then streams
+// the previously extracted StringPiece to the fetch.  Under ASan this
+// verifies the keep-alive that makes that ordering safe.
+TEST_F(RewriteDriverTest, TestCacheUseWithCycloneZeroCopy) {
+  AddFilter(RewriteOptions::kRewriteCss);
+
+  const char kCss[] = "* { display: none; }";
+  const char kMinCss[] = "*{display:none}";
+  SetResponseWithDefaultHeaders("a.css", kContentTypeCss, kCss, 100);
+
+  GoogleString css_minified_url =
+      Encode(kTestDomain, RewriteOptions::kCssFilterId, hasher()->Hash(kMinCss),
+             "a.css", "css");
+
+  // Cold load populates the HTTP cache (through the factory's own cache).
+  GoogleString contents;
+  ResponseHeaders response;
+  ASSERT_TRUE(FetchResourceUrl(css_minified_url, &contents, &response));
+  EXPECT_EQ(kMinCss, contents);
+
+  // Interpose a backend that delivers every hit as a memory-mapped view
+  // (emulating Cyclone's zero-copy borrow) and enable zero-copy serving.
+  MappedBackendCache* mapped_backend = new MappedBackendCache(lru_cache());
+  server_context()->DeleteCacheOnDestruction(mapped_backend);
+  HTTPCache* zero_copy_cache =
+      new HTTPCache(mapped_backend, timer(), hasher(), statistics());
+  zero_copy_cache->set_cyclone_zero_copy_enabled(true);
+  server_context()->set_http_cache(zero_copy_cache);  // Takes ownership.
+
+  // Warm load: served from the HTTP cache off mapped bytes.
+  contents.clear();
+  response.Clear();
+  ASSERT_TRUE(FetchResourceUrl(css_minified_url, &contents, &response));
+  EXPECT_EQ(kMinCss, contents);
+  EXPECT_LE(1, mapped_backend->mapped_hits());
+  // Every mapped borrow has been returned by the end of the request:
+  // nothing keeps mmap-backed bytes alive past the serving scope.
+  EXPECT_EQ(mapped_backend->mapped_hits(), mapped_backend->release_count());
+
+  // And again, to make sure the collapsed/linked state left everything
+  // consistent for repeat serving.
+  contents.clear();
+  response.Clear();
+  ASSERT_TRUE(FetchResourceUrl(css_minified_url, &contents, &response));
+  EXPECT_EQ(kMinCss, contents);
+  EXPECT_EQ(mapped_backend->mapped_hits(), mapped_backend->release_count());
 }
 
 // Test to make sure when we fetch a with a Via header, "public"

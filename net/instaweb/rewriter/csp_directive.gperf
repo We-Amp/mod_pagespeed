@@ -67,7 +67,11 @@ struct CspDirectiveInfo {
 "frame-src", CspDirective::kFrameSrc
 "img-src", CspDirective::kImgSrc
 "script-src", CspDirective::kScriptSrc
+"script-src-attr", CspDirective::kScriptSrcAttr
+"script-src-elem", CspDirective::kScriptSrcElem
 "style-src", CspDirective::kStyleSrc
+"style-src-attr", CspDirective::kStyleSrcAttr
+"style-src-elem", CspDirective::kStyleSrcElem
 "base-uri", CspDirective::kBaseUri
 %%
 

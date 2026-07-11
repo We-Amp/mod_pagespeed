@@ -8,7 +8,7 @@
 #
 # Prerequisites:
 #   - Node.js / npx on PATH
-#   - npm package: google-closure-compiler (npx will auto-install if needed)
+#   - npm package: google-closure-compiler (npx fetches the pinned version)
 #   - A Bazel build of //net/instaweb/js:data2c (or pass DATA2C= to override)
 #
 # Usage:
@@ -101,6 +101,11 @@ trap 'rm -rf "$TMPDIR"' EXIT
 # --------------------------------------------------------------------------
 # Closure Compiler helpers
 # --------------------------------------------------------------------------
+# The compiler is pinned so that regeneration is deterministic: an unpinned
+# npx resolves whatever is latest, which rewrites every generated asset on
+# each regen. Bump deliberately, adopting the full diff.
+CLOSURE_COMPILER_VERSION="20260311.0.0"
+
 closure_compile() {
     local src="$1" output="$2" level="$3"
     shift 3
@@ -111,7 +116,7 @@ closure_compile() {
         format_flag="--formatting=PRETTY_PRINT"
     fi
 
-    npx google-closure-compiler \
+    npx --yes "google-closure-compiler@$CLOSURE_COMPILER_VERSION" \
         --js "$src" \
         --js_output_file "$output" \
         "${extra_flags[@]}" \
@@ -120,6 +125,17 @@ closure_compile() {
         --generate_exports \
         "--output_wrapper=(function(){%output%})();" \
         $format_flag
+    strip_closure_license "$output"
+}
+
+# The pinned library's sources carry an @license header the compiler
+# preserves into the output. Shipped assets must stay comment-free
+# (StaticAssetManagerTest asserts this); attribution is retained in the
+# pinned tools/closure/ checkout this script fetches.
+strip_closure_license() {
+    perl -0777 -pi -e \
+        's{/\*\s*Copyright The Closure Library Authors\.\s*SPDX-License-Identifier: Apache-2\.0\s*\*/\n?}{}g' \
+        "$1"
 }
 
 # --------------------------------------------------------------------------
@@ -127,11 +143,27 @@ closure_compile() {
 # --------------------------------------------------------------------------
 echo "==> Compiling JS with Closure Compiler..."
 
-# Files that need dependency mode + closure library
-CLOSURE_LIB_DIR="$REPO_ROOT/third_party/closure_library"
+# Files that need dependency mode + the Closure Library.
+#
+# The library is pinned to the final upstream release (upstream is archived,
+# so this never moves). Fetched on demand into tools/closure/ (gitignored);
+# the commit hash is verified so a tampered or wrong checkout can't silently
+# change the shipped JS.
+CLOSURE_LIB_TAG="v20230802"
+CLOSURE_LIB_COMMIT="ccf3f1dcd7258ff413406daa45bad79277d40afd"
+CLOSURE_LIB_DIR="$REPO_ROOT/tools/closure/closure-library-$CLOSURE_LIB_TAG"
 if [[ ! -d "$CLOSURE_LIB_DIR" ]]; then
-    # Try bazel external
-    CLOSURE_LIB_DIR="$(bazel info output_base 2>/dev/null)/external/closure_library" || true
+    echo "==> Fetching Closure Library $CLOSURE_LIB_TAG..."
+    mkdir -p "$REPO_ROOT/tools/closure"
+    git clone --quiet --depth 1 --branch "$CLOSURE_LIB_TAG" \
+        https://github.com/google/closure-library "$CLOSURE_LIB_DIR"
+fi
+ACTUAL_COMMIT="$(git -C "$CLOSURE_LIB_DIR" rev-parse HEAD)"
+if [[ "$ACTUAL_COMMIT" != "$CLOSURE_LIB_COMMIT" ]]; then
+    echo "ERROR: Closure Library at $CLOSURE_LIB_DIR is at commit" >&2
+    echo "  $ACTUAL_COMMIT, expected $CLOSURE_LIB_COMMIT ($CLOSURE_LIB_TAG)." >&2
+    echo "Remove the directory and re-run to fetch the pinned version." >&2
+    exit 1
 fi
 
 # --- closure_compiler_gen files (with dependency mode, use closure library) ---
@@ -151,11 +183,13 @@ for entry in \
 
     # Collect closure library JS files
     cl_flags=()
-    if [[ -d "$CLOSURE_LIB_DIR" ]]; then
-        while IFS= read -r f; do
-            cl_flags+=(--js "$f")
-        done < <(find "$CLOSURE_LIB_DIR" -name '*.js' ! -name '*_test.js' ! -name '*_perf.js' | sort)
+    if [[ ! -d "$CLOSURE_LIB_DIR" ]]; then
+        echo "ERROR: Closure Library missing at $CLOSURE_LIB_DIR" >&2
+        exit 1
     fi
+    while IFS= read -r f; do
+        cl_flags+=(--js "$f")
+    done < <(find "$CLOSURE_LIB_DIR" -name '*.js' ! -name '*_test.js' ! -name '*_perf.js' | sort)
 
     echo "  $base (dbg + opt, dependency mode)"
     closure_compile "$src" "$TMPDIR/${base}_dbg.js" SIMPLE \
@@ -217,13 +251,17 @@ ALL_NAMES=(
     responsive_js
 )
 
+# Run data2c from inside TMPDIR with relative paths: it embeds the input
+# path in a header comment, and an absolute mktemp path there would make
+# every .cc differ on every regen.
 for name in "${ALL_NAMES[@]}"; do
-    "$DATA2C" --data_file="$TMPDIR/${name}_dbg.js" \
-              --c_file="$TMPDIR/${name}.cc" \
-              --varname="JS_${name}"
-    "$DATA2C" --data_file="$TMPDIR/${name}_opt.js" \
-              --c_file="$TMPDIR/${name}_opt.cc" \
-              --varname="JS_${name}_opt"
+    (cd "$TMPDIR" && \
+     "$DATA2C" --data_file="${name}_dbg.js" \
+               --c_file="${name}.cc" \
+               --varname="JS_${name}" && \
+     "$DATA2C" --data_file="${name}_opt.js" \
+               --c_file="${name}_opt.cc" \
+               --varname="JS_${name}_opt")
 done
 
 # --------------------------------------------------------------------------

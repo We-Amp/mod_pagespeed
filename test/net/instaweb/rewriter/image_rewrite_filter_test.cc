@@ -41,6 +41,7 @@
 #include "net/instaweb/rewriter/public/rewrite_context.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
+#include "net/instaweb/rewriter/public/rewrite_stats.h"
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "net/instaweb/rewriter/rendered_image.pb.h"
 #include "net/instaweb/util/public/mock_property_page.h"
@@ -4301,6 +4302,69 @@ TEST_F(ImageRewriteTest, BasicCsp) {
              "<img src=\"uploads/b.png\">",
              "<!--The preceding resource was not rewritten "
              "because CSP disallows its fetch-->"));
+}
+
+TEST_F(ImageRewriteTest, CspBlocksDataUrlInlining) {
+  options()->set_image_inline_max_bytes(100000);
+  options()->EnableFilter(RewriteOptions::kInlineImages);
+  options()->EnableFilter(RewriteOptions::kRecompressPng);
+  options()->EnableFilter(RewriteOptions::kDebug);
+  rewrite_driver()->AddFilters();
+  AddFileToMockFetcher(StrCat(kTestDomain, "a.png"), kCuppaPngFile,
+                       kContentTypePng, 100);
+  static const char kCsp[] =
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"img-src 'self'\">";
+
+  Parse("csp_no_data_inline", StrCat(kCsp, "<img src=\"a.png\">"));
+  // img-src 'self' does not match data: URLs, so the image must not be
+  // inlined...
+  EXPECT_THAT(output_buffer_, ::testing::Not(HasSubstr("src=\"data:")));
+  // ...but rewriting to a same-origin URL is still permitted.
+  EXPECT_THAT(output_buffer_, HasSubstr(".pagespeed.ic."));
+  EXPECT_THAT(output_buffer_,
+              HasSubstr("The image was not inlined because the "
+                        "Content-Security-Policy on the page does not "
+                        "permit data: images."));
+  EXPECT_EQ(
+      1,
+      statistics()->GetVariable(RewriteStats::kCspBlockedRewrites)->Get());
+}
+
+TEST_F(ImageRewriteTest, CspPermitsDataUrlInlining) {
+  options()->set_image_inline_max_bytes(100000);
+  options()->EnableFilter(RewriteOptions::kInlineImages);
+  options()->EnableFilter(RewriteOptions::kRecompressPng);
+  rewrite_driver()->AddFilters();
+  AddFileToMockFetcher(StrCat(kTestDomain, "a.png"), kCuppaPngFile,
+                       kContentTypePng, 100);
+  static const char kCsp[] =
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"img-src 'self' data:\">";
+
+  Parse("csp_data_inline", StrCat(kCsp, "<img src=\"a.png\">"));
+  EXPECT_THAT(output_buffer_, HasSubstr("src=\"data:image/png"));
+  EXPECT_EQ(
+      0,
+      statistics()->GetVariable(RewriteStats::kCspBlockedRewrites)->Get());
+}
+
+TEST_F(ImageRewriteTest, CspBlockedRewriteStatistic) {
+  AddRecompressImageFilters();
+  rewrite_driver()->AddFilters();
+  AddFileToMockFetcher("images/a.jpg", kPuzzleJpgFile, kContentTypeJpeg, 100);
+  AddFileToMockFetcher("uploads/b.png", kPuzzleJpgFile, kContentTypeJpeg, 100);
+  static const char kCsp[] =
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"img-src */images/\">";
+
+  // b.png is refused at CreateInputResource time by the policy; a.jpg is
+  // fetched and rewritten normally.
+  Parse("csp_blocked_stat", StrCat(kCsp, "<img src=\"images/a.jpg\">",
+                                   "<img src=\"uploads/b.png\">"));
+  EXPECT_EQ(
+      1,
+      statistics()->GetVariable(RewriteStats::kCspBlockedRewrites)->Get());
 }
 
 TEST_F(ImageRewriteTest, RenderCsp) {

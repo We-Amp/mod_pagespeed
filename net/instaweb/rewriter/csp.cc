@@ -158,6 +158,11 @@ CspSourceExpression CspSourceExpression::Parse(StringPiece input) {
       return CspSourceExpression();
     }
 
+    if (host_part == "*.") {
+      // "*." without an actual host is not a valid host-part.
+      return CspSourceExpression();
+    }
+
     // Start on port-part, if any
     if (input.starts_with(":")) {
       input.remove_prefix(1);
@@ -253,7 +258,11 @@ bool CspSourceExpression::Matches(const GoogleUrl& origin_url,
   // specified.
   if (kind_ == kHostSource && expr_scheme.empty() && expr_host == "*" &&
       expr_port.empty() && expr_path.empty()) {
-    if (url.SchemeIs("http") || url.SchemeIs("https") || url.SchemeIs("ftp")) {
+    // Per spec a lone * covers the network schemes http, https, ws and
+    // wss, plus the protected resource's own scheme (approximated here
+    // by the origin's scheme) --- notably NOT data: or ftp:.
+    if (url.SchemeIs("http") || url.SchemeIs("https") || url.SchemeIs("ws") ||
+        url.SchemeIs("wss")) {
       return true;
     }
     return (url.Scheme() == origin_url.Scheme());
@@ -308,9 +317,10 @@ bool CspSourceExpression::Matches(const GoogleUrl& origin_url,
   // TODO(morlovich):Redirect following may require changes here ---
   // this would also be skipped for redirects.
   if (!expr_path.empty()) {
-    // TODO(morlovich): Verify that behavior for query here is what we want.
+    // Per the URL matching algorithm the query string is not part of
+    // the path, so match against the query-stripped path.
     StringPieceVector url_path_list;
-    SplitStringPieceToVector(url.PathAndLeaf(), "/", &url_path_list, true);
+    SplitStringPieceToVector(url.PathSansQuery(), "/", &url_path_list, true);
     if (expr_path.size() > url_path_list.size()) {
       return false;
     }
@@ -453,6 +463,16 @@ bool CspSourceList::Matches(const GoogleUrl& origin_url,
   return false;
 }
 
+bool CspSourceList::HasSchemeSource(StringPiece scheme) const {
+  for (const CspSourceExpression& expr : expressions_) {
+    if (expr.kind() == CspSourceExpression::kSchemeSource &&
+        expr.url_data().scheme_part == scheme) {
+      return true;
+    }
+  }
+  return false;
+}
+
 CspPolicy::CspPolicy() {
   policies_.resize(static_cast<size_t>(CspDirective::kNumSourceListDirectives));
 }
@@ -477,7 +497,10 @@ std::unique_ptr<CspPolicy> CspPolicy::Parse(StringPiece input) {
   policy = std::make_unique<CspPolicy>();
   for (StringPiece token : tokens) {
     TrimCspWhitespace(&token);
-    StringPiece::size_type pos = token.find(' ');
+    // Directive name and value are separated by required whitespace,
+    // which per the grammar is SP or HTAB. Splitting on ' ' alone would
+    // drop a tab-separated directive entirely (fail-open).
+    StringPiece::size_type pos = token.find_first_of(" \t");
     if (pos != StringPiece::npos) {
       StringPiece name = token.substr(0, pos);
       StringPiece value = token.substr(pos + 1);
@@ -504,6 +527,18 @@ std::unique_ptr<CspPolicy> CspPolicy::Parse(StringPiece input) {
   return policy;
 }
 
+const CspSourceList* CspPolicy::EffectiveSourceList(CspDirective specific,
+                                                    CspDirective base) const {
+  const CspSourceList* list = SourceListFor(specific);
+  if (list == nullptr) {
+    list = SourceListFor(base);
+  }
+  if (list == nullptr) {
+    list = SourceListFor(CspDirective::kDefaultSrc);
+  }
+  return list;
+}
+
 bool CspPolicy::PermitsEval() const {
   // AKA EnsureCSPDoesNotBlockStringCompilation() from the spec.
   // https://w3c.github.io/webappsec-csp/#can-compile-strings
@@ -516,7 +551,10 @@ bool CspPolicy::PermitsEval() const {
 }
 
 bool CspPolicy::PermitsInlineScript() const {
-  const CspSourceList* script_src = SourceListFor(CspDirective::kScriptSrc);
+  // Inline <script> blocks are governed by script-src-elem, falling
+  // back to script-src and then default-src (CSP3).
+  const CspSourceList* script_src = EffectiveSourceList(
+      CspDirective::kScriptSrcElem, CspDirective::kScriptSrc);
   if (script_src == nullptr) {
     return true;
   }
@@ -529,7 +567,10 @@ bool CspPolicy::PermitsInlineScript() const {
 }
 
 bool CspPolicy::PermitsInlineScriptAttribute() const {
-  const CspSourceList* script_src = SourceListFor(CspDirective::kScriptSrc);
+  // Inline event handlers are governed by script-src-attr, falling back
+  // to script-src and then default-src (CSP3).
+  const CspSourceList* script_src = EffectiveSourceList(
+      CspDirective::kScriptSrcAttr, CspDirective::kScriptSrc);
   if (script_src == nullptr) {
     return true;
   }
@@ -543,7 +584,10 @@ bool CspPolicy::PermitsInlineScriptAttribute() const {
 }
 
 bool CspPolicy::PermitsInlineStyle() const {
-  const CspSourceList* style_src = SourceListFor(CspDirective::kStyleSrc);
+  // Inline <style> blocks are governed by style-src-elem, falling back
+  // to style-src and then default-src (CSP3).
+  const CspSourceList* style_src =
+      EffectiveSourceList(CspDirective::kStyleSrcElem, CspDirective::kStyleSrc);
   if (style_src == nullptr) {
     return true;
   }
@@ -556,18 +600,59 @@ bool CspPolicy::PermitsInlineStyle() const {
 }
 
 bool CspPolicy::PermitsInlineStyleAttribute() const {
-  return PermitsInlineStyle();
+  // style attributes are governed by style-src-attr, falling back to
+  // style-src and then default-src (CSP3).
+  const CspSourceList* style_src =
+      EffectiveSourceList(CspDirective::kStyleSrcAttr, CspDirective::kStyleSrc);
+  if (style_src == nullptr) {
+    return true;
+  }
+
+  if (style_src->saw_strict_dynamic()) {
+    return false;
+  }
+
+  return (style_src->saw_unsafe_inline() && !style_src->saw_hash_or_nonce());
+}
+
+bool CspPolicy::PermitsDataImage() const {
+  const CspSourceList* img_src =
+      EffectiveSourceList(CspDirective::kImgSrc, CspDirective::kImgSrc);
+  if (img_src == nullptr) {
+    // No relevant policy at all.
+    return true;
+  }
+  // In CSP, host sources and '*' do not match data: URLs; only an
+  // explicit data: scheme-source permits them.
+  return img_src->HasSchemeSource("data");
 }
 
 bool CspPolicy::CanLoadUrl(CspDirective role, const GoogleUrl& origin_url,
                            const GoogleUrl& url) const {
   // AKA: "Does url match source list in origin with redirect count?", combined
   // with the various pre-request checks.
-  CHECK(role == CspDirective::kImgSrc || role == CspDirective::kStyleSrc ||
-        role == CspDirective::kScriptSrc);
-  const CspSourceList* source_list = SourceListFor(role);
-  if (source_list == nullptr) {
-    source_list = SourceListFor(CspDirective::kDefaultSrc);
+  // External script/style loads are element-created requests, so they
+  // are governed by the -elem variant when present (CSP3).
+  const CspSourceList* source_list = nullptr;
+  switch (role) {
+    case CspDirective::kScriptSrc:
+      source_list = EffectiveSourceList(CspDirective::kScriptSrcElem,
+                                        CspDirective::kScriptSrc);
+      break;
+    case CspDirective::kStyleSrc:
+      source_list = EffectiveSourceList(CspDirective::kStyleSrcElem,
+                                        CspDirective::kStyleSrc);
+      break;
+    case CspDirective::kImgSrc:
+      source_list =
+          EffectiveSourceList(CspDirective::kImgSrc, CspDirective::kImgSrc);
+      break;
+    default:
+      // Only the roles above are supported. DFATAL aborts in debug builds
+      // so a caller passing a new role is caught in tests and must add
+      // explicit handling; release builds log an error and deny.
+      LOG(DFATAL) << "Unexpected role in CspPolicy::CanLoadUrl";
+      return false;
   }
 
   if (source_list == nullptr) {

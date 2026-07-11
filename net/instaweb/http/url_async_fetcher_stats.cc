@@ -21,6 +21,7 @@
 
 #include "base/logging.h"
 #include "net/instaweb/http/public/async_fetch.h"
+#include "pagespeed/kernel/base/shared_string.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -71,6 +72,14 @@ class UrlAsyncFetcherStats::StatsAsyncFetch : public SharedAsyncFetch {
                    MessageHandler* handler) override {
     size_ += content.size();
     return SharedAsyncFetch::HandleWrite(content, handler);
+  }
+
+  // A shared-storage serve must not bypass the byte count: route it
+  // through HandleWrite.
+  bool HandleWriteShared(const StringPiece& content,
+                         const SharedString& /*storage*/,
+                         MessageHandler* handler) override {
+    return HandleWrite(content, handler);
   }
 
  private:

@@ -217,14 +217,23 @@ with that version family, and will always produce a single module named
 
 <h2 id="honor-csp">Honoring Content-Security-Policy Headers</h2>
 <p>
-  As of 1.13.35.1 PageSpeed is able to adapt its optimizations according to any
-  Content Security Policies specified in the response headers. In this release
-  you need to opt-in into this feature, future releases may turn it on by
-  default.
+  PageSpeed takes Content-Security-Policy response headers and
+  <code>&lt;meta http-equiv="Content-Security-Policy"&gt;</code> tags into
+  account when optimizing. For the directives it understands &mdash;
+  including <code>default-src</code>, <code>script-src</code>,
+  <code>style-src</code>, <code>img-src</code> and
+  <code>base-uri</code> &mdash; it avoids rewrites whose output the policy
+  would not permit, for example inlining content when the policy does not
+  allow it, or rewriting a resource to a URL outside the allowed sources.
+  This covers the common cases but not every CSP feature, so pages using a
+  strict policy should still be verified after enabling optimization.
+</p>
+<p>
+  This behavior is enabled by default. To disable it, use:
 </p>
 <dl>
-  <dt>Apache:<dd><pre class="prettyprint">ModPagespeedHonorCsp on</pre>
-  <dt>Nginx:<dd><pre class="prettyprint">pagespeed HonorCsp on;</pre>
+  <dt>Apache:<dd><pre class="prettyprint">ModPagespeedHonorCsp off</pre>
+  <dt>Nginx:<dd><pre class="prettyprint">pagespeed HonorCsp off;</pre>
 </dl>
 
 <h2 id="respectvary">Respecting Vary Headers</h2>

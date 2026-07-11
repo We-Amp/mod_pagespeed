@@ -812,6 +812,10 @@ TEST_F(ResponsiveImageFilterTest, Lazyload) {
   options()->EnableFilter(RewriteOptions::kLazyloadImages);
   // Disable beaconing so that the image is automatically lazyloaded.
   options()->set_critical_images_beacon_enabled(false);
+  // Without critical-image data, lazyload skips the first
+  // LazyloadImagesSkipFirst images (LCP protection); disable that here so
+  // the single image in this test is lazyloaded.
+  options()->set_lazyload_images_skip_first(0);
   // Set User-Agent so that Lazyload will work.
   SetCurrentUserAgent(UserAgentMatcherTestBase::kChrome18UserAgent);
   SetHtmlMimetype();  // Prevent insertion of CDATA tags to static JS.

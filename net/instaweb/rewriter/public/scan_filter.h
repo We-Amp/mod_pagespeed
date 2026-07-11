@@ -20,6 +20,7 @@
 #ifndef NET_INSTAWEB_REWRITER_PUBLIC_SCAN_FILTER_H_
 #define NET_INSTAWEB_REWRITER_PUBLIC_SCAN_FILTER_H_
 
+#include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/html/empty_html_filter.h"
 
 namespace net_instaweb {
@@ -56,6 +57,11 @@ class ScanFilter : public EmptyHtmlFilter {
   const char* Name() const override { return "Scan"; }
 
  private:
+  // Splits a (possibly comma-coalesced) Content-Security-Policy value
+  // into its constituent serialized policies and adds each to the
+  // driver's CSP context.
+  void AddCspPolicies(StringPiece value);
+
   RewriteDriver* driver_;
   bool seen_any_nodes_;
   bool seen_refs_;

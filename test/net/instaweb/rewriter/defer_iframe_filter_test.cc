@@ -63,6 +63,41 @@ TEST_F(DeferIframeFilterTest, TestDeferIframe) {
   ValidateExpected("defer_iframe", input_html, output_html);
 }
 
+TEST_F(DeferIframeFilterTest, CspForbidsInlineScript) {
+  // Under a script-src policy without 'unsafe-inline' the browser would
+  // block the inline iframe-swap scripts, so the iframe must be left
+  // untouched.
+  GoogleString input_html =
+      "<head>"
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"script-src *;\">"
+      "</head>"
+      "<body>"
+      "<iframe src=\"http://test.com/1.html\"/>"
+      "</body>";
+  ValidateExpected("defer_iframe_csp_no_inline", input_html, input_html);
+}
+
+TEST_F(DeferIframeFilterTest, CspAllowsInlineScript) {
+  // With 'unsafe-inline' permitted the filter behaves as usual.
+  const char kCsp[] =
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"script-src * 'unsafe-inline';\">";
+  StringPiece defer_iframe_js_code =
+      server_context()->static_asset_manager()->GetAsset(
+          StaticAssetEnum::DEFER_IFRAME, options());
+  GoogleString input_html = StrCat("<head>", kCsp,
+                                   "</head>"
+                                   "<body>"
+                                   "<iframe src=\"http://test.com/1.html\"/>"
+                                   "</body>");
+  GoogleString output_html =
+      StrCat("<head>", kCsp, "</head><body><script type=\"text/javascript\">",
+             defer_iframe_js_code, "pagespeed.deferIframeInit();</script>",
+             GeneratePagespeedIframeTag("http://test.com/1.html"), "</body>");
+  ValidateExpected("defer_iframe_csp_unsafe_inline", input_html, output_html);
+}
+
 TEST_F(DeferIframeFilterTest, TestNoIframePresent) {
   GoogleString input_html =
       "<head></head>"

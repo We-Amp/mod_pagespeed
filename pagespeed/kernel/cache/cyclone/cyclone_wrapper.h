@@ -44,6 +44,25 @@ extern "C" {
 typedef struct CycloneCacheHandle CycloneCacheHandle;
 typedef struct CycloneReadHandle CycloneReadHandle;
 
+// Storage tier for key-routed operations (see the *_tier function variants
+// and CycloneCacheConfig::small_tier_percent).  Mirrors Cyclone's own C API
+// (include/cyclone/cyclone_c.h), including the uint8_t underlying type --
+// this header is only compiled as C++ in this tree, so the fixed enum base
+// is available.  Note the vendored wrapper never links against upstream's
+// C ABI (upstream's src/c_api is not built here), so enum-width parity is
+// documentation, not an ABI requirement; the same applies to CycloneError
+// below, whose width is implementation-defined.  The two tiers are
+// physically separate keyspaces: the same key written to both tiers refers
+// to two independent entries.
+typedef enum CycloneTier : uint8_t {
+  CYCLONE_TIER_DEFAULT = 0,  // Hash-routed default (payload) volume - the
+                             // behavior of the tier-less functions.
+  CYCLONE_TIER_SMALL = 1     // Dedicated small-object volume, isolated from
+                             // default-tier eviction churn.  Falls back to
+                             // the default tier when the small tier is
+                             // disabled or inactive.
+} CycloneTier;
+
 // Error codes returned by Cyclone operations.
 // These map to the internal Cyclone error codes.
 typedef enum CycloneError {
@@ -87,9 +106,24 @@ typedef struct CycloneCacheConfig {
   // Set to non-zero to enable.
   // When enabled, the cache directory is stored in the data file via mmap.
   int persist_directory;
+
+  // Small-object tier carve-out percentage (0 = disabled).
+  // When > 0 (clamped to [1, 50] by Cyclone), that percentage of
+  // cache_size_bytes is carved out into a physically separate small-object
+  // volume at "<cache_path>.small" that only CYCLONE_TIER_SMALL operations
+  // route to.  If the total size cannot host both volumes' sizing floors
+  // (~256 MB single-process), the tier is silently disabled and
+  // CYCLONE_TIER_SMALL falls back to default routing - check
+  // cyclone_cache_small_tier_active() after cyclone_cache_create().
+  uint32_t small_tier_percent;
 } CycloneCacheConfig;
 
 // Statistics from the cache.
+//
+// This struct crosses the vendored C ABI between the C++20 codebase and the
+// C++23 wrapper implementation.  Every field is a uint64_t, so there is no
+// internal padding and all offsets are fixed; extend by APPENDING fields
+// only -- never reorder, retype, or remove existing ones.
 typedef struct CycloneCacheStats {
   uint64_t ram_cache_hits;      // Hits served from RAM cache
   uint64_t ram_cache_misses;    // Misses in RAM cache
@@ -100,6 +134,15 @@ typedef struct CycloneCacheStats {
   uint64_t evictions;           // Number of entries evicted
   uint64_t current_size_bytes;  // Current size of cache on disk
   uint64_t current_entries;     // Current number of entries in cache
+  uint64_t ram_cache_bytes;     // Bytes currently held in the RAM cache
+  uint64_t write_buffer_wraps;  // Circular write-buffer wraps (all volumes)
+  // Lease-based region pinning.  Process-local counters: the
+  // writer that defers/drops/forces is the one that counts.
+  uint64_t wraps_deferred_by_lease;  // Wraps deferred by a live read lease
+  uint64_t writes_dropped_by_lease;  // Fills dropped by deferred wraps
+  uint64_t wraps_forced_past_lease;  // Wraps forced past the lease ceiling
+  uint64_t tag_collision_evictions;  // Dir entries evicted by full-bucket
+                                     // (bucket,tag) collision on insert
 } CycloneCacheStats;
 
 // ============================================================================
@@ -188,6 +231,11 @@ int cyclone_read_handle_has_mapped_data(const CycloneReadHandle* handle);
 // Returns 0 if the handle is NULL.
 size_t cyclone_read_handle_size(const CycloneReadHandle* handle);
 
+// Check whether this handle's data was served from the RAM cache tier.
+//
+// Returns 1 for a RAM-tier hit, 0 for a disk hit or a NULL handle.
+int cyclone_read_handle_is_ram_hit(const CycloneReadHandle* handle);
+
 // Increment the reference count on a read handle.
 //
 // This allows multiple holders to share a read handle. The handle remains
@@ -216,6 +264,23 @@ int cyclone_read_handle_refcount(const CycloneReadHandle* handle);
 // After this call, the handle is invalid and must not be used.
 // It is safe to call this with a NULL handle.
 void cyclone_read_handle_close(CycloneReadHandle* handle);
+
+// the design record: re-stamp the read lease pinning this handle's borrow.  Returns
+// 1 if still valid (lease extended, epoch unchanged), 0 if the borrowed
+// region may have been overwritten (embedder must copy) or not applicable.
+int cyclone_read_handle_renew_lease(CycloneReadHandle* handle);
+
+// the design record (2026-07-07): intent-checked renewal for the ALIASED zero-copy
+// path (per aliased send).  Returns a cyclone::LeaseRenewal value as int:
+// 0 = kOk (keep aliasing), 1 = kCopyNow (de-alias by copying, region
+// intact), 2 = kTorn (abort — region may be overwritten), 3 = kLeasesOff
+// (no lease protection; copy, do not abort).  NULL/RAM handle => 3.
+int cyclone_read_handle_renew_lease_strict(CycloneReadHandle* handle);
+
+// the design record: ns until a ceiling-forced wrap could overwrite this borrow;
+// UINT64_MAX when none is deferred / not applicable.
+uint64_t cyclone_read_handle_ns_until_forced_wrap(
+    const CycloneReadHandle* handle);
 
 // ============================================================================
 // Cache Write Operations
@@ -249,6 +314,35 @@ CycloneError cyclone_cache_delete(CycloneCacheHandle* cache, const char* key,
 // Returns CYCLONE_NOT_INITIALIZED if the cache is not running.
 CycloneError cyclone_cache_exists(CycloneCacheHandle* cache, const char* key,
                                   size_t key_len, int* exists);
+
+// ============================================================================
+// Tier-aware Operations
+// ============================================================================
+//
+// Additive variants of the core operations that take an explicit storage
+// tier.  Passing CYCLONE_TIER_DEFAULT behaves exactly like the tier-less
+// function of the same name; the tier-less functions are unchanged.
+
+CycloneError cyclone_cache_read_tier(CycloneCacheHandle* cache, const char* key,
+                                     size_t key_len, CycloneTier tier,
+                                     CycloneReadHandle** out_handle);
+CycloneError cyclone_cache_write_tier(CycloneCacheHandle* cache,
+                                      const char* key, size_t key_len,
+                                      const char* data, size_t data_len,
+                                      CycloneTier tier);
+CycloneError cyclone_cache_delete_tier(CycloneCacheHandle* cache,
+                                       const char* key, size_t key_len,
+                                       CycloneTier tier);
+// Same return convention as cyclone_cache_exists().
+CycloneError cyclone_cache_exists_tier(CycloneCacheHandle* cache,
+                                       const char* key, size_t key_len,
+                                       CycloneTier tier, int* exists);
+
+// Returns non-zero when the small-object tier is enabled (a dedicated small
+// volume exists), 0 otherwise - including when small_tier_percent was set
+// but cache_size_bytes was below the sizing floor and the tier was silently
+// disabled.  Returns 0 for a NULL cache.
+int cyclone_cache_small_tier_active(const CycloneCacheHandle* cache);
 
 // ============================================================================
 // Statistics and Diagnostics

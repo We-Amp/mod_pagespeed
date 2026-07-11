@@ -93,6 +93,12 @@ void CriticalImagesBeaconFilter::InitStats(Statistics* statistics) {
 }
 
 void CriticalImagesBeaconFilter::EndDocument() {
+  // Re-checked here for pages without images, so the finder isn't told a
+  // beacon was initiated when CSP suppressed the beacon JS.
+  if (insert_beacon_js_ && !added_beacon_js_ &&
+      (!CspPermitsInlineScript() || !CspPermitsInlineScriptAttribute())) {
+    insert_beacon_js_ = false;
+  }
   CriticalImagesFinder* finder =
       driver()->server_context()->critical_images_finder();
   finder->UpdateCandidateImagesForBeaconing(image_url_hashes_, driver(),
@@ -121,12 +127,15 @@ void CriticalImagesBeaconFilter::MaybeAddBeaconJavascript(
   GoogleString options_signature_hash =
       driver()->server_context()->hasher()->Hash(
           driver()->options()->signature());
-  // If lazyload is enabled, it will run the beacon after it has loaded all the
-  // images. Otherwise, run it at page onload.
+  // If lazyload is enabled in JS mode, its loader script will run the beacon
+  // after it has loaded all the images. Native-mode lazyload injects no
+  // JavaScript, so the beacon must run at page onload, as it does when
+  // lazyload is off.
   bool lazyload_will_beacon =
       driver()->options()->Enabled(RewriteOptions::kLazyloadImages) &&
       LazyloadImagesFilter::ShouldApply(driver()) ==
-          RewriterHtmlApplication::ACTIVE;
+          RewriterHtmlApplication::ACTIVE &&
+      !LazyloadImagesFilter::ShouldApplyNativeMode(driver());
   GoogleString send_beacon_at_onload = BoolToString(!lazyload_will_beacon);
   GoogleString resize_rendered_image_dimensions_enabled =
       BoolToString(driver()->options()->Enabled(
@@ -156,6 +165,15 @@ void CriticalImagesBeaconFilter::Clear() {
 }
 
 void CriticalImagesBeaconFilter::EndElementImpl(HtmlElement* element) {
+  // The beacon is an inline script wired to inline onload handlers; if the
+  // page's CSP forbids either, don't instrument the page. The finder then
+  // sees no beacon initiated and keeps following its usual no-data path.
+  // Once the beacon JS is committed to the page we keep annotating images
+  // so the instrumentation stays consistent.
+  if (insert_beacon_js_ && !added_beacon_js_ &&
+      (!CspPermitsInlineScript() || !CspPermitsInlineScriptAttribute())) {
+    insert_beacon_js_ = false;
+  }
   if (element->keyword() != HtmlName::kImg &&
       element->keyword() != HtmlName::kInput) {
     return;

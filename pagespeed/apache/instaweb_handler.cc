@@ -27,9 +27,9 @@
 #include "http_core.h"
 #include "http_protocol.h"
 #include "http_request.h"
+#include "net/instaweb/http/public/async_fetch.h"
 #include "net/instaweb/http/public/cache_url_async_fetcher.h"
 #include "net/instaweb/http/public/request_context.h"
-#include "net/instaweb/http/public/sync_fetcher_adapter_callback.h"
 #include "net/instaweb/public/global_constants.h"
 #include "net/instaweb/rewriter/public/domain_lawyer.h"
 #include "net/instaweb/rewriter/public/resource_fetch.h"
@@ -51,6 +51,7 @@
 #include "pagespeed/apache/instaweb_context.h"
 #include "pagespeed/apache/mod_instaweb.h"
 #include "pagespeed/apache/simple_buffered_apache_fetch.h"
+#include "pagespeed/apache/streaming_pagespeed_resource_fetch.h"
 #include "pagespeed/automatic/proxy_fetch.h"
 #include "pagespeed/automatic/proxy_interface.h"
 #include "pagespeed/kernel/base/basictypes.h"
@@ -196,34 +197,6 @@ ApacheFetch* InstawebHandler::MakeFetch(const GoogleString& url, bool buffered,
 }
 
 /* static */
-bool InstawebHandler::IsCompressibleContentType(const char* content_type) {
-  if (content_type == nullptr) {
-    return false;
-  }
-  GoogleString type = content_type;
-  size_t separator_idx = type.find(';');
-  if (separator_idx != GoogleString::npos) {
-    type.erase(separator_idx);
-  }
-
-  bool res = false;
-  if (type.find("text/") == 0) {
-    res = true;
-  } else if (type.find("application/") == 0) {
-    if (type.find("javascript") != type.npos ||
-        type.find("json") != type.npos ||
-        type.find("ecmascript") != type.npos ||
-        type == "application/livescript" || type == "application/js" ||
-        type == "application/jscript" || type == "application/x-js" ||
-        type == "application/xhtml+xml" || type == "application/xml") {
-      res = true;
-    }
-  }
-
-  return res;
-}
-
-/* static */
 void InstawebHandler::send_out_headers_and_body(
     request_rec* request, const ResponseHeaders& response_headers,
     const GoogleString& output) {
@@ -233,7 +206,8 @@ void InstawebHandler::send_out_headers_and_body(
   request->status = response_headers.status_code();
   DisableDownstreamHeaderFilters(request);
   if (response_headers.status_code() == HttpStatus::kOK &&
-      IsCompressibleContentType(request->content_type)) {
+      StreamingPagespeedResourceFetch::IsCompressibleContentType(
+          request->content_type)) {
     // Make sure compression is enabled for this response.
     ap_add_output_filter("DEFLATE", nullptr, request, request->connection);
   }
@@ -399,35 +373,66 @@ void InstawebHandler::RemoveStrippedResponseHeadersFromApacheRequest() {
   }
 }
 
-// Handle url as .pagespeed. rewritten resource.
+// Handle url as .pagespeed. rewritten resource.  The response is streamed
+// to the client as it is produced, through an unbuffered ApacheFetch, the
+// same mechanism the in-place (IPRO) path uses: the fetch callbacks all
+// run on this request thread while WaitForFetch() pumps the driver's
+// scheduler sequence, and each Write() goes straight to ap_rwrite.
 void InstawebHandler::HandleAsPagespeedResource() {
   RewriteDriver* driver = MakeDriver();
+  MakeFetch(false /* not buffered */, "ps-resource");
+  // The old buffered path never sent X-Content-Type-Options on resources;
+  // whatever nosniff the response should carry is already present in its
+  // headers (e.g. via FixFetchFallbackHeaders).  is_proxy solely controls
+  // whether ApacheFetch adds its own nosniff header, so use it to keep the
+  // wire behavior unchanged.
+  fetch_->set_is_proxy(true);
+  // On failure we answer the request ourselves below, exactly like the old
+  // buffered path did; ApacheFetch must not emit the failed fetch's
+  // headers or body.
+  fetch_->set_handle_error(false);
   DisownDriver();
-  GoogleString output;  // TODO(jmarantz): Quit buffering resource output.
-  StringWriter writer(&output);
 
-  SyncFetcherAdapterCallback* callback = new SyncFetcherAdapterCallback(
-      server_context_->thread_system(), &writer, request_context_);
-  callback->SetRequestHeadersTakingOwnership(request_headers_.release());
+  StreamingPagespeedResourceFetch streaming_fetch(request_, fetch_);
+  ResourceFetch::StartWithDriver(stripped_gurl_,
+                                 ResourceFetch::kDontAutoCleanupDriver,
+                                 server_context_, driver, &streaming_fetch);
+  // Unlike the old ResourceFetch::BlockingFetch flow, there is no
+  // wall-clock ceiling here: like the IPRO path, WaitForFetch() pumps the
+  // driver's scheduler sequence until the fetch reports Done.  Every
+  // segment of that wait is individually bounded:
+  //  - HTTP cache lookups: Cyclone and the shm/LRU L1 answer synchronously
+  //    (CycloneCache::Get); external caches sit behind AsyncCache, which
+  //    reports kNotFound immediately when unhealthy and cancels queued
+  //    lookups under load-shedding, with memcached/redis I/O timeouts
+  //    underneath (SystemCaches::ConstructExternalCacheInterfaces*).
+  //  - Reconstruction: origin fetches are bounded by the fetcher timeout
+  //    (CurlUrlAsyncFetcher), and the rewrite is bounded by the fetch
+  //    deadline alarm (RewriteContext::FetchContext::SetupDeadlineAlarm)
+  //    where an input fallback exists, or by low-priority-worker
+  //    load-shedding cancellation otherwise.
+  //  - Cross-thread deliveries are queued to the scheduler sequence, whose
+  //    Add() signals the scheduler so Wait() wakes immediately.
+  // Wait() logs "Waiting for completion" if this ever runs long.
+  WaitForFetch();
 
-  if (ResourceFetch::BlockingFetch(stripped_gurl_, server_context_, driver,
-                                   callback)) {
-    ResponseHeaders* response_headers = callback->response_headers();
-    // TODO(sligocki): Check that this is already done in ResourceFetch
-    // and remove redundant setting here.
-    response_headers->SetDate(server_context_->timer()->NowMs());
-    // ResourceFetch adds X-Page-Speed header, old mod_pagespeed code
-    // did not. For now, we remove that header for consistency.
-    // TODO(sligocki): Consistently use X- headers in MPS and PSOL.
-    // I think it would be good to change X-Mod-Pagespeed -> X-Page-Speed
-    // and use that for all HTML and resource requests.
-    response_headers->RemoveAll(kPageSpeedHeader);
-    send_out_headers_and_body(request_, *response_headers, output);
-  } else {
-    server_context_->ReportResourceNotFound(original_url_, request_);
+  if (!fetch_->status_ok()) {
+    if (!fetch_->response_committed()) {
+      // Nothing was sent to the client: with handle_error disabled,
+      // ApacheFetch suppresses all output for error responses.  Send out
+      // the same 404 the buffered path produced (this also increments
+      // resource_404_count).
+      server_context_->ReportResourceNotFound(original_url_, request_);
+    } else {
+      // Headers (and possibly an error body) already reached the client --
+      // e.g. ApacheFetch's missing-Content-Type 403 -- so emitting a second
+      // response is not possible; just log.
+      server_context_->message_handler()->Message(
+          kInfo, "Resource fetch for %s failed after response was committed.",
+          original_url_.c_str());
+    }
   }
-
-  callback->Release();
+  driver->Cleanup();
 }
 
 static apr_status_t DeleteInPlaceRecorder(void* object) {

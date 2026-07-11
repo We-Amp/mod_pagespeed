@@ -70,6 +70,16 @@ constexpr char kUnusableSnippet[] =
     "var ga_id = '%s';"
     "</script>";
 
+// References the ga_id and makes ga() calls, but never actually loads
+// analytics.js (or any other recognized loader), so it must be classified as
+// unusable rather than rewritten as if it were an analytics.js page.
+constexpr char kUnrecognizedGaSnippet[] =
+    "%s"
+    "<script>"
+    "ga('create', '%s', 'auto');"
+    "ga('send', 'pageview');"
+    "</script>";
+
 constexpr char kSynchronousGA[] =
     "%s"
     "<script>"
@@ -358,6 +368,41 @@ TEST_F(InsertGAFilterTest, SimpleInsertAnalyticsJs) {
   ValidateExpected("simple_addition", kHtmlInput, output);
 }
 
+TEST_F(InsertGAFilterTest, CspForbidsInlineScript) {
+  // The GA snippet is injected as an inline script, which a script-src
+  // policy without 'unsafe-inline' would block; insert nothing.
+  rewrite_driver()->AddFilters();
+  ValidateNoChanges("csp_no_inline",
+                    "<head>\n"
+                    "<meta http-equiv=\"Content-Security-Policy\" "
+                    "content=\"script-src *;\">"
+                    "<title>Something</title>\n"
+                    "</head>"
+                    "<body> Hello World!</body>");
+}
+
+TEST_F(InsertGAFilterTest, CspAllowsInlineScript) {
+  // With 'unsafe-inline' permitted the filter behaves as usual.
+  rewrite_driver()->AddFilters();
+  const char kCsp[] =
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"script-src * 'unsafe-inline';\">";
+  GoogleString input =
+      StrCat("<head>\n", kCsp,
+             "<title>Something</title>\n"
+             "</head>"
+             "<body> Hello World!</body>");
+  GoogleString expected =
+      StrCat("<head>\n", kCsp,
+             "<title>Something</title>\n"
+             "</head><body> Hello World!"
+             "<script>",
+             absl::StrFormat(kAnalyticsJsSnippet, kGaId,
+                             kAnalyticsJsIncreaseSiteSpeedTracking, ""),
+             "</script></body>");
+  ValidateExpected("csp_unsafe_inline", input, expected);
+}
+
 TEST_F(InsertGAFilterTest, NoIncreasedSpeed) {
   // Show that we don't add the js to increase speed tracking unless that option
   // is enabled.
@@ -549,6 +594,15 @@ TEST_F(InsertGAFilterTest, UnusableSnippetContentExperiment) {
   GoogleString input = absl::StrFormat(kUnusableSnippet, "", kGaId);
   GoogleString output = absl::StrFormat(kUnusableSnippet, "<head/>", kGaId);
   ValidateExpected("unusable script", input, output);
+}
+// A snippet that uses ga() but never loads analytics.js must be treated as
+// unusable, not silently rewritten as an analytics.js content experiment.
+TEST_F(InsertGAFilterTest, UnrecognizedGaSnippetContentExperiment) {
+  SetUpContentExperiment(true);
+  GoogleString input = absl::StrFormat(kUnrecognizedGaSnippet, "", kGaId);
+  GoogleString output =
+      absl::StrFormat(kUnrecognizedGaSnippet, "<head/>", kGaId);
+  ValidateExpected("unrecognized ga snippet", input, output);
 }
 
 TEST_F(InsertGAFilterTest, SynchronousGANoExperiment) {

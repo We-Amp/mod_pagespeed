@@ -19,6 +19,8 @@
 
 #include "net/instaweb/http/public/http_value.h"
 
+#include <limits>
+
 #include "base/logging.h"
 #include "pagespeed/kernel/base/shared_string.h"
 #include "pagespeed/kernel/base/string.h"
@@ -48,10 +50,44 @@ namespace net_instaweb {
 
 class MessageHandler;
 
-void HTTPValue::CopyOnWrite() { storage_.DetachRetainingContent(); }
+void HTTPValue::CopyOnWrite() {
+  CollapseToOwned();
+  storage_.DetachRetainingContent();
+}
+
+void HTTPValue::CollapseToOwned() {
+  if (!mapped_active_) {
+    return;
+  }
+  StringPiece mapped = mapped_storage_.Value();
+  storage_.DetachAndClear();
+  storage_.Append(mapped.data(), mapped.size());
+  // Leave mapped mode but retain mapped_storage_: previously extracted
+  // StringPieces point into the mapped region and must stay valid for the
+  // life of this HTTPValue (or until Clear()).
+  //
+  // the design record note -- this copy is deliberately NOT epoch-verified.  A
+  // verified collapse would need a failure channel, and none exists
+  // cleanly: (a) the API is void and its callers (share() during
+  // OutputResource::Link, CopyOnWrite before any mutation) have no failure
+  // semantics; (b) the only meaningful failure action, Clear(), would
+  // violate the previously-extracted-StringPieces contract this function
+  // exists to preserve (dangling pointers, a worse bug than the one being
+  // guarded).  The residual window is small by construction: the collapse
+  // runs within the same callback chain as the cache read, under the read
+  // lease stamped at that read (normal wraps are blocked while it is
+  // live); only a ceiling-forced wrap racing this ms-scale copy could tear
+  // it -- the same accepted class as every other synchronous post-read
+  // copy.  Serve paths needing the stronger guarantee de-alias via
+  // ExtractMappedContents + CopyMappedVerified (or the port barrier)
+  // BEFORE the value escapes, not via collapse.
+  mapped_active_ = false;
+}
 
 void HTTPValue::Clear() {
   storage_.DetachAndClear();
+  mapped_storage_ = MappedSharedString();
+  mapped_active_ = false;
   contents_size_ = 0;
 }
 
@@ -115,9 +151,9 @@ void HTTPValue::SetSizeOfFirstChunk(unsigned int size) {
 // particular alignment for casting between char* and int*, we just manually
 // decode one byte at a time.
 unsigned int HTTPValue::SizeOfFirstChunk() const {
-  CHECK(storage_.size() >= kStorageOverhead);
+  CHECK(raw_size() >= kStorageOverhead);
   const unsigned char* size_buffer =
-      reinterpret_cast<const unsigned char*>(storage_.data() + 1);
+      reinterpret_cast<const unsigned char*>(raw_data() + 1);
   unsigned int size = size_buffer[0];
   size |= size_buffer[1] << 8;
   size |= size_buffer[2] << 16;
@@ -132,14 +168,14 @@ bool HTTPValue::ExtractHeaders(ResponseHeaders* headers,
                                MessageHandler* handler) const {
   bool ret = false;
   headers->Clear();
-  if (storage_.size() >= kStorageOverhead) {
+  if (raw_size() >= kStorageOverhead) {
     char type_id = type_identifier();
-    const char* start = storage_.data() + kStorageOverhead;
+    const char* start = raw_data() + kStorageOverhead;
     int size = SizeOfFirstChunk();
-    if (size <= storage_.size() - kStorageOverhead) {
+    if (size <= raw_size() - kStorageOverhead) {
       if (type_id == kBodyFirst) {
         start += size;
-        size = storage_.size() - size - kStorageOverhead;
+        size = raw_size() - size - kStorageOverhead;
         ret = true;
       } else {
         ret = (type_id == kHeadersFirst);
@@ -157,14 +193,14 @@ bool HTTPValue::ExtractHeaders(ResponseHeaders* headers,
 // invalid entry rather than aborting the server.
 bool HTTPValue::ExtractContents(StringPiece* val) const {
   bool ret = false;
-  if (storage_.size() >= kStorageOverhead) {
+  if (raw_size() >= kStorageOverhead) {
     char type_id = type_identifier();
-    const char* start = storage_.data() + kStorageOverhead;
+    const char* start = raw_data() + kStorageOverhead;
     int size = SizeOfFirstChunk();
-    if (size <= storage_.size() - kStorageOverhead) {
+    if (size <= raw_size() - kStorageOverhead) {
       if (type_id == kHeadersFirst) {
         start += size;
-        size = storage_.size() - size - kStorageOverhead;
+        size = raw_size() - size - kStorageOverhead;
         ret = true;
       } else {
         ret = (type_id == kBodyFirst);
@@ -175,19 +211,33 @@ bool HTTPValue::ExtractContents(StringPiece* val) const {
   return ret;
 }
 
+bool HTTPValue::ExtractMappedContents(StringPiece* val,
+                                      MappedSharedString* keepalive) const {
+  if (!mapped_active_) {
+    return false;
+  }
+  if (!ExtractContents(val)) {
+    return false;
+  }
+  // Reference copy: bumps the shared read-handle refcount, pinning the
+  // mapped region for as long as any copy of *keepalive is alive.  No copy.
+  *keepalive = mapped_storage_;
+  return true;
+}
+
 int64 HTTPValue::ComputeContentsSize() const {
   // Return size as 0 if the cache is corrupted.
   int64 size = 0;
-  if (storage_.size() >= kStorageOverhead) {
+  if (raw_size() >= kStorageOverhead) {
     // Get the type id which is stored first (head or body).
     char type_id = type_identifier();
     // Get the size of the type which is stored first.
     size = SizeOfFirstChunk();
     // If the headers are stored first then update the size with storage size -
     // first chunk size.
-    if ((size <= static_cast<int64>(storage_.size() - kStorageOverhead)) &&
+    if ((size <= static_cast<int64>(raw_size() - kStorageOverhead)) &&
         (type_id == kHeadersFirst)) {
-      size = storage_.size() - size - kStorageOverhead;
+      size = raw_size() - size - kStorageOverhead;
     }
   }
   return size;
@@ -204,7 +254,10 @@ bool HTTPValue::Link(const SharedString& src, ResponseHeaders* headers,
     // the headers in an easier-to-extract form, so we don't have to give up
     // the integrity checks.
     SharedString temp(storage_);
+    bool was_mapped = mapped_active_;
+    int64 old_contents_size = contents_size_;
     storage_ = src;
+    mapped_active_ = false;
     contents_size_ = ComputeContentsSize();
 
     // TODO(jmarantz): this could be a lot lighter weight, but we are going
@@ -214,6 +267,51 @@ bool HTTPValue::Link(const SharedString& src, ResponseHeaders* headers,
     ok = ExtractHeaders(headers, handler);
     if (!ok) {
       storage_ = temp;
+      mapped_active_ = was_mapped;
+      contents_size_ = old_contents_size;
+    } else {
+      // The old mapped view (if any) has been replaced wholesale; drop the
+      // keep-alive reference like a successful re-Link drops old storage.
+      mapped_storage_ = MappedSharedString();
+    }
+  }
+  return ok;
+}
+
+bool HTTPValue::LinkMapped(const MappedSharedString& src,
+                           ResponseHeaders* headers, MessageHandler* handler) {
+  if (!src.is_mapped()) {
+    // Owned mode: exactly the classic Link (ToOwned() is a cheap
+    // reference copy when the MappedSharedString is owned).
+    return Link(src.ToOwned(), headers, handler);
+  }
+  bool ok = false;
+  // raw_size() narrows the mapped length to int (to match SharedString::size()
+  // and the signed corrupt-entry guards in ExtractHeaders/ExtractContents).
+  // Reject a (hypothetical) > INT_MAX mapped entry as a clean miss rather than
+  // let the narrowing wrap into a mis-parse.
+  if (src.size() >= static_cast<size_t>(kStorageOverhead) &&
+      src.size() <= static_cast<size_t>(std::numeric_limits<int>::max())) {
+    // Validate exactly like Link(): swap the view in, make sure the headers
+    // parse; restore the previous state on failure.
+    SharedString old_storage(storage_);
+    MappedSharedString old_mapped(mapped_storage_);
+    bool was_mapped = mapped_active_;
+    int64 old_contents_size = contents_size_;
+
+    mapped_storage_ = src;  // Reference copy; no byte copy.
+    mapped_active_ = true;
+    contents_size_ = ComputeContentsSize();
+
+    ok = ExtractHeaders(headers, handler);
+    if (ok) {
+      // Reads now come from the mapped view; owned storage is unused.
+      storage_.DetachAndClear();
+    } else {
+      storage_ = old_storage;
+      mapped_storage_ = old_mapped;
+      mapped_active_ = was_mapped;
+      contents_size_ = old_contents_size;
     }
   }
   return ok;

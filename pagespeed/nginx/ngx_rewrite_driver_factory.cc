@@ -111,6 +111,11 @@ UrlAsyncFetcher* NgxRewriteDriverFactory::AllocateFetcher(
         config->blocking_fetch_timeout_ms(), resolver_,
         native_fetcher_max_keepalive_requests_, thread_system(),
         message_handler());
+    fetcher->set_track_original_content_length(track_original_content_length());
+    // Certificate locations must be set before SetHttpsOptions loads them.
+    fetcher->SetSslCertificatesDir(config->ssl_cert_directory());
+    fetcher->SetSslCertificatesFile(config->ssl_cert_file());
+    fetcher->SetHttpsOptions(config->https_options());
     ngx_url_async_fetchers_.push_back(fetcher);
     return fetcher;
   } else {

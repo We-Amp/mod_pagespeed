@@ -59,15 +59,27 @@ void ScanFilter::StartDocument() {
   driver_->set_containing_charset(
       headers == nullptr ? "" : headers->DetermineCharset());
 
-  driver_->mutable_content_security_policy()->Clear();
+  driver_->ClearCspPolicies();
   if (driver_->options()->honor_csp() && headers != nullptr) {
     ConstStringStarVector values;
     if (headers->Lookup(HttpAttributes::kContentSecurityPolicy, &values)) {
       for (const GoogleString* policy : values) {
-        driver_->mutable_content_security_policy()->AddPolicy(
-            CspPolicy::Parse(*policy));
+        AddCspPolicies(*policy);
       }
     }
+  }
+}
+
+void ScanFilter::AddCspPolicies(StringPiece value) {
+  // Multiple CSP header lines may be coalesced into a single
+  // comma-separated header value. A comma cannot occur inside a
+  // serialized policy, so split on it and enforce each segment as a
+  // separate policy; parsing the coalesced value as one policy would
+  // corrupt the directives around the comma.
+  StringPieceVector policies;
+  SplitStringPieceToVector(value, ",", &policies, true);
+  for (StringPiece policy : policies) {
+    driver_->AddCspPolicy(CspPolicy::Parse(policy));
   }
 }
 
@@ -164,8 +176,10 @@ void ScanFilter::StartElement(HtmlElement* element) {
     if (equiv && content &&
         StringCaseEqual(equiv, HttpAttributes::kContentSecurityPolicy) &&
         !StringPiece(content).empty()) {
-      driver_->mutable_content_security_policy()->AddPolicy(
-          CspPolicy::Parse(content));
+      // A meta tag carries a single serialized policy per the HTML spec,
+      // but commas cannot occur inside one either, so splitting here as
+      // well is safe and strictly conservative (it can only tighten).
+      AddCspPolicies(content);
     }
   }
 

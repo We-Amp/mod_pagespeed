@@ -39,6 +39,7 @@
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/function.h"
 #include "pagespeed/kernel/base/gtest_prod.h"
+#include "pagespeed/kernel/base/shared_string.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/http/http_names.h"
@@ -350,6 +351,13 @@ class ProxyFetch : public SharedAsyncFetch {
   void HandleHeadersComplete() override;
   bool HandleWrite(const StringPiece& content,
                    MessageHandler* handler) override;
+  // A shared-storage serve must not bypass the HTML parser: route it
+  // through HandleWrite.
+  bool HandleWriteShared(const StringPiece& content,
+                         const SharedString& /*storage*/,
+                         MessageHandler* handler) override {
+    return HandleWrite(content, handler);
+  }
   bool HandleFlush(MessageHandler* handler) override;
   void HandleDone(bool success) override;
   bool IsCachedResultValid(const ResponseHeaders& headers) override;

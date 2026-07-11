@@ -57,6 +57,8 @@ export interface PhysicalCachesResponse {
 export interface PurgeResponse {
   success: boolean;
   message?: string;
+  /** Present on failure, e.g. "Purging not enabled: please add 'EnableCachePurge on'...". */
+  error?: string;
   [key: string]: unknown;
 }
 
@@ -115,6 +117,12 @@ export interface LicenseStatusResponse {
    * fully licensed install can be over-cap).
    */
   over_cap?: boolean;
+  /**
+   * Set when a license file is present but unusable, so the console can give an
+   * actionable hint instead of a bare "Unlicensed". EACCES = permissions;
+   * EMPTY / TOO_LARGE = re-apply the key. (admin_license_handler HandleStatus.)
+   */
+  license_file_error?: string;
   error?: string;
   [key: string]: unknown;
 }

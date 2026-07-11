@@ -134,6 +134,36 @@ TEST_F(JsDeferDisabledFilterTest, DeferScriptDebug) {
       << "js_defer_debug.js should have been included";
 }
 
+TEST_F(JsDeferDisabledFilterTest, CspForbidsInlineScript) {
+  // Under a script-src policy without 'unsafe-inline' the deferJs runtime
+  // (which re-executes deferred scripts via inline JS) would be blocked by
+  // the browser, so the filter must not add its bootstrap script.
+  InitJsDeferDisabledFilter(false);
+  ValidateNoChanges("csp_no_inline",
+                    "<html><head>"
+                    "<meta http-equiv=\"Content-Security-Policy\" "
+                    "content=\"script-src *;\">"
+                    "<script type='text/psajs' src='a.js'></script>"
+                    "</head><body>Hello, world!</body></html>");
+}
+
+TEST_F(JsDeferDisabledFilterTest, CspAllowsInlineScript) {
+  // With 'unsafe-inline' permitted the filter behaves as usual.
+  InitJsDeferDisabledFilter(false);
+  const char kCsp[] =
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"script-src * 'unsafe-inline';\">";
+  ValidateExpected(
+      "csp_unsafe_inline",
+      StrCat("<html><head>", kCsp,
+             "<script type='text/psajs' src='a.js'></script>"
+             "</head><body>Hello, world!</body></html>"),
+      StrCat("<html><head>", kCsp,
+             "<script type='text/psajs' src='a.js'></script>"
+             "</head><body>Hello, world!",
+             kDeferJsCodeNonGStatic, "</body></html>"));
+}
+
 TEST_F(JsDeferDisabledFilterTest, InvalidUserAgent) {
   InitJsDeferDisabledFilter(false);
   SetCurrentUserAgent("BlackListUserAgent");

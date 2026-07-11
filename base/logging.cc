@@ -64,7 +64,10 @@ namespace {
 std::mutex g_sinks_mutex;
 std::vector<LogSink*>* g_sinks = nullptr;
 
-std::vector<LogSink*>* GetSinks() {
+// Allocates on first use. Only AddLogSink may call this: the read and remove
+// paths must not resurrect the container, or a LOG() arriving after the last
+// RemoveLogSink would re-leak it past DLL unload.
+std::vector<LogSink*>* GetOrCreateSinks() {
   if (g_sinks == nullptr) {
     g_sinks = new std::vector<LogSink*>();
   }
@@ -75,17 +78,27 @@ std::vector<LogSink*>* GetSinks() {
 
 void AddLogSink(LogSink* sink) {
   std::lock_guard<std::mutex> lock(g_sinks_mutex);
-  GetSinks()->push_back(sink);
+  GetOrCreateSinks()->push_back(sink);
 }
 
 void RemoveLogSink(LogSink* sink) {
   std::lock_guard<std::mutex> lock(g_sinks_mutex);
-  auto* sinks = GetSinks();
-  for (auto it = sinks->begin(); it != sinks->end(); ++it) {
+  if (g_sinks == nullptr) {
+    return;
+  }
+  for (auto it = g_sinks->begin(); it != g_sinks->end(); ++it) {
     if (*it == sink) {
-      sinks->erase(it);
+      g_sinks->erase(it);
       break;
     }
+  }
+  // Free the container once the last sink unregisters. erase() alone keeps the
+  // vector's heap buffer alive, and that buffer is owned by the module that
+  // registered the sink -- for a dynamically unloaded module (the IIS DLL) it
+  // outlives FreeLibrary and trips AppVerifier's Leak provider (stop 0x900).
+  if (g_sinks->empty()) {
+    delete g_sinks;
+    g_sinks = nullptr;
   }
 }
 
@@ -93,8 +106,10 @@ void SendToSinks(int severity, const char* full_filename,
                  const char* base_filename, int line, const char* message,
                  size_t message_len) {
   std::lock_guard<std::mutex> lock(g_sinks_mutex);
-  auto* sinks = GetSinks();
-  for (auto* sink : *sinks) {
+  if (g_sinks == nullptr) {
+    return;
+  }
+  for (auto* sink : *g_sinks) {
     sink->send(severity, full_filename, base_filename, line, message,
                message_len);
   }

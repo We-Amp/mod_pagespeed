@@ -421,4 +421,53 @@ TEST_F(UserAgentMatcherTest, DoesntSupportAnimatedWebp) {
       kPagespeedInsightsDesktopUserAgent));
 }
 
+TEST_F(UserAgentMatcherTest, SupportsNativeLazyLoading) {
+  // Chromium >= 77 (Chrome, Edge, Opera share the Chrome/<version> token).
+  EXPECT_TRUE(user_agent_matcher_->SupportsNativeLazyLoading(
+      "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+      "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"));
+  EXPECT_TRUE(user_agent_matcher_->SupportsNativeLazyLoading(
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+      "(KHTML, like Gecko) Chrome/77.0.3865.90 Safari/537.36"));
+  EXPECT_TRUE(user_agent_matcher_->SupportsNativeLazyLoading(
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+      "(KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36 Edg/119.0.0.0"));
+  EXPECT_FALSE(user_agent_matcher_->SupportsNativeLazyLoading(
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+      "(KHTML, like Gecko) Chrome/76.0.3809.100 Safari/537.36"));
+  EXPECT_FALSE(
+      user_agent_matcher_->SupportsNativeLazyLoading(kChrome18UserAgent));
+
+  // Firefox >= 75.
+  EXPECT_TRUE(user_agent_matcher_->SupportsNativeLazyLoading(
+      "Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 "
+      "Firefox/115.0"));
+  EXPECT_TRUE(user_agent_matcher_->SupportsNativeLazyLoading(
+      "Mozilla/5.0 (X11; Linux x86_64; rv:75.0) Gecko/20100101 "
+      "Firefox/75.0"));
+  EXPECT_FALSE(user_agent_matcher_->SupportsNativeLazyLoading(
+      "Mozilla/5.0 (X11; Linux x86_64; rv:74.0) Gecko/20100101 "
+      "Firefox/74.0"));
+
+  // Safari >= 15.4 (separate Version/<major>.<minor> token).
+  EXPECT_TRUE(user_agent_matcher_->SupportsNativeLazyLoading(
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
+      "(KHTML, like Gecko) Version/15.4 Safari/605.1.15"));
+  EXPECT_TRUE(user_agent_matcher_->SupportsNativeLazyLoading(
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
+      "(KHTML, like Gecko) Version/17.1 Safari/605.1.15"));
+  EXPECT_FALSE(user_agent_matcher_->SupportsNativeLazyLoading(
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
+      "(KHTML, like Gecko) Version/15.3 Safari/605.1.15"));
+  EXPECT_FALSE(
+      user_agent_matcher_->SupportsNativeLazyLoading(kSafariUserAgent));
+
+  // Unknown or legacy user agents fall back to the script-based path.
+  EXPECT_FALSE(
+      user_agent_matcher_->SupportsNativeLazyLoading(kIe10UserAgent));
+  EXPECT_FALSE(
+      user_agent_matcher_->SupportsNativeLazyLoading(kCriOS48UserAgent));
+  EXPECT_FALSE(user_agent_matcher_->SupportsNativeLazyLoading(""));
+}
+
 }  // namespace net_instaweb

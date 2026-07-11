@@ -279,6 +279,50 @@ TEST_F(DelayImagesFilterTest, DelayImagesPreserveURLsOn) {
   MatchOutputAndCountBytes(kInputHtml, kInputHtml);
 }
 
+TEST_F(DelayImagesFilterTest, CspForbidsInlineScript) {
+  // Under a script-src policy without 'unsafe-inline' the browser would
+  // block the inline swap scripts and onload handlers, so the image must
+  // be left alone (the low-res preview marker is dropped).
+  options()->DisableFilter(RewriteOptions::kInlineImages);
+  AddFilter(RewriteOptions::kDelayImages);
+  AddFileToMockFetcher("http://test.com/1.webp", kSampleWebpFile,
+                       kContentTypeWebp, 100);
+  const char kCsp[] =
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"script-src *;\">";
+  GoogleString input_html = StrCat("<head>", kCsp,
+                                   "</head>"
+                                   "<body>"
+                                   "<img src=\"http://test.com/1.webp\"/>"
+                                   "</body>");
+  GoogleString output_html =
+      StrCat("<head>", kCsp, "</head><body>", GetNoscript(),
+             "<img src=\"http://test.com/1.webp\"/></body>");
+  MatchOutputAndCountBytes(input_html, output_html);
+}
+
+TEST_F(DelayImagesFilterTest, CspAllowsInlineScript) {
+  // With 'unsafe-inline' permitted the filter behaves as usual.
+  options()->DisableFilter(RewriteOptions::kInlineImages);
+  AddFilter(RewriteOptions::kDelayImages);
+  AddFileToMockFetcher("http://test.com/1.webp", kSampleWebpFile,
+                       kContentTypeWebp, 100);
+  const char kCsp[] =
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"script-src * 'unsafe-inline';\">";
+  GoogleString input_html = StrCat("<head>", kCsp,
+                                   "</head>"
+                                   "<body>"
+                                   "<img src=\"http://test.com/1.webp\"/>"
+                                   "</body>");
+  GoogleString output_html = StrCat(
+      "<head>", kCsp, "</head><body>", GetNoscript(),
+      GetImageOnloadScriptBlock(),
+      GenerateRewrittenImageTag("http://test.com/1.webp", kSampleWebpData),
+      "</body>");
+  MatchOutputAndCountBytes(input_html, output_html);
+}
+
 TEST_F(DelayImagesFilterTest, DelayImageInsideNoscript) {
   AddFilter(RewriteOptions::kDelayImages);
   AddFileToMockFetcher("http://test.com/1.webp", kSampleWebpFile,

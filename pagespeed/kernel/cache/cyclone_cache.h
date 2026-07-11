@@ -20,6 +20,8 @@
 #ifndef PAGESPEED_KERNEL_CACHE_CYCLONE_CACHE_H_
 #define PAGESPEED_KERNEL_CACHE_CYCLONE_CACHE_H_
 
+#include <memory>
+
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/cache_interface.h"
 #include "pagespeed/kernel/base/string.h"
@@ -92,17 +94,33 @@ class CycloneCache : public CacheInterface {
     // previously written entries are still reachable after a restart.
     bool persist_directory;
 
+    // Small-object tier carve-out percentage (0 = disabled).
+    // When > 0, that percentage of cache_size_bytes is carved out into a
+    // physically separate small-object volume at "<cache_path>.small" that
+    // only small_tier_view() operations route to, so payload churn on the
+    // default volume can never evict small-tier entries.  If the total size
+    // cannot host both volumes' sizing floors (~256 MB single-process), the
+    // tier silently disables itself and small-tier operations fall back to
+    // default routing -- check small_tier_active().
+    int small_tier_percent;
+
     Config()
         : cache_size_bytes(100 * 1024 * 1024),  // 100 MB default
           ram_cache_size_bytes(0),              // No RAM cache by default
           enable_checksum(true),
           num_segments(0),
-          persist_directory(true) {}
+          persist_directory(true),
+          small_tier_percent(0) {}
   };
 
-  // Statistics variable names.
+  // Statistics variable names.  kRamHits/kDiskHits split kHits by serving
+  // tier.  Like the other CycloneCache variables, they are only incremented
+  // on the global statistics object, so they are visible in the global view
+  // but stay 0 in per-vhost split statistics.
   static const char kHits[];
   static const char kMisses[];
+  static const char kRamHits[];
+  static const char kDiskHits[];
   static const char kInserts[];
   static const char kDeletes[];
   static const char kFailures[];
@@ -123,6 +141,11 @@ class CycloneCache : public CacheInterface {
   // Returns a formatted name for this cache type.
   static GoogleString FormatName() { return "CycloneCache"; }
 
+  // Name used by the small-tier view returned from small_tier_view().
+  static GoogleString FormatSmallTierName() {
+    return "CycloneCache(small_tier)";
+  }
+
   // CacheInterface implementation.
   void Get(const GoogleString& key, Callback* callback) override;
   void Put(const GoogleString& key, const SharedString& value) override;
@@ -140,10 +163,39 @@ class CycloneCache : public CacheInterface {
   // Stops the cache. After this call, all operations will fail.
   void ShutDown() override;
 
+  // Appends Cyclone's internal counters (tier hits, sizes, eviction,
+  // write-buffer wrap and the design record lease telemetry) to *out as
+  // "Label: value" lines.  No-op when the cache is unavailable.
+  void PrintStats(GoogleString* out) const;
+
   // Returns the configuration used to create this cache.
   const Config& config() const { return config_; }
 
+  // True when the dedicated small-object volume exists.  False either
+  // because config().small_tier_percent is 0 or because cache_size_bytes was
+  // below the sizing floor and the tier was silently disabled (small-tier
+  // operations then fall back to default routing).
+  bool small_tier_active() const;
+
+  // Returns a lightweight CacheInterface view over this same cache whose
+  // Get/Put/Delete route to the small-object tier.  The view is owned by
+  // this CycloneCache and shares its handle, statistics, and lifetime;
+  // Backend() on the view returns this CycloneCache.  Safe to use even when
+  // the small tier is disabled or inactive (operations fall back to default
+  // routing inside Cyclone).
+  CacheInterface* small_tier_view();
+
  private:
+  class SmallTierView;
+
+  // Shared implementations for both tiers.  |small_tier| selects
+  // CYCLONE_TIER_SMALL routing.
+  void GetWithTier(const GoogleString& key, bool small_tier,
+                   Callback* callback);
+  void PutWithTier(const GoogleString& key, const SharedString& value,
+                   bool small_tier);
+  void DeleteWithTier(const GoogleString& key, bool small_tier);
+
   Config config_;
   CycloneCacheHandle* cache_;  // C handle from wrapper
   MessageHandler* handler_;
@@ -152,11 +204,15 @@ class CycloneCache : public CacheInterface {
   // Statistics variables
   Variable* hits_;
   Variable* misses_;
+  Variable* ram_hits_;
+  Variable* disk_hits_;
   Variable* inserts_;
   Variable* deletes_;
   Variable* failures_;
   Variable* bytes_read_;
   Variable* bytes_written_;
+
+  std::unique_ptr<CacheInterface> small_tier_view_;
 
   CycloneCache(const CycloneCache&) = delete;
   CycloneCache& operator=(const CycloneCache&) = delete;

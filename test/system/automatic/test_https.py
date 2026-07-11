@@ -65,7 +65,7 @@ class TestHttpsBasic:
     """
 
     @pytest.mark.not_envoy(reason="Envoy HTTPS listener does not rewrite HTML (needs PageSpeed filter per-listener init)")
-    @pytest.mark.not_nginx(reason="Nginx HTTPS CSS combination requires FetchHttps with self-signed cert support")
+    # not_nginx marker removed: native-TLS test
     def test_https_css_combination(
         self, https_client: PageSpeedClient, https_example_root: str
     ):
@@ -102,7 +102,7 @@ class TestHttpsBasic:
             "Expected X-Mod-Pagespeed or X-Page-Speed header over HTTPS"
 
     @pytest.mark.not_envoy(reason="Envoy HTTPS listener does not rewrite HTML (needs PageSpeed filter per-listener init)")
-    @pytest.mark.not_nginx(reason="Nginx HTTPS CSS combination requires FetchHttps with self-signed cert support")
+    # not_nginx marker removed: native-TLS test
     def test_https_combined_css_with_filters(
         self, https_client: PageSpeedClient, https_example_root: str
     ):
@@ -133,7 +133,7 @@ class TestHttpsBasic:
         )
 
     @pytest.mark.not_envoy(reason="Envoy HTTPS listener does not rewrite HTML (needs PageSpeed filter per-listener init)")
-    @pytest.mark.not_nginx(reason="Nginx HTTPS CSS combination requires FetchHttps with self-signed cert support")
+    # not_nginx marker removed: native-TLS test
     def test_https_combined_css_preserves_relativity(
         self, https_client: PageSpeedClient, https_example_root: str
     ):

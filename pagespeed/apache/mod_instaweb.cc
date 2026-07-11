@@ -1467,7 +1467,7 @@ static const char* ParseDirective(cmd_parms* cmd, void* data, const char* arg) {
     directive = kModPagespeedImageMaxRewritesAtOnce;
   }
 
-  if (strings::StartsWith(directive, prefix)) {
+  if (StringCaseStartsWith(directive, prefix)) {
     StringPiece option = directive.substr(prefix.size());
     GoogleString msg;
 
@@ -1623,7 +1623,7 @@ static const char* ParseDirective2(cmd_parms* cmd, void* data, const char* arg1,
   StringPiece prefix(RewriteQuery::kModPagespeed);
   StringPiece directive = cmd->directive->directive;
   // Go through generic path first.
-  if (strings::StartsWith(directive, prefix)) {
+  if (StringCaseStartsWith(directive, prefix)) {
     GoogleString msg;
     StringPiece option = directive.substr(prefix.size());
     RewriteOptions::OptionSettingResult result =
@@ -1640,7 +1640,8 @@ static const char* ParseDirective2(cmd_parms* cmd, void* data, const char* arg1,
     }
   }
 
-  return "Unknown directive.";
+  return apr_pstrcat(cmd->pool, cmd->directive->directive,
+                     " unknown directive.", NULL);
 }
 
 // Callback function that parses a three-argument directive.  This is called
@@ -1660,7 +1661,7 @@ static const char* ParseDirective3(cmd_parms* cmd, void* data, const char* arg1,
   StringPiece prefix(RewriteQuery::kModPagespeed);
   StringPiece directive = cmd->directive->directive;
   // Go through generic path first.
-  if (strings::StartsWith(directive, prefix)) {
+  if (StringCaseStartsWith(directive, prefix)) {
     GoogleString msg;
     RewriteOptions::OptionSettingResult result =
         config->ParseAndSetOptionFromName3(directive.substr(prefix.size()),

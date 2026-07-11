@@ -416,6 +416,20 @@ EOF
 EOF
     fi
 
+    # Native fetcher mode (opt-in): PAGESPEED_TEST_NATIVE_FETCHER=1 runs the
+    # suite with NgxUrlAsyncFetcher instead of curl. CheckResolver() requires a
+    # configured resolver; derive it from /etc/resolv.conf. ipv6=off because the
+    # test server only listens on IPv4 and "localhost" also resolves to ::1.
+    if [ "$NO_MODULE" = false ] && [ "${PAGESPEED_TEST_NATIVE_FETCHER:-0}" = "1" ]; then
+        NATIVE_RESOLVER=$(awk '/^nameserver/{print $2; exit}' /etc/resolv.conf)
+        cat >> "$NGINX_CONFIG_FILE" << EOF
+    # Native fetcher (PAGESPEED_TEST_NATIVE_FETCHER=1)
+    resolver ${NATIVE_RESOLVER:-127.0.0.1} ipv6=off;
+    pagespeed UseNativeFetcher on;
+
+EOF
+    fi
+
     cat >> "$NGINX_CONFIG_FILE" << EOF
     server {
         listen $NGINX_PORT;

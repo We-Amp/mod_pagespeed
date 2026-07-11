@@ -304,6 +304,15 @@
     kLazyloadImagesBlankUrl, kDirectoryScope, \
     "URL of image used to display prior to loading the lazy image. " \
     "Empty means use a site-local copy.", true) \
+  X(kLazyloadImagesModeAuto, lazyload_images_mode_, "llmo", \
+    kLazyloadImagesMode, kDirectoryScope, \
+    "How to lazyload images: 'native' annotates non-critical images with " \
+    "loading=\"lazy\", 'js' uses the JavaScript loader, and 'auto' (the " \
+    "default) picks per user agent.", true) \
+  X(1, lazyload_images_skip_first_, "llsf", \
+    kLazyloadImagesSkipFirst, kDirectoryScope, \
+    "Number of leading images to leave untouched when critical image data " \
+    "is unavailable, protecting likely LCP candidates.", true) \
   X(false, use_blank_image_for_inline_preview_, "biip", \
     kUseBlankImageForInlinePreview, kDirectoryScope, \
     "Use a blank image for inline preview", true) \

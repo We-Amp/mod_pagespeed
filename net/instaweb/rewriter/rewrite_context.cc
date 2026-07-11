@@ -56,6 +56,7 @@
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/function.h"
 #include "pagespeed/kernel/base/hasher.h"
+#include "pagespeed/kernel/base/mapped_shared_string.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/named_lock_manager.h"
 #include "pagespeed/kernel/base/proto_util.h"
@@ -2033,6 +2034,7 @@ bool RewriteContext::AreOutputsAllowedByCsp(CspDirective role) const {
   for (const OutputResourcePtr& o : outputs_) {
     if (o.get() != nullptr && o->has_hash() && o->has_url() &&
         !Driver()->IsLoadPermittedByCsp(GoogleUrl(o->url()), role)) {
+      FindServerContext()->rewrite_stats()->csp_blocked_rewrites()->Add(1);
       return false;
     }
   }
@@ -2686,9 +2688,27 @@ void RewriteContext::FetchFallbackCacheDone(HTTPCache::FindResult result,
 
   StringPiece contents;
   ResponseHeaders* response_headers = data->response_headers();
-  if ((result.status == HTTPCache::kFound) &&
-      data->http_value()->ExtractContents(&contents) &&
-      (response_headers->status_code() == HttpStatus::kOK)) {
+  bool usable = (result.status == HTTPCache::kFound) &&
+                data->http_value()->ExtractContents(&contents) &&
+                (response_headers->status_code() == HttpStatus::kOK);
+  // De-alias a borrowed mmap view before the port write, exactly like
+  // CacheUrlAsyncFetcher's hit serve (see the zero-copy note there): the
+  // pin ('data', released when this function returns) must not be relied on
+  // past this frame, and a raw mapped pointer must never reach a port
+  // Write().  FetchFallbackDone() serves synchronously, so the owned copy
+  // below outlives the write.  A torn borrow degrades to reconstruction --
+  // these bytes are re-derivable, so nothing needs to fail.
+  GoogleString devalias;  // Must outlive FetchFallbackDone() below.
+  if (usable && data->http_value()->is_mapped()) {
+    StringPiece mapped;
+    MappedSharedString keepalive;
+    usable = data->http_value()->ExtractMappedContents(&mapped, &keepalive) &&
+             CopyMappedVerified(mapped, keepalive, &devalias);
+    if (usable) {
+      contents = devalias;
+    }
+  }
+  if (usable) {
     DCHECK(!response_headers->IsGzipped() ||
            Driver()->request_context()->accepts_gzip());
     // We want to serve the found result, with short cache lifetime.

@@ -264,6 +264,37 @@ TEST_F(LocalStorageCacheTest, Img) {
                                              ">")));
 }
 
+TEST_F(LocalStorageCacheTest, CspForbidsInlineScript) {
+  // Under a script-src policy without 'unsafe-inline' the browser would
+  // block the utility script and the inline-JS replacements on repeat
+  // views, so the filter must stand down entirely: the image is inlined
+  // normally and no lsc attributes or scripts are emitted.
+  const char kCsp[] =
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"script-src *;\">\n";
+  TestLocalStorage("csp_no_inline", kCsp, kCsp,
+                   StrCat("<img src='", kCuppaPngFilename, "'>"),
+                   StrCat("<img src='", kCuppaPngInlineData, "'>"));
+}
+
+TEST_F(LocalStorageCacheTest, CspAllowsInlineScript) {
+  // With 'unsafe-inline' permitted the filter behaves as usual.
+  const char kCsp[] =
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"script-src * 'unsafe-inline';\">\n";
+  TestLocalStorage("csp_unsafe_inline", kCsp, kCsp,
+                   StrCat("<img src='", kCuppaPngFilename, "'>"),
+                   InsertScriptBefore(StrCat("<img src='", kCuppaPngInlineData,
+                                             "' data-pagespeed-lsc-url="
+                                             "\"",
+                                             kTestDomain, kCuppaPngFilename,
+                                             "\""
+                                             " data-pagespeed-lsc-hash=\"0\""
+                                             " data-pagespeed-lsc-expiry="
+                                             "\"Tue, 02 Feb 2010 18:53:06 GMT\""
+                                             ">")));
+}
+
 TEST_F(LocalStorageCacheTest, ImgTooBig) {
   TestLocalStorage(
       "img_too_big", "", "", StrCat("<img src='", kPuzzleJpgFilename, "'>"),

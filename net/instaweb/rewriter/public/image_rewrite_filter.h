@@ -56,6 +56,9 @@ enum InlineResult {
   // Image should not be inlined because it is part of a responsive image.
   INLINE_RESPONSIVE,
   INLINE_SHORTCUT,
+  // Image not inlined because the page's Content-Security-Policy does
+  // not permit data: images.
+  INLINE_DISALLOWED_BY_CSP,
   INLINE_INTERNAL_ERROR,
 };
 

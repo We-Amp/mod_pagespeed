@@ -184,8 +184,6 @@ class InstawebHandler {
   // options to use.
   void ComputeCustomOptions();
 
-  static bool IsCompressibleContentType(const char* content_type);
-
   static void send_out_headers_and_body(request_rec* request,
                                         const ResponseHeaders& response_headers,
                                         const GoogleString& output);

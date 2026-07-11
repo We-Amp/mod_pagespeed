@@ -131,6 +131,16 @@ void DelayImagesFilter::EndElementImpl(HtmlElement* element) {
         low_res_src->DecodedValueOrNull() == nullptr) {
       return;
     }
+    // The low-res swap runs from injected inline scripts (and, when
+    // rewriting in place, from inline onload handlers); if the page's CSP
+    // forbids those, renaming src would break the image entirely. Leave the
+    // high-res image untouched and drop the low-res preview marker. Checked
+    // per element because a meta-tag policy can arrive mid-document.
+    if (!CspPermitsInlineScript() || (insert_low_res_images_inplace_ &&
+                                      !CspPermitsInlineScriptAttribute())) {
+      element->DeleteAttribute(HtmlName::kDataPagespeedLowResSrc);
+      return;
+    }
     HtmlElement::Attribute* src = element->FindAttribute(HtmlName::kSrc);
     semantic_type::Category category =
         resource_tag_scanner::CategorizeAttribute(element, src,

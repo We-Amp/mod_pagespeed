@@ -326,7 +326,17 @@ QueuedWorkerPool::Sequence::AddFunction::~AddFunction() {}
 bool QueuedWorkerPool::Sequence::InitiateShutDown() {
   ScopedMutex lock(sequence_mutex_.get());
   shutdown_ = true;
-  return !active_;
+  // Only report "safe to recycle now" when the sequence is genuinely idle: no
+  // worker running it (active_) AND no work still queued for an as-yet-
+  // unassigned worker.  A sequence with queued work is still sitting in (or
+  // en route to) the pool's queued_sequences_ list; recycling it here would put
+  // it on free_sequences_ at the same time -- the two lists are documented
+  // mutually exclusive -- and let NewSequence() hand back a Sequence whose
+  // work_queue_ is non-empty, tripping DCHECK(work_queue_.empty()) in Reset().
+  // When work is still queued we defer recycling to NextFunction(): the pending
+  // dispatch will reach it, and NextFunction() now recycles on the shutdown
+  // path regardless of active_.
+  return !active_ && work_queue_.empty();
 }
 
 void QueuedWorkerPool::Sequence::WaitForShutDown() {
@@ -431,22 +441,37 @@ Function* QueuedWorkerPool::Sequence::NextFunction() {
   {
     ScopedMutex lock(sequence_mutex_.get());
     if (shutdown_) {
-      if (active_) {
-        if (!work_queue_.empty()) {
-          LOG(WARNING) << "Canceling " << work_queue_.size()
-                       << " functions on sequence Shutdown";
-          queue_size_delta -= CancelTasksOnWorkQueue();
-        }
+      const bool had_pending = !work_queue_.empty();
+      if (had_pending) {
+        LOG(WARNING) << "Canceling " << work_queue_.size()
+                     << " functions on sequence Shutdown";
+        queue_size_delta -= CancelTasksOnWorkQueue();
+      }
+      // Recycle the sequence back to the pool exactly once, when a real
+      // dispatch winds down: either a run was in progress (active_), or this
+      // is the single pending dispatch that arrived with queued work after
+      // FreeSequence()/pool-shutdown flipped shutdown_ but before this worker
+      // ever went active (had_pending).  A worker only reaches NextFunction()
+      // via a dispatch, and a shut-down sequence accepts no new dispatch
+      // (Add() cancels once shutdown_), so this fires once per sequence.
+      //
+      // We must NOT recycle when the sequence is neither active nor had
+      // pending work: that is a queued dispatch whose work was already drained
+      // by CancelPendingFunctions() before FreeSequence() recycled it -- the
+      // recycle already happened in FreeSequence(), so recycling again here
+      // would double-list it in free_sequences_.  Previously this branch only
+      // fired when active_ was true, which leaked a sequence whose worker was
+      // dispatched but had not yet gone active when shutdown was requested.
+      if (active_ || had_pending) {
         active_ = false;
 
-        // Note after the Signal(), the current sequence may be
-        // deleted if we are in the process of shutting down the
-        // entire pool, so no further access to member variables is
-        // allowed.  Hence we copied the pool_ variable to a local
-        // temp so we can return it.  Note also that if the pool is in
-        // the process of shutting down, then pool_ will be NULL so we
-        // won't bother to add the free_sequences_ list.  In any case
-        // this will be cleaned on shutdown via all_sequences_.
+        // Note after the Signal(), the current sequence may be deleted if we
+        // are in the process of shutting down the entire pool, so no further
+        // access to member variables is allowed.  Hence we copied the pool_
+        // variable to a local temp so we can return it.  Note also that if the
+        // pool is in the process of shutting down, then pool_ will be NULL so
+        // we won't bother to add the free_sequences_ list.  In any case this
+        // will be cleaned on shutdown via all_sequences_.
         release_to_pool = pool_;
         termination_condvar_->Signal();
       }

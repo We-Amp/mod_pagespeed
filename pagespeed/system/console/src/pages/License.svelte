@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { AdminApiClient, ApiError } from "$lib/api/client";
   import { usePolling } from "$lib/api/polling.svelte";
+  import RefreshNotice from "$lib/RefreshNotice.svelte";
   import {
     formatLicenseDate,
     getLicenseErrorMessage,
@@ -78,6 +79,20 @@
     return days;
   });
 
+  // Map a license_file_error code to an actionable hint.
+  function licenseFileErrorHint(code: string): string {
+    switch (code) {
+      case "EACCES":
+        return "A license file is present but not readable \u2014 fix its file permissions so the server process can read it.";
+      case "EMPTY":
+        return "The license file is empty \u2014 re-apply your license key below.";
+      case "TOO_LARGE":
+        return "The license file is unexpectedly large and was not loaded \u2014 re-apply your license key below.";
+      default:
+        return `A license file is present but could not be loaded (${code}) \u2014 re-apply your license key below.`;
+    }
+  }
+
   // Only the global admin endpoint can manage licenses. The isGlobal prop is
   // set by the router based on which admin endpoint is being served; the
   // server's is_global field is not authoritative for UI gating.
@@ -130,7 +145,7 @@
     checkoutPolling = true;
 
     const product = period === "annual" ? "business-site-annual" : "business-site-monthly";
-    const buyUrl = `https://modpagespeed.com/buy/?nonce=${nonce}&product=${product}&origin=${encodeURIComponent(window.location.origin)}`;
+    const buyUrl = `https://modpagespeed.com/buy/?nonce=${nonce}&product=${product}&origin=${encodeURIComponent(window.location.origin)}&utm_source=console&utm_medium=in-product&utm_campaign=unlicensed`;
     const win = window.open(buyUrl, "mps-checkout", "width=520,height=720,scrollbars=yes");
     if (!win || win.closed) {
       // Popup blocked — fall back to new tab (postMessage won't work, but polling will)
@@ -257,7 +272,7 @@
 
   {#if license.loading}
     <p class="loading">Loading license status...</p>
-  {:else if license.error}
+  {:else if license.error && !license.data}
     <div class="license-unavailable" data-testid="license-unavailable">
       <div class="unavailable-icon">
         <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -277,7 +292,7 @@
           Retry
         </button>
         <a
-          href="https://modpagespeed.com/buy/"
+          href="https://modpagespeed.com/buy/?utm_source=console&utm_medium=in-product&utm_campaign=unlicensed"
           target="_blank"
           rel="noopener noreferrer"
           class="btn btn-secondary"
@@ -287,6 +302,7 @@
       </div>
     </div>
   {:else if license.data}
+    <RefreshNotice error={license.error} />
     <!-- A. Status Card -->
     <div class="status-card">
       <div class="status-row">
@@ -344,6 +360,12 @@
           {getLicenseErrorMessage(license.data.error)}
         </div>
       {/if}
+
+      {#if license.data.license_file_error}
+        <div class="license-error" role="alert">
+          {licenseFileErrorHint(license.data.license_file_error)}
+        </div>
+      {/if}
     </div>
 
     <!-- B. Purchase (not licensed or expired, global admin only) -->
@@ -390,7 +412,7 @@
               Buy Annual
             </button>
             <a
-              href="https://modpagespeed.com/pricing/"
+              href="https://modpagespeed.com/pricing/?utm_source=console&utm_medium=in-product&utm_campaign=unlicensed"
               target="_blank"
               rel="noopener noreferrer"
               class="btn btn-secondary"

@@ -101,8 +101,11 @@ void LocalStorageCacheFilter::StartElementImpl(HtmlElement* element) {
     }
   }
 
-  // We need to insert our javascript before the first element that uses it.
-  if (script_needs_inserting_ && !script_inserted_) {
+  // We need to insert our javascript before the first element that uses it,
+  // unless the page's CSP forbids inline scripts (a meta-tag policy can
+  // arrive mid-document, after elements were marked).
+  if (script_needs_inserting_ && !script_inserted_ &&
+      CspPermitsInlineScript()) {
     InsertOurScriptElement(element);
   }
 }
@@ -122,19 +125,26 @@ void LocalStorageCacheFilter::EndElementImpl(HtmlElement* element) {
     if (url != nullptr) {
       num_local_storage_cache_candidates_found_->Add(1);
       GoogleString hash = GenerateHashFromUrlAndElement(driver(), url, element);
-      if (IsHashInCookie(driver(), kLscCookieName, hash, &cookie_hashes_)) {
+      // Replacing the element with an inline script is pointless when the
+      // page's CSP forbids inline scripts: the browser would drop both the
+      // script and the resource it restores.
+      if (CspPermitsInlineScript() &&
+          IsHashInCookie(driver(), kLscCookieName, hash, &cookie_hashes_)) {
         num_local_storage_cache_stored_total_->Add(1);
         StringPiece given_url(url);
         GoogleUrl abs_url(base_url(), given_url);
         StringPiece lsc_url(abs_url.IsWebValid() ? abs_url.Spec() : given_url);
         GoogleString snippet("pagespeed.localStorageCache.");
+        GoogleString escaped_lsc_url;
+        EscapeToJsStringLiteral(lsc_url, false /* no quotes */,
+                                &escaped_lsc_url);
         if (is_img) {
           num_local_storage_cache_stored_images_->Add(1);
-          StrAppend(&snippet, "inlineImg(\"", lsc_url, "\", \"", hash, "\"",
-                    ExtractOtherImgAttributes(element), ");");
+          StrAppend(&snippet, "inlineImg(\"", escaped_lsc_url, "\", \"", hash,
+                    "\"", ExtractOtherImgAttributes(element), ");");
         } else /* is_link */ {
           num_local_storage_cache_stored_css_->Add(1);
-          StrAppend(&snippet, "inlineCss(\"", lsc_url, "\");");
+          StrAppend(&snippet, "inlineCss(\"", escaped_lsc_url, "\");");
         }
         HtmlElement* script_element =
             driver()->NewElement(element->parent(), HtmlName::kScript);
@@ -172,9 +182,13 @@ bool LocalStorageCacheFilter::AddStorableResource(const StringPiece& url,
                                                   InlineState* state) {
   // Only determine the state once.
   if (!state->initialized_) {
-    // If LSC isn't enabled, we're done.
+    // If LSC isn't enabled, we're done. The filter also stands down when
+    // the page's CSP forbids inline scripts, since it works by replacing
+    // resources with inline JS on repeat views; the browser would block
+    // both the utility script and the replacements.
     state->enabled_ =
-        driver->options()->Enabled(RewriteOptions::kLocalStorageCache);
+        driver->options()->Enabled(RewriteOptions::kLocalStorageCache) &&
+        driver->content_security_policy().PermitsInlineScript();
 
     // Get the absolute LSC url from the link url if it's valid otherwise as-is.
     if (state->enabled_) {

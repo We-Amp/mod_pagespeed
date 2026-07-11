@@ -154,6 +154,10 @@ void FallbackCache::Put(const GoogleString& key, const SharedString& value) {
     small_object_cache_->Put(key, forwarding_value);
   } else {
     SharedString wrapped_value(value);
+    // 'value' may share storage with a response that is being served (e.g. a
+    // write-through fill of a cache-hit value); appending in place could
+    // reallocate the shared bytes under a concurrent reader, so detach first.
+    wrapped_value.DetachRetainingContent();
     wrapped_value.Append(&kInSmallObjectCache, 1);
     small_object_cache_->Put(key, wrapped_value);
   }

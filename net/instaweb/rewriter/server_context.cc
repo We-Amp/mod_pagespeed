@@ -90,6 +90,7 @@ const char kBeaconOptionsHashQueryParam[] = "oh";
 const char kBeaconCriticalImagesQueryParam[] = "ci";
 const char kBeaconRenderedDimensionsQueryParam[] = "rd";
 const char kBeaconCriticalCssQueryParam[] = "cs";
+const char kBeaconOverflowQueryParam[] = "of";
 const char kBeaconNonceQueryParam[] = "n";
 
 // Attributes that should not be automatically copied from inputs to outputs
@@ -599,6 +600,18 @@ bool ServerContext::HandleBeacon(StringPiece params, StringPiece user_agent,
         rewrite_stats_->beacon_timings_ms_histogram()->Add(value);
       }
     }
+  }
+
+  // The client flags truncated payloads (e.g. the critical-CSS beacon drops
+  // selectors once it overflows its POST budget) so the data loss is
+  // observable here instead of silent.
+  if (query_params.Lookup1Unescaped(kBeaconOverflowQueryParam,
+                                    &query_param_str) &&
+      query_param_str == "1") {
+    rewrite_stats_->beacon_overflow_count()->Add(1);
+    message_handler_->Message(
+        kWarning, "Beacon reported truncated (overflowed) data for %s",
+        url_query_param.spec_c_str());
   }
 
   // Process data from critical image and CSS beacons.

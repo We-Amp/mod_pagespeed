@@ -152,7 +152,11 @@ ResourceFetch::ResourceFetch(const GoogleUrl& url, CleanupMode cleanup_mode,
       redirect_count_(0),
       cleanup_mode_(cleanup_mode) {
   resource_url_.Reset(url);
-  DCHECK(driver_->request_headers() == nullptr);
+  // Note: the driver may already carry request headers here.  Apache's
+  // streaming resource path constructs an ApacheFetch before calling
+  // StartWithDriver, and ApacheFetch's constructor installs the (same
+  // request's) headers on the driver.  RewriteDriver::FetchResource only
+  // sets them from the fetch when they are still unset.
 }
 
 ResourceFetch::~ResourceFetch() {}

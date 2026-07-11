@@ -64,6 +64,7 @@ const char* kWaveFormCounters[RewriteDriverFactory::kNumWorkerPools] = {
 // We also keep a histogram, kBeaconTimingsMsHistogram of these.
 const char kTotalPageLoadMs[] = "total_page_load_ms";
 const char kPageLoadCount[] = "page_load_count";
+const char kBeaconOverflowCount[] = "beacon_overflow_count";
 
 const int kNumWaveformSamples = 200;
 
@@ -97,6 +98,9 @@ const char RewriteStats::kResourceUrlDomainAcceptances[] =
 // because of the domain they are on.
 const char RewriteStats::kResourceUrlDomainRejections[] =
     "resource_url_domain_rejections";
+// Num of rewrites suppressed because a Content-Security-Policy on the
+// page did not permit them (input use, output rendering, or inlining).
+const char RewriteStats::kCspBlockedRewrites[] = "csp_blocked_rewrites";
 
 const char RewriteStats::kDownstreamCachePurgeAttempts[] =
     "downstream_cache_purge_attempts";
@@ -111,6 +115,7 @@ const char RewriteStats::kSuccessfulDownstreamCachePurges[] =
 void RewriteStats::InitStats(Statistics* statistics) {
   statistics->AddVariable(kResourceUrlDomainAcceptances);
   statistics->AddVariable(kResourceUrlDomainRejections);
+  statistics->AddVariable(kCspBlockedRewrites);
   statistics->AddVariable(kCachedOutputMissedDeadline);
   statistics->AddVariable(kCachedOutputHits);
   statistics->AddVariable(kCachedOutputMisses);
@@ -118,6 +123,7 @@ void RewriteStats::InitStats(Statistics* statistics) {
   statistics->AddVariable(kInstawebSlurp404Count);
   statistics->AddVariable(kTotalPageLoadMs);
   statistics->AddVariable(kPageLoadCount);
+  statistics->AddVariable(kBeaconOverflowCount);
   statistics->AddVariable(kResourceFetchesCached);
   statistics->AddVariable(kResourceFetchConstructSuccesses);
   statistics->AddVariable(kResourceFetchConstructFailures);
@@ -168,12 +174,14 @@ RewriteStats::RewriteStats(bool has_waveforms, Statistics* stats,
       num_cache_control_not_rewritable_resources_(
           stats->GetVariable(kNumCacheControlNotRewritableResources)),
       num_flushes_(stats->GetVariable(kNumFlushes)),
+      beacon_overflow_count_(stats->GetVariable(kBeaconOverflowCount)),
       page_load_count_(stats->GetVariable(kPageLoadCount)),
       resource_404_count_(stats->GetVariable(kInstawebResource404Count)),
       resource_url_domain_acceptances_(
           stats->GetVariable(kResourceUrlDomainAcceptances)),
       resource_url_domain_rejections_(
           stats->GetVariable(kResourceUrlDomainRejections)),
+      csp_blocked_rewrites_(stats->GetVariable(kCspBlockedRewrites)),
       slurp_404_count_(stats->GetVariable(kInstawebSlurp404Count)),
       succeeded_filter_resource_fetches_(
           stats->GetVariable(kResourceFetchConstructSuccesses)),

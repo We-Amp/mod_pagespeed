@@ -108,6 +108,12 @@ class CssSummarizerBase : public RewriteFilter {
     // If it's an external stylesheet, the value of the rel attribute
     GoogleString rel;
 
+    // If it's an external stylesheet, the charset it is in: as declared by
+    // the resource itself (header, @charset, or BOM), falling back to the
+    // charset attribute on the link. Empty means it inherits the page's
+    // charset.
+    GoogleString charset;
+
     // True if it's a <link rel=stylesheet href=>, false for <style>
     bool is_external;
 
@@ -124,6 +130,13 @@ class CssSummarizerBase : public RewriteFilter {
   // we'll just throw it away when we're done anyway).  By default all CSS
   // must be summarized.
   virtual bool MustSummarize(HtmlElement* element) const { return true; }
+
+  // This should be overridden if rendering the summary would conflict with the
+  // page's Content-Security-Policy (e.g. the subclass inlines external CSS
+  // into <style> blocks). When this returns false, WillNotRenderSummary() is
+  // invoked instead of RenderSummary(). Called from a rewrite thread. The
+  // default permits rendering unconditionally.
+  virtual bool PolicyPermitsRendering() const { return true; }
 
   // This should be overridden to compute a per-resource summary.
   // The method should not modify the object state, and only

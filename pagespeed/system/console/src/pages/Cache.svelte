@@ -54,6 +54,14 @@
   }
 
   async function doPurgeAll() {
+    if (
+      !window.confirm(
+        "Purge the ENTIRE cache? This invalidates every cached resource and can " +
+          "cause a load spike on your origin as the cache refills.",
+      )
+    ) {
+      return;
+    }
     purgeLoading = true;
     purgeError = null;
     purgeResult = null;
@@ -550,13 +558,14 @@
         {#if purgeResult}
           <div class="result-box" class:result-success={purgeResult.success} class:result-error={!purgeResult.success}>
             <p>
-              {#if purgeResult.success}
+              {#if purgeResult.error}
+                Purge failed. {purgeResult.error}
+              {:else if purgeResult.message}
+                {purgeResult.message}
+              {:else if purgeResult.success}
                 Purge successful.
               {:else}
                 Purge failed.
-              {/if}
-              {#if purgeResult.message}
-                {purgeResult.message}
               {/if}
             </p>
           </div>

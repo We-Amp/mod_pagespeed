@@ -134,6 +134,19 @@ class HTTPCacheCallback : public CacheInterface::Callback {
     start_ms_ = start_us_ / 1000;
   }
 
+  // Links the backend value into the callback's HTTPValue.  With the
+  // zero-copy flag on and a memory-mapped backend value (Cyclone), the
+  // HTTPValue borrows the mapped bytes directly (no copy); consumers that
+  // let the value escape the request-serving scope collapse it to owned
+  // storage (see HTTPValue::LinkMapped).  Otherwise this is the classic
+  // owned-copy Link.
+  bool LinkHttpValue(ResponseHeaders* headers) {
+    if (http_cache_->cyclone_zero_copy_enabled() && value().is_mapped()) {
+      return callback_->http_value()->LinkMapped(value(), headers, handler_);
+    }
+    return callback_->http_value()->Link(value().ToOwned(), headers, handler_);
+  }
+
   bool ValidateCandidate(const GoogleString& key,
                          CacheInterface::KeyState backend_state) override {
     ++cache_level_;
@@ -142,7 +155,7 @@ class HTTPCacheCallback : public CacheInterface::Callback {
     ResponseHeaders* headers = callback_->response_headers();
     bool is_expired = false;
     if ((backend_state == CacheInterface::kAvailable) &&
-        callback_->http_value()->Link(value().ToOwned(), headers, handler_) &&
+        LinkHttpValue(headers) &&
         (http_cache_->force_caching_ ||
          headers->IsProxyCacheable(callback_->req_properties(),
                                    callback_->RespectVaryOnResources(),
@@ -219,6 +232,14 @@ class HTTPCacheCallback : public CacheInterface::Callback {
             StringPiece content;
             callback_->http_value()->ExtractContents(&content);
             callback_->http_value()->Clear();
+            // Zero-copy note: when http_value() is a mapped view, 'content'
+            // points into the mmap region and Clear() has just dropped the
+            // HTTPValue's own keep-alive reference to it.  The bytes remain
+            // valid across the Write() below because CacheInterface::
+            // Callback::value_ (this callback's MappedSharedString) still
+            // holds a reference for the whole ValidateCandidate call, i.e.
+            // until HTTPCacheCallback::Done -- that is the pin here, not the
+            // HTTPValue keep-alive.  Write() then copies into owned storage.
             callback_->http_value()->Write(content, handler_);
             callback_->http_value()->SetHeaders(headers);
           }
@@ -454,7 +475,10 @@ void HTTPCache::PutInternal(bool preserve_response_headers,
   // directly to a client through InflatingFetch.
   cache_->Put(CompositeKey(key, fragment), value->share());
   if (cache_time_us_ != nullptr) {
-    int64 delta_us = timer_->NowUs() - start_us;
+    // The wall clock can step backwards (NTP/hypervisor sync); clamp like
+    // the lookup path above so a step can't feed Add a negative delta.
+    int64 delta_us =
+        std::max(static_cast<int64>(0), timer_->NowUs() - start_us);
     cache_time_us_->Add(delta_us);
   }
 }

@@ -209,6 +209,24 @@ TEST_F(ScanFilterTest, CspParse) {
       GoogleUrl("http://www.example.org/foo.png"), CspDirective::kImgSrc));
 }
 
+TEST_F(ScanFilterTest, CspParseCommaCoalesced) {
+  // Two policies coalesced into one header value must be enforced as
+  // two separate policies, not corrupted into one.
+  ResponseHeaders headers;
+  headers.Add("Content-Security-Policy",
+              "img-src https:, script-src 'none'");
+  rewrite_driver()->set_response_headers_ptr(&headers);
+  ValidateNoChanges("csp_comma", "<head></head>");
+  EXPECT_EQ(2, rewrite_driver()->content_security_policy().policies_size());
+  EXPECT_TRUE(rewrite_driver()->IsLoadPermittedByCsp(
+      GoogleUrl("https://www.example.com/foo.png"), CspDirective::kImgSrc));
+  EXPECT_FALSE(rewrite_driver()->IsLoadPermittedByCsp(
+      GoogleUrl("http://www.example.com/foo.png"), CspDirective::kImgSrc));
+  EXPECT_FALSE(rewrite_driver()->IsLoadPermittedByCsp(
+      GoogleUrl("https://www.example.com/foo.js"),
+      CspDirective::kScriptSrc));
+}
+
 TEST_F(ScanFilterTest, CspParseOff) {
   options()->set_honor_csp(false);
 

@@ -555,8 +555,6 @@ class TestCacheIntegration:
             "cache_hits",
             "cache_misses",
             "cache_inserts",
-            "lru_cache_hits",
-            "lru_cache_misses",
         ]
 
         initial_values = {

@@ -104,6 +104,7 @@ SYSTEM_CORE_DEPS = [
     "//pagespeed/kernel/license_v2:license_verifier",
     "//pagespeed/kernel/license_v2:tracking_metadata",
     "//pagespeed/kernel/sharedmem",
+    "//pagespeed/kernel/util",
     "//third_party/redis-crc",
     "@hiredis",
 ]

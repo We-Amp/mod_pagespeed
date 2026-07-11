@@ -195,6 +195,9 @@ const char RewriteOptions::kJsPreserveURLs[] = "JsPreserveURLs";
 const char RewriteOptions::kLazyloadImagesAfterOnload[] =
     "LazyloadImagesAfterOnload";
 const char RewriteOptions::kLazyloadImagesBlankUrl[] = "LazyloadImagesBlankUrl";
+const char RewriteOptions::kLazyloadImagesMode[] = "LazyloadImagesMode";
+const char RewriteOptions::kLazyloadImagesSkipFirst[] =
+    "LazyloadImagesSkipFirst";
 const char RewriteOptions::kLoadFromFileCacheTtlMs[] = "LoadFromFileCacheTtlMs";
 const char RewriteOptions::kLogBackgroundRewrite[] = "LogBackgroundRewrite";
 const char RewriteOptions::kLogMobilizationSamples[] = "LogMobilizationSamples";
@@ -316,10 +319,15 @@ const char RewriteOptions::kLibrary[] = "Library";
 const char RewriteOptions::kCacheFlushFilename[] = "CacheFlushFilename";
 const char RewriteOptions::kCacheFlushPollIntervalSec[] =
     "CacheFlushPollIntervalSec";
+const char RewriteOptions::kCycloneZeroCopy[] = "CycloneZeroCopy";
+const char RewriteOptions::kCycloneZeroCopyServe[] = "CycloneZeroCopyServe";
+const char RewriteOptions::kCycloneRamCacheKb[] = "CycloneRamCacheKb";
 const char RewriteOptions::kFetchHttps[] = "FetchHttps";
 const char RewriteOptions::kFetcherTimeOutMs[] = "FetcherTimeOutMs";
 const char RewriteOptions::kFileCacheCleanSizeKb[] = "FileCacheSizeKb";
 const char RewriteOptions::kFileCachePath[] = "FileCachePath";
+const char RewriteOptions::kFileCacheSmallTierPercent[] =
+    "FileCacheSmallTierPercent";
 const char RewriteOptions::kLogDir[] = "LogDir";
 const char RewriteOptions::kLruCacheByteLimit[] = "LRUCacheByteLimit";
 const char RewriteOptions::kLruCacheKbPerProcess[] = "LRUCacheKbPerProcess";
@@ -923,9 +931,15 @@ bool IsInSet(const RewriteOptions::Filter* filters, int num,
 void StripBeaconUrlQueryParam(GoogleString* url,
                               GoogleString* url_no_query_param) {
   if (StringPiece(*url).ends_with("ets=")) {
-    // Strip the ? or & in front of ets= as well.
-    int chars_to_strip = STATIC_STRLEN("ets=") + 1;
-    url->resize(url->size() - chars_to_strip);
+    // Strip "ets=", and also the ? or & separator in front of it, but only if
+    // that separator is actually present -- otherwise strip just "ets=".
+    size_t ets_pos = url->size() - STATIC_STRLEN("ets=");
+    if (ets_pos > 0 &&
+        ((*url)[ets_pos - 1] == '?' || (*url)[ets_pos - 1] == '&')) {
+      url->resize(ets_pos - 1);
+    } else {
+      url->resize(ets_pos);
+    }
   }
 
   StringPieceVector url_split;
@@ -1127,6 +1141,9 @@ RewriteOptions::RewriteOptions(ThreadSystem* thread_system)
   // Sanity-checks -- will be active only when compiled for debug.
 #ifndef NDEBUG
   CheckFilterSetOrdering(kCoreFilterSet, arraysize(kCoreFilterSet));
+  CheckFilterSetOrdering(kOptimizeForBandwidthFilterSet,
+                         arraysize(kOptimizeForBandwidthFilterSet));
+  CheckFilterSetOrdering(kMobilizeFilterSet, arraysize(kMobilizeFilterSet));
   CheckFilterSetOrdering(kTestFilterSet, arraysize(kTestFilterSet));
   CheckFilterSetOrdering(kDangerousFilterSet, arraysize(kDangerousFilterSet));
   CheckFilterSetOrdering(kImagePreserveUrlDisabledFilters,
@@ -1811,7 +1828,7 @@ bool RewriteOptions::AddCommaSeparatedListToFilterSet(
   SplitStringPieceToVector(filters, ",", &names, true);
   bool ret = true;
   for (int i = 0, n = names.size(); i < n; ++i) {
-    ret = AddByNameToFilterSet(names[i], set, handler);
+    ret &= AddByNameToFilterSet(names[i], set, handler);
   }
   return ret;
 }
@@ -1834,16 +1851,16 @@ bool RewriteOptions::AdjustFiltersByCommaSeparatedList(
     if (!option.empty()) {
       if (option[0] == '-') {
         option.remove_prefix(1);
-        ret = AddByNameToFilterSet(names[i], &disabled_filters_, handler);
+        ret &= AddByNameToFilterSet(names[i], &disabled_filters_, handler);
       } else if (option[0] == '+') {
         option.remove_prefix(1);
-        ret = AddByNameToFilterSet(names[i], &enabled_filters_, handler);
+        ret &= AddByNameToFilterSet(names[i], &enabled_filters_, handler);
       } else {
         // No prefix means: reset to pass-through mode prior to
         // applying any of the filters.  +a,-b,+c" will just add
         // a and c and remove b to current default config, but
         // "+a,-b,+c,d" will just run with filters a, c and d.
-        ret = AddByNameToFilterSet(names[i], &enabled_filters_, handler);
+        ret &= AddByNameToFilterSet(names[i], &enabled_filters_, handler);
         non_incremental = true;
       }
     }
@@ -2431,6 +2448,21 @@ bool RewriteOptions::ParseFromString(StringPiece value_string,
   } else {
     // value_string is not "true"/"false" or "on"/"off"/"unplugged".
     // Return a parse error.
+    return false;
+  }
+  return true;
+}
+
+bool RewriteOptions::ParseFromString(StringPiece value_string,
+                                     LazyloadImagesMode* value) {
+  if (StringCaseEqual(value_string, "auto")) {
+    *value = kLazyloadImagesModeAuto;
+  } else if (StringCaseEqual(value_string, "native")) {
+    *value = kLazyloadImagesModeNative;
+  } else if (StringCaseEqual(value_string, "js")) {
+    *value = kLazyloadImagesModeJs;
+  } else {
+    // value_string is not one of "auto"/"native"/"js". Return a parse error.
     return false;
   }
   return true;
@@ -3161,6 +3193,18 @@ GoogleString RewriteOptions::ToString(RewriteLevel level) {
   return "?";
 }
 
+GoogleString RewriteOptions::ToString(LazyloadImagesMode mode) {
+  switch (mode) {
+    case kLazyloadImagesModeAuto:
+      return "auto";
+    case kLazyloadImagesModeNative:
+      return "native";
+    case kLazyloadImagesModeJs:
+      return "js";
+  }
+  return "?";
+}
+
 GoogleString RewriteOptions::ToString(const BeaconUrl& beacon_url) {
   GoogleString result = beacon_url.http;
   if (beacon_url.http != beacon_url.https) {
@@ -3388,7 +3432,7 @@ GoogleString RewriteOptions::ExperimentSpec::ToString() const {
   GoogleString out;
   StrAppend(&out, "id=", IntegerToString(id_));
   if (ga_variable_slot_ != kDefaultExperimentSlot) {
-    StrAppend(&out, "slot=", IntegerToString(ga_variable_slot_));
+    StrAppend(&out, ";slot=", IntegerToString(ga_variable_slot_));
   }
   if (!ga_id_.empty()) {
     StrAppend(&out, ";ga=", ga_id_);
@@ -3551,6 +3595,7 @@ bool RewriteOptions::ValidateConfiguredHttpHeader(const GoogleString& name,
   }
   if (name.size() > 1024) {
     *error_message = "Field name too long";
+    return false;
   }
   if (value.size() > 1024) {
     *error_message = "Field value too long";
@@ -3616,7 +3661,7 @@ bool RewriteOptions::ValidateAndAddResourceHeader(const StringPiece& name,
     }
 
     // Arbitrary limit of adding 20 headers
-    if (resource_headers_.size() > 20) {
+    if (resource_headers_.size() >= 20) {
       *error_message = "Too many AddResourceHeader directives (max: 20)";
       return false;
     }

@@ -50,8 +50,6 @@ namespace net_instaweb {
 
 class CriticalSelectorFilter : public CssSummarizerBase {
  public:
-  static const char kAddStylesFunction[];
-  static const char kAddStylesInvocation[];
   static const char kNoscriptStylesClass[];
 
   explicit CriticalSelectorFilter(RewriteDriver* rewrite_driver);
@@ -76,6 +74,13 @@ class CriticalSelectorFilter : public CssSummarizerBase {
   // Selectors are inlined into the html.
   bool IntendedForInlining() const override { return true; }
   ScriptUsage GetScriptUsage() const override { return kWillInjectScripts; }
+
+  // We replace external <link> stylesheets with inline <style> blocks, which
+  // a style-src policy without 'unsafe-inline' would block -- leaving the
+  // page unstyled. Do not render in that case; the page is left untouched.
+  bool PolicyPermitsRendering() const override {
+    return driver()->content_security_policy().PermitsInlineStyle();
+  }
 
  protected:
   // Overrides of CssSummarizerBase summary API. These help us compute
@@ -128,9 +133,6 @@ class CriticalSelectorFilter : public CssSummarizerBase {
 
   // True if we rendered any block at all.
   bool any_rendered_;
-
-  // True if flush early script to move links has been added.
-  bool is_flush_script_added_;
 
   CriticalSelectorFilter(const CriticalSelectorFilter&) = delete;
   CriticalSelectorFilter& operator=(const CriticalSelectorFilter&) = delete;

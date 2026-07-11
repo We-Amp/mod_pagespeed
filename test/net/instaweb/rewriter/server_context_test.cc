@@ -43,6 +43,7 @@
 #include "net/instaweb/rewriter/public/resource.h"
 #include "net/instaweb/rewriter/public/resource_namer.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
+#include "net/instaweb/rewriter/public/rewrite_stats.h"
 #include "net/instaweb/rewriter/public/rewrite_filter.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/rewrite_query.h"
@@ -1086,6 +1087,23 @@ TEST_F(ServerContextTest, TestHandleBeacon) {
   EXPECT_TRUE(server_context()->HandleBeacon(
       "url=http%3A%2F%2Flocalhost%3A8080%2Findex.html&ets=load:34",
       UserAgentMatcherTestBase::kChromeUserAgent, CreateRequestContext()));
+}
+
+TEST_F(ServerContextTest, TestHandleBeaconOverflowFlag) {
+  // A beacon carrying of=1 reports that the client truncated its payload;
+  // the loss is counted so it is observable server-side.
+  Variable* overflow_count =
+      server_context()->rewrite_stats()->beacon_overflow_count();
+  EXPECT_EQ(0, overflow_count->Get());
+  EXPECT_TRUE(server_context()->HandleBeacon(
+      "url=http%3A%2F%2Flocalhost%3A8080%2Findex.html&ets=load:34&of=1",
+      UserAgentMatcherTestBase::kChromeUserAgent, CreateRequestContext()));
+  EXPECT_EQ(1, overflow_count->Get());
+  // Anything other than "1" doesn't count.
+  EXPECT_TRUE(server_context()->HandleBeacon(
+      "url=http%3A%2F%2Flocalhost%3A8080%2Findex.html&ets=load:34&of=0",
+      UserAgentMatcherTestBase::kChromeUserAgent, CreateRequestContext()));
+  EXPECT_EQ(1, overflow_count->Get());
 }
 
 class BeaconTest : public ServerContextTest {

@@ -516,6 +516,13 @@ void SystemCaches::SetupCaches(ServerContext* server_context,
   }
 
   http_cache->set_max_cacheable_response_content_length(max_content_length);
+  // Zero-copy serving of memory-mapped (Cyclone) cache hits, default off.
+  // Applies to both cache topologies above: with an LRU L1 the
+  // WriteThroughCache forwards the backend's MappedSharedString by
+  // reference, so mapped-ness survives the L1/L2 stack.
+  http_cache->set_cyclone_zero_copy_enabled(config->cyclone_zero_copy());
+  http_cache->set_cyclone_zero_copy_serve_enabled(
+      config->cyclone_zero_copy_serve());
   server_context->set_http_cache(http_cache);
 
   // And now the metadata cache. If we only have one level, it will be in
@@ -559,8 +566,17 @@ void SystemCaches::SetupCaches(ServerContext* server_context,
       // Entries larger than the shm value cap skip L1 and live in Cyclone only;
       // small entries land in both. The WriteThroughCache is assembled below,
       // from metadata_l1/metadata_l2, once l1_size_limit is set.
+      //
+      // Metadata routes to the small-object tier of the Cyclone cache
+      // (FileCacheSmallTierPercent): rname/ entries are tiny compared to the
+      // HTTP payloads they co-mingled with, and volume eviction churn from
+      // payload traffic used to drop them wholesale, defeating the
+      // restart-warmth this write-through exists to provide. The small tier
+      // is a physically separate volume, so payload churn can no longer
+      // evict metadata. When the tier is disabled or inactive this is the
+      // same cache as file_cache().
       metadata_l1 = shm_metadata_cache;
-      metadata_l2 = file_cache;
+      metadata_l2 = caches_for_path->small_tier_file_cache();
       l1_size_limit = shm_metadata_cache_info->cache_backend->MaxValueSize();
 
       // Give the property store the same arrangement: shared memory is the
@@ -576,8 +592,8 @@ void SystemCaches::SetupCaches(ServerContext* server_context,
       // internally, so the slight over-counting only steers a few
       // borderline-sized values to Cyclone alone -- same as the metadata
       // cache above, and harmless.
-      WriteThroughCache* pcache_write_through =
-          new WriteThroughCache(shm_metadata_cache, file_cache);
+      WriteThroughCache* pcache_write_through = new WriteThroughCache(
+          shm_metadata_cache, caches_for_path->small_tier_file_cache());
       pcache_write_through->set_cache1_limit(
           shm_metadata_cache_info->cache_backend->MaxValueSize());
       server_context->DeleteCacheOnDestruction(pcache_write_through);
@@ -740,7 +756,7 @@ void SystemCaches::InitStats(Statistics* statistics) {
 #endif
   CycloneCache::InitStats(statistics);
   CacheStats::InitStats(SystemCachePath::kFileCache, statistics);
-  CacheStats::InitStats(SystemCachePath::kLruCache, statistics);
+  CacheStats::InitStats(SystemCachePath::kFileCacheSmall, statistics);
   CacheStats::InitStats(kShmCache, statistics);
 #if PAGESPEED_ENABLE_MEMCACHED
   CacheStats::InitStats(kMemcachedAsync, statistics);
@@ -767,6 +783,17 @@ void SystemCaches::PrintCacheStats(StatFlags flags, GoogleString* out) {
         StringWriter writer(out);
         writer.Write(cache_info->cache_backend->DumpStats(),
                      factory_->message_handler());
+      }
+    }
+
+    for (PathCacheMap::iterator p = path_cache_map_.begin(),
+                                e = path_cache_map_.end();
+         p != e; ++p) {
+      CycloneCache* cyclone_cache = p->second->cyclone_cache();
+      if (cyclone_cache != nullptr && cyclone_cache->IsHealthy()) {
+        StrAppend(out, "\nCyclone cache '", cyclone_cache->config().cache_path,
+                  "' statistics:\n");
+        cyclone_cache->PrintStats(out);
       }
     }
   }

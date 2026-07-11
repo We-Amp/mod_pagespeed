@@ -839,7 +839,7 @@ bool DomainLawyer::MapDomainHelper(
           // Ignore requests to map to the same scheme://hostname:port/.
         } else if (!allow_wildcards && from_domain->IsWildcarded()) {
           handler->Message(kError, "Cannot map from a wildcarded domain: %s",
-                           to_domain_name.as_string().c_str());
+                           domain_name.as_string().c_str());
           ret = false;
         } else {
           bool ok = (from_domain->*set_domain_fn)(to_domain, handler);

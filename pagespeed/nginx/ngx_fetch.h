@@ -65,6 +65,15 @@ class NgxConnection : public PoolElement<NgxConnection> {
     socklen_ = socklen;
     ngx_memcpy(&sockaddr_, sockaddr, socklen);
   }
+  // TLS connections are pooled per (sockaddr, host): the handshake carries
+  // the host's SNI and the certificate was verified against it, so a pooled
+  // TLS connection is only valid for the same host again.
+  void SetTlsKey(StringPiece host) {
+    is_ssl_ = true;
+    host.CopyToString(&ssl_host_);
+  }
+  bool is_ssl() const { return is_ssl_; }
+  const GoogleString& ssl_host() const { return ssl_host_; }
   // Close ensures that NgxConnection deletes itself at the appropriate time,
   // which can be after receiving a non-keepalive response, or when the remote
   // server closes the connection when the NgxConnection is pooled and idle.
@@ -78,7 +87,8 @@ class NgxConnection : public PoolElement<NgxConnection> {
 
   static NgxConnection* Connect(ngx_peer_connection_t* pc,
                                 MessageHandler* handler,
-                                int max_keepalive_requests);
+                                int max_keepalive_requests, bool is_ssl,
+                                StringPiece ssl_host);
   static void IdleWriteHandler(ngx_event_t* ev);
   static void IdleReadHandler(ngx_event_t* ev);
   // Terminate will cleanup any idle connections upon shutdown.
@@ -98,6 +108,8 @@ class NgxConnection : public PoolElement<NgxConnection> {
   socklen_t socklen_;
   u_char sockaddr_[NGX_SOCKADDRLEN];
   MessageHandler* handler_;
+  bool is_ssl_ = false;
+  GoogleString ssl_host_;
 
   NgxConnection(const NgxConnection&) = delete;
   NgxConnection& operator=(const NgxConnection&) = delete;
@@ -154,6 +166,22 @@ class NgxFetch : public PoolElement<NgxFetch> {
   void set_response_handler(response_handler_pt handler) {
     response_handler = handler;
   }
+#if (NGX_SSL)
+  // Start the TLS handshake on the (connected) underlying socket. Returns
+  // NGX_OK when the handshake is in progress or done — completion, peer
+  // verification and the request write then run via TlsHandshakeHandler.
+  // Returns NGX_ERROR only before any completion callback can have run.
+  int StartTlsHandshake();
+  // Certificate checks after a completed handshake, honoring the fetcher's
+  // https options the same way the curl fetcher does: the chain result is
+  // ignored with allow_self_signed/allow_unknown_certificate_authority, the
+  // hostname is checked always (CURLOPT_SSL_VERIFYHOST=2 equivalent).
+  bool VerifyTlsPeer(ngx_connection_t* c);
+  // Write-event handler bridging a pending TCP connect to the handshake.
+  static void TlsConnectedHandler(ngx_event_t* wev);
+  // c->ssl->handler: handshake finished (or failed).
+  static void TlsHandshakeHandler(ngx_connection_t* c);
+#endif
   // Only the Static functions could be used in callbacks.
   static void ResolveDoneHandler(ngx_resolver_ctx_t* ctx);
   // Write the request.
@@ -175,6 +203,13 @@ class NgxFetch : public PoolElement<NgxFetch> {
 
   const GoogleString str_url_;
   ngx_url_t url_;
+  // Scheme of str_url_; https fetches handshake TLS before the request.
+  bool is_https_ = false;
+  // Host from the url, for SNI, certificate verification and the TLS
+  // connection-pool key.
+  GoogleString ssl_host_;
+  // IP-literal hosts get no SNI (RFC 6066) and match against IP SANs.
+  bool ssl_host_is_ip_ = false;
   NgxUrlAsyncFetcher* fetcher_;
   AsyncFetch* async_fetch_;
   ResponseHeadersParser parser_;

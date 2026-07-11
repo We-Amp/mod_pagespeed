@@ -26,7 +26,7 @@ PSOL worker threads cannot call nginx APIs directly. Communication uses a Unix p
 - **`ps_event_data`** -- Struct written atomically: `{type, sender, connection}`
 - **`ReadEventHandler`** -- nginx calls this when pipe becomes readable; dispatches to callback
 
-Write retries use exponential backoff (100us to 100ms, 50 attempts max) to handle full pipe buffers. Pipe capacity is bumped via `F_SETPIPE_SZ` where available.
+A full pipe never blocks or drops: writes that hit `EAGAIN` divert to a mutex-guarded overflow queue that the reader drains in order (see `ngx_event_connection.cc`). Pipe capacity is bumped via `F_SETPIPE_SZ` where available.
 
 Two pipe instances exist: one for `NgxBaseFetch` (response delivery) and one per `NgxUrlAsyncFetcher` (fetch completion notification).
 
@@ -61,13 +61,15 @@ bazel build --config=clang-libstdcxx13 //pagespeed/nginx:ngx_pagespeed_module.so
 
 - **`combine_css` timeout**: When ProxyFetch needs to fetch sub-resources before emitting output, and the fetch takes longer than nginx `send_timeout`, nginx kills the connection. Pre-fetching sub-resources before streaming is the fix pattern.
 - **Streaming architecture**: nginx streams response chunks through filters. ProxyFetch may need to buffer the entire response for certain optimizations, creating back-pressure.
-- **Native fetcher vs curl**: `NgxUrlAsyncFetcher` uses nginx's own connection pool; curl fetcher (`CurlUrlAsyncFetcher`) is the default and more reliable for HTTPS.
+- **Native fetcher needs a resolver**: `UseNativeFetcher on` hard-fails at startup unless nginx.conf configures the core `resolver` directive.
 
 ## Fetcher
 
 Two fetcher options controlled by `use_native_fetcher_`:
-- **Default (curl)**: `CurlUrlAsyncFetcher` -- independent of nginx, handles HTTPS via BoringSSL
-- **Native**: `NgxUrlAsyncFetcher` -- uses nginx's resolver and connection pool, signals completion via its own `NgxEventConnection` pipe
+- **Default (curl)**: `CurlUrlAsyncFetcher` -- independent of nginx (one poll thread per worker), TLS via the module's statically linked library
+- **Native**: `NgxUrlAsyncFetcher` -- runs on the nginx event loop (no fetch threads), uses nginx's resolver and connection pool, signals completion via its own `NgxEventConnection` pipe. TLS uses nginx's own SSL machinery (`ngx_ssl_*`): the handshake runs on the event loop, certificate verification mirrors the curl fetcher's `FetchHttps` semantics (chain verification skipped under `allow_self_signed`/`allow_unknown_certificate_authority`, hostname always checked), and TLS connections are keepalive-pooled per (address, host). Direct OpenSSL calls go through `ngx_openssl_shim.{h,cc}` -- module code must NOT call `SSL_*`/`X509_*` directly, those bind to the module's hidden statically linked TLS library instead of nginx's (ABI mix on nginx-owned objects). Https-through-fetch-proxy (CONNECT) is not supported: configure the curl fetcher for that.
+
+Test harness: `PAGESPEED_TEST_NATIVE_FETCHER=1 ./test/system/run_nginx_tests.sh` runs the suite with the native fetcher (injects `resolver` + `UseNativeFetcher on`).
 
 ## Cross-References
 

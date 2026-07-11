@@ -51,6 +51,12 @@ const char kOriginalImageJsonWidthKey[] = "ow";
 const char kOriginalImageJsonHeightKey[] = "oh";
 const char kEmptyValuePlaceholder[] = "\n";
 
+// Upper bound on a beacon-supplied image side, in pixels. The beacon JSON is
+// untrusted; capping each dimension here keeps the width*height and the
+// subsequent 100*area and area*percent products comfortably within int64,
+// while still being far larger than any real rendered image (a ~1M-pixel side).
+constexpr int kMaxBeaconImageDim = 1 << 20;
+
 // Create CriticalImagesInfo object from the value of property_value.  NULL if
 // no value is found, or if the property value reflects that no results are
 // available.  Result is owned by caller.
@@ -409,8 +415,18 @@ RenderedImages* CriticalImagesFinder::JsonMapToRenderedImagesMap(
       int rendered_height = json_rendered_image_map[img_src]
                                 .get(kRenderedImageJsonHeightKey, 0)
                                 .asInt();
-      int original_area = (original_width * original_height);
-      int rendered_area = (rendered_width * rendered_height);
+      // The dimensions come from untrusted beacon JSON; reject entries with
+      // out-of-range values so the area products below cannot overflow int64.
+      if (original_width < 0 || original_width > kMaxBeaconImageDim ||
+          original_height < 0 || original_height > kMaxBeaconImageDim ||
+          rendered_width < 0 || rendered_width > kMaxBeaconImageDim ||
+          rendered_height < 0 || rendered_height > kMaxBeaconImageDim) {
+        continue;
+      }
+      int64 original_area =
+          static_cast<int64>(original_width) * original_height;
+      int64 rendered_area =
+          static_cast<int64>(rendered_width) * rendered_height;
       // Store renderedWidth and renderedHeight for the image only if
       // the rendered sizes are lower than the original sizes by at least the
       // percentage threshold set.

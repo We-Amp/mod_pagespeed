@@ -91,24 +91,9 @@ pagespeed.LazyloadImages.prototype.offset_ = function(a) {
   var b = this.compute_top_(a);
   return {top:b, bottom:b + a.offsetHeight};
 };
-pagespeed.LazyloadImages.prototype.getStyle_ = function(a, b) {
-  if (a.currentStyle) {
-    return a.currentStyle[b];
-  }
-  if (document.defaultView && document.defaultView.getComputedStyle) {
-    var c = document.defaultView.getComputedStyle(a, null);
-    if (c) {
-      return c.getPropertyValue(b);
-    }
-  }
-  return a.style && a.style[b] ? a.style[b] : "";
-};
 pagespeed.LazyloadImages.prototype.isVisible_ = function(a) {
   if (!this.onload_done_ && (a.offsetHeight == 0 || a.offsetWidth == 0)) {
     return !1;
-  }
-  if (this.getStyle_(a, "position") == "relative") {
-    return !0;
   }
   var b = this.viewport_(), c = a.getBoundingClientRect();
   c ? (a = c.top - b.height, b = c.bottom) : (c = this.offset_(a), a = c.top - b.bottom, b = c.bottom - b.top);
@@ -125,10 +110,18 @@ pagespeed.LazyloadImages.prototype.loadIfVisibleAndMaybeBeacon = function(a) {
         d && d.removeChild(a);
         a._getAttribute && (a.getAttribute = a._getAttribute);
         a.removeAttribute("onload");
-        a.tagName && a.tagName == "IMG" && pagespeed.CriticalImages && pagespeedutils.addHandler(a, "load", function(f) {
-          pagespeed.CriticalImages.checkImageForCriticality(this);
-          b.onload_done_ && (b.imgs_to_load_before_beaconing_--, b.imgs_to_load_before_beaconing_ == 0 && pagespeed.CriticalImages.checkCriticalImages());
-        });
+        if (a.tagName && a.tagName == "IMG" && pagespeed.CriticalImages) {
+          var f = !1, g = function() {
+            f || (f = !0, b.onload_done_ && (b.imgs_to_load_before_beaconing_--, b.imgs_to_load_before_beaconing_ == 0 && pagespeed.CriticalImages.checkCriticalImages()));
+          };
+          pagespeedutils.addHandler(a, "load", function(h) {
+            pagespeed.CriticalImages.checkImageForCriticality(this);
+            g();
+          });
+          pagespeedutils.addHandler(a, "error", function(h) {
+            g();
+          });
+        }
         a.removeAttribute("data-pagespeed-lazy-src");
         a.removeAttribute("data-pagespeed-lazy-replaced-functions");
         d && d.insertBefore(a, e);
@@ -146,6 +139,9 @@ pagespeed.LazyloadImages.prototype.loadIfVisibleAndMaybeBeacon = pagespeed.Lazyl
 pagespeed.LazyloadImages.prototype.loadAllImages = function() {
   this.force_load_ = !0;
   this.loadVisible_();
+  for (var a = document.getElementsByTagName("img"), b = 0, c; c = a[b]; b++) {
+    this.hasAttribute_(c, "data-pagespeed-lazy-src") && this.loadIfVisibleAndMaybeBeacon(c);
+  }
 };
 pagespeed.LazyloadImages.prototype.loadAllImages = pagespeed.LazyloadImages.prototype.loadAllImages;
 pagespeed.LazyloadImages.prototype.loadVisible_ = function() {
@@ -181,7 +177,7 @@ pagespeed.lazyLoadInit = function(a, b) {
     pagespeed.CriticalImages && (c.imgs_to_load_before_beaconing_ = c.countDeferredImgs_(), c.imgs_to_load_before_beaconing_ == 0 && pagespeed.CriticalImages.checkCriticalImages());
     c.loadVisible_();
   });
-  b.indexOf("data") != 0 && ((new Image()).src = b);
+  b.indexOf("data:") != 0 && ((new Image()).src = b);
   b = function() {
     if (!(c.onload_done_ && a || c.scroll_timer_)) {
       var d = (new Date()).getTime(), e = c.min_scroll_time_;

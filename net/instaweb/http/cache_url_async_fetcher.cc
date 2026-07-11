@@ -30,6 +30,8 @@
 #include "net/instaweb/http/public/url_async_fetcher.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/function.h"
+#include "pagespeed/kernel/base/mapped_shared_string.h"
+#include "pagespeed/kernel/base/shared_string.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -117,6 +119,14 @@ class CachePutFetch : public SharedAsyncFetch {
       ret &= cache_value_writer_.Write(content, handler);
     }
     return ret;
+  }
+
+  // A shared-storage serve must not bypass the cache put: route it through
+  // HandleWrite so cache_value_writer_ records the bytes.
+  bool HandleWriteShared(const StringPiece& content,
+                         const SharedString& /*storage*/,
+                         MessageHandler* handler) override {
+    return HandleWrite(content, handler);
   }
 
   bool HandleFlush(MessageHandler* handler) override {
@@ -304,6 +314,34 @@ class CacheFindCallback : public HTTPCache::Callback {
           // non-chunked responses.
           StringPiece contents;
           http_value()->ExtractContents(&contents);
+          // Zero-copy note: with CycloneZeroCopy, http_value() may
+          // be a borrowed mmap view.  A raw mapped pointer must NEVER reach a
+          // port Write() on this path: ports do not copy synchronously in all
+          // cases (Apache's ap_rwrite wraps writes larger than its 8000-byte
+          // buffer in a TRANSIENT bucket whose deferred remainder drains
+          // client-paced, re-reading the same raw pointer with no barrier),
+          // and RecordingFetch records whatever bytes it is handed.  So a
+          // mapped value is de-aliased HERE with the verified copy
+          // (copy-then-verify); a torn borrow fails the fetch closed instead
+          // of serving -- and possibly re-caching -- garbage.
+          GoogleString devalias;  // Must outlive the Write() below.
+          bool contents_ok = true;
+          if (http_value()->is_mapped()) {
+            StringPiece mapped;
+            MappedSharedString keepalive;
+            contents_ok =
+                http_value()->ExtractMappedContents(&mapped, &keepalive) &&
+                CopyMappedVerified(mapped, keepalive, &devalias);
+            if (contents_ok) {
+              contents = devalias;
+            }
+          }
+          if (!contents_ok) {
+            VLOG(1) << "Torn zero-copy borrow for: " << url_
+                    << " -- failing the cache serve closed.";
+            base_fetch_->Done(false);
+            break;
+          }
           base_fetch_->set_content_length(contents.size());
           response_headers()->ComputeCaching();
           is_imminently_expiring = IsImminentlyExpiring(*response_headers());
@@ -431,9 +469,6 @@ class CacheFindCallback : public HTTPCache::Callback {
       response_headers->Clear();
       return false;
     }
-    if (fallback_responses_served_while_revalidate_ != nullptr) {
-      fallback_responses_served_while_revalidate_->Add(1);
-    }
     // CacheControl header is changed to private, max-age=0 to avoid caching
     // of the resource either by browser or intermediate proxy as stale
     // content should be served only for this request, any future requests
@@ -442,9 +477,29 @@ class CacheFindCallback : public HTTPCache::Callback {
                               "private, max-age=0");
     response_headers->RemoveAll(HttpAttributes::kExpires);
     response_headers->ComputeCaching();
-    base_fetch_->HeadersComplete();
     StringPiece contents;
     fallback_http_value()->ExtractContents(&contents);
+    // De-alias a borrowed mmap view before the port write, exactly like the
+    // fresh-hit serve above (see the zero-copy note there).  A torn borrow
+    // bails out BEFORE HeadersComplete: the caller falls back to the normal
+    // fetch flow as if there were no usable stale value.
+    GoogleString devalias;  // Must outlive the Write() below.
+    if (fallback_http_value()->is_mapped()) {
+      StringPiece mapped;
+      MappedSharedString keepalive;
+      if (!fallback_http_value()->ExtractMappedContents(&mapped, &keepalive) ||
+          !CopyMappedVerified(mapped, keepalive, &devalias)) {
+        response_headers->Clear();
+        return false;
+      }
+      contents = devalias;
+    }
+    // Counted here (not before the de-alias above) so a torn bail-out does
+    // not register as a served stale response.
+    if (fallback_responses_served_while_revalidate_ != nullptr) {
+      fallback_responses_served_while_revalidate_->Add(1);
+    }
+    base_fetch_->HeadersComplete();
     base_fetch_->Write(contents, handler_);
 
     // Issue a background fetch to update the cache with a fresh value so

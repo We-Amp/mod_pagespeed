@@ -218,6 +218,7 @@
     gap: var(--ps-space-xs, 4px);
     font-size: var(--ps-font-size-lg);
     font-weight: 500;
+    min-width: 0;
   }
 
   .topbar-logo-link {
@@ -227,6 +228,7 @@
     color: inherit;
     border-radius: var(--ps-border-radius);
     transition: opacity 0.15s ease;
+    flex-shrink: 0;
   }
 
   .topbar-logo-link:hover {
@@ -307,6 +309,10 @@
     background: rgba(255, 255, 255, 0.15);
     letter-spacing: 0.02em;
     white-space: nowrap;
+    flex-shrink: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .topbar-pill-unlicensed {
@@ -319,6 +325,7 @@
     letter-spacing: 0.04em;
     text-transform: uppercase;
     white-space: nowrap;
+    flex-shrink: 0;
   }
 
   /* the design record: informational accent, not the amber unlicensed warning. */
@@ -332,6 +339,7 @@
     letter-spacing: 0.04em;
     text-transform: uppercase;
     white-space: nowrap;
+    flex-shrink: 0;
   }
 
   .menu-toggle {
@@ -496,6 +504,15 @@
       top: var(--ps-topbar-height);
       background: rgba(0, 0, 0, 0.3);
       z-index: 15;
+    }
+  }
+
+  /* On the narrowest phones the logo + scope badge + license pill can no longer
+     coexist. The Unlicensed/Over-cap pill is the conversion hook, so drop the
+     less-critical scope badge first rather than clipping the pill. */
+  @media (max-width: 430px) {
+    .topbar-badge {
+      display: none;
     }
   }
 </style>

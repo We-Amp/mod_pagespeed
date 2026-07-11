@@ -15,7 +15,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-// Automatically generated from bazel-out/darwin_arm64-fastbuild/bin/net/instaweb/rewriter/client_domain_rewriter_dbg.js
+// Automatically generated from client_domain_rewriter_dbg.js
 
 namespace net_instaweb {
 

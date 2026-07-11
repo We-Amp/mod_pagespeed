@@ -167,7 +167,8 @@ InsertGAFilter::AnalyticsStatus InsertGAFilter::FindSnippetInScript(
     // loading then one to do the initialization and page tracking.  We want to
     // process the second one.
     return kGaJs;  // Syncronous ga.js
-  } else if (s.find(".google-analytics.com/analytics.js")) {
+  } else if (s.find(".google-analytics.com/analytics.js") !=
+             GoogleString::npos) {
     return kAnalyticsJs;
   }
   return kUnusableSnippetFound;
@@ -210,6 +211,11 @@ GoogleString InsertGAFilter::GaJsExperimentSnippet() const {
 // data being lost.
 void InsertGAFilter::EndDocument() {
   if (found_snippet_ || added_analytics_js_ || ga_id_.empty()) {
+    return;
+  }
+  if (!CspPermitsInlineScript()) {
+    // The GA snippet is injected as an inline script, which the page's
+    // CSP forbids; the browser would never run it.
     return;
   }
 
@@ -477,8 +483,12 @@ void InsertGAFilter::EndElementImpl(HtmlElement* element) {
 }
 
 void InsertGAFilter::Characters(HtmlCharactersNode* characters) {
+  // Don't touch existing inline scripts when the page's CSP forbids inline
+  // script execution: editing one would invalidate a hash-sourced
+  // allowance, and the ga.js content-experiment path re-injects the script
+  // body as new inline scripts the browser would block.
   if (script_element_ != nullptr && !found_snippet_ &&
-      !added_experiment_snippet_) {
+      !added_experiment_snippet_ && CspPermitsInlineScript()) {
     RewriteInlineScript(characters);
   }
 }

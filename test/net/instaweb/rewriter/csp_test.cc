@@ -117,6 +117,16 @@ TEST(CspParseSourceTest, NonQuoted) {
   EXPECT_EQ(CspSourceExpression(CspSourceExpression::kUnknown),
             CspSourceExpression::Parse("*example.com"));
 
+  // A bare "*." (no host after the wildcard) is invalid.
+  EXPECT_EQ(CspSourceExpression(CspSourceExpression::kUnknown),
+            CspSourceExpression::Parse("*."));
+
+  EXPECT_EQ(CspSourceExpression(CspSourceExpression::kUnknown),
+            CspSourceExpression::Parse("http://*."));
+
+  EXPECT_EQ(CspSourceExpression(CspSourceExpression::kUnknown),
+            CspSourceExpression::Parse("*.:80"));
+
   // w/o a colon this is a hostname, not a scheme.
   EXPECT_EQ(
       CspSourceExpression(CspSourceExpression::kHostSource,
@@ -229,14 +239,14 @@ TEST_F(CspMatchSourceTest, Basic) {
 }
 
 TEST_F(CspMatchSourceTest, Universal) {
-  // Any urls on a "network scheme" are OK with *
+  // Any urls on a "network scheme" (http, https, ws, wss) are OK with *
   CheckMatch(true, "*", "gopher://origin", "http://www.example.com");
   CheckMatch(true, "*", "gopher://origin", "https://www.example.com");
-  CheckMatch(true, "*", "gopher://origin", "ftp://www.example.com");
+  CheckMatch(true, "*", "gopher://origin", "ws://www.example.com");
+  CheckMatch(true, "*", "gopher://origin", "wss://www.example.com");
 
-  // Oddly, as spec'd, this doesn't include ws: and wss:
-  CheckMatch(false, "*", "gopher://origin", "ws://www.example.com");
-  CheckMatch(false, "*", "gopher://origin", "wss://www.example.com");
+  // ftp: is not a network scheme per spec, so * does not cover it.
+  CheckMatch(false, "*", "gopher://origin", "ftp://www.example.com");
 
   // Note that data: in particular is not intended to be matched by *
   CheckMatch(false, "*", "http://www.example.com", "data:text/plain,stuff");
@@ -382,6 +392,17 @@ TEST_F(CspMatchSourceTest, Path) {
   // GoogleUrl::UnescapeIgnorePlus wouldn't.
   CheckMatch(true, "www.example.com/cs%2f/", "http://whatever",
              "http://www.example.com/cs%2f/pretty.css");
+
+  // The query string is not part of the path for matching purposes.
+  CheckMatch(true, "example.com/js/app.js", "http://example.com/",
+             "http://example.com/js/app.js?v=2");
+  CheckMatch(false, "example.com/js/app.js", "http://example.com/",
+             "http://example.com/js/other.js?v=2");
+  // ...even when the query contains a '/'.
+  CheckMatch(true, "example.com/js/", "http://example.com/",
+             "http://example.com/js/app.js?a=b/c");
+  CheckMatch(false, "example.com/js/app.js", "http://example.com/",
+             "http://example.com/js/app.js/extra?v=2");
 }
 
 TEST_F(CspMatchSourceTest, CaseSensitivity) {
@@ -509,6 +530,24 @@ TEST(CspParseTest, Basic) {
   EXPECT_FALSE(source_list->saw_hash_or_nonce());
 }
 
+TEST(CspParseTest, TabSeparated) {
+  // The grammar permits SP or HTAB between directive name and value; a
+  // tab-separated directive must not be dropped.
+  std::unique_ptr<CspPolicy> policy(
+      CspPolicy::Parse("script-src\t'none';\timg-src\t*"));
+  ASSERT_TRUE(policy != nullptr);
+  const CspSourceList* script_src =
+      policy->SourceListFor(CspDirective::kScriptSrc);
+  ASSERT_TRUE(script_src != nullptr);
+  EXPECT_TRUE(script_src->expressions().empty());
+  const CspSourceList* img_src = policy->SourceListFor(CspDirective::kImgSrc);
+  ASSERT_TRUE(img_src != nullptr);
+  EXPECT_EQ(1, img_src->expressions().size());
+  EXPECT_FALSE(policy->CanLoadUrl(CspDirective::kScriptSrc,
+                                  GoogleUrl("http://www.example.com/"),
+                                  GoogleUrl("http://www.example.com/a.js")));
+}
+
 TEST(CspParseTest, Repeated) {
   // Repeating within same policy doesn't do anything.
   std::unique_ptr<CspPolicy> policy(CspPolicy::Parse(
@@ -579,7 +618,34 @@ TEST(CspPolicyTest, InlineScript) {
   }
 
   {
+    // With no script-src, inline script falls back to default-src;
+    // default-src * without 'unsafe-inline' does not permit inline
+    // script.
     std::unique_ptr<CspPolicy> p(CspPolicy::Parse("default-src *"));
+    ASSERT_TRUE(p != nullptr);
+    EXPECT_FALSE(p->PermitsInlineScript());
+    EXPECT_FALSE(p->PermitsInlineScriptAttribute());
+  }
+
+  {
+    std::unique_ptr<CspPolicy> p(CspPolicy::Parse("default-src 'self'"));
+    ASSERT_TRUE(p != nullptr);
+    EXPECT_FALSE(p->PermitsInlineScript());
+    EXPECT_FALSE(p->PermitsInlineScriptAttribute());
+  }
+
+  {
+    std::unique_ptr<CspPolicy> p(
+        CspPolicy::Parse("default-src 'unsafe-inline'"));
+    ASSERT_TRUE(p != nullptr);
+    EXPECT_TRUE(p->PermitsInlineScript());
+    EXPECT_TRUE(p->PermitsInlineScriptAttribute());
+  }
+
+  {
+    // An explicit script-src takes precedence over default-src.
+    std::unique_ptr<CspPolicy> p(
+        CspPolicy::Parse("script-src 'unsafe-inline'; default-src 'none'"));
     ASSERT_TRUE(p != nullptr);
     EXPECT_TRUE(p->PermitsInlineScript());
     EXPECT_TRUE(p->PermitsInlineScriptAttribute());
@@ -637,7 +703,32 @@ TEST(CspPolicyTest, InlineStyle) {
   }
 
   {
+    // With no style-src, inline style falls back to default-src.
     std::unique_ptr<CspPolicy> p(CspPolicy::Parse("default-src *"));
+    ASSERT_TRUE(p != nullptr);
+    EXPECT_FALSE(p->PermitsInlineStyle());
+    EXPECT_FALSE(p->PermitsInlineStyleAttribute());
+  }
+
+  {
+    std::unique_ptr<CspPolicy> p(CspPolicy::Parse("default-src 'self'"));
+    ASSERT_TRUE(p != nullptr);
+    EXPECT_FALSE(p->PermitsInlineStyle());
+    EXPECT_FALSE(p->PermitsInlineStyleAttribute());
+  }
+
+  {
+    std::unique_ptr<CspPolicy> p(
+        CspPolicy::Parse("default-src 'unsafe-inline'"));
+    ASSERT_TRUE(p != nullptr);
+    EXPECT_TRUE(p->PermitsInlineStyle());
+    EXPECT_TRUE(p->PermitsInlineStyleAttribute());
+  }
+
+  {
+    // An explicit style-src takes precedence over default-src.
+    std::unique_ptr<CspPolicy> p(
+        CspPolicy::Parse("style-src 'unsafe-inline'; default-src 'none'"));
     ASSERT_TRUE(p != nullptr);
     EXPECT_TRUE(p->PermitsInlineStyle());
     EXPECT_TRUE(p->PermitsInlineStyleAttribute());
@@ -680,6 +771,175 @@ TEST(CspPolicyTest, InlineStyle) {
     ASSERT_TRUE(p != nullptr);
     EXPECT_FALSE(p->PermitsInlineStyle());
     EXPECT_FALSE(p->PermitsInlineStyleAttribute());
+  }
+}
+
+TEST(CspPolicyTest, ScriptSrcElemAttr) {
+  {
+    // script-src-elem governs inline <script>, overriding script-src...
+    std::unique_ptr<CspPolicy> p(CspPolicy::Parse(
+        "script-src-elem 'unsafe-inline'; script-src 'none'"));
+    ASSERT_TRUE(p != nullptr);
+    EXPECT_TRUE(p->PermitsInlineScript());
+    // ...but not inline event handlers, which use script-src-attr ->
+    // script-src.
+    EXPECT_FALSE(p->PermitsInlineScriptAttribute());
+  }
+
+  {
+    std::unique_ptr<CspPolicy> p(CspPolicy::Parse(
+        "script-src-elem 'none'; script-src 'unsafe-inline'"));
+    ASSERT_TRUE(p != nullptr);
+    EXPECT_FALSE(p->PermitsInlineScript());
+    EXPECT_TRUE(p->PermitsInlineScriptAttribute());
+  }
+
+  {
+    // script-src-attr governs event handlers, overriding script-src.
+    std::unique_ptr<CspPolicy> p(CspPolicy::Parse(
+        "script-src-attr 'unsafe-inline'; script-src 'none'"));
+    ASSERT_TRUE(p != nullptr);
+    EXPECT_FALSE(p->PermitsInlineScript());
+    EXPECT_TRUE(p->PermitsInlineScriptAttribute());
+  }
+
+  {
+    // -elem overrides default-src too when script-src is absent.
+    std::unique_ptr<CspPolicy> p(CspPolicy::Parse(
+        "script-src-elem 'unsafe-inline'; default-src 'none'"));
+    ASSERT_TRUE(p != nullptr);
+    EXPECT_TRUE(p->PermitsInlineScript());
+    EXPECT_FALSE(p->PermitsInlineScriptAttribute());
+  }
+
+  {
+    // External script loads consult script-src-elem first.
+    std::unique_ptr<CspPolicy> p(CspPolicy::Parse(
+        "script-src-elem www.example.com; script-src 'none'"));
+    ASSERT_TRUE(p != nullptr);
+    EXPECT_TRUE(p->CanLoadUrl(CspDirective::kScriptSrc,
+                              GoogleUrl("http://www.example.com/"),
+                              GoogleUrl("http://www.example.com/foo.js")));
+    EXPECT_FALSE(p->CanLoadUrl(CspDirective::kScriptSrc,
+                               GoogleUrl("http://www.example.com/"),
+                               GoogleUrl("http://www.example.org/foo.js")));
+  }
+
+  {
+    // With -elem and script-src absent, external script loads still
+    // fall back to default-src.
+    std::unique_ptr<CspPolicy> p(
+        CspPolicy::Parse("default-src www.example.com"));
+    ASSERT_TRUE(p != nullptr);
+    EXPECT_TRUE(p->CanLoadUrl(CspDirective::kScriptSrc,
+                              GoogleUrl("http://www.example.com/"),
+                              GoogleUrl("http://www.example.com/foo.js")));
+    EXPECT_FALSE(p->CanLoadUrl(CspDirective::kScriptSrc,
+                               GoogleUrl("http://www.example.com/"),
+                               GoogleUrl("http://www.example.org/foo.js")));
+  }
+}
+
+TEST(CspPolicyTest, StyleSrcElemAttr) {
+  {
+    std::unique_ptr<CspPolicy> p(CspPolicy::Parse(
+        "style-src-elem 'unsafe-inline'; style-src 'none'"));
+    ASSERT_TRUE(p != nullptr);
+    EXPECT_TRUE(p->PermitsInlineStyle());
+    EXPECT_FALSE(p->PermitsInlineStyleAttribute());
+  }
+
+  {
+    std::unique_ptr<CspPolicy> p(CspPolicy::Parse(
+        "style-src-attr 'unsafe-inline'; style-src 'none'"));
+    ASSERT_TRUE(p != nullptr);
+    EXPECT_FALSE(p->PermitsInlineStyle());
+    EXPECT_TRUE(p->PermitsInlineStyleAttribute());
+  }
+
+  {
+    // External stylesheet loads consult style-src-elem first.
+    std::unique_ptr<CspPolicy> p(CspPolicy::Parse(
+        "style-src-elem www.example.com; style-src 'none'"));
+    ASSERT_TRUE(p != nullptr);
+    EXPECT_TRUE(p->CanLoadUrl(CspDirective::kStyleSrc,
+                              GoogleUrl("http://www.example.com/"),
+                              GoogleUrl("http://www.example.com/a.css")));
+    EXPECT_FALSE(p->CanLoadUrl(CspDirective::kStyleSrc,
+                               GoogleUrl("http://www.example.com/"),
+                               GoogleUrl("http://www.example.org/a.css")));
+  }
+}
+
+TEST(CspPolicyTest, PermitsDataImage) {
+  {
+    // No img-src or default-src --- no relevant policy.
+    std::unique_ptr<CspPolicy> p(CspPolicy::Parse("script-src *"));
+    ASSERT_TRUE(p != nullptr);
+    EXPECT_TRUE(p->PermitsDataImage());
+  }
+
+  {
+    // Host sources and * do not match data: URLs.
+    std::unique_ptr<CspPolicy> p(CspPolicy::Parse("img-src *"));
+    ASSERT_TRUE(p != nullptr);
+    EXPECT_FALSE(p->PermitsDataImage());
+  }
+
+  {
+    std::unique_ptr<CspPolicy> p(CspPolicy::Parse("img-src 'self'"));
+    ASSERT_TRUE(p != nullptr);
+    EXPECT_FALSE(p->PermitsDataImage());
+  }
+
+  {
+    std::unique_ptr<CspPolicy> p(CspPolicy::Parse("img-src 'self' data:"));
+    ASSERT_TRUE(p != nullptr);
+    EXPECT_TRUE(p->PermitsDataImage());
+  }
+
+  {
+    // Falls back to default-src when img-src is absent.
+    std::unique_ptr<CspPolicy> p(CspPolicy::Parse("default-src 'self'"));
+    ASSERT_TRUE(p != nullptr);
+    EXPECT_FALSE(p->PermitsDataImage());
+  }
+
+  {
+    std::unique_ptr<CspPolicy> p(CspPolicy::Parse("default-src data:"));
+    ASSERT_TRUE(p != nullptr);
+    EXPECT_TRUE(p->PermitsDataImage());
+  }
+
+  {
+    // img-src takes precedence over default-src.
+    std::unique_ptr<CspPolicy> p(
+        CspPolicy::Parse("img-src data:; default-src 'none'"));
+    ASSERT_TRUE(p != nullptr);
+    EXPECT_TRUE(p->PermitsDataImage());
+  }
+}
+
+TEST(CspContextTest, PermitsDataImage) {
+  {
+    // Base case: no policies at all.
+    CspContext ctx;
+    EXPECT_TRUE(ctx.PermitsDataImage());
+  }
+
+  {
+    // All policies must permit.
+    CspContext ctx;
+    ctx.AddPolicy(CspPolicy::Parse("img-src data:"));
+    ctx.AddPolicy(CspPolicy::Parse("img-src 'self'"));
+    EXPECT_FALSE(ctx.PermitsDataImage());
+  }
+
+  {
+    CspContext ctx;
+    ctx.AddPolicy(CspPolicy::Parse("img-src data:"));
+    ctx.AddPolicy(CspPolicy::Parse("default-src data: 'self'"));
+    EXPECT_TRUE(ctx.PermitsDataImage());
   }
 }
 

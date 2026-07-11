@@ -392,8 +392,6 @@ pagespeed.Graphs.prototype.drawVisualization = function() {
                     pagespeed.Graphs.DisplayDiv.CACHE_TYPE);
   this.drawBarChart('redis', 'Redis',
                     pagespeed.Graphs.DisplayDiv.CACHE_TYPE);
-  this.drawBarChart('lru_cache', 'LRU',
-                    pagespeed.Graphs.DisplayDiv.CACHE_TYPE);
   this.drawBarChart('shm_cache', 'Shared Memory',
                     pagespeed.Graphs.DisplayDiv.CACHE_TYPE);
 
@@ -407,8 +405,6 @@ pagespeed.Graphs.prototype.drawVisualization = function() {
 
   this.drawHistoryChart('http', 'Http', pagespeed.Graphs.DisplayDiv.REALTIME);
   this.drawHistoryChart('file_cache', 'File Cache RT',
-                        pagespeed.Graphs.DisplayDiv.REALTIME);
-  this.drawHistoryChart('lru_cache', 'LRU Cache RT',
                         pagespeed.Graphs.DisplayDiv.REALTIME);
   this.drawHistoryChart('curl_fetch', 'Curl stats RT',
                         pagespeed.Graphs.DisplayDiv.REALTIME);

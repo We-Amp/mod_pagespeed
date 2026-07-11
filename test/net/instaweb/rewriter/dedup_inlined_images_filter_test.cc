@@ -233,6 +233,35 @@ TEST_F(DedupInlinedImagesTest, DedupSecondSmallImageWithAttributes) {
                                 "</script>")));
 }
 
+TEST_F(DedupInlinedImagesTest, CspForbidsInlineScript) {
+  // Under a script-src policy without 'unsafe-inline' the browser would
+  // block the inline restore scripts, so duplicates must not be deduped
+  // (each occurrence keeps its own inlined data, and no ids are added).
+  const char kCsp[] =
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"script-src *;\">\n";
+  TestDedupImages("csp_no_inline", kCsp, kCsp,
+                  StrCat("<img src='", kCuppaPngFilename, "'>\n", "<img src='",
+                         kCuppaPngFilename, "'>"),
+                  StrCat("<img src='", kCuppaPngInlineData, "'>\n",
+                         "<img src='", kCuppaPngInlineData, "'>"));
+}
+
+TEST_F(DedupInlinedImagesTest, CspAllowsInlineScript) {
+  // With 'unsafe-inline' permitted the filter behaves as usual.
+  const char kCsp[] =
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"script-src * 'unsafe-inline';\">\n";
+  TestDedupImages(
+      "csp_unsafe_inline", kCsp, kCsp,
+      StrCat("<img src='", kCuppaPngFilename, "'>\n", "<img src='",
+             kCuppaPngFilename, "'>"),
+      StrCat("<img src='", kCuppaPngInlineData, "' id=\"pagespeed_img_01\">\n",
+             InsertScriptBefore(
+                 StrCat("<img id=\"pagespeed_img_02\">",
+                        absl::StrFormat(kInlinedScriptFormat, 3, 1, 2, 3)))));
+}
+
 TEST_F(DedupInlinedImagesTest, DisabledForOldBlackberry) {
   // This UA doesn't support LazyloadImages so nor does it support deduping.
   SetCurrentUserAgent(UserAgentMatcherTestBase::kBlackBerryOS5UserAgent);

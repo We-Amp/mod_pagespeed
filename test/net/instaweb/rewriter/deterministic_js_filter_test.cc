@@ -68,6 +68,35 @@ TEST_F(DeterministicJsFilterTest, DeterministicJsInjection) {
                    expected_str);
 }
 
+TEST_F(DeterministicJsFilterTest, CspForbidsInlineScript) {
+  // The Date()/random() overrides are an inline script, which a
+  // script-src policy without 'unsafe-inline' would block; the page must
+  // be left untouched.
+  ValidateNoChanges("csp_no_inline",
+                    "<head>"
+                    "<meta http-equiv=\"Content-Security-Policy\" "
+                    "content=\"script-src *;\">"
+                    "</head><body></body>");
+}
+
+TEST_F(DeterministicJsFilterTest, CspAllowsInlineScript) {
+  // With 'unsafe-inline' permitted the filter behaves as usual. The
+  // script is injected at the start of <head>, before the policy tag.
+  const char kCsp[] =
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"script-src * 'unsafe-inline';\">";
+  StringPiece deterministic_js_code =
+      server_context()->static_asset_manager()->GetAsset(
+          StaticAssetEnum::DETERMINISTIC_JS, options());
+  GoogleString expected_str =
+      StrCat("<head><script type=\"text/javascript\" "
+             "data-pagespeed-no-defer>",
+             deterministic_js_code, "</script>", kCsp, "</head><body></body>");
+  ValidateExpected("csp_unsafe_inline",
+                   StrCat("<head>", kCsp, "</head><body></body>"),
+                   expected_str);
+}
+
 TEST_F(DeterministicJsFilterTest, DeterministicJsInjectionWithSomeHeadContent) {
   StringPiece deterministic_js_code =
       server_context()->static_asset_manager()->GetAsset(

@@ -246,11 +246,263 @@ namespace ps_base_fetch {
 ngx_http_output_header_filter_pt ngx_http_next_header_filter;
 ngx_http_output_body_filter_pt ngx_http_next_body_filter;
 
+// the design record forced-wrap safety margin.  Keep aliasing only while a ceiling-
+// forced wrap is at least this far off (>> one drain's writev burst); below
+// it, de-alias the tail proactively.  Far under the lease ceiling, so a
+// normal-speed serve stays aliased its whole life.
+const uint64_t kBarrierMarginNs = 1000ULL * 1000 * 1000;  // 1 s
+
+// the design record per-drain zero-copy barrier.  Runs in the write call stack (this is
+// the top body filter, re-entered by ngx_http_writer -> ngx_http_output_filter
+// before every socket drain) BEFORE the aliased buf is handed to the write
+// filter, so an aliased writev is always immediately preceded (same stack, µs)
+// by an intent-checked lease revalidation.  Returns NGX_OK to proceed (the buf
+// may have been de-aliased in place) or NGX_ERROR to fail the serve closed (a
+// wrap committed -> the unsent tail is torn and Content-Length is already on
+// the wire).
+ngx_int_t ps_zerocopy_barrier(ngx_http_request_t* r, PsZeroCopyAlias* a) {
+  ngx_buf_t* b = a->buf;
+  if (a->done || b->memory == 0) {
+    return NGX_OK;  // already de-aliased (owned) or finalized.
+  }
+  if (b->pos >= b->last) {
+    a->done = true;  // fully drained while aliased (fast client): spent.
+    return NGX_OK;
+  }
+  // Stamp a fresh lease + Dekker-revalidate: a normal wrap whose lease-load is
+  // seq_cst-after ours now defers; kCopyNow = a wrap is in flight (region
+  // intact), kTorn = a wrap committed (region may be overwritten), kOk = none.
+  const LeaseRenewal res = a->pin->RenewLeaseStrict();
+  if (res == LeaseRenewal::kTorn) {
+    a->done = true;
+    if (a->renew_fail_stat != nullptr) {
+      a->renew_fail_stat->Add(1);
+    }
+    return NGX_ERROR;  // torn tail, Content-Length already promised: RST.
+  }
+  const bool deadline_near = a->pin->NsUntilForcedWrap() <= kBarrierMarginNs;
+  if (res == LeaseRenewal::kOk && !deadline_near) {
+    return NGX_OK;  // provably safe to keep aliasing this drain.
+  }
+  // kCopyNow / kLeasesOff / a ceiling-forced wrap within the margin (which
+  // ignores the lease): de-alias the unsent tail into request-owned memory
+  // BEFORE the write filter reads it.  Single-threaded loop -> no race with
+  // the write filter sending this same buf.
+  size_t rem = static_cast<size_t>(b->last - b->pos);
+  u_char* owned = static_cast<u_char*>(ngx_pnalloc(r->pool, rem));
+  if (owned == nullptr) {
+    a->done = true;
+    return NGX_ERROR;  // cannot de-alias safely: fail closed (rare).
+  }
+  ngx_memcpy(owned, b->pos, rem);
+  // copy-then-verify: a forced wrap could have raced the memcpy; re-check the
+  // borrow AFTER the copy and fail closed if the epoch moved (torn copy).
+  if (a->pin->RenewLeaseStrict() == LeaseRenewal::kTorn) {
+    a->done = true;
+    if (a->renew_fail_stat != nullptr) {
+      a->renew_fail_stat->Add(1);
+    }
+    return NGX_ERROR;
+  }
+  b->start = b->pos = owned;
+  b->last = b->end = owned + rem;
+  b->memory = 0;
+  b->temporary = 1;
+  a->done = true;
+  if (a->copied_out_stat != nullptr) {
+    a->copied_out_stat->Add(1);
+  }
+  return NGX_OK;
+}
+
+// Ring degrade margin: while refills remain, a ceiling-forced wrap
+// (which ignores our lease) reachable within this window means the stripe
+// is too hot to keep leaning on the pin -- copy the whole remaining tail
+// out now.  Same value and rationale as the emit-time margin
+// (kEmitMarginNs) in ngx_base_fetch.cc.
+const uint64_t kRingDegradeMarginNs = 500ULL * 1000 * 1000;  // 500 ms
+
+// Bounded-copy ring: copy the next window from the pinned region into
+// the oldest slot (or, under wrap pressure, the whole remaining tail into a
+// one-shot pool buffer, finishing the ring).  Copy-then-verify per window,
+// the same protocol as the whole-body copy path: a forced wrap ignores our
+// fresh lease and can race the memcpy, so the borrow is re-checked AFTER
+// the bytes were copied and a kTorn verdict fails the serve closed
+// (Content-Length is already on the wire).
+ngx_int_t ps_bounded_ring_emit_next(ngx_http_request_t* r,
+                                    PsBoundedCopyRing* ring,
+                                    ngx_chain_t** out) {
+  *out = nullptr;
+  DCHECK(!ring->done);
+  DCHECK(ring->cursor < ring->size);
+  const size_t remaining = ring->size - ring->cursor;
+  ngx_buf_t* b = ring->slot[ring->next_refill];
+  const size_t capacity = static_cast<size_t>(b->end - b->start);
+  const size_t n = remaining < capacity ? remaining : capacity;
+  ngx_memcpy(b->start, ring->src + ring->cursor, n);
+  const LeaseRenewal res = ring->pin->RenewLeaseStrict();
+  if (res == LeaseRenewal::kTorn) {
+    ring->done = true;
+    if (ring->renew_fail_stat != nullptr) {
+      ring->renew_fail_stat->Add(1);
+    }
+    return NGX_ERROR;  // epoch moved: the copied window may be torn.
+  }
+  if (res == LeaseRenewal::kOk &&
+      ring->pin->NsUntilForcedWrap() > kRingDegradeMarginNs) {
+    ngx_chain_t* cl = ngx_alloc_chain_link(r->pool);
+    if (cl == nullptr) {
+      ring->done = true;
+      return NGX_ERROR;
+    }
+    // Recycle the slot buf in place: same descriptor, new window.
+    b->pos = b->start;
+    b->last = b->start + n;
+    b->flush = 0;
+    b->shadow = nullptr;
+    ring->cursor += n;
+    ring->next_refill = (ring->next_refill + 1) % kRingSlotCount;
+    if (ring->cursor == ring->size) {
+      b->last_buf = 1;
+      ring->done = true;
+      // Every body byte is in nginx-owned memory now: stop pinning the
+      // mapped region without waiting for the final window to drain.
+      delete ring->pin;
+      ring->pin = nullptr;
+    } else {
+      b->last_buf = 0;
+    }
+    if (ring->refills_stat != nullptr) {
+      ring->refills_stat->Add(1);
+    }
+    cl->buf = b;
+    cl->next = nullptr;
+    *out = cl;
+    return NGX_OK;
+  }
+  // kCopyNow (wrap in flight), kLeasesOff (no verify semantics to lean on),
+  // or a ceiling-forced wrap within the margin: stop leaning on the pin.
+  // Copy the whole remaining tail once, verify once more, and finish the
+  // serve from owned memory (the just-copied slot window is discarded --
+  // the tail starts at the unadvanced cursor and includes those bytes).
+  u_char* owned = static_cast<u_char*>(ngx_pnalloc(r->pool, remaining));
+  ngx_buf_t* tb = static_cast<ngx_buf_t*>(ngx_calloc_buf(r->pool));
+  ngx_chain_t* cl = ngx_alloc_chain_link(r->pool);
+  if (owned == nullptr || tb == nullptr || cl == nullptr) {
+    ring->done = true;
+    return NGX_ERROR;
+  }
+  ngx_memcpy(owned, ring->src + ring->cursor, remaining);
+  const LeaseRenewal rv = ring->pin->RenewLeaseStrict();
+  delete ring->pin;
+  ring->pin = nullptr;
+  ring->done = true;
+  ring->cursor = ring->size;
+  if (rv == LeaseRenewal::kTorn) {
+    if (ring->renew_fail_stat != nullptr) {
+      ring->renew_fail_stat->Add(1);
+    }
+    return NGX_ERROR;
+  }
+  tb->start = tb->pos = owned;
+  tb->last = tb->end = owned + remaining;
+  tb->temporary = 1;
+  tb->last_buf = 1;
+  if (ring->copied_out_stat != nullptr) {
+    ring->copied_out_stat->Add(1);
+  }
+  cl->buf = tb;
+  cl->next = nullptr;
+  *out = cl;
+  return NGX_OK;
+}
+
+// Refill timer handler: drive the request's write path exactly as a
+// write event would -- the writer flushes r->out, re-enters the body-filter
+// chain (our refill block) with NULL input, and finalizes the request when
+// everything has drained.  ngx_http_run_posted_requests is the standard
+// epilogue for request work driven from a raw event.
+void ps_bounded_ring_refill_event(ngx_event_t* ev) {
+  ngx_http_request_t* r = static_cast<ngx_http_request_t*>(ev->data);
+  ngx_connection_t* c = r->connection;
+  r->write_event_handler(r);
+  ngx_http_run_posted_requests(c);
+}
+
 ngx_int_t ps_base_fetch_filter(ngx_http_request_t* r, ngx_chain_t* in) {
   ps_request_ctx_t* ctx = ps_get_request_context(r);
 
   if (r->header_only) {
     return NGX_OK;
+  }
+  // the design record: run the per-drain barrier BEFORE the base_fetch-null early return
+  // below -- the aliased buf can still be in r->out after the NgxBaseFetch was
+  // released mid-drain, and it must be revalidated/de-aliased before any
+  // further writev.  Keyed only off the request-scoped ctx + pool-scoped pin.
+  if (ctx != nullptr && ctx->zerocopy_alias != nullptr) {
+    if (ps_zerocopy_barrier(r, ctx->zerocopy_alias) != NGX_OK) {
+      return NGX_ERROR;
+    }
+  }
+  // Bounded-copy ring refill.  This is the top body filter, so
+  // ngx_http_writer re-enters it (in == NULL) whenever the stream becomes
+  // writable again -- that re-entry is the ring's refill clock.  Like the
+  // barrier above it must run before the base_fetch-null early return: the
+  // ring outlives the NgxBaseFetch by design.  A slot whose buf reads
+  // pos == last is fully accepted by the socket (verified against nginx
+  // 1.30.3: h2 advances the ORIGINAL buf's pos only on DATA-frame send
+  // completion, via the shadow back-pointer, and only then recycles the
+  // shadow chunks; QUIC copies at consumption), so no downstream reference
+  // to the previous window's bytes can remain and the slot is reusable.
+  // Slots drain in emission order, so scan from the oldest and stop at the
+  // first undrained one.
+  if (ctx != nullptr && ctx->bounded_ring != nullptr &&
+      !ctx->bounded_ring->done) {
+    PsBoundedCopyRing* ring = ctx->bounded_ring;
+    ngx_chain_t* refills = nullptr;
+    ngx_chain_t** refill_tail = &refills;
+    while (!ring->done) {
+      ngx_buf_t* slot = ring->slot[ring->next_refill];
+      if (slot->pos < slot->last) {
+        break;  // oldest window still in flight downstream.
+      }
+      ngx_chain_t* cl = nullptr;
+      if (ps_bounded_ring_emit_next(r, ring, &cl) != NGX_OK) {
+        ps_set_buffered(r, false);
+        return NGX_ERROR;  // torn window mid-stream: reset fail-closed.
+      }
+      *refill_tail = cl;
+      refill_tail = &cl->next;
+    }
+    if (refills != nullptr) {
+      // Refilled windows go after whatever is already being passed down.
+      if (in == nullptr) {
+        in = refills;
+      } else {
+        ngx_chain_t* tail = in;
+        while (tail->next != nullptr) {
+          tail = tail->next;
+        }
+        tail->next = refills;
+      }
+    }
+    // Keep our buffered bit set while windows remain so ngx_http_writer
+    // stays armed (ngx_http_set_write_handler keys on r->buffered) across
+    // h2 window reopens; once the final window is handed down, r->out and
+    // the stream's own buffering own completion.  Reuses the same bit
+    // ps_base_fetch_handler holds while collecting: the ring only exists
+    // after the base fetch was released, so ownership never overlaps.
+    ps_set_buffered(r, !ring->done);
+    // Re-arm the refill clock: fast cadence while windows are turning over,
+    // backed off when the in-flight windows have not drained yet (a slow
+    // client's resume rides the exhausted-writer path; the timer is only
+    // its backstop).  Disarm on completion -- and on the error return
+    // above, request teardown runs the pool cleanup, which disarms.
+    if (!ring->done) {
+      ngx_add_timer(&ring->refill_ev, refills != nullptr ? 1 : 25);
+    } else if (ring->refill_ev.timer_set) {
+      ngx_del_timer(&ring->refill_ev);
+    }
   }
   if (ctx == nullptr || ctx->base_fetch == nullptr) {
     return ngx_http_next_body_filter(r, in);
@@ -897,10 +1149,10 @@ char* ps_configure(ngx_conf_t* cf, NgxRewriteOptions** options,
       g_gzip_setter.SetGZipForLocation(cf, false);
     }
   }
-  if (n_args == 2 && args[0].compare("gzip") == 0) {
-    if (args[1].compare("on") == 0) {
+  if (n_args == 2 && StringCaseEqual(args[0], "gzip")) {
+    if (StringCaseEqual(args[1], "on")) {
       g_gzip_setter.SetGZipForLocation(cf, true);
-    } else if (args[1].compare("off") == 0) {
+    } else if (StringCaseEqual(args[1], "off")) {
       g_gzip_setter.SetGZipForLocation(cf, false);
     } else {
       char* error_message = string_piece_to_pool_string(

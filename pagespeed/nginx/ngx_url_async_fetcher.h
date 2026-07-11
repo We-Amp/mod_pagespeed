@@ -32,6 +32,9 @@
 extern "C" {
 #include <ngx_config.h>
 #include <ngx_core.h>
+#if (NGX_SSL)
+#include <ngx_event.h>
+#endif
 }
 
 #include <vector>
@@ -70,7 +73,39 @@ class NgxUrlAsyncFetcher : public UrlAsyncFetcher {
   // the read handler in the main thread
   static void ReadCallback(const ps_event_data& data);
 
-  virtual bool SupportsHttps() const { return false; }
+  // True when nginx was built with SSL support and the https options enable
+  // https fetching. Mirrors CurlUrlAsyncFetcher's interpretation of the
+  // FetchHttps directive.
+  virtual bool SupportsHttps() const {
+#if (NGX_SSL)
+    return allow_https();
+#else
+    return false;
+#endif
+  }
+
+  // Parses a FetchHttps directive (same keywords as the curl fetcher) and,
+  // when https is enabled, sets up the SSL context. Call the certificate
+  // setters first: the CA locations are loaded here. Must be called before
+  // fetches start (single-threaded startup).
+  bool SetHttpsOptions(StringPiece directive);
+  void SetSslCertificatesDir(StringPiece dir) {
+    dir.CopyToString(&ssl_certificates_dir_);
+  }
+  void SetSslCertificatesFile(StringPiece file) {
+    file.CopyToString(&ssl_certificates_file_);
+  }
+
+  bool allow_https() const;
+  bool allow_self_signed() const;
+  bool allow_unknown_certificate_authority() const;
+  bool allow_certificate_not_yet_valid() const;
+
+#if (NGX_SSL)
+  // SSL context shared by all https fetches of this fetcher. Only valid
+  // when SupportsHttps() is true.
+  ngx_ssl_t* ssl() { return &ssl_; }
+#endif
 
   virtual void Fetch(const GoogleString& url, MessageHandler* message_handler,
                      AsyncFetch* callback);
@@ -112,6 +147,9 @@ class NgxUrlAsyncFetcher : public UrlAsyncFetcher {
  private:
   static void TimeoutHandler(ngx_event_t* tev);
   static bool ParseUrl(ngx_url_t* url, ngx_pool_t* pool);
+#if (NGX_SSL)
+  bool CreateSslContext();
+#endif
   friend class NgxFetch;
 
   NgxFetchPool active_fetches_;
@@ -138,6 +176,14 @@ class NgxUrlAsyncFetcher : public UrlAsyncFetcher {
   ngx_msec_t fetch_timeout_;
 
   NgxEventConnection* event_connection_;
+
+  uint32 https_options_ = 0;
+  GoogleString ssl_certificates_dir_;
+  GoogleString ssl_certificates_file_;
+#if (NGX_SSL)
+  ngx_ssl_t ssl_;
+  bool ssl_created_ = false;
+#endif
 
   NgxUrlAsyncFetcher(const NgxUrlAsyncFetcher&) = delete;
   NgxUrlAsyncFetcher& operator=(const NgxUrlAsyncFetcher&) = delete;

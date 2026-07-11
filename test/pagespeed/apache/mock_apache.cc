@@ -22,21 +22,26 @@
 #include <cstdlib>
 #include <vector>
 
+// clang-format off: the httpd headers below require apache_httpd_includes.h
+// (httpd.h) first; alphabetical include sorting breaks them.
 #include "base/logging.h"
 #include "pagespeed/apache/apache_httpd_includes.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/http/http_names.h"
+#include "apr_buckets.h"  // NOLINT - for the ap_pass_brigade mock
 #include "apr_strings.h"  // NOLINT - for apr_pstrdup
 #include "http_log.h"     // NOLINT - for ap_log_*_ declarations
 #include "http_protocol.h"  // NOLINT - for AP_DECLARE_HOOK types
 #include "http_request.h"   // NOLINT - for AP_DECLARE_HOOK types
 #include "unixd.h"        // NOLINT - for unixd_config_rec
 #include "util_filter.h"  // NOLINT
+// clang-format on
 
 namespace {
 
 net_instaweb::StringVector* recorded_actions = nullptr;
 bool apr_initialized = false;
+bool partial_pass_brigade = false;
 
 }  // namespace
 
@@ -45,6 +50,7 @@ namespace net_instaweb {
 void MockApache::Initialize() {
   CHECK(recorded_actions == nullptr);
   recorded_actions = new StringVector();
+  partial_pass_brigade = false;
   if (!apr_initialized) {
     apr_initialize();
     atexit(apr_terminate);
@@ -97,6 +103,10 @@ void MockApache::PrepareRequest(request_rec* request) {
 
 void MockApache::CleanupRequest(request_rec* request) {
   apr_pool_destroy(request->pool);
+}
+
+void MockApache::set_partial_pass_brigade(bool enabled) {
+  partial_pass_brigade = enabled;
 }
 
 GoogleString MockApache::ActionsSinceLastCall() {
@@ -153,8 +163,9 @@ void ap_remove_output_filter(ap_filter_t* filter) {
   log_action(StrCat("ap_remove_output_filter(", filter->frec->name, ")"));
 }
 
-ap_filter_t* ap_add_output_filter(const char*, void*, request_rec*, conn_rec*) {
-  log_fatal("ap_add_output_filter");
+ap_filter_t* ap_add_output_filter(const char* name, void*, request_rec*,
+                                  conn_rec*) {
+  log_action(StrCat("ap_add_output_filter(", StringPiece(name), ")"));
   return nullptr;
 }
 
@@ -164,9 +175,72 @@ apr_status_t ap_get_brigade(ap_filter_t*, apr_bucket_brigade*, ap_input_mode_t,
   return 0;
 }
 
-apr_status_t ap_pass_brigade(ap_filter_t*, apr_bucket_brigade*) {
-  log_fatal("ap_pass_brigade");
-  return 0;
+// Functional mock: consumes the brigade the way a downstream chain would,
+// reading every data bucket (which runs a PAGESPEED_MMAP bucket's the design record
+// read barrier) and logging the concatenated bytes.  Read failures (e.g. a
+// torn mapped borrow) propagate to the caller like a downstream error.
+apr_status_t ap_pass_brigade(ap_filter_t*, apr_bucket_brigade* bb) {
+  if (partial_pass_brigade) {
+    // Model the deferred-write geometry (see mock_apache.h) for the first
+    // data bucket.
+    apr_bucket* bucket = APR_BRIGADE_FIRST(bb);
+    while (bucket != APR_BRIGADE_SENTINEL(bb) &&
+           APR_BUCKET_IS_METADATA(bucket)) {
+      bucket = APR_BUCKET_NEXT(bucket);
+    }
+    CHECK(bucket != APR_BRIGADE_SENTINEL(bb))
+        << "partial mode needs a data bucket";
+    const char* data = nullptr;
+    apr_size_t len = 0;
+    apr_status_t rv = apr_bucket_read(bucket, &data, &len, APR_BLOCK_READ);
+    if (rv != APR_SUCCESS) {
+      log_action("ap_pass_brigade_partial(first=READ_ERROR)");
+      return rv;
+    }
+    CHECK_GE(len, 2u) << "partial mode needs a splittable bucket";
+    const apr_size_t half = len / 2;
+    GoogleString first(data, half);
+    CHECK_EQ(APR_SUCCESS, apr_bucket_split(bucket, half));
+    apr_bucket* rest = APR_BUCKET_NEXT(bucket);
+    apr_bucket_delete(bucket);  // First half accepted by the "socket".
+    // Deferred-write park.  Real httpd DISCARDS this status
+    // (setaside_remaining_output is void), so the mock logs it but does not
+    // return it -- a failure must surface through the re-read below, the
+    // way a poisoned parked bucket fails the next real drain.
+    apr_status_t setaside_rv = apr_bucket_setaside(rest, bb->p);
+    // The next send attempt: re-read (the re-entry barrier), then consume.
+    apr_status_t rest_rv = apr_bucket_read(rest, &data, &len, APR_BLOCK_READ);
+    if (rest_rv != APR_SUCCESS) {
+      log_action(StrCat("ap_pass_brigade_partial(first=", first, ",setaside=",
+                        net_instaweb::IntegerToString(setaside_rv),
+                        ",rest=READ_ERROR)"));
+      return rest_rv;
+    }
+    GoogleString rest_bytes(data, len);
+    apr_brigade_cleanup(bb);
+    log_action(StrCat("ap_pass_brigade_partial(first=", first,
+                      ",setaside=", net_instaweb::IntegerToString(setaside_rv),
+                      ",rest=", rest_bytes, ")"));
+    return APR_SUCCESS;
+  }
+  GoogleString bytes;
+  for (apr_bucket* bucket = APR_BRIGADE_FIRST(bb);
+       bucket != APR_BRIGADE_SENTINEL(bb); bucket = APR_BUCKET_NEXT(bucket)) {
+    if (APR_BUCKET_IS_METADATA(bucket)) {
+      continue;
+    }
+    const char* data = nullptr;
+    apr_size_t len = 0;
+    apr_status_t rv = apr_bucket_read(bucket, &data, &len, APR_BLOCK_READ);
+    if (rv != APR_SUCCESS) {
+      log_action("ap_pass_brigade(READ_ERROR)");
+      return rv;
+    }
+    bytes.append(data, len);
+  }
+  apr_brigade_cleanup(bb);
+  log_action(StrCat("ap_pass_brigade(", bytes, ")"));
+  return APR_SUCCESS;
 }
 
 ap_filter_rec_t* ap_register_output_filter(const char*, ap_out_filter_func,
@@ -189,21 +263,20 @@ ap_filter_rec_t* ap_register_input_filter(const char*, ap_in_filter_func,
 // Apache 2.4 defines macros like "#define ap_log_error ap_log_error_"
 // so we need to provide the underscore-suffixed versions.
 // These are variadic functions - we just ignore the arguments for testing.
-void ap_log_error_(const char* file, int line, int module_index,
-                   int level, apr_status_t status,
-                   const server_rec* s, const char* fmt, ...) {
+void ap_log_error_(const char* file, int line, int module_index, int level,
+                   apr_status_t status, const server_rec* s, const char* fmt,
+                   ...) {
   // Do nothing - this is a mock for testing.
 }
 
-void ap_log_rerror_(const char* file, int line, int module_index,
-                    int level, apr_status_t status,
-                    const request_rec* r, const char* fmt, ...) {
+void ap_log_rerror_(const char* file, int line, int module_index, int level,
+                    apr_status_t status, const request_rec* r, const char* fmt,
+                    ...) {
   // Do nothing - this is a mock for testing.
 }
 
-void ap_log_perror_(const char* file, int line, int module_index,
-                    int level, apr_status_t status, apr_pool_t* p,
-                    const char* fmt, ...) {
+void ap_log_perror_(const char* file, int line, int module_index, int level,
+                    apr_status_t status, apr_pool_t* p, const char* fmt, ...) {
   // Do nothing - this is a mock for testing.
 }
 

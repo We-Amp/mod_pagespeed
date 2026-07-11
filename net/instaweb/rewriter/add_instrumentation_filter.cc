@@ -99,6 +99,12 @@ void AddInstrumentationFilter::AddHeadScript(HtmlElement* element) {
   // Reference: http://msdn.microsoft.com/en-us/library/jj676915(v=vs.85).aspx
   if (element->keyword() != HtmlName::kTitle &&
       element->keyword() != HtmlName::kMeta) {
+    // The timing snippet is an inline script; when the page's CSP forbids
+    // inline scripts, don't add it (and don't mark it added: permission
+    // only shrinks as policies accumulate, so this stays blocked).
+    if (!CspPermitsInlineScript()) {
+      return;
+    }
     added_head_script_ = true;
     // TODO(abliss): add an actual element instead, so other filters can
     // rewrite this JS
@@ -127,7 +133,8 @@ void AddInstrumentationFilter::EndElementImpl(HtmlElement* element) {
     if (!added_head_script_) {
       AddHeadScript(element);
     }
-    if (driver()->options()->report_unload_time() && !added_unload_script_) {
+    if (driver()->options()->report_unload_time() && !added_unload_script_ &&
+        CspPermitsInlineScript()) {
       GoogleString js = GetScriptJs(kUnloadTag);
       HtmlElement* script = driver()->NewElement(element, HtmlName::kScript);
       if (!driver()->defer_instrumentation_script()) {
@@ -146,6 +153,11 @@ void AddInstrumentationFilter::EndDocument() {
   // assured by add_head_filter.
   if (!found_head_) {
     LOG(WARNING) << "No <head> found for URL " << driver()->url();
+    return;
+  }
+  if (!CspPermitsInlineScript()) {
+    // The onload beacon runs from an inline script the page's CSP would
+    // block; injecting it would only add dead bytes.
     return;
   }
   GoogleString js = GetScriptJs(kLoadTag);

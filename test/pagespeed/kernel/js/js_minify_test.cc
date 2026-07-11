@@ -187,6 +187,12 @@ TEST_F(JsMinifyTest, ErrorRegexNewline) {
   CheckError("/not_valid\njavascript/;");
 }
 
+TEST_F(JsMinifyTest, OldMinifierBailsOnTemplateLiteral) {
+  // The legacy minifier does not understand template literals; rather than
+  // corrupt the literal body it must treat the input as unparseable.
+  CheckOldError("var x = `hello ${1 + 2} world`;");
+}
+
 TEST_F(JsMinifyTest, SignedCharDoesntSignExtend) {
   const unsigned char input[] = {0xe0, 0xb2, 0xa0, 0x00};
   const char* input_nosign = reinterpret_cast<const char*>(input);

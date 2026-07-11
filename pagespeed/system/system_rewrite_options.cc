@@ -172,10 +172,21 @@ void SystemRewriteOptions::AddProperties() {
   AddSystemProperty(true, &SystemRewriteOptions::use_shared_mem_locking_,
                     "ausml", RewriteOptions::kUseSharedMemLocking,
                     "Use shared memory for internal named lock service", true);
-  AddSystemProperty(100L * 1024 /* 100 megabytes */,
+  AddSystemProperty(1024L * 1024 /* 1 gigabyte */,
                     &SystemRewriteOptions::file_cache_clean_size_kb_, "afc",
                     RewriteOptions::kFileCacheCleanSizeKb,
                     "Set the target size (in kilobytes) for file cache", true);
+  AddSystemProperty(10, &SystemRewriteOptions::file_cache_small_tier_percent_,
+                    "afstp", RewriteOptions::kFileCacheSmallTierPercent,
+                    "Percentage of the file cache carved out as a separate "
+                    "small-object volume that protects metadata and property "
+                    "entries from payload churn. 0 disables the tier; values "
+                    "are clamped to [0, 50]. Below roughly 256 MB of total "
+                    "file cache the tier disables itself and entries share "
+                    "the main volume. Applies in the default shared-memory "
+                    "metadata cache configuration; with the shm metadata "
+                    "cache disabled, metadata stays on the main volume.",
+                    true);
   AddSystemProperty(0, &SystemRewriteOptions::lru_cache_byte_limit_, "alcb",
                     RewriteOptions::kLruCacheByteLimit,
                     "Set the maximum byte size entry to store in the "
@@ -203,6 +214,36 @@ void SystemRewriteOptions::AddProperties() {
                     RewriteOptions::kCompressMetadataCache,
                     "Whether to compress cache entries before writing them to "
                     "memory or disk.",
+                    true);
+  AddSystemProperty(false, &SystemRewriteOptions::cyclone_zero_copy_, "aczc",
+                    RewriteOptions::kCycloneZeroCopy,
+                    "Serve HTTP cache hits directly from the Cyclone cache's "
+                    "memory-mapped storage without copying the payload "
+                    "(zero-copy).  Experimental.",
+                    true);
+  AddSystemProperty(true, &SystemRewriteOptions::cyclone_zero_copy_serve_,
+                    "aczs", RewriteOptions::kCycloneZeroCopyServe,
+                    "Carry memory-mapped Cyclone cache-hit bytes into the "
+                    "port output buffer by reference (aliased) instead of "
+                    "copying them; the serve safely copies the tail out "
+                    "before a cache eviction can overwrite it.  Default on "
+                    "for nginx; on Apache the aliased serve is experimental "
+                    "and activates only when this option is explicitly set. "
+                    "Apache aliases only plain-HTTP/1.x main-request 200s "
+                    "of at least 16KB served verbatim (no Range, no "
+                    "deflate/ssl/http2 or other transforming filter), and "
+                    "bytes an output filter parks for a slow client are "
+                    "copied out at that point; everything else serves a "
+                    "verified copy.",
+                    true);
+  AddSystemProperty(static_cast<int64>(0),
+                    &SystemRewriteOptions::cyclone_ram_cache_kb_, "acrk",
+                    RewriteOptions::kCycloneRamCacheKb,
+                    "Set the size, in KB, of Cyclone's internal RAM cache "
+                    "tier, decoupled from LRUCacheKbPerProcess.  0 (the "
+                    "default) disables the RAM tier -- reads are served "
+                    "from the memory-mapped volume, which the OS page cache "
+                    "already keeps hot; -1 inherits LRUCacheKbPerProcess.",
                     true);
   AddSystemProperty(
       "enable", &SystemRewriteOptions::https_options_, "fhs", kFetchHttps,
@@ -388,6 +429,12 @@ bool SystemRewriteOptions::ControllerPortOption::SetFromString(
                " is not a valid number or 'unix:' path: '", value_string, "'");
     return false;
   }
+  if (port < 1 || port > 65535) {
+    *error_detail =
+        StrCat(kCentralControllerPort, " must be a TCP port in [1,65535]: '",
+               value_string, "'");
+    return false;
+  }
   // Prepend the port with localhost: before saving it into the option.
   set(StrCat("localhost:", value_string));
   return true;
@@ -399,10 +446,11 @@ bool SystemRewriteOptions::HttpsOptions::SetFromString(
   SplitStringPieceToVector(value, ",", &keywords, true);
   for (int i = 0, n = keywords.size(); i < n; ++i) {
     StringPiece keyword = keywords[i];
-    if (keyword != "enable" && keyword != "disable" &&
-        keyword != "allow_self_signed" &&
-        keyword != "allow_unknown_certificate_authority" &&
-        keyword != "allow_certificate_not_yet_valid") {
+    if (!StringCaseEqual(keyword, "enable") &&
+        !StringCaseEqual(keyword, "disable") &&
+        !StringCaseEqual(keyword, "allow_self_signed") &&
+        !StringCaseEqual(keyword, "allow_unknown_certificate_authority") &&
+        !StringCaseEqual(keyword, "allow_certificate_not_yet_valid")) {
       StrAppend(error_detail, "Invalid HTTPS keyword: ", keyword,
                 ", legal options are: enable,disable,allow_self_signed,"
                 "allow_unknown_certificate_authority,"
@@ -423,19 +471,21 @@ bool SystemRewriteOptions::StaticAssetCDNOptions::SetFromString(
     return false;
   }
 
-  StaticAssetSet* new_set = static_assets_to_cdn_.MakeWriteable();
-  new_set->clear();
+  // Parse into a local set and commit only on full success, so a bad label
+  // partway through doesn't destroy the previously configured set.
+  StaticAssetSet parsed;
   for (int i = 1, n = args.size(); i < n; ++i) {
     StaticAssetEnum::StaticAsset value;
     TrimWhitespace(&args[i]);
     if (StaticAssetEnum::StaticAsset_Parse(args[i].as_string(), &value)) {
-      new_set->insert(value);
+      parsed.insert(value);
     } else {
       *error_detail = StrCat("Invalid static asset label: ", args[i]);
       return false;
     }
   }
 
+  *static_assets_to_cdn_.MakeWriteable() = parsed;
   args[0].CopyToString(&mutable_value());
   return true;
 }

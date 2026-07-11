@@ -92,6 +92,10 @@ class CurlUrlAsyncFetcher : public UrlAsyncFetcher {
   bool SetHttpsOptions(StringPiece directive);
   static bool ValidateHttpsOptions(StringPiece directive,
                                    GoogleString* error_message);
+  // Parses a FetchHttps directive into HttpsOptions flags. Public so other
+  // fetchers (the nginx native fetcher) share the same interpretation.
+  static bool ParseHttpsOptions(StringPiece directive, uint32* options,
+                                GoogleString* error_message);
 
   enum HttpsOptions {
     kEnableHttps = 1 << 0,
@@ -159,9 +163,6 @@ class CurlUrlAsyncFetcher : public UrlAsyncFetcher {
   using CurlFetchPool = Pool<CurlFetch>;
 
  private:
-  static bool ParseHttpsOptions(StringPiece directive, uint32* options,
-                                GoogleString* error_message);
-
   friend class CurlFetch;
 
   CURLM* multi_handle_;

@@ -78,6 +78,7 @@
 #include "pagespeed/kernel/base/file_system.h"
 #include "pagespeed/kernel/base/function.h"
 #include "pagespeed/kernel/base/hasher.h"
+#include "pagespeed/kernel/base/mapped_shared_string.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/proto_util.h"
 #include "pagespeed/kernel/base/request_trace.h"
@@ -241,6 +242,11 @@ RewriteDriver::RewriteDriver(MessageHandler* message_handler,
   early_pre_render_filters_.push_back(&scan_filter_);
 
   dependency_tracker_ = std::make_unique<DependencyTracker>(this);
+
+  // Publish the initial (empty) CSP context version so that
+  // content_security_policy() is always dereferenceable, even before
+  // the first Clear().
+  ClearCspPolicies();
 }
 
 void RewriteDriver::PopulateRequestContext() {
@@ -438,7 +444,7 @@ void RewriteDriver::Clear() NO_THREAD_SAFETY_ANALYSIS {
   ClearRequestProperties();
   user_agent_.clear();
 
-  csp_context_.Clear();
+  ClearCspPolicies();
 }
 
 // Must be called with rewrite_mutex() held.
@@ -1265,22 +1271,80 @@ class CacheCallback : public OptionsAwareHTTPCacheCallback {
   }
 
   void Done(HTTPCache::FindResult find_result) override {
+    // The cache may call us back on one of its own threads, but the fetch
+    // we are feeding may only be safe to touch from the request thread
+    // (e.g. Apache's unbuffered ApacheFetch, which streams straight to the
+    // client).  When the driver has been switched to run its tasks on the
+    // request thread (RewriteDriver::RunTasksOnRequestThread), deliver the
+    // response there -- the same contract CacheUrlAsyncFetcher honors via
+    // set_response_sequence for in-place fetches.  Otherwise deliver
+    // inline, as before.
+    Scheduler::Sequence* sequence = driver_->scheduler_sequence();
+    if (sequence != nullptr) {
+      sequence->Add(
+          MakeFunction(this, &CacheCallback::DeliverDone, find_result));
+    } else {
+      DeliverDone(find_result);
+    }
+  }
+
+  void DeliverDone(HTTPCache::FindResult find_result) {
     StringPiece content;
     ResponseHeaders* response_headers = async_fetch_->response_headers();
     if (find_result.status == HTTPCache::kFound) {
       RewriteStats* stats = driver_->server_context()->rewrite_stats();
       stats->cached_resource_fetches()->Add(1);
 
+      // Bodies below this size keep the cheap copy: a dedicated aliased
+      // ngx_buf_t + copy-out timer is not worth it for tiny resources.
+      const size_t kZeroCopyServeMinBytes = size_t{16} * 1024;
       HTTPValue* value = http_value();
-      bool success = (value->ExtractContents(&content) &&
-                      value->ExtractHeaders(response_headers, handler_));
+      // Zero-copy ALIASED serve (CycloneZeroCopyServe).  This is the
+      // '.pagespeed.' rewritten-resource cache-hit serve: 'value' is the
+      // single canonical optimized OutputResource, and async_fetch_ is a
+      // pass-through ResourceFetch(SharedAsyncFetch) over the port base
+      // fetch with NO RecordingFetch in the chain, so 'content' is served
+      // verbatim; when it is a borrowed Cyclone mmap view we alias the
+      // region into the port output buffer.  The mmap StringPiece is
+      // extracted BEFORE output_resource_->Link collapses the mapped value
+      // (Link -> HTTPValue::share() -> owned copy), and mapped_keepalive
+      // pins the read handle (with the design record renew/force-wrap hooks)
+      // until the port send completes.  Recording/transforming wrappers
+      // override WriteMapped to force the copying Write.
+      HTTPCache* http_cache = driver_->server_context()->http_cache();
+      MappedSharedString mapped_keepalive;
+      const bool alias_serve =
+          http_cache->cyclone_zero_copy_serve_enabled() && value->is_mapped() &&
+          value->ExtractMappedContents(&content, &mapped_keepalive) &&
+          content.size() >= kZeroCopyServeMinBytes;
+      bool success = value->ExtractHeaders(response_headers, handler_);
       if (success) {
+        // output_resource_->Link routes to HTTPValue::share(), which
+        // collapses a mapped (Cyclone zero-copy) value to owned storage --
+        // the OutputResource outlives this serving scope.  For the aliased
+        // serve 'content' was extracted before the collapse (it must alias
+        // the mmap region) and stays valid via the HTTPValue's retained
+        // keep-alive.  For the copying serve 'content' is extracted AFTER
+        // the collapse, so it aliases the collapsed owned storage and the
+        // WriteShared below hands the refcounted bytes to the port fetch
+        // with no body copy.  ExtractContents cannot fail here: it checks a
+        // strict subset of what ExtractHeaders just validated.
         output_resource_->Link(value, handler_);
         output_resource_->SetWritten(true);
+        success = alias_serve || value->ExtractContents(&content);
+      }
+      if (success) {
         async_fetch_->set_content_length(content.size());
         async_fetch_->FixCacheControlForGoogleCache();
         async_fetch_->HeadersComplete();
-        success = async_fetch_->Write(content, handler_);
+        // value->share() is owned heap storage by construction (share()
+        // collapses any mapped view first); mapped bytes never ride the
+        // WriteShared path -- their protection window is bounded, and they
+        // go through WriteMapped with their keepalive instead.
+        success =
+            alias_serve
+                ? async_fetch_->WriteMapped(content, mapped_keepalive, handler_)
+                : async_fetch_->WriteShared(content, value->share(), handler_);
       }
       async_fetch_->Done(success);
       driver_->FetchComplete();
@@ -1514,6 +1578,7 @@ ResourcePtr RewriteDriver::CreateInputResource(
   } else if (decoded_base_url_.IsAnyValid()) {
     if (!IsLoadPermittedByCsp(input_url, role)) {
       *is_authorized = false;
+      server_context_->rewrite_stats()->csp_blocked_rewrites()->Add(1);
       message_handler()->Message(kInfo, "CSP prevents use of '%s'",
                                  input_url.spec_c_str());
       return resource;
@@ -3004,13 +3069,37 @@ void RewriteDriver::SetIsAmpDocument(bool is_amp) {
   set_buffer_events(false);
 }
 
+void RewriteDriver::ClearCspPolicies() {
+  csp_context_versions_.clear();
+  csp_context_versions_.push_back(std::make_unique<CspContext>());
+  csp_context_snapshot_.store(csp_context_versions_.back().get(),
+                              std::memory_order_release);
+}
+
+void RewriteDriver::AddCspPolicy(std::unique_ptr<CspPolicy> policy) {
+  if (policy == nullptr) {
+    return;
+  }
+  // Copy-on-write: rewrite threads may be reading the current version
+  // concurrently, so a published version is never mutated in place.
+  // Copying shares the (immutable) policies rather than duplicating
+  // them.
+  auto new_version =
+      std::make_unique<CspContext>(*csp_context_versions_.back());
+  new_version->AddPolicy(std::move(policy));
+  csp_context_versions_.push_back(std::move(new_version));
+  csp_context_snapshot_.store(csp_context_versions_.back().get(),
+                              std::memory_order_release);
+}
+
 bool RewriteDriver::IsLoadPermittedByCsp(const GoogleUrl& url,
                                          CspDirective role) {
-  if (csp_context_.empty()) {
+  const CspContext& csp_context = content_security_policy();
+  if (csp_context.empty()) {
     return true;
   }
 
-  return csp_context_.CanLoadUrl(role, google_url(), url);
+  return csp_context.CanLoadUrl(role, google_url(), url);
 }
 
 bool RewriteDriver::IsLoadPermittedByCsp(const GoogleUrl& url, InputRole role) {
@@ -3023,7 +3112,7 @@ bool RewriteDriver::IsLoadPermittedByCsp(const GoogleUrl& url, InputRole role) {
       return IsLoadPermittedByCsp(url, CspDirective::kImgSrc);
     case InputRole::kUnknown:
       // Weird type, not sure what policy to check.
-      return csp_context_.empty();
+      return content_security_policy().empty();
     case InputRole::kReconstruction:
       // All OK.
       return true;

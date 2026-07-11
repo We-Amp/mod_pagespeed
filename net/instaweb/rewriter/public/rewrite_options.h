@@ -242,6 +242,21 @@ class RewriteOptions {
     kEnabledStandby,
   };
 
+  // Application modes for the lazyload_images filter.
+  enum LazyloadImagesMode {
+    // Pick kLazyloadImagesModeNative or kLazyloadImagesModeJs per request,
+    // based on whether the user agent supports the native loading="lazy"
+    // attribute.
+    kLazyloadImagesModeAuto,
+    // Annotate non-critical images with loading="lazy" (and critical images
+    // with fetchpriority="high"), keeping src/srcset intact and injecting no
+    // JavaScript.
+    kLazyloadImagesModeNative,
+    // Legacy behavior: blank out the src and restore it with an injected
+    // JavaScript loader.
+    kLazyloadImagesModeJs,
+  };
+
   // Any new Option added should have a corresponding name here that must be
   // passed in when Add*Property is called in AddProperties(). You must also
   // update the LookupOptionByNameTest method in rewrite_options_test.cc. If
@@ -342,6 +357,8 @@ class RewriteOptions {
   static const char kJsPreserveURLs[];
   static const char kLazyloadImagesAfterOnload[];
   static const char kLazyloadImagesBlankUrl[];
+  static const char kLazyloadImagesMode[];
+  static const char kLazyloadImagesSkipFirst[];
   static const char kLoadFromFileCacheTtlMs[];
   static const char kLogBackgroundRewrite[];
   static const char kLogMobilizationSamples[];
@@ -439,10 +456,14 @@ class RewriteOptions {
   static const char kCacheFlushFilename[];
   static const char kCacheFlushPollIntervalSec[];
   static const char kCompressMetadataCache[];
+  static const char kCycloneZeroCopy[];
+  static const char kCycloneZeroCopyServe[];
+  static const char kCycloneRamCacheKb[];
   static const char kFetcherProxy[];
   static const char kFetchHttps[];
   static const char kFileCacheCleanSizeKb[];
   static const char kFileCachePath[];
+  static const char kFileCacheSmallTierPercent[];
   static const char kLogDir[];
   static const char kLruCacheByteLimit[];
   static const char kLruCacheKbPerProcess[];
@@ -721,7 +742,7 @@ class RewriteOptions {
     StringPiece option_name_;  // Key into all_options_.
     OptionScope scope_;
     bool do_not_use_for_signature_computation_;  // Default is false.
-    bool safe_to_print_;  // Safe to print in debug filter output.
+    bool safe_to_print_ = false;  // Safe to print in debug filter output.
     int index_;
 
     PropertyBase(const PropertyBase&) = delete;
@@ -1478,6 +1499,8 @@ class RewriteOptions {
   // Option<T>::value_ from a string representation of it.
   static bool ParseFromString(StringPiece value_string, bool* value);
   static bool ParseFromString(StringPiece value_string, EnabledEnum* value);
+  static bool ParseFromString(StringPiece value_string,
+                              LazyloadImagesMode* value);
   static bool ParseFromString(StringPiece value_string, int* value) {
     return StringToInt(value_string, value);
   }
@@ -2056,6 +2079,20 @@ class RewriteOptions {
 
   void set_lazyload_images_blank_url(StringPiece p) {
     set_option(GoogleString(p.data(), p.size()), &lazyload_images_blank_url_);
+  }
+
+  void set_lazyload_images_mode(LazyloadImagesMode x) {
+    set_option(x, &lazyload_images_mode_);
+  }
+  LazyloadImagesMode lazyload_images_mode() const {
+    return lazyload_images_mode_.value();
+  }
+
+  void set_lazyload_images_skip_first(int x) {
+    set_option(x, &lazyload_images_skip_first_);
+  }
+  int lazyload_images_skip_first() const {
+    return lazyload_images_skip_first_.value();
   }
   const GoogleString& lazyload_images_blank_url() const {
     return lazyload_images_blank_url_.value();
@@ -2869,8 +2906,10 @@ class RewriteOptions {
     return frozen;
   }
 
-  // Returns the computed signature.
-  const GoogleString& signature() const {
+  // Returns the computed signature by value, so the copy is made while the
+  // reader-lock below is held rather than handing back a reference into
+  // signature_ that a concurrent cache flush could rebuild.
+  GoogleString signature() const {
     // We take a reader-lock because we may be looking at the
     // global_options signature concurrent with updating it if someone
     // flushes cache.  Note that the default mutex implementation is
@@ -3085,6 +3124,35 @@ class RewriteOptions {
    private:
     Option(const Option&) = delete;
     Option& operator=(const Option&) = delete;
+  };
+
+  // An integer-valued Option that rejects, at parse time, any value outside
+  // the inclusive range [kMin, kMax].  A sentinel value that a consumer treats
+  // specially (e.g. -1 meaning "unset"/"fall back") must lie within the range.
+  template <class T, int kMin, int kMax>
+  class RangeBoundedOption : public Option<T> {
+   public:
+    RangeBoundedOption() {}
+
+    bool SetFromString(StringPiece value_string,
+                       GoogleString* error_detail) override {
+      T value;
+      if (!RewriteOptions::ParseFromString(value_string, &value)) {
+        return false;
+      }
+      if (value < kMin || value > kMax) {
+        *error_detail =
+            StrCat("Value out of range; must be in [", IntegerToString(kMin),
+                   ",", IntegerToString(kMax), "].");
+        return false;
+      }
+      this->set(value);
+      return true;
+    }
+
+   private:
+    RangeBoundedOption(const RangeBoundedOption&) = delete;
+    RangeBoundedOption& operator=(const RangeBoundedOption&) = delete;
   };
 
  protected:
@@ -3493,6 +3561,7 @@ class RewriteOptions {
   static GoogleString ToString(int64 x) { return Integer64ToString(x); }
   static GoogleString ToString(const GoogleString& x) { return x; }
   static GoogleString ToString(RewriteLevel x);
+  static GoogleString ToString(LazyloadImagesMode x);
   static GoogleString ToString(const ResourceCategorySet& x);
   static GoogleString ToString(const BeaconUrl& beacon_url);
   static GoogleString ToString(const MobTheme& mob_theme);
@@ -3627,14 +3696,16 @@ class RewriteOptions {
 
   // Option related to generic image quality. This is overridden by
   // image(jpeg/webp) specific options.
-  Option<int64> image_recompress_quality_;
+  RangeBoundedOption<int64, -1, 100> image_recompress_quality_;
 
   // Options related to jpeg compression.
-  Option<int64> image_jpeg_recompress_quality_;
-  Option<int64> image_jpeg_recompress_quality_for_small_screens_;
-  Option<int64> image_jpeg_quality_for_save_data_;
-  Option<int64> image_jpeg_num_progressive_scans_;
-  Option<int64> image_jpeg_num_progressive_scans_for_small_screens_;
+  RangeBoundedOption<int64, -1, 100> image_jpeg_recompress_quality_;
+  RangeBoundedOption<int64, -1, 100>
+      image_jpeg_recompress_quality_for_small_screens_;
+  RangeBoundedOption<int64, -1, 100> image_jpeg_quality_for_save_data_;
+  RangeBoundedOption<int64, -1, 10> image_jpeg_num_progressive_scans_;
+  RangeBoundedOption<int64, -1, 10>
+      image_jpeg_num_progressive_scans_for_small_screens_;
 
   // Options governing when to retain optimized images vs keep original
   Option<int> image_limit_optimized_percent_;
@@ -3642,10 +3713,11 @@ class RewriteOptions {
   Option<int> image_limit_rendered_area_percent_;
 
   // Options related to webp compression.
-  Option<int64> image_webp_recompress_quality_;
-  Option<int64> image_webp_recompress_quality_for_small_screens_;
-  Option<int64> image_webp_animated_recompress_quality_;
-  Option<int64> image_webp_quality_for_save_data_;
+  RangeBoundedOption<int64, -1, 100> image_webp_recompress_quality_;
+  RangeBoundedOption<int64, -1, 100>
+      image_webp_recompress_quality_for_small_screens_;
+  RangeBoundedOption<int64, -1, 100> image_webp_animated_recompress_quality_;
+  RangeBoundedOption<int64, -1, 100> image_webp_quality_for_save_data_;
   Option<int64> image_webp_timeout_ms_;
 
   Option<int> image_max_rewrites_at_once_;
@@ -3742,6 +3814,13 @@ class RewriteOptions {
   // The initial image url to load in the lazyload images filter. If this is not
   // specified, we use a 1x1 inlined image.
   Option<GoogleString> lazyload_images_blank_url_;
+  // How the lazyload_images filter is applied: native loading="lazy"
+  // attributes, the JavaScript loader, or per-user-agent selection.
+  Option<LazyloadImagesMode> lazyload_images_mode_;
+  // When critical image data is unavailable, leave the first N otherwise
+  // eligible images of the document untouched to protect likely LCP
+  // candidates.
+  Option<int> lazyload_images_skip_first_;
   // Whether inline preview should use a blank image instead of a low resolution
   // version of the original image.
   Option<bool> use_blank_image_for_inline_preview_;
@@ -3854,7 +3933,7 @@ class RewriteOptions {
   Option<int64> max_image_size_low_resolution_bytes_;
   // Percentage (an integer between 0 and 100 inclusive) of images rewrites to
   // drop.
-  Option<int> rewrite_random_drop_percentage_;
+  RangeBoundedOption<int, 0, 100> rewrite_random_drop_percentage_;
 
   // For proxies operating in in-place mode this allows fetching optimized
   // resources from sites that have MPS, etc configured.
@@ -4010,7 +4089,7 @@ class RewriteOptions {
   Option<int64> remote_configuration_timeout_ms_;
 
   // The level to set the gzip compression of HTTPCache items.
-  Option<int> http_cache_compression_level_;
+  RangeBoundedOption<int, -1, 9> http_cache_compression_level_;
 
   // Pass this string in url to allow for pagespeed options.
   Option<GoogleString> request_option_override_;

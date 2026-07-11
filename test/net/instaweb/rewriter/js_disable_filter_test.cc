@@ -122,6 +122,41 @@ TEST_F(JsDisableFilterTest, DisablesScript) {
   FAIL();
 }
 
+TEST_F(JsDisableFilterTest, CspForbidsInlineScript) {
+  // Under a script-src policy without 'unsafe-inline' the deferJs runtime
+  // (which re-executes disabled scripts via inline JS) would be blocked,
+  // so scripts and onload handlers must be left alone.
+  const GoogleString input_html = StrCat(
+      "<head>"
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"script-src *;\">"
+      "</head><body>",
+      "<script src=\"blah1\" random=\"true\">hi1</script>"
+      "<img src=\"abc.jpg\" onload=\"foo1('abc');foo2();\">"
+      "</body>");
+  ValidateNoChanges("csp_no_inline", input_html);
+}
+
+TEST_F(JsDisableFilterTest, CspAllowsInlineScript) {
+  // With 'unsafe-inline' permitted the filter behaves as usual.
+  const char kCsp[] =
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"script-src * 'unsafe-inline';\">";
+  const GoogleString input_html =
+      StrCat("<head>", kCsp, "</head><body>",
+             "<script src=\"blah1\" random=\"true\">hi1</script>"
+             "<img src=\"abc.jpg\" onload=\"foo1('abc');foo2();\">"
+             "</body>");
+  const GoogleString expected = StrCat(
+      "<head>", kCsp, "</head><body>",
+      "<script src=\"blah1\" random=\"true\" type=\"text/psajs\""
+      " data-pagespeed-orig-index=\"0\">hi1</script>"
+      "<img src=\"abc.jpg\" data-pagespeed-onload=\"foo1('abc');foo2();\" "
+      "onload=\"",
+      JsDisableFilter::kElementOnloadCode, "\"></body>");
+  ValidateExpected("csp_unsafe_inline", input_html, expected);
+}
+
 TEST_F(JsDisableFilterTest, InvalidUserAgent) {
   SetCurrentUserAgent("BlackListUserAgent");
   const char script[] =

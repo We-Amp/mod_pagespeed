@@ -323,6 +323,55 @@ TEST_F(QueuedWorkerPoolTest, CancelPending) {
   EXPECT_EQ(-300, count);
 }
 
+// Regression test for the free-while-queued race behind the Apache system-test
+// flake (random RemoteDisconnected on resource requests, root-caused to
+// DCHECK(work_queue_.empty()) firing in Sequence::Reset()).  A Sequence with
+// work still queued for an as-yet-unassigned worker must NOT be recycled onto
+// free_sequences_ by FreeSequence(): it is still in the pool's queued_sequences_
+// list, and the two lists are documented mutually exclusive.  Pre-fix,
+// FreeSequence() recycled it anyway, so the next NewSequence() handed back a
+// Sequence whose work_queue_ was non-empty -> Reset() DCHECK abort (debug) /
+// silently double-owned sequence (opt).
+TEST_F(QueuedWorkerPoolTest, FreeSequenceWhileQueuedIsNotRecycled) {
+  // The fixture pool has 2 workers.  Wedge both so no dispatch can run, and
+  // confirm both are actually occupied before proceeding.
+  SyncPoint started1(thread_runtime_.get());
+  SyncPoint started2(thread_runtime_.get());
+  SyncPoint release1(thread_runtime_.get());
+  SyncPoint release2(thread_runtime_.get());
+  QueuedWorkerPool::Sequence* wedge1 = worker_->NewSequence();
+  wedge1->Add(new NotifyAndWait(&started1, &release1));
+  QueuedWorkerPool::Sequence* wedge2 = worker_->NewSequence();
+  wedge2->Add(new NotifyAndWait(&started2, &release2));
+  started1.Wait();
+  started2.Wait();
+
+  // victim: one function queued while both workers are busy, so it sits in
+  // queued_sequences_ with active_ == false and a non-empty work_queue_.
+  LogOpsFunction* fn = new LogOpsFunction;  // set_delete_after_callback(false)
+  QueuedWorkerPool::Sequence* victim = worker_->NewSequence();
+  victim->Add(fn);
+
+  // Free it while it is still queued for dispatch.
+  worker_->FreeSequence(victim);
+
+  // It must not have been recycled onto free_sequences_ yet.  On the buggy code
+  // this line either returns `victim` (opt) -- caught by EXPECT_NE -- or aborts
+  // inside Reset()'s DCHECK(work_queue_.empty()) (debug) because `victim` still
+  // holds `fn`.
+  QueuedWorkerPool::Sequence* fresh = worker_->NewSequence();
+  EXPECT_NE(victim, fresh);
+
+  // Drain: unblock the workers and shut down.  The queued function on `victim`
+  // is canceled exactly once as part of shutdown; it never runs.
+  release1.Notify();
+  release2.Notify();
+  worker_->ShutDown();
+  EXPECT_TRUE(fn->cancel_called());
+  EXPECT_FALSE(fn->run_called());
+  delete fn;
+}
+
 }  // namespace
 
 }  // namespace net_instaweb

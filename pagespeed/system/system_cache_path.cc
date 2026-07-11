@@ -19,6 +19,7 @@
 
 #include "pagespeed/system/system_cache_path.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <memory>
 
@@ -45,7 +46,7 @@
 namespace net_instaweb {
 
 const char SystemCachePath::kFileCache[] = "file_cache";
-const char SystemCachePath::kLruCache[] = "lru_cache";
+const char SystemCachePath::kFileCacheSmall[] = "file_cache_small";
 
 // The SystemCachePath encapsulates a cache-sharing model where a user specifies
 // a file-cache path per virtual-host.  With each file-cache object we keep
@@ -59,8 +60,10 @@ SystemCachePath::SystemCachePath(const StringPiece& path,
       shm_runtime_(shm_runtime),
       lock_manager_(nullptr),
       cache_backend_(nullptr),
+      cyclone_cache_(nullptr),
       lru_cache_(nullptr),
       file_cache_(nullptr),
+      small_tier_file_cache_(nullptr),
       cache_flush_filename_(config->cache_flush_filename()),
       unplugged_(config->unplugged()),
       enable_cache_purge_(config->enable_cache_purge()),
@@ -121,11 +124,24 @@ SystemCachePath::SystemCachePath(const StringPiece& path,
   CycloneCache::Config cyclone_config;
   cyclone_config.cache_path = StrCat(config->file_cache_path(), "/cyclone.dat");
   cyclone_config.cache_size_bytes = config->file_cache_clean_size_kb() * 1024;
-  // Use the LRU cache size setting for the RAM cache layer
+  // Cyclone's internal RAM cache tier size.  Decoupled from the PSOL LRU
+  // cache via CycloneRamCacheKb; the default (0) disables the tier -- reads
+  // come straight from the memory-mapped volume, so a per-process RAM copy
+  // only duplicates what the OS page cache already holds.  The -1 sentinel
+  // opts back into the legacy coupling to LRUCacheKbPerProcess.
+  const int64 cyclone_ram_cache_kb = config->cyclone_ram_cache_kb();
   cyclone_config.ram_cache_size_bytes =
-      config->lru_cache_kb_per_process() * 1024;
+      (cyclone_ram_cache_kb < 0 ? config->lru_cache_kb_per_process()
+                                : cyclone_ram_cache_kb) *
+      1024;
   cyclone_config.enable_checksum = true;
   cyclone_config.num_segments = 0;  // Use default
+  // Carve out a separate small-object volume for metadata/property entries
+  // so payload churn in the main volume cannot evict them.  There is no
+  // framework-level bounds validation on the directive, so clamp here.
+  int small_tier_percent =
+      std::min(50, std::max(0, config->file_cache_small_tier_percent()));
+  cyclone_config.small_tier_percent = small_tier_percent;
 
   CycloneCache* cyclone_cache = new CycloneCache(
       cyclone_config, factory->statistics(), factory->message_handler());
@@ -134,11 +150,43 @@ SystemCachePath::SystemCachePath(const StringPiece& path,
   // Check if CycloneCache started successfully
   if (cyclone_cache->IsHealthy()) {
     cache_backend_ = cyclone_cache;
+    cyclone_cache_ = cyclone_cache;
     // Register cyclone.dat so Apache's post_config chown sweep fixes ownership.
     factory->AddCreatedDirectory(cyclone_config.cache_path);
+    if (cyclone_cache->small_tier_active()) {
+      // The small-object tier is a physically separate volume file that needs
+      // the same ownership treatment.
+      factory->AddCreatedDirectory(StrCat(cyclone_config.cache_path, ".small"));
+    }
     file_cache_ = new CacheStats(kFileCache, cache_backend_, factory->timer(),
                                  factory->statistics());
     factory->TakeOwnership(file_cache_);
+
+    if (small_tier_percent > 0) {
+      if (!cyclone_cache->small_tier_active() &&
+          config->has_file_cache_small_tier_percent()) {
+        // The carve-out could not give both volumes their sizing floor, so
+        // Cyclone silently disabled the tier; small-tier operations fall back
+        // to default routing.  Warn only when the directive was set
+        // explicitly: stated intent that cannot be honored deserves a
+        // warning, while the unset default staying below the floor (e.g. the
+        // 100 MB default cache size) is normal and logs nothing.
+        factory->message_handler()->Message(
+            kWarning,
+            "FileCacheSmallTierPercent=%d is set, but the file cache "
+            "(FileCacheSizeKb) is too small to host the small-object tier "
+            "(needs roughly 256 MB of total file cache). Metadata and "
+            "property-cache entries will share the main volume at %s.",
+            small_tier_percent, cyclone_config.cache_path.c_str());
+      }
+      small_tier_file_cache_ =
+          new CacheStats(kFileCacheSmall, cyclone_cache->small_tier_view(),
+                         factory->timer(), factory->statistics());
+      factory->TakeOwnership(small_tier_file_cache_);
+    } else {
+      // Feature off: keep the wiring simple by aliasing the default cache.
+      small_tier_file_cache_ = file_cache_;
+    }
 
     if (cyclone_config.ram_cache_size_bytes > 0) {
       factory->message_handler()->Message(
@@ -171,6 +219,8 @@ SystemCachePath::SystemCachePath(const StringPiece& path,
     file_cache_ = new CacheStats(kFileCache, cache_backend_, factory->timer(),
                                  factory->statistics());
     factory->TakeOwnership(file_cache_);
+    // No Cyclone, no tiers: the fallback LRU serves both roles.
+    small_tier_file_cache_ = file_cache_;
   }
 }
 

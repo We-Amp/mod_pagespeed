@@ -42,8 +42,13 @@ void JsDeferDisabledFilter::DetermineEnabled(GoogleString* disabled_reason) {
 }
 
 bool JsDeferDisabledFilter::ShouldApply(RewriteDriver* driver) {
+  // Deferral works by disabling scripts during parse and re-executing them
+  // from injected inline JS; a CSP that forbids inline scripts blocks that
+  // runtime and would leave the page's scripts dead. The policy can arrive
+  // via a mid-document <meta> tag, so EndDocument() re-checks this.
   return driver->request_properties()->SupportsJsDefer(
-      driver->options()->enable_aggressive_rewriters_for_mobile());
+             driver->options()->enable_aggressive_rewriters_for_mobile()) &&
+         driver->content_security_policy().PermitsInlineScript();
 }
 
 void JsDeferDisabledFilter::InsertJsDeferCode() {

@@ -19,6 +19,7 @@
 
 #include "pagespeed/kernel/base/mapped_shared_string.h"
 
+#include <cstdint>
 #include <utility>
 
 namespace net_instaweb {
@@ -63,6 +64,19 @@ MappedSharedString MappedSharedString::FromMappedView(
   MappedSharedString result;
   result.storage_ =
       std::make_shared<MappedView>(data, size, release_callback, release_data);
+  return result;
+}
+
+// static
+MappedSharedString MappedSharedString::FromMappedView(
+    const char* data, size_t size, MappedReleaseCallback release_callback,
+    MappedRenewCallback renew_callback,
+    MappedRenewStrictCallback renew_strict_callback,
+    MappedNsUntilForcedWrapCallback ns_until_callback, void* release_data) {
+  MappedSharedString result;
+  result.storage_ = std::make_shared<MappedView>(
+      data, size, release_callback, release_data, renew_callback,
+      renew_strict_callback, ns_until_callback);
   return result;
 }
 
@@ -118,6 +132,47 @@ bool MappedSharedString::unique() const {
   } else {
     return std::get<std::shared_ptr<MappedView>>(storage_).use_count() == 1;
   }
+}
+
+bool MappedSharedString::RenewLease() const {
+  if (std::holds_alternative<std::shared_ptr<MappedView>>(storage_)) {
+    const auto& view = std::get<std::shared_ptr<MappedView>>(storage_);
+    if (view->renew_callback != nullptr) {
+      return view->renew_callback(view->release_data) != 0;
+    }
+  }
+  return false;
+}
+
+LeaseRenewal MappedSharedString::RenewLeaseStrict() const {
+  if (std::holds_alternative<std::shared_ptr<MappedView>>(storage_)) {
+    const auto& view = std::get<std::shared_ptr<MappedView>>(storage_);
+    if (view->renew_strict_callback != nullptr) {
+      return static_cast<LeaseRenewal>(
+          view->renew_strict_callback(view->release_data));
+    }
+  }
+  return LeaseRenewal::kLeasesOff;
+}
+
+uint64_t MappedSharedString::NsUntilForcedWrap() const {
+  if (std::holds_alternative<std::shared_ptr<MappedView>>(storage_)) {
+    const auto& view = std::get<std::shared_ptr<MappedView>>(storage_);
+    if (view->ns_until_callback != nullptr) {
+      return view->ns_until_callback(view->release_data);
+    }
+  }
+  return UINT64_MAX;
+}
+
+bool CopyMappedVerified(const StringPiece& span,
+                        const MappedSharedString& keepalive,
+                        GoogleString* out) {
+  span.CopyToString(out);
+  // Copy-then-verify: only a genuinely torn borrow (epoch moved under the
+  // copy) fails; kOk / kCopyNow (wrap deferred or in flight, region intact)
+  // and kLeasesOff (no lease protection configured) serve the copy.
+  return keepalive.RenewLeaseStrict() != LeaseRenewal::kTorn;
 }
 
 }  // namespace net_instaweb

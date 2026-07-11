@@ -53,7 +53,7 @@ class SystemCachePath {
  public:
   // CacheStats prefixes.
   static const char kFileCache[];
-  static const char kLruCache[];
+  static const char kFileCacheSmall[];
 
   SystemCachePath(const StringPiece& path, const SystemRewriteOptions* config,
                   RewriteDriverFactory* factory,
@@ -70,10 +70,31 @@ class SystemCachePath {
   // Per-machine file cache with any stats wrappers.
   CacheInterface* file_cache() { return file_cache_; }
 
+  // Small-object-tier routed view over the same on-disk cache, with its own
+  // stats wrapper ("file_cache_small").  Intended for metadata and
+  // property-cache entries so payload churn in the default volume cannot
+  // evict them.  Three shapes, precisely:
+  //   - FileCacheSmallTierPercent 0 (or the LRU fallback when Cyclone is
+  //     unavailable): literally aliases file_cache() -- same object, stats
+  //     label "file_cache".
+  //   - Percent > 0 but the cache is below the tier's sizing floor: a
+  //     distinct CacheStats labeled "file_cache_small" whose operations
+  //     Cyclone routes back to the default keyspace.  Same keyspace as
+  //     file_cache(), different stats label.
+  //   - Percent > 0 and the tier is active: "file_cache_small" routing to
+  //     the physically separate small volume.
+  // Always safe to use.
+  CacheInterface* small_tier_file_cache() { return small_tier_file_cache_; }
+
   // Access to backend for testing.  Do not use this directly in production
   // as it lacks statistics wrappers, etc.
   // Returns the underlying cache (CycloneCache or fallback LRU).
   CacheInterface* cache_backend() { return cache_backend_; }
+
+  // The CycloneCache backend, or NULL when Cyclone failed to start and the
+  // LRU fallback is in use.  For telemetry (e.g. the global caches page);
+  // production cache traffic should go through file_cache().
+  CycloneCache* cyclone_cache() { return cyclone_cache_; }
   NamedLockManager* lock_manager() { return lock_manager_; }
 
   // See comments in SystemCaches for calling conventions on these.
@@ -112,8 +133,10 @@ class SystemCachePath {
   std::unique_ptr<ThreadSafeLockManager> fallback_lock_manager_;
   NamedLockManager* lock_manager_;
   CacheInterface* cache_backend_;  // Cyclone or fallback LRU, owned by factory
+  CycloneCache* cyclone_cache_;    // cache_backend_ as CycloneCache, or NULL
   CacheInterface* lru_cache_;
   CacheInterface* file_cache_;
+  CacheInterface* small_tier_file_cache_;
   std::unique_ptr<LRUCache>
       fallback_lru_cache_;  // Used when CycloneCache fails
   GoogleString cache_flush_filename_;

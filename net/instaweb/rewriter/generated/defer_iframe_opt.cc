@@ -15,7 +15,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-// Automatically generated from bazel-out/darwin_arm64-fastbuild/bin/net/instaweb/rewriter/defer_iframe_opt.js
+// Automatically generated from defer_iframe_opt.js
 
 namespace net_instaweb {
 

@@ -274,6 +274,10 @@ TEST_F(CssUtilTest, CanMediaAffectScreenTest) {
   EXPECT_FALSE(css_util::CanMediaAffectScreen("not!?#?;valid"));
   // We must handle CSS3 media queries (http://www.w3.org/TR/css3-mediaqueries/)
   EXPECT_TRUE(css_util::CanMediaAffectScreen("not print"));
+  // "not" negates the entire media query, so a negated query with a
+  // condition is still true on screens where the condition fails.
+  EXPECT_TRUE(css_util::CanMediaAffectScreen("not screen and (color)"));
+  EXPECT_TRUE(css_util::CanMediaAffectScreen("not all and (monochrome)"));
   EXPECT_TRUE(css_util::CanMediaAffectScreen(
       "only screen and (max-device-width: 480px) "));
   // "(parens)" are equivalent to "all and (parens)" -- thus screen-affecting.

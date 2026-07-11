@@ -15,27 +15,27 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-// Automatically generated from bazel-out/darwin_arm64-fastbuild/bin/net/instaweb/rewriter/critical_css_loader_opt.js
+// Automatically generated from critical_css_loader_opt.js
 
 namespace net_instaweb {
 
 const char* JS_critical_css_loader_opt =
-    "(function(){function b(){var a=window,e=d;if(a.addEventListe"
+    "(function(){function c(){var a=window,e=d;if(a.addEventListe"
     "ner)a.addEventListener(\"load\",e,!1);else if(a.attachEvent)a."
-    "attachEvent(\"onload\",e);else{var c=a.onload;a.onload=functio"
-    "n(){e.call(this);c&&c.call(this)}}};var f=!1;function d(){if"
+    "attachEvent(\"onload\",e);else{var b=a.onload;a.onload=functio"
+    "n(){e.call(this);b&&b.call(this)}}};var f=!1;function d(){if"
     "(!f){f=!0;for(var a=document.getElementsByClassName(\"psa_add"
-    "_styles\"),e=0,c;c=a[e];++e)if(c.nodeName==\"NOSCRIPT\"){var g="
-    "document.createElement(\"div\");g.innerHTML=c.textContent;c=g."
-    "childNodes;for(var h=0;h<c.length;++h)c[h].removeAttribute(\""
-    "id\");document.body.appendChild(g)}}}\nfunction k(){var a=wind"
-    "ow.requestAnimationFrame||window.webkitRequestAnimationFrame"
-    "||window.mozRequestAnimationFrame||window.oRequestAnimationF"
-    "rame||window.msRequestAnimationFrame||null;a?a(function(){wi"
-    "ndow.setTimeout(d,0)}):b()}var l=[\"pagespeed\",\"CriticalCssLo"
-    "ader\",\"Run\"],m=this||self;l[0]in m||typeof m.execScript==\"un"
-    "defined\"||m.execScript(\"var \"+l[0]);for(var n;l.length&&(n=l"
-    ".shift());)l.length||k===void 0?m[n]&&m[n]!==Object.prototyp"
-    "e[n]?m=m[n]:m=m[n]={}:m[n]=k;})();\n";
+    "_styles\"),e=0,b;b=a[e];++e)if(b.nodeName==\"NOSCRIPT\"){var h="
+    "document.createElement(\"div\");h.innerHTML=b.textContent;b=h."
+    "childNodes;for(var g=0;g<b.length;++g)b[g].nodeType===1&&b[g"
+    "].removeAttribute(\"id\");document.body.appendChild(h)}}}\nfunc"
+    "tion k(){var a=window.requestAnimationFrame||window.webkitRe"
+    "questAnimationFrame||window.mozRequestAnimationFrame||window"
+    ".oRequestAnimationFrame||window.msRequestAnimationFrame||nul"
+    "l;c();a&&a(function(){window.setTimeout(d,0)})}var l=[\"pages"
+    "peed\",\"CriticalCssLoader\",\"Run\"],m=this||self;l[0]in m||type"
+    "of m.execScript==\"undefined\"||m.execScript(\"var \"+l[0]);for("
+    "var n;l.length&&(n=l.shift());)l.length||k===void 0?m[n]&&m["
+    "n]!==Object.prototype[n]?m=m[n]:m=m[n]={}:m[n]=k;})();\n";
 
 }  // namespace net_instaweb

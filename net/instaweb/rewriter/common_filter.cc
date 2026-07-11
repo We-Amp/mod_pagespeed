@@ -171,6 +171,14 @@ bool CommonFilter::IsRelativeUrlLoadPermittedByCsp(StringPiece url,
   }
 }
 
+bool CommonFilter::CspPermitsInlineScript() const {
+  return driver_->content_security_policy().PermitsInlineScript();
+}
+
+bool CommonFilter::CspPermitsInlineScriptAttribute() const {
+  return driver_->content_security_policy().PermitsInlineScriptAttribute();
+}
+
 ResourcePtr CommonFilter::CreateInputResource(StringPiece input_url,
                                               RewriteDriver::InputRole role,
                                               bool* is_authorized) {

@@ -233,6 +233,38 @@ TEST_F(MakeShowAdsAsyncFilterTest, OneShowAds) {
   CheckStatForShowAds(1);
 }
 
+TEST_F(MakeShowAdsAsyncFilterTest, CspForbidsInlineScript) {
+  // The conversion re-injects the showads API call as a new inline script,
+  // which a script-src policy without 'unsafe-inline' would block; the
+  // original snippets must be left untouched.
+  GoogleString html = StrCat(
+      "<head><title>Something</title>"
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"script-src *;\">"
+      "</head><body>",
+      GetShowAdsDataSnippetWithContent(GetShowAdsDataContent1()),
+      kShowAdsApiCall, "</body>");
+  ValidateNoChanges(test_info_->name(), html);
+  CheckStatForNoApplicableAds();
+}
+
+TEST_F(MakeShowAdsAsyncFilterTest, CspAllowsInlineScript) {
+  // With 'unsafe-inline' permitted the filter behaves as usual.
+  const char kCsp[] =
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"script-src * 'unsafe-inline';\">";
+  GoogleString html_in = StrCat(
+      "<head><title>Something</title>", kCsp, "</head><body>",
+      StrCat(GetShowAdsDataSnippetWithContent(GetShowAdsDataContent1()),
+             kShowAdsApiCall),
+      "</body>");
+  GoogleString html_out =
+      StrCat("<head><title>Something</title>", kCsp, "</head><body>",
+             GetShowAdsDataFormat1Output(), "</body>");
+  ValidateExpected(test_info_->name(), html_in, html_out);
+  CheckStatForShowAds(1);
+}
+
 TEST_F(MakeShowAdsAsyncFilterTest, OneShowAdsWithComments) {
   ValidateExpected(test_info_->name(),
                    GetPage(StrCat(GetShowAdsDataSnippetWithContent(

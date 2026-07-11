@@ -43,6 +43,7 @@
 #include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/http/google_url.h"
 #include "pagespeed/kernel/sharedmem/shared_mem_statistics.h"
+#include "pagespeed/kernel/util/statistics_logger.h"
 #include "pagespeed/system/add_headers_fetcher.h"
 #include "pagespeed/system/admin_license_handler.h"
 #include "pagespeed/system/loopback_route_fetcher.h"
@@ -105,6 +106,21 @@ void SystemServerContext::FlushCacheIfNecessary() {
     cache_path_->FlushCacheIfNecessary();
   } else {
     CheckLegacyGlobalCacheFlushFile();
+  }
+
+  // Advance the statistics log on a wall-clock cadence that does not depend on
+  // this request having driven an HTML rewrite or a pagespeed-resource fetch.
+  // Those are the only paths that otherwise call UpdateAndDumpIfRequired(), so
+  // under pass-through/static/cached traffic the log never grows and the
+  // /pagespeed_admin Graphs page flatlines even though the live Statistics
+  // counters keep moving. This hook runs on every request across all ports
+  // (nginx, Apache, IIS); UpdateAndDumpIfRequired() is internally throttled to
+  // StatisticsLoggingIntervalMs via a non-blocking TryLock on the logger's own
+  // timestamp mutex, so on all but ~one request per interval it is a cheap
+  // no-op and can neither block nor contend with the cache-flush mutex above.
+  StatisticsLogger* stats_logger = statistics()->console_logger();
+  if (stats_logger != nullptr) {
+    stats_logger->UpdateAndDumpIfRequired();
   }
 }
 

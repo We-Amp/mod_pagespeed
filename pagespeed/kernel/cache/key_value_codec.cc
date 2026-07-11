@@ -45,8 +45,8 @@ namespace net_instaweb {
 
 namespace key_value_codec {
 
-// Takes a key and a value, and encodes the pair of them into key_value,
-// sharing storage with value.
+// Takes a key and a value, and encodes the pair of them into key_value
+// (in its own storage, detached from value).
 //
 // The encoding format is [value, key, 2 bytes of key size].
 bool Encode(StringPiece key, const SharedString& value,
@@ -56,6 +56,10 @@ bool Encode(StringPiece key, const SharedString& value,
   }
   uint32 key_size = key.size();
   *key_value = value;
+  // 'value' may share storage with a response that is being served (e.g. a
+  // write-through fill of a cache-hit value); appending in place could
+  // reallocate the shared bytes under a concurrent reader, so detach first.
+  key_value->DetachRetainingContent();
   key_value->Append(key);
   uint8 ch = key_size & 0xff;
   key_value->Append(reinterpret_cast<char*>(&ch), 1);

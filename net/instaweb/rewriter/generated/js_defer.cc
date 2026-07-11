@@ -15,7 +15,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-// Automatically generated from bazel-out/darwin_arm64-fastbuild/bin/net/instaweb/rewriter/js_defer_dbg.js
+// Automatically generated from js_defer_dbg.js
 
 namespace net_instaweb {
 

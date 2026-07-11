@@ -30,13 +30,15 @@ class KeyValueCodecTest : public testing::Test {
   void CodecTest(const StringPiece& key, const StringPiece& value) {
     SharedString val(value);
     ASSERT_TRUE(key_value_codec::Encode(key, val, &key_value_));
-    EXPECT_EQ(val.data(), key_value_.data()) << "shared storage";
+    // Encode must NOT append into storage shared with 'val': that could
+    // reallocate the bytes under a concurrent reader of 'val'.
+    EXPECT_NE(val.data(), key_value_.data()) << "detached storage";
+    EXPECT_EQ(value, StringPiece(key_value_.data(), value.size()));
 
     ASSERT_TRUE(
         key_value_codec::Decode(&key_value_, &decoded_key_, &decoded_value_));
     EXPECT_EQ(key, decoded_key_);
     EXPECT_EQ(value, decoded_value_.Value());
-    EXPECT_EQ(val.data(), key_value_.data()) << "shared storage";
     EXPECT_EQ(decoded_value_.data(), key_value_.data()) << "shared storage";
   }
 

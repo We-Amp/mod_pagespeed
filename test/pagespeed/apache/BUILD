@@ -38,6 +38,7 @@ pagespeed_cc_test(
     srcs = [
         "apache_config_test.cc",
         "apache_fetch_test.cc",
+        "apache_mmap_bucket_test.cc",
         "apache_writer_test.cc",
         "header_util_test.cc",
         "simple_buffered_apache_fetch_test.cc",

@@ -77,8 +77,10 @@ class Router {
     });
   }
 
-  get currentRoute(): Route | undefined {
-    return routes.find((r) => r.path === this.hash);
+  get currentRoute(): Route {
+    // An unknown hash (stale bookmark, doc-link drift) must not leave the app
+    // stuck on a permanent "Loading..." spinner. Fall back to the first route.
+    return routes.find((r) => r.path === this.hash) ?? routes[0];
   }
 
   navigate(path: string): void {

@@ -518,4 +518,62 @@ TEST_F(MappedSharedStringTest, OwnedSharedStringSharesPointer) {
   EXPECT_TRUE(original.SharesStorage(owned));
 }
 
+// ============================================================================
+// CopyMappedVerified
+// ============================================================================
+
+namespace {
+
+int g_strict_verdict = 0;  // LeaseRenewal as int; set per test.
+int StrictVerdictHook(void* /*user_data*/) { return g_strict_verdict; }
+int RenewHook(void* /*user_data*/) { return 1; }
+uint64_t NsUntilHook(void* /*user_data*/) { return ~static_cast<uint64_t>(0); }
+
+}  // namespace
+
+TEST_F(MappedSharedStringTest, CopyMappedVerifiedClean) {
+  g_strict_verdict = static_cast<int>(LeaseRenewal::kOk);
+  MappedSharedString mss = MappedSharedString::FromMappedView(
+      kTestData, kTestDataSize, ReleaseCallback, RenewHook, StrictVerdictHook,
+      NsUntilHook, &release_count_);
+  GoogleString out;
+  EXPECT_TRUE(CopyMappedVerified(mss.Value(), mss, &out));
+  EXPECT_EQ("Hello, World!", out);
+  EXPECT_NE(kTestData, out.data());  // A real copy, not an alias.
+}
+
+TEST_F(MappedSharedStringTest, CopyMappedVerifiedCopyNowStillServes) {
+  g_strict_verdict = static_cast<int>(LeaseRenewal::kCopyNow);
+  MappedSharedString mss = MappedSharedString::FromMappedView(
+      kTestData, kTestDataSize, ReleaseCallback, RenewHook, StrictVerdictHook,
+      NsUntilHook, &release_count_);
+  GoogleString out;
+  // A wrap in flight leaves the region intact: the copy is servable.
+  EXPECT_TRUE(CopyMappedVerified(mss.Value(), mss, &out));
+  EXPECT_EQ("Hello, World!", out);
+}
+
+TEST_F(MappedSharedStringTest, CopyMappedVerifiedTornFails) {
+  g_strict_verdict = static_cast<int>(LeaseRenewal::kTorn);
+  MappedSharedString mss = MappedSharedString::FromMappedView(
+      kTestData, kTestDataSize, ReleaseCallback, RenewHook, StrictVerdictHook,
+      NsUntilHook, &release_count_);
+  GoogleString out;
+  EXPECT_FALSE(CopyMappedVerified(mss.Value(), mss, &out));
+}
+
+TEST_F(MappedSharedStringTest, CopyMappedVerifiedNoHooksAlwaysVerifies) {
+  // Hook-less mapped view (legacy) and plain owned storage: kLeasesOff,
+  // copy without failing.
+  MappedSharedString mapped = MappedSharedString::FromMappedView(
+      kTestData, kTestDataSize, ReleaseCallback, &release_count_);
+  GoogleString out;
+  EXPECT_TRUE(CopyMappedVerified(mapped.Value(), mapped, &out));
+  EXPECT_EQ("Hello, World!", out);
+
+  MappedSharedString owned(SharedString("owned-bytes"));
+  EXPECT_TRUE(CopyMappedVerified(owned.Value(), owned, &out));
+  EXPECT_EQ("owned-bytes", out);
+}
+
 }  // namespace net_instaweb

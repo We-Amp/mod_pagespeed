@@ -17,6 +17,24 @@ NGINX_COPTS = [
     "-Wno-old-style-cast",
 ]
 
+# Segment queue used by NgxBaseFetch to buffer response bytes between PSOL
+# threads and the nginx thread (M0 of the zero-copy serving ladder).
+# Deliberately nginx-free so it can be unit tested standalone
+# (//test/pagespeed/nginx:ngx_segment_buffer_test). The module targets below
+# compile ngx_segment_buffer.cc directly in their srcs instead of depending on
+# this target, because the --add-module archive (ngx_pagespeed_archive, an
+# alwayslink .lo) only bundles its own srcs — a dep would leave undefined
+# symbols at nginx's own link step.
+cc_library(
+    name = "ngx_segment_buffer",
+    srcs = ["ngx_segment_buffer.cc"],
+    hdrs = ["ngx_segment_buffer.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)
+
 # Core NGINX PageSpeed library
 # Contains the main module implementation and all supporting classes.
 cc_library(
@@ -27,12 +45,14 @@ cc_library(
         "ngx_caching_headers.cc",
         "ngx_event_connection.cc",
         "ngx_fetch.cc",
+        "ngx_openssl_shim.cc",
         "ngx_gzip_setter.cc",
         "ngx_list_iterator.cc",
         "ngx_message_handler.cc",
         "ngx_pagespeed.cc",
         "ngx_rewrite_driver_factory.cc",
         "ngx_rewrite_options.cc",
+        "ngx_segment_buffer.cc",
         "ngx_server_context.cc",
         "ngx_url_async_fetcher.cc",
         "ngx_webbotauth_handler.cc",
@@ -43,12 +63,14 @@ cc_library(
         "ngx_caching_headers.h",
         "ngx_event_connection.h",
         "ngx_fetch.h",
+        "ngx_openssl_shim.h",
         "ngx_gzip_setter.h",
         "ngx_list_iterator.h",
         "ngx_message_handler.h",
         "ngx_pagespeed.h",
         "ngx_rewrite_driver_factory.h",
         "ngx_rewrite_options.h",
+        "ngx_segment_buffer.h",
         "ngx_server_context.h",
         "ngx_url_async_fetcher.h",
         "ngx_webbotauth_handler.h",
@@ -115,12 +137,14 @@ cc_library(
         "ngx_caching_headers.cc",
         "ngx_event_connection.cc",
         "ngx_fetch.cc",
+        "ngx_openssl_shim.cc",
         "ngx_gzip_setter.cc",
         "ngx_list_iterator.cc",
         "ngx_message_handler.cc",
         "ngx_pagespeed.cc",
         "ngx_rewrite_driver_factory.cc",
         "ngx_rewrite_options.cc",
+        "ngx_segment_buffer.cc",
         "ngx_server_context.cc",
         "ngx_url_async_fetcher.cc",
         "ngx_webbotauth_handler.cc",
@@ -131,12 +155,14 @@ cc_library(
         "ngx_caching_headers.h",
         "ngx_event_connection.h",
         "ngx_fetch.h",
+        "ngx_openssl_shim.h",
         "ngx_gzip_setter.h",
         "ngx_list_iterator.h",
         "ngx_message_handler.h",
         "ngx_pagespeed.h",
         "ngx_rewrite_driver_factory.h",
         "ngx_rewrite_options.h",
+        "ngx_segment_buffer.h",
         "ngx_server_context.h",
         "ngx_url_async_fetcher.h",
         "ngx_webbotauth_handler.h",
@@ -215,11 +241,13 @@ cc_library(
         "ngx_caching_headers.cc",
         "ngx_event_connection.cc",
         "ngx_fetch.cc",
+        "ngx_openssl_shim.cc",
         "ngx_gzip_setter.cc",
         "ngx_list_iterator.cc",
         "ngx_message_handler.cc",
         "ngx_rewrite_driver_factory.cc",
         "ngx_rewrite_options.cc",
+        "ngx_segment_buffer.cc",
         "ngx_server_context.cc",
         "ngx_url_async_fetcher.cc",
         "ngx_webbotauth_handler.cc",
@@ -230,12 +258,14 @@ cc_library(
         "ngx_caching_headers.h",
         "ngx_event_connection.h",
         "ngx_fetch.h",
+        "ngx_openssl_shim.h",
         "ngx_gzip_setter.h",
         "ngx_list_iterator.h",
         "ngx_message_handler.h",
         "ngx_pagespeed.h",
         "ngx_rewrite_driver_factory.h",
         "ngx_rewrite_options.h",
+        "ngx_segment_buffer.h",
         "ngx_server_context.h",
         "ngx_url_async_fetcher.h",
         "ngx_webbotauth_handler.h",

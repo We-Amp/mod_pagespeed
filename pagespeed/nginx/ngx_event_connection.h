@@ -32,6 +32,8 @@ extern "C" {
 
 #include <pthread.h>
 
+#include <deque>
+
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/http/headers.h"
 
@@ -56,6 +58,7 @@ using callbackPtr = void (*)(const ps_event_data&);
 class NgxEventConnection {
  public:
   explicit NgxEventConnection(callbackPtr handler);
+  ~NgxEventConnection();
 
   // Creates the file descriptors and ngx_connection_t required for event
   // messaging between pagespeed and nginx.
@@ -73,11 +76,28 @@ class NgxEventConnection {
   static bool CreateNgxConnection(ngx_cycle_t* cycle, ngx_fd_t pipe_fd);
   static void ReadEventHandler(ngx_event_t* e);
   static bool ReadAndNotify(ngx_fd_t fd);
+  // Invokes the receiving callback for one event; skips internal wake markers
+  // (sender == nullptr).
+  static void DispatchEvent(const ps_event_data& data);
+  // Single non-blocking write attempt (retrying EINTR). Returns false with
+  // ngx_errno preserved on failure. Must be called under write_mutex_.
+  bool TryWriteToPipe(const ps_event_data& data);
+  // Runs on the event-loop thread after the pipe has been drained: delivers
+  // events that overflowed while the pipe was full, in order, and switches
+  // writers back to direct pipe writes once the queue is empty.
+  void FlushOverflow();
 
   callbackPtr event_handler_;
   // We own these file descriptors
   ngx_fd_t pipe_write_fd_;
   ngx_fd_t pipe_read_fd_;
+
+  // Guards overflow_mode_ and overflow_, and serializes pipe writes so that
+  // the "no event may enter the pipe while older events wait in the overflow
+  // queue" ordering invariant holds.
+  pthread_mutex_t write_mutex_;
+  bool overflow_mode_;
+  std::deque<ps_event_data> overflow_;
 
   NgxEventConnection(const NgxEventConnection&) = delete;
   NgxEventConnection& operator=(const NgxEventConnection&) = delete;

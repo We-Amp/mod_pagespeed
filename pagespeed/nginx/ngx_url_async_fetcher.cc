@@ -33,6 +33,7 @@ extern "C" {
 #include "net/instaweb/http/public/inflating_fetch.h"
 #include "net/instaweb/public/version.h"
 #include "ngx_fetch.h"
+#include "ngx_openssl_shim.h"
 #include "ngx_url_async_fetcher.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/condvar.h"
@@ -47,6 +48,7 @@ extern "C" {
 #include "pagespeed/kernel/http/request_headers.h"
 #include "pagespeed/kernel/http/response_headers.h"
 #include "pagespeed/kernel/http/response_headers_parser.h"
+#include "pagespeed/system/curl_url_async_fetcher.h"
 
 namespace net_instaweb {
 
@@ -95,6 +97,13 @@ NgxUrlAsyncFetcher::~NgxUrlAsyncFetcher() {
   active_fetches_.DeleteAll();
   NgxConnection::Terminate();
 
+#if (NGX_SSL)
+  if (ssl_created_) {
+    ngx_ssl_cleanup_ctx(&ssl_);
+    ssl_created_ = false;
+  }
+#endif
+
   if (pool_ != nullptr) {
     ngx_destroy_pool(pool_);
     pool_ = nullptr;
@@ -104,6 +113,102 @@ NgxUrlAsyncFetcher::~NgxUrlAsyncFetcher() {
     mutex_ = nullptr;
   }
 }
+
+bool NgxUrlAsyncFetcher::SetHttpsOptions(StringPiece directive) {
+  GoogleString error_message;
+  // The FetchHttps keywords have a single interpretation across fetchers;
+  // the curl fetcher owns the parser.
+  if (!CurlUrlAsyncFetcher::ParseHttpsOptions(directive, &https_options_,
+                                              &error_message)) {
+    message_handler_->Message(kError, "%s", error_message.c_str());
+    return false;
+  }
+#if (NGX_SSL)
+  if (allow_https() && !ssl_created_) {
+    if (!CreateSslContext()) {
+      message_handler_->Message(kError,
+                                "NgxUrlAsyncFetcher: SSL context setup "
+                                "failed, https fetching disabled.");
+      https_options_ &= ~CurlUrlAsyncFetcher::kEnableHttps;
+      return false;
+    }
+  }
+#else
+  if (allow_https()) {
+    message_handler_->Message(
+        kWarning,
+        "NgxUrlAsyncFetcher: nginx was built without SSL support; "
+        "https resources will not be fetched or rewritten.");
+  }
+#endif
+  return true;
+}
+
+bool NgxUrlAsyncFetcher::allow_https() const {
+  return (https_options_ & CurlUrlAsyncFetcher::kEnableHttps) != 0;
+}
+
+bool NgxUrlAsyncFetcher::allow_self_signed() const {
+  return (https_options_ & CurlUrlAsyncFetcher::kAllowSelfSigned) != 0;
+}
+
+bool NgxUrlAsyncFetcher::allow_unknown_certificate_authority() const {
+  return (https_options_ &
+          CurlUrlAsyncFetcher::kAllowUnknownCertificateAuthority) != 0;
+}
+
+bool NgxUrlAsyncFetcher::allow_certificate_not_yet_valid() const {
+  return (https_options_ & CurlUrlAsyncFetcher::kAllowCertificateNotYetValid) !=
+         0;
+}
+
+#if (NGX_SSL)
+bool NgxUrlAsyncFetcher::CreateSslContext() {
+  // All direct OpenSSL calls go through NgxOpenSslShim; see its header for
+  // why (the module statically links a different TLS library).
+  NgxOpenSslShim* shim = NgxOpenSslShim::Get();
+  if (!shim->ok()) {
+    message_handler_->Message(
+        kError,
+        "NgxUrlAsyncFetcher: could not resolve nginx's TLS library "
+        "entry points.");
+    return false;
+  }
+  ngx_memzero(&ssl_, sizeof(ssl_));
+  ssl_.log = log_;
+  ngx_uint_t protocols = NGX_SSL_TLSv1 | NGX_SSL_TLSv1_1 | NGX_SSL_TLSv1_2;
+#ifdef NGX_SSL_TLSv1_3
+  protocols |= NGX_SSL_TLSv1_3;
+#endif
+  if (ngx_ssl_create(&ssl_, protocols, nullptr) != NGX_OK) {
+    return false;
+  }
+  ssl_created_ = true;
+
+  // CA trust anchors for certificate verification: the configured
+  // SslCertFile/SslCertDirectory when present, the OpenSSL defaults
+  // otherwise (mirrors the curl fetcher's CAINFO/CAPATH handling).
+  int rc;
+  if (!ssl_certificates_file_.empty() || !ssl_certificates_dir_.empty()) {
+    rc = shim->SslCtxLoadVerifyLocations(
+        ssl_.ctx,
+        ssl_certificates_file_.empty() ? nullptr
+                                       : ssl_certificates_file_.c_str(),
+        ssl_certificates_dir_.empty() ? nullptr
+                                      : ssl_certificates_dir_.c_str());
+  } else {
+    rc = shim->SslCtxSetDefaultVerifyPaths(ssl_.ctx);
+  }
+  if (rc != 1) {
+    message_handler_->Message(
+        kWarning,
+        "NgxUrlAsyncFetcher: failed to load CA certificates; certificate "
+        "verification will fail unless allow_self_signed or "
+        "allow_unknown_certificate_authority is set.");
+  }
+  return true;
+}
+#endif
 
 bool NgxUrlAsyncFetcher::ParseUrl(ngx_url_t* url, ngx_pool_t* pool) {
   size_t scheme_offset;
@@ -218,6 +323,17 @@ void NgxUrlAsyncFetcher::Fetch(const GoogleString& url,
   // Don't accept new fetches when shut down. This flow is also entered when
   // we did not initialize properly in ::Init().
   if (shutdown_) {
+    async_fetch->Done(false);
+    return;
+  }
+  // The rewriter checks SupportsHttps() before scheduling https fetches, but
+  // guard here too (mirrors the curl fetcher): an https fetch without TLS
+  // support would speak plaintext to a TLS port.
+  if (StringCaseStartsWith(url, "https:") && !SupportsHttps()) {
+    message_handler->Message(kWarning,
+                             "NgxUrlAsyncFetcher: https fetching is not "
+                             "enabled, failing fetch for %s",
+                             url.c_str());
     async_fetch->Done(false);
     return;
   }

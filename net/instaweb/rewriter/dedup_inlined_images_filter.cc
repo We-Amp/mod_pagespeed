@@ -153,11 +153,16 @@ void DedupInlinedImagesFilter::EndElementImpl(HtmlElement* element) {
 bool DedupInlinedImagesFilter::IsDedupCandidate(HtmlElement* element,
                                                 StringPiece* src_iff_true) {
   // Ignore images inside a <noscript> as inserting any JS is pointless.
+  // Ignore all images when the page's CSP forbids inline scripts, since the
+  // dedup mechanism restores each duplicate from an inline script that the
+  // browser would block, leaving a blank image. Checked per element because
+  // a meta-tag policy can arrive mid-document.
   // Ignore images that aren't inlined (a data URI).
   // Ignore images that are smaller than the cutoff, current set to roughly
   // the size of the JS snippet we insert (ignoring the functions JS overhead).
   // TODO(matterbury): Also handle input tags.
-  if (noscript_element() == nullptr && element->keyword() == HtmlName::kImg) {
+  if (noscript_element() == nullptr && element->keyword() == HtmlName::kImg &&
+      CspPermitsInlineScript()) {
     const StringPiece src(element->AttributeValue(HtmlName::kSrc));
     if (IsDataImageUrl(src) && src.size() > kMinimumImageCutoff) {
       *src_iff_true = src;

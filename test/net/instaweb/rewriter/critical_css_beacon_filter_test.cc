@@ -179,6 +179,25 @@ TEST_F(CriticalCssBeaconFilterTest, ExtractFromInlineStyle) {
                       BeaconHtml(kInlineStyle, kSelectorsInline));
 }
 
+TEST_F(CriticalCssBeaconFilterTest, CspForbidsInlineScript) {
+  // The beacon bootstrap is an inline script; under a script-src policy
+  // without 'unsafe-inline' the browser blocks it, so no beaconing.
+  const char kCsp[] =
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"script-src *;\">";
+  ValidateNoChanges(kTestDomain, InputHtml(StrCat(kCsp, kInlineStyle)));
+}
+
+TEST_F(CriticalCssBeaconFilterTest, CspAllowsInlineScript) {
+  // With 'unsafe-inline' permitted the filter behaves as usual.
+  const char kCsp[] =
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"script-src * 'unsafe-inline';\">";
+  GoogleString head = StrCat(kCsp, kInlineStyle);
+  ValidateExpectedUrl(kTestDomain, InputHtml(head),
+                      BeaconHtml(head, kSelectorsInline));
+}
+
 TEST_F(CriticalCssBeaconFilterTest, DisabledForIE) {
   SetCurrentUserAgent(UserAgentMatcherTestBase::kIe7UserAgent);
   ValidateNoChanges(kTestDomain, InputHtml(kInlineStyle));

@@ -30,6 +30,7 @@
 #include "net/instaweb/rewriter/public/static_asset_manager.h"
 #include "net/instaweb/util/public/mock_property_page.h"
 #include "net/instaweb/util/public/property_cache.h"
+#include "pagespeed/kernel/base/charset_util.h"
 #include "pagespeed/kernel/base/hasher.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
@@ -192,6 +193,37 @@ TEST_F(CriticalSelectorFilterTest, BasicOperation) {
       StrCat("<head>", critical_css, "</head>", "<body><div>Stuff</div>",
              LoadRestOfCss(css), "</body>"));
   ValidateRewriterLogging(RewriterHtmlApplication::ACTIVE);
+}
+
+TEST_F(CriticalSelectorFilterTest, CspForbidsInlineStyle) {
+  // A style-src policy without 'unsafe-inline' would make the browser block
+  // the inline <style> blocks this filter swaps in for <link> tags, so the
+  // filter must leave the page alone entirely.
+  const char kCsp[] =
+      "<meta http-equiv=\"Content-Security-Policy\" content=\"style-src *;\">";
+  GoogleString html =
+      StrCat("<head>", kCsp, CssLinkHref("a.css"), CssLinkHref("b.css"),
+             "</head>"
+             "<body><div>Stuff</div></body>");
+  ValidateNoChanges("csp_no_inline", html);
+}
+
+TEST_F(CriticalSelectorFilterTest, CspAllowsInlineStyle) {
+  // With 'unsafe-inline' permitted, the filter behaves as usual.
+  const char kCsp[] =
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"style-src * 'unsafe-inline';\">";
+  GoogleString links = StrCat(CssLinkHref("a.css"), CssLinkHref("b.css"));
+  GoogleString critical_css =
+      "<style>div,*::first-letter{display:block}</style>"  // from a.css
+      "<style>@media screen{*{margin:0}}</style>";         // from b.css
+  GoogleString html = StrCat("<head>", kCsp, links,
+                             "</head>"
+                             "<body><div>Stuff</div></body>");
+  ValidateExpected(
+      "csp_unsafe_inline", html,
+      StrCat("<head>", kCsp, critical_css, "</head>", "<body><div>Stuff</div>",
+             LoadRestOfCss(links), "</body>"));
 }
 
 TEST_F(CriticalSelectorFilterTest, UnauthorizedCss) {
@@ -474,6 +506,72 @@ TEST_F(CriticalSelectorFilterTest, RetainUnparseable) {
   ValidateExpected(
       "partly_unparseable", CssLinkHref("c.css"),
       StrCat("<style>!huh! {background:#fff}@huh { display: block; }</style>",
+             LoadRestOfCss(CssLinkHref("c.css"))));
+}
+
+TEST_F(CriticalSelectorFilterTest, CharsetIncompatibleNonAscii) {
+  // c.css declares utf-8 via its BOM and its critical subset carries a
+  // non-ASCII byte, while the page is iso-8859-1. Inlining would garble the
+  // bytes, so the filter must leave this stylesheet alone.
+  GoogleString css = StrCat(kUtf8Bom, "div { content: \"\xD2\x90\"; }");
+  SetResponseWithDefaultHeaders("c.css", kContentTypeCss, css, 100);
+  ValidateNoChanges(
+      "charset_mismatch",
+      StrCat("<meta charset=\"ISO-8859-1\">", CssLinkHref("c.css")));
+}
+
+TEST_F(CriticalSelectorFilterTest, CharsetIncompatibleAsciiOnly) {
+  // Same charset mismatch, but the critical subset keeps to the ASCII
+  // subset, which is charset-agnostic --- so inlining proceeds.
+  GoogleString css = StrCat(kUtf8Bom, "div { color: red; }");
+  SetResponseWithDefaultHeaders("c.css", kContentTypeCss, css, 100);
+  ValidateExpected(
+      "charset_mismatch_ascii",
+      StrCat("<meta charset=\"ISO-8859-1\">", CssLinkHref("c.css")),
+      StrCat("<meta charset=\"ISO-8859-1\">", "<style>div{color:red}</style>",
+             LoadRestOfCss(CssLinkHref("c.css"))));
+}
+
+TEST_F(CriticalSelectorFilterTest, CopiesLinkAttributes) {
+  // id, title, and data-* carry over from the replaced link to the inline
+  // style; other attributes (here foo) do not.
+  GoogleString link =
+      "<link rel=\"stylesheet\" href=\"a.css\" id=\"main\" title=\"Main\""
+      " data-x=\"1\" foo=\"bar\">";
+  ValidateExpected(
+      "copy_attrs", link,
+      StrCat("<style id=\"main\" title=\"Main\" data-x=\"1\">"
+             "div,*::first-letter{display:block}</style>",
+             LoadRestOfCss(link)));
+}
+
+TEST_F(CriticalSelectorFilterTest, DropImports) {
+  // An @import inside the inline critical block would still trigger a
+  // render-blocking fetch, and no critical rule can depend on it (imported
+  // files' selectors were never beacon candidates). It must be dropped from
+  // the critical subset; the deferred full copy retains it.
+  GoogleString css = "@import url(imp.css); div { color: red; }";
+  SetResponseWithDefaultHeaders("c.css", kContentTypeCss, css, 100);
+  ValidateExpected("drop_imports", CssLinkHref("c.css"),
+                   StrCat("<style>div{color:red}</style>",
+                          LoadRestOfCss(CssLinkHref("c.css"))));
+}
+
+TEST_F(CriticalSelectorFilterTest, DropKeyframes) {
+  // @keyframes (incl. vendor-prefixed) don't affect first paint and are
+  // dropped from the critical subset; @font-face is kept since it shapes
+  // text from the first paint on.
+  GoogleString css =
+      "@keyframes spin { from { transform: rotate(0deg); }"
+      " to { transform: rotate(360deg); } }"
+      "@-webkit-keyframes spin { from { transform: rotate(0deg); } }"
+      "@font-face { font-family: Cool; src: url(cool.woff2); }"
+      "div { animation: spin 2s linear infinite; }";
+  SetResponseWithDefaultHeaders("c.css", kContentTypeCss, css, 100);
+  ValidateExpected(
+      "drop_keyframes", CssLinkHref("c.css"),
+      StrCat("<style>@font-face{font-family:Cool;src:url(cool.woff2)}"
+             "div{animation:spin 2s linear infinite}</style>",
              LoadRestOfCss(CssLinkHref("c.css"))));
 }
 

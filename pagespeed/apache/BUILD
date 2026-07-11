@@ -56,6 +56,7 @@ cc_library(
         "apache_config.cc",
         "apache_fetch.cc",
         "apache_message_handler.cc",
+        "apache_mmap_bucket.cc",
         "apache_request_context.cc",
         "apache_rewrite_driver_factory.cc",
         "apache_server_context.cc",
@@ -68,6 +69,7 @@ cc_library(
         "instaweb_handler.cc",
         "log_message_handler.cc",
         "simple_buffered_apache_fetch.cc",
+        "streaming_pagespeed_resource_fetch.cc",
     ],
     hdrs = [
         "apache_config.h",
@@ -75,6 +77,7 @@ cc_library(
         "apache_httpd_includes.h",
         "apache_logging_includes.h",
         "apache_message_handler.h",
+        "apache_mmap_bucket.h",
         "apache_request_context.h",
         "apache_rewrite_driver_factory.h",
         "apache_server_context.h",
@@ -87,6 +90,7 @@ cc_library(
         "log_message_handler.h",
         "mod_instaweb.h",
         "simple_buffered_apache_fetch.h",
+        "streaming_pagespeed_resource_fetch.h",
     ],
     copts = [
         "-I/usr/include/apache2/",

@@ -125,6 +125,13 @@ void JsDisableFilter::StartElementImpl(HtmlElement* element) {
     HtmlElement::Attribute* src;
     if (script_tag_scanner_.ParseScriptElement(element, &src) ==
         ScriptTagScanner::kJavaScript) {
+      // The deferJs runtime re-executes disabled scripts via injected inline
+      // JS; if the page's CSP forbids inline scripts, disabling this script
+      // would leave it dead in the browser. Back off, matching
+      // JsDeferDisabledFilter::ShouldApply().
+      if (!CspPermitsInlineScript()) {
+        return;
+      }
       if (element->FindAttribute(HtmlName::kDataPagespeedNoDefer) ||
           element->FindAttribute(HtmlName::kPagespeedNoDefer)) {
         driver()->log_record()->LogJsDisableFilter(
@@ -176,7 +183,11 @@ void JsDisableFilter::StartElementImpl(HtmlElement* element) {
   }
 
   HtmlElement::Attribute* onload = element->FindAttribute(HtmlName::kOnload);
-  if (onload != nullptr) {
+  // The replacement onload handler is an inline event-handler attribute
+  // whose original is only re-triggered by the deferJs runtime; leave the
+  // handler alone when the page's CSP forbids either.
+  if (onload != nullptr && CspPermitsInlineScript() &&
+      CspPermitsInlineScriptAttribute()) {
     // The onload value can be any script. It's not necessary that it is
     // always javascript. But we don't have any way of identifying it.
     // For now let us assume it is JS, which is the case in majority.
@@ -193,6 +204,13 @@ void JsDisableFilter::StartElementImpl(HtmlElement* element) {
 
 void JsDisableFilter::EndElementImpl(HtmlElement* element) {}
 
-void JsDisableFilter::EndDocument() { InsertJsDeferExperimentalScript(); }
+void JsDisableFilter::EndDocument() {
+  if (!CspPermitsInlineScript()) {
+    // The experimental-defer marker is an inline script; the CSP that
+    // suppressed script disabling above blocks it as well.
+    return;
+  }
+  InsertJsDeferExperimentalScript();
+}
 
 }  // namespace net_instaweb

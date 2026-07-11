@@ -1,6 +1,7 @@
 <script lang="ts">
   import { AdminApiClient } from "$lib/api/client";
   import { usePolling } from "$lib/api/polling.svelte";
+  import RefreshNotice from "$lib/RefreshNotice.svelte";
 
   const { basePath = "" }: { basePath?: string; isGlobal?: boolean } = $props();
   const api = new AdminApiClient(basePath);
@@ -8,6 +9,14 @@
 
   let search = $state("");
   let selectedIndex = $state(0);
+
+  // The backend emits a -5000 sentinel for percentile stats when a histogram
+  // has too few samples to compute them. These are latency/size values that are
+  // never legitimately negative, so render an en-dash instead of "-5000".
+  function fmtStat(v: string): string {
+    const n = Number(v.replace(/,/g, ""));
+    return Number.isFinite(n) && n < 0 ? "\u2013" : v;
+  }
 
   interface HistogramRow {
     name: string;
@@ -155,11 +164,12 @@
 
   {#if histograms.loading}
     <p class="loading">Loading histograms...</p>
-  {:else if histograms.error}
+  {:else if histograms.error && !histograms.data}
     <p class="error">{histograms.error.message}</p>
   {:else if parsed.rows.length === 0}
     <p class="empty">No histogram data available.</p>
   {:else}
+    <RefreshNotice error={histograms.error} />
     <div class="toolbar">
       <input
         type="text"
@@ -198,14 +208,14 @@
               >
                 <td class="name-cell">{row.name}</td>
                 <td class="num-cell">{row.count}</td>
-                <td class="num-cell">{row.avg}</td>
-                <td class="num-cell">{row.stddev}</td>
-                <td class="num-cell">{row.min}</td>
-                <td class="num-cell">{row.median}</td>
-                <td class="num-cell">{row.max}</td>
-                <td class="num-cell">{row.p90}</td>
-                <td class="num-cell">{row.p95}</td>
-                <td class="num-cell">{row.p99}</td>
+                <td class="num-cell">{fmtStat(row.avg)}</td>
+                <td class="num-cell">{fmtStat(row.stddev)}</td>
+                <td class="num-cell">{fmtStat(row.min)}</td>
+                <td class="num-cell">{fmtStat(row.median)}</td>
+                <td class="num-cell">{fmtStat(row.max)}</td>
+                <td class="num-cell">{fmtStat(row.p90)}</td>
+                <td class="num-cell">{fmtStat(row.p95)}</td>
+                <td class="num-cell">{fmtStat(row.p99)}</td>
               </tr>
             {/each}
           </tbody>

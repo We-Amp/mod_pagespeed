@@ -85,6 +85,13 @@ static void SetLastError(const std::string& msg) { g_last_error = msg; }
 // Helper to clear the thread-local error message.
 static void ClearLastError() { g_last_error.clear(); }
 
+// Map the C ABI tier to Cyclone's C++ tier.  Anything other than
+// CYCLONE_TIER_SMALL routes to the default tier.
+static cyclone::Tier ToCycloneTier(CycloneTier tier) {
+  return tier == CYCLONE_TIER_SMALL ? cyclone::Tier::kSmall
+                                    : cyclone::Tier::kDefault;
+}
+
 extern "C" {
 
 CycloneCacheHandle* cyclone_cache_create(const CycloneCacheConfig* config) {
@@ -102,6 +109,10 @@ CycloneCacheHandle* cyclone_cache_create(const CycloneCacheConfig* config) {
   cyclone::CacheConfig cc;
   cc.ram_cache_size = config->ram_cache_size_bytes;
   cc.enable_checksum = config->enable_checksum != 0;
+  // Small-object tier carve-out; Cyclone clamps nonzero values to [1, 50]
+  // and silently disables the tier when cache_size_bytes is below the
+  // sizing floor (see cyclone_cache_small_tier_active()).
+  cc.small_tier_percent = config->small_tier_percent;
   if (config->num_segments > 0) {
     cc.num_segments = config->num_segments;
   }
@@ -183,9 +194,10 @@ int cyclone_cache_is_running(const CycloneCacheHandle* cache) {
   return (cache && cache->impl && cache->running) ? 1 : 0;
 }
 
-CycloneError cyclone_cache_read(CycloneCacheHandle* cache, const char* key,
-                                size_t key_len,
-                                CycloneReadHandle** out_handle) {
+static CycloneError CycloneCacheReadInternal(CycloneCacheHandle* cache,
+                                             const char* key, size_t key_len,
+                                             cyclone::Tier tier,
+                                             CycloneReadHandle** out_handle) {
   ClearLastError();
 
   if (!cache || !cache->impl || !cache->running) {
@@ -202,7 +214,7 @@ CycloneError cyclone_cache_read(CycloneCacheHandle* cache, const char* key,
   cyclone::CacheKey ckey(std::string_view(key, key_len));
 
   // Perform synchronous read
-  auto result = cache->impl->read_sync(ckey);
+  auto result = cache->impl->read_sync(ckey, tier);
 
   if (!result) {
     // Key not found - this is not an error condition, just a miss
@@ -246,6 +258,20 @@ CycloneError cyclone_cache_read(CycloneCacheHandle* cache, const char* key,
   return CYCLONE_OK;
 }
 
+CycloneError cyclone_cache_read(CycloneCacheHandle* cache, const char* key,
+                                size_t key_len,
+                                CycloneReadHandle** out_handle) {
+  return CycloneCacheReadInternal(cache, key, key_len, cyclone::Tier::kDefault,
+                                  out_handle);
+}
+
+CycloneError cyclone_cache_read_tier(CycloneCacheHandle* cache, const char* key,
+                                     size_t key_len, CycloneTier tier,
+                                     CycloneReadHandle** out_handle) {
+  return CycloneCacheReadInternal(cache, key, key_len, ToCycloneTier(tier),
+                                  out_handle);
+}
+
 const char* cyclone_read_handle_data(const CycloneReadHandle* handle) {
   return handle ? handle->get_data_copy() : nullptr;
 }
@@ -260,6 +286,10 @@ int cyclone_read_handle_has_mapped_data(const CycloneReadHandle* handle) {
 
 size_t cyclone_read_handle_size(const CycloneReadHandle* handle) {
   return handle ? handle->data_size : 0;
+}
+
+int cyclone_read_handle_is_ram_hit(const CycloneReadHandle* handle) {
+  return (handle != nullptr && handle->handle.is_ram_cache_hit()) ? 1 : 0;
 }
 
 void cyclone_read_handle_ref(CycloneReadHandle* handle) {
@@ -286,9 +316,26 @@ void cyclone_read_handle_close(CycloneReadHandle* handle) {
   cyclone_read_handle_unref(handle);
 }
 
-CycloneError cyclone_cache_write(CycloneCacheHandle* cache, const char* key,
-                                 size_t key_len, const char* data,
-                                 size_t data_len) {
+int cyclone_read_handle_renew_lease(CycloneReadHandle* handle) {
+  return (handle != nullptr && handle->handle.renew_lease()) ? 1 : 0;
+}
+
+int cyclone_read_handle_renew_lease_strict(CycloneReadHandle* handle) {
+  if (handle == nullptr) {
+    return static_cast<int>(cyclone::LeaseRenewal::kLeasesOff);
+  }
+  return static_cast<int>(handle->handle.renew_lease_strict());
+}
+
+uint64_t cyclone_read_handle_ns_until_forced_wrap(
+    const CycloneReadHandle* handle) {
+  return handle != nullptr ? handle->handle.ns_until_forced_wrap() : UINT64_MAX;
+}
+
+static CycloneError CycloneCacheWriteInternal(CycloneCacheHandle* cache,
+                                              const char* key, size_t key_len,
+                                              const char* data, size_t data_len,
+                                              cyclone::Tier tier) {
   ClearLastError();
 
   if (!cache || !cache->impl || !cache->running) {
@@ -306,13 +353,13 @@ CycloneError cyclone_cache_write(CycloneCacheHandle* cache, const char* key,
 
   // Always delete existing entry first - Cyclone doesn't properly handle overwrites
   // (with RAM cache enabled, overwrites cause content_length to become 0)
-  auto exists_result = cache->impl->exists_sync(ckey);
+  auto exists_result = cache->impl->exists_sync(ckey, tier);
   if (exists_result && *exists_result) {
-    cache->impl->remove_sync(ckey);
+    cache->impl->remove_sync(ckey, tier);
   }
 
   // Now write to the (empty) slot - use pre-allocated version with size
-  auto handle_result = cache->impl->write_sync(ckey, data_len);
+  auto handle_result = cache->impl->write_sync(ckey, data_len, tier);
 
   if (!handle_result) {
     SetLastError("Failed to allocate space for write - cache may be full");
@@ -354,8 +401,24 @@ CycloneError cyclone_cache_write(CycloneCacheHandle* cache, const char* key,
   return CYCLONE_OK;
 }
 
-CycloneError cyclone_cache_delete(CycloneCacheHandle* cache, const char* key,
-                                  size_t key_len) {
+CycloneError cyclone_cache_write(CycloneCacheHandle* cache, const char* key,
+                                 size_t key_len, const char* data,
+                                 size_t data_len) {
+  return CycloneCacheWriteInternal(cache, key, key_len, data, data_len,
+                                   cyclone::Tier::kDefault);
+}
+
+CycloneError cyclone_cache_write_tier(CycloneCacheHandle* cache,
+                                      const char* key, size_t key_len,
+                                      const char* data, size_t data_len,
+                                      CycloneTier tier) {
+  return CycloneCacheWriteInternal(cache, key, key_len, data, data_len,
+                                   ToCycloneTier(tier));
+}
+
+static CycloneError CycloneCacheDeleteInternal(CycloneCacheHandle* cache,
+                                               const char* key, size_t key_len,
+                                               cyclone::Tier tier) {
   ClearLastError();
 
   if (!cache || !cache->impl || !cache->running) {
@@ -369,7 +432,7 @@ CycloneError cyclone_cache_delete(CycloneCacheHandle* cache, const char* key,
   }
 
   cyclone::CacheKey ckey(std::string_view(key, key_len));
-  auto result = cache->impl->remove_sync(ckey);
+  auto result = cache->impl->remove_sync(ckey, tier);
 
   if (!result) {
     // Key not found - return NOT_FOUND but don't set error message
@@ -380,8 +443,22 @@ CycloneError cyclone_cache_delete(CycloneCacheHandle* cache, const char* key,
   return CYCLONE_OK;
 }
 
-CycloneError cyclone_cache_exists(CycloneCacheHandle* cache, const char* key,
-                                  size_t key_len, int* exists) {
+CycloneError cyclone_cache_delete(CycloneCacheHandle* cache, const char* key,
+                                  size_t key_len) {
+  return CycloneCacheDeleteInternal(cache, key, key_len,
+                                    cyclone::Tier::kDefault);
+}
+
+CycloneError cyclone_cache_delete_tier(CycloneCacheHandle* cache,
+                                       const char* key, size_t key_len,
+                                       CycloneTier tier) {
+  return CycloneCacheDeleteInternal(cache, key, key_len, ToCycloneTier(tier));
+}
+
+static CycloneError CycloneCacheExistsInternal(CycloneCacheHandle* cache,
+                                               const char* key, size_t key_len,
+                                               cyclone::Tier tier,
+                                               int* exists) {
   ClearLastError();
 
   if (!cache || !cache->impl || !cache->running) {
@@ -395,7 +472,7 @@ CycloneError cyclone_cache_exists(CycloneCacheHandle* cache, const char* key,
   }
 
   cyclone::CacheKey ckey(std::string_view(key, key_len));
-  auto result = cache->impl->exists_sync(ckey);
+  auto result = cache->impl->exists_sync(ckey, tier);
 
   if (!result) {
     SetLastError("Failed to check existence");
@@ -404,6 +481,23 @@ CycloneError cyclone_cache_exists(CycloneCacheHandle* cache, const char* key,
 
   *exists = *result ? 1 : 0;
   return CYCLONE_OK;
+}
+
+CycloneError cyclone_cache_exists(CycloneCacheHandle* cache, const char* key,
+                                  size_t key_len, int* exists) {
+  return CycloneCacheExistsInternal(cache, key, key_len,
+                                    cyclone::Tier::kDefault, exists);
+}
+
+CycloneError cyclone_cache_exists_tier(CycloneCacheHandle* cache,
+                                       const char* key, size_t key_len,
+                                       CycloneTier tier, int* exists) {
+  return CycloneCacheExistsInternal(cache, key, key_len, ToCycloneTier(tier),
+                                    exists);
+}
+
+int cyclone_cache_small_tier_active(const CycloneCacheHandle* cache) {
+  return (cache && cache->impl && cache->impl->small_tier_active()) ? 1 : 0;
 }
 
 void cyclone_cache_get_stats(const CycloneCacheHandle* cache,
@@ -422,6 +516,12 @@ void cyclone_cache_get_stats(const CycloneCacheHandle* cache,
   stats->evictions = s.evictions;
   stats->current_size_bytes = s.current_bytes;
   stats->current_entries = s.current_entries;
+  stats->ram_cache_bytes = s.ram_cache_bytes;
+  stats->write_buffer_wraps = s.write_buffer_wraps;
+  stats->wraps_deferred_by_lease = s.wraps_deferred_by_lease;
+  stats->writes_dropped_by_lease = s.writes_dropped_by_lease;
+  stats->wraps_forced_past_lease = s.wraps_forced_past_lease;
+  stats->tag_collision_evictions = s.tag_collision_evictions;
 }
 
 const char* cyclone_get_last_error(void) {

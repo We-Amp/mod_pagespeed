@@ -109,7 +109,6 @@ class TestCacheHitTracking:
         # nginx may use different stat names, so check for common ones
         cache_hit_stats = [
             "cache_hits",
-            "lru_cache_hits",
             "file_cache_hits",
             "http_cache_hits",
         ]
@@ -146,8 +145,6 @@ class TestCacheHitTracking:
             "cache_hits",
             "cache_misses",
             "cache_inserts",
-            "lru_cache_hits",
-            "lru_cache_misses",
             "file_cache_hits",
             "file_cache_misses",
         ]

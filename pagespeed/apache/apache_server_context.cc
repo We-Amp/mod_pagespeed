@@ -118,7 +118,15 @@ ApacheConfig* ApacheServerContext::NonSpdyConfigOverlay() {
 
 void ApacheServerContext::CollapseConfigOverlaysAndComputeSignatures() {
   // These days we ignore the spdy overlay and merge-in the non-spdy one
-  // unconditionally.
+  // unconditionally. A non-null spdy overlay means a <ModPagespeedIf spdy>
+  // block carried directives, which are now silently dropped; warn once per
+  // config load so the operator can remove the dead block.
+  if (spdy_config_overlay_.get() != nullptr) {
+    message_handler()->Message(
+        kWarning,
+        "<ModPagespeedIf spdy> is deprecated; its directives are ignored. "
+        "Please remove the block from your configuration.");
+  }
   if (non_spdy_config_overlay_.get() != nullptr) {
     global_config()->Merge(*non_spdy_config_overlay_);
   }

@@ -79,7 +79,31 @@ class ApacheFetch : public AsyncFetch {
 
   bool status_ok() const { return status_ok_; }
 
+  // Whether this fetch has already sent response headers (and possibly body
+  // bytes) to the client.  Once true, the caller must not emit a response of
+  // its own (e.g. an error page), even if status_ok() is false:
+  // SendOutHeaders() can commit a 403 for a response that lacked a
+  // Content-Type regardless of handle_error.  Only meaningful on the request
+  // thread; for the buffered case only after Wait() has returned.
+  bool response_committed() const { return headers_sent_; }
+
   bool IsCachedResultValid(const ResponseHeaders& headers) override
+      LOCKS_EXCLUDED(scheduler_->mutex());
+
+  // Zero-copy ALIASED serve (CycloneZeroCopyServe, the design record).  Called on
+  // the request thread by the '.pagespeed.' cache-hit serve
+  // (rewrite_driver.cc CacheCallback::DeliverDone) with a body StringPiece
+  // aliasing a Cyclone mmap region and its pinning keepalive.  When the
+  // Apache opt-in gate and the verbatim-serve guards hold, the body goes
+  // out as a PAGESPEED_MMAP bucket that revalidates the read lease before
+  // every send and copies out on setaside (apache_mmap_bucket.h);
+  // otherwise the bytes are de-aliased here by a verified copy
+  // (copy-then-verify) and served through the classic Write path.  A torn
+  // borrow (epoch moved) fails the serve closed instead of completing a
+  // corrupt body.
+  bool WriteMapped(const StringPiece& mmap_sp,
+                   const MappedSharedString& keepalive,
+                   MessageHandler* handler) override
       LOCKS_EXCLUDED(scheduler_->mutex());
 
   // By default ApacheFetch is not intended for proxying third party content.
@@ -108,6 +132,12 @@ class ApacheFetch : public AsyncFetch {
   bool wait_called_;
   bool handle_error_;
   bool squelch_output_;
+  // Whether SendOutHeaders() actually handed headers to the ApacheWriter.
+  // False when handle_error_ is false and the response was an error: in
+  // that case the caller answers the request itself and we must not write
+  // anything (ApacheWriter requires OutputHeaders() before Write()).
+  // Only read/written on the request thread.
+  bool headers_sent_;
   bool status_ok_;
   bool is_proxy_;
   bool buffered_;

@@ -62,7 +62,10 @@ extern "C" {
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "ngx_event_connection.h"
 #include "ngx_pagespeed.h"
+#include "ngx_segment_buffer.h"
 #include "ngx_server_context.h"
+#include "pagespeed/kernel/base/mapped_shared_string.h"
+#include "pagespeed/kernel/base/shared_string.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/http/headers.h"
 
@@ -135,8 +138,24 @@ class NgxBaseFetch : public AsyncFetch {
 
   bool IsCachedResultValid(const ResponseHeaders& headers) override;
 
+  // Zero-copy ALIASED serve (CycloneZeroCopyServe).  Records the mmap
+  // region as a BORROWED blob (no copy) and stashes 'keepalive' (which
+  // carries the design record force-wrap-deadline hook); CopyBufferToNginx emits
+  // the aliased ngx_buf_t on the nginx thread and, for the aliased path,
+  // arms a single-shot timer that copies the tail out if the client is
+  // slow.  A mapped serve is a single Write.
+  bool WriteMapped(const StringPiece& mmap_sp,
+                   const MappedSharedString& keepalive,
+                   MessageHandler* handler) override;
+
  private:
   virtual bool HandleWrite(const StringPiece& sp, MessageHandler* handler);
+  // Retains a trimmed refcounted view of 'storage' as a whole segment
+  // instead of copying 'content' (large writes only; small writes fall
+  // back to the copying HandleWrite).
+  bool HandleWriteShared(const StringPiece& content,
+                         const SharedString& storage,
+                         MessageHandler* handler) override;
   virtual bool HandleFlush(MessageHandler* handler);
   virtual void HandleHeadersComplete();
   virtual void HandleDone(bool success);
@@ -150,8 +169,9 @@ class NgxBaseFetch : public AsyncFetch {
   //   NGX_ERROR: failure
   //   NGX_AGAIN: still has buffer to send, need to checkout link_ptr
   //   NGX_OK: done, HandleDone has been called
-  // Allocates an nginx buffer, copies our buffer_ contents into it, clears
-  // buffer_.
+  // Drains buffer_: small segments are copied into page-sized nginx buffers,
+  // large segments are moved out whole (into pool-cleanup-owned holders)
+  // without a copy.
   ngx_int_t CopyBufferToNginx(ngx_chain_t** link_ptr);
 
   void Lock();
@@ -168,7 +188,11 @@ class NgxBaseFetch : public AsyncFetch {
 
   GoogleString url_;
   ngx_http_request_t* request_;
-  GoogleString buffer_;
+  // Response bytes buffered between PSOL-side writes and nginx-side
+  // collection, as a queue of owned segments (M0 of the zero-copy serving
+  // ladder). Appended under mutex_ on PSOL threads (HandleWrite), drained
+  // under mutex_ on the nginx thread (CollectAccumulatedWrites).
+  NgxSegmentBuffer buffer_;
   NgxServerContext* server_context_;
   const RewriteOptions* options_;
   bool need_flush_;
@@ -185,6 +209,14 @@ class NgxBaseFetch : public AsyncFetch {
   // Set to true just before the nginx side releases its reference
   bool detached_;
   bool suppress_;
+
+  // Zero-copy ALIASED serve (CycloneZeroCopyServe).  One borrowed blob +
+  // one pin: set on a PSOL thread by WriteMapped, drained on the nginx
+  // thread by CopyBufferToNginx (both under mutex_).
+  const char* borrowed_data_ = nullptr;
+  size_t borrowed_size_ = 0;
+  bool has_borrowed_ = false;
+  MappedSharedString pinned_pending_;
 
   NgxBaseFetch(const NgxBaseFetch&) = delete;
   NgxBaseFetch& operator=(const NgxBaseFetch&) = delete;

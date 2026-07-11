@@ -38,6 +38,18 @@ extern "C" {
 #include <nginx.h>
 }
 
+#if (NGX_SSL)
+// ABI-stable X509 verification results, supplied defensively: the OpenSSL
+// headers this translation unit sees may not be the ones nginx's TLS
+// library was built from (see ngx_openssl_shim.h).
+#ifndef X509_V_OK
+#define X509_V_OK 0
+#endif
+#ifndef X509_V_ERR_CERT_NOT_YET_VALID
+#define X509_V_ERR_CERT_NOT_YET_VALID 9
+#endif
+#endif
+
 #include <algorithm>
 #include <string>
 #include <typeinfo>
@@ -49,6 +61,7 @@ extern "C" {
 #include "net/instaweb/public/global_constants.h"
 #include "net/instaweb/public/version.h"
 #include "ngx_fetch.h"
+#include "ngx_openssl_shim.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/condvar.h"
 #include "pagespeed/kernel/base/message_handler.h"
@@ -88,11 +101,32 @@ NgxConnection::~NgxConnection() {
   CHECK(c_ == nullptr) << "NgxConnection: Underlying connection should be NULL";
 }
 
+namespace {
+
+// Closes an outbound fetch connection, shutting down TLS first when
+// present. The connection's pool (created for the TLS state) is ours.
+void CloseFetchConnection(ngx_connection_t* c) {
+#if (NGX_SSL)
+  if (c->ssl != nullptr) {
+    c->ssl->no_wait_shutdown = 1;
+    c->ssl->no_send_shutdown = 1;
+    (void)ngx_ssl_shutdown(c);
+  }
+#endif
+  ngx_pool_t* pool = c->pool;
+  ngx_close_connection(c);
+  if (pool != nullptr) {
+    ngx_destroy_pool(pool);
+  }
+}
+
+}  // namespace
+
 void NgxConnection::Terminate() {
   for (NgxConnectionPool::iterator p = connection_pool.begin();
        p != connection_pool.end(); ++p) {
     NgxConnection* nc = *p;
-    ngx_close_connection(nc->c_);
+    CloseFetchConnection(nc->c_);
     nc->c_ = nullptr;
     delete nc;
   }
@@ -101,7 +135,8 @@ void NgxConnection::Terminate() {
 
 NgxConnection* NgxConnection::Connect(ngx_peer_connection_t* pc,
                                       MessageHandler* handler,
-                                      int max_keepalive_requests) {
+                                      int max_keepalive_requests, bool is_ssl,
+                                      StringPiece ssl_host) {
   NgxConnection* nc;
   {
     ScopedMutex lock(&NgxConnection::connection_pool_mutex);
@@ -110,7 +145,8 @@ NgxConnection* NgxConnection::Connect(ngx_peer_connection_t* pc,
          p != connection_pool.end(); ++p) {
       nc = *p;
 
-      if (ngx_memn2cmp(static_cast<u_char*>(nc->sockaddr_),
+      if (nc->is_ssl() == is_ssl && (!is_ssl || ssl_host == nc->ssl_host()) &&
+          ngx_memn2cmp(static_cast<u_char*>(nc->sockaddr_),
                        reinterpret_cast<u_char*>(pc->sockaddr), nc->socklen_,
                        pc->socklen) == 0) {
         CHECK(nc->c_->idle) << "Pool should only contain idle connections!";
@@ -144,6 +180,9 @@ NgxConnection* NgxConnection::Connect(ngx_peer_connection_t* pc,
   // NgxConnection deletes itself if NgxConnection::Close()
   nc = new NgxConnection(handler, max_keepalive_requests);
   nc->SetSock(reinterpret_cast<u_char*>(pc->sockaddr), pc->socklen);
+  if (is_ssl) {
+    nc->SetTlsKey(ssl_host);
+  }
   nc->c_ = pc->connection;
   return nc;
 }
@@ -179,7 +218,7 @@ void NgxConnection::Close() {
   }
 
   if (!keepalive_ || max_keepalive_requests_ <= 0 || removed_from_pool) {
-    ngx_close_connection(c_);
+    CloseFetchConnection(c_);
     c_ = nullptr;
     delete this;
     return;
@@ -313,6 +352,30 @@ bool NgxFetch::Init() {
     message_handler_->Message(kError, "NgxFetch: ParseUrl() failed for [%s]:%s",
                               str_url_.c_str(), url_.err);
     return false;
+  }
+
+  is_https_ = StringCaseStartsWith(str_url_, "https://");
+  if (is_https_) {
+#if (NGX_SSL)
+    if (fetcher_->proxy_.url.len != 0) {
+      // Tunneling TLS through a fetch proxy needs CONNECT support, which
+      // this fetcher does not implement.
+      message_handler_->Message(kWarning,
+                                "NgxFetch: https fetching through a fetch "
+                                "proxy is not supported, failing [%s]",
+                                str_url_.c_str());
+      return false;
+    }
+    ssl_host_.assign(reinterpret_cast<char*>(url_.host.data), url_.host.len);
+    ssl_host_is_ip_ =
+        ngx_inet_addr(url_.host.data, url_.host.len) != INADDR_NONE;
+#else
+    message_handler_->Message(kWarning,
+                              "NgxFetch: nginx was built without SSL "
+                              "support, failing https fetch [%s]",
+                              str_url_.c_str());
+    return false;
+#endif
   }
 
   timeout_event_ =
@@ -662,6 +725,19 @@ int NgxFetch::InitRequest() {
     }
     *(out_->last++) = CR;
     *(out_->last++) = LF;
+#if (NGX_SSL)
+    // https on a fresh connection: handshake TLS before any request bytes
+    // go out. A pooled TLS connection (c->ssl set) has already handshaked,
+    // and its c->send/c->recv are the SSL variants — plain flow applies.
+    if (is_https_ && connection_->c_->ssl == nullptr) {
+      if (rc == NGX_AGAIN) {
+        // TCP connect in flight; handshake once the socket is writable.
+        connection_->c_->write->handler = NgxFetch::TlsConnectedHandler;
+        return NGX_OK;
+      }
+      return StartTlsHandshake();
+    }
+#endif
     if (rc == NGX_AGAIN) {
       return NGX_OK;
     }
@@ -672,6 +748,123 @@ int NgxFetch::InitRequest() {
   NgxFetch::ConnectionWriteHandler(connection_->c_->write);
   return NGX_OK;
 }
+
+#if (NGX_SSL)
+int NgxFetch::StartTlsHandshake() {
+  ngx_connection_t* c = connection_->c_;
+  // ngx_ssl_create_connection allocates the TLS state from c->pool;
+  // connections from ngx_event_connect_peer come without one.
+  if (c->pool == nullptr) {
+    c->pool = ngx_create_pool(256, c->log);
+    if (c->pool == nullptr) {
+      return NGX_ERROR;
+    }
+  }
+  if (ngx_ssl_create_connection(fetcher_->ssl(), c,
+                                NGX_SSL_BUFFER | NGX_SSL_CLIENT) != NGX_OK) {
+    message_handler()->Message(
+        kWarning, "NgxFetch: failed to create TLS connection for %s",
+        str_url());
+    return NGX_ERROR;
+  }
+
+  // SNI, except for IP-literal hosts (RFC 6066 forbids those).
+  if (!ssl_host_is_ip_) {
+    NgxOpenSslShim::Get()->SslSetTlsextHostName(c->ssl->connection,
+                                                ssl_host_.c_str());
+  }
+
+  ngx_int_t rc = ngx_ssl_handshake(c);
+  if (rc == NGX_AGAIN) {
+    c->ssl->handler = NgxFetch::TlsHandshakeHandler;
+    return NGX_OK;
+  }
+  if (rc == NGX_OK) {
+    // Completed synchronously; verification and the request write follow
+    // the same path as the async case. Failures in there run
+    // CallbackDone(false) themselves, so report NGX_OK to the caller.
+    TlsHandshakeHandler(c);
+    return NGX_OK;
+  }
+  return NGX_ERROR;
+}
+
+void NgxFetch::TlsConnectedHandler(ngx_event_t* wev) {
+  ngx_connection_t* c = static_cast<ngx_connection_t*>(wev->data);
+  NgxFetch* fetch = static_cast<NgxFetch*>(c->data);
+  // The TCP connect finished; a failed connect surfaces as a handshake
+  // write error below.
+  if (fetch->StartTlsHandshake() != NGX_OK) {
+    fetch->CallbackDone(false);
+  }
+}
+
+void NgxFetch::TlsHandshakeHandler(ngx_connection_t* c) {
+  NgxFetch* fetch = static_cast<NgxFetch*>(c->data);
+  if (!c->ssl->handshaked) {
+    fetch->message_handler()->Message(
+        kWarning, "NgxFetch: TLS handshake failed for %s", fetch->str_url());
+    fetch->CallbackDone(false);
+    return;
+  }
+  if (!fetch->VerifyTlsPeer(c)) {
+    // CallbackDone(false) never pools the connection, so a peer that
+    // failed verification cannot be reused.
+    fetch->CallbackDone(false);
+    return;
+  }
+  // The handshake borrowed the connection's event handlers; restore ours
+  // and send the request.
+  c->read->handler = NgxFetch::ConnectionReadHandler;
+  c->write->handler = NgxFetch::ConnectionWriteHandler;
+  NgxFetch::ConnectionWriteHandler(c->write);
+}
+
+bool NgxFetch::VerifyTlsPeer(ngx_connection_t* c) {
+  // Direct OpenSSL calls go through NgxOpenSslShim; see its header.
+  NgxOpenSslShim* shim = NgxOpenSslShim::Get();
+  if (!fetcher_->allow_self_signed() &&
+      !fetcher_->allow_unknown_certificate_authority()) {
+    long verify_result = shim->SslGetVerifyResult(c->ssl->connection);
+    if (verify_result != X509_V_OK &&
+        !(fetcher_->allow_certificate_not_yet_valid() &&
+          verify_result == X509_V_ERR_CERT_NOT_YET_VALID)) {
+      message_handler()->Message(
+          kWarning, "NgxFetch: certificate verification failed for %s: %s",
+          str_url(), shim->X509VerifyCertErrorString(verify_result));
+      return false;
+    }
+  }
+  // The peer must present a certificate matching the requested host in all
+  // modes, like the curl fetcher (CURLOPT_SSL_VERIFYHOST == 2).
+  X509* cert = shim->SslGetPeerCertificate(c->ssl->connection);
+  if (cert == nullptr) {
+    message_handler()->Message(kWarning, "NgxFetch: no peer certificate for %s",
+                               str_url());
+    return false;
+  }
+  bool host_matches;
+  if (ssl_host_is_ip_) {
+    // pagespeed routinely fetches through its own vhost by IP (loopback
+    // routing); ngx_ssl_check_host only matches DNS names, so IP-literal
+    // hosts check the certificate's IP SANs instead.
+    host_matches = shim->X509CheckIpAsc(cert, ssl_host_.c_str()) == 1;
+  } else {
+    ngx_str_t name;
+    name.len = ssl_host_.size();
+    name.data = reinterpret_cast<u_char*>(const_cast<char*>(ssl_host_.c_str()));
+    host_matches = ngx_ssl_check_host(c, &name) == NGX_OK;
+  }
+  shim->X509Free(cert);
+  if (!host_matches) {
+    message_handler()->Message(
+        kWarning, "NgxFetch: certificate does not match host %s for %s",
+        ssl_host_.c_str(), str_url());
+    return false;
+  }
+  return true;
+}
+#endif
 
 int NgxFetch::Connect() {
   ngx_peer_connection_t pc;
@@ -687,7 +880,8 @@ int NgxFetch::Connect() {
   pc.rcvbuf = -1;
 
   connection_ = NgxConnection::Connect(&pc, message_handler(),
-                                       fetcher_->max_keepalive_requests_);
+                                       fetcher_->max_keepalive_requests_,
+                                       is_https_, ssl_host_);
   ngx_log_error(NGX_LOG_DEBUG, fetcher_->log_, 0,
                 "NgxFetch %p Connect() connection %p for [%s]", this,
                 connection_, str_url());

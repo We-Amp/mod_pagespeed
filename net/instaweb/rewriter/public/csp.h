@@ -26,8 +26,9 @@
 // 1) We don't fully parse some kinds of source expressions, like nonce and
 //    hash ones.
 // 2) Only some of the directives are parsed.
-// 3) URL matching doesn't support WebSocket (ws: and wss:) schemes, since
-//    mod_pagespeed doesn't, and they make for some really ugly conditionals.
+// 3) URL matching mostly doesn't support WebSocket (ws: and wss:)
+//    schemes, since mod_pagespeed doesn't rewrite them; the lone-*
+//    source does cover them per spec, however.
 
 #ifndef NET_INSTAWEB_REWRITER_PUBLIC_CSP_H_
 #define NET_INSTAWEB_REWRITER_PUBLIC_CSP_H_
@@ -180,6 +181,12 @@ class CspSourceList {
 
   bool Matches(const GoogleUrl& origin_url, const GoogleUrl& url) const;
 
+  // Whether the list contains a scheme-source for 'scheme' (lowercase,
+  // without the colon), e.g. "data". Host sources and '*' do not match
+  // data: URLs, so this is what decides whether data: content may be
+  // introduced under this list.
+  bool HasSchemeSource(StringPiece scheme) const;
+
  private:
   std::vector<CspSourceExpression> expressions_;
   bool saw_unsafe_inline_;
@@ -209,6 +216,11 @@ class CspPolicy {
   bool PermitsInlineStyle() const;
   bool PermitsInlineStyleAttribute() const;
 
+  // Whether an image with a data: URL is permitted: img-src (falling
+  // back to default-src) must either be absent or contain an explicit
+  // data: scheme-source.
+  bool PermitsDataImage() const;
+
   // Tests whether 'url' can be loaded within 'origin_url' as 'role', where
   // 'role' should be kStyleSrc, kScriptSrc or kImgSrc.
   bool CanLoadUrl(CspDirective role, const GoogleUrl& origin_url,
@@ -218,6 +230,12 @@ class CspPolicy {
                        const GoogleUrl& base_candidate) const;
 
  private:
+  // Returns the source list that effectively governs 'specific',
+  // following the CSP3 fallback chain: 'specific' if present, else
+  // 'base', else default-src. May return null if none are present.
+  const CspSourceList* EffectiveSourceList(CspDirective specific,
+                                           CspDirective base) const;
+
   // The expectation is that some of these may be null.
   std::vector<std::unique_ptr<CspSourceList>> policies_;
 };
@@ -225,6 +243,12 @@ class CspPolicy {
 // A set of all policies (maybe none!) on the page. Note that we do not track
 // those with report disposition, only those that actually enforce --- reporting
 // seems like it would keep the page author informed about our effects as it is.
+//
+// Thread-safety: RewriteDriver publishes CspContext objects copy-on-write
+// (see RewriteDriver::AddCspPolicy) --- a published context is never
+// mutated again, so it may be read from rewrite threads without locking.
+// Copying a context is cheap: the policies themselves are shared, not
+// duplicated.
 class CspContext {
  public:
   bool PermitsEval() const { return AllPermit(&CspPolicy::PermitsEval); }
@@ -245,8 +269,12 @@ class CspContext {
     return AllPermit(&CspPolicy::PermitsInlineStyleAttribute);
   }
 
+  bool PermitsDataImage() const {
+    return AllPermit(&CspPolicy::PermitsDataImage);
+  }
+
   bool CanLoadUrl(CspDirective role, const GoogleUrl& origin_url,
-                  const GoogleUrl& url) {
+                  const GoogleUrl& url) const {
     // All policies must OK, with base case being 'true'.
     for (const auto& policy : policies_) {
       if (!policy->CanLoadUrl(role, origin_url, url)) {
@@ -281,6 +309,19 @@ class CspContext {
           policy->SourceListFor(CspDirective::kDefaultSrc) != nullptr) {
         return true;
       }
+      // The CSP3 -elem/-attr variants govern the same content classes,
+      // so their presence matters just as much to callers asking
+      // whether any applicable policy exists.
+      if (directive == CspDirective::kScriptSrc &&
+          (policy->SourceListFor(CspDirective::kScriptSrcElem) != nullptr ||
+           policy->SourceListFor(CspDirective::kScriptSrcAttr) != nullptr)) {
+        return true;
+      }
+      if (directive == CspDirective::kStyleSrc &&
+          (policy->SourceListFor(CspDirective::kStyleSrcElem) != nullptr ||
+           policy->SourceListFor(CspDirective::kStyleSrcAttr) != nullptr)) {
+        return true;
+      }
     }
     return false;
   }
@@ -305,7 +346,7 @@ class CspContext {
     return true;
   }
 
-  std::vector<std::unique_ptr<CspPolicy>> policies_;
+  std::vector<std::shared_ptr<const CspPolicy>> policies_;
 };
 
 }  // namespace net_instaweb

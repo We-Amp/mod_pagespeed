@@ -42,6 +42,7 @@
 #include "pagespeed/kernel/util/platform.h"
 #include "pagespeed/kernel/util/simple_stats.h"
 #include "pagespeed/opt/logging/request_timing_info.h"
+#include "test/net/instaweb/http/mapped_backend_cache.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/base/mock_hasher.h"
 #include "test/pagespeed/kernel/base/mock_timer.h"
@@ -1636,6 +1637,177 @@ TEST_F(HTTPCacheWriteThroughTest, CacheFreshness) {
   EXPECT_EQ(0, cache2_.num_inserts());
   EXPECT_EQ(0, cache2_.num_deletes());
   EXPECT_EQ(kFoundResult, callback4.result_);
+}
+
+// ============================================================================
+// Zero-copy serving of memory-mapped backend values (CycloneZeroCopy).
+// The backend is wrapped so every hit is delivered as a mapped
+// MappedSharedString, emulating CycloneCache's mmap borrow path.
+// ============================================================================
+
+class HTTPCacheZeroCopyTest : public HTTPCacheTest {
+ protected:
+  HTTPCacheZeroCopyTest() : mapped_backend_(&lru_cache_) {
+    http_cache_ = std::make_unique<HTTPCache>(&mapped_backend_, &mock_timer_,
+                                              &mock_hasher_, &simple_stats_);
+  }
+
+  // Puts a vanilla cacheable entry and returns a Find callback that has
+  // completed against it.
+  std::unique_ptr<Callback> PutAndFind() {
+    ResponseHeaders meta_data_in;
+    InitHeaders(&meta_data_in, "max-age=300");
+    Put(kUrl, kFragment, &meta_data_in, "content");
+    std::unique_ptr<Callback> callback(NewCallback());
+    http_cache_->Find(kUrl, kFragment, &message_handler_, callback.get());
+    EXPECT_TRUE(callback->called_);
+    return callback;
+  }
+
+  MappedBackendCache mapped_backend_;
+};
+
+TEST_F(HTTPCacheZeroCopyTest, FlagOffMappedValueCopiedToOwned) {
+  // Default (flag off): a mapped backend value must be served exactly like
+  // before -- the callback's HTTPValue owns its bytes.
+  ASSERT_FALSE(http_cache_->cyclone_zero_copy_enabled());
+  std::unique_ptr<Callback> callback = PutAndFind();
+  ASSERT_EQ(kFoundResult, callback->result_);
+  EXPECT_EQ(1, mapped_backend_.mapped_hits());
+
+  HTTPValue* value = callback->http_value();
+  EXPECT_FALSE(value->is_mapped());
+  StringPiece contents;
+  ASSERT_TRUE(value->ExtractContents(&contents));
+  EXPECT_EQ("content", contents);
+  // The extracted bytes are an owned copy, NOT the mapped buffer.
+  EXPECT_FALSE(mapped_backend_.ContainsPointer(contents.data()));
+  ASSERT_TRUE(callback->response_headers()->headers_complete());
+  EXPECT_STREQ("value", callback->response_headers()->Lookup1("name"));
+}
+
+TEST_F(HTTPCacheZeroCopyTest, FlagOnMappedValueServedZeroCopy) {
+  http_cache_->set_cyclone_zero_copy_enabled(true);
+  std::unique_ptr<Callback> callback = PutAndFind();
+  ASSERT_EQ(kFoundResult, callback->result_);
+
+  HTTPValue* value = callback->http_value();
+  EXPECT_TRUE(value->is_mapped());
+  StringPiece contents;
+  ASSERT_TRUE(value->ExtractContents(&contents));
+  EXPECT_EQ("content", contents);
+  // Zero-copy: the extracted contents point into the mapped buffer.
+  EXPECT_TRUE(mapped_backend_.ContainsPointer(contents.data()));
+  ASSERT_TRUE(callback->response_headers()->headers_complete());
+  EXPECT_STREQ("value", callback->response_headers()->Lookup1("name"));
+
+  ResponseHeaders check_headers;
+  ASSERT_TRUE(value->ExtractHeaders(&check_headers, &message_handler_));
+  EXPECT_STREQ("value", check_headers.Lookup1("name"));
+
+  // The borrow is dropped with the callback's HTTPValue.
+  EXPECT_EQ(0, mapped_backend_.release_count());
+  callback.reset();
+  EXPECT_EQ(1, mapped_backend_.release_count());
+}
+
+TEST_F(HTTPCacheZeroCopyTest, FlagOnFlagOffByteIdentical) {
+  // The same entry served with the flag off and on must be byte-identical.
+  ResponseHeaders meta_data_in;
+  InitHeaders(&meta_data_in, "max-age=300");
+  Put(kUrl, kFragment, &meta_data_in, "content");
+
+  std::unique_ptr<Callback> off_callback(NewCallback());
+  http_cache_->Find(kUrl, kFragment, &message_handler_, off_callback.get());
+  ASSERT_TRUE(off_callback->called_);
+  ASSERT_EQ(kFoundResult, off_callback->result_);
+
+  http_cache_->set_cyclone_zero_copy_enabled(true);
+  std::unique_ptr<Callback> on_callback(NewCallback());
+  http_cache_->Find(kUrl, kFragment, &message_handler_, on_callback.get());
+  ASSERT_TRUE(on_callback->called_);
+  ASSERT_EQ(kFoundResult, on_callback->result_);
+
+  StringPiece off_contents, on_contents;
+  ASSERT_TRUE(off_callback->http_value()->ExtractContents(&off_contents));
+  ASSERT_TRUE(on_callback->http_value()->ExtractContents(&on_contents));
+  EXPECT_EQ(off_contents, on_contents);
+  EXPECT_EQ(off_callback->response_headers()->ToString(),
+            on_callback->response_headers()->ToString());
+}
+
+TEST_F(HTTPCacheZeroCopyTest, FlagOnStaleFallbackCollapsesToOwned) {
+  // The stale-serving path links http_value into fallback_http_value
+  // (HTTPValue::Link), which must collapse the borrow: the fallback value
+  // escapes into FallbackSharedAsyncFetch and outlives the callback scope.
+  http_cache_->set_cyclone_zero_copy_enabled(true);
+  ResponseHeaders meta_data_in;
+  InitHeaders(&meta_data_in, "max-age=300");
+  Put(kUrl, kFragment, &meta_data_in, "content");
+  mock_timer_.AdvanceMs(301 * 1000);
+
+  std::unique_ptr<Callback> callback(NewCallback());
+  http_cache_->Find(kUrl, kFragment, &message_handler_, callback.get());
+  ASSERT_TRUE(callback->called_);
+  ASSERT_EQ(kNotFoundResult, callback->result_);
+
+  HTTPValue* fallback = callback->fallback_http_value();
+  ASSERT_FALSE(fallback->Empty());
+  EXPECT_FALSE(fallback->is_mapped());
+  StringPiece contents;
+  ASSERT_TRUE(fallback->ExtractContents(&contents));
+  EXPECT_EQ("content", contents);
+  EXPECT_FALSE(mapped_backend_.ContainsPointer(contents.data()));
+}
+
+TEST_F(HTTPCacheZeroCopyTest, FlagOnOverrideTtlRebuildsFromMappedBytes) {
+  // OverrideCacheTtlMs > original TTL triggers
+  // UpdateCacheHeadersIfForceCached, which rebuilds the HTTPValue from its
+  // own contents (ExtractContents -> Clear -> Write -> SetHeaders).  With a
+  // mapped value the extracted contents point into the mmap; the rebuild
+  // relies on the CacheInterface callback's reference keeping those bytes
+  // alive through ValidateCandidate.  (ASan guards the lifetime here.)
+  http_cache_->set_cyclone_zero_copy_enabled(true);
+  ResponseHeaders meta_data_in;
+  InitHeaders(&meta_data_in, "max-age=300");
+  Put(kUrl, kFragment, &meta_data_in, "content");
+
+  std::unique_ptr<Callback> callback(NewCallback());
+  callback->override_cache_ttl_ms_ = 400 * 1000;
+  http_cache_->Find(kUrl, kFragment, &message_handler_, callback.get());
+  ASSERT_TRUE(callback->called_);
+  ASSERT_EQ(kFoundResult, callback->result_);
+
+  HTTPValue* value = callback->http_value();
+  // The rebuild collapses to owned storage.
+  EXPECT_FALSE(value->is_mapped());
+  StringPiece contents;
+  ASSERT_TRUE(value->ExtractContents(&contents));
+  EXPECT_EQ("content", contents);
+  EXPECT_FALSE(mapped_backend_.ContainsPointer(contents.data()));
+  EXPECT_STREQ("max-age=400", callback->response_headers()->Lookup1(
+                                  HttpAttributes::kCacheControl));
+}
+
+TEST_F(HTTPCacheZeroCopyTest, FlagOnGzippedEntryInflatedToOwned) {
+  // A gzipped cache entry served to a client that does not accept gzip goes
+  // through UnGzipValueIfCompressed + Link(&new_value): the delivered value
+  // must be the inflated, owned bytes.
+  http_cache_->set_cyclone_zero_copy_enabled(true);
+  ResponseHeaders response_headers;
+  PopulateGzippedEntry("max-age=300", &response_headers);
+
+  std::unique_ptr<Callback> callback(NewCallback());
+  http_cache_->Find(kUrl, kFragment, &message_handler_, callback.get());
+  ASSERT_TRUE(callback->called_);
+  ASSERT_EQ(kFoundResult, callback->result_);
+
+  HTTPValue* value = callback->http_value();
+  EXPECT_FALSE(value->is_mapped());
+  StringPiece contents;
+  ASSERT_TRUE(value->ExtractContents(&contents));
+  EXPECT_STREQ(kCssText, contents);
+  EXPECT_FALSE(mapped_backend_.ContainsPointer(contents.data()));
 }
 
 }  // namespace net_instaweb

@@ -342,6 +342,27 @@ TEST_F(RewriteOptionsTest, CommaSeparatedList) {
   ASSERT_TRUE(OnlyEnabled(RewriteOptions::kHtmlWriterFilter));  // default
 }
 
+TEST_F(RewriteOptionsTest, CommaSeparatedListRejectsBogusFilter) {
+  // A bogus filter name must make the call fail even when accompanied by valid
+  // names; the valid names are still applied (documented contract).
+  NullMessageHandler handler;
+  EXPECT_FALSE(options_.EnableFiltersByCommaSeparatedList("bogus_filter,rewrite_css",
+                                                          &handler));
+  EXPECT_TRUE(options_.Enabled(RewriteOptions::kRewriteCss));
+
+  // The failure must stick regardless of the order of the bad name, and the
+  // valid name must still be applied/removed even when the bad name comes
+  // first -- this pins the accumulation fix, not merely the early-exit path.
+  EXPECT_FALSE(options_.DisableFiltersByCommaSeparatedList(
+      "another_bogus_filter,rewrite_css", &handler));
+  EXPECT_FALSE(options_.Enabled(RewriteOptions::kRewriteCss));
+  // Use a filter that was not explicitly disabled above: an explicit disable
+  // trumps a later "+" adjustment by design.
+  EXPECT_FALSE(options_.AdjustFiltersByCommaSeparatedList("+nope,+inline_css",
+                                                          &handler));
+  EXPECT_TRUE(options_.Enabled(RewriteOptions::kInlineCss));
+}
+
 TEST_F(RewriteOptionsTest, CompoundFlag) {
   FilterSet s;
   s.Insert(RewriteOptions::kConvertGifToPng);
@@ -852,6 +873,19 @@ void RewriteOptionsTest::TestSetOptionFromName(bool test_log_variant) {
               "JsInlineMaxBytes", "NOT_INT", &handler);
   EXPECT_EQ(RewriteOptions::kDefaultJsInlineMaxBytes,
             options_.js_inline_max_bytes());  // unchanged from default.
+
+  // Bounded numeric options reject out-of-range values at parse time, while
+  // accepting in-range values and documented sentinels.
+  TestNameSet(RewriteOptions::kOptionValueInvalid, test_log_variant,
+              "RewriteRandomDropPercentage", "101", &handler);
+  EXPECT_EQ(0, options_.rewrite_random_drop_percentage());  // unchanged.
+  TestNameSet(RewriteOptions::kOptionOk, test_log_variant,
+              "RewriteRandomDropPercentage", "50", &handler);
+  EXPECT_EQ(50, options_.rewrite_random_drop_percentage());
+  TestNameSet(RewriteOptions::kOptionValueInvalid, test_log_variant,
+              "JpegRecompressionQuality", "101", &handler);
+  TestNameSet(RewriteOptions::kOptionOk, test_log_variant,
+              "JpegRecompressionQuality", "-1", &handler);  // sentinel.
 }
 
 TEST_F(RewriteOptionsTest, SetOptionFromName) { TestSetOptionFromName(false); }
@@ -960,6 +994,8 @@ TEST_F(RewriteOptionsTest, LookupOptionByNameTest) {
       RewriteOptions::kJsPreserveURLs,
       RewriteOptions::kLazyloadImagesAfterOnload,
       RewriteOptions::kLazyloadImagesBlankUrl,
+      RewriteOptions::kLazyloadImagesMode,
+      RewriteOptions::kLazyloadImagesSkipFirst,
       RewriteOptions::kLoadFromFileCacheTtlMs,
       RewriteOptions::kLogBackgroundRewrite,
       RewriteOptions::kLogMobilizationSamples,
@@ -1882,6 +1918,15 @@ TEST_F(RewriteOptionsTest, ExperimentDeviceTypeParseTest) {
   }
 }
 
+TEST_F(RewriteOptionsTest, ExperimentSpecSlotToString) {
+  NullMessageHandler handler;
+  // A non-default slot must be emitted as ";slot=" so ToString round-trips
+  // through the parser. Valid slots are 1-5; the default is 1.
+  GoogleString spec_str("id=1;slot=4;percent=15");
+  RewriteOptions::ExperimentSpec spec(spec_str, &options_, &handler);
+  EXPECT_EQ(spec_str, spec.ToString());
+}
+
 TEST_F(RewriteOptionsTest, ExperimentDeviceTypeRangeUnderflowDeathTest) {
   RewriteOptions::ExperimentSpec spec(1);
 
@@ -2566,6 +2611,21 @@ TEST_F(RewriteOptionsTest, ParseBeaconUrl) {
   EXPECT_STREQ("/mod_pagespeed_beacon?a=b", beacon_url.https);
   EXPECT_STREQ("/mod_pagespeed_beacon", beacon_url.http_in);
   EXPECT_STREQ("/mod_pagespeed_beacon", beacon_url.https_in);
+
+  // Regression: a beacon URL that is exactly "ets=" used to underflow the
+  // separator-stripping arithmetic; it must strip cleanly to empty instead.
+  EXPECT_TRUE(RewriteOptions::ParseBeaconUrl("ets=", &beacon_url));
+  EXPECT_STREQ("", beacon_url.http);
+  EXPECT_STREQ("", beacon_url.https);
+  EXPECT_STREQ("", beacon_url.http_in);
+  EXPECT_STREQ("", beacon_url.https_in);
+
+  // A URL ending in "-ets=" has no '?' or '&' before "ets=", so only "ets=" is
+  // stripped and the character in front of it is preserved.
+  EXPECT_TRUE(
+      RewriteOptions::ParseBeaconUrl("http://" + url + "/x-ets=", &beacon_url));
+  EXPECT_STREQ("http://" + url + "/x-", beacon_url.http);
+  EXPECT_STREQ("https://" + url + "/x-", beacon_url.https);
 }
 
 TEST_F(RewriteOptionsTest, AccessOptionByIdAndName) {

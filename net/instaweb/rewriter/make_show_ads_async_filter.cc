@@ -39,7 +39,7 @@ namespace net_instaweb {
 const char MakeShowAdsAsyncFilter::kShowAdsSnippetsConverted[] =
     "show_ads_snippets_converted";
 const char MakeShowAdsAsyncFilter::kShowAdsSnippetsNotConverted[] =
-    "show_ads_snippets_not_converte";
+    "show_ads_snippets_not_converted";
 // This variable is used to track mispairs between showads data <script>
 // elements and the <script> elements that call showads API.
 const char MakeShowAdsAsyncFilter::kShowAdsApiReplacedForAsync[] =
@@ -102,8 +102,14 @@ void MakeShowAdsAsyncFilter::EndElementImpl(HtmlElement* element) {
       // TODO(morlovich): We don't actually need this to be rewritable,
       // we could just leave the old one in place if it crosses the flush
       // window!
+      // The conversion re-injects the showads API call as a new inline
+      // <script>, which the page's CSP may forbid; in that case leave the
+      // original snippet untouched. Already-converted snippets (pending
+      // API-call replacements) are still completed below so converted ads
+      // stay internally consistent.
       ShowAdsSnippetParser::AttributeMap parsed_attributes;
-      if (IsApplicableShowAds(current_script_element_contents_,
+      if (CspPermitsInlineScript() &&
+          IsApplicableShowAds(current_script_element_contents_,
                               &parsed_attributes)) {
         ReplaceShowAdsWithAdsByGoogleElement(parsed_attributes, element);
       } else {

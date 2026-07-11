@@ -109,7 +109,6 @@ class ApacheConfig : public SystemRewriteOptions {
   static void AddProperties();
   void Init();
 
-  Option<bool> fetch_from_mod_spdy_;
   Option<bool> force_buffering_;
   Option<bool> proxy_all_requests_mode_;
   Option<GoogleString> proxy_auth_;  // CookieName[=Value][:RedirectUrl]

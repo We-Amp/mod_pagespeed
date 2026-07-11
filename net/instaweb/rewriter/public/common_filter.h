@@ -116,6 +116,18 @@ class CommonFilter : public EmptyHtmlFilter {
 
   bool IsRelativeUrlLoadPermittedByCsp(StringPiece url, CspDirective role);
 
+  // Returns true unless the page's Content-Security-Policy forbids execution
+  // of inline <script> elements. The policy is only tracked when the HonorCsp
+  // option is on; otherwise it is empty, which permits everything. Filters
+  // that inject inline scripts must consult this at each injection point --
+  // and before any DOM mutation that depends on the injected script running
+  // -- since a <meta>-delivered policy can arrive mid-document.
+  bool CspPermitsInlineScript() const;
+
+  // Like CspPermitsInlineScript(), but for inline event-handler attributes
+  // (e.g. onload) that a filter would add to an element.
+  bool CspPermitsInlineScriptAttribute() const;
+
   // Returns whether or not the base url is valid.  This value will change
   // as a filter processes the document.  E.g. If there are url refs before
   // the base tag is reached, it will return false until the filter sees the

@@ -74,6 +74,14 @@ class UserAgentMatcher {
   virtual bool SupportsImageInlining(const StringPiece& user_agent) const;
   bool SupportsLazyloadImages(StringPiece user_agent) const;
 
+  // Returns true if the user agent is known to support the native
+  // loading="lazy" attribute on <img> elements. This is a conservative
+  // allow-list: Chromium >= 77 (Chrome, Edge, Opera, all of which carry a
+  // Chrome/<version> token), Firefox >= 75, and Safari >= 15.4. Unknown user
+  // agents return false so that callers can fall back to the script-based
+  // lazyload implementation.
+  bool SupportsNativeLazyLoading(StringPiece user_agent) const;
+
   // Returns the DeviceType for the given user agent string.
   virtual DeviceType GetDeviceTypeForUA(const StringPiece& user_agent) const;
 
