@@ -1,3 +1,115 @@
+# mod_pagespeed 1.15.0+r18 Release Notes
+
+**Release date:** 2026-07-11
+**Status:** Stable
+
+## Overview
+
+Performance, caching, and correctness release for the 1.15 line, with security
+hardening across input validation and output escaping. Update recommended.
+
+## Highlights
+
+### Performance
+
+- Cached resources are now served with far less copying. Apache and IIS serve
+  memory-mapped cache hits zero-copy, and nginx gains an experimental
+  `CycloneZeroCopyServe` mode that serves cache hits directly from the
+  memory-mapped cache. Apache additionally streams optimized resource
+  responses instead of double-buffering them, and nginx serves cached
+  responses on HTTP/2 and HTTP/3 through a bounded copy ring.
+- The default file cache size is raised to 1 GB.
+
+### Caching
+
+- Metadata and page-property cache entries are now stored in a dedicated
+  small-object volume on file caches of ~256 MB or larger, keeping them warm
+  across restarts independent of payload traffic. **Upgrade note: the first
+  restart after upgrading rebuilds the payload cache once** on caches at or
+  above that size (re-optimization proceeds normally from a cold payload
+  cache; metadata is unaffected). Set `FileCacheSmallTierPercent 0` to
+  disable.
+- The cache's RAM tier is now sized independently of
+  `LRUCacheKbPerProcess` via the new `CycloneRamCacheKb` directive
+  (default 0: disabled — memory-mapped cache hits are already served from
+  page cache).
+- New cache observability counters on the admin console's caches page.
+
+### Correctness and configuration
+
+Configuration validation is stricter in this release; previously-accepted
+invalid configurations may now fail to load, which is intentional:
+
+- An invalid filter name in `?PageSpeedFilters=` now consistently rejects the
+  whole query (rejection was previously position-dependent).
+- Out-of-range values for bounded options now fail configuration load instead
+  of being silently accepted: image qualities (-1..100), progressive JPEG
+  scans (-1..10), `RewriteRandomDropPercentage` (0..100),
+  `HttpCacheCompressionLevel` (-1..9), `CentralControllerPort` (1..65535).
+- The `AddResourceHeader` limit of 20 headers is enforced exactly.
+- Directive and option-scope matching is now case-consistent across all
+  server ports, so scope enforcement can no longer be sidestepped by casing.
+- The legacy JavaScript minifier (used when `UseExperimentalJsMinifier` is
+  off) now passes files containing template literals through unmodified
+  instead of corrupting them.
+
+### Critical CSS and Content-Security-Policy
+
+- `prioritize_critical_css` and other script-injecting filters now honor a
+  restrictive Content-Security-Policy when `HonorCsp` is enabled, backing off
+  instead of injecting scripts the policy would block, and the CSP policy
+  engine received a set of correctness fixes.
+- Inlined critical CSS preserves stylesheet charset fidelity and link
+  attributes, and handles `@import`/`@keyframes` rules correctly.
+- The critical-CSS beacon is viewport-aware, and beacon truncation is now
+  observable in statistics instead of silently starving extraction.
+- `lazyload_images` gains a native mode that emits `loading="lazy"` on
+  below-the-fold images instead of injecting the JavaScript loader.
+
+### IIS
+
+- Fixed a defect in the IIS loopback fetcher where a sub-resource fetch that
+  completed asynchronously could be treated as an empty response, suppressing
+  optimization of the parent page for five minutes at a time — pages were
+  intermittently served in their original form. Update recommended for IIS
+  deployments.
+- Configuration parsing is hardened: a malformed configuration line can no
+  longer crash the module at startup, unknown options are reported instead of
+  silently ignored, and option scoping is now enforced on IIS as on the other
+  ports.
+
+### Security hardening
+
+This release hardens input validation and output escaping across the
+rewriter, beacon handling, and configuration parsing. The bundled HTTPS
+fetch library is updated to curl 8.21.0, which addresses a batch of
+recently published curl vulnerabilities. No exploitation is known; update
+recommended.
+
+### Reliability
+
+- The bundled Cyclone cache library is updated: deterministic teardown,
+  key-verified directory election (a rare collision can no longer associate a
+  cache entry with the wrong key), periodic directory sync for a tighter
+  power-loss window (including on Windows), a fix for a startup race where
+  multiple server processes opening the cache concurrently could corrupt or
+  spuriously fail cache initialization (recovery after a crash during cache
+  creation is now automatic), and roughly 4 MB less memory per cache stripe.
+- A worker-pool sequence could be recycled while work was still queued;
+  scheduler alarms are now driven from the event loop on nginx; the
+  experimental native fetcher (`UseNativeFetcher`) gains native TLS support.
+- Admin console reliability and usability pass.
+
+## Platform Support
+
+| Platform | Module | Status |
+|----------|--------|--------|
+| **Apache 2.4+** | `mod_pagespeed.so` | Stable |
+| **Nginx 1.26+** | `ngx_pagespeed_module.so` | Stable |
+| **IIS 10+** | `pagespeed_iis.dll` | Stable |
+
+---
+
 # mod_pagespeed 1.15.0 Release Notes
 
 **Release date:** 2026-06-01

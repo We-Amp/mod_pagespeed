@@ -1,4 +1,5 @@
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+load("@bazel_tools//tools/build_defs/repo:utils.bzl", "maybe")
 load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 load(":hiredis.bzl", "hiredis_build_rule")
 load(":jsoncpp.bzl", "jsoncpp_build_rule")
@@ -91,8 +92,40 @@ APRUTIL_SHA = "4ce5fead950705f6b33dcac5b7fae45f4295b80cb75a6a1378baaec896fd4fc1"
 
 # Cyclone Cache - pinned at release time. This commit carries the
 # fork-safe Cache::stop() fix that stops Apache children
-# and the nginx master hanging in Cyclone teardown on graceful recycle/reload.
-CYCLONE_COMMIT = "9ab0305fa5b78ba1a19025f0ac6251ba89981919"
+# and the nginx master hanging in Cyclone teardown on graceful recycle/reload,
+# the small-object tier API: CacheConfig::small_tier_percent,
+# tier-routed sync ops, and Cache::small_tier_active(), plus lease-based
+# region pinning: borrowed mmap read views are
+# protected against circular-buffer wraps for the lease window — the safety
+# prerequisite for the zero-copy serving path (CycloneZeroCopy).  This bump
+# makes cache teardown join every background thread
+# unconditionally: fixes a thread-leak/use-after-free (the Apache
+# graceful-restart symptom where a lingering flush thread kept children
+# alive -> MPM scoreboard exhaustion) plus a teardown deadlock and an
+# in-flight-operation race surfaced by that fix.  This bump adds
+# the epoch-checked renew_lease() and force-wrap deadline (ns_until_forced_wrap)
+# that the zero-copy serve copy-out path renews against, plus a Volume-lifetime
+# use-after-free fix on the renew path.  This bump makes the
+# directory insert/remove election verify the full stored key before electing
+# update-in-place: previously a different key colliding on the (stripe, bucket,
+# 12-bit tag) triple silently destroyed the victim's directory slot on every
+# write (deterministic; the victim reads back as a clean NotFound), and adds
+# the tag_collision_evictions stat for the full-bucket eviction fallback.
+# This bump fixes Volume::open() so non-creators wait for the
+# creator to finish initialization: closes a multi-process cache-open race
+# where a second opener could observe a half-initialized volume and corrupt
+# it or spuriously fail initialization (the lock is kernel-dropped on
+# process death, so crash recovery is automatic); it also brings a Cyclone change,
+# which removes the dead WriteAggregator and reclaims ~4 MB of committed RSS
+# per cache stripe with no API impact.
+# This bump makes wrap gating borrow-scoped:
+# the per-stripe read lease defers wraps only while read handles are actually
+# outstanding (refcounted, released on handle close; ceiling-forced wraps
+# reset leaked state), so cache writes no longer starve at capacity under
+# steady reads. On-disk format unchanged (v1); adds the borrows_outstanding
+# stats gauge (append-only C-struct extension, rebuilt against the vendored
+# header by this bump). renew_lease() semantics for open handles unchanged.
+CYCLONE_COMMIT = "4e34d7bb634d2310aea52aec22ea09eacd65aaa4"
 
 # Libevent - cross-platform event notification library
 # Used by LibeventDispatcher for standalone event loop (Apache deployments)
@@ -100,8 +133,8 @@ LIBEVENT_VERSION = "2.1.12-stable"
 LIBEVENT_SHA = "92e6de1be9ec176428fd2367677e61ceffc2ee1cb119035037a27d346b0403bb"
 
 # libcurl - HTTP client library (built from source)
-LIBCURL_VERSION = "8.20.0"
-LIBCURL_SHA = "738fe8ae973a6f171b4e7cf7146edd19894e19f09cd45a3b673ebdba3549a435"
+LIBCURL_VERSION = "8.21.0"
+LIBCURL_SHA = "ec753aa6f408a3ca9f0d6d5f7a77417aecd1544db13c03ae5d443612bf367364"
 
 # libmemcached - memcached client library (built from source)
 # Using awesomized/libmemcached fork which is actively maintained
@@ -170,8 +203,12 @@ def mod_pagespeed_dependencies():
         patch_args = ["-p1"],
     )
 
-    # Phase 2: Standalone libevent
-    http_archive(
+    # Phase 2: Standalone libevent.
+    # maybe(): WORKSPACE.envoy pre-defines this repo with Envoy's patched
+    # snapshot (event2/watch.h) before calling mod_pagespeed_dependencies();
+    # the lean WORKSPACE does not, so it gets this vanilla release.
+    maybe(
+        http_archive,
         name = "com_github_libevent_libevent",
         strip_prefix = "libevent-%s" % LIBEVENT_VERSION,
         url = "https://github.com/libevent/libevent/releases/download/release-%s/libevent-%s.tar.gz" % (LIBEVENT_VERSION, LIBEVENT_VERSION),

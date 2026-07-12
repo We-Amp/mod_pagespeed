@@ -3,9 +3,9 @@
   "dataLicense": "CC0-1.0",
   "SPDXID": "SPDXRef-DOCUMENT",
   "name": "pagespeed-1.1",
-  "documentNamespace": "https://spdx.org/spdxdocs/pagespeed-1.1-2026-07-02T08:26:53Z",
+  "documentNamespace": "https://spdx.org/spdxdocs/pagespeed-1.1-2026-07-11T13:18:22Z",
   "creationInfo": {
-    "created": "2026-07-02T08:26:53Z",
+    "created": "2026-07-11T13:18:22Z",
     "creators": [
       "Tool: generate-sbom.py-1.0",
       "Organization: We-Amp B.V."
@@ -394,7 +394,7 @@
     {
       "SPDXID": "SPDXRef-Package-curl",
       "name": "curl",
-      "versionInfo": "8.20.0",
+      "versionInfo": "8.21.0",
       "supplier": "Organization: Daniel Stenberg and contributors",
       "downloadLocation": "https://github.com/curl/curl",
       "filesAnalyzed": false,
@@ -405,7 +405,7 @@
         {
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
-          "referenceLocator": "pkg:github/curl/curl@curl-8_20_0"
+          "referenceLocator": "pkg:github/curl/curl@curl-8_21_0"
         }
       ]
     },

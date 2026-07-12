@@ -117,7 +117,7 @@ CPP_DEPS = [
     {"name": "apr-util", "version": {"key": "APRUTIL_COMMIT"}, "license": "Apache-2.0",
      "holder": "The Apache Software Foundation", "repo": "apache/apr-util", "purl_version": None},
     {"name": "curl", "version": {"key": "LIBCURL_VERSION"}, "license": "curl",
-     "holder": "Daniel Stenberg and contributors", "repo": "curl/curl", "purl_version": "curl-8_20_0"},
+     "holder": "Daniel Stenberg and contributors", "repo": "curl/curl", "purl_version": "curl-8_21_0"},
     {"name": "libmemcached", "version": {"key": "LIBMEMCACHED_VERSION"}, "license": "BSD-3-Clause",
      "holder": "Brian Aker / awesomized", "repo": "awesomized/libmemcached", "purl_version": None},
     {"name": "ed25519", "version": {"literal": "b1f19fab4aebe607805620d25a5e42566ce46a0e"}, "license": "Zlib",

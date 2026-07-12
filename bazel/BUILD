@@ -9,11 +9,19 @@ exports_files([
     "sparsehash_cstring.patch",
     "googleurl_visibility.patch",
     "googleurl_macos_libcxx.patch",
-    "curl_boringssl_ssl_connect_8_18.patch",
+    "curl_boringssl_ssl_connect_8_20.patch",
     "boringssl_dll_unload_tls_cleanup.patch",
 ])
 
 # =============================================================================
+# Set by --config=envoy-filter (.bazelrc); selects the EXT_BUILD_DEPS
+# spelling the Envoy workspace's rules_foreign_cc pin accepts (see the
+# cache_entries select below).
+config_setting(
+    name = "rules_foreign_cc_envoy_pin",
+    define_values = {"rules_foreign_cc_pin": "envoy"},
+)
+
 # libcurl - HTTP client library (built from source via cmake)
 # =============================================================================
 
@@ -98,6 +106,23 @@ cmake(
             "CURL_CA_BUNDLE": "/etc/ssl/certs/ca-certificates.crt",
             "CURL_CA_PATH": "/etc/ssl/certs",
         },
+    }) | select({
+        # The two workspaces pin INCOMPATIBLE rules_foreign_cc versions and
+        # no single $-spelling for EXT_BUILD_DEPS passes both:
+        #   lean 0.11.1:  ${X} ok, $X ok, $$X fails its $$VAR$$ parser,
+        #                 $$X$$ ok
+        #   Envoy pin:    runs bazel make-var expansion, so ${X}/$X/$(X) all
+        #                 fail analysis; only $$X survives (escapes to a
+        #                 literal $X the wrapper shell script then expands)
+        # The envoy-filter config (the only supported way to build the Envoy
+        # workspace, see pagespeed/envoy/CLAUDE.md) sets this define; the
+        # union overrides the lean ${X} spellings above with the $$X ones.
+        ":rules_foreign_cc_envoy_pin": {
+            "OPENSSL_INCLUDE_DIR": "$$EXT_BUILD_DEPS/include",
+            "OPENSSL_SSL_LIBRARY": "$$EXT_BUILD_DEPS/lib/libssl_internal.a",
+            "OPENSSL_CRYPTO_LIBRARY": "$$EXT_BUILD_DEPS/lib/libcrypto_internal.a",
+        },
+        "//conditions:default": {},
     }),
     visibility = ["//visibility:public"],
 )

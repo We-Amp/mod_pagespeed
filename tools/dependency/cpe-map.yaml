@@ -144,7 +144,7 @@ deps:
 
   curl:
     cpe: "cpe:2.3:a:haxx:curl"                 # NVD: 143 CVEs (canonical; curl:curl has only 4)
-    release_date: "2026-04-29"                  # curl-8_20_0 — GitHub release + annotated tag both 2026-04-29. (Was 2024-09-11, ~20mo too EARLY = heavy over-reporting; the 20 dropped CVEs all affect curl < 8.20.0 and are fixed in 8.20.0 — verified against NVD version ranges.)
+    release_date: "2026-06-24"                  # curl-8_21_0 — GitHub release published 2026-06-24. (Was 2026-04-29 = curl-8_20_0. Same discipline as before: the date tracks the PINNED release so the publish-date filter drops CVEs the pin already fixes.)
 
   libmemcached:
     cpe: "cpe:2.3:a:awesome:libmemcached"      # NVD: 1 CVE (the awesomized fork)

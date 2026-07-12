@@ -27,14 +27,28 @@
 #     rebuild from source under their own config, so a source-only workspace is
 #     sufficient; the only cost on the rare split is a colder bazel cache.
 #
+#   The single-box ARM64 lane has the same shape with a different trigger: its
+#   downstream jobs reuse the workspace linux-arm64-build extracted, but the
+#   lane serializes jobs FIFO ACROSS runs, so another run's build can land
+#   between this run's build and its downstream jobs, leaving the workspace at
+#   the wrong SHA. Observed: a unit-test job silently testing a sibling PR's
+#   tree -- failing on that PR's bug while masking it on the PR's own run.
+#
 # Usage:
-#   ensure-workspace.sh <short_sha>
+#   ensure-workspace.sh <short_sha> [<local_tarball>]
+#
+#   <local_tarball>: optional box-local tarball path handed to
+#   extract-vendor-tarball.sh --local. Used by the single-box ARM64 lane,
+#   where the authoritative shared vendor dir is a local filesystem path, so
+#   the self-heal never needs the network. Cross-box x86 lanes omit it (the
+#   local vendor path there belongs to the other machine).
 #
 # Requires (set by the workflow env): WORKSPACE_DIR, GITHUB_SHA, GITHUB_WORKSPACE.
 set -euo pipefail
 
 SHORT_SHA="${1:-}"
 [ -n "$SHORT_SHA" ] || { echo "::error::ensure-workspace.sh: <short_sha> argument required" >&2; exit 2; }
+LOCAL_TARBALL="${2:-}"
 : "${WORKSPACE_DIR:?ensure-workspace.sh: WORKSPACE_DIR must be set}"
 : "${GITHUB_SHA:?ensure-workspace.sh: GITHUB_SHA must be set}"
 : "${GITHUB_WORKSPACE:?ensure-workspace.sh: GITHUB_WORKSPACE must be set}"
@@ -69,12 +83,15 @@ rm -rf "${WORKSPACE_DIR:?}"/* "${WORKSPACE_DIR:?}"/.[!.]* 2>/dev/null || true
 #              works regardless of whether the runner's tar was built with zstd
 #              support (the self-heal only ever runs on the OTHER box, where we
 #              have no positive proof of `tar --zstd`).
-#   no --local : on the box this job actually landed on, the local vendor path
-#              belongs to the other machine, so go straight to the shared copy.
-bash "${GITHUB_WORKSPACE}/_ci-tools/tools/ci/extract-vendor-tarball.sh" \
-  --sha "${SHORT_SHA}" \
-  --dest "${WORKSPACE_DIR}" \
-  --stream
+#   --local  : only when the caller passed a box-local tarball path (ARM64
+#              lane). Without it -- the cross-box x86 case -- the local vendor
+#              path belongs to the other machine, so go straight to the
+#              shared copy.
+EXTRACT_ARGS=(--sha "${SHORT_SHA}" --dest "${WORKSPACE_DIR}" --stream)
+if [ -n "$LOCAL_TARBALL" ]; then
+  EXTRACT_ARGS+=(--local "$LOCAL_TARBALL")
+fi
+bash "${GITHUB_WORKSPACE}/_ci-tools/tools/ci/extract-vendor-tarball.sh" "${EXTRACT_ARGS[@]}"
 
 STAMPED2="$(tr -d '[:space:]' < "${WORKSPACE_DIR}/GIT_COMMIT")"
 [ "$STAMPED2" = "$GITHUB_SHA" ] || {
