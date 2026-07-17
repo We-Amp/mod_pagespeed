@@ -198,7 +198,7 @@ Two advanced cases use `Domains.AuthorizedDomains`:
 ## Container & runtime requirements
 
 The bundled nginx + module are glibc ELF binaries built for a glibc ≥ 2.31 floor, so they
-run on Debian 11/12, Ubuntu 20.04+, RHEL/Alma 8/9, and Amazon Linux 2023. `libstdc++` is
+run on Debian 11/12, Ubuntu 20.04+, RHEL/Alma 9, and Amazon Linux 2023. `libstdc++` is
 statically linked and the build has no OpenSSL dependency, so there is no libstdc++ or
 libssl/libcrypto host requirement. The binaries link a small set of host shared libraries:
 

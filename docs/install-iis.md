@@ -1,6 +1,6 @@
 # Installing PageSpeed for IIS
 
-**Status: Experimental**
+**Status: Stable** (since 1.15.0+r18 — see the platform table in `RELEASE_NOTES.md`)
 
 ## Requirements
 
@@ -98,7 +98,7 @@ powershell -ExecutionPolicy Bypass -File Stop-IISExpress.ps1
 See [iis-limitations.md](iis-limitations.md) for full details.
 
 Key limitations:
-- IPRO async cache stubs return misses
-- Beacon data silently discarded
-- Redis only (no Memcached on Windows)
-- Single `IisServerContext` per application pool
+- External cache is Redis only (no Memcached on Windows)
+- Shared-memory statistics/caches are per worker process (no cross-process
+  sharing between `w3wp.exe` workers)
+- Incremental HTML flushing is compiled out (output is buffered)

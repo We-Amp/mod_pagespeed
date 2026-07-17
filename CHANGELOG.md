@@ -125,7 +125,7 @@ platforms while preserving the full set of 40+ optimization filters.
 For releases prior to We-Amp stewardship, see the
 [Google mod_pagespeed release notes](https://www.modpagespeed.com/doc/release_notes).
 
-The last official Google release was **1.14.36.1** (July 2020).
+The last official Google release was **1.14.36.1** (August 2020).
 Version 1.15.0.0 was assigned in December 2018 but never released.
 
 [1.1.0-beta.1]: https://github.com/we-amp/mod_pagespeed/releases/tag/v1.1.0-beta.1
