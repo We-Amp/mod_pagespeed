@@ -57,7 +57,27 @@ class ApacheWriter : public Writer {
   // across blocking waits, where a mapped alias could be overwritten
   // underneath it, so the caller must serve a copy instead.  Fail-closed:
   // an unknown filter name disables aliasing.
-  bool RequestServesBodyVerbatim() const;
+  //
+  // On a false return, if 'blocker' is non-null it is set to a
+  // human-readable description of the FIRST disqualifying condition
+  // (e.g. "output filter 'deflate' is not a known verbatim pass-through"),
+  // for the caller's opted-in-but-ineligible diagnostics (the
+  // silent degrade was indistinguishable from a dead code path).
+  bool RequestServesBodyVerbatim(GoogleString* blocker = nullptr) const;
+
+  // Lets self-dispatching output filters settle against the committed
+  // response before the eligibility walk.  A mod_filter harness
+  // (AddOutputFilterByType / FilterChain, httpd 2.4 mod_filter.c) sits in
+  // EVERY request's output chain until the first brigade passes, then
+  // evaluates its provider conditions against the response and removes
+  // itself when none matches.  Passing one empty brigade runs exactly that
+  // dispatch, so an unmatched harness (e.g. a by-type DEFLATE harness on
+  // an image response) leaves the chain before
+  // RequestServesBodyVerbatim() walks it, while a MATCHED harness stays
+  // and correctly disqualifies aliasing.  Must be called on
+  // the request thread after OutputHeaders(); the headers this may commit
+  // to the wire are identical on the aliased and copy paths.
+  void SettleOutputFilters();
 
   // Sends 'span' -- bytes aliasing the Cyclone mapped region pinned by
   // 'pin' -- as a single PAGESPEED_MMAP bucket brigade (see

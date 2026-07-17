@@ -94,11 +94,17 @@ class JsKeywords {
     kSemiInsert,     // Whitespace that triggers semicolon insertion.
     kRegex,          // A regex literal, such as /foo/i or /a+b*/
     kStringLiteral,  // A string literal, such as 'foo' or "bar"
-    kNumber,         // A numeric literal, such as 3.5 or 017 or .2e+10
-    kOperator,       // An operator or symbol, such as && or <<= or (
-    kIdentifier,     // An identifier (variable name, label, etc).
-    kEndOfInput,     // End of input was reached without errors.
-    kError           // A syntax error occurred.
+    kTemplateLiteral,  // A chunk of an ES6 template literal.  One of: a
+                       // whole no-substitution template `abc`; a template
+                       // head `abc${; a template middle }abc${; or a
+                       // template tail }abc`.  The JavaScript inside each
+                       // ${...} interpolation is tokenized separately as
+                       // ordinary tokens between the chunks.
+    kNumber,           // A numeric literal, such as 3.5 or 017 or .2e+10
+    kOperator,         // An operator or symbol, such as && or <<= or (
+    kIdentifier,       // An identifier (variable name, label, etc).
+    kEndOfInput,       // End of input was reached without errors.
+    kError             // A syntax error occurred.
   };
 
   static bool IsAKeyword(Type type) { return type < kNotAKeyword; }

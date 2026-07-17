@@ -77,6 +77,15 @@ SystemRequestContext* NgxServerContext::NewRequestContext(
       thread_system()->NewMutex(), timer(), ps_determine_host(r), local_port,
       str_to_string_piece(local_ip));
 
+  // Record the transport scheme of the incoming connection so loopback
+  // fetches speak the right protocol to local_port (defect B).
+  // Same detection as ngx_http_variable_scheme / ps_is_https.
+#if (NGX_HTTP_SSL)
+  ctx->set_local_scheme(r->connection->ssl != nullptr ? "https" : "http");
+#else
+  ctx->set_local_scheme("http");
+#endif
+
   // See if http2 is in use.
   if (ngx_http2_variable_index_ >= 0) {
     ngx_http_variable_value_t* val =

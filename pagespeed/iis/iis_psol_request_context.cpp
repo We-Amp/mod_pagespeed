@@ -9,12 +9,16 @@ namespace net_instaweb {
 class Timer;
 
 IisPsolRequestContext::IisPsolRequestContext(AbstractMutex* logging_mutex, Timer* timer,
-                                     StringPiece hostname,int local_port, GoogleString local_ip_address)
+                                     StringPiece hostname,int local_port, GoogleString local_ip_address,
+                                     GoogleString local_scheme)
     : SystemRequestContext(logging_mutex, timer, hostname, local_port, local_ip_address),
       local_port_(local_port),
-	  local_ip_address_(local_ip_address) 
+	  local_ip_address_(local_ip_address)
 	  ,check_third_part_cookie_()
 {
+	// Transport scheme of the incoming connection, consumed by
+	// LoopbackRouteFetcher when munging unknown-origin URLs.
+	set_local_scheme(local_scheme);
 }
 
 IisPsolRequestContext::~IisPsolRequestContext() {

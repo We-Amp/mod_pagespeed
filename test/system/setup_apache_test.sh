@@ -158,6 +158,14 @@ EOF
     ModPagespeedInPlaceResourceOptimization on
     ModPagespeedFetchHttps enable,allow_self_signed
 
+    # Zero-copy aliased serving under the STOCK filter chain:
+    # mod_reqtimeout stays enabled and the AddOutputFilterByType harness
+    # above stays in place -- test_zerocopy_serve.py asserts the aliased
+    # path fires anyway.  Main (plain-HTTP) block only: the HTTPS vhost's
+    # ssl filter makes aliasing correctly ineligible there.
+    ModPagespeedCycloneZeroCopy on
+    ModPagespeedCycloneZeroCopyServe on
+
     # Match bash test configuration from debug.conf.template
     ModPagespeedBlockingRewriteKey psatest
     ModPagespeedCriticalImagesBeaconEnabled false
@@ -335,7 +343,10 @@ EOF
     sudo a2ensite pagespeed-secondary 2>/dev/null || true
 
     # Enable required modules (including ssl for HTTPS)
-    sudo a2enmod rewrite headers deflate proxy proxy_http expires ssl 2>/dev/null || true
+    # reqtimeout is explicit so test_zerocopy_serve.py always exercises
+    # the stock Debian chain, even on images where the default-enabled
+    # module set was trimmed.
+    sudo a2enmod rewrite headers deflate proxy proxy_http expires ssl reqtimeout 2>/dev/null || true
     sudo a2enmod pagespeed 2>/dev/null || true
     sudo a2enconf servername 2>/dev/null || true
 

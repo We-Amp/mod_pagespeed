@@ -20,6 +20,8 @@
 #ifndef PAGESPEED_KERNEL_CACHE_CYCLONE_CACHE_H_
 #define PAGESPEED_KERNEL_CACHE_CYCLONE_CACHE_H_
 
+#include <atomic>
+#include <cstdint>
 #include <memory>
 
 #include "pagespeed/kernel/base/basictypes.h"
@@ -200,6 +202,12 @@ class CycloneCache : public CacheInterface {
   CycloneCacheHandle* cache_;  // C handle from wrapper
   MessageHandler* handler_;
   bool is_shut_down_;
+
+  // Write failures observed by this instance.  A full or unwritable cache
+  // fails EVERY write, so PutWithTier samples its kWarning off this count
+  // instead of logging at request rate; the cyclone_cache_failures statistic
+  // still counts each failure.
+  std::atomic<uint64_t> write_failure_log_count_{0};
 
   // Statistics variables
   Variable* hits_;

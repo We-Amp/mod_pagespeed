@@ -46,14 +46,21 @@ class MessageHandler;
 class LoopbackRouteFetcher : public UrlAsyncFetcher {
  public:
   // Does not take ownership of anything. own_port is the port the incoming
-  // request came in on, and own_ip is the same for the IP. If the
-  // backend_fetcher does actual fetching (and is not merely simulating it for
-  // testing purposes) it should be the Curl fetcher, as others may not direct
-  // requests this class produces properly.
+  // request came in on, and own_ip is the same for the IP. own_scheme is the
+  // transport scheme of the incoming connection ("http" or "https"); it is
+  // what a loopback connection to own_port must speak. Pass "" when the port
+  // does not plumb the connection scheme, in which case munged URLs keep the
+  // resource URL's scheme (with X-Forwarded-Proto in play the
+  // resource scheme can differ from the transport, producing structurally
+  // unfetchable URLs like https://127.0.0.1:<plain-http-port>/...).
+  // If the backend_fetcher does actual fetching (and is not merely simulating
+  // it for testing purposes) it should be the Curl fetcher, as others may not
+  // direct requests this class produces properly.
   // (As this fetcher may produce requests that need to connect to some IP
   //  but have a Host: and URL from somewhere else).
   LoopbackRouteFetcher(const RewriteOptions* options,
                        const GoogleString& own_ip, int own_port,
+                       const GoogleString& own_scheme,
                        UrlAsyncFetcher* backend_fetcher);
   ~LoopbackRouteFetcher() override;
 
@@ -71,6 +78,7 @@ class LoopbackRouteFetcher : public UrlAsyncFetcher {
   const RewriteOptions* const options_;
   GoogleString own_ip_;
   int own_port_;
+  GoogleString own_scheme_;  // "" = unknown, keep the resource URL's scheme.
   UrlAsyncFetcher* const backend_fetcher_;
 
   LoopbackRouteFetcher(const LoopbackRouteFetcher&) = delete;

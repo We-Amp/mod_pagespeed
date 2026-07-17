@@ -724,6 +724,14 @@ void RewriteDriverFactory::InitStats(Statistics* statistics) {
   statistics->AddVariable("zerocopy_serve_aliased");
   statistics->AddVariable("zerocopy_serve_copied_out");
   statistics->AddVariable("zerocopy_serve_renew_fail_reset");
+  // ineligible = opted-in serves that never reached the aliased path
+  // because the request failed an eligibility gate (Apache: subrequest /
+  // header-only / Range / a non-verbatim output filter on the chain).
+  // Distinguishes "aliasing configured but structurally blocked" from a
+  // dead upstream path (the defect existed because this degrade was
+  // silent).  The first blocked serve also logs its blocking condition at
+  // INFO, once per process.
+  statistics->AddVariable("zerocopy_serve_ineligible");
   // IIS sink: aliased-serve aborts NOT caused by a torn borrow
   // (allocation / submit failures); torn borrows stay in
   // zerocopy_serve_renew_fail_reset so its meaning matches nginx.

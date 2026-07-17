@@ -103,7 +103,10 @@ class JsTokenizer {
     kOpenBrace,
     kOpenBracket,
     kOpenParen,
-    kBlockKeyword,  // Keyword that precedes "(...)", e.g. "if" or "for".
+    kTemplateInterp,  // Inside a template literal's ${...} interpolation.
+                      // Acts as an open delimiter whose matching close is
+                      // the '}' that ends the interpolation.
+    kBlockKeyword,    // Keyword that precedes "(...)", e.g. "if" or "for".
     kBlockHeader,   // Start of block, e.g. "if (...)", "for (...)", or "else".
     kReturnThrow,   // A return or throw keyword.
     kJumpKeyword,   // A break, continue, or debugger keyword.
@@ -140,6 +143,19 @@ class JsTokenizer {
   JsKeywords::Type ConsumeSemicolon(StringPiece* token_out);
   JsKeywords::Type ConsumeSlash(StringPiece* token_out);
   JsKeywords::Type ConsumeString(StringPiece* token_out);
+  // Consumes one chunk of an ES6 template literal, starting at the current
+  // input character which must be either a backtick (start of a template)
+  // or a '}' (resuming a template after an interpolation).  Emits a single
+  // kTemplateLiteral token for the chunk.  If the chunk ends with '${',
+  // pushes kTemplateInterp so that the interpolation is tokenized as JS;
+  // if it ends with a backtick, pushes an expression.  Returns kError on an
+  // unterminated template.
+  JsKeywords::Type ConsumeTemplateChunk(StringPiece* token_out);
+  // Returns true if the nearest enclosing open delimiter on the parse stack
+  // (skipping expression/operator states) is a kTemplateInterp, meaning a
+  // '}' at the current position resumes a template literal rather than
+  // closing a brace.
+  bool NearestOpenDelimiterIsTemplateInterp() const;
 
   // For each of these methods, if the start of the input is that kind of
   // token, consumes the token and returns true, otherwise returns false

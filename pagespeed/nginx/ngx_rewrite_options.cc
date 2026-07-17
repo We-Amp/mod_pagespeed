@@ -290,6 +290,15 @@ void NgxRewriteOptions::AddProperties() {
   // a RewriteOptions instance and we're in a static method.
   NgxRewriteOptions dummy_config(nullptr);
   dummy_config.set_default_x_header_value(kModPagespeedVersion);
+  // Zero-copy serving is opt-in on every port, nginx included: the r18
+  // default-on never actually engaged(the defect -- the port-neutral
+  // CycloneZeroCopy default meant no value was ever mapped), so making it
+  // genuinely-on now would jump from zero to full fleet engagement in one
+  // release, alongside the r19 cache-format migration.  Enable with
+  // "pagespeed CycloneZeroCopy on;" (the serve sink is default-on and
+  // engages once values are mapped).  Revisit default-on only with the
+  // protocol-matrix floor asserts in place and a revision of
+  // opt-in field soak behind it.
 }
 
 void NgxRewriteOptions::Initialize() {

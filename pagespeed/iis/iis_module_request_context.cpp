@@ -28,7 +28,12 @@ namespace net_instaweb
 	{
 		pRawValueAcceptEncoding = 0;
 		pRawValueLengthAcceptEncoding = 0;
-		requestContext_ = new IisInnerRequestContext(is_resource, url, url_len, gurl,this, process_context, server_context, local_port, local_ip_address);
+		// Transport scheme of the incoming connection — what a loopback fetch
+		// to local_port must speak. The request URL's scheme can differ when
+		// X-Forwarded-Proto is honored (defect B).
+		GoogleString local_scheme =
+			(pContext->GetRequest()->GetRawHttpRequest()->pSslInfo != NULL) ? "https" : "http";
+		requestContext_ = new IisInnerRequestContext(is_resource, url, url_len, gurl,this, process_context, server_context, local_port, local_ip_address, local_scheme);
 		GoogleString checkpath = FindConfigFile(ws2s(pContext->GetApplication()->GetApplicationPhysicalPath()));
 		requestContext_->SetSiteConfigFile(checkpath);
 	}

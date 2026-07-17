@@ -58,6 +58,9 @@ SystemRequestContext* EnvoyServerContext::NewRequestContext(
   SystemRequestContext* ctx = new SystemRequestContext(
       thread_system()->NewMutex(), timer(), host_str, actual_port, host_str);
   ctx->set_using_http2(false);
+  // No connection info is available here, so local_scheme stays unset and
+  // LoopbackRouteFetcher keeps the resource URL's scheme when munging
+  // (defect B is not wired for this port yet).
   return ctx;
 }
 

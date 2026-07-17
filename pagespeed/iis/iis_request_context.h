@@ -26,7 +26,7 @@ class IisInnerRequestContext
 {
 public:
 	IisInnerRequestContext(bool is_resource, const char * url, size_t url_len, GoogleUrl* gurl
-		, IisModuleRequestContext *outer_context,  IisProcessContext* process_context, IisServerContext* server_context, int local_port, GoogleString local_ip_address) :
+		, IisModuleRequestContext *outer_context,  IisProcessContext* process_context, IisServerContext* server_context, int local_port, GoogleString local_ip_address, GoogleString local_scheme) :
 		 is_resource_(is_resource)
 		, url_(url)
 		, url_len_(url_len)
@@ -42,6 +42,7 @@ public:
 		, server_context_(server_context)
 		, local_port_(local_port)
 		, local_ip_address_(local_ip_address)
+		, local_scheme_(local_scheme)
 		, in_place_(false)
 		, driver_(NULL)
 		, recorder_(NULL)
@@ -57,7 +58,8 @@ public:
 				gurl->Host(),
 
 				local_port,
-				local_ip_address)
+				local_ip_address,
+				local_scheme)
 			);
 	}
 
@@ -70,7 +72,8 @@ public:
 			gurl_->Host(),
 
 			local_port_,
-			local_ip_address_)
+			local_ip_address_,
+			local_scheme_)
 			);
 	}
 	virtual void CleanupStoredContext();
@@ -138,6 +141,7 @@ private:
 	IisModuleRequestContext* outer_context_;
 	int local_port_;
 	GoogleString local_ip_address_;
+	GoogleString local_scheme_;
 	bool in_place_;
 	RewriteDriver* driver_;
 	InPlaceResourceRecorder* recorder_;

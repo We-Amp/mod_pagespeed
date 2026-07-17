@@ -46,10 +46,12 @@ class MessageHandler;
 LoopbackRouteFetcher::LoopbackRouteFetcher(const RewriteOptions* options,
                                            const GoogleString& own_ip,
                                            int own_port,
+                                           const GoogleString& own_scheme,
                                            UrlAsyncFetcher* backend_fetcher)
     : options_(options),
       own_ip_(own_ip),
       own_port_(own_port),
+      own_scheme_(own_scheme),
       backend_fetcher_(backend_fetcher) {
   if (own_ip_.empty()) {
     own_ip_ = "127.0.0.1";
@@ -93,7 +95,17 @@ void LoopbackRouteFetcher::Fetch(const GoogleString& original_url,
     // Includes leading slash.
     parsed_url.PathAndLeaf().CopyToString(&path_and_leaf);
 
-    StringPiece scheme = parsed_url.Scheme();
+    // defect B: the resource URL's scheme may reflect
+    // X-Forwarded-Proto rather than the transport this server speaks on
+    // own_port_ (e.g. https page URLs synthesized from an XFP header received
+    // on a plain-http listener). The munged URL connects to own_port_, so it
+    // must use the connection's transport scheme when the port plumbed it —
+    // otherwise we attempt a TLS handshake against a plain port (or vice
+    // versa), a structurally unfetchable URL whose guaranteed failure the
+    // HTTP cache then remembers. The Host header set above keeps the original
+    // authority, so cache keys and vhost routing are unaffected.
+    StringPiece scheme =
+        own_scheme_.empty() ? parsed_url.Scheme() : StringPiece(own_scheme_);
     GoogleString port_section = "";
     if (!((own_port_ == 80 && scheme == "http") ||
           (own_port_ == 443 && scheme == "https"))) {

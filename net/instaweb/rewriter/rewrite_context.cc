@@ -263,7 +263,7 @@ class RewriteContext::OutputCacheCallback : public CacheInterface::Callback {
     // used as we update cache_result_->cache_ok directly.
     CacheLookupResult candidate_cache_result;
     bool local_cache_ok =
-        TryDecodeCacheResult(state, value().Value(), &candidate_cache_result);
+        TryDecodeCacheResult(state, value(), &candidate_cache_result);
 
     // cache_ok determines whether or not a second level cache is looked up. If
     // this is a stale rewrite, ensure there is an additional look up in the
@@ -386,7 +386,8 @@ class RewriteContext::OutputCacheCallback : public CacheInterface::Callback {
   //
   // Will return false with result->can_revalidate = false if the cached result
   // is entirely unsalvageable.
-  bool TryDecodeCacheResult(CacheInterface::KeyState state, StringPiece val_str,
+  bool TryDecodeCacheResult(CacheInterface::KeyState state,
+                            const MappedSharedString& cache_value,
                             CacheLookupResult* result) {
     bool* can_revalidate = &(result->can_revalidate);
     InputInfoStarVector* revalidate = &(result->revalidate);
@@ -402,9 +403,25 @@ class RewriteContext::OutputCacheCallback : public CacheInterface::Callback {
     }
     // We've got a hit on the output metadata; the contents should
     // be a protobuf.  Try to parse it.
+    StringPiece val_str = cache_value.Value();
     ArrayInputStream input(val_str.data(), val_str.size());
     if (partitions->ParseFromZeroCopyStream(&input) &&
         IsOtherDependencyValid(partitions, is_stale_rewrite)) {
+      // the design record parse-then-verify: when the bytes were borrowed from a mapped
+      // (Cyclone zero-copy) region, a ceiling-forced wrap can overwrite them
+      // under the parse and yield a structurally-valid protobuf carrying the
+      // wrong fields (most acute with CompressMetadataCache off, where there
+      // is no checksum to reject it).  Having consumed the bytes, re-check the
+      // borrow; a torn read is treated as a cache miss.
+      if (cache_value.is_mapped() &&
+          cache_value.RenewLeaseStrict() == LeaseRenewal::kTorn) {
+        rewrite_context_->FindServerContext()
+            ->rewrite_stats()
+            ->cached_output_misses()
+            ->Add(1);
+        *can_revalidate = false;
+        return false;
+      }
       bool ok = true;
       *can_revalidate = true;
       for (int i = 0, n = partitions->partition_size(); i < n; ++i) {

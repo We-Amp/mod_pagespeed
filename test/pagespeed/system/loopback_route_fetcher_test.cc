@@ -84,7 +84,13 @@ class LoopbackRouteFetcherTest : public RewriteOptionsTestBase<RewriteOptions> {
   LoopbackRouteFetcherTest()
       : thread_system_(Platform::CreateThreadSystem()),
         options_(thread_system_.get()),
-        loopback_route_fetcher_(&options_, kOwnIp, 42, &reflecting_fetcher_) {}
+        loopback_route_fetcher_(&options_, kOwnIp, 42, "",
+                                &reflecting_fetcher_),
+        plain_http_fetcher_(&options_, kOwnIp, 8080, "http",
+                            &reflecting_fetcher_),
+        tls_fetcher_(&options_, kOwnIp, 8443, "https", &reflecting_fetcher_),
+        tls_default_port_fetcher_(&options_, kOwnIp, 443, "https",
+                                  &reflecting_fetcher_) {}
 
   void PrepareDone(bool ok) { EXPECT_TRUE(ok); }
 
@@ -93,7 +99,14 @@ class LoopbackRouteFetcherTest : public RewriteOptionsTestBase<RewriteOptions> {
   ReflectingTestFetcher reflecting_fetcher_;
   std::unique_ptr<ThreadSystem> thread_system_;
   RewriteOptions options_;
+  // No connection scheme plumbed — legacy behavior.
   LoopbackRouteFetcher loopback_route_fetcher_;
+  // Connection came in over plain http on port 8080.
+  LoopbackRouteFetcher plain_http_fetcher_;
+  // Connection came in over TLS on port 8443.
+  LoopbackRouteFetcher tls_fetcher_;
+  // Connection came in over TLS on port 443.
+  LoopbackRouteFetcher tls_default_port_fetcher_;
 };
 
 TEST_F(LoopbackRouteFetcherTest, LoopbackRouteFetcherWorks) {
@@ -165,6 +178,68 @@ TEST_F(LoopbackRouteFetcherTest, LoopbackRouteFetcherWorks) {
   EXPECT_STREQ(StrCat("http://", kOwnIp, ":42/url"), dest6.buffer());
   EXPECT_STREQ("somehost.cdn.com:456",
                dest6.response_headers()->Lookup1("Host"));
+}
+
+// defect B: when X-Forwarded-Proto is in play the resource URL's
+// scheme reflects the original client connection, not the transport this
+// server actually speaks on own_port. Munging must use the connection's
+// transport scheme, otherwise we synthesize structurally unfetchable URLs
+// like https://127.0.0.1:<plain-http-port>/... — a guaranteed TLS handshake
+// failure whose result is then remembered by the 300s failure cache.
+TEST_F(LoopbackRouteFetcherTest, MungesWithConnectionSchemeOverPlainHttp) {
+  // https resource URL (from an X-Forwarded-Proto: https page) arriving over
+  // the plain-http listener on 8080 must loop back over plain http.
+  ExpectStringAsyncFetch dest(
+      true, RequestContext::NewTestRequestContext(thread_system_.get()));
+  plain_http_fetcher_.Fetch("https://somehost.com/style.css", &handler_,
+                            &dest);
+  EXPECT_STREQ(StrCat("http://", kOwnIp, ":8080/style.css"), dest.buffer());
+  // The Host header still carries the original authority, so cache keys and
+  // virtual-host routing are unaffected.
+  EXPECT_STREQ("somehost.com", dest.response_headers()->Lookup1("Host"));
+}
+
+TEST_F(LoopbackRouteFetcherTest, MungesWithConnectionSchemeOverTls) {
+  // Mirror image: http resource URL arriving over a TLS listener loops back
+  // over TLS.
+  ExpectStringAsyncFetch dest(
+      true, RequestContext::NewTestRequestContext(thread_system_.get()));
+  tls_fetcher_.Fetch("http://somehost.com/app.js", &handler_, &dest);
+  EXPECT_STREQ(StrCat("https://", kOwnIp, ":8443/app.js"), dest.buffer());
+  EXPECT_STREQ("somehost.com", dest.response_headers()->Lookup1("Host"));
+}
+
+TEST_F(LoopbackRouteFetcherTest, ElidesDefaultPortOfConnectionScheme) {
+  // Port elision must follow the connection scheme too: 443 is default for
+  // the https transport even when the resource URL says http.
+  ExpectStringAsyncFetch dest(
+      true, RequestContext::NewTestRequestContext(thread_system_.get()));
+  tls_default_port_fetcher_.Fetch("http://somehost.com/app.js", &handler_,
+                                  &dest);
+  EXPECT_STREQ(StrCat("https://", kOwnIp, "/app.js"), dest.buffer());
+  EXPECT_STREQ("somehost.com", dest.response_headers()->Lookup1("Host"));
+}
+
+TEST_F(LoopbackRouteFetcherTest, EmptyConnectionSchemeKeepsResourceScheme) {
+  // Ports that don't plumb the connection scheme keep the legacy behavior:
+  // the resource URL's scheme survives into the munged URL.
+  ExpectStringAsyncFetch dest(
+      true, RequestContext::NewTestRequestContext(thread_system_.get()));
+  loopback_route_fetcher_.Fetch("https://somehost.com/style.css", &handler_,
+                                &dest);
+  EXPECT_STREQ(StrCat("https://", kOwnIp, ":42/style.css"), dest.buffer());
+  EXPECT_STREQ("somehost.com", dest.response_headers()->Lookup1("Host"));
+}
+
+TEST_F(LoopbackRouteFetcherTest, ConnectionSchemeDoesNotAffectKnownOrigins) {
+  // Known origins are still fetched exactly as given (same mapping as in
+  // LoopbackRouteFetcherWorks above).
+  options_.WriteableDomainLawyer()->AddOriginDomainMapping(
+      "somehost.cdn.com", "somehost.com", "", &handler_);
+  ExpectStringAsyncFetch dest(
+      true, RequestContext::NewTestRequestContext(thread_system_.get()));
+  plain_http_fetcher_.Fetch("http://somehost.com/url", &handler_, &dest);
+  EXPECT_STREQ("http://somehost.com/url", dest.buffer());
 }
 
 TEST_F(LoopbackRouteFetcherTest, CanDetectSelfSrc) {

@@ -20,6 +20,7 @@
 #include "pagespeed/apache/apache_fetch.h"
 
 #include <algorithm>
+#include <atomic>
 
 #include "base/logging.h"
 #include "net/instaweb/rewriter/public/server_context.h"
@@ -28,6 +29,7 @@
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/mapped_shared_string.h"
 #include "pagespeed/kernel/base/statistics.h"
+#include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/http/http_names.h"
@@ -45,6 +47,13 @@ namespace {
 // margin so an admitted serve is never de-aliased (and double-counted) by
 // its very first read.
 const uint64_t kEmitMarginNs = 2 * kMmapAliasReadBarrierMarginNs;
+
+// Whether the opted-in-but-ineligible diagnosis was already logged.  An
+// ineligible chain disqualifies EVERY serve on it, so the log names the
+// first blocker once per process and the zerocopy_serve_ineligible counter
+// carries the ongoing signal (without either, the degrade was
+// indistinguishable from a dead code path).
+std::atomic<bool> ineligible_serve_logged{false};
 
 }  // namespace
 
@@ -242,11 +251,54 @@ bool ApacheFetch::WriteMapped(const StringPiece& mmap_sp,
   // Alias only a committed, verbatim 200 on the unbuffered request-thread
   // streaming path.  RequestServesBodyVerbatim() excludes subrequests,
   // header-only, Range, and any output filter (deflate/ssl/http2/unknown)
-  // that could transform, re-slice, or retain the aliased bytes.
-  const bool alias_eligible =
-      alias_opted_in && !buffered_ && headers_sent_ &&
-      response_headers()->status_code() == HttpStatus::kOK &&
-      apache_writer_->RequestServesBodyVerbatim();
+  // that could transform, re-slice, or retain the aliased bytes.  An
+  // opted-in serve that fails these gates is counted (and its first
+  // blocker logged once per process): the operator asked for aliasing and
+  // is not getting it, and without the signal that degrade reads as
+  // aliased=0/copied_out=0 -- a dead path.
+  bool alias_eligible = false;
+  if (alias_opted_in) {
+    GoogleString blocker;
+    if (buffered_) {
+      blocker = "buffered (non-streaming) fetch";
+    } else if (!headers_sent_) {
+      blocker = "headers not sent before body";
+    } else if (response_headers()->status_code() != HttpStatus::kOK) {
+      blocker =
+          StrCat("status ", IntegerToString(response_headers()->status_code()),
+                 " (only 200 aliases)");
+    } else {
+      // Let self-dispatching filters settle against the committed
+      // response before the walk: a mod_filter harness
+      // (AddOutputFilterByType / FilterChain) sits in EVERY request's
+      // output chain until the first brigade, then dispatches on the
+      // response and removes itself when no provider matches.  One empty
+      // brigade runs exactly that dispatch, so an unmatched harness
+      // (e.g. a by-type DEFLATE harness on an image response) leaves the
+      // chain before the walk, while a matched harness stays and
+      // correctly disqualifies aliasing.
+      apache_writer_->SettleOutputFilters();
+      if (apache_writer_->RequestServesBodyVerbatim(&blocker)) {
+        alias_eligible = true;
+      }
+    }
+    if (!alias_eligible) {
+      Variable* ineligible_stat =
+          stats != nullptr ? stats->FindVariable("zerocopy_serve_ineligible")
+                           : nullptr;
+      if (ineligible_stat != nullptr) {
+        ineligible_stat->Add(1);
+      }
+      if (!ineligible_serve_logged.exchange(true)) {
+        message_handler_->Message(
+            kInfo,
+            "CycloneZeroCopyServe: serve for %s is not alias-eligible (%s); "
+            "serving a verified copy. Counted in zerocopy_serve_ineligible; "
+            "logged once per process.",
+            mapped_url_.c_str(), blocker.c_str());
+      }
+    }
+  }
   if (alias_eligible) {
     // the design record emit-time decision (intent-checked).  RenewLeaseStrict()
     // stamps a fresh lease AND revalidates the borrow, the same protocol

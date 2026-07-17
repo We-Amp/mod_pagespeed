@@ -219,15 +219,17 @@ void SystemRewriteOptions::AddProperties() {
                     RewriteOptions::kCycloneZeroCopy,
                     "Serve HTTP cache hits directly from the Cyclone cache's "
                     "memory-mapped storage without copying the payload "
-                    "(zero-copy).  Experimental.",
+                    "(zero-copy).  Off by default on every port; set it on "
+                    "explicitly to opt in.",
                     true);
   AddSystemProperty(true, &SystemRewriteOptions::cyclone_zero_copy_serve_,
                     "aczs", RewriteOptions::kCycloneZeroCopyServe,
                     "Carry memory-mapped Cyclone cache-hit bytes into the "
                     "port output buffer by reference (aliased) instead of "
                     "copying them; the serve safely copies the tail out "
-                    "before a cache eviction can overwrite it.  Default on "
-                    "for nginx; on Apache the aliased serve is experimental "
+                    "before a cache eviction can overwrite it.  Engages only "
+                    "once CycloneZeroCopy maps cache values; on Apache the "
+                    "aliased serve is experimental "
                     "and activates only when this option is explicitly set. "
                     "Apache aliases only plain-HTTP/1.x main-request 200s "
                     "of at least 16KB served verbatim (no Range, no "

@@ -180,6 +180,13 @@ apr_status_t ap_get_brigade(ap_filter_t*, apr_bucket_brigade*, ap_input_mode_t,
 // read barrier) and logging the concatenated bytes.  Read failures (e.g. a
 // torn mapped borrow) propagate to the caller like a downstream error.
 apr_status_t ap_pass_brigade(ap_filter_t*, apr_bucket_brigade* bb) {
+  if (APR_BRIGADE_EMPTY(bb)) {
+    // ApacheWriter::SettleOutputFilters() passes one empty brigade before
+    // the eligibility walk.  Log it distinctly, and keep
+    // partial mode's data-bucket invariant for real body passes.
+    log_action("ap_pass_brigade(EMPTY)");
+    return APR_SUCCESS;
+  }
   if (partial_pass_brigade) {
     // Model the deferred-write geometry (see mock_apache.h) for the first
     // data bucket.

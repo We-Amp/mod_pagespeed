@@ -137,6 +137,13 @@ EOF
     ModPagespeedStatisticsLogging on
     ModPagespeedFetchHttps enable
 
+    # Zero-copy aliased serving under the STOCK filter chain:
+    # mod_reqtimeout stays enabled and the AddOutputFilterByType harness
+    # above stays in place -- the zerocopy_serve system test asserts the
+    # aliased path fires anyway.
+    ModPagespeedCycloneZeroCopy on
+    ModPagespeedCycloneZeroCopyServe on
+
     <Location /mod_pagespeed_statistics>
         Require local
         SetHandler mod_pagespeed_statistics
@@ -154,8 +161,10 @@ EOF
 </IfModule>
 EOF
 
-        # Enable modules (Debian/Ubuntu style)
-        sudo a2enmod rewrite headers deflate proxy proxy_http expires 2>/dev/null || true
+        # Enable modules (Debian/Ubuntu style).  reqtimeout is explicit so
+        # the zerocopy_serve test always exercises the stock Debian chain
+        # even on images where the default-enabled set was trimmed.
+        sudo a2enmod rewrite headers deflate proxy proxy_http expires reqtimeout 2>/dev/null || true
         sudo a2enmod pagespeed 2>/dev/null || true
     fi
 

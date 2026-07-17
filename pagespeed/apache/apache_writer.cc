@@ -59,6 +59,16 @@ const char* const kVerbatimOutputFilters[] = {
     "logio_ttfb_out",    // mod_logio first-byte timestamp passthrough.
     "old_write",         // ap_rwrite shim; flushes its own buffer, then
                          // passes foreign brigades through untouched.
+    "reqtimeout",        // mod_reqtimeout's output filter (reqtimeout_eor,
+                         // httpd 2.4 modules/filters/mod_reqtimeout.c):
+                         // input-timeout bookkeeping only.  It looks at
+                         // whether the brigade's LAST bucket is the EOR
+                         // metadata bucket (to reset its per-connection
+                         // timeout stage) and then ap_pass_brigade()s the
+                         // brigade on untouched -- it never reads,
+                         // re-slices, or retains data buckets.  Enabled by
+                         // default on Debian/Ubuntu; omitting it disabled
+                         // aliasing on every stock install.
 };
 
 bool IsVerbatimOutputFilter(const char* name) {
@@ -98,19 +108,46 @@ bool ApacheWriter::Flush(MessageHandler* handler) {
   return true;
 }
 
-bool ApacheWriter::RequestServesBodyVerbatim() const {
+void ApacheWriter::SettleOutputFilters() {
+  DCHECK(apache_request_thread_->IsCurrentThread());
+  DCHECK(headers_out_);
+  conn_rec* c = request_->connection;
+  if (c == nullptr) {
+    return;  // Nothing to settle; the eligibility walk fails closed.
+  }
+  apr_bucket_brigade* bb = apr_brigade_create(request_->pool, c->bucket_alloc);
+  // The return status is deliberately ignored: no body bytes were sent,
+  // and a filter that errors on an empty brigade will error again on the
+  // body pass, where the serve's normal failure handling applies.
+  ap_pass_brigade(request_->output_filters, bb);
+  apr_brigade_destroy(bb);
+}
+
+bool ApacheWriter::RequestServesBodyVerbatim(GoogleString* blocker) const {
   request_rec* r = request_;
   if (r->main != nullptr || r->prev != nullptr || r->next != nullptr) {
-    return false;  // Subrequest or internal-redirect chain.
+    if (blocker != nullptr) {
+      *blocker = "subrequest or internal-redirect chain";
+    }
+    return false;
   }
   if (r->header_only) {
+    if (blocker != nullptr) {
+      *blocker = "header-only request";
+    }
     return false;
   }
   if (r->connection == nullptr) {
+    if (blocker != nullptr) {
+      *blocker = "no connection";
+    }
     return false;
   }
   if (apr_table_get(r->headers_in, "Range") != nullptr) {
-    return false;  // The byterange filter would re-slice the body.
+    if (blocker != nullptr) {
+      *blocker = "Range request";  // The byterange filter would re-slice.
+    }
+    return false;
   }
   // Walk the output chain: the request-level list links onward into the
   // connection-level filters, ending at the core network filter.  Every
@@ -119,6 +156,13 @@ bool ApacheWriter::RequestServesBodyVerbatim() const {
   for (ap_filter_t* f = r->output_filters; f != nullptr; f = f->next) {
     if (f->frec == nullptr || f->frec->name == nullptr ||
         !IsVerbatimOutputFilter(f->frec->name)) {
+      if (blocker != nullptr) {
+        *blocker = StrCat("output filter '",
+                          (f->frec != nullptr && f->frec->name != nullptr)
+                              ? f->frec->name
+                              : "(unnamed)",
+                          "' is not a known verbatim pass-through");
+      }
       return false;
     }
   }

@@ -13,7 +13,8 @@ class Timer;
 class IisPsolRequestContext : public SystemRequestContext {
  public:
   IisPsolRequestContext(AbstractMutex* logging_mutex, Timer* timer,
-                    StringPiece hostname,int local_port, GoogleString local_ip_address);
+                    StringPiece hostname,int local_port, GoogleString local_ip_address,
+                    GoogleString local_scheme);
 
   int local_port() const { return local_port_; }
   const GoogleString& local_ip_address() const { return local_ip_address_; }

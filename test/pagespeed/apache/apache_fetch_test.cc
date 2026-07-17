@@ -730,20 +730,18 @@ class ApacheFetchZeroCopyTest : public ApacheFetchTest {
     return StringPiece(region_, STATIC_STRLEN(kMappedBody));
   }
 
-  // Replaces the mock's fake filter chain with the stock verbatim serve
+  // Replaces the mock's fake filter chain with the given output-filter
   // chain and gives the request a connection with a bucket allocator, so
-  // ApacheWriter::RequestServesBodyVerbatim() holds and the aliased
-  // brigade can be built and passed.
-  void SetUpVerbatimServeChain() {
-    static const char* const kNames[] = {"content_length", "http_header",
-                                         "core"};
+  // ApacheWriter::RequestServesBodyVerbatim() can walk the chain and an
+  // aliased brigade can be built and passed.
+  void SetUpServeChain(const char* const* names, size_t count) {
     ap_filter_t** filter = &request_.output_filters;
-    for (size_t i = 0; i < arraysize(kNames); ++i, filter = &(*filter)->next) {
+    for (size_t i = 0; i < count; ++i, filter = &(*filter)->next) {
       *filter = static_cast<ap_filter_t*>(
           apr_palloc(request_.pool, sizeof(ap_filter_t)));
       (*filter)->frec = static_cast<ap_filter_rec_t*>(
           apr_palloc(request_.pool, sizeof(ap_filter_rec_t)));
-      (*filter)->frec->name = kNames[i];
+      (*filter)->frec->name = names[i];
     }
     *filter = nullptr;
     conn_ =
@@ -754,6 +752,13 @@ class ApacheFetchZeroCopyTest : public ApacheFetchTest {
     request_.prev = nullptr;
     request_.next = nullptr;
     request_.header_only = 0;
+  }
+
+  // The stock verbatim serve chain.
+  void SetUpVerbatimServeChain() {
+    static const char* const kNames[] = {"content_length", "http_header",
+                                         "core"};
+    SetUpServeChain(kNames, arraysize(kNames));
   }
 
   int64 StatValue(const char* name) {
@@ -784,9 +789,11 @@ TEST_F(ApacheFetchZeroCopyTest, NoOptInServesVerifiedCopy) {
   EXPECT_EQ(GoogleString::npos, actions.find("ap_pass_brigade")) << actions;
   // The copied-out counter tracks degradation of alias-ELIGIBLE serves
   // only; the not-opted-in verified copy is the classic serve and counts
-  // nowhere.
+  // nowhere -- including zerocopy_serve_ineligible, which is scoped to
+  // OPTED-IN serves (no opt-in, nothing to diagnose).
   EXPECT_EQ(0, StatValue("zerocopy_serve_copied_out"));
   EXPECT_EQ(0, StatValue("zerocopy_serve_aliased"));
+  EXPECT_EQ(0, StatValue("zerocopy_serve_ineligible"));
   // Copy-then-verify ran exactly once.
   EXPECT_EQ(1u, script_.strict_calls);
   pin = MappedSharedString();
@@ -810,9 +817,34 @@ TEST_F(ApacheFetchZeroCopyTest, OptInAliasesVerbatimServe) {
   EXPECT_EQ(GoogleString::npos, actions.find("ap_rwrite")) << actions;
   EXPECT_EQ(1, StatValue("zerocopy_serve_aliased"));
   EXPECT_EQ(0, StatValue("zerocopy_serve_copied_out"));
+  EXPECT_EQ(0, StatValue("zerocopy_serve_ineligible"));
   // Emit-time renewal plus the bucket's per-send read barrier.
   EXPECT_EQ(2u, script_.strict_calls);
   // The bucket was consumed by the pass; its pin reference is gone.
+  pin = MappedSharedString();
+  EXPECT_EQ(1, script_.released);
+  apache_fetch_->Done(true);
+}
+
+// mod_reqtimeout's output filter (default-enabled on Debian/Ubuntu) is
+// timeout bookkeeping that passes brigades through untouched; its presence
+// on the connection chain must not disqualify aliasing (before
+// it was allowlisted, aliasing was dead on every stock install).
+TEST_F(ApacheFetchZeroCopyTest, OptInAliasesWithReqtimeoutInChain) {
+  memcpy(region_, kMappedBody, STATIC_STRLEN(kMappedBody));
+  static const char* const kNames[] = {"content_length", "http_header",
+                                       "http_outerror", "reqtimeout", "core"};
+  SetUpServeChain(kNames, arraysize(kNames));
+  InitFetchWithOptions(NewOptedInOptions());
+  MappedSharedString pin = MakePin();
+  EXPECT_TRUE(apache_fetch_->WriteMapped(MappedSpan(), pin, message_handler()));
+  GoogleString actions = MockApache::ActionsSinceLastCall();
+  EXPECT_NE(GoogleString::npos,
+            actions.find(StrCat("ap_pass_brigade(", kMappedBody, ")")))
+      << actions;
+  EXPECT_EQ(GoogleString::npos, actions.find("ap_rwrite")) << actions;
+  EXPECT_EQ(1, StatValue("zerocopy_serve_aliased"));
+  EXPECT_EQ(0, StatValue("zerocopy_serve_ineligible"));
   pin = MappedSharedString();
   EXPECT_EQ(1, script_.released);
   apache_fetch_->Done(true);
@@ -838,10 +870,17 @@ TEST_F(ApacheFetchZeroCopyTest, DeflateOnChainForcesCopy) {
   EXPECT_NE(GoogleString::npos,
             actions.find(StrCat("ap_rwrite(", kMappedBody, ")")))
       << actions;
+  // The settle pass ran before the (failed) walk: real mod_filter
+  // harnesses would have dispatched and, unmatched, left the chain.
+  EXPECT_NE(GoogleString::npos, actions.find("ap_pass_brigade(EMPTY)"))
+      << actions;
   EXPECT_EQ(0, StatValue("zerocopy_serve_aliased"));
   // A non-verbatim chain is not alias-ELIGIBLE, so its verified copy is the
-  // classic serve, not a counted degrade.
+  // classic serve, not a counted degrade...
   EXPECT_EQ(0, StatValue("zerocopy_serve_copied_out"));
+  // ...but the operator opted in and is not getting aliasing: that IS the
+  // ineligible signal.
+  EXPECT_EQ(1, StatValue("zerocopy_serve_ineligible"));
   apache_fetch_->Done(true);
 }
 
@@ -876,7 +915,9 @@ TEST_F(ApacheFetchZeroCopyTest, TornAtEmitFailsClosedAndAborts) {
       apache_fetch_->WriteMapped(MappedSpan(), pin, message_handler()));
   GoogleString actions = MockApache::ActionsSinceLastCall();
   EXPECT_EQ(GoogleString::npos, actions.find("ap_rwrite")) << actions;
-  EXPECT_EQ(GoogleString::npos, actions.find("ap_pass_brigade")) << actions;
+  // The settle pass (empty brigade) may appear in the log, but no BODY
+  // bytes may reach the chain.
+  EXPECT_EQ(GoogleString::npos, actions.find(kMappedBody)) << actions;
   EXPECT_EQ(1, conn_->aborted);
   EXPECT_EQ(1, StatValue("zerocopy_serve_renew_fail_reset"));
   apache_fetch_->Done(false);
@@ -902,6 +943,8 @@ TEST_F(ApacheFetchZeroCopyTest, DefaultOnWithoutExplicitSetServesCopy) {
   EXPECT_EQ(GoogleString::npos, actions.find("ap_pass_brigade")) << actions;
   EXPECT_EQ(0, StatValue("zerocopy_serve_aliased"));
   EXPECT_EQ(0, StatValue("zerocopy_serve_copied_out"));
+  // was_set gate failed => not opted in => not an ineligible-serve either.
+  EXPECT_EQ(0, StatValue("zerocopy_serve_ineligible"));
   apache_fetch_->Done(true);
 }
 

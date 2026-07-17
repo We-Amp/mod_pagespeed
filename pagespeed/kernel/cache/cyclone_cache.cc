@@ -21,6 +21,7 @@
 
 #include <sys/stat.h>
 
+#include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <memory>
@@ -292,9 +293,22 @@ void CycloneCache::PutWithTier(const GoogleString& key,
     bytes_written_->Add(static_cast<int64>(data.size()));
   } else {
     failures_->Add(1);
-    const char* error = cyclone_get_last_error();
-    handler_->Message(kWarning, "CycloneCache: Write failed for key %s: %s",
-                      key.c_str(), error ? error : "unknown error");
+    // A full or unwritable cache fails every write, so a per-failure warning
+    // floods the log at request rate without adding signal.  Log the first
+    // failure and every 1024th after that; the cyclone_cache_failures
+    // statistic still counts each one.
+    uint64_t n =
+        write_failure_log_count_.fetch_add(1, std::memory_order_relaxed);
+    if ((n & 1023) == 0) {
+      const char* error = cyclone_get_last_error();
+      handler_->Message(
+          kWarning,
+          "CycloneCache: Write failed for key %s: %s (failure #%llu on this "
+          "cache; every failure is counted in cyclone_cache_failures, this "
+          "warning is logged 1-in-1024)",
+          key.c_str(), error ? error : "unknown error",
+          static_cast<unsigned long long>(n) + 1);
+    }
   }
 }
 
@@ -376,6 +390,16 @@ void CycloneCache::PrintStats(GoogleString* out) const {
       out, "Tag collision evictions: ",
       Integer64ToString(static_cast<int64>(stats.tag_collision_evictions)),
       "\n");
+  StrAppend(out, "Bucket full evictions: ",
+            Integer64ToString(static_cast<int64>(stats.bucket_full_evictions)),
+            "\n");
+  StrAppend(
+      out, "Resets under degraded gate: ",
+      Integer64ToString(static_cast<int64>(stats.resets_under_degraded_gate)),
+      "\n");
+  StrAppend(out, "Resets gate verified: ",
+            Integer64ToString(static_cast<int64>(stats.resets_gate_verified)),
+            "\n");
 }
 
 bool CycloneCache::IsHealthy() const {

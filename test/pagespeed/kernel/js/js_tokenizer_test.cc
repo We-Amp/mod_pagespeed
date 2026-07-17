@@ -1659,4 +1659,146 @@ TEST_F(JsTokenizerTest, TokenizePrototype) {
   ExpectTokenizeFileSuccessfully("prototype.original");
 }
 
+// ---------------------------------------------------------------------------
+// ES6 template literal tests (POC: teach the tokenizer template literals).
+// ---------------------------------------------------------------------------
+
+TEST_F(JsTokenizerTest, TemplateNoSubstitution) {
+  BeginTokenizing("var x = `hello world`;");
+  ExpectToken(JsKeywords::kVar, "var");
+  ExpectToken(JsKeywords::kWhitespace, " ");
+  ExpectToken(JsKeywords::kIdentifier, "x");
+  ExpectToken(JsKeywords::kWhitespace, " ");
+  ExpectToken(JsKeywords::kOperator, "=");
+  ExpectToken(JsKeywords::kWhitespace, " ");
+  ExpectToken(JsKeywords::kTemplateLiteral, "`hello world`",
+              "Start Other Expr");
+  ExpectToken(JsKeywords::kOperator, ";", "Start");
+  ExpectEndOfInput();
+}
+
+TEST_F(JsTokenizerTest, TemplateSingleInterpolation) {
+  BeginTokenizing("`a${x}b`");
+  ExpectToken(JsKeywords::kTemplateLiteral, "`a${", "Start ${");
+  ExpectToken(JsKeywords::kIdentifier, "x", "Start ${ Expr");
+  ExpectToken(JsKeywords::kTemplateLiteral, "}b`", "Start Expr");
+  ExpectEndOfInput();
+}
+
+TEST_F(JsTokenizerTest, TemplateMultipleInterpolations) {
+  BeginTokenizing("`${a}mid${b}`");
+  ExpectToken(JsKeywords::kTemplateLiteral, "`${", "Start ${");
+  ExpectToken(JsKeywords::kIdentifier, "a", "Start ${ Expr");
+  ExpectToken(JsKeywords::kTemplateLiteral, "}mid${", "Start ${");
+  ExpectToken(JsKeywords::kIdentifier, "b", "Start ${ Expr");
+  ExpectToken(JsKeywords::kTemplateLiteral, "}`", "Start Expr");
+  ExpectEndOfInput();
+}
+
+TEST_F(JsTokenizerTest, TemplateNestedTemplate) {
+  // A template literal nested inside an interpolation of an outer template.
+  BeginTokenizing("`outer${`inner${x}`}done`");
+  ExpectToken(JsKeywords::kTemplateLiteral, "`outer${", "Start ${");
+  ExpectToken(JsKeywords::kTemplateLiteral, "`inner${", "Start ${ ${");
+  ExpectToken(JsKeywords::kIdentifier, "x", "Start ${ ${ Expr");
+  ExpectToken(JsKeywords::kTemplateLiteral, "}`", "Start ${ Expr");
+  ExpectToken(JsKeywords::kTemplateLiteral, "}done`", "Start Expr");
+  ExpectEndOfInput();
+}
+
+TEST_F(JsTokenizerTest, TemplateObjectLiteralInInterpolation) {
+  // The brace-depth trap: ${ {a:1} } -- the first '}' closes the object
+  // literal, the second '}' resumes the template.
+  BeginTokenizing("`v=${ {a:1} }`");
+  ExpectToken(JsKeywords::kTemplateLiteral, "`v=${", "Start ${");
+  ExpectToken(JsKeywords::kWhitespace, " ");
+  ExpectToken(JsKeywords::kOperator, "{", "Start ${ {");
+  ExpectToken(JsKeywords::kIdentifier, "a", "Start ${ { Expr");
+  ExpectToken(JsKeywords::kOperator, ":", "Start ${ { Oper");
+  ExpectToken(JsKeywords::kNumber, "1", "Start ${ { Expr");
+  ExpectToken(JsKeywords::kOperator, "}", "Start ${ Expr");
+  ExpectToken(JsKeywords::kWhitespace, " ");
+  ExpectToken(JsKeywords::kTemplateLiteral, "}`", "Start Expr");
+  ExpectEndOfInput();
+}
+
+TEST_F(JsTokenizerTest, TemplateEscapedBacktickAndDollar) {
+  // \` is an escaped backtick (not a terminator); \${ is an escaped
+  // interpolation (literal text, not an interpolation); \\ is an escaped
+  // backslash.
+  BeginTokenizing("`a\\`b\\${c}\\\\d`");
+  ExpectToken(JsKeywords::kTemplateLiteral, "`a\\`b\\${c}\\\\d`", "Start Expr");
+  ExpectEndOfInput();
+}
+
+TEST_F(JsTokenizerTest, TemplateFollowedByDivision) {
+  // A completed template literal is a primary expression, so a following
+  // slash is division, not a regex.
+  BeginTokenizing("`x`/y/g");
+  ExpectToken(JsKeywords::kTemplateLiteral, "`x`", "Start Expr");
+  ExpectToken(JsKeywords::kOperator, "/", "Start Expr Oper");
+  ExpectToken(JsKeywords::kIdentifier, "y", "Start Expr");
+  ExpectToken(JsKeywords::kOperator, "/", "Start Expr Oper");
+  ExpectToken(JsKeywords::kIdentifier, "g", "Start Expr");
+  ExpectEndOfInput();
+}
+
+TEST_F(JsTokenizerTest, TemplateInterpolationSlashIsRegex) {
+  // A slash at the start of an interpolation expression is a regex literal.
+  BeginTokenizing("`${/y/g}`");
+  ExpectToken(JsKeywords::kTemplateLiteral, "`${", "Start ${");
+  ExpectToken(JsKeywords::kRegex, "/y/g", "Start ${ Expr");
+  ExpectToken(JsKeywords::kTemplateLiteral, "}`", "Start Expr");
+  ExpectEndOfInput();
+}
+
+TEST_F(JsTokenizerTest, TemplateMultiline) {
+  // Template literals may contain raw linebreaks; these must not trigger
+  // semicolon insertion or terminate the token.
+  BeginTokenizing("`line1\nline2\nline3`");
+  ExpectToken(JsKeywords::kTemplateLiteral, "`line1\nline2\nline3`",
+              "Start Expr");
+  ExpectEndOfInput();
+}
+
+TEST_F(JsTokenizerTest, TaggedTemplate) {
+  // tag`x` is a tagged template; the tag identifier and the template stay
+  // adjacent and the whole thing is an expression.
+  BeginTokenizing("tag`x${y}z`");
+  ExpectToken(JsKeywords::kIdentifier, "tag", "Start Expr");
+  ExpectToken(JsKeywords::kTemplateLiteral, "`x${", "Start Expr ${");
+  ExpectToken(JsKeywords::kIdentifier, "y", "Start Expr ${ Expr");
+  ExpectToken(JsKeywords::kTemplateLiteral, "}z`", "Start Expr");
+  ExpectEndOfInput();
+}
+
+TEST_F(JsTokenizerTest, TemplateUnterminated) {
+  // An unterminated template (no closing backtick) is a conservative error.
+  BeginTokenizing("`abc${x}def");
+  ExpectToken(JsKeywords::kTemplateLiteral, "`abc${");
+  ExpectToken(JsKeywords::kIdentifier, "x");
+  ExpectError("}def");
+}
+
+TEST_F(JsTokenizerTest, TemplateInReturnPosition) {
+  // A slash-context / ASI check: `return` followed by a template on the same
+  // line yields the template as the returned expression.
+  BeginTokenizing("function f(){return `v=${a+b}`}");
+  ExpectToken(JsKeywords::kFunction, "function");
+  ExpectToken(JsKeywords::kWhitespace, " ");
+  ExpectToken(JsKeywords::kIdentifier, "f");
+  ExpectToken(JsKeywords::kOperator, "(");
+  ExpectToken(JsKeywords::kOperator, ")");
+  ExpectToken(JsKeywords::kOperator, "{");
+  ExpectToken(JsKeywords::kReturn, "return");
+  ExpectToken(JsKeywords::kWhitespace, " ");
+  ExpectToken(JsKeywords::kTemplateLiteral, "`v=${");
+  ExpectToken(JsKeywords::kIdentifier, "a");
+  ExpectToken(JsKeywords::kOperator, "+");
+  ExpectToken(JsKeywords::kIdentifier, "b");
+  ExpectToken(JsKeywords::kTemplateLiteral, "}`");
+  ExpectToken(JsKeywords::kOperator, "}");
+  ExpectEndOfInput();
+}
+
 }  // namespace

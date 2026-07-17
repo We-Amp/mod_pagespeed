@@ -20,7 +20,9 @@
 #include "pagespeed/kernel/cache/fallback_cache.h"
 
 #include "base/logging.h"
+#include "pagespeed/kernel/base/mapped_shared_string.h"
 #include "pagespeed/kernel/base/shared_string.h"
+#include "pagespeed/kernel/base/string.h"
 
 namespace {
 
@@ -84,9 +86,24 @@ class FallbackCallback : public CacheInterface::Callback {
       return true;  // The forwarding-marker in the small object cache is OK.
     } else if ((size >= 1) && (val[size - 1] == kInSmallObjectCache)) {
       // Link values together, but strip the marker from the new view.
-      // ToOwned() is required because MappedSharedString doesn't support
+      // An owned copy is required because MappedSharedString doesn't support
       // RemoveSuffix - we need to work with the owned SharedString.
-      SharedString new_value = value().ToOwned();
+      const MappedSharedString& mapped_value = value();
+      SharedString new_value;
+      if (mapped_value.is_mapped()) {
+        // De-alias the borrowed (e.g. Cyclone zero-copy) bytes with the
+        // verified copy (copy-then-verify, the design record); a torn borrow is treated
+        // as a miss via the same not-found path used for a bad encoding below.
+        GoogleString devalias;
+        if (!CopyMappedVerified(mapped_value.Value(), mapped_value,
+                                &devalias)) {
+          callback_->DelegatedValidateCandidate(key, CacheInterface::kNotFound);
+          return false;
+        }
+        new_value.SwapWithString(&devalias);
+      } else {
+        new_value = mapped_value.ToOwned();
+      }
       new_value.RemoveSuffix(1);
       callback_->set_value(new_value);
       return callback_->DelegatedValidateCandidate(key, state);

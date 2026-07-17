@@ -54,12 +54,22 @@ class SystemRequestContext : public RequestContext {
   const GoogleString& local_ip() const { return local_ip_; }
   StringPiece url() const { return url_; }
 
+  // Transport scheme ("http"/"https") of the connection the request came in
+  // on — the scheme a loopback fetch to local_port() must use. Distinct from
+  // the request URL's scheme, which may reflect X-Forwarded-Proto.
+  // Ports that can't determine it leave it empty.
+  void set_local_scheme(StringPiece scheme) {
+    scheme.CopyToString(&local_scheme_);
+  }
+  const GoogleString& local_scheme() const { return local_scheme_; }
+
  protected:
   ~SystemRequestContext() override {}
 
  private:
   int local_port_;
   GoogleString local_ip_;
+  GoogleString local_scheme_;
   GoogleString url_;
 
   SystemRequestContext(const SystemRequestContext&) = delete;

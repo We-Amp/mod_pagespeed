@@ -25,6 +25,9 @@ pagespeed_cc_test(
     srcs = glob(["*_test.cc"]),
     deps = [
         "//pagespeed/kernel/cache:cyclone_cache",
+        # Exports the mprotect-based MappedBackendCache test harness used by
+        # the zero-copy (Cyclone borrow) promotion / marker-strip tests.
+        "//test/net/instaweb/http:http_test_base",
         "//test/pagespeed/kernel/cache:cache_test_base",
     ],
 )

@@ -48,6 +48,7 @@
 #include "net/instaweb/rewriter/public/single_rewrite_context.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/charset_util.h"
+#include "pagespeed/kernel/base/mapped_shared_string.h"
 #include "pagespeed/kernel/base/named_lock_manager.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/stl_util.h"
@@ -64,6 +65,7 @@
 #include "pagespeed/kernel/http/response_headers.h"
 #include "pagespeed/kernel/http/semantic_type.h"
 #include "pagespeed/kernel/thread/queued_worker_pool.h"
+#include "test/net/instaweb/http/mapped_backend_cache.h"
 #include "test/net/instaweb/http/mock_url_fetcher.h"
 #include "test/net/instaweb/rewriter/rewrite_context_test_base.h"
 #include "test/net/instaweb/rewriter/rewrite_test_base.h"
@@ -273,6 +275,38 @@ TEST_F(RewriteContextTest, TrimOnTheFlyOptimizable) {
   ClearStats();
   EXPECT_EQ(0, fetch_successes_->Get());  // no more fetches.
   EXPECT_EQ(0, fetch_failures_->Get());
+}
+
+// The OutputPartitions metadata protobuf is parsed straight off the (possibly
+// memory-mapped, zero-copy) cache value.  A torn borrow can still parse as a
+// structurally-valid protobuf carrying the wrong fields; the parse-then-verify
+// guard must reject it and treat the read as a metadata miss rather than serve
+// a rewrite decoded from clobbered bytes.
+TEST_F(RewriteContextTest, MetadataTornMappedTreatedAsMiss) {
+  GoogleString input_html, output_html;
+  TrimOnTheFlyStart(&input_html, &output_html);
+
+  // A warm request would normally be a metadata hit.
+  ValidateExpected("trimmable", input_html, output_html);
+  EXPECT_EQ(1, metadata_cache_info().num_hits());
+  EXPECT_EQ(0, metadata_cache_info().num_misses());
+  ClearStats();
+
+  // Interpose a backend that delivers every metadata hit as a memory-mapped
+  // view whose borrow reports as torn (a wrap committed over the region under
+  // the parse).  The wrapper does not own its delegate.
+  MappedBackendCache* mapped_metadata =
+      new MappedBackendCache(server_context()->metadata_cache());
+  mapped_metadata->set_strict_verdict(LeaseRenewal::kTorn);
+  server_context()->DeleteCacheOnDestruction(mapped_metadata);
+  server_context()->set_metadata_cache(mapped_metadata);
+
+  // The output is still correct (recomputed), and the torn metadata record was
+  // NOT served as a hit -- it degraded to a miss.
+  ValidateExpected("trimmable", input_html, output_html);
+  EXPECT_LE(1, mapped_metadata->mapped_hits());
+  EXPECT_EQ(0, metadata_cache_info().num_hits());
+  EXPECT_LE(1, metadata_cache_info().num_misses());
 }
 
 TEST_F(RewriteContextTest, TrimOnTheFlyWithVaryCookie) {

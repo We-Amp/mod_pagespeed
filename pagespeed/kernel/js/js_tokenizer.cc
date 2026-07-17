@@ -385,6 +385,10 @@ JsKeywords::Type JsTokenizer::NextToken(StringPiece* token_out) {
     case '\'':
     case '"':
       return ConsumeString(token_out);
+    case '`':
+      // Backtick unambiguously begins an ES6 template literal, regardless
+      // of parse state (a tagged template like tag`x` is still a template).
+      return ConsumeTemplateChunk(token_out);
     case '0':
     case '1':
     case '2':
@@ -445,6 +449,9 @@ GoogleString JsTokenizer::ParseStackForTest() const {
       case kOpenParen:
         output.append("(");
         break;
+      case kTemplateInterp:
+        output.append("${");
+        break;
       case kBlockKeyword:
         output.append("BkKwd");
         break;
@@ -504,10 +511,24 @@ bool JsTokenizer::PopToMatchingOpen(
 JsKeywords::Type JsTokenizer::ConsumeCloseBrace(StringPiece* token_out) {
   DCHECK(!input_.empty());
   DCHECK_EQ('}', input_[0]);
+  // If the nearest enclosing open delimiter is a template interpolation,
+  // then this '}' does not close a brace: it resumes the enclosing template
+  // literal (a TemplateMiddle or TemplateTail chunk).  Pop the
+  // interpolation's expression states and the kTemplateInterp marker, then
+  // scan the template chunk starting at this '}'.
+  if (NearestOpenDelimiterIsTemplateInterp()) {
+    while (parse_stack_.back() != kTemplateInterp) {
+      parse_stack_.pop_back();
+      DCHECK(!parse_stack_.empty());
+    }
+    parse_stack_.pop_back();  // Pop the kTemplateInterp marker.
+    return ConsumeTemplateChunk(token_out);
+  }
   // Pop the most recent kOpenBrace (and everything above it) off the stack.
-  if (!PopToMatchingOpen(
-          kOpenBrace, {kStartOfInput, kOpenBracket, kOpenParen, kBlockKeyword},
-          token_out)) {
+  if (!PopToMatchingOpen(kOpenBrace,
+                         {kStartOfInput, kOpenBracket, kOpenParen,
+                          kBlockKeyword, kTemplateInterp},
+                         token_out)) {
     return JsKeywords::kError;
   }
   // If the open brace was preceeded by a BlockHeader, we can pop that off the
@@ -555,10 +576,10 @@ JsKeywords::Type JsTokenizer::ConsumeCloseBracket(StringPiece* token_out) {
   DCHECK(!input_.empty());
   DCHECK_EQ(']', input_[0]);
   // Pop the most recent kOpenBracket (and everything above it) off the stack.
-  if (!PopToMatchingOpen(
-          kOpenBracket,
-          {kStartOfInput, kOpenBrace, kOpenParen, kBlockKeyword, kBlockHeader},
-          token_out)) {
+  if (!PopToMatchingOpen(kOpenBracket,
+                         {kStartOfInput, kOpenBrace, kOpenParen, kBlockKeyword,
+                          kBlockHeader, kTemplateInterp},
+                         token_out)) {
     return JsKeywords::kError;
   }
   PushExpression();
@@ -583,7 +604,7 @@ JsKeywords::Type JsTokenizer::ConsumeCloseParen(StringPiece* token_out) {
   // Pop the most recent kOpenParen (and everything above it) off the stack.
   if (!PopToMatchingOpen(kOpenParen,
                          {kStartOfInput, kOpenBrace, kOpenBracket,
-                          kBlockKeyword, kBlockHeader},
+                          kBlockKeyword, kBlockHeader, kTemplateInterp},
                          token_out)) {
     return JsKeywords::kError;
   }
@@ -975,7 +996,7 @@ JsKeywords::Type JsTokenizer::ConsumeSemicolon(StringPiece* token_out) {
   while (true) {
     DCHECK(!parse_stack_.empty());
     const ParseState state = parse_stack_.back();
-    if (state == kOpenBracket) {
+    if (state == kOpenBracket || state == kTemplateInterp) {
       return Error(token_out);
     } else if (state == kOpenParen) {
       // Semicolon within parens is only okay if it's a for-loop header, so the
@@ -1022,6 +1043,7 @@ JsKeywords::Type JsTokenizer::ConsumeSlash(StringPiece* token_out) {
     case kOpenBrace:
     case kOpenBracket:
     case kOpenParen:
+    case kTemplateInterp:
     case kBlockHeader:
     case kReturnThrow:
       return ConsumeRegex(token_out);
@@ -1048,6 +1070,71 @@ JsKeywords::Type JsTokenizer::ConsumeString(StringPiece* token_out) {
   PushExpression();
   return Emit(JsKeywords::kStringLiteral, input_.size() - unconsumed.size(),
               token_out);
+}
+
+bool JsTokenizer::NearestOpenDelimiterIsTemplateInterp() const {
+  // Walk from the top of the stack, skipping expression/operator/keyword
+  // states, until we reach an open delimiter (or the bottom of the stack).
+  for (std::vector<ParseState>::const_reverse_iterator
+           iter = parse_stack_.rbegin(),
+           end = parse_stack_.rend();
+       iter != end; ++iter) {
+    switch (*iter) {
+      case kTemplateInterp:
+        return true;
+      case kStartOfInput:
+      case kOpenBrace:
+      case kOpenBracket:
+      case kOpenParen:
+      case kBlockKeyword:
+        return false;
+      default:
+        // A non-delimiter state (expression, operator, block header, or a
+        // keyword state): keep looking further down the stack.
+        break;
+    }
+  }
+  return false;
+}
+
+JsKeywords::Type JsTokenizer::ConsumeTemplateChunk(StringPiece* token_out) {
+  DCHECK(!input_.empty());
+  DCHECK(input_[0] == '`' || input_[0] == '}');
+  // input_[0] is the chunk's opening delimiter (a backtick to begin a
+  // template, or a '}' to resume one after an interpolation).  Scan forward
+  // to the chunk's terminator: an unescaped backtick ends the template (this
+  // chunk is a no-substitution template or a TemplateTail), while an
+  // unescaped '${' starts an interpolation (this chunk is a TemplateHead or
+  // TemplateMiddle).  Template literals may span multiple lines, so raw
+  // linebreaks are permitted; a backslash escapes the following byte
+  // (covering \`, \$, and \\).
+  const size_t size = input_.size();
+  for (size_t i = 1; i < size; ++i) {
+    const char c = input_[i];
+    if (c == '\\') {
+      // Escape sequence: skip the next byte (if any).  If the backslash is
+      // the final byte, the loop terminates and we report an unterminated
+      // template below.
+      ++i;
+      continue;
+    }
+    if (c == '`') {
+      // End of the template literal.  A template is a primary expression, so
+      // a subsequent slash is division.
+      PushExpression();
+      return Emit(JsKeywords::kTemplateLiteral, i + 1, token_out);
+    }
+    if (c == '$' && i + 1 < size && input_[i + 1] == '{') {
+      // Start of a ${...} interpolation.  The '${' is part of this chunk;
+      // the interpolation body that follows is tokenized as ordinary JS
+      // until the matching '}' resumes the template.
+      parse_stack_.push_back(kTemplateInterp);
+      return Emit(JsKeywords::kTemplateLiteral, i + 2, token_out);
+    }
+  }
+  // Reached end of input without a closing backtick or an interpolation:
+  // the template is unterminated.  Bail conservatively.
+  return Error(token_out);
 }
 
 bool JsTokenizer::TryConsumeWhitespace(bool allow_semicolon_insertion,
@@ -1233,6 +1320,7 @@ bool JsTokenizer::TryInsertLinebreakSemicolon() {
     case kOpenBrace:
     case kOpenBracket:
     case kOpenParen:
+    case kTemplateInterp:
     case kBlockKeyword:
     case kBlockHeader:
       // Semicolon insertion never happens in places where it would create an
@@ -1246,7 +1334,8 @@ bool JsTokenizer::TryInsertLinebreakSemicolon() {
                end = parse_stack_.rend();
            iter != end; ++iter) {
         const ParseState state = *iter;
-        if (state == kOpenParen || state == kOpenBracket) {
+        if (state == kOpenParen || state == kOpenBracket ||
+            state == kTemplateInterp) {
           return false;
         }
         if (state == kOpenBrace || state == kBlockHeader) {
@@ -1298,7 +1387,7 @@ bool JsTokenizer::TryInsertLinebreakSemicolon() {
 bool JsTokenizer::CanPreceedObjectLiteral(ParseState state) {
   return (state == kOperator || state == kQuestionMark ||
           state == kOpenBracket || state == kOpenParen ||
-          state == kReturnThrow);
+          state == kReturnThrow || state == kTemplateInterp);
 }
 
 JsTokenizerPatterns::JsTokenizerPatterns()

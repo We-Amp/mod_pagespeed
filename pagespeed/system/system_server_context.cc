@@ -481,7 +481,8 @@ void SystemServerContext::ApplySessionFetchers(const RequestContextPtr& request,
     // LoopbackRouteFetcher may decide we should be talking to ourselves.
     driver->SetSessionFetcher(new LoopbackRouteFetcher(
         driver->options(), system_request->local_ip(),
-        system_request->local_port(), driver->async_fetcher()));
+        system_request->local_port(), system_request->local_scheme(),
+        driver->async_fetcher()));
   }
 
   if (driver->options()->num_custom_fetch_headers() > 0) {

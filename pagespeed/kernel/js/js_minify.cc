@@ -550,6 +550,7 @@ bool IsNameNumberOrKeyword(JsKeywords::Type type) {
     case JsKeywords::kSemiInsert:
     case JsKeywords::kRegex:
     case JsKeywords::kStringLiteral:
+    case JsKeywords::kTemplateLiteral:
     case JsKeywords::kOperator:
     case JsKeywords::kEndOfInput:
     case JsKeywords::kError:

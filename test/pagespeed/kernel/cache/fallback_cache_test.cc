@@ -20,10 +20,13 @@
 #include "pagespeed/kernel/cache/fallback_cache.h"
 
 #include "pagespeed/kernel/base/google_message_handler.h"
+#include "pagespeed/kernel/base/mapped_shared_string.h"
+#include "pagespeed/kernel/base/shared_string.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/cache/cache_interface.h"
 #include "pagespeed/kernel/cache/lru_cache.h"
+#include "test/net/instaweb/http/mapped_backend_cache.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/cache/cache_test_base.h"
 
@@ -255,6 +258,38 @@ TEST_F(FallbackCacheTest, CorruptValue) {
 TEST_F(FallbackCacheTest, CorruptValueLastCharL) {
   CheckPut(&small_cache_, "key", "xL");
   CheckNotFound("key");
+}
+
+// When the marker-carrying small-object value is delivered as a memory-mapped
+// zero-copy view (emulating CycloneCache) whose borrow has torn under the
+// marker-strip copy, the read must degrade to a miss rather than serve the
+// stripped garbage.
+TEST_F(FallbackCacheTest, SmallValueTornMappedTreatedAsMiss) {
+  MappedBackendCache mapped_small(&small_cache_);
+  FallbackCache fallback(&mapped_small, &large_cache_, kTestValueSizeThreshold,
+                         &handler_);
+
+  // A below-threshold value lands in the small cache with the 'S' marker.
+  fallback.Put("Name", SharedString("Value"));
+  EXPECT_LT(0, small_cache_.size_bytes());
+
+  mapped_small.set_strict_verdict(LeaseRenewal::kTorn);
+  CheckNotFound(&fallback, "Name");
+  EXPECT_LE(1, mapped_small.mapped_hits());
+}
+
+// The clean-borrow counterpart: a live mapped small-object hit is copied via
+// the verified primitive, the marker stripped, and the value served.
+TEST_F(FallbackCacheTest, SmallValueCleanMappedServed) {
+  MappedBackendCache mapped_small(&small_cache_);
+  FallbackCache fallback(&mapped_small, &large_cache_, kTestValueSizeThreshold,
+                         &handler_);
+
+  fallback.Put("Name", SharedString("Value"));
+
+  // Default verdict is kOk (a live lease).
+  CheckGet(&fallback, "Name", "Value");
+  EXPECT_LE(1, mapped_small.mapped_hits());
 }
 
 }  // namespace net_instaweb

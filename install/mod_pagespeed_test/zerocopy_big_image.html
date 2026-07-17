@@ -1,0 +1,18 @@
+<!doctype html>
+<html>
+<!-- Zero-copy aliased-serve E2E fixture.
+
+     The image must produce a REWRITTEN .pagespeed.ic. artifact that is
+     (a) stored in the HTTP cache (cache-extended .ce. outputs are
+     on-the-fly resources, re-derived per fetch, never an HTTP-cache
+     hit), (b) larger than the engine's 16KB aliasing floor (the example
+     page's 256x192 Puzzle lands ~10KB), and (c) an actual byte saving
+     so the rewrite is not dropped (full-size Puzzle.jpg recompression
+     saves nothing: image_rewrites_dropped_nosaving_noresize).  A resize
+     to 800x600 satisfies all three, and image/jpeg matches no stock
+     by-type output-filter condition. -->
+<head><title>zerocopy big image</title></head>
+<body>
+  <img src="/mod_pagespeed_example/images/Puzzle.jpg" width="800" height="600">
+</body>
+</html>
