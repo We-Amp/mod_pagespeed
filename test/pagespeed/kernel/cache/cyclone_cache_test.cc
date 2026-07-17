@@ -22,6 +22,15 @@
 #include "pagespeed/kernel/cache/cyclone_cache.h"
 
 #include <memory>
+#include <vector>
+
+#ifndef _WIN32
+#include <sys/wait.h>
+#include <unistd.h>
+
+#include <cerrno>
+#include <csignal>
+#endif
 
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/google_message_handler.h"
@@ -662,5 +671,371 @@ TEST_F(CycloneCacheTest, SmallTierOffByDefault) {
   EXPECT_EQ(0, cache_->config().small_tier_percent);
   EXPECT_FALSE(cache_->small_tier_active());
 }
+
+// ============================================================================
+// Small-Tier Retention at Scale (metadata L2 hit-rate reproduction)
+// ============================================================================
+//
+// Production observed the metadata L2 (file_cache_small) retaining almost
+// nothing under load: ~128k inserts, 18 hits, ~239k misses, while the small
+// volume sat only ~6% full (no eviction).  These tests bisect that: the
+// single-process probe below must be GREEN (retention ~100%) for the fault to
+// be multi-process; if it is RED, the fault is in the single-process small-
+// tier put/get path itself.
+
+// Counting callback: records found/not-found without asserting per-get, so the
+// caller can compute an aggregate hit rate.
+class HitCountCallback : public CacheInterface::Callback {
+ public:
+  void Done(CacheInterface::KeyState state) override {
+    found_ = (state == CacheInterface::kAvailable);
+    done_ = true;
+  }
+  bool found() const { return found_; }
+  bool done() const { return done_; }
+
+ private:
+  bool done_ = false;
+  bool found_ = false;
+};
+
+// Small-object tier (metadata L2) coverage.
+//
+// These three probes were written while chasing a production signature: small-
+// tier writes reported success (cyclone_cache_failures ~ 0) while reads came
+// back nearly empty (18 hits / 239k inserts), even though the churning default
+// tier stayed visible (276k hits).  Each probe pins one candidate explanation
+// -- lost inserts, cross-process write incoherence, cross-process read
+// invisibility to a long-lived reader.
+//
+// All three PASS, and that is the finding: the small tier retains, and is
+// coherent and visible across processes, in these configurations.  Plain
+// small-tier incoherence therefore does NOT explain the production signature;
+// the fault lies elsewhere.  The probes stay as standing regression gates, so
+// read each failure message below as "what a RED here would mean", not as a
+// prediction that it will fire.
+
+// Write many metadata-sized entries to the small-object tier through
+// small_tier_view(), then read them straight back in the same process.  The
+// small volume (~128 MB) dwarfs the ~10 MB written, so the ring never wraps:
+// every miss is a lost insert, not an eviction.  Retention must be ~100%.
+TEST_F(CycloneCacheTest, SmallTierRetentionAtScale) {
+  if (!IsHealthyTest()) {
+    GTEST_SKIP() << "CycloneCache not available";
+  }
+  // 1 GB total -> ~128 MB small volume (well above the ~10 MB we write).
+  std::unique_ptr<CycloneCache> cache = MakeTieredCache(
+      static_cast<int64>(1024) * 1024 * 1024, 10, "retention_scale");
+  ASSERT_TRUE(cache->IsHealthy());
+  ASSERT_TRUE(cache->small_tier_active())
+      << "small tier must be active for this test to be meaningful";
+
+  CacheInterface* view = cache->small_tier_view();
+
+  const int kN = 4000;
+  for (int i = 0; i < kN; ++i) {
+    GoogleString key = StrCat("meta/", IntegerToString(i));
+    SharedString value(GoogleString(200, static_cast<char>('a' + (i % 26))));
+    view->Put(key, value);
+  }
+
+  int hits = 0;
+  for (int i = 0; i < kN; ++i) {
+    GoogleString key = StrCat("meta/", IntegerToString(i));
+    HitCountCallback cb;
+    view->Get(key, &cb);
+    if (cb.found()) {
+      ++hits;
+    }
+  }
+
+  // RED/GREEN gate: near-total retention with no eviction pressure.
+  EXPECT_GE(hits, static_cast<int>(0.99 * kN))
+      << "small-tier retention " << hits << "/" << kN
+      << " with the ring only ~10 MB / ~128 MB full (no eviction) -- inserts "
+         "landed but reads miss: single-process small-tier correctness fault";
+
+  cache->ShutDown();
+}
+
+#ifndef _WIN32  // fork()/waitpid(): POSIX-only cross-process tests
+// The production topology: N independent "worker" processes, each with its own
+// CycloneCache attached to the SAME on-disk volume (exactly how Apache
+// MPM-event workers share cyclone.dat/.small).  The adapter hardcodes
+// multi_process_config.total_processes = 1 for every instance, so no worker
+// knows the others exist.  All writes target the small-object tier, which the
+// volume dwarfs (~13 MB written into ~128 MB, no eviction), so any loss here
+// would be cross-process incoherence and not eviction.
+//
+// Retention is ~100%: writes from unrelated processes ARE coherent even with
+// total_processes = 1.  A RED here would mean that stopped being true.
+TEST_F(CycloneCacheTest, SmallTierRetentionMultiProcess) {
+  if (!IsHealthyTest()) {
+    GTEST_SKIP() << "CycloneCache not available";
+  }
+
+  // Release the SetUp cache so forked children don't inherit its fds/mmaps.
+  // This also leaves the parent SINGLE-THREADED at fork() time (ShutDown()
+  // joins Cyclone's threads), which is load-bearing: a child forked from a
+  // multi-threaded parent may not create threads under TSan -- and, per POSIX,
+  // may not safely call anything non-async-signal-safe at all.  Do not move a
+  // live CycloneCache above the fork.
+  cache_->ShutDown();
+  cache_.reset();
+
+  const GoogleString mp_path = StrCat(cache_path_, "_mp");
+  auto make_cfg = [&]() {
+    CycloneCache::Config config;
+    config.cache_path = mp_path;
+    // 10 GB -> ~1 GB small tier -> ~512K dir slots.  Kept deliberately BELOW
+    // the bucket-saturation regime so any loss here is cross-process
+    // incoherence, not hash-bucket saturation.
+    config.cache_size_bytes = static_cast<int64>(10) * 1024 * 1024 * 1024;
+    config.ram_cache_size_bytes = 0;
+    config.enable_checksum = true;
+    config.num_segments = 0;
+    config.small_tier_percent = 10;
+    return config;
+  };
+
+  // Parent lays down the volumes first, then closes: children open-existing,
+  // isolating steady-state write coherence from any concurrent-creation race.
+  {
+    CycloneCache seed(make_cfg(), stats_.get(), handler_.get());
+    ASSERT_TRUE(seed.IsHealthy());
+    ASSERT_TRUE(seed.small_tier_active())
+        << "1 GB cache must host an active small tier";
+    seed.ShutDown();
+  }
+
+  const int kProcs = 8;
+  const int kPerProc = 2000;  // 16k entries total, far below the small
+                              // tier's slot count (no saturation).
+
+  std::vector<pid_t> kids;
+  for (int p = 0; p < kProcs; ++p) {
+    pid_t pid = fork();
+    ASSERT_NE(-1, pid) << "fork failed";
+    if (pid == 0) {
+      // CHILD == one Apache worker process.
+      CycloneCache child(make_cfg(), stats_.get(), handler_.get());
+      if (!child.IsHealthy()) {
+        _exit(2);
+      }
+      CacheInterface* view = child.small_tier_view();
+      for (int j = 0; j < kPerProc; ++j) {
+        GoogleString key =
+            StrCat("mp/", IntegerToString(p), "/", IntegerToString(j));
+        SharedString value(GoogleString(200, static_cast<char>('a' + (j % 26))));
+        view->Put(key, value);
+      }
+      child.ShutDown();
+      _exit(0);
+    }
+    kids.push_back(pid);
+  }
+
+  int write_failures = 0;
+  for (pid_t pid : kids) {
+    int status = 0;
+    waitpid(pid, &status, 0);
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+      ++write_failures;
+    }
+  }
+  ASSERT_EQ(0, write_failures)
+      << write_failures << " of " << kProcs << " writer processes failed to "
+         "open/attach the shared cache (a distinct fault from write loss)";
+
+  // Parent reopens and reads back every key written by every worker.
+  CycloneCache reader(make_cfg(), stats_.get(), handler_.get());
+  ASSERT_TRUE(reader.IsHealthy());
+  CacheInterface* rview = reader.small_tier_view();
+
+  const int kTotal = kProcs * kPerProc;
+  int hits = 0;
+  for (int p = 0; p < kProcs; ++p) {
+    for (int j = 0; j < kPerProc; ++j) {
+      GoogleString key =
+          StrCat("mp/", IntegerToString(p), "/", IntegerToString(j));
+      HitCountCallback cb;
+      rview->Get(key, &cb);
+      if (cb.found()) {
+        ++hits;
+      }
+    }
+  }
+
+  EXPECT_GE(hits, static_cast<int>(0.99 * kTotal))
+      << "cross-process small-tier retention " << hits << "/" << kTotal
+      << " -- " << kProcs << " workers wrote a shared small volume only ~13 MB "
+         "/ ~128 MB full (no eviction); loss here is the total_processes=1 "
+         "directory-coherence fault (cyclone_wrapper.cc hardcodes "
+         "multi_process_config.total_processes = 1 while Apache runs many "
+         "worker processes on the same volume)";
+
+  reader.ShutDown();
+}
+
+// The sharpest form of the production hypothesis, and the one the two tests
+// above cannot reach: writes SUCCEED in one process, yet a LONG-LIVED reader
+// in another process never sees them.  The distinguishing detail vs the
+// sequential fork test above (whose reader is opened fresh, after the writes):
+// here one reader instance issues a GET for every key -- a MISS -- BEFORE
+// another process writes that key, and GETs again through the SAME instance
+// AFTER.  A stale in-process negative-lookup cache, or an mmap/phase view that
+// only refreshes on ring-wrap (and the tiny small tier never wraps), would
+// keep serving the primed miss.
+//
+// It does not: the reader sees the foreign writes.  So read-visibility to a
+// long-lived reader holds too, and this explanation of the production
+// signature is refuted along with the other two.
+//
+// ORDERING, and why the pipe handshake is not incidental: the property under
+// test is "reader opened and primed a miss BEFORE the writer's Put, re-read
+// through the SAME instance AFTER it".  The writer is forked FIRST -- while
+// the parent still holds no cache and is therefore single-threaded -- and then
+// parked on a pipe until the parent has opened the reader and primed every
+// miss.  Forking after the reader exists would fork a multi-threaded parent
+// into a child that then spawns Cyclone's threads: POSIX-illegal, and TSan
+// kills the child for it.  So the handshake, not program order, is what
+// enforces primed-before-write.  Keep it.
+TEST_F(CycloneCacheTest, SmallTierCrossProcessReadVisibility) {
+  if (!IsHealthyTest()) {
+    GTEST_SKIP() << "CycloneCache not available";
+  }
+
+  cache_->ShutDown();
+  cache_.reset();
+
+  const GoogleString vis_path = StrCat(cache_path_, "_vis");
+  auto make_cfg = [&]() {
+    CycloneCache::Config config;
+    config.cache_path = vis_path;
+    config.cache_size_bytes = static_cast<int64>(10) * 1024 * 1024 * 1024;
+    config.ram_cache_size_bytes = 0;
+    config.enable_checksum = true;
+    config.num_segments = 0;
+    config.small_tier_percent = 10;
+    return config;
+  };
+
+  const int kN = 2000;
+  auto key_of = [](int i) { return StrCat("vis/", IntegerToString(i)); };
+
+  // If the writer child dies before we release it, the parent's write() to a
+  // reader-less pipe would raise SIGPIPE and kill the test process outright,
+  // hiding the child's real exit status.  Take EPIPE instead, and restore the
+  // previous disposition on the way out (this is process-global state).
+  class ScopedIgnoreSigPipe {
+   public:
+    ScopedIgnoreSigPipe() : prev_(signal(SIGPIPE, SIG_IGN)) {}
+    ~ScopedIgnoreSigPipe() { signal(SIGPIPE, prev_); }
+
+   private:
+    void (*prev_)(int);
+  } ignore_sigpipe;
+
+  int go_pipe[2];
+  ASSERT_EQ(0, pipe(go_pipe)) << "pipe failed";
+
+  // WRITER: forked BEFORE the reader exists, so the parent is single-threaded
+  // here.  The child does nothing until the parent releases it.
+  pid_t pid = fork();
+  ASSERT_NE(-1, pid) << "fork failed";
+  if (pid == 0) {
+    close(go_pipe[1]);
+    char go = 0;
+    ssize_t n;
+    do {
+      n = read(go_pipe[0], &go, 1);
+    } while (n < 0 && errno == EINTR);
+    if (n != 1) {
+      // EOF: the parent aborted before priming.  Write nothing -- a late write
+      // to a volume nobody is watching would only corrupt the next run.
+      _exit(3);
+    }
+    close(go_pipe[0]);
+    // Never let a wedged child hang the parent's waitpid() to the test timeout.
+    alarm(120);
+
+    CycloneCache writer(make_cfg(), stats_.get(), handler_.get());
+    if (!writer.IsHealthy()) {
+      _exit(2);
+    }
+    CacheInterface* wview = writer.small_tier_view();
+    for (int i = 0; i < kN; ++i) {
+      SharedString value(GoogleString(200, static_cast<char>('a' + (i % 26))));
+      wview->Put(key_of(i), value);
+    }
+    writer.ShutDown();
+    _exit(0);
+  }
+  close(go_pipe[0]);
+
+  // READER: a long-lived instance, opened BEFORE any write lands (like an
+  // Apache worker that started before the request that populates the entry).
+  // It is also the process that CREATES the volume; the child open-existings.
+  CycloneCache reader(make_cfg(), stats_.get(), handler_.get());
+  const bool reader_ok = reader.IsHealthy() && reader.small_tier_active();
+  CacheInterface* rview = reader.small_tier_view();
+
+  // Prime a MISS for every key through the reader's own view.
+  int primed_miss = 0;
+  if (reader_ok) {
+    for (int i = 0; i < kN; ++i) {
+      HitCountCallback cb;
+      rview->Get(key_of(i), &cb);
+      if (!cb.found()) {
+        ++primed_miss;
+      }
+    }
+  }
+
+  // Release the writer, then reap it.  Nothing above this point may fail the
+  // test: a fatal assertion would return from the test body with the child
+  // still parked on the pipe, orphaning it.  Assertions come after the reap.
+  const char go = 1;
+  ssize_t written;
+  do {
+    written = write(go_pipe[1], &go, 1);
+  } while (written < 0 && errno == EINTR);
+  close(go_pipe[1]);
+
+  int status = 0;
+  pid_t reaped;
+  do {
+    reaped = waitpid(pid, &status, 0);
+  } while (reaped < 0 && errno == EINTR);
+
+  ASSERT_TRUE(reader_ok) << "reader must open with an active small tier";
+  ASSERT_EQ(kN, primed_miss) << "keys must start absent";
+  ASSERT_EQ(1, static_cast<int>(written)) << "failed to release the writer";
+  ASSERT_EQ(pid, reaped) << "waitpid failed for the writer";
+  ASSERT_TRUE(WIFEXITED(status) && WEXITSTATUS(status) == 0)
+      << "writer process failed to write the keys (wait status " << status
+      << ")";
+
+  // The SAME long-lived reader instance now GETs every key again.  The writes
+  // succeeded in another process; a coherent shared cache must surface them.
+  int hits = 0;
+  for (int i = 0; i < kN; ++i) {
+    HitCountCallback cb;
+    rview->Get(key_of(i), &cb);
+    if (cb.found()) {
+      ++hits;
+    }
+  }
+
+  EXPECT_GE(hits, static_cast<int>(0.99 * kN))
+      << "long-lived reader saw " << hits << "/" << kN << " keys written by "
+         "another process AFTER it primed a miss for each -- reproduces the "
+         "production small-tier read-visibility collapse (writes succeed, "
+         "reads miss)";
+
+  reader.ShutDown();
+}
+
+#endif  // _WIN32
 
 }  // namespace net_instaweb

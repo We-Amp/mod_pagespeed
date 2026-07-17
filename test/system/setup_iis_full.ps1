@@ -639,7 +639,10 @@ pagespeed FetchHttps enable,allow_self_signed
 pagespeed CriticalImagesBeaconEnabled false
 pagespeed BlockingRewriteKey psatest
 pagespeed Library 43 1o978_K0_LNE5_ystNklf http://www.modpagespeed.com/rewrite_javascript.js
-pagespeed MessageBufferSize 100000
+# 1MB, not the usual 100KB: under the AppVerifier matrix the 100KB buffer
+# holds ~76s of messages, so a fetch_until failure window has rotated out
+# before any capture runs. In-memory only; test rig cost is nil.
+pagespeed MessageBufferSize 1000000
 pagespeed AdminPath /pagespeed_admin
 pagespeed StatisticsPath /pagespeed_statistics
 pagespeed GlobalStatisticsPath /pagespeed_global_statistics
@@ -647,6 +650,59 @@ pagespeed ConsolePath /pagespeed_console
 pagespeed MessagesPath /pagespeed_message
 pagespeed GlobalAdminPath /pagespeed_global_admin
 "@
+
+        # ZeroCopy M1 merge-gate rig config (opt-in). The gate integration
+        # test (iis/test_iis_zerocopy_gate.py) needs the aliased serve on and a
+        # Cyclone volume small enough that flood writes wrap it mid-serve, so
+        # the region-rewrite canary actually exercises the strict-renew /
+        # copy-then-verify / fail-closed machinery. Off by default: leaves
+        # normal IIS runs on the shipped experimental-off defaults.
+        if ($env:PAGESPEED_ZEROCOPY_GATE -eq '1') {
+            $pagespeedConfig += @"
+
+pagespeed CycloneZeroCopy on
+pagespeed CycloneZeroCopyServe on
+pagespeed FileCacheSizeKb 65536
+"@
+            # canary.js: a large, unique-token-bearing resource the gate test
+            # floods (distinct ?v= inputs) to churn the small Cyclone volume.
+            $canaryToken = "ZZQX_CYCLONE_ZEROCOPY_CANARY_MARKER_ZZQX"
+            $sb = New-Object System.Text.StringBuilder
+            [void]$sb.Append("/* zero-copy M1 gate canary flood resource */`n")
+            [void]$sb.Append("var _canary_marker = `"$canaryToken`";`n")
+            while ($sb.Length -lt 131072) { [void]$sb.Append("/* $canaryToken */`n") }
+            foreach ($cd in @("$WebRoot\mod_pagespeed_test", "$WebRoot\mod_pagespeed_example")) {
+                if (Test-Path $cd) { Set-Content -Path (Join-Path $cd "canary.js") -Value $sb.ToString() -Encoding ASCII }
+            }
+            # zc_noise_src.jpg: a large, high-entropy source the gate
+            # fixture (zerocopy_multichunk.html) resizes down to a ~0.5 MB
+            # rewritten .ic -- several 128 KB aliased chunks, so the aliased
+            # serve runs its full multi-completion loop. High entropy (random
+            # bytes) keeps the resized JPEG from compressing away.
+            try {
+                Add-Type -AssemblyName System.Drawing
+                $imgDir = "$WebRoot\mod_pagespeed_example\images"
+                if (Test-Path $imgDir) {
+                    $iw = 2400; $ih = 1800
+                    $bmp = New-Object System.Drawing.Bitmap $iw, $ih, ([System.Drawing.Imaging.PixelFormat]::Format24bppRgb)
+                    $rect = New-Object System.Drawing.Rectangle 0, 0, $iw, $ih
+                    $bits = $bmp.LockBits($rect, [System.Drawing.Imaging.ImageLockMode]::WriteOnly, $bmp.PixelFormat)
+                    $nbytes = $bits.Stride * $ih
+                    $rnd = New-Object byte[] $nbytes
+                    (New-Object Random 20260714).NextBytes($rnd)
+                    [System.Runtime.InteropServices.Marshal]::Copy($rnd, 0, $bits.Scan0, $nbytes)
+                    $bmp.UnlockBits($bits)
+                    $jpegEnc = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object { $_.MimeType -eq 'image/jpeg' }
+                    $encParams = New-Object System.Drawing.Imaging.EncoderParameters 1
+                    $encParams.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter ([System.Drawing.Imaging.Encoder]::Quality, [long]92)
+                    $bmp.Save((Join-Path $imgDir 'zc_noise_src.jpg'), $jpegEnc, $encParams)
+                    $bmp.Dispose()
+                }
+            } catch {
+                Write-Status "ZeroCopy M1 gate: could not generate zc_noise_src.jpg ($($_.Exception.Message)); the gate test falls back to the small single-chunk image" "Yellow"
+            }
+            Write-Status "ZeroCopy M1 gate: CycloneZeroCopy on, 64 MB Cyclone volume, canary.js + zc_noise_src.jpg written" "Cyan"
+        }
 
         # Site-level config
         $pagespeedConfig | Set-Content "$WebRoot\pagespeed.config" -Encoding UTF8

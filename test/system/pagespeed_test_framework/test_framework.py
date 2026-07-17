@@ -21,6 +21,8 @@ any PageSpeed server. They can be run without any server setup.
 Run with: python -m pytest -v test_framework.py
 """
 
+import re
+
 import pytest
 
 from pagespeed_test_framework.client import Response
@@ -483,7 +485,7 @@ class TestFetchUntilRetryBehavior:
         ok = Response(status=200, headers={}, body=b"done")
 
         def fake_once(self, path, condition, timeout=100.0, interval=0.5,
-                      headers=None, use_gzip=False):
+                      headers=None, use_gzip=False, detail_fn=None):
             calls["n"] += 1
             if calls["n"] == 1:
                 raise TimeoutError("transient")
@@ -504,7 +506,7 @@ class TestFetchUntilRetryBehavior:
         calls = {"n": 0}
 
         def fake_once(self, path, condition, timeout=100.0, interval=0.5,
-                      headers=None, use_gzip=False):
+                      headers=None, use_gzip=False, detail_fn=None):
             calls["n"] += 1
             raise TimeoutError("never converges")
 
@@ -521,7 +523,7 @@ class TestFetchUntilRetryBehavior:
         calls = {"n": 0}
 
         def fake_once(self, path, condition, timeout=100.0, interval=0.5,
-                      headers=None, use_gzip=False):
+                      headers=None, use_gzip=False, detail_fn=None):
             calls["n"] += 1
             raise TimeoutError("boom")
 
@@ -529,6 +531,142 @@ class TestFetchUntilRetryBehavior:
         with pytest.raises(TimeoutError):
             self._client().fetch_until("/x", lambda r: False)
         assert calls["n"] == 1  # no extra attempts
+
+
+class TestFetchUntilTimeoutDiagnostics:
+    """Failure-window diagnostics for fetch_until timeouts.
+
+    A fetch_until timeout on the AppVerifier lane is currently undiagnosable:
+    the server's message buffer rotates past the failure window before the
+    suite-end evidence capture runs, and the TimeoutError discards how close
+    the condition was (0-of-2 vs 1-of-2 matches). These tests pin the
+    at-the-moment-of-failure capture: match-count detail in the error, and
+    last-response-body + message_history snapshots written to
+    PAGESPEED_EVIDENCE_DIR (the directory CI already uploads).
+    """
+
+    MESSAGES_JSON = b'{"messages":[{"severity":"info","message":"hello"}]}'
+
+    def _patch_get(self, monkeypatch, body=b"one match here",
+                   admin_error=False):
+        """Serve a canned page for every path; message_history JSON for the
+        admin path (or a connection error when admin_error is set)."""
+        from pagespeed_test_framework import client as client_mod
+        from pagespeed_test_framework.client import Response
+
+        monkeypatch.setattr(client_mod, "_TIMEOUT_MULTIPLIER", 1.0)
+        monkeypatch.setattr(client_mod, "_FETCH_UNTIL_RETRIES", 0)
+
+        messages_json = self.MESSAGES_JSON
+
+        def fake_get(self, path, headers=None, allow_redirects=False):
+            if "message_history" in path:
+                if admin_error:
+                    raise OSError("admin endpoint unreachable")
+                return Response(status=200, headers={}, body=messages_json,
+                                url=path)
+            return Response(status=200, headers={}, body=body, url=path)
+
+        monkeypatch.setattr(client_mod.PageSpeedClient, "get", fake_get)
+        return client_mod.PageSpeedClient("localhost", 80)
+
+    def _fetch_count_timeout(self, client, expected_count=2):
+        with pytest.raises(TimeoutError) as err:
+            client.fetch_until_count(
+                "/mod_pagespeed_example/inline_css.html?PageSpeedFilters=inline_css",
+                pattern=r"match",
+                expected_count=expected_count,
+                timeout=0.05,
+            )
+        return err.value
+
+    def test_count_timeout_reports_match_count(self, monkeypatch):
+        """The error must state how close the condition was: 1-of-2 matches
+        (rewrite partially converged) reads completely differently from
+        0-of-2 (rewrite never started)."""
+        client = self._patch_get(monkeypatch)
+        err = self._fetch_count_timeout(client, expected_count=2)
+        assert "matches=1" in str(err)
+        assert "expected=2" in str(err)
+
+    def test_contains_timeout_reports_pattern(self, monkeypatch):
+        """fetch_until_contains names the pattern that never appeared."""
+        client = self._patch_get(monkeypatch)
+        with pytest.raises(TimeoutError) as err:
+            client.fetch_until_contains("/page.html", "never-there",
+                                        timeout=0.05)
+        assert "never-there" in str(err.value)
+
+    def test_timeout_saves_body_and_message_history(self, monkeypatch, tmp_path):
+        """With PAGESPEED_EVIDENCE_DIR set, a timeout writes the last
+        response body and a moment-of-failure message_history snapshot."""
+        monkeypatch.setenv("PAGESPEED_EVIDENCE_DIR", str(tmp_path))
+        monkeypatch.setenv("PAGESPEED_ADMIN_PATH", "/pagespeed_admin")
+        client = self._patch_get(monkeypatch, body=b"<html>one match</html>")
+        self._fetch_count_timeout(client)
+
+        bodies = list(tmp_path.glob("fetch-until-timeout-*-body.html"))
+        messages = list(tmp_path.glob("fetch-until-timeout-*-messages.json"))
+        infos = list(tmp_path.glob("fetch-until-timeout-*-info.txt"))
+        assert len(bodies) == 1, f"files: {[p.name for p in tmp_path.iterdir()]}"
+        assert bodies[0].read_bytes() == b"<html>one match</html>"
+        assert len(messages) == 1
+        assert messages[0].read_bytes() == self.MESSAGES_JSON
+        assert len(infos) == 1
+        info = infos[0].read_text()
+        assert "inline_css.html" in info
+        assert "status=200" in info
+        assert "matches=1" in info
+
+    def test_timeout_message_names_evidence(self, monkeypatch, tmp_path):
+        """The TimeoutError points triage at the evidence files."""
+        monkeypatch.setenv("PAGESPEED_EVIDENCE_DIR", str(tmp_path))
+        client = self._patch_get(monkeypatch)
+        err = self._fetch_count_timeout(client)
+        assert "fetch-until-timeout-" in str(err)
+
+    def test_admin_snapshot_failure_does_not_mask_timeout(self, monkeypatch,
+                                                          tmp_path):
+        """If the message_history fetch itself fails, the body is still
+        saved and the original TimeoutError still propagates."""
+        monkeypatch.setenv("PAGESPEED_EVIDENCE_DIR", str(tmp_path))
+        client = self._patch_get(monkeypatch, admin_error=True)
+        err = self._fetch_count_timeout(client)
+        assert "Condition not met" in str(err)
+        assert len(list(tmp_path.glob("*-body.html"))) == 1
+        assert list(tmp_path.glob("*-messages.json")) == []
+
+    def test_no_evidence_dir_writes_nothing(self, monkeypatch, tmp_path):
+        """Without PAGESPEED_EVIDENCE_DIR (Linux lanes, local runs) the
+        timeout path stays exactly as before: no files, plain error."""
+        monkeypatch.delenv("PAGESPEED_EVIDENCE_DIR", raising=False)
+        monkeypatch.chdir(tmp_path)
+        client = self._patch_get(monkeypatch)
+        err = self._fetch_count_timeout(client)
+        assert "Condition not met" in str(err)
+        assert list(tmp_path.iterdir()) == []
+
+    def test_repeated_timeouts_get_unique_files(self, monkeypatch, tmp_path):
+        """Two timeouts in one run (e.g. the IIS retry budget) must not
+        overwrite each other's evidence."""
+        monkeypatch.setenv("PAGESPEED_EVIDENCE_DIR", str(tmp_path))
+        client = self._patch_get(monkeypatch)
+        self._fetch_count_timeout(client)
+        self._fetch_count_timeout(client)
+        assert len(list(tmp_path.glob("*-body.html"))) == 2
+
+    def test_evidence_filenames_are_windows_safe(self, monkeypatch, tmp_path):
+        """Query strings and slashes in the polled path must not produce
+        invalid filenames (this all runs on Windows CI)."""
+        monkeypatch.setenv("PAGESPEED_EVIDENCE_DIR", str(tmp_path))
+        client = self._patch_get(monkeypatch)
+        with pytest.raises(TimeoutError):
+            client.fetch_until("/a/b.html?x=1&y=2*<>|", lambda r: False,
+                               timeout=0.05)
+        names = [p.name for p in tmp_path.iterdir()]
+        assert names, "expected evidence files"
+        for name in names:
+            assert re.fullmatch(r"[A-Za-z0-9._-]+", name), name
 
 
 if __name__ == "__main__":

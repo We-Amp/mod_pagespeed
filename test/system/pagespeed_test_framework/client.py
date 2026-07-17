@@ -20,6 +20,7 @@ server. It mirrors the wget-based fetching from the bash system tests.
 
 import gzip
 import http.client
+import itertools
 import os
 import re
 import ssl
@@ -67,6 +68,11 @@ def _read_fetch_until_retries() -> int:
 
 
 _FETCH_UNTIL_RETRIES = _read_fetch_until_retries()
+
+
+# Sequences the per-failure evidence files so repeated timeouts in one run
+# (e.g. the IIS retry budget) never overwrite each other.
+_TIMEOUT_EVIDENCE_SEQ = itertools.count(1)
 
 
 # Default User-Agent matching the bash tests (Chrome 6).
@@ -334,6 +340,7 @@ class PageSpeedClient:
         interval: float = 0.5,
         headers: Optional[Dict[str, str]] = None,
         use_gzip: bool = False,
+        detail_fn: Optional[Callable[[Response], str]] = None,
     ) -> Response:
         """Poll URL until condition is satisfied.
 
@@ -359,6 +366,10 @@ class PageSpeedClient:
             interval: Seconds between requests (default 0.5s)
             headers: Optional request headers
             use_gzip: Use gzip-compressed fetching
+            detail_fn: Optional callable mapping the last Response to a short
+                description of how close the condition was (e.g. "matches=1
+                expected=2"); included in the TimeoutError and the on-failure
+                evidence so a timeout is diagnosable after the fact
 
         Returns:
             Response that satisfied the condition
@@ -377,6 +388,7 @@ class PageSpeedClient:
                     interval=interval,
                     headers=headers,
                     use_gzip=use_gzip,
+                    detail_fn=detail_fn,
                 )
             except TimeoutError as err:
                 last_error = err
@@ -401,6 +413,7 @@ class PageSpeedClient:
         interval: float = 0.5,
         headers: Optional[Dict[str, str]] = None,
         use_gzip: bool = False,
+        detail_fn: Optional[Callable[[Response], str]] = None,
     ) -> Response:
         """Single budget-bounded poll of ``path`` until ``condition`` holds.
 
@@ -424,9 +437,86 @@ class PageSpeedClient:
 
         elapsed = time.time() - start
         status_info = f"status={last_response.status}" if last_response else "no response"
+        detail = ""
+        if detail_fn is not None and last_response is not None:
+            try:
+                detail = detail_fn(last_response)
+            except Exception:
+                # Diagnostics must never replace the genuine timeout.
+                detail = ""
+        evidence_note = self._save_timeout_evidence(
+            path, last_response, status_info, detail, elapsed
+        )
         raise TimeoutError(
             f"Condition not met after {elapsed:.1f}s for {path}. Last: {status_info}"
+            + (f", {detail}" if detail else "")
+            + evidence_note
         )
+
+    def _save_timeout_evidence(
+        self,
+        path: str,
+        last_response: Optional[Response],
+        status_info: str,
+        detail: str,
+        elapsed: float,
+    ) -> str:
+        """Capture the failure window the instant a fetch_until times out.
+
+        The server's message buffer rotates within ~a minute under AppVerifier
+        churn, so the suite-end capture in run_iis_tests.ps1 arrives blind for
+        the window that actually failed. Writes the last response
+        body and a moment-of-failure message_history snapshot into
+        PAGESPEED_EVIDENCE_DIR (per-iteration, uploaded by CI); no-op when the
+        variable is unset. Returns a note for the TimeoutError message, or ""
+        -- and never raises: evidence capture must not mask the timeout.
+        """
+        evidence_dir = os.environ.get("PAGESPEED_EVIDENCE_DIR", "")
+        if not evidence_dir:
+            return ""
+        try:
+            os.makedirs(evidence_dir, exist_ok=True)
+            slug = re.sub(r"[^A-Za-z0-9._-]+", "-", path).strip("-.")[:80]
+            prefix = f"fetch-until-timeout-{next(_TIMEOUT_EVIDENCE_SEQ):03d}-{slug}"
+
+            if last_response is not None:
+                with open(os.path.join(evidence_dir, f"{prefix}-body.html"), "wb") as f:
+                    f.write(last_response.body)
+
+            try:
+                admin_path = os.environ.get("PAGESPEED_ADMIN_PATH", "/pagespeed_admin")
+                snapshot = self.get(f"{admin_path}/message_history")
+                with open(
+                    os.path.join(evidence_dir, f"{prefix}-messages.json"), "wb"
+                ) as f:
+                    f.write(snapshot.body)
+            except Exception:
+                # The worker may be too wedged to serve admin pages; the body
+                # and info files are still worth keeping.
+                pass
+
+            info_lines = [
+                f"url: {path}",
+                f"elapsed: {elapsed:.1f}s",
+                f"last: {status_info}",
+            ]
+            if detail:
+                info_lines.append(f"detail: {detail}")
+            if last_response is not None:
+                info_lines.append("headers:")
+                info_lines.extend(
+                    f"  {name}: {value}"
+                    for name, value in last_response.headers.items()
+                )
+            with open(
+                os.path.join(evidence_dir, f"{prefix}-info.txt"), "w",
+                encoding="utf-8",
+            ) as f:
+                f.write("\n".join(info_lines) + "\n")
+
+            return f" Evidence: {prefix}-* in {evidence_dir}"
+        except Exception:
+            return ""
 
     def fetch_until_count(
         self,
@@ -469,7 +559,15 @@ class PageSpeedClient:
             # return immediately with the unoptimized 4 files).
             return len(regex.findall(r.text)) == expected_count
 
-        return self.fetch_until(path, check_count, timeout=timeout, headers=headers)
+        def count_detail(r: Response) -> str:
+            # matches=1 expected=2 (partial convergence) triages completely
+            # differently from matches=0 (rewrite never started).
+            return f"matches={len(regex.findall(r.text))} expected={expected_count}"
+
+        return self.fetch_until(
+            path, check_count, timeout=timeout, headers=headers,
+            detail_fn=count_detail,
+        )
 
     def fetch_until_contains(
         self,
@@ -500,7 +598,13 @@ class PageSpeedClient:
         def check_contains(r: Response) -> bool:
             return regex.search(r.text) is not None
 
-        return self.fetch_until(path, check_contains, timeout=timeout, headers=headers)
+        def contains_detail(r: Response) -> str:
+            return f"pattern {pattern!r} not found"
+
+        return self.fetch_until(
+            path, check_contains, timeout=timeout, headers=headers,
+            detail_fn=contains_detail,
+        )
 
     def get_statistics(
         self, stats_path: str = "/mod_pagespeed_statistics",
