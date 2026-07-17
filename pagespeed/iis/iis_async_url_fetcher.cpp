@@ -53,11 +53,13 @@ void IisAsyncWorker::OnCompleted(WinHTTPStatus status)
 	// that failure for five minutes.
 	if (status != Ok) {
 		messagehandler->Message(kWarning,
-		    "Native fetch of [%s] failed: WinHTTP status=%d", url_.c_str(), (int)status);
+		    "Native fetch of [%s] failed: WinHTTP status=%d diag=[%s]",
+		    url_.c_str(), (int)status, client.Diag().c_str());
 	} else if (content_bytes_ == 0) {
 		messagehandler->Message(kWarning,
 		    "Native fetch of [%s] returned an empty body (WinHTTP Ok, 0 content bytes); "
-		    "PSOL will cache this as a failure", url_.c_str());
+		    "PSOL will cache this as a failure. diag=[%s]",
+		    url_.c_str(), client.Diag().c_str());
 	}
 	fetch->Done(status==Ok);
 	fetcher->StopFetch(this);	

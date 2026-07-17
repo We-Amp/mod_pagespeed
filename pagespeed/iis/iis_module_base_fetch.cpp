@@ -664,14 +664,21 @@ IisModuleBaseFetch::ZcDrive IisModuleBaseFetch::AbortZeroCopyServe(
 	zc_pin_ = MappedSharedString();
 	if (http_context_ != NULL)
 	{
-		// Content-Length already went out with the headers; the client must
-		// never see a complete body assembled from an overwritten region.
-		// Reset the connection so the partial transfer is discarded and
-		// never cached downstream.
+		// The client must never see a COMPLETE body assembled from an
+		// overwritten region, and the serve is HTTP/1.1 chunked (no
+		// Content-Length), so the truncation is only client-detectable if
+		// the terminating 0-length chunk never goes out.  CloseConnection()
+		// tears the connection down asynchronously and can lose the race
+		// against end-of-request processing, which flushes the terminating
+		// chunk first: the abort then reaches the client as a
+		// cleanly-terminated short body that neither it nor a downstream
+		// cache can tell apart from a complete response (observed on the
+		// M1 gate rig).  ResetConnection() aborts the socket immediately
+		// (TCP RST), so no terminator is ever emitted for a torn serve.
 		IHttpResponse* r = http_context_->GetResponse();
 		if (r != NULL)
 		{
-			r->CloseConnection();
+			r->ResetConnection();
 		}
 		http_context_->SetRequestHandled();
 	}

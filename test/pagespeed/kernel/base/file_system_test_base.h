@@ -93,6 +93,7 @@ class FileSystemTest : public testing::Test {
   void TestTemp();
   void TestAppend();
   void TestRename();
+  void TestRenameReplace();
   void TestRemove();
   void TestExists();
   void TestCreateFileInDir();

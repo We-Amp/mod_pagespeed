@@ -57,6 +57,8 @@
 
 #include "pagespeed/iis/iis_async_url_fetcher.h"
 
+#include "pagespeed/iis/asyncwinhttp.h"
+
 #include <string>
 
 #include "pagespeed/kernel/base/string.h"
@@ -117,6 +119,67 @@ TEST(IisAsyncUrlFetcherDeriveHostTest,
                                      "http://other.example.org/path");
   header = "scribble-over-original-bytes";
   EXPECT_EQ("client.example.com", result);
+}
+
+
+// the IIS native fetcher's WinHTTP client resolves "localhost"
+// through the OS resolver, which can prefer the IPv6 loopback while the
+// origin site only answers on IPv4. The async connect then fails, PSOL
+// remembers the fetch failure, and rewrites of local sub-resources never
+// converge (the Windows CI lane surfaced this as rewrite-convergence
+// timeouts under Application Verifier). WinHTTP::LoopbackConnectHost is the
+// pure decision helper for the fix: it picks the address handed to
+// WinHttpConnect for a loopback host per attempt, while the Host request
+// header keeps naming the original authority. These tests pin the mapping.
+
+typedef ::ASyncWinHTTP::WinHTTP WinHttpClient;
+
+TEST(WinHttpLoopbackConnectHostTest, LocalhostPinsIpv4ThenIpv6) {
+  // First attempt connects to the IPv4 loopback; the single retry attempt
+  // falls back to the IPv6 loopback. The IPv6 loopback must be BRACKETED:
+  // WinHttpConnect rejects a bare "::1" synchronously (error 12005,
+  // ERROR_WINHTTP_INVALID_URL), which completes the fetch as failed before
+  // the retry can engage.
+  EXPECT_EQ(std::wstring(L"127.0.0.1"),
+            WinHttpClient::LoopbackConnectHost(L"localhost", false));
+  EXPECT_EQ(std::wstring(L"[::1]"),
+            WinHttpClient::LoopbackConnectHost(L"localhost", true));
+}
+
+TEST(WinHttpLoopbackConnectHostTest, LocalhostMatchIsCaseInsensitive) {
+  EXPECT_EQ(std::wstring(L"127.0.0.1"),
+            WinHttpClient::LoopbackConnectHost(L"LOCALHOST", false));
+  EXPECT_EQ(std::wstring(L"[::1]"),
+            WinHttpClient::LoopbackConnectHost(L"LocalHost", true));
+}
+
+TEST(WinHttpLoopbackConnectHostTest, Ipv6LoopbackTargetRetriesIpv4) {
+  // A URL that already names the IPv6 loopback keeps it for the first
+  // attempt but retries on IPv4 (the observed failure was a native fetch of
+  // http://[::1]:8080/... against a binding that only answered on IPv4).
+  // The first-attempt address must stay bracketed -- WinHttpCrackUrl keeps
+  // the brackets, and WinHttpConnect requires them for IPv6 literals.
+  EXPECT_EQ(std::wstring(L"[::1]"),
+            WinHttpClient::LoopbackConnectHost(L"::1", false));
+  EXPECT_EQ(std::wstring(L"127.0.0.1"),
+            WinHttpClient::LoopbackConnectHost(L"::1", true));
+  EXPECT_EQ(std::wstring(L"[::1]"),
+            WinHttpClient::LoopbackConnectHost(L"[::1]", false));
+  EXPECT_EQ(std::wstring(L"127.0.0.1"),
+            WinHttpClient::LoopbackConnectHost(L"[::1]", true));
+}
+
+TEST(WinHttpLoopbackConnectHostTest, NonLoopbackHostsAreNotPinned) {
+  EXPECT_EQ(std::wstring(),
+            WinHttpClient::LoopbackConnectHost(L"example.com", false));
+  EXPECT_EQ(std::wstring(),
+            WinHttpClient::LoopbackConnectHost(L"example.com", true));
+  // An explicit 127.0.0.1 already names the answering family; leave it be.
+  EXPECT_EQ(std::wstring(),
+            WinHttpClient::LoopbackConnectHost(L"127.0.0.1", false));
+  // No prefix confusion with hostnames that merely start with "localhost".
+  EXPECT_EQ(std::wstring(),
+            WinHttpClient::LoopbackConnectHost(L"localhost.example.com", false));
 }
 
 }  // namespace

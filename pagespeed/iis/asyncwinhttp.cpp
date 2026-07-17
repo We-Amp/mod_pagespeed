@@ -30,6 +30,10 @@ WinHTTP::WinHTTP()
 	eventhandler=NULL;
 	status=WinHTTPStatus::NotStarted;
 	allow_self_signed_=false;
+	loopback_pinned_=false;
+	retry_scheduled_=false;
+	retry_attempted_=false;
+	response_data_seen_=false;
 }
 void WinHTTP::SetUserAgent(std::string useragent)
 {
@@ -60,6 +64,7 @@ bool WinHTTP::TotalTimeValid()
 
 	{
 		//std::cout << "total timeout" << std::endl;
+		diag_+="|total_timeout elapsed_ms="+std::to_string((unsigned long)(GetTickCount()-starttime));
 		status=WinHTTPStatus::Timeout;
 		CleanUp();
 		return false;
@@ -85,6 +90,22 @@ void WinHTTP::OnHandleClosing(HINTERNET handle) {
 	{
 		//std::cout << "setting event" << std::endl;
 		session=NULL;
+		if (retry_scheduled_ && status!=WinHTTPStatus::Cancelled)
+		{
+			// the pinned loopback attempt failed before any response
+			// data and every handle is now gone -- restart the request once
+			// against the other loopback family. endEvent stays unset until
+			// that attempt completes, keeping Wait()/CleanUp semantics intact.
+			retry_scheduled_=false;
+			retry_attempted_=true;
+			if (StartRequest())
+				return;
+			if (session)
+				return; // retry failed mid-setup; its own close cascade finishes
+			diag_+="|retry_start_fail";
+			status=WinHTTPStatus::Error;
+		}
+		retry_scheduled_=false;
 		SetEvent(endEvent);
 		if(eventhandler)
 			eventhandler->OnCompleted(status);
@@ -92,9 +113,13 @@ void WinHTTP::OnHandleClosing(HINTERNET handle) {
 }
 
 		
-void WinHTTP::OnHeadersAvailable() 
+void WinHTTP::OnHeadersAvailable()
 {
 	if (!TotalTimeValid()) return;
+	// Headers arrived, so the pinned connect address worked; from here on a
+	// loopback retry would re-deliver response data downstream.
+	if (!response_data_seen_) diag_+="|hdrs";
+	response_data_seen_=true;
 		
 	DWORD dwSize=0;
 	if (!WinHttpQueryHeaders( requestHandle, WINHTTP_QUERY_RAW_HEADERS_CRLF,
@@ -104,6 +129,7 @@ void WinHTTP::OnHeadersAvailable()
 		DWORD err=GetLastError();
 		if (err!=ERROR_INSUFFICIENT_BUFFER)
 		{
+			diag_+="|qhdrs_size_fail="+std::to_string((unsigned long)err);
 			SetError(1012,0);
 			CleanUp();
 			return;
@@ -121,11 +147,12 @@ void WinHTTP::OnHeadersAvailable()
                                     lpOutBuffer, &dwSize,
                                     WINHTTP_NO_HEADER_INDEX))
 		{
+			diag_+="|qhdrs_read_fail="+std::to_string((unsigned long)GetLastError());
 			delete [] lpOutBuffer;
 			SetError(1002,0);
 			CleanUp();
 			//EventHandlerCompleted();
-			
+
 			return;
 		}
 	std::string headers=ws2s(lpOutBuffer) ;
@@ -144,6 +171,7 @@ void WinHTTP::OnHeadersAvailable()
 	// NULL -- WinHTTP does not write it, and would race the callback if it did.
 	if (!WinHttpQueryDataAvailable(requestHandle,NULL))
 	{
+		diag_+="|qda_hdrs_fail="+std::to_string((unsigned long)GetLastError());
 		SetError(1014,GetLastError());
 		CleanUp();
 	}
@@ -164,6 +192,7 @@ void WinHTTP::OnReadComplete(char *buffer,DWORD length)
 	if (eventhandler) eventhandler->OnData(buffer,length,Content);
 	if (!WinHttpQueryDataAvailable(requestHandle,NULL))
 	{
+		diag_+="|qda_read_fail="+std::to_string((unsigned long)GetLastError());
 		SetError(1014,GetLastError());
 		CleanUp();
 	}
@@ -177,11 +206,20 @@ void WinHTTP::OnRedirect(std::wstring url)
 	if (!TotalTimeValid()) return;
 	std::cout<<"redirect"<<ws2s(url)<<std::endl;
 }
-void WinHTTP::OnRequestError(WINHTTP_ASYNC_RESULT *result) 
+void WinHTTP::OnRequestError(WINHTTP_ASYNC_RESULT *result)
 {
 	status=WinHTTPStatus::Error;
 	dwError=result->dwError;
-	dwResult=result->dwResult; 
+	dwResult=result->dwResult;
+	// a pinned loopback attempt that failed before any response
+	// data (typically ERROR_WINHTTP_CANNOT_CONNECT when only the other
+	// loopback family is listening) is retried once; OnHandleClosing
+	// restarts it after the close cascade below releases the handles.
+	if (LoopbackRetryEligible())
+		retry_scheduled_=true;
+	diag_+="|async_err api="+std::to_string((unsigned long)result->dwResult)
+		+" err="+std::to_string((unsigned long)result->dwError)
+		+(retry_scheduled_?"+retry_sched":"");
 	CleanUp();
 }
 void WinHTTP::OnResponseReceived() 
@@ -193,10 +231,25 @@ void WinHTTP::OnSecureFailure()
 {
 	if (!TotalTimeValid()) return;
 }
-void WinHTTP::OnSendRequestComplete() 
+void WinHTTP::OnSendRequestComplete()
 {
 	if (!TotalTimeValid()) return;
-	//std::cout<<"send request complete" << std::endl;
+	// WinHttpReceiveResponse belongs HERE, after the async
+	// WinHttpSendRequest completes (SENDREQUEST_COMPLETE). It used to be
+	// driven from OnRequestSent (REQUEST_SENT, an informational
+	// notification that fires while the send operation is still active
+	// inside WinHTTP), overlapping the receive pipeline with the live send
+	// op -- a race that Cuzz collapses into a spurious request abort:
+	// REQUEST_ERROR api=API_SEND_REQUEST err=12017 OPERATION_CANCELLED
+	// after headers already arrived, with no handle closed by this class
+	// (every CleanUp path was instrumented and silent).
+	if (!WinHttpReceiveResponse(requestHandle,NULL))
+	{
+		diag_+="|recvresp_fail="+std::to_string((unsigned long)GetLastError());
+		dwResult=1000;
+		status=WinHTTPStatus::Error;
+		CleanUp();
+	}
 }
 void WinHTTP::OnWriteComplete(DWORD length) 
 {
@@ -236,6 +289,7 @@ void WinHTTP::OnDataAvailable(DWORD bytes)
 	}
 	if (!WinHttpReadData(requestHandle,(LPVOID) tempbuf,bytes,NULL))
 	{
+		diag_+="|readdata_fail="+std::to_string((unsigned long)GetLastError());
 		SetError(1013,GetLastError());
 		CleanUp();
 	}
@@ -255,15 +309,9 @@ void WinHTTP::OnConnectionClosed() {/*std::cout << "connection closed" << std::e
 	
 
 void WinHTTP::OnRequestSent(DWORD bytes) {
+	// Informational only (bytes reached the wire). WinHttpReceiveResponse
+	// moved to OnSendRequestComplete -- see the note there.
 	if (!TotalTimeValid()) return;
-	//std::cout << "request sent"<< bytes << std::endl;
-	if (!WinHttpReceiveResponse(requestHandle,NULL))
-	{
-		dwResult=1000;
-		status=WinHTTPStatus::Error;
-		CleanUp();
-
-	}	
 }
 
 
@@ -374,10 +422,40 @@ void WinHTTP::WinHttpCallback(
 	}
 }
 
+std::wstring WinHTTP::LoopbackConnectHost(const std::wstring &host,bool retry_attempt)
+{
+	// The IPv6 loopback is always returned in BRACKETED form: WinHttpConnect
+	// rejects an unbracketed "::1" synchronously with
+	// ERROR_WINHTTP_INVALID_URL (12005), and a synchronous connect failure
+	// tears the session down before the retry plumbing can engage, so every
+	// [::1]-target fetch would fail outright (WinHttpCrackUrl itself keeps
+	// the brackets in the host component it returns).
+	if (_wcsicmp(host.c_str(),L"localhost")==0)
+		return retry_attempt ? L"[::1]" : L"127.0.0.1";
+	if (host==L"::1" || host==L"[::1]")
+		return retry_attempt ? L"127.0.0.1" : L"[::1]";
+	return L"";
+}
+
+bool WinHTTP::LoopbackRetryEligible()
+{
+	return loopback_pinned_ && !retry_attempted_ && !response_data_seen_;
+}
+
 bool WinHTTP::GetUrl(std::string url, std::string host)
+{
+	url_=url;
+	host_=host;
+	retry_scheduled_=false;
+	retry_attempted_=false;
+	return StartRequest();
+}
+
+bool WinHTTP::StartRequest()
 {
 	status=WinHTTPStatus::Running;
 	starttime=GetTickCount();
+	response_data_seen_=false;
 	URL_COMPONENTS urlComp;
 	ZeroMemory(&urlComp, sizeof(urlComp));
 	urlComp.dwStructSize = sizeof(urlComp);
@@ -386,11 +464,11 @@ bool WinHTTP::GetUrl(std::string url, std::string host)
 	urlComp.dwUrlPathLength   = (DWORD)-1;
 	urlComp.dwExtraInfoLength = (DWORD)-1;
 	
-	std::wstring wUrl=s2ws(url);
+	std::wstring wUrl=s2ws(url_);
 	
 	if (!WinHttpCrackUrl(wUrl.c_str(),wcslen(wUrl.c_str()),0,&urlComp))
 	{
-		
+		diag_+="|crackurl_fail="+std::to_string((unsigned long)GetLastError());
 		return false;
 	}
 	std::wstring server=std::wstring(urlComp.lpszHostName,urlComp.dwHostNameLength);
@@ -399,6 +477,36 @@ bool WinHTTP::GetUrl(std::string url, std::string host)
 		+
 		std::wstring(urlComp.lpszExtraInfo,urlComp.dwExtraInfoLength)
 		;
+
+	// WinHTTP hands "localhost" to the OS resolver, which can prefer
+	// the IPv6 loopback while the origin site only answers on IPv4; the async
+	// connect then fails and PSOL remembers the fetch failure for minutes, so
+	// rewrites of local sub-resources never converge. Pin the connect address
+	// for loopback hosts and retry the other loopback family once on failure
+	// (OnRequestError / OnHandleClosing). Only the address handed to
+	// WinHttpConnect changes; the Host request header keeps naming the
+	// original authority.
+	std::wstring connectHost=LoopbackConnectHost(server,retry_attempted_);
+	loopback_pinned_=(connectHost!=L"");
+	if (!loopback_pinned_)
+		connectHost=server;
+	diag_+=(retry_attempted_?"|retry(":"|first(")+ws2s(connectHost)+")";
+	std::string hostHeader=host_;
+	if (loopback_pinned_ && hostHeader=="" && connectHost!=server)
+	{
+		// Without an explicit Host header WinHTTP derives Host from the
+		// WinHttpConnect server name -- now the pinned address. Preserve the
+		// URL's own authority instead.
+		std::string authority=ws2s(server);
+		// WinHttpCrackUrl keeps the brackets of an IPv6 literal, so only wrap
+		// a bare colon-hex address (never double-bracket).
+		if (authority.find(':')!=std::string::npos && authority[0]!='[')
+			authority="["+authority+"]";
+		int defaultPort=(urlComp.nScheme==INTERNET_SCHEME_HTTPS)?INTERNET_DEFAULT_HTTPS_PORT:INTERNET_DEFAULT_HTTP_PORT;
+		if (port!=defaultPort)
+			authority+=":"+std::to_string(port);
+		hostHeader=authority;
+	}
 
 	
 	WinHTTP *thisptr=this;
@@ -415,7 +523,7 @@ bool WinHTTP::GetUrl(std::string url, std::string host)
 		// Security: removed OutputDebugStringW that leaked connection details
 
 
-		connectSession=WinHttpConnect(session,server.c_str(),port,0);
+		connectSession=WinHttpConnect(session,connectHost.c_str(),port,0);
 		if (connectSession)
 		{
 			// Use TLS for https URLs. WinHttpCrackUrl populated urlComp.nScheme;
@@ -428,8 +536,8 @@ bool WinHTTP::GetUrl(std::string url, std::string host)
 				requestFlags|=WINHTTP_FLAG_SECURE;
 			}
 			requestHandle=WinHttpOpenRequest(connectSession,L"GET",urlpath.c_str(),NULL,NULL,NULL,requestFlags);
-			if (host != "") {
-				std::wstring w_host = s2ws(host);
+			if (hostHeader != "") {
+				std::wstring w_host = s2ws(hostHeader);
 				w_host = L"Host: " + w_host;
 				WinHttpAddRequestHeaders(requestHandle, w_host.c_str(), (ULONG)-1L, WINHTTP_ADDREQ_FLAG_REPLACE | WINHTTP_ADDREQ_FLAG_ADD);
 
@@ -461,15 +569,23 @@ bool WinHTTP::GetUrl(std::string url, std::string host)
 				if (!result)
 				{
 					firstError=GetLastError();
+					// schedule the loopback fallback before CleanUp --
+					// the close cascade may run inline and consult the flag.
+					bool retrying=LoopbackRetryEligible();
+					if (retrying)
+						retry_scheduled_=true;
+					diag_+="|send_fail="+std::to_string((unsigned long)firstError)
+						+(retrying?"+retry_sched":"");
 					CleanUp();
-					return false;
+					return retrying;
 				}
 				return true;
-				
+
 			}
 			else
 			{
 				firstError=GetLastError();
+				diag_+="|openreq_fail="+std::to_string((unsigned long)firstError);
 				CleanUp();
 				return false;
 			}
@@ -477,12 +593,16 @@ bool WinHTTP::GetUrl(std::string url, std::string host)
 		else
 		{
 			firstError=GetLastError();
+			diag_+="|connect_fail="+std::to_string((unsigned long)firstError);
 			CleanUp();
 			return false;
 		}
 	}
 	else
+	{
+		diag_+="|open_fail="+std::to_string((unsigned long)GetLastError());
 		return false;
+	}
 
 }
 void WinHTTP::CleanUp()

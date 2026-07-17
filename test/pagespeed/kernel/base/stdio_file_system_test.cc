@@ -135,6 +135,8 @@ TEST_F(StdioFileSystemTest, TestAppend) { TestAppend(); }
 // Write a temp file, rename it, then read it.
 TEST_F(StdioFileSystemTest, TestRename) { TestRename(); }
 
+TEST_F(StdioFileSystemTest, TestRenameReplace) { TestRenameReplace(); }
+
 // Write a file and successfully delete it.
 TEST_F(StdioFileSystemTest, TestRemove) { TestRemove(); }
 

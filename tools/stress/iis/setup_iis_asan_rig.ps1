@@ -94,8 +94,13 @@ New-Item -ItemType File -Path "$RigDir\logs\error.log" -Force | Out-Null
 # to the FIRST w3wp instance only, so under recycle churn nearly every crashing
 # worker was a later, unmonitored instance: 8 w3wp faults, zero dumps captured.
 # LocalDumps is consulted by WER per-crash, so EVERY w3wp instance is covered.
-# cleanup_iis_asan_rig.ps1 deletes the key (dedicated CI runners; nothing else
-# configures w3wp LocalDumps on them).
+# cleanup_iis_asan_rig.ps1 deletes the key. The AppVerif lanes (the CI workflow
+# win-appverif, nightly-iis-appverif) now arm the same key via
+# tools/ci/Set-WerLocalDumps.ps1, so this is no longer the only writer: both
+# sides arm idempotently, tolerate the key already being gone at cleanup, and
+# scope any dump purge to their own run window by timestamp. The schedules are
+# still disjoint, so an actual overlap should not occur; this just makes one
+# non-destructive.
 $werKey = 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\w3wp.exe'
 New-Item -ItemType Directory -Path $CoredumpDir -Force | Out-Null
 New-Item -Path $werKey -Force | Out-Null

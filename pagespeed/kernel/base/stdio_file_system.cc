@@ -397,12 +397,45 @@ bool StdioFileSystem::RemoveFile(const char* filename,
 bool StdioFileSystem::RenameFileHelper(const char* old_file,
                                        const char* new_file,
                                        MessageHandler* handler) {
+#ifdef _WIN32
+  // Callers require POSIX rename semantics: renaming onto an existing path
+  // atomically replaces it (WriteFileAtomic, and through it PurgeContext's
+  // cache.purge updates, depend on this). The Universal CRT's rename() never
+  // replaces an existing target (fails with EEXIST), so use MoveFileEx with
+  // MOVEFILE_REPLACE_EXISTING. Even then, Windows refuses the replace with
+  // ERROR_ACCESS_DENIED/ERROR_SHARING_VIOLATION while any handle opened
+  // without FILE_SHARE_DELETE (every CRT fopen reader) holds the target;
+  // such reader windows are short-lived, so retry briefly with exponential
+  // backoff (~0.5s total) instead of losing the update. Bounded, because the
+  // caller may hold a named lock.
+  const int kMaxAttempts = 10;
+  DWORD error = 0;
+  int delay_ms = 1;
+  for (int attempt = 0; attempt < kMaxAttempts; ++attempt) {
+    if (MoveFileExA(old_file, new_file,
+                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+      return true;
+    }
+    error = GetLastError();
+    if (error != ERROR_ACCESS_DENIED && error != ERROR_SHARING_VIOLATION) {
+      break;
+    }
+    if (attempt + 1 < kMaxAttempts) {
+      Sleep(delay_ms);
+      delay_ms *= 2;
+    }
+  }
+  handler->Message(kError, "Failed to rename file %s to %s: windows error %lu",
+                   old_file, new_file, static_cast<unsigned long>(error));
+  return false;
+#else
   bool ret = (rename(old_file, new_file) == 0);
   if (!ret) {
     handler->Message(kError, "Failed to rename file %s to %s: %s", old_file,
                      new_file, strerror(errno));
   }
   return ret;
+#endif  // _WIN32
 }
 
 bool StdioFileSystem::MakeDir(const char* path, MessageHandler* handler) {

@@ -322,3 +322,16 @@ pagespeed_cc_test(
         "//pagespeed/iis:iis_ip_string",
     ],
 )
+
+# Windows semantics of StdioFileSystem::RenameFile: renaming
+# onto an existing path must replace it (the POSIX contract WriteFileAtomic
+# and PurgeContext depend on), riding out transient no-share-delete readers.
+# Lives here because this is the unit-test tree the Windows CI lane builds.
+pagespeed_cc_test(
+    name = "iis_win_rename_test",
+    srcs = ["iis_win_rename_test.cc"],
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base_core",
+    ],
+)

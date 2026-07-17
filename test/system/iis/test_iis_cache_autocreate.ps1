@@ -4,16 +4,20 @@
 # Live-VM verified 2026-06-22 on the Windows Server 2016 IIS base image / v1.15.0:
 # the original fixture asserted the OLD per-site FILE-cache layout
 # (<FileCachePath>\<siteid>.ROOT subdirectories + per-subdir ACLs). v1.15.0 uses
-# the CYCLONE cache - a single `cyclone.dat` store under FileCachePath, with NO
-# per-site subdirectories and no per-subdir ACL dance. The probe showed the
-# cache root contains only `cyclone.dat`; a per-site `<id>.ROOT` subdir is never
-# created. The old assertions are therefore obsolete. This fixture now pins the
+# the CYCLONE cache - a single Cyclone store under FileCachePath, with NO
+# per-site subdirectories and no per-subdir ACL dance. As of r19 the store file
+# is fingerprinted by the cache's on-disk format version, so a fresh cache root
+# holds `cyclone-<ver>-<fingerprint>.dat` (main store) plus a
+# `cyclone.dat-<ver>-<fingerprint>.small` small tier - not a plain `cyclone.dat`
+# (older builds wrote the literal `cyclone.dat`; this fixture accepts both). A
+# per-site `<id>.ROOT` subdir is never created. The old assertions are therefore
+# obsolete. This fixture now pins the
 # REACHABLE Cyclone contract:
 #
 #   1. Positive: with FileCachePath at its shipped value and the cache contents
 #      cleared (the root kept - the module auto-creates the store UNDER the root,
 #      not the root itself; a deleted root surfaces cache-path-missing), the
-#      module re-initializes its Cyclone store (a FRESH `cyclone.dat`, after the
+#      module re-initializes its Cyclone store (a FRESH store file, after the
 #      setup asserts the old one is gone) under FileCachePath on request, serves
 #      OPTIMIZED responses (X-Page-Speed present), and emits no
 #      X-Pagespeed-Init-Status. NOTE: this pins store-file auto-init + an
@@ -109,6 +113,26 @@ function Wait-ForFile {
     }
     return $false
 }
+function Get-CycloneStore {
+    # The Cyclone MAIN store file. r19+ fingerprints it by on-disk format version
+    # (cyclone-<ver>-<fingerprint>.dat); older builds wrote a literal cyclone.dat.
+    # Match either, but exclude the small-tier sidecar (cyclone.dat-<ver>-*.small).
+    param([string]$root)
+    Get-ChildItem -LiteralPath $root -Filter 'cyclone*.dat' -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -notlike '*.small' } | Select-Object -First 1
+}
+function Wait-ForCycloneStore {
+    param([string]$root, [int]$timeoutSec = 30)
+    $elapsed = 0
+    while ($elapsed -lt $timeoutSec) {
+        $store = Get-CycloneStore -root $root
+        if ($store) { return $store }
+        # Keep traffic flowing so the Cyclone store is written.
+        Get-PsResponse -u $script:Url | Out-Null
+        Start-Sleep -Seconds 2; $elapsed += 2
+    }
+    return $null
+}
 function Recycle-AppPool {
     param([string]$pool)
     & $appcmd recycle apppool /apppool.name:$pool | Out-Null
@@ -122,23 +146,23 @@ function Start-W3SVC { Start-Service -Name W3SVC -ErrorAction SilentlyContinue; 
 function Clear-CacheContents {
     param([string]$root)
     Stop-W3SVC
-    $dat = Join-Path $root "cyclone.dat"
-    # Retry the clear: w3wp may not have released the cyclone.dat handle the
+    # Retry the clear: w3wp may not have released the store-file handle the
     # instant W3SVC stops. Retry the delete a few times before giving up.
     for ($i = 0; $i -lt 5; $i++) {
         if (Test-Path -LiteralPath $root) {
             Get-ChildItem -LiteralPath $root -Force -ErrorAction SilentlyContinue |
                 Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
         }
-        if (-not (Test-Path -LiteralPath $dat)) { break }
+        if (-not (Get-CycloneStore -root $root)) { break }
         Start-Sleep -Seconds 2
     }
     New-Item -ItemType Directory -Path $root -Force | Out-Null
-    # Prove the Cyclone store is actually GONE. A surviving cyclone.dat would let
+    # Prove the Cyclone store is actually GONE. A surviving store file would let
     # the positive path FALSE-PASS on a stale file instead of a genuine fresh
     # auto-init -- the very contract this gating fixture exists to assert.
-    if (Test-Path -LiteralPath $dat) {
-        throw "Setup: cyclone.dat still present after clear + retries (w3wp handle not released?): $dat"
+    $stale = Get-CycloneStore -root $root
+    if ($stale) {
+        throw "Setup: Cyclone store still present after clear + retries (w3wp handle not released?): $($stale.FullName)"
     }
     Start-W3SVC
 }
@@ -157,8 +181,6 @@ if (-not $ConfigPath -or -not (Test-Path -LiteralPath $ConfigPath)) {
 }
 $baseline = Get-PsHeaders -u $Url
 if (-not $baseline) { Write-Error "Cannot reach $Url - IIS not responding."; exit 2 }
-
-$cycloneDat = Join-Path $CacheRoot "cyclone.dat"
 
 # --- Backup config + define restore BEFORE any state mutation. The script-scope
 #     trap (active from parse time) must only ever RESTORE the captured config,
@@ -188,7 +210,7 @@ try {
     #     cleanup) and lets the trap restore (never blank) the config. ---
     Write-Host "=== Setup: clear cache contents ==="
     Clear-CacheContents -root $CacheRoot
-    Write-Host "Pre-state OK: cache root present, cyclone.dat cleared ($CacheRoot)."
+    Write-Host "Pre-state OK: cache root present, Cyclone store cleared ($CacheRoot)."
 
     # ============================================================
     # POSITIVE PATH: Cyclone store auto-initializes under FileCachePath.
@@ -216,17 +238,19 @@ try {
         throw "Positive path: X-Pagespeed-Init-Status did not clear within ${PollSeconds}s; observed '$obs'."
     }
 
-    # Assert: the Cyclone store (cyclone.dat) was auto-created UNDER FileCachePath.
-    if (-not (Wait-ForFile -path $cycloneDat -timeoutSec $PollSeconds)) {
+    # Assert: the Cyclone store (cyclone-<ver>-<fingerprint>.dat as of r19, or a
+    # legacy cyclone.dat) was auto-created UNDER FileCachePath.
+    $store = Wait-ForCycloneStore -root $CacheRoot -timeoutSec $PollSeconds
+    if (-not $store) {
         Write-Host "cache root contents:"; Get-ChildItem -LiteralPath $CacheRoot -Force -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "    $($_.Name)" }
-        throw "Positive path: Cyclone store '$cycloneDat' was not created within ${PollSeconds}s."
+        throw "Positive path: no Cyclone store (cyclone*.dat) was created under '$CacheRoot' within ${PollSeconds}s."
     }
-    Write-Host "Cyclone store auto-created: $cycloneDat"
+    Write-Host "Cyclone store auto-created: $($store.Name)"
 
     # Assert: module is healthy + licensed (optimizing -> X-Page-Speed present).
     $xps = Wait-ForHeader -u $Url -name "X-Page-Speed" -timeoutSec $PollSeconds
     if (-not $xps) { throw "Positive path: X-Page-Speed header absent (module not optimizing/licensed)." }
-    Write-Host "PASS: positive path (cyclone.dat created, X-Page-Speed=$xps, no init-status)."
+    Write-Host "PASS: positive path (Cyclone store $($store.Name) created, X-Page-Speed=$xps, no init-status)."
 
     # ============================================================
     # NEGATIVE PATH: cache-path-missing via an out-of-prefix, missing path.

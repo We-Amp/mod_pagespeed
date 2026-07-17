@@ -22,7 +22,16 @@
     Deliberately does NOT depend on a crash .dmp or on the LocalDumps registry
     key. Arming LocalDumps makes WER write the dump but SKIP the ReportArchive
     entry, so a dump-based probe and an archive-based probe each go blind in the
-    other's presence. The event log is the one signal neither suppresses.
+    other's presence. The event log is the one signal neither suppresses, which
+    is why this gate reads it and nothing else.
+
+    NOTE (dump-arming hardening): CI now DOES arm LocalDumps for the verified w3wp, so
+    on those runs probe 3 below finds nothing and the stop-code line disappears
+    from this report -- probes 1 and 2 still fire, so the VERDICT is unaffected.
+    The classification Sig[8] used to carry is recovered downstream instead:
+    Collect-CrashDumps.ps1 runs `!avrf` on the captured dump, which yields the
+    provider, stop code, owner DLL and allocation stack -- strictly more than
+    Sig[8] did. Do not "fix" a missing WER-reports section on an armed run.
 
     Nothing in a healthy run produces a 5009: the harness tears the pool down
     with appcmd/Restart-WebAppPool, and only ever Stop-Processes iisexpress.

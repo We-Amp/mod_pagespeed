@@ -167,6 +167,19 @@ void FileSystemTest::TestRename() {
   CheckRead(to_file, from_text);
 }
 
+// Renaming onto an existing path must atomically replace it (POSIX rename
+// semantics). WriteFileAtomic -- and through it PurgeContext's cache.purge
+// updates -- depends on this contract on every platform.
+void FileSystemTest::TestRenameReplace() {
+  GoogleString from_text = "replacement";
+  GoogleString to_file = WriteNewFile("/to_replace.txt", "original");
+  GoogleString from_file = WriteNewFile("/from_replace.txt", from_text);
+  ASSERT_TRUE(
+      file_system()->RenameFile(from_file.c_str(), to_file.c_str(), &handler_));
+  CheckDoesNotExist(from_file);
+  CheckRead(to_file, from_text);
+}
+
 // Write a file and successfully delete it.
 void FileSystemTest::TestRemove() {
   GoogleString filename = WriteNewFile("/remove.txt", "Goodbye, world!");

@@ -39,7 +39,10 @@ living on one machine's `D:\` drive.
   sweep's 30s skew buffer, so those terminations land outside the window.
 - **Crash dumps.** Setup installs a **WER LocalDumps** override for
   `w3wp.exe` (`HKLM\...\Windows Error Reporting\LocalDumps\w3wp.exe`, full dumps
-  → `C:\CrashDumps`); cleanup removes it. WER consults the key per-crash, so
+  → `C:\CrashDumps`); cleanup removes it. The AppVerif lanes arm the same key via
+  `tools/ci/Set-WerLocalDumps.ps1` (dump dir derived from free space rather than
+  fixed), so this rig is no longer its only writer — both sides arm idempotently
+  and scope dump purges to their own run window. WER consults the key per-crash, so
   **every** worker instance is covered — unlike `procdump -e -w`, which attaches
   to the first `w3wp` only and missed all 8 faults on the first effective
   nightly. Full dumps are large; they stay on the runner for on-box cdb/windbg.

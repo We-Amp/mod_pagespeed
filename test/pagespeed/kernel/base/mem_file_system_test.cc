@@ -79,6 +79,8 @@ TEST_F(MemFileSystemTest, TestAppend) { TestAppend(); }
 // Write a temp file, rename it, then read it.
 TEST_F(MemFileSystemTest, TestRename) { TestRename(); }
 
+TEST_F(MemFileSystemTest, TestRenameReplace) { TestRenameReplace(); }
+
 // Write a file and successfully delete it.
 TEST_F(MemFileSystemTest, TestRemove) { TestRemove(); }
 
