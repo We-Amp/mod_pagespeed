@@ -18,9 +18,11 @@ most often miss; it does not duplicate `CLAUDE.md`.
   libstdc++). C++ unit tests need the test_env quartet:
   `--test_env=REDIS_HOST=redis --test_env=REDIS_PORT=6379`
   `--test_env=MEMCACHED_HOST=memcached --test_env=MEMCACHED_PORT=11211`.
-- **Match CI locally before pushing:** `tools/fix-format.sh` and
-  `tools/tidyup.sh` (clang-format-20 / clang-tidy-20). See "Linting & Formatting"
-  in `CLAUDE.md`.
+- **Match CI locally before pushing:** `tools/format.sh` (the single entry point —
+  resolves clang-format **20.x** itself, so it matches CI even if your local
+  clang-format is a newer major) and `tools/tidyup.sh` (clang-tidy-20).
+  `tools/install-hooks.sh` also wires a `pre-push` gate. See "Linting &
+  Formatting" in `CLAUDE.md`.
 - **Two name-colliding factory files:** the live IIS factory is
   `pagespeed/iis/iis_rewrite_driver_factory.cpp`; `pagespeed/windows/iis_rewrite_driver_factory.cc`
   is build-inert (`tags = ["manual"]`). See "IIS Platform Internals" in `CLAUDE.md`.

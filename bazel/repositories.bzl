@@ -125,7 +125,94 @@ APRUTIL_SHA = "4ce5fead950705f6b33dcac5b7fae45f4295b80cb75a6a1378baaec896fd4fc1"
 # steady reads. On-disk format unchanged (v1); adds the borrows_outstanding
 # stats gauge (append-only C-struct extension, rebuilt against the vendored
 # header by this bump). renew_lease() semantics for open handles unchanged.
-CYCLONE_COMMIT = "4e34d7bb634d2310aea52aec22ea09eacd65aaa4"
+# This bump brings the lock-free concurrent read path: the
+# reader-side stripe lock and the directory global lock are gone, replaced
+# by per-bucket seqlocks and per-thread-sharded read counters + HitTracker,
+# so read throughput scales with cores instead of collapsing under
+# contention (a same-machine cache A/B showed a ~5x read-throughput gain and
+# turned a memory-pressure regime that used to lose to the file cache into a
+# win). It also drops the per-write fsync in multi-process mode (removes the
+# journal-commit convoy -> higher fill throughput, lower RSS, a Cyclone change),
+# and fixes auto stripe sizing: the stripe count now derives from a 32MB
+# granularity so small auto-sized volumes get enough stripes for lease-based
+# region pinning to stay local (a 256MB cache goes ~70%->90% hit under mixed
+# load); the derived stripe count is persisted in the volume header and
+# validated on open. Adds stripe_count/stripe_bytes stats (append-only
+# C-struct extension, rebuilt against the vendored header by this bump).
+# OPERATIONAL: the on-disk volume format major version is bumped (kept in
+# lockstep with the document version), so existing cache volumes auto-reset
+# (cold-wipe) on first open after upgrade AND on rollback -- expect a
+# one-time origin-fetch spike; prefer an off-peak reship window.
+# This bump heap-backs the CRC-validation cache: the 65536-slot
+# atomic array made sizeof(Volume) ~520 KB, so any stack-allocated Volume
+# overflowed a 1 MB thread stack (the Windows default) and crashed with
+# STATUS_STACK_OVERFLOW -- caught by the Windows/IIS port's unit tests.
+# sizeof(Volume) drops to ~8.5 KB (one pointer indirection on the read path,
+# negligible); a static_assert guard keeps future large inline members out.
+# No format or API change. Also brings a Cyclone change: the same fix for
+# HitTracker (its 4096-stripe array made sizeof(HitTracker) ~1 MB under
+# MSVC -- a stack-allocated tracker overflowed the Windows 1 MB default
+# thread stack; now heap-backed, sizeof ~120 bytes, static_assert guard).
+# This bump hardens the zero-copy read protocol:
+# one change adds the reader-side acquire fences the copy-then-verify epoch
+# rechecks needed on weakly-ordered CPUs (no-op on x86) and makes the
+# aliased-serving contract explicit (forced-wrap deadline polling is
+# normative -- the module's serve paths already comply); one change closes a
+# wrap-survivor window where a stale directory entry or chain node could
+# hand out a borrow that the ordinary forward fill then overwrote
+# undetected (positional guard at both read choke points); one change stops the
+# multi-process write lock from force-releasing a live-but-stalled holder
+# (liveness proof + takeover-generation guard -- overlapping-write fix).
+# This bump (wave-3 hardening batch): one change holds the
+# per-stripe write lock across the pwrite, closing a microsecond
+# reservation-to-pwrite tear window a concurrent reader could observe;
+# one change also routes in-place volume-header updates through the mapping on
+# Windows, fixing fd writes to mmap'd ranges being silently swallowed on
+# some Windows configurations (relevant to the Windows/IIS port). several changes
+# add libFuzzer read-gauntlet + nightly stress harnesses and a Windows
+# MSVC/AppVerifier CI lane upstream. On-disk format UNCHANGED: no cache
+# reset on upgrade or rollback.
+# This bump (cyclone 330035e: PRs several changes + the upgrade-safety stack
+# several changes, corp the design record) completes the multi-process silent-corruption
+# fix line and makes cross-format upgrades unilaterally safe: one change fixes
+# shared-cursor wrap adoption (a stale-high peer could re-wrap and reserve
+# an OVERLAPPING range -> CRC-clean corruption); one change adds the lifetime-lock
+# reset gate (never reset()/wipe a volume under a live peer -- refuse to
+# open instead); one change bumps the on-disk format to v6 (8-aligned header tail
+# + 8-byte document-slot padding) and fixes the header read-modify-write
+# races on the hit-count and remove-alternate paths; one change encodes
+# format+geometry into the cache FILENAME (cyclone.dat ->
+# cyclone-6-<geohash>.dat), so binaries that disagree on on-disk layout
+# open DIFFERENT files and cross-format upgrade overlap (nginx SIGHUP/USR2,
+# apachectl graceful, IIS overlapped recycle) can no longer corrupt a live
+# peer's cache, regardless of release order; one change adds opt-in startup GC of
+# superseded fingerprint files (CacheConfig::gc_superseded_on_start,
+# default OFF; we do not enable it, and a legacy cyclone.dat is never
+# auto-deleted).
+# OPERATIONAL: v6 is a format bump, but with fingerprinted filenames the
+# new binary opens a NEW cache file rather than resetting the old one --
+# still a cold cache on upgrade (one-time origin-fetch spike; prefer an
+# off-peak window), the previous file is left orphaned on disk (reclaim
+# manually or via the opt-in GC), and ROLLBACK is WARM: the old binary
+# finds its own file untouched.
+#
+# Bumped to a Cyclone change: Cache::volume_files() (embedder access to the actual
+# fingerprint-named on-disk path) and fingerprint-aware resolution for the
+# unsized (size==0) open mode.  mod_pagespeed itself always opens with an
+# explicit size and never touches the volume file by name, so this is a
+# pin-pair bump: the module and the optimizer must pin the SAME cache-library commit (the 2.0
+# nginx integration needs these; see the design record's one-release constraint).
+#
+# This bump (cyclone edecf16): one change fixes the write path when a
+# directory bucket fills with current-phase entries -- the amplifier that
+# makes the post-upgrade refill window worse -- and counts the resulting
+# evictions (bucket_full_evictions); one change brings the cross-process reset
+# gate (one change) to Windows and adds reset-gate observability
+# (resets_gate_verified / resets_under_degraded_gate) plus tests.  The
+# three new counters are appended at the stats-struct tail and surfaced
+# via the console backend stats.  On-disk format UNCHANGED.  Still a
+# pin-pair bump per the design record: the module and the optimizer must pin the SAME commit.
+CYCLONE_COMMIT = "edecf16a4c07fbd5f07ba1c7121b9fcacfc2da07"
 
 # Libevent - cross-platform event notification library
 # Used by LibeventDispatcher for standalone event loop (Apache deployments)

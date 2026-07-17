@@ -34,8 +34,10 @@ cc_library(
         "apr_init.h",
         "apr_thread_compatible_pool.h",
     ],
-    copts = [
-        "-Ithird_party/apr/gen/arch/linux/x64/include/",
+    copts = select({
+        "//bazel:linux_arm64": ["-Ithird_party/apr/gen/arch/linux/arm64/include/"],
+        "//conditions:default": ["-Ithird_party/apr/gen/arch/linux/x64/include/"],
+    }) + [
         "-Iexternal/apr/include/",
         "-Iexternal/apr/include/arch/unix/",
         "-Iexternal/apr/",
@@ -97,8 +99,16 @@ cc_library(
         "-Iexternal/aprutil/include/",
         "-Iexternal/aprutil/include/arch/unix/",
         "-Iexternal/aprutil/",
-        "-Ithird_party/aprutil/gen/arch/linux/x64/include/",
-        "-Ithird_party/apr/gen/arch/linux/x64/include/",
+    ] + select({
+        "//bazel:linux_arm64": [
+            "-Ithird_party/aprutil/gen/arch/linux/arm64/include/",
+            "-Ithird_party/apr/gen/arch/linux/arm64/include/",
+        ],
+        "//conditions:default": [
+            "-Ithird_party/aprutil/gen/arch/linux/x64/include/",
+            "-Ithird_party/apr/gen/arch/linux/x64/include/",
+        ],
+    }) + [
         "-Iexternal/apr/include/",
         "-Iexternal/apr/include/arch/unix/",
         "-Iexternal/apr/",
@@ -131,8 +141,16 @@ cc_library(
         "-Iexternal/aprutil/include/",
         "-Iexternal/aprutil/include/arch/unix/",
         "-Iexternal/aprutil/",
-        "-Ithird_party/aprutil/gen/arch/linux/x64/include/",
-        "-Ithird_party/apr/gen/arch/linux/x64/include/",
+    ] + select({
+        "//bazel:linux_arm64": [
+            "-Ithird_party/aprutil/gen/arch/linux/arm64/include/",
+            "-Ithird_party/apr/gen/arch/linux/arm64/include/",
+        ],
+        "//conditions:default": [
+            "-Ithird_party/aprutil/gen/arch/linux/x64/include/",
+            "-Ithird_party/apr/gen/arch/linux/x64/include/",
+        ],
+    }) + [
         "-Iexternal/apr/include/",
         "-Iexternal/apr/include/arch/unix/",
         "-Iexternal/apr/",

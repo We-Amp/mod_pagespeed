@@ -20,6 +20,12 @@
 #   - authenticate to Docker Hub when DOCKERHUB_TOKEN is present to dodge
 #     anonymous pull rate limits.
 # All three are best-effort and degrade to the previous behaviour.
+#
+# Daemon reachability: every step below goes through the docker CLI, so an
+# unreachable daemon makes `docker image inspect` read as a cache miss and the
+# subsequent `docker pull` read as a registry failure -- reporting "Docker Hub
+# unreachable or rate-limited" for what is really a local socket that is not
+# there. Probe the daemon once, up front, and name the real cause.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -28,6 +34,7 @@ DOCKER_DIR="$(cd "$DOCKER_DIR" && pwd)"
 
 BASE_PULL_TIMEOUT="${BASE_PULL_TIMEOUT:-300}"      # per docker-pull attempt (s)
 IMAGE_BUILD_TIMEOUT="${IMAGE_BUILD_TIMEOUT:-4200}" # whole docker-build (s)
+DAEMON_PING_TIMEOUT="${DAEMON_PING_TIMEOUT:-30}"   # daemon reachability probe (s)
 
 # Determine architecture tag
 case "$(uname -m)" in
@@ -56,6 +63,45 @@ _timeout() {
     wait "$watcher" 2>/dev/null || true
   fi
   return "$rc"
+}
+
+# Fail fast, and accurately, when the docker daemon is not reachable. Bounded so
+# a hung socket cannot stall the job. A WSL runner was seen with a healthy
+# native dockerd whose /run/docker.sock had been unlinked out from under it by
+# Docker Desktop's WSL integration: every docker call failed, and the pre-pull
+# blamed Docker Hub, which sent the investigation at the registry instead of the
+# host. The distinguishing tell was in the timing -- the pulls failed instantly
+# rather than burning their 300s cap -- which is far too subtle to rely on.
+require_docker_daemon() {
+  local out rc=0 attempt
+  # Poll before declaring it down. A single probe turns a transient blip (host
+  # resuming, a daemon restart, a socket re-bind) into a hard failure -- the
+  # recurring "Docker preflight" flake that a re-run then turns green. Same
+  # 5x/3s shape as the 2.0 optimizer line tools/ci/docker-preflight.sh (its), which hit
+  # this class first; unlike its bare `docker info`, each probe here is bounded,
+  # so a HUNG daemon still cannot wedge the job.
+  for attempt in 1 2 3 4 5; do
+    rc=0
+    out="$(_timeout "$DAEMON_PING_TIMEOUT" docker version --format "{{.Server.Version}}" 2>&1)" || rc=$?
+    [ "$rc" -eq 0 ] && break
+    [ "$attempt" -lt 5 ] && sleep 3
+  done
+  # Flatten to a single line: a ::error:: annotation stops at the first newline,
+  # and docker prefixes its error with the failed template's empty line. The
+  # annotation is the record that MATTERS here -- the per-step log blob on these
+  # runners can vanish within minutes, while annotations persist -- so a
+  # multi-line $out silently truncates the cause to "docker said: " and nothing.
+  out="$(printf '%s' "$out" | tr '\n\r\t' '   ' | sed -e 's/  */ /g' -e 's/^ //' -e 's/ $//')"
+  if [ "$rc" -eq 0 ]; then
+    if [ "$attempt" -gt 1 ]; then
+      echo "ensure-ci-image: docker daemon reachable (server ${out}) after ${attempt} attempt(s) — the daemon was briefly unreachable"
+    else
+      echo "ensure-ci-image: docker daemon reachable (server ${out})"
+    fi
+    return 0
+  fi
+  echo "::error::ensure-ci-image: docker daemon is NOT reachable — this is a HOST problem, not a registry problem; nothing below can work. Check that the daemon is running and that its socket exists (on a WSL runner, Docker Desktop's WSL integration can unlink a native dockerd's socket out from under it). DOCKER_HOST=${DOCKER_HOST:-<unset: using the active docker context>}. docker said: ${out}" >&2
+  return 1
 }
 
 # Authenticate to Docker Hub if creds are present (best-effort). Skipped when
@@ -150,6 +196,10 @@ else
 fi
 
 IMAGE="pagespeed1.1-dev:${ARCH_TAG}-${HASH}"
+
+# Before the cache probe: a dead daemon would otherwise look like a cache miss
+# and send us into a build that cannot possibly succeed.
+require_docker_daemon
 
 if docker image inspect "$IMAGE" >/dev/null 2>&1; then
   echo "Image cache hit: $IMAGE"

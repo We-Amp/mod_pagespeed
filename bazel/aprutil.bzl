@@ -1,5 +1,16 @@
 aprutil_build_rule = """
 
+# Linux/arm64 selector for the arm64 pre-generated apr-util headers. Defined
+# inline (like //third_party/libwebp's is_x86) so it is visible inside the
+# @aprutil repo.
+config_setting(
+    name = "linux_arm64",
+    constraint_values = [
+        "@platforms//os:linux",
+        "@platforms//cpu:arm64",
+    ],
+)
+
 cc_library(
     name = "aprutil",
     srcs = [
@@ -94,6 +105,11 @@ cc_library(
             "-Ithird_party/aprutil/gen/arch/mac/x64/include/",
             "-Ithird_party/aprutil/gen/arch/mac/x64/include/private",
             "-Ithird_party/apr/gen/arch/mac/x64/include/",
+        ],
+        ":linux_arm64": [
+            "-Ithird_party/aprutil/gen/arch/linux/arm64/include/",
+            "-Ithird_party/aprutil/gen/arch/linux/arm64/include/private",
+            "-Ithird_party/apr/gen/arch/linux/arm64/include/",
         ],
         "//conditions:default": [
             "-Ithird_party/aprutil/gen/arch/linux/x64/include/",

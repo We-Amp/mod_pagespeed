@@ -1,3 +1,118 @@
+# mod_pagespeed 1.15.0+r19 Release Notes
+
+**Release date:** 2026-07-17
+**Status:** Stable
+
+## Overview
+
+Cache upgrade-safety release, plus zero-copy serving corrections. Update
+recommended.
+
+## Highlights
+
+### Caching: version-safe cache files
+
+- The cache now lives in a file fingerprinted by the bundled cache library's
+  on-disk format version — not the mod_pagespeed release version. Format
+  changes are anticipated to be infrequent, so most future upgrades will keep
+  the cache warm. When the format does change (as it does in this release),
+  old and new worker processes never open the same file, which removes a class
+  of cache-corruption risk during upgrades, when both could briefly overlap on
+  one cache file.
+- **Upgrade note: the first start after upgrading to r19 begins with a cold
+  cache.** Pages keep being served normally and re-optimization proceeds in the
+  background, as with any cold cache.
+- The previous version's cache file is left on disk untouched, so **rolling
+  back to the previous package is warm** — it finds its cache exactly as it
+  left it. Once you are confident you will not roll back, you can delete the
+  older files in the cache directory to reclaim disk. Nothing is deleted
+  automatically. (Cache files are sparse; apparent size overstates actual disk
+  use.)
+- Fixed: when a cache-directory hash bucket filled up entirely with
+  current-version entries, new writes to that bucket were silently dropped (the
+  entry was simply never cached, so affected resources were re-optimized on
+  every request). Writes now land by evicting an existing entry, and a new
+  `bucket_full_evictions` statistic makes the condition observable. The effect
+  was most likely during upgrade-day write storms into a cold cache.
+
+### Zero-copy serving (opt-in, now available on all three platforms)
+
+- Cached resources can be served directly from the memory-mapped cache without
+  copying the payload — available on nginx, Apache, and IIS.
+- A correction to the r18 notes: they described zero-copy serving as on by
+  default on nginx, but common configurations silently made every request
+  ineligible, so it rarely engaged. That defect is fixed — and with r19 the
+  feature is uniformly **opt-in on every platform** while it accrues production
+  soak. On-by-default is planned for a future revision.
+- To enable it:
+  - nginx: `pagespeed CycloneZeroCopy on;`
+  - Apache: `ModPagespeedCycloneZeroCopy on` and
+    `ModPagespeedCycloneZeroCopyServe on`
+  - IIS: `pagespeed CycloneZeroCopy on` and `pagespeed CycloneZeroCopyServe on`
+- A new `zerocopy_serve_ineligible` statistic counts requests that fell back to
+  copied serving, and a one-time log message explains the first fallback (on
+  Apache this message needs `LogLevel info`; the statistic is always on).
+
+### Performance and reliability
+
+- The bundled cache library gains a lock-free read path — cache hits no longer
+  take a lock — and no longer syncs to disk on every cache write (durability is
+  periodic, and the power-loss window stays bounded), plus a hardening batch
+  covering crash recovery and startup edge cases. Under write-heavy load,
+  removing the per-write disk sync measured an order of magnitude higher
+  sustained throughput in internal testing.
+- Memory-mapped cache reads are verified before being promoted into the
+  in-memory tier, hardening the serving path against torn or damaged entries.
+- IIS: fixed a defect where optimization of a site's own sub-resources (CSS,
+  JavaScript, images) could fail to converge on machines whose name resolution
+  prefers the IPv6 loopback — pages then kept serving their original resources
+  for minutes at a time. The server's internal fetches now pin the loopback
+  address family explicitly and fall back to the other family automatically.
+- Windows/IIS: cache-invalidation updates (purge requests) after the first one
+  were silently discarded — the on-disk purge state never advanced, so later
+  purges did not take effect across restarts or between worker processes.
+  Atomic file replacement on Windows now works as intended and purges apply
+  reliably.
+- Windows/IIS: a cross-process guard now prevents one worker process from
+  resetting a shared cache file while another process still has it mapped,
+  closing a corruption window in multi-worker setups; two new statistics
+  (`resets_gate_verified`, `resets_under_degraded_gate`) make gate health
+  observable.
+- IIS: fixed a race in the server's internal fetcher where a sub-resource fetch
+  could be spuriously canceled just after its response had arrived. Because a
+  failed internal fetch is remembered for several minutes, a single spurious
+  abort could stall re-optimization of the affected resource well beyond the
+  moment of failure, surfacing as intermittent optimization stalls.
+- Fixed on all three platforms: behind a TLS-terminating proxy (when the
+  `X-Forwarded-Proto` header is honored), the server's internal fetches for a
+  page's own sub-resources combined the page's `https` scheme with the
+  plain-HTTP listener port — a connection that could never succeed — so the
+  affected CSS, JavaScript, and images were repeatedly re-fetched and never
+  optimized. Internal fetches now use the protocol the listener actually
+  speaks.
+- Cache write-failure warnings are now rate-limited, so a persistent storage
+  condition cannot flood the error log.
+- The legacy JavaScript minifier (used when `UseExperimentalJsMinifier` is off)
+  now minifies files containing ES2015 template literals; r18 passed such files
+  through unmodified, r19 optimizes them.
+
+### Experimental
+
+- The native fetcher (`UseNativeFetcher`, nginx) remains off by default. Native
+  HTTPS support has been introduced, so the fetcher can now retrieve `https://`
+  resources directly. Enabling it requires a `resolver` directive in the nginx
+  configuration.
+
+## Platform Support
+
+| Platform | Module | Status |
+|----------|--------|--------|
+| **Apache 2.4+** | `mod_pagespeed.so` | Stable |
+| **Nginx 1.26+** | `ngx_pagespeed_module.so` | Stable |
+| **IIS 10+** | `pagespeed_iis.dll` | Stable |
+
+---
+
 # mod_pagespeed 1.15.0+r18 Release Notes
 
 **Release date:** 2026-07-11
@@ -12,10 +127,11 @@ hardening across input validation and output escaping. Update recommended.
 
 ### Performance
 
-- Cached resources are now served with far less copying. Apache and IIS serve
-  memory-mapped cache hits zero-copy, and nginx gains an experimental
-  `CycloneZeroCopyServe` mode that serves cache hits directly from the
-  memory-mapped cache. Apache additionally streams optimized resource
+- Cached resources are now served with far less copying. Cache hits are
+  served from the memory-mapped cache by reference (`CycloneZeroCopyServe`) —
+  on by default on nginx, and an experimental opt-in on Apache and IIS — and
+  an experimental fully zero-copy serve mode (`CycloneZeroCopy`, off by
+  default) is available. Apache additionally streams optimized resource
   responses instead of double-buffering them, and nginx serves cached
   responses on HTTP/2 and HTTP/3 through a bounded copy ring.
 - The default file cache size is raised to 1 GB.

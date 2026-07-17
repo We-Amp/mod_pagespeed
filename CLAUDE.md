@@ -263,16 +263,21 @@ convenience wrapper that builds the Apache module and drives the real runner.
 
 ### Linting & Formatting (match CI locally)
 
-These scripts run inside the dev container and reproduce the CI `clang-format
-check` and clang-tidy steps exactly (both pinned to version 20). Run them before
-pushing to avoid a CI round-trip:
+These reproduce the CI `clang-format check` and clang-tidy steps exactly (both
+pinned to clang-format/clang-tidy **20**). Run them before pushing to avoid a CI
+round-trip:
 
 | Command | Does |
 |---------|------|
-| `tools/fix-format.sh` | Reformats all in-scope C/C++ sources under `pagespeed/` and `net/` with `clang-format-20`, matching CI's scope (excludes `pagespeed/iis/*` and vendored files carrying the `DO NOT EDIT BY HAND` banner). |
-| `clang-format-20 -i <file>` | Reformat a single file. |
+| `tools/format.sh` | **Single entry point.** Formats (or `--check` verifies, `--changed` scopes to changed files) exactly the C/C++ CI lints, resolving clang-format **20.x** itself — a local `clang-format-20`, else a pinned `clang-format==20.1.8` pip wheel it bootstraps into a shared cache venv (the same wheel `mirrors-clang-format` installs; verified byte-identical to the CI `clang-format-20`). Needs neither the dev container nor a remote formatter box. |
+| `tools/fix-format.sh` | Reformats all in-scope C/C++ sources under `pagespeed/` and `net/` with `clang-format-20`, matching CI's scope (excludes `pagespeed/iis/*`, `net/instaweb/rewriter/generated/*`, and vendored files carrying the `DO NOT EDIT BY HAND` banner). Requires `clang-format-20` on PATH; prefer `tools/format.sh` if yours is not 20.x. |
 | `tools/tidyup.sh [--fix]` | Runs `clang-tidy-20` (`run-clang-tidy-20`); `--fix` applies auto-fixes. |
-| `tools/install-hooks.sh` | One-time per clone: points `core.hooksPath` at `.githooks/` (pre-commit format check). Bypass once with `git commit --no-verify`. |
+| `tools/install-hooks.sh` | One-time per clone: points `core.hooksPath` at `.githooks/` (commit-time format check **and** a `pre-push` gate that runs `tools/format.sh --check --changed`). Bypass once with `git commit --no-verify` / `git push --no-verify`. |
+
+**Rule:** if your `clang-format` is not **20.x** (a Homebrew `llvm` ships a newer
+major that reformats differently), do **not** format by hand — run
+`tools/format.sh`, which always uses the pinned version. The `pre-push` hook runs
+the same check, so divergent formatting is caught before it is pushed.
 
 ## Envoy Filter
 

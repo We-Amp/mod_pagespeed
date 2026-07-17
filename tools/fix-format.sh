@@ -15,6 +15,7 @@ cd "$(git rev-parse --show-toplevel)"
 find pagespeed net -type f \
   \( -name "*.cc" -o -name "*.cpp" -o -name "*.h" -o -name "*.hpp" \) \
   -not -path "pagespeed/iis/*" \
+  -not -path "net/instaweb/rewriter/generated/*" \
   -print0 \
   | xargs -0 -r grep -LZ "DO NOT EDIT BY HAND" \
   | xargs -0 -r clang-format-20 -i

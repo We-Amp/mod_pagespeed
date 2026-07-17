@@ -22,6 +22,19 @@ config_setting(
     define_values = {"rules_foreign_cc_pin": "envoy"},
 )
 
+# Selects the Linux/arm64 target — used to pick the arm64 pre-generated APR /
+# apr-util configure headers (third_party/{apr,aprutil}/gen/arch/linux/arm64)
+# over the x64 tree. macOS is matched separately (os:macos) so a native
+# Apple-Silicon build keeps its existing mac/x64 tree; this setting requires
+# os:linux so it can never collide with the macOS branch.
+config_setting(
+    name = "linux_arm64",
+    constraint_values = [
+        "@platforms//os:linux",
+        "@platforms//cpu:arm64",
+    ],
+)
+
 # libcurl - HTTP client library (built from source via cmake)
 # =============================================================================
 

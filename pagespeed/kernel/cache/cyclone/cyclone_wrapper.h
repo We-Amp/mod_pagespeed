@@ -143,6 +143,14 @@ typedef struct CycloneCacheStats {
   uint64_t wraps_forced_past_lease;  // Wraps forced past the lease ceiling
   uint64_t tag_collision_evictions;  // Dir entries evicted by full-bucket
                                      // (bucket,tag) collision on insert
+  uint64_t bucket_full_evictions;    // Entries evicted because a directory
+                                     // bucket was full of current-phase
+                                     // entries (upgrade-day amplifier signal)
+  uint64_t resets_under_degraded_gate;  // Resets performed while the
+                                        // cross-process reset gate was
+                                        // unavailable (the alarm)
+  uint64_t resets_gate_verified;        // Resets performed with the gate
+                                        // confirming no live peer
 } CycloneCacheStats;
 
 // ============================================================================

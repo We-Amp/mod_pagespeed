@@ -1,5 +1,15 @@
 apr_build_rule = """
 
+# Linux/arm64 selector for the arm64 pre-generated APR headers. Defined inline
+# (like //third_party/libwebp's is_x86) so it is visible inside the @apr repo.
+config_setting(
+    name = "linux_arm64",
+    constraint_values = [
+        "@platforms//os:linux",
+        "@platforms//cpu:arm64",
+    ],
+)
+
 cc_library(
     name = "apr",
     srcs = [
@@ -141,6 +151,7 @@ cc_library(
     ],
     copts = select({
         "@platforms//os:macos": ["-Ithird_party/apr/gen/arch/mac/x64/include/"],
+        ":linux_arm64": ["-Ithird_party/apr/gen/arch/linux/arm64/include/"],
         "//conditions:default": ["-Ithird_party/apr/gen/arch/linux/x64/include/"],
     }) + [
         "-Iexternal/apr/random/unix",

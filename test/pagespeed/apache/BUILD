@@ -15,8 +15,16 @@ pagespeed_cc_test_library(
         "-Iexternal/aprutil/include/",
         "-Iexternal/aprutil/include/arch/unix/",
         "-Iexternal/aprutil/",
-        "-Ithird_party/aprutil/gen/arch/linux/x64/include/",
-        "-Ithird_party/apr/gen/arch/linux/x64/include/",
+    ] + select({
+        "//bazel:linux_arm64": [
+            "-Ithird_party/aprutil/gen/arch/linux/arm64/include/",
+            "-Ithird_party/apr/gen/arch/linux/arm64/include/",
+        ],
+        "//conditions:default": [
+            "-Ithird_party/aprutil/gen/arch/linux/x64/include/",
+            "-Ithird_party/apr/gen/arch/linux/x64/include/",
+        ],
+    }) + [
         "-Iexternal/apr/include/",
         "-Iexternal/apr/include/arch/unix/",
         "-Iexternal/apr/",
@@ -48,8 +56,16 @@ pagespeed_cc_test(
         "-Iexternal/aprutil/include/",
         "-Iexternal/aprutil/include/arch/unix/",
         "-Iexternal/aprutil/",
-        "-Ithird_party/aprutil/gen/arch/linux/x64/include/",
-        "-Ithird_party/apr/gen/arch/linux/x64/include/",
+    ] + select({
+        "//bazel:linux_arm64": [
+            "-Ithird_party/aprutil/gen/arch/linux/arm64/include/",
+            "-Ithird_party/apr/gen/arch/linux/arm64/include/",
+        ],
+        "//conditions:default": [
+            "-Ithird_party/aprutil/gen/arch/linux/x64/include/",
+            "-Ithird_party/apr/gen/arch/linux/x64/include/",
+        ],
+    }) + [
         "-Iexternal/apr/include/",
         "-Iexternal/apr/include/arch/unix/",
         "-Iexternal/apr/",

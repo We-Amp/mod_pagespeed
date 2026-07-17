@@ -7,17 +7,23 @@
 #               valid). This is the portability gate when run on debian:11/debian:12.
 #   2. SERVE  — nginx starts and answers on the listen port.
 #   3. OPTIMIZE — a CSS-referencing page comes back with the `X-Page-Speed` header
-#               (the optimizer is active in the request path).
+#               (the optimizer is active in the request path), and the header VALUE
+#               is exactly the version this tree stamps (derived from
+#               net/instaweb/public/VERSION; override via EXPECTED_XPS, fallback
+#               "1.15.0" when run detached from a checkout). Catches a pair built
+#               with a stale/unpatched VERSION (a "-beta.1" sidecar).
 #   4. LICENSE — if a license token is supplied, the optimized response must NOT
 #               carry `X-PageSpeed-Warn: unlicensed`. Without a token the
 #               warning IS expected (eval mode) — asserted so a silently-disabled
 #               optimizer can't pass.
 #
-# Usage: check-sidecar-pair.sh <pairdir> <docker-image> [license-token-path]
+# Usage: [EXPECTED_XPS=<version>] check-sidecar-pair.sh <pairdir> <docker-image> [license-token-path]
 #   <pairdir>       dir containing nginx + ngx_pagespeed_module.so
 #   <docker-image>  e.g. debian:11, debian:12 (the --platform is the host's arch;
 #                   callers that cross-build pass --platform via DOCKER_DEFAULT_PLATFORM)
 #   [license-token] optional path to a license token; enables the LICENSE assertion
+#   EXPECTED_XPS    optional expected X-Page-Speed value; overrides the VERSION-file
+#                   derivation
 set -uo pipefail
 
 PAIR="${1:?usage: check-sidecar-pair.sh <pairdir> <image> [token]}"
@@ -36,11 +42,27 @@ if [ -n "$TOKEN" ]; then
   TOKEN_ENV="1"
 fi
 
-echo "===== sidecar pair smoke: $IMAGE (license=${TOKEN_ENV}) ====="
+# Expected X-Page-Speed value: the version the tree stamps into the module
+# (version.h.in: MAJOR.MINOR.BUILD plus "-PRERELEASE" when non-empty). The
+# workflow patches net/instaweb/public/VERSION before building, so deriving
+# from the same file asserts the pair matches the tree that built it.
+if [ -z "${EXPECTED_XPS:-}" ]; then
+  VERSION_FILE="$(cd "$(dirname "$0")/../.." 2>/dev/null && pwd)/net/instaweb/public/VERSION"
+  if [ -f "$VERSION_FILE" ]; then
+    EXPECTED_XPS=$(
+      . "$VERSION_FILE"
+      printf '%s.%s.%s%s' "$MAJOR" "$MINOR" "$BUILD" "${PRERELEASE:+-$PRERELEASE}"
+    )
+  else
+    EXPECTED_XPS="1.15.0"
+  fi
+fi
+
+echo "===== sidecar pair smoke: $IMAGE (license=${TOKEN_ENV}, expect X-Page-Speed ${EXPECTED_XPS}) ====="
 # shellcheck disable=SC2086
 docker run --rm --init $PLAT_ARG \
   -v "$PAIR:/p:ro" "${TOKEN_MOUNT[@]+"${TOKEN_MOUNT[@]}"}" \
-  -e HAVE_LICENSE="$TOKEN_ENV" \
+  -e HAVE_LICENSE="$TOKEN_ENV" -e EXPECTED_XPS="$EXPECTED_XPS" \
   "$IMAGE" bash -c '
     set -e; export DEBIAN_FRONTEND=noninteractive
     apt-get update -qq >/dev/null 2>&1
@@ -98,7 +120,9 @@ CONF
     [ "$ok" = 1 ] || { echo "  >>> SERVE FAILED (no response on :8099)"; exit 1; }
 
     # 3. OPTIMIZE — drive a few requests so pagespeed processes the page, then assert
-    #    the X-Page-Speed header (optimizer active in the request path).
+    #    the X-Page-Speed header (optimizer active in the request path) AND that its
+    #    value is exactly the expected version (a presence-only check let a pair
+    #    built from an unpatched VERSION ship a prerelease stamp —).
     HDRS=""
     for i in $(seq 1 12); do
       HDRS=$(curl -fsS -D - -o /dev/null "http://127.0.0.1:8099/" 2>/dev/null || true)
@@ -106,7 +130,12 @@ CONF
       sleep 1
     done
     if echo "$HDRS" | grep -iq "^X-Page-Speed:"; then
-      echo "    OPTIMIZE: X-Page-Speed present"
+      XPS=$(echo "$HDRS" | grep -i "^X-Page-Speed:" | head -1 | cut -d: -f2- | tr -d "[:space:]")
+      if [ "$XPS" = "$EXPECTED_XPS" ]; then
+        echo "    OPTIMIZE: X-Page-Speed: $XPS (version matches)"
+      else
+        echo "  >>> VERSION FAILED: X-Page-Speed is \"$XPS\", expected \"$EXPECTED_XPS\""; exit 1
+      fi
     else
       echo "  >>> OPTIMIZE FAILED (no X-Page-Speed header after warmup)"; echo "$HDRS" | sed "s/^/    /"; exit 1
     fi

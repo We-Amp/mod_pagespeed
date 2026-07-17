@@ -209,3 +209,12 @@ test:ci --test_output=errors
 # is observed. The config exists mainly to provide a named config for arm64 builds.
 build:ci-linux-arm64 --config=ci
 build:ci-linux-arm64 --nostamp
+# arm64 APR/apr-util pre-generated header paths. build:linux (auto-applied via
+# enable_platform_specific_config) injects the x64 gen -I globally; on arm64
+# the //bazel:linux_arm64 select places only the arm64 gen tree in the sandbox,
+# so the x64 -I resolves nothing and these supply the arm64 tree for targets
+# that rely on the global include (e.g. tests including apr_network_io.h with
+# no local copts). Both -I sets coexist harmlessly: in sandboxed builds only
+# the selected tree exists, and clang ignores nonexistent include dirs.
+build:ci-linux-arm64 --copt="-Ithird_party/aprutil/gen/arch/linux/arm64/include/"
+build:ci-linux-arm64 --copt="-Ithird_party/apr/gen/arch/linux/arm64/include/"

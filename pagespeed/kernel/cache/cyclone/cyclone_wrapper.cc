@@ -522,6 +522,9 @@ void cyclone_cache_get_stats(const CycloneCacheHandle* cache,
   stats->writes_dropped_by_lease = s.writes_dropped_by_lease;
   stats->wraps_forced_past_lease = s.wraps_forced_past_lease;
   stats->tag_collision_evictions = s.tag_collision_evictions;
+  stats->bucket_full_evictions = s.bucket_full_evictions;
+  stats->resets_under_degraded_gate = s.resets_under_degraded_gate;
+  stats->resets_gate_verified = s.resets_gate_verified;
 }
 
 const char* cyclone_get_last_error(void) {
