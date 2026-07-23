@@ -147,8 +147,9 @@ function Reset-PageSpeedTestCache {
     # (silently, under -ErrorAction SilentlyContinue) and the w3wp may also
     # service one more request in the gap, rewriting cache entries with the
     # prior job's Last-Modified header before the recycle drops the
-    # in-memory LRU. Recycle first -> brief sleep so w3wp exits -> then
-    # purge.
+    # in-memory LRU. Recycle first -> wait for the old w3wp to actually exit
+    # (a recycle only INITIATES the drain, and AppVerifier + page heap make
+    # the teardown slow --) -> then purge.
     #
     # mod_pagespeed's rewrite cache is keyed by input URL + content hash --
     # NOT by file mtime -- so a cached rewrite from a previous job hits on
@@ -177,11 +178,30 @@ function Reset-PageSpeedTestCache {
         if (Get-Command Restart-WebAppPool -ErrorAction SilentlyContinue) {
             Restart-WebAppPool -Name $AppPoolName -ErrorAction SilentlyContinue
             Write-Status "Recycled app pool: $AppPoolName" "Gray"
-            # Brief drain so w3wp finishes any in-flight request and exits
-            # before we touch the cache files it might still be writing.
-            Start-Sleep -Seconds 2
         }
     } catch { }
+
+    # Wait for the OLD worker to actually exit before touching cache files it
+    # may still be writing (cyclone.dat is held open for the process
+    # lifetime). A recycle only INITIATES the drain, and under AppVerifier +
+    # page heap a w3wp teardown runs far past the blind 2s sleep this
+    # replaces (locked-file purge failures in 4 of 8 nightly
+    # iterations). Poll via appcmd -- same idiom as the rest of this script,
+    # no WebAdministration dependency; an erroring/empty listing (pool not
+    # created yet on a cold runner) reads as "no worker", the goal state.
+    # Bounded and non-fatal: this purge is a best-effort safety net shared by
+    # the PR lanes, and a lingering CROSS-JOB worker must not hard-fail them
+    # (the AppVerif matrix does its own stop-wait-purge and fails loud).
+    $wpGone = $false
+    foreach ($wait in 1..30) {
+        $wps = @()
+        try { $wps = Invoke-AppCmd list wp "/apppool.name:$AppPoolName" } catch { }
+        if ("$wps" -notmatch 'WP "\d+"') { $wpGone = $true; break }
+        Start-Sleep -Seconds 1
+    }
+    if (-not $wpGone) {
+        Write-Status "Warning: $AppPoolName worker still draining after 30s; purging around residual locks" "Yellow"
+    }
 
     # Step 2: purge stale on-disk cache. Loud on partial failure.
     foreach ($staleCache in @($CacheDir,

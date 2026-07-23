@@ -44,6 +44,7 @@ from pagespeed_test_framework import (
     assert_not_contains,
     assert_http_status,
     parse_statistics,
+    require_status_ok,
 )
 
 
@@ -58,7 +59,10 @@ def stats_log_path(server_config) -> Optional[pathlib.Path]:
     log_path = os.environ.get("PAGESPEED_STATS_LOG")
     if log_path:
         return pathlib.Path(log_path)
-    # Default location for IIS
+    # Default location for IIS (only derivable when a cache dir is configured;
+    # PAGESPEED_CACHE_DIR has no built-in default)
+    if not server_config.cache_dir:
+        return None
     return pathlib.Path(server_config.cache_dir) / "stats.log"
 
 
@@ -313,7 +317,13 @@ class TestStatisticsLogging:
     @pytest.mark.slow
     def test_statistics_log_file_exists(self, stats_log_path: pathlib.Path):
         """Statistics log file should exist when logging is enabled."""
-        if not stats_log_path or not stats_log_path.exists():
+        if not stats_log_path:
+            pytest.skip(
+                "Statistics log file location is not configured "
+                "(neither PAGESPEED_STATS_LOG nor PAGESPEED_CACHE_DIR is set). "
+                "Set PAGESPEED_STATS_LOG to enable this test."
+            )
+        if not stats_log_path.exists():
             pytest.skip(
                 f"Statistics log file not found at {stats_log_path}. "
                 "Set PAGESPEED_STATS_LOG to enable this test."
@@ -454,8 +464,8 @@ class TestStatisticsJson:
 
         try:
             data = json.loads(response.text)
-        except json.JSONDecodeError:
-            pytest.skip("JSON handler not available or returned invalid JSON")
+        except json.JSONDecodeError as e:
+            pytest.fail(f"Response is not valid JSON: {e}\nContent: {response.text[:500]}")
 
         # Each requested variable should appear exactly once
         text = response.text
@@ -486,8 +496,8 @@ class TestStatisticsJson:
 
         try:
             data = json.loads(response.text)
-        except json.JSONDecodeError:
-            pytest.skip("JSON handler not available")
+        except json.JSONDecodeError as e:
+            pytest.fail(f"Response is not valid JSON: {e}\nContent: {response.text[:500]}")
 
         # Should have timestamps key
         assert "timestamps" in data, (
@@ -549,7 +559,10 @@ class TestStatisticsConsole:
 
         # Console might not be configured
         if response.status == 404:
-            pytest.skip("Statistics console not configured")
+            # ConsolePath /pagespeed_console is configured on the lane
+            # (setup_iis_full.ps1); a 404 is a handler regression
+            #.
+            require_status_ok(response, "Statistics console")
 
         assert_http_status(response, 200)
 
@@ -562,7 +575,10 @@ class TestStatisticsConsole:
         response = client.get(console_url)
 
         if response.status == 404:
-            pytest.skip("Statistics console not configured")
+            # ConsolePath /pagespeed_console is configured on the lane
+            # (setup_iis_full.ps1); a 404 is a handler regression
+            #.
+            require_status_ok(response, "Statistics console")
 
         assert_http_status(response, 200)
 
@@ -588,7 +604,10 @@ class TestStatisticsConsole:
         response = client.get(console_url)
 
         if response.status == 404:
-            pytest.skip("Statistics console not configured")
+            # ConsolePath /pagespeed_console is configured on the lane
+            # (setup_iis_full.ps1); a 404 is a handler regression
+            #.
+            require_status_ok(response, "Statistics console")
 
         assert_http_status(response, 200)
 
@@ -607,9 +626,15 @@ class TestStatisticsConsole:
             ]
         )
 
-        # This is a soft check - console might be minimal
         if not has_interactive:
-            pytest.skip("Console does not appear to have interactive elements")
+            # The console SPA ships scripts/charts; a bare page means the
+            # console assets failed to render -- a product regression
+            #.
+            pytest.fail(
+                "Console page has no interactive elements "
+                "(<script/chart/graph/canvas/svg).\n"
+                f"Response body: {response.text[:500]}"
+            )
 
 
 # ============================================================================

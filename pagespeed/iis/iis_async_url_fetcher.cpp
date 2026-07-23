@@ -17,6 +17,8 @@ IisAsyncWorker::IisAsyncWorker(IisAsyncUrlFetcher * fetcher,AsyncFetch *fetch,Me
 	content_bytes_=0;
 	this->fetcher=fetcher;
 	this->messagehandler=messagehandler;
+	starting_=false;
+	deferred_stop_=false;
 }
 
 IisAsyncWorker::~IisAsyncWorker()
@@ -126,13 +128,34 @@ void IisAsyncUrlFetcher::Fetch(const GoogleString& url,
 	    fetch->request_headers()->Lookup1(HttpAttributes::kHost), url);
 	const char* host = host_storage.c_str();
 	message_handler->Message(kInfo, "Native Fetching of [%s] (host:[%s])", url.c_str(), host);
+	// WinHTTP can complete synchronously: OnCompleted -> StopFetch may run
+	// re-entrantly on THIS thread from inside GetUrl() (the critical section
+	// is reentrant for its owner). Deleting the worker there would free the
+	// object GetUrl() is still executing on, so StopFetch defers the
+	// delete to here, after GetUrl() has fully returned.
+	worker->set_starting(true);
 	worker->GetUrl(url, host);
+	worker->set_starting(false);
+	if (worker->deferred_stop()) {
+		// StopFetch already removed the worker from asyncworkers.
+		delete worker;
+	}
 	LeaveCriticalSection(&cs);
 }
 void IisAsyncUrlFetcher::StopFetch(IisAsyncWorker *worker)
 {
 	EnterCriticalSection(&cs);
 	if (this->shutting_down_) {
+		LeaveCriticalSection(&cs);
+		return;
+	}
+	if (worker->starting()) {
+		// Re-entrant call from a synchronous completion inside Fetch()'s
+		// worker->GetUrl() on this same thread. The worker's own methods are
+		// still on the stack below us — defer the delete to Fetch(). Remove
+		// it from the list now so ShutDown() can never double-handle it.
+		asyncworkers.remove(worker);
+		worker->set_deferred_stop(true);
 		LeaveCriticalSection(&cs);
 		return;
 	}

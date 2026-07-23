@@ -53,7 +53,25 @@ param(
 
     # AppVerif + page heap run PageSpeed's async work 5-50x slower; scales
     # fetch_until's poll budget and the pytest per-test timeout.
-    [int]$TimeoutMultiplier = 4,
+    #
+    # 6, not 4: the rewrite-filter tests budget fetch_until at
+    # 30s base, so 4x polls for 120s -- but a transient loopback-fetch failure
+    # is remembered by the module for ~300s (the 5-minute negative cache;
+    # url_input_resource_recent_fetch_failure climbed in EVERY regressed
+    # nightly iteration measured: 3, 8, 10, 20, 63), and a 120s budget can
+    # never outwait that window. 6x (180s) plus one fetch retry (below) spans
+    # it: even a poll that starts the moment the failure is remembered still
+    # has 300+s ahead of it. This buys budget only -- a rewrite that never
+    # converges still times out and fails.
+    [int]$TimeoutMultiplier = 6,
+
+    # Extra full-budget fetch_until attempts after a TimeoutError, exported as
+    # PAGESPEED_TEST_FETCH_RETRIES. Opt-in (0 everywhere it is unset), loud
+    # (every retry is logged), and cannot retry a non-converging rewrite into
+    # passing -- see client.py's _read_fetch_until_retries. 1 here: pairs with
+    # the multiplier to carry a poll across the 300s fetch-failure window
+    #, matching what the CI workflow's iis-sys-tests lane already runs.
+    [int]$FetchRetries = 1,
 
     # Print the plan and exit, without touching machine-global verifier state.
     [switch]$DryRun
@@ -73,6 +91,7 @@ $ArmSpecs = @{
 }
 
 $gflags = 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\gflags.exe'
+$appcmd = "$env:SystemRoot\System32\inetsrv\appcmd.exe"
 $detector = Join-Path $RepoDir 'tools\ci\Assert-NoWorkerFailFast.ps1'
 if (-not (Test-Path $detector)) { throw "detector not found: $detector" }
 
@@ -92,6 +111,7 @@ foreach ($p in $plan) {
     Write-Host ("  {0,-18} x{1}  cuzz={2} pageheap={3}" -f $p.Name, $p.Iterations, $p.Spec.Cuzz, $p.Spec.PageHeap)
 }
 Write-Host "  providers: $($BaseProviders -join ' ') (Leak deliberately absent)"
+Write-Host "  timeout multiplier: ${TimeoutMultiplier}x, fetch retries: $FetchRetries"
 Write-Host "  total iterations: $(($plan | Measure-Object -Property Iterations -Sum).Sum)"
 if ($DryRun) { Write-Host 'dry run; machine state untouched.'; exit 0 }
 
@@ -105,6 +125,32 @@ function Disable-Verifier {
     $global:LASTEXITCODE = 0
 }
 
+function Stop-PoolWorker {
+    # Stop an app pool and wait until its worker process has actually EXITED.
+    # `appcmd stop apppool` only initiates a graceful shutdown: w3wp keeps
+    # draining in-flight requests (up to shutdownTimeLimit, 90s) with the
+    # PageSpeed file cache still open, and under AppVerifier + page heap the
+    # teardown itself is slow too. appcmd's "not found"/"already stopped"
+    # goes to stderr -- a terminating ErrorRecord under
+    # ErrorActionPreference=Stop -- hence the try/catch (same pattern as
+    # Disable-Verifier); a missing pool has no worker, which is the goal
+    # state anyway. Returns $false if a worker outlives the bounded wait.
+    param([string]$PoolName, [int]$TimeoutSec = 90)
+    try { & $appcmd stop apppool $PoolName 2>&1 | Out-Null } catch { }
+    $global:LASTEXITCODE = 0
+    $deadline = (Get-Date).AddSeconds($TimeoutSec)
+    while ($true) {
+        $wps = @()
+        try { $wps = & $appcmd list wp "/apppool.name:$PoolName" 2>&1 } catch { }
+        $global:LASTEXITCODE = 0
+        # `WP "1234" (applicationPool:...)` per live worker; an erroring or
+        # empty listing means no worker, which is what the caller needs.
+        if ("$wps" -notmatch 'WP "\d+"') { return $true }
+        if ((Get-Date) -ge $deadline) { return $false }
+        Start-Sleep -Seconds 2
+    }
+}
+
 $results = [System.Collections.Generic.List[object]]::new()
 
 try {
@@ -116,9 +162,57 @@ try {
 
             Disable-Verifier
 
+            # Quiesce the workers that hold the file cache BEFORE purging it
+            #. The previous iteration's teardown only INITIATED a
+            # graceful pool stop, so its w3wp can still be draining here with
+            # the cache open (cyclone.dat is process-lifetime-held); the
+            # legacy purge ran straight into that window under
+            # -ErrorAction SilentlyContinue, i.e. an invisible partial no-op,
+            # and the next iteration then served stale entries into
+            # Last-Modified mismatches and cold-cache slow paths. Stop both
+            # pools that can hold C:\pagespeed_cache -- the module is global
+            # and the server-level config points every pool at that path --
+            # then wait for the workers to actually exit. Strictly
+            # pool-scoped, never a blind w3wp kill: this runner's single IIS
+            # instance is shared with other jobs (e.g. the IIS ASan nightly).
+            foreach ($pool in @('PageSpeedTestPool', 'DefaultAppPool')) {
+                if (-not (Stop-PoolWorker $pool)) {
+                    # WAS force-kills at shutdownTimeLimit, so this is a
+                    # genuinely stuck worker; the purge retries below absorb
+                    # the residual lock, and a persistent failure fails LOUD.
+                    Write-Host "WARNING: $pool worker still alive after the bounded drain wait; purging will retry around the lock."
+                }
+            }
+
             # Purge the file cache so a previous iteration's cache-extended
-            # resources cannot produce Last-Modified mismatches.
-            if (Test-Path 'C:\pagespeed_cache') { Remove-Item 'C:\pagespeed_cache' -Recurse -Force -ErrorAction SilentlyContinue }
+            # resources cannot produce Last-Modified mismatches. Bounded retry
+            # around residual locks. If it STILL fails, the cache state is
+            # unknown: count the iteration as regressed WITHOUT running it,
+            # because a result measured on a contaminated cache is a harness
+            # artifact wearing a product regression's clothes (and silently
+            # continuing is the bug being fixed here, not a strategy).
+            $cacheDir = 'C:\pagespeed_cache'
+            $purged = $true
+            if (Test-Path $cacheDir) {
+                $purged = $false
+                foreach ($attempt in 1..4) {
+                    Remove-Item $cacheDir -Recurse -Force -ErrorAction SilentlyContinue
+                    if (-not (Test-Path $cacheDir)) { $purged = $true; break }
+                    Write-Host "purge attempt $attempt/4 could not remove $cacheDir; retrying in 5s"
+                    Start-Sleep -Seconds 5
+                }
+            }
+            if (-not $purged) {
+                $left = @(Get-ChildItem $cacheDir -Recurse -Force -ErrorAction SilentlyContinue | Select-Object -First 5)
+                Write-Host "ERROR: $cacheDir survived 4 purge attempts (residual: $($left.FullName -join ', '))."
+                Write-Host "Skipping ${tag}: no trustworthy result is possible on a contaminated cache."
+                $results.Add([pscustomobject]@{
+                        Arm = $arm.Name; Iteration = $i; Seconds = 0
+                        TestRc = -1; FailFast = $false; Ok = $false
+                    })
+                Write-Host "$tag : SKIPPED (cache purge failed), counted as regressed"
+                continue
+            }
 
             appverif -enable @BaseProviders -for w3wp.exe
             if ($arm.Spec.Cuzz)     { appverif -enable Cuzz -for w3wp.exe -with Cuzz.FuzzingLevel=4 }
@@ -127,15 +221,25 @@ try {
             # Recycle AFTER arming: IFEO settings are read at process start, so
             # the worker that serves this iteration must be spawned now. The old
             # worker dies unverified, which is why this cannot trip the detector.
+            # START, not restart: the pre-purge quiesce above STOPPED this pool,
+            # and Restart-WebAppPool on a stopped pool throws InvalidOperation
+            # ("You have to start stopped object before restarting it") -- a
+            # terminating error that -ErrorAction SilentlyContinue does NOT
+            # swallow (a dispatched run died here). An idle started
+            # pool has no worker; any worker spawned on a later request reads
+            # the armed IFEO and is verified. PageSpeedTestPool needs no such
+            # handling: setup_iis_full.ps1 deletes, recreates and starts it
+            # inside run_iis_tests.ps1, after arming.
             Import-Module WebAdministration -ErrorAction SilentlyContinue
-            if (Get-Command Restart-WebAppPool -ErrorAction SilentlyContinue) {
-                Restart-WebAppPool -Name 'DefaultAppPool' -ErrorAction SilentlyContinue
+            if (Get-Command Start-WebAppPool -ErrorAction SilentlyContinue) {
+                try { Start-WebAppPool -Name 'DefaultAppPool' -ErrorAction Stop } catch { }
             }
 
             $since = Get-Date
             $sw = [Diagnostics.Stopwatch]::StartNew()
 
             $env:PAGESPEED_TEST_TIMEOUT_MULTIPLIER = "$TimeoutMultiplier"
+            $env:PAGESPEED_TEST_FETCH_RETRIES = "$FetchRetries"
             # Route run_iis_tests.ps1's on-failure snapshots (statistics +
             # message_history, taken before its teardown recycles the worker)
             # into this iteration's corner of the evidence artifact.
@@ -177,7 +281,8 @@ if ($bad.Count -gt 0) {
     Write-Host "FAIL: $($bad.Count) of $($results.Count) iteration(s) regressed:"
     foreach ($b in $bad) {
         $why = @()
-        if ($b.TestRc -ne 0) { $why += "tests rc=$($b.TestRc)" }
+        if ($b.TestRc -eq -1) { $why += 'cache purge failed (locked)' }
+        elseif ($b.TestRc -ne 0) { $why += "tests rc=$($b.TestRc)" }
         if ($b.FailFast)     { $why += 'worker fail-fast' }
         Write-Host "  $($b.Arm)-$($b.Iteration): $($why -join ', ')"
     }

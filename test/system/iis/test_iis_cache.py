@@ -42,6 +42,8 @@ from pagespeed_test_framework import (
     assert_not_contains,
     assert_http_status,
     parse_statistics,
+    require_no_auth_gate,
+    require_status_ok,
 )
 
 
@@ -102,7 +104,13 @@ class TestCacheFlush:
     ):
         """Cache flush file should exist after flush operation."""
         if not cache_flush_file:
-            pytest.skip("Cache directory not configured")
+            pytest.fail(
+                "Cannot locate cache.flush: PAGESPEED_CACHE_DIR is not set and "
+                "has no default -- every lane uses a different FileCachePath, "
+                "so this test cannot guess where <cache dir>/cache.flush lives. "
+                "Export PAGESPEED_CACHE_DIR to the cache directory the IIS "
+                "server under test is actually configured with."
+            )
 
         # Perform flush
         flush_cache()
@@ -229,50 +237,61 @@ class TestCacheFlushStatistics:
 
     @pytest.mark.iis_only
     @pytest.mark.requires_stats
-    @pytest.mark.skip(
-        reason="cache flush via file-touch does not propagate to "
-        "cache_flush_count on IIS in the current test rig, and the "
-        "admin-API fallback in flush_cache is also broken because "
-        "iis_admin_handler.cc is dead code. Un-skip once "
-        "the admin handler lands or once the file-watch path is debugged on the "
-        "the IIS VM."
-    )
     def test_cache_flush_count_increments(
         self,
         client: PageSpeedClient,
         server_config,
-        flush_cache: Callable[[], None],
+        example_root: str,
     ):
-        """cache_flush_count should increment after cache flush.
+        """cache_flush_count should increment after a whole-cache purge.
 
         Ported from cache_flushing.sh:
         NUM_NEW_FLUSHES=$(expr $NUM_FLUSHES - $NUM_INITIAL_FLUSHES)
         check [ $NUM_NEW_FLUSHES -ge 1 ]
         check [ $NUM_NEW_FLUSHES -lt 20 ]
+
+        The IIS rig runs with EnableCachePurge on, so the live flush path
+        is the purge machinery, not the legacy cache.flush file-watch:
+        GET /pagespeed_admin/cache?purge=* routes through AdminSite::PurgeHandler
+        -> PurgeContext::SetCachePurgeGlobalTimestampMs, and the next
+        request's FlushCacheIfNecessary -> PollFileSystem applies the new
+        purge set and bumps cache_flush_count via UpdateCachePurgeSet
+        (system_server_context.cc). The flush_cache fixture's cache.flush
+        file-touch is inert here because PurgeContext watches cache.purge
+        in purge mode.
         """
         # Get initial count
         stats_before = client.get_statistics(stats_path=server_config.stats_path)
         initial_count = stats_before.get("cache_flush_count", 0)
 
-        # Flush the cache
-        flush_cache()
+        # Drive a whole-cache purge through the live admin path.
+        purge_url = f"{server_config.admin_path}/cache?purge=*"
+        response = client.get(purge_url)
+        require_no_auth_gate(response, "Admin endpoint /pagespeed_admin")
+        require_status_ok(response, "Cache purge endpoint")
 
-        # Wait for stats to update
-        time.sleep(1.5)
-
-        # Get new count
-        stats_after = client.get_statistics(stats_path=server_config.stats_path)
-        new_count = stats_after.get("cache_flush_count", 0)
+        # The counter moves when the next pagespeed-handled request's
+        # PollFileSystem observes the updated purge set; poll, driving a
+        # page fetch each round to trigger the check.
+        new_count = initial_count
+        deadline = time.time() + 30.0
+        while time.time() < deadline:
+            client.get(f"{example_root}/extend_cache.html")
+            stats_after = client.get_statistics(stats_path=server_config.stats_path)
+            new_count = stats_after.get("cache_flush_count", 0)
+            if new_count > initial_count:
+                break
+            time.sleep(0.5)
 
         # Should have incremented by at least 1, but not excessively
         delta = new_count - initial_count
         assert delta >= 1, (
-            f"cache_flush_count should increment after flush. "
+            f"cache_flush_count should increment after purge. "
             f"Before: {initial_count}, After: {new_count}, Delta: {delta}"
         )
         assert delta < 20, (
             f"cache_flush_count incremented too much ({delta}). "
-            f"Expected < 20 flushes from single touch."
+            f"Expected < 20 flushes from a single purge."
         )
 
     @pytest.mark.iis_only
@@ -463,8 +482,10 @@ class TestCachePurge:
         purge_url = f"{server_config.admin_path}/cache?purge=*"
         response = client.get(purge_url)
 
-        if response.status == 403:
-            pytest.skip("Admin endpoint requires authentication")
+        # The lane runs the admin endpoint without auth; a 403 from the
+        # admin handler is a plausible regression, not an environment
+        # condition.
+        require_no_auth_gate(response, "Admin endpoint /pagespeed_admin")
 
         assert_http_status(response, 200)
         content_type = response.header("Content-Type").lower()
@@ -491,8 +512,10 @@ class TestCachePurge:
         )
         response = client.get(purge_url)
 
-        if response.status == 403:
-            pytest.skip("Admin endpoint requires authentication")
+        # The lane runs the admin endpoint without auth; a 403 from the
+        # admin handler is a plausible regression, not an environment
+        # condition.
+        require_no_auth_gate(response, "Admin endpoint /pagespeed_admin")
 
         assert_http_status(response, 200)
         data = json.loads(response.text)

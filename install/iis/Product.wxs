@@ -218,17 +218,20 @@
       <CreateFolder />
     </Component>
 
-    <!-- Default pagespeed.config. NeverOverwrite preserves admin edits
-         across upgrades; Permanent leaves the file on uninstall so a
-         reinstall picks up existing customizations.
+    <!-- THE machine-global default pagespeed.config — the design record tier 1, the
+         base layer of the documented single source of truth. This is the ONE
+         seeded default; the wwwroot copy below is a per-site override SAMPLE,
+         not a second competing default. NeverOverwrite preserves
+         admin edits across upgrades; Permanent leaves the file on uninstall so
+         a reinstall picks up existing customizations.
 
          Filed into PAGESPEEDDATA (C:\ProgramData\We-Amp\PageSpeed\)
          alongside the cache + logs subdirectories — one canonical product
-         directory. The legacy C:\ProgramData\We-Amp\IISWebSpeed\ path is
-         no longer created by fresh installs; iis_module_factory.cpp keeps
-         a runtime fallback on it for upgrade-from-IISpeed and
-         upgrade-from-1.1-pre-this-change customers whose config survives
-         via NeverOverwrite. -->
+         directory. The legacy C:\ProgramData\We-Amp\IISWebSpeed\ path
+         is no longer created by fresh installs;
+         iis_config_util.cpp keeps a runtime fallback on it for
+         upgrade-from-IISpeed and upgrade-from-1.1-pre-this-change customers
+         whose config survives via NeverOverwrite. -->
     <Component Id="PagespeedConfig" Directory="PAGESPEEDDATA"
                Guid="A1B2C3D4-1001-4000-8000-000000000004"
                NeverOverwrite="yes" Permanent="yes">
@@ -237,15 +240,22 @@
             KeyPath="yes" />
     </Component>
 
-    <!-- Site-level pagespeed.config in the default wwwroot. The IIS module
-         bails in OnBeginRequest unless the application's physical path
-         contains a pagespeed.config / iiswebspeed.config, so a bare MSI
-         install produces a no-op module. Dropping a default into the
-         Default Web Site's root restores drop-in IISpeed 1.0 behavior.
-         NeverOverwrite preserves existing IISpeed configs on upgrade;
-         Permanent keeps admin edits through uninstall/reinstall.
+    <!-- Per-site override SAMPLE — the design record tier 3, authoritative when present
+        . This is NOT a second copy of the machine-global default
+         above: it is the drop-in per-site override surface (the IISpeed /
+         IISWebSpeed backward-compat model), seeded into the Default Web Site's
+         physical root so a bare install engages out of the box (the module's
+         engage gate requires a per-site config under the application's physical
+         path — a bare install would otherwise be a no-op module) and so
+         operators have a per-site file to edit. Its content layers LAST over
+         the machine-global base, so any directive here wins for this site.
+         NeverOverwrite preserves existing IISpeed configs (and admin edits) on
+         upgrade; Permanent keeps admin edits through uninstall/reinstall.
          Conditional on IISWWWROOT in case the registry lookup and the
-         fallback both leave the property empty on exotic setups. -->
+         fallback both leave the property empty on exotic setups.
+         Non-serving of this web-root config file is asserted by the
+         requestFiltering deny in web.config.sample (do not rely on the IIS
+         *.config default alone). -->
     <Component Id="SitePagespeedConfig" Directory="WWWROOTDIR"
                Guid="A1B2C3D4-1001-4000-8000-000000000005"
                NeverOverwrite="yes" Permanent="yes"

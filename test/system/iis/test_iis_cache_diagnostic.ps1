@@ -136,6 +136,45 @@ function Recycle-AppPool {
     Start-Sleep -Seconds 3
 }
 
+# Resolve the %ProgramData% machine-global base config (the NON-authoritative
+# twin, the design record tiers 1/2). Mirrors iis_config_util::ResolveProgramDataConfig:
+# PageSpeed\ first, then legacy IISWebSpeed\, pagespeed.config before
+# iiswebspeed.config. Returns $null when no base config exists.
+function Resolve-ProgramDataConfigPath {
+    $base = [System.Environment]::GetFolderPath('CommonApplicationData')
+    foreach ($dir in @('We-Amp\PageSpeed', 'We-Amp\IISWebSpeed')) {
+        foreach ($name in @('pagespeed.config', 'iiswebspeed.config')) {
+            $p = Join-Path (Join-Path $base $dir) $name
+            if (Test-Path -LiteralPath $p) { return $p }
+        }
+    }
+    return $null
+}
+
+# Look for the design record config-drift warning in the Windows Application event
+# log. IisMessageHandler writes kWarning to event source "IISpeed", so the
+# factory's drift warning lands here. Returns:
+#   $true  - a matching drift event was found at/after $since
+#   $false - the log was queried but no matching event exists
+#   $null  - the log could not be queried (permissions / provider not present)
+function Test-DriftWarningLogged {
+    param([datetime]$since)
+    try {
+        $events = Get-WinEvent -FilterHashtable @{
+            LogName = 'Application'; ProviderName = 'IISpeed'; StartTime = $since
+        } -ErrorAction Stop
+    } catch {
+        if ($_.Exception.Message -match 'No events were found') { return $false }
+        return $null
+    }
+    foreach ($e in $events) {
+        if ($e.Message -match 'differing content' -and $e.Message -match 'machine-global') {
+            return $true
+        }
+    }
+    return $false
+}
+
 # --- Resolve the config the module actually reads ---
 if (-not $ConfigPath) {
     $ConfigPath = Resolve-ModuleConfigPath -site $SiteName
@@ -176,9 +215,21 @@ function Restore-Config {
     Recycle-AppPool -pool $AppPool
     $script:restored = $true
 }
+
+# Phase 2 also edits the %ProgramData% base config; restore it too on any
+# exit path. Guarded so it is a no-op when Phase 2 never provisioned the twin.
+$script:pdProvisioned = $false
+$script:pdRestored = $false
+function Restore-PdConfig {
+    if (-not $script:pdProvisioned -or $script:pdRestored) { return }
+    Write-Host "Restoring machine-global %ProgramData% pagespeed.config..."
+    Set-Content -LiteralPath $script:pdConfigPath -Value $script:pdOriginalContent -NoNewline
+    Recycle-AppPool -pool $AppPool
+    $script:pdRestored = $true
+}
 # Restore on any exit path (success, throw, Ctrl+C). trap is the PS idiom
 # closest to `defer`; it runs once on the first terminating error in scope.
-trap { Restore-Config; break }
+trap { Restore-Config; Restore-PdConfig; break }
 
 try {
     # --- Provision: point FileCachePath at a bogus missing path ---
@@ -229,6 +280,77 @@ try {
     }
     Write-Host "PASS: healthy state restored (X-Page-Speed=$xps, no X-Pagespeed-Init-Status)."
 
+    # ===================================================================
+    # Phase 2 — config-resolution authority contract.
+    #   (a) editing the AUTHORITATIVE (per-site) config changes behavior:
+    #       already asserted above — the bogus FileCachePath in the
+    #       per-site config surfaced X-Pagespeed-Init-Status=cache-path-missing.
+    #   (b) editing the NON-authoritative twin (the %ProgramData% base) does
+    #       NOT change behavior — the per-site file overrides it.
+    #   (c) with two configs present and differing, the drift warning fires.
+    # ===================================================================
+    Write-Host "=== Phase 2: config-resolution authority contract ==="
+    $script:pdConfigPath = Resolve-ProgramDataConfigPath
+    if (-not $script:pdConfigPath) {
+        Write-Host "::warning::No %ProgramData% base config found (single-file / non-standard layout); skipping the non-authoritative-twin + drift assertions (b)(c)."
+    } elseif ($script:pdConfigPath -eq $ConfigPath) {
+        # Collapsed/legacy layout where the resolved per-site config IS the
+        # ProgramData file (no distinct twin): the contract does not apply.
+        Write-Host "::warning::Resolved per-site config and %ProgramData% base are the same file; skipping the non-authoritative-twin + drift assertions (b)(c)."
+    } else {
+        Write-Host "ProgramData base (non-authoritative twin): $script:pdConfigPath"
+        $script:pdOriginalContent = Get-Content -Raw -LiteralPath $script:pdConfigPath
+        $pdBackupPath = "$($script:pdConfigPath).regression-backup"
+        Copy-Item -LiteralPath $script:pdConfigPath -Destination $pdBackupPath -Force
+        $script:pdProvisioned = $true
+
+        # (b)+(c): point the TWIN's FileCachePath at the same bogus missing
+        # path. The per-site file (authoritative) still sets a valid
+        # FileCachePath, so if resolution is correct the module stays HEALTHY
+        # (proving the twin is non-authoritative); and because the two files now
+        # differ, the factory's drift warning must fire.
+        $pdBogusLine = 'pagespeed FileCachePath "' + $BogusCachePath + '"'
+        $pdPatched = $script:pdOriginalContent -replace `
+            '(?m)^\s*(?:ModPagespeed|pagespeed\s+)FileCachePath\s+.*$', $pdBogusLine
+        if ($pdPatched -eq $script:pdOriginalContent) {
+            $pdPatched = $script:pdOriginalContent.TrimEnd() + "`n" + $pdBogusLine + "`n"
+        }
+        Set-Content -LiteralPath $script:pdConfigPath -Value $pdPatched -NoNewline
+        $recycleTime = Get-Date
+        Recycle-AppPool -pool $AppPool
+
+        Write-Host "--- (b) twin edit must NOT change behavior (per-site file wins) ---"
+        $b_xps = Wait-ForHeader -u $Url -name "X-Page-Speed" -timeoutSec $PollSeconds
+        $b_h = Get-PsHeaders -u $Url
+        $b_obs = if ($b_h) { $b_h["X-Pagespeed-Init-Status"] } else { "<no response>" }
+        if (-not $b_xps -or $b_obs) {
+            throw "Regression: editing the non-authoritative %ProgramData% twin changed behavior (X-Page-Speed='$b_xps', X-Pagespeed-Init-Status='$b_obs'). The per-site file must stay authoritative."
+        }
+        Write-Host "PASS (b): twin edit had no effect; per-site config is authoritative."
+
+        Write-Host "--- (c) drift warning must fire (two configs present, differing content) ---"
+        $drift = Test-DriftWarningLogged -since $recycleTime
+        if ($drift -eq $true) {
+            Write-Host "PASS (c): config-drift warning present in Application event log (source IISpeed)."
+        } elseif ($drift -eq $false) {
+            throw "Regression: expected an the design record config-drift warning in the Application event log after the twin diverged from the per-site file; none found."
+        } else {
+            Write-Host "::warning::Could not query the Application event log for the IISpeed drift warning (permissions / provider). Drift-warning assertion (c) INCONCLUSIVE."
+        }
+
+        Restore-PdConfig
+        if (Test-Path -LiteralPath $pdBackupPath) {
+            Remove-Item -LiteralPath $pdBackupPath -Force -ErrorAction SilentlyContinue
+        }
+
+        Write-Host "--- Phase 2: healthy state restored after twin restore ---"
+        $c_xps = Wait-ForHeader -u $Url -name "X-Page-Speed" -timeoutSec $PollSeconds
+        if (-not $c_xps) {
+            throw "Regression: X-Page-Speed did not return after restoring the %ProgramData% twin."
+        }
+        Write-Host "PASS: Phase 2 healthy state restored."
+    }
+
     Write-Host "=== test_iis_cache_diagnostic.ps1: ALL PASS ==="
     exit 0
 }
@@ -239,9 +361,19 @@ finally {
     # is out-of-prefix + non-existent, so the module writes nothing during the
     # failure window, and the restore re-points at the original cache.
     Restore-Config
-    # Remove the on-disk backup so the host is left exactly as found (Restore-Config
-    # restores from the in-memory copy, so the backup file is otherwise orphaned).
+    # Phase 2: restore the %ProgramData% twin too (no-op if never
+    # provisioned or already restored above).
+    Restore-PdConfig
+    # Remove the on-disk backups so the host is left exactly as found
+    # (Restore-* restore from the in-memory copies, so the backup files are
+    # otherwise orphaned).
     if (Test-Path -LiteralPath $backupPath) {
         Remove-Item -LiteralPath $backupPath -Force -ErrorAction SilentlyContinue
+    }
+    if ($script:pdProvisioned -and $script:pdConfigPath) {
+        $pdOrphan = "$($script:pdConfigPath).regression-backup"
+        if (Test-Path -LiteralPath $pdOrphan) {
+            Remove-Item -LiteralPath $pdOrphan -Force -ErrorAction SilentlyContinue
+        }
     }
 }

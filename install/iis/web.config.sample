@@ -6,7 +6,17 @@
 
     <!-- Required for PageSpeed combined resource URLs containing '+' -->
     <security>
-      <requestFiltering allowDoubleEscaping="true" />
+      <requestFiltering allowDoubleEscaping="true">
+        <!-- Non-serving guard. The per-site override
+             pagespeed.config / iiswebspeed.config live in the site's web root,
+             so deny serving them EXPLICITLY rather than relying on the IIS
+             *.config default alone. hiddenSegments returns 404 for any request
+             whose path contains these names. -->
+        <hiddenSegments>
+          <add segment="pagespeed.config" />
+          <add segment="iiswebspeed.config" />
+        </hiddenSegments>
+      </requestFiltering>
     </security>
   </system.webServer>
 </configuration>

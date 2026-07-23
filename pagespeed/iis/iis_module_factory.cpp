@@ -7,6 +7,7 @@
 #include "pagespeed/iis/iis_rewrite_options.h"
 #include "pagespeed/iis/iis_message_handler.h"
 #include "pagespeed/iis/iis_configuration.h"
+#include "pagespeed/iis/iis_config_util.h"
 #include "pagespeed/iis/log_message_handler.h"
 
 
@@ -49,72 +50,46 @@ IisProcessContext* IisModuleFactory::GetProcessContext(const GoogleString& site_
 
 	// Config-path resolution.
 	//
-	// Canonical-vs-fallback order (directory, not filename):
-	//   1. %ProgramData%\We-Amp\PageSpeed\        (canonical 1.1+)
-	//   2. %ProgramData%\We-Amp\IISWebSpeed\      (legacy fallback)
-	//
-	// Within each directory we still try CONFIGFILE_PRIMARY
-	// ("pagespeed.config") before CONFIGFILE_FALLBACK
-	// ("iiswebspeed.config") — that two-name fallback is the
-	// upgrade-from-IISpeed-1.0 contract and is independent of the
-	// directory move below.
-	//
-	// Why canonical-first: fresh 1.1 installs file
-	// pagespeed.config into PageSpeed\ alongside the cache + logs
-	// subdirectories — one canonical product directory. The MSI no
-	// longer creates IISWebSpeed\ at all (Product.wxs IISWEBSPEEDDIR
-	// declaration was removed).
-	//
-	// Why the IISWebSpeed\ fallback stays: upgrade-from-IISpeed and
-	// upgrade-from-1.1-pre-this-change customers retain their config
-	// at IISWebSpeed\ via NeverOverwrite="yes" on Product.wxs:228.
-	// Detecting existence with GetFileAttributesA on each candidate is
-	// cheap (one syscall per startup) and avoids a deferred-CA
-	// filesystem migration during the MSI transaction.
-	//
-	// TODO(oschaaf): deduplicate this code accross the code base
-	// and speed it up / cache it (only needs to be determined at startup).
-	CHAR szPath[MAX_PATH];
-	std::string config_path;
-	if (SUCCEEDED(SHGetFolderPathA(NULL,
-		CSIDL_COMMON_APPDATA,
-		NULL,
-		0,
-		szPath)))
-	{
-		const std::string pdata(szPath);
-		// Candidate directories in canonical-first order. Trailing
-		// backslash included so the CONFIGFILE_* append below joins
-		// cleanly.
-		static const char* const kDirs[] = {
-			"\\We-Amp\\PageSpeed\\",      // canonical 1.1+
-			"\\We-Amp\\IISWebSpeed\\",    // legacy upgrade fallback
-		};
-		bool found = false;
-		for (const char* dir : kDirs) {
-			std::string candidate = pdata + dir + CONFIGFILE_PRIMARY;
-			if (GetFileAttributesA(candidate.c_str()) != INVALID_FILE_ATTRIBUTES) {
-				config_path = candidate;
-				found = true;
-				break;
-			}
-			candidate = pdata + dir + CONFIGFILE_FALLBACK;
-			if (GetFileAttributesA(candidate.c_str()) != INVALID_FILE_ATTRIBUTES) {
-				config_path = candidate;
-				found = true;
-				break;
-			}
-		}
-		if (!found) {
-			// Nothing exists yet — return the canonical path so the
-			// downstream parser surfaces a sensible "not found"
-			// message pointing at where the config _should_ live.
-			config_path = pdata + kDirs[0] + CONFIGFILE_PRIMARY;
-		}
-		if (message_handler_) {
-			message_handler_->Message(kInfo,
-				"IisModuleFactory: resolved config path: %s",
-				config_path.c_str());
+	// The %ProgramData% base config (tiers 1/2, canonical-first:
+	// PageSpeed\ then legacy IISWebSpeed\, each preferring
+	// pagespeed.config over iiswebspeed.config) is now resolved by the
+	// single shared helper in iis_config_util so the factory, the
+	// request-time merge (iis_misc.cpp), and the engage gate
+	// (iis_http_module.cpp) can never diverge — that split-brain was the
+	// config-drift defect this shared helper exists to eliminate. This base drives the process-level
+	// global/root options and FileID1 change-detection below; site_root
+	// (the per-site override, the design record tier 3) drives FileID2, so editing
+	// EITHER the base or the authoritative per-site file re-inits the
+	// process context.
+	bool pd_config_exists = false;
+	std::string config_path =
+		iis_config_util::ResolveProgramDataConfig(&pd_config_exists);
+
+	if (message_handler_) {
+		// Effective winner: the per-site
+		// override when present, else the %ProgramData% base.
+		const bool site_config_exists =
+			!site_root.empty() &&
+			GetFileAttributesA(site_root.c_str()) != INVALID_FILE_ATTRIBUTES;
+		const std::string& effective_config =
+			site_config_exists ? site_root : config_path;
+		message_handler_->Message(kInfo,
+			"IisModuleFactory: resolved effective config: %s",
+			effective_config.c_str());
+
+		// Drift diagnostic: more than one config file present
+		// with differing content. NeverOverwrite/Permanent mean the
+		// installer never deleted the loser, so an operator who edited the
+		// non-winning file sees no effect — name which file wins and which
+		// is overridden.
+		if (pd_config_exists && site_config_exists &&
+			config_path != site_root &&
+			!iis_config_util::ConfigContentsEqual(config_path, site_root)) {
+			message_handler_->Message(kWarning,
+				"IisModuleFactory: multiple pagespeed.config files present with "
+				"differing content; per-site '%s' overrides machine-global '%s'. "
+				"Edit the per-site file to change behavior.",
+				site_root.c_str(), config_path.c_str());
 		}
 	}
 

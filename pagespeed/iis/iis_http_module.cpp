@@ -35,6 +35,7 @@
 #include "pagespeed/kernel/base/statistics.h"
 
 #include "pagespeed/iis/iis_global_constants.h"
+#include "pagespeed/iis/iis_config_util.h"
 #include "pagespeed/iis/iis_proxy_fetch_completion.h"
 #include "pagespeed/iis/iis_process_context.h"
 #include "pagespeed/iis/iis_rewrite_driver_factory.h"
@@ -97,16 +98,15 @@ namespace net_instaweb
 
 	bool has_own_iispeed_config(IHttpContext *pHttpContext)
 	{
-		// todo, fix with findfirstfilechangenotification
-		GoogleString checkpath = FindConfigFile(ws2s(pHttpContext->GetApplication()->GetApplicationPhysicalPath()));
-		DWORD result = GetFileAttributesA(checkpath.c_str());
-		if (result == INVALID_FILE_ATTRIBUTES)
-		{
-			return false;
-		}
-		return true;
-
-
+		// Engage gate: a site engages when it has its OWN per-site config
+		//. Routed through the shared resolver's tier-3
+		// primitive so the gate, the request-time merge, and the FileID watch
+		// probe the exact same file. Deliberately scoped to the per-site file
+		// (not the %ProgramData% base): a site without its own config stays
+		// disengaged, so single-site behavior — including opt-out by removing
+		// the per-site file — is unchanged.
+		return iis_config_util::SiteConfigExists(
+			ws2s(pHttpContext->GetApplication()->GetApplicationPhysicalPath()));
 	}
 
 	bool IisHttpModule::IsLocalRequest(IN IHttpContext* pHttpContext)

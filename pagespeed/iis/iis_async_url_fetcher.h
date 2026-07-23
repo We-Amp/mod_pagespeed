@@ -73,11 +73,27 @@ class IisAsyncWorker :public ASyncWinHTTP::WinHTTPEvents
 	// delivered nothing is what PSOL classifies as kFetchStatusEmpty, and it costs the
 	// parent page five minutes of un-rewritten HTML. Count them so it cannot be silent.
 	int64 content_bytes_;
+	// Deferred-deletion handshake with IisAsyncUrlFetcher; both flags are
+	// only touched under the fetcher's critical section. WinHTTP can
+	// complete a request synchronously, so OnCompleted -> StopFetch can run
+	// re-entrantly on the SAME thread from inside client.GetUrl() (a
+	// CRITICAL_SECTION is reentrant for its owner) — deleting the worker
+	// there frees the object GetUrl() is still executing on.
+	// StopFetch instead marks the worker deferred; Fetch() performs the
+	// delete after GetUrl() has fully returned.
+	bool starting_;
+	bool deferred_stop_;
 public:
 	IisAsyncWorker(net_instaweb::IisAsyncUrlFetcher * fetcher, AsyncFetch *fetch, MessageHandler* messagehandler);
 	virtual void OnData(const char *data, int length, WinHTTPContentType type);// the data
 	virtual void OnCompleted(WinHTTPStatus status);
 	void Cancel();
+	// Deferred-deletion handshake; call only under the fetcher's critical
+	// section (see the member comment).
+	bool starting() const { return starting_; }
+	void set_starting(bool val) { starting_ = val; }
+	bool deferred_stop() const { return deferred_stop_; }
+	void set_deferred_stop(bool val) { deferred_stop_ = val; }
 	bool GetUrl(GoogleString url, const char* host)
 	{
 		CHECK(host != NULL);

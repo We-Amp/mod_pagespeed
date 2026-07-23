@@ -4,8 +4,9 @@ Add **mod_pagespeed 1.15** to your ASP.NET Core app with two lines of middleware
 Kestrel server stays the public front door — it owns the listening socket, auth, and
 routing exactly like a normal ASP.NET Core app. A bundled, matched nginx with the
 ngx_pagespeed module runs on loopback behind your app, optimizing responses before they
-return to clients: it recompresses images (jpeg/png/webp), minifies CSS and JS,
-inlines and extracts critical CSS, and rewrites HTML for Core Web Vitals. Requests that
+return to clients: it recompresses images (jpeg/png/webp) and, through opt-in filters,
+transcodes to and recompresses AVIF; it minifies CSS and JS, inlines and extracts critical
+CSS, and rewrites HTML for Core Web Vitals. Requests that
 can't be optimized — and any request while the optimizer isn't running — pass straight
 through your app un-optimized.
 
@@ -23,7 +24,10 @@ the default **Inverse** topology (see
 > [mod_pagespeed 1.15 vs ModPageSpeed 2.0](https://modpagespeed.com/pricing). On Windows,
 > use the IIS module; on macOS or in containers where bundling nginx isn't wanted, use
 > [`WeAmp.PageSpeed.AspNetCore`](https://www.nuget.org/packages/WeAmp.PageSpeed.AspNetCore)
-> (ModPageSpeed 2.0). This package does **not** do AVIF — AVIF is ModPageSpeed 2.0 only.
+> (ModPageSpeed 2.0). The bundled nginx module includes the opt-in AVIF filters. Enable
+> `convert_jpeg_to_avif` for photographic JPEGs; `convert_to_avif_lossless`,
+> `convert_to_avif_animated` and `recompress_avif` cover flat-palette, animated and
+> already-AVIF sources.
 
 ## How it works
 
@@ -147,6 +151,8 @@ it's shown to name the keys.
 |---|---|---|---|
 | `Enabled` | `true` | optional | Master switch for optimization. |
 | `RewriteLevel` | `CoreFilters` | optional | One of `PassThrough`, `CoreFilters`, `OptimizeForBandwidth`, `MobilizeFilters`, `TestingCoreFilters`, `AllFilters`. |
+| `EnabledFilters` | unset | optional | Comma-separated filter names to enable on top of `RewriteLevel` (e.g. `"rewrite_css,rewrite_javascript,recompress_images"`). Spaces are stripped and the list is checked for syntax only (`[-+a-z0-9_,]`); the filter names themselves are validated by the optimization engine at startup. |
+| `DisabledFilters` | unset | optional | Comma-separated filter names to turn off. Disabling wins over enabling, including over filters implied by `RewriteLevel`. Same syntax rules as `EnabledFilters`. |
 | `Sidecar.Mode` | `Inverse` | optional | `Inverse` (default — your middleware is the public front door, nginx optimizes on loopback), `Process` (classic front-proxy — bundled nginx is the public front door, Kestrel the private origin), `External` (connect to an operator-managed nginx). `Docker` is reserved for a future release and fails config validation. |
 | `Sidecar.ListenPort` | `8080` | optional | The public port the package binds in Inverse (the default, since `OwnPublicPort` is `true`) and the public nginx port in Process. |
 | `Sidecar.OwnPublicPort` | `true` | optional | Inverse only. When `true` (default), the package binds the public endpoint on `0.0.0.0:Sidecar.ListenPort`. Set `false` to own the bind yourself via `Kestrel:Endpoints` (note: `--urls` / `UseUrls` / `ASPNETCORE_URLS` are overridden once the loopback endpoint is added and will not bind publicly). Ignored in Process/External. |

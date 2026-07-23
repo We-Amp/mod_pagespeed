@@ -3,10 +3,11 @@
 
 #include <string>
 
-#include <algorithm> 
-#include <functional> 
+#include <algorithm>
+#include <functional>
 #include <cctype>
 #include <locale>
+#include <vector>
 
 
 
@@ -28,6 +29,7 @@
 
 #include "pagespeed/iis/iis_request_context.h"
 #include "pagespeed/iis/iis_configuration.h"
+#include "pagespeed/iis/iis_config_util.h"
 #include "pagespeed/iis/iis_server_context.h"
 
 #include "Shlobj.h"
@@ -202,70 +204,35 @@ namespace net_instaweb
 		//return true;
 	  }
 
-	  //WCHAR *wFileName=new WCHAR[MAX_PATH];
-	  // get site root:		  
-	  //DWORD pathlength;
-	  //HRESULT res=r->MapPath(L"/iiswebspeed.config",wFileName,&pathlength);
-	  std::string filename=ctx->GetSiteConfigFile();
-	  if (filename!="")
+	  // Config resolution: the SAME shared precedence
+	  // chain the factory and the engage gate use — %ProgramData% base
+	  // (tiers 1/2, canonical-first) then the per-site override (tier 3),
+	  // existing files only, layered in list order so the per-site file wins
+	  // (ConfigFactory::GetConfig applies each in order). This replaces the
+	  // hand-copied %ProgramData% probe that used to live here and could drift
+	  // from the factory's copy.
+	  std::string site_physical =
+		  ws2s(pHttpContext->GetApplication()->GetApplicationPhysicalPath());
+	  std::vector<std::string> resolved =
+		  iis_config_util::ResolveConfigPaths(site_physical);
+	  if (!resolved.empty())
 	  {
-	  /*if (SUCCEEDED(res)) // We have root
-	  {
-		  *options=global_options->Clone();
-		  
-		  wFileName[pathlength]=0;
-		  char *fileName=new char[pathlength*2+1];
-		  wcstombs(fileName,wFileName,pathlength);*/
 		  *options=global_options->Clone();
 		  std::map<std::string,std::string> input;
 		  auto path=url->PathSansQuery();
 		  auto fullpath=url->PathAndLeaf();
 		  auto hostname=url->Host();
-		  
-		  
+
+
 		  /* this is what we will match, add IP and other data please */
 		  input["path"]=std::string(path.data(),path.length());
 		  input["fullpath"]=std::string(fullpath.data(),fullpath.length());
 		  input["hostname"]=std::string(hostname.data(),hostname.length());
 		  input["config"]=std::string("request");
 
-		  /* this is where we will look for configuration */
-		  std::list<std::string> paths;
-		  //paths.push_back(modulePath+CONFIGFILE);
-
-
-		  CHAR szPath[MAX_PATH];
-
-		  if (SUCCEEDED(SHGetFolderPathA(NULL,
-			  CSIDL_COMMON_APPDATA,
-			  NULL,
-			  0,
-			  szPath)))
-		  {
-			  // Mirror iis_module_factory.cpp's canonical-vs-
-			  // fallback resolution — PageSpeed\ first (fresh 1.1+
-			  // installs), IISWebSpeed\ as upgrade fallback. Probe
-			  // existence in the canonical dir; only fall back to
-			  // the legacy dir when the canonical one has nothing,
-			  // to avoid pushing a stale candidate the loader would
-			  // then log as not-found.
-			  std::string pdata_path(szPath);
-			  std::string canonical = pdata_path + "\\We-Amp\\PageSpeed\\";
-			  std::string legacy    = pdata_path + "\\We-Amp\\IISWebSpeed\\";
-			  if (GetFileAttributesA((canonical + CONFIGFILE_PRIMARY).c_str()) != INVALID_FILE_ATTRIBUTES
-			      || GetFileAttributesA((canonical + CONFIGFILE_FALLBACK).c_str()) != INVALID_FILE_ATTRIBUTES) {
-				  paths.push_back(FindConfigFile(canonical));
-			  } else {
-				  paths.push_back(FindConfigFile(legacy));
-			  }
-		  }
-
-		  if (filename!="")
-		  paths.push_back(filename);
-
-		  /* this is where we get our options */
+		  /* this is where we get our options: base first, per-site override last */
+		  std::list<std::string> paths(resolved.begin(), resolved.end());
 		  cf->GetConfig(paths,input,**options,server_context->message_handler(), NULL);
-		  //delete [] fileName;
 	  }
 	  else
 		  *options = global_options->Clone(); // get global options

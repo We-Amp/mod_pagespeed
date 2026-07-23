@@ -92,6 +92,7 @@ cc_library(
         "iis_rewrite_driver_factory.cpp",
         "iis_rewrite_options.cpp",
         "iis_configuration.cpp",
+        "iis_config_util.cpp",
         "iis_global_constants.cpp",
         "iis_base_fetch.cpp",
         "iis_async_url_fetcher.cpp",
