@@ -21,8 +21,6 @@ These tests verify that the lazyload_images filter correctly defers
 loading of below-the-fold images.
 """
 
-import re
-
 import pytest
 
 from pagespeed_test_framework import (
@@ -31,6 +29,7 @@ from pagespeed_test_framework import (
     assert_not_contains,
     assert_http_status,
     assert_header_contains,
+    require_match,
 )
 
 
@@ -159,9 +158,11 @@ class TestLazyloadBlankGif:
 
         # Extract the blank GIF URL from the response
         # Pattern: src="...1.<hash>.gif..."
-        match = re.search(r'src="([^"]*1\.[^"]*\.gif)"', response.text)
-        if not match:
-            pytest.skip("Could not find blank GIF URL in response")
+        match = require_match(
+            r'src="([^"]*1\.[^"]*\.gif)"',
+            response,
+            "blank GIF URL",
+        )
 
         gif_url = match.group(1)
         # Handle both absolute URLs (http://...) and relative URLs

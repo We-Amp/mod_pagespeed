@@ -30,6 +30,7 @@ from pagespeed_test_framework import (
     assert_not_contains,
     assert_http_status,
     assert_header_contains,
+    require_match,
 )
 
 
@@ -127,16 +128,21 @@ class TestRewrittenImageHeaders:
         """Rewritten images should have correct Content-Type."""
         # First get a page to find a rewritten image URL
         page_url = f"{example_root}/rewrite_images.html?PageSpeedFilters=rewrite_images"
-        response = client.fetch_until_contains(
+        response = client.fetch_until(
             page_url,
-            pattern=r"\.pagespeed\.ic.*\.jpg",
+            condition=lambda r: re.search(
+                r'src="[^"]*\.pagespeed\.ic[^"]*\.jpg"', r.text
+            )
+            is not None,
             timeout=60.0,
         )
 
         # Extract a rewritten JPEG URL
-        match = re.search(r'src="([^"]*\.pagespeed\.ic[^"]*\.jpg)"', response.text)
-        if not match:
-            pytest.skip("Could not find rewritten JPEG URL")
+        match = require_match(
+            r'src="([^"]*\.pagespeed\.ic[^"]*\.jpg)"',
+            response,
+            "rewritten JPEG URL",
+        )
 
         img_url = match.group(1)
         if not img_url.startswith("/") and not img_url.startswith("http"):
@@ -159,15 +165,20 @@ class TestRewrittenImageHeaders:
             check_not_from "$IMG_HEADERS" fgrep -i 'Content-Encoding: gzip'
         """
         page_url = f"{example_root}/rewrite_images.html?PageSpeedFilters=rewrite_images"
-        response = client.fetch_until_contains(
+        response = client.fetch_until(
             page_url,
-            pattern=r"\.pagespeed\.ic.*\.jpg",
+            condition=lambda r: re.search(
+                r'src="[^"]*\.pagespeed\.ic[^"]*\.jpg"', r.text
+            )
+            is not None,
             timeout=60.0,
         )
 
-        match = re.search(r'src="([^"]*\.pagespeed\.ic[^"]*\.jpg)"', response.text)
-        if not match:
-            pytest.skip("Could not find rewritten JPEG URL")
+        match = require_match(
+            r'src="([^"]*\.pagespeed\.ic[^"]*\.jpg)"',
+            response,
+            "rewritten JPEG URL",
+        )
 
         img_url = match.group(1)
         if not img_url.startswith("/") and not img_url.startswith("http"):
@@ -193,15 +204,20 @@ class TestRewrittenImageHeaders:
             check_not_from "$IMG_HEADERS" fgrep -i 'Vary: Accept-Encoding'
         """
         page_url = f"{example_root}/rewrite_images.html?PageSpeedFilters=rewrite_images"
-        response = client.fetch_until_contains(
+        response = client.fetch_until(
             page_url,
-            pattern=r"\.pagespeed\.ic.*\.jpg",
+            condition=lambda r: re.search(
+                r'src="[^"]*\.pagespeed\.ic[^"]*\.jpg"', r.text
+            )
+            is not None,
             timeout=60.0,
         )
 
-        match = re.search(r'src="([^"]*\.pagespeed\.ic[^"]*\.jpg)"', response.text)
-        if not match:
-            pytest.skip("Could not find rewritten JPEG URL")
+        match = require_match(
+            r'src="([^"]*\.pagespeed\.ic[^"]*\.jpg)"',
+            response,
+            "rewritten JPEG URL",
+        )
 
         img_url = match.group(1)
         if not img_url.startswith("/") and not img_url.startswith("http"):
@@ -224,15 +240,20 @@ class TestRewrittenImageHeaders:
             check_from "$IMG_HEADERS" egrep -qi '(Etag: W/"0")|(Etag: W/"0-gzip")'
         """
         page_url = f"{example_root}/rewrite_images.html?PageSpeedFilters=rewrite_images"
-        response = client.fetch_until_contains(
+        response = client.fetch_until(
             page_url,
-            pattern=r"\.pagespeed\.ic.*\.jpg",
+            condition=lambda r: re.search(
+                r'src="[^"]*\.pagespeed\.ic[^"]*\.jpg"', r.text
+            )
+            is not None,
             timeout=60.0,
         )
 
-        match = re.search(r'src="([^"]*\.pagespeed\.ic[^"]*\.jpg)"', response.text)
-        if not match:
-            pytest.skip("Could not find rewritten JPEG URL")
+        match = require_match(
+            r'src="([^"]*\.pagespeed\.ic[^"]*\.jpg)"',
+            response,
+            "rewritten JPEG URL",
+        )
 
         img_url = match.group(1)
         if not img_url.startswith("/") and not img_url.startswith("http"):
@@ -257,15 +278,20 @@ class TestRewrittenImageHeaders:
             check_from "$IMG_HEADERS" fgrep -qi 'Last-Modified'
         """
         page_url = f"{example_root}/rewrite_images.html?PageSpeedFilters=rewrite_images"
-        response = client.fetch_until_contains(
+        response = client.fetch_until(
             page_url,
-            pattern=r"\.pagespeed\.ic.*\.jpg",
+            condition=lambda r: re.search(
+                r'src="[^"]*\.pagespeed\.ic[^"]*\.jpg"', r.text
+            )
+            is not None,
             timeout=60.0,
         )
 
-        match = re.search(r'src="([^"]*\.pagespeed\.ic[^"]*\.jpg)"', response.text)
-        if not match:
-            pytest.skip("Could not find rewritten JPEG URL")
+        match = require_match(
+            r'src="([^"]*\.pagespeed\.ic[^"]*\.jpg)"',
+            response,
+            "rewritten JPEG URL",
+        )
 
         img_url = match.group(1)
         if not img_url.startswith("/") and not img_url.startswith("http"):

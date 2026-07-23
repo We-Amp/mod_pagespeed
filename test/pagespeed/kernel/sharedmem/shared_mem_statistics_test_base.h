@@ -58,6 +58,7 @@ class SharedMemStatisticsTestBase : public testing::Test {
   void TestSetReturningPrevious();
   void TestHistogram();
   void TestHistogramRender();
+  void TestHistogramPercentileSmallSample();
   void TestHistogramNoExtraClear();
   void TestHistogramExtremeBuckets();
   void TestTimedVariableEmulation();
@@ -134,6 +135,11 @@ TYPED_TEST_P(SharedMemStatisticsTestTemplate, TestHistogramRender) {
   SharedMemStatisticsTestBase::TestHistogramRender();
 }
 
+TYPED_TEST_P(SharedMemStatisticsTestTemplate,
+             TestHistogramPercentileSmallSample) {
+  SharedMemStatisticsTestBase::TestHistogramPercentileSmallSample();
+}
+
 TYPED_TEST_P(SharedMemStatisticsTestTemplate, TestHistogramExtremeBuckets) {
   SharedMemStatisticsTestBase::TestHistogramExtremeBuckets();
 }
@@ -146,12 +152,11 @@ TYPED_TEST_P(SharedMemStatisticsTestTemplate, TestTimedVariableEmulation) {
   SharedMemStatisticsTestBase::TestTimedVariableEmulation();
 }
 
-REGISTER_TYPED_TEST_SUITE_P(SharedMemStatisticsTestTemplate, TestCreate,
-                            TestSet, TestClear, TestAdd,
-                            TestSetReturningPrevious, TestHistogram,
-                            TestHistogramRender, TestHistogramNoExtraClear,
-                            TestHistogramExtremeBuckets,
-                            TestTimedVariableEmulation);
+REGISTER_TYPED_TEST_SUITE_P(
+    SharedMemStatisticsTestTemplate, TestCreate, TestSet, TestClear, TestAdd,
+    TestSetReturningPrevious, TestHistogram, TestHistogramRender,
+    TestHistogramPercentileSmallSample, TestHistogramNoExtraClear,
+    TestHistogramExtremeBuckets, TestTimedVariableEmulation);
 
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(SharedMemStatisticsTestTemplate);
 

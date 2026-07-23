@@ -38,6 +38,8 @@ from pagespeed_test_framework import (
     assert_contains,
     assert_not_contains,
     assert_http_status,
+    require_match,
+    require_status_ok,
 )
 
 
@@ -164,7 +166,14 @@ class TestMaxHtmlParseBytes:
         response = client.get(f"{test_root}/large_file.html")
 
         if response.status == 404:
-            pytest.skip("large_file.html test page not available")
+            # install/mod_pagespeed_test/large_file.html ships with the
+            # fixture content the lane deploys, so a 404 means the content
+            # was not deployed or the server is not routing it -- a
+            # fixture or product defect, not a reason to pass.
+            pytest.fail(
+                "large_file.html test page returned 404; the fixture "
+                "ships install/mod_pagespeed_test/large_file.html"
+            )
 
         # Large files should either:
         # - Be served (200) possibly without optimization
@@ -225,16 +234,21 @@ class TestPageSpeedModes:
         but previously optimized resources should still be accessible.
         """
         # First, generate an optimized resource
-        response1 = client.fetch_until_contains(
+        response1 = client.fetch_until(
             f"{example_root}/extend_cache.html?PageSpeedFilters=extend_cache_images",
-            pattern=r"\.pagespeed\.ce\.",
+            condition=lambda r: re.search(
+                r'src="[^"]*\.pagespeed\.[^"]*"', r.text
+            )
+            is not None,
             timeout=30.0
         )
 
         # Extract a .pagespeed. resource URL
-        match = re.search(r'src="([^"]*\.pagespeed\.[^"]*)"', response1.text)
-        if not match:
-            pytest.skip("No optimized resource found to test")
+        match = require_match(
+            r'src="([^"]*\.pagespeed\.[^"]*)"',
+            response1,
+            "optimized resource URL",
+        )
 
         resource_url = match.group(1)
         if not resource_url.startswith("http"):
@@ -359,7 +373,10 @@ class TestConfigDisplay:
         response = client.get(f"{server_config.admin_path}/config")
 
         if response.status != 200:
-            pytest.skip("Config page not available")
+            # AdminPath and its sub-pages are configured on the lane
+            # (setup_iis_full.ps1); a non-200 is a handler regression
+            #.
+            require_status_ok(response, "Admin config page")
 
         # Should contain filter-related content
         filter_keywords = ["filter", "enable", "rewrite", "optimize"]
@@ -374,7 +391,10 @@ class TestConfigDisplay:
         response = client.get(f"{server_config.admin_path}/config")
 
         if response.status != 200:
-            pytest.skip("Config page not available")
+            # AdminPath and its sub-pages are configured on the lane
+            # (setup_iis_full.ps1); a non-200 is a handler regression
+            #.
+            require_status_ok(response, "Admin config page")
 
         # Should contain path-related content
         path_keywords = ["path", "root", "cache", "directory"]

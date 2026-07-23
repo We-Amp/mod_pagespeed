@@ -42,6 +42,7 @@ from pagespeed_test_framework import (
     assert_http_status,
     assert_stat_increased,
     parse_statistics,
+    require_match,
 )
 
 
@@ -296,20 +297,22 @@ class TestDownstreamCacheHeaders:
         """
         # First, get a page with rewritten resources
         page_url = f"{example_root}/extend_cache.html?PageSpeedFilters=extend_cache_images"
-        response = client.fetch_until_contains(
+        response = client.fetch_until(
             page_url,
-            pattern=r'Puzzle\.jpg\.pagespeed\.ce\.',
+            condition=lambda r: re.search(
+                r'src="[^"]*Puzzle\.jpg\.pagespeed\.ce\.[^"]+\.jpg"', r.text
+            )
+            is not None,
             timeout=30.0,
         )
         assert_http_status(response, 200)
 
         # Extract the cache-extended URL
-        match = re.search(
+        match = require_match(
             r'src="([^"]*Puzzle\.jpg\.pagespeed\.ce\.[^"]+\.jpg)"',
-            response.text,
+            response,
+            "cache-extended image URL",
         )
-        if not match:
-            pytest.skip("Could not find cache-extended image URL")
 
         image_url = match.group(1)
         # Handle both absolute URLs (http://...) and relative URLs
@@ -349,20 +352,22 @@ class TestDownstreamCacheHeaders:
         """Verify CSS optimized resources have proper cache headers."""
         # Get a page with combined CSS
         page_url = f"{example_root}/combine_css.html?PageSpeedFilters=combine_css"
-        response = client.fetch_until_contains(
+        response = client.fetch_until(
             page_url,
-            pattern=r'\.pagespeed\.cc\.',
+            condition=lambda r: re.search(
+                r'href="[^"]*\.pagespeed\.cc\.[^"]+\.css"', r.text
+            )
+            is not None,
             timeout=30.0,
         )
         assert_http_status(response, 200)
 
         # Extract a combined CSS URL
-        match = re.search(
+        match = require_match(
             r'href="([^"]*\.pagespeed\.cc\.[^"]+\.css)"',
-            response.text,
+            response,
+            "combined CSS URL",
         )
-        if not match:
-            pytest.skip("Could not find combined CSS URL")
 
         css_url = match.group(1)
         if not css_url.startswith("/"):
@@ -572,20 +577,22 @@ class TestPreserveNoCache:
         """
         # Get a page with optimized resources
         page_url = f"{example_root}/extend_cache.html?PageSpeedFilters=extend_cache_images"
-        response = client.fetch_until_contains(
+        response = client.fetch_until(
             page_url,
-            pattern=r'\.pagespeed\.ce\.',
+            condition=lambda r: re.search(
+                r'src="[^"]*\.pagespeed\.ce\.[^"]+"', r.text
+            )
+            is not None,
             timeout=30.0,
         )
         assert_http_status(response, 200)
 
         # Extract a cache-extended URL
-        match = re.search(
+        match = require_match(
             r'src="([^"]*\.pagespeed\.ce\.[^"]+)"',
-            response.text,
+            response,
+            "cache-extended resource URL",
         )
-        if not match:
-            pytest.skip("Could not find cache-extended resource URL")
 
         resource_url = match.group(1)
         if not resource_url.startswith("/"):

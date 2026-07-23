@@ -36,6 +36,7 @@ from pagespeed_test_framework import (
     Response,
     assert_contains,
     assert_http_status,
+    require_match,
 )
 from pagespeed_test_framework.client import DEFAULT_USER_AGENT
 
@@ -271,18 +272,23 @@ class TestKeepaliveResourceServing:
         page_url = f"{example_root}/combine_css.html?PageSpeedFilters=rewrite_css,extend_cache_css"
 
         # Use regular client to wait for optimization
-        html_response = client.fetch_until_contains(
+        html_response = client.fetch_until(
             page_url,
-            pattern=r'\.pagespeed\.',
+            condition=lambda r: re.search(
+                r'(href|src)="[^"]*\.pagespeed\.[^"]+"', r.text
+            )
+            is not None,
             timeout=30.0,
         )
         assert_http_status(html_response, 200)
 
         # Extract .pagespeed. resource URLs from the HTML
+        require_match(
+            r'(href|src)="([^"]*\.pagespeed\.[^"]+)"',
+            html_response,
+            ".pagespeed. resource URLs",
+        )
         pagespeed_urls = re.findall(r'(href|src)="([^"]*\.pagespeed\.[^"]+)"', html_response.text)
-
-        if not pagespeed_urls:
-            pytest.skip("No .pagespeed. resources found in HTML")
 
         # Fetch resources over keepalive connection
         resource_responses: List[Response] = []
@@ -323,17 +329,22 @@ class TestKeepaliveMixedRequests:
         """
         # First HTML request
         html_url = f"{example_root}/combine_css.html?PageSpeedFilters=rewrite_css,extend_cache_css"
-        html_response = client.fetch_until_contains(
+        html_response = client.fetch_until(
             html_url,
-            pattern=r'\.pagespeed\.',
+            condition=lambda r: re.search(
+                r'(href|src)="[^"]*\.pagespeed\.[^"]+"', r.text
+            )
+            is not None,
             timeout=30.0,
         )
         assert_http_status(html_response, 200)
 
         # Extract a resource URL
-        match = re.search(r'(href|src)="([^"]*\.pagespeed\.[^"]+)"', html_response.text)
-        if not match:
-            pytest.skip("No .pagespeed. resources found")
+        match = require_match(
+            r'(href|src)="([^"]*\.pagespeed\.[^"]+)"',
+            html_response,
+            ".pagespeed. resource URL",
+        )
 
         resource_url = match.group(2)
         if not resource_url.startswith("/"):
@@ -428,20 +439,22 @@ class TestKeepalive304Responses:
         page_url = f"{example_root}/extend_cache.html?PageSpeedFilters=extend_cache_images"
 
         # Use regular client to wait for optimization
-        html_response = client.fetch_until_contains(
+        html_response = client.fetch_until(
             page_url,
-            pattern=r'\.pagespeed\.ce\.',
+            condition=lambda r: re.search(
+                r'src="[^"]*\.pagespeed\.ce\.[^"]+"', r.text
+            )
+            is not None,
             timeout=30.0,
         )
         assert_http_status(html_response, 200)
 
         # Extract a cache-extended image URL
-        match = re.search(
+        match = require_match(
             r'src="([^"]*\.pagespeed\.ce\.[^"]+)"',
-            html_response.text,
+            html_response,
+            "cache-extended resource URL",
         )
-        if not match:
-            pytest.skip("No cache-extended resource found")
 
         resource_url = match.group(1)
         if not resource_url.startswith("/"):
@@ -455,7 +468,15 @@ class TestKeepalive304Responses:
         last_modified = r1.header("Last-Modified")
 
         if not etag and not last_modified:
-            pytest.skip("Resource doesn't have ETag or Last-Modified")
+            # Cache-extended .pagespeed. resources carry Last-Modified on
+            # every lane (asserted unconditionally by the automatic
+            # extend_cache tests); a validator-free response means the
+            # product broke conditional-request support.
+            pytest.fail(
+                "Cache-extended resource carries neither ETag nor "
+                "Last-Modified; conditional requests cannot be exercised. "
+                f"Response headers: {dict(r1.headers)!r}"
+            )
 
         # Step 2: Conditional request with If-None-Match
         conditional_headers = {}

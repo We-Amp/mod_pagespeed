@@ -58,7 +58,16 @@ class TestNoCacheResources:
         """
         url = f"{test_root}/no_cache/hello.js.pagespeed.ce.0.js"
 
-        response = client.get(url)
+        # Poll rather than GET once: inside the module's ~300s
+        # remembered-fetch-failure window a derived .pagespeed. URL 404s even
+        # though it serves fine once the window expires. The
+        # first poll succeeds immediately on healthy lanes, so behavior there
+        # is unchanged; 30s matches the suite's other fetch_until budgets and
+        # scales past the window via PAGESPEED_TEST_TIMEOUT_MULTIPLIER.
+        def check_200(resp):
+            return resp.status == 200
+
+        response = client.fetch_until(url, condition=check_200, timeout=30.0)
         assert_http_status(response, 200)
 
         # Verify the JS content is correct
@@ -82,7 +91,16 @@ class TestNoCacheResources:
         """
         url = f"{test_root}/no_cache/hello.js.pagespeed.jm.0.js"
 
-        response = client.get(url)
+        # Poll rather than GET once: inside the module's ~300s
+        # remembered-fetch-failure window a derived .pagespeed. URL 404s even
+        # though it serves fine once the window expires. The
+        # first poll succeeds immediately on healthy lanes, so behavior there
+        # is unchanged; 30s matches the suite's other fetch_until budgets and
+        # scales past the window via PAGESPEED_TEST_TIMEOUT_MULTIPLIER.
+        def check_200(resp):
+            return resp.status == 200
+
+        response = client.fetch_until(url, condition=check_200, timeout=30.0)
         assert_http_status(response, 200)
 
         # Verify the JS content is correct (minified but functional)

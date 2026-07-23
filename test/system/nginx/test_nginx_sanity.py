@@ -36,6 +36,8 @@ from pagespeed_test_framework import (
     assert_not_contains,
     assert_http_status,
     assert_header_contains,
+    require_no_auth_gate,
+    require_status_ok,
 )
 
 
@@ -293,9 +295,10 @@ class TestNginxAdmin:
         """
         response = client.get(server_config.admin_path)
 
-        # May return 200 or 403 depending on auth configuration
-        if response.status == 403:
-            pytest.skip("Admin endpoint requires authentication")
+        # The lane runs the admin endpoint without auth; a 403 from
+        # the admin handler is a plausible regression, not an
+        # environment condition.
+        require_no_auth_gate(response, "Admin endpoint /pagespeed_admin")
 
         assert response.status in (200, 301, 302), \
             f"Admin endpoint should respond, got status {response.status}"
@@ -313,12 +316,15 @@ class TestNginxAdmin:
         """Verify admin statistics sub-page works."""
         response = client.get(f"{server_config.admin_path}/statistics")
 
-        if response.status == 403:
-            pytest.skip("Admin endpoint requires authentication")
-        if response.status == 404:
-            pytest.skip("Admin statistics page not available")
+        # The lane runs the admin endpoint without auth; a 403 from
+        # the admin handler is a plausible regression, not an
+        # environment condition.
+        require_no_auth_gate(response, "Admin endpoint /pagespeed_admin")
 
-        assert_http_status(response, 200)
+        # The nginx lane configures AdminPath /pagespeed_admin, so a missing
+        # statistics sub-page is a handler regression, not an environment
+        # condition.
+        require_status_ok(response, "Admin statistics page")
         assert_contains(
             response,
             r"Statistics|statistics",
@@ -330,12 +336,15 @@ class TestNginxAdmin:
         """Verify admin config sub-page works."""
         response = client.get(f"{server_config.admin_path}/config")
 
-        if response.status == 403:
-            pytest.skip("Admin endpoint requires authentication")
-        if response.status == 404:
-            pytest.skip("Admin config page not available")
+        # The lane runs the admin endpoint without auth; a 403 from
+        # the admin handler is a plausible regression, not an
+        # environment condition.
+        require_no_auth_gate(response, "Admin endpoint /pagespeed_admin")
 
-        assert_http_status(response, 200)
+        # The nginx lane configures AdminPath /pagespeed_admin, so a missing
+        # config sub-page is a handler regression, not an environment
+        # condition.
+        require_status_ok(response, "Admin config page")
         assert_contains(
             response,
             r"Configuration|Config|config",
@@ -347,12 +356,15 @@ class TestNginxAdmin:
         """Verify admin cache sub-page works."""
         response = client.get(f"{server_config.admin_path}/cache")
 
-        if response.status == 403:
-            pytest.skip("Admin endpoint requires authentication")
-        if response.status == 404:
-            pytest.skip("Admin cache page not available")
+        # The lane runs the admin endpoint without auth; a 403 from
+        # the admin handler is a plausible regression, not an
+        # environment condition.
+        require_no_auth_gate(response, "Admin endpoint /pagespeed_admin")
 
-        assert_http_status(response, 200)
+        # The nginx lane configures AdminPath /pagespeed_admin, so a missing
+        # cache sub-page is a handler regression, not an environment
+        # condition.
+        require_status_ok(response, "Admin cache page")
         assert_contains(
             response,
             r"Cache|cache",

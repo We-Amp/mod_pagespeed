@@ -31,6 +31,7 @@ from pagespeed_test_framework import (
     assert_http_status,
     assert_header_equals,
     assert_header_contains,
+    require_match,
 )
 
 
@@ -121,20 +122,22 @@ class TestVaryAcceptEncoding:
         # Fetch a page that has rewritten resources
         page_url = f"{example_root}/rewrite_css_images.html?PageSpeedFilters=rewrite_css"
 
-        response = client.fetch_until_contains(
+        response = client.fetch_until(
             page_url,
-            pattern=r'\.pagespeed\.cf\.',
+            condition=lambda r: re.search(
+                r'href="[^"]*\.pagespeed\.cf\.[^"]*"', r.text
+            )
+            is not None,
             timeout=30.0,
         )
         assert_http_status(response, 200)
 
         # Extract a rewritten CSS URL
-        match = re.search(
+        match = require_match(
             r'href="([^"]*\.pagespeed\.cf\.[^"]*)"',
-            response.text,
+            response,
+            "rewritten CSS URL",
         )
-        if not match:
-            pytest.skip("Could not find rewritten CSS URL")
 
         css_url = match.group(1)
         if not css_url.startswith("/"):
@@ -165,16 +168,21 @@ class TestCacheControlPublic:
         # Get a page with combined CSS
         page_url = f"{example_root}/combine_css.html?PageSpeedFilters=combine_css"
 
-        response = client.fetch_until_contains(
+        response = client.fetch_until(
             page_url,
-            pattern=r'\.pagespeed\.(cc|cf)\.',
+            condition=lambda r: re.search(
+                r'href="[^"]*\.pagespeed\.(cc|cf)\.[^"]*"', r.text
+            )
+            is not None,
             timeout=30.0,
         )
 
         # Extract the pagespeed resource URL
-        match = re.search(r'href="([^"]*\.pagespeed\.(cc|cf)\.[^"]*)"', response.text)
-        if not match:
-            pytest.skip("Could not find .pagespeed. resource URL")
+        match = require_match(
+            r'href="([^"]*\.pagespeed\.(cc|cf)\.[^"]*)"',
+            response,
+            ".pagespeed. resource URL",
+        )
 
         resource_url = match.group(1)
         if not resource_url.startswith("/"):
@@ -206,19 +214,21 @@ class TestCacheControlPublic:
         """Optimized resources should have Cache-Control headers."""
         page_url = f"{example_root}/rewrite_css_images.html?PageSpeedFilters=rewrite_css"
 
-        response = client.fetch_until_contains(
+        response = client.fetch_until(
             page_url,
-            pattern=r'\.pagespeed\.cf\.',
+            condition=lambda r: re.search(
+                r'href="[^"]*\.pagespeed\.cf\.[^"]*"', r.text
+            )
+            is not None,
             timeout=30.0,
         )
 
         # Extract the rewritten CSS URL
-        match = re.search(
+        match = require_match(
             r'href="([^"]*\.pagespeed\.cf\.[^"]*)"',
-            response.text,
+            response,
+            "rewritten CSS URL",
         )
-        if not match:
-            pytest.skip("Could not find rewritten CSS URL")
 
         css_url = match.group(1)
         if not css_url.startswith("/"):
@@ -274,31 +284,37 @@ class Test304NotModified:
         # Get a page with rewritten CSS
         page_url = f"{example_root}/rewrite_css_images.html?PageSpeedFilters=rewrite_css"
 
-        response = client.fetch_until_contains(
+        response = client.fetch_until(
             page_url,
-            pattern=r'\.pagespeed\.cf\.',
+            condition=lambda r: re.search(
+                r'href="[^"]*\.pagespeed\.cf\.[^"]*"', r.text
+            )
+            is not None,
             timeout=30.0,
         )
 
         # Extract the rewritten CSS URL
-        match = re.search(
+        match = require_match(
             r'href="([^"]*\.pagespeed\.cf\.[^"]*)"',
-            response.text,
+            response,
+            "rewritten CSS URL",
         )
-        if not match:
-            pytest.skip("Could not find rewritten CSS URL")
 
         css_url = match.group(1)
         if not css_url.startswith("/"):
             css_url = f"{example_root}/{css_url}"
 
-        # First request to get ETag
-        css_response = client.get(css_url)
+        # First request to get ETag (poll like the IPRO ETag tests do --
+        # a .pagespeed. resource without an ETag is a regression, not an
+        # environment condition)
+        css_response = client.fetch_until(
+            css_url,
+            condition=lambda r: r.header("ETag") != "",
+            timeout=30.0,
+        )
         assert_http_status(css_response, 200)
 
         etag = css_response.header("ETag")
-        if not etag:
-            pytest.skip("Resource does not have ETag header")
 
         # Conditional request should return 304
         response_304 = client.get(css_url, headers={"If-None-Match": etag})
@@ -341,19 +357,21 @@ class TestContentTypePreserved:
         """Verify optimized CSS has Content-Type: text/css."""
         page_url = f"{example_root}/rewrite_css_images.html?PageSpeedFilters=rewrite_css"
 
-        response = client.fetch_until_contains(
+        response = client.fetch_until(
             page_url,
-            pattern=r'\.pagespeed\.cf\.',
+            condition=lambda r: re.search(
+                r'href="[^"]*\.pagespeed\.cf\.[^"]*"', r.text
+            )
+            is not None,
             timeout=30.0,
         )
 
         # Extract the rewritten CSS URL
-        match = re.search(
+        match = require_match(
             r'href="([^"]*\.pagespeed\.cf\.[^"]*)"',
-            response.text,
+            response,
+            "rewritten CSS URL",
         )
-        if not match:
-            pytest.skip("Could not find rewritten CSS URL")
 
         css_url = match.group(1)
         if not css_url.startswith("/"):
@@ -373,19 +391,21 @@ class TestContentTypePreserved:
         # Get a page with rewritten JavaScript
         page_url = f"{example_root}/combine_javascript.html?PageSpeedFilters=combine_javascript"
 
-        response = client.fetch_until_contains(
+        response = client.fetch_until(
             page_url,
-            pattern=r'\.pagespeed\.(jc|jm)\.',
+            condition=lambda r: re.search(
+                r'src="[^"]*\.pagespeed\.(jc|jm)\.[^"]*"', r.text
+            )
+            is not None,
             timeout=30.0,
         )
 
         # Extract the rewritten JS URL
-        match = re.search(
+        match = require_match(
             r'src="([^"]*\.pagespeed\.(jc|jm)\.[^"]*)"',
-            response.text,
+            response,
+            "rewritten JavaScript URL",
         )
-        if not match:
-            pytest.skip("Could not find rewritten JavaScript URL")
 
         js_url = match.group(1)
         if not js_url.startswith("/"):

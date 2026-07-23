@@ -34,7 +34,7 @@ existing run_iis_tests.ps1 pytest invocation collects it.
 
 import pytest
 
-from pagespeed_test_framework import PageSpeedClient
+from pagespeed_test_framework import PageSpeedClient, require_no_auth_gate
 
 
 GLOBAL_ADMIN_PATH = "/pagespeed_global_admin"
@@ -67,15 +67,15 @@ class TestAdminLicenseCsrfHeaderForwarding:
             headers=CSRF_HEADERS,
         )
 
-        # If the admin endpoint is gated by token auth, the IIS handler
-        # returns 403 BEFORE reaching the license handler. Skip in that
-        # case so the test stays robust across auth-on and auth-off
-        # CI configurations.
-        if (response.status == 403
-                and CSRF_REJECT_MESSAGE not in response.text):
-            pytest.skip(
-                "Admin endpoint gated by token auth - cannot exercise CSRF path"
-            )
+        # A 403 without the CSRF gate's own message means an upstream
+        # auth gate rejected the request before it reached the license
+        # handler. The lanes run the admin endpoints without auth, so
+        # that is a plausible regression, not an environment condition
+        #.
+        require_no_auth_gate(
+            response, "License consent endpoint",
+            allow_marker=CSRF_REJECT_MESSAGE,
+        )
 
         assert CSRF_REJECT_MESSAGE not in response.text, (
             "Regression: IIS PopulateRequestHeaders did not forward CSRF "
@@ -100,11 +100,16 @@ class TestAdminLicenseCsrfHeaderForwarding:
             headers=None,
         )
 
-        if (response.status == 403
-                and CSRF_REJECT_MESSAGE not in response.text):
-            pytest.skip(
-                "Admin endpoint gated by token auth - cannot exercise CSRF path"
-            )
+        # A 403 without the CSRF gate's own message means an upstream
+        # auth gate rejected the request before it reached the license
+        # handler. The lanes run the admin endpoints without auth, so
+        # that is a plausible regression, not an environment condition
+        #. The gate's own rejection is the behavior under
+        # test here and is asserted below.
+        require_no_auth_gate(
+            response, "License consent endpoint",
+            allow_marker=CSRF_REJECT_MESSAGE,
+        )
 
         assert response.status == 403, (
             f"CSRF gate must return 403 without headers, got {response.status} "

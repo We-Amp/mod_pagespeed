@@ -86,17 +86,22 @@ class TestInsertDnsPrefetch:
     """
 
     def test_insert_dns_prefetch(self, client: PageSpeedClient, example_root: str):
-        """insert_dns_prefetch should add dns-prefetch link tags."""
+        """insert_dns_prefetch should add connection warm-up link tags.
+
+        The example page's two external domains both fit within the filter's
+        preconnect budget, so both inserted hints use rel=preconnect (domains
+        beyond the budget would get rel=dns-prefetch).
+        """
         url = f"{example_root}/insert_dns_prefetch.html?PageSpeedFilters=insert_dns_prefetch"
 
         response = client.fetch_until_contains(
             url,
-            pattern=r'dns-prefetch',
+            pattern=r'rel=["\']?preconnect',
             timeout=30.0,
         )
 
         assert_http_status(response, 200)
-        assert_contains(response, r'rel=["\']?dns-prefetch')
+        assert_contains(response, r'rel=["\']?preconnect')
 
 
 class TestMoveCss:
@@ -238,12 +243,18 @@ class TestFlattenCssImports:
     """
 
     def test_flatten_css_imports(self, client: PageSpeedClient, example_root: str):
-        """flatten_css_imports should inline @import rules."""
+        """flatten_css_imports should inline @import rules.
+
+        The imported stylesheet also declares an @font-face; the CSS
+        serializer emits @font-face rules ahead of all rulesets, so the
+        flattened inline style is @font-face followed by the imported
+        .yellow/.blue/.bold rules.
+        """
         url = f"{example_root}/flatten_css_imports.html?PageSpeedFilters=flatten_css_imports"
 
         response = client.fetch_until_contains(
             url,
-            pattern=r"<style>\.yellow",
+            pattern=r"<style>[^<]*\.yellow",
             timeout=30.0,
         )
         assert_http_status(response, 200)

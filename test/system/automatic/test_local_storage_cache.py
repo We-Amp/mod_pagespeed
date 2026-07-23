@@ -30,6 +30,7 @@ from pagespeed_test_framework import (
     assert_contains,
     assert_not_contains,
     assert_http_status,
+    require_match,
 )
 
 
@@ -210,9 +211,12 @@ class TestLocalStorageCacheCookie:
         assert_http_status(response1, 200)
 
         # Extract hashes from data-pagespeed-lsc-hash attributes
+        require_match(
+            r'data-pagespeed-lsc-hash="[^"]*"',
+            response1,
+            "data-pagespeed-lsc-hash attributes",
+        )
         hashes = re.findall(r'data-pagespeed-lsc-hash="([^"]*)"', response1.text)
-        if not hashes:
-            pytest.skip("No LSC hashes found in response")
 
         # Create the cookie with hashes
         cookie_value = "!".join(hashes)

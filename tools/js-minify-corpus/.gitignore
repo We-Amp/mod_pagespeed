@@ -1,0 +1,10 @@
+# Downloaded corpus artifacts (third-party sources, npm tarballs, generated
+# synthetic files, locally-built bundles, oracle outputs) are never committed.
+# Only the tooling, the pinned manifest, and the findings report live in the
+# repo.
+.corpus/
+
+# npm-installed pinned bundler toolchain for bundle-fixtures/ (the lockfile IS
+# committed; the installed tree is not).
+bundle-fixtures/node_modules/
+bundle-fixtures/dist/

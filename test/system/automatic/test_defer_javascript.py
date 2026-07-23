@@ -21,8 +21,6 @@ These tests verify that the defer_javascript filter correctly defers
 JavaScript execution until after page load.
 """
 
-import re
-
 import pytest
 
 from pagespeed_test_framework import (
@@ -31,6 +29,7 @@ from pagespeed_test_framework import (
     assert_not_contains,
     assert_http_status,
     assert_header_contains,
+    require_match,
 )
 
 
@@ -246,10 +245,13 @@ class TestDeferJsWithHash:
         )
         assert_http_status(response, 200)
 
-        # Extract the defer JS URL with hash
-        match = re.search(r'src="([^"]*js_defer[^"]*\.js)"', response.text)
-        if not match:
-            pytest.skip("Could not find defer JS URL")
+        # Extract the defer JS URL with hash. The blocking-rewrite header
+        # forces a fully rewritten response, so the URL must be present.
+        match = require_match(
+            r'src="([^"]*js_defer[^"]*\.js)"',
+            response,
+            "defer JS URL",
+        )
 
         js_url = match.group(1)
         # Handle both absolute URLs (http://...) and relative URLs

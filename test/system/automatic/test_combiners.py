@@ -92,7 +92,16 @@ class TestCombineCss:
         repeated = "+".join(css_files * 16)  # 64 files
         large_url = f"{example_root}/styles/{repeated}.pagespeed.cc.46IlzLf_NK.css"
 
-        response = client.get(large_url)
+        # Poll rather than GET once: inside the module's ~300s
+        # remembered-fetch-failure window a derived .pagespeed. URL 404s even
+        # though it serves fine once the window expires. The
+        # first poll succeeds immediately on healthy lanes, so behavior there
+        # is unchanged; 30s matches the suite's other fetch_until budgets and
+        # scales past the window via PAGESPEED_TEST_TIMEOUT_MULTIPLIER.
+        def check_200(resp):
+            return resp.status == 200
+
+        response = client.fetch_until(large_url, condition=check_200, timeout=30.0)
         assert_http_status(response, 200)
 
         # Should have substantial content (combined CSS from multiple files)

@@ -46,7 +46,8 @@ from pagespeed_test_framework import (
     PageSpeedClient,
     assert_contains,
     assert_not_contains,
-    assert_http_status,
+    require_no_auth_gate,
+    require_status_ok,
 )
 
 
@@ -127,8 +128,10 @@ class TestAdminPages:
         response = client.get(admin_path)
 
         # Should return 200 or redirect to a sub-page
-        if response.status == 403:
-            pytest.skip("Admin endpoint requires authentication")
+        # The lane runs the admin endpoint without auth; a 403 from the
+        # admin handler is a plausible regression, not an environment
+        # condition.
+        require_no_auth_gate(response, "Admin endpoint /pagespeed_admin")
 
         assert response.status in (200, 301, 302), (
             f"Admin endpoint should respond, got status {response.status}"
@@ -143,12 +146,14 @@ class TestAdminPages:
         """
         response = client.get(f"{admin_path}/statistics")
 
-        if response.status == 403:
-            pytest.skip("Admin endpoint requires authentication")
-        if response.status == 404:
-            pytest.skip("Statistics admin page not available")
+        # The lane runs the admin endpoint without auth; a 403 from the
+        # admin handler is a plausible regression, not an environment
+        # condition.
+        require_no_auth_gate(response, "Admin endpoint /pagespeed_admin")
 
-        assert_http_status(response, 200)
+        # AdminPath and its sub-pages are configured on the lane
+        # (setup_iis_full.ps1); a 404 is a handler regression.
+        require_status_ok(response, "Admin statistics page")
         content_type = response.header("Content-Type").lower()
         assert "application/json" in content_type, (
             f"Statistics endpoint should return JSON, got: {content_type}"
@@ -163,12 +168,14 @@ class TestAdminPages:
         """Admin config endpoint should return JSON with the rendered config."""
         response = client.get(f"{admin_path}/config")
 
-        if response.status == 403:
-            pytest.skip("Admin endpoint requires authentication")
-        if response.status == 404:
-            pytest.skip("Config admin page not available")
+        # The lane runs the admin endpoint without auth; a 403 from the
+        # admin handler is a plausible regression, not an environment
+        # condition.
+        require_no_auth_gate(response, "Admin endpoint /pagespeed_admin")
 
-        assert_http_status(response, 200)
+        # AdminPath and its sub-pages are configured on the lane
+        # (setup_iis_full.ps1); a 404 is a handler regression.
+        require_status_ok(response, "Admin config page")
         content_type = response.header("Content-Type").lower()
         assert "application/json" in content_type, (
             f"Config endpoint should return JSON, got: {content_type}"
@@ -186,12 +193,14 @@ class TestAdminPages:
         """Admin histograms endpoint should return JSON with rendered histograms."""
         response = client.get(f"{admin_path}/histograms")
 
-        if response.status == 403:
-            pytest.skip("Admin endpoint requires authentication")
-        if response.status == 404:
-            pytest.skip("Histograms admin page not available")
+        # The lane runs the admin endpoint without auth; a 403 from the
+        # admin handler is a plausible regression, not an environment
+        # condition.
+        require_no_auth_gate(response, "Admin endpoint /pagespeed_admin")
 
-        assert_http_status(response, 200)
+        # AdminPath and its sub-pages are configured on the lane
+        # (setup_iis_full.ps1); a 404 is a handler regression.
+        require_status_ok(response, "Admin histograms page")
         content_type = response.header("Content-Type").lower()
         assert "application/json" in content_type, (
             f"Histograms endpoint should return JSON, got: {content_type}"
@@ -207,12 +216,14 @@ class TestAdminPages:
         """Admin cache endpoint should return JSON with cache structure info."""
         response = client.get(f"{admin_path}/cache")
 
-        if response.status == 403:
-            pytest.skip("Admin endpoint requires authentication")
-        if response.status == 404:
-            pytest.skip("Cache admin page not available")
+        # The lane runs the admin endpoint without auth; a 403 from the
+        # admin handler is a plausible regression, not an environment
+        # condition.
+        require_no_auth_gate(response, "Admin endpoint /pagespeed_admin")
 
-        assert_http_status(response, 200)
+        # AdminPath and its sub-pages are configured on the lane
+        # (setup_iis_full.ps1); a 404 is a handler regression.
+        require_status_ok(response, "Admin cache page")
         content_type = response.header("Content-Type").lower()
         assert "application/json" in content_type, (
             f"Cache endpoint should return JSON, got: {content_type}"
@@ -232,12 +243,14 @@ class TestAdminPages:
         """Admin console endpoint should serve the Svelte SPA shell."""
         response = client.get(f"{admin_path}/console")
 
-        if response.status == 403:
-            pytest.skip("Admin endpoint requires authentication")
-        if response.status == 404:
-            pytest.skip("Console admin page not available")
+        # The lane runs the admin endpoint without auth; a 403 from the
+        # admin handler is a plausible regression, not an environment
+        # condition.
+        require_no_auth_gate(response, "Admin endpoint /pagespeed_admin")
 
-        assert_http_status(response, 200)
+        # AdminPath and its sub-pages are configured on the lane
+        # (setup_iis_full.ps1); a 404 is a handler regression.
+        require_status_ok(response, "Admin console page")
         content_type = response.header("Content-Type").lower()
         assert "text/html" in content_type, (
             f"Console SPA shell should be HTML, got: {content_type}"
@@ -253,12 +266,14 @@ class TestAdminPages:
         """Admin message_history endpoint should return JSON with messages."""
         response = client.get(f"{admin_path}/message_history")
 
-        if response.status == 403:
-            pytest.skip("Admin endpoint requires authentication")
-        if response.status == 404:
-            pytest.skip("Message History admin page not available")
+        # The lane runs the admin endpoint without auth; a 403 from the
+        # admin handler is a plausible regression, not an environment
+        # condition.
+        require_no_auth_gate(response, "Admin endpoint /pagespeed_admin")
 
-        assert_http_status(response, 200)
+        # AdminPath and its sub-pages are configured on the lane
+        # (setup_iis_full.ps1); a 404 is a handler regression.
+        require_status_ok(response, "Admin message_history page")
         content_type = response.header("Content-Type").lower()
         assert "application/json" in content_type, (
             f"Message history endpoint should return JSON, got: {content_type}"
@@ -312,8 +327,10 @@ class TestAdminPaths:
         """Default admin path should be accessible."""
         response = client.get(f"{admin_path}/statistics")
 
-        if response.status == 403:
-            pytest.skip("Admin endpoint requires authentication")
+        # The lane runs the admin endpoint without auth; a 403 from the
+        # admin handler is a plausible regression, not an environment
+        # condition.
+        require_no_auth_gate(response, "Admin endpoint /pagespeed_admin")
 
         # Should either work (200) or redirect (301/302) or be not found (404)
         assert response.status in (200, 301, 302, 404), (
@@ -322,25 +339,27 @@ class TestAdminPaths:
 
     @pytest.mark.iis_only
     def test_global_admin_path(self, client: PageSpeedClient):
-        """Global admin path should respond (if configured)."""
+        """Global admin path should respond."""
         response = client.get("/pagespeed_global_admin/statistics")
 
-        # Global admin might not be configured
-        if response.status == 404:
-            pytest.skip("Global admin path not configured")
+        # The lane runs the global admin endpoint without auth; a 403
+        # from the admin handler is a plausible regression, not an
+        # environment condition.
+        require_no_auth_gate(response, "Global admin endpoint /pagespeed_global_admin")
 
-        if response.status == 403:
-            pytest.skip("Global admin requires authentication")
-
-        assert_http_status(response, 200)
+        # GlobalAdminPath /pagespeed_global_admin is configured on the lane
+        # (setup_iis_full.ps1); a 404 is a handler regression.
+        require_status_ok(response, "Global admin statistics page")
 
     @pytest.mark.iis_only
     def test_admin_path_trailing_slash(self, client: PageSpeedClient, admin_path: str):
         """Admin path should work with trailing slash."""
         response = client.get(f"{admin_path}/")
 
-        if response.status == 403:
-            pytest.skip("Admin endpoint requires authentication")
+        # The lane runs the admin endpoint without auth; a 403 from the
+        # admin handler is a plausible regression, not an environment
+        # condition.
+        require_no_auth_gate(response, "Admin endpoint /pagespeed_admin")
 
         # Should redirect or return 200
         assert response.status in (200, 301, 302, 404), (
@@ -481,12 +500,14 @@ class TestMessagePage:
         """Message history page should be available."""
         response = client.get(f"{admin_path}/message_history")
 
-        if response.status == 403:
-            pytest.skip("Message history requires authentication")
-        if response.status == 404:
-            pytest.skip("Message history page not available")
+        # The lane runs the admin endpoint without auth; a 403 from the
+        # admin handler is a plausible regression, not an environment
+        # condition.
+        require_no_auth_gate(response, "Message history endpoint")
 
-        assert_http_status(response, 200)
+        # AdminPath and its sub-pages are configured on the lane
+        # (setup_iis_full.ps1); a 404 is a handler regression.
+        require_status_ok(response, "Message history page")
 
     @pytest.mark.iis_only
     def test_message_page_contains_messages(
@@ -499,8 +520,10 @@ class TestMessagePage:
         """
         response = client.get(f"{admin_path}/message_history")
 
-        if response.status != 200:
-            pytest.skip("Message history page not available")
+        # AdminPath and its sub-pages are configured on the lane
+        # (setup_iis_full.ps1); a non-200 is a handler regression
+        #.
+        require_status_ok(response, "Message history page")
 
         content_type = response.header("Content-Type").lower()
         assert "application/json" in content_type, (
@@ -524,8 +547,10 @@ class TestMessagePage:
         """Message history page should escape any user-controlled content."""
         response = client.get(f"{admin_path}/message_history")
 
-        if response.status != 200:
-            pytest.skip("Message history page not available")
+        # AdminPath and its sub-pages are configured on the lane
+        # (setup_iis_full.ps1); a non-200 is a handler regression
+        #.
+        require_status_ok(response, "Message history page")
 
         # Check that common XSS patterns are not present in raw form
         dangerous_patterns = [
@@ -565,8 +590,10 @@ class TestAdminIntegration:
         # Get admin statistics page
         response = client.get(f"{admin_path}/statistics")
 
-        if response.status != 200:
-            pytest.skip("Admin statistics page not available")
+        # AdminPath and its sub-pages are configured on the lane
+        # (setup_iis_full.ps1); a non-200 is a handler regression
+        #.
+        require_status_ok(response, "Admin statistics page")
 
         # Admin page should contain at least some of the same stat names
         stats_found = 0
@@ -585,8 +612,10 @@ class TestAdminIntegration:
         """Admin config page should show enabled filters."""
         response = client.get(f"{admin_path}/config")
 
-        if response.status != 200:
-            pytest.skip("Admin config page not available")
+        # AdminPath and its sub-pages are configured on the lane
+        # (setup_iis_full.ps1); a non-200 is a handler regression
+        #.
+        require_status_ok(response, "Admin config page")
 
         # Should mention common filter names or configuration options
         config_terms = [
@@ -613,8 +642,10 @@ class TestAdminIntegration:
         """Admin cache page should show cache information."""
         response = client.get(f"{admin_path}/cache")
 
-        if response.status != 200:
-            pytest.skip("Admin cache page not available")
+        # AdminPath and its sub-pages are configured on the lane
+        # (setup_iis_full.ps1); a non-200 is a handler regression
+        #.
+        require_status_ok(response, "Admin cache page")
 
         # Should contain cache-related terms
         cache_terms = [
@@ -691,15 +722,15 @@ class TestLicenseEndpointRequestHeaderPassthrough:
             headers=CSRF_HEADERS,
         )
 
-        # If the admin endpoint is gated by token auth, the IIS handler
-        # returns 403 BEFORE reaching the license handler. Skip in that
-        # case so the test is robust across both auth-on and auth-off
-        # CI configurations.
-        if (response.status == 403
-                and "Missing or invalid CSRF headers" not in response.text):
-            pytest.skip(
-                "Admin endpoint gated by token auth - cannot exercise CSRF path"
-            )
+        # A 403 without the CSRF gate's own message means an upstream
+        # auth gate rejected the request before it reached the license
+        # handler. The lanes run the admin endpoints without auth, so
+        # that is a plausible regression, not an environment condition
+        #.
+        require_no_auth_gate(
+            response, "License consent endpoint",
+            allow_marker="Missing or invalid CSRF headers",
+        )
 
         assert "Missing or invalid CSRF headers" not in response.text, (
             "Regression: IIS admin handler dropped CSRF headers before "
@@ -742,14 +773,15 @@ class TestLicenseEndpointRequestHeaderPassthrough:
             headers=CSRF_HEADERS,
         )
 
-        # If the admin endpoint is gated by token auth, skip --
-        # the IIS handler 403s before reaching the license handler.
-        if (response.status == 403
-                and "Missing or invalid CSRF headers" not in response.text):
-            pytest.skip(
-                "Admin endpoint gated by token auth - cannot exercise "
-                "body-forwarding path"
-            )
+        # A 403 without the CSRF gate's own message means an upstream
+        # auth gate rejected the request before it reached the license
+        # handler. The lanes run the admin endpoints without auth, so
+        # that is a plausible regression, not an environment condition
+        #.
+        require_no_auth_gate(
+            response, "License apply endpoint",
+            allow_marker="Missing or invalid CSRF headers",
+        )
 
         assert "Missing 'key' or 'license_key'" not in response.text, (
             "Regression: iis_http_module.cpp dropped POST body before it "
@@ -775,11 +807,16 @@ class TestLicenseEndpointRequestHeaderPassthrough:
             headers=None,
         )
 
-        if (response.status == 403
-                and "Missing or invalid CSRF headers" not in response.text):
-            pytest.skip(
-                "Admin endpoint gated by token auth - cannot exercise CSRF path"
-            )
+        # A 403 without the CSRF gate's own message means an upstream
+        # auth gate rejected the request before it reached the license
+        # handler. The lanes run the admin endpoints without auth, so
+        # that is a plausible regression, not an environment condition
+        #. The gate's own rejection is the behavior under
+        # test here and is asserted below.
+        require_no_auth_gate(
+            response, "License consent endpoint",
+            allow_marker="Missing or invalid CSRF headers",
+        )
 
         assert response.status == 403, (
             f"CSRF gate must return 403 without headers, got {response.status} "

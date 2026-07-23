@@ -31,6 +31,7 @@ from pagespeed_test_framework import (
     assert_not_contains,
     assert_http_status,
     assert_header_contains,
+    require_match,
 )
 
 
@@ -160,9 +161,11 @@ class TestOutlinedResourceCompression:
         assert_http_status(response, 200)
 
         # Extract the outlined JS URL
-        match = re.search(r'src="([^"]*\.pagespeed\.[^"]*\.js)"', response.text)
-        if not match:
-            pytest.skip("Could not find outlined JS URL")
+        match = require_match(
+            r'src="([^"]*\.pagespeed\.[^"]*\.js)"',
+            response,
+            "outlined JS URL",
+        )
 
         js_url = match.group(1)
         # Handle both absolute URLs (http://...) and relative URLs
@@ -203,9 +206,11 @@ class TestOutlinedResourceCompression:
         )
 
         # Extract the outlined JS URL
-        match = re.search(r'src="([^"]*\.pagespeed\.[^"]*\.js)"', response.text)
-        if not match:
-            pytest.skip("Could not find outlined JS URL")
+        match = require_match(
+            r'src="([^"]*\.pagespeed\.[^"]*\.js)"',
+            response,
+            "outlined JS URL",
+        )
 
         js_url = match.group(1)
         # Handle both absolute URLs (http://...) and relative URLs
@@ -237,16 +242,21 @@ class TestOutlinedResourceCompression:
         url = f"{example_root}/outline_javascript.html?PageSpeedFilters=outline_javascript"
 
         # Use fetch_until to ensure the outliner has run and produced a JS URL
-        response = client.fetch_until_contains(
+        response = client.fetch_until(
             url,
-            pattern=r'\.pagespeed\.[^"]*\.js',
+            condition=lambda r: re.search(
+                r'src="[^"]*\.pagespeed\.[^"]*\.js"', r.text
+            )
+            is not None,
             timeout=30.0,
         )
 
         # Extract the outlined JS URL
-        match = re.search(r'src="([^"]*\.pagespeed\.[^"]*\.js)"', response.text)
-        if not match:
-            pytest.skip("Could not find outlined JS URL")
+        match = require_match(
+            r'src="([^"]*\.pagespeed\.[^"]*\.js)"',
+            response,
+            "outlined JS URL",
+        )
 
         js_url = match.group(1)
         # Handle both absolute URLs (http://...) and relative URLs

@@ -24,7 +24,9 @@ Environment Variables:
     PAGESPEED_HTTPS_PORT: HTTPS server port (default: 8443)
     PAGESPEED_SECONDARY_HOST: Secondary server for proxy tests
     PAGESPEED_SECONDARY_PORT: Secondary server port
-    PAGESPEED_CACHE_DIR: Cache directory for flush tests
+    PAGESPEED_CACHE_DIR: Cache directory for flush tests (no default; the
+        flush_cache fixture fails, rather than skips, when it is unset or
+        unusable)
     PAGESPEED_STATS_ENABLED: Whether statistics are enabled (default: 1)
     PAGESPEED_TEST_ROOT: Root path for test pages (default: /mod_pagespeed_test)
     PAGESPEED_EXAMPLE_ROOT: Root path for example pages (default: /mod_pagespeed_example)
@@ -41,7 +43,15 @@ from typing import Callable, Dict, Optional
 
 import pytest
 
-from pagespeed_test_framework.client import PageSpeedClient, ProxiedPageSpeedClient
+from pagespeed_test_framework.client import (
+    PageSpeedClient,
+    ProxiedPageSpeedClient,
+    # Imported (not re-parsed here) so the poll budget in client.py and the
+    # pytest cap below can never drift on parsing semantics (invalid/<=0 ->
+    # default). See pytest_configure.
+    _read_fetch_until_retries,
+    _read_timeout_multiplier,
+)
 
 
 @dataclass
@@ -63,7 +73,10 @@ class ServerConfig:
     # Paths
     test_root: str
     example_root: str
-    cache_dir: str
+    # None when PAGESPEED_CACHE_DIR is unset. There is deliberately no default:
+    # every lane uses a different FileCachePath, so any built-in guess is wrong
+    # somewhere and fails silently at flush time.
+    cache_dir: Optional[str]
 
     # Statistics and admin paths
     stats_path: str
@@ -99,9 +112,15 @@ class ServerConfig:
 
     @property
     def is_windows(self) -> bool:
-        """Check if cache directory is on Windows."""
+        """Check if cache directory is on Windows.
+
+        Infers the platform from the shape of cache_dir, so it is only
+        meaningful when PAGESPEED_CACHE_DIR is set; with no cache dir
+        configured there is nothing to infer from and this reports False.
+        """
         # Windows paths start with drive letter or use backslashes
-        return (len(self.cache_dir) > 1 and self.cache_dir[1] == ':') or '\\' in self.cache_dir
+        cache_dir = self.cache_dir or ""
+        return (len(cache_dir) > 1 and cache_dir[1] == ':') or '\\' in cache_dir
 
 
 @pytest.fixture(scope="session")
@@ -134,7 +153,8 @@ def server_config() -> ServerConfig:
         ),
         test_root=os.environ.get("PAGESPEED_TEST_ROOT", "/mod_pagespeed_test"),
         example_root=os.environ.get("PAGESPEED_EXAMPLE_ROOT", "/mod_pagespeed_example"),
-        cache_dir=os.environ.get("PAGESPEED_CACHE_DIR", "/var/cache/pagespeed"),
+        # No default: see ServerConfig.cache_dir. Tests that need it fail loudly.
+        cache_dir=os.environ.get("PAGESPEED_CACHE_DIR"),
         stats_path=os.environ.get("PAGESPEED_STATS_PATH", default_stats_path),
         admin_path=os.environ.get("PAGESPEED_ADMIN_PATH", default_admin_path),
         server_type=server_type,
@@ -284,6 +304,10 @@ def flush_cache(server_config: ServerConfig, client: PageSpeedClient) -> Callabl
 
     For IIS, we use the admin API to flush cache if the file touch method doesn't work.
 
+    A cache directory that is unset, missing, or unwritable is an environment
+    or product defect, not a reason to pass silently: every exit path below
+    that did not flush the cache calls pytest.fail().
+
     Usage:
         def test_cache(flush_cache):
             flush_cache()
@@ -291,36 +315,57 @@ def flush_cache(server_config: ServerConfig, client: PageSpeedClient) -> Callabl
     """
 
     def _flush() -> None:
-        # Try file-based cache flush first
-        cache_flush_path = pathlib.Path(server_config.cache_dir) / "cache.flush"
+        cache_dir = server_config.cache_dir
+        if not cache_dir:
+            pytest.fail(
+                "Cannot flush cache: PAGESPEED_CACHE_DIR is not set and has no "
+                "default -- every lane uses a different FileCachePath (Apache: "
+                "/var/cache/mod_pagespeed, nginx/Envoy/IIS: see the lane's "
+                "run_*_tests script). Export PAGESPEED_CACHE_DIR to the cache "
+                "directory the server under test is actually configured with."
+            )
 
-        try:
-            if cache_flush_path.parent.exists():
+        # Try file-based cache flush first
+        cache_flush_path = pathlib.Path(cache_dir) / "cache.flush"
+        cache_dir_exists = cache_flush_path.parent.exists()
+        touch_error: Optional[OSError] = None
+
+        if cache_dir_exists:
+            try:
                 # Touch the cache.flush file
                 cache_flush_path.touch()
                 # Wait for cache flush to be detected (poll interval)
                 time.sleep(1.5)
                 return
-        except (OSError, PermissionError):
-            # File method didn't work, try admin API for IIS
-            pass
+            except OSError as exc:
+                # File method didn't work, try admin API for IIS
+                touch_error = exc
 
         # Try admin API endpoint for cache flush (works for IIS)
+        admin_error: Optional[Exception] = None
         if server_config.is_iis:
             try:
                 flush_url = f"{server_config.admin_path}?cache_flush=1"
                 client.get(flush_url)
                 time.sleep(1.0)
                 return
-            except Exception:
-                pass
+            except Exception as exc:
+                admin_error = exc
 
-        # nginx uses the same file-based flush as Apache (touch cache.flush)
-        # If we get here and it's nginx, the file method already failed above
-        if server_config.is_nginx:
-            pytest.skip(f"Cannot flush cache: directory not found or not writable: {server_config.cache_dir}")
-
-        pytest.skip(f"Cannot flush cache: directory not found: {server_config.cache_dir}")
+        # Nothing flushed the cache. nginx and Apache both use the file-based
+        # flush (touch cache.flush), so the file failure above is terminal.
+        detail = f" IIS admin-API fallback also failed: {admin_error!r}." if admin_error else ""
+        if not cache_dir_exists:
+            pytest.fail(
+                f"Cannot flush cache: cache directory does not exist: {cache_dir} "
+                f"(PAGESPEED_CACHE_DIR). Point it at the server's FileCachePath, "
+                f"and check the server actually created it.{detail}"
+            )
+        pytest.fail(
+            f"Cannot flush cache: cannot write {cache_flush_path}: {touch_error!r}. "
+            f"The test runner needs write access to the server's cache "
+            f"directory (PAGESPEED_CACHE_DIR).{detail}"
+        )
 
     return _flush
 
@@ -337,21 +382,31 @@ def webp_client(client: PageSpeedClient) -> PageSpeedClient:
 # Markers for test categorization
 def pytest_configure(config):
     """Register custom markers."""
-    # Scale pytest's per-test timeout by PAGESPEED_TEST_TIMEOUT_MULTIPLIER so
-    # slow environments (AppVerif + Page Heap, 5-50x slowdown) don't hit the
-    # 120s pytest ceiling before fetch_until's own multiplier-scaled retry
-    # loop has a chance to run. Without this, bumping the multiplier is a
-    # no-op for any test whose wall clock exceeds 120s.
-    raw_multiplier = os.environ.get("PAGESPEED_TEST_TIMEOUT_MULTIPLIER", "1.0")
-    try:
-        multiplier = float(raw_multiplier)
-        if multiplier <= 0:
-            multiplier = 1.0
-    except ValueError:
-        multiplier = 1.0
-    if multiplier > 1.0:
+    # Scale pytest's per-test timeout past fetch_until's worst-case wall
+    # clock: ini timeout x PAGESPEED_TEST_TIMEOUT_MULTIPLIER x
+    # (1 + PAGESPEED_TEST_FETCH_RETRIES).
+    #
+    # The multiplier term: slow environments (AppVerif + Page Heap, 5-50x
+    # slowdown) must not hit the 120s pytest ceiling before fetch_until's
+    # multiplier-scaled budget runs out -- without this, bumping the
+    # multiplier is a no-op for any test whose wall clock exceeds 120s.
+    #
+    # The retry term: with PAGESPEED_TEST_FETCH_RETRIES > 0 one
+    # fetch_until costs up to base x multiplier x (1 + retries). At the
+    # AppVerif matrix's values (multiplier 6, retries 1) a 60s-base test
+    # needs exactly 720s -- equal to the old 120x6 cap, so pytest could fire
+    # at the very instant the retry budget ended, pre-empting fetch_until's
+    # own TimeoutError (and its evidence capture) or killing a poll seconds
+    # before convergence. Two-poll tests (2 x 30s base) needed ~728s > 720s,
+    # and 120s-base tests (test_js_blacklist et al.) need 1440s and were
+    # killed mid-FIRST attempt, so the widened budget never applied at all.
+    # The cap must sit ABOVE fetch_until's worst case so pytest's timeout
+    # always loses to the harness's own, better-instrumented one.
+    multiplier = _read_timeout_multiplier()
+    attempts = 1 + _read_fetch_until_retries()
+    if multiplier > 1.0 or attempts > 1:
         base_timeout = int(config.getini("timeout") or 120)
-        config.option.timeout = int(base_timeout * multiplier)
+        config.option.timeout = int(base_timeout * multiplier * attempts)
 
     config.addinivalue_line(
         "markers", "requires_secondary: test requires secondary server"

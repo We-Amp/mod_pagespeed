@@ -29,6 +29,7 @@ from pagespeed_test_framework import (
     PageSpeedClient,
     assert_contains,
     assert_http_status,
+    require_match,
 )
 
 
@@ -93,19 +94,21 @@ class TestIfModifiedSince:
         """Cache-extended resources should return 304 for If-Modified-Since."""
         # First, get the page to find a cache-extended URL
         page_url = f"{example_root}/extend_cache.html?PageSpeedFilters=extend_cache_images"
-        response = client.fetch_until_contains(
+        response = client.fetch_until(
             page_url,
-            pattern=r'Puzzle\.jpg\.pagespeed\.ce\.',
+            condition=lambda r: re.search(
+                r'src="[^"]*Puzzle\.jpg\.pagespeed\.ce\.[^"]+\.jpg"', r.text
+            )
+            is not None,
             timeout=30.0,
         )
 
         # Extract the cache-extended URL
-        match = re.search(
+        match = require_match(
             r'src="([^"]*Puzzle\.jpg\.pagespeed\.ce\.[^"]+\.jpg)"',
-            response.text,
+            response,
+            "cache-extended image URL",
         )
-        if not match:
-            pytest.skip("Could not find cache-extended image URL")
 
         image_url = match.group(1)
         # Handle both absolute URLs (http://...) and relative URLs
@@ -145,23 +148,32 @@ class TestLastModifiedMatch:
 
         origin_last_modified = origin_response.header("Last-Modified")
         if not origin_last_modified:
-            pytest.skip("Origin doesn't have Last-Modified header")
+            # Every lane's static file handling sends Last-Modified for
+            # files on disk (Apache/nginx/IIS natively, the Envoy fixture
+            # server explicitly), so a missing header is a fixture/server
+            # defect, not a reason to pass.
+            pytest.fail(
+                "Origin served the fixture image without a Last-Modified "
+                f"header. Response headers: {dict(origin_response.headers)!r}"
+            )
 
         # Get a cache-extended version
         page_url = f"{example_root}/extend_cache.html?PageSpeedFilters=extend_cache_images"
-        response = client.fetch_until_contains(
+        response = client.fetch_until(
             page_url,
-            pattern=r'Puzzle\.jpg\.pagespeed\.ce\.',
+            condition=lambda r: re.search(
+                r'src="[^"]*Puzzle\.jpg\.pagespeed\.ce\.[^"]+\.jpg"', r.text
+            )
+            is not None,
             timeout=30.0,
         )
 
         # Extract and fetch the cache-extended URL
-        match = re.search(
+        match = require_match(
             r'src="([^"]*Puzzle\.jpg\.pagespeed\.ce\.[^"]+\.jpg)"',
-            response.text,
+            response,
+            "cache-extended image URL",
         )
-        if not match:
-            pytest.skip("Could not find cache-extended image URL")
 
         image_url = match.group(1)
         # Handle both absolute URLs (http://...) and relative URLs

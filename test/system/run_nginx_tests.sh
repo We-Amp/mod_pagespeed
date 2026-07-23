@@ -346,6 +346,7 @@ http {
         image/jpeg                            jpeg jpg;
         image/png                             png;
         image/webp                            webp;
+        image/avif                            avif;
         image/svg+xml                         svg svgz;
         image/x-icon                          ico;
         application/pdf                       pdf;
@@ -469,6 +470,14 @@ EOF
         # Matches Apache's debug.conf.template configuration
         location ~ /no_cache/ {
             add_header Cache-Control "no-cache" always;
+        }
+
+        # Beaconing stays off globally (so lazyload_images etc. work without
+        # browser beacon data), but the prioritize_critical_images round-trip
+        # test needs real beacon instrumentation on its example page. Scoped
+        # stand-in for Apache's imagebeacon.example.com test vhost.
+        location = /mod_pagespeed_example/prioritize_critical_images.html {
+            pagespeed CriticalImagesBeaconEnabled true;
         }
 
 EOF

@@ -75,8 +75,19 @@ class TestQueryParamsInResourceFlow:
         """
         url = f"{rewritten_root}/styles/W.rewrite_css_images.css.pagespeed.cf.Hash.css"
 
-        response = client.get(
+        # Poll rather than GET once: inside the module's ~300s
+        # remembered-fetch-failure window a derived .pagespeed. URL 404s even
+        # though it serves fine once the window expires. The
+        # first poll succeeds immediately on healthy lanes, so behavior there
+        # is unchanged; 30s matches test_image_rewritten_by_default above and
+        # scales past the window via PAGESPEED_TEST_TIMEOUT_MULTIPLIER.
+        def check_200(resp):
+            return resp.status == 200
+
+        response = client.fetch_until(
             url,
+            condition=check_200,
+            timeout=30.0,
             headers={
                 "X-PSA-Blocking-Rewrite": "psatest",
                 "PageSpeedFilters": "-convert_png_to_jpeg, -recompress_png",
@@ -107,8 +118,19 @@ class TestQueryParamsInResourceFlow:
             "?PageSpeedFilters=-convert_png_to_jpeg,-recompress_png"
         )
 
-        response = client.get(
+        # Poll rather than GET once: inside the module's ~300s
+        # remembered-fetch-failure window a derived .pagespeed. URL 404s even
+        # though it serves fine once the window expires. The
+        # first poll succeeds immediately on healthy lanes, so behavior there
+        # is unchanged; 30s matches test_image_rewritten_by_default above and
+        # scales past the window via PAGESPEED_TEST_TIMEOUT_MULTIPLIER.
+        def check_200(resp):
+            return resp.status == 200
+
+        response = client.fetch_until(
             url,
+            condition=check_200,
+            timeout=30.0,
             headers={"X-PSA-Blocking-Rewrite": "psatest"},
         )
         assert_http_status(response, 200)

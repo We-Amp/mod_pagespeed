@@ -24,7 +24,8 @@ Environment Variables:
     PAGESPEED_PORT - Server port (default: 8080 for IIS Express)
     PAGESPEED_TEST_ROOT - Test pages root (default: /)
     PAGESPEED_EXAMPLE_ROOT - Example pages root (default: /)
-    PAGESPEED_CACHE_DIR - Cache directory (default: C:\\PageSpeed\\cache)
+    PAGESPEED_CACHE_DIR - Cache directory (no default; cache-flush fixtures
+        fail when it is unset or unusable)
     PAGESPEED_STATS_ENABLED - Whether stats are enabled (default: 1)
     IIS_EXPRESS - Set to 1 when running against IIS Express
 
@@ -94,7 +95,11 @@ def server_config() -> ServerConfig:
         # IIS test site uses root paths (no /mod_pagespeed_example prefix)
         test_root=os.environ.get("PAGESPEED_TEST_ROOT", ""),
         example_root=os.environ.get("PAGESPEED_EXAMPLE_ROOT", ""),
-        cache_dir=os.environ.get("PAGESPEED_CACHE_DIR", "C:\\PageSpeed\\cache"),
+        # No default: the IIS rigs disagree on the path (run_iis_tests.ps1 uses
+        # C:\pagespeed_cache or %TEMP%\pagespeed_iis_test\cache), so a built-in
+        # guess silently pointed the flush at a directory that never existed.
+        # Fixtures that need it now fail loudly instead.
+        cache_dir=os.environ.get("PAGESPEED_CACHE_DIR"),
         stats_path=os.environ.get("PAGESPEED_STATS_PATH", "/pagespeed_statistics"),
         admin_path=os.environ.get("PAGESPEED_ADMIN_PATH", "/pagespeed_admin"),
         server_type="iis",
@@ -156,6 +161,12 @@ def statistics_path(server_config: ServerConfig) -> str:
 @pytest.fixture
 def iis_cache_dir(server_config: ServerConfig) -> pathlib.Path:
     """Return the IIS-specific cache directory path."""
+    if not server_config.cache_dir:
+        pytest.fail(
+            "PAGESPEED_CACHE_DIR is not set and has no default; point it at the "
+            "cache directory the IIS test site is configured with (see "
+            "test/system/run_iis_tests.ps1)."
+        )
     return pathlib.Path(server_config.cache_dir)
 
 
@@ -170,7 +181,9 @@ def flush_iis_cache(iis_cache_dir: pathlib.Path):
     def _flush():
         cache_flush = iis_cache_dir / "cache.flush"
         if not iis_cache_dir.exists():
-            pytest.skip(f"Cache directory not found: {iis_cache_dir}")
+            # A missing cache directory is an environment/product defect, not a
+            # reason to pass silently.
+            pytest.fail(f"Cannot flush cache: cache directory not found: {iis_cache_dir}")
 
         cache_flush.touch()
         time.sleep(1.5)  # Wait for cache flush to be detected

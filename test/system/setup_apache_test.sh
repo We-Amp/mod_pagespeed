@@ -170,6 +170,14 @@ EOF
     ModPagespeedBlockingRewriteKey psatest
     ModPagespeedCriticalImagesBeaconEnabled false
 
+    # Beaconing stays off globally (so lazyload_images etc. work without
+    # browser beacon data), but the prioritize_critical_images round-trip
+    # test needs real beacon instrumentation on its example page. Scoped
+    # stand-in for debug.conf.template's imagebeacon.example.com vhost.
+    <Location /mod_pagespeed_example/prioritize_critical_images.html>
+        ModPagespeedCriticalImagesBeaconEnabled true
+    </Location>
+
     # Configure canonicalize_javascript_libraries filter
     ModPagespeedLibrary 43 1o978_K0_LNE5_ystNklf http://www.modpagespeed.com/rewrite_javascript.js
 
@@ -396,6 +404,13 @@ start_apache() {
     log_info ""
     log_info "Or run all tests:"
     log_info "  python3 -m pytest test/system/automatic/ -v"
+    log_info ""
+    log_info "The Apache lane (automatic/) has no cache-flush tests, so"
+    log_info "PAGESPEED_CACHE_DIR is not needed for it. Only if you point a"
+    log_info "cache-flush suite at this server, export the cache dir -- it has"
+    log_info "no default and those tests now fail rather than skip when it is"
+    log_info "unset:"
+    log_info "  export PAGESPEED_CACHE_DIR=/var/cache/mod_pagespeed"
 }
 
 stop_apache() {

@@ -31,6 +31,7 @@ from pagespeed_test_framework import (
     assert_http_status,
     assert_file_size,
     assert_header_contains,
+    require_match,
 )
 
 
@@ -68,16 +69,21 @@ class TestRewriteJavascript:
         """
         url = f"{example_root}/rewrite_javascript.html?PageSpeedFilters=rewrite_javascript"
 
-        response = client.fetch_until_contains(
+        response = client.fetch_until(
             url,
-            pattern=r"\.pagespeed\.jm\.",
+            condition=lambda r: re.search(
+                r'src="[^"]*\.pagespeed\.jm\.[^"]*"', r.text
+            )
+            is not None,
             timeout=30.0,
         )
 
         # Extract rewritten JS URL
-        match = re.search(r'src="([^"]*\.pagespeed\.jm\.[^"]*)"', response.text)
-        if not match:
-            pytest.skip("Could not find rewritten JS URL")
+        match = require_match(
+            r'src="([^"]*\.pagespeed\.jm\.[^"]*)"',
+            response,
+            "rewritten JS URL",
+        )
 
         js_url = match.group(1)
         # Handle both absolute URLs (http://...) and relative URLs
@@ -141,15 +147,20 @@ class TestRewriteJavascript:
         """
         url = f"{example_root}/rewrite_javascript.html?PageSpeedFilters=rewrite_javascript"
 
-        response = client.fetch_until_contains(
+        response = client.fetch_until(
             url,
-            pattern=r"\.pagespeed\.jm\.",
+            condition=lambda r: re.search(
+                r'src="[^"]*\.pagespeed\.jm\.[^"]*"', r.text
+            )
+            is not None,
             timeout=30.0,
         )
 
-        match = re.search(r'src="([^"]*\.pagespeed\.jm\.[^"]*)"', response.text)
-        if not match:
-            pytest.skip("Could not find rewritten JS URL")
+        match = require_match(
+            r'src="([^"]*\.pagespeed\.jm\.[^"]*)"',
+            response,
+            "rewritten JS URL",
+        )
 
         js_url = match.group(1)
         # Handle both absolute URLs (http://...) and relative URLs

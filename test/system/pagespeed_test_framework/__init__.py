@@ -40,12 +40,19 @@ from pagespeed_test_framework.assertions import (
     assert_header_contains,
     assert_stat_delta,
     assert_stat_increased,
+    assert_stat_unchanged,
     assert_file_size,
+    assert_image_format,
 )
 from pagespeed_test_framework.stats import (
     parse_statistics,
     get_stat,
     scrape_header,
+)
+from pagespeed_test_framework.require import (
+    require_match,
+    require_status_ok,
+    require_no_auth_gate,
 )
 
 __all__ = [
@@ -60,7 +67,13 @@ __all__ = [
     "assert_header_contains",
     "assert_stat_delta",
     "assert_stat_increased",
+    "assert_stat_unchanged",
     "assert_file_size",
+    "assert_image_format",
+    # Require (fail-with-context, never skip --)
+    "require_match",
+    "require_status_ok",
+    "require_no_auth_gate",
     # Stats
     "parse_statistics",
     "get_stat",

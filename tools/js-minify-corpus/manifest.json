@@ -1,0 +1,223 @@
+{
+  "schema": 1,
+  "packages": [
+    {
+      "name": "jquery",
+      "version": "3.7.1",
+      "tarball": "https://registry.npmjs.org/jquery/-/jquery-3.7.1.tgz",
+      "sha256": "68a9f787516da47c680e09c187bcbac4536b6f85d90eb882844e12919e583f53",
+      "bytes": 404231,
+      "files": [
+        "dist/jquery.js",
+        "dist/jquery.min.js",
+        "dist/jquery.slim.js",
+        "dist/jquery.slim.min.js"
+      ]
+    },
+    {
+      "name": "lodash",
+      "version": "4.17.21",
+      "tarball": "https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz",
+      "sha256": "6a087ac9e5702a0c9d60fbcd48696012646ec8df1491dea472b150e79fcaf804",
+      "bytes": 318961,
+      "files": [
+        "lodash.js",
+        "lodash.min.js",
+        "core.js",
+        "core.min.js"
+      ]
+    },
+    {
+      "name": "underscore",
+      "version": "1.13.7",
+      "tarball": "https://registry.npmjs.org/underscore/-/underscore-1.13.7.tgz",
+      "sha256": "a252090ea284c52edc7c8a90e05cf97fb56e2d151a1e70c203e8ec27eb50cd66",
+      "bytes": 217395,
+      "files": [
+        "underscore-umd.js",
+        "underscore-umd-min.js",
+        "underscore-esm.js",
+        "underscore-esm-min.js"
+      ]
+    },
+    {
+      "name": "axios",
+      "version": "1.10.0",
+      "tarball": "https://registry.npmjs.org/axios/-/axios-1.10.0.tgz",
+      "sha256": "2f9a4ff9ed92d048ced63c0007c5f4f99d668bfd030a12fb27983107addd1ec5",
+      "bytes": 554009,
+      "files": [
+        "dist/axios.js",
+        "dist/axios.min.js",
+        "dist/esm/axios.js",
+        "dist/node/axios.cjs"
+      ]
+    },
+    {
+      "name": "moment",
+      "version": "2.30.1",
+      "tarball": "https://registry.npmjs.org/moment/-/moment-2.30.1.tgz",
+      "sha256": "52219a9fee5e1faade4c72536c173c54cedd5e2619272dd0c251a30aeafcde8c",
+      "bytes": 715526,
+      "files": [
+        "moment.js",
+        "min/moment.min.js",
+        "min/moment-with-locales.js",
+        "min/moment-with-locales.min.js"
+      ]
+    },
+    {
+      "name": "d3",
+      "version": "7.9.0",
+      "tarball": "https://registry.npmjs.org/d3/-/d3-7.9.0.tgz",
+      "sha256": "7e36605710a2ba54846797c8c6d888911341b215ae53257dc32a49a0b824355e",
+      "bytes": 233671,
+      "files": [
+        "dist/d3.js",
+        "dist/d3.min.js",
+        "src/index.js"
+      ]
+    },
+    {
+      "name": "three",
+      "version": "0.160.1",
+      "tarball": "https://registry.npmjs.org/three/-/three-0.160.1.tgz",
+      "sha256": "d462f9bb4a53d0a75f5ebba49ec1c69847f166cd1bd6cbfdd98ce0b5b7988609",
+      "bytes": 9406353,
+      "files": [
+        "build/three.module.js",
+        "build/three.module.min.js",
+        "build/three.cjs"
+      ]
+    },
+    {
+      "name": "react",
+      "version": "18.3.1",
+      "tarball": "https://registry.npmjs.org/react/-/react-18.3.1.tgz",
+      "sha256": "8d9bed01a672e7eaf387942d781ad47c6a43089a30a0306060f9fd5ac7870347",
+      "bytes": 81751,
+      "files": [
+        "umd/react.development.js",
+        "umd/react.production.min.js"
+      ]
+    },
+    {
+      "name": "react-dom",
+      "version": "18.3.1",
+      "tarball": "https://registry.npmjs.org/react-dom/-/react-dom-18.3.1.tgz",
+      "sha256": "031d4427a99f2f3f6cac18bbbf308594a67e4f47d10f4896fdec446505b040e0",
+      "bytes": 1089001,
+      "files": [
+        "umd/react-dom.development.js",
+        "umd/react-dom.production.min.js"
+      ]
+    },
+    {
+      "name": "vue",
+      "version": "3.5.13",
+      "tarball": "https://registry.npmjs.org/vue/-/vue-3.5.13.tgz",
+      "sha256": "d28cf28245139a84ab37fa3aee023be0857d235ad5887af5d856ccbe57a0e1df",
+      "bytes": 629738,
+      "files": [
+        "dist/vue.global.js",
+        "dist/vue.global.prod.js",
+        "dist/vue.esm-bundler.js",
+        "dist/vue.cjs.js"
+      ]
+    },
+    {
+      "name": "vue",
+      "version": "2.7.16",
+      "tarball": "https://registry.npmjs.org/vue/-/vue-2.7.16.tgz",
+      "sha256": "4f17d3265ff02a297224db426cc6a36c168b7f788f67de9440823432c75e3bd9",
+      "bytes": 1179179,
+      "files": [
+        "dist/vue.js",
+        "dist/vue.min.js",
+        "dist/vue.esm.js"
+      ]
+    },
+    {
+      "name": "core-js-bundle",
+      "version": "3.40.0",
+      "tarball": "https://registry.npmjs.org/core-js-bundle/-/core-js-bundle-3.40.0.tgz",
+      "sha256": "3d55e6a1f36ccea12ebb2858e10e60686984e779f1b4165ad422d7db866f045d",
+      "bytes": 382671,
+      "files": [
+        "minified.js"
+      ]
+    },
+    {
+      "name": "core-js",
+      "version": "3.40.0",
+      "tarball": "https://registry.npmjs.org/core-js/-/core-js-3.40.0.tgz",
+      "sha256": "1f76eb6c6f357713f99a1808ea8781be758c71b49c5720ca6af9172ff0e36370",
+      "bytes": 295529,
+      "files": [
+        "modules/es.array.iterator.js",
+        "modules/es.promise.js",
+        "modules/esnext.iterator.from.js"
+      ]
+    },
+    {
+      "name": "tslib",
+      "version": "2.8.1",
+      "tarball": "https://registry.npmjs.org/tslib/-/tslib-2.8.1.tgz",
+      "sha256": "66f635d5eeabae44807534976913a102cf615b9a045368359c9f79ae6ee2119e",
+      "bytes": 18477,
+      "files": [
+        "tslib.js",
+        "tslib.es6.js",
+        "modules/index.js"
+      ]
+    }
+  ],
+  "bundles": {
+    "fixtures": "bundle-fixtures/",
+    "tools": {
+      "webpack": "5.108.4",
+      "webpack-cli": "7.2.1",
+      "terser-webpack-plugin": "5.6.1",
+      "rollup": "4.62.2",
+      "esbuild": "0.28.1"
+    },
+    "outputs": {
+      "esbuild-minified-banner-map.js": {
+        "sha256": "ac6ce4d38d02f6ba3efe01ce8d95402091d32ca95270bff83fcc6765956f8de3",
+        "bytes": 1375
+      },
+      "rollup-esm.js": {
+        "sha256": "6213ae2b9c117956b0f3464a89a43d7d3e8af6c56d4f051295647922361d2e85",
+        "bytes": 2584
+      },
+      "rollup-iife-banner.js": {
+        "sha256": "7937b6a43bc8ccae65da3bcc41ecb276d40662a3095ba5822756e36560b057e4",
+        "bytes": 3012
+      },
+      "webpack-minified-banner.js": {
+        "sha256": "a9f70d45411bd270e2e579cd08078298ae3319cfbd2784b9a257f40390d9b8e4",
+        "bytes": 3747
+      },
+      "webpack-minified-banner.lazy-chunk.js": {
+        "sha256": "13270dcefe83689b7f6a074560bc5067f76a6115741c83d20c431573a508f99b",
+        "bytes": 488
+      },
+      "webpack-sourcemap.js": {
+        "sha256": "a4b850645d49a97c2e5a3574e5a460be3e4b97b8a19fcade74305718aef09316",
+        "bytes": 14006
+      },
+      "webpack-sourcemap.lazy-chunk.js": {
+        "sha256": "4993199bfb30842737556200d112e9b1afe1417e191c292db439752e57f7221b",
+        "bytes": 604
+      },
+      "webpack-unminified.js": {
+        "sha256": "cad0316d81e8e0d277bf03b7248fcea146030f0df4b2ba0162cab843e71e221f",
+        "bytes": 13961
+      },
+      "webpack-unminified.lazy-chunk.js": {
+        "sha256": "310b18c2508c2d1bd2b2b2d2bdfe661e830e83b7f3f66733a7ffbb02d1dee890",
+        "bytes": 547
+      }
+    }
+  }
+}

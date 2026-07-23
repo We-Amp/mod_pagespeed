@@ -471,6 +471,13 @@ start_envoy() {
     log_info ""
     log_info "Or run all tests (including HTTPS):"
     log_info "  ./test/system/run_envoy_tests.sh -v"
+    log_info ""
+    log_info "The default Envoy lane (automatic/ system/ envoy/) has no"
+    log_info "cache-flush tests, so PAGESPEED_CACHE_DIR is not needed for it."
+    log_info "Only if you point a cache-flush suite at this server, export the"
+    log_info "cache dir -- it has no default and those tests now fail rather"
+    log_info "than skip when it is unset:"
+    log_info "  export PAGESPEED_CACHE_DIR=$PAGESPEED_CACHE_DIR"
 }
 
 stop_envoy_process() {

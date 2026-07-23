@@ -25,8 +25,14 @@ py_library(
         "__init__.py",
         "assertions.py",
         "client.py",
+        "require.py",
         "stats.py",
     ],
+    # Put test/system/ on dependents' sys.path so tests can
+    # `from pagespeed_test_framework import ...` (without this, only the
+    # workspace root is importable and every dependent py_test fails at
+    # import with ModuleNotFoundError).
+    imports = [".."],
     visibility = ["//visibility:public"],
 )
 

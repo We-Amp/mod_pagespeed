@@ -20,7 +20,7 @@ from Apache's beacons_load.sh and unload_handler.sh system tests.
 Test classes:
 - TestBeaconHandler: Tests beacon endpoint handling
 - TestBeaconResponse: Tests beacon response format
-- TestUnloadHandler: Tests beforeunload handler for ReportUnloadTime
+- TestUnloadHandler: Tests the beacon's page-hide send triggers
 - TestBeaconInstrumentation: Tests beacon script injection
 
 Environment Variables:
@@ -37,6 +37,8 @@ from pagespeed_test_framework import (
     assert_contains,
     assert_not_contains,
     assert_http_status,
+    require_match,
+    require_status_ok,
 )
 
 
@@ -67,14 +69,22 @@ class TestBeaconHandler:
         ]
 
         found = False
+        attempts = []
         for path in beacon_paths:
             response = client.get(path)
+            attempts.append(f"{path} -> {response.status}")
             if response.status in (200, 204, 400, 405):
                 found = True
                 break
 
         if not found:
-            pytest.skip("No beacon endpoint found")
+            # The beacon handler serves these paths on the lane (the
+            # instrumentation tests below rely on it), so no responding
+            # endpoint is a product regression, not an environment
+            # condition.
+            pytest.fail(
+                "No beacon endpoint found. Probed: " + "; ".join(attempts)
+            )
 
     @pytest.mark.iis_only
     def test_beacon_load_event(
@@ -89,8 +99,10 @@ class TestBeaconHandler:
         beacon_paths = ["/mod_pagespeed_beacon", "/pagespeed_beacon"]
         beacon_data = "url=http://example.com/test&event=load"
 
+        attempts = []
         for path in beacon_paths:
             response = client.get(f"{path}?{beacon_data}")
+            attempts.append(f"GET {path} -> {response.status}")
 
             if response.status in (200, 204):
                 # Found working beacon endpoint
@@ -99,10 +111,16 @@ class TestBeaconHandler:
         # Try POST method
         for path in beacon_paths:
             response = client.post(path, data=beacon_data)
+            attempts.append(f"POST {path} -> {response.status}")
             if response.status in (200, 204):
                 return
 
-        pytest.skip("Beacon endpoint not responding to load events")
+        # The beacon handler must accept load events on the lane; no
+        # responding endpoint is a product regression.
+        pytest.fail(
+            "Beacon endpoint not responding to load events. Probed: "
+            + "; ".join(attempts)
+        )
 
     @pytest.mark.iis_only
     def test_beacon_with_timing_data(
@@ -120,13 +138,20 @@ class TestBeaconHandler:
             "&full=500"
         )
 
+        attempts = []
         for path in beacon_paths:
             response = client.get(f"{path}?{beacon_data}")
+            attempts.append(f"{path} -> {response.status}")
             if response.status in (200, 204, 400):
                 # Endpoint exists (400 may mean invalid data format)
                 return
 
-        pytest.skip("No beacon endpoint accepting timing data")
+        # The beacon handler must accept timing data on the lane; no
+        # responding endpoint is a product regression.
+        pytest.fail(
+            "No beacon endpoint accepting timing data. Probed: "
+            + "; ".join(attempts)
+        )
 
 
 # ============================================================================
@@ -151,8 +176,10 @@ class TestBeaconResponse:
         """
         beacon_paths = ["/mod_pagespeed_beacon", "/pagespeed_beacon"]
 
+        attempts = []
         for path in beacon_paths:
             response = client.get(f"{path}?url=http://example.com")
+            attempts.append(f"{path} -> {response.status}")
 
             if response.status == 204:
                 # Perfect - 204 is the expected response
@@ -164,7 +191,11 @@ class TestBeaconResponse:
                 # 200 is acceptable
                 return
 
-        pytest.skip("No beacon endpoint found")
+        # The beacon handler serves these paths on the lane; no responding
+        # endpoint is a product regression.
+        pytest.fail(
+            "No beacon endpoint found. Probed: " + "; ".join(attempts)
+        )
 
     @pytest.mark.iis_only
     def test_beacon_no_cache_headers(
@@ -177,8 +208,10 @@ class TestBeaconResponse:
         """
         beacon_paths = ["/mod_pagespeed_beacon", "/pagespeed_beacon"]
 
+        attempts = []
         for path in beacon_paths:
             response = client.get(f"{path}?url=http://example.com")
+            attempts.append(f"{path} -> {response.status}")
 
             if response.status in (200, 204):
                 cache_control = response.header("Cache-Control")
@@ -190,7 +223,11 @@ class TestBeaconResponse:
                     ), f"Beacon should not be cached, got: {cache_control}"
                 return
 
-        pytest.skip("No beacon endpoint found")
+        # The beacon handler serves these paths on the lane; no responding
+        # endpoint is a product regression.
+        pytest.fail(
+            "No beacon endpoint found. Probed: " + "; ".join(attempts)
+        )
 
     @pytest.mark.iis_only
     def test_beacon_minimal_body(
@@ -199,8 +236,10 @@ class TestBeaconResponse:
         """Beacon response should have minimal body."""
         beacon_paths = ["/mod_pagespeed_beacon", "/pagespeed_beacon"]
 
+        attempts = []
         for path in beacon_paths:
             response = client.get(f"{path}?url=http://example.com")
+            attempts.append(f"{path} -> {response.status}")
 
             if response.status in (200, 204):
                 # Body should be small (preferably empty for 204)
@@ -210,60 +249,63 @@ class TestBeaconResponse:
                 )
                 return
 
-        pytest.skip("No beacon endpoint found")
+        # The beacon handler serves these paths on the lane; no responding
+        # endpoint is a product regression.
+        pytest.fail(
+            "No beacon endpoint found. Probed: " + "; ".join(attempts)
+        )
 
 
 # ============================================================================
-# TestUnloadHandler: Test beforeunload handler
+# TestUnloadHandler: Test the beacon's page-hide send triggers
 # ============================================================================
 
 
 class TestUnloadHandler:
-    """Tests for beforeunload handler functionality.
+    """Tests for the page-hide send triggers of the instrumentation beacon.
 
-    These tests verify that PageSpeed adds beforeunload handlers
-    when ReportUnloadTime is enabled.
+    The collector reports on visibilitychange-to-hidden / pagehide; the
+    legacy beforeunload handler (and the ReportUnloadTime option driving
+    it) is a deprecated no-op and must never be injected, since an unload
+    handler disables the back/forward cache.
 
     Ported from: pagespeed/apache/system_tests/unload_handler.sh
     """
 
     @pytest.mark.iis_only
-    def test_beforeunload_handler_added(
+    def test_pagehide_handler_added(
         self, client: PageSpeedClient, example_root: str
     ):
-        """ReportUnloadTime should add beforeunload handler.
+        """The instrumentation script should send on page-hide.
 
-        When enabled, PageSpeed adds a beforeunload event listener
-        to send timing data when the user leaves the page.
+        The collector registers pagehide/visibilitychange listeners to
+        send timing data when the user leaves the page; no beforeunload
+        handler may be present.
         """
-        # Request with instrumentation that includes unload tracking
         response = client.get(
             f"{example_root}/extend_cache.html"
             "?PageSpeedFilters=+add_instrumentation"
         )
 
         if response.status != 200:
-            pytest.skip("add_instrumentation not available")
+            # The fixture page with filters enabled must be served; a
+            # non-200 is a server/product failure.
+            require_status_ok(response, "add_instrumentation test page")
 
-        # Check if beforeunload or unload handler is present
-        unload_patterns = [
-            r"beforeunload",
-            r"onbeforeunload",
-            r"addEventListener.*unload",
-            r"unload.*listener",
-        ]
-
-        found = any(
-            re.search(pattern, response.text, re.IGNORECASE)
-            for pattern in unload_patterns
+        # The page-hide send triggers must be present; with
+        # add_instrumentation enabled their absence means the filter did
+        # not instrument the page -- a product regression.
+        require_match(
+            r"pagehide|visibilitychange",
+            response,
+            "page-hide send trigger (add_instrumentation)",
+            flags=re.IGNORECASE,
         )
 
-        # This may depend on configuration
-        if not found:
-            pytest.skip(
-                "beforeunload handler not found - "
-                "ReportUnloadTime may not be enabled"
-            )
+        # ...and the bfcache-breaking beforeunload handler must not be.
+        assert not re.search(r"beforeunload", response.text, re.IGNORECASE), (
+            "beforeunload handler found - it breaks the back/forward cache"
+        )
 
     @pytest.mark.iis_only
     def test_unload_instrumentation_script(
@@ -276,26 +318,21 @@ class TestUnloadHandler:
         )
 
         if response.status != 200:
-            pytest.skip("Page not available")
+            # The fixture page with filters enabled must be served; a
+            # non-200 is a server/product failure.
+            require_status_ok(response, "instrumentation test page")
 
         # Look for instrumentation script
         if "<script" in response.text.lower():
-            # Instrumentation was added
-            # Check for timing-related code
-            timing_patterns = [
-                r"pagespeed",
-                r"timing",
-                r"performance",
-                r"beacon",
-            ]
-
-            found = any(
-                re.search(pattern, response.text, re.IGNORECASE)
-                for pattern in timing_patterns
+            # Instrumentation was added; the injected script must carry the
+            # timing code -- a script without it means the filter
+            # regressed.
+            require_match(
+                r"pagespeed|timing|performance|beacon",
+                response,
+                "instrumentation timing code",
+                flags=re.IGNORECASE,
             )
-
-            if not found:
-                pytest.skip("Instrumentation script doesn't include timing")
 
 
 # ============================================================================
@@ -321,7 +358,9 @@ class TestBeaconInstrumentation:
         )
 
         if response.status != 200:
-            pytest.skip("Page not available")
+            # The fixture page with filters enabled must be served; a
+            # non-200 is a server/product failure.
+            require_status_ok(response, "instrumentation test page")
 
         # Check for script injection
         assert_contains(
@@ -341,7 +380,9 @@ class TestBeaconInstrumentation:
         )
 
         if response.status != 200:
-            pytest.skip("Page not available")
+            # The fixture page with filters enabled must be served; a
+            # non-200 is a server/product failure.
+            require_status_ok(response, "instrumentation test page")
 
         # May or may not have scripts depending on page content
         # This is informational
@@ -357,7 +398,9 @@ class TestBeaconInstrumentation:
         )
 
         if response.status != 200:
-            pytest.skip("Page not available")
+            # The fixture page with filters enabled must be served; a
+            # non-200 is a server/product failure.
+            require_status_ok(response, "instrumentation test page")
 
         # Look for beacon URL in script
         beacon_patterns = [
@@ -397,7 +440,9 @@ class TestBeaconDataFlow:
         )
 
         if page_response.status != 200:
-            pytest.skip("Instrumented page not available")
+            # The fixture page with filters enabled must be served; a
+            # non-200 is a server/product failure.
+            require_status_ok(page_response, "instrumented test page")
 
         # Step 2: Simulate beacon send
         beacon_paths = ["/mod_pagespeed_beacon", "/pagespeed_beacon"]
@@ -428,7 +473,9 @@ class TestBeaconDataFlow:
         )
 
         if response.status != 200:
-            pytest.skip("Page not available")
+            # The fixture page with filters enabled must be served; a
+            # non-200 is a server/product failure.
+            require_status_ok(response, "instrumentation test page")
 
         # Critical CSS uses beacons to collect CSS usage data
         # Look for related instrumentation

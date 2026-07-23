@@ -46,6 +46,11 @@ from pagespeed_test_framework.stats import (
     extract_beacon_params,
     count_pattern_matches,
 )
+from pagespeed_test_framework.require import (
+    require_match,
+    require_status_ok,
+    require_no_auth_gate,
+)
 
 
 class TestResponse:
@@ -667,6 +672,226 @@ class TestFetchUntilTimeoutDiagnostics:
         assert names, "expected evidence files"
         for name in names:
             assert re.fullmatch(r"[A-Za-z0-9._-]+", name), name
+
+
+class TestRequireMatch:
+    """Tests for require_match.
+
+    The "could not find X in the response" shape must FAIL with the body
+    attached for diagnosis, never skip: the missing artifact is the
+    product's job, so its absence is a regression, not an environment
+    condition.
+    """
+
+    def test_returns_match_on_hit(self):
+        match = require_match(r'src="([^"]+)"', 'a src="x.jpg" b', "image URL")
+        assert match.group(1) == "x.jpg"
+
+    def test_supports_flags(self):
+        match = require_match(r"PAGEHIDE", "a pagehide b", "trigger",
+                              flags=re.IGNORECASE)
+        assert match.group(0) == "pagehide"
+
+    def test_accepts_response(self):
+        response = Response(status=200, headers={}, body=b'src="y.jpg"')
+        match = require_match(r'src="([^"]+)"', response, "image URL")
+        assert match.group(1) == "y.jpg"
+
+    def test_fails_not_skips_on_miss(self):
+        with pytest.raises(pytest.fail.Exception):
+            require_match(r"\.pagespeed\.ic", "<html>plain</html>",
+                          "rewritten image URL")
+
+    def test_failure_attaches_body_and_pattern(self):
+        body = "<html>" + "x" * 100 + "</html>"
+        with pytest.raises(pytest.fail.Exception) as err:
+            require_match(r"\.pagespeed\.ic", body, "rewritten image URL")
+        message = str(err.value)
+        assert "rewritten image URL" in message
+        assert r"\.pagespeed\.ic" in message
+        assert body in message
+
+    def test_failure_truncates_long_body(self):
+        body = "y" * 5000
+        with pytest.raises(pytest.fail.Exception) as err:
+            require_match(r"absent", body, "artifact")
+        message = str(err.value)
+        assert "truncated" in message
+        assert len(message) < 3000  # ~2KB cap + scaffolding, not the full 5KB
+
+    def test_failure_reports_body_length(self):
+        with pytest.raises(pytest.fail.Exception) as err:
+            require_match(r"absent", "z" * 5000, "artifact")
+        assert "5000 chars" in str(err.value)
+
+    def test_failure_includes_url_when_response_has_one(self):
+        """Passing the Response (not response.text) names the URL."""
+        response = Response(
+            status=200, headers={}, body=b"<html>plain</html>",
+            url="/rewrite_images.html?PageSpeedFilters=rewrite_images",
+        )
+        with pytest.raises(pytest.fail.Exception) as err:
+            require_match(r"\.pagespeed\.ic", response, "rewritten image URL")
+        message = str(err.value)
+        assert "/rewrite_images.html?PageSpeedFilters=rewrite_images" in message
+        assert "rewritten image URL" in message
+
+    def test_failure_omits_url_note_for_plain_text(self):
+        """The text-based signature keeps working, without a URL note."""
+        with pytest.raises(pytest.fail.Exception) as err:
+            require_match(r"absent", "<html>plain</html>", "artifact")
+        assert " for /" not in str(err.value)
+
+    def test_failure_omits_url_note_when_response_has_no_url(self):
+        """Response without a URL (default) produces no dangling 'for'."""
+        response = Response(status=200, headers={}, body=b"plain")
+        with pytest.raises(pytest.fail.Exception) as err:
+            require_match(r"absent", response, "artifact")
+        assert " for " not in str(err.value)
+
+
+class TestRequireStatusOk:
+    """Tests for require_status_ok.
+
+    For endpoints that are unambiguously configured on the lane, a non-200
+    is a regression signal and must fail with context, not skip.
+    """
+
+    def test_passes_on_200(self):
+        response = Response(status=200, headers={}, body=b"ok", url="/x")
+        assert require_status_ok(response, "Admin page") is response
+
+    def test_fails_not_skips_on_404(self):
+        response = Response(status=404, headers={}, body=b"nope", url="/admin")
+        with pytest.raises(pytest.fail.Exception):
+            require_status_ok(response, "Admin page")
+
+    def test_failure_carries_status_url_and_body(self):
+        response = Response(status=503, headers={}, body=b"backend down",
+                            url="/pagespeed_admin/cache")
+        with pytest.raises(pytest.fail.Exception) as err:
+            require_status_ok(response, "Admin cache page")
+        message = str(err.value)
+        assert "Admin cache page" in message
+        assert "503" in message
+        assert "/pagespeed_admin/cache" in message
+        assert "backend down" in message
+
+
+class TestRequireNoAuthGate:
+    """Tests for require_no_auth_gate.
+
+    A 401/403 from the admin handler is a plausible regression, not an
+    environment condition: the lanes run these endpoints without auth.
+    """
+
+    def test_passes_on_200(self):
+        response = Response(status=200, headers={}, body=b"ok")
+        require_no_auth_gate(response, "Admin endpoint")
+
+    def test_passes_on_other_non_auth_status(self):
+        # e.g. a redirect or even a 500 is not an auth gate; other
+        # assertions cover those.
+        response = Response(status=301, headers={}, body=b"")
+        require_no_auth_gate(response, "Admin endpoint")
+
+    def test_fails_not_skips_on_403(self):
+        response = Response(status=403, headers={}, body=b"forbidden")
+        with pytest.raises(pytest.fail.Exception):
+            require_no_auth_gate(response, "Admin endpoint")
+
+    def test_fails_not_skips_on_401(self):
+        response = Response(status=401, headers={}, body=b"unauthorized")
+        with pytest.raises(pytest.fail.Exception):
+            require_no_auth_gate(response, "Admin endpoint")
+
+    def test_failure_explains_and_attaches_body(self):
+        response = Response(status=403, headers={}, body=b"go away",
+                            url="/pagespeed_admin")
+        with pytest.raises(pytest.fail.Exception) as err:
+            require_no_auth_gate(response, "Admin endpoint /pagespeed_admin")
+        message = str(err.value)
+        assert "Admin endpoint /pagespeed_admin" in message
+        assert "403" in message
+        assert "go away" in message
+
+    def test_allow_marker_permits_expected_rejection(self):
+        # The CSRF gate's own rejection is the behavior under test; only an
+        # upstream auth gate's 403 is suspicious.
+        response = Response(status=403, headers={},
+                            body=b"Missing or invalid CSRF headers")
+        require_no_auth_gate(
+            response, "License consent endpoint",
+            allow_marker="Missing or invalid CSRF headers",
+        )
+
+    def test_allow_marker_mismatch_still_fails(self):
+        response = Response(status=403, headers={}, body=b"token required")
+        with pytest.raises(pytest.fail.Exception):
+            require_no_auth_gate(
+                response, "License consent endpoint",
+                allow_marker="Missing or invalid CSRF headers",
+            )
+
+class TestPytestTimeoutScaling:
+    """conftest.pytest_configure must cap pytest's per-test timeout ABOVE
+    fetch_until's worst case: ini timeout x multiplier x (1 + retries).
+
+    At the AppVerif matrix's values (multiplier 6, retries 1) the old
+    multiplier-only cap (720s) could fire at the exact instant the retry
+    budget ended -- killing a poll seconds before convergence and
+    pre-empting fetch_until's own, better-instrumented TimeoutError
+   ."""
+
+    class _StubConfig:
+        """Minimal stand-in for pytest's Config: pytest_configure reads
+        getini("timeout"), writes option.timeout, and registers markers."""
+
+        def __init__(self, ini_timeout=120):
+            from types import SimpleNamespace
+            self.option = SimpleNamespace(timeout=None)
+            self._ini_timeout = ini_timeout
+
+        def getini(self, name):
+            return self._ini_timeout if name == "timeout" else None
+
+        def addinivalue_line(self, *_args):
+            pass
+
+    def _configure(self, monkeypatch, multiplier=None, retries=None):
+        import conftest
+        if multiplier is None:
+            monkeypatch.delenv("PAGESPEED_TEST_TIMEOUT_MULTIPLIER", raising=False)
+        else:
+            monkeypatch.setenv("PAGESPEED_TEST_TIMEOUT_MULTIPLIER", multiplier)
+        if retries is None:
+            monkeypatch.delenv("PAGESPEED_TEST_FETCH_RETRIES", raising=False)
+        else:
+            monkeypatch.setenv("PAGESPEED_TEST_FETCH_RETRIES", retries)
+        config = self._StubConfig()
+        conftest.pytest_configure(config)
+        return config.option.timeout
+
+    def test_untouched_by_default(self, monkeypatch):
+        """No envs => no override; pytest.ini's own value stands."""
+        assert self._configure(monkeypatch) is None
+
+    def test_multiplier_only(self, monkeypatch):
+        assert self._configure(monkeypatch, multiplier="4") == 480
+
+    def test_retries_only(self, monkeypatch):
+        """Retries raise the worst case even at multiplier 1."""
+        assert self._configure(monkeypatch, retries="1") == 240
+
+    def test_multiplier_and_retries(self, monkeypatch):
+        """The nightly AppVerif matrix combination:
+        120 x 6 x (1 + 1) = 1440, covering a 120s-base test's full
+        two-attempt budget."""
+        assert self._configure(monkeypatch, multiplier="6", retries="1") == 1440
+
+    def test_garbage_envs_leave_timeout_untouched(self, monkeypatch):
+        """client.py's parsing semantics (invalid/<=0 -> default) apply."""
+        assert self._configure(monkeypatch, multiplier="junk", retries="junk") is None
 
 
 if __name__ == "__main__":

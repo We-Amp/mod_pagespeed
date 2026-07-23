@@ -40,6 +40,8 @@ from pagespeed_test_framework import (
     assert_not_contains,
     assert_http_status,
     assert_header_contains,
+    require_match,
+    require_status_ok,
 )
 
 
@@ -318,17 +320,22 @@ class TestPassThroughHeaders:
     ):
         """Combined CSS should have correct Content-Type."""
         # Request a page that combines CSS
-        response = client.fetch_until_contains(
+        response = client.fetch_until(
             f"{example_root}/combine_css.html?PageSpeedFilters=combine_css",
-            pattern=r"\.pagespeed\.cc\.",
+            condition=lambda r: re.search(
+                r'href="[^"]*\.pagespeed\.cc\.[^"]*"', r.text
+            )
+            is not None,
             timeout=30.0
         )
         assert_http_status(response, 200)
 
         # Extract combined CSS URL from response
-        match = re.search(r'href="([^"]*\.pagespeed\.cc\.[^"]*)"', response.text)
-        if not match:
-            pytest.skip("No combined CSS found in response")
+        match = require_match(
+            r'href="([^"]*\.pagespeed\.cc\.[^"]*)"',
+            response,
+            "combined CSS URL",
+        )
 
         css_url = match.group(1)
         if not css_url.startswith("http"):
@@ -351,19 +358,26 @@ class TestPassThroughHeaders:
     ):
         """Combined JavaScript should have correct Content-Type."""
         # Request a page that combines JS
-        response = client.fetch_until_contains(
+        response = client.fetch_until(
             f"{example_root}/combine_javascript.html?PageSpeedFilters=combine_javascript",
-            pattern=r"\.pagespeed\.jc\.",
+            condition=lambda r: re.search(
+                r'src="[^"]*\.pagespeed\.jc\.[^"]*"', r.text
+            )
+            is not None,
             timeout=30.0
         )
 
         if response.status != 200:
-            pytest.skip("combine_javascript test page not available")
+            # The fixture page with filters enabled must be served; a
+            # non-200 is a server/product failure.
+            require_status_ok(response, "combine_javascript test page")
 
         # Extract combined JS URL from response
-        match = re.search(r'src="([^"]*\.pagespeed\.jc\.[^"]*)"', response.text)
-        if not match:
-            pytest.skip("No combined JavaScript found in response")
+        match = require_match(
+            r'src="([^"]*\.pagespeed\.jc\.[^"]*)"',
+            response,
+            "combined JavaScript URL",
+        )
 
         js_url = match.group(1)
         if not js_url.startswith("http"):

@@ -421,6 +421,43 @@ void SharedMemStatisticsTestBase::TestHistogramRender() {
   EXPECT_TRUE(Contains(html_graph, "-&infin;,</td>"));
 }
 
+// A histogram with only a handful of samples cannot produce a meaningful
+// percentile estimate; the estimate collapses onto a near-minimum bucket bound
+// (around -5000 on a negative-bucket latency histogram). Those percentile
+// cells must be omitted from the rendered table so no consumer -- the admin
+// console or the raw /histograms output -- ever sees that no-data value.
+void SharedMemStatisticsTestBase::TestHistogramPercentileSmallSample() {
+  ParentInit();
+  Histogram* h1 = stats_->GetHistogram(kHist1);
+  // Negative buckets + the default upper bound reproduce the -5000-style bound.
+  h1->EnableNegativeBuckets();
+  h1->Add(30);
+  EXPECT_EQ(1, h1->Count());
+
+  GoogleString html;
+  StringWriter writer(&html);
+  stats_->RenderHistograms(&writer, &handler_);
+  // The summary row uses bare <td> cells; a negative value there could only be
+  // a percentile no-data placeholder (count/avg/min/max are all positive here).
+  // The bucket detail table uses <td style=...> cells, so it is not matched.
+  EXPECT_FALSE(Contains(html, "<td>-")) << "negative no-data stat leaked";
+  // The median/90/95/99 cells are rendered empty below the threshold.
+  EXPECT_TRUE(Contains(html, "<td></td>"))
+      << "percentile cells should be empty below the sample threshold";
+
+  // Once enough samples accumulate, real percentile values are emitted again.
+  h1->Add(40);
+  h1->Add(50);
+  h1->Add(60);
+  h1->Add(70);
+  EXPECT_EQ(5, h1->Count());
+  html.clear();
+  stats_->RenderHistograms(&writer, &handler_);
+  EXPECT_FALSE(Contains(html, "<td></td>"))
+      << "percentiles should be emitted at or above the sample threshold";
+  EXPECT_FALSE(Contains(html, "<td>-"));
+}
+
 void SharedMemStatisticsTestBase::TestHistogramNoExtraClear() {
   // Make sure we don't lose histogram data when a child process
   // redundantly applies the same settings.

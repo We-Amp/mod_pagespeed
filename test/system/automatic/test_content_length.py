@@ -27,6 +27,7 @@ import pytest
 from pagespeed_test_framework import (
     PageSpeedClient,
     assert_http_status,
+    require_match,
 )
 
 
@@ -54,21 +55,23 @@ class TestContentLength:
         url = f"{example_root}/rewrite_css_images.html?PageSpeedFilters=rewrite_css"
 
         # First wait for the CSS to be rewritten
-        response = client.fetch_until_count(
+        response = client.fetch_until(
             url,
-            pattern=r"rewrite_css_images\.css\.pagespeed\.cf\.",
-            expected_count=1,
+            condition=lambda r: re.search(
+                r'href="[^"]*rewrite_css_images\.css\.pagespeed\.cf\.[^"]*"',
+                r.text,
+            )
+            is not None,
             timeout=30.0,
         )
         assert_http_status(response, 200)
 
         # Extract the rewritten CSS URL
-        match = re.search(
+        match = require_match(
             r'href="([^"]*rewrite_css_images\.css\.pagespeed\.cf\.[^"]*)"',
-            response.text,
+            response,
+            "rewritten CSS URL",
         )
-        if not match:
-            pytest.skip("Could not find rewritten CSS URL")
 
         css_url = match.group(1)
         # Handle both absolute URLs (http://...) and relative URLs
@@ -95,20 +98,22 @@ class TestContentLength:
         url = f"{example_root}/rewrite_css_images.html?PageSpeedFilters=rewrite_css"
 
         # First wait for the CSS to be rewritten
-        response = client.fetch_until_count(
+        response = client.fetch_until(
             url,
-            pattern=r"rewrite_css_images\.css\.pagespeed\.cf\.",
-            expected_count=1,
+            condition=lambda r: re.search(
+                r'href="[^"]*rewrite_css_images\.css\.pagespeed\.cf\.[^"]*"',
+                r.text,
+            )
+            is not None,
             timeout=30.0,
         )
 
         # Extract the rewritten CSS URL
-        match = re.search(
+        match = require_match(
             r'href="([^"]*rewrite_css_images\.css\.pagespeed\.cf\.[^"]*)"',
-            response.text,
+            response,
+            "rewritten CSS URL",
         )
-        if not match:
-            pytest.skip("Could not find rewritten CSS URL")
 
         css_url = match.group(1)
         # Handle both absolute URLs (http://...) and relative URLs
@@ -142,20 +147,22 @@ class TestContentLength:
         url = f"{example_root}/rewrite_css_images.html?PageSpeedFilters=rewrite_css"
 
         # First wait for the CSS to be rewritten
-        response = client.fetch_until_count(
+        response = client.fetch_until(
             url,
-            pattern=r"rewrite_css_images\.css\.pagespeed\.cf\.",
-            expected_count=1,
+            condition=lambda r: re.search(
+                r'href="[^"]*rewrite_css_images\.css\.pagespeed\.cf\.[^"]*"',
+                r.text,
+            )
+            is not None,
             timeout=30.0,
         )
 
         # Extract the rewritten CSS URL
-        match = re.search(
+        match = require_match(
             r'href="([^"]*rewrite_css_images\.css\.pagespeed\.cf\.[^"]*)"',
-            response.text,
+            response,
+            "rewritten CSS URL",
         )
-        if not match:
-            pytest.skip("Could not find rewritten CSS URL")
 
         css_url = match.group(1)
         # Handle both absolute URLs (http://...) and relative URLs
