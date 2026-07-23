@@ -76,8 +76,11 @@ void DomStatsFilter::EndElementImpl(HtmlElement* element) {
     ++num_external_css_;
   } else {
     HtmlElement::Attribute* src;
-    if (script_tag_scanner_.ParseScriptElement(element, &src) ==
-        ScriptTagScanner::kJavaScript) {
+    ScriptTagScanner::ScriptClassification classification =
+        script_tag_scanner_.ParseScriptElement(element, &src);
+    // A module is JavaScript too; both count toward the page's script total.
+    if (classification == ScriptTagScanner::kJavaScript ||
+        classification == ScriptTagScanner::kJavaScriptModule) {
       ++num_scripts_;
     }
   }

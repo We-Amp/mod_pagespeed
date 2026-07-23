@@ -233,6 +233,38 @@ TEST_F(DedupInlinedImagesTest, DedupSecondSmallImageWithAttributes) {
                                 "</script>")));
 }
 
+TEST_F(DedupInlinedImagesTest, EscapesAuthorControlledIdInJsLiteral) {
+  // Regression test for a stored-XSS vector. The second (deduplicated) image
+  // carries an author/UGC-controlled id whose value is spliced into the
+  // single-quoted argument of the emitted
+  //   pagespeed.dedupInlinedImages.inlineImg('...','<id>','...')
+  // call. If the id is not escaped, a value such as  x');alert(1);//  closes
+  // the JS string literal and injects arbitrary script (breakout). Verify the
+  // id is escaped in the generated inline JS so no breakout is possible.
+  const char kXssId[] = "x');alert(1);//";
+  GoogleString body_in =
+      StrCat("<img src='", kCuppaPngFilename, "'>\n", "<img src='",
+             kCuppaPngFilename, "' id=\"", kXssId, "\">");
+  GoogleString html_in =
+      absl::StrFormat(kHtmlWrapperFormat, "", body_in.c_str());
+  Parse("escape_author_id", html_in);
+  // The unescaped breakout must NOT appear in the emitted JS. We match the
+  // JS-call context specifically (payload followed by ',' -- the argument
+  // separator of inlineImg('from','id','script')): the deduped <img> retains
+  // its raw id attribute (id="x');alert(1);//"), where the payload survives
+  // inertly, so a whole-output search for "x');alert" would match that benign
+  // attribute regardless of escaping. The "','" suffix appears only in the JS
+  // call, not in the double-quoted attribute.
+  EXPECT_EQ(GoogleString::npos, output_buffer_.find("x');alert(1);//','"))
+      << "Unescaped author id broke out of the JS string literal:\n"
+      << output_buffer_;
+  // The escaped form must be present, confirming the dedup path fired and the
+  // single quote was neutralized as \'.
+  EXPECT_NE(GoogleString::npos, output_buffer_.find("x\\');alert"))
+      << output_buffer_;
+  output_buffer_.clear();
+}
+
 TEST_F(DedupInlinedImagesTest, CspForbidsInlineScript) {
   // Under a script-src policy without 'unsafe-inline' the browser would
   // block the inline restore scripts, so duplicates must not be deduped

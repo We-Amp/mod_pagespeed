@@ -14,9 +14,10 @@ constants for versions and pairs them with a curated license/PURL map
 (CPP_DEPS) — versions auto-track repositories.bzl, metadata is reviewed.
 
 Scope: the directly-declared runtime/library deps. Intentionally excluded:
-  - build/test-only: googletest, rules_foreign_cc, bazel_compdb
-  - grpc-transitive (c-ares, protobuf, upb): pulled by grpc_deps(), not
-    pinned directly by 1.1; tracked upstream via the gRPC bump.
+  - build/test-only: googletest, rules_cc, rules_proto, rules_foreign_cc,
+    bazel_compdb
+  - protobuf-transitive tooling pulled by protobuf_deps() (rules_java,
+    rules_python, etc.): not pinned directly by 1.1.
 The committed JS deps are the two bundled into admin_console.html
 (svelte, uplot); the rest of pagespeed/system/console/ is build tooling.
 
@@ -80,8 +81,8 @@ CPP_DEPS = [
      "holder": "Google Inc.", "repo": "google/boringssl", "purl_version": None},
     {"name": "libevent", "version": {"key": "LIBEVENT_VERSION"}, "license": "BSD-3-Clause",
      "holder": "Niels Provos and Nick Mathewson", "repo": "libevent/libevent", "purl_version": None},
-    {"name": "grpc", "version": {"key": "GRPC_VERSION"}, "license": "Apache-2.0",
-     "holder": "The gRPC Authors", "repo": "grpc/grpc", "purl_version": "v1.78.1"},
+    {"name": "protobuf", "version": {"key": "PROTOBUF_COMMIT"}, "license": "BSD-3-Clause",
+     "holder": "The Protocol Buffers Authors", "repo": "protocolbuffers/protobuf", "purl_version": "v31.1"},
     {"name": "re2", "version": {"key": "_RE2_VERSION"}, "license": "BSD-3-Clause",
      "holder": "Google Inc.", "repo": "google/re2", "purl_version": None},
     {"name": "fmt", "version": {"key": "FMT_VERSION"}, "license": "MIT",
@@ -98,6 +99,15 @@ CPP_DEPS = [
      "holder": "Glenn Randers-Pehrson et al.", "repo": "glennrp/libpng", "purl_version": "v1.6.58"},
     {"name": "libwebp", "version": {"key": "LIBWEBP_COMMIT"}, "license": "BSD-3-Clause",
      "holder": "Google Inc.", "repo": "webmproject/libwebp", "purl_version": "v1.5.0"},
+    {"name": "libavif", "version": {"key": "LIBAVIF_VERSION"}, "license": "BSD-2-Clause",
+     "holder": "Joe Drago and libavif contributors", "repo": "AOMediaCodec/libavif", "purl_version": "v1.4.2"},
+    # aom is commit-pinned (googlesource tarballs are not byte-stable — see
+    # bazel/repositories.bzl); the commit equals tag v3.12.0.
+    {"name": "aom", "version": {"key": "AOM_COMMIT"}, "license": "BSD-2-Clause",
+     "holder": "Alliance for Open Media", "repo": None,
+     "download": "https://aomedia.googlesource.com/aom/", "purl_version": None},
+    {"name": "dav1d", "version": {"key": "DAV1D_VERSION"}, "license": "BSD-2-Clause",
+     "holder": "VideoLAN and dav1d authors", "repo": "videolan/dav1d", "purl_version": None},
     {"name": "sparsehash", "version": {"key": "GOOGLE_SPARSEHASH_COMMIT"}, "license": "BSD-3-Clause",
      "holder": "Google Inc.", "repo": "sparsehash/sparsehash", "purl_version": None},
     {"name": "gflags", "version": {"key": "GFLAGS_COMMIT"}, "license": "BSD-3-Clause",
@@ -129,7 +139,7 @@ CPP_DEPS = [
     # source, not a Bazel http_archive), so it is pinned inline as a literal. Keep this
     # lockstep with DEF_NGINX_VER (focal path) in install/nginx/build_module_in_container.sh
     # — the load-bearing pin the sidecar binary is actually built from.
-    {"name": "nginx", "version": {"literal": "1.30.3"}, "license": "BSD-2-Clause",
+    {"name": "nginx", "version": {"literal": "1.30.4"}, "license": "BSD-2-Clause",
      "holder": "Nginx, Inc. / F5", "repo": None,
      "download": "https://nginx.org/", "purl_version": None},
 ]

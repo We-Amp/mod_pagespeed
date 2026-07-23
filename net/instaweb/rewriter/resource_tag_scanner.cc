@@ -42,9 +42,10 @@ const char kAppleTouchIconPrecomposed[] = "apple-touch-icon-precomposed";
 const char kAppleTouchStartupImage[] = "apple-touch-startup-image";
 
 // Below are the values of the "rel" attribute of LINK tag which are relevant to
-// DNS prefetch.
+// connection warm-up hints.
 const char kRelPrefetch[] = "prefetch";
 const char kRelDnsPrefetch[] = "dns-prefetch";
+const char kRelPreconnect[] = "preconnect";
 
 const char kAttrValImage[] = "image";  // <input type="image" src=...>
 
@@ -88,7 +89,8 @@ semantic_type::Category CategorizeAttributeBySpec(
       }
       for (int i = 0, n = values.size(); i < n; ++i) {
         if (StringCaseEqual(values[i], kRelPrefetch) ||
-            StringCaseEqual(values[i], kRelDnsPrefetch)) {
+            StringCaseEqual(values[i], kRelDnsPrefetch) ||
+            StringCaseEqual(values[i], kRelPreconnect)) {
           return semantic_type::kPrefetch;
         }
       }

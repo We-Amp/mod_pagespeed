@@ -324,6 +324,11 @@ automate this for resources that it rewrites, using the directive:
      >pagespeed ShardDomain domain_to_shard shard1,shard2,shard3...;</pre>
 </dl>
 
+<p><strong>Note:</strong> Domain sharding is deprecated: it is an
+HTTP/1-era workaround that hurts performance with HTTP/2 and HTTP/3,
+which multiplex over a single connection.  Remove any
+<code>ShardDomain</code> directives.</p>
+
 <p>Wildcards cannot be used in this directive.</p>
 
 <p>This will distribute the domains for rewritten URLs among the
@@ -343,10 +348,10 @@ pagespeed ShardDomain example.com static1.example.com,static2.example.com;</pre>
 Using this directive, PageSpeed will distribute roughly half the
 resources rewritten from example.com
 into <code>static1.example.com</code>, and the rest to
-<code>static2.example.com</code>.  You can specify as many shards as
-you like.  The optimum number of shards is a topic of active
-research, and is browser-dependent.  Configuring between 2 and 4
-shards should yield good results.  Changing the number of shards
+<code>static2.example.com</code>.  On HTTP/1-only deployments, between
+2 and 4 shards was historically considered a good trade-off; this no
+longer applies with HTTP/2 and HTTP/3 (see the deprecation note
+above).  Changing the number of shards
 will cause PageSpeed to choose different names for resources,
 resulting in a partial cache flush.</p>
 

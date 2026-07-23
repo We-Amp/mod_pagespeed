@@ -223,6 +223,23 @@ TEST_F(HtmlKeywordsTest, DetectEncodingErrors) {
   EXPECT_TRUE(UnescapeEncodingError("\200"));
 }
 
+TEST_F(HtmlKeywordsTest, NumericEntityOverflowIsError) {
+  // The decimal/hex accumulators clamp above the maximum Unicode code-point
+  // (0x10FFFF) rather than wrapping uint32.  Without the clamp,
+  // &#4294967330; (2^32 + 34) wrapped to 34 and decoded to '"', and
+  // &#x100000022; wrapped to 0x22 the same way.
+  EXPECT_TRUE(UnescapeEncodingError("&#4294967330;"));
+  EXPECT_TRUE(UnescapeEncodingError("&#x100000022;"));
+  // One above the maximum Unicode code-point.
+  EXPECT_TRUE(UnescapeEncodingError("&#x110000;"));
+  // The maximum valid code-point is far outside the single-byte range this
+  // decoder emits, so it stays a decoding error -- but it must not wrap.
+  EXPECT_TRUE(UnescapeEncodingError("&#x10FFFF;"));
+  // The clamp must not disturb in-range values.
+  EXPECT_FALSE(UnescapeEncodingError("&#255;"));
+  EXPECT_FALSE(UnescapeEncodingError("&#xff;"));
+}
+
 TEST_F(HtmlKeywordsTest, EscapedSingleByteAccented) {
   BiTest("&atilde;&Yacute;&yacute;", "\xe3\xdd\xfd");
 }
@@ -303,6 +320,19 @@ TEST_F(HtmlKeywordsTest, WhitespaceNotChanged) {
   Unchanged("a\rb");
   Unchanged("a\tb");
   Unchanged("a\fb");
+}
+
+TEST_F(HtmlKeywordsTest, InitIsIdempotent) {
+  // Init() already ran in SetUpTestSuite; repeated calls must keep the same
+  // singleton instance rather than leaking or replacing it.  (The interesting
+  // property -- two threads racing the *first* Init() -- is not
+  // deterministically testable here; the double-checked locking in Init()
+  // covers it.)
+  const StringPiece* before = HtmlKeywords::KeywordToString(HtmlName::kA);
+  HtmlKeywords::Init();
+  HtmlKeywords::Init();
+  const StringPiece* after = HtmlKeywords::KeywordToString(HtmlName::kA);
+  EXPECT_EQ(before, after);
 }
 
 }  // namespace net_instaweb

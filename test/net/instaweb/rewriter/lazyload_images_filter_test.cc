@@ -630,6 +630,158 @@ TEST_F(LazyloadImagesFilterTest, NativeModeCriticalGetsFetchPriority) {
             StatValue(LazyloadImagesFilter::kLazyloadImagesSkippedCritical));
 }
 
+// Srcset-only images have no src to defer, but a beacon-critical candidate
+// earns the same eager-fetch treatment as a critical src: fetchpriority=high
+// and decoding=async. A non-critical srcset-only image gets loading="lazy"
+// like a non-critical src (covered in detail by
+// NativeModeNonCriticalSrcsetOnlyGetsLazy).
+TEST_F(LazyloadImagesFilterTest, NativeModeCriticalSrcsetOnlyGetsFetchPriority) {
+  options()->set_lazyload_images_mode(
+      RewriteOptions::kLazyloadImagesModeNative);
+  InitLazyloadImagesFilter(false);
+  MockCriticalImagesFinder* finder = new MockCriticalImagesFinder(statistics());
+  server_context()->set_critical_images_finder(finder);
+  StringSet* critical_images = new StringSet;
+  critical_images->insert("http://test.com/hires.jpg");
+  finder->set_critical_images(critical_images);
+  ValidateExpected(
+      "native_critical_srcset_only",
+      "<head></head>"
+      "<body>"
+      "<img srcset=\"lowres.jpg 1x, hires.jpg 2x\"/>"
+      "<img srcset=\"other.jpg 1x\"/>"
+      "</body>",
+      "<head></head>"
+      "<body>"
+      "<img srcset=\"lowres.jpg 1x, hires.jpg 2x\" fetchpriority=\"high\" "
+      "decoding=\"async\"/>"
+      "<img srcset=\"other.jpg 1x\" loading=\"lazy\" decoding=\"async\"/>"
+      "</body>");
+  EXPECT_EQ(1, StatValue(LazyloadImagesFilter::kLazyloadImagesNativeApplied));
+  EXPECT_EQ(1,
+            StatValue(LazyloadImagesFilter::kLazyloadImagesSkippedCritical));
+}
+
+// Author attributes win over the srcset-only critical treatment, mirroring
+// the src path: loading= opts the element out entirely; an author
+// fetchpriority= is kept (decoding is still added when absent); an author
+// decoding= is kept (fetchpriority is still added when absent).
+TEST_F(LazyloadImagesFilterTest,
+       NativeModeCriticalSrcsetOnlyAuthorAttributesRespected) {
+  options()->set_lazyload_images_mode(
+      RewriteOptions::kLazyloadImagesModeNative);
+  InitLazyloadImagesFilter(false);
+  MockCriticalImagesFinder* finder = new MockCriticalImagesFinder(statistics());
+  server_context()->set_critical_images_finder(finder);
+  StringSet* critical_images = new StringSet;
+  critical_images->insert("http://test.com/hires.jpg");
+  finder->set_critical_images(critical_images);
+  ValidateExpected(
+      "native_critical_srcset_only_author_attributes",
+      "<head></head>"
+      "<body>"
+      "<img srcset=\"lowres.jpg 1x, hires.jpg 2x\" loading=\"lazy\"/>"
+      "<img srcset=\"lowres.jpg 1x, hires.jpg 2x\" fetchpriority=\"low\"/>"
+      "<img srcset=\"lowres.jpg 1x, hires.jpg 2x\" decoding=\"sync\"/>"
+      "</body>",
+      "<head></head>"
+      "<body>"
+      "<img srcset=\"lowres.jpg 1x, hires.jpg 2x\" loading=\"lazy\"/>"
+      "<img srcset=\"lowres.jpg 1x, hires.jpg 2x\" fetchpriority=\"low\" "
+      "decoding=\"async\"/>"
+      "<img srcset=\"lowres.jpg 1x, hires.jpg 2x\" decoding=\"sync\" "
+      "fetchpriority=\"high\"/>"
+      "</body>");
+  // Only the latter two images were treated as critical; the loading= image
+  // was left alone before the critical check ran.
+  EXPECT_EQ(2,
+            StatValue(LazyloadImagesFilter::kLazyloadImagesSkippedCritical));
+}
+
+// A non-critical srcset-only image has no src to defer, but native mode
+// still applies loading="lazy" (plus decoding="async" when absent), exactly
+// like a non-critical src. An author-supplied loading or decoding attribute
+// wins, as it does for images with a src.
+TEST_F(LazyloadImagesFilterTest, NativeModeNonCriticalSrcsetOnlyGetsLazy) {
+  options()->set_lazyload_images_mode(
+      RewriteOptions::kLazyloadImagesModeNative);
+  InitLazyloadImagesFilter(false);
+  MockCriticalImagesFinder* finder = new MockCriticalImagesFinder(statistics());
+  server_context()->set_critical_images_finder(finder);
+  StringSet* critical_images = new StringSet;
+  critical_images->insert("http://test.com/hires.jpg");
+  finder->set_critical_images(critical_images);
+  ValidateExpected(
+      "native_noncritical_srcset_only",
+      "<head></head>"
+      "<body>"
+      "<img srcset=\"lowres.jpg 1x, hires.jpg 2x\"/>"
+      "<img srcset=\"other.jpg 1x\"/>"
+      "<img srcset=\"other2.jpg 1x\" decoding=\"sync\"/>"
+      "<img srcset=\"other3.jpg 1x\" loading=\"eager\"/>"
+      "</body>",
+      "<head></head>"
+      "<body>"
+      "<img srcset=\"lowres.jpg 1x, hires.jpg 2x\" fetchpriority=\"high\" "
+      "decoding=\"async\"/>"
+      "<img srcset=\"other.jpg 1x\" loading=\"lazy\" decoding=\"async\"/>"
+      "<img srcset=\"other2.jpg 1x\" decoding=\"sync\" loading=\"lazy\"/>"
+      "<img srcset=\"other3.jpg 1x\" loading=\"eager\"/>"
+      "</body>");
+  EXPECT_EQ(2, StatValue(LazyloadImagesFilter::kLazyloadImagesNativeApplied));
+  EXPECT_EQ(1,
+            StatValue(LazyloadImagesFilter::kLazyloadImagesSkippedCritical));
+}
+
+// Without critical-image data the skip-first LCP protection covers
+// srcset-only images too, mirroring the src path: the first N otherwise
+// eligible images are left untouched.
+TEST_F(LazyloadImagesFilterTest, SkipFirstSrcsetOnlyInNativeMode) {
+  options()->set_lazyload_images_mode(
+      RewriteOptions::kLazyloadImagesModeNative);
+  InitLazyloadImagesFilterWithSkipFirst(false, 1);
+  ValidateExpected(
+      "native_skip_first_srcset_only",
+      "<body>"
+      "<img srcset=\"1.jpg 1x\"/>"
+      "<img srcset=\"2.jpg 1x\"/>"
+      "</body>",
+      "<body>"
+      "<img srcset=\"1.jpg 1x\"/>"
+      "<img srcset=\"2.jpg 1x\" loading=\"lazy\" decoding=\"async\"/>"
+      "</body>");
+}
+
+// The src path's author opt-out attributes win on src-less images too:
+// pagespeed_no_defer/data-pagespeed-no-defer leave the element completely
+// untouched, and a data-pagespeed-lazy-src/data-src marker (a third-party
+// loader's) is left alone. The guards run ahead of the critical check, as
+// in the src path, so even a beacon-critical candidate is not promoted.
+TEST_F(LazyloadImagesFilterTest,
+       NativeModeSrcsetOnlyAuthorOptOutAttributesRespected) {
+  options()->set_lazyload_images_mode(
+      RewriteOptions::kLazyloadImagesModeNative);
+  InitLazyloadImagesFilter(false);
+  MockCriticalImagesFinder* finder = new MockCriticalImagesFinder(statistics());
+  server_context()->set_critical_images_finder(finder);
+  StringSet* critical_images = new StringSet;
+  critical_images->insert("http://test.com/hires.jpg");
+  finder->set_critical_images(critical_images);
+  ValidateNoChanges(
+      "native_srcset_only_author_optouts",
+      "<head></head>"
+      "<body>"
+      "<img srcset=\"lowres.jpg 1x, hires.jpg 2x\" data-pagespeed-no-defer />"
+      "<img srcset=\"other.jpg 1x\" pagespeed_no_defer />"
+      "<img srcset=\"lowres.jpg 1x, hires.jpg 2x\" "
+      "data-pagespeed-lazy-src=\"lowres.jpg\"/>"
+      "<img srcset=\"other.jpg 1x\" data-src=\"other.jpg\"/>"
+      "</body>");
+  EXPECT_EQ(0, StatValue(LazyloadImagesFilter::kLazyloadImagesNativeApplied));
+  EXPECT_EQ(0,
+            StatValue(LazyloadImagesFilter::kLazyloadImagesSkippedCritical));
+}
+
 // Auto mode selects native for a user agent supporting loading="lazy".
 TEST_F(LazyloadImagesFilterTest, AutoModeUsesNativeForModernUa) {
   SetCurrentUserAgent(kChrome120UserAgent);

@@ -366,17 +366,4 @@ void EnvoyRewriteDriverFactory::InitStats(Statistics* statistics) {
   CurlUrlAsyncFetcher::InitStats(statistics);
 }
 
-void EnvoyRewriteDriverFactory::PrepareForkedProcess(const char* name) {
-  // envoy_pid = envoy_getpid(); // Needed for logging to have the right PIDs.
-  SystemRewriteDriverFactory::PrepareForkedProcess(name);
-}
-
-void EnvoyRewriteDriverFactory::NameProcess(const char* name) {
-  SystemRewriteDriverFactory::NameProcess(name);
-  // char name_for_setproctitle[32];
-  // snprintf(name_for_setproctitle, sizeof(name_for_setproctitle),
-  //         "pagespeed %s", name);
-  // envoy_setproctitle(name_for_setproctitle);
-}
-
 }  // namespace net_instaweb

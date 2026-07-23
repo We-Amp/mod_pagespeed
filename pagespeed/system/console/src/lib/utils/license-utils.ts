@@ -33,6 +33,30 @@ export function getLicenseErrorMessage(error: string): string {
   return messages[error] ?? `License error: ${error}`;
 }
 
+/**
+ * Decide whether the console should offer license-management controls
+ * (purchase / apply / activate).
+ *
+ * The backend's `is_global` flag on the license status response is
+ * authoritative: the server computes it and enforces it server-side when a
+ * key is applied or activated, so this UI gate is advisory only. Trust the
+ * flag whenever it is present — this is what lets an operator who serves the
+ * global admin console at a custom (renamed) path manage licenses, instead of
+ * the controls being wrongly hidden by a URL heuristic that only recognizes
+ * the built-in path.
+ *
+ * Fall back to the URL-derived heuristic (`isGlobalFallback`) only when the
+ * flag is absent: older backends predate it and never send it. While status
+ * is still loading (`null`/`undefined`), the same fallback applies so the gate
+ * doesn't momentarily flip while data is in flight.
+ */
+export function resolveCanManageLicense(
+  status: { is_global?: boolean } | null | undefined,
+  isGlobalFallback: boolean,
+): boolean {
+  return status?.is_global ?? isGlobalFallback;
+}
+
 /** Format a Unix epoch (seconds) as a human-readable date string. */
 export function formatLicenseDate(epoch: number): string {
   if (!epoch || epoch <= 0) return "N/A";

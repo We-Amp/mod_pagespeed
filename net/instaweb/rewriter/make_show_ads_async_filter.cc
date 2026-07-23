@@ -113,7 +113,30 @@ void MakeShowAdsAsyncFilter::EndElementImpl(HtmlElement* element) {
                               &parsed_attributes)) {
         ReplaceShowAdsWithAdsByGoogleElement(parsed_attributes, element);
       } else {
-        if (num_pending_show_ads_api_call_replacements_ > 0) {
+        // The script was left unconverted. Determine whether it *looked like*
+        // a showads data snippet so we can record a missed conversion.
+        // ParseStrict succeeds only when the entire inline body is a
+        // well-formed list of google_ad_* assignments (the shape of a showads
+        // data snippet) and it yields at least one attribute. That holds for
+        // the snippets we skip because they fail applicability (missing/invalid
+        // required attribute or non-html output) and for a valid snippet the
+        // page CSP forbids converting (in which case IsApplicableShowAds above
+        // was short-circuited and never parsed) -- all genuine "not converted"
+        // cases. It is false for the show_ads.js API-call <script> (empty
+        // body), the injected adsbygoogle push, and any unrelated inline
+        // script, none of which should be counted. We parse here rather than
+        // reuse parsed_attributes because ParseStrict can leave the map
+        // partially populated when it fails midway (e.g. an unexpected
+        // statement after some google_ad_* assignments), and because the CSP
+        // short-circuit skips the parse entirely.
+        ShowAdsSnippetParser::AttributeMap not_converted_attributes;
+        if (show_ads_snippet_parser_.ParseStrict(
+                current_script_element_contents_,
+                server_context()->js_tokenizer_patterns(),
+                &not_converted_attributes) &&
+            !not_converted_attributes.empty()) {
+          show_ads_snippets_not_converted_count_->Add(1);
+        } else if (num_pending_show_ads_api_call_replacements_ > 0) {
           const char* src_attribute =
               element->EscapedAttributeValue(HtmlName::kSrc);
           if (src_attribute != nullptr &&
@@ -134,7 +157,7 @@ void MakeShowAdsAsyncFilter::EndElementImpl(HtmlElement* element) {
   }
 }
 
-void MakeShowAdsAsyncFilter::Characters(HtmlCharactersNode* characters) {
+void MakeShowAdsAsyncFilter::CharactersImpl(HtmlCharactersNode* characters) {
   if (current_script_element_ != nullptr) {
     current_script_element_contents_ += characters->contents();
   }

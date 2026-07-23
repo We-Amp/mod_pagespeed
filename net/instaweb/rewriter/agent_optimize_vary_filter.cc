@@ -66,6 +66,23 @@ AgentOptimizeVaryFilter::AgentOptimizeVaryFilter(RewriteDriver* driver)
 
 AgentOptimizeVaryFilter::~AgentOptimizeVaryFilter() {}
 
+bool AgentOptimizeVaryFilter::RequestAcceptsMarkdown(
+    const RequestHeaders* request_headers) {
+  if (request_headers == nullptr) {
+    return false;
+  }
+  ConstStringStarVector accept_values;
+  if (!request_headers->Lookup(HttpAttributes::kAccept, &accept_values)) {
+    return false;
+  }
+  for (const GoogleString* value : accept_values) {
+    if (value != nullptr && AcceptContainsMarkdown(*value)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void AgentOptimizeVaryFilter::StartDocumentImpl() {
   // Response headers are mutable only until the first Flush; after that
   // mutable_response_headers() returns NULL and we must not touch them.
@@ -82,23 +99,7 @@ void AgentOptimizeVaryFilter::StartDocumentImpl() {
     return;
   }
 
-  const RequestHeaders* request_headers = driver()->request_headers();
-  if (request_headers == nullptr) {
-    return;
-  }
-
-  ConstStringStarVector accept_values;
-  if (!request_headers->Lookup(HttpAttributes::kAccept, &accept_values)) {
-    return;
-  }
-  bool wants_markdown = false;
-  for (const GoogleString* value : accept_values) {
-    if (value != nullptr && AcceptContainsMarkdown(*value)) {
-      wants_markdown = true;
-      break;
-    }
-  }
-  if (!wants_markdown) {
+  if (!RequestAcceptsMarkdown(driver()->request_headers())) {
     return;
   }
 

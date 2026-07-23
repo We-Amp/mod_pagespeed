@@ -261,16 +261,26 @@ void Minifier<OutputConsumer>::ConsumeBlockComment() {
   // compilation comments to avoid breaking scripts that rely on them.
   // See http://code.google.com/p/page-speed/issues/detail?id=198
   const bool may_be_ccc = (index_ < input_size() && input_[index_] == '@');
+  bool has_newline = false;
   while (index_ < input_size()) {
     if (input_[index_] == '*' && Peek() == '/') {
       index_ += 2;
       if (may_be_ccc && input_[index_ - 3] == '@') {
         ChangeToken(kCCCommentToken);
         output_.append(input_.substr(begin, index_ - begin));
-      } else if (whitespace_ == kNoWhitespace) {
-        whitespace_ = kSpace;
+      } else {
+        // A block comment containing a linebreak counts as a line terminator
+        // for semicolon insertion (e.g. "return/*\n*/x" must not become
+        // "return x"), so promote the pending whitespace accordingly.
+        const JsWhitespace whitespace = has_newline ? kLinebreak : kSpace;
+        if (whitespace > whitespace_) {
+          whitespace_ = whitespace;
+        }
       }
       return;
+    }
+    if (input_[index_] == '\n' || input_[index_] == '\r') {
+      has_newline = true;
     }
     ++index_;
   }
@@ -326,7 +336,9 @@ void Minifier<OutputConsumer>::ConsumeRegex() {
       // If we see a backslash, don't check the next character (this is mainly
       // relevant if the next character is a slash that would otherwise close
       // the regex literal, or a closing bracket when we are within brackets).
-      ++index_;
+      if (index_ < input_size()) {
+        ++index_;
+      }
     } else if (ch == '/') {
       // Slashes within brackets are implicitly escaped.
       if (!within_brackets) {
@@ -363,7 +375,11 @@ void Minifier<OutputConsumer>::ConsumeString() {
     const char ch = input_[index_];
     ++index_;
     if (ch == '\\') {
-      ++index_;
+      // Skip the escaped character, but never past the end of the input
+      // (a lone backslash at EOF).
+      if (index_ < input_size()) {
+        ++index_;
+      }
     } else {
       if (ch == quote) {
         ChangeToken(kStringToken);
@@ -560,6 +576,26 @@ bool IsNameNumberOrKeyword(JsKeywords::Type type) {
   }
 }
 
+// Returns true if a linebreak after this keyword always induces semicolon
+// insertion, no matter what token follows -- ECMAScript's restricted
+// productions, which forbid a LineTerminator between the keyword and its
+// operand.  (`yield` is restricted only inside generators, but keeping a
+// linebreak after its identifier uses is byte-safe: the output re-parses
+// identically.)
+bool IsAsiKeyword(JsKeywords::Type type) {
+  switch (type) {
+    case JsKeywords::kBreak:
+    case JsKeywords::kContinue:
+    case JsKeywords::kDebugger:
+    case JsKeywords::kReturn:
+    case JsKeywords::kThrow:
+    case JsKeywords::kYield:
+      return true;
+    default:
+      return false;
+  }
+}
+
 // Updates *line and *col numbers based on the next incremental chunk of text.
 // Note: This only works correctly for ASCII text. If text contains multi-byte
 // UTF-8 chars, our updates will be incorrect.
@@ -676,22 +712,47 @@ JsKeywords::Type JsMinifyingTokenizer::NextTokenHelper(
       return type;
     } else if (type == JsKeywords::kComment) {
       // Emit comments that look like they might be IE conditional compilation
-      // comments; treat all other comments as whitespace.
+      // comments; treat all other comments as whitespace.  A leading
+      // `#!...` hashbang line is likewise emitted verbatim (including its
+      // terminating linebreak, so node-executable scripts stay directly
+      // executable).
       //   all comments matching a user-specified pattern.  It might also be
       //   nice to make retaining of IE conditional compilation comments
       //   optional, so we can turn it off for non-IE browsers.
-      if (token.size() >= 6 && strings::StartsWith(token, "/*@") &&
-          strings::EndsWith(token, "@*/")) {
+      if ((token.size() >= 6 && strings::StartsWith(token, "/*@") &&
+           strings::EndsWith(token, "@*/")) ||
+          strings::StartsWith(token, "#!")) {
         *token_out = token;
         *position_out = first_position;  // Beginning of whitespace/comments.
         return type;
-      } else if (whitespace_ == kNoWhitespace) {
-        whitespace_ = kSpace;
+      } else {
+        // A block comment containing a line terminator counts as a
+        // linebreak for semicolon insertion (e.g. "return/*\n*/x" must not
+        // become "return x"), so promote the pending whitespace
+        // accordingly.  U+2028/U+2029 are line terminators too.
+        const bool has_newline =
+            token.find('\n') != StringPiece::npos ||
+            token.find('\r') != StringPiece::npos ||
+            token.find("\xE2\x80\xA8") != StringPiece::npos ||
+            token.find("\xE2\x80\xA9") != StringPiece::npos;
+        const JsWhitespace whitespace = has_newline ? kLinebreak : kSpace;
+        if (whitespace > whitespace_) {
+          whitespace_ = whitespace;
+        }
       }
     } else {
       const JsWhitespace whitespace = whitespace_;
       whitespace_ = kNoWhitespace;
-      if (whitespace != kNoWhitespace && WhitespaceNeededBefore(type, token)) {
+      if (whitespace != kNoWhitespace &&
+          (WhitespaceNeededBefore(type, token) ||
+           // A linebreak after a restricted-production keyword always
+           // induces semicolon insertion regardless of the next token.
+           // This matters chiefly when the linebreak was inside a block
+           // comment (e.g. "return/*\n*/(x)" must keep its linebreak): a
+           // real linebreak after such a keyword arrives as kSemiInsert
+           // and is emitted directly, except before `;` or `}`, where
+           // keeping the linebreak is merely harmless.
+           (whitespace == kLinebreak && IsAsiKeyword(prev_type_)))) {
         next_type_ = type;
         next_token_ = token;
         next_position_ = token_position;

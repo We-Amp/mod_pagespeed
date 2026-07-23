@@ -89,7 +89,12 @@ class TestInsertDnsPrefetch:
     def test_insert_dns_prefetch_uses_link_tag(
         self, client: PageSpeedClient, example_root: str
     ):
-        """DNS prefetch should use rel=dns-prefetch link tags."""
+        """Connection warm-up hints should use rel=preconnect link tags.
+
+        The example page has exactly two external domains, both of which fit
+        within the filter's preconnect budget, so both inserted hints use
+        rel=preconnect (domains beyond the budget would get rel=dns-prefetch).
+        """
         url = f"{example_root}/insert_dns_prefetch.html?PageSpeedFilters=insert_dns_prefetch"
 
         response = client.get(
@@ -98,11 +103,11 @@ class TestInsertDnsPrefetch:
         )
         assert_http_status(response, 200)
 
-        # Should have dns-prefetch rel attribute
+        # Should have preconnect rel attribute
         assert_contains(
             response,
-            r'rel=["\']?dns-prefetch',
-            "Should use rel=dns-prefetch",
+            r'rel=["\']?preconnect',
+            "Should use rel=preconnect",
         )
 
 

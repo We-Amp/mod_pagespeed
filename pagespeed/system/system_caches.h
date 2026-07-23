@@ -221,6 +221,14 @@ class SystemCaches {
   void SetupPcacheCohorts(ServerContext* server_context,
                           bool enable_property_cache);
 
+  // Wraps a blocking metadata L2 cache in a put-only async write-behind shim so
+  // its writes drain off the rewrite critical path, lazily creating the shared
+  // single-thread worker pool.  'l1_size_limit' must match the enclosing
+  // WriteThroughCache's cache1 limit so the shim keeps L1-skipping entries
+  // synchronous.  The returned cache is owned by the factory.
+  CacheInterface* WrapMetadataL2WriteBehind(CacheInterface* l2,
+                                            size_t l1_size_limit);
+
   RewriteDriverFactory* factory_;
   AbstractSharedMem* shared_mem_runtime_;
   int thread_limit_;
@@ -249,6 +257,11 @@ class SystemCaches {
   std::unique_ptr<QueuedWorkerPool> memcached_pool_;
 #endif
   std::unique_ptr<QueuedWorkerPool> redis_pool_;
+
+  // Dedicated single-thread pool backing the metadata L2 write-behind shim
+  // (AsyncMetadataL2Writes).  Shared across vhosts; strict FIFO ordering
+  // depends on it having exactly one thread.  Null unless the option is on.
+  std::unique_ptr<QueuedWorkerPool> metadata_write_behind_pool_;
 
   // Explicit lists of MemcachedCache/RedisCache instances are stored individually,
   // as they require extra treatment during startup and shutdown.

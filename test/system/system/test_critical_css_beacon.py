@@ -37,6 +37,7 @@ from pagespeed_test_framework import (
     PageSpeedClient,
     assert_contains,
     assert_http_status,
+    assert_not_contains,
     assert_stat_delta,
 )
 from pagespeed_test_framework.stats import extract_beacon_params
@@ -45,15 +46,21 @@ from pagespeed_test_framework.stats import extract_beacon_params
 # same set the legacy bash test beacons back.
 CRITICAL_SELECTORS = ".big,.blue,.bold,.foo"
 
+# The critical selector beaconed back for the cascade-layers page; it lives
+# inside an @layer block in styles/layers.css.
+LAYER_CRITICAL_SELECTORS = ".layer-critical"
 
-def _instrumented_url(example_root: str) -> str:
+
+def _instrumented_url(
+    example_root: str, page: str = "prioritize_critical_css.html"
+) -> str:
     """Example page URL with the filter enabled and a cache-busting param.
 
     The random param gives each test its own property-cache entry, so tests
     don't have to wait out the rebeaconing interval of a previous test.
     """
     return (
-        f"{example_root}/prioritize_critical_css.html"
+        f"{example_root}/{page}"
         f"?PageSpeedFilters=prioritize_critical_css"
         f"&test_id={random.randint(1, 1000000000)}"
     )
@@ -166,4 +173,57 @@ class TestPrioritizeCriticalCss:
         assert_http_status(response, 200)
         assert_contains(response, r"<style>\.blue\{[^}]*\}</style>")
         assert_contains(response, r"<style>\.big\{[^}]*\}</style>")
-        assert_contains(response, r"<style>\.blue\{[^}]*\}\.bold\{[^}]*\}</style>")
+        # The all_using_imports.css stylesheet also declares an @font-face,
+        # which the critical-CSS filter always retains and the serializer
+        # emits ahead of the critical rulesets.
+        assert_contains(
+            response,
+            r"<style>@font-face\{[^}]*\}\.blue\{[^}]*\}\.bold\{[^}]*\}</style>",
+        )
+
+
+class TestPrioritizeCriticalCssLayers:
+    """Cascade-layer sheets: beacon arming plus a layer-aware inline subset.
+
+    styles/layers.css keeps every rule inside @layer blocks (the shape of
+    frameworks that wrap their entire output in cascade layers). The page
+    must still arm the beacon — with an empty candidate set the server
+    answers kDoNotBeacon and never instruments — and after a beacon response
+    the inline subset keeps survivors inside their @layer wrappers while
+    emptied block-form @layer declarations stay behind, so first-occurrence
+    layer order matches the deferred full copy.
+    """
+
+    def test_pure_layer_page_arms_and_inlines_layered_subset(
+        self, client: PageSpeedClient, example_root: str
+    ):
+        url = _instrumented_url(
+            example_root, page="prioritize_critical_css_layers.html"
+        )
+        # Arming is itself load-bearing: the candidates can only come from
+        # inside the @layer bodies on this page.
+        params = _fetch_beacon_params(client, url)
+
+        data = (
+            f"oh={params['hash']}&n={params['nonce']}"
+            f"&cs={LAYER_CRITICAL_SELECTORS}"
+        )
+        response = _post_beacon(client, params, data)
+        assert_http_status(response, 204)
+
+        response = client.fetch_until_count(
+            url,
+            pattern=r"@layer base\{\.layer-critical\{[^}]*\}\}",
+            expected_count=1,
+            timeout=60.0,
+        )
+        assert_http_status(response, 200)
+        # The emptied non-critical layer survives as a bare declaration;
+        # dropping it would flip the inline subset's layer order relative to
+        # the full stylesheet loaded afterwards.
+        assert_contains(response, r"@layer components\{\}")
+        # The statement-form declaration rides along verbatim.
+        assert_contains(response, r"@layer base, components;")
+        # The non-critical rule lives only in the deferred full copy (the
+        # cloned <link>), never in an inline <style>.
+        assert_not_contains(response, r"\.layer-noncritical\{")

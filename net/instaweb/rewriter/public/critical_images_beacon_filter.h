@@ -33,9 +33,11 @@
 namespace net_instaweb {
 
 // Inject javascript for detecting above the fold images after the page has
-// loaded. Also adds data-pagespeed-url-hash attributes that the beacon sends
-// back to the server. This allows the beacon to work despite image URL
-// rewriting or inlining.
+// loaded. Also adds data-pagespeed-url-hash attributes (or, for srcset-only
+// images, data-pagespeed-srcset-url-hashes with the candidate hashes
+// positionally aligned with srcset) that the beacon sends back to the
+// server. This allows the beacon to work despite image URL rewriting or
+// inlining.
 class CriticalImagesBeaconFilter : public CommonFilter {
  public:
   static const char* kImageOnloadCode;

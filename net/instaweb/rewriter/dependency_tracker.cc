@@ -102,10 +102,18 @@ void DependencyTracker::WriteToPropertyCacheIfDone() {
   }
 
   if (driver_->options()->NeedsDependenciesCohort()) {
-    // Make a proto, and write it out to the pcache.
+    // Make a proto, and write it out to the pcache. Font dependencies go
+    // into their own field: binaries that predate DEP_FONT skip it as an
+    // unknown field, while a DEP_FONT value in 'dependency' would read back
+    // there as the closed-enum field default, DEP_JAVASCRIPT (see
+    // dependencies.proto).
     Dependencies deps;
     for (const std::pair<const int, Dependency>& key_val : computed_info_) {
-      *deps.add_dependency() = key_val.second;
+      if (key_val.second.content_type() == DEP_FONT) {
+        *deps.add_font_dependency() = key_val.second;
+      } else {
+        *deps.add_dependency() = key_val.second;
+      }
     }
     UpdateInPropertyCache(deps, driver_,
                           driver_->server_context()->dependencies_cohort(),

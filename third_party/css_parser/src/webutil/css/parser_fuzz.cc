@@ -181,6 +181,24 @@ const char* const kCorpus[] = {
     "@charset",
     "@charset \"",
     "@namespace",
+
+    // Conditional group rules (@supports/@layer/@container): truncated
+    // preludes, statement forms, unterminated bodies, strings that hide
+    // block/paren delimiters, and MQ4 raw media expressions.
+    "@supports",
+    "@supports (",
+    "@supports (a:b)",
+    "@supports (a:b){",
+    "@layer",
+    "@layer a,",
+    "@layer a;@layer b{",
+    "@container (width >",
+    "@media (width >= ",
+    "@media (400px<=width<=700px){",
+    "@supports (\"{\"):{",
+    "@supports \"unterminated string {",
+    "@supports (a:b){@import url(x);@charset \"utf-8\";}",
+    "@layer a.b{@media screen{@supports (c:d){e{f:url(g)}}}}",
 };
 
 // Build progressively deeper nested inputs at run time to probe the recursion /
@@ -192,6 +210,17 @@ std::vector<std::string> DeepNesters() {
                      std::string(depth, ')') + " }");
     out.emplace_back(std::string(depth, '{'));
     out.emplace_back("a { content: " + std::string(depth, '[') + "x" + " }");
+  }
+  // Nested group rules hammer the statement-recursion cap
+  // (Parser::kMaxGroupRuleDepth): beyond it the parser must consume the rest
+  // iteratively, whatever the depth. Both unterminated and terminated forms.
+  for (int depth : {16, 64, 256, 1024}) {
+    std::string open;
+    for (int i = 0; i < depth; ++i) {
+      open += "@supports (a:b){";
+    }
+    out.emplace_back(open);
+    out.emplace_back(open + "e{f:g}" + std::string(depth, '}'));
   }
   return out;
 }

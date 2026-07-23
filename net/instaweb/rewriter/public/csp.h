@@ -187,6 +187,21 @@ class CspSourceList {
   // introduced under this list.
   bool HasSchemeSource(StringPiece scheme) const;
 
+  // Whether this source list can match no URL whatsoever: it holds no
+  // source expressions, so Matches() returns false for every URL. This is
+  // the representation of 'none' and of an empty source list (keyword-only
+  // sources such as 'unsafe-inline' or nonces/hashes contribute no matchable
+  // expression either). For the base-uri directive this is the provably-safe
+  // signal that the browser will ignore every <base> element, since no
+  // <base href> value can satisfy the policy.
+  //
+  // Caveat: "matches no URL" does not imply "blocks everything" for every
+  // directive. Where non-URL sources can authorize loads (e.g. nonces,
+  // hashes, or 'unsafe-inline' under script-src), a list with an empty
+  // expression set may still permit content; only draw the blocks-all
+  // conclusion for directives matched purely by URL, such as base-uri.
+  bool MatchesNothing() const { return expressions_.empty(); }
+
  private:
   std::vector<CspSourceExpression> expressions_;
   bool saw_unsafe_inline_;
@@ -228,6 +243,17 @@ class CspPolicy {
 
   bool IsBasePermitted(const GoogleUrl& previous_origin,
                        const GoogleUrl& base_candidate) const;
+
+  // Whether this policy's base-uri directive provably neutralizes any <base>
+  // element on the page: the directive is present and its source list matches
+  // no URL (e.g. base-uri 'none' or an empty base-uri list), so the browser
+  // ignores every <base>, leaving relative-URL resolution anchored at the
+  // document URL. When true a <base> tag cannot change resolution and may be
+  // treated as inert. Returns false when base-uri is absent (no restriction on
+  // <base>) or names any source that some <base href> could match --- in
+  // particular 'self' or a host/scheme list, which still permit a same-origin
+  // <base> to change the path and thus resolution.
+  bool BaseUriDisablesAllBases() const;
 
  private:
   // Returns the source list that effectively governs 'specific',
@@ -292,6 +318,22 @@ class CspContext {
       }
     }
     return true;
+  }
+
+  // Whether the combined page policy provably neutralizes every <base>
+  // element: some enforced policy's base-uri matches nothing. CSP is a
+  // conjunction, so a single policy that blocks all <base> URLs is enough to
+  // make the browser ignore <base> entirely, regardless of what the other
+  // policies allow. When true, rewriting can treat a <base> tag as inert
+  // instead of bailing. Conservative: false unless at least one policy
+  // provably blocks all bases.
+  bool IsBaseNeutralizedByCsp() const {
+    for (const auto& policy : policies_) {
+      if (policy->BaseUriDisablesAllBases()) {
+        return true;
+      }
+    }
+    return false;
   }
 
   bool HasDirective(CspDirective directive) const {

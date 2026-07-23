@@ -399,6 +399,30 @@
     "the quality. Use -1 to ignore the Save-Data header.", true) \
   X(kDefaultImageWebpTimeoutMs, image_webp_timeout_ms_, "wt", \
     kImageWebpTimeoutMs, kLegacyProcessScope, nullptr, true) \
+  X(kDefaultImageAvifRecompressQuality, \
+    image_avif_recompress_quality_, "iav", \
+    kImageAvifRecompressionQuality, kQueryScope, \
+    "Quality for rewritten avif images [-1,100], 100 refers to best quality, " \
+    "-1 uses ImageRecompressionQuality.", true) \
+  X(kDefaultImageAvifRecompressQualityForSmallScreens, \
+    image_avif_recompress_quality_for_small_screens_, "iavss", \
+    kImageAvifRecompressionQualityForSmallScreens, kQueryScope, \
+    "Quality for rewritten avif images for small screens. [-1,100], " \
+    "100 refers to best quality, -1 falls back to " \
+    "AvifRecompressionQuality.", true) \
+  X(kDefaultImageAvifAnimatedRecompressQuality, \
+    image_avif_animated_recompress_quality_, "iava", \
+    kImageAvifAnimatedRecompressionQuality, kQueryScope, \
+    "Quality for rewritten animated avif images [-1,100], " \
+    "100 refers to best quality, -1 uses ImageRecompressionQuality.", true) \
+  X(kDefaultImageAvifQualityForSaveData, \
+    image_avif_quality_for_save_data_, "iavsd", \
+    kImageAvifQualityForSaveData, kQueryScope, \
+    "Set quality for the images which will be optimized to lossy AVIF " \
+    "format in the Save-Data mode. Use a value in [0,100] to explicitly set " \
+    "the quality. Use -1 to ignore the Save-Data header.", true) \
+  X(kDefaultImageAvifTimeoutMs, image_avif_timeout_ms_, "avt", \
+    kImageAvifTimeoutMs, kLegacyProcessScope, nullptr, true) \
   X(kDefaultMaxInlinedPreviewImagesIndex, \
     max_inlined_preview_images_index_, "mdii", \
     kMaxInlinedPreviewImagesIndex, kDirectoryScope, \
@@ -469,7 +493,8 @@
     "Assign users to a specific experiment setting.", true) \
   X(false, report_unload_time_, "rut", \
     kReportUnloadTime, kDirectoryScope, \
-    "If set reports optional page unload time.", true) \
+    "Deprecated, no effect: the beacon is now sent on page-hide, which " \
+    "covers pre-onload abandonment without breaking bfcache.", true) \
   X("", x_header_value_, "xhv", \
     kXModPagespeedHeaderValue, kDirectoryScope, \
     "Set the value for the X-Mod-Pagespeed HTTP header", true) \
@@ -510,8 +535,8 @@
   X(true, use_experimental_js_minifier_, "uejsm", \
     kUseExperimentalJsMinifier, kDirectoryScope, \
     "If set to false, uses the old legacy::MinifyJs-based minifier. " \
-    "This option will be deprecated once we do a successful release with the " \
-    "new minifier.", true) \
+    "The legacy minifier is deprecated and will be removed in a future " \
+    "release.", true) \
   X(kDefaultMaxCombinedCssBytes, max_combined_css_bytes_, "xcc", \
     kMaxCombinedCssBytes, kQueryScope, \
     "Maximum size allowed for the combined CSS resource.", true) \

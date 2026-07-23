@@ -32,6 +32,7 @@
 #include "net/instaweb/rewriter/public/critical_images_finder.h"
 #include "net/instaweb/rewriter/public/critical_selector_finder.h"
 #include "net/instaweb/rewriter/public/experiment_matcher.h"
+#include "net/instaweb/rewriter/public/named_lock_schedule_rewrite_controller.h"
 #include "net/instaweb/rewriter/public/process_context.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
@@ -40,10 +41,8 @@
 #include "net/instaweb/rewriter/public/static_asset_manager.h"
 #include "net/instaweb/rewriter/public/url_namer.h"
 #include "net/instaweb/rewriter/public/usage_data_reporter.h"
+#include "net/instaweb/rewriter/public/work_bound_expensive_operation_controller.h"
 #include "net/instaweb/util/public/property_store.h"
-#include "pagespeed/controller/central_controller.h"
-#include "pagespeed/controller/compatible_central_controller.h"
-#include "pagespeed/controller/in_process_central_controller.h"
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/checking_thread_system.h"
 #include "pagespeed/kernel/base/file_system.h"
@@ -468,8 +467,17 @@ void RewriteDriverFactory::InitServerContext(ServerContext* server_context) {
     server_context->set_default_system_fetcher(fetcher);
   }
 
-  server_context->set_central_controller(
-      GetCentralController(server_context->lock_manager()));
+  server_context->set_expensive_operation_controller(
+      std::make_shared<WorkBoundExpensiveOperationController>(
+          // Treat 0 as -1 (unlimited) for backward compatibility with the
+          // old image_max_rewrites_at_once semantics.
+          default_options()->image_max_rewrites_at_once() > 0
+              ? default_options()->image_max_rewrites_at_once()
+              : -1,
+          statistics()));
+  server_context->set_schedule_rewrite_controller(
+      std::make_shared<NamedLockScheduleRewriteController>(
+          server_context->lock_manager(), thread_system(), statistics()));
   if (server_context->url_namer() == nullptr) {
     server_context->set_url_namer(url_namer());
   }
@@ -507,13 +515,6 @@ void RewriteDriverFactory::InitServerContext(ServerContext* server_context) {
       server_context->global_options()->Clone());
   server_context->GetRemoteOptions(remote_options.get(),
                                    true /* startup fetch */);
-}
-
-std::shared_ptr<CentralController> RewriteDriverFactory::GetCentralController(
-    NamedLockManager* lock_manager) {
-  return std::make_shared<CompatibleCentralController>(
-      default_options()->image_max_rewrites_at_once(), statistics(),
-      thread_system(), lock_manager);
 }
 
 void RewriteDriverFactory::RebuildDecodingDriverForTests(
@@ -668,7 +669,7 @@ void RewriteDriverFactory::ShutDown() {
   for (ServerContextSet::iterator p = server_contexts_.begin();
        p != server_contexts_.end(); ++p) {
     ServerContext* server_context = *p;
-    server_context->central_controller()->ShutDown();
+    server_context->schedule_rewrite_controller()->ShutDown();
     server_context->ShutDownDrivers(cutoff_time_ms);
   }
 
@@ -740,7 +741,8 @@ void RewriteDriverFactory::InitStats(Statistics* statistics) {
   RewriteDriver::InitStats(statistics);
   RewriteStats::InitStats(statistics);
   CacheBatcher::InitStats(statistics);
-  InProcessCentralController::InitStats(statistics);
+  WorkBoundExpensiveOperationController::InitStats(statistics);
+  NamedLockScheduleRewriteController::InitStats(statistics);
   CriticalImagesFinder::InitStats(statistics);
   CriticalSelectorFinder::InitStats(statistics);
   PropertyStoreGetCallback::InitStats(statistics);

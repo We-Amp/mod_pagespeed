@@ -84,13 +84,22 @@ ScriptTagScanner::ScriptClassification ScriptTagScanner::ParseScriptElement(
     } else if (type_str.data() == nullptr) {  // e.g. <script type>
       // If the type attribute is empty (no =) then fall back to the lang attr.
       check_lang_attr = true;
-    } else if (type_str.empty() || IsJsMime(Normalized(type_str))) {
-      // An empty type string (but not whitespace-only!) is JS,
-      // So is one that's a known mimetype once lowercased and
-      // having its leading and trailing whitespace removed
+    } else if (type_str.empty()) {
+      // An empty type string (but not whitespace-only!) is JS.
       lang = kJavaScript;
     } else {
-      lang = kUnknownScript;
+      const GoogleString normalized = Normalized(type_str);
+      if (normalized == "module") {
+        // HTML spec matches the "module" script type ASCII-case-insensitively
+        // after stripping surrounding whitespace, like the mimetypes below.
+        lang = kJavaScriptModule;
+      } else if (IsJsMime(normalized)) {
+        // A known mimetype once lowercased and having its leading and
+        // trailing whitespace removed is JS.
+        lang = kJavaScript;
+      } else {
+        lang = kUnknownScript;
+      }
     }
   }
 
@@ -141,7 +150,9 @@ int ScriptTagScanner::ExecutionMode(const HtmlElement* element) const {
 
   // HTML5 notes that certain values of IE-proprietary 'for' and 'event'
   // attributes are magic and are to be handled as if they're not there,
-  // while others will cause the script to not be run at all.
+  // while others will cause the script to not be run at all. Per the
+  // 'prepare a script' algorithm the script also must not run when only
+  // one of the two attributes is present, whatever its value.
   // Note: there is a disagreement between Chrome and Firefox on how
   // empty ones are handled. We set kExecuteForEvent as it is the conservative
   // value, requiring careful treatment by filters
@@ -157,6 +168,8 @@ int ScriptTagScanner::ExecutionMode(const HtmlElement* element) const {
     if (event_str != "onload" && event_str != "onload()") {
       flags |= kExecuteForEvent;
     }
+  } else if (for_attr != nullptr || event_attr != nullptr) {
+    flags |= kExecuteForEvent;
   }
 
   return flags;
@@ -167,6 +180,17 @@ GoogleString ScriptTagScanner::Normalized(const StringPiece& str) {
   TrimWhitespace(str, &normal_form);
   LowerString(&normal_form);
   return normal_form;
+}
+
+bool ScriptTagScanner::HasIntegrityAttribute(const HtmlElement* element) {
+  const HtmlElement::AttributeList& attrs = element->attributes();
+  for (HtmlElement::AttributeConstIterator i(attrs.begin()), e(attrs.end());
+       i != e; ++i) {
+    if (StringCaseEqual((*i).name_str(), "integrity")) {
+      return true;
+    }
+  }
+  return false;
 }
 
 bool ScriptTagScanner::IsJsMime(const GoogleString& type_str) {

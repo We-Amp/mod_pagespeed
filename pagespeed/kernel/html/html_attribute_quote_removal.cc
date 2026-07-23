@@ -30,10 +30,14 @@ namespace {
 
 // Explicit about signedness because we are
 // loading a 0-indexed lookup table.
+// "/" is legal in unquoted attribute values per HTML5 (the forbidden set is
+// only whitespace, '"' "'" '=' '<' '>' and backtick); the "/>" re-parse
+// hazard on brief-closed tags is guarded by HtmlWriterFilter
+// (html_writer_filter.cc).
 constexpr char kNoQuoteChars[] =
     "abcdefghijklmnopqrstuvwxyz"
     "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-    "0123456789-._:";
+    "0123456789-._:/";
 
 // Build the lookup table at compile time using constexpr.
 constexpr std::array<bool, 256> BuildNeedsNoQuotesTable() {

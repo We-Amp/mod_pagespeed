@@ -141,6 +141,12 @@ To avoid opening up cross-domain scripting vulnerabilities, the Inline
 Javscript filter will only inline an external JavaScript file if it is being
 served from the same domain as the HTML file into which it is to be inlined.
 </p>
+<p>
+Module scripts (<code>&lt;script type="module"&gt;</code>) are never inlined:
+moving a module's code into the page would change how its relative
+<code>import</code> specifiers and <code>import.meta.url</code> resolve, as
+well as its fetch semantics.
+</p>
 
 <h2>Risks</h2>
 <p>

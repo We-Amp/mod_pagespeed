@@ -11,8 +11,7 @@ Apache and Nginx factories inherit from.
 
 Base class for `ApacheRewriteDriverFactory` and `NginxRewriteDriverFactory`.
 Manages shared-memory statistics, worker thread pools, fetcher allocation,
-`RootInit`/`ChildInit` lifecycle (Apache pre-fork model), and the central
-controller process (gRPC-based optimization coordination).
+and `RootInit`/`ChildInit` lifecycle (Apache pre-fork model).
 
 ### Admin Console (`admin_site.h`, `admin_site.cc`)
 
@@ -49,7 +48,6 @@ than making an external DNS-resolved request. Delegates to
 | `system_server_context.cc` | Base server context with `ChildInit`, stats, cache flush |
 | `in_place_resource_recorder.cc` | Records IPRO responses into the cache |
 | `system_thread_system.h` | Thread system with deferred thread-start support (for fork safety) |
-| `controller_manager.cc` | Forks and manages the central controller process |
 
 ## Testing
 

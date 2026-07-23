@@ -105,4 +105,15 @@ TEST_F(MockTimerTest, SetTimeDeltaWithCallback) {
   EXPECT_EQ(kCallbackCalledTwice, str);
 }
 
+// A Timer subclass with no independent monotonic source (like MockTimer)
+// inherits Timer's default NowMonotonicUs(), which falls back to NowUs(). This
+// keeps mock-driven latency deltas deterministic and controllable in tests.
+TEST_F(MockTimerTest, MonotonicFallsBackToNowUs) {
+  timer_.SetTimeUs(5012);
+  EXPECT_EQ(5012, timer_.NowMonotonicUs());
+  EXPECT_EQ(5, timer_.NowMonotonicMs());
+  timer_.AdvanceUs(1000);
+  EXPECT_EQ(6012, timer_.NowMonotonicUs());
+}
+
 }  // namespace net_instaweb

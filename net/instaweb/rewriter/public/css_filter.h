@@ -97,7 +97,7 @@ class CssFilter : public RewriteFilter {
 
   void StartDocumentImpl() override;
   void StartElementImpl(HtmlElement* element) override;
-  void Characters(HtmlCharactersNode* characters) override;
+  void CharactersImpl(HtmlCharactersNode* characters) override;
   void EndElementImpl(HtmlElement* element) override;
 
   const char* Name() const override { return "CssFilter"; }
@@ -119,6 +119,7 @@ class CssFilter : public RewriteFilter {
   static const char kMinifyFailed[];
   static const char kRecursion[];
   static const char kComplexQueries[];
+  static const char kUnparseableImport[];
 
   RewriteContext* MakeNestedFlatteningContextInNewSlot(
       const ResourcePtr& resource, const GoogleString& location,
@@ -234,6 +235,10 @@ class CssFilter : public RewriteFilter {
   Variable* num_flatten_imports_recursion_;
   // # of times CSS was not flattened because it had complex media queries.
   Variable* num_flatten_imports_complex_queries_;
+  // # of times CSS was not flattened because it contained an @import that
+  // the parser could not parse (e.g. one using cascade layer or range
+  // media query syntax), which is preserved verbatim as an unparsed ruleset.
+  Variable* num_flatten_imports_unparseable_import_;
 
   CssUrlEncoder encoder_;
 
@@ -344,7 +349,7 @@ class CssFilter::Context : public SingleRewriteContext {
   // file.
   int64 ImageInlineMaxBytes() const;
 
-  bool ScheduleViaCentralController() override { return true; }
+  bool ScheduleViaNamedLockController() override { return true; }
 
   CssFilter* filter_;
   std::unique_ptr<CssImageRewriter> css_image_rewriter_;

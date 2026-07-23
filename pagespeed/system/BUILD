@@ -197,9 +197,7 @@ cc_binary(
 # =============================================================================
 
 # Minimal system library for Envoy deployments.
-# Excludes components not needed by Envoy:
-#   - controller_manager.cc (Envoy handles process management)
-#   - memcached_cache.cc (Redis is the preferred external cache)
+# Excludes memcached_cache.cc (Redis is the preferred external cache).
 # This reduces binary size and external dependencies.
 cc_library(
     name = "system_envoy",
@@ -207,7 +205,6 @@ cc_library(
     hdrs = SYSTEM_CORE_HDRS,
     copts = [
         "-DPAGESPEED_ENABLE_MEMCACHED=0",
-        "-DPAGESPEED_NO_FORK",  # Use stub ControllerManager
         "-DPAGESPEED_SERVER=\\\"envoy\\\"",
         "-Wno-trigraphs",  # Generated html_admin_console.cc contains ??X sequences
     ],
@@ -221,7 +218,6 @@ cc_library(
 
 # Minimal system library for Windows cross-compilation.
 # Excludes POSIX-only components:
-#   - controller_manager.cc (uses fork/signals)
 #   - memcached_cache.cc (libmemcached is POSIX-only)
 # Use this target for Windows IIS integration.
 cc_library(
@@ -230,7 +226,6 @@ cc_library(
     hdrs = SYSTEM_CORE_HDRS,
     copts = [
         "-DPAGESPEED_ENABLE_MEMCACHED=0",
-        "-DPAGESPEED_NO_FORK",  # Redundant with _WIN32, but explicit for clarity
         "-DPAGESPEED_SERVER=\\\"iis\\\"",
         "-Wno-trigraphs",  # Generated html_admin_console.cc contains ??X sequences
     ],
@@ -245,8 +240,8 @@ cc_library(
 # =============================================================================
 
 # Core system library - APR-free.
-# Includes controller_manager.cc and memcached_cache.cc which are excluded
-# from system_envoy and system_windows.
+# Includes memcached_cache.cc which is excluded from system_envoy and
+# system_windows.
 # Generated via pagespeed_system_library() macro in system.bzl.
 pagespeed_system_library(name = "system", server_type = "nginx")
 
@@ -272,16 +267,6 @@ cc_library(
         "//pagespeed/kernel/http",
         "//bazel:curl",
     ],
-)
-
-cc_library(
-    name = "system_controller_process_h",
-    srcs = [
-    ],
-    hdrs = [
-        "controller_process.h",
-    ],
-    visibility = ["//visibility:public"],
 )
 
 # System-level test scripts for Apache/Nginx system tests

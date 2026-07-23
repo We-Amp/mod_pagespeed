@@ -39,6 +39,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # flex and bison for building libmemcached from source
     flex \
     bison \
+    # AV1 stack (libaom/dav1d/libavif, the design record): nasm for x86_64 SIMD --
+    # bazel/libaom.bzl sets ENABLE_NASM=1, which hard-fails configure without
+    # nasm; meson + ninja for dav1d (Meson-native, see bazel/libdav1d.bzl)
+    nasm \
+    meson \
+    ninja-build \
     # Redis tools for testing
     redis-tools \
     # Required for some builds
@@ -96,8 +102,8 @@ RUN pip3 install --no-cache-dir --break-system-packages requests==2.32.4 pytest=
 
 # Download and configure nginx source (required for building ngx_pagespeed)
 # The nginx_repository bazel rule looks for source at /usr/local/src/nginx
-ENV NGINX_VERSION=1.30.3
-ENV NGINX_SHA256=e5823dc6f45610993def93ebf6cfce68264af4958c77e874b7d20f3709001b8f
+ENV NGINX_VERSION=1.30.4
+ENV NGINX_SHA256=4261dc90e9e47c1c4041276e9aaa3d48ebe2e664f728e14fa95ae6c67d57a08b
 RUN curl -fsSL "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" -o /tmp/nginx.tar.gz \
     && echo "${NGINX_SHA256}  /tmp/nginx.tar.gz" | sha256sum -c - \
     && tar -xzf /tmp/nginx.tar.gz -C /usr/local/src \

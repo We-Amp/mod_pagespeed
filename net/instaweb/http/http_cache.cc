@@ -132,6 +132,10 @@ class HTTPCacheCallback : public CacheInterface::Callback {
         cache_level_(0) {
     start_us_ = http_cache_->timer()->NowUs();
     start_ms_ = start_us_ / 1000;
+    // Latency is measured against a monotonic clock so a wall-clock step
+    // (NTP/hypervisor sync) can't produce a negative delta; start_us_/start_ms_
+    // stay on the wall clock because they feed cache freshness/expiry math.
+    start_monotonic_us_ = http_cache_->timer()->NowMonotonicUs();
   }
 
   // Links the backend value into the callback's HTTPValue.  With the
@@ -152,6 +156,7 @@ class HTTPCacheCallback : public CacheInterface::Callback {
     ++cache_level_;
     int64 now_us = http_cache_->timer()->NowUs();
     int64 now_ms = now_us / 1000;
+    int64 now_monotonic_us = http_cache_->timer()->NowMonotonicUs();
     ResponseHeaders* headers = callback_->response_headers();
     bool is_expired = false;
     if ((backend_state == CacheInterface::kAvailable) &&
@@ -265,7 +270,8 @@ class HTTPCacheCallback : public CacheInterface::Callback {
     }
 
     // TODO(gee): Perhaps all of this belongs in TimingInfo.
-    int64 elapsed_us = std::max(static_cast<int64>(0), now_us - start_us_);
+    // Monotonic delta: non-decreasing by construction, so no clamp is needed.
+    int64 elapsed_us = now_monotonic_us - start_monotonic_us_;
     http_cache_->cache_time_us()->Add(elapsed_us);
     callback_->ReportLatencyMs(elapsed_us / 1000);
     if (cache_level_ == http_cache_->cache_levels() ||
@@ -288,6 +294,7 @@ class HTTPCacheCallback : public CacheInterface::Callback {
     }
     start_ms_ = now_ms;
     start_us_ = now_us;
+    start_monotonic_us_ = now_monotonic_us;
     return result_.status == HTTPCache::kFound;
   }
 
@@ -306,6 +313,7 @@ class HTTPCacheCallback : public CacheInterface::Callback {
   HTTPCache::FindResult result_;
   int64 start_us_;
   int64 start_ms_;
+  int64 start_monotonic_us_;
   int cache_level_;
 
   HTTPCacheCallback(const HTTPCacheCallback&) = delete;
@@ -416,8 +424,9 @@ HTTPValue* HTTPCache::ApplyHeaderChangesForPut(int64 start_us,
 
 void HTTPCache::PutInternal(bool preserve_response_headers,
                             const GoogleString& key,
-                            const GoogleString& fragment, int64 start_us,
-                            HTTPValue* value, ResponseHeaders* response_headers,
+                            const GoogleString& fragment,
+                            int64 start_monotonic_us, HTTPValue* value,
+                            ResponseHeaders* response_headers,
                             MessageHandler* handler) {
   HTTPValue working_value;
 
@@ -475,10 +484,10 @@ void HTTPCache::PutInternal(bool preserve_response_headers,
   // directly to a client through InflatingFetch.
   cache_->Put(CompositeKey(key, fragment), value->share());
   if (cache_time_us_ != nullptr) {
-    // The wall clock can step backwards (NTP/hypervisor sync); clamp like
-    // the lookup path above so a step can't feed Add a negative delta.
-    int64 delta_us =
-        std::max(static_cast<int64>(0), timer_->NowUs() - start_us);
+    // Latency is measured against a monotonic clock, which is non-decreasing by
+    // construction, so a wall-clock step (NTP/hypervisor sync) can no longer
+    // feed Add a negative delta and no clamp is needed.
+    int64 delta_us = timer_->NowMonotonicUs() - start_monotonic_us;
     cache_time_us_->Add(delta_us);
   }
 }
@@ -491,6 +500,7 @@ void HTTPCache::Put(const GoogleString& key, const GoogleString& fragment,
                     const HttpOptions& http_options, HTTPValue* value,
                     MessageHandler* handler) {
   int64 start_us = timer_->NowUs();
+  int64 start_monotonic_us = timer_->NowMonotonicUs();
   // Extract headers and contents.
   ResponseHeaders headers(http_options);
   bool success = value->ExtractHeaders(&headers, handler);
@@ -513,8 +523,8 @@ void HTTPCache::Put(const GoogleString& key, const GoogleString& fragment,
       ApplyHeaderChangesForPut(start_us, nullptr, &headers, value, handler);
   // Put into underlying cache.
   if (new_value != nullptr) {
-    PutInternal(false /* preserve_response_headers */, key, fragment, start_us,
-                new_value, &headers, handler);
+    PutInternal(false /* preserve_response_headers */, key, fragment,
+                start_monotonic_us, new_value, &headers, handler);
     if (cache_inserts_ != nullptr) {
       cache_inserts_->Add(1);
     }
@@ -535,6 +545,7 @@ void HTTPCache::Put(const GoogleString& key, const GoogleString& fragment,
     return;
   }
   int64 start_us = timer_->NowUs();
+  int64 start_monotonic_us = timer_->NowMonotonicUs();
   int64 now_ms = start_us / 1000;
   if ((IsExpired(*headers, now_ms) ||
        !headers->IsProxyCacheable(req_properties, respect_vary_on_resources,
@@ -550,8 +561,8 @@ void HTTPCache::Put(const GoogleString& key, const GoogleString& fragment,
       ApplyHeaderChangesForPut(start_us, &content, headers, nullptr, handler));
   // Put into underlying cache.
   if (value.get() != nullptr) {
-    PutInternal(true /* preserve_response_headers */, key, fragment, start_us,
-                value.get(), headers, handler);
+    PutInternal(true /* preserve_response_headers */, key, fragment,
+                start_monotonic_us, value.get(), headers, handler);
     if (cache_inserts_ != nullptr) {
       cache_inserts_->Add(1);
     }

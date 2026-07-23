@@ -54,7 +54,6 @@ envoy_cc_library(
     ],
     copts = ENVOY_COPTS + [
         "-DPAGESPEED_ENABLE_MEMCACHED=0",  # Envoy uses Redis only
-        "-DPAGESPEED_NO_FORK",  # Envoy handles process management
     ],
     repository = "@envoy",
     visibility = ["//visibility:public"],

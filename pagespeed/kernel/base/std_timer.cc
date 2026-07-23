@@ -35,6 +35,13 @@ int64 StdTimer::NowUs() const {
       .count();
 }
 
+int64 StdTimer::NowMonotonicUs() const {
+  auto now = std::chrono::steady_clock::now();
+  auto duration = now.time_since_epoch();
+  return std::chrono::duration_cast<std::chrono::microseconds>(duration)
+      .count();
+}
+
 void StdTimer::SleepUs(int64 us) {
   std::this_thread::sleep_for(std::chrono::microseconds(us));
 }

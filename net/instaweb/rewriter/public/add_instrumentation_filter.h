@@ -36,11 +36,6 @@ class Variable;
 // Injects javascript instrumentation for monitoring page-rendering time.
 class AddInstrumentationFilter : public CommonFilter {
  public:
-  static const char kLoadTag[];
-  static const char kUnloadTag[];
-  static GoogleString* kUnloadScriptFormatXhtml;
-  static GoogleString* kTailScriptFormatXhtml;
-
   // Counters.
   static const char kInstrumentationScriptAddedCount[];
 
@@ -64,8 +59,8 @@ class AddInstrumentationFilter : public CommonFilter {
   Variable* instrumentation_script_added_count_;
 
  private:
-  // Returns JS using the specified event.
-  GoogleString GetScriptJs(StringPiece event);
+  // Returns the static collector JS plus the init call.
+  GoogleString GetScriptJs();
 
   // Adds the kHeadScript just before the current event only if the element is
   // not a <title> or <meta>.
@@ -73,7 +68,6 @@ class AddInstrumentationFilter : public CommonFilter {
 
   bool found_head_;
   bool added_head_script_;
-  bool added_unload_script_;
 
   AddInstrumentationFilter(const AddInstrumentationFilter&) = delete;
   AddInstrumentationFilter& operator=(const AddInstrumentationFilter&) = delete;

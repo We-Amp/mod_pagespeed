@@ -32,10 +32,11 @@
 #include "net/instaweb/http/public/http_cache.h"
 #include "net/instaweb/http/public/request_context.h"
 #include "net/instaweb/http/public/url_async_fetcher.h"
+#include "net/instaweb/rewriter/public/named_lock_schedule_rewrite_controller.h"
 #include "net/instaweb/rewriter/public/output_resource.h"
 #include "net/instaweb/rewriter/public/resource.h"
+#include "net/instaweb/rewriter/public/work_bound_expensive_operation_controller.h"
 #include "net/instaweb/util/public/property_cache.h"
-#include "pagespeed/controller/central_controller.h"
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/atomic_bool.h"
 #include "pagespeed/kernel/base/basictypes.h"
@@ -551,11 +552,23 @@ class ServerContext {
   const GoogleString& hostname() const { return hostname_; }
   void set_hostname(const GoogleString& x) { hostname_ = x; }
 
-  void set_central_controller(std::shared_ptr<CentralController> controller) {
-    central_controller_ = controller;
+  void set_expensive_operation_controller(
+      std::shared_ptr<WorkBoundExpensiveOperationController> controller) {
+    expensive_operation_controller_ = std::move(controller);
   }
 
-  CentralController* central_controller() { return central_controller_.get(); }
+  WorkBoundExpensiveOperationController* expensive_operation_controller() {
+    return expensive_operation_controller_.get();
+  }
+
+  void set_schedule_rewrite_controller(
+      std::shared_ptr<NamedLockScheduleRewriteController> controller) {
+    schedule_rewrite_controller_ = std::move(controller);
+  }
+
+  NamedLockScheduleRewriteController* schedule_rewrite_controller() {
+    return schedule_rewrite_controller_.get();
+  }
 
   // Adds an X-Original-Content-Length header to the response headers
   // based on the size of the input resources.
@@ -787,7 +800,10 @@ class ServerContext {
 
   std::unique_ptr<CachePropertyStore> cache_property_store_;
 
-  std::shared_ptr<CentralController> central_controller_;
+  std::shared_ptr<WorkBoundExpensiveOperationController>
+      expensive_operation_controller_;
+  std::shared_ptr<NamedLockScheduleRewriteController>
+      schedule_rewrite_controller_;
 
   ServerContext(const ServerContext&) = delete;
   ServerContext& operator=(const ServerContext&) = delete;

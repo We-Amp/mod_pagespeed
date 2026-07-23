@@ -31,65 +31,46 @@ under the License.
 <h1>Run Experiment</h1>
 <h2>Overview</h2>
 
+<p>
 This feature allows you to run experiments where segments of your traffic get
 the page rewritten with different settings in order to figure out which filters
-work best for your site.  It reports to your
-<a href="http://www.google.com/analytics/">Google Analytics</a> account, storing
-data in a
-<a href="/analytics/devguides/collection/gajs/gaTrackingCustomVariables">custom
-variable</a>
-or <a href="https://developers.google.com/analytics/devguides/collection/analyticsjs/experiments">content
-experiment</a>.
+work best for your site.  PageSpeed handles variant assignment: each visitor is
+assigned to an experiment variant, and the assignment is recorded in the
+<code>PageSpeedExperiment</code> cookie.
+</p>
+<p class="note">
+<strong>Reporting is bring-your-own-analytics.</strong>  Earlier versions
+reported experiment results to Google Analytics (Universal Analytics), which
+was discontinued in July 2023; PageSpeed no longer injects Google Analytics
+reporting.  To measure results, read the variant server-side from the
+<code>PageSpeedExperiment</code> cookie, or use the experiment id included in
+the <a href="filter-instrumentation-add.html">instrumentation beacon</a>, and
+feed the data to your own analytics tool.
+</p>
 
 <h2>Configuration</h2>
 <p>
-To run an experiment you must set several options in the configuration file.
-First, you turn on this feature and tell it
-your <a href="http://support.google.com/analytics/bin/answer.py?hl=en&answer=1032385">Web
-Property ID</a>:
+To run an experiment you turn the feature on in the configuration file:
 </p>
 <dl>
   <dt>Apache:<dd><pre class="prettyprint">
-ModPagespeedRunExperiment on
-ModPagespeedUseAnalyticsJs off  // use ga.js
-ModPagespeedAnalyticsID UA-XXXXXXX-Y</pre>
+ModPagespeedRunExperiment on</pre>
   <dt>Nginx:<dd><pre class="prettyprint">
-pagespeed RunExperiment on;
-pagespeed UseAnalyticsJs off;
-pagespeed AnalyticsID UA-XXXXXXX-Y;</pre>
+pagespeed RunExperiment on;</pre>
 </dl>
 <p>
-This will enable several filters needed for experiments including
-the <a href="filter-insert-ga">Insert Google Analytics</a> filter to insert
-the <code>ga.js</code> tracking snippet into each page.  If you already have a
-tracking snippet on your pages, the lowest risk option is to remove it so that
-the one PageSpeed inserts is the only one.  If you do choose to leave your
-existing snippet, PageSpeed will attempt to modify it to add experiment
-tracking.  If you've customized your snippets you should manually verify that
-the modified snippet is still correct.
-</p>
-<p>
-To disable experiments and experiment tracking you can set RunExperiment to
-'off':
+To disable experiments you can set RunExperiment to 'off':
 <dl>
   <dt>Apache:<dd><pre class="prettyprint"
      >ModPagespeedRunExperiment off</pre>
   <dt>Nginx:<dd><pre class="prettyprint"
      >pagespeed RunExperiment off;</pre>
 </dl>
-If you still want PageSpeed to automatically insert the Google Analytics
-tracking snippet, you need to enable the insert_ga filter:
-<dl>
-  <dt>Apache:<dd><pre class="prettyprint"
-     >ModPagespeedEnableFilters insert_ga</pre>
-  <dt>Nginx:<dd><pre class="prettyprint"
-     >pagespeed EnableFilters insert_ga;</pre>
-</dl>
 </p>
 <p>
-Once you have turned on RunExperiment and set your Google Analytics id you can
-set up an experiment.  For example, to test how much PageSpeed is speeding
-up your site you can apply optimizations for only half your visitors:
+Once you have turned on RunExperiment you can set up an experiment.  For
+example, to test how much PageSpeed is speeding up your site you can apply
+optimizations for only half your visitors:
 </p>
 <dl>
   <dt>Apache:<dd><pre class="prettyprint">
@@ -101,10 +82,9 @@ pagespeed ExperimentSpec "id=2;percent=50";</pre>
 </dl>
 <p>
 Each <code>ExperimentSpec</code> defines an experimental treatment or
-specification.  We only insert experiment tracking for users that fall into a
-defined group, so you should define both an experiment group and a control
-group.  The specification is a semicolon-separated list of settings.  Some
-settings are required:
+specification.  Visitors are only assigned to defined groups, so you should
+define both an experiment group and a control group.  The specification is a
+semicolon-separated list of settings.  Some settings are required:
 <dl>
   <dt><code>id</code><dd>A positive integer, unique across all experiments.  You
       can't reuse ids from one experiment to the next; every id must be unique.
@@ -123,15 +103,6 @@ ExperimentSpec 1 above adds the optional setting <code>default</code>, described
 below, which tells PageSpeed to apply just the filters and settings
 it would normally apply.  ExperimentSpec 2 specifies nothing and so turns off
 all filters.
-</p>
-<p>
-To report on these settings, PageSpeed will inject JavaScript into the page
-to send data to your Analytics account.  It will set one of the following for
-each visitor:
-<pre class="prettyprint">
-_gaq.push(['_setCustomVar', 1, 'ExperimentState', 'Experiment: 1']);
-_gaq.push(['_setCustomVar', 1, 'ExperimentState', 'Experiment: 2']);
-</pre>
 </p>
 <p>
 In addition to <code>id</code> and <code>percent</code> described above, there
@@ -170,16 +141,24 @@ settings you could set in the configuration file:
   <dt><code>options</code><dd>
       A comma-separated list of options to set.  For example,
       <tt>options=JpegNumProgressiveScans=5,WebpRecompressionQuality=72</tt>.
-  <dt><code>ga_id</code><dd>The Google Analytics ID you would like the data of
-      this experiment reported to.  If not specified, this experiment will use
-      the Analytics ID specified with
-      <code><a href="filter-insert-ga">AnalyticsID</a></code>.
-  <dt><code>slot</code><dd>Google Analytics provides five slots for custom
-      variables.  Here you specify which custom variable slot you would
-      like to use.  The default is slot 1, but you can change this setting
-      globally with:
-      <pre class="prettyprint">ExperimentVariable 2</pre>
+  <dt><code>ga</code><dd>Accepted for configuration compatibility but
+      deprecated: it names the Universal Analytics property this experiment
+      would have reported to, and Universal Analytics was discontinued in July
+      2023.  Setting it emits a warning at configuration time and has no useful
+      effect.
+  <dt><code>slot</code><dd>Accepted for configuration compatibility but
+      deprecated, like <code>ga</code>: it selected the Universal Analytics
+      custom variable slot (1-5, also settable globally
+      with <code>ExperimentVariable</code>).
 </dl>
+<p class="note">
+Note: experiments no longer auto-enable
+the <a href="filter-insert-ga">insert_ga</a> filter.  You can still opt in
+explicitly with <code>enable=insert_ga</code> in a spec
+(plus <code>AnalyticsID</code>), but the injected snippet reports to the
+discontinued Universal Analytics service, so this is not useful for new
+deployments.
+</p>
 <p>
 Visitors are assigned to ExperimentSpecs on a week-to-week basis.  This
 means that when you finish one experiment and start another, it will take up to
@@ -197,19 +176,15 @@ loading the page with <code>?PageSpeedEnrollExperiment=-1</code>.
 <h2>Examples</h2>
 <p>
 Run an experiment on 30% of visitors where half get the default configuration
-and half get no filters.  Use Google Analytics ID UA-XXXXXXX-Y to run the
-experiment, and default to logging the experiment information into custom
-variable slot 1:
+and half get no filters:
 </p>
 <dl>
   <dt>Apache:<dd><pre class="prettyprint">
 ModPagespeedRunExperiment on
-ModPagespeedAnalyticsID UA-XXXXXXX-Y
 ModPagespeedExperimentSpec id=1;percent=15;default
 ModPagespeedExperimentSpec id=2;percent=15</pre>
   <dt>Nginx:<dd><pre class="prettyprint">
 pagespeed RunExperiment on;
-pagespeed AnalyticsID UA-XXXXXXX-Y;
 pagespeed ExperimentSpec "id=1;percent=15;default";
 pagespeed ExperimentSpec "id=2;percent=15";</pre>
 </dl>
@@ -227,21 +202,16 @@ plus <code><a href="reference-image-optimize#inline_preview_images"
 <li>One tenth get no filters.
 <li>The remaining 70% aren't included in the experiment.
 </ul>
-All the other visitors will be unaffected.  For measurement it logs to custom
-variable slot 3 of Google Analytics account UA-XXXXXXX-Y.
+All the other visitors will be unaffected.
 </p>
 <dl>
   <dt>Apache:<dd><pre class="prettyprint">
 ModPagespeedRunExperiment on
-ModPagespeedAnalyticsID UA-XXXXXXX-Y
-ModPagespeedExperimentVariable 3
 ModPagespeedExperimentSpec id=3;percent=10;default
 ModPagespeedExperimentSpec id=4;percent=10;level=CoreFilters;enabled=inline_preview_images,remove_comments;disabled=rewrite_javascript;options=AvoidRenamingIntrospectiveJavascript=off,CssInlineMaxBytes=4096
 ModPagespeedExperimentSpec id=5;percent=10</pre>
   <dt>Nginx:<dd><pre class="prettyprint">
 pagespeed RunExperiment on;
-pagespeed AnalyticsID UA-XXXXXXX-Y;
-pagespeed ExperimentVariable 3;
 pagespeed ExperimentSpec "id=3;percent=10;default";
 pagespeed ExperimentSpec "id=4;percent=10;level=CoreFilters;enabled=inline_preview_images,remove_comments;disabled=rewrite_javascript;options=AvoidRenamingIntrospectiveJavascript=off,CssInlineMaxBytes=4096";
 pagespeed ExperimentSpec "id=5;percent=10";</pre>
@@ -265,142 +235,35 @@ ideal settings right away, you're unlikely to have made things much worse.
 
 <h2>Reporting</h2>
 <p>
-After you have been running an experiment for 24 hours Analytics will have
-results for you.  The screenshots below walk through the process of creating a
-custom report to view them.
+PageSpeed does the variant assignment; collecting and analyzing the results is
+up to your own analytics.  There are two places to read the assigned variant:
+</p>
+<ul>
+<li>The <code>PageSpeedExperiment</code> cookie, available server-side on every
+    request.  You can log it alongside your existing request metrics, or
+    forward it to your analytics tool as a custom dimension.
+<li>The <a href="filter-instrumentation-add.html">instrumentation beacon</a>
+    (<code>add_instrumentation</code>, force-enabled while an experiment is
+    running), whose beacon URL includes the experiment id.  Aggregating beacon
+    load times by experiment id gives a direct page-speed comparison between
+    variants.
+</ul>
 <p>
-<ol>
-<li><h3>Set up advanced segments</h3>
-  <ol type="a">
-  <li>Advanced segments let you label fractions of your traffic.  To view speed
-      results broken down by experiments you need to add segments for
-      each experimental group.  Click <a target="_blank"
-      href="https://www.google.com/analytics/web/permalink?type=advanced_segment&amp;uid=16TeL7ueRGuGttAzoYeV3A">here</a>
-      to import a segment for a sample experimental group.
-  <li>If prompted, log into Google Analytics:
-    <div><img class="experiment-screenshot"
-              alt="Google Analytics login screen."
-              src="analytics_screenshots/1_login.png"></div>
-  <li>Select the profile that your experiment data was collected under, enter
-      a name for the segment, and click <strong>Create Advanced
-      Segment</strong>:
-    <div><img class="experiment-screenshot"
-              alt="Import advanced segment screen."
-              src="analytics_screenshots/2_import_advanced_segment.png">
-    </div>
-  <li>On the next screen you can adjust this custom segment to fit your
-      situation.  If you used a custom variable slot other than the default,
-      which is 1, change <strong>Custom Variable (Key 1)</strong>
-      and <strong>Custom Variable (Value 01)</strong> to the appropriate values.
-      Where it says <strong>Experiment: 1</strong> replace 1 with the experiment
-      id you used. You also need to change <strong>FuriousState</strong> (our
-      initial code name) to <strong>ExperimentState</strong>.
-
-    <div><img class="experiment-screenshot"
-              alt="Advanced segment settings."
-              src="analytics_screenshots/3_segment_settings.png">
-    </div>
-  <li>Click <strong>Save Segment</strong>.
-  <li>Repeat these steps for the rest of your experiment ids.
-  </ol>
-<li><h3>Add advanced segments to the speed report</h3>
-  <ol type="a">
-  <li>Click <strong>All Accounts</strong>.
-  <li>On the dropdown menu click the name for your profile.  In the screenshot
-      below this is labeled <strong>your profile name [DEFAULT]</strong>.
-    <div><img class="experiment-screenshot"
-              alt="Profile switching dropdown."
-              src="analytics_screenshots/4_profile_switch.png">
-    </div>
-  <li>Click <strong>Standard Reporting</strong>:
-    <div><img class="experiment-screenshot"
-              alt="After profile switching."
-              src="analytics_screenshots/5_profile_switched.png">
-    </div>
-  <li>Click <strong>Content</strong>
-    <div><img class="experiment-screenshot"
-              alt="Standard reporting screen."
-              src="analytics_screenshots/6_standard_reporting.png">
-    </div>
-  <li>Under <strong>Content</strong> click <strong>Site
-      Speed</strong> and then <strong>Page Timings</strong> to bring up
-      the <strong>Site Speed Page Timings</strong> page:
-    <div><img class="experiment-screenshot"
-              alt="Page timings screen."
-              src="analytics_screenshots/7_page_timings.png">
-    </div>
-  <li>Click <strong>Advanced Segments</strong>.
-  <li>Under <strong>Custom Segments</strong> you will see the segments you added
-      above.  Check the boxes next to them and click <strong>Apply</strong>:
-    <div><img class="experiment-screenshot"
-              alt="Advanced segment selection screen."
-              src="analytics_screenshots/8_advanced_segments.png">
-    </div>
-  <li>This takes you to back to the <strong>Site Speed Page Timings</strong>
-      page.
-  </ol>
-<li><h3>Examine experimental results</h3>
-  <ol type="a">
-  <li>The <strong>Explorer</strong> tab shows average timing
-      information both overall and, below, per-url:
-    <div><img class="experiment-screenshot"
-              alt="Explorer tab."
-              src="analytics_screenshots/9_page_level_timings.png">
-    </div>
-  <li>Averages can be misleading, however, because one user who suffers
-      abnormally high latency before the onload event will have an outsize
-      effect on the average.  Unless your sample is very large, such users can
-      make an experiment falsely appear to be a success or failure.  To overcome
-      this problem a histogram is helpful.  Click
-      the <strong>Performance</strong> tab to see page load times grouped into
-      intervals.
-    <div><img class="experiment-screenshot"
-              alt="Performance tab."
-              src="analytics_screenshots/10_histogram.png">
-    </div>
-  <li>To see more fine grained timing detail, click the <strong>+</strong> icon
-      next to any histogram interval to expand it.
-  <li>In this experiment PageSpeed appears to have moved about 8% of visits
-      from the 1-3 second category to the 0-1 second one.  For a simple
-      mostly-text site running only the core set of filters, this is a
-      reasonable result.  As a next step the webmaster of this site might
-      examine the <a href="config_filters">filter list</a> to determine if there
-      are filters that are not in the core set which might be good targets for
-      future experimentation.
-  </ol>
-</ol>
+When comparing variants, prefer histograms or percentiles over averages: one
+visitor with abnormally high latency can have an outsize effect on an average
+and make an experiment falsely appear to be a success or failure.
+</p>
 
 <h2 id="content-experiments"
   >Integration with Google Analytics Content Experiments</h2>
-<p class="note"><strong>Note: New feature as of 1.10.33.0</strong></p>
-
-<p>
-The usage described above reports experiment results to a custom variable in
-Google Analytics.  As of 1.10.33.0 PageSpeed supports reporting experiment
-results to a GA Content Experiment.  To do this, set up a
-<a href="https://developers.google.com/analytics/devguides/collection/analyticsjs/experiments#pro-server">server-side
-content experiment</a>.  When setting this up GA will tell you an "Experiment
-ID" (which PageSpeed calls <code>ContentExperimentID</code>) and, for each
-variation, a "Chosen Variation Index" (which PageSpeed
-calls <code>ContentExperimentVariantID</code>).  Tell PageSpeed about these via
-the <code>options=</code> parameter in the <code>ExperimentSpec</code>:
-</p>
-
-<dl>
-  <dt>Apache:<dd><pre class="prettyprint">
-ModPagespeedExperimentSpec id=1;percent=15;options=ContentExperimentID=ID:ABC123,ContentExperimentVariantID=1;default
-ModPagespeedExperimentSpec id=2;percent=15;options=ContentExperimentID=ID:ABC123,ContentExperimentVariantID=2</pre>
-  <dt>Nginx:<dd><pre class="prettyprint">
-pagespeed ExperimentSpec "id=1;percent=15;options=ContentExperimentID=ID:ABC123,ContentExperimentVariantID=1;default";
-pagespeed ExperimentSpec "id=2;percent=15;options=ContentExperimentID=ID:ABC123,ContentExperimentVariantID=2";</pre>
-</dl>
-
-<p>
-While you can use the Content Experiment integration with
-either <code>ga.js</code> or <code>analytics.js</code> we recommend
-using <code>analytics.js</code> if possible.  Not only is <code>ga.js</code>
-obselete, with Content Experiments it requires PageSpeed to insert a blocking
-script, which slows down your page.
+<p class="note">
+<strong>Deprecated.</strong>  Earlier versions could report experiment results
+to a Google Analytics Content Experiment
+via <code>ContentExperimentID</code>/<code>ContentExperimentVariantID</code>
+options in an <code>ExperimentSpec</code>.  Content Experiments were part of
+Universal Analytics, which was discontinued in July 2023.  The options are
+still accepted for configuration compatibility but are not useful for new
+deployments.
 </p>
 
 <h2>Technical Implementation</h2>
@@ -432,26 +295,8 @@ You can test this on your site with the <code>curl</code> program:
 If you don't see a <code>Set-Cookie</code> header in the output, this feature
 isn't set up properly.  If you don't see an <code>X-Mod-Pagespeed</code> header
 (Apache) or an <code>X-Page-Speed</code> header (Nginx), PageSpeed isn't running
-at all.  On each page PageSpeed adds some JavaScript to set a Google Analytics
-custom variable:
+at all.
 </p>
-<pre class="prettyprint">
-   _gaq.push(['_setCustomVar', 1, 'ExperimentState', 'Experiment: 4']);
-</pre>
-<p>
-While it does try to detect when a page already is using Google Analytics and
-add to it only what it needs, this is imprecise and can get it wrong.  We
-recommend that you let PageSpeed insert the only snippet.  If you need to
-call <a href="https://developers.google.com/analytics/devguides/collection/gajs/methods/">other
-tracking methods</a>, for example to set
-the <a href="https://developers.google.com/analytics/devguides/collection/gajs/methods/gaJSApiBasicConfiguration#_gat.GA_Tracker_._setSampleRate">sample
-rate</a> for your site, you can do this by adding to the <code>_gaq</code> array
-within <code>&lt;head&gt;</code>.  The code to do this for setting the site
-sampleRate to 80% would be:
-<pre class="prettyprint">
-   _gaq = _gaq || [];
-   _gaq.push(['_setSampleRate', '80']);
-</pre>
   </div>
   <!--#include virtual="_footer.html" -->
   </body>

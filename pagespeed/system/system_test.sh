@@ -18,9 +18,6 @@
 # See automatic/system_test_helpers.sh for usage.
 #
 
-# Default to not running the controller, unless specified to
-# do so via an environment variable.
-RUN_CONTROLLER_TEST=${RUN_CONTROLLER_TEST:-off}
 IS_FILE_CACHE=false
 if [ "${MEMCACHED_PORT:-0}" -eq 0 ] && [ "${REDIS_PORT:-0}" -eq 0 ]; then
   IS_FILE_CACHE=true
@@ -89,9 +86,6 @@ run_test modify_caching_headers
 run_test combine_javascript
 run_test map_proxy_domain
 run_test instant_ipro
-if [ "$RUN_CONTROLLER_TEST" = "on" ]; then
-  run_test controller
-fi
 run_test json_content_type
 run_test shard_domain
 run_test server_side_includes
@@ -171,7 +165,6 @@ if [ "$CACHE_FLUSH_TEST" = "on" ]; then
 fi
 run_test add_resource_headers
 run_test long_url_handling
-run_test controller_process_handling
 run_test strip_subresources
 run_test protocol_relative_urls
 

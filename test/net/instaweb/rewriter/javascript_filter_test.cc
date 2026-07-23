@@ -41,6 +41,7 @@
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/base/string_writer.h"
 #include "pagespeed/kernel/cache/lru_cache.h"
 #include "pagespeed/kernel/http/content_type.h"
 #include "pagespeed/kernel/http/google_url.h"
@@ -86,6 +87,15 @@ const char kJsonData[] = "  {  'foo' :  [ 'bar' , 'baz' ]  }  ";
 const char kJsonMinData[] = "{'foo':['bar','baz']}";
 const char kOrigJsonName[] = "hello.json";
 const char kRewrittenJsonName[] = "hello.json";
+
+const char kInlineModuleFormat[] = "<script type=\"module\">%s</script>\n";
+const char kModuleJsData[] =
+    "import { a } from './x.js';  /* removed */  export const y = 1;";
+const char kModuleJsMinData[] = "import{a}from'./x.js';export const y=1;";
+const char kOrigModuleName[] = "sub/module.js";
+const char kCdnDomain[] = "http://cdn.test.com/";
+const char kShard1Domain[] = "http://shard1.test.com/";
+const char kShard2Domain[] = "http://shard2.test.com/";
 
 GoogleString ScriptSrc(const StringPiece& url) {
   return StrCat("<script src=\"", url, "\"></script>");
@@ -870,6 +880,279 @@ TEST_P(JavascriptFilterTest, MinificationFailure) {
   EXPECT_EQ(1, minification_failures_->Get());
   EXPECT_EQ(0, num_uses_->Get());
   EXPECT_EQ(1, did_not_shrink_->Get());
+}
+
+TEST_P(JavascriptFilterTest, RewriteEs2020Script) {
+  // A modern (ES2019/ES2020) script: destructuring declaration, nullish
+  // coalescing, optional chaining, and an optional catch binding.  This must
+  // minify -- and thus rewrite, without bumping the failure stat -- rather
+  // than silently degrading to pass-through.  Both minifier generations
+  // produce the same output for this input.
+  const char kEs2020Js[] =
+      "const { a } = window.cfg ?? {};\n"
+      "try { a?.go(); } catch {}\n";
+  const char kEs2020MinJs[] = "const{a}=window.cfg??{};try{a?.go();}catch{}";
+  InitFilters();
+  SetResponseWithDefaultHeaders("modern.js", kContentTypeJavascript, kEs2020Js,
+                                100);
+  const GoogleString expected_url =
+      Encode("", kFilterId, "0", "modern.js", "js");
+  ValidateExpected("rewrite_es2020", GenerateHtml("modern.js"),
+                   GenerateHtml(expected_url.c_str()));
+  EXPECT_EQ(1, blocks_minified_->Get());
+  EXPECT_EQ(0, minification_failures_->Get());
+
+  GoogleString content;
+  EXPECT_TRUE(FetchResourceUrl(StrCat(kTestDomain, expected_url), &content));
+  EXPECT_STREQ(kEs2020MinJs, content);
+}
+
+TEST_P(JavascriptFilterTest, PreserveEs2020ReservedError) {
+  // `enum` is reserved in all modes; the tokenizer-based minifier must still
+  // fail on it, preserve the original resource, and bump the failure stat.
+  // The legacy heuristic minifier does not detect this (it passes the bytes
+  // through), so the stat expectations only apply to the experimental
+  // minifier.
+  InitFilters();
+  SetResponseWithDefaultHeaders("foo.js", kContentTypeJavascript, "enum Foo{}",
+                                100);
+  ValidateNoChanges("preserve_es2020_reserved",
+                    "<script src=foo.js></script>");
+  if (GetParam()) {
+    EXPECT_EQ(0, blocks_minified_->Get());
+    EXPECT_EQ(1, minification_failures_->Get());
+  }
+}
+
+TEST_P(JavascriptFilterTest, RewriteExternalModuleScript) {
+  InitFilters();
+  SetResponseWithDefaultHeaders(kOrigModuleName, kContentTypeJavascript,
+                                kModuleJsData, 100);
+  const GoogleString input =
+      StrCat("<script type=\"module\" src=\"", kOrigModuleName, "\"></script>",
+             "<script type=\"module\" async src=\"", kOrigModuleName,
+             "\"></script>");
+  if (!GetParam()) {
+    // The legacy minifier predates module syntax and can corrupt module
+    // bodies, so module elements pass through byte-for-byte under that
+    // generation.
+    ValidateNoChanges("module_passthrough_legacy", input);
+    EXPECT_EQ(0, blocks_minified_->Get());
+    return;
+  }
+  // The rewritten URL stays in the source directory (relative imports keep
+  // resolving identically) and the type="module" and async attributes
+  // survive the rename verbatim.
+  const GoogleString expected_url =
+      Encode("sub/", kFilterId, "0", "module.js", "js");
+  const GoogleString expected_html = StrCat(
+      "<script type=\"module\" src=\"", expected_url, "\"></script>",
+      "<script type=\"module\" async src=\"", expected_url, "\"></script>");
+  ValidateExpected("rewrite_external_module", input, expected_html);
+  EXPECT_EQ(1, blocks_minified_->Get());
+  EXPECT_EQ(0, minification_failures_->Get());
+
+  // The minified body never rewrites import specifiers.
+  GoogleString content;
+  EXPECT_TRUE(FetchResourceUrl(StrCat(kTestDomain, expected_url), &content));
+  EXPECT_STREQ(kModuleJsMinData, content);
+}
+
+TEST_P(JavascriptFilterTest, RewriteInlineModuleScript) {
+  InitFilters();
+  const GoogleString input =
+      absl::StrFormat(kInlineModuleFormat, kModuleJsData);
+  if (!GetParam()) {
+    ValidateNoChanges("inline_module_passthrough_legacy", input);
+    EXPECT_EQ(0, blocks_minified_->Get());
+    return;
+  }
+  // Minified in place: the URL is unchanged, so relative imports and
+  // import.meta are unaffected, and type="module" is untouched.
+  ValidateExpected("rewrite_inline_module", input,
+                   absl::StrFormat(kInlineModuleFormat, kModuleJsMinData));
+  EXPECT_EQ(1, blocks_minified_->Get());
+  EXPECT_EQ(0, minification_failures_->Get());
+  EXPECT_EQ(1, num_uses_->Get());
+}
+
+TEST_P(JavascriptFilterTest, InlineModuleClassBody) {
+  // Class bodies are tokenizable, so the module minifies in place under the
+  // tokenizer-based minifier. Legacy configs never enter the module flow at
+  // all, so the body passes through byte-for-byte and nothing is counted.
+  InitFilters();
+  const char kClassModule[] = "class F { m() {} }  export default F;";
+  const GoogleString input = absl::StrFormat(kInlineModuleFormat, kClassModule);
+  if (!GetParam()) {
+    ValidateNoChanges("inline_module_class_body_legacy", input);
+    EXPECT_EQ(0, blocks_minified_->Get());
+    return;
+  }
+  ValidateExpected(
+      "inline_module_class_body", input,
+      absl::StrFormat(kInlineModuleFormat, "class F{m(){}}export default F;"));
+  EXPECT_EQ(1, blocks_minified_->Get());
+  EXPECT_EQ(0, minification_failures_->Get());
+  EXPECT_EQ(1, num_uses_->Get());
+}
+
+TEST_P(JavascriptFilterTest, ModuleLibraryNotCanonicalized) {
+  // A library-matching resource referenced from a module element must never
+  // be swapped to the canonical library URL: module fetches are CORS-mode
+  // (a canonical CDN URL without CORS headers fails to load outright) and
+  // import.meta / relative-import resolution change with the host. The
+  // rewrite context still classifies the URL as a library, so the element
+  // passes through unchanged rather than being renamed.
+  RegisterLibrary();
+  InitFiltersAndTest(100);
+  ValidateNoChanges(
+      "module_library_not_canonicalized",
+      StrCat("<script type=\"module\" src=\"", kOrigJsName, "\"></script>"));
+}
+
+TEST_P(JavascriptFilterTest, ModuleCanonicalizeOnlyConfigUntouched) {
+  // With only canonicalize_javascript_libraries enabled (no external
+  // rewriting), a module element must not enter the jm flow at all: the
+  // canonicalize-only entry is deliberately dropped for modules, so the
+  // element passes through with no rewrite context created.
+  RegisterLibrary();
+  options()->EnableFilter(RewriteOptions::kCanonicalizeJavascriptLibraries);
+  rewrite_driver_->AddFilters();
+  InitTest(100);
+  ValidateNoChanges(
+      "module_canonicalize_only",
+      StrCat("<script type=\"module\" src=\"", kOrigJsName, "\"></script>"));
+  EXPECT_EQ(0, libraries_identified_->Get());
+}
+
+TEST_P(JavascriptFilterTest, ModuleCanonicalizationBlockedAfterClassicPrime) {
+  // The canonicalize_url metadata is keyed by input URL and shared across
+  // pages: a classic reference primes it, and a module element referencing
+  // the same URL on a later page must still not be swapped. This pins the
+  // Render-side gate; the HTML-scan entry cannot protect this case.
+  RegisterLibrary();
+  InitFiltersAndTest(100);
+  ValidateExpected("classic_prime", GenerateHtml(kOrigJsName),
+                   GenerateHtml(kLibraryUrl));
+  ValidateNoChanges(
+      "module_after_classic_prime",
+      StrCat("<script type=\"module\" src=\"", kOrigJsName, "\"></script>"));
+}
+
+TEST_P(JavascriptFilterTest, ModuleWithIntegrityUntouched) {
+  // Renaming or reminifying an integrity-bearing module would break its
+  // subresource-integrity check in the browser. The attribute name match
+  // is ASCII-case-insensitive.
+  InitFilters();
+  SetResponseWithDefaultHeaders(kOrigModuleName, kContentTypeJavascript,
+                                kModuleJsData, 100);
+  ValidateNoChanges("module_with_integrity",
+                    StrCat("<script type=\"module\" src=\"", kOrigModuleName,
+                           "\" integrity=\"sha384-x\"></script>"
+                           "<script type=\"module\" src=\"",
+                           kOrigModuleName,
+                           "\" Integrity=\"sha384-x\"></script>"));
+  EXPECT_EQ(0, num_uses_->Get());
+}
+
+TEST_P(JavascriptFilterTest, ClassicWithIntegrityUntouched) {
+  // Renaming or reminifying an integrity-bearing classic script breaks its
+  // subresource-integrity check in the browser just as it does for module
+  // scripts, so it must pass through untouched. The attribute name match is
+  // ASCII-case-insensitive.
+  InitFiltersAndTest(100);
+  ValidateNoChanges("classic_with_integrity",
+                    StrCat("<script src=\"", kOrigJsName,
+                           "\" integrity=\"sha384-x\"></script>"
+                           "<script src=\"", kOrigJsName,
+                           "\" Integrity=\"sha384-x\"></script>"));
+  EXPECT_EQ(0, num_uses_->Get());
+}
+
+TEST_P(JavascriptFilterTest, InlineClassicWithIntegrityUntouched) {
+  // The integrity= guard covers inline classic scripts too: the body must
+  // pass through byte-for-byte rather than being minified in place.
+  InitFilters();
+  ValidateNoChanges("inline_classic_with_integrity",
+                    StrCat("<script integrity=\"sha384-x\">", kJsData,
+                           "</script>"));
+  EXPECT_EQ(0, blocks_minified_->Get());
+}
+
+TEST_P(JavascriptFilterTest, UnrecognizedScriptLogGone) {
+  // A module element must not trip the kUnknownScript "Unrecognized script"
+  // info message, even under the legacy generation where it passes through
+  // untouched. Pins the scanner classification: kUnknownScript is the only
+  // path that emits this message.
+  InitFilters();
+  SetResponseWithDefaultHeaders(kOrigModuleName, kContentTypeJavascript,
+                                kModuleJsData, 100);
+  Parse("module_not_unrecognized",
+        StrCat("<script type=\"module\" src=\"", kOrigModuleName,
+               "\"></script>"));
+  GoogleString messages;
+  StringWriter writer(&messages);
+  message_handler()->Dump(&writer);
+  EXPECT_THAT(messages, ::testing::Not(::testing::HasSubstr(
+                            "Unrecognized script")));
+}
+
+TEST_P(JavascriptFilterTest, ModuleNotRelocatedByMapRewriteDomain) {
+  // Rewritten output URLs are encoded with UrlNamer::kSharded and rendered
+  // back into the element, so with MapRewriteDomain configured the module
+  // would be relocated to the CDN host. Module fetches are CORS-mode (the
+  // fetch fails outright without Access-Control-Allow-Origin) and relative
+  // imports re-resolve against the wrong host, so the src must be left
+  // untouched instead.
+  ASSERT_TRUE(AddRewriteDomainMapping(kCdnDomain, kTestDomain));
+  InitFilters();
+  SetResponseWithDefaultHeaders(kOrigModuleName, kContentTypeJavascript,
+                                kModuleJsData, 100);
+  const GoogleString input =
+      StrCat("<script type=\"module\" src=\"", kOrigModuleName, "\"></script>");
+  ValidateNoChanges("module_map_rewrite_domain", input);
+  EXPECT_EQ(0, blocks_minified_->Get());
+  EXPECT_EQ(0, num_uses_->Get());
+}
+
+TEST_P(JavascriptFilterTest, ModuleNotRelocatedByShardDomain) {
+  // Same relocation hazard via ShardDomain: the output URL would be encoded
+  // onto one of the shard hosts, so the module src must stay on the origin
+  // host.
+  ASSERT_TRUE(
+      AddShard(kTestDomain, StrCat(kShard1Domain, ",", kShard2Domain)));
+  InitFilters();
+  SetResponseWithDefaultHeaders(kOrigModuleName, kContentTypeJavascript,
+                                kModuleJsData, 100);
+  const GoogleString input =
+      StrCat("<script type=\"module\" src=\"", kOrigModuleName, "\"></script>");
+  ValidateNoChanges("module_shard_domain", input);
+  EXPECT_EQ(0, blocks_minified_->Get());
+  EXPECT_EQ(0, num_uses_->Get());
+}
+
+TEST_P(JavascriptFilterTest, ClassicScriptRelocatedByMapRewriteDomain) {
+  // Control: classic scripts are not CORS-mode, so relocating the rewritten
+  // URL to the mapped domain remains correct and must stay byte-identical.
+  ASSERT_TRUE(AddRewriteDomainMapping(kCdnDomain, kTestDomain));
+  InitFiltersAndTest(100);
+  ValidateExpected(
+      "classic_map_rewrite_domain", GenerateHtml(kOrigJsName),
+      GenerateHtml(StrCat(kCdnDomain, expected_rewritten_path_).c_str()));
+  EXPECT_EQ(1, num_uses_->Get());
+}
+
+TEST_P(JavascriptFilterTest, ClassicScriptRelocatedByShardDomain) {
+  // Control: classic scripts still get relocated onto a shard host. The mock
+  // hasher encodes to "0", which selects the first shard (the same selection
+  // css_filter_test.cc relies on for its cdn1.com expectation).
+  ASSERT_TRUE(
+      AddShard(kTestDomain, StrCat(kShard1Domain, ",", kShard2Domain)));
+  InitFiltersAndTest(100);
+  ValidateExpected(
+      "classic_shard_domain", GenerateHtml(kOrigJsName),
+      GenerateHtml(StrCat(kShard1Domain, expected_rewritten_path_).c_str()));
+  EXPECT_EQ(1, num_uses_->Get());
 }
 
 TEST_P(JavascriptFilterTest, ReuseRewrite) {

@@ -2817,6 +2817,7 @@ bool RewriteDriver::is_critical_images_beacon_enabled() {
   return (options()->Enabled(RewriteOptions::kLazyloadImages) ||
           options()->Enabled(RewriteOptions::kInlineImages) ||
           options()->Enabled(RewriteOptions::kDelayImages) ||
+          options()->Enabled(RewriteOptions::kPrioritizeCriticalImages) ||
           options()->Enabled(
               RewriteOptions::kResizeToRenderedImageDimensions)) &&
          options()->critical_images_beacon_enabled() &&

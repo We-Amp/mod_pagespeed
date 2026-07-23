@@ -5526,8 +5526,71 @@ pagespeed.CriticalImages.Beacon_.prototype.isCritical_ = function(a) {
   this.imgLocations_[b] = !0;
   return a.top <= this.windowSize_.height && a.left <= this.windowSize_.width;
 };
-pagespeed.CriticalImages.Beacon_.prototype.insertIfImageIsCritical_ = function(a) {
+pagespeed.CriticalImages.isHtmlSpace_ = function(a) {
+  return a == " " || a == "\t" || a == "\n" || a == "\f" || a == "\r";
+};
+pagespeed.CriticalImages.parseSrcSetUrls_ = function(a) {
+  for (var b = [], c = 0, d = a.length;;) {
+    for (; c < d && (pagespeed.CriticalImages.isHtmlSpace_(a.charAt(c)) || a.charAt(c) == ",");) {
+      ++c;
+    }
+    if (c >= d) {
+      break;
+    }
+    for (var e = c; e < d && !pagespeed.CriticalImages.isHtmlSpace_(a.charAt(e));) {
+      ++e;
+    }
+    var f = a.substring(c, e);
+    c = e;
+    for (e = !0; f.charAt(f.length - 1) == ",";) {
+      f = f.substring(0, f.length - 1), e = !1;
+    }
+    if (e) {
+      for (e = !1; c < d;) {
+        var g = a.charAt(c);
+        if (g == "(") {
+          e = !0;
+        } else if (g == ")" && e) {
+          e = !1;
+        } else if (g == "," && !e) {
+          break;
+        }
+        ++c;
+      }
+    }
+    b.push(f);
+  }
+  return b;
+};
+pagespeed.CriticalImages.absolutifyUrl_ = function(a) {
+  var b = document.createElement("a");
+  b.href = a;
+  return b.href;
+};
+pagespeed.CriticalImages.Beacon_.prototype.imageKey_ = function(a) {
   var b = a.getAttribute("data-pagespeed-url-hash");
+  if (b) {
+    return b;
+  }
+  var c = a.getAttribute("data-pagespeed-srcset-url-hashes");
+  if (!c) {
+    return null;
+  }
+  b = a.currentSrc;
+  if (!b) {
+    return null;
+  }
+  a = pagespeed.CriticalImages.parseSrcSetUrls_(a.getAttribute("srcset") || "");
+  c = c.split(",");
+  for (var d = 0; d < a.length && d < c.length; ++d) {
+    if (c[d] && pagespeed.CriticalImages.absolutifyUrl_(a[d]) == b) {
+      return c[d];
+    }
+  }
+  return null;
+};
+pagespeed.CriticalImages.Beacon_.prototype.insertIfImageIsCritical_ = function(a) {
+  var b = this.imageKey_(a);
   !b || b in this.criticalImagesKeys_ || !this.isCritical_(a) || (this.criticalImages_.push(b), this.criticalImagesKeys_[b] = !0);
 };
 pagespeed.CriticalImages.Beacon_.prototype.checkImageForCriticality = function(a) {
@@ -5573,7 +5636,7 @@ pagespeed.CriticalImages.Beacon_.prototype.getImageRenderedMap = function() {
     return {};
   }
   for (var d = 0; c = b[d]; ++d) {
-    var e = c.getAttribute("data-pagespeed-url-hash");
+    var e = this.imageKey_(c);
     e && (!(e in a) && c.width > 0 && c.height > 0 && c.naturalWidth > 0 && c.naturalHeight > 0 || e in a && c.width >= a[e].rw && c.height >= a[e].rh) && (a[e] = {rw:c.width, rh:c.height, ow:c.naturalWidth, oh:c.naturalHeight});
   }
   return a;

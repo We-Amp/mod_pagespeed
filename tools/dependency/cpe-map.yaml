@@ -67,9 +67,9 @@ deps:
     cpe: "cpe:2.3:a:libevent_project:libevent"  # NVD: 5 CVEs
     release_date: "2020-07-05"                  # release-2.1.12-stable — GitHub release + annotated tag both 2020-07-05
 
-  grpc:
-    cpe: "cpe:2.3:a:grpc:grpc"                  # NVD: 14 CVEs
-    release_date: "2026-02-20"                  # v1.78.1 — GitHub release published 2026-02-20
+  protobuf:
+    cpe: "cpe:2.3:a:google:protobuf"          # NVD: 5 CVEs (was previously pulled transitively via gRPC)
+    release_date: "2025-05-28"                  # v31.1 release commit (74211c0) — tag commit dated 2025-05-28
 
   re2:
     cpe: "N/A"
@@ -106,6 +106,27 @@ deps:
   libwebp:
     cpe: "cpe:2.3:a:webmproject:libwebp"       # NVD: 15 CVEs
     release_date: "2024-12-20"                  # v1.5.0 — annotated tag date 2024-12-20 (webmproject/libwebp publishes no GitHub Releases; tag is authoritative)
+
+  # AVIF codec stack. CPE choices + CVE counts verified against the live NVD CVE
+  # API on 2026-07-17 (virtualMatchString query, totalResults shown in the comment).
+  # Each release_date is the PINNED version's real upstream ship date, per the
+  # release_date INVARIANT above — NOT a later bump/comment date.
+  aom:
+    cpe: "cpe:2.3:a:aomedia:aomedia"           # NVD: 11 CVEs (libaom is tracked under aomedia:aomedia, e.g. the 2021-04 CVE-2021-3047x batch)
+    # v3.12.0 — commit-pinned 3b624af4 (== tag v3.12.0). committer.date 2025-02-10,
+    # which is also the AOMedia "libaom 3.12.0" release-announcement date. (author.date
+    # is 2025-02-07, 3 days earlier; committer.date is the file convention here and the
+    # announced ship date — using it does not late-drop any CVE, the 02-07..02-09 window
+    # published none.)
+    release_date: "2025-02-10"
+
+  dav1d:
+    cpe: "cpe:2.3:a:videolan:dav1d"            # NVD: 2 CVEs
+    release_date: "2025-01-21"                 # 1.5.1 "Sonic" — VideoLAN code.videolan.org GitLab release published 2025-01-21
+
+  libavif:
+    cpe: "cpe:2.3:a:aomedia:libavif"           # NVD: 3 CVEs (aomedia:libavif — the AOMediaCodec container/coordination lib, distinct from aomedia:aomedia)
+    release_date: "2026-05-26"                 # v1.4.2 — AOMediaCodec/libavif GitHub release + annotated tag both 2026-05-26
 
   sparsehash:
     cpe: "N/A"
@@ -171,9 +192,9 @@ deps:
   nginx:
     cpe: "cpe:2.3:a:f5:nginx"                    # NVD: nginx tracked under vendor f5 (legacy nginx:nginx also exists)
     # Bundled matched-pair nginx for the design record sidecar (D3). SHIPPED version is
-    # DEF_NGINX_VER (focal path) in install/nginx/build_module_in_container.sh = 1.30.3,
+    # DEF_NGINX_VER (focal path) in install/nginx/build_module_in_container.sh = 1.30.4,
     # the 1.30 stable branch (GA bump 2026-06-03 from 1.24.0 — newer branch, smaller CVE
     # backlog). nginx is the ONE dep whose version is not a repositories.bzl constant, so
-    # generate-sbom.py pins it as {"literal": "1.30.3"}; keep that literal lockstep with
+    # generate-sbom.py pins it as {"literal": "1.30.4"}; keep that literal lockstep with
     # DEF_NGINX_VER (focal) when the bundled nginx is bumped.
-    release_date: "2026-06-17"                   # nginx 1.30.3 stable — upstream release 2026-06-17 (nginx.org CHANGES-1.30; security: CVE-2026-42055, CVE-2026-48142)
+    release_date: "2026-07-15"                   # nginx 1.30.4 stable — upstream release 2026-07-15 (nginx.org download Last-Modified; security: CVE-2026-42533, CVE-2026-60005, CVE-2026-56434)

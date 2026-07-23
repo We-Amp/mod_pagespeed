@@ -46,7 +46,9 @@ class UrlAsyncFetcherStats::StatsAsyncFetch : public SharedAsyncFetch {
  public:
   StatsAsyncFetch(UrlAsyncFetcherStats* stats_fetcher, AsyncFetch* base_fetch)
       : SharedAsyncFetch(base_fetch), stats_fetcher_(stats_fetcher), size_(0) {
-    start_time_us_ = stats_fetcher_->timer_->NowUs();
+    // Fetch latency is an elapsed-time delta, so it uses the monotonic clock
+    // to stay non-negative across wall-clock steps.
+    start_time_us_ = stats_fetcher_->timer_->NowMonotonicUs();
   }
 
   ~StatsAsyncFetch() override {}
@@ -58,7 +60,7 @@ class UrlAsyncFetcherStats::StatsAsyncFetch : public SharedAsyncFetch {
   }
 
   void HandleDone(bool success) override {
-    int64 end_time_us = stats_fetcher_->timer_->NowUs();
+    int64 end_time_us = stats_fetcher_->timer_->NowMonotonicUs();
     stats_fetcher_->fetch_latency_us_histogram_->Add(end_time_us -
                                                      start_time_us_);
     stats_fetcher_->fetches_->Add(1);

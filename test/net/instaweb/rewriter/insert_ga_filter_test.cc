@@ -275,10 +275,12 @@ class InsertGAFilterTest : public RewriteTestBase {
     RewriteOptions* options = rewrite_driver()->options()->Clone();
     options->set_use_analytics_js(use_analytics_js);
     options->set_running_experiment(true);
-    ASSERT_TRUE(
-        options->AddExperimentSpec("id=2;percent=10;slot=4;", &handler));
+    // insert_ga is no longer force-enabled by experiments; specs must opt in
+    // explicitly with enable=insert_ga (SetExperimentState clears filters).
     ASSERT_TRUE(options->AddExperimentSpec(
-        "id=7;percent=10;level=CoreFilters;slot=4;", &handler));
+        "id=2;percent=10;slot=4;enable=insert_ga", &handler));
+    ASSERT_TRUE(options->AddExperimentSpec(
+        "id=7;percent=10;level=CoreFilters;slot=4;enable=insert_ga", &handler));
     options->SetExperimentState(2);
 
     // Setting up experiments automatically enables AddInstrumentation.
@@ -299,14 +301,16 @@ class InsertGAFilterTest : public RewriteTestBase {
     RewriteOptions* options = rewrite_driver()->options()->Clone();
     options->set_use_analytics_js(use_analytics_js);
     options->set_running_experiment(true);
+    // insert_ga is no longer force-enabled by experiments; specs must opt in
+    // explicitly with enable=insert_ga (SetExperimentState clears filters).
     ASSERT_TRUE(options->AddExperimentSpec(
-        absl::StrFormat("id=2;percent=10;slot=4;options="
+        absl::StrFormat("id=2;percent=10;slot=4;enable=insert_ga;options="
                         "ContentExperimentID=123,"
                         "ContentExperimentVariantID=%s",
                         variant_id.c_str()),
         &handler));
     ASSERT_TRUE(options->AddExperimentSpec(
-        "id=7;percent=10;level=CoreFilters;slot=4;options="
+        "id=7;percent=10;level=CoreFilters;slot=4;enable=insert_ga;options="
         "ContentExperimentID=123,"
         "ContentExperimentVariantID=789",
         &handler));
@@ -349,6 +353,21 @@ TEST_F(InsertGAFilterTest, SimpleInsertGaJs) {
   ValidateExpectedUrl("https://www.test1.com/index.html", kHtmlInput, output);
 }
 
+TEST_F(InsertGAFilterTest, TextAfterCloseBody) {
+  // Stray text after </body> nulls the preferred insertion point; the
+  // end-of-body bookkeeping in the sealed CommonFilter::Characters() must
+  // still run (the filter overrides CharactersImpl()), pushing the snippet
+  // to the end of the document.
+  options()->set_use_analytics_js(false);
+  rewrite_driver()->AddFilters();
+  GoogleString input = StrCat(kHtmlInput, "stray trailing text");
+  GoogleString expected =
+      StrCat(input, "<script>",
+             absl::StrFormat(kGAJsSnippet, kGaId, "test.com", kGASpeedTracking),
+             "</script>");
+  ValidateExpected("text_after_close_body", input, expected);
+}
+
 TEST_F(InsertGAFilterTest, SimpleInsertGaJsIdUnset) {
   // Show that when the ga id is not set we do nothing.
   options()->set_use_analytics_js(false);
@@ -387,11 +406,10 @@ TEST_F(InsertGAFilterTest, CspAllowsInlineScript) {
   const char kCsp[] =
       "<meta http-equiv=\"Content-Security-Policy\" "
       "content=\"script-src * 'unsafe-inline';\">";
-  GoogleString input =
-      StrCat("<head>\n", kCsp,
-             "<title>Something</title>\n"
-             "</head>"
-             "<body> Hello World!</body>");
+  GoogleString input = StrCat("<head>\n", kCsp,
+                              "<title>Something</title>\n"
+                              "</head>"
+                              "<body> Hello World!</body>");
   GoogleString expected =
       StrCat("<head>\n", kCsp,
              "<title>Something</title>\n"
@@ -953,6 +971,65 @@ TEST_F(InsertGAFilterTest, AsynchronousGAContentExperimentFlush) {
   rewrite_driver()->FinishParse();
 
   EXPECT_EQ(output, output_buffer_);
+}
+
+// A page that loads ga.js synchronously (the first half of a sync ga.js
+// snippet).  It has no ga id, so it is not itself rewritten, but it trips the
+// filter's "seen a sync ga.js loader" flag.  Note the angle brackets inside
+// document.write are URL-encoded (as the real GA snippet does) so the outer
+// <script> isn't closed early.
+constexpr char kSyncGaJsLoaderOnly[] =
+    "<script>"
+    " var gaJsHost = ((\"https:\" == document.location.protocol) ?"
+    "                \"https://ssl.\" : \"http://www.\");"
+    " document.write(unescape(\"%3Cscript src='\" + gaJsHost +"
+    "                         \"google-analytics.com/ga.js'"
+    "                         type='text/javascript'%3E%3C/script%3E\"));"
+    "</script>";
+
+// A page that references the ga id and calls _getTracker/_trackPageview but
+// never loads ga.js itself.  On its own this is an unusable snippet, NOT the
+// second half of a synchronous ga.js loader.
+constexpr char kGetTrackerNoLoader[] =
+    "%s"
+    "<script>"
+    " try { var pageTracker = _gat._getTracker(\"%s\");"
+    "       pageTracker._trackPageview(); } catch(err) {}"
+    "</script>";
+
+// Regression test for cross-document state bleed.  seen_sync_ga_js_ is a
+// per-document flag, but (unlike its siblings found_snippet_, script_element_,
+// added_analytics_js_ and added_experiment_snippet_) it was set in the ctor and
+// on the loader page yet never reset in StartDocumentImpl.  Because the
+// filter/driver instance is pooled and reused per document, the flag leaked
+// from one page to the next parsed on the SAME instance, misclassifying a later
+// page's _getTracker/_trackPageview script as the second half of a sync ga.js
+// loader (kGaJs) instead of kUnusableSnippetFound -> wrong rewrite / analytics
+// loss.
+//
+// This drives two documents through the SAME rewrite_driver(): html_parse()
+// returns the persistent driver, so each StartParse re-runs StartDocumentImpl
+// on the same InsertGAFilter instance.  That reuse path -- WITHOUT constructing
+// a fresh filter -- is the only way to exercise the bug; a fresh filter per
+// document would mask it.
+TEST_F(InsertGAFilterTest, SeenSyncGaJsResetAcrossDocuments) {
+  SetUpContentExperiment(false);  // ga.js content experiment.
+
+  // Document 1: a sync ga.js loader on the shared filter instance.  This trips
+  // seen_sync_ga_js_.  We only care that the flag gets set, so parse it and
+  // discard the output.
+  Parse("doc1_sync_ga_js_loader", kSyncGaJsLoaderOnly);
+  output_buffer_.clear();
+
+  // Document 2: same filter/driver instance, no fresh filter.  With the flag
+  // reset per-document this is an unusable snippet, left untouched save for the
+  // experiment framework's empty <head/>.  Pre-fix, the leaked flag makes the
+  // filter treat it as sync ga.js and wrongly rewrite it, failing this
+  // expectation.
+  GoogleString input = absl::StrFormat(kGetTrackerNoLoader, "", kGaId);
+  GoogleString expected =
+      absl::StrFormat(kGetTrackerNoLoader, "<head/>", kGaId);
+  ValidateExpected("doc2_not_misclassified_as_sync_ga_js", input, expected);
 }
 
 }  // namespace

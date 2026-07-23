@@ -26,6 +26,7 @@
 #include "pagespeed/kernel/http/google_url.h"
 #include "test/net/instaweb/rewriter/rewrite_options_test_base.h"
 #include "test/pagespeed/kernel/base/gtest.h"
+#include "test/pagespeed/kernel/base/mock_message_handler.h"
 #include "test/pagespeed/kernel/base/null_thread_system.h"
 
 namespace net_instaweb {
@@ -237,48 +238,58 @@ TEST_F(SystemRewriteOptionsTest, StaticAssetCdn) {
   EXPECT_TRUE(assets4.find(StaticAssetEnum::MOBILIZE_JS) != assets4.end());
 }
 
-TEST_F(SystemRewriteOptionsTest, CentralControllerInitValue) {
-  EXPECT_EQ("", options_.controller_port());
-}
-
-TEST_F(SystemRewriteOptionsTest, CentralControllerTcpPort) {
+// The experimental gRPC central controller was removed. Its three options are
+// deprecated no-ops: they still parse (old configs must not error), accept any
+// value without validation, and log a deprecation warning when set.
+TEST_F(SystemRewriteOptionsTest, CentralControllerPortDeprecatedNoOp) {
   GoogleString msg;
+  MockMessageHandler handler(thread_system_.NewMutex());
   EXPECT_EQ(options_.ParseAndSetOptionFromName1(
                 SystemRewriteOptions::kCentralControllerPort, "1234", &msg,
-                &handler_),
+                &handler),
             RewriteOptions::kOptionOk);
-  EXPECT_EQ(options_.controller_port(), "localhost:1234");
-  EXPECT_EQ("", msg);
-}
+  EXPECT_EQ(1, handler.MessagesOfType(kWarning));
 
-TEST_F(SystemRewriteOptionsTest, CentralControllerUnixPort) {
-  GoogleString msg;
+  // Values the removed validation machinery used to reject now parse fine;
+  // the option is inert either way.
   EXPECT_EQ(options_.ParseAndSetOptionFromName1(
-                SystemRewriteOptions::kCentralControllerPort, "unix:a", &msg,
-                &handler_),
+                SystemRewriteOptions::kCentralControllerPort, "not-a-port",
+                &msg, &handler),
             RewriteOptions::kOptionOk);
-  EXPECT_EQ(options_.controller_port(), "unix:a");
-  EXPECT_EQ("", msg);
+  EXPECT_EQ(2, handler.MessagesOfType(kWarning));
+
+  // The last value is stored verbatim (and ignored).
+  const char* id = nullptr;
+  bool was_set = false;
+  GoogleString value;
+  ASSERT_TRUE(options_.OptionValue(
+      SystemRewriteOptions::kCentralControllerPort, &id, &was_set, &value));
+  EXPECT_TRUE(was_set);
+  EXPECT_EQ("not-a-port", value);
 }
 
-TEST_F(SystemRewriteOptionsTest, CentralControllerTooShortUnixPort) {
+TEST_F(SystemRewriteOptionsTest, PopularityContestOptionsDeprecatedNoOp) {
   GoogleString msg;
+  MockMessageHandler handler(thread_system_.NewMutex());
   EXPECT_EQ(options_.ParseAndSetOptionFromName1(
-                SystemRewriteOptions::kCentralControllerPort, "unix:", &msg,
-                &handler_),
-            RewriteOptions::kOptionValueInvalid);
-  EXPECT_EQ(options_.controller_port(), "");
-  EXPECT_NE("", msg);
+                SystemRewriteOptions::kPopularityContestMaxInFlight, "5", &msg,
+                &handler),
+            RewriteOptions::kOptionOk);
+  EXPECT_EQ(options_.ParseAndSetOptionFromName1(
+                SystemRewriteOptions::kPopularityContestMaxQueueSize, "6",
+                &msg, &handler),
+            RewriteOptions::kOptionOk);
+  EXPECT_EQ(2, handler.MessagesOfType(kWarning));
 }
 
-TEST_F(SystemRewriteOptionsTest, CentralControllerBadTcpPort) {
+TEST_F(SystemRewriteOptionsTest, UnrelatedOptionLogsNoControllerWarning) {
   GoogleString msg;
+  MockMessageHandler handler(thread_system_.NewMutex());
   EXPECT_EQ(options_.ParseAndSetOptionFromName1(
-                SystemRewriteOptions::kCentralControllerPort, "123a", &msg,
-                &handler_),
-            RewriteOptions::kOptionValueInvalid);
-  EXPECT_EQ(options_.controller_port(), "");
-  EXPECT_NE("", msg);
+                SystemRewriteOptions::kRedisServer, "host1:1234", &msg,
+                &handler),
+            RewriteOptions::kOptionOk);
+  EXPECT_EQ(0, handler.MessagesOfType(kWarning));
 }
 
 TEST_F(SystemRewriteOptionsTest, RedisServer) {

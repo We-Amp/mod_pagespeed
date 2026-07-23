@@ -6,6 +6,7 @@
   import {
     formatLicenseDate,
     getLicenseErrorMessage,
+    resolveCanManageLicense,
   } from "$lib/utils/license-utils";
 
   // isGlobal is passed by App.svelte to all page components (convention).
@@ -93,10 +94,14 @@
     }
   }
 
-  // Only the global admin endpoint can manage licenses. The isGlobal prop is
-  // set by the router based on which admin endpoint is being served; the
-  // server's is_global field is not authoritative for UI gating.
-  let canManageLicense = $derived(isGlobal);
+  // Only the global admin endpoint can manage licenses. The backend's
+  // `is_global` field in the license status response is authoritative — the
+  // server computes it and enforces it server-side on apply/activate, so this
+  // gate is advisory only. Trusting it lets a custom (renamed) global admin
+  // path manage licenses instead of being wrongly hidden by the URL heuristic.
+  // The isGlobal prop (URL-derived) is a fallback for older backends that
+  // don't send the flag, and covers the still-loading state.
+  let canManageLicense = $derived(resolveCanManageLicense(license.data, isGlobal));
 
   // ── Manual key apply ────────────────────────────────────────
   async function applyLicense() {

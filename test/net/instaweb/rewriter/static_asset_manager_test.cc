@@ -170,6 +170,23 @@ TEST_F(StaticAssetManagerTest, TestJsOpt) {
   }
 }
 
+TEST_F(StaticAssetManagerTest, DeferJsHasNoFirefoxDataUrlWorkaround) {
+  // Regression pin for the removed Firefox data:text/javascript workaround
+  // (Mozilla bug 728151, fixed in FF21): pages serving script-src
+  // 'unsafe-inline' green-light defer_javascript, but 'unsafe-inline' does not
+  // permit data: script URLs, so the workaround broke deferred inline scripts
+  // on Firefox. The shipped asset must not UA-sniff for Firefox.
+  GoogleString script(
+      manager_->GetAsset(StaticAssetEnum::DEFER_JS, options_));
+  EXPECT_EQ(GoogleString::npos, script.find("Firefox"));
+
+  options_->EnableFilter(RewriteOptions::kDebug);
+  GoogleString debug_script(
+      manager_->GetAsset(StaticAssetEnum::DEFER_JS, options_));
+  EXPECT_EQ(GoogleString::npos, debug_script.find("Firefox"));
+  EXPECT_EQ(GoogleString::npos, debug_script.find("isFireFox"));
+}
+
 TEST_F(StaticAssetManagerTest, TestHtmlInsertInlineJs) {
   SetHtmlMimetype();
   AddStaticJsBeforeBr filter(rewrite_driver());

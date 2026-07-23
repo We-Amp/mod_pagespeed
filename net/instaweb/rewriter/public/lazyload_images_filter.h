@@ -156,6 +156,12 @@ class LazyloadImagesFilter : public CommonFilter {
   void InsertOverrideAttributesScript(HtmlElement* element,
                                       bool is_before_script);
 
+  // Returns true if any srcset candidate of the element is beacon-critical.
+  // Consulted only for srcset-only images (no src to defer): in native mode a
+  // critical candidate earns the same eager-fetch treatment as a critical
+  // src, keyed on the candidate the beacon reported as displayed.
+  bool HasCriticalSrcsetCandidate(const HtmlElement& element);
+
   // The initial image url to be used.
   GoogleString blank_image_url_;
   // If non-NULL, we skip rewriting till we reach

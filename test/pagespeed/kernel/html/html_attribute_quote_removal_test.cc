@@ -47,9 +47,24 @@ TEST_F(HtmlAttributeQuoteRemovalTest, NoQuotesNoChange) {
                     "<div class=foo id=bar>foobar</div>");
 }
 
-TEST_F(HtmlAttributeQuoteRemovalTest, DoNotRemoveNeededQuotes) {
-  ValidateNoChanges("do_not_remove_needed_quotes",
-                    "<a href=\"http://www.example.com/\">foobar</a>");
+TEST_F(HtmlAttributeQuoteRemovalTest, RemoveUnneededQuotesFromUrls) {
+  ValidateExpected("remove_unneeded_quotes_from_urls",
+                   "<a href=\"http://www.example.com/\">foobar</a>",
+                   "<a href=http://www.example.com/>foobar</a>");
+}
+
+TEST_F(HtmlAttributeQuoteRemovalTest, UrlQuoteRemovalBriefClose) {
+  // Pins the writer guard: an unquoted value ending in '/' must be kept
+  // apart from a following "/>", otherwise the '/' would be re-parsed as
+  // part of the attribute value.
+  ValidateExpected("url_quote_removal_brief_close",
+                   "<img src=\"/foo/\"/>",
+                   "<img src=/foo/ />");
+}
+
+TEST_F(HtmlAttributeQuoteRemovalTest, UrlWithQueryKeepsQuotes) {
+  ValidateNoChanges("url_with_query_keeps_quotes",
+                    "<a href=\"/search?q=1\">x</a>");
 }
 
 TEST_F(HtmlAttributeQuoteRemovalTest, DoNotDeleteEmptyAttrs) {

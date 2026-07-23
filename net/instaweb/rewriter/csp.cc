@@ -674,6 +674,14 @@ bool CspPolicy::IsBasePermitted(const GoogleUrl& previous_origin,
   return true;
 }
 
+bool CspPolicy::BaseUriDisablesAllBases() const {
+  const CspSourceList* source_list = SourceListFor(CspDirective::kBaseUri);
+  // Only a present base-uri directive whose source list matches nothing (e.g.
+  // 'none') provably blocks every <base>. An absent directive imposes no
+  // restriction, and a non-empty list could match some <base href>.
+  return source_list != nullptr && source_list->MatchesNothing();
+}
+
 void CspContext::AddPolicy(std::unique_ptr<CspPolicy> policy) {
   if (policy != nullptr) {
     policies_.push_back(std::move(policy));

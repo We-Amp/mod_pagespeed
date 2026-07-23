@@ -123,11 +123,24 @@ void ScanFilter::StartElement(HtmlElement* element) {
         return;
       }
 
-      // It would be much better if we were to use IsBasePermitted here, but
-      // we may not be able to set previous_origin accurately. So instead,
-      // we act overly conservatively and handle
+      // A CSP base-uri directive governs whether the browser honors this
+      // <base>. We cannot reliably reconstruct the previous_origin needed to
+      // evaluate an arbitrary base-uri source list against this specific
+      // <base href>, so in general we stay conservative and bail. The one
+      // case we can prove without previous_origin is a base-uri that matches
+      // nothing (e.g. base-uri 'none'): there the browser ignores every
+      // <base> element, so the tag cannot affect relative-URL resolution.
+      // We then treat it as inert --- skipping it entirely, exactly as the
+      // browser does --- and let rewriting proceed instead of bailing.
       if (driver_->content_security_policy().HasDirective(
               CspDirective::kBaseUri)) {
+        if (driver_->content_security_policy().IsBaseNeutralizedByCsp()) {
+          driver_->InsertDebugComment(
+              "CSP base-uri neutralizes this base (the browser ignores it), "
+              "so it is treated as inert and rewriting proceeds.",
+              element);
+          return;
+        }
         driver_->InsertDebugComment(
             "Unable to check safety of a base with CSP base-uri, "
             "proceeding conservatively.",

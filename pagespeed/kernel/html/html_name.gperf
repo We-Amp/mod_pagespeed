@@ -68,6 +68,7 @@ struct KeywordMap {const char* name; net_instaweb::HtmlName::Keyword keyword;};
 "abbr",                               HtmlName::kAbbr
 "action",                             HtmlName::kAction
 "address",                            HtmlName::kAddress
+"allowfullscreen",                    HtmlName::kAllowfullscreen
 "alt",                                HtmlName::kAlt
 "amp",                                HtmlName::kAmp
 "area",                               HtmlName::kArea
@@ -124,6 +125,7 @@ struct KeywordMap {const char* name; net_instaweb::HtmlName::Keyword keyword;};
 "data-pagespeed-prioritize",          HtmlName::kDataPagespeedPrioritize
 "data-pagespeed-responsive-temp",     HtmlName::kDataPagespeedResponsiveTemp
 "data-pagespeed-size",                HtmlName::kDataPagespeedSize
+"data-pagespeed-srcset-url-hashes",   HtmlName::kDataPagespeedSrcsetUrlHashes
 "data-pagespeed-url-hash",            HtmlName::kDataPagespeedUrlHash
 "data-src",                           HtmlName::kDataSrc
 "data-srcset",                        HtmlName::kDataSrcset
@@ -136,6 +138,7 @@ struct KeywordMap {const char* name; net_instaweb::HtmlName::Keyword keyword;};
 "del",                                HtmlName::kDel
 "details",                            HtmlName::kDetails
 "dfn",                                HtmlName::kDfn
+"dialog",                             HtmlName::kDialog
 "dir",                                HtmlName::kDir
 "disabled",                           HtmlName::kDisabled
 "display",                            HtmlName::kDisplay
@@ -225,6 +228,7 @@ struct KeywordMap {const char* name; net_instaweb::HtmlName::Keyword keyword;};
 "pagespeed_no_transform",             HtmlName::kPagespeedNoTransform
 "param",                              HtmlName::kParam
 "picture",                            HtmlName::kPicture
+"playsinline",                        HtmlName::kPlaysinline
 "poster",                             HtmlName::kPoster
 "pre",                                HtmlName::kPre
 "profile",                            HtmlName::kProfile

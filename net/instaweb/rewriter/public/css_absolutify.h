@@ -45,7 +45,9 @@ class CssAbsolutify {
   // Absolutify all relative URLs in the stylesheet using the given base URL.
   // The Declaration structures are modified in-situ. You can control whether
   // URLs in parseable sections (BACKGROUND, BACKGROUND_IMAGE, LIST_STYLE,
-  // LIST_STYLE_IMAGE) and/or unparseable sections (UNPARSEABLE) are handled.
+  // LIST_STYLE_IMAGE) and/or unparseable sections (UNPARSEABLE declarations,
+  // dummy selectors, unparsed regions, and the opaque preludes of
+  // conditional group rules) are handled.
   // @font-face are absolutified no matter what these are set to.
   // TODO(sligocki): Remove handle_ bools, and always handle both. Also,
   // absolutify imports in this function.
@@ -56,6 +58,18 @@ class CssAbsolutify {
                              RewriteDriver* driver, MessageHandler* handler);
 
  private:
+  // Walk one stylesheet level: font-faces, rulesets, unparseable sections.
+  // Recurses into group-rule (@supports/@layer/@container) bodies, whose
+  // declarations are parsed structure and are therefore never seen by the
+  // textual unparseable-section path. The opaque group preludes, in
+  // contrast, are covered by that path when handle_unparseable_sections is
+  // set.
+  static bool AbsolutifyStylesheet(Css::Stylesheet* stylesheet,
+                                   CssTagScanner::Transformer* transformer,
+                                   bool handle_parseable_ruleset_sections,
+                                   bool handle_unparseable_sections,
+                                   MessageHandler* handler);
+
   static bool AbsolutifyDeclarations(Css::Declarations* decls,
                                      CssTagScanner::Transformer* transformer,
                                      bool handle_parseable_sections,

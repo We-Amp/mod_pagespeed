@@ -70,6 +70,13 @@ const int kNumWaveformSamples = 200;
 
 // Histogram names.
 const char kBeaconTimingsMsHistogram[] = "Beacon Reported Load Time (ms)";
+// Core Web Vitals histograms fed by the add_instrumentation beacon.  CLS is
+// reported in fixed-point milli-units (a CLS of 0.1 arrives as 100) so it
+// stays an integer end-to-end.
+const char kBeaconLcpMsHistogram[] = "Beacon Reported LCP (ms)";
+const char kBeaconClsMilliHistogram[] = "Beacon Reported CLS (milli-units)";
+const char kBeaconInpMsHistogram[] = "Beacon Reported INP (ms)";
+const char kBeaconTtfbMsHistogram[] = "Beacon Reported TTFB (ms)";
 const char kFetchLatencyHistogram[] = "Pagespeed Resource Latency Histogram";
 const char kRewriteLatencyHistogram[] = "Rewrite Latency Histogram";
 const char kBackendLatencyHistogram[] =
@@ -131,6 +138,10 @@ void RewriteStats::InitStats(Statistics* statistics) {
   statistics->AddVariable(kNumCacheControlNotRewritableResources);
   statistics->AddVariable(kNumFlushes);
   statistics->AddHistogram(kBeaconTimingsMsHistogram);
+  statistics->AddHistogram(kBeaconLcpMsHistogram);
+  statistics->AddHistogram(kBeaconClsMilliHistogram);
+  statistics->AddHistogram(kBeaconInpMsHistogram);
+  statistics->AddHistogram(kBeaconTtfbMsHistogram);
   statistics->AddHistogram(kFetchLatencyHistogram);
   statistics->AddHistogram(kRewriteLatencyHistogram);
   statistics->AddHistogram(kBackendLatencyHistogram);
@@ -201,6 +212,11 @@ RewriteStats::RewriteStats(bool has_waveforms, Statistics* stats,
           stats->GetVariable(kSuccessfulDownstreamCachePurges)),
       beacon_timings_ms_histogram_(
           stats->GetHistogram(kBeaconTimingsMsHistogram)),
+      beacon_lcp_ms_histogram_(stats->GetHistogram(kBeaconLcpMsHistogram)),
+      beacon_cls_milli_histogram_(
+          stats->GetHistogram(kBeaconClsMilliHistogram)),
+      beacon_inp_ms_histogram_(stats->GetHistogram(kBeaconInpMsHistogram)),
+      beacon_ttfb_ms_histogram_(stats->GetHistogram(kBeaconTtfbMsHistogram)),
       fetch_latency_histogram_(stats->GetHistogram(kFetchLatencyHistogram)),
       rewrite_latency_histogram_(stats->GetHistogram(kRewriteLatencyHistogram)),
       backend_latency_histogram_(stats->GetHistogram(kBackendLatencyHistogram)),

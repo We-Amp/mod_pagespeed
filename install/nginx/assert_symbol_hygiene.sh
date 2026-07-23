@@ -10,7 +10,7 @@
 #      the highest-severity crash mode (R3).
 #   2. nm -D --defined-only: the ONLY exported dynamic symbols are the nginx
 #      module trio (ngx_modules / ngx_module_names / ngx_module_order). Anything
-#      else (spdlog/grpc/protobuf/re2/...) means the version script (.lds) did
+#      else (spdlog/protobuf/re2/...) means the version script (.lds) did
 #      not take effect.
 #
 # Usage: assert_symbol_hygiene.sh <path-to-module.so>

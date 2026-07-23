@@ -20,9 +20,11 @@
 #include "pagespeed/kernel/html/html_keywords.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <cstring>  // For memset/memcpy used by sparsehash
 #include <map>
+#include <mutex>
 #include <utility>
 
 #include "base/logging.h"
@@ -196,7 +198,7 @@ const char kParagraphTerminators[] =
 
 }  // namespace
 
-HtmlKeywords* HtmlKeywords::singleton_ = nullptr;
+std::atomic<HtmlKeywords*> HtmlKeywords::singleton_ = nullptr;
 
 HtmlKeywords::HtmlKeywords() {
   InitEscapeSequences();
@@ -262,15 +264,25 @@ void HtmlKeywords::InitEscapeSequences() {
 }
 
 void HtmlKeywords::Init() {
-  if (singleton_ == nullptr) {
-    singleton_ = new HtmlKeywords();
+  // Double-checked locking with std::atomic: the fast path (singleton_ already
+  // set) is lock-free.  The mutex serializes only the first initialization (or
+  // re-initialization after ShutDown).  A static std::once_flag would not work
+  // here because ShutDown() must be able to reset the singleton for re-Init().
+  if (singleton_.load(std::memory_order_acquire) != nullptr) {
+    return;
+  }
+  static std::mutex mu;
+  std::lock_guard<std::mutex> lock(mu);
+  if (singleton_.load(std::memory_order_relaxed) == nullptr) {
+    singleton_.store(new HtmlKeywords(), std::memory_order_release);
   }
 }
 
 void HtmlKeywords::ShutDown() {
-  if (singleton_ != nullptr) {
-    delete singleton_;
-    singleton_ = nullptr;
+  HtmlKeywords* expected = singleton_.load(std::memory_order_acquire);
+  if (expected != nullptr) {
+    delete expected;
+    singleton_.store(nullptr, std::memory_order_release);
   }
 }
 

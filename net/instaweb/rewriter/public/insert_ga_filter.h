@@ -139,7 +139,7 @@ class InsertGAFilter : public CommonFilter {
   void StartElementImpl(HtmlElement* element) override;
   void EndElementImpl(HtmlElement* element) override;
   // HTML Events we expect to be in <script> elements.
-  void Characters(HtmlCharactersNode* characters) override;
+  void CharactersImpl(HtmlCharactersNode* characters) override;
 
   const char* Name() const override { return "InsertGASnippet"; }
   ScriptUsage GetScriptUsage() const override { return kWillInjectScripts; }

@@ -67,14 +67,36 @@ void JsOutlineFilter::StartElementImpl(HtmlElement* element) {
 
   HtmlElement::Attribute* src;
   // We only deal with Javascript
-  if (script_tag_scanner_.ParseScriptElement(element, &src) ==
-      ScriptTagScanner::kJavaScript) {
+  ScriptTagScanner::ScriptClassification classification =
+      script_tag_scanner_.ParseScriptElement(element, &src);
+  if (classification == ScriptTagScanner::kJavaScript) {
     inline_element_ = element;
     inline_chars_ = nullptr;
     // script elements which already have a src should not be outlined.
     if (src != nullptr) {
       inline_element_ = nullptr;
+    } else if (ScriptTagScanner::HasIntegrityAttribute(element)) {
+      // Browsers ignore integrity= on an inline script, but CloneElement
+      // copies the attribute onto the outlined external element, where it
+      // becomes enforced against the outlined bytes; a hash that does not
+      // match those bytes exactly (harmless while inline) would make the
+      // browser block the script. Leave it inline.
+      driver()->InsertDebugComment(
+          "JS not outlined: integrity attribute would become enforced on "
+          "the outlined script",
+          element);
+      inline_element_ = nullptr;
     }
+  } else if (classification == ScriptTagScanner::kJavaScriptModule &&
+             src == nullptr) {
+    // Outlining an inline module would move import resolution from the
+    // document base URL (which honors <base href>) to the outlined script
+    // URL, create an import.meta.url that did not exist, and flip the CSP
+    // surface from inline-script to external-script.
+    driver()->InsertDebugComment(
+        "JS not outlined: module scripts are never outlined (import "
+        "resolution would change)",
+        element);
   }
 }
 
@@ -99,7 +121,7 @@ void JsOutlineFilter::Flush() {
   inline_chars_ = nullptr;
 }
 
-void JsOutlineFilter::Characters(HtmlCharactersNode* characters) {
+void JsOutlineFilter::CharactersImpl(HtmlCharactersNode* characters) {
   if (inline_element_ != nullptr) {
     inline_chars_ = characters;
   }

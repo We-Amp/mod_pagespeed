@@ -291,6 +291,68 @@ TEST_F(ScriptTagScannerTest, TypeScriptsNormalize) {
   }
 }
 
+TEST_F(ScriptTagScannerTest, TypeModule) {
+  ValidateNoChanges("module scripts",
+                    "<script type=\"module\"></script>"
+                    "<script type=\"module\" src=\"a.js\"></script>");
+  ASSERT_EQ(2, collector_.Size());
+  EXPECT_EQ(GoogleString(), collector_.UrlAt(0));
+  EXPECT_EQ(ScriptTagScanner::kJavaScriptModule,
+            collector_.ClassificationAt(0));
+  EXPECT_EQ(GoogleString("a.js"), collector_.UrlAt(1));
+  EXPECT_EQ(ScriptTagScanner::kJavaScriptModule,
+            collector_.ClassificationAt(1));
+}
+
+TEST_F(ScriptTagScannerTest, TypeModuleNormalize) {
+  // The "module" script type is matched after removal of leading/trailing
+  // whitespace and case folding, like the mimetypes above.
+  ValidateNoChanges("module normalize", ScriptWithType(" module ") +
+                                            ScriptWithType("MODULE") +
+                                            ScriptWithType("\tModule "));
+  ASSERT_EQ(3, collector_.Size());
+  for (int i = 0; i <= 2; ++i) {
+    EXPECT_EQ(GoogleString(), collector_.UrlAt(i));
+    EXPECT_EQ(ScriptTagScanner::kJavaScriptModule,
+              collector_.ClassificationAt(i));
+  }
+}
+
+TEST_F(ScriptTagScannerTest, TypeModuleLookalikesUnknown) {
+  // Only the exact (normalized) "module" token is a module; other script
+  // types such as importmap and speculationrules stay unknown.
+  ValidateNoChanges("module lookalikes",
+                    ScriptWithType("modulex") + ScriptWithType("module/x") +
+                        ScriptWithType("text/module") +
+                        ScriptWithType("importmap") +
+                        ScriptWithType("speculationrules"));
+  ASSERT_EQ(5, collector_.Size());
+  for (int i = 0; i <= 4; ++i) {
+    EXPECT_EQ(GoogleString(), collector_.UrlAt(i));
+    EXPECT_EQ(ScriptTagScanner::kUnknownScript, collector_.ClassificationAt(i));
+  }
+}
+
+TEST_F(ScriptTagScannerTest, LanguageModuleIsUnknown) {
+  // The language attribute cannot declare a module; it probes the mimetype
+  // list with "text/module", which is not JS.
+  ValidateNoChanges("language module", ScriptWithLang("module"));
+  ASSERT_EQ(1, collector_.Size());
+  EXPECT_EQ(GoogleString(), collector_.UrlAt(0));
+  EXPECT_EQ(ScriptTagScanner::kUnknownScript, collector_.ClassificationAt(0));
+}
+
+TEST_F(ScriptTagScannerTest, ModuleExecutionMode) {
+  // ExecutionMode reports attribute presence only: a module's implicit
+  // deferral is not a flag, while async is meaningful on modules.
+  TestSpec module_tests[] = {
+      {"type=module async src=a", ScriptTagScanner::kExecuteAsync},
+      {"type=module src=a", ScriptTagScanner::kExecuteSync},
+      {"type=module", ScriptTagScanner::kExecuteSync},
+      {nullptr, ScriptTagScanner::kExecuteSync}};
+  TestFlags(module_tests);
+}
+
 TEST_F(ScriptTagScannerTest, LangScripts) {
   // for language attribute, we are supposed to test text/lang
   // against the valid mimetypes list
@@ -373,8 +435,13 @@ TEST_F(ScriptTagScannerTest, ForEvent) {
   TestSpec for_event_tests[] = {
       {"for event", ScriptTagScanner::kExecuteForEvent},
       {"for=\"\" event=\"\"", ScriptTagScanner::kExecuteForEvent},
-      {"for", ScriptTagScanner::kExecuteSync},
-      {"event", ScriptTagScanner::kExecuteSync},
+      // Only one of for/event present: HTML5's 'prepare a script' says the
+      // script must not execute at all, no matter the value, so the
+      // conservative kExecuteForEvent applies here as well.
+      {"for", ScriptTagScanner::kExecuteForEvent},
+      {"event", ScriptTagScanner::kExecuteForEvent},
+      {"for=\"window\"", ScriptTagScanner::kExecuteForEvent},
+      {"event=\"onload\"", ScriptTagScanner::kExecuteForEvent},
       {"for=\"a\" event=\"b\"", ScriptTagScanner::kExecuteForEvent},
       {"for=\"window\" event=\"b\"", ScriptTagScanner::kExecuteForEvent},
       {"for=\"window\" event=\"b\" async",

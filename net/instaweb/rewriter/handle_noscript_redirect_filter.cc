@@ -19,8 +19,8 @@
 
 #include "net/instaweb/rewriter/public/handle_noscript_redirect_filter.h"
 
-#include "net/instaweb/public/global_constants.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
+#include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/html/html_element.h"
 #include "pagespeed/kernel/html/html_name.h"
@@ -71,11 +71,18 @@ void HandleNoscriptRedirectFilter::EndElement(HtmlElement* element) {
     // <link rel=canonical href=...> ?   If we want to do this then if there is
     // no such element, to insert our link element we might need to add a head
     // (since all heads might have been flushed already).
-    HtmlCharactersNode* link_node = rewrite_driver_->NewCharactersNode(
-        element,
-        absl::StrFormat(kLinkRelCanonicalFormatter,
-                        rewrite_driver_->google_url().AllExceptQuery()));
-    rewrite_driver_->AppendChild(element, link_node);
+    // Build a real <link> element rather than injecting formatted text, so the
+    // href goes through HtmlElement::AddAttribute (which applies the same
+    // HtmlKeywords::Escape) and the tag is serialized by HtmlWriterFilter.
+    // BRIEF_CLOSE keeps the emitted bytes identical to the old raw-text form.
+    HtmlElement* link_element =
+        rewrite_driver_->NewElement(element, HtmlName::kLink);
+    link_element->set_style(HtmlElement::BRIEF_CLOSE);
+    rewrite_driver_->AddAttribute(link_element, HtmlName::kRel, kCanonical);
+    rewrite_driver_->AddAttribute(
+        link_element, HtmlName::kHref,
+        rewrite_driver_->google_url().AllExceptQuery());
+    rewrite_driver_->AppendChild(element, link_element);
     canonical_inserted_ = true;
   }
 }

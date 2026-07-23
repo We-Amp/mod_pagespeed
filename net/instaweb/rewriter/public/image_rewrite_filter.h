@@ -106,6 +106,37 @@ class ImageRewriteFilter : public RewriteFilter {
   static const char kImageWebpFromGifAnimatedSuccessMs[];
   static const char kImageWebpFromGifAnimatedTimeouts[];
 
+  // AVIF counter family, mirroring the WebP names above.  Without these an AVIF
+  // encode timeout or codec failure is invisible on the stats page.  There are
+  // no opaque/alpha buckets: the AVIF encode funnel (Image::RewriteToAvif) has
+  // no transparency signal at the point the outcome is recorded.
+  //
+  // The *Timeouts and *Overruns pair are BOTH needed and mean different
+  // things.  A timeout is a conversion that produced nothing (aborted, or --
+  // for a still -- declined before it started).  An overrun is a conversion
+  // that produced a served image but took longer than the timeout allowed:
+  // an AV1 still encode cannot be interrupted once begun, so exceeding the
+  // budget is detected only afterwards and the result is kept.  Without the
+  // second counter that case is invisible, because it is a success.
+  static const char kImageAvifRewrites[];
+  static const char kImageAvifFromJpegFailureMs[];
+  static const char kImageAvifFromJpegSuccessMs[];
+  static const char kImageAvifFromJpegTimeouts[];
+  static const char kImageAvifFromJpegOverruns[];
+  static const char kImageAvifFromPngFailureMs[];
+  static const char kImageAvifFromPngSuccessMs[];
+  static const char kImageAvifFromPngTimeouts[];
+  static const char kImageAvifFromPngOverruns[];
+  static const char kImageAvifFromGifAnimatedFailureMs[];
+  static const char kImageAvifFromGifAnimatedSuccessMs[];
+  static const char kImageAvifFromGifAnimatedTimeouts[];
+  static const char kImageAvifFromGifAnimatedOverruns[];
+  // AVIF->AVIF recompression (the recompress_avif filter).
+  static const char kImageAvifFromAvifFailureMs[];
+  static const char kImageAvifFromAvifSuccessMs[];
+  static const char kImageAvifFromAvifTimeouts[];
+  static const char kImageAvifFromAvifOverruns[];
+
   // The property cache property name used to store URLs discovered when
   // image_inlining_identify_and_cache_without_rewriting() is set in the
   // RewriteOptions.
@@ -339,6 +370,8 @@ class ImageRewriteFilter : public RewriteFilter {
   Variable* image_inline_count_;
   // # of images rewritten into WebP format.
   Variable* image_webp_rewrites_;
+  // # of images rewritten into AVIF format.
+  Variable* image_avif_rewrites_;
   // # of images being rewritten right now.
   UpDownCounter* image_ongoing_rewrites_;
 
@@ -362,6 +395,9 @@ class ImageRewriteFilter : public RewriteFilter {
 
   // Sets of variables and histograms for various conversions to WebP.
   Image::ConversionVariables webp_conversion_variables_;
+
+  // Sets of variables and histograms for various conversions to AVIF.
+  Image::ConversionVariables avif_conversion_variables_;
 
   // The options related to this filter.
   static StringPieceVector* related_options_;

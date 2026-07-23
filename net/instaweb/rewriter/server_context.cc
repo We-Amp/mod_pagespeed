@@ -92,6 +92,20 @@ const char kBeaconRenderedDimensionsQueryParam[] = "rd";
 const char kBeaconCriticalCssQueryParam[] = "cs";
 const char kBeaconOverflowQueryParam[] = "of";
 const char kBeaconNonceQueryParam[] = "n";
+// Core Web Vitals params reported by the add_instrumentation collector.
+// Each is an optional non-negative decimal integer, parsed independently.
+// Note: client TTFB is "c_ttfb" (absolute responseStart), a fresh name; the
+// legacy "ttfb" param carried responseStart - requestStart and stays
+// ignored so the two semantics never mix in one histogram.
+const char kBeaconLcpQueryParam[] = "lcp";
+const char kBeaconClsQueryParam[] = "cls";  // fixed-point milli-units
+const char kBeaconInpQueryParam[] = "inp";
+const char kBeaconTtfbQueryParam[] = "c_ttfb";
+
+// Sanity clamps for beacon-reported metrics; values beyond these are
+// dropped as garbage rather than skewing the histograms.
+const int kMaxBeaconMetricMs = 10 * 60 * 1000;  // 10 minutes
+const int kMaxBeaconClsMilli = 100000;          // CLS of 100
 
 // Attributes that should not be automatically copied from inputs to outputs
 const char* kExcludedAttributes[] = {
@@ -598,6 +612,35 @@ bool ServerContext::HandleBeacon(StringPiece params, StringPiece user_agent,
         rewrite_stats_->total_page_load_ms()->Add(value);
         rewrite_stats_->page_load_count()->Add(1);
         rewrite_stats_->beacon_timings_ms_histogram()->Add(value);
+      }
+    }
+  }
+
+  // Extract the Core Web Vitals metrics.  Each parameter is optional and
+  // parsed independently: the values come from separate client-side
+  // observers, so one malformed or out-of-range value is dropped silently
+  // without affecting the others or the beacon status.
+  struct CwvBeaconParam {
+    const char* name;
+    Histogram* histogram;
+    int max_value;
+  };
+  const CwvBeaconParam cwv_params[] = {
+      {kBeaconLcpQueryParam, rewrite_stats_->beacon_lcp_ms_histogram(),
+       kMaxBeaconMetricMs},
+      {kBeaconClsQueryParam, rewrite_stats_->beacon_cls_milli_histogram(),
+       kMaxBeaconClsMilli},
+      {kBeaconInpQueryParam, rewrite_stats_->beacon_inp_ms_histogram(),
+       kMaxBeaconMetricMs},
+      {kBeaconTtfbQueryParam, rewrite_stats_->beacon_ttfb_ms_histogram(),
+       kMaxBeaconMetricMs},
+  };
+  for (const CwvBeaconParam& param : cwv_params) {
+    if (query_params.Lookup1Unescaped(param.name, &query_param_str)) {
+      int value = -1;
+      if (StringToInt(query_param_str, &value) && value >= 0 &&
+          value <= param.max_value) {
+        param.histogram->Add(value);
       }
     }
   }

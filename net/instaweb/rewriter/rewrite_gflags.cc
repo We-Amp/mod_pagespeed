@@ -377,9 +377,10 @@ DEFINE_bool(enable_extended_instrumentation, false,
             "If set to true, additional instrumentation js added to that "
             "page that adds more information to the beacon.");
 
-DEFINE_bool(use_experimental_js_minifier, false,
-            "If set to true, uses the new JsTokenizer-based minifier. "
-            "This option will be removed when that minifier has matured.");
+DEFINE_bool(use_experimental_js_minifier, true,
+            "If set to false, uses the old legacy::MinifyJs-based minifier. "
+            "The legacy minifier is deprecated and will be removed in a "
+            "future release.");
 
 DEFINE_string(blocking_rewrite_key, RewriteOptions::kDefaultBlockingRewriteKey,
               "Enables rewrites to finish before the response is sent to "

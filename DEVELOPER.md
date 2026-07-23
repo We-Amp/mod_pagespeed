@@ -145,8 +145,7 @@ mod_pagespeed/
 │   ├── envoy/              # Envoy filter
 │   ├── iis/                # IIS native module (live factory)
 │   ├── automatic/          # ProxyFetch — shared rewriting engine
-│   ├── system/             # System-level abstractions (admin UI, cache backends)
-│   └── controller/         # gRPC coordination service
+│   └── system/             # System-level abstractions (admin UI, cache backends)
 ├── base/                   # glog-compatible logging (base/logging.h)
 ├── test/                   # Tests (mirrors source structure)
 ├── bazel/                  # Bazel build rules and dependencies

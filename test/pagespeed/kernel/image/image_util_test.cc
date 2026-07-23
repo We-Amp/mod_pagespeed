@@ -20,6 +20,7 @@
 #include "pagespeed/kernel/image/image_util.h"
 
 #include <cstdint>
+#include <vector>
 
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -45,6 +46,7 @@ using pagespeed::image_compression::ImageFormat;
 using pagespeed::image_compression::PixelFormat;
 
 // Image formats.
+using pagespeed::image_compression::IMAGE_AVIF;
 using pagespeed::image_compression::IMAGE_GIF;
 using pagespeed::image_compression::IMAGE_JPEG;
 using pagespeed::image_compression::IMAGE_PNG;
@@ -79,9 +81,9 @@ TEST(ImageUtilTest, ImageFormatToMimeTypeString) {
   EXPECT_STREQ("image/png", ImageFormatToMimeTypeString(IMAGE_PNG));
   EXPECT_STREQ("image/gif", ImageFormatToMimeTypeString(IMAGE_GIF));
   EXPECT_STREQ("image/webp", ImageFormatToMimeTypeString(IMAGE_WEBP));
-  EXPECT_STREQ("image/webp", ImageFormatToMimeTypeString(IMAGE_WEBP));
+  EXPECT_STREQ("image/avif", ImageFormatToMimeTypeString(IMAGE_AVIF));
   EXPECT_STREQ(kInvalidImageFormat,
-               ImageFormatToMimeTypeString(static_cast<ImageFormat>(5)));
+               ImageFormatToMimeTypeString(static_cast<ImageFormat>(6)));
 }
 
 TEST(ImageUtilTest, ImageFormatToString) {
@@ -90,8 +92,9 @@ TEST(ImageUtilTest, ImageFormatToString) {
   EXPECT_STREQ("IMAGE_PNG", ImageFormatToString(IMAGE_PNG));
   EXPECT_STREQ("IMAGE_GIF", ImageFormatToString(IMAGE_GIF));
   EXPECT_STREQ("IMAGE_WEBP", ImageFormatToString(IMAGE_WEBP));
+  EXPECT_STREQ("IMAGE_AVIF", ImageFormatToString(IMAGE_AVIF));
   EXPECT_STREQ(kInvalidImageFormat,
-               ImageFormatToMimeTypeString(static_cast<ImageFormat>(5)));
+               ImageFormatToString(static_cast<ImageFormat>(6)));
 }
 
 TEST(ImageUtilTest, GetPixelFormatString) {
@@ -132,6 +135,148 @@ TEST(ImageUtilTest, ImageFormat) {
 
   ASSERT_TRUE(ReadTestFileWithExt(kWebpTestDir, kWebpIccXmpImage, &buffer));
   EXPECT_EQ(net_instaweb::IMAGE_WEBP, ComputeImageType(buffer));
+}
+
+namespace {
+
+void AppendBE32ToString(uint32_t v, GoogleString* out) {
+  out->push_back(static_cast<char>((v >> 24) & 0xFF));
+  out->push_back(static_cast<char>((v >> 16) & 0xFF));
+  out->push_back(static_cast<char>((v >> 8) & 0xFF));
+  out->push_back(static_cast<char>(v & 0xFF));
+}
+
+// Builds an ISO-BMFF "ftyp" box: size(BE32) + "ftyp" + major brand +
+// minor version + compatible brands. When declared_size is non-zero it
+// overrides the computed box size (to exercise the clamp paths); the actual
+// bytes emitted are always the real fields.
+GoogleString MakeFtypBox(const GoogleString& major_brand,
+                         const std::vector<GoogleString>& compatible_brands,
+                         uint32_t declared_size = 0) {
+  EXPECT_EQ(static_cast<size_t>(4), major_brand.size());
+  GoogleString box;
+  const uint32_t real_size =
+      static_cast<uint32_t>(16 + 4 * compatible_brands.size());
+  AppendBE32ToString(declared_size != 0 ? declared_size : real_size, &box);
+  box.append("ftyp");
+  box.append(major_brand);
+  box.append(4, '\0');  // minor version.
+  for (const GoogleString& brand : compatible_brands) {
+    EXPECT_EQ(static_cast<size_t>(4), brand.size());
+    box.append(brand);
+  }
+  return box;
+}
+
+}  // namespace
+
+// the design record Stream D: ISO-BMFF / AVIF sniffing in ComputeImageType. The probe is
+// keyed on an "ftyp" box whose major or compatible brand is an AVIF brand, so
+// non-AVIF ISO-BMFF (mp4/HEIC) and truncated/hostile inputs never
+// misclassify -- and never crash.
+TEST(ImageUtilTest, ComputeImageTypeAvifSniffing) {
+  // (a) Major brand "avif" -> still AVIF.
+  EXPECT_EQ(net_instaweb::IMAGE_AVIF,
+            ComputeImageType(MakeFtypBox("avif", {"mif1", "miaf"})));
+  // No compatible brands at all -- the minimal 16-byte ftyp.
+  EXPECT_EQ(net_instaweb::IMAGE_AVIF,
+            ComputeImageType(MakeFtypBox("avif", {})));
+
+  // (b) Major brand "avis" -> animated AVIF (image sequence). "avis" wins
+  // even when "avif" is also present as a compatible brand.
+  EXPECT_EQ(net_instaweb::IMAGE_AVIF_ANIMATED,
+            ComputeImageType(MakeFtypBox("avis", {"avif", "msf1", "miaf"})));
+
+  // (c) AVIF brand only in the compatible-brands list, different major.
+  EXPECT_EQ(net_instaweb::IMAGE_AVIF,
+            ComputeImageType(MakeFtypBox("mif1", {"miaf", "avif"})));
+  EXPECT_EQ(net_instaweb::IMAGE_AVIF_ANIMATED,
+            ComputeImageType(MakeFtypBox("msf1", {"miaf", "avis"})));
+
+  // (e) Non-AVIF ftyp (a plain mp4/isom container) -> NOT AVIF.
+  EXPECT_EQ(net_instaweb::IMAGE_UNKNOWN,
+            ComputeImageType(MakeFtypBox("isom", {"iso2", "mp41"})));
+  // HEIC: same container family, not AVIF.
+  EXPECT_EQ(net_instaweb::IMAGE_UNKNOWN,
+            ComputeImageType(MakeFtypBox("heic", {"mif1", "heic"})));
+}
+
+TEST(ImageUtilTest, ComputeImageTypeAvifSniffingHostileBuffers) {
+  // (d) Truncated buffers: shorter than the 12-byte probe minimum -> no crash,
+  // IMAGE_UNKNOWN (the leading 0x00 size byte matches no other sniffer).
+  const GoogleString full = MakeFtypBox("avif", {"mif1"});
+  for (size_t len = 0; len < 12; ++len) {
+    EXPECT_EQ(net_instaweb::IMAGE_UNKNOWN,
+              ComputeImageType(StringPiece(full.data(), len)))
+        << "at truncation length " << len;
+  }
+  // Exactly 12 bytes: the major brand is readable, the declared box size
+  // (larger than the buffer) is clamped, and the type is still detected.
+  EXPECT_EQ(net_instaweb::IMAGE_AVIF,
+            ComputeImageType(StringPiece(full.data(), 12)));
+
+  // Absurd declared box sizes must not crash or read out of bounds.
+  // Size 0xFFFFFFFF with an AVIF compatible brand inside the actual buffer:
+  // clamped to the buffer, brand found, best-effort detection.
+  EXPECT_EQ(net_instaweb::IMAGE_AVIF,
+            ComputeImageType(MakeFtypBox("mif1", {"avif"}, 0xFFFFFFFF)));
+  // Absurd size on a non-AVIF ftyp with trailing non-brand garbage: no crash,
+  // and no misclassification.
+  GoogleString hostile = MakeFtypBox("isom", {"mp41"}, 0xFFFFFFFF);
+  hostile.append("mdat-not-a-brand-avXfavYs");
+  EXPECT_EQ(net_instaweb::IMAGE_UNKNOWN, ComputeImageType(hostile));
+  // A declared size smaller than the 16-byte minimum is also clamped, not
+  // trusted (a zero/8-byte size would otherwise wrap the brand scan).
+  EXPECT_EQ(net_instaweb::IMAGE_AVIF,
+            ComputeImageType(MakeFtypBox("avif", {}, 8)));
+
+  // Trailing bytes after the ftyp box (the normal case: meta/mdat boxes
+  // follow) do not confuse the probe.
+  GoogleString with_tail = MakeFtypBox("avif", {"mif1"});
+  with_tail.append(GoogleString(64, '\x5A'));
+  EXPECT_EQ(net_instaweb::IMAGE_AVIF, ComputeImageType(with_tail));
+}
+
+// the design record Stream H: the ISO-BMFF C2PA carrier -- a top-level "uuid" box tagged
+// with the C2PA manifest UUID (d8fec3d6-1b0e-483c-9297-5828877ec481) -- must
+// trip ImageHasC2paManifest, and only when the buffer is actually ISO-BMFF
+// (an "ftyp" box gate prevents false positives on random binary data).
+TEST(ImageUtilTest, IsoBmffUuidC2paDetection) {
+  using pagespeed::image_compression::ImageHasC2paManifest;
+
+  static const unsigned char kC2paUuid[16] = {
+      0xd8, 0xfe, 0xc3, 0xd6, 0x1b, 0x0e, 0x48, 0x3c,
+      0x92, 0x97, 0x58, 0x28, 0x87, 0x7e, 0xc4, 0x81};
+  const GoogleString payload = "opaque-manifest-bytes";
+  GoogleString uuid_box;
+  AppendBE32ToString(static_cast<uint32_t>(8 + 16 + payload.size()), &uuid_box);
+  uuid_box.append("uuid");
+  uuid_box.append(reinterpret_cast<const char*>(kC2paUuid), 16);
+  uuid_box.append(payload);
+
+  // Note: no "jumb"/"jumd"/"c2pa"/"caBX" tokens and no XMP markers anywhere in
+  // these fixtures, so ONLY the ISO-BMFF uuid path can fire.
+  const GoogleString ftyp = MakeFtypBox("avif", {"mif1", "miaf"});
+
+  // Positive: ftyp-gated buffer carrying the C2PA uuid box.
+  EXPECT_TRUE(ImageHasC2paManifest(ftyp + uuid_box));
+
+  // The gate: the very same uuid box WITHOUT an ISO-BMFF ftyp prefix is not
+  // detected (the raw 16-byte scan must not fire on non-BMFF data).
+  EXPECT_FALSE(ImageHasC2paManifest(uuid_box));
+  EXPECT_FALSE(ImageHasC2paManifest(GoogleString(16, 'x') + uuid_box));
+
+  // A uuid box with a DIFFERENT UUID is not a C2PA carrier.
+  GoogleString other_uuid_box;
+  AppendBE32ToString(static_cast<uint32_t>(8 + 16 + payload.size()),
+                     &other_uuid_box);
+  other_uuid_box.append("uuid");
+  other_uuid_box.append(16, '\x42');
+  other_uuid_box.append(payload);
+  EXPECT_FALSE(ImageHasC2paManifest(ftyp + other_uuid_box));
+
+  // A clean AVIF (ftyp, no manifest boxes) is manifest-free.
+  EXPECT_FALSE(ImageHasC2paManifest(ftyp));
 }
 
 // the design record: the C2PA / Content-Credentials provenance detector.

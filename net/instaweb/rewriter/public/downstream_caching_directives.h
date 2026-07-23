@@ -57,6 +57,12 @@ class DownstreamCachingDirectives {
   bool SupportsWebp() const;
   bool SupportsWebpLosslessAlpha() const;
   bool SupportsWebpAnimated() const;
+  // AVIF siblings of the SupportsWebp* directives, so a downstream cache can
+  // advertise AVIF capability via PS-CapabilityList (keyed on the AVIF filter
+  // ids). Mirrors the WebP logic exactly.
+  bool SupportsAvif() const;
+  bool SupportsAvifLosslessAlpha() const;
+  bool SupportsAvifAnimated() const;
 
  private:
   // Helper method for figuring out support for a given capability based on
@@ -83,6 +89,9 @@ class DownstreamCachingDirectives {
   mutable LazyBool supports_webp_;
   mutable LazyBool supports_webp_lossless_alpha_;
   mutable LazyBool supports_webp_animated_;
+  mutable LazyBool supports_avif_;
+  mutable LazyBool supports_avif_lossless_alpha_;
+  mutable LazyBool supports_avif_animated_;
 
   GoogleString capabilities_to_be_supported_;
 

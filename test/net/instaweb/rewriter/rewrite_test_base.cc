@@ -249,6 +249,12 @@ void RewriteTestBase::SetBaseUrlForFetch(const StringPiece& url) {
   rewrite_driver_->SetBaseUrlForFetch(url);
 }
 
+void RewriteTestBase::SetDriverFetchUrlForTesting(const StringPiece& url) {
+  // fetch_url_ is private to RewriteDriver; RewriteTestBase is a friend.
+  rewrite_driver_->fetch_url_ = url.as_string();
+  rewrite_driver_->SetBaseUrlForFetch(url);
+}
+
 void RewriteTestBase::ParseUrl(StringPiece url, StringPiece html_input) {
   if (rewrite_driver_->request_headers() == nullptr) {
     SetDriverRequestHeaders();

@@ -122,7 +122,7 @@ class TestRemoveQuotes:
     Bash original:
         test_filter remove_quotes does what it says on the tin.
         num_quoted=$(sed 's/ /\n/g' $FETCHED | grep -c '"')
-        check [ $num_quoted -eq 2 ]
+        check [ $num_quoted -eq 1 ]
         check_not grep -q "'" $FETCHED
     """
 
@@ -142,12 +142,14 @@ class TestRemoveQuotes:
         if debug_start > 0:
             text = text[:debug_start]
 
-        # Count quoted attributes (should be minimal)
-        # Original test expects exactly 2 remaining quoted attrs
+        # Every attribute in the fixture is quote-safe except alt="", which
+        # keeps its quotes (empty values are left intact); src goes unquoted
+        # because '/' is allowed in unquoted attribute values.
+        assert "src=images/BikeCrashIcn.png" in text
         quote_count = text.count('"')
-        # Allow some flexibility - the important thing is quotes are reduced
-        assert quote_count <= 10, \
-            f"Expected minimal quotes after remove_quotes, found {quote_count}"
+        assert quote_count == 2, \
+            f'Expected exactly 2 quote chars (alt="") after remove_quotes, ' \
+            f"found {quote_count}"
 
 
 class TestTrimUrls:

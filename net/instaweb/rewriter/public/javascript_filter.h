@@ -66,7 +66,7 @@ class JavascriptFilter : public RewriteFilter {
 
   void StartDocumentImpl() override { InitializeConfigIfNecessary(); }
   void StartElementImpl(HtmlElement* element) override;
-  void Characters(HtmlCharactersNode* characters) override;
+  void CharactersImpl(HtmlCharactersNode* characters) override;
   void EndElementImpl(HtmlElement* element) override;
   void IEDirective(HtmlIEDirectiveNode* directive) override;
 

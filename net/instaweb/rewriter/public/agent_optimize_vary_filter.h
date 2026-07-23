@@ -34,6 +34,7 @@
 namespace net_instaweb {
 
 class HtmlElement;
+class RequestHeaders;
 class RewriteDriver;
 
 // Adds `Vary: Accept` to the HTML response when:
@@ -51,6 +52,11 @@ class AgentOptimizeVaryFilter : public CommonFilter {
   void EndElementImpl(HtmlElement* element) override {}
 
   const char* Name() const override { return "AgentOptimizeVary"; }
+
+  // Returns true if any of the request's Accept header values contains the
+  // `text/markdown` media-range token — the agent_optimize negotiation
+  // signal. Null request_headers (or no Accept header) returns false.
+  static bool RequestAcceptsMarkdown(const RequestHeaders* request_headers);
 
  private:
   AgentOptimizeVaryFilter(const AgentOptimizeVaryFilter&) = delete;

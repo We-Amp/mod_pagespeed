@@ -192,11 +192,15 @@ for entry in \
     done < <(find "$CLOSURE_LIB_DIR" -name '*.js' ! -name '*_test.js' ! -name '*_perf.js' | sort)
 
     echo "  $base (dbg + opt, dependency mode)"
+    # ${arr[@]+...} guard: macOS ships bash 3.2, where expanding an empty
+    # array under `set -u` is an unbound-variable error.
     closure_compile "$src" "$TMPDIR/${base}_dbg.js" SIMPLE \
-        "${include_flags[@]}" --entry_point "$entry_ns:$entry_point" \
+        ${include_flags[@]+"${include_flags[@]}"} \
+        --entry_point "$entry_ns:$entry_point" \
         --dependency_mode PRUNE "${cl_flags[@]}"
     closure_compile "$src" "$TMPDIR/${base}_opt.js" ADVANCED \
-        "${include_flags[@]}" --entry_point "$entry_ns:$entry_point" \
+        ${include_flags[@]+"${include_flags[@]}"} \
+        --entry_point "$entry_ns:$entry_point" \
         --dependency_mode PRUNE "${cl_flags[@]}"
 done
 

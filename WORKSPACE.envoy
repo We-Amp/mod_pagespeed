@@ -55,10 +55,10 @@ http_archive(
     urls = ["https://github.com/google/gurl/archive/e6c272102e0554e02c1bb317edff927ee56c7d0b.tar.gz"],
     patches = ["//bazel:googleurl_visibility.patch"],
     patch_args = ["-p1"],
-    # Fix for macOS libc++ 17+ where __is_cpp17_contiguous_iterator was renamed to __libcpp_is_contiguous_iterator
-    patch_cmds = [
-        """if [ "$(uname)" = "Darwin" ]; then sed -i.bak 's/__is_cpp17_contiguous_iterator/__libcpp_is_contiguous_iterator/g' base/containers/checked_iterators.h && rm -f base/containers/checked_iterators.h.bak; fi""",
-    ],
+    # NOTE: no checked_iterators.h sed here — this snapshot already carries both
+    # the old (__is_cpp17_contiguous_iterator) and new
+    # (__libcpp_is_contiguous_iterator) spellings, so renaming old->new on
+    # Darwin produces a duplicate specialization and breaks the macOS build.
 )
 
 local_repository(

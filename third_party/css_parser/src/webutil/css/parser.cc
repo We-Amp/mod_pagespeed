@@ -59,6 +59,7 @@ const uint64_t Parser::kCssCommentError;
 
 const int Parser::kMaxErrorsRemembered;
 const int Parser::kDefaultMaxFunctionDepth;
+const int Parser::kMaxGroupRuleDepth;
 
 class Tracer {  // in opt mode, do nothing.
  public:
@@ -77,6 +78,7 @@ Parser::Parser(const char* utf8text, const char* textend)
       quirks_mode_(true),
       preservation_mode_(false),
       max_function_depth_(kDefaultMaxFunctionDepth),
+      group_rule_depth_(0),
       errors_seen_mask_(kNoError),
       unparseable_sections_seen_mask_(kNoError) {}
 
@@ -87,6 +89,7 @@ Parser::Parser(const char* utf8text)
       quirks_mode_(true),
       preservation_mode_(false),
       max_function_depth_(kDefaultMaxFunctionDepth),
+      group_rule_depth_(0),
       errors_seen_mask_(kNoError),
       unparseable_sections_seen_mask_(kNoError) {}
 
@@ -97,6 +100,7 @@ Parser::Parser(CssStringPiece s)
       quirks_mode_(true),
       preservation_mode_(false),
       max_function_depth_(kDefaultMaxFunctionDepth),
+      group_rule_depth_(0),
       errors_seen_mask_(kNoError),
       unparseable_sections_seen_mask_(kNoError) {}
 
@@ -237,10 +241,15 @@ void Parser::SkipNextToken() {
 // Starting with {, [ or ( at in_, skip ahead to the matching closing char.
 // Returns true if end was found, false if EOF was reached first.
 bool Parser::SkipMatching() {
+  ReportParsingError(kBlockError, "Ignoring {}, [] or () block.");
+  return SkipMatchingQuiet();
+}
+
+// The error-free skip: identical consumption to SkipMatching(), for callers
+// whose balanced scan is part of a successful parse rather than a discard.
+bool Parser::SkipMatchingQuiet() {
   Tracer trace(__func__, this);
   DCHECK(*in_ == '{' || *in_ == '[' || *in_ == '(');
-
-  ReportParsingError(kBlockError, "Ignoring {}, [] or () block.");
 
   // Stack of closing delims to look for.
   string delim_stack;
@@ -316,6 +325,40 @@ bool Parser::SkipPastDelimiter(char delim) {
         case '(':
           // Ignore result.
           SkipMatching();
+          break;
+        // Skip over all other tokens.
+        default:
+          // Ignore whatever there is to parse.
+          SkipNextToken();
+          break;
+      }
+    }
+    SkipSpace();
+  }
+
+  // Reached EOF before delimiter reached.
+  return false;
+}
+
+// Same as SkipPastDelimiter() except nested balanced blocks are crossed with
+// SkipMatchingQuiet(), so no kBlockError is reported: the bytes being scanned
+// are a valid raw capture (e.g. "(max-width: calc(100px + 2em))"), not junk.
+bool Parser::SkipBalancedTo(char delim) {
+  Tracer trace(__func__, this);
+
+  SkipSpace();
+  while (in_ < end_) {
+    if (*in_ == delim) {
+      ++in_;
+      return true;
+    } else {
+      switch (*in_) {
+        // Properly match and skip over nested {}, [] and ().
+        case '{':
+        case '[':
+        case '(':
+          // Ignore result.
+          SkipMatchingQuiet();
           break;
         // Skip over all other tokens.
         default:
@@ -2319,6 +2362,8 @@ MediaQuery* Parser::ParseMediaQuery() {
         need_and = true;
         found_and = false;
         in_++;
+        // Everything between the parentheses, for the raw fallback below.
+        const char* expr_start = in_;
         SkipSpace();
         UnicodeText name = ParseIdent();
         SkipSpace();
@@ -2341,12 +2386,23 @@ MediaQuery* Parser::ParseMediaQuery() {
             }
             const char* begin = in_;
             // TODO(sligocki): Actually parse value?
-            if (SkipPastDelimiter(')')) {
+            // Quiet skip: values like calc(100px + 2em) contain balanced
+            // parens; crossing them must not set kBlockError, which would
+            // demote the whole @media block in preservation mode.
+            if (SkipBalancedTo(')')) {
               const char* end = in_ - 1;
               UnicodeText value;
-              // Note: If SkipPastDelimiter() returns true, then
+              // Note: If SkipBalancedTo() returns true, then
               // it has always run ++in_ at the end. So this is safe.
               CHECK_LE(begin, end);
+              if (!UniLib::IsInterchangeValid(begin, end - begin)) {
+                // CopyUTF8() below would silently rewrite these bytes with
+                // only a LOG(WARNING); report the error so that downstream
+                // consumers do not treat the parse as lossless and so that
+                // preservation mode keeps the original bytes instead.
+                ReportParsingError(kUtf8Error,
+                                   "UTF8 parsing error in media query value");
+              }
               value.CopyUTF8(begin, end - begin);
               query->add_expression(new MediaExpression(name, value));
             } else {
@@ -2356,12 +2412,36 @@ MediaQuery* Parser::ParseMediaQuery() {
             }
             break;
           }
-          default:
-            ReportParsingError(kMediaError,
-                               "Failed to parse media expression.");
-            SkipPastDelimiter(')');
-            SkipToMediaQueryEnd();
-            return nullptr;
+          default: {
+            // Media Queries level 4 range syntax ((width >= 768px),
+            // (400px <= width <= 700px)), general-enclosed, and anything else
+            // we do not model: keep the expression as raw verbatim bytes.
+            // Structure-aware consumers treat a raw expression as
+            // complex/opaque and stay conservative. The rewind restores the
+            // position but not the error mask: ParseIdent can report errors
+            // (invalid UTF-8 / bad escape) before returning, and such an
+            // expression still demotes its block in preservation mode even
+            // though it is raw-accepted here — same acceptance as before.
+            in_ = expr_start;
+            if (!SkipBalancedTo(')')) {
+              ReportParsingError(kMediaError, "Unclosed media expression.");
+              SkipToMediaQueryEnd();
+              return nullptr;
+            }
+            const char* end = in_ - 1;
+            CHECK_LE(expr_start, end);
+            if (!UniLib::IsInterchangeValid(expr_start, end - expr_start)) {
+              // NewRaw() -> UnicodeText::CopyUTF8 would silently rewrite
+              // these bytes with only a LOG(WARNING); report the error so
+              // that downstream consumers do not treat the parse as lossless
+              // and so that preservation mode keeps the original bytes.
+              ReportParsingError(kUtf8Error,
+                                 "UTF8 parsing error in raw media expression");
+            }
+            query->add_expression(MediaExpression::NewRaw(
+                CssStringPiece(expr_start, end - expr_start)));
+            break;
+          }
         }
         break;
       }
@@ -2491,6 +2571,121 @@ FontFace* Parser::ParseFontFace() {
   return font_face.release();
 }
 
+bool Parser::ParseGroupRule(const char* at_start,
+                            uint64_t start_errors_seen_mask,
+                            const MediaQueries* media_queries,
+                            Stylesheet* stylesheet) {
+  Tracer trace(__func__, this);
+
+  // Step 1: balanced prelude capture, up to the first top-level '{'. The
+  // prelude is opaque (no validation of @supports conditions, layer names or
+  // container queries), so only balancing and string/escape awareness matter.
+  // Any non-block form bails to SkipToAtRuleEnd(): with the error reported
+  // here, ParseStatement's preservation logic saves the statement verbatim.
+  while (true) {
+    SkipSpace();
+    if (Done() || *in_ == '}') {
+      ReportParsingError(kAtRuleError, "Group rule without a block.");
+      return SkipToAtRuleEnd();
+    }
+    if (*in_ == '{') {
+      break;
+    }
+    if (*in_ == ';') {
+      // Statement form, e.g. "@layer a, b;". Not a group production;
+      // SkipToAtRuleEnd() consumes exactly through the ';' so the whole
+      // statement is preserved verbatim, in order.
+      ReportParsingError(kAtRuleError, "Group rule in statement form.");
+      return SkipToAtRuleEnd();
+    }
+    switch (*in_) {
+      case '(':
+      case '[':
+        // Quiet: a balanced prelude block is valid syntax, not an error.
+        SkipMatchingQuiet();
+        break;
+      default:
+        // String/escape-aware single-token skip: a '{' or ';' inside a
+        // quoted string must not terminate the prelude.
+        SkipNextToken();
+        break;
+    }
+  }
+
+  // Prelude bytes: '@' through the last non-whitespace byte before the '{'.
+  // Internal whitespace and comments are kept verbatim (opaque capture).
+  const char* prelude_end = in_;
+  while (prelude_end > at_start && IsSpace(prelude_end[-1])) {
+    --prelude_end;
+  }
+  CssStringPiece prelude(at_start, prelude_end - at_start);
+
+  // Step 2: depth guard, checked before the '{' is consumed so that
+  // SkipToAtRuleEnd() swallows the whole balanced block (iteratively — no
+  // recursion) and preservation mode saves it verbatim.
+  if (group_rule_depth_ >= kMaxGroupRuleDepth) {
+    ReportParsingError(kAtRuleError, "Group rules nested too deeply.");
+    return SkipToAtRuleEnd();
+  }
+
+  // Step 3: body — the same statement loop as @media, with the body
+  // stylesheet as the sink so @font-face lands in the body's font_faces
+  // bucket (never hoisted out of its condition) and nested statements demote
+  // themselves into the body exactly as they would at top level.
+  DCHECK_EQ('{', *in_);
+  in_++;
+  std::unique_ptr<Stylesheet> body(new Stylesheet());
+  ++group_rule_depth_;
+  SkipSpace();
+  while (in_ < end_ && *in_ != '}') {
+    if (*in_ == ';') {
+      // Browser-style recovery for a stray ';' at statement position (a
+      // common hand-authoring artifact, e.g. "{ .x{y:z}; }"): skip it
+      // silently. Left to ParseSelectors' recovery it would eat the group's
+      // closing '}' hunting for a '{' and fail the whole sheet — an input
+      // that was combinable while the group was still an opaque at-rule.
+      in_++;
+      SkipSpace();
+      continue;
+    }
+    const char* oldin = in_;
+    // Parse either a ruleset or at-rule.
+    ParseStatement(nullptr, body.get());
+    if (in_ == oldin) {
+      ReportParsingError(
+          kSelectorError,
+          absl::StrFormat("Could not parse ruleset: illegal char %c", *in_));
+      in_++;
+    }
+    SkipSpace();
+  }
+  --group_rule_depth_;
+  if (in_ >= end_) {
+    // Same contract as @media at EOF: the error must be *preserved* (no
+    // verbatim save), so downstream falls back to the original bytes.
+    ReportParsingError(kAtRuleError, "Unexpected EOF in group rule.");
+    return false;
+  }
+  DCHECK_EQ('}', *in_);
+  in_++;
+
+  // Step 4: attach. In preservation mode a residual error means some body
+  // statement failed without demoting itself; dropping the node here routes
+  // the whole group through ParseStatement's verbatim save — never a mask
+  // leak (css_combine relies on mask==0), never byte loss. In
+  // non-preservation mode attach unconditionally, mirroring @media: inner
+  // failures lose inner rulesets and leave the error mask set.
+  if (preservation_mode_ && errors_seen_mask_ != start_errors_seen_mask) {
+    return true;
+  }
+  Ruleset* ruleset = new Ruleset(prelude, body.release());
+  if (media_queries != nullptr) {
+    ruleset->set_media_queries(media_queries->DeepCopy());
+  }
+  stylesheet->mutable_rulesets().push_back(ruleset);
+  return true;
+}
+
 void Parser::ParseStatement(const MediaQueries* media_queries,
                             Stylesheet* stylesheet) {
   Tracer trace(__func__, this);
@@ -2510,8 +2705,13 @@ void Parser::ParseStatement(const MediaQueries* media_queries,
 
     // @import string|uri medium-list ? ;
     if (StringCaseEquals(ident, "import")) {
-      if (media_queries != nullptr) {
-        ReportParsingError(kImportError, "@import found inside @media");
+      // Also rejected inside group-rule bodies: hoisting an @import out of
+      // its condition into the top-level imports bucket would change
+      // semantics, and flatten/AbsolutifyImports read only that bucket. The
+      // rejected statement is preserved verbatim as a child of the body.
+      if (media_queries != nullptr || group_rule_depth_ > 0) {
+        ReportParsingError(kImportError,
+                           "@import found inside @media or group rule");
         correctly_terminated = SkipToAtRuleEnd();
       } else if (!stylesheet->rulesets().empty() ||
                  !stylesheet->font_faces().empty()) {
@@ -2544,8 +2744,9 @@ void Parser::ParseStatement(const MediaQueries* media_queries,
 
       // @charset string ;
     } else if (StringCaseEquals(ident, "charset")) {
-      if (media_queries != nullptr) {
-        ReportParsingError(kCharsetError, "@charset found inside @media");
+      if (media_queries != nullptr || group_rule_depth_ > 0) {
+        ReportParsingError(kCharsetError,
+                           "@charset found inside @media or group rule");
         correctly_terminated = SkipToAtRuleEnd();
       } else if (!stylesheet->rulesets().empty() ||
                  !stylesheet->imports().empty() ||
@@ -2647,6 +2848,18 @@ void Parser::ParseStatement(const MediaQueries* media_queries,
         stylesheet->mutable_font_faces().push_back(font_face.release());
       }
 
+      // Conditional group rules: @supports/@layer/@container { statement* }.
+      // Note: @media is NOT routed through here; it keeps the legacy
+      // flatten-with-annotation model above. Statement-form "@layer a, b;"
+      // bails out of ParseGroupRule to the same verbatim-preservation path as
+      // unknown at-rules, which keeps its source order relative to block-form
+      // @layer rules (both live in the ordered rulesets sequence).
+    } else if (StringCaseEquals(ident, "supports") ||
+               StringCaseEquals(ident, "layer") ||
+               StringCaseEquals(ident, "container")) {
+      correctly_terminated = ParseGroupRule(oldin, start_errors_seen_mask,
+                                            media_queries, stylesheet);
+
       // Unexpected @-rule.
     } else {
       string ident_string(ident.utf8_data(), ident.utf8_length());
@@ -2742,17 +2955,41 @@ Stylesheet* Parser::ParseStylesheet() {
   Tracer trace(__func__, this);
 
   Stylesheet* stylesheet = ParseRawStylesheet();
-
-  Rulesets& rulesets = stylesheet->mutable_rulesets();
-  for (int i = 0; i < rulesets.size(); ++i) {
-    if (rulesets[i]->type() == Css::Ruleset::RULESET) {
-      Declarations& orig_declarations = rulesets[i]->mutable_declarations();
-      rulesets[i]->set_declarations(ExpandDeclarations(&orig_declarations));
-    }
-  }
-
+  ExpandShorthandDeclarations(stylesheet);
   return stylesheet;
 }
+
+void Parser::ExpandShorthandDeclarations(Stylesheet* stylesheet) {
+  Rulesets& rulesets = stylesheet->mutable_rulesets();
+  for (int i = 0; i < rulesets.size(); ++i) {
+    switch (rulesets[i]->type()) {
+      case Css::Ruleset::RULESET: {
+        Declarations& orig_declarations = rulesets[i]->mutable_declarations();
+        rulesets[i]->set_declarations(ExpandDeclarations(&orig_declarations));
+        break;
+      }
+      case Css::Ruleset::GROUP_RULE:
+        // Group bodies hold ordinary statements: expand them too so that
+        // consumers of the full parse see the same declaration shape inside
+        // and outside groups. Recursion depth is bounded by the parse-time
+        // group depth cap.
+        ExpandShorthandDeclarations(rulesets[i]->mutable_group_body());
+        break;
+      case Css::Ruleset::UNPARSED_REGION:
+        break;
+    }
+  }
+}
+
+// Group-rule Ruleset. Out-of-line because the unique_ptr<Stylesheet> member
+// needs Stylesheet complete (it is declared below Ruleset in parser.h).
+Ruleset::Ruleset(const CssStringPiece& prelude, Stylesheet* body)
+    : type_(GROUP_RULE),
+      media_queries_(new MediaQueries),
+      group_prelude_(prelude.data(), prelude.size()),
+      group_body_(body) {}
+
+Ruleset::~Ruleset() {}
 
 //
 // Some destructors that need STLDeleteElements() from stl_util.h

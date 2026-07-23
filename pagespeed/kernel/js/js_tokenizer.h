@@ -100,6 +100,10 @@ class JsTokenizer {
     kOperator,  // A prefix or binary operator (including some keywords).
     kPeriod,
     kQuestionMark,
+    kOptionalChain,  // The ES2020 `?.` operator.  Like kPeriod, a reserved
+                     // word after it is treated as an identifier, but unlike
+                     // kPeriod an open paren or bracket may follow (a?.(x),
+                     // a?.[i]).
     kOpenBrace,
     kOpenBracket,
     kOpenParen,
@@ -108,9 +112,47 @@ class JsTokenizer {
                       // the '}' that ends the interpolation.
     kBlockKeyword,    // Keyword that precedes "(...)", e.g. "if" or "for".
     kBlockHeader,   // Start of block, e.g. "if (...)", "for (...)", or "else".
-    kReturnThrow,   // A return or throw keyword.
+    kReturnThrow,   // A return, throw, or yield keyword.
     kJumpKeyword,   // A break, continue, or debugger keyword.
-    kOtherKeyword,  // A const, default, or var keyword.
+    kOtherKeyword,  // A default keyword, or the marker an initializer's `=`
+                    // installs over a declaration keyword.
+    kModuleDecl,    // An import or export declaration is open.  The marker
+                    // sits at the base of the declaration (directly over the
+                    // statement base) so that TryInsertLinebreakSemicolon can
+                    // apply the module-declaration continuation rules when
+                    // the declaration's grammatical end is reached.
+    kFromClause,    // Inside the from-clause of an import/export declaration:
+                    // pushed by the contextual keyword `from` (awaiting the
+                    // module specifier) and by a module specifier string
+                    // directly over kModuleDecl (a bare import), and installed
+                    // under a completed `export [async] function` body.  A
+                    // kExpression directly over it is always the completed
+                    // specifier (or the completed declaration), after which
+                    // nothing can continue, so ASI always fires there.
+    kModuleVarKeyword,  // The let/const/var keyword of a variable
+                        // declaration (a plain one, or the declaration of an
+                        // `export`).  The declared binding lands directly on
+                        // it; after the bare binding only `,` or `=` can
+                        // continue the declaration.
+    kArrow,        // The `=>` of an arrow function (emitted as separate `=` and
+                   // `>` tokens, byte-preserving).  Sits under the arrow body
+                   // like an operator: expression-body continuations keep the
+                   // ordinary rules, and a `{...}` directly over it is a block
+                   // body whose close completes the (terminal) arrow.
+    kObjectValue,  // The `:` of an object-literal property, marking the
+                   // value position of that property.  Acts like an
+                   // operator, but the expression collapse does not eat
+                   // it, so a value expression never lands directly on the
+                   // literal's brace and ConsumeOpenParen can tell a
+                   // property name (method shorthand) apart from a value.
+    kClassKeyword,  // The `class` keyword and its heritage span (the name
+                    // is ignored; `extends` pushes an operator and the
+                    // heritage expression collapses back here).  The `{`
+                    // of the body completes the header (see
+                    // ConsumeOpenBrace).
+    kClassBrace,    // The `{` of a class body.  Element names sit directly
+                    // on it (method shorthand gate, static-block brace,
+                    // field initializers); `;` rolls back to it.
   };
 
   // Enum for tracking whether the first three tokens in the input are open
@@ -156,6 +198,10 @@ class JsTokenizer {
   // '}' at the current position resumes a template literal rather than
   // closing a brace.
   bool NearestOpenDelimiterIsTemplateInterp() const;
+  // Returns true if the nearest enclosing open delimiter on the parse stack
+  // (skipping expression/operator states) is a kClassBrace, meaning a '}'
+  // at the current position closes a class body.
+  bool NearestOpenDelimiterIsClassBrace() const;
 
   // For each of these methods, if the start of the input is that kind of
   // token, consumes the token and returns true, otherwise returns false
@@ -163,6 +209,9 @@ class JsTokenizer {
   bool TryConsumeComment(JsKeywords::Type* type_out, StringPiece* token_out);
   bool TryConsumeIdentifierOrKeyword(JsKeywords::Type* type_out,
                                      StringPiece* token_out);
+  // Consumes a private name (`#x`) as a single identifier token.
+  bool TryConsumePrivateName(JsKeywords::Type* type_out,
+                             StringPiece* token_out);
   bool TryConsumeWhitespace(bool allow_semicolon_insertion,
                             JsKeywords::Type* type_out, StringPiece* token_out);
 
@@ -207,6 +256,11 @@ class JsTokenizer {
   JsonStep json_step_;
   bool start_of_line_;  // No non-whitespace/comment tokens on this line yet.
   bool error_;
+  // One-shot flag armed when a block-bodied arrow completes: nothing can
+  // continue it, so the next linebreak inserts a semicolon regardless of
+  // the continuation set.  Cleared on the next non-whitespace/comment
+  // token (or when it drives the insertion).
+  bool arrow_body_asi_pending_;
 
   JsTokenizer(const JsTokenizer&) = delete;
   JsTokenizer& operator=(const JsTokenizer&) = delete;
@@ -232,6 +286,8 @@ struct JsTokenizerPatterns {
   const RE2 string_literal_pattern;
   const RE2 whitespace_pattern;
   const RE2 line_continuation_pattern;
+  const RE2 module_continuation_pattern;
+  const RE2 module_var_continuation_pattern;
 
  private:
   JsTokenizerPatterns(const JsTokenizerPatterns&) = delete;

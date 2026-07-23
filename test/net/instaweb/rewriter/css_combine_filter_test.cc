@@ -1665,6 +1665,39 @@ TEST_F(CssCombineFilterTest, RobustnessUnclosedString) {
                     StrCat(CssLinkHref(kCssA), CssLinkHref(kCssB)));
 }
 
+TEST_F(CssCombineFilterTest, CombineGroupRules) {
+  // A sheet made of conditional group rules parses cleanly (error mask 0),
+  // so it must remain combinable.
+  CssLink::Vector css_in, css_out;
+  css_in.Add("1.css", "@supports (display: grid) { .a { color: red } }\n", "",
+             true);
+  css_in.Add("2.css", "h2 { color: blue; }\n", "", true);
+  BarrierTestHelper("combine_group_rules", css_in, &css_out);
+  EXPECT_EQ(1, css_out.size());
+
+  GoogleString expected_combination =
+      "@supports (display: grid) { .a { color: red } }\n"
+      "h2 { color: blue; }\n";
+  GoogleString actual_combination;
+  EXPECT_TRUE(FetchResourceUrl(StrCat(kTestDomain, css_out[0]->url_),
+                               &actual_combination));
+  EXPECT_EQ(expected_combination, actual_combination);
+}
+
+TEST_F(CssCombineFilterTest, CombineGroupRulesWithInnerGarbage) {
+  // Unparseable statements inside a group body demote to verbatim regions
+  // and reset the error mask, so the sheet stays combinable — the same
+  // CleanParse invariant the top-level demotion path guarantees.
+  CssLink::Vector css_in, css_out;
+  css_in.Add("1.css",
+             "@supports (a:b) { @keyframes k { 0% { top: 0 } }"
+             " .a { color: red } }\n",
+             "", true);
+  css_in.Add("2.css", "h2 { color: blue; }\n", "", true);
+  BarrierTestHelper("combine_group_rules_garbage", css_in, &css_out);
+  EXPECT_EQ(1, css_out.size());
+}
+
 // See: http://www.alistapart.com/articles/alternate/
 //  and http://www.w3.org/TR/html4/present/styles.html#h-14.3.1
 TEST_F(CssCombineFilterTest, AlternateStylesheets) {

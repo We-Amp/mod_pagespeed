@@ -30,6 +30,7 @@
 namespace net_instaweb {
 
 class GoogleUrl;
+class HtmlElement;
 class RewriteDriver;
 class Statistics;
 
@@ -41,6 +42,9 @@ class GoogleFontCssInlineFilter : public CssInlineFilter {
 
   static void InitStats(Statistics* statistics);
 
+  void StartDocumentImpl() override;
+  void StartElementImpl(HtmlElement* element) override;
+  void EndElementImpl(HtmlElement* element) override;
   const char* Name() const override { return "InlineGoogleFontCss"; }
 
  protected:
@@ -49,6 +53,18 @@ class GoogleFontCssInlineFilter : public CssInlineFilter {
  private:
   void ResetAndExplainReason(const char* reason, ResourcePtr* resource);
   void CheckIfFontServiceUrl(const GoogleUrl& url, bool* result);
+  // Inserts a <link rel="preconnect"> hint for the host serving the font
+  // files referenced by the loader CSS, once per document.
+  void MaybeInsertPreconnect(const GoogleUrl& font_css_url);
+
+  // Element whose EndElementImpl is currently being processed by
+  // CssInlineFilter; CreateResource only receives the URL, so this is how
+  // MaybeInsertPreconnect finds the spot to insert the hint at.
+  HtmlElement* font_css_element_;
+  bool preconnect_inserted_;
+  // Set when the author already supplied a preconnect hint for the font
+  // file host, making ours redundant.
+  bool author_preconnect_seen_;
 
   GoogleFontCssInlineFilter(const GoogleFontCssInlineFilter&) = delete;
   GoogleFontCssInlineFilter& operator=(const GoogleFontCssInlineFilter&) =

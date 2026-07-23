@@ -42,6 +42,7 @@
 #include "net/instaweb/rewriter/cached_result.pb.h"
 #include "net/instaweb/rewriter/public/inline_output_resource.h"
 #include "net/instaweb/rewriter/public/input_info_utils.h"
+#include "net/instaweb/rewriter/public/named_lock_schedule_rewrite_controller.h"
 #include "net/instaweb/rewriter/public/output_resource.h"
 #include "net/instaweb/rewriter/public/resource.h"
 #include "net/instaweb/rewriter/public/resource_namer.h"
@@ -52,7 +53,6 @@
 #include "net/instaweb/rewriter/public/rewrite_stats.h"
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "net/instaweb/rewriter/public/url_namer.h"
-#include "pagespeed/controller/central_controller.h"
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/function.h"
 #include "pagespeed/kernel/base/hasher.h"
@@ -1024,8 +1024,9 @@ class RewriteContext::InvokeRewriteFunction : public Function {
 
 RewriteContext::CacheLookupResultCallback::~CacheLookupResultCallback() {}
 
-// Implements ScheduleRewriteCallback, sequestering the returned Context
-// and then running the supplied callback as appropriate.
+// Adapts a ScheduleRewriteCallback to a NamedLockScheduleRewriteController,
+// sequestering the returned Context and then running the supplied callback as
+// appropriate.
 class RewriteContext::TryLockFunction : public ScheduleRewriteCallback {
  public:
   TryLockFunction(const GoogleString& key, Sequence* sequence,
@@ -1047,6 +1048,57 @@ class RewriteContext::TryLockFunction : public ScheduleRewriteCallback {
   Function* callback_;
   RewriteContext* context_;
 };
+
+namespace {
+
+// Transaction context handed to a ScheduleRewriteCallback scheduled on a
+// NamedLockScheduleRewriteController. Reports completion (success or failure)
+// back to the controller exactly once, on explicit Mark*() call or on
+// destruction. Construction schedules the rewrite; the context is owned by
+// the callback and deletes itself when the callback does.
+class ScheduleRewriteContextImpl : public ScheduleRewriteContext {
+ public:
+  ScheduleRewriteContextImpl(NamedLockScheduleRewriteController* controller,
+                             ScheduleRewriteCallback* callback)
+      : controller_(controller), callback_(callback), key_(callback_->key()) {
+    // SetTransactionContext steals ownership, which means we will never outlive
+    // the callback.
+    callback_->SetTransactionContext(this);
+    controller_->ScheduleRewrite(
+        key_, MakeFunction(this, &ScheduleRewriteContextImpl::CallRun,
+                           &ScheduleRewriteContextImpl::CallCancel));
+  }
+
+  ~ScheduleRewriteContextImpl() override { MarkSucceeded(); }
+
+  void MarkSucceeded() override {
+    if (controller_ != nullptr) {
+      controller_->NotifyRewriteComplete(key_);
+      controller_ = nullptr;
+    }
+  }
+
+  void MarkFailed() override {
+    if (controller_ != nullptr) {
+      controller_->NotifyRewriteFailed(key_);
+      controller_ = nullptr;
+    }
+  }
+
+ private:
+  void CallRun() { callback_->CallRun(); }
+
+  void CallCancel() {
+    controller_ = nullptr;  // Controller denied us, so don't try to release.
+    callback_->CallCancel();
+  }
+
+  NamedLockScheduleRewriteController* controller_;
+  ScheduleRewriteCallback* callback_;
+  const GoogleString key_;
+};
+
+}  // namespace
 
 void RewriteContext::InitStats(Statistics* stats) {
   stats->AddVariable(kNumRewritesAbandonedForLockContention);
@@ -1457,21 +1509,21 @@ void RewriteContext::OutputCacheMiss() {
 
 void RewriteContext::ObtainLockForCreation(ServerContext* server_context,
                                            Function* callback) {
-  // Because the CentralController can block indefinitely, it's important that
+  // Because the rewrite scheduler can block indefinitely, it's important that
   // any given sequence of rewrite only requests a single lock from it. For
   // instance, if all the image rewrites within a css rewrite requested a
-  // controller lock it would be at best slow and could easily deadlock if
+  // scheduler lock it would be at best slow and could easily deadlock if
   // insufficient "rewrite tokens" are available. In general we prevent this by
   // only allowing "root" contexts to obtain a lock, ie: those without a parent.
   // Unfortunately, in the case of IPRO the "interesting" context is nested
   // inside an InPlaceRewriteContext. We don't want to require all IPRO requests
-  // go via the controller, since many are fast. So instead we have an
+  // go via the scheduler, since many are fast. So instead we have an
   // escape-hatch that allows InPlaceRewriteContext to declare itself safe for
   // nesting.
   bool context_safe_for_controller = !has_parent();
   if (has_parent() && !parent_->has_parent()) {
     context_safe_for_controller =
-        parent_->ScheduleNestedContextViaCentalController();
+        parent_->ScheduleNestedContextViaNamedLockController();
     if (context_safe_for_controller && parent_->num_nested() > 1) {
       // If a context declares itself safe for nesting but actually has multiple
       // nested contexts, it can cause the problems described above.
@@ -1480,9 +1532,12 @@ void RewriteContext::ObtainLockForCreation(ServerContext* server_context,
                   << "has " << parent_->num_nested() << " children";
     }
   }
-  if (ScheduleViaCentralController() && context_safe_for_controller) {
-    server_context->central_controller()->ScheduleRewrite(new TryLockFunction(
-        LockName(), Driver()->rewrite_worker(), callback, this));
+  if (ScheduleViaNamedLockController() && context_safe_for_controller) {
+    // Starts the transaction and deletes itself when done.
+    new ScheduleRewriteContextImpl(
+        server_context->schedule_rewrite_controller(),
+        new TryLockFunction(LockName(), Driver()->rewrite_worker(), callback,
+                            this));
   } else {
     server_context->TryLockForCreation(Lock(), callback);
   }

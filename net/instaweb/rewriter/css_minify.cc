@@ -26,6 +26,7 @@
 #include "base/logging.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/string.h"
+#include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/writer.h"
 #include "third_party/css_parser/src/util/utf8/public/unicodetext.h"
 #include "third_party/css_parser/src/webutil/css/identifier.h"
@@ -242,12 +243,19 @@ void CssMinify::Minify(const Css::MediaQuery& media_query) {
 
 void CssMinify::Minify(const Css::MediaExpression& expression) {
   Write("(");
-  Write(Css::EscapeIdentifier(expression.name()));
-  if (expression.has_value()) {
-    Write(":");
+  if (expression.is_raw()) {
+    // Whole-expression raw capture (MQ4 range syntax, general-enclosed):
+    // emit the bytes verbatim, no escaping.
     const UnicodeText& value = expression.value();
-    // Note: Value is an unparsed region of raw bytes. So don't escape it.
     Write(StringPiece(value.utf8_data(), value.utf8_length()));
+  } else {
+    Write(Css::EscapeIdentifier(expression.name()));
+    if (expression.has_value()) {
+      Write(":");
+      const UnicodeText& value = expression.value();
+      // Note: Value is an unparsed region of raw bytes. So don't escape it.
+      Write(StringPiece(value.utf8_data(), value.utf8_length()));
+    }
   }
   Write(")");
 }
@@ -292,6 +300,17 @@ void CssMinify::MinifyRulesetIgnoringMedia(const Css::Ruleset& ruleset) {
       break;
     case Css::Ruleset::UNPARSED_REGION:
       Minify(*ruleset.unparsed_region());
+      break;
+    case Css::Ruleset::GROUP_RULE:
+      // The prelude is verbatim source bytes ("@supports (display:grid)").
+      // Body charsets/imports are empty by construction; the body buckets
+      // recurse through the same JoinMinifyIter specializations, so nested
+      // @media re-grouping and nested groups come for free.
+      Write(ruleset.group_prelude());
+      Write("{");
+      JoinMinify(ruleset.group_body().font_faces(), "");
+      JoinMinify(ruleset.group_body().rulesets(), "");
+      Write("}");
       break;
   }
 }
@@ -486,16 +505,30 @@ void CssMinify::Minify(const Css::Value& value) {
       WriteURL(value.GetStringValue());
       Write(")");
       break;
-    case Css::Value::FUNCTION:
-      if (Css::EscapeIdentifier(value.GetFunctionName()) == "calc") {
+    case Css::Value::FUNCTION: {
+      const GoogleString function_name =
+          Css::EscapeIdentifier(value.GetFunctionName());
+      // CSS Values 4 math functions require a unit on zero lengths (a bare
+      // 0 is not a <length> there), so keep zero units while inside one.
+      // Save/restore the flag around the parameters so a nested function
+      // (e.g. var() inside calc()) does not clear the enclosing math
+      // context.
+      const bool was_in_css_calc_function = in_css_calc_function_;
+      // CSS function names are ASCII case-insensitive.
+      if (StringCaseEqual(function_name, "calc") ||
+          StringCaseEqual(function_name, "-webkit-calc") ||
+          StringCaseEqual(function_name, "min") ||
+          StringCaseEqual(function_name, "max") ||
+          StringCaseEqual(function_name, "clamp")) {
         in_css_calc_function_ = true;
       }
-      Write(Css::EscapeIdentifier(value.GetFunctionName()));
+      Write(function_name);
       Write("(");
       Minify(*value.GetParametersWithSeparators());
       Write(")");
-      in_css_calc_function_ = false;
+      in_css_calc_function_ = was_in_css_calc_function;
       break;
+    }
     case Css::Value::RECT:
       Write("rect(");
       Minify(*value.GetParametersWithSeparators());
@@ -590,6 +623,15 @@ bool CssMinify::Equals(const Css::MediaQuery& a,
 
 bool CssMinify::Equals(const Css::MediaExpression& a,
                        const Css::MediaExpression& b) const {
+  // Raw expressions are opaque: equal iff both raw and byte-identical.
+  // Conservative — unequal raw text merely prevents merging adjacent
+  // rulesets into one @media run (an extra @media wrapper, never a reorder).
+  if (a.is_raw() != b.is_raw()) {
+    return false;
+  }
+  if (a.is_raw()) {
+    return a.value() == b.value();
+  }
   if (a.name() != b.name() || a.has_value() != b.has_value()) {
     return false;
   }

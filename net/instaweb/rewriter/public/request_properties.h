@@ -64,6 +64,13 @@ class RequestProperties {
   bool SupportsWebpRewrittenUrls() const;
   bool SupportsWebpLosslessAlpha() const;
   bool SupportsWebpAnimated() const;
+  // AVIF capability queries. These AND the DeviceProperties Accept-driven
+  // capability with the downstream cache's advertised AVIF capability, exactly
+  // as the SupportsWebp* wrappers do. Stream G's SetAvifLevel calls these.
+  bool SupportsAvifInPlace() const;
+  bool SupportsAvifRewrittenUrls() const;
+  bool SupportsAvifLosslessAlpha() const;
+  bool SupportsAvifAnimated() const;
   bool IsBot() const;
   UserAgentMatcher::DeviceType GetDeviceType() const;
   bool IsMobile() const;
@@ -89,6 +96,10 @@ class RequestProperties {
   mutable LazyBool supports_webp_rewritten_urls_;
   mutable LazyBool supports_webp_lossless_alpha_;
   mutable LazyBool supports_webp_animated_;
+  mutable LazyBool supports_avif_in_place_;
+  mutable LazyBool supports_avif_rewritten_urls_;
+  mutable LazyBool supports_avif_lossless_alpha_;
+  mutable LazyBool supports_avif_animated_;
 
   RequestProperties(const RequestProperties&) = delete;
   RequestProperties& operator=(const RequestProperties&) = delete;

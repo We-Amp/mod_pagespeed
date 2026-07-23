@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>prioritize_critical_css layers example</title>
+    <link rel="stylesheet" type="text/css" href="styles/layers.css">
+  </head>
+  <body>
+    <span class="layer-critical">Prioritize Critical CSS with cascade layers</span>
+    <div class="layer-noncritical">
+      <p>
+      Every rule in this page's stylesheet lives inside an @layer block, the
+      shape produced by frameworks that wrap their entire output in cascade
+      layers. The prioritize_critical_css filter still instruments the page,
+      collects the selectors inside the layer bodies as beacon candidates,
+      and inlines the critical rules wrapped in their original @layer
+      declarations so the cascade order matches the full stylesheet that is
+      lazily loaded afterwards. </p>
+    </div>
+  </body>
+</html>

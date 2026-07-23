@@ -140,8 +140,15 @@ void LocalStorageCacheFilter::EndElementImpl(HtmlElement* element) {
                                 &escaped_lsc_url);
         if (is_img) {
           num_local_storage_cache_stored_images_->Add(1);
-          StrAppend(&snippet, "inlineImg(\"", escaped_lsc_url, "\", \"", hash,
-                    "\"", ExtractOtherImgAttributes(element), ");");
+          // The hash is currently produced by the (web64) hasher and so is not
+          // attacker-controllable, but splicing it raw into an inline JS string
+          // literal relies on that out-of-file invariant. Escape it as we do
+          // the url, for defense-in-depth and consistency.
+          GoogleString escaped_hash;
+          EscapeToJsStringLiteral(hash, false /* no quotes */, &escaped_hash);
+          StrAppend(&snippet, "inlineImg(\"", escaped_lsc_url, "\", \"",
+                    escaped_hash, "\"", ExtractOtherImgAttributes(element),
+                    ");");
         } else /* is_link */ {
           num_local_storage_cache_stored_css_->Add(1);
           StrAppend(&snippet, "inlineCss(\"", escaped_lsc_url, "\");");
@@ -350,7 +357,12 @@ GoogleString LocalStorageCacheFilter::ExtractOtherImgAttributes(
       if (attr.DecodedValueOrNull() != nullptr) {
         EscapeToJsStringLiteral(attr.DecodedValueOrNull(), false, &escaped_js);
       }
-      StrAppend(&result, ", \"", attr.name_str(), "=", escaped_js, "\"");
+      // The attribute NAME must be escaped too: the HTML lexer will accept
+      // arbitrary characters (including a '"') in an attribute name, so an
+      // unescaped name would break out of this JS string literal (stored XSS).
+      GoogleString escaped_name;
+      EscapeToJsStringLiteral(attr.name_str(), false, &escaped_name);
+      StrAppend(&result, ", \"", escaped_name, "=", escaped_js, "\"");
     }
   }
   return result;

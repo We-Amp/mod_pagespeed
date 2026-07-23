@@ -1780,8 +1780,11 @@ TEST_F(ParserTest, SelectorError) {
 }
 
 TEST_F(ParserTest, MediaError) {
-  std::unique_ptr<Parser> p(
-      new Parser("@media screen and (max-width^?`) { .a { color: red; } }"));
+  // Note: Unrecognized text inside a balanced (...) expression is now kept
+  // as a raw expression (MQ4 general-enclosed), so a *query-level* error
+  // (doubled 'and') is used here to pin the "not all" demotion.
+  std::unique_ptr<Parser> p(new Parser(
+      "@media screen and and (max-width: 300px) { .a { color: red; } }"));
   std::unique_ptr<Stylesheet> stylesheet(p->ParseStylesheet());
   EXPECT_TRUE(Parser::kMediaError & p->errors_seen_mask());
   // Note: User agents are to represent a media query as "not all" when one
@@ -1793,7 +1796,8 @@ TEST_F(ParserTest, MediaError) {
       stylesheet->ToString());
 
   p = std::make_unique<Parser>(
-      "@media screen and (max-width^?`), print { .a { color: red; } }");
+      "@media screen and and (max-width: 300px), print "
+      "{ .a { color: red; } }");
   stylesheet.reset(p->ParseStylesheet());
   EXPECT_TRUE(Parser::kMediaError & p->errors_seen_mask());
   // Note: First media query should be treated as "not all", but the second
@@ -1801,6 +1805,17 @@ TEST_F(ParserTest, MediaError) {
   EXPECT_EQ(
       "/* AUTHOR */\n\n\n\n"
       "@media not all, print { .a {color: #ff0000} }\n",
+      stylesheet->ToString());
+
+  // The old form of the inputs above — garbage inside a balanced expression —
+  // is now general-enclosed: preserved as a raw expression, no error.
+  p = std::make_unique<Parser>(
+      "@media screen and (max-width^?`) { .a { color: red; } }");
+  stylesheet.reset(p->ParseStylesheet());
+  EXPECT_FALSE(Parser::kMediaError & p->errors_seen_mask());
+  EXPECT_EQ(
+      "/* AUTHOR */\n\n\n\n"
+      "@media screen and (max-width^?`) { .a {color: #ff0000} }\n",
       stylesheet->ToString());
 
   p = std::make_unique<Parser>("@media { .a { color: red; } }");
@@ -2697,6 +2712,531 @@ TEST_F(ParserTest, BadPartialImportEncoding) {
   Parser parser(kBadPartialImportEncoding);
   delete parser.ParseStylesheet();
   EXPECT_NE(Parser::kNoError, parser.errors_seen_mask());
+}
+
+TEST_F(ParserTest, AtSupportsBasic) {
+  for (bool preserve : {false, true}) {
+    SCOPED_TRACE(preserve ? "preservation" : "non-preservation");
+    Parser p("@supports (display: grid) { .a { width: 1px } }");
+    p.set_preservation_mode(preserve);
+    std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
+    EXPECT_EQ(Parser::kNoError, p.errors_seen_mask());
+    EXPECT_EQ(Parser::kNoError, p.unparseable_sections_seen_mask());
+    EXPECT_TRUE(p.Done());
+    ASSERT_EQ(1, t->rulesets().size());
+    ASSERT_EQ(Ruleset::GROUP_RULE, t->ruleset(0).type());
+    EXPECT_EQ("@supports (display: grid)", t->ruleset(0).group_prelude());
+    EXPECT_EQ(0, t->ruleset(0).media_queries().size());
+    const Stylesheet& body = t->ruleset(0).group_body();
+    EXPECT_TRUE(body.charsets().empty());
+    EXPECT_TRUE(body.imports().empty());
+    EXPECT_TRUE(body.font_faces().empty());
+    ASSERT_EQ(1, body.rulesets().size());
+    ASSERT_EQ(Ruleset::RULESET, body.ruleset(0).type());
+    EXPECT_EQ("@supports (display: grid) { .a {width: 1px} }",
+              t->ruleset(0).ToString());
+  }
+}
+
+TEST_F(ParserTest, AtSupportsNestedParens) {
+  Parser p(
+      "@supports ((display: flex) and (not (display: grid)))"
+      " { .b { width: 2px } }");
+  p.set_preservation_mode(true);
+  std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
+  EXPECT_EQ(Parser::kNoError, p.errors_seen_mask());
+  ASSERT_EQ(1, t->rulesets().size());
+  ASSERT_EQ(Ruleset::GROUP_RULE, t->ruleset(0).type());
+  EXPECT_EQ("@supports ((display: flex) and (not (display: grid)))",
+            t->ruleset(0).group_prelude());
+  ASSERT_EQ(1, t->ruleset(0).group_body().rulesets().size());
+}
+
+TEST_F(ParserTest, AtSupportsString) {
+  // A string in the prelude may contain '{', ')' and ';' without terminating
+  // the prelude capture.
+  Parser p("@supports (content: \"ab{cd)e;f\") { .c { width: 3px } }");
+  p.set_preservation_mode(true);
+  std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
+  EXPECT_EQ(Parser::kNoError, p.errors_seen_mask());
+  ASSERT_EQ(1, t->rulesets().size());
+  ASSERT_EQ(Ruleset::GROUP_RULE, t->ruleset(0).type());
+  EXPECT_EQ("@supports (content: \"ab{cd)e;f\")",
+            t->ruleset(0).group_prelude());
+  ASSERT_EQ(1, t->ruleset(0).group_body().rulesets().size());
+}
+
+TEST_F(ParserTest, AtSupportsFontFace) {
+  // Font feature query: the @font-face must live in the body's bucket, never
+  // hoisted to the top level (that would move it outside its condition).
+  Parser p(
+      "@supports (font-variation-settings: normal) {"
+      " @font-face { font-family: 'Cabin'; src: local('Wingdings'); } }");
+  p.set_preservation_mode(true);
+  std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
+  EXPECT_EQ(Parser::kNoError, p.errors_seen_mask());
+  EXPECT_TRUE(t->font_faces().empty());
+  ASSERT_EQ(1, t->rulesets().size());
+  ASSERT_EQ(Ruleset::GROUP_RULE, t->ruleset(0).type());
+  const Stylesheet& body = t->ruleset(0).group_body();
+  ASSERT_EQ(1, body.font_faces().size());
+  EXPECT_EQ(2, body.font_face(0).declarations().size());
+  EXPECT_TRUE(body.rulesets().empty());
+}
+
+TEST_F(ParserTest, AtLayerBlock) {
+  Parser p(
+      "@layer framework.base { .d { width: 4px } }\n"
+      "@layer { .e { width: 5px } }");
+  p.set_preservation_mode(true);
+  std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
+  EXPECT_EQ(Parser::kNoError, p.errors_seen_mask());
+  ASSERT_EQ(2, t->rulesets().size());
+  ASSERT_EQ(Ruleset::GROUP_RULE, t->ruleset(0).type());
+  EXPECT_EQ("@layer framework.base", t->ruleset(0).group_prelude());
+  ASSERT_EQ(Ruleset::GROUP_RULE, t->ruleset(1).type());
+  EXPECT_EQ("@layer", t->ruleset(1).group_prelude());
+  ASSERT_EQ(1, t->ruleset(1).group_body().rulesets().size());
+}
+
+TEST_F(ParserTest, AtLayerStatement) {
+  // Statement form stays an UnparsedRegion, and its order relative to
+  // block-form @layer rules is preserved (cascade order depends on it).
+  Parser p(
+      "@layer a, b;\n"
+      "@layer b { .f { width: 6px } }");
+  p.set_preservation_mode(true);
+  std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
+  EXPECT_EQ(Parser::kNoError, p.errors_seen_mask());
+  EXPECT_NE(Parser::kNoError, p.unparseable_sections_seen_mask());
+  ASSERT_EQ(2, t->rulesets().size());
+  ASSERT_EQ(Ruleset::UNPARSED_REGION, t->ruleset(0).type());
+  CssStringPiece bytes = t->ruleset(0).unparsed_region()
+      ->bytes_in_original_buffer();
+  EXPECT_EQ("@layer a, b;", string(bytes.data(), bytes.size()));
+  ASSERT_EQ(Ruleset::GROUP_RULE, t->ruleset(1).type());
+  EXPECT_EQ("@layer b", t->ruleset(1).group_prelude());
+
+  // Non-preservation mode: dropped with an error, like unknown at-rules.
+  Parser q("@layer a, b;");
+  std::unique_ptr<Stylesheet> t2(q.ParseStylesheet());
+  EXPECT_TRUE(Parser::kAtRuleError & q.errors_seen_mask());
+  EXPECT_EQ(0, t2->rulesets().size());
+}
+
+TEST_F(ParserTest, AtContainerNamedRange) {
+  // Container name and range query are opaque prelude bytes.
+  Parser p("@container sidebar (width >= 400px) { .g { width: 7px } }");
+  p.set_preservation_mode(true);
+  std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
+  EXPECT_EQ(Parser::kNoError, p.errors_seen_mask());
+  ASSERT_EQ(1, t->rulesets().size());
+  ASSERT_EQ(Ruleset::GROUP_RULE, t->ruleset(0).type());
+  EXPECT_EQ("@container sidebar (width >= 400px)",
+            t->ruleset(0).group_prelude());
+  ASSERT_EQ(1, t->ruleset(0).group_body().rulesets().size());
+}
+
+TEST_F(ParserTest, NestedGroups) {
+  Parser p("@layer x{@supports (a:b){@media screen{.a{width: 1px}}}}");
+  p.set_preservation_mode(true);
+  std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
+  EXPECT_EQ(Parser::kNoError, p.errors_seen_mask());
+  ASSERT_EQ(1, t->rulesets().size());
+  ASSERT_EQ(Ruleset::GROUP_RULE, t->ruleset(0).type());
+  EXPECT_EQ("@layer x", t->ruleset(0).group_prelude());
+  const Stylesheet& layer_body = t->ruleset(0).group_body();
+  ASSERT_EQ(1, layer_body.rulesets().size());
+  ASSERT_EQ(Ruleset::GROUP_RULE, layer_body.ruleset(0).type());
+  EXPECT_EQ("@supports (a:b)", layer_body.ruleset(0).group_prelude());
+  const Stylesheet& supports_body = layer_body.ruleset(0).group_body();
+  // @media keeps the flatten-with-annotation model inside group bodies too.
+  ASSERT_EQ(1, supports_body.rulesets().size());
+  ASSERT_EQ(Ruleset::RULESET, supports_body.ruleset(0).type());
+  ASSERT_EQ(1, supports_body.ruleset(0).media_queries().size());
+  EXPECT_EQ("screen", UnicodeTextToUTF8(
+                          supports_body.ruleset(0).media_query(0)
+                              .media_type()));
+  EXPECT_EQ(
+      "@layer x { @supports (a:b) { @media screen { .a {width: 1px} } } }",
+      t->ruleset(0).ToString());
+}
+
+TEST_F(ParserTest, GroupInsideMedia) {
+  Parser p("@media screen { @supports (a: b) { .a { width: 1px } } }");
+  p.set_preservation_mode(true);
+  std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
+  EXPECT_EQ(Parser::kNoError, p.errors_seen_mask());
+  ASSERT_EQ(1, t->rulesets().size());
+  ASSERT_EQ(Ruleset::GROUP_RULE, t->ruleset(0).type());
+  // The enclosing @media is an annotation on the group node (same model as
+  // every other @media child); the body ruleset carries no annotation.
+  ASSERT_EQ(1, t->ruleset(0).media_queries().size());
+  EXPECT_EQ("screen",
+            UnicodeTextToUTF8(t->ruleset(0).media_query(0).media_type()));
+  const Stylesheet& body = t->ruleset(0).group_body();
+  ASSERT_EQ(1, body.rulesets().size());
+  EXPECT_EQ(0, body.ruleset(0).media_queries().size());
+}
+
+TEST_F(ParserTest, ImportInsideGroupRejected) {
+  Parser p(
+      "@supports (a:b) { @import url(x.css); @charset \"utf-8\";"
+      " .a { width: 1px } }");
+  p.set_preservation_mode(true);
+  std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
+  // Both rejections demote to verbatim body children: mask clean.
+  EXPECT_EQ(Parser::kNoError, p.errors_seen_mask());
+  EXPECT_NE(Parser::kNoError, p.unparseable_sections_seen_mask());
+  EXPECT_TRUE(t->imports().empty());
+  EXPECT_TRUE(t->charsets().empty());
+  ASSERT_EQ(1, t->rulesets().size());
+  ASSERT_EQ(Ruleset::GROUP_RULE, t->ruleset(0).type());
+  const Stylesheet& body = t->ruleset(0).group_body();
+  EXPECT_TRUE(body.imports().empty());
+  EXPECT_TRUE(body.charsets().empty());
+  ASSERT_EQ(3, body.rulesets().size());
+  ASSERT_EQ(Ruleset::UNPARSED_REGION, body.ruleset(0).type());
+  CssStringPiece bytes = body.ruleset(0).unparsed_region()
+      ->bytes_in_original_buffer();
+  EXPECT_EQ("@import url(x.css);", string(bytes.data(), bytes.size()));
+  ASSERT_EQ(Ruleset::UNPARSED_REGION, body.ruleset(1).type());
+  ASSERT_EQ(Ruleset::RULESET, body.ruleset(2).type());
+}
+
+TEST_F(ParserTest, GroupBodyInnerErrorDemotion) {
+  // Inner failures demote *inside* the body (statement-level granularity);
+  // the group node itself survives and the error mask stays clean, which is
+  // the invariant css_combine's CleanParse depends on.
+  Parser p(
+      "@supports (a:b) {"
+      " @keyframes k { 0% { top: 0 } }"
+      " ,z { width: 1px }"
+      " .a { width: 2px } }");
+  p.set_preservation_mode(true);
+  std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
+  EXPECT_EQ(Parser::kNoError, p.errors_seen_mask());
+  EXPECT_NE(Parser::kNoError, p.unparseable_sections_seen_mask());
+  ASSERT_EQ(1, t->rulesets().size());
+  ASSERT_EQ(Ruleset::GROUP_RULE, t->ruleset(0).type());
+  const Stylesheet& body = t->ruleset(0).group_body();
+  ASSERT_EQ(3, body.rulesets().size());
+  ASSERT_EQ(Ruleset::UNPARSED_REGION, body.ruleset(0).type());
+  ASSERT_EQ(Ruleset::RULESET, body.ruleset(1).type());
+  EXPECT_TRUE(body.ruleset(1).selectors().is_dummy());
+  ASSERT_EQ(Ruleset::RULESET, body.ruleset(2).type());
+  EXPECT_FALSE(body.ruleset(2).selectors().is_dummy());
+}
+
+TEST_F(ParserTest, GroupNonPreservationInnerErrorKeepsMask) {
+  // Non-preservation mirrors @media: the group node is attached, the broken
+  // inner ruleset is lost, and the error mask stays set.
+  Parser p("@supports (a:b) { ,z { width: 1px } .a { width: 2px } }");
+  std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
+  EXPECT_NE(Parser::kNoError, p.errors_seen_mask());
+  ASSERT_EQ(1, t->rulesets().size());
+  ASSERT_EQ(Ruleset::GROUP_RULE, t->ruleset(0).type());
+  const Stylesheet& body = t->ruleset(0).group_body();
+  ASSERT_EQ(1, body.rulesets().size());
+  ASSERT_EQ(Ruleset::RULESET, body.ruleset(0).type());
+}
+
+TEST_F(ParserTest, GroupBodyStraySemicolonRecovered) {
+  // A stray ';' at statement position inside a group body (a common
+  // hand-authoring artifact) is skipped, browser-style, keeping the sheet
+  // cleanly parsed — and therefore combinable. Before group rules were
+  // parsed, the opaque at-rule path also accepted this input; acceptance
+  // must not regress.
+  for (bool preserve : {false, true}) {
+    SCOPED_TRACE(preserve ? "preservation" : "non-preservation");
+    Parser p("@supports (a:b) { .x { width: 1px }; ; .y { width: 2px } }");
+    p.set_preservation_mode(preserve);
+    std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
+    EXPECT_EQ(Parser::kNoError, p.errors_seen_mask());
+    EXPECT_EQ(Parser::kNoError, p.unparseable_sections_seen_mask());
+    EXPECT_TRUE(p.Done());
+    ASSERT_EQ(1, t->rulesets().size());
+    ASSERT_EQ(Ruleset::GROUP_RULE, t->ruleset(0).type());
+    const Stylesheet& body = t->ruleset(0).group_body();
+    ASSERT_EQ(2, body.rulesets().size());
+    EXPECT_EQ(Ruleset::RULESET, body.ruleset(0).type());
+    EXPECT_EQ(Ruleset::RULESET, body.ruleset(1).type());
+  }
+}
+
+TEST_F(ParserTest, GroupBodyGarbageCrossingBraceFallsBack) {
+  // Non-';' garbage at statement position with no '{' after it: selector
+  // recovery scans past the group's closing brace to EOF. Accepted
+  // @media-parity contract (the same input inside @media fails identically
+  // today): the error is *preserved* — never a clean mask alongside byte
+  // loss — so downstream falls back to the original bytes.
+  Parser p("@supports (a:b) { .x { width: 1px } ) }");
+  p.set_preservation_mode(true);
+  std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
+  EXPECT_NE(Parser::kNoError, p.errors_seen_mask());
+  EXPECT_EQ(0, t->rulesets().size());
+}
+
+TEST_F(ParserTest, GroupUnbalancedEOF) {
+  // EOF before the body's '}': the error must be preserved (no verbatim
+  // save), exactly like @media, so downstream falls back to original bytes.
+  Parser p("@supports (a:b) { .a { width: 1px }");
+  p.set_preservation_mode(true);
+  std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
+  EXPECT_TRUE(Parser::kAtRuleError & p.errors_seen_mask());
+  EXPECT_EQ(0, t->rulesets().size());
+}
+
+TEST_F(ParserTest, GroupDepthLimit) {
+  // 17 nested groups: the 17th exceeds kMaxGroupRuleDepth (16) and is
+  // demoted to a verbatim UnparsedRegion child of the 16th body; the mask
+  // stays clean in preservation mode.
+  string css;
+  for (int i = 0; i < 17; ++i) {
+    css += "@supports (a:b){";
+  }
+  css += ".a{width: 1px}";
+  for (int i = 0; i < 17; ++i) {
+    css += "}";
+  }
+  Parser p(css);
+  p.set_preservation_mode(true);
+  std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
+  EXPECT_EQ(Parser::kNoError, p.errors_seen_mask());
+  EXPECT_NE(Parser::kNoError, p.unparseable_sections_seen_mask());
+  const Stylesheet* sheet = t.get();
+  for (int i = 0; i < 16; ++i) {
+    ASSERT_EQ(1, sheet->rulesets().size()) << "depth " << i;
+    ASSERT_EQ(Ruleset::GROUP_RULE, sheet->ruleset(0).type()) << "depth " << i;
+    sheet = &sheet->ruleset(0).group_body();
+  }
+  ASSERT_EQ(1, sheet->rulesets().size());
+  ASSERT_EQ(Ruleset::UNPARSED_REGION, sheet->ruleset(0).type());
+  CssStringPiece bytes = sheet->ruleset(0).unparsed_region()
+      ->bytes_in_original_buffer();
+  EXPECT_EQ("@supports (a:b){.a{width: 1px}}",
+            string(bytes.data(), bytes.size()));
+}
+
+TEST_F(ParserTest, MediaRangeSyntax) {
+  for (bool preserve : {false, true}) {
+    SCOPED_TRACE(preserve ? "preservation" : "non-preservation");
+    Parser p("@media (width >= 768px) { .a { width: 1px } }");
+    p.set_preservation_mode(preserve);
+    std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
+    EXPECT_EQ(Parser::kNoError, p.errors_seen_mask());
+    ASSERT_EQ(1, t->rulesets().size());
+    ASSERT_EQ(Ruleset::RULESET, t->ruleset(0).type());
+    ASSERT_EQ(1, t->ruleset(0).media_queries().size());
+    const MediaQuery& query = t->ruleset(0).media_query(0);
+    EXPECT_EQ(MediaQuery::NO_QUALIFIER, query.qualifier());
+    EXPECT_EQ("", UnicodeTextToUTF8(query.media_type()));
+    ASSERT_EQ(1, query.expressions().size());
+    EXPECT_TRUE(query.expression(0).is_raw());
+    ASSERT_TRUE(query.expression(0).has_value());
+    EXPECT_EQ("width >= 768px",
+              UnicodeTextToUTF8(query.expression(0).value()));
+    EXPECT_EQ("(width >= 768px)", query.ToString());
+  }
+}
+
+TEST_F(ParserTest, MediaRangeDoubleAndGeneralEnclosed) {
+  Parser p(
+      "@media (400px <= width <= 700px) { .a { width: 1px } }\n"
+      "@media ((min-width: 400px) or (hover)) { .b { width: 2px } }\n"
+      "@media screen and (width >= 768px) and (color) "
+      "{ .c { width: 3px } }");
+  p.set_preservation_mode(true);
+  std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
+  EXPECT_EQ(Parser::kNoError, p.errors_seen_mask());
+  ASSERT_EQ(3, t->rulesets().size());
+
+  ASSERT_EQ(1, t->ruleset(0).media_queries().size());
+  ASSERT_EQ(1, t->ruleset(0).media_query(0).expressions().size());
+  EXPECT_TRUE(t->ruleset(0).media_query(0).expression(0).is_raw());
+  EXPECT_EQ("400px <= width <= 700px",
+            UnicodeTextToUTF8(
+                t->ruleset(0).media_query(0).expression(0).value()));
+
+  // General-enclosed: the whole parenthesized disjunction is ONE raw
+  // expression (query-level 'or' between expressions still demotes).
+  ASSERT_EQ(1, t->ruleset(1).media_queries().size());
+  ASSERT_EQ(1, t->ruleset(1).media_query(0).expressions().size());
+  EXPECT_TRUE(t->ruleset(1).media_query(0).expression(0).is_raw());
+  EXPECT_EQ("(min-width: 400px) or (hover)",
+            UnicodeTextToUTF8(
+                t->ruleset(1).media_query(0).expression(0).value()));
+
+  // Structured and raw expressions mix under 'and'.
+  ASSERT_EQ(1, t->ruleset(2).media_queries().size());
+  const MediaQuery& query = t->ruleset(2).media_query(0);
+  EXPECT_EQ("screen", UnicodeTextToUTF8(query.media_type()));
+  ASSERT_EQ(2, query.expressions().size());
+  EXPECT_TRUE(query.expression(0).is_raw());
+  EXPECT_EQ("width >= 768px",
+            UnicodeTextToUTF8(query.expression(0).value()));
+  EXPECT_FALSE(query.expression(1).is_raw());
+  EXPECT_EQ("color", UnicodeTextToUTF8(query.expression(1).name()));
+}
+
+TEST_F(ParserTest, MediaRawDeepCopy) {
+  // Every ruleset inside @media gets its annotation via DeepCopy: the raw
+  // flag and bytes must survive the copy chain.
+  Parser p("@media (width >= 768px) { .a { width: 1px } }");
+  p.set_preservation_mode(true);
+  std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
+  ASSERT_EQ(1, t->rulesets().size());
+  ASSERT_EQ(1, t->ruleset(0).media_queries().size());
+  std::unique_ptr<MediaQueries> copy(t->ruleset(0).media_queries().DeepCopy());
+  ASSERT_EQ(1, copy->size());
+  ASSERT_EQ(1, (*copy)[0]->expressions().size());
+  EXPECT_TRUE((*copy)[0]->expression(0).is_raw());
+  EXPECT_EQ("width >= 768px",
+            UnicodeTextToUTF8((*copy)[0]->expression(0).value()));
+  EXPECT_EQ(t->ruleset(0).media_queries().ToString(), copy->ToString());
+}
+
+TEST_F(ParserTest, MediaOrStillDemotes) {
+  // Query-level 'or' between expressions is not modeled: the whole query is
+  // an error, so in preservation mode the whole @media block demotes to a
+  // verbatim UnparsedRegion and in non-preservation mode becomes "not all".
+  Parser p("@media (a) or (b) { .a { width: 1px } }");
+  p.set_preservation_mode(true);
+  std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
+  EXPECT_EQ(Parser::kNoError, p.errors_seen_mask());
+  EXPECT_NE(Parser::kNoError, p.unparseable_sections_seen_mask());
+  ASSERT_EQ(1, t->rulesets().size());
+  ASSERT_EQ(Ruleset::UNPARSED_REGION, t->ruleset(0).type());
+
+  Parser q("@media (a) or (b) { .a { width: 1px } }");
+  std::unique_ptr<Stylesheet> t2(q.ParseStylesheet());
+  EXPECT_TRUE(Parser::kMediaError & q.errors_seen_mask());
+  ASSERT_EQ(1, t2->rulesets().size());
+  ASSERT_EQ(1, t2->ruleset(0).media_queries().size());
+  EXPECT_EQ(MediaQuery::NOT, t2->ruleset(0).media_query(0).qualifier());
+  EXPECT_EQ("all",
+            UnicodeTextToUTF8(t2->ruleset(0).media_query(0).media_type()));
+}
+
+TEST_F(ParserTest, ImportWithMQ4Media) {
+  Parser p("@import url(x.css) (width >= 768px);");
+  p.set_preservation_mode(true);
+  std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
+  EXPECT_EQ(Parser::kNoError, p.errors_seen_mask());
+  ASSERT_EQ(1, t->imports().size());
+  EXPECT_EQ("x.css", UnicodeTextToUTF8(t->import(0).link()));
+  ASSERT_EQ(1, t->import(0).media_queries().size());
+  ASSERT_EQ(1, t->import(0).media_queries()[0]->expressions().size());
+  EXPECT_TRUE(t->import(0).media_queries()[0]->expression(0).is_raw());
+  EXPECT_EQ("width >= 768px",
+            UnicodeTextToUTF8(
+                t->import(0).media_queries()[0]->expression(0).value()));
+}
+
+TEST_F(ParserTest, CalcInMediaValue) {
+  // Regression: the ':'-value capture used the error-reporting skip, so a
+  // balanced calc() in a media value set kBlockError and (in preservation
+  // mode) demoted the whole @media block.
+  Parser p("@media (max-width: calc(100px + 2em)) { .a { width: 1px } }");
+  p.set_preservation_mode(true);
+  std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
+  EXPECT_EQ(Parser::kNoError, p.errors_seen_mask());
+  EXPECT_EQ(Parser::kNoError, p.unparseable_sections_seen_mask());
+  ASSERT_EQ(1, t->rulesets().size());
+  ASSERT_EQ(Ruleset::RULESET, t->ruleset(0).type());
+  ASSERT_EQ(1, t->ruleset(0).media_queries().size());
+  const MediaQuery& query = t->ruleset(0).media_query(0);
+  ASSERT_EQ(1, query.expressions().size());
+  EXPECT_FALSE(query.expression(0).is_raw());
+  EXPECT_EQ("max-width", UnicodeTextToUTF8(query.expression(0).name()));
+  EXPECT_EQ("calc(100px + 2em)",
+            UnicodeTextToUTF8(query.expression(0).value()));
+}
+
+TEST_F(ParserTest, MediaRawExpressionInvalidUtf8) {
+  // Invalid UTF-8 inside a raw (MQ4 range / general-enclosed) media
+  // expression must not be silently sanitized: MediaExpression::NewRaw feeds
+  // the captured bytes to UnicodeText::CopyUTF8, which rewrites them with
+  // only a LOG(WARNING). The parse must report kUtf8Error so that, in
+  // preservation mode, the whole @media statement demotes to a verbatim
+  // UnparsedRegion holding the original bytes.
+  const char kCss[] = "@media (width >= \xff) {a{b:c}}";
+
+  Parser p(kCss);
+  p.set_preservation_mode(true);
+  std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
+  EXPECT_EQ(Parser::kNoError, p.errors_seen_mask());
+  EXPECT_TRUE(Parser::kUtf8Error & p.unparseable_sections_seen_mask());
+  ASSERT_EQ(1, t->rulesets().size());
+  ASSERT_EQ(Ruleset::UNPARSED_REGION, t->ruleset(0).type());
+  CssStringPiece bytes =
+      t->ruleset(0).unparsed_region()->bytes_in_original_buffer();
+  EXPECT_EQ(kCss, string(bytes.data(), bytes.size()));
+
+  // Non-preservation mode: the parse continues (the raw expression is kept),
+  // but the error must be visible in the mask instead of a clean parse.
+  Parser q(kCss);
+  std::unique_ptr<Stylesheet> t2(q.ParseStylesheet());
+  EXPECT_TRUE(Parser::kUtf8Error & q.errors_seen_mask());
+  ASSERT_EQ(1, t2->rulesets().size());
+  ASSERT_EQ(Ruleset::RULESET, t2->ruleset(0).type());
+}
+
+TEST_F(ParserTest, MediaColonValueInvalidUtf8) {
+  // Same sanitization hole in the structured name:value capture: the value
+  // bytes cross UnicodeText::CopyUTF8, which rewrites invalid UTF-8 with
+  // only a LOG(WARNING). The parse must report kUtf8Error.
+  const char kCss[] = "@media (max-width: \xff) {a{b:c}}";
+
+  Parser p(kCss);
+  p.set_preservation_mode(true);
+  std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
+  EXPECT_EQ(Parser::kNoError, p.errors_seen_mask());
+  EXPECT_TRUE(Parser::kUtf8Error & p.unparseable_sections_seen_mask());
+  ASSERT_EQ(1, t->rulesets().size());
+  ASSERT_EQ(Ruleset::UNPARSED_REGION, t->ruleset(0).type());
+  CssStringPiece bytes =
+      t->ruleset(0).unparsed_region()->bytes_in_original_buffer();
+  EXPECT_EQ(kCss, string(bytes.data(), bytes.size()));
+
+  Parser q(kCss);
+  std::unique_ptr<Stylesheet> t2(q.ParseStylesheet());
+  EXPECT_TRUE(Parser::kUtf8Error & q.errors_seen_mask());
+  ASSERT_EQ(1, t2->rulesets().size());
+  ASSERT_EQ(Ruleset::RULESET, t2->ruleset(0).type());
+}
+
+TEST_F(ParserTest, MediaRawExpressionValidUtf8) {
+  // Positive control: interchange-valid non-ASCII UTF-8 (U+00E9) is kept
+  // without error in both capture forms — only bytes that CopyUTF8 would
+  // alter demote the statement.
+  Parser p("@media (\xc3\xa9 >= 1px) {a{b:c}}");
+  p.set_preservation_mode(true);
+  std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
+  EXPECT_EQ(Parser::kNoError, p.errors_seen_mask());
+  EXPECT_EQ(Parser::kNoError, p.unparseable_sections_seen_mask());
+  ASSERT_EQ(1, t->rulesets().size());
+  ASSERT_EQ(Ruleset::RULESET, t->ruleset(0).type());
+  ASSERT_EQ(1, t->ruleset(0).media_queries().size());
+  const MediaQuery& query = t->ruleset(0).media_query(0);
+  ASSERT_EQ(1, query.expressions().size());
+  EXPECT_TRUE(query.expression(0).is_raw());
+  EXPECT_EQ("\xc3\xa9 >= 1px",
+            UnicodeTextToUTF8(query.expression(0).value()));
+
+  Parser q("@media (max-width: \xc3\xa9) {a{b:c}}");
+  q.set_preservation_mode(true);
+  std::unique_ptr<Stylesheet> t2(q.ParseStylesheet());
+  EXPECT_EQ(Parser::kNoError, q.errors_seen_mask());
+  EXPECT_EQ(Parser::kNoError, q.unparseable_sections_seen_mask());
+  ASSERT_EQ(1, t2->rulesets().size());
+  ASSERT_EQ(Ruleset::RULESET, t2->ruleset(0).type());
+  ASSERT_EQ(1, t2->ruleset(0).media_queries().size());
+  const MediaQuery& query2 = t2->ruleset(0).media_query(0);
+  ASSERT_EQ(1, query2.expressions().size());
+  EXPECT_FALSE(query2.expression(0).is_raw());
+  EXPECT_EQ("max-width", UnicodeTextToUTF8(query2.expression(0).name()));
+  EXPECT_EQ("\xc3\xa9", UnicodeTextToUTF8(query2.expression(0).value()));
 }
 
 }  // namespace Css

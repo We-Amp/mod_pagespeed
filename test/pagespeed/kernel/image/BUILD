@@ -75,6 +75,17 @@ pagespeed_cc_test(
     ],
 )
 
+# AVIF codec tests
+pagespeed_cc_test(
+    name = "avif_test",
+    srcs = ["avif_optimizer_test.cc"],
+    data = TEST_DATA,
+    deps = [
+        ":image_test_base",
+        "//pagespeed/kernel/image:avif",
+    ],
+)
+
 # GIF codec tests
 pagespeed_cc_test(
     name = "gif_test",

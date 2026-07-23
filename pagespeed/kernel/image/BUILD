@@ -1,7 +1,45 @@
 load("@rules_proto//proto:defs.bzl", "proto_library")
 load("@rules_cc//cc:defs.bzl", "cc_library", "cc_proto_library")
+load("//bazel:libaom.bzl", "libaom_from_source")
+load("//bazel:libavif.bzl", "libavif_from_source")
+
+# load("//bazel:libdav1d.bzl", "libdav1d_from_source")  # Stream A: enable for accelerated decode
 
 licenses(["notice"])  # Apache 2
+
+# =============================================================================
+# AVIF codec stack — built from source via
+# rules_foreign_cc. libaom is the AV1 encoder+decoder; libavif wraps it and
+# MUST thread it as a cmake dep (see bazel/libavif.bzl) or every encode/decode
+# returns AVIF_RESULT_NO_CODEC_AVAILABLE at runtime.
+#   :aom      (cmake)  AV1 reference encoder+decoder static lib
+#   :avif_lib (cmake)  libavif static lib, AVIF_CODEC_AOM=SYSTEM, deps=[":aom"]
+#   :dav1d    (meson)  optional faster decoder — enable via with_dav1d=True
+# =============================================================================
+libaom_from_source()
+
+# libdav1d_from_source()  # Stream A: uncomment + flip with_dav1d below.
+
+libavif_from_source()  # add with_dav1d = True once :dav1d is enabled
+
+# AVIF codec cc_library — mirrors :webp (below). Wraps the
+# libavif static lib (:avif_lib, codecs threaded via cmake) with the
+# AvifFrameReader (decode + animation) and AvifFrameWriter (encode + animation).
+cc_library(
+    name = "avif",
+    srcs = ["avif_optimizer.cc"],
+    hdrs = ["avif_optimizer.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":avif_lib",
+        ":image_base",
+        # Source include tree so the clang-tidy compdb (which never runs the
+        # cmake build) can resolve "avif/avif.h" — see _LIBAVIF_SRCS_BUILD_FILE
+        # in bazel/repositories.bzl.
+        "@libavif_src//:source_headers",
+        "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)
 
 proto_library(
     name = "image_optimizer_proto",
@@ -140,6 +178,7 @@ cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        ":avif",
         ":frame_processing",
         ":gif",
         ":image_base",
@@ -204,6 +243,7 @@ cc_library(
     hdrs = ["image_optimizer.h"],
     visibility = ["//visibility:public"],
     deps = [
+        ":avif",
         ":frame_processing",
         ":gif",
         ":image_analysis",
@@ -213,6 +253,23 @@ cc_library(
         ":image_resizer",
         ":jpeg",
         ":png",
+        ":webp",
+        "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)
+
+# AVIF Stream B/C build-validation + encode-speed harness (NOT shipped). Encodes
+# a representative image to AVIF (timed), round-trips it back through the reader,
+# and compares AVIF vs WebP output size. See avif_roundtrip_main.cc.
+cc_binary(
+    name = "avif_roundtrip_main",
+    testonly = True,
+    srcs = ["avif_roundtrip_main.cc"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":avif",
+        ":image_base",
+        ":image_converter",
         ":webp",
         "//pagespeed/kernel/base:pagespeed_base",
     ],
@@ -265,6 +322,7 @@ cc_binary(
 cc_library(
     name = "image",
     hdrs = [
+        "avif_optimizer.h",
         "frame_interface_optimizer.h",
         "gif_reader.h",
         "image_analysis.h",
@@ -287,6 +345,7 @@ cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        ":avif",
         ":frame_processing",
         ":gif",
         ":image_analysis",

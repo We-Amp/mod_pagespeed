@@ -34,6 +34,7 @@ pagespeed_py_test_suite(
         "test_critical_css_beacon.py",
         "test_headers.py",
         "test_ipro.py",
+        "test_prioritize_critical_images.py",
     ],
     deps = ["//test/system:conftest"],
 )

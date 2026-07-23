@@ -72,7 +72,9 @@ class CachePutFetch : public SharedAsyncFetch {
         saved_headers_(http_options_),
         req_properties_(base_fetch->request_headers()->GetProperties()) {
     if (backend_first_byte_latency_ != nullptr) {
-      start_time_ms_ = cache_->timer()->NowMs();
+      // Elapsed-time start for the backend-first-byte latency stat: monotonic
+      // so a wall-clock step can't make the delta negative.
+      start_time_ms_ = cache_->timer()->NowMonotonicMs();
     }
   }
 
@@ -83,7 +85,11 @@ class CachePutFetch : public SharedAsyncFetch {
     // actual backend fetch and not potentially using the cache.
     int64 now_ms = cache_->timer()->NowMs();
     if (backend_first_byte_latency_ != nullptr) {
-      backend_first_byte_latency_->Add(now_ms - start_time_ms_);
+      // start_time_ms_ is a monotonic reading; pair it with a monotonic now so
+      // the latency delta is immune to wall-clock steps. now_ms (wall) is kept
+      // for FixDateHeaders below, which needs a real timestamp.
+      backend_first_byte_latency_->Add(cache_->timer()->NowMonotonicMs() -
+                                       start_time_ms_);
     }
     ResponseHeaders* headers = response_headers();
     headers->FixDateHeaders(now_ms);

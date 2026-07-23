@@ -345,8 +345,7 @@ void CssSummarizerBase::StartElementImpl(HtmlElement* element) {
   // regardless of their position relative to non-scoped CSS.
 }
 
-void CssSummarizerBase::Characters(HtmlCharactersNode* characters_node) {
-  CommonFilter::Characters(characters_node);
+void CssSummarizerBase::CharactersImpl(HtmlCharactersNode* characters_node) {
   if (style_element_ != nullptr) {
     // Note: HtmlParse should guarantee that we only get one CharactersNode
     // per <style> block even if it is split by a flush.

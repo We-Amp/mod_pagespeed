@@ -14,8 +14,8 @@
   if (!d) {
     return !1;
   }
-  var f = a.indexOf("?") == -1 ? "?" : "&";
-  a = a + f + "url=" + encodeURIComponent(b);
+  var g = a.indexOf("?") == -1 ? "?" : "&";
+  a = a + g + "url=" + encodeURIComponent(b);
   d.open("POST", a);
   d.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
   d.send(c);
@@ -73,16 +73,26 @@ pagespeed.LocalStorageCache.prototype.replaceLastScript = function(a) {
 };
 pagespeed.LocalStorageCache.prototype.replaceLastScript = pagespeed.LocalStorageCache.prototype.replaceLastScript;
 pagespeed.LocalStorageCache.prototype.inlineCss = function(a) {
-  var b = window.localStorage.getItem("pagespeed_lsc_url:" + a), c = document.createElement(b ? "style" : "link");
+  var b = null;
+  try {
+    b = window.localStorage.getItem("pagespeed_lsc_url:" + a);
+  } catch (d) {
+  }
+  var c = document.createElement(b ? "style" : "link");
   b && !this.hasExpired(b) ? (c.type = "text/css", c.appendChild(document.createTextNode(this.getData(b)))) : (c.rel = "stylesheet", c.href = a, this.regenerate_cookie_ = !0);
   this.replaceLastScript(c);
 };
 pagespeed.LocalStorageCache.prototype.inlineCss = pagespeed.LocalStorageCache.prototype.inlineCss;
 pagespeed.LocalStorageCache.prototype.inlineImg = function(a, b) {
-  var c = window.localStorage.getItem("pagespeed_lsc_url:" + a + " pagespeed_lsc_hash:" + b), d = document.createElement("img");
+  var c = null;
+  try {
+    c = window.localStorage.getItem("pagespeed_lsc_url:" + a + " pagespeed_lsc_hash:" + b);
+  } catch (h) {
+  }
+  var d = document.createElement("img");
   c && !this.hasExpired(c) ? d.src = this.getData(c) : (d.src = a, this.regenerate_cookie_ = !0);
   c = 2;
-  for (var f = arguments.length; c < f; ++c) {
+  for (var g = arguments.length; c < g; ++c) {
     var e = arguments[c].indexOf("=");
     d.setAttribute(arguments[c].substring(0, e), arguments[c].substring(e + 1));
   }
@@ -91,19 +101,28 @@ pagespeed.LocalStorageCache.prototype.inlineImg = function(a, b) {
 pagespeed.LocalStorageCache.prototype.inlineImg = pagespeed.LocalStorageCache.prototype.inlineImg;
 pagespeed.LocalStorageCache.prototype.processTags_ = function(a, b, c) {
   a = document.getElementsByTagName(a);
-  for (var d = 0, f = a.length; d < f; ++d) {
-    var e = a[d], h = e.getAttribute("data-pagespeed-lsc-hash"), g = e.getAttribute("data-pagespeed-lsc-url");
-    if (h && g) {
-      g = "pagespeed_lsc_url:" + g;
-      b && (g += " pagespeed_lsc_hash:" + h);
+  for (var d = 0, g = a.length; d < g; ++d) {
+    var e = a[d], h = e.getAttribute("data-pagespeed-lsc-hash"), f = e.getAttribute("data-pagespeed-lsc-url");
+    if (h && f) {
+      f = "pagespeed_lsc_url:" + f;
+      b && (f += " pagespeed_lsc_hash:" + h);
       var k = e.getAttribute("data-pagespeed-lsc-expiry");
       k = k ? (new Date(k)).getTime() : "";
       e = c(e);
       if (!e) {
-        var l = window.localStorage.getItem(g);
+        var l = null;
+        try {
+          l = window.localStorage.getItem(f);
+        } catch (m) {
+        }
         l && (e = this.getData(l));
       }
-      e && (window.localStorage.setItem(g, k + " " + h + " " + e), this.regenerate_cookie_ = !0);
+      if (e) {
+        try {
+          window.localStorage.setItem(f, k + " " + h + " " + e), this.regenerate_cookie_ = !0;
+        } catch (m) {
+        }
+      }
     }
   }
 };
@@ -117,44 +136,52 @@ pagespeed.LocalStorageCache.prototype.saveInlinedData_ = function() {
 };
 pagespeed.LocalStorageCache.prototype.generateCookie_ = function() {
   if (this.regenerate_cookie_) {
-    for (var a = [], b = [], c = 0, d = pagespeedutils.now(), f = 0, e = window.localStorage.length; f < e; ++f) {
-      var h = window.localStorage.key(f);
-      if (!h.indexOf("pagespeed_lsc_url:")) {
-        var g = window.localStorage.getItem(h), k = g.indexOf(" "), l = parseInt(g.substring(0, k), 10);
-        if (!isNaN(l)) {
-          if (l <= d) {
-            a.push(h);
-            continue;
-          } else if (l < c || c == 0) {
-            c = l;
+    var a = [], b = [], c = 0, d = pagespeedutils.now(), g = 0;
+    try {
+      g = window.localStorage.length;
+    } catch (n) {
+    }
+    for (var e = 0; e < g; ++e) {
+      try {
+        var h = window.localStorage.key(e);
+        if (!h.indexOf("pagespeed_lsc_url:")) {
+          var f = window.localStorage.getItem(h), k = f.indexOf(" "), l = parseInt(f.substring(0, k), 10);
+          if (!isNaN(l)) {
+            if (l <= d) {
+              a.push(h);
+              continue;
+            } else if (l < c || c == 0) {
+              c = l;
+            }
           }
+          var m = f.indexOf(" ", k + 1), p = f.substring(k + 1, m);
+          b.push(p);
         }
-        h = g.indexOf(" ", k + 1);
-        g = g.substring(k + 1, h);
-        b.push(g);
+      } catch (n) {
       }
     }
     d = "";
     c && (d = "; expires=" + (new Date(c)).toUTCString());
-    document.cookie = "_GPSLSC=" + b.join("!") + d;
-    f = 0;
-    for (e = a.length; f < e; ++f) {
-      window.localStorage.removeItem(a[f]);
+    document.cookie = "_GPSLSC=" + b.join("!") + ";path=/" + d;
+    e = 0;
+    for (g = a.length; e < g; ++e) {
+      try {
+        window.localStorage.removeItem(a[e]);
+      } catch (n) {
+      }
     }
     this.regenerate_cookie_ = !1;
   }
 };
 pagespeed.localStorageCacheInit = function() {
-  if (window.localStorage) {
-    var a = new pagespeed.LocalStorageCache();
-    pagespeed.localStorageCache = a;
-    pagespeedutils.addHandler(window, "load", function() {
-      a.saveInlinedData_();
-    });
-    pagespeedutils.addHandler(window, "load", function() {
-      a.generateCookie_();
-    });
-  }
+  var a = new pagespeed.LocalStorageCache();
+  pagespeed.localStorageCache = a;
+  pagespeedutils.addHandler(window, "load", function() {
+    a.saveInlinedData_();
+  });
+  pagespeedutils.addHandler(window, "load", function() {
+    a.generateCookie_();
+  });
 };
 pagespeed.localStorageCacheInit = pagespeed.localStorageCacheInit;
 })();

@@ -371,17 +371,6 @@ TEST_F(UserAgentMatcherTest, DoesntSupportWebpLosslessAlpha) {
       user_agent_matcher_->SupportsWebpLosslessAlpha(kWindowsPhoneUserAgent));
 }
 
-TEST_F(UserAgentMatcherTest, SupportsDnsPrefetchUsingRelPrefetch) {
-  EXPECT_FALSE(
-      user_agent_matcher_->SupportsDnsPrefetchUsingRelPrefetch(kIe6UserAgent));
-  EXPECT_FALSE(
-      user_agent_matcher_->SupportsDnsPrefetchUsingRelPrefetch(kIe7UserAgent));
-  EXPECT_FALSE(
-      user_agent_matcher_->SupportsDnsPrefetchUsingRelPrefetch(kIe8UserAgent));
-  EXPECT_TRUE(
-      user_agent_matcher_->SupportsDnsPrefetchUsingRelPrefetch(kIe9UserAgent));
-}
-
 TEST_F(UserAgentMatcherTest, GetDeviceTypeForUA) { VerifyGetDeviceTypeForUA(); }
 
 TEST_F(UserAgentMatcherTest, IE11NoDeferJs) {
@@ -463,8 +452,7 @@ TEST_F(UserAgentMatcherTest, SupportsNativeLazyLoading) {
       user_agent_matcher_->SupportsNativeLazyLoading(kSafariUserAgent));
 
   // Unknown or legacy user agents fall back to the script-based path.
-  EXPECT_FALSE(
-      user_agent_matcher_->SupportsNativeLazyLoading(kIe10UserAgent));
+  EXPECT_FALSE(user_agent_matcher_->SupportsNativeLazyLoading(kIe10UserAgent));
   EXPECT_FALSE(
       user_agent_matcher_->SupportsNativeLazyLoading(kCriOS48UserAgent));
   EXPECT_FALSE(user_agent_matcher_->SupportsNativeLazyLoading(""));

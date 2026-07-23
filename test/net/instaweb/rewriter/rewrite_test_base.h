@@ -158,6 +158,14 @@ class RewriteTestBase : public RewriteOptionsTestBase {
   // on the main rewrite driver.
   void SetBaseUrlForFetch(const StringPiece& url);
 
+  // Puts the main rewrite driver into the state RewriteDriver::FetchResource()
+  // leaves it in for 'url' -- fetch_url() non-empty and the (decoded) base URL
+  // pointing at the committed URL -- WITHOUT running an actual fetch. Lets
+  // unit tests drive the committed-URL reconcile logic
+  // (ImageUrlEncoder::SetWebpAndMobileUserAgent / SetAvifCapability) directly.
+  // Uses RewriteTestBase's friend access to RewriteDriver.
+  void SetDriverFetchUrlForTesting(const StringPiece& url);
+
   // Populates request-headers based on the current user-agent and
   // the attributes added via AddRequestAttribute and installs them
   // into rewrite_driver_.

@@ -252,6 +252,17 @@ TEST_F(CssTagScannerTest, TestHasImport) {
                                &message_handler_));
 }
 
+TEST_F(CssTagScannerTest, TestHasUrl) {
+  // Should work.
+  EXPECT_TRUE(CssTagScanner::HasUrl("url("));
+  EXPECT_TRUE(CssTagScanner::HasUrl("URL("));
+  EXPECT_TRUE(CssTagScanner::HasUrl("a { background: Url(x.png); }"));
+
+  // Should fail.
+  EXPECT_FALSE(CssTagScanner::HasUrl(""));
+  EXPECT_FALSE(CssTagScanner::HasUrl("a { color: pink; }"));
+}
+
 TEST_F(CssTagScannerTest, IsStylesheetOrAlternate) {
   EXPECT_TRUE(CssTagScanner::IsStylesheetOrAlternate("stylesheet"));
   EXPECT_TRUE(CssTagScanner::IsStylesheetOrAlternate("canonical stylesheet"));
@@ -600,6 +611,43 @@ TEST_F(RewriteDomainTransformerTest, StreamingCharByChar) {
       "| ||||ul {| |l|i|s|t|-|s|t|y|l|e|-|i|m|a|g|e|:"
       "||||||||||url(http://old-base.com/a.png)|;| |}|",
       result);
+}
+
+// CSS functional notation and @-keywords are ASCII case-insensitive, so
+// uppercase URL( and @IMPORT must be transformed exactly like their lowercase
+// forms. Transformed constructs are reserialized as lowercase url(/@import.
+TEST_F(RewriteDomainTransformerTest, RelativeUppercaseUrl) {
+  EXPECT_STREQ("a url(http://old-base.com/subdir/image.png) b",
+               Transform("a URL(subdir/image.png) b"));
+}
+
+TEST_F(RewriteDomainTransformerTest, RelativeMixedCaseUrl) {
+  EXPECT_STREQ("a url('http://old-base.com/subdir/image.png') b",
+               Transform("a Url('subdir/image.png') b"));
+}
+
+TEST_F(RewriteDomainTransformerTest, ImportUppercase) {
+  EXPECT_STREQ(
+      "a @import 'http://old-base.com/style.css' div { display: block; }",
+      Transform("a @IMPORT 'style.css' div { display: block; }"));
+}
+
+TEST_F(RewriteDomainTransformerTest, AbsoluteUppercase) {
+  // Case-insensitive matching must not alter pass-through semantics: an
+  // absolute URL the transformer declines is emitted with bytes preserved.
+  const char css_with_abs_path[] = "a URL(http://other_base/image.png) b";
+  EXPECT_STREQ(css_with_abs_path, Transform(css_with_abs_path));
+}
+
+TEST_F(RewriteDomainTransformerTest, StreamingUppercaseUrlInterrupt) {
+  // An uppercase url( keyword split across chunk boundaries must be
+  // recognized with the same streaming/interrupt contract as lowercase.
+  const char* input[] = {"U", "RL(", "foo.png)", nullptr};
+  EXPECT_EQ(
+      "portion=, retain=U|"
+      "portion=, retain=URL(|"
+      "portion=url(http://old-base.com/foo.png), retain=|",
+      TransformStreaming(input));
 }
 
 class FailTransformer : public CssTagScanner::Transformer {

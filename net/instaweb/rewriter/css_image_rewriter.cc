@@ -191,6 +191,111 @@ void CssImageRewriter::InheritChildImageInfo(RewriteContext* context) {
   }
 }
 
+void CssImageRewriter::RewriteRulesets(Css::Rulesets* rulesets,
+                                       int64 image_inline_max_bytes,
+                                       RewriteContext* parent,
+                                       CssHierarchy* hierarchy,
+                                       bool* spriting_ok,
+                                       MessageHandler* handler) {
+  const RewriteOptions* options = driver()->options();
+  for (Css::Rulesets::iterator ruleset_iter = rulesets->begin();
+       ruleset_iter != rulesets->end(); ++ruleset_iter) {
+    Css::Ruleset* ruleset = *ruleset_iter;
+    if (ruleset->type() == Css::Ruleset::GROUP_RULE) {
+      // Rulesets inside @supports/@layer/@container are parsed structure
+      // owned by the group node; images inside are only reached through this
+      // recursion. The prelude never contains a url(). Body @font-face is
+      // skipped, like the top-level font_faces bucket.
+      RewriteRulesets(&ruleset->mutable_group_body()->mutable_rulesets(),
+                      image_inline_max_bytes, parent, hierarchy, spriting_ok,
+                      handler);
+      continue;
+    }
+    if (ruleset->type() != Css::Ruleset::RULESET) {
+      continue;
+    }
+    Css::Declarations& decls = ruleset->mutable_declarations();
+    bool background_position_found = false;
+    bool background_image_found = false;
+    for (Css::Declarations::iterator decl_iter = decls.begin();
+         decl_iter != decls.end(); ++decl_iter) {
+      Css::Declaration* decl = *decl_iter;
+      // Only edit image declarations.
+      switch (decl->prop()) {
+        case Css::Property::BACKGROUND_POSITION:
+        case Css::Property::BACKGROUND_POSITION_X:
+        case Css::Property::BACKGROUND_POSITION_Y:
+          background_position_found = true;
+          break;
+        case Css::Property::BACKGROUND:
+        case Css::Property::BACKGROUND_IMAGE:
+        case Css::Property::CONTENT:  // In CSS2 but not CSS2.1
+        case Css::Property::CURSOR:
+        case Css::Property::LIST_STYLE:
+        case Css::Property::LIST_STYLE_IMAGE: {
+          // Rewrite all URLs. Technically, background-image should only
+          // have a single value which is a URL, but background could have
+          // more values.
+          Css::Values* values = decl->mutable_values();
+          for (size_t value_index = 0; value_index < values->size();
+               value_index++) {
+            Css::Value* value = values->at(value_index);
+            if (value->GetLexicalUnitType() == Css::Value::URI) {
+              background_image_found = true;
+              GoogleString rel_url = UnicodeTextToUTF8(value->GetStringValue());
+              // TODO(abliss): only do this resolution once.
+              const GoogleUrl original_url(hierarchy->css_resolution_base(),
+                                           rel_url);
+              if (!original_url.IsWebValid()) {
+                continue;
+              }
+              if (!options->IsAllowed(original_url.Spec())) {
+                continue;
+              }
+              bool is_authorized;
+              if (*spriting_ok) {
+                // TODO(sligocki): Pass in the correct base URL here.
+                // Specifically, the final base URL of the CSS that will
+                // be used to trim the final URLs.
+                // hierarchy->css_base_url(), hierarchy->css_trim_url(),
+                // or hierarchy->css_resolution_base()?
+                // Note that currently preserving URLs doesn't work for
+                // image combining filter, so we need to fix that before
+                // testing which URL is correct.
+                if (!image_combiner_->AddCssBackgroundContext(
+                        original_url, hierarchy->css_trim_url(), values,
+                        value_index, root_context_, &decls, &is_authorized,
+                        handler)) {
+                  // This doesn't fail flattening but we want to log it.
+                  hierarchy->AddFlatteningFailureReason(CannotImportMessage(
+                      "rewrite", original_url.Spec(), is_authorized));
+                }
+              }
+              if (!RewriteImage(image_inline_max_bytes,
+                                hierarchy->css_trim_url(), original_url, parent,
+                                values, value_index, &is_authorized)) {
+                // This doesn't fail flattening but we want to log it.
+                hierarchy->AddFlatteningFailureReason(CannotImportMessage(
+                    "rewrite", original_url.Spec(), is_authorized));
+              }
+            }
+          }
+          break;
+        }
+        default:
+          break;
+      }
+    }
+    // All the declarations in this ruleset have been parsed.
+    if (*spriting_ok && background_position_found && !background_image_found) {
+      // A ruleset that contains a background-position but no background image
+      // is a signal that we should not be spriting.
+      handler->Message(kInfo, "Lone background-position found: Cannot sprite.");
+      *spriting_ok = false;
+    }
+  }
+}
+
 bool CssImageRewriter::RewriteCss(int64 image_inline_max_bytes,
                                   RewriteContext* parent,
                                   CssHierarchy* hierarchy,
@@ -231,97 +336,9 @@ bool CssImageRewriter::RewriteCss(int64 image_inline_max_bytes,
       image_combiner_->Reset(parent, hierarchy->css_base_url(),
                              hierarchy->input_contents());
     }
-    Css::Rulesets& rulesets =
-        hierarchy->mutable_stylesheet()->mutable_rulesets();
-    for (Css::Rulesets::iterator ruleset_iter = rulesets.begin();
-         ruleset_iter != rulesets.end(); ++ruleset_iter) {
-      Css::Ruleset* ruleset = *ruleset_iter;
-      if (ruleset->type() != Css::Ruleset::RULESET) {
-        continue;
-      }
-      Css::Declarations& decls = ruleset->mutable_declarations();
-      bool background_position_found = false;
-      bool background_image_found = false;
-      for (Css::Declarations::iterator decl_iter = decls.begin();
-           decl_iter != decls.end(); ++decl_iter) {
-        Css::Declaration* decl = *decl_iter;
-        // Only edit image declarations.
-        switch (decl->prop()) {
-          case Css::Property::BACKGROUND_POSITION:
-          case Css::Property::BACKGROUND_POSITION_X:
-          case Css::Property::BACKGROUND_POSITION_Y:
-            background_position_found = true;
-            break;
-          case Css::Property::BACKGROUND:
-          case Css::Property::BACKGROUND_IMAGE:
-          case Css::Property::CONTENT:  // In CSS2 but not CSS2.1
-          case Css::Property::CURSOR:
-          case Css::Property::LIST_STYLE:
-          case Css::Property::LIST_STYLE_IMAGE: {
-            // Rewrite all URLs. Technically, background-image should only
-            // have a single value which is a URL, but background could have
-            // more values.
-            Css::Values* values = decl->mutable_values();
-            for (size_t value_index = 0; value_index < values->size();
-                 value_index++) {
-              Css::Value* value = values->at(value_index);
-              if (value->GetLexicalUnitType() == Css::Value::URI) {
-                background_image_found = true;
-                GoogleString rel_url =
-                    UnicodeTextToUTF8(value->GetStringValue());
-                // TODO(abliss): only do this resolution once.
-                const GoogleUrl original_url(hierarchy->css_resolution_base(),
-                                             rel_url);
-                if (!original_url.IsWebValid()) {
-                  continue;
-                }
-                if (!options->IsAllowed(original_url.Spec())) {
-                  continue;
-                }
-                bool is_authorized;
-                if (spriting_ok) {
-                  // TODO(sligocki): Pass in the correct base URL here.
-                  // Specifically, the final base URL of the CSS that will
-                  // be used to trim the final URLs.
-                  // hierarchy->css_base_url(), hierarchy->css_trim_url(),
-                  // or hierarchy->css_resolution_base()?
-                  // Note that currently preserving URLs doesn't work for
-                  // image combining filter, so we need to fix that before
-                  // testing which URL is correct.
-                  if (!image_combiner_->AddCssBackgroundContext(
-                          original_url, hierarchy->css_trim_url(), values,
-                          value_index, root_context_, &decls, &is_authorized,
-                          handler)) {
-                    // This doesn't fail flattening but we want to log it.
-                    hierarchy->AddFlatteningFailureReason(CannotImportMessage(
-                        "rewrite", original_url.Spec(), is_authorized));
-                  }
-                }
-                if (!RewriteImage(image_inline_max_bytes,
-                                  hierarchy->css_trim_url(), original_url,
-                                  parent, values, value_index,
-                                  &is_authorized)) {
-                  // This doesn't fail flattening but we want to log it.
-                  hierarchy->AddFlatteningFailureReason(CannotImportMessage(
-                      "rewrite", original_url.Spec(), is_authorized));
-                }
-              }
-            }
-            break;
-          }
-          default:
-            break;
-        }
-      }
-      // All the declarations in this ruleset have been parsed.
-      if (spriting_ok && background_position_found && !background_image_found) {
-        // A ruleset that contains a background-position but no background image
-        // is a signal that we should not be spriting.
-        handler->Message(kInfo,
-                         "Lone background-position found: Cannot sprite.");
-        spriting_ok = false;
-      }
-    }
+    RewriteRulesets(&hierarchy->mutable_stylesheet()->mutable_rulesets(),
+                    image_inline_max_bytes, parent, hierarchy, &spriting_ok,
+                    handler);
 
     image_combiner_->RegisterOrReleaseContext();
   } else {

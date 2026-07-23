@@ -170,6 +170,15 @@ const char RewriteOptions::kImageWebpAnimatedRecompressionQuality[] =
 const char RewriteOptions::kImageWebpQualityForSaveData[] =
     "WebpQualityForSaveData";
 const char RewriteOptions::kImageWebpTimeoutMs[] = "WebpTimeoutMs";
+const char RewriteOptions::kImageAvifRecompressionQuality[] =
+    "AvifRecompressionQuality";
+const char RewriteOptions::kImageAvifRecompressionQualityForSmallScreens[] =
+    "AvifRecompressionQualityForSmallScreens";
+const char RewriteOptions::kImageAvifAnimatedRecompressionQuality[] =
+    "AvifAnimatedRecompressionQuality";
+const char RewriteOptions::kImageAvifQualityForSaveData[] =
+    "AvifQualityForSaveData";
+const char RewriteOptions::kImageAvifTimeoutMs[] = "AvifTimeoutMs";
 const char RewriteOptions::kImplicitCacheTtlMs[] = "ImplicitCacheTtlMs";
 const char RewriteOptions::kInPlaceResourceOptimization[] =
     "InPlaceResourceOptimization";
@@ -322,6 +331,7 @@ const char RewriteOptions::kCacheFlushPollIntervalSec[] =
 const char RewriteOptions::kCycloneZeroCopy[] = "CycloneZeroCopy";
 const char RewriteOptions::kCycloneZeroCopyServe[] = "CycloneZeroCopyServe";
 const char RewriteOptions::kCycloneRamCacheKb[] = "CycloneRamCacheKb";
+const char RewriteOptions::kAsyncMetadataL2Writes[] = "AsyncMetadataL2Writes";
 const char RewriteOptions::kFetchHttps[] = "FetchHttps";
 const char RewriteOptions::kFetcherTimeOutMs[] = "FetcherTimeOutMs";
 const char RewriteOptions::kFileCacheCleanSizeKb[] = "FileCacheSizeKb";
@@ -343,6 +353,8 @@ const char RewriteOptions::kRemoteConfigurationTimeoutMs[] =
 const char RewriteOptions::kRequestOptionOverride[] = "RequestOptionOverride";
 const char RewriteOptions::kServeWebpToAnyAgent[] =
     "ServeRewrittenWebpUrlsToAnyAgent";
+const char RewriteOptions::kServeAvifToAnyAgent[] =
+    "ServeRewrittenAvifUrlsToAnyAgent";
 const char RewriteOptions::kSlurpDirectory[] = "SlurpDirectory";
 const char RewriteOptions::kSlurpFlushLimit[] = "SlurpFlushLimit";
 const char RewriteOptions::kSlurpReadOnly[] = "SlurpReadOnly";
@@ -410,9 +422,10 @@ const int64 RewriteOptions::kDefaultCssInlineMaxBytes = 2048;
 const int64 RewriteOptions::kDefaultCssFlattenMaxBytes = 1024000;
 const int64 RewriteOptions::kDefaultCssImageInlineMaxBytes = 0;
 const int64 RewriteOptions::kDefaultCssOutlineMinBytes = 3000;
-// 3K is bigger than Roboto loader for Chrome (2.2k)
+// Font Service CSS runs ~6-15K for one or two families and up to ~40K for
+// heavy multi-subset embeds; 48K admits real responses with headroom.
 const int64 RewriteOptions::kDefaultGoogleFontCssInlineMaxBytes =
-    static_cast<const int64>(3 * 1024);
+    static_cast<const int64>(48 * 1024);
 const int64 RewriteOptions::kDefaultImageInlineMaxBytes = 3072;
 const int64 RewriteOptions::kDefaultJsInlineMaxBytes = 2048;
 const int64 RewriteOptions::kDefaultJsOutlineMinBytes = 3000;
@@ -484,6 +497,20 @@ const int64 RewriteOptions::kDefaultImageWebpQualityForSaveData = 50;
 // Timeout, in ms, for all WebP conversion attempts for each source
 // image. If negative, does not time out.
 const int64 RewriteOptions::kDefaultImageWebpTimeoutMs = -1;
+
+// AVIF quality defaults. -1 falls back to
+// ImageRecompressionQuality, mirroring the WebP defaults; the encode-side
+// default (~50-60 from the Stream 0 spike) is applied in image.cc when the
+// resolved quality is left at the codec default.
+const int64 RewriteOptions::kDefaultImageAvifRecompressQuality = 60;
+const int64 RewriteOptions::kDefaultImageAvifRecompressQualityForSmallScreens =
+    50;
+const int64 RewriteOptions::kDefaultImageAvifAnimatedRecompressQuality = 50;
+const int64 RewriteOptions::kDefaultImageAvifQualityForSaveData = 45;
+// AV1 still-image encode is materially slower than WebP; a positive default
+// timeout keeps a slow encode from pinning a worker (the progress hook aborts
+// at frame boundaries). Tunable via AvifTimeoutMs.
+const int64 RewriteOptions::kDefaultImageAvifTimeoutMs = 5000;
 
 const int64 RewriteOptions::kDefaultMaxCacheableResponseContentLength =
     16777216;  // 16 MB in bytes
@@ -649,7 +676,6 @@ const RewriteOptions::Filter kOptimizeForBandwidthFilterSet[] = {
 const RewriteOptions::Filter kTestFilterSet[] = {
     RewriteOptions::kConvertJpegToWebp,
     RewriteOptions::kDebug,
-    RewriteOptions::kDeferIframe,
     RewriteOptions::kDeferJavascript,
     RewriteOptions::kDelayImages,  // AKA inline_preview_images
     RewriteOptions::kIncludeJsSourceMaps,
@@ -658,7 +684,6 @@ const RewriteOptions::Filter kTestFilterSet[] = {
     RewriteOptions::kInsertImageDimensions,
     RewriteOptions::kLazyloadImages,
     RewriteOptions::kLeftTrimUrls,
-    RewriteOptions::kMakeGoogleAnalyticsAsync,
     RewriteOptions::kPrioritizeCriticalCss,
     RewriteOptions::kResizeToRenderedImageDimensions,
     RewriteOptions::kResponsiveImages,
@@ -671,15 +696,19 @@ const RewriteOptions::Filter kDangerousFilterSet[] = {
     RewriteOptions::kCachePartialHtmlDeprecated,
     RewriteOptions::kCanonicalizeJavascriptLibraries,
     RewriteOptions::kComputeVisibleTextDeprecated,
+    RewriteOptions::kDeferIframeDeprecated,
     RewriteOptions::kDeterministicJs,  // used for measurement
     RewriteOptions::kDisableJavascript,
-    RewriteOptions::kDivStructure,
+    RewriteOptions::kDivStructureDeprecated,
     RewriteOptions::kExperimentCollectMobImageInfo,
-    RewriteOptions::kExplicitCloseTags,
+    RewriteOptions::kExplicitCloseTagsDeprecated,
     RewriteOptions::kFixReflows,
+    RewriteOptions::kFlushSubresourcesDeprecated,
+    RewriteOptions::kMakeGoogleAnalyticsAsyncDeprecated,
     RewriteOptions::kMobilize,
-    RewriteOptions::kMobilizePrecompute,      // TODO(jud): Unused, remove.
-    RewriteOptions::kServeDeprecationNotice,  // internal.
+    RewriteOptions::kMobilizePrecomputeDeprecated,
+    RewriteOptions::kSplitHtmlDeprecated,
+    RewriteOptions::kSplitHtmlHelperDeprecated,
     RewriteOptions::kStripScripts,
 };
 
@@ -688,15 +717,9 @@ const RewriteOptions::Filter kDangerousFilterSet[] = {
 // SupportNoscriptFilter::IsAnyFilterRequiringScriptExecutionEnabled() method
 // if you update this list.
 const RewriteOptions::Filter kRequiresScriptExecutionFilterSet[] = {
-    RewriteOptions::kCachePartialHtmlDeprecated,
-    RewriteOptions::kDedupInlinedImages,
-    RewriteOptions::kDeferIframe,
-    RewriteOptions::kDeferJavascript,
-    RewriteOptions::kDelayImages,
-    RewriteOptions::kFlushSubresources,
-    RewriteOptions::kLazyloadImages,
-    RewriteOptions::kLocalStorageCache,
-    RewriteOptions::kMobilize,
+    RewriteOptions::kDedupInlinedImages, RewriteOptions::kDeferJavascript,
+    RewriteOptions::kDelayImages,        RewriteOptions::kLazyloadImages,
+    RewriteOptions::kLocalStorageCache,  RewriteOptions::kMobilize,
     // We do not include kPrioritizeVisibleContent since we do not want to
     // attach SupportNoscriptFilter in the case of blink pcache miss
     // pass-through, since this response will not have any custom script
@@ -714,7 +737,6 @@ const RewriteOptions::Filter kAddHeadFilters[] = {
     RewriteOptions::kCombineHeads,
     RewriteOptions::kDeterministicJs,
     RewriteOptions::kHandleNoscriptRedirect,
-    RewriteOptions::kMakeGoogleAnalyticsAsync,
     RewriteOptions::kMobilize,
     RewriteOptions::kMoveCssAboveScripts,
     RewriteOptions::kMoveCssToHead,
@@ -769,22 +791,27 @@ const RewriteOptions::FilterEnumToIdAndNameEntry
          "Convert animated images to WebP"},
         {RewriteOptions::kConvertToWebpLossless, "ws",
          "When converting images to WebP, prefer lossless conversions"},
+        {RewriteOptions::kConvertJpegToAvif, "ja", "Convert Jpeg To Avif"},
+        {RewriteOptions::kConvertToAvifLossless, "al",
+         "When converting images to Avif, prefer lossless conversions"},
+        {RewriteOptions::kConvertToAvifAnimated, "am",
+         "Convert animated images to Avif"},
         {RewriteOptions::kDebug, "db", "Debug"},
         {RewriteOptions::kDecodeRewrittenUrls, "du", "Decode Rewritten URLs"},
         {RewriteOptions::kDedupInlinedImages, "dd", "Dedup Inlined Images"},
-        {RewriteOptions::kDeferIframe, "df", "Defer Iframe"},
+        {RewriteOptions::kDeferIframeDeprecated, "df", "Deprecated."},
         {RewriteOptions::kDeferJavascript, "dj", "Defer Javascript"},
         {RewriteOptions::kDelayImages, "di", "Delay Images"},
         {RewriteOptions::kDeterministicJs, "mj", "Deterministic Js"},
         {RewriteOptions::kDisableJavascript, "jd",
          "Disables scripts by placing them inside noscript tags"},
-        {RewriteOptions::kDivStructure, "ds", "Div Structure"},
+        {RewriteOptions::kDivStructureDeprecated, "ds", "Deprecated."},
         {RewriteOptions::kElideAttributes, "ea", "Elide Attributes"},
         {RewriteOptions::kExperimentCollectMobImageInfo, "xi",
          "Experiment: collect image info to help mobilization"},
         {RewriteOptions::kExperimentHttp2, "x2",
          "Experiment: http2-specific features in development"},
-        {RewriteOptions::kExplicitCloseTags, "xc", "Explicit Close Tags"},
+        {RewriteOptions::kExplicitCloseTagsDeprecated, "xc", "Deprecated."},
         {RewriteOptions::kExtendCacheCss, "ec", "Cache Extend Css"},
         {RewriteOptions::kExtendCacheImages, "ei", "Cache Extend Images"},
         {RewriteOptions::kExtendCachePdfs, "ep", "Cache Extend PDFs"},
@@ -794,7 +821,7 @@ const RewriteOptions::FilterEnumToIdAndNameEntry
         {RewriteOptions::kFixReflows, "fr", "Fix Reflows"},
         {RewriteOptions::kFlattenCssImports,
          RewriteOptions::kCssImportFlattenerId, "Flatten CSS Imports"},
-        {RewriteOptions::kFlushSubresources, "fs", "Flush Subresources"},
+        {RewriteOptions::kFlushSubresourcesDeprecated, "fs", "Deprecated."},
         {RewriteOptions::kHandleNoscriptRedirect, "hn",
          "Handles Noscript Redirects"},
         {RewriteOptions::kHintPreloadSubresources, "hpsr",
@@ -817,17 +844,20 @@ const RewriteOptions::FilterEnumToIdAndNameEntry
         {RewriteOptions::kInsertGA, "ig", "Insert Google Analytics"},
         {RewriteOptions::kInsertImageDimensions, "id",
          "Insert Image Dimensions"},
+        {RewriteOptions::kInsertSpeculationRules, "isr",
+         "Insert Speculation Rules"},
         {RewriteOptions::kJpegSubsampling, "js", "Jpeg Subsampling"},
         {RewriteOptions::kLazyloadImages, "ll", "Lazyload Images"},
         {RewriteOptions::kLeftTrimUrls, "tu", "Left Trim Urls"},
         {RewriteOptions::kLocalStorageCache,
          RewriteOptions::kLocalStorageCacheId, "Local Storage Cache"},
-        {RewriteOptions::kMakeGoogleAnalyticsAsync, "ga",
-         "Make Google Analytics Async"},
+        {RewriteOptions::kMakeGoogleAnalyticsAsyncDeprecated, "ga",
+         "Deprecated."},
         {RewriteOptions::kMakeShowAdsAsync, "gaa",
          "Convert showads.js use to async adsbygoogle.js"},
         {RewriteOptions::kMobilize, "mob", "Mobilize Webpage"},
-        {RewriteOptions::kMobilizePrecompute, "mob_precompute", "Deprecated."},
+        {RewriteOptions::kMobilizePrecomputeDeprecated, "mob_precompute",
+         "Deprecated."},
         {RewriteOptions::kMoveCssAboveScripts, "cj", "Move Css Above Scripts"},
         {RewriteOptions::kMoveCssToHead, "cm", "Move Css To Head"},
         {RewriteOptions::kOutlineCss, "co", "Outline Css"},
@@ -835,9 +865,12 @@ const RewriteOptions::FilterEnumToIdAndNameEntry
         {RewriteOptions::kPedantic, "pc", "Add pedantic types"},
         {RewriteOptions::kPrioritizeCriticalCss,
          RewriteOptions::kPrioritizeCriticalCssId, "Prioritize Critical Css"},
+        {RewriteOptions::kPrioritizeCriticalImages, "pci",
+         "Prioritize Critical Images"},
         {RewriteOptions::kRecompressJpeg, "rj", "Recompress Jpeg"},
         {RewriteOptions::kRecompressPng, "rp", "Recompress Png"},
         {RewriteOptions::kRecompressWebp, "rw", "Recompress Webp"},
+        {RewriteOptions::kRecompressAvif, "ra", "Recompress Avif"},
         {RewriteOptions::kRemoveComments, "rc", "Remove Comments"},
         {RewriteOptions::kRemoveQuotes, "rq", "Remove Quotes"},
         {RewriteOptions::kResizeImages, "ri", "Resize Images"},
@@ -857,10 +890,8 @@ const RewriteOptions::FilterEnumToIdAndNameEntry
          "Rewrite Style Attributes"},
         {RewriteOptions::kRewriteStyleAttributesWithUrl, "cu",
          "Rewrite Style Attributes With Url"},
-        {RewriteOptions::kServeDeprecationNotice, "sd",
-         "Serve Deprecation Notice"},
-        {RewriteOptions::kSplitHtml, "sh", "Deprecated"},
-        {RewriteOptions::kSplitHtmlHelper, "se", "Deprecated"},
+        {RewriteOptions::kSplitHtmlDeprecated, "sh", "Deprecated."},
+        {RewriteOptions::kSplitHtmlHelperDeprecated, "se", "Deprecated."},
         {RewriteOptions::kSpriteImages, RewriteOptions::kImageCombineId,
          "Sprite Images"},
         {RewriteOptions::kStripImageColorProfile, "cp",
@@ -1118,7 +1149,11 @@ bool RewriteOptions::ImageOptimizationEnabled() const {
           this->Enabled(RewriteOptions::kConvertPngToJpeg) ||
           this->Enabled(RewriteOptions::kConvertJpegToWebp) ||
           this->Enabled(RewriteOptions::kConvertToWebpAnimated) ||
-          this->Enabled(RewriteOptions::kConvertToWebpLossless));
+          this->Enabled(RewriteOptions::kConvertToWebpLossless) ||
+          this->Enabled(RewriteOptions::kRecompressAvif) ||
+          this->Enabled(RewriteOptions::kConvertJpegToAvif) ||
+          this->Enabled(RewriteOptions::kConvertToAvifAnimated) ||
+          this->Enabled(RewriteOptions::kConvertToAvifLossless));
 }
 
 RewriteOptions::RewriteOptions(ThreadSystem* thread_system)
@@ -1252,6 +1287,17 @@ void RewriteOptions::AddProperties() {
   REWRITE_OPTION_PROPERTIES_SEGMENT_4(REGISTER_OPTION)
 
 #undef REGISTER_OPTION
+
+  // Mirrors serve_rewritten_webp_urls_to_any_agent_ (registered in
+  // rewrite_options_properties.inc). Registered here as an explicit
+  // AddBaseProperty call -- alongside the other non-table registrations below --
+  // because the generated properties table (.inc) is owned by another track;
+  // this keeps the AVIF option self-contained to rewrite_options.{h,cc}. Gates
+  // the canonical-AvifLevel assumption in ImageUrlEncoder::SetAvifCapability.
+  AddBaseProperty(true,
+                  &RewriteOptions::serve_rewritten_avif_urls_to_any_agent_,
+                  "saaa", kServeAvifToAnyAgent, kDirectoryScope,
+                  "Serve rewritten .avif images to any user-agent", true);
 
   ResponsiveDensities default_densities;
   default_densities.assign(kDefaultResponsiveImageDensities,
@@ -1698,19 +1744,19 @@ void RewriteOptions::DisallowResourcesForProxy() {
 bool RewriteOptions::EnableFiltersByCommaSeparatedList(
     const StringPiece& filters, MessageHandler* handler) {
   return AddCommaSeparatedListToFilterSetState(filters, &enabled_filters_,
-                                               handler);
+                                               handler, true /* enabling */);
 }
 
 bool RewriteOptions::DisableFiltersByCommaSeparatedList(
     const StringPiece& filters, MessageHandler* handler) {
   return AddCommaSeparatedListToFilterSetState(filters, &disabled_filters_,
-                                               handler);
+                                               handler, false /* enabling */);
 }
 
 bool RewriteOptions::ForbidFiltersByCommaSeparatedList(
     const StringPiece& filters, MessageHandler* handler) {
   return AddCommaSeparatedListToFilterSetState(filters, &forbidden_filters_,
-                                               handler);
+                                               handler, false /* enabling */);
 }
 
 void RewriteOptions::DisableAllFilters() {
@@ -1814,21 +1860,23 @@ void RewriteOptions::ClearFilters() {
 }
 
 bool RewriteOptions::AddCommaSeparatedListToFilterSetState(
-    const StringPiece& filters, FilterSet* set, MessageHandler* handler) {
+    const StringPiece& filters, FilterSet* set, MessageHandler* handler,
+    bool enabling) {
   DCHECK(!frozen_);
   size_t prev_set_size = set->size();
-  bool ret = AddCommaSeparatedListToFilterSet(filters, set, handler);
+  bool ret = AddCommaSeparatedListToFilterSet(filters, set, handler, enabling);
   modified_ |= (set->size() != prev_set_size);
   return ret;
 }
 
 bool RewriteOptions::AddCommaSeparatedListToFilterSet(
-    const StringPiece& filters, FilterSet* set, MessageHandler* handler) {
+    const StringPiece& filters, FilterSet* set, MessageHandler* handler,
+    bool enabling) {
   StringPieceVector names;
   SplitStringPieceToVector(filters, ",", &names, true);
   bool ret = true;
   for (int i = 0, n = names.size(); i < n; ++i) {
-    ret &= AddByNameToFilterSet(names[i], set, handler);
+    ret &= AddByNameToFilterSet(names[i], set, handler, enabling);
   }
   return ret;
 }
@@ -1851,16 +1899,19 @@ bool RewriteOptions::AdjustFiltersByCommaSeparatedList(
     if (!option.empty()) {
       if (option[0] == '-') {
         option.remove_prefix(1);
-        ret &= AddByNameToFilterSet(names[i], &disabled_filters_, handler);
+        ret &= AddByNameToFilterSet(names[i], &disabled_filters_, handler,
+                                    false /* enabling */);
       } else if (option[0] == '+') {
         option.remove_prefix(1);
-        ret &= AddByNameToFilterSet(names[i], &enabled_filters_, handler);
+        ret &= AddByNameToFilterSet(names[i], &enabled_filters_, handler,
+                                    true /* enabling */);
       } else {
         // No prefix means: reset to pass-through mode prior to
         // applying any of the filters.  +a,-b,+c" will just add
         // a and c and remove b to current default config, but
         // "+a,-b,+c,d" will just run with filters a, c and d.
-        ret &= AddByNameToFilterSet(names[i], &enabled_filters_, handler);
+        ret &= AddByNameToFilterSet(names[i], &enabled_filters_, handler,
+                                    true /* enabling */);
         non_incremental = true;
       }
     }
@@ -1883,7 +1934,8 @@ bool RewriteOptions::AdjustFiltersByCommaSeparatedList(
 
 bool RewriteOptions::AddByNameToFilterSet(const StringPiece& option,
                                           FilterSet* set,
-                                          MessageHandler* handler) {
+                                          MessageHandler* handler,
+                                          bool enabling) {
   bool ret = true;
   Filter filter = LookupFilter(option);
   if (filter == kEndOfFilters) {
@@ -1894,6 +1946,12 @@ bool RewriteOptions::AddByNameToFilterSet(const StringPiece& option,
     // if that happens!
     if (option == "rewrite_images") {
       // Every filter here needs to be listed in kCoreFilterSet as well.
+      // Note: the AVIF conversion filters (kConvertJpegToAvif,
+      // kConvertToAvifLossless, kConvertToAvifAnimated, kRecompressAvif) are
+      // deliberately NOT part of rewrite_images (or kCoreFilterSet) for their
+      // 1.15 introduction: AVIF encoding is far more CPU-expensive than WebP,
+      // so it is opt-in only — enable the individual filters explicitly.
+      // Do not add them back here without an explicit cost-profile decision.
       set->Insert(kConvertGifToPng);
       set->Insert(kConvertJpegToProgressive);
       set->Insert(kConvertJpegToWebp);
@@ -1952,10 +2010,71 @@ bool RewriteOptions::AddByNameToFilterSet(const StringPiece& option,
       ret = false;
     }
   } else {
+    // Deprecated no-op filters: the names stay accepted for config
+    // compatibility, but nothing reads the bits they set. Warn the operator
+    // that they have no effect — but only when enabling: disabling or
+    // forbidding is what the warning recommends, so those mentions stay
+    // silent (same gate as the analytics warnings below).
+    if (enabling && handler != nullptr) {
+      if (filter == kDeferIframeDeprecated) {
+        // The standalone "defer_iframe" filter was never wired up to
+        // anything: DeferIframeFilter is an integral part of
+        // defer_javascript and disable_javascript, and enabling it on its
+        // own only set a bit that nothing read.
+        handler->Message(
+            kWarning,
+            "Filter 'defer_iframe' is deprecated and has no effect; iframe "
+            "deferral is built into 'defer_javascript'.");
+      } else {
+        static const struct {
+          Filter filter;
+          const char* warning;
+        } kDeprecatedWarnings[] = {
+            {kDivStructureDeprecated,
+             "Filter 'div_structure' is deprecated and has no effect."},
+            {kExplicitCloseTagsDeprecated,
+             "Filter 'explicit_close_tags' is deprecated and has no effect."},
+            {kFlushSubresourcesDeprecated,
+             "Filter 'flush_subresources' is deprecated and has no effect; "
+             "the flush-early flow it fed was removed."},
+            {kMobilizePrecomputeDeprecated,
+             "Filter 'mobilize_precompute' is deprecated and has no "
+             "effect."},
+            {kSplitHtmlDeprecated,
+             "Filter 'split_html' is deprecated and has no effect."},
+            {kSplitHtmlHelperDeprecated,
+             "Filter 'split_html_helper' is deprecated and has no effect."},
+        };
+        for (int i = 0; i < arraysize(kDeprecatedWarnings); ++i) {
+          if (kDeprecatedWarnings[i].filter == filter) {
+            handler->Message(kWarning, "%s", kDeprecatedWarnings[i].warning);
+            break;
+          }
+        }
+      }
+    }
     set->Insert(filter);
     // kResizeMobileImages requires kDelayImages.
     if (filter == kResizeMobileImages) {
       set->Insert(kDelayImages);
+    }
+    // Warn about deprecated Universal-Analytics-era filters, but only when
+    // they are being enabled: disabling or forbidding them is exactly what
+    // the warning asks operators to do, so those mentions stay silent.
+    if (enabling && handler != nullptr) {
+      if (filter == kInsertGA) {
+        handler->Message(
+            kWarning,
+            "insert_ga targets Universal Analytics, which was discontinued in "
+            "July 2023; the injected tracker reports to a dead service. The "
+            "filter is deprecated and experiments no longer auto-enable it.");
+      } else if (filter == kMakeGoogleAnalyticsAsyncDeprecated) {
+        handler->Message(
+            kWarning,
+            "make_google_analytics_async is deprecated and is now a no-op: it "
+            "rewrote the synchronous ga.js snippet, which Universal Analytics' "
+            "shutdown made obsolete.");
+      }
     }
   }
   return ret;
@@ -2164,6 +2283,26 @@ RewriteOptions::ParseAndSetOptionFromNameWithScope(
   OptionSettingResult result =
       SetOptionFromNameInternal(name, arg, max_scope, &error_detail);
   if (result != RewriteOptions::kOptionNameUnknown) {
+    if (result == RewriteOptions::kOptionOk && handler != nullptr) {
+      if (StringCaseEqual(name, kAnalyticsID)) {
+        handler->Message(
+            kWarning,
+            "AnalyticsID targets Universal Analytics, which was discontinued "
+            "in July 2023. insert_ga is deprecated; use your own analytics "
+            "for experiment reporting.");
+      } else if (StringCaseEqual(name, kUseExperimentalJsMinifier) &&
+                 !use_experimental_js_minifier_.value()) {
+        // Only an explicit 'off' reaches this warning: an unset option takes
+        // the tokenizer-based minifier (the default), and an explicit 'on'
+        // matches it, so both stay silent.
+        handler->Message(
+            kWarning,
+            "UseExperimentalJsMinifier off: the legacy JavaScript minifier is "
+            "deprecated and will be removed in a future release. The "
+            "tokenizer-based minifier is the default; remove the directive "
+            "to silence this warning.");
+      }
+    }
     return FormatSetOptionMessage(result, name, arg, error_detail, msg);
   }
 
@@ -2605,12 +2744,74 @@ bool RewriteOptions::Forbidden(Filter filter) const {
           (forbid_all_disabled_filters() && disabled_filters_.IsSet(filter)));
 }
 
+namespace {
+
+// Rewritten-resource URLs carry the compound filter ids "ce"
+// (RewriteOptions::kCacheExtenderId, shared by all cache-extension filters)
+// and "ic" (RewriteOptions::kImageCompressionId, shared by the
+// image-optimization filters).  These ids deliberately have no entry in the
+// filter id table, so LookupFilterById resolves them to kEndOfFilters.  A
+// compound id counts as forbidden only when every filter that can produce
+// its URLs is forbidden: the URL namespace carries no per-subtype
+// information, so forbidding a single subtype cannot revoke just that
+// subtype's URLs without also breaking the still-allowed subtypes.
+// Generation of new URLs stops immediately via the per-filter Enabled()
+// checks regardless.
+const RewriteOptions::Filter kCacheExtenderIdFilters[] = {
+    RewriteOptions::kExtendCacheCss, RewriteOptions::kExtendCacheImages,
+    RewriteOptions::kExtendCachePdfs, RewriteOptions::kExtendCacheScripts};
+
+// Must stay in sync with ImageRewriteFilter::kRelatedFilters.
+const RewriteOptions::Filter kImageCompressionIdFilters[] = {
+    RewriteOptions::kConvertGifToPng,
+    RewriteOptions::kConvertJpegToProgressive,
+    RewriteOptions::kConvertJpegToWebp,
+    RewriteOptions::kConvertPngToJpeg,
+    RewriteOptions::kConvertToWebpAnimated,
+    RewriteOptions::kConvertToWebpLossless,
+    RewriteOptions::kConvertJpegToAvif,
+    RewriteOptions::kConvertToAvifLossless,
+    RewriteOptions::kConvertToAvifAnimated,
+    RewriteOptions::kJpegSubsampling,
+    RewriteOptions::kRecompressJpeg,
+    RewriteOptions::kRecompressPng,
+    RewriteOptions::kRecompressWebp,
+    RewriteOptions::kRecompressAvif,
+    RewriteOptions::kResizeImages,
+    RewriteOptions::kResizeMobileImages,
+    RewriteOptions::kStripImageColorProfile,
+    RewriteOptions::kStripImageMetaData};
+
+bool AllFiltersForbidden(const RewriteOptions& options,
+                         const RewriteOptions::Filter* filters, int num) {
+  for (int i = 0; i < num; ++i) {
+    if (!options.Forbidden(filters[i])) {
+      return false;
+    }
+  }
+  return true;
+}
+
+}  // namespace
+
 bool RewriteOptions::Forbidden(StringPiece filter_id) const {
   // It's forbidden if it's expressly forbidden or if it's disabled and all
   //  disabled filters are forbidden.
   RewriteOptions::Filter filter = RewriteOptions::LookupFilterById(filter_id);
-  // TODO(jmarantz): handle "ce" which is not indexed as a single filter.
-  return ((filter != kEndOfFilters) && Forbidden(filter));
+  if (filter != kEndOfFilters) {
+    return Forbidden(filter);
+  }
+  // The compound resource ids are not indexed as single filters; each is
+  // forbidden only once every filter that can produce its URLs is forbidden.
+  if (filter_id == kCacheExtenderId) {
+    return AllFiltersForbidden(*this, kCacheExtenderIdFilters,
+                               arraysize(kCacheExtenderIdFilters));
+  }
+  if (filter_id == kImageCompressionId) {
+    return AllFiltersForbidden(*this, kImageCompressionIdFilters,
+                               arraysize(kImageCompressionIdFilters));
+  }
+  return false;
 }
 
 bool RewriteOptions::HasRejectedHeader(
@@ -3725,9 +3926,12 @@ bool RewriteOptions::InsertExperimentSpecInVector(ExperimentSpec* spec) {
   return true;
 }
 
-// Always enable add_head, insert_ga, add_instrumentation, and HtmlWriter.  This
-// is considered a "no-filter" base for experiments.
-// Note: insert_ga no longer needs add_head, but add_instrumentation still does.
+// Always enable add_head, add_instrumentation, and HtmlWriter.  This is
+// considered a "no-filter" base for experiments.  insert_ga is no longer
+// force-enabled: it targets the discontinued Universal Analytics service, so
+// experiments do variant assignment only and reporting is bring-your-own
+// analytics (enable=insert_ga in a spec remains an explicit opt-in).
+// Note: add_instrumentation needs add_head.
 bool RewriteOptions::SetupExperimentRewriters() {
   // Don't change anything if we're not in an experiment or have some
   // unset id.
@@ -3773,7 +3977,6 @@ void RewriteOptions::SetRequiredExperimentFilters() {
   ForceEnableFilter(RewriteOptions::kAddHead);
   ForceEnableFilter(RewriteOptions::kAddInstrumentation);
   ForceEnableFilter(RewriteOptions::kComputeStatistics);
-  ForceEnableFilter(RewriteOptions::kInsertGA);
   ForceEnableFilter(RewriteOptions::kHtmlWriterFilter);
 }
 
@@ -3854,6 +4057,13 @@ void RewriteOptions::ExperimentSpec::Initialize(const StringPiece& spec,
       StringPiece ga = PieceAfterEquals(piece);
       if (ga.length() > 0) {
         ga_id_ = GoogleString(ga.data(), ga.length());
+        if (handler != nullptr) {
+          handler->Message(
+              kWarning,
+              "Experiment spec 'ga=' component targets Universal Analytics, "
+              "which was discontinued in July 2023. insert_ga is deprecated; "
+              "use your own analytics for experiment reporting.");
+        }
       }
     } else if (StringCaseStartsWith(piece, "slot")) {
       StringPiece slot = PieceAfterEquals(piece);
@@ -3872,12 +4082,14 @@ void RewriteOptions::ExperimentSpec::Initialize(const StringPiece& spec,
     } else if (StringCaseStartsWith(piece, "enable")) {
       StringPiece enabled = PieceAfterEquals(piece);
       if (enabled.length() > 0) {
-        AddCommaSeparatedListToFilterSet(enabled, &enabled_filters_, handler);
+        AddCommaSeparatedListToFilterSet(enabled, &enabled_filters_, handler,
+                                         true /* enabling */);
       }
     } else if (StringCaseStartsWith(piece, "disable")) {
       StringPiece disabled = PieceAfterEquals(piece);
       if (disabled.length() > 0) {
-        AddCommaSeparatedListToFilterSet(disabled, &disabled_filters_, handler);
+        AddCommaSeparatedListToFilterSet(disabled, &disabled_filters_, handler,
+                                         false /* enabling */);
       }
     } else if (StringCaseStartsWith(piece, "options")) {
       StringPiece options = PieceAfterEquals(piece);
@@ -4398,6 +4610,38 @@ int64 RewriteOptions::ImageWebpAnimatedQuality() const {
   int64 quality = image_webp_animated_recompress_quality_.value();
   if (quality < 0) {
     quality = ImageWebpQuality();
+  }
+  return quality;
+}
+
+int64 RewriteOptions::ImageAvifQuality() const {
+  int64 quality = image_avif_recompress_quality_.value();
+  if (quality < 0) {
+    quality = image_recompress_quality_.value();
+  }
+  return quality;
+}
+
+int64 RewriteOptions::ImageAvifQualityForSmallScreen() const {
+  int64 quality = image_avif_recompress_quality_for_small_screens_.value();
+  if (quality < 0) {
+    quality = ImageAvifQuality();
+  }
+  return quality;
+}
+
+int64 RewriteOptions::ImageAvifQualityForSaveData() const {
+  int64 quality = image_avif_quality_for_save_data_.value();
+  if (quality < 0) {
+    quality = ImageAvifQuality();
+  }
+  return quality;
+}
+
+int64 RewriteOptions::ImageAvifAnimatedQuality() const {
+  int64 quality = image_avif_animated_recompress_quality_.value();
+  if (quality < 0) {
+    quality = ImageAvifQuality();
   }
   return quality;
 }

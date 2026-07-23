@@ -106,6 +106,11 @@ const HtmlName::Keyword kSometimesLiteralTags[] = {
 // position 0 to reduce special-cases.
 const int kStartStack = 1;
 
+// Maximum size for token_ or attr_value_ accumulation buffers.
+// Prevents DoS via crafted HTML with unclosed comments, giant tag names,
+// or enormous attribute values that grow token_ without bound.
+const size_t kMaxTokenSize = 10UL * 1024 * 1024;  // 10MB
+
 #ifndef NDEBUG
 #define CHECK_KEYWORD_SET_ORDERING(keywords) \
   CheckKeywordSetOrdering(keywords, arraysize(keywords))
@@ -736,7 +741,11 @@ void HtmlLexer::EmitTagOpen(bool allow_implicit_close) {
 void HtmlLexer::EmitTagBriefClose() {
   if (!discard_until_start_state_for_error_recovery_) {
     HtmlElement* element = PopElement();
-    CloseElement(element, HtmlElement::BRIEF_CLOSE);
+    // PopElement() returns nullptr when only the sentinel remains on the
+    // stack; HtmlParse::CloseElement would dereference it.
+    if (element != nullptr) {
+      CloseElement(element, HtmlElement::BRIEF_CLOSE);
+    }
   }
   state_ = START;
 }
@@ -1036,12 +1045,14 @@ void HtmlLexer::Parse(const char* text, int size) {
       ++line_;
     }
 
-    // Guard against unbounded literal_ growth within a single element
-    // (e.g., a multi-GB <textarea>). If the size limit has been exceeded
-    // and the literal buffer is already large, stop parsing. This
-    // preserves the element-boundary behavior for normal-sized content
-    // while preventing OOM from pathological input.
-    if (size_limit_exceeded_ && literal_.size() > 10UL * 1024 * 1024) {
+    // Guard against unbounded token/attribute accumulation within a
+    // single element (e.g. unclosed comment, mega-attribute, giant
+    // tag name, multi-GB <textarea>).  This ceiling is unconditional --
+    // it applies even when no size_limit_ is configured.  10MB is
+    // generous; legitimate HTML tokens are rarely larger than a few KB.
+    if (token_.size() > kMaxTokenSize || attr_value_.size() > kMaxTokenSize ||
+        literal_.size() > kMaxTokenSize || attr_name_.size() > kMaxTokenSize) {
+      size_limit_exceeded_ = true;
       skip_parsing_ = true;
       return;
     }

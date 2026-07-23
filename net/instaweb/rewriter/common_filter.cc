@@ -131,7 +131,11 @@ void CommonFilter::Characters(net_instaweb::HtmlCharactersNode* characters) {
   if (end_body_point_ != nullptr && !OnlyWhitespace(characters->contents())) {
     end_body_point_ = nullptr;
   }
+  // Run actual filter's CharactersImpl.
+  CharactersImpl(characters);
 }
+
+void CommonFilter::CharactersImpl(HtmlCharactersNode* characters) {}
 
 // Returns whether or not we can resolve against the base tag.  References
 // that occur before the base tag can not be resolved against it.

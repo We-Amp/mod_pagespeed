@@ -25,6 +25,7 @@
 #include "base/logging.h"
 //#include "strings/stringpiece_utils.h"
 #include "pagespeed/kernel/base/basictypes.h"
+#include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/base/timer.h"
@@ -247,6 +248,14 @@ void SystemRewriteOptions::AddProperties() {
                     "from the memory-mapped volume, which the OS page cache "
                     "already keeps hot; -1 inherits LRUCacheKbPerProcess.",
                     true);
+  AddSystemProperty(false, &SystemRewriteOptions::async_metadata_l2_writes_,
+                    "amlw", RewriteOptions::kAsyncMetadataL2Writes,
+                    "Defer the metadata cache's blocking L2 (disk) write off "
+                    "the rewrite critical path onto a single-thread "
+                    "write-behind queue.  Reads and the shared-memory L1 write "
+                    "stay synchronous, so same-machine read-your-writes is "
+                    "preserved.  Experimental; off by default.",
+                    true);
   AddSystemProperty(
       "enable", &SystemRewriteOptions::https_options_, "fhs", kFetchHttps,
       "Controls direct fetching of HTTPS resources."
@@ -291,18 +300,22 @@ void SystemRewriteOptions::AddProperties() {
   AddSystemProperty("", &SystemRewriteOptions::controller_port_, "ccp",
                     SystemRewriteOptions::kCentralControllerPort,
                     kProcessScopeStrict,
-                    "TCP port for central controller processes", false);
+                    "Deprecated and ignored: the experimental gRPC central "
+                    "controller was removed",
+                    false);
   AddSystemProperty(
       10, &SystemRewriteOptions::popularity_contest_max_inflight_requests_,
       "pci", SystemRewriteOptions::kPopularityContestMaxInFlight,
       kProcessScopeStrict,
-      "Max simultaneous requests allowed to proceed "
-      "out of the popularity contest",
+      "Deprecated and ignored: the experimental gRPC central "
+      "controller was removed",
       false);
   AddSystemProperty(
       1000, &SystemRewriteOptions::popularity_contest_max_queue_size_, "pcq",
       SystemRewriteOptions::kPopularityContestMaxQueueSize, kProcessScopeStrict,
-      "Max number of queued rewrites allowed in the popularity contest", false);
+      "Deprecated and ignored: the experimental gRPC central "
+      "controller was removed",
+      false);
   AddSystemProperty(false, &SystemRewriteOptions::disable_loopback_routing_,
                     "adlr", "DangerPermitFetchFromUnknownHosts",
                     kProcessScopeStrict,
@@ -416,30 +429,23 @@ SystemRewriteOptions* SystemRewriteOptions::DynamicCast(
   return config;
 }
 
-bool SystemRewriteOptions::ControllerPortOption::SetFromString(
-    StringPiece value_string, GoogleString* error_detail) {
-  // Valid values are: unix:<path> or a tcp port number.
-  if (strings::StartsWith(value_string, "unix:") &&
-      value_string.size() > 5 /*strlen("unix:")*/) {
-    set(value_string.as_string());
-    return true;
+RewriteOptions::OptionSettingResult
+SystemRewriteOptions::ParseAndSetOptionFromName1(StringPiece name,
+                                                 StringPiece arg,
+                                                 GoogleString* msg,
+                                                 MessageHandler* handler) {
+  // The experimental gRPC central controller was removed; these options are
+  // kept registered so old configs still parse, but they no longer do
+  // anything. Warn when they are set.
+  if (StringCaseEqual(name, kCentralControllerPort) ||
+      StringCaseEqual(name, kPopularityContestMaxInFlight) ||
+      StringCaseEqual(name, kPopularityContestMaxQueueSize)) {
+    handler->Message(kWarning,
+                     "'%s' is deprecated and ignored; the experimental gRPC "
+                     "central controller was removed.",
+                     name.as_string().c_str());
   }
-  int port;
-  if (!StringToInt(value_string, &port)) {
-    *error_detail =
-        StrCat(kCentralControllerPort,
-               " is not a valid number or 'unix:' path: '", value_string, "'");
-    return false;
-  }
-  if (port < 1 || port > 65535) {
-    *error_detail =
-        StrCat(kCentralControllerPort, " must be a TCP port in [1,65535]: '",
-               value_string, "'");
-    return false;
-  }
-  // Prepend the port with localhost: before saving it into the option.
-  set(StrCat("localhost:", value_string));
-  return true;
+  return RewriteOptions::ParseAndSetOptionFromName1(name, arg, msg, handler);
 }
 
 bool SystemRewriteOptions::HttpsOptions::SetFromString(

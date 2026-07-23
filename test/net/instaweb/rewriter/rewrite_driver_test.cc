@@ -28,6 +28,7 @@
 #include "net/instaweb/http/public/wait_url_async_fetcher.h"
 #include "net/instaweb/rewriter/public/domain_lawyer.h"
 #include "net/instaweb/rewriter/public/file_load_policy.h"
+#include "net/instaweb/rewriter/public/image_rewrite_filter.h"
 #include "net/instaweb/rewriter/public/output_resource_kind.h"
 #include "net/instaweb/rewriter/public/request_properties.h"
 #include "net/instaweb/rewriter/public/resource.h"
@@ -330,6 +331,49 @@ TEST_F(RewriteDriverTest, TestModernUrl) {
       Encode("http://example.com/", "ce", "123456789", "Puzzle.jpg", "jpg"));
   GlobalReplaceSubstring("123456789", "", &encoded_url);
   EXPECT_FALSE(CanDecodeUrl(encoded_url));
+}
+
+TEST_F(RewriteDriverTest, TestForbiddenCompoundFilterIds) {
+  rewrite_driver()->AddFilters();
+
+  GoogleString ce_url =
+      Encode("http://example.com/", "ce", "HASH", "Puzzle.jpg", "jpg");
+  // The leaf of an image URL must start with an image code (the "x"
+  // separator) or ImageUrlEncoder::Decode rejects it before the
+  // forbidden-filter check runs.
+  GoogleString ic_url =
+      Encode("http://example.com/", "ic", "HASH", "xPuzzle.jpg", "jpg");
+  EXPECT_TRUE(CanDecodeUrl(ce_url));
+  EXPECT_TRUE(CanDecodeUrl(ic_url));
+
+  // The driver's own options freeze on first use, so the forbid variations
+  // below decode against freshly-constructed options (as production does for
+  // query- or vhost-scoped options), using the same decode path and the same
+  // forbidden-filter gate.
+  StringVector decoded_urls;
+  RewriteOptions forbid_options(factory()->thread_system());
+
+  // Partial forbid: the other cache-extension filters can still produce
+  // "ce" URLs, so decoding them stays allowed.
+  forbid_options.ForbidFilter(RewriteOptions::kExtendCacheImages);
+  EXPECT_TRUE(rewrite_driver()->DecodeUrlGivenOptions(
+      GoogleUrl(ce_url), &forbid_options, server_context()->url_namer(),
+      &decoded_urls));
+
+  forbid_options.ForbidFilter(RewriteOptions::kExtendCacheCss);
+  forbid_options.ForbidFilter(RewriteOptions::kExtendCachePdfs);
+  forbid_options.ForbidFilter(RewriteOptions::kExtendCacheScripts);
+  EXPECT_FALSE(rewrite_driver()->DecodeUrlGivenOptions(
+      GoogleUrl(ce_url), &forbid_options, server_context()->url_namer(),
+      &decoded_urls));
+
+  RewriteOptions forbid_image_options(factory()->thread_system());
+  for (int i = 0; i < ImageRewriteFilter::kRelatedFiltersSize; ++i) {
+    forbid_image_options.ForbidFilter(ImageRewriteFilter::kRelatedFilters[i]);
+  }
+  EXPECT_FALSE(rewrite_driver()->DecodeUrlGivenOptions(
+      GoogleUrl(ic_url), &forbid_image_options, server_context()->url_namer(),
+      &decoded_urls));
 }
 
 class RewriteDriverTestUrlNamer : public RewriteDriverTest {

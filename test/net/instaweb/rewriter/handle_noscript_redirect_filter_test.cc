@@ -85,12 +85,52 @@ TEST_F(HandleNoscriptRedirectFilterTest, TestTwoHeadCanonical) {
   ValidateExpected("two_head_canonical", input_html, output_html);
 }
 
+TEST_F(HandleNoscriptRedirectFilterTest, TestCanonicalUrlHtmlEscaped) {
+  // Regression: the request URL is HTML-escaped before it is formatted into
+  // the inserted canonical href, matching SupportNoscriptFilter. A '&' in the
+  // path survives URL normalization (unlike '<' or '"', which get
+  // percent-encoded), so it reaches the formatter verbatim and must be emitted
+  // as "&amp;", not a raw "&".
+  GoogleString input_html =
+      "<head></head><body><img src=\"http://test.com/1.jpeg\"/></body>";
+  GoogleString output_html =
+      "<head><link rel=\"canonical\" href=\"http://test.com/a&amp;b.html\"/>"
+      "</head><body><img src=\"http://test.com/1.jpeg\"/></body>";
+  ValidateExpectedUrl("http://test.com/a&b.html", input_html, output_html);
+}
+
 TEST_F(HandleNoscriptRedirectFilterTest, TestTwoLinksInHead) {
   GoogleString input_html =
       "<head><link rel=\"canonical\" href=\"http://test.com/foo.html\">"
       "<link href=special.css rel=stylesheet type=text/css/></head>"
       "<body><img src=\"http://test.com/1.jpeg\"/></body>";
   ValidateNoChanges("two_links_in_head", input_html);
+}
+
+// Combination fixture: the inserted canonical <link> is a real element, so it
+// is visible to downstream attribute-level filters added after this filter
+// (HtmlAttributeQuoteRemoval is added last, for maximum effect).
+class HandleNoscriptRedirectRemoveQuotesTest : public RewriteTestBase {
+ protected:
+  void SetUp() override {
+    options()->EnableFilter(RewriteOptions::kHandleNoscriptRedirect);
+    options()->EnableFilter(RewriteOptions::kRemoveQuotes);
+    RewriteTestBase::SetUp();
+    rewrite_driver()->AddFilters();
+  }
+};
+
+TEST_F(HandleNoscriptRedirectRemoveQuotesTest, TestCanonicalLinkQuotesRemoved) {
+  // kRemoveQuotes strips the quote-safe rel/href quotes from the inserted link
+  // (URL characters including '/' are in the unquoted allow-set), and
+  // HtmlWriterFilter emits a guard space before "/>" because the trailing
+  // attribute is now unquoted. The pre-existing <img> is unquoted likewise.
+  GoogleString input_html =
+      "<head></head><body><img src=\"http://test.com/1.jpeg\"/></body>";
+  GoogleString output_html =
+      "<head><link rel=canonical href=http://test.com/remove_quotes.html />"
+      "</head><body><img src=http://test.com/1.jpeg /></body>";
+  ValidateExpected("remove_quotes", input_html, output_html);
 }
 
 }  // namespace net_instaweb

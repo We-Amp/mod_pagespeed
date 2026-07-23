@@ -90,6 +90,11 @@ a new script combination.
 <p>This filter currently cannot combine across inline scripts, and
 IE conditional comments.
 </p>
+<p>Module scripts (<code>&lt;script type="module"&gt;</code>) are never
+combined: modules have their own scope and execution semantics that the
+combined-script format cannot represent. A module script also acts as a
+boundary, so scripts before and after it are combined separately.
+</p>
 <p>This filter generates URLs that are essentially the concatenation
 of the URLs of all the Javascript files being combined.  The maximum URL size
 is generally limited to about 2k characters due to IE:

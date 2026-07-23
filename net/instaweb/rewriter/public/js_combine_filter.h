@@ -98,7 +98,7 @@ class JsCombineFilter : public RewriteFilter {
   void StartDocumentImpl() override;
   void StartElementImpl(HtmlElement* element) override;
   void EndElementImpl(HtmlElement* element) override;
-  void Characters(HtmlCharactersNode* characters) override;
+  void CharactersImpl(HtmlCharactersNode* characters) override;
   void Flush() override;
   void IEDirective(HtmlIEDirectiveNode* directive) override;
   const char* Name() const override { return "JsCombine"; }

@@ -1024,6 +1024,108 @@ TEST(CspParseTest, BaseUri) {
   }
 }
 
+TEST(CspParseTest, BaseUriDisablesAllBases) {
+  {
+    // No CSP directive at all: no restriction on <base>, so not neutralized.
+    std::unique_ptr<CspPolicy> p(CspPolicy::Parse("img-src *"));
+    EXPECT_FALSE(p->BaseUriDisablesAllBases());
+  }
+
+  {
+    // base-uri present but with no directive of its own: still not neutralized.
+    std::unique_ptr<CspPolicy> p(CspPolicy::Parse("default-src 'none'"));
+    EXPECT_FALSE(p->BaseUriDisablesAllBases());
+  }
+
+  {
+    // The provably-safe case: base-uri 'none' matches nothing, so the browser
+    // ignores every <base>.
+    std::unique_ptr<CspPolicy> p(CspPolicy::Parse("base-uri 'none'"));
+    EXPECT_TRUE(p->BaseUriDisablesAllBases());
+  }
+
+  {
+    // An empty base-uri source list is equivalent to 'none'.
+    std::unique_ptr<CspPolicy> p(CspPolicy::Parse("base-uri"));
+    EXPECT_TRUE(p->BaseUriDisablesAllBases());
+  }
+
+  {
+    // base-uri 'self' still permits a same-origin <base> (which can change the
+    // path and thus resolution), so it does NOT neutralize.
+    std::unique_ptr<CspPolicy> p(CspPolicy::Parse("base-uri 'self'"));
+    EXPECT_FALSE(p->BaseUriDisablesAllBases());
+  }
+
+  {
+    // A host/scheme source list is likewise not neutralizing.
+    std::unique_ptr<CspPolicy> p(CspPolicy::Parse("base-uri https:"));
+    EXPECT_FALSE(p->BaseUriDisablesAllBases());
+  }
+
+  {
+    // The catch-all wildcard permits any <base>: not neutralizing.
+    std::unique_ptr<CspPolicy> p(CspPolicy::Parse("base-uri *"));
+    EXPECT_FALSE(p->BaseUriDisablesAllBases());
+  }
+
+  {
+    // Keyword-only lists contribute no URL-matchable expression. A nonce
+    // never matches a URL, so a nonce-only base-uri blocks every <base>,
+    // just like 'none' --- per the spec's URL matching algorithm and
+    // observed browser behavior.
+    std::unique_ptr<CspPolicy> p(
+        CspPolicy::Parse("base-uri 'nonce-b64Value='"));
+    EXPECT_TRUE(p->BaseUriDisablesAllBases());
+  }
+
+  {
+    // Same for 'unsafe-inline': not URL-matchable, so on base-uri it leaves
+    // the list matching nothing and every <base> is ignored.
+    std::unique_ptr<CspPolicy> p(CspPolicy::Parse("base-uri 'unsafe-inline'"));
+    EXPECT_TRUE(p->BaseUriDisablesAllBases());
+  }
+}
+
+TEST(CspContext, BaseNeutralized) {
+  {
+    // Base case: no policies, nothing neutralized.
+    CspContext ctx;
+    EXPECT_FALSE(ctx.IsBaseNeutralizedByCsp());
+  }
+
+  {
+    // A single base-uri 'none' policy neutralizes all bases.
+    CspContext ctx;
+    ctx.AddPolicy(CspPolicy::Parse("base-uri 'none'"));
+    EXPECT_TRUE(ctx.IsBaseNeutralizedByCsp());
+  }
+
+  {
+    // A non-empty base-uri does not neutralize.
+    CspContext ctx;
+    ctx.AddPolicy(CspPolicy::Parse("base-uri 'self'"));
+    EXPECT_FALSE(ctx.IsBaseNeutralizedByCsp());
+  }
+
+  {
+    // CSP is a conjunction: if any enforced policy blocks all bases, the
+    // browser ignores <base> regardless of what the others permit.
+    CspContext ctx;
+    ctx.AddPolicy(CspPolicy::Parse("base-uri 'self'"));
+    ctx.AddPolicy(CspPolicy::Parse("base-uri 'none'"));
+    EXPECT_TRUE(ctx.IsBaseNeutralizedByCsp());
+  }
+
+  {
+    // Multiple non-neutralizing base-uri policies: still not neutralized.
+    CspContext ctx;
+    ctx.AddPolicy(CspPolicy::Parse("base-uri https:"));
+    ctx.AddPolicy(CspPolicy::Parse("base-uri *.example.com"));
+    EXPECT_FALSE(ctx.IsBaseNeutralizedByCsp());
+  }
+}
+
 TEST(CspContextText, BitField) {
   {
     // Base case.

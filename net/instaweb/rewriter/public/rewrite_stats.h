@@ -117,6 +117,14 @@ class RewriteStats {
   Histogram* beacon_timings_ms_histogram() {
     return beacon_timings_ms_histogram_;
   }
+  // Core Web Vitals reported by the add_instrumentation beacon.
+  Histogram* beacon_lcp_ms_histogram() { return beacon_lcp_ms_histogram_; }
+  // CLS in fixed-point milli-units: a CLS of 0.1 is recorded as 100.
+  Histogram* beacon_cls_milli_histogram() {
+    return beacon_cls_milli_histogram_;
+  }
+  Histogram* beacon_inp_ms_histogram() { return beacon_inp_ms_histogram_; }
+  Histogram* beacon_ttfb_ms_histogram() { return beacon_ttfb_ms_histogram_; }
   // .pagespeed. resource latency in ms.
   Histogram* fetch_latency_histogram() { return fetch_latency_histogram_; }
   // HTML rewrite latency in ms.
@@ -166,6 +174,10 @@ class RewriteStats {
   Variable* successful_downstream_cache_purges_;
 
   Histogram* beacon_timings_ms_histogram_;
+  Histogram* beacon_lcp_ms_histogram_;
+  Histogram* beacon_cls_milli_histogram_;
+  Histogram* beacon_inp_ms_histogram_;
+  Histogram* beacon_ttfb_ms_histogram_;
   Histogram* fetch_latency_histogram_;
   Histogram* rewrite_latency_histogram_;
   Histogram* backend_latency_histogram_;

@@ -22,7 +22,7 @@
 #include <memory>
 
 // http_protocol.h includes httpd.h. We need to include httpd_includes.h, which
-// works around a conflicting definition of OK in gRPC.
+// captures Apache's OK macro as APACHE_OK and undefines it.
 #include "http_protocol.h"  // NOLINT
 #include "net/instaweb/rewriter/config/measurement_proxy_rewrite_options_manager.h"
 #include "net/instaweb/rewriter/public/measurement_proxy_url_namer.h"

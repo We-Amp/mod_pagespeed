@@ -59,9 +59,11 @@ browser to pre-resolve DNS for resources on the page.
 
 <h2>Operation</h2>
 <p>
-This filter inserts the tag <code>&lt;link rel="dns-prefetch"&gt;</code> (or
-<code>&lt;link rel="prefetch"&gt;</code> for IE9) in the HEAD section, for all
-domains present in the HTML document.
+This filter inserts connection warm-up hint tags in the HEAD section, for all
+domains present in the HTML document. The first two domains get a
+<code>&lt;link rel="preconnect"&gt;</code> tag, which warms up a full
+connection; the remaining domains get the cheaper
+<code>&lt;link rel="dns-prefetch"&gt;</code> tag, which only pre-resolves DNS.
 </p>
 
 <h2>Example</h2>
@@ -87,8 +89,8 @@ and after rewriting:
 <pre class="prettyprint">
 &lt;html&gt;
   &lt;head&gt;
-    &lt;link rel="dns-prefetch" href="//www.domain1.com"&gt;
-    &lt;link rel="dns-prefetch" href="//www.domain2.com"&gt;
+    &lt;link rel="preconnect" href="https://www.domain1.com"&gt;
+    &lt;link rel="preconnect" href="https://www.domain2.com"&gt;
   &lt;/head&gt;
   &lt;body&gt;
     &lt;img src="www.domain1.com/image1.jpeg"&gt;

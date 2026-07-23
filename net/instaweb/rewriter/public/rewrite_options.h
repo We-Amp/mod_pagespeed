@@ -128,19 +128,26 @@ class RewriteOptions {
     kConvertPngToJpeg,
     kConvertToWebpAnimated,
     kConvertToWebpLossless,
+    kConvertJpegToAvif,
+    kConvertToAvifLossless,
+    kConvertToAvifAnimated,
     kDebug,
     kDecodeRewrittenUrls,
     kDedupInlinedImages,
-    kDeferIframe,
+    // Accepted-but-inert. DeferIframeFilter runs only as a built-in helper of
+    // defer_js/disable_js.
+    kDeferIframeDeprecated,
     kDeferJavascript,
     kDelayImages,
     kDeterministicJs,
     kDisableJavascript,
-    kDivStructure,
+    // Accepted-but-inert; nothing consumes the enabled bit.
+    kDivStructureDeprecated,
     kElideAttributes,
     kExperimentCollectMobImageInfo,
     kExperimentHttp2,  // used while developing proper HTTP2 features.
-    kExplicitCloseTags,
+    // Accepted-but-inert; nothing consumes the enabled bit.
+    kExplicitCloseTagsDeprecated,
     kExtendCacheCss,
     kExtendCacheImages,
     kExtendCachePdfs,
@@ -148,7 +155,8 @@ class RewriteOptions {
     kFallbackRewriteCssUrls,
     kFixReflows,
     kFlattenCssImports,
-    kFlushSubresources,
+    // Accepted-but-inert; the flush-early flow it fed was removed.
+    kFlushSubresourcesDeprecated,
     kHandleNoscriptRedirect,
     kHintPreloadSubresources,
     kHtmlWriterFilter,
@@ -163,23 +171,29 @@ class RewriteOptions {
     kInsertDnsPrefetch,
     kInsertGA,
     kInsertImageDimensions,
+    kInsertSpeculationRules,
     kJpegSubsampling,
     kLazyloadImages,
     kLeftTrimUrls,
     kLocalStorageCache,
-    kMakeGoogleAnalyticsAsync,
+    kMakeGoogleAnalyticsAsyncDeprecated,
     kMakeShowAdsAsync,
+    // Load-bearing bit: gates UsePerOriginPropertyCachePage(), membership in
+    // kAddHeadFilters, and the MobilizeFilters level head. Do not deprecate.
     kMobilize,
-    kMobilizePrecompute,  // TODO(jud): This is unused, remove it.
+    // Accepted-but-inert; never had a consumer.
+    kMobilizePrecomputeDeprecated,
     kMoveCssAboveScripts,
     kMoveCssToHead,
     kOutlineCss,
     kOutlineJavascript,
     kPedantic,
     kPrioritizeCriticalCss,
+    kPrioritizeCriticalImages,
     kRecompressJpeg,
     kRecompressPng,
     kRecompressWebp,
+    kRecompressAvif,
     kRemoveComments,
     kRemoveQuotes,
     kResizeImages,
@@ -193,9 +207,9 @@ class RewriteOptions {
     kRewriteJavascriptInline,
     kRewriteStyleAttributes,
     kRewriteStyleAttributesWithUrl,
-    kServeDeprecationNotice,
-    kSplitHtml,
-    kSplitHtmlHelper,
+    // Accepted-but-inert; nothing consumes the enabled bits.
+    kSplitHtmlDeprecated,
+    kSplitHtmlHelperDeprecated,
     kSpriteImages,
     kStripImageColorProfile,
     kStripImageMetaData,
@@ -341,6 +355,13 @@ class RewriteOptions {
   static const char kImageWebpRecompressionQualityForSmallScreens[];
   static const char kImageWebpAnimatedRecompressionQuality[];
   static const char kImageWebpTimeoutMs[];
+  // AVIF recompression-quality option names, mirroring the
+  // WebP quality options above.
+  static const char kImageAvifQualityForSaveData[];
+  static const char kImageAvifRecompressionQuality[];
+  static const char kImageAvifRecompressionQualityForSmallScreens[];
+  static const char kImageAvifAnimatedRecompressionQuality[];
+  static const char kImageAvifTimeoutMs[];
   static const char kImplicitCacheTtlMs[];
   static const char kIncreaseSpeedTracking[];
   static const char kInlineOnlyCriticalImages[];
@@ -459,6 +480,7 @@ class RewriteOptions {
   static const char kCycloneZeroCopy[];
   static const char kCycloneZeroCopyServe[];
   static const char kCycloneRamCacheKb[];
+  static const char kAsyncMetadataL2Writes[];
   static const char kFetcherProxy[];
   static const char kFetchHttps[];
   static const char kFileCacheCleanSizeKb[];
@@ -473,6 +495,7 @@ class RewriteOptions {
   static const char kProxySuffix[];
   static const char kRateLimitBackgroundFetches[];
   static const char kServeWebpToAnyAgent[];
+  static const char kServeAvifToAnyAgent[];
   static const char kSlurpDirectory[];
   static const char kSlurpFlushLimit[];
   static const char kSlurpReadOnly[];
@@ -594,6 +617,13 @@ class RewriteOptions {
   int64 ImageWebpQualityForSmallScreen() const;
   int64 ImageWebpQualityForSaveData() const;
   int64 ImageWebpAnimatedQuality() const;
+  // AVIF recompression-quality accessors, mirroring the WebP
+  // accessors above (fall back to ImageAvifQuality()/ImageRecompressionQuality
+  // when unset, exactly as WebP does).
+  int64 ImageAvifQuality() const;
+  int64 ImageAvifQualityForSmallScreen() const;
+  int64 ImageAvifQualityForSaveData() const;
+  int64 ImageAvifAnimatedQuality() const;
   int64 ImageJpegNumProgressiveScansForSmallScreen() const;
   // Returns true if any quality for small screen is valid and different from
   // the base quality.
@@ -688,8 +718,12 @@ class RewriteOptions {
   // filter(s) to the given set. If the given name doesn't match -and- if
   // handler is not NULL, logs a warning message to handler. Returns true if
   // the name matched and the set was updated, false otherwise.
+  // 'enabling' says whether the set being built enables the named filters;
+  // deprecated analytics filters (insert_ga, make_google_analytics_async) log
+  // a deprecation warning only when enabling is true, so disable/forbid
+  // mentions stay silent.
   static bool AddByNameToFilterSet(const StringPiece& option, FilterSet* set,
-                                   MessageHandler* handler);
+                                   MessageHandler* handler, bool enabling);
 
   // Convenience name for (name,value) pairs of options (typically filter
   // parameters), as well as sets of those pairs.
@@ -861,6 +895,14 @@ class RewriteOptions {
   static const int64 kDefaultImageWebpAnimatedRecompressQuality;
   static const int64 kDefaultImageWebpRecompressQualityForSmallScreens;
   static const int64 kDefaultImageWebpTimeoutMs;
+  // AVIF defaults. Quality default mirrors the WebP default
+  // shape (-1 falls back to ImageRecompressionQuality); see the spike outcome
+  // (quality ~50-60) for the encoder default applied in image.cc.
+  static const int64 kDefaultImageAvifQualityForSaveData;
+  static const int64 kDefaultImageAvifRecompressQuality;
+  static const int64 kDefaultImageAvifAnimatedRecompressQuality;
+  static const int64 kDefaultImageAvifRecompressQualityForSmallScreens;
+  static const int64 kDefaultImageAvifTimeoutMs;
   static const int kDefaultDomainShardCount;
   static const int64 kDefaultOptionCookiesDurationMs;
   static const int64 kDefaultLoadFromFileCacheTtlMs;
@@ -2335,6 +2377,24 @@ class RewriteOptions {
     set_option(x, &image_webp_timeout_ms_);
   }
 
+  // AVIF quality/timeout setters, mirroring the WebP setters.
+  void set_image_avif_recompress_quality(int64 x) {
+    set_option(x, &image_avif_recompress_quality_);
+  }
+  void set_image_avif_recompress_quality_for_small_screens(int64 x) {
+    set_option(x, &image_avif_recompress_quality_for_small_screens_);
+  }
+  void set_image_avif_animated_recompress_quality(int64 x) {
+    set_option(x, &image_avif_animated_recompress_quality_);
+  }
+  void set_image_avif_quality_for_save_data(int64 x) {
+    set_option(x, &image_avif_quality_for_save_data_);
+  }
+  int64 image_avif_timeout_ms() const { return image_avif_timeout_ms_.value(); }
+  void set_image_avif_timeout_ms(int64 x) {
+    set_option(x, &image_avif_timeout_ms_);
+  }
+
   bool domain_rewrite_hyperlinks() const {
     return CheckMobilizeFiltersOption(domain_rewrite_hyperlinks_);
   }
@@ -2621,6 +2681,13 @@ class RewriteOptions {
   }
   bool serve_rewritten_webp_urls_to_any_agent() const {
     return serve_rewritten_webp_urls_to_any_agent_.value();
+  }
+
+  void set_serve_rewritten_avif_urls_to_any_agent(bool x) {
+    set_option(x, &serve_rewritten_avif_urls_to_any_agent_);
+  }
+  bool serve_rewritten_avif_urls_to_any_agent() const {
+    return serve_rewritten_avif_urls_to_any_agent_.value();
   }
 
   void set_cache_fragment(StringPiece p) {
@@ -2945,6 +3012,15 @@ class RewriteOptions {
 
   // Convert the filter name to a Filter.
   static Filter LookupFilter(const StringPiece& filter_name);
+
+  // Inverse of LookupFilter: returns the configuration name that a user would
+  // write in EnableFilters for `filter`, or an empty StringPiece if the filter
+  // has no configuration name (deliberately-internal filters).  If several
+  // names alias the same filter, an arbitrary one of them is returned.
+  //
+  // This exists so tests can assert that every user-facing filter is actually
+  // reachable from configuration; see RewriteOptionsTest.AllFiltersAreNameable.
+  static StringPiece LookupFilterName(Filter filter);
 
   // Looks up an option id/name and returns the corresponding PropertyBase if
   // found, or NULL if the id/name is not found.
@@ -3499,10 +3575,12 @@ class RewriteOptions {
   static void AddProperties();
   bool AddCommaSeparatedListToFilterSetState(const StringPiece& filters,
                                              FilterSet* set,
-                                             MessageHandler* handler);
+                                             MessageHandler* handler,
+                                             bool enabling);
   static bool AddCommaSeparatedListToFilterSet(const StringPiece& filters,
                                                FilterSet* set,
-                                               MessageHandler* handler);
+                                               MessageHandler* handler,
+                                               bool enabling);
   // Initialize the Filter id to enum reverse array used for fast lookups.
   static void InitFilterIdToEnumArray();
   static void InitOptionIdToPropertyArray();
@@ -3720,6 +3798,15 @@ class RewriteOptions {
   RangeBoundedOption<int64, -1, 100> image_webp_quality_for_save_data_;
   Option<int64> image_webp_timeout_ms_;
 
+  // Options related to AVIF compression, mirroring the WebP
+  // members above.
+  RangeBoundedOption<int64, -1, 100> image_avif_recompress_quality_;
+  RangeBoundedOption<int64, -1, 100>
+      image_avif_recompress_quality_for_small_screens_;
+  RangeBoundedOption<int64, -1, 100> image_avif_animated_recompress_quality_;
+  RangeBoundedOption<int64, -1, 100> image_avif_quality_for_save_data_;
+  Option<int64> image_avif_timeout_ms_;
+
   Option<int> image_max_rewrites_at_once_;
   Option<int> max_url_segment_size_;  // For http://a/b/c.d, use strlen("c.d").
   Option<int> max_url_size_;          // This is strlen("http://a/b/c.d").
@@ -3868,6 +3955,7 @@ class RewriteOptions {
   Option<bool> report_unload_time_;
 
   Option<bool> serve_rewritten_webp_urls_to_any_agent_;
+  Option<bool> serve_rewritten_avif_urls_to_any_agent_;
 
   // Enables experimental code in defer js.
   Option<bool> enable_defer_js_experimental_;

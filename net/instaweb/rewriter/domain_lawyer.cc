@@ -20,6 +20,7 @@
 #include "net/instaweb/rewriter/public/domain_lawyer.h"
 
 #include <map>
+#include <mutex>
 #include <set>
 #include <utility>  // for std::pair
 #include <vector>
@@ -785,6 +786,22 @@ bool DomainLawyer::AddTwoProtocolOriginDomainMapping(
                                  handler);
 }
 
+namespace {
+
+// ModPagespeedShardDomain / "pagespeed ShardDomain" is legal in Apache
+// directory scope, where it is re-parsed for every request, so the
+// deprecation warning in AddShard is deduped process-wide: each distinct
+// mapping warns at most once.  Leaky by design: shard configs are static
+// and few.
+bool ShouldWarnShardDeprecation(const GoogleString& mapping) {
+  static std::mutex* mutex = new std::mutex;
+  static std::set<GoogleString>* warned_mappings = new std::set<GoogleString>;
+  std::lock_guard<std::mutex> lock(*mutex);
+  return warned_mappings->insert(mapping).second;
+}
+
+}  // namespace
+
 bool DomainLawyer::AddShard(const StringPiece& shard_domain_name,
                             const StringPiece& comma_separated_shards,
                             MessageHandler* handler) {
@@ -792,6 +809,22 @@ bool DomainLawyer::AddShard(const StringPiece& shard_domain_name,
       shard_domain_name, comma_separated_shards, "" /* host_header */,
       &Domain::SetShardFrom, false /* allow_wildcards */,
       true /* allow_map_to_https */, true /* authorize */, handler);
+  if (result) {
+    // Domain sharding is an HTTP/1-era workaround for per-host connection
+    // limits. Under HTTP/2 and HTTP/3 it is a pessimization: each shard
+    // costs an extra connection and TLS handshake, while a single
+    // multiplexed connection already provides full parallelism.
+    if (ShouldWarnShardDeprecation(
+            StrCat(shard_domain_name, "->", comma_separated_shards))) {
+      handler->Message(
+          kWarning,
+          "Domain sharding of %s to {%s} is deprecated: it hurts performance "
+          "with HTTP/2 and HTTP/3, which multiplex over a single connection. "
+          "Remove the ShardDomain directive.",
+          shard_domain_name.as_string().c_str(),
+          comma_separated_shards.as_string().c_str());
+    }
+  }
   can_rewrite_domains_ |= result;
   return result;
 }

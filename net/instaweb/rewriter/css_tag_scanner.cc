@@ -166,6 +166,27 @@ inline LexResult EatLiteral(CssTagScanner::InputPortion input_kind,
   return kLexInterrupted;
 }
 
+// Like EatLiteral, but matches expected case-insensitively (expected must be
+// lowercase). CSS functional notation and @-keywords are case-insensitive.
+inline LexResult EatLiteralNoCase(CssTagScanner::InputPortion input_kind,
+                                  StringPiece expected, StringPiece* in) {
+  if (StringCaseStartsWith(*in, expected)) {
+    in->remove_prefix(expected.size());
+    return kLexYes;
+  }
+
+  if (input_kind == CssTagScanner::kInputIncludesEnd) {
+    return kLexNo;
+  }
+
+  if (in->size() >= expected.size()) {
+    return kLexNo;
+  }
+
+  // This is conservative: we may already see a difference at this point.
+  return kLexInterrupted;
+}
+
 // Extract string- or identifier-like content from CSS until reaching the
 // given terminator (which will not be included in the output), handling simple
 // escapes along the way. If is_string is true, will also permit escaped line
@@ -384,7 +405,7 @@ bool CssTagScanner::TransformUrlsStreaming(
       // end point for batch write to exclude the @, so if we
       // write out with transformed URL, we should start with
       // @import.
-      switch (EatLiteral(input_portion, "import", &remaining)) {
+      switch (EatLiteralNoCase(input_portion, "import", &remaining)) {
         case kLexYes: {
           TrimLeadingWhitespace(&remaining);
           // The code here handles @import "foo" and @import 'foo';
@@ -407,13 +428,13 @@ bool CssTagScanner::TransformUrlsStreaming(
         case kLexNo:
           break;
       }
-    } else if (c == 'u') {
+    } else if (c == 'u' || c == 'U') {
       // See if we are at url(. Also provisionally set an
       // end point for batch write to exclude the u, so if we
       // write out with transformed URL, we should start with
       // url(
       GoogleString wrapped_url;
-      switch (EatLiteral(input_portion, "rl(", &remaining)) {
+      switch (EatLiteralNoCase(input_portion, "rl(", &remaining)) {
         case kLexYes: {
           TrimLeadingWhitespace(&remaining);
           // Note if we have a quoted URL inside url(), it needs to be
@@ -522,7 +543,8 @@ bool CssTagScanner::HasImport(const StringPiece& contents,
 }
 
 bool CssTagScanner::HasUrl(const StringPiece& contents) {
-  return (contents.find(CssTagScanner::kUriValue) != StringPiece::npos);
+  return (FindIgnoreCase(contents, CssTagScanner::kUriValue) !=
+          StringPiece::npos);
 }
 
 bool CssTagScanner::IsStylesheetOrAlternate(

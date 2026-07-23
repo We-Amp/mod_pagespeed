@@ -46,6 +46,7 @@ struct ContentType {
     kJpeg,
     kSwf,
     kWebp,
+    kAvif,
     kIco,
     kJson,
     kSourceMap,
@@ -123,6 +124,7 @@ extern const ContentType& kContentTypeGif;
 extern const ContentType& kContentTypeJpeg;
 extern const ContentType& kContentTypeSwf;
 extern const ContentType& kContentTypeWebp;
+extern const ContentType& kContentTypeAvif;
 extern const ContentType& kContentTypeIco;
 // PDF:
 extern const ContentType& kContentTypePdf;

@@ -121,10 +121,6 @@ class EnvoyRewriteDriverFactory : public SystemRewriteDriverFactory {
 
   void SetCircularBuffer(SharedCircularBuffer* buffer) override;
 
-  void PrepareForkedProcess(const char* name) override;
-
-  void NameProcess(const char* name) override;
-
  private:
   // Timer *timer_;
 

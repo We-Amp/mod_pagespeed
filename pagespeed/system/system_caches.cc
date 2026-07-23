@@ -40,6 +40,7 @@
 #include "pagespeed/kernel/base/string_writer.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/cache/async_cache.h"
+#include "pagespeed/kernel/cache/async_write_behind_cache.h"
 #include "pagespeed/kernel/cache/cache_batcher.h"
 #include "pagespeed/kernel/cache/cache_stats.h"
 #include "pagespeed/kernel/cache/compressed_cache.h"
@@ -106,6 +107,9 @@ void SystemCaches::ShutDown(MessageHandler* message_handler) {
   if (redis_pool_) {
     redis_pool_->InitiateShutDown();
   }
+  if (metadata_write_behind_pool_) {
+    metadata_write_behind_pool_->InitiateShutDown();
+  }
 #if PAGESPEED_ENABLE_MEMCACHED
   if (memcached_pool_) {
     memcached_pool_->WaitForShutDownComplete();
@@ -115,6 +119,12 @@ void SystemCaches::ShutDown(MessageHandler* message_handler) {
   if (redis_pool_) {
     redis_pool_->WaitForShutDownComplete();
     redis_pool_.reset(nullptr);
+  }
+  // Drain the metadata write-behind queue before any backing store is torn
+  // down, so no deferred Put/Delete outlives the cache it writes to.
+  if (metadata_write_behind_pool_) {
+    metadata_write_behind_pool_->WaitForShutDownComplete();
+    metadata_write_behind_pool_.reset(nullptr);
   }
 
   if (is_root_process_) {
@@ -458,6 +468,22 @@ void SystemCaches::SetupPcacheCohorts(ServerContext* server_context,
       server_context->AddCohort(RewriteDriver::kDependenciesCohort, pcache));
 }
 
+CacheInterface* SystemCaches::WrapMetadataL2WriteBehind(CacheInterface* l2,
+                                                        size_t l1_size_limit) {
+  // A single dedicated thread gives the write-behind queue strict FIFO order,
+  // so a Put and a later Delete of the same key can never reorder.  The pool is
+  // shared across vhosts (like memcached_pool_/redis_pool_) and is quiesced in
+  // ShutDown() before any backing store is destroyed.
+  if (metadata_write_behind_pool_ == nullptr) {
+    metadata_write_behind_pool_ = std::make_unique<QueuedWorkerPool>(
+        1, "metadata_write_behind", factory_->thread_system());
+  }
+  AsyncWriteBehindCache* write_behind = new AsyncWriteBehindCache(
+      l2, metadata_write_behind_pool_.get(), l1_size_limit);
+  factory_->TakeOwnership(write_behind);
+  return write_behind;
+}
+
 void SystemCaches::SetupCaches(ServerContext* server_context,
                                bool enable_property_cache) {
   SystemRewriteOptions* config =
@@ -578,6 +604,15 @@ void SystemCaches::SetupCaches(ServerContext* server_context,
       metadata_l1 = shm_metadata_cache;
       metadata_l2 = caches_for_path->small_tier_file_cache();
       l1_size_limit = shm_metadata_cache_info->cache_backend->MaxValueSize();
+
+      // Optionally take the blocking L2 (disk) write off the rewrite critical
+      // path.  The shm L1 above stays a synchronous write and reads consult it
+      // first, so same-machine read-your-writes is preserved; only the durable
+      // L2 write is deferred.  Entries too big for L1 keep a synchronous L2
+      // write (see AsyncWriteBehindCache).  Default off.
+      if (config->async_metadata_l2_writes()) {
+        metadata_l2 = WrapMetadataL2WriteBehind(metadata_l2, l1_size_limit);
+      }
 
       // Give the property store the same arrangement: shared memory is the
       // fast L1 for property lookups; Cyclone is the durable L2 so

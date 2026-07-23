@@ -64,6 +64,12 @@ const ContentType kTypes[] = {
     // avoid creating security vulnerabilities.
     {"image/svg+xml", ".svg", ContentType::kXml},
 
+    // AVIF. Appended at the end of the canonical block (index 18) rather than
+    // beside webp so the existing index-referenced kContentType* handles below
+    // (kTypes[0]..kTypes[16]) keep their indices. Drives the ".avif" output-URL
+    // extension via NameExtensionToContentType.
+    {"image/avif", ".avif", ContentType::kAvif},  // kTypes[18]
+
     // Synonyms; Note that the canonical types above are referenced by index
     // in the named references declared below.  The synonyms below are not
     // index-sensitive.
@@ -132,8 +138,13 @@ const ContentType& kContentTypePdf = kTypes[15];
 
 const ContentType& kContentTypeBinaryOctetStream = kTypes[16];
 
+// kTypes[17] is image/svg+xml (no named reference; maps to kXml).
+const ContentType& kContentTypeAvif = kTypes[18];
+
 int ContentType::MaxProducedExtensionLength() {
-  return 4;  // .jpeg or .webp
+  // Counts extension characters WITHOUT the dot: "jpeg", "webp", and "avif"
+  // are all 4.
+  return 4;
 }
 
 bool ContentType::IsCss() const { return type_ == kCss; }
@@ -184,6 +195,7 @@ bool ContentType::IsImage() const {
     case kGif:
     case kJpeg:
     case kWebp:
+    case kAvif:
       return true;
     default:
       return false;
@@ -319,6 +331,7 @@ bool ContentType::IsLikelyStaticResource() const {
     case kVideo:
     case kAudio:
     case kWebp:
+    case kAvif:
       return true;
   };
   LOG(DFATAL) << "Unexpected content type: " << type_;

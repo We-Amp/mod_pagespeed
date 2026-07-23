@@ -504,8 +504,8 @@
     </a>
   </td>
   <td class="desc">
-    Injects &lt;link rel="dns-prefetch" href="//www.example.com"&gt; tags in the
-    HEAD to enable the browser to do DNS prefetching.
+    Injects &lt;link rel="preconnect"&gt; and &lt;link rel="dns-prefetch"&gt;
+    hints in the HEAD to enable the browser to warm up connections early.
   </td>
   <td class="before">
     <a href="insert_dns_prefetch.html?PageSpeed=off">
@@ -526,7 +526,9 @@
     </a>
   </td>
   <td class="desc">
-    Inserts Google Analytics javascript snippet.
+    Deprecated: inserts a Universal Analytics javascript snippet, but
+    Universal Analytics was discontinued in July 2023 so the injected
+    tracker reports to a dead service.
   </td>
   <td class="before">
     <a href="insert_ga.html?PageSpeed=off">
@@ -535,6 +537,28 @@
   </td>
   <td class="after">
     <a href="insert_ga.html?PageSpeed=on&amp;PageSpeedFilters=insert_ga">
+      after
+    </a>
+  </td>
+</tr>
+
+<tr class="filter_row">
+  <td class="code">
+    <a href="https://modpagespeed.com/doc/filter-insert-speculation-rules">
+      insert_speculation_rules
+    </a>
+  </td>
+  <td class="desc">
+    Injects a &lt;script type="speculationrules"&gt; ruleset at the end of the
+    body so supporting browsers can prefetch same-origin links early.
+  </td>
+  <td class="before">
+    <a href="insert_speculation_rules.html?PageSpeed=off">
+      before
+    </a>
+  </td>
+  <td class="after">
+    <a href="insert_speculation_rules.html?PageSpeed=on&amp;PageSpeedFilters=insert_speculation_rules">
       after
     </a>
   </td>
@@ -600,27 +624,6 @@
   </td>
   <td class="after">
     <a href="make_show_ads_async.html?PageSpeed=on&amp;PageSpeedFilters=make_show_ads_async">
-      after
-    </a>
-  </td>
-</tr>
-
-<tr class="filter_row">
-  <td class="code">
-    <a href="https://modpagespeed.com/doc/filter-make-google-analytics-async">
-      make_google_analytics_async
-    </a>
-  </td>
-  <td class="desc">
-    Converts synchronous Google Analytics code to load asynchronously.
-  </td>
-  <td class="before">
-    <a href="make_google_analytics_async.html?PageSpeed=off">
-      before
-    </a>
-  </td>
-  <td class="after">
-    <a href="make_google_analytics_async.html?PageSpeed=on&amp;PageSpeedFilters=make_google_analytics_async">
       after
     </a>
   </td>
@@ -726,6 +729,28 @@
   </td>
   <td class="after">
     <a href="prioritize_critical_css.html?PageSpeed=on&amp;PageSpeedFilters=rewrite_css,flatten_css_imports,inline_import_to_link,prioritize_critical_css">
+      after
+    </a>
+  </td>
+</tr>
+
+<tr class="filter_row">
+  <td class="code">
+    <a href="https://modpagespeed.com/doc/filter-prioritize-critical-images">
+      prioritize_critical_images
+    </a>
+  </td>
+  <td class="desc">
+    Instruments the page and raises the fetch priority of the images reported
+    above the fold.
+  </td>
+  <td class="before">
+    <a href="prioritize_critical_images.html?PageSpeed=off">
+      before
+    </a>
+  </td>
+  <td class="after">
+    <a href="prioritize_critical_images.html?PageSpeed=on&amp;PageSpeedFilters=prioritize_critical_images">
       after
     </a>
   </td>
@@ -941,6 +966,28 @@
 
 <tr class="filter_row">
   <td class="code">
+    <a href="https://modpagespeed.com/doc/filter-css-rewrite">
+      rewrite_css (group rules)
+    </a>
+  </td>
+  <td class="desc">
+    Minifies CSS inside @supports, @layer, and @container blocks and
+    optimizes the images they reference.
+  </td>
+  <td class="before">
+    <a href="rewrite_css_group_rules.html?PageSpeed=off">
+      before
+    </a>
+  </td>
+  <td class="after">
+    <a href="rewrite_css_group_rules.html?PageSpeed=on&amp;PageSpeedFilters=rewrite_css,rewrite_images,extend_cache">
+      after
+    </a>
+  </td>
+</tr>
+
+<tr class="filter_row">
+  <td class="code">
     <a href="https://modpagespeed.com/doc/filter-image-optimize">
       rewrite_images
     </a>
@@ -976,6 +1023,28 @@
   </td>
   <td class="after">
     <a href="rewrite_javascript.html?PageSpeed=on&amp;PageSpeedFilters=rewrite_javascript">
+      after
+    </a>
+  </td>
+</tr>
+
+<tr class="filter_row">
+  <td class="code">
+    <a href="https://modpagespeed.com/doc/filter-js-minify">
+      rewrite_javascript (modules)
+    </a>
+  </td>
+  <td class="desc">
+    Minifies JavaScript modules, preserving the type="module" attribute and
+    import specifiers.
+  </td>
+  <td class="before">
+    <a href="rewrite_javascript_module.html?PageSpeed=off">
+      before
+    </a>
+  </td>
+  <td class="after">
+    <a href="rewrite_javascript_module.html?PageSpeed=on&amp;PageSpeedFilters=rewrite_javascript">
       after
     </a>
   </td>

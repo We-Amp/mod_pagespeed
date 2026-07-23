@@ -169,7 +169,6 @@ cc_library(
     ],
     copts = NGINX_COPTS + [
         "-DPAGESPEED_ENABLE_MEMCACHED=0",
-        "-DPAGESPEED_NO_FORK",
     ],
     visibility = ["//visibility:public"],
     deps = [

@@ -77,9 +77,14 @@ class CriticalSelectorFilter : public CssSummarizerBase {
 
   // We replace external <link> stylesheets with inline <style> blocks, which
   // a style-src policy without 'unsafe-inline' would block -- leaving the
-  // page unstyled. Do not render in that case; the page is left untouched.
+  // page unstyled. We also move the non-critical CSS into <noscript> blocks and
+  // re-add it with an injected inline bootstrap <script>; a script-src policy
+  // without 'unsafe-inline' blocks that loader, stranding the deferred styles.
+  // Only render when the policy permits BOTH inline style and inline script;
+  // otherwise leave the page untouched so all its CSS still loads normally.
   bool PolicyPermitsRendering() const override {
-    return driver()->content_security_policy().PermitsInlineStyle();
+    return driver()->content_security_policy().PermitsInlineStyle() &&
+           driver()->content_security_policy().PermitsInlineScript();
   }
 
  protected:
@@ -114,6 +119,14 @@ class CriticalSelectorFilter : public CssSummarizerBase {
 
   void RememberFullCss(int pos, HtmlElement* element,
                        HtmlCharactersNode* char_node);
+
+  // Filters one stylesheet's rulesets in place against critical_selectors_,
+  // recursing into GROUP_RULE (@supports/@layer/@container) bodies. Called by
+  // Summarize() on the top level; the stylesheet's font_faces() bucket is
+  // never touched at any level (@font-face shapes text from the first paint
+  // on), and only Summarize() drops imports (group bodies cannot contain
+  // them).
+  void FilterStylesheet(Css::Stylesheet* stylesheet) const;
 
   // Selectors that are critical for this page.
   // These are just copied over from the finder and turned into a set for easier

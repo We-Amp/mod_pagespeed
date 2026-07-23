@@ -485,6 +485,27 @@ TEST_F(CssFilterTest, RewriteEmptyCssTest) {
   EXPECT_EQ(0, num_parse_failures_->Get());
 }
 
+// Regression test for a "</style>" breakout XSS. When rewrite_css minifies an
+// inline <style>, the CSS parser decodes hex escapes ("\3C" -> '<') and the
+// serializer (Css::EscapeString) does not re-escape '<', '>' or '/'. A crafted
+// content string such as "\3C/style\3E\3Cscript\3E..." -- inert as authored --
+// would otherwise serialize to a literal "</style><script>...", breaking out of
+// the inline <style> element (stored/reflected XSS). The inline optimization
+// must be abandoned (element left unchanged) so the escaped text stays inert.
+TEST_F(CssFilterTest, DoesNotBreakOutOfInlineStyleViaEscapedClosingTag) {
+  const char kEvilCss[] =
+      "a::after{content:\"\\3C/style\\3E\\3Cscript\\3Ealert(1)"
+      "\\3C/script\\3E\"}";
+  GoogleString html = StrCat("<head><style>", kEvilCss, "</style></head>");
+  Parse("escaped_style_breakout", html);
+  // The rewritten HTML must not contain a live </style> breakout, nor a bare
+  // <script> materialized from the decoded CSS content string.
+  EXPECT_EQ(GoogleString::npos, output_buffer_.find("</style><script"))
+      << output_buffer_;
+  EXPECT_EQ(GoogleString::npos, output_buffer_.find("<script>alert"))
+      << output_buffer_;
+}
+
 // Make sure we allow rewriting to empty output (ex: input all commented out).
 TEST_F(CssFilterTest, EmptyOutput) {
   ValidateRewrite("empty_output", "/* body { background: blue; } */\n", "",
@@ -710,8 +731,10 @@ TEST_F(CssFilterTest, RewriteVariousCss) {
       // Important: Don't "fix" by adding space between 'and' and '('.
       "@media only screen and(min-resolution:240dpi){ .bar{ background: red; "
       "}}",
-      // Unexpected space in media feature name.
-      "@media (max-de vice-width: 850px) { .pm-thumb-106 { width: 80px; } }",
+      // Unexpected space in media feature name: a general-enclosed raw
+      // expression (MQ4), so the block minifies; the bytes inside the
+      // parens stay verbatim. The spaced form is pinned separately below.
+      "@media (max-de vice-width: 850px){.pm-thumb-106{width:80px}}",
       // Unexpected \0 in various places. Common browser hack.
       "@media screen\\0{ .select:before { width: 18px; } }",
       "@media screen and (min-width:0 \\0) { .foo { color: red; } }",
@@ -798,6 +821,18 @@ TEST_F(CssFilterTest, RewriteVariousCss) {
     GoogleString id = absl::StrFormat("distilled_css_good%d", i);
     ValidateRewrite(id, good_examples[i], good_examples[i], kExpectSuccess);
   }
+
+  // A space inside a media feature name makes the expression
+  // general-enclosed; it used to fail the media-query parse and preserve
+  // the whole block verbatim. As a raw expression the block now minifies —
+  // with the expression bytes untouched, so browsers still evaluate the
+  // query to unknown/false exactly as before.
+  ValidateRewrite("media_feature_name_space",
+                  "@media (max-de vice-width: 850px) "
+                  "{ .pm-thumb-106 { width: 80px; } }",
+                  "@media (max-de vice-width: 850px)"
+                  "{.pm-thumb-106{width:80px}}",
+                  kExpectSuccess);
 
   const char* fail_examples[] = {
       // Unclosed at-rules.
@@ -1812,6 +1847,35 @@ TEST_F(CssFilterTest, NoAlwaysRewriteCss) {
   ValidateRewrite("contracting_example2", "  ", "", kExpectSuccess);
 }
 
+TEST_F(CssFilterTest, GroupRuleSheetPassesBytesGate) {
+  // Production runs with always_rewrite_css(false): a rewrite is only used
+  // when it saves bytes. A sheet wrapped whole in @layer used to be one
+  // opaque verbatim region — zero bytes saved, dropped as "Cannot improve".
+  // Minification inside the group body must flip that gate.
+  options()->ClearSignatureForTesting();
+  options()->set_always_rewrite_css(false);
+  server_context()->ComputeSignature(options());
+  ValidateRewrite("group_rule_bytes_gate",
+                  "@layer base {\n  .a { top: 0px; }\n}\n",
+                  "@layer base{.a{top:0}}", kExpectSuccess);
+}
+
+TEST_F(CssFilterTest, MediaRangeSyntaxMinified) {
+  // MQ4 range syntax is captured as a raw media expression: the block
+  // minifies with the expression bytes verbatim.
+  ValidateRewrite("media_range_syntax",
+                  "@media (width >= 768px) { .a { color: red; } }",
+                  "@media (width >= 768px){.a{color:red}}", kExpectSuccess);
+}
+
+TEST_F(CssFilterTest, BrokenGroupRuleFallsBack) {
+  // EOF inside a group body preserves the parse error; with no fallback
+  // configured the original bytes must be served unchanged.
+  DebugWithMessage("<!--CSS rewrite failed: Parse error in %url%-->");
+  ValidateFailParse("broken_group_rule",
+                    "@supports (display: grid) { .a { color: red }");
+}
+
 TEST_F(CssFilterTest, RemoveComments) {
   ValidateRewrite("remove_comments", " /* This comment will be removed. */ ",
                   "", kExpectSuccess);
@@ -2191,6 +2255,46 @@ TEST_F(CssFilterTest, AbsolutifyUnparseableUrlsWithDomainMapping) {
       "absolutify_unparseable_urls_etc_without", css_input, css_output,
       true /* expect_unparseable_section */, false /* enable_image_rewriting */,
       false /* enable_proxy_mode */, true /* enable_mapping_and_sharding */);
+}
+
+TEST_F(CssFilterTest, AbsolutifyGroupRuleUrlsWithDomainMapping) {
+  // url()s inside @supports/@layer bodies are parsed declarations, so the
+  // textual unparseable-section path never sees them: absolutification must
+  // recurse into group bodies (both plain rulesets and body @font-face) or
+  // domain-mapped/proxied CSS keeps broken relative url()s. Note the group
+  // sheet parses cleanly — no unparseable section.
+  const char css_input[] =
+      "@supports (display: grid) { body { background: url(a.png) } }"
+      "@layer base { @font-face { src: url(sub/c.png) } }";
+  const char css_output[] =
+      "@supports (display: grid)"
+      "{body{background:url(http://cdn2.com/a.png)}}"
+      "@layer base{@font-face{src:url(http://cdn1.com/sub/c.png)}}";
+  TestUrlAbsolutification(
+      "absolutify_group_rule_urls", css_input, css_output,
+      false /* expect_unparseable_section */,
+      false /* enable_image_rewriting */, false /* enable_proxy_mode */,
+      true /* enable_mapping_and_sharding */);
+}
+
+TEST_F(CssFilterTest, AbsolutifyGroupRulePreludeUrlWithDomainMapping) {
+  // A url() in a group-rule prelude is invisible to the parsed-declaration
+  // walk: the prelude is opaque bytes. This sheet parses cleanly, so
+  // unparseable_detected() is false and the textual absolutify pass must be
+  // enabled by the group rule's presence alone -- pre-777f36421 the
+  // @supports block itself was an UnparsedRegion, which set the
+  // unparseable-section mask and got its prelude urls absolutified.
+  const char css_input[] =
+      "@supports (background: image-set(url(a.png) 1x)) {"
+      " body { background: url(sub/c.png) } }";
+  const char css_output[] =
+      "@supports (background: image-set(url(http://cdn2.com/a.png) 1x))"
+      "{body{background:url(http://cdn1.com/sub/c.png)}}";
+  TestUrlAbsolutification(
+      "absolutify_group_rule_prelude_url", css_input, css_output,
+      false /* expect_unparseable_section */,
+      false /* enable_image_rewriting */, false /* enable_proxy_mode */,
+      true /* enable_mapping_and_sharding */);
 }
 
 TEST_F(CssFilterTest, DontAbsolutifyCursorUrlsWithoutDomainMapping) {

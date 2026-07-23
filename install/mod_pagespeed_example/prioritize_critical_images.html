@@ -1,0 +1,30 @@
+<html>
+  <head>
+    <title>prioritize_critical_images example</title>
+  </head>
+  <body>
+    <img src="images/Puzzle.jpg"><br/>
+    <p>The image above is at the top of the page; once the critical-images
+    beacon has reported it as above the fold, it is annotated with
+    fetchpriority="high" so the browser frontloads its fetch.</p>
+    <p>*</p>
+    <p>*</p>
+    <p>*</p>
+    <p>*</p>
+    <p>*</p>
+    <p>*</p>
+    <p>*</p>
+    <p>*</p>
+    <p>*</p>
+    <p>*</p>
+    <p>*</p>
+    <p>*</p>
+    <p>Should be below the fold on most screens. The images below are not
+    reported as critical, so they keep their default fetch priority.</p>
+    <p>*</p>
+    <p>*</p>
+    <img src="images/BikeCrashIcn.png"><br/>
+    <img src="images/IronChef2.gif"><br/>
+    <img src="images/Cuppa.png"><br/>
+  </body>
+</html>

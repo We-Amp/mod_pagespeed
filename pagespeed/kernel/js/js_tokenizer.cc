@@ -89,17 +89,70 @@
 // - Lastly, we're left with eight keywords that don't fit into any of the
 //   above categories.  We group these into three parse states:
 //
-//     - kReturnThrow for "return" and "throw".  They're sort of like prefix
-//       operators in that a slash after these is a regex, but a linebreak
-//       after these *always* inserts a semicolon.
+//     - kReturnThrow for "return", "throw", and "yield".  They're sort of
+//       like prefix operators in that a slash after these is a regex, but a
+//       linebreak after these *always* inserts a semicolon.  (`yield` is a
+//       keyword only inside generators, but the always-insert rule is
+//       byte-safe for its sloppy-mode identifier uses too: a kept newline
+//       re-parses identically.)
 //
 //     - kJumpKeyword for "break", "continue", and "debugger".  A slash after
 //       these is an error, and a linebreak after these *always* inserts a
 //       semicolon.
 //
-//     - kOtherKeyword for "const", "default", and "var".  A slash after these
-//       is an error too, but a linebreak after these *never* inserts a
-//       semicolon.
+//     - kOtherKeyword for "default" (and for the initializer marker that
+//       an `=` installs over a declaration keyword).  A slash after it is
+//       an error too, but a linebreak after it *never* inserts a semicolon.
+//
+//     - kModuleDecl for "import" and "export" at statement position.  The
+//       marker anchors a module declaration: while it is on the stack, a
+//       linebreak at the declaration's grammatical end inserts a semicolon
+//       no matter what token follows, while the declaration continuations
+//       "from", ",", "=" and an open initializer expression still suppress
+//       insertion.  A "(" or "." directly after "import" converts the
+//       marker back to a plain kOperator (dynamic import() and import.meta
+//       are expressions).
+//
+//     - kFromClause for the from-clause of an import/export declaration.
+//       The contextual keyword "from" pushes it (awaiting the module
+//       specifier), a module specifier string directly over kModuleDecl
+//       (a bare import) pushes it too, and a completed
+//       "export [async] function" body installs it.  A kExpression
+//       directly over it is always the completed specifier or declaration:
+//       nothing can continue there, so a linebreak always inserts.
+//
+//     - kModuleVarKeyword for the let/const/var keyword of a variable
+//       declaration (a plain one, or the declaration of an `export`).  The
+//       declared binding lands directly on it; after the bare binding only
+//       "," or "=" can continue.
+//
+//     - kArrow for the `=>` of an arrow function (still emitted as
+//       separate `=` and `>` tokens).  It sits under the arrow body like
+//       an operator: an expression body keeps the ordinary continuation
+//       rules, while a `{...}` block body closes into a terminal
+//       expression -- per ECMA-262 an ArrowFunction is an
+//       AssignmentExpression that no operator, call, or index access can
+//       continue, so a linebreak after a block-bodied arrow always
+//       inserts a semicolon.
+//
+//     - kObjectValue for the `:` of an object-literal property.  It acts
+//       like an operator, but the expression collapse does not eat it, so
+//       a property value never lands directly on the literal's brace --
+//       leaving only a property NAME there, which lets ConsumeOpenParen
+//       recognize method shorthand (`{ m() {} }`) without mistaking a
+//       call in value position (`{ a: f() }`) for one.
+//
+//     - kClassKeyword for `class` and its heritage span (the name is
+//       ignored; `extends` pushes an operator and the heritage expression
+//       collapses back).  The `{` of the body completes the header into a
+//       block header and opens a kClassBrace, the class body: element
+//       names sit directly on it (so the method-shorthand gate fires for
+//       `m(){}`, `get`/`set`, `static`, computed, and `#` names), a `{`
+//       after a name is a static block, a field initializer is an
+//       ordinary expression with ordinary ASI rules, `;` rolls back to
+//       it, and the closing `}` pops the header -- rolling a declaration
+//       back to statement base or collapsing a class expression into an
+//       expression.
 //
 // To help make the above more concrete, suppose we're parsing the code:
 //
@@ -162,6 +215,31 @@ namespace pagespeed {
 namespace js {
 
 namespace {
+
+// Maximum parse stack depth, to prevent memory exhaustion from crafted
+// deeply nested input (e.g. "[[[[[...").  When the cap is reached the
+// tokenizer reports an error (preserving the input byte-for-byte, like any
+// other tokenizer error) rather than growing the stack without bound.  The
+// guard sits at every push site that crafted input can repeat without an
+// intervening pop: the open delimiters, `?`, and `${`.
+const size_t kMaxParseStackDepth = 4096;
+
+// Returns true if the given comment token contains a line terminator
+// (\n, \r, U+2028, or U+2029).  Such a comment counts as a line terminator
+// for automatic semicolon insertion (ECMA-262).
+bool CommentHasLineTerminator(StringPiece token) {
+  return (token.find('\n') != StringPiece::npos ||
+          token.find('\r') != StringPiece::npos ||
+          token.find("\xE2\x80\xA8") != StringPiece::npos ||
+          token.find("\xE2\x80\xA9") != StringPiece::npos);
+}
+
+// Returns true if the given comment token is shaped like an IE conditional
+// compilation comment (/*@...@*/), which the minifier retains verbatim.
+bool IsConditionalCompilationComment(StringPiece token) {
+  return (token.size() >= 6 && strings::StartsWith(token, "/*@") &&
+          strings::EndsWith(token, "@*/"));
+}
 
 // Regex to match JavaScript identifiers.  For details, see page 18 of
 // http://www.ecma-international.org/publications/files/ECMA-ST/Ecma-262.pdf
@@ -247,6 +325,11 @@ const char* const kRegexLiteralRegex =
 // unescaped linebreak, but the match will terminate after the linebreak; the
 // caller must then check whether the start and end characters of the match are
 // the same (both single quote or both double quote), and reject it if not.
+// Note that since ES2019 (the JSON-superset change), raw U+2028 and U+2029
+// are legal inside string literals, so the terminator classes below cover
+// only the quote characters and the CR/LF linebreaks -- U+2028/U+2029 are
+// matched by the \C body like any other character and never trigger
+// linebreak logic inside a string.
 const char* const kStringLiteralRegex =
     // Single-quoted string literals can contain any characters that aren't
     // single quotes, backslashes, or linebreaks.  They can also contain escape
@@ -262,10 +345,10 @@ const char* const kStringLiteralRegex =
     // This would be easier if there were a way to say "match an invalid UTF8
     // byte only", but apparently there is no way to do this in RE2.
     // See https://groups.google.com/forum/#!topic/re2-dev/26wVIHcowh4
-    "'(\\C*?(\\\\(\r\n|\n\r|\n|.))?)*?['\n\r\\p{Zl}\\p{Zp}]|"
+    "'(\\C*?(\\\\(\r\n|\n\r|\n|.))?)*?['\n\r]|"
     // A string literal can also be double-quoted instead, which is the same,
     // except that double quotes must be escaped instead of single quotes.
-    "\"(\\C*?(\\\\(\r\n|\n\r|\n|.))?)*?[\"\n\r\\p{Zl}\\p{Zp}]";
+    "\"(\\C*?(\\\\(\r\n|\n\r|\n|.))?)*?[\"\n\r]";
 
 // Regex to match JavaScript whitespace.  For details, see page 15 of
 // http://www.ecma-international.org/publications/files/ECMA-ST/Ecma-262.pdf
@@ -301,6 +384,30 @@ const char* const kLineContinuationRegex =
     "(in|instanceof)($|[^$_\\p{Lu}\\p{Ll}\\p{Lt}\\p{Lm}\\p{Lo}\\p{Nl}\\p{Mn}"
     "\\p{Mc}\\p{Nd}\\p{Pc}\xE2\x80\x8C\xE2\x80\x8D\\\\])";
 
+// Regex to check if the next token in the remaining input could continue an
+// import or export declaration when the parse stack is at a module
+// declaration point (kModuleDecl directly below a kExpression): after a
+// default-import binding, an import/export clause, or a namespace binding.
+// Only `from` (a from-clause or re-export) and `,` (binding and clause
+// lists) can continue the declaration there; anything else ends it, so the
+// linebreak inserts a semicolon.  (Note that this regex will not necessarily
+// capture the entire next token; the only useful information to be had from
+// it is whether it matches at all or not).
+const char* const kModuleContinuationRegex =
+    ",|"
+    // `from` must not merely be the prefix of a longer identifier, so make
+    // sure it is not followed by an identifier character (see
+    // kIdentifierRegex for details).
+    "from($|[^$_\\p{Lu}\\p{Ll}\\p{Lt}\\p{Lm}\\p{Lo}\\p{Nl}\\p{Mn}"
+    "\\p{Mc}\\p{Nd}\\p{Pc}\xE2\x80\x8C\xE2\x80\x8D\\\\])";
+
+// Regex to check if the next token in the remaining input could continue an
+// export variable declaration at its bare-binding point (kModuleVarKeyword
+// directly below a kExpression): only `,` (the next declarator) and `=` (the
+// initializer) can continue there; anything else ends the declaration, so
+// the linebreak inserts a semicolon.
+const char* const kModuleVarContinuationRegex = "[,=]";
+
 }  // namespace
 
 JsTokenizer::JsTokenizer(const JsTokenizerPatterns* patterns, StringPiece input)
@@ -308,7 +415,8 @@ JsTokenizer::JsTokenizer(const JsTokenizerPatterns* patterns, StringPiece input)
       input_(input),
       json_step_(kJsonStart),
       start_of_line_(true),
-      error_(false) {
+      error_(false),
+      arrow_body_asi_pending_(false) {
   parse_stack_.push_back(kStartOfInput);
 }
 
@@ -338,6 +446,50 @@ JsKeywords::Type JsTokenizer::NextToken(StringPiece* token_out) {
   // parse stack is empty before looking at the top entry.
   DCHECK(!parse_stack_.empty());
   DCHECK_EQ(kStartOfInput, parse_stack_[0]);
+  // Backstop against unbounded parse-stack growth.  The per-consumer guards
+  // below cap the delimiter-nesting paths, but token kinds that push without
+  // a matching pop (repeated restricted-production or block keywords,
+  // `a.b.c...` member chains, etc.) would otherwise grow the stack one entry
+  // per token.  Bounding here -- before dispatch -- closes the whole class:
+  // a single NextToken() call pushes a small constant number of entries, so
+  // the stack can never exceed kMaxParseStackDepth by more than that.
+  // Erroring is byte-preserving (Error() passes the remainder through).
+  if (parse_stack_.size() >= kMaxParseStackDepth) {
+    return Error(token_out);
+  }
+  // A hashbang (`#!...`) line is valid only as the very first bytes of a
+  // script or module.  Consume the whole line -- including its terminating
+  // linebreak -- as a comment, so the minifier can retain it verbatim
+  // (the linebreak inside the token is what keeps the following code off
+  // the hashbang line).  After leading trivia this is not a legal
+  // hashbang, but accepting it stays byte-preserving; a `#` anywhere else
+  // is an error.
+  if (json_step_ == kJsonStart && input_.size() >= 2 && input_[0] == '#' &&
+      input_[1] == '!') {
+    int size = 0;
+    const int input_size = input_.size();
+    while (size < input_size) {
+      const unsigned char c = input_[size];
+      if (c == '\n' || c == '\r') {
+        ++size;
+        break;
+      }
+      // U+2028/U+2029 (E2 80 A8/A9) are line terminators too.
+      if (c == 0xE2 && size + 2 < input_size &&
+          static_cast<unsigned char>(input_[size + 1]) == 0x80 &&
+          (static_cast<unsigned char>(input_[size + 2]) == 0xA8 ||
+           static_cast<unsigned char>(input_[size + 2]) == 0xA9)) {
+        size += 3;
+        break;
+      }
+      ++size;
+    }
+    // \r\n is a single LineTerminatorSequence.
+    if (size < input_size && input_[size - 1] == '\r' && input_[size] == '\n') {
+      ++size;
+    }
+    return Emit(JsKeywords::kComment, size, token_out);
+  }
   // Scan and return the next token.
   const char ch = input_[0];
   switch (ch) {
@@ -374,6 +526,16 @@ JsKeywords::Type JsTokenizer::NextToken(StringPiece* token_out) {
       return ConsumeColon(token_out);
     case ',':
       return ConsumeComma(token_out);
+    case '#': {
+      // A private name (`#x`), valid inside class bodies (and tolerated
+      // byte-preservingly elsewhere).  Anything else (`#` alone, or not
+      // followed by an identifier-start) is an error.
+      JsKeywords::Type type;
+      if (TryConsumePrivateName(&type, token_out)) {
+        return type;
+      }
+      return Error(token_out);
+    }
     case '.':
       return ConsumePeriod(token_out);
     case '?':
@@ -440,6 +602,9 @@ GoogleString JsTokenizer::ParseStackForTest() const {
       case kQuestionMark:
         output.append("?");
         break;
+      case kOptionalChain:
+        output.append("?.");
+        break;
       case kOpenBrace:
         output.append("{");
         break;
@@ -467,6 +632,27 @@ GoogleString JsTokenizer::ParseStackForTest() const {
       case kOtherKeyword:
         output.append("Other");
         break;
+      case kModuleDecl:
+        output.append("Mod");
+        break;
+      case kFromClause:
+        output.append("From");
+        break;
+      case kModuleVarKeyword:
+        output.append("MVar");
+        break;
+      case kArrow:
+        output.append("=>");
+        break;
+      case kObjectValue:
+        output.append("OVal");
+        break;
+      case kClassKeyword:
+        output.append("Cls");
+        break;
+      case kClassBrace:
+        output.append("Cls{");
+        break;
       default:
         LOG(DFATAL) << "Unknown parse state: " << *iter;
         output.append("UNKNOWN");
@@ -479,9 +665,53 @@ GoogleString JsTokenizer::ParseStackForTest() const {
 JsKeywords::Type JsTokenizer::ConsumeOpenBrace(StringPiece* token_out) {
   DCHECK(!input_.empty());
   DCHECK_EQ('{', input_[0]);
+  if (parse_stack_.size() >= kMaxParseStackDepth) {
+    return Error(token_out);
+  }
   const ParseState state = parse_stack_.back();
-  if (state == kExpression || state == kPeriod || state == kBlockKeyword ||
-      state == kJumpKeyword || state == kOtherKeyword) {
+  if (state == kBlockKeyword) {
+    // ES2019 optional catch binding: `catch {` has no parenthesized
+    // parameter, so the block keyword is followed directly by its block.
+    // Complete the block header ourselves, exactly as if `(...)` had been
+    // present.  (This also tokenizes invalid input like `if {` as a block;
+    // syntax checking is a non-goal of this class, and the slash
+    // classification only shifts for input that was already invalid JS.)
+    parse_stack_.pop_back();
+    PushBlockHeader();
+    parse_stack_.push_back(kOpenBrace);
+    return Emit(JsKeywords::kOperator, 1, token_out);
+  }
+  // The `{` of a class body completes the class header into a block header
+  // and opens the class body brace: directly over the keyword for an
+  // anonymous class (`class {}`, `export default class {}`), or over the
+  // heritage expression (`class X extends Y {}`).
+  if (state == kClassKeyword ||
+      (state == kExpression && parse_stack_.size() >= 2 &&
+       parse_stack_[parse_stack_.size() - 2] == kClassKeyword)) {
+    if (state == kExpression) {
+      parse_stack_.pop_back();
+    }
+    parse_stack_.pop_back();
+    PushBlockHeader();
+    parse_stack_.push_back(kClassBrace);
+    return Emit(JsKeywords::kOperator, 1, token_out);
+  }
+  // A `{` directly after a name inside a class body is a static block
+  // (`static { ... }`): complete it into a block of ordinary statements.
+  // (A bare `x {` was already invalid JS, tolerated byte-preservingly.)
+  if (state == kExpression && parse_stack_.size() >= 2 &&
+      parse_stack_[parse_stack_.size() - 2] == kClassBrace) {
+    parse_stack_.pop_back();
+    PushBlockHeader();
+    parse_stack_.push_back(kOpenBrace);
+    return Emit(JsKeywords::kOperator, 1, token_out);
+  }
+  // Note that kOtherKeyword is intentionally permitted here (and in
+  // ConsumeOpenBracket): `export default {a: 1}` starts an object
+  // expression.  (Destructuring binding patterns arrive via
+  // kModuleVarKeyword instead.)
+  if (state == kExpression || state == kPeriod || state == kOptionalChain ||
+      state == kJumpKeyword) {
     return Error(token_out);
   }
   parse_stack_.push_back(kOpenBrace);
@@ -524,11 +754,23 @@ JsKeywords::Type JsTokenizer::ConsumeCloseBrace(StringPiece* token_out) {
     parse_stack_.pop_back();  // Pop the kTemplateInterp marker.
     return ConsumeTemplateChunk(token_out);
   }
-  // Pop the most recent kOpenBrace (and everything above it) off the stack.
-  if (!PopToMatchingOpen(kOpenBrace,
-                         {kStartOfInput, kOpenBracket, kOpenParen,
-                          kBlockKeyword, kTemplateInterp},
-                         token_out)) {
+  // If the nearest enclosing open delimiter is a class body brace, this
+  // '}' closes the class body: pop everything down to it (an element name,
+  // a field initializer, or nothing) and the brace itself, then continue
+  // exactly as if a block had just closed (the class header's block header
+  // is popped below, rolling a declaration back to statement base or
+  // collapsing a class expression into an expression).
+  if (NearestOpenDelimiterIsClassBrace()) {
+    while (parse_stack_.back() != kClassBrace) {
+      parse_stack_.pop_back();
+      DCHECK(!parse_stack_.empty());
+    }
+    parse_stack_.pop_back();  // Pop the class body brace.
+  } else if (!PopToMatchingOpen(kOpenBrace,
+                                {kStartOfInput, kOpenBracket, kOpenParen,
+                                 kBlockKeyword, kTemplateInterp},
+                                token_out)) {
+    // Pop the most recent kOpenBrace (and everything above it) off the stack.
     return JsKeywords::kError;
   }
   // If the open brace was preceeded by a BlockHeader, we can pop that off the
@@ -546,14 +788,71 @@ JsKeywords::Type JsTokenizer::ConsumeCloseBrace(StringPiece* token_out) {
   // then that BlockHeader will be popped when we roll back to
   // start-of-statement for some other reason, such as encountering a
   // semicolon.)
-  if (parse_stack_.back() == kBlockHeader) {
+  const bool popped_block_header = (parse_stack_.back() == kBlockHeader);
+  if (popped_block_header) {
     parse_stack_.pop_back();
   }
   // Depending on the parse state that came before the kOpenBrace, we just
   // closed either an object literal (which is a kExpression), or a block
-  // (which isn't).
+  // (which isn't).  One refinement: a kOtherKeyword can precede an object
+  // literal only as the start of an `export default {...}` object
+  // expression (which involves no block header).  If we just popped a block
+  // header while a kOtherKeyword lies beneath, these braces were a block,
+  // not an expression, so do not push one.  This preserves the behavior for
+  // EVERY block-header-over-kOtherKeyword shape: the genuine
+  // `export default function(){}` (a declaration; a slash directly after it
+  // then errors out, preserving the input -- see the kExport comment in
+  // TryConsumeIdentifierOrKeyword) as well as invalid-JS shapes like
+  // `default do{}` that reach here via the block-header routes.
   DCHECK(!parse_stack_.empty());
-  if (CanPreceedObjectLiteral(parse_stack_.back())) {
+  // A `}` closing a brace that sits directly on a kArrow ends the arrow's
+  // block body.  The completed ArrowFunction is grammatically terminal: per
+  // ECMA-262 it is an AssignmentExpression, not a UnaryExpression, so no
+  // operator, call, or index access can continue it, and a linebreak
+  // before the next token always inserts a semicolon.  Collapse it like
+  // any expression and arm the one-shot flag that
+  // TryInsertLinebreakSemicolon consults at the next linebreak.  (A
+  // function EXPRESSION body, `x => function(){}`, does NOT take this
+  // path: its closing brace pops a block header, and the function
+  // expression can still be called or divided.)
+  if (!popped_block_header && parse_stack_.back() == kArrow) {
+    parse_stack_.pop_back();
+    PushExpression();
+    const JsKeywords::Type type = Emit(JsKeywords::kOperator, 1, token_out);
+    arrow_body_asi_pending_ = true;
+    return type;
+  }
+  // The closing brace of a function-bodied export declaration: the
+  // declaration is grammatically complete there -- nothing can continue
+  // it (node-verified: a following slash starts a regex statement, with
+  // or without a linebreak).  Peel the states the header forms interpose
+  // -- an `async` identifier's kExpression and the `default` kOtherKeyword
+  // -- and when a module marker lies beneath, move the declaration to the
+  // from-clause shape, where ASI always fires.  This covers
+  // `export function f(){}`, `export async function f(){}`,
+  // `export default [async] function(){}`, and `export default class {}`
+  // (the last two kept the kOtherKeyword carve-out until now).
+  if (popped_block_header) {
+    if (parse_stack_.back() == kExpression && parse_stack_.size() >= 2 &&
+        (parse_stack_[parse_stack_.size() - 2] == kModuleDecl ||
+         parse_stack_[parse_stack_.size() - 2] == kOtherKeyword)) {
+      parse_stack_.pop_back();
+    }
+    if (parse_stack_.back() == kOtherKeyword && parse_stack_.size() >= 2 &&
+        parse_stack_[parse_stack_.size() - 2] == kModuleDecl) {
+      parse_stack_.pop_back();
+    }
+  }
+  if (popped_block_header && parse_stack_.back() == kModuleDecl) {
+    parse_stack_.push_back(kFromClause);
+    PushExpression();
+  } else if ((popped_block_header && parse_stack_.back() == kArrow) ||
+             (CanPreceedObjectLiteral(parse_stack_.back()) &&
+              !(popped_block_header && parse_stack_.back() == kOtherKeyword))) {
+    // A function-EXPRESSION arrow body (`x => function(){}`) collapses into
+    // the body expression (kArrow is deliberately not object-literal-shaped
+    // for the property-name/method/colon checks, so this one case names it
+    // directly).
     PushExpression();
   }
   // Emit a token for the close brace.
@@ -564,8 +863,14 @@ JsKeywords::Type JsTokenizer::ConsumeOpenBracket(StringPiece* token_out) {
   DCHECK(!input_.empty());
   DCHECK_EQ('[', input_[0]);
   const ParseState state = parse_stack_.back();
+  // kOtherKeyword is permitted: `export default [1]` starts an array
+  // expression (destructuring declarations arrive via kModuleVarKeyword).
+  // kOptionalChain is permitted too: `a?.[i]`.
   if (state == kPeriod || state == kBlockKeyword || state == kJumpKeyword ||
-      state == kOtherKeyword) {
+      state == kClassKeyword) {
+    return Error(token_out);
+  }
+  if (parse_stack_.size() >= kMaxParseStackDepth) {
     return Error(token_out);
   }
   parse_stack_.push_back(kOpenBracket);
@@ -578,7 +883,7 @@ JsKeywords::Type JsTokenizer::ConsumeCloseBracket(StringPiece* token_out) {
   // Pop the most recent kOpenBracket (and everything above it) off the stack.
   if (!PopToMatchingOpen(kOpenBracket,
                          {kStartOfInput, kOpenBrace, kOpenParen, kBlockKeyword,
-                          kBlockHeader, kTemplateInterp},
+                          kBlockHeader, kTemplateInterp, kClassBrace},
                          token_out)) {
     return JsKeywords::kError;
   }
@@ -590,9 +895,55 @@ JsKeywords::Type JsTokenizer::ConsumeCloseBracket(StringPiece* token_out) {
 JsKeywords::Type JsTokenizer::ConsumeOpenParen(StringPiece* token_out) {
   DCHECK(!input_.empty());
   DCHECK_EQ('(', input_[0]);
-  const ParseState state = parse_stack_.back();
-  if (state == kPeriod || state == kJumpKeyword || state == kOtherKeyword) {
+  if (parse_stack_.size() >= kMaxParseStackDepth) {
     return Error(token_out);
+  }
+  // `import(...)` is a dynamic import call, not a declaration: drop the
+  // module-declaration marker and treat the construct exactly as if `import`
+  // had pushed a plain kOperator (the close paren then collapses to an
+  // expression).  `export (...)` is invalid JS either way; converting it
+  // here keeps the tokenization byte-preserving.
+  if (parse_stack_.back() == kModuleDecl) {
+    parse_stack_.pop_back();
+    PushOperator();
+  }
+  const ParseState state = parse_stack_.back();
+  // A paren after a variable-declaration keyword is never valid (`var (x)`).
+  // A paren after the `default` kOtherKeyword is valid only as
+  // `export default (...)`, where it begins a parenthesized expression or an
+  // arrow parameter list (`export default () => {}`); the completed
+  // expression then collapses onto the kOtherKeyword exactly like
+  // `export default 5` does.  Everywhere else (e.g. a switch's
+  // `default (x)`) it stays a byte-preserving error.
+  const bool other_allows_paren =
+      state == kOtherKeyword && parse_stack_.size() >= 2 &&
+      parse_stack_[parse_stack_.size() - 2] == kModuleDecl;
+  if (state == kPeriod || state == kJumpKeyword || state == kModuleVarKeyword ||
+      state == kClassKeyword ||
+      (state == kOtherKeyword && !other_allows_paren)) {
+    return Error(token_out);
+  }
+  // Method shorthand in an object literal (`{ m() {} }`, `{ get v() {} }`,
+  // `{ async *n() {} }`, `{ ['k']() {} }`) or a class body
+  // (`class X { m() {} }`): a `(` directly after a property or element
+  // name -- an expression sitting directly on an object-literal kOpenBrace
+  // or a kClassBrace -- is the parameter list of a method, and the `{...}`
+  // after it is a block body.  Push a block keyword so the parens complete
+  // into a block header, exactly like a function's; the body then closes
+  // back to the property position of the literal or the class body.  Only
+  // a property name ever sits directly on the literal's brace: a value
+  // expression is held off it by the kObjectValue that the property colon
+  // installs (so `{ a: f() }` and `{ a: (function(){})() }` are calls, not
+  // methods), a parenthesized property name is not legal, a shorthand
+  // property cannot be followed by `(` inside its own literal, and a `{`
+  // that is NOT object-literal-shaped (e.g. at statement position) fails
+  // the CanPreceedObjectLiteral check below its brace.
+  if (state == kExpression && parse_stack_.size() >= 2 &&
+      ((parse_stack_[parse_stack_.size() - 2] == kOpenBrace &&
+        parse_stack_.size() >= 3 &&
+        CanPreceedObjectLiteral(parse_stack_[parse_stack_.size() - 3])) ||
+       parse_stack_[parse_stack_.size() - 2] == kClassBrace)) {
+    parse_stack_.push_back(kBlockKeyword);
   }
   parse_stack_.push_back(kOpenParen);
   return Emit(JsKeywords::kOperator, 1, token_out);
@@ -602,10 +953,11 @@ JsKeywords::Type JsTokenizer::ConsumeCloseParen(StringPiece* token_out) {
   DCHECK(!input_.empty());
   DCHECK_EQ(')', input_[0]);
   // Pop the most recent kOpenParen (and everything above it) off the stack.
-  if (!PopToMatchingOpen(kOpenParen,
-                         {kStartOfInput, kOpenBrace, kOpenBracket,
-                          kBlockKeyword, kBlockHeader, kTemplateInterp},
-                         token_out)) {
+  if (!PopToMatchingOpen(
+          kOpenParen,
+          {kStartOfInput, kOpenBrace, kOpenBracket, kBlockKeyword, kBlockHeader,
+           kTemplateInterp, kClassBrace},
+          token_out)) {
     return JsKeywords::kError;
   }
   // If this is the closing paren of e.g. "if (...)", then we've just created a
@@ -662,6 +1014,34 @@ bool JsTokenizer::TryConsumeComment(JsKeywords::Type* type_out,
   return false;
 }
 
+bool JsTokenizer::TryConsumePrivateName(JsKeywords::Type* type_out,
+                                        StringPiece* token_out) {
+  DCHECK(!input_.empty());
+  DCHECK_EQ('#', input_[0]);
+  // Consume `#` plus an ASCII identifier as a single identifier token.
+  // (Non-ASCII private names fall through to the byte-preserving error,
+  // like non-ASCII binding lookaheads elsewhere in this class.)
+  const int size = input_.size();
+  if (size >= 2) {
+    const unsigned char first = input_[1];
+    if (('a' <= first && first <= 'z') || first == '_' ||
+        ('A' <= first && first <= 'Z') || first == '$' || first == '\\') {
+      int index = 2;
+      for (; index < size; ++index) {
+        const unsigned char ch = input_[index];
+        if (!net_instaweb::IsAsciiAlphaNumeric(ch) && ch != '_' && ch != '$' &&
+            ch != '\\') {
+          break;
+        }
+      }
+      PushExpression();
+      *type_out = Emit(JsKeywords::kIdentifier, index, token_out);
+      return true;
+    }
+  }
+  return false;
+}
+
 JsKeywords::Type JsTokenizer::ConsumeColon(StringPiece* token_out) {
   DCHECK(!input_.empty());
   DCHECK_EQ(':', input_[0]);
@@ -691,24 +1071,41 @@ JsKeywords::Type JsTokenizer::ConsumeColon(StringPiece* token_out) {
         // entries right now.
         DCHECK_GE(parse_stack_.size(), 2u);
         if (CanPreceedObjectLiteral(parse_stack_[parse_stack_.size() - 2])) {
-          PushOperator();
+          // An object-literal property colon: install the value marker
+          // (rather than a plain operator, which the expression collapse
+          // would eat) so that a value expression never lands directly on
+          // the brace and a following property name is the only expression
+          // that does -- the method-shorthand discriminator (see
+          // ConsumeOpenParen).
+          parse_stack_.push_back(kObjectValue);
         }
         return Emit(JsKeywords::kOperator, 1, token_out);
       // Skip past anything that could lie between the colon and the question
       // mark or start-of-statement.  This includes the kOtherKeyword parse
-      // state for the sake of the "default" keyword.
+      // state for the sake of the "default" keyword, the kArrow state for
+      // the sake of an arrow in a ternary branch (`a ? x => b : c`), and
+      // the kReturnThrow state for the sake of a `yield:` label (sloppy
+      // mode; `return:`/`throw:` were already invalid JS).
       case kExpression:
       case kOtherKeyword:
+      case kArrow:
+      case kReturnThrow:
         parse_stack_.pop_back();
         break;
       // Reaching any other parse state is an error.
       case kOperator:
       case kPeriod:
+      case kOptionalChain:
       case kOpenBracket:
       case kOpenParen:
       case kBlockKeyword:
-      case kReturnThrow:
       case kJumpKeyword:
+      case kModuleDecl:
+      case kFromClause:
+      case kModuleVarKeyword:
+      case kObjectValue:
+      case kClassKeyword:
+      case kClassBrace:
         return Error(token_out);
       default:
         LOG(DFATAL) << "Unknown parse state: " << parse_stack_.back();
@@ -720,6 +1117,43 @@ JsKeywords::Type JsTokenizer::ConsumeColon(StringPiece* token_out) {
 JsKeywords::Type JsTokenizer::ConsumeComma(StringPiece* token_out) {
   DCHECK(!input_.empty());
   DCHECK_EQ(',', input_[0]);
+  if (parse_stack_.back() == kReturnThrow) {
+    // A comma directly after return/throw/yield: outside generators
+    // `yield` is an ordinary identifier (`f(yield, 2)`, `var yield, x`),
+    // and inside a generator `yield, 2` is a comma expression over a bare
+    // yield -- so treat the keyword as the expression it just produced
+    // and let the normal comma paths decide (`return, 2` and `throw, 2`
+    // were already invalid JS, tolerated byte-preservingly).
+    parse_stack_.pop_back();
+    PushExpression();
+  }
+  // A comma directly over a completed arrow body (an expression body
+  // collapsed to [kArrow, kExpression]) ENDS the arrow: the body is an
+  // AssignmentExpression, which a comma cannot continue -- `get: () => 1,
+  // set(v) {}` is a property plus a setter method, `foo(() => 1, 2)` is
+  // two arguments, and `x = () => 1, 2` is a sequence expression
+  // (node-verified).  Pop the arrow head(s) and let the normal comma
+  // path decide at the level below.
+  while (parse_stack_.size() >= 2 && parse_stack_.back() == kExpression &&
+         parse_stack_[parse_stack_.size() - 2] == kArrow) {
+    parse_stack_.pop_back();  // The body expression.
+    parse_stack_.pop_back();  // The arrow head.
+    PushExpression();         // Re-collapse onto the level below.
+  }
+  // A keyword rename target in an import/export clause (`export { a as
+  // default, b }`, `export { a as if, b }`) is complete at the following
+  // comma: pop the keyword state it pushed, then let the normal clause
+  // comma path decide.  (Import-side renames to reserved words are
+  // invalid JS -- engines reject `import { a as default }` -- only
+  // tolerated byte-preservingly.)
+  const ParseState rename_state = parse_stack_.back();
+  if ((rename_state == kOtherKeyword || rename_state == kBlockKeyword) &&
+      parse_stack_.size() >= 4 &&
+      parse_stack_[parse_stack_.size() - 2] == kExpression &&
+      parse_stack_[parse_stack_.size() - 3] == kOpenBrace &&
+      parse_stack_[parse_stack_.size() - 4] == kModuleDecl) {
+    parse_stack_.pop_back();
+  }
   const ParseState state = parse_stack_.back();
   if (state == kExpression) {
     // Since the top state is currently kExpression, and the bottom state is
@@ -731,13 +1165,31 @@ JsKeywords::Type JsTokenizer::ConsumeComma(StringPiece* token_out) {
     // identifier lists for e.g. the var keyword.  For any of those, pop the
     // stack back up to the opening delimiter, so that we see the same parse
     // stack state for each item in the list.
-    if (prev == kOtherKeyword || prev == kOpenBracket ||
+    if (prev == kOtherKeyword || prev == kModuleVarKeyword ||
+        prev == kObjectValue || prev == kOpenBracket ||
         (prev == kOpenBrace &&
          // Similarly, if the second-from-top state is kOpenBrace (or anything
          // else other than kStartOfInput), we know the parse stack has at
          // least three entries.
          CanPreceedObjectLiteral(parse_stack_[parse_stack_.size() - 3]))) {
       parse_stack_.pop_back();
+      // A comma ending an object-literal property value also pops the
+      // kObjectValue the property colon installed, returning to the
+      // property position for the next entry.
+      if (prev == kObjectValue) {
+        parse_stack_.pop_back();
+      }
+      // A declarator comma after an initialized declarator (`var x = 1, y`,
+      // exported or not) also pops the declaration keyword installed by the
+      // initializer's `=`, so that the next binding sits directly over the
+      // variable keyword and ASI after the bare binding fires.  (A comma
+      // after `export default <expr>` is invalid JS -- `default` takes an
+      // AssignmentExpression -- so carving back there too is harmless.)
+      if (prev == kOtherKeyword && parse_stack_.size() >= 2 &&
+          (parse_stack_[parse_stack_.size() - 2] == kModuleDecl ||
+           parse_stack_[parse_stack_.size() - 2] == kModuleVarKeyword)) {
+        parse_stack_.pop_back();
+      }
     } else {
       // A comma can also be a binary operator (executing the first operand and
       // returning the second, as it does in C).
@@ -796,12 +1248,13 @@ bool JsTokenizer::TryConsumeIdentifierOrKeyword(JsKeywords::Type* type_out,
   JsKeywords::Flag flag_ignored;
   JsKeywords::Type type =
       JsKeywords::Lookup(input_.substr(0, index), &flag_ignored);
-  // A reserved word immediately after a period operator is treated as an
-  // identifier.  For example, even though "if" is normally a reserved word,
-  // "foo.if" is legal code, and is equivalent to "foo['if']".  Similarly, a
+  // A reserved word immediately after a period operator (or its ES2020
+  // optional-chaining cousin `?.`) is treated as an identifier.  For example,
+  // even though "if" is normally a reserved word, "foo.if" is legal code, and
+  // is equivalent to "foo['if']" (and so is "foo?.if").  Similarly, a
   // reserved word is an identifier when used as a property name for an object
   // literal.
-  if (parse_stack_.back() == kPeriod ||
+  if (parse_stack_.back() == kPeriod || parse_stack_.back() == kOptionalChain ||
       (parse_stack_.back() == kOpenBrace &&
        CanPreceedObjectLiteral(parse_stack_[parse_stack_.size() - 2]))) {
     PushExpression();
@@ -812,29 +1265,132 @@ bool JsTokenizer::TryConsumeIdentifierOrKeyword(JsKeywords::Type* type_out,
     // If the word isn't a keyword, then it's an identifier.  Also, these other
     // "keywords" are only reserved for future use in strict mode, and
     // otherwise are legal identifiers.  Since we don't detect strict mode
-    // errors yet, just always allow them as identifiers.
+    // errors yet, just always allow them as identifiers.  (`yield` is the
+    // exception: it is reserved inside generators, which this tokenizer now
+    // models, so it takes its own case below.)
     case JsKeywords::kNotAKeyword:
     case JsKeywords::kImplements:
     case JsKeywords::kInterface:
-    case JsKeywords::kLet:
     case JsKeywords::kPackage:
     case JsKeywords::kPrivate:
     case JsKeywords::kProtected:
     case JsKeywords::kPublic:
     case JsKeywords::kStatic:
-    case JsKeywords::kYield:
       type = JsKeywords::kIdentifier;
-      // An identifier just after a kBlockKeyword is the name of a function
-      // declaration; we just ignore it and leave the parse state as
-      // kBlockKeyword.  Other identifiers are treated as kExpressions.
-      if (parse_stack_.back() != kBlockKeyword) {
+      // `from` and `as` are contextual keywords, not reserved words, so they
+      // arrive here as ordinary identifiers.  Inside an import/export
+      // declaration they take dedicated parse states:
+      //  - `from` at a module declaration point (kModuleDecl directly under
+      //    a kExpression: after a default binding, a clause, or a namespace
+      //    binding) or directly after the `*` of `export *` begins the
+      //    from-clause.  It moves the declaration to the kFromClause state,
+      //    which suppresses semicolon insertion until the module specifier
+      //    arrives -- and makes insertion after the specifier unconditional.
+      //  - `as` after the `*` of `import *`/`export *` (a kOperator over
+      //    the marker, with at most one kExpression between, as in
+      //    `import a, * as ns`) takes the kPeriod path so the binding that
+      //    follows collapses back to a module declaration point.
+      // Everywhere else they remain ordinary identifiers.
+      if (parse_stack_.size() >= 2 &&
+          parse_stack_[parse_stack_.size() - 2] == kModuleDecl &&
+          (parse_stack_.back() == kExpression ||
+           parse_stack_.back() == kOperator) &&
+          input_.substr(0, index) == "from") {
+        parse_stack_.pop_back();
+        parse_stack_.push_back(kFromClause);
+      } else if (parse_stack_.back() == kOperator && parse_stack_.size() >= 2 &&
+                 (parse_stack_[parse_stack_.size() - 2] == kModuleDecl ||
+                  (parse_stack_.size() >= 3 &&
+                   parse_stack_[parse_stack_.size() - 2] == kExpression &&
+                   parse_stack_[parse_stack_.size() - 3] == kModuleDecl)) &&
+                 input_.substr(0, index) == "as") {
+        parse_stack_.push_back(kPeriod);
+      } else if (parse_stack_.back() != kBlockKeyword &&
+                 parse_stack_.back() != kClassKeyword) {
+        // An identifier just after a kBlockKeyword is the name of a function
+        // declaration (and just after a kClassKeyword the name of a class);
+        // we just ignore it and leave the parse state alone.  Other
+        // identifiers are treated as kExpressions.
         PushExpression();
       }
       break;
+    // ES2015 `let` is a declaration keyword only at statement position AND
+    // when what follows can begin a binding; everywhere else it is still a
+    // legal identifier (`var let = 1;`, `let = 5;`, `let++;`, `let / 2;` are
+    // all valid non-strict code).  Statement position means: start of input,
+    // start of a statement inside a block, or directly after a block header
+    // such as `if (x)`.  (A kOpenBrace at the top of the stack here is
+    // always a block: had it been an object literal, the property-name
+    // branch above would already have consumed this word as an identifier.)
+    // The set deliberately excludes kOpenParen and kOperator, so `let` in a
+    // for-header stays an identifier; the residual `for (let {a} of xs)`
+    // therefore still errors out (byte-preserving) -- pinned in tests, do
+    // not "fix" by widening the set without revisiting the sloppy-mode
+    // traces.  kModuleDecl (directly after `export`) IS a statement
+    // position, but with a narrower binding lookahead (below): only an
+    // identifier-start character qualifies, so `export let {a} = b` keeps
+    // its pinned error residual (the identifier path leaves the `{` to
+    // error out, byte-preserving) while `export let x` becomes a
+    // declaration that pushes a kModuleVarKeyword (below).
+    //
+    // Binding lookahead (mirrors the spec's cover-grammar disambiguation):
+    // classify as a declaration only if the next non-whitespace character is
+    // an ASCII identifier-start character ('a'-'z', 'A'-'Z', '_', '$', or a
+    // '\\' unicode escape) or '{' or '['.  Anything else -- an operator,
+    // EOF, a comment, or a non-ASCII byte (which could be unicode
+    // whitespace) -- takes the identifier path, which is exactly the old
+    // tokenizer's behavior: a lookahead miss degrades to byte-identical
+    // pre-ES2015 tokenization, never to an error or a misclassified slash.
+    // (Cost: `let /*c*/ x = 1` and `let \u{3c0} = 1` tokenize as
+    // identifier-then-identifier, which is still byte-preserving.)
+    // A declaration `let` behaves like const/var: a linebreak after it never
+    // inserts a semicolon, and a slash after it is an error.  The keyword
+    // pushes a kModuleVarKeyword (whether or not it sits over the module
+    // marker): the binding then lands at the declaration's bare-binding
+    // point, where only `,` or `=` continue (see
+    // TryInsertLinebreakSemicolon), and the `=` of an initializer installs
+    // the kOtherKeyword itself (see ConsumeOperator).
+    case JsKeywords::kLet: {
+      const ParseState let_state = parse_stack_.back();
+      const bool stmt_position =
+          let_state == kStartOfInput || let_state == kOpenBrace ||
+          let_state == kBlockHeader || let_state == kModuleDecl;
+      bool is_declaration = false;
+      if (stmt_position) {
+        const int size = input_.size();
+        int i = index;
+        while (i < size &&
+               (input_[i] == ' ' || input_[i] == '\t' || input_[i] == '\f' ||
+                input_[i] == '\v' || input_[i] == '\n' || input_[i] == '\r')) {
+          ++i;
+        }
+        if (i < size) {
+          const char c = input_[i];
+          is_declaration =
+              (('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z') || c == '_' ||
+               c == '$' || c == '\\' ||
+               // A `{`/`[` binding pattern is a declaration everywhere
+               // except over the module marker, where the pinned
+               // `export let {a} = b` residual is preserved instead.
+               (let_state != kModuleDecl && (c == '{' || c == '[')));
+        }
+      }
+      if (is_declaration) {
+        parse_stack_.push_back(kModuleVarKeyword);
+      } else {
+        type = JsKeywords::kIdentifier;
+        if (parse_stack_.back() != kBlockKeyword) {
+          PushExpression();
+        }
+      }
+      break;
+    }
     // These keywords are expressions.  A slash after one of these is division
-    // (rather than a regex literal).
+    // (rather than a regex literal).  ES2015 `super` is a primary-expression
+    // head (`super(...)`, `super.x`, `super[i]`), so it belongs here too.
     case JsKeywords::kFalse:
     case JsKeywords::kNull:
+    case JsKeywords::kSuper:
     case JsKeywords::kThis:
     case JsKeywords::kTrue:
       PushExpression();
@@ -879,6 +1435,25 @@ bool JsTokenizer::TryConsumeIdentifierOrKeyword(JsKeywords::Type* type_out,
     case JsKeywords::kThrow:
       parse_stack_.push_back(kReturnThrow);
       break;
+    // `yield` is a keyword inside generators (which this tokenizer now
+    // models) and a legal identifier everywhere else.  Treat it like
+    // `return`/`throw`: a slash after it starts a regex literal, and a
+    // linebreak after it always inserts a semicolon.  Inside a generator
+    // that is exactly right -- `yield /re/g` yields the regex (reading the
+    // slash as division would re-emit a bare `g` identifier where engines
+    // then report a ReferenceError), and a LineTerminator before a
+    // delegated `*` is a SyntaxError in engines, so the newline must not
+    // be dropped.  Outside generators the extra insertions are byte-safe:
+    // a kept newline re-parses identically, since engines only insert
+    // when the next token cannot continue anyway.  After a block keyword
+    // it is a function name (`function yield() {}`).
+    case JsKeywords::kYield:
+      if (parse_stack_.back() == kBlockKeyword) {
+        type = JsKeywords::kIdentifier;
+      } else {
+        parse_stack_.push_back(kReturnThrow);
+      }
+      break;
     // These keywords can't have a division operator or a regex literal after
     // them, so a slash after one of these is an error (not counting comments,
     // of course).  Moreover, a linebreak after them always induces semicolon
@@ -890,19 +1465,68 @@ bool JsTokenizer::TryConsumeIdentifierOrKeyword(JsKeywords::Type* type_out,
       break;
     // These keywords also can't have a division operator or a regex literal
     // after them.  However, a linebreak after them never induces semicolon
-    // insertion.
+    // insertion.  They push a kModuleVarKeyword (exactly like a declaration
+    // `let` above), so the binding lands at the declaration's bare-binding
+    // point, where only `,` or `=` continue -- the same restricted point the
+    // module-declaration fix established for `export var/const x`.
     case JsKeywords::kConst:
-    case JsKeywords::kDefault:
     case JsKeywords::kVar:
+      parse_stack_.push_back(kModuleVarKeyword);
+      break;
+    case JsKeywords::kDefault:
       parse_stack_.push_back(kOtherKeyword);
       break;
-    // These keywords are reserved and may not be used:
-    case JsKeywords::kClass:
-    case JsKeywords::kEnum:
-    case JsKeywords::kExport:
-    case JsKeywords::kExtends:
+    // ES2015 `import` and `export` begin module declarations.  At statement
+    // position we push a kModuleDecl marker that anchors the declaration:
+    // braces after it are clause-shaped (object-literal-shaped), a linebreak
+    // directly after the keyword never inserts a semicolon (`import\n{a}`
+    // continues the statement), and ASI fires at the declaration's
+    // grammatical end regardless of the next token (see
+    // TryInsertLinebreakSemicolon and kModuleContinuationRegex).  `import`
+    // followed by `(` or `.` is the dynamic import() call or import.meta:
+    // ConsumeOpenParen/ConsumePeriod convert the marker back to a plain
+    // kOperator, so those tokenize exactly like ordinary expressions.  At
+    // expression position (e.g. `x = import('y')`) both keywords keep the
+    // plain-operator behavior.  Known residual, accepted deliberately: in
+    // `export default function(){}` the function body's closing brace
+    // leaves the `default` kOtherKeyword on top of the stack (see
+    // ConsumeCloseBrace), so a regex literal directly after it -- genuine
+    // but vanishingly rare JS, e.g. `export default function(){}/re/...` --
+    // is reported as an error, preserving the input byte-for-byte rather
+    // than mis-tokenizing it.  That error-preservation holds only for the
+    // plain form: in `export default async function(){}` the `async`
+    // identifier interposes a kExpression, so the closing brace leaves an
+    // Expr on top and a following slash is classified as division.  That is
+    // the pre-existing async-function misclassification family
+    // (`async function f(){}/re/` behaves identically), newly reachable now
+    // that `export` tokenizes; pinned in tests as-is.
     case JsKeywords::kImport:
-    case JsKeywords::kSuper:
+    case JsKeywords::kExport:
+      if (parse_stack_.back() == kStartOfInput ||
+          parse_stack_.back() == kOpenBrace ||
+          parse_stack_.back() == kBlockHeader) {
+        parse_stack_.push_back(kModuleDecl);
+      } else {
+        PushOperator();
+      }
+      break;
+    // `class` opens a class header: the keyword (and the heritage span)
+    // takes a kClassKeyword state; the `{` of the body completes it (see
+    // ConsumeOpenBrace).  `extends` is the heritage operator there, and
+    // reserved everywhere else (as is `enum`, in ALL modes), so those
+    // still error byte-preservingly.
+    case JsKeywords::kClass:
+      parse_stack_.push_back(kClassKeyword);
+      break;
+    case JsKeywords::kExtends:
+      if (parse_stack_.back() == kClassKeyword) {
+        PushOperator();
+      } else {
+        *type_out = Error(token_out);
+        return true;
+      }
+      break;
+    case JsKeywords::kEnum:
       *type_out = Error(token_out);
       return true;
     default:
@@ -941,8 +1565,60 @@ JsKeywords::Type JsTokenizer::ConsumeOperator(StringPiece* token_out) {
   // Is this a postfix operator?  We treat those differently than prefix or
   // unary operators.
   DCHECK(!parse_stack_.empty());
-  if ((token == "++" || token == "--") && parse_stack_.back() == kExpression) {
+  // The arrow head's `>` below intentionally repeats this empty body: both
+  // constructs leave the parse state unchanged.
+  if ((token == "++" || token == "--") &&
+      parse_stack_.back() == kExpression) {  // NOLINT(bugprone-branch-clone)
     // Postfix operator; leave the parse state as kExpression.
+  } else if (token == "=" && !input_.empty() && input_[0] == '>') {
+    // An arrow head `=>` (per ECMA-262 a single punctuator, though emitted
+    // here as separate `=` and `>` tokens to preserve the old byte stream):
+    // push a kArrow state so that a `{...}` body is recognized as a block
+    // when it closes (see ConsumeCloseBrace).  The state sits under the
+    // body like an operator, so expression-body continuations keep the
+    // ordinary rules.  This check comes before the declaration-initializer
+    // case below: `export let f => ...` lexes as an arrow (invalid JS,
+    // tolerated byte-preservingly).
+    parse_stack_.push_back(kArrow);
+  } else if (token[0] == '>' && parse_stack_.back() == kArrow) {
+    // The `>` of the arrow head: leave the kArrow state on the stack.
+    // (A kArrow directly on top is only ever seen here, right after the
+    // `=`; anything else this combines with was already invalid JS.)
+  } else if (token[0] == '*' && parse_stack_.back() == kBlockKeyword) {
+    // The `*` of `function*` (and `async function*`): a generator marker,
+    // not a binary operator -- leave the block keyword on the stack so the
+    // name and parameter list complete into a block header exactly like a
+    // plain function's.  (`if * x` and the like were already invalid JS;
+    // leaving the keyword there stays byte-preserving.)
+  } else if (token == "=" &&
+             ((parse_stack_.size() >= 2 && parse_stack_.back() == kExpression &&
+               (parse_stack_[parse_stack_.size() - 2] == kModuleDecl ||
+                parse_stack_[parse_stack_.size() - 2] == kModuleVarKeyword ||
+                parse_stack_[parse_stack_.size() - 2] == kClassBrace)) ||
+              (parse_stack_.size() >= 3 && parse_stack_.back() == kExpression &&
+               parse_stack_[parse_stack_.size() - 2] == kOpenBrace &&
+               CanPreceedObjectLiteral(
+                   parse_stack_[parse_stack_.size() - 3])))) {
+    // The `=` of an initializer: a variable initializer (`let/const/var x
+    // = ...`, exported or not; also of an invalid `import ... = ...`,
+    // tolerated), a class field initializer (`class X { a = ... }`), or a
+    // destructuring default (`const { canvas = f() } = x`, or a parameter
+    // pattern).  In all three the right-hand side is an ordinary
+    // expression (an AssignmentExpression) with ordinary ASI continuation
+    // rules, so install a kOtherKeyword over the declaration marker, class
+    // body brace, or pattern brace before pushing the operator.  The
+    // initializer then collapses to [..., kOtherKeyword, kExpression],
+    // which is NOT a bare-binding point for TryInsertLinebreakSemicolon.
+    // For class fields and destructuring patterns the marker also keeps
+    // the initializer from collapsing back onto the brace
+    // indistinguishably from an element name, which would misfire the
+    // method-shorthand gate on call/member continuations
+    // (`class X { a = 1\n(2) }` is a call, not a method).  (An `=`
+    // shorthand in a real object literal was already invalid JS, tolerated
+    // byte-preservingly.)
+    parse_stack_.pop_back();
+    parse_stack_.push_back(kOtherKeyword);
+    PushOperator();
   } else {
     // Prefix or binary operator; push it onto the stack.
     PushOperator();
@@ -959,6 +1635,20 @@ JsKeywords::Type JsTokenizer::ConsumePeriod(StringPiece* token_out) {
       return ConsumeNumber(token_out);
     }
   }
+  // ES2015 spread `...` (and rest in destructuring and parameter lists):
+  // emit it as a single operator token; like other prefix operators, an
+  // expression (and a regex literal) may follow.
+  if (input_.size() >= 3 && input_[1] == '.' && input_[2] == '.') {
+    PushOperator();
+    return Emit(JsKeywords::kOperator, 3, token_out);
+  }
+  // `import.meta` (or a member access on a dynamic import) is not a
+  // declaration: drop the module-declaration marker, exactly as
+  // ConsumeOpenParen does for `import(...)`.
+  if (parse_stack_.back() == kModuleDecl) {
+    parse_stack_.pop_back();
+    PushOperator();
+  }
   parse_stack_.push_back(kPeriod);
   return Emit(JsKeywords::kOperator, 1, token_out);
 }
@@ -967,8 +1657,38 @@ JsKeywords::Type JsTokenizer::ConsumeQuestionMark(StringPiece* token_out) {
   DCHECK(!input_.empty());
   DCHECK_EQ('?', input_[0]);
   DCHECK(!parse_stack_.empty());
-  if (parse_stack_.back() != kExpression) {
+  // A `?` can grow the stack without a pop until its `:` arrives
+  // ("1?1?1?..."), so it needs the depth cap too.
+  if (parse_stack_.size() >= kMaxParseStackDepth) {
     return Error(token_out);
+  }
+  if (parse_stack_.back() != kExpression) {
+    // Outside generators `yield` is an ordinary identifier (`x = yield ?
+    // 1 : 2`), so treat the keyword as the expression it just produced.
+    // (`return ?` and `throw ?` were already invalid JS, as is
+    // `yield ? 1 : 2` inside a generator -- all byte-preserving.)
+    if (parse_stack_.back() == kReturnThrow) {
+      parse_stack_.pop_back();
+      PushExpression();
+    } else {
+      return Error(token_out);
+    }
+  }
+  if (input_.size() >= 2 && input_[1] == '?') {
+    // ES2020 nullish coalescing `??`, or ES2021 logical assignment `??=`.
+    // Both are binary operators: a slash after them starts a regex literal,
+    // and an open brace after them starts an object literal.
+    const int length = (input_.size() >= 3 && input_[2] == '=') ? 3 : 2;
+    PushOperator();
+    return Emit(JsKeywords::kOperator, length, token_out);
+  }
+  if (input_.size() >= 2 && input_[1] == '.' &&
+      !(input_.size() >= 3 && input_[2] >= '0' && input_[2] <= '9')) {
+    // ES2020 optional chaining `?.`.  Per ECMA-262, OptionalChainingPunctuator
+    // is `?.` [lookahead not in DecimalDigit], so `a?.5:b` is the ternary
+    // `a ? .5 : b` and falls through to the kQuestionMark path below.
+    parse_stack_.push_back(kOptionalChain);
+    return Emit(JsKeywords::kOperator, 2, token_out);
   }
   parse_stack_.push_back(kQuestionMark);
   return Emit(JsKeywords::kOperator, 1, token_out);
@@ -1009,7 +1729,9 @@ JsKeywords::Type JsTokenizer::ConsumeSemicolon(StringPiece* token_out) {
         return Error(token_out);
       }
       break;
-    } else if (state == kStartOfInput || state == kOpenBrace) {
+    } else if (state == kStartOfInput || state == kOpenBrace ||
+               state == kClassBrace) {
+      // A `;` inside a class body is a legal no-op (and a field separator).
       break;
     }
     parse_stack_.pop_back();
@@ -1028,7 +1750,26 @@ JsKeywords::Type JsTokenizer::ConsumeSlash(StringPiece* token_out) {
     if (next == '/') {
       return ConsumeLineComment(token_out);
     } else if (next == '*') {
-      return ConsumeBlockComment(token_out);
+      const JsKeywords::Type type = ConsumeBlockComment(token_out);
+      // A block comment that contains a line terminator counts as a line
+      // terminator for automatic semicolon insertion (ECMA-262), so run the
+      // same insertion logic a real linebreak would get: "return/*\n*/x"
+      // must not be joined into "return x", and "x/*\n*/++y" must not be
+      // joined into the syntax error "x++y".  (Comments pulled into
+      // TryInsertLinebreakSemicolon's own lookahead queue do not pass
+      // through here, so this cannot re-enter.)  Conditional-compilation
+      // comments are left as plain comments: the minifier retains them
+      // verbatim, and the retained text itself carries the linebreak into
+      // the output.
+      if (type == JsKeywords::kComment &&
+          CommentHasLineTerminator(*token_out) &&
+          !IsConditionalCompilationComment(*token_out)) {
+        start_of_line_ = true;
+        if (TryInsertLinebreakSemicolon()) {
+          return JsKeywords::kSemiInsert;
+        }
+      }
+      return type;
     }
   }
   // Otherwise, we have to consult the current parse state to decide if this
@@ -1046,11 +1787,19 @@ JsKeywords::Type JsTokenizer::ConsumeSlash(StringPiece* token_out) {
     case kTemplateInterp:
     case kBlockHeader:
     case kReturnThrow:
+    case kArrow:  // `x => /re/`: a regex literal starts an expression body.
+    case kObjectValue:  // A regex literal can start a property value.
       return ConsumeRegex(token_out);
     case kPeriod:
+    case kOptionalChain:
     case kBlockKeyword:
     case kJumpKeyword:
     case kOtherKeyword:
+    case kModuleDecl:
+    case kFromClause:
+    case kModuleVarKeyword:
+    case kClassKeyword:
+    case kClassBrace:
       return Error(token_out);
     default:
       LOG(DFATAL) << "Unknown parse state: " << parse_stack_.back();
@@ -1066,6 +1815,13 @@ JsKeywords::Type JsTokenizer::ConsumeString(StringPiece* token_out) {
       input_[input_.size() - unconsumed.size() - 1] != input_[0]) {
     // EOF or an unescaped linebreak in the string will cause an error.
     return Error(token_out);
+  }
+  // A string literal directly over the module marker is the module specifier
+  // of a bare import (`import 'x'`): move the declaration to the from-clause
+  // shape so that ASI always fires after the specifier, exactly as it does
+  // after the specifier of a from-clause.
+  if (parse_stack_.back() == kModuleDecl) {
+    parse_stack_.push_back(kFromClause);
   }
   PushExpression();
   return Emit(JsKeywords::kStringLiteral, input_.size() - unconsumed.size(),
@@ -1087,6 +1843,40 @@ bool JsTokenizer::NearestOpenDelimiterIsTemplateInterp() const {
       case kOpenBracket:
       case kOpenParen:
       case kBlockKeyword:
+      case kClassBrace:
+        // kClassBrace IS a delimiter here: inside a template
+        // interpolation a class body `}` closes the class (and a template
+        // after it is a tagged template on the class expression,
+        // node-verified), not template text.  (Without this stop the walk
+        // continued past the class body down to the interpolation and
+        // consumed the class's `}` as template text.)
+        return false;
+      default:
+        // A non-delimiter state (expression, operator, block header, or a
+        // keyword state): keep looking further down the stack.
+        break;
+    }
+  }
+  return false;
+}
+
+bool JsTokenizer::NearestOpenDelimiterIsClassBrace() const {
+  // Same walk as the template-interpolation check, for the class body
+  // brace.  kClassBrace itself is a delimiter here (a nested class body
+  // belongs to the innermost class).
+  for (std::vector<ParseState>::const_reverse_iterator
+           iter = parse_stack_.rbegin(),
+           end = parse_stack_.rend();
+       iter != end; ++iter) {
+    switch (*iter) {
+      case kClassBrace:
+        return true;
+      case kStartOfInput:
+      case kOpenBrace:
+      case kOpenBracket:
+      case kOpenParen:
+      case kBlockKeyword:
+      case kTemplateInterp:
         return false;
       default:
         // A non-delimiter state (expression, operator, block header, or a
@@ -1128,6 +1918,9 @@ JsKeywords::Type JsTokenizer::ConsumeTemplateChunk(StringPiece* token_out) {
       // Start of a ${...} interpolation.  The '${' is part of this chunk;
       // the interpolation body that follows is tokenized as ordinary JS
       // until the matching '}' resumes the template.
+      if (parse_stack_.size() >= kMaxParseStackDepth) {
+        return Error(token_out);
+      }
       parse_stack_.push_back(kTemplateInterp);
       return Emit(JsKeywords::kTemplateLiteral, i + 2, token_out);
     }
@@ -1206,6 +1999,10 @@ JsKeywords::Type JsTokenizer::Emit(JsKeywords::Type type, int num_chars,
   if (type != JsKeywords::kComment && type != JsKeywords::kWhitespace &&
       type != JsKeywords::kLineSeparator && type != JsKeywords::kSemiInsert) {
     start_of_line_ = false;
+    // Any real token continues (or ends) the construct the arrow body was
+    // part of, so a pending terminal-arrow ASI no longer applies.
+    // (ConsumeCloseBrace arms the flag only after emitting its own `}`.)
+    arrow_body_asi_pending_ = false;
     // Check if it looks like we're tokenizing a JSON object rather than JS
     // code.  If the first three tokens in the input are open brace, string
     // literal, colon, then this is a JSON object (since that would be illegal
@@ -1274,7 +2071,8 @@ void JsTokenizer::PushExpression() {
   // and "foo(1)" -> "Expr ( Expr )" becomes "Expr Expr" becomes "Expr").
   DCHECK(!parse_stack_.empty());
   while (parse_stack_.back() == kExpression ||
-         parse_stack_.back() == kOperator || parse_stack_.back() == kPeriod) {
+         parse_stack_.back() == kOperator || parse_stack_.back() == kPeriod ||
+         parse_stack_.back() == kOptionalChain) {
     parse_stack_.pop_back();
     DCHECK(!parse_stack_.empty());
   }
@@ -1323,8 +2121,9 @@ bool JsTokenizer::TryInsertLinebreakSemicolon() {
     case kTemplateInterp:
     case kBlockKeyword:
     case kBlockHeader:
+    case kClassBrace:
       // Semicolon insertion never happens in places where it would create an
-      // empty statement.
+      // empty statement (or an empty class element).
       return false;
     case kExpression:
       // A statement can't end with an unclosed paren or bracket; in
@@ -1342,6 +2141,58 @@ bool JsTokenizer::TryInsertLinebreakSemicolon() {
           break;
         }
       }
+      // After a completed block-bodied arrow (the flag armed at its
+      // closing brace) nothing can continue the ArrowFunction -- not even
+      // the operators and parens in the generic continuation set -- so ASI
+      // always fires.  (An expression body is still open instead, with
+      // ordinary continuation rules, and never arms the flag.)
+      if (arrow_body_asi_pending_) {
+        arrow_body_asi_pending_ = false;
+        break;
+      }
+      // After the module specifier of an import/export declaration (or
+      // after a completed `export [async] function` body) nothing can
+      // continue the declaration, so ASI always fires -- the generic
+      // continuation set, and even the `from` continuation, do not apply
+      // here (`import 'x'\nfrom = 5;` is two statements).
+      if (parse_stack_.size() >= 2 &&
+          parse_stack_[parse_stack_.size() - 2] == kFromClause) {
+        break;
+      }
+      // At the bare-binding point of a variable declaration
+      // (kModuleVarKeyword directly below the expression), only `,` (the
+      // next declarator) and `=` (the initializer) can continue.
+      if (parse_stack_.size() >= 2 &&
+          parse_stack_[parse_stack_.size() - 2] == kModuleVarKeyword) {
+        Re2StringPiece unconsumed = StringPieceToRe2(input_);
+        if (RE2::Consume(&unconsumed,
+                         patterns_->module_var_continuation_pattern)) {
+          return false;
+        }
+        break;
+      }
+      // At any other module declaration point (kModuleDecl directly below
+      // the expression: after an import/export binding, clause, or
+      // namespace binding) the generic continuation set is too broad --
+      // `(`, `/`, and the like cannot continue an import/export
+      // declaration.  Only the declaration continuations `from` and `,`
+      // suppress insertion here.
+      if (parse_stack_.size() >= 2 &&
+          parse_stack_[parse_stack_.size() - 2] == kModuleDecl) {
+        Re2StringPiece unconsumed = StringPieceToRe2(input_);
+        if (RE2::Consume(&unconsumed, patterns_->module_continuation_pattern)) {
+          return false;
+        }
+        break;
+      }
+      // In a class heritage span (`class X extends Y`), the `{` of the
+      // class body is not a statement block and never inserts -- engines
+      // treat a linebreak between the heritage expression and the body as
+      // insignificant (node-verified for empty and method bodies).
+      if (parse_stack_.size() >= 2 &&
+          parse_stack_[parse_stack_.size() - 2] == kClassKeyword) {
+        return false;
+      }
       // Semicolon insertion will not happen after an expression if the next
       // token could continue the statement.
       {
@@ -1351,11 +2202,15 @@ bool JsTokenizer::TryInsertLinebreakSemicolon() {
         }
       }
       break;
-    // Binary and prefix operators should not have semicolon insertion happen
-    // after them.
+    // Binary and prefix operators (including the arrow head `=>`, whose
+    // body is still to come, and the property colon awaiting its value)
+    // should not have semicolon insertion happen after them.
     case kOperator:
     case kPeriod:
+    case kOptionalChain:
     case kQuestionMark:
+    case kArrow:
+    case kObjectValue:
       return false;
     // Line continuations are never permitted after return, throw, break,
     // continue, or debugger keywords, so a semicolon is always inserted for
@@ -1363,9 +2218,16 @@ bool JsTokenizer::TryInsertLinebreakSemicolon() {
     case kReturnThrow:
     case kJumpKeyword:
       break;
-    // A statement cannot end after const, default, or var, so we never insert
-    // a semicolon after those.
+    // A statement cannot end after `default` or an initializer's `=`, so we
+    // never insert a semicolon after those.  Nor can it end directly after
+    // the `import`/`export` that opened a module declaration, after the
+    // `from` awaiting its module specifier, or after the let/const/var that
+    // opened a variable declaration.
     case kOtherKeyword:
+    case kModuleDecl:
+    case kFromClause:
+    case kModuleVarKeyword:
+    case kClassKeyword:
       return false;
     default:
       LOG(DFATAL) << "Unknown parse state: " << parse_stack_.back();
@@ -1376,7 +2238,9 @@ bool JsTokenizer::TryInsertLinebreakSemicolon() {
   while (true) {
     DCHECK(!parse_stack_.empty());
     const ParseState state = parse_stack_.back();
-    if (state == kStartOfInput || state == kOpenBrace) {
+    if (state == kStartOfInput || state == kOpenBrace || state == kClassBrace) {
+      // Inside a class body an inserted semicolon ends the current element
+      // (a field declaration), not the class.
       break;
     }
     parse_stack_.pop_back();
@@ -1385,9 +2249,26 @@ bool JsTokenizer::TryInsertLinebreakSemicolon() {
 }
 
 bool JsTokenizer::CanPreceedObjectLiteral(ParseState state) {
+  // kOtherKeyword is included for `export default {...}`: the braces start
+  // an object expression.  ConsumeCloseBrace carves out the one case where
+  // a block legitimately sits on top of a kOtherKeyword
+  // (`export default function(){}`).  kModuleDecl is included for the
+  // import/export clauses (`import {a} from 'x'`, `export {a}`), whose
+  // braces are object-literal-shaped; kModuleVarKeyword is included for
+  // destructuring binding patterns in variable declarations
+  // (`const {a} = x`, `export var {a} = b`), which for our purposes are
+  // likewise object-literal-shaped (property names, `:` renames, and the
+  // closing brace producing an expression so that `= x` parses).  kArrow
+  // is deliberately absent: an arrow's `{...}` is a BLOCK body, not an
+  // object literal, so statement keywords inside it keep their keyword
+  // paths (the one collapse that needs the arrow, a function-expression
+  // body `x => function(){}`, is handled explicitly in ConsumeCloseBrace).
+  // kOptionalChain is deliberately absent too: `a?.{` is never valid.
   return (state == kOperator || state == kQuestionMark ||
           state == kOpenBracket || state == kOpenParen ||
-          state == kReturnThrow || state == kTemplateInterp);
+          state == kReturnThrow || state == kTemplateInterp ||
+          state == kOtherKeyword || state == kModuleDecl ||
+          state == kModuleVarKeyword || state == kObjectValue);
 }
 
 JsTokenizerPatterns::JsTokenizerPatterns()
@@ -1398,7 +2279,9 @@ JsTokenizerPatterns::JsTokenizerPatterns()
       regex_literal_pattern(kRegexLiteralRegex),
       string_literal_pattern(kStringLiteralRegex),
       whitespace_pattern(kWhitespaceRegex),
-      line_continuation_pattern(kLineContinuationRegex) {
+      line_continuation_pattern(kLineContinuationRegex),
+      module_continuation_pattern(kModuleContinuationRegex),
+      module_var_continuation_pattern(kModuleVarContinuationRegex) {
   DCHECK(identifier_pattern.ok());
   DCHECK(numeric_literal_pattern.ok());
   DCHECK(operator_pattern.ok());
@@ -1406,6 +2289,8 @@ JsTokenizerPatterns::JsTokenizerPatterns()
   DCHECK(string_literal_pattern.ok());
   DCHECK(whitespace_pattern.ok());
   DCHECK(line_continuation_pattern.ok());
+  DCHECK(module_continuation_pattern.ok());
+  DCHECK(module_var_continuation_pattern.ok());
 }
 
 JsTokenizerPatterns::~JsTokenizerPatterns() {}

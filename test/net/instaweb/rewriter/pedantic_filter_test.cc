@@ -73,6 +73,13 @@ TEST_F(PedanticFilterTest, DoNotBreakScriptType) {
                     "</head>");
 }
 
+TEST_F(PedanticFilterTest, ModuleTypeUntouched) {
+  // A module script always carries type=module, so the no-type
+  // text/javascript injection can never reach it, HTML4 doctype or not.
+  ValidateNoChanges("module_type_untouched",
+                    "<head><script type=\"module\">var x=1;</script></head>");
+}
+
 TEST_F(PedanticFilterTest, DoNotAlterHTML5Script) {
   SetDoctype("<!doctype html>");
   ValidateNoChanges("do_not_alter_html_5_style",

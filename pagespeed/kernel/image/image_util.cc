@@ -63,6 +63,8 @@ const char* ImageFormatToMimeTypeString(ImageFormat image_type) {
       return "image/gif";
     case IMAGE_WEBP:
       return "image/webp";
+    case IMAGE_AVIF:
+      return "image/avif";
       // No default so compiler will complain if any enum is not processed.
   }
   return kInvalidImageFormat;
@@ -80,6 +82,8 @@ const char* ImageFormatToString(ImageFormat image_type) {
       return "IMAGE_GIF";
     case IMAGE_WEBP:
       return "IMAGE_WEBP";
+    case IMAGE_AVIF:
+      return "IMAGE_AVIF";
       // No default so compiler will complain if any enum is not processed.
   }
   return kInvalidImageFormat;
@@ -121,6 +125,48 @@ net_instaweb::ImageType ComputeImageType(const StringPiece& buf) {
   // Note that we can be fooled if we're passed random binary data;
   // we make the call based on as few as two bytes (JPEG).
   net_instaweb::ImageType image_type = net_instaweb::IMAGE_UNKNOWN;
+
+  // AVIF (and the HEIF family) are ISO-BMFF containers: a big-endian 4-byte box
+  // size, then the box type "ftyp" at offset 4, a 4-byte major brand at offset
+  // 8, a 4-byte minor version, and zero or more 4-byte compatible brands from
+  // offset 16 to the end of the ftyp box. Because the file begins with 0x00 (the
+  // high byte of the box size), it never matches the first-byte switch below, so
+  // we probe for it explicitly first. The probe is exact -- an "ftyp" box whose
+  // major or compatible brand is an AVIF brand -- so JPEG/PNG/GIF/WebP inputs
+  // are never misclassified.
+  if (buf.size() >= 12 && memcmp(buf.data() + 4, "ftyp", 4) == 0) {
+    // Length of the ftyp box; clamp to the bytes we actually have so the
+    // compatible-brand scan can never read past the buffer.
+    size_t box_size = (static_cast<size_t>(CharToInt(buf[0])) << 24) |
+                      (static_cast<size_t>(CharToInt(buf[1])) << 16) |
+                      (static_cast<size_t>(CharToInt(buf[2])) << 8) |
+                      static_cast<size_t>(CharToInt(buf[3]));
+    if (box_size < 12 || box_size > buf.size()) {
+      box_size = buf.size();
+    }
+    const char* major_brand = buf.data() + 8;
+    bool is_avif = (memcmp(major_brand, "avif", 4) == 0);
+    bool is_avis = (memcmp(major_brand, "avis", 4) == 0);
+    for (size_t off = 16; off + 4 <= box_size; off += 4) {
+      if (memcmp(buf.data() + off, "avis", 4) == 0) {
+        is_avis = true;
+      } else if (memcmp(buf.data() + off, "avif", 4) == 0) {
+        is_avif = true;
+      }
+    }
+    if (is_avis) {
+      image_type = net_instaweb::IMAGE_AVIF_ANIMATED;
+    } else if (is_avif) {
+      // TODO(avif): deliberate M2 follow-up -- probe the decoded features here
+      // (the libavif decode path exists) to promote alpha/lossless AVIF to
+      // IMAGE_AVIF_LOSSLESS_OR_ALPHA, mirroring the WebPGetFeatures() check
+      // below. In M1 all still AVIF classifies as the base IMAGE_AVIF; this
+      // sniff stays byte-cheap (no decode) by design.
+      image_type = net_instaweb::IMAGE_AVIF;
+    }
+    return image_type;
+  }
+
   if (buf.size() >= 8) {
     // Note that gcc rightly complains about constant ranges with the
     // negative char constants unless we cast.
@@ -230,6 +276,27 @@ bool HasJumbfC2pa(StringPiece bytes) {
   }
   return false;
 }
+
+// the design record Stream H: explicit ISO-BMFF / AVIF C2PA carrier detection. A C2PA
+// manifest in an ISO-BMFF container (AVIF, HEIF, MP4) is stored either as a
+// JUMBF superbox ("jumb", already caught by HasJumbfC2pa above) or inside a
+// top-level "uuid" box tagged with the C2PA manifest UUID
+// d8fec3d6-1b0e-483c-9297-5828877ec481. HasJumbfC2pa catches the JUMBF form
+// regardless of container; this adds the raw-UUID form and is gated on the file
+// actually being ISO-BMFF (an "ftyp" box at offset 4) so the 16-byte signature
+// scan cannot false-positive on unrelated binary data. Signature-only, no box
+// parse or re-emit, mirroring the other detectors here.
+bool HasIsoBmffC2pa(StringPiece bytes) {
+  // ISO-BMFF gate: 4-byte big-endian box size, then "ftyp" at offset 4.
+  if (bytes.size() < 12 || memcmp(bytes.data() + 4, "ftyp", 4) != 0) {
+    return false;
+  }
+  static const unsigned char kC2paUuid[16] = {
+      0xd8, 0xfe, 0xc3, 0xd6, 0x1b, 0x0e, 0x48, 0x3c,
+      0x92, 0x97, 0x58, 0x28, 0x87, 0x7e, 0xc4, 0x81};
+  return ContainsToken(
+      bytes, StringPiece(reinterpret_cast<const char*>(kC2paUuid), 16));
+}
 }  // namespace
 
 bool ImageHasXmpC2pa(StringPiece bytes) {
@@ -250,7 +317,7 @@ bool ImageHasC2paManifest(StringPiece bytes) {
   if (bytes.size() < 12) {
     return false;
   }
-  return HasJumbfC2pa(bytes) || ImageHasXmpC2pa(bytes);
+  return HasJumbfC2pa(bytes) || HasIsoBmffC2pa(bytes) || ImageHasXmpC2pa(bytes);
 }
 
 namespace {

@@ -52,6 +52,22 @@ class Timer {
   // Returns number of microseconds since 1970.
   virtual int64 NowUs() const = 0;
 
+  // Returns a monotonically non-decreasing time in microseconds from an
+  // unspecified epoch. Unlike NowUs(), this is immune to wall-clock steps
+  // (NTP, hypervisor time-sync, a misbehaving timesync daemon), so it is the
+  // correct source for elapsed-time / latency / duration measurements.
+  //
+  // It must NOT be used for absolute timestamps (HTTP Date headers, cache
+  // freshness/expiry), which require wall-clock time from NowUs()/NowMs().
+  //
+  // The base implementation falls back to NowUs() for Timer subclasses that
+  // have no independent monotonic source; subclasses backed by a real
+  // monotonic clock (PosixTimer, StdTimer) override it.
+  virtual int64 NowMonotonicUs() const;
+
+  // Monotonic counterpart of NowMs(); see NowMonotonicUs().
+  virtual int64 NowMonotonicMs() const;
+
   // Sleep for given number of milliseconds.
   virtual void SleepMs(int64 ms);
 

@@ -43,6 +43,7 @@
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/html/html_element.h"
+#include "pagespeed/kernel/html/html_name.h"
 #include "pagespeed/kernel/html/html_node.h"
 #include "pagespeed/kernel/http/content_type.h"
 #include "pagespeed/kernel/http/data_url.h"
@@ -58,6 +59,9 @@ namespace {
 
 const char kInlineCspMessage[] =
     "Avoiding modifying inline script with CSP present";
+
+const char kModuleCrossHostMessage[] =
+    "Not rewriting module script: rewritten URL would be on another host";
 
 void CleanupWhitespaceScriptBody(RewriteDriver* driver,
                                  HtmlCharactersNode* node) {
@@ -79,6 +83,18 @@ void CleanupWhitespaceScriptBody(RewriteDriver* driver,
   }
   bool deleted = driver->DeleteNode(node);
   DCHECK(deleted);
+}
+
+// Module fetches are CORS-mode and their import.meta.url / relative-import
+// resolution is host-sensitive, so a module element must never be pointed at
+// a canonical library URL (validated only under classic-script semantics).
+bool IsModuleScriptElement(const HtmlElement* element) {
+  if (element == nullptr) {
+    return false;
+  }
+  const HtmlElement::Attribute* type = element->FindAttribute(HtmlName::kType);
+  return type != nullptr && type->DecodedValueOrNull() != nullptr &&
+         ScriptTagScanner::Normalized(type->DecodedValueOrNull()) == "module";
 }
 
 }  // namespace
@@ -262,7 +278,11 @@ class JavascriptFilter::Context : public SingleRewriteContext {
       return;
     }
     if (!result->optimizable()) {
-      if (result->canonicalize_url() && output_slot->CanDirectSetUrl()) {
+      // The canonicalize_url bit is keyed by input URL and may have been
+      // written by a classic-script reference to the same URL on another
+      // page; module elements must not be swapped to the canonical URL.
+      if (result->canonicalize_url() && output_slot->CanDirectSetUrl() &&
+          !IsModuleScriptElement(output_slot->element())) {
         // Use the canonical library url and disable the later render step.
         // This permits us to patch in a library url that doesn't correspond to
         // the OutputResource naming scheme.
@@ -389,12 +409,59 @@ void JavascriptFilter::StartElementImpl(HtmlElement* element) {
   DCHECK_EQ(kNoScript, script_type_);
   HtmlElement::Attribute* script_src;
   const RewriteOptions* options = driver()->options();
-  switch (script_tag_scanner_.ParseScriptElement(element, &script_src)) {
+  const ScriptTagScanner::ScriptClassification classification =
+      script_tag_scanner_.ParseScriptElement(element, &script_src);
+  // A script carrying integrity= pins its bytes: any rewrite (minify,
+  // rename, canonicalize) breaks the browser's subresource-integrity check
+  // and the script never executes. This holds for classic and module
+  // scripts alike.
+  if ((classification == ScriptTagScanner::kJavaScript ||
+       classification == ScriptTagScanner::kJavaScriptModule) &&
+      ScriptTagScanner::HasIntegrityAttribute(element)) {
+    return;
+  }
+  switch (classification) {
     case ScriptTagScanner::kJavaScript:
       if (script_src != nullptr) {
         if (options->Enabled(RewriteOptions::kRewriteJavascriptExternal) ||
             options->Enabled(
                 RewriteOptions::kCanonicalizeJavascriptLibraries)) {
+          script_type_ = kExternalScript;
+          RewriteExternalScript(element, script_src);
+        }
+      } else if (options->Enabled(RewriteOptions::kRewriteJavascriptInline)) {
+        script_type_ = kInlineScript;
+      }
+      break;
+    case ScriptTagScanner::kJavaScriptModule:
+      // Module scripts are minified only by the tokenizer-based minifier;
+      // the legacy minifier predates module syntax and can misparse regex
+      // literals after module-only keywords (e.g. `export default /re/`),
+      // corrupting the script rather than failing cleanly.
+      if (!options->use_experimental_js_minifier()) {
+        break;
+      }
+      if (script_src != nullptr) {
+        // Unlike classic scripts, kCanonicalizeJavascriptLibraries does not
+        // enter the flow here: module fetches are CORS-mode (a canonical CDN
+        // URL without CORS headers fails to load at all) and import.meta.url
+        // plus relative-import resolution change with the host. Minification
+        // is safe: it strips whitespace/comments only, never rewrites import
+        // specifiers, and the rewritten URL stays in the source directory.
+        if (options->Enabled(RewriteOptions::kRewriteJavascriptExternal)) {
+          // The same host-sensitivity applies to the rewritten URL: it is
+          // encoded with UrlNamer::kSharded and rendered back into the
+          // element (unless js_preserve_urls keeps the original src), so
+          // MapRewriteDomain or ShardDomain would relocate the module to
+          // another host. Skip the rewrite in that case; a same-host rewrite
+          // keeps relative imports resolving against the right host.
+          GoogleUrl script_gurl(driver()->base_url(),
+                                script_src->DecodedValueOrNull());
+          if (!options->js_preserve_urls() &&
+              options->domain_lawyer()->WillDomainChange(script_gurl)) {
+            driver()->InsertDebugComment(kModuleCrossHostMessage, element);
+            break;
+          }
           script_type_ = kExternalScript;
           RewriteExternalScript(element, script_src);
         }
@@ -412,7 +479,7 @@ void JavascriptFilter::StartElementImpl(HtmlElement* element) {
   }
 }
 
-void JavascriptFilter::Characters(HtmlCharactersNode* characters) {
+void JavascriptFilter::CharactersImpl(HtmlCharactersNode* characters) {
   switch (script_type_) {
     case kInlineScript:
       RewriteInlineScript(characters);

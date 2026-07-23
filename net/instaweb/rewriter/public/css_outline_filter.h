@@ -51,7 +51,7 @@ class CssOutlineFilter : public CommonFilter {
   void Flush() override;
 
   // HTML Events we expect to be in <style> elements.
-  void Characters(HtmlCharactersNode* characters) override;
+  void CharactersImpl(HtmlCharactersNode* characters) override;
 
   const char* Name() const override { return "OutlineCss"; }
 

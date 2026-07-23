@@ -243,8 +243,10 @@ the table:
     <tr>
       <td><code><a href="filter-make-google-analytics-async">
             make_google_analytics_async</a></code></td>
-      <td>No</td><td>No</td><td>Convert synchronous use of Google
-        Analytics API to asynchronous</td>
+      <td>No</td><td>No</td><td>Deprecated, now a no-op: it rewrote the
+        synchronous Universal Analytics ga.js snippet, which the July 2023
+        Universal Analytics shutdown made obsolete.  The name is still
+        accepted for configuration compatibility.</td>
     </tr>
     <tr>
       <td><code><a href="filter-make-show-ads-async">
@@ -317,8 +319,10 @@ the table:
     </tr>
     <tr>
       <td><code><a href="filter-insert-ga">insert_ga</a></code></td>
-      <td>No</td><td>No</td><td>Adds the Google Analytics snippet to
-      each HTML page.</td>
+      <td>No</td><td>No</td><td>Deprecated: adds a Universal Analytics
+      snippet to each HTML page, but Universal Analytics was discontinued in
+      July 2023, so the injected tracker reports to a dead service.
+      Experiments no longer auto-enable it.</td>
     </tr>
     <tr>
       <td><code><a href="reference-image-optimize#rewrite_images"
@@ -579,12 +583,25 @@ the table:
         Loads images when they become visible in the client viewport.</td>
     </tr>
     <tr>
+      <td><code><a href="filter-prioritize-critical-images"
+                   >prioritize_critical_images</a></code></td>
+      <td>No</td><td>No</td><td>
+        Raises the fetch priority of the images reported above the fold.</td>
+    </tr>
+    <tr>
       <td><code><a href="filter-insert-dns-prefetch"
                    >insert_dns_prefetch</a></code></td>
       <td>No</td><td>No</td><td>
-        Inserts <code>&lt;link rel="dns-prefetch"
-          href="//www.example.com"&gt;</code> tags to reduce DNS resolution
-        time.</td>
+        Inserts <code>&lt;link rel="preconnect"&gt;</code> and
+        <code>&lt;link rel="dns-prefetch"&gt;</code> hints to warm up
+        connections and reduce DNS resolution time.</td>
+    </tr>
+    <tr>
+      <td><code><a href="filter-insert-speculation-rules"
+                   >insert_speculation_rules</a></code></td>
+      <td>No</td><td>No</td><td>
+        Injects a <code>&lt;script type="speculationrules"&gt;</code> ruleset
+        so supporting browsers prefetch same-origin links early.</td>
     </tr>
     <tr>
       <td><code><a href="filter-hint-preload-subresources"
@@ -689,6 +706,8 @@ sections</a>.
 <p>
 The <code><a href="filter-lazyload-images">lazyload_images</a></code>,
 <code><a href="filter-inline-preview-images">inline_preview_images</a></code>,
+<code><a href="filter-prioritize-critical-images"
+        >prioritize_critical_images</a></code>,
 and <code><a href="reference-image-optimize#inline_images">inline_images</a>
 </code> filters, use a <a href="faq#beacons">beacon</a> to collect information
 about the rewritten page so as to optimize the rewriting process. The beacon
@@ -704,7 +723,10 @@ using:
 </dl>
 <p>
 If you disable image beacons but enable filters that use them, the filters will
-work but not as well as when beacons are enabled.
+work but not as well as when beacons are enabled. The exception is
+<code><a href="filter-prioritize-critical-images"
+        >prioritize_critical_images</a></code>, which does nothing at all
+without beacon data.
 </p>
 <p>
 This directive can be used in all scopes including

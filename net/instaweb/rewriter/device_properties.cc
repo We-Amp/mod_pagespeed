@@ -38,6 +38,7 @@ DeviceProperties::DeviceProperties(UserAgentMatcher* matcher)
       supports_lazyload_images_(kNotSet),
       requests_save_data_(kNotSet),
       accepts_webp_(kNotSet),
+      accepts_avif_(kNotSet),
       supports_webp_rewritten_urls_(kNotSet),
       supports_webp_lossless_alpha_(kNotSet),
       supports_webp_animated_(kNotSet),
@@ -73,6 +74,13 @@ void DeviceProperties::ParseRequestHeaders(
   DCHECK_EQ(kNotSet, accepts_webp_) << "Double call to ParseRequestHeaders";
   accepts_webp_ = request_headers.HasValue(HttpAttributes::kAccept,
                                            kContentTypeWebp.mime_type())
+                      ? kTrue
+                      : kFalse;
+  // AVIF is strictly Accept-header-driven; there is no legacy
+  // no-Accept UA population, unlike WebP. Match kContentTypeAvif.mime_type()
+  // exactly as accepts_webp_ matches kContentTypeWebp above.
+  accepts_avif_ = request_headers.HasValue(HttpAttributes::kAccept,
+                                           kContentTypeAvif.mime_type())
                       ? kTrue
                       : kFalse;
   accepts_gzip_ = request_headers.HasValue(HttpAttributes::kAcceptEncoding,
@@ -195,6 +203,27 @@ bool DeviceProperties::SupportsWebpAnimated() const {
     }
   }
   return (supports_webp_animated_ == kTrue);
+}
+
+// AVIF capability accessors. Unlike the WebP accessors above, none of these
+// consult the UA matcher: AVIF has no "legacy no-Accept" UA population to
+// allow-list, so support is decided solely by the Accept: image/avif
+// header captured in accepts_avif_. All four levels therefore share the same
+// gate; the per-image AVIF-vs-WebP-vs-original choice happens at encode time.
+bool DeviceProperties::SupportsAvifInPlace() const {
+  return (accepts_avif_ == kTrue);
+}
+
+bool DeviceProperties::SupportsAvifRewrittenUrls() const {
+  return (accepts_avif_ == kTrue);
+}
+
+bool DeviceProperties::SupportsAvifLosslessAlpha() const {
+  return (accepts_avif_ == kTrue);
+}
+
+bool DeviceProperties::SupportsAvifAnimated() const {
+  return (accepts_avif_ == kTrue);
 }
 
 bool DeviceProperties::IsBot() const {

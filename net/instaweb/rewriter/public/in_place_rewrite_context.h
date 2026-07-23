@@ -120,8 +120,9 @@ class InPlaceRewriteContext : public SingleRewriteContext {
   bool CreationLockBeforeStartFetch() const override { return false; }
 
   // The context nested inside this context can be scheduled via the
-  // CentralController. See comment in RewriteContext::ObtainLockForCreation.
-  bool ScheduleNestedContextViaCentalController() const override {
+  // named-lock rewrite scheduler. See comment in
+  // RewriteContext::ObtainLockForCreation.
+  bool ScheduleNestedContextViaNamedLockController() const override {
     return true;
   }
 

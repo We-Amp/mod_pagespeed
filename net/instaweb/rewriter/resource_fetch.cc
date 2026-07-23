@@ -148,7 +148,9 @@ ResourceFetch::ResourceFetch(const GoogleUrl& url, CleanupMode cleanup_mode,
     : SharedAsyncFetch(async_fetch),
       driver_(driver),
       timer_(timer),
-      start_time_ms_(timer->NowMs()),
+      // Elapsed-time start for the fetch-latency stat; monotonic so a
+      // wall-clock step can't make the delta negative.
+      start_time_ms_(timer->NowMonotonicMs()),
       redirect_count_(0),
       cleanup_mode_(cleanup_mode) {
   resource_url_.Reset(url);
@@ -198,7 +200,8 @@ void ResourceFetch::HandleDone(bool success) {
     }
   }
   RewriteStats* stats = driver_->server_context()->rewrite_stats();
-  stats->fetch_latency_histogram()->Add(timer_->NowMs() - start_time_ms_);
+  stats->fetch_latency_histogram()->Add(timer_->NowMonotonicMs() -
+                                        start_time_ms_);
   stats->total_fetch_count()->IncBy(1);
   if (cleanup_mode_ == kAutoCleanupDriver) {
     driver_->Cleanup();

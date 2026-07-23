@@ -79,7 +79,6 @@ bool SupportNoscriptFilter::IsAnyFilterRequiringScriptExecutionEnabled() const {
     RewriteOptions::Filter filter = js_filters[i];
     bool filter_enabled = true;
     switch (filter) {
-      case RewriteOptions::kDeferIframe:
       case RewriteOptions::kDeferJavascript:
         filter_enabled = request_properties->SupportsJsDefer(
             options->enable_aggressive_rewriters_for_mobile());

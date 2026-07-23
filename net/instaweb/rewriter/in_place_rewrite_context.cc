@@ -670,8 +670,14 @@ void InPlaceRewriteContext::StartFetchReconstructionParent() {
 }
 
 bool InPlaceRewriteContext::InPlaceOptimizeForBrowserEnabled() const {
+  // Browser-dependent in-place optimization is possible whenever a
+  // browser-capability-gated conversion filter is on: WebP or AVIF.
   return Options()->Enabled(RewriteOptions::kInPlaceOptimizeForBrowser) &&
-         Options()->Enabled(RewriteOptions::kConvertJpegToWebp);
+         (Options()->Enabled(RewriteOptions::kConvertJpegToWebp) ||
+          Options()->Enabled(RewriteOptions::kConvertJpegToAvif) ||
+          Options()->Enabled(RewriteOptions::kConvertToAvifLossless) ||
+          Options()->Enabled(RewriteOptions::kConvertToAvifAnimated) ||
+          Options()->Enabled(RewriteOptions::kRecompressAvif));
 }
 
 // TODO(jmaessen): Sharpen this up.  Mark CSS vary:User-Agent because it doesn't
@@ -710,18 +716,28 @@ void InPlaceRewriteContext::AddVaryIfRequired(const CachedResult& cached_result,
       new_vary = HttpAttributes::kUserAgent;
     } else if (ImageUrlEncoder::AllowVaryOnAccept(*Options(),
                                                   request_properties) &&
-               (image_type == IMAGE_JPEG || image_type == IMAGE_WEBP) &&
-               Options()->Enabled(RewriteOptions::kConvertJpegToWebp)) {
+               (image_type == IMAGE_JPEG || image_type == IMAGE_WEBP ||
+                image_type == IMAGE_AVIF ||
+                image_type == IMAGE_AVIF_LOSSLESS_OR_ALPHA ||
+                image_type == IMAGE_AVIF_ANIMATED) &&
+               (Options()->Enabled(RewriteOptions::kConvertJpegToWebp) ||
+                Options()->Enabled(RewriteOptions::kConvertJpegToAvif) ||
+                Options()->Enabled(RewriteOptions::kConvertToAvifLossless) ||
+                Options()->Enabled(RewriteOptions::kConvertToAvifAnimated) ||
+                Options()->Enabled(RewriteOptions::kRecompressAvif))) {
       // If we are allowed to vary on Accept header and the image has been
-      // successfully optimized to lossy format, we need to add "vary: accept",
-      // since we might have used the Accept header for determining image
-      // quality and whether WebP lossy could be used.
+      // successfully optimized, we need to add "vary: accept", since we might
+      // have used the Accept header for determining image quality and whether
+      // WebP lossy or AVIF could be used (AVIF capability is entirely
+      // Accept-driven).
       new_vary = HttpAttributes::kAccept;
     }
 
-    depends_on_save_data = (image_type == IMAGE_JPEG) ||
-                           (image_type == IMAGE_WEBP) ||
-                           (image_type == IMAGE_WEBP_ANIMATED);
+    depends_on_save_data =
+        (image_type == IMAGE_JPEG) || (image_type == IMAGE_WEBP) ||
+        (image_type == IMAGE_WEBP_ANIMATED) || (image_type == IMAGE_AVIF) ||
+        (image_type == IMAGE_AVIF_LOSSLESS_OR_ALPHA) ||
+        (image_type == IMAGE_AVIF_ANIMATED);
 
   } else if (type->IsCss()) {
     // If it's CSS, constituent images can be rewritten in a UA-dependent
@@ -764,17 +780,44 @@ void InPlaceRewriteContext::AddVaryIfRequired(const CachedResult& cached_result,
   }
   ConstStringStarVector varies;
   if (headers->Lookup(HttpAttributes::kVary, &varies)) {
-    // Need to add to the existing Vary header.  But first, check that the vary
-    // header doesn't already encompass new_vary.
+    // A pre-existing "Vary: *" already covers any token we might add.
     for (int i = 0, s = varies.size(); i < s; ++i) {
-      StringPiece vary(*varies[i]);
-      if (StringPiece("*") == vary ||
-          StringCaseEqual(HttpAttributes::kUserAgent, vary) ||
-          (type->IsImage() && StringCaseEqual(HttpAttributes::kAccept, vary))) {
-        // Current Vary: header captures necessary vary information.
+      if (StringPiece("*") == StringPiece(*varies[i])) {
         return;
       }
     }
+    // Merge per token: append only the new_vary tokens not already covered
+    // (case-insensitively) by the existing Vary header, as a single Vary line.
+    // A pre-existing token must not suppress a different token we need.
+    StringPieceVector new_tokens;
+    SplitStringPieceToVector(new_vary, ",", &new_tokens, true);
+    GoogleString vary_to_add;
+    for (int i = 0, n = new_tokens.size(); i < n; ++i) {
+      StringPiece token = new_tokens[i];
+      TrimWhitespace(&token);
+      if (token.empty()) {
+        continue;
+      }
+      bool covered = false;
+      for (int j = 0, s = varies.size(); j < s; ++j) {
+        if (StringCaseEqual(token, *varies[j])) {
+          covered = true;
+          break;
+        }
+      }
+      if (!covered) {
+        if (!vary_to_add.empty()) {
+          vary_to_add += ",";
+        }
+        token.AppendToString(&vary_to_add);
+      }
+    }
+    if (vary_to_add.empty()) {
+      // Current Vary: header captures necessary vary information.
+      return;
+    }
+    headers->Add(HttpAttributes::kVary, vary_to_add);
+    return;
   }
   headers->Add(HttpAttributes::kVary, new_vary);
 }
@@ -845,6 +888,20 @@ void InPlaceRewriteContext::EncodeUserAgentIntoResourceContext(
       }
     } else {
       context->set_libwebp_level(ResourceContext::LIBWEBP_NONE);
+    }
+  }
+
+  // Same clamp for the AVIF capability dimension:
+  //   - if we are still allowed to vary on accept, we can use lossy format
+  //   - if we are not allowed to vary on accept, we cannot use any AVIF format.
+  if (!vary_on_user_agent) {
+    if (ImageUrlEncoder::AllowVaryOnAccept(*Driver()->options(),
+                                           *Driver()->request_properties())) {
+      if (context->avif_level() != ResourceContext::AVIF_NONE) {
+        context->set_avif_level(ResourceContext::AVIF_LOSSY_ONLY);
+      }
+    } else {
+      context->set_avif_level(ResourceContext::AVIF_NONE);
     }
   }
 }

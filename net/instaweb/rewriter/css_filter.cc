@@ -162,6 +162,8 @@ const char CssFilter::kLimitExceeded[] = "flatten_imports_limit_exceeded";
 const char CssFilter::kMinifyFailed[] = "flatten_imports_minify_failed";
 const char CssFilter::kRecursion[] = "flatten_imports_recursion";
 const char CssFilter::kComplexQueries[] = "flatten_imports_complex_queries";
+const char CssFilter::kUnparseableImport[] =
+    "flatten_imports_unparseable_import";
 
 CssFilter::Context::Context(CssFilter* filter, RewriteDriver* driver,
                             RewriteContext* parent,
@@ -442,9 +444,12 @@ bool CssFilter::Context::RewriteCssText(const GoogleUrl& css_base_gurl,
         StrCat("CSS rewrite failed: Parse error in ", css_base_gurl.Spec()));
   } else {
     // Edit stylesheet.
-    // Any problem with an @import results in the error mask bit kImportError
-    // being set, so if we get here we know that any @import rules were parsed
-    // successfully, thus, flattening is safe.
+    // A failed @-rule (such as an @import using cascade layer or range media
+    // query syntax, which the parser predates) is terminated and preserved
+    // verbatim as an unparsed ruleset, with the error demoted to
+    // unparseable_sections_seen_mask. Flattening is still safe because
+    // CssHierarchy refuses to flatten when such an unparsed @import is
+    // present (checked in both Parse and ExpandChildren).
     bool has_unparseables =
         (parser.unparseable_sections_seen_mask() != Css::Parser::kNoError);
     RewriteCssFromRoot(css_base_gurl, css_trim_gurl, in_text, in_text_size,
@@ -637,7 +642,11 @@ void CssFilter::Context::Harvest() {
       absolutified_urls |= CssAbsolutify::AbsolutifyUrls(
           hierarchy_.mutable_stylesheet(), css_base_gurl_to_use,
           !css_rewritten_, /* handle_parseable_ruleset_sections */
-          hierarchy_.unparseable_detected(), /* handle_unparseable_sections */
+          // handle_unparseable_sections: group rules parse cleanly, so
+          // unparseable_detected() alone would skip their opaque preludes,
+          // which can hold url()s. Pre-777f36421 such blocks were
+          // UnparsedRegions and were covered by the unparseable flag.
+          hierarchy_.unparseable_detected() || hierarchy_.group_rules_seen(),
           Driver(), Driver()->message_handler());
     }
 
@@ -653,13 +662,26 @@ void CssFilter::Context::Harvest() {
       ServerContext* server_context = FindServerContext();
       server_context->MergeNonCachingResponseHeaders(input_resource_,
                                                      output_resource_);
+    } else if (FindIgnoreCase(out_text, "</style") != StringPiece::npos) {
+      // Security: the CSS parser decodes hex escapes (e.g. "\3C" -> '<') and
+      // Css::EscapeString does not re-escape '<', '>' or '/', so crafted CSS
+      // (e.g. content:"\3C/style\3E...") can serialize to a literal "</style>"
+      // that breaks out of the inline <style> element (XSS). Mirror
+      // CssInlineFilter::HasClosingStyleTag: if the serialized CSS contains a
+      // closing style tag, abandon the inline optimization and leave the
+      // original element unchanged.
+      ok = false;
+      mutable_output_partition(0)->add_debug_message(
+          "CSS not inlined since it contains style closing tag");
     } else {
       mutable_output_partition(0)->set_inlined_data(out_text);
       mutable_output_partition(0)->set_is_inline_output_resource(true);
     }
-    ok = Driver()->Write(ResourceVector(1, input_resource_), out_text,
-                         &kContentTypeCss, input_resource_->charset(),
-                         output_resource_.get());
+    if (ok) {
+      ok = Driver()->Write(ResourceVector(1, input_resource_), out_text,
+                           &kContentTypeCss, input_resource_->charset(),
+                           output_resource_.get());
+    }
   }
 
   if (!hierarchy_.flattening_failure_reason().empty()) {
@@ -842,6 +864,8 @@ CssFilter::CssFilter(RewriteDriver* driver, CacheExtender* cache_extender,
   num_flatten_imports_minify_failed_ = stats->GetVariable(kMinifyFailed);
   num_flatten_imports_recursion_ = stats->GetVariable(kRecursion);
   num_flatten_imports_complex_queries_ = stats->GetVariable(kComplexQueries);
+  num_flatten_imports_unparseable_import_ =
+      stats->GetVariable(kUnparseableImport);
 }
 
 CssFilter::~CssFilter() {}
@@ -861,6 +885,7 @@ void CssFilter::InitStats(Statistics* statistics) {
   statistics->AddVariable(CssFilter::kMinifyFailed);
   statistics->AddVariable(CssFilter::kRecursion);
   statistics->AddVariable(CssFilter::kComplexQueries);
+  statistics->AddVariable(CssFilter::kUnparseableImport);
 }
 
 namespace {
@@ -956,7 +981,7 @@ void CssFilter::StartElementImpl(HtmlElement* element) {
   // We deal with <link> elements in EndElement.
 }
 
-void CssFilter::Characters(HtmlCharactersNode* characters_node) {
+void CssFilter::CharactersImpl(HtmlCharactersNode* characters_node) {
   if (in_style_element_ && driver()->can_rewrite_resources()) {
     // Note: HtmlParse should guarantee that we only get one CharactersNode
     // per <style> block even if it is split by a flush. However, this code

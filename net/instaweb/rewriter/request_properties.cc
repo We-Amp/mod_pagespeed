@@ -37,7 +37,11 @@ RequestProperties::RequestProperties(UserAgentMatcher* matcher)
       supports_webp_in_place_(kNotSet),
       supports_webp_rewritten_urls_(kNotSet),
       supports_webp_lossless_alpha_(kNotSet),
-      supports_webp_animated_(kNotSet) {}
+      supports_webp_animated_(kNotSet),
+      supports_avif_in_place_(kNotSet),
+      supports_avif_rewritten_urls_(kNotSet),
+      supports_avif_lossless_alpha_(kNotSet),
+      supports_avif_animated_(kNotSet) {}
 
 RequestProperties::~RequestProperties() {}
 
@@ -150,6 +154,53 @@ bool RequestProperties::SupportsWebpAnimated() const {
             : kFalse;
   }
   return (supports_webp_animated_ == kTrue);
+}
+
+// AVIF capability wrappers, AND-ed with the downstream cache's advertised AVIF
+// capability, exactly mirroring the SupportsWebp* wrappers above. DeviceProperties
+// supplies the Accept-header-driven capability; DownstreamCachingDirectives lets a
+// downstream cache (PS-CapabilityList) advertise AVIF support.
+bool RequestProperties::SupportsAvifInPlace() const {
+  if (supports_avif_in_place_ == kNotSet) {
+    supports_avif_in_place_ = (downstream_caching_directives_->SupportsAvif() &&
+                               device_properties_->SupportsAvifInPlace())
+                                  ? kTrue
+                                  : kFalse;
+  }
+  return (supports_avif_in_place_ == kTrue);
+}
+
+bool RequestProperties::SupportsAvifRewrittenUrls() const {
+  if (supports_avif_rewritten_urls_ == kNotSet) {
+    supports_avif_rewritten_urls_ =
+        (downstream_caching_directives_->SupportsAvif() &&
+         device_properties_->SupportsAvifRewrittenUrls())
+            ? kTrue
+            : kFalse;
+  }
+  return (supports_avif_rewritten_urls_ == kTrue);
+}
+
+bool RequestProperties::SupportsAvifLosslessAlpha() const {
+  if (supports_avif_lossless_alpha_ == kNotSet) {
+    supports_avif_lossless_alpha_ =
+        (downstream_caching_directives_->SupportsAvifLosslessAlpha() &&
+         device_properties_->SupportsAvifLosslessAlpha())
+            ? kTrue
+            : kFalse;
+  }
+  return (supports_avif_lossless_alpha_ == kTrue);
+}
+
+bool RequestProperties::SupportsAvifAnimated() const {
+  if (supports_avif_animated_ == kNotSet) {
+    supports_avif_animated_ =
+        (downstream_caching_directives_->SupportsAvifAnimated() &&
+         device_properties_->SupportsAvifAnimated())
+            ? kTrue
+            : kFalse;
+  }
+  return (supports_avif_animated_ == kTrue);
 }
 
 bool RequestProperties::IsBot() const { return device_properties_->IsBot(); }

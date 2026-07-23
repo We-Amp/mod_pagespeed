@@ -133,7 +133,7 @@ tools/dependency/cve_scan.py --snapshot ... --fail-on high   # blocking variant
 # Live CVE scan against NVD (caches raw responses under .cve-cache/).
 tools/dependency/cve_scan.py                       # all deps, medium+
 tools/dependency/cve_scan.py --severity high       # high+ only
-tools/dependency/cve_scan.py --dep curl --dep grpc # subset
+tools/dependency/cve_scan.py --dep curl --dep envoy # subset
 tools/dependency/cve_scan.py --offline             # .cve-cache only, no network
 tools/dependency/cve_scan.py --refresh             # ignore cache, re-fetch
 
@@ -170,7 +170,7 @@ and fail without a reviewable snapshot/dep/ignore-list change.
 ## Honest limitations
 
 - **Sub-deps a vendored library bundles internally are invisible.** We annotate
-  what we *declare* in `repositories.bzl`. If, say, Envoy or gRPC statically
+  what we *declare* in `repositories.bzl`. If, say, Envoy or protobuf statically
   bundles a third library that we never declare, that library's CVEs are not
   matched here. Backstops: the runtime Docker image / built `.deb`+`.rpm`
   scan (catches dynamically-linked `.so`s via grype's reliable OS-package path),
@@ -184,8 +184,9 @@ and fail without a reviewable snapshot/dep/ignore-list change.
   `virtualMatchString` returns all CVEs for the product; the release_date filter
   approximates version applicability but is not a substitute for reading each
   advisory's affected-version range. A finding is a *candidate* to triage, not a
-  confirmed exposure. (Example: a gRPC-Go CVE surfaces under the `grpc:grpc` CPE
-  even though we build gRPC C++ — exactly what the ignore-list/VEX is for.)
+  confirmed exposure. (Example: when we vendored gRPC, a gRPC-Go CVE surfaced
+  under the `grpc:grpc` CPE even though we built gRPC C++ — exactly what the
+  ignore-list/VEX is for.)
 - **NVD CVSS coverage is incomplete.** A CVE with no CVSS score is not matched by
   the severity threshold; such CVEs are skipped (rare for the products here).
 - **The per-PR snapshot is up to ~24 h stale.** The PR job scans the committed

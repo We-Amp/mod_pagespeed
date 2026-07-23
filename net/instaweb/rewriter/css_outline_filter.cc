@@ -95,7 +95,7 @@ void CssOutlineFilter::Flush() {
   inline_chars_ = nullptr;
 }
 
-void CssOutlineFilter::Characters(HtmlCharactersNode* characters) {
+void CssOutlineFilter::CharactersImpl(HtmlCharactersNode* characters) {
   if (inline_element_ != nullptr) {
     CHECK(inline_chars_ == nullptr) << "Multiple character blocks in style.";
     inline_chars_ = characters;

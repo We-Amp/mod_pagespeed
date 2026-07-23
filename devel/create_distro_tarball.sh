@@ -171,7 +171,6 @@ tar cj --dereference --exclude='.git' --exclude='.svn' --exclude='.hg' -f $TARBA
     $GFLAGS \
     $GIFLIB \
     $DIR/third_party/google-sparsehash \
-    $DIR/third_party/grpc \
     $DIR/third_party/hiredis \
     $ICU \
     $JSONCPP \

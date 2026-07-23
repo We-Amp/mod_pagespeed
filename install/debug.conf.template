@@ -5,7 +5,6 @@
 # 8082 -- SLURP
 # @@APACHE_SECONDARY_PORT@@ -- secondary configuration (8083 debug, 8084 root)
 # @@APACHE_TERTIARY_PORT@@ --- loopback route testing
-# @@CONTROLLER_PORT@@ --- Central controller port
 #
 # Note that when system-testing on CentOS installs we need to authorize these
 # ports via semanage.  Any new ports should thus be added to the Makefile in
@@ -74,8 +73,6 @@ ModPagespeedMapProxyDomain http://@@APACHE_DOMAIN@@/content_type_present \
                            http://@@PAGESPEED-TEST-HOST@@:8091
 ModPagespeedMapProxyDomain http://@@APACHE_DOMAIN@@/content_type_absent \
                            http://@@PAGESPEED-TEST-HOST@@:8092
-
-#CONTROLLER ModPagespeedExperimentalCentralControllerPort @@CONTROLLER_PORT@@
 
 # Turn on "KeepAlive" so we can test it in system_test.sh.
 KeepAlive On
@@ -550,7 +547,8 @@ NameVirtualHost localhost:@@APACHE_SECONDARY_PORT@@
   # cache-flush polling.
   # ModPagespeedCacheFlushPollIntervalSec 0
 
-  # Helps testing whether the configuration of reporting 'unload' time works.
+  # Helps testing that the deprecated ReportUnloadTime option still parses
+  # and stays a no-op (the beacon always sends on page-hide).
   ModPagespeedReportUnloadTime on
 
   # Make a non-empty subdirectory config to make sure that
@@ -2148,6 +2146,13 @@ Listen 127.0.0.2:@@APACHE_TERTIARY_PORT@@
 # to work, as that is needed for
 # automatic/system_tests/resource_content_type_html.sh to work.
 AddType image/webp .webp
+
+# As above, for avif: the system has not usually added it as an installed
+# mimetype, so a .avif served off disk by the default handler would fall back
+# to the default type. (A .pagespeed.ic. resource gets its Content-Type from
+# the module, not from this map, so the AVIF system tests do not depend on
+# this line -- it is here for parity with the webp entry above.)
+AddType image/avif .avif
 
 # As above, for verifying JSON content-type in system/system_test.sh
 AddType application/json .json

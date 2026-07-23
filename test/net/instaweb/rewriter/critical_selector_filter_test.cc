@@ -195,6 +195,31 @@ TEST_F(CriticalSelectorFilterTest, BasicOperation) {
   ValidateRewriterLogging(RewriterHtmlApplication::ACTIVE);
 }
 
+// Regression test for a "</style>" breakout XSS on the critical-CSS inline
+// path. The '*' rule below is part of the critical subset, so it is minified
+// and written into an inline <style>. Its content string uses hex escapes that
+// decode to "</style><script>...". The CSS parser decodes "\3C" to '<' and the
+// serializer does not re-escape '<', '>' or '/', so without the closing-tag
+// guard the minified subset would serialize a literal "</style><script>",
+// breaking out of the inline <style> the filter emits (XSS). The filter must
+// instead skip inlining this summary; the full CSS still loads normally.
+TEST_F(CriticalSelectorFilterTest,
+       DoesNotBreakOutOfInlineStyleViaEscapedClosingTag) {
+  GoogleString css =
+      "<style>*{content:\"\\3C/style\\3E\\3Cscript\\3Ealert(1)"
+      "\\3C/script\\3E\"}</style>";
+  GoogleString html = StrCat("<head>", css,
+                             "</head>"
+                             "<body><div>Stuff</div></body>");
+  Parse("escaped_style_breakout", html);
+  // No live </style> breakout and no bare <script> materialized from the
+  // decoded CSS content string may appear in the rendered HTML.
+  EXPECT_EQ(GoogleString::npos, output_buffer_.find("</style><script"))
+      << output_buffer_;
+  EXPECT_EQ(GoogleString::npos, output_buffer_.find("<script>alert"))
+      << output_buffer_;
+}
+
 TEST_F(CriticalSelectorFilterTest, CspForbidsInlineStyle) {
   // A style-src policy without 'unsafe-inline' would make the browser block
   // the inline <style> blocks this filter swaps in for <link> tags, so the
@@ -224,6 +249,25 @@ TEST_F(CriticalSelectorFilterTest, CspAllowsInlineStyle) {
       "csp_unsafe_inline", html,
       StrCat("<head>", kCsp, critical_css, "</head>", "<body><div>Stuff</div>",
              LoadRestOfCss(links), "</body>"));
+}
+
+// Regression test for bug M4: the filter inlines the critical subset, moves
+// the non-critical CSS into <noscript> blocks, and re-adds it with an injected
+// inline bootstrap <script>. Under a policy that permits inline style but
+// forbids inline script (style-src ... 'unsafe-inline'; script-src * without
+// 'unsafe-inline'), the browser would block that loader, stranding all the
+// non-critical CSS. The filter must therefore leave the page untouched: no
+// inline <style> swap, no <noscript> blocks, and no blocked loader script, so
+// every stylesheet still loads normally via its original <link>.
+TEST_F(CriticalSelectorFilterTest, CspForbidsInlineScriptKeepsCssIntact) {
+  const char kCsp[] =
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"style-src * 'unsafe-inline'; script-src *;\">";
+  GoogleString html =
+      StrCat("<head>", kCsp, CssLinkHref("a.css"), CssLinkHref("b.css"),
+             "</head>"
+             "<body><div>Stuff</div></body>");
+  ValidateNoChanges("csp_no_inline_script", html);
 }
 
 TEST_F(CriticalSelectorFilterTest, UnauthorizedCss) {
@@ -532,6 +576,20 @@ TEST_F(CriticalSelectorFilterTest, CharsetIncompatibleAsciiOnly) {
              LoadRestOfCss(CssLinkHref("c.css"))));
 }
 
+// Regression test for bug M6: c.css declares no charset at all (no
+// Content-Type charset, no @charset rule, no BOM, no charset attribute), so
+// summary.charset is empty. Its critical subset carries a non-ASCII byte.
+// With the charset unknown the filter cannot assume it matches the page, so
+// inlining could garble the bytes; it must treat the unknown charset as a
+// mismatch and leave the stylesheet alone rather than inline mojibake.
+TEST_F(CriticalSelectorFilterTest, CharsetUnknownNonAsciiNotInlined) {
+  GoogleString css = "div { content: \"\xD2\x90\"; }";  // no BOM / @charset
+  SetResponseWithDefaultHeaders("c.css", kContentTypeCss, css, 100);
+  ValidateNoChanges(
+      "charset_unknown_non_ascii",
+      StrCat("<meta charset=\"ISO-8859-1\">", CssLinkHref("c.css")));
+}
+
 TEST_F(CriticalSelectorFilterTest, CopiesLinkAttributes) {
   // id, title, and data-* carry over from the replaced link to the inline
   // style; other attributes (here foo) do not.
@@ -557,6 +615,173 @@ TEST_F(CriticalSelectorFilterTest, DropImports) {
                           LoadRestOfCss(CssLinkHref("c.css"))));
 }
 
+TEST_F(CriticalSelectorFilterTest, LayeredImportKeptAsLayerStatement) {
+  // A layered import ("@import url(x) layer(theme);") DECLARES layer
+  // "theme" at that position: layer priority is first-occurrence order
+  // (CSS Cascade 5, "Layer Ordering"), and the import precedes every
+  // ruleset, so its declaration comes first. The import itself still must
+  // not survive into the inline subset (a render-blocking fetch), so the
+  // declaration is retained as a statement-form "@layer theme;" in the
+  // import's original position. Without it, "a" would become the subset's
+  // first-declared layer, flipping the cascade vs. the deferred full copy,
+  // which means theme-then-a.
+  GoogleString css =
+      "@import url(theme.css) layer(theme);"
+      "@layer a { span { color: red; } }"
+      "@layer theme { div { color: red; } }";
+  SetResponseWithDefaultHeaders("c.css", kContentTypeCss, css, 100);
+  ValidateExpected("layered_import_kept_as_statement", CssLinkHref("c.css"),
+                   StrCat("<style>@layer theme;@layer a{}"
+                          "@layer theme{div{color:red}}</style>",
+                          LoadRestOfCss(CssLinkHref("c.css"))));
+}
+
+TEST_F(CriticalSelectorFilterTest, PlainImportAfterLayeredImportDropped) {
+  // The plain @import sits after the layered import's verbatim region in
+  // the parser's ordered rulesets sequence, so it is preserved verbatim
+  // too rather than bucketed. It declares no layer and must leave the
+  // subset exactly like a bucketed import, while the layered import still
+  // leaves its "@layer theme;" statement behind.
+  GoogleString css =
+      "@import url(theme.css) layer(theme);"
+      "@import url(plain.css);"
+      "div { color: red; }";
+  SetResponseWithDefaultHeaders("c.css", kContentTypeCss, css, 100);
+  ValidateExpected("plain_import_after_layered_dropped", CssLinkHref("c.css"),
+                   StrCat("<style>@layer theme;div{color:red}</style>",
+                          LoadRestOfCss(CssLinkHref("c.css"))));
+}
+
+TEST_F(CriticalSelectorFilterTest, AnonymousLayerImportDropped) {
+  // "@import url(x) layer;" imports into an ANONYMOUS layer. Anonymous
+  // layers have no statement form, and removing one occurrence from the
+  // first-occurrence sequence cannot reorder the remaining ones, so the
+  // import keeps the plain drop behavior.
+  GoogleString css =
+      "@import url(anon.css) layer;"
+      "div { color: red; }";
+  SetResponseWithDefaultHeaders("c.css", kContentTypeCss, css, 100);
+  ValidateExpected("anonymous_layer_import_dropped", CssLinkHref("c.css"),
+                   StrCat("<style>div{color:red}</style>",
+                          LoadRestOfCss(CssLinkHref("c.css"))));
+}
+
+TEST_F(CriticalSelectorFilterTest, ConditionedLayeredImportSupportsKept) {
+  // The layer declaration from a CONDITIONED import is subject to the
+  // import conditions (CSS Cascade 5): a false document-global condition
+  // means the layer contributes nothing to layer order. Rewriting to an
+  // unconditional "@layer theme;" would declare theme even when the
+  // condition fails, flipping first-occurrence order against the deferred
+  // full copy, so the import is kept verbatim and the browser evaluates
+  // the condition itself.
+  GoogleString css =
+      "@import url(cond.css) layer(theme) supports(display: grid);"
+      "div { color: red; }";
+  SetResponseWithDefaultHeaders("c.css", kContentTypeCss, css, 100);
+  ValidateExpected(
+      "conditioned_layered_import_supports", CssLinkHref("c.css"),
+      StrCat("<style>@import url(cond.css) layer(theme) "
+             "supports(display: grid);div{color:red}</style>",
+             LoadRestOfCss(CssLinkHref("c.css"))));
+}
+
+TEST_F(CriticalSelectorFilterTest, ConditionedLayeredImportMediaKept) {
+  // Same as the supports() case, with a media query list condition: the
+  // declaration only holds where the condition matches, and the subset is
+  // cached per-page while the condition varies per visitor --- the import
+  // is kept verbatim for the browser to evaluate.
+  GoogleString css =
+      "@import url(cond.css) layer(theme) screen and (min-width:1200px);"
+      "div { color: red; }";
+  SetResponseWithDefaultHeaders("c.css", kContentTypeCss, css, 100);
+  ValidateExpected(
+      "conditioned_layered_import_media", CssLinkHref("c.css"),
+      StrCat("<style>@import url(cond.css) layer(theme) "
+             "screen and (min-width:1200px);div{color:red}</style>",
+             LoadRestOfCss(CssLinkHref("c.css"))));
+}
+
+TEST_F(CriticalSelectorFilterTest, MediaNestedLayeredImportDropped) {
+  // An @import nested in a top-level @media flattens to a top-level
+  // region carrying the media annotation, but nested @import is invalid
+  // CSS that every browser ignores: no statement may be emitted for it
+  // (a "@media print{@layer theme;}" wrapper would still declare a layer
+  // the source never declares), and the fetch has no place in the inline
+  // subset. The region is dropped, annotation and all.
+  GoogleString css =
+      "@media print { @import url(x) layer(theme); }"
+      "div { color: red; }";
+  SetResponseWithDefaultHeaders("c.css", kContentTypeCss, css, 100);
+  ValidateExpected("media_nested_layered_import_dropped",
+                   CssLinkHref("c.css"),
+                   StrCat("<style>div{color:red}</style>",
+                          LoadRestOfCss(CssLinkHref("c.css"))));
+}
+
+TEST_F(CriticalSelectorFilterTest, PastTopOfSheetLayeredImportDropped) {
+  // An @import after a style rule is invalid (CSS lets only @charset and
+  // statement-form @layer precede it), so every browser ignores it: it
+  // is dropped without leaving a "@layer" statement the source never
+  // made.
+  GoogleString css =
+      "span { color: red; }"
+      "@import url(x) layer(theme);"
+      "div { color: red; }";
+  SetResponseWithDefaultHeaders("c.css", kContentTypeCss, css, 100);
+  ValidateExpected("past_top_of_sheet_layered_import_dropped",
+                   CssLinkHref("c.css"),
+                   StrCat("<style>div{color:red}</style>",
+                          LoadRestOfCss(CssLinkHref("c.css"))));
+}
+
+TEST_F(CriticalSelectorFilterTest, LayerStatementBeforeLayeredImportKept) {
+  // Statement-form "@layer a;" is the one statement CSS Cascade 5 allows
+  // before an @import, so the import stays valid and its layer
+  // declaration is retained in place: the subset keeps the source's
+  // a-then-theme order.
+  GoogleString css =
+      "@layer a;"
+      "@import url(x) layer(theme);"
+      "div { color: red; }";
+  SetResponseWithDefaultHeaders("c.css", kContentTypeCss, css, 100);
+  ValidateExpected("layer_statement_before_layered_import",
+                   CssLinkHref("c.css"),
+                   StrCat("<style>@layer a;@layer theme;div{color:red}</style>",
+                          LoadRestOfCss(CssLinkHref("c.css"))));
+}
+
+TEST_F(CriticalSelectorFilterTest, SupportsFirstLayeredImportDropped) {
+  // The layer clause PRECEDES supports()/media in the @import grammar
+  // (CSS Cascade 5), so a supports-first import is invalid and browsers
+  // ignore it whole: nothing may be retained from it.
+  GoogleString css =
+      "@import url(x) supports(display: grid) layer(theme);"
+      "div { color: red; }";
+  SetResponseWithDefaultHeaders("c.css", kContentTypeCss, css, 100);
+  ValidateExpected("supports_first_layered_import_dropped",
+                   CssLinkHref("c.css"),
+                   StrCat("<style>div{color:red}</style>",
+                          LoadRestOfCss(CssLinkHref("c.css"))));
+}
+
+TEST_F(CriticalSelectorFilterTest, MediaNestedLayerStatementBlocksImport) {
+  // A statement-form @layer flattened out of a @media block was wrapped
+  // in an at-rule, which DOES invalidate a following @import (only
+  // top-level statements may precede one): the import is invalid and is
+  // dropped without a statement, while the annotated statement itself
+  // rides along verbatim.
+  GoogleString css =
+      "@media print { @layer a; }"
+      "@import url(x) layer(theme);"
+      "div { color: red; }";
+  SetResponseWithDefaultHeaders("c.css", kContentTypeCss, css, 100);
+  ValidateExpected("media_nested_layer_statement_blocks_import",
+                   CssLinkHref("c.css"),
+                   StrCat("<style>@media print{@layer a;}"
+                          "div{color:red}</style>",
+                          LoadRestOfCss(CssLinkHref("c.css"))));
+}
+
 TEST_F(CriticalSelectorFilterTest, DropKeyframes) {
   // @keyframes (incl. vendor-prefixed) don't affect first paint and are
   // dropped from the critical subset; @font-face is kept since it shapes
@@ -573,6 +798,214 @@ TEST_F(CriticalSelectorFilterTest, DropKeyframes) {
       StrCat("<style>@font-face{font-family:Cool;src:url(cool.woff2)}"
              "div{animation:spin 2s linear infinite}</style>",
              LoadRestOfCss(CssLinkHref("c.css"))));
+}
+
+TEST_F(CriticalSelectorFilterTest, FilterInsideGroupRules) {
+  // Selector filtering recurses into conditional group rule
+  // (@supports/@layer/@container) bodies. "section" is not critical, so the
+  // @supports body empties; an empty @supports declares nothing, so the node
+  // is dropped from the critical subset (the deferred full copy retains it).
+  GoogleString css =
+      "@supports (display: grid) { section { display: grid; } }"
+      "div { color: red; }"
+      "p { color: blue; }";
+  SetResponseWithDefaultHeaders("c.css", kContentTypeCss, css, 100);
+  ValidateExpected("filter_inside_group_rules", CssLinkHref("c.css"),
+                   StrCat("<style>div{color:red}</style>",
+                          LoadRestOfCss(CssLinkHref("c.css"))));
+}
+
+TEST_F(CriticalSelectorFilterTest, DropKeyframesKeepGroupRules) {
+  // The keyframes-drop keys on UNPARSED_REGION, not on "any at-rule": the
+  // @keyframes block is dropped while the @layer group next to it survives.
+  // The layer's only rule is critical, so the filtered body is intact and
+  // the survivor stays wrapped in its verbatim "@layer base" prelude.
+  GoogleString css =
+      "@keyframes spin { from { transform: rotate(0deg); } }"
+      "@layer base { div { margin: 0px; } }"
+      "div { color: red; }";
+  SetResponseWithDefaultHeaders("c.css", kContentTypeCss, css, 100);
+  ValidateExpected("drop_keyframes_keep_groups", CssLinkHref("c.css"),
+                   StrCat("<style>@layer base{div{margin:0}}"
+                          "div{color:red}</style>",
+                          LoadRestOfCss(CssLinkHref("c.css"))));
+}
+
+TEST_F(CriticalSelectorFilterTest, EmptyLayerDeclarationKept) {
+  // "@layer base{}" still DECLARES layer base: layer priority is
+  // first-occurrence declaration order, so an emptied block-form @layer must
+  // stay in the subset as an empty declaration rather than be dropped.
+  GoogleString css = "@layer base { span { color: red; } } div { color: blue; }";
+  SetResponseWithDefaultHeaders("c.css", kContentTypeCss, css, 100);
+  ValidateExpected("empty_layer_kept", CssLinkHref("c.css"),
+                   StrCat("<style>@layer base{}div{color:#00f}</style>",
+                          LoadRestOfCss(CssLinkHref("c.css"))));
+}
+
+TEST_F(CriticalSelectorFilterTest, LayerDeclarationOrderPreserved) {
+  // Dropping the emptied first "@layer a{}" would make "b" the subset's
+  // first-declared layer, flipping the cascade to b-then-a while the source
+  // (and the deferred full copy, whose first occurrences are already fixed
+  // by this inline subset) means a-then-b.
+  GoogleString css =
+      "@layer a { span { color: red; } }"
+      "@layer b { div { color: red; } }"
+      "@layer a { div { margin: 0px; } }";
+  SetResponseWithDefaultHeaders("c.css", kContentTypeCss, css, 100);
+  ValidateExpected("layer_order_preserved", CssLinkHref("c.css"),
+                   StrCat("<style>@layer a{}@layer b{div{color:red}}"
+                          "@layer a{div{margin:0}}</style>",
+                          LoadRestOfCss(CssLinkHref("c.css"))));
+}
+
+TEST_F(CriticalSelectorFilterTest, LayerStatementKeptGroupFiltered) {
+  // Statement-form "@layer a,b;" is an unparsed region that declares layers,
+  // so it rides along verbatim; the emptied block form of "b" stays as an
+  // empty declaration next to it.
+  GoogleString css =
+      "@layer a,b;@layer b { span { color: red; } } div { color: red; }";
+  SetResponseWithDefaultHeaders("c.css", kContentTypeCss, css, 100);
+  ValidateExpected("layer_statement_kept", CssLinkHref("c.css"),
+                   StrCat("<style>@layer a,b;@layer b{}div{color:red}</style>",
+                          LoadRestOfCss(CssLinkHref("c.css"))));
+}
+
+TEST_F(CriticalSelectorFilterTest, GroupMediaGatesBody) {
+  // The group node's media annotation (from an enclosing top-level @media)
+  // is filtered like a ruleset's: definitely-non-screen media deletes the
+  // node whole, @layer included — a @layer inside a non-matching conditional
+  // rule takes no effect and contributes no first occurrence to layer order
+  // (CSS Cascade 5, "Layer Ordering"), so for screen the source declared
+  // nothing and print is restored by the deferred full copy. Partially
+  // applying media compacts to the screen queries; raw MQ4 forms are
+  // conservatively screen-affecting and keep the node.
+  GoogleString css =
+      "@media print { @supports (display: grid) { div { color: red; } } }"
+      "@media print { @layer a { div { color: red; } } }"
+      "@media screen,print { @layer b { div { color: red; } } }"
+      "@media (width >= 768px) { @layer c { div { color: red; } } }"
+      "div { color: red; }";
+  SetResponseWithDefaultHeaders("c.css", kContentTypeCss, css, 100);
+  ValidateExpected("group_media_gates_body", CssLinkHref("c.css"),
+                   StrCat("<style>@media screen{@layer b{div{color:red}}}"
+                          "@media (width >= 768px){@layer c{div{color:red}}}"
+                          "div{color:red}</style>",
+                          LoadRestOfCss(CssLinkHref("c.css"))));
+}
+
+TEST_F(CriticalSelectorFilterTest, NestedGroupsFiltered) {
+  // Recursion filters nested groups: in "x" the critical rule survives
+  // doubly wrapped and its non-critical sibling is dropped; in "y" the inner
+  // @supports empties and is dropped (no declaration side effects), which
+  // empties the enclosing @layer body — kept as a bare declaration.
+  GoogleString css =
+      "@layer x { @supports (display: grid) {"
+      " div { color: red; } span { color: red; } } }"
+      "@layer y { @supports (display: grid) { span { color: red; } } }"
+      "div { color: red; }";
+  SetResponseWithDefaultHeaders("c.css", kContentTypeCss, css, 100);
+  ValidateExpected(
+      "nested_groups_filtered", CssLinkHref("c.css"),
+      StrCat("<style>@layer x{@supports (display: grid){div{color:red}}}"
+             "@layer y{}div{color:red}</style>",
+             LoadRestOfCss(CssLinkHref("c.css"))));
+}
+
+TEST_F(CriticalSelectorFilterTest, KeyframesInsideGroupDropped) {
+  // The keyframes-drop applies inside group bodies too: keyframe lists are
+  // paint-irrelevant at any nesting level (the deferred full copy retains
+  // them).
+  GoogleString css =
+      "@supports (display: grid) {"
+      " @keyframes spin { from { transform: rotate(0deg); } }"
+      " div { color: red; } }";
+  SetResponseWithDefaultHeaders("c.css", kContentTypeCss, css, 100);
+  ValidateExpected(
+      "keyframes_inside_group_dropped", CssLinkHref("c.css"),
+      StrCat("<style>@supports (display: grid){div{color:red}}</style>",
+             LoadRestOfCss(CssLinkHref("c.css"))));
+}
+
+TEST_F(CriticalSelectorFilterTest, FontFaceInsideGroupKept) {
+  // Body font-faces mirror the never-filtered top-level bucket (@font-face
+  // shapes text from the first paint on), and a font-face-only body keeps
+  // its group even though every body ruleset was filtered out.
+  GoogleString css =
+      "@supports (display: grid) {"
+      " @font-face { font-family: Cool; src: url(cool.woff2); }"
+      " span { color: red; } }"
+      "div { color: red; }";
+  SetResponseWithDefaultHeaders("c.css", kContentTypeCss, css, 100);
+  ValidateExpected(
+      "font_face_inside_group_kept", CssLinkHref("c.css"),
+      StrCat("<style>@supports (display: grid)"
+             "{@font-face{font-family:Cool;src:url(cool.woff2)}}"
+             "div{color:red}</style>",
+             LoadRestOfCss(CssLinkHref("c.css"))));
+}
+
+TEST_F(CriticalSelectorFilterTest, EscapedIdentEmptyGroupKept) {
+  // "@\73 upports" parses as a supports group (the dispatch ident is
+  // decoded), but the stored prelude is verbatim bytes, which the
+  // case-insensitive "@supports"/"@container" drop-if-empty test must not
+  // match. The polarity is deliberate: a mis-kept empty group costs a few
+  // bytes, while treating an escape-obscured "@layer" as droppable would
+  // corrupt cascade order.
+  GoogleString css =
+      "@\\73 upports (display: grid) { span { color: red; } }"
+      "div { color: red; }";
+  SetResponseWithDefaultHeaders("c.css", kContentTypeCss, css, 100);
+  ValidateExpected(
+      "escaped_ident_empty_group_kept", CssLinkHref("c.css"),
+      StrCat("<style>@\\73 upports (display: grid){}div{color:red}</style>",
+             LoadRestOfCss(CssLinkHref("c.css"))));
+}
+
+TEST_F(CriticalSelectorFilterTest, EmptyContainerDropped) {
+  // The @container arm of the emptied-group drop: an @container whose body
+  // filtered down to nothing declares nothing (unlike block-form @layer),
+  // so the node is dropped from the critical subset exactly like
+  // @supports; the deferred full copy retains it.
+  GoogleString css =
+      "@container (width > 400px) { span { color: red; } }"
+      "div { color: red; }";
+  SetResponseWithDefaultHeaders("c.css", kContentTypeCss, css, 100);
+  ValidateExpected("empty_container_dropped", CssLinkHref("c.css"),
+                   StrCat("<style>div{color:red}</style>",
+                          LoadRestOfCss(CssLinkHref("c.css"))));
+}
+
+TEST_F(CriticalSelectorFilterTest, EmptyLayerKeepsContainerAlive) {
+  // The element-sensitive exception of CSS Cascade 5's layer ordering:
+  // layers inside @container contribute to layer order regardless of the
+  // container condition, which is evaluated per element. The emptied
+  // inner "@layer a{}" stays as a declaration; because it stays, the
+  // @container body is non-empty and the container node itself survives
+  // too, so the layer declaration is not dropped along with it.
+  GoogleString css =
+      "@container (width > 400px) { @layer a { span { color: red; } } }"
+      "div { color: red; }";
+  SetResponseWithDefaultHeaders("c.css", kContentTypeCss, css, 100);
+  ValidateExpected("empty_layer_keeps_container", CssLinkHref("c.css"),
+                   StrCat("<style>@container (width > 400px){@layer a{}}"
+                          "div{color:red}</style>",
+                          LoadRestOfCss(CssLinkHref("c.css"))));
+}
+
+TEST_F(CriticalSelectorFilterTest, UnlayeredRuleBetweenLayersPinned) {
+  // An unlayered rule interleaved between two layer blocks must stay
+  // between the emptied-but-retained layer declarations: a-then-b order
+  // is fixed by first occurrence, and keeping the survivor's relative
+  // position is what makes the inline subset's cascade identical to the
+  // source's (and to the deferred full copy's).
+  GoogleString css =
+      "@layer a { span { color: red; } }"
+      "div { color: red; }"
+      "@layer b { span { color: red; } }";
+  SetResponseWithDefaultHeaders("c.css", kContentTypeCss, css, 100);
+  ValidateExpected("unlayered_between_layers_pinned", CssLinkHref("c.css"),
+                   StrCat("<style>@layer a{}div{color:red}@layer b{}</style>",
+                          LoadRestOfCss(CssLinkHref("c.css"))));
 }
 
 TEST_F(CriticalSelectorFilterTest, NoSelectorInfo) {

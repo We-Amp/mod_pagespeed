@@ -50,6 +50,7 @@ class UserAgentMatcher {
   static const char kTestUserAgentWebP[];  // webp user agent
   // Note that this must not contain the substring "webp".
   static const char kTestUserAgentNoWebP[];  // non-webp user agent
+  static const char kTestUserAgentAvif[];    // avif user agent
 
   enum DeviceType {
     kDesktop,
@@ -69,7 +70,6 @@ class UserAgentMatcher {
   // this only to force edge compatibility mode and to work around a persistent
   // IE Vary: caching bug.
   bool IsIe(const StringPiece& user_agent) const;
-  bool IsIe9(const StringPiece& user_agent) const;
 
   virtual bool SupportsImageInlining(const StringPiece& user_agent) const;
   bool SupportsLazyloadImages(StringPiece user_agent) const;
@@ -115,13 +115,15 @@ class UserAgentMatcher {
   // out an "accept: webp" header.
   bool SupportsWebpAnimated(const StringPiece& user_agent) const;
 
-  // IE9 does not implement <link rel=dns-prefetch ...>. Instead it does DNS
-  // preresolution when it sees <link rel=prefetch ...>. This method returns
-  // true if the browser support DNS prefetch using rel=prefetch.
-  // Refer:
-  // http://blogs.msdn.com/b/ie/archive/2011/03/17/internet-explorer-9-network-performance-improvements.aspx
-  // NOLINT
-  bool SupportsDnsPrefetchUsingRelPrefetch(const StringPiece& user_agent) const;
+  // AVIF support. Unlike WebP, there is no legacy UA population that supports
+  // AVIF without sending Accept: image/avif, so there is deliberately no
+  // allow/block list and no LegacyAvif() analogue. AVIF support is
+  // strictly Accept-header-driven and is decided in DeviceProperties; these
+  // UA-only queries therefore carry no UA-based signal and report false. They
+  // exist for API parity with the WebP path.
+  bool SupportsAvifLosslessAlpha(const StringPiece& user_agent) const;
+  bool SupportsAvifAnimated(const StringPiece& user_agent) const;
+
   bool SupportsDnsPrefetch(const StringPiece& user_agent) const;
 
   virtual bool IsAndroidUserAgent(const StringPiece& user_agent) const;

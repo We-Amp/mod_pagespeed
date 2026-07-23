@@ -31,6 +31,7 @@ class PosixTimer : public Timer {
   ~PosixTimer() override;
 
   int64 NowUs() const override;
+  int64 NowMonotonicUs() const override;
   void SleepUs(int64 us) override;
 
  private:

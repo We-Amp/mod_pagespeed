@@ -426,6 +426,50 @@ TEST_F(CssFlattenImportsTest, FlattenNoop) {
                              kExpectSuccess | kNoClearFetcher);
 }
 
+TEST_F(CssFlattenImportsTest, KeepCharsetWithNoImports) {
+  // A root stylesheet with an @charset but no @imports has nothing to be
+  // flattened, so it must keep its @charset: served without a charset in the
+  // Content-Type header (as here) it is the only encoding declaration.
+  const char css_in[] =
+      "@charset \"UTF-8\";"
+      ".background_red{background-color:red}";
+  ValidateRewriteExternalCss("keep_charset_no_imports", css_in, css_in,
+                             kExpectSuccess | kNoClearFetcher);
+  ValidateRewriteExternalCss("keep_charset_no_imports", css_in, css_in,
+                             kExpectCached | kNoOtherContexts);
+}
+
+TEST_F(CssFlattenImportsTest, KeepCharsetWithNoImportsAndNoLimit) {
+  // Same as above but with no flattening byte limit, which takes the
+  // stylesheet-merging code path instead of the content-concatenating one.
+  options()->ClearSignatureForTesting();
+  options()->set_css_flatten_max_bytes(0);
+  server_context()->ComputeSignature(options());
+
+  const char css_in[] =
+      "@charset \"UTF-8\";"
+      ".background_red{background-color:red}";
+  ValidateRewriteExternalCss("keep_charset_no_imports_no_limit", css_in, css_in,
+                             kExpectSuccess | kNoClearFetcher);
+  ValidateRewriteExternalCss("keep_charset_no_imports_no_limit", css_in, css_in,
+                             kExpectCached | kNoOtherContexts);
+}
+
+TEST_F(CssFlattenImportsTest, KeepCharsetWhenFlatteningFails) {
+  // Control: when flattening genuinely fails the @charset must also be kept,
+  // both before and after the fix - if this goes red the fix keyed the wrong
+  // condition.
+  DebugWithMessage(
+      "<!--4xx status code, preventing rewriting of"
+      " http://test.com/404.css-->");
+  const char css_in[] =
+      "@charset \"UTF-8\";"
+      "@import url(http://test.com/404.css);";
+
+  ValidateRewriteExternalCss("keep_charset_flatten_404", css_in, css_in,
+                             kExpectSuccess | kNoClearFetcher);
+}
+
 TEST_F(CssFlattenImportsTest, Flatten404) {
   DebugWithMessage(
       "<!--4xx status code, preventing rewriting of"
@@ -482,13 +526,15 @@ TEST_F(CssFlattenImportsTest, FlattenInvalidCSS) {
 
   // This gets a parse error but thanks to the idea of "unparseable sections"
   // in the CSS parser it's not treated as an error and the "bad" text is kept.
-  // Because the error was in the bogus @import statement, we do NOT flatten.
-  DebugWithMessage("");
+  // Because the error was in the bogus @import statement, we do NOT flatten,
+  // and the unparseable @import is reported as the flattening failure reason.
+  DebugWithMessage("<!--Flattening failed: Unparseable @import in inline-->");
   const char kUnparseableImportCss[] = "@import styles.css; a { color:red }";
   const char kFlattenedImportCss[] = "@import styles.css;a{color:red}";
-  ValidateRewriteExternalCss("flatten_unparseable_css_import",
-                             kUnparseableImportCss, kFlattenedImportCss,
-                             kExpectSuccess | kNoClearFetcher);
+  ValidateRewriteExternalCss(
+      "flatten_unparseable_css_import", kUnparseableImportCss,
+      kFlattenedImportCss,
+      kExpectSuccess | kNoClearFetcher | kFlattenImportsUnparseableImport);
 
   // Same as above, but since the @import itself is valid we DO flatten.
   const char kUnparseableCss[] = "@import url(styles.css) ;a{ #color: 333 }";
@@ -1155,6 +1201,105 @@ TEST_F(CssFlattenImportsTest, NoFlattenMediaQueriesChild) {
       kExpectSuccess | kNoClearFetcher | kFlattenImportsComplexQueries);
 }
 
+// The CSS parser predates cascade layers, so an @import using that syntax
+// fails to parse and is preserved verbatim as an unparsed ruleset, which
+// import expansion cannot see. Flattening a sibling @import would strand
+// the verbatim @import mid-stylesheet where browsers ignore it, so we must
+// refuse to flatten instead.
+TEST_F(CssFlattenImportsTest, NoFlattenUnparseableLayerImport) {
+  // Turn on debug to get the flattening failure reason in an HTML comment.
+  DebugWithMessage("<!--Flattening failed: Unparseable @import in inline-->");
+
+  SetResponseWithDefaultHeaders("child.css", kContentTypeCss,
+                                ".background_blue{background-color:#00f}", 100);
+
+  // The parser also demotes the second @import to a verbatim unparsed
+  // ruleset (an @import after a ruleset is invalid), so the stylesheet
+  // serializes unchanged; the point is that nothing is flattened into it.
+  ValidateRewriteInlineCss(
+      "no_flatten_unparseable_layer_import",
+      "@import url(http://test.com/layered.css) layer(base);"
+      "@import url(child.css);",
+      "@import url(http://test.com/layered.css) layer(base);"
+      "@import url(child.css);",
+      kExpectSuccess | kNoClearFetcher | kFlattenImportsUnparseableImport);
+}
+
+// Still don't flatten when the unparseable @import is in the child CSS.
+TEST_F(CssFlattenImportsTest, NoFlattenUnparseableLayerImportChild) {
+  // Turn on debug to get the flattening failure reason in an HTML comment.
+  DebugWithMessage(
+      "<!--Flattening failed: "
+      "Unparseable @import in http://test.com/child.css-->");
+
+  SetResponseWithDefaultHeaders(
+      "child.css", kContentTypeCss,
+      "@import url(http://test.com/layered.css) layer(base);"
+      "@import url(grand.css);",
+      100);
+  SetResponseWithDefaultHeaders("layered.css", kContentTypeCss,
+                                ".background_red{background-color:#f00}", 100);
+  SetResponseWithDefaultHeaders("grand.css", kContentTypeCss,
+                                ".background_blue{background-color:#00f}", 100);
+
+  ValidateRewriteExternalCss(
+      "no_flatten_unparseable_layer_import_child", "@import url(child.css);",
+      "@import url(child.css);",
+      kExpectSuccess | kNoClearFetcher | kFlattenImportsUnparseableImport);
+}
+
+// Same refusal when a parseable @import precedes the unparseable one: the
+// parseable sibling would otherwise flatten and the merged rulesets would be
+// prepended in front of the verbatim @import, stranding it mid-stylesheet
+// where browsers ignore it.
+TEST_F(CssFlattenImportsTest, NoFlattenUnparseableLayerImportAfterSibling) {
+  // Turn on debug to get the flattening failure reason in an HTML comment.
+  DebugWithMessage("<!--Flattening failed: Unparseable @import in inline-->");
+
+  SetResponseWithDefaultHeaders("child.css", kContentTypeCss,
+                                ".background_blue{background-color:#00f}", 100);
+
+  ValidateRewrite("no_flatten_unparseable_layer_import_after_sibling",
+                  "@import url(child.css);"
+                  "@import url(http://test.com/layered.css) layer(base);",
+                  "@import url(child.css);"
+                  "@import url(http://test.com/layered.css) layer(base);",
+                  kExpectSuccess | kNoClearFetcher |
+                      kFlattenImportsUnparseableImport);
+}
+
+// The same geometry in an imported child, validated cold and warm. The second
+// (repeat) rewrite serves the child's rewritten content from the cache, which
+// is re-parsed without going through ExpandChildren, so the refusal must also
+// happen when the cached content is parsed.
+TEST_F(CssFlattenImportsTest, NoFlattenUnparseableLayerImportChildWarmCache) {
+  // Turn on debug to get the flattening failure reason in an HTML comment.
+  DebugWithMessage(
+      "<!--Flattening failed: "
+      "Unparseable @import in http://test.com/child.css-->");
+
+  SetResponseWithDefaultHeaders(
+      "child.css", kContentTypeCss,
+      "@import url(grand.css);"
+      "@import url(http://test.com/layered.css) layer(base);",
+      100);
+  SetResponseWithDefaultHeaders("grand.css", kContentTypeCss,
+                                ".background_blue{background-color:#00f}", 100);
+
+  // First time loads the CSS files into the cache.
+  ValidateRewriteExternalCss(
+      "no_flatten_unparseable_layer_import_child_warm",
+      "@import url(child.css);", "@import url(child.css);",
+      kExpectSuccess | kNoClearFetcher | kFlattenImportsUnparseableImport);
+
+  // Re-optimize, with the child's rewrite now served from the cache. The
+  // output must still equal the input (no flattening).
+  ValidateRewriteExternalCss(
+      "no_flatten_unparseable_layer_import_child_warm_repeat",
+      "@import url(child.css);", "@import url(child.css);",
+      kExpectSuccess | kNoClearFetcher | kFlattenImportsUnparseableImport);
+}
+
 // See https://github.com/apache/incubator-pagespeed-mod/issues/1092
 TEST_F(CssFlattenImportsTest, FlattenTooComplexNested) {
   GoogleString css_in =
@@ -1202,6 +1347,48 @@ TEST_F(CssFlattenImportsTest, MergeMediaQueries) {
       "@media only screen{.b{color:#00f}}",
       */
       kExpectSuccess | kNoClearFetcher | kFlattenImportsComplexQueries);
+}
+
+TEST_F(CssFlattenImportsTest, FlattenGroupRules) {
+  // A child sheet made of conditional group rules flattens in intact.
+  const char kGroupCssFile[] = "group.css";
+  const char kGroupCss[] = "@supports (display: grid){.a{top:0}}";
+  const char css_in[] = "@import url(http://test.com/group.css);";
+
+  SetResponseWithDefaultHeaders(kGroupCssFile, kContentTypeCss, kGroupCss, 100);
+
+  ValidateRewriteExternalCss("flatten_group_rules", css_in, kGroupCss,
+                             kExpectSuccess | kNoClearFetcher);
+}
+
+TEST_F(CssFlattenImportsTest, FlattenGroupRulesWithMedia) {
+  // A media-annotated @import wraps the flattened group rule in @media:
+  // the group node takes the media annotation exactly as an unparsed region
+  // would, producing @media x{@supports ...{...}}.
+  const char kGroupCssFile[] = "group.css";
+  const char kGroupCss[] = "@supports (display: grid){.a{top:0}}";
+  const char css_in[] = "@import url(http://test.com/group.css) screen;";
+  const GoogleString css_out =
+      StrCat("@media screen{", kGroupCss, "}");
+
+  SetResponseWithDefaultHeaders(kGroupCssFile, kContentTypeCss, kGroupCss, 100);
+
+  ValidateRewriteExternalCss("flatten_group_rules_media", css_in, css_out,
+                             kExpectSuccess | kNoClearFetcher);
+}
+
+TEST_F(CssFlattenImportsTest, NoFlattenMQ4ImportMedia) {
+  // Raw (MQ4 range syntax) media on an @import is a complex query:
+  // flattening is refused with the same accounting as any other complex
+  // query, and the import round-trips byte-preserved.
+  DebugWithMessage(
+      "<!--Flattening failed: "
+      "Complex media queries in the @import of inline-->");
+
+  ValidateRewrite("mq4_media_queries",
+                  "@import url(child.css) (width >= 768px);",
+                  "@import url(child.css) (width >= 768px);",
+                  kExpectSuccess | kFlattenImportsComplexQueries);
 }
 
 // Intersections of media queries with "only" & "and" can be resolved relatively

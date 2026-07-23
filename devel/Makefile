@@ -688,7 +688,6 @@ make_obj_dirs : $(GIT_SRC)
 		$(OBJDIR)/apache/pagespeed/apache \
 		$(OBJDIR)/apache/pagespeed/automatic \
 		$(OBJDIR)/apache/pagespeed/automatic/public \
-		$(OBJDIR)/apache/pagespeed/controller \
 		$(OBJDIR)/apache/pagespeed/system \
 		$(OBJDIR)/apache/pagespeed/system/public \
 		$(OBJDIR)/css_parser

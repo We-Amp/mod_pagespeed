@@ -145,7 +145,7 @@ fi
 #
 # The thin $PAGESPEED_ARCHIVE only carries the nginx-glue support objects; the
 # full PageSpeed/PSOL code (and its vendored curl, hiredis, BoringSSL, brotli,
-# protobuf, abseil, grpc, ...) lives in the rest of the Bazel object graph.
+# protobuf, abseil, ...) lives in the rest of the Bazel object graph.
 # nginx must link ALL of it into the module .so, or the link fails with a wall
 # of undefined net_instaweb / curl / redis symbols.
 #
@@ -187,7 +187,7 @@ EOF
     PAGESPEED_LINK_ARCHIVE="$PAGESPEED_ARCHIVE"
 fi
 
-# Hide all non-nginx symbols (BoringSSL/curl/protobuf/grpc/...) so they cannot
+# Hide all non-nginx symbols (BoringSSL/curl/protobuf/...) so they cannot
 # collide with nginx's own system OpenSSL / zlib loaded in the same process;
 # export only the ngx_modules* trio. Matches the Bazel-native .so link.
 NGX_PAGESPEED_VERSION_SCRIPT=""

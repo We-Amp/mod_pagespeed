@@ -14,12 +14,14 @@
 # limitations under the License.
 test_filter hint_preload_subresources works, and finds indirects
 
-# Expect 5 resources to be hinted
-fetch_until -save $URL 'grep -c ^Link:' 5 --save-headers
+# Expect 6 resources to be hinted
+fetch_until -save $URL 'grep -c ^Link:' 6 --save-headers
 OUT=$(cat $FETCH_UNTIL_OUTFILE)
 
 check_from "$OUT" fgrep \
   'Link: </mod_pagespeed_example/styles/all_using_imports.css>; rel=preload; as=style; nopush'
+check_from "$OUT" fgrep \
+  'Link: </mod_pagespeed_example/styles/example.woff2>; rel=preload; as=font; crossorigin; nopush'
 check_from "$OUT" fgrep \
   'Link: </mod_pagespeed_example/styles/yellow.css>; rel=preload; as=style; nopush'
 check_from "$OUT" fgrep \

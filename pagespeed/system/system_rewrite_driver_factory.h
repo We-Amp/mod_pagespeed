@@ -27,7 +27,6 @@
 
 #include "net/instaweb/rewriter/public/rewrite_driver_factory.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
-#include "pagespeed/controller/central_controller.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/hasher.h"
 #include "pagespeed/kernel/base/statistics.h"
@@ -237,27 +236,6 @@ class SystemRewriteDriverFactory : public RewriteDriverFactory {
   // that might be used for handling user requests.
   virtual int LookupThreadLimit() { return 1; }
 
-  // By default this uses the ControllerManager to fork off some processes to
-  // handle the Controller.  If you're on a system where fork doesn't make
-  // sense or running the Controller in its own process doesn't make sense, this
-  // is a hook where you can start the controller in whatever way makes sense
-  // for your platform.
-  virtual void StartController(const SystemRewriteOptions& options);
-
-  // Set the name of this process, for debugging visibility.
-  virtual void NameProcess(const char* name);
-
-  // Hook for handling any process-specific initialization the host webserver
-  // might need when we manually fork off a process.  Children should call the
-  // superclass method when overriding (so it can set the process name).  See
-  // NgxRewriteDriverFactory::PrepareForkedProcess.
-  virtual void PrepareForkedProcess(const char* name);
-
-  // Once we've created the controller process, we need to initialize it like we
-  // would one of our normal parent or child processes.  The controller manager
-  // will call this once it has a process it needs prepared.
-  virtual void PrepareControllerProcess();
-
  protected:
   // Initializes all the statistics objects created transitively by
   // SystemRewriteDriverFactory.  Only subclasses should call this.
@@ -304,10 +282,6 @@ class SystemRewriteDriverFactory : public RewriteDriverFactory {
   virtual void AutoDetectThreadCounts();
 
   bool thread_counts_finalized() { return thread_counts_finalized_; }
-
-  // Delegate from RewriteDriverFactory to construct CentralController.
-  std::shared_ptr<CentralController> GetCentralController(
-      NamedLockManager* lock_manager) override;
 
  private:
   // Build global shared-memory statistics, taking ownership.  This is invoked
@@ -390,8 +364,6 @@ class SystemRewriteDriverFactory : public RewriteDriverFactory {
   // These are <= 0 if we should autodetect.
   int num_rewrite_threads_;
   int num_expensive_rewrite_threads_;
-
-  std::shared_ptr<CentralController> central_controller_;
 
   SystemRewriteDriverFactory(const SystemRewriteDriverFactory&) = delete;
   SystemRewriteDriverFactory& operator=(const SystemRewriteDriverFactory&) =

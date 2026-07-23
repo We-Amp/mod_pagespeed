@@ -239,6 +239,10 @@ class DomainLawyer {
 
   // Specifies domain-sharding.  This implicitly calls AddDomain(to_domain).
   //
+  // Deprecated: sharding is an HTTP/1-era optimization that is
+  // counterproductive with HTTP/2 and HTTP/3; AddShard logs a kWarning,
+  // once per process per mapping.
+  //
   // Wildcards may not be used in the to_domain or the from_domain.
   bool AddShard(const StringPiece& to_domain,
                 const StringPiece& comma_separated_shards,

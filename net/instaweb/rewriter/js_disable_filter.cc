@@ -123,8 +123,19 @@ void JsDisableFilter::StartElementImpl(HtmlElement* element) {
     }
   } else {
     HtmlElement::Attribute* src;
-    if (script_tag_scanner_.ParseScriptElement(element, &src) ==
-        ScriptTagScanner::kJavaScript) {
+    ScriptTagScanner::ScriptClassification classification =
+        script_tag_scanner_.ParseScriptElement(element, &src);
+    if (classification == ScriptTagScanner::kJavaScriptModule) {
+      // Modules are already deferred by spec, and the deferJs runtime
+      // re-executes script bodies via injected inline JS/eval, where
+      // import/export are SyntaxErrors; a re-typed src'd module would also
+      // be re-fetched as a classic script. Leave module elements alone.
+      // No log record: LogJsDisableFilter's only payload is
+      // has_pagespeed_no_defer, and logging a module skip there would
+      // conflate two distinct skip reasons in log analysis.
+      return;
+    }
+    if (classification == ScriptTagScanner::kJavaScript) {
       // The deferJs runtime re-executes disabled scripts via injected inline
       // JS; if the page's CSP forbids inline scripts, disabling this script
       // would leave it dead in the browser. Back off, matching
@@ -144,9 +155,10 @@ void JsDisableFilter::StartElementImpl(HtmlElement* element) {
         GoogleUrl abs_url(driver()->base_url(), src->DecodedValueOrNull());
         if (abs_url.IsWebValid() &&
             !driver()->options()->IsAllowed(abs_url.Spec())) {
-          driver()->log_record()->LogJsDisableFilter(
-              RewriteOptions::FilterId(RewriteOptions::kDisableJavascript),
-              true);
+          // No log record: LogJsDisableFilter's only payload is
+          // has_pagespeed_no_defer, and logging a disallow skip there would
+          // conflate an admin-config skip with an author opt-out (the same
+          // conflation the module skip path above avoids).
           return;
         }
       }

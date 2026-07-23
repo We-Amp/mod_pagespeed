@@ -20,13 +20,16 @@
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 
 #include <atomic>
+#include <cstdint>
 #include <memory>
 
 #include "net/instaweb/rewriter/public/domain_lawyer.h"
 #include "net/instaweb/rewriter/public/experiment_util.h"
+#include "net/instaweb/rewriter/public/image_rewrite_filter.h"
 #include "pagespeed/kernel/base/google_message_handler.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/null_message_handler.h"
+#include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/http/google_url.h"
 #include "pagespeed/kernel/http/request_headers.h"
@@ -346,8 +349,8 @@ TEST_F(RewriteOptionsTest, CommaSeparatedListRejectsBogusFilter) {
   // A bogus filter name must make the call fail even when accompanied by valid
   // names; the valid names are still applied (documented contract).
   NullMessageHandler handler;
-  EXPECT_FALSE(options_.EnableFiltersByCommaSeparatedList("bogus_filter,rewrite_css",
-                                                          &handler));
+  EXPECT_FALSE(options_.EnableFiltersByCommaSeparatedList(
+      "bogus_filter,rewrite_css", &handler));
   EXPECT_TRUE(options_.Enabled(RewriteOptions::kRewriteCss));
 
   // The failure must stick regardless of the order of the bad name, and the
@@ -361,6 +364,113 @@ TEST_F(RewriteOptionsTest, CommaSeparatedListRejectsBogusFilter) {
   EXPECT_FALSE(options_.AdjustFiltersByCommaSeparatedList("+nope,+inline_css",
                                                           &handler));
   EXPECT_TRUE(options_.Enabled(RewriteOptions::kInlineCss));
+}
+
+// Filters that deliberately have no configuration name, and so cannot be named
+// in EnableFilters.  These are internal filters that the rewriter turns on by
+// itself; rewrite_filter_names.gperf warns explicitly against listing internal
+// filters there, because anything listed becomes reachable from query params.
+//
+// This list is an allowlist, not a description: a filter belongs here only if
+// leaving it unconfigurable is a deliberate decision.  If you add a filter and
+// AllFiltersAreNameable fails, the default answer is to give it a name in
+// rewrite_filter_names.gperf, not to add it here.
+const RewriteOptions::Filter kFiltersWithoutConfigNames[] = {
+    RewriteOptions::kComputeVisibleTextDeprecated,  // deprecated, inert
+    RewriteOptions::kHandleNoscriptRedirect,        // internal
+    RewriteOptions::kHtmlWriterFilter,              // internal, always on
+};
+
+bool ExpectedToBeUnnameable(RewriteOptions::Filter filter) {
+  for (int i = 0; i < arraysize(kFiltersWithoutConfigNames); ++i) {
+    if (kFiltersWithoutConfigNames[i] == filter) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Every filter that is not on the internal allowlist above must have a
+// configuration name in rewrite_filter_names.gperf, and that name must map back
+// to the same filter.  Without this, a filter can ship fully implemented and
+// still be unreachable from any configuration -- which is exactly how the AVIF
+// filters shipped.  The DCHECK in InitFilterIdToEnumArray()
+// validates the enum/id table but says nothing about nameability.
+TEST_F(RewriteOptionsTest, AllFiltersAreNameable) {
+  for (RewriteOptions::Filter f = RewriteOptions::kFirstFilter;
+       f < RewriteOptions::kEndOfFilters;
+       f = static_cast<RewriteOptions::Filter>(f + 1)) {
+    StringPiece name = RewriteOptions::LookupFilterName(f);
+    // Identify the filter by everything we have, so a future failure names the
+    // culprit without anyone having to count enum values by hand.
+    GoogleString who =
+        StrCat("filter enum value ", IntegerToString(static_cast<int>(f)),
+               " (id \"", RewriteOptions::FilterId(f), "\", description \"",
+               RewriteOptions::FilterName(f), "\")");
+    if (ExpectedToBeUnnameable(f)) {
+      EXPECT_TRUE(name.empty())
+          << who << " is listed in kFiltersWithoutConfigNames as deliberately "
+          << "unconfigurable, but rewrite_filter_names.gperf now gives it the "
+          << "name \"" << name << "\".  If exposing it is intended, remove it "
+          << "from kFiltersWithoutConfigNames.";
+    } else {
+      ASSERT_FALSE(name.empty())
+          << who << " has no entry in net/instaweb/rewriter/"
+          << "rewrite_filter_names.gperf, so it cannot be enabled from any "
+          << "configuration (EnableFilters, query params, headers).  Add a "
+          << "name there, or -- if it is deliberately internal -- add it to "
+          << "kFiltersWithoutConfigNames in this file.";
+      EXPECT_EQ(f, RewriteOptions::LookupFilter(name))
+          << who << " is named \"" << name << "\" but that name does not map "
+          << "back to it.";
+    }
+  }
+}
+
+// Pins the four AVIF filter names specifically: they resolve, they
+// resolve to the right enum, and they work through the real option-parsing
+// entry point a user's config goes through.
+TEST_F(RewriteOptionsTest, AvifFilterNames) {
+  EXPECT_EQ(RewriteOptions::kConvertJpegToAvif,
+            RewriteOptions::LookupFilter("convert_jpeg_to_avif"));
+  EXPECT_EQ(RewriteOptions::kConvertToAvifAnimated,
+            RewriteOptions::LookupFilter("convert_to_avif_animated"));
+  EXPECT_EQ(RewriteOptions::kConvertToAvifLossless,
+            RewriteOptions::LookupFilter("convert_to_avif_lossless"));
+  EXPECT_EQ(RewriteOptions::kRecompressAvif,
+            RewriteOptions::LookupFilter("recompress_avif"));
+
+  FilterSet s;
+  s.Insert(RewriteOptions::kConvertJpegToAvif);
+  s.Insert(RewriteOptions::kConvertToAvifAnimated);
+  s.Insert(RewriteOptions::kConvertToAvifLossless);
+  s.Insert(RewriteOptions::kRecompressAvif);
+  s.Insert(RewriteOptions::kHtmlWriterFilter);  // enabled by default
+  static const char kList[] =
+      "convert_jpeg_to_avif,convert_to_avif_animated,"
+      "convert_to_avif_lossless,recompress_avif";
+  NullMessageHandler handler;
+  ASSERT_TRUE(options_.EnableFiltersByCommaSeparatedList(kList, &handler));
+  ASSERT_TRUE(OnlyEnabled(s));
+  ASSERT_TRUE(options_.DisableFiltersByCommaSeparatedList(kList, &handler));
+  ASSERT_TRUE(OnlyEnabled(RewriteOptions::kHtmlWriterFilter));  // default
+}
+
+// The AVIF filters are deliberately opt-in only: they must NOT be pulled in by
+// the rewrite_images / recompress_images compound flags or by any rewrite
+// level, because AVIF encoding is far more CPU-expensive than WebP.  See the
+// comment in RewriteOptions::AddByNameToFilterSet.
+TEST_F(RewriteOptionsTest, AvifFiltersAreNotInCompoundSets) {
+  NullMessageHandler handler;
+  ASSERT_TRUE(
+      options_.EnableFiltersByCommaSeparatedList("rewrite_images", &handler));
+  ASSERT_TRUE(options_.EnableFiltersByCommaSeparatedList("recompress_images",
+                                                         &handler));
+  options_.SetRewriteLevel(RewriteOptions::kCoreFilters);
+  EXPECT_FALSE(options_.Enabled(RewriteOptions::kConvertJpegToAvif));
+  EXPECT_FALSE(options_.Enabled(RewriteOptions::kConvertToAvifAnimated));
+  EXPECT_FALSE(options_.Enabled(RewriteOptions::kConvertToAvifLossless));
+  EXPECT_FALSE(options_.Enabled(RewriteOptions::kRecompressAvif));
 }
 
 TEST_F(RewriteOptionsTest, CompoundFlag) {
@@ -761,6 +871,36 @@ TEST_F(RewriteOptionsTest, ForbidFilter) {
       RewriteOptions::FilterId(RewriteOptions::kFlattenCssImports)));
 }
 
+TEST_F(RewriteOptionsTest, ForbidCompoundFilterIds) {
+  // "ce" is the compound id shared by the cache-extension filters; it does
+  // not resolve to a single filter enum.  It counts as forbidden only once
+  // every filter that can produce "ce" URLs is forbidden.
+  options_.SetRewriteLevel(RewriteOptions::kCoreFilters);
+  EXPECT_FALSE(options_.Forbidden(RewriteOptions::kCacheExtenderId));
+
+  // Partial forbid: the other cache-extension filters can still produce
+  // "ce" URLs, so the id as a whole is not forbidden.
+  options_.ForbidFilter(RewriteOptions::kExtendCacheImages);
+  EXPECT_FALSE(options_.Forbidden(RewriteOptions::kCacheExtenderId));
+
+  options_.ForbidFilter(RewriteOptions::kExtendCacheCss);
+  options_.ForbidFilter(RewriteOptions::kExtendCachePdfs);
+  options_.ForbidFilter(RewriteOptions::kExtendCacheScripts);
+  EXPECT_TRUE(options_.Forbidden(RewriteOptions::kCacheExtenderId));
+}
+
+TEST_F(RewriteOptionsTest, ForbidCompoundImageFilterId) {
+  // Same as above for "ic", the compound id shared by the image-optimization
+  // filters.
+  options_.SetRewriteLevel(RewriteOptions::kCoreFilters);
+  EXPECT_FALSE(options_.Forbidden(RewriteOptions::kImageCompressionId));
+
+  for (int i = 0; i < ImageRewriteFilter::kRelatedFiltersSize; ++i) {
+    options_.ForbidFilter(ImageRewriteFilter::kRelatedFilters[i]);
+  }
+  EXPECT_TRUE(options_.Forbidden(RewriteOptions::kImageCompressionId));
+}
+
 TEST_F(RewriteOptionsTest, AllDoesNotImplyStripScrips) {
   options_.SetRewriteLevel(RewriteOptions::kAllFilters);
   EXPECT_TRUE(options_.Enabled(RewriteOptions::kCombineCss));
@@ -770,10 +910,10 @@ TEST_F(RewriteOptionsTest, AllDoesNotImplyStripScrips) {
 TEST_F(RewriteOptionsTest, ExplicitlyEnabledDangerousFilters) {
   options_.SetRewriteLevel(RewriteOptions::kAllFilters);
   options_.EnableFilter(RewriteOptions::kStripScripts);
-  EXPECT_FALSE(options_.Enabled(RewriteOptions::kDivStructure));
+  EXPECT_FALSE(options_.Enabled(RewriteOptions::kDivStructureDeprecated));
   EXPECT_TRUE(options_.Enabled(RewriteOptions::kStripScripts));
-  options_.EnableFilter(RewriteOptions::kDivStructure);
-  EXPECT_TRUE(options_.Enabled(RewriteOptions::kDivStructure));
+  options_.EnableFilter(RewriteOptions::kDivStructureDeprecated);
+  EXPECT_TRUE(options_.Enabled(RewriteOptions::kDivStructureDeprecated));
 }
 
 TEST_F(RewriteOptionsTest, CoreAndNotDangerous) {
@@ -792,7 +932,7 @@ TEST_F(RewriteOptionsTest, CoreByNameNotLevel) {
   ASSERT_TRUE(options_.Enabled(RewriteOptions::kExtendCacheImages));
 
   // Test these for PlusAndMinus validation.
-  EXPECT_FALSE(options_.Enabled(RewriteOptions::kDivStructure));
+  EXPECT_FALSE(options_.Enabled(RewriteOptions::kDivStructureDeprecated));
   EXPECT_TRUE(options_.Enabled(RewriteOptions::kInlineCss));
 }
 
@@ -808,7 +948,7 @@ TEST_F(RewriteOptionsTest, PlusAndMinus) {
   ASSERT_TRUE(options_.Enabled(RewriteOptions::kExtendCacheImages));
 
   // These should be opposite from normal.
-  EXPECT_TRUE(options_.Enabled(RewriteOptions::kDivStructure));
+  EXPECT_TRUE(options_.Enabled(RewriteOptions::kDivStructureDeprecated));
   EXPECT_FALSE(options_.Enabled(RewriteOptions::kInlineCss));
 }
 
@@ -977,6 +1117,11 @@ TEST_F(RewriteOptionsTest, LookupOptionByNameTest) {
       RewriteOptions::kImageWebpRecompressionQualityForSmallScreens,
       RewriteOptions::kImageWebpAnimatedRecompressionQuality,
       RewriteOptions::kImageWebpTimeoutMs,
+      RewriteOptions::kImageAvifQualityForSaveData,
+      RewriteOptions::kImageAvifRecompressionQuality,
+      RewriteOptions::kImageAvifRecompressionQualityForSmallScreens,
+      RewriteOptions::kImageAvifAnimatedRecompressionQuality,
+      RewriteOptions::kImageAvifTimeoutMs,
       RewriteOptions::kImplicitCacheTtlMs,
       RewriteOptions::kIncreaseSpeedTracking,
       RewriteOptions::kInlineOnlyCriticalImages,
@@ -1048,6 +1193,7 @@ TEST_F(RewriteOptionsTest, LookupOptionByNameTest) {
       RewriteOptions::kServeStaleIfFetchError,
       RewriteOptions::kServeStaleWhileRevalidateThresholdSec,
       RewriteOptions::kServeWebpToAnyAgent,
+      RewriteOptions::kServeAvifToAnyAgent,
       RewriteOptions::kServeXhrAccessControlHeaders,
       RewriteOptions::kStickyQueryParameters,
       RewriteOptions::kSupportNoScriptEnabled,
@@ -1585,13 +1731,19 @@ TEST_F(RewriteOptionsTest, ExperimentSpecTest) {
   EXPECT_EQ("UA-111111-1", options_.ga_id());
   EXPECT_EQ(4, options_.experiment_ga_slot());
 
-  // insert_ga can not be disabled in any experiment because that filter injects
-  // the instrumentation we use to collect the data.
+  // insert_ga is no longer force-enabled for experiments (it targets the
+  // discontinued Universal Analytics service), so this spec's
+  // disabled=insert_ga is honored.
   options_.SetExperimentState(2);
   EXPECT_FALSE(options_.Enabled(RewriteOptions::kInlineCss));
   EXPECT_FALSE(options_.Enabled(RewriteOptions::kSpriteImages));
   EXPECT_FALSE(options_.Enabled(RewriteOptions::kLeftTrimUrls));
-  EXPECT_TRUE(options_.Enabled(RewriteOptions::kInsertGA));
+  EXPECT_FALSE(options_.Enabled(RewriteOptions::kInsertGA));
+  // The filters required for experiment variant assignment and measurement
+  // are still force-enabled.
+  EXPECT_TRUE(options_.Enabled(RewriteOptions::kAddHead));
+  EXPECT_TRUE(options_.Enabled(RewriteOptions::kAddInstrumentation));
+  EXPECT_TRUE(options_.Enabled(RewriteOptions::kComputeStatistics));
   EXPECT_EQ(3, options_.experiment_ga_slot());
   // This experiment specified a ga_id, so make sure that we set it.
   EXPECT_EQ("UA-2222-1", options_.ga_id());
@@ -1639,6 +1791,108 @@ TEST_F(RewriteOptionsTest, ExperimentSpecTest) {
   // Object to adding a 27th.
   EXPECT_FALSE(
       options_.AddExperimentSpec("id=200;percent=1;default", &handler));
+}
+
+TEST_F(RewriteOptionsTest, ExperimentSpecInsertGAExplicitOptIn) {
+  // insert_ga is not force-enabled by experiments anymore, but a spec can
+  // still opt in explicitly with enable=insert_ga.
+  NullMessageHandler handler;
+  options_.set_ga_id("UA-111111-1");
+  EXPECT_TRUE(
+      options_.AddExperimentSpec("id=3;percent=10;enable=insert_ga", &handler));
+  options_.SetExperimentState(3);
+  EXPECT_TRUE(options_.Enabled(RewriteOptions::kInsertGA));
+}
+
+TEST_F(RewriteOptionsTest, MakeGoogleAnalyticsAsyncConfigCompat) {
+  // make_google_analytics_async is deprecated and a no-op, but configs that
+  // mention it must still parse successfully.
+  NullMessageHandler handler;
+  EXPECT_TRUE(options_.EnableFiltersByCommaSeparatedList(
+      "make_google_analytics_async", &handler));
+  EXPECT_TRUE(options_.DisableFiltersByCommaSeparatedList(
+      "make_google_analytics_async", &handler));
+}
+
+TEST_F(RewriteOptionsTest, DeprecatedAnalyticsFiltersWarn) {
+  // Enabling a Universal-Analytics-era filter emits a deprecation warning.
+  TestMessageHandler handler;
+  EXPECT_TRUE(
+      options_.EnableFiltersByCommaSeparatedList("insert_ga", &handler));
+  ASSERT_EQ(1U, handler.messages().size());
+  EXPECT_NE(GoogleString::npos,
+            handler.messages()[0].find("insert_ga targets Universal Analytics"))
+      << handler.messages()[0];
+
+  EXPECT_TRUE(options_.EnableFiltersByCommaSeparatedList(
+      "make_google_analytics_async", &handler));
+  ASSERT_EQ(2U, handler.messages().size());
+  EXPECT_NE(
+      GoogleString::npos,
+      handler.messages()[1].find("make_google_analytics_async is deprecated"))
+      << handler.messages()[1];
+
+  // Disabling (or forbidding) the deprecated filters is exactly what the
+  // warning recommends, so those mentions must stay silent.
+  EXPECT_TRUE(options_.DisableFiltersByCommaSeparatedList(
+      "insert_ga,make_google_analytics_async", &handler));
+  EXPECT_EQ(2U, handler.messages().size());
+  EXPECT_TRUE(options_.ForbidFiltersByCommaSeparatedList(
+      "insert_ga,make_google_analytics_async", &handler));
+  EXPECT_EQ(2U, handler.messages().size());
+}
+
+TEST_F(RewriteOptionsTest, AnalyticsIDWarns) {
+  // Setting AnalyticsID succeeds (config compatibility) but warns that it
+  // targets the discontinued Universal Analytics service.
+  TestMessageHandler handler;
+  GoogleString msg;
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromName1(RewriteOptions::kAnalyticsID,
+                                                "UA-111111-1", &msg, &handler));
+  EXPECT_EQ("UA-111111-1", options_.ga_id());
+  ASSERT_EQ(1U, handler.messages().size());
+  EXPECT_NE(GoogleString::npos, handler.messages()[0].find(
+                                    "AnalyticsID targets Universal Analytics"))
+      << handler.messages()[0];
+}
+
+TEST_F(RewriteOptionsTest, ExperimentalJsMinifierDefaultsOn) {
+  // The tokenizer-based minifier is the default; the legacy minifier is only
+  // reached by explicitly turning the option off.
+  EXPECT_TRUE(options_.use_experimental_js_minifier());
+}
+
+TEST_F(RewriteOptionsTest, LegacyJsMinifierDeprecationWarn) {
+  // Explicitly selecting the legacy JavaScript minifier still parses (config
+  // compatibility) but logs a deprecation warning, once per directive.
+  TestMessageHandler handler;
+  GoogleString msg;
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromName1(
+                RewriteOptions::kUseExperimentalJsMinifier, "off", &msg,
+                &handler));
+  EXPECT_FALSE(options_.use_experimental_js_minifier());
+  ASSERT_EQ(1U, handler.messages().size());
+  EXPECT_NE(GoogleString::npos,
+            handler.messages()[0].find(
+                "legacy JavaScript minifier is deprecated"))
+      << handler.messages()[0];
+}
+
+TEST_F(RewriteOptionsTest, LegacyJsMinifierDeprecationSilent) {
+  // Only an explicit 'off' warns: an untouched config takes the
+  // tokenizer-based default silently, and an explicit 'on' matches the
+  // default, so it stays silent too.
+  TestMessageHandler handler;
+  GoogleString msg;
+  EXPECT_EQ(0U, handler.messages().size());
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromName1(
+                RewriteOptions::kUseExperimentalJsMinifier, "on", &msg,
+                &handler));
+  EXPECT_TRUE(options_.use_experimental_js_minifier());
+  EXPECT_EQ(0U, handler.messages().size());
 }
 
 TEST_F(RewriteOptionsTest, DefaultExperimentSpecTest) {
@@ -2528,6 +2782,199 @@ TEST_F(RewriteOptionsTest, EnabledFiltersRequiringJavaScriptTest) {
   EXPECT_TRUE(bar_fs.empty());
 }
 
+TEST_F(RewriteOptionsTest, DeferIframeDeprecatedIsInertButAccepted) {
+  // The standalone "defer_iframe" filter name stays accepted for config
+  // compatibility, but it is a deprecated no-op: iframe deferral is built
+  // into defer_javascript/disable_javascript.
+  RewriteOptions options(&thread_system_);
+  TestMessageHandler handler;
+  EXPECT_TRUE(
+      options.EnableFiltersByCommaSeparatedList("defer_iframe", &handler));
+  // Characterization/regression pin for the kWarning added in b9c61b7fd:
+  // the warning was emitted but never asserted. Green both ways.
+  ASSERT_EQ(1, handler.messages().size());
+  EXPECT_STREQ(
+      "Warning: Filter 'defer_iframe' is deprecated and has no effect; "
+      "iframe deferral is built into 'defer_javascript'.",
+      handler.messages()[0].c_str());
+  EXPECT_TRUE(options.Enabled(RewriteOptions::kDeferIframeDeprecated));
+  EXPECT_STREQ(
+      "df", RewriteOptions::FilterId(RewriteOptions::kDeferIframeDeprecated));
+  EXPECT_STREQ(
+      "Deprecated.",
+      RewriteOptions::FilterName(RewriteOptions::kDeferIframeDeprecated));
+
+  // It must not require script execution, so enabling it must not trigger
+  // the noscript-redirect machinery for no-JS clients.
+  RewriteOptions::FilterVector fs;
+  options.GetEnabledFiltersRequiringScriptExecution(&fs);
+  EXPECT_TRUE(fs.empty());
+
+  // The AllFilters level must not implicitly enable it.
+  RewriteOptions all_options(&thread_system_);
+  all_options.SetRewriteLevel(RewriteOptions::kAllFilters);
+  EXPECT_FALSE(all_options.Enabled(RewriteOptions::kDeferIframeDeprecated));
+}
+
+TEST_F(RewriteOptionsTest, DeferIframeDeprecationWarnsOnlyWhenEnabling) {
+  // Enabling the deprecated no-op warns; disabling (or forbidding) is what
+  // the warning recommends, so those mentions stay silent (same gate as the
+  // analytics deprecation warnings).
+  TestMessageHandler handler;
+  EXPECT_TRUE(
+      options_.EnableFiltersByCommaSeparatedList("defer_iframe", &handler));
+  ASSERT_EQ(1U, handler.messages().size());
+  EXPECT_NE(GoogleString::npos,
+            handler.messages()[0].find("Filter 'defer_iframe' is deprecated"))
+      << handler.messages()[0];
+
+  EXPECT_TRUE(options_.DisableFiltersByCommaSeparatedList("defer_iframe",
+                                                          &handler));
+  EXPECT_TRUE(options_.ForbidFiltersByCommaSeparatedList("defer_iframe",
+                                                         &handler));
+  EXPECT_EQ(1U, handler.messages().size());
+}
+
+TEST_F(RewriteOptionsTest, ShardDomainDeprecationWarning) {
+  // The ShardDomain option (ModPagespeedShardDomain / "pagespeed
+  // ShardDomain") stays accepted for config compatibility, but domain
+  // sharding is deprecated: it hurts performance with HTTP/2 and HTTP/3,
+  // which multiplex over a single connection.  Parsing it logs a warning,
+  // deduped process-wide per mapping, so this test uses mapping strings
+  // parsed by no other test in the binary.
+  RewriteOptions options(&thread_system_);
+  TestMessageHandler handler;
+  GoogleString msg;
+  EXPECT_EQ(
+      RewriteOptions::kOptionOk,
+      options.ParseAndSetOptionFromName2(
+          RewriteOptions::kShardDomain, "https://dep.example.com",
+          "https://dep1.cdn.example.com,https://dep2.cdn.example.com", &msg,
+          &handler));
+  ASSERT_EQ(1, handler.messages().size());
+  EXPECT_NE(GoogleString::npos, handler.messages()[0].find("Warning"));
+  EXPECT_NE(GoogleString::npos, handler.messages()[0].find("deprecated"));
+  EXPECT_NE(GoogleString::npos,
+            handler.messages()[0].find("Remove the ShardDomain directive"));
+
+  // Re-parsing the same mapping (e.g. an .htaccess re-parse per request)
+  // does not re-warn.
+  RewriteOptions options2(&thread_system_);
+  EXPECT_EQ(
+      RewriteOptions::kOptionOk,
+      options2.ParseAndSetOptionFromName2(
+          RewriteOptions::kShardDomain, "https://dep.example.com",
+          "https://dep1.cdn.example.com,https://dep2.cdn.example.com", &msg,
+          &handler));
+  EXPECT_EQ(1, handler.messages().size());
+}
+
+TEST_F(RewriteOptionsTest, CachePartialHtmlDeprecatedIsInertButAccepted) {
+  // The standalone "cache_partial_html" filter name stays accepted for config
+  // compatibility, but it is a deprecated no-op: nothing consumes the enabled
+  // bit for rewriting.
+  RewriteOptions options(&thread_system_);
+  NullMessageHandler handler;
+  EXPECT_TRUE(options.EnableFiltersByCommaSeparatedList("cache_partial_html",
+                                                        &handler));
+  EXPECT_TRUE(options.Enabled(RewriteOptions::kCachePartialHtmlDeprecated));
+  EXPECT_STREQ(
+      "ct",
+      RewriteOptions::FilterId(RewriteOptions::kCachePartialHtmlDeprecated));
+  EXPECT_STREQ(
+      "Deprecated.",
+      RewriteOptions::FilterName(RewriteOptions::kCachePartialHtmlDeprecated));
+
+  // It must not require script execution, so enabling it must not trigger
+  // the noscript-redirect machinery for no-JS clients.
+  RewriteOptions::FilterVector fs;
+  options.GetEnabledFiltersRequiringScriptExecution(&fs);
+  EXPECT_TRUE(fs.empty());
+
+  // The AllFilters level must not implicitly enable it.
+  RewriteOptions all_options(&thread_system_);
+  all_options.SetRewriteLevel(RewriteOptions::kAllFilters);
+  EXPECT_FALSE(
+      all_options.Enabled(RewriteOptions::kCachePartialHtmlDeprecated));
+}
+
+TEST_F(RewriteOptionsTest, ComputeVisibleTextDeprecatedIsInert) {
+  // Characterization/guard test: green both before and after the
+  // cache_partial_html fix. kComputeVisibleTextDeprecated has no config
+  // name, so it can only be enabled programmatically; like the other
+  // deprecated no-op filters it must not require script execution and
+  // must not be enabled by the AllFilters level.
+  RewriteOptions options(&thread_system_);
+  options.EnableFilter(RewriteOptions::kComputeVisibleTextDeprecated);
+  EXPECT_TRUE(options.Enabled(RewriteOptions::kComputeVisibleTextDeprecated));
+
+  RewriteOptions::FilterVector fs;
+  options.GetEnabledFiltersRequiringScriptExecution(&fs);
+  EXPECT_TRUE(fs.empty());
+
+  RewriteOptions all_options(&thread_system_);
+  all_options.SetRewriteLevel(RewriteOptions::kAllFilters);
+  EXPECT_FALSE(
+      all_options.Enabled(RewriteOptions::kComputeVisibleTextDeprecated));
+}
+
+TEST_F(RewriteOptionsTest, DeprecatedDeadFiltersAreInertButAccepted) {
+  // Registry sweep: these filter names stay accepted for config
+  // compatibility, but the filters are deprecated no-ops. Each must keep
+  // parsing, keep its id, report "Deprecated." as its display name, require
+  // no script execution, and stay out of the AllFilters level.
+  struct DeprecatedFilter {
+    const char* name;
+    RewriteOptions::Filter filter;
+    const char* id;
+  };
+  static const DeprecatedFilter kDeprecatedFilters[] = {
+      {"div_structure", RewriteOptions::kDivStructureDeprecated, "ds"},
+      {"explicit_close_tags", RewriteOptions::kExplicitCloseTagsDeprecated,
+       "xc"},
+      {"flush_subresources", RewriteOptions::kFlushSubresourcesDeprecated,
+       "fs"},
+      {"mobilize_precompute", RewriteOptions::kMobilizePrecomputeDeprecated,
+       "mob_precompute"},
+      {"split_html", RewriteOptions::kSplitHtmlDeprecated, "sh"},
+      {"split_html_helper", RewriteOptions::kSplitHtmlHelperDeprecated, "se"},
+  };
+  for (int i = 0; i < arraysize(kDeprecatedFilters); ++i) {
+    SCOPED_TRACE(kDeprecatedFilters[i].name);
+    RewriteOptions options(&thread_system_);
+    NullMessageHandler handler;
+    EXPECT_TRUE(options.EnableFiltersByCommaSeparatedList(
+        kDeprecatedFilters[i].name, &handler));
+    EXPECT_TRUE(options.Enabled(kDeprecatedFilters[i].filter));
+    EXPECT_STREQ(kDeprecatedFilters[i].id,
+                 RewriteOptions::FilterId(kDeprecatedFilters[i].filter));
+    EXPECT_STREQ("Deprecated.",
+                 RewriteOptions::FilterName(kDeprecatedFilters[i].filter));
+
+    // It must not require script execution, so enabling it must not trigger
+    // the noscript-redirect machinery for no-JS clients.
+    RewriteOptions::FilterVector fs;
+    options.GetEnabledFiltersRequiringScriptExecution(&fs);
+    EXPECT_TRUE(fs.empty());
+
+    // The AllFilters level must not implicitly enable it.
+    RewriteOptions all_options(&thread_system_);
+    all_options.SetRewriteLevel(RewriteOptions::kAllFilters);
+    EXPECT_FALSE(all_options.Enabled(kDeprecatedFilters[i].filter));
+  }
+}
+
+TEST_F(RewriteOptionsTest, ServeDeprecationNoticeExcised) {
+  // kServeDeprecationNotice was never reachable by name: it is absent from
+  // the gperf name table and from the compound-name list, so no config could
+  // enable it. The enum entry and its "sd" id are excised outright instead
+  // of deprecated in place.
+  EXPECT_EQ(RewriteOptions::kEndOfFilters,
+            RewriteOptions::LookupFilterById("sd"));
+  EXPECT_EQ(RewriteOptions::kEndOfFilters,
+            RewriteOptions::LookupFilter("serve_deprecation_notice"));
+}
+
 TEST_F(RewriteOptionsTest, FilterLookupMethods) {
   EXPECT_STREQ("Add Head",
                RewriteOptions::FilterName(RewriteOptions::kAddHead));
@@ -3192,7 +3639,7 @@ namespace {
 
 class ModeTrackingRWLock : public ThreadSystem::RWLock {
  public:
-  enum class Mode { kIdle, kShared, kExclusive };
+  enum class Mode : std::uint8_t { kIdle, kShared, kExclusive };
 
   ModeTrackingRWLock() = default;
   ~ModeTrackingRWLock() override = default;

@@ -112,6 +112,11 @@ the <code>span</code> would have been created outside and after the
 Any <code>document.body.appendChild</code> calls will always get appended to
 the bottom of the page.
 </p>
+<p>
+Module scripts (<code>&lt;script type="module"&gt;</code>) are left unchanged
+by this filter: browsers already defer module execution natively, and the
+re-execution mechanism used by defer_javascript cannot run module syntax.
+</p>
 <h2>Requirements</h2>
 <p>
 defer_javascript is supported for browser versions of chrome 15+,

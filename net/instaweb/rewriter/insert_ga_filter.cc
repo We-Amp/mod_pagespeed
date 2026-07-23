@@ -104,12 +104,14 @@ InsertGAFilter::~InsertGAFilter() {}
 bool InsertGAFilter::StringLiteralMatches(StringPiece literal,
                                           StringPiece desired) {
   // Literal includes the beginning and ending quotes; need to exclude them.
+  if (literal.size() < 2) return false;
   return literal.substr(1, literal.size() - 2) == desired;
 }
 
 bool InsertGAFilter::StringLiteralEndsWith(StringPiece literal,
                                            StringPiece desired) {
   // Literal includes the beginning and ending quotes; need to exclude them.
+  if (literal.size() < 2) return false;
   return literal.substr(1, literal.size() - 2).ends_with(desired);
 }
 
@@ -118,6 +120,7 @@ void InsertGAFilter::StartDocumentImpl() {
   script_element_ = nullptr;
   added_analytics_js_ = false;
   added_experiment_snippet_ = false;
+  seen_sync_ga_js_ = false;
   if (driver()->options()->running_experiment()) {
     driver()->message_handler()->Message(
         kInfo, "run_experiment: %s",
@@ -482,7 +485,7 @@ void InsertGAFilter::EndElementImpl(HtmlElement* element) {
   }
 }
 
-void InsertGAFilter::Characters(HtmlCharactersNode* characters) {
+void InsertGAFilter::CharactersImpl(HtmlCharactersNode* characters) {
   // Don't touch existing inline scripts when the page's CSP forbids inline
   // script execution: editing one would invalidate a hash-sourced
   // allowance, and the ga.js content-experiment path re-injects the script

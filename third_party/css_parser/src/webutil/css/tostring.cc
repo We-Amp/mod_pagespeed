@@ -420,12 +420,24 @@ string UnparsedRegion::ToString() const {
 
 string MediaExpression::ToString() const {
   string result = "(";
-  result += Css::EscapeIdentifier(name());
-  if (has_value()) {
-    result += ": ";
-    // Note: While this is not a string, it is a mixture of text that should
-    // be escaped in roughly the same way.
-    result += Css::EscapeString(value());
+  if (is_raw()) {
+    // Raw expression: the bytes must stay textually faithful — this string
+    // feeds CanMediaAffectScreen(), whose token scan treats a leading '(' as
+    // "may affect screen" (conservative keep). A ',' inside the raw bytes
+    // cannot flip that scan to a false "no": a media type or '(' precedes it,
+    // so an earlier fragment already answered yes. (A NOT-qualified raw
+    // query can still answer "no" — correct, and identical to both the
+    // pre-raw "not all" demotion and MQ4 unknown-value semantics.)
+    // No escaping.
+    result.append(value().utf8_data(), value().utf8_length());
+  } else {
+    result += Css::EscapeIdentifier(name());
+    if (has_value()) {
+      result += ": ";
+      // Note: While this is not a string, it is a mixture of text that should
+      // be escaped in roughly the same way.
+      result += Css::EscapeString(value());
+    }
   }
   result += ")";
   return result;
@@ -468,6 +480,25 @@ string Ruleset::ToString() const {
     case UNPARSED_REGION:
       result = unparsed_region()->ToString();
       break;
+    case GROUP_RULE: {
+      // Body charsets/imports are empty by construction; emit the two
+      // populated buckets in the same order as Stylesheet::ToString().
+      string body;
+      if (!group_body().font_faces().empty()) {
+        body = JoinElementStrings(group_body().font_faces(), " ");
+      }
+      string body_rulesets = JoinElementStrings(group_body().rulesets(), " ");
+      if (!body_rulesets.empty()) {
+        if (!body.empty()) body += " ";
+        body += body_rulesets;
+      }
+      result += group_prelude() + " {";
+      if (!body.empty()) {
+        result += " " + body;
+      }
+      result += " }";
+      break;
+    }
   }
   if (!media_queries().empty()) result += " }";
   return result;

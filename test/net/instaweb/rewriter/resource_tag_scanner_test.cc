@@ -139,6 +139,15 @@ TEST_F(ResourceTagScannerTest, Prefetch) {
   EXPECT_EQ(semantic_type::kPrefetch, resource_category_[0]);
 }
 
+TEST_F(ResourceTagScannerTest, Preconnect) {
+  ValidateNoChanges("Preconnect",
+                    "<link rel=\"preconnect\" href=\"do_find_preconnect\">\n");
+  ASSERT_EQ(static_cast<size_t>(1), resources_.size());
+  ASSERT_EQ(static_cast<size_t>(1), resource_category_.size());
+  EXPECT_STREQ("do_find_preconnect", resources_[0]);
+  EXPECT_EQ(semantic_type::kPrefetch, resource_category_[0]);
+}
+
 TEST_F(ResourceTagScannerTest, NoMediaCss) {
   ValidateNoChanges(
       "NoMediaCss",

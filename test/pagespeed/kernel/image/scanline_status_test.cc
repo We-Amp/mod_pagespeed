@@ -47,6 +47,8 @@ TEST(ScanlineStatusTest, ComesFromReader) {
       FRAME_GIFREADER,
       FRAME_WEBPWRITER,
       FRAME_PADDING_READER,
+      FRAME_AVIFREADER,
+      FRAME_AVIFWRITER,
   };
 
   EXPECT_EQ(NUM_SCANLINE_SOURCE, arraysize(kAllSources));

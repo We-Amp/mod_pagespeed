@@ -39,32 +39,34 @@ class TestHintPreloadSubresources:
     Bash original::
 
         test_filter hint_preload_subresources works, and finds indirects
-        # Expect 5 resources to be hinted
-        fetch_until -save $URL 'grep -c ^Link:' 5 --save-headers
+        # Expect 6 resources to be hinted
+        fetch_until -save $URL 'grep -c ^Link:' 6 --save-headers
     """
 
     def test_preload_hints_count(
         self, client: PageSpeedClient, example_root: str
     ):
-        """hint_preload_subresources should add 5 Link headers.
+        """hint_preload_subresources should add 6 Link headers.
 
         Bash original::
 
-            fetch_until -save $URL 'grep -c ^Link:' 5 --save-headers
+            fetch_until -save $URL 'grep -c ^Link:' 6 --save-headers
         """
         url = f"{example_root}/hint_preload_subresources.html?PageSpeedFilters=hint_preload_subresources"
 
-        # Count Link headers - bash test expects 5
+        # Count Link headers - the example page hints its stylesheet, the
+        # three @imported stylesheets, one @font-face woff2 font, and one
+        # script: 6 preloads.
         response = client.fetch_until(
             url,
-            condition=lambda r: r.header("Link", "").count("rel=preload") >= 5,
+            condition=lambda r: r.header("Link", "").count("rel=preload") >= 6,
             timeout=30.0,
         )
         assert_http_status(response, 200)
 
         link_header = response.header("Link", "")
         link_count = link_header.count("rel=preload")
-        assert link_count >= 5, f"Expected 5 Link preload headers, got {link_count}"
+        assert link_count >= 6, f"Expected 6 Link preload headers, got {link_count}"
 
     def test_preload_css_main(
         self, client: PageSpeedClient, example_root: str
@@ -137,6 +139,31 @@ class TestHintPreloadSubresources:
         link_header = response.header("Link", "")
         assert re.search(r"inline_javascript\.js.*rel=preload.*as=script", link_header), \
             f"Should hint preload JavaScript, got Link: {link_header}"
+
+    def test_preload_font(
+        self, client: PageSpeedClient, example_root: str
+    ):
+        """woff2 fonts from @font-face rules should preload with as=font.
+
+        Font preloads must carry the crossorigin attribute: fonts are always
+        fetched in anonymous CORS mode, so a preload without it would not
+        match the later fetch and the font would be downloaded twice.
+        """
+        url = f"{example_root}/hint_preload_subresources.html?PageSpeedFilters=hint_preload_subresources"
+
+        # Use fetch_until to wait for the font Link header
+        response = client.fetch_until(
+            url,
+            condition=lambda r: "example.woff2" in r.header("Link", ""),
+            timeout=30.0,
+        )
+        assert_http_status(response, 200)
+
+        link_header = response.header("Link", "")
+        assert re.search(
+            r"example\.woff2[^,]*rel=preload[^,]*as=font[^,]*crossorigin",
+            link_header,
+        ), f"Should hint preload woff2 font with as=font and crossorigin, got Link: {link_header}"
 
     def test_preload_includes_nopush(
         self, client: PageSpeedClient, example_root: str

@@ -105,14 +105,16 @@ class CacheStats::StatsCallback : public DelegatingCacheCallback {
   StatsCallback(CacheStats* stats, Timer* timer,
                 CacheInterface::Callback* callback)
       : DelegatingCacheCallback(callback), stats_(stats), timer_(timer) {
-    start_time_us_ = timer->NowUs();
+    // Latency deltas use the monotonic clock so a wall-clock step can't make
+    // the elapsed time negative.
+    start_time_us_ = timer->NowMonotonicUs();
   }
 
   ~StatsCallback() override {}
 
   void Done(CacheInterface::KeyState state) override {
     if (state == CacheInterface::kAvailable) {
-      int64 end_time_us = timer_->NowUs();
+      int64 end_time_us = timer_->NowMonotonicUs();
       stats_->hits_->Add(1);
       stats_->lookup_size_bytes_histogram_->Add(value().size());
       stats_->hit_latency_us_histogram_->Add(end_time_us - start_time_us_);
@@ -157,11 +159,11 @@ void CacheStats::MultiGet(MultiGetRequest* request) {
 
 void CacheStats::Put(const GoogleString& key, const SharedString& value) {
   if (!shutdown_.value()) {
-    int64 start_time_us = timer_->NowUs();
+    int64 start_time_us = timer_->NowMonotonicUs();
     inserts_->Add(1);
     insert_size_bytes_histogram_->Add(value.size());
     cache_->Put(key, value);
-    insert_latency_us_histogram_->Add(timer_->NowUs() - start_time_us);
+    insert_latency_us_histogram_->Add(timer_->NowMonotonicUs() - start_time_us);
   }
 }
 

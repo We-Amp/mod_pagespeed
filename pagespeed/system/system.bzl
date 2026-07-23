@@ -14,9 +14,7 @@ def pagespeed_system_library(name, server_type, **kwargs):
     """
     native.cc_library(
         name = name,
-        srcs = SYSTEM_CORE_SRCS + SYSTEM_GENERATED_SRCS + [
-            "controller_manager.cc",
-        ] + select({
+        srcs = SYSTEM_CORE_SRCS + SYSTEM_GENERATED_SRCS + select({
             "@platforms//os:linux": ["memcached_cache.cc"],
             "//conditions:default": [],
         }),
@@ -32,10 +30,7 @@ def pagespeed_system_library(name, server_type, **kwargs):
             "//conditions:default": ["-DPAGESPEED_ENABLE_MEMCACHED=0"],
         }),
         visibility = ["//visibility:public"],
-        deps = SYSTEM_CORE_DEPS + [
-            # Full gRPC controller for fork-mode (Apache/nginx).
-            "//pagespeed/controller",
-        ] + select({
+        deps = SYSTEM_CORE_DEPS + select({
             "@platforms//os:linux": [
                 ":memcached_cache",
                 "//bazel:libmemcached",
@@ -73,8 +68,6 @@ SYSTEM_CORE_HDRS = [
     "add_headers_fetcher.h",
     "admin_license_handler.h",
     "admin_site.h",
-    "controller_manager.h",
-    "controller_process.h",
     "external_server_spec.h",
     "in_place_resource_recorder.h",
     "loopback_route_fetcher.h",
@@ -94,10 +87,8 @@ SYSTEM_CORE_DEPS = [
     ":json_utils",
     ":over_cap_match",
     ":redis_cache",
-    ":system_controller_process_h",
     "//net/instaweb/http",
     "//net/instaweb/rewriter",
-    "//pagespeed/controller:controller_core",
     "//pagespeed/kernel/cache:cyclone_cache",
     "//pagespeed/kernel/license_v2:license_file",
     "//pagespeed/kernel/license_v2:license_token",

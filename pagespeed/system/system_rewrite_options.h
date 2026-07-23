@@ -67,6 +67,10 @@ class SystemRewriteOptions : public RewriteOptions {
 
   void Merge(const RewriteOptions& src) override;
 
+  OptionSettingResult ParseAndSetOptionFromName1(
+      StringPiece name, StringPiece arg, GoogleString* msg,
+      MessageHandler* handler) override;
+
   OptionSettingResult ParseAndSetOptionFromName2(
       StringPiece name, StringPiece arg1, StringPiece arg2, GoogleString* msg,
       MessageHandler* handler) override;
@@ -131,6 +135,12 @@ class SystemRewriteOptions : public RewriteOptions {
   int64 cyclone_ram_cache_kb() const { return cyclone_ram_cache_kb_.value(); }
   void set_cyclone_ram_cache_kb(int64 x) {
     set_option(x, &cyclone_ram_cache_kb_);
+  }
+  bool async_metadata_l2_writes() const {
+    return async_metadata_l2_writes_.value();
+  }
+  void set_async_metadata_l2_writes(bool x) {
+    set_option(x, &async_metadata_l2_writes_);
   }
   bool statistics_enabled() const { return statistics_enabled_.value(); }
   void set_statistics_enabled(bool x) { set_option(x, &statistics_enabled_); }
@@ -206,16 +216,6 @@ class SystemRewriteOptions : public RewriteOptions {
   const GoogleString& fetcher_proxy() const { return fetcher_proxy_.value(); }
   void set_fetcher_proxy(const GoogleString& x) {
     set_option(x, &fetcher_proxy_);
-  }
-
-  const GoogleString& controller_port() const {
-    return controller_port_.value();
-  }
-  int popularity_contest_max_inflight_requests() const {
-    return popularity_contest_max_inflight_requests_.value();
-  }
-  int popularity_contest_max_queue_size() const {
-    return popularity_contest_max_queue_size_.value();
   }
 
   // Cache flushing configuration.
@@ -447,12 +447,6 @@ class SystemRewriteOptions : public RewriteOptions {
     }
   };
 
-  class ControllerPortOption : public Option<GoogleString> {
-   public:
-    bool SetFromString(StringPiece value_string,
-                       GoogleString* error_detail) override;
-  };
-
   // Keeps the properties added by this subclass.  These are merged into
   // RewriteOptions::all_properties_ during Initialize().
   static Properties* system_properties_;
@@ -515,6 +509,10 @@ class SystemRewriteOptions : public RewriteOptions {
   // mmap volume); -1 inherits LRUCacheKbPerProcess (legacy coupling);
   // >0 sets that many KB.
   Option<int64> cyclone_ram_cache_kb_;
+  // Defer the metadata cache's blocking L2 (disk) write off the rewrite
+  // critical path via a single-thread write-behind queue.  Experimental,
+  // default off; reads and the shm L1 write stay synchronous.
+  Option<bool> async_metadata_l2_writes_;
 
   Option<bool> slurp_read_only_;
   Option<bool> test_proxy_;
@@ -532,7 +530,10 @@ class SystemRewriteOptions : public RewriteOptions {
   // cleartext.  We'll decompress as we read the content if needed.
   Option<bool> fetch_with_gzip_;
 
-  ControllerPortOption controller_port_;
+  // Deprecated no-op options, kept registered so old configs still parse.
+  // Setting any of these logs a deprecation warning (see
+  // ParseAndSetOptionFromName1); the values are never read.
+  Option<GoogleString> controller_port_;
   Option<int> popularity_contest_max_inflight_requests_;
   Option<int> popularity_contest_max_queue_size_;
 

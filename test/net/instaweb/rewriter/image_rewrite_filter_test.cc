@@ -35,6 +35,7 @@
 #include "net/instaweb/rewriter/public/dom_stats_filter.h"
 #include "net/instaweb/rewriter/public/domain_lawyer.h"
 #include "net/instaweb/rewriter/public/image.h"
+#include "net/instaweb/rewriter/public/image_url_encoder.h"
 #include "net/instaweb/rewriter/public/resource.h"
 #include "net/instaweb/rewriter/public/resource_namer.h"
 #include "net/instaweb/rewriter/public/resource_tag_scanner.h"
@@ -46,13 +47,14 @@
 #include "net/instaweb/rewriter/rendered_image.pb.h"
 #include "net/instaweb/util/public/mock_property_page.h"
 #include "net/instaweb/util/public/property_cache.h"
-#include "pagespeed/controller/work_bound_expensive_operation_controller.h"
+#include "net/instaweb/rewriter/public/work_bound_expensive_operation_controller.h"
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/md5_hasher.h"  // for MD5Hasher
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/base/string_writer.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/base/timer.h"  // for Timer, etc
 #include "pagespeed/kernel/cache/lru_cache.h"
@@ -1144,6 +1146,52 @@ class ImageRewriteTest : public RewriteTestBase {
       ResetUserAgent(user_agent);
     }
     return FetchResourceUrl(url, content, response);
+  }
+
+  // Like FetchWebp, but "avif" selects a BOTH-capable client (webp-lossless
+  // UA plus Accept: image/avif) -- the population that mints ".avif" URLs.
+  bool FetchAvif(StringPiece url, StringPiece user_agent, GoogleString* content,
+                 ResponseHeaders* response) {
+    content->clear();
+    response->Clear();
+    ClearStats();
+    if (user_agent == "avif") {
+      ResetForAvif();
+    } else {
+      ResetUserAgent(user_agent);
+    }
+    return FetchResourceUrl(url, content, response);
+  }
+
+  // Configures the current request as a both-capable (WebP-lossless + AVIF)
+  // client: the canonical minting population for committed ".avif" URLs.
+  void ResetForAvif() {
+    ClearRewriteDriver();
+    SetupForWebpLossless();
+    AddRequestAttribute(HttpAttributes::kAccept, "image/avif");
+    SetDriverRequestHeaders();
+  }
+
+  // Runs the fetch-path capability encode -- the exact
+  // SetWebpAndMobileUserAgent + SetAvifCapability pair
+  // ImageRewriteFilter::EncodeUserAgentIntoResourceContext runs -- against the
+  // CURRENT driver state and returns the resulting context.
+  ResourceContext ReconciledResourceContext() {
+    ResourceContext context;
+    ImageUrlEncoder::SetWebpAndMobileUserAgent(*rewrite_driver(), &context);
+    ImageUrlEncoder::SetAvifCapability(*rewrite_driver(), &context);
+    return context;
+  }
+
+  // The capability context the CURRENT client derives naturally (no committed
+  // URL in play) -- i.e. the metadata key this client MINTS under.
+  ResourceContext MintingResourceContext() {
+    ResourceContext context;
+    ImageUrlEncoder::SetLibWebpLevel(
+        *options(), *rewrite_driver()->request_properties(), &context);
+    ImageUrlEncoder::SetAvifLevel(
+        *options(), *rewrite_driver()->request_properties(), &context);
+    return context;
   }
 
   void IProFetchAndValidate(StringPiece url, StringPiece user_agent,
@@ -2241,6 +2289,27 @@ TEST_F(ImageRewriteTest, DebugNoResizeTest) {
                                  "does not appear to need resizing.-->"));
 }
 
+TEST_F(ImageRewriteTest, DelayImagesLowResResizeMessageDims) {
+  // The info message logged when a low-quality mobile image is resized must
+  // report the resized height, not the width twice.  Puzzle.jpg is 1023x766,
+  // so a 320px-wide mobile resize yields 320x239.
+  options()->EnableFilter(RewriteOptions::kDelayImages);
+  options()->EnableFilter(RewriteOptions::kResizeMobileImages);
+  rewrite_driver()->AddFilters();
+  SetCurrentUserAgent(UserAgentMatcherTestBase::kAndroidICSUserAgent);
+  GoogleString initial_url = StrCat(kTestDomain, kPuzzleJpgFile);
+  GoogleString page_url = StrCat(kTestDomain, "test.html");
+  AddFileToMockFetcher(initial_url, kPuzzleJpgFile, kContentTypeJpeg, 100);
+  const char html_boilerplate[] = "<img src='%s'>";
+  GoogleString html_input =
+      absl::StrFormat(html_boilerplate, initial_url.c_str());
+  ParseUrl(page_url, html_input);
+  GoogleString messages;
+  StringWriter writer(&messages);
+  message_handler()->Dump(&writer);
+  EXPECT_THAT(messages, testing::HasSubstr("to 320x239("));
+}
+
 TEST_F(ImageRewriteTest, DebugWithMapRewriteDomain) {
   options()->EnableFilter(RewriteOptions::kDebug);
   options()->EnableFilter(RewriteOptions::kResizeImages);
@@ -2563,6 +2632,41 @@ TEST_F(ImageRewriteTest, InlineLargerResize) {
   // Image is inlined but not resized, so preserve dimensions.
   TestSingleRewrite(kCuppaOPngFile, kContentTypePng, kContentTypePng,
                     kResizedDims, kResizedDims, false, true);
+}
+
+TEST_F(ImageRewriteTest, TotalBytesSavedNoUnderflowWhenOutputLarger) {
+  // Regression test: the image_rewrite_total_bytes_saved statistic must not be
+  // corrupted when the optimized output is LARGER than the input.
+  //
+  // If an operator sets ImageLimitOptimizedPercent above 100, an optimized
+  // image that is bigger than the input can still pass the "keep it?" gate and
+  // reach the stats path. The saving was computed as
+  // input_size() - output_size() in size_t, which wraps to a huge value when
+  // output > input (and violates Variable::Add's non-negative-delta contract),
+  // corrupting the counter. The fix only Adds a positive signed delta.
+  //
+  // We reproduce "optimized output larger than input" exactly as
+  // InlineLargerResize does: resize CuppaO (an already-optimal graphic) down by
+  // one pixel, which re-encodes to an image larger than the tiny original.
+  // Raising the limit to 1000% lets that larger output through the gate so the
+  // stats-update path actually runs.
+  options()->EnableFilter(RewriteOptions::kResizeImages);
+  options()->set_image_limit_optimized_percent(1000);
+  rewrite_driver()->AddFilters();
+
+  Variable* total_bytes_saved =
+      statistics()->GetVariable("image_rewrite_total_bytes_saved");
+  ASSERT_TRUE(total_bytes_saved != nullptr);
+  EXPECT_EQ(0, total_bytes_saved->Get());
+
+  const char kResizedDims[] = " width=64 height=69";
+  TestSingleRewrite(kCuppaOPngFile, kContentTypePng, kContentTypePng,
+                    kResizedDims, kResizedDims, true, false);
+
+  // With the guard the larger-output path records no (negative/underflowed)
+  // saving, so the counter stays 0. Without the guard this Add would corrupt
+  // the counter (and DCHECK-fail on a debug build).
+  EXPECT_EQ(0, total_bytes_saved->Get());
 }
 
 TEST_F(ImageRewriteTest, ResizeTransparentImage) {
@@ -3573,6 +3677,269 @@ TEST_F(ImageRewriteTest, ServeWebpFromColdCache) {
   EXPECT_STREQ(kJpegMimeType, response.Lookup1(HttpAttributes::kContentType));
 }
 
+// AVIF statistics follow-up: proves the AVIF counter family is REGISTERED (via
+// ImageRewriteFilter::InitStats) and bound to the filter's own
+// avif_conversion_variables_, not merely incremented somewhere.  The
+// image_test.cc coverage exercises Image::RewriteToAvif against a private
+// SimpleStats; this exercises the production registration path, which is the
+// half that fails silently -- a counter that exists on the stats page and
+// always reads zero.
+TEST_F(ImageRewriteTest, AvifStatsAreRegisteredAndIncremented) {
+  UseMd5Hasher();
+  AddRecompressImageFilters();
+  // Deterministic minted format: no competing JPEG->WebP candidate.
+  options()->DisableFilter(RewriteOptions::kConvertJpegToWebp);
+  options()->EnableFilter(RewriteOptions::kConvertJpegToAvif);
+  options()->EnableFilter(RewriteOptions::kConvertToAvifLossless);
+
+  // GetVariable/GetHistogram return non-NULL only for names that InitStats
+  // actually registered, so these lookups are themselves the registration
+  // assertion.
+  Variable* avif_rewrites =
+      statistics()->GetVariable(ImageRewriteFilter::kImageAvifRewrites);
+  ASSERT_TRUE(avif_rewrites != nullptr);
+  Histogram* avif_from_jpeg_success = statistics()->GetHistogram(
+      ImageRewriteFilter::kImageAvifFromJpegSuccessMs);
+  ASSERT_TRUE(avif_from_jpeg_success != nullptr);
+  Variable* avif_from_jpeg_timeouts =
+      statistics()->GetVariable(ImageRewriteFilter::kImageAvifFromJpegTimeouts);
+  ASSERT_TRUE(avif_from_jpeg_timeouts != nullptr);
+
+  EXPECT_EQ(0, avif_rewrites->Get());
+  EXPECT_EQ(0, avif_from_jpeg_success->Count());
+
+  GoogleString img_src;
+  ResetForAvif();
+  AddFileToMockFetcher(kPuzzleUrl, kPuzzleJpgFile, kContentTypeJpeg, 100);
+  RewriteImageFromHtml("img", kContentTypeAvif, &img_src);
+
+  // One image was rewritten INTO AVIF ...
+  EXPECT_EQ(1, avif_rewrites->Get());
+  // ... and the JPEG->AVIF encode timing landed in the right bucket.
+  EXPECT_EQ(1, avif_from_jpeg_success->Count());
+  EXPECT_EQ(0, avif_from_jpeg_timeouts->Get());
+}
+
+// the design record: the AVIF sibling of ServeWebpFromColdCache. Mint a committed
+// ".avif" URL with a both-capable client, then prove: cache-served fetches do
+// not re-rewrite; cold-cache reconstruction (including by a NON-capable
+// client, via the committed-URL reconcile + serve-to-any-agent) reproduces the
+// IDENTICAL AVIF bytes; and with serve-to-any-agent off a non-capable client
+// gets the original JPEG, privately cached.
+TEST_F(ImageRewriteTest, ServeAvifFromColdCache) {
+  const StringPiece kJpegMimeType = kContentTypeJpeg.mime_type();
+  const StringPiece kAvifMimeType = kContentTypeAvif.mime_type();
+
+  UseMd5Hasher();
+  AddRecompressImageFilters();
+  // Make the minted format deterministic: no competing JPEG->WebP candidate
+  // (the AVIF-vs-WebP pick-smaller outcome is content-dependent).
+  options()->DisableFilter(RewriteOptions::kConvertJpegToWebp);
+  options()->EnableFilter(RewriteOptions::kConvertJpegToAvif);
+  options()->EnableFilter(RewriteOptions::kConvertToAvifLossless);
+  options()->set_serve_rewritten_avif_urls_to_any_agent(true);
+
+  // First rewrite an HTML file with an image for a both-capable client
+  // (WebP-lossless UA + Accept: image/avif) and collect the ".avif" URL.
+  GoogleString img_src;
+  ResetForAvif();
+  Variable* image_rewrite_count =
+      statistics()->GetVariable(ImageRewriteFilter::kImageRewrites);
+  AddFileToMockFetcher(kPuzzleUrl, kPuzzleJpgFile, kContentTypeJpeg, 100);
+  RewriteImageFromHtml("img", kContentTypeAvif, &img_src);
+  EXPECT_EQ(1, image_rewrite_count->Get());
+  GoogleUrl avif_gurl(html_gurl(), img_src);
+
+  // Serve this image from cache. No further rewrites should be needed, since
+  // the image was optimized when serving HTML.
+  GoogleString golden_content, content;
+  ResponseHeaders response;
+  EXPECT_TRUE(FetchAvif(avif_gurl.Spec(), "avif", &golden_content, &response));
+  EXPECT_STREQ(kAvifMimeType, response.Lookup1(HttpAttributes::kContentType));
+  EXPECT_TRUE(response.IsProxyCacheable());
+  EXPECT_EQ(0, image_rewrite_count->Get());
+
+  // Now clear the cache and fetch the resource again. We will need to
+  // reconstruct the image but we'll get the same result.
+  lru_cache()->Clear();
+  EXPECT_TRUE(FetchAvif(avif_gurl.Spec(), "avif", &content, &response));
+  EXPECT_STREQ(kAvifMimeType, response.Lookup1(HttpAttributes::kContentType));
+  EXPECT_EQ(1, image_rewrite_count->Get());  // We had to reconstruct.
+  EXPECT_TRUE(content == golden_content);
+
+  // Do the same test again, but don't clear the cache.
+  EXPECT_TRUE(FetchAvif(avif_gurl.Spec(), "avif", &content, &response));
+  EXPECT_STREQ(kAvifMimeType, response.Lookup1(HttpAttributes::kContentType));
+  EXPECT_EQ(0, image_rewrite_count->Get());  // Served from cache.
+  EXPECT_TRUE(content == golden_content);
+
+  // Now set the user-agent to something that supports NEITHER format, and we
+  // must still reconstruct the identical AVIF when asked for it, because
+  // serve_rewritten_avif_urls_to_any_agent(true) is set and the committed-URL
+  // reconcile forces the canonical capability context.
+  lru_cache()->Clear();
+  EXPECT_TRUE(FetchAvif(avif_gurl.Spec(), "null", &content, &response));
+  EXPECT_STREQ(kAvifMimeType, response.Lookup1(HttpAttributes::kContentType));
+  EXPECT_EQ(1, image_rewrite_count->Get());  // We had to reconstruct.
+  EXPECT_TRUE(content == golden_content);
+
+  // Now turn off 'serve_rewritten_avif_urls_to_any_agent', and we will serve
+  // the original jpeg instead, privately cached.
+  options()->ClearSignatureForTesting();
+  options()->set_serve_rewritten_avif_urls_to_any_agent(false);
+  server_context()->ComputeSignature(options());
+
+  lru_cache()->Clear();
+  EXPECT_TRUE(FetchAvif(avif_gurl.Spec(), "null", &content, &response));
+  EXPECT_STREQ(kJpegMimeType, response.Lookup1(HttpAttributes::kContentType));
+  EXPECT_FALSE(response.IsProxyCacheable());
+  EXPECT_TRUE(response.IsBrowserCacheable());
+  EXPECT_FALSE(content == golden_content);
+  EXPECT_GT(content.size(), golden_content.size());
+
+  // But if a both-capable client asks for the resource, we will serve the
+  // AVIF to them.
+  EXPECT_TRUE(FetchAvif(avif_gurl.Spec(), "avif", &content, &response));
+  EXPECT_STREQ(kAvifMimeType, response.Lookup1(HttpAttributes::kContentType));
+}
+
+// ---- the design record Stream G: committed-URL cache-key reconcile ----
+//
+// The metadata cache key folds BOTH capability dimensions (libwebp_level and
+// avif_level). When a committed rewritten URL (".avif"/".webp") is re-fetched
+// by a differently-capable client, SetWebpAndMobileUserAgent +
+// SetAvifCapability must recompute EXACTLY the key the URL's minting
+// population stored -- forcing only one dimension (or forcing the other to
+// NONE) computes a key no minter ever wrote and self-MISSes (the SEV-3 class
+// of bug these tests pin down). The minting key is derived from a real
+// both-capable request via the production SetLibWebpLevel/SetAvifLevel, never
+// hand-assembled.
+
+TEST_F(ImageRewriteTest, AvifCommittedUrlReconcileReproducesMintingKey) {
+  // Canonical config: lossless-tier conversion filters for both formats.
+  options()->EnableFilter(RewriteOptions::kRecompressJpeg);
+  options()->EnableFilter(RewriteOptions::kConvertJpegToWebp);
+  options()->EnableFilter(RewriteOptions::kConvertToWebpLossless);
+  options()->EnableFilter(RewriteOptions::kConvertJpegToAvif);
+  options()->EnableFilter(RewriteOptions::kConvertToAvifLossless);
+  options()->set_serve_rewritten_webp_urls_to_any_agent(true);
+  options()->set_serve_rewritten_avif_urls_to_any_agent(true);
+
+  // The key the ".avif"-minting population stores: a both-capable client
+  // derives BOTH canonical levels from its own request.
+  ResetForAvif();
+  const ResourceContext minter = MintingResourceContext();
+  EXPECT_EQ(ResourceContext::LIBWEBP_LOSSY_LOSSLESS_ALPHA,
+            minter.libwebp_level());
+  EXPECT_EQ(ResourceContext::AVIF_LOSSY_LOSSLESS_ALPHA, minter.avif_level());
+  const GoogleString minting_key =
+      ImageUrlEncoder::CacheKeyFromResourceContext(minter);
+  EXPECT_EQ("vAg", minting_key);
+
+  // A client with NO image-format capabilities re-fetches the committed
+  // ".avif" URL: the reconcile must force BOTH canonical levels, and the
+  // recomputed key must equal the minting key (the invariant).
+  ResetUserAgent("null");
+  SetDriverFetchUrlForTesting(
+      "http://test.com/xPuzzle.jpg.pagespeed.ic.0.avif");
+  const ResourceContext reconciled = ReconciledResourceContext();
+  EXPECT_EQ(ResourceContext::AVIF_LOSSY_LOSSLESS_ALPHA,
+            reconciled.avif_level());
+  EXPECT_EQ(ResourceContext::LIBWEBP_LOSSY_LOSSLESS_ALPHA,
+            reconciled.libwebp_level());
+  EXPECT_EQ(minting_key,
+            ImageUrlEncoder::CacheKeyFromResourceContext(reconciled));
+
+  // The both-capable client itself re-fetching the committed URL also
+  // recomputes the same key (agent-independence in both dimensions).
+  ResetForAvif();
+  SetDriverFetchUrlForTesting(
+      "http://test.com/xPuzzle.jpg.pagespeed.ic.0.avif");
+  EXPECT_EQ(minting_key, ImageUrlEncoder::CacheKeyFromResourceContext(
+                             ReconciledResourceContext()));
+}
+
+TEST_F(ImageRewriteTest, WebpCommittedUrlWithAvifEnabledReconcile) {
+  // With any AVIF conversion filter enabled, a committed ".webp" URL was
+  // minted by both-capable clients whose stored key carried the canonical
+  // AVIF token as well (losing the per-image format choice does not remove
+  // the capability token from the key). The reconcile must force BOTH
+  // dimensions to canonical.
+  options()->EnableFilter(RewriteOptions::kRecompressJpeg);
+  options()->EnableFilter(RewriteOptions::kConvertJpegToWebp);
+  options()->EnableFilter(RewriteOptions::kConvertToWebpLossless);
+  options()->EnableFilter(RewriteOptions::kConvertJpegToAvif);
+  options()->EnableFilter(RewriteOptions::kConvertToAvifLossless);
+  options()->set_serve_rewritten_webp_urls_to_any_agent(true);
+  options()->set_serve_rewritten_avif_urls_to_any_agent(true);
+
+  ResetForAvif();
+  const GoogleString minting_key =
+      ImageUrlEncoder::CacheKeyFromResourceContext(MintingResourceContext());
+  EXPECT_EQ("vAg", minting_key);
+
+  ResetUserAgent("null");
+  SetDriverFetchUrlForTesting(
+      "http://test.com/xPuzzle.jpg.pagespeed.ic.0.webp");
+  const ResourceContext reconciled = ReconciledResourceContext();
+  EXPECT_EQ(ResourceContext::LIBWEBP_LOSSY_LOSSLESS_ALPHA,
+            reconciled.libwebp_level());
+  EXPECT_EQ(ResourceContext::AVIF_LOSSY_LOSSLESS_ALPHA,
+            reconciled.avif_level());
+  EXPECT_EQ(minting_key,
+            ImageUrlEncoder::CacheKeyFromResourceContext(reconciled));
+}
+
+TEST_F(ImageRewriteTest, WebpCommittedUrlWithoutAvifFiltersReconcilesNoAvif) {
+  // With NO AVIF filter enabled (including ".webp" URLs minted before AVIF
+  // existed), the ".webp"-minting population's stored key has no A-token, so
+  // the reconcile must force AVIF_NONE -- not a phantom AVIF capability.
+  options()->EnableFilter(RewriteOptions::kRecompressJpeg);
+  options()->EnableFilter(RewriteOptions::kConvertJpegToWebp);
+  options()->EnableFilter(RewriteOptions::kConvertToWebpLossless);
+  options()->set_serve_rewritten_webp_urls_to_any_agent(true);
+  options()->set_serve_rewritten_avif_urls_to_any_agent(true);
+
+  // The minting population here is WebP-capable only (no AVIF filters means
+  // even an AVIF-advertising client derives AVIF_NONE).
+  ResetForAvif();
+  const ResourceContext minter = MintingResourceContext();
+  EXPECT_EQ(ResourceContext::AVIF_NONE, minter.avif_level());
+  const GoogleString minting_key =
+      ImageUrlEncoder::CacheKeyFromResourceContext(minter);
+  EXPECT_EQ("v", minting_key);
+
+  ResetUserAgent("null");
+  SetDriverFetchUrlForTesting(
+      "http://test.com/xPuzzle.jpg.pagespeed.ic.0.webp");
+  const ResourceContext reconciled = ReconciledResourceContext();
+  EXPECT_EQ(ResourceContext::LIBWEBP_LOSSY_LOSSLESS_ALPHA,
+            reconciled.libwebp_level());
+  EXPECT_EQ(ResourceContext::AVIF_NONE, reconciled.avif_level());
+  const GoogleString reconciled_key =
+      ImageUrlEncoder::CacheKeyFromResourceContext(reconciled);
+  EXPECT_EQ(minting_key, reconciled_key);
+  EXPECT_EQ(GoogleString::npos, reconciled_key.find('A'));
+}
+
+TEST_F(ImageRewriteTest, AvifCommittedUrlWithoutServeOptionNotForced) {
+  // Without serve_rewritten_avif_urls_to_any_agent, the committed-".avif"
+  // reconcile must NOT fire: a non-capable client derives its natural
+  // (empty) capabilities.
+  options()->EnableFilter(RewriteOptions::kRecompressJpeg);
+  options()->EnableFilter(RewriteOptions::kConvertJpegToAvif);
+  options()->EnableFilter(RewriteOptions::kConvertToAvifLossless);
+  options()->set_serve_rewritten_avif_urls_to_any_agent(false);
+
+  ResetUserAgent("null");
+  SetDriverFetchUrlForTesting(
+      "http://test.com/xPuzzle.jpg.pagespeed.ic.0.avif");
+  const ResourceContext reconciled = ReconciledResourceContext();
+  EXPECT_EQ(ResourceContext::LIBWEBP_NONE, reconciled.libwebp_level());
+  EXPECT_EQ(ResourceContext::AVIF_NONE, reconciled.avif_level());
+  EXPECT_EQ(".", ImageUrlEncoder::CacheKeyFromResourceContext(reconciled));
+}
+
 // If we drop a rewrite because of load, make sure it returns the original URL.
 // This verifies that Issue 707 is fixed.
 TEST_F(ImageRewriteTest, TooBusyReturnsOriginalResource) {
@@ -4058,6 +4425,50 @@ TEST_F(ImageRewriteTest, JpegInResolutionLimitNoResizing) {
   TestResolutionLimit(kResolutionLimitBytes, kResolutionLimitJpegFile,
                       kContentTypeJpeg, true /*try_webp*/, false /*try_resize*/,
                       true /*expect_rewritten*/);
+}
+
+// Regression test for the int64 overflow that bypassed the resolution DoS
+// guard. When an image reports dimensions large enough that
+// width * height * 4 overflows int64, the signed multiplication wraps
+// negative, so `(negative) > image_resolution_limit_bytes()` is false and the
+// oversized image is NOT dropped (defeating the anti-DoS guard and feeding huge
+// downstream allocations). The overflow-safe guard must still drop it.
+//
+// We start from a real (blank) PNG and overwrite only the IHDR width/height
+// fields with INT32_MAX (0x7FFFFFFF) each. The PNG signature and "IHDR" label
+// are untouched, so the image is still recognized as a PNG and reports these
+// dimensions straight from its header, with no decode or allocation. With
+// width == height == 0x7FFFFFFF, width * height * 4 overflows int64.
+TEST_F(ImageRewriteTest, ResolutionLimitInt64OverflowIsDropped) {
+  options()->EnableFilter(RewriteOptions::kRecompressPng);
+  options()->set_image_resolution_limit_bytes(kResolutionLimitBytes);
+  rewrite_driver()->AddFilters();
+
+  GoogleString png;
+  ASSERT_TRUE(LoadFile(kLargePngFile, &png));
+  // PNG layout: 8-byte signature + 4-byte chunk length + "IHDR" places the
+  // big-endian width at byte offset 16 and height at offset 20 (see
+  // PngIntAtPosition / ImageHeaders::kIHDRDataStart, which is 16).
+  const size_t kIhdrWidthOffset = 16;
+  ASSERT_GE(png.size(), kIhdrWidthOffset + 8);
+  // 0x7F 0xFF 0xFF 0xFF twice => width = height = INT32_MAX: positive (so the
+  // dimensions survive the validity check) but their area * 4 overflows int64.
+  for (int i = 0; i < 8; ++i) {
+    png[kIhdrWidthOffset + i] = (i % 4 == 0) ? '\x7f' : '\xff';
+  }
+
+  const GoogleString url = StrCat(kTestDomain, "overflow.png");
+  SetResponseWithDefaultHeaders(url, kContentTypePng, png, 100);
+  ParseUrl(StrCat(kTestDomain, "test.html"), StrCat("<img src='", url, "'>"));
+
+  Variable* image_rewrites =
+      statistics()->GetVariable(ImageRewriteFilter::kImageRewrites);
+  Variable* no_rewrites = statistics()->GetVariable(
+      ImageRewriteFilter::kImageNoRewritesHighResolution);
+  EXPECT_EQ(0, image_rewrites->Get());
+  EXPECT_EQ(1, no_rewrites->Get())
+      << "int64 overflow bypassed the resolution guard; the oversized image "
+         "was not dropped";
 }
 
 TEST_F(ImageRewriteTest, AnimatedGifToWebpWithWebpAnimatedUa) {

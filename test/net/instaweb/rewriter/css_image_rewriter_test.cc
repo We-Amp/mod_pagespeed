@@ -140,6 +140,88 @@ TEST_F(CssImageRewriterTest, CacheExtendsImagesSimple) {
                   kExpectSuccess | kNoClearFetcher);
 }
 
+TEST_F(CssImageRewriterTest, CacheExtendsImagesInGroupRule) {
+  // Images referenced inside a @supports body live in the group node's body
+  // stylesheet, not the top-level rulesets walk. The group prelude is
+  // verbatim source bytes; the body is minified structure.
+  SetResponseWithDefaultHeaders("foo.png", kContentTypePng, kDummyContent, 100);
+
+  static const char css_before[] =
+      "@supports (display: grid) {\n"
+      "  body {\n"
+      "    background-image: url(foo.png);\n"
+      "  }\n"
+      "}\n";
+  const GoogleString css_after =
+      StrCat("@supports (display: grid){body{background-image:url(",
+             Encode("", "ce", "0", "foo.png", "png"), ")}}");
+
+  ValidateRewrite("cache_extends_images_in_group_rule", css_before, css_after,
+                  kExpectSuccess | kNoClearFetcher);
+}
+
+TEST_F(CssImageRewriterTest, CacheExtendsImagesInLayerAndContainer) {
+  // @layer and @container bodies get the same image rewriting as @supports;
+  // the two group nodes keep their relative order.
+  SetResponseWithDefaultHeaders("foo.png", kContentTypePng, kDummyContent, 100);
+  SetResponseWithDefaultHeaders("bar.png", kContentTypePng, kDummyContent, 100);
+
+  static const char css_before[] =
+      "@layer base {\n"
+      "  .a { background-image: url(foo.png); }\n"
+      "}\n"
+      "@container sidebar (width >= 400px) {\n"
+      "  .b { background-image: url(bar.png); }\n"
+      "}\n";
+  const GoogleString css_after =
+      StrCat("@layer base{.a{background-image:url(",
+             Encode("", "ce", "0", "foo.png", "png"),
+             ")}}@container sidebar (width >= 400px){.b{background-image:url(",
+             Encode("", "ce", "0", "bar.png", "png"), ")}}");
+
+  ValidateRewrite("cache_extends_images_in_layer_and_container", css_before,
+                  css_after, kExpectSuccess | kNoClearFetcher);
+}
+
+TEST_F(CssImageRewriterTest, CacheExtendsImagesInGroupRuleInsideMedia) {
+  // A group node nested in @media carries the @media annotation; the image
+  // inside its body must still be rewritten and the minifier re-groups the
+  // output under one @media wrapper.
+  SetResponseWithDefaultHeaders("foo.png", kContentTypePng, kDummyContent, 100);
+
+  static const char css_before[] =
+      "@media screen {\n"
+      "  @supports (display: flex) {\n"
+      "    .a { background-image: url(foo.png); }\n"
+      "  }\n"
+      "}\n";
+  const GoogleString css_after =
+      StrCat("@media screen{@supports (display: flex){.a{background-image:url(",
+             Encode("", "ce", "0", "foo.png", "png"), ")}}}");
+
+  ValidateRewrite("cache_extends_images_in_group_rule_inside_media", css_before,
+                  css_after, kExpectSuccess | kNoClearFetcher);
+}
+
+TEST_F(CssImageRewriterTest, CacheExtendsImagesInNestedGroupRules) {
+  // Two group levels: the walk must recurse through the outer body into the
+  // inner body.
+  SetResponseWithDefaultHeaders("foo.png", kContentTypePng, kDummyContent, 100);
+
+  static const char css_before[] =
+      "@layer x {\n"
+      "  @supports (display: grid) {\n"
+      "    .a { background-image: url(foo.png); }\n"
+      "  }\n"
+      "}\n";
+  const GoogleString css_after =
+      StrCat("@layer x{@supports (display: grid){.a{background-image:url(",
+             Encode("", "ce", "0", "foo.png", "png"), ")}}}");
+
+  ValidateRewrite("cache_extends_images_in_nested_group_rules", css_before,
+                  css_after, kExpectSuccess | kNoClearFetcher);
+}
+
 TEST_F(CssImageRewriterTest, CacheExtendsImagesEmbeddedComma) {
   // Makes sure image-URL rewriting doesn't corrupt URLs with embedded
   // commas.  Earlier, we were escaping commas in URLs by backslashing
@@ -417,6 +499,28 @@ TEST_F(CssImageRewriterTest, RecompressImages) {
                              kExpectSuccess | kNoClearFetcher);
 }
 
+TEST_F(CssImageRewriterTest, RecompressImagesInGroupRule) {
+  // Recompression must reach an image referenced inside a @supports body.
+  options()->ClearSignatureForTesting();
+  options()->SoftEnableFilterForTesting(RewriteOptions::kRecompressPng);
+  server_context()->ComputeSignature(options());
+  AddFileToMockFetcher(StrCat(kTestDomain, "foo.png"), kBikePngFile,
+                       kContentTypePng, 100);
+  static const char kCss[] =
+      "@supports (display: grid) {\n"
+      "  body {\n"
+      "    background-image: url(foo.png);\n"
+      "  }\n"
+      "}\n";
+
+  const GoogleString kCssAfter =
+      StrCat("@supports (display: grid){body{background-image:url(",
+             Encode("", "ic", "0", "foo.png", "png"), ")}}");
+
+  ValidateRewriteExternalCss("recompress_css_images_in_group_rule", kCss,
+                             kCssAfter, kExpectSuccess | kNoClearFetcher);
+}
+
 TEST_F(CssImageRewriterTest, CssImagePreserveUrls) {
   options()->ClearSignatureForTesting();
   options()->SoftEnableFilterForTesting(RewriteOptions::kRecompressPng);
@@ -534,6 +638,28 @@ TEST_F(InlineCssImageRewriterTest, InlineImages) {
   // causes the check to fail. Inlining eliminates a resource fetch, so
   // it should normally be a net win in practice.
   ValidateRewrite("inline_css_images", input_css, expected_css,
+                  kExpectSuccess | kNoClearFetcher | kNoStatCheck);
+}
+
+TEST_F(InlineCssImageRewriterTest, InlineImagesInGroupRule) {
+  // Inlining must reach an image referenced inside a @layer body.
+  SetMaxBytes(NumTestImageBytes() + 1,   // image_inline_max_bytes
+              NumTestImageBytes() + 1);  // css_image_inline_max_bytes
+  GoogleString input_css = StrCat(
+      "@layer base {\n"
+      "  body {\n"
+      "    background-image: url(",
+      TestImageFileName(),
+      ");\n"
+      "  }\n"
+      "}\n");
+  GoogleString expected_css = StrCat("@layer base{body{background-image:url(",
+                                     TestImageDataUrl(), ")}}");
+
+  // Skip the stat check because inlining *increases* the CSS size and
+  // causes the check to fail. Inlining eliminates a resource fetch, so
+  // it should normally be a net win in practice.
+  ValidateRewrite("inline_css_images_in_group_rule", input_css, expected_css,
                   kExpectSuccess | kNoClearFetcher | kNoStatCheck);
 }
 
@@ -715,6 +841,25 @@ TEST_F(CssImageRewriterTest, CacheExtendsImagesSimpleFallback) {
       css_template, Encode("", "ce", "0", "foo.png", "png").c_str());
 
   ValidateRewrite("unparseable", css_before, css_after,
+                  kExpectFallback | kNoClearFetcher);
+}
+
+TEST_F(CssImageRewriterTest, CacheExtendsImagesBrokenGroupRuleFallback) {
+  SetResponseWithDefaultHeaders("foo.png", kContentTypePng, kDummyContent, 100);
+
+  // EOF before the group body's closing brace preserves the parse error, so
+  // no group structure is emitted; the textual fallback must still rewrite
+  // the url() with all other bytes unchanged.
+  static const char css_template[] =
+      "@supports (display: grid) {\n"
+      "  body {\n"
+      "    background-image: url(%s);\n"
+      "  }\n";
+  const GoogleString css_before = absl::StrFormat(css_template, "foo.png");
+  const GoogleString css_after = absl::StrFormat(
+      css_template, Encode("", "ce", "0", "foo.png", "png").c_str());
+
+  ValidateRewrite("broken_group_rule_fallback", css_before, css_after,
                   kExpectFallback | kNoClearFetcher);
 }
 

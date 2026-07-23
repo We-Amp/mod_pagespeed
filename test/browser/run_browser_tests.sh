@@ -23,3 +23,5 @@ fi
 PLAYWRIGHT_SKIP_BROWSER_GC=1 npx playwright install chromium
 
 node critical_css_beacon_test.mjs
+node add_instrumentation_test.mjs
+node critical_images_beacon_test.mjs

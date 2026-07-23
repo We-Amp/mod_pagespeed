@@ -61,6 +61,16 @@ class DeviceProperties {
   bool SupportsWebpRewrittenUrls() const;
   bool SupportsWebpLosslessAlpha() const;
   bool SupportsWebpAnimated() const;
+  // AVIF capability accessors. Unlike WebP, AVIF has no "legacy no-Accept" UA
+  // population to allow-list: support is strictly driven by the
+  // Accept: image/avif header parsed in ParseRequestHeaders, so every level
+  // gates solely on accepts_avif_ and none of these consult the UA matcher.
+  // These are pure pre-decode request capabilities; the per-image
+  // AVIF-vs-WebP-vs-original format choice happens at encode time, not here.
+  bool SupportsAvifInPlace() const;
+  bool SupportsAvifRewrittenUrls() const;
+  bool SupportsAvifLosslessAlpha() const;
+  bool SupportsAvifAnimated() const;
   bool IsBot() const;
   bool AcceptsGzip() const;
   UserAgentMatcher::DeviceType GetDeviceType() const;
@@ -98,6 +108,11 @@ class DeviceProperties {
   mutable LazyBool supports_lazyload_images_;
   mutable LazyBool requests_save_data_;
   mutable LazyBool accepts_webp_;
+  // Whether the request carried "Accept: image/avif". Mirrors accepts_webp_:
+  // ctor-initialized to kNotSet, set once in ParseRequestHeaders, and (like
+  // accepts_webp_) NOT reset in SetUserAgent, since AVIF support is a property
+  // of the request headers, not of the user-agent string.
+  mutable LazyBool accepts_avif_;
   mutable LazyBool accepts_gzip_;
   mutable LazyBool supports_webp_rewritten_urls_;
   mutable LazyBool supports_webp_lossless_alpha_;

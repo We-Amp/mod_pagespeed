@@ -88,8 +88,35 @@ class ImageUrlEncoder : public UrlSegmentEncoder {
   static void SetWebpAndMobileUserAgent(const RewriteDriver& driver,
                                         ResourceContext* context);
 
+  // Set AVIF level according to the request capabilities.  This is a pure
+  // pre-decode request capability (from request_properties.SupportsAvif*() and
+  // the enabled AVIF filters), carrying NO image-byte input -- the exact mirror
+  // of SetLibWebpLevel.  avif_level and libwebp_level are independent: both may
+  // be non-NONE for a both-capable request, and both ride in the metadata cache
+  // key (CacheKeyFromResourceContext).  The per-image format choice is made
+  // downstream at encode time (Stream E), recorded in the CachedResult output
+  // extension, never folded back into this level.
+  static void SetAvifLevel(const RewriteOptions& options,
+                           const RequestProperties& request_properties,
+                           ResourceContext* resource_context);
+
+  // Sets the AVIF request capability in resource context, applying the
+  // committed-URL reconcile rule for a fetch of a rewritten ".avif" URL:
+  // under serve_rewritten_avif_urls_to_any_agent, an any-agent /
+  // differing-capability serve assumes a canonical AvifLevel so the fetch-side
+  // key reproduces the stored key (mirrors SetWebpAndMobileUserAgent's
+  // LIBWEBP_LOSSY_LOSSLESS_ALPHA any-agent assumption);
+  // otherwise the level is derived naturally via SetAvifLevel (a same-capability
+  // client reproduces its own stored key with no forcing).  context may be NULL.
+  static void SetAvifCapability(const RewriteDriver& driver,
+                                ResourceContext* context);
+
   // Determines whether the given URL is a pagespeed-rewritten webp URL.
   static bool IsWebpRewrittenUrl(const GoogleUrl& gurl);
+
+  // Determines whether the given URL is a pagespeed-rewritten avif URL,
+  // keyed on the ".avif" output extension (mirrors IsWebpRewrittenUrl).
+  static bool IsAvifRewrittenUrl(const GoogleUrl& gurl);
 
   // Flag whether this device has a small screen, which determines what
   // Jpeg/WebP quality to use.

@@ -32,6 +32,7 @@
 
 namespace Css {
 
+class Rulesets;
 class Values;
 
 }  // namespace Css
@@ -84,6 +85,16 @@ class CssImageRewriter {
                     const GoogleUrl& original_url, RewriteContext* parent,
                     Css::Values* values, size_t value_index,
                     bool* is_authorized);
+  // Starts nested rewrites for every image URL in one rulesets sequence.
+  // Recurses into group-rule (@supports/@layer/@container) bodies, whose
+  // rulesets are owned by the group node and are never seen by a top-level
+  // walk; recursion depth is bounded by the parser's group-nesting cap.
+  // *spriting_ok is shared across the whole walk: a lone background-position
+  // anywhere disables spriting for all later rulesets, exactly as in the
+  // flat-sheet loop.
+  void RewriteRulesets(Css::Rulesets* rulesets, int64 image_inline_max_bytes,
+                       RewriteContext* parent, CssHierarchy* hierarchy,
+                       bool* spriting_ok, MessageHandler* handler);
 
   // Needed for import flattening.
   CssFilter* filter_;

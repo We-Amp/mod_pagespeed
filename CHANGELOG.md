@@ -5,6 +5,55 @@ All notable changes to mod_pagespeed are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Pages that set a strict Content-Security-Policy `base-uri` policy blocking all
+  `<base>` elements (e.g. `base-uri 'none'`) now retain more optimization. When
+  the policy guarantees the browser will ignore a `<base>` tag, the optimizer no
+  longer conservatively disables rewriting on that page; other `base-uri`
+  policies remain handled conservatively.
+
+### Fixed
+
+- License management in the admin console is now offered based on the server's
+  authoritative global-admin determination. Operators who serve the global
+  admin console at a custom (renamed) path can now purchase, apply, and activate
+  licenses instead of finding those controls unexpectedly hidden.
+- Histogram percentile stats (median/90/95/99) for very-small sample counts are
+  now omitted instead of shown as a -5000 no-data placeholder in the admin
+  console and `/histograms` output.
+- **IIS: unified `pagespeed.config` resolution to a single documented source of
+  truth.** The IIS module previously resolved its configuration through more
+  than one independent code path, so editing one of the installed config files
+  could appear to have no effect. Resolution now follows one documented
+  precedence chain, shared by config load, change-detection, and the
+  engage/serve gate; the module logs which file is in effect and warns when
+  more than one config file exists with differing content. Behavior for a
+  standard single site is unchanged.
+
+### Upgrade Notes
+
+- **IIS configuration resolution is now unified and documented — no files on
+  your system were changed, deleted, moved, or overwritten by this upgrade.**
+  IIS installs ship a `pagespeed.config` in two places: a machine-global
+  default under `%ProgramData%\We-Amp\PageSpeed\`, and a per-site copy in each
+  site's web root. Both are preserved across upgrades (they always have been).
+  What changed is that the resolution order is now one documented rule:
+
+  1. `%ProgramData%\We-Amp\PageSpeed\pagespeed.config` — machine-global base default
+  2. `%ProgramData%\We-Amp\IISWebSpeed\pagespeed.config` — legacy fallback (upgrade-from-IISpeed installs only)
+  3. `<site physical path>\pagespeed.config` — per-site override, **authoritative when present**
+
+  The per-site file in the site's web root takes precedence; the `%ProgramData%`
+  locations act as the base layer underneath it. If you previously edited one
+  copy and did not see the expected effect, re-check which file you edited — for
+  a standard single site, edit the copy in that site's web root. On startup the
+  module now logs the file it resolved as effective and warns when a second
+  config with different content is present, so any earlier ambiguity about which
+  file applies is now visible in the log.
+
 ## [1.15.0] - 2026-06-01
 
 ### Changed

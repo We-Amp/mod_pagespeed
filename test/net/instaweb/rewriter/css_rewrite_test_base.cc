@@ -78,6 +78,7 @@ void CssRewriteTestBase::ResetStats() {
   num_flatten_imports_minify_failed_->Clear();
   num_flatten_imports_recursion_->Clear();
   num_flatten_imports_complex_queries_->Clear();
+  num_flatten_imports_unparseable_import_->Clear();
 }
 
 bool CssRewriteTestBase::ValidateWithStats(
@@ -161,6 +162,9 @@ bool CssRewriteTestBase::ValidateWithStats(
         << css_input;
     EXPECT_EQ(FlagSet(flags, kFlattenImportsComplexQueries) ? 1 : 0,
               num_flatten_imports_complex_queries_->Get())
+        << css_input;
+    EXPECT_EQ(FlagSet(flags, kFlattenImportsUnparseableImport) ? 1 : 0,
+              num_flatten_imports_unparseable_import_->Get())
         << css_input;
   }
 

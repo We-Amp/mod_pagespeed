@@ -304,7 +304,7 @@ TEST_F(LocalStorageCacheTest, ImgTooBig) {
 TEST_F(LocalStorageCacheTest, ImgLocalStorageDisabled) {
   options()->ClearSignatureForTesting();
   // Enabling another filter that triggers the NOSCRIPT tag-insertion in HTML.
-  options()->EnableFilter(RewriteOptions::kDeferIframe);
+  options()->EnableFilter(RewriteOptions::kDeferJavascript);
   options()->DisableFilter(RewriteOptions::kLocalStorageCache);
   options()->set_in_place_rewriting_enabled(true);
   server_context()->ComputeSignature(options());
@@ -339,6 +339,51 @@ TEST_F(LocalStorageCacheTest, CookieSet) {
              " data-pagespeed-lsc-expiry="
              "\"Tue, 02 Feb 2010 18:53:06 GMT\""
              ">"));
+}
+
+TEST_F(LocalStorageCacheTest, InlineImgEscapesAttributeNameXss) {
+  // Regression test for a stored-XSS vector on the cookie-primed repeat-view
+  // path. The HTML lexer accepts arbitrary characters -- including a
+  // double-quote -- in an attribute NAME. When the LSC filter replaces an
+  // <img> with an inline pagespeed.localStorageCache.inlineImg(...) call it
+  // splices each non-excluded attribute's name into a JS string literal. If the
+  // name is not JS-escaped (as the value already is), a crafted name such as
+  //   pwn"+alert(1)+"
+  // breaks out of the string literal and injects arbitrary script that runs on
+  // every repeat view. The name must be escaped exactly like the value.
+  UseMd5Hasher();
+
+  // Prime the LSC cookie with the image's hash (du_OhARrJl for Cuppa.png with
+  // no width/height under the MD5 hasher) so the <img> takes the scripted
+  // inlineImg(...) path in a single view. Extra attributes do not affect the
+  // hash (it is derived from url + width + height only).
+  GoogleString cookie =
+      StrCat(LocalStorageCacheFilter::kLscCookieName, "=du_OhARrJl");
+  request_headers_.Add(HttpAttributes::kCookie, cookie);
+
+  // The malicious attribute NAME carries the breakout payload. It contains no
+  // '=' or whitespace, either of which would terminate the name in the lexer.
+  GoogleString img =
+      StrCat("<img src='", kCuppaPngFilename, "' pwn\"+alert(1)+\"=x>");
+
+  ClearRewriteDriver();
+  rewrite_driver()->SetRequestHeaders(request_headers_);
+  GoogleString html_in =
+      StrCat("<head><title>t</title></head><body>", img, "</body>");
+  Parse("inline_img_escapes_attr_name_xss", html_in);
+
+  // Sanity: we actually exercised the scripted inlineImg path.
+  EXPECT_NE(GoogleString::npos,
+            output_buffer_.find("pagespeed.localStorageCache.inlineImg("))
+      << output_buffer_;
+  // The raw, unescaped name must NOT appear -- that is the string-literal
+  // breakout.
+  EXPECT_EQ(GoogleString::npos, output_buffer_.find("pwn\"+alert(1)+\"=x"))
+      << output_buffer_;
+  // The escaped form must be present instead: the double-quotes in the name are
+  // backslash-escaped so they stay inside the JS string literal.
+  EXPECT_NE(GoogleString::npos, output_buffer_.find("pwn\\\"+alert(1)+\\\"=x"))
+      << output_buffer_;
 }
 
 TEST_F(LocalStorageCacheTest, RepeatViews) {
@@ -529,6 +574,16 @@ TEST_F(LocalStorageCacheTest, RepeatViewsWithOtherAttributes) {
       ");</script>");
   TestLocalStorage("third_view", css, InsertScriptBefore(scripted_css), img,
                    scripted_img);
+}
+
+TEST_F(LocalStorageCacheTest, ShippedJsGuardsStorageAndSetsRootPathCookie) {
+  // Pin the compiled asset: try/catch survive Closure ADVANCED as bare
+  // tokens and ;path=/ is a string literal, so these hold regardless of
+  // minification. If a future compiler bump changes the emitted shape,
+  // verify the regenerated asset and update this pin deliberately.
+  EXPECT_NE(GoogleString::npos, local_storage_cache_js_.find("try{"));
+  EXPECT_NE(GoogleString::npos, local_storage_cache_js_.find("catch("));
+  EXPECT_NE(GoogleString::npos, local_storage_cache_js_.find(";path=/"));
 }
 
 TEST_F(LocalStorageCacheTest, RepeatViewsOfSameImageAtDifferentSizes) {

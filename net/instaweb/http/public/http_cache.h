@@ -392,8 +392,11 @@ class HTTPCache {
 
   // If headers is passed as NULL, the response headers will be extracted from
   // the HTTPValue. Otherwise, the headers passed in will be used.
+  // start_monotonic_us is a Timer::NowMonotonicUs() reading captured by the
+  // caller at the start of the Put; it is used only for the insert-latency
+  // stat (cache_time_us_), never for header/freshness math.
   void PutInternal(bool preserve_response_headers, const GoogleString& key,
-                   const GoogleString& fragment, int64 start_us,
+                   const GoogleString& fragment, int64 start_monotonic_us,
                    HTTPValue* value, ResponseHeaders* headers,
                    MessageHandler* handler);
   void DeleteInternal(const GoogleString& key_fragment);

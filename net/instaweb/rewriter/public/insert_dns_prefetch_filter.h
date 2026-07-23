@@ -30,8 +30,11 @@ namespace net_instaweb {
 class FlushEarlyInfo;
 class RewriteDriver;
 
-// Injects <link rel="dns-prefetch" href="//www.example.com"> tags in the HEAD
-// to enable the browser to do DNS prefetching.
+// Injects <link rel="preconnect" href="https://www.example.com"> tags for the
+// first few stable domains and <link rel="dns-prefetch"> tags for the rest, in
+// the HEAD, to enable the browser to warm up connections early. Preconnect
+// hrefs are scheme-qualified origins because a preconnect opens a
+// scheme-specific connection (TCP, plus TLS for https).
 class InsertDnsPrefetchFilter : public CommonFilter {
  public:
   explicit InsertDnsPrefetchFilter(RewriteDriver* driver);
@@ -59,7 +62,6 @@ class InsertDnsPrefetchFilter : public CommonFilter {
   // Refer to the implementation for details about stability. This filter will
   // insert the tags into the HEAD once the list is stable.
   bool IsDomainListStable(const FlushEarlyInfo& flush_early_info) const;
-  void DebugPrint(const char* msg);
 
   // This flag is useful if multiple HEADs are present. This filter inserts the
   // DNS prefetch tags only in the first HEAD.
@@ -76,8 +78,8 @@ class InsertDnsPrefetchFilter : public CommonFilter {
   // HEAD.
   StringSet domains_in_body_;
 
-  // The list of domains for which DNS prefetch tags can be inserted, in the
-  // order they were seen in BODY.
+  // The list of origins (scheme://host[:port]) for which connection warm-up
+  // tags can be inserted, in the order the domains were first seen.
   StringVector dns_prefetch_domains_;
 
   // Whether this user agent supports dns prefetch filter.

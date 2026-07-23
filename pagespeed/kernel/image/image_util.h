@@ -48,7 +48,11 @@ enum ImageFormat {
   IMAGE_JPEG,
   IMAGE_PNG,
   IMAGE_GIF,
-  IMAGE_WEBP
+  IMAGE_WEBP,
+  // AVIF collapses to a single ImageFormat value (mirroring IMAGE_WEBP), even
+  // though the proto net_instaweb::ImageType distinguishes the lossless/alpha
+  // and animated sub-variants. Codec wiring is deferred (Stream B/C).
+  IMAGE_AVIF
 };
 
 enum PixelFormat {
@@ -72,6 +76,22 @@ enum PreferredLibwebpLevel {
   WEBP_LOSSY,
   WEBP_LOSSLESS,
   WEBP_ANIMATED
+};
+
+// Request-capability level for AVIF, mirroring PreferredLibwebpLevel. This is a
+// pure pre-decode capability derived from the request (Accept: image/avif and
+// options); it is computed independently of the libwebp level and both may ride
+// in the metadata cache key. The per-image AVIF-vs-WebP-vs-original choice is an
+// encode-time decision (Stream E) recorded in the .avif extension, not here.
+enum PreferredAvifLevel {
+  // Disjoint LIBAVIF_ prefix (mirroring how PreferredLibwebpLevel's WEBP_*
+  // enumerators stay disjoint from the proto LibWebpLevel's LIBWEBP_* values) so
+  // these do NOT share exact spelling with the proto ResourceContext::AVIF_*
+  // enumerators and cannot collide if both are brought unqualified into scope.
+  LIBAVIF_NONE = 0,
+  LIBAVIF_LOSSY,
+  LIBAVIF_LOSSLESS,
+  LIBAVIF_ANIMATED
 };
 
 const uint8_t kAlphaOpaque = 255;

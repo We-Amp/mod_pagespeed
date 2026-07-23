@@ -34,6 +34,7 @@ namespace net_instaweb {
 const char UserAgentMatcher::kTestUserAgentWebP[] = "test-user-agent-webp";
 // Note that this must not contain the substring "webp".
 const char UserAgentMatcher::kTestUserAgentNoWebP[] = "test-user-agent-no";
+const char UserAgentMatcher::kTestUserAgentAvif[] = "test-user-agent-avif";
 
 class RequestHeaders;
 
@@ -388,10 +389,6 @@ bool UserAgentMatcher::IsIe(const StringPiece& user_agent) const {
   return ie_user_agents_.Match(user_agent, false);
 }
 
-bool UserAgentMatcher::IsIe9(const StringPiece& user_agent) const {
-  return user_agent.find(" MSIE 9.") != GoogleString::npos;
-}
-
 bool UserAgentMatcher::SupportsImageInlining(
     const StringPiece& user_agent) const {
   if (user_agent.empty()) {
@@ -498,6 +495,20 @@ bool UserAgentMatcher::SupportsWebpAnimated(
   return supports_webp_animated_.Match(user_agent, false);
 }
 
+// AVIF is strictly Accept-header-driven: there is no legacy UA
+// allow-list, so the UA string alone carries no AVIF signal and these always
+// report false. Real gating happens via the Accept: image/avif header in
+// DeviceProperties. The parameter is intentionally unused.
+bool UserAgentMatcher::SupportsAvifLosslessAlpha(
+    const StringPiece& /*user_agent*/) const {
+  return false;
+}
+
+bool UserAgentMatcher::SupportsAvifAnimated(
+    const StringPiece& /*user_agent*/) const {
+  return false;
+}
+
 UserAgentMatcher::DeviceType UserAgentMatcher::GetDeviceTypeForUAAndHeaders(
     const StringPiece& user_agent,
     const RequestHeaders* request_headers) const {
@@ -518,11 +529,6 @@ bool UserAgentMatcher::GetChromeBuildNumber(const StringPiece& user_agent,
                                             int* patch) const {
   return RE2::PartialMatch(StringPieceToRe2(user_agent),
                            chrome_version_pattern_, major, minor, build, patch);
-}
-
-bool UserAgentMatcher::SupportsDnsPrefetchUsingRelPrefetch(
-    const StringPiece& user_agent) const {
-  return IsIe9(user_agent);
 }
 
 // TODO(bharathbhushan): Make sure GetDeviceTypeForUA is called only once per

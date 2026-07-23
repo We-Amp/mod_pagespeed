@@ -19,9 +19,39 @@ from the bash system_test_helpers.sh.
 """
 
 import re
-from typing import Dict, Union
+from typing import Dict, Optional, Union
 
 from pagespeed_test_framework.client import Response
+
+# Magic-byte signatures for the image formats the rewriter can emit, longest
+# discriminator first. AVIF is ISOBMFF: bytes 4..8 are the "ftyp" box type and
+# bytes 8..12 the major brand, which is "avif" for a still image and "avis" for
+# an animated one -- so the brand must be matched as a set, never as a single
+# 8-byte "ftypavif" compare.
+_AVIF_BRANDS = (b"avif", b"avis")
+
+
+def _detect_image_format(body: bytes) -> Optional[str]:
+    """Identify an image format from its leading bytes.
+
+    Args:
+        body: Raw image bytes
+
+    Returns:
+        Lowercase format name ("avif", "webp", "jpeg", "png", "gif"), or None
+        if the bytes match no format this framework knows about.
+    """
+    if body[0:2] == b"\xff\xd8":
+        return "jpeg"
+    if body[0:4] == b"RIFF" and body[8:12] == b"WEBP":
+        return "webp"
+    if body[4:8] == b"ftyp" and body[8:12] in _AVIF_BRANDS:
+        return "avif"
+    if body[0:8] == b"\x89PNG\r\n\x1a\n":
+        return "png"
+    if body[0:6] in (b"GIF87a", b"GIF89a"):
+        return "gif"
+    return None
 
 
 def assert_contains(
@@ -298,3 +328,50 @@ def assert_file_size(
         raise AssertionError(
             f"{prefix}Size {size} not {op_str} {expected_size}"
         )
+
+
+def assert_image_format(
+    response: Union[bytes, Response],
+    expected_format: str,
+    msg: str = "",
+) -> None:
+    """Assert that a response body carries an image of the expected format.
+
+    This checks the actual bytes, not the Content-Type header, so it stays
+    honest even when the server's mime map is wrong or missing.
+
+    Args:
+        response: Response (or raw bytes) whose body should be an image
+        expected_format: Expected format name, e.g. "avif", "webp", "jpeg"
+        msg: Optional message for assertion failure
+
+    Raises:
+        AssertionError: If the body is not in the expected format
+        ValueError: If expected_format is not a format we can detect
+    """
+    known_formats = ("avif", "webp", "jpeg", "png", "gif")
+    expected = expected_format.lower()
+    if expected not in known_formats:
+        raise ValueError(
+            f"Unknown expected_format: {expected_format!r} "
+            f"(known: {', '.join(known_formats)})"
+        )
+
+    if isinstance(response, Response):
+        body = response.body
+        content_type = response.header("Content-Type") or "<absent>"
+    else:
+        body = response
+        content_type = "<n/a: raw bytes>"
+
+    actual = _detect_image_format(body)
+    if actual == expected:
+        return
+
+    prefix = f"{msg}: " if msg else ""
+    detected = actual if actual else "unrecognized"
+    raise AssertionError(
+        f"{prefix}Expected {expected} image, got {detected}. "
+        f"First 16 bytes: {body[:16].hex(' ')} | "
+        f"Content-Type: {content_type} | body length: {len(body)}"
+    )

@@ -19,6 +19,9 @@
 
 #include "net/instaweb/rewriter/public/in_place_rewrite_context.h"
 
+#include <algorithm>
+#include <vector>
+
 #include "net/instaweb/http/public/counting_url_async_fetcher.h"
 #include "net/instaweb/http/public/http_cache.h"
 #include "net/instaweb/http/public/request_context.h"
@@ -130,6 +133,8 @@ class InPlaceRewriteContextTest : public RewriteTestBase {
         redirect_url_("http://www.example.com/redir.url"),
         rewritten_jpg_url_(
             "http://www.example.com/cacheable.jpg.pagespeed.ic.0.jpg"),
+        rewritten_css_url_(
+            "http://www.example.com/cacheable.css.pagespeed.cf.0.css"),
         json_js_type_url_("http://www.example.com/cacheable_js_type.json"),
         json_json_type_url_("http://www.example.com/cacheable_json_type.json"),
         json_json_type_synonym_url_(
@@ -375,6 +380,42 @@ class InPlaceRewriteContextTest : public RewriteTestBase {
     ClearRewriteDriver();
   }
 
+  // Overwrites the cached rewritten resource at `rewritten_url` with an entry
+  // carrying a pre-existing `vary` header, so a following warm fetch exercises
+  // the Vary merging in AddVaryIfRequired.  Must be called before
+  // ResetHeadersAndStats(), while the driver's cache fragment still matches
+  // the one the original rewritten entry was stored with.
+  void SeedRewrittenCacheEntry(const GoogleString& rewritten_url,
+                               const GoogleString& content_type,
+                               const GoogleString& body,
+                               const StringPiece& vary) {
+    ResponseHeaders seeded_headers;
+    SetDefaultHeaders(content_type, &seeded_headers);
+    seeded_headers.SetDateAndCaching(start_time_ms(), ttl_ms_);
+    seeded_headers.Replace(HttpAttributes::kVary, vary);
+    seeded_headers.ComputeCaching();
+    http_cache()->Put(rewritten_url, rewrite_driver_->CacheFragment(),
+                      RequestHeaders::Properties(),
+                      ResponseHeaders::GetVaryOption(options()->respect_vary()),
+                      &seeded_headers, body, message_handler());
+  }
+
+  // Returns the response's Vary tokens lowercased and sorted, so tests can
+  // compare token sets regardless of case, order, or header-line grouping.
+  std::vector<GoogleString> LowercaseVaryTokens() {
+    std::vector<GoogleString> tokens;
+    ConstStringStarVector varies;
+    if (response_headers_.Lookup(HttpAttributes::kVary, &varies)) {
+      for (int i = 0, n = varies.size(); i < n; ++i) {
+        GoogleString token(*varies[i]);
+        LowerString(&token);
+        tokens.push_back(token);
+      }
+    }
+    std::sort(tokens.begin(), tokens.end());
+    return tokens;
+  }
+
   void CheckWarmCache(StringPiece id) {
     EXPECT_EQ(0, counting_url_async_fetcher()->fetch_count()) << id;
     EXPECT_EQ(1, http_cache()->cache_hits()->Get()) << id;
@@ -506,6 +547,7 @@ class InPlaceRewriteContextTest : public RewriteTestBase {
   const GoogleString bad_url_;
   const GoogleString redirect_url_;
   const GoogleString rewritten_jpg_url_;
+  const GoogleString rewritten_css_url_;
   const GoogleString json_js_type_url_;
   const GoogleString json_json_type_url_;
   const GoogleString json_json_type_synonym_url_;
@@ -1608,25 +1650,151 @@ TEST_F(InPlaceRewriteContextTest, AcceptHeaderMerging) {
   FetchAndCheckResponse(cache_jpg_vary_star_url_, "good", true, 0, nullptr,
                         start_time_ms());
   EXPECT_STREQ("*", response_headers_.Lookup1(HttpAttributes::kVary));
+}
 
-  // TODO(jmaessen): Right now we're not properly passing through Vary: headers
-  // from the fetched resource.  When jmarantz's pending change lands, we will
-  // do so, and these tests should be re-enabled accordingly.  Note that I've
-  // verified in gdb that we're actually handling pre-existing headers properly
-  // (due to a duplicate call; luckily we're idempotent!).
+TEST_F(InPlaceRewriteContextTest, VaryMergeAddsAcceptAlongsideUserAgent) {
+  options()->set_in_place_wait_for_optimized(true);
+  set_optimize_for_browser(true);
+  Init();
 
-  // FetchAndCheckResponse(cache_jpg_vary_ua_url_, "good:ic", true, ttl_ms_,
-  //                       etag_, start_time_ms());
-  // EXPECT_STREQ(HttpAttributes::kUserAgent,
-  //              response_headers_.Lookup1(HttpAttributes::kVary));
+  // Cold fetch primes the metadata cache and the rewritten-resource cache.
+  FetchAndCheckResponse(cache_jpg_url_, "good:ic", true, ttl_ms_, etag_,
+                        start_time_ms());
+  // Seed the rewritten entry with a pre-existing Vary: User-Agent header.
+  SeedRewrittenCacheEntry(rewritten_jpg_url_, kContentTypeJpeg.mime_type(),
+                          "good:ic", "User-Agent");
 
-  // FetchAndCheckResponse(cache_jpg_vary_origin_url_, "good:ic", true, ttl_ms_,
-  //                       etag_, start_time_ms());
-  // ConstStringStarVector accepts;
-  // EXPECT_TRUE(response_headers_.Lookup(HttpAttributes::kVary, &accepts));
-  // ASSERT_EQ(2, accepts.size());
-  // EXPECT_STREQ("Origin", *accepts[0]);
-  // EXPECT_STREQ(HttpAttributes::kAccept, *accepts[1]);
+  ResetHeadersAndStats();
+  SetTimeMs(start_time_ms() + ttl_ms_ / 2);
+  FetchAndCheckResponse(cache_jpg_url_, "good:ic", true, ttl_ms_ / 2, etag_,
+                        start_time_ms() + ttl_ms_ / 2);
+  // The seeded rewritten entry is served from cache ...
+  CheckWarmCache("vary_merge_accept");
+  // ... and the pre-existing User-Agent token must not suppress the Accept
+  // token this resource varies on.
+  EXPECT_EQ(std::vector<GoogleString>({"accept", "user-agent"}),
+            LowercaseVaryTokens());
+}
+
+TEST_F(InPlaceRewriteContextTest, VaryMergeAddsUserAgentAlongsideAccept) {
+  options()->set_in_place_wait_for_optimized(true);
+  set_optimize_for_browser(true);
+  Init();
+  options()->ClearSignatureForTesting();
+  RewriteOptions::AllowVaryOn allow_vary_on;
+  EXPECT_TRUE(RewriteOptions::ParseFromString("User-Agent", &allow_vary_on));
+  options()->set_allow_vary_on(allow_vary_on);
+  server_context()->ComputeSignature(options());
+
+  // Cold fetch primes the metadata cache and the rewritten-resource cache.
+  FetchAndCheckResponse(cache_jpg_url_, "good:ic", true, ttl_ms_, etag_,
+                        start_time_ms());
+  // Seed the rewritten entry with a pre-existing Vary: Accept header.
+  SeedRewrittenCacheEntry(rewritten_jpg_url_, kContentTypeJpeg.mime_type(),
+                          "good:ic", "Accept");
+
+  ResetHeadersAndStats();
+  SetTimeMs(start_time_ms() + ttl_ms_ / 2);
+  FetchAndCheckResponse(cache_jpg_url_, "good:ic", true, ttl_ms_ / 2, etag_,
+                        start_time_ms() + ttl_ms_ / 2);
+  CheckWarmCache("vary_merge_user_agent");
+  // The pre-existing Accept token must not suppress the User-Agent token this
+  // resource varies on.
+  EXPECT_EQ(std::vector<GoogleString>({"accept", "user-agent"}),
+            LowercaseVaryTokens());
+}
+
+TEST_F(InPlaceRewriteContextTest, VaryMergeCommaCombinedIsNotDuplicated) {
+  options()->set_in_place_wait_for_optimized(true);
+  set_optimize_for_browser(true);
+  Init();
+
+  FetchAndCheckResponse(cache_jpg_url_, "good:ic", true, ttl_ms_, etag_,
+                        start_time_ms());
+  // Seed a single Vary line already covering both tokens.
+  SeedRewrittenCacheEntry(rewritten_jpg_url_, kContentTypeJpeg.mime_type(),
+                          "good:ic", "User-Agent, Accept");
+
+  ResetHeadersAndStats();
+  SetTimeMs(start_time_ms() + ttl_ms_ / 2);
+  FetchAndCheckResponse(cache_jpg_url_, "good:ic", true, ttl_ms_ / 2, etag_,
+                        start_time_ms() + ttl_ms_ / 2);
+  CheckWarmCache("vary_merge_comma_combined");
+  // Both tokens are already covered; nothing may be appended.
+  EXPECT_EQ(std::vector<GoogleString>({"accept", "user-agent"}),
+            LowercaseVaryTokens());
+}
+
+TEST_F(InPlaceRewriteContextTest, VaryMergeCaseInsensitiveIsNotDuplicated) {
+  options()->set_in_place_wait_for_optimized(true);
+  set_optimize_for_browser(true);
+  Init();
+
+  FetchAndCheckResponse(cache_jpg_url_, "good:ic", true, ttl_ms_, etag_,
+                        start_time_ms());
+  // Coverage is case-insensitive: "accept" already covers "Accept".
+  SeedRewrittenCacheEntry(rewritten_jpg_url_, kContentTypeJpeg.mime_type(),
+                          "good:ic", "accept");
+
+  ResetHeadersAndStats();
+  SetTimeMs(start_time_ms() + ttl_ms_ / 2);
+  FetchAndCheckResponse(cache_jpg_url_, "good:ic", true, ttl_ms_ / 2, etag_,
+                        start_time_ms() + ttl_ms_ / 2);
+  CheckWarmCache("vary_merge_case_insensitive");
+  EXPECT_EQ(std::vector<GoogleString>({"accept"}), LowercaseVaryTokens());
+}
+
+TEST_F(InPlaceRewriteContextTest, VaryMergeAddsSaveDataAlongsideAccept) {
+  options()->set_in_place_wait_for_optimized(true);
+  set_optimize_for_browser(true);
+  Init();
+  options()->ClearSignatureForTesting();
+  RewriteOptions::AllowVaryOn allow_vary_on;
+  EXPECT_TRUE(
+      RewriteOptions::ParseFromString("Accept,Save-Data", &allow_vary_on));
+  options()->set_allow_vary_on(allow_vary_on);
+  options()->set_image_webp_quality_for_save_data(70);
+  server_context()->ComputeSignature(options());
+
+  FetchAndCheckResponse(cache_jpg_url_, "good:ic", true, ttl_ms_, etag_,
+                        start_time_ms());
+  // Seed the rewritten entry with a pre-existing Vary: Accept header.
+  SeedRewrittenCacheEntry(rewritten_jpg_url_, kContentTypeJpeg.mime_type(),
+                          "good:ic", "Accept");
+
+  ResetHeadersAndStats();
+  SetTimeMs(start_time_ms() + ttl_ms_ / 2);
+  FetchAndCheckResponse(cache_jpg_url_, "good:ic", true, ttl_ms_ / 2, etag_,
+                        start_time_ms() + ttl_ms_ / 2);
+  CheckWarmCache("vary_merge_save_data");
+  // Accept is covered, but the Save-Data token must still be appended.
+  EXPECT_EQ(std::vector<GoogleString>({"accept", "save-data"}),
+            LowercaseVaryTokens());
+}
+
+TEST_F(InPlaceRewriteContextTest, VaryMergeCssAddsUserAgentAlongsideAccept) {
+  options()->set_in_place_wait_for_optimized(true);
+  set_optimize_for_browser(true);
+  Init();
+
+  FetchAndCheckResponse(cache_css_url_, "good:cf", true, ttl_ms_, etag_,
+                        start_time_ms());
+  // Seed the rewritten CSS entry with a pre-existing Vary: Accept header.
+  SeedRewrittenCacheEntry(rewritten_css_url_, kContentTypeCss.mime_type(),
+                          "good:cf", "Accept");
+
+  ResetHeadersAndStats();
+  SetTimeMs(start_time_ms() + ttl_ms_ / 2);
+  FetchAndCheckResponse(cache_css_url_, "good:cf", true, ttl_ms_ / 2, etag_,
+                        start_time_ms() + ttl_ms_ / 2);
+  CheckWarmCache("vary_merge_css_user_agent");
+  // CSS varies on User-Agent (constituent images may be rewritten in a
+  // UA-dependent manner); the seeded Accept token must be preserved.  The
+  // Accept-Encoding token is added by the HTTP cache itself when serving
+  // gzippable text content (InflatingFetch), independent of the Vary merge.
+  EXPECT_EQ(
+      std::vector<GoogleString>({"accept", "accept-encoding", "user-agent"}),
+      LowercaseVaryTokens());
 }
 
 TEST_F(InPlaceRewriteContextTest, NoAcceptHeaderForLosslessOrAnimated) {

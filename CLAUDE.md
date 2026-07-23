@@ -125,7 +125,7 @@ the most common orientation mistake in this repo.
 | `net/instaweb/` | ~57 rewriter filters (`net/instaweb/rewriter/*_filter.cc`, e.g. `cache_extender.cc`, `add_instrumentation_filter.cc`) plus their support code, `RewriteDriver`, and `RewriteOptions` (`net/instaweb/rewriter/rewrite_driver.cc`, `rewrite_options.cc`) — `net/instaweb/rewriter/` holds ~133 `.cc` in all | Legacy `net_instaweb::` namespace. To add or edit a rewriter filter, work HERE, not under `pagespeed/`. |
 | `net/instaweb/{htmlparse,http,util,spriter}/` | Legacy HTML-parse / HTTP / util / image-spriter support | — |
 | `net/instaweb/genfiles/` | Generated gperf/Closure outputs (minified `*_opt.js` / `*_dbg.js` bundles) | **GENERATED — DO NOT EDIT BY HAND.** `net/instaweb/genfiles/rewriter/*.js` are minified Closure output (30 bundles) and carry no in-file DO-NOT-EDIT marker. Edit the source `.js` and regenerate via `tools/regenerate-rewriter-js.sh`; the generated set is hash-guarded by `net/instaweb/rewriter/generated/.source-hash` (run `tools/regenerate-rewriter-js.sh --check-hash` to detect staleness). |
-| `pagespeed/` | Modern subsystems: port adapters (`apache/`, `nginx/`, `envoy/`, `iis/`), `kernel/`, `system/`, `automatic/`, `controller/` | See [Code Architecture](#code-architecture). |
+| `pagespeed/` | Modern subsystems: port adapters (`apache/`, `nginx/`, `envoy/`, `iis/`), `kernel/`, `system/`, `automatic/` | See [Code Architecture](#code-architecture). |
 | `base/logging.h` | glog-compatible logging | At repo root, not under `pagespeed/` (see [Logging System](#logging-system)). |
 
 There is no `rewriter/` directory under `pagespeed/` — an agent told "add a filter"
@@ -143,7 +143,6 @@ must look under `net/instaweb/rewriter/`.
 | `iis/` | IIS native module |
 | `system/` | System abstractions (admin UI, cache backends) |
 | `automatic/` | ProxyFetch - standalone rewriting engine shared by all deployment modes |
-| `controller/` | gRPC-based optimization coordination |
 
 The admin console is a Svelte/Vite single-page app under `pagespeed/system/console/`. Its compiled output, `pagespeed/system/console/admin_console.html`, is a **GENERATED single-file Vite bundle — DO NOT EDIT BY HAND.** Edit the SPA source under `pagespeed/system/console/src/` and rebuild via `pagespeed/system/console/build.sh`; the checked-in bundle is guarded by the `console-drift` CI job (`pagespeed/system/console/check-no-drift.sh`) against `pagespeed/system/console/admin_console.html.srchash`.
 
@@ -163,7 +162,7 @@ Custom glog-compatible logging in `base/logging.h` (at repo root, not under page
 
 ### Dependencies
 
-- Envoy HTTP proxy libraries, Protocol Buffers, gRPC
+- Envoy HTTP proxy libraries, Protocol Buffers
 - APR/APRUtil/Serf (Apache module only)
 - libjpeg-turbo, libpng, libwebp, giflib (image optimization)
 - Cyclone Cache (high-performance disk cache, requires C++23)

@@ -136,23 +136,19 @@ deferJsNs.DeferJs.prototype.addNode = function(a, b, d) {
   c ? (d && this.attemptPrefetchOrQueue(c), this.addUrl(c, a, b)) : this.addStr(a.innerHTML || a.textContent || a.data || "", a, b);
 };
 deferJsNs.DeferJs.prototype.addStr = function(a, b, d) {
-  if (this.isFireFox()) {
-    this.addUrl("data:text/javascript," + encodeURIComponent(a), b, d);
-  } else {
-    this.logs.push("Add to queue str: " + a);
-    var c = this;
-    this.submitTask(function() {
-      c.removeNotProcessedAttributeTillNode(b);
-      c.nextPsaJsNode().setAttribute(deferJsNs.DeferJs.PSA_CURRENT_NODE, "");
-      try {
-        c.globalEval(a, b);
-      } catch (e) {
-        c.log("Exception while evaluating.", e);
-      }
-      c.log("Evaluated: " + a);
-      c.runNext();
-    }, d);
-  }
+  this.logs.push("Add to queue str: " + a);
+  var c = this;
+  this.submitTask(function() {
+    c.removeNotProcessedAttributeTillNode(b);
+    c.nextPsaJsNode().setAttribute(deferJsNs.DeferJs.PSA_CURRENT_NODE, "");
+    try {
+      c.globalEval(a, b);
+    } catch (e) {
+      c.log("Exception while evaluating.", e);
+    }
+    c.log("Evaluated: " + a);
+    c.runNext();
+  }, d);
 };
 deferJsNs.DeferJs.prototype.addStr = deferJsNs.DeferJs.prototype.addStr;
 deferJsNs.DeferJs.prototype.cloneScriptNode = function(a) {
@@ -564,9 +560,6 @@ deferJsNs.addOnload = function(a, b) {
   pagespeedutils.addHandler(a, "load", b);
 };
 pagespeed.addOnload = deferJsNs.addOnload;
-deferJsNs.DeferJs.prototype.isFireFox = function() {
-  return navigator.userAgent.indexOf("Firefox") != -1;
-};
 deferJsNs.DeferJs.prototype.isWebKit = function() {
   return navigator.userAgent.indexOf("AppleWebKit") != -1;
 };

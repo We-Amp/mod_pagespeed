@@ -214,7 +214,7 @@ class CssSummarizerBase : public RewriteFilter {
   void StartDocumentImpl() override;
   void EndDocument() override;
   void StartElementImpl(HtmlElement* element) override;
-  void Characters(HtmlCharactersNode* characters) override;
+  void CharactersImpl(HtmlCharactersNode* characters) override;
   void EndElementImpl(HtmlElement* element) override;
   void RenderDone() override;
 

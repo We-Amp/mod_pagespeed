@@ -6,6 +6,7 @@ cc_library(
     name = "cache",
     srcs = [
         "async_cache.cc",
+        "async_write_behind_cache.cc",
         "cache_batcher.cc",
         "cache_key_prepender.cc",
         "cache_stats.cc",
@@ -23,6 +24,7 @@ cc_library(
     ],
     hdrs = [
         "async_cache.h",
+        "async_write_behind_cache.h",
         "cache_batcher.h",
         "cache_interface.h",
         "cache_key_prepender.h",

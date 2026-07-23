@@ -15,10 +15,12 @@
  */
 
 /**
- * @fileoverview Code for beaconing client page load time back to the server.
- * This javascript is part of the AddInstrumentationFilter.
- *
- * @author jud@google.com (Jud Porter)
+ * @fileoverview Real-user-monitoring collector for the
+ * AddInstrumentationFilter.  Gathers Core Web Vitals (LCP, session-window
+ * CLS, INP) through PerformanceObserver plus Navigation Timing Level 2
+ * data, and reports them in a single navigator.sendBeacon POST when the
+ * page is hidden or unloaded.  Web APIs are accessed with bracket notation
+ * throughout so the Closure Compiler's ADVANCED mode cannot rename them.
  */
 
 // Exporting functions using quoted attributes to prevent js compiler from
@@ -30,146 +32,326 @@ var pagespeed = window['pagespeed'];
 /**
  * @constructor
  * @param {string} beaconUrlPrefix The prefix portion of the beacon url.
- * @param {string} event Event to trigger on, either 'load' or 'beforeunload'.
  * @param {string} extraParams Additional parameters to be added to the beacon.
  * @param {string} htmlUrl Url of the page the beacon is being inserted on.
  */
-pagespeed.AddInstrumentation = function(beaconUrlPrefix, event, extraParams,
+pagespeed.AddInstrumentation = function(beaconUrlPrefix, extraParams,
                                         htmlUrl) {
   this.beaconUrlPrefix_ = beaconUrlPrefix;
-  this.event_ = event;
   this.extraParams_ = extraParams;
   this.htmlUrl_ = htmlUrl;
+  /** @private {boolean} Whether the beacon has been sent (exactly-once). */
+  this.sent_ = false;
+  /** @private {number} Latest LCP candidate in ms, -1 if none observed. */
+  this.lcpMs_ = -1;
+  /** @private {!Object} Current CLS session window. */
+  this.clsSession_ = {sum: 0, firstTime: 0, lastTime: 0};
+  /** @private {number} Max session-window CLS observed so far. */
+  this.cls_ = 0;
+  /** @private {boolean} Whether the layout-shift observer is installed. */
+  this.clsObserved_ = false;
+  /** @private {number} Worst interaction duration in ms, -1 if none. */
+  this.inpMs_ = -1;
+  /** @private {!Array<!Object>} Installed observers plus their handlers. */
+  this.observers_ = [];
+  this.initObservers_();
 };
 
-pagespeed['beaconUrl'] = '';
+/**
+ * Registers a buffered PerformanceObserver for a single entry type.
+ * Buffering is essential: this script runs at the end of the body, after
+ * the earliest paint and layout-shift entries were dispatched.  Failures
+ * are contained per type so support degrades per-metric on browsers that
+ * lack an entry type (older Safari throws on unsupported types).
+ * @param {string} type The performance entry type to observe.
+ * @param {function(!Array<!Object>)} handler Receives observed entries.
+ * @param {Object=} opt_extra Extra options for the observe() call.
+ * @return {boolean} Whether the observer was installed.
+ * @private
+ */
+pagespeed.AddInstrumentation.prototype.observe_ = function(type, handler,
+                                                           opt_extra) {
+  var PO = window['PerformanceObserver'];
+  if (!PO) {
+    return false;
+  }
+  // Gate on supportedEntryTypes: some browsers accept the observe() options
+  // dict but silently never deliver entries for unsupported types (e.g.
+  // layout-shift), which would otherwise make the metric read as a
+  // legitimate zero instead of "not measured".
+  if (!PO['supportedEntryTypes'] ||
+      PO['supportedEntryTypes'].indexOf(type) == -1) {
+    return false;
+  }
+  try {
+    var observer = new PO(function(list) { handler(list['getEntries']()); });
+    var opts = opt_extra || {};
+    opts['type'] = type;
+    opts['buffered'] = true;
+    observer['observe'](opts);
+    this.observers_.push({observer: observer, handler: handler});
+    return true;
+  } catch (e) {
+    return false;
+  }
+};
 
 /**
- * Create beacon URL and send request to server.
+ * Installs the Core Web Vitals observers.
+ * @private
  */
-pagespeed.AddInstrumentation.prototype.sendBeacon = function() {
-  var url = this.beaconUrlPrefix_;
+pagespeed.AddInstrumentation.prototype.initObservers_ = function() {
+  var that = this;
 
-  var oldStartTime = window['mod_pagespeed_start'];
-  var currentTime = Number(new Date());
-  var traditionalPLT = (currentTime - oldStartTime);
-
-  // Handle a beacon url that already has query params.
-  url += (url.indexOf('?') == -1) ? '?' : '&';
-  url += 'ets=';
-  url += (this.event_ == 'load') ? 'load:' : 'unload:';
-  url += traditionalPLT;
-
-  // We use navigation timing api for getting accurate start time. This api is
-  // available in Internet Explorer 9+, Google Chrome 6+ and Firefox 7+.
-  // If not present, we set the start time to when the rendering started.
-  // TODO(satyanarayana): Remove the oldStartTime usages once
-  // devconsole code has been updated to use the new "rload" param value.
-
-  if (this.event_ == 'beforeunload' && window['mod_pagespeed_loaded']) {
-    return;
-  }
-
-  url += '&r' + this.event_ + '=';
-  if (window['performance']) {
-    var timingApi = window['performance']['timing'];
-    var navStartTime = timingApi['navigationStart'];
-    var requestStartTime = timingApi['requestStart'];
-    url += (timingApi[this.event_ + 'EventStart'] - navStartTime);
-    url += '&nav=' + (timingApi['fetchStart'] - navStartTime);
-    url += '&dns=' + (
-        timingApi['domainLookupEnd'] - timingApi['domainLookupStart']);
-    url += '&connect=' + (
-        timingApi['connectEnd'] - timingApi['connectStart']);
-    url += '&req_start=' + (requestStartTime - navStartTime);
-    url += '&ttfb=' + (
-        timingApi['responseStart'] - requestStartTime);
-    url += '&dwld=' + (
-        timingApi['responseEnd'] - timingApi['responseStart']);
-    url += '&dom_c=' + (timingApi['domContentLoadedEventStart'] - navStartTime);
-
-    if (window['performance']['navigation']) {
-      url += '&nt=' + window['performance']['navigation']['type'];
+  // Largest Contentful Paint: the last entry emitted wins.
+  this.observe_('largest-contentful-paint', function(entries) {
+    for (var i = 0; i < entries.length; i++) {
+      var e = entries[i];
+      that.lcpMs_ =
+          Math.round(e['renderTime'] || e['loadTime'] || e['startTime']);
     }
-    var firstPaintTime = -1;
-    if (timingApi['msFirstPaint']) {
-      // IE.
-      firstPaintTime = timingApi['msFirstPaint'];
-    } else if (window['chrome'] && window['chrome']['loadTimes']) {
-      // Chrome. Note that window.chrome.loadTimes returns a time in seconds.
-      firstPaintTime = Math.floor(
-          window['chrome']['loadTimes']()['firstPaintTime'] * 1000);
+  });
+
+  // Cumulative Layout Shift, session-window variant: shifts within a
+  // window of at most 5s, with gaps of at most 1s, accumulate; the value
+  // reported is the worst window.  Shifts right after user input are
+  // excluded, as in the CLS definition.
+  this.clsObserved_ = this.observe_('layout-shift', function(entries) {
+    for (var i = 0; i < entries.length; i++) {
+      var e = entries[i];
+      if (e['hadRecentInput']) {
+        continue;
+      }
+      var s = that.clsSession_;
+      if (s.sum > 0 && e['startTime'] - s.lastTime < 1000 &&
+          e['startTime'] - s.firstTime < 5000) {
+        s.sum += e['value'];
+        s.lastTime = e['startTime'];
+      } else {
+        s.sum = e['value'];
+        s.firstTime = s.lastTime = e['startTime'];
+      }
+      if (s.sum > that.cls_) {
+        that.cls_ = s.sum;
+      }
     }
-    firstPaintTime = firstPaintTime - requestStartTime;
-    if (firstPaintTime >= 0) {
-      url += '&fp=' + firstPaintTime;
+  });
+
+  // Interaction latency: the worst qualifying interaction duration.  This
+  // deliberately reports the maximum rather than the 98th-percentile
+  // estimator the INP metric specifies; for typical page views (fewer than
+  // 50 interactions) the two are identical.
+  var inpHandler = function(entries) {
+    for (var i = 0; i < entries.length; i++) {
+      var e = entries[i];
+      // 'event' entries without an interactionId are not discrete
+      // interactions (e.g. plain mousemoves); skip them.  'first-input'
+      // entries always qualify.
+      if (e['entryType'] == 'event' && !e['interactionId']) {
+        continue;
+      }
+      var duration = Math.round(e['duration']);
+      if (duration > that.inpMs_) {
+        that.inpMs_ = duration;
+      }
     }
-  } else {
-   url += traditionalPLT;
-  }
+  };
+  this.observe_('event', inpHandler, {'durationThreshold': 40});
+  // Fallback so a single early interaction is still captured on browsers
+  // without event-timing support; merged through the same max.
+  this.observe_('first-input', inpHandler);
+};
 
-  if (pagespeed['getResourceTimingData'] && window.parent == window) {
-    url += pagespeed.getResourceTimingData();
-  }
-
-  url += (window.parent != window) ? '&ifr=1' : '&ifr=0';
-
-  if (this.event_ == 'load') {
-    window['mod_pagespeed_loaded'] = true;
-    var numPrefetchedResources =
-        window['mod_pagespeed_num_resources_prefetched'];
-    if (numPrefetchedResources) {
-      url += '&nrp=' + numPrefetchedResources;
+/**
+ * Re-arms measurement after a back/forward-cache restore.  Hiding the page
+ * latched the exactly-once guard and disconnected the observers, so without
+ * this a restored visit would beacon nothing and contribute no LCP/CLS/INP.
+ * Per web-vitals guidance the restore is a new page view: reset the
+ * accumulation state, re-install the observers, and let the next hide beacon
+ * again.  Degrades exactly like the constructor: without PerformanceObserver
+ * no observers come back, and the restored visit still re-beacons its
+ * Navigation Timing subset.
+ *
+ * Note: the re-installed observers are created with buffered:true (see
+ * observe_), so Chromium immediately re-delivers pre-freeze entries into the
+ * fresh state.  The restored visit's LCP therefore floors at the frozen
+ * visit's value (semantically fine: the content is identical and no new LCP
+ * can fire after the first hide), and its CLS/INP start from the pre-freeze
+ * values rather than zero -- per-visit beacon approximation we accept, since
+ * entry timestamps cannot distinguish cache epochs.
+ * @private
+ */
+pagespeed.AddInstrumentation.prototype.rearm_ = function() {
+  // Normally send_ already disconnected everything when the page hid; close
+  // any observer that is somehow still live so entries are never delivered
+  // twice into the fresh accumulation state below.
+  for (var i = 0; i < this.observers_.length; i++) {
+    try {
+      this.observers_[i].observer['disconnect']();
+    } catch (e) {
     }
-    var prefetchStartTime = window['mod_pagespeed_prefetch_start'];
-    if (prefetchStartTime) {
-      url += '&htmlAt=' + (oldStartTime - prefetchStartTime);
+  }
+  this.observers_ = [];
+  this.sent_ = false;
+  this.lcpMs_ = -1;
+  this.clsSession_ = {sum: 0, firstTime: 0, lastTime: 0};
+  this.cls_ = 0;
+  this.inpMs_ = -1;
+  this.initObservers_();
+};
+
+/**
+ * Assembles the beacon POST body as a query-parameter string.  Always
+ * returns a non-empty string: some server frontends reject a POST with an
+ * empty body.
+ * @return {string} The beacon body.
+ * @private
+ */
+pagespeed.AddInstrumentation.prototype.buildBody_ = function() {
+  var parts = [];
+  var perf = window['performance'];
+  var navEntry = null;
+  if (perf && perf['getEntriesByType']) {
+    var navEntries = perf['getEntriesByType']('navigation');
+    if (navEntries && navEntries.length > 0) {
+      navEntry = navEntries[0];
     }
   }
-
-  if (pagespeed['criticalCss']) {
-    var cc = pagespeed['criticalCss'];
-    url += '&ccis=' + cc['total_critical_inlined_size'] +
-           '&cces=' + cc['total_original_external_size'] +
-           '&ccos=' + cc['total_overhead_size'] +
-           '&ccrl=' + cc['num_replaced_links'] +
-           '&ccul=' + cc['num_unreplaced_links'];
+  if (navEntry) {
+    var loadMs = Math.round(navEntry['loadEventStart']);
+    if (loadMs > 0) {
+      // Page load time.  Omitted when the page is hidden before onload
+      // fires; the server treats it as optional.
+      parts.push('ets=load:' + loadMs);
+      parts.push('rload=' + loadMs);
+    }
+    parts.push('nav=' + Math.round(navEntry['fetchStart']));
+    parts.push('dns=' + Math.round(navEntry['domainLookupEnd'] -
+                                   navEntry['domainLookupStart']));
+    parts.push('connect=' + Math.round(navEntry['connectEnd'] -
+                                       navEntry['connectStart']));
+    parts.push('req_start=' + Math.round(navEntry['requestStart']));
+    // c_ttfb (client TTFB): absolute responseStart from navigation start.
+    // Deliberately a new name: the legacy ttfb param carried
+    // responseStart - requestStart and the server ignores it.
+    parts.push('c_ttfb=' + Math.round(navEntry['responseStart']));
+    parts.push('dwld=' + Math.round(navEntry['responseEnd'] -
+                                    navEntry['responseStart']));
+    parts.push('dom_c=' + Math.round(navEntry['domContentLoadedEventStart']));
+    if (navEntry['type']) {
+      parts.push('nt=' + navEntry['type']);
+    }
+  } else if (window['mod_pagespeed_start']) {
+    // No Navigation Timing support at all: report the elapsed time since
+    // the timing script at the top of the head ran.  Note this is measured
+    // at hide-time, not at the load event, so it overstates load time by
+    // however long the page stayed open.
+    parts.push('ets=load:' +
+               (Number(new Date()) - window['mod_pagespeed_start']));
   }
-
+  if (this.lcpMs_ >= 0) {
+    parts.push('lcp=' + this.lcpMs_);
+  }
+  if (this.clsObserved_) {
+    // Fixed-point milli-units keep the value an integer end-to-end: a CLS
+    // of 0.1 is reported as cls=100.  Zero is meaningful, so the param is
+    // sent whenever the observer was installed.
+    parts.push('cls=' + Math.round(this.cls_ * 1000));
+  }
+  if (this.inpMs_ >= 0) {
+    parts.push('inp=' + this.inpMs_);
+  }
   // Collect devicePixelRatios to find common values.
-  // Note: This may append =undefined for old browsers.
-  url += '&dpr=' + window.devicePixelRatio;
-
+  // Note: This may append =undefined for old browsers; it also guarantees
+  // the body is never empty.
+  parts.push('dpr=' + window.devicePixelRatio);
+  var body = parts.join('&');
   if (this.extraParams_ != '') {
-    url += this.extraParams_;
+    body += this.extraParams_;
+  }
+  if (pagespeed['getResourceTimingData']) {
+    body += pagespeed['getResourceTimingData']();
   }
   if (document.referrer) {
-    url += '&ref=' + encodeURIComponent(document.referrer);
+    body += '&ref=' + encodeURIComponent(document.referrer);
   }
-  url += '&url=' + encodeURIComponent(this.htmlUrl_);
+  return body;
+};
 
-  pagespeed['beaconUrl'] = url;
-  new Image().src = url;
+/**
+ * Flushes the observers and sends the beacon, exactly once.  Prefers
+ * navigator.sendBeacon (survives page dismissal); falls back to the legacy
+ * image GET with the body appended to the query string.
+ * @private
+ */
+pagespeed.AddInstrumentation.prototype.send_ = function() {
+  if (this.sent_) {
+    return;
+  }
+  this.sent_ = true;
+  // Flush entries queued but not yet delivered to observer callbacks, then
+  // stop observing.
+  for (var i = 0; i < this.observers_.length; i++) {
+    var o = this.observers_[i];
+    try {
+      o.handler(o.observer['takeRecords']());
+      o.observer['disconnect']();
+    } catch (e) {
+    }
+  }
+  var body = this.buildBody_();
+  var url = this.beaconUrlPrefix_;
+  // Handle a beacon url that already has query params.  The page URL stays
+  // in the beacon URL's query string (not the body) so it shows up in
+  // access logs and load-balancer routing.
+  url += (url.indexOf('?') == -1) ? '?' : '&';
+  url += 'url=' + encodeURIComponent(this.htmlUrl_);
+  var nav = window.navigator;
+  if (nav && nav['sendBeacon']) {
+    try {
+      if (nav['sendBeacon'](url, body)) {
+        return;
+      }
+    } catch (e) {
+    }
+  }
+  new Image().src = url + '&' + body;
 };
 
 /**
  * Initialize instrumentation beacon.
  * @param {string} beaconUrl Url of beacon.
- * @param {string} event Event to trigger on, either 'load' or 'beforeunload'.
  * @param {string} extraParams Additional parameters to be added to the beacon.
  * @param {string} htmlUrl Url of the page the beacon is being inserted on.
  */
-pagespeed.addInstrumentationInit = function(beaconUrl, event, extraParams,
-                                            htmlUrl) {
-
-  var temp = new pagespeed.AddInstrumentation(beaconUrl, event, extraParams,
-                                              htmlUrl);
-  if (window.addEventListener) {
-    window.addEventListener(event, function() { temp.sendBeacon(); }, false);
-  } else {
-    window.attachEvent('on' + event, function() { temp.sendBeacon(); });
+pagespeed.addInstrumentationInit = function(beaconUrl, extraParams, htmlUrl) {
+  if (window.parent != window) {
+    // Only top-level page views are reported; never run in iframes.
+    return;
   }
-
+  var collector = new pagespeed.AddInstrumentation(beaconUrl, extraParams,
+                                                   htmlUrl);
+  // Send when the page becomes hidden or is being unloaded.  Both fire on
+  // navigation; the exactly-once guard collapses them to a single beacon.
+  // Deliberately no 'beforeunload'/'unload' listeners: those disable the
+  // back/forward cache.
+  document.addEventListener('visibilitychange', function() {
+    if (document['visibilityState'] == 'hidden') {
+      collector.send_();
+    }
+  });
+  window.addEventListener('pagehide', function() { collector.send_(); });
+  window.addEventListener('pageshow', function(event) {
+    // pageshow with persisted=true is a back/forward-cache restore: the
+    // frozen page (with this collector, already sent and disconnected)
+    // becomes the current visit again.  Re-arm so the restored visit is
+    // measured and beaconed on its own hide.  Non-persisted pageshows
+    // (initial load, ordinary navigations) must not reset the exactly-once
+    // guard.
+    if (event['persisted']) {
+      collector.rearm_();
+    }
+  });
 };
 
 pagespeed['addInstrumentationInit'] = pagespeed.addInstrumentationInit;

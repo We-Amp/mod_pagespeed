@@ -3,9 +3,9 @@
   "dataLicense": "CC0-1.0",
   "SPDXID": "SPDXRef-DOCUMENT",
   "name": "pagespeed-1.1",
-  "documentNamespace": "https://spdx.org/spdxdocs/pagespeed-1.1-2026-07-11T13:18:22Z",
+  "documentNamespace": "https://spdx.org/spdxdocs/pagespeed-1.1-2026-07-23T10:55:33Z",
   "creationInfo": {
-    "created": "2026-07-11T13:18:22Z",
+    "created": "2026-07-23T10:55:33Z",
     "creators": [
       "Tool: generate-sbom.py-1.0",
       "Organization: We-Amp B.V."
@@ -98,20 +98,20 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-Package-grpc",
-      "name": "grpc",
-      "versionInfo": "1.78.1",
-      "supplier": "Organization: The gRPC Authors",
-      "downloadLocation": "https://github.com/grpc/grpc",
+      "SPDXID": "SPDXRef-Package-protobuf",
+      "name": "protobuf",
+      "versionInfo": "74211c0dfc2777318ab53c2cd2c317a2ef9012de",
+      "supplier": "Organization: The Protocol Buffers Authors",
+      "downloadLocation": "https://github.com/protocolbuffers/protobuf",
       "filesAnalyzed": false,
-      "licenseConcluded": "Apache-2.0",
-      "licenseDeclared": "Apache-2.0",
-      "copyrightText": "Copyright The gRPC Authors",
+      "licenseConcluded": "BSD-3-Clause",
+      "licenseDeclared": "BSD-3-Clause",
+      "copyrightText": "Copyright The Protocol Buffers Authors",
       "externalRefs": [
         {
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
-          "referenceLocator": "pkg:github/grpc/grpc@v1.78.1"
+          "referenceLocator": "pkg:github/protocolbuffers/protobuf@v31.1"
         }
       ]
     },
@@ -256,6 +256,54 @@
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
           "referenceLocator": "pkg:github/webmproject/libwebp@v1.5.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-libavif",
+      "name": "libavif",
+      "versionInfo": "1.4.2",
+      "supplier": "Organization: Joe Drago and libavif contributors",
+      "downloadLocation": "https://github.com/AOMediaCodec/libavif",
+      "filesAnalyzed": false,
+      "licenseConcluded": "BSD-2-Clause",
+      "licenseDeclared": "BSD-2-Clause",
+      "copyrightText": "Copyright Joe Drago and libavif contributors",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:github/AOMediaCodec/libavif@v1.4.2"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-aom",
+      "name": "aom",
+      "versionInfo": "3b624af45b86646a20b11a9ff803aeae588cdee6",
+      "supplier": "Organization: Alliance for Open Media",
+      "downloadLocation": "https://aomedia.googlesource.com/aom/",
+      "filesAnalyzed": false,
+      "licenseConcluded": "BSD-2-Clause",
+      "licenseDeclared": "BSD-2-Clause",
+      "copyrightText": "Copyright Alliance for Open Media",
+      "externalRefs": []
+    },
+    {
+      "SPDXID": "SPDXRef-Package-dav1d",
+      "name": "dav1d",
+      "versionInfo": "1.5.1",
+      "supplier": "Organization: VideoLAN and dav1d authors",
+      "downloadLocation": "https://github.com/videolan/dav1d",
+      "filesAnalyzed": false,
+      "licenseConcluded": "BSD-2-Clause",
+      "licenseDeclared": "BSD-2-Clause",
+      "copyrightText": "Copyright VideoLAN and dav1d authors",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:github/videolan/dav1d@1.5.1"
         }
       ]
     },
@@ -466,7 +514,7 @@
     {
       "SPDXID": "SPDXRef-Package-nginx",
       "name": "nginx",
-      "versionInfo": "1.30.3",
+      "versionInfo": "1.30.4",
       "supplier": "Organization: Nginx, Inc. / F5",
       "downloadLocation": "https://nginx.org/",
       "filesAnalyzed": false,
@@ -541,7 +589,7 @@
     {
       "spdxElementId": "SPDXRef-Package-pagespeed-1.1",
       "relationshipType": "DEPENDS_ON",
-      "relatedSpdxElement": "SPDXRef-Package-grpc"
+      "relatedSpdxElement": "SPDXRef-Package-protobuf"
     },
     {
       "spdxElementId": "SPDXRef-Package-pagespeed-1.1",
@@ -582,6 +630,21 @@
       "spdxElementId": "SPDXRef-Package-pagespeed-1.1",
       "relationshipType": "DEPENDS_ON",
       "relatedSpdxElement": "SPDXRef-Package-libwebp"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-pagespeed-1.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-libavif"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-pagespeed-1.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-aom"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-pagespeed-1.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-dav1d"
     },
     {
       "spdxElementId": "SPDXRef-Package-pagespeed-1.1",

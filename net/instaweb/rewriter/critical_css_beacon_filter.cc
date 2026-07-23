@@ -126,9 +126,14 @@ void CriticalCssBeaconFilter::AppendSelectorsInitJs(
 //        pagespeed.selectors);
 void CriticalCssBeaconFilter::AppendBeaconInitJs(const BeaconMetadata& metadata,
                                                  GoogleString* script) {
-  GoogleString beacon_url = driver()->IsHttps()
-                                ? driver()->options()->beacon_url().https
-                                : driver()->options()->beacon_url().http;
+  const GoogleString& raw_beacon_url =
+      driver()->IsHttps() ? driver()->options()->beacon_url().https
+                          : driver()->options()->beacon_url().http;
+  // Escape the beacon URL to a JS string literal, matching page_url below. It
+  // comes from admin-configured options rather than end-user input, but
+  // escaping keeps the value well-formed regardless of its contents.
+  GoogleString beacon_url;
+  EscapeToJsStringLiteral(raw_beacon_url, false /* add_quotes */, &beacon_url);
   GoogleString page_url;
   EscapeToJsStringLiteral(driver()->google_url().Spec(), false /* add_quotes */,
                           &page_url);
@@ -255,8 +260,33 @@ void CriticalCssBeaconFilter::FindSelectorsFromStylesheet(
   const Rulesets& rulesets = css.rulesets();
   for (int i = 0, n = rulesets.size(); i < n; ++i) {
     Ruleset* ruleset = rulesets[i];
-    if (ruleset->type() == Ruleset::UNPARSED_REGION) {
-      // Couldn't parse this as a rule.
+    if (ruleset->type() == Ruleset::GROUP_RULE) {
+      // The group node's own media annotation (from an enclosing top-level
+      // @media) gates everything in its body, and body rulesets may carry
+      // empty annotations of their own, so the gate must run BEFORE the
+      // recursion or a selector under "@media print{@supports (x){...}}"
+      // would leak into the candidate set. @media nested inside the body is
+      // flattened onto the body's rulesets as annotations, which the
+      // per-ruleset check below covers on recursion.
+      if (!css_util::CanMediaAffectScreen(
+              ruleset->media_queries().ToString())) {
+        continue;
+      }
+      // The @supports/@container/@layer condition itself is never evaluated:
+      // the prelude is structure-blind verbatim bytes with no server-side
+      // decision procedure. Collecting every body selector as a candidate is
+      // a one-way hazard only: beacon results can only enlarge the set of
+      // rulesets CriticalSelectorFilter::Summarize keeps (its decisions are
+      // per-ruleset keep/drop), and every kept survivor stays wrapped in its
+      // original group prelude, so the browser re-evaluates the condition at
+      // render time. A selector reported critical under a false condition
+      // costs subset bytes; it can never change styling.
+      FindSelectorsFromStylesheet(ruleset->group_body(), selectors);
+      continue;
+    }
+    if (ruleset->type() != Ruleset::RULESET) {
+      // Unparsed regions have no selectors; the selectors() getter below
+      // CHECKs on type.
       continue;
     }
     // Skip rules that can't apply to the screen.

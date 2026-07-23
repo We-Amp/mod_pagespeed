@@ -53,7 +53,6 @@
 #include "net/instaweb/rewriter/public/domain_rewrite_filter.h"
 #include "net/instaweb/rewriter/public/fix_reflow_filter.h"
 #include "net/instaweb/rewriter/public/flush_html_filter.h"
-#include "net/instaweb/rewriter/public/google_analytics_filter.h"
 #include "net/instaweb/rewriter/public/google_font_css_inline_filter.h"
 #include "net/instaweb/rewriter/public/handle_noscript_redirect_filter.h"
 #include "net/instaweb/rewriter/public/image_combine_filter.h"
@@ -62,6 +61,7 @@
 #include "net/instaweb/rewriter/public/insert_amp_link_filter.h"
 #include "net/instaweb/rewriter/public/insert_dns_prefetch_filter.h"
 #include "net/instaweb/rewriter/public/insert_ga_filter.h"
+#include "net/instaweb/rewriter/public/insert_speculation_rules_filter.h"
 #include "net/instaweb/rewriter/public/javascript_filter.h"
 #include "net/instaweb/rewriter/public/js_combine_filter.h"
 #include "net/instaweb/rewriter/public/js_defer_disabled_filter.h"
@@ -73,6 +73,7 @@
 #include "net/instaweb/rewriter/public/make_show_ads_async_filter.h"
 #include "net/instaweb/rewriter/public/meta_tag_filter.h"
 #include "net/instaweb/rewriter/public/pedantic_filter.h"
+#include "net/instaweb/rewriter/public/prioritize_critical_images_filter.h"
 #include "net/instaweb/rewriter/public/push_preload_filter.h"
 #include "net/instaweb/rewriter/public/redirect_on_size_limit_filter.h"
 #include "net/instaweb/rewriter/public/responsive_image_filter.h"
@@ -80,7 +81,6 @@
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_driver_factory.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
-#include "net/instaweb/rewriter/public/rewritten_content_scanning_filter.h"
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "net/instaweb/rewriter/public/strip_scripts_filter.h"
 #include "net/instaweb/rewriter/public/strip_subresource_hints_filter.h"
@@ -145,7 +145,6 @@ void RewriteDriver::InitStats(Statistics* statistics) {
   CssSummarizerBase::InitStats(statistics);
   DedupInlinedImagesFilter::InitStats(statistics);
   DomainRewriteFilter::InitStats(statistics);
-  GoogleAnalyticsFilter::InitStats(statistics);
   GoogleFontCssInlineFilter::InitStats(statistics);
   ImageCombineFilter::InitStats(statistics);
   ImageRewriteFilter::InitStats(statistics);
@@ -158,6 +157,7 @@ void RewriteDriver::InitStats(Statistics* statistics) {
   LocalStorageCacheFilter::InitStats(statistics);
   MakeShowAdsAsyncFilter::InitStats(statistics);
   MetaTagFilter::InitStats(statistics);
+  PrioritizeCriticalImagesFilter::InitStats(statistics);
   RewriteContext::InitStats(statistics);
   UrlInputResource::InitStats(statistics);
   UrlLeftTrimFilter::InitStats(statistics);
@@ -278,6 +278,11 @@ void RewriteDriver::AddPreRenderFilters() {
     // because it depends on seeing the original image URLs.
     AppendOwnedPreRenderFilter(new CriticalImagesBeaconFilter(this));
   }
+  if (rewrite_options->Enabled(RewriteOptions::kPrioritizeCriticalImages)) {
+    // Runs before image rewriting so it sees the original image URLs the
+    // beacon criticality data is keyed on.
+    AppendOwnedPreRenderFilter(new PrioritizeCriticalImagesFilter(this));
+  }
   if (rewrite_options->Enabled(RewriteOptions::kMakeShowAdsAsync)) {
     // We want this filter early in case we ever inline the loader JS.
     AppendOwnedPreRenderFilter(new MakeShowAdsAsyncFilter(this));
@@ -348,16 +353,9 @@ void RewriteDriver::AddPreRenderFilters() {
     CHECK(server_context_ != nullptr);
     AppendOwnedPreRenderFilter(new JsOutlineFilter(this));
   }
-  if (rewrite_options->Enabled(RewriteOptions::kMakeGoogleAnalyticsAsync)) {
-    // Converts sync loads of Google Analytics javascript to async loads.
-    // This needs to be listed before rewrite_javascript because it injects
-    // javascript that has comments and extra whitespace.
-    AppendOwnedPreRenderFilter(new GoogleAnalyticsFilter(this, statistics()));
-  }
-  if ((rewrite_options->Enabled(RewriteOptions::kInsertGA) ||
-       rewrite_options->running_experiment()) &&
+  if (rewrite_options->Enabled(RewriteOptions::kInsertGA) &&
       rewrite_options->ga_id() != "") {
-    // Like MakeGoogleAnalyticsAsync, InsertGA should be before js rewriting.
+    // InsertGA should be before js rewriting.
     AppendOwnedPreRenderFilter(new InsertGAFilter(this));
   }
   if (rewrite_options->Enabled(RewriteOptions::kCombineJavascript)) {
@@ -453,10 +451,6 @@ void RewriteDriver::AddPreRenderFilters() {
 
 void RewriteDriver::AddPostRenderFilters() {
   const RewriteOptions* rewrite_options = options();
-  if (rewrite_options->Enabled(RewriteOptions::kFlushSubresources) &&
-      !options()->pre_connect_url().empty()) {
-    AddOwnedPostRenderFilter(new RewrittenContentScanningFilter(this));
-  }
   if (rewrite_options->Enabled(RewriteOptions::kInsertDnsPrefetch)) {
     InsertDnsPrefetchFilter* insert_dns_prefetch_filter =
         new InsertDnsPrefetchFilter(this);
@@ -466,6 +460,9 @@ void RewriteDriver::AddPostRenderFilters() {
     InsertAmpLinkFilter* insert_amp_link_filter = new InsertAmpLinkFilter(this);
     AddOwnedPostRenderFilter(insert_amp_link_filter);
   }
+  if (rewrite_options->Enabled(RewriteOptions::kInsertSpeculationRules)) {
+    AddOwnedPostRenderFilter(new InsertSpeculationRulesFilter(this));
+  }
   if (rewrite_options->Enabled(RewriteOptions::kAddInstrumentation)) {
     // Inject javascript to instrument loading-time. This should run before
     // defer js so that its onload handler can fire before JS starts executing.
@@ -474,8 +471,10 @@ void RewriteDriver::AddPostRenderFilters() {
   if (rewrite_options->Enabled(RewriteOptions::kDeferJavascript)) {
     // Defers javascript download and execution to post onload. This filter
     // should be applied before JsDisableFilter and JsDeferFilter.
-    // kDeferIframe filter should never be turned on when either defer_js
-    // or disable_js is enabled.
+    // DeferIframeFilter is an integral part of defer_js/disable_js: its
+    // inline conversion scripts defer only because the js-defer machinery
+    // defers them. The standalone 'defer_iframe' config name is a
+    // deprecated no-op (kDeferIframeDeprecated).
     AddOwnedPostRenderFilter(new DeferIframeFilter(this));
     AddOwnedPostRenderFilter(new JsDisableFilter(this));
     // Though we are adding JsDeferDisabledFilter here, if we are flushing
@@ -499,8 +498,10 @@ void RewriteDriver::AddPostRenderFilters() {
     AddOwnedPostRenderFilter(new AgentOptimizeVaryFilter(this));
   }
   if (rewrite_options->Enabled(RewriteOptions::kDisableJavascript)) {
-    // kDeferIframe filter should never be turned on when either defer_js
-    // or disable_js is enabled.
+    // DeferIframeFilter is an integral part of defer_js/disable_js: its
+    // inline conversion scripts defer only because the js-defer machinery
+    // defers them. The standalone 'defer_iframe' config name is a
+    // deprecated no-op (kDeferIframeDeprecated).
     AddOwnedPostRenderFilter(new DeferIframeFilter(this));
     AddOwnedPostRenderFilter(new JsDisableFilter(this));
   }

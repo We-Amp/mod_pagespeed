@@ -17,7 +17,9 @@
 # Author: jefftk@google.com (Jeff Kaufman)
 #
 # Runs all Apache-specific experiment framework tests that depend on AnalyticsID
-# being set.
+# being set.  A config with AnalyticsID must still parse and divert (checked by
+# the sourced apache_experiment_test.sh), but insert_ga is deprecated and no
+# longer auto-enabled by experiments, so no analytics javascript is injected.
 #
 # See apache_experiment_test for usage.
 #
@@ -27,13 +29,11 @@ source "$this_dir/apache_experiment_test.sh" || exit 1
 EXAMPLE="$1/mod_pagespeed_example"
 EXTEND_CACHE="$EXAMPLE/extend_cache.html"
 
-start_test Analytics javascript is added for the experimental group.
+start_test Analytics javascript is not added for any group despite AnalyticsID.
 OUT=$($WGET_DUMP --header='Cookie: PageSpeedExperiment=2' $EXTEND_CACHE)
-check_from "$OUT" fgrep -q 'Experiment: 2'
+check_not_from "$OUT" fgrep -q 'Experiment:'
 OUT=$($WGET_DUMP --header='Cookie: PageSpeedExperiment=7' $EXTEND_CACHE)
-check_from "$OUT" fgrep -q 'Experiment: 7'
-
-start_test Analytics javascript is not added for the no-experiment group.
+check_not_from "$OUT" fgrep -q 'Experiment:'
 OUT=$($WGET_DUMP --header='Cookie: PageSpeedExperiment=0' $EXTEND_CACHE)
 check_not_from "$OUT" fgrep -q 'Experiment:'
 

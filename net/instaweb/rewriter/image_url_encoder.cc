@@ -52,6 +52,15 @@ const char kMobileUserAgentKey[] = "m";
 const char kSaveDataKey[] = "d";
 const char kSmallScreenKey[] = "ss";
 
+// AVIF cache-key tokens live in a DISJOINT alphabet: every AVIF token begins
+// with the uppercase 'A' prefix, which is never used by any WebP token
+// (". w v a m d ss").  This guarantees no AVIF key can ever equal a WebP key,
+// so an AVIF payload can never be served under a WebP-keyed entry (or vice
+// versa).  AVIF_NONE emits no token (like a would-be "A.").
+const char kAvifLossyUserAgentKey[] = "Af";
+const char kAvifLossyLosslessAlphaUserAgentKey[] = "Ag";
+const char kAvifAnimatedUserAgentKey[] = "Ah";
+
 bool IsValidCode(char code) {
   return ((code == kCodeSeparator) || (code == kCodeWebpLossy) ||
           (code == kCodeWebpLossyLosslessAlpha) ||
@@ -215,8 +224,16 @@ bool ImageUrlEncoder::Decode(const StringPiece& encoded, StringVector* urls,
   // mostly when the url is a Non-Legacy encoded one.
   if (terminator == kCodeWebpLossy) {
     data->set_libwebp_level(ResourceContext::LIBWEBP_LOSSY_ONLY);
+    // Normalize: a legacy WebP terminator commits this URL to WebP, so any AVIF
+    // capability that may have been pre-set on the context was never part of
+    // the stored key.  Clear it so an old ".webp" URL cannot decode into a
+    // context carrying an AVIF capability (which would recompute a different
+    // key). Legacy AVIF terminators intentionally do not exist -- AVIF-ness is
+    // recovered from the ".avif" extension (IsAvifRewrittenUrl), not the URL.
+    data->clear_avif_level();
   } else if (terminator == kCodeWebpLossyLosslessAlpha) {
     data->set_libwebp_level(ResourceContext::LIBWEBP_LOSSY_LOSSLESS_ALPHA);
+    data->clear_avif_level();
   }
 
   GoogleString* url = StringVectorAdd(urls);
@@ -251,6 +268,99 @@ void ImageUrlEncoder::SetLibWebpLevel(
   resource_context->set_libwebp_level(libwebp_level);
 }
 
+void ImageUrlEncoder::SetAvifLevel(const RewriteOptions& options,
+                                   const RequestProperties& request_properties,
+                                   ResourceContext* resource_context) {
+  ResourceContext::AvifLevel avif_level = ResourceContext::AVIF_NONE;
+  // Pure pre-decode request capability, mirroring SetLibWebpLevel: derived only
+  // from what the request advertises, with NO image-byte input.  The metadata
+  // cache is looked up on this key; the source fetch+decode only happens on a
+  // miss, so the level cannot (and must not) inspect the source to choose
+  // "lossy photo vs flat art" -- those bytes do not exist yet.  Capability only.
+  //
+  // We do enabled checks before setting the AVIF level, exactly as
+  // SetLibWebpLevel does, since it avoids writing two metadata cache keys for the
+  // same output when AVIF rewriting is disabled.  AVIF capability is Accept-driven
+  // (SupportsAvif* all key off accepts_avif_), so the TIER is selected by which
+  // AVIF filters are enabled -- NOT by any UA signal -- exactly as WebP's tier is
+  // gated by the enabled WebP filters.
+  if (request_properties.SupportsAvifAnimated() &&
+      (options.Enabled(RewriteOptions::kRecompressAvif) ||
+       options.Enabled(RewriteOptions::kConvertToAvifAnimated))) {
+    avif_level = ResourceContext::AVIF_ANIMATED;
+  } else if (request_properties.SupportsAvifLosslessAlpha() &&
+             (options.Enabled(RewriteOptions::kRecompressAvif) ||
+              options.Enabled(RewriteOptions::kConvertToAvifLossless))) {
+    avif_level = ResourceContext::AVIF_LOSSY_LOSSLESS_ALPHA;
+  } else if (request_properties.SupportsAvifRewrittenUrls() &&
+             (options.Enabled(RewriteOptions::kRecompressAvif) ||
+              options.Enabled(RewriteOptions::kConvertToAvifLossless) ||
+              options.Enabled(RewriteOptions::kConvertJpegToAvif))) {
+    avif_level = ResourceContext::AVIF_LOSSY_ONLY;
+  }
+  resource_context->set_avif_level(avif_level);
+}
+
+void ImageUrlEncoder::SetAvifCapability(const RewriteDriver& driver,
+                                        ResourceContext* context) {
+  const RewriteOptions* options = driver.options();
+  if (context == nullptr) {
+    return;
+  }
+
+  // Committed-URL reconcile rule (keyed on the URL's committed ".avif" /
+  // ".webp" extension, nothing else): reconcile = reproduce the CANONICAL
+  // metadata key of the MINTING population; BOTH capability dimensions are
+  // forced, because both ride in the stored key.  A committed URL can only have
+  // been minted by a client whose Accept advertised the committed format, and
+  // an AVIF-advertising client in practice advertises WebP as well -- so the
+  // dominant minting population for ".avif" is both-capable, and its stored key
+  // carries BOTH canonical tokens.  Forcing only one dimension (or forcing the
+  // other to NONE) recomputes a key no minter ever stored and self-MISSes.
+  //  * Otherwise (same-capability re-fetch, the common path) do NOT force:
+  //    SetAvifLevel re-derives the natural level, which already reproduces the
+  //    stored key (blanket-forcing would recompute a different token and cause
+  //    a metadata self-MISS -- not poisoning, thanks to the disjoint alphabet,
+  //    but not a hit either).
+  if (options->serve_rewritten_avif_urls_to_any_agent() &&
+      !driver.fetch_url().empty() &&
+      IsAvifRewrittenUrl(driver.decoded_base_url())) {
+    // Canonical key of the ".avif"-minting population: both dimensions at
+    // their canonical serve-to-any-agent levels, mirroring WebP's
+    // LIBWEBP_LOSSY_LOSSLESS_ALPHA assumption in SetWebpAndMobileUserAgent.
+    // SetWebpAndMobileUserAgent (which ran first) took the non-".webp"
+    // else-branch and re-derived a per-agent libwebp_level; override it so the
+    // key is agent-independent in BOTH dimensions and matches the both-capable
+    // minter's stored key.
+    context->set_avif_level(ResourceContext::AVIF_LOSSY_LOSSLESS_ALPHA);
+    context->set_libwebp_level(ResourceContext::LIBWEBP_LOSSY_LOSSLESS_ALPHA);
+  } else if (options->serve_rewritten_webp_urls_to_any_agent() &&
+             !driver.fetch_url().empty() &&
+             IsWebpRewrittenUrl(driver.decoded_base_url())) {
+    // Canonical key of the ".webp"-minting population.  The libwebp dimension
+    // was already forced to LIBWEBP_LOSSY_LOSSLESS_ALPHA by
+    // SetWebpAndMobileUserAgent.  The AVIF dimension of the minter's stored key
+    // depends on the server config, not the agent: with any AVIF conversion
+    // filter enabled, a ".webp" URL is minted by both-capable clients whose key
+    // carried the canonical AVIF token (the format choice losing to WebP does
+    // not remove the capability token from the key); without AVIF filters
+    // (including ".webp" URLs minted before AVIF existed) the stored key has no
+    // A-token, so force AVIF_NONE.  This keeps Decode()'s clearing of
+    // avif_level on legacy WebP terminators consistent: legacy-encoded URLs
+    // predate AVIF and reconcile to the no-A-token key.
+    const bool avif_conversion_enabled =
+        options->Enabled(RewriteOptions::kConvertJpegToAvif) ||
+        options->Enabled(RewriteOptions::kConvertToAvifLossless) ||
+        options->Enabled(RewriteOptions::kConvertToAvifAnimated) ||
+        options->Enabled(RewriteOptions::kRecompressAvif);
+    context->set_avif_level(avif_conversion_enabled
+                                ? ResourceContext::AVIF_LOSSY_LOSSLESS_ALPHA
+                                : ResourceContext::AVIF_NONE);
+  } else {
+    SetAvifLevel(*options, *driver.request_properties(), context);
+  }
+}
+
 bool ImageUrlEncoder::IsWebpRewrittenUrl(const GoogleUrl& gurl) {
   ResourceNamer namer;
   if (!namer.DecodeIgnoreHashAndSignature(gurl.LeafSansQuery())) {
@@ -268,6 +378,24 @@ bool ImageUrlEncoder::IsWebpRewrittenUrl(const GoogleUrl& gurl) {
 
   StringPiece webp_extension_with_dot = kContentTypeWebp.file_extension();
   return namer.ext() == webp_extension_with_dot.substr(1);
+}
+
+bool ImageUrlEncoder::IsAvifRewrittenUrl(const GoogleUrl& gurl) {
+  ResourceNamer namer;
+  if (!namer.DecodeIgnoreHashAndSignature(gurl.LeafSansQuery())) {
+    return false;
+  }
+
+  // As with IsWebpRewrittenUrl, only images rewritten by ImageRewriteFilter
+  // (id "ic") are AVIF-committed.
+  if (namer.id() != RewriteOptions::kImageCompressionId) {
+    return false;
+  }
+
+  // Keyed on the ".avif" output extension, exactly as IsWebpRewrittenUrl keys
+  // on ".webp".
+  StringPiece avif_extension_with_dot = kContentTypeAvif.file_extension();
+  return namer.ext() == avif_extension_with_dot.substr(1);
 }
 
 void ImageUrlEncoder::SetWebpAndMobileUserAgent(const RewriteDriver& driver,
@@ -312,6 +440,25 @@ void ImageUrlEncoder::SetSmallScreen(const RewriteDriver& driver,
 //
 // mobile_user_agent, if applies, doubles the optimized versions. However,
 // this flag is usually not effective.
+//
+// Capability-vs-format model (see cached_result.proto ResourceContext):
+//   libwebp_level and avif_level are independent request CAPABILITIES; both may
+//   be non-NONE for a both-capable client, and BOTH are folded into this cache
+//   key.  The per-image "AVIF vs WebP vs keep-original" FORMAT choice is made
+//   downstream at encode time and recorded in the CachedResult output
+//   URL/extension -- it is NEVER folded back into the levels or this key.  The
+//   key is unchanged by which format ultimately wins.
+//
+// Token table (the two alphabets are DISJOINT -- every AVIF token is
+// 'A'-prefixed, which no WebP token uses -- so no AVIF key can equal a WebP
+// key):
+//   WebP (libwebp_level):  '.' NONE, 'w' lossy, 'v' lossy+lossless+alpha,
+//                          'a' animated   (plus 'm' mobile, 'd'/'ss' quality)
+//   AVIF (avif_level):     (none emits no token), 'Af' lossy,
+//                          'Ag' lossy+lossless+alpha, 'Ah' animated
+//   The two tokens are emitted INDEPENDENTLY from the two levels: a both-
+//   capable request emits both (e.g. "vAg"); a WebP-only request emits only the
+//   WebP token; an AVIF-only (committed ".avif") request emits only "Af/Ag/Ah".
 GoogleString ImageUrlEncoder::CacheKeyFromResourceContext(
     const ResourceContext& resource_context) {
   GoogleString user_agent_cache_key = "";
@@ -340,6 +487,25 @@ GoogleString ImageUrlEncoder::CacheKeyFromResourceContext(
     StrAppend(&user_agent_cache_key, kSaveDataKey);
   } else if (resource_context.may_use_small_screen_quality()) {
     StrAppend(&user_agent_cache_key, kSmallScreenKey);
+  }
+
+  // Emit the AVIF capability token INDEPENDENTLY from the WebP token above.
+  // Appended last so that AVIF_NONE (the overwhelmingly common case) leaves
+  // existing WebP-only keys byte-for-byte unchanged.  The 'A'-prefixed alphabet
+  // is disjoint from every WebP token, so any combination is unambiguous.
+  switch (resource_context.avif_level()) {
+    case ResourceContext::AVIF_NONE:
+      // No token for AVIF_NONE (mirrors an unemitted "A.").
+      break;
+    case ResourceContext::AVIF_LOSSY_ONLY:
+      StrAppend(&user_agent_cache_key, kAvifLossyUserAgentKey);
+      break;
+    case ResourceContext::AVIF_LOSSY_LOSSLESS_ALPHA:
+      StrAppend(&user_agent_cache_key, kAvifLossyLosslessAlphaUserAgentKey);
+      break;
+    case ResourceContext::AVIF_ANIMATED:
+      StrAppend(&user_agent_cache_key, kAvifAnimatedUserAgentKey);
+      break;
   }
 
   return user_agent_cache_key;

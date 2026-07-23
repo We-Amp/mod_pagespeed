@@ -40,7 +40,7 @@ message AssociatedImageInfo {
 // is a sequence of input URLs and a filter id. The input array
 // tells us which inputs are used to construct this output; it must be
 // interpreted using the URL-sequence that was used to form the key.
-// Next free tag: 27
+// Next free tag: 29
 message CachedResult {
   // Tags 1-7 are for internal use by output_resource.
 
@@ -151,6 +151,15 @@ message CachedResult {
   // it declares nothing and thus inherits the enclosing page's charset.
   // Used by CssSummarizerBase.
   optional string inlined_data_charset = 27;
+
+  // Font dependencies (content_type == DEP_FONT) discovered inside collected
+  // CSS. Used by CollectDependenciesFilter. Font dependencies serialize ONLY
+  // into this field, never into collected_dependency above, so binaries that
+  // predate DEP_FONT skip them as unknown fields; if stored in the old field,
+  // proto2's closed enums would make an old binary read content_type as the
+  // field default (DEP_JAVASCRIPT) and emit as=script for a font (see
+  // dependencies.proto).
+  repeated Dependency collected_font_dependency = 28;
 }
 
 // Contains the mapping of input URLs to output URLs.  In the general
@@ -180,7 +189,7 @@ message OutputPartitions {
 
 // Encapsulates all the data needed to rewrite a resource.  Any filter needing
 // additional information should add it as optional fields here.
-//   Next free tag: 9
+//   Next free tag: 10
 message ResourceContext {
   optional ImageDim desired_image_dims = 1;
   reserved 2;
@@ -196,6 +205,22 @@ message ResourceContext {
   optional LibWebpLevel libwebp_level = 5 [default = LIBWEBP_NONE];
 
   reserved 6;
+
+  // Request-capability level for AVIF, computed pre-decode exactly like
+  // libwebp_level above (from request support + enabled AVIF filters, never
+  // from image bytes). avif_level and libwebp_level are independent
+  // capabilities: a both-capable request legitimately carries BOTH non-NONE,
+  // and both ride in the metadata cache key. The per-image AVIF-vs-WebP-vs-
+  // original format choice happens at encode time and is recorded in the
+  // CachedResult output URL/extension (.avif), NEVER folded back into this
+  // level or the key. See image_url_encoder.cc CacheKeyFromResourceContext.
+  enum AvifLevel {
+    AVIF_NONE = 0;
+    AVIF_LOSSY_ONLY = 1;
+    AVIF_LOSSY_LOSSLESS_ALPHA = 2;
+    AVIF_ANIMATED = 3;
+  }
+  optional AvifLevel avif_level = 9 [default = AVIF_NONE];
 
   // Set to true if we may use the image qualities set for small screen.
   optional bool may_use_small_screen_quality = 7;

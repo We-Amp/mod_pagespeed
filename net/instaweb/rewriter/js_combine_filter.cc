@@ -331,7 +331,10 @@ class JsCombineFilter::Context : public RewriteContext {
   }
 
   bool PolicyPermitsRendering() const override {
-    return AreOutputsAllowedByCsp(CspDirective::kScriptSrc);
+    // The rendered output includes inline <script> bootstraps, which need
+    // inline-script permission in addition to the URL being allowed.
+    return AreOutputsAllowedByCsp(CspDirective::kScriptSrc) &&
+           Driver()->content_security_policy().PermitsInlineScript();
   }
 
   // For every partition, write a new script tag that points to the
@@ -578,7 +581,13 @@ void JsCombineFilter::StartElementImpl(HtmlElement* element) {
       break;
 
     case ScriptTagScanner::kUnknownScript:
-      // We have something like vbscript. Handle this as a barrier
+    case ScriptTagScanner::kJavaScriptModule:
+      // Barriers, both deliberately. Unknown types are something like
+      // vbscript. Modules have isolated top-level scope, implicit strict
+      // mode, and deferred execution, none of which the eval-based
+      // combination strategy can represent (import is a SyntaxError inside
+      // eval). The depth increment must match EndElementImpl's unconditional
+      // decrement for every </script>.
       NextCombination();
       ++script_depth_;
       break;
@@ -598,7 +607,7 @@ void JsCombineFilter::IEDirective(HtmlIEDirectiveNode* directive) {
   NextCombination();
 }
 
-void JsCombineFilter::Characters(HtmlCharactersNode* characters) {
+void JsCombineFilter::CharactersImpl(HtmlCharactersNode* characters) {
   // If a script has non-whitespace data inside of it, we cannot
   // replace its contents with a call to eval, as they may be needed.
   if (script_depth_ > 0 && !OnlyWhitespace(characters->contents())) {
@@ -624,9 +633,16 @@ void JsCombineFilter::Flush() {
 // reset.
 void JsCombineFilter::ConsiderJsForCombination(HtmlElement* element,
                                                HtmlElement::Attribute* src) {
-  if (!driver()->content_security_policy().PermitsEval()) {
+  // Combining replaces each original <script src> with an inline
+  // <script>eval(...)</script> bootstrap, so both eval and inline scripts
+  // must be permitted by the page's CSP; otherwise browsers block the
+  // bootstraps and the combined scripts silently never execute.
+  if (!driver()->content_security_policy().PermitsEval() ||
+      !CspPermitsInlineScript()) {
     driver()->InsertDebugComment(
-        "Not considering JS combining since CSP forbids eval", element);
+        "Not considering JS combining since CSP forbids eval or inline "
+        "scripts",
+        element);
     context_->Reset();
     return;
   }
@@ -672,6 +688,15 @@ void JsCombineFilter::ConsiderJsForCombination(HtmlElement* element,
   // TODO(morlovich): is it worth combining multiple scripts with
   // async/defer if the flags are the same?
   if (script_scanner_.ExecutionMode(element) != script_scanner_.kExecuteSync) {
+    NextCombination();
+    return;
+  }
+
+  // Combining stringifies each script into a variable inside a shared file
+  // and deletes the original element along with its integrity= attribute,
+  // silently discarding the author's SRI guarantee (the per-file hash could
+  // never match the combined bytes anyway). Treat it as a barrier.
+  if (ScriptTagScanner::HasIntegrityAttribute(element)) {
     NextCombination();
     return;
   }
@@ -726,7 +751,10 @@ JsCombineFilter::JsCombiner* JsCombineFilter::combiner() const {
 // In sync flow, just write out what we have so far, and then
 // reset the context.
 void JsCombineFilter::NextCombination() {
-  if (!context_->empty() && driver()->content_security_policy().PermitsEval()) {
+  // Re-check the CSP here, since a stricter policy can arrive mid-document
+  // after scripts were already accumulated into the context.
+  if (!context_->empty() && driver()->content_security_policy().PermitsEval() &&
+      CspPermitsInlineScript()) {
     driver()->InitiateRewrite(context_.release());
     context_.reset(MakeContext());
   }

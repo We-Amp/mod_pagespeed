@@ -20,14 +20,14 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-reco
 # Install pytest
 RUN pip3 install --no-cache-dir pytest pytest-timeout
 
-# Build nginx 1.30.3 from source (must match the version the module was built
+# Build nginx 1.30.4 from source (must match the version the module was built
 # against — nginx ABI-pins modules to the exact version, so this MUST track the
-# dev nginx in docker/Dockerfile; CVE-2026-42055: 1.30.2 -> 1.30.3).
-RUN curl -fsSL "https://nginx.org/download/nginx-1.30.3.tar.gz" -o /tmp/nginx.tar.gz \
-    && echo "e5823dc6f45610993def93ebf6cfce68264af4958c77e874b7d20f3709001b8f  /tmp/nginx.tar.gz" | sha256sum -c - \
+# dev nginx in docker/Dockerfile; CVE-2026-42533: 1.30.3 -> 1.30.4).
+RUN curl -fsSL "https://nginx.org/download/nginx-1.30.4.tar.gz" -o /tmp/nginx.tar.gz \
+    && echo "4261dc90e9e47c1c4041276e9aaa3d48ebe2e664f728e14fa95ae6c67d57a08b  /tmp/nginx.tar.gz" | sha256sum -c - \
     && tar -xzf /tmp/nginx.tar.gz -C /usr/local/src \
     && rm /tmp/nginx.tar.gz \
-    && cd /usr/local/src/nginx-1.30.3 \
+    && cd /usr/local/src/nginx-1.30.4 \
     && ./configure \
         --prefix=/usr/local/nginx \
         --with-http_v2_module \

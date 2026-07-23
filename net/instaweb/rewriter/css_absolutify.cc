@@ -66,6 +66,15 @@ bool CssAbsolutify::AbsolutifyUrls(Css::Stylesheet* stylesheet,
                                        driver->options(),
                                        driver->message_handler());
   transformer.set_trim_urls(false);
+  return AbsolutifyStylesheet(stylesheet, &transformer,
+                              handle_parseable_ruleset_sections,
+                              handle_unparseable_sections, handler);
+}
+
+bool CssAbsolutify::AbsolutifyStylesheet(
+    Css::Stylesheet* stylesheet, CssTagScanner::Transformer* transformer,
+    bool handle_parseable_ruleset_sections, bool handle_unparseable_sections,
+    MessageHandler* handler) {
   bool urls_modified = false;
 
   Css::FontFaces& font_faces = stylesheet->mutable_font_faces();
@@ -73,7 +82,7 @@ bool CssAbsolutify::AbsolutifyUrls(Css::Stylesheet* stylesheet,
        font_face_iter != font_faces.end(); ++font_face_iter) {
     Css::FontFace* font_face = *font_face_iter;
     if (AbsolutifyDeclarations(
-            &font_face->mutable_declarations(), &transformer,
+            &font_face->mutable_declarations(), transformer,
             true, /* Must handle parseable sections in @font-face. */
             handle_unparseable_sections, handler)) {
       urls_modified = true;
@@ -97,7 +106,7 @@ bool CssAbsolutify::AbsolutifyUrls(Css::Stylesheet* stylesheet,
             GoogleString rewritten_bytes;
             StringWriter writer(&rewritten_bytes);
             if (CssTagScanner::TransformUrls(original_bytes, &writer,
-                                             &transformer, handler)) {
+                                             transformer, handler)) {
               selectors.set_bytes_in_original_buffer(rewritten_bytes);
               urls_modified = true;
             }
@@ -111,9 +120,27 @@ bool CssAbsolutify::AbsolutifyUrls(Css::Stylesheet* stylesheet,
           StringPiece original_bytes(tmp.data(), tmp.size());
           GoogleString rewritten_bytes;
           StringWriter writer(&rewritten_bytes);
-          if (CssTagScanner::TransformUrls(original_bytes, &writer,
-                                           &transformer, handler)) {
+          if (CssTagScanner::TransformUrls(original_bytes, &writer, transformer,
+                                           handler)) {
             unparsed->set_bytes_in_original_buffer(rewritten_bytes);
+            urls_modified = true;
+          }
+          break;
+        }
+        case Css::Ruleset::GROUP_RULE: {
+          // Group-rule preludes (@supports/@layer/@container conditions) are
+          // opaque, structure-blind bytes, so a url() in one -- e.g.
+          // "@supports (background: image-set(url(a.png) 1x))" -- is
+          // invisible to the parsed-declaration walk below. Absolutify it
+          // textually with the same semantics as UNPARSED_REGION. (@media
+          // preludes never reach here: media queries are parsed structurally
+          // and cannot contain url()s.)
+          StringPiece prelude_bytes(ruleset->group_prelude());
+          GoogleString rewritten_bytes;
+          StringWriter writer(&rewritten_bytes);
+          if (CssTagScanner::TransformUrls(prelude_bytes, &writer, transformer,
+                                           handler)) {
+            *ruleset->mutable_group_prelude() = rewritten_bytes;
             urls_modified = true;
           }
           break;
@@ -121,9 +148,21 @@ bool CssAbsolutify::AbsolutifyUrls(Css::Stylesheet* stylesheet,
       }
     }
     if (ruleset->type() == Css::Ruleset::RULESET) {
-      if (AbsolutifyDeclarations(&ruleset->mutable_declarations(), &transformer,
+      if (AbsolutifyDeclarations(&ruleset->mutable_declarations(), transformer,
                                  handle_parseable_ruleset_sections,
                                  handle_unparseable_sections, handler)) {
+        urls_modified = true;
+      }
+    } else if (ruleset->type() == Css::Ruleset::GROUP_RULE) {
+      // Declarations inside @supports/@layer/@container are parsed
+      // structure, so the textual unparseable path above never sees them.
+      // Without this recursion, proxied/moved CSS would keep relative url()s
+      // inside group rules. The prelude, in contrast, is opaque bytes and
+      // may well contain url()s; it is transformed textually above when
+      // handle_unparseable_sections is set.
+      if (AbsolutifyStylesheet(ruleset->mutable_group_body(), transformer,
+                               handle_parseable_ruleset_sections,
+                               handle_unparseable_sections, handler)) {
         urls_modified = true;
       }
     }

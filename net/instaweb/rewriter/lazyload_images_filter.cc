@@ -19,6 +19,8 @@
 
 #include "net/instaweb/rewriter/public/lazyload_images_filter.h"
 
+#include <vector>
+
 #include "base/logging.h"
 #include "net/instaweb/rewriter/public/critical_images_finder.h"
 #include "net/instaweb/rewriter/public/csp.h"
@@ -26,6 +28,7 @@
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/server_context.h"
+#include "net/instaweb/rewriter/public/srcset_slot.h"
 #include "net/instaweb/rewriter/public/static_asset_manager.h"
 #include "net/instaweb/util/public/fallback_property_page.h"
 #include "pagespeed/kernel/base/escaping.h"
@@ -291,6 +294,69 @@ void LazyloadImagesFilter::EndElementImpl(HtmlElement* element) {
 
   HtmlElement::Attribute* src = element->FindAttribute(HtmlName::kSrc);
   if (src == nullptr) {
+    // Srcset-only image: there is no src to defer, so the js machinery has
+    // nothing to rewrite, but native mode still applies. A beacon-critical
+    // srcset candidate earns the same eager-fetch treatment as a critical
+    // src, and a non-critical one gets loading="lazy" like a non-critical
+    // src. The beacon keys such images on the candidate the browser actually
+    // displayed. Author attributes win, as they do for images with a src:
+    // loading= opts the element out, pagespeed_no_defer is honored, and a
+    // data-pagespeed-lazy-src/data-src marker (a third-party loader's) is
+    // left alone.
+    if (!native_mode_ ||
+        element->FindAttribute(HtmlName::kLoading) != nullptr) {
+      return;
+    }
+    if (element->FindAttribute(HtmlName::kDataPagespeedNoDefer) != nullptr ||
+        element->FindAttribute(HtmlName::kPagespeedNoDefer) != nullptr) {
+      return;
+    }
+    AbstractLogRecord* log_record = driver()->log_record();
+    if (element->FindAttribute(HtmlName::kDataPagespeedLazySrc) != nullptr ||
+        element->FindAttribute(HtmlName::kDataSrc) != nullptr) {
+      log_record->LogLazyloadFilter(
+          RewriteOptions::FilterId(RewriteOptions::kLazyloadImages),
+          RewriterApplication::NOT_APPLIED, false, false);
+      return;
+    }
+    if (HasCriticalSrcsetCandidate(*element)) {
+      if (element->FindAttribute(HtmlName::kFetchpriority) == nullptr) {
+        driver()->AddAttribute(element, HtmlName::kFetchpriority, "high");
+      }
+      if (element->FindAttribute(HtmlName::kDecoding) == nullptr) {
+        driver()->AddAttribute(element, HtmlName::kDecoding, "async");
+      }
+      lazyload_images_skipped_critical_->Add(1);
+      log_record->LogLazyloadFilter(
+          RewriteOptions::FilterId(RewriteOptions::kLazyloadImages),
+          RewriterApplication::NOT_APPLIED, false, true);
+      return;
+    }
+    CriticalImagesFinder* finder =
+        driver()->server_context()->critical_images_finder();
+    if (finder->Available(driver()) != CriticalImagesFinder::kAvailable) {
+      // LCP protection, mirroring the src path: without critical-image data
+      // leave the first N otherwise eligible images untouched.
+      ++num_eligible_images_seen_;
+      if (num_eligible_images_seen_ <=
+          driver()->options()->lazyload_images_skip_first()) {
+        log_record->LogLazyloadFilter(
+            RewriteOptions::FilterId(RewriteOptions::kLazyloadImages),
+            RewriterApplication::NOT_APPLIED, false, false);
+        return;
+      }
+    }
+    driver()->AddAttribute(element, HtmlName::kLoading, "lazy");
+    // decoding="async" keeps image decode off the main thread. As in the src
+    // path, deliberately no fetchpriority="low": loading="lazy" already
+    // deprioritizes the fetch.
+    if (element->FindAttribute(HtmlName::kDecoding) == nullptr) {
+      driver()->AddAttribute(element, HtmlName::kDecoding, "async");
+    }
+    lazyload_images_native_applied_->Add(1);
+    log_record->LogLazyloadFilter(
+        RewriteOptions::FilterId(RewriteOptions::kLazyloadImages),
+        RewriterApplication::APPLIED_OK, false, false);
     return;
   }
 
@@ -520,6 +586,46 @@ GoogleString LazyloadImagesFilter::GetLazyloadJsSnippet(
       StrCat(lazyload_images_js, "\npagespeed.lazyLoadInit(", load_onload, ", ",
              escaped_blank_image_url, ");\n");
   return lazyload_js;
+}
+
+bool LazyloadImagesFilter::HasCriticalSrcsetCandidate(
+    const HtmlElement& element) {
+  const HtmlElement::Attribute* srcset =
+      element.FindAttribute(HtmlName::kSrcset);
+  if (srcset == nullptr || srcset->DecodedValueOrNull() == nullptr) {
+    return false;
+  }
+  CriticalImagesFinder* finder =
+      driver()->server_context()->critical_images_finder();
+  if (finder->Available(driver()) != CriticalImagesFinder::kAvailable) {
+    return false;
+  }
+  std::vector<SrcSetSlotCollection::ImageCandidate> candidates;
+  SrcSetSlotCollection::ParseSrcSet(srcset->DecodedValueOrNull(), &candidates);
+  for (int i = 0, n = candidates.size(); i < n; ++i) {
+    if (candidates[i].url.empty()) {
+      continue;
+    }
+    // Decode the url since the critical images in the finder are not
+    // rewritten.
+    GoogleUrl gurl(base_url(), candidates[i].url);
+    StringVector decoded_url_vector;
+    if (driver()->DecodeUrl(gurl, &decoded_url_vector) &&
+        decoded_url_vector.size() == 1) {
+      gurl.Reset(decoded_url_vector[0]);
+    }
+    if (!gurl.IsAnyValid()) {
+      continue;
+    }
+    StringPiece full_url = gurl.Spec();
+    if (full_url.empty() || !driver()->options()->IsAllowed(full_url)) {
+      continue;
+    }
+    if (finder->IsHtmlCriticalImage(full_url, driver())) {
+      return true;
+    }
+  }
+  return false;
 }
 
 }  // namespace net_instaweb

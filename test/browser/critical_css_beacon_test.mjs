@@ -13,31 +13,12 @@
 // Run via run_browser_tests.sh (installs playwright + chromium on demand).
 
 import { chromium } from 'playwright';
-import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { loadCompiledAsset } from './lib.mjs';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const MAX_POST_SIZE = 131072;  // pagespeedutils.MAX_POST_SIZE, compiled in.
-
-// --- Extract the compiled JS string from the generated data2c .cc file. ---
-function loadCompiledAsset(ccPath) {
-  const cc = readFileSync(ccPath, 'utf8');
-  const start = cc.indexOf('=');
-  const end = cc.lastIndexOf('";');
-  if (start === -1 || end === -1 || end < start) {
-    throw new Error(`unrecognized data2c format in ${ccPath}`);
-  }
-  const literals = cc.slice(start, end + 1).match(/"(?:[^"\\]|\\.)*"/g);
-  if (!literals || literals.length === 0) {
-    throw new Error(`no string literals found in ${ccPath}`);
-  }
-  const escaped = literals.map((l) => l.slice(1, -1)).join('');
-  return escaped.replace(/\\(x[0-9a-fA-F]{2}|.)/g, (m, e) => {
-    if (e[0] === 'x') return String.fromCharCode(parseInt(e.slice(1), 16));
-    return { n: '\n', t: '\t', r: '\r' }[e] ?? e;
-  });
-}
 
 const beaconJs = loadCompiledAsset(
     join(repoRoot, 'net', 'instaweb', 'rewriter', 'generated',

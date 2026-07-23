@@ -59,20 +59,11 @@ const char kHeadScriptNonPedantic[] =
 
 }  // namespace
 
-// Timing tag for total page load time.  Also embedded in kTailScriptFormat
-// above via the second %s.
-// TODO(jud): These values would be better set to "load" and "beforeunload".
-const char AddInstrumentationFilter::kLoadTag[] = "load:";
-const char AddInstrumentationFilter::kUnloadTag[] = "unload:";
-
 // Counters.
 const char AddInstrumentationFilter::kInstrumentationScriptAddedCount[] =
     "instrumentation_filter_script_added_count";
 AddInstrumentationFilter::AddInstrumentationFilter(RewriteDriver* driver)
-    : CommonFilter(driver),
-      found_head_(false),
-      added_head_script_(false),
-      added_unload_script_(false) {
+    : CommonFilter(driver), found_head_(false), added_head_script_(false) {
   Statistics* stats = driver->server_context()->statistics();
   instrumentation_script_added_count_ =
       stats->GetVariable(kInstrumentationScriptAddedCount);
@@ -87,7 +78,6 @@ void AddInstrumentationFilter::InitStats(Statistics* statistics) {
 void AddInstrumentationFilter::StartDocumentImpl() {
   found_head_ = false;
   added_head_script_ = false;
-  added_unload_script_ = false;
 }
 
 void AddInstrumentationFilter::AddHeadScript(HtmlElement* element) {
@@ -129,22 +119,13 @@ void AddInstrumentationFilter::StartElementImpl(HtmlElement* element) {
 }
 
 void AddInstrumentationFilter::EndElementImpl(HtmlElement* element) {
-  if (found_head_ && element->keyword() == HtmlName::kHead) {
-    if (!added_head_script_) {
-      AddHeadScript(element);
-    }
-    if (driver()->options()->report_unload_time() && !added_unload_script_ &&
-        CspPermitsInlineScript()) {
-      GoogleString js = GetScriptJs(kUnloadTag);
-      HtmlElement* script = driver()->NewElement(element, HtmlName::kScript);
-      if (!driver()->defer_instrumentation_script()) {
-        driver()->AddAttribute(script, HtmlName::kDataPagespeedNoDefer,
-                               StringPiece());
-      }
-      driver()->InsertNodeBeforeCurrent(script);
-      AddJsToElement(js, script);
-      added_unload_script_ = true;
-    }
+  // Note: ReportUnloadTime used to inject a second, beforeunload-driven
+  // beacon script here.  The collector now always sends on page-hide, which
+  // covers pre-onload abandonment without an unload handler (and without
+  // breaking the back/forward cache), so the option is a deprecated no-op.
+  if (found_head_ && element->keyword() == HtmlName::kHead &&
+      !added_head_script_) {
+    AddHeadScript(element);
   }
 }
 
@@ -156,11 +137,11 @@ void AddInstrumentationFilter::EndDocument() {
     return;
   }
   if (!CspPermitsInlineScript()) {
-    // The onload beacon runs from an inline script the page's CSP would
+    // The beacon collector runs from an inline script the page's CSP would
     // block; injecting it would only add dead bytes.
     return;
   }
-  GoogleString js = GetScriptJs(kLoadTag);
+  GoogleString js = GetScriptJs();
   HtmlElement* script = driver()->NewElement(nullptr, HtmlName::kScript);
   if (!driver()->defer_instrumentation_script()) {
     driver()->AddAttribute(script, HtmlName::kDataPagespeedNoDefer,
@@ -170,22 +151,17 @@ void AddInstrumentationFilter::EndDocument() {
   AddJsToElement(js, script);
 }
 
-GoogleString AddInstrumentationFilter::GetScriptJs(StringPiece event) {
+GoogleString AddInstrumentationFilter::GetScriptJs() {
   GoogleString js;
   StaticAssetManager* static_asset_manager =
       driver()->server_context()->static_asset_manager();
-  // Only add the static JS once.
-  if (!added_unload_script_) {
-    if (driver()->options()->enable_extended_instrumentation()) {
-      js = static_asset_manager->GetAsset(
-          StaticAssetEnum::EXTENDED_INSTRUMENTATION_JS, driver()->options());
-    }
-    StrAppend(
-        &js, static_asset_manager->GetAsset(
-                 StaticAssetEnum::ADD_INSTRUMENTATION_JS, driver()->options()));
+  if (driver()->options()->enable_extended_instrumentation()) {
+    js = static_asset_manager->GetAsset(
+        StaticAssetEnum::EXTENDED_INSTRUMENTATION_JS, driver()->options());
   }
-
-  GoogleString js_event = (event == kLoadTag) ? "load" : "beforeunload";
+  StrAppend(&js,
+            static_asset_manager->GetAsset(
+                StaticAssetEnum::ADD_INSTRUMENTATION_JS, driver()->options()));
 
   const RewriteOptions::BeaconUrl& beacons = driver()->options()->beacon_url();
   const GoogleString* beacon_url =
@@ -238,7 +214,6 @@ GoogleString AddInstrumentationFilter::GetScriptJs(StringPiece event) {
 
   StrAppend(&js, "\npagespeed.addInstrumentationInit(");
   StrAppend(&js, "'", *beacon_url, "', ");
-  StrAppend(&js, "'", js_event, "', ");
   StrAppend(&js, "'", extra_params, "', ");
   StrAppend(&js, "'", html_url, "');");
 

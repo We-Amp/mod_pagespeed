@@ -59,15 +59,22 @@ class MediaExpression {
  public:
   // Media feature without a value. Ex: (color).
   explicit MediaExpression(const UnicodeText& name)
-      : name_(name), has_value_(false) {}
+      : name_(name), has_value_(false), is_raw_(false) {}
   // Media feature with value. Ex: (max-width: 500px).
   MediaExpression(const UnicodeText& name, const UnicodeText& value)
-      : name_(name), has_value_(true), value_(value) {}
+      : name_(name), has_value_(true), value_(value), is_raw_(false) {}
+  // Raw expression: the verbatim bytes between the parentheses of an
+  // expression whose internal structure we do not model — Media Queries
+  // level 4 range syntax such as (width >= 768px), general-enclosed, etc.
+  // name() is empty, value() holds the bytes. Serializers must emit them
+  // unescaped and unaltered.
+  static MediaExpression* NewRaw(const CssStringPiece& bytes);
   ~MediaExpression();
 
   const UnicodeText& name() const { return name_; }
   bool has_value() const { return has_value_; }
   const UnicodeText& value() const { return value_; }
+  bool is_raw() const { return is_raw_; }
 
   MediaExpression* DeepCopy() const;
   string ToString() const;
@@ -77,6 +84,8 @@ class MediaExpression {
   bool has_value_;
   // Unparsed value. TODO(sligocki): Actually parse it?
   UnicodeText value_;
+  // True iff this expression is a raw capture (see NewRaw above).
+  bool is_raw_;
 
   DISALLOW_COPY_AND_ASSIGN(MediaExpression);
 };

@@ -23,6 +23,17 @@ package net_instaweb;
 enum DependencyType {
   DEP_JAVASCRIPT = 1;
   DEP_CSS = 2;
+
+  // Fonts discovered inside collected CSS (@font-face src). Dependencies of
+  // this type must be serialized ONLY into the dedicated font fields
+  // (Dependencies.font_dependency, CachedResult.collected_font_dependency),
+  // never into the pre-existing Dependency fields: proto2 enums are closed,
+  // so a binary that predates DEP_FONT reading value 3 from the old fields
+  // would move it to the unknown-field set and content_type() would read as
+  // the field default (DEP_JAVASCRIPT), emitting as=script for a font.
+  // Keeping fonts in new fields makes old binaries skip them entirely as
+  // unknown fields instead.
+  DEP_FONT = 3;
 }
 
 // A single candidate for pushing or preloading.
@@ -52,4 +63,9 @@ message Dependency {
 // All the candidates for pushing or preloading.
 message Dependencies {
   repeated Dependency dependency = 1;
+
+  // Font candidates (content_type == DEP_FONT). Fonts serialize ONLY into
+  // this field, never into 'dependency' above, so binaries that predate
+  // DEP_FONT skip them as unknown fields (see the DEP_FONT comment).
+  repeated Dependency font_dependency = 2;
 }

@@ -76,8 +76,8 @@ class CommonFilter : public EmptyHtmlFilter {
   // is incredibly ugly). It can be necessitated by other post-</html> content,
   // or by flushes in the body.
   //
-  // Note that if a subclass overloads the Characters function, it needs to call
-  // the parent implementation for this function to be correct.
+  // The required Characters() bookkeeping always runs (Characters() is
+  // sealed), so overriding CharactersImpl() cannot break this.
   void InsertNodeAtBodyEnd(HtmlNode* data);
 
   // Note: Don't overload these methods, overload the implementers instead!
@@ -85,10 +85,9 @@ class CommonFilter : public EmptyHtmlFilter {
   void StartElement(HtmlElement* element) override;
   void EndElement(HtmlElement* element) override;
 
-  // If a subclass overloads this function and wishes to use
-  // InsertNodeAtBodyEnd(), it needs to make an upcall to this implementation
-  // for InsertNodeAtBodyEnd() to work correctly.
-  void Characters(HtmlCharactersNode* characters) override;
+  // Characters() is sealed: it performs the end-of-body bookkeeping that
+  // InsertNodeAtBodyEnd() depends on, then delegates to CharactersImpl().
+  void Characters(HtmlCharactersNode* characters) final;
 
   // Creates an input resource with the url evaluated based on input_url
   // which may need to be absolutified relative to base_url(). Returns NULL
@@ -197,6 +196,12 @@ class CommonFilter : public EmptyHtmlFilter {
   virtual void StartDocumentImpl() = 0;
   virtual void StartElementImpl(HtmlElement* element) = 0;
   virtual void EndElementImpl(HtmlElement* element) = 0;
+
+  // Characters bookkeeping (tracking of the end-of-body insertion point used
+  // by InsertNodeAtBodyEnd) is done in the sealed Characters() wrapper; it
+  // always runs, so overriders need no upcall. Unlike the hooks above this one
+  // is not pure: most filters ignore character nodes.
+  virtual void CharactersImpl(HtmlCharactersNode* characters);
 
   // ID string used in logging. Inheritors should supply whatever short ID
   // string they use.

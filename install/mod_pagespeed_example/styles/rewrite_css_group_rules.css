@@ -1,0 +1,18 @@
+/* This comment will be removed */
+@layer components {
+  .group-rule-box {
+    background-image: url(../images/BikeCrashIcn.png);
+    width: 100px;
+    height: 100px;
+  }
+}
+@supports (display: grid) {
+  .group-rule-box {
+    display: grid;
+  }
+}
+@media (width >= 200px) {
+  .group-rule-box {
+    border: 1px solid #cccccc;
+  }
+}

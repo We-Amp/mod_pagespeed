@@ -507,6 +507,11 @@ class Library : public spriter::ImageLibraryInterface {
     ~Canvas() override {}
 
     bool DrawImage(const Image* image, int x, int y) override {
+      // The canvas image may be null if the blank canvas could not be
+      // materialized; fail the sprite rather than dereference it.
+      if (image_ == nullptr) {
+        return false;
+      }
       const SpriterImage* spriter_image =
           static_cast<const SpriterImage*>(image);
       return image_->DrawImage(spriter_image->image(), x, y);
@@ -516,6 +521,11 @@ class Library : public spriter::ImageLibraryInterface {
     bool WriteToFile(const FilePath& write_path,
                      spriter::ImageFormat format) override {
       if (format != spriter::PNG) {
+        return false;
+      }
+      // The canvas image may be null if the blank canvas could not be
+      // materialized; never RegisterImage(path, nullptr).
+      if (image_ == nullptr) {
         return false;
       }
       lib_->RegisterImage(write_path, image_.release());
@@ -584,6 +594,18 @@ class Library : public spriter::ImageLibraryInterface {
         (image_type != net_instaweb::IMAGE_GIF)) {
       handler->Message(kInfo, "Cannot sprite: not PNG or GIF, %s",
                        resource->url().c_str());
+      return false;
+    }
+    // Reject non-positive dimensions.  The raw header sniffing used to
+    // extract dimensions does not validate them (a crafted PNG/GIF can
+    // declare zero width or height), and a zero-dimension image can only
+    // produce a zero-dimension canvas, which cannot be materialized as a
+    // real image.
+    net_instaweb::ImageDim dims;
+    image->Dimensions(&dims);
+    if (dims.width() <= 0 || dims.height() <= 0) {
+      handler->Message(kInfo, "Cannot sprite: bad dimensions %dx%d, %s",
+                       dims.width(), dims.height(), resource->url().c_str());
       return false;
     }
     RegisterImage(resource->url(), image.release());

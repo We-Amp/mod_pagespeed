@@ -58,6 +58,7 @@ using pagespeed::image_compression::kMessagePatternPixelFormat;
 using pagespeed::image_compression::kMessagePatternStats;
 using pagespeed::image_compression::kMessagePatternUnexpectedEOF;
 using pagespeed::image_compression::kMessagePatternWritingToWebp;
+using pagespeed::image_compression::LIBAVIF_LOSSY;
 using pagespeed::image_compression::PixelFormat;
 using pagespeed::image_compression::WEBP_ANIMATED;
 using pagespeed::image_compression::WEBP_LOSSLESS;
@@ -134,6 +135,73 @@ class ConversionVarChecker {
         ->failure_ms = simple_stats_.AddHistogram("gif_webp_animated_failure");
 
     options->webp_conversion_variables = &webp_conversion_variables_;
+
+    // AVIF family.  Same shape as the WebP
+    // family above, minus the opaque/alpha buckets, which the AVIF encode
+    // funnel has no transparency signal for.
+    avif_conversion_variables_.Get(Image::ConversionVariables::FROM_PNG)
+        ->timeout_count = simple_stats_.AddVariable("png_avif_timeout");
+    avif_conversion_variables_.Get(Image::ConversionVariables::FROM_PNG)
+        ->success_ms = simple_stats_.AddHistogram("png_avif_success");
+    avif_conversion_variables_.Get(Image::ConversionVariables::FROM_PNG)
+        ->failure_ms = simple_stats_.AddHistogram("png_avif_failure");
+
+    avif_conversion_variables_.Get(Image::ConversionVariables::FROM_JPEG)
+        ->timeout_count = simple_stats_.AddVariable("jpeg_avif_timeout");
+    avif_conversion_variables_.Get(Image::ConversionVariables::FROM_JPEG)
+        ->success_ms = simple_stats_.AddHistogram("jpeg_avif_success");
+    avif_conversion_variables_.Get(Image::ConversionVariables::FROM_JPEG)
+        ->failure_ms = simple_stats_.AddHistogram("jpeg_avif_failure");
+
+    avif_conversion_variables_
+        .Get(Image::ConversionVariables::FROM_GIF_ANIMATED)
+        ->timeout_count =
+        simple_stats_.AddVariable("gif_avif_animated_timeout");
+    avif_conversion_variables_
+        .Get(Image::ConversionVariables::FROM_GIF_ANIMATED)
+        ->success_ms = simple_stats_.AddHistogram("gif_avif_animated_success");
+    avif_conversion_variables_
+        .Get(Image::ConversionVariables::FROM_GIF_ANIMATED)
+        ->failure_ms = simple_stats_.AddHistogram("gif_avif_animated_failure");
+
+    avif_conversion_variables_.Get(Image::ConversionVariables::FROM_AVIF)
+        ->timeout_count = simple_stats_.AddVariable("avif_avif_timeout");
+    avif_conversion_variables_.Get(Image::ConversionVariables::FROM_AVIF)
+        ->success_ms = simple_stats_.AddHistogram("avif_avif_success");
+    avif_conversion_variables_.Get(Image::ConversionVariables::FROM_AVIF)
+        ->failure_ms = simple_stats_.AddHistogram("avif_avif_failure");
+
+    // Budget OVERRUN buckets: an encode that produced a served image but took
+    // longer than avif_conversion_timeout_ms allowed.  Distinct from the
+    // timeout buckets above, which count conversions that produced nothing.
+    avif_conversion_variables_.Get(Image::ConversionVariables::FROM_PNG)
+        ->overrun_count = simple_stats_.AddVariable("png_avif_overrun");
+    avif_conversion_variables_.Get(Image::ConversionVariables::FROM_JPEG)
+        ->overrun_count = simple_stats_.AddVariable("jpeg_avif_overrun");
+    avif_conversion_variables_
+        .Get(Image::ConversionVariables::FROM_GIF_ANIMATED)
+        ->overrun_count =
+        simple_stats_.AddVariable("gif_avif_animated_overrun");
+    avif_conversion_variables_.Get(Image::ConversionVariables::FROM_AVIF)
+        ->overrun_count = simple_stats_.AddVariable("avif_avif_overrun");
+
+    options->avif_conversion_variables = &avif_conversion_variables_;
+  }
+
+  // AVIF accessors.  Deliberately not folded into Test() above: Test() is
+  // called from ~30 WebP tests and its positional signature is already at the
+  // limit of readability.
+  int64 AvifTimeouts(Image::ConversionVariables::VariableType var_type) {
+    return avif_conversion_variables_.Get(var_type)->timeout_count->Get();
+  }
+  int AvifSuccesses(Image::ConversionVariables::VariableType var_type) {
+    return avif_conversion_variables_.Get(var_type)->success_ms->Count();
+  }
+  int AvifFailures(Image::ConversionVariables::VariableType var_type) {
+    return avif_conversion_variables_.Get(var_type)->failure_ms->Count();
+  }
+  int64 AvifOverruns(Image::ConversionVariables::VariableType var_type) {
+    return avif_conversion_variables_.Get(var_type)->overrun_count->Get();
   }
 
   void Test(int gif_webp_timeout, int gif_webp_success, int gif_webp_failure,
@@ -210,6 +278,7 @@ class ConversionVarChecker {
   std::unique_ptr<ThreadSystem> thread_system_;
   SimpleStats simple_stats_;
   Image::ConversionVariables webp_conversion_variables_;
+  Image::ConversionVariables avif_conversion_variables_;
 };
 
 }  // namespace
@@ -576,14 +645,16 @@ TEST_F(ImageTest, PngAlphaToWebpTestFailsBecauseTooManyTries) {
   options->convert_jpeg_to_webp = true;
   options->webp_quality = 75;
   options->jpeg_quality = 85;
-  options->conversions_attempted = 2;
+  // Pre-exhaust the shared conversion budget (kMaxConversionAttempts, now 3:
+  // WebP probe, AVIF probe, jpeg-recompress fallback).
+  options->conversions_attempted = 3;
 
   GoogleString buffer;
   ImagePtr image(ReadFromFileWithOptions(kCuppaTransparent, &buffer, options));
   image->output_size();
   EXPECT_EQ(ContentType::kPng, image->content_type()->type());
-  EXPECT_EQ(2, options->conversions_attempted);
-  // There were already enough (2) attempts, so we shouldn't try any
+  EXPECT_EQ(3, options->conversions_attempted);
+  // There were already enough (3) attempts, so we shouldn't try any
   // more conversions.
   conversion_var_checker.Test(0, 0, 0,  // gif
                               0, 0, 0,  // png
@@ -1006,6 +1077,447 @@ TEST_F(ImageTest, JpegToWebpDoesNotTimeOutTest) {
                               true);
 }
 
+// the design record Stream E: a refused speculative AVIF probe (WebP disabled) must not
+// starve the guaranteed jpeg-recompress fallback -- the output must be the
+// RECOMPRESSED JPEG, never the original bytes.
+//
+// Unlike the WebP tests above, this does NOT drive a MockTimer delta queue.
+// The AVIF still-image path has no mid-encode deadline to trip (AV1 exposes no
+// abort), so a 1 ms budget is enforced up front instead: PrepareImage()
+// estimates Puzzle.jpg's cost (0.78 Mpx costs tens of ms even at the fastest
+// speed the writer will step up to) and declines before encoding. That refusal
+// is deterministic and clock-independent, which is why no timer deltas are
+// queued here: adding some would just be misleading decoration. The encode is
+// never run, so the test also does not depend on how fast the machine is.
+TEST_F(ImageTest, JpegToAvifTimesOutToJpegRecompressTest) {
+  Image::CompressionOptions* options = new Image::CompressionOptions;
+  ConversionVarChecker conversion_var_checker(options);
+  SetJpegRecompressionAndQuality(options);
+  options->convert_jpeg_to_avif = true;
+  options->preferred_avif = LIBAVIF_LOSSY;
+  options->avif_quality = 75;
+  options->avif_conversion_timeout_ms = 1;
+
+  EXPECT_EQ(0, options->conversions_attempted);
+
+  GoogleString buffer;
+  ImagePtr image(ReadFromFileWithOptions(kPuzzle, &buffer, options));
+  image->output_size();
+  EXPECT_EQ(ContentType::kJpeg, image->content_type()->type());
+  // The recompressed JPEG, not the original bytes.
+  EXPECT_GT(image->input_size(), image->output_size());
+  // One attempt for the failed AVIF probe, one for the recompress fallback.
+  EXPECT_EQ(2, options->conversions_attempted);
+  // No WebP conversion was attempted.
+  conversion_var_checker.Test(0, 0, 0,  // gif
+                              0, 0, 0,  // png
+                              0, 0, 0,  // jpeg
+                              0, 0, 0,  // gif animated
+                              true);
+  // ... and the AVIF timeout counter is actually incremented.  Before the AVIF
+  // counter family existed this was invisible: the fallback to JPEG looked
+  // identical, from the stats page, to a plain JPEG recompress.  Note the
+  // counter now tallies a REFUSAL (the encode was never started) rather than
+  // an expiry; both mean "AvifTimeoutMs is turning conversions away".
+  EXPECT_EQ(1, conversion_var_checker.AvifTimeouts(
+                   Image::ConversionVariables::FROM_JPEG));
+  EXPECT_EQ(0, conversion_var_checker.AvifSuccesses(
+                   Image::ConversionVariables::FROM_JPEG));
+  // A timeout is recorded as a timeout, not as a failure.
+  EXPECT_EQ(0, conversion_var_checker.AvifFailures(
+                   Image::ConversionVariables::FROM_JPEG));
+}
+
+// The case the kMaxConversionAttempts bump (2 -> 3) fixes: with BOTH
+// speculative probes enabled and BOTH failing, the budget must still leave
+// room for the guaranteed jpeg-recompress fallback. Under the old cap of 2
+// the two failed probes exhausted the budget and the ORIGINAL bytes were
+// served.
+TEST_F(ImageTest, JpegToWebpAndAvifBothTimeOutToJpegRecompressTest) {
+  Image::CompressionOptions* options = new Image::CompressionOptions;
+  ConversionVarChecker conversion_var_checker(options);
+  SetJpegRecompressionAndQuality(options);
+  options->convert_jpeg_to_webp = true;
+  options->preferred_webp = WEBP_LOSSY;
+  options->webp_quality = 75;
+  options->webp_conversion_timeout_ms = 1;
+  options->convert_jpeg_to_avif = true;
+  options->preferred_avif = LIBAVIF_LOSSY;
+  options->avif_quality = 75;
+  options->avif_conversion_timeout_ms = 1;
+  // WebP probe: handler ctor, Start(), then time out in the progress hook.
+  // These deltas are POSITIONAL -- they are consumed in NowUs() call order --
+  // so anything that changes the number or order of clock reads in the WebP
+  // path invalidates them.
+  timer_.SetTimeDeltaUs(1);
+  timer_.SetTimeDeltaUs(1);
+  timer_.SetTimeDeltaUs(1000 * options->webp_conversion_timeout_ms + 1);
+  timer_.SetTimeDeltaUs(0);  // Stop() of the WebP timeout handler
+  // The AVIF probe needs no deltas: its 1 ms budget is enforced as an up-front
+  // admission refusal in PrepareImage() (estimated cost vs budget), not by the
+  // clock, so it fails deterministically whatever the timer says.
+
+  EXPECT_EQ(0, options->conversions_attempted);
+
+  GoogleString buffer;
+  ImagePtr image(ReadFromFileWithOptions(kPuzzle, &buffer, options));
+  image->output_size();
+  EXPECT_EQ(ContentType::kJpeg, image->content_type()->type());
+  // The recompressed JPEG, not the original bytes.
+  EXPECT_GT(image->input_size(), image->output_size());
+  // Failed WebP probe + failed AVIF probe + recompress fallback.
+  EXPECT_EQ(3, options->conversions_attempted);
+  conversion_var_checker.Test(0, 0, 0,  // gif
+                              0, 0, 0,  // png
+                              1, 0, 0,  // jpeg (WebP probe timed out)
+                              0, 0, 0,  // gif animated
+                              true);
+}
+
+// the design record pre-merge (expert review): POSITIVE AVIF coverage. The timeout tests
+// above only prove the fallback chain; this proves a real AVIF encode
+// SUCCEEDS end to end -- correct content type, genuinely AVIF bytes, smaller
+// than the JPEG input. A codec-less libavif build (no AOM encoder threaded)
+// fails here instead of silently passing the suite.
+TEST_F(ImageTest, JpegToAvifSuccessTest) {
+  Image::CompressionOptions* options = new Image::CompressionOptions;
+  ConversionVarChecker conversion_var_checker(options);
+  SetJpegRecompressionAndQuality(options);
+  options->convert_jpeg_to_avif = true;
+  options->preferred_avif = LIBAVIF_LOSSY;
+  options->avif_quality = 75;
+  // Deliberately NO conversion-timeout mock: the real encode must complete.
+
+  EXPECT_EQ(0, options->conversions_attempted);
+
+  GoogleString buffer;
+  ImagePtr image(ReadFromFileWithOptions(kPuzzle, &buffer, options));
+  image->output_size();
+
+  // The AVIF candidate won: the output is served as image/avif ...
+  EXPECT_EQ(ContentType::kAvif, image->content_type()->type());
+  ExpectContentType(IMAGE_AVIF, image.get());
+  // ... its bytes sniff as a genuine ISO-BMFF AVIF ...
+  EXPECT_EQ(IMAGE_AVIF,
+            pagespeed::image_compression::ComputeImageType(image->Contents()));
+  // ... and the conversion actually shrank the photo.
+  EXPECT_LT(image->output_size(), image->input_size());
+
+  // Exactly one conversion attempt: the successful AVIF encode. The
+  // jpeg-recompress fallback was not needed.
+  EXPECT_EQ(1, options->conversions_attempted);
+
+  // The success is observable in the AVIF stats family, in the FROM_JPEG
+  // bucket and nowhere else.
+  EXPECT_EQ(1, conversion_var_checker.AvifSuccesses(
+                   Image::ConversionVariables::FROM_JPEG));
+  EXPECT_EQ(0, conversion_var_checker.AvifFailures(
+                   Image::ConversionVariables::FROM_JPEG));
+  EXPECT_EQ(0, conversion_var_checker.AvifTimeouts(
+                   Image::ConversionVariables::FROM_JPEG));
+  EXPECT_EQ(0, conversion_var_checker.AvifSuccesses(
+                   Image::ConversionVariables::FROM_PNG));
+  EXPECT_EQ(0, conversion_var_checker.AvifSuccesses(
+                   Image::ConversionVariables::FROM_AVIF));
+}
+
+// The admission guard must ADMIT, not only refuse.
+//
+// This test exists because its absence made the guard untestable in the one
+// direction that matters. The timeout tests above all drive a 1 ms budget and
+// assert a refusal, and JpegToAvifSuccessTest leaves avif_conversion_timeout_ms
+// at its -1 default -- which DISABLES the guard entirely. So every unit-level
+// exercise of the estimate was a refusal, and a guard broken in the
+// refuse-everything direction (wrong units, wrong table index, sign flip,
+// estimate scaled by 1e6) would have kept the whole suite green while silently
+// removing AVIF from production.
+//
+// Here the budget is a realistic 5000 ms -- the shipped default -- so the guard
+// is ON and must let an ordinary photo through. Puzzle.jpg is 1023x766
+// (0.78 Mpx); at speed 6 -- the configured floor, which a 5000 ms budget
+// comfortably affords -- the estimate is a few hundred milliseconds on either
+// architecture, well inside 5000 ms, so no step-up is needed.
+TEST_F(ImageTest, JpegToAvifAdmittedWithinBudgetTest) {
+  Image::CompressionOptions* options = new Image::CompressionOptions;
+  ConversionVarChecker conversion_var_checker(options);
+  SetJpegRecompressionAndQuality(options);
+  options->convert_jpeg_to_avif = true;
+  options->preferred_avif = LIBAVIF_LOSSY;
+  options->avif_quality = 75;
+  // The guard is ENABLED (positive budget) and must still admit.
+  options->avif_conversion_timeout_ms = 5000;
+
+  GoogleString buffer;
+  ImagePtr image(ReadFromFileWithOptions(kPuzzle, &buffer, options));
+  image->output_size();
+
+  // The AVIF encode ran and won.
+  EXPECT_EQ(ContentType::kAvif, image->content_type()->type());
+  EXPECT_EQ(IMAGE_AVIF,
+            pagespeed::image_compression::ComputeImageType(image->Contents()));
+  EXPECT_LT(image->output_size(), image->input_size());
+  EXPECT_EQ(1, options->conversions_attempted);
+
+  // Counted as a success, and -- the point of this test -- NOT turned away.
+  EXPECT_EQ(1, conversion_var_checker.AvifSuccesses(
+                   Image::ConversionVariables::FROM_JPEG));
+  EXPECT_EQ(0, conversion_var_checker.AvifTimeouts(
+                   Image::ConversionVariables::FROM_JPEG));
+  // The mock timer never advances here, so elapsed is 0: an admitted encode
+  // inside its budget records no overrun either.
+  EXPECT_EQ(0, conversion_var_checker.AvifOverruns(
+                   Image::ConversionVariables::FROM_JPEG));
+}
+
+// The exact budget at which Puzzle.jpg flips from admitted to refused.
+//
+// Puzzle.jpg is 1023x766. The writer derives the speed from
+// the budget: it tries the configured floor (6) first and steps UP through the
+// table until one fits, refusing only when not even the FASTEST known speed
+// does. The refusal boundary is therefore set by the cheapest table entry at or
+// above the floor -- speed 9 on both architectures -- so the estimate
+//   pixels * min(kAvifEncodeMsPerMpxBySpeed[6..10]) / 1000000
+// is the largest budget that still admits, and one less is the smallest that
+// refuses. (Before the budget-derived speed table this boundary was set by
+// speed 8, because a sub-2s
+// timeout pinned the speed there and 9/10 were unreachable.)
+//
+// The per-megapixel constant is duplicated here ON PURPOSE rather than derived
+// from the writer: that is what makes the pair a tripwire on the table itself.
+// It is per-architecture for the same reason the table is -- 64-bit ARM encodes
+// roughly 2.8x faster, so a single hard-coded boundary would be wrong on one of
+// the two lanes. Keep these in step with the cheapest entry of
+// kAvifEncodeMsPerMpxBySpeed in avif_optimizer.cc.
+#if defined(__aarch64__) || defined(_M_ARM64)
+const int64 kAvifFastestMsPerMpx = 26;  // speed 9
+#else
+const int64 kAvifFastestMsPerMpx = 72;  // speed 9
+#endif
+const int64 kPuzzlePixels = 1023 * 766;
+const int64 kPuzzleFastestEstimateMs =
+    kPuzzlePixels * kAvifFastestMsPerMpx / 1000000;
+
+// Boundary pair, part 1 of 2: JUST INSIDE the cutoff must be admitted.
+//
+// The pair pins the guard's actual threshold, not merely its two extremes.
+// Both halves are decided by the same table entry -- the cheapest reachable
+// speed -- which makes this a direct test of that entry's value, and of the
+// arithmetic around it.
+TEST_F(ImageTest, JpegToAvifAdmittedAtBudgetBoundaryTest) {
+  Image::CompressionOptions* options = new Image::CompressionOptions;
+  ConversionVarChecker conversion_var_checker(options);
+  SetJpegRecompressionAndQuality(options);
+  options->convert_jpeg_to_avif = true;
+  options->preferred_avif = LIBAVIF_LOSSY;
+  options->avif_quality = 75;
+  // estimate == budget: admitted (refusal requires estimate > budget).
+  options->avif_conversion_timeout_ms = kPuzzleFastestEstimateMs;
+
+  GoogleString buffer;
+  ImagePtr image(ReadFromFileWithOptions(kPuzzle, &buffer, options));
+  image->output_size();
+
+  EXPECT_EQ(ContentType::kAvif, image->content_type()->type());
+  EXPECT_EQ(IMAGE_AVIF,
+            pagespeed::image_compression::ComputeImageType(image->Contents()));
+  EXPECT_EQ(1, conversion_var_checker.AvifSuccesses(
+                   Image::ConversionVariables::FROM_JPEG));
+  EXPECT_EQ(0, conversion_var_checker.AvifTimeouts(
+                   Image::ConversionVariables::FROM_JPEG));
+}
+
+// Boundary pair, part 2 of 2: ONE MILLISECOND TIGHTER must be refused.
+// Same image, same speed, one millisecond less budget than the estimate.
+TEST_F(ImageTest, JpegToAvifRefusedJustBelowBudgetBoundaryTest) {
+  Image::CompressionOptions* options = new Image::CompressionOptions;
+  ConversionVarChecker conversion_var_checker(options);
+  SetJpegRecompressionAndQuality(options);
+  options->convert_jpeg_to_avif = true;
+  options->preferred_avif = LIBAVIF_LOSSY;
+  options->avif_quality = 75;
+  // estimate > budget by exactly 1 ms: refused.
+  options->avif_conversion_timeout_ms = kPuzzleFastestEstimateMs - 1;
+
+  GoogleString buffer;
+  ImagePtr image(ReadFromFileWithOptions(kPuzzle, &buffer, options));
+  image->output_size();
+
+  // AVIF was declined, so the guaranteed jpeg-recompress fallback served it.
+  EXPECT_EQ(ContentType::kJpeg, image->content_type()->type());
+  EXPECT_EQ(1, conversion_var_checker.AvifTimeouts(
+                   Image::ConversionVariables::FROM_JPEG));
+  EXPECT_EQ(0, conversion_var_checker.AvifSuccesses(
+                   Image::ConversionVariables::FROM_JPEG));
+  // A refusal costs no CPU and produces no image, so it is NOT an overrun.
+  EXPECT_EQ(0, conversion_var_checker.AvifOverruns(
+                   Image::ConversionVariables::FROM_JPEG));
+}
+
+// The encode-budget contract, end to end: AvifTimeoutMs must be MONOTONE, and crossing the
+// old 2000 ms speed cliff must not silently change the encode.
+//
+// This is the test that was missing. The timeout used to select the
+// encoder speed on a fixed threshold in image.cc -- below 2000 ms speed 8,
+// otherwise speed 6 -- while the writer's admission test estimated cost from
+// that same speed. Speed 6 costs ~5x more per megapixel, so raising the
+// timeout across 2000 ms admitted FEWER megapixels, and the shipped 5000 ms
+// default admitted less than a "tighter" 1999 ms would have. Nothing covered
+// the coupling, so nothing objected.
+//
+// Two properties are asserted over a sweep that straddles the old cliff:
+//   1. admission never gets STRICTER as the budget grows; and
+//   2. the produced bytes are IDENTICAL across the sweep -- the timeout no
+//      longer moves the quality knob at all. Under the old design the
+//      1999 -> 2000 step changed the encoder speed and therefore the output.
+// The encode is deterministic here (single-threaded aom, identical settings),
+// so byte equality is a legitimate assertion and a much sharper one than
+// comparing sizes.
+TEST_F(ImageTest, JpegToAvifTimeoutIsMonotoneAcrossOldSpeedCliffTest) {
+  const int64 kBudgets[] = {1000, 1999, 2000, 2001, 5000};
+
+  GoogleString first_output;
+  int64 first_budget = 0;
+  for (int64 budget : kBudgets) {
+    Image::CompressionOptions* options = new Image::CompressionOptions;
+    SetJpegRecompressionAndQuality(options);
+    options->convert_jpeg_to_avif = true;
+    options->preferred_avif = LIBAVIF_LOSSY;
+    options->avif_quality = 75;
+    options->avif_conversion_timeout_ms = budget;
+
+    GoogleString buffer;
+    ImagePtr image(ReadFromFileWithOptions(kPuzzle, &buffer, options));
+    image->output_size();
+
+    // (1) Every budget in the sweep admits. Puzzle.jpg fits at the floor
+    // speed even at the tightest budget here, so any refusal means the
+    // budget got stricter as it grew.
+    ASSERT_EQ(ContentType::kAvif, image->content_type()->type())
+        << "AvifTimeoutMs " << budget
+        << " refused an image that a smaller budget admitted";
+
+    GoogleString output(image->Contents().data(), image->Contents().size());
+    if (first_output.empty()) {
+      first_output = output;
+      first_budget = budget;
+    } else {
+      // (2) Same bytes, whichever side of the old 2000 ms cliff we are on.
+      EXPECT_EQ(first_output.size(), output.size())
+          << "AvifTimeoutMs " << budget << " produced a different-sized AVIF "
+          << "than AvifTimeoutMs " << first_budget
+          << ": the timeout is still moving the encoder speed";
+      EXPECT_TRUE(first_output == output)
+          << "AvifTimeoutMs " << budget << " produced different AVIF bytes "
+          << "than AvifTimeoutMs " << first_budget;
+    }
+  }
+}
+
+// An admitted still encode that RUNS PAST its budget must be counted -- and
+// its output must still be served.
+//
+// This is the case the admission guard structurally cannot prevent: the
+// estimate said the image would fit, so it was let in, and an AV1 still encode
+// cannot be interrupted once started (no deadline parameter, no cancel flag).
+// The budget is therefore exceeded in reality and discovered only afterwards.
+//
+// Two things are asserted, and they pull in opposite directions on purpose:
+//   1. the AVIF image is still produced and served -- discarding finished work
+//      is the original defect this whole change removes; and
+//   2. the overrun is nevertheless RECORDED, so it is not silent.
+//
+// It is recorded in a bucket of its own rather than in the timeout counter.
+// The conversion SUCCEEDED, so `ok` is true here; feeding this into
+// was_timed_out would trip UpdateConversionStats' DCHECK(!ok) in debug builds
+// and would report a served image as a conversion that never happened.
+//
+// The overrun is manufactured with MockTimer deltas rather than a real slow
+// encode, so the test is deterministic and does not depend on machine speed.
+// The deltas are POSITIONAL -- consumed in NowUs() call order: the
+// ConversionTimeoutHandler constructor, Start()'s Reset(), then Stop()'s
+// TimeElapsedMs(). The still path consults no progress hook, so those three
+// are the only clock reads in it.
+TEST_F(ImageTest, JpegToAvifBudgetOverrunIsCountedAndOutputKeptTest) {
+  Image::CompressionOptions* options = new Image::CompressionOptions;
+  ConversionVarChecker conversion_var_checker(options);
+  SetJpegRecompressionAndQuality(options);
+  options->convert_jpeg_to_avif = true;
+  options->preferred_avif = LIBAVIF_LOSSY;
+  options->avif_quality = 75;
+  // Generous enough that the ~348 ms estimate is admitted ...
+  options->avif_conversion_timeout_ms = 5000;
+  timer_.SetTimeDeltaUs(1);  // ctor (initial deadline)
+  timer_.SetTimeDeltaUs(1);  // Start(): deadline re-baselined
+  // ... but the clock then reports far more than 5000 ms actually elapsed.
+  timer_.SetTimeDeltaUs(1000 * (options->avif_conversion_timeout_ms + 1000));
+
+  GoogleString buffer;
+  ImagePtr image(ReadFromFileWithOptions(kPuzzle, &buffer, options));
+  image->output_size();
+
+  // (1) The finished encode was KEPT and served as AVIF.
+  EXPECT_EQ(ContentType::kAvif, image->content_type()->type());
+  EXPECT_EQ(IMAGE_AVIF,
+            pagespeed::image_compression::ComputeImageType(image->Contents()));
+  EXPECT_LT(image->output_size(), image->input_size());
+
+  // (2) ... and the overrun was recorded.
+  EXPECT_EQ(1, conversion_var_checker.AvifOverruns(
+                   Image::ConversionVariables::FROM_JPEG));
+
+  // It is a SUCCESS that cost too much -- not a timeout, not a failure.
+  EXPECT_EQ(1, conversion_var_checker.AvifSuccesses(
+                   Image::ConversionVariables::FROM_JPEG));
+  EXPECT_EQ(0, conversion_var_checker.AvifTimeouts(
+                   Image::ConversionVariables::FROM_JPEG));
+  EXPECT_EQ(0, conversion_var_checker.AvifFailures(
+                   Image::ConversionVariables::FROM_JPEG));
+}
+
+// The third outcome: a codec FAILURE that is not a timeout.  An AVIF-sniffing
+// input whose payload is truncated passes format detection and then fails
+// inside the frame reader, which is the early-return path in
+// Image::RewriteToAvif that is easiest to leave uninstrumented (and was).
+TEST_F(ImageTest, AvifRecompressFailureIsCounted) {
+  // First produce a genuine AVIF to truncate.
+  Image::CompressionOptions* enc_options = new Image::CompressionOptions;
+  SetJpegRecompressionAndQuality(enc_options);
+  enc_options->convert_jpeg_to_avif = true;
+  enc_options->preferred_avif = LIBAVIF_LOSSY;
+  enc_options->avif_quality = 75;
+  GoogleString enc_buffer;
+  ImagePtr encoded(ReadFromFileWithOptions(kPuzzle, &enc_buffer, enc_options));
+  encoded->output_size();
+  ASSERT_EQ(ContentType::kAvif, encoded->content_type()->type());
+  GoogleString avif_bytes(encoded->Contents().data(),
+                          encoded->Contents().size());
+  ASSERT_GT(avif_bytes.size(), static_cast<size_t>(64));
+
+  // Truncate to the first half: still sniffs as AVIF (the ftyp box is intact),
+  // no longer decodable.
+  GoogleString truncated = avif_bytes.substr(0, avif_bytes.size() / 2);
+  ASSERT_EQ(IMAGE_AVIF,
+            pagespeed::image_compression::ComputeImageType(truncated));
+
+  Image::CompressionOptions* options = new Image::CompressionOptions;
+  ConversionVarChecker conversion_var_checker(options);
+  options->recompress_avif = true;
+  options->preferred_avif = LIBAVIF_LOSSY;
+  options->avif_quality = 75;
+  ImagePtr image(NewImage(truncated, "truncated.avif", GTestTempDir(), options,
+                          &timer_, &message_handler_));
+  image->output_size();
+
+  // The failure is counted in the AVIF->AVIF bucket, as a failure rather than
+  // a timeout.
+  EXPECT_EQ(1, conversion_var_checker.AvifFailures(
+                   Image::ConversionVariables::FROM_AVIF));
+  EXPECT_EQ(0, conversion_var_checker.AvifTimeouts(
+                   Image::ConversionVariables::FROM_AVIF));
+  EXPECT_EQ(0, conversion_var_checker.AvifSuccesses(
+                   Image::ConversionVariables::FROM_AVIF));
+}
+
 TEST_F(ImageTest, WebpNonLaFromJpgTest) {
   ConversionVarChecker conversion_var_checker(options_.get());
   options_->webp_quality = 75;
@@ -1132,10 +1644,41 @@ TEST_F(ImageTest, BlankTransparentImage) {
   EXPECT_EQ(blank_dim.height(), height);
 }
 
+TEST_F(ImageTest, BlankImageWithBadDimensionsReturnsNull) {
+  // Characterization test: green both before and after the null-blank-image
+  // consumer guards.  It pins the producer contract those guards rely on:
+  // BlankImageWithOptions fails for dimensions the PNG writer rejects (see
+  // PngScanlineWriter::InitWithStatus and libpng's own IHDR validation).
+  //
+  // A negative width wraps to a huge size_t at the writer boundary and is
+  // rejected by libpng's IHDR validation (logged at info/error level), so
+  // BlankImageWithOptions returns nullptr in all build modes.
+  Image::CompressionOptions* options = new Image::CompressionOptions();
+  ImagePtr blank(BlankImageWithOptions(-5, 100, IMAGE_PNG, GTestTempDir(),
+                                       &timer_, &message_handler_, options));
+  EXPECT_EQ(nullptr, blank.get());
+
+  // Zero dimensions trip the writer's explicit width/height < 1 check, which
+  // logs via PS_LOG_DFATAL: in opt builds (NDEBUG) that degrades to
+  // PS_LOG_ERROR and BlankImageWithOptions returns nullptr, while in debug
+  // builds it is a FatalError (LOG(FATAL)) and aborts.  Same #ifdef idiom as
+  // the other PS_LOG_DFATAL tests in the tree (e.g. png_optimizer_test.cc).
+#ifdef NDEBUG
+  options = new Image::CompressionOptions();
+  blank.reset(BlankImageWithOptions(0, 0, IMAGE_PNG, GTestTempDir(), &timer_,
+                                    &message_handler_, options));
+  EXPECT_EQ(nullptr, blank.get());
+#else
+  EXPECT_DEATH(
+      BlankImageWithOptions(0, 0, IMAGE_PNG, GTestTempDir(), &timer_,
+                            &message_handler_, new Image::CompressionOptions()),
+      "dimensions are not positive");
+#endif
+}
+
 TEST_F(ImageTest, ResizeTo) {
   GoogleString buf;
   ImagePtr image(ReadImageFromFile(IMAGE_JPEG, kPuzzle, &buf, false));
-
   ImageDim new_dim;
   new_dim.set_width(10);
   new_dim.set_height(10);
@@ -1432,6 +1975,28 @@ GoogleString SpliceXmpItxtIntoPng(const GoogleString& png) {
   return out;
 }
 
+// the design record Stream H: appends a top-level ISO-BMFF "uuid" box tagged with the
+// C2PA manifest UUID (d8fec3d6-1b0e-483c-9297-5828877ec481) to an AVIF.
+// Appended at the END of the file -- inserting it mid-stream would shift mdat
+// and invalidate the meta box's absolute iloc offsets, corrupting the decode;
+// a trailing unknown top-level box is skipped cleanly by libavif. No
+// "jumb"/"c2pa" tokens on purpose -- detection must come from the ISO-BMFF
+// uuid path of ImageHasC2paManifest.
+GoogleString SpliceC2paUuidBoxIntoAvif(const GoogleString& avif) {
+  EXPECT_GE(avif.size(), static_cast<size_t>(16));
+  EXPECT_EQ(0, memcmp(avif.data() + 4, "ftyp", 4));
+  static const unsigned char kC2paUuid[16] = {
+      0xd8, 0xfe, 0xc3, 0xd6, 0x1b, 0x0e, 0x48, 0x3c,
+      0x92, 0x97, 0x58, 0x28, 0x87, 0x7e, 0xc4, 0x81};
+  const GoogleString payload = "opaque-manifest-bytes";
+  GoogleString out = avif;
+  AppendBE32(static_cast<uint32_t>(8 + 16 + payload.size()), &out);
+  out.append("uuid");
+  out.append(reinterpret_cast<const char*>(kC2paUuid), 16);
+  out.append(payload);
+  return out;
+}
+
 }  // namespace
 
 TEST_F(ImageTest, PreserveC2paJpegRecompressKeepsManifest) {
@@ -1651,6 +2216,98 @@ TEST_F(ImageTest, PreserveC2paJpegToWebpStaysJpeg) {
   EXPECT_EQ(ContentType::kWebp, off->content_type()->type());
   EXPECT_EQ(GoogleString::npos, off_out.find("c2pa"));
   EXPECT_NE(out, off_out);
+}
+
+// the design record pre-merge (expert review): the design record skip-not-strip floor extends
+// to the AVIF conversion path. The AVIF encoder does not carry an APP11/JUMBF
+// manifest, so a manifest-bearing JPEG must NOT be converted to AVIF under the
+// default -- it stays a (recompressed) JPEG that keeps the manifest, and is
+// NEVER served as a provenance-stripped AVIF.
+TEST_F(ImageTest, PreserveC2paJpegToAvifStaysJpeg) {
+  GoogleString original;
+  ASSERT_TRUE(
+      file_system_.ReadFile(StrCat(GTestSrcDir(), kTestData, kPuzzle).c_str(),
+                            &original, &message_handler_));
+  const GoogleString with_c2pa = SpliceC2paApp11IntoJpeg(original);
+  ASSERT_TRUE(pagespeed::image_compression::ImageHasC2paManifest(with_c2pa));
+
+  Image::CompressionOptions* options = new Image::CompressionOptions();
+  options->recompress_jpeg = true;
+  options->convert_jpeg_to_avif = true;
+  options->preferred_avif = LIBAVIF_LOSSY;
+  options->avif_quality = 75;
+  EXPECT_TRUE(options->preserve_c2pa);  // Default-on.
+  ImagePtr image(NewImage(with_c2pa, "c2pa-avif", GTestTempDir(), options,
+                          &timer_, &message_handler_));
+  const GoogleString out(image->Contents().data(), image->Contents().size());
+
+  // Stayed JPEG (not AVIF), manifest intact: skip-not-strip, output unchanged
+  // in type and provenance.
+  EXPECT_EQ(ContentType::kJpeg, image->content_type()->type());
+  EXPECT_NE(GoogleString::npos, out.find("c2pa"));
+
+  // Contrast: preservation OFF actually converts to AVIF and drops the
+  // manifest, proving the ON arm's kJpeg result is the !has_c2pa guard
+  // suppressing a conversion that would otherwise have succeeded.
+  Image::CompressionOptions* off_options = new Image::CompressionOptions();
+  off_options->recompress_jpeg = true;
+  off_options->convert_jpeg_to_avif = true;
+  off_options->preferred_avif = LIBAVIF_LOSSY;
+  off_options->avif_quality = 75;
+  off_options->preserve_c2pa = false;
+  ImagePtr off(NewImage(with_c2pa, "c2pa-avif-off", GTestTempDir(), off_options,
+                        &timer_, &message_handler_));
+  const GoogleString off_out(off->Contents().data(), off->Contents().size());
+  EXPECT_EQ(ContentType::kAvif, off->content_type()->type());
+  EXPECT_EQ(GoogleString::npos, off_out.find("c2pa"));
+  EXPECT_NE(out, off_out);
+}
+
+// A manifest-bearing AVIF INPUT (C2PA in a top-level ISO-BMFF uuid box) must
+// not be recompressed: the avif->avif re-encode cannot carry the uuid box, so
+// the gate serves the ORIGINAL bytes byte-for-byte (skip-not-strip).
+TEST_F(ImageTest, PreserveC2paAvifInputSkipsRecompress) {
+  // Build a genuine AVIF from the JPEG fixture, then splice the C2PA uuid box.
+  Image::CompressionOptions* make_options = new Image::CompressionOptions();
+  make_options->recompress_jpeg = true;
+  make_options->jpeg_quality = 85;
+  make_options->convert_jpeg_to_avif = true;
+  make_options->preferred_avif = LIBAVIF_LOSSY;
+  make_options->avif_quality = 75;
+  GoogleString buffer;
+  ImagePtr made(ReadFromFileWithOptions(kPuzzle, &buffer, make_options));
+  made->output_size();
+  ASSERT_EQ(ContentType::kAvif, made->content_type()->type());
+  const GoogleString avif(made->Contents().data(), made->Contents().size());
+
+  const GoogleString with_c2pa = SpliceC2paUuidBoxIntoAvif(avif);
+  ASSERT_TRUE(pagespeed::image_compression::ImageHasC2paManifest(with_c2pa));
+  ASSERT_EQ(IMAGE_AVIF,
+            pagespeed::image_compression::ComputeImageType(with_c2pa));
+
+  // Preserve ON (default): the recompress is skipped and the original
+  // manifest-bearing bytes are served unchanged -- never a stripped AVIF.
+  Image::CompressionOptions* on_options = new Image::CompressionOptions();
+  on_options->recompress_avif = true;
+  on_options->avif_quality = 50;
+  EXPECT_TRUE(on_options->preserve_c2pa);  // Default-on.
+  ImagePtr on(NewImage(with_c2pa, "c2pa-avif-in", GTestTempDir(), on_options,
+                       &timer_, &message_handler_));
+  const GoogleString on_out(on->Contents().data(), on->Contents().size());
+  EXPECT_EQ(with_c2pa, on_out);  // Byte-identical skip.
+  EXPECT_TRUE(pagespeed::image_compression::ImageHasC2paManifest(on_out));
+
+  // Preserve OFF: the avif->avif recompress genuinely runs (bytes differ),
+  // proving the ON arm's byte-identical result is the gate firing rather than
+  // the recompress path being inert.
+  Image::CompressionOptions* off_options = new Image::CompressionOptions();
+  off_options->recompress_avif = true;
+  off_options->avif_quality = 50;
+  off_options->preserve_c2pa = false;
+  ImagePtr off(NewImage(with_c2pa, "c2pa-avif-in-off", GTestTempDir(),
+                        off_options, &timer_, &message_handler_));
+  const GoogleString off_out(off->Contents().data(), off->Contents().size());
+  EXPECT_NE(with_c2pa, off_out);
 }
 
 // ---- the design record Level A: PNG carry-through (ImageProvenanceCarry) ----

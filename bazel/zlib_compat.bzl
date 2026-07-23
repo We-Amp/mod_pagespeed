@@ -2,7 +2,7 @@
 #
 # Two zlib implementations used to be linked into every binary (and the
 # production ngx_pagespeed_module.so): stock madler @zlib — pulled in
-# transitively by protobuf's gzip_stream and grpc — alongside the vendored
+# transitively by protobuf's gzip_stream — alongside the vendored
 # @zlib_ng. Both export the same symbols (zlib-ng is built ZLIB_COMPAT), so the
 # linker bound one or the other depending on link order, producing different —
 # both valid — deflate output per binary. That is an ODR/UB hazard and was the
@@ -11,8 +11,8 @@
 #
 # This repository rule declares @zlib as a thin alias onto @zlib_ng so the whole
 # graph links exactly ONE deflate. It must be invoked from
-# mod_pagespeed_dependencies() — which runs before grpc_deps()/protobuf_deps()
-# in WORKSPACE — so their maybe()-guarded madler @zlib declaration is skipped.
+# mod_pagespeed_dependencies() — which runs before protobuf_deps()
+# in WORKSPACE — so its maybe()-guarded madler @zlib declaration is skipped.
 def _zlib_ng_alias_impl(repository_ctx):
     repository_ctx.file("WORKSPACE", 'workspace(name = "zlib")\n')
     repository_ctx.file("BUILD.bazel", """\

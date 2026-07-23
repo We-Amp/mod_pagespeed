@@ -284,4 +284,72 @@ TEST_F(ScanFilterTest, CspBase2) {
   EXPECT_TRUE(rewrite_driver()->other_base_problem());
 }
 
+// base-uri 'none' provably makes the browser ignore every <base>, so the tag
+// is inert: rewriting proceeds (no base problem) and the base is not honored.
+TEST_F(ScanFilterTest, CspBaseNeutralizedByNone) {
+  rewrite_driver()->AddFilters();
+  EnableDebug();
+  static const char kTestName[] = "set_base";
+  static const char kNewBase[] = "http://example.com/index.html";
+  static const char kCsp[] =
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"base-uri 'none'\">";
+  ValidateExpected(
+      kTestName,
+      StrCat("<head>", kCsp, "<base href=\"", kNewBase,
+             "\">"
+             "</head>"),
+      StrCat("<head>", kCsp, "<base href=\"", kNewBase,
+             "\">"
+             "<!--CSP base-uri neutralizes this base (the browser ignores it), "
+             "so it is treated as inert and rewriting proceeds.-->"
+             "</head>"));
+  EXPECT_FALSE(rewrite_driver()->other_base_problem());
+}
+
+// An empty base-uri source list is equivalent to 'none' and likewise inert.
+TEST_F(ScanFilterTest, CspBaseNeutralizedByEmptyList) {
+  rewrite_driver()->AddFilters();
+  EnableDebug();
+  static const char kTestName[] = "set_base";
+  static const char kNewBase[] = "http://example.com/index.html";
+  static const char kCsp[] =
+      "<meta http-equiv=\"Content-Security-Policy\" content=\"base-uri\">";
+  ValidateExpected(
+      kTestName,
+      StrCat("<head>", kCsp, "<base href=\"", kNewBase,
+             "\">"
+             "</head>"),
+      StrCat("<head>", kCsp, "<base href=\"", kNewBase,
+             "\">"
+             "<!--CSP base-uri neutralizes this base (the browser ignores it), "
+             "so it is treated as inert and rewriting proceeds.-->"
+             "</head>"));
+  EXPECT_FALSE(rewrite_driver()->other_base_problem());
+}
+
+// Adversarial: base-uri 'self' still permits a same-origin <base> that can
+// change the path (and thus relative-URL resolution), so we must NOT relax ---
+// the conservative bail is preserved.
+TEST_F(ScanFilterTest, CspBaseSelfStillBails) {
+  rewrite_driver()->AddFilters();
+  EnableDebug();
+  static const char kTestName[] = "set_base";
+  static const char kNewBase[] = "http://example.com/index.html";
+  static const char kCsp[] =
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"base-uri 'self'\">";
+  ValidateExpected(
+      kTestName,
+      StrCat("<head>", kCsp, "<base href=\"", kNewBase,
+             "\">"
+             "</head>"),
+      StrCat("<head>", kCsp, "<base href=\"", kNewBase,
+             "\">"
+             "<!--Unable to check safety of a base with CSP base-uri, "
+             "proceeding conservatively.-->"
+             "</head>"));
+  EXPECT_TRUE(rewrite_driver()->other_base_problem());
+}
+
 }  // namespace net_instaweb

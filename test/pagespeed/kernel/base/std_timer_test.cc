@@ -120,6 +120,34 @@ TEST_F(StdTimerTest, MicrosecondPrecision) {
   EXPECT_LT(min_delta, 1000);
 }
 
+// Test that the monotonic clock is non-decreasing across many samples.
+TEST_F(StdTimerTest, MonotonicClockNeverDecreases) {
+  int64 prev = timer_.NowMonotonicUs();
+  EXPECT_GT(prev, 0);
+  for (int i = 0; i < 1000; ++i) {
+    int64 now = timer_.NowMonotonicUs();
+    EXPECT_GE(now, prev);
+    prev = now;
+  }
+}
+
+// Test that the monotonic clock actually advances across a sleep, so a latency
+// delta computed from it is positive.
+TEST_F(StdTimerTest, MonotonicClockAdvancesAcrossSleep) {
+  const int64 sleep_us = 10000;  // 10ms
+  int64 start = timer_.NowMonotonicUs();
+  timer_.SleepUs(sleep_us);
+  int64 delta = timer_.NowMonotonicUs() - start;
+  EXPECT_GE(delta, sleep_us);
+}
+
+// Test that NowMonotonicMs is consistent with NowMonotonicUs.
+TEST_F(StdTimerTest, MonotonicMsConsistentWithUs) {
+  int64 now_us = timer_.NowMonotonicUs();
+  int64 now_ms = timer_.NowMonotonicMs();
+  EXPECT_NEAR(now_ms, now_us / Timer::kMsUs, 10);
+}
+
 // Test that timer constants are correct
 TEST_F(StdTimerTest, TimerConstants) {
   EXPECT_EQ(1000, Timer::kSecondMs);
