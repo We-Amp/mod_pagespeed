@@ -24,6 +24,318 @@
     }
    }
   ],
+  "cpe:2.3:a:aomedia:aomedia": [
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "AOM v2.0.1 was discovered to contain a stack buffer overflow via the component src/aom_image.c."
+      }
+     ],
+     "id": "CVE-2020-36129",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 8.8,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2021-12-02T22:15:08.597"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "AOM v2.0.1 was discovered to contain a NULL pointer dereference via the component av1/av1_dx_iface.c."
+      }
+     ],
+     "id": "CVE-2020-36130",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 6.5,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2021-12-02T22:15:08.650"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "AOM v2.0.1 was discovered to contain a stack buffer overflow via the component stats/rate_hist.c."
+      }
+     ],
+     "id": "CVE-2020-36131",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 8.8,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2021-12-02T22:15:08.693"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "AOM v2.0.1 was discovered to contain a global buffer overflow via the component av1/encoder/partition_search.h."
+      }
+     ],
+     "id": "CVE-2020-36133",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 8.8,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2021-12-02T22:15:08.733"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "AOM v2.0.1 was discovered to contain a segmentation violation via the component aom_dsp/x86/obmc_sad_avx2.c."
+      }
+     ],
+     "id": "CVE-2020-36134",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 6.5,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2021-12-02T22:15:08.780"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "AOM v2.0.1 was discovered to contain a NULL pointer dereference via the component rate_hist.c."
+      }
+     ],
+     "id": "CVE-2020-36135",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 6.5,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2021-12-02T22:15:08.833"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "aom_image.c in libaom in AOMedia before 2021-04-07 frees memory that is not located on the heap."
+      }
+     ],
+     "id": "CVE-2021-30473",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 9.8,
+         "baseSeverity": "CRITICAL"
+        }
+       }
+      ]
+     },
+     "published": "2021-05-06T15:15:07.943"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "aom_dsp/grain_table.c in libaom in AOMedia before 2021-03-30 has a use-after-free."
+      }
+     ],
+     "id": "CVE-2021-30474",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 9.8,
+         "baseSeverity": "CRITICAL"
+        }
+       }
+      ]
+     },
+     "published": "2021-06-02T17:15:08.630"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "aom_dsp/noise_model.c in libaom in AOMedia before 2021-03-24 has a buffer overflow."
+      }
+     ],
+     "id": "CVE-2021-30475",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 9.8,
+         "baseSeverity": "CRITICAL"
+        }
+       }
+      ]
+     },
+     "published": "2021-06-04T14:15:07.540"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "AOMedia v3.0.0 to v3.5.0 was discovered to contain an invalid read memory access via the component assign_frame_buffer_p in av1/common/av1_common_int.h."
+      }
+     ],
+     "id": "CVE-2023-39616",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 7.5,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2023-08-29T17:15:12.633"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Increasing the resolution of video frames, while performing a multi-threaded encode, can result in a heap overflow in av1_loop_restoration_dealloc()."
+      }
+     ],
+     "id": "CVE-2023-6879",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 9.0,
+         "baseSeverity": "CRITICAL"
+        }
+       }
+      ]
+     },
+     "published": "2023-12-27T23:15:07.530"
+    }
+   }
+  ],
+  "cpe:2.3:a:aomedia:libavif": [
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "libavif 0.8.0 and 0.8.1 has an out-of-bounds write in avifDecoderDataFillImageGrid."
+      }
+     ],
+     "id": "CVE-2020-36407",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 8.8,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2021-07-01T03:15:08.033"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "In libavif before 1.3.0, makeRoom in stream.c has an integer overflow and resultant buffer overflow in stream->offset+size."
+      }
+     ],
+     "id": "CVE-2025-48174",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 4.5,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2025-05-16T05:15:37.213"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "In libavif before 1.3.0, avifImageRGBToYUV in reformat.c has integer overflows in multiplications involving rgbRowBytes, yRowBytes, uRowBytes, and vRowBytes."
+      }
+     ],
+     "id": "CVE-2025-48175",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 4.5,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2025-05-16T05:15:37.470"
+    }
+   }
+  ],
   "cpe:2.3:a:apache:apr-util": [
    {
     "cve": {
@@ -4117,115 +4429,27 @@
     }
    }
   ],
-  "cpe:2.3:a:grpc:grpc": [
+  "cpe:2.3:a:google:protobuf": [
    {
     "cve": {
      "descriptions": [
       {
        "lang": "en",
-       "value": "Google gRPC before 2017-02-22 has an out-of-bounds write caused by a heap-based buffer overflow related to the parse_unix function in core/ext/client_channel/parse_address.c."
+       "value": "protobuf allows remote authenticated attackers to cause a heap-based buffer overflow."
       }
      ],
-     "id": "CVE-2017-7860",
-     "metrics": {
-      "cvssMetricV30": [
-       {
-        "cvssData": {
-         "baseScore": 9.8,
-         "baseSeverity": "CRITICAL"
-        }
-       }
-      ]
-     },
-     "published": "2017-04-14T04:59:00.383"
-    }
-   },
-   {
-    "cve": {
-     "descriptions": [
-      {
-       "lang": "en",
-       "value": "Google gRPC before 2017-02-22 has an out-of-bounds write related to the gpr_free function in core/lib/support/alloc.c."
-      }
-     ],
-     "id": "CVE-2017-7861",
-     "metrics": {
-      "cvssMetricV30": [
-       {
-        "cvssData": {
-         "baseScore": 9.8,
-         "baseSeverity": "CRITICAL"
-        }
-       }
-      ]
-     },
-     "published": "2017-04-14T04:59:00.417"
-    }
-   },
-   {
-    "cve": {
-     "descriptions": [
-      {
-       "lang": "en",
-       "value": "Google gRPC before 2017-03-29 has an out-of-bounds write caused by a heap-based use-after-free related to the grpc_call_destroy function in core/lib/surface/call.c."
-      }
-     ],
-     "id": "CVE-2017-8359",
-     "metrics": {
-      "cvssMetricV30": [
-       {
-        "cvssData": {
-         "baseScore": 9.8,
-         "baseSeverity": "CRITICAL"
-        }
-       }
-      ]
-     },
-     "published": "2017-04-30T17:59:00.997"
-    }
-   },
-   {
-    "cve": {
-     "descriptions": [
-      {
-       "lang": "en",
-       "value": "Google gRPC before 2017-04-05 has an out-of-bounds write caused by a heap-based buffer overflow related to core/lib/iomgr/error.c."
-      }
-     ],
-     "id": "CVE-2017-9431",
-     "metrics": {
-      "cvssMetricV30": [
-       {
-        "cvssData": {
-         "baseScore": 9.8,
-         "baseSeverity": "CRITICAL"
-        }
-       }
-      ]
-     },
-     "published": "2017-06-05T03:29:00.197"
-    }
-   },
-   {
-    "cve": {
-     "descriptions": [
-      {
-       "lang": "en",
-       "value": "The package grpc before 1.24.4; the package @grpc/grpc-js before 1.1.8 are vulnerable to Prototype Pollution via loadPackageDefinition."
-      }
-     ],
-     "id": "CVE-2020-7768",
+     "id": "CVE-2015-5237",
      "metrics": {
       "cvssMetricV31": [
        {
         "cvssData": {
-         "baseScore": 7.5,
+         "baseScore": 8.8,
          "baseSeverity": "HIGH"
         }
        }
       ]
      },
-     "published": "2020-11-11T11:15:10.930"
+     "published": "2017-09-25T17:29:00.397"
     }
    },
    {
@@ -4233,65 +4457,21 @@
      "descriptions": [
       {
        "lang": "en",
-       "value": "There exists an vulnerability causing an abort() to be called in gRPC.\u00a0 The following headers cause gRPC's C++ implementation to abort() when called via http2:  te: x (x != trailers)  :scheme: x (x != http, https)  grpclb_client_stats: x (x == anything)  On top of sending one of those headers, a later header must be sent that gets the total header size past 8KB. We recommend upgrading past git commit\u00a02485fa94bd8a723e5c977d55a3ce10b301b437f8 or v1.53 and above."
+       "value": "Nullptr dereference when a null char is present in a proto symbol. The symbol is parsed incorrectly, leading to an unchecked call into the proto file's name during generation of the resulting error message. Since the symbol is incorrectly parsed, the file is nullptr. We recommend upgrading to version 3.15.0 or greater."
       }
      ],
-     "id": "CVE-2023-1428",
+     "id": "CVE-2021-22570",
      "metrics": {
       "cvssMetricV31": [
        {
         "cvssData": {
-         "baseScore": 7.5,
-         "baseSeverity": "HIGH"
-        }
-       }
-      ]
-     },
-     "published": "2023-06-09T11:15:09.200"
-    }
-   },
-   {
-    "cve": {
-     "descriptions": [
-      {
-       "lang": "en",
-       "value": "When gRPC HTTP2 stack raised a header size exceeded error, it skipped parsing the rest of the HPACK frame. This caused any HPACK table mutations to also be skipped, resulting in a desynchronization of HPACK tables between sender and receiver. If leveraged, say, between a proxy and a backend, this could lead to requests from the proxy being interpreted as containing headers from different proxy clients - leading to an information leak that can be used for privilege escalation or data exfiltration. We recommend upgrading beyond the commit contained in\u00a0 https://github.com/grpc/grpc/pull/33005 https://github.com/grpc/grpc/pull/33005"
-      }
-     ],
-     "id": "CVE-2023-32731",
-     "metrics": {
-      "cvssMetricV31": [
-       {
-        "cvssData": {
-         "baseScore": 7.4,
-         "baseSeverity": "HIGH"
-        }
-       }
-      ]
-     },
-     "published": "2023-06-09T11:15:09.303"
-    }
-   },
-   {
-    "cve": {
-     "descriptions": [
-      {
-       "lang": "en",
-       "value": "gRPC contains a vulnerability whereby a client can cause a termination of connection between a HTTP2 proxy and a gRPC server: a base64 encoding error for `-bin` suffixed headers will result in a disconnection by the gRPC server, but is typically allowed by HTTP2 proxies. We recommend upgrading beyond the commit in\u00a0 https://github.com/grpc/grpc/pull/32309 https://www.google.com/url"
-      }
-     ],
-     "id": "CVE-2023-32732",
-     "metrics": {
-      "cvssMetricV31": [
-       {
-        "cvssData": {
-         "baseScore": 5.3,
+         "baseScore": 6.5,
          "baseSeverity": "MEDIUM"
         }
        }
       ]
      },
-     "published": "2023-06-09T11:15:09.377"
+     "published": "2022-01-26T14:15:08.067"
     }
    },
    {
@@ -4299,10 +4479,32 @@
      "descriptions": [
       {
        "lang": "en",
-       "value": "gRPC contains a vulnerability that allows hpack table accounting errors could lead to unwanted disconnects between clients and servers in exceptional cases/\u00a0Three vectors were found that allow the following DOS attacks:  - Unbounded memory buffering in the HPACK parser - Unbounded CPU consumption in the HPACK parser  The unbounded CPU consumption is down to a copy that occurred per-input-block in the parser, and because that could be unbounded due to the memory copy bug we end up with an O(n^2) parsing loop, with n selected by the client.  The unbounded memory buffering bugs:  - The header size limit check was behind the string reading code, so we needed to first buffer up to a 4 gigabyte string before rejecting it as longer than 8 or 16kb. - HPACK varints have an encoding quirk whereby an infinite number of 0\u2019s can be added at the start of an integer. gRPC\u2019s hpack parser needed to read all of them before concluding a parse. - gRPC\u2019s metadata overflow check was performed per frame, so that the following sequence of frames could cause infinite buffering: HEADERS: containing a: 1 CONTINUATION: containing a: 2 CONTINUATION: containing a: 3 etc\u2026"
+       "value": "The JsonToBinaryStream()\u00a0function is part of the protocol buffers C++ implementation and is used to parse JSON from a stream. If the input is broken up into separate chunks in a certain way, the parser will attempt to read bytes from a chunk that has already been freed."
       }
      ],
-     "id": "CVE-2023-33953",
+     "id": "CVE-2024-2410",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 7.6,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2024-05-03T13:15:21.700"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Any project that parses untrusted Protocol Buffers data\u00a0containing an arbitrary number of nested groups / series of SGROUP\u00a0tags can corrupted by exceeding the stack limit i.e. StackOverflow. Parsing nested groups as unknown fields with DiscardUnknownFieldsParser or Java Protobuf Lite parser, or against Protobuf map fields, creates unbounded recursions that can be abused by an attacker."
+      }
+     ],
+     "id": "CVE-2024-7254",
      "metrics": {
       "cvssMetricV31": [
        {
@@ -4313,7 +4515,7 @@
        }
       ]
      },
-     "published": "2023-08-09T13:15:09.370"
+     "published": "2024-09-19T01:15:10.963"
     }
    },
    {
@@ -4321,10 +4523,10 @@
      "descriptions": [
       {
        "lang": "en",
-       "value": "The HTTP/2 protocol allows a denial of service (server resource consumption) because request cancellation can reset many streams quickly, as exploited in the wild in August through October 2023."
+       "value": "A denial-of-service (DoS) vulnerability exists in google.protobuf.json_format.ParseDict() in Python, where the max_recursion_depth limit can be bypassed when parsing nested google.protobuf.Any messages.  Due to missing recursion depth accounting inside the internal Any-handling logic, an attacker can supply deeply nested Any structures that bypass the intended recursion limit, eventually exhausting Python\u2019s recursion stack and causing a RecursionError."
       }
      ],
-     "id": "CVE-2023-44487",
+     "id": "CVE-2026-0994",
      "metrics": {
       "cvssMetricV31": [
        {
@@ -4335,95 +4537,7 @@
        }
       ]
      },
-     "published": "2023-10-10T14:15:10.883"
-    }
-   },
-   {
-    "cve": {
-     "descriptions": [
-      {
-       "lang": "en",
-       "value": "Lack of error handling in the TCP server in Google's gRPC starting version 1.23 on posix-compatible platforms (ex. Linux) allows an attacker to cause a denial of service by initiating a significant number of connections with the server. Note that gRPC C++ Python, and Ruby are affected, but gRPC Java, and Go are NOT affected."
-      }
-     ],
-     "id": "CVE-2023-4785",
-     "metrics": {
-      "cvssMetricV31": [
-       {
-        "cvssData": {
-         "baseScore": 7.5,
-         "baseSeverity": "HIGH"
-        }
-       }
-      ]
-     },
-     "published": "2023-09-13T17:15:10.227"
-    }
-   },
-   {
-    "cve": {
-     "descriptions": [
-      {
-       "lang": "en",
-       "value": "There exists a denial of service through Data corruption in gRPC-C++ -\u00a0gRPC-C++ servers with transmit zero copy enabled through the channel arg GRPC_ARG_TCP_TX_ZEROCOPY_ENABLED can experience data corruption issues. The data sent by the application may be corrupted before transmission over the network thus leading the receiver to receive an incorrect set of bytes causing RPC requests to fail. We recommend upgrading past commit\u00a0e9046b2bbebc0cb7f5dc42008f807f6c7e98e791"
-      }
-     ],
-     "id": "CVE-2024-11407",
-     "metrics": {
-      "cvssMetricV31": [
-       {
-        "cvssData": {
-         "baseScore": 7.5,
-         "baseSeverity": "HIGH"
-        }
-       }
-      ]
-     },
-     "published": "2024-11-26T17:15:22.830"
-    }
-   },
-   {
-    "cve": {
-     "descriptions": [
-      {
-       "lang": "en",
-       "value": "It's possible for a gRPC client communicating with a HTTP/2 proxy to poison the HPACK table between the proxy and the backend such that other clients see failed requests. It's also possible to use this vulnerability to leak other clients HTTP header keys, but not values.  This occurs because the error status for a misencoded header is not cleared between header reads, resulting in subsequent (incrementally indexed) added headers in the first request being poisoned until cleared from the HPACK table.  Please update to a fixed version of gRPC as soon as possible. This bug has been fixed in 1.58.3, 1.59.5, 1.60.2, 1.61.3, 1.62.3, 1.63.2, 1.64.3, 1.65.4."
-      }
-     ],
-     "id": "CVE-2024-7246",
-     "metrics": {
-      "cvssMetricV31": [
-       {
-        "cvssData": {
-         "baseScore": 5.3,
-         "baseSeverity": "MEDIUM"
-        }
-       }
-      ]
-     },
-     "published": "2024-08-06T11:16:07.587"
-    }
-   },
-   {
-    "cve": {
-     "descriptions": [
-      {
-       "lang": "en",
-       "value": "gRPC-Go is the Go language implementation of gRPC. Versions prior to 1.79.3 have an authorization bypass resulting from improper input validation of the HTTP/2 `:path` pseudo-header. The gRPC-Go server was too lenient in its routing logic, accepting requests where the `:path` omitted the mandatory leading slash (e.g., `Service/Method` instead of `/Service/Method`). While the server successfully routed these requests to the correct handler, authorization interceptors (including the official `grpc/authz` package) evaluated the raw, non-canonical path string. Consequently, \"deny\" rules defined using canonical paths (starting with `/`) failed to match the incoming request, allowing it to bypass the policy if a fallback \"allow\" rule was present. This affects gRPC-Go servers that use path-based authorization interceptors, such as the official RBAC implementation in `google.golang.org/grpc/authz` or custom interceptors relying on `info.FullMethod` or `grpc.Method(ctx)`; AND that have a security policy contains specific \"deny\" rules for canonical paths but allows other requests by default (a fallback \"allow\" rule). The vulnerability is exploitable by an attacker who can send raw HTTP/2 frames with malformed `:path` headers directly to the gRPC server. The fix in version 1.79.3 ensures that any request with a `:path` that does not start with a leading slash is immediately rejected with a `codes.Unimplemented` error, preventing it from reaching authorization interceptors or handlers with a non-canonical path string. While upgrading is the most secure and recommended path, users can mitigate the vulnerability using one of the following methods: Use a validating interceptor (recommended mitigation); infrastructure-level normalization; and/or policy hardening."
-      }
-     ],
-     "id": "CVE-2026-33186",
-     "metrics": {
-      "cvssMetricV31": [
-       {
-        "cvssData": {
-         "baseScore": 9.1,
-         "baseSeverity": "CRITICAL"
-        }
-       }
-      ]
-     },
-     "published": "2026-03-20T23:16:45.180"
+     "published": "2026-01-23T15:16:06.840"
     }
    }
   ],
@@ -9830,6 +9944,52 @@
     }
    }
   ],
+  "cpe:2.3:a:videolan:dav1d": [
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "VideoLAN dav1d before 1.2.0 has a thread_task.c race condition that can lead to an application crash, related to dav1d_decode_frame_exit."
+      }
+     ],
+     "id": "CVE-2023-32570",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 5.9,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2023-05-10T05:15:12.190"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "An integer overflow in dav1d AV1 decoder that can occur when decoding videos with large frame size. This can lead to memory corruption within the AV1 decoder. We recommend upgrading past version 1.4.0 of dav1d."
+      }
+     ],
+     "id": "CVE-2024-1580",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 5.9,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2024-02-19T11:15:08.817"
+    }
+   }
+  ],
   "cpe:2.3:a:webmproject:libwebp": [
    {
     "cve": {
@@ -10163,7 +10323,7 @@
    }
   ]
  },
- "generated": "2026-07-16T13:23:48Z",
+ "generated": "2026-07-20T10:08:30Z",
  "schema": 1,
  "source": "https://services.nvd.nist.gov/rest/json/cves/2.0"
 }

@@ -65,7 +65,20 @@ common --experimental_allow_tags_propagation
 # (Workaround for https://github.com/bazelbuild/rules_foreign_cc/issues/421)
 build:linux --copt=-fPIC
 build:linux --copt=-Wno-deprecated-declarations
-build:linux --copt=-Wno-dangling-reference
+# -Wdangling-reference is a GCC C++/ObjC++-only warning, so this suppression
+# MUST be a --cxxopt, never a --copt. As a --copt it also lands on every C
+# compile, where GCC answers with
+#   cc1: warning: command-line option '-Wno-dangling-reference' is valid for
+#        C++/ObjC++ but not for C
+# That is harmless for our own C code, but rules_foreign_cc bakes the C copts
+# into CMAKE_C_FLAGS for every cmake() dependency, and CMake's
+# check_c_compiler_flag() treats that GNU "valid for ... but not for" line as a
+# FAIL_REGEX hit. Every probe then reports the flag as unsupported, so libaom's
+# require_c_flag(-std=c99) hard-fails configure on any leg that builds with
+# plain host GCC. Clang legs never saw it because --config=clang
+# adds -Wno-unknown-warning-option, which silences clang's equivalent complaint.
+# Guarded by tools/assert-bazelrc-lang-flags.sh.
+build:linux --cxxopt=-Wno-dangling-reference
 build:linux --cxxopt=-std=c++20 --host_cxxopt=-std=c++20
 build:linux --conlyopt=-fexceptions
 build:linux --fission=dbg,opt
@@ -102,6 +115,15 @@ build:hardening-bti --copt=-mbranch-protection=standard
 
 # We already have absl in the build, define absl=1 to tell googletest to use absl for backtrace.
 build --define absl=1
+
+# CRT for the AVIF codec stack. The AV1 codecs are built by cmake via
+# rules_foreign_cc, which does not see Bazel's --features, so the CRT choice has
+# to be mirrored into a --define that //bazel:windows_static_crt can select on.
+# `static` matches the static_link_msvcrt feature --config=windows enables;
+# --config=win-asan flips it to `dynamic` below, in step with the
+# --features=-static_link_msvcrt it already sets. Declared as a plain `build`
+# line so it lands before any --config expansion and stays order-independent.
+build --define=avif_crt=static
 
 # Disable ICU linking for googleurl.
 build --@com_googlesource_googleurl//build_config:system_icu=0
@@ -166,18 +188,18 @@ build:macos --cxxopt=-std=c++20 --host_cxxopt=-std=c++20
 build:macos --action_env=PATH=/opt/homebrew/bin:/opt/local/bin:/usr/local/bin:/usr/bin:/bin
 build:macos --host_action_env=PATH=/opt/homebrew/bin:/opt/local/bin:/usr/local/bin:/usr/bin:/bin
 build:macos --define tcmalloc=disabled
-# Enable aligned allocation (required by absl)
-build:macos --copt=-faligned-allocation --host_copt=-faligned-allocation
-# Suppress 'register' keyword errors from gperf-generated code (deprecated in C++17)
-build:macos --copt=-Wno-register --host_copt=-Wno-register
+# Enable aligned allocation (required by absl). C++-only (clang rejects it for
+# C), so --cxxopt, not --copt — see the -Wno-dangling-reference note above.
+build:macos --cxxopt=-faligned-allocation --host_cxxopt=-faligned-allocation
+# Suppress 'register' keyword errors from gperf-generated code (deprecated in
+# C++17). -Wregister is C++/ObjC++-only, hence --cxxopt.
+build:macos --cxxopt=-Wno-register --host_cxxopt=-Wno-register
 
 # macOS ASAN/UBSAN
 build:macos-asan --config=asan
 # Workaround, see https://github.com/bazelbuild/bazel/issues/6932
 build:macos-asan --copt -Wno-macro-redefined
 build:macos-asan --copt -D_FORTIFY_SOURCE=0
-# Workaround, see https://github.com/bazelbuild/bazel/issues/4341
-build:macos-asan --copt -DGRPC_BAZEL_BUILD
 # Dynamic link cause issues like: `dyld: malformed mach-o: load commands size (59272) > 32768`
 build:macos-asan --dynamic_mode=off
 
@@ -342,7 +364,8 @@ build:clang-cl --copt="-Wno-builtin-macro-redefined"
 # ./test/mocks/http/stream.h(16,21): error: 'addCallbacks'
 #     overrides a member function but is not marked 'override'
 #   MOCK_METHOD(void, addCallbacks, (StreamCallbacks & callbacks));
-build:clang-cl --copt="-Wno-inconsistent-missing-override"
+# -Winconsistent-missing-override is a C++-only clang warning, hence --cxxopt.
+build:clang-cl --cxxopt="-Wno-inconsistent-missing-override"
 
 # Defaults to 'auto' - Off for windows, so override to linux behavior
 build:windows --enable_runfiles=yes
@@ -391,6 +414,11 @@ build:win-asan --copt=-O1
 # ASan needs the dynamic CRT (static CRT is incompatible with ASan DLL model)
 build:win-asan --features=-fully_static_link
 build:win-asan --features=-static_link_msvcrt
+# ...and the same for the cmake-built AV1 codecs, which cannot see --features.
+# Without this they keep the static CRT: lld-link downgrades the mix to the
+# LNK4098 *warning*, so the leg stays green while ASan's interceptors -- which
+# hook the dynamic CRT -- stop covering allocations inside the codec.
+build:win-asan --define=avif_crt=dynamic
 build:win-asan --dynamic_mode=off
 
 # Windows MSVC /analyze static analysis

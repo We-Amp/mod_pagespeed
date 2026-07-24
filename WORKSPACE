@@ -30,20 +30,76 @@ http_archive(
     urls = ["https://github.com/google/gurl/archive/e6c272102e0554e02c1bb317edff927ee56c7d0b.tar.gz"],
     patches = ["//bazel:googleurl_visibility.patch"],
     patch_args = ["-p1"],
-    patch_cmds = [
-        """if [ "$(uname)" = "Darwin" ]; then sed -i.bak 's/__is_cpp17_contiguous_iterator/__libcpp_is_contiguous_iterator/g' base/containers/checked_iterators.h && rm -f base/containers/checked_iterators.h.bak; fi""",
+    # NOTE: the former Darwin-only patch_cmds sed renaming
+    # __is_cpp17_contiguous_iterator -> __libcpp_is_contiguous_iterator was
+    # removed: current libc++ (Xcode 16+ / macOS 26) already uses the new
+    # spelling, and the pinned gurl snapshot now carries an upstream block with
+    # that spelling too, so the sed produced a duplicate-definition error.
+)
+
+# build_bazel_apple_support — declared explicitly here so we can carry
+# bazel/apple_support_macos26.patch: 1.17.1's osx_cc_configure.bzl compiles
+# wrapped_clang/libtool_check_unique with -Wl,-no_uuid and
+# -Wl,-no_adhoc_codesign, which the macOS 26 toolchain rejects (missing
+# LC_UUID / immediate SIGKILL on arm64). The patch just drops those two flags.
+# This declaration predates and outlives gRPC: grpc_deps() used to pin the
+# same 1.17.1 transitively via its existing_rules() guard, but the patched
+# Apple crosstool is needed by bazel itself, not by gRPC.
+http_archive(
+    name = "build_bazel_apple_support",
+    sha256 = "b53f6491e742549f13866628ddffcc75d1f3b2d6987dc4f14a16b242113c890b",
+    urls = [
+        "https://storage.googleapis.com/grpc-bazel-mirror/github.com/bazelbuild/apple_support/releases/download/1.17.1/apple_support.1.17.1.tar.gz",
+        "https://github.com/bazelbuild/apple_support/releases/download/1.17.1/apple_support.1.17.1.tar.gz",
+    ],
+    patches = ["//bazel:apple_support_macos26.patch"],
+    patch_args = ["-p1"],
+)
+
+# Protocol Buffers C++ runtime + codegen is declared in
+# bazel/repositories.bzl (com_google_protobuf, pinned to the v31.1 release
+# commit gRPC 1.78.1's grpc_deps() used to provide before the gRPC dependency
+# was removed along with the experimental central controller).
+
+# rules_cc and rules_proto for cc_library/cc_proto_library and proto_library.
+# Same pins gRPC 1.78.1's grpc_deps() used; declared before protobuf_deps()
+# below so its maybe()-style guards keep these versions.
+http_archive(
+    name = "rules_cc",
+    sha256 = "abc605dd850f813bb37004b77db20106a19311a96b2da1c92b789da529d28fe1",
+    strip_prefix = "rules_cc-0.0.17",
+    urls = [
+        "https://github.com/bazelbuild/rules_cc/releases/download/0.0.17/rules_cc-0.0.17.tar.gz",
     ],
 )
 
-# gRPC transitive dependencies (abseil, protobuf, c-ares, upb, etc.)
-# Uses maybe() — only declares repos not already in mod_pagespeed_dependencies().
-load("@com_github_grpc_grpc//bazel:grpc_deps.bzl", "grpc_deps")
+http_archive(
+    name = "rules_proto",
+    sha256 = "0e5c64a2599a6e26c6a03d6162242d231ecc0de219534c38cb4402171def21e8",
+    strip_prefix = "rules_proto-7.0.2",
+    urls = [
+        "https://github.com/bazelbuild/rules_proto/archive/refs/tags/7.0.2.tar.gz",
+    ],
+)
 
-grpc_deps()
+# Protobuf's transitive deps (bazel_skylib, rules_java, rules_python, etc.).
+# Skips abseil-cpp/zlib/jsoncpp/rules_cc, already declared above or in
+# mod_pagespeed_dependencies().
+load("@com_google_protobuf//:protobuf_deps.bzl", "protobuf_deps")
 
-load("@com_github_grpc_grpc//bazel:grpc_extra_deps.bzl", "grpc_extra_deps")
+protobuf_deps()
 
-grpc_extra_deps()
+load("@rules_java//java:rules_java_deps.bzl", "rules_java_dependencies")
+
+rules_java_dependencies()
+
+load("@rules_python//python:repositories.bzl", "py_repositories")
+
+py_repositories()
+
+load("@rules_proto//proto:repositories.bzl", "rules_proto_dependencies")
+
+rules_proto_dependencies()
 
 # rules_foreign_cc - for building cmake/autoconf projects (curl, libmemcached)
 http_archive(
@@ -59,9 +115,11 @@ rules_foreign_cc_dependencies()
 
 # bazel_compdb — generates compile_commands.json for clang-tidy.
 # Used by tools/gen_compilation_database.py via the compilation_database_aspect.
+# NOTE: sha updated 2026-07-20 — GitHub re-rolled the 0.5.2 archive (same
+# release content, new tarball bytes); any cold fetch with the old sha fails.
 http_archive(
     name = "bazel_compdb",
-    sha256 = "cd9e2dd65ee15c985b4b4b0f0f0c39dc3ef84fd749cbeef9c40c2f24a3c45a4d",
+    sha256 = "d32835b26dd35aad8fd0ba0d712265df6565a3ad860d39e4c01ad41059ea7eda",
     strip_prefix = "bazel-compilation-database-0.5.2",
     urls = ["https://github.com/grailbio/bazel-compilation-database/archive/refs/tags/0.5.2.tar.gz"],
 )

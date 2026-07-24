@@ -22,10 +22,14 @@
 #   1. INTEGRITY ALWAYS, EVEN ON THE LOCAL HIT. Before any `tar` runs we verify
 #      non-empty + `zstd -t` (and a `.sha256` sidecar when present). A partial
 #      NEVER reaches tar.
-#   2. SELF-HEALING FALLBACK. If the local copy is missing OR fails integrity,
-#      we re-fetch from the authoritative cache-host shared dir with retries +
-#      backoff, re-verifying each attempt. A flaky/partial local file heals
-#      from the authoritative source instead of cascading downstream failures.
+#   2. SELF-HEALING FALLBACK. If the local copy is missing, fails integrity,
+#      OR FAILS EXTRACTION (a verified file can still vanish -- or its DrvFs
+#      mount flap -- between `zstd -t` and `tar`: Linux Build lane, run
+#      29756918487, "Local tarball present and verified" then seconds later
+#      "Cannot open: No such file or directory"), we re-fetch from the
+#      authoritative cache-host shared dir with retries + backoff, re-verifying
+#      each attempt. A flaky/partial/vanished local file heals from the
+#      authoritative source instead of cascading downstream failures.
 #   3. IN-FLIGHT TTL EXTENSION. On every successful cache-host fetch we `touch` the
 #      remote tarball so the design record's 3-day cleanup measures "days since last
 #      consumed" rather than "days since vendored". A workflow rerun within the
@@ -205,6 +209,27 @@ fetch_from_ci_hub() {
   return 1
 }
 
+# --- extraction ---------------------------------------------------------------
+# extract_workspace <path>
+#   Extracts a tarball that has ALREADY passed verify_tarball into $DEST.
+#   Returns tar's (or the pipeline's, under pipefail) exit status so the
+#   caller can self-heal: a verified file can still vanish -- or its DrvFs
+#   mount flap -- between verification and extraction (Linux Build lane, run
+#   29756918487: "Local tarball present and verified" followed seconds later
+#   by tar's "Cannot open: No such file or directory"). Called under `if`, so
+#   `set -e` is intentionally suppressed inside; the last command's status is
+#   the function's return value (pipefail keeps a zstd-side failure in the
+#   --stream pipeline from being masked by tar's exit code).
+extract_workspace() {
+  local path="$1"
+  log "Extracting verified workspace from ${path} into ${DEST}"
+  if [ "$STREAM" -eq 1 ]; then
+    zstd -d -T0 "$path" -c | tar xf - -C "$DEST"
+  else
+    tar --zstd -xf "$path" -C "$DEST"
+  fi
+}
+
 # --- main -------------------------------------------------------------------
 mkdir -p "$DEST"
 
@@ -228,30 +253,42 @@ else
   log "No local candidate provided (auxiliary runner) -- fetching from cache-host."
 fi
 
-# 2. Fall back to the authoritative cache-host shared dir.
-if [ -z "$CHOSEN" ]; then
-  FETCHED="/tmp/${BASENAME}"
-  if fetch_from_ci_hub "$FETCHED"; then
-    CHOSEN="$FETCHED"
-  else
-    err "Vendor tarball ${BASENAME} is unavailable on $(hostname) AND could not be"
-    err "fetched/verified from cache-host after ${FETCH_RETRIES} attempts."
-    err "Most likely the producing vendor job's artifact was cleaned up by the"
-    err "3-day TTL because only failed jobs were rerun -- GitHub does"
-    err "NOT re-run the successful 'Vendor Dependencies' job on 'gh run rerun"
-    err "--failed'. RECOVERY: rerun the FULL workflow ('gh run rerun <run-id>'"
-    err "without --failed, or push an empty commit) so the vendor job"
-    err "regenerates the tarball."
-    exit 1
+# 2. Extract the verified local candidate. Verification passing is NOT the end
+#    of the story: the file can still vanish, or the DrvFs mount flap, between
+#    `zstd -t` and `tar`. Treat a failed extraction exactly
+#    like a failed integrity check -- heal from cache-host below.
+if [ -n "$CHOSEN" ]; then
+  if extract_workspace "$CHOSEN"; then
+    log "Workspace extracted into ${DEST}"
+    exit 0
   fi
+  warn "Local tarball verified but extraction failed on $(hostname): $CHOSEN -- self-healing from cache-host."
+  CHOSEN=""
 fi
 
-# 3. Extract the verified tarball. (Verification already happened above, so
-#    tar only ever sees a complete archive.)
-log "Extracting verified workspace from ${CHOSEN} into ${DEST}"
-if [ "$STREAM" -eq 1 ]; then
-  zstd -d -T0 "$CHOSEN" -c | tar xf - -C "$DEST"
-else
-  tar --zstd -xf "$CHOSEN" -C "$DEST"
+# 3. Fall back to the authoritative cache-host shared dir.
+FETCHED="/tmp/${BASENAME}"
+if fetch_from_ci_hub "$FETCHED"; then
+  # The fetched copy was verified by fetch_from_ci_hub a moment ago, so an
+  # extraction failure here is not a fetch/integrity problem; there is no
+  # further fallback -- fail loud.
+  if extract_workspace "$FETCHED"; then
+    log "Workspace extracted into ${DEST}"
+    exit 0
+  fi
+  err "Vendor tarball ${BASENAME} was fetched from cache-host and passed integrity,"
+  err "but extraction into ${DEST} still failed on $(hostname). Investigate the"
+  err "runner's tar/zstd toolchain and the destination filesystem; re-running"
+  err "the job as-is will hit the same failure."
+  exit 1
 fi
-log "Workspace extracted into ${DEST}"
+
+err "Vendor tarball ${BASENAME} is unavailable on $(hostname) AND could not be"
+err "fetched/verified from cache-host after ${FETCH_RETRIES} attempts."
+err "Most likely the producing vendor job's artifact was cleaned up by the"
+err "3-day TTL because only failed jobs were rerun -- GitHub does"
+err "NOT re-run the successful 'Vendor Dependencies' job on 'gh run rerun"
+err "--failed'. RECOVERY: rerun the FULL workflow ('gh run rerun <run-id>'"
+err "without --failed, or push an empty commit) so the vendor job"
+err "regenerates the tarball."
+exit 1

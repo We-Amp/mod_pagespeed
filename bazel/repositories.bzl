@@ -14,6 +14,14 @@ load(":aprutil.bzl", "aprutil_build_rule")
 load(":cyclone.bzl", "cyclone_build_rule")
 load(":ed25519.bzl", "ed25519_build_rule")
 load(":zlib_compat.bzl", "zlib_ng_alias_repository")
+# NOTE: do NOT `load(":libavif.bzl"/":libaom.bzl"/":libdav1d.bzl", ...)` here.
+# Those files top-level-load @rules_foreign_cc//foreign_cc:defs.bzl, but this
+# module is loaded from WORKSPACE *before* the rules_foreign_cc http_archive is
+# declared -- importing them creates a "repository used prior to being defined"
+# repo-mapping cycle. The *_src archives only need the trivial all_srcs
+# filegroup, so they reuse _ALL_SRCS_BUILD_FILE (below), exactly like curl/
+# memcached. The cmake() macros in those .bzl files are loaded later, at BUILD
+# loading time, which is fine.
 
 # the design record / CVE matcher: every vendored C/C++ dep below carries a CPE +
 # release_date annotation in tools/dependency/cpe-map.yaml, scanned daily
@@ -22,7 +30,7 @@ load(":zlib_compat.bzl", "zlib_ng_alias_repository")
 # justification) — a new C/C++ dep cannot land unscanned. When you add or bump a
 # dep, update its cpe-map.yaml release_date.
 
-ENVOY_COMMIT = "f97695a50e11f5ff6719e129a466bf9204b64a7f"  # v1.37.5 - 2026-06-26 CVE batch (defense-in-depth; mpp's compiled extension set was already unaffected — see tools/dependency/cve-ignore.yaml). ABI-compat pins (gRPC/BoringSSL/zlib-ng below) unchanged v1.37.2->v1.37.5.
+ENVOY_COMMIT = "f97695a50e11f5ff6719e129a466bf9204b64a7f"  # v1.37.5 - 2026-06-26 CVE batch (defense-in-depth; mpp's compiled extension set was already unaffected — see tools/dependency/cve-ignore.yaml). ABI-compat pins (BoringSSL/zlib-ng below) unchanged v1.37.2->v1.37.5.
 ENVOY_SHA = "b517189c09755bcf24a0e04376f4f329df83aad03ed014857a506c74ce9c103f"
 
 # Standalone zlib-ng — replaces @envoy//bazel:zlib for non-Envoy builds.
@@ -34,12 +42,11 @@ ZLIB_NG_SHA = "6a0561b50b8f5f6434a6a9e667a67026f2b2064a1ffa959c6b2dae320161c2a8"
 BORINGSSL_VERSION = "0.20260508.0"
 BORINGSSL_SHA = "de3371d3fe085afd34778a4c988fb7840b9c92cb21504e674f33ebefd98edc00"
 
-# Phase 4: Standalone gRPC — pinned for ABI compatibility with Envoy v1.37.2.
-# Bumped May 2026 from 1.76.0 (~2 minor releases of upstream drift; the 1.78
-# series picked up the `<string>` / `<limits>` / `<algorithm>` include cleanups
-# we previously carried in bazel/grpc.patch — 3 hunks dropped on re-port).
-GRPC_VERSION = "1.78.1"
-GRPC_SHA = "961a44a2a5a50670e58f5e887c17fe70529253da23802245326d681f6d8d1ba6"
+# Protocol Buffers C++ runtime + codegen. Same v31.1 release commit that
+# gRPC 1.78.1's grpc_deps() provided before the gRPC dependency was removed
+# along with the experimental central controller.
+PROTOBUF_COMMIT = "74211c0dfc2777318ab53c2cd2c317a2ef9012de"  # v31.1
+PROTOBUF_SHA = "d0e3a75876a81e1536028bb9cf9181382b198da4cc6fa6aef86879ef629ac807"
 
 # Standalone googletest — previously only an Envoy transitive dep.
 GOOGLETEST_VERSION = "1.17.0"
@@ -228,11 +235,51 @@ LIBCURL_SHA = "ec753aa6f408a3ca9f0d6d5f7a77417aecd1544db13c03ae5d443612bf367364"
 LIBMEMCACHED_VERSION = "1.1.4"
 LIBMEMCACHED_SHA = "c477e1f6510e1dc698e84f3717ce690a8f65b94c616ecaa62306cce0f5e3116a"
 
+# AVIF stack. Built from source via rules_foreign_cc:
+#   libavif  -> cmake  (bazel/libavif.bzl)
+#   libaom   -> cmake  (bazel/libaom.bzl)   AV1 encoder+decoder (reference)
+#   dav1d    -> meson  (bazel/libdav1d.bzl) faster AV1 decoder (optional)
+# Source-stability decisions (Stream 0 spike): libavif ships a byte-stable
+# GitHub release tarball; dav1d uses the byte-stable GitHub MIRROR release tag
+# (videolan/dav1d), NOT the code.videolan.org GitLab auto-tarball; aom uses a
+# git_repository commit pin (aomedia.googlesource.com is git-only and its
+# archive tarballs are not byte-stable), mirroring the cyclone pattern.
+# NOTE: each dep also needs a tools/dependency/cpe-map.yaml entry.
+LIBAVIF_VERSION = "1.4.2"
+LIBAVIF_SHA = "2b645287340ba5a631d268b551dc2d72bd73ac33335962dd36dcdb6d8366921d"
+DAV1D_VERSION = "1.5.1"
+DAV1D_SHA = "fa635e2bdb25147b1384007c83e15de44c589582bb3b9a53fc1579cb9d74b695"
+AOM_COMMIT = "3b624af45b86646a20b11a9ff803aeae588cdee6"  # v3.12.0 (dereferenced tag)
+
 # Build file content for source archives used by rules_foreign_cc
 _ALL_SRCS_BUILD_FILE = """
 filegroup(
     name = "all_srcs",
     srcs = glob(["**"]),
+    visibility = ["//visibility:public"],
+)
+"""
+
+# libavif_src additionally exposes its SOURCE include tree as a header-only
+# cc_library: the clang-tidy compdb build in CI's lint job
+# (--output_groups=compdb_files,header_files) never runs the cmake() install,
+# so TUs including "avif/avif.h" can only resolve it against the source
+# headers (byte-identical to the cmake-installed copies; the duplicate -I in
+# real builds is harmless). load() must lead the file, so this is a full
+# standalone string rather than _ALL_SRCS_BUILD_FILE + suffix.
+_LIBAVIF_SRCS_BUILD_FILE = """
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+filegroup(
+    name = "all_srcs",
+    srcs = glob(["**"]),
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "source_headers",
+    hdrs = glob(["include/avif/*.h"]),
+    includes = ["include"],
     visibility = ["//visibility:public"],
 )
 """
@@ -246,8 +293,8 @@ _ABSEIL_PATCHES = [
 
 def mod_pagespeed_dependencies():
     # Declare abseil under both names used in the dependency graph:
-    # - "com_google_absl": PageSpeed BUILD files, grpc_deps()
-    # - "abseil-cpp": gRPC internal refs, protobuf transitive deps
+    # - "com_google_absl": PageSpeed BUILD files
+    # - "abseil-cpp": protobuf transitive deps
     # Both must exist with identical content to satisfy Bazel's strict
     # include checking on Windows (headers from either external/ dir
     # must be matched by a declared dep).
@@ -271,9 +318,9 @@ def mod_pagespeed_dependencies():
     )
 
     # Collapse the duplicate deflate: alias @zlib -> @zlib_ng so protobuf's
-    # gzip_stream and grpc link the SAME single zlib-ng as libpng/kernel/util,
+    # gzip_stream links the SAME single zlib-ng as libpng/kernel/util,
     # instead of dragging in a second (stock madler) zlib. Declared here, before
-    # grpc_deps()/protobuf_deps() in WORKSPACE, so their maybe()-guarded madler
+    # protobuf_deps() in WORKSPACE, so its maybe()-guarded madler
     # @zlib is skipped. Fixes the ODR/UB two-deflate hazard (was the PngOptimizer
     # golden "flake"). See bazel/zlib_compat.bzl.
     zlib_ng_alias_repository(name = "zlib")
@@ -288,6 +335,22 @@ def mod_pagespeed_dependencies():
         # the BoringSSL TLS slot on DLL unload (issue one change).
         patches = ["@mod_pagespeed//bazel:boringssl_dll_unload_tls_cleanup.patch"],
         patch_args = ["-p1"],
+    )
+
+    # Protocol Buffers. Its @abseil-cpp refs resolve directly against the
+    # abseil archive declared above (both abseil names exist).
+    http_archive(
+        name = "com_google_protobuf",
+        strip_prefix = "protobuf-%s" % PROTOBUF_COMMIT,
+        url = "https://github.com/protocolbuffers/protobuf/archive/%s.tar.gz" % PROTOBUF_COMMIT,
+        sha256 = PROTOBUF_SHA,
+        # Redirect protobuf's internal @abseil-cpp refs to the canonical
+        # @com_google_absl repo (same wiring gRPC's grpc_deps() declaration
+        # used). Without this, protobuf's absl deps resolve to the duplicate
+        # "abseil-cpp" archive, and Windows strict-include validation flags
+        # every absl header a protobuf header pulls in (e.g. absl/log/*) as an
+        # undeclared inclusion in dependents.
+        repo_mapping = {"@abseil-cpp": "@com_google_absl"},
     )
 
     # Phase 2: Standalone libevent.
@@ -314,22 +377,6 @@ filegroup(
 """,
     )
 
-    # Phase 4: Standalone gRPC — previously only an Envoy transitive dep.
-    # Patch fixes layering_check, missing includes, Apple builds, and
-    # third_party/BUILD wiring for our standalone BoringSSL/zlib-ng/c-ares.
-    http_archive(
-        name = "com_github_grpc_grpc",
-        strip_prefix = "grpc-%s" % GRPC_VERSION,
-        url = "https://github.com/grpc/grpc/archive/v%s.tar.gz" % GRPC_VERSION,
-        sha256 = GRPC_SHA,
-        patches = ["//bazel:grpc.patch"],
-        patch_args = ["-p1"],
-        # Redirect gRPC's internal @abseil-cpp refs to our canonical repo.
-        # Without this, gRPC targets add external/abseil-cpp/ to include paths,
-        # causing "undeclared inclusion" errors on Windows.
-        repo_mapping = {"@abseil-cpp": "@com_google_absl"},
-    )
-
     # Standalone googletest — previously only an Envoy transitive dep.
     http_archive(
         name = "googletest",
@@ -342,9 +389,9 @@ filegroup(
         repo_mapping = {"@abseil-cpp": "@com_google_absl"},
     )
 
-    # Pre-declare @re2 to prevent grpc_extra_deps()/protobuf from creating
-    # a duplicate alongside @com_googlesource_code_re2 (from grpc_deps).
-    # Both names must resolve to the same version.
+    # re2 is used directly by pagespeed (pagespeed/kernel/util/re2.h, via
+    # @com_googlesource_code_re2) and by googletest (which references @re2
+    # when built with absl). Both names must resolve to the same version.
     # Bumped May 2026 from 2022-04-01 (~4 years of upstream drift); parity
     # with MPS 2.0 which already runs this version. The Windows strict-deps
     # fallout from this bump is fixed independently in test/pagespeed/kernel/util/BUILD.
@@ -529,6 +576,42 @@ cc_library(
         strip_prefix = "libmemcached-%s" % LIBMEMCACHED_VERSION,
         url = "https://github.com/awesomized/libmemcached/archive/refs/tags/%s.tar.gz" % LIBMEMCACHED_VERSION,
         sha256 = LIBMEMCACHED_SHA,
+        build_file_content = _ALL_SRCS_BUILD_FILE,
+    )
+
+    # ---- AVIF stack --------------------------------------------
+    # libavif source - built via cmake in //bazel:avif (codecs threaded as
+    # cmake deps; see bazel/libavif.bzl).
+    http_archive(
+        name = "libavif_src",
+        strip_prefix = "libavif-%s" % LIBAVIF_VERSION,
+        url = "https://github.com/AOMediaCodec/libavif/archive/refs/tags/v%s.tar.gz" % LIBAVIF_VERSION,
+        sha256 = LIBAVIF_SHA,
+        build_file_content = _LIBAVIF_SRCS_BUILD_FILE,
+        # Static libavif installs a MERGED archive, and its merge helper picks a
+        # bundling tool by compiler ID -- which routes clang-cl into the GNU `ar`
+        # branch and produces no archive at all. See the patch header for the
+        # full diagnosis. No effect on the Linux/macOS legs.
+        patches = ["//bazel:libavif_merge_static_libs_clang_cl.patch"],
+        patch_args = ["-p1"],
+    )
+
+    # dav1d source - built via meson in //bazel:dav1d. GitHub mirror release
+    # tag (byte-stable), NOT the GitLab auto-tarball.
+    http_archive(
+        name = "dav1d_src",
+        strip_prefix = "dav1d-%s" % DAV1D_VERSION,
+        url = "https://github.com/videolan/dav1d/archive/refs/tags/%s.tar.gz" % DAV1D_VERSION,
+        sha256 = DAV1D_SHA,
+        build_file_content = _ALL_SRCS_BUILD_FILE,
+    )
+
+    # aom source - built via cmake in //bazel:aom. git_repository commit pin
+    # (googlesource is git-only; archive tarballs are not byte-stable).
+    git_repository(
+        name = "aom_src",
+        remote = "https://aomedia.googlesource.com/aom",
+        commit = AOM_COMMIT,
         build_file_content = _ALL_SRCS_BUILD_FILE,
     )
 

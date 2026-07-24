@@ -6,6 +6,8 @@
 # This populates:
 #   <vendor-dir>/repo-cache    - Bazel repository cache (all http_archive deps)
 #   <vendor-dir>/cyclone       - Cyclone Cache source (git_repository)
+#   <vendor-dir>/aom           - libaom source (git_repository; googlesource is
+#                                git-only, so it cannot ride the repo-cache)
 #
 # After running this, builds can use --config=vendored for fully offline builds:
 #   bazel build --config=vendored --config=clang-libstdcxx13 //...
@@ -24,6 +26,7 @@ fi
 
 REPO_CACHE="$VENDOR_DIR/repo-cache"
 CYCLONE_DIR="$VENDOR_DIR/cyclone"
+AOM_DIR="$VENDOR_DIR/aom"
 
 mkdir -p "$REPO_CACHE"
 
@@ -77,6 +80,43 @@ else:
     raise SystemExit('ERROR: Could not extract cyclone_build_rule from bazel/cyclone.bzl')
 " > "$CYCLONE_DIR/BUILD.bazel"
 
+# libaom: git_repository on aomedia.googlesource.com (git-only; archive
+# tarballs are not byte-stable, so it cannot be an http_archive and cannot
+# ride the repo-cache). Vendored the same way as Cyclone so offline
+# --config=vendored builds — notably the release nginx-distro containers,
+# which ship without git — never need to clone it.
+echo "==> Vendoring libaom..."
+AOM_COMMIT=$(grep 'AOM_COMMIT' bazel/repositories.bzl | head -1 | sed 's/.*"\(.*\)".*/\1/' || true)
+if [ -z "$AOM_COMMIT" ]; then
+    echo "ERROR: Could not extract AOM_COMMIT from bazel/repositories.bzl" >&2
+    exit 1
+fi
+echo "    aom commit: $AOM_COMMIT"
+rm -rf "$AOM_DIR"
+git clone https://aomedia.googlesource.com/aom "$AOM_DIR"
+(cd "$AOM_DIR" && git checkout --detach "$AOM_COMMIT")
+rm -rf "$AOM_DIR/.git"
+
+touch "$AOM_DIR/WORKSPACE"
+
+# Recreate the BUILD file git_repository would generate from build_file_content
+# (_ALL_SRCS_BUILD_FILE in bazel/repositories.bzl)
+python3 -c "
+import re
+with open('bazel/repositories.bzl') as f:
+    content = f.read()
+m = re.search(r'_ALL_SRCS_BUILD_FILE\s*=\s*\"\"\"(.*?)\"\"\"', content, re.DOTALL)
+if m:
+    print(m.group(1))
+else:
+    raise SystemExit('ERROR: Could not extract _ALL_SRCS_BUILD_FILE from bazel/repositories.bzl')
+" > "$AOM_DIR/BUILD.bazel"
+
+[ -f "$AOM_DIR/CMakeLists.txt" ] || {
+    echo "ERROR: vendored aom looks wrong (no CMakeLists.txt at $AOM_DIR)" >&2
+    exit 1
+}
+
 # -----------------------------------------------------------------------
 # 2. Fetch all http_archive deps into the repository cache.
 #    Use --override_repository for the git_repository deps we just vendored
@@ -84,19 +124,20 @@ else:
 #
 #    We skip the envoy target because envoy's macros reference @rules_fuzzing
 #    which isn't declared — this causes a loading error that aborts the fetch
-#    before all deps are cached. The envoy http_archive itself (and all shared
-#    transitive deps) are still fetched transitively via grpc_deps()/grpc_extra_deps()
-#    which are loaded unconditionally in WORKSPACE.
+#    before all deps are cached. The envoy http_archive itself is declared
+#    in bazel/repositories.bzl and fetched below via 'bazel sync --only'.
 # -----------------------------------------------------------------------
 
 echo "==> Fetching dependencies into repository cache..."
 
 OVERRIDE_FLAGS=(
     --override_repository=cyclone="$CYCLONE_DIR"
+    --override_repository=aom_src="$AOM_DIR"
 )
 
 # Fetch deps for the Apache module — this pulls in the bulk of http_archive deps
-# including boringssl, abseil, grpc, and all transitive deps from grpc_deps()/grpc_extra_deps().
+# including boringssl, abseil, protobuf, and all transitive deps from
+# protobuf_deps() (loaded unconditionally in WORKSPACE).
 bazel --output_base="$VENDOR_OUTPUT_BASE" fetch \
     --repository_cache="$REPO_CACHE" \
     "${OVERRIDE_FLAGS[@]}" \
@@ -148,7 +189,7 @@ check_dep() {
 sha_of() { grep "$1" bazel/repositories.bzl | head -1 | sed 's/.*"\([0-9a-f]\{64\}\)".*/\1/'; }
 check_dep "boringssl" "$(sha_of BORINGSSL_SHA)"
 check_dep "abseil"    "$(sha_of _ABSEIL_SHA)"
-check_dep "grpc"      "$(sha_of GRPC_SHA)"
+check_dep "protobuf"  "$(sha_of PROTOBUF_SHA)"
 check_dep "libpng"    "$(sha_of LIBPNG_SHA)"
 check_dep "envoy"     "$(sha_of ENVOY_SHA)"
 

@@ -1,2 +1,3 @@
 pagespeed/envoy
 test/pagespeed/envoy
+docs/spikes/avif-stream0/bazel

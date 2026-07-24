@@ -77,9 +77,9 @@ case "${DISTRO}" in
          DEF_NGINX_SHA256="77a2541637b92a621e3ee76776c8b7b40cf6d707e69ba53a940283e30ff2f55d" ;;
   # focal is the design record SIDECAR portable path ONLY (not a distro-stock package
   # target). Its nginx is bumped to the 1.30 stable branch for GA: newer branch, smaller CVE backlog than 1.24.0 (2023).
-  # sha256 captured from nginx.org/download/nginx-1.30.3.tar.gz 2026-06-17 (security bump 1.30.2 -> 1.30.3: CVE-2026-42055).
-  focal) DEF_NGINX_VER="1.30.3"
-         DEF_NGINX_SHA256="e5823dc6f45610993def93ebf6cfce68264af4958c77e874b7d20f3709001b8f" ;;
+  # sha256 captured from nginx.org/download/nginx-1.30.4.tar.gz 2026-07-23 (security bump 1.30.3 -> 1.30.4: CVE-2026-42533, CVE-2026-60005, CVE-2026-56434).
+  focal) DEF_NGINX_VER="1.30.4"
+         DEF_NGINX_SHA256="4261dc90e9e47c1c4041276e9aaa3d48ebe2e664f728e14fa95ae6c67d57a08b" ;;
   el9)   DEF_NGINX_VER="1.20.1"
          DEF_NGINX_SHA256="e462e11533d5c30baa05df7652160ff5979591d291736cfa5edb9fd2edb48c49" ;;
   # el10 (AlmaLinux/RHEL/Rocky/CloudLinux 10, the design record): distro-source mode like
@@ -290,7 +290,7 @@ install_deps_noble() {
     build-essential g++-13 gcc-13 \
     clang lld llvm \
     zlib1g-dev libpcre3-dev libssl-dev \
-    python3 unzip zip gperf bison flex \
+    python3 unzip zip gperf bison flex nasm \
     dpkg-dev fakeroot >/dev/null
   # bazelisk (pinned + checksum-verified) if bazel/bazelisk not already provided.
   install_bazelisk
@@ -313,7 +313,7 @@ install_deps_focal() {
     ca-certificates curl wget gnupg lsb-release software-properties-common \
     build-essential \
     zlib1g-dev libpcre3-dev libssl-dev \
-    python3 unzip zip gperf bison flex \
+    python3 unzip zip gperf bison flex nasm \
     dpkg-dev fakeroot >/dev/null
   # g++-13 / libstdc++-13 from the Ubuntu toolchain PPA (focal ships g++-9).
   add-apt-repository -y ppa:ubuntu-toolchain-r/test >/dev/null
@@ -338,13 +338,25 @@ install_deps_focal() {
 install_deps_el9() {
   # --allowerasing: almalinux:9 ships curl-minimal, which conflicts with the full
   # `curl` package; allow dnf to swap it rather than abort on "conflicting requests".
+  # perl: libaom's cmake configure hard-requires it (RTCD/asm generation). On el9
+  # it arrives transitively anyway; pin it explicitly so a slimmer future base
+  # image can't regress the aom build (el10's base did exactly that).
   dnf install -y --allowerasing --setopt=install_weak_deps=False \
     ca-certificates curl wget \
     gcc-toolset-13 \
     clang lld llvm \
     zlib-devel pcre-devel openssl-devel \
-    python3 unzip zip gperf bison flex \
+    python3 perl unzip zip gperf bison flex \
     rpm-build dnf-plugins-core tar gzip make >/dev/null
+  # libaom (AVIF, r20) hard-requires nasm for its x86 SIMD (ENABLE_NASM=1 in
+  # bazel/libaom.bzl). On el9 nasm lives in CRB (verified: base repos have no
+  # match), and EL ships it for x86_64 only — aarch64 aom uses GNU as — so
+  # enable CRB and gate by arch.
+  if [ "$(uname -m)" = "x86_64" ]; then
+    dnf config-manager --set-enabled crb 2>/dev/null \
+      || dnf config-manager --enable crb 2>/dev/null || true
+    dnf install -y --setopt=install_weak_deps=False nasm >/dev/null
+  fi
   # bazelisk (pinned + checksum-verified) if bazel/bazelisk not already provided.
   install_bazelisk
 }
@@ -366,13 +378,23 @@ install_deps_el10() {
   # this the el10 distro-source `rpmbuild -bp` fails at %prep with
   # "gpgverify: gpg2: command not found" and the el10 nginx module silently never
   # builds (the leg is soft). Verified in a real almalinux:10 container.
+  # perl: libaom's cmake configure hard-requires it ("Perl is required to build
+  # libaom", aom_configure.cmake) — the almalinux:10 base image, unlike el9,
+  # ships NO perl even transitively; r20 attempt 4d el10 leg failed exactly
+  # there. Verified installable in a real almalinux:10 container (perl 5.40).
   dnf install -y --allowerasing --setopt=install_weak_deps=False \
     ca-certificates curl wget gnupg2 \
     gcc-toolset-15 \
     clang lld llvm \
     zlib-devel pcre2-devel openssl-devel \
-    python3 unzip zip gperf bison flex \
+    python3 perl unzip zip gperf bison flex \
     rpm-build dnf-plugins-core tar gzip make which file >/dev/null
+  # libaom (AVIF, r20) hard-requires nasm for its x86 SIMD (ENABLE_NASM=1 in
+  # bazel/libaom.bzl); EL packages nasm for x86_64 only, and aarch64 aom uses
+  # GNU as, so gate by arch.
+  if [ "$(uname -m)" = "x86_64" ]; then
+    dnf install -y --setopt=install_weak_deps=False nasm >/dev/null
+  fi
   # bazelisk (pinned + checksum-verified) if bazel/bazelisk not already provided.
   install_bazelisk
 }
@@ -387,7 +409,7 @@ install_deps_debian_common() {
     ca-certificates curl wget gnupg lsb-release \
     build-essential make \
     zlib1g-dev libssl-dev \
-    python3 unzip zip gperf bison flex \
+    python3 unzip zip gperf bison flex nasm \
     dpkg-dev fakeroot >/dev/null
   # PCRE dev headers for nginx. Older distros (bullseye/bookworm/jammy) ship the
   # legacy libpcre3-dev (PCRE 8.x); trixie DROPPED it and ships only libpcre2-dev
@@ -658,9 +680,10 @@ BAZEL_FLAGS=(
 # a warm --disk_cache satisfies the .so link as a cache hit, Bazel does NOT stage
 # the intermediate compile outputs loose into bazel-out (it never needs them as
 # files), so ~dozens of objects (abseil base/crc, css_parser utf, jpeg_reader,
-# grpc alts, ...) are absent and the archive silently loses them -> undefined
-# symbols / wrong behavior on the optimizing path. A no-disk_cache build forces
-# every CppCompile to execute and write its .pic.o loose, so all 2900+ members
+# protobuf well-known types, ...) are absent and the archive silently loses them
+# -> undefined symbols / wrong behavior on the optimizing path. A no-disk_cache
+# build forces every CppCompile to execute and write its .pic.o loose, so all
+# 2900+ members
 # are present (verified: 2986 loose .pic.o vs 0 under a warm cache). The
 # --config=vendored repository_cache still avoids re-fetching external repos, so
 # only compilation is cold. (Honor an explicit opt-in override if a caller really
@@ -1009,22 +1032,56 @@ echo "    all ${NOBJS} PSOL objects materialized in execroot"
 ( cd "${EXECROOT}" && tr '\n' ' ' < "${WORK}/psol_objs.txt" \
     | xargs ar qcsP "${MERGED}" ) || { echo "ERROR: ar failed assembling merged archive" >&2; exit 1; }
 
-# Append the 4 vendored static libs, each extracted into its OWN dir.
-echo "==> appending vendored static libs (curl + libmemcached x3)"
-for libname in libcurl.a libhashkit.a libmemcached.a libmemcachedutil.a; do
-  libpath="$(grep -E "/${libname}$" "${WORK}/all_inputs.txt" | head -1 || true)"
-  if [ -z "${libpath}" ]; then
-    echo "ERROR: vendored ${libname} not found in CppLink inputs" >&2
-    exit 1
-  fi
+# Append EVERY static-lib (.a) CppLink input via ar's MRI script mode
+# (ADDLIB): it copies archive members verbatim, so member names never collide
+# with each other or with the loose objects, and duplicate names INSIDE one
+# archive survive too — libavif.a legitimately carries two scale.c.o members,
+# which any ar-x extraction strategy silently clobbers (the linker itself
+# resolves members by symbol index, not name, so duplicates are fine).
+# Generic on purpose: a hardcoded lib list silently drops any NEW archive that
+# joins the link — r20's foreign-cc image codecs (libaom.a + libavif.a) fell
+# through exactly that way, and GATE 1 caught the packaged module failing
+# dlopen with "undefined symbol: avifDecoderCreate". The REQUIRED set asserts
+# the known members never vanish from the link either (a lib disappearing from
+# CppLink inputs is a build regression, not a reason to ship a thinner
+# archive).
+REQUIRED_LIBS="libcurl.a libhashkit.a libmemcached.a libmemcachedutil.a libaom.a libavif.a"
+grep -E '\.a$' "${WORK}/all_inputs.txt" | sort -u > "${WORK}/psol_libs.txt" || true
+for req in ${REQUIRED_LIBS}; do
+  grep -qE "/${req}$" "${WORK}/psol_libs.txt" \
+    || { echo "ERROR: required static lib ${req} not found in CppLink inputs" >&2; exit 1; }
+done
+NLIBS="$(wc -l < "${WORK}/psol_libs.txt" | tr -d ' ')"
+echo "==> appending ${NLIBS} static libs from CppLink inputs"
+# Validate every lib first (so a missing path fails before any MRI mutation),
+# then merge in a single MRI run.
+: > "${WORK}/merge.mri"
+echo "OPEN ${MERGED}" >> "${WORK}/merge.mri"
+LIB_MEMBERS=0
+while IFS= read -r libpath; do
+  libname="$(basename "${libpath}")"
   abslib="${EXECROOT}/${libpath}"
   [ -f "${abslib}" ] || abslib="${libpath}"  # absolute fallback
-  exd="${WORK}/extract/${libname%.a}"
-  mkdir -p "${exd}"
-  ( cd "${exd}" && ar x "${abslib}" )
-  ( cd "${exd}" && find . -name '*.o' -print0 | xargs -0 ar qPS "${MERGED}" )
-done
+  [ -f "${abslib}" ] || { echo "ERROR: static lib not found: ${libpath}" >&2; exit 1; }
+  NMEM="$(ar t "${abslib}" | wc -l | tr -d ' ')"
+  NDUP="$(ar t "${abslib}" | sort | uniq -d | wc -l | tr -d ' ')"
+  LIB_MEMBERS=$((LIB_MEMBERS + NMEM))
+  echo "    + ${libname} (${NMEM} members, ${NDUP} duplicate member name(s))"
+  echo "ADDLIB ${abslib}" >> "${WORK}/merge.mri"
+done < "${WORK}/psol_libs.txt"
+printf 'SAVE\nEND\n' >> "${WORK}/merge.mri"
+ar -M < "${WORK}/merge.mri" \
+  || { echo "ERROR: ar MRI merge of static libs failed" >&2; exit 1; }
 ar s "${MERGED}"
+# Lossless-merge assertion: every loose object AND every lib member must be in
+# the final archive — a count short of the sum means something was dropped.
+EXPECTED=$((NOBJS + LIB_MEMBERS))
+ACTUAL="$(ar t "${MERGED}" | wc -l | tr -d ' ')"
+[ "${ACTUAL}" -eq "${EXPECTED}" ] || {
+  echo "ERROR: merged archive has ${ACTUAL} members, expected ${EXPECTED} (${NOBJS} objects + ${LIB_MEMBERS} lib members)" >&2
+  exit 1
+}
+echo "    merged archive members: ${ACTUAL} (lossless)"
 echo "    merged archive: $(du -h "${MERGED}" | cut -f1)"
 
 # ---------------------------------------------------------------------------

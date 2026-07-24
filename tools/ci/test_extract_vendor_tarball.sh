@@ -18,6 +18,10 @@
 #                         -> fetches, verifies, extracts.
 #   5. sha-mismatch       local .zst is a *valid* zstd frame but its sidecar
 #                         sha256 disagrees -> rejected, self-heals from cache-host.
+#   6. vanish-at-extract  local tarball PASSES verify but `tar` fails on it
+#                         (the observed race: "Local tarball present and
+#                         verified", then extraction dies) -> self-heals from
+#                         cache-host and extracts correctly.
 #
 # Run:
 #   tools/ci/test_extract_vendor_tarball.sh
@@ -208,6 +212,30 @@ if run_extract --sha "$SHA" --dest "$DEST" --local "$LOCAL" >"$TEST_TMP/out5.log
   fi
 else
   bad "sha-mismatch path returned non-zero despite valid cache-host copy"; cat "$TEST_TMP/out5.log"
+fi
+
+# ===========================================================================
+echo "[6] vanish-at-extract: local verifies OK but tar fails -> heal + extract"
+# ===========================================================================
+DEST="$TEST_TMP/dest6"
+LOCAL="$TEST_TMP/local6.tar.zst"
+# A valid zstd frame whose payload is NOT a tar archive: passes `zstd -t`
+# (no sidecar, so zstd -t is the floor) but `tar --zstd -xf` fails on it.
+# This is the same contract as the observed race (verify OK, extraction dies
+# seconds later) injected deterministically -- the harness
+# cannot delete the file between the script's verify and extract steps.
+printf 'valid zstd frame, but definitely not a tar archive\n' | zstd -q > "$LOCAL"
+# Valid copy on cache-host so extract-phase self-heal can succeed.
+cp "$GOOD" "$SHARED/$NAME"; rm -f "$SHARED/$NAME.sha256"
+if run_extract --sha "$SHA" --dest "$DEST" --local "$LOCAL" >"$TEST_TMP/out6.log" 2>&1; then
+  if [ -f "$DEST/GIT_COMMIT" ] && [ "$(cat "$DEST/marker.txt")" = "hello workspace" ] \
+     && grep -q "verified but extraction failed" "$TEST_TMP/out6.log"; then
+    ok "local verified but failed extraction; self-healed from cache-host, extracted"
+  else
+    bad "exit 0 but did not self-heal/extract as expected"; cat "$TEST_TMP/out6.log"
+  fi
+else
+  bad "extract-phase self-heal returned non-zero despite valid cache-host copy"; cat "$TEST_TMP/out6.log"
 fi
 
 echo ""

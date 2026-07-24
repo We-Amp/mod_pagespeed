@@ -11,6 +11,7 @@ exports_files([
     "googleurl_macos_libcxx.patch",
     "curl_boringssl_ssl_connect_8_20.patch",
     "boringssl_dll_unload_tls_cleanup.patch",
+    "libavif_merge_static_libs_clang_cl.patch",
 ])
 
 # =============================================================================
@@ -32,6 +33,40 @@ config_setting(
     constraint_values = [
         "@platforms//os:linux",
         "@platforms//cpu:arm64",
+    ],
+)
+
+# =============================================================================
+# AVIF codec stack — see bazel/libaom.bzl and bazel/libavif.bzl.
+# =============================================================================
+
+# The AV1 codecs are built by cmake through rules_foreign_cc, so they do NOT
+# see Bazel's C++ features — a cmake() cache entry is the only way to pick the
+# CRT, and select() cannot read --features. .bazelrc therefore mirrors the CRT
+# choice into --define=avif_crt: `static` globally (matching the
+# static_link_msvcrt feature --config=windows turns on) and `dynamic` under
+# --config=win-asan, which turns static_link_msvcrt back off because ASan's
+# interceptors hook the DYNAMIC CRT.
+#
+# Keying the cmake entries on os:windows alone silently mixed the two under
+# --config=win-asan: lld-link reports a CRT mix as LNK4098, a *warning*, so the
+# leg stayed green while ASan quietly stopped instrumenting allocations inside
+# the statically-CRT'd codec — the one thing that leg exists to do.
+config_setting(
+    name = "windows_static_crt",
+    constraint_values = ["@platforms//os:windows"],
+    define_values = {"avif_crt": "static"},
+)
+
+# libaom's own CPU detection sees an empty CMAKE_SYSTEM_PROCESSOR under
+# rules_foreign_cc and falls through to a scalar `generic` target, so
+# AOM_TARGET_CPU has to be set explicitly. Keyed on os+cpu rather than os alone
+# so a future win-arm64 leg does not inherit an x86_64 target CPU.
+config_setting(
+    name = "windows_x86_64",
+    constraint_values = [
+        "@platforms//os:windows",
+        "@platforms//cpu:x86_64",
     ],
 )
 
