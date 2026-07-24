@@ -1,3 +1,518 @@
+# mod_pagespeed 1.15.0+r20 Release Notes
+
+**Release date:** 2026-07-23
+**Status:** Stable
+
+## Overview
+
+Security and correctness release for the 1.15 line, hardening output escaping,
+input validation, and rewrite correctness across the HTML rewriter filters.
+**Update recommended.**
+
+The largest addition is **AVIF image support**, bringing the image path to
+parity with the WebP support it has shipped for years: opt-in AVIF encoding on
+Apache, nginx, and IIS, served only to browsers that advertise the format.
+
+The release also ships a filter modernization batch: new opt-in filters for
+critical images and speculation rules, revived Google Fonts CSS inlining,
+Core Web Vitals reporting from the instrumentation beacon, and support for
+modern JavaScript and CSS constructs that previously passed through
+unoptimized.
+
+**Provenance.** Most of the issues addressed here are long-standing defects
+that originate in the upstream mod_pagespeed codebase (originally developed by
+Google as open source) on which the 1.15 line is built; each was verified
+against the published upstream source. A few are gaps in functionality added
+more recently (Content-Security-Policy handling and stylesheet charset
+fidelity). All are now fixed.
+
+### Security
+
+- The nginx bundled with the NuGet sidecar package and its container image is
+  updated to 1.30.4, picking up the July 2026 upstream nginx security fixes —
+  including CVE-2026-42533, a request-processing memory-safety defect that the
+  upstream nginx advisory reports as exploited in the wild. Update recommended for sidecar deployments. If you
+  build the nginx module against your own nginx, build against 1.30.4 or
+  later.
+- Fixed a cross-site scripting issue where crafted CSS could break out of an
+  inlined `<style>` element when CSS optimization was enabled.
+- Fixed a cross-site scripting issue in local-storage cache inlining where a
+  crafted image attribute could inject script on repeat page views.
+- Fixed a cross-site scripting issue where a crafted image `id` could inject
+  script during inline-image deduplication.
+- Fixed a cross-site scripting issue where a crafted image URL could be
+  reflected unescaped into inline image-preview JavaScript.
+- Hardened image optimization against crafted image dimensions that could
+  bypass the resolution limit and trigger excessive memory use
+  (denial-of-service).
+- Fixed a CSS dependency-parsing defect that could misread stylesheet contents
+  (out-of-bounds read / dropped `@import` rules).
+- Fixed a crash on the image-spriting path that could be triggered by a
+  malformed image file declaring invalid dimensions (denial-of-service). Such
+  inputs are now rejected and the page is served with the original images;
+  sprite sets mixing an unusable image with valid ones now sprite the valid
+  subset. A related defensive guard covers the inline image-preview path,
+  which is not reachable from end-user input.
+- Hardened the JavaScript minifier against crafted scripts that could drive
+  unbounded memory growth during parsing, exhausting server memory
+  (denial-of-service). Parsing depth is now bounded; a script that exceeds the
+  bound is passed through byte-for-byte unminified, which is the minifier's
+  existing behavior for any input it declines to process. Ordinary
+  JavaScript — including large bundles and heavily nested framework output —
+  is unaffected. **Affects all 1.15 releases up to and including r19; update
+  recommended for any deployment that optimizes JavaScript it does not
+  control.**
+- Hardened the HTML parser against crafted documents that could drive memory
+  use to the size of the input regardless of configuration
+  (denial-of-service). A hard ceiling now applies to how much a single HTML
+  token may accumulate, independent of the configurable parse-size limit,
+  whose semantics are unchanged. Documents that trip the ceiling fall back to
+  being passed through rather than rewritten. **Affects all 1.15 releases up
+  to and including r19; update recommended for any deployment that rewrites
+  HTML it does not control.**
+- Fixed a content-integrity defect where an out-of-range numeric HTML
+  character reference decoded to an arbitrary, unrelated character instead of
+  being rejected. Out-of-range references are now reported as a decoding
+  error and the original escaped text is kept verbatim. References within the
+  valid Unicode range are unaffected.
+- Defense-in-depth output-escaping consistency across several rewriter filters
+  (these paths are not reachable from end-user input; no action required).
+- Defense-in-depth division-by-zero guard in the responsive-image sizing
+  path (this path is not reachable from end-user input; no action required).
+- Defense-in-depth bounds guard on a JavaScript string- and
+  regular-expression-scanning path (no out-of-range access was reachable; the
+  affected inputs already ended in the existing graceful error).
+- Defense-in-depth null guard on an HTML tag-close path (not reachable on this
+  release; the guard protects the invariant against future drift).
+- Fixed a startup race in HTML keyword-table initialization where concurrent
+  first-time initialization could construct the shared table twice and publish
+  it without synchronization. Initialization is now thread-safe.
+
+### Features
+
+- **AVIF image support.** Images can now be optimized to AVIF, alongside the
+  existing WebP path, on Apache, nginx, and IIS. Four new filters, all
+  **opt-in**, cover the same ground WebP does:
+  - `convert_jpeg_to_avif` — convert JPEG sources to AVIF.
+  - `convert_to_avif_lossless` — prefer lossless AVIF where it wins
+    (also the path for images with alpha).
+  - `convert_to_avif_animated` — convert animated images to animated AVIF.
+  - `recompress_avif` — re-encode images that are already AVIF.
+
+  Behavior worth knowing before you enable them:
+  - **AVIF is not part of `rewrite_images` or any rewrite level, by design.**
+    AV1 encoding costs substantially more CPU than WebP, so folding it into
+    `rewrite_images` would be a silent cost increase for every existing
+    deployment on upgrade. Enable the filters you want explicitly.
+  - AVIF is served only to browsers that advertise it (`Accept: image/avif`).
+    There is no user-agent allowlist: the request header alone decides.
+    Clients that do not advertise AVIF keep getting the WebP or original-format
+    result exactly as before.
+  - The encoder picks the **smaller** of the AVIF, WebP, and original outputs
+    per image, so enabling AVIF cannot make an image larger; if AVIF encoding
+    fails or times out, the rewrite falls back through WebP to the original
+    format rather than failing the image.
+  - EXIF, ICC color profiles, and XMP are carried across AVIF re-encoding
+    under the existing metadata-retention options. Images carrying a C2PA
+    content-provenance manifest are **skipped, never stripped** — such images
+    are served as authored.
+  - Because AV1 encoding is slow relative to WebP, every still-image encode is
+    admitted against a time budget (`AvifTimeoutMs`, default 5000 ms) before it
+    starts, and the encoder speed is derived from that budget and the image's
+    pixel count: a larger budget admits more images and never selects a
+    lower-quality speed than configured. Images that cannot fit the budget even
+    at the fastest speed are left to the WebP/original path. An absolute
+    100-megapixel ceiling applies regardless of budget.
+  - **Known limitation, animated AVIF:** that budget-derived speed selection
+    applies to **still images only**. An animated sequence always encodes at
+    the configured encoder speed, so animated AVIF encodes cost considerably
+    more per image than stills and do not get faster when `AvifTimeoutMs` is
+    lowered — a long animated encode is bounded by the abort applied between
+    frames rather than by the budget. Account for this before enabling
+    `convert_to_avif_animated` over a large animated-image inventory. A future
+    release is expected to extend budget-derived speed selection to animated
+    sequences.
+  - The module now links the AV1 encoder and decoder, so the installed module
+    is **appreciably larger** than in r19. Plan package and disk footprint
+    accordingly.
+  - A full family of `image_avif_*` statistics (rewrites, per-source-format
+    timeouts, budget overruns, and success/failure timings) is registered
+    automatically, so encode failures and timeouts are visible on the
+    statistics page.
+- New opt-in filter `prioritize_critical_images`: sets `fetchpriority="high"`
+  on the first two images the critical-images beacon has reported above the
+  fold, so the browser front-loads the fetches that determine Largest
+  Contentful Paint. The filter is a strict no-op without beacon data (a wrong
+  guess would prioritize a below-the-fold image at the LCP image's expense),
+  an author-supplied `fetchpriority` always wins, and it backs off on
+  `Save-Data` requests, AMP documents, and disallowed URLs. It rewrites
+  attributes only and injects no scripts; enabling it also turns on
+  critical-images beaconing. It is not part of any rewrite level's filter set
+  — enable it explicitly.
+- New opt-in filter `insert_speculation_rules`: injects a same-origin prefetch
+  ruleset (`<script type="speculationrules">`) so supporting browsers prefetch
+  a link as the user starts interacting with it; other browsers ignore the
+  tag. The filter backs off when the page already carries its own ruleset,
+  when a Content-Security-Policy forbids inline scripts, on non-200,
+  cookie-setting, or `no-store` responses, and on AMP documents. It is not
+  part of any rewrite level's filter set — enable it explicitly.
+- Google Fonts CSS inlining is revived: the default size cap
+  (`GoogleFontCssInlineMaxBytes`) rises from 3 KiB to 48 KiB. Real Font
+  Service responses run ~6–15 KiB, so the old cap rejected essentially every
+  one and the filter never fired. A scheme-qualified
+  `<link rel="preconnect" href="…://fonts.gstatic.com" crossorigin>` hint is
+  now emitted ahead of the first recognized font stylesheet, whether the
+  loader CSS ends up inlined or not, unless the author already warms that host
+  with a usable `crossorigin` preconnect. **Upgrade note:** "not inlined"
+  verdicts cached under the old cap keep applying until they expire (up to a
+  day), so inlining ramps up as the cache re-warms.
+- `hint_preload_subresources` now emits font preload hints (`rel=preload;
+  as=font; crossorigin`, up to four per page) harvested from `@font-face`
+  rules in the page's collected CSS. Fonts are discovered two hops late (HTML,
+  then CSS, then the font file), so a hint saves the longest fetch chain.
+  Harvesting is deliberately conservative: woff2 sources only, only faces
+  gated to media needed to render, and only faces whose `unicode-range` covers
+  printable ASCII. Fonts referenced only from `@import`ed stylesheets are
+  collected once `flatten_css_imports` is enabled. Fleets running mixed
+  versions against a shared cache degrade cleanly: older binaries skip the new
+  cache entries.
+- The instrumentation beacon now reports Core Web Vitals — LCP, CLS, and INP —
+  plus navigation timing, collected with `PerformanceObserver` and sent in a
+  single `sendBeacon` POST when the page is hidden. This replaces the legacy
+  on-load image GET and the `beforeunload` beacon; the `beforeunload` handler
+  disabled the browser's back/forward cache, so instrumented pages are
+  eligible for it again, and a visit restored from it is measured and
+  beaconed as its own page view. Four new histograms (LCP, CLS, INP, TTFB)
+  appear on the admin console automatically, and beacons sent by pages cached
+  before the upgrade are still accepted. `ReportUnloadTime` is deprecated to a
+  no-op.
+- The tokenizer-based JavaScript minifier (`UseExperimentalJsMinifier`) now
+  handles modern syntax — `??`, `??=`, `?.`, optional catch binding,
+  destructuring declarations, `super`, dynamic `import()`/`import.meta`, and
+  module statement forms — where it previously rejected most ES2015+ input and
+  silently passed modern bundles through unminified. Input it still cannot
+  model keeps its original bytes, as before.
+- `<script type="module">` is now a first-class script kind; previously every
+  JavaScript filter skipped module scripts. `rewrite_javascript` minifies them
+  (tokenizer-based minifier only), preserving import specifiers and the
+  resource directory so relative imports keep resolving. Combining treats a
+  module as a barrier — scripts on either side still combine among themselves
+  — and inlining, outlining, and disabling leave modules alone, since those
+  rewrites would change import resolution or execution timing. Modules are
+  never relocated to another host by rewriting or cache extension (their
+  fetches are CORS-mode) and are never substituted by library
+  canonicalization.
+- CSS inside `@supports`, `@layer`, and `@container` blocks, and media queries
+  using level-4 range syntax such as `(width >= 768px)`, previously failed to
+  parse — so everything inside them passed through unminified and unoptimized,
+  which for framework bundles that wrap the whole stylesheet in `@layer` meant
+  the entire file. These constructs now parse: such stylesheets minify, images
+  referenced inside the blocks are rewritten, inlined, and cache-extended like
+  any others, and `prioritize_critical_css` collects and inlines critical
+  selectors inside them while preserving `@layer` cascade order. Sheets that
+  still fail to parse are served byte-for-byte unchanged, as before.
+- `insert_dns_prefetch` now emits `<link rel="preconnect">` for the first two
+  domains of its stable-domain list (dns-prefetch for the rest): preconnect
+  warms the whole connection (DNS + TCP + TLS) where dns-prefetch only
+  resolves the name. Preconnect hints are scheme-qualified and keep
+  non-default ports, and the filter no longer emits hints an author already
+  provides. The legacy IE9-only `rel=prefetch` variant is removed. **Rollout
+  note for mixed-version fleets sharing a cache:** until the affected
+  property-cache entries expire, an older binary reading entries written by
+  this version can emit malformed preconnect hrefs of the form
+  `//https://host`, which browsers ignore.
+- `prioritize_critical_images` and native-mode `lazyload_images` now handle
+  images that use `srcset` without a `src` attribute: the beacon reports the
+  candidate the browser actually displays, beacon-critical candidates get
+  `fetchpriority="high"`, and the rest are lazy-loaded under the same
+  first-image LCP protection as `src` images, honoring author
+  `loading`/`fetchpriority`/`decoding` attributes.
+
+### Correctness
+
+- Fixed a Google Analytics snippet-detection bug where analytics markup could
+  be misidentified across requests, leading to missing analytics on some pages.
+- Under a strict Content-Security-Policy that permits inline styles but not
+  inline scripts, critical-CSS prioritization could render pages with the
+  non-critical styles missing; such pages are now left unchanged.
+  **Update recommended for sites served with a Content-Security-Policy.**
+- Fixed a text-integrity issue where an external stylesheet with no declared
+  character set and non-ASCII content could be inlined with garbled bytes;
+  such stylesheets are now left unchanged.
+- Fixed an input-handling defect where images with extreme author-specified
+  dimensions could produce an invalid responsive-image candidate.
+- CSS minification could incorrectly strip units from zero terms inside the
+  math functions `calc()`, `-webkit-calc`, `min()`, `max()`, and `clamp()` —
+  after any nested function such as `var()` (e.g. `calc(var(--x) - 0px)`
+  became `calc(var(--x) - 0)`), and throughout `min()`/`max()`/`clamp()`/
+  `-webkit-calc` themselves — producing invalid CSS that browsers drop.
+  Math-function context is now recognized for all of these functions and
+  preserved across nesting.
+- `combine_javascript` now requires the Content-Security-Policy to permit
+  inline scripts before combining, not just `unsafe-eval`. The filter replaces
+  script tags with small inline bootstrap scripts; under policies such as
+  `unsafe-eval` without `unsafe-inline` (or `strict-dynamic`/nonce-based
+  policies) the combined scripts loaded but never executed. Affected pages now
+  keep their original, working script tags.
+  **Update recommended for sites served with a Content-Security-Policy.**
+- Fixed a `Vary` header merge defect in in-place optimization: when a response
+  already carried one `Vary` token (such as `Accept`), another needed token
+  (such as `User-Agent` or `Save-Data`) was not added, so a downstream cache
+  could serve the wrong variant of a resource. Tokens are now merged
+  individually; existing tokens are never removed or duplicated.
+- Fixed a class of defects in the tokenizer-based JavaScript minifier
+  (`UseExperimentalJsMinifier`) that fused valid statements into a syntax
+  error: a line opening with `(` or a regular-expression literal following an
+  `import`/`export` declaration, a plain `let`/`var` declaration, or a
+  block-bodied arrow function could be joined onto the previous line when the
+  source relied on automatic semicolon insertion. These declaration boundaries
+  are now modeled; input the minifier cannot model is still passed through
+  byte-for-byte.
+- Both JavaScript minifiers now treat a block comment containing a line break
+  as a line break, as the language specification requires. Previously such a
+  comment was collapsed to a plain space, so a statement boundary that relied
+  on it disappeared: code of the shape `return/*<newline>*/x` was minified to
+  `return x`, silently changing what the script returned, and comparable
+  inputs were fused into outright syntax errors. Conditional-compilation
+  comments are still retained verbatim.
+- Pages that combine a `<base>` element with a Content-Security-Policy
+  `base-uri` directive are no longer excluded from optimization outright.
+  Where the policy provably neutralizes every `<base>` element (`base-uri
+  'none'` or an empty source list), the browser ignores the tag, so it cannot
+  affect relative-URL resolution and rewriting now proceeds. Any `base-uri`
+  value that could still match a `<base>` — `'self'`, host or scheme lists,
+  `*` — backs off exactly as before, as do pages with no such directive.
+  Strict policies of this shape previously paid a rewriting penalty for being
+  strict.
+- IIS: fixed a use-after-free in the server's internal fetcher when a request
+  completed synchronously, which could crash the worker process. Deletion of
+  the completed fetch is now deferred until the originating call has fully
+  returned.
+- Admin console: license management controls are no longer hidden when the
+  global admin console is served at a renamed path. The console now trusts the
+  authoritative flag the server already returns instead of inferring the answer
+  from the URL. Server-side enforcement was never affected — control
+  visibility was the only thing wrong.
+- Scripts carrying Subresource Integrity (`integrity=`) are now left untouched
+  by JavaScript rewriting and minification (`rewrite_javascript`), by
+  combining (an integrity-bearing script acts as a barrier; scripts on either
+  side still combine among themselves), by outlining of inline scripts, and —
+  stylesheets included — by cache extension when it would relocate the
+  resource to another host (domain sharding or mapping). Previously such a
+  rewrite changed or moved the bytes so the hash no longer matched, and the
+  browser blocked a resource that was valid as authored.
+- `inline_javascript` no longer inlines external scripts carrying `async` or
+  `defer`: those attributes are ignored on inline scripts, so inlining
+  silently turned a deferred script into a parser-blocking one that ran
+  mid-parse, out of order. Scripts carrying only one of the `for`/`event`
+  attribute pair — which per HTML5 never execute — are likewise left alone by
+  inlining and combining, where previously the rewrite made them run.
+- HTML responses whose bytes depend on the `Save-Data` request header now
+  carry `Vary: Save-Data`, so a downstream cache cannot serve the data-saver
+  variant to a full-data client or vice versa. Existing `Vary` tokens are
+  preserved.
+- CSS minification now recognizes the math functions `calc()`, `min()`,
+  `max()`, and `clamp()` case-insensitively, as the specification requires;
+  uppercase or mixed-case forms (e.g. `CALC(100% - 0px)`) previously had
+  units incorrectly stripped from zero terms, producing invalid CSS that
+  browsers drop.
+- Stylesheets containing an `@import` rule that uses syntax the CSS parser
+  does not understand — such as cascade layers
+  (`@import url(x) layer(base);`) or other unrecognized import syntax — are
+  no longer import-flattened, a
+  transformation that could drop or reorder rules. Other optimizations
+  (minification, image rewriting) still apply to such stylesheets.
+- A stylesheet whose only encoding declaration is a leading `@charset` rule
+  could lose that declaration when import-flattening was enabled but no
+  imports were inlined (including results served from the flatten cache),
+  leaving the browser to guess the encoding of non-ASCII content. The
+  declaration is now preserved in that case; stylesheets that do have imports
+  inlined keep the standards-required behavior of dropping it. Note that an
+  already-minified stylesheet with no imports that carries `@charset` now
+  serializes byte-identically, so under the default configuration its rewrite
+  is dropped as a no-op — including any in-CSS image rewrites it previously
+  kept alive.
+- CSS scanning now recognizes `URL()` and `@IMPORT` case-insensitively, as
+  the specification requires. Uppercase references were previously invisible
+  to URL rebasing when stylesheets were combined, inlined, or outlined, and
+  to URL rewriting inside style attributes, which could leave stale or
+  unexpectedly relative URLs in place.
+- Fixed a `local_storage_cache` defect where unavailable or failing browser
+  storage (for example in some private-browsing modes) made an inlined
+  resource disappear from the page entirely — and could break every inlined
+  resource on the page — instead of falling back to the network. Inlining
+  now degrades gracefully. The cookie that records which resources a browser
+  already holds in local storage is now scoped to the whole site (`path=/`)
+  instead of the current page's directory, so the server recognizes them
+  site-wide.
+- Removed an obsolete Firefox workaround from `defer_javascript` that ran
+  deferred inline scripts through a `data:` URL (for a Firefox bug fixed in
+  2013). Content-Security-Policy rules that permit inline scripts do not
+  permit `data:` script URLs, so under such policies every deferred inline
+  script was blocked on Firefox and the page broke.
+- `cache_partial_html` no longer triggers the no-script redirect machinery
+  for clients without JavaScript: like `defer_iframe`, the filter name is
+  still accepted for configuration compatibility but has no rewriting
+  effect, so it must not mark pages as requiring script execution.
+- `elide_attributes` now also elides values matching current-HTML defaults
+  in HTML5 documents — `loading=eager`, `decoding=auto`, and
+  `fetchpriority=auto` on images, `media=all` on stylesheet links, and
+  `fetchpriority=auto` on links and scripts — and strips values from the
+  modern boolean attributes `open` (dialog), `disabled` (fieldset),
+  `allowfullscreen` (iframe), and `playsinline` (video). Entries for
+  long-dead markup (`command`, `keygen`, `seamless`, and similar) were
+  removed and no longer alter such elements.
+- `remove_quotes` now also strips quotes from attribute values containing
+  `/`, so most URL-valued attributes (such as `href="/foo/bar"`) are emitted
+  unquoted. Values ending in `/` are kept unambiguous by the output writer's
+  existing guard.
+- The canonical link inserted by the no-script redirect handling is now built
+  as a real element. Output is unchanged under the default configuration;
+  attribute-level filters such as `remove_quotes` now apply to it
+  consistently, as they do to all other elements.
+- Fixed a diagnostic message in low-resolution image resizing that printed
+  the target width twice instead of width×height.
+
+### Statistics
+
+- `show_ads_snippets_not_converted` now reflects recognized-but-unconverted
+  AdSense snippets (it previously always reported 0).
+- `num_js_inlined` no longer over-counts scripts that are intentionally left
+  external in XHTML documents.
+- Fixed a rare corruption of the image byte-savings counter that could occur
+  under a non-default configuration where an optimized image ended up larger
+  than its input.
+- The reported page-load time (the Beacon Reported Load Time histogram and the
+  `total_page_load_ms` average) is now measured from navigation start, so it
+  additionally includes DNS, connection setup, and time to first byte. The
+  histogram steps up once at rollout; this is a measurement change, not a site
+  regression.
+- Telemetry for scripts skipped by administrator configuration no longer
+  records them as author opt-outs (`has_pagespeed_no_defer`), matching the
+  module-script and CSP-backoff paths.
+- `flatten_imports_unparseable_import` counts stylesheets for which
+  import-flattening was declined because an `@import` rule uses syntax the
+  CSS parser does not understand (such as cascade layers or other
+  unrecognized import syntax).
+- The `image_ongoing_rewrites` gauge no longer leaks a count on a failure
+  path that could not be triggered in practice (defensive fix).
+- Histogram percentiles (median, 90th, 95th, 99th) are no longer reported as a
+  `-5000` no-data placeholder when a histogram has too few samples to estimate
+  them. The cells are now rendered empty instead — for the raw `/histograms`
+  output as well as the admin console, which previously hid the placeholder for
+  itself only. Anything scraping `/histograms` should expect an empty value
+  rather than `-5000`.
+- Latency and duration statistics (HTTP cache lookup and insert, cache hit and
+  insert, fetch, and backend first-byte latency) are now measured against a
+  monotonic clock. A backward step of the system wall clock — from a time
+  sync, a hypervisor, or a misbehaving time daemon — previously produced
+  negative recorded durations. Absolute timestamps used for HTTP `Date`
+  headers and for cache freshness are deliberately still taken from the wall
+  clock and are unaffected.
+- New `image_avif_*` statistics cover AVIF rewrites, per-source-format encode
+  timeouts, budget overruns, and success/failure timings.
+
+### Configuration
+
+- New AVIF options, mirroring their WebP counterparts: `AvifRecompressionQuality`
+  (default 60), `AvifRecompressionQualityForSmallScreens` (50),
+  `AvifAnimatedRecompressionQuality` (50), `AvifQualityForSaveData` (45), and
+  `AvifTimeoutMs` (5000). They take effect only when one of the AVIF filters is
+  enabled; see the AVIF entry under Features.
+- **IIS: `pagespeed.config` now has a single, documented resolution order.**
+  The module previously probed the configuration locations independently from
+  several code paths, so when the installed copies diverged, editing one of
+  them could appear to have no effect at all. All paths now use one resolver,
+  with this precedence (lowest first; the last file that defines a setting
+  wins):
+  1. `%ProgramData%\We-Amp\PageSpeed\pagespeed.config` — machine-global base.
+  2. `%ProgramData%\We-Amp\IISWebSpeed\pagespeed.config` — legacy fallback,
+     for upgrades from IISpeed.
+  3. `<site physical path>\pagespeed.config` — per-site override,
+     authoritative when present.
+
+  Within each location `pagespeed.config` is still preferred over the legacy
+  `iiswebspeed.config`. **For a standard single-site installation, behavior is
+  unchanged** — this matches what request handling already did. On startup the
+  module now logs which configuration is in effect and warns when several
+  configuration files exist with differing contents, which is the diagnostic
+  for the "my edit did nothing" case.
+- New option `AsyncMetadataL2Writes` (default **off**). When enabled, writes to
+  the disk-backed second tier of the metadata cache are deferred to a
+  background worker instead of running on the rewrite-completion path, so slow
+  disk write latency no longer amplifies into serving-throughput loss and
+  tail-latency spikes during a cache-populating miss storm. Reads stay
+  synchronous. With the option off, behavior is identical to previous
+  releases. Enabling it is safe by construction — served content is
+  content-hash-addressed, so a deferred write can at worst cost a
+  re-optimization, never wrong or stale bytes — but it is default-off this
+  release while it accrues production soak.
+- The Universal Analytics filters are deprecated — the service stopped
+  processing hits in July 2023, so the trackers these filters inject or
+  rewrite reported to a discontinued service. Enabling `insert_ga` or setting
+  `AnalyticsID` logs a deprecation warning at configuration load (disabling
+  stays silent), and `make_google_analytics_async` is now a no-op whose name
+  still parses, so existing configurations keep loading. Experiments no longer
+  auto-enable `insert_ga`: the A/B framework keeps variant assignment (the
+  `PageSpeedExperiment` cookie) and the experiment id in the instrumentation
+  beacon, reporting is bring-your-own-analytics, and an experiment spec can
+  still opt in explicitly with `enable=insert_ga`.
+- `defer_iframe` is deprecated: the filter name was accepted but had no effect
+  on its own (iframe deferral is built into `defer_javascript` and
+  `disable_javascript`). The name still parses for compatibility, logs a
+  deprecation warning at configuration load, and no longer triggers the
+  no-script redirect machinery. Configurations using `defer_iframe` can simply
+  remove it.
+- The legacy JavaScript minifier is deprecated: it remains available this
+  release via `UseExperimentalJsMinifier off`, but explicitly selecting it
+  logs a deprecation warning at configuration load, and it will be removed in
+  a future release. The tokenizer-based minifier (the default since
+  1.10.33.0) now minifies modern JavaScript it previously passed through
+  unoptimized, backed by a stress corpus of real-world, bundled, and
+  synthetic JavaScript: full coverage, with zero parse, semantic, or
+  idempotence failures.
+- The experimental gRPC "central controller" was removed, along with its
+  dedicated controller process and the gRPC build dependency. The
+  `ExperimentalCentralControllerPort`, `ExperimentalPopularityContestMaxInFlight`,
+  and `ExperimentalPopularityContestMaxQueueSize` options are deprecated: they
+  still parse for compatibility but are ignored, and log a deprecation warning
+  when set. There is no behavior change for configurations that did not set
+  these options — the default work-bound expensive-operation throttling and
+  named-lock rewrite scheduling are unchanged. The controller's
+  experimental-only statistics counters (`num_rewrites_requested`,
+  `num_rewrites_succeeded`, `num_rewrites_failed`, the popularity-contest and
+  queued-controller gauges, and `controller_reconnect_time`) are no longer
+  registered; they read as zero under default configurations, so dashboards
+  scraping them will see them go missing rather than zero.
+- Domain sharding (`ShardDomain`) is deprecated: it is an HTTP/1-era
+  workaround that hurts performance with HTTP/2 and HTTP/3, which multiplex
+  over a single connection. The directive still works for compatibility but
+  logs a deprecation warning, deduplicated to at most once per process per
+  shard declaration. Configurations using `ShardDomain` can simply remove
+  the directive.
+- The long-inert filters `div_structure`, `explicit_close_tags`,
+  `mobilize_precompute`, `split_html`, `split_html_helper`, and
+  `flush_subresources` are deprecated: the names still parse for
+  compatibility and log a deprecation warning at configuration load but have
+  no effect. (`flush_subresources` also no longer adds head-section domains
+  to the `insert_dns_prefetch` hint list.) Configurations using them can
+  simply remove them.
+- `ForbidFilters` now also gates previously-rewritten URLs carrying the
+  shared cache-extension (`.pagespeed.ce.`) and image (`.pagespeed.ic.`)
+  markers: such URLs are no longer served once every filter that can produce
+  them is forbidden. Previously, forbidding those filters stopped new
+  rewrites but could not stop already-rewritten URLs from being served.
+
+## Platform Support
+
+| Platform | Module | Status |
+|----------|--------|--------|
+| **Apache 2.4+** | `mod_pagespeed.so` | Stable |
+| **Nginx 1.26+** | `ngx_pagespeed_module.so` | Stable |
+| **IIS 10+** | `pagespeed_iis.dll` | Stable |
+
+---
+
 # mod_pagespeed 1.15.0+r19 Release Notes
 
 **Release date:** 2026-07-17
@@ -161,7 +676,7 @@ invalid configurations may now fail to load, which is intentional:
 - Out-of-range values for bounded options now fail configuration load instead
   of being silently accepted: image qualities (-1..100), progressive JPEG
   scans (-1..10), `RewriteRandomDropPercentage` (0..100),
-  `HttpCacheCompressionLevel` (-1..9), `CentralControllerPort` (1..65535).
+  `HttpCacheCompressionLevel` (-1..9).
 - The `AddResourceHeader` limit of 20 headers is enforced exactly.
 - Directive and option-scope matching is now case-consistent across all
   server ports, so scope enforcement can no longer be sidestepped by casing.
