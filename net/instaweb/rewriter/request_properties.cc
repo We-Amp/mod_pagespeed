@@ -205,6 +205,10 @@ bool RequestProperties::SupportsAvifAnimated() const {
 
 bool RequestProperties::IsBot() const { return device_properties_->IsBot(); }
 
+void RequestProperties::SetWebBotAuthVerdict(bool signature_verified_agent) {
+  device_properties_->SetWebBotAuthVerdict(signature_verified_agent);
+}
+
 bool RequestProperties::IsMobile() const {
   return device_properties_->IsMobile();
 }

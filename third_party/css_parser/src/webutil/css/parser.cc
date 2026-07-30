@@ -1054,7 +1054,21 @@ Value* Parser::ParseAnyWithFunctionDepth(int max_function_depth) {
       in_++;
       break;
     case '+':
-      toret = ParseNumber();
+      // A '+' directly followed by a digit or '.' starts a signed number
+      // (e.g. "+2px"). Anything else is an operator token — notably the
+      // addition operator in calc() and custom-property values — which we
+      // surface as an OPERATOR value so that constructs like
+      // "calc(1px + 2px)" and "--x: 1px + 2px" parse instead of dropping
+      // the whole declaration.
+      if (in_ < end_ - 1 &&
+          ((*(in_ + 1) >= '0' && *(in_ + 1) <= '9') || *(in_ + 1) == '.')) {
+        toret = ParseNumber();
+      } else {
+        UnicodeText op;
+        op.CopyUTF8("+", 1);
+        toret = new Value(Value::OPERATOR, op);
+        in_++;
+      }
       break;
     case '-':
       // ambiguity between a negative number and an identifier starting with -.
@@ -1944,12 +1958,30 @@ SimpleSelector* Parser::ParseSimpleSelector() {
         sep.CopyUTF8(":", 1);
       }
       UnicodeText pseudoclass = ParseIdent();
-      // FIXME(yian): skip constructs "(en)" in lang(en) for now.
+      // Functional pseudo-class argument pass-through: capture
+      // the balanced parenthesized argument text verbatim and store it on
+      // the selector instead of erroring out and dropping it. This fixes
+      // :where()/:is()/:not()/:has()/:nth-*()/:lang() etc., which used to
+      // serialize with their arguments silently dropped (".prose :where"
+      // matches nothing). An unbalanced argument list (EOF before ')')
+      // keeps the previous kSelectorError behavior.
       if (!Done() && *in_ == '(') {
-        ReportParsingError(kSelectorError,
-                           "Cannot parse parameters for pseudoclass.");
         in_++;
-        if (!SkipPastDelimiter(')')) break;
+        const char* arg_start = in_;
+        // SkipBalancedTo (not SkipPastDelimiter): crossing nested balanced
+        // blocks inside the arguments is part of a successful parse, so it
+        // must not report kBlockError.
+        if (!SkipBalancedTo(')')) {
+          ReportParsingError(kSelectorError,
+                             "Cannot parse parameters for pseudoclass.");
+          break;
+        }
+        UnicodeText function_arguments =
+            UTF8ToUnicodeText(arg_start, in_ - arg_start - 1);
+        if (!pseudoclass.empty())
+          return SimpleSelector::NewFunctionalPseudoclass(pseudoclass, sep,
+                                                          function_arguments);
+        break;
       }
       if (!pseudoclass.empty())
         return SimpleSelector::NewPseudoclass(pseudoclass, sep);
@@ -2808,6 +2840,16 @@ void Parser::ParseStatement(const MediaQueries* media_queries,
           in_++;
           SkipSpace();
           while (in_ < end_ && *in_ != '}') {
+            if (*in_ == ';') {
+              // Browser-style recovery for a stray ';' at statement position,
+              // identical to the group-rule body loop in ParseGroupRule()
+              // above: skip it silently. Left to ParseSelectors' recovery it
+              // would eat the @media block's closing '}' hunting for a '{'
+              // and fail the whole sheet.
+              in_++;
+              SkipSpace();
+              continue;
+            }
             const char* oldin = in_;
             // Parse either a ruleset or at-rule.
             ParseStatement(media_queries.get(), stylesheet);

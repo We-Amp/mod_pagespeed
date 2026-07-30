@@ -47,6 +47,7 @@ pagespeed_cc_test(
         "apache_config_test.cc",
         "apache_fetch_test.cc",
         "apache_mmap_bucket_test.cc",
+        "apache_mpm_detection_test.cc",
         "apache_writer_test.cc",
         "header_util_test.cc",
         "simple_buffered_apache_fetch_test.cc",
@@ -70,9 +71,15 @@ pagespeed_cc_test(
         "-Iexternal/apr/include/arch/unix/",
         "-Iexternal/apr/",
     ],
-    data = ["//test/net/instaweb/rewriter:testdata"],
+    data = [
+        # the design record: apache_mpm_detection_test.cc reads this source to pin the
+        # FinalizeThreadCounts() call site in the post-config hook.
+        "//pagespeed/apache:mod_instaweb_src",
+        "//test/net/instaweb/rewriter:testdata",
+    ],
     target_compatible_with = ["@platforms//os:linux"],
     deps = [
+        "//pagespeed/system:optimization_thread_policy",
         "//test/pagespeed/apache:test_base",
     ],
 )

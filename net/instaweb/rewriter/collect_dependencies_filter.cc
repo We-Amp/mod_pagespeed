@@ -154,7 +154,9 @@ bool UnicodeRangeIntersectsBasicText(StringPiece value_text) {
 // unit (see FontFaceCoversBasicText); preservation mode stores each number's
 // verbatim bytes, so IDENT text + verbatim number bytes + dimension unit
 // text reproduces the original token exactly, with COMMA values as ","
-// separators. Anything else (strings, functions, ...) cannot be
+// separators. Letter-leading tokens (U+FEFF) lex as IDENT "U" + OPERATOR "+"
+// + IDENT "FEFF", so the OPERATOR's verbatim text fills the gap between the
+// two idents. Anything else (strings, functions, ...) cannot be
 // reconstructed faithfully, and a NUMBER without verbatim bytes (parsing
 // without preservation mode) has unrecoverable text.
 bool ReconstructUnicodeRangeValue(const Css::Declaration& decl,
@@ -182,6 +184,11 @@ bool ReconstructUnicodeRangeValue(const Css::Declaration& decl,
       case Css::Value::COMMA:
         text += ",";
         break;
+      case Css::Value::OPERATOR:
+        // Letter-leading ranges (U+FEFF) lex the '+' as an OPERATOR; its
+        // text is verbatim ("+").
+        text += UnicodeTextToUTF8(value->GetStringValue());
+        break;
       default:
         return false;
     }
@@ -193,17 +200,19 @@ bool ReconstructUnicodeRangeValue(const Css::Declaration& decl,
 // Decides whether a face's unicode-range (if any) plausibly covers ordinary
 // text. The CSS parser has no notion of unicode-range, and its declarations
 // reach us in one of two shapes:
-//  - Letter-leading or wildcard forms (U+FEFF, U+26??) fail value parsing;
-//    in preservation mode the whole declaration is demoted to a
-//    Property::UNPARSEABLE dummy carrying verbatim bytes (without setting
-//    the parser error mask). We scan those bytes for ASCII intersection.
-//  - Digit-leading, wildcard-free forms (U+0400-045F) lex CLEANLY --- as
-//    IDENT "U" plus a NUMBER whose "-045F" tail becomes a unit (ParseNumber
-//    accepts '-' as a unit start via StartsIdent) --- so the declaration
-//    comes out as ordinary Property::OTHER. The original token text is then
-//    rebuilt from the parsed values (see ReconstructUnicodeRangeValue) and
-//    evaluated the same way; only values we cannot reconstruct stay
-//    unevaluatable and read as "no basic coverage".
+//  - Wildcard forms (U+26??) fail value parsing; in preservation mode the
+//    whole declaration is demoted to a Property::UNPARSEABLE dummy carrying
+//    verbatim bytes (without setting the parser error mask). We scan those
+//    bytes for ASCII intersection.
+//  - Wildcard-free forms (U+0400-045F, U+FEFF) lex CLEANLY --- digit-leading
+//    ones as IDENT "U" plus a NUMBER whose "-045F" tail becomes a unit
+//    (ParseNumber accepts '-' as a unit start via StartsIdent),
+//    letter-leading ones as IDENT "U" + OPERATOR "+" + IDENT "FEFF" --- so
+//    the declaration comes out as ordinary Property::OTHER. The original
+//    token text is then rebuilt from the parsed values (see
+//    ReconstructUnicodeRangeValue) and evaluated the same way; only values
+//    we cannot reconstruct stay unevaluatable and read as "no basic
+//    coverage".
 // Per CSS cascade the last unicode-range declaration in the face wins; a
 // face without any unicode-range declaration is assumed to cover basic
 // text.
@@ -309,6 +318,48 @@ bool FindWoff2SrcUrl(const Css::FontFace& face, const GoogleUrl& base_url,
     }
   }
   return false;
+}
+
+// A modulepreload does not populate the preload cache; it populates the module
+// map, whose entries are keyed on the URL and the module type and are reused
+// by the element (and by every later import) naming that URL. Dependency can
+// carry neither integrity metadata nor a credentials mode, so two cases are
+// left unhinted:
+//
+//   - integrity= : the hint would fetch and map the module with no integrity
+//     metadata attached, and that entry is what the <script integrity=...>
+//     element then reuses --- the hint would stand in for the check the author
+//     asked for.
+//   - crossorigin=use-credentials : that is credentials mode 'include', while
+//     a hint carrying no crossorigin fetches same-origin. Those are different
+//     map entries, so the hinted fetch is never reused --- a wasted request.
+//
+// Both skips are no-regressions: such modules got no hint at all before
+// modulepreload emission existed.
+//
+// The skip is write-side, so there is a one-request stale-hint window: after
+// an author adds integrity= or crossorigin=use-credentials, the pcache entry
+// from the previous request still emits its now-unmatched hint until this
+// parse rewrites that entry. Self-healing, and the same class of staleness as
+// any other edit to the HTML.
+//
+// crossorigin is not an HtmlName keyword, so it is matched by name (see
+// google_font_css_inline_filter.cc). Anonymous is the attribute's default
+// state and is exactly what a modulepreload fetches with, and per HTML any
+// unrecognized value --- including a padded " use-credentials " --- maps to
+// Anonymous, so only the exact value is excluded and the value is compared
+// unmodified.
+bool ModuleCanBeHinted(const HtmlElement* element) {
+  if (ScriptTagScanner::HasIntegrityAttribute(element)) {
+    return false;
+  }
+  const HtmlElement::Attribute* crossorigin =
+      element->FindAttribute("crossorigin");
+  if (crossorigin == nullptr) {
+    return true;
+  }
+  const char* mode = crossorigin->DecodedValueOrNull();
+  return mode == nullptr || !StringCaseEqual(mode, "use-credentials");
 }
 
 }  // namespace
@@ -439,9 +490,9 @@ class CollectDependenciesFilter::Context : public RewriteContext {
         parser.errors_seen_mask() != Css::Parser::kNoError) {
       // Don't harvest fonts from CSS we could not fully make sense of.
       // Note that in preservation mode, declarations whose values fail to
-      // lex (such as letter-leading or wildcard unicode-range forms) are
-      // demoted to unparseable dummies and do not set the error mask;
-      // digit-leading unicode-range forms lex cleanly and never error (see
+      // lex (such as wildcard unicode-range forms) are demoted to
+      // unparseable dummies and do not set the error mask; wildcard-free
+      // unicode-range forms lex cleanly and never error (see
       // FontFaceCoversBasicText).
       return;
     }
@@ -474,7 +525,12 @@ class CollectDependenciesFilter::Context : public RewriteContext {
 
   void Rewrite(int partition_index, CachedResult* partition,
                const OutputResourcePtr& output_resource) override {
-    Dependency* dep = partition->add_collected_dependency();
+    // Modules go into their own field: a DEP_MODULE value read out of
+    // collected_dependency by a binary that predates it would come back as
+    // the closed-enum field default, DEP_JAVASCRIPT (see dependencies.proto).
+    Dependency* dep = (dep_type_ == DEP_MODULE)
+                          ? partition->add_collected_module_dependency()
+                          : partition->add_collected_dependency();
     dep->set_url(slot(0)->resource()->url());
     dep->set_content_type(dep_type_);
 
@@ -559,16 +615,41 @@ class CollectDependenciesFilter::Context : public RewriteContext {
     // We already allocated dep_id_, so we should report on it, with either
     // the first dependency we collected, or nullptr.
     if (num_output_partitions() == 1 &&
-        output_partition(0)->collected_dependency_size() > 0) {
+        (output_partition(0)->collected_dependency_size() > 0 ||
+         output_partition(0)->collected_module_dependency_size() > 0)) {
       // Deep copy here because output_partition is already written, and it
       // makes no sense to mutate it.
       CachedResult result = *output_partition(0);
 
-      // Top-level stuff just gets its dep_id_ as the sorting key.
-      result.mutable_collected_dependency(0)->add_order_key(dep_id_);
+      // The primary dependency is whichever of the two fields the collector
+      // filled: Rewrite() writes it to collected_module_dependency when
+      // dep_type_ is DEP_MODULE and to collected_dependency otherwise, so
+      // exactly one of them holds it.
+      Dependency* primary = result.collected_module_dependency_size() > 0
+                                ? result.mutable_collected_module_dependency(0)
+                                : result.mutable_collected_dependency(0);
 
-      dep_tracker->ReportDependencyCandidate(dep_id_,
-                                             &result.collected_dependency(0));
+      // The cdf metadata cache key does not include the dependency type, so a
+      // partition written for a URL loaded as a classic script gets replayed
+      // verbatim for a page that loads the same URL as a module --- and the
+      // same holds for the pre-existing CSS/JS pair. dep_type_ comes from
+      // *this* page's parse and is authoritative; without this the replay
+      // would hint a module with as=script, a classic script with
+      // modulepreload, or a script with the stale as=style of a URL some other
+      // page loads as a stylesheet. The tracker re-routes by content_type, so
+      // the pcache fields follow from this too.
+      //
+      // This repairs the primary only. The children reported below still come
+      // from the cached partition, so a stylesheet partition replayed on a
+      // page that loads the same URL as a script still reports that
+      // stylesheet's @import and font children --- pre-existing behaviour of
+      // the shared key, unchanged here.
+      primary->set_content_type(dep_type_);
+
+      // Top-level stuff just gets its dep_id_ as the sorting key.
+      primary->add_order_key(dep_id_);
+
+      dep_tracker->ReportDependencyCandidate(dep_id_, primary);
 
       // Any other dependencies stored in result->collected_dependency >= 1
       // are things we discovered *inside* whatever is described by
@@ -641,18 +722,20 @@ void CollectDependenciesFilter::StartElementImpl(HtmlElement* element) {
         continue;
       }
 
-      // Module scripts need rel=modulepreload; a plain as=script preload
-      // occupies a different preload-cache slot than the module map fetch,
-      // so hinting one only causes a double fetch. Skip them until
-      // modulepreload emission exists.
+      // Module scripts are collected as DEP_MODULE so they can be hinted with
+      // rel=modulepreload; a plain as=script preload occupies a different
+      // preload-cache slot than the module map fetch, so it would only cause
+      // a double fetch.
+      bool is_module = false;
       if (attributes[i].category == semantic_type::kScript) {
         const HtmlElement::Attribute* type =
             element->FindAttribute(HtmlName::kType);
-        if (type != nullptr && type->DecodedValueOrNull() != nullptr &&
-            ScriptTagScanner::Normalized(type->DecodedValueOrNull()) ==
-                "module") {
-          continue;
-        }
+        is_module = type != nullptr && type->DecodedValueOrNull() != nullptr &&
+                    ScriptTagScanner::Normalized(type->DecodedValueOrNull()) ==
+                        "module";
+      }
+      if (is_module && !ModuleCanBeHinted(element)) {
+        continue;
       }
 
       // Check media on standard stylesheets.
@@ -693,10 +776,11 @@ void CollectDependenciesFilter::StartElementImpl(HtmlElement* element) {
       }
       ResourceSlotPtr slot(driver()->GetSlot(resource, element, attr));
       slot->set_need_aggregate_input_info(true);
-      Context* context = new Context(
-          attributes[i].category == semantic_type::kStylesheet ? DEP_CSS
-                                                               : DEP_JAVASCRIPT,
-          driver());
+      DependencyType dep_type = DEP_CSS;
+      if (attributes[i].category == semantic_type::kScript) {
+        dep_type = is_module ? DEP_MODULE : DEP_JAVASCRIPT;
+      }
+      Context* context = new Context(dep_type, driver());
       context->AddSlot(slot);
       if (driver()->InitiateRewrite(context)) {
         context->Initiated();

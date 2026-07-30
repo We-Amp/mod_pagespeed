@@ -51,6 +51,21 @@ cc_library(
 )
 
 # =============================================================================
+# the design record optimization thread-count policy.
+# Standalone so the effective-CPU-budget detection and the budget arithmetic
+# can be unit-tested without a server, a container, or a particular host.
+# =============================================================================
+cc_library(
+    name = "optimization_thread_policy",
+    srcs = ["optimization_thread_policy.cc"],
+    hdrs = ["optimization_thread_policy.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)
+
+# =============================================================================
 # Admin license handler
 # =============================================================================
 # Handles /v1/license/* endpoints in the admin console.

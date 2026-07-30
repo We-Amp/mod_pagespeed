@@ -102,6 +102,16 @@ TEST_F(UserAgentMatcherTest, NotSupportsJsDeferAllowMobile) {
   EXPECT_FALSE(user_agent_matcher_->SupportsJsDefer(kOperaMobi9, true));
 }
 
+// The two bot tests below assert what UserAgentMatcher answers at its own
+// layer, and that answer is deliberately unchanged. They do NOT mean bots are
+// served deferred JavaScript: DeviceProperties::SupportsJsDefer ANDs in
+// !IsBot(), so every user agent in these two tests loses defer before any
+// filter sees it. See DeferDisabledForGooglebot in
+// test/net/instaweb/rewriter/js_defer_disabled_filter_test.cc for the
+// end-to-end behaviour, and the kDeferJSAllowlist comment in
+// pagespeed/kernel/http/user_agent_matcher.cc for why the bot entries here
+// were kept rather than deleted.
+
 // Googlebot for mobile generally includes the UA for the mobile device
 // being impersonated.
 #define GOOGLEBOT_MOBILE \
@@ -191,6 +201,21 @@ TEST_F(UserAgentMatcherTest, DoesntSupportWebp) {
   EXPECT_FALSE(user_agent_matcher_->LegacyWebp(kFirefoxUserAgent));
   EXPECT_FALSE(user_agent_matcher_->LegacyWebp(kFirefox1UserAgent));
   EXPECT_FALSE(user_agent_matcher_->LegacyWebp(kFirefox42AndroidUserAgent));
+  // https://github.com/apache/incubator-pagespeed-mod/issues/596: the legacy
+  // allow list used to carry *Firefox/66.* .. *Firefox/71.* entries meant to
+  // cover Firefox versions that were WebP-capable without sending the Accept
+  // header. They never took effect -- the open-ended "*Firefox/*" entry in the
+  // block list is registered after every allow entry, and the highest matching
+  // index wins -- so every Firefox has always been false here. These pin that
+  // verdict independently of whether those entries are present.
+  EXPECT_FALSE(user_agent_matcher_->LegacyWebp(
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:66.0) Gecko/20100101 "
+      "Firefox/66.0"));
+  EXPECT_FALSE(user_agent_matcher_->LegacyWebp(
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:68.0) Gecko/20100101 "
+      "Firefox/68.0"));
+  EXPECT_FALSE(user_agent_matcher_->LegacyWebp(
+      "Mozilla/5.0 (Android 9; Mobile; rv:71.0) Gecko/71.0 Firefox/71.0"));
   EXPECT_FALSE(user_agent_matcher_->LegacyWebp(kIe6UserAgent));
   EXPECT_FALSE(user_agent_matcher_->LegacyWebp(kIe7UserAgent));
   EXPECT_FALSE(user_agent_matcher_->LegacyWebp(kIe8UserAgent));
@@ -300,77 +325,6 @@ TEST_F(UserAgentMatcherTest, DoesntSupportDnsPrefetch) {
   EXPECT_FALSE(user_agent_matcher_->SupportsDnsPrefetch(kSafariUserAgent));
 }
 
-TEST_F(UserAgentMatcherTest, SupportsWebpLosslessAlpha) {
-  EXPECT_TRUE(user_agent_matcher_->SupportsWebpLosslessAlpha(
-      kTestingWebpLosslessAlpha));
-  EXPECT_TRUE(
-      user_agent_matcher_->SupportsWebpLosslessAlpha(kIPadChrome29UserAgent));
-  EXPECT_TRUE(
-      user_agent_matcher_->SupportsWebpLosslessAlpha(kIPadChrome36UserAgent));
-  EXPECT_TRUE(
-      user_agent_matcher_->SupportsWebpLosslessAlpha(kIPhoneChrome36UserAgent));
-  EXPECT_TRUE(
-      user_agent_matcher_->SupportsWebpLosslessAlpha(kNexus10ChromeUserAgent));
-  EXPECT_TRUE(user_agent_matcher_->SupportsWebpLosslessAlpha(XT907UserAgent));
-  EXPECT_TRUE(user_agent_matcher_->SupportsWebpLosslessAlpha(
-      kPagespeedInsightsMobileUserAgent));
-  EXPECT_TRUE(user_agent_matcher_->SupportsWebpLosslessAlpha(
-      kPagespeedInsightsDesktopUserAgent));
-  EXPECT_TRUE(
-      user_agent_matcher_->SupportsWebpLosslessAlpha(kFirefox7UserAgent));
-}
-
-TEST_F(UserAgentMatcherTest, DoesntSupportWebpLosslessAlpha) {
-  // The most interesting tests here are the recent but slightly older versions
-  // of Chrome and Opera that can't display webp.
-  EXPECT_FALSE(user_agent_matcher_->SupportsWebpLosslessAlpha(kTestingWebp));
-  EXPECT_FALSE(
-      user_agent_matcher_->SupportsWebpLosslessAlpha(kAndroidICSUserAgent));
-  EXPECT_FALSE(
-      user_agent_matcher_->SupportsWebpLosslessAlpha(kChrome12UserAgent));
-  EXPECT_FALSE(
-      user_agent_matcher_->SupportsWebpLosslessAlpha(kChrome18UserAgent));
-  EXPECT_FALSE(
-      user_agent_matcher_->SupportsWebpLosslessAlpha(kOpera1110UserAgent));
-
-  EXPECT_FALSE(
-      user_agent_matcher_->SupportsWebpLosslessAlpha(kAndroidHCUserAgent));
-  EXPECT_FALSE(
-      user_agent_matcher_->SupportsWebpLosslessAlpha(kChromeUserAgent));
-  EXPECT_FALSE(
-      user_agent_matcher_->SupportsWebpLosslessAlpha(kChrome9UserAgent));
-  EXPECT_FALSE(
-      user_agent_matcher_->SupportsWebpLosslessAlpha(kChrome15UserAgent));
-  EXPECT_FALSE(
-      user_agent_matcher_->SupportsWebpLosslessAlpha(kOpera1101UserAgent));
-  EXPECT_FALSE(
-      user_agent_matcher_->SupportsWebpLosslessAlpha(kFirefoxUserAgent));
-  EXPECT_FALSE(
-      user_agent_matcher_->SupportsWebpLosslessAlpha(kFirefox1UserAgent));
-  EXPECT_FALSE(user_agent_matcher_->SupportsWebpLosslessAlpha(kIe6UserAgent));
-  EXPECT_FALSE(user_agent_matcher_->SupportsWebpLosslessAlpha(kIe7UserAgent));
-  EXPECT_FALSE(user_agent_matcher_->SupportsWebpLosslessAlpha(kIe8UserAgent));
-  EXPECT_FALSE(user_agent_matcher_->SupportsWebpLosslessAlpha(kIe9UserAgent));
-  for (int i = 0; i < kIe11UserAgentsArraySize; ++i) {
-    EXPECT_FALSE(
-        user_agent_matcher_->SupportsWebpLosslessAlpha(kIe11UserAgents[i]));
-  }
-  EXPECT_FALSE(
-      user_agent_matcher_->SupportsWebpLosslessAlpha(kIPhoneUserAgent));
-  EXPECT_FALSE(user_agent_matcher_->SupportsWebpLosslessAlpha(kNokiaUserAgent));
-  EXPECT_FALSE(
-      user_agent_matcher_->SupportsWebpLosslessAlpha(kOpera5UserAgent));
-  EXPECT_FALSE(
-      user_agent_matcher_->SupportsWebpLosslessAlpha(kOpera8UserAgent));
-  EXPECT_FALSE(user_agent_matcher_->SupportsWebpLosslessAlpha(kPSPUserAgent));
-  EXPECT_FALSE(
-      user_agent_matcher_->SupportsWebpLosslessAlpha(kSafariUserAgent));
-  EXPECT_FALSE(
-      user_agent_matcher_->SupportsWebpLosslessAlpha(kIPadChrome28UserAgent));
-  EXPECT_FALSE(
-      user_agent_matcher_->SupportsWebpLosslessAlpha(kWindowsPhoneUserAgent));
-}
-
 TEST_F(UserAgentMatcherTest, GetDeviceTypeForUA) { VerifyGetDeviceTypeForUA(); }
 
 TEST_F(UserAgentMatcherTest, IE11NoDeferJs) {
@@ -381,34 +335,6 @@ TEST_F(UserAgentMatcherTest, IE11NoDeferJs) {
 }
 
 TEST_F(UserAgentMatcherTest, Mobilization) { VerifyMobilizationSupport(); }
-
-TEST_F(UserAgentMatcherTest, SupportsAnimatedWebp) {
-  EXPECT_TRUE(user_agent_matcher_->SupportsWebpAnimated(kTestingWebpAnimated));
-
-  EXPECT_TRUE(user_agent_matcher_->SupportsWebpAnimated(kChrome32UserAgent));
-  EXPECT_TRUE(user_agent_matcher_->SupportsWebpAnimated(kCriOS32UserAgent));
-  EXPECT_TRUE(user_agent_matcher_->SupportsWebpAnimated(kOpera19UserAgent));
-  EXPECT_TRUE(user_agent_matcher_->SupportsWebpAnimated(kChrome37UserAgent));
-  EXPECT_TRUE(user_agent_matcher_->SupportsWebpAnimated(kFirefox7UserAgent));
-}
-
-TEST_F(UserAgentMatcherTest, DoesntSupportAnimatedWebp) {
-  EXPECT_FALSE(user_agent_matcher_->SupportsWebpAnimated(kChrome31UserAgent));
-  EXPECT_FALSE(user_agent_matcher_->SupportsWebpAnimated(kCriOS31UserAgent));
-  EXPECT_FALSE(user_agent_matcher_->SupportsWebpAnimated(kOpera18UserAgent));
-  EXPECT_FALSE(user_agent_matcher_->SupportsWebpAnimated(kChrome18UserAgent));
-  EXPECT_FALSE(user_agent_matcher_->SupportsWebpAnimated(kOpera1110UserAgent));
-  EXPECT_FALSE(user_agent_matcher_->SupportsWebpAnimated(kAndroidICSUserAgent));
-  EXPECT_FALSE(user_agent_matcher_->SupportsWebpAnimated(kFirefoxUserAgent));
-  EXPECT_FALSE(user_agent_matcher_->SupportsWebpAnimated(kIe10UserAgent));
-  EXPECT_FALSE(user_agent_matcher_->SupportsWebpAnimated(kIPhone4Safari));
-  EXPECT_FALSE(
-      user_agent_matcher_->SupportsWebpAnimated(kWindowsPhoneUserAgent));
-  EXPECT_FALSE(user_agent_matcher_->SupportsWebpAnimated(
-      kPagespeedInsightsMobileUserAgent));
-  EXPECT_FALSE(user_agent_matcher_->SupportsWebpAnimated(
-      kPagespeedInsightsDesktopUserAgent));
-}
 
 TEST_F(UserAgentMatcherTest, SupportsNativeLazyLoading) {
   // Chromium >= 77 (Chrome, Edge, Opera share the Chrome/<version> token).

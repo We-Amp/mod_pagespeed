@@ -1684,6 +1684,25 @@ TEST_F(CssCombineFilterTest, CombineGroupRules) {
   EXPECT_EQ(expected_combination, actual_combination);
 }
 
+TEST_F(CssCombineFilterTest, CombineMediaStraySemicolon) {
+  // A trailing stray ';' inside an @media block used to fail the parse, which
+  // made the sheet a combine barrier. It now parses cleanly (error mask 0),
+  // so the sheet must combine.
+  CssLink::Vector css_in, css_out;
+  css_in.Add("1.css", "@media screen { .a { color: red }; }\n", "", true);
+  css_in.Add("2.css", "h2 { color: blue; }\n", "", true);
+  BarrierTestHelper("combine_media_stray_semicolon", css_in, &css_out);
+  EXPECT_EQ(1, css_out.size());
+
+  GoogleString expected_combination =
+      "@media screen { .a { color: red }; }\n"
+      "h2 { color: blue; }\n";
+  GoogleString actual_combination;
+  EXPECT_TRUE(FetchResourceUrl(StrCat(kTestDomain, css_out[0]->url_),
+                               &actual_combination));
+  EXPECT_EQ(expected_combination, actual_combination);
+}
+
 TEST_F(CssCombineFilterTest, CombineGroupRulesWithInnerGarbage) {
   // Unparseable statements inside a group body demote to verbatim regions
   // and reset the error mask, so the sheet stays combinable — the same

@@ -33,8 +33,8 @@ from pagespeed_test_framework.client import WEBP_USER_AGENT
 
 # User agents for different Chrome versions
 # These match the bash test: using simple "Chrome/XX." format
+CHROME_137_UA = "Chrome/137."
 CHROME_32_UA = "Chrome/32."
-CHROME_31_UA = "Chrome/31."
 CHROME_22_UA = "Chrome/22."
 
 
@@ -95,53 +95,19 @@ class TestOptimizeToWebp:
             "PNG should be converted to WebP",
         )
 
-    def test_webp_lossless_only_for_chrome_31(
+    def test_old_browser_version_still_gets_webp(
         self, client: PageSpeedClient, test_root: str
     ):
-        """Chrome 31 should get lossless WebP but not animated.
+        """A browser version far below any old allow list still gets WebP.
 
-        Bash original:
-            test_optimize_to_webp ... "Chrome/31."
-              "/xCuppa.png.pagespeed.ic.*.webp"
-              "/PageSpeedAnimationSmall.gif"  (not converted)
-        """
-        url = (
-            f"{test_root}/optimize_for_bandwidth/webp_urls/rewrite_webp.html"
-            "?PageSpeedFilters=convert_to_webp_lossless,convert_to_webp_animated,recompress_png"
-        )
-
-        webp_client = PageSpeedClient(
-            host=client.host,
-            port=client.port,
-            user_agent=CHROME_31_UA,
-        )
-
-        response = webp_client.fetch_until_contains(
-            url,
-            pattern=r'xCuppa\.png\.pagespeed\.ic\.[^"]*\.webp',
-            timeout=60.0,
-            headers={
-                "Accept": "text/html, image/webp",
-            },
-        )
-        assert_http_status(response, 200)
-
-        # Animated GIF should NOT be converted (Chrome 31 doesn't support animated WebP)
-        assert_contains(
-            response,
-            r"PageSpeedAnimationSmall\.gif",
-            "Animated GIF should not be converted for Chrome 31",
-        )
-
-    def test_no_webp_for_old_chrome(
-        self, client: PageSpeedClient, test_root: str
-    ):
-        """Old Chrome (22) should not get WebP, PNG recompressed instead.
+        Capability is read off the Accept header, so a request advertising
+        image/webp is taken at its word and produces exactly the same output as
+        the modern-Chrome case above.
 
         Bash original:
             test_optimize_to_webp ... "Chrome/22."
-              "/xCuppa.png.pagespeed.ic.*.png"  (recompressed PNG, not WebP)
-              "/PageSpeedAnimationSmall.gif"   (not converted)
+              "/xCuppa.png.pagespeed.ic.*.webp"
+              "/xPageSpeedAnimationSmall.gif.pagespeed.ic.*.webp"
         """
         url = (
             f"{test_root}/optimize_for_bandwidth/webp_urls/rewrite_webp.html"
@@ -156,19 +122,102 @@ class TestOptimizeToWebp:
 
         response = old_chrome_client.fetch_until_contains(
             url,
-            pattern=r'xCuppa\.png\.pagespeed\.ic\.[^"]*\.png',
+            pattern=r'xPageSpeedAnimationSmall\.gif\.pagespeed\.ic\.[^"]*\.webp',
             timeout=60.0,
             headers={
-                "Accept": "text/html, image/webp",  # Even with this, old Chrome won't get WebP
+                "Accept": "text/html, image/webp",
             },
         )
         assert_http_status(response, 200)
 
-        # Animated GIF should not be converted
         assert_contains(
             response,
-            r"PageSpeedAnimationSmall\.gif",
-            "Animated GIF should not be converted for old Chrome",
+            r'xCuppa\.png\.pagespeed\.ic\.[^"]*\.webp',
+            "PNG should be converted to WebP",
+        )
+
+    def test_animated_webp_requires_the_animated_filter(
+        self, client: PageSpeedClient, test_root: str
+    ):
+        """Without convert_to_webp_animated the animated GIF is left alone.
+
+        The enabled filter set, not the browser version, is what draws this
+        line now.
+
+        Bash original:
+            test_optimize_to_webp webp_urls/rewrite_webp.html
+              "convert_to_webp_lossless,recompress_png"
+              "Chrome/137."
+              "/xCuppa.png.pagespeed.ic.*.webp"
+              "/PageSpeedAnimationSmall.gif"  (not converted)
+        """
+        url = (
+            f"{test_root}/optimize_for_bandwidth/webp_urls/rewrite_webp.html"
+            "?PageSpeedFilters=convert_to_webp_lossless,recompress_png"
+        )
+
+        webp_client = PageSpeedClient(
+            host=client.host,
+            port=client.port,
+            user_agent=CHROME_137_UA,
+        )
+
+        response = webp_client.fetch_until_contains(
+            url,
+            pattern=r'xCuppa\.png\.pagespeed\.ic\.[^"]*\.webp',
+            timeout=60.0,
+            headers={
+                "Accept": "text/html, image/webp",
+            },
+        )
+        assert_http_status(response, 200)
+
+        assert_not_contains(
+            response,
+            r'xPageSpeedAnimationSmall\.gif\.pagespeed\.ic\.[^"]*\.webp',
+            "Animated GIF must not be converted without convert_to_webp_animated",
+        )
+
+    def test_no_webp_without_accept_header(
+        self, client: PageSpeedClient, test_root: str
+    ):
+        """A request that does not advertise WebP gets none of it.
+
+        The PNG is recompressed as PNG and the animated GIF is left alone, no
+        matter how modern the user agent is.
+
+        Bash original:
+            test_optimize_without_webp_accept webp_urls/rewrite_webp.html
+              "convert_to_webp_lossless,convert_to_webp_animated,recompress_png"
+              "Chrome/137."
+              "/xCuppa.png.pagespeed.ic.*.png"
+              "/PageSpeedAnimationSmall.gif"  (not converted)
+        """
+        url = (
+            f"{test_root}/optimize_for_bandwidth/webp_urls/rewrite_webp.html"
+            "?PageSpeedFilters=convert_to_webp_lossless,convert_to_webp_animated,recompress_png"
+        )
+
+        no_webp_client = PageSpeedClient(
+            host=client.host,
+            port=client.port,
+            user_agent=CHROME_137_UA,
+        )
+
+        response = no_webp_client.fetch_until_contains(
+            url,
+            pattern=r'xCuppa\.png\.pagespeed\.ic\.[^"]*\.png',
+            timeout=60.0,
+            headers={
+                "Accept": "text/html",
+            },
+        )
+        assert_http_status(response, 200)
+
+        assert_not_contains(
+            response,
+            r'xPageSpeedAnimationSmall\.gif\.pagespeed\.ic\.[^"]*\.webp',
+            "Animated GIF must not be converted without Accept: image/webp",
         )
 
 

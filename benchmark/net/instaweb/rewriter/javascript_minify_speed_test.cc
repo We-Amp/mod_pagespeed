@@ -22,16 +22,11 @@
 // CPU: Intel Nehalem with HyperThreading (4 cores) dL1:32KB dL2:256KB
 // Benchmark                     Time(ns)    CPU(ns) Iterations
 // ------------------------------------------------------------
-// BM_MinifyJavascriptNew/64         3862       3870     178281
-// BM_MinifyJavascriptNew/512       29962      30058      24922
-// BM_MinifyJavascriptNew/4k       163436     163944       4218
-// BM_MinifyJavascriptNew/32k     1370666    1374490        494
-// BM_MinifyJavascriptNew/256k   11499929   11532620        100
-// BM_MinifyJavascriptOld/64         1182       1185     571793
-// BM_MinifyJavascriptOld/512       10234      10270      65585
-// BM_MinifyJavascriptOld/4k        65045      65232      10000
-// BM_MinifyJavascriptOld/32k      666505     669240       1000
-// BM_MinifyJavascriptOld/256k    4989183    5005530        100
+// BM_MinifyJavascript/64            3862       3870     178281
+// BM_MinifyJavascript/512          29962      30058      24922
+// BM_MinifyJavascript/4k          163436     163944       4218
+// BM_MinifyJavascript/32k        1370666    1374490        494
+// BM_MinifyJavascript/256k      11499929   11532620        100
 //
 // Disclaimer: comparing runs over time and across different machines
 // can be misleading.  When contemplating an algorithm change, always do
@@ -51,8 +46,7 @@ extern const char* JS_console_js;
 
 namespace {
 
-void TestMinifyJavascript(bool use_experimental_minifier,
-                          benchmark::State& state) {
+void TestMinifyJavascript(benchmark::State& state) {
   GoogleString in_text;
   for (int i = 0; i < state.iterations(); i += strlen(JS_console_js)) {
     in_text += JS_console_js;
@@ -63,8 +57,7 @@ void TestMinifyJavascript(bool use_experimental_minifier,
   JavascriptRewriteConfig::InitStats(&stats);
   pagespeed::js::JsTokenizerPatterns js_tokenizer_patterns;
   JavascriptLibraryIdentification js_lib_id;
-  JavascriptRewriteConfig config(&stats, true /* minify */,
-                                 use_experimental_minifier, &js_lib_id,
+  JavascriptRewriteConfig config(&stats, true /* minify */, &js_lib_id,
                                  &js_tokenizer_patterns);
 
   NullMessageHandler handler;
@@ -74,15 +67,10 @@ void TestMinifyJavascript(bool use_experimental_minifier,
   }
 }
 
-static void BM_MinifyJavascriptNew(benchmark::State& state) {
-  TestMinifyJavascript(true, state);
+static void BM_MinifyJavascript(benchmark::State& state) {
+  TestMinifyJavascript(state);
 }
-BENCHMARK_RANGE(BM_MinifyJavascriptNew, 1 << 6, 1 << 18);
-
-static void BM_MinifyJavascriptOld(benchmark::State& state) {
-  TestMinifyJavascript(false, state);
-}
-BENCHMARK_RANGE(BM_MinifyJavascriptOld, 1 << 6, 1 << 18);
+BENCHMARK_RANGE(BM_MinifyJavascript, 1 << 6, 1 << 18);
 
 }  // namespace
 

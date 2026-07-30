@@ -561,6 +561,11 @@ void CssMinify::Minify(const Css::Value& value) {
       // TODO(sligocki): Do not add spaces around COMMA tokens.
       Write(",");
       break;
+    case Css::Value::OPERATOR:
+      // calc() '+' etc.: verbatim, like Value::ToString(). The function
+      // parameter separators supply the (required) surrounding spaces.
+      Write(UnicodeTextToUTF8(value.GetStringValue()));
+      break;
     case Css::Value::UNKNOWN:
       handler_->MessageS(kError, "Unknown attribute");
       ok_ = false;

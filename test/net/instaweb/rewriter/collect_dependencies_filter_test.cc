@@ -93,6 +93,39 @@ class CollectDependenciesFilterTest : public RewriteTestBase {
     return Integer64ToString(start_time_ms_ + delta_sec * Timer::kSecondMs);
   }
 
+  // Reconstructs the cdf context's metadata cache key for a resource. Mirrors
+  // RewriteContext::SetPartitionKey() for a single-slot context with the
+  // default encoder, no UA-specific cache key, and no CacheKeySuffix; if that
+  // scheme changes, callers' asserts on the entry fail loudly rather than
+  // going vacuous. (FontsNeverInOldMetadataCacheStore reconstructs the same
+  // key inline; it predates this helper.)
+  GoogleString CdfPartitionKey(StringPiece resource_url) {
+    GoogleString signature = server_context()->lock_hasher()->Hash(
+        rewrite_driver()->options()->signature());
+    GoogleString encoding;
+    UrlSegmentEncoder encoder;
+    StringVector dummy_url_keys;
+    dummy_url_keys.push_back("");
+    encoder.Encode(dummy_url_keys, nullptr, &encoding);
+    return StrCat(ServerContext::kCacheKeyResourceNamePrefix, "cdf", "_",
+                  signature, "/", resource_url, "@", encoding, "@_");
+  }
+
+  // Reads back the OutputPartitions the collector wrote to the metadata cache
+  // for a resource --- the store the tracker's content_type re-routing (and
+  // Report()'s type repair) can never fix up on the way out.
+  void ReadCdfPartitions(StringPiece resource_url, OutputPartitions* out) {
+    const GoogleString key = CdfPartitionKey(resource_url);
+    CacheInterface::SynchronousCallback callback;
+    lru_cache()->Get(key, &callback);
+    ASSERT_TRUE(callback.called());
+    ASSERT_EQ(CacheInterface::kAvailable, callback.state())
+        << "No cdf metadata entry at the reconstructed key " << key
+        << "; RewriteContext::SetPartitionKey() may have changed.";
+    StringPiece raw = callback.value_as_string_piece();
+    ASSERT_TRUE(out->ParseFromArray(raw.data(), raw.size()));
+  }
+
   PropertyCache* pcache_;
   PropertyPage* page_;
   int64 start_time_ms_;
@@ -219,10 +252,10 @@ TEST_F(CollectDependenciesFilterTest, MediaTopLevel) {
   rewrite_driver()->FinishParse();
 }
 
-TEST_F(CollectDependenciesFilterTest, ModuleScriptNotCollected) {
-  // Module scripts are skipped: the emitted hint would be a plain as=script
-  // preload, which occupies a different preload-cache slot than the module
-  // map fetch and would only cause a double fetch.
+TEST_F(CollectDependenciesFilterTest, ModuleScriptCollected) {
+  // Module scripts are collected as DEP_MODULE, into the dedicated
+  // module_dependency field, so they can be hinted with rel=modulepreload.
+  // Classic scripts on the same page keep going into 'dependency'.
   rewrite_driver()->AddFilters();
 
   const char kInput[] =
@@ -246,9 +279,230 @@ TEST_F(CollectDependenciesFilterTest, ModuleScriptNotCollected) {
                                  "date_ms: ",
                                  FormatRelTimeSec(0),
                                  "}"
+                                 "order_key: 1"
+                                 "}"
+                                 "module_dependency {"
+                                 "url: 'http://test.com/b.js'"
+                                 "content_type: DEP_MODULE "
+                                 "validity_info {"
+                                 "type: CACHED "
+                                 "expiration_time_ms: ",
+                                 FormatRelTimeSec(200),
+                                 " "
+                                 "date_ms: ",
+                                 FormatRelTimeSec(0),
+                                 "}"
                                  "order_key: 0"
                                  "}")));
   rewrite_driver()->FinishParse();
+}
+
+TEST_F(CollectDependenciesFilterTest, ModuleScriptWithIntegrityNotCollected) {
+  // A modulepreload entry is matched on its integrity metadata, and Dependency
+  // has nowhere to carry it, so an integrity-bearing module would get a hint
+  // the browser cannot match --- a double fetch, worse than the no hint these
+  // got before. Classic scripts are unaffected by the integrity attribute.
+  rewrite_driver()->AddFilters();
+
+  const char kInput[] =
+      "<script type=module src=b.js integrity=sha384-abc></script>"
+      "<script src=d.js></script>";
+  ValidateNoChanges("module_integrity", kInput);
+
+  ResetDriver();
+  DependencyTracker* tracker = rewrite_driver()->dependency_tracker();
+  rewrite_driver()->StartParse(kTestDomain);
+  ASSERT_TRUE(tracker->read_in_info() != nullptr);
+  const Dependencies& deps = *tracker->read_in_info();
+  EXPECT_EQ(0, deps.module_dependency_size());
+  ASSERT_EQ(1, deps.dependency_size());
+  EXPECT_EQ("http://test.com/d.js", deps.dependency(0).url());
+  rewrite_driver()->FinishParse();
+}
+
+TEST_F(CollectDependenciesFilterTest, ModuleScriptUseCredentialsNotCollected) {
+  // crossorigin=use-credentials is credentials mode 'include'; a
+  // modulepreload hint carries no crossorigin and so fetches same-origin.
+  // Those are different module-map entries, so the hinted fetch would never
+  // be reused. Dependency cannot carry the credentials mode, so skip.
+  //
+  // Only the exact value is excluded, and the value is compared unmodified:
+  // per HTML, crossorigin is an enumerated attribute whose invalid values
+  // (including a padded " use-credentials ") map to Anonymous --- which is
+  // exactly what a modulepreload fetches with, so d.js IS hintable.
+  rewrite_driver()->AddFilters();
+
+  const char kInput[] =
+      "<script type=module src=b.js crossorigin=use-credentials></script>"
+      "<script type=module src=d.js crossorigin=\" use-credentials "
+      "\"></script>";
+  ValidateNoChanges("module_use_credentials", kInput);
+
+  ResetDriver();
+  DependencyTracker* tracker = rewrite_driver()->dependency_tracker();
+  rewrite_driver()->StartParse(kTestDomain);
+  ASSERT_TRUE(tracker->read_in_info() != nullptr);
+  const Dependencies& deps = *tracker->read_in_info();
+  EXPECT_EQ(0, deps.dependency_size());
+  ASSERT_EQ(1, deps.module_dependency_size());
+  EXPECT_EQ("http://test.com/d.js", deps.module_dependency(0).url());
+  EXPECT_EQ(DEP_MODULE, deps.module_dependency(0).content_type());
+  rewrite_driver()->FinishParse();
+}
+
+TEST_F(CollectDependenciesFilterTest,
+       ModuleScriptAnonymousCrossoriginCollected) {
+  // Anonymous is the crossorigin attribute's default state, and it is exactly
+  // what a modulepreload hint fetches with, so a value-less or
+  // crossorigin=anonymous module is collected like any other.
+  rewrite_driver()->AddFilters();
+
+  const char kInput[] =
+      "<script type=module src=b.js crossorigin=anonymous></script>"
+      "<script type=module src=d.js crossorigin></script>";
+  ValidateNoChanges("module_anonymous_crossorigin", kInput);
+
+  ResetDriver();
+  DependencyTracker* tracker = rewrite_driver()->dependency_tracker();
+  rewrite_driver()->StartParse(kTestDomain);
+  ASSERT_TRUE(tracker->read_in_info() != nullptr);
+  const Dependencies& deps = *tracker->read_in_info();
+  EXPECT_EQ(0, deps.dependency_size());
+  ASSERT_EQ(2, deps.module_dependency_size());
+  EXPECT_EQ("http://test.com/b.js", deps.module_dependency(0).url());
+  EXPECT_EQ(DEP_MODULE, deps.module_dependency(0).content_type());
+  EXPECT_EQ("http://test.com/d.js", deps.module_dependency(1).url());
+  EXPECT_EQ(DEP_MODULE, deps.module_dependency(1).content_type());
+  rewrite_driver()->FinishParse();
+}
+
+TEST_F(CollectDependenciesFilterTest, ModuleTypeFollowsPageNotMetadataCache) {
+  // The cdf metadata cache key does not include the dependency type, so the
+  // partition written for a URL loaded as a classic script is replayed
+  // verbatim for a page that loads the same URL as a module. The type must
+  // follow *this* page's parse, otherwise the module gets an as=script hint
+  // (the double fetch) --- or, in the other direction, a classic script gets
+  // rel=modulepreload.
+  //
+  // Report()'s repair is unconditional, so it equally governs the
+  // pre-existing CSS/JS cross-type replay: a URL loaded as a stylesheet on
+  // one page and as a script on another no longer carries the other page's
+  // stale as= param.
+  rewrite_driver()->AddFilters();
+
+  // First page: b.js as a classic script. This writes the cdf partition.
+  ValidateNoChanges("classic_first", "<script src=b.js></script>");
+
+  // Second page: same URL, now a module. The cdf context hits the metadata
+  // cache written above.
+  ResetDriver();
+  ValidateNoChanges("module_second", "<script type=module src=b.js></script>");
+
+  // Prove the replay actually happened rather than the module page silently
+  // recomputing: the metadata entry must still be the classic partition the
+  // first page wrote. A miss would have run Rewrite() again and left
+  // collected_module_dependency here instead. Without this the test could go
+  // vacuous if the key scheme ever stopped colliding.
+  {
+    OutputPartitions partitions;
+    ASSERT_NO_FATAL_FAILURE(
+        ReadCdfPartitions("http://test.com/b.js", &partitions));
+    ASSERT_EQ(1, partitions.partition_size());
+    EXPECT_EQ(0, partitions.partition(0).collected_module_dependency_size())
+        << "The module page recomputed the partition; it must have replayed "
+           "the classic one, or this test proves nothing.";
+    ASSERT_EQ(1, partitions.partition(0).collected_dependency_size());
+    EXPECT_EQ(DEP_JAVASCRIPT,
+              partitions.partition(0).collected_dependency(0).content_type());
+  }
+
+  ResetDriver();
+  DependencyTracker* tracker = rewrite_driver()->dependency_tracker();
+  rewrite_driver()->StartParse(kTestDomain);
+  ASSERT_TRUE(tracker->read_in_info() != nullptr);
+  const Dependencies& deps = *tracker->read_in_info();
+  EXPECT_EQ(0, deps.dependency_size());
+  ASSERT_EQ(1, deps.module_dependency_size());
+  EXPECT_EQ("http://test.com/b.js", deps.module_dependency(0).url());
+  EXPECT_EQ(DEP_MODULE, deps.module_dependency(0).content_type());
+  rewrite_driver()->FinishParse();
+
+  // And back the other way: the module partition just written must not make
+  // b.js read back as a module on a page that loads it classically.
+  ResetDriver();
+  ValidateNoChanges("classic_again", "<script src=b.js></script>");
+
+  ResetDriver();
+  tracker = rewrite_driver()->dependency_tracker();
+  rewrite_driver()->StartParse(kTestDomain);
+  ASSERT_TRUE(tracker->read_in_info() != nullptr);
+  const Dependencies& deps2 = *tracker->read_in_info();
+  EXPECT_EQ(0, deps2.module_dependency_size());
+  ASSERT_EQ(1, deps2.dependency_size());
+  EXPECT_EQ("http://test.com/b.js", deps2.dependency(0).url());
+  EXPECT_EQ(DEP_JAVASCRIPT, deps2.dependency(0).content_type());
+  rewrite_driver()->FinishParse();
+}
+
+TEST_F(CollectDependenciesFilterTest, ModulesNeverInOldSerializedFields) {
+  // The downgrade contract, the DEP_FONT rule applied to DEP_MODULE: a
+  // DEP_MODULE entry must only ever appear in the dedicated module fields.
+  // In 'dependency' a binary predating DEP_MODULE would read its content_type
+  // as the closed-enum field default (DEP_JAVASCRIPT) and emit as=script for
+  // a module --- the exact double fetch this feature exists to avoid.
+  rewrite_driver()->AddFilters();
+
+  ValidateNoChanges("module_downgrade_contract",
+                    "<script type=module src=b.js></script>");
+
+  ResetDriver();
+  DependencyTracker* tracker = rewrite_driver()->dependency_tracker();
+  rewrite_driver()->StartParse(kTestDomain);
+  ASSERT_TRUE(tracker->read_in_info() != nullptr);
+  const Dependencies& deps = *tracker->read_in_info();
+  for (int i = 0; i < deps.dependency_size(); ++i) {
+    EXPECT_NE(DEP_MODULE, deps.dependency(i).content_type())
+        << "DEP_MODULE leaked into the pre-DEP_MODULE 'dependency' field: "
+        << deps.dependency(i).url();
+  }
+  ASSERT_EQ(1, deps.module_dependency_size());
+  EXPECT_EQ(DEP_MODULE, deps.module_dependency(0).content_type());
+  EXPECT_EQ("http://test.com/b.js", deps.module_dependency(0).url());
+  // NOTE: this pcache-side check cannot fail for a module mis-filed by the
+  // collector --- Report() forces content_type from this page's parse and the
+  // tracker re-routes by content_type, repairing it on the way out. The store
+  // that matters is pinned by ModulesNeverInOldMetadataCacheStore.
+  rewrite_driver()->FinishParse();
+}
+
+TEST_F(CollectDependenciesFilterTest, ModulesNeverInOldMetadataCacheStore) {
+  // Companion to ModulesNeverInOldSerializedFields, pinning the OTHER store:
+  // the cdf OutputPartitions entry in the metadata cache, which the collector
+  // writes directly and which nothing downstream can repair. This is the test
+  // that actually guards the downgrade contract --- a module mis-filed into
+  // collected_dependency reaches the pcache correctly anyway (Report() forces
+  // the type, the tracker re-routes on it), but sits wrong in the metadata
+  // cache forever. An r20 binary replaying that partition reads DEP_MODULE
+  // out of a field it predates, gets the closed-enum field default
+  // DEP_JAVASCRIPT, and emits rel=preload; as=script for a module: the double
+  // fetch the field split exists to prevent.
+  rewrite_driver()->AddFilters();
+
+  ValidateNoChanges("module_metadata_contract",
+                    "<script type=module src=b.js></script>");
+
+  OutputPartitions partitions;
+  ASSERT_NO_FATAL_FAILURE(
+      ReadCdfPartitions("http://test.com/b.js", &partitions));
+  ASSERT_EQ(1, partitions.partition_size());
+  const CachedResult& result = partitions.partition(0);
+  EXPECT_EQ(0, result.collected_dependency_size())
+      << "A module leaked into CachedResult.collected_dependency, where a "
+         "binary predating DEP_MODULE would read it as DEP_JAVASCRIPT.";
+  ASSERT_EQ(1, result.collected_module_dependency_size());
+  EXPECT_EQ(DEP_MODULE, result.collected_module_dependency(0).content_type());
+  EXPECT_EQ("http://test.com/b.js",
+            result.collected_module_dependency(0).url());
 }
 
 TEST_F(CollectDependenciesFilterTest, HandleEmptyResources) {
@@ -810,12 +1064,12 @@ TEST_F(CollectDependenciesFilterTest, SkipsFaceWithoutWoff2) {
 TEST_F(CollectDependenciesFilterTest, UnicodeRangeGatesHarvest) {
   // A face whose unicode-range does not include any printable ASCII
   // characters (U+0020 - U+007E) is a specialized subset and skipped; one
-  // that does is harvested. The harvested face uses the realistic
-  // latin-subset shape --- a list including the letter-leading U+FEFF ---
-  // whose value fails to lex and therefore demotes to a scannable
-  // UNPARSEABLE declaration. The skipped face's digit-leading range parses
-  // cleanly; it is reconstructed from the parsed values and evaluates
-  // outside printable ASCII (see DigitLeadingCleanParseRangeSkipped for the
+  // that does is harvested. Both faces lex cleanly here: the harvested
+  // face uses the realistic latin-subset shape --- a list including the
+  // letter-leading U+FEFF, which lexes as IDENT "U" + OPERATOR "+" + IDENT
+  // "FEFF" --- and is reconstructed from the parsed values; the skipped
+  // face's digit-leading range reconstructs and evaluates outside
+  // printable ASCII (see DigitLeadingCleanParseRangeSkipped for the
   // dedicated pin).
   SetResponseWithDefaultHeaders(
       "f.css", kContentTypeCss,
@@ -915,7 +1169,8 @@ TEST_F(CollectDependenciesFilterTest, UnicodeRangeWildcardAndEdgeForms) {
   //    U+41 == 'A', inside printable ASCII -> harvested.
   //  - "garbage" parses cleanly as an identifier; reconstruction yields
   //    "garbage", not a unicode-range token -> no coverage -> skipped.
-  //  - U+GGGG fails to lex (demotes) but yields no parseable token ->
+  //  - U+GGGG lexes cleanly (IDENT "U" + OPERATOR "+" + IDENT "GGGG") and
+  //    reconstructs to "U+GGGG", which is not a parseable token ->
   //    no coverage -> skipped.
   SetResponseWithDefaultHeaders(
       "f.css", kContentTypeCss,
@@ -1002,12 +1257,12 @@ TEST_F(CollectDependenciesFilterTest, UnicodeRangeWildcardAndEdgeForms) {
 
 TEST_F(CollectDependenciesFilterTest, UnicodeRangeLastDeclarationWins) {
   // Per CSS cascade, the last unicode-range declaration in a face wins:
-  //  - Face A: a non-intersecting demoted range followed by an intersecting
-  //    demoted one -> harvested (would be skipped if the first won).
-  //  - Face B: an intersecting demoted range followed by a clean-parsing
-  //    digit-leading one -> the clean-parsing declaration wins, is
+  //  - Face A: a non-intersecting letter-leading range followed by an
+  //    intersecting list -> harvested (would be skipped if the first won).
+  //  - Face B: an intersecting letter-leading list followed by a
+  //    digit-leading one -> the digit-leading declaration wins, is
   //    reconstructed, and evaluates outside printable ASCII -> skipped
-  //    (pins the interaction between the two declaration shapes).
+  //    (pins the interaction between the two lexing shapes).
   SetResponseWithDefaultHeaders(
       "f.css", kContentTypeCss,
       "@font-face { font-family: A;"

@@ -19,7 +19,7 @@
 
 #include "pagespeed/system/system_rewrite_driver_factory.h"
 
-#include <algorithm>  // for min
+#include <algorithm>  // for min, max
 #include <cstdio>
 #include <cstdlib>
 #include <map>
@@ -64,6 +64,7 @@
 #include "pagespeed/kernel/util/input_file_nonce_generator.h"
 #include "pagespeed/kernel/util/nonce_generator.h"
 #include "pagespeed/system/in_place_resource_recorder.h"
+#include "pagespeed/system/optimization_thread_policy.h"
 #include "pagespeed/system/system_caches.h"
 #include "pagespeed/system/system_rewrite_options.h"
 #include "pagespeed/system/system_server_context.h"
@@ -89,6 +90,53 @@ const char kTrackOriginalContentLength[] = "TrackOriginalContentLength";
 const char kCreateSharedMemoryMetadataCache[] =
     "CreateSharedMemoryMetadataCache";
 
+// The literal that asks for the design record policy by name.
+const char kAutoThreadCountLiteral[] = "auto";
+
+// Parses a NumRewriteThreads / NumExpensiveRewriteThreads argument.  Accepts
+// `auto` and its alias `0` (both yielding kAutoThreadCount) and any positive
+// integer; rejects everything else with a message naming the directive, which
+// is what the operator sees at startup.
+//
+// A positive value above kMaxOptimizationThreadsPerPool is clamped rather than
+// rejected, with a warning naming both the requested and the resolved count.
+// An explicit count is an override, so it is not the policy's business to
+// refuse it -- but installing thousands of threads per server process because
+// a digit was mistyped, silently, is exactly what the design record exists to stop.
+bool ParseThreadCountArgument(StringPiece option, StringPiece arg, int* count,
+                              GoogleString* msg, MessageHandler* handler) {
+  if (StringCaseEqual(arg, kAutoThreadCountLiteral)) {
+    *count = SystemRewriteDriverFactory::kAutoThreadCount;
+    return true;
+  }
+  int value = 0;
+  if (!StringToInt(arg, &value)) {
+    *msg = StrCat("'", option, "' must be a positive integer or '",
+                  kAutoThreadCountLiteral, "'; got '", arg, "'.");
+    return false;
+  }
+  if (value < 0) {
+    *msg = StrCat("'", option, "' must not be negative; got '", arg, "'. Use '",
+                  kAutoThreadCountLiteral,
+                  "' (or 0) to size the pool automatically.");
+    return false;
+  }
+  if (value > kMaxOptimizationThreadsPerPool) {
+    GoogleString option_str;
+    option.CopyToString(&option_str);
+    handler->Message(kWarning,
+                     "'%s' was set to %d, which is far more threads than any "
+                     "server process can use; using %d instead. Leave it "
+                     "unset, or set it to '%s', to size the pool from the CPU "
+                     "budget.",
+                     option_str.c_str(), value, kMaxOptimizationThreadsPerPool,
+                     kAutoThreadCountLiteral);
+    value = kMaxOptimizationThreadsPerPool;
+  }
+  *count = value;  // 0 is the alias for `auto`.
+  return true;
+}
+
 }  // namespace
 
 SystemRewriteDriverFactory::SystemRewriteDriverFactory(
@@ -107,8 +155,15 @@ SystemRewriteDriverFactory::SystemRewriteDriverFactory(
       use_per_vhost_statistics_(true),
       install_crash_handler_(false),
       thread_counts_finalized_(false),
-      num_rewrite_threads_(-1),
-      num_expensive_rewrite_threads_(-1) {
+      configured_rewrite_threads_(kAutoThreadCount),
+      configured_expensive_rewrite_threads_(kAutoThreadCount),
+      num_rewrite_threads_(kAutoThreadCount),
+      num_expensive_rewrite_threads_(kAutoThreadCount),
+      concurrent_processes_(kUnknownProcessConcurrency),
+      logged_rewrite_threads_(-1),
+      logged_expensive_rewrite_threads_(-1) {
+  // cpu_budget_ stays at its conservative default (one core, nothing read)
+  // until AutoDetectThreadCounts() reads the machine.
   if (shared_mem_runtime == nullptr) {
 #if PAGESPEED_SUPPORT_POSIX_SHARED_MEM
     shared_mem_runtime = new PthreadSharedMem();
@@ -122,13 +177,20 @@ SystemRewriteDriverFactory::SystemRewriteDriverFactory(
 // We need an Init() method to finish construction because we want to call
 // virtual methods that subclasses can override.
 void SystemRewriteDriverFactory::Init() {
-  // Note: in Apache this must run after mod_pagespeed_register_hooks has
-  // completed.  See http://httpd.apache.org/docs/2.4/developer/new_api_2_4.html
-  // and search for ap_mpm_query.
-  AutoDetectThreadCounts();
+  // Some servers can't answer questions about their threading model this
+  // early: they only know once the configuration has been processed.  Those
+  // return false here and call FinalizeThreadCounts() themselves later,
+  // updating caches()->set_thread_limit() at the same time.
+  if (ThreadCountsKnownAtInit()) {
+    AutoDetectThreadCounts();
+  }
 
   int thread_limit = LookupThreadLimit();
-  thread_limit += num_rewrite_threads() + num_expensive_rewrite_threads();
+  if (thread_counts_finalized()) {
+    thread_limit += num_rewrite_threads() + num_expensive_rewrite_threads();
+  }
+  // SystemCaches must exist before configuration is parsed: ParseAndSetOption2
+  // calls caches()->CreateShmMetadataCache() while reading the config.
   caches_ = std::make_unique<SystemCaches>(this, shared_mem_runtime_.get(),
                                            thread_limit);
 }
@@ -222,6 +284,26 @@ void SystemRewriteDriverFactory::InitStaticAssetManager(
   static_asset_manager->set_library_url_prefix(static_asset_prefix_);
 }
 
+void SystemRewriteDriverFactory::WarnIfThreadCountsNotFinalized() {
+  if (thread_counts_finalized_) {
+    return;
+  }
+  // A DCHECK alone is not enough here.  A port whose FinalizeThreadCounts()
+  // call site is deleted -- the Apache one lives in a hand-written post-config
+  // hook -- falls back to one worker in each pool and, because the resolution
+  // never ran, never logs the line that would have said so.  That is the
+  // silent-failure mode the design record D6 is about, so say it out loud in every
+  // build, not only in debug ones.
+  DCHECK(thread_counts_finalized_)
+      << "Rewrite worker pool created before thread counts were finalized";
+  message_handler()->Message(
+      kWarning,
+      "PageSpeed optimization worker pool created before the thread counts "
+      "were resolved: falling back to one thread per pool. This is a bug -- "
+      "this port must call FinalizeThreadCounts() once it can answer "
+      "ConcurrentProcessCount(), and before any worker pool is built.");
+}
+
 QueuedWorkerPool* SystemRewriteDriverFactory::CreateWorkerPool(
     WorkerPoolCategory pool, StringPiece name) {
   switch (pool) {
@@ -229,10 +311,15 @@ QueuedWorkerPool* SystemRewriteDriverFactory::CreateWorkerPool(
       // In Apache this will effectively be 0, as it doesn't use HTML threads.
       return new QueuedWorkerPool(1, name, thread_system());
     case kRewriteWorkers:
-      return new QueuedWorkerPool(num_rewrite_threads_, name, thread_system());
-    case kLowPriorityRewriteWorkers:
-      return new QueuedWorkerPool(num_expensive_rewrite_threads_, name,
+      // Thread counts must have been finalized by now; clamp defensively so a
+      // regression in that ordering can't create a pool with <= 0 workers.
+      WarnIfThreadCountsNotFinalized();
+      return new QueuedWorkerPool(std::max(1, num_rewrite_threads_), name,
                                   thread_system());
+    case kLowPriorityRewriteWorkers:
+      WarnIfThreadCountsNotFinalized();
+      return new QueuedWorkerPool(std::max(1, num_expensive_rewrite_threads_),
+                                  name, thread_system());
     default:
       return RewriteDriverFactory::CreateWorkerPool(pool, name);
   }
@@ -381,23 +468,35 @@ SystemRewriteDriverFactory::ParseAndSetOption1(StringPiece option,
     return parsed_as_bool;
   }
 
+  // The two thread counts accept `auto` as a literal, with `0` as its alias,
+  // and reject anything negative.  the design record D4: a negative count used to
+  // convert to size_t as SIZE_MAX on its way to the worker pools, which means
+  // unbounded thread creation and a CHECK failure at child init.  Nothing
+  // validated it, so the only symptom was the crash.
+  if (StringCaseEqual(option, kNumRewriteThreads) ||
+      StringCaseEqual(option, kNumExpensiveRewriteThreads)) {
+    int count = kAutoThreadCount;
+    if (!ParseThreadCountArgument(option, arg, &count, msg, handler)) {
+      return RewriteOptions::kOptionValueInvalid;
+    }
+    if (StringCaseEqual(option, kNumRewriteThreads)) {
+      set_num_rewrite_threads(count);
+    } else {
+      set_num_expensive_rewrite_threads(count);
+    }
+    return RewriteOptions::kOptionOk;
+  }
+
   // Others take an integer >= 0.
   //
   // Values of 0 have special meanings:
-  //   Num(Expensive)RewriteThreads: autodetect (see AutoDetectThreadCounts())
   //   MessageBufferSize: disable the message buffer
   int int_value = 0;
   RewriteOptions::OptionSettingResult parsed_as_int =
       RewriteOptions::ParseFromString(arg, &int_value)
           ? RewriteOptions::kOptionOk
           : RewriteOptions::kOptionValueInvalid;
-  if (StringCaseEqual(option, kNumRewriteThreads)) {
-    set_num_rewrite_threads(int_value);
-    return parsed_as_int;
-  } else if (StringCaseEqual(option, kNumExpensiveRewriteThreads)) {
-    set_num_expensive_rewrite_threads(int_value);
-    return parsed_as_int;
-  } else if (StringCaseEqual(option, kMessageBufferSize)) {
+  if (StringCaseEqual(option, kMessageBufferSize)) {
     set_message_buffer_size(int_value);
     return parsed_as_int;
   }
@@ -645,34 +744,72 @@ void SystemRewriteDriverFactory::AutoDetectThreadCounts() {
     return;
   }
 
-  if (IsServerThreaded()) {
-    if (num_rewrite_threads_ <= 0) {
-      num_rewrite_threads_ = 4;
-    }
-    if (num_expensive_rewrite_threads_ <= 0) {
-      num_expensive_rewrite_threads_ = 4;
-    }
-    message_handler()->Message(
-        kInfo,
-        "Detected threaded server."
-        " Own threads: %d Rewrite, %d Expensive Rewrite.",
-        num_rewrite_threads_, num_expensive_rewrite_threads_);
-
-  } else {
-    if (num_rewrite_threads_ <= 0) {
-      num_rewrite_threads_ = 1;
-    }
-    if (num_expensive_rewrite_threads_ <= 0) {
-      num_expensive_rewrite_threads_ = 1;
-    }
-    message_handler()->Message(
-        kInfo,
-        "No threading detected."
-        " Own threads: %d Rewrite, %d Expensive Rewrite.",
-        num_rewrite_threads_, num_expensive_rewrite_threads_);
-  }
+  cpu_budget_ = DetectEffectiveCpuBudget();
+  concurrent_processes_ = ConcurrentProcessCount();
+  ResolveThreadCounts();
 
   thread_counts_finalized_ = true;
+  LogThreadCountResolutionIfChanged();
+}
+
+void SystemRewriteDriverFactory::ResolveThreadCounts() {
+  const OptimizationThreadCounts computed = ComputeOptimizationThreadCounts(
+      cpu_budget_.effective_cores, concurrent_processes_);
+
+  // An explicitly configured count always beats the computed one, in either
+  // ordering.  kAutoThreadCount -- which is what both `auto` and `0` parse to
+  // -- means "apply the policy", so it does not count as explicit.
+  num_rewrite_threads_ = configured_rewrite_threads_ > 0
+                             ? configured_rewrite_threads_
+                             : computed.rewrite;
+  num_expensive_rewrite_threads_ = configured_expensive_rewrite_threads_ > 0
+                                       ? configured_expensive_rewrite_threads_
+                                       : computed.expensive;
+}
+
+void SystemRewriteDriverFactory::ReresolveIfFinalized() {
+  if (!thread_counts_finalized_) {
+    return;  // Resolution hasn't run yet; it will pick the new value up.
+  }
+  ResolveThreadCounts();
+  LogThreadCountResolutionIfChanged();
+}
+
+void SystemRewriteDriverFactory::LogThreadCountResolutionIfChanged() {
+  if (num_rewrite_threads_ == logged_rewrite_threads_ &&
+      num_expensive_rewrite_threads_ == logged_expensive_rewrite_threads_) {
+    return;
+  }
+  logged_rewrite_threads_ = num_rewrite_threads_;
+  logged_expensive_rewrite_threads_ = num_expensive_rewrite_threads_;
+  LogThreadCountResolution();
+}
+
+void SystemRewriteDriverFactory::LogThreadCountResolution() {
+  // kWarning, not kInfo: see the declaration.  Apache's default LogLevel is
+  // warn, and this line has to reach an operator who has not changed it.
+  if (concurrent_processes_ <= 0) {
+    message_handler()->Message(
+        kWarning,
+        "PageSpeed optimization threads: %d rewrite, %d expensive rewrite "
+        "(per server process). Could not determine how many server processes "
+        "share this machine, so the minimum was used; set NumRewriteThreads "
+        "and NumExpensiveRewriteThreads to choose the counts yourself. "
+        "Effective CPU budget: %d whole cores (limited by %s).",
+        num_rewrite_threads_, num_expensive_rewrite_threads_,
+        cpu_budget_.effective_cores, CpuBudgetSourceName(cpu_budget_.source));
+    return;
+  }
+  message_handler()->Message(
+      kWarning,
+      "PageSpeed optimization threads: %d rewrite, %d expensive rewrite "
+      "(per server process). Effective CPU budget: %d whole cores (limited by "
+      "%s); server processes: %d; %s. Override with NumRewriteThreads and "
+      "NumExpensiveRewriteThreads.",
+      num_rewrite_threads_, num_expensive_rewrite_threads_,
+      cpu_budget_.effective_cores, CpuBudgetSourceName(cpu_budget_.source),
+      concurrent_processes_,
+      IsServerThreaded() ? "threaded server" : "non-threaded server");
 }
 
 }  // namespace net_instaweb

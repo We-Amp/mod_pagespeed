@@ -277,6 +277,10 @@ void RewriteDriver::SetRequestHeaders(const RequestHeaders& headers) {
   PopulateRequestContext();
 }
 
+void RewriteDriver::SetWebBotAuthVerdict(bool signature_verified_agent) {
+  request_properties_->SetWebBotAuthVerdict(signature_verified_agent);
+}
+
 void RewriteDriver::set_request_context(const RequestContextPtr& x) {
   // Ideally, we would have a CHECK(x.get() != NULL) here, since all "real"
   // RewriteDrivers should have a valid request context.
@@ -324,7 +328,7 @@ RewriteDriver::~RewriteDriver() {
         low_priority_rewrite_worker_);
   }
   Clear();
-  STLDeleteElements(&filters_to_delete_);
+  filters_to_delete_.clear();
   STLDeleteElements(&resource_claimants_);
 }
 
@@ -875,17 +879,17 @@ void RewriteDriver::TraceString(const GoogleString& s) {
 // out of the core driver.
 
 void RewriteDriver::AddOwnedEarlyPreRenderFilter(HtmlFilter* filter) {
-  filters_to_delete_.push_back(filter);
+  filters_to_delete_.emplace_back(filter);
   early_pre_render_filters_.push_back(filter);
 }
 
 void RewriteDriver::PrependOwnedPreRenderFilter(HtmlFilter* filter) {
-  filters_to_delete_.push_back(filter);
+  filters_to_delete_.emplace_back(filter);
   pre_render_filters_.push_front(filter);
 }
 
 void RewriteDriver::AppendOwnedPreRenderFilter(HtmlFilter* filter) {
-  filters_to_delete_.push_back(filter);
+  filters_to_delete_.emplace_back(filter);
   pre_render_filters_.push_back(filter);
 }
 
@@ -894,7 +898,7 @@ void RewriteDriver::AppendUnownedPreRenderFilter(HtmlFilter* filter) {
 }
 
 void RewriteDriver::AddOwnedPostRenderFilter(HtmlFilter* filter) {
-  filters_to_delete_.push_back(filter);
+  filters_to_delete_.emplace_back(filter);
   AddUnownedPostRenderFilter(filter);
 }
 
@@ -932,7 +936,7 @@ void RewriteDriver::RegisterRewriteFilter(RewriteFilter* filter) {
   //
   // TODO(sligocki): It'd be nice to get this into the constructor.
   resource_filter_map_[filter->id()] = filter;
-  filters_to_delete_.push_back(filter);
+  filters_to_delete_.emplace_back(filter);
 }
 
 void RewriteDriver::SetWriter(Writer* writer) {

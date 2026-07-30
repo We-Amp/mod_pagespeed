@@ -67,6 +67,15 @@ class ScriptTagScanner {
   // values: trim surrounding whitespace and lowercase.
   static GoogleString Normalized(const StringPiece& str);
 
+  // Returns true if type (a <script type> attribute value) names a known
+  // data-block script type that the browser never executes as JavaScript --
+  // JSON-LD, plain JSON data blocks, import maps, speculation rules, and the
+  // inert text/template type. These classify as kUnknownScript (they are not
+  // JS), but they are well-understood, deliberate markup rather than an
+  // authoring mistake, so callers can suppress the "Unrecognized script"
+  // diagnostic for them. The value is matched after Normalized() folding.
+  static bool IsKnownNonJsScriptType(StringPiece type);
+
   // Returns true if the element carries an integrity= attribute. A filter
   // that changes such a script's bytes (minify, combine, outline) breaks
   // the browser's subresource-integrity check, so it must leave the script

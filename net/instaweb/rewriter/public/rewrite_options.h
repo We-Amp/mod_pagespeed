@@ -2574,13 +2574,6 @@ class RewriteOptions {
     set_option(x, &enable_extended_instrumentation_);
   }
 
-  bool use_experimental_js_minifier() const {
-    return use_experimental_js_minifier_.value();
-  }
-  void set_use_experimental_js_minifier(bool x) {
-    set_option(x, &use_experimental_js_minifier_);
-  }
-
   void set_max_combined_css_bytes(int64 x) {
     set_option(x, &max_combined_css_bytes_);
   }
@@ -4122,6 +4115,9 @@ class RewriteOptions {
   // reports more information in the beacon.
   Option<bool> enable_extended_instrumentation_;
 
+  // Retained only so configurations that still carry the directive keep
+  // parsing; the legacy JavaScript minifier it selected was removed and this
+  // value is never read.  Excluded from the options signature.
   Option<bool> use_experimental_js_minifier_;
 
   // Maximum size allowed for the combined CSS resource.

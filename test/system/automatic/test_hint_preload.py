@@ -184,5 +184,80 @@ class TestHintPreloadSubresources:
             f"Preload hints should include nopush, got Link: {link_header}"
 
 
+@pytest.mark.not_iis  # Link:rel=preload headers sent after IIS collects headers (architectural)
+class TestHintPreloadModuleScripts:
+    """<script type=module> subresources are hinted with rel=modulepreload.
+
+    Asserted against rewrite_javascript_module.html rather than
+    hint_preload_subresources.html on purpose: the bash original of the
+    class above pins that page's Link-header count at exactly 6, so adding a
+    module to it would break the bash lane.
+    """
+
+    MODULE_URL_SUFFIX = (
+        "rewrite_javascript_module.html"
+        "?PageSpeedFilters=hint_preload_subresources,rewrite_javascript"
+    )
+
+    def test_module_hinted_with_modulepreload(
+        self, client: PageSpeedClient, example_root: str
+    ):
+        """The external module gets rel=modulepreload, not rel=preload.
+
+        A rel=preload; as=script hint occupies a different preload-cache slot
+        than the module map fetch, so it would make the browser fetch the
+        module twice.
+        """
+        url = f"{example_root}/{self.MODULE_URL_SUFFIX}"
+
+        response = client.fetch_until(
+            url,
+            condition=lambda r: "modulepreload" in r.header("Link", ""),
+            timeout=30.0,
+        )
+        assert_http_status(response, 200)
+
+        link_header = response.header("Link", "")
+        assert re.search(
+            r"rewrite_javascript_module[^,]*\.js>; rel=modulepreload; nopush",
+            link_header,
+        ), f"Should hint the module with rel=modulepreload, got Link: {link_header}"
+
+    def test_modulepreload_has_no_as_or_crossorigin(
+        self, client: PageSpeedClient, example_root: str
+    ):
+        """modulepreload carries neither an as= nor a crossorigin param.
+
+        Its destination already defaults to script, and its default
+        credentials mode already matches a <script type=module> without a
+        crossorigin attribute, so both params would be redundant bytes.
+        """
+        url = f"{example_root}/{self.MODULE_URL_SUFFIX}"
+
+        response = client.fetch_until(
+            url,
+            condition=lambda r: "modulepreload" in r.header("Link", ""),
+            timeout=30.0,
+        )
+        assert_http_status(response, 200)
+
+        # Scope the assertions to the module's own link-value: a page-global
+        # check would silently start passing (or failing) on whatever else
+        # the page happens to hint.
+        link_header = response.header("Link", "")
+        module_values = [
+            value for value in link_header.split(",")
+            if "modulepreload" in value
+        ]
+        assert len(module_values) == 1, \
+            f"Expected exactly one modulepreload hint, got Link: {link_header}"
+        module_value = module_values[0]
+        assert "as=" not in module_value, \
+            f"modulepreload must not carry an as= param, got: {module_value}"
+        assert "crossorigin" not in module_value, \
+            f"modulepreload must not carry crossorigin, got: {module_value}"
+        assert_contains(module_value, "nopush")
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

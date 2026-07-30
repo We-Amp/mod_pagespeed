@@ -20,6 +20,8 @@
 #ifndef PAGESPEED_KERNEL_JS_JS_MINIFY_H_
 #define PAGESPEED_KERNEL_JS_JS_MINIFY_H_
 
+#include <cstdint>
+
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/source_map.h"
 #include "pagespeed/kernel/base/string.h"
@@ -35,7 +37,7 @@ namespace js {
 //   kNoWhitespace means that there is no whitespace between the tokens.
 //   kSpace means there's been at least one space/tab, but no linebreaks.
 //   kLinebreak means there's been at least one linebreak.
-enum JsWhitespace { kNoWhitespace, kSpace, kLinebreak };
+enum JsWhitespace : std::uint8_t { kNoWhitespace, kSpace, kLinebreak };
 
 // This works like JsTokenizer, except that it only emits whitespace and
 // comment tokens that are deemed necessary for the script to work.  IE
@@ -80,6 +82,15 @@ class JsMinifyingTokenizer {
   StringPiece prev_token_;
   JsKeywords::Type next_type_;
   StringPiece next_token_;
+  // A retained conditional-compilation comment is grammatically inert, so the
+  // semicolon-insertion signal of the token before it (a restricted-production
+  // keyword like `return`) must be carried across the comment; these track
+  // that carry for prev_/next_ respectively.  They carry the same signal for
+  // a speculatively-classified operator word (await/yield/for-of "of"): a
+  // linebreak after such a token is never removed (see
+  // JsTokenizer::LastTokenWasSpeculativeOperator).
+  bool prev_carries_asi_;
+  bool next_carries_asi_;
   net_instaweb::source_map::MappingVector* mappings_;
   net_instaweb::source_map::Mapping current_position_;
   net_instaweb::source_map::Mapping next_position_;
@@ -108,30 +119,6 @@ bool MinifyUtf8Js(const JsTokenizerPatterns* patterns, StringPiece input,
 bool MinifyUtf8JsWithSourceMap(
     const JsTokenizerPatterns* patterns, StringPiece input,
     GoogleString* output, net_instaweb::source_map::MappingVector* mappings);
-
-///////////////////////////////////////////////////////////////////////////////
-// Below is the old JsMinify implementation.  It has several known issues that
-// the newer implementation above fixes, but for now is still more
-// battle-tested.
-//
-// TODO(mdsteele): Deprecate these functions once we're more confident in the
-// new implementation, and remove them once all clients are migrated.
-///////////////////////////////////////////////////////////////////////////////
-
-// Returns true if minification was successful, false otherwise.
-bool MinifyJs(const StringPiece& input, GoogleString* out);
-
-// Returns true if minification was successful, false otherwise.
-bool GetMinifiedJsSize(const StringPiece& input, int* minimized_size);
-
-// Returns true if minification and collapsing string was successful, false
-// otherwise. This functin is a special use of js_minify. It minifies the JS
-// and removes all the string literals. Example:
-//   before : var x = 'asd \' lse'
-//   after  : var x=''
-bool MinifyJsAndCollapseStrings(const StringPiece& input, GoogleString* output);
-bool GetMinifiedStringCollapsedJsSize(const StringPiece& input,
-                                      int* minimized_size);
 
 }  // namespace js
 

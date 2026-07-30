@@ -137,6 +137,8 @@ class HtmlLeafNode : public HtmlNode {
     HtmlEventListIterator iter_;
   };
 
+  friend class HtmlTestingPeer;
+
   std::unique_ptr<Data> data_;
 };
 

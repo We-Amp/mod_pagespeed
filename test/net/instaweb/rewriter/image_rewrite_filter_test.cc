@@ -31,11 +31,13 @@
 #include "net/instaweb/http/public/logging_proto_impl.h"
 #include "net/instaweb/http/public/request_context.h"
 #include "net/instaweb/http/public/wait_url_async_fetcher.h"
+#include "net/instaweb/public/global_constants.h"
 #include "net/instaweb/rewriter/cached_result.pb.h"
 #include "net/instaweb/rewriter/public/dom_stats_filter.h"
 #include "net/instaweb/rewriter/public/domain_lawyer.h"
 #include "net/instaweb/rewriter/public/image.h"
 #include "net/instaweb/rewriter/public/image_url_encoder.h"
+#include "net/instaweb/rewriter/public/request_properties.h"
 #include "net/instaweb/rewriter/public/resource.h"
 #include "net/instaweb/rewriter/public/resource_namer.h"
 #include "net/instaweb/rewriter/public/resource_tag_scanner.h"
@@ -4471,6 +4473,133 @@ TEST_F(ImageRewriteTest, ResolutionLimitInt64OverflowIsDropped) {
          "was not dropped";
 }
 
+// recompress_webp is a core filter; convert_to_webp_animated is opt-in. Without
+// the opt-in filter the animated level cannot change the encoded output -- it
+// settles at the lossless/alpha level, which encodes identically -- so taking it
+// would split the metadata cache key and force a re-optimization pass producing
+// identical output. An animated-capable client must therefore key as lossless
+// here.
+TEST_F(ImageRewriteTest, RecompressWebpAloneKeepsLosslessCacheKey) {
+  options()->EnableFilter(RewriteOptions::kRecompressWebp);
+  ClearRewriteDriver();
+  SetupForWebpAnimated();
+  SetDriverRequestHeaders();
+  ASSERT_TRUE(rewrite_driver()->request_properties()->SupportsWebpAnimated());
+
+  const ResourceContext context = MintingResourceContext();
+  EXPECT_EQ(ResourceContext::LIBWEBP_LOSSY_LOSSLESS_ALPHA,
+            context.libwebp_level());
+  EXPECT_EQ("v", ImageUrlEncoder::CacheKeyFromResourceContext(context));
+}
+
+// The opt-in filter is what makes the animated level change the encoded
+// output, so there the distinct cache key is earned.
+TEST_F(ImageRewriteTest, ConvertToWebpAnimatedTakesAnimatedCacheKey) {
+  options()->EnableFilter(RewriteOptions::kRecompressWebp);
+  options()->EnableFilter(RewriteOptions::kConvertToWebpAnimated);
+  ClearRewriteDriver();
+  SetupForWebpAnimated();
+  SetDriverRequestHeaders();
+
+  const ResourceContext context = MintingResourceContext();
+  EXPECT_EQ(ResourceContext::LIBWEBP_ANIMATED, context.libwebp_level());
+  EXPECT_EQ("a", ImageUrlEncoder::CacheKeyFromResourceContext(context));
+}
+
+// This guards an OUTPUT regression, not a cache-key detail.
+//
+// SupportsWebpAnimated() and SupportsWebpLosslessAlpha() are independent:
+// RequestProperties ANDs the user-agent verdict with DownstreamCachingDirectives,
+// which keys animated on the "wa" filter id and lossless/alpha on "ws". No
+// user-agent string alone yields animated-without-lossless, but a downstream
+// cache advertising "wa" and not "ws" does -- as exercised below.
+//
+// Such a request must still settle at LIBWEBP_LOSSY_LOSSLESS_ALPHA. If it fell
+// through to LIBWEBP_LOSSY_ONLY, SetWebpCompressionOptions would clear
+// allow_webp_alpha, and alpha-bearing PNG/GIF images would stop being converted
+// to WebP at all -- different bytes served, not merely a different key.
+TEST_F(ImageRewriteTest, AnimatedCapableWithoutLosslessKeepsAlphaLevel) {
+  options()->EnableFilter(RewriteOptions::kRecompressWebp);
+  ClearRewriteDriver();
+  SetupForWebpAnimated();
+  // Advertise animated + jpeg-to-webp, but deliberately NOT lossless ("ws").
+  AddRequestAttribute(kPsaCapabilityList, "wa,jw:");
+  SetDriverRequestHeaders();
+
+  const RequestProperties* request_properties =
+      rewrite_driver()->request_properties();
+  ASSERT_TRUE(request_properties->SupportsWebpAnimated());
+  ASSERT_FALSE(request_properties->SupportsWebpLosslessAlpha());
+
+  const ResourceContext context = MintingResourceContext();
+  EXPECT_EQ(ResourceContext::LIBWEBP_LOSSY_LOSSLESS_ALPHA,
+            context.libwebp_level())
+      << "an animated-capable request must never settle below the "
+         "lossless/alpha level; LIBWEBP_LOSSY_ONLY would drop alpha->WebP "
+         "conversion";
+}
+
+// Companion to the test above: it pins the OTHER side of the predicate, namely
+// that the animated capability lifts a request to the lossless/alpha level ONLY
+// under recompress_webp -- exactly the requests that used to take the animated
+// level -- and not merely because some WebP filter happens to be on.
+//
+// The same animated-capable, not-lossless-capable client is used here, but with
+// recompress_webp OFF and convert_to_webp_lossless ON. Such a request has always
+// settled at LIBWEBP_LOSSY_ONLY, with allow_webp_alpha off. Lifting it to
+// LIBWEBP_LOSSY_LOSSLESS_ALPHA would start emitting alpha WebP where none was
+// emitted before -- an output change, and one a downstream cache that declined
+// to vary on "ws" has explicitly not opted into.
+//
+// So do NOT "simplify" the branch predicate to
+//   (SupportsWebpLosslessAlpha() || SupportsWebpAnimated()) &&
+//   (recompress_webp || convert_to_webp_lossless)
+// however tempting the symmetry looks -- that form is what this test forbids.
+TEST_F(ImageRewriteTest, AnimatedCapableLosslessFilterAloneKeepsLossyOnly) {
+  options()->EnableFilter(RewriteOptions::kConvertToWebpLossless);
+  options()->DisableFilter(RewriteOptions::kRecompressWebp);
+  ClearRewriteDriver();
+  SetupForWebpAnimated();
+  AddRequestAttribute(kPsaCapabilityList, "wa,jw:");
+  SetDriverRequestHeaders();
+
+  const RequestProperties* request_properties =
+      rewrite_driver()->request_properties();
+  ASSERT_TRUE(request_properties->SupportsWebpAnimated());
+  ASSERT_FALSE(request_properties->SupportsWebpLosslessAlpha());
+  ASSERT_TRUE(request_properties->SupportsWebpRewrittenUrls());
+  ASSERT_FALSE(options()->Enabled(RewriteOptions::kRecompressWebp));
+
+  const ResourceContext context = MintingResourceContext();
+  EXPECT_EQ(ResourceContext::LIBWEBP_LOSSY_ONLY, context.libwebp_level())
+      << "without recompress_webp the animated capability must not lift this "
+         "request to the lossless/alpha level; that would turn allow_webp_alpha "
+         "on where it has always been off";
+}
+
+// Companion to the three guards above, pinning the other direction: WebP
+// capability comes from the Accept header and from nothing else. A current
+// Chrome user agent -- the strongest WebP signal a user-agent string can carry,
+// and one the deleted lossless/animated allow lists used to match -- must not
+// produce any WebP level when the request carries no "Accept: image/webp".
+TEST_F(ImageRewriteTest, NoAcceptHeaderMeansNoWebpFromUserAgentAlone) {
+  options()->EnableFilter(RewriteOptions::kRecompressWebp);
+  options()->EnableFilter(RewriteOptions::kConvertToWebpAnimated);
+  ClearRewriteDriver();
+  SetCurrentUserAgent(UserAgentMatcherTestBase::kChrome137UserAgent);
+  SetDriverRequestHeaders();
+
+  const RequestProperties* request_properties =
+      rewrite_driver()->request_properties();
+  EXPECT_FALSE(request_properties->SupportsWebpInPlace());
+  EXPECT_FALSE(request_properties->SupportsWebpRewrittenUrls());
+  EXPECT_FALSE(request_properties->SupportsWebpLosslessAlpha());
+  EXPECT_FALSE(request_properties->SupportsWebpAnimated());
+
+  const ResourceContext context = MintingResourceContext();
+  EXPECT_EQ(ResourceContext::LIBWEBP_NONE, context.libwebp_level());
+}
+
 TEST_F(ImageRewriteTest, AnimatedGifToWebpWithWebpAnimatedUa) {
   options()->EnableFilter(RewriteOptions::kInsertImageDimensions);
   options()->EnableFilter(RewriteOptions::kConvertToWebpAnimated);
@@ -4487,19 +4616,27 @@ TEST_F(ImageRewriteTest, AnimatedGifToWebpWithWebpAnimatedUa) {
                           true);
 }
 
-TEST_F(ImageRewriteTest, AnimatedGifToWebpWithWebpLaUa) {
+// Retargeted from AnimatedGifToWebpWithWebpLaUa, which asserted that a client
+// advertising WebP but not matching the animated user-agent list was denied
+// animated WebP. That distinction no longer exists: "Accept: image/webp" is
+// read as support for every WebP flavour, so the plainest possible WebP client
+// gets the animated conversion too, and only the convert_to_webp_animated
+// filter decides whether it happens (see AnimatedGifToWebpNotEnabled).
+// It is therefore a deliberate near-duplicate of AnimatedGifToWebpWithWebpAnimatedUa
+// above: the pair is the user-agent-invariance pin, and they must stay identical.
+TEST_F(ImageRewriteTest, AnimatedGifToWebpWithPlainWebpAccept) {
   options()->EnableFilter(RewriteOptions::kInsertImageDimensions);
   options()->EnableFilter(RewriteOptions::kConvertToWebpAnimated);
   options()->set_image_recompress_quality(85);
   rewrite_driver()->AddFilters();
-  SetupForWebpLossless();
-  TestSingleRewrite(kCradleAnimation, kContentTypeGif, kContentTypeGif, "",
-                    " width=\"200\" height=\"150\"", false, false);
+  SetupForWebp();
+  TestSingleRewrite(kCradleAnimation, kContentTypeGif, kContentTypeWebp, "",
+                    " width=\"200\" height=\"150\"", true, false);
   TestConversionVariables(0, 0, 0,  // gif
                           0, 0, 0,  // png
                           0, 0, 0,  // jpg
-                          0, 0, 0,  // gif animated
-                          false);
+                          0, 1, 0,  // gif animated
+                          true);
 }
 
 TEST_F(ImageRewriteTest, AnimatedGifToWebpNotEnabled) {

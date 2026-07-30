@@ -33,6 +33,15 @@
 #      page -- each telemetry counter ticks EXACTLY ONCE per client
 #      transaction across the whole run (internal redirects and repeated
 #      phase entries never double-count).
+#  12. the WebBotAuthBotDetection gate (default off). A signed request
+#      presenting a stock browser User-Agent -- the case no user-agent list
+#      can detect -- gets the instrumentation beacon on the DEFAULT server
+#      (gate off: observe-only preserved) and does NOT get it on the
+#      gate-on server. An UNSIGNED request with the same browser
+#      User-Agent keeps the beacon even with the gate on, proving the gate
+#      keys on the signature and not on the directive alone. A fourth probe
+#      signs with the UNREGISTERED kid ("signed-agent" rather than
+#      "<bot>, ed25519-verified") to cover the reader's other verdict branch.
 #
 # Signatures are produced by //pagespeed/kernel/webbotauth:webbotauth_sign_tool,
 # which uses the SAME serializer the verifier checks, so the bytes are
@@ -54,6 +63,8 @@ TOOL="${TOOL:-$WORKSPACE/bazel-bin/pagespeed/kernel/webbotauth/webbotauth_sign_t
 MOD="${MOD:-$WORKSPACE/bazel-bin/pagespeed/nginx/ngx_pagespeed_module.so}"
 NGINX="${NGINX:-/usr/local/src/nginx/objs/nginx}"
 PORT="${PORT:-8999}"
+# Second server, identical except for `WebBotAuthBotDetection on` (check 12).
+PORT2="${PORT2:-$((PORT + 10))}"
 KID="${KID:-test-key-1}"
 BOT="${BOT:-testbot}"
 BASE="${BASE:-/tmp/wba_smoke}"
@@ -65,6 +76,11 @@ done
 rm -rf "$BASE"
 mkdir -p "$BASE"/{www,logs,cache,client_body_temp,proxy_temp,fastcgi_temp,uwsgi_temp,scgi_temp}
 echo "ok" > "$BASE/www/wba-probe"
+# Minimal HTML for the beacon-gate checks: add_instrumentation injects
+# pagespeed.addInstrumentationInit(...) into it unless the client is
+# classified as a bot.
+printf '<html><head><title>b</title></head><body>probe</body></html>\n' \
+  > "$BASE/www/beacon-probe.html"
 
 # Operator key directory (signer public key) + fresh signed/tampered headers.
 # The JWKS carries TWO kids over the same deterministic key: the registered
@@ -157,6 +173,28 @@ http {
     # file), re-entering the precontent phase -- the once-per-transaction
     # guard must keep the verdict and tick each counter exactly once.
     location /dir/ { index index.html; }
+    # Beacon probe: add_instrumentation is scoped to this location so the
+    # checks above keep seeing byte-identical responses.
+    location = /beacon-probe.html {
+      pagespeed EnableFilters add_instrumentation;
+      try_files \$uri =404;
+    }
+    location / { try_files \$uri =404; }
+  }
+
+  # Same configuration, plus the opt-in gate. WebBotAuthBotDetection is
+  # kServerScope, so this server block overrides the default-off value while
+  # inheriting every other WebBotAuth setting from the http block above.
+  server {
+    listen 127.0.0.1:$PORT2;
+    server_name localhost;
+    root $BASE/www;
+    pagespeed WebBotAuthBotDetection on;
+    add_header X-Verified-Bot \$x_verified_bot always;
+    location = /beacon-probe.html {
+      pagespeed EnableFilters add_instrumentation;
+      try_files \$uri =404;
+    }
     location / { try_files \$uri =404; }
   }
 }
@@ -187,6 +225,23 @@ verdict_url() {
 stat() {
   curl -fsS "http://127.0.0.1:$PORT/ngx_pagespeed_statistics" \
     | tr ',' '\n' | sed -n "s/.*\"$1\": *\([0-9][0-9]*\).*/\1/p" | head -1
+}
+
+# Fetch the beacon probe's BODY from a given port and report whether the
+# instrumentation beacon is present. add_instrumentation is the most visible of
+# the six bot-gated consumers: DetermineEnabled disables the filter outright for
+# a bot, so the injected pagespeed.addInstrumentationInit(...) call disappears.
+beacon() {  # beacon <port> [curl args...]
+  local port="$1"; shift
+  # No pipeline: `grep -q` exiting early would SIGPIPE curl, and under
+  # `set -o pipefail` that reads as a failed fetch rather than a missing
+  # beacon -- a false "absent" for the very thing being measured.
+  local body
+  body=$(curl -fsS "$@" "http://127.0.0.1:$port/beacon-probe.html")
+  case "$body" in
+    *addInstrumentationInit*) echo present ;;
+    *) echo absent ;;
+  esac
 }
 
 fail=0
@@ -246,5 +301,41 @@ V_COUNT=$(stat web_bot_auth_verified_signed_requests)
 O_COUNT=$(stat web_bot_auth_other_signature_requests)
 check "verified-counter" "7" "${V_COUNT:-unreadable}"
 check "other-counter   " "1" "${O_COUNT:-unreadable}"
+
+# WebBotAuthBotDetection gate. All three requests present the SAME stock
+# browser User-Agent, so the user-agent heuristic alone classifies every one of
+# them as human; only the signature can tell b1/b2 apart from b3.
+CHROME_UA="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
+# Warm-up: wait until the default (gate-off) server emits the beacon for an
+# ordinary unsigned browser request, so the three measurements below cannot
+# race a cold pagespeed start. Unsigned, so it perturbs no counter (and the
+# counters were read above regardless).
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  [ "$(beacon "$PORT" -H "Host: localhost" -H "User-Agent: $CHROME_UA")" = present ] && break
+  sleep 1
+done
+
+# Signed, gate OFF (default server): observe-only, so the beacon is still
+# emitted. This is the assertion that pins the default.
+b1=$(beacon "$PORT" -H "Host: localhost" -H "User-Agent: $CHROME_UA" \
+     -H "Signature-Agent: $SIG_AGENT" -H "Signature-Input: $S_SIGINPUT" -H "Signature: $S_SIG")
+# Signed, gate ON: classified as an automated client despite the browser
+# User-Agent, so the filter is disabled and the beacon is gone.
+b2=$(beacon "$PORT2" -H "Host: localhost" -H "User-Agent: $CHROME_UA" \
+     -H "Signature-Agent: $SIG_AGENT" -H "Signature-Input: $S_SIGINPUT" -H "Signature: $S_SIG")
+# UNSIGNED, gate ON: no verdict to act on, so nothing changes -- the gate keys
+# on a verified signature, never on the directive by itself.
+b3=$(beacon "$PORT2" -H "Host: localhost" -H "User-Agent: $CHROME_UA")
+# Signed with the UNREGISTERED kid, gate ON: verdict "signed-agent", not
+# "<bot>, ed25519-verified". Exercises the OTHER branch of the verdict reader --
+# b2 above only covers the verified-bot suffix -- and pins that an unregistered
+# but cryptographically valid signer is treated as an automated client too.
+b4=$(beacon "$PORT2" -H "Host: localhost" -H "User-Agent: $CHROME_UA" \
+     -H "Signature-Agent: $SIG_AGENT" -H "Signature-Input: $U_SIGINPUT" -H "Signature: $U_SIG")
+
+check "gate-off-signed " "present" "$b1"
+check "gate-on-signed  " "absent"  "$b2"
+check "gate-on-unsigned" "present" "$b3"
+check "gate-on-unregkid" "absent"  "$b4"
 
 [ "$fail" -eq 0 ] && echo "WEBBOTAUTH SMOKE: PASS" || { echo "WEBBOTAUTH SMOKE: FAIL"; exit 1; }

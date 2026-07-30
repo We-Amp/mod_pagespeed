@@ -282,6 +282,34 @@ pagespeed_cc_test(
     ],
 )
 
+# the design record optimization thread-count policy: the effective-CPU-budget
+# arithmetic (min of online CPUs / affinity mask / cgroup quota), the cgroup
+# file parsing, and the budget formula.  Pure unit test -- no server, no
+# container, no dependence on the host's core count.
+pagespeed_cc_test(
+    name = "optimization_thread_policy_test",
+    srcs = ["optimization_thread_policy_test.cc"],
+    shard_count = 1,
+    deps = [
+        "//pagespeed/system:optimization_thread_policy",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+    ],
+)
+
+# SystemRewriteDriverFactory thread-count autodetection tests: what
+# NumRewriteThreads / NumExpensiveRewriteThreads resolve to on each port
+# shape, and that an explicit setting always wins over the detected default.
+pagespeed_cc_test(
+    name = "system_rewrite_driver_factory_test",
+    srcs = ["system_rewrite_driver_factory_test.cc"],
+    shard_count = 1,
+    deps = [
+        "//pagespeed/system:optimization_thread_policy",
+        "//test/net/instaweb/rewriter:test_base",
+        "//test/pagespeed/system:test_base_core",
+    ],
+)
+
 # SystemRewriteOptions unit tests (incl. the StrictAdminAccess opt-in gate,
 # shared across all server ports). The file was present in the tree but not
 # built by any target; wire it so its cases actually run.

@@ -73,8 +73,15 @@ class TestIPROBasic:
         content_type = response.header("Content-Type")
         assert "image" in content_type.lower(), f"Expected image, got {content_type}"
 
-    def test_webp_for_supported_browsers(self, client: PageSpeedClient, example_root: str):
-        """Images should be served as WebP for supporting browsers."""
+    def test_png_request_with_webp_accept_succeeds(
+        self, client: PageSpeedClient, example_root: str
+    ):
+        """A PNG requested with a WebP Accept header still returns an image.
+
+        The assertion below accepts any image content type, so this does NOT
+        enforce that WebP was served. Proving that needs a poll plus an explicit
+        image/webp assertion -- tracked as a follow-up.
+        """
         response = client.get(
             f"{example_root}/images/sample.png",
             headers={"Accept": "image/webp,image/*,*/*"},
@@ -206,8 +213,16 @@ class TestIPROCacheFlow:
 class TestIPROWebPNegotiation:
     """Test WebP content negotiation for images."""
 
-    def test_ipro_webp_for_supported_browser(self, client: PageSpeedClient, example_root: str):
-        """WebP-capable client may get WebP version of images."""
+    def test_ipro_png_with_webp_accept_is_well_formed_if_webp(
+        self, client: PageSpeedClient, example_root: str
+    ):
+        """A PNG requested with a WebP Accept header returns well-formed bytes.
+
+        Unconditionally this enforces only that an image comes back; the
+        magic-byte check is conditional on the response actually being WebP, so
+        this does NOT enforce that WebP was served. Proving that needs a poll
+        plus an unconditional image/webp assertion -- tracked as a follow-up.
+        """
         # First request to trigger optimization
         client.get(
             f"{example_root}/images/sample.png",

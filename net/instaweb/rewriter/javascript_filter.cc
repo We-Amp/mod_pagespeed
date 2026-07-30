@@ -434,13 +434,6 @@ void JavascriptFilter::StartElementImpl(HtmlElement* element) {
       }
       break;
     case ScriptTagScanner::kJavaScriptModule:
-      // Module scripts are minified only by the tokenizer-based minifier;
-      // the legacy minifier predates module syntax and can misparse regex
-      // literals after module-only keywords (e.g. `export default /re/`),
-      // corrupting the script rather than failing cleanly.
-      if (!options->use_experimental_js_minifier()) {
-        break;
-      }
       if (script_src != nullptr) {
         // Unlike classic scripts, kCanonicalizeJavascriptLibraries does not
         // enter the flow here: module fetches are CORS-mode (a canonical CDN
@@ -470,6 +463,18 @@ void JavascriptFilter::StartElementImpl(HtmlElement* element) {
       }
       break;
     case ScriptTagScanner::kUnknownScript: {
+      // Data-only <script> blocks (JSON-LD, JSON data islands, import maps,
+      // speculation rules, templates) also classify as kUnknownScript because
+      // they are not JavaScript, but they are deliberate, well-understood
+      // markup -- not an authoring mistake -- so they must not trip the
+      // "Unrecognized script" diagnostic. Only genuinely unrecognized types
+      // log.
+      HtmlElement::Attribute* type_attr =
+          element->FindAttribute(HtmlName::kType);
+      if (type_attr != nullptr && ScriptTagScanner::IsKnownNonJsScriptType(
+                                      type_attr->DecodedValueOrNull())) {
+        break;
+      }
       GoogleString script_dump = element->ToString();
       driver()->InfoHere("Unrecognized script:'%s'", script_dump.c_str());
       break;
@@ -499,7 +504,6 @@ JavascriptRewriteConfig* JavascriptFilter::InitializeConfig(
                 options->Enabled(RewriteOptions::kRewriteJavascriptInline);
   return new JavascriptRewriteConfig(
       driver->server_context()->statistics(), minify,
-      options->use_experimental_js_minifier(),
       options->javascript_library_identification(),
       driver->server_context()->js_tokenizer_patterns());
 }

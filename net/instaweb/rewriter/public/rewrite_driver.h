@@ -272,6 +272,18 @@ class RewriteDriver : public HtmlParse {
   // This method also sets up the user-agent and device properties.
   void SetRequestHeaders(const RequestHeaders& headers);
 
+  // Records the outcome of Web Bot Auth (RFC 9421 HTTP message signature)
+  // verification for this request; see DeviceProperties::SetWebBotAuthVerdict
+  // for the full contract. A true verdict makes request_properties()->IsBot()
+  // true regardless of the user-agent string; false is "no opinion" and leaves
+  // the user-agent heuristic in charge.
+  //
+  // MUST be called AFTER SetRequestHeaders, which recreates the
+  // RequestProperties object and would discard an earlier verdict. Only a port
+  // that implements Web Bot Auth calls this at all; the others never do, and
+  // their behaviour is byte-identical to before it existed.
+  void SetWebBotAuthVerdict(bool signature_verified_agent);
+
   const RequestHeaders* request_headers() const {
     return request_headers_.get();
   }

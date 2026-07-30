@@ -138,6 +138,13 @@ class SimpleSelector {
   static SimpleSelector* NewId(const UnicodeText& id);
   static SimpleSelector* NewPseudoclass(const UnicodeText& pseudoclass,
                                         const UnicodeText& sep);
+  // A functional pseudo-class (e.g. :where(h2), :nth-child(2n+1)).
+  // function_arguments is the verbatim source text between the parens
+  // (opaque pass-through; the arguments are not parsed into
+  // selector nodes).
+  static SimpleSelector* NewFunctionalPseudoclass(
+      const UnicodeText& pseudoclass, const UnicodeText& sep,
+      const UnicodeText& function_arguments);
   static SimpleSelector* NewLang(const UnicodeText& lang);
 
   // oper is '=' for EXACT_ATTRIBUTE, or the first character of the attribute
@@ -201,6 +208,20 @@ class SimpleSelector {
     DCHECK_EQ(PSEUDOCLASS, type_);
     return attribute_;
   }
+  // Verbatim argument text for a functional pseudo-class (:where(h2) ->
+  // "h2"). Only meaningful when has_function_arguments() is true.
+  // See NewFunctionalPseudoclass.
+  const UnicodeText& function_arguments() const {
+    DCHECK_EQ(PSEUDOCLASS, type_);
+    return function_arguments_;
+  }
+  // True when the pseudo-class was written with a parenthesized argument
+  // list (even an empty one, e.g. :where()), so serialization can re-emit
+  // the parens.
+  bool has_function_arguments() const {
+    DCHECK_EQ(PSEUDOCLASS, type_);
+    return has_function_arguments_;
+  }
 
   // lang accessor
   const UnicodeText& lang() const {
@@ -219,15 +240,29 @@ class SimpleSelector {
 
   UnicodeText attribute_;  // Attribute name, valid for *_ATTRIBUTE, CLASS, ID
   UnicodeText value_;  // Valid for *_ATTRIBUTE, CLASS, ID, PSEUDOCLASS, LANG
+  UnicodeText function_arguments_;  // Valid for PSEUDOCLASS.
+  bool has_function_arguments_;     // Valid for PSEUDOCLASS.
 
   // Private constructors, for use by factory methods
   SimpleSelector(Type type, const UnicodeText& attribute,
                  const UnicodeText& value)
-      : type_(type), attribute_(attribute), value_(value) {}
+      : type_(type),
+        attribute_(attribute),
+        value_(value),
+        has_function_arguments_(false) {}
+  SimpleSelector(Type type, const UnicodeText& attribute,
+                 const UnicodeText& value,
+                 const UnicodeText& function_arguments)
+      : type_(type),
+        attribute_(attribute),
+        value_(value),
+        function_arguments_(function_arguments),
+        has_function_arguments_(true) {}
   SimpleSelector(HtmlTagEnum element_type, const UnicodeText& element_text)
       : type_(ELEMENT_TYPE),
         element_type_(element_type),
-        element_text_(element_text) {}
+        element_text_(element_text),
+        has_function_arguments_(false) {}
 
   // TODO(XXX):
   // DISALLOW_IMPLICIT_CONSTRUCTORS(SimpleSelector);

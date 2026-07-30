@@ -1,11 +1,24 @@
 // Copyright 2026 We-Amp B.V.
 // Licensed under the Apache License, Version 2.0 (the "License").
 //
-// nginx <-> Web-Bot-Auth verifier glue. OBSERVE-ONLY:
-// classifies each request (human / signed-agent / verified-bot / unknown) via
-// the RFC 9421 verifier (pagespeed/kernel/webbotauth) and exposes the verdict
-// as the $x_verified_bot nginx variable. It NEVER blocks and NEVER enforces;
-// it only labels. The feature is OFF by default (the WebBotAuth directive).
+// nginx <-> Web-Bot-Auth verifier glue. OBSERVE-ONLY
+// UNLESS WebBotAuthBotDetection IS ON: classifies each request (human /
+// signed-agent / verified-bot / unknown) via the RFC 9421 verifier
+// (pagespeed/kernel/webbotauth) and exposes the verdict as the
+// $x_verified_bot nginx variable. It NEVER blocks and NEVER enforces; it only
+// labels. The feature is OFF by default (the WebBotAuth directive).
+//
+// The one exception to observe-only is the separate, also default-off
+// WebBotAuthBotDetection directive: with it on, a request whose signature
+// verified is additionally classified as an automated client by PageSpeed's
+// own bot detection (RequestProperties::IsBot), which suppresses the
+// instrumentation, critical-image and critical-CSS beacons and lazyload for
+// that request, skips its background fetches when
+// DisableBackgroundFetchesForBots is on (default off), and logs it as a bot.
+// It still never blocks it and never alters the page's visible content.
+// With WebBotAuthBotDetection off -- the default, and the behaviour every
+// deployment that enabled WebBotAuth for telemetry alone keeps -- the verdict
+// reaches nothing but the $x_verified_bot variable and the opt-in counters.
 //
 // This header is deliberately free of any webbotauth includes so that
 // ngx_pagespeed.cc (compiled by nginx itself for the --add-module path) can
@@ -45,6 +58,24 @@ ngx_int_t ps_rsl_cap_preaccess_handler(ngx_http_request_t* r);
 ngx_int_t ps_x_verified_bot_variable(ngx_http_request_t* r,
                                      ngx_http_variable_value_t* v,
                                      uintptr_t data);
+
+// Reads back the verdict the preaccess handler already stored for this
+// transaction and answers the single question PageSpeed's bot detection needs:
+// did a Web Bot Auth signature actually verify? True only for signed-agent and
+// verified-bot; false for human, for unknown (verification failed), and
+// whenever the handler did not run -- including when WebBotAuth is off.
+//
+// Deliberately one-directional, mirroring DeviceProperties::IsBot: a valid
+// signature proves the client is automated, but neither "no signature" nor
+// "verification failed" is evidence of a human, so the false answer means
+// "no opinion" and simply leaves the user-agent heuristic in charge. Reading
+// "unknown" as bot would also hand any client a one-header way to switch off
+// its own beaconing.
+//
+// Pure read of the stored value -- no crypto, no file read, no allocation on
+// the request path. Callers must additionally check the
+// WebBotAuthBotDetection option before acting on the answer.
+bool ps_webbotauth_signature_verified(ngx_http_request_t* r);
 
 // Registers the opt-in telemetry counters (verified/signed-agent requests +
 // non-web-bot-auth "other signature" requests). Called from

@@ -2180,6 +2180,7 @@ TEST_F(RewriteDriverTest, SetRequestHeadersPopulatesWebpAccept) {
   EXPECT_TRUE(request_properties->SupportsWebpInPlace());
   EXPECT_TRUE(request_properties->SupportsWebpRewrittenUrls());
   EXPECT_TRUE(request_properties->SupportsWebpLosslessAlpha());
+  EXPECT_TRUE(request_properties->SupportsWebpAnimated());
 }
 
 TEST_F(RewriteDriverTest, SetRequestHeadersPopulatesWebpNoAccept) {
@@ -2190,8 +2191,10 @@ TEST_F(RewriteDriverTest, SetRequestHeadersPopulatesWebpNoAccept) {
   const RequestProperties* request_properties =
       rewrite_driver()->request_properties();
   EXPECT_FALSE(request_properties->SupportsWebpInPlace());
+  // The legacy no-Accept carve-out grants the lossy tier only.
   EXPECT_TRUE(request_properties->SupportsWebpRewrittenUrls());
   EXPECT_FALSE(request_properties->SupportsWebpLosslessAlpha());
+  EXPECT_FALSE(request_properties->SupportsWebpAnimated());
 }
 
 // Test classes created for using a managed rewrite driver, so that downstream

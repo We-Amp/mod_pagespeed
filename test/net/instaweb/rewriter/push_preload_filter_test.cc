@@ -119,17 +119,74 @@ TEST_F(PushPreloadFilterTest, BasicOperation) {
                *links[1]);
 }
 
-TEST_F(PushPreloadFilterTest, ModuleScriptNotHinted) {
-  // Module srcs are not collected, so no as=script Link hint is emitted for
-  // them: a plain preload occupies a different preload-cache slot than the
-  // module map fetch and would only double-fetch.
+TEST_F(PushPreloadFilterTest, ModuleScriptHinted) {
+  // Module srcs get rel=modulepreload, which matches the module map fetch;
+  // the older rel=preload; as=script hint occupies a different preload-cache
+  // slot and would only double-fetch. modulepreload needs no as= param (its
+  // destination defaults to script) and no crossorigin (its default
+  // credentials mode already matches a <script type=module>).
   rewrite_driver()->AddFilters();
 
   static const char kInput[] =
       "<link rel=stylesheet href=a.css>"
       "<script type=module src=b.js></script>";
 
-  ValidateNoChanges("module_not_hinted", kInput);
+  ValidateNoChanges("module_hinted", kInput);
+
+  ResetDriver();
+  rewrite_driver()->StartParse(kTestDomain);
+  rewrite_driver()->ParseText("<!doctype html><html>");
+  rewrite_driver()->Flush();  // Run filters
+  ConstStringStarVector links;
+
+  EXPECT_TRUE(rewrite_driver()->response_headers()->Lookup(
+      HttpAttributes::kLink, &links));
+  rewrite_driver()->FinishParse();
+
+  ASSERT_EQ(2, links.size());
+  EXPECT_STREQ("</a.css>; rel=preload; as=style; nopush", *links[0]);
+  EXPECT_STREQ("</b.js>; rel=modulepreload; nopush", *links[1]);
+  EXPECT_EQ(GoogleString::npos, links[1]->find("as="))
+      << "modulepreload must not carry an as= param: " << *links[1];
+  EXPECT_EQ(GoogleString::npos, links[1]->find("crossorigin"))
+      << "modulepreload must not carry a crossorigin param: " << *links[1];
+}
+
+TEST_F(PushPreloadFilterTest, ModuleHintsInterleaveByOrderKey) {
+  // Modules share the one order-key space with everything else, so document
+  // order is preserved across the merge of the separate proto fields.
+  SetResponseWithDefaultHeaders("m.js", kContentTypeJavascript, " var m = 1",
+                                200);
+  rewrite_driver()->AddFilters();
+
+  ValidateNoChanges("module_interleave",
+                    "<script type=module src=m.js></script>"
+                    "<link rel=stylesheet href=a.css>"
+                    "<script src=b.js></script>");
+
+  ResetDriver();
+  rewrite_driver()->StartParse(kTestDomain);
+  rewrite_driver()->ParseText("<!doctype html><html>");
+  rewrite_driver()->Flush();  // Run filters
+  ConstStringStarVector links;
+
+  EXPECT_TRUE(rewrite_driver()->response_headers()->Lookup(
+      HttpAttributes::kLink, &links));
+  rewrite_driver()->FinishParse();
+
+  ASSERT_EQ(3, links.size());
+  EXPECT_STREQ("</m.js>; rel=modulepreload; nopush", *links[0]);
+  EXPECT_STREQ("</a.css>; rel=preload; as=style; nopush", *links[1]);
+  EXPECT_STREQ("</b.js>; rel=preload; as=script; nopush", *links[2]);
+}
+
+TEST_F(PushPreloadFilterTest, ModuleHintUsesRewrittenUrl) {
+  // As for every other dependency, the hint points at the most rewritten URL.
+  options()->EnableFilter(RewriteOptions::kRewriteJavascriptExternal);
+  rewrite_driver()->AddFilters();
+
+  ValidateExpected("module_rewritten", "<script type=module src=b.js></script>",
+                   "<script type=module src=b.js.pagespeed.jm.0.js></script>");
 
   ResetDriver();
   rewrite_driver()->StartParse(kTestDomain);
@@ -142,7 +199,62 @@ TEST_F(PushPreloadFilterTest, ModuleScriptNotHinted) {
   rewrite_driver()->FinishParse();
 
   ASSERT_EQ(1, links.size());
-  EXPECT_STREQ("</a.css>; rel=preload; as=style; nopush", *links[0]);
+  EXPECT_STREQ("</b.js.pagespeed.jm.0.js>; rel=modulepreload; nopush",
+               *links[0]);
+}
+
+TEST_F(PushPreloadFilterTest, ModulesDoNotConsumeTheFontCap) {
+  // The four-hint cap is font-only: modules are uncapped, like CSS and JS,
+  // and must not eat font slots (or have their own count bounded by them).
+  SetResponseWithDefaultHeaders(
+      "many.css", kContentTypeCss,
+      "@font-face { font-family: A; src: url(w1.woff2) format(\"woff2\"); }"
+      "@font-face { font-family: B; src: url(w2.woff2) format(\"woff2\"); }"
+      "@font-face { font-family: C; src: url(w3.woff2) format(\"woff2\"); }"
+      "@font-face { font-family: D; src: url(w4.woff2) format(\"woff2\"); }"
+      "@font-face { font-family: E; src: url(w5.woff2) format(\"woff2\"); }",
+      100);
+  for (int i = 1; i <= 5; ++i) {
+    SetResponseWithDefaultHeaders(StrCat("m", IntegerToString(i), ".js"),
+                                  kContentTypeJavascript, " var m = 1", 200);
+  }
+  rewrite_driver()->AddFilters();
+
+  ValidateNoChanges("modules_and_font_cap",
+                    "<link rel=stylesheet href=many.css>"
+                    "<script type=module src=m1.js></script>"
+                    "<script type=module src=m2.js></script>"
+                    "<script type=module src=m3.js></script>"
+                    "<script type=module src=m4.js></script>"
+                    "<script type=module src=m5.js></script>");
+
+  ResetDriver();
+  rewrite_driver()->StartParse(kTestDomain);
+  rewrite_driver()->ParseText("<!doctype html><html>");
+  rewrite_driver()->Flush();  // Run filters
+  ConstStringStarVector links;
+
+  EXPECT_TRUE(rewrite_driver()->response_headers()->Lookup(
+      HttpAttributes::kLink, &links));
+  rewrite_driver()->FinishParse();
+
+  // 1 stylesheet + 4 of the 5 fonts (the whole cap) + all 5 modules. The
+  // fifth font is declared precisely so a cap-raising regression shows up
+  // here rather than passing silently.
+  ASSERT_EQ(10, links.size());
+  EXPECT_STREQ("</many.css>; rel=preload; as=style; nopush", *links[0]);
+  EXPECT_STREQ("</w4.woff2>; rel=preload; as=font; crossorigin; nopush",
+               *links[4]);
+  for (int i = 1; i <= 5; ++i) {
+    EXPECT_STREQ(
+        StrCat("</m", IntegerToString(i), ".js>; rel=modulepreload; nopush")
+            .c_str(),
+        links[4 + i]->c_str());
+  }
+  for (int i = 0, n = links.size(); i < n; ++i) {
+    EXPECT_EQ(GoogleString::npos, links[i]->find("w5.woff2"))
+        << "The fifth font must not be hinted: " << *links[i];
+  }
 }
 
 TEST_F(PushPreloadFilterTest, Invalidation) {
@@ -460,6 +572,38 @@ TEST_F(PushPreloadFilterTest, OldEntryNewBinary) {
   ASSERT_EQ(2, links.size());
   EXPECT_STREQ("</old.css>; rel=preload; as=style; nopush", *links[0]);
   EXPECT_STREQ("</old.js>; rel=preload; as=script; nopush", *links[1]);
+}
+
+TEST_F(PushPreloadFilterTest, NewEntryModuleFieldOnly) {
+  // The other half of the downgrade contract: an entry that carries only
+  // 'module_dependency' emits exactly the modulepreload hints, nothing else.
+  // A binary predating DEP_MODULE reads this field as unknown and emits
+  // nothing at all, which is r20 behaviour --- never a wrong hint.
+  rewrite_driver()->AddFilters();
+
+  ResetDriver();
+  Dependencies new_deps;
+  Dependency* mod_dep = new_deps.add_module_dependency();
+  mod_dep->set_url("http://test.com/new.js");
+  mod_dep->set_content_type(DEP_MODULE);
+  mod_dep->add_order_key(0);
+  // "dependencies" is kDepProp in dependency_tracker.cc.
+  UpdateInPropertyCache(new_deps, rewrite_driver(),
+                        server_context()->dependencies_cohort(), "dependencies",
+                        true /* write_cohort */);
+
+  ResetDriver();  // Re-read the pcache with the injected entry.
+  rewrite_driver()->StartParse(kTestDomain);
+  rewrite_driver()->ParseText("<!doctype html><html>");
+  rewrite_driver()->Flush();  // Run filters
+  ConstStringStarVector links;
+
+  EXPECT_TRUE(rewrite_driver()->response_headers()->Lookup(
+      HttpAttributes::kLink, &links));
+  rewrite_driver()->FinishParse();
+
+  ASSERT_EQ(1, links.size());
+  EXPECT_STREQ("</new.js>; rel=modulepreload; nopush", *links[0]);
 }
 
 }  // namespace

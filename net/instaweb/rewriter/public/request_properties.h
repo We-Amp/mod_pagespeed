@@ -72,6 +72,10 @@ class RequestProperties {
   bool SupportsAvifLosslessAlpha() const;
   bool SupportsAvifAnimated() const;
   bool IsBot() const;
+  // Forwards the Web Bot Auth verification outcome to the underlying
+  // DeviceProperties object; see device_properties.h for the contract. Only a
+  // true verdict has any effect, and it can only ever make IsBot() true.
+  void SetWebBotAuthVerdict(bool signature_verified_agent);
   UserAgentMatcher::DeviceType GetDeviceType() const;
   bool IsMobile() const;
   bool IsTablet() const;

@@ -102,7 +102,21 @@ class ApacheRewriteDriverFactory : public SystemRewriteDriverFactory {
   bool IsServerThreaded() override;
   int LookupThreadLimit() override;
 
+  // the design record D1.  httpd's configured child-process count, which is the number
+  // of processes that will each build their own optimization worker pools.
+  // Available from post-config onwards, which is where FinalizeThreadCounts()
+  // runs.
+  int ConcurrentProcessCount() override;
+
+  // Apache answers ap_mpm_query() with zeroes (or not at all, if the MPM
+  // module hasn't been loaded yet) until the configuration has been
+  // processed, so thread-count resolution has to be deferred to post-config.
+  // See FinalizeThreadCounts().
+  bool ThreadCountsKnownAtInit() override { return false; }
+
  protected:
+  void LogThreadCountResolution() override;
+
   UrlAsyncFetcher* AllocateFetcher(SystemRewriteOptions* config) override;
 
   // Provide defaults.

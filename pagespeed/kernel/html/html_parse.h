@@ -304,9 +304,12 @@ class HtmlParse {
   }
   HtmlElement* NewElement(HtmlElement* parent, const HtmlName& name);
 
-  // For both versions of AddAttribute
-  // Pass in NULL for value to add an attribute with no value at all
+  // For both versions of AddAttribute:
+  // Pass a default-constructed StringPiece (data() == nullptr) to add an
+  // attribute with no value at all
   //   ex: <script data-pagespeed-no-transform>
+  // Never construct the piece from a null const char*, which is undefined
+  // behavior for std::string_view-backed StringPiece dialects.
   // Pass in "" for value if you want the value to be the empty string
   //   ex: <div style="">
   void AddAttribute(HtmlElement* element, HtmlName::Keyword keyword,
@@ -510,10 +513,11 @@ class HtmlParse {
   bool can_modify_urls() { return can_modify_urls_; }
 
  protected:
-  using FilterVector = std::vector<HtmlFilter*>;
+  using FilterVector = std::vector<std::unique_ptr<HtmlFilter>>;
   using FilterList = std::list<HtmlFilter*>;
   using DeferredNode = std::pair<HtmlNode*, HtmlEventList*>;
-  using NodeToEventListMap = std::map<const HtmlNode*, HtmlEventList*>;
+  using NodeToEventListMap =
+      std::map<const HtmlNode*, std::unique_ptr<HtmlEventList>>;
   using FilterElementMap = std::map<HtmlFilter*, DeferredNode>;
   using NodeSet = std::set<const HtmlNode*>;
 
@@ -633,7 +637,7 @@ class HtmlParse {
   FilterVector event_listeners_;
   SymbolTableSensitive string_table_;
   FilterList filters_;
-  HtmlLexer* lexer_;
+  std::unique_ptr<HtmlLexer> lexer_;
   Arena<HtmlNode> nodes_;
   HtmlEventList queue_;
   HtmlEventListIterator current_;

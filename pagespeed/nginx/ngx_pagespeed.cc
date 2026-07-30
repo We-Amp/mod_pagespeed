@@ -2189,6 +2189,31 @@ RequestRouting::Response ps_route_request(ngx_http_request_t* r) {
 // Forward declaration — defined later in this file.
 bool ps_request_body_to_string_piece(ngx_http_request_t* r, StringPiece* out);
 
+// Feeds the Web-Bot-Auth verdict already computed at PREACCESS into PageSpeed's
+// own bot detection, so a signed agent presenting a browser user-agent is
+// classified as the automated client it is. Gated on the default-off
+// WebBotAuthBotDetection directive: without it, the verdict keeps reaching
+// nothing but $x_verified_bot and the opt-in counters, which is the
+// observe-only contract every existing WebBotAuth deployment relies on.
+//
+// Reads the stored verdict only -- no verification work happens here. Must be
+// called after SetRequestHeaders, which recreates the driver's
+// RequestProperties and would otherwise discard the verdict. Both directives
+// are kServerScope, so the server config is the right place to read them, and
+// it is the same config the preaccess handler and the $x_verified_bot variable
+// consult.
+void ps_apply_webbotauth_verdict(ngx_http_request_t* r, ps_srv_conf_t* cfg_s,
+                                 RewriteDriver* driver) {
+  const NgxRewriteOptions* config = cfg_s->server_context->config();
+  if (config == nullptr || !config->web_bot_auth() ||
+      !config->web_bot_auth_bot_detection()) {
+    return;
+  }
+  if (ps_webbotauth_signature_verified(r)) {
+    driver->SetWebBotAuthVerdict(true);
+  }
+}
+
 ngx_int_t ps_resource_handler(ngx_http_request_t* r, bool html_rewrite,
                               RequestRouting::Response response_category) {
   if (r != r->main) {
@@ -2419,6 +2444,7 @@ ngx_int_t ps_resource_handler(ngx_http_request_t* r, bool html_rewrite,
       }
 
       driver->SetRequestHeaders(*ctx->base_fetch->request_headers());
+      ps_apply_webbotauth_verdict(r, cfg_s, driver);
       driver->set_pagespeed_query_params(pagespeed_query_params);
       driver->set_pagespeed_option_cookies(pagespeed_option_cookies);
       cfg_s->proxy_fetch_factory->StartNewProxyFetch(
@@ -2449,6 +2475,7 @@ ngx_int_t ps_resource_handler(ngx_http_request_t* r, bool html_rewrite,
     }
 
     driver->SetRequestHeaders(*ctx->base_fetch->request_headers());
+    ps_apply_webbotauth_verdict(r, cfg_s, driver);
     driver->set_pagespeed_query_params(pagespeed_query_params);
     driver->set_pagespeed_option_cookies(pagespeed_option_cookies);
 
@@ -2484,6 +2511,7 @@ ngx_int_t ps_resource_handler(ngx_http_request_t* r, bool html_rewrite,
     }
 
     driver->SetRequestHeaders(*ctx->base_fetch->request_headers());
+    ps_apply_webbotauth_verdict(r, cfg_s, driver);
     ctx->driver = driver;
 
     cfg_s->server_context->message_handler()->Message(

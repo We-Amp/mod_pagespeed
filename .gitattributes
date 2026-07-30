@@ -5,3 +5,13 @@
 
 # Prevent CRLF corruption of the CI commit SHA stamp on Windows checkouts.
 GIT_COMMIT text eol=lf
+
+# The html/ documentation archive is not part of the source distribution.
+# It is the mod_pagespeed 1.0 documentation, published unchanged as the /1.0/
+# archive on modpagespeed.com, and shipping it inside a 1.15 source tarball put
+# 82 files describing a different release next to the code they do not
+# describe. It stays in git and stays published; it just stops being packaged.
+# The leading slash anchors the rule to the repo root: without it, the pattern
+# also matches pagespeed/kernel/html/ at depth and `git archive` of the HTML
+# kernel silently produces an empty tarball.
+/html/ export-ignore

@@ -102,25 +102,17 @@ class UserAgentMatcher {
 
   // Returns true if the user agent includes a legacy browser that supports
   // webp, but does not issue Accept:image/webp.  At the moment, this means
-  // only Android 4.0+ (excluding Firefox).
+  // only Android 4.0+ (excluding Firefox).  This is the ONLY UA-derived WebP
+  // signal that remains: which WebP flavours a client can decode (lossy,
+  // lossless/alpha, animated) is read off the Accept: image/webp header in
+  // DeviceProperties, not from any browser-version list here.
   bool LegacyWebp(const StringPiece& user_agent) const;
 
-  // Returns true if the user agent includes a string indicating WebP lossy
-  // or WebP alpha support. If the browser does indeed support WebP, it also
-  // needs to send out an "accept: webp" header.
-  bool SupportsWebpLosslessAlpha(const StringPiece& user_agent) const;
-
-  // Returns true if the user agent includes an animated WebP capable
-  // sub-string. If the browser does indeed support WebP, it also needs to send
-  // out an "accept: webp" header.
-  bool SupportsWebpAnimated(const StringPiece& user_agent) const;
-
-  // AVIF support. Unlike WebP, there is no legacy UA population that supports
-  // AVIF without sending Accept: image/avif, so there is deliberately no
-  // allow/block list and no LegacyAvif() analogue. AVIF support is
-  // strictly Accept-header-driven and is decided in DeviceProperties; these
-  // UA-only queries therefore carry no UA-based signal and report false. They
-  // exist for API parity with the WebP path.
+  // AVIF support. Like WebP above, AVIF capability is decided from the
+  // Accept: image/avif header in DeviceProperties; unlike WebP there is not
+  // even a legacy no-Accept UA population, so there is deliberately no
+  // allow/block list and no LegacyAvif() analogue. These UA-only
+  // queries therefore carry no signal and report false.
   bool SupportsAvifLosslessAlpha(const StringPiece& user_agent) const;
   bool SupportsAvifAnimated(const StringPiece& user_agent) const;
 
@@ -154,8 +146,6 @@ class UserAgentMatcher {
   FastWildcardGroup defer_js_allowlist_;
   FastWildcardGroup defer_js_mobile_allowlist_;
   FastWildcardGroup legacy_webp_;
-  FastWildcardGroup supports_webp_lossless_alpha_;
-  FastWildcardGroup supports_webp_animated_;
   FastWildcardGroup supports_dns_prefetch_;
   FastWildcardGroup mobile_user_agents_;
   FastWildcardGroup tablet_user_agents_;

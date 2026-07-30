@@ -59,7 +59,7 @@ Value::Value(double num, Unit unit)
 
 Value::Value(ValueType ty, const UnicodeText& str)
     : type_(ty), unit_(Unit::EM), color_(0, 0, 0), str_(str) {
-  DCHECK(ty == STRING || ty == URI);
+  DCHECK(ty == STRING || ty == URI || ty == OPERATOR);
 }
 
 Value::Value(const Identifier& identifier)
@@ -129,6 +129,7 @@ bool Value::Equals(const Value& other) const {
       return unit_ == other.unit_ && num_ == other.num_;
     case URI:
     case STRING:
+    case OPERATOR:
       return str_ == other.str_;
     case IDENT:
       if (identifier_.ident() != other.identifier_.ident()) return false;
@@ -336,7 +337,7 @@ const UnicodeText& Value::GetFunctionName() const {
 }
 
 const UnicodeText& Value::GetStringValue() const {
-  DCHECK(type_ == URI || type_ == STRING);
+  DCHECK(type_ == URI || type_ == STRING || type_ == OPERATOR);
   return str_;
 }
 

@@ -494,6 +494,22 @@ TEST_F(CssMinifyTest, MediaRegroupingAroundGroupRules) {
       minified);
 }
 
+TEST_F(CssMinifyTest, MediaBodyStraySemicolon) {
+  // A stray ';' after a rule inside @media is a hand-authoring artifact
+  // browsers ignore. It is now dropped rather than surviving as a verbatim
+  // region, so both rules minify normally.
+  static const char kCss[] =
+      "@media screen {\n"
+      "  .a { top: 0px };\n"
+      "  .b { left: 0px }\n"
+      "}";
+  GoogleString minified;
+  StringWriter writer(&minified);
+  CssMinify minify(&writer, &handler_);
+  EXPECT_TRUE(minify.ParseStylesheet(kCss));
+  EXPECT_STREQ("@media screen{.a{top:0}.b{left:0}}", minified);
+}
+
 TEST_F(CssMinifyTest, RawMediaExpressions) {
   // Raw MQ4 expressions serialize verbatim. Equal raw queries merge into one
   // @media run; unequal raw queries stay separate (order-preserving).

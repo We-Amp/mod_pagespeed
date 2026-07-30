@@ -85,6 +85,18 @@ SimpleSelector* SimpleSelector::NewPseudoclass(const UnicodeText& pseudoclass,
   return new SimpleSelector(SimpleSelector::PSEUDOCLASS, sep, pseudoclass);
 }
 
+SimpleSelector* SimpleSelector::NewFunctionalPseudoclass(
+    const UnicodeText& pseudoclass, const UnicodeText& sep,
+    const UnicodeText& function_arguments) {
+  // Functional pseudo-class argument pass-through: the argument
+  // text between the parens is stored verbatim and re-emitted on
+  // serialization, rather than parsed into selector nodes — no mpp consumer
+  // matches selectors against a DOM, so the arguments only need to survive
+  // the round trip un-mangled.
+  return new SimpleSelector(SimpleSelector::PSEUDOCLASS, sep, pseudoclass,
+                            function_arguments);
+}
+
 SimpleSelector* SimpleSelector::NewLang(const UnicodeText& lang) {
   return new SimpleSelector(SimpleSelector::LANG, UnicodeText(), lang);
 }

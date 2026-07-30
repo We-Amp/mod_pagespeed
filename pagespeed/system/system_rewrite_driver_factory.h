@@ -33,6 +33,7 @@
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/thread/queued_worker_pool.h"
+#include "pagespeed/system/optimization_thread_policy.h"
 
 namespace net_instaweb {
 
@@ -208,13 +209,32 @@ class SystemRewriteDriverFactory : public RewriteDriverFactory {
   }
   const GoogleString& static_asset_prefix() { return static_asset_prefix_; }
 
+  // The resolved counts: what the worker pools will actually be built with.
+  // Only meaningful once thread_counts_finalized(); before that they read as
+  // kAutoThreadCount.
   int num_rewrite_threads() const { return num_rewrite_threads_; }
-  void set_num_rewrite_threads(int x) { num_rewrite_threads_ = x; }
   int num_expensive_rewrite_threads() const {
     return num_expensive_rewrite_threads_;
   }
+
+  // The *configured* counts, as NumRewriteThreads /
+  // NumExpensiveRewriteThreads set them.  kAutoThreadCount (which is what
+  // both `auto` and `0` parse to, and the initial value) means "compute it
+  // from the design record policy".  A positive value always wins over the computed
+  // one, whichever order parsing and detection happen in: setting one after
+  // the counts have been finalized re-resolves them.
+  //
+  // constexpr, not `static const int`, so it has no out-of-class definition to
+  // forget: an in-class-initialized `static const int` still needs one for any
+  // ODR use, and an EXPECT_EQ() or a std::max() against it would fail to link.
+  static constexpr int kAutoThreadCount = 0;
+  void set_num_rewrite_threads(int x) {
+    configured_rewrite_threads_ = x;
+    ReresolveIfFinalized();
+  }
   void set_num_expensive_rewrite_threads(int x) {
-    num_expensive_rewrite_threads_ = x;
+    configured_expensive_rewrite_threads_ = x;
+    ReresolveIfFinalized();
   }
   bool use_per_vhost_statistics() const { return use_per_vhost_statistics_; }
   void set_use_per_vhost_statistics(bool x) { use_per_vhost_statistics_ = x; }
@@ -228,6 +248,12 @@ class SystemRewriteDriverFactory : public RewriteDriverFactory {
   // Check whether the server is threaded.  For example, Nginx uses an event
   // loop and can keep with the default of false, while Apache with a threaded
   // multiprocessing module (MPM) overrides this method to return true.
+  //
+  // Since the design record this no longer feeds the thread-count policy -- request
+  // concurrency is not the constraint on CPU-bound optimization work, and the
+  // divisor that matters is ConcurrentProcessCount().  It is still reported in
+  // the startup log, because it describes the deployment shape an operator is
+  // looking at.
   virtual bool IsServerThreaded() {
     return false;  // Most new servers are non-threaded nowadays.
   }
@@ -235,6 +261,39 @@ class SystemRewriteDriverFactory : public RewriteDriverFactory {
   // Threaded implementing servers should return the maximum number of threads
   // that might be used for handling user requests.
   virtual int LookupThreadLimit() { return 1; }
+
+  // the design record D1.  How many server processes on this machine each build their
+  // own optimization worker pools -- Apache's configured child count, nginx's
+  // worker_processes, the IIS application pool's worker-process count, Envoy's
+  // concurrency.  It is the divisor that keeps the aggregate bounded: without
+  // it a per-process count oversubscribes the machine by exactly the process
+  // count.
+  //
+  // The default is kUnknownProcessConcurrency, and a port that leaves it there
+  // resolves to one thread in each pool and logs that it did.  It deliberately
+  // does not guess a larger number: silently oversubscribing a machine is the
+  // failure mode the design record exists to end.
+  virtual int ConcurrentProcessCount() { return kUnknownProcessConcurrency; }
+
+  // Returns false on platforms that cannot answer IsServerThreaded() /
+  // ConcurrentProcessCount() / LookupThreadLimit() correctly until after
+  // configuration has been processed; such platforms must call
+  // FinalizeThreadCounts() themselves once the answers are available, and
+  // update the cache thread limit with caches()->set_thread_limit().
+  virtual bool ThreadCountsKnownAtInit() { return true; }
+
+  // Runs thread-count resolution if it hasn't run yet.  Platforms that return
+  // false from ThreadCountsKnownAtInit() must call this as soon as
+  // ConcurrentProcessCount() can be answered, and before anything reads the
+  // thread counts.  Idempotent.
+  void FinalizeThreadCounts() { AutoDetectThreadCounts(); }
+
+  // The CPU budget and process-concurrency divisor the resolved counts were
+  // computed from.  Only meaningful once thread_counts_finalized().  Exposed
+  // so ports can report them; the admin/statistics surface is's
+  // follow-up.
+  const EffectiveCpuBudget& cpu_budget() const { return cpu_budget_; }
+  int concurrent_process_count() const { return concurrent_processes_; }
 
  protected:
   // Initializes all the statistics objects created transitively by
@@ -277,13 +336,44 @@ class SystemRewriteDriverFactory : public RewriteDriverFactory {
   FileSystem* DefaultFileSystem() override;
   NamedLockManager* DefaultLockManager() override;
 
-  // Updates num_rewrite_threads_ and num_expensive_rewrite_threads_
-  // with sensible values if they are not explicitly set.
+  // Reads the effective CPU budget and the process-concurrency divisor, then
+  // resolves num_rewrite_threads_ and num_expensive_rewrite_threads_ from the
+  // the design record policy for any count the operator did not set explicitly.
+  // Idempotent; the first call is the one that counts.
   virtual void AutoDetectThreadCounts();
+
+  // Logs the resolved counts and everything they were derived from.
+  //
+  // This is emitted at kWarning, not kInfo, on purpose: Apache's default
+  // LogLevel is warn, and a resolution reported below the default log level is
+  // indistinguishable from one that never happened -- which is a large part of
+  // why the old behaviour went unnoticed for years.  Ports that
+  // can describe their deployment shape in more detail override this.
+  virtual void LogThreadCountResolution();
 
   bool thread_counts_finalized() { return thread_counts_finalized_; }
 
  private:
+  // Applies the design record formula to cpu_budget_ / concurrent_processes_ and
+  // writes the result into num_rewrite_threads_ and
+  // num_expensive_rewrite_threads_, except where the operator configured a
+  // positive count.
+  void ResolveThreadCounts();
+
+  // Called when a directive is set.  If the counts were already resolved --
+  // which happens on the ports that read configuration after Init() -- redo
+  // the resolution so the explicitly configured count wins regardless of
+  // ordering, and report the new answer.
+  void ReresolveIfFinalized();
+
+  // Calls LogThreadCountResolution() unless the resolved pair is what was
+  // logged last.
+  void LogThreadCountResolutionIfChanged();
+
+  // Complains, in every build and not only in debug ones, if a worker pool is
+  // built before thread-count resolution has run.  See the definition.
+  void WarnIfThreadCountsNotFinalized();
+
   // Build global shared-memory statistics, taking ownership.  This is invoked
   // if at least one server context (global or VirtualHost) enables statistics.
   Statistics* SetUpGlobalSharedMemStatistics(
@@ -361,9 +451,25 @@ class SystemRewriteDriverFactory : public RewriteDriverFactory {
   // true iff we ran through AutoDetectThreadCounts().
   bool thread_counts_finalized_;
 
-  // These are <= 0 if we should autodetect.
+  // What the operator configured.  kAutoThreadCount means "apply the
+  // policy"; that is both the initial value and what `auto` and `0` parse to.
+  int configured_rewrite_threads_;
+  int configured_expensive_rewrite_threads_;
+
+  // What the pools will be built with.  kAutoThreadCount until resolution has
+  // run.
   int num_rewrite_threads_;
   int num_expensive_rewrite_threads_;
+
+  // The inputs the resolved counts came from, kept for logging and for
+  // re-resolution when a directive arrives after finalization.
+  EffectiveCpuBudget cpu_budget_;
+  int concurrent_processes_;
+
+  // The last pair LogThreadCountResolution() was called with, so a
+  // re-resolution that changes nothing does not repeat itself.
+  int logged_rewrite_threads_;
+  int logged_expensive_rewrite_threads_;
 
   SystemRewriteDriverFactory(const SystemRewriteDriverFactory&) = delete;
   SystemRewriteDriverFactory& operator=(const SystemRewriteDriverFactory&) =

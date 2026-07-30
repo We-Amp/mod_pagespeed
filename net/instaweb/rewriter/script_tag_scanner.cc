@@ -182,6 +182,13 @@ GoogleString ScriptTagScanner::Normalized(const StringPiece& str) {
   return normal_form;
 }
 
+bool ScriptTagScanner::IsKnownNonJsScriptType(StringPiece type) {
+  const GoogleString normalized = Normalized(type);
+  return normalized == "application/ld+json" ||
+         normalized == "application/json" || normalized == "importmap" ||
+         normalized == "speculationrules" || normalized == "text/template";
+}
+
 bool ScriptTagScanner::HasIntegrityAttribute(const HtmlElement* element) {
   const HtmlElement::AttributeList& attrs = element->attributes();
   for (HtmlElement::AttributeConstIterator i(attrs.begin()), e(attrs.end());

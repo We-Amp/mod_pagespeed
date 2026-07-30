@@ -431,6 +431,29 @@ TEST_F(ScriptTagScannerTest, LangScriptsNormalizeWhitespace) {
   }
 }
 
+TEST_F(ScriptTagScannerTest, IsKnownNonJsScriptType) {
+  // The known data-block script types are recognized after Normalized()
+  // folding (leading/trailing whitespace trimmed, ASCII-lowercased).
+  EXPECT_TRUE(ScriptTagScanner::IsKnownNonJsScriptType("application/ld+json"));
+  EXPECT_TRUE(ScriptTagScanner::IsKnownNonJsScriptType("application/json"));
+  EXPECT_TRUE(ScriptTagScanner::IsKnownNonJsScriptType("importmap"));
+  EXPECT_TRUE(ScriptTagScanner::IsKnownNonJsScriptType("speculationrules"));
+  EXPECT_TRUE(ScriptTagScanner::IsKnownNonJsScriptType("text/template"));
+  EXPECT_TRUE(
+      ScriptTagScanner::IsKnownNonJsScriptType("  Application/LD+JSON\t"));
+  EXPECT_TRUE(ScriptTagScanner::IsKnownNonJsScriptType("IMPORTMAP"));
+
+  // Everything else -- JS mimetypes, module, genuinely unknown types, empty
+  // and null -- is not a known data-block type.
+  EXPECT_FALSE(ScriptTagScanner::IsKnownNonJsScriptType("text/javascript"));
+  EXPECT_FALSE(ScriptTagScanner::IsKnownNonJsScriptType("module"));
+  EXPECT_FALSE(ScriptTagScanner::IsKnownNonJsScriptType("text/x-nope"));
+  EXPECT_FALSE(ScriptTagScanner::IsKnownNonJsScriptType("json"));
+  EXPECT_FALSE(ScriptTagScanner::IsKnownNonJsScriptType("text/json"));
+  EXPECT_FALSE(ScriptTagScanner::IsKnownNonJsScriptType(""));
+  EXPECT_FALSE(ScriptTagScanner::IsKnownNonJsScriptType(StringPiece()));
+}
+
 TEST_F(ScriptTagScannerTest, ForEvent) {
   TestSpec for_event_tests[] = {
       {"for event", ScriptTagScanner::kExecuteForEvent},

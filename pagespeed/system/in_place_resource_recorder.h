@@ -158,6 +158,15 @@ class InPlaceResourceRecorder : public Writer {
   void DroppedDueToSize();
   void DroppedAsUncacheable();
 
+  // Records a specific, non-generic terminal outcome exactly once. The first
+  // such outcome wins, which keeps the per-outcome counters mutually
+  // exclusive and lets DoneAndSetHeaders() add to num_failed_ only when no
+  // specific outcome fired -- so ipro_recorder_failed counts genuine
+  // recording malfunctions (write/inflate error, truncated response) and
+  // nothing else. Returns true if this call recorded the outcome (i.e. it was
+  // the first), false if a prior outcome already claimed this recording.
+  bool RecordSpecificOutcome(Variable* counter);
+
   const GoogleString url_;
   const GoogleString fragment_;
   const RequestHeaders::Properties request_properties_;
@@ -179,6 +188,10 @@ class InPlaceResourceRecorder : public Writer {
   Variable* num_failed_;
   Variable* num_dropped_due_to_load_;
   Variable* num_dropped_due_to_size_;
+  Variable* num_dropped_content_type_;
+  Variable* num_error_status_;
+  Variable* num_skipped_transient_;
+  Variable* num_empty_;
 
   // Track how many simultaneous recordings are underway in this process.  Not
   // used when max_concurrent_recordings_ == 0 (unlimited).
@@ -187,6 +200,11 @@ class InPlaceResourceRecorder : public Writer {
   int status_code_;
   // Something went wrong and this resource shouldn't be saved.
   bool failure_;
+
+  // True once a specific (non-generic) terminal outcome has fired and bumped
+  // its own counter. Guards RecordSpecificOutcome() (first outcome wins) and
+  // tells DoneAndSetHeaders() not to also bump num_failed_.
+  bool specific_outcome_recorded_;
 
   // Track that ConsiderResponseHeaders() is called with full headers
   // exactly once.

@@ -265,7 +265,7 @@ bool ParseContentType(const StringPiece& content_type_str,
   if (semi_split.size() == 0) {
     return false;
   }
-  semi_split[0].CopyToString(mime_type);
+  mime_type->assign(semi_split[0].data(), semi_split[0].size());
   for (int i = 1, n = semi_split.size(); i < n; ++i) {
     StringPieceVector eq_split;
     SplitStringPieceToVector(semi_split[i], "=", &eq_split, false);
@@ -273,7 +273,7 @@ bool ParseContentType(const StringPiece& content_type_str,
       TrimWhitespace(&eq_split[0]);
       if (StringCaseEqual(eq_split[0], "charset")) {
         TrimWhitespace(&eq_split[1]);
-        eq_split[1].CopyToString(charset);
+        charset->assign(eq_split[1].data(), eq_split[1].size());
         break;
       }
     }
@@ -293,11 +293,19 @@ void MimeTypeListToContentTypeSet(const GoogleString& in,
   SplitStringPieceToVector(in, ",", &strings, true /* omit_empty */);
   for (StringPieceVector::const_iterator i = strings.begin(), e = strings.end();
        i != e; ++i) {
-    const ContentType* ct = MimeTypeToContentType(*i);
+    // Mime-type lists are commonly written with whitespace after the
+    // commas (e.g. "text/html, application/xhtml+xml"); trim each entry
+    // before lookup.
+    StringPiece trimmed(*i);
+    TrimWhitespace(&trimmed);
+    if (trimmed.empty()) {
+      continue;
+    }
+    const ContentType* ct = MimeTypeToContentType(trimmed);
     if (ct == nullptr) {
-      LOG(WARNING) << "'" << *i << "' is not a recognized mime-type.";
+      LOG(WARNING) << "'" << trimmed << "' is not a recognized mime-type.";
     } else {
-      VLOG(1) << "Adding '" << *i << "' to the content-type set.";
+      VLOG(1) << "Adding '" << trimmed << "' to the content-type set.";
       out->insert(ct);
     }
   }

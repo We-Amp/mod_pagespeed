@@ -20,6 +20,8 @@
 #include "pagespeed/kernel/html/html_element.h"
 
 #include <cstdio>
+#include <cstring>
+#include <functional>
 #include <memory>
 
 #include "base/logging.h"
@@ -34,7 +36,7 @@ namespace net_instaweb {
 HtmlElement::HtmlElement(HtmlElement* parent, const HtmlName& name,
                          const HtmlEventListIterator& begin,
                          const HtmlEventListIterator& end)
-    : HtmlNode(parent), data_(new Data(name, begin, end)) {}
+    : HtmlNode(parent), data_(std::make_unique<Data>(name, begin, end)) {}
 
 HtmlElement::~HtmlElement() {}
 
@@ -192,8 +194,14 @@ GoogleString HtmlElement::ToString() const {
 void HtmlElement::DebugPrint() const { puts(ToString().c_str()); }
 
 void HtmlElement::AddAttribute(const Attribute& src_attr) {
-  Attribute* attr = new Attribute(src_attr.name(), src_attr.escaped_value(),
-                                  src_attr.quote_style());
+  // escaped_value() returns nullptr for valueless attributes (e.g.
+  // <tag disabled>); constructing a StringPiece from a null const char*
+  // is undefined behavior, so handle the null case explicitly.
+  const char* escaped_value = src_attr.escaped_value();
+  StringPiece escaped_sp =
+      (escaped_value != nullptr) ? StringPiece(escaped_value) : StringPiece();
+  Attribute* attr =
+      new Attribute(src_attr.name(), escaped_sp, src_attr.quote_style());
   if (src_attr.decoded_value_computed_) {
     attr->decoded_value_computed_ = true;
     attr->decoding_error_ = src_attr.decoding_error_;
@@ -254,11 +262,19 @@ void HtmlElement::Attribute::SetValue(const StringPiece& decoded_value) {
   // is a substring of value_.  This copies the value just prior
   // to deallocation of the old value_.
   const char* escaped_chars = escaped_value_.get();
-  DCHECK(decoded_value.data() + decoded_value.size() < escaped_chars ||
-         escaped_chars + strlen(escaped_chars) < decoded_value.data())
+  // escaped_chars is nullptr for valueless attributes (e.g. <tag disabled>),
+  // and comparing unrelated pointers with operator< is undefined behavior,
+  // so use std::less for the overlap check.
+  DCHECK(escaped_chars == nullptr ||
+         std::less<const char*>()(decoded_value.data() + decoded_value.size(),
+                                  escaped_chars) ||
+         std::less<const char*>()(escaped_chars + strlen(escaped_chars),
+                                  decoded_value.data()))
       << "Setting unescaped value from substring of escaped value.";
   CopyValue(HtmlKeywords::Escape(decoded_value, &buf), &escaped_value_);
   CopyValue(decoded_value, &decoded_value_);
+  decoded_value_computed_ = true;
+  decoding_error_ = false;
 }
 
 void HtmlElement::Attribute::SetEscapedValue(const StringPiece& escaped_value) {
@@ -292,6 +308,13 @@ const char* HtmlElement::Attribute::quote_str() const {
 }
 
 void HtmlElement::Attribute::ComputeDecodedValue() const {
+  if (escaped_value_.get() == nullptr) {
+    // Valueless attribute (e.g. <input disabled>): no value to decode.
+    decoded_value_.reset();
+    decoding_error_ = false;
+    decoded_value_computed_ = true;
+    return;
+  }
   GoogleString buf;
   StringPiece unescaped_value =
       HtmlKeywords::Unescape(escaped_value_.get(), &buf, &decoding_error_);

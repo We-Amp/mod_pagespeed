@@ -57,8 +57,13 @@ class DeviceProperties {
   // Accept header.  We can't tell a proxy cache to distinguish this case using
   // Vary: accept in the result headers, as we can't guarantee we'll see such a
   // header, ever.  So we need to Vary: user-agent or cache-control: private,
-  // and thus restrict it to rewritten urls.
+  // and thus restrict it to rewritten urls.  This is the only WebP accessor
+  // that still consults the user agent, and it grants the lossy tier only.
   bool SupportsWebpRewrittenUrls() const;
+  // Lossless/alpha and animated WebP gate solely on the Accept: image/webp
+  // header, exactly like SupportsWebpInPlace above and the AVIF accessors
+  // below: a client that advertises image/webp is taken to support every WebP
+  // flavour.  No user-agent allow list is consulted.
   bool SupportsWebpLosslessAlpha() const;
   bool SupportsWebpAnimated() const;
   // AVIF capability accessors. Unlike WebP, AVIF has no "legacy no-Accept" UA
@@ -72,6 +77,34 @@ class DeviceProperties {
   bool SupportsAvifLosslessAlpha() const;
   bool SupportsAvifAnimated() const;
   bool IsBot() const;
+  // Records the outcome of Web Bot Auth (RFC 9421 HTTP message signature)
+  // verification for this request. Pass true only for a request whose signature
+  // actually verified -- a signed agent or a registered verified bot. Pass
+  // false, or never call this at all, for everything else.
+  //
+  // Consequences of a true verdict, i.e. everything IsBot() gates:
+  // add_instrumentation is disabled outright, the critical-image and
+  // critical-CSS beacons are suppressed, lazyload_images is disabled,
+  // the defer_javascript family is disabled (js_defer_disabled, js_disable,
+  // defer_iframe, fix_reflow and the support_noscript fallback all gate on
+  // SupportsJsDefer), background fetches are skipped when
+  // DisableBackgroundFetchesForBots is on (default off), and the request is
+  // logged as a bot by LogDeviceInfo.
+  //
+  // The override is deliberately one-directional: a valid signature is a
+  // cryptographic assertion of bot-ness, and never an assertion of humanity.
+  // "No signature material present" and "verification failed" are both far too
+  // common among ordinary bots to be read as evidence of a human, so a false
+  // verdict simply falls through to the user-agent heuristic. IsBot() can
+  // therefore only ever move from false to true because of this call, which
+  // bounds the blast radius to withholding beacons and lazyload from a
+  // misclassified client -- never to serving it something broken.
+  //
+  // Takes a plain bool rather than the webbotauth verdict enum on purpose: the
+  // port binding collapses the enum, so this layer keeps no dependency on
+  // pagespeed/kernel/webbotauth, and ports that do not implement Web Bot Auth
+  // simply never call it.
+  void SetWebBotAuthVerdict(bool signature_verified_agent);
   bool AcceptsGzip() const;
   UserAgentMatcher::DeviceType GetDeviceType() const;
   bool IsMobile() const { return GetDeviceType() == UserAgentMatcher::kMobile; }
@@ -113,10 +146,22 @@ class DeviceProperties {
   // accepts_webp_) NOT reset in SetUserAgent, since AVIF support is a property
   // of the request headers, not of the user-agent string.
   mutable LazyBool accepts_avif_;
+  // Whether Web Bot Auth verification succeeded for this request. Like
+  // accepts_avif_ above, this is a property of the request headers rather than
+  // of the user-agent string, so SetUserAgent must NOT reset it.
+  //
+  // IsBot() consults this ahead of the is_bot_ memo, so IsBot() specifically is
+  // order-independent with respect to SetUserAgent and SetWebBotAuthVerdict.
+  // That guarantee stops at IsBot(): its callers memoise their OWN results
+  // around it (supports_lazyload_images_ and supports_js_defer_ here, their
+  // RequestProperties twins, and SupportsCriticalImagesBeacon
+  // via SupportsImageInlining), so a verdict that arrives after one of those has
+  // first been read is not retroactive. Set the verdict before any consumer
+  // runs. The nginx port does (SetRequestHeaders, then the verdict, both before
+  // the driver starts parsing); any port wiring this up later must too.
+  bool webbotauth_verified_agent_;
   mutable LazyBool accepts_gzip_;
   mutable LazyBool supports_webp_rewritten_urls_;
-  mutable LazyBool supports_webp_lossless_alpha_;
-  mutable LazyBool supports_webp_animated_;
   mutable LazyBool is_bot_;
   mutable LazyBool is_mobile_user_agent_;
   mutable LazyBool supports_split_html_;

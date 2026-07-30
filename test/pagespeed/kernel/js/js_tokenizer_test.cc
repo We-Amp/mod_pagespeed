@@ -46,6 +46,10 @@ class JsTokenizerTest : public testing::Test {
     EXPECT_STREQ(expected_parse_stack, tokenizer_->ParseStackForTest());
   }
 
+  void ExpectSpeculativeOperatorWindow(bool open) {
+    EXPECT_EQ(open, tokenizer_->LastTokenWasSpeculativeOperator());
+  }
+
   void ExpectToken(JsKeywords::Type expected_type, StringPiece expected_token) {
     StringPiece actual_token;
     const JsKeywords::Type actual_type = tokenizer_->NextToken(&actual_token);
@@ -517,6 +521,301 @@ TEST_F(JsTokenizerTest, StrictModeReservedWords) {
   // `return`/`throw` -- byte-safe for its sloppy identifier uses.
   ExpectToken(JsKeywords::kYield, "yield", "Start MVar RetTh");
   ExpectToken(JsKeywords::kOperator, ";");
+  ExpectEndOfInput();
+}
+
+TEST_F(JsTokenizerTest, AwaitRegex) {
+  // "await" acts like a prefix operator; a slash after it starts a regex
+  // literal, not division.
+  BeginTokenizing("return await / x /;");
+  ExpectToken(JsKeywords::kReturn, "return", "Start RetTh");
+  ExpectToken(JsKeywords::kWhitespace, " ");
+  ExpectToken(JsKeywords::kAwait, "await", "Start RetTh Oper");
+  ExpectToken(JsKeywords::kWhitespace, " ");
+  ExpectToken(JsKeywords::kRegex, "/ x /", "Start RetTh Expr");
+  ExpectToken(JsKeywords::kOperator, ";", "Start");
+  ExpectEndOfInput();
+}
+
+TEST_F(JsTokenizerTest, AwaitNoSemicolonInsertion) {
+  // "await" is not a restricted production; a linebreak after it does not
+  // induce semicolon insertion.
+  BeginTokenizing("await\nx");
+  ExpectToken(JsKeywords::kAwait, "await", "Start Oper");
+  ExpectToken(JsKeywords::kLineSeparator, "\n");
+  ExpectToken(JsKeywords::kIdentifier, "x", "Start Expr");
+  ExpectEndOfInput();
+}
+
+TEST_F(JsTokenizerTest, YieldRegex) {
+  // "yield" behaves like return/throw; a slash after it starts a regex
+  // literal, not division.
+  BeginTokenizing("yield / x /;");
+  ExpectToken(JsKeywords::kYield, "yield", "Start RetTh");
+  ExpectToken(JsKeywords::kWhitespace, " ");
+  ExpectToken(JsKeywords::kRegex, "/ x /", "Start RetTh Expr");
+  ExpectToken(JsKeywords::kOperator, ";", "Start");
+  ExpectEndOfInput();
+}
+
+TEST_F(JsTokenizerTest, YieldSemicolonInsertion) {
+  // "yield" is a restricted production, like return/throw: a linebreak after
+  // it induces semicolon insertion.
+  BeginTokenizing("yield\nx");
+  ExpectToken(JsKeywords::kYield, "yield", "Start RetTh");
+  ExpectToken(JsKeywords::kSemiInsert, "\n", "Start");
+  ExpectToken(JsKeywords::kIdentifier, "x", "Start Expr");
+  ExpectEndOfInput();
+}
+
+TEST_F(JsTokenizerTest, ForOfRegex) {
+  // The contextual "of" keyword is still emitted as kIdentifier (so the
+  // minifier preserves the space in "a of"), but it pushes an operator state
+  // so that a following slash begins a regex literal.
+  BeginTokenizing("for(a of / z /)b;");
+  ExpectToken(JsKeywords::kFor, "for", "Start BkKwd");
+  ExpectToken(JsKeywords::kOperator, "(", "Start BkKwd (");
+  ExpectToken(JsKeywords::kIdentifier, "a", "Start BkKwd ( Expr");
+  ExpectToken(JsKeywords::kWhitespace, " ");
+  ExpectToken(JsKeywords::kIdentifier, "of", "Start BkKwd ( Expr Oper");
+  ExpectToken(JsKeywords::kWhitespace, " ");
+  ExpectToken(JsKeywords::kRegex, "/ z /", "Start BkKwd ( Expr");
+  ExpectToken(JsKeywords::kOperator, ")", "Start BkHdr");
+  ExpectToken(JsKeywords::kIdentifier, "b", "Start BkHdr Expr");
+  ExpectToken(JsKeywords::kOperator, ";", "Start");
+  ExpectEndOfInput();
+}
+
+TEST_F(JsTokenizerTest, AwaitAfterPeriod) {
+  // After a period, "await" is an ordinary property name, and a slash after
+  // the member expression is division.
+  BeginTokenizing("x.await/2;");
+  ExpectToken(JsKeywords::kIdentifier, "x", "Start Expr");
+  ExpectToken(JsKeywords::kOperator, ".", "Start Expr .");
+  ExpectToken(JsKeywords::kIdentifier, "await", "Start Expr");
+  ExpectToken(JsKeywords::kOperator, "/", "Start Expr Oper");
+  ExpectToken(JsKeywords::kNumber, "2", "Start Expr");
+  ExpectToken(JsKeywords::kOperator, ";", "Start");
+  ExpectEndOfInput();
+}
+
+TEST_F(JsTokenizerTest, VarAwait) {
+  // Outside an async function, "await" is a legal variable name.  We still
+  // emit kAwait and push an operator state -- an intentional, fail-safe
+  // degradation (see JsMinifyTest.AwaitAsVariableDegradation) -- which is
+  // harmless here.
+  BeginTokenizing("var await=1;");
+  // "var" pushes the declaration state kModuleVarKeyword ("MVar").
+  ExpectToken(JsKeywords::kVar, "var", "Start MVar");
+  ExpectToken(JsKeywords::kWhitespace, " ");
+  ExpectToken(JsKeywords::kAwait, "await", "Start MVar Oper");
+  ExpectToken(JsKeywords::kOperator, "=", "Start MVar Oper");
+  ExpectToken(JsKeywords::kNumber, "1", "Start MVar Expr");
+  ExpectToken(JsKeywords::kOperator, ";", "Start");
+  ExpectEndOfInput();
+}
+
+TEST_F(JsTokenizerTest, SpeculativeRegexCommentDelimiterGuard) {
+  // A regex consumed directly after "await"/"yield" (which may really be
+  // plain identifiers, making the slash division) must neither contain a
+  // comment delimiter nor abut one across its end: reassembly after
+  // whitespace/comment removal could otherwise create "//" or "/*".  The
+  // tokenizer errors, which makes minification fail closed.
+  BeginTokenizing("x = await / 2 // c\n+ y;");
+  ExpectToken(JsKeywords::kIdentifier, "x", "Start Expr");
+  ExpectToken(JsKeywords::kWhitespace, " ");
+  ExpectToken(JsKeywords::kOperator, "=", "Start Expr Oper");
+  ExpectToken(JsKeywords::kWhitespace, " ");
+  ExpectToken(JsKeywords::kAwait, "await", "Start Expr Oper");
+  ExpectToken(JsKeywords::kWhitespace, " ");
+  ExpectError("/ 2 // c\n+ y;");
+}
+
+TEST_F(JsTokenizerTest, SpeculativeRegexGuardIgnoresCharacterClasses) {
+  // The comment-delimiter guard is about REASSEMBLY at the literal's right
+  // boundary, so a `//` inside a character class -- which cannot open a
+  // comment that escapes the verbatim literal -- does not trip it.
+  BeginTokenizing("return await/[//]/g;");
+  ExpectToken(JsKeywords::kReturn, "return", "Start RetTh");
+  ExpectToken(JsKeywords::kWhitespace, " ");
+  ExpectToken(JsKeywords::kAwait, "await", "Start RetTh Oper");
+  ExpectToken(JsKeywords::kRegex, "/[//]/g", "Start RetTh Expr");
+  ExpectToken(JsKeywords::kOperator, ";", "Start");
+  ExpectEndOfInput();
+}
+
+TEST_F(JsTokenizerTest, SpeculativeRegexGuardIgnoresFlags) {
+  // Nor does a comment after a FLAGGED literal: the last byte emitted is a
+  // flag letter, and nothing welds onto that.
+  BeginTokenizing("return await/a/g/*c*/;");
+  ExpectToken(JsKeywords::kReturn, "return", "Start RetTh");
+  ExpectToken(JsKeywords::kWhitespace, " ");
+  ExpectToken(JsKeywords::kAwait, "await", "Start RetTh Oper");
+  ExpectToken(JsKeywords::kRegex, "/a/g", "Start RetTh Expr");
+  ExpectToken(JsKeywords::kComment, "/*c*/", "Start RetTh Expr");
+  ExpectToken(JsKeywords::kOperator, ";", "Start");
+  ExpectEndOfInput();
+}
+
+TEST_F(JsTokenizerTest, SpeculativeOperatorBlockGuard) {
+  // A "{" directly after "await" (which may really be a plain identifier)
+  // must not be committed to the object-literal reading: in the identifier
+  // reading (an ASI-separated statement) the braces are a BLOCK, after which
+  // a slash is a regex rather than division.  The tokenizer errors, which
+  // makes minification fail closed.
+  BeginTokenizing("var await = 1;\nawait\n{ } / x /.test(y);");
+  // "var" pushes the declaration state kModuleVarKeyword ("MVar"); the block
+  // guard after the ASI-separated "await" is unaffected by that state.
+  ExpectToken(JsKeywords::kVar, "var", "Start MVar");
+  ExpectToken(JsKeywords::kWhitespace, " ");
+  ExpectToken(JsKeywords::kAwait, "await", "Start MVar Oper");
+  ExpectToken(JsKeywords::kWhitespace, " ");
+  ExpectToken(JsKeywords::kOperator, "=", "Start MVar Oper");
+  ExpectToken(JsKeywords::kWhitespace, " ");
+  ExpectToken(JsKeywords::kNumber, "1", "Start MVar Expr");
+  ExpectToken(JsKeywords::kOperator, ";", "Start");
+  ExpectToken(JsKeywords::kLineSeparator, "\n");
+  ExpectToken(JsKeywords::kAwait, "await", "Start Oper");
+  ExpectToken(JsKeywords::kLineSeparator, "\n");
+  ExpectError("{ } / x /.test(y);");
+}
+
+TEST_F(JsTokenizerTest, MemberNameAfterModifierIsNotAnOperator) {
+  // A `get`/`set`/`async` modifier leaves a kExpression on the object
+  // literal's brace, and the word after it is the member's NAME, not an
+  // operator: classifying `of` (or `await`/`yield`) as one there would leave
+  // the method's block unmatched and error out a few tokens later.
+  BeginTokenizing("x={get of(){}};");
+  ExpectToken(JsKeywords::kIdentifier, "x", "Start Expr");
+  ExpectToken(JsKeywords::kOperator, "=", "Start Expr Oper");
+  ExpectToken(JsKeywords::kOperator, "{", "Start Expr Oper {");
+  ExpectToken(JsKeywords::kIdentifier, "get", "Start Expr Oper { Expr");
+  ExpectToken(JsKeywords::kWhitespace, " ");
+  ExpectToken(JsKeywords::kIdentifier, "of", "Start Expr Oper { Expr");
+  ExpectToken(JsKeywords::kOperator, "(", "Start Expr Oper { Expr BkKwd (");
+  ExpectToken(JsKeywords::kOperator, ")", "Start Expr Oper { Expr BkHdr");
+  ExpectToken(JsKeywords::kOperator, "{", "Start Expr Oper { Expr BkHdr {");
+  ExpectToken(JsKeywords::kOperator, "}", "Start Expr Oper { Expr");
+  ExpectToken(JsKeywords::kOperator, "}", "Start Expr");
+  ExpectToken(JsKeywords::kOperator, ";", "Start");
+  ExpectEndOfInput();
+}
+
+TEST_F(JsTokenizerTest, ClassMemberNameAfterModifierIsNotAnOperator) {
+  // The same rule inside a class body, where the modifier sits on the class
+  // brace instead.
+  BeginTokenizing("class C{get await(){}}");
+  ExpectToken(JsKeywords::kClass, "class", "Start Cls");
+  ExpectToken(JsKeywords::kWhitespace, " ");
+  ExpectToken(JsKeywords::kIdentifier, "C", "Start Cls");
+  ExpectToken(JsKeywords::kOperator, "{", "Start BkHdr Cls{");
+  ExpectToken(JsKeywords::kIdentifier, "get", "Start BkHdr Cls{ Expr");
+  ExpectToken(JsKeywords::kWhitespace, " ");
+  // `await` in member-name position is emitted as a plain identifier.
+  ExpectToken(JsKeywords::kIdentifier, "await", "Start BkHdr Cls{ Expr");
+  ExpectToken(JsKeywords::kOperator, "(", "Start BkHdr Cls{ Expr BkKwd (");
+  ExpectToken(JsKeywords::kOperator, ")", "Start BkHdr Cls{ Expr BkHdr");
+  ExpectToken(JsKeywords::kOperator, "{", "Start BkHdr Cls{ Expr BkHdr {");
+  ExpectToken(JsKeywords::kOperator, "}", "Start BkHdr Cls{ Expr");
+  ExpectToken(JsKeywords::kOperator, "}", "Start");
+  ExpectEndOfInput();
+}
+
+TEST_F(JsTokenizerTest, GeneratorMethodStarIsABlockKeyword) {
+  // The `*` of a generator method shorthand with a plain name is a generator
+  // marker, exactly like the `*` of `function*`: it pushes a block keyword,
+  // so the name that follows takes the function-name path (which is what
+  // keeps `*await` naming the method) and the parameter list completes into a
+  // block header.  The marker also installs the expression a plain method
+  // name would leave, so the body closes back to the same state and a
+  // following comma is the member separator.
+  BeginTokenizing("x={*await(){}};");
+  ExpectToken(JsKeywords::kIdentifier, "x", "Start Expr");
+  ExpectToken(JsKeywords::kOperator, "=", "Start Expr Oper");
+  ExpectToken(JsKeywords::kOperator, "{", "Start Expr Oper {");
+  ExpectToken(JsKeywords::kOperator, "*", "Start Expr Oper { Expr BkKwd");
+  ExpectToken(JsKeywords::kAwait, "await", "Start Expr Oper { Expr BkKwd");
+  ExpectToken(JsKeywords::kOperator, "(", "Start Expr Oper { Expr BkKwd (");
+  ExpectToken(JsKeywords::kOperator, ")", "Start Expr Oper { Expr BkHdr");
+  ExpectToken(JsKeywords::kOperator, "{", "Start Expr Oper { Expr BkHdr {");
+  ExpectToken(JsKeywords::kOperator, "}", "Start Expr Oper { Expr");
+  ExpectToken(JsKeywords::kOperator, "}", "Start Expr");
+  ExpectToken(JsKeywords::kOperator, ";", "Start");
+  ExpectEndOfInput();
+}
+
+TEST_F(JsTokenizerTest, GeneratorMethodStarWithComputedNameStaysAnOperator) {
+  // ...but only with a plain name.  A computed name would error on the `[`
+  // after a block keyword, so the identifier lookahead keeps it on the
+  // ordinary operator path.
+  BeginTokenizing("x={*[k](){}};");
+  ExpectToken(JsKeywords::kIdentifier, "x", "Start Expr");
+  ExpectToken(JsKeywords::kOperator, "=", "Start Expr Oper");
+  ExpectToken(JsKeywords::kOperator, "{", "Start Expr Oper {");
+  ExpectToken(JsKeywords::kOperator, "*", "Start Expr Oper { Oper");
+  ExpectToken(JsKeywords::kOperator, "[", "Start Expr Oper { Oper [");
+  ExpectToken(JsKeywords::kIdentifier, "k", "Start Expr Oper { Oper [ Expr");
+  ExpectToken(JsKeywords::kOperator, "]", "Start Expr Oper { Expr");
+  ExpectToken(JsKeywords::kOperator, "(", "Start Expr Oper { Expr BkKwd (");
+  ExpectToken(JsKeywords::kOperator, ")", "Start Expr Oper { Expr BkHdr");
+  ExpectToken(JsKeywords::kOperator, "{", "Start Expr Oper { Expr BkHdr {");
+  ExpectToken(JsKeywords::kOperator, "}", "Start Expr Oper { Expr");
+  ExpectToken(JsKeywords::kOperator, "}", "Start Expr");
+  ExpectToken(JsKeywords::kOperator, ";", "Start");
+  ExpectEndOfInput();
+}
+
+TEST_F(JsTokenizerTest, SpeculativeOperatorFollowedBySeparator) {
+  // A `,` or `:` directly after `await` means the word had no operand, so it
+  // was really a plain identifier (all legal sloppy-mode code).  The
+  // separator carve-outs in ConsumeComma/ConsumeColon collapse the
+  // speculative operator into the expression it really is, exactly as the
+  // kReturnThrow path does for `yield`.
+  BeginTokenizing("var await,x;");
+  ExpectToken(JsKeywords::kVar, "var", "Start MVar");
+  ExpectToken(JsKeywords::kWhitespace, " ");
+  ExpectToken(JsKeywords::kAwait, "await", "Start MVar Oper");
+  ExpectToken(JsKeywords::kOperator, ",", "Start MVar");
+  ExpectToken(JsKeywords::kIdentifier, "x", "Start MVar Expr");
+  ExpectToken(JsKeywords::kOperator, ";", "Start");
+  ExpectEndOfInput();
+}
+
+TEST_F(JsTokenizerTest, SpeculativeOperatorFollowedByTernaryColon) {
+  BeginTokenizing("x=c?await:v;");
+  ExpectToken(JsKeywords::kIdentifier, "x", "Start Expr");
+  ExpectToken(JsKeywords::kOperator, "=", "Start Expr Oper");
+  ExpectToken(JsKeywords::kIdentifier, "c", "Start Expr");
+  ExpectToken(JsKeywords::kOperator, "?", "Start Expr ?");
+  ExpectToken(JsKeywords::kAwait, "await", "Start Expr ? Oper");
+  ExpectToken(JsKeywords::kOperator, ":", "Start Expr Oper");
+  ExpectToken(JsKeywords::kIdentifier, "v", "Start Expr");
+  ExpectToken(JsKeywords::kOperator, ";", "Start");
+  ExpectEndOfInput();
+}
+
+TEST_F(JsTokenizerTest, SpeculativeUpdateOperatorKeepsWindow) {
+  // A `++`/`--` consumed while the speculative window is open keeps it open
+  // (`await++` may be a completed postfix UpdateExpression whose following
+  // linebreak inserts a semicolon).  The linebreak arrives as a
+  // kLineSeparator -- the parse stack alone would let the next token
+  // continue -- and the minifier preserves it via
+  // LastTokenWasSpeculativeOperator().
+  BeginTokenizing("await++\nf(x);");
+  ExpectToken(JsKeywords::kAwait, "await", "Start Oper");
+  ExpectToken(JsKeywords::kOperator, "++", "Start Oper");
+  // The carry itself: the window is still open after the update operator...
+  ExpectSpeculativeOperatorWindow(true);
+  ExpectToken(JsKeywords::kLineSeparator, "\n");
+  // ...and survives the whitespace, which is what the minifier consults.
+  ExpectSpeculativeOperatorWindow(true);
+  ExpectToken(JsKeywords::kIdentifier, "f", "Start Expr");
+  // The next significant token closes it.
+  ExpectSpeculativeOperatorWindow(false);
+  ExpectToken(JsKeywords::kOperator, "(", "Start Expr (");
+  ExpectToken(JsKeywords::kIdentifier, "x", "Start Expr ( Expr");
+  ExpectToken(JsKeywords::kOperator, ")", "Start Expr");
+  ExpectToken(JsKeywords::kOperator, ";", "Start");
   ExpectEndOfInput();
 }
 
@@ -2225,6 +2524,9 @@ TEST_F(JsTokenizerTest, LetDeclarationAfterCaseLabel) {
 }
 
 TEST_F(JsTokenizerTest, ForConstDestructuringOf) {
+  // The for-of "of" is treated as a (speculative) binary operator so that a
+  // following slash starts a regex, so "of" pushes a kOperator (see
+  // ForOfRegex).
   BeginTokenizing("for(const {a} of xs){}");
   ExpectToken(JsKeywords::kFor, "for", "Start BkKwd");
   ExpectToken(JsKeywords::kOperator, "(", "Start BkKwd (");
@@ -2234,7 +2536,7 @@ TEST_F(JsTokenizerTest, ForConstDestructuringOf) {
   ExpectToken(JsKeywords::kIdentifier, "a", "Start BkKwd ( MVar { Expr");
   ExpectToken(JsKeywords::kOperator, "}", "Start BkKwd ( MVar Expr");
   ExpectToken(JsKeywords::kWhitespace, " ");
-  ExpectToken(JsKeywords::kIdentifier, "of", "Start BkKwd ( MVar Expr");
+  ExpectToken(JsKeywords::kIdentifier, "of", "Start BkKwd ( MVar Expr Oper");
   ExpectToken(JsKeywords::kWhitespace, " ");
   ExpectToken(JsKeywords::kIdentifier, "xs", "Start BkKwd ( MVar Expr");
   ExpectToken(JsKeywords::kOperator, ")", "Start BkHdr");
@@ -2302,10 +2604,12 @@ TEST_F(JsTokenizerTest, ObjectMethodShorthand) {
   ExpectToken(JsKeywords::kOperator, "{", "Start MVar Other Oper {");
   ExpectToken(JsKeywords::kWhitespace, " ");
   ExpectToken(JsKeywords::kIdentifier, "m", "Start MVar Other Oper { Expr");
-  ExpectToken(JsKeywords::kOperator, "(", "Start MVar Other Oper { Expr BkKwd (");
+  ExpectToken(JsKeywords::kOperator, "(",
+              "Start MVar Other Oper { Expr BkKwd (");
   ExpectToken(JsKeywords::kOperator, ")", "Start MVar Other Oper { Expr BkHdr");
   ExpectToken(JsKeywords::kWhitespace, " ");
-  ExpectToken(JsKeywords::kOperator, "{", "Start MVar Other Oper { Expr BkHdr {");
+  ExpectToken(JsKeywords::kOperator, "{",
+              "Start MVar Other Oper { Expr BkHdr {");
   ExpectToken(JsKeywords::kOperator, "}", "Start MVar Other Oper { Expr");
   ExpectToken(JsKeywords::kWhitespace, " ");
   ExpectToken(JsKeywords::kOperator, "}", "Start MVar Other Expr");
@@ -2328,21 +2632,26 @@ TEST_F(JsTokenizerTest, ObjectGetterSetterMethod) {
   ExpectToken(JsKeywords::kIdentifier, "get", "Start MVar Other Oper { Expr");
   ExpectToken(JsKeywords::kWhitespace, " ");
   ExpectToken(JsKeywords::kIdentifier, "v", "Start MVar Other Oper { Expr");
-  ExpectToken(JsKeywords::kOperator, "(", "Start MVar Other Oper { Expr BkKwd (");
+  ExpectToken(JsKeywords::kOperator, "(",
+              "Start MVar Other Oper { Expr BkKwd (");
   ExpectToken(JsKeywords::kOperator, ")", "Start MVar Other Oper { Expr BkHdr");
   ExpectToken(JsKeywords::kWhitespace, " ");
-  ExpectToken(JsKeywords::kOperator, "{", "Start MVar Other Oper { Expr BkHdr {");
+  ExpectToken(JsKeywords::kOperator, "{",
+              "Start MVar Other Oper { Expr BkHdr {");
   ExpectToken(JsKeywords::kOperator, "}", "Start MVar Other Oper { Expr");
   ExpectToken(JsKeywords::kOperator, ",", "Start MVar Other Oper {");
   ExpectToken(JsKeywords::kWhitespace, " ");
   ExpectToken(JsKeywords::kIdentifier, "set", "Start MVar Other Oper { Expr");
   ExpectToken(JsKeywords::kWhitespace, " ");
   ExpectToken(JsKeywords::kIdentifier, "v", "Start MVar Other Oper { Expr");
-  ExpectToken(JsKeywords::kOperator, "(", "Start MVar Other Oper { Expr BkKwd (");
-  ExpectToken(JsKeywords::kIdentifier, "x", "Start MVar Other Oper { Expr BkKwd ( Expr");
+  ExpectToken(JsKeywords::kOperator, "(",
+              "Start MVar Other Oper { Expr BkKwd (");
+  ExpectToken(JsKeywords::kIdentifier, "x",
+              "Start MVar Other Oper { Expr BkKwd ( Expr");
   ExpectToken(JsKeywords::kOperator, ")", "Start MVar Other Oper { Expr BkHdr");
   ExpectToken(JsKeywords::kWhitespace, " ");
-  ExpectToken(JsKeywords::kOperator, "{", "Start MVar Other Oper { Expr BkHdr {");
+  ExpectToken(JsKeywords::kOperator, "{",
+              "Start MVar Other Oper { Expr BkHdr {");
   ExpectToken(JsKeywords::kOperator, "}", "Start MVar Other Oper { Expr");
   ExpectToken(JsKeywords::kWhitespace, " ");
   ExpectToken(JsKeywords::kOperator, "}", "Start MVar Other Expr");
@@ -2351,9 +2660,14 @@ TEST_F(JsTokenizerTest, ObjectGetterSetterMethod) {
 }
 
 TEST_F(JsTokenizerTest, ObjectAsyncAndStarMethod) {
-  // `async` collapses like `get`/`set`; a leading `*` merges into an
-  // operator that the property name then collapses.  Both reach the same
-  // method gate.
+  // `async` collapses like `get`/`set` and reaches the method gate that way;
+  // a leading `*` before a plain name is instead a generator marker that
+  // pushes a block keyword, exactly like the `*` of `function*`, so the name
+  // and parameter list complete into a block header (see
+  // GeneratorMethodStarIsABlockKeyword).  The token stream is the same
+  // either way; the block-keyword route installs the same name expression
+  // under its block keyword, so both routes close the body back to the
+  // literal's property position.
   BeginTokenizing("var o = { async m() {}, *n() {} };");
   ExpectToken(JsKeywords::kVar, "var", "Start MVar");
   ExpectToken(JsKeywords::kWhitespace, " ");
@@ -2366,19 +2680,25 @@ TEST_F(JsTokenizerTest, ObjectAsyncAndStarMethod) {
   ExpectToken(JsKeywords::kIdentifier, "async", "Start MVar Other Oper { Expr");
   ExpectToken(JsKeywords::kWhitespace, " ");
   ExpectToken(JsKeywords::kIdentifier, "m", "Start MVar Other Oper { Expr");
-  ExpectToken(JsKeywords::kOperator, "(", "Start MVar Other Oper { Expr BkKwd (");
+  ExpectToken(JsKeywords::kOperator, "(",
+              "Start MVar Other Oper { Expr BkKwd (");
   ExpectToken(JsKeywords::kOperator, ")", "Start MVar Other Oper { Expr BkHdr");
   ExpectToken(JsKeywords::kWhitespace, " ");
-  ExpectToken(JsKeywords::kOperator, "{", "Start MVar Other Oper { Expr BkHdr {");
+  ExpectToken(JsKeywords::kOperator, "{",
+              "Start MVar Other Oper { Expr BkHdr {");
   ExpectToken(JsKeywords::kOperator, "}", "Start MVar Other Oper { Expr");
   ExpectToken(JsKeywords::kOperator, ",", "Start MVar Other Oper {");
   ExpectToken(JsKeywords::kWhitespace, " ");
-  ExpectToken(JsKeywords::kOperator, "*", "Start MVar Other Oper { Oper");
-  ExpectToken(JsKeywords::kIdentifier, "n", "Start MVar Other Oper { Expr");
-  ExpectToken(JsKeywords::kOperator, "(", "Start MVar Other Oper { Expr BkKwd (");
+  ExpectToken(JsKeywords::kOperator, "*",
+              "Start MVar Other Oper { Expr BkKwd");
+  ExpectToken(JsKeywords::kIdentifier, "n",
+              "Start MVar Other Oper { Expr BkKwd");
+  ExpectToken(JsKeywords::kOperator, "(",
+              "Start MVar Other Oper { Expr BkKwd (");
   ExpectToken(JsKeywords::kOperator, ")", "Start MVar Other Oper { Expr BkHdr");
   ExpectToken(JsKeywords::kWhitespace, " ");
-  ExpectToken(JsKeywords::kOperator, "{", "Start MVar Other Oper { Expr BkHdr {");
+  ExpectToken(JsKeywords::kOperator, "{",
+              "Start MVar Other Oper { Expr BkHdr {");
   ExpectToken(JsKeywords::kOperator, "}", "Start MVar Other Oper { Expr");
   ExpectToken(JsKeywords::kWhitespace, " ");
   ExpectToken(JsKeywords::kOperator, "}", "Start MVar Other Expr");
@@ -2401,12 +2721,15 @@ TEST_F(JsTokenizerTest, ObjectComputedMethod) {
   ExpectToken(JsKeywords::kIdentifier, "get", "Start MVar Other Oper { Expr");
   ExpectToken(JsKeywords::kWhitespace, " ");
   ExpectToken(JsKeywords::kOperator, "[", "Start MVar Other Oper { Expr [");
-  ExpectToken(JsKeywords::kStringLiteral, "'k'", "Start MVar Other Oper { Expr [ Expr");
+  ExpectToken(JsKeywords::kStringLiteral, "'k'",
+              "Start MVar Other Oper { Expr [ Expr");
   ExpectToken(JsKeywords::kOperator, "]", "Start MVar Other Oper { Expr");
-  ExpectToken(JsKeywords::kOperator, "(", "Start MVar Other Oper { Expr BkKwd (");
+  ExpectToken(JsKeywords::kOperator, "(",
+              "Start MVar Other Oper { Expr BkKwd (");
   ExpectToken(JsKeywords::kOperator, ")", "Start MVar Other Oper { Expr BkHdr");
   ExpectToken(JsKeywords::kWhitespace, " ");
-  ExpectToken(JsKeywords::kOperator, "{", "Start MVar Other Oper { Expr BkHdr {");
+  ExpectToken(JsKeywords::kOperator, "{",
+              "Start MVar Other Oper { Expr BkHdr {");
   ExpectToken(JsKeywords::kOperator, "}", "Start MVar Other Oper { Expr");
   ExpectToken(JsKeywords::kWhitespace, " ");
   ExpectToken(JsKeywords::kOperator, "}", "Start MVar Other Expr");
@@ -2477,10 +2800,12 @@ TEST_F(JsTokenizerTest, ObjectKeywordNamedMethod) {
   ExpectToken(JsKeywords::kOperator, "{", "Start MVar Other Oper {");
   ExpectToken(JsKeywords::kWhitespace, " ");
   ExpectToken(JsKeywords::kIdentifier, "if", "Start MVar Other Oper { Expr");
-  ExpectToken(JsKeywords::kOperator, "(", "Start MVar Other Oper { Expr BkKwd (");
+  ExpectToken(JsKeywords::kOperator, "(",
+              "Start MVar Other Oper { Expr BkKwd (");
   ExpectToken(JsKeywords::kOperator, ")", "Start MVar Other Oper { Expr BkHdr");
   ExpectToken(JsKeywords::kWhitespace, " ");
-  ExpectToken(JsKeywords::kOperator, "{", "Start MVar Other Oper { Expr BkHdr {");
+  ExpectToken(JsKeywords::kOperator, "{",
+              "Start MVar Other Oper { Expr BkHdr {");
   ExpectToken(JsKeywords::kOperator, "}", "Start MVar Other Oper { Expr");
   ExpectToken(JsKeywords::kWhitespace, " ");
   ExpectToken(JsKeywords::kOperator, "}", "Start MVar Other Expr");
@@ -2584,12 +2909,15 @@ TEST_F(JsTokenizerTest, ObjectCallAfterGroupValueIsNotAMethod) {
   ExpectToken(JsKeywords::kWhitespace, " ");
   ExpectToken(JsKeywords::kFunction, "function",
               "Start MVar Other Oper { OVal BkKwd");
-  ExpectToken(JsKeywords::kOperator, "(", "Start MVar Other Oper { OVal BkKwd (");
+  ExpectToken(JsKeywords::kOperator, "(",
+              "Start MVar Other Oper { OVal BkKwd (");
   ExpectToken(JsKeywords::kOperator, ")", "Start MVar Other Oper { OVal BkHdr");
   ExpectToken(JsKeywords::kWhitespace, " ");
-  ExpectToken(JsKeywords::kOperator, "{", "Start MVar Other Oper { OVal BkHdr {");
+  ExpectToken(JsKeywords::kOperator, "{",
+              "Start MVar Other Oper { OVal BkHdr {");
   ExpectToken(JsKeywords::kOperator, "}", "Start MVar Other Oper { OVal Expr");
-  ExpectToken(JsKeywords::kOperator, "(", "Start MVar Other Oper { OVal Expr (");
+  ExpectToken(JsKeywords::kOperator, "(",
+              "Start MVar Other Oper { OVal Expr (");
   ExpectToken(JsKeywords::kOperator, ")", "Start MVar Other Oper { OVal Expr");
   ExpectToken(JsKeywords::kOperator, ",", "Start MVar Other Oper {");
   ExpectToken(JsKeywords::kWhitespace, " ");
@@ -2601,12 +2929,15 @@ TEST_F(JsTokenizerTest, ObjectCallAfterGroupValueIsNotAMethod) {
               "Start MVar Other Oper { OVal ( BkKwd");
   ExpectToken(JsKeywords::kOperator, "(",
               "Start MVar Other Oper { OVal ( BkKwd (");
-  ExpectToken(JsKeywords::kOperator, ")", "Start MVar Other Oper { OVal ( BkHdr");
+  ExpectToken(JsKeywords::kOperator, ")",
+              "Start MVar Other Oper { OVal ( BkHdr");
   ExpectToken(JsKeywords::kOperator, "{",
               "Start MVar Other Oper { OVal ( BkHdr {");
-  ExpectToken(JsKeywords::kOperator, "}", "Start MVar Other Oper { OVal ( Expr");
+  ExpectToken(JsKeywords::kOperator, "}",
+              "Start MVar Other Oper { OVal ( Expr");
   ExpectToken(JsKeywords::kOperator, ")", "Start MVar Other Oper { OVal Expr");
-  ExpectToken(JsKeywords::kOperator, "(", "Start MVar Other Oper { OVal Expr (");
+  ExpectToken(JsKeywords::kOperator, "(",
+              "Start MVar Other Oper { OVal Expr (");
   ExpectToken(JsKeywords::kOperator, ")", "Start MVar Other Oper { OVal Expr");
   ExpectToken(JsKeywords::kWhitespace, " ");
   ExpectToken(JsKeywords::kOperator, "}", "Start MVar Other Expr");
@@ -2767,8 +3098,11 @@ TEST_F(JsTokenizerTest, AsyncGeneratorDeclaration) {
 }
 
 TEST_F(JsTokenizerTest, GeneratorMethod) {
-  // `{ *n() {} }`: the `*` merges into an operator that the name
-  // collapses, and the method gate (object literal + paren) does the rest.
+  // `{ *n() {} }`: the `*` before a plain name is a generator marker that
+  // pushes a block keyword (like `function*`), so the name and parameter list
+  // complete into a block header and the body closes back to the literal's
+  // property position -- the marker installs the same name expression a plain
+  // method leaves, so a following comma is the member separator.
   BeginTokenizing("var o = { *n() {} };");
   ExpectToken(JsKeywords::kVar, "var", "Start MVar");
   ExpectToken(JsKeywords::kWhitespace, " ");
@@ -2778,12 +3112,16 @@ TEST_F(JsTokenizerTest, GeneratorMethod) {
   ExpectToken(JsKeywords::kWhitespace, " ");
   ExpectToken(JsKeywords::kOperator, "{", "Start MVar Other Oper {");
   ExpectToken(JsKeywords::kWhitespace, " ");
-  ExpectToken(JsKeywords::kOperator, "*", "Start MVar Other Oper { Oper");
-  ExpectToken(JsKeywords::kIdentifier, "n", "Start MVar Other Oper { Expr");
-  ExpectToken(JsKeywords::kOperator, "(", "Start MVar Other Oper { Expr BkKwd (");
+  ExpectToken(JsKeywords::kOperator, "*",
+              "Start MVar Other Oper { Expr BkKwd");
+  ExpectToken(JsKeywords::kIdentifier, "n",
+              "Start MVar Other Oper { Expr BkKwd");
+  ExpectToken(JsKeywords::kOperator, "(",
+              "Start MVar Other Oper { Expr BkKwd (");
   ExpectToken(JsKeywords::kOperator, ")", "Start MVar Other Oper { Expr BkHdr");
   ExpectToken(JsKeywords::kWhitespace, " ");
-  ExpectToken(JsKeywords::kOperator, "{", "Start MVar Other Oper { Expr BkHdr {");
+  ExpectToken(JsKeywords::kOperator, "{",
+              "Start MVar Other Oper { Expr BkHdr {");
   ExpectToken(JsKeywords::kOperator, "}", "Start MVar Other Oper { Expr");
   ExpectToken(JsKeywords::kWhitespace, " ");
   ExpectToken(JsKeywords::kOperator, "}", "Start MVar Other Expr");
@@ -2878,39 +3216,51 @@ TEST_F(JsTokenizerTest, RawLineSeparatorInString) {
   // JSON-superset change): the whole literal is one string token, and the
   // line separator inside it must NOT trigger linebreak logic.  (Raw \n
   // or \r in a string stays an error.)
-  BeginTokenizing("var s = 'a\xE2\x80\xA8" "b';");
+  BeginTokenizing(
+      "var s = 'a\xE2\x80\xA8"
+      "b';");
   ExpectToken(JsKeywords::kVar, "var", "Start MVar");
   ExpectToken(JsKeywords::kWhitespace, " ");
   ExpectToken(JsKeywords::kIdentifier, "s", "Start MVar Expr");
   ExpectToken(JsKeywords::kWhitespace, " ");
   ExpectToken(JsKeywords::kOperator, "=", "Start MVar Other Oper");
   ExpectToken(JsKeywords::kWhitespace, " ");
-  ExpectToken(JsKeywords::kStringLiteral, "'a\xE2\x80\xA8" "b'",
+  ExpectToken(JsKeywords::kStringLiteral,
+              "'a\xE2\x80\xA8"
+              "b'",
               "Start MVar Other Expr");
   ExpectToken(JsKeywords::kOperator, ";", "Start");
   ExpectEndOfInput();
 
-  BeginTokenizing("var s = 'a\xE2\x80\xA9" "b';");
+  BeginTokenizing(
+      "var s = 'a\xE2\x80\xA9"
+      "b';");
   ExpectToken(JsKeywords::kVar, "var", "Start MVar");
   ExpectToken(JsKeywords::kWhitespace, " ");
   ExpectToken(JsKeywords::kIdentifier, "s", "Start MVar Expr");
   ExpectToken(JsKeywords::kWhitespace, " ");
   ExpectToken(JsKeywords::kOperator, "=", "Start MVar Other Oper");
   ExpectToken(JsKeywords::kWhitespace, " ");
-  ExpectToken(JsKeywords::kStringLiteral, "'a\xE2\x80\xA9" "b'",
+  ExpectToken(JsKeywords::kStringLiteral,
+              "'a\xE2\x80\xA9"
+              "b'",
               "Start MVar Other Expr");
   ExpectToken(JsKeywords::kOperator, ";", "Start");
   ExpectEndOfInput();
 
   // Same in double quotes.
-  BeginTokenizing("var s = \"a\xE2\x80\xA8" "b\";");
+  BeginTokenizing(
+      "var s = \"a\xE2\x80\xA8"
+      "b\";");
   ExpectToken(JsKeywords::kVar, "var", "Start MVar");
   ExpectToken(JsKeywords::kWhitespace, " ");
   ExpectToken(JsKeywords::kIdentifier, "s", "Start MVar Expr");
   ExpectToken(JsKeywords::kWhitespace, " ");
   ExpectToken(JsKeywords::kOperator, "=", "Start MVar Other Oper");
   ExpectToken(JsKeywords::kWhitespace, " ");
-  ExpectToken(JsKeywords::kStringLiteral, "\"a\xE2\x80\xA8" "b\"",
+  ExpectToken(JsKeywords::kStringLiteral,
+              "\"a\xE2\x80\xA8"
+              "b\"",
               "Start MVar Other Expr");
   ExpectToken(JsKeywords::kOperator, ";", "Start");
   ExpectEndOfInput();
@@ -2984,7 +3334,8 @@ TEST_F(JsTokenizerTest, ArrowBodyReturnParenTernary) {
   ExpectToken(JsKeywords::kWhitespace, " ");
   ExpectToken(JsKeywords::kOperator, "?", "Start Expr => { RetTh Expr ?");
   ExpectToken(JsKeywords::kWhitespace, " ");
-  ExpectToken(JsKeywords::kIdentifier, "b", "Start Expr => { RetTh Expr ? Expr");
+  ExpectToken(JsKeywords::kIdentifier, "b",
+              "Start Expr => { RetTh Expr ? Expr");
   ExpectToken(JsKeywords::kWhitespace, " ");
   ExpectToken(JsKeywords::kOperator, ":", "Start Expr => { RetTh Expr Oper");
   ExpectToken(JsKeywords::kWhitespace, " ");
@@ -2998,7 +3349,9 @@ TEST_F(JsTokenizerTest, ArrowBodyReturnParenTernary) {
 
 TEST_F(JsTokenizerTest, ArrowBodyForOf) {
   // Block keywords inside an arrow body take their keyword paths: the
-  // parenthesized header completes into a block header.
+  // parenthesized header completes into a block header.  As in
+  // ForConstDestructuringOf, the for-of "of" is a speculatively-classified
+  // binary operator, so it pushes a kOperator.
   BeginTokenizing("x = () => { for (x of y) {} };");
   ExpectToken(JsKeywords::kIdentifier, "x", "Start Expr");
   ExpectToken(JsKeywords::kWhitespace, " ");
@@ -3017,7 +3370,8 @@ TEST_F(JsTokenizerTest, ArrowBodyForOf) {
   ExpectToken(JsKeywords::kOperator, "(", "Start Expr => { BkKwd (");
   ExpectToken(JsKeywords::kIdentifier, "x", "Start Expr => { BkKwd ( Expr");
   ExpectToken(JsKeywords::kWhitespace, " ");
-  ExpectToken(JsKeywords::kIdentifier, "of", "Start Expr => { BkKwd ( Expr");
+  ExpectToken(JsKeywords::kIdentifier, "of",
+              "Start Expr => { BkKwd ( Expr Oper");
   ExpectToken(JsKeywords::kWhitespace, " ");
   ExpectToken(JsKeywords::kIdentifier, "y", "Start Expr => { BkKwd ( Expr");
   ExpectToken(JsKeywords::kOperator, ")", "Start Expr => { BkHdr");
@@ -3444,7 +3798,8 @@ TEST_F(JsTokenizerTest, ClassMethodShorthand) {
   ExpectToken(JsKeywords::kWhitespace, " ");
   ExpectToken(JsKeywords::kIdentifier, "v", "Start BkHdr Cls{ Expr");
   ExpectToken(JsKeywords::kOperator, "(", "Start BkHdr Cls{ Expr BkKwd (");
-  ExpectToken(JsKeywords::kIdentifier, "x", "Start BkHdr Cls{ Expr BkKwd ( Expr");
+  ExpectToken(JsKeywords::kIdentifier, "x",
+              "Start BkHdr Cls{ Expr BkKwd ( Expr");
   ExpectToken(JsKeywords::kOperator, ")", "Start BkHdr Cls{ Expr BkHdr");
   ExpectToken(JsKeywords::kWhitespace, " ");
   ExpectToken(JsKeywords::kOperator, "{", "Start BkHdr Cls{ Expr BkHdr {");
@@ -3538,8 +3893,10 @@ TEST_F(JsTokenizerTest, ClassComputedGeneratorAsyncPrivate) {
   ExpectToken(JsKeywords::kOperator, "{", "Start BkHdr Cls{ Expr BkHdr {");
   ExpectToken(JsKeywords::kOperator, "}", "Start BkHdr Cls{ Expr");
   ExpectToken(JsKeywords::kWhitespace, " ");
-  ExpectToken(JsKeywords::kOperator, "*", "Start BkHdr Cls{ Expr Oper");
-  ExpectToken(JsKeywords::kIdentifier, "g", "Start BkHdr Cls{ Expr");
+  // The `*` of a named generator method pushes a block keyword; the
+  // computed name above it keeps the ordinary operator path.
+  ExpectToken(JsKeywords::kOperator, "*", "Start BkHdr Cls{ Expr BkKwd");
+  ExpectToken(JsKeywords::kIdentifier, "g", "Start BkHdr Cls{ Expr BkKwd");
   ExpectToken(JsKeywords::kOperator, "(", "Start BkHdr Cls{ Expr BkKwd (");
   ExpectToken(JsKeywords::kOperator, ")", "Start BkHdr Cls{ Expr BkHdr");
   ExpectToken(JsKeywords::kWhitespace, " ");
@@ -3654,18 +4011,23 @@ TEST_F(JsTokenizerTest, ClassPrivateElements) {
   ExpectToken(JsKeywords::kWhitespace, " ");
   ExpectToken(JsKeywords::kIdentifier, "check", "Start BkHdr Cls{ Expr");
   ExpectToken(JsKeywords::kOperator, "(", "Start BkHdr Cls{ Expr BkKwd (");
-  ExpectToken(JsKeywords::kIdentifier, "o", "Start BkHdr Cls{ Expr BkKwd ( Expr");
+  ExpectToken(JsKeywords::kIdentifier, "o",
+              "Start BkHdr Cls{ Expr BkKwd ( Expr");
   ExpectToken(JsKeywords::kOperator, ")", "Start BkHdr Cls{ Expr BkHdr");
   ExpectToken(JsKeywords::kWhitespace, " ");
   ExpectToken(JsKeywords::kOperator, "{", "Start BkHdr Cls{ Expr BkHdr {");
   ExpectToken(JsKeywords::kWhitespace, " ");
-  ExpectToken(JsKeywords::kReturn, "return", "Start BkHdr Cls{ Expr BkHdr { RetTh");
+  ExpectToken(JsKeywords::kReturn, "return",
+              "Start BkHdr Cls{ Expr BkHdr { RetTh");
   ExpectToken(JsKeywords::kWhitespace, " ");
-  ExpectToken(JsKeywords::kIdentifier, "#x", "Start BkHdr Cls{ Expr BkHdr { RetTh Expr");
+  ExpectToken(JsKeywords::kIdentifier, "#x",
+              "Start BkHdr Cls{ Expr BkHdr { RetTh Expr");
   ExpectToken(JsKeywords::kWhitespace, " ");
-  ExpectToken(JsKeywords::kIn, "in", "Start BkHdr Cls{ Expr BkHdr { RetTh Expr Oper");
+  ExpectToken(JsKeywords::kIn, "in",
+              "Start BkHdr Cls{ Expr BkHdr { RetTh Expr Oper");
   ExpectToken(JsKeywords::kWhitespace, " ");
-  ExpectToken(JsKeywords::kIdentifier, "o", "Start BkHdr Cls{ Expr BkHdr { RetTh Expr");
+  ExpectToken(JsKeywords::kIdentifier, "o",
+              "Start BkHdr Cls{ Expr BkHdr { RetTh Expr");
   ExpectToken(JsKeywords::kOperator, ";", "Start BkHdr Cls{ Expr BkHdr {");
   ExpectToken(JsKeywords::kWhitespace, " ");
   ExpectToken(JsKeywords::kOperator, "}", "Start BkHdr Cls{ Expr");
@@ -3865,18 +4227,24 @@ TEST_F(JsTokenizerTest, ArrowCommaEndsBody) {
   ExpectToken(JsKeywords::kOperator, "(", "Start MVar Other Oper { OVal (");
   ExpectToken(JsKeywords::kOperator, ")", "Start MVar Other Oper { OVal Expr");
   ExpectToken(JsKeywords::kWhitespace, " ");
-  ExpectToken(JsKeywords::kOperator, "=", "Start MVar Other Oper { OVal Expr =>");
-  ExpectToken(JsKeywords::kOperator, ">", "Start MVar Other Oper { OVal Expr =>");
+  ExpectToken(JsKeywords::kOperator, "=",
+              "Start MVar Other Oper { OVal Expr =>");
+  ExpectToken(JsKeywords::kOperator, ">",
+              "Start MVar Other Oper { OVal Expr =>");
   ExpectToken(JsKeywords::kWhitespace, " ");
-  ExpectToken(JsKeywords::kNumber, "1", "Start MVar Other Oper { OVal Expr => Expr");
+  ExpectToken(JsKeywords::kNumber, "1",
+              "Start MVar Other Oper { OVal Expr => Expr");
   ExpectToken(JsKeywords::kOperator, ",", "Start MVar Other Oper {");
   ExpectToken(JsKeywords::kWhitespace, " ");
   ExpectToken(JsKeywords::kIdentifier, "set", "Start MVar Other Oper { Expr");
-  ExpectToken(JsKeywords::kOperator, "(", "Start MVar Other Oper { Expr BkKwd (");
-  ExpectToken(JsKeywords::kIdentifier, "v", "Start MVar Other Oper { Expr BkKwd ( Expr");
+  ExpectToken(JsKeywords::kOperator, "(",
+              "Start MVar Other Oper { Expr BkKwd (");
+  ExpectToken(JsKeywords::kIdentifier, "v",
+              "Start MVar Other Oper { Expr BkKwd ( Expr");
   ExpectToken(JsKeywords::kOperator, ")", "Start MVar Other Oper { Expr BkHdr");
   ExpectToken(JsKeywords::kWhitespace, " ");
-  ExpectToken(JsKeywords::kOperator, "{", "Start MVar Other Oper { Expr BkHdr {");
+  ExpectToken(JsKeywords::kOperator, "{",
+              "Start MVar Other Oper { Expr BkHdr {");
   ExpectToken(JsKeywords::kOperator, "}", "Start MVar Other Oper { Expr");
   ExpectToken(JsKeywords::kWhitespace, " ");
   ExpectToken(JsKeywords::kOperator, "}", "Start MVar Other Expr");
@@ -4062,20 +4430,29 @@ TEST_F(JsTokenizerTest, ClassBodyInsideTemplateInterpolation) {
   ExpectToken(JsKeywords::kWhitespace, " ");
   ExpectToken(JsKeywords::kIdentifier, "A", "Start MVar Other Oper ${ Cls");
   ExpectToken(JsKeywords::kWhitespace, " ");
-  ExpectToken(JsKeywords::kOperator, "{", "Start MVar Other Oper ${ BkHdr Cls{");
+  ExpectToken(JsKeywords::kOperator, "{",
+              "Start MVar Other Oper ${ BkHdr Cls{");
   ExpectToken(JsKeywords::kWhitespace, " ");
-  ExpectToken(JsKeywords::kIdentifier, "m", "Start MVar Other Oper ${ BkHdr Cls{ Expr");
-  ExpectToken(JsKeywords::kOperator, "(", "Start MVar Other Oper ${ BkHdr Cls{ Expr BkKwd (");
-  ExpectToken(JsKeywords::kOperator, ")", "Start MVar Other Oper ${ BkHdr Cls{ Expr BkHdr");
+  ExpectToken(JsKeywords::kIdentifier, "m",
+              "Start MVar Other Oper ${ BkHdr Cls{ Expr");
+  ExpectToken(JsKeywords::kOperator, "(",
+              "Start MVar Other Oper ${ BkHdr Cls{ Expr BkKwd (");
+  ExpectToken(JsKeywords::kOperator, ")",
+              "Start MVar Other Oper ${ BkHdr Cls{ Expr BkHdr");
   ExpectToken(JsKeywords::kWhitespace, " ");
-  ExpectToken(JsKeywords::kOperator, "{", "Start MVar Other Oper ${ BkHdr Cls{ Expr BkHdr {");
-  ExpectToken(JsKeywords::kOperator, "}", "Start MVar Other Oper ${ BkHdr Cls{ Expr");
+  ExpectToken(JsKeywords::kOperator, "{",
+              "Start MVar Other Oper ${ BkHdr Cls{ Expr BkHdr {");
+  ExpectToken(JsKeywords::kOperator, "}",
+              "Start MVar Other Oper ${ BkHdr Cls{ Expr");
   ExpectToken(JsKeywords::kWhitespace, " ");
   ExpectToken(JsKeywords::kOperator, "}", "Start MVar Other Oper ${ Expr");
   ExpectToken(JsKeywords::kWhitespace, " ");
-  ExpectToken(JsKeywords::kTemplateLiteral, "`y${", "Start MVar Other Oper ${ Expr ${");
-  ExpectToken(JsKeywords::kIdentifier, "z", "Start MVar Other Oper ${ Expr ${ Expr");
-  ExpectToken(JsKeywords::kTemplateLiteral, "}`", "Start MVar Other Oper ${ Expr");
+  ExpectToken(JsKeywords::kTemplateLiteral, "`y${",
+              "Start MVar Other Oper ${ Expr ${");
+  ExpectToken(JsKeywords::kIdentifier, "z",
+              "Start MVar Other Oper ${ Expr ${ Expr");
+  ExpectToken(JsKeywords::kTemplateLiteral, "}`",
+              "Start MVar Other Oper ${ Expr");
   ExpectToken(JsKeywords::kWhitespace, " ");
   ExpectToken(JsKeywords::kTemplateLiteral, "}`", "Start MVar Other Expr");
   ExpectToken(JsKeywords::kOperator, ";", "Start");
@@ -5005,6 +5382,116 @@ TEST_F(JsTokenizerTest, NestedArrowBodyAsi) {
   ExpectToken(JsKeywords::kOperator, "}", "Start Expr => Expr");
   ExpectToken(JsKeywords::kSemiInsert, "\n");
   ExpectToken(JsKeywords::kRegex, "/re/g", "Start Expr");
+  ExpectToken(JsKeywords::kOperator, ";", "Start");
+  ExpectEndOfInput();
+}
+
+// The PostfixUpdate* tests below cover the one-shot postfix_update_pending_
+// flag: after a postfix ++/-- the expression is a completed
+// UpdateExpression, to which no call or member access can attach, so a
+// linebreak before `(` or before a `.`-led numeric literal inserts a
+// semicolon even though the generic continuation set contains both.
+// See https://github.com/We-Amp/pagespeed-optimizer/issues/1092
+
+TEST_F(JsTokenizerTest, PostfixUpdateAsiParen) {
+  // The kSemiInsert also proves the flag's lifetime: ConsumeOperator arms
+  // it after Emit() has run for the `++` token, so it survives the
+  // whitespace token and is still set at the ASI consult.
+  BeginTokenizing("a++\n(b);");
+  ExpectToken(JsKeywords::kIdentifier, "a", "Start Expr");
+  ExpectToken(JsKeywords::kOperator, "++", "Start Expr");
+  ExpectToken(JsKeywords::kSemiInsert, "\n");
+  ExpectToken(JsKeywords::kOperator, "(", "Start (");
+  ExpectToken(JsKeywords::kIdentifier, "b", "Start ( Expr");
+  ExpectToken(JsKeywords::kOperator, ")", "Start Expr");
+  ExpectToken(JsKeywords::kOperator, ";", "Start");
+  ExpectEndOfInput();
+}
+
+TEST_F(JsTokenizerTest, PostfixUpdateAsiIndentedParen) {
+  // The whitespace token handed to the ASI check includes the linebreak AND
+  // the next line's indentation: by the time TryInsertLinebreakSemicolon
+  // consults the remaining input, its first byte is the `(` itself, never
+  // a space or tab (the generic continuation regex relies on the same
+  // convention).
+  BeginTokenizing("a++\n  (b);");
+  ExpectToken(JsKeywords::kIdentifier, "a", "Start Expr");
+  ExpectToken(JsKeywords::kOperator, "++", "Start Expr");
+  ExpectToken(JsKeywords::kSemiInsert, "\n  ");
+  ExpectToken(JsKeywords::kOperator, "(", "Start (");
+  ExpectToken(JsKeywords::kIdentifier, "b", "Start ( Expr");
+  ExpectToken(JsKeywords::kOperator, ")", "Start Expr");
+  ExpectToken(JsKeywords::kOperator, ";", "Start");
+  ExpectEndOfInput();
+}
+
+TEST_F(JsTokenizerTest, PostfixUpdateAsiNumericDot) {
+  // `a++\n.5` is `a++; .5;` -- the `.5` is a new statement's numeric
+  // literal, not a member access.
+  BeginTokenizing("a++\n.5;");
+  ExpectToken(JsKeywords::kIdentifier, "a", "Start Expr");
+  ExpectToken(JsKeywords::kOperator, "++", "Start Expr");
+  ExpectToken(JsKeywords::kSemiInsert, "\n");
+  ExpectToken(JsKeywords::kNumber, ".5", "Start Expr");
+  ExpectToken(JsKeywords::kOperator, ";", "Start");
+  ExpectEndOfInput();
+}
+
+TEST_F(JsTokenizerTest, PostfixUpdateAsiCommentCarried) {
+  // A block comment containing a linebreak counts as a line terminator for
+  // ASI, exactly as after return/throw.
+  BeginTokenizing("a++/*\n*/(b);");
+  ExpectToken(JsKeywords::kIdentifier, "a", "Start Expr");
+  ExpectToken(JsKeywords::kOperator, "++", "Start Expr");
+  ExpectToken(JsKeywords::kSemiInsert, "/*\n*/");
+  ExpectToken(JsKeywords::kOperator, "(", "Start (");
+  ExpectToken(JsKeywords::kIdentifier, "b", "Start ( Expr");
+  ExpectToken(JsKeywords::kOperator, ")", "Start Expr");
+  ExpectToken(JsKeywords::kOperator, ";", "Start");
+  ExpectEndOfInput();
+}
+
+TEST_F(JsTokenizerTest, PostfixUpdateAsiOtherStarts) {
+  // `[` is absent from the generic continuation set, so it was already
+  // retained; assert the insertion stays.
+  BeginTokenizing("a++\n[0];");
+  ExpectToken(JsKeywords::kIdentifier, "a", "Start Expr");
+  ExpectToken(JsKeywords::kOperator, "++", "Start Expr");
+  ExpectToken(JsKeywords::kSemiInsert, "\n");
+  ExpectToken(JsKeywords::kOperator, "[", "Start [");
+  ExpectToken(JsKeywords::kNumber, "0", "Start [ Expr");
+  ExpectToken(JsKeywords::kOperator, "]", "Start Expr");
+  ExpectToken(JsKeywords::kOperator, ";", "Start");
+  ExpectEndOfInput();
+}
+
+TEST_F(JsTokenizerTest, PostfixUpdateContinuationStaysOpen) {
+  // A binary operator legally continues the UpdateExpression: the linebreak
+  // stays a mere separator and no semicolon is inserted.
+  BeginTokenizing("a++\n*b;");
+  ExpectToken(JsKeywords::kIdentifier, "a", "Start Expr");
+  ExpectToken(JsKeywords::kOperator, "++", "Start Expr");
+  ExpectToken(JsKeywords::kLineSeparator, "\n");
+  ExpectToken(JsKeywords::kOperator, "*", "Start Expr Oper");
+  ExpectToken(JsKeywords::kIdentifier, "b", "Start Expr");
+  ExpectToken(JsKeywords::kOperator, ";", "Start");
+  ExpectEndOfInput();
+}
+
+TEST_F(JsTokenizerTest, PostfixUpdateFlagClearedByNextToken) {
+  // The flag is one-shot: the next significant token clears it, so after
+  // `a++ +b` the trailing `b` is a general expression again and a linebreak
+  // before `(` is an ordinary call continuation (no insertion).
+  BeginTokenizing("a++ +b\n(c);");
+  ExpectToken(JsKeywords::kIdentifier, "a", "Start Expr");
+  ExpectToken(JsKeywords::kOperator, "++", "Start Expr");
+  ExpectToken(JsKeywords::kWhitespace, " ");
+  ExpectToken(JsKeywords::kOperator, "+", "Start Expr Oper");
+  ExpectToken(JsKeywords::kIdentifier, "b", "Start Expr");
+  ExpectToken(JsKeywords::kLineSeparator, "\n");
+  ExpectToken(JsKeywords::kOperator, "(", "Start Expr (");
+  ExpectToken(JsKeywords::kIdentifier, "c", "Start Expr ( Expr");
+  ExpectToken(JsKeywords::kOperator, ")", "Start Expr");
   ExpectToken(JsKeywords::kOperator, ";", "Start");
   ExpectEndOfInput();
 }

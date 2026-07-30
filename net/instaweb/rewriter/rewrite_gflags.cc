@@ -377,11 +377,6 @@ DEFINE_bool(enable_extended_instrumentation, false,
             "If set to true, additional instrumentation js added to that "
             "page that adds more information to the beacon.");
 
-DEFINE_bool(use_experimental_js_minifier, true,
-            "If set to false, uses the old legacy::MinifyJs-based minifier. "
-            "The legacy minifier is deprecated and will be removed in a "
-            "future release.");
-
 DEFINE_string(blocking_rewrite_key, RewriteOptions::kDefaultBlockingRewriteKey,
               "Enables rewrites to finish before the response is sent to "
               "the client, if X-PSA-Blocking-Rewrite http request header's "
@@ -871,10 +866,6 @@ bool RewriteGflags::SetupOptionsOnly(RewriteOptions* options,
   if (WasExplicitlySet("enable_extended_instrumentation")) {
     options->set_enable_extended_instrumentation(
         FLAGS_enable_extended_instrumentation);
-  }
-  if (WasExplicitlySet("use_experimental_js_minifier")) {
-    options->set_use_experimental_js_minifier(
-        FLAGS_use_experimental_js_minifier);
   }
   if (WasExplicitlySet("enable_cache_purge")) {
     options->set_enable_cache_purge(FLAGS_enable_cache_purge);

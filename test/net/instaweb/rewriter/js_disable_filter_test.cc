@@ -51,6 +51,12 @@ class JsDisableFilterTest : public RewriteTestBase {
  protected:
   void SetUp() override {
     RewriteTestBase::SetUp();
+    // RewriteTestBase sends an empty user agent, which BotChecker classifies as
+    // a bot, and DeviceProperties::SupportsJsDefer withholds the whole
+    // defer_javascript family from bots. Speak as a browser, exactly as
+    // LazyloadImagesFilterTest::SetUp does for the same reason. Individual
+    // tests below override this to exercise the non-browser paths.
+    SetCurrentUserAgent(UserAgentMatcherTestBase::kChrome18UserAgent);
     options()->EnableFilter(RewriteOptions::kDisableJavascript);
     options()->Disallow("*donotmove*");
   }
@@ -342,6 +348,33 @@ TEST_F(JsDisableFilterTest, DisablesScriptOnlyFromFirstSrc) {
       "</script></body>");
 
   ValidateExpected("http://example.com/", input_html, expected);
+}
+
+// End-to-end proof of the #558 gate at the markup layer: an automated client
+// gets the document as authored. Scripts keep their original type (no
+// text/psajs), pick up no data-pagespeed-orig-index, keep their onload=
+// handlers, and -- because support_noscript rides on the same
+// SupportsJsDefer seam -- get no <noscript> redirect banner either. Compare
+// DisablesScriptOnlyFromFirstSrc above, which is the identical input under a
+// browser user agent.
+TEST_F(JsDisableFilterTest, NoDeferMarkupForBots) {
+  options_->EnableFilter(RewriteOptions::kDeferJavascript);
+  const GoogleString input_html =
+      StrCat("<body>", kUnrelatedNoscriptTags,
+             "<script random=\"true\">hi1</script>", kUnrelatedTags,
+             "<img src=\"abc.jpg\" onload=\"foo1('abc');foo2();\">"
+             "<script src=\"1.js\"></script></body>");
+
+  const char* kBotUserAgents[] = {
+      UserAgentMatcherTestBase::kGooglebotUserAgent, "Mediapartners-Google",
+      "Wget/1.21.4",
+      "",  // No user agent at all -- a bot under BotChecker.
+  };
+  for (const char* user_agent : kBotUserAgents) {
+    SCOPED_TRACE(user_agent);
+    SetCurrentUserAgent(user_agent);
+    ValidateNoChanges("bot_useragent", input_html);
+  }
 }
 
 TEST_F(JsDisableFilterTest, AddsMetaTagForIE) {

@@ -83,10 +83,21 @@ const char* kLazyloadImagesBlockedlist[] = {"BlackBerry*CLDC*", "*Opera Mini*",
 // We'll be updating this as and when required.
 // The blockedlist is checked first, then if not in there, the allowlist is
 // checked.
-// Do allow googlebot, since we run defer js for modern browsers.
+// Historically this list read "Do allow googlebot, since we run defer js for
+// modern browsers." That is no longer the effective policy: DeviceProperties::
+// SupportsJsDefer now ANDs in !IsBot(), so *Wget*, *Googlebot* and
+// *Mediapartners-Google* below are unreachable-in-effect -- every client that
+// matches them is classified a bot by BotChecker and never reaches this list at
+// the DeviceProperties layer. A client that does not run PageSpeed's deferral
+// runtime cannot use text/psajs markup at all, so crawlers and fetchers now get
+// the page as authored. The entries are kept rather than deleted so that this
+// remains a policy change at one seam, not a data edit spread across two layers;
+// UserAgentMatcher::SupportsJsDefer is still unit-tested at its own layer and
+// still answers true for them.
 // Note: None of the following should match a mobile UA.
 const char* kDeferJSAllowlist[] = {"*Chrome/*", "*Firefox/*", "*Safari*",
                                    // Plus IE, see code below.
+                                   // Bot entries: dead in effect, see above.
                                    "*Wget*", "*Googlebot*",
                                    "*Mediapartners-Google*"};
 const char* kDeferJSBlockedlist[] = {
@@ -111,10 +122,15 @@ const char* kDeferJSMobileAllowlist[] = {
 //     "Firefox" in the user agent.
 //  2. Recent Opera support WebP, and some Opera have both "Opera" and
 //     "Firefox" in the user agent.
+// This list previously also carried "*Firefox/66.*" .. "*Firefox/71.*". Those
+// entries never took effect: the open-ended "*Firefox/*" entry in
+// kLegacyWebpBlockedlist below is registered after every allow entry and the
+// highest matching index wins, so LegacyWebp() was false for every Firefox
+// regardless. They are gone; see
+// https://github.com/apache/incubator-pagespeed-mod/issues/596 and the
+// UserAgentMatcherTest.DoesntSupportWebp assertions that pin the verdict.
 const char* kLegacyWebpAllowlist[] = {
-    "*Android *",    "*Firefox/66.*", "*Firefox/67.*",
-    "*Firefox/68.*", "*Firefox/69.*", "*Firefox/70.*",
-    "*Firefox/71.*",  // These Firefox versions are webp capable but don´t send webp header
+    "*Android *",
 };
 
 // Based on https://github.com/apache/incubator-pagespeed-mod/issues/978,
@@ -132,46 +148,12 @@ const char* kLegacyWebpBlockedlist[] = {
     "*Firefox/64.*",  // Firefox versions not webp capables
 };
 
-// To determine lossless webp support and animated webp support, we must
-// examine the UA.
-const char* kWebpLosslessAlphaAllowlist[] = {
-    "*Chrome/??.*", "*Chrome/???.*", "*CriOS/??.*",
-    // User agent used only for internal testing.
-    "webp-la", "webp-animated",
-    "*Firefox/*",  // Do this way to permit Firefox webcapable to convert png
-};
-
-const char* kWebpLosslessAlphaBlockedlist[] = {
-    "*Chrome/?.*",   "*Chrome/1?.*",  "*Chrome/20.*",  "*Chrome/21.*",
-    "*Chrome/22.*",  "*CriOS/1?.*",   "*CriOS/20.*",   "*CriOS/21.*",
-    "*CriOS/22.*",   "*CriOS/23.*",   "*CriOS/24.*",   "*CriOS/25.*",
-    "*CriOS/26.*",   "*CriOS/27.*",   "*CriOS/28.*",   "*Firefox/?.*",
-    "*Firefox/1?.*", "*Firefox/2?.*", "*Firefox/3?.*", "*Firefox/4?.*",
-    "*Firefox/5?.*", "*Firefox/60.*", "*Firefox/61.*", "*Firefox/62.*",
-    "*Firefox/63.*",
-    "*Firefox/64.*",  // Black list Firefox not webp capable
-};
-
-// Animated WebP is supported by browsers based on Chromium v32+, including
-// Chrome 32+ and Opera 19+. Because since version 15, Opera has been including
-// "Chrome/VERSION" in the user agent string [1], the test for Chrome 32+ will
-// also cover Opera 19+.
-// [1] https://dev.opera.com/blog/opera-user-agent-strings-opera-15-and-beyond/
-const char* kWebpAnimatedAllowlist[] = {
-    "*Chrome/??.*",
-    "*CriOS/??.*",
-    "webp-animated",  // User agent for internal testing.
-    "*Firefox/*",
-};
-
-const char* kWebpAnimatedBlockedlist[] = {
-    "*Chrome/?.*",   "*Chrome/1?.*",  "*Chrome/2?.*",  "*Chrome/30.*",
-    "*Chrome/31.*",  "*CriOS/?.*",    "*CriOS/1?.*",   "*CriOS/2?.*",
-    "*CriOS/30.*",   "*CriOS/31.*",   "*Firefox/?.*",  "*Firefox/1?.*",
-    "*Firefox/2?.*", "*Firefox/3?.*", "*Firefox/4?.*", "*Firefox/5?.*",
-    "*Firefox/60.*", "*Firefox/61.*", "*Firefox/62.*", "*Firefox/63.*",
-    "*Firefox/64.*",
-};
+// Lossless/alpha and animated WebP used to be decided from hand-maintained
+// browser-version allow/block lists here. They are gone: DeviceProperties now
+// reads both capabilities off the "Accept: image/webp" request header alone,
+// the way AVIF already did. The lists had to be updated on every browser
+// release, went stale on version-digit rollovers, and said nothing at all about
+// a browser that had not been enumerated.
 
 const char* kInsertDnsPrefetchAllowlist[] = {
     "*Chrome/*",
@@ -328,18 +310,6 @@ UserAgentMatcher::UserAgentMatcher()
     legacy_webp_.Disallow(kLegacyWebpBlockedlist[i]);
   }
 
-  for (int i = 0, n = arraysize(kWebpLosslessAlphaAllowlist); i < n; ++i) {
-    supports_webp_lossless_alpha_.Allow(kWebpLosslessAlphaAllowlist[i]);
-  }
-  for (int i = 0, n = arraysize(kWebpLosslessAlphaBlockedlist); i < n; ++i) {
-    supports_webp_lossless_alpha_.Disallow(kWebpLosslessAlphaBlockedlist[i]);
-  }
-  for (int i = 0, n = arraysize(kWebpAnimatedAllowlist); i < n; ++i) {
-    supports_webp_animated_.Allow(kWebpAnimatedAllowlist[i]);
-  }
-  for (int i = 0, n = arraysize(kWebpAnimatedBlockedlist); i < n; ++i) {
-    supports_webp_animated_.Disallow(kWebpAnimatedBlockedlist[i]);
-  }
   for (int i = 0, n = arraysize(kInsertDnsPrefetchAllowlist); i < n; ++i) {
     supports_dns_prefetch_.Allow(kInsertDnsPrefetchAllowlist[i]);
   }
@@ -483,16 +453,6 @@ bool UserAgentMatcher::SupportsJsDefer(const StringPiece& user_agent,
 
 bool UserAgentMatcher::LegacyWebp(const StringPiece& user_agent) const {
   return legacy_webp_.Match(user_agent, false);
-}
-
-bool UserAgentMatcher::SupportsWebpLosslessAlpha(
-    const StringPiece& user_agent) const {
-  return supports_webp_lossless_alpha_.Match(user_agent, false);
-}
-
-bool UserAgentMatcher::SupportsWebpAnimated(
-    const StringPiece& user_agent) const {
-  return supports_webp_animated_.Match(user_agent, false);
 }
 
 // AVIF is strictly Accept-header-driven: there is no legacy UA

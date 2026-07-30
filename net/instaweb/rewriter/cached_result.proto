@@ -160,6 +160,15 @@ message CachedResult {
   // field default (DEP_JAVASCRIPT) and emit as=script for a font (see
   // dependencies.proto).
   repeated Dependency collected_font_dependency = 28;
+
+  // Module script dependencies (content_type == DEP_MODULE). Used by
+  // CollectDependenciesFilter. Module dependencies serialize ONLY into this
+  // field, never into collected_dependency above, so binaries that predate
+  // DEP_MODULE skip them as unknown fields; if stored in the old field,
+  // proto2's closed enums would make an old binary read content_type as the
+  // field default (DEP_JAVASCRIPT) and emit rel=preload; as=script for a
+  // module, which double-fetches (see dependencies.proto).
+  repeated Dependency collected_module_dependency = 29;
 }
 
 // Contains the mapping of input URLs to output URLs.  In the general

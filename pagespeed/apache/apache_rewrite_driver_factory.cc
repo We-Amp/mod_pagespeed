@@ -29,6 +29,7 @@
 #include "pagespeed/apache/apache_config.h"
 #include "pagespeed/apache/apache_httpd_includes.h"
 #include "pagespeed/apache/apache_message_handler.h"
+#include "pagespeed/apache/apache_mpm_detection.h"
 #include "pagespeed/apache/apache_server_context.h"
 #include "pagespeed/apache/apache_thread_system.h"
 #include "pagespeed/apache/apr_timer.h"
@@ -44,6 +45,7 @@
 #include "pagespeed/kernel/thread/libevent_dispatcher.h"
 #include "pagespeed/kernel/thread/pthread_shared_mem.h"
 #include "pagespeed/system/curl_url_async_fetcher.h"
+#include "pagespeed/system/optimization_thread_policy.h"
 #include "pagespeed/system/system_rewrite_options.h"
 
 namespace net_instaweb {
@@ -151,20 +153,47 @@ void ApacheRewriteDriverFactory::SetNeedSchedulerThread() {
 }
 
 bool ApacheRewriteDriverFactory::IsServerThreaded() {
-  // Detect whether we're using a threaded MPM.
-  apr_status_t status;
-  int result = 0, threads = 1;
-  status = ap_mpm_query(AP_MPMQ_IS_THREADED, &result);
-  if (status == APR_SUCCESS &&
-      (result == AP_MPMQ_STATIC || result == AP_MPMQ_DYNAMIC)) {
-    // Number of configured threads.
-    status = ap_mpm_query(AP_MPMQ_MAX_THREADS, &threads);
-    if (status != APR_SUCCESS) {
-      return false;  // Assume non-thready by default.
-    }
+  return IsThreadedFromMpmInfo(QueryMpmThreadInfo());
+}
+
+int ApacheRewriteDriverFactory::ConcurrentProcessCount() {
+  return ProcessConcurrencyFromMpmInfo(QueryMpmProcessInfo());
+}
+
+void ApacheRewriteDriverFactory::LogThreadCountResolution() {
+  // Report the divisor the counts were actually computed from, not a fresh
+  // query: if the two ever disagreed, the log has to name the one that was
+  // used.
+  const int processes = concurrent_process_count();
+
+  // kWarning throughout: Apache's default LogLevel is warn, and a resolution
+  // an operator cannot see is a resolution nobody made.
+  if (processes <= 0) {
+    message_handler()->Message(
+        kWarning,
+        "PageSpeed optimization threads: %d rewrite, %d expensive rewrite "
+        "(per httpd child). Could not read the configured child-process count "
+        "from the MPM, so the minimum was used. If the MPM module is loaded "
+        "after mod_pagespeed, load it first; otherwise set NumRewriteThreads "
+        "and NumExpensiveRewriteThreads explicitly. Effective CPU budget: %d "
+        "whole cores (limited by %s).",
+        num_rewrite_threads(), num_expensive_rewrite_threads(),
+        cpu_budget().effective_cores, CpuBudgetSourceName(cpu_budget().source));
+    return;
   }
 
-  return threads > 1;
+  const MpmThreadInfo thread_info = QueryMpmThreadInfo();
+  message_handler()->Message(
+      kWarning,
+      "PageSpeed optimization threads: %d rewrite, %d expensive rewrite "
+      "(per httpd child). Effective CPU budget: %d whole cores (limited by "
+      "%s); httpd children: %d; MPM: %s (ThreadsPerChild=%d). Override with "
+      "NumRewriteThreads and NumExpensiveRewriteThreads.",
+      num_rewrite_threads(), num_expensive_rewrite_threads(),
+      cpu_budget().effective_cores, CpuBudgetSourceName(cpu_budget().source),
+      processes,
+      IsThreadedFromMpmInfo(thread_info) ? "threaded" : "non-threaded",
+      thread_info.max_threads);
 }
 
 int ApacheRewriteDriverFactory::LookupThreadLimit() {

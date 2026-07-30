@@ -32,6 +32,7 @@
 #include "test/net/instaweb/rewriter/rewrite_test_base.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/html/html_parse_test_base.h"
+#include "test/pagespeed/kernel/http/user_agent_matcher_test_base.h"
 
 namespace net_instaweb {
 
@@ -304,6 +305,15 @@ TEST_F(LocalStorageCacheTest, ImgTooBig) {
 TEST_F(LocalStorageCacheTest, ImgLocalStorageDisabled) {
   options()->ClearSignatureForTesting();
   // Enabling another filter that triggers the NOSCRIPT tag-insertion in HTML.
+  // defer_javascript, and therefore the noscript fallback that rides on it, is
+  // withheld from bots -- and the empty user agent this fixture otherwise sends
+  // is one. This is the only test in this file that depends on the defer
+  // family, so the browser user agent is set here rather than in the fixture,
+  // where it would also perturb the user-agent-dependent image-inlining paths.
+  // TestLocalStorage installs request_headers_ directly, so SetCurrentUserAgent
+  // would not reach the driver.
+  request_headers_.Add(HttpAttributes::kUserAgent,
+                       UserAgentMatcherTestBase::kChrome18UserAgent);
   options()->EnableFilter(RewriteOptions::kDeferJavascript);
   options()->DisableFilter(RewriteOptions::kLocalStorageCache);
   options()->set_in_place_rewriting_enabled(true);

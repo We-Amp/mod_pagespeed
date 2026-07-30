@@ -39,9 +39,8 @@ DeviceProperties::DeviceProperties(UserAgentMatcher* matcher)
       requests_save_data_(kNotSet),
       accepts_webp_(kNotSet),
       accepts_avif_(kNotSet),
+      webbotauth_verified_agent_(false),
       supports_webp_rewritten_urls_(kNotSet),
-      supports_webp_lossless_alpha_(kNotSet),
-      supports_webp_animated_(kNotSet),
       is_bot_(kNotSet),
       is_mobile_user_agent_(kNotSet),
       supports_split_html_(kNotSet),
@@ -61,8 +60,6 @@ void DeviceProperties::SetUserAgent(const StringPiece& user_agent_string) {
   supports_js_defer_ = kNotSet;
   supports_lazyload_images_ = kNotSet;
   supports_webp_rewritten_urls_ = kNotSet;
-  supports_webp_lossless_alpha_ = kNotSet;
-  supports_webp_animated_ = kNotSet;
   is_bot_ = kNotSet;
   is_mobile_user_agent_ = kNotSet;
   supports_split_html_ = kNotSet;
@@ -148,11 +145,24 @@ bool DeviceProperties::SupportsCriticalImagesBeacon() const {
 // Note that the result of the function is cached as supports_js_defer_. This
 // must be cleared before calling the function a second time with a different
 // value for allow_mobile.
+//
+// Bots are excluded, exactly as in SupportsLazyloadImages above. defer_javascript
+// retypes every script to text/psajs, which is inert to any client that does not
+// run PageSpeed's deferral runtime: an automated client would receive a page whose
+// scripts never execute and whose external JavaScript is never even fetched. The
+// UA-matcher allowlist consulted below still names Googlebot, Mediapartners-Google
+// and Wget by hand; the !IsBot() term overrides all three, deliberately -- see the
+// note at kDeferJSAllowlist in user_agent_matcher.cc.
+//
+// The IsBot() term is inside the memo, so (per the ordering note on
+// webbotauth_verified_agent_ in device_properties.h) a Web Bot Auth verdict must be
+// recorded before the first consumer reads this; it is not retroactive.
 bool DeviceProperties::SupportsJsDefer(bool allow_mobile) const {
   if (supports_js_defer_ == kNotSet) {
-    supports_js_defer_ = ua_matcher_->SupportsJsDefer(user_agent_, allow_mobile)
-                             ? kTrue
-                             : kFalse;
+    supports_js_defer_ =
+        (!IsBot() && ua_matcher_->SupportsJsDefer(user_agent_, allow_mobile))
+            ? kTrue
+            : kFalse;
   }
   return (supports_js_defer_ == kTrue);
 }
@@ -164,12 +174,11 @@ bool DeviceProperties::SupportsWebpInPlace() const {
   return (accepts_webp_ == kTrue);
 }
 
-// TODO(huibao): Only use "accept: image/webp" header to determine whether and
-// which format of WebP is supported. Currently there are some browsers which
-// have "accept: image/webp" but only support lossy/lossless format, and some
-// browsers which don't have "accept" header but support lossy format. Once
-// the market share of these browsers is small enough, we can simplify the logic
-// by only checking the "accept" header.
+// The only WebP capability still derived from the user-agent string. It exists
+// for the "webp-capable but sends no Accept: image/webp on this request"
+// population -- historically the Android browser, see kLegacyWebpAllowlist in
+// user_agent_matcher.cc. It grants the lossy tier only; a user agent alone can
+// never reach lossless/alpha or animated (see the two accessors below).
 bool DeviceProperties::SupportsWebpRewrittenUrls() const {
   if (supports_webp_rewritten_urls_ == kNotSet) {
     if ((accepts_webp_ == kTrue) || ua_matcher_->LegacyWebp(user_agent_)) {
@@ -181,28 +190,18 @@ bool DeviceProperties::SupportsWebpRewrittenUrls() const {
   return (supports_webp_rewritten_urls_ == kTrue);
 }
 
+// Lossless/alpha and animated WebP are decided by the Accept header alone, the
+// way SupportsWebpInPlace above and all of AVIF below already are. A client
+// that advertises image/webp is taken at its word for every WebP flavour: the
+// hand-maintained browser-version lists this used to consult had to be updated
+// on every browser release, went stale on version-digit rollovers, and could
+// never say anything about a browser nobody had enumerated yet.
 bool DeviceProperties::SupportsWebpLosslessAlpha() const {
-  if (supports_webp_lossless_alpha_ == kNotSet) {
-    if ((accepts_webp_ == kTrue) &&
-        ua_matcher_->SupportsWebpLosslessAlpha(user_agent_)) {
-      supports_webp_lossless_alpha_ = kTrue;
-    } else {
-      supports_webp_lossless_alpha_ = kFalse;
-    }
-  }
-  return (supports_webp_lossless_alpha_ == kTrue);
+  return (accepts_webp_ == kTrue);
 }
 
 bool DeviceProperties::SupportsWebpAnimated() const {
-  if (supports_webp_animated_ == kNotSet) {
-    if ((accepts_webp_ == kTrue) &&
-        ua_matcher_->SupportsWebpAnimated(user_agent_)) {
-      supports_webp_animated_ = kTrue;
-    } else {
-      supports_webp_animated_ = kFalse;
-    }
-  }
-  return (supports_webp_animated_ == kTrue);
+  return (accepts_webp_ == kTrue);
 }
 
 // AVIF capability accessors. Unlike the WebP accessors above, none of these
@@ -226,7 +225,23 @@ bool DeviceProperties::SupportsAvifAnimated() const {
   return (accepts_avif_ == kTrue);
 }
 
+void DeviceProperties::SetWebBotAuthVerdict(bool signature_verified_agent) {
+  // Monotone: only ever raises the flag. A later unsigned or unverifiable
+  // request state cannot retract a signature that already verified, and no
+  // caller can use this to assert that a client is human.
+  webbotauth_verified_agent_ =
+      webbotauth_verified_agent_ || signature_verified_agent;
+}
+
 bool DeviceProperties::IsBot() const {
+  // A verified signature outranks the user-agent string, and is checked ahead
+  // of the is_bot_ memo so the answer does not depend on whether IsBot() was
+  // called before or after SetWebBotAuthVerdict. This is the only signal that
+  // can classify an agent presenting a byte-identical copy of a real browser's
+  // user agent, which no user-agent list can do by construction.
+  if (webbotauth_verified_agent_) {
+    return true;
+  }
   if (is_bot_ == kNotSet) {
     is_bot_ = BotChecker::Lookup(user_agent_) ? kTrue : kFalse;
   }

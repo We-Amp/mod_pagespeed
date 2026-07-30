@@ -1234,6 +1234,20 @@ TEST_F(RewriteOptionsTest, LookupOptionByNameTest) {
   // Check that case doesn't matter when looking up directives.
   EXPECT_TRUE(nullptr != RewriteOptions::LookupOptionByName("EnableRewriting"));
   EXPECT_TRUE(nullptr != RewriteOptions::LookupOptionByName("eNaBlErEWrItIng"));
+
+  // Regression pin: AvifTimeoutMs must keep a
+  // non-null help string: Apache's InstallCommands() only registers options
+  // whose help_text() is non-null, so a null help string silently removes the
+  // ModPagespeedAvifTimeoutMs directive. It must also stay kLegacyProcessScope:
+  // server-wide is the deliberate posture for this tunable.
+  const RewriteOptions::PropertyBase* avif_timeout_prop =
+      RewriteOptions::LookupOptionByName(RewriteOptions::kImageAvifTimeoutMs);
+  ASSERT_TRUE(avif_timeout_prop != nullptr)
+      << "AvifTimeoutMs cannot be looked up by name";
+  EXPECT_TRUE(avif_timeout_prop->help_text() != nullptr)
+      << "AvifTimeoutMs must have a help string to remain an Apache directive";
+  EXPECT_EQ(RewriteOptions::kLegacyProcessScope, avif_timeout_prop->scope())
+      << "AvifTimeoutMs must stay process-scope by design";
 }
 
 // All the non-base option names are explicitly enumerated here. Modifications
@@ -1857,33 +1871,28 @@ TEST_F(RewriteOptionsTest, AnalyticsIDWarns) {
       << handler.messages()[0];
 }
 
-TEST_F(RewriteOptionsTest, ExperimentalJsMinifierDefaultsOn) {
-  // The tokenizer-based minifier is the default; the legacy minifier is only
-  // reached by explicitly turning the option off.
-  EXPECT_TRUE(options_.use_experimental_js_minifier());
-}
-
-TEST_F(RewriteOptionsTest, LegacyJsMinifierDeprecationWarn) {
-  // Explicitly selecting the legacy JavaScript minifier still parses (config
-  // compatibility) but logs a deprecation warning, once per directive.
+TEST_F(RewriteOptionsTest, UseExperimentalJsMinifierIgnoredWarnOff) {
+  // The legacy JavaScript minifier was removed.  The directive still parses
+  // (config compatibility on every port) but is ignored, and warns once.
   TestMessageHandler handler;
   GoogleString msg;
   EXPECT_EQ(RewriteOptions::kOptionOk,
             options_.ParseAndSetOptionFromName1(
                 RewriteOptions::kUseExperimentalJsMinifier, "off", &msg,
                 &handler));
-  EXPECT_FALSE(options_.use_experimental_js_minifier());
   ASSERT_EQ(1U, handler.messages().size());
   EXPECT_NE(GoogleString::npos,
             handler.messages()[0].find(
-                "legacy JavaScript minifier is deprecated"))
+                "legacy JavaScript minifier has been removed"))
+      << handler.messages()[0];
+  EXPECT_NE(GoogleString::npos,
+            handler.messages()[0].find("deprecated and ignored"))
       << handler.messages()[0];
 }
 
-TEST_F(RewriteOptionsTest, LegacyJsMinifierDeprecationSilent) {
-  // Only an explicit 'off' warns: an untouched config takes the
-  // tokenizer-based default silently, and an explicit 'on' matches the
-  // default, so it stays silent too.
+TEST_F(RewriteOptionsTest, UseExperimentalJsMinifierIgnoredWarnOn) {
+  // 'on' is as meaningless as 'off' now, so it warns identically -- unlike
+  // before the removal, when 'on' matched the default and stayed silent.
   TestMessageHandler handler;
   GoogleString msg;
   EXPECT_EQ(0U, handler.messages().size());
@@ -1891,8 +1900,44 @@ TEST_F(RewriteOptionsTest, LegacyJsMinifierDeprecationSilent) {
             options_.ParseAndSetOptionFromName1(
                 RewriteOptions::kUseExperimentalJsMinifier, "on", &msg,
                 &handler));
-  EXPECT_TRUE(options_.use_experimental_js_minifier());
-  EXPECT_EQ(0U, handler.messages().size());
+  ASSERT_EQ(1U, handler.messages().size());
+  EXPECT_NE(GoogleString::npos,
+            handler.messages()[0].find(
+                "legacy JavaScript minifier has been removed"))
+      << handler.messages()[0];
+}
+
+TEST_F(RewriteOptionsTest, UseExperimentalJsMinifierNotInSignature) {
+  // Load-bearing: the retained no-op option must not contribute to the
+  // options signature.  If it did, a config carrying the directive would keep
+  // its pre-upgrade metadata-cache key and keep emitting the rewritten URLs
+  // its removed minifier produced.  Excluding it makes such a config converge
+  // onto exactly the same metadata partition as a default config.
+  NullMessageHandler null_handler;
+  GoogleString msg;
+
+  RewriteOptions defaults(&thread_system_);
+  defaults.ComputeSignature();
+  const GoogleString default_signature = defaults.signature();
+
+  options_.ClearSignatureForTesting();
+  ASSERT_EQ(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromName1(
+                RewriteOptions::kUseExperimentalJsMinifier, "off", &msg,
+                &null_handler));
+  options_.ComputeSignature();
+  EXPECT_EQ(GoogleString::npos, options_.signature().find("uejsm"))
+      << options_.signature();
+  EXPECT_STREQ(default_signature, options_.signature());
+
+  // ...and 'on' likewise.
+  options_.ClearSignatureForTesting();
+  ASSERT_EQ(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromName1(
+                RewriteOptions::kUseExperimentalJsMinifier, "on", &msg,
+                &null_handler));
+  options_.ComputeSignature();
+  EXPECT_STREQ(default_signature, options_.signature());
 }
 
 TEST_F(RewriteOptionsTest, DefaultExperimentSpecTest) {

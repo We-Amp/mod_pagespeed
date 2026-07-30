@@ -422,7 +422,9 @@
     "format in the Save-Data mode. Use a value in [0,100] to explicitly set " \
     "the quality. Use -1 to ignore the Save-Data header.", true) \
   X(kDefaultImageAvifTimeoutMs, image_avif_timeout_ms_, "avt", \
-    kImageAvifTimeoutMs, kLegacyProcessScope, nullptr, true) \
+    kImageAvifTimeoutMs, kLegacyProcessScope, \
+    "Timeout for AVIF still-image encoding, in milliseconds; the encoder " \
+    "speed is derived from this budget.", true) \
   X(kDefaultMaxInlinedPreviewImagesIndex, \
     max_inlined_preview_images_index_, "mdii", \
     kMaxInlinedPreviewImagesIndex, kDirectoryScope, \
@@ -532,11 +534,6 @@
     kEnableExtendedInstrumentation, kDirectoryScope, \
     "If set to true, addition instrumentation js is added to that page that " \
     "the beacon can collect more information.", true) \
-  X(true, use_experimental_js_minifier_, "uejsm", \
-    kUseExperimentalJsMinifier, kDirectoryScope, \
-    "If set to false, uses the old legacy::MinifyJs-based minifier. " \
-    "The legacy minifier is deprecated and will be removed in a future " \
-    "release.", true) \
   X(kDefaultMaxCombinedCssBytes, max_combined_css_bytes_, "xcc", \
     kMaxCombinedCssBytes, kQueryScope, \
     "Maximum size allowed for the combined CSS resource.", true) \

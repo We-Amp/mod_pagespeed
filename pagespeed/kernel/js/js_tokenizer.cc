@@ -370,7 +370,13 @@ const char* const kWhitespaceRegex =
 const char* const kLineContinuationRegex =
     // Any operator (even a multicharacter operator) starting with one of the
     // following characters can continue the current expression.
-    "[=(*/%^&|<>?:,.]|"
+    "[(*/%^&|<>?:,.]|"
+    // An = can continue immediately after an expression, but an => cannot:
+    // ECMA-262 forbids a LineTerminator between an arrow head and its =>
+    // token, so a linebreak before => always inserts a semicolon.  (Without
+    // this, the already-invalid "a = x\n=> y" would minify to the VALID
+    // "a=x=>y" -- an invalid-to-valid transformation.)
+    "=($|[^>])|"
     // A != can continue immediately after an expression, but not a !.
     "!=|"
     // A + or - can continue after an expression, but not a ++ or -- (because
@@ -416,7 +422,8 @@ JsTokenizer::JsTokenizer(const JsTokenizerPatterns* patterns, StringPiece input)
       json_step_(kJsonStart),
       start_of_line_(true),
       error_(false),
-      arrow_body_asi_pending_(false) {
+      arrow_body_asi_pending_(false),
+      postfix_update_pending_(false) {
   parse_stack_.push_back(kStartOfInput);
 }
 
@@ -665,6 +672,24 @@ GoogleString JsTokenizer::ParseStackForTest() const {
 JsKeywords::Type JsTokenizer::ConsumeOpenBrace(StringPiece* token_out) {
   DCHECK(!input_.empty());
   DCHECK_EQ('{', input_[0]);
+  // Invariant: a "{" after a speculatively-classified operator word
+  // (await/yield/for-of "of" -- each of which may really be a plain
+  // identifier) must not be committed to the object-literal reading when
+  // the identifier reading is live: in that reading (an ASI-separated
+  // statement) the braces are a BLOCK, after which a slash is a regex
+  // rather than division.  "(" and "[" continue the expression under
+  // either reading; "{" is the one delimiter whose reading diverges.
+  // The identifier reading is live ONLY when a line terminator separates
+  // the word from the "{" (speculative_linebreak_; a terminator inside a
+  // block comment counts, per the spec's ASI rules): without one,
+  // "expr {" is a SyntaxError, so the "{" is provably the operand's
+  // object literal (`yield {a: 1}` in a generator) and falls through to
+  // the normal handling.  With one, declining (error) is fail-safe:
+  // minification fails and the caller serves the original input
+  // unmodified.
+  if (speculative_operator_ && speculative_linebreak_) {
+    return Error(token_out);
+  }
   if (parse_stack_.size() >= kMaxParseStackDepth) {
     return Error(token_out);
   }
@@ -1045,6 +1070,16 @@ bool JsTokenizer::TryConsumePrivateName(JsKeywords::Type* type_out,
 JsKeywords::Type JsTokenizer::ConsumeColon(StringPiece* token_out) {
   DCHECK(!input_.empty());
   DCHECK_EQ(':', input_[0]);
+  if (parse_stack_.back() == kOperator && speculative_operator_) {
+    // A colon directly after a speculatively-classified operator word: as in
+    // ConsumeComma, the word (`await`, or a for-of `of`) has no operand, so
+    // it was really a plain identifier -- a ternary alternative
+    // (`cond ? await : val`) or a label.  Treat it as that expression and
+    // let the loop below find the question mark, exactly as the kReturnThrow
+    // case does for `yield`.
+    parse_stack_.pop_back();
+    PushExpression();
+  }
   while (true) {
     DCHECK(!parse_stack_.empty());
     switch (parse_stack_.back()) {
@@ -1117,6 +1152,16 @@ JsKeywords::Type JsTokenizer::ConsumeColon(StringPiece* token_out) {
 JsKeywords::Type JsTokenizer::ConsumeComma(StringPiece* token_out) {
   DCHECK(!input_.empty());
   DCHECK_EQ(',', input_[0]);
+  if (parse_stack_.back() == kOperator && speculative_operator_) {
+    // A comma directly after a speculatively-classified operator word: the
+    // word is `await` (or a for-of `of`) with no operand, which means it was
+    // really a plain identifier all along (`var await, x`, `f(await, 1)`,
+    // `[await, 1]`, `{a: await, b: 1}` -- all legal sloppy-mode code).
+    // Treat it as the expression it really is and let the normal comma paths
+    // decide, exactly as the kReturnThrow branch below does for `yield`.
+    parse_stack_.pop_back();
+    PushExpression();
+  }
   if (parse_stack_.back() == kReturnThrow) {
     // A comma directly after return/throw/yield: outside generators
     // `yield` is an ordinary identifier (`f(yield, 2)`, `var yield, x`),
@@ -1261,6 +1306,9 @@ bool JsTokenizer::TryConsumeIdentifierOrKeyword(JsKeywords::Type* type_out,
     *type_out = Emit(JsKeywords::kIdentifier, index, token_out);
     return true;
   }
+  // Set for the speculatively-classified operator words (await/yield/of);
+  // see LastTokenWasSpeculativeOperator().
+  bool speculative = false;
   switch (type) {
     // If the word isn't a keyword, then it's an identifier.  Also, these other
     // "keywords" are only reserved for future use in strict mode, and
@@ -1277,6 +1325,18 @@ bool JsTokenizer::TryConsumeIdentifierOrKeyword(JsKeywords::Type* type_out,
     case JsKeywords::kPublic:
     case JsKeywords::kStatic:
       type = JsKeywords::kIdentifier;
+      // `of` is a contextual keyword too: an identifier directly after an
+      // expression is either the for-of keyword or the start of an
+      // ASI-separated statement.  Treat it as a binary operator so that a
+      // following slash starts a regex (e.g. `for (m of /re/.exec(s))`).
+      // This is fail-safe for the ASI reading: a misread slash yields a
+      // verbatim pseudo-regex or a declined minification (see ConsumeRegex),
+      // and a following linebreak is preserved by the minifier (see
+      // LastTokenWasSpeculativeOperator).  Member-name position is excluded:
+      // the kExpression there is a `get`/`set`/`async` modifier, so the `of`
+      // is unambiguously the member's NAME (`{ get of(){} }`), and pushing
+      // an operator would leave the method's `{` unmatched.
+      //
       // `from` and `as` are contextual keywords, not reserved words, so they
       // arrive here as ordinary identifiers.  Inside an import/export
       // declaration they take dedicated parse states:
@@ -1291,11 +1351,15 @@ bool JsTokenizer::TryConsumeIdentifierOrKeyword(JsKeywords::Type* type_out,
       //    `import a, * as ns`) takes the kPeriod path so the binding that
       //    follows collapses back to a module declaration point.
       // Everywhere else they remain ordinary identifiers.
-      if (parse_stack_.size() >= 2 &&
-          parse_stack_[parse_stack_.size() - 2] == kModuleDecl &&
-          (parse_stack_.back() == kExpression ||
-           parse_stack_.back() == kOperator) &&
-          input_.substr(0, index) == "from") {
+      if (parse_stack_.back() == kExpression && !AtMemberNameAfterModifier() &&
+          input_.substr(0, index) == "of") {
+        PushOperator();
+        speculative = true;
+      } else if (parse_stack_.size() >= 2 &&
+                 parse_stack_[parse_stack_.size() - 2] == kModuleDecl &&
+                 (parse_stack_.back() == kExpression ||
+                  parse_stack_.back() == kOperator) &&
+                 input_.substr(0, index) == "from") {
         parse_stack_.pop_back();
         parse_stack_.push_back(kFromClause);
       } else if (parse_stack_.back() == kOperator && parse_stack_.size() >= 2 &&
@@ -1446,12 +1510,56 @@ bool JsTokenizer::TryConsumeIdentifierOrKeyword(JsKeywords::Type* type_out,
     // be dropped.  Outside generators the extra insertions are byte-safe:
     // a kept newline re-parses identically, since engines only insert
     // when the next token cannot continue anyway.  After a block keyword
-    // it is a function name (`function yield() {}`).
+    // it is a function name (`function yield() {}`), and in member-name
+    // position it is a member NAME (`{ get yield(){} }`).  Because the
+    // identifier reading stays possible, the classification is speculative
+    // (see LastTokenWasSpeculativeOperator).
     case JsKeywords::kYield:
-      if (parse_stack_.back() == kBlockKeyword) {
+      if (parse_stack_.back() == kBlockKeyword ||
+          parse_stack_.back() == kClassKeyword) {
+        // `class yield {}` is a SyntaxError in every mode (class bodies
+        // are strict), but taking the name path keeps the tokenization
+        // byte-preserving instead of committing the body's braces to a
+        // divergent reading.
         type = JsKeywords::kIdentifier;
+      } else if (AtMemberNameAfterModifier()) {
+        type = JsKeywords::kIdentifier;
+        PushExpression();
       } else {
         parse_stack_.push_back(kReturnThrow);
+        speculative = true;
+      }
+      break;
+    // `await` acts like a prefix operator: a slash after it starts a regex
+    // literal (not division), an open brace after it starts an object
+    // literal, and a linebreak after it never induces semicolon insertion
+    // (await is not a restricted production).  It keeps the plain kOperator
+    // state -- not kReturnThrow, which `yield` can afford because a yield
+    // expression is a whole statement's worth of parse state, whereas an
+    // await expression must collapse into its surrounding expression
+    // (`{ a: await g(), b: 1 }`).  The `,`/`:` that may follow the
+    // IDENTIFIER reading is instead tolerated at the separator itself; see
+    // the speculative-operator carve-outs in ConsumeComma and ConsumeColon.
+    // Directly after a block keyword `await` is the `for await` modifier
+    // (`for await (const x of s)`) or the name of a function declaration
+    // (`function await() {}`, legal in sloppy mode), and in member-name
+    // position it is a member NAME (`{ get await(){} }`, `{ *await(){} }`),
+    // so leave the operator reading alone in both.  Outside an async
+    // function `await` is a plain identifier, which is why the
+    // classification is speculative (see LastTokenWasSpeculativeOperator).
+    case JsKeywords::kAwait:
+      if (parse_stack_.back() == kBlockKeyword ||
+          parse_stack_.back() == kClassKeyword) {
+        // Leave the parse state alone; `await` names the function or the
+        // class (`class await {}`, legal in sloppy mode -- the class-body
+        // `{` must take the kClassBrace path, never the speculative
+        // object-literal commit) or modifies the `for`.
+      } else if (AtMemberNameAfterModifier()) {
+        type = JsKeywords::kIdentifier;
+        PushExpression();
+      } else {
+        PushOperator();
+        speculative = true;
       }
       break;
     // These keywords can't have a division operator or a regex literal after
@@ -1535,6 +1643,8 @@ bool JsTokenizer::TryConsumeIdentifierOrKeyword(JsKeywords::Type* type_out,
       return true;
   }
   *type_out = Emit(type, index, token_out);
+  // Emit() cleared the flag; re-open the window for the speculative words.
+  speculative_operator_ = speculative;
   return true;
 }
 
@@ -1559,17 +1669,25 @@ JsKeywords::Type JsTokenizer::ConsumeOperator(StringPiece* token_out) {
     // Unrecognized character:
     return Error(token_out);
   }
+  // Sampled before Emit() below clears it; see the update-operator carry at
+  // the end of this method.
+  const bool was_speculative = speculative_operator_;
   const JsKeywords::Type type =
       Emit(JsKeywords::kOperator, input_.size() - unconsumed.size(), token_out);
   const StringPiece token = *token_out;
   // Is this a postfix operator?  We treat those differently than prefix or
   // unary operators.
   DCHECK(!parse_stack_.empty());
-  // The arrow head's `>` below intentionally repeats this empty body: both
-  // constructs leave the parse state unchanged.
-  if ((token == "++" || token == "--") &&
-      parse_stack_.back() == kExpression) {  // NOLINT(bugprone-branch-clone)
-    // Postfix operator; leave the parse state as kExpression.
+  if ((token == "++" || token == "--") && parse_stack_.back() == kExpression) {
+    // Postfix operator; leave the parse state as kExpression ("an
+    // expression followed by a postfix operator is still just an
+    // expression"), but remember that the expression is now a completed
+    // UpdateExpression, whose continuation set is strictly narrower than
+    // a general expression's: no call or member access can attach to it.
+    // TryInsertLinebreakSemicolon consults this flag at the next
+    // linebreak.  (Emit() already ran for this token above, so the flag
+    // armed here survives until the NEXT significant token clears it.)
+    postfix_update_pending_ = true;
   } else if (token == "=" && !input_.empty() && input_[0] == '>') {
     // An arrow head `=>` (per ECMA-262 a single punctuator, though emitted
     // here as separate `=` and `>` tokens to preserve the old byte stream):
@@ -1580,8 +1698,10 @@ JsKeywords::Type JsTokenizer::ConsumeOperator(StringPiece* token_out) {
     // case below: `export let f => ...` lexes as an arrow (invalid JS,
     // tolerated byte-preservingly).
     parse_stack_.push_back(kArrow);
-  } else if (token[0] == '>' && parse_stack_.back() == kArrow) {
-    // The `>` of the arrow head: leave the kArrow state on the stack.
+  } else if (token[0] == '>' &&
+             parse_stack_.back() == kArrow) {  // NOLINT(bugprone-branch-clone)
+    // The `>` of the arrow head: leave the kArrow state on the stack; the
+    // generator-`*` branch below intentionally repeats this empty body.
     // (A kArrow directly on top is only ever seen here, right after the
     // `=`; anything else this combines with was already invalid JS.)
   } else if (token[0] == '*' && parse_stack_.back() == kBlockKeyword) {
@@ -1590,6 +1710,35 @@ JsKeywords::Type JsTokenizer::ConsumeOperator(StringPiece* token_out) {
     // name and parameter list complete into a block header exactly like a
     // plain function's.  (`if * x` and the like were already invalid JS;
     // leaving the keyword there stays byte-preserving.)
+  } else if (token == "*" &&
+             (IsMemberNameBrace(parse_stack_.size() - 1) ||
+              AtMemberNameAfterModifier()) &&
+             NextCharStartsIdentifier()) {
+    // The `*` of a generator method shorthand with a plain name (`{ *m(){} }`,
+    // `{ async *m(){} }`, `class X { *m(){} }`): also a generator marker, so
+    // push a block keyword just like `function*` above.  The name then takes
+    // the function-name path -- which is what makes `{ *await(){} }` and
+    // `{ *yield(){} }` name their methods rather than push an operator -- and
+    // the parameter list completes into a block header.
+    //
+    // The name's function-name path pushes no expression, so without more the
+    // closing brace of the body would land on the bare member-name brace --
+    // where a following comma (the member separator) is an error, declining
+    // minification of `{ *m(){}, b: 2 }`.  A plain method name (or an `async`
+    // modifier) leaves a kExpression under the block header, and the close
+    // then lands on that.  Install the same expression here, under the block
+    // keyword, so the completed method closes back to exactly the state a
+    // plain method leaves and the comma takes the normal member-separator
+    // path.  (When an `async` modifier already left that expression,
+    // PushExpression() simply merges with it.)
+    //
+    // The identifier lookahead keeps every other member-name form on the
+    // plain-operator path below, which already handles them: a computed name
+    // (`{ *[Symbol.iterator](){} }`) would error on the `[` after a block
+    // keyword, and string/numeric names have no reason to move.  (A binary
+    // `*` directly on a member-name brace was already invalid JS.)
+    PushExpression();
+    parse_stack_.push_back(kBlockKeyword);
   } else if (token == "=" &&
              ((parse_stack_.size() >= 2 && parse_stack_.back() == kExpression &&
                (parse_stack_[parse_stack_.size() - 2] == kModuleDecl ||
@@ -1622,6 +1771,21 @@ JsKeywords::Type JsTokenizer::ConsumeOperator(StringPiece* token_out) {
   } else {
     // Prefix or binary operator; push it onto the stack.
     PushOperator();
+  }
+  // An update operator consumed while the speculative window was open
+  // (`await++`, `yield--`): under the identifier reading the word and the
+  // `++`/`--` form a completed postfix UpdateExpression, so a linebreak
+  // after the pair may be load-bearing for semicolon insertion; under the
+  // operator-word reading the `++`/`--` is a prefix operator, and a
+  // linebreak before its operand is legal.  Preserving the linebreak is
+  // therefore semantics-neutral in both readings, so keep the window open
+  // across the update operator -- the minifier then preserves the
+  // linebreak, and a slash after the pair keeps the fail-safe regex guard.
+  // (Emit() above cleared the flag.  The postfix branch cannot race this:
+  // it requires a kExpression top, which means the previous token already
+  // closed the window.)
+  if ((token == "++" || token == "--") && was_speculative) {
+    speculative_operator_ = true;
   }
   return type;
 }
@@ -1694,6 +1858,102 @@ JsKeywords::Type JsTokenizer::ConsumeQuestionMark(StringPiece* token_out) {
   return Emit(JsKeywords::kOperator, 1, token_out);
 }
 
+namespace {
+
+// Walks a regex literal starting at its opening slash and returns the index
+// of its closing slash, or npos if it is unterminated.  A slash inside a
+// character class is implicitly escaped and does not close the literal;
+// classes do not nest, so a single flag tracks them.
+size_t FindRegexClosingSlash(StringPiece input) {
+  bool in_class = false;
+  bool escaped = false;
+  for (size_t i = 1; i < input.size(); ++i) {
+    const char ch = input[i];
+    if (escaped) {
+      escaped = false;
+    } else if (ch == '\\') {
+      escaped = true;
+    } else if (in_class) {
+      in_class = (ch != ']');
+    } else if (ch == '[') {
+      in_class = true;
+    } else if (ch == '/') {
+      return i;
+    }
+  }
+  return StringPiece::npos;
+}
+
+}  // namespace
+
+bool SpeculativeRegexCanReassembleComment(StringPiece input) {
+  DCHECK(!input.empty());
+  DCHECK_EQ('/', input[0]);
+  const size_t close = FindRegexClosingSlash(input);
+  if (close == StringPiece::npos) {
+    // Unterminated.  The callers only get here after a successful scan, but
+    // decline rather than guess.
+    return true;
+  }
+  // The right boundary: with flags, input[close + 1] is a flag letter and
+  // nothing can weld onto it; without flags it is the next input byte, and a
+  // "/" or "*" there welds onto the closing slash as soon as the whitespace
+  // between them is deleted.  (This is the guard's whole purpose; the input's
+  // own comments are not the hazard -- they are comments under either reading
+  // and at the same byte.)
+  if (close + 1 < input.size() &&
+      (input[close + 1] == '/' || input[close + 1] == '*')) {
+    return true;
+  }
+  // Comment delimiters INSIDE the literal.  Every "//" or "/*" among the
+  // bytes about to be emitted verbatim opens a comment under the division
+  // reading, whatever it means under the regex reading, so this test ignores
+  // escaping.
+  bool in_class = false;
+  bool escaped = false;
+  for (size_t i = 1; i < close; ++i) {
+    const char ch = input[i];
+    const bool delimiter =
+        ch == '/' && (input[i + 1] == '/' || input[i + 1] == '*');
+    if (delimiter) {
+      if (!in_class) {
+        // Outside a character class an unescaped slash would already have
+        // closed the literal, so a delimiter here was formed by an escape
+        // (`/a\//`, `/a\/*b/`).  Decline: it is vanishingly rare, and the
+        // division reading of such input is not valid JavaScript anyway.
+        return true;
+      }
+      if (input[i + 1] == '*') {
+        // Under the division reading a "/*" inside what the regex reading
+        // calls a character class opens a BLOCK comment.  That is harmless
+        // only if the comment cannot swallow anything the minifier rewrote:
+        // either it closes inside the verbatim literal, or it never closes
+        // at all -- in which case the division reading is not valid
+        // JavaScript.
+        const size_t end = input.find("*/", i + 2);
+        if (end != StringPiece::npos && end + 2 > close) {
+          return true;
+        }
+      }
+      // A "//" inside a character class is harmless: under the division
+      // reading it opens a LINE comment, and a regex literal may not contain
+      // a line terminator, so the class's own `]` and the closing slash are
+      // both swallowed by it -- leaving the `[` unclosed for the rest of the
+      // line, which no valid division reading recovers from.
+    }
+    if (escaped) {
+      escaped = false;
+    } else if (ch == '\\') {
+      escaped = true;
+    } else if (in_class) {
+      in_class = (ch != ']');
+    } else if (ch == '[') {
+      in_class = true;
+    }
+  }
+  return false;
+}
+
 JsKeywords::Type JsTokenizer::ConsumeRegex(StringPiece* token_out) {
   DCHECK(!input_.empty());
   DCHECK_EQ('/', input_[0]);
@@ -1702,8 +1962,18 @@ JsKeywords::Type JsTokenizer::ConsumeRegex(StringPiece* token_out) {
     // EOF or a linebreak in the regex will cause an error.
     return Error(token_out);
   }
+  const size_t num_chars = input_.size() - unconsumed.size();
+  // Invariant: a regex consumed directly after a speculatively-classified
+  // operator word (await/yield/for-of "of" -- each of which may really be a
+  // plain identifier, making this slash division) must not let minification
+  // reassemble a comment delimiter that was not in the input.  Declining
+  // (error) is fail-safe: minification fails and the caller serves the
+  // original input unmodified.
+  if (speculative_operator_ && SpeculativeRegexCanReassembleComment(input_)) {
+    return Error(token_out);
+  }
   PushExpression();
-  return Emit(JsKeywords::kRegex, input_.size() - unconsumed.size(), token_out);
+  return Emit(JsKeywords::kRegex, num_chars, token_out);
 }
 
 JsKeywords::Type JsTokenizer::ConsumeSemicolon(StringPiece* token_out) {
@@ -2003,6 +2273,15 @@ JsKeywords::Type JsTokenizer::Emit(JsKeywords::Type type, int num_chars,
     // part of, so a pending terminal-arrow ASI no longer applies.
     // (ConsumeCloseBrace arms the flag only after emitting its own `}`.)
     arrow_body_asi_pending_ = false;
+    // Likewise for a pending postfix-update ASI: any real token either
+    // legally continues the UpdateExpression or ends its statement.
+    // (ConsumeOperator arms the flag only after emitting its own `++`/`--`.)
+    postfix_update_pending_ = false;
+    // Any significant token ends the speculative-operator window; the cases
+    // in TryConsumeIdentifierOrKeyword that open the window re-set the flag
+    // after calling Emit().
+    speculative_operator_ = false;
+    speculative_linebreak_ = false;
     // Check if it looks like we're tokenizing a JSON object rather than JS
     // code.  If the first three tokens in the input are open brace, string
     // literal, colon, then this is a JSON object (since that would be illegal
@@ -2048,6 +2327,18 @@ JsKeywords::Type JsTokenizer::Emit(JsKeywords::Type type, int num_chars,
         break;
       default:
         break;
+    }
+  } else if (speculative_operator_) {
+    // Whitespace or a comment inside an open speculative window: record
+    // whether it carries a line terminator (LF, CR, or the UTF-8 LS/PS
+    // sequences) -- a terminator inside a block comment counts for ASI
+    // exactly like bare whitespace, so the scan looks at token content,
+    // not token type.  ConsumeOpenBrace narrows its decline to this case.
+    if (token.find('\n') != StringPiece::npos ||
+        token.find('\r') != StringPiece::npos ||
+        token.find("\xE2\x80\xA8") != StringPiece::npos ||
+        token.find("\xE2\x80\xA9") != StringPiece::npos) {
+      speculative_linebreak_ = true;
     }
   }
   *token_out = token;
@@ -2193,6 +2484,39 @@ bool JsTokenizer::TryInsertLinebreakSemicolon() {
           parse_stack_[parse_stack_.size() - 2] == kClassKeyword) {
         return false;
       }
+      // At a class-element position (the expression sits directly on the
+      // class body brace) the completed expression is an element: a field
+      // name, a computed name, or a just-closed method.  Only `=` (a field
+      // initializer) or `(` (a method parameter list) can continue an
+      // element there, and neither reading is linebreak-sensitive.  The
+      // generic continuation set below is too broad for this position --
+      // `*` most notably begins a FOLLOWING generator method, and the
+      // linebreak after a bare field is ASI-load-bearing:
+      // `class C { x \n *gen(){} }` corrupts to `x*gen(){}` (parsed as a
+      // multiplication in field-initializer position) if it is dropped.
+      if (parse_stack_.size() >= 2 &&
+          parse_stack_[parse_stack_.size() - 2] == kClassBrace) {
+        // NOTE: the '=' test also admits '==' / '===' / '=>' here, but no
+        // class element can begin with any of those, so both readings of
+        // such input are SyntaxErrors and the choice cannot matter.
+        if (input_[0] == '=' || input_[0] == '(') {
+          return false;
+        }
+        break;
+      }
+      // After a postfix `++`/`--` (flag armed in ConsumeOperator) the
+      // completed UpdateExpression cannot take a call or member access, so
+      // a following `(`, or a `.` starting a numeric literal, begins a new
+      // statement and the linebreak inserts a semicolon -- even though the
+      // generic continuation set below contains both `(` and `.`.  (Every
+      // other member of that set is a binary/ternary operator, which
+      // legally continues an UpdateExpression.)
+      if (postfix_update_pending_ &&
+          (input_[0] == '(' || (input_[0] == '.' && input_.size() >= 2 &&
+                                input_[1] >= '0' && input_[1] <= '9'))) {
+        postfix_update_pending_ = false;
+        break;
+      }
       // Semicolon insertion will not happen after an expression if the next
       // token could continue the statement.
       {
@@ -2269,6 +2593,38 @@ bool JsTokenizer::CanPreceedObjectLiteral(ParseState state) {
           state == kReturnThrow || state == kTemplateInterp ||
           state == kOtherKeyword || state == kModuleDecl ||
           state == kModuleVarKeyword || state == kObjectValue);
+}
+
+bool JsTokenizer::IsMemberNameBrace(size_t index) const {
+  DCHECK_LT(index, parse_stack_.size());
+  const ParseState state = parse_stack_[index];
+  if (state == kClassBrace) {
+    return true;
+  }
+  return state == kOpenBrace && index >= 1 &&
+         CanPreceedObjectLiteral(parse_stack_[index - 1]);
+}
+
+bool JsTokenizer::AtMemberNameAfterModifier() const {
+  const size_t size = parse_stack_.size();
+  return size >= 2 && parse_stack_[size - 1] == kExpression &&
+         IsMemberNameBrace(size - 2);
+}
+
+bool JsTokenizer::NextCharStartsIdentifier() const {
+  const int size = input_.size();
+  int i = 0;
+  while (i < size &&
+         (input_[i] == ' ' || input_[i] == '\t' || input_[i] == '\f' ||
+          input_[i] == '\v' || input_[i] == '\n' || input_[i] == '\r')) {
+    ++i;
+  }
+  if (i >= size) {
+    return false;
+  }
+  const char c = input_[i];
+  return ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z') || c == '_' ||
+         c == '$' || c == '\\';
 }
 
 JsTokenizerPatterns::JsTokenizerPatterns()

@@ -72,15 +72,26 @@ const char UserAgentMatcherTestBase::kBlackBerryOS5UserAgent[] =
 const char UserAgentMatcherTestBase::kBlackBerryOS6UserAgent[] =
     "Mozilla/5.0 (BlackBerry; U; BlackBerry 9800; en-US) AppleWebKit/534.11+ "
     "(KHTML, like Gecko) Version/6.0.0.141 Mobile Safari/534.11+";
+// First three-digit major version; regression guard for #555.
+const char UserAgentMatcherTestBase::kChrome100UserAgent[] =
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/100.0.4896.75 Safari/537.36";
 const char UserAgentMatcherTestBase::kChrome12UserAgent[] =  // webp capable
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_6_4) "
     "AppleWebKit/534.30 (KHTML, like Gecko) Chrome/12.0.742.100 Safari/534.30";
+const char UserAgentMatcherTestBase::kChrome137UserAgent[] =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36";
 const char UserAgentMatcherTestBase::kChrome15UserAgent[] =  // Not webp capable
     "Mozilla/5.0 (Windows; U; Windows NT 6.1; en-US) "
     "AppleWebKit/534.13 (KHTML, like Gecko) Chrome/15.0.597.19 Safari/534.13";
 const char UserAgentMatcherTestBase::kChrome18UserAgent[] =  // webp capable
     "Mozilla/5.0 (Windows; U; Windows NT 6.1; en-US) "
     "AppleWebKit/534.13 (KHTML, like Gecko) Chrome/18.0.597.19 Safari/534.13";
+// Last two-digit major version; pairs with kChrome100UserAgent for #555.
+const char UserAgentMatcherTestBase::kChrome99UserAgent[] =
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/99.0.4844.51 Safari/537.36";
 const char UserAgentMatcherTestBase::kChrome9UserAgent[] =  // Not webp capable
     "Mozilla/5.0 (Windows; U; Windows NT 6.1; en-US) "
     "AppleWebKit/534.13 (KHTML, like Gecko) Chrome/9.0.597.19 Safari/534.13";
@@ -103,6 +114,10 @@ const char UserAgentMatcherTestBase::kChromeUserAgent[] =
     "Mozilla/5.0 (Windows; U; Windows NT 5.1; en-US) "
     "AppleWebKit/525.13 (KHTML, like Gecko) Chrome/0.A.B.C Safari/525.13";
 const char UserAgentMatcherTestBase::kCompalUserAgent[] = "Compal-A618";
+const char UserAgentMatcherTestBase::kCriOS137UserAgent[] =
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) "
+    "AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/137.0.7151.51 "
+    "Mobile/15E148 Safari/604.1";
 const char UserAgentMatcherTestBase::kCriOS31UserAgent[] =
     "Mozilla/5.0 (iPhone; CPU iPhone OS 7_0_3 like Mac OS X) "
     "AppleWebKit/537.51.1 (KHTML, like Gecko) CriOS/31.0.1650.18 Mobile/11B511 "
@@ -115,8 +130,18 @@ const char UserAgentMatcherTestBase::kCriOS48UserAgent[] =
     "Mozilla/5.0 (iPhone; CPU iPhone OS 9_2 like Mac OS X) "
     "AppleWebKit/601.1 (KHTML, like Gecko) CriOS/48.0.2564.87 "
     "Mobile/13C75 Safari/601.1.46";
+// Single-digit iOS Chrome major: below both WebP floors, and the one shape an
+// open-ended allow entry only stays safe against if the block lists carry a
+// single-digit pattern of their own.
+const char UserAgentMatcherTestBase::kCriOS9UserAgent[] =
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 6_0 like Mac OS X) "
+    "AppleWebKit/536.26 (KHTML, like Gecko) CriOS/9.0.0.0 Mobile/10A403 "
+    "Safari/8536.25";
 const char UserAgentMatcherTestBase::kDoCoMoMobileUserAgent[] =
     "DoCoMo/1.0/D505iS/c20/TB/W20H10";
+const char UserAgentMatcherTestBase::kEdge137UserAgent[] =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36 Edg/137.0.3296.68";
 const char UserAgentMatcherTestBase::kFirefox1UserAgent[] =
     "Mozilla/5.0 (X11; U; Linux i686; en-US; rv:1.8.0.7) "
     "Gecko/20060909 Firefox/1.5.0.7 MG (Novarra-Vision/6.1)";
@@ -253,6 +278,9 @@ const char UserAgentMatcherTestBase::kOpera5UserAgent[] =
     "Opera/5.0 (SunOS 5.8 sun4u; U) [en]";
 const char UserAgentMatcherTestBase::kOpera8UserAgent[] =
     "Opera/8.01 (J2ME/MIDP; Opera Mini/1.1.2666/1724; en; U; ssr)";
+const char UserAgentMatcherTestBase::kOpera119UserAgent[] =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36 OPR/119.0.0.0";
 const char UserAgentMatcherTestBase::kOpera18UserAgent[] =
     "Mozilla/5.0 (Windows NT 6.2; WOW64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/31.0.1650.63 Safari/537.36 OPR/18.0.1284.68";

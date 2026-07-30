@@ -37,6 +37,40 @@ TEST_F(HtmlNameTest, OneKeyword) {
   EXPECT_EQ(HtmlName::kStyle, HtmlName::Lookup("style"));
 }
 
+TEST_F(HtmlNameTest, CrossOriginKeyword) {
+  EXPECT_EQ(HtmlName::kCrossorigin, HtmlName::Lookup("crossorigin"));
+  EXPECT_EQ(HtmlName::kCrossorigin, HtmlName::Lookup("CrossOrigin"));
+}
+
+TEST_F(HtmlNameTest, IntegrityKeyword) {
+  EXPECT_EQ(HtmlName::kIntegrity, HtmlName::Lookup("integrity"));
+  EXPECT_EQ(HtmlName::kIntegrity, HtmlName::Lookup("INTEGRITY"));
+}
+
+TEST_F(HtmlNameTest, TemplateKeyword) {
+  EXPECT_EQ(HtmlName::kTemplate, HtmlName::Lookup("template"));
+  EXPECT_EQ(HtmlName::kTemplate, HtmlName::Lookup("Template"));
+}
+
+TEST_F(HtmlNameTest, ConvergedKeywordUnion) {
+  // Keywords converged with ModPageSpeed 2.0's html_name table:
+  // living-standard attributes/tags 2.0 once lacked, plus the 1.15-internal
+  // data-pagespeed-srcset-url-hashes.  The 2.0 table adopts the same union
+  // (We-Amp/pagespeed-optimizer#1140), keeping the two Keyword enums identical
+  // so a single canonical html_name (#1130 vendoring) is ordinal-preserving.
+  EXPECT_EQ(HtmlName::kAllowfullscreen, HtmlName::Lookup("allowfullscreen"));
+  EXPECT_EQ(HtmlName::kDecoding, HtmlName::Lookup("decoding"));
+  EXPECT_EQ(HtmlName::kDialog, HtmlName::Lookup("dialog"));
+  EXPECT_EQ(HtmlName::kFetchpriority, HtmlName::Lookup("fetchpriority"));
+  EXPECT_EQ(HtmlName::kLoading, HtmlName::Lookup("loading"));
+  EXPECT_EQ(HtmlName::kPicture, HtmlName::Lookup("picture"));
+  EXPECT_EQ(HtmlName::kPlaysinline, HtmlName::Lookup("playsinline"));
+  EXPECT_EQ(HtmlName::kDataPagespeedSrcsetUrlHashes,
+            HtmlName::Lookup("data-pagespeed-srcset-url-hashes"));
+  EXPECT_EQ(HtmlName::kDataPagespeedSrcsetUrlHashes,
+            HtmlName::Lookup("Data-Pagespeed-Srcset-Url-Hashes"));
+}
+
 TEST_F(HtmlNameTest, AllKeywordsDefaultCase) {
   for (HtmlName::Iterator iter; !iter.AtEnd(); iter.Next()) {
     EXPECT_EQ(iter.keyword(), HtmlName::Lookup(iter.name()));

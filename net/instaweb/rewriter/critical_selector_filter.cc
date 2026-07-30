@@ -70,6 +70,33 @@ void Compact(VectorType* cl) {
   cl->erase(new_end, cl->end());
 }
 
+// Filters an @media annotation down to the queries that can affect the
+// screen: a definitely-non-screen query is deleted and its slot nulled,
+// leaving holes for the caller to Compact() (or to discard with the node).
+// The vector must not already contain null holes. Returns whether any query
+// still applies — true for an empty annotation, which is unconditional.
+// CanMediaAffectScreen() treats unknown/raw forms (MQ4 range syntax,
+// partial parses) as screen-affecting, so the polarity is conservative:
+// only definitely-non-screen media is dropped.
+//
+// Shared by both arms of FilterStylesheet() — a GROUP_RULE node's annotation
+// (flattened out of an enclosing top-level @media) is filtered exactly like a
+// RULESET's; only what the caller does with the verdict differs.
+bool FilterMediaQueriesForScreen(Css::MediaQueries* media_queries) {
+  bool any_media_apply = media_queries->empty();
+  for (int mediaquery_index = 0, num_mediaquery = media_queries->size();
+       mediaquery_index < num_mediaquery; ++mediaquery_index) {
+    Css::MediaQuery* mq = media_queries->at(mediaquery_index);
+    if (css_util::CanMediaAffectScreen(mq->ToString())) {
+      any_media_apply = true;
+    } else {
+      delete mq;
+      (*media_queries)[mediaquery_index] = nullptr;
+    }
+  }
+  return any_media_apply;
+}
+
 // Cheaply identifies @keyframes at-rules (including vendor-prefixed forms
 // like @-webkit-keyframes) held whole inside an unparsed region.
 bool IsKeyframesRegion(StringPiece bytes) {
@@ -481,21 +508,12 @@ void CriticalSelectorFilter::FilterStylesheet(
        ruleset_index < num_rulesets; ++ruleset_index) {
     Css::Ruleset* r = stylesheet->mutable_rulesets().at(ruleset_index);
     if (r->type() == Css::Ruleset::GROUP_RULE) {
-      // Media filtering identical to the RULESET path below: the group
-      // node's annotation (from an enclosing top-level @media) gates its
-      // whole body, and body rulesets may carry empty annotations of their
-      // own, so it must be applied here rather than left to the recursion.
-      bool any_media_apply = r->media_queries().empty();
-      for (int mediaquery_index = 0, num_mediaquery = r->media_queries().size();
-           mediaquery_index < num_mediaquery; ++mediaquery_index) {
-        Css::MediaQuery* mq = r->mutable_media_queries().at(mediaquery_index);
-        if (css_util::CanMediaAffectScreen(mq->ToString())) {
-          any_media_apply = true;
-        } else {
-          delete mq;
-          r->mutable_media_queries()[mediaquery_index] = nullptr;
-        }
-      }
+      // The group node's annotation (from an enclosing top-level @media)
+      // gates its whole body, and body rulesets may carry empty annotations
+      // of their own, so filtering must happen here rather than be left to
+      // the recursion.
+      bool any_media_apply =
+          FilterMediaQueriesForScreen(&r->mutable_media_queries());
       if (!any_media_apply) {
         // Every query is definitely non-screen (CanMediaAffectScreen treats
         // unknown/raw forms as screen-affecting), e.g.
@@ -567,17 +585,8 @@ void CriticalSelectorFilter::FilterStylesheet(
     // TODO(morlovich): It's silly to serialize this, we should work directly
     // off AST once we have decision procedure on that.
 
-    bool any_media_apply = r->media_queries().empty();
-    for (int mediaquery_index = 0, num_mediaquery = r->media_queries().size();
-         mediaquery_index < num_mediaquery; ++mediaquery_index) {
-      Css::MediaQuery* mq = r->mutable_media_queries().at(mediaquery_index);
-      if (css_util::CanMediaAffectScreen(mq->ToString())) {
-        any_media_apply = true;
-      } else {
-        delete mq;
-        r->mutable_media_queries()[mediaquery_index] = nullptr;
-      }
-    }
+    bool any_media_apply =
+        FilterMediaQueriesForScreen(&r->mutable_media_queries());
 
     bool any_selectors_apply = false;
     if (any_media_apply) {

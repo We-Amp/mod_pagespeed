@@ -815,6 +815,19 @@ TEST_F(CriticalSelectorFilterTest, FilterInsideGroupRules) {
                           LoadRestOfCss(CssLinkHref("c.css"))));
 }
 
+TEST_F(CriticalSelectorFilterTest, MediaStraySemicolonRuleFiltered) {
+  // A stray ';' between two rules in an @media body used to leave the rule
+  // after it as a verbatim region with no selectors, which this filter
+  // retained wholesale to be conservative. Now that the ';' is skipped, the
+  // rule has a real selector and is filtered by criticality: "p" is not
+  // critical, so only "div" reaches the critical subset.
+  GoogleString css = "@media screen { div { color: red }; p { color: blue } }";
+  SetResponseWithDefaultHeaders("c.css", kContentTypeCss, css, 100);
+  ValidateExpected("media_stray_semicolon_filtered", CssLinkHref("c.css"),
+                   StrCat("<style>@media screen{div{color:red}}</style>",
+                          LoadRestOfCss(CssLinkHref("c.css"))));
+}
+
 TEST_F(CriticalSelectorFilterTest, DropKeyframesKeepGroupRules) {
   // The keyframes-drop keys on UNPARSED_REGION, not on "any at-rule": the
   // @keyframes block is dropped while the @layer group next to it survives.

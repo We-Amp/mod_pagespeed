@@ -146,8 +146,7 @@ HtmlLexer::HtmlLexer(HtmlParse* html_parse)
       element_(nullptr),
       line_(1),
       tag_start_line_(-1),
-      script_html_comment_(false),
-      script_html_comment_script_(false),
+      script_escape_state_(HtmlCommentEscapeState::kNone),
       discard_until_start_state_for_error_recovery_(false),
       size_limit_exceeded_(false),
       skip_parsing_(false),
@@ -179,7 +178,10 @@ void HtmlLexer::EvalStart(char c) {
 // HTML5 "Tag open state"
 // TODO(morlovich): Use an ASCII method rather than isalpha
 bool HtmlLexer::IsLegalTagFirstChar(char c) {
-  return (isalpha(c) != 0);  // Required by MSVC 10.0: warning C4800 :-(
+  // The lexer processes arbitrary bytes; passing a negative char to isalpha
+  // is undefined behavior, so cast to unsigned char first.
+  // Required by MSVC 10.0: warning C4800 :-(
+  return (isalpha(static_cast<unsigned char>(c)) != 0);
 }
 
 // ... and letters, digits, unicode and some symbols for subsequent chars.
@@ -191,8 +193,8 @@ bool HtmlLexer::IsLegalTagFirstChar(char c) {
 // to parse all HTML on the web.
 // TODO(morlovich): It's completely bogus for HTML.
 bool HtmlLexer::IsLegalTagChar(char c) {
-  return (IsI18nChar(c) || (isalnum(c) || (c == '<') || (c == '-') ||
-                            (c == '#') || (c == '_') || (c == ':')));
+  return (IsI18nChar(c) || (isalnum(static_cast<unsigned char>(c)) != 0) ||
+          (c == '<') || (c == '-') || (c == '#') || (c == '_') || (c == ':'));
 }
 
 // TODO(morlovich): This is even more bogus, since it's true for
@@ -544,7 +546,14 @@ void HtmlLexer::EvalLiteralTag(char c) {
     html_parse_->message_handler()->Check(
         literal_close_.size() > 3,
         "literal_close_.size() <= 3");  // NOLINT
-    int literal_minus_close_size = literal_.size() - literal_close_.size();
+    if (literal_.size() < literal_close_.size()) {
+      // Not enough bytes accumulated to contain the close tag yet.  Bail
+      // out before the subtraction below can underflow (size_t wraparound
+      // followed by implementation-defined conversion to int).
+      return;
+    }
+    int literal_minus_close_size =
+        static_cast<int>(literal_.size() - literal_close_.size());
     if ((literal_minus_close_size >= 0) &&
         StringCaseEqual(literal_.c_str() + literal_minus_close_size,
                         literal_close_)) {
@@ -567,6 +576,10 @@ static bool CanEndTag(char c) {
           c == '/' || c == '>');
 }
 
+bool HtmlLexer::IsScriptHtmlCommentClosing(char c) const {
+  return c == '>' && strings::EndsWith(StringPiece(literal_), "-->");
+}
+
 void HtmlLexer::EvalScriptTag(char c) {
   // We generally just buffer stuff into literal_ until we see </script ,
   // but there is a special case we need to worry about unlike for other
@@ -575,9 +588,9 @@ void HtmlLexer::EvalScriptTag(char c) {
   // See http://wiki.whatwg.org/wiki/CDATA_Escapes and
   // http://lists.w3.org/Archives/Public/public-html/2009Aug/0452.html
   // for a bit of backstory.
-  if (c == '-') {
+  if (c == '-' && script_escape_state_ == HtmlCommentEscapeState::kNone) {
     if (strings::EndsWith(StringPiece(literal_), "<!--")) {
-      script_html_comment_ = true;
+      script_escape_state_ = HtmlCommentEscapeState::kInComment;
     }
   }
 
@@ -585,13 +598,12 @@ void HtmlLexer::EvalScriptTag(char c) {
     StringPiece prev_fragment(literal_);
     prev_fragment.remove_suffix(1);
     if (StringCaseEndsWith(prev_fragment, "</script")) {
-      if (script_html_comment_script_) {
-        // Just close one escaping level, not <script>"
-        script_html_comment_script_ = false;
+      if (script_escape_state_ == HtmlCommentEscapeState::kDoubleEscaped) {
+        // Just close one escaping level, not <script>.
+        script_escape_state_ = HtmlCommentEscapeState::kInComment;
       } else {
         // Script actually closed, emit it.
-        script_html_comment_ = false;
-        script_html_comment_script_ = false;
+        script_escape_state_ = HtmlCommentEscapeState::kNone;
 
         // Drop the '</script' + c from literal, and also save the form
         // of the '</script' for the close tag.
@@ -614,15 +626,14 @@ void HtmlLexer::EvalScriptTag(char c) {
           state_ = TAG_BRIEF_CLOSE;
         }
       }
-    } else if (script_html_comment_ &&
+    } else if (script_escape_state_ != HtmlCommentEscapeState::kNone &&
                StringCaseEndsWith(prev_fragment, "<script")) {
       // Inside a comment, what looks like a 'terminated' <script>
-      // gets us into an another level of escaping.
-      script_html_comment_script_ = true;
-    } else if (c == '>' && strings::EndsWith(StringPiece(literal_), "-->")) {
-      // --> exits both level of escaping.
-      script_html_comment_ = false;
-      script_html_comment_script_ = false;
+      // gets us into another level of escaping.
+      script_escape_state_ = HtmlCommentEscapeState::kDoubleEscaped;
+    } else if (IsScriptHtmlCommentClosing(c)) {
+      // --> exits both levels of escaping.
+      script_escape_state_ = HtmlCommentEscapeState::kNone;
     }
   }
 }
@@ -723,15 +734,14 @@ void HtmlLexer::EmitTagOpen(bool allow_implicit_close) {
   if (IsLiteralTag(element_->keyword())) {
     state_ =
         (element_->keyword() == HtmlName::kScript) ? SCRIPT_TAG : LITERAL_TAG;
-    script_html_comment_ = false;
-    script_html_comment_script_ = false;
+    script_escape_state_ = HtmlCommentEscapeState::kNone;
     literal_close_ = StrCat("</", element_->name_str(), ">");
   } else {
     state_ = START;
   }
 
   if (allow_implicit_close && IsImplicitlyClosedTag(element_->keyword())) {
-    element_->name_str().CopyToString(&token_);
+    token_.assign(element_->name_str().data(), element_->name_str().size());
     EmitTagClose(HtmlElement::IMPLICIT_CLOSE);
   }
 
@@ -773,7 +783,7 @@ void HtmlLexer::StartParse(const StringPiece& id,
                            const ContentType& content_type) {
   line_ = 1;
   tag_start_line_ = -1;
-  id.CopyToString(&id_);
+  id_.assign(id.data(), id.size());
   content_type_ = content_type;
   has_attr_value_ = false;
   attr_quote_ = HtmlElement::NO_QUOTE;
@@ -788,8 +798,7 @@ void HtmlLexer::StartParse(const StringPiece& id,
   size_limit_exceeded_ = false;
   skip_parsing_ = false;
   num_bytes_parsed_ = 0;
-  script_html_comment_ = false;
-  script_html_comment_script_ = false;
+  script_escape_state_ = HtmlCommentEscapeState::kNone;
   discard_until_start_state_for_error_recovery_ = false;
   // clear buffers
 }
@@ -820,7 +829,7 @@ void HtmlLexer::FinishParse() {
 
   for (int i = element_stack_.size() - 1; i > 0; --i) {
     HtmlElement* element = element_stack_.back();
-    element->name_str().CopyToString(&token_);
+    token_.assign(element->name_str().data(), element->name_str().size());
     HtmlElement::Style style =
         skip_parsing_ ? HtmlElement::EXPLICIT_CLOSE : HtmlElement::UNCLOSED;
     EmitTagClose(style);
@@ -842,11 +851,18 @@ void HtmlLexer::MakeAttribute(bool has_value) {
   }
   HtmlName name = html_parse_->MakeName(attr_name_);
   attr_name_.clear();
-  const char* value = nullptr;
   html_parse_->message_handler()->Check(has_value == has_attr_value_,
                                         "has_value != has_attr_value_");
+  // Build the value piece explicitly so it is never constructed from a
+  // possibly-null const char*: for valueless (boolean) attributes we need
+  // data() == nullptr to distinguish <tag attr> from <tag attr=> (see
+  // HtmlElement::Attribute::CopyValue), and constructing a StringPiece
+  // from a null const char* is undefined behavior when StringPiece is
+  // backed by std::string_view.  A default-constructed StringPiece is
+  // (nullptr, 0) under both StringPiece dialects.
+  StringPiece value;
   if (has_value) {
-    value = attr_value_.c_str();
+    value = StringPiece(attr_value_.data(), attr_value_.size());
     has_attr_value_ = false;
   } else {
     html_parse_->message_handler()->Check(attr_value_.empty(),
@@ -884,9 +900,10 @@ void HtmlLexer::EvalAttribute(char c) {
   }
 }
 
-// "<x y".
-// HTML5 spec state name: Attribute name
-void HtmlLexer::EvalAttrName(char c) {
+// Shared logic for EvalAttrName and EvalAttrNameSpace: handles '=', space,
+// '>', and '/' which behave identically in both states. Returns true if the
+// character was consumed.
+bool HtmlLexer::HandleAttributeEnd(char c) {
   if (c == '=') {
     state_ = TAG_ATTR_EQ;
     has_attr_value_ = true;
@@ -898,6 +915,15 @@ void HtmlLexer::EvalAttrName(char c) {
   } else if (c == '/') {
     state_ = TAG_BRIEF_CLOSE;
   } else {
+    return false;
+  }
+  return true;
+}
+
+// "<x y".
+// HTML5 spec state name: Attribute name
+void HtmlLexer::EvalAttrName(char c) {
+  if (!HandleAttributeEnd(c)) {
     // This includes both legal characters, and anything else, even stuff
     // like <, etc.
     attr_name_ += c;
@@ -907,17 +933,7 @@ void HtmlLexer::EvalAttrName(char c) {
 // "<x y ".
 // HTML5 spec state name: After attribute name
 void HtmlLexer::EvalAttrNameSpace(char c) {
-  if (c == '=') {
-    state_ = TAG_ATTR_EQ;
-    has_attr_value_ = true;
-  } else if (IsHtmlSpace(c)) {
-    state_ = TAG_ATTR_NAME_SPACE;
-  } else if (c == '>') {
-    MakeAttribute(false);
-    EmitTagOpen(true);
-  } else if (c == '/') {
-    state_ = TAG_BRIEF_CLOSE;
-  } else {
+  if (!HandleAttributeEnd(c)) {
     // "<x y z".  Now that we see the 'z', we need
     // to finish 'y' as an attribute, then queue up
     // 'z' (c) as the start of a new attribute.

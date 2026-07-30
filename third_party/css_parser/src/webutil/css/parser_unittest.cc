@@ -1759,14 +1759,6 @@ TEST_F(ParserTest, SelectorError) {
   EXPECT_EQ(0, stylesheet->rulesets().size());
   EXPECT_TRUE(Parser::kSelectorError & p.errors_seen_mask());
 
-  Parser p2("div:nth-child(1n) { color: red; }");
-  stylesheet.reset(p2.ParseStylesheet());
-  EXPECT_TRUE(Parser::kSelectorError & p2.errors_seen_mask());
-  // Note: We fail to parse the (1n). If this is fixed, this test should be
-  // updated accordingly.
-  EXPECT_EQ("/* AUTHOR */\n\n\n\ndiv:nth-child {color: #ff0000}\n",
-            stylesheet->ToString());
-
   Parser p3("}}");
   stylesheet.reset(p3.ParseStylesheet());
   EXPECT_EQ(0, stylesheet->rulesets().size());
@@ -2964,6 +2956,112 @@ TEST_F(ParserTest, GroupBodyStraySemicolonRecovered) {
   }
 }
 
+TEST_F(ParserTest, MediaBodyStraySemicolonRecovered) {
+  // @media parity with GroupBodyStraySemicolonRecovered above: a stray ';' at
+  // statement position inside an @media body is skipped, browser-style. The
+  // flattened model has no @media node, so both survivors land at top level
+  // carrying the "screen" annotation.
+  for (bool preserve : {false, true}) {
+    SCOPED_TRACE(preserve ? "preservation" : "non-preservation");
+    Parser p("@media screen { .x { width: 1px }; ; .y { width: 2px } }");
+    p.set_preservation_mode(preserve);
+    std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
+    EXPECT_EQ(Parser::kNoError, p.errors_seen_mask());
+    EXPECT_EQ(Parser::kNoError, p.unparseable_sections_seen_mask());
+    EXPECT_TRUE(p.Done());
+    ASSERT_EQ(2, t->rulesets().size());
+    EXPECT_EQ(Ruleset::RULESET, t->ruleset(0).type());
+    EXPECT_EQ(Ruleset::RULESET, t->ruleset(1).type());
+    ASSERT_EQ(1, t->ruleset(0).media_queries().size());
+    EXPECT_EQ("screen",
+              UnicodeTextToUTF8(t->ruleset(0).media_query(0).media_type()));
+    ASSERT_EQ(1, t->ruleset(1).media_queries().size());
+    EXPECT_EQ("screen",
+              UnicodeTextToUTF8(t->ruleset(1).media_query(0).media_type()));
+  }
+}
+
+TEST_F(ParserTest, MediaBodyTailStraySemicolonRecovered) {
+  // The regression that motivated the recovery: with no '{' left in the body,
+  // selector recovery used to eat the @media block's closing '}' hunting for
+  // one, run to EOF, and fail the whole sheet — so it was served unminified
+  // and uncombinable. It must now parse cleanly.
+  for (bool preserve : {false, true}) {
+    SCOPED_TRACE(preserve ? "preservation" : "non-preservation");
+    Parser p("@media screen{.x{color:red};}");
+    p.set_preservation_mode(preserve);
+    std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
+    EXPECT_EQ(Parser::kNoError, p.errors_seen_mask());
+    EXPECT_EQ(Parser::kNoError, p.unparseable_sections_seen_mask());
+    EXPECT_TRUE(p.Done());
+    ASSERT_EQ(1, t->rulesets().size());
+    EXPECT_EQ(Ruleset::RULESET, t->ruleset(0).type());
+    ASSERT_EQ(1, t->ruleset(0).media_queries().size());
+    EXPECT_EQ("screen",
+              UnicodeTextToUTF8(t->ruleset(0).media_query(0).media_type()));
+  }
+}
+
+TEST_F(ParserTest, MediaBodyLeadingAndOnlyStraySemicolon) {
+  // The loop-head placement covers a ';' in leading position too, not only
+  // the trailing one, and a body holding nothing but a ';' is accepted as an
+  // empty block. @media has no AST node of its own, so the empty block simply
+  // stops being emitted rather than falling back to original bytes.
+  for (bool preserve : {false, true}) {
+    SCOPED_TRACE(preserve ? "preservation" : "non-preservation");
+    {
+      // Leading position: the rule after the ';' still parses.
+      Parser p("@media screen{;.a{b:c}}");
+      p.set_preservation_mode(preserve);
+      std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
+      EXPECT_EQ(Parser::kNoError, p.errors_seen_mask());
+      EXPECT_EQ(Parser::kNoError, p.unparseable_sections_seen_mask());
+      EXPECT_TRUE(p.Done());
+      ASSERT_EQ(1, t->rulesets().size());
+      EXPECT_EQ(Ruleset::RULESET, t->ruleset(0).type());
+      ASSERT_EQ(1, t->ruleset(0).media_queries().size());
+      EXPECT_EQ("screen",
+                UnicodeTextToUTF8(t->ruleset(0).media_query(0).media_type()));
+    }
+    {
+      // Only a ';': zero rulesets, clean masks.
+      Parser p("@media screen{;}");
+      p.set_preservation_mode(preserve);
+      std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
+      EXPECT_EQ(Parser::kNoError, p.errors_seen_mask());
+      EXPECT_EQ(Parser::kNoError, p.unparseable_sections_seen_mask());
+      EXPECT_TRUE(p.Done());
+      EXPECT_EQ(0, t->rulesets().size());
+    }
+  }
+}
+
+TEST_F(ParserTest, MediaBodyStraySemicolonAfterNestedMedia) {
+  // Nested @media is deliberately not parsed: in preservation mode the inner
+  // block is saved verbatim as an unparsed region carrying the outer "screen"
+  // annotation, which demotes the error to the unparseable mask. A trailing
+  // stray ';' after it used to derail selector recovery through the outer
+  // closing brace and fail the sheet anyway; the recovery now keeps the
+  // demotion intact, so the inner bytes survive untouched.
+  Parser p("@media screen{@media print{a{b:c}};}");
+  p.set_preservation_mode(true);
+  std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
+  EXPECT_EQ(Parser::kNoError, p.errors_seen_mask());
+  EXPECT_NE(Parser::kNoError, p.unparseable_sections_seen_mask());
+  EXPECT_TRUE(p.Done());
+  ASSERT_EQ(1, t->rulesets().size());
+  ASSERT_EQ(Ruleset::UNPARSED_REGION, t->ruleset(0).type());
+  CssStringPiece bytes =
+      t->ruleset(0).unparsed_region()->bytes_in_original_buffer();
+  EXPECT_EQ("@media print{a{b:c}}", string(bytes.data(), bytes.size()));
+  // Those verbatim bytes are exactly what CssMinify re-emits for an unparsed
+  // region, so the inner block survives serialization unchanged.
+  EXPECT_NE(string::npos, t->ToString().find("@media print{a{b:c}}"));
+  ASSERT_EQ(1, t->ruleset(0).media_queries().size());
+  EXPECT_EQ("screen",
+            UnicodeTextToUTF8(t->ruleset(0).media_query(0).media_type()));
+}
+
 TEST_F(ParserTest, GroupBodyGarbageCrossingBraceFallsBack) {
   // Non-';' garbage at statement position with no '{' after it: selector
   // recovery scans past the group's closing brace to EOF. Accepted
@@ -2975,6 +3073,23 @@ TEST_F(ParserTest, GroupBodyGarbageCrossingBraceFallsBack) {
   std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
   EXPECT_NE(Parser::kNoError, p.errors_seen_mask());
   EXPECT_EQ(0, t->rulesets().size());
+}
+
+TEST_F(ParserTest, MediaBodyGarbageCrossingBraceFallsBack) {
+  // The same residual from the @media side, pinned so the ';' recovery above
+  // is not mistaken for general garbage tolerance: only the literal ';' is
+  // special-cased. Non-';' garbage at statement position with no '{' after it
+  // still lets selector recovery scan past the block's closing brace to EOF,
+  // and the error is *preserved* — never a clean mask alongside byte loss —
+  // so downstream falls back to the original bytes. Unlike the group case
+  // there is no @media node to drop, so the rule parsed before the garbage
+  // stays in the flattened sheet; that residue is inert precisely because the
+  // preserved error forces the byte-for-byte fallback.
+  Parser p("@media screen { .x { width: 1px } ) }");
+  p.set_preservation_mode(true);
+  std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
+  EXPECT_NE(Parser::kNoError, p.errors_seen_mask());
+  EXPECT_EQ(1, t->rulesets().size());
 }
 
 TEST_F(ParserTest, GroupUnbalancedEOF) {
@@ -3237,6 +3352,541 @@ TEST_F(ParserTest, MediaRawExpressionValidUtf8) {
   EXPECT_FALSE(query2.expression(0).is_raw());
   EXPECT_EQ("max-width", UnicodeTextToUTF8(query2.expression(0).name()));
   EXPECT_EQ("\xc3\xa9", UnicodeTextToUTF8(query2.expression(0).value()));
+}
+
+TEST_F(ParserTest, CalcAdditionOperator) {
+  // Regression test for the calc()-addition cases ported from mod_pagespeed
+  // 2.0's css_minify_test.cc (CssVarInCalc,
+  // CustomPropertyCalcOperandsPreserved): a '+' that is not the sign of a
+  // number used to fail value parsing (kNumberError), which dropped the
+  // entire declaration in non-preservation mode. It now lexes as an
+  // OPERATOR value, mirroring how '-' already lexed as an identifier.
+  {
+    Parser a("+ 2px");
+    std::unique_ptr<Value> v(ParseAny(&a));
+    ASSERT_TRUE(v.get() != nullptr);
+    EXPECT_EQ(Value::OPERATOR, v->GetLexicalUnitType());
+    EXPECT_EQ("+", UnicodeTextToUTF8(v->GetStringValue()));
+  }
+  for (bool preserve : {false, true}) {
+    SCOPED_TRACE(preserve ? "preservation" : "non-preservation");
+
+    Parser p("h1 { width: calc(1px + 2px); }");
+    p.set_preservation_mode(preserve);
+    std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
+    EXPECT_EQ(Parser::kNoError, p.errors_seen_mask());
+    EXPECT_EQ(Parser::kNoError, p.unparseable_sections_seen_mask());
+    ASSERT_EQ(1, t->rulesets().size());
+    EXPECT_EQ("h1 {width: calc(1px + 2px)}", t->ruleset(0).ToString());
+
+    Parser q("h1 { width: calc(var(--sidebar) + 20px); }");
+    q.set_preservation_mode(preserve);
+    std::unique_ptr<Stylesheet> t2(q.ParseStylesheet());
+    EXPECT_EQ(Parser::kNoError, q.errors_seen_mask());
+    EXPECT_EQ(Parser::kNoError, q.unparseable_sections_seen_mask());
+    ASSERT_EQ(1, t2->rulesets().size());
+    EXPECT_EQ("h1 {width: calc(var(--sidebar) + 20px)}",
+              t2->ruleset(0).ToString());
+
+    // Operands of a calc() expression stored in a custom property.
+    Parser r(":root { --x: 1px + 2px; }");
+    r.set_preservation_mode(preserve);
+    std::unique_ptr<Stylesheet> t3(r.ParseStylesheet());
+    EXPECT_EQ(Parser::kNoError, r.errors_seen_mask());
+    EXPECT_EQ(Parser::kNoError, r.unparseable_sections_seen_mask());
+    ASSERT_EQ(1, t3->rulesets().size());
+    EXPECT_EQ(":root {--x: 1px + 2px}", t3->ruleset(0).ToString());
+
+    // A '+' directly attached to a number still parses as a signed number.
+    Parser s(":root { --x: +2px; }");
+    s.set_preservation_mode(preserve);
+    std::unique_ptr<Stylesheet> t4(s.ParseStylesheet());
+    EXPECT_EQ(Parser::kNoError, s.errors_seen_mask());
+    ASSERT_EQ(1, t4->rulesets().size());
+    EXPECT_EQ(":root {--x: 2px}", t4->ruleset(0).ToString());
+  }
+}
+
+// =============================================================================
+// Modern-CSS regression cases ported from mod_pagespeed 2.0's
+// test/lib/css/css_minify_test.cc. 2.0 asserts minified string
+// output; here we port the constructs and assert this parser's
+// tree/serialization behavior instead. Cases that expose known AST-parser
+// limitations pin the exact current behavior with a comment — teaching the
+// AST parser full modern-CSS semantics is a separate parser-feature
+// decision, not something these tests require.
+// =============================================================================
+
+TEST_F(ParserTest, ModernCssCustomProperties) {
+  // the 2.0 optimizer line: CssCustomProperties, CssVarUsage, CssVarWithFallback.
+  for (bool preserve : {false, true}) {
+    SCOPED_TRACE(preserve ? "preservation" : "non-preservation");
+
+    Parser p(":root { --my-color: #ff0; }");
+    p.set_preservation_mode(preserve);
+    std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
+    EXPECT_EQ(Parser::kNoError, p.errors_seen_mask());
+    EXPECT_EQ(Parser::kNoError, p.unparseable_sections_seen_mask());
+    ASSERT_EQ(1, t->rulesets().size());
+    ASSERT_EQ(1, t->ruleset(0).declarations().size());
+    const Declaration* decl = t->ruleset(0).declarations()[0];
+    EXPECT_EQ(Property::OTHER, decl->prop());
+    EXPECT_EQ("--my-color", decl->prop_text());
+    // Note: colors are canonicalized on serialization (#ff0 -> #ffff00).
+    EXPECT_EQ(":root {--my-color: #ffff00}", t->ruleset(0).ToString());
+
+    Parser q("h1 { color: var(--my-color); }");
+    q.set_preservation_mode(preserve);
+    std::unique_ptr<Stylesheet> t2(q.ParseStylesheet());
+    EXPECT_EQ(Parser::kNoError, q.errors_seen_mask());
+    EXPECT_EQ(Parser::kNoError, q.unparseable_sections_seen_mask());
+    ASSERT_EQ(1, t2->rulesets().size());
+    EXPECT_EQ("h1 {color: var(--my-color)}", t2->ruleset(0).ToString());
+
+    Parser r("h1 { color: var(--my-color, #ff0); }");
+    r.set_preservation_mode(preserve);
+    std::unique_ptr<Stylesheet> t3(r.ParseStylesheet());
+    EXPECT_EQ(Parser::kNoError, r.errors_seen_mask());
+    ASSERT_EQ(1, t3->rulesets().size());
+    EXPECT_EQ("h1 {color: var(--my-color, #ffff00)}",
+              t3->ruleset(0).ToString());
+
+    // the 2.0 optimizer line: DoubleHyphenClassSelectorNotOpaque — a double hyphen inside a
+    // class name is an ordinary identifier, not a custom property.
+    Parser s(".foo--bar:hover { color: red }");
+    s.set_preservation_mode(preserve);
+    std::unique_ptr<Stylesheet> t4(s.ParseStylesheet());
+    EXPECT_EQ(Parser::kNoError, s.errors_seen_mask());
+    EXPECT_EQ(Parser::kNoError, s.unparseable_sections_seen_mask());
+    ASSERT_EQ(1, t4->rulesets().size());
+    EXPECT_EQ(".foo--bar:hover {color: #ff0000}", t4->ruleset(0).ToString());
+  }
+}
+
+TEST_F(ParserTest, ModernCssCustomPropertyValues) {
+  for (bool preserve : {false, true}) {
+    SCOPED_TRACE(preserve ? "preservation" : "non-preservation");
+
+    // the 2.0 optimizer line: CustomPropertyCommentBecomesTokenSeparator — the comment is
+    // stripped but keeps the tokens apart, matching 2.0.
+    Parser p(":root { --x: a/*c*/b; }");
+    p.set_preservation_mode(preserve);
+    std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
+    EXPECT_EQ(Parser::kNoError, p.errors_seen_mask());
+    EXPECT_EQ(Parser::kNoError, p.unparseable_sections_seen_mask());
+    ASSERT_EQ(1, t->rulesets().size());
+    EXPECT_EQ(":root {--x: a b}", t->ruleset(0).ToString());
+
+    // the 2.0 optimizer line: CustomPropertyInternalSpaceRunsPreserved. DOCUMENTED DIFFERENCE:
+    // 2.0 preserves interior whitespace runs; this parser stores values as a
+    // token vector, so the run collapses to a single space.
+    Parser q(":root { --msg: a   b; }");
+    q.set_preservation_mode(preserve);
+    std::unique_ptr<Stylesheet> t2(q.ParseStylesheet());
+    EXPECT_EQ(Parser::kNoError, q.errors_seen_mask());
+    EXPECT_EQ(Parser::kNoError, q.unparseable_sections_seen_mask());
+    ASSERT_EQ(1, t2->rulesets().size());
+    EXPECT_EQ(":root {--msg: a b}", t2->ruleset(0).ToString());
+
+    // the 2.0 optimizer line: CustomPropertySelectorFragmentPreserved. KNOWN LIMITATION: a
+    // selector fragment is not a representable value here — the declaration
+    // is dropped in non-preservation mode and passed through verbatim in
+    // preservation mode.
+    Parser r(":root { --sel: .a > .b; }");
+    r.set_preservation_mode(preserve);
+    std::unique_ptr<Stylesheet> t3(r.ParseStylesheet());
+    ASSERT_EQ(1, t3->rulesets().size());
+    if (preserve) {
+      EXPECT_EQ(Parser::kNoError, r.errors_seen_mask());
+      EXPECT_EQ(
+          static_cast<uint64_t>(Parser::kNumberError | Parser::kValueError |
+                                Parser::kDeclarationError),
+          r.unparseable_sections_seen_mask());
+      EXPECT_EQ(":root {/* Unparsed declaration: */ --sel: .a > .b}",
+                t3->ruleset(0).ToString());
+    } else {
+      EXPECT_EQ(
+          static_cast<uint64_t>(Parser::kNumberError | Parser::kValueError |
+                                Parser::kDeclarationError),
+          r.errors_seen_mask());
+      EXPECT_EQ(":root {}", t3->ruleset(0).ToString());
+    }
+
+    // the 2.0 optimizer line: CustomPropertyValueWithBalancedBraces. KNOWN LIMITATION: a {}
+    // block inside a value is not representable — dropped/verbatim as
+    // above; surrounding declarations still parse either way.
+    Parser s(".a{--x: {a:b};color: red}");
+    s.set_preservation_mode(preserve);
+    std::unique_ptr<Stylesheet> t4(s.ParseStylesheet());
+    ASSERT_EQ(1, t4->rulesets().size());
+    if (preserve) {
+      EXPECT_EQ(Parser::kNoError, s.errors_seen_mask());
+      EXPECT_EQ(static_cast<uint64_t>(Parser::kBlockError |
+                                      Parser::kSkippedTokenError |
+                                      Parser::kDeclarationError),
+                s.unparseable_sections_seen_mask());
+      EXPECT_EQ(".a {/* Unparsed declaration: */ --x: {a:b}; color: #ff0000}",
+                t4->ruleset(0).ToString());
+    } else {
+      EXPECT_EQ(static_cast<uint64_t>(Parser::kBlockError |
+                                      Parser::kSkippedTokenError |
+                                      Parser::kDeclarationError),
+                s.errors_seen_mask());
+      EXPECT_EQ(".a {color: #ff0000}", t4->ruleset(0).ToString());
+    }
+  }
+}
+
+TEST_F(ParserTest, ModernCssCustomPropertyUnterminated) {
+  // the 2.0 optimizer line: CustomPropertyUnterminatedValueDoesNotCrash. The unterminated
+  // ruleset raises kRulesetError but must not crash; the declaration itself
+  // parses and survives.
+  for (bool preserve : {false, true}) {
+    SCOPED_TRACE(preserve ? "preservation" : "non-preservation");
+    Parser p(".a{--x: 1px + 2px");
+    p.set_preservation_mode(preserve);
+    std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
+    EXPECT_TRUE(Parser::kRulesetError & p.errors_seen_mask());
+    EXPECT_TRUE(p.Done());
+    ASSERT_EQ(1, t->rulesets().size());
+  }
+}
+
+TEST_F(ParserTest, ModernCssFunctionalPseudoclassParams) {
+  // the 2.0 optimizer line: SelectorSpaceBeforeWhere/Is/Not/Has, CompoundSelectorNoSpace.
+  //
+  // Functional pseudo-class arguments are captured verbatim and re-emitted
+  // on serialization (opaque pass-through), so these parse
+  // cleanly in both modes and round-trip un-mangled. They used to report
+  // kSelectorError and serialize with the arguments silently dropped
+  // (".prose :where" — a selector no browser would match), demoting to a
+  // byte-exact unparsed-selectors region in preservation mode.
+  for (const char* css :
+       {".prose :where(h2){color:red}", ".prose:where(h2){color:red}",
+        ".div :is(.a,.b){color:red}", ".x :not(.y){color:red}",
+        ".a :has(.b){color:red}"}) {
+    SCOPED_TRACE(css);
+
+    Parser p(css);
+    std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
+    EXPECT_EQ(Parser::kNoError, p.errors_seen_mask());
+    EXPECT_TRUE(p.Done());
+    ASSERT_EQ(1, t->rulesets().size());
+
+    Parser q(css);
+    q.set_preservation_mode(true);
+    std::unique_ptr<Stylesheet> t2(q.ParseStylesheet());
+    EXPECT_EQ(Parser::kNoError, q.errors_seen_mask());
+    EXPECT_EQ(Parser::kNoError, q.unparseable_sections_seen_mask());
+    ASSERT_EQ(1, t2->rulesets().size());
+    // A real parsed ruleset now, not an unparsed-selectors dummy region,
+    // so its declarations are processed in preservation mode too.
+    EXPECT_FALSE(t2->ruleset(0).selectors().is_dummy());
+
+    // The selector survives un-mangled in both modes (declaration
+    // serialization normalizes the color either way).
+    const string selector = string(css).substr(0, string(css).find('{'));
+    EXPECT_EQ(selector + " {color: #ff0000}", t->ruleset(0).ToString());
+    EXPECT_EQ(selector + " {color: #ff0000}", t2->ruleset(0).ToString());
+  }
+}
+
+TEST_F(ParserTest, ModernCssTailwindTypographyPattern) {
+  // the 2.0 optimizer line: TailwindTypographyPattern — real-world Tailwind CSS v4 selector
+  // with nested functional pseudo-classes and attribute selectors. The
+  // nested balanced argument text round-trips verbatim in
+  // both modes; this used to serialize as the matches-nothing
+  // ".prose :where:not" in non-preservation mode and demote to a
+  // byte-exact dummy region in preservation mode.
+  const char* kCss =
+      ".prose :where(h2):not(:where([class~=not-prose],[class~=not-prose] *))"
+      "{color:red}";
+  const char* kSerialized =
+      ".prose :where(h2):not(:where([class~=not-prose],[class~=not-prose] *))"
+      " {color: #ff0000}";
+
+  Parser p(kCss);
+  std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
+  EXPECT_EQ(Parser::kNoError, p.errors_seen_mask());
+  ASSERT_EQ(1, t->rulesets().size());
+  EXPECT_EQ(kSerialized, t->ruleset(0).ToString());
+
+  Parser q(kCss);
+  q.set_preservation_mode(true);
+  std::unique_ptr<Stylesheet> t2(q.ParseStylesheet());
+  EXPECT_EQ(Parser::kNoError, q.errors_seen_mask());
+  EXPECT_EQ(Parser::kNoError, q.unparseable_sections_seen_mask());
+  ASSERT_EQ(1, t2->rulesets().size());
+  EXPECT_FALSE(t2->ruleset(0).selectors().is_dummy());
+  EXPECT_EQ(kSerialized, t2->ruleset(0).ToString());
+}
+
+TEST_F(ParserTest, ModernCssFunctionalPseudoclassRoundTrip) {
+  // functional pseudo-class argument pass-through. Each
+  // selector parses with kNoError in non-preservation mode and serializes
+  // with its argument text verbatim, and serialization is idempotent
+  // (parse -> ToString -> re-parse -> identical ToString).
+  for (const char* selector :
+       {":where(h2)", ":is(h1, h2)", ":not(.a, .b)", ":has(> img)",
+        ":matches(.x)", ":lang(en)", ":nth-child(2n+1)",
+        ":nth-child(2n of .foo)",
+        // Nested functional pseudo-classes.
+        ":not(:where(h2))", ":where(:is(.a, .b) > .c)",
+        // A ')' inside a quoted string in the arguments does not terminate
+        // the balanced capture.
+        ":not([data-x=\")\"])",
+        // Pseudo-element separator (::) with arguments.
+        "::slotted(span)",
+        // Tailwind-v4-style compound selector mixing element, class,
+        // attribute, functional pseudo-class and plain pseudo-class.
+        "a.x[href]:where(.y):hover",
+        // The legacy documented-gap case from ParserTest.SelectorError.
+        "div:nth-child(1n)",
+        // Empty argument list: valid, and the parens are kept.
+        ":where()"}) {
+    SCOPED_TRACE(selector);
+    const string css = string(selector) + "{color:red}";
+    const string expected = string(selector) + " {color: #ff0000}";
+
+    Parser p(css);
+    std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
+    EXPECT_EQ(Parser::kNoError, p.errors_seen_mask());
+    ASSERT_EQ(1, t->rulesets().size());
+    EXPECT_EQ(expected, t->ruleset(0).ToString());
+
+    // Idempotence: re-parsing the serialization yields the same
+    // serialization. (The Parser borrows the input buffer, so the
+    // serialized text must outlive it — hence the named variable.)
+    const string serialized = t->ruleset(0).ToString();
+    Parser p2(serialized);
+    std::unique_ptr<Stylesheet> t2(p2.ParseStylesheet());
+    EXPECT_EQ(Parser::kNoError, p2.errors_seen_mask());
+    ASSERT_EQ(1, t2->rulesets().size());
+    EXPECT_EQ(expected, t2->ruleset(0).ToString());
+  }
+}
+
+TEST_F(ParserTest, ModernCssFunctionalPseudoclassMalformed) {
+  // an unbalanced argument list (EOF before ')') keeps the
+  // legacy kSelectorError behavior.
+  Parser p(".a:where(h2{ color:red }");
+  std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
+  EXPECT_TRUE(Parser::kSelectorError & p.errors_seen_mask());
+  EXPECT_TRUE(p.Done());
+  EXPECT_EQ(0, t->rulesets().size());
+
+  // Mixed stylesheet: a malformed functional pseudo-class in one ruleset
+  // does not affect a well-formed functional-pseudo-class ruleset, and
+  // the error mask still reports the bad one.
+  Parser p2(".ok:where(h2){color:red} .a:where(h2{ color:red }");
+  std::unique_ptr<Stylesheet> t2(p2.ParseStylesheet());
+  EXPECT_TRUE(Parser::kSelectorError & p2.errors_seen_mask());
+  EXPECT_TRUE(p2.Done());
+  ASSERT_EQ(1, t2->rulesets().size());
+  EXPECT_EQ(".ok:where(h2) {color: #ff0000}", t2->ruleset(0).ToString());
+}
+
+TEST_F(ParserTest, ModernCssDescendantCombinatorInsideAtRules) {
+  // the 2.0 optimizer line: DescendantCombinatorInsideAtLayer,
+  // DescendantCombinatorInsideNestedAtRules. The @layer/@supports group
+  // structure itself parses cleanly, and since the inner
+  // functional-pseudo-class ruleset parses cleanly too.
+  for (bool preserve : {false, true}) {
+    SCOPED_TRACE(preserve ? "preservation" : "non-preservation");
+
+    Parser p("@layer base{.prose :where(h2){font-weight:700}}");
+    p.set_preservation_mode(preserve);
+    std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
+    EXPECT_EQ(Parser::kNoError, p.errors_seen_mask());
+    EXPECT_EQ(Parser::kNoError, p.unparseable_sections_seen_mask());
+    ASSERT_EQ(1, t->rulesets().size());
+    ASSERT_EQ(Ruleset::GROUP_RULE, t->ruleset(0).type());
+    EXPECT_EQ("@layer base", t->ruleset(0).group_prelude());
+    ASSERT_EQ(1, t->ruleset(0).group_body().rulesets().size());
+
+    Parser q(
+        "@layer base{@supports (display:grid){.prose :where(h2){color:red}}}");
+    q.set_preservation_mode(preserve);
+    std::unique_ptr<Stylesheet> t2(q.ParseStylesheet());
+    EXPECT_EQ(Parser::kNoError, q.errors_seen_mask());
+    EXPECT_EQ(Parser::kNoError, q.unparseable_sections_seen_mask());
+    ASSERT_EQ(1, t2->rulesets().size());
+    ASSERT_EQ(Ruleset::GROUP_RULE, t2->ruleset(0).type());
+    EXPECT_EQ("@layer base", t2->ruleset(0).group_prelude());
+    const Stylesheet& layer_body = t2->ruleset(0).group_body();
+    ASSERT_EQ(1, layer_body.rulesets().size());
+    ASSERT_EQ(Ruleset::GROUP_RULE, layer_body.ruleset(0).type());
+    EXPECT_EQ("@supports (display:grid)",
+              layer_body.ruleset(0).group_prelude());
+    ASSERT_EQ(1, layer_body.ruleset(0).group_body().rulesets().size());
+  }
+}
+
+TEST_F(ParserTest, ModernCssMediaFeatureColonSpace) {
+  // the 2.0 optimizer line: MediaFeatureColonSpacePreserved. Accepted without error in both
+  // modes; serialization normalizes "max-width :" to "max-width:", which is
+  // semantically safe.
+  for (bool preserve : {false, true}) {
+    SCOPED_TRACE(preserve ? "preservation" : "non-preservation");
+    Parser p("@media (max-width : 600px){h1{color:red}}");
+    p.set_preservation_mode(preserve);
+    std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
+    EXPECT_EQ(Parser::kNoError, p.errors_seen_mask());
+    EXPECT_EQ(Parser::kNoError, p.unparseable_sections_seen_mask());
+    ASSERT_EQ(1, t->rulesets().size());
+    EXPECT_EQ("@media (max-width: 600px) { h1 {color: #ff0000} }",
+              t->ruleset(0).ToString());
+  }
+}
+
+TEST_F(ParserTest, ModernCssDescendantBeforePseudoClass) {
+  // the 2.0 optimizer line: SelectorSpaceBeforeHover, SelectorSpaceBeforeFirstChild,
+  // SelectorSpaceBeforePseudoElement. A descendant combinator before a
+  // non-functional pseudo-class/element parses cleanly — the space is
+  // preserved as DESCENDANT, not glued into a compound selector.
+  for (bool preserve : {false, true}) {
+    SCOPED_TRACE(preserve ? "preservation" : "non-preservation");
+
+    Parser p(".nav :hover{color:blue}");
+    p.set_preservation_mode(preserve);
+    std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
+    EXPECT_EQ(Parser::kNoError, p.errors_seen_mask());
+    ASSERT_EQ(1, t->rulesets().size());
+    ASSERT_EQ(2, t->ruleset(0).selector(0).size());
+    EXPECT_EQ(SimpleSelectors::DESCENDANT,
+              t->ruleset(0).selectors()[0]->at(1)->combinator());
+    EXPECT_EQ(".nav :hover {color: #0000ff}", t->ruleset(0).ToString());
+
+    Parser q("ul :first-child{color:red}");
+    q.set_preservation_mode(preserve);
+    std::unique_ptr<Stylesheet> t2(q.ParseStylesheet());
+    EXPECT_EQ(Parser::kNoError, q.errors_seen_mask());
+    ASSERT_EQ(1, t2->rulesets().size());
+    EXPECT_EQ("ul :first-child {color: #ff0000}", t2->ruleset(0).ToString());
+
+    Parser r(".card ::before{content:''}");
+    r.set_preservation_mode(preserve);
+    std::unique_ptr<Stylesheet> t3(r.ParseStylesheet());
+    EXPECT_EQ(Parser::kNoError, r.errors_seen_mask());
+    ASSERT_EQ(1, t3->rulesets().size());
+    EXPECT_EQ(".card ::before {content: \"\"}", t3->ruleset(0).ToString());
+  }
+}
+
+TEST_F(ParserTest, ModernCssEscapedSpaceInSelector) {
+  // the 2.0 optimizer line: EscapedSpaceInSelectorPreserved,
+  // EscapedSpaceBeforeCombinatorPreserved. The escaped space is part of the
+  // class identifier and must survive; the serializer emits it as "\ ".
+  for (bool preserve : {false, true}) {
+    SCOPED_TRACE(preserve ? "preservation" : "non-preservation");
+
+    Parser p(".a\\ { color: red; }");
+    p.set_preservation_mode(preserve);
+    std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
+    EXPECT_EQ(Parser::kNoError, p.errors_seen_mask());
+    ASSERT_EQ(1, t->rulesets().size());
+    EXPECT_EQ(".a\\  {color: #ff0000}", t->ruleset(0).ToString());
+
+    Parser q(".a\\  > b { color: red; }");
+    q.set_preservation_mode(preserve);
+    std::unique_ptr<Stylesheet> t2(q.ParseStylesheet());
+    EXPECT_EQ(Parser::kNoError, q.errors_seen_mask());
+    ASSERT_EQ(1, t2->rulesets().size());
+    EXPECT_EQ(".a\\  > b {color: #ff0000}", t2->ruleset(0).ToString());
+  }
+}
+
+TEST_F(ParserTest, ModernCssTrailingBackslashAtEof) {
+  // the 2.0 optimizer line: TrailingBackslashAtEofDoesNotCrash. The dangling escape raises
+  // kSelectorError but the preceding ruleset survives and nothing crashes.
+  for (bool preserve : {false, true}) {
+    SCOPED_TRACE(preserve ? "preservation" : "non-preservation");
+    Parser p("h1{color:red}\\");
+    p.set_preservation_mode(preserve);
+    std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
+    EXPECT_TRUE(Parser::kSelectorError & p.errors_seen_mask());
+    EXPECT_TRUE(p.Done());
+    ASSERT_EQ(1, t->rulesets().size());
+    EXPECT_EQ("h1 {color: #ff0000}", t->ruleset(0).ToString());
+  }
+}
+
+TEST_F(ParserTest, ModernCssDeepNestingDoesNotCrash) {
+  // the 2.0 optimizer line: Phase5DeepNestingDoesNotCrash. 200 nested blocks far exceed
+  // kMaxGroupRuleDepth; the parser must terminate without crashing.
+  string css;
+  for (int i = 0; i < 200; ++i) {
+    css += "a{";
+  }
+  css += "color:red";
+  for (int i = 0; i < 200; ++i) {
+    css += "}";
+  }
+
+  Parser p(css);
+  std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
+  EXPECT_EQ(
+      static_cast<uint64_t>(Parser::kBlockError | Parser::kDeclarationError),
+      p.errors_seen_mask());
+  EXPECT_TRUE(p.Done());
+
+  Parser q(css);
+  q.set_preservation_mode(true);
+  std::unique_ptr<Stylesheet> t2(q.ParseStylesheet());
+  EXPECT_EQ(Parser::kNoError, q.errors_seen_mask());
+  EXPECT_EQ(
+      static_cast<uint64_t>(Parser::kBlockError | Parser::kDeclarationError),
+      q.unparseable_sections_seen_mask());
+  EXPECT_TRUE(q.Done());
+}
+
+TEST_F(ParserTest, UnicodeRangeLexingShapes) {
+  // Companion to CalcAdditionOperator pinning how unicode-range values lex
+  // now that a non-numeric '+' is an OPERATOR. net/instaweb's
+  // collect_dependencies_filter reconstructs the original token text from
+  // these parsed values to evaluate basic-text coverage, so the shapes are
+  // a contract:
+  //  - Digit-leading tokens keep lexing as IDENT "U" + NUMBER whose
+  //    "-XXXX" tail became a dimension unit (verbatim bytes preserved).
+  //  - Letter-leading tokens (U+FEFF) lex as IDENT "U" + OPERATOR "+" +
+  //    IDENT "FEFF" --- before the OPERATOR change they failed value
+  //    parsing and demoted to UNPARSEABLE dummies in preservation mode.
+  //  - Wildcard tokens (U+26??) still fail value parsing and demote.
+  Parser p("@font-face { unicode-range: U+0000-00FF, U+FEFF; }");
+  p.set_preservation_mode(true);
+  std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
+  EXPECT_EQ(Parser::kNoError, p.errors_seen_mask());
+  ASSERT_EQ(1, t->font_faces().size());
+  const FontFace& face = t->font_face(0);
+  ASSERT_EQ(1, face.declarations().size());
+  const Declaration& decl = *face.declarations().at(0);
+  EXPECT_EQ("unicode-range", decl.prop_text());
+  ASSERT_TRUE(decl.values() != nullptr);
+  const Values& values = *decl.values();
+  ASSERT_EQ(6, values.size());
+  EXPECT_EQ(Value::IDENT, values.get(0)->GetLexicalUnitType());
+  EXPECT_EQ("U", UnicodeTextToUTF8(values.get(0)->GetIdentifierText()));
+  EXPECT_EQ(Value::NUMBER, values.get(1)->GetLexicalUnitType());
+  EXPECT_EQ("+0000", values.get(1)->bytes_in_original_buffer());
+  EXPECT_EQ("-00FF", values.get(1)->GetDimensionUnitText());
+  EXPECT_EQ(Value::COMMA, values.get(2)->GetLexicalUnitType());
+  EXPECT_EQ(Value::IDENT, values.get(3)->GetLexicalUnitType());
+  EXPECT_EQ("U", UnicodeTextToUTF8(values.get(3)->GetIdentifierText()));
+  EXPECT_EQ(Value::OPERATOR, values.get(4)->GetLexicalUnitType());
+  EXPECT_EQ("+", UnicodeTextToUTF8(values.get(4)->GetStringValue()));
+  EXPECT_EQ(Value::IDENT, values.get(5)->GetLexicalUnitType());
+  EXPECT_EQ("FEFF", UnicodeTextToUTF8(values.get(5)->GetIdentifierText()));
+
+  // Wildcard forms still fail value parsing and demote to an UNPARSEABLE
+  // dummy carrying the verbatim declaration bytes in preservation mode.
+  Parser w("@font-face { unicode-range: U+26??; }");
+  w.set_preservation_mode(true);
+  std::unique_ptr<Stylesheet> t2(w.ParseStylesheet());
+  ASSERT_EQ(1, t2->font_faces().size());
+  const FontFace& wface = t2->font_face(0);
+  ASSERT_EQ(1, wface.declarations().size());
+  EXPECT_EQ(Property::UNPARSEABLE,
+            wface.declarations().at(0)->property().prop());
 }
 
 }  // namespace Css

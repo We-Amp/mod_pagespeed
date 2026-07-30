@@ -1335,6 +1335,26 @@ void RewriteOptions::AddProperties() {
   properties_->property(properties_->size() - 1)
       ->set_do_not_use_for_signature_computation(true);
 
+  // The legacy JavaScript minifier was removed; this option is kept
+  // registered -- with the same name, id and scope -- so that configurations
+  // that still carry the directive keep parsing on every port and via remote
+  // config.  Its value is never read.  Registered here rather than in
+  // rewrite_options_properties.inc because it needs the post-registration
+  // signature tweak below.
+  AddBaseProperty(true, &RewriteOptions::use_experimental_js_minifier_, "uejsm",
+                  kUseExperimentalJsMinifier, kDirectoryScope,
+                  "Deprecated and ignored: the legacy JavaScript minifier was "
+                  "removed; the tokenizer-based minifier is the only "
+                  "JavaScript minifier",
+                  true);
+  // Load-bearing.  If this no-op option stayed in the signature, a config
+  // carrying the directive would keep its pre-removal metadata-cache key and
+  // keep emitting the rewritten URLs the removed minifier produced.  Excluding
+  // it converges such a config onto the same metadata partition as a default
+  // config, so its JavaScript is re-minified once after the upgrade.
+  properties_->property(properties_->size() - 1)
+      ->set_do_not_use_for_signature_computation(true);
+
   // Some options are removed, but we recognize their names for backwards
   // compatibility with config files that still have them.
   AddDeprecatedProperty("MaxPrefetchJsElements", kDirectoryScope);
@@ -2290,17 +2310,14 @@ RewriteOptions::ParseAndSetOptionFromNameWithScope(
             "AnalyticsID targets Universal Analytics, which was discontinued "
             "in July 2023. insert_ga is deprecated; use your own analytics "
             "for experiment reporting.");
-      } else if (StringCaseEqual(name, kUseExperimentalJsMinifier) &&
-                 !use_experimental_js_minifier_.value()) {
-        // Only an explicit 'off' reaches this warning: an unset option takes
-        // the tokenizer-based minifier (the default), and an explicit 'on'
-        // matches it, so both stay silent.
+      } else if (StringCaseEqual(name, kUseExperimentalJsMinifier)) {
+        // Either value warns: with the legacy minifier gone, 'on' is as
+        // meaningless as 'off'.
         handler->Message(
             kWarning,
-            "UseExperimentalJsMinifier off: the legacy JavaScript minifier is "
-            "deprecated and will be removed in a future release. The "
-            "tokenizer-based minifier is the default; remove the directive "
-            "to silence this warning.");
+            "'UseExperimentalJsMinifier': the legacy JavaScript minifier has "
+            "been removed; the option is deprecated and ignored. Remove the "
+            "directive.");
       }
     }
     return FormatSetOptionMessage(result, name, arg, error_detail, msg);

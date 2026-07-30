@@ -101,6 +101,7 @@ struct KeywordMap {const char* name; net_instaweb::HtmlName::Keyword keyword;};
 "command",                            HtmlName::kCommand
 "content",                            HtmlName::kContent
 "controls",                           HtmlName::kControls
+"crossorigin",                        HtmlName::kCrossorigin
 "data",                               HtmlName::kData
 "datalist",                           HtmlName::kDatalist
 "data-actual-height",                 HtmlName::kDataActualHeight
@@ -181,6 +182,7 @@ struct KeywordMap {const char* name; net_instaweb::HtmlName::Keyword keyword;};
 "indeterminate",                      HtmlName::kIndeterminate
 "ins",                                HtmlName::kIns
 "input",                              HtmlName::kInput
+"integrity",                          HtmlName::kIntegrity
 "ismap",                              HtmlName::kIsmap
 "itemprop",                           HtmlName::kItemProp
 "kbd",                                HtmlName::kKbd
@@ -264,6 +266,7 @@ struct KeywordMap {const char* name; net_instaweb::HtmlName::Keyword keyword;};
 "tag",                                HtmlName::kTag
 "tbody",                              HtmlName::kTbody
 "td",                                 HtmlName::kTd
+"template",                           HtmlName::kTemplate
 "test",                               HtmlName::kTest
 "textarea",                           HtmlName::kTextarea
 "tfoot",                              HtmlName::kTfoot

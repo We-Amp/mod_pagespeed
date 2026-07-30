@@ -65,17 +65,7 @@ const char* kBeforeCompilation =
     "    is.gecko = true;\n"
     "}\n";
 
-const char* kAfterCompilationOld =
-    "var is={ie:navigator.appName=='Microsoft Internet Explorer',"
-    "java:navigator.javaEnabled(),ns:navigator.appName=='Netscape',"
-    "ua:navigator.userAgent.toLowerCase(),version:parseFloat("
-    "navigator.appVersion.substr(21))||parseFloat(navigator.appVersion)"
-    ",win:navigator.platform=='Win32'}\n"
-    "is.mac=is.ua.indexOf('mac')>=0;if(is.ua.indexOf('opera')>=0){"
-    "is.ie=is.ns=false;is.opera=true;}\n"
-    "if(is.ua.indexOf('gecko')>=0){is.ie=is.ns=false;is.gecko=true;}";
-
-const char* kAfterCompilationNew =
+const char* kAfterCompilation =
     "var is={ie:navigator.appName=='Microsoft Internet Explorer',"
     "java:navigator.javaEnabled(),ns:navigator.appName=='Netscape',"
     "ua:navigator.userAgent.toLowerCase(),version:parseFloat("
@@ -89,34 +79,16 @@ const char kTestRootDir[] = "/test/pagespeed/kernel/js/testdata/third_party/";
 
 class JsMinifyTest : public testing::Test {
  protected:
-  void CheckOldMinification(StringPiece before, StringPiece after) {
-    GoogleString output;
-    EXPECT_TRUE(pagespeed::js::MinifyJs(before, &output));
-    EXPECT_EQ(after, output);
-
-    int output_size = -1;
-    EXPECT_TRUE(pagespeed::js::GetMinifiedJsSize(before, &output_size));
-    EXPECT_EQ(static_cast<int>(after.size()), output_size);
-  }
-
   void CheckNewMinification(StringPiece before, StringPiece after) {
     GoogleString output;
     EXPECT_TRUE(pagespeed::js::MinifyUtf8Js(&patterns_, before, &output));
     EXPECT_EQ(after, output);
   }
 
+  // The tokenizer-based minifier is the only minifier; these names are kept
+  // so the ~90 call sites below read unchanged.
   void CheckMinification(StringPiece before, StringPiece after) {
-    CheckOldMinification(before, after);
     CheckNewMinification(before, after);
-  }
-
-  void CheckOldError(StringPiece input) {
-    GoogleString output;
-    EXPECT_FALSE(pagespeed::js::MinifyJs(input, &output));
-
-    int output_size = -1;
-    EXPECT_FALSE(pagespeed::js::GetMinifiedJsSize(input, &output_size));
-    EXPECT_EQ(-1, output_size);
   }
 
   void CheckNewError(StringPiece input) {
@@ -124,10 +96,7 @@ class JsMinifyTest : public testing::Test {
     EXPECT_FALSE(pagespeed::js::MinifyUtf8Js(&patterns_, input, &output));
   }
 
-  void CheckError(StringPiece input) {
-    CheckOldError(input);
-    CheckNewError(input);
-  }
+  void CheckError(StringPiece input) { CheckNewError(input); }
 
   void CheckFileMinification(StringPiece before_filename,
                              StringPiece after_filename) {
@@ -156,14 +125,11 @@ class JsMinifyTest : public testing::Test {
 };
 
 TEST_F(JsMinifyTest, Basic) {
-  // Our new minifier is slightly better at removing linebreaks than our old
-  // minifier, so they get slightly different results for this test.
-  CheckOldMinification(kBeforeCompilation, kAfterCompilationOld);
-  CheckNewMinification(kBeforeCompilation, kAfterCompilationNew);
+  CheckNewMinification(kBeforeCompilation, kAfterCompilation);
 }
 
 TEST_F(JsMinifyTest, AlreadyMinified) {
-  CheckMinification(kAfterCompilationNew, kAfterCompilationNew);
+  CheckMinification(kAfterCompilation, kAfterCompilation);
 }
 
 TEST_F(JsMinifyTest, Json) {
@@ -196,9 +162,7 @@ TEST_F(JsMinifyTest, ErrorTrailingBackslashInRegex) {
 
 TEST_F(JsMinifyTest, DeeplyNestedInputFailsGracefully) {
   // The tokenizer caps its parse stack depth, so crafted deeply nested input
-  // must produce a graceful error rather than unbounded memory growth.  (The
-  // legacy minifier keeps no nesting state, so only the new minifier is
-  // exercised here.)
+  // must produce a graceful error rather than unbounded memory growth.
   CheckNewError(GoogleString(100000, '['));
   CheckNewError(GoogleString(100000, '('));
 }
@@ -207,20 +171,9 @@ TEST_F(JsMinifyTest, ErrorRegexNewline) {
   CheckError("/not_valid\njavascript/;");
 }
 
-TEST_F(JsMinifyTest, OldMinifierBailsOnTemplateLiteral) {
-  // The legacy minifier does not understand template literals; rather than
-  // corrupt the literal body it must treat the input as unparseable.
-  CheckOldError("var x = `hello ${1 + 2} world`;");
-}
-
 TEST_F(JsMinifyTest, Es2020NullishCoalescing) {
   CheckNewMinification("a ?? b;", "a??b;");
   CheckNewMinification("x ??= y;", "x??=y;");
-  // Pin that the legacy minifier is UNCHANGED: it has no parse states for
-  // these operators and simply passes the characters through (it never
-  // bailed on them, so "unchanged" here means identical output, not error).
-  CheckOldMinification("a ?? b;", "a??b;");
-  CheckOldMinification("x ??= y;", "x??=y;");
 }
 
 TEST_F(JsMinifyTest, Es2020NullishThenRegex) {
@@ -232,8 +185,6 @@ TEST_F(JsMinifyTest, Es2020NullishThenRegex) {
 TEST_F(JsMinifyTest, Es2020OptionalChaining) {
   CheckNewMinification("a ?. b;", "a?.b;");
   CheckNewMinification("r = a?.b ?? c;", "r=a?.b??c;");
-  // Legacy minifier pin (pass-through, unchanged).
-  CheckOldMinification("a ?. b;", "a?.b;");
 }
 
 TEST_F(JsMinifyTest, Es2020TernaryWithLeadingDecimal) {
@@ -251,15 +202,12 @@ TEST_F(JsMinifyTest, Es2015Destructuring) {
   CheckNewMinification("const { a, b } = x;", "const{a,b}=x;");
   CheckNewMinification("const [ a ] = xs;", "const[a]=xs;");
   CheckNewMinification("let { a } = x;", "let{a}=x;");
-  // Legacy minifier pin (pass-through, unchanged).
-  CheckOldMinification("const { a, b } = x;", "const{a,b}=x;");
 }
 
 TEST_F(JsMinifyTest, Es2015LetDeclaration) {
   CheckMinification("let x = 1;", "let x=1;");
-  // A linebreak between `let` and its binding is preserved by both
-  // generations (old path: semicolon-insertion rendering; new path:
-  // name-after-name linebreak) -- byte-identical either way.
+  // A linebreak between `let` and its binding is preserved (name-after-name
+  // linebreak).
   CheckMinification("let\nx = 1;", "let\nx=1;");
 }
 
@@ -269,10 +217,8 @@ TEST_F(JsMinifyTest, Es2015LetNonBindingUses) {
   // the destructuring change (slash after `let` is division).
   CheckMinification("let / 2;", "let/2;");
   CheckMinification("let = 5;", "let=5;");
-  // The legacy minifier has a pre-existing failure on `++ /` (it guesses
-  // regex after ++ and hits the linebreak/EOF), so pin the new minifier
-  // only: postfix ++ leaves an expression, slash is division.
-  CheckNewMinification("let++ / 2;", "let++/2;");
+  // Postfix ++ leaves an expression, so the slash is division.
+  CheckMinification("let++ / 2;", "let++/2;");
 }
 
 TEST_F(JsMinifyTest, Es2020KeywordExpressions) {
@@ -287,8 +233,7 @@ TEST_F(JsMinifyTest, Es2015ModuleDeclarationAsi) {
   // ASI fires at the grammatical end of an import/export declaration
   // regardless of the following token, so the linebreak is significant:
   // dropping it fuses the next statement into the declaration and produces
-  // a SyntaxError.  (New-minifier pins; the legacy minifier does not model
-  // modules.)
+  // a SyntaxError.
   CheckNewMinification("import 'x'\n(main)()", "import'x'\n(main)()");
   CheckNewMinification("import a from 'x'\n/re/g", "import a from'x'\n/re/g");
   CheckNewMinification("export {a}\n(re)", "export{a}\n(re)");
@@ -380,7 +325,6 @@ TEST_F(JsMinifyTest, LetVarDeclarationAsi) {
   // ASI fires after the bare binding of a plain let/var declaration,
   // exactly as it does for `export let x`: dropping the linebreak fuses
   // the next statement into the declaration and produces a SyntaxError.
-  // (New-minifier pins; the legacy minifier does not model `let`.)
   CheckNewMinification("let x\n(a)()", "let x\n(a)()");
   CheckNewMinification("var x\n(a)()", "var x\n(a)()");
   CheckNewMinification("let x\n/re/;", "let x\n/re/;");
@@ -430,11 +374,25 @@ TEST_F(JsMinifyTest, ArrowBodyAsi) {
   CheckNewMinification("x = () => 5\n/re/g;", "x=()=>5/re/g;");
 }
 
+TEST_F(JsMinifyTest, LinebreakBeforeArrowHead) {  //
+  // ECMA-262 forbids a LineTerminator between an arrow head and its =>, so
+  // the linebreak before => always inserts a semicolon and must survive.
+  // The input was already invalid; the byte-preserving contract demands the
+  // output stay invalid too (it must not minify to the valid "a=x=>y").
+  CheckNewMinification("a = x\n=> y", "a=x\n=>y");
+  // The same trap inside a class-field initializer.
+  CheckNewMinification("class C { x = a\n=> b; }", "class C{x=a\n=>b;}");
+  // Positive controls: a linebreak AFTER the arrow head is insignificant,
+  // and the other =-starting continuations still apply.
+  CheckNewMinification("x = a =>\nb;", "x=a=>b;");
+  CheckNewMinification("a = b\n>= c;", "a=b>=c;");
+  CheckNewMinification("x = y\n== w;", "x=y==w;");
+}
+
 TEST_F(JsMinifyTest, ObjectMethodShorthand) {
   // Method/get/set/async/star shorthand in object literals: the parameter
   // list is a block header and the body a block; the literal then
-  // continues at property position.  (Legacy-minifier coverage varies;
-  // these pin the tokenizer path.)
+  // continues at property position.
   CheckNewMinification("var o = { m() {} };", "var o={m(){}};");
   CheckNewMinification("var o = { get v() { return 1; } };",
                        "var o={get v(){return 1;}};");
@@ -490,13 +448,44 @@ TEST_F(JsMinifyTest, Generators) {
   CheckNewMinification("yield: 1;", "yield:1;");
 }
 
+TEST_F(JsMinifyTest, GeneratorMethodCommaSeparator) {  //
+  // A generator method whose `*` marker pushed the block keyword directly
+  // onto the member-name brace used to leave that bare brace on top when the
+  // body closed, so the comma separating the next member was an error and
+  // the whole file declined.  The marker now installs the same kExpression a
+  // plain method name leaves, and the separator takes the normal path --
+  // for plain names and for the speculative words alike.
+  CheckNewMinification("var o = { *m() {}, b: 2 };", "var o={*m(){},b:2};");
+  CheckNewMinification("var o = { *await() { yield 1; }, b: 2 };",
+                       "var o={*await(){yield 1;},b:2};");
+  CheckNewMinification("var o = { *yield() {}, b: 2 };",
+                       "var o={*yield(){},b:2};");
+  // Mixed member forms after a generator method.
+  CheckNewMinification("var o = { *m() {}, \"s\": 1, [k]: 2, n() {}, *p() {} };",
+                       "var o={*m(){},\"s\":1,[k]:2,n(){},*p(){}};");
+  // The same separator path inside a class-field initializer.
+  CheckNewMinification("class C { x = { *m() {}, b: 2 }; }",
+                       "class C{x={*m(){},b:2};}");
+}
+
 TEST_F(JsMinifyTest, RawLineSeparatorInString) {
   // Raw U+2028/U+2029 inside a string literal (legal since ES2019) pass
   // through verbatim; the byte inside the string is not a linebreak.
-  CheckNewMinification("var s = 'a\xE2\x80\xA8" "b';", "var s='a\xE2\x80\xA8" "b';");
-  CheckNewMinification("var s = 'a\xE2\x80\xA9" "b';", "var s='a\xE2\x80\xA9" "b';");
-  CheckNewMinification("var s = 'a\xE2\x80\xA8" "b'\nvar t = 1;",
-                       "var s='a\xE2\x80\xA8" "b'\nvar t=1;");
+  CheckNewMinification(
+      "var s = 'a\xE2\x80\xA8"
+      "b';",
+      "var s='a\xE2\x80\xA8"
+      "b';");
+  CheckNewMinification(
+      "var s = 'a\xE2\x80\xA9"
+      "b';",
+      "var s='a\xE2\x80\xA9"
+      "b';");
+  CheckNewMinification(
+      "var s = 'a\xE2\x80\xA8"
+      "b'\nvar t = 1;",
+      "var s='a\xE2\x80\xA8"
+      "b'\nvar t=1;");
 }
 
 TEST_F(JsMinifyTest, Shebang) {
@@ -512,11 +501,11 @@ TEST_F(JsMinifyTest, Shebang) {
 TEST_F(JsMinifyTest, ArrowBodyStatements) {
   // An arrow BLOCK body is a block: control statements inside it take
   // their keyword paths (webpack/esbuild runtime-arrow shapes).
-  CheckNewMinification("const load = () => { try { f(); } catch (e) { g(); } };",
-                       "const load=()=>{try{f();}catch(e){g();}};");
   CheckNewMinification(
-      "const load = () => { for (const k in obj) { f(k); } };",
-      "const load=()=>{for(const k in obj){f(k);}};");
+      "const load = () => { try { f(); } catch (e) { g(); } };",
+      "const load=()=>{try{f();}catch(e){g();}};");
+  CheckNewMinification("const load = () => { for (const k in obj) { f(k); } };",
+                       "const load=()=>{for(const k in obj){f(k);}};");
   CheckNewMinification("const load = () => { for (x of y) {} };",
                        "const load=()=>{for(x of y){}};");
   CheckNewMinification("const load = () => { while (cond) { f(); } };",
@@ -577,6 +566,51 @@ TEST_F(JsMinifyTest, ClassBodies) {
   CheckNewMinification("class X {}\n/re/g;", "class X{}/re/g;");
   CheckNewMinification("x = class {}\n/re/g;", "x=class{}/re/g;");
   CheckNewMinification("x = class {}\nfoo();", "x=class{}\nfoo();");
+}
+
+TEST_F(JsMinifyTest, ClassBareFieldAsiBeforeStar) {
+  // The linebreak after a bare class field is ASI-load-bearing when the
+  // next element is a generator method: dropping it fuses the field and
+  // the method into one invalid `x*gen(){}` element (`*` lands in
+  // initializer position as a multiplication; node-verified).
+  CheckNewMinification("class C {\n  x\n  *gen() { yield 1; }\n}",
+                       "class C{x\n*gen(){yield 1;}}");
+  CheckNewMinification("class C {\n  static x\n  *gen() { yield 1; }\n}",
+                       "class C{static x\n*gen(){yield 1;}}");
+  CheckNewMinification("class C {\n  [a]\n  *gen() { yield 1; }\n}",
+                       "class C{[a]\n*gen(){yield 1;}}");
+  // A `*` INSIDE a field initializer is ordinary multiplication and stays
+  // on one line; the linebreak before the next bare field still inserts.
+  CheckNewMinification("class C {\n  x = 3 * 4\n  y\n}", "class C{x=3*4\ny}");
+  // `=` and `(` legitimately continue an element name across a linebreak
+  // (an initializer and a method parameter list) and are not sensitive to
+  // the linebreak, so it still collapses.
+  CheckNewMinification("class C {\n  x\n  = 5\n  y\n}", "class C{x=5\ny}");
+  CheckNewMinification("class C {\n  x\n  () { return 1; }\n}",
+                       "class C{x(){return 1;}}");
+  // Between a completed method and a following generator the linebreak is
+  // conservatively preserved (a just-closed method sits in the same
+  // element position as a field name; both spellings are valid).
+  CheckNewMinification("class C { m(){}\n*gen(){ yield 1; } }",
+                       "class C{m(){}\n*gen(){yield 1;}}");
+  // Object literals separate members with commas, never ASI; unchanged.
+  CheckNewMinification("o = { x: 1,\n*gen(){ yield 1; } };",
+                       "o={x:1,*gen(){yield 1;}};");
+  // The spec-trap variant: a bare field named `async` before a generator
+  // method.  Collapsing the linebreak would manufacture an ASYNC generator
+  // (`async *gen(){}`); with the linebreak the spec forbids the
+  // async-method reading, so it stays a plain generator.
+  CheckNewMinification("class C {\n  async\n  *gen() { yield 1; }\n}",
+                       "class C{async\n*gen(){yield 1;}}");
+  CheckNewMinification("class C { async *gen() { yield 1; } }",
+                       "class C{async*gen(){yield 1;}}");
+  // Private bare field, and a class expression inside parens (the
+  // element-position rule must hold with enclosing paren states on the
+  // parse stack).
+  CheckNewMinification("class C {\n  #x\n  *gen() { yield 1; }\n}",
+                       "class C{#x\n*gen(){yield 1;}}");
+  CheckNewMinification("f((class { y\n*gen() { yield 1; } }));",
+                       "f((class{y\n*gen(){yield 1;}}));");
 }
 
 TEST_F(JsMinifyTest, ExportRenameKeywordComma) {
@@ -656,22 +690,7 @@ TEST_F(JsMinifyTest, CarriageReturnEndsLineComment) {
 
 // See http://code.google.com/p/page-speed/issues/detail?id=198
 TEST_F(JsMinifyTest, LeaveIEConditionalCompilationComments) {
-  // Our new minifier is slightly better at removing linebreaks than our old
-  // minifier, so they get slightly different results for this test.
-  CheckOldMinification(
-      "/*@cc_on\n"
-      "  /*@if (@_win32)\n"
-      "    document.write('IE');\n"
-      "  @else @*/\n"
-      "    document.write('other');\n"
-      "  /*@end\n"
-      "@*/",
-      "/*@cc_on\n"
-      "  /*@if (@_win32)\n"
-      "    document.write('IE');\n"
-      "  @else @*/\n"
-      "document.write('other');/*@end\n"
-      "@*/");
+  // IE conditional-compilation comments are retained verbatim.
   CheckNewMinification(
       "/*@cc_on\n"
       "  /*@if (@_win32)\n"
@@ -685,6 +704,48 @@ TEST_F(JsMinifyTest, LeaveIEConditionalCompilationComments) {
       "    document.write('IE');\n"
       "  @else @*/document.write('other');/*@end\n"
       "@*/");
+}
+
+TEST_F(JsMinifyTest, RetainedCommentNoRegexGlue) {  //
+  // Without a separator, the "/" and the retained comment's "/*" fuse into
+  // "//" -- a line comment that swallows the rest of the line and silently
+  // changes the program's meaning (x becomes 6 instead of 2).
+  CheckNewMinification("var await = 1;\nx = await / 2 / /*@ c @*/ y;",
+                       "var await=1;x=await/ 2 / /*@ c @*/y;");
+  CheckNewMinification("x = a / /*@c@*/ b;", "x=a/ /*@c@*/b;");
+  CheckNewMinification("var a=6,b=3,x; x = a / /*@c@*/ b;",
+                       "var a=6,b=3,x;x=a/ /*@c@*/b;");
+}
+
+TEST_F(JsMinifyTest, RetainedCommentTrailingSlashNoGlue) {  //
+  // The trailing "@*/" ends in "/", so a following "/" would form "//".
+  CheckNewMinification("a = b /*@c@*/ / d;", "a=b/*@c@*/ /d;");
+}
+
+TEST_F(JsMinifyTest, RetainedCommentTightWhenNoGlue) {
+  // When no glue hazard exists, the separator around a retained comment is
+  // dropped (this is a compression improvement over the old early-return
+  // path, which left a stray separator after the comment).
+  CheckNewMinification("x = a /*@c@*/ b;", "x=a/*@c@*/b;");
+  CheckNewMinification("f(); /*@c@*/ g();", "f();/*@c@*/g();");
+  CheckNewMinification("x = 4 /*@c@*/ 5;", "x=4/*@c@*/5;");
+}
+
+TEST_F(JsMinifyTest, RetainedCommentPreservesAsiLinebreak) {  //
+  CheckNewMinification("return\n/*@c@*/ 42;", "return\n/*@c@*/42;");
+}
+
+TEST_F(JsMinifyTest, RetainedCommentPreservesAsiAfterComment) {  //
+  // A comment is grammatically inert: a linebreak *after* the retained comment
+  // must still trigger ASI when the token before it was a speculatively-
+  // classified operator word (await / of) or a restricted-production keyword.
+  CheckNewMinification("var await = 1;\nawait /*@c@*/\ny;",
+                       "var await=1;await/*@c@*/\ny;");
+  CheckNewMinification("function f(){return /*@c@*/\n42;}",
+                       "function f(){return/*@c@*/\n42;}");
+  // Back-to-back retained comments: the first comment's closing "*/" already
+  // terminates it, so no line/block comment forms across the boundary.
+  CheckNewMinification("/*@a@*//*@b@*/", "/*@a@*//*@b@*/");
 }
 
 TEST_F(JsMinifyTest, DoNotJoinPlusses) {
@@ -749,6 +810,17 @@ TEST_F(JsMinifyTest, DoNotCreateLineComment) {
   CheckMinification("var x = 42 / /foo/;\n", "var x=42/ /foo/;");
 }
 
+TEST_F(JsMinifyTest, DoNotCreateBlockComment) {
+  // Removing the whitespace between a regex literal's closing slash and a
+  // following "*" would form "/*" -- an unintended block comment -- in any
+  // downstream lexer that reads the slash as division (e.g. when "await" is
+  // really a plain identifier, making the pseudo-regex two divisions).
+  CheckMinification("x = / 2 / * y;", "x=/ 2 / *y;");
+  CheckMinification("x = await / 2 / * y;", "x=await/ 2 / *y;");
+  // A regex with flags cannot glue: the flags end the token.
+  CheckMinification("x = / 2 /g * y;", "x=/ 2 /g*y;");
+}
+
 TEST_F(JsMinifyTest, DoNotCreateSgmlLineComment1) {
   // Yes, this is legal code.  It tests if x is less than not(decrement y).
   CheckMinification("if (x <! --y) { x = 0; }\n", "if(x<! --y){x=0;}");
@@ -762,9 +834,18 @@ TEST_F(JsMinifyTest, DoNotCreateSgmlLineComment2) {
 TEST_F(JsMinifyTest, DoNotJoinDecimalIntegerAndDot) {
   // 34 .toString() is legal code, but 34.toString() isn't, because the . in
   // the second example gets parsed as part of the literal (decimal point).  So
-  // we need to leave a space in there.  Our old minifier gets this wrong, but
-  // the new minifier should handle it correctly.
+  // we need to leave a space in there.
   CheckNewMinification("0192  . toString()", "0192 .toString()");
+}
+
+TEST_F(JsMinifyTest, BareZeroDotPreservesSpace) {  //
+  // Bare 0 is a decimal literal that can absorb a decimal point, so
+  // "0 .toString()" must keep the space before the period: "0.toString()"
+  // is a SyntaxError ("0." lexes as a number and the property access is
+  // gone).
+  CheckNewMinification("0 .toString()", "0 .toString()");
+  // 00 is octal and cannot take a decimal point, so no space is needed.
+  CheckNewMinification("00 .toString()", "00.toString()");
 }
 
 TEST_F(JsMinifyTest, DoJoinHexOctalIntegerAndDot) {
@@ -792,8 +873,7 @@ TEST_F(JsMinifyTest, ObjectLiteralRegexLiteral) {
   // On the first line, this looks like it should be an object literal divided
   // by x divided by i, but nope, that's a block with a labelled expression
   // statement, followed by a regex literal.  The second line, on the other
-  // hand, _is_ an object literal, followed by division.  Our old minifier gets
-  // the second one wrong, but the new minifier should handle it correctly.
+  // hand, _is_ an object literal, followed by division.
   CheckMinification("{foo: 123} / x /i;", "{foo:123}/ x /i;");
   CheckNewMinification("x={foo: 1} / x /i;", "x={foo:1}/x/i;");
 }
@@ -835,6 +915,253 @@ TEST_F(JsMinifyTest, ReturnThrowNumber) {
   CheckMinification("return 1;\nthrow 2;", "return 1;throw 2;");
 }
 
+TEST_F(JsMinifyTest, AwaitRegex) {
+  // A slash after "await" starts a regex literal, not division; the interior
+  // whitespace of the regex must be preserved.
+  CheckMinification("async function f(){ return await /a +b/.test(s); }",
+                    "async function f(){return await/a +b/.test(s);}");
+  CheckMinification("async () => { await / x /g.test(s); };",
+                    "async()=>{await/ x /g.test(s);};");
+  CheckMinification("await / x /g;", "await/ x /g;");
+  CheckMinification("yield / x /g;", "yield/ x /g;");
+}
+
+TEST_F(JsMinifyTest, ForOfRegex) {
+  // The contextual "of" keyword acts like a binary operator: a slash after it
+  // starts a regex literal, not division.
+  CheckMinification("for (const m of / x +y /.exec(s)) m();",
+                    "for(const m of/ x +y /.exec(s))m();");
+}
+
+TEST_F(JsMinifyTest, YieldSemicolonInsertion) {
+  // "yield" is a restricted production: a linebreak after it induces
+  // semicolon insertion, so the linebreak must be preserved...
+  CheckMinification("yield\n/ x /g;", "yield\n/ x /g;");
+  // ...even when the linebreak hides inside a block comment.
+  CheckMinification("yield/*\n*/x;", "yield\nx;");
+  CheckMinification("yield/*\n*/'s';", "yield\n's';");
+}
+
+TEST_F(JsMinifyTest, AwaitYieldOfAsOrdinaryIdentifiers) {
+  // After a period these words are ordinary property names, and a slash after
+  // the member expression is division.
+  CheckMinification("x.await / 2;", "x.await/2;");
+  CheckMinification("x.of / 2;", "x.of/2;");
+  CheckMinification("x.yield / 2;", "x.yield/2;");
+  // "of" in a plain expression context is an ordinary identifier; the slashes
+  // are division.
+  CheckMinification("of / 2 / 2;", "of/2/2;");
+  CheckMinification("x = of / 2 / 2;", "x=of/2/2;");
+  CheckMinification("typeof x / 2;", "typeof x/2;");
+  // As object literal property names they are ordinary identifiers.
+  CheckMinification("x = { await: 1, of: 2, yield: 3 };",
+                    "x={await:1,of:2,yield:3};");
+  // "for await" and function declarations named await/yield still work.
+  CheckMinification("for await (const x of s) f(x);",
+                    "for await(const x of s)f(x);");
+  CheckMinification("function await() {}", "function await(){}");
+  CheckMinification("function yield() {}", "function yield(){}");
+}
+
+TEST_F(JsMinifyTest, AwaitAsVariableDegradation) {
+  // Outside an async function "await" is a legal variable name, but the
+  // minifier always assumes a slash after "await" begins a regex literal.
+  // This is an intentional, fail-safe degradation: the pseudo-regex (really
+  // two divisions) is emitted byte-for-byte, so the code still behaves the
+  // same -- we merely miss removing the whitespace inside it.  (When
+  // byte-for-byte reassembly would be unsafe, minification is declined
+  // instead; see SpeculativeRegexCommentDelimiterGuard.)
+  CheckMinification("var await = 4; x = await / 2 / 2;",
+                    "var await=4;x=await/ 2 / 2;");
+  // When the pseudo-regex is unterminated, minification fails outright and
+  // the caller serves the original input unmodified.
+  CheckError("x = await / 2;");
+}
+
+TEST_F(JsMinifyTest, SpeculativeRegexCommentDelimiterGuard) {
+  // In sloppy mode "await" and "yield" can be plain identifiers, making a
+  // slash after them division -- possibly followed by a comment.  If the
+  // misread pseudo-regex contains or abuts a comment delimiter, removing
+  // whitespace/comments around it would reassemble "//" or "/*" and change
+  // the program.  The minifier declines (fails) instead, and the caller
+  // serves the original input unmodified.
+  CheckError("x = await / 2 // c\n+ y;");
+  CheckError("function f(){ var yield = 2; return yield / 2 // half\n}");
+  CheckError("x = await / a /* // */ / d;");
+  // An IE conditional compilation comment between the word and the slash is
+  // preserved as a token but must not end the speculative window.
+  CheckError("x = await /*@ @*/ / 2 // c\n+ y;");
+}
+
+TEST_F(JsMinifyTest, SpeculativeRegexGuardNarrowness) {
+  // The comment-delimiter guard exists to stop whitespace removal from
+  // WELDING a "//" or "/*" that was not in the input, which can only happen
+  // at the pseudo-regex's right boundary and only when it has no flags (a
+  // flag letter is the last byte emitted, and nothing welds onto that).
+  // Comment delimiters that cannot reassemble must not decline.
+  CheckMinification("async function f(){ return await /a/g/*c*/ }",
+                    "async function f(){return await/a/g}");
+  CheckMinification("function* g(){ yield /2/g/*c*/ }",
+                    "function*g(){yield/2/g}");
+  // A "//" or "/*" inside a character class is inert: it is part of the
+  // verbatim literal and cannot open a comment that escapes it.
+  CheckMinification("async function f(){ return await /[//]/.test(x) }",
+                    "async function f(){return await/[//]/.test(x)}");
+  CheckMinification("async function f(){ return await /[/*]/.test(x) }",
+                    "async function f(){return await/[/*]/.test(x)}");
+  CheckMinification("for (m of /[//]/.exec(s)) m();",
+                    "for(m of/[//]/.exec(s))m();");
+  // The genuine protection is unchanged: an unflagged pseudo-regex whose
+  // closing slash abuts a "/" or "*" would weld into a comment delimiter.
+  CheckError("x = await / 2 // c\n+ y;");
+  CheckError("x = await / a /* // */ / d;");
+  CheckError("log(await //*c*/b//c\n/ /*@cc@*/ c)");
+}
+
+TEST_F(JsMinifyTest, SpeculativeOperatorPreservesLinebreak) {
+  // If "await" (or an "of" after an expression) is really a plain identifier,
+  // the linebreak after it may be load-bearing for semicolon insertion, so it
+  // is never removed.  Preserving it is always semantics-neutral: in real
+  // async/for-of code the linebreak is legal there too.
+  CheckMinification("x = await\n'use strict';", "x=await\n'use strict';");
+  CheckMinification("x = await\n!function(){}();", "x=await\n!function(){}();");
+  CheckMinification("let of\n's';", "let of\n's';");
+}
+
+TEST_F(JsMinifyTest, SpeculativeUpdateOperatorPreservesLinebreak) {
+  // If "await"/"yield" is really a plain identifier, `await++` is a
+  // completed postfix UpdateExpression and the linebreak after it may be
+  // load-bearing for semicolon insertion; under the operator-word reading
+  // the `++` is a prefix operator and a linebreak before its operand is
+  // legal.  Preserving the linebreak is semantics-neutral in both readings,
+  // so it is never removed.
+  CheckMinification("var await = 5;\nawait++\nconsole.log(await);",
+                    "var await=5;await++\nconsole.log(await);");
+  CheckMinification("var await = 5;\nawait--\nconsole.log(await);",
+                    "var await=5;await--\nconsole.log(await);");
+  CheckMinification("function f(){ var yield = 2; yield++\ng(); }",
+                    "function f(){var yield=2;yield++\ng();}");
+  // Same line: nothing is load-bearing; minifies fully.
+  CheckMinification("var await = 5; await++; f();", "var await=5;await++;f();");
+  // Control: an ordinary postfix update keeps its ASI linebreak via the
+  // postfix-update path, unchanged.
+  CheckMinification("q++\nconsole.log(q);", "q++\nconsole.log(q);");
+}
+
+TEST_F(JsMinifyTest, SpeculativeOperatorClosePaths) {
+  // A dangling speculative kOperator (an `await` that turned out to be a
+  // plain identifier with no operand) must be tolerated by every close and
+  // separator path.
+  CheckMinification("f( await );", "f(await);");
+  CheckMinification("x = ( await ) / 2;", "x=(await)/2;");
+  CheckMinification("a[ await ] = 1;", "a[await]=1;");
+  CheckMinification("x = await ;", "x=await;");
+  CheckMinification("x = `a${ await }b`;", "x=`a${await}b`;");
+  CheckMinification("function f(){ return await }",
+                    "function f(){return await}");
+  CheckMinification("await: while(1) break await;",
+                    "await:while(1)break await;");
+  CheckMinification("switch(x){ case await: break; }",
+                    "switch(x){case await:break;}");
+  CheckMinification("o?.await / 2;", "o?.await/2;");
+}
+
+TEST_F(JsMinifyTest, SpeculativeOperatorBlockGuard) {
+  // If "await" is really a plain identifier, "await\n{ }" is an
+  // ASI-separated statement followed by a BLOCK, and a slash after the block
+  // starts a regex; the operator reading would instead make the braces an
+  // object literal and the slash division, stripping the regex's interior
+  // whitespace.  "{" is the one token whose reading diverges, so the
+  // minifier declines and the caller serves the original input unmodified.
+  CheckError("var await = 1;\nawait\n{ } / x /.test(y);");
+  CheckError("await\n{ }\n/ x /.test(y);");
+  CheckError("await\n{ } /* c */ / x /.test(y);");
+  CheckError("await\n{ a: 1 } / x /.test(y);");
+  CheckError("await\n{ x = 1 } / y /.test(z);");
+  // The decline covers any "{" reached across a line terminator in the
+  // speculative window, whether or not a slash follows the block (decline
+  // is acceptable; wrong output is not).
+  CheckError("await\n{ }\n(x);");
+  // WITHOUT a line terminator the identifier reading is impossible
+  // ("expr {" is a SyntaxError), so the "{" is provably the operand's
+  // object literal and the minifier commits instead of declining.
+  CheckNewMinification("x = yield { a: 1 };", "x=yield{a:1};");
+  CheckNewMinification("function* g() { yield { a: 1 }; }",
+                       "function*g(){yield{a:1};}");
+  CheckNewMinification("async function f() { await { a: 1 }; }",
+                       "async function f(){await{a:1};}");
+  CheckNewMinification("for (x of { a: 1 }) {}", "for(x of{a:1}){}");
+  // A line terminator INSIDE a block comment counts for ASI (the spec
+  // treats such a comment as a line terminator): still ambiguous, still
+  // declined.  A same-line comment without one commits.
+  CheckError("function* g() { yield /*\n*/ { a: 1 }; }");
+  CheckNewMinification("function* g() { yield /* c */ { a: 1 }; }",
+                       "function*g(){yield{a:1};}");
+  // `await` in a BINDING position names the thing being declared (legal in
+  // sloppy mode) -- it is not an operator and must not open the speculative
+  // window: the class body's `{` takes the class-brace path and a slash
+  // after the completed declaration is a statement-position REGEX, never
+  // division (the adversarial review's counterexample to the same-line
+  // commit).
+  CheckNewMinification("class await {}\n/ a /.test(b) ? f() : g();",
+                       "class await{}/ a /.test(b)?f():g();");
+  CheckNewMinification("class await extends B {}",
+                       "class await extends B{}");
+  CheckNewMinification("function await() { return 1; }",
+                       "function await(){return 1;}");
+  // `class yield {}` is a SyntaxError in every mode; byte-preserving.
+  CheckNewMinification("class yield {}", "class yield{}");
+}
+
+TEST_F(JsMinifyTest, AwaitYieldOfAsMemberNames) {
+  // `await`, `yield` and `of` are all legal member names.  After a
+  // `get`/`set`/`async` modifier -- or a generator `*` -- the word is
+  // unambiguously the member's NAME, so it must not take the
+  // speculative-operator classification: doing so leaves the method's block
+  // unmatched and declines the whole file.
+  CheckMinification("obj = { get of(){ return 1 } };",
+                    "obj={get of(){return 1}};");
+  CheckMinification("obj = { set of(v){} };", "obj={set of(v){}};");
+  CheckMinification("obj = { async of(){} };", "obj={async of(){}};");
+  CheckMinification("obj = { *await(){} };", "obj={*await(){}};");
+  CheckMinification("obj = { get await(){} };", "obj={get await(){}};");
+  CheckMinification("obj = { async await(){} };", "obj={async await(){}};");
+  CheckMinification("obj = { *yield(){} };", "obj={*yield(){}};");
+  CheckMinification("obj = { get yield(){} };", "obj={get yield(){}};");
+  // The same in a class body, and with the `static` modifier.
+  CheckMinification("class C { get of(){} }", "class C{get of(){}}");
+  CheckMinification("class C { get await(){} }", "class C{get await(){}}");
+  CheckMinification("class C { static *yield(){} }",
+                    "class C{static*yield(){}}");
+  // The generator `*` only becomes a method marker before a plain name;
+  // computed and string names keep the ordinary operator path.
+  CheckMinification("obj = { *[Symbol.iterator](){} };",
+                    "obj={*[Symbol.iterator](){}};");
+  CheckMinification("class C { *[Symbol.iterator](){} }",
+                    "class C{*[Symbol.iterator](){}}");
+  CheckMinification("obj = { async *gen(){ yield 1 } };",
+                    "obj={async*gen(){yield 1}};");
+}
+
+TEST_F(JsMinifyTest, AwaitAsSeparatedIdentifier) {
+  // In sloppy mode `await` is an ordinary identifier, so a separator may
+  // follow it directly.  A speculative operator with no operand is exactly
+  // that case, and the separator collapses it back to an expression.
+  CheckMinification("var await, x;", "var await,x;");
+  CheckMinification("f(await, 1);", "f(await,1);");
+  CheckMinification("x = cond ? await : val;", "x=cond?await:val;");
+  CheckMinification("x = [await, 1];", "x=[await,1];");
+  CheckMinification("x = {a: await, b: 1};", "x={a:await,b:1};");
+  CheckMinification("function f(await, b){ return await + b }",
+                    "function f(await,b){return await+b}");
+  // ...while a genuine await expression still collapses into the surrounding
+  // expression, so the enclosing list separators keep working.
+  CheckMinification("async function f(){ return { a: await g(), b: 1 }; }",
+                    "async function f(){return{a:await g(),b:1};}");
+  CheckMinification("async function f(){ await g(), await h(); }",
+                    "async function f(){await g(),await h();}");
+}
+
 TEST_F(JsMinifyTest, KeywordPrecedesRegex) {
   // Make sure "typeof /./" sees the first "/" as a regex and not division.
   // If it thinks it's a division then it will treat the "/    /" as a regex
@@ -851,8 +1178,7 @@ TEST_F(JsMinifyTest, KeywordPrecedesRegex) {
 
 TEST_F(JsMinifyTest, LoopRegex) {
   // Make sure we understand that a slash after "while (...)" or "for (...)" is
-  // a regex, not division.  Our old minifier gets this wrong, but the new
-  // minifier should handle it correctly.
+  // a regex, not division.
   CheckNewMinification("while (0) /\\//.exec('');", "while(0)/\\//.exec('');");
   CheckNewMinification("for (x in y) / z /.exec(x);",
                        "for(x in y)/ z /.exec(x);");
@@ -875,7 +1201,7 @@ TEST_F(JsMinifyTest, DoNotCrash) {
   for (int i = 0, size = sizeof(kCrashTestString); i <= size; ++i) {
     GoogleString input(kCrashTestString, i);
     GoogleString output;
-    pagespeed::js::MinifyJs(input, &output);
+    pagespeed::js::MinifyUtf8Js(&patterns_, input, &output);
   }
 }
 
@@ -885,13 +1211,13 @@ TEST_F(JsMinifyTest, DoNotCrash) {
 
 TEST_F(JsMinifyTest, SemicolonInsertionIncrement) {
   CheckMinification("a\n++b\nc++\nd", "a\n++b\nc++\nd");
-  // A trickier case that only the new minifier gets right:
+  // A trickier case: the linebreak inside the operator is removable.
   CheckNewMinification("a\n++\nb\nc++\nd", "a\n++b\nc++\nd");
 }
 
 TEST_F(JsMinifyTest, SemicolonInsertionDecrement) {
   CheckMinification("a\n--b\nc--\nd", "a\n--b\nc--\nd");
-  // A trickier case that only the new minifier gets right:
+  // A trickier case: the linebreak inside the operator is removable.
   CheckNewMinification("a\n--\nb\nc--\nd", "a\n--b\nc--\nd");
 }
 
@@ -914,6 +1240,86 @@ TEST_F(JsMinifyTest, SemicolonInsertionFuncCall) {
   // No semicolons will be inserted, so the linebreak can be removed.  This is
   // actually a function call, not two statements.
   CheckMinification("a = b + c\n(d + e).print()", "a=b+c(d+e).print()");
+}
+
+// The SemicolonInsertionPostfix* tests below cover ASI after a completed
+// postfix ++/-- expression: no call or member access can attach to an
+// UpdateExpression, so a linebreak before `(`, or before a `.`-led numeric
+// literal, inserts a semicolon and must be retained -- even though the same
+// tokens after a general expression would continue the statement (see
+// SemicolonInsertionFuncCall above).  All assertions are new-minifier-only:
+// the deprecated legacy path is independently broken for this class and is
+// slated for deletion.
+// See https://github.com/We-Amp/pagespeed-optimizer/issues/1092
+
+TEST_F(JsMinifyTest, SemicolonInsertionPostfixParen) {
+  // A `(` after a postfix operator starts a new statement, not a call, so
+  // the linebreak inserts a semicolon and cannot be removed.
+  CheckNewMinification("a++\n(b)()", "a++\n(b)()");
+  CheckNewMinification("a--\n(a)", "a--\n(a)");
+  CheckNewMinification("a.v--\n(a)", "a.v--\n(a)");
+  CheckNewMinification("x = a++\n(b)", "x=a++\n(b)");
+  CheckNewMinification("(a)++\n(b)", "(a)++\n(b)");
+  // An indented continuation line: the whitespace run (linebreak plus the
+  // indentation) collapses to just the linebreak.
+  CheckNewMinification("a++\n  (b)", "a++\n(b)");
+}
+
+TEST_F(JsMinifyTest, SemicolonInsertionPostfixNumericDot) {
+  // A `.`-led numeric literal after a postfix operator starts a new
+  // statement (`a++; .5;`), not a member access: the linebreak stays.
+  CheckNewMinification("a++\n.5", "a++\n.5");
+}
+
+TEST_F(JsMinifyTest, SemicolonInsertionPostfixCommentCarried) {
+  // A comment-borne linebreak after a postfix operator behaves exactly like
+  // a real one: the comment is dropped and the linebreak materializes.
+  CheckNewMinification("a++/*\n*/(b)", "a++\n(b)");
+  CheckNewMinification("a++//c\n(b)", "a++\n(b)");
+}
+
+TEST_F(JsMinifyTest, SemicolonInsertionPostfixOtherStatementStarts) {
+  // Statement starters that never appeared in the generic continuation set
+  // were already retained; lock them in.
+  CheckNewMinification("a++\n[0]", "a++\n[0]");
+  CheckNewMinification("a++\n++b", "a++\n++b");
+  CheckNewMinification("a++\nb", "a++\nb");
+  CheckNewMinification("a++\n~b", "a++\n~b");
+  CheckNewMinification("a++\n!b", "a++\n!b");
+  CheckNewMinification("a++\n`t`", "a++\n`t`");
+}
+
+TEST_F(JsMinifyTest, SemicolonInsertionPostfixContinuationsStillJoin) {
+  // Binary and ternary operators legally continue an UpdateExpression, so
+  // these linebreaks stay insignificant and are still removed.
+  CheckNewMinification("a++\n* b", "a++*b");
+  CheckNewMinification("a++\n/ b", "a++/b");
+  CheckNewMinification("a++\n% b", "a++%b");
+  CheckNewMinification("a++\n, b", "a++,b");
+  CheckNewMinification("a++\n? b : c", "a++?b:c");
+  CheckNewMinification("a++\n== b", "a++==b");
+  CheckNewMinification("x = a++\nin b", "x=a++in b");
+  CheckNewMinification("x = a++\ninstanceof b", "x=a++instanceof b");
+  // A `+` continues too, but a separator must remain to avoid fusing
+  // `+++`; the minifier keeps the linebreak (same size as a space).
+  CheckNewMinification("a++\n+ b", "a++\n+b");
+  // A real semicolon or a closing paren suppresses insertion outright.
+  CheckNewMinification("a++\n;", "a++;");
+  CheckNewMinification("f(a++\n)", "f(a++)");
+}
+
+TEST_F(JsMinifyTest, SemicolonInsertionPostfixIdempotent) {
+  // Minifying already-minified output changes nothing.
+  CheckNewMinification("a++\n(b)()", "a++\n(b)()");
+  CheckNewMinification("x=a++\n(b)", "x=a++\n(b)");
+  CheckNewMinification("a++\n(b)", "a++\n(b)");
+  CheckNewMinification("a++\n.5", "a++\n.5");
+  CheckNewMinification("a++*b", "a++*b");
+  CheckNewMinification("a++\n+b", "a++\n+b");
+  CheckNewMinification("x=a++in b", "x=a++in b");
+  CheckNewMinification("x=a++instanceof b", "x=a++instanceof b");
+  CheckNewMinification("a++;", "a++;");
+  CheckNewMinification("f(a++)", "f(a++)");
 }
 
 TEST_F(JsMinifyTest, SemicolonInsertionRegex) {
@@ -983,13 +1389,10 @@ TEST_F(JsMinifyTest, SemicolonInsertionCommentLinebreakStatementBoundaries) {
   // before a token that can continue the statement).
   CheckMinification("x/*\n*/(y)", "x(y)");
   CheckMinification("x = 1/*\n*/+ 2", "x=1+2");
-  // The new path treats `[` and a template literal conservatively (it keeps
-  // the linebreak, exactly as it does for a real linebreak in the same
-  // position); the legacy path joins the subscript.  Both re-parse
-  // identically to the input.
-  CheckOldMinification("x/*\n*/[y]", "x[y]");
+  // `[` and a template literal are treated conservatively (the linebreak is
+  // kept, exactly as for a real linebreak in the same position); the result
+  // re-parses identically to the input.
   CheckNewMinification("x/*\n*/[y]", "x\n[y]");
-  // (New path only: the legacy minifier rejects template literals outright.)
   CheckNewMinification("x/*\n*/`t`", "x\n`t`");
 }
 
@@ -1013,9 +1416,7 @@ TEST_F(JsMinifyTest, SemicolonInsertionCommentLinebreakEdges) {
   // two names may not be joined.
   CheckMinification("x = 5/*\n*/instanceof y", "x=5\ninstanceof y");
   // A class body brace after the heritage expression is not a statement
-  // block; the new path joins it (as for a real linebreak), the legacy path
-  // conservatively keeps the linebreak.  Both re-parse identically.
-  CheckOldMinification("class X extends Y/*\n*/{}", "class X extends Y\n{}");
+  // block, so it is joined (as for a real linebreak).
   CheckNewMinification("class X extends Y/*\n*/{}", "class X extends Y{}");
 }
 
@@ -1048,29 +1449,6 @@ TEST_F(JsMinifyTest, Latin1Input) {
       "str='Qu\xE9 pasa';// 'qu\xE9' means 'what'\n"
       "cents=/* 73\xA2 is $0.73 */73;",
       "str='Qu\xE9 pasa';cents=73;");
-}
-
-const char kCollapsingStringTestString[] =
-    "var x = 'asd \\' lse'\n"
-    "var y /*comment*/ = /re'gex/\n"
-    "var z = \"x =\" + x\n";
-
-const char kCollapsedTestString[] =
-    "var x=''\n"
-    "var y=/re'gex/\n"
-    "var z=\"\"+x";
-
-TEST_F(JsMinifyTest, CollapsingStringTest) {
-  int size = 0;
-  GoogleString output;
-  ASSERT_TRUE(pagespeed::js::MinifyJsAndCollapseStrings(
-      kCollapsingStringTestString, &output));
-  ASSERT_EQ(strlen(kCollapsedTestString), output.size());
-  ASSERT_EQ(kCollapsedTestString, output);
-
-  ASSERT_TRUE(pagespeed::js::GetMinifiedStringCollapsedJsSize(
-      kCollapsingStringTestString, &size));
-  ASSERT_EQ(static_cast<int>(strlen(kCollapsedTestString)), size);
 }
 
 TEST_F(JsMinifyTest, MinifyAngular) {
@@ -1129,7 +1507,7 @@ TEST_F(JsMinifyTest, SourceMapsComplex) {
   EXPECT_TRUE(pagespeed::js::MinifyUtf8JsWithSourceMap(
       &patterns_, kBeforeCompilation, &output, &mappings));
 
-  EXPECT_EQ(kAfterCompilationNew, output);
+  EXPECT_EQ(kAfterCompilation, output);
 
   const char expected_map[] =
       "{"

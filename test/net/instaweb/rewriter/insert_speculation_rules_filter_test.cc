@@ -29,6 +29,7 @@
 #include "pagespeed/kernel/http/response_headers.h"
 #include "test/net/instaweb/rewriter/rewrite_test_base.h"
 #include "test/pagespeed/kernel/base/gtest.h"
+#include "test/pagespeed/kernel/http/user_agent_matcher_test_base.h"
 
 namespace net_instaweb {
 
@@ -254,6 +255,11 @@ TEST_F(InsertSpeculationRulesFilterAmpTest, AmpDocumentIsNoOp) {
 TEST_F(InsertSpeculationRulesFilterTest, DeferJsCoexistence) {
   // defer_javascript must leave the injected tag alone: type=speculationrules
   // is not a JavaScript mimetype, so the defer machinery must not rewrite it.
+  // A browser user agent is required: the test base's empty user agent reads
+  // as a bot since the SupportsJsDefer gate, which would disable defer
+  // entirely and make these negative assertions vacuously true.
+  SetCurrentUserAgent(
+      UserAgentMatcherTestBase::kChrome18UserAgent);
   options()->EnableFilter(RewriteOptions::kInsertSpeculationRules);
   options()->EnableFilter(RewriteOptions::kDeferJavascript);
   rewrite_driver()->AddFilters();

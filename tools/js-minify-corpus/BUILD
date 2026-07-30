@@ -10,3 +10,13 @@ cc_binary(
         "//pagespeed/kernel/js",
     ],
 )
+
+# One-shot equivalence dump for the JsKeywords table: build before and after
+# a lookup-implementation change and diff the outputs. See the file header.
+cc_binary(
+    name = "js_keywords_dump",
+    srcs = ["js_keywords_dump.cc"],
+    deps = [
+        "//pagespeed/kernel/js",
+    ],
+)

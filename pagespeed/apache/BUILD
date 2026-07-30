@@ -9,6 +9,16 @@ exports_files(
     visibility = ["//visibility:public"],
 )
 
+# the design record: the post-config hook is the only place Apache resolves its thread
+# counts, and that is one hand-written call that no unit test can reach.
+# test/pagespeed/apache/apache_mpm_detection_test.cc reads this source to
+# assert the call site still exists; see the test for why.
+filegroup(
+    name = "mod_instaweb_src",
+    srcs = ["mod_instaweb.cc"],
+    visibility = ["//visibility:public"],
+)
+
 # Apache-specific system test scripts
 filegroup(
     name = "system_test_files",
@@ -59,6 +69,7 @@ cc_library(
         "apache_fetch.cc",
         "apache_message_handler.cc",
         "apache_mmap_bucket.cc",
+        "apache_mpm_detection.cc",
         "apache_request_context.cc",
         "apache_rewrite_driver_factory.cc",
         "apache_server_context.cc",
@@ -80,6 +91,7 @@ cc_library(
         "apache_logging_includes.h",
         "apache_message_handler.h",
         "apache_mmap_bucket.h",
+        "apache_mpm_detection.h",
         "apache_request_context.h",
         "apache_rewrite_driver_factory.h",
         "apache_server_context.h",
@@ -121,6 +133,9 @@ cc_library(
         "//pagespeed/kernel/thread:libevent_dispatcher",
         "//pagespeed/system:system_apache",
         "//pagespeed/system:curl_fetcher",
+        # the design record: apache_mpm_detection.cc and apache_rewrite_driver_factory.cc
+        # include the thread-count policy header directly.
+        "//pagespeed/system:optimization_thread_policy",
         # @aprutil supplies the bucket-brigade glue (apr_brigade_create in
         # instaweb_context.cc) and the httpd util_filter API; it is no longer
         # for memcached. Declared here because apache_apr no longer pulls it.

@@ -20,6 +20,8 @@
 #ifndef PAGESPEED_KERNEL_JS_JS_KEYWORDS_H_
 #define PAGESPEED_KERNEL_JS_JS_KEYWORDS_H_
 
+#include <cstdint>
+
 #include "pagespeed/kernel/base/string_util.h"
 
 namespace net_instaweb {
@@ -30,7 +32,7 @@ namespace pagespeed {
 
 class JsKeywords {
  public:
-  enum Type {
+  enum Type : std::uint8_t {
     // literals
     kNull,
     kTrue,
@@ -84,10 +86,13 @@ class JsKeywords {
     kStatic,
     kYield,
 
-    // Sentinel value for gperf.
+    // contextual keyword (ES2017 async functions)
+    kAwait,
+
+    // Sentinel value.
     kNotAKeyword,
 
-    // Other types of lexical tokens; returned by lexer, but not gperf.
+    // Other types of lexical tokens; returned by lexer, but not keyword lookup.
     kComment,        // A block or line comment (not including the linebreak).
     kWhitespace,     // Whitespace not containing any linebreaks.
     kLineSeparator,  // Whitespace with linebreaks, but no semicolon insertion.
@@ -114,7 +119,7 @@ class JsKeywords {
   // but keywords such as 'while' cannot.
   static bool CanKeywordPrecedeRegEx(const StringPiece& name);
 
-  enum Flag {
+  enum Flag : std::uint8_t {
     kNone,
     kIsValue,
     kIsReservedNonStrict,

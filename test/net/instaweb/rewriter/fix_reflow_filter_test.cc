@@ -38,6 +38,7 @@
 #include "test/net/instaweb/rewriter/rewrite_test_base.h"
 #include "test/net/instaweb/rewriter/test_rewrite_driver_factory.h"
 #include "test/pagespeed/kernel/base/gtest.h"
+#include "test/pagespeed/kernel/http/user_agent_matcher_test_base.h"
 
 namespace net_instaweb {
 
@@ -57,6 +58,12 @@ class FixReflowFilterTest : public CustomRewriteTestBase<RewriteOptions> {
         SetupCohort(server_context()->page_property_cache(), kCohortName);
     server_context()->set_fix_reflow_cohort(cohort);
     ResetDriver();
+    // RewriteTestBase sends an empty user agent, which BotChecker classifies as
+    // a bot, and DeviceProperties::SupportsJsDefer withholds the whole
+    // defer_javascript family from bots -- fix_reflow gates on it too. Speak as
+    // a browser, exactly as LazyloadImagesFilterTest::SetUp does. The "junk"
+    // user agent in FixReflowFilterTest.Disabled below overrides this.
+    SetCurrentUserAgent(UserAgentMatcherTestBase::kChrome18UserAgent);
     options()->EnableFilter(RewriteOptions::kDeferJavascript);
     options()->EnableFilter(RewriteOptions::kFixReflows);
   }

@@ -703,9 +703,6 @@ TEST_F(CssFilterTest, RewriteVariousCss) {
       // TODO(sligocki): rm spaces around COMMA token.
       "a{-webkit-transition-property:opacity , -webkit-transform}",
 
-      // Parameterized pseudo-selector.
-      "div:nth-child(1n) {color:red}",
-
       // IE8 Hack \0/
       // See http://dimox.net/personal-css-hacks-for-ie6-ie7-ie8/
       "a{color: red\\0/ ;background-color:green}",
@@ -713,7 +710,6 @@ TEST_F(CssFilterTest, RewriteVariousCss) {
       "@media screen and (min-width:0 \\\\0){.foo{color:red}}",
 
       "a{font:bold verdana 10px }",
-      "a{foo: +bar }",
       "a{color: rgb(foo,+,) }",
 
       // Malformed @import statements.
@@ -781,9 +777,6 @@ TEST_F(CssFilterTest, RewriteVariousCss) {
       // kSelectorError from Alexa-100
       // Selector list ends in comma
       ".hp .col ul, {display:inline}",
-      // Parameters for pseudoclass
-      "body:not(:target) {color:red}",
-      "a:not(.button):hover {color:red}",
       // Typos
       "# new_results_notification{font-size:12px}",
       ".bold: {font-weight:bold}",
@@ -821,6 +814,27 @@ TEST_F(CssFilterTest, RewriteVariousCss) {
     GoogleString id = absl::StrFormat("distilled_css_good%d", i);
     ValidateRewrite(id, good_examples[i], good_examples[i], kExpectSuccess);
   }
+
+  // A '+' not directly attached to a number now lexes as an OPERATOR value
+  // (for calc() addition), so this invalid declaration parses and minifies
+  // instead of round-tripping verbatim; the joined values gain a space the
+  // original did not have. Browsers drop the declaration either way.
+  ValidateRewrite("plus_operator_value", "a{foo: +bar }", "a{foo:+ bar}",
+                  kExpectSuccess);
+
+  // Functional pseudo-class arguments now round-trip (opaque
+  // pass-through) instead of failing the selector parse, so these rulesets
+  // parse and minify — arguments retained — rather than round-tripping
+  // byte-exact as preserved unparsed-selectors regions.
+  ValidateRewrite("functional_pseudo_nth_child",
+                  "div:nth-child(1n) {color:red}",
+                  "div:nth-child(1n){color:red}", kExpectSuccess);
+  ValidateRewrite("functional_pseudo_not_target",
+                  "body:not(:target) {color:red}",
+                  "body:not(:target){color:red}", kExpectSuccess);
+  ValidateRewrite("functional_pseudo_not_hover",
+                  "a:not(.button):hover {color:red}",
+                  "a:not(.button):hover{color:red}", kExpectSuccess);
 
   // A space inside a media feature name makes the expression
   // general-enclosed; it used to fail the media-query parse and preserve
@@ -1400,7 +1414,11 @@ TEST_F(CssFilterTest, ComplexCssTest) {
        ".ciuNoteBox .topLeft,\n"
        ".ciuNoteEditBox .topLeft, x:-moz-any-link {font-size:0}"},
 
-      // Parameters for pseudoclass
+      // Parameters for pseudoclass. Since the functional
+      // pseudo-class arguments parse (opaque pass-through), so these
+      // selectors are no longer preserved byte-exact as unparsed-selectors
+      // regions: the arguments are retained verbatim, but the selector-list
+      // joins now minify (", "/",\n" -> ",").
       {"/* Opera（＋Firefox、Safari） */\n"
        "body:not(:target) .sh_heading_main_b, body:not(:target) "
        ".sh_heading_main_b_wide{\n"
@@ -1428,19 +1446,18 @@ TEST_F(CssFilterTest, ComplexCssTest) {
        "from(#FFFFFF), to(#F0F0F0));\n"
        "}\n",
 
-       "body:not(:target) .sh_heading_main_b, body:not(:target) "
+       "body:not(:target) .sh_heading_main_b,body:not(:target) "
        ".sh_heading_main_b_wide{background:url(data:image/png;base64,"
        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAAoCAYAAAA/tpB3AAAAQ0lEQVR42k3EMQLAIAg"
        "EMP//WkRQVMB2YLgMae/XMhOLCMzdq3svds7B9t6VmWFrLWzOWakqJiLYGKNiZqz3jh"
        "HR+wBZbpvd95zR6QAAAABJRU5ErkJggg==) repeat-x left top}"
        "html:not([lang*="
-       "]) .sh_heading_main_b,\n"
-       "html:not([lang*="
+       "]) .sh_heading_main_b,html:not([lang*="
        "]) .sh_heading_main_b_wide{"
        "background:-moz-linear-gradient(top,#fff,#f0f0f0);"
        "background:-webkit-gradient(linear,left top,left bottom,"
        "from(#fff),to(#f0f0f0))}"
-       "html:not(:only-child:only-child) .sh_heading_main_b,\n"
+       "html:not(:only-child:only-child) .sh_heading_main_b,"
        "html:not(:only-child:only-child) .sh_heading_main_b_wide{"
        "background:-webkit-gradient(linear,left top,left bottom,"
        "from(#fff),to(#f0f0f0))}"},
@@ -1866,6 +1883,14 @@ TEST_F(CssFilterTest, MediaRangeSyntaxMinified) {
   ValidateRewrite("media_range_syntax",
                   "@media (width >= 768px) { .a { color: red; } }",
                   "@media (width >= 768px){.a{color:red}}", kExpectSuccess);
+}
+
+TEST_F(CssFilterTest, MediaStraySemicolonMinified) {
+  // A trailing stray ';' inside an @media block used to fail the whole sheet,
+  // so it was served unchanged. It now parses and minifies like any other.
+  ValidateRewrite("media_stray_semicolon",
+                  "@media screen { .a { color: red }; }",
+                  "@media screen{.a{color:red}}", kExpectSuccess);
 }
 
 TEST_F(CssFilterTest, BrokenGroupRuleFallsBack) {
@@ -2295,6 +2320,25 @@ TEST_F(CssFilterTest, AbsolutifyGroupRulePreludeUrlWithDomainMapping) {
       false /* expect_unparseable_section */,
       false /* enable_image_rewriting */, false /* enable_proxy_mode */,
       true /* enable_mapping_and_sharding */);
+}
+
+TEST_F(CssFilterTest, AbsolutifyMediaStraySemicolonUrlWithDomainMapping) {
+  // Case B of the @media stray-';' recovery: the rule AFTER the ';' used to
+  // be demoted to a dummy-selector verbatim region, which set the
+  // unparseable-section mask and routed its url()s through the textual
+  // absolutify pass. It is now a real parsed ruleset and the sheet is clean,
+  // so the parsed-declaration walk must pick the url() up instead. Either way
+  // the url has to come out absolutified -- this pins that the
+  // unparseable_detected() flip loses no url handling.
+  const char css_input[] =
+      "@media screen { .x { color: red }; .y { background: url(a.png) } }";
+  const char css_output[] =
+      "@media screen{.x{color:red}.y{background:url(http://cdn2.com/a.png)}}";
+  TestUrlAbsolutification("absolutify_media_stray_semicolon_url", css_input,
+                          css_output, false /* expect_unparseable_section */,
+                          false /* enable_image_rewriting */,
+                          false /* enable_proxy_mode */,
+                          true /* enable_mapping_and_sharding */);
 }
 
 TEST_F(CssFilterTest, DontAbsolutifyCursorUrlsWithoutDomainMapping) {

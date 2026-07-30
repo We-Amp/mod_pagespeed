@@ -189,4 +189,28 @@ TEST(MimeTypeListToContentTypeSetTest, TestBadString) {
   EXPECT_EQ(1, out.size());
   EXPECT_EQ(1, out.count(&kContentTypeJpeg));
 }
+// Entries separated by ", " (comma + whitespace) must be trimmed before
+// lookup, otherwise only the first entry is recognized.
+TEST(MimeTypeListToContentTypeSetTest, WhitespaceAroundEntries) {
+  GoogleString s = "text/html, application/xhtml+xml , image/gif";
+  std::set<const ContentType*> out;
+
+  MimeTypeListToContentTypeSet(s, &out);
+  EXPECT_EQ(3, out.size());
+  EXPECT_EQ(1, out.count(&kContentTypeHtml));
+  EXPECT_EQ(1, out.count(&kContentTypeXhtml));
+  EXPECT_EQ(1, out.count(&kContentTypeGif));
+}
+
+// Whitespace-only entries are dropped, not warned on or matched.
+TEST(MimeTypeListToContentTypeSetTest, WhitespaceOnlyEntries) {
+  GoogleString s = "image/gif, ,image/jpeg";
+  std::set<const ContentType*> out;
+
+  MimeTypeListToContentTypeSet(s, &out);
+  EXPECT_EQ(2, out.size());
+  EXPECT_EQ(1, out.count(&kContentTypeGif));
+  EXPECT_EQ(1, out.count(&kContentTypeJpeg));
+}
+
 }  // namespace net_instaweb

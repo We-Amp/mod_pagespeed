@@ -251,13 +251,38 @@ void ImageUrlEncoder::SetLibWebpLevel(
   ResourceContext::LibWebpLevel libwebp_level = ResourceContext::LIBWEBP_NONE;
   // We do enabled checks before Setting the Webp Level, since it avoids writing
   // two metadata cache keys for same output if webp rewriting is disabled.
+  // The animated level is taken ONLY when convert_to_webp_animated is on, i.e.
+  // only when it can actually change the encoded output.  Without that filter
+  // SetWebpCompressionOptions falls the animated level through to the
+  // lossless/alpha arm, so taking it would only split the metadata cache key --
+  // re-keying and re-optimizing an entire image catalogue for nothing.
+  //
+  // What makes dropping it safe is the second disjunct of the branch below, NOT
+  // the fallthrough alone.  It absorbs exactly the requests that previously took
+  // the animated level under recompress_webp: an animated-capable request that
+  // would have keyed LIBWEBP_ANIMATED now settles at LIBWEBP_LOSSY_LOSSLESS_ALPHA
+  // instead, which encodes identically -- so the cache key changes and the output
+  // never does.  It is deliberately NOT widened to (lossless || animated) &&
+  // (recompress_webp || convert_to_webp_lossless): under recompress_webp off and
+  // convert_to_webp_lossless on, such a request has always settled at
+  // LIBWEBP_LOSSY_ONLY, and lifting it here would flip allow_webp_alpha on and
+  // start emitting alpha WebP where none was emitted before -- an output change.
+  //
+  // The animated and lossless/alpha capabilities are independent: RequestProperties
+  // ANDs the user-agent verdict with DownstreamCachingDirectives, which keys
+  // animated on the "wa" filter id and lossless/alpha on "ws".  So an
+  // animated-capable but not-lossless-capable request is reachable via a
+  // PS-CapabilityList header even though no user-agent string produces it, and
+  // that combination is what makes the second disjunct load-bearing rather than
+  // dead code.
   if (request_properties.SupportsWebpAnimated() &&
-      (options.Enabled(RewriteOptions::kRecompressWebp) ||
-       options.Enabled(RewriteOptions::kConvertToWebpAnimated))) {
+      options.Enabled(RewriteOptions::kConvertToWebpAnimated)) {
     libwebp_level = ResourceContext::LIBWEBP_ANIMATED;
-  } else if (request_properties.SupportsWebpLosslessAlpha() &&
-             (options.Enabled(RewriteOptions::kRecompressWebp) ||
-              options.Enabled(RewriteOptions::kConvertToWebpLossless))) {
+  } else if ((request_properties.SupportsWebpLosslessAlpha() &&
+              (options.Enabled(RewriteOptions::kRecompressWebp) ||
+               options.Enabled(RewriteOptions::kConvertToWebpLossless))) ||
+             (request_properties.SupportsWebpAnimated() &&
+              options.Enabled(RewriteOptions::kRecompressWebp))) {
     libwebp_level = ResourceContext::LIBWEBP_LOSSY_LOSSLESS_ALPHA;
   } else if (request_properties.SupportsWebpRewrittenUrls() &&
              (options.Enabled(RewriteOptions::kRecompressWebp) ||

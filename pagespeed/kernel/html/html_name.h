@@ -33,7 +33,8 @@ class HtmlName {
  public:
   // We keep both attribute names and tag names in the same space
   // for convenience.  This list must be kept in alpha-order and
-  // in sync with the static array in html_name.cc.
+  // in sync with html_name.gperf (from which the build generates
+  // html_name.gp.cc).
   //
   // Note that this list does not need to cover all HTML keywords --
   // only the ones that we are interested in for rewriting.
@@ -76,6 +77,7 @@ class HtmlName {
     kCommand,
     kContent,
     kControls,
+    kCrossorigin,
     kData,
     kDatalist,
     kDataActualHeight,
@@ -156,6 +158,7 @@ class HtmlName {
     kIndeterminate,
     kIns,
     kInput,
+    kIntegrity,
     kIsmap,
     kItemProp,
     kKbd,
@@ -239,6 +242,7 @@ class HtmlName {
     kTag,
     kTbody,
     kTd,
+    kTemplate,
     kTest,
     kTextarea,
     kTfoot,

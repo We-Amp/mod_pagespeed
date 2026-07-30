@@ -48,7 +48,9 @@ class UserAgentMatcherTestBase : public testing::Test {
   static const char kBenqUserAgent[];
   static const char kBlackBerryOS5UserAgent[];
   static const char kBlackBerryOS6UserAgent[];
+  static const char kChrome100UserAgent[];
   static const char kChrome12UserAgent[];
+  static const char kChrome137UserAgent[];
   static const char kChrome15UserAgent[];
   static const char kChrome18UserAgent[];
   static const char kChrome31UserAgent[];
@@ -56,13 +58,17 @@ class UserAgentMatcherTestBase : public testing::Test {
   static const char kChrome37UserAgent[];
   static const char kChrome41UserAgent[];
   static const char kChrome42UserAgent[];
+  static const char kChrome99UserAgent[];
   static const char kChrome9UserAgent[];
   static const char kChromeUserAgent[];
   static const char kCompalUserAgent[];
+  static const char kCriOS137UserAgent[];
   static const char kCriOS31UserAgent[];
   static const char kCriOS32UserAgent[];
   static const char kCriOS48UserAgent[];
+  static const char kCriOS9UserAgent[];
   static const char kDoCoMoMobileUserAgent[];
+  static const char kEdge137UserAgent[];
   static const char kFirefox1UserAgent[];
   static const char kFirefox3UserAgent[];
   static const char kFirefox42AndroidUserAgent[];
@@ -114,6 +120,7 @@ class UserAgentMatcherTestBase : public testing::Test {
   static const char kNokiaUserAgent[];
   static const char kOpera1101UserAgent[];
   static const char kOpera1110UserAgent[];
+  static const char kOpera119UserAgent[];
   static const char kOpera18UserAgent[];
   static const char kOpera19UserAgent[];
   static const char kOpera5UserAgent[];

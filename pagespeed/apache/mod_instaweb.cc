@@ -59,6 +59,7 @@
 #include "pagespeed/kernel/http/response_headers.h"
 #include "pagespeed/system/in_place_resource_recorder.h"
 #include "pagespeed/system/loopback_route_fetcher.h"
+#include "pagespeed/system/system_caches.h"
 #include "pagespeed/system/system_server_context.h"
 #include "util_filter.h"  // NOLINT
 // Note: a very useful reference is this file, which demos many Apache module
@@ -1028,6 +1029,18 @@ int pagespeed_post_config(apr_pool_t* pool, apr_pool_t* plog, apr_pool_t* ptemp,
 
   ApacheRewriteDriverFactory* factory =
       apache_process_context.factory(server_list);
+
+  // Thread-count resolution is deferred to here: ap_mpm_query() cannot report
+  // the MPM's threading model, the configured ThreadsPerChild, or the child
+  // count the design record policy divides by until the configuration has been
+  // processed, and it can't answer at all if the MPM module is loaded after
+  // mod_pagespeed.  This must run before anything reads the thread counts,
+  // and after directives have been parsed so an explicit NumRewriteThreads /
+  // NumExpensiveRewriteThreads still wins.
+  factory->FinalizeThreadCounts();
+  factory->caches()->set_thread_limit(factory->LookupThreadLimit() +
+                                      factory->num_rewrite_threads() +
+                                      factory->num_expensive_rewrite_threads());
 
   std::vector<SystemServerContext*> server_contexts;
   std::set<ApacheServerContext*> server_contexts_covered;

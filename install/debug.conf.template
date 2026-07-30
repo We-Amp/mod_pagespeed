@@ -446,6 +446,11 @@ ModPagespeedDisableFilters inline_preview_images,resize_mobile_images
 ModPagespeedDisableFilters lazyload_images
 </Directory>
 
+# Directory-scope coverage for the retained no-op option: the legacy
+# JavaScript minifier was removed, but the directive must still parse (and
+# warn) wherever it was previously accepted.  This conf is always loaded, so
+# this is the automated check that a live <Directory> stanza carrying the
+# directive does not break httpd startup.
 <Directory "@@APACHE_DOC_ROOT@@/mod_pagespeed_test/experimental_js_minifier" >
   ModPagespeedUseExperimentalJsMinifier on
 </Directory>

@@ -82,6 +82,49 @@ RPT-HTTPClient
 Ruby
 WordPress
 Yahoo!
+### Agent-era additions.
+###
+### Matching here is EXACT and CASE-SENSITIVE (%compare-strncmp), against the
+### whole user agent and against each " /,;+()"-delimited token of it, so entries
+### are listed in their wire casing and without version suffixes. Do NOT extend
+### the case-insensitive bot/crawl/spider substring rule in Lookup() below to
+### cover new clients: that rule already matches "bot" anywhere in the string
+### (Abbott, Talkbot, robot, any product name spelling it out) and is the one
+### unbounded false-positive source in this file.
+###
+### Clients whose token already contains bot, crawl or spider -- GPTBot,
+### ClaudeBot, OAI-SearchBot, PerplexityBot, CCBot, Applebot(-Extended),
+### Amazonbot, Bytespider, FirecrawlAgent and the rest of that cohort -- are
+### deliberately NOT listed: the substring rule catches them, and a duplicate
+### entry here would be dead weight that reads as coverage.
+###
+### User-triggered agent fetchers and agent infrastructure. These carry no
+### bot/crawl/spider substring, which is exactly why they need entries.
+ChatGPT-User
+Claude-User
+Claude-Web
+Perplexity-User
+### No Meta entry: both documented Meta agent user agents end in the crawler
+### documentation URL ".../webmasters/crawler)", so the crawl substring already
+### matches them -- the same reason Applebot-Extended is absent.
+anthropic-ai
+cohere-ai
+GoogleOther
+### Modern generic HTTP clients: the post-2015 analogues of Apache-HttpClient,
+### Python-urllib, Ruby and PHP above. None of them render, so none of them
+### should be trusted to report a critical-image or critical-CSS set.
+Go-http-client
+node-fetch
+python-requests
+axios
+okhttp
+undici
+Scrapy
+aiohttp
+libwww-perl
+HeadlessChrome
+curl
+Wget
 %%
 
 bool BotChecker::Lookup(const StringPiece& user_agent) {
@@ -97,7 +140,13 @@ bool BotChecker::Lookup(const StringPiece& user_agent) {
     return true;
   }
   // get the application_name/domain_name/email
-  const char separator[] = " /,;+";
+  //
+  // '(' and ')' are separators here because the overwhelmingly common shape for
+  // an agent token is a parenthesised comment -- "Mozilla/5.0 (compatible;
+  // GoogleOther)". Without them the final token is "GoogleOther)" and no exact
+  // entry can ever match it. This separator set is local to BotChecker on
+  // purpose; SplitStringPieceToVector's other callers are untouched.
+  const char separator[] = " /,;+()";
   StringPieceVector names;
   SplitStringPieceToVector(user_agent, separator, &names, true);
   for (int i = 0, n = names.size(); i < n; ++i) {

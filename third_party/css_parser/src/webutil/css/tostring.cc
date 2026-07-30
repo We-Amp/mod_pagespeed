@@ -254,6 +254,11 @@ string Value::ToString() const {
       return Css::EscapeIdentifier(GetIdentifierText());
     case COMMA:
       return ",";
+    case OPERATOR:
+      // Operators (currently just the calc() '+') serialize verbatim; they
+      // must NOT go through EscapeIdentifier, which would emit "\+" — an
+      // escaped-plus identifier, not the addition operator.
+      return string(str_.utf8_data(), str_.utf8_length());
     case UNKNOWN:
       return "UNKNOWN";
     case DEFAULT:
@@ -325,11 +330,21 @@ string SimpleSelector::ToString() const {
       return absl::StrFormat(".%s", Css::EscapeIdentifier(value()).c_str());
     case ID:
       return absl::StrFormat("#%s", Css::EscapeIdentifier(value()).c_str());
-    case PSEUDOCLASS:
-      return absl::StrFormat("%s%s",
-                             // pseudoclass_separator() is either ":" or "::".
-                             UnicodeTextToUTF8(pseudoclass_separator()).c_str(),
-                             Css::EscapeIdentifier(pseudoclass()).c_str());
+    case PSEUDOCLASS: {
+      string result = absl::StrFormat(
+          "%s%s",
+          // pseudoclass_separator() is either ":" or "::".
+          UnicodeTextToUTF8(pseudoclass_separator()).c_str(),
+          Css::EscapeIdentifier(pseudoclass()).c_str());
+      // Functional pseudo-class argument pass-through: the
+      // argument text was captured verbatim, re-emit it inside the parens.
+      if (has_function_arguments()) {
+        result += "(";
+        result += UnicodeTextToUTF8(function_arguments());
+        result += ")";
+      }
+      return result;
+    }
     case LANG:
       return absl::StrFormat(":lang(%s)",
                              Css::EscapeIdentifier(lang()).c_str());

@@ -17,9 +17,7 @@ For every corpus file:
   4. If minified: node --check the OUTPUT (oracle a: output must parse).
   5. Idempotence: minify the minified output again; bytes must be identical
      (oracle c).
-  6. Legacy comparison: run --mode=legacy, node --check its output; report
-     divergences where exactly one implementation produces parsing output.
-  7. Semantic equivalence (synthetic exec probes only): run original and
+  6. Semantic equivalence (synthetic exec probes only): run original and
      minified in node, diff stdout + exit code (oracle b).
 
 Output: JSONL per-file records + a summary.json + SUMMARY.md in the report
@@ -128,7 +126,6 @@ def analyze_file(path, probe, work_dir, tmpdir, meta):
     safe = re.sub(r"[^A-Za-z0-9_.-]", "_", os.path.relpath(path))
     tok_out = os.path.join(work_dir, safe + ".tok.js")
     tok_out2 = os.path.join(work_dir, safe + ".tok2.js")
-    leg_out = os.path.join(work_dir, safe + ".leg.js")
 
     # --- tokenizer path ---------------------------------------------------
     tok = run_probe(probe, "tokenizer", path, tok_out)
@@ -153,19 +150,6 @@ def analyze_file(path, probe, work_dir, tmpdir, meta):
         else:
             rec["idempotent"] = False
             rec["idempotence_note"] = "second pass rc=%d" % tok2["rc"]
-
-    # --- legacy path ------------------------------------------------------
-    leg = run_probe(probe, "legacy", path, leg_out)
-    rec["legacy"] = ("ok" if leg["rc"] == 0 else
-                     "unmodelable" if leg["rc"] == 1 else
-                     "crash" if leg["rc"] < 0 else "probe-error")
-    rec["legacy_out_bytes"] = leg["out_bytes"]
-    if leg["rc"] == 0:
-        with open(leg_out, "rb") as f:
-            lok, lerr = node_check(f.read(), rec["goal"], tmpdir)
-        rec["legacy_output_parse"] = lok
-        if not lok:
-            rec["legacy_output_error"] = lerr
 
     # --- semantic equivalence (executable probes only) --------------------
     if rec["executable"] and rec["input_parse"]:
@@ -220,7 +204,6 @@ def summarize(records):
         bump("goal", r["goal"])
         bump("kind", r.get("kind", "real"))
         bump("tokenizer", r["tokenizer"])
-        bump("legacy", r["legacy"])
         if not r["input_parse"]:
             bump("input_parse", "fail")
     s["by"] = by
@@ -240,18 +223,6 @@ def summarize(records):
     s["input_unparseable"] = [
         {"file": r["file"], "error": r.get("input_error", "")}
         for r in records if not r["input_parse"]]
-    # Legacy-vs-tokenizer divergence on minified-and-parseable outcomes.
-    diverge = []
-    for r in records:
-        tok_good = r["tokenizer"] == "ok" and r.get("tok_output_parse")
-        leg_good = r["legacy"] == "ok" and r.get("legacy_output_parse")
-        if tok_good != leg_good:
-            diverge.append({"file": r["file"],
-                            "tokenizer": r["tokenizer"],
-                            "tok_parse": r.get("tok_output_parse"),
-                            "legacy": r["legacy"],
-                            "legacy_parse": r.get("legacy_output_parse")})
-    s["legacy_tokenizer_divergence"] = diverge
     # Size stats over tokenizer-minified files.
     if tok_ok:
         ratios = sorted(r["tok_out_bytes"] / max(1, r["in_bytes"])
@@ -271,7 +242,6 @@ def write_summary_md(path, s, records):
     a("- goals: %s" % s["by"].get("goal", {}))
     a("- kinds: %s" % s["by"].get("kind", {}))
     a("- tokenizer: %s" % s["by"].get("tokenizer", {}))
-    a("- legacy: %s" % s["by"].get("legacy", {}))
     a("- pass-through rate (tokenizer unmodelable): %.1f%%"
       % (100 * s["pass_through_rate"]))
     if "tok_size_ratio_median" in s:
@@ -283,8 +253,7 @@ def write_summary_md(path, s, records):
             ("tok_semantic_diffs", "Semantic diffs (stdout mismatch)"),
             ("tok_non_idempotent", "Non-idempotent outputs"),
             ("crashes", "Crashes"),
-            ("input_unparseable", "Inputs unparseable (corpus issues)"),
-            ("legacy_tokenizer_divergence", "Legacy/tokenizer divergence")]:
+            ("input_unparseable", "Inputs unparseable (corpus issues)")]:
         entries = s[key]
         a("## %s: %d" % (title, len(entries)))
         for e in entries[:40]:
@@ -348,11 +317,10 @@ def main(argv=None):
         f.write("\n")
     write_summary_md(os.path.join(args.report, "SUMMARY.md"), s, records)
     print("parse-fail=%d semantic-diff=%d non-idempotent=%d crash=%d "
-          "unmodelable=%d divergence=%d input-bad=%d" % (
+          "unmodelable=%d input-bad=%d" % (
               len(s["tok_parse_failures"]), len(s["tok_semantic_diffs"]),
               len(s["tok_non_idempotent"]), len(s["crashes"]),
               s["by"].get("tokenizer", {}).get("unmodelable", 0),
-              len(s["legacy_tokenizer_divergence"]),
               len(s["input_unparseable"])))
     print("report: %s" % os.path.join(args.report, "SUMMARY.md"))
     if args.gate:

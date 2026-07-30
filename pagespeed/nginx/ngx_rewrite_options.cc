@@ -46,6 +46,7 @@ const char kAdminPath[] = "AdminPath";
 const char kGlobalAdminPath[] = "GlobalAdminPath";
 const char kWebBotAuth[] = "WebBotAuth";
 const char kWebBotAuthTelemetry[] = "WebBotAuthTelemetry";
+const char kWebBotAuthBotDetection[] = "WebBotAuthBotDetection";
 const char kWebBotAuthPublicCounter[] = "WebBotAuthPublicCounter";
 const char kWebBotAuthDirectoryHost[] = "WebBotAuthDirectoryHost";
 const char kWebBotAuthVerifiedBots[] = "WebBotAuthVerifiedBots";
@@ -161,6 +162,19 @@ void NgxRewriteOptions::AddProperties() {
       "web_bot_auth_verified_signed_requests statistic (and non-web-bot-auth "
       "signature material in web_bot_auth_other_signature_requests). "
       "Default off.",
+      false);
+  // The one directive that lets the Web-Bot-Auth verdict change behaviour.
+  // Kept separate from WebBotAuth, and default off, because WebBotAuth shipped
+  // as observe-only: a deployment that enabled it for telemetry must not
+  // silently acquire a change in which requests beacon.
+  add_ngx_option(
+      false, &NgxRewriteOptions::web_bot_auth_bot_detection_, "wbabd",
+      kWebBotAuthBotDetection, kServerScope,
+      "Let a verified Web-Bot-Auth signature classify the request as an "
+      "automated client for PageSpeed's own bot detection, so a signed agent "
+      "is recognised even when it presents a browser user-agent. Suppresses "
+      "the measurement beacons and lazyload for that request; never blocks it. "
+      "Requires WebBotAuth. Default off (verdict stays observe-only).",
       false);
   // the design record Bar-A (experimental): opt-in verified-crawl counter mode. One of
   // off (default) | private | public; gates the well-known counter endpoint

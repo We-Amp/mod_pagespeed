@@ -10,13 +10,13 @@
 //   * exit 0: minifier returned true, output is the minified bytes.
 //   * exit 1: minifier returned false ("cannot model this input"). The output
 //     file is still fully populated: minified prefix + unmodified remainder,
-//     exactly as MinifyUtf8Js/MinifyJs specify.
+//     exactly as MinifyUtf8Js specifies.
 //   * exit 2: usage or I/O error.
 //   * crashes (asserts/segfaults) propagate as signals for the harness to
 //     record.
 //
 // Usage:
-//   js_minify_probe --mode=tokenizer|legacy|legacy-collapse <in.js> <out.js>
+//   js_minify_probe --mode=tokenizer <in.js> <out.js>
 //
 // A single machine-readable line is printed to stdout:
 //   mode=tokenizer result=ok in_bytes=123 out_bytes=45
@@ -76,8 +76,7 @@ int main(int argc, char** argv) {
   }
   if (mode == nullptr || in_path == nullptr || out_path == nullptr) {
     fprintf(stderr,
-            "usage: js_minify_probe --mode=tokenizer|legacy|legacy-collapse "
-            "<in.js> <out.js>\n");
+            "usage: js_minify_probe --mode=tokenizer <in.js> <out.js>\n");
     return 2;
   }
 
@@ -92,10 +91,6 @@ int main(int argc, char** argv) {
   if (strcmp(mode, "tokenizer") == 0) {
     pagespeed::js::JsTokenizerPatterns patterns;
     result = pagespeed::js::MinifyUtf8Js(&patterns, input, &output);
-  } else if (strcmp(mode, "legacy") == 0) {
-    result = pagespeed::js::MinifyJs(input, &output);
-  } else if (strcmp(mode, "legacy-collapse") == 0) {
-    result = pagespeed::js::MinifyJsAndCollapseStrings(input, &output);
   } else {
     fprintf(stderr, "unknown mode: %s\n", mode);
     return 2;

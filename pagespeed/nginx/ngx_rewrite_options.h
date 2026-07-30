@@ -154,10 +154,17 @@ class NgxRewriteOptions : public SystemRewriteOptions {
   const GoogleString& console_path() const { return console_path_.value(); }
   const GoogleString& messages_path() const { return messages_path_.value(); }
 
-  // the design record A1 Web-Bot-Auth (observe-only, default off).
+  // the design record A1 Web-Bot-Auth (default off; observe-only unless
+  // WebBotAuthBotDetection is also on -- see that accessor below).
   bool web_bot_auth() const { return web_bot_auth_.value(); }
   bool web_bot_auth_telemetry() const {
     return web_bot_auth_telemetry_.value();
+  }
+  // Default off: only with this on does a verified signature feed PageSpeed's
+  // bot detection (RequestProperties::IsBot). Everything WebBotAuth does
+  // otherwise stays observe-only.
+  bool web_bot_auth_bot_detection() const {
+    return web_bot_auth_bot_detection_.value();
   }
   // the design record Bar-A opt-in counter mode (experimental): "off" (default/empty) |
   // "private" | "public". Gates the /.well-known/webbotauth-counter endpoint.
@@ -300,6 +307,7 @@ class NgxRewriteOptions : public SystemRewriteOptions {
   // the design record A1 Web-Bot-Auth options (default off / empty).
   Option<bool> web_bot_auth_;
   Option<bool> web_bot_auth_telemetry_;
+  Option<bool> web_bot_auth_bot_detection_;
   Option<GoogleString> web_bot_auth_public_counter_;
   Option<GoogleString> web_bot_auth_directory_host_;
   Option<GoogleString> web_bot_auth_verified_bots_;

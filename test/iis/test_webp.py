@@ -107,11 +107,17 @@ class TestWebPConversion:
         # async optimization. The test verifies the request succeeds and
         # returns valid image content.
 
-    def test_webp_conversion_for_png(self, client: PageSpeedClient, example_root: str):
-        """PNG images should be converted to WebP for supporting browsers.
+    def test_png_request_with_webp_accept_succeeds(
+        self, client: PageSpeedClient, example_root: str
+    ):
+        """A PNG requested with a WebP Accept header still returns an image.
 
-        Requests a PNG image with a WebP Accept header and verifies
-        that PageSpeed can convert it to WebP format.
+        This enforces only that the request succeeds and returns image content;
+        it does NOT assert that WebP conversion happened, because the assertion
+        below accepts any image content type. Whether the response comes back as
+        PNG or WebP depends on IPRO cache state and configuration. Proving the
+        conversion needs a poll plus an explicit image/webp assertion -- tracked
+        as a follow-up.
         """
         # First request triggers optimization
         client.get(
@@ -254,11 +260,16 @@ class TestWebPNegotiation:
 class TestWebPFallback:
     """Tests for WebP fallback behavior."""
 
-    def test_gif_not_converted_to_webp(self, client: PageSpeedClient, example_root: str):
-        """Animated GIFs should not be converted to WebP by default.
+    def test_gif_request_with_webp_accept_succeeds(
+        self, client: PageSpeedClient, example_root: str
+    ):
+        """A GIF requested with a WebP Accept header still returns an image.
 
-        Animated GIFs have special handling and may not be converted to
-        WebP unless convert_to_webp_animated filter is enabled.
+        The old name claimed this proved GIFs are NOT converted to WebP. It
+        never did: the assertion below accepts any image content type, and
+        small.gif is not an animated fixture. Proving the negative needs an
+        animated fixture plus an explicit assertion that the content type is
+        not image/webp -- tracked as a follow-up.
         """
         # Request GIF with WebP support (small.gif exists in testsite)
         response = client.get(
@@ -272,8 +283,8 @@ class TestWebPFallback:
         content_type = response.header("Content-Type") or ""
         assert "image" in content_type.lower(), f"Expected image, got {content_type}"
 
-        # By default, animated GIFs may not be converted to WebP
-        # (unless convert_to_webp_animated is enabled)
+        # NOTE: this deliberately does not assert the content type is not
+        # image/webp -- see the docstring.
 
     def test_small_image_not_converted(self, client: PageSpeedClient, example_root: str):
         """Very small images may not be converted to WebP.

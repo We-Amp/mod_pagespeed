@@ -26,6 +26,7 @@
 #include "net/instaweb/http/public/http_cache_failure.h"
 #include "net/instaweb/http/public/http_value.h"
 #include "net/instaweb/http/public/inflating_fetch.h"
+#include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/http/content_type.h"
@@ -43,6 +44,10 @@ const char kNumNotCacheable[] = "ipro_recorder_not_cacheable";
 const char kNumFailed[] = "ipro_recorder_failed";
 const char kNumDroppedDueToLoad[] = "ipro_recorder_dropped_due_to_load";
 const char kNumDroppedDueToSize[] = "ipro_recorder_dropped_due_to_size";
+const char kNumDroppedContentType[] = "ipro_recorder_dropped_content_type";
+const char kNumErrorStatus[] = "ipro_recorder_error_status";
+const char kNumSkippedTransient[] = "ipro_recorder_skipped_transient";
+const char kNumEmpty[] = "ipro_recorder_empty";
 
 }  // namespace
 
@@ -69,8 +74,13 @@ InPlaceResourceRecorder::InPlaceResourceRecorder(
       num_failed_(stats->GetVariable(kNumFailed)),
       num_dropped_due_to_load_(stats->GetVariable(kNumDroppedDueToLoad)),
       num_dropped_due_to_size_(stats->GetVariable(kNumDroppedDueToSize)),
+      num_dropped_content_type_(stats->GetVariable(kNumDroppedContentType)),
+      num_error_status_(stats->GetVariable(kNumErrorStatus)),
+      num_skipped_transient_(stats->GetVariable(kNumSkippedTransient)),
+      num_empty_(stats->GetVariable(kNumEmpty)),
       status_code_(-1),
       failure_(false),
+      specific_outcome_recorded_(false),
       full_response_headers_considered_(false),
       consider_response_headers_called_(false),
       cache_control_set_(false) {
@@ -78,7 +88,10 @@ InPlaceResourceRecorder::InPlaceResourceRecorder(
   if (limit_active_recordings() &&
       active_recordings_.BarrierIncrement(1) > max_concurrent_recordings_) {
     VLOG(1) << "IPRO: too many recordings in progress, not recording";
-    num_dropped_due_to_load_->Add(1);
+    RecordSpecificOutcome(num_dropped_due_to_load_);
+    handler_->Message(kInfo,
+                      "IPRO: not recording %s: too many concurrent recordings",
+                      url_.c_str());
     failure_ = true;
   }
 
@@ -108,6 +121,19 @@ void InPlaceResourceRecorder::InitStats(Statistics* statistics) {
   statistics->AddVariable(kNumFailed);
   statistics->AddVariable(kNumDroppedDueToLoad);
   statistics->AddVariable(kNumDroppedDueToSize);
+  statistics->AddVariable(kNumDroppedContentType);
+  statistics->AddVariable(kNumErrorStatus);
+  statistics->AddVariable(kNumSkippedTransient);
+  statistics->AddVariable(kNumEmpty);
+}
+
+bool InPlaceResourceRecorder::RecordSpecificOutcome(Variable* counter) {
+  if (specific_outcome_recorded_) {
+    return false;
+  }
+  specific_outcome_recorded_ = true;
+  counter->Add(1);
+  return true;
 }
 
 bool InPlaceResourceRecorder::Write(const StringPiece& contents,
@@ -117,8 +143,16 @@ bool InPlaceResourceRecorder::Write(const StringPiece& contents,
     return false;
   }
 
-  // Write into resource_value_ decompressing if needed.
+  // Write into resource_value_ decompressing if needed. A write/inflate
+  // error here is a genuine recording malfunction: leave it uncounted so
+  // DoneAndSetHeaders() attributes it to num_failed_. Write() short-circuits
+  // once failure_ is set, so this fires at most once per recording.
   failure_ = !inflating_fetch_.Write(contents, handler_);
+  if (failure_) {
+    handler_->Message(kWarning,
+                      "IPRO: failed to record %s: write/inflate error",
+                      url_.c_str());
+  }
   if (max_response_bytes_ <= 0 ||
       resource_value_.contents_size() < max_response_bytes_) {
     return !failure_;
@@ -174,6 +208,15 @@ void InPlaceResourceRecorder::ConsiderResponseHeaders(
     if ((content_type == nullptr) ||
         !(content_type->IsImage() || content_type->IsCss() ||
           content_type->IsJsLike())) {
+      // Not an image/CSS/JS-like content type: this is an expected, benign
+      // bail (HTML, PDF, plain text, ...), not a recording malfunction.
+      // Count it in its own bucket so it never inflates num_failed_.
+      if (RecordSpecificOutcome(num_dropped_content_type_)) {
+        handler_->Message(kInfo,
+                          "IPRO: not recording %s: content type is not "
+                          "rewritable (image/CSS/JS)",
+                          url_.c_str());
+      }
       // DroppedAsUncacheable().  If at some point we decide to go this
       // way, we must also change the expected cache_inserts count in
       // "Blocking rewrite enabled." in apache/system_test.sh from 3 to
@@ -208,6 +251,12 @@ void InPlaceResourceRecorder::ConsiderResponseHeaders(
       failure_kind = kFetchStatus4xxError;
     }
     cache_->RememberFailure(url_, fragment_, failure_kind, handler_);
+    // A 4xx/5xx origin response is a broken-resource signal for the operator,
+    // but not a recorder malfunction; it gets its own counter.
+    if (RecordSpecificOutcome(num_error_status_)) {
+      handler_->Message(kInfo, "IPRO: not recording %s: origin returned %d",
+                        url_.c_str(), status_code_);
+    }
     failure_ = true;
     return;
   }
@@ -217,6 +266,14 @@ void InPlaceResourceRecorder::ConsiderResponseHeaders(
   // like 304 and 206 an another response is likely to be a 200 soon. We group
   // the other stuff with them here since it's the conservative default.
   if (status_code_ != HttpStatus::kOK) {
+    // Transient non-200 (304 Not Modified, 206 Partial Content, ...):
+    // deliberately not remembered, and not a malfunction. Own counter.
+    if (RecordSpecificOutcome(num_skipped_transient_)) {
+      handler_->Message(kInfo,
+                        "IPRO: not recording %s: transient status %d "
+                        "(not a 200)",
+                        url_.c_str(), status_code_);
+    }
     failure_ = true;
     return;
   }
@@ -227,13 +284,25 @@ void InPlaceResourceRecorder::ConsiderResponseHeaders(
       ResponseHeaders::kNoValidator);
   if (!is_cacheable) {
     DroppedAsUncacheable();
-    num_not_cacheable_->Add(1);
+    // Cache-Control forbids caching: an expected policy outcome, not a
+    // malfunction. Keeps its existing dedicated counter.
+    if (RecordSpecificOutcome(num_not_cacheable_)) {
+      handler_->Message(kInfo,
+                        "IPRO: not recording %s: response is not cacheable",
+                        url_.c_str());
+    }
     return;
   }
 }
 
 void InPlaceResourceRecorder::DroppedDueToSize() {
-  num_dropped_due_to_size_->Add(1);
+  // Oversize responses are a deliberate size-limit policy outcome, not a
+  // malfunction; keep their dedicated counter and out of num_failed_.
+  if (RecordSpecificOutcome(num_dropped_due_to_size_)) {
+    handler_->Message(kInfo,
+                      "IPRO: not recording %s: response exceeds the size limit",
+                      url_.c_str());
+  }
   // Too big == too big to cache.
   DroppedAsUncacheable();
 }
@@ -260,6 +329,11 @@ void InPlaceResourceRecorder::DoneAndSetHeaders(
   if (!entire_response_received) {
     // To record successfully, we must have a complete response.  Otherwise you
     // get https://github.com/apache/incubator-pagespeed-mod/issues/1081.
+    // A truncated response is a genuine recording failure: leave it uncounted
+    // by the specific buckets so it lands in num_failed_ below.
+    handler_->Message(
+        kWarning, "IPRO: failed to record %s: incomplete/truncated response",
+        url_.c_str());
     Fail();
   }
 
@@ -267,17 +341,30 @@ void InPlaceResourceRecorder::DoneAndSetHeaders(
     ConsiderResponseHeaders(kFullHeaders, response_headers);
   }
 
-  if (status_code_ == HttpStatus::kOK && resource_value_.contents_size() == 0) {
-    // Ignore Empty 200 responses.
-    // https://github.com/apache/incubator-pagespeed-mod/issues/1050
-    if (!failure_) {
-      cache_->RememberFailure(url_, fragment_, kFetchStatusEmpty, handler_);
+  // Ignore Empty 200 responses.
+  // https://github.com/apache/incubator-pagespeed-mod/issues/1050
+  // A legal empty resource is a deliberate cache-the-skip, not a malfunction,
+  // so it gets its own counter. Guarded on !failure_ so a truncated or
+  // otherwise-failed response that happens to be empty stays a genuine
+  // failure rather than being reclassified as "empty".
+  if (!failure_ && status_code_ == HttpStatus::kOK &&
+      resource_value_.contents_size() == 0) {
+    cache_->RememberFailure(url_, fragment_, kFetchStatusEmpty, handler_);
+    if (RecordSpecificOutcome(num_empty_)) {
+      handler_->Message(kInfo, "IPRO: not recording %s: empty 200 response",
+                        url_.c_str());
     }
     failure_ = true;
   }
 
   if (failure_) {
-    num_failed_->Add(1);
+    // num_failed_ counts genuine recording malfunctions only. Every expected
+    // or policy outcome above recorded a specific counter and set
+    // specific_outcome_recorded_, so only write/inflate errors and truncated
+    // responses reach this bump.
+    if (!specific_outcome_recorded_) {
+      num_failed_->Add(1);
+    }
   } else {
     // We are skeptical of the correctness of the  content-encoding here,
     // since it can  be captured post-mod_deflate with pre-deflate content.

@@ -58,11 +58,10 @@ const char JavascriptCodeBlock::kIntrospectionComment[] =
     "This script contains introspective JavaScript and is unsafe to replace.";
 
 JavascriptRewriteConfig::JavascriptRewriteConfig(
-    Statistics* stats, bool minify, bool use_experimental_minifier,
+    Statistics* stats, bool minify,
     const JavascriptLibraryIdentification* identification,
     const pagespeed::js::JsTokenizerPatterns* js_tokenizer_patterns)
     : minify_(minify),
-      use_experimental_minifier_(use_experimental_minifier),
       library_identification_(identification),
       js_tokenizer_patterns_(js_tokenizer_patterns),
       blocks_minified_(stats->GetVariable(kBlocksMinified)),
@@ -184,7 +183,9 @@ bool JavascriptCodeBlock::Rewrite() {
     return successfully_rewritten_;
   }
 
-  if (MinifyJs(original_code_, &rewritten_code_, &source_mappings_)) {
+  if (pagespeed::js::MinifyUtf8JsWithSourceMap(config_->js_tokenizer_patterns(),
+                                               original_code_, &rewritten_code_,
+                                               &source_mappings_)) {
     // Minification succeeded. The fact that it succeeded doesn't imply that
     // it actually saved anything; we increment num_reducing_uses when there
     // were actual savings.
@@ -223,16 +224,6 @@ void JavascriptCodeBlock::SwapRewrittenString(GoogleString* other) {
   rewritten_code_.clear();
   rewritten_ = false;
   successfully_rewritten_ = false;
-}
-
-bool JavascriptCodeBlock::MinifyJs(StringPiece input, GoogleString* output,
-                                   source_map::MappingVector* source_mappings) {
-  if (config_->use_experimental_minifier()) {
-    return pagespeed::js::MinifyUtf8JsWithSourceMap(
-        config_->js_tokenizer_patterns(), input, output, source_mappings);
-  } else {
-    return pagespeed::js::MinifyJs(input, output);
-  }
 }
 
 }  // namespace net_instaweb

@@ -1,9 +1,12 @@
 // Copyright 2026 We-Amp B.V.
 // Licensed under the Apache License, Version 2.0 (the "License").
 //
-// Implementation of the observe-only nginx Web-Bot-Auth (RFC 9421) wiring.
-// See ngx_webbotauth_handler.h. the design record Amendment A1: the FREE verifier --
-// no 401/402, no enforcement, no RSL-CAP, no metering beyond an opt-in counter.
+// Implementation of the nginx Web-Bot-Auth (RFC 9421) wiring -- observe-only
+// unless WebBotAuthBotDetection is on, in which case a verified signature also
+// classifies the request as an automated client for PageSpeed's own bot
+// detection (see ngx_webbotauth_handler.h). the design record Amendment A1: the FREE
+// verifier -- no 401/402, no enforcement, no RSL-CAP, no metering beyond an
+// opt-in counter.
 //
 // A1 v1 scope: signer keys come from an operator-LOCAL JWKS file
 // (WebBotAuthKeyDirectoryFile) and are resolved SYNCHRONOUSLY in-memory. The
@@ -676,10 +679,15 @@ webbotauth::Verdict ClassifyRequest(ngx_http_request_t* r,
 
 // Render the verdict as the $x_verified_bot token. A verified bot is emitted as
 // "<bot-name>, ed25519-verified"; otherwise the bare verdict token.
+// Suffix FormatVerdict appends for a registered verified bot. Named because
+// ps_webbotauth_signature_verified below recognises the stored value by it;
+// the two must agree, and this constant is what makes them agree.
+const char kVerifiedBotSuffix[] = ", ed25519-verified";
+
 GoogleString FormatVerdict(webbotauth::Verdict verdict,
                            const GoogleString& bot_name) {
   if (verdict == webbotauth::Verdict::kVerifiedBot) {
-    return StrCat(bot_name, ", ed25519-verified");
+    return StrCat(bot_name, kVerifiedBotSuffix);
   }
   return webbotauth::VerdictToken(verdict);
 }
@@ -919,6 +927,30 @@ ngx_int_t ps_x_verified_bot_variable(ngx_http_request_t* r,
       /*other_signature_out=*/nullptr, /*verify_latency_us_out=*/nullptr);
   SetNgxVarValue(r, v, FormatVerdict(verdict, bot_name));
   return NGX_OK;
+}
+
+bool ps_webbotauth_signature_verified(ngx_http_request_t* r) {
+  if (g_xvb_var_index == NGX_ERROR || r == nullptr) {
+    return false;
+  }
+  // Resolve against the MAIN request, exactly as ps_x_verified_bot_variable
+  // does: the verdict is computed once per client transaction and a subrequest
+  // must inherit it rather than see an empty slot.
+  const ngx_http_variable_value_t* mv = &r->main->variables[g_xvb_var_index];
+  if (!mv->valid || mv->not_found || mv->data == nullptr) {
+    // The preaccess handler never ran (WebBotAuth off, or a phase pipeline
+    // that skipped it). No opinion -- never recompute here, since this is
+    // called on the content path where the verifier's cost budget does not
+    // apply.
+    return false;
+  }
+  const StringPiece value(reinterpret_cast<const char*>(mv->data), mv->len);
+  // Positive verdicts only. kSignedAgent formats as its own token;
+  // kVerifiedBot formats as "<bot name>" + kVerifiedBotSuffix (FormatVerdict).
+  // kHuman and kUnknown format as their own tokens and are not matched here.
+  const StringPiece signed_agent_token(
+      webbotauth::VerdictToken(webbotauth::Verdict::kSignedAgent));
+  return value == signed_agent_token || value.ends_with(kVerifiedBotSuffix);
 }
 
 void ps_webbotauth_counter_map(const GoogleString& path) {

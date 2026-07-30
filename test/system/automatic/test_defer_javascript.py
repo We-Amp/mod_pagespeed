@@ -128,6 +128,64 @@ class TestDeferJavascript:
         )
 
 
+class TestDeferJavascriptBotExclusion:
+    """defer_javascript is withheld from automated clients.
+
+    The deferred form (``type="text/psajs"`` plus the ``js_defer`` runtime) can
+    only be executed by PageSpeed's client-side runtime, so a client that does
+    not run JavaScript would receive a page whose scripts never run. Bots are
+    served the page's normal, unmodified script markup instead -- including
+    search-engine crawlers, deliberately.
+
+    The tests above pass because the framework's default User-Agent is a Chrome
+    string, not because the filter is unconditional. These tests pin the other
+    side of that.
+    """
+
+    # Real crawler / fetcher user agents. The last one is the empty-UA case,
+    # which BotChecker also classifies as a bot.
+    BOT_USER_AGENTS = [
+        "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+        "Mediapartners-Google",
+        "Wget/1.21.4",
+        "",
+    ]
+
+    @pytest.mark.parametrize("user_agent", BOT_USER_AGENTS)
+    def test_bots_get_undeferred_markup(
+        self, client: PageSpeedClient, example_root: str, user_agent: str
+    ):
+        """Bots should receive neither psajs markup nor the defer runtime."""
+        url = f"{example_root}/defer_javascript.html?PageSpeedFilters=defer_javascript"
+
+        response = client.get(
+            url,
+            headers={
+                "X-PSA-Blocking-Rewrite": "psatest",
+                "User-Agent": user_agent,
+            },
+        )
+        assert_http_status(response, 200)
+
+        assert_not_contains(
+            response,
+            r"text/psajs",
+            "Bots should not receive deferred script markup",
+        )
+        assert_not_contains(
+            response,
+            r"/js_defer",
+            "Bots should not receive the defer runtime",
+        )
+        # support_noscript rides on the same gate, so there is no stray
+        # noscript redirect banner either.
+        assert_not_contains(
+            response,
+            r"PageSpeed=noscript",
+            "Bots should not receive the noscript fallback",
+        )
+
+
 class TestDeferJavascriptDebug:
     """Tests for defer_javascript in debug mode.
 
