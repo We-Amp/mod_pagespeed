@@ -110,6 +110,44 @@ TEST_F(HtmlParseTest, RetainBogusEndTag) {
       "</script>");
 }
 
+// Cross-ported from pagespeed-optimizer (We-Amp/pagespeed-optimizer) html_parse_test.cc;
+// these exercise the HTML-comment escape states inside <script> that
+// HtmlLexer tracks with HtmlCommentEscapeState (We-Amp/pagespeed-optimizer#1139).
+TEST_F(HtmlParseTest, ScriptWithCommentEscaping) {
+  // Script with <!-- ... //--> pattern and nested < > characters.
+  ValidateNoChanges("script_with_comment_escaping",
+                    "<script type=\"text/javascript\">\n"
+                    "<!--\n"
+                    "if (a < b && c > d) { alert('test'); }\n"
+                    "// -->\n"
+                    "</script>");
+}
+
+TEST_F(HtmlParseTest, ScriptCommentEscapedWrite) {
+  // A script wrapped in <!-- ... -->; --> must exit the comment escape so
+  // that the following </script> closes the element.
+  ValidateNoChanges("script_comment_escaped_write",
+                    "<script><!--\n"
+                    "document.write('<div>');\n"
+                    "--></script>");
+}
+
+TEST_F(HtmlParseTest, ScriptWithNestedHtmlComment) {
+  // Script containing <!-- and --> comment delimiters with a split
+  // '</' + 'script>' that must not close the element.
+  ValidateNoChanges("script_with_nested_html_comment",
+                    "<script><!--\n"
+                    "var x = '</' + 'script>';\n"
+                    "//--></script>");
+}
+
+// Cross-ported from pagespeed-optimizer's EofInScript: EOF while inside a script
+// tag emits the remaining content and implicitly closes the element without
+// inserting a </script> into the output.
+TEST_F(HtmlParseTest, EofInScript) {
+  ValidateNoChanges("eof_in_script", "<script>var x = 1;");
+}
+
 TEST_F(HtmlParseTest, AmpersandInHref) {
   // Note that we will escape the "&" in the href.
   ValidateNoChanges(
@@ -184,6 +222,32 @@ TEST_F(HtmlParseTest, AttrDecodeError) {
   EXPECT_EQ("<ERROR>", attr_saver.value());
 }
 
+TEST_F(HtmlParseTest, BooleanAttribute) {
+  // A valueless (boolean) attribute must reach AddEscapedAttribute as a
+  // piece whose data() is nullptr: constructing a StringPiece from a null
+  // const char* is undefined behavior when StringPiece is backed by
+  // std::string_view, and Attribute::CopyValue uses data() == nullptr to
+  // distinguish <tag attr> from <tag attr=>.  Round-tripping unchanged
+  // pins that CopyValue branch: the writer only omits "=" when
+  // escaped_value() is nullptr.
+  ValidateNoChanges("bool_attr", "<input disabled>");
+  ValidateNoChanges("bool_attr_multi", "<input disabled required readonly>");
+  ValidateNoChanges("bool_attr_mixed",
+                    "<input type=\"text\" disabled name=\"q\" required>");
+  // The writer normalizes brief-close to " />"; the valueless attribute
+  // still round-trips without an added "=".
+  ValidateExpected("bool_attr_brief_close", "<input disabled/>",
+                   "<input disabled />");
+
+  // DecodedValueOrNull() must be null for the valueless attribute (the
+  // CopyValue data()==nullptr branch), and empty-but-non-null for
+  // <tag attr=>, so only the former contributes "(null)" here.
+  AttrValuesSaverFilter attr_saver;
+  html_parse_.AddFilter(&attr_saver);
+  Parse("bool_attr_value", "<input disabled><input disabled=>");
+  EXPECT_EQ("(null)", attr_saver.value());
+}
+
 TEST_F(HtmlParseTest, UnclosedQuote) {
   // In this test, the system automatically closes the 'a' tag, which
   // didn't really get closed in the input text.  The exact syntax
@@ -203,6 +267,64 @@ TEST_F(HtmlParseTest, UnclosedQuote) {
 
 TEST_F(HtmlParseTest, NestedDivInBr) {
   ValidateNoChanges("nested_div_in_br", "<br><div>hello</div></br>");
+}
+
+TEST_F(HtmlParseTest, HighBitBytesInTagSyntax) {
+  // Bytes with the high bit set used to reach isalpha()/isalnum() as
+  // negative char values, which is undefined behavior (the lexer processes
+  // arbitrary bytes).  A high-bit byte is not a legal tag-first char, so
+  // "<\xe9" is passed through as literal text; inside a tag name it is
+  // accepted as an i18n character.
+  ValidateNoChanges("high_bit_tag_first_char", "<\xe9lement>x</\xe9lement>");
+  ValidateNoChanges("high_bit_tag_char", "<a\xe9>x</a\xe9>");
+}
+
+TEST_F(HtmlParseTest, ShortLiteralTagContent) {
+  // Regression test: when the accumulated literal content is shorter than
+  // the literal close string (e.g. "</style>"), EvalLiteralTag must not
+  // underflow its size computation when a '>' arrives.
+  ValidateNoChanges("short_literal_style", "<style>>x</style>");
+  ValidateNoChanges("short_literal_iframe", "<iframe>></iframe>");
+}
+
+// Regression filter for a null-deref in HtmlParse::InsertNodeAfterCurrent:
+// when the current event carries no node (e.g. StartDocument), GetNode()
+// returns nullptr and must not be dereferenced while finding a parent.
+class InsertAfterStartDocumentFilter : public EmptyHtmlFilter {
+ public:
+  explicit InsertAfterStartDocumentFilter(HtmlParse* html_parse)
+      : html_parse_(html_parse) {}
+
+  void StartDocument() override {
+    HtmlCharactersNode* node = html_parse_->NewCharactersNode(nullptr, "x");
+    html_parse_->InsertNodeAfterCurrent(node);
+  }
+
+  const char* Name() const override { return "insert_after_start_document"; }
+
+ private:
+  HtmlParse* html_parse_;
+
+  InsertAfterStartDocumentFilter(const InsertAfterStartDocumentFilter&) =
+      delete;
+  InsertAfterStartDocumentFilter& operator=(
+      const InsertAfterStartDocumentFilter&) = delete;
+};
+
+TEST_F(HtmlParseTest, InsertNodeAfterCurrentAtStartDocument) {
+  InsertAfterStartDocumentFilter inserter(&html_parse_);
+  html_parse_.AddFilter(&inserter);
+  Parse("insert_after_start_document", "y");
+  // The node inserted after the (node-less) StartDocument event gets a null
+  // parent and is emitted before the parsed content.
+  EXPECT_EQ("x<html><body>\ny</body></html>\n", output_buffer_);
+}
+
+TEST_F(HtmlParseTest, LogRewriteTimingWithoutTimer) {
+  // Enabling rewrite-timing logging without installing a Timer used to
+  // dereference the null timer_ in StartParse and ShowProgress.
+  html_parse_.set_log_rewrite_timing(true);
+  ValidateNoChanges("log_rewrite_timing_no_timer", "<p>x</p>");
 }
 
 // bug 2465145 - Sequential defaulted attribute tags lost
@@ -1067,6 +1189,32 @@ TEST_F(HtmlAnnotationTest, ScriptQuirkBasic) {
   EXPECT_EQ("+script '<!--<script>-->' -script(e) 'a</script>b'", annotation());
 }
 
+// Cross-ported from pagespeed-optimizer (We-Amp/pagespeed-optimizer) html_parse_test.cc,
+// where the lexer tracks this with the HtmlCommentEscapeState enum that this
+// change adopts.  See We-Amp/pagespeed-optimizer#1139.
+TEST_F(HtmlAnnotationTest, ScriptDoubleEscapedCommentState) {
+  // WHATWG script double-escape: <script> inside <script><!-- ... enters a
+  // second escape level.  The first </script> only pops back to the comment
+  // level, --> clears both levels, and the final </script> closes the
+  // element, so everything up to it stays script literal text.
+  ValidateNoChanges("script_double_escaped_state",
+                    "<script><!--<script>var y = 1;</script>--></script>");
+  EXPECT_EQ("+script '<!--<script>var y = 1;</script>-->' -script(e)",
+            annotation());
+}
+
+TEST_F(HtmlAnnotationTest, ScriptDoubleEscapingMultipleCloses) {
+  // The inner </script> exits only the double-escaped level, so the outer
+  // script element stays open until the second </script>; <p>after</p> is
+  // parsed as HTML.
+  ValidateNoChanges("script_double_escaping_multiple_closes",
+                    "<script><!--<script>inner code</script>outer code"
+                    "</script><p>after</p>");
+  EXPECT_EQ("+script '<!--<script>inner code</script>outer code' -script(e)"
+            " +p 'after' -p(e)",
+            annotation());
+}
+
 TEST_F(HtmlAnnotationTest, ScriptQuirkCloseAttr) {
   // HTML5 script parsing is weird in that </script> actually gets attribute
   // parsing.
@@ -1775,6 +1923,25 @@ TEST_F(EventListManipulationTest, TestCoalesceOnAdd) {
   // this will coalesce node1 and node2 togethers.  So there is only
   // one node1_="12", and node2_ is gone.  Deleting node1_ will now
   // leave us empty
+  html_parse_.DeleteNode(node1_);
+  CheckExpected("");
+}
+
+TEST_F(EventListManipulationTest, TestCoalesceReleasesData) {
+  CheckExpected("1");
+  EXPECT_TRUE(HtmlTestingPeer::LeafNodeHasData(node2_));
+  HtmlTestingPeer::AddEvent(&html_parse_, new HtmlCharactersEvent(node2_, -1));
+
+  // Applying a filter coalesces node2_ into node1_, marking node2_ dead.
+  // The merged-away node must release its Data buffer at that point
+  //, not hold it until end-of-parse.
+  CheckExpected("12");
+  EXPECT_FALSE(node2_->live());
+  EXPECT_FALSE(HtmlTestingPeer::LeafNodeHasData(node2_));
+
+  // The surviving node keeps the merged contents, and deleting it still
+  // removes everything.
+  EXPECT_TRUE(HtmlTestingPeer::LeafNodeHasData(node1_));
   html_parse_.DeleteNode(node1_);
   CheckExpected("");
 }
@@ -3278,6 +3445,22 @@ TEST_F(HtmlParseTestNoBody, InsertExternalScriptAfterEndOfHead) {
   SetupWriter();
   ValidateExpected("1", "<head>text</head>",
                    "<head>text</head><script src=\"inserted\"></script>");
+}
+
+// Coverage: html_lexer.cc Restart() empty-literal release-mode guard.
+// Parse() normally guarantees literal_ is non-empty when Restart runs; if
+// that invariant is ever violated, the guard degrades gracefully instead of
+// computing literal_.resize(SIZE_MAX) in a release build.  Restored from
+// pagespeed-optimizer, where the test was dropped in the
+// vendoring migration because canonical granted the lexer no test peer.
+TEST_F(HtmlParseTest, RestartWithEmptyLiteralDoesNotUnderflow) {
+  html_parse_.StartParse("http://test.com/");
+  HtmlLexer* lexer = HtmlTestingPeer::GetLexer(&html_parse_);
+  // Force the invariant violation: Restart with an empty literal_ must not
+  // crash or abort (release builds used to hit resize(SIZE_MAX) here).
+  HtmlTestingPeer::RestartWithEmptyLiteral(lexer, 'x');
+  html_parse_.FinishParse();
+  SUCCEED();
 }
 
 }  // namespace net_instaweb

@@ -20,6 +20,7 @@
 #ifndef PAGESPEED_KERNEL_HTML_HTML_LEXER_H_
 #define PAGESPEED_KERNEL_HTML_HTML_LEXER_H_
 
+#include <cstdint>
 #include <vector>
 
 #include "pagespeed/kernel/base/basictypes.h"
@@ -104,6 +105,11 @@ class HtmlLexer {
   static const int kMaxNestingDepth = 512;
 
  private:
+  // Grants the test-side peer (test/pagespeed/kernel/html/html_testing_peer.h)
+  // access to literal_ and Restart() so tests can force the empty-literal
+  // invariant violation that Restart()'s release-mode guard protects against.
+  friend class HtmlTestingPeer;
+
   // Most of these routines expect c to be the last character of literal_
   inline void EvalStart(char c);
   inline void EvalTag(char c);
@@ -126,6 +132,7 @@ class HtmlLexer {
   inline void EvalCdataEnd1(char c);
   inline void EvalCdataEnd2(char c);
   inline void EvalAttribute(char c);
+  inline bool HandleAttributeEnd(char c);
   inline void EvalAttrName(char c);
   inline void EvalAttrNameSpace(char c);
   inline void EvalAttrEq(char c);
@@ -237,9 +244,20 @@ class HtmlLexer {
   int line_;
   int tag_start_line_;  // line at which we last transitioned to TAG state
   GoogleString id_;
-  GoogleString literal_close_;       // specific tag go close, e.g </script>
-  bool script_html_comment_;         // inside <script> <!--
-  bool script_html_comment_script_;  // inside <script> <!-- <script>
+  GoogleString literal_close_;  // specific tag go close, e.g </script>
+
+  // Tracks HTML comment escape state within <script> elements.
+  // See http://wiki.whatwg.org/wiki/CDATA_Escapes
+  enum class HtmlCommentEscapeState : std::uint8_t {
+    kNone,           // normal script parsing
+    kInComment,      // inside <script> <!--
+    kDoubleEscaped,  // inside <script> <!-- <script>
+  };
+  HtmlCommentEscapeState script_escape_state_;
+
+  // Returns true if current char and buffer indicate --> is closing
+  // an HTML comment escape within a script element.
+  bool IsScriptHtmlCommentClosing(char c) const;
   // in some cases we have to drop what looks like attributes on a closing
   // tag as part of error recovery.
   bool discard_until_start_state_for_error_recovery_;

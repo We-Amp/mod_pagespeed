@@ -28,6 +28,8 @@
 //   * default            -> a deterministic main() that drives an embedded
 //                           adversarial corpus (and, if given, every file under
 //                           argv[1]) through the parser. Hermetic; CI-friendly.
+//                           `--dump_corpus=<dir>` instead writes the embedded
+//                           corpus to <dir> (libFuzzer seed support, #645).
 //   * -DCSS_PARSER_LIBFUZZER -> exposes LLVMFuzzerTestOneInput for coverage-
 //                           guided discovery when linked with -fsanitize=fuzzer.
 //
@@ -38,6 +40,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <vector>
@@ -199,6 +202,13 @@ const char* const kCorpus[] = {
     "@supports \"unterminated string {",
     "@supports (a:b){@import url(x);@charset \"utf-8\";}",
     "@layer a.b{@media screen{@supports (c:d){e{f:url(g)}}}}",
+
+    // Stray ';' at statement position inside an @media body, crossed with
+    // truncation: the recovery skip must not run off the end of the buffer.
+    "@media screen{.a{b:c};",
+    "@media screen{;",
+    "@media screen{;}",
+    "@media screen{.a{b:c}; ) }",
 };
 
 // Build progressively deeper nested inputs at run time to probe the recursion /
@@ -225,6 +235,46 @@ std::vector<std::string> DeepNesters() {
   return out;
 }
 
+// CI seed support: write the embedded corpus (kCorpus plus the
+// generated DeepNesters) to one file per input under `dir`, so the scheduled
+// libFuzzer lane can seed its persisted corpus directory without re-parsing
+// this source file. Returns the number of files written, or -1 on error.
+int DumpCorpus(const char* dir) {
+  std::error_code ec;
+  std::filesystem::create_directories(dir, ec);
+  if (ec) {
+    std::fprintf(stderr, "dump_corpus: cannot create %s: %s\n", dir,
+                 ec.message().c_str());
+    return -1;
+  }
+  int n = 0;
+  auto write_one = [&](const char* data, size_t size) -> bool {
+    char name[32];
+    std::snprintf(name, sizeof(name), "seed-%04d", n);
+    const std::filesystem::path path = std::filesystem::path(dir) / name;
+    FILE* f = std::fopen(path.c_str(), "wb");
+    if (f == nullptr) {
+      std::fprintf(stderr, "dump_corpus: cannot open %s\n", path.c_str());
+      return false;
+    }
+    const size_t wrote = std::fwrite(data, 1, size, f);
+    std::fclose(f);
+    if (wrote != size) {
+      std::fprintf(stderr, "dump_corpus: short write on %s\n", path.c_str());
+      return false;
+    }
+    ++n;
+    return true;
+  };
+  for (const char* s : kCorpus) {
+    if (!write_one(s, std::strlen(s))) return -1;
+  }
+  for (const std::string& s : DeepNesters()) {
+    if (!write_one(s.data(), s.size())) return -1;
+  }
+  return n;
+}
+
 }  // namespace
 
 #ifdef CSS_PARSER_LIBFUZZER
@@ -235,6 +285,18 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
 }
 #else
 int main(int argc, char** argv) {
+  // `--dump_corpus=<dir>` writes the embedded corpus to <dir> and exits —
+  // used by the scheduled fuzz lane to seed libFuzzer's corpus directory.
+  for (int i = 1; i < argc; ++i) {
+    constexpr char kDumpPrefix[] = "--dump_corpus=";
+    if (std::strncmp(argv[i], kDumpPrefix, sizeof(kDumpPrefix) - 1) == 0) {
+      const int dumped = DumpCorpus(argv[i] + sizeof(kDumpPrefix) - 1);
+      if (dumped < 0) return 1;
+      std::fprintf(stderr, "css parser fuzz harness: dumped %d seed inputs\n",
+                   dumped);
+      return 0;
+    }
+  }
   size_t n = 0;
   for (const char* s : kCorpus) {
     ParseOne(s, std::strlen(s));

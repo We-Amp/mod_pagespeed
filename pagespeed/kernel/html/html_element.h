@@ -234,9 +234,10 @@ class HtmlElement : public HtmlNode {
   void AddAttribute(const Attribute& attr);
 
   // Unconditionally add attribute, copying value.
-  // For binary attributes (those without values) use value=NULL.
-  // TODO(sligocki): StringPiece(NULL) seems fragile because what it is or
-  // how it's treated is not documented.
+  // For binary attributes (those without values) pass a default-constructed
+  // StringPiece (data() == nullptr); never construct one from a null
+  // const char*, which is undefined behavior for std::string_view-backed
+  // StringPiece dialects.
   //
   // Doesn't check for attribute duplication (which is illegal in html).
   //
@@ -331,6 +332,10 @@ class HtmlElement : public HtmlNode {
 
   friend class HtmlParse;
   friend class HtmlLexer;
+  // Grants the test-side peer (test/pagespeed/kernel/html/html_testing_peer.h)
+  // access to the line-number setters and Data::kMaxLineNumber so tests can
+  // cover the partial-line-number branches of ToString().
+  friend class HtmlTestingPeer;
 
   Style style() const { return data_->style_; }
   void set_style(Style style) { data_->style_ = style; }

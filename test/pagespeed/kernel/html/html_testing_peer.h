@@ -24,6 +24,7 @@
 
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/html/html_element.h"
+#include "pagespeed/kernel/html/html_lexer.h"
 #include "pagespeed/kernel/html/html_node.h"
 #include "pagespeed/kernel/html/html_parse.h"
 
@@ -52,6 +53,34 @@ class HtmlTestingPeer {
   }
   static void set_buffer_events(HtmlParse* parse, bool value) {
     parse->set_buffer_events(value);
+  }
+
+  // Access to the parse session's lexer (HtmlParse friended this peer).
+  static HtmlLexer* GetLexer(HtmlParse* parse) { return parse->lexer_.get(); }
+
+  // Forces the empty-literal invariant violation that HtmlLexer::Restart()'s
+  // release-mode guard protects against: Parse() normally guarantees
+  // literal_ is non-empty when Restart runs, but if that is ever violated a
+  // release build (asserts compiled out) would otherwise compute
+  // literal_.resize(literal_.size() - 1) as resize(SIZE_MAX).
+  static void RestartWithEmptyLiteral(HtmlLexer* lexer, char c) {
+    lexer->literal_.clear();
+    lexer->Restart(c);
+  }
+
+  // Line-number setters for covering the partial-line-number branches of
+  // HtmlElement::ToString().
+  static void SetBeginLineNumber(HtmlElement* element, int line) {
+    element->set_begin_line_number(line);
+  }
+  static void SetEndLineNumber(HtmlElement* element, int line) {
+    element->set_end_line_number(line);
+  }
+  static int MaxLineNumber() { return HtmlElement::Data::kMaxLineNumber; }
+  // Reports whether a leaf node is still holding its Data buffer, i.e.
+  // FreeData() has not been called on it (nor has it been destroyed).
+  static bool LeafNodeHasData(const HtmlLeafNode* node) {
+    return node->data_.get() != nullptr;
   }
 
  private:

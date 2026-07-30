@@ -7,19 +7,24 @@
 # the per-PR gates are elsewhere; this turns the otherwise-invisible daily
 # report into an actionable, tracked signal.
 #
-#   post-findings-issue.sh <label> <title> <findings-md-file>
+#   post-findings-issue.sh <label> <title> <findings-md-file> [resolve-hint]
 #
 # Behavior (find-or-create, one open issue per <label>):
 #   - findings present  → create the issue (or update its body) with the
 #                         findings + a timestamp; the issue's OPEN state means
-#                         "unresolved dependency CVEs exist".
+#                         "unresolved findings exist".
 #   - findings empty    → comment "clean" on and CLOSE any existing open issue.
 # Idempotent: never opens a second issue, never spams when nothing changed body.
 #
 # Needs `gh` + GH_TOKEN with `issues: write`. Set DRY_RUN=1 to echo, not act.
+# Optional knobs (defaults keep the original dep-scan wording):
+#   [resolve-hint] 4th arg — trailer telling the reader how to resolve.
+#   LABEL_DESC  env — description used when the marker label is created.
+#   CLEAN_NOTE  env — phrase used in the auto-close comment.
 set -uo pipefail
 
 LABEL="${1:?label}"; TITLE="${2:?title}"; BODY_FILE="${3:?findings md file}"
+HINT="${4:-Fix the dep or record a justified suppression (\`sbom/*.vex.json\` / \`cve-ignore.yaml\`); this issue auto-closes when the scan is clean.}"
 REPO="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY unset}"
 RUN_URL="${GITHUB_SERVER_URL:-https://github.com}/${REPO}/actions/runs/${GITHUB_RUN_ID:-}"
 NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -28,7 +33,7 @@ gh_() { if [ "${DRY_RUN:-0}" = "1" ]; then echo "DRY: gh $*" >&2; else gh "$@"; 
 
 # Ensure the marker label exists (idempotent); harmless if it already does.
 gh_ label create "$LABEL" --repo "$REPO" --color B60205 \
-  --description "Automated dependency CVE findings" --force >/dev/null 2>&1 || true
+  --description "${LABEL_DESC:-Automated dependency CVE findings}" --force >/dev/null 2>&1 || true
 
 # At most one open tracking issue per label.
 existing="$(gh issue list --repo "$REPO" --label "$LABEL" --state open \
@@ -41,7 +46,7 @@ if [ "$has_findings" = "1" ]; then
   body="$(cat "$BODY_FILE")
 
 ---
-_Automated by \`${GITHUB_WORKFLOW:-dep-scan}\` at ${NOW} — [run](${RUN_URL}). Fix the dep or record a justified suppression (\`sbom/*.vex.json\` / \`cve-ignore.yaml\`); this issue auto-closes when the scan is clean._"
+_Automated by \`${GITHUB_WORKFLOW:-dep-scan}\` at ${NOW} — [run](${RUN_URL}). ${HINT}_"
   if [ -n "$existing" ]; then
     gh_ issue edit "$existing" --repo "$REPO" --body "$body"
     echo "updated issue #$existing" >&2
@@ -51,7 +56,7 @@ _Automated by \`${GITHUB_WORKFLOW:-dep-scan}\` at ${NOW} — [run](${RUN_URL}). 
   fi
 else
   if [ -n "$existing" ]; then
-    gh_ issue comment "$existing" --repo "$REPO" --body "✅ No medium+ findings as of ${NOW} ([run](${RUN_URL})). Auto-closing."
+    gh_ issue comment "$existing" --repo "$REPO" --body "✅ ${CLEAN_NOTE:-No medium+ findings} as of ${NOW} ([run](${RUN_URL})). Auto-closing."
     gh_ issue close "$existing" --repo "$REPO"
     echo "closed issue #$existing (clean)" >&2
   else
