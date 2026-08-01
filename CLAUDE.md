@@ -660,6 +660,9 @@ leaves the build green while the real code is untouched.
 - Never use `git commit --amend` unless the user explicitly requests it.
 - Always `git push` after committing unless told otherwise.
 - When working across branches, confirm the target branch with the user before committing.
+- **Release-note gate (blocking CI, `release-note-guard`).** A PR touching `pagespeed/`, `net/`, or `install/` — excluding tests, `BUILD` files, and `*.md` — must also touch `RELEASE_NOTES.md` (in-development section at the top) **or** `CHANGELOG.md` (under `## [Unreleased]`); either satisfies it. Note `pagespeed/iis/` is product code here and is **not** exempt (the formatting scripts exclude it, this gate does not).
+- If the change is genuinely invisible to users, waive it with a mandatory reason in a commit message or the PR body: `Release-Note: none - <why this is invisible to users>` (`-`, `:`, en dash or em dash all work; the reason must be at least 12 characters).
+- Check it locally before pushing: `bash tools/ci/check_release_note.sh --base origin/master --head HEAD` (self-test: `--self-test`).
 
 ## Debugging Methodology
 

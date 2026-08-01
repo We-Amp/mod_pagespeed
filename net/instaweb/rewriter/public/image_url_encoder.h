@@ -72,10 +72,13 @@ class ImageUrlEncoder : public UrlSegmentEncoder {
   bool Decode(const StringPiece& url_segment, StringVector* urls,
               ResourceContext* dim, MessageHandler* handler) const override;
 
-  // Set LibWebp level according to the user agent.
-  // TODO(poojatandon): Pass a user agent object with its webp-cabaple bits
-  // pre-analyzed (not just the string from the request headers), since
-  // checking webp level related code doesn't belong here.
+  // Set LibWebp level from the request's WebP capabilities and the enabled
+  // filters. The lossless/alpha and animated capabilities come from the
+  // Accept: image/webp request header alone; the lossy tier additionally keeps
+  // the legacy no-Accept user-agent carve-out (DeviceProperties::
+  // SupportsWebpRewrittenUrls). So above the lossy tier the level encodes the
+  // enabled filter tier rather than a browser-version verdict -- structurally
+  // the same shape as SetAvifLevel below.
   static void SetLibWebpLevel(const RewriteOptions& options,
                               const RequestProperties& request_properties,
                               ResourceContext* resource_context);
@@ -90,8 +93,11 @@ class ImageUrlEncoder : public UrlSegmentEncoder {
 
   // Set AVIF level according to the request capabilities.  This is a pure
   // pre-decode request capability (from request_properties.SupportsAvif*() and
-  // the enabled AVIF filters), carrying NO image-byte input -- the exact mirror
-  // of SetLibWebpLevel.  avif_level and libwebp_level are independent: both may
+  // the enabled AVIF filters), carrying NO image-byte input, structurally
+  // mirroring SetLibWebpLevel.  The two are no longer an exact mirror at the
+  // top tier: SetLibWebpLevel takes its animated level only under
+  // convert_to_webp_animated, whereas SetAvifLevel still admits recompress_avif
+  // into AVIF_ANIMATED.  avif_level and libwebp_level are independent: both may
   // be non-NONE for a both-capable request, and both ride in the metadata cache
   // key (CacheKeyFromResourceContext).  The per-image format choice is made
   // downstream at encode time (Stream E), recorded in the CachedResult output
