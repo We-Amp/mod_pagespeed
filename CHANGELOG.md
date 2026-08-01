@@ -7,6 +7,102 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.15.0+r21] - 2026-08-01
+
+### Added
+
+- Module scripts (`<script type="module">`) are hinted again: collected module
+  dependencies are emitted as `rel=modulepreload` in the `Link` response
+  header. Modules carrying `integrity` or `crossorigin="use-credentials"` are
+  left unhinted. Mixed-version deployments sharing a cache degrade cleanly
+ .
+- nginx: new server-scope directive `WebBotAuthBotDetection` (default off).
+  When enabled, a cryptographically verified Web Bot Auth signature (RFC 9421)
+  classifies the request as an automated client regardless of its user-agent
+  string. With it off — the default — Web Bot Auth verification remains
+  observe-only, exactly as before.
+
+### Removed
+
+- The legacy JavaScript minifier. The tokenizer-based minifier (the default
+  since 1.10.33.0) is now the only JavaScript minifier.
+  `UseExperimentalJsMinifier` remains accepted on every port, is ignored, and
+  logs a deprecation warning; configurations carrying it start normally.
+  Sites that had explicitly set it re-optimize their JavaScript once in the
+  background after upgrading; sites that ran the legacy minifier also gain
+  module minification and source-map support.
+
+### Changed
+
+- The known automated-client list used for optimization decisions has been
+  brought up to date (it predated the current generation of AI assistant
+  fetchers, HTTP client libraries, and command-line tools), and token matching
+  now recognizes parenthesized user-agent comment forms. `curl` and `wget`
+  are now classified as automated clients.
+- `defer_javascript` (and the filters sharing its gate: `disable_javascript`,
+  `defer_iframe`, `fix_reflow`, `support_noscript`) no longer applies to
+  automated clients, including search-engine crawlers: they receive the page's
+  normal authored script markup instead of deferred markup that only
+  PageSpeed's client-side runtime can execute.
+- WebP support is now determined from the browser's `Accept` request header
+  alone, instead of from hand-maintained lists of browser version strings. A
+  browser that advertises WebP is taken to support every flavour of it, as AVIF
+  already was; browsers that do not advertise WebP are unaffected. This also
+  fixes browsers whose major version number reached three digits (current
+  Chrome, Edge and Opera, and Chrome on iOS) being read as incapable of
+  animated WebP, and Chrome on iOS losing lossless/alpha WebP. Sites using
+  `convert_to_webp_animated`, `convert_to_webp_lossless` or
+  `in_place_optimize_for_browser` should expect a one-time re-optimization pass
+  after upgrading.
+  No purge or manual invalidation of a downstream or CDN cache is required:
+  where an image's optimized output changes, it is published under a new
+  rewritten URL that the HTML is updated to point at, while previously
+  rewritten URLs keep resolving and age out normally.
+
+### Fixed
+
+- JavaScript minification now makes the correct regex-versus-division decision
+  after `await` and after the `of` of a `for...of` loop: a regular-expression
+  literal in that position keeps its interior spacing instead of being
+  rewritten into a different pattern (e.g. `return await /a +b/.test(s)`),
+  matching the existing `yield` behavior. Line breaks after these words are
+  preserved whenever removing one could change how the script re-parses.
+- JavaScript minification can no longer assemble a comment delimiter that was
+  not in the input: deleting whitespace no longer welds a division or
+  regex-closing slash onto a following `*` (forming `/*` and silently
+  commenting out the rest of the script), and the same guard now covers
+  retained IE conditional-compilation comments next to a slash. Scripts in
+  which `await` or `yield` may really be plain variable names and a safe
+  rewrite cannot be guaranteed are now declined — served byte-for-byte
+  unchanged — instead of minified wrongly.
+- JavaScript minification could corrupt a script in which a line break
+  separates a postfix `++`/`--` from a next statement that begins with an
+  opening parenthesis, or with a leading-dot number such as `.5`. That line
+  break is what keeps the two statements apart — without it the code re-parses
+  as a call or member access on the value just incremented, which the browser
+  rejects as a syntax error — but the minifier removed it and reported
+  success, so the script was served broken with nothing logged. Such line
+  breaks are now preserved (including when carried inside a comment). Line
+  breaks that a following binary operator genuinely continues are still
+  removed, and already-correct minified output is byte-for-byte unchanged.
+- A stray `;` after a rule inside an `@media` block no longer makes the whole
+  stylesheet fall back to its original bytes: such sheets now minify, combine,
+  and participate in `prioritize_critical_css` like any other stylesheet.
+  Sheets that still fail to parse are served byte-for-byte unchanged, as
+  before.
+- JavaScript minification no longer merges a division operator into a retained
+  IE conditional-compilation comment (`/*@ ... @*/`). The `/` and the comment's
+  opening `/*` could fuse into `//`, turning the rest of the line into a
+  comment and silently changing what the script computes. A separating space
+  is now kept whenever the two would otherwise join, and the equivalent hazard
+  after such a comment is guarded the same way.
+- JavaScript minification no longer removes the space between a bare `0`
+  literal and a following property access (`0 .toString()`). Removing it made
+  the period parse as a decimal point, turning valid code into a script that
+  fails to parse. Other numeric literals are unaffected.
+
+## [1.15.0+r20] - 2026-07-23
+
 ### Changed
 
 - Pages that set a strict Content-Security-Policy `base-uri` policy blocking all

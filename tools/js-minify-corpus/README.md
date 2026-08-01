@@ -2,7 +2,7 @@
 
 Spike tooling to stress the tokenizer-based JS minifier
 (`pagespeed/kernel/js/js_minify.cc` — `MinifyUtf8Js` via
-`JsMinifyingTokenizer`, the `UseExperimentalJsMinifier` path) against
+`JsMinifyingTokenizer`, the only JavaScript minifier) against
 real-world and synthetic JavaScript, with automated oracles. Discovery, not
 fixes: failures are minimized and reported, the tokenizer is not modified.
 
@@ -10,10 +10,15 @@ fixes: failures are minimized and reported, the tokenizer is not modified.
 
 - `js_minify_probe.cc` + `BUILD` — single-file probe binary exposing the raw
   minifier contract: exit 0 = minified, exit 1 = "unmodelable" (the
-  byte-preserving pass-through case), signals = crashes. Modes: `tokenizer`,
-  `legacy`, `legacy-collapse`. Unlike `net/instaweb/rewriter/js_minify_main.cc`
+  byte-preserving pass-through case), signals = crashes. Mode: `tokenizer`.
+  Unlike `net/instaweb/rewriter/js_minify_main.cc`
   it does not mask failures with a trimmed-input fallback, so the harness can
   observe exactly what the library returns.
+- `js_keywords_dump.cc` — one-shot equivalence dump for the JsKeywords table
+  (name, Type, Flag, CanKeywordPrecedeRegEx for every keyword plus a
+  non-keyword probe set, order-normalized). Build it before and after a
+  lookup-implementation change and diff the two outputs — they must be
+  byte-identical.
 - `manifest.json` — pinned npm packages (name, version, tarball URL, sha256,
   member files) plus a `bundles` section pinning the bundler tool versions
   and the expected sha256 of every locally-built bundle output. Third-party
@@ -39,15 +44,17 @@ fixes: failures are minimized and reported, the tokenizer is not modified.
   module-ness/executability.
 - `run_oracles.py` — the harness. Per file: goal classification
   (script/module, with reclassification fallback), input parse check,
-  tokenizer + legacy probe runs, output parse check (`node --check`),
+  tokenizer probe run, output parse check (`node --check`),
   idempotence (minify twice, compare bytes), semantic stdout diff for
-  executable probes, legacy-vs-tokenizer divergence. Writes
+  executable probes. Writes
   `records.jsonl`, `summary.json`, `SUMMARY.md`.
 - `minimize.py` — ddmin-style greedy reducer that preserves a given failure
   (parse / semantic / idempotence), bounded by `--max-evals`.
 - `run.sh` — end-to-end: build probe, fetch, build bundles, generate,
   oracle run. Extra probe-build bazel flags can be passed via the
   `BAZEL_BUILD_OPTIONS` env var (used by the CI lane).
+- `gen_goldens.py` + `goldens/manifest.json` — committed expected-output
+  goldens for the deterministic corpora (see "Goldens manifest" below).
 
 ## Usage
 
@@ -75,12 +82,41 @@ python3 tools/js-minify-corpus/minimize.py \
    diff between original and minified).
 3. Non-idempotence: `minify(minify(x)) != minify(x)`.
 4. Crashes/asserts (probe killed by a signal).
-5. Legacy-vs-tokenizer divergence: exactly one implementation produces
-   parsing output for the same input.
 
 "Unmodelable" results (exit 1) are *not* bugs — that is the byte-preserving
-pass-through contract — but the pass-through rate is a health metric for
-deprecating the legacy minifier.
+pass-through contract — but the pass-through rate is a health metric for the
+minifier's syntax coverage.
+
+## Goldens manifest (shared expected outputs, the design record D1)
+
+`goldens/manifest.json` pins the minifier's expected behavior over the
+DETERMINISTIC corpora: the checked-in inputs (`bundle-fixtures/src/`,
+`findings/repros/`) plus the synthetic corpus, regenerated from
+`generate_synthetic.py` on every run. Per input it records the input sha256,
+the probe status (`ok` / `unmodelable` / `error-N` / `signal-N`) and the
+output sha256 (unmodelable outputs equal the input by contract — recorded
+anyway so a contract break is caught). The manifest also pins the sha256 of
+`generate_synthetic.py` and of `gen_goldens.py` itself. The fetched
+real-world corpus and the locally-built bundle outputs are network-dependent
+and deliberately excluded (they stay covered by the oracle gate and the
+release-readiness cross-product run).
+
+The manifest is vendored into the ModPageSpeed 2.0 repo through the same pin
+as the kernel, so ONE shared expectation gates both repos against silent
+minifier drift. CI regenerates it after the oracle gate and fails on any
+difference.
+
+Regenerate (one command, after building the probe):
+
+```sh
+python3 tools/js-minify-corpus/gen_goldens.py
+```
+
+**The rule: behavior PRs carry their golden diff.** Any change that alters
+minifier output (or the synthetic generator, or this tooling) must include
+the regenerated `goldens/manifest.json` in the same PR — otherwise the CI
+freshness gate (`gen_goldens.py --check`) goes red. The diff doubles as a
+reviewable statement of exactly which corpus inputs changed behavior.
 
 ## Notes
 

@@ -163,6 +163,11 @@ build:windows --local_resources=cpu=HOST_CPUS
 build:remote-cache --remote_cache=http://cache-host:9090
 build:remote-cache --remote_upload_local_results=true
 build:remote-cache --remote_timeout=120
+# A shared LRU remote cache can evict a blob that an in-flight build still
+# references; re-execute the action on evicted-blob detection instead of
+# hard-failing. Kept consistent with the Windows legs (below), which already
+# set the same retry count via build:windows.
+build:remote-cache --experimental_remote_cache_eviction_retries=5
 build:windows --remote_cache=http://cache-host:9090
 # Windows is a read-only remote-cache consumer (no --remote_upload_local_results).
 # The on-demand output prefetcher writes a temp file then renames it into bazel-out;

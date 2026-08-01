@@ -1,3 +1,351 @@
+# mod_pagespeed 1.15.0+r21 Release Notes
+
+**Release date:** 2026-08-01
+**Status:** Stable
+
+## Highlights
+
+- **Apache: optimization thread counts are now sized from the machine.** The
+  two worker pools that do optimization work — `NumRewriteThreads` for HTML,
+  CSS and JavaScript, `NumExpensiveRewriteThreads` for image transcoding — were
+  meant to be sized from the server's threading model, but the MPM was asked
+  about it before httpd had processed its configuration. On a distribution
+  package, where the MPM is a loadable module, it answered with zeroes, the MPM
+  read as non-threaded, and the server ran one thread in each pool whatever its
+  hardware or configuration. On an httpd built from source with the MPM linked
+  in, the same question was answered differently on the second configuration
+  pass, and the server ran **four threads in each pool per child process** —
+  never a chosen number, and never visible, because the line reporting it was
+  emitted below the level the log was open at.
+
+  Both directives now default to `auto`. On Apache each pool is then sized at
+  half the CPUs the process is actually permitted to use, divided by the
+  child-process ceiling httpd reports — `MaxRequestWorkers / ThreadsPerChild`
+  on worker and event, `MaxRequestWorkers` on prefork, capped by `ServerLimit`
+  in each case — and never drops below one thread. The number comes from httpd
+  itself, so a configuration httpd resolves differently to the arithmetic above
+  is the one that counts.
+
+  **What changes for you:** on Apache, the counts now depend on your cores and
+  your configured child-process ceiling, not on your hardware alone. Because
+  that ceiling is high by default — stock `event` allows 16 child processes —
+  most Apache servers resolve to one thread per pool.
+
+  If you run a **distribution package**, that is what you were already running
+  and nothing changes. **If you built httpd from source**, this is a reduction:
+  four threads per pool per child becomes one per pool for a default
+  configuration, because four per child across sixteen children was more
+  optimization threads than such a machine has cores. If you want the old
+  concurrency back, set `NumRewriteThreads` and `NumExpensiveRewriteThreads`
+  explicitly — but size them against your whole server rather than one child.
+  A server configured with few children on a many-core machine gets more than
+  before, which is the case a fixed default could never serve. Expect somewhat
+  higher CPU use while a cold cache warms where the counts went up.
+  `NumRewriteThreads` and `NumExpensiveRewriteThreads` remain the opt-out and
+  still override the computed value entirely; `auto` (or `0`) asks for the
+  automatic sizing explicitly.
+
+  **On nginx, Envoy and IIS the thread counts do not change.** Those ports do
+  not yet report how many worker processes share the machine, and rather than
+  guess a divisor and risk oversubscribing the host, the policy takes its
+  minimum: one thread per pool. On nginx and Envoy that is exactly what they
+  ran before. IIS is unchanged for a different reason — the IIS module sizes
+  its own optimization pools and this release does not touch that code, so IIS
+  keeps the counts it has always used. The directive validation and the startup
+  log line below do apply to every port.
+
+  **Before upgrading, check for a negative `NumRewriteThreads` or
+  `NumExpensiveRewriteThreads`.** A negative value used to be accepted and then
+  crash the server process at startup; it is now rejected when the
+  configuration is read, with a message naming the directive. On Apache an
+  invalid directive value is a fatal configuration error, so a negative value
+  left in place will stop httpd from starting after the upgrade. Change it to
+  `auto` first. An implausibly large positive value is clamped rather than
+  rejected, with a warning naming both the requested and the resolved count.
+
+  Two related fixes come with it. The CPU budget now comes from what the
+  process may actually use — the CPU affinity mask, and the CPU quota on the
+  process's own cgroup and its ancestors, which covers a container, a
+  Kubernetes pod and a systemd unit with `CPUQuota=` alike — instead of the
+  host's core count. And the resolved counts, along with the CPU budget and
+  child count they were derived from, are written to the error log at startup;
+  previously the line was emitted below Apache's default `LogLevel` and never
+  reached the log at all. (The same line is emitted on the other ports, but
+  nginx's compiled-in default `error_log` level is `error`, so on nginx it
+  still takes `error_log ... warn` to see it.)
+
+- The source tarball no longer contains the `html/` documentation archive.
+  Those 82 files are the mod_pagespeed 1.0 documentation, published as the
+  `/1.0/` archive on modpagespeed.com; shipping them inside a 1.15 source
+  tree placed documentation for a different release next to code it does not
+  describe. Nothing else changes: the archive is still published at `/1.0/`,
+  and current documentation is at modpagespeed.com — 2.0 under `/docs/`,
+  1.15 under `/1.1/docs/`.
+
+- The AVIF still-image encode budget is now configurable on Apache as
+  `ModPagespeedAvifTimeoutMs` (server configuration; also accepted inside a
+  `<VirtualHost>`). In r20 this setting was only reachable on nginx; on Apache
+  it stayed at its 5000 ms default with no way to change it. The tunable
+  itself is unchanged: as in r20, a larger budget admits more images to AVIF
+  and never selects a lower-quality encoder speed than configured. It only
+  becomes settable on Apache now.
+
+- Data-only `<script>` blocks (JSON-LD, plain JSON data, import maps,
+  speculation rules, and templates) no longer emit a spurious "Unrecognized
+  script" info message. These blocks are deliberate, non-executable markup, so
+  the diagnostic was noise; genuinely unrecognized script types still log.
+
+- IPRO recorder statistics are now accurate. `ipro_recorder_failed` counts
+  genuine recording failures only (a write/inflate error or a truncated
+  response). Previously it also absorbed expected outcomes — non-rewritable
+  content types, error (4xx/5xx) and not-modified (304/206) responses, empty
+  responses, and load- or size-limited recordings — which each now have their
+  own counter (`ipro_recorder_dropped_content_type`, `ipro_recorder_error_status`,
+  `ipro_recorder_skipped_transient`, `ipro_recorder_empty`, alongside the
+  existing `ipro_recorder_not_cacheable`, `ipro_recorder_dropped_due_to_load`,
+  and `ipro_recorder_dropped_due_to_size`). Each recorder outcome is also
+  logged for diagnosis.
+
+- A stray `;` after a rule inside an `@media` block — a common hand-authoring
+  artifact, as in `@media screen { .a { color: red }; }` — no longer fails the
+  stylesheet. Such sheets previously passed through whole: unminified,
+  excluded from CSS combining, and skipped by `prioritize_critical_css`. They
+  are now handled like any other stylesheet. Sheets that still fail to parse
+  are served byte-for-byte unchanged, as before.
+
+- `hint_preload_subresources` again hints `<script type="module">`
+  subresources, now using `rel=modulepreload` in the `Link` response header it
+  emits (this filter adds no markup to the page). Module scripts stopped being
+  hinted in r20: the older `rel=preload; as=script` hint does not match how a
+  browser fetches a module, so it could cost an extra fetch rather than save
+  one. `rel=modulepreload` matches the module fetch, so the hint is usable.
+  Modules carrying `integrity` or `crossorigin="use-credentials"` are left
+  unhinted, because a hint for those cannot be matched reliably. Browsers that
+  do not act on the hint are unaffected. Servers running mixed versions
+  against a shared cache degrade cleanly: older versions skip the new cache
+  entries rather than misread them.
+
+- WebP support is now determined from the browser's `Accept` request header
+  alone. Which flavours of WebP a browser could handle — lossy, lossless,
+  transparent, animated — used to be decided from hand-maintained lists of
+  browser version strings. Those lists had to be updated as browsers shipped
+  and had gone stale: browsers whose major version number reached three digits
+  (current Chrome, Edge and Opera, and Chrome on iOS) were read as incapable of
+  animated WebP, and Chrome on iOS also lost lossless and alpha WebP. A browser
+  that advertises WebP is now taken to support all of it, matching how AVIF has
+  always been handled, so that class of staleness cannot return. Browsers that
+  do not advertise WebP are unaffected. Beyond the browsers named above, the
+  main beneficiary is Safari, which advertises WebP on image requests but was
+  never on the old lists: with `in_place_optimize_for_browser`, Safari can now
+  receive transparent and lossless WebP where those filters are enabled and it
+  previously received PNG. What a given visitor gets still depends on the
+  request headers, and some CDN and proxy configurations hold responses to
+  lossy WebP.
+  **Upgrade note: the first start after upgrading to r21 re-optimizes some
+  images once**, because which WebP features a browser supports forms part of
+  the image optimization cache key, and this release changes that
+  determination. On a default configuration the browsers named above are the
+  ones affected — a minority of visitors, or most current-browser traffic if
+  you enable `convert_to_webp_animated`. Sites running
+  `in_place_optimize_for_browser` additionally see it for the share of their
+  traffic that the old lists never covered. Pages keep being served normally
+  and re-optimization proceeds in the background, as with any cold cache; while
+  the pass completes, affected images are served in their original form, so
+  expect a brief rise in page weight. No purge or manual invalidation of any
+  downstream proxy or CDN is required: where an image's optimized output
+  changes, it is published under a new rewritten URL and the HTML is updated
+  to point at it, while previously rewritten URLs keep resolving and age out
+  normally.
+
+- The legacy JavaScript minifier has been removed. The tokenizer-based
+  minifier — the default since 1.10.33.0, and the only one that understands
+  modern JavaScript — is now the only JavaScript minifier.
+  `UseExperimentalJsMinifier` is deprecated and ignored: configurations that
+  still set it start normally and log a warning naming the directive, which
+  can simply be deleted. Default configurations are unaffected — they were
+  already using this minifier. **Upgrade note: sites that set
+  `UseExperimentalJsMinifier` explicitly re-optimize their JavaScript once
+  after upgrading**; with `on` the output and the rewritten URLs are
+  identical and only that one background pass is new, while with `off` the
+  minified output itself changes. Pages keep being served normally and
+  re-optimization proceeds in the background, as with any cold cache; while
+  the pass completes, affected scripts are served in their original form, so
+  expect a brief rise in page weight. No purge or manual invalidation of any
+  downstream proxy or CDN is required: where a script's optimized output
+  changes, it is published under a new rewritten URL and the HTML is updated
+  to point at it, while previously rewritten URLs keep resolving and age out
+  normally. Two things also begin working on sites that were running `off`:
+  `<script type="module">` is now minified, and `include_js_source_maps` now
+  produces source maps. If you generated your own `ModPagespeedLibrary`
+  signatures for `canonicalize_javascript_libraries` against the legacy
+  JavaScript minifier, regenerate them; until then those libraries are
+  minified normally instead of canonicalized.
+
+- Automated clients are recognised far more reliably, so the measurement data
+  that drives optimization is collected from real browsers only. The list of
+  known non-rendering clients had not been updated since 2013 and missed the
+  entire current generation: AI assistant fetchers that retrieve a page on a
+  person's behalf, agent infrastructure, and the HTTP client libraries and
+  command-line tools written since. Traditional crawlers were already
+  recognised. These clients no longer run the instrumentation, critical-image
+  and critical-CSS beacons, so the data those beacons collect — which
+  `prioritize_critical_css`, `inline_preview_images` and image prioritization
+  optimize from — reflects what actual visitors render rather than what a
+  non-rendering client reported. Matching is exact and case-sensitive against
+  the client identifier, so ordinary browsers are unaffected. Applies to all
+  supported servers. Note that `curl` and `wget` are now classified as
+  automated clients: a page fetched with either for a spot check will not
+  contain the beacon scripts, and lazy-loaded images will be served eagerly.
+
+- **nginx:** a Web Bot Auth signature can now inform that decision, behind the
+  new `WebBotAuthBotDetection` directive (server configuration, default off).
+  With it on, a request carrying a cryptographically valid Web Bot Auth
+  signature (RFC 9421) is treated as an automated client whatever identifier it
+  presents — so an agent that identifies honestly is classified correctly even
+  when it sends a browser's user-agent string, which no identifier list can
+  detect. Only a signature that verifies counts; an absent or failed signature
+  changes nothing. Requires `WebBotAuth`, the existing directive that turns
+  signature verification on. Off by default, so Web Bot Auth stays observe-only
+  for every existing deployment: with the new directive off, a verification
+  result still only labels the request — it populates the `$x_verified_bot`
+  nginx variable, which you can log or pass to your own configuration, and the
+  opt-in verified-request statistics — exactly as in r20.
+
+- `defer_javascript` no longer sends deferred markup to automated clients.
+  When `defer_javascript` (or `disable_javascript`) is enabled, `<script>`
+  elements are rewritten into a form only PageSpeed's client-side runtime can
+  execute. A client that does not run that runtime received a page whose
+  scripts never ran and whose external JavaScript was never even requested —
+  script-dead markup it had no way to act on. Automated clients are now served
+  the page's normal, unmodified script markup instead. This covers the filters
+  that share the same gate: `defer_javascript`, `disable_javascript`,
+  `defer_iframe`, `fix_reflow`, and the `support_noscript` fallback they share,
+  so such a client gets clean markup rather than clean markup plus a stray
+  `<noscript>` redirect banner. Browsers are unaffected, and `defer_javascript`
+  remains off by default.
+
+  This deliberately includes search-engine crawlers, which previously received
+  the deferred form. They now receive the page exactly as it is authored —
+  normal markup, not a degraded version of it, and without the serialized
+  script execution the deferral runtime imposes. `lazyload_images` has behaved
+  this way for automated clients for years. No configuration change is
+  required. As with the client recognition above, an automated client that
+  presents a browser's exact user-agent string is still served the deferred
+  form unless a verified Web Bot Auth signature identifies it.
+
+- **JavaScript minification: generators that yield object literals are
+  minified again.** A file containing `yield {…}` — or a same-line
+  `await {…}` or `for (x of {…})` — was served in its original, unminified
+  form: the minifier could not rule out that the braces opened a block
+  rather than the operand, and declined the whole file. On a single line
+  the braces can only be the operand, so such files are now fully minified.
+  The genuinely ambiguous form — a line break between the keyword and the
+  brace, where the two readings differ — is still declined and served
+  unmodified, as before.
+
+- **JavaScript minification: a class with a bare field directly before a
+  generator method is no longer broken by minification.** The line break
+  after a bare field — `x` on its own line, followed by `*gen() {…}` — is
+  what ends the field declaration; the minifier removed it, fusing the field
+  and the generator method into one invalid declaration, so the minified
+  script failed to parse where the original ran. The line break is now
+  preserved. Static (`static x`), computed-name (`[expr]`), and private
+  (`#x`) bare fields were affected the same way and are covered by the same
+  fix.
+
+- **JavaScript minification: an object literal whose generator method is
+  followed by further members is minified again.** A file containing
+  `{ *gen() {…}, b: 2 }` — a generator method (named anything, including
+  `await` or `yield`) with a comma and another member after it — was served
+  in its original, unminified form: the minifier mis-modeled the separator
+  after the completed method body and declined the whole file. Such files
+  are now fully minified.
+
+- **JavaScript minification: a line break before an arrow's `=>` is now
+  preserved.** JavaScript forbids a line break between an arrow head and
+  its `=>`, so `a = x` followed by `=> y` on the next line is already a
+  syntax error. The minifier dropped that line break and emitted `a=x=>y` —
+  turning broken input into valid but different code, masking the authoring
+  error. The line break is now kept, so invalid input is served as it was
+  written.
+
+- **JavaScript minification: a division operator no longer merges into a
+  retained IE conditional-compilation comment.** When minification removed
+  the space between a division `/` and a retained `/*@ ... @*/` comment, the
+  `/` and the comment's opening `/*` fused into `//` — a line comment that
+  swallowed the rest of the line and silently changed what the script
+  computes, with both forms valid so nothing failed loudly. A separating
+  space is now kept whenever the two would otherwise join, and the
+  equivalent hazard after such a comment is guarded the same way.
+
+- **JavaScript minification: the space between a bare `0` and a following
+  property access is now kept.** `0 .toString()` minified to
+  `0.toString()`, where the period is absorbed as the literal's decimal
+  point, turning valid code into a script that fails to parse. The space is
+  now preserved after a bare `0`; other numeric literals are unaffected.
+
+- **JavaScript minification: the line break after a postfix `++`/`--` is no
+  longer removed when it is load-bearing.** A line break separating a
+  completed postfix `++`/`--` expression from a next statement that begins
+  with an opening parenthesis, or with a leading-dot number such as `.5`,
+  is what keeps the two statements apart: without it the code re-parses as
+  a call or member access on the value just incremented, which the browser
+  rejects as a syntax error — but the minifier removed it and reported
+  success, so the script was served broken with nothing logged. Such line
+  breaks are now preserved (including when carried inside a comment). Line
+  breaks that a following binary operator genuinely continues are still
+  removed, and already-correct minified output is byte-for-byte unchanged.
+
+- **HTML parsing: the text of merged character runs is no longer held
+  until end of parse.** When the parser coalesces adjacent character
+  tokens into one — a routine step before the rewrite filters run — the
+  token it merged away kept its copy of the text alive for the rest of the
+  parse, so a text-heavy page held more peak memory than it needed to. The
+  merged-away token now releases its text the moment it is retired. What
+  is served is unchanged.
+
+- The HTML parser is hardened against malformed markup, cross-porting the
+  robustness fixes ModPageSpeed 2.0 accumulated for the same code. Certain
+  malformed HTML could crash the worker process or trip undefined behaviour
+  while a page was being parsed for rewriting. Such markup is now handled
+  safely and the page is served. **Update recommended.**
+
+  Two pieces of modern markup are now recognised where they were previously
+  unknown. A page whose doctype is `<!DOCTYPE html SYSTEM
+  "about:legacy-compat">` — the long form the HTML standard reserves for
+  generators that cannot emit the short `<!DOCTYPE html>`, such as XSLT
+  output — was classified as having an unknown doctype; it is now treated as
+  HTML5 (XHTML5 for XML content types), like any other HTML5 page. And the
+  `crossorigin`, `integrity` and `template` attributes and elements are now
+  known keywords rather than unrecognised names, which is groundwork only:
+  parsing and rewriting of pages that use them is unchanged in this release.
+
+- **CSS: selectors with functional pseudo-classes are no longer mangled.**
+  CSS minification could not represent the parenthesized arguments of
+  `:where()`, `:is()`, `:not()`, `:has()`, `:nth-child()` and friends —
+  common in Tailwind v4 and modern CSS resets — so it reported a selector
+  error and silently dropped the argument text: `.prose :where(h2)` minified
+  to `.prose :where`, a selector no browser matches. The parser now captures
+  the balanced argument text verbatim and re-emits it on serialization, so
+  these selectors round-trip intact. As a side effect, rulesets that were
+  previously passed through byte-for-byte as opaque regions are now fully
+  parsed, so their declarations are minified and their URLs rewritten like
+  any other ruleset.
+- **CSS: declarations with a spaced `+` addition operator are no longer
+  dropped.** CSS minification silently discarded any declaration whose value
+  contained a spaced `+` — `calc(1px + 2px)` or a custom property such as
+  `--x: 1px + 2px` — because the CSS parser treated a `+` not directly
+  attached to a number as a number-parsing error (e.g.
+  `h1 { width: calc(1px + 2px); }` became `h1 {}`). The parser now lexes
+  such a `+` as an operator value, so these declarations parse and
+  round-trip; a `+` directly attached to a number still parses as a signed
+  number. The CSS parser's regression coverage for modern constructs was
+  expanded alongside this fix (ported from the 2.0 test suite): `calc()`
+  with `var()` operands, calc-operand custom properties, and unicode-range
+  lexing shapes.
+
+---
+
 # mod_pagespeed 1.15.0+r20 Release Notes
 
 **Release date:** 2026-07-23
@@ -419,6 +767,11 @@ fidelity). All are now fixed.
   `AvifAnimatedRecompressionQuality` (50), `AvifQualityForSaveData` (45), and
   `AvifTimeoutMs` (5000). They take effect only when one of the AVIF filters is
   enabled; see the AVIF entry under Features.
+  - Note on `AvifTimeoutMs` in r20: on nginx it is settable in the `http`
+    block (`pagespeed AvifTimeoutMs 3000;`), but it is not exposed as an
+    Apache `ModPagespeed*` directive in r20, so on Apache it stays at its
+    default. This is corrected in r21, where `ModPagespeedAvifTimeoutMs`
+    becomes available in the server configuration.
 - **IIS: `pagespeed.config` now has a single, documented resolution order.**
   The module previously probed the configuration locations independently from
   several code paths, so when the installed copies diverged, editing one of
