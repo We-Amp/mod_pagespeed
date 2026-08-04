@@ -174,12 +174,15 @@ TEST_F(IntegerToStringToIntTest, TestIntegerToStringToInt) {
   int n = 1;
   for (int i = 0; i < 1000; ++i) {
     ValidateIntegerToStringToInt(n);
-    n *= -3;  // This will overflow, that's fine, we just want a range of ints.
+    // Deliberate wraparound to get a range of ints; computed in the unsigned
+    // type (defined behavior) so this stays UBSan-clean.
+    n = static_cast<int>(static_cast<uint32>(n) * -3);
   }
   int64 n64 = 1LL;
   for (int i = 0; i < 1000; ++i) {
     ValidateInteger64ToStringToInt64(n64);
-    n64 *= -3;  // This will overflow, that's fine, we just want a range of ints
+    // Same deliberate wraparound as above.
+    n64 = static_cast<int64>(static_cast<uint64>(n64) * -3);
   }
 }
 

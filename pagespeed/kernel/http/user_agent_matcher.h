@@ -52,7 +52,11 @@ class UserAgentMatcher {
   static const char kTestUserAgentNoWebP[];  // non-webp user agent
   static const char kTestUserAgentAvif[];    // avif user agent
 
-  enum DeviceType {
+  // Fixed underlying type: holding an out-of-range value (e.g. the death
+  // test's DeviceType(-1)) is then defined behavior, so the defensive
+  // range check in ExperimentSpec::matches_device_type — not UB — is what
+  // fires.
+  enum DeviceType : int {
     kDesktop,
     kTablet,
     kMobile,
@@ -108,6 +112,25 @@ class UserAgentMatcher {
   // DeviceProperties, not from any browser-version list here.
   bool LegacyWebp(const StringPiece& user_agent) const;
 
+  // Returns true if the user agent decodes WebP but is known not to advertise
+  // "image/webp" in the Accept header of a navigation request -- Safari 16+
+  // and Firefox 132+.  This answers a strictly narrower question
+  // than LegacyWebp() above, which covers the old Android population.
+  //
+  // The verdict is a guess derived from a client-controlled string, so it may
+  // only ever shape responses whose representation is named by the URL itself
+  // -- rewritten .pagespeed. URLs.  It must never shape a response that a
+  // shared cache would file under a request-header key: the request's Accept
+  // header did not determine it, and a cache keyed on Accept would hand the
+  // result to clients that cannot decode it.  The in-place path, the one
+  // place that used to serve per-request bytes from the ORIGINAL URL, is
+  // request-independent since #640 and never consults request-derived WebP
+  // capability, so this confinement holds structurally; DeviceProperties
+  // additionally keeps SupportsWebpInPlace() strictly Accept-driven so the
+  // logged capability stays honest.
+  bool SupportsWebpButOmitsNavigationAccept(
+      const StringPiece& user_agent) const;
+
   // AVIF support. Like WebP above, AVIF capability is decided from the
   // Accept: image/avif header in DeviceProperties; unlike WebP there is not
   // even a legacy no-Accept UA population, so there is deliberately no
@@ -146,6 +169,7 @@ class UserAgentMatcher {
   FastWildcardGroup defer_js_allowlist_;
   FastWildcardGroup defer_js_mobile_allowlist_;
   FastWildcardGroup legacy_webp_;
+  FastWildcardGroup webp_no_navigation_accept_;
   FastWildcardGroup supports_dns_prefetch_;
   FastWildcardGroup mobile_user_agents_;
   FastWildcardGroup tablet_user_agents_;

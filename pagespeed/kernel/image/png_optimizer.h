@@ -87,7 +87,10 @@ struct PngCompressParams : public ScanlineWriterConfig {
 // Helper that manages the lifetime of the png_ptr and info_ptr.
 class ScopedPngStruct {
  public:
-  enum Type { READ, WRITE };
+  // Fixed underlying type: holding an out-of-range value (e.g. the death
+  // test's Type(-1)) is then defined behavior, so the constructor's
+  // type == READ || type == WRITE check — not UB — is what fires.
+  enum Type : int { READ, WRITE };
 
   ScopedPngStruct(Type type, MessageHandler* handler);
   ~ScopedPngStruct();
