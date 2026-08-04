@@ -20,3 +20,14 @@ cc_library(
         "//pagespeed/kernel/util:util_re2",
     ],
 )
+
+# Dual-oracle fuzz harness for the JS minifier (idempotence +
+# token-channel equivalence; see the file header).  Two build modes:
+# default deterministic replay + -DJS_MINIFY_LIBFUZZER for
+# -fsanitize=fuzzer.
+cc_binary(
+    name = "js_minify_fuzz",
+    srcs = ["js_minify_fuzz.cc"],
+    tags = ["manual"],
+    deps = [":js"],
+)

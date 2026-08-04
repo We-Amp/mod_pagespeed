@@ -253,6 +253,15 @@ void RewriteDriver::PopulateRequestContext() {
   if ((request_context_.get() != nullptr && (request_headers_ != nullptr))) {
     request_context_->SetAcceptsWebp(
         request_properties_->SupportsWebpRewrittenUrls());
+    // The broad bit above includes user-agent-derived grants (the legacy
+    // Android allow-list and the design record no-navigation-Accept fallback). The
+    // second bit records the narrower "the request itself advertised
+    // image/webp" fact -- RequestProperties::SupportsWebpInPlace() is exactly
+    // that predicate -- so that the Vary: Accept cache-validity check can
+    // distinguish an observed Accept header from a UA guess (see
+    // OptionsAwareHTTPCacheCallback::IsCacheValid).
+    request_context_->SetAcceptsWebpViaAcceptHeader(
+        request_properties_->SupportsWebpInPlace());
     request_context_->SetAcceptsGzip(request_properties_->AcceptsGzip());
     request_context_->Freeze();
   }
@@ -1338,6 +1347,18 @@ class CacheCallback : public OptionsAwareHTTPCacheCallback {
         success = alias_serve || value->ExtractContents(&content);
       }
       if (success) {
+        // the design record: this is a hash-committed .pagespeed. URL serve, so
+        // upgrade to 'public, immutable' where publicly cacheable. Applied
+        // to the wire response only -- the cached entry stays unstamped --
+        // and only for external serving: a nested driver here means a
+        // chained rewrite is fetching a .pagespeed. INPUT internally
+        // (RewriteContext::FetchInputs), and stamping that would let
+        // ApplyInputCacheControl read the synthetic 'public' as an
+        // explicitly-public input and bake it into the outer stored entry.
+        if (!driver_->is_nested()) {
+          driver_->server_context()->ApplyRewrittenUrlCacheControl(
+              response_headers);
+        }
         async_fetch_->set_content_length(content.size());
         async_fetch_->FixCacheControlForGoogleCache();
         async_fetch_->HeadersComplete();
@@ -1367,6 +1388,12 @@ class CacheCallback : public OptionsAwareHTTPCacheCallback {
                         (ResponseHeaders::GetVaryOption(
                             driver_->options()->respect_vary())),
                         response_headers, content, handler_);
+        // the design record: stamp the wire response only, after the unstamped
+        // headers went into the cache above; external serving only (see
+        // the is_nested() rationale on the cache-hit branch above).
+        if (!driver_->is_nested()) {
+          server_context->ApplyRewrittenUrlCacheControl(response_headers);
+        }
         async_fetch_->Done(async_fetch_->Write(content, handler_));
         driver_->FetchComplete();
       } else {
@@ -2504,8 +2531,21 @@ OptionsAwareHTTPCacheCallback::RespectVaryOnResources() const {
 bool OptionsAwareHTTPCacheCallback::IsCacheValid(
     const GoogleString& url, const RewriteOptions& rewrite_options,
     const RequestContextPtr& request_ctx, const ResponseHeaders& headers) {
+  // A cached WebP response that says "Vary: Accept" was selected by an Accept
+  // header, so it is valid for this request only if this request's own Accept
+  // header would have selected it too. The narrow accepts_webp bit is used
+  // deliberately: a user-agent-derived grant (legacy Android, or the design record
+  // Safari/Firefox fallback) means the client would DECODE the bytes, but the
+  // entry's Vary claim would be false as-selected, so those requests
+  // revalidate against the origin instead of reusing the entry. This is
+  // stricter than the pre-the design record behavior, which reused such entries for the
+  // legacy-Android UA grant as well. The .pagespeed. resource path
+  // (CacheCallback::IsCacheValid in this file) intentionally keeps consulting
+  // the broad accepts_webp() bit -- there the format is committed in the URL
+  // and rewritten .webp entries carry no Vary: Accept, so this clause does
+  // not fire for them.
   if ((headers.DetermineContentType() == &kContentTypeWebp) &&
-      !request_ctx->accepts_webp() &&
+      !request_ctx->accepts_webp_via_accept_header() &&
       headers.HasValue(HttpAttributes::kVary, HttpAttributes::kAccept)) {
     return false;
   }

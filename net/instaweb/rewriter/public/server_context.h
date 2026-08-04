@@ -162,6 +162,16 @@ class ServerContext {
   void ApplyInputCacheControl(const ResourceVector& inputs,
                               ResponseHeaders* headers);
 
+  // Upgrades the Cache-Control of a response being served under a
+  // hash-committed .pagespeed. URL with explicit 'public' plus RFC 8246
+  // 'immutable', if and only if the response is already publicly
+  // cacheable. Serving-time only: never apply this to headers that are
+  // stored in a cache or copied into derived (e.g. in-place) responses --
+  // stored entries carry 'public' only when every input explicitly said
+  // so, and the in-place fallback path relies on that as a signal. See the
+  // implementation comment for the full reasoning.
+  void ApplyRewrittenUrlCacheControl(ResponseHeaders* headers);
+
   // Is this URL a ref to a Pagespeed resource?
   bool IsPagespeedResource(const GoogleUrl& url) const;
 

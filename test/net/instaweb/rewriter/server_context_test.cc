@@ -1687,6 +1687,11 @@ TEST_F(ServerContextTest, WriteChecksInputVector) {
                           output_resource.get());
   ResponseHeaders* headers = output_resource->response_headers();
   EXPECT_FALSE(headers->HasValue(HttpAttributes::kCacheControl, "public"));
+  // the design record: stored output headers never carry 'immutable' -- the
+  // 'public, immutable' upgrade is applied only when serving a
+  // hash-committed URL (ServerContext::ApplyRewrittenUrlCacheControl), and
+  // a private input must never yield it anywhere.
+  EXPECT_FALSE(headers->HasValue(HttpAttributes::kCacheControl, "immutable"));
   EXPECT_TRUE(headers->HasValue(HttpAttributes::kCacheControl, "private"));
   EXPECT_TRUE(headers->HasValue(HttpAttributes::kCacheControl, "max-age=400"));
   EXPECT_STREQ("text/plain; charset=\"\\koi8-r\"",

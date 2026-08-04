@@ -1,0 +1,16 @@
+# UndefinedBehaviorSanitizer suppressions for mod_pagespeed 1.1
+#
+# Format: <check-type>:<source-or-function-pattern>
+# See: https://clang.llvm.org/docs/UndefinedBehaviorSanitizer.html#suppressions
+#
+# Each entry is a known finding filed as its own issue; remove the entry when
+# the linked issue is fixed. Wired into CI via the linux-asan lane's
+# --test_env=UBSAN_OPTIONS=...:suppressions=/workspace/tools/ubsan_suppressions.txt
+# (same pattern as the TSan lane). For a local run:
+#   UBSAN_OPTIONS=halt_on_error=true:print_stacktrace=1:suppressions=$PWD/tools/ubsan_suppressions.txt \
+#     bazel test --config=macos --config=macos-asan ...
+
+# No active suppressions. The four findings from the first honest UBSan run
+# (a signed overflow in string_util_test, two invalid-enum death
+# tests, and a memcmp(NULL,NULL,0) in vendored unicodetext) are all fixed, as
+# is the AddIdsFilterTest indeterminate driver_ capture.

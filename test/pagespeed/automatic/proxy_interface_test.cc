@@ -2910,6 +2910,26 @@ TEST_F(ProxyInterfaceTest, NoStore) {
                RewriteHtmlCacheHeader("no-store2", "no-store, max-age=300"));
 }
 
+// Rewritten HTML must never invite shared caches via s-maxage: the HTML
+// embeds .pagespeed. URLs that can commit to a content variant chosen for
+// the requesting client, so a shared cache holding it can serve one
+// client's variant to another.
+TEST_F(ProxyInterfaceTest, NoSMaxAgeOnRewrittenHtml) {
+  RewriteOptions* options = server_context()->global_options();
+  options->ClearSignatureForTesting();
+  options->set_max_html_cache_time_ms(0);
+  server_context()->ComputeSignature(options);
+
+  EXPECT_STREQ("max-age=0, no-cache",
+               RewriteHtmlCacheHeader("smaxage", "max-age=300, s-maxage=10"));
+  EXPECT_STREQ("max-age=0, no-cache",
+               RewriteHtmlCacheHeader("smaxage-only", "s-maxage=10"));
+  // Directives that must survive still do.
+  EXPECT_STREQ(
+      "max-age=0, no-cache, no-store",
+      RewriteHtmlCacheHeader("smaxage-ns", "no-store, s-maxage=10"));
+}
+
 TEST_F(ProxyInterfaceTest, PropCacheFilter) {
   RewriteOptions* options = server_context()->global_options();
   options->ClearSignatureForTesting();

@@ -317,12 +317,102 @@ bool JsMinifyingTokenizer::WhitespaceNeededBefore(JsKeywords::Type type,
   // glomming a period onto the end of numeric literal that will absorb it as a
   // decimal point, and 3) to prevent us from joining operators together to
   // form line comments or other operators.
+  //
+  // Anti-glom boundary table (the "operator glomming" class, from the
+  // minifier-rewrite triage): dropping whitespace between two operator/punctuator tokens
+  // must never let them re-lex as a DIFFERENT token (`&` `=` -> `&=`,
+  // `= ` `=` -> `==`, `?` `?` -> `??`, `.` `0` -> `.0`, `5` `...` ->
+  // `5...`, ...).  Keyed on the last char of the previous token and the
+  // first char of the next; multi-char operators reduce to the same
+  // boundary (`<<`+`=` ends `<`, starts `=`).  This table is evaluated
+  // FIRST: the word/number branch and the legacy per-char branches below
+  // all return early, and would pre-empt a tail check for number/regex/
+  // `<`/`-`/`/` boundaries.  Every guarded pair is unreachable on valid
+  // JS (in a parseable program these token pairs are never adjacent), so
+  // valid-input output is byte-identical; the only behavioral change is
+  // on invalid input, where gluing was a token-stream corruption.
+  if (!prev_token_.empty() && !token.empty()) {
+    const char p = prev_token_[prev_token_.size() - 1];
+    const char c = token[0];
+    bool glues = false;
+    switch (p) {
+      case '=':
+        glues = (c == '=' || c == '>');
+        break;
+      case '!':
+        glues = (c == '=');
+        break;
+      case '<':
+        glues = (c == '<' || c == '=');
+        break;
+      case '>':
+        glues = (c == '>' || c == '=');
+        break;
+      case '+':
+      case '-':
+        // `+`+`=` -> `+=` — but only for the single-char token: `++`/`--`
+        // followed by `=` is valid JS (`attaches++ === 0`), where gluing
+        // re-lexes as `++`,`===` — same tokens, long-standing behavior.
+        glues = (c == '=' && prev_token_.size() == 1);
+        break;
+      case '*':
+        glues = (c == '*' || c == '=');
+        break;
+      case '%':
+      case '^':
+        glues = (c == '=');
+        break;
+      case '&':
+        glues = (c == '&' || c == '=');
+        break;
+      case '|':
+        glues = (c == '|' || c == '=');
+        break;
+      case '?':
+        // `?`+`?` -> `??`, `?`+`=` -> part of `??=`, and `?`+`.` -> `?.`
+        // — EXCEPT `?.` before a digit, which lexes as `?` + `.5` (the
+        // spec's `?.` lookahead exclusion; `a ? .5 : b` -> `a?.5:b` is
+        // the correct, long-standing valid-input behavior).
+        glues = (c == '?' || c == '=' ||
+                 (c == '.' &&
+                  !(token.size() >= 2 && token[1] >= '0' && token[1] <= '9')));
+        break;
+      case '.':
+        // `.`+`.` (`..`/`...` territory) and `.`+digit (`.0` number
+        // fusion) — operator-dot prevs only.  A number prev token is
+        // exempt: its trailing dot cannot fuse with a following `.`
+        // (`1..x` lexes as `1.` `.` `x`, token-stable — `x = 1.
+        // .toString();` -> `x=1..toString();` is the long-standing
+        // valid-input behavior), and number+`.`-starting-token is owned
+        // by the number rule below.
+        glues = (prev_type_ != JsKeywords::kNumber &&
+                 (c == '.' || (c >= '0' && c <= '9')));
+        break;
+      case '/':
+        // Division `/`+`=` -> `/=`.  A REGEX prev token is exempt:
+        // `/re/==b` re-lexes as `/re/`, `==`, `b` (regex scanning closes
+        // at the second `/`), and gluing there is the long-standing
+        // valid-input behavior (`a = /re/ == b` -> `a=/re/==b`).  The
+        // legacy `/`+`/` and `/`+`*` comment guards below already cover
+        // regex-prev over-conservatively; keep that.
+        glues = (c == '=' && prev_type_ != JsKeywords::kRegex);
+        break;
+      default:
+        break;
+    }
+    if (glues) {
+      return true;
+    }
+  }
   if (IsNameNumberOrKeyword(type)) {
     return (IsNameNumberOrKeyword(prev_type_) ||
             prev_type_ == JsKeywords::kRegex);
-  } else if (token == ".") {
+  } else if (strings::StartsWith(token, ".")) {
     // To avoid merging tokens, we can't append a period to the end of a number
-    // literal that...
+    // literal that...  (Generalized from token == "." to any `.`-starting
+    // token — `...` spread and `.5` dot-numbers fuse with a number the same
+    // way; unreachable on valid JS, where a number is never directly
+    // followed by a `.`-starting token without an intervening operator.)
     return (prev_type_ == JsKeywords::kNumber &&
             // ...doesn't already have a decimal point or exponent, and...
             prev_token_.find_first_of(".eE") == StringPiece::npos &&
@@ -349,6 +439,19 @@ bool JsMinifyingTokenizer::WhitespaceNeededBefore(JsKeywords::Type type,
   return false;
 }
 
+// True when two bytes can fuse into one token when directly adjacent at
+// the decline seam: both word-ish (identifier chars, digits, or high
+// bytes — conservative for unicode identifier-continue), or a `.` next to
+// a digit (`.5` number fusion, either direction).
+static bool CanFuseAtSeam(char p, char c) {
+  const auto wordish = [](char x) {
+    return (x >= 'a' && x <= 'z') || (x >= 'A' && x <= 'Z') ||
+           (x >= '0' && x <= '9') || x == '_' || x == '$' || x == '.' ||
+           static_cast<unsigned char>(x) >= 0x80;
+  };
+  return wordish(p) && wordish(c);
+}
+
 bool MinifyUtf8Js(const JsTokenizerPatterns* patterns, StringPiece input,
                   GoogleString* output) {
   return MinifyUtf8JsWithSourceMap(patterns, input, output, nullptr);
@@ -367,6 +470,20 @@ bool MinifyUtf8JsWithSourceMap(
         return true;
       case JsKeywords::kError:
         DCHECK(tokenizer.has_error());
+        // Decline-seam anti-fusion guard (RC-C, minifier-rewrite triage): the
+        // passthrough remainder is appended verbatim, but whitespace
+        // pending before the error token has already been dropped by the
+        // minifying tokenizer — when the minified prefix ends with and the
+        // remainder starts with word-ish characters they would fuse into
+        // one token (`t extends` -> `textends`).  Emit a single space at
+        // the seam in that case.  Never fires on accepted input (the seam
+        // only exists on the decline path), so accepted-input output is
+        // byte-identical; on valid-but-unmodelable input (the n4 class)
+        // it is a correctness fix for the seam, not a behavior regression.
+        if (!output->empty() && !token.empty() &&
+            CanFuseAtSeam(output->back(), token[0])) {
+          output->push_back(' ');
+        }
         output->append(token.data(), token.size());
         return false;
       default:

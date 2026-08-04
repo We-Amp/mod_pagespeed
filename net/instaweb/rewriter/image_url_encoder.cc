@@ -536,18 +536,4 @@ GoogleString ImageUrlEncoder::CacheKeyFromResourceContext(
   return user_agent_cache_key;
 }
 
-bool ImageUrlEncoder::AllowVaryOnUserAgent(
-    const RewriteOptions& options,
-    const RequestProperties& request_properties) {
-  return (options.AllowVaryOnUserAgent() ||
-          (options.AllowVaryOnAuto() && !request_properties.HasViaHeader()));
-}
-
-bool ImageUrlEncoder::AllowVaryOnAccept(
-    const RewriteOptions& options,
-    const RequestProperties& request_properties) {
-  return (options.AllowVaryOnAccept() ||
-          (options.AllowVaryOnAuto() && request_properties.HasViaHeader()));
-}
-
 }  // namespace net_instaweb

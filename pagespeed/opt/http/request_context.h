@@ -152,6 +152,20 @@ class RequestContext : public RefCounted<RequestContext> {
   void SetAcceptsWebp(bool x);
   bool accepts_webp() const { return accepts_webp_; }
 
+  // Refinement of accepts_webp(): true only when the WebP capability was
+  // asserted by the request's own "Accept: image/webp" header. accepts_webp()
+  // is broader -- it also carries user-agent-derived grants (the legacy
+  // Android allow-list and the design record no-navigation-Accept fallback), which
+  // is right for choosing what to serve on rewritten URLs but wrong for
+  // deciding whether a cached response carrying "Vary: Accept" is valid
+  // as-selected for this request (see
+  // OptionsAwareHTTPCacheCallback::IsCacheValid). Always a subset of
+  // accepts_webp().
+  void SetAcceptsWebpViaAcceptHeader(bool x);
+  bool accepts_webp_via_accept_header() const {
+    return accepts_webp_via_accept_header_;
+  }
+
   // Indicates whether the request-headers tell us that a browser can extract
   // gzip compressed data.
   void SetAcceptsGzip(bool x);
@@ -251,6 +265,7 @@ class RequestContext : public RefCounted<RequestContext> {
 
   bool using_http2_;
   bool accepts_webp_;
+  bool accepts_webp_via_accept_header_;
   bool accepts_gzip_;
   bool frozen_;
   GoogleString minimal_private_suffix_;

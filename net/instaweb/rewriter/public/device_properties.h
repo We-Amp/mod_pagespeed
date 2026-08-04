@@ -48,9 +48,13 @@ class DeviceProperties {
   bool SupportsCriticalCss() const;
   bool SupportsCriticalImagesBeacon() const;
   bool SupportsJsDefer(bool enable_mobile) const;
-  // SupportsWebpInPlace indicates we saw an Accept: image/webp header, and can
-  // rewrite the request in place (using Vary: accept in the result headers,
-  // etc.).
+  // SupportsWebpInPlace indicates we saw an Accept: image/webp header.
+  // Strictly Accept-driven: the UA-derived WebP verdict is excluded,
+  // so a guessed capability never masquerades as an observed Accept header.
+  // Since #640 the in-place path itself is request-independent and consults no
+  // WebP capability at all; the remaining consumers are device logging and
+  // RequestContext::accepts_webp_via_accept_header (the Vary: Accept
+  // cache-validity check in OptionsAwareHTTPCacheCallback::IsCacheValid).
   bool SupportsWebpInPlace() const;
   // SupportsWebpRewrittenUrls indicates that the device can handle webp so long
   // as the url changes - either we know this based on user agent, or we got an
@@ -88,7 +92,9 @@ class DeviceProperties {
   // the defer_javascript family is disabled (js_defer_disabled, js_disable,
   // defer_iframe, fix_reflow and the support_noscript fallback all gate on
   // SupportsJsDefer), background fetches are skipped when
-  // DisableBackgroundFetchesForBots is on (default off), and the request is
+  // DisableBackgroundFetchesForBots is on (default off), the design record WebP
+  // user-agent fallback declines to grant WebP from the UA
+  // (ApplyUserAgentWebpFallback in device_properties.cc), and the request is
   // logged as a bot by LogDeviceInfo.
   //
   // The override is deliberately one-directional: a valid signature is a
@@ -96,9 +102,22 @@ class DeviceProperties {
   // "No signature material present" and "verification failed" are both far too
   // common among ordinary bots to be read as evidence of a human, so a false
   // verdict simply falls through to the user-agent heuristic. IsBot() can
-  // therefore only ever move from false to true because of this call, which
-  // bounds the blast radius to withholding beacons and lazyload from a
-  // misclassified client -- never to serving it something broken.
+  // therefore only ever move from false to true because of this call.
+  //
+  // Timing caveat: unlike the other consumers above, which read IsBot() at
+  // rewrite time, the WebP fallback reads it during ParseRequestHeaders --
+  // and the nginx port can only apply this verdict AFTER SetRequestHeaders
+  // (ps_apply_webbotauth_verdict in ngx_pagespeed.cc; calling earlier would
+  // see the verdict discarded when SetRequestHeaders recreates
+  // RequestProperties). The fallback therefore sees the verdict as of parse
+  // time, and a verdict recorded later is NOT retroactive on an
+  // already-granted fallback. So the honest blast-radius statement is: a
+  // late true verdict withholds beacons, lazyload and JS-defer as intended,
+  // but a verified agent asserting a Safari-16+/Firefox-132+ UA may still be
+  // served rewritten .webp URLs for that request. That residue is bounded --
+  // it never serves anything broken, only a format the asserted UA decodes --
+  // and it is still STRICTER than the Accept path, which grants WebP on
+  // "Accept: image/webp" with no IsBot() gate at all.
   //
   // Takes a plain bool rather than the webbotauth verdict enum on purpose: the
   // port binding collapses the enum, so this layer keeps no dependency on
@@ -140,7 +159,18 @@ class DeviceProperties {
   mutable LazyBool supports_js_defer_;
   mutable LazyBool supports_lazyload_images_;
   mutable LazyBool requests_save_data_;
+  // Grants WebP from the user-agent string when the Accept header did not.
+  // Precondition: accepts_webp_ == kFalse.
+  void ApplyUserAgentWebpFallback();
+
   mutable LazyBool accepts_webp_;
+  // True when accepts_webp_ was set to kTrue by ApplyUserAgentWebpFallback
+  // rather than by an "Accept: image/webp" request header.  Every
+  // WebP capability accessor may consult accepts_webp_ freely; the one thing
+  // this bit forbids is SupportsWebpInPlace(), which must report only an
+  // observed Accept header, never a user-agent guess.  It is also what lets
+  // SetUserAgent withdraw a grant the previous user-agent string earned.
+  mutable LazyBool webp_ua_derived_;
   // Whether the request carried "Accept: image/avif". Mirrors accepts_webp_:
   // ctor-initialized to kNotSet, set once in ParseRequestHeaders, and (like
   // accepts_webp_) NOT reset in SetUserAgent, since AVIF support is a property
@@ -158,7 +188,11 @@ class DeviceProperties {
   // via SupportsImageInlining), so a verdict that arrives after one of those has
   // first been read is not retroactive. Set the verdict before any consumer
   // runs. The nginx port does (SetRequestHeaders, then the verdict, both before
-  // the driver starts parsing); any port wiring this up later must too.
+  // the driver starts parsing); any port wiring this up later must too. One
+  // consumer is structurally out of reach of that rule: the design record WebP
+  // fallback reads IsBot() inside ParseRequestHeaders itself, i.e. before any
+  // port can call SetWebBotAuthVerdict -- see the timing caveat at
+  // SetWebBotAuthVerdict above for the (bounded) consequence.
   bool webbotauth_verified_agent_;
   mutable LazyBool accepts_gzip_;
   mutable LazyBool supports_webp_rewritten_urls_;

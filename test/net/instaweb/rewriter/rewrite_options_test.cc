@@ -196,47 +196,6 @@ class RewriteOptionsTest : public RewriteOptionsTestBase<RewriteOptions> {
     EXPECT_FALSE(lawyer.IsOriginKnown(url));
   }
 
-  void VerifyAllowVaryOn(const GoogleString& input_str, bool expected_valid,
-                         bool expected_allow_auto,
-                         bool expected_allow_save_data,
-                         bool expected_allow_user_agent,
-                         bool expected_allow_accept,
-                         const GoogleString& expected_str) {
-    RewriteOptions::OptionSettingResult is_valid =
-        options_.SetOptionFromName(RewriteOptions::kAllowVaryOn, input_str);
-
-    if (expected_valid) {
-      EXPECT_EQ(RewriteOptions::kOptionOk, is_valid);
-    } else {
-      EXPECT_EQ(RewriteOptions::kOptionValueInvalid, is_valid);
-      return;  // No more checking
-    }
-    EXPECT_EQ(expected_allow_auto, options_.AllowVaryOnAuto());
-    EXPECT_EQ(expected_allow_save_data, options_.AllowVaryOnSaveData());
-    EXPECT_EQ(expected_allow_user_agent, options_.AllowVaryOnUserAgent());
-    EXPECT_EQ(expected_allow_accept, options_.AllowVaryOnAccept());
-    EXPECT_STREQ(expected_str, options_.AllowVaryOnToString());
-  }
-
-  void VerifyMergingAllowVaryOn(const GoogleString& old_option_str,
-                                const GoogleString& new_option_str,
-                                const GoogleString& expected_option_str) {
-    RewriteOptions merged_options(&thread_system_);
-    RewriteOptions new_options(&thread_system_);
-    if (!old_option_str.empty()) {
-      EXPECT_EQ(RewriteOptions::kOptionOk,
-                merged_options.SetOptionFromName(RewriteOptions::kAllowVaryOn,
-                                                 old_option_str));
-    }
-    if (!new_option_str.empty()) {
-      EXPECT_EQ(RewriteOptions::kOptionOk,
-                new_options.SetOptionFromName(RewriteOptions::kAllowVaryOn,
-                                              new_option_str));
-    }
-    merged_options.Merge(new_options);
-    EXPECT_STREQ(expected_option_str, merged_options.AllowVaryOnToString());
-  }
-
   void TestSetOptionFromName(bool test_log_variant);
 
   NullThreadSystem thread_system_;
@@ -3232,7 +3191,9 @@ TEST_F(RewriteOptionsTest, BandwidthMode) {
       vhost_options->Enabled(RewriteOptions::kConvertJpegToProgressive));
   EXPECT_TRUE(vhost_options->Enabled(RewriteOptions::kConvertJpegToWebp));
   EXPECT_TRUE(vhost_options->Enabled(RewriteOptions::kConvertPngToJpeg));
-  EXPECT_TRUE(
+  // The retired in_place_optimize_for_browser filter is no longer part of
+  // the OptimizeForBandwidth level.
+  EXPECT_FALSE(
       vhost_options->Enabled(RewriteOptions::kInPlaceOptimizeForBrowser));
   EXPECT_TRUE(vhost_options->Enabled(RewriteOptions::kJpegSubsampling));
   EXPECT_TRUE(vhost_options->Enabled(RewriteOptions::kRecompressJpeg));
@@ -3244,7 +3205,7 @@ TEST_F(RewriteOptionsTest, BandwidthMode) {
   EXPECT_TRUE(vhost_options->Enabled(RewriteOptions::kRewriteJavascriptInline));
   EXPECT_TRUE(vhost_options->Enabled(RewriteOptions::kStripImageColorProfile));
   EXPECT_TRUE(vhost_options->Enabled(RewriteOptions::kStripImageMetaData));
-  EXPECT_TRUE(
+  EXPECT_FALSE(
       vhost_options->Enabled(RewriteOptions::kInPlaceOptimizeForBrowser));
   EXPECT_TRUE(vhost_options->in_place_rewriting_enabled());
   EXPECT_TRUE(vhost_options->css_preserve_urls());
@@ -3301,7 +3262,7 @@ TEST_F(RewriteOptionsTest, BandwidthMode) {
   EXPECT_TRUE(options_.Enabled(RewriteOptions::kRewriteCss));
   EXPECT_TRUE(options_.Enabled(RewriteOptions::kRewriteJavascriptExternal));
   EXPECT_TRUE(options_.Enabled(RewriteOptions::kRewriteJavascriptInline));
-  EXPECT_TRUE(options_.Enabled(RewriteOptions::kInPlaceOptimizeForBrowser));
+  EXPECT_FALSE(options_.Enabled(RewriteOptions::kInPlaceOptimizeForBrowser));
   EXPECT_TRUE(options_.in_place_rewriting_enabled());
   EXPECT_FALSE(options_.css_preserve_urls());
   EXPECT_TRUE(options_.image_preserve_urls());
@@ -3848,115 +3809,49 @@ TEST_F(RewriteOptionsTest, ParseFloats) {
   EXPECT_FALSE(RewriteOptions::ParseFromString("1 2 3", &densities));
 }
 
-TEST_F(RewriteOptionsTest, ParseAllowVaryOn) {
-  // Explicitly listed headers should be supported, independently of "Via"
-  // header.
-  VerifyAllowVaryOn("User-Agent", true /* expected_valid */,
-                    false /* expected_allow_auto */,
-                    false /* expected_allow_save_data */,
-                    true /* expected_allow_user_agent */,
-                    false /* expected_allow_accept */, "User-Agent");
-  VerifyAllowVaryOn("Save-Data", true /* expected_valid */,
-                    false /* expected_allow_auto */,
-                    true /* expected_allow_save_data */,
-                    false /* expected_allow_user_agent */,
-                    false /* expected_allow_accept */, "Save-Data");
-  VerifyAllowVaryOn("Accept", true /* expected_valid */,
-                    false /* expected_allow_auto */,
-                    false /* expected_allow_save_data */,
-                    false /* expected_allow_user_agent */,
-                    true /* expected_allow_accept */, "Accept");
-  VerifyAllowVaryOn(
-      "Save-Data,Accept,User-Agent", true /* expected_valid */,
-      false /* expected_allow_auto */, true /* expected_allow_save_data */,
-      true /* expected_allow_user_agent */, true /* expected_allow_accept */,
-      "Accept,Save-Data,User-Agent");
-  VerifyAllowVaryOn(
-      "Save-Data,Accept,User-Agent", true /* expected_valid */,
-      false /* expected_allow_auto */, true /* expected_allow_save_data */,
-      true /* expected_allow_user_agent */, true /* expected_allow_accept */,
-      "Accept,Save-Data,User-Agent");
-
-  // Case and empty space don't matter.
-  VerifyAllowVaryOn(
-      " accept,SAVE-DATA,   uSER-aGENT  ", true /* expected_valid */,
-      false /* expected_allow_auto */, true /* expected_allow_save_data */,
-      true /* expected_allow_user_agent */, true /* expected_allow_accept */,
-      "Accept,Save-Data,User-Agent");
-
-  // "None" disables all headers.
-  VerifyAllowVaryOn("None", true /* expected_valid */,
-                    false /* expected_allow_auto */,
-                    false /* expected_allow_save_data */,
-                    false /* expected_allow_user_agent */,
-                    false /* expected_allow_accept */, "None");
-  VerifyAllowVaryOn("nONE  ", true /* expected_valid */,
-                    false /* expected_allow_auto */,
-                    false /* expected_allow_save_data */,
-                    false /* expected_allow_user_agent */,
-                    false /* expected_allow_accept */, "None");
-
-  // In "Auto" mode, the "Auto" bit is set and the "Save-Data" header is
-  // enabled. Caller can decide which other headers to allow.
-  VerifyAllowVaryOn("AUTO", true /* expected_valid */,
-                    true /* expected_allow_auto */,
-                    true /* expected_allow_save_data */,
-                    false /* expected_allow_user_agent */,
-                    false /* expected_allow_accept */, "Auto");
-  VerifyAllowVaryOn("   auto ", true /* expected_valid */,
-                    true /* expected_allow_auto */,
-                    true /* expected_allow_save_data */,
-                    false /* expected_allow_user_agent */,
-                    false /* expected_allow_accept */, "Auto");
-
-  const bool not_used = false;
-  // Unsupported or invalid headers will not be accepted.
-  VerifyAllowVaryOn("Content-Length,User-Agent", false /* expected_valid */,
-                    not_used, not_used, not_used, not_used, "not-used");
-  VerifyAllowVaryOn(", ,User-Agent,Invalid", false /* expected_valid */,
-                    not_used, not_used, not_used, not_used, "not-used");
-  VerifyAllowVaryOn("Content-Length,Invalid", false /* expected_valid */,
-                    not_used, not_used, not_used, not_used, "not-used");
-
-  // Mixing "Auto" with "None", or mixing either of them with other headers
-  // is not allowed.
-  VerifyAllowVaryOn("Auto,None", false /* expected_valid */, not_used, not_used,
-                    not_used, not_used, "not-used");
-  VerifyAllowVaryOn("Auto,Accept", false /* expected_valid */, not_used,
-                    not_used, not_used, not_used, "not-used");
-  VerifyAllowVaryOn("Content-Length,None", false /* expected_valid */, not_used,
-                    not_used, not_used, not_used, "not-used");
-
-  // Empty string and extra comma are disallowed.
-  VerifyAllowVaryOn("", false /* expected_valid */, not_used, not_used,
-                    not_used, not_used, "not-used");
-  VerifyAllowVaryOn("    ", false /* expected_valid */, not_used, not_used,
-                    not_used, not_used, "not-used");
-  VerifyAllowVaryOn(",", false /* expected_valid */, not_used, not_used,
-                    not_used, not_used, "not-used");
-  VerifyAllowVaryOn(", ,, ", false /* expected_valid */, not_used, not_used,
-                    not_used, not_used, "not-used");
-  VerifyAllowVaryOn("accept,", false /* expected_valid */, not_used, not_used,
-                    not_used, not_used, "not-used");
+// AllowVaryOn is retired.  It stays registered so that an existing
+// configuration file still loads, but any value is accepted and ignored.
+TEST_F(RewriteOptionsTest, AllowVaryOnIsAcceptedAndIgnored) {
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            options_.SetOptionFromName(RewriteOptions::kAllowVaryOn, "Auto"));
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            options_.SetOptionFromName(RewriteOptions::kAllowVaryOn, "None"));
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            options_.SetOptionFromName(RewriteOptions::kAllowVaryOn,
+                                       "Accept,User-Agent"));
+  // Even values the old parser rejected must not fail a config load now.
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            options_.SetOptionFromName(RewriteOptions::kAllowVaryOn,
+                                       "Content-Length"));
 }
 
-TEST_F(RewriteOptionsTest, MergeAllowVaryOnOptions) {
-  // New option, if specified, will always overwrite the old one.
-  VerifyMergingAllowVaryOn("Accept,User-Agent", "Save-Data", "Save-Data");
-  VerifyMergingAllowVaryOn("Accept", "Save-Data", "Save-Data");
-  VerifyMergingAllowVaryOn("Accept", "None", "None");
-  VerifyMergingAllowVaryOn("", "Save-Data", "Save-Data");
-  VerifyMergingAllowVaryOn("", "None", "None");
-  VerifyMergingAllowVaryOn("", "Auto", "Auto");
+// The retired AllowVaryOn and PrivateNotVaryForIE directives must not
+// contribute to the options signature: their values are never read, so a
+// config (or request) carrying them -- with any value at all -- must land on
+// exactly the same metadata-cache partition as a default config.  Before this
+// exclusion, any value of the ignored AllowVaryOn string minted a fresh
+// signature, fragmenting the metadata cache.
+TEST_F(RewriteOptionsTest, RetiredVaryDirectivesNotInSignature) {
+  RewriteOptions defaults(&thread_system_);
+  defaults.ComputeSignature();
+  const GoogleString default_signature = defaults.signature();
 
-  // New option, is un-specified, will be ignored.
-  VerifyMergingAllowVaryOn("Accept,User-Agent", "", "Accept,User-Agent");
-  VerifyMergingAllowVaryOn("None", "", "None");
-  VerifyMergingAllowVaryOn("Auto", "", "Auto");
-
-  // If neither option has been specified, the default will be used.
-  VerifyMergingAllowVaryOn("", "", "Auto");
+  options_.ClearSignatureForTesting();
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            options_.SetOptionFromName(RewriteOptions::kAllowVaryOn,
+                                       "some-junk-value"));
+  // A non-default value for the retired boolean, likewise.
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            options_.SetOptionFromName(RewriteOptions::kPrivateNotVaryForIE,
+                                       "off"));
+  options_.ComputeSignature();
+  EXPECT_EQ(GoogleString::npos, options_.signature().find("avo"))
+      << options_.signature();
+  EXPECT_EQ(GoogleString::npos, options_.signature().find("pnvie"))
+      << options_.signature();
+  EXPECT_STREQ(default_signature, options_.signature());
 }
+
 
 TEST_F(RewriteOptionsTest, MergeAllowDisallow) {
   RewriteOptions one(&thread_system_), two(&thread_system_);
@@ -4089,49 +3984,26 @@ TEST_F(RewriteOptionsTest, ImageQualitiesAllDisabled) {
   EXPECT_FALSE(options_.HasValidSaveDataQualities());
 }
 
+// Save-Data image qualities are used whenever they are configured; there is no
+// longer a separate opt-in for varying on the header, because the Save-Data
+// variant is only ever published under its own rewritten URL.
 TEST_F(RewriteOptionsTest, SupportSaveData) {
-  // By default, AllowVaryOn is set to "Auto" which implies "Save-Data".
   options_.set_image_jpeg_quality_for_save_data(-1);
   options_.set_image_webp_quality_for_save_data(-1);
   EXPECT_FALSE(options_.HasValidSaveDataQualities());
-  EXPECT_TRUE(options_.AllowVaryOnSaveData());
   EXPECT_FALSE(options_.SupportSaveData());
 
   options_.set_image_jpeg_quality_for_save_data(20);
   options_.set_image_webp_quality_for_save_data(30);
   EXPECT_TRUE(options_.HasValidSaveDataQualities());
-  EXPECT_TRUE(options_.AllowVaryOnSaveData());
   EXPECT_TRUE(options_.SupportSaveData());
 
-  // Disallow vary on "Save-Data".
+  // The retired AllowVaryOn directive no longer suppresses it.
   EXPECT_EQ(RewriteOptions::kOptionOk,
             options_.SetOptionFromName(RewriteOptions::kAllowVaryOn, "None"));
-  options_.set_image_jpeg_quality_for_save_data(-1);
-  options_.set_image_webp_quality_for_save_data(-1);
-  EXPECT_FALSE(options_.HasValidSaveDataQualities());
-  EXPECT_FALSE(options_.AllowVaryOnSaveData());
-  EXPECT_FALSE(options_.SupportSaveData());
-
-  options_.set_image_jpeg_quality_for_save_data(20);
-  options_.set_image_webp_quality_for_save_data(30);
-  EXPECT_TRUE(options_.HasValidSaveDataQualities());
-  EXPECT_FALSE(options_.AllowVaryOnSaveData());
-  EXPECT_FALSE(options_.SupportSaveData());
-
-  // Explicitly allow vary on "Save-Data".
-  EXPECT_EQ(
-      RewriteOptions::kOptionOk,
-      options_.SetOptionFromName(RewriteOptions::kAllowVaryOn, "Save-Data"));
-  EXPECT_TRUE(options_.HasValidSaveDataQualities());
-  EXPECT_TRUE(options_.AllowVaryOnSaveData());
   EXPECT_TRUE(options_.SupportSaveData());
-
-  options_.set_image_jpeg_quality_for_save_data(-1);
-  options_.set_image_webp_quality_for_save_data(-1);
-  EXPECT_FALSE(options_.HasValidSaveDataQualities());
-  EXPECT_TRUE(options_.AllowVaryOnSaveData());
-  EXPECT_FALSE(options_.SupportSaveData());
 }
+
 
 // the design record P4: the agent_optimize toggle round-trips and merges.
 TEST_F(RewriteOptionsTest, AgentOptimizeOptionRoundTrip) {

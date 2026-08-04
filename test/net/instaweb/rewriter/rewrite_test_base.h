@@ -189,14 +189,19 @@ class RewriteTestBase : public RewriteOptionsTestBase {
   // be used with extreme care.
   Timer* timer() { return factory()->mock_timer(); }
 
-  // Append default headers to the given string.
+  // Append the default headers a rewritten resource is SERVED with to the
+  // given string (includes the design record serving-time 'public, immutable'
+  // upgrade; stored cache entries do not carry it).
   void AppendDefaultHeaders(const ContentType& content_type,
                             GoogleString* text);
 
   // Like above, but also include a Link: <..>; rel="canonical" header.
+  // 'served' selects between the wire shape (true: with the design record
+  // serving-time 'public, immutable' upgrade) and the stored-cache-entry
+  // shape (false: without it).
   void AppendDefaultHeadersWithCanonical(const ContentType& content_type,
                                          StringPiece canonical_url,
-                                         GoogleString* text);
+                                         GoogleString* text, bool served);
 
   void ServeResourceFromManyContexts(const GoogleString& resource_url,
                                      const StringPiece& expected_content);

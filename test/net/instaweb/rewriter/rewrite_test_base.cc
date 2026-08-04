@@ -331,12 +331,18 @@ void RewriteTestBase::AppendDefaultHeaders(const ContentType& content_type,
                                            GoogleString* text) {
   ResponseHeaders headers;
   PopulateDefaultHeaders(content_type, 0, &headers);
+  // Served (not stored) rewritten-resource headers carry the design record
+  // serving-time upgrade; the Replace-based setters also move Cache-Control
+  // to the end, mirroring ServerContext::ApplyRewrittenUrlCacheControl.
+  headers.SetCacheControlPublic();
+  headers.SetCacheControlImmutable();
   StringWriter writer(text);
   headers.WriteAsHttp(&writer, message_handler());
 }
 
 void RewriteTestBase::AppendDefaultHeadersWithCanonical(
-    const ContentType& content_type, StringPiece canon, GoogleString* text) {
+    const ContentType& content_type, StringPiece canon, GoogleString* text,
+    bool served) {
   ResponseHeaders headers;
   headers.Add(HttpAttributes::kLink,
               StrCat("<", canon, ">; rel=\"canonical\""));
@@ -354,6 +360,17 @@ void RewriteTestBase::AppendDefaultHeadersWithCanonical(
     length = fetch.buffer().size();
   }
   headers.SetOriginalContentLength(length);
+
+  if (served) {
+    // A response actually served under the .pagespeed. URL carries the
+    // the design record serving-time upgrade (stored cache entries do not); the
+    // Replace-based setters move Cache-Control after
+    // X-Original-Content-Length, mirroring
+    // ServerContext::ApplyRewrittenUrlCacheControl running after the
+    // stored headers were copied.
+    headers.SetCacheControlPublic();
+    headers.SetCacheControlImmutable();
+  }
 
   headers.WriteAsHttp(&writer, message_handler());
 }

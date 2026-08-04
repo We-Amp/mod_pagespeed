@@ -1423,10 +1423,35 @@ bool JsTokenizer::TryConsumeIdentifierOrKeyword(JsKeywords::Type* type_out,
       if (stmt_position) {
         const int size = input_.size();
         int i = index;
-        while (i < size &&
-               (input_[i] == ' ' || input_[i] == '\t' || input_[i] == '\f' ||
-                input_[i] == '\v' || input_[i] == '\n' || input_[i] == '\r')) {
-          ++i;
+        // Look for what follows the `let`, skipping whitespace AND
+        // comments.  A comment between `let` and its binding must not flip
+        // the classification to identifier (RC-E, confirmation-
+        // nightly triage): on the identifier reading the minifier dropped
+        // linebreaks the declaration reading requires, emitting
+        // unparseable output for valid input (`let /*c*/ row\n+4;`
+        // minified to `let row+4;`, a syntax error).  An unterminated
+        // block comment stops the scan: the tokenizer will error on it
+        // downstream, and a conservative identifier reading is the safe
+        // fallback there.
+        while (i < size) {
+          const char ch = input_[i];
+          if (ch == ' ' || ch == '\t' || ch == '\f' || ch == '\v' ||
+              ch == '\n' || ch == '\r') {
+            ++i;
+          } else if (ch == '/' && i + 1 < size && input_[i + 1] == '/') {
+            i += 2;
+            while (i < size && input_[i] != '\n' && input_[i] != '\r') {
+              ++i;
+            }
+          } else if (ch == '/' && i + 1 < size && input_[i + 1] == '*') {
+            const size_t end = input_.find("*/", i + 2);
+            if (end == StringPiece::npos) {
+              break;
+            }
+            i = static_cast<int>(end) + 2;
+          } else {
+            break;
+          }
         }
         if (i < size) {
           const char c = input_[i];

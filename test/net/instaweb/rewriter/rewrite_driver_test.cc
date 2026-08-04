@@ -2159,8 +2159,22 @@ TEST_F(RewriteDriverTest, ValidateCacheResponseRewrittenWebp) {
   EXPECT_FALSE(OptionsAwareHTTPCacheCallback::IsCacheValid(
       kOriginUrl, *options(), request_context, response_headers));
 
-  // vary:accept, accepts_webp true.
+  // vary:accept with only the broad accepts_webp bit set: this is the shape a
+  // user-agent-derived grant produces (legacy Android, or the design record
+  // Safari/Firefox fallback). The client could decode the bytes, but the
+  // entry's "Vary: Accept" claim would be false as-selected, so the entry is
+  // NOT valid -- the request revalidates against the origin instead.
   request_context->SetAcceptsWebp(true);
+  options()->set_serve_rewritten_webp_urls_to_any_agent(true);
+  EXPECT_FALSE(OptionsAwareHTTPCacheCallback::IsCacheValid(
+      kOriginUrl, *options(), request_context, response_headers));
+  options()->set_serve_rewritten_webp_urls_to_any_agent(false);
+  EXPECT_FALSE(OptionsAwareHTTPCacheCallback::IsCacheValid(
+      kOriginUrl, *options(), request_context, response_headers));
+
+  // vary:accept with an Accept-derived verdict: the request itself advertised
+  // image/webp, the Vary claim holds as-selected, the entry is valid.
+  request_context->SetAcceptsWebpViaAcceptHeader(true);
   options()->set_serve_rewritten_webp_urls_to_any_agent(true);
   EXPECT_TRUE(OptionsAwareHTTPCacheCallback::IsCacheValid(
       kOriginUrl, *options(), request_context, response_headers));
@@ -2181,6 +2195,10 @@ TEST_F(RewriteDriverTest, SetRequestHeadersPopulatesWebpAccept) {
   EXPECT_TRUE(request_properties->SupportsWebpRewrittenUrls());
   EXPECT_TRUE(request_properties->SupportsWebpLosslessAlpha());
   EXPECT_TRUE(request_properties->SupportsWebpAnimated());
+  // An observed Accept header populates both RequestContext bits.
+  EXPECT_TRUE(rewrite_driver()->request_context()->accepts_webp());
+  EXPECT_TRUE(
+      rewrite_driver()->request_context()->accepts_webp_via_accept_header());
 }
 
 TEST_F(RewriteDriverTest, SetRequestHeadersPopulatesWebpNoAccept) {
@@ -2195,6 +2213,30 @@ TEST_F(RewriteDriverTest, SetRequestHeadersPopulatesWebpNoAccept) {
   EXPECT_TRUE(request_properties->SupportsWebpRewrittenUrls());
   EXPECT_FALSE(request_properties->SupportsWebpLosslessAlpha());
   EXPECT_FALSE(request_properties->SupportsWebpAnimated());
+  // A user-agent-derived grant reaches only the broad RequestContext bit; the
+  // Accept-derived bit stays false, so Vary: Accept cache entries revalidate.
+  EXPECT_TRUE(rewrite_driver()->request_context()->accepts_webp());
+  EXPECT_FALSE(
+      rewrite_driver()->request_context()->accepts_webp_via_accept_header());
+}
+
+// Same split for the design record fallback population: Safari 16+ with no image
+// types in its navigation Accept gets the broad bit (rewritten URLs may serve
+// WebP) but never the Accept-derived bit (a cached origin-URL WebP response
+// carrying "Vary: Accept" is not treated as valid for it).
+TEST_F(RewriteDriverTest, SetRequestHeadersPopulatesWebpUaFallback) {
+  RequestHeaders headers;
+  headers.Add(HttpAttributes::kAccept, "text/html");
+  headers.Add(HttpAttributes::kUserAgent,
+              UserAgentMatcherTestBase::kSafari16UserAgent);
+  rewrite_driver()->SetRequestHeaders(headers);
+  const RequestProperties* request_properties =
+      rewrite_driver()->request_properties();
+  EXPECT_FALSE(request_properties->SupportsWebpInPlace());
+  EXPECT_TRUE(request_properties->SupportsWebpRewrittenUrls());
+  EXPECT_TRUE(rewrite_driver()->request_context()->accepts_webp());
+  EXPECT_FALSE(
+      rewrite_driver()->request_context()->accepts_webp_via_accept_header());
 }
 
 // Test classes created for using a managed rewrite driver, so that downstream

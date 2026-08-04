@@ -12,7 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-start_test Ipro transcode to webp, iterating with Noop
+start_test Ipro optimization, iterating with Noop
 # There's a trick for making demo pages that show the fully optimized ipro
 # images without relying on the user flushing the browser cache, which relies
 # on a 'Noop' option setting via query-param.  The Noop option does not enter
@@ -29,6 +29,10 @@ start_test Ipro transcode to webp, iterating with Noop
 # pagespeed query params are stripped from the generate internal .pagespeed.
 # URL (but not other query params).
 #
+# In-place optimization is request-independent: the optimized result is the
+# image recompressed in its original format (marked by the W/"PSA-aj-..."
+# ETag), never a per-browser conversion, and it carries no Vary: header.
+#
 # As we are checking some statistics, try get the system to quiesce to reduce
 # flakiness from outstanding background rewrites triggered by tests above.
 echo -n Waiting for quiescence by checking curl_fetch_active_count ...
@@ -39,13 +43,11 @@ done
 sleep 2
 echo " done"
 URL="$EXAMPLE_ROOT/images/Puzzle.jpg"
-URL+="?PageSpeedFilters=+in_place_optimize_for_browser"
-WGET_ARGS="--user-agent webp --header Accept:image/webp"
 RANDOM1=$RANDOM
 RANDOM2=$((RANDOM1 + 1))
-URL1="${URL}&PageSpeedNoop=$RANDOM1"
-URL2="${URL}&PageSpeedNoop=$RANDOM2"
-fetch_until "$URL1" "grep -c image/webp" 1 --save-headers
+URL1="${URL}?PageSpeedNoop=$RANDOM1"
+URL2="${URL}?PageSpeedNoop=$RANDOM2"
+fetch_until "$URL1" 'grep -c W/\"PSA-aj-' 1 --save-headers
 #NUM_REWRITES_URL1=$(scrape_stat image_rewrites)
 echo -n Waiting for quiescence by checking curl_fetch_active_count ...
 # The last check in this test was observed to flake. Let's see if waiting
@@ -58,14 +60,17 @@ while [ $(scrape_stat curl_fetch_active_count) -gt 0 ]; do
   sleep .1
 done
 NUM_FETCHES_URL1=$(scrape_stat http_fetches)
-check $WGET -q $WGET_ARGS --save-headers "$URL2" -O $WGET_OUTPUT
+check $WGET -q --save-headers "$URL2" -O $WGET_OUTPUT
 #NUM_REWRITES_URL2=$(scrape_stat image_rewrites)
 while [ $(scrape_stat curl_fetch_active_count) -gt 0 ]; do
   echo -n .
   sleep .1
 done
 NUM_FETCHES_URL2=$(scrape_stat http_fetches)
-check_from "$(extract_headers $WGET_OUTPUT)" grep -q "image/webp"
+check_from "$(extract_headers $WGET_OUTPUT)" fgrep -qi 'Etag: W/"PSA-aj-'
+check_from "$(extract_headers $WGET_OUTPUT)" \
+  fgrep -qi 'Content-Type: image/jpeg'
+check_not_from "$(extract_headers $WGET_OUTPUT)" fgrep -qi 'Vary:'
 #check [ $NUM_REWRITES_URL2 = $NUM_REWRITES_URL1 ]
 check [ $NUM_FETCHES_URL2 = $NUM_FETCHES_URL1 ]
 URL=""

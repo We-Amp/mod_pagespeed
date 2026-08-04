@@ -212,6 +212,16 @@ class ResponseHeadersTest : public testing::Test {
     return headers.LookupJoined(HttpAttributes::kCacheControl);
   }
 
+  // Same as AddPublicToCacheControl, but for SetCacheControlImmutable.
+  GoogleString AddImmutableToCacheControl(const StringVector& cache_control) {
+    ResponseHeaders headers;
+    for (int i = 0, n = cache_control.size(); i < n; ++i) {
+      headers.Add(HttpAttributes::kCacheControl, cache_control[i]);
+    }
+    headers.SetCacheControlImmutable();
+    return headers.LookupJoined(HttpAttributes::kCacheControl);
+  }
+
   GoogleMessageHandler message_handler_;
   ResponseHeaders response_headers_;
   ResponseHeadersParser parser_;
@@ -2282,6 +2292,25 @@ TEST_F(ResponseHeadersTest, CacheControlPublic) {
   EXPECT_STREQ("no-cache", AddPublicToCacheControl({"no-cache"}));
   EXPECT_STREQ("No-Store", AddPublicToCacheControl({"No-Store"}));
   EXPECT_STREQ("No-Cache", AddPublicToCacheControl({"No-Cache"}));
+}
+
+TEST_F(ResponseHeadersTest, CacheControlImmutable) {
+  EXPECT_STREQ("max-age=100, immutable",
+               AddImmutableToCacheControl({"max-age=100"}));
+  EXPECT_STREQ("max-age=100, public, immutable",
+               AddImmutableToCacheControl({"max-age=100, public"}));
+  // Idempotent: a second application changes nothing.
+  EXPECT_STREQ("max-age=100, immutable",
+               AddImmutableToCacheControl({"max-age=100, immutable"}));
+  EXPECT_STREQ("max-age=100, Immutable",
+               AddImmutableToCacheControl({"max-age=100, Immutable"}));
+  // Refuses to mark non-publicly-cacheable responses.
+  EXPECT_STREQ("max-age=100, private",
+               AddImmutableToCacheControl({"max-age=100,private"}));
+  EXPECT_STREQ("no-store", AddImmutableToCacheControl({"no-store"}));
+  EXPECT_STREQ("no-cache", AddImmutableToCacheControl({"no-cache"}));
+  EXPECT_STREQ("No-Store", AddImmutableToCacheControl({"No-Store"}));
+  EXPECT_STREQ("No-Cache", AddImmutableToCacheControl({"No-Cache"}));
 }
 
 TEST_F(ResponseHeadersTest, TestHopByHopSanitization) {

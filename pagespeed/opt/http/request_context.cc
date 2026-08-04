@@ -65,6 +65,7 @@ RequestContext::RequestContext(const HttpOptions& options, AbstractMutex* mutex,
 void RequestContext::Init() {
   using_http2_ = false;
   accepts_webp_ = false;
+  accepts_webp_via_accept_header_ = false;
   accepts_gzip_ = false;
   frozen_ = false;
 }
@@ -128,6 +129,13 @@ void RequestContext::SetAcceptsWebp(bool x) {
   if (x != accepts_webp_) {
     DCHECK(!frozen_);
     accepts_webp_ = x;
+  }
+}
+
+void RequestContext::SetAcceptsWebpViaAcceptHeader(bool x) {
+  if (x != accepts_webp_via_accept_header_) {
+    DCHECK(!frozen_);
+    accepts_webp_via_accept_header_ = x;
   }
 }
 

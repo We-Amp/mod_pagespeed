@@ -29,6 +29,7 @@
 #include "net/instaweb/rewriter/public/fake_filter.h"
 #include "net/instaweb/rewriter/public/file_load_policy.h"
 #include "net/instaweb/rewriter/public/output_resource.h"
+#include "net/instaweb/rewriter/public/request_properties.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "pagespeed/kernel/base/hasher.h"
@@ -250,11 +251,6 @@ class InPlaceRewriteContextTest : public RewriteTestBase {
     }
     options()->set_in_place_rewriting_enabled(true);
 
-    // Only allow to vary on "Accept" header.
-    RewriteOptions::AllowVaryOn allow_vary_on;
-    EXPECT_TRUE(RewriteOptions::ParseFromString("accept", &allow_vary_on));
-    options()->set_allow_vary_on(allow_vary_on);
-
     server_context()->ComputeSignature(options());
     // Clear stats since we may have added something to the cache.
     ClearStats();
@@ -378,42 +374,6 @@ class InPlaceRewriteContextTest : public RewriteTestBase {
     css_filter_->ClearStats();
     RewriteTestBase::ClearStats();
     ClearRewriteDriver();
-  }
-
-  // Overwrites the cached rewritten resource at `rewritten_url` with an entry
-  // carrying a pre-existing `vary` header, so a following warm fetch exercises
-  // the Vary merging in AddVaryIfRequired.  Must be called before
-  // ResetHeadersAndStats(), while the driver's cache fragment still matches
-  // the one the original rewritten entry was stored with.
-  void SeedRewrittenCacheEntry(const GoogleString& rewritten_url,
-                               const GoogleString& content_type,
-                               const GoogleString& body,
-                               const StringPiece& vary) {
-    ResponseHeaders seeded_headers;
-    SetDefaultHeaders(content_type, &seeded_headers);
-    seeded_headers.SetDateAndCaching(start_time_ms(), ttl_ms_);
-    seeded_headers.Replace(HttpAttributes::kVary, vary);
-    seeded_headers.ComputeCaching();
-    http_cache()->Put(rewritten_url, rewrite_driver_->CacheFragment(),
-                      RequestHeaders::Properties(),
-                      ResponseHeaders::GetVaryOption(options()->respect_vary()),
-                      &seeded_headers, body, message_handler());
-  }
-
-  // Returns the response's Vary tokens lowercased and sorted, so tests can
-  // compare token sets regardless of case, order, or header-line grouping.
-  std::vector<GoogleString> LowercaseVaryTokens() {
-    std::vector<GoogleString> tokens;
-    ConstStringStarVector varies;
-    if (response_headers_.Lookup(HttpAttributes::kVary, &varies)) {
-      for (int i = 0, n = varies.size(); i < n; ++i) {
-        GoogleString token(*varies[i]);
-        LowerString(&token);
-        tokens.push_back(token);
-      }
-    }
-    std::sort(tokens.begin(), tokens.end());
-    return tokens;
   }
 
   void CheckWarmCache(StringPiece id) {
@@ -987,6 +947,36 @@ TEST_F(InPlaceRewriteContextTest, CacheableJpgUrlRewritingSucceeds) {
   EXPECT_EQ(0, css_filter_->num_rewrites());
 }
 
+// the design record pin: a successfully in-place-optimized resource served at its
+// ORIGINAL URL must not gain 'public' or 'immutable'. Those tokens are a
+// serving-time upgrade reserved for hash-committed .pagespeed. URLs
+// (ServerContext::ApplyRewrittenUrlCacheControl). The nested rewritten
+// resource's STORED headers carry 'public' only when every input explicitly
+// said so, and RewriteContext::FetchContext::FetchFallbackDoneImpl
+// propagates exactly that signal onto the in-place response -- explicit
+// 'public' the origin never sent would newly authorize shared caches to
+// store Authorization-bearing responses (RFC 9111 s3.5). A regression here
+// usually means the stored .pagespeed. entry got stamped unconditionally.
+TEST_F(InPlaceRewriteContextTest, OptimizedOriginalUrlServeNotPublicImmutable) {
+  Init();
+  // First fetch triggers the background rewrite.
+  FetchAndCheckResponse(cache_jpg_url_, cache_body_, true, ttl_ms_, nullptr,
+                        start_time_ms());
+  ResetHeadersAndStats();
+  SetTimeMs(start_time_ms() + ttl_ms_ / 2);
+  // Second fetch serves the optimized bytes at the original URL.
+  FetchAndCheckResponse(cache_jpg_url_, "good:ic", true, ttl_ms_ / 2, etag_,
+                        start_time_ms() + ttl_ms_ / 2);
+  // The origin authored no Cache-Control beyond its TTL, so the in-place
+  // serve must carry exactly the remaining max-age -- nothing else.
+  EXPECT_EQ(StrCat("max-age=", Integer64ToString(ttl_ms_ / 2 / Timer::kSecondMs)),
+            response_headers_.LookupJoined(HttpAttributes::kCacheControl));
+  EXPECT_FALSE(
+      response_headers_.HasValue(HttpAttributes::kCacheControl, "public"));
+  EXPECT_FALSE(
+      response_headers_.HasValue(HttpAttributes::kCacheControl, "immutable"));
+}
+
 TEST_F(InPlaceRewriteContextTest, CacheablePngUrlRewritingSucceeds) {
   Init();
   ExpectInPlaceImageSuccessFlow(cache_png_url_);
@@ -1421,424 +1411,133 @@ TEST_F(InPlaceRewriteContextTest, ResponseHeaderMimeTypeUpdate) {
                response_headers_.Lookup1(HttpAttributes::kContentType));
 }
 
-TEST_F(InPlaceRewriteContextTest, OptimizeForBrowserEncodingAndHeader) {
+// In-place optimization must never produce browser-dependent bytes, so it must
+// never emit a Vary: header -- whatever the request advertises, and whatever
+// conversion filters are enabled.  Enabling the retired
+// in_place_optimize_for_browser filter changes nothing.
+TEST_F(InPlaceRewriteContextTest, InPlaceNeverAddsVary) {
   options()->set_in_place_wait_for_optimized(true);
   set_optimize_for_browser(true);
   Init();
 
-  // Image with correct extension in URL.
+  // A WebP-advertising browser.
+  ResetUserAgent(UserAgentMatcher::kTestUserAgentWebP);
+  SetAcceptWebp();
+  SetDriverRequestHeaders();
   FetchAndCheckResponse(cache_jpg_url_, "good:ic", true, ttl_ms_, etag_,
                         start_time_ms());
-  EXPECT_EQ(0, css_filter_->num_encode_user_agent());
-  EXPECT_EQ(1, img_filter_->num_encode_user_agent());
-  EXPECT_EQ(0, js_filter_->num_encode_user_agent());
-  EXPECT_STREQ(HttpAttributes::kAccept,
-               response_headers_.Lookup1(HttpAttributes::kVary));
+  EXPECT_EQ(nullptr, response_headers_.Lookup1(HttpAttributes::kVary));
+  EXPECT_FALSE(response_headers_.HasValue(HttpAttributes::kCacheControl,
+                                          HttpAttributes::kPrivate));
 
-  // Image with no extension in URL.
+  // A non-WebP browser gets the same treatment.
   ResetHeadersAndStats();
-  FetchAndCheckResponse(cache_jpg_no_extension_url_, "good:ic", true, ttl_ms_,
-                        etag_, start_time_ms());
-  EXPECT_EQ(1, css_filter_->num_encode_user_agent());
-  EXPECT_EQ(1, img_filter_->num_encode_user_agent());
-  EXPECT_EQ(0, js_filter_->num_encode_user_agent());
-  EXPECT_STREQ(HttpAttributes::kAccept,
-               response_headers_.Lookup1(HttpAttributes::kVary));
+  ResetUserAgent(UserAgentMatcher::kTestUserAgentNoWebP);
+  SetDriverRequestHeaders();
+  FetchAndCheckResponse(cache_jpg_url_, "good:ic", true, ttl_ms_, etag_,
+                        start_time_ms());
+  EXPECT_EQ(nullptr, response_headers_.Lookup1(HttpAttributes::kVary));
 
-  // CSS with correct extension in URL.
+  // CSS, whose constituent images used to force Vary: User-Agent.
   ResetHeadersAndStats();
   FetchAndCheckResponse(cache_css_url_, "good:cf", true, ttl_ms_, etag_,
                         start_time_ms());
-  EXPECT_EQ(1, css_filter_->num_encode_user_agent());
-  EXPECT_EQ(0, img_filter_->num_encode_user_agent());
-  EXPECT_EQ(0, js_filter_->num_encode_user_agent());
-  EXPECT_STREQ(HttpAttributes::kUserAgent,
-               response_headers_.Lookup1(HttpAttributes::kVary));
+  EXPECT_EQ(nullptr, response_headers_.Lookup1(HttpAttributes::kVary));
 
-  // HTML with correct extension in URL.
+  // Internet Explorer no longer gets Cache-Control: private either.
   ResetHeadersAndStats();
-  FetchAndCheckResponse(cache_html_url_, "good", true, ttl_ms_, original_etag_,
+  ResetUserAgent(
+      "Mozilla/5.0 (compatible; MSIE 9.0; Windows NT 6.1; Trident/5.0)");
+  SetDriverRequestHeaders();
+  FetchAndCheckResponse(cache_jpg_url_, "good:ic", true, ttl_ms_, etag_,
                         start_time_ms());
-  EXPECT_EQ(0, css_filter_->num_encode_user_agent());
-  EXPECT_EQ(0, img_filter_->num_encode_user_agent());
-  EXPECT_EQ(0, js_filter_->num_encode_user_agent());
   EXPECT_EQ(nullptr, response_headers_.Lookup1(HttpAttributes::kVary));
-
-  // Javascript with correct extension in URL.
-  ResetHeadersAndStats();
-  FetchAndCheckResponse(cache_js_url_, "good:jm", true, ttl_ms_, etag_,
-                        start_time_ms());
-  EXPECT_EQ(0, css_filter_->num_encode_user_agent());
-  EXPECT_EQ(0, img_filter_->num_encode_user_agent());
-  EXPECT_EQ(0, js_filter_->num_encode_user_agent());
-  EXPECT_EQ(nullptr, response_headers_.Lookup1(HttpAttributes::kVary));
-
-  // Javascript with jpeg extension in URL.
-  ResetHeadersAndStats();
-  FetchAndCheckResponse(cache_js_jpg_extension_url_, "good:jm", true, ttl_ms_,
-                        etag_, start_time_ms());
-  EXPECT_EQ(0, css_filter_->num_encode_user_agent());
-  EXPECT_EQ(1, img_filter_->num_encode_user_agent());
-  EXPECT_EQ(0, js_filter_->num_encode_user_agent());
-  EXPECT_EQ(nullptr, response_headers_.Lookup1(HttpAttributes::kVary));
-
-  // Bad content with unknown extension.
-  ResetHeadersAndStats();
-  FetchAndCheckResponse(bad_url_, bad_body_, true, 0, nullptr, start_time_ms());
-  EXPECT_EQ(1, css_filter_->num_encode_user_agent());
-  EXPECT_EQ(1, img_filter_->num_encode_user_agent());
-  EXPECT_EQ(0, js_filter_->num_encode_user_agent());
-  EXPECT_EQ(nullptr, response_headers_.Lookup1(HttpAttributes::kVary));
+  EXPECT_FALSE(response_headers_.HasValue(HttpAttributes::kCacheControl,
+                                          HttpAttributes::kPrivate));
 }
 
-TEST_F(InPlaceRewriteContextTest, OptimizeForBrowserRewriting) {
-  // When in_place_wait_for_optimized is true, force_rewrite is set to true and
-  // the nested RewriteContext will not check for rewritten content if input
-  // is ready. Keep that in mind when checking lru_cache hits/misses.
+// The in-place metadata key must be user-agent independent: a WebP browser and
+// a non-WebP browser share one cache entry, so the second request is a hit.
+TEST_F(InPlaceRewriteContextTest, InPlaceMetadataKeyIsUserAgentIndependent) {
   options()->set_in_place_wait_for_optimized(true);
-  options()->set_private_not_vary_for_ie(true);
   set_optimize_for_browser(true);
   Init();
 
-  // First fetch with kTestUserAgentWebP. This will miss everything (metadata
-  // lookup, original content, and rewritten content).
-  // Vary: Accept header should be added.
   ResetUserAgent(UserAgentMatcher::kTestUserAgentWebP);
   SetAcceptWebp();
   SetDriverRequestHeaders();
   FetchAndCheckResponse(cache_jpg_url_, "good:ic", true, ttl_ms_, etag_,
                         start_time_ms());
-
-  EXPECT_EQ(1, counting_url_async_fetcher()->fetch_count());
-  EXPECT_EQ(0, http_cache()->cache_hits()->Get());
-  EXPECT_EQ(1, http_cache()->cache_misses()->Get());   // original
-  EXPECT_EQ(2, http_cache()->cache_inserts()->Get());  // rewritten + original
-  EXPECT_EQ(0, lru_cache()->num_hits());
-  EXPECT_EQ(2, lru_cache()->num_misses());   // + ipro-md
-  EXPECT_EQ(4, lru_cache()->num_inserts());  // + ipro-md + md
   EXPECT_EQ(1, img_filter_->num_rewrites());
-  EXPECT_EQ(0, js_filter_->num_rewrites());
-  EXPECT_EQ(0, css_filter_->num_rewrites());
-  EXPECT_EQ(0, oversized_stream_->Get());
-  EXPECT_STREQ(HttpAttributes::kAccept,
-               response_headers_.Lookup1(HttpAttributes::kVary));
 
-  // The second fetch uses a different user agent, kTestUserAgentNoWebP.
-  // This will miss the metadata cache so it will start fetch input (cache hit)
-  // and rewrite content (cache miss).
-  // Vary: Accept header should be be added.
+  // A differently-capable agent reuses the very same optimized result.
   ResetHeadersAndStats();
-  SetTimeMs(start_time_ms() + ttl_ms_ / 2);
   ResetUserAgent(UserAgentMatcher::kTestUserAgentNoWebP);
   SetDriverRequestHeaders();
-  FetchAndCheckResponse(cache_jpg_url_, "good:ic", true, ttl_ms_ / 2, etag_,
-                        start_time_ms() + ttl_ms_ / 2);
-  EXPECT_EQ(0, counting_url_async_fetcher()->fetch_count());
-  EXPECT_EQ(1, http_cache()->cache_hits()->Get());     // original
-  EXPECT_EQ(0, http_cache()->cache_misses()->Get());   // rewritten
-  EXPECT_EQ(1, http_cache()->cache_inserts()->Get());  // rewritten
-  EXPECT_EQ(1, lru_cache()->num_hits());               // original
-  EXPECT_EQ(1, lru_cache()->num_misses());             // ipro-md
-  EXPECT_EQ(3, lru_cache()->num_inserts());            // + ipro-md + md
-  EXPECT_EQ(1, img_filter_->num_rewrites());
-  EXPECT_EQ(0, js_filter_->num_rewrites());
-  EXPECT_EQ(0, css_filter_->num_rewrites());
-  EXPECT_EQ(0, oversized_stream_->Get());
-  EXPECT_STREQ(HttpAttributes::kAccept,
-               response_headers_.Lookup1(HttpAttributes::kVary));
-
-  // The third fetch uses an IE 9 user agent string, which should result in a
-  // Cache-Control: private resource and no Vary header.
-  ResetHeadersAndStats();
-  SetTimeMs(start_time_ms() + ttl_ms_ / 2);
-  ResetUserAgent(UserAgentMatcherTestBase::kIe9UserAgent);
-  SetDriverRequestHeaders();
-  FetchAndCheckResponse(cache_jpg_url_, "good:ic", true, ttl_ms_ / 2, etag_,
-                        start_time_ms() + ttl_ms_ / 2);
-  CheckWarmCache("no_webp_to_ie");
-  EXPECT_FALSE(response_headers_.Has(HttpAttributes::kVary));
-  ConstStringStarVector cache_controls;
-  EXPECT_TRUE(
-      response_headers_.Lookup(HttpAttributes::kCacheControl, &cache_controls));
-  ASSERT_EQ(2, cache_controls.size());
-  EXPECT_STREQ(HttpAttributes::kPrivate, *cache_controls[1]);
-
-  // Fetch again still with kTestUserAgentWebP, but omits the Accept:webp
-  // header.  Metadata cache hits.  No input fetch and rewriting.
-  // Vary: Accept header should be be added.
-  ResetHeadersAndStats();
-  SetTimeMs(start_time_ms() + ttl_ms_ / 2);
-  ResetUserAgent(UserAgentMatcher::kTestUserAgentWebP);
-  SetDriverRequestHeaders();
-  FetchAndCheckResponse(cache_jpg_url_, "good:ic", true, ttl_ms_ / 2, etag_,
-                        start_time_ms() + ttl_ms_ / 2);
-  CheckWarmCache("no_webp_without_accept");
-  EXPECT_STREQ(HttpAttributes::kAccept,
-               response_headers_.Lookup1(HttpAttributes::kVary));
-
-  // Fetch another time, switching to just sending Accept: webp and using
-  // kTestUserAgentNoWebP.  Metadata cache hits. No input fetch and rewriting.
-  // Vary: User-Agent header should be added.
-  ResetHeadersAndStats();
-  SetTimeMs((start_time_ms() + ttl_ms_ / 2));
-  ResetUserAgent(UserAgentMatcher::kTestUserAgentNoWebP);
-  SetAcceptWebp();
-  SetDriverRequestHeaders();
-  FetchAndCheckResponse(cache_jpg_url_, "good:ic", true, ttl_ms_ / 2, etag_,
-                        start_time_ms() + ttl_ms_ / 2);
-  CheckWarmCache("back_to_webp");
-  EXPECT_STREQ(HttpAttributes::kAccept,
-               response_headers_.Lookup1(HttpAttributes::kVary));
-}
-
-TEST_F(InPlaceRewriteContextTest, OptimizeForBrowserNoPrivateForIE) {
-  // Similar to test above, but set private_not_vary_for_ie to false and omit
-  // detailed checking of cache hit statistics, focusing just on a behavioral
-  // test.
-  options()->set_in_place_wait_for_optimized(true);
-  options()->set_private_not_vary_for_ie(false);
-  set_optimize_for_browser(true);
-  Init();
-
-  // First fetch with kTestUserAgentWebP.
-  // Vary: Accept header should be added.
-  ResetUserAgent(UserAgentMatcher::kTestUserAgentWebP);
-  SetAcceptWebp();
-  SetDriverRequestHeaders();
   FetchAndCheckResponse(cache_jpg_url_, "good:ic", true, ttl_ms_, etag_,
                         start_time_ms());
-  EXPECT_STREQ(HttpAttributes::kAccept,
-               response_headers_.Lookup1(HttpAttributes::kVary));
-
-  // The second fetch uses a different user agent, kTestUserAgentNoWebP.
-  // Vary: Accept header should be be added.
-  ResetHeadersAndStats();
-  SetTimeMs(start_time_ms() + ttl_ms_ / 2);
-  ResetUserAgent(UserAgentMatcher::kTestUserAgentNoWebP);
-  SetDriverRequestHeaders();
-  FetchAndCheckResponse(cache_jpg_url_, "good:ic", true, ttl_ms_ / 2, etag_,
-                        start_time_ms() + ttl_ms_ / 2);
-  EXPECT_STREQ(HttpAttributes::kAccept,
-               response_headers_.Lookup1(HttpAttributes::kVary));
-
-  // The third fetch uses an IE 9 user agent string, which should *also* have a
-  // Vary: Accept header since private_not_vary_for_ie == false.
-  ResetHeadersAndStats();
-  SetTimeMs(start_time_ms() + ttl_ms_ / 2);
-  ResetUserAgent(UserAgentMatcherTestBase::kIe9UserAgent);
-  SetDriverRequestHeaders();
-  FetchAndCheckResponse(cache_jpg_url_, "good:ic", true, ttl_ms_ / 2, etag_,
-                        start_time_ms() + ttl_ms_ / 2);
-  EXPECT_STREQ(HttpAttributes::kAccept,
-               response_headers_.Lookup1(HttpAttributes::kVary));
-}
-
-TEST_F(InPlaceRewriteContextTest, AcceptHeaderMerging) {
-  options()->set_in_place_wait_for_optimized(true);
-  set_optimize_for_browser(true);
-  Init();
-  SetAcceptWebp();
-  SetDriverRequestHeaders();
-  FetchAndCheckResponse(cache_jpg_url_, "good:ic", true, ttl_ms_, etag_,
-                        start_time_ms());
-  EXPECT_STREQ(HttpAttributes::kAccept,
-               response_headers_.Lookup1(HttpAttributes::kVary));
-
-  // We don't actually optimize the Vary: * resource.  See
-  // CachingHeaders::HasExplicitNoCacheDirective().  Inexplicably (?), we also
-  // change its ttl to 0 in spite of incoming ttl headers.
-  FetchAndCheckResponse(cache_jpg_vary_star_url_, "good", true, 0, nullptr,
-                        start_time_ms());
-  EXPECT_STREQ("*", response_headers_.Lookup1(HttpAttributes::kVary));
-}
-
-TEST_F(InPlaceRewriteContextTest, VaryMergeAddsAcceptAlongsideUserAgent) {
-  options()->set_in_place_wait_for_optimized(true);
-  set_optimize_for_browser(true);
-  Init();
-
-  // Cold fetch primes the metadata cache and the rewritten-resource cache.
-  FetchAndCheckResponse(cache_jpg_url_, "good:ic", true, ttl_ms_, etag_,
-                        start_time_ms());
-  // Seed the rewritten entry with a pre-existing Vary: User-Agent header.
-  SeedRewrittenCacheEntry(rewritten_jpg_url_, kContentTypeJpeg.mime_type(),
-                          "good:ic", "User-Agent");
-
-  ResetHeadersAndStats();
-  SetTimeMs(start_time_ms() + ttl_ms_ / 2);
-  FetchAndCheckResponse(cache_jpg_url_, "good:ic", true, ttl_ms_ / 2, etag_,
-                        start_time_ms() + ttl_ms_ / 2);
-  // The seeded rewritten entry is served from cache ...
-  CheckWarmCache("vary_merge_accept");
-  // ... and the pre-existing User-Agent token must not suppress the Accept
-  // token this resource varies on.
-  EXPECT_EQ(std::vector<GoogleString>({"accept", "user-agent"}),
-            LowercaseVaryTokens());
-}
-
-TEST_F(InPlaceRewriteContextTest, VaryMergeAddsUserAgentAlongsideAccept) {
-  options()->set_in_place_wait_for_optimized(true);
-  set_optimize_for_browser(true);
-  Init();
-  options()->ClearSignatureForTesting();
-  RewriteOptions::AllowVaryOn allow_vary_on;
-  EXPECT_TRUE(RewriteOptions::ParseFromString("User-Agent", &allow_vary_on));
-  options()->set_allow_vary_on(allow_vary_on);
-  server_context()->ComputeSignature(options());
-
-  // Cold fetch primes the metadata cache and the rewritten-resource cache.
-  FetchAndCheckResponse(cache_jpg_url_, "good:ic", true, ttl_ms_, etag_,
-                        start_time_ms());
-  // Seed the rewritten entry with a pre-existing Vary: Accept header.
-  SeedRewrittenCacheEntry(rewritten_jpg_url_, kContentTypeJpeg.mime_type(),
-                          "good:ic", "Accept");
-
-  ResetHeadersAndStats();
-  SetTimeMs(start_time_ms() + ttl_ms_ / 2);
-  FetchAndCheckResponse(cache_jpg_url_, "good:ic", true, ttl_ms_ / 2, etag_,
-                        start_time_ms() + ttl_ms_ / 2);
-  CheckWarmCache("vary_merge_user_agent");
-  // The pre-existing Accept token must not suppress the User-Agent token this
-  // resource varies on.
-  EXPECT_EQ(std::vector<GoogleString>({"accept", "user-agent"}),
-            LowercaseVaryTokens());
-}
-
-TEST_F(InPlaceRewriteContextTest, VaryMergeCommaCombinedIsNotDuplicated) {
-  options()->set_in_place_wait_for_optimized(true);
-  set_optimize_for_browser(true);
-  Init();
-
-  FetchAndCheckResponse(cache_jpg_url_, "good:ic", true, ttl_ms_, etag_,
-                        start_time_ms());
-  // Seed a single Vary line already covering both tokens.
-  SeedRewrittenCacheEntry(rewritten_jpg_url_, kContentTypeJpeg.mime_type(),
-                          "good:ic", "User-Agent, Accept");
-
-  ResetHeadersAndStats();
-  SetTimeMs(start_time_ms() + ttl_ms_ / 2);
-  FetchAndCheckResponse(cache_jpg_url_, "good:ic", true, ttl_ms_ / 2, etag_,
-                        start_time_ms() + ttl_ms_ / 2);
-  CheckWarmCache("vary_merge_comma_combined");
-  // Both tokens are already covered; nothing may be appended.
-  EXPECT_EQ(std::vector<GoogleString>({"accept", "user-agent"}),
-            LowercaseVaryTokens());
-}
-
-TEST_F(InPlaceRewriteContextTest, VaryMergeCaseInsensitiveIsNotDuplicated) {
-  options()->set_in_place_wait_for_optimized(true);
-  set_optimize_for_browser(true);
-  Init();
-
-  FetchAndCheckResponse(cache_jpg_url_, "good:ic", true, ttl_ms_, etag_,
-                        start_time_ms());
-  // Coverage is case-insensitive: "accept" already covers "Accept".
-  SeedRewrittenCacheEntry(rewritten_jpg_url_, kContentTypeJpeg.mime_type(),
-                          "good:ic", "accept");
-
-  ResetHeadersAndStats();
-  SetTimeMs(start_time_ms() + ttl_ms_ / 2);
-  FetchAndCheckResponse(cache_jpg_url_, "good:ic", true, ttl_ms_ / 2, etag_,
-                        start_time_ms() + ttl_ms_ / 2);
-  CheckWarmCache("vary_merge_case_insensitive");
-  EXPECT_EQ(std::vector<GoogleString>({"accept"}), LowercaseVaryTokens());
-}
-
-TEST_F(InPlaceRewriteContextTest, VaryMergeAddsSaveDataAlongsideAccept) {
-  options()->set_in_place_wait_for_optimized(true);
-  set_optimize_for_browser(true);
-  Init();
-  options()->ClearSignatureForTesting();
-  RewriteOptions::AllowVaryOn allow_vary_on;
-  EXPECT_TRUE(
-      RewriteOptions::ParseFromString("Accept,Save-Data", &allow_vary_on));
-  options()->set_allow_vary_on(allow_vary_on);
-  options()->set_image_webp_quality_for_save_data(70);
-  server_context()->ComputeSignature(options());
-
-  FetchAndCheckResponse(cache_jpg_url_, "good:ic", true, ttl_ms_, etag_,
-                        start_time_ms());
-  // Seed the rewritten entry with a pre-existing Vary: Accept header.
-  SeedRewrittenCacheEntry(rewritten_jpg_url_, kContentTypeJpeg.mime_type(),
-                          "good:ic", "Accept");
-
-  ResetHeadersAndStats();
-  SetTimeMs(start_time_ms() + ttl_ms_ / 2);
-  FetchAndCheckResponse(cache_jpg_url_, "good:ic", true, ttl_ms_ / 2, etag_,
-                        start_time_ms() + ttl_ms_ / 2);
-  CheckWarmCache("vary_merge_save_data");
-  // Accept is covered, but the Save-Data token must still be appended.
-  EXPECT_EQ(std::vector<GoogleString>({"accept", "save-data"}),
-            LowercaseVaryTokens());
-}
-
-TEST_F(InPlaceRewriteContextTest, VaryMergeCssAddsUserAgentAlongsideAccept) {
-  options()->set_in_place_wait_for_optimized(true);
-  set_optimize_for_browser(true);
-  Init();
-
-  FetchAndCheckResponse(cache_css_url_, "good:cf", true, ttl_ms_, etag_,
-                        start_time_ms());
-  // Seed the rewritten CSS entry with a pre-existing Vary: Accept header.
-  SeedRewrittenCacheEntry(rewritten_css_url_, kContentTypeCss.mime_type(),
-                          "good:cf", "Accept");
-
-  ResetHeadersAndStats();
-  SetTimeMs(start_time_ms() + ttl_ms_ / 2);
-  FetchAndCheckResponse(cache_css_url_, "good:cf", true, ttl_ms_ / 2, etag_,
-                        start_time_ms() + ttl_ms_ / 2);
-  CheckWarmCache("vary_merge_css_user_agent");
-  // CSS varies on User-Agent (constituent images may be rewritten in a
-  // UA-dependent manner); the seeded Accept token must be preserved.  The
-  // Accept-Encoding token is added by the HTTP cache itself when serving
-  // gzippable text content (InflatingFetch), independent of the Vary merge.
-  EXPECT_EQ(
-      std::vector<GoogleString>({"accept", "accept-encoding", "user-agent"}),
-      LowercaseVaryTokens());
-}
-
-TEST_F(InPlaceRewriteContextTest, NoAcceptHeaderForLosslessOrAnimated) {
-  // Make sure that InPlaceRewriteContext won't add "Vary: Accept" header to
-  // an image optimized to WebP lossless or WebP animated. Note that we're using
-  // FakeImageFilter in this test. If we use the real filter,
-  // ImageRewriteFilter, an image will never be converted to WebP lossless nor
-  // WebP animated, unless we're allowed to vary on user-agent.
-  options()->set_in_place_wait_for_optimized(true);
-  set_optimize_for_browser(true);
-  Init();
-  SetAcceptWebp();
-
-  // First check lossless case.
-  img_filter_->set_optimized_image_type(IMAGE_WEBP_LOSSLESS_OR_ALPHA);
-
-  FetchAndCheckResponse(cache_png_url_, "good:ic", true, ttl_ms_, etag_,
-                        start_time_ms());
-  EXPECT_FALSE(response_headers_.Has(HttpAttributes::kVary));
-
-  // Now check animated case.
-  img_filter_->set_optimized_image_type(IMAGE_WEBP_ANIMATED);
-  FetchAndCheckResponse(cache_jpg_url_, "good:ic", true, ttl_ms_, etag_,
-                        start_time_ms());
-  EXPECT_FALSE(response_headers_.Has(HttpAttributes::kVary));
-}
-
-TEST_F(InPlaceRewriteContextTest, OptimizeForBrowserNegative) {
-  options()->set_in_place_wait_for_optimized(true);
-  set_optimize_for_browser(false);
-  Init();
-
-  // Vary: User-Agent header should not be added no matter the user-agent.
-  ResetUserAgent(UserAgentMatcher::kTestUserAgentWebP);
-  SetAcceptWebp();
-  FetchAndCheckResponse(cache_jpg_url_, "good:ic", true, ttl_ms_, etag_,
-                        start_time_ms());
+  EXPECT_EQ(0, img_filter_->num_rewrites());
   EXPECT_EQ(nullptr, response_headers_.Lookup1(HttpAttributes::kVary));
+}
 
+// The in-place path hands the nested rewriter a capability-free
+// ResourceContext, so no browser capability is encoded into it at all.
+TEST_F(InPlaceRewriteContextTest, InPlaceDoesNotEncodeBrowserCapabilities) {
+  options()->set_in_place_wait_for_optimized(true);
+  set_optimize_for_browser(true);
+  Init();
+
+  ResetUserAgent(UserAgentMatcher::kTestUserAgentWebP);
+  SetAcceptWebp();
+  SetDriverRequestHeaders();
+  FetchAndCheckResponse(cache_jpg_url_, "good:ic", true, ttl_ms_, etag_,
+                        start_time_ms());
+  EXPECT_EQ(0, img_filter_->num_encode_user_agent());
+  EXPECT_EQ(0, css_filter_->num_encode_user_agent());
+  EXPECT_EQ(0, js_filter_->num_encode_user_agent());
+}
+
+// the design record companion to the three request-independence tests above, exercising
+// the one population they do not: a client whose WebP capability is DERIVED
+// FROM THE USER-AGENT STRING (Safari 16+ sends no image types in a navigation
+// Accept), rather than from an Accept header.  That verdict is a guess, so it
+// may only ever shape rewritten URLs, whose format is committed in the URL;
+// in-place responses are cached under a request-independent key and served
+// with no Vary, where a guessed WebP would be handed to clients that cannot
+// decode it.  Request-independence guarantees this structurally --
+// nothing on the in-place path consults request-derived WebP at all -- and
+// this test pins that the guarantee holds for the UA-derived grant
+// specifically: should per-request capability encoding ever return to this
+// path, the D1 population must not come with it.
+TEST_F(InPlaceRewriteContextTest, UserAgentDerivedWebpDoesNotReachInPlace) {
+  options()->set_in_place_wait_for_optimized(true);
+  set_optimize_for_browser(true);
+  Init();
+
+  // Safari 16 with a navigation Accept: no SetAcceptWebp() here, so the WebP
+  // grant on this request can only be UA-derived.  Precondition first: the
+  // grant really is live, so the assertions below cannot pass vacuously.
+  ResetUserAgent(UserAgentMatcherTestBase::kSafari16UserAgent);
+  SetDriverRequestHeaders();
+  EXPECT_TRUE(
+      rewrite_driver()->request_properties()->SupportsWebpRewrittenUrls());
+  EXPECT_FALSE(rewrite_driver()->request_properties()->SupportsWebpInPlace());
+
+  FetchAndCheckResponse(cache_jpg_url_, "good:ic", true, ttl_ms_, etag_,
+                        start_time_ms());
+  EXPECT_EQ(1, img_filter_->num_rewrites());
+  // No Vary, no per-request capability encoding.
+  EXPECT_EQ(nullptr, response_headers_.Lookup1(HttpAttributes::kVary));
+  EXPECT_EQ(0, img_filter_->num_encode_user_agent());
+
+  // A WebP-incapable client is served the very same cache entry -- which is
+  // only safe because the Safari verdict never shaped it.
   ResetHeadersAndStats();
-  SetTimeMs((start_time_ms() + ttl_ms_ / 2));
   ResetUserAgent(UserAgentMatcher::kTestUserAgentNoWebP);
-  FetchAndCheckResponse(cache_jpg_url_, "good:ic", true, ttl_ms_ / 2, etag_,
-                        start_time_ms() + ttl_ms_ / 2);
+  SetDriverRequestHeaders();
+  FetchAndCheckResponse(cache_jpg_url_, "good:ic", true, ttl_ms_, etag_,
+                        start_time_ms());
+  EXPECT_EQ(0, img_filter_->num_rewrites());
   EXPECT_EQ(nullptr, response_headers_.Lookup1(HttpAttributes::kVary));
 }
 

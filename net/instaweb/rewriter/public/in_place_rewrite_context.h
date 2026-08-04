@@ -111,10 +111,6 @@ class InPlaceRewriteContext : public SingleRewriteContext {
 
   int64 GetRewriteDeadlineAlarmMs() const override;
 
-  GoogleString UserAgentCacheKey(
-      const ResourceContext* resource_context) const override;
-  void EncodeUserAgentIntoResourceContext(ResourceContext* context) override;
-
   // We don't lock for IPRO because IPRO would rather stream back the original
   // resource than wait for the optimization.
   bool CreationLockBeforeStartFetch() const override { return false; }
@@ -146,13 +142,6 @@ class InPlaceRewriteContext : public SingleRewriteContext {
   // Update the date and expiry time based on the InputInfo's.
   void UpdateDateAndExpiry(const protobuf::RepeatedPtrField<InputInfo>& inputs,
                            int64* date_ms, int64* expiry_ms);
-  // Returns true if kInPlaceOptimizeForBrowser is enabled and we
-  // actually need to do browser specific rewriting based on options.
-  bool InPlaceOptimizeForBrowserEnabled() const;
-  // Add a Vary: user-agent or Vary: Accept header as appropriate
-  // if the fetch result may be browser dependent.
-  void AddVaryIfRequired(const CachedResult& cached_result,
-                         ResponseHeaders* headers) const;
   // Image rewriting adds a Link rel=canonical header.  Because a single cached
   // result can be served from multiple urls we do need to keep generating it.
   // But when serving via IPRO we should remove it if the url hasn't changed.

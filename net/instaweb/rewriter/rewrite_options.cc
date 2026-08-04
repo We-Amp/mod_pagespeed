@@ -597,9 +597,6 @@ RewriteOptions::Properties* RewriteOptions::properties_ = nullptr;
 RewriteOptions::Properties* RewriteOptions::all_properties_ = nullptr;
 RewriteOptions::Properties* RewriteOptions::deprecated_properties_ = nullptr;
 
-const char RewriteOptions::AllowVaryOn::kNoneString[] = "None";
-const char RewriteOptions::AllowVaryOn::kAutoString[] = "Auto";
-
 namespace {
 
 // When you change this, remember to update the documentation:
@@ -659,7 +656,9 @@ const RewriteOptions::Filter kOptimizeForBandwidthFilterSet[] = {
     RewriteOptions::kConvertJpegToProgressive,  // rewrite_images
     RewriteOptions::kConvertJpegToWebp,         // rewrite_images
     RewriteOptions::kConvertPngToJpeg,          // rewrite_images
-    RewriteOptions::kInPlaceOptimizeForBrowser,
+    // kInPlaceOptimizeForBrowser is retired: in-place optimization is
+    // request-independent, so the filter has no consumers.  The name is still
+    // accepted (with a warning) for config compatibility.
     RewriteOptions::kJpegSubsampling,  // rewrite_images
     RewriteOptions::kRecompressJpeg,   // rewrite_images
     RewriteOptions::kRecompressPng,    // rewrite_images
@@ -1310,14 +1309,39 @@ void RewriteOptions::AddProperties() {
                   "ResponsiveImageFilter srcsets.",
                   true);
 
-  AllowVaryOn default_allow_vary_on;
-  ParseFromString(AllowVaryOn::kAutoString, &default_allow_vary_on);
+  // Retired option, registered as an ignored free-form string so that a
+  // configuration file that still sets it continues to load on every port.
+  // (An unregistered directive name is a fatal config error on Apache and
+  // nginx.)  In-place optimization no longer produces browser-dependent bytes,
+  // so there is nothing left to vary on.  Directory scope (it was query scope
+  // when it did something): an ignored option must not be settable from a
+  // query param, and it is excluded from the signature below, so neither a
+  // config file that still carries it nor a request that smuggles it in can
+  // mint a fresh metadata-cache partition.
   AddBaseProperty(
-      default_allow_vary_on, &RewriteOptions::allow_vary_on_, "avo",
-      kAllowVaryOn, kQueryScope,
-      "\"Auto\", \"None\", or comma separated list of strings chosen from "
-      "\"Save-Data\", \"User-Agent\", and \"Accept\".",
+      "", &RewriteOptions::allow_vary_on_deprecated_, "avo", kAllowVaryOn,
+      kDirectoryScope,
+      "Deprecated and ignored: in-place optimization no longer varies its "
+      "output by request header.",
       true);
+  properties_->property(properties_->size() - 1)
+      ->set_do_not_use_for_signature_computation(true);
+
+  // Retired option, same treatment as AllowVaryOn above: its value is never
+  // read, so it must not participate in signature computation -- a config
+  // still carrying the directive converges onto the same metadata partition
+  // as a default config.  Registered here rather than in
+  // rewrite_options_properties.inc because it needs the post-registration
+  // signature tweak.
+  AddBaseProperty(
+      true, &RewriteOptions::private_not_vary_for_ie_, "pnvie",
+      kPrivateNotVaryForIE, kDirectoryScope,
+      "Deprecated and ignored: in-place optimized resources are no longer "
+      "browser-dependent, so they are never served as Cache-Control: private "
+      "and never carry a Vary header.",
+      true);
+  properties_->property(properties_->size() - 1)
+      ->set_do_not_use_for_signature_computation(true);
 
   // Test-only, so no enum.
   AddRequestProperty(false,
@@ -2057,6 +2081,10 @@ bool RewriteOptions::AddByNameToFilterSet(const StringPiece& option,
             {kFlushSubresourcesDeprecated,
              "Filter 'flush_subresources' is deprecated and has no effect; "
              "the flush-early flow it fed was removed."},
+            {kInPlaceOptimizeForBrowser,
+             "Filter 'in_place_optimize_for_browser' is deprecated and has "
+             "no effect; in-place optimization no longer varies its output "
+             "by request header."},
             {kMobilizePrecomputeDeprecated,
              "Filter 'mobilize_precompute' is deprecated and has no "
              "effect."},
@@ -2290,6 +2318,17 @@ bool IsRenderOnlyDirectiveName(StringPiece name) {
 RewriteOptions::OptionSettingResult RewriteOptions::ParseAndSetOptionFromName1(
     StringPiece name, StringPiece arg, GoogleString* msg,
     MessageHandler* handler) {
+  // Retired directives are still registered so that an existing configuration
+  // file keeps loading, but tell the operator they now do nothing.
+  if (StringCaseEqual(name, kAllowVaryOn) ||
+      StringCaseEqual(name, kPrivateNotVaryForIE)) {
+    handler->Message(kWarning,
+                     "'%s' is deprecated and ignored: in-place optimization no "
+                     "longer produces browser-dependent output, so it never "
+                     "emits a Vary header.  Please remove it from your "
+                     "configuration.",
+                     name.as_string().c_str());
+  }
   // Parse and set with the equvalent of "query = false".
   return ParseAndSetOptionFromNameWithScope(
       name, arg, RewriteOptions::kProcessScopeStrict, msg, handler);
@@ -2658,38 +2697,6 @@ bool RewriteOptions::ParseFromString(StringPiece value_string,
 bool RewriteOptions::ParseFromString(StringPiece value_string,
                                      protobuf::MessageLite* proto) {
   return ParseProtoFromStringPiece(value_string, proto);
-}
-
-bool RewriteOptions::ParseFromString(StringPiece value_string,
-                                     AllowVaryOn* allow_vary_on) {
-  AllowVaryOn allow;
-  TrimWhitespace(&value_string);
-  if (StringCaseEqual(value_string, AllowVaryOn::kNoneString)) {
-    // "allow" has already been initialized to all false; nothing to do.
-  } else if (StringCaseEqual(value_string, AllowVaryOn::kAutoString)) {
-    allow.set_allow_auto(true);
-  } else {
-    StringPieceVector value_vector;
-    SplitStringPieceToVector(value_string, ",", &value_vector,
-                             false /* omit_empty_strings */);
-    // When "value_string" is empty, "value_vector" has only one element
-    // which is an empty string.
-    for (size_t i = 0, n = value_vector.size(); i < n; ++i) {
-      StringPiece value = value_vector[i];
-      TrimWhitespace(&value);
-      if (StringCaseEqual(value, HttpAttributes::kAccept)) {
-        allow.set_allow_accept(true);
-      } else if (StringCaseEqual(value, HttpAttributes::kSaveData)) {
-        allow.set_allow_save_data(true);
-      } else if (StringCaseEqual(value, HttpAttributes::kUserAgent)) {
-        allow.set_allow_user_agent(true);
-      } else {
-        return false;
-      }
-    }
-  }
-  *allow_vary_on = allow;
-  return true;
 }
 
 bool RewriteOptions::Enabled(Filter filter) const {
@@ -3192,17 +3199,6 @@ GoogleString RewriteOptions::OptionSignature(const protobuf::MessageLite& proto,
   return hasher->Hash(ToString(proto));
 }
 
-GoogleString RewriteOptions::OptionSignature(const AllowVaryOn& allow_vary_on,
-                                             const Hasher* hasher) {
-  GoogleString out;
-  char mask =
-      (allow_vary_on.allow_auto() | (allow_vary_on.allow_accept() << 1) |
-       (allow_vary_on.allow_save_data() << 2) |
-       (allow_vary_on.allow_user_agent() << 3));
-  Web64Encode(GoogleString(&mask, 1), &out);
-  return out;
-}
-
 void RewriteOptions::DisableIfNotExplictlyEnabled(Filter filter) {
   if (!enabled_filters_.IsSet(filter)) {
     disabled_filters_.Insert(filter);
@@ -3470,38 +3466,6 @@ GoogleString RewriteOptions::FilterSetToString(
     }
   }
   return output;
-}
-
-GoogleString RewriteOptions::AllowVaryOn::ToString() const {
-  GoogleString result = "";
-  const char* delim = "";
-  if (allow_auto()) {
-    result = kAutoString;
-    // Make sure all other options have been set correctly.
-    DCHECK(!allow_accept());
-    DCHECK(!allow_user_agent());
-    DCHECK(allow_save_data());
-  } else {
-    if (allow_accept()) {
-      StrAppend(&result, delim, HttpAttributes::kAccept);
-      delim = ",";
-    }
-    if (allow_save_data()) {
-      StrAppend(&result, delim, HttpAttributes::kSaveData);
-      delim = ",";
-    }
-    if (allow_user_agent()) {
-      StrAppend(&result, delim, HttpAttributes::kUserAgent);
-    }
-    if (result.empty()) {
-      result = kNoneString;
-    }
-  }
-  return result;
-}
-
-GoogleString RewriteOptions::ToString(const AllowVaryOn& allow_vary_on) {
-  return allow_vary_on.ToString();
 }
 
 GoogleString RewriteOptions::EnabledFiltersToString() const {

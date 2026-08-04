@@ -82,9 +82,9 @@ Cache flush (all three): `--cache-dir <FileCachePath>` — the harness touches
 ### Knobs that maximize shutdown-UAF reproduction
 - `--cache-bust-frac 0.35` — higher = more fresh rewrites in flight.
 - `--restart-interval` low (e.g. `15`) — more teardown events overlapping load.
-- Configure the served vhost with **IPRO** (`in_place_optimize_for_browser`) and
-  short cache TTLs so `ResourceRevalidateDone`/`Harvest` (the exact shutdown-UAF frame)
-  churns continuously.
+- Configure the served vhost with **IPRO** (`InPlaceResourceOptimization on`)
+  and short cache TTLs so `ResourceRevalidateDone`/`Harvest` (the exact shutdown-UAF
+  frame) churns continuously.
 
 ## Leveraging the legacy load tooling
 

@@ -151,12 +151,6 @@
     kInPlacePreemptiveRewriteJavascript, kDirectoryScope, \
     "If set, issue preemptive rewrites of JS on the HTML path when " \
     "configured to use IPRO.", true) \
-  X(true, private_not_vary_for_ie_, "pnvie", \
-    kPrivateNotVaryForIE, kDirectoryScope, \
-    "If set, serve in-place optimized resources as Cache-Control: private " \
-    "rather than Vary: Accept.  Avoids an extra fetch on cache hit, but " \
-    "prevents proxy caching of these resources.  Only relevant if your " \
-    "proxy caches Vary: Accept", true) \
   X(true, combine_across_paths_, "cp", \
     kCombineAcrossPaths, kDirectoryScope, \
     "Allow combining resources from different paths", true) \

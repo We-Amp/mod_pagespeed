@@ -805,6 +805,21 @@ class RewriteContext::FetchContext {
         response_headers->CopyFrom(*(output_resource_->response_headers()));
         // Use the most conservative Cache-Control considering all inputs.
         AdjustCacheControl();
+        // the design record: the requested URL committed to exactly this content by
+        // hash, so where the response is publicly cacheable serve it as
+        // 'public, immutable'. Serving-time only -- stored output headers
+        // stay unstamped ('public' there still means "every input said
+        // public", which the in-place fallback path reads as a signal in
+        // FetchFallbackDoneImpl below); the hash-mismatch and
+        // fallback-to-original paths are deliberately not stamped, and
+        // neither are nested-driver fetches (chained rewrites fetching a
+        // .pagespeed. INPUT internally -- a synthetic 'public' there would
+        // be read back by ApplyInputCacheControl as an explicitly-public
+        // input and baked into the outer stored entry).
+        if (!rewrite_context_->Driver()->is_nested()) {
+          rewrite_context_->FindServerContext()->ApplyRewrittenUrlCacheControl(
+              response_headers);
+        }
         StringPiece contents = output_resource_->ExtractUncompressedContents();
         async_fetch_->set_content_length(contents.size());
         async_fetch_->HeadersComplete();
@@ -3013,6 +3028,15 @@ void AppendInt(GoogleString* out, const char* name, int val,
 
 bool RewriteContext::IsNestedIn(StringPiece id) const {
   return parent_ != nullptr && id == parent_->id();
+}
+
+bool RewriteContext::HasInPlaceRewriteAncestor() const {
+  for (const RewriteContext* c = parent_; c != nullptr; c = c->parent_) {
+    if (StringPiece(RewriteOptions::kInPlaceRewriteId) == c->id()) {
+      return true;
+    }
+  }
+  return false;
 }
 
 void RewriteContext::CheckNotFrozen() {

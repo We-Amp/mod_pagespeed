@@ -27,6 +27,7 @@
 #include "net/instaweb/http/public/async_fetch.h"
 #include "net/instaweb/http/public/async_fetch_with_lock.h"
 #include "net/instaweb/http/public/counting_url_async_fetcher.h"
+#include "net/instaweb/http/public/http_cache.h"
 #include "net/instaweb/http/public/http_cache_failure.h"
 #include "net/instaweb/http/public/logging_proto_impl.h"
 #include "net/instaweb/http/public/rate_controller.h"
@@ -1446,8 +1447,10 @@ TEST_F(RewriteContextTest, TestRewritesOnEmptyPublicResources) {
     EXPECT_TRUE(FetchResource(kTestDomain, "ce", "test.css", "css", &content,
                               &headers));
     EXPECT_EQ("", content);
-    EXPECT_STREQ("max-age=31536000",
-                 headers.Lookup1(HttpAttributes::kCacheControl));
+    // the design record: hash-committed rewritten outputs are served with an explicit
+    // 'public' and RFC 8246 'immutable' when they are publicly cacheable.
+    EXPECT_STREQ("max-age=31536000, public, immutable",
+                 headers.LookupJoined(HttpAttributes::kCacheControl));
   }
 }
 
@@ -1532,9 +1535,10 @@ TEST_F(RewriteContextTest, EmptyOutputResources) {
     EXPECT_TRUE(FetchResource(kTestDomain, "cf", "test.css", "css", &content,
                               &headers));
     EXPECT_EQ("", content);  // Result is empty. That's fine.
-    // And serves with full public 1year cache lifetime.
-    EXPECT_STREQ("max-age=31536000",
-                 headers.Lookup1(HttpAttributes::kCacheControl));
+    // And serves with full public 1year cache lifetime (made explicit, plus
+    // RFC 8246 'immutable', per the design record).
+    EXPECT_STREQ("max-age=31536000, public, immutable",
+                 headers.LookupJoined(HttpAttributes::kCacheControl));
   }
 }
 
@@ -1772,10 +1776,11 @@ TEST_F(RewriteContextTest, CacheExtendCacheableResource) {
     EXPECT_TRUE(FetchResource(kTestDomain, TrimWhitespaceSyncFilter::kFilterId,
                               "a.css", "css", &content, &headers));
     EXPECT_EQ("a", content);
-    EXPECT_STREQ(absl::StrFormat("max-age=%lld",
+    // the design record: served hash-committed responses carry 'public, immutable'.
+    EXPECT_STREQ(absl::StrFormat("max-age=%lld, public, immutable",
                                  static_cast<long long int>(
                                      ServerContext::kGeneratedMaxAgeMs / 1000)),
-                 headers.Lookup1(HttpAttributes::kCacheControl));
+                 headers.LookupJoined(HttpAttributes::kCacheControl));
   }
 }
 
@@ -2103,6 +2108,85 @@ TEST_F(RewriteContextTest, RepeatedTwoFilters) {
           CssLinkHref(Encode("", "tw", "0",
                              Encode("", "uc", "0", "a.css", "css"), "css"))));
   EXPECT_EQ(1, trim_filter_->num_rewrites());
+}
+
+// Reads the raw STORED http-cache entry headers for a URL, bypassing the
+// serving paths, so tests can assert on what is cached rather than what is
+// served.
+class StoredHeadersCallback : public OptionsAwareHTTPCacheCallback {
+ public:
+  StoredHeadersCallback(const RewriteOptions* options,
+                        const RequestContextPtr& request_ctx,
+                        GoogleString* headers_out)
+      : OptionsAwareHTTPCacheCallback(options, request_ctx),
+        headers_out_(headers_out),
+        found_(false) {}
+  ~StoredHeadersCallback() override {}
+
+  void Done(HTTPCache::FindResult find_result) override {
+    if (find_result.status == HTTPCache::kFound) {
+      found_ = true;
+      *headers_out_ = response_headers()->ToString();
+    }
+  }
+
+  bool found() const { return found_; }
+
+ private:
+  GoogleString* headers_out_;
+  bool found_;
+
+  StoredHeadersCallback(const StoredHeadersCallback&) = delete;
+  StoredHeadersCallback& operator=(const StoredHeadersCallback&) = delete;
+};
+
+// the design record pin: chained rewrites fetch .pagespeed. INPUTS through a nested
+// driver (RewriteContext::FetchInputs); those internal fetches must not
+// receive the serving-time 'public, immutable' upgrade, or
+// ApplyInputCacheControl would read the synthetic 'public' as an
+// explicitly-public input and bake it into the outer STORED entry -- which
+// the in-place fallback path later reads as an "every input said public"
+// signal (see FetchFallbackDoneImpl).
+TEST_F(RewriteContextTest, ChainedFetchDoesNotBakePublicIntoStoredEntry) {
+  // Need normal filters since cloned RewriteDriver instances wouldn't
+  // know about test-only stuff.
+  options()->EnableFilter(RewriteOptions::kCombineCss);
+  options()->EnableFilter(RewriteOptions::kRewriteCss);
+  rewrite_driver()->AddFilters();
+
+  SetResponseWithDefaultHeaders("a.css", kContentTypeCss,
+                                " div { display: block;  }", 100);
+  SetResponseWithDefaultHeaders("b.css", kContentTypeCss,
+                                " span { display: inline; }", 100);
+
+  // Outer combination whose inputs are themselves .pagespeed. URLs.
+  GoogleString url =
+      Encode(kTestDomain, "cc", "0",
+             MultiUrl(Encode("", "cf", "0", "a.css", "css"),
+                      Encode("", "cf", "0", "b.css", "css")),
+             "css");
+
+  GoogleString content;
+  ResponseHeaders headers;
+  EXPECT_TRUE(FetchResourceUrl(url, &content, &headers));
+  EXPECT_EQ(HttpStatus::kOK, headers.status_code());
+  // The wire response of the outer .pagespeed. URL carries the upgrade...
+  EXPECT_TRUE(headers.HasValue(HttpAttributes::kCacheControl, "immutable"))
+      << headers.ToString();
+
+  // ...but the stored entry must not: no input was explicitly public.
+  GoogleString stored_headers;
+  StoredHeadersCallback callback(options(), CreateRequestContext(),
+                                 &stored_headers);
+  http_cache()->Find(url, rewrite_driver()->CacheFragment(),
+                     message_handler(), &callback);
+  ASSERT_TRUE(callback.found());
+  EXPECT_EQ(GoogleString::npos, stored_headers.find("public"))
+      << stored_headers;
+  EXPECT_EQ(GoogleString::npos, stored_headers.find("immutable"))
+      << stored_headers;
+  EXPECT_NE(GoogleString::npos, stored_headers.find("max-age=31536000"))
+      << stored_headers;
 }
 
 TEST_F(RewriteContextTest, ReconstructChainedWrongHash) {

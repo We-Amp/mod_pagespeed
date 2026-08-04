@@ -745,8 +745,16 @@ void ImageRewriteFilter::Context::Render() {
   if (place_ == Place::kCss || !has_parent()) {
     InlineResult inline_result;
     if (place_ == Place::kCss) {
+      // Whether an image may be inlined into CSS is a per-browser decision
+      // (request_properties()->SupportsImageInlining() in TryInline).  CSS
+      // optimized in place is cached under a request-independent key and
+      // served with no Vary: header, so the decision must not be consulted
+      // there: pass 0 so no image is ever inlined into in-place CSS, keeping
+      // the output bytes identical for every client.
+      int64 css_image_inline_max_bytes =
+          HasInPlaceRewriteAncestor() ? 0 : css_image_inline_max_bytes_;
       rewrote_url = filter_->FinishRewriteCssImageUrl(
-          css_image_inline_max_bytes_, result, resource_slot, &inline_result);
+          css_image_inline_max_bytes, result, resource_slot, &inline_result);
       if (Driver()->options()->Enabled(RewriteOptions::kInlineImages)) {
         const char* message = MessageForInlineResult(inline_result);
         if (message != nullptr) {

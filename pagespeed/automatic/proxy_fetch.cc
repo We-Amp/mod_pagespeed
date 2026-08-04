@@ -690,9 +690,14 @@ void ProxyFetch::SetupForHtml() {
                                        "must-revalidate")) {
         ttl_ms = 0;
         cache_control_suffix = ", no-cache";
-        // Preserve values like no-store and no-transform.
+        // Preserve values like no-store and no-transform, but not s-maxage:
+        // rewritten HTML embeds .pagespeed. URLs that can commit to a
+        // content variant chosen for the requesting client, so an s-maxage
+        // inviting shared caches to hold it would let one client's variant
+        // be served to another.
         cache_control_suffix +=
-            response_headers()->CacheControlValuesToPreserve();
+            response_headers()->CacheControlValuesToPreserve(
+                false /* preserve_s_maxage */);
       } else {
         ttl_ms = std::min(options->max_html_cache_time_ms(),
                           response_headers()->cache_ttl_ms());

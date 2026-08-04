@@ -27,9 +27,7 @@
 #include "net/instaweb/http/public/cache_url_async_fetcher.h"
 #include "net/instaweb/http/public/http_cache.h"
 #include "net/instaweb/rewriter/cached_result.pb.h"
-#include "net/instaweb/rewriter/public/image_url_encoder.h"
 #include "net/instaweb/rewriter/public/output_resource.h"
-#include "net/instaweb/rewriter/public/request_properties.h"
 #include "net/instaweb/rewriter/public/resource.h"
 #include "net/instaweb/rewriter/public/resource_namer.h"
 #include "net/instaweb/rewriter/public/resource_slot.h"
@@ -45,10 +43,8 @@
 #include "pagespeed/kernel/http/content_type.h"
 #include "pagespeed/kernel/http/google_url.h"
 #include "pagespeed/kernel/http/http_names.h"
-#include "pagespeed/kernel/http/image_types.pb.h"
 #include "pagespeed/kernel/http/request_headers.h"
 #include "pagespeed/kernel/http/response_headers.h"
-#include "pagespeed/kernel/http/user_agent_matcher.h"
 
 namespace net_instaweb {
 
@@ -451,7 +447,6 @@ void InPlaceRewriteContext::FixFetchFallbackHeaders(
                                        expire_at_ms - date_ms);
     }
     headers->SetDateAndCaching(now_ms, expire_at_ms - now_ms);
-    AddVaryIfRequired(cached_result, headers);
   }
   RemoveRedundantRelCanonicalHeader(cached_result, headers);
 }
@@ -667,243 +662,6 @@ void InPlaceRewriteContext::StartFetchReconstruction() {
 
 void InPlaceRewriteContext::StartFetchReconstructionParent() {
   RewriteContext::StartFetchReconstruction();
-}
-
-bool InPlaceRewriteContext::InPlaceOptimizeForBrowserEnabled() const {
-  // Browser-dependent in-place optimization is possible whenever a
-  // browser-capability-gated conversion filter is on: WebP or AVIF.
-  return Options()->Enabled(RewriteOptions::kInPlaceOptimizeForBrowser) &&
-         (Options()->Enabled(RewriteOptions::kConvertJpegToWebp) ||
-          Options()->Enabled(RewriteOptions::kConvertJpegToAvif) ||
-          Options()->Enabled(RewriteOptions::kConvertToAvifLossless) ||
-          Options()->Enabled(RewriteOptions::kConvertToAvifAnimated) ||
-          Options()->Enabled(RewriteOptions::kRecompressAvif));
-}
-
-// TODO(jmaessen): Sharpen this up.  Mark CSS vary:User-Agent because it doesn't
-// see the Accept:image/webp header; we can skip this if all its images will be
-// IPRO'd.  We don't need to mark non-webp-eligible images, which may require
-// some fiddly options checking.  We need to treat webp lossless differently, so
-// we can't just look at the extension and content type; right now we just
-// disable lossless.
-void InPlaceRewriteContext::AddVaryIfRequired(const CachedResult& cached_result,
-                                              ResponseHeaders* headers) const {
-  if (!InPlaceOptimizeForBrowserEnabled() || num_output_partitions() != 1) {
-    // No browser-dependent rewrites => no need for vary
-    return;
-  }
-  const ContentType* type = headers->DetermineContentType();
-  // Returns true if we may return different rewritten content based
-  // on the user agent.
-  GoogleString new_vary;
-  bool depends_on_save_data = false;
-  if (type->IsImage()) {
-    ImageType image_type =
-        static_cast<ImageType>(cached_result.optimized_image_type());
-
-    const RequestProperties& request_properties =
-        *Driver()->request_properties();
-    if (ImageUrlEncoder::AllowVaryOnUserAgent(*Options(), request_properties) &&
-        (image_type != IMAGE_UNKNOWN) &&
-        (Options()->Enabled(RewriteOptions::kConvertJpegToWebp) ||
-         Options()->Enabled(RewriteOptions::kConvertToWebpLossless) ||
-         Options()->Enabled(RewriteOptions::kConvertToWebpAnimated) ||
-         Options()->HasValidSmallScreenQualities())) {
-      // If we are allowed to vary on user-agent and the image has been
-      // successfully optimized, we need to add "vary: user-agent", since
-      // we might have used user-agent for determining image format and/or
-      // quality.
-      new_vary = HttpAttributes::kUserAgent;
-    } else if (ImageUrlEncoder::AllowVaryOnAccept(*Options(),
-                                                  request_properties) &&
-               (image_type == IMAGE_JPEG || image_type == IMAGE_WEBP ||
-                image_type == IMAGE_AVIF ||
-                image_type == IMAGE_AVIF_LOSSLESS_OR_ALPHA ||
-                image_type == IMAGE_AVIF_ANIMATED) &&
-               (Options()->Enabled(RewriteOptions::kConvertJpegToWebp) ||
-                Options()->Enabled(RewriteOptions::kConvertJpegToAvif) ||
-                Options()->Enabled(RewriteOptions::kConvertToAvifLossless) ||
-                Options()->Enabled(RewriteOptions::kConvertToAvifAnimated) ||
-                Options()->Enabled(RewriteOptions::kRecompressAvif))) {
-      // If we are allowed to vary on Accept header and the image has been
-      // successfully optimized, we need to add "vary: accept", since we might
-      // have used the Accept header for determining image quality and whether
-      // WebP lossy or AVIF could be used (AVIF capability is entirely
-      // Accept-driven).
-      new_vary = HttpAttributes::kAccept;
-    }
-
-    depends_on_save_data =
-        (image_type == IMAGE_JPEG) || (image_type == IMAGE_WEBP) ||
-        (image_type == IMAGE_WEBP_ANIMATED) || (image_type == IMAGE_AVIF) ||
-        (image_type == IMAGE_AVIF_LOSSLESS_OR_ALPHA) ||
-        (image_type == IMAGE_AVIF_ANIMATED);
-
-  } else if (type->IsCss()) {
-    // If it's CSS, constituent images can be rewritten in a UA-dependent
-    // manner.  But we don't necessarily see Accept:image/webp on the request,
-    // so we must Vary: User-Agent.
-    if (Options()->Enabled(RewriteOptions::kRewriteCss) &&
-        (Options()->Enabled(RewriteOptions::kConvertJpegToWebp) ||
-         Options()->Enabled(RewriteOptions::kConvertToWebpAnimated) ||
-         Options()->Enabled(RewriteOptions::kConvertToWebpLossless))) {
-      new_vary = HttpAttributes::kUserAgent;
-      depends_on_save_data = true;
-    }
-  }
-
-  // If Save-Data is allowed, add it to the Vary header.
-  if (depends_on_save_data && Options()->SupportSaveData()) {
-    if (!new_vary.empty()) {
-      new_vary += ",";
-    }
-    new_vary += HttpAttributes::kSaveData;
-  }
-
-  if (new_vary.empty()) {
-    return;
-  }
-
-  if (Options()->private_not_vary_for_ie() &&
-      Driver()->user_agent_matcher()->IsIe(Driver()->user_agent())) {
-    // IE stores Vary: Accept resources in its cache, but must revalidate them
-    // every single time they're fetched (except for older IE, which doesn't
-    // cache them at all).  To avoid the re-validation cost (which imposes load
-    // on the server unless a proxy cache deals with it) we by default serve
-    // these resource cache-control: private to IE.  This will invalidate all
-    // Vary: capable proxy caches along the way, though.  In practice this is
-    // usually not be a big deal: few proxies handle Vary: Accept, though some
-    // CDNs do, and none we've heard of handle Vary: User-Agent without special
-    // configuration.
-    headers->Add(HttpAttributes::kCacheControl, HttpAttributes::kPrivate);
-    return;
-  }
-  ConstStringStarVector varies;
-  if (headers->Lookup(HttpAttributes::kVary, &varies)) {
-    // A pre-existing "Vary: *" already covers any token we might add.
-    for (int i = 0, s = varies.size(); i < s; ++i) {
-      if (StringPiece("*") == StringPiece(*varies[i])) {
-        return;
-      }
-    }
-    // Merge per token: append only the new_vary tokens not already covered
-    // (case-insensitively) by the existing Vary header, as a single Vary line.
-    // A pre-existing token must not suppress a different token we need.
-    StringPieceVector new_tokens;
-    SplitStringPieceToVector(new_vary, ",", &new_tokens, true);
-    GoogleString vary_to_add;
-    for (int i = 0, n = new_tokens.size(); i < n; ++i) {
-      StringPiece token = new_tokens[i];
-      TrimWhitespace(&token);
-      if (token.empty()) {
-        continue;
-      }
-      bool covered = false;
-      for (int j = 0, s = varies.size(); j < s; ++j) {
-        if (StringCaseEqual(token, *varies[j])) {
-          covered = true;
-          break;
-        }
-      }
-      if (!covered) {
-        if (!vary_to_add.empty()) {
-          vary_to_add += ",";
-        }
-        token.AppendToString(&vary_to_add);
-      }
-    }
-    if (vary_to_add.empty()) {
-      // Current Vary: header captures necessary vary information.
-      return;
-    }
-    headers->Add(HttpAttributes::kVary, vary_to_add);
-    return;
-  }
-  headers->Add(HttpAttributes::kVary, new_vary);
-}
-
-GoogleString InPlaceRewriteContext::UserAgentCacheKey(
-    const ResourceContext* resource_context) const {
-  if (InPlaceOptimizeForBrowserEnabled() && resource_context != nullptr) {
-    return ImageUrlEncoder::CacheKeyFromResourceContext(*resource_context);
-  }
-  return "";
-}
-
-// We risk intentionally increasing metadata cache fragmentation when request
-// URL extensions are wrong or inconclusive.
-// For a known extension, we optimistically think it tells us the
-// correct resource type like image, css, etc. For images, we don't care about
-// the actual image format (JPEG or PNG, for example). If the type derived
-// from extension is wrong, we either lose the opportunity to optimize the
-// resource based on user agent context (e.g., an image with .txt extension)
-// or fragment the metadata cache unnecessarily (e.g., an HTML with .png
-// extension)
-// In case of an unknown extension or no extension in the URL, we encode
-// all supported user agent capacities so that it will work for both image and
-// CSS at the cost of unnecessary fragmentation of metadata cache.
-void InPlaceRewriteContext::EncodeUserAgentIntoResourceContext(
-    ResourceContext* context) {
-  if (!InPlaceOptimizeForBrowserEnabled()) {
-    return;
-  }
-  // TODO(jmaessen): filter->EncodeUserAgentIntoResourceContext(context)
-  // actually calls the same method twice here.  In both cases we are also
-  // dealing with possible mobile user agents,
-  // which requires a different set of vary: headers.
-  const ContentType* type = NameExtensionToContentType(url_);
-  if (type == nullptr) {
-    // Get ImageRewriteFilter with any image type.
-    RewriteFilter* filter = GetRewriteFilter(kContentTypeJpeg);
-    if (filter != nullptr) {
-      filter->EncodeUserAgentIntoResourceContext(context);
-    }
-    filter = GetRewriteFilter(kContentTypeCss);
-    if (filter != nullptr) {
-      filter->EncodeUserAgentIntoResourceContext(context);
-    }
-  } else if (type->IsImage() || type->IsCss()) {
-    RewriteFilter* filter = GetRewriteFilter(*type);
-    if (filter != nullptr) {
-      filter->EncodeUserAgentIntoResourceContext(context);
-    }
-  }
-
-  // In IPRO, we cannot use mobile quality if we're not allowed to vary on
-  // user agent.
-  const bool vary_on_user_agent = ImageUrlEncoder::AllowVaryOnUserAgent(
-      *Driver()->options(), *Driver()->request_properties());
-  if (!vary_on_user_agent) {
-    context->set_may_use_small_screen_quality(false);
-  }
-
-  // In IPRO, if we are not allowed to vary on user agent:
-  //   - if we are still allowed to vary on accept, we can use lossy format
-  //   - if we are not allowed to vary on accept, we cannot use any WebP format.
-  if (!vary_on_user_agent) {
-    if (ImageUrlEncoder::AllowVaryOnAccept(*Driver()->options(),
-                                           *Driver()->request_properties())) {
-      if (context->libwebp_level() != ResourceContext::LIBWEBP_NONE) {
-        context->set_libwebp_level(ResourceContext::LIBWEBP_LOSSY_ONLY);
-      }
-    } else {
-      context->set_libwebp_level(ResourceContext::LIBWEBP_NONE);
-    }
-  }
-
-  // Same clamp for the AVIF capability dimension:
-  //   - if we are still allowed to vary on accept, we can use lossy format
-  //   - if we are not allowed to vary on accept, we cannot use any AVIF format.
-  if (!vary_on_user_agent) {
-    if (ImageUrlEncoder::AllowVaryOnAccept(*Driver()->options(),
-                                           *Driver()->request_properties())) {
-      if (context->avif_level() != ResourceContext::AVIF_NONE) {
-        context->set_avif_level(ResourceContext::AVIF_LOSSY_ONLY);
-      }
-    } else {
-      context->set_avif_level(ResourceContext::AVIF_NONE);
-    }
-  }
 }
 
 }  // namespace net_instaweb

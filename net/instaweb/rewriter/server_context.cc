@@ -475,6 +475,36 @@ void ServerContext::ApplyInputCacheControl(const ResourceVector& inputs,
   }
 }
 
+void ServerContext::ApplyRewrittenUrlCacheControl(ResponseHeaders* headers) {
+  // the design record: a rewritten output's URL embeds its content hash -- changed
+  // content mints a new URL -- so the bytes behind a hash-committed
+  // .pagespeed. URL can never change. When such a response is publicly
+  // cacheable, say 'public' explicitly (unlocks shared caches that require
+  // the token, e.g. Google Cloud CDN, cf. FixCacheControlForGoogleCache)
+  // and add RFC 8246 'immutable' (Firefox 49+ and Safari 11+ skip
+  // revalidation for the full TTL; Chrome currently ignores it).
+  //
+  // This is applied ONLY when serving a hash-committed .pagespeed. URL,
+  // never to the stored output headers. Stored entries keep the historical
+  // shape -- 'public' only when every input explicitly said so -- because
+  // derived serving paths depend on that as a signal: the in-place
+  // (original-URL) fallback path re-adds 'public' to its response exactly
+  // when the nested rewritten resource's stored headers carry it
+  // (RewriteContext::FetchContext::FetchFallbackDoneImpl), and an
+  // unconditional stored 'public' would upgrade original-URL responses the
+  // origin never marked public (RFC 9111 s3.5: explicit 'public' newly
+  // authorizes shared caches to store Authorization-bearing responses).
+  //
+  // Privacy floor: both setters refuse to touch a response carrying
+  // private/no-cache/no-store, and input-driven downgrades have already
+  // been applied to the headers by ApplyInputCacheControl by the time any
+  // serving path calls this. Hash-mismatch and fallback-to-original serving
+  // rebuild Cache-Control via SetDateAndCaching and are deliberately not
+  // stamped.
+  headers->SetCacheControlPublic();
+  headers->SetCacheControlImmutable();
+}
+
 void ServerContext::AddOriginalContentLengthHeader(const ResourceVector& inputs,
                                                    ResponseHeaders* headers) {
   // Determine the total original content length for input resource, and

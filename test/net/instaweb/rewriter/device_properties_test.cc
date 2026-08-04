@@ -192,6 +192,139 @@ TEST_F(DevicePropertiesTest, WebpWithoutAcceptOnlyLegacyAndroidIsRewritten) {
   ExpectNoWebpSupport(UserAgentMatcherTestBase::kSafariUserAgent);
 }
 
+// the design record. A navigation request from Safari 16+ or Firefox 132+ carries no
+// "image/webp" in Accept, but the browser decodes WebP. Derive the capability
+// from the user agent -- and confine the result to rewritten URLs.
+TEST_F(DevicePropertiesTest, WebpFromUserAgentWhenAcceptOmitsIt) {
+  // A navigation Accept header from Safari: no image types at all.
+  RequestHeaders headers;
+  headers.Add(HttpAttributes::kAccept,
+              "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
+
+  DeviceProperties safari(&user_agent_matcher_);
+  safari.SetUserAgent(UserAgentMatcherTestBase::kSafari17IPhoneUserAgent);
+  safari.ParseRequestHeaders(headers);
+  // Rewritten URLs carry the capability in the URL itself, so a guess is safe
+  // there...
+  EXPECT_TRUE(safari.SupportsWebpRewrittenUrls());
+  // ...but SupportsWebpInPlace() must keep reporting only an observed
+  // "Accept: image/webp" header, never a user-agent guess: its remaining
+  // consumer is device logging, and (should any per-request in-place behavior
+  // ever return) a response shaped by a guess could not honestly claim
+  // "Vary: Accept".
+  EXPECT_FALSE(safari.SupportsWebpInPlace());
+
+  DeviceProperties firefox(&user_agent_matcher_);
+  firefox.SetUserAgent(UserAgentMatcherTestBase::kFirefox141UserAgent);
+  firefox.ParseRequestHeaders(headers);
+  EXPECT_TRUE(firefox.SupportsWebpRewrittenUrls());
+  EXPECT_FALSE(firefox.SupportsWebpInPlace());
+
+  // Below the floors, nothing changes. Safari 15 is the sharp edge: its UA is
+  // byte-identical to a real Catalina Safari 15, which has no WebP decoder,
+  // so the design record Version/16 floor must deny it.
+  DeviceProperties safari15(&user_agent_matcher_);
+  safari15.SetUserAgent(UserAgentMatcherTestBase::kSafari15UserAgent);
+  safari15.ParseRequestHeaders(headers);
+  EXPECT_FALSE(safari15.SupportsWebpRewrittenUrls());
+  EXPECT_FALSE(safari15.SupportsWebpInPlace());
+
+  DeviceProperties safari13(&user_agent_matcher_);
+  safari13.SetUserAgent(UserAgentMatcherTestBase::kSafari13UserAgent);
+  safari13.ParseRequestHeaders(headers);
+  EXPECT_FALSE(safari13.SupportsWebpRewrittenUrls());
+  EXPECT_FALSE(safari13.SupportsWebpInPlace());
+
+  DeviceProperties firefox131(&user_agent_matcher_);
+  firefox131.SetUserAgent(UserAgentMatcherTestBase::kFirefox131UserAgent);
+  firefox131.ParseRequestHeaders(headers);
+  EXPECT_FALSE(firefox131.SupportsWebpRewrittenUrls());
+  EXPECT_FALSE(firefox131.SupportsWebpInPlace());
+
+  // A crawler is never granted the guess, even when its UA is Safari-shaped and
+  // above the floor.
+  DeviceProperties applebot(&user_agent_matcher_);
+  applebot.SetUserAgent(UserAgentMatcherTestBase::kApplebotSafari16UserAgent);
+  applebot.ParseRequestHeaders(headers);
+  EXPECT_FALSE(applebot.SupportsWebpRewrittenUrls());
+  EXPECT_FALSE(applebot.SupportsWebpInPlace());
+}
+
+// A real "Accept: image/webp" still reads as an in-place-capable client. Only
+// the UA-derived verdict is excluded from SupportsWebpInPlace() -- the guess
+// must not change what is reported for honest Accept-advertising clients.
+TEST_F(DevicePropertiesTest, WebpInPlaceStillGrantedOnRealAcceptHeader) {
+  RequestHeaders headers;
+  headers.Add(HttpAttributes::kAccept, "image/webp");
+
+  DeviceProperties safari(&user_agent_matcher_);
+  safari.SetUserAgent(UserAgentMatcherTestBase::kSafari17IPhoneUserAgent);
+  safari.ParseRequestHeaders(headers);
+  EXPECT_TRUE(safari.SupportsWebpInPlace());
+  EXPECT_TRUE(safari.SupportsWebpRewrittenUrls());
+}
+
+// the design record constraint 4. accepts_webp_ is not reset by SetUserAgent, and
+// ParseRequestHeaders may only run once, so making WebP capability
+// UA-dependent could have turned "SetUserAgent before ParseRequestHeaders"
+// into an unchecked invariant. It did not: whichever call runs second
+// establishes the verdict, and both orders agree.
+TEST_F(DevicePropertiesTest, WebpFromUserAgentIsOrderIndependent) {
+  RequestHeaders headers;
+  headers.Add(HttpAttributes::kAccept, "text/html,*/*;q=0.8");
+
+  DeviceProperties ua_first(&user_agent_matcher_);
+  ua_first.SetUserAgent(UserAgentMatcherTestBase::kSafari16UserAgent);
+  ua_first.ParseRequestHeaders(headers);
+
+  DeviceProperties headers_first(&user_agent_matcher_);
+  headers_first.ParseRequestHeaders(headers);
+  headers_first.SetUserAgent(UserAgentMatcherTestBase::kSafari16UserAgent);
+
+  EXPECT_TRUE(ua_first.SupportsWebpRewrittenUrls());
+  EXPECT_TRUE(headers_first.SupportsWebpRewrittenUrls());
+  EXPECT_FALSE(ua_first.SupportsWebpInPlace());
+  EXPECT_FALSE(headers_first.SupportsWebpInPlace());
+}
+
+// Replacing the user agent must withdraw a grant that the previous user agent
+// earned; otherwise a UA-derived kTrue would masquerade as a real Accept
+// header for the rest of the object's life.
+TEST_F(DevicePropertiesTest, WebpFromUserAgentWithdrawnOnUserAgentChange) {
+  RequestHeaders headers;
+  headers.Add(HttpAttributes::kAccept, "text/html,*/*;q=0.8");
+
+  DeviceProperties device_properties(&user_agent_matcher_);
+  device_properties.SetUserAgent(UserAgentMatcherTestBase::kSafari16UserAgent);
+  device_properties.ParseRequestHeaders(headers);
+  EXPECT_TRUE(device_properties.SupportsWebpRewrittenUrls());
+
+  device_properties.SetUserAgent(UserAgentMatcherTestBase::kSafari13UserAgent);
+  EXPECT_FALSE(device_properties.SupportsWebpRewrittenUrls());
+  EXPECT_FALSE(device_properties.SupportsWebpInPlace());
+
+  // ...and re-granted when the user agent qualifies again.
+  device_properties.SetUserAgent(UserAgentMatcherTestBase::kFirefox132UserAgent);
+  EXPECT_TRUE(device_properties.SupportsWebpRewrittenUrls());
+  EXPECT_FALSE(device_properties.SupportsWebpInPlace());
+}
+
+// A real Accept: image/webp must survive a later SetUserAgent, including one
+// naming a browser below the floor: the header said what it said.
+TEST_F(DevicePropertiesTest, RealAcceptHeaderSurvivesUserAgentChange) {
+  RequestHeaders headers;
+  headers.Add(HttpAttributes::kAccept, "image/webp");
+
+  DeviceProperties device_properties(&user_agent_matcher_);
+  device_properties.SetUserAgent(UserAgentMatcherTestBase::kSafari16UserAgent);
+  device_properties.ParseRequestHeaders(headers);
+  EXPECT_TRUE(device_properties.SupportsWebpInPlace());
+
+  device_properties.SetUserAgent(UserAgentMatcherTestBase::kSafari13UserAgent);
+  EXPECT_TRUE(device_properties.SupportsWebpInPlace());
+  EXPECT_TRUE(device_properties.SupportsWebpRewrittenUrls());
+}
+
 TEST_F(DevicePropertiesTest, ProcessSaveDataHeader) {
   ParseAndVerifySaveData("on", true);
   ParseAndVerifySaveData("oN", true);

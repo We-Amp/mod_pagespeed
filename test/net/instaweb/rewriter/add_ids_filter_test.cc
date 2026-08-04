@@ -19,6 +19,8 @@
 
 #include "net/instaweb/rewriter/public/add_ids_filter.h"
 
+#include <memory>
+
 #include "pagespeed/kernel/base/string_util.h"
 #include "test/net/instaweb/rewriter/rewrite_test_base.h"
 #include "test/pagespeed/kernel/base/gtest.h"
@@ -30,11 +32,13 @@ namespace {
 
 class AddIdsFilterTest : public RewriteTestBase {
  protected:
-  AddIdsFilterTest() : add_ids_filter_(rewrite_driver()) {}
-
   void SetUp() override {
     RewriteTestBase::SetUp();
-    html_parse()->AddFilter(&add_ids_filter_);
+    // rewrite_driver() is not valid during fixture construction (see
+    // RewriteTestBase), so build the filter here, not in a member
+    // initializer.
+    add_ids_filter_ = std::make_unique<AddIdsFilter>(rewrite_driver());
+    html_parse()->AddFilter(add_ids_filter_.get());
   }
 
   bool AddBody() const override { return false; }
@@ -48,7 +52,7 @@ class AddIdsFilterTest : public RewriteTestBase {
   }
 
  private:
-  AddIdsFilter add_ids_filter_;
+  std::unique_ptr<AddIdsFilter> add_ids_filter_;
 };
 
 TEST_F(AddIdsFilterTest, NoDivtest) {

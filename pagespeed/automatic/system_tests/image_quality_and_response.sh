@@ -15,28 +15,46 @@
 set -u
 set -e
 
-# Rewrites an image with the specified Save-Data header and Via header;
-# verifies the content type, length, and Vary header of the response.
-function ipro_rewrite_image_and_verify_response() {
-  local HAS_SAVE_DATA=$1
-  local HAS_VIA=$2
-  local EXPECTED_CONTENT_TYPE=$3
-  local EXPECTED_VARY=$4
-  local EXPECTED_CONTENT_LENGTH=$5
-  local SECONDARY_HOST="optimizeforbandwidth.example.com"
+# In-place optimization is request-independent: it optimizes an image
+# identically for every client and never picks a format or quality based on
+# the request, so every client gets the same bytes and the response must never
+# carry a Vary: header.  It may still convert to a universally supported
+# format (a photographic PNG becomes a JPEG via convert_png_to_jpeg), but
+# never per requester; the request-gated targets (WebP, AVIF) are chosen only
+# on rewritten URLs, where the format is part of the URL itself.
+#
+# These tests fetch the same image with a range of user-agents and request
+# headers and assert that the answer does not move.
+
+# Hashes the response body (everything past the headers) of a
+# 'wget --save-headers' dump, so responses can be compared byte-for-byte.
+function ipro_body_checksum() {
+  local carriage_return=$(printf "\r")
+  local first_blank_line=$(
+    grep --text -n -m 1 \^${carriage_return}\$ "$1" | cut -f1 -d:)
+  tail --lines=+$((first_blank_line + 1)) "$1" | md5sum | cut -d' ' -f1
+}
+
+# Fetches $IMAGE from $HOST with the given user-agent and request headers.
+# When $EXPECT_OPTIMIZED is true, polls until the in-place optimized response
+# (marked by its W/"PSA-aj-..." ETag) appears; when false, expects the
+# optimizer to leave the image alone and the poll to time out on the original
+# response.  Either way, fails the test if the response carries a Vary:
+# header or Cache-Control: private, then echoes
+# "<content-type> <content-length> <body-md5>" as the last line.
+function ipro_fetch_and_check_no_vary() {
+  local HOST=$1
+  local IMAGE=$2
+  local EXPECT_OPTIMIZED=$3
+  local USER_AGENT=$4
+  local ACCEPT_WEBP=$5
+  local HAS_SAVE_DATA=$6
+  local HAS_VIA=$7
+
+  local URL="http://$HOST/$IMAGE"
   local OPT="--save-headers --user-agent=$USER_AGENT"
+  local TEST_ID="IPRO no-vary $URL UA=$USER_AGENT"
 
-  local URL
-  if [ -z "${STATIC_DOMAIN:-}" ]; then
-    URL="http://$HOST/$IMAGE"
-  fi
-
-  local TIME_OUT_STR=""
-  if [ "$EXPECTED_CONTENT_LENGTH" = "$UNOPTIMIZED" ]; then
-    TIME_OUT_STR="-expect_time_out"
-  fi
-
-  local TEST_ID="IPRO rewrite image $URL UA=$USER_AGENT"
   if [ "$ACCEPT_WEBP" = true ]; then
     OPT+=" --header=Accept:image/webp"
     TEST_ID+=" Accept:webp"
@@ -50,72 +68,74 @@ function ipro_rewrite_image_and_verify_response() {
     TEST_ID+=" Via:proxy"
   fi
 
-  # Fetch the image until it's optimized or timed-out.
   start_test "$TEST_ID"
-  http_proxy=$SECONDARY_HOSTNAME \
-    fetch_until -save $TIME_OUT_STR $URL 'grep -c W/\"PSA-aj-' 1 "$OPT"
+  if [ "$EXPECT_OPTIMIZED" = true ]; then
+    http_proxy=$SECONDARY_HOSTNAME \
+      fetch_until -save $URL 'grep -c W/\"PSA-aj-' 1 "$OPT"
+  else
+    # The image stays unoptimized: the in-place ETag must never appear.
+    http_proxy=$SECONDARY_HOSTNAME \
+      fetch_until -save -expect_time_out $URL 'grep -c W/\"PSA-aj-' 1 "$OPT"
+    check_not_from "$(extract_headers $FETCH_UNTIL_OUTFILE)" \
+      fgrep -qi 'Etag: W/"PSA-aj-'
+  fi
+
+  # The whole point of the change: no Vary, and no IE-specific privacy hack.
+  check_not_from "$(extract_headers $FETCH_UNTIL_OUTFILE)" grep -q "^Vary: "
+  check_not_from "$(extract_headers $FETCH_UNTIL_OUTFILE)" \
+    grep -qi "^Cache-Control:.*private"
 
   local TYPE="$(extract_headers $FETCH_UNTIL_OUTFILE | \
     scrape_header 'Content-Type')"
-  check [ $TYPE = $EXPECTED_CONTENT_TYPE ]
-  # If the image can be optimized, content length is checked against a range
-  # for accommodating image encoder version difference.
   local LENGTH="$(extract_headers $FETCH_UNTIL_OUTFILE | scrape_content_length)"
-  if [ "$EXPECTED_CONTENT_LENGTH" != "$UNOPTIMIZED" ]; then
-    local MIN_LENGTH=`expr $EXPECTED_CONTENT_LENGTH - 80`
-    local MAX_LENGTH=`expr $EXPECTED_CONTENT_LENGTH + 80`
-    check [ $LENGTH -ge $MIN_LENGTH ]
-    check [ $LENGTH -le $MAX_LENGTH ]
-  fi
-  local VARY="$(extract_headers $FETCH_UNTIL_OUTFILE | scrape_header 'Vary')"
-  if [ -z $EXPECTED_VARY ]; then
-    check_not_from "$(extract_headers $FETCH_UNTIL_OUTFILE)" grep -q "^Vary: "
-  else
-    check [ $VARY = $EXPECTED_VARY ]
-  fi
+  local CHECKSUM="$(ipro_body_checksum $FETCH_UNTIL_OUTFILE)"
+  echo "$TYPE $LENGTH $CHECKSUM"
 }
 
-# Rewrites an image using the specified user-agent. Checks the combination
-# of with and without Save-Data header and Via header.
-# With "Via", "AllowVaryOn: auto" implies "Save-Data,Accept".
-# Without "Via", "AllowVaryOn: auto" implies "Save-Data,User-Agent".
-function ipro_rewrite_image() {
+# Fetches $IMAGE from $HOST with every combination of user-agent, Accept,
+# Save-Data and Via, and checks that the content type and the exact response
+# bytes never move.  $EXPECT_OPTIMIZED says whether in-place optimization is
+# expected to produce an optimized response for this image at all: animated
+# GIFs stay untouched (their only conversion target, animated WebP, is
+# request-gated and therefore no longer available in place), but must STILL
+# come back Vary-free and byte-identical for every client.
+function ipro_response_is_request_independent() {
   local HOST=$1
   local IMAGE=$2
-  local USER_AGENT=$3
-  local ACCEPT_WEBP=$4
-  local EXPECTED_CONTENT_TYPE_VIA_YES=$5
-  local EXPECTED_CONTENT_TYPE_VIA_NO=$6
-  local EXPECTED_VARY_VIA_YES=$7
-  local EXPECTED_VARY_VIA_NO=$8
-  local EXPECTED_LENGTH_SD_NO_VIA_YES=$9
-  local EXPECTED_LENGTH_SD_NO_VIA_NO=${10}
-  local EXPECTED_LENGTH_SD_YES_VIA_YES=${11}
-  local EXPECTED_LENGTH_SD_YES_VIA_NO=${12}
-  # Constants
-  local SAVE_DATA_YES=true
-  local SAVE_DATA_NO=false
-  local VIA_YES=true
-  local VIA_NO=false
-  # Save-Data: no, Via: yes
-  ipro_rewrite_image_and_verify_response "$SAVE_DATA_NO" "$VIA_YES" \
-    "$EXPECTED_CONTENT_TYPE_VIA_YES" "$EXPECTED_VARY_VIA_YES" \
-    "$EXPECTED_LENGTH_SD_NO_VIA_YES"
-  # Save-Data: no, Via: no
-  ipro_rewrite_image_and_verify_response "$SAVE_DATA_NO" "$VIA_NO" \
-    "$EXPECTED_CONTENT_TYPE_VIA_NO" "$EXPECTED_VARY_VIA_NO" \
-    "$EXPECTED_LENGTH_SD_NO_VIA_NO"
-  # Save-Data: yes, Via: yes
-  ipro_rewrite_image_and_verify_response "$SAVE_DATA_YES" "$VIA_YES" \
-    "$EXPECTED_CONTENT_TYPE_VIA_YES" "$EXPECTED_VARY_VIA_YES" \
-    "$EXPECTED_LENGTH_SD_YES_VIA_YES"
-  # Save-Data: yes, Via: no
-  ipro_rewrite_image_and_verify_response "$SAVE_DATA_YES" "$VIA_NO" \
-    "$EXPECTED_CONTENT_TYPE_VIA_NO" "$EXPECTED_VARY_VIA_NO" \
-    "$EXPECTED_LENGTH_SD_YES_VIA_NO"
+  local EXPECTED_CONTENT_TYPE=$3
+  local EXPECT_OPTIMIZED=$4
+
+  local BASELINE=""
+  local AGENT
+  for AGENT in "$CHROME_MOBILE:true" "$SAFARI_MOBILE:false" \
+               "$FIREFOX_DESKTOP:false"; do
+    local USER_AGENT="${AGENT%:*}"
+    local ACCEPT_WEBP="${AGENT##*:}"
+    local SAVE_DATA
+    for SAVE_DATA in true false; do
+      local VIA
+      for VIA in true false; do
+        local RESULT="$(ipro_fetch_and_check_no_vary \
+          "$HOST" "$IMAGE" "$EXPECT_OPTIMIZED" \
+          "$USER_AGENT" "$ACCEPT_WEBP" "$SAVE_DATA" "$VIA" \
+          | tail -n 1)"
+        local TYPE="${RESULT%% *}"
+        start_test "IPRO expected type $IMAGE UA=$USER_AGENT"
+        check [ "$TYPE" = "$EXPECTED_CONTENT_TYPE" ]
+        if [ -z "$BASELINE" ]; then
+          BASELINE="$RESULT"
+        else
+          start_test "IPRO bytes identical $IMAGE UA=$USER_AGENT"
+          check [ "$RESULT" = "$BASELINE" ]
+        fi
+      done
+    done
+  done
 }
 
-# Hosts
+# Hosts.  They used to differ in their (now retired) AllowVaryOn settings, so
+# each must now be request-independent on its own; their quality settings
+# still differ, so responses are only compared within one host.
 HOST_ALLOW_ACCEPT="ipro-for-browser.example.com"
 HOST_ALLOW_AUTO="ipro-for-browser-vary-on-auto.example.com"
 HOST_ALLOW_NONE="ipro-for-browser-vary-on-none.example.com"
@@ -124,100 +144,27 @@ CHROME_MOBILE="Mozilla*Android*Mobile*Chrome/44.*"
 SAFARI_MOBILE="iPhone*Safari/8536.25"
 FIREFOX_DESKTOP="Firefox/1.5"
 # Images
-# JPEG image which will be optimized to lossy format.
+# JPEG image, recompressed as a JPEG.
 IMAGE_PUZZLE="images/Puzzle.jpg"
-# PNG image which will be optimized to lossless format.
+# Non-photographic PNG image, recompressed as a PNG.
 IMAGE_CUPPA="images/Cuppa.png"
-# PNG image which will be optimized to lossy format.
+# Photographic PNG image, converted to JPEG for every client alike
+# (convert_png_to_jpeg is request-independent, so it stays available in
+# place).
 IMAGE_BIKE="images/BikeCrashIcn.png"
-# Animated GIF which can only be optimized to animated WebP.
+# Animated GIF, which in-place optimization leaves alone.
 IMAGE_ANIMATION="images/PageSpeedAnimationSmall.gif"
-# Qualities overriding
-UNSET_QUALITY=\
-"?PageSpeedJpegQualityForSaveData=-1&PageSpeedWebpQualityForSaveData=-1"
-SAME_QUALITY=\
-"?PageSpeedJpegQualityForSaveData=75&PageSpeedWebpQualityForSaveData=70"
 # Constants
-ACCEPT_WEBP_YES=true
-ACCEPT_WEBP_NO=false
-UNOPTIMIZED=-1
+OPTIMIZED=true
+UNOPTIMIZED=false
 
-# Allowed to vary on "Auto". Test 3 kinds of user-agents, on 3 quality levels
-# for 4 kinds of images.
-# JPEG image, optimized for Chrome on Android.
-ipro_rewrite_image "$HOST_ALLOW_AUTO" "$IMAGE_PUZZLE" \
-  "$CHROME_MOBILE" "$ACCEPT_WEBP_YES" "image/webp" "image/webp" \
-  "Accept,Save-Data" "User-Agent,Save-Data" 33108 25774 19124 19124
-# JPEG image, optimized for Safari on iOS.
-ipro_rewrite_image "$HOST_ALLOW_AUTO" "$IMAGE_PUZZLE" \
-  "$SAFARI_MOBILE" "$ACCEPT_WEBP_NO" "image/jpeg" "image/jpeg" \
-  "Accept,Save-Data" "User-Agent,Save-Data" 73096 51452 38944 38944
-# JPEG image, optimized for Firefox on desktop.
-ipro_rewrite_image "$HOST_ALLOW_AUTO" "$IMAGE_PUZZLE" \
-  "$FIREFOX_DESKTOP" "$ACCEPT_WEBP_NO" "image/jpeg" "image/jpeg" \
-  "Accept,Save-Data" "User-Agent,Save-Data" 73096 73096 38944 38944
-# Photographic PNG image, optimized for Chrome on Android.
-ipro_rewrite_image "$HOST_ALLOW_AUTO" "$IMAGE_BIKE" \
-  "$CHROME_MOBILE" "$ACCEPT_WEBP_YES" "image/webp" "image/webp" \
-  "Accept,Save-Data" "User-Agent,Save-Data" 2454 2014 1476 1476
-# Photographic PNG image, optimized for Safari on iOS.
-ipro_rewrite_image "$HOST_ALLOW_AUTO" "$IMAGE_BIKE" \
-  "$SAFARI_MOBILE" "$ACCEPT_WEBP_NO" "image/jpeg" "image/jpeg" \
-  "Accept,Save-Data" "User-Agent,Save-Data" 3536 2606 2069 2069
-# Photographic PNG image, optimized for Firefox on desktop.
-ipro_rewrite_image "$HOST_ALLOW_AUTO" "$IMAGE_BIKE" \
-  "$FIREFOX_DESKTOP" "$ACCEPT_WEBP_NO" "image/jpeg" "image/jpeg" \
-  "Accept,Save-Data" "User-Agent,Save-Data" 3536 3536 2069 2069
-# Non-photographic PNG image, optimized for Chrome on Android.
-ipro_rewrite_image "$HOST_ALLOW_AUTO" "$IMAGE_CUPPA" \
-  "$CHROME_MOBILE" "$ACCEPT_WEBP_YES" "image/png" "image/webp" \
-  "" "User-Agent" 770 694 770 694
-# Non-photographic PNG image, optimized for Safari on iOS.
-ipro_rewrite_image "$HOST_ALLOW_AUTO" "$IMAGE_CUPPA" \
-  "$SAFARI_MOBILE" "$ACCEPT_WEBP_NO" "image/png" "image/png" \
-  "" "User-Agent" 770 770 770 770
-# Non-photographic PNG image, optimized for Firefox on desktop.
-ipro_rewrite_image "$HOST_ALLOW_AUTO" "$IMAGE_CUPPA" \
-  "$FIREFOX_DESKTOP" "$ACCEPT_WEBP_NO" "image/png" "image/png" \
-  "" "User-Agent" 770 770 770 770
-# Animated GIF image, optimized for Chrome on Android.
-ipro_rewrite_image "$HOST_ALLOW_AUTO" "$IMAGE_ANIMATION" \
-  "$CHROME_MOBILE" "$ACCEPT_WEBP_YES" "image/gif" "image/webp" \
-  "" "User-Agent,Save-Data" "$UNOPTIMIZED" 6122 "$UNOPTIMIZED" 3036
-# Animated GIF image, optimized for Safari on iOS.
-ipro_rewrite_image "$HOST_ALLOW_AUTO" "$IMAGE_ANIMATION" \
-  "$SAFARI_MOBILE" "$ACCEPT_WEBP_NO" "image/gif" "image/gif" \
-  "" "" "$UNOPTIMIZED" "$UNOPTIMIZED" "$UNOPTIMIZED" "$UNOPTIMIZED"
-# Animated GIF image, optimized for Firefox on desktop.
-ipro_rewrite_image "$HOST_ALLOW_AUTO" "$IMAGE_ANIMATION" \
-  "$FIREFOX_DESKTOP" "$ACCEPT_WEBP_NO" "image/gif" "image/gif" \
-  "" "" "$UNOPTIMIZED" "$UNOPTIMIZED" "$UNOPTIMIZED" "$UNOPTIMIZED"
-
-# Only allow to vary on Accept, JPEG image is optimized to desktop quality.
-ipro_rewrite_image "$HOST_ALLOW_ACCEPT" "$IMAGE_PUZZLE" \
-  "$CHROME_MOBILE" "$ACCEPT_WEBP_YES" "image/webp" "image/webp" \
-  "Accept" "Accept" 33108 33108 33108 33108
-# Only allow to vary on Accept, photographic PNG image is optimized to PNG and
-# Vary header is not added.
-ipro_rewrite_image "$HOST_ALLOW_ACCEPT" "$IMAGE_CUPPA" \
-  "$SAFARI_MOBILE" "$ACCEPT_WEBP_YES" "image/png" "image/png" \
-  "" "" 770 770 770 770
-# Only allow to vary on Accept, animated image cannot be optimized.
-ipro_rewrite_image "$HOST_ALLOW_ACCEPT" "$IMAGE_ANIMATION" \
-  "$SAFARI_MOBILE" "$ACCEPT_WEBP_YES" "image/gif" "image/gif" \
-  "" "" "$UNOPTIMIZED" "$UNOPTIMIZED" "$UNOPTIMIZED" "$UNOPTIMIZED"
-# Nothing is allowed to vary on, JPEG image is optimized to desktop quality and
-# Vary header is not added.
-ipro_rewrite_image "$HOST_ALLOW_NONE" "$IMAGE_PUZZLE" \
-  "$CHROME_MOBILE" "$ACCEPT_WEBP_YES" "image/jpeg" "image/jpeg" \
-  "" "" 73096 73096 73096 73096
-# When quality for Save-Data was not set, Vary header does not include
-# "Save-Data".
-ipro_rewrite_image "$HOST_ALLOW_AUTO" "$IMAGE_PUZZLE$UNSET_QUALITY" \
-  "$CHROME_MOBILE" "$ACCEPT_WEBP_YES" "image/webp" "image/webp" \
-  "Accept" "User-Agent" 33108 25774 33108 25774
-# When quality for Save-Data was set to the same for desktop, Vary header does
-# not include "Save-Data".
-ipro_rewrite_image "$HOST_ALLOW_AUTO" "$IMAGE_PUZZLE$SAME_QUALITY" \
-  "$CHROME_MOBILE" "$ACCEPT_WEBP_YES" "image/webp" "image/webp" \
-  "Accept" "User-Agent" 33108 25774 33108 25774
+for HOST in "$HOST_ALLOW_AUTO" "$HOST_ALLOW_ACCEPT" "$HOST_ALLOW_NONE"; do
+  ipro_response_is_request_independent \
+    "$HOST" "$IMAGE_PUZZLE" "image/jpeg" "$OPTIMIZED"
+  ipro_response_is_request_independent \
+    "$HOST" "$IMAGE_CUPPA" "image/png" "$OPTIMIZED"
+  ipro_response_is_request_independent \
+    "$HOST" "$IMAGE_BIKE" "image/jpeg" "$OPTIMIZED"
+  ipro_response_is_request_independent \
+    "$HOST" "$IMAGE_ANIMATION" "image/gif" "$UNOPTIMIZED"
+done

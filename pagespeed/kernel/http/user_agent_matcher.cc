@@ -155,6 +155,239 @@ const char* kLegacyWebpBlockedlist[] = {
 // release, went stale on version-digit rollovers, and said nothing at all about
 // a browser that had not been enumerated.
 
+// Browsers that decode WebP but do not advertise "image/webp" in the Accept
+// header of a *navigation* request.  Two populations:
+//
+//   Safari 16+   -- decodes WebP, but Safari has never listed image types in
+//                   a navigation Accept header.  The floor is 16, NOT 14, and
+//                   the distinction is load-bearing: Safari's WebP decode is
+//                   OS-gated, and Safari 14/15 on macOS Catalina (10.15) has
+//                   no WebP decoder at all -- served a committed ".webp" URL
+//                   it renders a broken image, strictly worse than the JPEG
+//                   status quo.  Denying by real OS version is impossible
+//                   from the UA: every modern macOS freezes the UA's OS token
+//                   at "Intel Mac OS X 10_15_7" (anti-fingerprinting), so
+//                   Catalina and Sequoia read identically.  Safari 16 is the
+//                   first version that cannot run on Catalina, which makes
+//                   Version/16 the earliest decoder-safe floor derivable from
+//                   the UA alone.  See the design record amendment of 2026-08-02.
+//   Firefox 132+ -- WebP since Firefox 65 on every OS (not OS-gated, so no
+//                   Safari-style consideration applies), but Firefox 132
+//                   dropped image types from the navigation Accept header
+//                   entirely (Bugzilla 1917177).
+//
+// Together these are roughly a fifth of global page views, and today they
+// are served the original image because the HTML request carries no
+// "Accept: image/webp".  This group answers only the narrow question "does
+// this UA decode WebP even though this navigation Accept did not say so"; it
+// is consumed exclusively via the rewritten-URL path in DeviceProperties.  It
+// cannot reach the in-place path: in-place optimization is request-independent
+// and never consults request-derived WebP capability at all.
+//
+// Frozen-set safety.  Both allow entries are OPEN-ENDED on the version and the
+// floor is enforced entirely by the block list below (registered after every
+// allow entry, so the later rule wins -- deny beats allow).  Never the other
+// shape: a closed allow pattern like "*Chrome/??.*" (in the now-deleted
+// animated-WebP allowlist) silently disabled animated WebP for every Chrome
+// >= 100 for over four years, because the set of matching version shapes was
+// frozen at authoring time.  The denied range, by contrast, is finite and
+// historical, so enumerating it cannot rot.  The corollary is that the block
+// list must cover every major below the floor at EVERY digit width,
+// single-digit ones included.  The open-ended allow also admits Apple's 2025
+// renumbering of Safari to OS-aligned versions ("Version/26." and up).
+//
+// Safari is identified by the "Version/N... Safari/" idiom, never by "Safari/"
+// alone: Chrome, Edge and Opera all carry "Safari/537.36" in their UA and would
+// otherwise match.  That idiom is already used for the same reason in
+// kInsertDnsPrefetchBlockedlist below.
+//
+// Known limitation of this shape, and the reason it is worth stating out loud:
+// "open-ended allow plus a numeric floor in the deny list" fails OPEN on a
+// version token that is not a number at all.  A UA reading "Firefox/wibble"
+// matches the allow entry and no floor entry, so it is granted.  Real browsers
+// do not emit that, but privacy forks do -- a corpus backtest turned up
+// Camoufox ("Firefox/Camoufox Camoufox 140.0"), which happens to be Gecko 140
+// and so is granted correctly by accident.  The trade-off is inherent to the
+// frozen-set-safe shape; the mitigation is that the resulting grant only ever
+// reaches rewritten URLs.  The same class covers a sub-floor digit run glued
+// to a letter ("Version/9X2", "Firefox/45Build"): that is not a delimited
+// version token, it is a non-numeric token, and it fails open like
+// Firefox/wibble does -- with the one load-bearing exception of a digit glued
+// directly to "Safari/", which is denied explicitly below.
+const char* kWebpNoNavigationAcceptAllowlist[] = {
+    // Safari: requires a Version/ token *and* a Safari/ token.  Real Safari
+    // (macOS and iOS) always emits both; the Chromium family emits Safari/
+    // without Version/, so it cannot match here.  The leading space anchors
+    // Version/ as a token: every real Safari UA starts "Mozilla/5.0 ..." and
+    // space-precedes "Version/", while without it an alien token merely
+    // CONTAINING the substring -- "AppVersion/22.1 ... Safari/601" -- would
+    // satisfy the allow.
+    "* Version/*Safari/*",
+    // Firefox (Gecko).  Open-ended; the 132 floor lives in the block list.
+    // Same token anchoring: real Firefox UAs read "... Gecko/NNNNNNNN
+    // Firefox/NNN.0", so the leading space costs nothing and stops
+    // "MyFirefox/9000"-style tokens from matching.  The deny rows below stay
+    // deliberately UNanchored: over-deny is the safe direction, so a floor row
+    // is allowed to fire on alien tokens too.
+    "* Firefox/*",
+};
+
+// Every printable ASCII character that is not a digit, not a letter, and not
+// one of the two wildcard metacharacters, plus HTAB (legal in HTTP field
+// values).  The constructor crosses this alphabet with the sub-floor
+// no-minor-version deny shapes below; see the comment in the middle of
+// kWebpNoNavigationAcceptBlockedlist.
+const char kWebpNoNavigationAcceptVersionDelimiters[] =
+    "\t !\"#$%&'()+,-./:;<=>@[\\]^_`{|}~";
+
+const char* kWebpNoNavigationAcceptBlockedlist[] = {
+    // ---- Safari version floor: everything below Safari 16. ----
+    // Safari 14 and 15 are denied NOT because they lack a decoder everywhere
+    // but because the UA cannot prove they are not running on Catalina, where
+    // they have none -- see the Version/16 floor rationale above.
+    //
+    // Two-digit sub-floor majors 10-15 are denied by per-major CATCH-ALLS:
+    // "*Version/10*Safari/*" fires on "Version/10" followed by ANYTHING
+    // ("10.1", "10 ", "10;", "10)", glued "10Safari/"), so for these majors
+    // the floor holds in every delimiter shape by construction, with nothing
+    // to enumerate.  The deliberate over-deny this buys is bounded and
+    // documented: the same rows also match three-digit majors 100-159, which
+    // have never existed and, under Apple's OS-aligned renumbering (Safari 26
+    // shipped alongside macOS 26 in 2025, incrementing yearly), cannot exist
+    // before the scheme reaches triple digits around the year 2099.  No real
+    // population is lost -- the design record "never lose a real population" rule is
+    // satisfied vacuously -- while single- and two-digit futures (16-19, 26+,
+    // 99) are untouched, which is exactly why the same catch-all shape is NOT
+    // usable for single-digit majors: "*Version/1*Safari/*" would swallow
+    // Safari 16-19 today.
+    "*Version/10*Safari/*",
+    "*Version/11*Safari/*",
+    "*Version/12*Safari/*",
+    "*Version/13*Safari/*",
+    "*Version/14*Safari/*",
+    "*Version/15*Safari/*",
+    // Major 0, and anything else starting "Version/0": no real version token
+    // has ever begun with a zero, so this catch-all is safe forever and also
+    // closes the zero-padded spellings ("Version/09 Safari/") that the
+    // single-digit rows below would otherwise misread as two-digit majors.
+    "*Version/0*Safari/*",
+    // Single-digit sub-floor majors 1-9 (the '?' matches the digit).  The '.'
+    // and every other delimiter shape ("Version/9 ", "Version/9;", ...) are
+    // registered by the constructor, which crosses
+    // kWebpNoNavigationAcceptVersionDelimiters with "*Version/?<delim>*Safari/*"
+    // -- see the loop in the UserAgentMatcher constructor.  The one shape that
+    // enumeration cannot reach is the digit glued directly to the Safari
+    // token, denied here:
+    "*Version/?Safari/*",
+
+    // ---- Chromium family. ----
+    // These carry "Safari/537.36" for historical reasons, and genuine Chromium
+    // browsers always send "Accept: image/webp" anyway, so the UA-derived
+    // signal must never fire for them.  Android WebView is the case that makes
+    // this load-bearing: it emits "Version/4.0 ... Safari/537.36" and so would
+    // otherwise reach the Safari rule.  It is denied three times over -- by
+    // "*Chrome/*", by "*Android*", and by the Version/4.0 floor above -- and is
+    // therefore classified as NOT matching, which is the conservative verdict:
+    // an embedded WebView's decoder support is the host OS's business, not
+    // something the UA string can settle.
+    "*Chrome/*",
+    "*Chromium/*",
+    "*CriOS/*",
+    "*Edg/*",
+    "*EdgA/*",
+    "*EdgiOS/*",
+    "*Edge/*",
+    "*OPR/*",
+    "*OPiOS/*",
+    "*Opera*",
+    "*SamsungBrowser/*",
+    "*YaBrowser/*",
+    "*UCBrowser/*",
+    "*Silk/*",
+    "*Silk-Accelerated*",
+    "*BB10*",
+    "*PlayBook*",
+    "*PlayStation*",
+    "*Trident/*",
+    "*Windows Phone*",
+    // Android is denied only in combination with a Safari/ token, i.e. only for
+    // the WebKit-shaped rule.  A blanket "*Android*" would also strike Firefox
+    // for Android, whose UA is "Android NN; Mobile; rv:NNN.0 Gecko/NNN.0
+    // Firefox/NNN.0" -- Gecko, in the target population, and carrying no
+    // Safari/ token.  Backtesting a blanket entry against a real-world corpus
+    // showed it silently removing every Firefox-on-Android hit.
+    "*Android*Safari/*",
+
+    // Firefox for iOS is WebKit-backed, so it does decode WebP -- but its UA
+    // carries neither a "Version/" token nor "Firefox/", only "FxiOS/", so it
+    // matches no allow entry to begin with.  Denied explicitly as well, so that
+    // a future FxiOS release adding a Version/ token cannot silently flip it
+    // into the Safari rule.  Net effect: FxiOS is a deliberate false negative.
+    "*FxiOS/*",
+
+    // ---- Firefox version floor: everything below Firefox 132. ----
+    // Unlike the Safari 10-15 rows, Firefox CANNOT use per-major catch-alls at
+    // any width: "*Firefox/13*" would deny Firefox 132+ today, "*Firefox/45*"
+    // would deny the real future three-digit major 451 -- precisely the
+    // "*Chrome/??.*" rot class this list is built to avoid.  So the Firefox
+    // floor is enumerated by digit WIDTH instead, with '?' pinning the digit
+    // count: one-or-two-digit majors are all sub-floor (1-99), and the
+    // three-digit sub-floor range 100-131 is covered by the 10x/11x/12x
+    // prefixes plus exact 130 and 131.  A real "Firefox/132.0" or
+    // "Firefox/451.0" fails every row because the character after the pinned
+    // digits is another digit, never a delimiter.
+    //
+    // Only the END-ANCHORED no-minor forms ("...Firefox/45"<end>) live here;
+    // every delimited form -- ".", " ", ";", ")", ",", "/", ":", "-" and the
+    // rest of the printable non-alphanumeric alphabet -- is registered by the
+    // constructor, which crosses kWebpNoNavigationAcceptVersionDelimiters with
+    // each of these seven width shapes.  ("*Firefox/??" requires exactly two
+    // characters and then end of string, so "Firefox/132" cannot fire it.)
+    "*Firefox/?",
+    "*Firefox/??",
+    "*Firefox/10?",
+    "*Firefox/11?",
+    "*Firefox/12?",
+    "*Firefox/130",
+    "*Firefox/131",
+
+    // Gecko forks that carry a "Firefox/NNN" compatibility token with their own
+    // release numbering.  They are Gecko and do decode WebP, but their token
+    // does not mean what it says, so decline rather than guess.
+    "*PaleMoon*",
+    "*Waterfox*",
+    "*SeaMonkey*",
+    "*Iceweasel*",
+    "*IceCat*",
+
+    // ---- Crawlers and tooling. ----
+    // Applebot is the load-bearing entry: it is the one widely deployed crawler
+    // that advertises "Version/N... Safari/" with N above the floor and would
+    // otherwise be handed WebP.  The rest are cheap insurance; DeviceProperties
+    // applies an independent IsBot() gate on top of this group.
+    "*Applebot*",
+    "*Googlebot*",
+    "*Google-InspectionTool*",
+    "*bingbot*",
+    "*Bingbot*",
+    "*DuckDuckBot*",
+    "*YandexBot*",
+    "*Baiduspider*",
+    "*Slurp*",
+    "*AhrefsBot*",
+    "*SemrushBot*",
+    "*PetalBot*",
+    "*facebookexternalhit*",
+    "*Twitterbot*",
+    "*HeadlessChrome*",
+    "*PhantomJS*",
+    "*Electron/*",
+    "*curl/*",
+    "*Wget*",
+    "*python-requests*",
+    "*Go-http-client*",
+};
+
 const char* kInsertDnsPrefetchAllowlist[] = {
     "*Chrome/*",
     "*Firefox/*",
@@ -310,6 +543,43 @@ UserAgentMatcher::UserAgentMatcher()
     legacy_webp_.Disallow(kLegacyWebpBlockedlist[i]);
   }
 
+  // the design record.  Allows first, denies second: FastWildcardGroup lets the
+  // latest-registered matching rule win, so registering the block list after
+  // the allow list is what makes "deny beats allow" true here.
+  for (int i = 0, n = arraysize(kWebpNoNavigationAcceptAllowlist); i < n; ++i) {
+    webp_no_navigation_accept_.Allow(kWebpNoNavigationAcceptAllowlist[i]);
+  }
+  for (int i = 0, n = arraysize(kWebpNoNavigationAcceptBlockedlist); i < n;
+       ++i) {
+    webp_no_navigation_accept_.Disallow(kWebpNoNavigationAcceptBlockedlist[i]);
+  }
+  // Sub-floor no-minor-version deny rows ("Version/9;Safari/", "Firefox/45)"):
+  // the wildcard language has no character classes, so "digit run followed by
+  // a delimiter" is spelled out as one deny row per delimiter per width shape.
+  // The alphabet is every printable non-alphanumeric ASCII character plus
+  // HTAB; only the two wildcard metacharacters '*' and '?' are inexpressible
+  // (no quoting exists), an accepted residual since no fabricated version
+  // token has been observed using them as delimiters.  Registered after the
+  // static block list, which is fine: denies do not compete with denies, only
+  // with the allow entries above.  This costs a few hundred extra patterns in
+  // the group, built once per UserAgentMatcher, not per request.
+  for (const char* d = kWebpNoNavigationAcceptVersionDelimiters; *d != '\0';
+       ++d) {
+    const GoogleString delim(1, *d);
+    // Safari single-digit sub-floor majors 1-9 (0 and 10-15 are handled by
+    // catch-all rows in the static list).
+    webp_no_navigation_accept_.Disallow(
+        StrCat("*Version/?", delim, "*Safari/*"));
+    // Firefox sub-floor majors by digit width: 1-9, 10-99, 100-129, 130, 131.
+    webp_no_navigation_accept_.Disallow(StrCat("*Firefox/?", delim, "*"));
+    webp_no_navigation_accept_.Disallow(StrCat("*Firefox/??", delim, "*"));
+    webp_no_navigation_accept_.Disallow(StrCat("*Firefox/10?", delim, "*"));
+    webp_no_navigation_accept_.Disallow(StrCat("*Firefox/11?", delim, "*"));
+    webp_no_navigation_accept_.Disallow(StrCat("*Firefox/12?", delim, "*"));
+    webp_no_navigation_accept_.Disallow(StrCat("*Firefox/130", delim, "*"));
+    webp_no_navigation_accept_.Disallow(StrCat("*Firefox/131", delim, "*"));
+  }
+
   for (int i = 0, n = arraysize(kInsertDnsPrefetchAllowlist); i < n; ++i) {
     supports_dns_prefetch_.Allow(kInsertDnsPrefetchAllowlist[i]);
   }
@@ -453,6 +723,11 @@ bool UserAgentMatcher::SupportsJsDefer(const StringPiece& user_agent,
 
 bool UserAgentMatcher::LegacyWebp(const StringPiece& user_agent) const {
   return legacy_webp_.Match(user_agent, false);
+}
+
+bool UserAgentMatcher::SupportsWebpButOmitsNavigationAccept(
+    const StringPiece& user_agent) const {
+  return webp_no_navigation_accept_.Match(user_agent, false);
 }
 
 // AVIF is strictly Accept-header-driven: there is no legacy UA

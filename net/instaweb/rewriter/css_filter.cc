@@ -785,7 +785,14 @@ GoogleString CssFilter::Context::UserAgentCacheKey(
   // The cache key we get from the image codec is not sufficient, as
   // it does not produce different results if CSS image inlining is
   // on, but of course the css rewriter does.
+  //
+  // CSS rewritten under the in-place context always keys as "A": in-place
+  // responses are cached request-independently with no Vary: header, so image
+  // inlining -- a per-browser capability -- is suppressed on that path (see
+  // ImageRewriteFilter::Context::Render), and its output must share the
+  // no-inlining partition rather than fork on the requesting user-agent.
   if ((Options()->CssImageInlineMaxBytes() != 0) &&
+      !HasInPlaceRewriteAncestor() &&
       Driver()->request_properties()->SupportsImageInlining()) {
     StrAppend(&key, "I");
   } else {

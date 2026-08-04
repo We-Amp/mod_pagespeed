@@ -552,62 +552,12 @@ class RewriteOptions {
   // version for parsing densities.
   class ResponsiveDensities : public std::vector<double> {};
 
-  class AllowVaryOn {
-   public:
-    // Strings for display.
-    static const char kNoneString[];
-    static const char kAutoString[];
-
-    AllowVaryOn()
-        : allow_auto_(false),
-          allow_accept_(false),
-          allow_save_data_(false),
-          allow_user_agent_(false) {}
-
-    GoogleString ToString() const;
-
-    bool allow_auto() const { return allow_auto_; }
-    void set_allow_auto(bool v) { allow_auto_ = v; }
-    bool allow_accept() const { return allow_accept_; }
-    void set_allow_accept(bool v) { allow_accept_ = v; }
-    bool allow_save_data() const { return allow_save_data_ || allow_auto_; }
-    void set_allow_save_data(bool v) { allow_save_data_ = v; }
-    bool allow_user_agent() const { return allow_user_agent_; }
-    void set_allow_user_agent(bool v) { allow_user_agent_ = v; }
-
-   private:
-    // All of the properties must be included in
-    // RewriteOptions::OptionSignature.
-    bool allow_auto_;
-    bool allow_accept_;
-    bool allow_save_data_;
-    bool allow_user_agent_;
-  };
-
-  bool AllowVaryOnAuto() const { return allow_vary_on_.value().allow_auto(); }
-  bool AllowVaryOnAccept() const {
-    return allow_vary_on_.value().allow_accept();
-  }
-  bool AllowVaryOnSaveData() const {
-    return allow_vary_on_.value().allow_save_data();
-  }
-  bool AllowVaryOnUserAgent() const {
-    return allow_vary_on_.value().allow_user_agent();
-  }
-  GoogleString AllowVaryOnToString() const {
-    return ToString(allow_vary_on_.value());
-  }
-
-  // Returns true if PageSpeed responds differently for image requests with
-  // Save-Data header, i.e., using a unique quality and adding
-  // "Vary: Save-Data" header.
-  bool SupportSaveData() const {
-    return (HasValidSaveDataQualities() && AllowVaryOnSaveData());
-  }
-
-  void set_allow_vary_on(const AllowVaryOn& x) {
-    set_option(x, &allow_vary_on_);
-  }
+  // Returns true if PageSpeed may use the Save-Data image qualities, i.e.
+  // serve a smaller image to a client that asked for one with "Save-Data: on".
+  // The response carries no Vary: Save-Data header -- the Save-Data quality is
+  // folded into the metadata cache key instead, and the varying bytes are only
+  // ever published under a distinct rewritten URL.
+  bool SupportSaveData() const { return HasValidSaveDataQualities(); }
 
   // Image qualities and parameters, after applying the inheritance rules.
   int64 ImageJpegQuality() const;
@@ -856,7 +806,6 @@ class RewriteOptions {
     kOptionValueInvalid
   };
 
-  static const char kDefaultAllowVaryOn[];
   static const int kDefaultBeaconReinstrumentTimeSec;
   static const int64 kDefaultCssFlattenMaxBytes;
   static const int64 kDefaultCssImageInlineMaxBytes;
@@ -1572,8 +1521,6 @@ class RewriteOptions {
                               ResponsiveDensities* value);
   static bool ParseFromString(StringPiece value_string,
                               protobuf::MessageLite* proto);
-  static bool ParseFromString(StringPiece value_string,
-                              AllowVaryOn* allow_vary_on);
 
   // TODO(jmarantz): consider setting flags in the set_ methods so that
   // first's explicit settings can override default values from second.
@@ -1953,9 +1900,6 @@ class RewriteOptions {
 
   void set_private_not_vary_for_ie(bool x) {
     set_option(x, &private_not_vary_for_ie_);
-  }
-  bool private_not_vary_for_ie() const {
-    return private_not_vary_for_ie_.value();
   }
 
   void set_combine_across_paths(bool x) {
@@ -3620,8 +3564,6 @@ class RewriteOptions {
                                       const Hasher* hasher);
   static GoogleString OptionSignature(const ResponsiveDensities& densities,
                                       const Hasher* hasher);
-  static GoogleString OptionSignature(const AllowVaryOn& allow_vary_on,
-                                      const Hasher* hasher);
   static GoogleString OptionSignature(const protobuf::MessageLite& proto,
                                       const Hasher* hasher);
 
@@ -3639,7 +3581,6 @@ class RewriteOptions {
   static GoogleString ToString(const Color& color);
   static GoogleString ToString(const ResponsiveDensities& densities);
   static GoogleString ToString(const protobuf::MessageLite& proto);
-  static GoogleString ToString(const AllowVaryOn& allow_vary_on);
 
   // Returns true if p1's option_name is less than p2's. Used to order
   // all_properties_ and all_options_.
@@ -4254,8 +4195,13 @@ class RewriteOptions {
 
   Option<int64> noop_;
 
-  // Comma separated list of headers which we can vary-on, or "Auto", or "None".
-  Option<AllowVaryOn> allow_vary_on_;
+  // Retired: AllowVaryOn used to select which request headers the in-place
+  // path was permitted to Vary on.  The in-place path no longer produces
+  // browser-dependent bytes, so there is nothing left to vary on.  The option
+  // is kept registered -- as a free-form string that is parsed and discarded --
+  // purely so that an existing configuration file still loads.  Removing the
+  // registration would make Apache and nginx refuse to start.
+  Option<GoogleString> allow_vary_on_deprecated_;
 
   CopyOnWrite<JavascriptLibraryIdentification>
       javascript_library_identification_;

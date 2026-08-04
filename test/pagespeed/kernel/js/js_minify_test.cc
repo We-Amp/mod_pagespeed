@@ -211,6 +211,28 @@ TEST_F(JsMinifyTest, Es2015LetDeclaration) {
   CheckMinification("let\nx = 1;", "let\nx=1;");
 }
 
+TEST_F(JsMinifyTest, Es2015LetCommentBeforeBinding) {
+  // RC-E regression battery (confirmation-nightly triage): a
+  // comment between `let` and its binding must not flip the declaration
+  // lookahead to the identifier reading — on the identifier reading the
+  // linebreak after the binding looks droppable (`row\n+4` continues an
+  // expression), but on the declaration reading it is ASI-load-bearing
+  // (`let row` cannot continue with `+`), and dropping it emitted
+  // UNPARSEABLE output for valid input.
+  CheckNewMinification("let /*c*/ row\n+4;", "let row\n+4;");
+  CheckNewMinification("let//\nrow\n+4;", "let\nrow\n+4;");
+  CheckNewMinification("function f() {\n let /*c*/ row\n+4;\n}",
+                       "function f(){let row\n+4;}");
+  CheckNewMinification("let /*c*/ row\n+row;", "let row\n+row;");
+  // Control: the binding linebreak is kept when the next statement is not
+  // an expression continuation either (this shape was always correct).
+  CheckNewMinification("let /*c*/ row\nrow = 1;", "let row\nrow=1;");
+  // Safe shapes: an initializer or a declaration-comma continues the
+  // declaration, so the binding linebreak question never arises.
+  CheckNewMinification("let /*c*/ row = 1;", "let row=1;");
+  CheckNewMinification("let /*c*/ a = 1, b = 2;", "let a=1,b=2;");
+}
+
 TEST_F(JsMinifyTest, Es2015LetNonBindingUses) {
   // Sloppy-mode `let`-as-variable at statement position: the binding
   // lookahead takes the identifier path, so these minify exactly as before

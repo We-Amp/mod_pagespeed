@@ -118,6 +118,27 @@ TEST_F(CachingHeadersTest, DisableNostoreRetainNoCache) {
                DisableCacheControl());
 }
 
+TEST_F(CachingHeadersTest, DisableSMaxAge) {
+  // s-maxage overrides max-age for shared caches, so letting it survive
+  // would invite a shared cache to keep serving a response whose caching we
+  // are disabling (rewritten HTML once went out as
+  // "max-age=0, no-cache, s-maxage=10").
+  SetCacheControl("s-maxage=10");
+  EXPECT_STREQ(HttpAttributes::kNoCacheMaxAge0, DisableCacheControl());
+
+  SetCacheControl("max-age=60, s-maxage=10");
+  EXPECT_STREQ(HttpAttributes::kNoCacheMaxAge0, DisableCacheControl());
+
+  SetCacheControl("public, max-age=300, s-maxage=3600");
+  EXPECT_STREQ(HttpAttributes::kNoCacheMaxAge0, DisableCacheControl());
+
+  // Other directives around a dropped s-maxage are still preserved.
+  SetCacheControl("no-cache, s-maxage=600, no-store");
+  EXPECT_STREQ(
+      StrCat(HttpAttributes::kNoCacheMaxAge0, ", ", HttpAttributes::kNoStore),
+      DisableCacheControl());
+}
+
 TEST_F(CachingHeadersTest, IsCacheable) {
   // Default of no headers, likely static resource type and cacheable status
   // code is cacheable.

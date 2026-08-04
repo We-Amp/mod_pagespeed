@@ -271,6 +271,13 @@ class RewriteContext {
   // id.
   bool IsNestedIn(StringPiece id) const;
 
+  // Returns true if any ancestor of this context is the in-place resource
+  // optimization context.  In-place responses are cached and served under a
+  // request-independent key with no Vary: header, so rewrites reached through
+  // this chain must not consult per-request state (such as user-agent derived
+  // request properties) when producing output bytes.
+  bool HasInPlaceRewriteAncestor() const;
+
   // Checks to make sure that partitions_ is not frozen when it is
   // about to be modified, calling LOG(DFATAL) if there is a problem.
   void CheckNotFrozen();

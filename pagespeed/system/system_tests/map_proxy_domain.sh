@@ -114,9 +114,15 @@ URL="http://$PAGESPEED_TEST_HOST/do_not_modify/evil.html"
 OUT=$($WGET_DUMP $URL)
 check_from "$OUT" fgrep -q -i 'Set-Cookie: test-cookie'
 
-start_test Ipro transcode to webp from MapProxyDomain
+# In-place optimization is request-independent: even a webp-capable client
+# gets the image back in its original format, with no Vary: header, from a
+# MapProxyDomain origin just like from a local one.
+start_test Ipro from MapProxyDomain is request-independent
 URL="$PRIMARY_SERVER/modpagespeed_http/Puzzle.jpg"
-URL+="?PageSpeedFilters=+in_place_optimize_for_browser"
 WGET_ARGS="--user-agent webp --header Accept:image/webp"
-fetch_until "$URL" "grep -c image/webp" 1 --save-headers
+fetch_until -save "$URL" 'grep -c W/\"PSA-aj-' 1 --save-headers
+check_from "$(extract_headers $FETCH_UNTIL_OUTFILE)" \
+  fgrep -qi 'Content-Type: image/jpeg'
+check_not_from "$(extract_headers $FETCH_UNTIL_OUTFILE)" fgrep -qi 'Vary:'
+WGET_ARGS=""
 URL=""

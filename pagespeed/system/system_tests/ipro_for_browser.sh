@@ -12,24 +12,19 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-# Optimize in-place images for browser. Ideal test matrix (not covered yet):
+# In-place optimization is request-independent.  Whatever the User-Agent and
+# whatever the Accept header, the image comes back optimized identically for
+# every client -- a JPEG recompressed as JPEG, a synthetic PNG as PNG -- with
+# no Vary: header and no Cache-Control: private.  Conversion to a universally
+# supported format can still happen (photographic PNG to JPEG via
+# convert_png_to_jpeg), but never per requester; conversion to WebP or AVIF
+# happens only on rewritten URLs, where the format is part of the URL, so
+# there is nothing left for an in-place response to vary on.
+#
 # User-Agent:  Accept:  Image type   Result
 # -----------  -------  ----------   ----------------------------------
-#    IE         N/A     photo        image/jpeg, Cache-Control: private *
-#     :         N/A     synthetic    image/png,  no vary
-#  Old Opera     no     photo        image/jpeg, Vary: Accept
-#     :          no     synthetic    image/png,  no vary
-#     :         webp    photo        image/webp, Vary: Accept, Lossy
-#     :         webp    synthetic    image/png,  no vary
-#  Chrome or     no     photo        image/jpeg, Vary: Accept
-# Firefox or     no     synthetic    image/png,  no vary
-#  New Opera    webp    photo        image/webp, Vary: Accept, Lossy
-#     :         webp    synthetic    image/png,  no vary
-# TODO(jmaessen): * cases currently send Vary: Accept.  Fix (in progress).
-# TODO(jmaessen): Send image/webp lossless for synthetic and alpha-channel
-# images.  Will require reverting to Vary: Accept for these.  Stuff like
-# animated webp will have to remain unconverted still in IPRO mode, or switch
-# to cc: private, but right now animated webp support is still pending anyway.
+#   anything    any     photo        image/jpeg, no vary, publicly cacheable
+#      :        any     synthetic    image/png,  no vary, publicly cacheable
 function test_ipro_for_browser_webp() {
   IN_UA_PRETTY="$1"; shift
   IN_UA="$1"; shift
@@ -85,13 +80,13 @@ function test_ipro_for_browser_webp() {
 
 ##############################################################################
 # Test with testing-only user agent strings.
-#                          UA           Accept Type  Out  Vary     CC
-test_ipro_for_browser_webp "None" ""    ""     photo jpeg "Accept"
-test_ipro_for_browser_webp "" "webp"    ""     photo jpeg "Accept"
-test_ipro_for_browser_webp "" "webp-la" ""     photo jpeg "Accept"
-test_ipro_for_browser_webp "None" ""    "webp" photo webp "Accept"
-test_ipro_for_browser_webp "" "webp"    "webp" photo webp "Accept"
-test_ipro_for_browser_webp "" "webp-la" "webp" photo webp "Accept"
+#                          UA           Accept Type  Out
+test_ipro_for_browser_webp "None" ""    ""     photo jpeg
+test_ipro_for_browser_webp "" "webp"    ""     photo jpeg
+test_ipro_for_browser_webp "" "webp-la" ""     photo jpeg
+test_ipro_for_browser_webp "None" ""    "webp" photo jpeg
+test_ipro_for_browser_webp "" "webp"    "webp" photo jpeg
+test_ipro_for_browser_webp "" "webp-la" "webp" photo jpeg
 test_ipro_for_browser_webp "None" ""    ""     synth png
 test_ipro_for_browser_webp "" "webp"    ""     synth png
 test_ipro_for_browser_webp "" "webp-la" ""     synth png
@@ -105,36 +100,38 @@ OLD_WGETRC=$WGETRC
 WGETRC=$TESTTMP/wgetrc-ua
 export WGETRC
 
-# IE 9 and later must re-validate Vary: Accept.  We should send CC: private.
+# IE used to get Cache-Control: private instead of Vary: Accept.  In-place
+# responses no longer vary at all, so IE is served the same public response as
+# everyone else.
 IE9_UA="Mozilla/5.0 (Windows; U; MSIE 9.0; WIndows NT 9.0; en-US))"
 IE11_UA="Mozilla/5.0 (Windows NT 6.1; WOW64; ***********; rv:11.0) like Gecko"
 echo "user_agent = $IE9_UA" > $WGETRC
-#                           (no accept)  Type  Out  Vary CC
-test_ipro_for_browser_webp "IE 9"  "" "" photo jpeg ""   "max-age=[0-9]*,private"
+#                           (no accept)  Type  Out
+test_ipro_for_browser_webp "IE 9"  "" "" photo jpeg
 test_ipro_for_browser_webp "IE 9"  "" "" synth png
 echo "user_agent = $IE11_UA" > $WGETRC
-test_ipro_for_browser_webp "IE 11" "" "" photo jpeg ""   "max-age=[0-9]*,private"
+test_ipro_for_browser_webp "IE 11" "" "" photo jpeg
 test_ipro_for_browser_webp "IE 11" "" "" synth png
 
 # Older Opera did not support webp.
 OPERA_UA="Opera/9.80 (Windows NT 5.2; U; en) Presto/2.7.62 Version/11.01"
 echo "user_agent = $OPERA_UA" > $WGETRC
-#                                (no accept) Type  Out  Vary
-test_ipro_for_browser_webp "Old Opera" "" "" photo jpeg "Accept"
+#                                (no accept) Type  Out
+test_ipro_for_browser_webp "Old Opera" "" "" photo jpeg
 test_ipro_for_browser_webp "Old Opera" "" "" synth png
 # Slightly newer opera supports only lossy webp, sends header.
 OPERA_UA="Opera/9.80 (Windows NT 6.0; U; en) Presto/2.8.99 Version/11.10"
 echo "user_agent = $OPERA_UA" > $WGETRC
-#                                           Accept Type  Out  Vary
-test_ipro_for_browser_webp "Newer Opera" "" "webp" photo webp "Accept"
+#                                           Accept Type  Out
+test_ipro_for_browser_webp "Newer Opera" "" "webp" photo jpeg
 test_ipro_for_browser_webp "Newer Opera" "" "webp" synth png
 
 function test_decent_browsers() {
   echo "user_agent = $2" > $WGETRC
-  #                          UA      Accept Type      Out  Vary
-  test_ipro_for_browser_webp "$1" "" ""     photo     jpeg "Accept"
+  #                          UA      Accept Type      Out
+  test_ipro_for_browser_webp "$1" "" ""     photo     jpeg
   test_ipro_for_browser_webp "$1" "" ""     synthetic  png
-  test_ipro_for_browser_webp "$1" "" "webp" photo     webp "Accept"
+  test_ipro_for_browser_webp "$1" "" "webp" photo     jpeg
   test_ipro_for_browser_webp "$1" "" "webp" synthetic  png
 }
 CHROME_UA="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_9_1) AppleWebKit/537.36 "
