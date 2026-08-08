@@ -1,8 +1,9 @@
 {
-  "_comment": "Pinned grype vulnerability DB for the BLOCKING dep-scan path. The blocking CI job imports THIS archive with GRYPE_DB_AUTO_UPDATE=false so a newly-published CVE cannot non-deterministically break an in-flight PR or release — the same posture as pagespeed-optimizer's blocking-dep-scan. Report-only / scheduled runs use the live DB instead, so a new CVE still surfaces within a day, it just does not redden an unrelated PR. To bump: get the current archive from `grype db list -o raw` (or https://grype.anchore.io/databases/v6/latest.json), update path+checksum+built here, re-run the blocking job, and review like any dependency bump. schema/url_base must match the grype version pinned in dep-scan.sh.",
+  "_comment": "Pinned grype vulnerability DB for the BLOCKING dep-scan path. The blocking CI job imports THIS archive with GRYPE_DB_AUTO_UPDATE=false so a newly-published CVE cannot non-deterministically break an in-flight PR or release — the same posture as pagespeed-optimizer's blocking-dep-scan. Report-only / scheduled runs use the live DB instead, so a new CVE still surfaces within a day, it just does not redden an unrelated PR. To bump: get the current archive from `grype db list -o raw` (or https://grype.anchore.io/databases/v6/latest.json), update path+checksum+built here, re-run the blocking job, and review like any dependency bump. schema/url_base must match the grype version pinned in dep-scan.sh. `max_age_days` is the staleness ratchet — the scheduled dep-scan FAILS once the pin is older than this, so a forgotten pin is loud, not silent. Kept in sync with corp + pagespeed-optimizer tools/sbom/grype-db-pin.json.",
   "schema": "v6",
   "url_base": "https://grype.anchore.io/databases/v6",
-  "path": "vulnerability-db_v6.1.9_2026-07-22T00:36:31Z_1784703984.tar.zst",
-  "checksum": "sha256:8496f58655ba6b5d1ed133e8591629d729a53021e7f1b20063b0577ca7c0f02f",
-  "built": "2026-07-22T07:06:24Z"
+  "path": "vulnerability-db_v6.1.9_2026-08-05T00:35:21Z_1785913454.tar.zst",
+  "checksum": "sha256:d929b4ee3f8c535f76847d46d08b6844b86b7d150e60da578b5ea5e9755dc6ba",
+  "built": "2026-08-05T07:04:14Z",
+  "max_age_days": 14
 }

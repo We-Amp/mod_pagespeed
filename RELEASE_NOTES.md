@@ -1,3 +1,123 @@
+# mod_pagespeed 1.15.0+r22 Release Notes
+
+**Release date:** 2026-08-08
+**Status:** Stable
+
+## Highlights
+
+- **In-place optimization now serves one variant to every client, and its
+  responses no longer carry a `Vary` header.** When PageSpeed optimizes an
+  image at its original URL (rather than at a rewritten `.pagespeed.` URL), it
+  now optimizes that image identically for every client and serves the same
+  bytes to all of them. It no longer picks WebP, AVIF, a mobile quality or a
+  Save-Data quality from the request, so its responses carry no `Vary: Accept`
+  and no `Vary: User-Agent`, and are no longer downgraded to
+  `Cache-Control: private` for Internet Explorer. They are cacheable by
+  browsers, proxies and CDNs with no special configuration, and one cache
+  entry now serves every client instead of one per browser capability.
+  Conversion to a universally supported format still happens in place — a
+  photographic PNG still becomes a JPEG when `convert_png_to_jpeg` is enabled
+  — but never based on who is asking. WebP and AVIF are still selected on
+  rewritten URLs, where the chosen format is part of the URL, so no `Vary`
+  header is required. Image inlining into CSS is
+  likewise suppressed on the in-place path: whether a browser supports `data:`
+  URIs is a per-request property, so CSS optimized in place now always renders
+  as the no-inlining variant, byte-identical for every client.
+
+  This is an intermediate step, not the end state: it brings in-place
+  optimization in line with the request-independent model ModPageSpeed 2.0
+  uses, and future releases will continue modernizing in-place optimization
+  by converging on that architecture.
+
+  **What changes for you:** the `in_place_optimize_for_browser` filter and the
+  `AllowVaryOn` and `PrivateNotVaryForIE` directives are retired. They are
+  still accepted so that an existing configuration keeps loading — you will
+  see a warning in the error log — but they no longer have any effect and
+  should be removed. If you enabled `in_place_optimize_for_browser` (directly,
+  or through the `OptimizeForBandwidth` rewrite level), images served at their
+  original URLs will now be recompressed in place rather than converted to
+  WebP or AVIF, so those particular responses get larger. Sites whose HTML
+  PageSpeed rewrites are unaffected: the smaller WebP and AVIF variants
+  continue to be served from the rewritten URLs the HTML points at. If you had
+  configured a reverse proxy, CDN or Varnish instance to handle `Vary: Accept`
+  or `Vary: User-Agent` on PageSpeed image responses, that configuration is no
+  longer needed. One behavioral note: configurations that used
+  `AllowVaryOn "None"` or `AllowVaryOn "Accept"` to keep the
+  `...QualityForSaveData` settings from being applied no longer get that
+  suppression — the Save-Data qualities are now used on rewritten URLs
+  whenever they are configured; unset them if you do not want them. Expect a
+  one-time re-optimization pass after upgrading.
+
+- **Safari 16+ and Firefox 132+ now receive WebP on rewritten image URLs.**
+  Image rewriting chooses an image's output format from the `Accept` header
+  the browser sent with the page request. When that header does not list
+  image formats, the browser was served the original format instead — a JPEG
+  where Chrome received a WebP or an AVIF. Nothing reported an error; the
+  only visible symptom was that pages weighed more in those browsers than
+  they needed to. Safari 16 and later and Firefox 132 and later are now
+  recognised as WebP-capable from the browser identification they send and
+  receive the WebP variant, so photographic images that PageSpeed rewrites
+  transfer substantially fewer bytes in those browsers.
+
+  **What changes for you:** there is nothing to configure and no cache to
+  clear. Newly eligible browsers begin requesting a format that may not have
+  been produced yet, so expect a short warm-up during which they are served
+  the original image while the WebP is generated in the background — the same
+  behaviour as any cold cache. Existing optimized images stay valid and are
+  not regenerated. AVIF is unaffected and continues to be offered only to
+  browsers that ask for it by name, so these browsers receive WebP rather
+  than AVIF.
+
+- **Optimized `.pagespeed.` resources now declare
+  `Cache-Control: public, immutable`.** The URL of a rewritten resource
+  embeds a hash of its content — when the content changes, the URL changes —
+  so the response behind a given URL can never change. The one-year `max-age`
+  these resources have always carried now comes with an explicit `public` and
+  the standard `immutable` directive (RFC 8246): browsers that support it
+  (Firefox and Safari) skip revalidating these resources even on a
+  user-triggered reload — the case where browsers otherwise revalidate every
+  resource on the page despite a valid freshness lifetime — and the explicit
+  `public` makes the responses cacheable on CDNs that require the token (such
+  as Google Cloud CDN) without extra configuration. Other browsers and caches
+  ignore the new directives, so behavior there is unchanged. The upgrade is
+  applied only to responses that were already publicly cacheable: a resource
+  derived from any `private`, `no-cache`, or `no-store` input keeps its
+  restricted caching exactly as before, and responses served under a
+  non-matching URL (for example after a stale link) keep their existing
+  short, private lifetime. Responses served at the original URL by in-place
+  optimization are also unchanged: they keep exactly the caching lifetime the
+  origin gave them.
+
+- **Optimized HTML no longer carries an `s-maxage` directive inviting shared
+  caches to store it.** An `s-maxage` directive could survive on optimized
+  HTML, allowing a shared cache to store and re-serve an optimized page that
+  was intended for a single visitor. It is now stripped. Deployments using
+  the downstream-cache integration (`DownstreamCachePurgeLocationPrefix` and
+  related directives) are unaffected: that feature intentionally preserves
+  the origin's `Cache-Control` on optimized HTML, and continues to. The same
+  applies with `ModifyCachingHeaders off`, which disables all of PageSpeed's
+  caching-header rewriting including this fix. `s-maxage` handling on
+  non-HTML resources is unchanged.
+
+  **What changes for you:** if you operate a shared cache in front of
+  mod_pagespeed, an update is recommended.
+
+- **The JavaScript minifier no longer emits unparseable output for valid
+  JavaScript when a comment sits between `let` and its binding.** The
+  tokenizer's `let` declaration lookahead skipped whitespace but not
+  comments, so `let` in `let /*c*/ row …` (or `let//…` with the binding on
+  the next line) was misread as an identifier. On that reading a linebreak
+  after the binding looked droppable — but the output re-parses with `let` as
+  a declaration keyword, where the linebreak can be required:
+  `let /*c*/ row` followed by `+4;` on the next line was minified to
+  `let row+4;`, a syntax error that breaks the entire script. The lookahead
+  now skips `//` and `/*…*/` comments too, so the declaration is recognized
+  and the linebreak is preserved. Output for valid JavaScript is unchanged;
+  the fix only repairs the misread shapes. If any of your JavaScript hit
+  this, an update is recommended.
+
+---
+
 # mod_pagespeed 1.15.0+r21 Release Notes
 
 **Release date:** 2026-08-01
