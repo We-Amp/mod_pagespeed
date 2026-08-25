@@ -1,3 +1,22 @@
+# mod_pagespeed 1.16.0 Release Notes
+
+**Status:** In development
+
+Notes accumulate here until the 1.16.0 release; entries below are drafts and
+may change before release.
+
+## Packaging and platform notes
+
+- **Debian 11 (bullseye) packages are discontinued as of 1.16.** The bullseye
+  apt suite stays available and keeps serving the final 1.15 packages
+  (1.15.0+r22), so existing Debian 11 systems continue to work — they just no
+  longer receive new releases. The 1.16 serving components require glibc 2.34
+  or newer, which Debian 11 does not provide. To follow new releases, upgrade
+  the OS to Debian 12 (bookworm) or newer; the packages for those suites are
+  unchanged in name and configuration.
+
+---
+
 # mod_pagespeed 1.15.0+r22 Release Notes
 
 **Release date:** 2026-08-08

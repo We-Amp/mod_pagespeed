@@ -3,9 +3,9 @@
   "dataLicense": "CC0-1.0",
   "SPDXID": "SPDXRef-DOCUMENT",
   "name": "pagespeed-1.1",
-  "documentNamespace": "https://spdx.org/spdxdocs/pagespeed-1.1-2026-07-23T10:55:33Z",
+  "documentNamespace": "https://spdx.org/spdxdocs/pagespeed-1.1-2026-08-24T15:07:53Z",
   "creationInfo": {
-    "created": "2026-07-23T10:55:33Z",
+    "created": "2026-08-24T15:07:53Z",
     "creators": [
       "Tool: generate-sbom.py-1.0",
       "Organization: We-Amp B.V."
@@ -16,7 +16,7 @@
     {
       "SPDXID": "SPDXRef-Package-pagespeed-1.1",
       "name": "pagespeed-1.1",
-      "versionInfo": "1.15.0",
+      "versionInfo": "1.16.0",
       "supplier": "Organization: We-Amp B.V.",
       "downloadLocation": "https://github.com/We-Amp/mod_pagespeed",
       "filesAnalyzed": false,
