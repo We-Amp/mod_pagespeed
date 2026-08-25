@@ -19,6 +19,26 @@ filegroup(
     visibility = ["//visibility:public"],
 )
 
+# Same reason, one file over: the in-place seam's decision to ask the record
+# gate rather than construct a recorder itself is a call site that needs a
+# live httpd to execute.  test/pagespeed/apache/daemon_seam_test.cc reads this
+# source to assert it still holds.
+filegroup(
+    name = "instaweb_handler_src",
+    srcs = ["instaweb_handler.cc"],
+    visibility = ["//visibility:public"],
+)
+
+# EVERY .cc in the port, for the pin that asserts no file here constructs the
+# in-place recorder directly.  A glob rather than a list on purpose: the
+# regression that pin exists to catch is a construction site appearing in a
+# file nobody remembered to add.
+filegroup(
+    name = "apache_sources",
+    srcs = glob(["*.cc"]),
+    visibility = ["//visibility:public"],
+)
+
 # Apache-specific system test scripts
 filegroup(
     name = "system_test_files",
@@ -78,6 +98,7 @@ cc_library(
         "apache_writer.cc",
         "apr_timer.cc",
         "header_util.cc",
+        "in_place_not_modified_vary_fetch.cc",
         "instaweb_context.cc",
         "instaweb_handler.cc",
         "log_message_handler.cc",
@@ -99,6 +120,7 @@ cc_library(
         "apache_writer.h",
         "apr_timer.h",
         "header_util.h",
+        "in_place_not_modified_vary_fetch.h",
         "instaweb_context.h",
         "instaweb_handler.h",
         "log_message_handler.h",
@@ -132,6 +154,12 @@ cc_library(
         "//pagespeed/kernel/thread:event_scheduler",
         "//pagespeed/kernel/thread:libevent_dispatcher",
         "//pagespeed/system:system_apache",
+        # The startup check runs here, so THIS is where the daemon library
+        # binding (and its -ldl) enters the build -- not in the system library
+        # every port links.
+        "//pagespeed/system:daemon_adapter",
+        "//pagespeed/system:daemon_record_arm",
+        "//pagespeed/system:daemon_serve_arm",
         "//pagespeed/system:curl_fetcher",
         # the design record: apache_mpm_detection.cc and apache_rewrite_driver_factory.cc
         # include the thread-count policy header directly.

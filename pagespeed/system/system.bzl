@@ -48,6 +48,7 @@ SYSTEM_CORE_SRCS = [
     "admin_site.cc",
     "external_server_spec.cc",
     "in_place_resource_recorder.cc",
+    "ipro_record_gate.cc",
     "loopback_route_fetcher.cc",
     "redis_cache.cc",
     "system_cache_path.cc",
@@ -70,6 +71,7 @@ SYSTEM_CORE_HDRS = [
     "admin_site.h",
     "external_server_spec.h",
     "in_place_resource_recorder.h",
+    "ipro_record_gate.h",
     "loopback_route_fetcher.h",
     "redis_cache.h",
     "system_cache_path.h",
@@ -83,6 +85,8 @@ SYSTEM_CORE_HDRS = [
 ]
 
 SYSTEM_CORE_DEPS = [
+    ":daemon_health",
+    ":ipro_recorder",
     ":external_server_spec",
     ":json_utils",
     ":optimization_thread_policy",

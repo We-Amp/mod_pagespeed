@@ -310,6 +310,29 @@ TEST_F(ResponseHeadersTest, TestParseAndWrite) {
   CheckGoogleHeaders(response_headers3);
 }
 
+TEST_F(ResponseHeadersTest, HasValueCaseInsensitive) {
+  // #737: the case-insensitive sibling of HasValue, for header fields whose
+  // values are RFC 9110 tokens. Driven beside a byte-exact HasValue row for
+  // each case so the two methods' difference is pinned, not implied.
+  response_headers_.Add(HttpAttributes::kVary, "accept");
+  response_headers_.Add(HttpAttributes::kVary, "Accept-Encoding, Cookie");
+  // Case-variant token: only the case-insensitive form sees it.
+  EXPECT_FALSE(response_headers_.HasValue(HttpAttributes::kVary, "Accept"));
+  EXPECT_TRUE(response_headers_.HasValueCaseInsensitive(HttpAttributes::kVary,
+                                                        "Accept"));
+  // Comma-splitting applies to both (Vary is a comma-separated field).
+  EXPECT_TRUE(response_headers_.HasValueCaseInsensitive(HttpAttributes::kVary,
+                                                        "COOKIE"));
+  EXPECT_TRUE(response_headers_.HasValue(HttpAttributes::kVary, "Cookie"));
+  // Absent token: both say no.
+  EXPECT_FALSE(response_headers_.HasValueCaseInsensitive(HttpAttributes::kVary,
+                                                         "User-Agent"));
+  EXPECT_FALSE(response_headers_.HasValue(HttpAttributes::kVary, "User-Agent"));
+  // No substring matching: a token is matched whole.
+  EXPECT_FALSE(response_headers_.HasValueCaseInsensitive(HttpAttributes::kVary,
+                                                         "Accept-Enc"));
+}
+
 TEST_F(ResponseHeadersTest, TestSizeEstimate) {
   GoogleString headers = StrCat(
       "HTTP/1.0 200 OK\r\n"

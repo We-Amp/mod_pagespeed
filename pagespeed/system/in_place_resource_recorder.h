@@ -32,6 +32,7 @@
 #include "pagespeed/kernel/http/http_options.h"
 #include "pagespeed/kernel/http/request_headers.h"
 #include "pagespeed/kernel/http/response_headers.h"
+#include "pagespeed/system/ipro_recorder.h"
 
 namespace net_instaweb {
 
@@ -43,17 +44,8 @@ class Variable;
 // Records a copy of a resource streamed through it and saves the result to
 // the cache if it's cacheable. Used in the In-Place Resource Optimization
 // (IPRO) flow to get resources into the cache.
-class InPlaceResourceRecorder : public Writer {
+class InPlaceResourceRecorder : public IproRecorder {
  public:
-  enum HeadersKind {
-    // Headers should only be used to determine if context was gzip'd by
-    // a reverse proxy.
-    kPreliminaryHeaders,
-
-    // Headers are complete.
-    kFullHeaders
-  };
-
   // Does not take ownership of request_headers, cache nor handler.
   // Like other callbacks, InPlaceResourceRecorder is self-owned and will
   // delete itself when DoneAndSetHeaders() is called.
@@ -69,6 +61,13 @@ class InPlaceResourceRecorder : public Writer {
   ~InPlaceResourceRecorder() override;
 
   static void InitStats(Statistics* statistics);
+
+  // Number of recorders this process has ever CONSTRUCTED.  Test
+  // observability, and specifically for the one property that cannot be
+  // asserted any other way: that a serving seam did not build a recorder at
+  // all, as opposed to building one and then not using it.  Monotonic; never
+  // reset.
+  static int64 num_constructed();
 
   // These take a handler for compatibility with the Writer API, but the handler
   // is not used.
@@ -102,7 +101,7 @@ class InPlaceResourceRecorder : public Writer {
   //
   // Does not take ownership of response_headers.
   void ConsiderResponseHeaders(HeadersKind headers_kind,
-                               ResponseHeaders* response_headers);
+                               ResponseHeaders* response_headers) override;
 
   // We modify the caching headers to add a short s-maxage on unoptimized
   // resources, which includes when we're recording.  We don't want to save the
@@ -115,11 +114,11 @@ class InPlaceResourceRecorder : public Writer {
   // to cache.
   //
   // Stores a copy of cache_control.
-  void SaveCacheControl(const char* cache_control);
+  void SaveCacheControl(const char* cache_control) override;
 
   // Call if something went wrong. The results will not be added to cache.  You
   // still need to call DoneAndSetHeaders().
-  void Fail() { failure_ = true; }
+  void Fail() override { failure_ = true; }
 
   // Call when finished and the final response headers are known.
   // Because of Apache's quirky filter order, we cannot get both the
@@ -134,15 +133,17 @@ class InPlaceResourceRecorder : public Writer {
   //
   // Deletes itself. Do not use object after calling DoneAndSetHeaders().
   void DoneAndSetHeaders(ResponseHeaders* response_headers,
-                         bool entire_response_received);
+                         bool entire_response_received) override;
 
-  const GoogleString& url() const { return url_; }
-  MessageHandler* handler() { return handler_; }
+  const GoogleString& url() const override { return url_; }
+  MessageHandler* handler() override { return handler_; }
 
-  bool failed() { return failure_; }
-  bool limit_active_recordings() { return max_concurrent_recordings_ != 0; }
+  bool failed() const override { return failure_; }
+  bool limit_active_recordings() const {
+    return max_concurrent_recordings_ != 0;
+  }
 
-  const HttpOptions& http_options() const { return http_options_; }
+  const HttpOptions& http_options() const override { return http_options_; }
 
  private:
   class HTTPValueFetch : public AsyncFetchUsingWriter {

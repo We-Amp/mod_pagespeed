@@ -248,6 +248,14 @@ SystemRewriteOptions* SystemServerContext::global_system_rewrite_options() {
 
 void SystemServerContext::PostInitHook() {
   ServerContext::PostInitHook();
+  if (is_decoding_stub()) {
+    // The stub decoding context exists only to back the shared decoding
+    // driver: it runs on default options (no FileCachePath) and never
+    // serves requests, so admin/license setup here would always come up
+    // unlicensed and emit a spurious per-process UNLICENSED warning on
+    // licensed installs.
+    return;
+  }
   admin_site_ = std::make_unique<AdminSite>(
       timer(), thread_system(), message_handler(), DefaultSystemFetcher(),
       global_system_rewrite_options()->file_cache_path());

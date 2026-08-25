@@ -598,6 +598,23 @@ class RewriteOptions {
   // This version number should be incremented if any default-values
   // are changed, either in an Add*Property() call or via
   // options->set_default.
+  //
+  // A DEFAULT CHANGE NOW HAS A SECOND OBLIGATION, and it is not satisfied by
+  // bumping this number.  The per-request option context
+  // (net/instaweb/rewriter/public/option_context.h) is deliberately NOT
+  // sensitive to this version — that is the property that lets it survive an
+  // upgrade — and it carries only options somebody explicitly SET.  So a
+  // release that changes a default changes behaviour for every configuration
+  // that never set that option WITHOUT moving its option-context signature,
+  // and work already cached under that signature stays reachable and stale.
+  //
+  // The lever for that is kOptionContextFormatVersion, and it is deliberately
+  // expensive: bumping it re-keys every option context everywhere, which is a
+  // COLD CACHE on this side and on the component consuming the context.  So it
+  // is a judgement call, not a reflex — bump it when a default change alters
+  // what bytes a client receives, and leave it when the change is invisible to
+  // output.  Either way, decide explicitly; the failure mode of forgetting is
+  // silent stale content, not an error.
   static constexpr int kOptionsVersion = 15;
 
   // Number of bytes used for signature hashing.

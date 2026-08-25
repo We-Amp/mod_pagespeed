@@ -166,6 +166,20 @@ class RequestContext : public RefCounted<RequestContext> {
     return accepts_webp_via_accept_header_;
   }
 
+  // The AVIF counterpart of accepts_webp_via_accept_header(): true only when
+  // the request's own "Accept: image/avif" header asserted the capability.
+  // There is deliberately no broad accepts_avif() twin -- AVIF has no
+  // user-agent-derived grant to be broader than (no legacy allow-list, no
+  // no-navigation-Accept fallback), so the Accept-header fact is the only AVIF
+  // capability fact there is. Consumed by
+  // OptionsAwareHTTPCacheCallback::IsCacheValid to decide whether a cached
+  // AVIF response carrying "Vary: Accept" is valid as-selected for this
+  // request.
+  void SetAcceptsAvifViaAcceptHeader(bool x);
+  bool accepts_avif_via_accept_header() const {
+    return accepts_avif_via_accept_header_;
+  }
+
   // Indicates whether the request-headers tell us that a browser can extract
   // gzip compressed data.
   void SetAcceptsGzip(bool x);
@@ -266,6 +280,7 @@ class RequestContext : public RefCounted<RequestContext> {
   bool using_http2_;
   bool accepts_webp_;
   bool accepts_webp_via_accept_header_;
+  bool accepts_avif_via_accept_header_;
   bool accepts_gzip_;
   bool frozen_;
   GoogleString minimal_private_suffix_;

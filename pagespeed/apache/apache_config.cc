@@ -31,6 +31,8 @@ const char kProxyAuth[] = "ProxyAuth";
 const char kForceBuffering[] = "ForceBuffering";
 const char kProxyAllRequests[] = "ExperimentalProxyAllRequests";
 const char kMeasurementProxy[] = "ExperimentalMeasurementProxy";
+const char kDaemonSocketPath[] = "DaemonSocketPath";
+const char kDaemonVolumePath[] = "DaemonVolumePath";
 
 }  // namespace
 
@@ -88,6 +90,20 @@ void ApacheConfig::AddProperties() {
       "Experimental mode where mod_pagespeed acts entirely as a proxy, and "
       "doesn't attempt to work with any local serving. ",
       false /* safe_to_print*/);
+
+  AddApacheProperty(
+      "", &ApacheConfig::daemon_socket_path_, "dmsp", kDaemonSocketPath,
+      "Path of the optimizer daemon's notification socket. Set this together "
+      "with DaemonVolumePath to hand in-place optimization to the daemon; "
+      "leave both unset to keep the classic in-place path.",
+      true /* safe_to_print */);
+
+  AddApacheProperty(
+      "", &ApacheConfig::daemon_volume_path_, "dmvp", kDaemonVolumePath,
+      "Path of the optimizer daemon's shared cache volume. Keep this on a "
+      "DIFFERENT path from FileCachePath. Set this together with "
+      "DaemonSocketPath; leave both unset to keep the classic in-place path.",
+      true /* safe_to_print */);
 
   // Register deprecated options.
   AddDeprecatedProperty("CollectRefererStatistics",

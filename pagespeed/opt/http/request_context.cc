@@ -66,6 +66,7 @@ void RequestContext::Init() {
   using_http2_ = false;
   accepts_webp_ = false;
   accepts_webp_via_accept_header_ = false;
+  accepts_avif_via_accept_header_ = false;
   accepts_gzip_ = false;
   frozen_ = false;
 }
@@ -136,6 +137,13 @@ void RequestContext::SetAcceptsWebpViaAcceptHeader(bool x) {
   if (x != accepts_webp_via_accept_header_) {
     DCHECK(!frozen_);
     accepts_webp_via_accept_header_ = x;
+  }
+}
+
+void RequestContext::SetAcceptsAvifViaAcceptHeader(bool x) {
+  if (x != accepts_avif_via_accept_header_) {
+    DCHECK(!frozen_);
+    accepts_avif_via_accept_header_ = x;
   }
 }
 

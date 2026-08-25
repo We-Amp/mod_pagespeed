@@ -272,6 +272,58 @@ TEST_F(AdminExposureWarningTest, NullHandlerIsSafe) {
   EXPECT_EQ(0, WarningCount());
 }
 
+// =============================================================================
+// Decoding-stub license regression tests.
+// =============================================================================
+
+// A decoding stub context must skip admin/license setup in PostInitHook():
+// it runs on default options (no FileCachePath) and never serves requests,
+// so initializing the license machinery there logged a spurious per-process
+// UNLICENSED warning on licensed installs.
+TEST_F(AdminSiteTest, DecodingStubSkipsAdminAndLicenseInit) {
+  std::unique_ptr<SystemServerContext> stub(
+      new SystemServerContextNoProxyHtml(factory()));
+  stub->reset_global_options(new SystemRewriteOptions(thread_system_.get()));
+  stub->set_statistics(factory()->statistics());
+  stub->set_message_handler(message_handler());
+  stub->set_is_decoding_stub(true);
+  stub->PostInitHook();
+  EXPECT_EQ(nullptr, stub->admin_site());
+  GoogleString messages;
+  StringWriter writer(&messages);
+  message_handler()->Dump(&writer);
+  EXPECT_THAT(messages, ::testing::Not(::testing::HasSubstr("UNLICENSED")));
+}
+
+// Control: a regular (serving) context with no license file still builds its
+// AdminSite and logs the UNLICENSED warning — the real unlicensed path stays
+// intact.
+TEST_F(AdminSiteTest, ServingContextWithoutLicenseFileStillWarns) {
+  std::unique_ptr<SystemServerContext> sc(
+      new SystemServerContextNoProxyHtml(factory()));
+  SystemRewriteOptions* opts = new SystemRewriteOptions(thread_system_.get());
+  // Pin the license lookup to a path that cannot exist so the assertion is
+  // deterministic regardless of the host (the license file is resolved as a
+  // sibling of the file cache path).
+  opts->set_file_cache_path(StrCat(GTestTempDir(), "/no-such-dir/cache"));
+  sc->reset_global_options(opts);
+  sc->set_statistics(factory()->statistics());
+  sc->set_message_handler(message_handler());
+  sc->PostInitHook();
+  EXPECT_NE(nullptr, sc->admin_site());
+  GoogleString messages;
+  StringWriter writer(&messages);
+  message_handler()->Dump(&writer);
+  EXPECT_THAT(messages, ::testing::HasSubstr("UNLICENSED"));
+}
+
+// The factory marks the context it builds through
+// InitStubDecodingServerContext() as a decoding stub.
+TEST_F(AdminSiteTest, FactoryDecodingContextIsMarkedAsStub) {
+  std::unique_ptr<ServerContext> stub(factory()->NewDecodingServerContext());
+  EXPECT_TRUE(stub->is_decoding_stub());
+}
+
 }  // namespace
 
 }  // namespace net_instaweb

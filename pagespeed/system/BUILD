@@ -66,6 +66,144 @@ cc_library(
 )
 
 # =============================================================================
+# The daemon health verdict, on its own, with no dependencies.
+#
+# Split out so a serving seam can read the verdict without taking on the
+# run-time library binding that produces it -- or the link flag that binding
+# needs. Every port has a serving seam; only the ports that actually run a
+# startup check depend on :daemon_adapter.
+# =============================================================================
+cc_library(
+    name = "daemon_health",
+    hdrs = ["daemon_health.h"],
+    visibility = ["//visibility:public"],
+)
+
+# =============================================================================
+# The in-place recording lifecycle, as an interface.
+#
+# There are two substrates that record an origin response -- this module's own
+# cache, and the optimizer daemon's shared one -- and they share nothing but
+# the order a server drives them in. That order is the server's, not either
+# implementation's, which is what makes it worth naming as a type.
+#
+# Header-only and on its own so the daemon-side implementation can depend on
+# the lifecycle without depending on the system library, which depends on it.
+# =============================================================================
+cc_library(
+    name = "ipro_recorder",
+    srcs = ["ipro_recorder.cc"],
+    hdrs = ["ipro_recorder.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/kernel/http",
+    ],
+)
+
+# =============================================================================
+# Optimizer-daemon adapter: configuration, the volume-sizing mirror, and the
+# health verdict the serving seams read.
+#
+# LICENSING BOUNDARY.  The optimizer daemon and its client library are a
+# separate product under a different licence.  This target vendors nothing
+# from that tree and links nothing from it: daemon_abi.h declares the handful
+# of C entry points the adapter uses, and daemon_abi.cc binds them at RUN time
+# with dlopen/dlsym against whatever daemon package the operator installed.
+# There is deliberately no build-time dependency to add here, and adding one
+# would also break the co-install contract -- this module must load and serve
+# on a host with no daemon package at all.
+#
+# Standalone (not folded into the system library) so the startup logic can be
+# unit-tested without a server, and so the -ldl link requirement stays scoped
+# to the ports that actually run a startup check.  Only the Apache library
+# depends on this; the enum the serving seams read lives in daemon_health.h,
+# inside the system library, precisely so that depending on the VERDICT does
+# not mean depending on the BINDING.
+# =============================================================================
+cc_library(
+    name = "daemon_adapter",
+    srcs = [
+        "daemon_abi.cc",
+        "daemon_adapter.cc",
+    ],
+    hdrs = [
+        "daemon_abi.h",
+        "daemon_adapter.h",
+    ],
+    # daemon_health.h is NOT here -- see the :daemon_health target above.
+    linkopts = select({
+        "@platforms//os:windows": [],
+        "//conditions:default": ["-ldl"],
+    }),
+    visibility = ["//visibility:public"],
+    deps = [
+        ":daemon_health",
+        "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)
+
+# =============================================================================
+# The record arm: the gate that decides what may go into the optimizer
+# daemon's shared cache for one origin response, and the writer that carries
+# that decision out.
+#
+# Split from :daemon_adapter (startup) rather than folded into it, because the
+# gate is a pure function and stays testable without a cache, a socket or a
+# server -- and because the startup half must remain reachable from a port
+# whose serving seam has not been swapped yet.
+#
+# The same LICENSING BOUNDARY as :daemon_adapter applies: nothing from the
+# daemon's source tree is vendored and nothing from it is linked; every peer
+# call goes through the run-time binding in daemon_abi.h.
+# =============================================================================
+cc_library(
+    name = "daemon_record_arm",
+    srcs = [
+        "daemon_ipro_recorder.cc",
+        "daemon_record_arm.cc",
+    ],
+    hdrs = [
+        "daemon_ipro_recorder.h",
+        "daemon_record_arm.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":daemon_adapter",
+        ":ipro_recorder",
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/kernel/http",
+    ],
+)
+
+# =============================================================================
+# The serve arm: which stored entry this module may hand back for one
+# request, and the response state that goes with it.
+#
+# Split from :daemon_record_arm for the same reason that one is split from
+# :daemon_adapter -- the selection rules and the validator/`Vary`/
+# `Cache-Control` composition are pure functions and stay testable without a
+# cache, a socket or a server. It depends on the record arm rather than
+# duplicating it because both arms apply the SAME two URL restrictions, and
+# two copies of "which URLs name an entry we can be sure of" is exactly the
+# drift that puts a write where no read looks.
+#
+# The same LICENSING BOUNDARY as :daemon_adapter applies.
+# =============================================================================
+cc_library(
+    name = "daemon_serve_arm",
+    srcs = ["daemon_serve_arm.cc"],
+    hdrs = ["daemon_serve_arm.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":daemon_adapter",
+        ":daemon_record_arm",
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/kernel/http",
+    ],
+)
+
+# =============================================================================
 # Admin license handler
 # =============================================================================
 # Handles /v1/license/* endpoints in the admin console.

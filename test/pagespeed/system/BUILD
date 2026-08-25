@@ -282,6 +282,150 @@ pagespeed_cc_test(
     ],
 )
 
+# A real, dlopen-able stand-in for the daemon's client library.
+#
+# LoadDaemonAbi is the one part of the adapter no injected fake can reach --
+# every other test replaces the loader wholesale -- so its symbol binding,
+# version gate and layout handshake had never executed. Three flavours, because
+# a symbol cannot be un-exported at run time and each absence is a different
+# answer from the loader: the sized initializer is OPTIONAL (an older daemon
+# that lacks it must still load), and the Vary-Accept predicate is REQUIRED (a
+# library that lacks it is refused, whatever version it claims).
+cc_binary(
+    name = "libdaemon_stub.so",
+    testonly = True,
+    srcs = ["daemon_stub_lib.cc"],
+    # No C++ runtime: this object is dlopen()ed and dlclose()d once per test,
+    # and a statically linked runtime allocates its one-time state on every
+    # load without returning it on unload. See daemon_stub_lib.cc.
+    linkopts = ["-nostdlib++"],
+    linkshared = True,
+    linkstatic = True,
+    target_compatible_with = ["@platforms//os:linux"],
+    visibility = ["//visibility:public"],
+)
+
+cc_binary(
+    name = "libdaemon_stub_unsized.so",
+    testonly = True,
+    srcs = ["daemon_stub_lib.cc"],
+    defines = ["PS_STUB_OMIT_SIZED_INIT"],
+    linkopts = ["-nostdlib++"],
+    linkshared = True,
+    linkstatic = True,
+    target_compatible_with = ["@platforms//os:linux"],
+    visibility = ["//visibility:public"],
+)
+
+# A library that REPORTS the floor version but does not export the entry point
+# that version publishes. It is the only thing that can tell a required binding
+# from an optional one: against a truthful library both behave identically, so
+# without this flavour "the Vary-Accept predicate is in the floor" would be a
+# claim in a comment rather than a property under test.
+cc_binary(
+    name = "libdaemon_stub_no_varies_accept.so",
+    testonly = True,
+    srcs = ["daemon_stub_lib.cc"],
+    defines = ["PS_STUB_OMIT_VARIES_ACCEPT"],
+    linkopts = ["-nostdlib++"],
+    linkshared = True,
+    linkstatic = True,
+    target_compatible_with = ["@platforms//os:linux"],
+    visibility = ["//visibility:public"],
+)
+
+# Optimizer-daemon adapter startup: the volume-sizing mirror (match starts,
+# divergence refuses), the degrade path when the daemon is absent or
+# unreachable, and the RAM-tier floor the adapter opens the shared volume
+# with. Linux-only: the reachability case binds a real AF_UNIX socket.
+pagespeed_cc_test(
+    name = "daemon_adapter_test",
+    srcs = ["daemon_adapter_test.cc"],
+    data = [
+        ":libdaemon_stub.so",
+        ":libdaemon_stub_no_varies_accept.so",
+        ":libdaemon_stub_unsized.so",
+    ],
+    shard_count = 1,
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = [
+        "//pagespeed/system:daemon_adapter",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+    ],
+)
+
+# The record arm: the gate's rules, driven through the REAL client-library
+# binder against the real dlopen-able stand-in, so the peer's validation is
+# what answers rather than an in-process fake of it.
+pagespeed_cc_test(
+    name = "daemon_record_arm_test",
+    srcs = ["daemon_record_arm_test.cc"],
+    data = [":libdaemon_stub.so"],
+    shard_count = 1,
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = [
+        "//net/instaweb/rewriter",
+        "//pagespeed/system:daemon_record_arm",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+        "//test/pagespeed/system:test_base_core",
+    ],
+)
+
+# The daemon-side in-place recorder: the seam between a real ResponseHeaders
+# and the record gate's input, the checks that run before the gate, and the
+# self-owned lifecycle. Driven through the real client-library loader against
+# the real dlopen-able stand-in, like the gate's own suite.
+pagespeed_cc_test(
+    name = "daemon_ipro_recorder_test",
+    srcs = ["daemon_ipro_recorder_test.cc"],
+    data = [":libdaemon_stub.so"],
+    shard_count = 1,
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = [
+        "//net/instaweb/rewriter",
+        "//pagespeed/system:daemon_record_arm",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+        "//test/pagespeed/system:test_base_core",
+    ],
+)
+
+# The serve arm: which stored entry is handed back for one request, and the
+# validator / `Vary` / `Cache-Control` state that goes with it. Driven
+# through the real client-library loader against the real dlopen-able
+# stand-in, whose selector reproduces the peer's scoring arithmetic with the
+# format disqualify playable in BOTH generations (the peer's tie-break is not
+# modelled; no case scores a positive tie):
+# by default without the format disqualify, because an always-disqualifying
+# stand-in would make this arm's own disqualify unreachable and every case
+# here green by construction, and with it where a case pins what the current
+# peer does (no compatible member, so nothing is selected at all).
+pagespeed_cc_test(
+    name = "daemon_serve_arm_test",
+    srcs = ["daemon_serve_arm_test.cc"],
+    data = [":libdaemon_stub.so"],
+    shard_count = 1,
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = [
+        "//net/instaweb/rewriter",
+        "//pagespeed/system:daemon_serve_arm",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+        "//test/pagespeed/system:test_base_core",
+    ],
+)
+
+# The in-place record gate: the disposition mapping, and that the classic
+# recorder is not CONSTRUCTED on either daemon substrate.
+pagespeed_cc_test(
+    name = "ipro_record_gate_test",
+    srcs = ["ipro_record_gate_test.cc"],
+    shard_count = 1,
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = [
+        "//pagespeed/system:daemon_adapter",
+        "//test/pagespeed/system:test_base_core",
+    ],
+)
+
 # the design record optimization thread-count policy: the effective-CPU-budget
 # arithmetic (min of online CPUs / affinity mask / cgroup quota), the cgroup
 # file parsing, and the budget formula.  Pure unit test -- no server, no

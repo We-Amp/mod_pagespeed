@@ -263,6 +263,7 @@ ServerContext::ServerContext(RewriteDriverFactory* factory)
       metadata_cache_(nullptr),
       store_outputs_in_file_system_(false),
       response_headers_finalized_(true),
+      is_decoding_stub_(false),
       enable_property_cache_(true),
       lock_manager_(nullptr),
       message_handler_(nullptr),

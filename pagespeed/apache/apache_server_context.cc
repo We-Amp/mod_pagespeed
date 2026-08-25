@@ -83,6 +83,23 @@ bool ApacheServerContext::InitPath(const GoogleString& path) {
   return ok;
 }
 
+bool ApacheServerContext::RunDaemonStartupCheck() {
+  const ApacheConfig* config = global_config();
+  daemon_adapter_ = std::make_unique<DaemonAdapter>(
+      config->daemon_socket_path(), config->daemon_volume_path(),
+      message_handler());
+  const bool ok = daemon_adapter_->StartupCheck() == DaemonStartupStatus::kOk;
+  // Built whatever the verdict, and holding nothing open.  The serve arm
+  // records exactly one class per response through it, and a null object
+  // here would make "the daemon was not usable" and "this serve was not
+  // counted" the same absence in the counters.
+  if (daemon_adapter_->abi() != nullptr) {
+    daemon_serve_stats_ = std::make_unique<DaemonServeStats>(
+        daemon_adapter_->abi(), daemon_adapter_->volume_path());
+  }
+  return ok;
+}
+
 ApacheConfig* ApacheServerContext::global_config() {
   return ApacheConfig::DynamicCast(global_options());
 }

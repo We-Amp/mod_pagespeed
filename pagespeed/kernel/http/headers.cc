@@ -283,6 +283,20 @@ bool Headers<Proto>::HasValue(const StringPiece& name,
   return false;
 }
 
+template <class Proto>
+bool Headers<Proto>::HasValueCaseInsensitive(const StringPiece& name,
+                                             const StringPiece& value) const {
+  ConstStringStarVector values;
+  Lookup(name, &values);
+  for (ConstStringStarVector::const_iterator iter = values.begin();
+       iter != values.end(); ++iter) {
+    if (StringCaseEqual(value, **iter)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 namespace {
 
 bool IsCommaSeparatedField(const StringPiece& name) {

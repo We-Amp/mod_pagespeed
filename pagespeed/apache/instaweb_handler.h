@@ -49,7 +49,9 @@ class ApacheConfig;
 class ApacheRequestContext;
 class ApacheRewriteDriverFactory;
 class ApacheServerContext;
-class InPlaceResourceRecorder;
+class IproRecorder;
+struct DaemonRecordRequest;
+struct DaemonServeRequest;
 
 // Context for handling a request, computing options and request headers in
 // the constructor.
@@ -172,10 +174,43 @@ class InstawebHandler {
   // To prevent that, we hook map_to_storage for our own purposes.
   static apr_status_t instaweb_map_to_storage(request_rec* request);
 
-  // This must be called on any InPlaceResourceRecorder allocated by
+  // This must be called on any in-place recorder allocated by
   // instaweb_handler before calling DoneAndSetHeaders() on it.
   static void AboutToBeDoneWithRecorder(request_rec* request,
-                                        InPlaceResourceRecorder* recorder);
+                                        IproRecorder* recorder);
+
+  // Attaches an in-place recorder to this response, transferring ownership to
+  // the request pool.  The in-place output filters drive its lifecycle.
+  //
+  // `rewrite_caching_headers` is a SUBSTRATE decision -- see the definition.
+  void AttachInPlaceRecorder(IproRecorder* recorder,
+                             bool rewrite_caching_headers);
+
+  // One request header, read straight off the Apache request rather than off
+  // request_headers_, which has been stripped for resource fetching.
+  StringPiece RequestHeader(const char* name) const;
+
+  // Gathers what the daemon-side recorder needs about the request, before the
+  // response starts.  See the definition for why it cannot wait.
+  void BuildDaemonRecordRequest(
+      const RequestHeaders::Properties& request_properties,
+      DaemonRecordRequest* request);
+
+  // The four request fields the peer's classifier derives a capability mask
+  // from.  ONE reader for both arms; see the definition.
+  void CapabilityHeaders(StringPiece* accept, StringPiece* user_agent,
+                         StringPiece* save_data,
+                         StringPiece* accept_encoding) const;
+
+  // Gathers what the daemon-side SERVE arm needs about the request.
+  void BuildDaemonServeRequest(DaemonServeRequest* request);
+
+  // Records one serve class against the peer's serve-stats mmap.
+  void RecordDaemonServeClass(int serve_class);
+
+  // Answers this request from the optimizer daemon's shared cache if it can.
+  // A false return is the substrate declining, not an error.
+  bool ServeFromDaemonSubstrate();
 
  private:
   // Evaluate custom_options based upon global_options, directory-specific
@@ -252,6 +287,12 @@ class InstawebHandler {
   request_rec* request_;
   RequestContextPtr request_context_;
   ApacheRequestContext* apache_request_context_;  // owned by request_context_.
+  // Storage the daemon serve request's StringPieces borrow from.  Members
+  // rather than locals because the request outlives the frame that fills it.
+  GoogleString daemon_serve_url_;
+  GoogleString daemon_serve_host_;
+  GoogleString daemon_serve_scheme_;
+
   ApacheServerContext* server_context_;
   std::unique_ptr<RequestHeaders> request_headers_;
   std::unique_ptr<ResponseHeaders> response_headers_;

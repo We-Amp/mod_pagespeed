@@ -158,6 +158,7 @@ cc_library(
         "inline_rewrite_context.cc",
         "input_info_utils.cc",
         "named_lock_schedule_rewrite_controller.cc",
+        "option_context.cc",
         "output_resource.cc",
         "property_cache_util.cc",
         "request_properties.cc",
@@ -291,6 +292,7 @@ cc_library(
         "public/measurement_proxy_url_namer.h",
         "public/meta_tag_filter.h",
         "public/named_lock_schedule_rewrite_controller.h",
+        "public/option_context.h",
         "public/output_resource.h",
         "public/output_resource_kind.h",
         "public/pedantic_filter.h",
@@ -346,6 +348,11 @@ cc_library(
         "//pagespeed/kernel/base:pagespeed_base",
         "//pagespeed/kernel/cache",
         "//third_party/css_parser",
+        # option_context.cc signs the canonical option-context payload with
+        # SHA-256.  Unconditional by design: the SHA1Signature path compiles
+        # out under ENABLE_URL_SIGNATURES=0 and returns zeros, which would
+        # collapse every option context into one.
+        "@boringssl//:crypto",
     ],
 )
 

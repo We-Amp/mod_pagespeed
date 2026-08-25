@@ -3393,7 +3393,9 @@ TEST_F(ImageRewriteTest, AvifStatsAreRegisteredAndIncremented) {
 // not re-rewrite; cold-cache reconstruction (including by a NON-capable
 // client, via the committed-URL reconcile + serve-to-any-agent) reproduces the
 // IDENTICAL AVIF bytes; and with serve-to-any-agent off a non-capable client
-// gets the original JPEG, privately cached.
+// gets the original JPEG, privately cached -- from a WARM cache as well as a
+// cold one, which is the case CacheCallback::IsCacheValid guards and the case
+// the WebP twin has always covered at "Don't clear the cache here".
 TEST_F(ImageRewriteTest, ServeAvifFromColdCache) {
   const StringPiece kJpegMimeType = kContentTypeJpeg.mime_type();
   const StringPiece kAvifMimeType = kContentTypeAvif.mime_type();
@@ -3413,6 +3415,11 @@ TEST_F(ImageRewriteTest, ServeAvifFromColdCache) {
   ResetForAvif();
   Variable* image_rewrite_count =
       statistics()->GetVariable(ImageRewriteFilter::kImageRewrites);
+  // The AVIF-specific counter, the exact analogue of the WebP twin's
+  // kImageWebpRewrites: it counts only AVIF being produced, so a plain JPEG
+  // recompression does not move it.
+  Variable* avif_rewrite_count =
+      statistics()->GetVariable(ImageRewriteFilter::kImageAvifRewrites);
   AddFileToMockFetcher(kPuzzleUrl, kPuzzleJpgFile, kContentTypeJpeg, 100);
   RewriteImageFromHtml("img", kContentTypeAvif, &img_src);
   EXPECT_EQ(1, image_rewrite_count->Get());
@@ -3457,13 +3464,34 @@ TEST_F(ImageRewriteTest, ServeAvifFromColdCache) {
   options()->set_serve_rewritten_avif_urls_to_any_agent(false);
   server_context()->ComputeSignature(options());
 
-  lru_cache()->Clear();
+  // Deliberately do NOT clear the cache here, exactly as the WebP twin does
+  // not. The committed ".avif" entry minted above is still warm, and its HTTP
+  // cache key carries no requester capability, so this non-capable fetch HITS
+  // it. Only CacheCallback::IsCacheValid can reject that hit; clearing the
+  // cache first would exercise cold reconstruction instead and leave the warm
+  // path -- the one the guard exists for -- untested.
+  ClearStats();
   EXPECT_TRUE(FetchAvif(avif_gurl.Spec(), "null", &content, &response));
   EXPECT_STREQ(kJpegMimeType, response.Lookup1(HttpAttributes::kContentType));
   EXPECT_FALSE(response.IsProxyCacheable());
   EXPECT_TRUE(response.IsBrowserCacheable());
+  EXPECT_EQ(0, avif_rewrite_count->Get());  // No AVIF produced for this client.
+  EXPECT_EQ(2, lru_cache()->num_hits());    // Hits, but result is invalid.
   EXPECT_FALSE(content == golden_content);
   EXPECT_GT(content.size(), golden_content.size());
+  // The generic counter DOES move (which the WebP twin does not pin): this
+  // filter set
+  // leaves plain JPEG recompression available to a non-capable client, so the
+  // rejected AVIF hit falls through to one ordinary image rewrite. Pinned
+  // rather than left implicit, so the difference from the WebP twin is a
+  // recorded fact and not a silent divergence.
+  EXPECT_EQ(1, image_rewrite_count->Get());
+
+  // And it still works when the cache is cold, as it did before.
+  lru_cache()->Clear();
+  EXPECT_TRUE(FetchAvif(avif_gurl.Spec(), "null", &content, &response));
+  EXPECT_STREQ(kJpegMimeType, response.Lookup1(HttpAttributes::kContentType));
+  EXPECT_FALSE(content == golden_content);
 
   // But if a both-capable client asks for the resource, we will serve the
   // AVIF to them.

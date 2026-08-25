@@ -20,6 +20,8 @@
 #include "pagespeed/system/in_place_resource_recorder.h"
 
 #include <algorithm>
+#include <atomic>
+#include <cstdint>
 
 #include "base/logging.h"
 #include "net/instaweb/http/public/http_cache.h"
@@ -49,7 +51,18 @@ const char kNumErrorStatus[] = "ipro_recorder_error_status";
 const char kNumSkippedTransient[] = "ipro_recorder_skipped_transient";
 const char kNumEmpty[] = "ipro_recorder_empty";
 
+// Process-wide count of recorders ever CONSTRUCTED.  Deliberately not a
+// Statistics variable: it exists so a test can distinguish "the recorder was
+// not used" from "the recorder was not built", and a statistics variable
+// needs a Statistics object the construction site may not have reached yet.
+// Monotonic and never reset, so a test reads it before and after.
+std::atomic<int64_t> g_num_constructed{0};
+
 }  // namespace
+
+int64 InPlaceResourceRecorder::num_constructed() {
+  return g_num_constructed.load(std::memory_order_relaxed);
+}
 
 AtomicInt32 InPlaceResourceRecorder::active_recordings_(0);
 
@@ -84,6 +97,7 @@ InPlaceResourceRecorder::InPlaceResourceRecorder(
       full_response_headers_considered_(false),
       consider_response_headers_called_(false),
       cache_control_set_(false) {
+  g_num_constructed.fetch_add(1, std::memory_order_relaxed);
   num_resources_->Add(1);
   if (limit_active_recordings() &&
       active_recordings_.BarrierIncrement(1) > max_concurrent_recordings_) {

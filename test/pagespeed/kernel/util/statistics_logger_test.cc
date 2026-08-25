@@ -20,9 +20,9 @@
 #include "pagespeed/kernel/util/statistics_logger.h"
 
 #include <map>
+#include <memory>
 #include <set>
 #include <vector>
-#include <memory>
 
 #include "pagespeed/kernel/base/file_system.h"
 #include "pagespeed/kernel/base/json.h"
@@ -204,7 +204,16 @@ TEST_F(StatisticsLoggerTest, TestParseDataForGraphs) {
   // Though the fake log file only contains 4 variables, the method should
   // still return all the variables needed by the graphs page with 0 as
   // place holders.
-  EXPECT_EQ(88, parsed_var_data.size());
+  //
+  // THE NUMBER IS THE SIZE OF THE GRAPHS PAGE'S VARIABLE LIST, and it moves
+  // whenever a counter is added to it (statistics_logger.cc, kGraphsVars --
+  // NOT kOtherLoggedVars, which is the neighbouring list this comment first
+  // named by mistake). It is written out rather than derived because that list
+  // is file-local to the implementation; when it changes, this is the line
+  // that says so, which is the intent -- a counter reaching the graphs page is
+  // a user-visible surface change and should not slip in silently. Last moved
+  // when the daemon substrate's fallback re-notify failure counter was added.
+  EXPECT_EQ(92, parsed_var_data.size());
   EXPECT_EQ(4, list_of_timestamps.size());
   file_system_.Close(log_file, &handler_);
 }
@@ -307,8 +316,8 @@ TEST_F(StatisticsLoggerTest, ReadNextDataBlockAllOutOfRange) {
               "num_flushes: ", Integer64ToString(i), "\n");
   }
   GoogleString file_name;
-  ASSERT_TRUE(file_system_.WriteTempFile("/prefix/", input, &file_name,
-                                         &handler_));
+  ASSERT_TRUE(
+      file_system_.WriteTempFile("/prefix/", input, &file_name, &handler_));
   FileSystem::InputFile* log_file =
       file_system_.OpenInputFile(file_name.c_str(), &handler_);
   ASSERT_TRUE(log_file != nullptr);
@@ -350,9 +359,9 @@ TEST_F(StatisticsLoggerTest, DumpJsonRangeAfterAllEntriesDoesNotThrow) {
 
   GoogleString json_dump;
   StringWriter writer(&json_dump);
-  EXPECT_NO_THROW(
-      logger_.DumpJSON(true /* show_graphs */, var_titles, start_time,
-                       end_time, kLoggingIntervalMs, &writer, &handler_));
+  EXPECT_NO_THROW(logger_.DumpJSON(true /* show_graphs */, var_titles,
+                                   start_time, end_time, kLoggingIntervalMs,
+                                   &writer, &handler_));
   // Output should still be parseable JSON.
   Json::Value parsed;
   Json::CharReaderBuilder reader_builder;

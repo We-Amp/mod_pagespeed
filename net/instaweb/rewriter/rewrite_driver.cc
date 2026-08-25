@@ -262,6 +262,17 @@ void RewriteDriver::PopulateRequestContext() {
     // OptionsAwareHTTPCacheCallback::IsCacheValid).
     request_context_->SetAcceptsWebpViaAcceptHeader(
         request_properties_->SupportsWebpInPlace());
+    // The AVIF counterpart, for the same cache-validity check. AVIF has no
+    // user-agent-derived grant, so there is no broad bit to set
+    // alongside it. SupportsAvifInPlace() ANDs the Accept-header fact with the
+    // downstream cache's advertised AVIF capability, exactly as its WebP twin
+    // above does -- so behind a PS-CapabilityList that omits the AVIF filter
+    // id the bit is false even for a request that advertised image/avif. That
+    // is the conservative direction (extra revalidation, never wrong bytes).
+    // Must be stamped here, before the Freeze() below -- every setter
+    // DCHECKs !frozen_.
+    request_context_->SetAcceptsAvifViaAcceptHeader(
+        request_properties_->SupportsAvifInPlace());
     request_context_->SetAcceptsGzip(request_properties_->AcceptsGzip());
     request_context_->Freeze();
   }
@@ -1278,6 +1289,24 @@ class CacheCallback : public OptionsAwareHTTPCacheCallback {
     if (!driver_->options()->serve_rewritten_webp_urls_to_any_agent() &&
         (headers.DetermineContentType() == &kContentTypeWebp) &&
         !async_fetch_->request_context()->accepts_webp()) {
+      return false;
+    }
+    // The same for AVIF. This is a distinct concern from the "Vary: Accept"
+    // check in OptionsAwareHTTPCacheCallback::IsCacheValid below, and is NOT
+    // covered by it: .pagespeed. output carries no Vary at all, so that clause
+    // never fires here. The exposure this closes is that the HTTP cache key is
+    // OutputResource::HttpCacheKey() -- the decoded, domain-mapped, unsharded
+    // URL -- which does not encode the requester's capabilities. A committed
+    // ".avif" entry minted by an AVIF-capable client is therefore a warm HIT
+    // for a client that cannot decode AVIF, and reconstruction (where
+    // ImageUrlEncoder's committed-URL reconcile lives) is short-circuited by
+    // that hit. accepts_avif_via_accept_header() is used rather than a broad
+    // twin because AVIF has only the one bit; it is the exact analogue of
+    // accepts_webp() above, which is broad only because WebP has a
+    // user-agent-derived grant to be broad about.
+    if (!driver_->options()->serve_rewritten_avif_urls_to_any_agent() &&
+        (headers.DetermineContentType() == &kContentTypeAvif) &&
+        !async_fetch_->request_context()->accepts_avif_via_accept_header()) {
       return false;
     }
     return OptionsAwareHTTPCacheCallback::IsCacheValid(key, headers);
@@ -2517,6 +2546,31 @@ OptionsAwareHTTPCacheCallback::OptionsAwareHTTPCacheCallback(
 
 OptionsAwareHTTPCacheCallback::~OptionsAwareHTTPCacheCallback() {}
 
+namespace {
+
+// #737: does this cached entry claim it was selected by the request's Accept
+// header -- or vary on dimensions nobody can restate? Case-insensitive
+// because a Vary value lists field NAMES, which are RFC 9110 tokens ("Vary:
+// accept" is the same claim as "Vary: Accept"); and "Vary: *" means the
+// response varies on unspecified dimensions, so reusing it as-selected is
+// never safe (RFC 9110 section 12.5.5). The byte-exact HasValue this
+// replaces missed both legal spellings, which let an origin's lowercase
+// Vary or wildcard bypass the WebP/AVIF as-selected guards entirely.
+// SCOPE, stated because the wildcard invites a broader reading: these arms
+// fire only for a request whose Accept did NOT advertise the format -- the
+// decode-safety question they exist for. For an advertising request a
+// Vary: * entry is reused exactly as before this fix; whether Vary: *
+// should revalidate for EVERY request is general Vary policy
+// (RespectVaryOnResources), deliberately not decided inside a format
+// guard.
+bool VaryClaimsAcceptOrWildcard(const ResponseHeaders& headers) {
+  return headers.HasValueCaseInsensitive(HttpAttributes::kVary,
+                                         HttpAttributes::kAccept) ||
+         headers.HasValueCaseInsensitive(HttpAttributes::kVary, "*");
+}
+
+}  // namespace
+
 bool OptionsAwareHTTPCacheCallback::IsCacheValid(
     const GoogleString& key, const ResponseHeaders& headers) {
   return IsCacheValid(key, *rewrite_options_, request_context(), headers);
@@ -2544,9 +2598,27 @@ bool OptionsAwareHTTPCacheCallback::IsCacheValid(
   // the broad accepts_webp() bit -- there the format is committed in the URL
   // and rewritten .webp entries carry no Vary: Accept, so this clause does
   // not fire for them.
+  // The Vary test is the case-insensitive token-plus-wildcard one:
+  // "Vary: accept" makes the same as-selected claim, and a "Vary: *" entry
+  // varies on dimensions this callback cannot restate, so neither is valid
+  // for a request whose own Accept header did not select it.
   if ((headers.DetermineContentType() == &kContentTypeWebp) &&
       !request_ctx->accepts_webp_via_accept_header() &&
-      headers.HasValue(HttpAttributes::kVary, HttpAttributes::kAccept)) {
+      VaryClaimsAcceptOrWildcard(headers)) {
+    return false;
+  }
+
+  // The same rule for AVIF. Without this arm a cached image/avif response that
+  // an origin selected on Accept is reused for clients that never advertised
+  // image/avif -- bytes they cannot decode. AVIF has no user-agent-derived
+  // grant to reason about (there is no legacy no-Accept AVIF population), so
+  // there is only the one bit and the arm is the strict mirror of the WebP one
+  // above: same narrow Accept-header-only test, same widened #737 Vary test
+  // (case-insensitive token, wildcard included). Entries with no such Vary claim are
+  // untouched, as are all .pagespeed. resource URLs.
+  if ((headers.DetermineContentType() == &kContentTypeAvif) &&
+      !request_ctx->accepts_avif_via_accept_header() &&
+      VaryClaimsAcceptOrWildcard(headers)) {
     return false;
   }
 

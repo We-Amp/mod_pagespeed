@@ -533,6 +533,14 @@ class ServerContext {
   // To set up AdminSite for SystemServerContext.
   virtual void PostInitHook();
 
+  // True for the factory's stub decoding server context (see
+  // RewriteDriverFactory::InitStubDecodingServerContext): a context that
+  // only backs the shared decoding driver and never serves requests.
+  // Subclasses use this to skip serving-only initialization such as
+  // admin/license setup.
+  bool is_decoding_stub() const { return is_decoding_stub_; }
+  void set_is_decoding_stub(bool x) { is_decoding_stub_ = x; }
+
   // Returns whether or not this attribute can be merged into headers
   // without additional considerations.
   static bool IsExcludedAttribute(const char* attribute);
@@ -728,6 +736,7 @@ class ServerContext {
 
   bool store_outputs_in_file_system_;
   bool response_headers_finalized_;
+  bool is_decoding_stub_;
   bool enable_property_cache_;
 
   NamedLockManager* lock_manager_;

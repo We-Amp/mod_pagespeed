@@ -2181,6 +2181,146 @@ TEST_F(RewriteDriverTest, ValidateCacheResponseRewrittenWebp) {
   options()->set_serve_rewritten_webp_urls_to_any_agent(false);
   EXPECT_TRUE(OptionsAwareHTTPCacheCallback::IsCacheValid(
       kOriginUrl, *options(), request_context, response_headers));
+
+  // #737: "Vary: accept" (lowercase) is the SAME as-selected claim -- a Vary
+  // value lists field names, which are case-insensitive tokens. The guard
+  // must fire for a non-advertising request exactly as it does for the
+  // canonical spelling above.
+  RequestContextPtr lc_context(
+      new RequestContext(kDefaultHttpOptionsForTests, new NullMutex, timer()));
+  lc_context->SetAcceptsWebp(false);
+  ResponseHeaders lc_headers;
+  lc_headers.Add(HttpAttributes::kContentType, kWebpMimeType);
+  lc_headers.SetDateAndCaching(MockTimer::kApr_5_2010_ms,
+                               300 * Timer::kSecondMs, "");
+  lc_headers.Add(HttpAttributes::kVary, "accept");
+  lc_headers.ComputeCaching();
+  EXPECT_FALSE(OptionsAwareHTTPCacheCallback::IsCacheValid(
+      kOriginUrl, *options(), lc_context, lc_headers));
+
+  // #737: "Vary: *" varies on dimensions nobody can restate, so it is never
+  // valid as-selected for a non-advertising request...
+  ResponseHeaders star_headers;
+  star_headers.Add(HttpAttributes::kContentType, kWebpMimeType);
+  star_headers.SetDateAndCaching(MockTimer::kApr_5_2010_ms,
+                                 300 * Timer::kSecondMs, "");
+  star_headers.Add(HttpAttributes::kVary, "*");
+  star_headers.ComputeCaching();
+  EXPECT_FALSE(OptionsAwareHTTPCacheCallback::IsCacheValid(
+      kOriginUrl, *options(), lc_context, star_headers));
+
+  // ...while a request that DID advertise the format is outside these arms'
+  // decode-safety question: the wildcard entry is reused exactly as before
+  // the fix (general Vary: * policy belongs to RespectVaryOnResources, not
+  // a format guard).
+  RequestContextPtr adv_context(
+      new RequestContext(kDefaultHttpOptionsForTests, new NullMutex, timer()));
+  adv_context->SetAcceptsWebpViaAcceptHeader(true);
+  EXPECT_TRUE(OptionsAwareHTTPCacheCallback::IsCacheValid(
+      kOriginUrl, *options(), adv_context, star_headers));
+}
+
+// The AVIF mirror of ValidateCacheResponseRewrittenWebp above. AVIF has only
+// the one, Accept-derived capability bit (no user-agent-derived grant exists
+// to be broader than it), so the "broad bit only" row has no AVIF counterpart.
+TEST_F(RewriteDriverTest, ValidateCacheResponseRewrittenAvif) {
+  const StringPiece kAvifMimeType = kContentTypeAvif.mime_type();
+  RequestContextPtr request_context(
+      new RequestContext(kDefaultHttpOptionsForTests, new NullMutex, timer()));
+  options()->ClearSignatureForTesting();
+  ResponseHeaders response_headers;
+  response_headers.Add(HttpAttributes::kContentType, kAvifMimeType);
+  response_headers.SetDateAndCaching(MockTimer::kApr_5_2010_ms,
+                                     300 * Timer::kSecondMs, "");
+  response_headers.ComputeCaching();
+  const char kOriginUrl[] = "foo.avif";
+
+  // No vary:accept: the entry makes no as-selected claim, so the client's AVIF
+  // capability is irrelevant and the entry stays valid either way. This is the
+  // row that keeps the fix from invalidating in-place AVIF output, which
+  // carries no Vary.
+  request_context->SetAcceptsAvifViaAcceptHeader(false);
+  options()->set_serve_rewritten_avif_urls_to_any_agent(true);
+  EXPECT_TRUE(OptionsAwareHTTPCacheCallback::IsCacheValid(
+      kOriginUrl, *options(), request_context, response_headers));
+  options()->set_serve_rewritten_avif_urls_to_any_agent(false);
+  EXPECT_TRUE(OptionsAwareHTTPCacheCallback::IsCacheValid(
+      kOriginUrl, *options(), request_context, response_headers));
+
+  request_context->SetAcceptsAvifViaAcceptHeader(true);
+  EXPECT_TRUE(OptionsAwareHTTPCacheCallback::IsCacheValid(
+      kOriginUrl, *options(), request_context, response_headers));
+
+  // Now add a Vary: Accept and the client's own Accept header starts to
+  // matter.
+  response_headers.Add(HttpAttributes::kVary, HttpAttributes::kAccept);
+  response_headers.ComputeCaching();
+
+  // vary:accept, the request never advertised image/avif: the entry's Vary
+  // claim would be false as-selected, so it is NOT valid and the request
+  // revalidates against the origin rather than being handed AVIF bytes it did
+  // not ask for.
+  request_context->SetAcceptsAvifViaAcceptHeader(false);
+  options()->set_serve_rewritten_avif_urls_to_any_agent(true);
+  EXPECT_FALSE(OptionsAwareHTTPCacheCallback::IsCacheValid(
+      kOriginUrl, *options(), request_context, response_headers));
+  options()->set_serve_rewritten_avif_urls_to_any_agent(false);
+  EXPECT_FALSE(OptionsAwareHTTPCacheCallback::IsCacheValid(
+      kOriginUrl, *options(), request_context, response_headers));
+
+  // vary:accept with an Accept-derived verdict: the Vary claim holds
+  // as-selected, the entry is valid.
+  request_context->SetAcceptsAvifViaAcceptHeader(true);
+  options()->set_serve_rewritten_avif_urls_to_any_agent(true);
+  EXPECT_TRUE(OptionsAwareHTTPCacheCallback::IsCacheValid(
+      kOriginUrl, *options(), request_context, response_headers));
+  options()->set_serve_rewritten_avif_urls_to_any_agent(false);
+  EXPECT_TRUE(OptionsAwareHTTPCacheCallback::IsCacheValid(
+      kOriginUrl, *options(), request_context, response_headers));
+
+  // The WebP arm is untouched by the AVIF arm: a WebP entry under the same
+  // Vary: Accept is still decided by the WebP bit alone, which this request
+  // never set.
+  ResponseHeaders webp_headers;
+  webp_headers.Add(HttpAttributes::kContentType, kContentTypeWebp.mime_type());
+  webp_headers.SetDateAndCaching(MockTimer::kApr_5_2010_ms,
+                                 300 * Timer::kSecondMs, "");
+  webp_headers.Add(HttpAttributes::kVary, HttpAttributes::kAccept);
+  webp_headers.ComputeCaching();
+  EXPECT_FALSE(OptionsAwareHTTPCacheCallback::IsCacheValid(
+      "foo.webp", *options(), request_context, webp_headers));
+
+  // #737 mirror rows: the widened Vary test moves on both arms together.
+  // Lowercase "vary: accept" fires for a non-advertising request...
+  RequestContextPtr lc_context(
+      new RequestContext(kDefaultHttpOptionsForTests, new NullMutex, timer()));
+  lc_context->SetAcceptsAvifViaAcceptHeader(false);
+  ResponseHeaders lc_headers;
+  lc_headers.Add(HttpAttributes::kContentType, kAvifMimeType);
+  lc_headers.SetDateAndCaching(MockTimer::kApr_5_2010_ms,
+                               300 * Timer::kSecondMs, "");
+  lc_headers.Add(HttpAttributes::kVary, "accept");
+  lc_headers.ComputeCaching();
+  EXPECT_FALSE(OptionsAwareHTTPCacheCallback::IsCacheValid(
+      kOriginUrl, *options(), lc_context, lc_headers));
+
+  // ...as does "Vary: *"...
+  ResponseHeaders star_headers;
+  star_headers.Add(HttpAttributes::kContentType, kAvifMimeType);
+  star_headers.SetDateAndCaching(MockTimer::kApr_5_2010_ms,
+                                 300 * Timer::kSecondMs, "");
+  star_headers.Add(HttpAttributes::kVary, "*");
+  star_headers.ComputeCaching();
+  EXPECT_FALSE(OptionsAwareHTTPCacheCallback::IsCacheValid(
+      kOriginUrl, *options(), lc_context, star_headers));
+
+  // ...and an advertising request keeps reusing the wildcard entry, same
+  // scope rule as the WebP arm.
+  RequestContextPtr adv_context(
+      new RequestContext(kDefaultHttpOptionsForTests, new NullMutex, timer()));
+  adv_context->SetAcceptsAvifViaAcceptHeader(true);
+  EXPECT_TRUE(OptionsAwareHTTPCacheCallback::IsCacheValid(
+      kOriginUrl, *options(), adv_context, star_headers));
 }
 
 TEST_F(RewriteDriverTest, SetRequestHeadersPopulatesWebpAccept) {
@@ -2236,6 +2376,41 @@ TEST_F(RewriteDriverTest, SetRequestHeadersPopulatesWebpUaFallback) {
   EXPECT_TRUE(request_properties->SupportsWebpRewrittenUrls());
   EXPECT_TRUE(rewrite_driver()->request_context()->accepts_webp());
   EXPECT_FALSE(
+      rewrite_driver()->request_context()->accepts_webp_via_accept_header());
+}
+
+// The AVIF bit reaches the RequestContext, which is what the cache-validity
+// check reads. Without this wiring the guard arm above can never fire.
+TEST_F(RewriteDriverTest, SetRequestHeadersPopulatesAvifAccept) {
+  RequestHeaders headers;
+  headers.Add(HttpAttributes::kAccept, "image/avif");
+  headers.Add(HttpAttributes::kUserAgent,
+              UserAgentMatcherTestBase::kChrome42UserAgent);
+  rewrite_driver()->SetRequestHeaders(headers);
+  const RequestProperties* request_properties =
+      rewrite_driver()->request_properties();
+  EXPECT_TRUE(request_properties->SupportsAvifInPlace());
+  EXPECT_TRUE(
+      rewrite_driver()->request_context()->accepts_avif_via_accept_header());
+  // Advertising AVIF says nothing about WebP.
+  EXPECT_FALSE(
+      rewrite_driver()->request_context()->accepts_webp_via_accept_header());
+}
+
+// No "image/avif" in Accept means no AVIF bit -- there is no user-agent
+// fallback that could grant it, so this stays false for every UA.
+TEST_F(RewriteDriverTest, SetRequestHeadersPopulatesAvifNoAccept) {
+  RequestHeaders headers;
+  headers.Add(HttpAttributes::kAccept, "image/webp");
+  headers.Add(HttpAttributes::kUserAgent,
+              UserAgentMatcherTestBase::kChrome42UserAgent);
+  rewrite_driver()->SetRequestHeaders(headers);
+  const RequestProperties* request_properties =
+      rewrite_driver()->request_properties();
+  EXPECT_FALSE(request_properties->SupportsAvifInPlace());
+  EXPECT_FALSE(
+      rewrite_driver()->request_context()->accepts_avif_via_accept_header());
+  EXPECT_TRUE(
       rewrite_driver()->request_context()->accepts_webp_via_accept_header());
 }
 

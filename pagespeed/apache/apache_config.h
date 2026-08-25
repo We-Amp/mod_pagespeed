@@ -57,6 +57,23 @@ class ApacheConfig : public SystemRewriteOptions {
   }
   const GoogleString& proxy_auth() const { return proxy_auth_.value(); }
 
+  // Path of the optimizer daemon's notification socket
+  // (ModPagespeedDaemonSocketPath).  Empty when no daemon is configured.
+  const GoogleString& daemon_socket_path() const {
+    return daemon_socket_path_.value();
+  }
+
+  // Path of the optimizer daemon's shared cache volume
+  // (ModPagespeedDaemonVolumePath).  Empty when no daemon is configured.
+  //
+  // Deliberately independent of FileCachePath: the recommended deployment
+  // keeps the two at DIFFERENT paths so one volume file's health is not a
+  // shared-fate dependency of both the classic cache and the daemon's.  See
+  // docs/daemon-adapter-deployment.md.
+  const GoogleString& daemon_volume_path() const {
+    return daemon_volume_path_.value();
+  }
+
   bool force_buffering() const { return force_buffering_.value(); }
   void set_force_buffering(bool x) { set_option(x, &force_buffering_); }
 
@@ -114,6 +131,8 @@ class ApacheConfig : public SystemRewriteOptions {
   Option<GoogleString> proxy_auth_;  // CookieName[=Value][:RedirectUrl]
   Option<GoogleString> measurement_proxy_root_;
   Option<GoogleString> measurement_proxy_password_;
+  Option<GoogleString> daemon_socket_path_;
+  Option<GoogleString> daemon_volume_path_;
 
   ApacheConfig(const ApacheConfig&) = delete;
   ApacheConfig& operator=(const ApacheConfig&) = delete;

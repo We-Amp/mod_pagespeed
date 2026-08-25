@@ -57,7 +57,7 @@
 #include "pagespeed/kernel/http/google_url.h"
 #include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/response_headers.h"
-#include "pagespeed/system/in_place_resource_recorder.h"
+#include "pagespeed/system/ipro_recorder.h"
 #include "pagespeed/system/loopback_route_fetcher.h"
 #include "pagespeed/system/system_caches.h"
 #include "pagespeed/system/system_server_context.h"
@@ -749,8 +749,9 @@ apr_status_t instaweb_in_place_filter(ap_filter_t* filter,
   }
 
   // This should always be set by handle_as_in_place() in instaweb_handler.cc.
-  InPlaceResourceRecorder* recorder =
-      static_cast<InPlaceResourceRecorder*>(filter->ctx);
+  // The concrete recorder depends on which in-place substrate this server is
+  // on; these filters drive the lifecycle and do not care which.
+  IproRecorder* recorder = static_cast<IproRecorder*>(filter->ctx);
   CHECK(recorder != nullptr);
 
   bool first = true;
@@ -781,8 +782,8 @@ apr_status_t instaweb_in_place_filter(ap_filter_t* filter,
                                    request->content_type);
         }
 
-        recorder->ConsiderResponseHeaders(
-            InPlaceResourceRecorder::kPreliminaryHeaders, &response_headers);
+        recorder->ConsiderResponseHeaders(IproRecorder::kPreliminaryHeaders,
+                                          &response_headers);
       }
 
       if (recorder->failed()) {
@@ -836,8 +837,7 @@ apr_status_t instaweb_in_place_fix_headers_filter(ap_filter_t* filter,
   ApacheServerContext* server_context =
       InstawebContext::ServerContextFromServerRec(request->server);
   if (!server_context->global_config()->unplugged()) {
-    InPlaceResourceRecorder* recorder =
-        static_cast<InPlaceResourceRecorder*>(filter->ctx);
+    IproRecorder* recorder = static_cast<IproRecorder*>(filter->ctx);
     if (recorder != nullptr) {
       int s_maxage_sec =
           server_context->global_config()->EffectiveInPlaceSMaxAgeSec();
@@ -888,8 +888,7 @@ apr_status_t instaweb_in_place_check_headers_filter(ap_filter_t* filter,
   }
 
   // This should always be set by Instaweb::HandleAsInPlace().
-  InPlaceResourceRecorder* recorder =
-      static_cast<InPlaceResourceRecorder*>(filter->ctx);
+  IproRecorder* recorder = static_cast<IproRecorder*>(filter->ctx);
 
   // We do not want to call Done until the last bucket comes in, because the
   // instaweb_in_place_filter needs to record the body, so iterate to EOS
@@ -1086,6 +1085,24 @@ int pagespeed_post_config(apr_pool_t* pool, apr_pool_t* plog, apr_pool_t* ptemp,
         server_context->server()->server_hostname,
         server_context->server()->port);
     return HTTP_INTERNAL_SERVER_ERROR;
+  }
+
+  // Resolve every server's relationship with the optimizer daemon before any
+  // request can be served, so the serving path only ever reads a verdict.
+  //
+  // A refusal here fails the whole start, which is the point: the single
+  // condition that refuses is a cache-volume sizing divergence between this
+  // module and the daemon, and that divergence is SILENT at run time -- the
+  // two sides would open different volume files, share nothing, and look
+  // healthy while optimizing nothing.  Every other daemon problem degrades to
+  // in-place optimization off with one loud line, and the server starts.
+  for (SystemServerContext* system_server_context : server_contexts) {
+    ApacheServerContext* server_context =
+        dynamic_cast<ApacheServerContext*>(system_server_context);
+    CHECK(server_context != nullptr);
+    if (!server_context->RunDaemonStartupCheck()) {
+      return HTTP_INTERNAL_SERVER_ERROR;
+    }
   }
 
   // chown any directories we created. We may have to do it here in

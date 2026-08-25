@@ -19,6 +19,24 @@
 //   X(default_value, member_name, id, option_constant, scope, help,
 //     safe_to_print)
 //
+// CHANGING A default_value HERE HAS TWO CONSEQUENCES, not one.
+//   1. Bump RewriteOptions::kOptionsVersion, which flushes the metadata cache.
+//      (Long-standing rule; see the comment on that constant.)
+//   2. Consider bumping kOptionContextFormatVersion in
+//      net/instaweb/rewriter/public/option_context.h.  The per-request option
+//      context carries only options somebody explicitly SET, so a default
+//      change is INVISIBLE to it: configurations that never set this option
+//      keep the same signature and keep reaching work cached under the old
+//      behaviour.  Bumping that token is the only thing that re-keys them, and
+//      it costs a full cold cache on both sides of that contract -- so bump it
+//      when the new default changes what bytes a client receives, and do not
+//      when it cannot.  Decide explicitly: forgetting is silent stale content.
+//
+// The safe_to_print column is also load-bearing beyond debug output: an option
+// marked false has its VALUE withheld from the option-context payload and
+// replaced by a hash of itself, which is what keeps secrets out of anything
+// derived from a configuration.  Mark anything secret-bearing false.
+//
 // The table is split into segments to preserve registration order with
 // non-table calls (AddRequestProperty, options needing local variable
 // initialization, or post-registration tweaks) that are interleaved in

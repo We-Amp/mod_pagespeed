@@ -105,6 +105,14 @@ class Headers {
   // Is value one of the values in Lookup(name)?
   bool HasValue(const StringPiece& name, const StringPiece& value) const;
 
+  // Like HasValue, but compares the value case-insensitively. For header
+  // fields whose values are RFC 9110 tokens (e.g. the field names listed in
+  // a Vary value), token comparison is case-insensitive, and the byte-exact
+  // HasValue above silently misses legal spellings. Callers that
+  // compare opaque or case-significant values must keep using HasValue.
+  bool HasValueCaseInsensitive(const StringPiece& name,
+                               const StringPiece& value) const;
+
   // NumAttributeNames is also const but not thread-safe.
   int NumAttributeNames() const;
 

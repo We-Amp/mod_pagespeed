@@ -49,7 +49,9 @@ pagespeed_cc_test(
         "apache_mmap_bucket_test.cc",
         "apache_mpm_detection_test.cc",
         "apache_writer_test.cc",
+        "daemon_seam_test.cc",
         "header_util_test.cc",
+        "in_place_not_modified_vary_fetch_test.cc",
         "simple_buffered_apache_fetch_test.cc",
     ],
     copts = [
@@ -74,6 +76,10 @@ pagespeed_cc_test(
     data = [
         # the design record: apache_mpm_detection_test.cc reads this source to pin the
         # FinalizeThreadCounts() call site in the post-config hook.
+        # daemon_seam_test.cc reads mod_instaweb.cc and instaweb_handler.cc for
+        # the same reason: both call sites need a live httpd to execute.
+        "//pagespeed/apache:apache_sources",
+        "//pagespeed/apache:instaweb_handler_src",
         "//pagespeed/apache:mod_instaweb_src",
         "//test/net/instaweb/rewriter:testdata",
     ],

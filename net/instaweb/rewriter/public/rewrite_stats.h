@@ -107,6 +107,34 @@ class RewriteStats {
   Variable* ipro_not_in_cache() { return ipro_not_in_cache_; }
   Variable* ipro_not_rewritable() { return ipro_not_rewritable_; }
 
+  // The daemon substrate's two serving outcomes; see the comment beside
+  // their names in rewrite_stats.cc for why they are not the three above.
+  Variable* ipro_daemon_served() { return ipro_daemon_served_; }
+  Variable* ipro_daemon_fallthrough() { return ipro_daemon_fallthrough_; }
+
+  // Worker re-notifies sent on fallback hits, and sends that FAILED.  NOT
+  // partition members: every fallback hit is already counted in
+  // ipro_daemon_served.  Only send outcomes move these two -- see the
+  // comment beside their names in rewrite_stats.cc.
+  Variable* ipro_daemon_fallback_notified() {
+    return ipro_daemon_fallback_notified_;
+  }
+  Variable* ipro_daemon_fallback_notify_failed() {
+    return ipro_daemon_fallback_notify_failed_;
+  }
+
+  // Origin-refreshed sentinels sent on age-expired variant fall-throughs,
+  // and sends that FAILED.  NOT partition members either: every flagged
+  // fall-through is already counted in ipro_daemon_fallthrough.  Only send
+  // outcomes move these two -- see the comment beside their names in
+  // rewrite_stats.cc.
+  Variable* ipro_daemon_refresh_notified() {
+    return ipro_daemon_refresh_notified_;
+  }
+  Variable* ipro_daemon_refresh_notify_failed() {
+    return ipro_daemon_refresh_notify_failed_;
+  }
+
   Variable* downstream_cache_purge_attempts() {
     return downstream_cache_purge_attempts_;
   }
@@ -170,6 +198,12 @@ class RewriteStats {
   Variable* ipro_served_;
   Variable* ipro_not_in_cache_;
   Variable* ipro_not_rewritable_;
+  Variable* ipro_daemon_served_;
+  Variable* ipro_daemon_fallthrough_;
+  Variable* ipro_daemon_fallback_notified_;
+  Variable* ipro_daemon_fallback_notify_failed_;
+  Variable* ipro_daemon_refresh_notified_;
+  Variable* ipro_daemon_refresh_notify_failed_;
   Variable* downstream_cache_purge_attempts_;
   Variable* successful_downstream_cache_purges_;
 

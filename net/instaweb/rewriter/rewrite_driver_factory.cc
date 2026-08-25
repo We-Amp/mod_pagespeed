@@ -550,6 +550,9 @@ void RewriteDriverFactory::InitDecodingDriver(ServerContext* server_context) {
 }
 
 void RewriteDriverFactory::InitStubDecodingServerContext(ServerContext* sc) {
+  // Mark the context as a decoding stub before PostInitHook() runs so
+  // subclass hooks can skip serving-only setup.
+  sc->set_is_decoding_stub(true);
   sc->set_timer(timer());
   sc->set_url_namer(url_namer());
   sc->set_hasher(hasher());

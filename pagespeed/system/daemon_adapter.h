@@ -1,0 +1,227 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+#ifndef PAGESPEED_SYSTEM_DAEMON_ADAPTER_H_
+#define PAGESPEED_SYSTEM_DAEMON_ADAPTER_H_
+
+#include <cstddef>
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <vector>
+
+#include "pagespeed/kernel/base/string.h"
+#include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/system/daemon_abi.h"
+#include "pagespeed/system/daemon_health.h"
+
+namespace net_instaweb {
+
+class MessageHandler;
+
+// Whether the server may start at all.  Reserved, deliberately, for exactly
+// one class of condition: see StartupCheck.
+enum class DaemonStartupStatus {
+  kOk,
+  kRefuseToStart,
+};
+
+// ---------------------------------------------------------------------------
+// The adapter's startup half: configuration, the volume-sizing mirror, and
+// the health verdict the serving seam reads.
+//
+// THE PROBLEM THE MIRROR SOLVES.  The daemon derives its cache volume's
+// on-disk FILENAME from the volume's geometry, and the size is the geometry
+// input an operator sets.  A process that opens the same directory with a
+// different size does not collide with the daemon and does not fail: it
+// silently CREATES AND USES A DIFFERENT FILE, shares nothing, and runs a
+// permanently cold cache, with no error on either side.  Every request works.
+// Nothing is ever optimized.  That silence is why this one disagreement is
+// worth refusing to start over while every other daemon problem degrades.
+//
+// WHAT THE MIRROR IS.  The module does not carry a size of its own and does
+// not compare against one — a compiled-in constant could only ever agree with
+// the daemon's compiled-in default, which is not what the daemon runs on.  The
+// module INHERITS the size the daemon publishes, and the mirror is the check
+// that inheriting it actually landed on the daemon's file.
+//
+// WHAT IT NEVER DOES.  While the size is unknown it neither opens the volume
+// nor creates one — creating a volume is the failure being guarded against,
+// and a guard that authors it while checking is worse than no guard.  Once
+// the size IS known the volume is opened, and opening can still create a file
+// if the published size disagrees with what is on disk; that case is detected
+// after the fact and refuses the start (last row below).
+//
+// THE STATE MACHINE, in the order Resolve() walks it:
+//
+//   neither path configured        -> kNotConfigured, start.  Classic path.
+//   only one path configured       -> kUnavailable,   start.  Config mistake,
+//                                     and a loud one already.
+//   library absent / wrong ABI     -> kUnavailable,   start.
+//   daemon does not publish a size -> kUnavailable,   start.  An older daemon
+//                                     package; the mirror cannot be evaluated,
+//                                     so the volume is not touched.
+//   published size is 0 (unknown)  -> kUnavailable,   start.  No shared config
+//                                     (the daemon has never run), unreadable,
+//                                     or a schema this build refuses.
+//   size known, no volume on disk  -> kUnavailable,   start.  The daemon has
+//                                     not created its volume; we must not.
+//   size known, >1 volume on disk  -> proceed, and WARN.  Left-over files from
+//                                     an earlier cache size are the expected
+//                                     steady state after a resize; the daemon
+//                                     does not remove the one it stopped
+//                                     using.  The published size names exactly
+//                                     one of them and the attach check below
+//                                     proves we landed on it, so this is
+//                                     wasted disk, not a split.
+//   size known, opening created
+//     a NEW volume file            -> REFUSE TO START.  The published size
+//                                     disagrees with what is on disk; we just
+//                                     authored the split and say so, naming
+//                                     the file to remove.
+//   size known, opening attached
+//     to an existing file          -> kReady, start.
+//
+// The single refusal is the volume-sizing mirror and nothing else, which is
+// what keeps refuse-to-start narrow: it is the one state that is silent AND
+// wrong.  Everything else is loud by construction, and a second way to brick a
+// start buys nothing for a failure an operator can already see — least of all
+// for one a routine resize produces.
+//
+// THE RAM TIER is not part of the mirror.  It does not participate in the
+// filename derivation, so it cannot split the cache in two.  The adapter
+// forces it to zero unconditionally: this module must never opt in to a
+// per-process RAM tier over a volume another process writes, because such a
+// tier is keyed without any validation against the on-disk entry and would
+// keep serving bytes the daemon has already replaced.  Relying on the peer's
+// default is not enough — the peer documents that callers may opt in, so "we
+// did not opt in" has to be something this module enforces.
+// ---------------------------------------------------------------------------
+class DaemonAdapter {
+ public:
+  // Produces a bound client library or nullptr with *error set.  Injectable
+  // so the startup logic can be exercised against a peer that is absent,
+  // older, mis-sized, or well-behaved, none of which a unit test can install.
+  using AbiLoader =
+      std::function<DaemonAbi*(StringPiece path, GoogleString* error)>;
+
+  // The RAM tier this module opens the shared volume with.  Not a mirror: a
+  // fixed floor.  MUST stay zero.
+  static constexpr size_t kMirroredRamCacheSizeBytes = 0;
+
+  // `socket_path` and `volume_path` come straight from configuration; either
+  // or both may be empty, which is the unconfigured state.  Does not take
+  // ownership of `handler`.
+  DaemonAdapter(StringPiece socket_path, StringPiece volume_path,
+                MessageHandler* handler);
+  ~DaemonAdapter();
+
+  DaemonAdapter(const DaemonAdapter&) = delete;
+  DaemonAdapter& operator=(const DaemonAdapter&) = delete;
+
+  // Resolves health once and returns whether the server may start.
+  //
+  // Announces at most one message, and announces each DISTINCT condition at
+  // most once PER PROCESS — not per adapter.  A server re-reads its
+  // configuration during startup and rebuilds its contexts, so a per-object
+  // latch would say "exactly one line" and deliver two; the operator
+  // instruction in the deployment doc ("read the error log once") depends on
+  // the stronger property.  Distinct rather than global so a second virtual
+  // host failing for a different reason is still heard.
+  DaemonStartupStatus StartupCheck();
+
+  DaemonHealth health() const { return health_; }
+
+  // The bound client library, or nullptr when there is none.  Borrowed.
+  const DaemonAbi* abi() const { return abi_.get(); }
+
+  // The shared cache handle this process records through, opening it on first
+  // use.  Returns nullptr unless health() is kReady.
+  //
+  // OPENED HERE, NOT AT STARTUP, and the difference is the fork.  The startup
+  // check runs in the server's parent process and closes the volume again
+  // precisely so that no child inherits a handle it never asked for.  A
+  // request-serving process opens its own, once, and keeps it: the handle is
+  // per-process state, and there is no correct way to have made it before the
+  // process existed.
+  //
+  // Thread-safe; the open happens once per adapter however many threads race
+  // for it.
+  void* RecordCache();
+
+  bool configured() const {
+    return !socket_path_.empty() && !volume_path_.empty();
+  }
+
+  const GoogleString& socket_path() const { return socket_path_; }
+  const GoogleString& volume_path() const { return volume_path_; }
+
+  // Applies this module's fixed RAM-tier floor and the INHERITED volume size
+  // to a config the daemon has just initialised.  `inherited_size` must be a
+  // size the daemon published; passing 0 is a programming error and is
+  // rejected rather than defaulted.
+  static bool ApplyInheritedSizing(PsCacheConfig* config,
+                                   uint64_t inherited_size);
+
+  // The daemon volume files present for `volume_path`.
+  //
+  // The daemon names its volume `<stem>-<format>-<geohash>`, so a
+  // geometry-sensitive rename shows up as a SECOND file beside the configured
+  // stem rather than as an error.  Counting them before and after an open is
+  // what turns "did we land on the daemon's file" into an observation instead
+  // of an assumption.  Both the stem-prefix and inside-the-directory shapes
+  // are scanned because the configured path may be either.
+  static std::vector<GoogleString> VolumeFiles(StringPiece volume_path);
+
+  // Overrides the library binder and the library path.  Test seam only.
+  void set_abi_loader(AbiLoader loader) { abi_loader_ = std::move(loader); }
+  void set_library_path(StringPiece path) { path.CopyToString(&library_path_); }
+
+  // Forget every condition announced so far.  Tests only: the latch is
+  // process-wide by design, and a test binary is one process.
+  static void ResetAnnouncementsForTesting();
+
+ private:
+  static bool SocketAnswers(StringPiece path, GoogleString* error);
+
+  DaemonStartupStatus Resolve(GoogleString* error);
+
+  GoogleString socket_path_;
+  GoogleString volume_path_;
+  GoogleString library_path_;
+  MessageHandler* handler_;
+  AbiLoader abi_loader_;
+  std::unique_ptr<DaemonAbi> abi_;
+  DaemonHealth health_ = DaemonHealth::kNotConfigured;
+  // The size the daemon published, kept from the startup check so the
+  // per-process open uses the same one rather than asking again -- a second
+  // read could see a different answer and open a different file.
+  uint64_t inherited_volume_size_ = 0;
+  std::mutex record_cache_mutex_;
+  void* record_cache_ = nullptr;
+  bool record_cache_attempted_ = false;
+  // Set when the volume directory holds left-over files from an earlier cache
+  // size.  Reported on the healthy path, where nothing else would mention it.
+  GoogleString extra_volume_warning_;
+};
+
+}  // namespace net_instaweb
+
+#endif  // PAGESPEED_SYSTEM_DAEMON_ADAPTER_H_
