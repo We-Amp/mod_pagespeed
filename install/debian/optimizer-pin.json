@@ -11,7 +11,7 @@
     "optimizer release FIRST, record the pin, then cut the module release.",
     "A PLACEHOLDER tag makes the release lane refuse loudly."
   ],
-  "tag": "optimizer-v1.16.0-rc.1",
+  "tag": "optimizer-v1.16.0-rc.2",
   "mps2_commit": "91aa3a149ee22e0379d22b6dd12e232b9d75cbb4",
-  "sha256sums_sha256": "bcba75fc13a4547dc252c1026a43cfd590045e2c83388bcd06039fb1076d69db"
+  "sha256sums_sha256": "426890b5dc43eb9590f063b7c230182300325478dfe07169bd0889d65d84862b"
 }
