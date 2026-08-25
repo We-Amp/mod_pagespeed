@@ -761,14 +761,19 @@ if [ "${NGX_SRC_MODE}" = "distro" ] && { [ "${DISTRO}" = "el9" ] || [ "${DISTRO}
     || { echo "ERROR: AlmaLinux nginx SRPM ${NGX_SRPM} is not GPG-signed/trusted: $(rpm -K "${NGX_SRPM}")" >&2; exit 1; }
   # Install the SRPM + run %prep (rpmbuild -bp) to apply AlmaLinux's full patch
   # series. --nodeps: %prep needs none of nginx's BuildRequires (perl/gd/geoip).
-  rpm -i "${NGX_SRPM}"
-  rpmbuild -bp --nodeps "${HOME}/rpmbuild/SPECS/nginx.spec"
-  # The prepped tree lands under ~/rpmbuild/BUILD, NOT NGX_BUILD_DIR. EXACT-name
+  # Keep rpm's _topdir CONTAINER-LOCAL: on Docker Desktop's bind mounts
+  # (macOS/virtiofs) rpm's transient write-only cpio files become unopenable
+  # ("cpio: open failed - Permission denied" — the rc.2 arm64 el9 leg proved
+  # it). A mktemp topdir sidesteps the mount's permission semantics entirely.
+  SRPM_TOPDIR=$(mktemp -d -t nginx-srpm-topdir.XXXXXX)
+  rpm -i --define "_topdir ${SRPM_TOPDIR}" "${NGX_SRPM}"
+  rpmbuild -bp --nodeps --define "_topdir ${SRPM_TOPDIR}" "${SRPM_TOPDIR}/SPECS/nginx.spec"
+  # The prepped tree lands under the topdir's BUILD, NOT NGX_BUILD_DIR. EXACT-name
   # match (nginx-${NGINX_SRC_VERSION}) — never a glob — because %prep leaves a
   # nested FULL copy named nginx-<EVR>-src INSIDE the top-level tree.
-  NGX_SRC="$(find "${HOME}/rpmbuild/BUILD" -maxdepth 2 -type d -name "nginx-${NGINX_SRC_VERSION}" 2>/dev/null | sort | head -1)"
+  NGX_SRC="$(find "${SRPM_TOPDIR}/BUILD" -maxdepth 2 -type d -name "nginx-${NGINX_SRC_VERSION}" 2>/dev/null | sort | head -1)"
   [ -n "${NGX_SRC}" ] && [ -d "${NGX_SRC}/src" ] && [ -x "${NGX_SRC}/configure" ] \
-    || { echo "ERROR: rpmbuild -bp did not produce a prepped nginx-${NGINX_SRC_VERSION} tree under ${HOME}/rpmbuild/BUILD" >&2; exit 1; }
+    || { echo "ERROR: rpmbuild -bp did not produce a prepped nginx-${NGINX_SRC_VERSION} tree under ${SRPM_TOPDIR}/BUILD" >&2; exit 1; }
   echo "    distro nginx source: ${NGX_SRC} (Alma-signed SRPM; NGINX_VERSION $(awk -F'"' '/define NGINX_VERSION/{print $2}' "${NGX_SRC}/src/core/nginx.h"))"
 elif [ "${NGX_SRC_MODE}" = "distro" ]; then
   # the design record P4 ABI-drift fix — build against the DISTRO's OWN patched nginx
