@@ -99,6 +99,15 @@ do_package() {
   echo "Packaging ${HOST_ARCH}..."
   PREDEPENDS="$COMMON_PREDEPS"
   DEPENDS="${COMMON_DEPS}"
+  if [ -n "${OPTIMIZER_DEB_VERSION}" ]; then
+    # Exact-version dependency: the module serves through the optimizer
+    # daemon, and the pair is only supported at matching versions --
+    # upgrades and rollbacks move both packages together.
+    DEPENDS="${DEPENDS}, pagespeed-optimizer (= ${OPTIMIZER_DEB_VERSION})"
+  else
+    echo "warning: packaging WITHOUT a pagespeed-optimizer dependency;" \
+      "a serving pair build must pass -d <optimizer-deb-version>" >&2
+  fi
   PROVIDES="${PACKAGE}"
   CONFLICTS=""
   REPLACES=""
@@ -128,11 +137,13 @@ usage() {
   echo "-o dir     package output directory [${OUTPUTDIR}]"
   echo "-b dir     build input directory    [${BUILDDIR}]"
   echo "-c channel (ignored, kept for backward compatibility)"
+  echo "-d version pagespeed-optimizer version for an exact-version Depends"
+  echo "           (omitting it packages without the dependency, with a warning)"
   echo "-h         this help message"
 }
 
 process_opts() {
-  while getopts ":o:b:c:a:h" OPTNAME
+  while getopts ":o:b:c:a:d:h" OPTNAME
   do
     case $OPTNAME in
       o )
@@ -147,6 +158,16 @@ process_opts() {
         ;;
       a )
         TARGETARCH="$OPTARG"
+        ;;
+      d )
+        OPTIMIZER_DEB_VERSION="$OPTARG"
+        case "$OPTIMIZER_DEB_VERSION" in
+          *[!A-Za-z0-9.+~-]* | "" )
+            echo "'-d' takes a Debian package version" \
+              "([A-Za-z0-9.+~-], no epochs)." >&2
+            exit 1
+            ;;
+        esac
         ;;
       h )
         usage
@@ -180,6 +201,9 @@ DEB_FILES="${TMPFILEDIR}/files"
 DEB_CONTROL="${TMPFILEDIR}/control"
 DEB_SUBST="${SUBSTFILEDIR}/debian/substvars"
 CHANNEL="beta"
+# When set (-d), the package hard-depends on pagespeed-optimizer at exactly
+# this version: the serving module and the optimizer daemon ship as a pair.
+OPTIMIZER_DEB_VERSION=""
 # Default target architecture to same as build host.
 case "$(uname -m)" in
   x86_64)  TARGETARCH="x64" ;;

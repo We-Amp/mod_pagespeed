@@ -73,6 +73,16 @@ do_package() {
   fi
   DEPENDS="$DEPENDS, \
   libstdc++ >= 4.1.2"
+  if [ -n "${OPTIMIZER_RPM_VERSION}" ]; then
+    # Exact-version dependency: the module serves through the optimizer
+    # daemon, and the pair is only supported at matching versions --
+    # upgrades and rollbacks move both packages together.
+    DEPENDS="$DEPENDS, \
+  pagespeed-optimizer = ${OPTIMIZER_RPM_VERSION}"
+  else
+    echo "warning: packaging WITHOUT a pagespeed-optimizer dependency;" \
+      "a serving pair build must pass -d <optimizer-rpm-version>" >&2
+  fi
   gen_spec
 
   # Create temporary rpmbuild dirs. Keep the buildroot (%install staging) DISTINCT
@@ -113,12 +123,13 @@ usage() {
   echo "-o dir     package output directory [${OUTPUTDIR}]"
   echo "-b dir     build input directory    [${BUILDDIR}]"
   echo "-p         cPanel EasyApache 4 build"
+  echo "-d version exact pagespeed-optimizer version to depend on"
   echo "-c channel (ignored, kept for backward compatibility)"
   echo "-h         this help message"
 }
 
 process_opts() {
-  while getopts ":o:b:c:a:ph" OPTNAME
+  while getopts ":o:b:c:a:d:ph" OPTNAME
   do
     case $OPTNAME in
       o )
@@ -136,6 +147,16 @@ process_opts() {
         ;;
       p )
         CPANEL=true
+        ;;
+      d )
+        OPTIMIZER_RPM_VERSION="$OPTARG"
+        case "$OPTIMIZER_RPM_VERSION" in
+          *[!A-Za-z0-9.~^+]* | "" )
+            echo "'-d' takes an RPM package version" \
+              "([A-Za-z0-9.~^+], no epochs, no release suffix)." >&2
+            exit 1
+            ;;
+        esac
         ;;
       h )
         usage
@@ -175,6 +196,9 @@ case "$(uname -m)" in
 esac
 SPEC="${TMPFILEDIR}/mod-pagespeed.spec"
 CPANEL=false
+# When set (-d), the package hard-depends on pagespeed-optimizer at exactly
+# this version (the serving-pair contract).
+OPTIMIZER_RPM_VERSION=""
 
 # call cleanup() on exit
 trap cleanup 0

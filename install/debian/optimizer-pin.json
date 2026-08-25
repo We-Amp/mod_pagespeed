@@ -1,0 +1,17 @@
+{
+  "_comment": [
+    "Pin for the pagespeed-optimizer release the serving pair ships with.",
+    "tag: the optimizer release tag on the optimizer repository (optimizer-v<upstream>);",
+    "it must equal optimizer-v + this release's upstream version (module-only",
+    "reships drop the +rN tail and keep depending on the GA pair).",
+    "mps2_commit: the optimizer-repo commit that release was built from (provenance).",
+    "sha256sums_sha256: sha256 of that release's SHA256SUMS file; the fetch job",
+    "verifies the manifest against this hash and every artifact against the",
+    "manifest. Update this file as part of cutting each train: cut the",
+    "optimizer release FIRST, record the pin, then cut the module release.",
+    "A PLACEHOLDER tag makes the release lane refuse loudly."
+  ],
+  "tag": "optimizer-v1.16.0-rc.1",
+  "mps2_commit": "91aa3a149ee22e0379d22b6dd12e232b9d75cbb4",
+  "sha256sums_sha256": "bcba75fc13a4547dc252c1026a43cfd590045e2c83388bcd06039fb1076d69db"
+}
