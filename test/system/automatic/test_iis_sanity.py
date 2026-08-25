@@ -170,3 +170,9 @@ class TestIisCompression:
         # or server doesn't support gzip (which is also valid)
         if content_encoding:
             assert "gzip" in content_encoding.lower()
+
+
+if __name__ == "__main__":
+    # Route through SystemExit: a bare pytest.main(...) only returns its
+    # status, and a test main that drops it exits 0 on a red suite -- vacuously green, the gate cannot report failure.
+    raise SystemExit(pytest.main([__file__, "-v"]))

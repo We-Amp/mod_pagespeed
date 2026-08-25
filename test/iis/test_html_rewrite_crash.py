@@ -108,4 +108,4 @@ class TestHTMLRewriteStress:
 
 
 if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+    raise SystemExit(pytest.main([__file__, "-v"]))

@@ -25,6 +25,7 @@ py_library(
         "__init__.py",
         "assertions.py",
         "client.py",
+        "pytest_main.py",
         "require.py",
         "stats.py",
     ],
@@ -41,6 +42,32 @@ py_library(
 py_test(
     name = "test_framework",
     srcs = ["test_framework.py"],
+    deps = [
+        ":pagespeed_test_framework",
+        # test_framework.py's TestPytestTimeoutScaling does `import conftest`
+        # (test/system/conftest.py). Without the dep it is missing from the
+        # runfiles and those cases fail under bazel while direct pytest --
+        # which has test/system/ on sys.path -- passes.
+        "//test/system:conftest",
+    ],
+    python_version = "PY3",
+)
+
+# Regression guard for: the py_test wrapper must propagate
+# pytest's exit status, so a failing case turns the bazel target red.
+# test_framework.py rides along in srcs so the guard can subprocess-run the
+# exact file bazel uses as the test_framework target's main -- welding the
+# guard to the shipped entry point, so a partial revert of just that file's
+# __main__ hunk is caught here.
+py_test(
+    name = "test_pytest_exit_status",
+    # Two subprocess legs, each allowed up to 120s.
+    size = "medium",
+    srcs = [
+        "test_framework.py",
+        "test_pytest_exit_status.py",
+    ],
+    main = "test_pytest_exit_status.py",
     deps = [":pagespeed_test_framework"],
     python_version = "PY3",
 )

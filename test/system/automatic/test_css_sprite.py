@@ -50,11 +50,22 @@ class TestCssSpriteImagesInline:
         """Multiple images should be combined into a sprite."""
         url = f"{example_root}/sprite_images.html?PageSpeedFilters=inline_css,rewrite_css,sprite_images"
 
-        # The sprite should contain multiple images combined
+        # The sprite should contain multiple images combined.
+        #
+        # The filters here are a chain, not a set: the pattern matches only
+        # once the CSS has been rewritten with sprite .pagespeed.is URLs AND
+        # that CSS has been inlined into the HTML, so this page's convergence
+        # stacks rewrites where most tests wait for one. On a busy runner
+        # that stacks past a 60s window, so keep the framework's full
+        # default: the bash original ran every fetch_until with TIMEOUT=100
+        # (system_test_helpers.sh) and 60.0 was a Python-port tightening
+        # this test never needed to make. The wait itself stays a
+        # conditional poll (fetch_until_contains, 0.5s interval); the
+        # timeout only bounds how long the poll may run. #786.
         response = client.fetch_until_contains(
             url,
             pattern=r"Cuppa\.png.*BikeCrashIcn\.png.*IronChef2\.gif.*\.pagespeed\.is\..*\.png",
-            timeout=60.0,
+            timeout=100.0,
         )
         assert_http_status(response, 200)
 
@@ -109,4 +120,4 @@ class TestCssSpriteImagesExternal:
 
 
 if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+    raise SystemExit(pytest.main([__file__, "-v"]))

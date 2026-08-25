@@ -22,6 +22,7 @@ Run with: python -m pytest -v test_framework.py
 """
 
 import re
+import sys
 
 import pytest
 
@@ -51,6 +52,7 @@ from pagespeed_test_framework.require import (
     require_status_ok,
     require_no_auth_gate,
 )
+from pagespeed_test_framework.pytest_main import run_pytest
 
 
 class TestResponse:
@@ -674,6 +676,96 @@ class TestFetchUntilTimeoutDiagnostics:
             assert re.fullmatch(r"[A-Za-z0-9._-]+", name), name
 
 
+class TestFetchUntilTimeoutBodyExcerpt:
+    """Last-body excerpt in the fetch_until TimeoutError.
+
+    A convergence-window miss that reports only status and pattern cannot
+    be triaged after the fact: a 200 whose HTML simply never converged
+    reads exactly like a 200 whose body carried nothing useful. The
+    TimeoutError therefore carries a truncated excerpt of the last body
+    the poll saw -- unsprited-but-served HTML vs an empty or non-text
+    body are then distinguishable from the log line alone.
+    """
+
+    def _patch_get(self, monkeypatch, body=b"one match here"):
+        """Serve a canned body for every path, with a 0.05s poll budget."""
+        from pagespeed_test_framework import client as client_mod
+        from pagespeed_test_framework.client import Response
+
+        monkeypatch.setattr(client_mod, "_TIMEOUT_MULTIPLIER", 1.0)
+        monkeypatch.setattr(client_mod, "_FETCH_UNTIL_RETRIES", 0)
+        monkeypatch.delenv("PAGESPEED_EVIDENCE_DIR", raising=False)
+
+        def fake_get(self, path, headers=None, allow_redirects=False):
+            return Response(status=200, headers={}, body=body, url=path)
+
+        monkeypatch.setattr(client_mod.PageSpeedClient, "get", fake_get)
+        return client_mod.PageSpeedClient("localhost", 80)
+
+    def _timeout_error(self, client):
+        with pytest.raises(TimeoutError) as err:
+            client.fetch_until("/mod_pagespeed_example/sprite_images.html",
+                               lambda r: False, timeout=0.05)
+        return str(err.value)
+
+    def test_timeout_carries_body_excerpt(self, monkeypatch):
+        """The error names what the last response actually served."""
+        client = self._patch_get(monkeypatch, body=b"<html>not converged</html>")
+        message = self._timeout_error(client)
+        assert "body=" in message
+        assert "not converged" in message
+        assert "status=200" in message
+
+    def test_long_body_is_truncated_and_marked(self, monkeypatch):
+        """Bodies past the cap are cut, the cut is marked, and the tail is
+        absent -- the excerpt must quote, not paraphrase."""
+        client = self._patch_get(
+            monkeypatch,
+            body=b"<head-start>" + b"x" * 700 + b"<tail-marker>",
+        )
+        message = self._timeout_error(client)
+        assert "<head-start>" in message
+        assert "<tail-marker>" not in message
+        # 725 bytes served (12 + 700 + 13), 512 shown -> 213 cut.
+        assert "(+213 more bytes)" in message
+
+    def test_non_text_body_is_summarized_not_dumped(self, monkeypatch):
+        """A body that is not decodable text (e.g. a binary/image response)
+        gets a by-length summary instead of mojibake."""
+        png_like = b"\x89PNG\r\n\x1a\n" + b"\x00\x01\x02" * 9
+        client = self._patch_get(monkeypatch, body=png_like)
+        message = self._timeout_error(client)
+        assert "<non-text body, 35 bytes>" in message
+        assert "Condition not met" in message  # timeout itself still reported
+
+    def test_multibyte_cut_is_not_mislabeled_non_text(self, monkeypatch):
+        """Cutting the excerpt at a byte boundary can split a multi-byte
+        character; that must not misreport a text body as non-text."""
+        from pagespeed_test_framework.client import _format_last_body_excerpt
+        # 'z' + 300 two-byte chars = 601 bytes; the 512-byte cut lands inside
+        # the 256th two-byte char.
+        body = "z".encode() + "ä".encode() * 300
+        excerpt = _format_last_body_excerpt(body)
+        assert "non-text" not in excerpt
+        assert "(+90 more bytes)" in excerpt  # 601 - 511 kept bytes
+
+    def test_excerpt_keeps_the_error_on_one_line(self, monkeypatch):
+        """A multi-line HTML body must not blow the failure report into a
+        wall of lines; newlines are repr-escaped."""
+        client = self._patch_get(
+            monkeypatch, body=b"<html>\n<head>\n<title>x</title>"
+        )
+        message = self._timeout_error(client)
+        assert "\\n" in message  # escaped, not literal
+        assert "\n" not in message
+
+    def test_empty_body_omits_the_excerpt(self, monkeypatch):
+        """Nothing to quote: no body= segment at all."""
+        client = self._patch_get(monkeypatch, body=b"")
+        message = self._timeout_error(client)
+        assert "body=" not in message
+
+
 class TestRequireMatch:
     """Tests for require_match.
 
@@ -895,4 +987,9 @@ class TestPytestTimeoutScaling:
 
 
 if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+    # run_pytest sys.exit()s pytest's return code; a bare pytest.main(...)
+    # would drop it, and the bazel py_test would report PASS on a red suite
+    #. argv passthrough: bazel invokes this main with no args,
+    # so the default runs this file; the exit-status regression guard passes
+    # a synthetic case file, driving this exact shipped entry point.
+    run_pytest(sys.argv[1:] or [__file__, "-v"])

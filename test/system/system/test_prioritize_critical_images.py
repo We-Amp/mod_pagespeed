@@ -34,6 +34,8 @@ import random
 import re
 import urllib.parse
 
+import pytest
+
 from pagespeed_test_framework import (
     PageSpeedClient,
     assert_contains,
@@ -161,3 +163,9 @@ class TestPrioritizeCriticalImages:
         )
         assert_http_status(response, 200)
         assert_contains(response, annotated_img)
+
+
+if __name__ == "__main__":
+    # Route through SystemExit: a bare pytest.main(...) only returns its
+    # status, and a test main that drops it exits 0 on a red suite -- vacuously green, the gate cannot report failure.
+    raise SystemExit(pytest.main([__file__, "-v"]))

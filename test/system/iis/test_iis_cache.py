@@ -642,3 +642,9 @@ class TestCacheIntegration:
                     # Extended cache should have long TTL (at least 1 day = 86400s)
                     # But this may vary by configuration
                     assert max_age > 0, "max-age should be positive"
+
+
+if __name__ == "__main__":
+    # Route through SystemExit: a bare pytest.main(...) only returns its
+    # status, and a test main that drops it exits 0 on a red suite -- vacuously green, the gate cannot report failure.
+    raise SystemExit(pytest.main([__file__, "-v"]))

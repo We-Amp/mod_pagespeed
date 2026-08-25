@@ -115,6 +115,10 @@ filegroup(
 py_library(
     name = "conftest",
     srcs = ["conftest.py"],
+    # Put test/system/ on dependents' sys.path so they can `import conftest`,
+    # mirroring how direct pytest runs (cwd on sys.path) resolve it. Without
+    # this the dep adds the file to the runfiles but the import still fails.
+    imports = ["."],
     deps = ["//test/system/pagespeed_test_framework"],
     visibility = ["//visibility:public"],
 )

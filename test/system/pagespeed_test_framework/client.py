@@ -74,6 +74,53 @@ _FETCH_UNTIL_RETRIES = _read_fetch_until_retries()
 # (e.g. the IIS retry budget) never overwrite each other.
 _TIMEOUT_EVIDENCE_SEQ = itertools.count(1)
 
+# Cap, in bytes, for the last-response-body excerpt embedded in the
+# fetch_until TimeoutError message. 512 bytes covers a page's doctype and
+# the start of its head -- enough to tell an unconverged rewrite from an
+# error or empty body -- while keeping the pytest failure line readable.
+# Longer bodies are cut and marked; the full body still goes to
+# PAGESPEED_EVIDENCE_DIR when that is set (see _save_timeout_evidence).
+_TIMEOUT_BODY_EXCERPT_BYTES = 512
+
+
+def _format_last_body_excerpt(body: Optional[bytes]) -> str:
+    """One-line excerpt of the last response body, for the TimeoutError.
+
+    A convergence-window miss reports status and pattern, but triage still
+    cannot tell a page that served fine yet never converged from a body that
+    carried no HTML at all. Returns repr() of the first
+    ``_TIMEOUT_BODY_EXCERPT_BYTES`` bytes (repr keeps the message on one line
+    whatever the body contains), a "+N more bytes" marker when content was
+    cut, a by-length summary when the body is not decodable text, and "" for
+    an empty body. Must never raise: diagnostics cannot mask the timeout.
+    """
+    if not body:
+        return ""
+    excerpt = body[:_TIMEOUT_BODY_EXCERPT_BYTES]
+    cut = len(body) > _TIMEOUT_BODY_EXCERPT_BYTES
+    try:
+        text = excerpt.decode("utf-8")
+    except UnicodeDecodeError as err:
+        # A byte-boundary slice can split a multi-byte character, which would
+        # misreport a text body as non-text. Only a CUT excerpt whose first
+        # bad byte sits within its last 3 bytes (a partial trailing
+        # character: UTF-8 sequences are at most 4 bytes) is such an artifact
+        # -- everything before err.start then decoded fine. Anything else
+        # means the body genuinely is not text.
+        if not cut or err.start < len(excerpt) - 3:
+            return f"<non-text body, {len(body)} bytes>"
+        try:
+            text = excerpt[: err.start].decode("utf-8")
+        except UnicodeDecodeError:
+            return f"<non-text body, {len(body)} bytes>"
+    # Bytes of the original body the repr actually represents (the trim above
+    # may have dropped a partial character).
+    shown = len(text.encode("utf-8"))
+    note = repr(text)
+    if len(body) > shown:
+        note += f" (+{len(body) - shown} more bytes)"
+    return note
+
 
 # Default User-Agent matching the bash tests (Chrome 6).
 # This matches the wget user_agent in system_test_helpers.sh.
@@ -437,6 +484,9 @@ class PageSpeedClient:
 
         elapsed = time.time() - start
         status_info = f"status={last_response.status}" if last_response else "no response"
+        body_note = (
+            _format_last_body_excerpt(last_response.body) if last_response else ""
+        )
         detail = ""
         if detail_fn is not None and last_response is not None:
             try:
@@ -450,6 +500,7 @@ class PageSpeedClient:
         raise TimeoutError(
             f"Condition not met after {elapsed:.1f}s for {path}. Last: {status_info}"
             + (f", {detail}" if detail else "")
+            + (f", body={body_note}" if body_note else "")
             + evidence_note
         )
 

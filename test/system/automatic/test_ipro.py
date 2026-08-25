@@ -122,5 +122,135 @@ class TestIPRO:
         )
 
 
+def _vary_tokens(response) -> list:
+    """Lowercased ``Vary`` field tokens of a response; [] when there is none.
+
+    Multiple ``Vary`` lines and comma-joined values are equivalent (RFC 9110
+    12.5.5), and both spellings occur on these responses, so the tokens are
+    collected set-wise.
+    """
+    vary = response.header("Vary")
+    if not vary:
+        return []
+    return [token.strip().lower() for token in vary.split(",") if token.strip()]
+
+
+@pytest.mark.apache_only
+class TestIPROVaryParity:
+    """A revalidating 304 must state the same encoding axis as its 200.
+
+    The 200 for an in-place-optimized compressible resource carries ``Vary:
+    Accept-Encoding`` -- stamped by the serving chain's compressor, which the
+    module's bytes are written through.  The 304 that revalidated the same
+    resource carried no such token (a 304 has no body, and the compressor's
+    small-response shortcut fires on zero length before the line that states
+    the axis), so a shared cache updating its stored header fields from the
+    304 (RFC 9111 4.3.4) was told the response varies on a narrower set than
+    the one it had keyed on, and could collapse encoding variants.  Parity is
+    asserted for both request polarities, and in the negative for a resource
+    whose media type the compressor is never handed.
+    """
+
+    @staticmethod
+    def _served_by_ipro(response) -> bool:
+        # The module's in-place serve carries its own weak validator
+        # (W/"PSA-...); while the metadata cache is cold the origin's own
+        # response answers instead, and THAT 200 is not the one under test.
+        return response.header("ETag").startswith('W/"PSA-')
+
+    def _warm(self, client: PageSpeedClient, url: str):
+        return client.fetch_until(
+            url,
+            condition=self._served_by_ipro,
+            timeout=60.0,
+            detail_fn=lambda r: f"etag={r.header('ETag')!r}",
+        )
+
+    def test_css_pair_with_gzip_states_the_same_vary(
+        self, client: PageSpeedClient, test_root: str
+    ):
+        """With Accept-Encoding: gzip, the 304 states the 200's token."""
+        url = f"{test_root}/ipro/mod_deflate/big.css"
+        self._warm(client, url)
+
+        two_hundred = client.get(
+            url, headers={"Accept-Encoding": "gzip"}
+        )
+        assert_http_status(two_hundred, 200)
+        # Sanity half of the pair: with the client advertising gzip, the 200
+        # for a compressible in-place resource carries the encoding token.
+        # If this fails, the fixture stopped exercising the compressor and
+        # the parity assertions would pass vacuously.
+        assert "accept-encoding" in _vary_tokens(two_hundred), (
+            "the 200 for an in-place CSS resource no longer carries "
+            "Vary: Accept-Encoding; the parity test's precondition is gone"
+        )
+
+        conditional = client.get(
+            url,
+            headers={
+                "Accept-Encoding": "gzip",
+                "If-None-Match": two_hundred.header("ETag"),
+            },
+        )
+        assert_http_status(conditional, 304)
+        assert "accept-encoding" in _vary_tokens(conditional), (
+            "the 304 revalidating an in-place CSS resource dropped the "
+            "encoding axis its 200 states, so a shared cache updating its "
+            "stored headers (RFC 9111 4.3.4) narrows the response's "
+            "negotiation surface and may collapse encoding variants"
+        )
+
+    def test_css_pair_without_gzip_states_the_same_vary(
+        self, client: PageSpeedClient, test_root: str
+    ):
+        """Without Accept-Encoding, the pair still agrees on the axis."""
+        url = f"{test_root}/ipro/mod_deflate/big.css"
+        self._warm(client, url)
+
+        two_hundred = client.get(url)
+        assert_http_status(two_hundred, 200)
+        conditional = client.get(
+            url, headers={"If-None-Match": two_hundred.header("ETag")}
+        )
+        assert_http_status(conditional, 304)
+        # The compressor states the encoding axis before it scans the
+        # request's Accept-Encoding, so on this server the 200 carries the
+        # token here too -- but the assertion is PARITY, not presence, so a
+        # server whose compressor decides differently fails on the
+        # disagreement rather than on an assumption about which way.
+        assert ("accept-encoding" in _vary_tokens(conditional)) == (
+            "accept-encoding" in _vary_tokens(two_hundred)
+        ), (
+            "the 304 and the 200 for the same in-place resource disagree "
+            "about the encoding axis (no Accept-Encoding in the request)"
+        )
+
+    def test_image_pair_states_no_encoding_axis_on_either_leg(
+        self, client: PageSpeedClient, test_root: str
+    ):
+        """A media type the compressor is never handed has no axis at all."""
+        url = f"{test_root}/ipro/test_image_dont_reuse.png"
+        two_hundred = self._warm(client, url)
+        assert_http_status(two_hundred, 200)
+        assert "accept-encoding" not in _vary_tokens(two_hundred)
+
+        conditional = client.get(
+            url,
+            headers={
+                "Accept-Encoding": "gzip",
+                "If-None-Match": two_hundred.header("ETag"),
+            },
+        )
+        assert_http_status(conditional, 304)
+        # The fix composes against the compressor's own decision and is not
+        # an unconditional stamp: an in-place image resource has no encoding
+        # axis on either leg.
+        assert "accept-encoding" not in _vary_tokens(conditional), (
+            "the 304 for an in-place image resource states an encoding axis "
+            "its 200 never had"
+        )
+
+
 if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+    raise SystemExit(pytest.main([__file__, "-v"]))
