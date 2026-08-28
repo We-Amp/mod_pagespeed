@@ -635,6 +635,17 @@ install_deps_jammy() {
   install_bazelisk
 }
 
+# apt treats a corrupted download as a hard error and does not re-fetch it on
+# its own, so one flipped byte on a busy build host ("Hash Sum mismatch") kills
+# the whole leg with exit 100. Ask apt to retry the fetch itself; this covers
+# both the build-dep install below and the later `apt-get source nginx`. The
+# leg-level retry in release.yml is the outer net for what this still misses.
+# `-w` (not `-d`) plus `|| true`: this script also runs outside a container as
+# an unprivileged user, where the write fails and `set -e` would abort it.
+if [ -w /etc/apt/apt.conf.d ]; then
+  printf 'Acquire::Retries "3";\n' > /etc/apt/apt.conf.d/99-ci-fetch-retries 2>/dev/null || true
+fi
+
 if [ "${SKIP_DEPS:-}" != "1" ]; then
   echo "==> installing build deps (${DISTRO})"
   case "${DISTRO}" in
