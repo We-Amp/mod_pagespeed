@@ -40,6 +40,40 @@ misbehaves on a host, the mitigation is to reinstall the previous module and
 daemon packages together. The module and the daemon are a matched pair; they
 are installed, upgraded and rolled back as one.
 
+## Group membership and the versioned cache directory (2.1)
+
+Since the daemon's privilege drop (2.1), the optimizer daemon runs as the
+unprivileged `pagespeed` user and its artifacts are group-scoped: the cache
+volume, the notify socket and the shared configuration are mode `0660`/`0640`
+owned by `pagespeed:pagespeed`, under the versioned cold-start cache directory
+(`/var/cache/pagespeed-optimizer/v1/`) and `/run/pagespeed-optimizer/`. The
+module reaches all three as a **group member**, never as their owner — it
+still never creates the volume, and it still refuses to start if an open
+authors a stray second volume file.
+
+The module packages perform the group join in their postinst (`www-data` on
+deb; `apache` and/or `nginx` on rpm), guarded and idempotent, and a no-op when
+the optimizer package — which creates the group — is not installed. A
+web-server restart is required for the membership to take effect. An exotic
+web user gets the one-liner version: `usermod -a -G pagespeed <user>`.
+
+Two consequences are visible at startup:
+
+* **Permission denied is told apart from absent.** A module that cannot read
+  the daemon's cache directory, shared configuration or socket *because of
+  permissions* logs a line naming the likely cause — the web-server user not
+  being in the `pagespeed` group — rather than the "start the daemon" line
+  the absent case gets. The same distinction is made in the request-serving
+  process, where the volume is really opened.
+* **The cache-directory generation is checked.** The daemon publishes
+  `cache_dir_generation` in its shared configuration; this module is built
+  for generation 1. A daemon publishing a different generation is a loud
+  handshake failure — in-place optimization off, nothing opened, never a
+  silent split-brain across two layouts that share nothing. A daemon
+  publishing no generation at all (a package from before the privilege drop)
+  is the legacy layout: tolerated, announced once at startup, and used with
+  the configured paths as-is.
+
 ## Reference deployment: separate paths
 
 **Keep `ModPagespeedDaemonVolumePath` on a different path from
@@ -237,9 +271,11 @@ no in-place optimization from this substrate.
 
 If the directives are set and the daemon cannot be used — its client library
 is not installed, it is **an older release than this module can work with**, it
-is an older release that does not publish its cache volume's size, it has not
-created that volume yet, its volume will not open, or nothing answers on the
-socket — then, for that server:
+is an older release that does not publish its cache volume's size, it
+publishes a cache-directory generation this build is not written for, it has
+not created that volume yet, its volume will not open, nothing answers on the
+socket, or any of those is unreachable **because the web-server user is not in
+the `pagespeed` group** — then, for that server:
 
 * in-place optimization is **off** — nothing is recorded and nothing is
   served from the daemon's cache;
@@ -279,5 +315,13 @@ costs optimization, never availability.
   optimization is off until the packages match. A release too old to use at all
   says so in one line naming the version it has and the version this build
   needs.
+* A **permission-denied** line names the likely missing group membership
+  (`usermod -a -G pagespeed <web user>`); an **absent** socket or volume line
+  tells you to start the daemon. The two are not the same fix, and the log
+  says which one you have.
+* A daemon publishing no cache-directory generation logs one line about the
+  legacy layout and keeps working; one publishing a *different* generation
+  logs a handshake failure and in-place optimization stays off until the
+  module and daemon packages agree.
 * An in-place request on a server where the daemon is unavailable is served
   as-is, with no per-request log entries.

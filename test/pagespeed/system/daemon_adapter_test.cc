@@ -46,6 +46,7 @@
 #include "pagespeed/kernel/base/null_mutex.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/base/string_writer.h"
 #include "pagespeed/system/daemon_abi.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/base/mock_message_handler.h"
@@ -104,6 +105,12 @@ class FakeDaemonAbi : public DaemonAbi {
   }
 
   bool PublishesVolumeSize() const override { return publishes_size_; }
+
+  uint32_t SharedConfigGeneration(const char* volume_path) const override {
+    return publishes_generation ? published_generation : 0;
+  }
+
+  bool PublishesGeneration() const override { return publishes_generation; }
 
   int CacheOpen(const PsCacheConfig* config, void** out_cache) const override {
     observed_ram_cache_size = config->ram_cache_size;
@@ -282,6 +289,12 @@ class FakeDaemonAbi : public DaemonAbi {
 
   size_t grown_struct_bytes = sizeof(PsCacheConfig);
   int open_error = kPsOk;
+  // The generation the fake's shared config reports, and whether it reports
+  // one at all.  Defaults are the post-H1 contract (generation published,
+  // matching this build); a test moves them to play a pre-H1 daemon or a
+  // skewed one.
+  bool publishes_generation = true;
+  uint32_t published_generation = DaemonAdapter::kCacheDirGeneration;
 
   mutable size_t observed_ram_cache_size = 0;
   mutable uint64_t observed_volume_size = 0;
@@ -364,6 +377,8 @@ class DaemonAdapterTest : public testing::Test {
                                                  publishes_size_, sized_init_);
           abi->open_error = fake_open_error_;
           abi->grown_struct_bytes = grown_struct_bytes_;
+          abi->publishes_generation = publishes_generation_;
+          abi->published_generation = published_generation_;
           last_abi_ = abi;
           return abi;
         });
@@ -372,6 +387,14 @@ class DaemonAdapterTest : public testing::Test {
 
   GoogleString SocketPath(const GoogleString& name) {
     return StrCat(dir_, "/", name);
+  }
+
+  // Everything the handler has logged so far, for content assertions.
+  GoogleString Messages() {
+    GoogleString dump;
+    StringWriter writer(&dump);
+    handler_.Dump(&writer);
+    return dump;
   }
 
   GoogleString dir_;
@@ -383,6 +406,8 @@ class DaemonAdapterTest : public testing::Test {
   uint64_t published_size_ = kDaemonSize;
   size_t grown_struct_bytes_ = sizeof(PsCacheConfig);
   int fake_open_error_ = kPsOk;
+  bool publishes_generation_ = true;
+  uint32_t published_generation_ = DaemonAdapter::kCacheDirGeneration;
   FakeDaemonAbi* last_abi_ = nullptr;
 };
 
@@ -443,6 +468,191 @@ TEST_F(DaemonAdapterTest, UnreachableSocketTurnsIproOff) {
   EXPECT_EQ(DaemonStartupStatus::kOk, adapter->StartupCheck());
   EXPECT_EQ(DaemonHealth::kUnavailable, adapter->health());
   EXPECT_EQ(1, handler_.MessagesOfType(kError));
+}
+
+TEST_F(DaemonAdapterTest, AnAbsentSocketSaysToStartTheDaemon) {
+  // One half of the H2/H3 startup distinction: a missing socket means the
+  // daemon is not running, and the line carries that remediation.
+  DaemonCreatedItsVolume(kDaemonSize);
+  std::unique_ptr<DaemonAdapter> adapter(MakeAdapter(SocketPath("gone.sock")));
+  EXPECT_EQ(DaemonStartupStatus::kOk, adapter->StartupCheck());
+  EXPECT_EQ(DaemonHealth::kUnavailable, adapter->health());
+  EXPECT_EQ(1, handler_.MessagesOfType(kError));
+  EXPECT_NE(GoogleString::npos,
+            Messages().find("start the pagespeed-optimizer daemon"))
+      << Messages();
+}
+
+// --- permission denied vs absent (H2/H3) -----------------------------------
+//
+// After the daemon's privilege drop its cache directory, socket and shared
+// config are group-rw (pagespeed:pagespeed), which makes "the web-server user
+// is not in the `pagespeed` group" the most likely field failure -- and
+// EACCES must not read as "the daemon is not there".  The chmod cases need a
+// process the permission bits actually bind, so they skip under root (CI
+// containers run as root, and mode 0000 is still readable there).
+
+TEST_F(DaemonAdapterTest, VolumeDirAccessDistinguishesAbsentFromDenied) {
+  EXPECT_EQ(DaemonAdapter::DirAccess::kAbsent,
+            DaemonAdapter::VolumeDirAccess(
+                StrCat(dir_, "/no-such-parent/volume")));
+  EXPECT_EQ(DaemonAdapter::DirAccess::kReadable,
+            DaemonAdapter::VolumeDirAccess(volume_));
+  if (geteuid() == 0) {
+    GTEST_SKIP() << "permission bits do not bind root";
+  }
+  ASSERT_EQ(0, chmod(dir_.c_str(), 0000));
+  EXPECT_EQ(DaemonAdapter::DirAccess::kDenied,
+            DaemonAdapter::VolumeDirAccess(volume_));
+  EXPECT_EQ(0, chmod(dir_.c_str(), 0700));
+}
+
+TEST_F(DaemonAdapterTest, AnUnlistableCacheDirectoryNamesTheGroup) {
+  if (geteuid() == 0) {
+    GTEST_SKIP() << "permission bits do not bind root";
+  }
+  DaemonCreatedItsVolume(kDaemonSize);
+  const GoogleString socket_path = SocketPath("denied.sock");
+  ListeningSocket listener(socket_path);
+  ASSERT_TRUE(listener.bound());
+
+  std::unique_ptr<DaemonAdapter> adapter(MakeAdapter(socket_path));
+  ASSERT_EQ(0, chmod(dir_.c_str(), 0000));
+  EXPECT_EQ(DaemonStartupStatus::kOk, adapter->StartupCheck());
+  EXPECT_EQ(0, chmod(dir_.c_str(), 0700));
+  EXPECT_EQ(DaemonHealth::kUnavailable, adapter->health());
+  EXPECT_EQ(1, handler_.MessagesOfType(kError));
+  EXPECT_NE(GoogleString::npos,
+            Messages().find("not in the `pagespeed` group"))
+      << Messages();
+  // And the volume scan must not have misread EACCES as "no volume yet" --
+  // the absent message would have sent the operator to start the daemon.
+  EXPECT_EQ(GoogleString::npos, Messages().find("start the daemon first"))
+      << Messages();
+}
+
+TEST_F(DaemonAdapterTest, AnUnreadableSharedConfigNamesTheGroup) {
+  // Same distinction one state earlier: the shared config cannot be read, so
+  // the size is unknown -- but the cause is permissions, not a daemon that
+  // has never run.
+  if (geteuid() == 0) {
+    GTEST_SKIP() << "permission bits do not bind root";
+  }
+  published_size_ = 0;
+  const GoogleString socket_path = SocketPath("cfgdenied.sock");
+  ListeningSocket listener(socket_path);
+  ASSERT_TRUE(listener.bound());
+
+  std::unique_ptr<DaemonAdapter> adapter(MakeAdapter(socket_path));
+  ASSERT_EQ(0, chmod(dir_.c_str(), 0000));
+  EXPECT_EQ(DaemonStartupStatus::kOk, adapter->StartupCheck());
+  EXPECT_EQ(0, chmod(dir_.c_str(), 0700));
+  EXPECT_EQ(DaemonHealth::kUnavailable, adapter->health());
+  EXPECT_EQ(1, handler_.MessagesOfType(kError));
+  EXPECT_NE(GoogleString::npos,
+            Messages().find("not in the `pagespeed` group"))
+      << Messages();
+  EXPECT_EQ(GoogleString::npos, Messages().find("may not be running yet"))
+      << Messages();
+}
+
+TEST_F(DaemonAdapterTest, APermissionDeniedSocketNamesTheGroup) {
+  if (geteuid() == 0) {
+    GTEST_SKIP() << "permission bits do not bind root";
+  }
+  DaemonCreatedItsVolume(kDaemonSize);
+  const GoogleString subdir = StrCat(dir_, "/sub");
+  ASSERT_EQ(0, mkdir(subdir.c_str(), 0700));
+  const GoogleString socket_path = StrCat(subdir, "/daemon.sock");
+  ListeningSocket listener(socket_path);
+  ASSERT_TRUE(listener.bound());
+
+  std::unique_ptr<DaemonAdapter> adapter(MakeAdapter(socket_path));
+  ASSERT_EQ(0, chmod(subdir.c_str(), 0000));
+  EXPECT_EQ(DaemonStartupStatus::kOk, adapter->StartupCheck());
+  EXPECT_EQ(0, chmod(subdir.c_str(), 0700));
+  EXPECT_EQ(DaemonHealth::kUnavailable, adapter->health());
+  EXPECT_EQ(1, handler_.MessagesOfType(kError));
+  EXPECT_NE(GoogleString::npos,
+            Messages().find("not in the `pagespeed` group"))
+      << Messages();
+  EXPECT_EQ(GoogleString::npos,
+            Messages().find("start the pagespeed-optimizer daemon"))
+      << Messages();
+  // The listener's destructor unlinks the socket at scope exit, after this --
+  // so remove it explicitly, or the rmdir below fails on a non-empty dir.
+  EXPECT_EQ(0, unlink(socket_path.c_str()));
+  EXPECT_EQ(0, rmdir(subdir.c_str()));
+}
+
+// --- the cache-directory generation handshake ------------------------------
+//
+// Since the privilege drop the daemon's cache lives in a versioned cold-start
+// directory (vN) and the daemon publishes N in its shared config as
+// cache_dir_generation.  A skew is a loud handshake failure; an absent field
+// is the legacy layout, tolerated and announced once.
+
+TEST_F(DaemonAdapterTest, TheCompiledGenerationIsOne) {
+  EXPECT_EQ(1u, DaemonAdapter::kCacheDirGeneration);
+}
+
+TEST_F(DaemonAdapterTest, AGenerationMismatchIsALoudHandshakeFailure) {
+  // v2 vs v1: the two layouts share nothing, so the substrate goes down
+  // loudly -- and the volume is NEVER opened at the other generation's
+  // geometry.
+  published_generation_ = 2;
+  DaemonCreatedItsVolume(kDaemonSize);
+  const GoogleString socket_path = SocketPath("skew.sock");
+  ListeningSocket listener(socket_path);
+  ASSERT_TRUE(listener.bound());
+
+  std::unique_ptr<DaemonAdapter> adapter(MakeAdapter(socket_path));
+  EXPECT_EQ(DaemonStartupStatus::kOk, adapter->StartupCheck());
+  EXPECT_EQ(DaemonHealth::kUnavailable, adapter->health());
+  EXPECT_EQ(1, handler_.MessagesOfType(kError));
+  EXPECT_NE(GoogleString::npos, Messages().find("cache_dir_generation"))
+      << Messages();
+  ASSERT_TRUE(last_abi_ != nullptr);
+  EXPECT_EQ(0, last_abi_->opens);
+  EXPECT_EQ(1u, DaemonAdapter::VolumeFiles(volume_).size());
+}
+
+TEST_F(DaemonAdapterTest, APreH1DaemonIsToleratedWithOneLoudLine) {
+  // No generation reader at all (the rc-era daemon): the legacy layout, kept
+  // working with the configured paths as-is, announced once per process.
+  publishes_generation_ = false;
+  DaemonCreatedItsVolume(kDaemonSize);
+  const GoogleString socket_path = SocketPath("legacy.sock");
+  ListeningSocket listener(socket_path);
+  ASSERT_TRUE(listener.bound());
+
+  std::unique_ptr<DaemonAdapter> adapter(MakeAdapter(socket_path));
+  EXPECT_EQ(DaemonStartupStatus::kOk, adapter->StartupCheck());
+  EXPECT_EQ(DaemonHealth::kReady, adapter->health());
+  EXPECT_EQ(1, handler_.MessagesOfType(kError));
+  EXPECT_NE(GoogleString::npos, Messages().find("legacy")) << Messages();
+  // And it really did keep working: attached to the daemon's volume at the
+  // daemon's size, with no second file authored.
+  ASSERT_TRUE(last_abi_ != nullptr);
+  EXPECT_EQ(kDaemonSize, last_abi_->observed_volume_size);
+  EXPECT_EQ(1u, DaemonAdapter::VolumeFiles(volume_).size());
+}
+
+TEST_F(DaemonAdapterTest, AGenerationOfZeroIsUnknownNotAMismatch) {
+  // The reader exists but the field is absent from the shared config: the
+  // same tolerance as a pre-H1 daemon, and definitely not read as
+  // "generation 0" refusing against a build for generation 1.
+  published_generation_ = 0;
+  DaemonCreatedItsVolume(kDaemonSize);
+  const GoogleString socket_path = SocketPath("genzero.sock");
+  ListeningSocket listener(socket_path);
+  ASSERT_TRUE(listener.bound());
+
+  std::unique_ptr<DaemonAdapter> adapter(MakeAdapter(socket_path));
+  EXPECT_EQ(DaemonStartupStatus::kOk, adapter->StartupCheck());
+  EXPECT_EQ(DaemonHealth::kReady, adapter->health());
+  EXPECT_EQ(1, handler_.MessagesOfType(kError));
+  EXPECT_NE(GoogleString::npos, Messages().find("legacy")) << Messages();
 }
 
 // --- the mirror cannot be evaluated ⇒ degrade, and NEVER open --------------
@@ -869,7 +1079,7 @@ class LoadDaemonAbiTest : public testing::Test {
     // from a previous case cannot make a later one pass.
     for (const char* v :
          {"PS_STUB_MAJOR", "PS_STUB_MINOR", "PS_STUB_STRUCT_SIZE",
-          "PS_STUB_SCRIBBLE", "PS_STUB_VOLUME_SIZE"}) {
+          "PS_STUB_SCRIBBLE", "PS_STUB_VOLUME_SIZE", "PS_STUB_GENERATION"}) {
       unsetenv(v);
     }
   }
@@ -913,6 +1123,27 @@ TEST_F(LoadDaemonAbiTest, LoadsALibraryWithoutTheSizedInitializer) {
       LoadDaemonAbi(StubPath("libdaemon_stub_unsized.so"), &error_));
   ASSERT_TRUE(abi != nullptr) << error_;
   EXPECT_FALSE(abi->HasSizedCacheConfigInit());
+}
+
+TEST_F(LoadDaemonAbiTest, BindsTheGenerationReaderWhenPresent) {
+  std::unique_ptr<DaemonAbi> abi(
+      LoadDaemonAbi(StubPath("libdaemon_stub.so"), &error_));
+  ASSERT_TRUE(abi != nullptr) << error_;
+  EXPECT_TRUE(abi->PublishesGeneration());
+  EXPECT_EQ(1u, abi->SharedConfigGeneration("/unused"));
+  setenv("PS_STUB_GENERATION", "2", 1);
+  EXPECT_EQ(2u, abi->SharedConfigGeneration("/unused"));
+}
+
+TEST_F(LoadDaemonAbiTest, LoadsALibraryWithoutTheGenerationReader) {
+  // A pre-H1 daemon package exports no cache_dir_generation reader. It must
+  // still load: the generation is bound OPTIONALLY, and its absence is the
+  // adapter's legacy-layout case, not a refusal.
+  std::unique_ptr<DaemonAbi> abi(
+      LoadDaemonAbi(StubPath("libdaemon_stub_no_generation.so"), &error_));
+  ASSERT_TRUE(abi != nullptr) << error_;
+  EXPECT_FALSE(abi->PublishesGeneration());
+  EXPECT_EQ(0u, abi->SharedConfigGeneration("/unused"));
 }
 
 TEST_F(LoadDaemonAbiTest, RefusesAMismatchedMajorVersion) {

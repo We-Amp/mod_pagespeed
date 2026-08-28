@@ -652,6 +652,20 @@ class DaemonAbi {
   // older package, which is a degrade, not a failure.
   virtual bool PublishesVolumeSize() const = 0;
 
+  // The cache-directory generation the daemon published in its shared config
+  // (the `cache_dir_generation` field of pagespeed-shared.conf), or 0 when
+  // that is NOT KNOWN -- including when the daemon package predates the entry
+  // point at all, which is exactly the pre-H1 daemon whose layout is the
+  // legacy, unversioned one.  0 is "unknown", never a generation number: see
+  // kCacheDirGeneration in daemon_adapter.h.
+  virtual uint32_t SharedConfigGeneration(const char* volume_path) const = 0;
+
+  // Whether this daemon publishes a cache-directory generation at all.  False
+  // means a pre-H1 package, which the adapter tolerates as the legacy layout
+  // (one loud line, keep working with the configured paths) rather than
+  // refusing.
+  virtual bool PublishesGeneration() const = 0;
+
   // Returns kPsOk and stores an opaque cache handle in *out_cache, or an
   // error code.  A successful open must be matched with CacheClose.
   virtual int CacheOpen(const PsCacheConfig* config,

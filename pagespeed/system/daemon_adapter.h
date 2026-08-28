@@ -78,6 +78,17 @@ enum class DaemonStartupStatus {
 //   daemon does not publish a size -> kUnavailable,   start.  An older daemon
 //                                     package; the mirror cannot be evaluated,
 //                                     so the volume is not touched.
+//   generation published and NOT
+//     this build's                 -> kUnavailable,   start.  The versioned
+//                                     cold-start cache directories (vN) share
+//                                     nothing across N, so a skew is a loud
+//                                     handshake failure, never a silent
+//                                     split-brain; nothing is opened.
+//   generation unknown (0)         -> proceed, and NOTE once on the healthy
+//                                     path.  A pre-H1 daemon publishes no
+//                                     cache_dir_generation; that is the legacy
+//                                     layout, tolerated with the configured
+//                                     paths as-is.
 //   published size is 0 (unknown)  -> kUnavailable,   start.  No shared config
 //                                     (the daemon has never run), unreadable,
 //                                     or a schema this build refuses.
@@ -125,6 +136,32 @@ class DaemonAdapter {
   // The RAM tier this module opens the shared volume with.  Not a mirror: a
   // fixed floor.  MUST stay zero.
   static constexpr size_t kMirroredRamCacheSizeBytes = 0;
+
+  // The cache-directory generation this module is built for: the N in the
+  // daemon's versioned cold-start cache directory
+  // (/var/cache/pagespeed-optimizer/vN), introduced with the daemon's
+  // privilege drop (H1-H3).  Stamped identically into the daemon, which
+  // publishes it in its shared config as `cache_dir_generation`.  A daemon
+  // publishing a DIFFERENT non-zero generation is a loud handshake failure
+  // (substrate down, fail open to plain serving) -- the two layouts share
+  // nothing, and a quiet attach would be a split-brain.  A daemon publishing
+  // none (a pre-H1 package) is tolerated as the legacy layout; see Resolve.
+  static constexpr uint32_t kCacheDirGeneration = 1;
+
+  // What stands between this process and the directory the daemon's volume
+  // lives in.  After the privilege drop the volume, socket and shared config
+  // are group-rw (0660/0640 pagespeed:pagespeed), which makes "the
+  // web-server user is not in the `pagespeed` group" the most likely field
+  // failure -- and EACCES reads exactly like "the daemon is not there" to a
+  // scan that swallows errors, so the two must be told apart explicitly.
+  enum class DirAccess { kReadable, kAbsent, kDenied };
+
+  // Whether the directory holding the daemon's volume for `volume_path` can
+  // be looked inside: the path itself when it names a directory, its parent
+  // otherwise.  kDenied means permission denied (EACCES/EPERM), kAbsent any
+  // other failure.  On Windows there is no distinction and this always
+  // reports kAbsent.
+  static DirAccess VolumeDirAccess(StringPiece volume_path);
 
   // `socket_path` and `volume_path` come straight from configuration; either
   // or both may be empty, which is the unconfigured state.  Does not take
@@ -220,6 +257,10 @@ class DaemonAdapter {
   // Set when the volume directory holds left-over files from an earlier cache
   // size.  Reported on the healthy path, where nothing else would mention it.
   GoogleString extra_volume_warning_;
+  // Set when the daemon publishes no cache_dir_generation: a pre-H1 daemon on
+  // the legacy layout.  Reported once on the healthy path, where the
+  // tolerance would otherwise be invisible.
+  bool legacy_generation_layout_ = false;
 };
 
 }  // namespace net_instaweb

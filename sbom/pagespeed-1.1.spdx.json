@@ -3,9 +3,9 @@
   "dataLicense": "CC0-1.0",
   "SPDXID": "SPDXRef-DOCUMENT",
   "name": "pagespeed-1.1",
-  "documentNamespace": "https://spdx.org/spdxdocs/pagespeed-1.1-2026-08-24T15:07:53Z",
+  "documentNamespace": "https://spdx.org/spdxdocs/pagespeed-1.1-2026-08-27T16:29:47Z",
   "creationInfo": {
-    "created": "2026-08-24T15:07:53Z",
+    "created": "2026-08-27T16:29:47Z",
     "creators": [
       "Tool: generate-sbom.py-1.0",
       "Organization: We-Amp B.V."
@@ -424,7 +424,7 @@
     {
       "SPDXID": "SPDXRef-Package-apr-util",
       "name": "apr-util",
-      "versionInfo": "efbe77e09f0f3e872f2a1126d88d791ab4361b23",
+      "versionInfo": "eb1f0c8ebd4f9633c327f595746933da6349dded",
       "supplier": "Organization: The Apache Software Foundation",
       "downloadLocation": "https://github.com/apache/apr-util",
       "filesAnalyzed": false,
@@ -435,7 +435,7 @@
         {
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
-          "referenceLocator": "pkg:github/apache/apr-util@efbe77e09f0f3e872f2a1126d88d791ab4361b23"
+          "referenceLocator": "pkg:github/apache/apr-util@eb1f0c8ebd4f9633c327f595746933da6349dded"
         }
       ]
     },

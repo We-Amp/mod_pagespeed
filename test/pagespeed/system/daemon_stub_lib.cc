@@ -35,6 +35,8 @@
 //   PS_STUB_SCRIBBLE               bytes the SIZED initializer writes past
 //                                  the size it was given (default 0)
 //   PS_STUB_VOLUME_SIZE            what the shared-config reader returns
+//   PS_STUB_GENERATION             what the cache-dir-generation reader
+//                                  returns (default 1, the post-H1 contract)
 //   PS_STUB_LOG                    file the record arm's calls are appended
 //                                  to, one `key=value ...` line each, so a
 //                                  test can assert what the peer was ASKED
@@ -71,6 +73,10 @@
 //                                required one behave identically, and only a
 //                                library that lies about its version shows
 //                                which one is in use.
+//   PS_STUB_OMIT_GENERATION      no ps_read_shared_config_generation: the
+//                                pre-H1 daemon. Bound OPTIONALLY, so this
+//                                library must still load -- the adapter
+//                                tolerates the absence as the legacy layout.
 //
 // WHY THIS FILE MODELS THE PEER'S VALIDATION RATHER THAN JUST SUCCEEDING.
 // A stand-in that accepts everything cannot fail the way the real library
@@ -682,6 +688,15 @@ void ps_cache_config_init_sized(StubCacheConfig* config, size_t size) {
 uint64_t ps_read_shared_config_volume_size(const char* cache_path) {
   return static_cast<uint64_t>(EnvOr("PS_STUB_VOLUME_SIZE", 0));
 }
+
+#ifndef PS_STUB_OMIT_GENERATION
+// The cache-directory generation (cache_dir_generation), published since the
+// daemon's privilege drop. Bound OPTIONALLY by the module: the omit flavour
+// below is the pre-H1 daemon, whose absence must still load.
+uint32_t ps_read_shared_config_generation(const char* cache_path) {
+  return static_cast<uint32_t>(EnvOr("PS_STUB_GENERATION", 1));
+}
+#endif  // PS_STUB_OMIT_GENERATION
 
 int ps_cache_open(const StubCacheConfig* config, void** out_cache) {
   if (out_cache == nullptr) return 5;

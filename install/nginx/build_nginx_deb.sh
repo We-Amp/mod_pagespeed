@@ -189,7 +189,27 @@ cat > "${STAGEDIR}/DEBIAN/conffiles" <<EOF
 ${NGINX_MODAVAIL}/mod-pagespeed.conf
 EOF
 
-# postinst/postrm: keep nginx -t clean across install/remove.
+# postinst/postrm: keep nginx -t clean across install/remove, and join the
+# web-server user to the optimizer daemon's group.
+cat > "${STAGEDIR}/DEBIAN/postinst" <<'EOF'
+#!/bin/sh
+if [ "$1" = "configure" ]; then
+  # Join the web-server user to the `pagespeed` group. After the optimizer
+  # daemon's privilege drop (2.1) its cache volume, notify socket and shared
+  # config are group-rw (0660/0640 pagespeed:pagespeed), and group membership
+  # is what lets the module reach them. Stock Debian/Ubuntu nginx runs as
+  # www-data. Guarded and idempotent; a no-op when the optimizer package
+  # (which creates the group) is not installed, and a usermod failure must not
+  # fail the install: the module logs the degraded state loudly at startup
+  # instead.
+  if getent group pagespeed >/dev/null 2>&1 && id www-data >/dev/null 2>&1; then
+    usermod -a -G pagespeed www-data || true
+  fi
+fi
+exit 0
+EOF
+chmod 755 "${STAGEDIR}/DEBIAN/postinst"
+
 cat > "${STAGEDIR}/DEBIAN/postrm" <<'EOF'
 #!/bin/sh
 # Cache/log dirs are preserved on purpose (standard Unix convention).

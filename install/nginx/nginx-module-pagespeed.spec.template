@@ -76,6 +76,18 @@ exit 0
 # cannot be loaded from http{}/conf.d.) The FileCachePath dir is auto-created at
 # config-parse time — no manual
 # mkdir/chown needed.
+
+# Join the web-server user to the `pagespeed` group. After the optimizer
+# daemon's privilege drop (2.1) its cache volume, notify socket and shared
+# config are group-rw (0660/0640 pagespeed:pagespeed), and group membership is
+# what lets the module reach them. Guarded and idempotent; a no-op when the
+# optimizer package (which creates the group) is not installed, and a usermod
+# failure must not fail the install: the module logs the degraded state loudly
+# at startup instead.
+if getent group pagespeed >/dev/null 2>&1 && id nginx >/dev/null 2>&1; then
+  usermod -a -G pagespeed nginx || true
+fi
+
 exit 0
 
 %preun

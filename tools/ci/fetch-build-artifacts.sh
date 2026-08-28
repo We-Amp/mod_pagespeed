@@ -3,7 +3,7 @@
 # Copyright (c) 2024-2026 We-Amp B.V.
 #
 # fetch-build-artifacts.sh - Retried, integrity-checked fetch of the linux-x64
-# build-artifacts tarball staged on cache-host by the `linux-build` job.
+# build-artifacts tarball staged on the CI hub by the `linux-build` job.
 #
 # Why this exists (companion to extract-vendor-tarball.sh):
 #   The vendor tarball fetch is retried, verified, and TTL-extended. The
@@ -17,10 +17,13 @@
 # Usage:
 #   fetch-build-artifacts.sh --sha <full_sha> --out <dest_tarball_path>
 #
-# Environment overrides (all optional):
-#   CI_HUB_HOST      ssh host/IP (default: resolve via resolve-cache-host.sh).
-#   CI_HUB_USER      ssh user (default: oschaaf).
-#   FETCH_RETRIES   attempts (default: 4).
+# Environment (hub coordinates come from GitHub repository variables; NOTHING
+# environment-specific is hardcoded here):
+#   CI_HUB_ADDR            ssh host/IP (default: resolved by
+#                          resolve-cache-host.sh from CI_HUB_HOST / CI_HUB_IP).
+#   CI_HUB_USER            ssh user (required).
+#   CI_HUB_ARTIFACTS_ROOT  remote per-repo artifact root (required).
+#   FETCH_RETRIES          attempts (default: 4).
 #   FETCH_BACKOFF   initial backoff seconds, doubled each retry (default: 3).
 #
 # Exit codes:
@@ -46,17 +49,18 @@ done
 [ -n "$SHA" ] || die_usage "--sha is required (got empty; on a rerun-failed-jobs the vendor job does not re-run and its outputs can come back empty -- rerun the full workflow)"
 [ -n "$OUT" ] || die_usage "--out is required"
 
-CI_HUB_USER="${CI_HUB_USER:-oschaaf}"
-if [ -z "${CI_HUB_HOST:-}" ]; then
-  CI_HUB_HOST="$(bash "$(dirname "${BASH_SOURCE[0]}")/resolve-cache-host.sh" 2>/dev/null || echo 192.0.2.20)"
+CI_HUB_USER="${CI_HUB_USER:?CI_HUB_USER must be set (GitHub repository variable)}"
+CI_HUB_ARTIFACTS_ROOT="${CI_HUB_ARTIFACTS_ROOT:?CI_HUB_ARTIFACTS_ROOT must be set (GitHub repository variable)}"
+if [ -z "${CI_HUB_ADDR:-}" ]; then
+  CI_HUB_ADDR="$(bash "$(dirname "${BASH_SOURCE[0]}")/resolve-cache-host.sh" 2>/dev/null || true)"
 fi
-: "${CI_HUB_HOST:=192.0.2.20}"
+: "${CI_HUB_ADDR:=${CI_HUB_IP:-}}"
 RETRIES="${FETCH_RETRIES:-4}"
 BACKOFF="${FETCH_BACKOFF:-3}"
 SSH_OPTS="${SSH_OPTS:--o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=10}"
-REMOTE="/Users/builder/ci/shared/artifacts/mod_pagespeed/${SHA}/linux-x64/build-artifacts.tar.zst"
+REMOTE="${CI_HUB_ARTIFACTS_ROOT}/${SHA}/linux-x64/build-artifacts.tar.zst"
 
-echo "[fetch-build-artifacts] host=${CI_HUB_HOST} sha=${SHA}"
+echo "[fetch-build-artifacts] host=${CI_HUB_ADDR} sha=${SHA}"
 
 verify() {
   # A truncated transfer must NEVER reach tar. zstd -t walks the whole frame.
@@ -68,10 +72,10 @@ attempt=1
 while [ "$attempt" -le "$RETRIES" ]; do
   rm -f "$OUT"
   if rsync -a --partial --inplace -e "ssh ${SSH_OPTS}" \
-       "${CI_HUB_USER}@${CI_HUB_HOST}:${REMOTE}" "$OUT" 2>&1 && verify "$OUT"; then
+       "${CI_HUB_USER}@${CI_HUB_ADDR}:${REMOTE}" "$OUT" 2>&1 && verify "$OUT"; then
     # TTL extension: the design record cleanup is mtime-based, so a consumed artifact must
     # look recently used, not recently staged. Best-effort; never fatal.
-    ssh ${SSH_OPTS} "${CI_HUB_USER}@${CI_HUB_HOST}" "touch '${REMOTE}'" 2>/dev/null || true
+    ssh ${SSH_OPTS} "${CI_HUB_USER}@${CI_HUB_ADDR}" "touch '${REMOTE}'" 2>/dev/null || true
     echo "[fetch-build-artifacts] ok ($(wc -c < "$OUT") bytes, attempt ${attempt})"
     exit 0
   fi
@@ -81,6 +85,6 @@ while [ "$attempt" -le "$RETRIES" ]; do
 done
 
 rm -f "$OUT"
-echo "::error::build-artifacts unavailable or corrupt after ${RETRIES} attempts: ${CI_HUB_USER}@${CI_HUB_HOST}:${REMOTE}"
+echo "::error::build-artifacts unavailable or corrupt after ${RETRIES} attempts: ${CI_HUB_USER}@${CI_HUB_ADDR}:${REMOTE}"
 echo "::error::the artifact may have been cleaned up -- rerun the FULL workflow, not just the failed jobs"
 exit 1

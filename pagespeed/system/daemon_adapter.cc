@@ -159,7 +159,33 @@ void ScanDirectory(const GoogleString& dir, StringPiece stem,
   }
   closedir(d);
 }
+
+// Whether `dir` can be looked inside, and if not, WHY.  opendir, not stat:
+// listing the directory is exactly what the volume scan above does, so its
+// failure mode is the one worth reporting -- and "permission denied" must not
+// read as "the daemon is not there" (see VolumeDirAccess).
+DaemonAdapter::DirAccess ProbeDir(const GoogleString& dir) {
+  DIR* d = opendir(dir.c_str());
+  if (d != nullptr) {
+    closedir(d);
+    return DaemonAdapter::DirAccess::kReadable;
+  }
+  return (errno == EACCES || errno == EPERM)
+             ? DaemonAdapter::DirAccess::kDenied
+             : DaemonAdapter::DirAccess::kAbsent;
+}
 #endif
+
+// The remediation line for the failure H2/H3 make the most likely: after the
+// daemon's privilege drop its cache directory, volume, socket and shared
+// config are group-rw (0660/0640 pagespeed:pagespeed), and a web-server user
+// outside the `pagespeed` group gets EACCES where a pre-drop deployment got
+// in.  Named in every permission-denied degrade so the fix is one command.
+const char kGroupMembershipHint[] =
+    " The web-server user is probably not in the `pagespeed` group, which "
+    "owns the optimizer daemon's cache and socket since the daemon's "
+    "privilege drop. Add it (for example `usermod -a -G pagespeed www-data`, "
+    "or `apache`/`nginx` on an RPM host) and restart the web server.";
 
 }  // namespace
 
@@ -204,10 +230,17 @@ void* DaemonAdapter::RecordCache() {
   const int open_error = abi_->CacheOpen(config, &cache);
   if (open_error != kPsOk) {
     if (handler_ != nullptr) {
-      const GoogleString message = StrCat(
+      GoogleString message = StrCat(
           "nothing will be recorded for in-place optimization: cannot open "
           "the optimizer daemon's cache volume at ",
           volume_path_, ": ", abi_->StrError(open_error));
+      // This open runs in the request-serving process, which is the one that
+      // carries the web-server user's group memberships -- so a permission
+      // failure HERE is the group join the startup probe (which may run with
+      // different privileges) could not see.
+      if (VolumeDirAccess(volume_path_) == DirAccess::kDenied) {
+        StrAppend(&message, kGroupMembershipHint);
+      }
       if (ShouldAnnounce(message)) {
         handler_->Message(kError, "%s", message.c_str());
       }
@@ -265,6 +298,29 @@ std::vector<GoogleString> DaemonAdapter::VolumeFiles(StringPiece volume_path) {
   return out;
 }
 
+DaemonAdapter::DirAccess DaemonAdapter::VolumeDirAccess(
+    StringPiece volume_path) {
+#ifdef _WIN32
+  return DirAccess::kAbsent;
+#else
+  const GoogleString path(volume_path.data(), volume_path.size());
+  if (path.empty()) {
+    return DirAccess::kAbsent;
+  }
+  // The configured path may name the directory the volume lives in, or be a
+  // stem the volume sits beside -- the same two shapes VolumeFiles scans.
+  struct stat st;
+  if (stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) {
+    return ProbeDir(path);
+  }
+  const size_t slash = path.find_last_of('/');
+  const GoogleString parent = slash == GoogleString::npos ? GoogleString(".")
+                              : slash == 0                ? GoogleString("/")
+                                           : path.substr(0, slash);
+  return ProbeDir(parent);
+#endif
+}
+
 bool DaemonAdapter::SocketAnswers(StringPiece path, GoogleString* error) {
 #ifdef _WIN32
   StrAppend(error, "socket probing is not implemented on this platform (", path,
@@ -288,12 +344,24 @@ bool DaemonAdapter::SocketAnswers(StringPiece path, GoogleString* error) {
               strerror(errno));
     return false;
   }
+  errno = 0;
   const bool connected =
       connect(fd, reinterpret_cast<struct sockaddr*>(&address),
               sizeof(address)) == 0;
+  const int connect_errno = errno;
   if (!connected) {
     StrAppend(error, "the optimizer daemon does not answer at ", spelled, ": ",
-              strerror(errno));
+              strerror(connect_errno));
+    // Distinguish the two causes an operator can act on.  After H2/H3 a
+    // permission failure means the group join is missing; an absent socket
+    // means the daemon is not running.
+    if (connect_errno == EACCES || connect_errno == EPERM) {
+      StrAppend(error, kGroupMembershipHint);
+    } else if (connect_errno == ENOENT) {
+      StrAppend(error,
+                " The socket does not exist -- start the pagespeed-optimizer "
+                "daemon (for example `systemctl start pagespeed-optimizer`).");
+    }
   }
   close(fd);
   return connected;
@@ -303,6 +371,7 @@ bool DaemonAdapter::SocketAnswers(StringPiece path, GoogleString* error) {
 DaemonStartupStatus DaemonAdapter::Resolve(GoogleString* error) {
   health_ = DaemonHealth::kUnavailable;
   extra_volume_warning_.clear();
+  legacy_generation_layout_ = false;
 
   if (socket_path_.empty() && volume_path_.empty()) {
     health_ = DaemonHealth::kNotConfigured;
@@ -338,6 +407,35 @@ DaemonStartupStatus DaemonAdapter::Resolve(GoogleString* error) {
     return DaemonStartupStatus::kOk;
   }
 
+  // The cache-directory handshake.  Since the daemon's privilege drop its
+  // cache lives in a versioned cold-start directory (vN) and the daemon
+  // publishes N in its shared config as cache_dir_generation.  A published
+  // generation this build is not written for means the two layouts share
+  // NOTHING, so the substrate goes down loudly here rather than attaching to
+  // a directory whose contents mean something else -- the loud handshake
+  // failure, never a silent split-brain.  Nothing is opened on this path.
+  const uint32_t generation =
+      abi_->SharedConfigGeneration(volume_path_.c_str());
+  if (generation != 0 && generation != kCacheDirGeneration) {
+    StrAppend(error,
+              "in-place optimization is OFF: the optimizer daemon publishes "
+              "cache directory generation ",
+              Integer64ToString(static_cast<int64>(generation)),
+              " (cache_dir_generation) and this module is built for "
+              "generation ",
+              Integer64ToString(static_cast<int64>(kCacheDirGeneration)),
+              ". The two cache layouts share nothing; nothing was opened and "
+              "nothing was created. Install a module and daemon package pair "
+              "that agree.");
+    return DaemonStartupStatus::kOk;
+  }
+  // 0 is "unknown", not a generation: a pre-H1 daemon publishes no such field
+  // (or its package is too old to export the reader).  That is the legacy,
+  // unversioned layout, and it is TOLERATED -- the configured paths are used
+  // as-is, exactly as before the field existed.  The tolerance is announced
+  // once on the healthy path below, where it would otherwise be invisible.
+  legacy_generation_layout_ = (generation == 0);
+
   const uint64_t inherited = abi_->SharedConfigVolumeSize(volume_path_.c_str());
   inherited_volume_size_ = inherited;
   if (inherited == 0) {
@@ -345,6 +443,16 @@ DaemonStartupStatus DaemonAdapter::Resolve(GoogleString* error) {
     // config is unreadable, or it declares a schema this build refuses.  All
     // of them mean the same thing here: the size is not known, so the volume
     // is not opened.
+    if (VolumeDirAccess(volume_path_) == DirAccess::kDenied) {
+      // "Unreadable" because of PERMISSIONS, not absence: since the
+      // privilege drop the shared config is group-readable only (0640
+      // pagespeed:pagespeed), so this is the group join that did not happen.
+      StrAppend(error,
+                "in-place optimization is OFF: cannot read the optimizer "
+                "daemon's shared configuration beside ",
+                volume_path_, ": permission denied.", kGroupMembershipHint);
+      return DaemonStartupStatus::kOk;
+    }
     StrAppend(error,
               "in-place optimization is OFF: the optimizer daemon has not "
               "published the size of its cache volume at ",
@@ -356,6 +464,17 @@ DaemonStartupStatus DaemonAdapter::Resolve(GoogleString* error) {
 
   const std::vector<GoogleString> before = VolumeFiles(volume_path_);
   if (before.empty()) {
+    if (VolumeDirAccess(volume_path_) == DirAccess::kDenied) {
+      // The scan found nothing because it was not ALLOWED to look: the cache
+      // directory is group-only (2770 pagespeed:pagespeed) since the
+      // privilege drop.  Reported apart from the absent case below, because
+      // "start the daemon" is the wrong fix for this one.
+      StrAppend(error,
+                "in-place optimization is OFF: cannot look inside the "
+                "optimizer daemon's cache directory at ",
+                volume_path_, ": permission denied.", kGroupMembershipHint);
+      return DaemonStartupStatus::kOk;
+    }
     // The daemon published a size but its volume file is not there.  Creating
     // it is exactly what must not happen: the daemon is the volume's owner and
     // a volume we invent is one nothing else reads.
@@ -449,6 +568,18 @@ DaemonStartupStatus DaemonAdapter::Resolve(GoogleString* error) {
   }
 
   health_ = DaemonHealth::kReady;
+  if (legacy_generation_layout_) {
+    // Reported even though the server is healthy: the tolerance is a
+    // deliberate, working state, and one loud line is what keeps it from
+    // being mistaken for the generation handshake having passed.  The same
+    // latch keeps it to one line per process.
+    StrAppend(error,
+              "the optimizer daemon does not publish a cache directory "
+              "generation (cache_dir_generation): treating it as the legacy, "
+              "pre-privilege-drop layout and using the configured paths "
+              "as-is. This is expected with a daemon package from before the "
+              "privilege drop and disappears when the daemon is upgraded.");
+  }
   if (!extra_volume_warning_.empty()) {
     // Reported even though the server is healthy: nothing else will ever
     // mention the wasted disk, and the same latch keeps it to one line.

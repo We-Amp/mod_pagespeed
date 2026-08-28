@@ -26,7 +26,7 @@ $ErrorActionPreference = 'Continue'
 $ac = "$env:SystemRoot\System32\inetsrv\appcmd.exe"
 # Prefer explicit python installs; `Get-Command python` first hits the WindowsApps
 # App-Execution-Alias stub, which fails to run.
-$py = @("C:\Program Files\Python312\python.exe","C:\Users\oschaaf\AppData\Local\Programs\Python\Python312\python.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+$py = @("C:\Program Files\Python312\python.exe","$env:LOCALAPPDATA\Programs\Python\Python312\python.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
 if (-not $py) { $py = (Get-Command python -ErrorAction SilentlyContinue | Where-Object { $_.Source -notmatch 'WindowsApps' } | Select-Object -First 1).Source }
 if (-not $py) { Write-Error "No usable python found (WindowsApps stub excluded)"; exit 1 }
 

@@ -84,6 +84,23 @@ exit 0
 #------------------------------------------------------------------------------
 %post
 
+# Join the web-server user(s) to the `pagespeed` group. After the optimizer
+# daemon's privilege drop (2.1) its cache volume, notify socket and shared
+# config are group-rw (0660/0640 pagespeed:pagespeed), and group membership is
+# what lets the module reach them. The module package performs the join
+# because it is the package that knows its web server. Guarded and idempotent;
+# a no-op when the optimizer package (which creates the group) is not
+# installed -- dep-free degraded channels (EA4/el8) have no such group -- and
+# a usermod failure must not fail the install: the module logs the degraded
+# state loudly at startup instead.
+if getent group pagespeed >/dev/null 2>&1; then
+  for webuser in apache nginx; do
+    if id "$webuser" >/dev/null 2>&1; then
+      usermod -a -G pagespeed "$webuser" || true
+    fi
+  done
+fi
+
 exit 0
 
 #------------------------------------------------------------------------------

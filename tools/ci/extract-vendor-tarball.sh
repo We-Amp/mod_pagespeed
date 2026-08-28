@@ -7,12 +7,12 @@
 #
 # Why this script exists (recurring):
 #   The vendor job writes the tarball to per-machine local storage
-#   (both x64 builders carry the
-#   `ci-builder,dedicated` label) and rsyncs a copy to the cache-host shared dir.
+#   (a machine-local path on each x64 builder, all of which share one runner
+#   label) and rsyncs a copy to the CI hub shared dir.
 #   On `gh run rerun --failed`, GitHub does NOT re-run the successful vendor
 #   job; retried consumer jobs land on whichever machine has capacity -- often
 #   the OTHER one -- where the local tarball is missing or stale. The previous
-#   cache-host fallback (a) only ran when the local file was missing, so a *partial*
+#   hub fallback (a) only ran when the local file was missing, so a *partial*
 #   local file sailed straight into `tar` ("zstd: premature end" /
 #   "tar: Unexpected EOF"); and (b) had the integrity check inline-duplicated
 #   into every consumer job, so fixes drifted.
@@ -27,39 +27,41 @@
 #      mount flap -- between `zstd -t` and `tar`: Linux Build lane, run
 #      29756918487, "Local tarball present and verified" then seconds later
 #      "Cannot open: No such file or directory"), we re-fetch from the
-#      authoritative cache-host shared dir with retries + backoff, re-verifying
+#      authoritative CI hub shared dir with retries + backoff, re-verifying
 #      each attempt. A flaky/partial/vanished local file heals from the
 #      authoritative source instead of cascading downstream failures.
-#   3. IN-FLIGHT TTL EXTENSION. On every successful cache-host fetch we `touch` the
+#   3. IN-FLIGHT TTL EXTENSION. On every successful hub fetch we `touch` the
 #      remote tarball so the design record's 3-day cleanup measures "days since last
 #      consumed" rather than "days since vendored". A workflow rerun within the
 #      window keeps its artifact alive without weakening cleanup for idle repos.
 #   4. FAIL LOUD. When the artifact is genuinely gone from both the local disk
-#      and cache-host, we exit non-zero with precise, actionable guidance
+#      and the CI hub, we exit non-zero with precise, actionable guidance
 #      ("rerun the full workflow, not just failed jobs") instead of a silent
 #      partial or a swallowed warning.
 #
 # Usage:
 #   extract-vendor-tarball.sh --sha <short_sha> --dest <workspace_dir> \
-#       [--local <local_tarball_path>] [--stream]
+#       [--local <local_tarball_path>] [--prefix <name>] [--stream]
 #
 #   --sha    <s>  Short SHA the vendor job stamped into the tarball name
-#                 (mod_pagespeed-<sha>.tar.zst). Required.
+#                 (<prefix>-<sha>.tar.zst). Required.
 #   --dest   <d>  Directory to extract the workspace into. Required; created if
 #                 absent. Extraction is `tar ... -C <dest>`.
 #   --local  <p>  Candidate local tarball path to try before falling back to
-#                 cache-host. Optional; if omitted only
-#                 the cache-host path is used (e.g. auxiliary runners with no D:).
+#                 the hub (e.g. a machine-local vendor dir). Optional; if
+#                 omitted only the hub path is used (e.g. auxiliary runners
+#                 with no local vendor drive).
+#   --prefix <n>  Tarball basename prefix (default: mod_pagespeed).
 #   --stream      Extract by streaming `zstd -d | tar` instead of
 #                 `tar --zstd -xf`. Used by jobs whose tar lacks --zstd.
 #
-# Environment overrides (all optional, sane LAN defaults):
-#   CI_HUB_HOST          ssh host/IP for the shared dir (default: resolve
-#                       cache-host, else 192.0.2.20).
-#   CI_HUB_USER          ssh user (default: oschaaf).
-#   CI_HUB_VENDOR_DIR    remote shared vendor dir
-#                       (default: /Users/builder/ci/shared/vendor).
-#   FETCH_RETRIES       cache-host fetch attempts (default: 4).
+# Environment (hub coordinates come from GitHub repository variables; NOTHING
+# environment-specific is hardcoded here):
+#   CI_HUB_ADDR         ssh host/IP for the shared dir (default: resolved by
+#                       resolve-cache-host.sh from CI_HUB_HOST / CI_HUB_IP).
+#   CI_HUB_USER         ssh user (required only when the hub is contacted).
+#   CI_HUB_VENDOR_DIR   remote shared vendor dir (same).
+#   FETCH_RETRIES       hub fetch attempts (default: 4).
 #   FETCH_BACKOFF       initial backoff seconds, doubled each retry (default: 3).
 #   SSH_OPTS            ssh options (default: StrictHostKeyChecking=accept-new
 #                       + BatchMode=yes).
@@ -75,11 +77,12 @@ set -euo pipefail
 SHORT_SHA=""
 DEST=""
 LOCAL_TARBALL=""
+PREFIX="mod_pagespeed"
 STREAM=0
 
 die_usage() {
   echo "::error::extract-vendor-tarball.sh: $1" >&2
-  echo "usage: extract-vendor-tarball.sh --sha <short_sha> --dest <dir> [--local <path>] [--stream]" >&2
+  echo "usage: extract-vendor-tarball.sh --sha <short_sha> --dest <dir> [--local <path>] [--prefix <name>] [--stream]" >&2
   exit 2
 }
 
@@ -88,6 +91,7 @@ while [ $# -gt 0 ]; do
     --sha)    SHORT_SHA="${2:-}"; shift 2 ;;
     --dest)   DEST="${2:-}"; shift 2 ;;
     --local)  LOCAL_TARBALL="${2:-}"; shift 2 ;;
+    --prefix) PREFIX="${2:-}"; shift 2 ;;
     --stream) STREAM=1; shift ;;
     *)        die_usage "unknown argument: $1" ;;
   esac
@@ -95,28 +99,21 @@ done
 
 [ -n "$SHORT_SHA" ] || die_usage "--sha is required"
 [ -n "$DEST" ] || die_usage "--dest is required"
+[ -n "$PREFIX" ] || die_usage "--prefix must be non-empty"
 
 # --- config -----------------------------------------------------------------
-BASENAME="mod_pagespeed-${SHORT_SHA}.tar.zst"
-CI_HUB_USER="${CI_HUB_USER:-oschaaf}"
-CI_HUB_VENDOR_DIR="${CI_HUB_VENDOR_DIR:-/Users/builder/ci/shared/vendor}"
+BASENAME="${PREFIX}-${SHORT_SHA}.tar.zst"
+# Hub coordinates are only needed on the fetch path. Do NOT require them here:
+# a --local run with a good tarball never touches the hub, and aborting on an
+# unset variable would fail a job that had everything it needed. The hard
+# requirement (and the address resolution, which costs TCP probes) is scoped to
+# resolve_hub() below, called from fetch_from_hub().
+CI_HUB_USER="${CI_HUB_USER:-}"
+CI_HUB_VENDOR_DIR="${CI_HUB_VENDOR_DIR:-}"
 FETCH_RETRIES="${FETCH_RETRIES:-4}"
 FETCH_BACKOFF="${FETCH_BACKOFF:-3}"
 SSH_OPTS="${SSH_OPTS:--o StrictHostKeyChecking=accept-new -o BatchMode=yes}"
-
-if [ -z "${CI_HUB_HOST:-}" ]; then
-  # cache-host can resolve to MULTIPLE A-records: a live address AND stale ones
-  # from old DHCP leases / extra interfaces (a dead 192.0.2.20 was seen on
-  # ci-pool, and on ci-builder 2026-06-23). The old idiom
-  # `awk '{print $1; exit}'` took the FIRST address and assumed any resolved IP
-  # reached the host -- false when a stale address sorts first, so the fetch died
-  # "No route to host". resolve-cache-host.sh probes TCP/22 and returns the
-  # first *reachable* address; the := keeps the known-good default as a net.
-  CI_HUB_HOST="$(bash "$(dirname "${BASH_SOURCE[0]}")/resolve-cache-host.sh")"
-  : "${CI_HUB_HOST:=192.0.2.20}"
-fi
-
-REMOTE_PATH="${CI_HUB_USER}@${CI_HUB_HOST}:${CI_HUB_VENDOR_DIR}/${BASENAME}"
+REMOTE_PATH=""
 
 log()  { echo "$*"; }
 warn() { echo "::warning::$*"; }
@@ -166,18 +163,40 @@ verify_tarball() {
   return 0
 }
 
-# --- cache-host fetch with retry + backoff + TTL touch --------------------------
-# fetch_from_ci_hub <dest_path>
+# --- hub fetch with retry + backoff + TTL touch -----------------------------
+# fetch_from_hub <dest_path>
 #   Pulls the tarball (and its .sha256 sidecar if present) from the
 #   authoritative shared dir, verifying after each attempt. On success, touches
 #   the remote file's mtime so the 3-day TTL measures last-consumed.
-fetch_from_ci_hub() {
+# resolve_hub -- assert the hub coordinates and assemble REMOTE_PATH.
+#   Called once, lazily, from fetch_from_hub(): everything it needs is only
+#   needed when we actually reach over the network.
+resolve_hub() {
+  [ -n "$REMOTE_PATH" ] && return 0
+  : "${CI_HUB_USER:?CI_HUB_USER must be set (GitHub repository variable) to fetch from the hub}"
+  : "${CI_HUB_VENDOR_DIR:?CI_HUB_VENDOR_DIR must be set (GitHub repository variable) to fetch from the hub}"
+
+  if [ -z "${CI_HUB_ADDR:-}" ]; then
+    # resolve-cache-host.sh probes TCP/22 on every resolved address and prints
+    # the first that answers -- the bare first-resolved-address idiom this
+    # replaces pre-collapsed to whatever stale A-record DNS listed first and
+    # died with "No route to host" (see resolve-cache-host.sh's header).
+    CI_HUB_ADDR="$(bash "$(dirname "${BASH_SOURCE[0]}")/resolve-cache-host.sh" 2>/dev/null || true)"
+    : "${CI_HUB_ADDR:=${CI_HUB_IP:-}}"
+  fi
+  : "${CI_HUB_ADDR:?no hub address: set CI_HUB_ADDR, or CI_HUB_HOST/CI_HUB_IP for resolve-cache-host.sh}"
+
+  REMOTE_PATH="${CI_HUB_USER}@${CI_HUB_ADDR}:${CI_HUB_VENDOR_DIR}/${BASENAME}"
+}
+
+fetch_from_hub() {
   local dest_path="$1"
   local attempt backoff
+  resolve_hub
   backoff="$FETCH_BACKOFF"
 
   for attempt in $(seq 1 "$FETCH_RETRIES"); do
-    log "Fetching ${BASENAME} from cache-host (${CI_HUB_HOST}), attempt ${attempt}/${FETCH_RETRIES}..."
+    log "Fetching ${BASENAME} from the CI hub (${CI_HUB_ADDR}), attempt ${attempt}/${FETCH_RETRIES}..."
     # Best-effort sidecar fetch first (don't fail the attempt if it's absent --
     # older vendor runs predate the sidecar). --ignore-missing-args keeps rsync
     # from erroring when the sidecar doesn't exist on the source.
@@ -190,15 +209,15 @@ fetch_from_ci_hub() {
         # last consumption, not from vendoring. Best-effort; never fatal.
         # SSH_OPTS is an intentional multi-token option list -> must word-split.
         # shellcheck disable=SC2029,SC2086
-        ssh ${SSH_OPTS} "${CI_HUB_USER}@${CI_HUB_HOST}" \
+        ssh ${SSH_OPTS} "${CI_HUB_USER}@${CI_HUB_ADDR}" \
           "touch ${CI_HUB_VENDOR_DIR}/${BASENAME} ${CI_HUB_VENDOR_DIR}/${BASENAME}.sha256 2>/dev/null || true" \
           >/dev/null 2>&1 || true
-        log "Fetched and verified ${BASENAME} from cache-host."
+        log "Fetched and verified ${BASENAME} from the CI hub."
         return 0
       fi
-      warn "Fetched ${BASENAME} from cache-host but it failed integrity (attempt ${attempt}); retrying."
+      warn "Fetched ${BASENAME} from the CI hub but it failed integrity (attempt ${attempt}); retrying."
     else
-      warn "rsync of ${BASENAME} from cache-host failed (attempt ${attempt}/${FETCH_RETRIES})."
+      warn "rsync of ${BASENAME} from the CI hub failed (attempt ${attempt}/${FETCH_RETRIES})."
     fi
 
     if [ "$attempt" -lt "$FETCH_RETRIES" ]; then
@@ -236,47 +255,47 @@ mkdir -p "$DEST"
 CHOSEN=""
 
 # 1. Try the local candidate (same-machine vendor hit). Use -r, not -f: on
-#    ci-pool a Windows-written tarball under /mnt/d can be stat-present
-#    but EACCES for the WSL2 uid (DrvFs/NTFS ACL mismatch).
+#    a WSL2 builder a Windows-written tarball under a DrvFs mount can be
+#    stat-present but EACCES for the WSL2 uid (DrvFs/NTFS ACL mismatch).
 if [ -n "$LOCAL_TARBALL" ] && [ -r "$LOCAL_TARBALL" ]; then
   if verify_tarball "$LOCAL_TARBALL"; then
     log "Local tarball present and verified: $LOCAL_TARBALL"
     CHOSEN="$LOCAL_TARBALL"
   else
     # CRITICAL FIX vs old behaviour: a present-but-partial local file no longer
-    # reaches tar. We fall through and self-heal from cache-host.
-    warn "Local tarball failed integrity on $(hostname): $LOCAL_TARBALL -- self-healing from cache-host."
+    # reaches tar. We fall through and self-heal from the CI hub.
+    warn "Local tarball failed integrity on $(hostname): $LOCAL_TARBALL -- self-healing from the CI hub."
   fi
 elif [ -n "$LOCAL_TARBALL" ]; then
-  warn "Local tarball missing/unreadable on $(hostname): $LOCAL_TARBALL -- fetching from cache-host."
+  warn "Local tarball missing/unreadable on $(hostname): $LOCAL_TARBALL -- fetching from the CI hub."
 else
-  log "No local candidate provided (auxiliary runner) -- fetching from cache-host."
+  log "No local candidate provided (auxiliary runner) -- fetching from the CI hub."
 fi
 
 # 2. Extract the verified local candidate. Verification passing is NOT the end
 #    of the story: the file can still vanish, or the DrvFs mount flap, between
 #    `zstd -t` and `tar`. Treat a failed extraction exactly
-#    like a failed integrity check -- heal from cache-host below.
+#    like a failed integrity check -- heal from the CI hub below.
 if [ -n "$CHOSEN" ]; then
   if extract_workspace "$CHOSEN"; then
     log "Workspace extracted into ${DEST}"
     exit 0
   fi
-  warn "Local tarball verified but extraction failed on $(hostname): $CHOSEN -- self-healing from cache-host."
+  warn "Local tarball verified but extraction failed on $(hostname): $CHOSEN -- self-healing from the CI hub."
   CHOSEN=""
 fi
 
-# 3. Fall back to the authoritative cache-host shared dir.
+# 3. Fall back to the authoritative CI hub shared dir.
 FETCHED="/tmp/${BASENAME}"
-if fetch_from_ci_hub "$FETCHED"; then
-  # The fetched copy was verified by fetch_from_ci_hub a moment ago, so an
+if fetch_from_hub "$FETCHED"; then
+  # The fetched copy was verified by fetch_from_hub a moment ago, so an
   # extraction failure here is not a fetch/integrity problem; there is no
   # further fallback -- fail loud.
   if extract_workspace "$FETCHED"; then
     log "Workspace extracted into ${DEST}"
     exit 0
   fi
-  err "Vendor tarball ${BASENAME} was fetched from cache-host and passed integrity,"
+  err "Vendor tarball ${BASENAME} was fetched from the CI hub and passed integrity,"
   err "but extraction into ${DEST} still failed on $(hostname). Investigate the"
   err "runner's tar/zstd toolchain and the destination filesystem; re-running"
   err "the job as-is will hit the same failure."
@@ -284,7 +303,7 @@ if fetch_from_ci_hub "$FETCHED"; then
 fi
 
 err "Vendor tarball ${BASENAME} is unavailable on $(hostname) AND could not be"
-err "fetched/verified from cache-host after ${FETCH_RETRIES} attempts."
+err "fetched/verified from the CI hub after ${FETCH_RETRIES} attempts."
 err "Most likely the producing vendor job's artifact was cleaned up by the"
 err "3-day TTL because only failed jobs were rerun -- GitHub does"
 err "NOT re-run the successful 'Vendor Dependencies' job on 'gh run rerun"

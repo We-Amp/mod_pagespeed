@@ -130,8 +130,9 @@ fi
 # ---------------------------------------------------------------------------
 # 3. Build //:libmod_pagespeed.so. --config=vendored (offline, vendor/repo-cache
 #    + vendor/cyclone override) + --config=clang-libstdcxx13. NOT --config=ci
-#    (that adds --config=remote-cache pointing at cache-host + clang-libstdcxx13's
-#    el9 paths; we supply clang-libstdcxx13 explicitly and skip the remote cache).
+#    (that adds --config=remote-cache pointing at the bazel-remote-cache alias
+#    + clang-libstdcxx13's el9 paths; we supply clang-libstdcxx13 explicitly
+#    and skip the remote cache).
 #    The feature disables match the el9 leg (clang layering_check trips on abseil
 #    under libstdc++). build:linux's BAZEL_LINKLIBS=-l%:libstdc++.a statically
 #    links the C++ runtime into the .so.

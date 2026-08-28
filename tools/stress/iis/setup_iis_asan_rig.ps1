@@ -131,7 +131,7 @@ Write-Host "Module copied ($((Get-Item "$RigDir\bin\pagespeed_iis.dll").Length) 
 # 4. Generate the self-contained rewrite corpus into <docroot>\stress (8 pages, 4 css, 4 js, 6 png)
 #    Resolve a REAL python: prefer the explicit installs -- `Get-Command python`
 #    first hits the WindowsApps App-Execution-Alias stub, which fails to run.
-$py = @("C:\Program Files\Python312\python.exe","C:\Users\oschaaf\AppData\Local\Programs\Python\Python312\python.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+$py = @("C:\Program Files\Python312\python.exe","$env:LOCALAPPDATA\Programs\Python\Python312\python.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
 if (-not $py) { $py = (Get-Command python -ErrorAction SilentlyContinue | Where-Object { $_.Source -notmatch 'WindowsApps' } | Select-Object -First 1).Source }
 if (-not $py) { Write-Error "No usable python found (WindowsApps stub excluded)"; exit 1 }
 & $py "$RepoDir\tools\stress\stress_shutdown.py" gen-corpus --out "$RigDir\html\stress"

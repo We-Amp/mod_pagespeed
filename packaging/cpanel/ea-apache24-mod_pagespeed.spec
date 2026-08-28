@@ -153,6 +153,18 @@ if [ "${EA4_AUTO_RELOAD:-1}" = "1" ] && [ -x /scripts/restartsrv_httpd ]; then
     /scripts/restartsrv_httpd >/dev/null 2>&1 || true
 fi
 
+# Join the web-server user(s) to the `pagespeed` group, as on the other rpm
+# channels. EA4 is a dep-free degraded channel: no optimizer package, hence no
+# `pagespeed` group, so this is a no-op here by construction -- it only acts
+# if an optimizer package ever lands on the host.
+if getent group pagespeed >/dev/null 2>&1; then
+    for webuser in apache nginx; do
+        if id "$webuser" >/dev/null 2>&1; then
+            usermod -a -G pagespeed "$webuser" || true
+        fi
+    done
+fi
+
 %postun
 # On uninstall ($1 == 0), drop the LoadModule by reloading Apache.
 if [ "$1" = "0" ] && [ -x /scripts/restartsrv_httpd ]; then

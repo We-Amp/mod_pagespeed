@@ -1,35 +1,47 @@
 #!/usr/bin/env bash
 #
-# resolve-cache-host.sh -- print a *reachable* IP for cache-host.
+# resolve-cache-host.sh -- print a *reachable* address for the CI cache/artifact
+# hub.
+#
+# NOTHING environment-specific is stored in this file. The hub's name and its
+# fallback address come from the environment; in GitHub Actions they are
+# supplied by the repository variables CI_HUB_HOST / CI_HUB_IP (wired into each
+# workflow's top-level `env:`). Keep in sync with the pagespeed-optimizer copy.
 #
 # WHY THIS EXISTS
-#   cache-host can carry more than one A-record on the LAN DNS: the live
-#   address (currently 192.0.2.20) AND stale ones left behind by old
-#   DHCP leases / extra interfaces (e.g. a dead 192.0.2.20). The old
-#   idiom -- `getent hosts cache-host | awk '{print $1; exit}'` -- grabbed
-#   the FIRST resolved address and assumed any resolved IP reaches the host.
-#   That premise is false: when DNS lists a stale address first, every fetch
-#   that pre-collapsed to that single IP died with "No route to host"
-#   (a cross-runner artifact flake; the maintainer CI went red 2026-06-23).
+#   The hub can carry more than one A-record on the LAN DNS: the live address
+#   AND stale ones left behind by old DHCP leases / extra interfaces. The old
+#   idiom -- `getent hosts <hub> | awk '{print $1; exit}'` -- grabbed the FIRST
+#   resolved address and assumed any resolved IP reaches the host. That premise
+#   is false: when DNS lists a dead record first, every fetch that pre-collapsed
+#   to that single IP died with "No route to host" (a cross-runner artifact
+#   flake; the maintainer CI went red 2026-06-23).
 #   (ssh/rsync given the *hostname* survive this because OpenSSH iterates all
 #   resolved addresses -- it's only the pre-resolved-to-one-IP call sites and
 #   `docker --add-host`, which needs a single IP, that break.)
 #
 # WHAT IT DOES
 #   Probe TCP/22 on each resolved address in turn and print the first that
-#   answers; fall back to the known-good default if none do. Always exits 0
-#   and always prints something, so callers keep their own
-#   `${VAR:-192.0.2.20}` safety net as a second line of defence.
+#   answers; fall back to CI_HUB_IP if none do. Always exits 0 and always prints
+#   something (possibly empty, if no fallback was supplied), so callers keep
+#   their own `${VAR:-...}` safety net as a second line of defence.
 #
-# Override resolution entirely with CI_HUB_HOST=<ip-or-host>.
+# Environment
+#   CI_HUB_ADDR       Skip resolution entirely and print this verbatim
+#                     (use this to pin a runner via its .env).
+#   CI_HUB_HOST       Hostname to resolve.
+#   CI_HUB_IP         Fallback address.
+#   CI_HUB_PROBE_TIMEOUT   TCP probe timeout in seconds (default 3).
 set -u
 
-DEFAULT_IP="192.0.2.20"
+HUB_NAME="${CI_HUB_HOST:-}"
+FALLBACK_IP="${CI_HUB_IP:-}"
 PROBE_TIMEOUT="${CI_HUB_PROBE_TIMEOUT:-3}"
 
 # Honour an explicit override (e.g. runner .env pinning) without probing.
-if [ -n "${CI_HUB_HOST:-}" ]; then
-  echo "${CI_HUB_HOST}"
+OVERRIDE="${CI_HUB_ADDR:-}"
+if [ -n "${OVERRIDE}" ]; then
+  echo "${OVERRIDE}"
   exit 0
 fi
 
@@ -39,12 +51,17 @@ probe() {
   timeout "${PROBE_TIMEOUT}" bash -c "exec 3<>/dev/tcp/$1/22" 2>/dev/null
 }
 
-for ip in $(getent hosts cache-host 2>/dev/null | awk '$1 ~ /\./ {print $1}') "${DEFAULT_IP}"; do
+candidates=""
+if [ -n "${HUB_NAME}" ]; then
+  candidates="$(getent hosts "${HUB_NAME}" 2>/dev/null | awk '$1 ~ /\./ {print $1}')"
+fi
+
+for ip in ${candidates} ${FALLBACK_IP}; do
   if probe "${ip}"; then
     echo "${ip}"
     exit 0
   fi
 done
 
-# Nothing answered -- emit the default so callers still get a usable value.
-echo "${DEFAULT_IP}"
+# Nothing answered -- emit the fallback so callers still get a usable value.
+echo "${FALLBACK_IP}"

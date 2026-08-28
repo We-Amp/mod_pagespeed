@@ -89,9 +89,26 @@ LIBJPEG_TURBO_SHA = "a7da42b640377c2a9a9665e2c4b0ea60cd5599afb48c2521e6df0c9dc9d
 # APR 1.7.x branch head - Updated Feb 2026
 APR_COMMIT = "d7a4f5be56969ebb5d2f9d093e17eb39dd016693"
 APR_SHA = "5c56af0a8ad7dee32dc381620496f6ebbaa9bf64a470a4ad4fdb0eed84e87fc7"
-# APR-util 1.6.x branch head - Updated Feb 2026
-APRUTIL_COMMIT = "efbe77e09f0f3e872f2a1126d88d791ab4361b23"
-APRUTIL_SHA = "4ce5fead950705f6b33dcac5b7fae45f4295b80cb75a6a1378baaec896fd4fc1"
+# APR-util 1.6.5 (tag `1.6.5`, released 2026-08-10) - SECURITY bump Aug 2026.
+# Was efbe77e (1.6.x branch head, 2025-01-01, pre-1.6.4). 1.6.4 is the release
+# that carries the fixes for the 2026-08-06 advisory batch; 1.6.5 adds the
+# oracle-DBD build fix on top (upstream PR 70170) and is the current stable
+# release of the 1.6.x branch:
+#   CVE-2026-32327 (9.1) XML stack recursion   - fixed in 1.6.4 (<= 1.6.3 affected)
+#   CVE-2026-34191 (9.1) SQL injection, oracle DBD driver - fixed in 1.6.4 (1.6.0-1.6.3)
+#   CVE-2025-49506 (7.5) non-constant-time apr_password_validate() - fixed in 1.6.4
+#   CVE-2026-34501 (7.5) heap overflow, redis client   - fixed in 1.6.4 (1.6.0-1.6.3)
+#   CVE-2026-34502 (7.5) heap overflow, memcached client - fixed in 1.6.4 (1.3.0-1.6.3)
+# None of the five defects sit in a source file this build compiles (see the
+# srcs list in bazel/aprutil.bzl: no xml/, dbd/, redis/, memcache/, and crypto/
+# is limited to apr_md5.c + getuuid.c + uuid.c), so 1.1 was not exposed. The
+# bump is taken anyway because it is a clean fast-forward on the same branch:
+# of the compiled set only xlate/xlate.c changes (a NULL-argument guard in
+# apr_xlate_conv_buffer), plus APU_PATCH_VERSION 4 -> 5 in include/apu_version.h.
+# No pre-generated header regeneration needed (apu.h.in / apu_config.h.in /
+# apr_ldap.h.in unchanged), no ABI change to the bucket-brigade API 1.1 uses.
+APRUTIL_COMMIT = "eb1f0c8ebd4f9633c327f595746933da6349dded"
+APRUTIL_SHA = "804b8b276b346a69ca91bc704198de9ff4956a9a60a2f1212f350c230ee3dd03"
 
 # Cyclone Cache - high-performance disk cache with scan-resistant CLFUS algorithm
 # Requires C++23 - wrapper provides C ABI for C++20 consumers

@@ -158,9 +158,20 @@ build:windows --local_resources=cpu=HOST_CPUS
 # =============================================================================
 # Shared L2 cache across all CI runners and runs. Used alongside --disk_cache (L1).
 # No authentication required — the cache is on the local network.
-# Docker containers use --add-host=cache-host:${BAZEL_CACHE_HOST} to resolve
-# (dynamically resolved via getent/mDNS, falling back to 192.0.2.20).
-build:remote-cache --remote_cache=http://cache-host:9090
+#
+# The endpoint is addressed through the environment-neutral alias
+# `bazel-remote-cache`; NO environment-specific hostname or address is stored in
+# this tree (they live in GitHub repository variables).
+#   * CI Linux jobs run in Docker and map the alias with
+#     `--add-host=bazel-remote-cache:${BAZEL_CACHE_HOST}`.
+#   * CI Windows jobs build natively and pass `--remote_cache` explicitly.
+#   * Locally, either add a `bazel-remote-cache` entry to /etc/hosts, or put
+#     `build:remote-cache --remote_cache=http://<host>:9090` in user.bazelrc
+#     (gitignored, try-import'ed at the END of .bazelrc so it wins). Use the
+#     `build:remote-cache` prefix, not bare `build`: for a given config the
+#     last matching option wins, so an override on the same config is what
+#     actually takes effect.
+build:remote-cache --remote_cache=http://bazel-remote-cache:9090
 build:remote-cache --remote_upload_local_results=true
 build:remote-cache --remote_timeout=120
 # A shared LRU remote cache can evict a blob that an in-flight build still
@@ -168,8 +179,9 @@ build:remote-cache --remote_timeout=120
 # hard-failing. Kept consistent with the Windows legs (below), which already
 # set the same retry count via build:windows.
 build:remote-cache --experimental_remote_cache_eviction_retries=5
-build:windows --remote_cache=http://cache-host:9090
 # Windows is a read-only remote-cache consumer (no --remote_upload_local_results).
+# Windows jobs build natively (no Docker, so no --add-host alias): the workflows
+# pass --remote_cache=http://<hub>:9090 explicitly from a repository variable.
 # The on-demand output prefetcher writes a temp file then renames it into bazel-out;
 # on Windows that rename/open intermittently loses a race and fails with
 # "permission denied" on freshly-materialized generated headers (e.g. protobuf

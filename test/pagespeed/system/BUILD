@@ -334,6 +334,22 @@ cc_binary(
     visibility = ["//visibility:public"],
 )
 
+# The pre-H1 daemon: no cache_dir_generation reader. Like the sized
+# initializer this entry point is bound OPTIONALLY, so this flavour is what
+# proves its absence still loads -- the adapter's legacy-layout tolerance is a
+# claim in a comment until a library that genuinely lacks the symbol loads.
+cc_binary(
+    name = "libdaemon_stub_no_generation.so",
+    testonly = True,
+    srcs = ["daemon_stub_lib.cc"],
+    defines = ["PS_STUB_OMIT_GENERATION"],
+    linkopts = ["-nostdlib++"],
+    linkshared = True,
+    linkstatic = True,
+    target_compatible_with = ["@platforms//os:linux"],
+    visibility = ["//visibility:public"],
+)
+
 # Optimizer-daemon adapter startup: the volume-sizing mirror (match starts,
 # divergence refuses), the degrade path when the daemon is absent or
 # unreachable, and the RAM-tier floor the adapter opens the shared volume
@@ -343,6 +359,7 @@ pagespeed_cc_test(
     srcs = ["daemon_adapter_test.cc"],
     data = [
         ":libdaemon_stub.so",
+        ":libdaemon_stub_no_generation.so",
         ":libdaemon_stub_no_varies_accept.so",
         ":libdaemon_stub_unsized.so",
     ],

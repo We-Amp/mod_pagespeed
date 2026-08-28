@@ -473,6 +473,116 @@
      },
      "published": "2011-05-24T23:55:03.573"
     }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "APR-util versions 1.6.3 (and earlier) function apr_password_validate() was not constant-time with regards to hashes or passwords comparisons, potentially leaking their content via a side channel timing attack particularly on platforms without crypt() such as\u00a0\u00a0Windows, BeOS, NetWare, or Android.  Users are recommended to upgrade to version 1.6.4, which fixes this issue."
+      }
+     ],
+     "id": "CVE-2025-49506",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 7.5,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2026-08-06T15:16:41.890"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "A bug in APR-util version 1.6.3 (and earlier) allows a stack recursion attack against any library consumer which parses XML from untrusted sources and uses the\u00a0apr_xml_quote_elem() function.  Users are recommended to upgrade to version 1.6.4, which fixes this issue."
+      }
+     ],
+     "id": "CVE-2026-32327",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 9.1,
+         "baseSeverity": "CRITICAL"
+        }
+       }
+      ]
+     },
+     "published": "2026-08-06T15:16:54.190"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Improper Neutralization of Special Elements used in an SQL Command ('SQL Injection') vulnerability in Apache Portable Runtime Utility via apr_dbd_oracle provider.  This issue affects Apache Portable Runtime Utility: from 1.6.0 through 1.6.3"
+      }
+     ],
+     "id": "CVE-2026-34191",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 9.1,
+         "baseSeverity": "CRITICAL"
+        }
+       }
+      ]
+     },
+     "published": "2026-08-06T15:16:54.650"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Heap-based Buffer Overflow vulnerability in Apache Portable Runtime Utility redis client.  This issue affects Apache Portable Runtime Utility: from 1.6.0 through 1.6.3.  Users are recommended to upgrade to version 1.6.4, which fixes the issue."
+      }
+     ],
+     "id": "CVE-2026-34501",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 7.5,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2026-08-06T15:16:54.773"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Heap-based Buffer Overflow vulnerability in Apache Portable Runtime Utility memcached client  This issue affects Apache Portable Runtime Utility: from 1.3.0 through 1.6.3."
+      }
+     ],
+     "id": "CVE-2026-34502",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 7.5,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2026-08-06T15:16:54.920"
+    }
    }
   ],
   "cpe:2.3:a:apache:portable_runtime": [
@@ -10323,7 +10433,7 @@
    }
   ]
  },
- "generated": "2026-07-20T10:08:30Z",
+ "generated": "2026-08-27T16:15:35Z",
  "schema": 1,
  "source": "https://services.nvd.nist.gov/rest/json/cves/2.0"
 }

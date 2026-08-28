@@ -160,8 +160,8 @@ deps:
     release_date: "2026-01-04"                  # commit-pinned d7a4f5b (1.7.x branch head); commit committer.date 2026-01-04 ("Update config.guess..."). NOT the "Feb 2026" bzl bump comment.
 
   apr-util:
-    cpe: "cpe:2.3:a:apache:apr-util"           # NVD: 6 CVEs
-    release_date: "2025-01-01"                  # commit-pinned efbe77e (1.6.x branch head); commit committer.date 2025-01-01 ("Happy New Year 2025" — the literal pinned commit, a low-activity branch). NOT the "Feb 2026" bzl bump comment, which would be ~13mo too LATE = a false-negative window.
+    cpe: "cpe:2.3:a:apache:apr-util"           # NVD: 11 CVEs
+    release_date: "2026-08-10"                  # tag-pinned eb1f0c8 == apr-util 1.6.5, tag commit date 2026-08-10 ("release 1.6.5 from voted 1.6.5-rc1"). Was 2025-01-01 (commit-pinned efbe77e, a pre-1.6.4 1.6.x branch head). The pin now IS a release tag, so the date tracks that release — same discipline as curl: the publish-date filter then correctly drops the 2026-08-06 advisory batch (CVE-2026-32327 / -34191 / -34501 / -34502 / CVE-2025-49506), every one of which is fixed in 1.6.4 and therefore carried by 1.6.5. Bumped in the same commit as APRUTIL_COMMIT in bazel/repositories.bzl — never move this date without moving the pin.
 
   curl:
     cpe: "cpe:2.3:a:haxx:curl"                 # NVD: 143 CVEs (canonical; curl:curl has only 4)

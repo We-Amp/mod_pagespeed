@@ -52,6 +52,7 @@ using CacheOpenFn = int (*)(const PsCacheConfig*, void**);
 using CacheCloseFn = void (*)(void*);
 using StrErrorFn = const char* (*)(int);
 using SharedConfigVolumeSizeFn = uint64_t (*)(const char*);
+using SharedConfigGenerationFn = uint32_t (*)(const char*);
 using WriteParamsInitSizedFn = void (*)(PsWriteParams*, size_t);
 using NotifyParamsInitSizedFn = void (*)(PsNotifyParams*, size_t);
 using CacheWriteOriginalFn = int (*)(void*, const char*, const char*,
@@ -131,6 +132,17 @@ class DlopenDaemonAbi : public DaemonAbi {
 
   bool PublishesVolumeSize() const override {
     return shared_config_volume_size_ != nullptr;
+  }
+
+  uint32_t SharedConfigGeneration(const char* volume_path) const override {
+    if (shared_config_generation_ == nullptr) {
+      return 0;
+    }
+    return shared_config_generation_(volume_path);
+  }
+
+  bool PublishesGeneration() const override {
+    return shared_config_generation_ != nullptr;
   }
 
   int CacheOpen(const PsCacheConfig* config, void** out_cache) const override {
@@ -392,6 +404,9 @@ class DlopenDaemonAbi : public DaemonAbi {
     shared_config_volume_size_ = reinterpret_cast<SharedConfigVolumeSizeFn>(
         dlsym(handle_, "ps_read_shared_config_volume_size"));
     dlerror();
+    shared_config_generation_ = reinterpret_cast<SharedConfigGenerationFn>(
+        dlsym(handle_, "ps_read_shared_config_generation"));
+    dlerror();
   }
 
  private:
@@ -417,6 +432,7 @@ class DlopenDaemonAbi : public DaemonAbi {
   CacheConfigInitFn cache_config_init_ = nullptr;
   CacheConfigInitSizedFn cache_config_init_sized_ = nullptr;
   SharedConfigVolumeSizeFn shared_config_volume_size_ = nullptr;
+  SharedConfigGenerationFn shared_config_generation_ = nullptr;
   CacheOpenFn cache_open_ = nullptr;
   CacheCloseFn cache_close_ = nullptr;
   StrErrorFn str_error_ = nullptr;
