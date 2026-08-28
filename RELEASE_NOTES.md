@@ -1,12 +1,101 @@
 # mod_pagespeed 1.16.0 Release Notes
 
-**Status:** In development
+**Release candidate:** 1.16.0-rc.7
+**Release date:** 2026-08-28
+**Status:** Release candidate
 
-Notes accumulate here until the 1.16.0 release; entries below are drafts and
-may change before release.
+## Highlights
+
+- **The optimizer daemon now runs as an unprivileged user, and its cache and
+  sockets are scoped to a single group.** The daemon that performs in-place
+  optimization runs as a dedicated system user created by the optimizer
+  package, without elevated capabilities. Its cache volume, sockets and shared
+  configuration are readable and writable only by that user and by members of
+  one dedicated group, and the serving module reaches them as a group member.
+  This addresses local privilege escalation and local tampering with cached
+  content. Affects installations running the 1.16 release candidates that
+  precede this one; fixed in 1.16.0-rc.7. **Update recommended.**
+
+- **Daemon credentials are read from a configuration file instead of being
+  passed as process arguments.** The file is readable only by the daemon. This
+  addresses local credential disclosure. Affects installations running the
+  1.16 release candidates that precede this one; fixed in 1.16.0-rc.7.
+  **Update recommended.**
+
+- **Headless browser analysis now runs sandboxed.** When browser-based
+  analysis is enabled, the daemon starts the headless browser with its sandbox
+  on. On hosts where the kernel does not permit an unprivileged sandbox,
+  browser analysis is refused with a clear reason in the daemon's health output
+  and the daemon keeps serving; it never falls back to an unsandboxed browser.
+  `--browser-sandbox=off` remains available as an explicit opt-out. Affects
+  installations running earlier 1.16 release candidates with browser analysis
+  enabled; fixed in 1.16.0-rc.7. **Update recommended.**
+
+- **The management API is local-only and authenticated by default.** The
+  daemon now refuses to start with a remote-reachable management API that has
+  no token, and a tokenless API is never reachable off the host. The
+  recommended local transport is a group-scoped unix socket (`--api-socket`),
+  on which membership in the daemon's group is the credential and no token
+  needs to be distributed; the packages generate API and purge tokens at
+  install time for the TCP path. Cache purge over the API is no longer
+  possible without authentication. Affects installations running earlier 1.16
+  release candidates that enabled the management API; fixed in 1.16.0-rc.7.
+  **Update recommended.**
+
+- **Bundled apr-util updated to 1.6.5.** Picks up the upstream fixes for
+  CVE-2026-32327 (CVSS 9.1), CVE-2026-34191 (CVSS 9.1), CVE-2025-49506
+  (CVSS 7.5), CVE-2026-34501 (CVSS 7.5) and CVE-2026-34502 (CVSS 7.5),
+  published 2026-08-06; affected upstream versions are apr-util 1.6.3 and
+  earlier. The affected apr-util components are not built into or called by
+  any mod_pagespeed release, so no earlier release is believed to be exposed;
+  the bundle is updated so it carries no known-vulnerable version.
+  **Update recommended.**
+
+## Action required when upgrading
+
+- **The daemon's default cache and socket paths have changed.** The cache
+  directory is now `/var/cache/pagespeed-optimizer/v1/` and the notify socket
+  is now `/run/pagespeed-optimizer/notify.sock`. Earlier 1.16 release
+  candidates placed both under `/var/lib/pagespeed-optimizer/`. **A server
+  that sets `ModPagespeedDaemonVolumePath` and `ModPagespeedDaemonSocketPath`
+  explicitly must repoint both** at the new locations. A module still pointing
+  at the previous locations logs the reason at startup and runs with in-place
+  optimization off.
+
+- **Restart the web server after upgrading.** The module packages add the web
+  server's user to the daemon's group in their post-install step, and group
+  membership only takes effect in a fresh web-server process.
+
+- **The daemon's cache starts cold.** Nothing is migrated out of the previous
+  cache directory and nothing is deleted from it, so the first requests after
+  the upgrade re-warm in-place optimization. The previous directory can be
+  removed by hand once the new cache has warmed and the server is serving
+  optimized responses again.
+
+- **Container images now bind the management API to loopback.** Deployments
+  that reached the API from outside the container must set
+  `PAGESPEED_API_ALLOW_REMOTE=true` together with a token. Tokens generated at
+  container start are printed once to the container log; if you ship container
+  logs off-host, set the tokens yourself instead.
 
 ## Packaging and platform notes
 
+- **The module packages join the web-server user to the `pagespeed` group in
+  postinst.** With the optimizer daemon's privilege drop, the daemon's
+  cache volume, notify socket and shared configuration are group-scoped
+  (`0660`/`0640`, `pagespeed:pagespeed`), and the module reaches them as a
+  group member. The deb packages add `www-data`, the rpm packages add `apache`
+  and/or `nginx` — guarded, idempotent, and a no-op where the optimizer
+  package (which creates the group) is not installed. Restart the web server
+  after upgrading so the membership takes effect. Alongside this, the module
+  now logs *permission denied* distinctly from *absent* when it cannot reach
+  the daemon's artifacts (the permission line names the likely missing group
+  membership and its one-command fix), and it checks the daemon's published
+  `cache_dir_generation` against the generation it is built for: a mismatch is
+  a loud handshake failure with in-place optimization off — never a silent
+  attach to a layout that shares nothing — while a pre-privilege-drop daemon
+  publishing no generation is tolerated as the legacy layout with one startup
+  line.
 - **Debian 11 (bullseye) packages are discontinued as of 1.16.** The bullseye
   apt suite stays available and keeps serving the final 1.15 packages
   (1.15.0+r22), so existing Debian 11 systems continue to work — they just no
