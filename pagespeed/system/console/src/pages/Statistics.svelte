@@ -2,31 +2,25 @@
   import { AdminApiClient } from "$lib/api/client";
   import { usePolling } from "$lib/api/polling.svelte";
   import RefreshNotice from "$lib/RefreshNotice.svelte";
+  import {
+    DEFAULT_SORT,
+    buildRows,
+    loadDescriptionColumn,
+    nextSortState,
+    saveDescriptionColumn,
+    type SortKey,
+    type SortState,
+  } from "$lib/utils/stat-table";
 
   const { basePath = "" }: { basePath?: string; isGlobal?: boolean } = $props();
   const api = new AdminApiClient(basePath);
   const stats = usePolling(() => api.getStats(), 5000);
 
   let search = $state("");
-  let sortKey = $state<"name" | "value">("name");
-  let sortAsc = $state(true);
+  let sort = $state<SortState>({ ...DEFAULT_SORT });
+  let showDescriptions = $state(loadDescriptionColumn());
 
-  let entries = $derived.by(() => {
-    if (!stats.data?.variables) return [];
-    let items = Object.entries(stats.data.variables).map(([name, value]) => ({ name, value }));
-    if (search) {
-      const q = search.toLowerCase();
-      items = items.filter((e) => e.name.toLowerCase().includes(q));
-    }
-    items.sort((a, b) => {
-      const cmp =
-        sortKey === "name"
-          ? a.name.localeCompare(b.name)
-          : a.value - b.value;
-      return sortAsc ? cmp : -cmp;
-    });
-    return items;
-  });
+  let entries = $derived(buildRows(stats.data?.variables, search, sort));
 
   let totalCount = $derived(
     stats.data?.variables ? Object.keys(stats.data.variables).length : 0,
@@ -38,18 +32,18 @@
       : null,
   );
 
-  function toggleSort(key: "name" | "value") {
-    if (sortKey === key) {
-      sortAsc = !sortAsc;
-    } else {
-      sortKey = key;
-      sortAsc = true;
-    }
+  function toggleSort(key: SortKey) {
+    sort = nextSortState(sort, key);
   }
 
-  function sortIndicator(key: "name" | "value"): string {
-    if (sortKey !== key) return "";
-    return sortAsc ? " \u25B2" : " \u25BC";
+  function sortIndicator(key: SortKey): string {
+    if (sort.key !== key) return "";
+    return sort.asc ? " \u25B2" : " \u25BC";
+  }
+
+  function toggleDescriptions() {
+    showDescriptions = !showDescriptions;
+    saveDescriptionColumn(showDescriptions);
   }
 
   function toggleAutoRefresh() {
@@ -61,7 +55,7 @@
   }
 </script>
 
-<div class="page">
+<div class="page" class:wide={showDescriptions}>
   <div class="header">
     <h1>Statistics</h1>
     <div class="controls">
@@ -84,9 +78,17 @@
       <input
         type="text"
         class="search-input"
-        placeholder="Search variables..."
+        placeholder="Search name or description..."
         bind:value={search}
       />
+      <label class="toggle">
+        <input
+          type="checkbox"
+          checked={showDescriptions}
+          onchange={toggleDescriptions}
+        />
+        Description column
+      </label>
       <span class="count">
         {entries.length} of {totalCount} variables
       </span>
@@ -105,17 +107,25 @@
             <th class="sortable" onclick={() => toggleSort("value")}>
               Value{sortIndicator("value")}
             </th>
+            {#if showDescriptions}
+              <th class="description-header">Description</th>
+            {/if}
           </tr>
         </thead>
         <tbody>
           {#each entries as entry (entry.name)}
             <tr>
-              <td class="name-cell">{entry.name}</td>
+              <td class="name-cell" title={entry.description}>{entry.name}</td>
               <td class="value-cell">{entry.value.toLocaleString()}</td>
+              {#if showDescriptions}
+                <td class="description-cell">{entry.description}</td>
+              {/if}
             </tr>
           {:else}
             <tr>
-              <td colspan="2" class="empty">No matching variables found.</td>
+              <td colspan={showDescriptions ? 3 : 2} class="empty">
+                No matching variables found.
+              </td>
             </tr>
           {/each}
         </tbody>
@@ -127,6 +137,10 @@
 <style>
   .page {
     max-width: 960px;
+  }
+
+  .page.wide {
+    max-width: 1280px;
   }
 
   .header {
@@ -170,6 +184,17 @@
     outline: none;
     border-color: var(--ps-primary);
     box-shadow: 0 0 0 2px var(--ps-primary-light);
+  }
+
+  .toggle {
+    display: flex;
+    align-items: center;
+    gap: var(--ps-space-xs);
+    font-size: var(--ps-font-size-sm);
+    color: var(--ps-text-secondary);
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
   }
 
   .count {
@@ -235,6 +260,16 @@
   .name-cell {
     font-family: var(--ps-font-mono);
     word-break: break-all;
+    cursor: help;
+  }
+
+  .description-header {
+    width: 55%;
+  }
+
+  .description-cell {
+    color: var(--ps-text-secondary);
+    min-width: 20rem;
   }
 
   .value-cell {

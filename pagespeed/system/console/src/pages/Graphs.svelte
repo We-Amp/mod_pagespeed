@@ -2,6 +2,14 @@
   import { AdminApiClient } from "$lib/api/client";
   import type { ConsoleResponse, TimeRangeParams } from "$lib/api/types";
   import RefreshNotice from "$lib/RefreshNotice.svelte";
+  import {
+    graphTitle,
+    latestForDisplay,
+    loadDeltaView,
+    saveDeltaView,
+    seriesForDisplay,
+    type Sample,
+  } from "$lib/utils/graph-series";
 
   const { basePath = "" }: { basePath?: string; isGlobal?: boolean } = $props();
   const api = new AdminApiClient(basePath);
@@ -12,6 +20,9 @@
 
   let timeRange = $state("15");
   let autoRefresh = $state(true);
+  // Cumulative counters stay the default view; the per-interval view is opt-in
+  // and remembered across page loads.
+  let deltaView = $state(loadDeltaView());
   let search = $state("");
   let timer: ReturnType<typeof setInterval> | null = null;
 
@@ -88,6 +99,11 @@
     }
   }
 
+  function toggleDeltaView() {
+    deltaView = !deltaView;
+    saveDeltaView(deltaView);
+  }
+
   function toggleAutoRefresh() {
     autoRefresh = !autoRefresh;
     if (autoRefresh) {
@@ -109,24 +125,38 @@
 
   let filteredGraphs = $derived.by(() => {
     if (!data?.graphs) return [];
-    if (!search) return data.graphs;
-    const q = search.toLowerCase();
-    return data.graphs.filter((g) => g.name.toLowerCase().includes(q));
+    const matching = !search
+      ? data.graphs
+      : data.graphs.filter((g) => g.name.toLowerCase().includes(search.toLowerCase()));
+    // Plot per-interval deltas when the view is on; a counter reset (restart)
+    // becomes a gap rather than a negative spike.
+    return matching.map((g) => ({
+      name: g.name,
+      title: graphTitle(g.name, deltaView),
+      series: seriesForDisplay(g.data, deltaView),
+    }));
   });
+
+  /** The plottable values of a series, with gaps dropped. */
+  function plotted(series: Sample[]): number[] {
+    return series.filter((v): v is number => v !== null && Number.isFinite(v));
+  }
 
   function formatTimestamp(ts: number): string {
     return new Date(ts).toLocaleTimeString();
   }
 
-  // Simple sparkline as an inline SVG bar chart.
-  function sparklinePath(values: number[]): string {
+  // Simple sparkline as an inline SVG bar chart. A `null` sample is a gap (no
+  // bar) -- that is how a counter reset from a server restart is drawn.
+  function sparklinePath(values: Sample[]): string {
     if (values.length === 0) return "";
-    const max = Math.max(...values, 1);
+    const max = Math.max(...plotted(values), 1);
     const w = 300;
     const h = 40;
     const barW = w / values.length;
     return values
       .map((v, i) => {
+        if (v === null || !Number.isFinite(v)) return "";
         const barH = (v / max) * h;
         const x = i * barW;
         const y = h - barH;
@@ -148,6 +178,15 @@
       <button class="btn btn-secondary" onclick={toggleAutoRefresh}>
         {autoRefresh ? "Pause" : "Resume"}
       </button>
+      <label class="toggle" title="Plot the change per sample interval instead of the cumulative counter. A counter reset (server restart) is drawn as a gap.">
+        <input
+          type="checkbox"
+          data-testid="graphs-delta-toggle"
+          checked={deltaView}
+          onchange={toggleDeltaView}
+        />
+        Show per-interval deltas
+      </label>
       <button class="btn btn-primary" onclick={fetchData}>
         Refresh
       </button>
@@ -181,25 +220,30 @@
       {#if filteredGraphs.length > 0}
         <div class="graphs-grid">
           {#each filteredGraphs as graph (graph.name)}
+            {@const points = plotted(graph.series)}
+            {@const latest = latestForDisplay(graph.series)}
             <div class="graph-card">
               <div class="graph-header">
-                <h3 class="graph-name">{graph.name}</h3>
+                <h3 class="graph-name">{graph.title}</h3>
                 <span class="graph-stats">
-                  {#if graph.data.length > 0}
-                    Latest: {graph.data[graph.data.length - 1].toLocaleString()}
-                    | Min: {Math.min(...graph.data).toLocaleString()}
-                    | Max: {Math.max(...graph.data).toLocaleString()}
+                  {#if points.length > 0}
+                    <!-- A gap on the final sample has no value to report, so
+                         Latest shows a dash rather than an earlier interval's
+                         number. Min/Max still summarise the samples present. -->
+                    Latest: {latest === null ? "\u2014" : latest.toLocaleString()}
+                    | Min: {Math.min(...points).toLocaleString()}
+                    | Max: {Math.max(...points).toLocaleString()}
                   {/if}
                 </span>
               </div>
               <div class="sparkline">
                 <svg viewBox="0 0 300 40" preserveAspectRatio="none" width="100%" height="40">
-                  {@html sparklinePath(graph.data)}
+                  {@html sparklinePath(graph.series)}
                 </svg>
               </div>
               <details class="data-details">
-                <summary>Raw data ({graph.data.length} point{graph.data.length === 1 ? "" : "s"})</summary>
-                <pre class="data-block">{JSON.stringify(graph.data, null, 2)}</pre>
+                <summary>Raw data ({graph.series.length} point{graph.series.length === 1 ? "" : "s"})</summary>
+                <pre class="data-block">{JSON.stringify(graph.series, null, 2)}</pre>
               </details>
             </div>
           {/each}
@@ -295,6 +339,21 @@
     font-size: var(--ps-font-size-sm);
     background: var(--ps-bg);
     color: var(--ps-text);
+  }
+
+  .toggle {
+    display: flex;
+    align-items: center;
+    gap: var(--ps-space-xs);
+    font-size: var(--ps-font-size-sm);
+    color: var(--ps-text-secondary);
+    white-space: nowrap;
+    cursor: pointer;
+  }
+
+  .toggle input {
+    cursor: pointer;
+    margin: 0;
   }
 
   .graphs-grid {

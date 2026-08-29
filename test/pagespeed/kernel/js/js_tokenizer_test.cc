@@ -2986,9 +2986,10 @@ TEST_F(JsTokenizerTest, SpreadInArrayAndObject) {
   ExpectToken(JsKeywords::kOperator, ";", "Start");
   ExpectEndOfInput();
 
-  // Object spread, followed by another property: the spread element is an
-  // expression over the brace, so the comma pops back to property
-  // position.
+  // Object spread, followed by another property: the `...` installs the
+  // value marker (like a property colon), so the spread argument is held
+  // off the brace -- it is not a member name -- and the comma pops both
+  // back to property position.
   BeginTokenizing("var o = {...b, a: 1};");
   ExpectToken(JsKeywords::kVar, "var", "Start MVar");
   ExpectToken(JsKeywords::kWhitespace, " ");
@@ -2997,8 +2998,9 @@ TEST_F(JsTokenizerTest, SpreadInArrayAndObject) {
   ExpectToken(JsKeywords::kOperator, "=", "Start MVar Other Oper");
   ExpectToken(JsKeywords::kWhitespace, " ");
   ExpectToken(JsKeywords::kOperator, "{", "Start MVar Other Oper {");
-  ExpectToken(JsKeywords::kOperator, "...", "Start MVar Other Oper { Oper");
-  ExpectToken(JsKeywords::kIdentifier, "b", "Start MVar Other Oper { Expr");
+  ExpectToken(JsKeywords::kOperator, "...", "Start MVar Other Oper { OVal");
+  ExpectToken(JsKeywords::kIdentifier, "b",
+              "Start MVar Other Oper { OVal Expr");
   ExpectToken(JsKeywords::kOperator, ",", "Start MVar Other Oper {");
   ExpectToken(JsKeywords::kWhitespace, " ");
   ExpectToken(JsKeywords::kIdentifier, "a", "Start MVar Other Oper { Expr");
@@ -3006,6 +3008,95 @@ TEST_F(JsTokenizerTest, SpreadInArrayAndObject) {
   ExpectToken(JsKeywords::kWhitespace, " ");
   ExpectToken(JsKeywords::kNumber, "1", "Start MVar Other Oper { OVal Expr");
   ExpectToken(JsKeywords::kOperator, "}", "Start MVar Other Expr");
+  ExpectToken(JsKeywords::kOperator, ";", "Start");
+  ExpectEndOfInput();
+}
+
+TEST_F(JsTokenizerTest, SpreadCallInObjectLiteral) {  //
+  // A spread element whose argument is a CALL: the value marker the `...`
+  // installs keeps the callee off the brace, so the `(` is a call's
+  // argument list (not a method shorthand's parameter list) and the `)`
+  // produces an expression that the property comma can pop.
+  BeginTokenizing("x = {...f(), k: 1};");
+  ExpectToken(JsKeywords::kIdentifier, "x", "Start Expr");
+  ExpectToken(JsKeywords::kWhitespace, " ");
+  ExpectToken(JsKeywords::kOperator, "=", "Start Expr Oper");
+  ExpectToken(JsKeywords::kWhitespace, " ");
+  ExpectToken(JsKeywords::kOperator, "{", "Start Expr Oper {");
+  ExpectToken(JsKeywords::kOperator, "...", "Start Expr Oper { OVal");
+  ExpectToken(JsKeywords::kIdentifier, "f", "Start Expr Oper { OVal Expr");
+  ExpectToken(JsKeywords::kOperator, "(", "Start Expr Oper { OVal Expr (");
+  ExpectToken(JsKeywords::kOperator, ")", "Start Expr Oper { OVal Expr");
+  ExpectToken(JsKeywords::kOperator, ",", "Start Expr Oper {");
+  ExpectToken(JsKeywords::kWhitespace, " ");
+  ExpectToken(JsKeywords::kIdentifier, "k", "Start Expr Oper { Expr");
+  ExpectToken(JsKeywords::kOperator, ":", "Start Expr Oper { OVal");
+  ExpectToken(JsKeywords::kWhitespace, " ");
+  ExpectToken(JsKeywords::kNumber, "1", "Start Expr Oper { OVal Expr");
+  ExpectToken(JsKeywords::kOperator, "}", "Start Expr");
+  ExpectToken(JsKeywords::kOperator, ";", "Start");
+  ExpectEndOfInput();
+
+  // The discriminator still works the other way: a member NAME does sit
+  // directly on the brace, so there the `(` opens a method shorthand's
+  // parameter list and its `)` completes a block header.
+  BeginTokenizing("x = {m() {}, k: 1};");
+  ExpectToken(JsKeywords::kIdentifier, "x", "Start Expr");
+  ExpectToken(JsKeywords::kWhitespace, " ");
+  ExpectToken(JsKeywords::kOperator, "=", "Start Expr Oper");
+  ExpectToken(JsKeywords::kWhitespace, " ");
+  ExpectToken(JsKeywords::kOperator, "{", "Start Expr Oper {");
+  ExpectToken(JsKeywords::kIdentifier, "m", "Start Expr Oper { Expr");
+  ExpectToken(JsKeywords::kOperator, "(", "Start Expr Oper { Expr BkKwd (");
+  ExpectToken(JsKeywords::kOperator, ")", "Start Expr Oper { Expr BkHdr");
+  ExpectToken(JsKeywords::kWhitespace, " ");
+  ExpectToken(JsKeywords::kOperator, "{", "Start Expr Oper { Expr BkHdr {");
+  ExpectToken(JsKeywords::kOperator, "}", "Start Expr Oper { Expr");
+  ExpectToken(JsKeywords::kOperator, ",", "Start Expr Oper {");
+  ExpectToken(JsKeywords::kWhitespace, " ");
+  ExpectToken(JsKeywords::kIdentifier, "k", "Start Expr Oper { Expr");
+  ExpectToken(JsKeywords::kOperator, ":", "Start Expr Oper { OVal");
+  ExpectToken(JsKeywords::kWhitespace, " ");
+  ExpectToken(JsKeywords::kNumber, "1", "Start Expr Oper { OVal Expr");
+  ExpectToken(JsKeywords::kOperator, "}", "Start Expr");
+  ExpectToken(JsKeywords::kOperator, ";", "Start");
+  ExpectEndOfInput();
+
+  // The marker is an operand position, so a slash directly after the
+  // `...` starts a regex literal (as it does after a property colon),
+  // and the regex collapses onto the marker rather than eating it.
+  BeginTokenizing("x = {.../re/g, b: 1};");
+  ExpectToken(JsKeywords::kIdentifier, "x", "Start Expr");
+  ExpectToken(JsKeywords::kWhitespace, " ");
+  ExpectToken(JsKeywords::kOperator, "=", "Start Expr Oper");
+  ExpectToken(JsKeywords::kWhitespace, " ");
+  ExpectToken(JsKeywords::kOperator, "{", "Start Expr Oper {");
+  ExpectToken(JsKeywords::kOperator, "...", "Start Expr Oper { OVal");
+  ExpectToken(JsKeywords::kRegex, "/re/g", "Start Expr Oper { OVal Expr");
+  ExpectToken(JsKeywords::kOperator, ",", "Start Expr Oper {");
+
+  // The comma pops the marker along with the argument, so the next
+  // property name lands on the brace again and method shorthand re-arms
+  // behind a spread call.
+  BeginTokenizing("x = {...b(), m() {}};");
+  ExpectToken(JsKeywords::kIdentifier, "x", "Start Expr");
+  ExpectToken(JsKeywords::kWhitespace, " ");
+  ExpectToken(JsKeywords::kOperator, "=", "Start Expr Oper");
+  ExpectToken(JsKeywords::kWhitespace, " ");
+  ExpectToken(JsKeywords::kOperator, "{", "Start Expr Oper {");
+  ExpectToken(JsKeywords::kOperator, "...", "Start Expr Oper { OVal");
+  ExpectToken(JsKeywords::kIdentifier, "b", "Start Expr Oper { OVal Expr");
+  ExpectToken(JsKeywords::kOperator, "(", "Start Expr Oper { OVal Expr (");
+  ExpectToken(JsKeywords::kOperator, ")", "Start Expr Oper { OVal Expr");
+  ExpectToken(JsKeywords::kOperator, ",", "Start Expr Oper {");
+  ExpectToken(JsKeywords::kWhitespace, " ");
+  ExpectToken(JsKeywords::kIdentifier, "m", "Start Expr Oper { Expr");
+  ExpectToken(JsKeywords::kOperator, "(", "Start Expr Oper { Expr BkKwd (");
+  ExpectToken(JsKeywords::kOperator, ")", "Start Expr Oper { Expr BkHdr");
+  ExpectToken(JsKeywords::kWhitespace, " ");
+  ExpectToken(JsKeywords::kOperator, "{", "Start Expr Oper { Expr BkHdr {");
+  ExpectToken(JsKeywords::kOperator, "}", "Start Expr Oper { Expr");
+  ExpectToken(JsKeywords::kOperator, "}", "Start Expr");
   ExpectToken(JsKeywords::kOperator, ";", "Start");
   ExpectEndOfInput();
 }

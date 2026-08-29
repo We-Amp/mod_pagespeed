@@ -153,11 +153,14 @@ class JsTokenizer {
                    // ordinary rules, and a `{...}` directly over it is a block
                    // body whose close completes the (terminal) arrow.
     kObjectValue,  // The `:` of an object-literal property, marking the
-                   // value position of that property.  Acts like an
-                   // operator, but the expression collapse does not eat
-                   // it, so a value expression never lands directly on the
-                   // literal's brace and ConsumeOpenParen can tell a
-                   // property name (method shorthand) apart from a value.
+                   // value position of that property; also the spread
+                   // `...` of an object-literal element (`{...f()}`),
+                   // whose argument is likewise not a member name.  Acts
+                   // like an operator, but the expression collapse does
+                   // not eat it, so neither a value nor a spread argument
+                   // ever lands directly on the literal's brace and
+                   // ConsumeOpenParen can tell a member name (method
+                   // shorthand) apart from a value.
     kClassKeyword,  // The `class` keyword and its heritage span (the name
                     // is ignored; `extends` pushes an operator and the
                     // heritage expression collapses back here).  The `{`

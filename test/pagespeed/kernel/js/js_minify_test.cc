@@ -495,6 +495,78 @@ TEST_F(JsMinifyTest, Spread) {
   CheckNewMinification("function f(...args) {}", "function f(...args){}");
 }
 
+TEST_F(JsMinifyTest, ObjectSpreadCallElement) {  //
+  // The regression: an object-spread element whose argument is a call,
+  // followed by another property.  Before the fix the callee sat in the
+  // member-name position, the `(` was read as a method shorthand's
+  // parameter list, and the property comma had nothing valid to pop --
+  // so the whole script failed to minify (bundler output routinely has
+  // this shape).
+  CheckNewMinification("x = {...a(), b: 1};", "x={...a(),b:1};");
+
+  // The boundary around it.  Spread of a call with no property after it,
+  // of a parenthesized operand, of a member call, of an index, of a call
+  // with arguments, of a curried call, and of a tagged template.
+  CheckNewMinification("x = {...a()};", "x={...a()};");
+  CheckNewMinification("x = {...(a), b: 1};", "x={...(a),b:1};");
+  CheckNewMinification("x = {...a.b(), c: 1};", "x={...a.b(),c:1};");
+  CheckNewMinification("x = {...a[0], c: 1};", "x={...a[0],c:1};");
+  CheckNewMinification("x = {...a(b, c), d: 1};", "x={...a(b,c),d:1};");
+  CheckNewMinification("x = {...a()(), b: 1};", "x={...a()(),b:1};");
+  CheckNewMinification("x = {...a`t`, b: 1};", "x={...a`t`,b:1};");
+  // A spread ternary: the `...` marker is not the property colon, so the
+  // `:` still belongs to the `?`.
+  CheckNewMinification("x = {...a ? b : c, d: 1};", "x={...a?b:c,d:1};");
+  // A call in plain value position was never affected; keep it as a
+  // control alongside the spread forms.
+  CheckNewMinification("x = {k: a(), b: 1};", "x={k:a(),b:1};");
+  // Nested, inside a call argument, and in an arrow's expression body --
+  // the shape the umami-style tracker actually uses.
+  CheckNewMinification("x = {...{...a(), b: 1}, c: 2};",
+                       "x={...{...a(),b:1},c:2};");
+  CheckNewMinification("f({...a(), b: 1});", "f({...a(),b:1});");
+  CheckNewMinification("q = (t) => C({...B(), name: t});",
+                       "q=(t)=>C({...B(),name:t});");
+  // Mixed with the member-name forms the discriminator has to keep
+  // reading as methods.
+  CheckNewMinification("x = {async a() {}, ...b(), c: 1};",
+                       "x={async a(){},...b(),c:1};");
+  CheckNewMinification("x = {get a() { return 1 }, ...b(), c: 2};",
+                       "x={get a(){return 1},...b(),c:2};");
+  CheckNewMinification("class X { m() { return {...this.f(), g: 1} } }",
+                       "class X{m(){return{...this.f(),g:1}}}");
+  // Spread in array literals, call arguments and binding patterns is
+  // unchanged (no member-name reading to guard against there).
+  CheckNewMinification("x = [...a(), 1];", "x=[...a(),1];");
+  CheckNewMinification("f(...a(), 1);", "f(...a(),1);");
+  CheckNewMinification("const {a, ...r} = x;", "const{a,...r}=x;");
+  CheckNewMinification("function f({...r}) { return r }",
+                       "function f({...r}){return r}");
+
+  // The marker sits in an operand position, so the slash classification
+  // splits over it exactly as it does after a property colon: a regex
+  // literal may START the spread argument...
+  CheckNewMinification("x = {.../re/g, b: 1};", "x={.../re/g,b:1};");
+  // ...while a slash AFTER the argument is division (the call collapsed
+  // to an expression on top of the marker).
+  CheckNewMinification("x = {...a()/b/g, c: 1};", "x={...a()/b/g,c:1};");
+  // A line break between the spread argument and the property comma does
+  // not insert a semicolon: the comma continues the literal.
+  CheckNewMinification("x = {...a()\n, b: 1};", "x={...a(),b:1};");
+  // The comma pops the marker with the argument, so the next property
+  // name lands on the brace and method shorthand re-arms behind a spread
+  // call.
+  CheckNewMinification("x = {...b(), m() {}, c: 1};", "x={...b(),m(){},c:1};");
+
+  // Minification is idempotent: a second pass over the output is a no-op.
+  CheckNewMinification("x={...a(),b:1};", "x={...a(),b:1};");
+  CheckNewMinification("x={...{...a(),b:1},c:2};", "x={...{...a(),b:1},c:2};");
+  CheckNewMinification("q=(t)=>C({...B(),name:t});",
+                       "q=(t)=>C({...B(),name:t});");
+  CheckNewMinification("class X{m(){return{...this.f(),g:1}}}",
+                       "class X{m(){return{...this.f(),g:1}}}");
+}
+
 TEST_F(JsMinifyTest, Generators) {
   // The `*` of `function*` is a generator marker in every form.
   CheckNewMinification("function* n() {}", "function*n(){}");

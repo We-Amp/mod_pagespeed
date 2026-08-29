@@ -135,12 +135,14 @@
 //       continue, so a linebreak after a block-bodied arrow always
 //       inserts a semicolon.
 //
-//     - kObjectValue for the `:` of an object-literal property.  It acts
-//       like an operator, but the expression collapse does not eat it, so
-//       a property value never lands directly on the literal's brace --
-//       leaving only a property NAME there, which lets ConsumeOpenParen
-//       recognize method shorthand (`{ m() {} }`) without mistaking a
-//       call in value position (`{ a: f() }`) for one.
+//     - kObjectValue for the `:` of an object-literal property, and for a
+//       spread `...` directly on a member-name brace (`{...f()}`).  It
+//       acts like an operator, but the expression collapse does not eat
+//       it, so neither a property value nor a spread argument ever lands
+//       directly on the literal's brace -- leaving only a member NAME
+//       there, which lets ConsumeOpenParen recognize method shorthand
+//       (`{ m() {} }`) without mistaking a call in value or spread
+//       position (`{ a: f() }`, `{...f()}`) for one.
 //
 //     - kClassKeyword for `class` and its heritage span (the name is
 //       ignored; `extends` pushes an operator and the heritage expression
@@ -959,10 +961,12 @@ JsKeywords::Type JsTokenizer::ConsumeOpenParen(StringPiece* token_out) {
   // a property name ever sits directly on the literal's brace: a value
   // expression is held off it by the kObjectValue that the property colon
   // installs (so `{ a: f() }` and `{ a: (function(){})() }` are calls, not
-  // methods), a parenthesized property name is not legal, a shorthand
-  // property cannot be followed by `(` inside its own literal, and a `{`
-  // that is NOT object-literal-shaped (e.g. at statement position) fails
-  // the CanPreceedObjectLiteral check below its brace.
+  // methods), a spread argument by the kObjectValue the `...` installs (so
+  // `{...f(), k: v}` is a call too), a parenthesized property name is not
+  // legal, a shorthand property cannot be followed by `(` inside its own
+  // literal, and a `{` that is NOT object-literal-shaped (e.g. at
+  // statement position) fails the CanPreceedObjectLiteral check below its
+  // brace.
   if (state == kExpression && parse_stack_.size() >= 2 &&
       ((parse_stack_[parse_stack_.size() - 2] == kOpenBrace &&
         parse_stack_.size() >= 3 &&
@@ -1869,7 +1873,47 @@ JsKeywords::Type JsTokenizer::ConsumePeriod(StringPiece* token_out) {
   // emit it as a single operator token; like other prefix operators, an
   // expression (and a regex literal) may follow.
   if (input_.size() >= 3 && input_[1] == '.' && input_[2] == '.') {
-    PushOperator();
+    // Directly on a member-name brace the marker has to SURVIVE under the
+    // spread argument, so install the value marker instead of a plain
+    // operator (which the expression collapse in PushExpression eats).
+    // Without it the argument lands directly on the brace, i.e. in the
+    // member-name position, where ConsumeOpenParen reads a following `(`
+    // as a method shorthand's parameter list; the `)` then completes a
+    // block header rather than an expression, and the property comma
+    // after `{...f(), k: v}` had nothing valid to pop.  kObjectValue is
+    // exactly the "an expression here is a value, not a member name"
+    // marker the property colon installs, and the comma path already pops
+    // it back to the property position, which is what a spread element
+    // needs too.
+    //
+    // The marker therefore goes on every object-literal-SHAPED brace, not
+    // only on a literal in expression position: IsMemberNameBrace admits
+    // a kClassBrace, and through CanPreceedObjectLiteral it also admits
+    // the object BINDING patterns (`const {...r} = x`, `function
+    // f({...r})`, `({...r} = x)`, `catch ({...r})`), whose braces are
+    // member-name-shaped for the same reasons.  Those take the marker
+    // harmlessly -- a bare rest binding has no `(` to misread, and the
+    // closing brace pops the marker with everything else above it, so
+    // their tokenization is byte-identical either way.  What keeps the
+    // plain operator is everything that is NOT such a brace: array
+    // literals and array patterns (`[...a]`, `const [a, ...r] = x`),
+    // call-argument and parameter lists (`f(...a)`, `function
+    // f(...args)`), and braces that are not object-literal-shaped -- a
+    // statement-position block or an arrow's `{...}` block body, both of
+    // which fail the CanPreceedObjectLiteral check below the brace.
+    //
+    // One deliberate fail-safe: because a colon reaching kObjectValue is
+    // an error, an invalid `{...a: 1}` (a spread element cannot take a
+    // property colon) now refuses instead of being tolerated as it was
+    // when the operator collapsed away.  Refusing is byte-preserving --
+    // minification fails and the caller serves the input unmodified --
+    // and a spread ternary, `{...a ? b : c}`, still parses because its
+    // `?` is on the stack for the colon to find.
+    if (IsMemberNameBrace(parse_stack_.size() - 1)) {
+      parse_stack_.push_back(kObjectValue);
+    } else {
+      PushOperator();
+    }
     return Emit(JsKeywords::kOperator, 3, token_out);
   }
   // `import.meta` (or a member access on a dynamic import) is not a

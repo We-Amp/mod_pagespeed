@@ -193,6 +193,12 @@
    "output_sha256": "f80118410dcec20591d83af0872091c687a193260f79c482253863f506909bca"
   },
   {
+   "input": "findings/repros/n8-object-spread-call.js",
+   "input_sha256": "820dea053282e073af1d6b7e8f8190cf6159bc78ad2c5451a0bff3c90ee5bb7f",
+   "status": "ok",
+   "output_sha256": "c615367643589f12373e0cfbd4103566ba067bf71a208f982491b56c74b8baeb"
+  },
+  {
    "input": "synthetic/deep_0.js",
    "input_sha256": "945919baaf877058102f9d13be50fbc9b78583e2062462a92029e45b35b80886",
    "status": "ok",
