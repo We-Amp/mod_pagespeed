@@ -1,7 +1,7 @@
 # mod_pagespeed 1.16.0 Release Notes
 
-**Release candidate:** 1.16.0-rc.8
-**Release date:** 2026-08-28
+**Release candidate:** 1.16.0-rc.9
+**Release date:** 2026-08-29
 **Status:** Release candidate
 
 ## Highlights
@@ -75,6 +75,51 @@
   JavaScript, and output for all other valid JavaScript is unchanged.
   Affects all earlier releases; fixed in 1.16.0-rc.8. **Update recommended.**
 
+- **The optimizer daemon's JavaScript minifier now carries the same `let`
+  and object-spread fixes as the module.** In-place optimization is
+  performed by the optimizer daemon with its own copy of the minifier, and
+  the 1.16.0-rc.8 daemon still had the earlier misreadings: a `let`
+  declaration whose binding follows an HTML-style comment could lose a
+  required line break, and a script that spreads the result of a call inside an object
+  literal (`{...f(), k: v}`) was not minified at all. Both are fixed in the
+  daemon; scripts served through in-place optimization are now minified
+  exactly as the module minifies them. Affects the 1.16 release candidates
+  that precede this one; fixed in 1.16.0-rc.9. **Update recommended.**
+
+- **The admin console's graphs page can plot per-interval change instead of
+  cumulative totals.** A "Show per-interval deltas" checkbox next to the
+  refresh controls switches every graph from the raw cumulative counter to how
+  much that counter moved during each sample interval, so the curves read as
+  traffic rather than as ever-climbing totals. Restarting the server resets the
+  statistics counters; in this view such a reset is drawn as a gap rather than
+  as a drop to zero or a negative spike. The cumulative view remains the
+  default, and the choice is remembered in the browser.
+
+- **The admin console's statistics page now explains what the counters
+  mean.** Hovering a counter name shows a plain-language description of what
+  it counts, when it moves, and what a non-zero value suggests; an optional
+  "Description column" checkbox shows the same text inline, and the choice is
+  remembered in the browser. The search box matches the descriptions as well as
+  the names, so searching for "in-place" or "certificate" finds the relevant
+  counters without knowing the naming scheme. Clicking "Value" now sorts
+  biggest-first on the first click, so the counters that are actually moving
+  come to the top instead of the hundreds that sit at zero; "Name" still sorts
+  A to Z first.
+
+- **The JavaScript minifier no longer gives up on scripts that spread the
+  result of a function call into an object literal.** `{...f(), key: value}`
+  is a common shape in bundler output, and the minifier stopped at the
+  property separator that follows it: minification failed and the script was
+  served exactly as received. A script that fails to minify also does not
+  count as optimized, so it could not be renamed onto the rewrite domain
+  either — cache extension was the only filter that could move it. The
+  spread's argument is now read as an expression rather than as the start of
+  a shorthand method, so these scripts minify normally. Spread in every other
+  position — `{...a, b: 1}`, array literals, call arguments, rest parameters
+  and destructuring — was never affected, and output for all other valid
+  JavaScript is unchanged. Affects all earlier releases; fixed in
+  1.16.0-rc.9. **Update recommended.**
+
 ## Action required when upgrading
 
 - **The daemon's default cache and socket paths have changed.** The cache
@@ -101,6 +146,18 @@
   `PAGESPEED_API_ALLOW_REMOTE=true` together with a token. Tokens generated at
   container start are printed once to the container log; if you ship container
   logs off-host, set the tokens yourself instead.
+
+- **Container images now run the daemon as a fixed unprivileged user
+  (uid/gid 918, `pagespeed`) and share the cache directory by group.** A
+  peer container that mounts the same cache volume must be a member of
+  group 918 to attach — the bundled nginx image already is; any other peer
+  needs `group_add: ["918"]` (or an equivalent supplementary group). On first start the
+  daemon adopts an existing cache directory only if it was created by an
+  earlier daemon image; anything it cannot safely own makes it stop with
+  exit status 78 and a message naming the entry, so the operator can decide
+  rather than the daemon guessing. Set `PAGESPEED_ADOPT_VOLUME=off` to
+  refuse adoption entirely; the container then stops with exit status 78
+  and names what to clean up by hand.
 
 ## Packaging and platform notes
 
