@@ -674,6 +674,35 @@ class DaemonAbi {
 
   virtual const char* StrError(int error) const = 0;
 
+  // The peer's own sentence about the call that just failed, or nullptr when
+  // the installed library does not publish one.
+  //
+  // WHY THIS IS NOT REDUNDANT WITH StrError.  StrError names the error CLASS
+  // and nothing else -- the whole of what an operator got for a failed volume
+  // open was "Input/output error", which is true and useless.  The peer keeps
+  // the actual reason ("could not set its mode to 0660 (Operation not
+  // permitted)") beside the code, and dropping it turned a one-line fix into
+  // an investigation.  So the class is reported WITH the reason wherever the
+  // reason exists.
+  //
+  // MUST BE READ IMMEDIATELY AFTER THE FAILING CALL, and the storage is
+  // borrowed.  The peer keeps the text in a thread_local buffer that it
+  // CLEARS on entry to ps_cache_open, so the value is private to the calling
+  // thread (no cross-thread interleaving to reason about) but lives only
+  // until this module calls the library again.  Call sites therefore read it
+  // before anything else and copy it out, rather than holding the pointer.
+  //
+  // BOUND OPTIONALLY, so a daemon package older than the entry point still
+  // loads and still works -- the degrade is one missing clause in a log line,
+  // which is exactly the message this module emitted before, and nowhere near
+  // enough to refuse a library over.
+  //
+  // nullptr AND THE EMPTY STRING ARE THE SAME ANSWER, and both are real: an
+  // absent symbol gives nullptr, while a library that has one but is idle --
+  // the buffer cleared and nothing written back into it -- gives "".  A
+  // caller that checked only for nullptr would print a bare "()".
+  virtual const char* LastErrorMessage() const = 0;
+
   // ---------------------------------------------------------------------
   // The record arm.
   //

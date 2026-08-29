@@ -35,9 +35,11 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -130,6 +132,14 @@ class FakeDaemonAbi : public DaemonAbi {
 
   void CacheClose(void* cache) const override { ++closes; }
   const char* StrError(int error) const override { return "fake error"; }
+
+  // The peer's per-failure explanation, or its absence.  Both are real
+  // states: the entry point is bound optionally, so a daemon package from
+  // before it was published answers nullptr and the adapter must still
+  // produce a usable line.
+  const char* LastErrorMessage() const override {
+    return publishes_last_error ? last_error_message : nullptr;
+  }
 
   // The record arm, which nothing in THIS file exercises: these cases are
   // about startup, and the arm has its own tests driven through the real
@@ -289,6 +299,12 @@ class FakeDaemonAbi : public DaemonAbi {
 
   size_t grown_struct_bytes = sizeof(PsCacheConfig);
   int open_error = kPsOk;
+  // The reason the peer keeps beside the code, and whether it publishes one.
+  // The default text is the field failure this seam was added for: the class
+  // ("Input/output error") said nothing, the reason said exactly what to fix.
+  bool publishes_last_error = true;
+  const char* last_error_message =
+      "could not set its mode to 0660 (Operation not permitted)";
   // The generation the fake's shared config reports, and whether it reports
   // one at all.  Defaults are the post-H1 contract (generation published,
   // matching this build); a test moves them to play a pre-H1 daemon or a
@@ -379,9 +395,26 @@ class DaemonAdapterTest : public testing::Test {
           abi->grown_struct_bytes = grown_struct_bytes_;
           abi->publishes_generation = publishes_generation_;
           abi->published_generation = published_generation_;
+          abi->publishes_last_error = publishes_last_error_;
+          abi->last_error_message = last_error_message_;
           last_abi_ = abi;
           return abi;
         });
+    // Every case drives the retry schedule off `now_ms_`; nothing sleeps.
+    adapter->set_monotonic_clock([this]() { return now_ms_; });
+    return adapter;
+  }
+
+  // An adapter that has reached kReady, ready for the record arm.  The
+  // record-cache open is a SECOND open, after startup's, so a case can make
+  // startup succeed and that one fail -- which is the field failure: the
+  // parent process could open the volume and the dropped children could not.
+  // `socket_path` must already be listening.
+  DaemonAdapter* ReadyAdapter(const GoogleString& socket_path) {
+    DaemonCreatedItsVolume(kDaemonSize);
+    DaemonAdapter* adapter = MakeAdapter(socket_path);
+    EXPECT_EQ(DaemonStartupStatus::kOk, adapter->StartupCheck());
+    EXPECT_EQ(DaemonHealth::kReady, adapter->health());
     return adapter;
   }
 
@@ -407,7 +440,12 @@ class DaemonAdapterTest : public testing::Test {
   size_t grown_struct_bytes_ = sizeof(PsCacheConfig);
   int fake_open_error_ = kPsOk;
   bool publishes_generation_ = true;
+  bool publishes_last_error_ = true;
+  const char* last_error_message_ =
+      "could not set its mode to 0660 (Operation not permitted)";
   uint32_t published_generation_ = DaemonAdapter::kCacheDirGeneration;
+  // The retry schedule's clock.  Advanced by a case, never by time passing.
+  int64_t now_ms_ = 0;
   FakeDaemonAbi* last_abi_ = nullptr;
 };
 
@@ -987,6 +1025,297 @@ TEST_F(DaemonAdapterTest, UnopenableVolumeTurnsIproOff) {
   EXPECT_EQ(DaemonHealth::kUnavailable, adapter->health());
 }
 
+// --- the reason behind the error class --------------------------------------
+//
+// The failure these cases are written from reported "Input/output error" and
+// nothing else, for a condition whose actual reason named the fix outright.
+// The class alone is not diagnosable, so both open sites report the class WITH
+// the peer's own reason wherever the installed library publishes one.
+
+TEST_F(DaemonAdapterTest, TheStartupProbeNamesThePeersReason) {
+  fake_open_error_ = 2;
+  DaemonCreatedItsVolume(kDaemonSize);
+  const GoogleString socket_path = SocketPath("why.sock");
+  ListeningSocket listener(socket_path);
+  ASSERT_TRUE(listener.bound());
+
+  std::unique_ptr<DaemonAdapter> adapter(MakeAdapter(socket_path));
+  EXPECT_EQ(DaemonStartupStatus::kOk, adapter->StartupCheck());
+  // The class, so an operator can still grep for it...
+  EXPECT_NE(GoogleString::npos, Messages().find("fake error")) << Messages();
+  // ...and the reason, which is the half that says what to do.
+  EXPECT_NE(GoogleString::npos, Messages().find("Operation not permitted"))
+      << Messages();
+}
+
+TEST_F(DaemonAdapterTest, AnOlderPeerWithoutAReasonStillNamesTheErrorClass) {
+  // The entry point is bound optionally, so a daemon package from before it
+  // was published must still produce the line it always produced -- not an
+  // empty reason, and not a refusal to start.
+  publishes_last_error_ = false;
+  fake_open_error_ = 2;
+  DaemonCreatedItsVolume(kDaemonSize);
+  const GoogleString socket_path = SocketPath("old.sock");
+  ListeningSocket listener(socket_path);
+  ASSERT_TRUE(listener.bound());
+
+  std::unique_ptr<DaemonAdapter> adapter(MakeAdapter(socket_path));
+  EXPECT_EQ(DaemonStartupStatus::kOk, adapter->StartupCheck());
+  EXPECT_NE(GoogleString::npos,
+            Messages().find("cache volume at " + volume_ + ": fake error"))
+      << Messages();
+  EXPECT_EQ(GoogleString::npos, Messages().find("Operation not permitted"))
+      << Messages();
+}
+
+TEST_F(DaemonAdapterTest, TheRecordCacheOpenNamesThePeersReason) {
+  // The field failure was HERE, not at startup: the parent process could open
+  // the volume and the dropped children could not, so the startup probe
+  // passed and only this open failed.
+  const GoogleString socket_path = SocketPath("rec.sock");
+  ListeningSocket listener(socket_path);
+  ASSERT_TRUE(listener.bound());
+  std::unique_ptr<DaemonAdapter> adapter(ReadyAdapter(socket_path));
+  ASSERT_TRUE(last_abi_ != nullptr);
+  last_abi_->open_error = 2;
+
+  EXPECT_TRUE(adapter->RecordCache() == nullptr);
+  EXPECT_NE(GoogleString::npos, Messages().find("Operation not permitted"))
+      << Messages();
+}
+
+TEST_F(DaemonAdapterTest, AnIdlePeerReportingAnEmptyReasonAddsNothing) {
+  // The peer clears its buffer on entry to every open, so a library that has
+  // the entry point but wrote nothing back into it answers "" rather than
+  // nullptr.  Checking only for nullptr would print a bare "()" -- worse than
+  // the line this change set out to improve.
+  last_error_message_ = "";
+  fake_open_error_ = 2;
+  DaemonCreatedItsVolume(kDaemonSize);
+  const GoogleString socket_path = SocketPath("idle.sock");
+  ListeningSocket listener(socket_path);
+  ASSERT_TRUE(listener.bound());
+
+  std::unique_ptr<DaemonAdapter> adapter(MakeAdapter(socket_path));
+  EXPECT_EQ(DaemonStartupStatus::kOk, adapter->StartupCheck());
+  EXPECT_NE(GoogleString::npos,
+            Messages().find("cache volume at " + volume_ + ": fake error"))
+      << Messages();
+  EXPECT_EQ(GoogleString::npos, Messages().find("()")) << Messages();
+}
+
+TEST_F(DaemonAdapterTest, AReasonThatRepeatsTheErrorClassIsNotPrintedTwice) {
+  // Some codes are their own explanation, and the peer answers with the same
+  // sentence StrError returns.  Joining them blindly would print the words
+  // twice and read like two different facts.
+  last_error_message_ = "fake error";
+  fake_open_error_ = 2;
+  DaemonCreatedItsVolume(kDaemonSize);
+  const GoogleString socket_path = SocketPath("dup.sock");
+  ListeningSocket listener(socket_path);
+  ASSERT_TRUE(listener.bound());
+
+  std::unique_ptr<DaemonAdapter> adapter(MakeAdapter(socket_path));
+  EXPECT_EQ(DaemonStartupStatus::kOk, adapter->StartupCheck());
+  EXPECT_EQ(GoogleString::npos, Messages().find("fake error (fake error)"))
+      << Messages();
+  EXPECT_NE(GoogleString::npos, Messages().find("fake error")) << Messages();
+}
+
+TEST_F(DaemonAdapterTest, AnOlderPeerWithoutAReasonStillLogsTheRecordSiteLine) {
+  // The symbol-absent case at the site the field failure actually hit.  The
+  // startup probe has its own case; this one is the per-process open, which
+  // is the one that ran with the web-server user's privileges.
+  publishes_last_error_ = false;
+  const GoogleString socket_path = SocketPath("recold.sock");
+  ListeningSocket listener(socket_path);
+  ASSERT_TRUE(listener.bound());
+  std::unique_ptr<DaemonAdapter> adapter(ReadyAdapter(socket_path));
+  ASSERT_TRUE(last_abi_ != nullptr);
+  last_abi_->open_error = 2;
+
+  EXPECT_TRUE(adapter->RecordCache() == nullptr);
+  EXPECT_NE(GoogleString::npos,
+            Messages().find("cache volume at " + volume_ + ": fake error"))
+      << Messages();
+  EXPECT_EQ(GoogleString::npos, Messages().find("()")) << Messages();
+  // Still counted, still scheduled: a missing explanation is not a missing
+  // retry.
+  EXPECT_NE(GoogleString::npos, Messages().find("attempt 1 of")) << Messages();
+}
+
+// --- the record-cache retry schedule ----------------------------------------
+
+TEST_F(DaemonAdapterTest, AFailedRecordCacheOpenIsNotRetriedWithinItsBackoff) {
+  const GoogleString socket_path = SocketPath("bo1.sock");
+  ListeningSocket listener(socket_path);
+  ASSERT_TRUE(listener.bound());
+  std::unique_ptr<DaemonAdapter> adapter(ReadyAdapter(socket_path));
+  ASSERT_TRUE(last_abi_ != nullptr);
+  last_abi_->open_error = 2;
+  const int opens_after_startup = last_abi_->opens;
+
+  EXPECT_TRUE(adapter->RecordCache() == nullptr);
+  EXPECT_EQ(opens_after_startup + 1, last_abi_->opens);
+
+  // Every request in the backoff window: no syscall, and no second log line.
+  for (int i = 0; i < 20; ++i) {
+    EXPECT_TRUE(adapter->RecordCache() == nullptr);
+  }
+  now_ms_ += DaemonAdapter::kRecordCacheFirstBackoffMs - 1;
+  EXPECT_TRUE(adapter->RecordCache() == nullptr);
+  EXPECT_EQ(opens_after_startup + 1, last_abi_->opens);
+  EXPECT_EQ(1, handler_.MessagesOfType(kWarning));
+}
+
+TEST_F(DaemonAdapterTest, ARecordCacheOpenIsRetriedOnceItsBackoffElapses) {
+  const GoogleString socket_path = SocketPath("bo2.sock");
+  ListeningSocket listener(socket_path);
+  ASSERT_TRUE(listener.bound());
+  std::unique_ptr<DaemonAdapter> adapter(ReadyAdapter(socket_path));
+  ASSERT_TRUE(last_abi_ != nullptr);
+  last_abi_->open_error = 2;
+  const int opens_after_startup = last_abi_->opens;
+
+  EXPECT_TRUE(adapter->RecordCache() == nullptr);
+  now_ms_ += DaemonAdapter::kRecordCacheFirstBackoffMs;
+  EXPECT_TRUE(adapter->RecordCache() == nullptr);
+  EXPECT_EQ(opens_after_startup + 2, last_abi_->opens);
+
+  // The second backoff is the first doubled, so the wait that was long enough
+  // a moment ago is not long enough now.
+  now_ms_ += DaemonAdapter::kRecordCacheFirstBackoffMs;
+  EXPECT_TRUE(adapter->RecordCache() == nullptr);
+  EXPECT_EQ(opens_after_startup + 2, last_abi_->opens);
+  now_ms_ += DaemonAdapter::kRecordCacheFirstBackoffMs;
+  EXPECT_TRUE(adapter->RecordCache() == nullptr);
+  EXPECT_EQ(opens_after_startup + 3, last_abi_->opens);
+
+  // One line per attempt, never one per request.
+  EXPECT_EQ(3, handler_.MessagesOfType(kWarning));
+}
+
+TEST_F(DaemonAdapterTest, ADaemonThatFinishesStartingIsPickedUpOnARetry) {
+  // The whole point of the schedule: a worker that came up while the daemon
+  // was still starting used to record nothing for the rest of its life.
+  const GoogleString socket_path = SocketPath("heal.sock");
+  ListeningSocket listener(socket_path);
+  ASSERT_TRUE(listener.bound());
+  std::unique_ptr<DaemonAdapter> adapter(ReadyAdapter(socket_path));
+  ASSERT_TRUE(last_abi_ != nullptr);
+  last_abi_->open_error = 2;
+
+  ASSERT_TRUE(adapter->RecordCache() == nullptr);
+  last_abi_->open_error = kPsOk;
+  now_ms_ += DaemonAdapter::kRecordCacheFirstBackoffMs;
+  void* cache = adapter->RecordCache();
+  EXPECT_TRUE(cache != nullptr);
+
+  // And once open, it stays open and is not re-opened.
+  const int opens = last_abi_->opens;
+  now_ms_ += DaemonAdapter::kRecordCacheMaxBackoffMs;
+  EXPECT_EQ(cache, adapter->RecordCache());
+  EXPECT_EQ(opens, last_abi_->opens);
+  // The failure was transient and healed itself; nothing here is an error.
+  EXPECT_EQ(0, handler_.MessagesOfType(kError));
+}
+
+TEST_F(DaemonAdapterTest, ADurableFailureGivesUpAfterABoundedNumberOfAttempts) {
+  const GoogleString socket_path = SocketPath("give.sock");
+  ListeningSocket listener(socket_path);
+  ASSERT_TRUE(listener.bound());
+  std::unique_ptr<DaemonAdapter> adapter(ReadyAdapter(socket_path));
+  ASSERT_TRUE(last_abi_ != nullptr);
+  last_abi_->open_error = 2;
+  const int opens_after_startup = last_abi_->opens;
+
+  for (int i = 0; i < DaemonAdapter::kRecordCacheMaxAttempts; ++i) {
+    EXPECT_TRUE(adapter->RecordCache() == nullptr);
+    // Past the largest backoff, so each iteration is genuinely an attempt.
+    now_ms_ += DaemonAdapter::kRecordCacheMaxBackoffMs;
+  }
+  EXPECT_EQ(opens_after_startup + DaemonAdapter::kRecordCacheMaxAttempts,
+            last_abi_->opens);
+
+  // A durable failure must not become one open syscall per request forever.
+  for (int i = 0; i < 50; ++i) {
+    EXPECT_TRUE(adapter->RecordCache() == nullptr);
+    now_ms_ += DaemonAdapter::kRecordCacheMaxBackoffMs;
+  }
+  EXPECT_EQ(opens_after_startup + DaemonAdapter::kRecordCacheMaxAttempts,
+            last_abi_->opens);
+
+  // The give-up is the one line that needs an operator, so it is the only
+  // one at error level; every attempt before it could still have healed.
+  EXPECT_EQ(1, handler_.MessagesOfType(kError));
+  EXPECT_EQ(DaemonAdapter::kRecordCacheMaxAttempts - 1,
+            handler_.MessagesOfType(kWarning));
+  EXPECT_NE(GoogleString::npos, Messages().find("Giving up")) << Messages();
+}
+
+TEST_F(DaemonAdapterTest, TheBackoffStopsDoublingAtItsCap) {
+  const GoogleString socket_path = SocketPath("cap.sock");
+  ListeningSocket listener(socket_path);
+  ASSERT_TRUE(listener.bound());
+  std::unique_ptr<DaemonAdapter> adapter(ReadyAdapter(socket_path));
+  ASSERT_TRUE(last_abi_ != nullptr);
+  last_abi_->open_error = 2;
+
+  // Six failures, each waited out past any backoff the schedule can produce.
+  for (int i = 0; i < 6; ++i) {
+    EXPECT_TRUE(adapter->RecordCache() == nullptr);
+    now_ms_ += DaemonAdapter::kRecordCacheMaxBackoffMs;
+  }
+  // The SEVENTH is the first whose uncapped backoff (the first doubled six
+  // times, 64s) exceeds the cap.  Everything below asks one question: did the
+  // cap hold, or is the schedule still doubling?
+  EXPECT_TRUE(adapter->RecordCache() == nullptr);
+  const int opens = last_abi_->opens;
+
+  now_ms_ += DaemonAdapter::kRecordCacheMaxBackoffMs - 1;
+  EXPECT_TRUE(adapter->RecordCache() == nullptr);
+  EXPECT_EQ(opens, last_abi_->opens) << "retried before the cap had elapsed";
+
+  now_ms_ += 1;
+  EXPECT_TRUE(adapter->RecordCache() == nullptr);
+  EXPECT_EQ(opens + 1, last_abi_->opens)
+      << "still waiting at the cap, so the backoff is not capped -- an "
+         "uncapped doubling would have another 4s to run here";
+}
+
+TEST_F(DaemonAdapterTest, ConcurrentCallersMakeOneAttemptPerWindowBetweenThem) {
+  // The window is the unit of work, not the call.  Two request threads
+  // arriving together is the shape a worker actually sees, and the property
+  // that matters is that whichever one takes the attempt, the other finds it
+  // already taken -- one open syscall and one log line between them, not two.
+  const GoogleString socket_path = SocketPath("race.sock");
+  ListeningSocket listener(socket_path);
+  ASSERT_TRUE(listener.bound());
+  std::unique_ptr<DaemonAdapter> adapter(ReadyAdapter(socket_path));
+  ASSERT_TRUE(last_abi_ != nullptr);
+  last_abi_->open_error = 2;
+  const int opens_after_startup = last_abi_->opens;
+
+  std::atomic<int> at_the_line(0);
+  auto hammer = [&]() {
+    // Line the threads up so they genuinely contend rather than running one
+    // after the other, which would prove nothing.
+    at_the_line.fetch_add(1);
+    while (at_the_line.load() < 2) {
+    }
+    for (int i = 0; i < 200; ++i) {
+      EXPECT_TRUE(adapter->RecordCache() == nullptr);
+    }
+  };
+  std::thread first(hammer);
+  std::thread second(hammer);
+  first.join();
+  second.join();
+
+  EXPECT_EQ(opens_after_startup + 1, last_abi_->opens);
+  EXPECT_EQ(1, handler_.MessagesOfType(kWarning));
+}
+
 // --- the RAM tier -----------------------------------------------------------
 
 TEST_F(DaemonAdapterTest, VolumeIsOpenedWithTheRamTierOff) {
@@ -1144,6 +1473,25 @@ TEST_F(LoadDaemonAbiTest, LoadsALibraryWithoutTheGenerationReader) {
   ASSERT_TRUE(abi != nullptr) << error_;
   EXPECT_FALSE(abi->PublishesGeneration());
   EXPECT_EQ(0u, abi->SharedConfigGeneration("/unused"));
+}
+
+TEST_F(LoadDaemonAbiTest, BindsTheLastErrorReporterWhenPresent) {
+  std::unique_ptr<DaemonAbi> abi(
+      LoadDaemonAbi(StubPath("libdaemon_stub.so"), &error_));
+  ASSERT_TRUE(abi != nullptr) << error_;
+  ASSERT_TRUE(abi->LastErrorMessage() != nullptr);
+  EXPECT_STREQ("stub reason", abi->LastErrorMessage());
+}
+
+TEST_F(LoadDaemonAbiTest, LoadsALibraryWithoutTheLastErrorReporter) {
+  // A daemon package from before the per-failure explanation was published.
+  // Bound OPTIONALLY, so it must still load; the whole cost of its absence is
+  // that an error line carries the error class alone -- which is the line
+  // this module emitted before the reporter existed.
+  std::unique_ptr<DaemonAbi> abi(
+      LoadDaemonAbi(StubPath("libdaemon_stub_no_last_error.so"), &error_));
+  ASSERT_TRUE(abi != nullptr) << error_;
+  EXPECT_TRUE(abi->LastErrorMessage() == nullptr);
 }
 
 TEST_F(LoadDaemonAbiTest, RefusesAMismatchedMajorVersion) {

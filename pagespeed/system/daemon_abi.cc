@@ -51,6 +51,7 @@ using CacheConfigInitSizedFn = void (*)(PsCacheConfig*, size_t);
 using CacheOpenFn = int (*)(const PsCacheConfig*, void**);
 using CacheCloseFn = void (*)(void*);
 using StrErrorFn = const char* (*)(int);
+using LastErrorMessageFn = const char* (*)();
 using SharedConfigVolumeSizeFn = uint64_t (*)(const char*);
 using SharedConfigGenerationFn = uint32_t (*)(const char*);
 using WriteParamsInitSizedFn = void (*)(PsWriteParams*, size_t);
@@ -152,6 +153,13 @@ class DlopenDaemonAbi : public DaemonAbi {
   void CacheClose(void* cache) const override { cache_close_(cache); }
 
   const char* StrError(int error) const override { return str_error_(error); }
+
+  const char* LastErrorMessage() const override {
+    if (last_error_message_ == nullptr) {
+      return nullptr;
+    }
+    return last_error_message_();
+  }
 
   void WriteParamsInit(PsWriteParams* params) const override {
     write_params_init_sized_(params, sizeof(PsWriteParams));
@@ -407,6 +415,13 @@ class DlopenDaemonAbi : public DaemonAbi {
     shared_config_generation_ = reinterpret_cast<SharedConfigGenerationFn>(
         dlsym(handle_, "ps_read_shared_config_generation"));
     dlerror();
+    // The per-failure explanation.  Optional on the same terms as the two
+    // above and for a smaller stake: its absence costs one clause in an error
+    // line, so refusing a library over it would trade a working degrade for a
+    // server that will not start.
+    last_error_message_ = reinterpret_cast<LastErrorMessageFn>(
+        dlsym(handle_, "ps_last_error_message"));
+    dlerror();
   }
 
  private:
@@ -436,6 +451,7 @@ class DlopenDaemonAbi : public DaemonAbi {
   CacheOpenFn cache_open_ = nullptr;
   CacheCloseFn cache_close_ = nullptr;
   StrErrorFn str_error_ = nullptr;
+  LastErrorMessageFn last_error_message_ = nullptr;
   WriteParamsInitSizedFn write_params_init_sized_ = nullptr;
   NotifyParamsInitSizedFn notify_params_init_sized_ = nullptr;
   CacheWriteOriginalFn cache_write_original_ = nullptr;

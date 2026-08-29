@@ -350,6 +350,22 @@ cc_binary(
     visibility = ["//visibility:public"],
 )
 
+# A daemon package from before the per-failure explanation was published. Like
+# the two flavours above this entry point is bound OPTIONALLY, so this library
+# must still load and still work; without it "an older library is unaffected"
+# would be a claim in a comment.
+cc_binary(
+    name = "libdaemon_stub_no_last_error.so",
+    testonly = True,
+    srcs = ["daemon_stub_lib.cc"],
+    defines = ["PS_STUB_OMIT_LAST_ERROR"],
+    linkopts = ["-nostdlib++"],
+    linkshared = True,
+    linkstatic = True,
+    target_compatible_with = ["@platforms//os:linux"],
+    visibility = ["//visibility:public"],
+)
+
 # Optimizer-daemon adapter startup: the volume-sizing mirror (match starts,
 # divergence refuses), the degrade path when the daemon is absent or
 # unreachable, and the RAM-tier floor the adapter opens the shared volume
@@ -360,6 +376,7 @@ pagespeed_cc_test(
     data = [
         ":libdaemon_stub.so",
         ":libdaemon_stub_no_generation.so",
+        ":libdaemon_stub_no_last_error.so",
         ":libdaemon_stub_no_varies_accept.so",
         ":libdaemon_stub_unsized.so",
     ],

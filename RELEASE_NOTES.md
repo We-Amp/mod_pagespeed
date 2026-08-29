@@ -1,6 +1,6 @@
 # mod_pagespeed 1.16.0 Release Notes
 
-**Release candidate:** 1.16.0-rc.7
+**Release candidate:** 1.16.0-rc.8
 **Release date:** 2026-08-28
 **Status:** Release candidate
 
@@ -14,12 +14,12 @@
   one dedicated group, and the serving module reaches them as a group member.
   This addresses local privilege escalation and local tampering with cached
   content. Affects installations running the 1.16 release candidates that
-  precede this one; fixed in 1.16.0-rc.7. **Update recommended.**
+  precede this one; fixed in 1.16.0-rc.8. **Update recommended.**
 
 - **Daemon credentials are read from a configuration file instead of being
   passed as process arguments.** The file is readable only by the daemon. This
   addresses local credential disclosure. Affects installations running the
-  1.16 release candidates that precede this one; fixed in 1.16.0-rc.7.
+  1.16 release candidates that precede this one; fixed in 1.16.0-rc.8.
   **Update recommended.**
 
 - **Headless browser analysis now runs sandboxed.** When browser-based
@@ -29,7 +29,7 @@
   and the daemon keeps serving; it never falls back to an unsandboxed browser.
   `--browser-sandbox=off` remains available as an explicit opt-out. Affects
   installations running earlier 1.16 release candidates with browser analysis
-  enabled; fixed in 1.16.0-rc.7. **Update recommended.**
+  enabled; fixed in 1.16.0-rc.8. **Update recommended.**
 
 - **The management API is local-only and authenticated by default.** The
   daemon now refuses to start with a remote-reachable management API that has
@@ -39,7 +39,19 @@
   needs to be distributed; the packages generate API and purge tokens at
   install time for the TCP path. Cache purge over the API is no longer
   possible without authentication. Affects installations running earlier 1.16
-  release candidates that enabled the management API; fixed in 1.16.0-rc.7.
+  release candidates that enabled the management API; fixed in 1.16.0-rc.8.
+  **Update recommended.**
+
+- **In-place optimization no longer switches itself off when the serving
+  module attaches to the optimizer daemon's cache volume as a group member.**
+  With the 1.16.0-rc.7 package pair the optimizer refused the module's attach
+  with `Input/output error` whenever the module reached the cache volume as a
+  member of the daemon's group rather than as the daemon's own user — which is
+  how the packages set the pair up — so the module logged that nothing would
+  be recorded for in-place optimization and served every request unoptimized
+  while both processes otherwise reported healthy. The optimizer now accepts a
+  cache volume that already carries the intended permissions. Affects
+  installations running the 1.16.0-rc.7 package pair; fixed in 1.16.0-rc.8.
   **Update recommended.**
 
 - **Bundled apr-util updated to 1.6.5.** Picks up the upstream fixes for
@@ -50,6 +62,18 @@
   any mod_pagespeed release, so no earlier release is believed to be exposed;
   the bundle is updated so it carries no known-vulnerable version.
   **Update recommended.**
+
+- **The JavaScript minifier no longer drops a required line break after a
+  `let` declaration whose binding is preceded by an HTML-style comment.**
+  1.15.0+r22 fixed this for `//` and `/*…*/` comments; the same misreading
+  remained for the HTML comment forms — `<!--`, which opens a comment
+  anywhere, and `-->`, which opens one at the start of a line. `let <!--c`
+  with the binding `row` on the next line and `+4;` on the one after was
+  minified to `let` followed by `row+4;`, a syntax error that breaks the
+  entire script. The declaration is now recognized through both HTML forms
+  and the line break is preserved. These comment forms are rare in modern
+  JavaScript, and output for all other valid JavaScript is unchanged.
+  Affects all earlier releases; fixed in 1.16.0-rc.8. **Update recommended.**
 
 ## Action required when upgrading
 
@@ -96,6 +120,19 @@
   attach to a layout that shares nothing — while a pre-privilege-drop daemon
   publishing no generation is tolerated as the legacy layout with one startup
   line.
+- **When the serving module cannot attach to the optimizer daemon's cache
+  volume, it now reports the daemon's reason and retries instead of giving up
+  for the life of the worker.** Previously the log line named only the error
+  class — most often *Input/output error* — and the attach was tried exactly
+  once per worker process. A worker that started while the daemon was still
+  coming up, or during a daemon restart, therefore left in-place optimization
+  off for its entire lifetime, with nothing further in the log and requests
+  still being served normally, so the only outward sign was that nothing was
+  being optimized. The message now carries the reason the optimizer reports
+  alongside the class, and the attach is retried on a widening backoff for
+  about six minutes before giving up with a single line that says so. An
+  optimizer package too old to report a reason is unaffected and logs as it
+  did before.
 - **Debian 11 (bullseye) packages are discontinued as of 1.16.** The bullseye
   apt suite stays available and keeps serving the final 1.15 packages
   (1.15.0+r22), so existing Debian 11 systems continue to work — they just no

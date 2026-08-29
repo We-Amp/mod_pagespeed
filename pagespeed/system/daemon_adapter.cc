@@ -20,6 +20,7 @@
 #include "pagespeed/system/daemon_adapter.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <cstring>
 #include <mutex>
@@ -187,7 +188,65 @@ const char kGroupMembershipHint[] =
     "privilege drop. Add it (for example `usermod -a -G pagespeed www-data`, "
     "or `apache`/`nginx` on an RPM host) and restart the web server.";
 
+// The peer's report of a call that has just failed: the error class it
+// returned, plus the sentence the peer kept about THIS failure when the
+// installed library publishes one.
+//
+// CALL IT IMMEDIATELY AFTER THE FAILING CALL and nothing else -- the peer's
+// explanation describes the last failure on this thread, so anything that
+// re-enters the library first replaces it.  The reason is captured here, into
+// a string this module owns, before any of the filesystem checks that decorate
+// the same message run.
+//
+// The two are joined rather than substituted because they answer different
+// questions and the field failure needed both: the class is what an operator
+// greps for and what the daemon's own documentation is indexed by, while the
+// reason is the part that says what to do.  A library too old to publish a
+// reason yields exactly the line this module produced before.
+GoogleString DescribeDaemonError(const DaemonAbi* abi, int error) {
+  // THE REASON IS READ FIRST, before StrError, and copied out of the peer's
+  // storage in the same breath.  The rule this function documents is that
+  // nothing may re-enter the library between the failure and the read, and a
+  // function that broke its own rule would be the one place the ordering is
+  // easiest to get wrong later: StrError is a lookup today, but it is the
+  // peer's code, and "today it does not touch the buffer" is not a property
+  // this side can hold.  Reading first costs nothing and removes the
+  // question.
+  const char* peer_reason = abi->LastErrorMessage();
+  // Copied, not aliased: the peer hands back a pointer into a thread_local
+  // buffer it clears on the next ps_cache_open, so the borrowed pointer is
+  // only good until this module calls the library again.
+  const GoogleString reason(peer_reason == nullptr ? "" : peer_reason);
+
+  GoogleString described(abi->StrError(error));
+  // Empty and absent are the same answer -- the peer leaves the buffer empty
+  // when it has nothing to say, so a caller that only checked for nullptr
+  // would print a bare "()".  And a reason that merely repeats the class is
+  // not a second fact; appending it would print the same words twice.
+  if (!reason.empty() && described != reason) {
+    StrAppend(&described, " (", reason, ")");
+  }
+  return described;
+}
+
 }  // namespace
+
+int64_t DaemonAdapter::MonotonicNowMs() {
+  return std::chrono::duration_cast<std::chrono::milliseconds>(
+             std::chrono::steady_clock::now().time_since_epoch())
+      .count();
+}
+
+int64_t DaemonAdapter::BackoffMsAfter(int attempts) {
+  int64_t backoff = kRecordCacheFirstBackoffMs;
+  // Doubling by shifting would need its own overflow argument; multiplying up
+  // to the cap and stopping there needs none, and the loop runs at most
+  // kRecordCacheMaxAttempts times.
+  for (int i = 1; i < attempts && backoff < kRecordCacheMaxBackoffMs; ++i) {
+    backoff *= 2;
+  }
+  return std::min(backoff, kRecordCacheMaxBackoffMs);
+}
 
 DaemonAdapter::DaemonAdapter(StringPiece socket_path, StringPiece volume_path,
                              MessageHandler* handler)
@@ -195,7 +254,8 @@ DaemonAdapter::DaemonAdapter(StringPiece socket_path, StringPiece volume_path,
       volume_path_(volume_path.data(), volume_path.size()),
       library_path_(kDefaultDaemonLibraryName),
       handler_(handler),
-      abi_loader_(&LoadDaemonAbi) {}
+      abi_loader_(&LoadDaemonAbi),
+      monotonic_clock_(&DaemonAdapter::MonotonicNowMs) {}
 
 DaemonAdapter::~DaemonAdapter() {
   if (record_cache_ != nullptr && abi_ != nullptr) {
@@ -209,19 +269,29 @@ void* DaemonAdapter::RecordCache() {
     return nullptr;
   }
   std::lock_guard<std::mutex> lock(record_cache_mutex_);
-  if (record_cache_attempted_) {
+  if (record_cache_ != nullptr || record_cache_gave_up_) {
+    // Opened, or done trying.  Either way there is nothing left to decide.
     return record_cache_;
   }
-  // Attempted, whatever happens next.  A volume that will not open is not
-  // going to start opening on the next request, and retrying per request
-  // would turn one failure into one failure per request.
-  record_cache_attempted_ = true;
+  const int64_t now_ms = monotonic_clock_();
+  if (record_cache_attempts_ > 0 && now_ms < record_cache_next_attempt_ms_) {
+    // Inside a backoff window.  This is the common path once something is
+    // wrong -- it is what keeps a durable failure from costing an open
+    // syscall, and a log line, on every request.
+    return nullptr;
+  }
+  ++record_cache_attempts_;
 
   alignas(std::max_align_t) unsigned char
       config_storage[kCacheConfigProbeBytes] = {};
   PsCacheConfig* config = reinterpret_cast<PsCacheConfig*>(config_storage);
   abi_->CacheConfigInit(config);
   if (!ApplyInheritedSizing(config, inherited_volume_size_)) {
+    // NOT retried, and this is the one open failure that still latches: the
+    // inherited size is fixed at startup and re-deriving it from the same
+    // number cannot reach a different answer.  Retrying it would be a
+    // schedule with no state to wait for.
+    record_cache_gave_up_ = true;
     return nullptr;
   }
   config->volume_path = volume_path_.c_str();
@@ -229,11 +299,22 @@ void* DaemonAdapter::RecordCache() {
   void* cache = nullptr;
   const int open_error = abi_->CacheOpen(config, &cache);
   if (open_error != kPsOk) {
+    // Described FIRST, before the filesystem probe below: the peer's reason
+    // lives in a buffer it clears on the next ps_cache_open, so it has to be
+    // copied out before this module does anything else.
+    const GoogleString reason = DescribeDaemonError(abi_.get(), open_error);
+    const bool giving_up = record_cache_attempts_ >= kRecordCacheMaxAttempts;
+    if (giving_up) {
+      record_cache_gave_up_ = true;
+    } else {
+      record_cache_next_attempt_ms_ =
+          now_ms + BackoffMsAfter(record_cache_attempts_);
+    }
     if (handler_ != nullptr) {
       GoogleString message = StrCat(
           "nothing will be recorded for in-place optimization: cannot open "
           "the optimizer daemon's cache volume at ",
-          volume_path_, ": ", abi_->StrError(open_error));
+          volume_path_, ": ", reason);
       // This open runs in the request-serving process, which is the one that
       // carries the web-server user's group memberships -- so a permission
       // failure HERE is the group join the startup probe (which may run with
@@ -241,8 +322,22 @@ void* DaemonAdapter::RecordCache() {
       if (VolumeDirAccess(volume_path_) == DirAccess::kDenied) {
         StrAppend(&message, kGroupMembershipHint);
       }
+      // The attempt counter is part of the TEXT, not just of the sentence:
+      // the announcement latch is keyed on the message, so counting here is
+      // what lets each attempt be heard once while still holding a repeated
+      // failure to one line per attempt rather than one per request.
+      StrAppend(&message, " (attempt ", IntegerToString(record_cache_attempts_),
+                " of ", IntegerToString(kRecordCacheMaxAttempts), ")");
+      if (giving_up) {
+        StrAppend(&message,
+                  ". Giving up: in-place optimization stays off in this "
+                  "process until the web server is restarted.");
+      }
       if (ShouldAnnounce(message)) {
-        handler_->Message(kError, "%s", message.c_str());
+        // Warning while the arm may still recover on its own, error only for
+        // the state that needs an operator.  A start-up race that heals on
+        // the second attempt should not page anyone.
+        handler_->Message(giving_up ? kError : kWarning, "%s", message.c_str());
       }
     }
     return nullptr;
@@ -527,7 +622,7 @@ DaemonStartupStatus DaemonAdapter::Resolve(GoogleString* error) {
     StrAppend(error,
               "in-place optimization is OFF: cannot open the optimizer "
               "daemon's cache volume at ",
-              volume_path_, ": ", abi_->StrError(open_error));
+              volume_path_, ": ", DescribeDaemonError(abi_.get(), open_error));
     return DaemonStartupStatus::kOk;
   }
   // The probe is all this check needs the volume for.  Holding it open across

@@ -233,6 +233,49 @@ TEST_F(JsMinifyTest, Es2015LetCommentBeforeBinding) {
   CheckNewMinification("let /*c*/ a = 1, b = 2;", "let a=1,b=2;");
 }
 
+TEST_F(JsMinifyTest, Es2015LetHtmlCommentBeforeBinding) {
+  // Same RC-E defect as above, for the HTML comment forms (found
+  // by fuzzing): the binding lookahead must recognize every comment form
+  // the tokenizer itself accepts, not just the two slash forms.  `<!--`
+  // opens a line comment anywhere, so these are declarations whose binding
+  // linebreak is ASI-load-bearing; on the identifier reading the linebreak
+  // was dropped and the output `let\nrow+4;` no longer parses.
+  CheckNewMinification("let <!--c\nrow\n+4;", "let\nrow\n+4;");
+  CheckNewMinification("let<!--c\nrow\n+4;", "let\nrow\n+4;");
+  // `-->` opens a line comment at the start of a line, which a linebreak in
+  // skipped whitespace reaches...
+  CheckNewMinification("let\n-->\nrow\n+4;", "let\nrow\n+4;");
+  // ...and so does a linebreak inside a skipped block comment.
+  CheckNewMinification("let /*\n*/-->c\nrow\n+4;", "let\nrow\n+4;");
+  // Negative: `-->` that is NOT at the start of a line is `--` then `>`, so
+  // the lookahead misses and `let` stays an identifier -- byte-preserving,
+  // exactly as before.
+  CheckNewMinification("let -->x\ny", "let-->x\ny");
+  // A conditional-compilation comment is retained verbatim and does not put
+  // the scan at a line start, so the `-->` after it is not a comment either.
+  CheckNewMinification("let /*@\n@*/-->x\ny", "let/*@\n@*/-->x\ny");
+  // The same three statement positions the slash battery above covers: a
+  // block body, and the module marker (`export let`, whose narrower
+  // lookahead takes identifier-start characters only).
+  CheckNewMinification("function f() {\n let <!--c\nrow\n+4;\n}",
+                       "function f(){let\nrow\n+4;}");
+  CheckNewMinification("export let <!--c\nx\n/re/", "export let\nx\n/re/");
+  // A `{` or `[` binding pattern reached through an HTML comment is a
+  // declaration too.  Without the fix these were also non-idempotent: the
+  // first pass emitted `let\n{a}=x;`, whose `let` the second pass then read
+  // as a declaration and joined into `let{a}=x;`.
+  CheckNewMinification("let <!--c\n{ a } = x;", "let{a}=x;");
+  CheckNewMinification("let <!--c\n[ a ] = xs;", "let[a]=xs;");
+}
+
+TEST_F(JsMinifyTest, Es2015LetHtmlCommentIdempotent) {
+  // The minimized fuzz artifact for the HTML-comment RC-E defect: with the HTML forms missing
+  // from the lookahead, the first pass produced output that the second pass
+  // minified further, so minification was not idempotent.
+  CheckNewMinification("let\n-->\nlet\nt\n&", "let\nlet\nt&");
+  CheckNewMinification("let\nlet\nt&", "let\nlet\nt&");
+}
+
 TEST_F(JsMinifyTest, Es2015LetNonBindingUses) {
   // Sloppy-mode `let`-as-variable at statement position: the binding
   // lookahead takes the identifier path, so these minify exactly as before

@@ -137,6 +137,48 @@ class DaemonAdapter {
   // fixed floor.  MUST stay zero.
   static constexpr size_t kMirroredRamCacheSizeBytes = 0;
 
+  // The record-cache open's retry schedule.
+  //
+  // WHY THERE IS ONE AT ALL.  The open used to be a permanent one-shot: the
+  // first failure in a request-serving process turned in-place optimization
+  // off for that process's LIFE, and nothing said so again.  The most likely
+  // reason to fail is also the most likely to pass a moment later -- a worker
+  // that came up while the daemon was still starting, or during a daemon
+  // restart -- so the one-shot converted a race lasting seconds into a worker
+  // that never records again, silently, while the module keeps serving.  A
+  // bounded retry costs one open attempt on the request that crosses each
+  // deadline and nothing at all in between.
+  //
+  // WHY IT IS BOUNDED.  A durable failure (a mis-permissioned volume, a
+  // daemon that is simply not installed) must not become one open syscall per
+  // request forever, and must not become one log line per request either.
+  // Past the bound the condition is not transient and the answer is an
+  // operator's, so the arm gives up loudly and stays off.
+  //
+  // THE BOUND IS TWELVE ATTEMPTS, WHICH IS 363 SECONDS -- a little over six
+  // minutes.  Worth spelling out because the total is not the attempt count
+  // times anything: eleven waits separate twelve attempts (the last failure
+  // gives up rather than scheduling a thirteenth), and the doubling stops at
+  // the cap after the seventh, so the series is
+  //
+  //     1 + 2 + 4 + 8 + 16 + 32 + 60 + 60 + 60 + 60 + 60 = 363s
+  //
+  // The cap is what makes the count cheap past that point: each further
+  // attempt buys a whole minute of tolerance for one open syscall.  Twelve
+  // rather than ten because ten stops at 243s, and a daemon restart that
+  // takes longer than four minutes -- a slow host, a large volume, a unit
+  // that waits on something else first -- would strand the worker for good,
+  // which is the exact failure this schedule exists to prevent.  Any change
+  // here must update the arithmetic above with it.
+  static constexpr int kRecordCacheMaxAttempts = 12;
+  static constexpr int64_t kRecordCacheFirstBackoffMs = 1000;
+  static constexpr int64_t kRecordCacheMaxBackoffMs = 60000;
+
+  // A source of monotonic milliseconds.  Injectable ONLY so the schedule
+  // above can be tested by advancing a number instead of by sleeping out its
+  // 363 seconds; production always uses the steady clock.
+  using MonotonicClock = std::function<int64_t()>;
+
   // The cache-directory generation this module is built for: the N in the
   // daemon's versioned cold-start cache directory
   // (/var/cache/pagespeed-optimizer/vN), introduced with the daemon's
@@ -199,8 +241,14 @@ class DaemonAdapter {
   // per-process state, and there is no correct way to have made it before the
   // process existed.
   //
-  // Thread-safe; the open happens once per adapter however many threads race
-  // for it.
+  // Thread-safe; at most one open is in flight per adapter however many
+  // threads race for it, and a successful handle is opened exactly once.
+  //
+  // RETRIES ON A BOUNDED BACKOFF rather than latching on the first failure --
+  // see kRecordCacheMaxAttempts.  Returns nullptr while the arm is between
+  // attempts and after it has given up, so every caller still sees the same
+  // two outcomes it always did; nothing blocks and nothing sleeps on a
+  // request thread.
   void* RecordCache();
 
   bool configured() const {
@@ -231,6 +279,11 @@ class DaemonAdapter {
   void set_abi_loader(AbiLoader loader) { abi_loader_ = std::move(loader); }
   void set_library_path(StringPiece path) { path.CopyToString(&library_path_); }
 
+  // Overrides the retry schedule's clock.  Test seam only.
+  void set_monotonic_clock(MonotonicClock clock) {
+    monotonic_clock_ = std::move(clock);
+  }
+
   // Forget every condition announced so far.  Tests only: the latch is
   // process-wide by design, and a test binary is one process.
   static void ResetAnnouncementsForTesting();
@@ -239,6 +292,13 @@ class DaemonAdapter {
   static bool SocketAnswers(StringPiece path, GoogleString* error);
 
   DaemonStartupStatus Resolve(GoogleString* error);
+
+  // Milliseconds on the process's steady clock.  The production clock.
+  static int64_t MonotonicNowMs();
+
+  // How long to wait after `attempts` consecutive failures: the first
+  // backoff doubled each time and then capped.
+  static int64_t BackoffMsAfter(int attempts);
 
   GoogleString socket_path_;
   GoogleString volume_path_;
@@ -251,9 +311,17 @@ class DaemonAdapter {
   // per-process open uses the same one rather than asking again -- a second
   // read could see a different answer and open a different file.
   uint64_t inherited_volume_size_ = 0;
+  MonotonicClock monotonic_clock_;
   std::mutex record_cache_mutex_;
   void* record_cache_ = nullptr;
-  bool record_cache_attempted_ = false;
+  // The retry schedule's state, all of it guarded by record_cache_mutex_.
+  // Per-adapter and therefore per-process, which is the right scope: the
+  // handle being opened is per-process state (see RecordCache), so a
+  // process that is still racing the daemon's start must not be held off by
+  // another one's history.
+  int record_cache_attempts_ = 0;
+  int64_t record_cache_next_attempt_ms_ = 0;
+  bool record_cache_gave_up_ = false;
   // Set when the volume directory holds left-over files from an earlier cache
   // size.  Reported on the healthy path, where nothing else would mention it.
   GoogleString extra_volume_warning_;

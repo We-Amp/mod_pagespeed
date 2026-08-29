@@ -77,6 +77,11 @@
 //                                pre-H1 daemon. Bound OPTIONALLY, so this
 //                                library must still load -- the adapter
 //                                tolerates the absence as the legacy layout.
+//   PS_STUB_OMIT_LAST_ERROR      no ps_last_error_message: a daemon package
+//                                from before the per-failure explanation was
+//                                published. Bound OPTIONALLY, so it must
+//                                still load; the degrade is that an error
+//                                line carries the error class alone.
 //
 // WHY THIS FILE MODELS THE PEER'S VALIDATION RATHER THAN JUST SUCCEEDING.
 // A stand-in that accepts everything cannot fail the way the real library
@@ -708,6 +713,13 @@ int ps_cache_open(const StubCacheConfig* config, void** out_cache) {
 void ps_cache_close(void* cache) {}
 
 const char* ps_strerror(int error) { return "stub error"; }
+
+#ifndef PS_STUB_OMIT_LAST_ERROR
+// The per-failure explanation.  Fixed rather than derived from the last call:
+// what is under test is that the loader BINDS it and the adapter joins it to
+// the error class, not the peer's own bookkeeping.
+const char* ps_last_error_message() { return "stub reason"; }
+#endif  // PS_STUB_OMIT_LAST_ERROR
 
 // ---------------------------------------------------------------------------
 // The record arm.
