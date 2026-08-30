@@ -91,6 +91,11 @@ class ApacheServerContext : public SystemServerContext {
   // run.  Borrowed; the record arm asks it for the per-process cache handle.
   DaemonAdapter* daemon_adapter() { return daemon_adapter_.get(); }
 
+  // Creates the UDS-backed DaemonReader for the /v1/daemon/* admin
+  // endpoints, from this server's DaemonApiSocketPath.  See
+  // SystemServerContext::NewDaemonReader().
+  DaemonReader* NewDaemonReader() override;
+
   // The peer's serve-stats mmap for this server, or nullptr when no daemon
   // is configured.  Borrowed; PROCESS-lifetime, and deliberately not opened
   // here -- the object is built at configuration time and opens the file on

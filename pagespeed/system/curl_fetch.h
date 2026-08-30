@@ -26,6 +26,7 @@
 #include "pagespeed/kernel/base/pool.h"
 #include "pagespeed/kernel/base/pool_element.h"
 #include "pagespeed/kernel/base/string.h"
+#include "pagespeed/kernel/base/string_util.h"
 
 namespace net_instaweb {
 
@@ -50,6 +51,20 @@ class CurlFetch : public PoolElement<CurlFetch> {
   // Initialize the CURL easy handle with all options. Must be called
   // before adding to a CURLM multi handle. Returns true on success.
   bool InitCurl(CurlUrlAsyncFetcher* fetcher);
+
+  // Connect over the unix-domain socket at `path` instead of TCP; the URL's
+  // host is then ignored for routing.  Must be called before InitCurl.
+  void set_unix_socket_path(StringPiece path) {
+    path.CopyToString(&unix_socket_path_);
+  }
+
+  // Per-fetch overrides (must be called before InitCurl); the defaults
+  // (0) keep the fetcher's configured timeout and the compile-time
+  // response-body cap.
+  void set_timeout_ms(int64 timeout_ms) { timeout_ms_ = timeout_ms; }
+  void set_max_response_body_bytes(size_t max) {
+    max_response_body_bytes_ = max;
+  }
 
   // Called when curl reports this transfer is done.
   void Done(CURLcode result);
@@ -80,6 +95,9 @@ class CurlFetch : public PoolElement<CurlFetch> {
   size_t header_bytes_received_;
   int64 fetch_start_ms_;
   int64 fetch_end_ms_;
+  GoogleString unix_socket_path_;
+  int64 timeout_ms_ = 0;                // 0: use the fetcher's timeout
+  size_t max_response_body_bytes_ = 0;  // 0: use the compile-time cap
 
   CurlFetch(const CurlFetch&) = delete;
   CurlFetch& operator=(const CurlFetch&) = delete;

@@ -43,6 +43,11 @@ class EnvoyServerContext : public SystemServerContext {
   // set_trusted_input() on any ProxyFetches we use to transform internal HTML.
   bool ProxiesHtml() const override { return false; }
 
+  // Creates the UDS-backed DaemonReader for the /v1/daemon/* admin
+  // endpoints, from the configured DaemonApiSocketPath.  See
+  // SystemServerContext::NewDaemonReader().
+  DaemonReader* NewDaemonReader() override;
+
   // Call only when you need an EnvoyRewriteOptions.  If you don't need
   // Envoy-specific behavior, call global_options() instead which doesn't
   // downcast.

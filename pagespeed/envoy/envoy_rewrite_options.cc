@@ -26,6 +26,7 @@
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/timer.h"
+#include "pagespeed/system/daemon_reader.h"
 #include "pagespeed/system/system_caches.h"
 
 namespace net_instaweb {
@@ -38,6 +39,7 @@ const char kConsolePath[] = "ConsolePath";
 const char kMessagesPath[] = "MessagesPath";
 const char kAdminPath[] = "AdminPath";
 const char kGlobalAdminPath[] = "GlobalAdminPath";
+const char kDaemonApiSocketPath[] = "DaemonApiSocketPath";
 const char kHealthPath[] = "HealthPath";
 
 // These options are copied from mod_instaweb.cc, where APACHE_CONFIG_OPTIONX
@@ -111,6 +113,13 @@ void EnvoyRewriteOptions::AddProperties() {
       "/pagespeed_global_admin", &EnvoyRewriteOptions::global_admin_path_,
       "ngap", kGlobalAdminPath, kProcessScopeStrict,
       "Set the global admin path. Ex: /pagespeed_global_admin", false);
+  add_envoy_option(
+      kDefaultDaemonApiSocketPath,
+      &EnvoyRewriteOptions::daemon_api_socket_path_, "dasp",
+      kDaemonApiSocketPath, kServerScope,
+      "Set the unix socket path of the optimizer daemon's management API, "
+      "backing the /v1/daemon/* admin endpoints. Empty disables them.",
+      true);
 
   // HTML rewriting options.
   // Enable HTML rewriting (default: true)

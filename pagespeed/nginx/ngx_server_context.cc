@@ -31,6 +31,7 @@ extern "C" {
 #include "pagespeed/system/add_headers_fetcher.h"
 #include "pagespeed/system/loopback_route_fetcher.h"
 #include "pagespeed/system/system_request_context.h"
+#include "pagespeed/system/uds_daemon_reader.h"
 
 namespace net_instaweb {
 
@@ -43,6 +44,12 @@ NgxServerContext::~NgxServerContext() {}
 
 NgxRewriteOptions* NgxServerContext::config() {
   return NgxRewriteOptions::DynamicCast(global_options());
+}
+
+DaemonReader* NgxServerContext::NewDaemonReader() {
+  return new UdsDaemonReader(thread_system(), timer(),
+                             config()->daemon_api_socket_path(),
+                             message_handler());
 }
 
 SystemRequestContext* NgxServerContext::NewRequestContext(

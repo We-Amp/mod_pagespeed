@@ -7,6 +7,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# Console chrome derives from the product-facts single source (see
+# sync-product-facts.sh); verify the checked-in facts copy is in sync before
+# building so a stale copy cannot be baked into the bundle unnoticed.
+bash "$SCRIPT_DIR/check-product-facts.sh"
+
 # Ensure dependencies are installed
 if [ ! -d "node_modules" ]; then
   echo "Installing dependencies..."

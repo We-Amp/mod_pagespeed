@@ -15,13 +15,16 @@ async function navigateTo(page, hash: string) {
 test.describe("App shell", () => {
   test("loads and shows topbar with title", async ({ page }) => {
     await page.goto(BASE);
-    await expect(page.locator(".topbar-title")).toHaveText("PageSpeed Admin");
+    // The chrome derives from the product facts: the product name in the
+    // logo, the vendor link, and the console-scope badge.
+    await expect(page.locator(".topbar-logo")).toContainText("mod_pagespeed");
+    await expect(page.locator(".topbar-badge")).toHaveText("Admin");
   });
 
-  test("sidebar has all 9 nav items", async ({ page }) => {
+  test("sidebar has all 12 nav items", async ({ page }) => {
     await page.goto(BASE);
     const items = page.locator(".nav-item");
-    await expect(items).toHaveCount(9);
+    await expect(items).toHaveCount(12);
     const labels = await items.allTextContents();
     expect(labels).toEqual([
       "Statistics",
@@ -31,7 +34,10 @@ test.describe("App shell", () => {
       "Console",
       "Messages",
       "Graphs",
-      "License",
+      "Daemon Status",
+      "Daemon Cache",
+      "Daemon Back-pressure",
+      "Support",
       "About",
     ]);
   });
@@ -265,36 +271,6 @@ test.describe("Graphs page", () => {
 });
 
 // ---------------------------------------------------------------------------
-// License page
-// ---------------------------------------------------------------------------
-test.describe("License page", () => {
-  test("loads and shows status", async ({ page }) => {
-    const errors: string[] = [];
-    page.on("pageerror", (err) => errors.push(err.message));
-    await navigateTo(page, "#/license");
-    await page.waitForTimeout(3000);
-    // Should show a status badge or loading/error.
-    const hasBadge = (await page.locator(".status-badge").count()) > 0;
-    const hasError = (await page.locator(".error").count()) > 0;
-    const hasLoading = (await page.locator("text=Loading").count()) > 0;
-    expect(hasBadge || hasError || hasLoading).toBe(true);
-    // No JS errors.
-    expect(errors).toEqual([]);
-  });
-
-  test("shows license form or error state", async ({ page }) => {
-    await navigateTo(page, "#/license");
-    await page.waitForTimeout(3000);
-    // License page may show the form (if API returns data) or an error
-    // (if license service is unavailable). Either is acceptable.
-    const hasForm = (await page.locator("#license-key").count()) > 0;
-    const hasError = (await page.locator(".error").count()) > 0;
-    const hasBadge = (await page.locator(".status-badge").count()) > 0;
-    expect(hasForm || hasError || hasBadge).toBe(true);
-  });
-});
-
-// ---------------------------------------------------------------------------
 // Cross-page: no JS errors on any page
 // ---------------------------------------------------------------------------
 test("no JavaScript errors navigating through all pages", async ({ page }) => {
@@ -309,7 +285,10 @@ test("no JavaScript errors navigating through all pages", async ({ page }) => {
     "#/console",
     "#/messages",
     "#/graphs",
-    "#/license",
+    "#/daemon/status",
+    "#/daemon/cache",
+    "#/daemon/back-pressure",
+    "#/support",
     "#/about",
   ];
 

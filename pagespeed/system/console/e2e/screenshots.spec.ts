@@ -10,7 +10,10 @@ const pages = [
   { hash: "#/console", name: "console" },
   { hash: "#/messages", name: "messages" },
   { hash: "#/graphs", name: "graphs" },
-  { hash: "#/license", name: "license" },
+  { hash: "#/daemon/status", name: "daemon-status" },
+  { hash: "#/daemon/cache", name: "daemon-cache" },
+  { hash: "#/daemon/back-pressure", name: "daemon-back-pressure" },
+  { hash: "#/support", name: "support" },
   { hash: "#/about", name: "about" },
 ];
 

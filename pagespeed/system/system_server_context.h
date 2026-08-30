@@ -37,6 +37,7 @@
 namespace net_instaweb {
 
 class AsyncFetch;
+class DaemonReader;
 class GoogleUrl;
 class Histogram;
 class QueryParams;
@@ -94,6 +95,14 @@ class SystemServerContext : public ServerContext {
   // SystemServerContext doesn't proxy HTML by default. Subclasses like
   // ApacheServerContext override this to return true when appropriate.
   bool ProxiesHtml() const override { return false; }
+
+  // Creates the DaemonReader backing the admin console's /v1/daemon/*
+  // endpoints (a read-only proxy to the optimizer daemon's management API,
+  //).  Called once from PostInitHook(); the AdminSite takes
+  // ownership.  The default implementation returns nullptr -- ports without
+  // a daemon transport override nothing, and the endpoints then report the
+  // daemon unreachable (502).
+  virtual DaemonReader* NewDaemonReader();
 
   static void InitStats(Statistics* statistics);
 

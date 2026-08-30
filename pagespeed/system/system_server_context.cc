@@ -258,7 +258,7 @@ void SystemServerContext::PostInitHook() {
   }
   admin_site_ = std::make_unique<AdminSite>(
       timer(), thread_system(), message_handler(), DefaultSystemFetcher(),
-      global_system_rewrite_options()->file_cache_path());
+      global_system_rewrite_options()->file_cache_path(), NewDaemonReader());
   // Set initial license state from what Init() loaded from disk,
   // and register a callback to keep it updated.
   if (admin_site_->license_handler() != nullptr) {
@@ -299,6 +299,11 @@ void SystemServerContext::PostInitHook() {
           "to remove the warning and unlock support + premium features.");
     }
   }
+}
+
+DaemonReader* SystemServerContext::NewDaemonReader() {
+  // No daemon transport by default; ports with a curl-based fetcher override.
+  return nullptr;
 }
 
 void SystemServerContext::UpdateOverCapPolicy(bool active, StringPiece scope,

@@ -32,6 +32,7 @@ extern "C" {
 #include "ngx_rewrite_driver_factory.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/timer.h"
+#include "pagespeed/system/daemon_reader.h"
 #include "pagespeed/system/system_caches.h"
 
 namespace net_instaweb {
@@ -44,6 +45,7 @@ const char kConsolePath[] = "ConsolePath";
 const char kMessagesPath[] = "MessagesPath";
 const char kAdminPath[] = "AdminPath";
 const char kGlobalAdminPath[] = "GlobalAdminPath";
+const char kDaemonApiSocketPath[] = "DaemonApiSocketPath";
 const char kWebBotAuth[] = "WebBotAuth";
 const char kWebBotAuthTelemetry[] = "WebBotAuthTelemetry";
 const char kWebBotAuthBotDetection[] = "WebBotAuthBotDetection";
@@ -146,6 +148,12 @@ void NgxRewriteOptions::AddProperties() {
                  kGlobalAdminPath, kProcessScopeStrict,
                  "Set the global admin path.  Ex: /pagespeed_global_admin",
                  false);
+  add_ngx_option(
+      kDefaultDaemonApiSocketPath, &NgxRewriteOptions::daemon_api_socket_path_,
+      "dasp", kDaemonApiSocketPath, kServerScope,
+      "Set the unix socket path of the optimizer daemon's management API, "
+      "backing the /v1/daemon/* admin endpoints.  Empty disables them.",
+      true);
 
   // the design record A1 Web-Bot-Auth (observe-only RFC 9421 verifier). All default off /
   // empty: zero behavior change unless the operator opts in.

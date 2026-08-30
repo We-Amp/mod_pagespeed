@@ -44,6 +44,7 @@ def pagespeed_system_library(name, server_type, **kwargs):
 # These are loaded by both the macro above and the BUILD file.
 SYSTEM_CORE_SRCS = [
     "add_headers_fetcher.cc",
+    "admin_daemon_handler.cc",
     "admin_license_handler.cc",
     "admin_site.cc",
     "external_server_spec.cc",
@@ -67,6 +68,7 @@ SYSTEM_GENERATED_SRCS = [
 
 SYSTEM_CORE_HDRS = [
     "add_headers_fetcher.h",
+    "admin_daemon_handler.h",
     "admin_license_handler.h",
     "admin_site.h",
     "external_server_spec.h",
@@ -86,6 +88,7 @@ SYSTEM_CORE_HDRS = [
 
 SYSTEM_CORE_DEPS = [
     ":daemon_health",
+    ":daemon_reader",
     ":ipro_recorder",
     ":external_server_spec",
     ":json_utils",

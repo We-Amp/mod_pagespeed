@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The admin console can now show the optimizer daemon's status, cache
+  statistics, and back-pressure state.** Three read-only endpoints under the
+  admin path — `v1/daemon/health`, `v1/daemon/stats`, and
+  `v1/daemon/cooldowns` — proxy the daemon's management API over its unix
+  socket, configured with the new `DaemonApiSocketPath` directive
+  (Apache/nginx/Envoy; default `/run/pagespeed-optimizer/api.sock`, empty
+  disables). The proxy is read-only by construction: GET/HEAD only, the
+  upstream path comes from a fixed allow-list, and no client query string,
+  headers, or body reach the daemon. When the daemon is unreachable the
+  endpoints answer 502 so the console panels can render that state.
+
+- **The admin console now shows the optimizer daemon alongside the module.**
+  Three read-only panels — daemon status (health, version, uptime, checks,
+  browser-analysis state), daemon cache (entries, size, serve-savings
+  counters), and daemon back-pressure (thread-pool occupancy, dropped
+  notifications, cache cooldowns) — poll the daemon's management API through
+  the module's `/v1/daemon/` endpoints. When the daemon is unreachable or not
+  configured the panels say so plainly; the module's own pages are unaffected.
+
+### Removed
+
+- **The admin console's License tab is gone.** In its navigation slot is a
+  single gentle, dismissible Support panel pointing at support subscriptions;
+  the dismissal is remembered. The unlicensed and over-cap banners in the top
+  bar are removed with it. The underlying `/v1/license/*` endpoints are
+  untouched and still answer.
+
 ### Fixed
 
 - **A cache volume path whose name ends in a dot now attaches to the

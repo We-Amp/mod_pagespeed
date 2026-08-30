@@ -21,6 +21,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <mutex>
 #include <vector>
 
 #include "net/instaweb/http/public/async_fetch.h"
@@ -69,6 +70,31 @@ class CurlPollThread : public ThreadSystem::Thread {
   CurlUrlAsyncFetcher* fetcher_;
 };
 
+// libcurl's global init/cleanup is not thread-safe on libcurl < 7.84, and
+// curl_global_cleanup while another instance is mid-transfer is UB on any
+// version.  Multiple CurlUrlAsyncFetcher instances coexist in one process
+// (the factory fetcher plus the daemon reader's lazily created one), and the
+// reader's can be created on an admin request thread while the factory
+// fetcher's poll thread is inside libcurl.  Gate the global calls on a
+// process-wide refcount: the first instance initializes, and only the last
+// one cleans up.
+std::mutex g_curl_global_mutex;
+int g_curl_global_refcount = 0;
+
+void CurlGlobalInit() {
+  std::lock_guard<std::mutex> lock(g_curl_global_mutex);
+  if (g_curl_global_refcount++ == 0) {
+    curl_global_init(CURL_GLOBAL_DEFAULT);
+  }
+}
+
+void CurlGlobalCleanup() {
+  std::lock_guard<std::mutex> lock(g_curl_global_mutex);
+  if (--g_curl_global_refcount == 0) {
+    curl_global_cleanup();
+  }
+}
+
 }  // namespace
 
 CurlUrlAsyncFetcher::CurlUrlAsyncFetcher(const char* proxy,
@@ -103,7 +129,7 @@ CurlUrlAsyncFetcher::CurlUrlAsyncFetcher(const char* proxy,
     proxy_ = proxy;
   }
 
-  curl_global_init(CURL_GLOBAL_DEFAULT);
+  CurlGlobalInit();
   multi_handle_ = curl_multi_init();
 
   if (statistics != nullptr) {
@@ -140,7 +166,7 @@ CurlUrlAsyncFetcher::~CurlUrlAsyncFetcher() {
   if (multi_handle_ != nullptr) {
     curl_multi_cleanup(multi_handle_);
   }
-  curl_global_cleanup();
+  CurlGlobalCleanup();
 }
 
 void CurlUrlAsyncFetcher::InitStats(Statistics* statistics) {
@@ -171,6 +197,25 @@ void CurlUrlAsyncFetcher::ShutDown() {
 void CurlUrlAsyncFetcher::Fetch(const GoogleString& url,
                                 MessageHandler* message_handler,
                                 AsyncFetch* async_fetch) {
+  StartFetch(url, "" /* socket_path */, 0 /* timeout_ms */,
+             0 /* max_response_body_bytes */, message_handler, async_fetch);
+}
+
+void CurlUrlAsyncFetcher::FetchOverUnixSocket(const GoogleString& url,
+                                              StringPiece socket_path,
+                                              int64 timeout_ms,
+                                              size_t max_response_body_bytes,
+                                              MessageHandler* message_handler,
+                                              AsyncFetch* async_fetch) {
+  StartFetch(url, socket_path, timeout_ms, max_response_body_bytes,
+             message_handler, async_fetch);
+}
+
+void CurlUrlAsyncFetcher::StartFetch(const GoogleString& url,
+                                     StringPiece socket_path, int64 timeout_ms,
+                                     size_t max_response_body_bytes,
+                                     MessageHandler* message_handler,
+                                     AsyncFetch* async_fetch) {
   if (shutdown_) {
     message_handler->Message(
         kWarning, "CurlUrlAsyncFetcher is shut down, cannot fetch: %s",
@@ -199,6 +244,15 @@ void CurlUrlAsyncFetcher::Fetch(const GoogleString& url,
 
   CurlFetch* curl_fetch =
       new CurlFetch(url, async_fetch, message_handler, timer_);
+  if (!socket_path.empty()) {
+    curl_fetch->set_unix_socket_path(socket_path);
+  }
+  if (timeout_ms > 0) {
+    curl_fetch->set_timeout_ms(timeout_ms);
+  }
+  if (max_response_body_bytes > 0) {
+    curl_fetch->set_max_response_body_bytes(max_response_body_bytes);
+  }
 
   if (!curl_fetch->InitCurl(this)) {
     message_handler->Message(kError, "Failed to initialize curl fetch: %s",

@@ -83,8 +83,15 @@ bool CurlFetch::InitCurl(CurlUrlAsyncFetcher* fetcher) {
   curl_easy_setopt(curl_handle_, CURLOPT_PRIVATE, this);
   curl_easy_setopt(curl_handle_, CURLOPT_FOLLOWLOCATION, 0L);
 
+  // Unix-domain socket transport: connect over the socket instead of TCP
+  // (the URL's host is ignored for routing).
+  if (!unix_socket_path_.empty()) {
+    curl_easy_setopt(curl_handle_, CURLOPT_UNIX_SOCKET_PATH,
+                     unix_socket_path_.c_str());
+  }
+
   // Timeouts
-  int64 timeout_ms = fetcher->timeout_ms();
+  int64 timeout_ms = timeout_ms_ > 0 ? timeout_ms_ : fetcher->timeout_ms();
   if (timeout_ms > 0) {
     curl_easy_setopt(curl_handle_, CURLOPT_TIMEOUT_MS,
                      static_cast<long>(timeout_ms));
@@ -92,9 +99,15 @@ bool CurlFetch::InitCurl(CurlUrlAsyncFetcher* fetcher) {
                      static_cast<long>(timeout_ms));
   }
 
-  // Proxy
-  if (!fetcher->proxy().empty()) {
-    curl_easy_setopt(curl_handle_, CURLOPT_PROXY, fetcher->proxy().c_str());
+  // Proxy.  Unix-domain socket connections never leave the host and never go
+  // through a proxy: suppress it explicitly (not just by omission) so the
+  // invariant holds regardless of libcurl version.
+  if (unix_socket_path_.empty()) {
+    if (!fetcher->proxy().empty()) {
+      curl_easy_setopt(curl_handle_, CURLOPT_PROXY, fetcher->proxy().c_str());
+    }
+  } else {
+    curl_easy_setopt(curl_handle_, CURLOPT_PROXY, "");
   }
 
   // SSL configuration
@@ -344,10 +357,13 @@ size_t CurlFetch::WriteCallback(char* buffer, size_t size, size_t nmemb,
   fetch->bytes_received_ += total;
 
   // Reject responses that exceed the maximum body size to prevent OOM.
-  if (fetch->bytes_received_ > kMaxResponseBodyBytes) {
+  const size_t max_body_bytes = fetch->max_response_body_bytes_ != 0
+                                    ? fetch->max_response_body_bytes_
+                                    : kMaxResponseBodyBytes;
+  if (fetch->bytes_received_ > max_body_bytes) {
     fetch->message_handler_->Message(
         kWarning, "Response body too large (>%zu bytes), aborting fetch for %s",
-        kMaxResponseBodyBytes, fetch->url_.c_str());
+        max_body_bytes, fetch->url_.c_str());
     return 0;  // Returning 0 causes curl to abort with CURLE_WRITE_ERROR.
   }
 

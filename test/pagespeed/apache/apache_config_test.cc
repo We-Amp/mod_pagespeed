@@ -128,6 +128,24 @@ TEST_F(ApacheConfigTest, DaemonPathsParseFromTheirDirectives) {
   EXPECT_STREQ("/var/cache/pagespeed-daemon", config_.daemon_volume_path());
 }
 
+// The daemon's management API socket (the /v1/daemon/* console proxy, issue
+// #886) defaults to the daemon's packaged path and is disableable with an
+// empty value.
+TEST_F(ApacheConfigTest, DaemonApiSocketPathDefaultAndParse) {
+  EXPECT_STREQ("/run/pagespeed-optimizer/api.sock",
+               config_.daemon_api_socket_path());
+  GoogleString msg;
+  NullMessageHandler handler;
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            config_.ParseAndSetOptionFromName1(
+                "DaemonApiSocketPath", "/run/custom/api.sock", &msg, &handler));
+  EXPECT_STREQ("/run/custom/api.sock", config_.daemon_api_socket_path());
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            config_.ParseAndSetOptionFromName1("DaemonApiSocketPath", "",
+                                               &msg, &handler));
+  EXPECT_TRUE(config_.daemon_api_socket_path().empty());
+}
+
 // There is no runtime substrate toggle, and there must not be one.  The
 // mitigation for a defect on the daemon substrate is to reinstall the
 // previous module and daemon package pair, not to flip a directive: a

@@ -24,6 +24,7 @@
 #include <cstddef>
 #include <cstdlib>
 #include <memory>
+#include <thread>
 #include <vector>
 
 #include "base/logging.h"
@@ -738,6 +739,72 @@ TEST_F(CurlUrlAsyncFetcherTest, TestShutdownWithActiveFetches) {
   EXPECT_TRUE(fetch->IsDone());
   EXPECT_FALSE(fetch->success());
   delete fetch;
+}
+
+// ---- Coexisting fetcher instances (global init/cleanup refcounting) ----
+//
+// The admin console's daemon reader lazily creates its own
+// CurlUrlAsyncFetcher, so multiple instances coexist in one process and can
+// be constructed/destroyed while another instance's poll thread is inside
+// libcurl.  curl_global_init/curl_global_cleanup are gated on a process-wide
+// refcount (curl_url_async_fetcher.cc) to keep that safe; these tests
+// exercise coexistence, sequential reuse, and concurrent construction.
+
+TEST_F(CurlUrlAsyncFetcherTest, SecondFetcherCoexistsAndFetches) {
+  CurlUrlAsyncFetcher second("", thread_system_.get(), statistics_.get(),
+                             timer_.get(), fetcher_timeout_ms_,
+                             &message_handler_);
+  int index = AddTestUrl(StrCat("http://", test_host_, "/get"), "");
+  CurlTestFetch* fetch = fetches_[index];
+  fetch->Reset();
+  second.Fetch(urls_[index], &message_handler_, fetch);
+  ASSERT_EQ(1, WaitTillDone(index, index));
+  ASSERT_TRUE(fetch->IsDone());
+  EXPECT_TRUE(fetch->success());
+  EXPECT_EQ(HttpStatus::kOK, fetch->response_headers()->status_code());
+  // Destroying `second` must not disturb the fixture's fetcher.
+  second.ShutDown();
+  EXPECT_TRUE(TestFetch(kModpagespeedSite, kModpagespeedSite));
+}
+
+TEST_F(CurlUrlAsyncFetcherTest, SequentialFetcherCreateDestroy) {
+  for (int i = 0; i < 3; ++i) {
+    CurlUrlAsyncFetcher extra("", thread_system_.get(), nullptr /* statistics */,
+                              timer_.get(), fetcher_timeout_ms_,
+                              &message_handler_);
+    CurlTestFetch fetch(
+        RequestContext::NewTestRequestContext(thread_system_.get()),
+        mutex_.get());
+    extra.Fetch(StrCat("http://", test_host_, "/get"), &message_handler_,
+                &fetch);
+    int64 deadline_ms = timer_->NowMs() + fetcher_timeout_ms_ * 2;
+    while (!fetch.IsDone() && timer_->NowMs() < deadline_ms) {
+      usleep(1000);
+    }
+    ASSERT_TRUE(fetch.IsDone());
+    EXPECT_TRUE(fetch.success());
+    // `extra` is destroyed at the end of each iteration, while the fixture's
+    // fetcher stays live throughout.
+  }
+  EXPECT_TRUE(TestFetch(kModpagespeedSite, kModpagespeedSite));
+}
+
+TEST_F(CurlUrlAsyncFetcherTest, ConcurrentFetcherCreateDestroy) {
+  // Races the refcounted global init/cleanup across threads.  No fetches are
+  // issued, so the (shared, unsynchronized) message handler is never touched.
+  std::vector<std::thread> threads;
+  for (int i = 0; i < 4; ++i) {
+    threads.emplace_back([this]() {
+      CurlUrlAsyncFetcher extra("", thread_system_.get(),
+                                nullptr /* statistics */, timer_.get(), 1000,
+                                &message_handler_);
+      extra.ShutDown();
+    });
+  }
+  for (std::thread& thread : threads) {
+    thread.join();
+  }
+  EXPECT_TRUE(TestFetch(kModpagespeedSite, kModpagespeedSite));
 }
 
 // ---- Proxy tests (matching Serf) ----

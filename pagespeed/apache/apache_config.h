@@ -74,6 +74,14 @@ class ApacheConfig : public SystemRewriteOptions {
     return daemon_volume_path_.value();
   }
 
+  // Unix socket path of the optimizer daemon's management API
+  // (ModPagespeedDaemonApiSocketPath), backing the /v1/daemon/* admin
+  // endpoints.  Empty disables them.  Note this is a different socket from
+  // DaemonSocketPath (the notification socket).
+  const GoogleString& daemon_api_socket_path() const {
+    return daemon_api_socket_path_.value();
+  }
+
   bool force_buffering() const { return force_buffering_.value(); }
   void set_force_buffering(bool x) { set_option(x, &force_buffering_); }
 
@@ -133,6 +141,7 @@ class ApacheConfig : public SystemRewriteOptions {
   Option<GoogleString> measurement_proxy_password_;
   Option<GoogleString> daemon_socket_path_;
   Option<GoogleString> daemon_volume_path_;
+  Option<GoogleString> daemon_api_socket_path_;
 
   ApacheConfig(const ApacheConfig&) = delete;
   ApacheConfig& operator=(const ApacheConfig&) = delete;

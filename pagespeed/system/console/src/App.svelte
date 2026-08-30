@@ -1,8 +1,15 @@
 <script lang="ts">
   import { router, routes } from "$lib/router.svelte";
   import { detectBasePath } from "$lib/utils/base-path";
-  import { AdminApiClient } from "$lib/api/client";
-  import { onMount } from "svelte";
+  import {
+    PRODUCT_DISPLAY_NAME,
+    PRODUCT_NAME,
+    VENDOR,
+    VENDOR_HOST,
+    VENDOR_URL,
+    WEBSITE,
+    WEBSITE_HOST,
+  } from "$lib/data/product-facts-console";
   import type { Component } from "svelte";
 
   const { basePath, isGlobal } = detectBasePath();
@@ -12,29 +19,6 @@
   let sidebarOpen = $state(false);
   let loadedComponent = $state<Component | null>(null);
   let loadError = $state<string | null>(null);
-  let showLicenseBanner = $state(false);
-  // the design record: over-cap is INDEPENDENT of licensed — a fully licensed (scope=site)
-  // install can be optimizing outside its licensed site. Tracked separately so
-  // it surfaces even when showLicenseBanner is false. They are mutually
-  // exclusive in practice (over-cap requires an active license).
-  let showOverCapBanner = $state(false);
-
-  // the design record nudge target: the same /buy/ page the License section uses, with
-  // UTM so over-cap-driven buy intent is attributable (mirrors the 2.0 console).
-  const OVER_CAP_CTA_URL =
-    "https://modpagespeed.com/buy/?utm_source=console&utm_medium=in-product&utm_campaign=over-cap";
-
-  const api = new AdminApiClient(basePath);
-
-  onMount(async () => {
-    try {
-      const status = await api.getLicenseStatus();
-      showLicenseBanner = !status.licensed;
-      showOverCapBanner = !!status.over_cap;
-    } catch {
-      showLicenseBanner = true;
-    }
-  });
 
   // Reactively load the component when the route changes.
   $effect(() => {
@@ -59,7 +43,7 @@
   }
 </script>
 
-<div class="layout" class:has-banner={showLicenseBanner || showOverCapBanner}>
+<div class="layout">
   <!-- Topbar -->
   <header class="topbar">
     <button class="menu-toggle" onclick={toggleSidebar} aria-label="Toggle menu">
@@ -68,12 +52,12 @@
       </svg>
     </button>
     <span class="topbar-title">
-      <a href="https://modpagespeed.com" target="_blank" rel="noopener noreferrer" class="topbar-logo-link" aria-label="ModPageSpeed – visit modpagespeed.com">
+      <a href={WEBSITE} target="_blank" rel="noopener noreferrer" class="topbar-logo-link" aria-label="{PRODUCT_DISPLAY_NAME} – visit {WEBSITE_HOST}">
         <svg class="topbar-logo" viewBox="0 0 322 36" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
           <!-- Prompt chevron -->
           <text class="logo-accent" x="0" y="30" font-family="'JetBrains Mono', 'SF Mono', 'Fira Code', monospace" font-weight="700" font-size="26">&#x276F;</text>
           <!-- Name -->
-          <text x="24" y="30" font-family="Inter, system-ui, sans-serif" font-weight="700" font-size="32" fill="currentColor" letter-spacing="-1.2">mod_pagespeed</text>
+          <text x="24" y="30" font-family="Inter, system-ui, sans-serif" font-weight="700" font-size="32" fill="currentColor" letter-spacing="-1.2">{PRODUCT_NAME}</text>
           <!-- Blinking cursor -->
           <rect class="logo-accent logo-cursor" x="312" y="6" width="2.5" height="28" rx="1"/>
         </svg>
@@ -84,67 +68,16 @@
         <span class="topbar-running">running</span>
         <span class="topbar-subtitle-sep" aria-hidden="true">·</span>
         <a
-          href="https://we-amp.com"
+          href={VENDOR_URL}
           target="_blank"
           rel="noopener noreferrer"
           class="topbar-subtitle-link"
-          aria-label="We-Amp – visit we-amp.com"
-        >we-amp.com</a>
+          aria-label="{VENDOR} – visit {VENDOR_HOST}"
+        >{VENDOR_HOST}</a>
       </span>
       <span class="topbar-badge">{consoleLabel}</span>
-      {#if showLicenseBanner}
-        <!-- the design record: soft enforcement — amber warning, not a red error. -->
-        <span class="topbar-pill-unlicensed" aria-label="License status: unlicensed (optimization running)">Unlicensed</span>
-      {/if}
-      {#if showOverCapBanner}
-        <!-- the design record: informational accent pill — licensed, just over its site. -->
-        <span class="topbar-pill-overcap" aria-label="License status: optimizing outside the licensed site">Over-cap</span>
-      {/if}
     </span>
   </header>
-
-  <!-- License warning banner -->
-  <!-- the design record: soft enforcement — amber warning, not a red error. Optimization
-       keeps running while unlicensed; this only nudges toward activating. -->
-  {#if showLicenseBanner}
-    <div class="license-banner" role="status">
-      <svg class="license-banner-icon" width="18" height="18" viewBox="0 0 24 24"
-           fill="none" stroke="currentColor" stroke-width="2"
-           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-        <line x1="12" y1="9" x2="12" y2="13"/>
-        <line x1="12" y1="17" x2="12.01" y2="17"/>
-      </svg>
-      <span class="license-banner-text">
-        <strong>Unlicensed — optimization is running; activate a license to remove the warning.</strong>
-        <a href="#/license" class="license-banner-link"
-          >Purchase a license or apply a key in the License section&nbsp;&rarr;</a>
-      </span>
-    </div>
-  {/if}
-
-  <!-- Over-cap banner -->
-  <!-- the design record: a licensed (scope=site) install optimizing outside its licensed
-       site. Informational accent nudge — NOT a warning/error; optimization
-       keeps running. Independent of the unlicensed banner (mutually exclusive
-       in practice). -->
-  {#if showOverCapBanner}
-    <div class="license-banner license-banner-overcap" role="status">
-      <svg class="license-banner-icon" width="18" height="18" viewBox="0 0 24 24"
-           fill="none" stroke="currentColor" stroke-width="2"
-           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <circle cx="12" cy="12" r="10"/>
-        <line x1="12" y1="16" x2="12" y2="12"/>
-        <line x1="12" y1="8" x2="12.01" y2="8"/>
-      </svg>
-      <span class="license-banner-text">
-        <strong>This install is optimizing a site outside your licensed domain — optimization continues.</strong>
-        <a href={OVER_CAP_CTA_URL} target="_blank" rel="noopener"
-           class="license-banner-link"
-          >Claim a license slot for each additional site&nbsp;&rarr;</a>
-      </span>
-    </div>
-  {/if}
 
   <!-- Sidebar -->
   <nav class="sidebar" class:open={sidebarOpen}>
@@ -189,15 +122,6 @@
     grid-template-columns: var(--ps-sidebar-width) 1fr;
     grid-template-rows: var(--ps-topbar-height) 1fr;
     height: 100vh;
-    overflow: hidden;
-  }
-
-  .layout.has-banner {
-    grid-template-areas:
-      "topbar topbar"
-      "banner banner"
-      "sidebar content";
-    grid-template-rows: var(--ps-topbar-height) auto 1fr;
     overflow: hidden;
   }
 
@@ -315,33 +239,6 @@
     text-overflow: ellipsis;
   }
 
-  .topbar-pill-unlicensed {
-    font-size: var(--ps-font-size-xs);
-    font-weight: 700;
-    padding: 2px 10px;
-    border-radius: var(--ps-border-radius);
-    background: var(--ps-warning, #f59e0b);
-    color: #1f1300;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    white-space: nowrap;
-    flex-shrink: 0;
-  }
-
-  /* the design record: informational accent, not the amber unlicensed warning. */
-  .topbar-pill-overcap {
-    font-size: var(--ps-font-size-xs);
-    font-weight: 700;
-    padding: 2px 10px;
-    border-radius: var(--ps-border-radius);
-    background: var(--ps-info, #2563eb);
-    color: #ffffff;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    white-space: nowrap;
-    flex-shrink: 0;
-  }
-
   .menu-toggle {
     display: none;
     background: none;
@@ -399,52 +296,6 @@
     overflow-y: auto;
   }
 
-  .license-banner {
-    grid-area: banner;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: var(--ps-space-sm);
-    padding: var(--ps-space-sm) var(--ps-space-md);
-    background: color-mix(in srgb, var(--ps-warning) 15%, var(--ps-bg));
-    border-bottom: 2px solid var(--ps-warning);
-    font-size: var(--ps-font-size-sm);
-    color: var(--ps-text);
-  }
-
-  .license-banner-text {
-    text-align: center;
-  }
-
-  .license-banner-link {
-    color: var(--ps-primary);
-    text-decoration: none;
-    font-weight: 500;
-  }
-
-  .license-banner-link:hover {
-    text-decoration: underline;
-  }
-
-  .license-banner-icon {
-    color: var(--ps-warning);
-    flex-shrink: 0;
-  }
-
-  /* the design record: over-cap is an informational accent nudge, not an amber warning. */
-  .license-banner-overcap {
-    background: color-mix(in srgb, var(--ps-info, #2563eb) 12%, var(--ps-bg));
-    border-bottom: 2px solid var(--ps-info, #2563eb);
-  }
-
-  .license-banner-overcap .license-banner-icon {
-    color: var(--ps-info, #2563eb);
-  }
-
-  .license-banner-text strong {
-    font-weight: 600;
-  }
-
   .backdrop {
     display: none;
   }
@@ -464,13 +315,6 @@
       grid-template-columns: 1fr;
       grid-template-areas:
         "topbar"
-        "content";
-    }
-
-    .layout.has-banner {
-      grid-template-areas:
-        "topbar"
-        "banner"
         "content";
     }
 
@@ -507,9 +351,8 @@
     }
   }
 
-  /* On the narrowest phones the logo + scope badge + license pill can no longer
-     coexist. The Unlicensed/Over-cap pill is the conversion hook, so drop the
-     less-critical scope badge first rather than clipping the pill. */
+  /* On the narrowest phones the logo and scope badge can no longer coexist;
+     drop the badge rather than clipping it. */
   @media (max-width: 430px) {
     .topbar-badge {
       display: none;

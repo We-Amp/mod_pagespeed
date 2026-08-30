@@ -28,6 +28,7 @@
 #include "pagespeed/system/add_headers_fetcher.h"
 #include "pagespeed/system/loopback_route_fetcher.h"
 #include "pagespeed/system/system_request_context.h"
+#include "pagespeed/system/uds_daemon_reader.h"
 
 namespace net_instaweb {
 
@@ -37,6 +38,12 @@ EnvoyServerContext::EnvoyServerContext(EnvoyRewriteDriverFactory* factory,
 
 EnvoyRewriteOptions* EnvoyServerContext::config() {
   return EnvoyRewriteOptions::DynamicCast(global_options());
+}
+
+DaemonReader* EnvoyServerContext::NewDaemonReader() {
+  return new UdsDaemonReader(thread_system(), timer(),
+                             config()->daemon_api_socket_path(),
+                             message_handler());
 }
 
 SystemRequestContext* EnvoyServerContext::NewRequestContext() {

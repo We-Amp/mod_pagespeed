@@ -97,55 +97,70 @@ export interface MessagesResponse {
   [key: string]: unknown;
 }
 
-/** GET /v1/license/status */
-export interface LicenseStatusResponse {
-  licensed: boolean;
-  is_global?: boolean;
-  license_type?: string;
-  expires?: number;
-  expired?: boolean;
-  /** Subscriber email (legacy key name — not the site domain). */
-  domain?: string;
-  /** the design record license scope: community | site | org | host. Absent on legacy tokens. */
-  scope?: string;
-  /** the design record registrable domain the scope binds to. Absent on legacy tokens. */
-  site_domain?: string;
-  /**
-   * the design record: true when an active scope=site license is observed optimizing a
-   * host OUTSIDE its licensed site (over-cap). Soft/display-only — never gates
-   * optimization. Emitted only when true, and independent of `licensed` (a
-   * fully licensed install can be over-cap).
-   */
-  over_cap?: boolean;
-  /**
-   * Set when a license file is present but unusable, so the console can give an
-   * actionable hint instead of a bare "Unlicensed". EACCES = permissions;
-   * EMPTY / TOO_LARGE = re-apply the key. (admin_license_handler HandleStatus.)
-   */
-  license_file_error?: string;
-  error?: string;
+// ── Daemon (read-only proxy of the optimizer daemon's management API) ──────
+//
+// Every field is optional: older daemons omit newer blocks, and the daemon is
+// an untrusted peer — its JSON is rendered defensively throughout.
+
+/** GET /v1/daemon/health */
+export interface DaemonHealthResponse {
+  status?: string;
+  ready?: boolean;
+  version?: string;
+  git_commit?: string;
+  uptime_seconds?: number;
+  inflight?: number;
+  connections?: {
+    active?: number;
+    max?: number;
+  };
+  /** Named sub-health checks; values are daemon-defined (string or object). */
+  checks?: Record<string, unknown>;
+  /** Browser-based analysis state; absent when the daemon is older. */
+  browser?: {
+    enabled?: boolean;
+    chrome_running?: boolean;
+    chrome_consecutive_failures?: number;
+    chrome_restart_delay_ms?: number;
+  };
   [key: string]: unknown;
 }
 
-/** POST /v1/license/apply */
-export interface LicenseApplyResponse {
-  success: boolean;
-  message?: string;
-  error?: string;
+/** GET /v1/daemon/stats */
+export interface DaemonStatsResponse {
+  thread_pool?: {
+    inflight?: number;
+    size?: number;
+  };
+  connections?: {
+    active?: number;
+    max?: number;
+  };
+  notifications?: {
+    received?: number;
+    skipped_dedup?: number;
+    skipped_inflight?: number;
+  };
+  cache?: {
+    entries?: number;
+    size_bytes?: number;
+  };
+  /** Serve-savings counters from the daemon's shared statistics surface. */
+  serve_savings?: Record<string, unknown>;
   [key: string]: unknown;
 }
 
-/** POST /v1/license/activate */
-export interface ActivateResponse {
-  success: boolean;
-  found: boolean;
-  token?: string;
-  error?: string;
+/** One entry of GET /v1/daemon/cooldowns. */
+export interface DaemonCooldownEntry {
+  url?: string;
+  reason?: "processing" | "write_failure" | "revalidation" | string;
+  remaining_seconds?: number;
+  duration_seconds?: number;
   [key: string]: unknown;
 }
 
-/** POST /v1/license/consent */
-export interface ConsentResponse {
-  success: boolean;
-  error?: string;
-}
+/** GET /v1/daemon/cooldowns — a bare list or an object wrapping one. */
+export type DaemonCooldownsResponse =
+  | DaemonCooldownEntry[]
+  | { cooldowns?: DaemonCooldownEntry[]; [key: string]: unknown };
+

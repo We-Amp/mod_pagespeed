@@ -28,9 +28,11 @@
 
 namespace net_instaweb {
 
+class AdminDaemonHandler;
 class AdminLicenseHandler;
 class AsyncFetch;
 class CacheInterface;
+class DaemonReader;
 class GoogleUrl;
 class HTTPCache;
 class MessageHandler;
@@ -101,7 +103,7 @@ class AdminSite {
 
   AdminSite(Timer* timer, ThreadSystem* thread_system,
             MessageHandler* message_handler, UrlAsyncFetcher* fetcher,
-            const GoogleString& cache_path);
+            const GoogleString& cache_path, DaemonReader* daemon_reader);
 
   ~AdminSite();
 
@@ -196,6 +198,9 @@ class AdminSite {
   // Return the license handler (e.g. for checking license state).
   AdminLicenseHandler* license_handler() { return license_handler_.get(); }
 
+  // Return the daemon proxy handler (for the /v1/daemon/* endpoints).
+  AdminDaemonHandler* daemon_handler() { return daemon_handler_.get(); }
+
   // Return the message handler for debugging use.
   MessageHandler* MessageHandlerForTesting() { return message_handler_; }
 
@@ -203,6 +208,11 @@ class AdminSite {
   MessageHandler* message_handler_;
   Timer* timer_;
   std::unique_ptr<AdminLicenseHandler> license_handler_;
+  // The daemon reader is owned here; the handler borrows it.  Declaration
+  // order matters: the handler is destroyed first and drains in-flight
+  // fetches before the reader (and its transport) is torn down.
+  std::unique_ptr<DaemonReader> daemon_reader_;
+  std::unique_ptr<AdminDaemonHandler> daemon_handler_;
   AdminSite(const AdminSite&) = delete;
   AdminSite& operator=(const AdminSite&) = delete;
 };

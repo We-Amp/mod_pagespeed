@@ -10,10 +10,9 @@ import type {
   PurgeSetResponse,
   ConsoleResponse,
   MessagesResponse,
-  LicenseStatusResponse,
-  LicenseApplyResponse,
-  ActivateResponse,
-  ConsentResponse,
+  DaemonHealthResponse,
+  DaemonStatsResponse,
+  DaemonCooldownsResponse,
   TimeRangeParams,
 } from "./types";
 
@@ -72,8 +71,8 @@ export class AdminApiClient {
    * Build an ApiError from a non-2xx response, preferring the backend's JSON
    * `error` field over the bare status text. Admin handlers put the actionable
    * message in the body (e.g. "console_logger must be enabled to use '?json'",
-   * CSRF/rate-limit reasons, "License management is only available on the
-   * global admin endpoint"), so surfacing it turns "HTTP 404" into a fix.
+   * CSRF/rate-limit reasons, "Unknown admin page"), so surfacing it turns
+   * "HTTP 404" into a fix.
    */
   private async errorFromResponse(response: Response): Promise<ApiError> {
     let detail = response.statusText;
@@ -224,23 +223,20 @@ export class AdminApiClient {
     return this.get<ConsoleResponse>(`/graphs${qs ? `?${qs}` : ""}`);
   }
 
-  // ── License ────────────────────────────────────────────────
+  // ── Daemon ─────────────────────────────────────────────────
+  // Read-only proxy of the optimizer daemon's management API. A 502 means the
+  // daemon is unreachable or not configured — a normal operating state the
+  // panels render as an empty state, not an error.
 
-  async getLicenseStatus(): Promise<LicenseStatusResponse> {
-    return this.get<LicenseStatusResponse>("/v1/license/status");
+  async daemonHealth(): Promise<DaemonHealthResponse> {
+    return this.get<DaemonHealthResponse>("/v1/daemon/health");
   }
 
-  async applyLicense(key: string): Promise<LicenseApplyResponse> {
-    return this.post<LicenseApplyResponse>("/v1/license/apply", { key });
+  async daemonStats(): Promise<DaemonStatsResponse> {
+    return this.get<DaemonStatsResponse>("/v1/daemon/stats");
   }
 
-  async activateLicense(nonce: string, orderRef?: string): Promise<ActivateResponse> {
-    const body: Record<string, unknown> = { nonce };
-    if (orderRef) body.order_ref = orderRef;
-    return this.post<ActivateResponse>("/v1/license/activate", body);
-  }
-
-  async recordConsent(accepted: boolean): Promise<ConsentResponse> {
-    return this.post<ConsentResponse>("/v1/license/consent", { accepted });
+  async daemonCooldowns(): Promise<DaemonCooldownsResponse> {
+    return this.get<DaemonCooldownsResponse>("/v1/daemon/cooldowns");
   }
 }

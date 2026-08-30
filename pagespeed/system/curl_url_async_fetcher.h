@@ -78,6 +78,18 @@ class CurlUrlAsyncFetcher : public UrlAsyncFetcher {
   void Fetch(const GoogleString& url, MessageHandler* message_handler,
              AsyncFetch* callback) override;
 
+  // Fetches `url` over the unix-domain socket at `socket_path` instead of a
+  // TCP connection; the URL's host is ignored for routing (use
+  // "http://localhost/<path>").  `timeout_ms` (> 0) and
+  // `max_response_body_bytes` (> 0) override the fetcher's configured
+  // timeout and the compile-time response-body cap for this fetch.
+  // Any configured proxy is explicitly suppressed: socket connections never
+  // leave the host, on any libcurl version.
+  void FetchOverUnixSocket(const GoogleString& url, StringPiece socket_path,
+                           int64 timeout_ms, size_t max_response_body_bytes,
+                           MessageHandler* message_handler,
+                           AsyncFetch* async_fetch);
+
   // SSL/TLS Configuration
   void SetSslCertificatesDir(StringPiece dir);
   const GoogleString& ssl_certificates_dir() const {
@@ -164,6 +176,13 @@ class CurlUrlAsyncFetcher : public UrlAsyncFetcher {
 
  private:
   friend class CurlFetch;
+
+  // Shared implementation of Fetch() and FetchOverUnixSocket().  An empty
+  // `socket_path` means a regular TCP connection; `timeout_ms` and
+  // `max_response_body_bytes` <= 0 keep the fetcher's defaults.
+  void StartFetch(const GoogleString& url, StringPiece socket_path,
+                  int64 timeout_ms, size_t max_response_body_bytes,
+                  MessageHandler* message_handler, AsyncFetch* async_fetch);
 
   CURLM* multi_handle_;
   CurlFetchPool active_fetches_;

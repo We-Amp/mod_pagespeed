@@ -51,10 +51,28 @@ export const routes: Route[] = [
     component: () => import("../pages/Graphs.svelte"),
   },
   {
-    path: "#/license",
-    label: "License",
-    icon: "key",
-    component: () => import("../pages/License.svelte"),
+    path: "#/daemon/status",
+    label: "Daemon Status",
+    icon: "server",
+    component: () => import("../pages/DaemonStatus.svelte"),
+  },
+  {
+    path: "#/daemon/cache",
+    label: "Daemon Cache",
+    icon: "database",
+    component: () => import("../pages/DaemonCache.svelte"),
+  },
+  {
+    path: "#/daemon/back-pressure",
+    label: "Daemon Back-pressure",
+    icon: "gauge",
+    component: () => import("../pages/DaemonPressure.svelte"),
+  },
+  {
+    path: "#/support",
+    label: "Support",
+    icon: "heart",
+    component: () => import("../pages/Support.svelte"),
   },
   {
     path: "#/about",

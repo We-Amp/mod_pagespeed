@@ -18,6 +18,12 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
 SENTINEL="admin_console.html.srchash"
+
+# The synced product-facts copy has its own drift guard against the canonical
+# source; run it first so a stale facts copy is reported as such rather than
+# surfacing later as an opaque srchash mismatch.
+bash "$SCRIPT_DIR/check-product-facts.sh"
+
 if [ ! -f "$SENTINEL" ]; then
   echo "::error::$SENTINEL is missing. Run 'pagespeed/system/console/build.sh' and commit it."
   exit 1

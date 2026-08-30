@@ -114,6 +114,23 @@ pagespeed_cc_test(
     ],
 )
 
+# UDS daemon-reader tests - hermetic (in-process unix-socket server).
+pagespeed_cc_test(
+    name = "daemon_reader_test",
+    srcs = [
+        "daemon_reader_test.cc",
+    ],
+    shard_count = 1,
+    size = "large",
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = [
+        "//pagespeed/system:curl_fetcher",
+        "//pagespeed/kernel/http",
+        "//pagespeed/kernel/util",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+    ],
+)
+
 # =============================================================================
 # Fine-grained test targets for faster test iteration
 # =============================================================================

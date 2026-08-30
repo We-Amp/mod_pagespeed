@@ -45,6 +45,11 @@ class NgxServerContext : public SystemServerContext {
   // set_trusted_input() on any ProxyFetches we use to transform internal HTML.
   virtual bool ProxiesHtml() const { return false; }
 
+  // Creates the UDS-backed DaemonReader for the /v1/daemon/* admin
+  // endpoints, from this server block's DaemonApiSocketPath.  See
+  // SystemServerContext::NewDaemonReader().
+  virtual DaemonReader* NewDaemonReader();
+
   // Call only when you need an NgxRewriteOptions.  If you don't need
   // nginx-specific behavior, call global_options() instead which doesn't
   // downcast.

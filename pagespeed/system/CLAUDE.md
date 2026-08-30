@@ -20,6 +20,17 @@ console is a single embedded HTML page generated from Vite build output
 (`admin_console.html`). Endpoints include statistics, message history,
 cache inspection, configuration dump, histograms, graphs, and cache purge.
 
+The `/v1/daemon/*` endpoints (`admin_daemon_handler.cc`) are a read-only
+proxy to the optimizer daemon's management API: GET/HEAD only, upstream
+paths from a compile-time table, one in-flight request per endpoint, 502
+when the daemon is unreachable. The transport sits behind the `DaemonReader`
+seam (`daemon_reader.h`); the only implementation is `UdsDaemonReader`
+(in the `curl_fetcher` target), which fetches over the daemon's unix socket
+via `CurlUrlAsyncFetcher::FetchOverUnixSocket` with a 5s timeout and a 1 MiB
+response cap. Ports create the reader through the
+`SystemServerContext::NewDaemonReader()` hook; the socket path comes from
+the `DaemonApiSocketPath` option (Apache/nginx/Envoy; empty disables).
+
 ### Cache Path Management (`system_cache_path.cc`)
 
 `SystemCachePath` encapsulates per-virtual-host cache sharing. Each file

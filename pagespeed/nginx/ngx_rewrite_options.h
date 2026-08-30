@@ -243,6 +243,9 @@ class NgxRewriteOptions : public SystemRewriteOptions {
   const GoogleString& global_admin_path() const {
     return global_admin_path_.value();
   }
+  const GoogleString& daemon_api_socket_path() const {
+    return daemon_api_socket_path_.value();
+  }
   const std::vector<RefCountedPtr<ScriptLine> >& script_lines() const {
     return script_lines_;
   }
@@ -303,6 +306,7 @@ class NgxRewriteOptions : public SystemRewriteOptions {
   Option<GoogleString> messages_path_;
   Option<GoogleString> admin_path_;
   Option<GoogleString> global_admin_path_;
+  Option<GoogleString> daemon_api_socket_path_;
 
   // the design record A1 Web-Bot-Auth options (default off / empty).
   Option<bool> web_bot_auth_;

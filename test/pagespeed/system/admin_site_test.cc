@@ -32,7 +32,13 @@
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/string_writer.h"
 #include "pagespeed/kernel/base/thread_system.h"
+#include "pagespeed/kernel/http/google_url.h"
+#include "pagespeed/kernel/http/http_names.h"
+#include "pagespeed/kernel/http/query_params.h"
+#include "pagespeed/kernel/http/request_headers.h"
+#include "pagespeed/kernel/http/response_headers.h"
 #include "pagespeed/kernel/util/platform.h"
+#include "pagespeed/system/daemon_reader.h"
 #include "pagespeed/system/system_rewrite_options.h"
 #include "pagespeed/system/system_server_context.h"
 #include "test/net/instaweb/rewriter/custom_rewrite_test_base.h"
@@ -70,7 +76,7 @@ class AdminSiteTest : public CustomRewriteTestBase<SystemRewriteOptions> {
     server_context_.reset(SetupServerContext(options_.release()));
     admin_site_ = std::make_unique<AdminSite>(
         timer(), thread_system_.get(), message_handler(), nullptr /* fetcher */,
-        "/tmp/admin_site_test");
+        "/tmp/admin_site_test", nullptr /* daemon_reader */);
   }
 
   virtual void TearDown() { RewriteTestBase::TearDown(); }
@@ -322,6 +328,286 @@ TEST_F(AdminSiteTest, ServingContextWithoutLicenseFileStillWarns) {
 TEST_F(AdminSiteTest, FactoryDecodingContextIsMarkedAsStub) {
   std::unique_ptr<ServerContext> stub(factory()->NewDecodingServerContext());
   EXPECT_TRUE(stub->is_decoding_stub());
+}
+
+// =============================================================================
+// /v1/daemon/* read-only proxy tests.
+// =============================================================================
+
+// Test double for the DaemonReader seam: completes synchronously with a
+// canned response, records the requested daemon path, and can hold one
+// request in flight (to exercise the per-endpoint slot).
+class FakeDaemonReader : public DaemonReader {
+ public:
+  explicit FakeDaemonReader(MessageHandler* handler) : handler_(handler) {}
+
+  void Get(StringPiece daemon_path, AsyncFetch* fetch) override {
+    ++call_count_;
+    daemon_path.CopyToString(&last_daemon_path_);
+    if (daemon_path == hold_path_) {
+      held_fetch_ = fetch;
+      return;
+    }
+    Complete(fetch);
+  }
+
+  void Complete(AsyncFetch* fetch) {
+    if (fail_) {
+      fetch->Done(false);
+      return;
+    }
+    fetch->response_headers()->set_status_code(status_);
+    fetch->response_headers()->Add(HttpAttributes::kContentType, content_type_);
+    // An upstream-only header that must never leak to the client response.
+    fetch->response_headers()->Add("X-Upstream-Only", "secret");
+    fetch->Write(body_, handler_);
+    fetch->Done(true);
+  }
+
+  MessageHandler* handler_;
+  int call_count_ = 0;
+  GoogleString last_daemon_path_;
+  int status_ = HttpStatus::kOK;
+  GoogleString content_type_ = "application/json";
+  GoogleString body_ = "{\"status\":\"ok\"}";
+  bool fail_ = false;
+  // Requests for this daemon path are held in flight until Complete() is
+  // called on held_fetch_.
+  GoogleString hold_path_;
+  AsyncFetch* held_fetch_ = nullptr;
+};
+
+class AdminSiteDaemonTest : public AdminSiteTest {
+ protected:
+  void SetUp() override {
+    AdminSiteTest::SetUp();
+    // daemon_site_ takes ownership of the reader.
+    fake_reader_ = new FakeDaemonReader(message_handler());
+    daemon_site_ = std::make_unique<AdminSite>(
+        timer(), thread_system_.get(), message_handler(),
+        nullptr /* fetcher */, "/tmp/admin_site_test", fake_reader_);
+  }
+
+  // Issues a request for `url` against `site`'s AdminPage and returns the
+  // client fetch.  `url` includes the admin path prefix and may carry a
+  // query string.
+  std::unique_ptr<StringAsyncFetch> FetchAdminPage(
+      AdminSite* site, const GoogleString& url, RequestHeaders::Method method,
+      GoogleString* buffer) {
+    std::unique_ptr<StringAsyncFetch> fetch(
+        new StringAsyncFetch(rewrite_driver()->request_context(), buffer));
+    fetch->request_headers()->set_method(method);
+    GoogleUrl gurl(url);
+    QueryParams query_params;
+    SystemServerContext* system_server_context =
+        static_cast<SystemServerContext*>(server_context_.get());
+    site->AdminPage(true /* is_global */, gurl, query_params,
+                    rewrite_driver()->options(), nullptr /* cache_path */,
+                    fetch.get(), nullptr /* system_caches */,
+                    nullptr /* filesystem_metadata_cache */,
+                    nullptr /* http_cache */, nullptr /* metadata_cache */,
+                    nullptr /* page_property_cache */, system_server_context,
+                    factory()->statistics(), factory()->statistics(),
+                    system_server_context->global_system_rewrite_options(),
+                    "" /* request_body */);
+    return fetch;
+  }
+
+  FakeDaemonReader* fake_reader_ = nullptr;  // owned by daemon_site_
+  std::unique_ptr<AdminSite> daemon_site_;
+};
+
+TEST_F(AdminSiteDaemonTest, HappyPathForwardsStatusContentTypeAndBody) {
+  GoogleString buffer;
+  auto fetch =
+      FetchAdminPage(daemon_site_.get(),
+                     "http://localhost/pagespeed_admin/v1/daemon/health",
+                     RequestHeaders::kGet, &buffer);
+  ASSERT_TRUE(fetch->done());
+  EXPECT_EQ(1, fake_reader_->call_count_);
+  EXPECT_EQ("/v1/health", fake_reader_->last_daemon_path_);
+  EXPECT_EQ(HttpStatus::kOK, fetch->response_headers()->status_code());
+  EXPECT_EQ("{\"status\":\"ok\"}", buffer);
+  const char* content_type =
+      fetch->response_headers()->Lookup1(HttpAttributes::kContentType);
+  ASSERT_TRUE(content_type != nullptr);
+  EXPECT_STREQ("application/json", content_type);
+  // Cache-Control: no-store on every daemon response.
+  const char* cache_control =
+      fetch->response_headers()->Lookup1(HttpAttributes::kCacheControl);
+  ASSERT_TRUE(cache_control != nullptr);
+  EXPECT_STREQ("no-store", cache_control);
+  // No upstream response headers are forwarded.
+  EXPECT_FALSE(fetch->response_headers()->Has("X-Upstream-Only"));
+}
+
+TEST_F(AdminSiteDaemonTest, EndpointTableMapping) {
+  struct {
+    const char* url_suffix;
+    const char* upstream_path;
+  } cases[] = {
+      {"health", "/v1/health"},
+      {"stats", "/v1/stats"},
+      {"cooldowns", "/v1/cache/cooldowns"},
+  };
+  for (const auto& c : cases) {
+    GoogleString buffer;
+    auto fetch = FetchAdminPage(
+        daemon_site_.get(),
+        StrCat("http://localhost/pagespeed_admin/v1/daemon/", c.url_suffix),
+        RequestHeaders::kGet, &buffer);
+    ASSERT_TRUE(fetch->done()) << c.url_suffix;
+    EXPECT_EQ(HttpStatus::kOK, fetch->response_headers()->status_code());
+    EXPECT_EQ(c.upstream_path, fake_reader_->last_daemon_path_);
+  }
+}
+
+TEST_F(AdminSiteDaemonTest, UnknownLeafIs404AndNotProxied) {
+  // "config" is a real module admin leaf; routing through the daemon branch
+  // must not fall through to it.
+  for (const char* suffix : {"config", "stats/extra", "", "HEALTH"}) {
+    GoogleString buffer;
+    auto fetch = FetchAdminPage(
+        daemon_site_.get(),
+        StrCat("http://localhost/pagespeed_admin/v1/daemon/", suffix),
+        RequestHeaders::kGet, &buffer);
+    ASSERT_TRUE(fetch->done()) << suffix;
+    EXPECT_EQ(HttpStatus::kNotFound, fetch->response_headers()->status_code())
+        << suffix;
+    EXPECT_THAT(buffer, ::testing::HasSubstr("Unknown daemon endpoint"));
+  }
+  EXPECT_EQ(0, fake_reader_->call_count_);
+}
+
+TEST_F(AdminSiteDaemonTest, NonGetMethodsAre405) {
+  for (RequestHeaders::Method method :
+       {RequestHeaders::kPost, RequestHeaders::kPut, RequestHeaders::kDelete,
+        RequestHeaders::kPatch}) {
+    GoogleString buffer;
+    auto fetch = FetchAdminPage(
+        daemon_site_.get(),
+        "http://localhost/pagespeed_admin/v1/daemon/health", method, &buffer);
+    ASSERT_TRUE(fetch->done());
+    EXPECT_EQ(HttpStatus::kMethodNotAllowed,
+              fetch->response_headers()->status_code());
+  }
+  EXPECT_EQ(0, fake_reader_->call_count_);
+}
+
+TEST_F(AdminSiteDaemonTest, HeadRequestSendsNoBody) {
+  GoogleString buffer;
+  auto fetch =
+      FetchAdminPage(daemon_site_.get(),
+                     "http://localhost/pagespeed_admin/v1/daemon/health",
+                     RequestHeaders::kHead, &buffer);
+  ASSERT_TRUE(fetch->done());
+  EXPECT_EQ(HttpStatus::kOK, fetch->response_headers()->status_code());
+  EXPECT_TRUE(buffer.empty());
+  EXPECT_EQ(1, fake_reader_->call_count_);
+}
+
+TEST_F(AdminSiteDaemonTest, QueryStringIsNotForwarded) {
+  GoogleString buffer;
+  auto fetch = FetchAdminPage(
+      daemon_site_.get(),
+      "http://localhost/pagespeed_admin/v1/daemon/cooldowns?hostname=evil",
+      RequestHeaders::kGet, &buffer);
+  ASSERT_TRUE(fetch->done());
+  EXPECT_EQ(HttpStatus::kOK, fetch->response_headers()->status_code());
+  EXPECT_EQ("/v1/cache/cooldowns", fake_reader_->last_daemon_path_);
+}
+
+TEST_F(AdminSiteDaemonTest, NoReaderMeansDaemonUnreachable) {
+  // The fixture's admin_site_ has a null DaemonReader (this port/context has
+  // no daemon transport, or the socket path is empty).
+  GoogleString buffer;
+  auto fetch =
+      FetchAdminPage(admin_site_.get(),
+                     "http://localhost/pagespeed_admin/v1/daemon/health",
+                     RequestHeaders::kGet, &buffer);
+  ASSERT_TRUE(fetch->done());
+  EXPECT_EQ(HttpStatus::kBadGateway, fetch->response_headers()->status_code());
+  EXPECT_THAT(buffer, ::testing::HasSubstr("daemon unreachable"));
+  const char* cache_control =
+      fetch->response_headers()->Lookup1(HttpAttributes::kCacheControl);
+  ASSERT_TRUE(cache_control != nullptr);
+  EXPECT_STREQ("no-store", cache_control);
+}
+
+TEST_F(AdminSiteDaemonTest, UpstreamFailureIs502) {
+  fake_reader_->fail_ = true;
+  GoogleString buffer;
+  auto fetch =
+      FetchAdminPage(daemon_site_.get(),
+                     "http://localhost/pagespeed_admin/v1/daemon/stats",
+                     RequestHeaders::kGet, &buffer);
+  ASSERT_TRUE(fetch->done());
+  EXPECT_EQ(HttpStatus::kBadGateway, fetch->response_headers()->status_code());
+  EXPECT_THAT(buffer, ::testing::HasSubstr("daemon unreachable"));
+}
+
+TEST_F(AdminSiteDaemonTest, UpstreamStatusAndBodyPassThroughContentTypePinned) {
+  // Status and body pass through, but the Content-Type is pinned to
+  // application/json: the socket peer is untrusted, and every daemon endpoint
+  // serves JSON.  A spoofed text/html upstream must not render in the admin
+  // origin.
+  fake_reader_->status_ = 503;
+  fake_reader_->content_type_ = "text/html";
+  fake_reader_->body_ = "<script>alert(1)</script>";
+  GoogleString buffer;
+  auto fetch =
+      FetchAdminPage(daemon_site_.get(),
+                     "http://localhost/pagespeed_admin/v1/daemon/stats",
+                     RequestHeaders::kGet, &buffer);
+  ASSERT_TRUE(fetch->done());
+  EXPECT_EQ(503, fetch->response_headers()->status_code());
+  EXPECT_EQ("<script>alert(1)</script>", buffer);
+  const char* content_type =
+      fetch->response_headers()->Lookup1(HttpAttributes::kContentType);
+  ASSERT_TRUE(content_type != nullptr);
+  EXPECT_STREQ("application/json", content_type);
+}
+
+TEST_F(AdminSiteDaemonTest, ConcurrentRequestOnSameEndpointGets429) {
+  fake_reader_->hold_path_ = "/v1/health";
+  GoogleString buffer1, buffer2;
+  auto first =
+      FetchAdminPage(daemon_site_.get(),
+                     "http://localhost/pagespeed_admin/v1/daemon/health",
+                     RequestHeaders::kGet, &buffer1);
+  ASSERT_FALSE(first->done());  // held upstream
+  auto second =
+      FetchAdminPage(daemon_site_.get(),
+                     "http://localhost/pagespeed_admin/v1/daemon/health",
+                     RequestHeaders::kGet, &buffer2);
+  ASSERT_TRUE(second->done());
+  EXPECT_EQ(429, second->response_headers()->status_code());
+  // Release the held upstream read; the first request completes.
+  ASSERT_TRUE(fake_reader_->held_fetch_ != nullptr);
+  fake_reader_->Complete(fake_reader_->held_fetch_);
+  ASSERT_TRUE(first->done());
+  EXPECT_EQ(HttpStatus::kOK, first->response_headers()->status_code());
+  EXPECT_EQ("{\"status\":\"ok\"}", buffer1);
+}
+
+TEST_F(AdminSiteDaemonTest, PerEndpointSlotsDoNotBlockEachOther) {
+  fake_reader_->hold_path_ = "/v1/health";
+  GoogleString buffer1, buffer2;
+  auto first =
+      FetchAdminPage(daemon_site_.get(),
+                     "http://localhost/pagespeed_admin/v1/daemon/health",
+                     RequestHeaders::kGet, &buffer1);
+  ASSERT_FALSE(first->done());  // held upstream
+  // A different endpoint has its own slot and answers immediately.
+  auto second =
+      FetchAdminPage(daemon_site_.get(),
+                     "http://localhost/pagespeed_admin/v1/daemon/stats",
+                     RequestHeaders::kGet, &buffer2);
+  ASSERT_TRUE(second->done());
+  EXPECT_EQ(HttpStatus::kOK, second->response_headers()->status_code());
+  ASSERT_TRUE(fake_reader_->held_fetch_ != nullptr);
+  fake_reader_->Complete(fake_reader_->held_fetch_);
+  ASSERT_TRUE(first->done());
 }
 
 }  // namespace

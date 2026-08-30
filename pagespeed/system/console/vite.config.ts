@@ -1,9 +1,22 @@
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { viteSingleFile } from "vite-plugin-singlefile";
+import { CONSOLE_TITLE } from "./src/lib/data/product-facts-console";
+
+// The document title derives from the product-facts single source (the synced
+// copy in src/lib/data, re-exported by product-facts-console), so a product
+// rename is a one-file edit upstream rather than a hunt through the SPA.
+function consoleTitle(): Plugin {
+  return {
+    name: "console-title",
+    transformIndexHtml(html: string) {
+      return html.replace("%CONSOLE_TITLE%", CONSOLE_TITLE);
+    },
+  };
+}
 
 export default defineConfig({
-  plugins: [svelte(), viteSingleFile()],
+  plugins: [svelte(), viteSingleFile(), consoleTitle()],
   resolve: {
     alias: {
       $lib: "/src/lib",
@@ -36,6 +49,13 @@ export default defineConfig({
         rewrite: (path: string) => `/pagespeed_admin${path}`,
       },
       "/graphs": {
+        target: "http://localhost:8080",
+        rewrite: (path: string) => `/pagespeed_admin${path}`,
+      },
+      // The daemon panels' read-only proxy endpoints; listed explicitly ahead
+      // of the generic /v1/ rule so the console's daemon surface is visible
+      // here at a glance. Same dev backend as everything else.
+      "/v1/daemon/": {
         target: "http://localhost:8080",
         rewrite: (path: string) => `/pagespeed_admin${path}`,
       },

@@ -80,6 +80,22 @@ cc_library(
 )
 
 # =============================================================================
+# The DaemonReader seam: the read-only interface between the
+# admin console's /v1/daemon/* endpoints and the optimizer daemon's
+# management API, on its own with no curl dependency.  Header-only so every
+# port (including IIS, which has no daemon transport) can name the type; the
+# UDS implementation lives in :curl_fetcher.
+# =============================================================================
+cc_library(
+    name = "daemon_reader",
+    hdrs = ["daemon_reader.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)
+
+# =============================================================================
 # The in-place recording lifecycle, as an interface.
 #
 # There are two substrates that record an origin response -- this module's own
@@ -407,13 +423,16 @@ cc_library(
     srcs = [
         "curl_fetch.cc",
         "curl_url_async_fetcher.cc",
+        "uds_daemon_reader.cc",
     ],
     hdrs = [
         "curl_fetch.h",
         "curl_url_async_fetcher.h",
+        "uds_daemon_reader.h",
     ],
     visibility = ["//visibility:public"],
     deps = [
+        ":daemon_reader",
         "//net/instaweb/http",
         "//net/instaweb:net_instaweb_lib",
         "//pagespeed/kernel/base:pagespeed_base",

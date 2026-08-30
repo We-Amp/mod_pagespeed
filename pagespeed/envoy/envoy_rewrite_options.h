@@ -64,6 +64,9 @@ class EnvoyRewriteOptions : public SystemRewriteOptions {
   const GoogleString& global_admin_path() const {
     return global_admin_path_.value();
   }
+  const GoogleString& daemon_api_socket_path() const {
+    return daemon_api_socket_path_.value();
+  }
 
   // HTML rewriting options.
   // Returns true if HTML rewriting is enabled.
@@ -108,6 +111,7 @@ class EnvoyRewriteOptions : public SystemRewriteOptions {
   Option<GoogleString> messages_path_;
   Option<GoogleString> admin_path_;
   Option<GoogleString> global_admin_path_;
+  Option<GoogleString> daemon_api_socket_path_;
 
   // HTML rewriting options.
   Option<bool> enable_html_rewriting_;

@@ -21,6 +21,7 @@
 
 #include <atomic>
 #include <cstddef>
+#include <cstring>
 #include <memory>
 #include <set>
 #include <vector>
@@ -46,7 +47,9 @@
 #include "pagespeed/kernel/http/query_params.h"
 #include "pagespeed/kernel/http/response_headers.h"
 #include "pagespeed/kernel/util/statistics_logger.h"
+#include "pagespeed/system/admin_daemon_handler.h"
 #include "pagespeed/system/admin_license_handler.h"
+#include "pagespeed/system/daemon_reader.h"
 #include "pagespeed/system/system_cache_path.h"
 #include "pagespeed/system/system_caches.h"
 #include "pagespeed/system/system_rewrite_options.h"
@@ -110,11 +113,14 @@ class PurgeFetchCallbackGasket {
 
 AdminSite::AdminSite(Timer* timer, ThreadSystem* thread_system,
                      MessageHandler* message_handler, UrlAsyncFetcher* fetcher,
-                     const GoogleString& cache_path)
+                     const GoogleString& cache_path,
+                     DaemonReader* daemon_reader)
     : message_handler_(message_handler),
       timer_(timer),
       license_handler_(new AdminLicenseHandler(
-          timer, thread_system, message_handler, fetcher, cache_path)) {
+          timer, thread_system, message_handler, fetcher, cache_path)),
+      daemon_reader_(daemon_reader),
+      daemon_handler_(new AdminDaemonHandler(daemon_reader, message_handler)) {
   license_handler_->Init();
 }
 
@@ -428,6 +434,29 @@ void AdminSite::AdminPage(
                                        kContentTypeJson.mime_type());
         GoogleString json = StrCat("{\"error\":\"Unknown license endpoint: ",
                                    JsonEscape(api_path), "\"}");
+        fetch->Write(json, message_handler_);
+        fetch->Done(true);
+      }
+      return;
+    }
+    // /v1/daemon/* — read-only proxy to the optimizer daemon's management
+    // API.  Unlike the /v1/license/ branch above, the leaf is
+    // exact-matched against AdminDaemonHandler's compile-time endpoint table:
+    // the upstream path comes from the table, never from the request.  A
+    // non-matching leaf gets a 404 here and never falls through to the
+    // leaf-based dispatch below (so e.g. "v1/daemon/config" cannot reach the
+    // module's config dump).
+    const char kDaemonApiPrefix[] = "/v1/daemon/";
+    StringPiece::size_type daemon_pos = full_path.find(kDaemonApiPrefix);
+    if (daemon_pos != StringPiece::npos) {
+      StringPiece leaf =
+          full_path.substr(daemon_pos + strlen(kDaemonApiPrefix));
+      if (!daemon_handler_->HandleRequest(leaf, fetch)) {
+        fetch->response_headers()->SetStatusAndReason(HttpStatus::kNotFound);
+        fetch->response_headers()->Add(HttpAttributes::kContentType,
+                                       kContentTypeJson.mime_type());
+        GoogleString json = StrCat(
+            "{\"error\":\"Unknown daemon endpoint: ", JsonEscape(leaf), "\"}");
         fetch->Write(json, message_handler_);
         fetch->Done(true);
       }

@@ -38,6 +38,7 @@
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/http/http_names.h"
+#include "pagespeed/system/uds_daemon_reader.h"
 
 namespace net_instaweb {
 
@@ -102,6 +103,12 @@ bool ApacheServerContext::RunDaemonStartupCheck() {
 
 ApacheConfig* ApacheServerContext::global_config() {
   return ApacheConfig::DynamicCast(global_options());
+}
+
+DaemonReader* ApacheServerContext::NewDaemonReader() {
+  return new UdsDaemonReader(thread_system(), timer(),
+                             global_config()->daemon_api_socket_path(),
+                             message_handler());
 }
 
 const ApacheConfig* ApacheServerContext::global_config() const {
