@@ -1,7 +1,7 @@
 # mod_pagespeed 1.16.0 Release Notes
 
-**Release candidate:** 1.16.0-rc.9
-**Release date:** 2026-08-29
+**Release candidate:** 1.16.0-rc.10
+**Release date:** 2026-08-30
 **Status:** Release candidate
 
 ## Highlights
@@ -85,6 +85,38 @@
   daemon; scripts served through in-place optimization are now minified
   exactly as the module minifies them. Affects the 1.16 release candidates
   that precede this one; fixed in 1.16.0-rc.9. **Update recommended.**
+
+- **The container image can start the headless browser again.** In
+  1.16.0-rc.9, with browser analysis enabled, every browser launch in the
+  container image failed immediately and was retried every few seconds, so
+  browser-driven optimizations never ran and the host collected a core dump
+  per attempt. The optimizer now gives the browser an environment that
+  matches the unprivileged user it runs as, a browser that keeps failing at
+  launch is retried with an increasing delay (up to five minutes) and a
+  single log line naming the condition, and `/v1/health` reports the failure
+  count and current retry delay under `browser`. A latent fault in the
+  browser-exit path that could stop the optimizer itself after a browser
+  exit is closed as well. Affects 1.16.0-rc.9 only; fixed in 1.16.0-rc.10.
+  **Update recommended if browser analysis is enabled.**
+
+- **The optimizer daemon's service unit now ships a hardened profile, with
+  system-call filtering in log-only mode.** The kernel and host surfaces the
+  daemon never needs are closed off — kernel tunables, modules and logs,
+  control groups, the system clock, the hostname, other users' processes,
+  SUID/SGID bits, realtime scheduling and personality changes — its sockets
+  are limited to the four address families it uses, and core dumps are
+  disabled because a dump would contain cache contents and credentials.
+  System-call filtering records every call outside systemd's standard
+  system-service set and lets it proceed, so an operator can read a full
+  traffic cycle's worth of evidence from the audit log before turning on
+  enforcement; enforcement is an opt-in drop-in the package installs as an
+  example, with a companion drop-in for deployments that run browser
+  analysis. **No system call is killed by default.** The rest of the
+  hardening ships enabled and is a behaviour change: if you depend on one of
+  the closed surfaces — a core dump for crash triage is the realistic case —
+  restore it with a drop-in of your own. Containers, which have no systemd,
+  get a Chrome-compatible seccomp profile instead. Applies from
+  1.16.0-rc.10. **Update recommended.**
 
 - **The admin console's graphs page can plot per-interval change instead of
   cumulative totals.** A "Show per-interval deltas" checkbox next to the
