@@ -1,7 +1,7 @@
 # mod_pagespeed 1.16.0 Release Notes
 
-**Release candidate:** 1.16.0-rc.10
-**Release date:** 2026-08-30
+**Release candidate:** 1.16.0-rc.11
+**Release date:** 2026-08-31
 **Status:** Release candidate
 
 ## Highlights
@@ -117,6 +117,39 @@
   restore it with a drop-in of your own. Containers, which have no systemd,
   get a Chrome-compatible seccomp profile instead. Applies from
   1.16.0-rc.10. **Update recommended.**
+
+- **The companion enforcing syscall profile for browser analysis is now
+  complete.** The example drop-in that re-admits the extra syscalls headless
+  Chrome's sandbox needs (`20-browser-analysis.conf`), for deployments that
+  opt into the enforcing syscall profile, was incomplete: with the
+  1.16.0-rc.10 copy installed, enabling enforcement killed the browser at
+  launch and browser analysis backed off to unavailable. The drop-in has been
+  measured against a running browser under the packaged service unit and
+  completed. The default service unit and the enforcing profile itself are
+  unchanged, and syscall filtering remains log-only unless you opt in. Host
+  installs: the optimizer package now suggests a browser package, and the
+  packaged defaults file and the browser-analysis documentation say which one
+  to install and how to point the daemon at it. Affects only installations on
+  1.16.0-rc.10 that installed the opt-in enforcing drop-in together with
+  browser analysis on a host install; fixed in 1.16.0-rc.11. **Update
+  recommended** if that applies.
+
+- **Browser analysis now recovers a stale browser profile lock by itself.**
+  With browser analysis enabled and a persistent profile directory, the
+  headless browser could not start after the optimizer's container was
+  recreated (an image upgrade, a `docker compose up` that changed the
+  service, a host reboot) or after a host's name changed: the profile kept a
+  lock from the previous browser, every launch exited immediately, and
+  browser analysis stayed down until the lock was removed by hand. The
+  optimizer now removes a lock that belongs to another host or to a process
+  that is no longer running before each launch (and logs the previous owner;
+  a profile directory must not be shared between optimizer instances), names
+  a locked profile in the launch-failure log line instead of only the exit
+  status, and clears the failure count and retry delay reported under
+  `browser` in `/v1/health` once a launch has stayed up for a minute. Affects
+  installations running earlier 1.16 release candidates with browser analysis
+  enabled and a persistent profile directory; fixed in 1.16.0-rc.11.
+  **Update recommended** if browser analysis is enabled.
 
 - **The admin console's graphs page can plot per-interval change instead of
   cumulative totals.** A "Show per-interval deltas" checkbox next to the
