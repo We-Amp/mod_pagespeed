@@ -267,6 +267,10 @@ class FakeDaemonAbi : public DaemonAbi {
   }
   void ServeStatsRecordServeClass(void* /*handle*/, int /*serve_class*/,
                                   uint32_t /*flags*/) const override {}
+  void ServeStatsRecordHit(void* /*handle*/, int /*content_type*/,
+                           uint64_t /*original_bytes*/,
+                           uint64_t /*optimized_bytes*/,
+                           uint32_t /*mask*/) const override {}
   void ServeStatsClose(void* /*handle*/) const override {}
 
   // `<stem>-6-<size>` — the shape DaemonAdapter::VolumeFiles recognises.

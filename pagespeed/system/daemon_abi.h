@@ -128,11 +128,11 @@ inline constexpr int kPsErrNotFound = 1;
 // THE SERVE ARM DID NOT MOVE IT, and that is worth stating because the
 // opposite would be the natural guess.  Everything the serve arm binds is
 // OLDER than the floor: the cache reads and their accessors are 1.0, the
-// serve-class recorder is 1.1, the freshness evaluator and the
-// `Cache-Control` builder are 1.2.  So a daemon that can be recorded into can
-// also be served from, and there is no version in which this module records
-// but declines to serve -- a state that would be indistinguishable, from the
-// outside, from a serve arm that is simply broken.
+// serve-hit recorder is 1.0, the serve-class recorder is 1.1, the freshness
+// evaluator and the `Cache-Control` builder are 1.2.  So a daemon that can be
+// recorded into can also be served from, and there is no version in which this
+// module records but declines to serve -- a state that would be
+// indistinguishable, from the outside, from a serve arm that is simply broken.
 //
 // The volume-size reader is 1.6 and is deliberately NOT part of the floor: it
 // is bound optionally and its absence degrades (in-place optimization off,
@@ -878,6 +878,18 @@ class DaemonAbi {
                              void** out_handle) const = 0;
   virtual void ServeStatsRecordServeClass(void* handle, int serve_class,
                                           uint32_t flags) const = 0;
+
+  // ONE worker-processed serve HIT: the per-type original/optimized byte
+  // totals and the hit count, plus the SVG-served counter when `mask` names
+  // an SVG variant (pass 0 to skip that accounting).  Published at 1.0, so it
+  // predates every floor this module has had.  The GATE is the caller's --
+  // serve class kPsServeClassOptimized, a worker-produced entry, and a
+  // recorded origin content length -- exactly the gate the peer's own front
+  // ends apply; the peer no-ops on a content type it does not count.
+  virtual void ServeStatsRecordHit(void* handle, int content_type,
+                                   uint64_t original_bytes,
+                                   uint64_t optimized_bytes,
+                                   uint32_t mask) const = 0;
   virtual void ServeStatsClose(void* handle) const = 0;
 
  protected:

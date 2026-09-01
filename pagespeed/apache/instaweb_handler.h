@@ -51,6 +51,7 @@ class ApacheRewriteDriverFactory;
 class ApacheServerContext;
 class IproRecorder;
 struct DaemonRecordRequest;
+struct DaemonServeDecision;
 struct DaemonServeRequest;
 
 // Context for handling a request, computing options and request headers in
@@ -207,6 +208,10 @@ class InstawebHandler {
 
   // Records one serve class against the peer's serve-stats mmap.
   void RecordDaemonServeClass(int serve_class);
+
+  // Records one worker-processed serve HIT against the peer's serve-stats
+  // mmap.  The GATE is the caller's; see ServeFromDaemonSubstrate.
+  void RecordDaemonServeHit(const DaemonServeDecision& decision);
 
   // Answers this request from the optimizer daemon's shared cache if it can.
   // A false return is the substrate declining, not an error.

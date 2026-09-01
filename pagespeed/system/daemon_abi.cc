@@ -89,6 +89,8 @@ using BuildCacheControlFn = int (*)(const PsCacheControlInput*, char*, size_t,
                                     size_t*, uint32_t*);
 using ServeStatsOpenFn = int (*)(const char*, void**);
 using ServeStatsRecordServeClassFn = void (*)(void*, int, uint32_t);
+using ServeStatsRecordHitFn = void (*)(void*, int, uint64_t, uint64_t,
+                                       uint32_t);
 using ServeStatsCloseFn = void (*)(void*);
 
 class DlopenDaemonAbi : public DaemonAbi {
@@ -316,6 +318,13 @@ class DlopenDaemonAbi : public DaemonAbi {
     serve_stats_record_serve_class_(handle, serve_class, flags);
   }
 
+  void ServeStatsRecordHit(void* handle, int content_type,
+                           uint64_t original_bytes, uint64_t optimized_bytes,
+                           uint32_t mask) const override {
+    serve_stats_record_hit_(handle, content_type, original_bytes,
+                            optimized_bytes, mask);
+  }
+
   void ServeStatsClose(void* handle) const override {
     serve_stats_close_(handle);
   }
@@ -397,6 +406,7 @@ class DlopenDaemonAbi : public DaemonAbi {
            Bind("ps_serve_stats_open", &serve_stats_open_, error) &&
            Bind("ps_serve_stats_record_serve_class",
                 &serve_stats_record_serve_class_, error) &&
+           Bind("ps_serve_stats_record_hit", &serve_stats_record_hit_, error) &&
            Bind("ps_serve_stats_close", &serve_stats_close_, error);
   }
 
@@ -487,6 +497,7 @@ class DlopenDaemonAbi : public DaemonAbi {
   BuildCacheControlFn build_cache_control_ = nullptr;
   ServeStatsOpenFn serve_stats_open_ = nullptr;
   ServeStatsRecordServeClassFn serve_stats_record_serve_class_ = nullptr;
+  ServeStatsRecordHitFn serve_stats_record_hit_ = nullptr;
   ServeStatsCloseFn serve_stats_close_ = nullptr;
 };
 

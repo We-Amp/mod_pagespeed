@@ -457,6 +457,7 @@ void DaemonServeReader::Compose(const DaemonServeRequest& request,
   decision->stored_flags = stored_flags;
   decision->alternate_id = ServeAlternateIdForMask(stored_mask);
   decision->worker_processed = abi_->ReadIsWorkerProcessed(result_) != 0;
+  decision->origin_content_length = abi_->ReadOriginContentLength(result_);
   decision->ps_content_type = content_type;
 
   const char* origin_ct = abi_->ReadOriginContentType(result_);
@@ -838,16 +839,8 @@ void DaemonServeStats::Record(int serve_class) {
     return;
   }
   std::lock_guard<std::mutex> lock(mutex_);
-  if (handle_ == nullptr) {
-    if (attempted_ && ++since_attempt_ < kReopenInterval) {
-      return;
-    }
-    attempted_ = true;
-    since_attempt_ = 0;
-    if (abi_->ServeStatsOpen(cache_path_.c_str(), &handle_) != kPsOk) {
-      handle_ = nullptr;
-      return;
-    }
+  if (!EnsureOpenLocked()) {
+    return;
   }
   // kPsServeFlagNone always: the peer's flag on this call reports a FRONT
   // END's own cooldown or dedup having suppressed a request it would
@@ -855,6 +848,34 @@ void DaemonServeStats::Record(int serve_class) {
   // pressure is observe-only at this revision and nothing here branches on
   // it.
   abi_->ServeStatsRecordServeClass(handle_, serve_class, kPsServeFlagNone);
+}
+
+void DaemonServeStats::RecordHit(int content_type, uint64_t original_bytes,
+                                 uint64_t optimized_bytes, uint32_t mask) {
+  if (abi_ == nullptr || cache_path_.empty()) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!EnsureOpenLocked()) {
+    return;
+  }
+  abi_->ServeStatsRecordHit(handle_, content_type, original_bytes,
+                            optimized_bytes, mask);
+}
+
+bool DaemonServeStats::EnsureOpenLocked() {
+  if (handle_ == nullptr) {
+    if (attempted_ && ++since_attempt_ < kReopenInterval) {
+      return false;
+    }
+    attempted_ = true;
+    since_attempt_ = 0;
+    if (abi_->ServeStatsOpen(cache_path_.c_str(), &handle_) != kPsOk) {
+      handle_ = nullptr;
+      return false;
+    }
+  }
+  return true;
 }
 
 DaemonServeReader* MakeDaemonServeReaderIfReady(DaemonAdapter* adapter) {

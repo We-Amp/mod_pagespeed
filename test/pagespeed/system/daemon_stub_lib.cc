@@ -1487,6 +1487,21 @@ void ps_serve_stats_record_serve_class(void* handle, int serve_class,
   Log(line);
 }
 
+void ps_serve_stats_record_hit(void* handle, int content_type,
+                               uint64_t original_bytes,
+                               uint64_t optimized_bytes, uint32_t mask) {
+  if (handle == nullptr) {
+    return;
+  }
+  char line[160];
+  snprintf(line, sizeof(line),
+           "serve_hit type=%d original=%llu optimized=%llu mask=%x",
+           content_type, static_cast<unsigned long long>(original_bytes),
+           static_cast<unsigned long long>(optimized_bytes),
+           static_cast<unsigned>(mask));
+  Log(line);
+}
+
 void ps_serve_stats_close(void* handle) {}
 
 }  // extern "C"

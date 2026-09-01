@@ -269,6 +269,57 @@ TEST_F(DaemonSeamTest, AnAgeExpiredFallThroughSendsTheOriginRefreshSentinel) {
       << "the origin-refreshed sentinel has more than one call site";
 }
 
+TEST_F(DaemonSeamTest, AnOptimizedSubstrateServeRecordsItsHit) {
+  // In the module-serves topology the daemon only WRITES alternates and never
+  // answers a request, so its serve_savings counters can move only if the
+  // module records the serve.  The behavioural half -- the values
+  // the peer's recorder is handed, and the absent-file treatment -- is covered
+  // where the behaviour lives (daemon_serve_arm_test.cc).  What is pinned here
+  // is the WIRING: the record call sits on the 200 leg of the substrate serve
+  // (a 304 serves no body and counts no hit), after the response has gone out,
+  // gated on the same three facts the peer's own front ends gate on.
+  const GoogleString source =
+      ReadSource("pagespeed/apache/instaweb_handler.cc");
+  const size_t serve = source.find(
+      "bool InstawebHandler::"
+      "ServeFromDaemonSubstrate()");
+  ASSERT_NE(GoogleString::npos, serve)
+      << "the daemon serve seam has been renamed; this pin needs updating";
+  const size_t fn_end = source.find("\n}\n", serve);
+  ASSERT_NE(GoogleString::npos, fn_end);
+  const GoogleString body = source.substr(serve, fn_end - serve);
+
+  // The 200 leg, and nothing past it: the 304 leg emits no body and must
+  // record no hit.
+  const size_t sent = body.find(
+      "send_out_headers_and_body(request_, response_headers, body);");
+  ASSERT_NE(GoogleString::npos, sent);
+  const GoogleString leg = body.substr(sent);
+
+  EXPECT_NE(GoogleString::npos,
+            leg.find("decision.serve_class == kPsServeClassOptimized"))
+      << "the hit is no longer gated on the arm's optimized classification; "
+         "origin-byte serves would be counted as optimized ones";
+  EXPECT_NE(GoogleString::npos, leg.find("decision.worker_processed"))
+      << "the hit is no longer gated on the worker-processed bit; serves of "
+         "entries the optimizer never produced would be counted as savings";
+  EXPECT_NE(GoogleString::npos, leg.find("decision.origin_content_length > 0"))
+      << "the hit is no longer gated on a recorded origin length; the saving "
+         "would be measured against an origin size the entry does not have";
+  const size_t record = leg.find("RecordDaemonServeHit(decision)");
+  EXPECT_NE(GoogleString::npos, record)
+      << "the substrate's 200 leg no longer records the serve hit, so in the "
+         "module-serves topology the daemon's serve_savings counters stay "
+         "permanently zero";
+
+  // EXACTLY ONE record site in the whole port, for the same reason as the
+  // re-notify and the sentinel: a second call would double-count every serve,
+  // and no behavioural test could see it from here.  Counted on the call's own
+  // spelling, which the helper's definition does not share.
+  EXPECT_EQ(1, CountSubstring(source, "RecordDaemonServeHit(decision)"))
+      << "the serve-hit recorder has more than one call site";
+}
+
 TEST_F(DaemonSeamTest, TheDaemonSubstrateDoesNotRewriteCachingHeaders) {
   // The substrate's whole safety claim is that it records and changes nothing
   // about the response. The filter that shortens a response's downstream

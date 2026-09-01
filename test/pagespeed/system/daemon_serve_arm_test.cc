@@ -105,6 +105,7 @@ class DaemonServeArmTest : public testing::Test {
     unsetenv("PS_STUB_NOTIFY_FAIL");
     unsetenv("PS_STUB_BODY_MAGIC");
     unsetenv("PS_STUB_ORIGIN_CCFLAGS");
+    unsetenv("PS_STUB_ORIGIN_CONTENT_LENGTH");
     setenv("PS_STUB_INSERTED_AT", "1000", 1);
     setenv("PS_STUB_ORIGIN_MAXAGE", "600", 1);
     setenv("PS_STUB_ORIGIN_CT", "image/png", 1);
@@ -141,6 +142,7 @@ class DaemonServeArmTest : public testing::Test {
     unsetenv("PS_STUB_NOTIFY_FAIL");
     unsetenv("PS_STUB_BODY_MAGIC");
     unsetenv("PS_STUB_ORIGIN_CCFLAGS");
+    unsetenv("PS_STUB_ORIGIN_CONTENT_LENGTH");
   }
 
   GoogleString CallLog() const {
@@ -1439,6 +1441,61 @@ TEST_F(DaemonServeArmTest, AnAbsentServeStatsFileIsNotAnError) {
   stats.Record(kPsServeClassOptimized);
   EXPECT_FALSE(stats.open());
   EXPECT_TRUE(CallLog().find("serve_class") == GoogleString::npos);
+}
+
+// ---------------------------------------------------------------------------
+// Serve-hit accounting.  In the module-serves topology the daemon never
+// answers a request -- it only writes alternates -- so its serve_savings
+// counters can move only if the serving side records the hit.
+// The gate (optimized class, worker-produced entry, recorded origin length)
+// lives in the Apache seam and is pinned there; what is pinned HERE is the
+// arm half: the decision carries the three facts the gate reads, and the
+// recorder hands the peer exactly the bytes and the mask it was given.
+// ---------------------------------------------------------------------------
+
+TEST_F(DaemonServeArmTest, AnOptimizedServeDecisionCarriesTheHitGateInputs) {
+  setenv("PS_STUB_ORIGIN_CONTENT_LENGTH", "4096", 1);
+  SetAlternates("09:00:1,0c:00:0");
+  const DaemonServeDecision decision = Serve(Request("image/webp"));
+  ASSERT_EQ(DaemonServeVerdict::kServeOptimized, decision.verdict);
+  EXPECT_EQ(kPsServeClassOptimized, decision.serve_class);
+  EXPECT_TRUE(decision.worker_processed);
+  EXPECT_EQ(4096u, decision.origin_content_length);
+  EXPECT_EQ(kPsContentImage, decision.ps_content_type);
+  EXPECT_EQ(kMaskWebpDesktop, decision.stored_mask);
+}
+
+TEST_F(DaemonServeArmTest, AnUnrecordedOriginLengthStaysZeroOnTheDecision) {
+  // The default: the entry records no origin length.  Zero is "not recorded",
+  // never "the origin sent nothing" -- the seam's gate declines it.
+  SetAlternates("09:00:1,0c:00:0");
+  const DaemonServeDecision decision = Serve(Request("image/webp"));
+  ASSERT_EQ(DaemonServeVerdict::kServeOptimized, decision.verdict);
+  EXPECT_TRUE(decision.worker_processed);
+  EXPECT_EQ(0u, decision.origin_content_length);
+}
+
+TEST_F(DaemonServeArmTest, ANotWorkerProcessedEntryIsMarkedAsSuch) {
+  SetAlternates("09:00:0,0c:00:0");
+  const DaemonServeDecision decision = Serve(Request("image/webp"));
+  ASSERT_EQ(DaemonServeVerdict::kServeOptimized, decision.verdict);
+  EXPECT_FALSE(decision.worker_processed);
+}
+
+TEST_F(DaemonServeArmTest, AServeHitIsRecordedWithItsBytesAndMask) {
+  DaemonServeStats stats(abi_.get(), "/run/parity/cache");
+  stats.RecordHit(kPsContentImage, 4096, 1024, kMaskWebpDesktop);
+  const GoogleString log = CallLog();
+  EXPECT_NE(GoogleString::npos,
+            log.find("serve_hit type=3 original=4096 optimized=1024 mask=9"));
+}
+
+TEST_F(DaemonServeArmTest, AServeHitIsNotRecordedWhileTheFileIsAbsent) {
+  setenv("PS_STUB_SERVE_STATS_ABSENT", "1", 1);
+  DaemonServeStats stats(abi_.get(), "/run/parity/cache");
+  stats.RecordHit(kPsContentImage, 4096, 1024, kMaskWebpDesktop);
+  EXPECT_FALSE(stats.open());
+  EXPECT_EQ(GoogleString::npos, CallLog().find("serve_hit"));
 }
 
 // ---------------------------------------------------------------------------

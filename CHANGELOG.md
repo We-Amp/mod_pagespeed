@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The module now records the serve-time bandwidth savings it produces into
+  the optimizer daemon's statistics.** In the topology where the daemon only
+  writes optimized variants and the module serves them in place, the daemon
+  never answers a request itself, so its serve-savings counters (original vs
+  optimized bytes and hit counts, per content type) previously stayed at zero
+  forever. The module now records each optimized in-place serve through the
+  daemon's published client interface, so those counters reflect real traffic
+  and the daemon cache console panel has live data in this topology.
+  Only serves of worker-produced optimized variants with a recorded origin
+  size are counted, matching the gate the daemon's own front ends apply.
+
 - **The admin console can now show the optimizer daemon's status, cache
   statistics, and back-pressure state.** Three read-only endpoints under the
   admin path — `v1/daemon/health`, `v1/daemon/stats`, and

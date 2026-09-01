@@ -195,6 +195,13 @@ struct DaemonServeDecision {
   uint8_t stored_flags = 0;
   bool worker_processed = false;
 
+  // The ORIGIN length recorded on the served entry, or 0 when the entry
+  // records none.  Half of the serve-hit accounting gate, with
+  // `worker_processed`: the peer's serve-stats recorder counts a hit only
+  // against a real origin length (the saving is measured against it), and 0
+  // is "not recorded", never "the origin sent nothing".
+  uint32_t origin_content_length = 0;
+
   // The peer's content-type class of the entry being served, in the kPsContent*
   // numbering.  Carried because a fallback re-notify names it; distinct from
   // `content_type` below, which is the media-type FIELD this response emits.
@@ -806,6 +813,15 @@ class DaemonServeStats {
   // for it.
   void Record(int serve_class);
 
+  // Records ONE worker-processed serve HIT: the per-type original/optimized
+  // byte totals and the hit count, with the SVG-served counter answered from
+  // `mask` (0 skips it).  The GATE is the caller's -- serve class
+  // kPsServeClassOptimized, a worker-produced entry, a recorded origin
+  // content length; this object owns the open, not the verdict.  Same
+  // absent-file terms and threading as Record().
+  void RecordHit(int content_type, uint64_t original_bytes,
+                 uint64_t optimized_bytes, uint32_t mask);
+
   // Whether the mmap is currently open.  Test seam and evidence only.
   bool open() const { return handle_ != nullptr; }
 
@@ -821,6 +837,9 @@ class DaemonServeStats {
   // Retrying on EVERY serve is the other extreme: an open syscall per
   // request for as long as the worker is down.
   static constexpr int kReopenInterval = 64;
+
+  // The lazy open, shared by both recorders.  mutex_ must be held.
+  bool EnsureOpenLocked();
 
   const DaemonAbi* abi_;
   const GoogleString cache_path_;

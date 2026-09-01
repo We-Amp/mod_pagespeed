@@ -583,6 +583,24 @@ void InstawebHandler::RecordDaemonServeClass(int serve_class) {
   }
 }
 
+// Records ONE serve HIT against the peer's serve-stats mmap: the per-type
+// original/optimized byte totals and the hit count.  In this topology the
+// MODULE is the serving front end -- the daemon only writes alternates and
+// never answers a request -- so without this call the daemon's serve_savings
+// counters can never move here.  The GATE is the caller's; this helper
+// only translates the decision into the peer's accounting vocabulary: the
+// entry's content class, the origin length the saving is measured against,
+// the bytes actually served, and the served variant's mask (which answers the
+// SVG-served accounting on the peer's side).
+void InstawebHandler::RecordDaemonServeHit(
+    const DaemonServeDecision& decision) {
+  if (server_context_->daemon_serve_stats() != nullptr) {
+    server_context_->daemon_serve_stats()->RecordHit(
+        decision.ps_content_type, decision.origin_content_length,
+        decision.body.size(), decision.stored_mask);
+  }
+}
+
 // Answers this request from the optimizer daemon's shared cache, if it can.
 //
 // Returns true when the response has been emitted and the handler is done.
@@ -734,6 +752,18 @@ bool InstawebHandler::ServeFromDaemonSubstrate() {
     GoogleString body;
     decision.body.CopyToString(&body);
     send_out_headers_and_body(request_, response_headers, body);
+
+    // A 200 IS A SERVE; a 304 is not, and neither is an origin-byte or
+    // unoptimized answer.  Record the hit here, on the 200 leg only, gated on
+    // the same three facts the peer's own front ends gate on: the arm
+    // classified the serve OPTIMIZED, the entry was produced by the worker,
+    // and it carries the origin length the saving is measured against.  In
+    // this topology the module is the only serving front end, so this is the
+    // only place the daemon's serve_savings counters can move.
+    if (decision.serve_class == kPsServeClassOptimized &&
+        decision.worker_processed && decision.origin_content_length > 0) {
+      RecordDaemonServeHit(decision);
+    }
   }
 
   server_context_->rewrite_stats()->ipro_daemon_served()->Add(1);
