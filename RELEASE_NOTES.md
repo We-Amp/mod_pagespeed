@@ -1,7 +1,7 @@
 # mod_pagespeed 1.16.0 Release Notes
 
-**Release candidate:** 1.16.0-rc.11
-**Release date:** 2026-08-31
+**Release candidate:** 1.16.0-rc.12
+**Release date:** 2026-09-01
 **Status:** Release candidate
 
 ## Highlights
@@ -150,6 +150,65 @@
   installations running earlier 1.16 release candidates with browser analysis
   enabled and a persistent profile directory; fixed in 1.16.0-rc.11.
   **Update recommended** if browser analysis is enabled.
+
+- **The daemon cache console panel now shows live serve statistics when the
+  module serves in place.** In the topology where the optimizer daemon only
+  writes optimized variants and the serving module answers requests from the
+  shared cache, the daemon never responds to a request itself, so its
+  serve-savings counters — original versus optimized bytes and hit counts,
+  per content type — stayed at zero forever. The module now records each
+  optimized in-place serve through the daemon's published client interface,
+  so those counters reflect real traffic and the console panel has live data
+  in this topology. Only serves of worker-produced optimized variants with a
+  recorded origin size are counted, matching the gate the daemon's own front
+  ends apply. The daemon's statistics API additionally exposes the
+  serve-class partition (`serve_classes`: `optimized`, `original_cold`,
+  `original_pending`, `original_declined`, `original_skew`, plus the
+  `notify_suppressed` and unrecognized-drop counters) whenever serve
+  statistics are available. Recording serves requires the 1.16.0-rc.12
+  module; the per-class breakdown appears with the 1.16.0-rc.12 daemon.
+  Under an nginx 2.0 or ASP.NET front end these counters remain all-zero,
+  which means "not instrumented", not "nothing happened".
+
+- **`systemctl reload pagespeed-optimizer` no longer restarts the daemon.**
+  The unit declared no `ExecReload=`, so systemd fell back to sending SIGHUP
+  to the main process, and the daemon — which installs no SIGHUP handler —
+  died on it; with `Restart=on-failure` it came straight back, so every
+  "reload" was an unannounced restart that dropped in-flight optimizations
+  and reopened the cache volume. Reload has no honest semantics for this
+  daemon — its settings are fixed at startup, and the hot-reloadable subset
+  lives behind `PATCH /v1/config` — so the daemon now ignores SIGHUP and the
+  unit declares an `ExecReload=` that fails loudly and points at
+  `systemctl restart pagespeed-optimizer`. Affects host installs on earlier
+  1.16 release candidates; fixed in 1.16.0-rc.12. **Update recommended** for
+  host installs.
+
+- **A package upgrade no longer leaves `/etc/default/pagespeed-optimizer`
+  world-readable.** The file is one of the two `EnvironmentFile`s the
+  optimizer unit reads, and the design gate for those files is 0640
+  root:pagespeed (the other, `/etc/pagespeed-optimizer/daemon.env`, carries
+  the generated API and purge tokens and was already enforced). The gap was
+  the upgrade path: dpkg and rpm replace an operator-unedited `/etc/default`
+  file with the payload's mode and ownership, and nothing re-asserted the
+  gate afterwards — fresh installs were fine, upgrades were not. The packages
+  now ship the file at 0640, the maintainer scripts re-pin the mode on every
+  install and upgrade (an edited file keeps its contents; only the mode is
+  re-pinned), and a tmpfiles.d rule re-scopes the group to `pagespeed` on
+  every install, upgrade and boot. Affects host installs upgraded from
+  earlier 1.16 release candidates; fixed in 1.16.0-rc.12. **Update
+  recommended** for host installs.
+
+- **The management API serves the web console's static bundle without the API
+  token, as documented.** `GET` and `HEAD` requests to `/console` and paths
+  under it no longer require the token; the bundle carries no operational
+  data, and every `/v1/*` data endpoint — and every non-GET/HEAD request —
+  still requires the token when one is configured. In the same release,
+  `GET /v1/health` and `/v1/stats` now report the connection figures of the
+  management API listener itself in `connections` — the cap it actually
+  enforces (32 by default) and its live active count — rather than the
+  notification listener's separate limit. Affects installations on earlier
+  1.16 release candidates that opened the console against a token-configured
+  API; fixed in 1.16.0-rc.12.
 
 - **The admin console's graphs page can plot per-interval change instead of
   cumulative totals.** A "Show per-interval deltas" checkbox next to the
