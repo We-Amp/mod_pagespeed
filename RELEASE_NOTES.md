@@ -1,7 +1,7 @@
 # mod_pagespeed 1.16.0 Release Notes
 
-**Release candidate:** 1.16.0-rc.12
-**Release date:** 2026-09-01
+**Release candidate:** 1.16.0-rc.13
+**Release date:** 2026-09-02
 **Status:** Release candidate
 
 ## Highlights
@@ -209,6 +209,26 @@
   notification listener's separate limit. Affects installations on earlier
   1.16 release candidates that opened the console against a token-configured
   API; fixed in 1.16.0-rc.12.
+
+- **The optimizer no longer re-optimizes unchanged content on every freshness
+  cycle.** When an origin response carries no validators and its cache
+  lifetime expired, the daemon re-fetched the origin and — because it compared
+  the fresh fetch against the wrong cache slot, which holds a worker-produced
+  variant rather than the pristine origin — concluded the origin had changed,
+  every time. Each cycle purged the optimized variants and rebuilt them from
+  scratch (~10 s of re-encoding per resource), and in the module-serves
+  topology, where the serving module deliberately never serves stale, requests
+  landing mid-rebuild fell back to the original bytes — so on sparsely
+  trafficked sites optimized serves were rare to nonexistent. The daemon now
+  compares the re-fetched origin against the pristine origin reference by
+  content hash: an unchanged origin gets its variants' freshness restamped in
+  place (no purge, no re-encode), and a genuinely changed origin still purges
+  and rebuilds exactly as before. The freshness decision tolerates origins
+  behind CDNs that backdate responses with an `Age` header. Text resources
+  (CSS/JS, and HTML without agent optimization) carry no content hash and
+  keep the per-cycle purge for now. Affects all 1.16 release candidates;
+  fixed in 1.16.0-rc.13. **Update recommended** — deployments without
+  far-future origin cache headers benefit the most.
 
 - **The admin console's graphs page can plot per-interval change instead of
   cumulative totals.** A "Show per-interval deltas" checkbox next to the
