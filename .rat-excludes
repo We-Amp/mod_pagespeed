@@ -1,0 +1,147 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+#
+# Apache RAT (Release Audit Tool) exclusion list for this repository.
+#
+# Consumed by tools/ci/rat.sh, which backs the "License audit (Apache RAT)"
+# CI job. RAT 0.16.1 matches every non-comment line against the BASE NAME of
+# each file and directory it walks, never against the path; a line that
+# matches a directory name skips that whole subtree. Each line must be a
+# valid Java regular expression (`*.md` is rejected and dropped; write
+# `.*\.md`). RAT honours either its -e options or this file, never both, so
+# the version-control and build-output names live here too.
+#
+# Only files that legitimately carry no license header are listed. A
+# first-party source file is never excluded just to reach zero.
+
+# Version control, Bazel output trees and installed Node modules.
+\.git
+bazel-.*
+node_modules
+
+# Heritage upstream files that never carried a header and are left as-is:
+# the Apache example and test sites, the installer fragments and Debian
+# maintainer scripts, the packaging make variables, the Varnish debug
+# configs, the checked-in generated client JavaScript and console assets,
+# and the version stamps.
+mod_pagespeed_example
+mod_pagespeed_test
+do_not_modify
+common
+postinst
+postrm
+prerm
+conffiles
+make_vars\.mk
+changelog\.template
+control\.template
+.*\.vcl
+genfiles
+generated
+VERSION
+version\.h\.in
+
+# Chromium-derived packaging scripts (install/debian/build.sh and
+# install/rpm/build.sh) carry their original BSD-style notice, which RAT's
+# matchers do not recognise. Basename matching also hides two first-party
+# scripts that do carry the SPDX header: pagespeed/system/console/build.sh
+# and docs/spikes/avif-stream0/native/build.sh.
+build\.sh
+
+# Corpora, goldens and byte-exact test fixtures. Every first-party synthetic
+# INPUT that can carry a header does (the html-parse seeds, the js-minify
+# repros and bundle-fixture sources); their goldens manifests pin the
+# headered bytes. What stays listed, and why:
+#   units             the parity corpus units: imported third-party content
+#                     plus content-addressed first-party units whose sha256
+#                     is their identity (tools/parity/corpus/units)
+#   goldens           generated expected-output manifests (html-parse,
+#                     js-minify, parity)
+#   testdata          the heritage unit-test trees (test/**/testdata):
+#                     binary images and raw pixel dumps, third-party JS, and
+#                     inputs whose .gold expected outputs are byte-exact
+#   vendor            the vendored csstree copy under tools/parity/corpus
+#   .*\.jsonl         the transition-load request mixes (data lines, no
+#                     comment syntax)
+#   empty.html, whitespace-only.html, text-only.html
+#                     the three html-parse seeds whose test IS their entire
+#                     byte content (empty input, whitespace-only input, a
+#                     document with no markup at all): a comment would change
+#                     what they exercise
+#   whitespace.html   the IIS whitespace-only test page: its test requests a
+#                     body of nothing but newlines (the heritage copy under
+#                     install/mod_pagespeed_test is covered above)
+#   (...)-1.(css|js)  the parity adapter_asserts and serve_diff fixtures:
+#                     neg-nonimprov-1.{css,js} are byte-minimal by design (a
+#                     comment would make them improvable and flip the
+#                     negative-verdict rows), and the others' optimized-serve
+#                     bodies feed measured baselines only the parity lane can
+#                     re-harvest. Listed by name so the headered
+#                     fixtures/gen_fixture_png.py is audited again.
+units
+goldens
+testdata
+vendor
+.*\.jsonl
+empty\.html
+whitespace-only\.html
+text-only\.html
+whitespace\.html
+(control|cors|custom-header|notransform|varyaccept|cold|cond|neg-denied|neg-flap|neg-nonimprov|neg-refresh|nonreproducible)-1\.(css|js)
+
+# Third-party code, its generated configuration headers, and local patches.
+third_party
+.*\.patch
+.*\.diff
+
+# The license and notice files themselves.
+LICENSE.*
+NOTICE
+THIRD-PARTY-NOTICES
+
+# Documentation, configuration, data and lock files: no code, no header.
+.*\.md
+.*\.txt
+.*\.json
+.*\.lock
+.*\.conf
+.*\.conf\.template
+.*\.yaml\.template
+.*-data\.template
+.*\.ini
+.*\.cfg
+.*\.xml
+.*\.config
+.*\.sample
+.*\.csproj
+.*\.sln
+.*\.props
+.*\.targets
+.*\.code-workspace
+.*\.service
+.*\.srchash
+.*\.allow
+GIT_COMMIT
+platform_mappings
+Vagrantfile
+authorized_keys
+\.htaccess
+\.gitignore
+\.gitkeep
+\.gitattributes
+\.dockerignore
+\.nvmrc
+\.cachedirs
+\.source-hash
+\.bazelrc
+.*\.bazelrc
+\.bazelignore
+\.bazelversion
+\.clang-format
+\.clang-tidy
+\.git-blame-ignore-revs
+\.pre-commit-config\.yaml
+pnpm-lock\.yaml
+docker-compose.*\.yml
+pagespeed-envoy\.yaml
+github-actions-windows\.yml

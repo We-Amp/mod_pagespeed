@@ -43,10 +43,6 @@ build:macos --copt="-DPAGESPEED_SUPPORT_POSIX_SHARED_MEM=1"
 # Windows-specific: No POSIX shared memory, no APR
 build:windows --copt="-DPAGESPEED_SUPPORT_POSIX_SHARED_MEM=0"
 
-# System test build: swap Ed25519 public key to zero-seed test key.
-# Use with: bazel build --config=testkey //:libmod_pagespeed.so
-build:testkey --copt=-DPAGESPEED_TEST_LICENSE_KEY
-
 build --action_env=ABSL_LEGACY_THREAD_ANNOTATIONS=1
 build --copt="-DABSL_LEGACY_THREAD_ANNOTATIONS=1"
 build --cxxopt="-DABSL_LEGACY_THREAD_ANNOTATIONS=1"

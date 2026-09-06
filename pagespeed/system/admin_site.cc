@@ -48,7 +48,6 @@
 #include "pagespeed/kernel/http/response_headers.h"
 #include "pagespeed/kernel/util/statistics_logger.h"
 #include "pagespeed/system/admin_daemon_handler.h"
-#include "pagespeed/system/admin_license_handler.h"
 #include "pagespeed/system/daemon_reader.h"
 #include "pagespeed/system/system_cache_path.h"
 #include "pagespeed/system/system_caches.h"
@@ -111,18 +110,12 @@ class PurgeFetchCallbackGasket {
 
 }  // namespace
 
-AdminSite::AdminSite(Timer* timer, ThreadSystem* thread_system,
-                     MessageHandler* message_handler, UrlAsyncFetcher* fetcher,
-                     const GoogleString& cache_path,
+AdminSite::AdminSite(Timer* timer, MessageHandler* message_handler,
                      DaemonReader* daemon_reader)
     : message_handler_(message_handler),
       timer_(timer),
-      license_handler_(new AdminLicenseHandler(
-          timer, thread_system, message_handler, fetcher, cache_path)),
       daemon_reader_(daemon_reader),
-      daemon_handler_(new AdminDaemonHandler(daemon_reader, message_handler)) {
-  license_handler_->Init();
-}
+      daemon_handler_(new AdminDaemonHandler(daemon_reader, message_handler)) {}
 
 AdminSite::~AdminSite() = default;
 
@@ -420,28 +413,11 @@ void AdminSite::AdminPage(
     fetch->Write(json, message_handler_);
     fetch->Done(true);
   } else {
-    // Check for /v1/license/* API paths before leaf-based dispatch.
-    // The full path sans query looks like "/pagespeed_admin/v1/license/status".
+    // The full path sans query looks like "/pagespeed_admin/v1/daemon/health".
     StringPiece full_path = stripped_gurl.PathSansQuery();
-    StringPiece::size_type license_pos = full_path.find("/v1/license/");
-    if (license_pos != StringPiece::npos) {
-      // Extract the API path starting from /v1/license/...
-      StringPiece api_path = full_path.substr(license_pos);
-      if (!license_handler_->HandleRequest(api_path, request_body, is_global,
-                                           fetch)) {
-        fetch->response_headers()->SetStatusAndReason(HttpStatus::kNotFound);
-        fetch->response_headers()->Add(HttpAttributes::kContentType,
-                                       kContentTypeJson.mime_type());
-        GoogleString json = StrCat("{\"error\":\"Unknown license endpoint: ",
-                                   JsonEscape(api_path), "\"}");
-        fetch->Write(json, message_handler_);
-        fetch->Done(true);
-      }
-      return;
-    }
     // /v1/daemon/* — read-only proxy to the optimizer daemon's management
-    // API.  Unlike the /v1/license/ branch above, the leaf is
-    // exact-matched against AdminDaemonHandler's compile-time endpoint table:
+    // API.  The leaf is exact-matched against
+    // AdminDaemonHandler's compile-time endpoint table:
     // the upstream path comes from the table, never from the request.  A
     // non-matching leaf gets a 404 here and never falls through to the
     // leaf-based dispatch below (so e.g. "v1/daemon/config" cannot reach the

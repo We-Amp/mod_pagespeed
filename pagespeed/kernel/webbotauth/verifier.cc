@@ -140,8 +140,7 @@ VerifyResult VerifyAndClassify(const RequestView& req,
   }
 
   // 5. Rebuild the canonical signature base and verify with the reused
-  //    @ed25519 primitive (same dep as license_v2; NOT the license token
-  //    schema).
+  //    @ed25519 primitive (same dep as proofwire).
   BaseRequestView brv;
   brv.method = req.method;
   brv.authority = req.authority;

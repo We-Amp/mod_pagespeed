@@ -772,37 +772,6 @@ void NgxBaseFetch::HandleHeadersComplete() {
     }
   }
 
-  // the design record (D2): soft enforcement — on the optimized HTML transform path,
-  // when running unlicensed (live signal), add the soft warn header. Read at
-  // serve time from the LIVE license atomic (ShouldOptimize), keyed on the
-  // same atomic that encodes the grace window (R6); suppressed until the
-  // first license check completes (R5, LicenseCheckedOnce). HTML transforms
-  // are never persisted as cached optimized artifacts, so this is added to the
-  // serve-time header set only — never to a cached artifact, Vary, or
-  // cache-key.
-  if (base_fetch_type_ == kHtmlTransform &&
-      server_context_->LicenseCheckedOnce() &&
-      !server_context_->ShouldOptimize()) {
-    response_headers()->Add("x-pagespeed-warn", "unlicensed");
-  }
-
-  // the design record: over-cap detection on the optimized HTML transform path, keyed on
-  // the request Host. Runs for ANY license state — an active scope=site license
-  // can be over-cap even while fully licensed, so this is independent of the
-  // unlicensed gate above. Self-guards (a no-op unless a site policy is armed)
-  // and never gates optimization.
-  if (base_fetch_type_ == kHtmlTransform && request_ != nullptr &&
-      request_->headers_in.host != nullptr) {
-    server_context_->MaybeFlagOverCap(
-        str_to_string_piece(request_->headers_in.host->value));
-  }
-  // the design record: emit the soft over-cap warn header (a sibling x-pagespeed-warn
-  // value; mutually exclusive in practice with "unlicensed" above, since
-  // over-cap requires an active site license). Display/telemetry only.
-  if (base_fetch_type_ == kHtmlTransform && server_context_->IsOverCap()) {
-    response_headers()->Add("x-pagespeed-warn", "over-cap");
-  }
-
   RequestCollection(kHeadersComplete);  // Headers available.
 
   // For the IPRO lookup, supress notification of the nginx side here.

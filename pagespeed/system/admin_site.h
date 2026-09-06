@@ -29,7 +29,6 @@
 namespace net_instaweb {
 
 class AdminDaemonHandler;
-class AdminLicenseHandler;
 class AsyncFetch;
 class CacheInterface;
 class DaemonReader;
@@ -44,9 +43,7 @@ class Statistics;
 class SystemCachePath;
 class SystemCaches;
 class SystemRewriteOptions;
-class ThreadSystem;
 class Timer;
-class UrlAsyncFetcher;
 
 // Identifies which admin handler family a request hit, so the exposure
 // warning can fire once per family per process lifetime instead of once
@@ -101,9 +98,10 @@ class AdminSite {
   // in the top navigation bar.
   enum AdminSource { kPageSpeedAdmin, kStatistics, kOther };
 
-  AdminSite(Timer* timer, ThreadSystem* thread_system,
-            MessageHandler* message_handler, UrlAsyncFetcher* fetcher,
-            const GoogleString& cache_path, DaemonReader* daemon_reader);
+  // Takes ownership of |daemon_reader| (may be null: ports without a daemon
+  // transport get a /v1/daemon/* proxy that reports the daemon as absent).
+  AdminSite(Timer* timer, MessageHandler* message_handler,
+            DaemonReader* daemon_reader);
 
   ~AdminSite();
 
@@ -195,9 +193,6 @@ class AdminSite {
   void PurgeHandler(StringPiece url, SystemCachePath* cache_path,
                     AsyncFetch* fetch);
 
-  // Return the license handler (e.g. for checking license state).
-  AdminLicenseHandler* license_handler() { return license_handler_.get(); }
-
   // Return the daemon proxy handler (for the /v1/daemon/* endpoints).
   AdminDaemonHandler* daemon_handler() { return daemon_handler_.get(); }
 
@@ -207,7 +202,6 @@ class AdminSite {
  private:
   MessageHandler* message_handler_;
   Timer* timer_;
-  std::unique_ptr<AdminLicenseHandler> license_handler_;
   // The daemon reader is owned here; the handler borrows it.  Declaration
   // order matters: the handler is destroyed first and drains in-flight
   // fetches before the reader (and its transport) is torn down.

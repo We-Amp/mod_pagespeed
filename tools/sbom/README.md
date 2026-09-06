@@ -86,8 +86,7 @@ unpinned tool could fail it open.
 repo-cache plus a Cyclone checkout). Nothing in it is committed, so it does not
 exist in a CI checkout. A `vendor/modpagespeed2/` tree may linger on a developer
 box as a leftover of the pre-the design record `@modpagespeed2` Bazel `git_repository`
-(1.1 no longer consumes 2.0 that way — the shared license crypto is vendored
-into `pagespeed/kernel/license_v2/` by `tools/sync-crypto.sh`). It is a stale
+(1.1 no longer consumes 2.0 that way). It is a stale
 copy of a *different repo's* source; its CVEs are pagespeed-optimizer's to fix and
 are not actionable from this repo. Do not add it to `NPM_LOCKFILES`.
 

@@ -325,7 +325,7 @@ void SystemRewriteOptions::AddProperties() {
   AddSystemProperty(false, &SystemRewriteOptions::strict_admin_access_, "saa",
                     "StrictAdminAccess", kProcessScopeStrict,
                     "OPT-IN, default off. When on, the admin, statistics, "
-                    "console, message and license API handlers deny "
+                    "console and message handlers deny "
                     "non-loopback clients unless an explicit *Domains "
                     "allowlist is configured. The loopback decision uses the "
                     "validated client connection IP, not the Host header. "

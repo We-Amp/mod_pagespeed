@@ -20,7 +20,6 @@
 #include "net/instaweb/rewriter/public/agent_optimize_vary_filter.h"
 
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
-#include "net/instaweb/rewriter/public/server_context.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/http/http_names.h"
@@ -92,13 +91,9 @@ void AgentOptimizeVaryFilter::StartDocumentImpl() {
   }
 
   // This filter is only added when options()->agent_optimize() is set (see
-  // rewrite_driver_filter_init.cc). The remaining gate: the server-wide
-  // agent_optimize license entitlement AND an Accept: text/markdown request.
+  // rewrite_driver_filter_init.cc) — the operator flag is the whole gate
+  //. The remaining condition is an Accept: text/markdown request.
   // 1.1 never serves markdown — the sole effect here is the Vary: Accept signal.
-  if (!driver()->server_context()->IsAgentOptimizeEntitled()) {
-    return;
-  }
-
   if (!RequestAcceptsMarkdown(driver()->request_headers())) {
     return;
   }

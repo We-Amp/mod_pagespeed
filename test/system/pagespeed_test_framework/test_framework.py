@@ -913,7 +913,7 @@ class TestRequireNoAuthGate:
         response = Response(status=403, headers={},
                             body=b"Missing or invalid CSRF headers")
         require_no_auth_gate(
-            response, "License consent endpoint",
+            response, "JSON mutation endpoint",
             allow_marker="Missing or invalid CSRF headers",
         )
 
@@ -921,7 +921,7 @@ class TestRequireNoAuthGate:
         response = Response(status=403, headers={}, body=b"token required")
         with pytest.raises(pytest.fail.Exception):
             require_no_auth_gate(
-                response, "License consent endpoint",
+                response, "JSON mutation endpoint",
                 allow_marker="Missing or invalid CSRF headers",
             )
 

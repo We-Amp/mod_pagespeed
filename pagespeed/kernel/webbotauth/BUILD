@@ -6,7 +6,7 @@ package(default_visibility = ["//visibility:public"])
 # This is the unit-testable unit: its dependency closure is @ed25519 +
 # pagespeed_base + the cache *interface* only -- no nginx, no serf fetcher, no
 # Cyclone implementation. The crypto primitive (ed25519_verify) is REUSED from
-# @ed25519, the same dep as //pagespeed/kernel/license_v2 (no parallel crypto).
+# @ed25519, the same dep as //pagespeed/kernel/proofwire (no parallel crypto).
 cc_library(
     name = "webbotauth_core",
     srcs = [

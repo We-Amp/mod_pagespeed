@@ -20,9 +20,7 @@
 #ifndef PAGESPEED_SYSTEM_SYSTEM_SERVER_CONTEXT_H_
 #define PAGESPEED_SYSTEM_SYSTEM_SERVER_CONTEXT_H_
 
-#include <atomic>
 #include <memory>
-#include <mutex>
 
 #include "net/instaweb/http/public/request_context.h"
 #include "net/instaweb/rewriter/public/server_context.h"
@@ -55,6 +53,11 @@ class SystemRewriteOptions;
 class UpDownCounter;
 class UrlAsyncFetcherStats;
 class Variable;
+
+// Test-only: re-arms the once-per-process INFO notice about a leftover
+// pagespeed.license file (see SystemServerContext::PostInitHook) so a test can
+// observe it being logged.
+void ResetStaleLicenseFileNoticeForTesting();
 
 // A server context with features specific to a PSOL port on a unix system.
 class SystemServerContext : public ServerContext {
@@ -169,84 +172,6 @@ class SystemServerContext : public ServerContext {
 
   AdminSite* admin_site() { return admin_site_.get(); }
 
-  // Returns true if the license is active and optimization should proceed.
-  // Lock-free (uses atomic bool) — safe to call on every request hot path.
-  //
-  // the design record: under soft enforcement this is now a pure SIGNAL only — callers
-  // no longer gate core optimization on it; they emit the soft warn header
-  // instead. The agent_optimize entitlement (IsAgentOptimizeEntitled) stays
-  // hard-gated and is unaffected.
-  bool ShouldOptimize() const {
-    return license_active_.load(std::memory_order_relaxed);
-  }
-
-  // Update the license_active_ flag. Called by the license handler after
-  // state changes (init, apply, renewal).
-  void UpdateLicenseActive(bool active) {
-    license_active_.store(active, std::memory_order_relaxed);
-  }
-
-  // the design record (R5, cold-start suppression): true once the first license
-  // check/poll has completed. The soft "x-pagespeed-warn: unlicensed" header
-  // is emitted iff (LicenseCheckedOnce() && !ShouldOptimize()), so it stays
-  // suppressed until we have actually checked the license at least once.
-  // Lock-free — safe on the request hot path. Default true (fail-open) so
-  // paid installs never flash the warning during respawn / app-pool recycle.
-  bool LicenseCheckedOnce() const {
-    return license_checked_once_.load(std::memory_order_relaxed);
-  }
-
-  // Mark that the first license check/poll has completed. Called from
-  // PostInitHook right after the initial UpdateLicenseActive() seed.
-  void MarkLicenseChecked() {
-    license_checked_once_.store(true, std::memory_order_relaxed);
-  }
-
-  // the design record: true only when the active license grants the agent_optimize
-  // entitlement (license-valid AND the entitlement claim). Lock-free — safe on
-  // the request hot path. Default false (opt-in), unlike license_active_.
-  // Overrides ServerContext::IsAgentOptimizeEntitled (the base returns false).
-  bool IsAgentOptimizeEntitled() const override {
-    return agent_optimize_entitled_.load(std::memory_order_relaxed);
-  }
-
-  // Update the agent_optimize entitlement flag. Called by the license handler
-  // on the same state-change path as UpdateLicenseActive (init, apply, renewal).
-  void UpdateAgentOptimizeEntitled(bool entitled) {
-    agent_optimize_entitled_.store(entitled, std::memory_order_relaxed);
-  }
-
-  // the design record: true once this install has been observed optimizing a host that is
-  // OUTSIDE the licensed site of an active scope=="site" license (over-cap).
-  // Lock-free — safe to read on the request hot path and from the status JSON.
-  // A SOFT, display/telemetry-only signal: it NEVER gates optimization, never
-  // feeds ShouldOptimize()/license_active_. Once latched it
-  // stays set until the next license change (UpdateOverCapPolicy resets it).
-  // Acquire-load: pairs with the release-stores in MaybeFlagOverCap (latch) and
-  // UpdateOverCapPolicy (reset) so lock-free readers (the per-port warn header
-  // and the status JSON getter) observe a latch/reset on weak-memory CPUs (ARM)
-  // without taking over_cap_mutex_.
-  bool IsOverCap() const { return over_cap_.load(std::memory_order_acquire); }
-
-  // Per-request over-cap detection, called from each port's HTML-transform path
-  // with the request Host. Cheap and idempotent: short-circuits in two relaxed
-  // atomic loads for the common cases (already latched; or no active site-scope
-  // policy — unlicensed / community / org / host / scopeless / no domain), and
-  // only takes over_cap_mutex_ for an actively site-licensed install that has
-  // not yet latched. Sets the latch + logs a rate-limited WARNING the first
-  // time an external off-license host is seen. Never returns a value or alters
-  // optimization — purely sets the display/telemetry flag.
-  void MaybeFlagOverCap(StringPiece hostname);
-
-  // Publish the over-cap policy from the applied/renewed license. |active| is
-  // the live license validity; |scope|/|domain| are the design record token fields
-  // (empty on legacy scopeless tokens). site-scope is armed ONLY for an active
-  // scope=="site" license with a non-empty domain; every other case disarms
-  // detection. Resets the latch so a re-pointed license is evaluated afresh.
-  // Called on the same state-change path as UpdateLicenseActive (init, apply,
-  // renewal).
-  void UpdateOverCapPolicy(bool active, StringPiece scope, StringPiece domain);
-
  protected:
   // Flush the cache by updating the cache flush timestamp in the global
   // options.  This will change its signature, which is part of the cache key,
@@ -299,33 +224,6 @@ class SystemServerContext : public ServerContext {
   void CheckLegacyGlobalCacheFlushFile();
 
   std::unique_ptr<AdminSite> admin_site_;
-
-  // Lock-free license enforcement flag. Updated by AdminLicenseHandler,
-  // checked by per-port request handlers on every request.
-  std::atomic<bool> license_active_{true};  // Default true until Init
-  // the design record (R5): true once the first license check/poll has completed.
-  // Default true (fail-open) so paid installs never flash the soft warn header
-  // during respawn / app-pool recycle; PostInitHook re-affirms it after the
-  // initial seed. Separate atomic — never overloads license_active_.
-  std::atomic<bool> license_checked_once_{true};
-  // the design record: default false (opt-in) — the agent_optimize entitlement must be
-  // explicitly granted by an applied license token.
-  std::atomic<bool> agent_optimize_entitled_{false};
-
-  // the design record over-cap state. over_cap_ is the latched display/telemetry flag
-  // (read lock-free via IsOverCap / the status JSON). over_cap_site_scoped_ is
-  // the cheap hot-path gate so non-site installs (the common case) exit
-  // MaybeFlagOverCap without taking over_cap_mutex_. The licensed registrable
-  // domain (lowercased) is guarded by over_cap_mutex_, which also serializes
-  // the rare detect-transition (latch set) with UpdateOverCapPolicy (publish +
-  // latch reset) — MaybeFlagOverCap re-checks the gate + domain under the lock
-  // before latching so a racing license change can never latch a false
-  // positive (the guard 2.0's adversarial review hardened). Default disarmed.
-  std::atomic<bool> over_cap_{false};
-  std::atomic<bool> over_cap_site_scoped_{false};
-  std::atomic<int64_t> last_over_cap_warn_us_{0};
-  GoogleString over_cap_domain_;  // guarded by over_cap_mutex_
-  std::mutex over_cap_mutex_;
 
   bool initialized_;
   bool use_per_vhost_statistics_;

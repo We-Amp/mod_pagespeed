@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2024-2026 We-Amp B.V.
 //
 // product-facts.mjs — SINGLE SOURCE OF TRUTH for drift-prone product facts.
@@ -88,7 +88,7 @@ export const PRICING_TIERS = [
     unit: 'site',
     prices: { annualUsd: null, monthlyUsd: null },
     priceQualifier: '',
-    note: 'fully functional without a key, adds an X-PageSpeed-Warn: unlicensed response header',
+    note: 'no signup, no support subscription',
   },
   {
     id: 'community',
@@ -137,8 +137,18 @@ export const PRICING_TIERS = [
   },
 ];
 
+// PURITY RULE FOR THIS FILE
+//   Every top-level derivation below is either a plain literal or a call
+//   annotated /* @__PURE__ */ whose arguments are bare identifiers. Downstream
+//   bundlers (the 1.15 web console imports only names and URLs from this file)
+//   can then drop the whole pricing / apt-matrix block as dead code instead of
+//   embedding the ladder literals. Keep it that way: no bare
+//   `X.map(...).join(...)` or `Object.fromEntries(X.map(...))` at top level —
+//   wrap the derivation in a helper and call it through the annotation.
+
 // id -> row lookup, e.g. TIERS.business.prices.annualUsd.
-export const TIERS = Object.fromEntries(PRICING_TIERS.map((t) => [t.id, t]));
+const byId = (rows) => Object.fromEntries(rows.map((r) => [r.id, r]));
+export const TIERS = /* @__PURE__ */ byId(PRICING_TIERS);
 
 const usd = (n) => '$' + n.toLocaleString('en-US');
 /** Render one row's price label, derived from the configured tier values. */
@@ -153,23 +163,21 @@ function tierPriceLabel(t) {
   return '$0';
 }
 // id -> price label, derived — never restate a ladder number by hand.
-export const TIER_PRICE_LABELS = Object.fromEntries(
-  PRICING_TIERS.map((t) => [t.id, tierPriceLabel(t)]),
-);
+const priceLabels = (rows) => Object.fromEntries(rows.map((t) => [t.id, tierPriceLabel(t)]));
+export const TIER_PRICE_LABELS = /* @__PURE__ */ priceLabels(PRICING_TIERS);
 
 // The ladder as markdown bullets (llms*.txt) and as one line (ai-plugin.json).
 // Both derive from PRICING_TIERS, so a tier change flows to every surface.
-export const PRICING_LADDER_MD = PRICING_TIERS.map(
-  (t) => `- ${t.name} — ${TIER_PRICE_LABELS[t.id]}: ${t.note}`,
-).join('\n');
-export const PRICING_LADDER_LINE = PRICING_TIERS.map(
-  (t) => `${t.name} ${TIER_PRICE_LABELS[t.id]} (${t.note})`,
-).join('; ');
+const ladderMd = (rows, labels) =>
+  rows.map((t) => `- ${t.name} — ${labels[t.id]}: ${t.note}`).join('\n');
+const ladderLine = (rows, labels) =>
+  rows.map((t) => `${t.name} ${labels[t.id]} (${t.note})`).join('; ');
+export const PRICING_LADDER_MD = /* @__PURE__ */ ladderMd(PRICING_TIERS, TIER_PRICE_LABELS);
+export const PRICING_LADDER_LINE = /* @__PURE__ */ ladderLine(PRICING_TIERS, TIER_PRICE_LABELS);
 
 // Business annual vs 12 monthly cycles (derived).
-export const ANNUAL_SAVINGS_PCT = Math.round(
-  (1 - PRICE_ANNUAL_USD / (12 * PRICE_MONTHLY_USD)) * 100,
-);
+const savingsPct = (annual, monthly) => Math.round((1 - annual / (12 * monthly)) * 100);
+export const ANNUAL_SAVINGS_PCT = /* @__PURE__ */ savingsPct(PRICE_ANNUAL_USD, PRICE_MONTHLY_USD);
 // Google-recommended Offer freshness date; bump ~yearly (see offer-jsonld.ts).
 export const PRICE_VALID_UNTIL = '2026-12-31';
 
@@ -272,6 +280,10 @@ export const V2_LINE = '2.0';
 //     classes, pixel density, transfer-encoding alternates, and proactive
 //     generation of the full variant matrix. This comment previously made the
 //     wrong claim and no guard caught it -- see rule f3.
+// The rows below reference these lists directly (no spread copy): a spread is a
+// side effect to bundlers and would pin the whole table into consumers that
+// import only names and URLs. portsFor() copies on read, so nothing shares a
+// mutable array with a caller.
 const PORTS_1_15 = ['Apache', 'nginx', 'IIS']; // no Envoy — see rule 2 above
 const PORTS_2_0 = ['nginx', 'ASP.NET Core'];
 
@@ -279,29 +291,28 @@ export const IMAGE_FORMAT_SUPPORT = [
   {
     format: 'WebP',
     editions: {
-      [V1_LINE]: { ports: [...PORTS_1_15] },
-      [V2_LINE]: { ports: [...PORTS_2_0] },
+      [V1_LINE]: { ports: PORTS_1_15 },
+      [V2_LINE]: { ports: PORTS_2_0 },
     },
   },
   {
     format: 'AVIF',
     editions: {
-      [V1_LINE]: { ports: [...PORTS_1_15] },
-      [V2_LINE]: { ports: [...PORTS_2_0] },
+      [V1_LINE]: { ports: PORTS_1_15 },
+      [V2_LINE]: { ports: PORTS_2_0 },
     },
   },
   {
     format: 'SVG',
     editions: {
-      [V2_LINE]: { ports: [...PORTS_2_0] },
+      [V2_LINE]: { ports: PORTS_2_0 },
     },
   },
 ];
 
 // format -> row lookup, e.g. FORMAT_SUPPORT.AVIF.editions['1.15'].ports.
-export const FORMAT_SUPPORT = Object.fromEntries(
-  IMAGE_FORMAT_SUPPORT.map((r) => [r.format, r]),
-);
+const byFormat = (rows) => Object.fromEntries(rows.map((r) => [r.format, r]));
+export const FORMAT_SUPPORT = /* @__PURE__ */ byFormat(IMAGE_FORMAT_SUPPORT);
 
 /** Edition labels that encode `format`, in table order. e.g. ['1.15', '2.0']. */
 export function editionsFor(format) {
@@ -356,7 +367,7 @@ export function editionClause(formats = IMAGE_FORMAT_SUPPORT.map((r) => r.format
 // (['WebP', 'AVIF', 'SVG']). Its consumers — src/pages/api/product.json.ts and
 // src/pages/self-hosted-image-optimization.astro — must render byte-identically.
 // Derived, so a table change flows here instead of drifting.
-export const IMAGE_FORMATS = formatsFor(V2_LINE);
+export const IMAGE_FORMATS = /* @__PURE__ */ formatsFor(V2_LINE);
 
 // --- NuGet packages ---------------------------------------------------------
 export const PKG_ASPNETCORE = 'WeAmp.PageSpeed.AspNetCore'; // ModPageSpeed 2.0 middleware
@@ -392,35 +403,21 @@ export const NGINX_APT_DISTROS = [
 export const NGINX_APT_ARCHES = 'amd64 + arm64';
 // Compact prose listing of the prebuilt apt matrix, e.g.
 // "Debian 11 bullseye (nginx 1.18.0), Debian 12 bookworm (nginx 1.22.1), …".
-export const NGINX_APT_MATRIX = NGINX_APT_DISTROS.map(
-  (d) => `${d.distro} (nginx ${d.nginx})`,
-).join(', ');
+const aptMatrix = (rows) => rows.map((d) => `${d.distro} (nginx ${d.nginx})`).join(', ');
+export const NGINX_APT_MATRIX = /* @__PURE__ */ aptMatrix(NGINX_APT_DISTROS);
 
-// --- Licensing --------------------------------------------------------------
-export const LICENSE = 'Commercial';
-
-// --- Source-publication roadmap ---------------------------------------------
-// Single source of truth for the BSL source-publication plan, mirrored by the
-// machine-readable /api/product.json `source_publication` field AND the human
-// /license/ page. Keeping it here means those two surfaces (and any future one)
-// cannot drift on the license target, the change-date period, or the status.
-// `status: 'planned'` = intent stated, no date committed.
+// --- Software license -------------------------------------------------------
+// Single source of truth for the license the software is distributed under,
+// mirrored by the machine-readable /api/product.json `license` and
+// `source_publication` fields AND the human /license/ page, so those surfaces
+// cannot drift on the license name, its SPDX id, or the status. The sync test
+// (test/sync/source-publication-sync.test.ts) pins the record and fails if a
+// page re-states any of it as a literal.
 export const SOURCE_PUBLICATION = {
-  status: 'planned',
-  license: 'Business Source License 1.1', // full name (first mention in prose)
-  licenseId: 'BSL-1.1', // machine id (product.json `license_target`)
-  changeDateYears: 4, // each release converts this many years after publication
-  convertsTo: 'Apache 2.0', // license each release converts to at the change-date
+  status: 'licensed', // flips to 'published' with the commit that adds the public source location
+  license: 'Apache License 2.0', // full name (first mention in prose)
+  licenseId: 'Apache-2.0', // SPDX id (product.json `license` / `source_publication.license`)
 };
-// Display forms derived from the canonical values above, so the /license/ page
-// never re-states any of them by hand (and a renumber flows to every mention).
-const SMALL_INTEGER_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
-export const CHANGE_DATE_YEARS_WORD =
-  SMALL_INTEGER_WORDS[SOURCE_PUBLICATION.changeDateYears] ?? String(SOURCE_PUBLICATION.changeDateYears);
-export const SOURCE_LICENSE_LABEL = SOURCE_PUBLICATION.licenseId.replace('-', ' '); // 'BSL 1.1'
-export const SOURCE_LICENSE_ABBR = SOURCE_PUBLICATION.licenseId.split('-')[0]; // 'BSL'
-export const SOURCE_PUBLICATION_STATUS_LABEL =
-  SOURCE_PUBLICATION.status.charAt(0).toUpperCase() + SOURCE_PUBLICATION.status.slice(1); // 'Planned'
 
 /**
  * Token map consumed by scripts/generate-llms.mjs. Every value is the EXACT
@@ -428,7 +425,7 @@ export const SOURCE_PUBLICATION_STATUS_LABEL =
  * corresponding {{TOKEN}} site. Derive from the typed constants above so there
  * is one source — never hardcode a second copy of a number here.
  */
-export const LLMS_TOKENS = {
+const llmsTokens = () => ({
   PRICE_UNIT,
   PRICING_LADDER_MD,
   PRICING_LADDER_LINE,
@@ -454,4 +451,5 @@ export const LLMS_TOKENS = {
   NGINX_APT_ARCHES,
   COMPANY_KVK,
   COMPANY_FOUNDED_YEAR: String(COMPANY_FOUNDED_YEAR),
-};
+});
+export const LLMS_TOKENS = /* @__PURE__ */ llmsTokens();

@@ -1,4 +1,7 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 #
 # Entrypoint script for nginx package test containers.
 # Configures nginx with the packaged PageSpeed module, starts the server,
@@ -52,6 +55,12 @@ log_info "Module: $MODULE_PATH ($(du -h "$MODULE_PATH" | cut -f1))"
 # ── Step 2: Set up directories ──────────────────────────────────────────────
 log_info "Setting up directories..."
 mkdir -p "$WORK_DIR" "$DOC_ROOT" "$LOG_DIR" "$CACHE_DIR"
+# Drop-in compatibility fixture: releases before 2.1 kept a license token at
+# <parent of FileCachePath>/pagespeed.license. Stage a stale one so the suite
+# runs against an upgraded-install layout; the module must ignore it (one INFO
+# line, no behaviour change) -- asserted by automatic/test_no_license_apparatus.py
+# via the error log ($PAGESPEED_NGINX_ERROR_LOG, exported below).
+echo "stale-token-from-a-previous-release" > "$(dirname "$CACHE_DIR")/pagespeed.license"
 mkdir -p "$WORK_DIR/client_body_temp" "$WORK_DIR/proxy_temp" "$WORK_DIR/fastcgi_temp"
 
 # ── Step 3: Copy test content ───────────────────────────────────────────────
@@ -227,6 +236,10 @@ export PAGESPEED_STATS_PATH=/pagespeed_statistics
 export PAGESPEED_ADMIN_PATH=/pagespeed_admin
 export PAGESPEED_EXAMPLE_ROOT=/mod_pagespeed_example
 export PAGESPEED_TEST_ROOT=/mod_pagespeed_test
+# The stale-license notice is logged once per worker at startup; the admin
+# message history is a 100 KB ring that evicts it before the suite gets there,
+# so the test reads it from the error log (error_log level must stay at info).
+export PAGESPEED_NGINX_ERROR_LOG="$LOG_DIR/error.log"
 export PYTHONDONTWRITEBYTECODE=1
 
 cd /src/test/system

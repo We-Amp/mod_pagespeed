@@ -15,8 +15,6 @@ here -- everything is portable.
 | `http/` | HTTP primitives: `ContentType`, `GoogleUrl`, `RequestHeaders`, `ResponseHeaders`, `CachingHeaders`, `BotChecker` |
 | `image/` | Image codec wrappers: GIF, PNG, JPEG, WebP readers/optimizers; scanline-based processing pipeline |
 | `js/` | JavaScript tokenizer, minifier (`JsMinify`), keyword tables |
-| `license/` | Ed25519-based license token generation and validation |
-| `license_v2/` | V2 license file format and verification |
 | `sharedmem/` | Shared-memory abstractions: `InProcessSharedMem`, `SharedCircularBuffer`, `SharedMemStatistics`, `SharedMemLockManager` |
 | `thread/` | Threading primitives: `PthreadSharedMem`, `SchedulerThread`, `EventScheduler`, `EventDispatcher`, `QueuedWorkerPool` |
 | `util/` | Platform helpers, `NonceGenerator`, `CopyOnWrite`, `Gzip`, `ReEncoder` |

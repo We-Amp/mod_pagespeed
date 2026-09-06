@@ -10,9 +10,9 @@
 # The guard also fails on STALE entries (paths git no longer tracks outside
 # test/), so this file cannot silently accrue cruft.
 #
-# After the webbotauth + license_v2 relocation the 9 kernel tests are gone from
-# this list (they now live under test/pagespeed/kernel/<pkg>/). The remaining 17
-# below are pre-existing, intentionally-out-of-test/ files unrelated to this work.
+# After the kernel test relocation the kernel tests are gone from this list
+# (they now live under test/pagespeed/kernel/<pkg>/). The remaining 17 below are
+# pre-existing, intentionally-out-of-test/ files unrelated to this work.
 
 # --- benchmarks (pagespeed_cc_benchmark): tagged `manual`, so they are NOT in
 # the default CI build/test set by design; microbenchmarks, not unit tests, run

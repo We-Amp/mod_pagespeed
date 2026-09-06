@@ -19,7 +19,7 @@
 
 //
 // the design record: the AgentOptimizeVaryFilter advertises `Vary: Accept` on an HTML
-// response when an agent_optimize negotiation is active and entitled. mod_
+// response when an agent_optimize negotiation is active. mod_
 // pagespeed 1.1 has NO markdown render moat (no headless browser), so the
 // response BODY is never changed and no markdown is ever served — this filter
 // is the negotiation/cloaking-safety signal only. It lives in the shared
@@ -38,8 +38,8 @@ class RequestHeaders;
 class RewriteDriver;
 
 // Adds `Vary: Accept` to the HTML response when:
-//   options()->agent_optimize()  (gates this filter's presence, set at AddFilters)
-//   AND server_context()->IsAgentOptimizeEntitled()  (license entitlement)
+//   options()->agent_optimize()  (gates this filter's presence, set at AddFilters;
+//                                 the operator flag is the only gate, the design record D2)
 //   AND the request's Accept header contains the text/markdown token.
 // Never modifies the body. Idempotent (won't duplicate an existing Vary: Accept).
 class AgentOptimizeVaryFilter : public CommonFilter {

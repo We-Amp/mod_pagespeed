@@ -244,39 +244,6 @@ pagespeed_cc_test(
     ],
 )
 
-# AdminLicenseHandler integration tests.
-# Uses the testkey variant so tests can sign AND verify tokens with the
-# zero-seed Ed25519 keypair.  Depends on admin_license_handler_testkey
-# (NOT test_base_core) to avoid ODR violations with the production
-# license_verifier that test_base_core transitively pulls in.
-pagespeed_cc_test(
-    name = "admin_license_handler_test",
-    srcs = ["admin_license_handler_test.cc"],
-    copts = ["-DPAGESPEED_SERVER=\\\"test\\\""],
-    shard_count = 1,
-    deps = [
-        "//pagespeed/kernel/license_v2:license_file",
-        "//pagespeed/kernel/license_v2:license_signer",
-        "//pagespeed/kernel/license_v2:license_token",
-        "//pagespeed/kernel/license_v2:license_verifier_testkey",
-        "//pagespeed/kernel/license_v2:tracking_metadata",
-        "//pagespeed/system:admin_license_handler_testkey",
-        "//test/pagespeed/kernel/base:kernel_test_util",
-    ],
-)
-
-# the design record over-cap matcher unit tests (PSL-free, pure header — no server
-# context needed, so a lightweight standalone target).
-pagespeed_cc_test(
-    name = "over_cap_match_test",
-    srcs = ["over_cap_match_test.cc"],
-    shard_count = 1,
-    deps = [
-        "//pagespeed/system:over_cap_match",
-        "//test/pagespeed/kernel/base:kernel_test_util",
-    ],
-)
-
 # =============================================================================
 # Backward-compatible aggregate test target
 # =============================================================================

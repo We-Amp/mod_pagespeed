@@ -378,9 +378,6 @@ InstawebContext* build_context_for_request(request_rec* request) {
   ApacheServerContext* server_context =
       InstawebContext::ServerContextFromServerRec(request->server);
   // Escape ASAP if we're in unplugged mode or proxy_all_requests_mode.
-  // the design record: soft enforcement — license state no longer gates optimization
-  // here; the unlicensed state is signalled softly via a response header on
-  // the optimized path instead.
   if (server_context->global_config()->unplugged() ||
       server_context->global_config()->proxy_all_requests_mode()) {
     return nullptr;
@@ -512,33 +509,6 @@ InstawebContext* build_context_for_request(request_rec* request) {
     // context object.
     context->Finish();
     return nullptr;
-  }
-
-  // the design record (D2): soft enforcement — on the optimized HTML path, when running
-  // unlicensed (live signal), add the soft warn header. Read at serve time from
-  // the LIVE license atomic (ShouldOptimize), keyed on the same atomic that
-  // encodes the grace window (R6); suppressed until the first license check
-  // completes (R5, LicenseCheckedOnce). Added to request->headers_out (the
-  // transport map) only — never to a cached artifact, Vary, or cache-key.
-  if (server_context->LicenseCheckedOnce() &&
-      !server_context->ShouldOptimize()) {
-    apr_table_add(request->headers_out, "x-pagespeed-warn", "unlicensed");
-  }
-
-  // the design record: over-cap detection on the optimized HTML path, keyed on the
-  // request Host. Runs for ANY license state — an active scope=site license can
-  // be over-cap even while fully licensed, so this is independent of the
-  // unlicensed gate above. Self-guards (a no-op unless a site policy is armed)
-  // and never gates optimization.
-  if (const char* host =
-          apr_table_get(request->headers_in, HttpAttributes::kHost)) {
-    server_context->MaybeFlagOverCap(host);
-  }
-  // the design record: emit the soft over-cap warn header (a sibling x-pagespeed-warn
-  // value; mutually exclusive in practice with "unlicensed" above, since
-  // over-cap requires an active site license). Display/telemetry only.
-  if (server_context->IsOverCap()) {
-    apr_table_add(request->headers_out, "x-pagespeed-warn", "over-cap");
   }
 
   // Set X-Mod-Pagespeed header.

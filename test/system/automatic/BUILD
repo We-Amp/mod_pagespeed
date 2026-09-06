@@ -68,6 +68,7 @@ pagespeed_py_test_suite(
         "test_make_show_ads_async.py",
         "test_move_css.py",
         "test_no_cache.py",
+        "test_no_license_apparatus.py",
         "test_outliners.py",
         "test_query_params_resource.py",
         "test_rel_canonical.py",

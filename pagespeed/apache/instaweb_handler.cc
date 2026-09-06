@@ -1488,7 +1488,7 @@ apr_status_t InstawebHandler::instaweb_handler(request_rec* request) {
                                  AdminHandlerFamily::kAdmin, kAdminHandler,
                                  message_handler);
     InstawebHandler instaweb_handler(request);
-    // Read POST body for JSON API endpoints (e.g. /v1/license/*).
+    // Read POST body for JSON API endpoints.
     GoogleString request_body;
     if (request->method_number == M_POST) {
       apr_status_t body_ret;
@@ -1515,7 +1515,7 @@ apr_status_t InstawebHandler::instaweb_handler(request_rec* request) {
                                  AdminHandlerFamily::kGlobalAdmin,
                                  kGlobalAdminHandler, message_handler);
     InstawebHandler instaweb_handler(request);
-    // Read POST body for JSON API endpoints (e.g. /v1/license/*).
+    // Read POST body for JSON API endpoints.
     GoogleString request_body;
     if (request->method_number == M_POST) {
       apr_status_t body_ret;

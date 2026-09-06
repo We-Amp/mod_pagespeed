@@ -32,7 +32,7 @@ Apache system-test rig under ASan" from the sanitizer-rig umbrella work. Compani
 | `cleanup_apache_asan_rig.sh` | Stop Apache, restore `/etc/apache2/envvars`, remove corpus (runs on failure too) |
 
 Requires `apache2` + passwordless `sudo`. Env knobs: `MODULE_SO`, `DOCROOT`
-(`/var/www/html`), `PORT` (80), `ERRLOG`, `RIG_DIR`, `LICENSE_TOKEN`,
+(`/var/www/html`), `PORT` (80), `ERRLOG`, `RIG_DIR`,
 `ASAN_RUNTIME`, `DURATION`, `CONCURRENCY`, `REPO_DIR`.
 
 ## Build the module

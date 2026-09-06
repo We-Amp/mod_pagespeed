@@ -22,35 +22,6 @@ licenses(["notice"])  # Apache 2
 # Edit them there — that is the single source of truth.
 
 # =============================================================================
-# JSON field extraction utilities (used by admin_license_handler).
-# JsonEscape() now lives in string_util.h.
-# =============================================================================
-cc_library(
-    name = "json_utils",
-    srcs = ["json_utils.cc"],
-    hdrs = ["json_utils.h"],
-    visibility = ["//visibility:public"],
-    deps = [
-        "//pagespeed/kernel/base:pagespeed_base",
-    ],
-)
-
-# =============================================================================
-# the design record over-cap host matching (PSL-free, header-only).
-# Reimplemented byte-faithful from ModPageSpeed 2.0 (NOT vendored — these live
-# in the engine, not the crypto sync boundary). Standalone so both the system
-# library and over_cap_match_test depend on a single owner.
-# =============================================================================
-cc_library(
-    name = "over_cap_match",
-    hdrs = ["over_cap_match.h"],
-    visibility = ["//visibility:public"],
-    deps = [
-        "//pagespeed/kernel/base:pagespeed_base",
-    ],
-)
-
-# =============================================================================
 # the design record optimization thread-count policy.
 # Standalone so the effective-CPU-budget detection and the budget arithmetic
 # can be unit-tested without a server, a container, or a particular host.
@@ -220,50 +191,6 @@ cc_library(
 )
 
 # =============================================================================
-# Admin license handler
-# =============================================================================
-# Handles /v1/license/* endpoints in the admin console.
-# Separate library because it depends on license_v2 (Ed25519).
-cc_library(
-    name = "admin_license_handler",
-    srcs = ["admin_license_handler.cc"],
-    hdrs = ["admin_license_handler.h"],
-    local_defines = ["PAGESPEED_SERVER=\\\"unknown\\\""],
-    visibility = ["//visibility:public"],
-    deps = [
-        ":json_utils",
-        "//net/instaweb/http",
-        "//pagespeed/kernel/base:pagespeed_base",
-        "//pagespeed/kernel/http",
-        "//pagespeed/kernel/license_v2:license_file",
-        "//pagespeed/kernel/license_v2:license_token",
-        "//pagespeed/kernel/license_v2:license_verifier",
-        "//pagespeed/kernel/license_v2:tracking_metadata",
-    ],
-)
-
-# Test variant with zero-seed Ed25519 key for integration testing.
-# Tokens signed with CreateKeypair(seed=zeros) will verify successfully.
-cc_library(
-    name = "admin_license_handler_testkey",
-    testonly = True,
-    srcs = ["admin_license_handler.cc"],
-    hdrs = ["admin_license_handler.h"],
-    local_defines = ["PAGESPEED_SERVER=\\\"test\\\""],
-    visibility = ["//visibility:public"],
-    deps = [
-        ":json_utils",
-        "//net/instaweb/http",
-        "//pagespeed/kernel/base:pagespeed_base",
-        "//pagespeed/kernel/http",
-        "//pagespeed/kernel/license_v2:license_file",
-        "//pagespeed/kernel/license_v2:license_token",
-        "//pagespeed/kernel/license_v2:license_verifier_testkey",
-        "//pagespeed/kernel/license_v2:tracking_metadata",
-    ],
-)
-
-# =============================================================================
 # Fine-grained cache backend targets for faster incremental builds
 # =============================================================================
 
@@ -374,7 +301,6 @@ cc_library(
     hdrs = SYSTEM_CORE_HDRS,
     copts = [
         "-DPAGESPEED_ENABLE_MEMCACHED=0",
-        "-DPAGESPEED_SERVER=\\\"envoy\\\"",
         "-Wno-trigraphs",  # Generated html_admin_console.cc contains ??X sequences
     ],
     visibility = ["//visibility:public"],
@@ -395,7 +321,6 @@ cc_library(
     hdrs = SYSTEM_CORE_HDRS,
     copts = [
         "-DPAGESPEED_ENABLE_MEMCACHED=0",
-        "-DPAGESPEED_SERVER=\\\"iis\\\"",
         "-Wno-trigraphs",  # Generated html_admin_console.cc contains ??X sequences
     ],
     visibility = ["//visibility:public"],
@@ -412,10 +337,11 @@ cc_library(
 # Includes memcached_cache.cc which is excluded from system_envoy and
 # system_windows.
 # Generated via pagespeed_system_library() macro in system.bzl.
-pagespeed_system_library(name = "system", server_type = "nginx")
+pagespeed_system_library(name = "system")
 
-# Apache-specific variant. Reports server_type="apache" to the license service.
-pagespeed_system_library(name = "system_apache", server_type = "apache")
+# Apache-specific variant (same sources; kept as a distinct target so the
+# Apache and nginx link graphs stay independently addressable).
+pagespeed_system_library(name = "system_apache")
 
 
 cc_library(

@@ -610,13 +610,6 @@ class ServerContext {
   // for HTML.
   virtual bool ProxiesHtml() const = 0;
 
-  // the design record: whether the active license grants the agent_optimize entitlement.
-  // The base context (tests / PSOL-core, which have no licensing) returns false;
-  // SystemServerContext overrides it with the real, license-derived value. The
-  // shared AgentOptimizeVaryFilter dispatches through this virtual so it never
-  // has to downcast to the system layer.
-  virtual bool IsAgentOptimizeEntitled() const { return false; }
-
   // Makes a new RequestProperties.
   RequestProperties* NewRequestProperties();
 

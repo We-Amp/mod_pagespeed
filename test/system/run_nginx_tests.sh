@@ -1,4 +1,7 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 #
 # Builds ngx_pagespeed module, sets up NGINX, and runs Python system tests.
 #
@@ -265,6 +268,12 @@ setup_directories() {
     mkdir -p "$NGINX_CONFIG_DIR"
     mkdir -p "$NGINX_LOG_DIR"
     mkdir -p "$NGINX_CACHE_DIR"
+    # Drop-in compatibility fixture: releases before 2.1 kept a license token
+    # at <parent of FileCachePath>/pagespeed.license. Stage a stale one so the
+    # whole suite runs against an upgraded-install layout; the module must
+    # ignore it (one INFO line, no behaviour change) — asserted by
+    # automatic/test_no_license_apparatus.py.
+    echo "stale-token-from-a-previous-release" > "$(dirname "$NGINX_CACHE_DIR")/pagespeed.license"
     mkdir -p "$NGINX_CONFIG_DIR/www"
     # NGINX temp directories (needed for proxy, fastcgi, etc.)
     mkdir -p "$NGINX_CONFIG_DIR/client_body_temp"
@@ -684,6 +693,10 @@ run_tests() {
     export PAGESPEED_EXAMPLE_ROOT="${PAGESPEED_EXAMPLE_ROOT:-/mod_pagespeed_example}"
     export PAGESPEED_TEST_ROOT="${PAGESPEED_TEST_ROOT:-/mod_pagespeed_test}"
     export PAGESPEED_CACHE_DIR="${NGINX_CACHE_DIR}"
+    # Where automatic/test_no_license_apparatus.py reads the startup-time
+    # stale-license notice on nginx (the admin message history is a 100 KB
+    # ring that evicts it mid-suite). Requires error_log level info.
+    export PAGESPEED_NGINX_ERROR_LOG="$NGINX_LOG_DIR/error.log"
 
     # HTTPS configuration for TLS tests
     if [ -f "$TLS_CERT_FILE" ] && [ -f "$TLS_KEY_FILE" ]; then

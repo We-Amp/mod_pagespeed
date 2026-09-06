@@ -1957,8 +1957,8 @@ class RewriteOptions {
 
   // the design record: agent_optimize negotiation toggle (OFF by default). On 1.1 this
   // only enables Accept: text/markdown recognition + Vary: Accept on HTML; it
-  // never changes the body (no markdown render). Gated additionally by the
-  // agent_optimize license entitlement at request time.
+  // never changes the body (no markdown render). The operator flag is the
+  // only gate.
   void set_agent_optimize(bool x) { set_option(x, &agent_optimize_); }
   bool agent_optimize() const { return agent_optimize_.value(); }
 

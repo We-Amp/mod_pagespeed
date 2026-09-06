@@ -279,7 +279,7 @@ class InstawebHandler {
                                    GoogleString* data, apr_status_t* ret);
 
   // Read the raw POST body without content-type validation.
-  // Used for JSON API endpoints (e.g. /v1/license/*).
+  // Used for JSON API endpoints.
   static bool read_post_body(const request_rec* request, GoogleString* data,
                              apr_status_t* ret);
 

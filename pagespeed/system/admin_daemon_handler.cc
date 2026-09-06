@@ -59,8 +59,7 @@ static_assert(sizeof(kDaemonEndpoints) / sizeof(kDaemonEndpoints[0]) ==
 
 // DaemonProxyFetch captures the upstream daemon response and forwards status,
 // content-type, and body (only those) to the original client fetch.
-// Self-deletes on completion; modeled on LicenseProxyFetch in
-// admin_license_handler.cc.  Named at namespace scope (not the anonymous
+// Self-deletes on completion.  Named at namespace scope (not the anonymous
 // namespace above) so AdminDaemonHandler can befriend it.
 class DaemonProxyFetch : public StringAsyncFetch {
  public:

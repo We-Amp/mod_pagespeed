@@ -161,8 +161,7 @@ function Build-PageSpeedModule {
             "build",
             "--config=windows",
             "--config=clang-cl",
-            "//pagespeed/iis:pagespeed_iis.dll",
-            "//pagespeed/kernel/license_v2:generate_license_token"
+            "//pagespeed/iis:pagespeed_iis.dll"
         )
 
         & bazel @buildArgs
@@ -176,23 +175,6 @@ function Build-PageSpeedModule {
 
         $dllPath = "$SourceRoot\bazel-bin\pagespeed\iis\pagespeed_iis.dll"
         Write-Status "Module ready at: $dllPath" "Gray"
-
-        # Generate test license token and pre-seed the license file.
-        # Write to both the default cache path parent (C:\PageSpeed) and the
-        # configured fileCachePath parent (C:\) to cover both code paths.
-        $tokenBin = "$SourceRoot\bazel-bin\pagespeed\kernel\license_v2\generate_license_token.exe"
-        if (Test-Path $tokenBin) {
-            $keyPath = if ($env:PAGESPEED_SIGNING_KEY) { $env:PAGESPEED_SIGNING_KEY } else { "$env:USERPROFILE\.weamp\license-signing-key" }
-            if (-not (Test-Path $keyPath)) {
-                Write-Warning "No signing key at $keyPath - set LICENSE_TOKEN env var instead"
-            } else {
-                $token = & $tokenBin --key $keyPath --sub "test@system-test.local" --exp-duration 3600
-                @("C:\PageSpeed\pagespeed.license", "C:\pagespeed.license") | ForEach-Object {
-                    Set-Content -Path $_ -Value $token -NoNewline
-                    Write-Status "Test license written to $_" "Green"
-                }
-            }
-        }
     } finally {
         Pop-Location
     }

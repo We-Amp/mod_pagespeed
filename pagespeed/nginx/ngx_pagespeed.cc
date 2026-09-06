@@ -2784,11 +2784,6 @@ ngx_int_t ps_html_rewrite_header_filter(ngx_http_request_t* r) {
   // Poll for cache flush on every request (polls are rate-limited).
   cfg_s->server_context->FlushCacheIfNecessary();
 
-  // the design record: soft enforcement — optimization always proceeds regardless of
-  // license state. The unlicensed state is signalled softly via the
-  // "x-pagespeed-warn: unlicensed" header added on the optimized HTML path
-  // (see ps_set_buffered below), not by declining to optimize here.
-
   ps_request_ctx_t* ctx = ps_get_request_context(r);
 
   if (ctx == nullptr || ctx->html_rewrite == false) {
@@ -3462,8 +3457,6 @@ ngx_int_t ps_content_handler(ngx_http_request_t* r) {
                                  response_category);
     case RequestRouting::kCachePurge:
     case RequestRouting::kResource:
-      // the design record: soft enforcement — serve optimized resources regardless of
-      // license state (no longer declines when unlicensed).
       return ps_resource_handler(r, false /* html rewrite */,
                                  response_category);
   }

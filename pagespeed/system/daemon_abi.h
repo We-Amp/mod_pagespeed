@@ -128,7 +128,7 @@ inline constexpr int kPsErrNotFound = 1;
 // THE SERVE ARM DID NOT MOVE IT, and that is worth stating because the
 // opposite would be the natural guess.  Everything the serve arm binds is
 // OLDER than the floor: the cache reads and their accessors are 1.0, the
-// serve-hit recorder is 1.0, the serve-class recorder is 1.1, the freshness
+// serve-hit recorder is 1.0, the serve-class recorder is 1.0, the freshness
 // evaluator and the `Cache-Control` builder are 1.2.  So a daemon that can be
 // recorded into can also be served from, and there is no version in which this
 // module records but declines to serve -- a state that would be
