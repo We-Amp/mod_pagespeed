@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+
 #include <httpserv.h>
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/http/google_url.h"

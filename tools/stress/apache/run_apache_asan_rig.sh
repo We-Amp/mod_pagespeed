@@ -1,4 +1,7 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 # Drive tools/stress/stress_shutdown.py against the ASan Apache rig with periodic
 # graceful reload / hard restart / cache-flush chaos.
 #

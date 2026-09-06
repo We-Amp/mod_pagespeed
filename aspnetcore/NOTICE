@@ -1,7 +1,7 @@
 WeAmp.PageSpeed.Sidecar — mod_pagespeed 1.15 (ASP.NET Core nginx sidecar)
 Copyright (c) 2024-2026 We-Amp B.V.
 
-Licensed under the Business Source License 1.1 (see LICENSE).
+Licensed under the Apache License, Version 2.0 (see LICENSE).
 
 This product includes software derived from mod_pagespeed (Apache PageSpeed):
   Copyright (c) 2010-2017 Google Inc.
@@ -10,6 +10,7 @@ This product includes software derived from mod_pagespeed (Apache PageSpeed):
 
 This product includes the Cyclone Cache library:
   Copyright (c) 2024-2026 We-Amp B.V.
+  Licensed under the Apache License, Version 2.0
 
 This software is based in part on the work of the Independent JPEG Group.
 

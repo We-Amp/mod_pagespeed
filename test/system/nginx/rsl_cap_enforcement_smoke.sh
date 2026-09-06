@@ -1,4 +1,7 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 # AgentPass A3 live Day-0 smoke for the nginx RSL-CAP enforcement
 # wiring. PAID sibling of webbotauth_smoke.sh (the FREE observe-only A1 verifier).
 #

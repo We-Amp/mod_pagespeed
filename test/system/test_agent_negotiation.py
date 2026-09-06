@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 """the design record P4: agent_optimize negotiation / cloaking-safety parity.
 
 mod_pagespeed 1.1 has NO markdown render moat (no headless browser). Whatever the
@@ -7,13 +10,13 @@ decline. That "never mis-serve, never cloak" invariant is the load-bearing
 safety property, and because this file runs under EVERY port's system-test job
 (Apache / nginx / Envoy / IIS), a pass on all of them IS the port-parity proof.
 
-The positive negotiation assertion (an entitled ``Accept: text/markdown`` HTML
-response advertises ``Vary: Accept``) requires a server configured with
-``AgentOptimize on`` AND an ``agent_optimize``-entitled license. It is gated
-behind PAGESPEED_AGENT_OPTIMIZE_ENABLED=1 and skips otherwise.
+The positive negotiation assertion (an ``Accept: text/markdown`` HTML response
+advertises ``Vary: Accept``) requires a server configured with
+``AgentOptimize on`` — the operator flag is the only gate. It is
+gated behind PAGESPEED_AGENT_OPTIMIZE_ENABLED=1 and skips otherwise.
 
-Ported intent: the design record §8.4 port-parity (negotiation/licensing/safety;
-render-fidelity rows n/a on 1.1).
+Ported intent: the design record §8.4 port-parity (negotiation/safety; render-fidelity
+rows n/a on 1.1).
 """
 
 import os

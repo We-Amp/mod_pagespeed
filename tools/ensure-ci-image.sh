@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 # Ensure the pagespeed1.1-dev Docker image is available.
 # Content-hashes docker/ → pagespeed1.1-dev:{arch}-{hash}
 # Builds only when the hash changes.

@@ -62,3 +62,6 @@ test/browser/node_modules/
 # parity adapter-arm container build (HOME=/workspace) droppings
 /.cache/
 /.ssh/
+
+# Apache RAT report written by tools/ci/rat.sh
+rat-report.txt

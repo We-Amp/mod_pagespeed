@@ -1,4 +1,7 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 #
 # Sets up Apache with mod_pagespeed for running Python system tests.
 #
@@ -95,13 +98,14 @@ setup_directories() {
     sudo chown -R www-data:www-data /var/cache/mod_pagespeed /var/cache/mod_pagespeed_secondary /var/log/pagespeed
     sudo chmod 755 /var/cache/mod_pagespeed /var/cache/mod_pagespeed_secondary /var/log/pagespeed
 
-    # Pre-seed test license file if LICENSE_TOKEN is set (from --testkey build).
-    # Path: /var/cache/pagespeed.license (parent of FileCachePath).
-    if [ -n "${LICENSE_TOKEN:-}" ]; then
-        log_info "Writing test license to /var/cache/pagespeed.license"
-        echo "$LICENSE_TOKEN" | sudo tee /var/cache/pagespeed.license > /dev/null
-        sudo chown www-data:www-data /var/cache/pagespeed.license
-    fi
+    # Drop-in compatibility fixture: releases before 2.1 kept a license token
+    # at <parent of FileCachePath>/pagespeed.license. Stage a stale one so the
+    # whole suite runs against an upgraded-install layout; the module must
+    # ignore it (one INFO line, no behaviour change) — asserted by
+    # automatic/test_no_license_apparatus.py.
+    log_info "Staging a stale pagespeed.license fixture at /var/cache/pagespeed.license"
+    echo "stale-token-from-a-previous-release" | sudo tee /var/cache/pagespeed.license > /dev/null
+    sudo chown www-data:www-data /var/cache/pagespeed.license
 }
 
 install_module() {
@@ -152,6 +156,10 @@ EOF
 
     ModPagespeedFileCachePath "/var/cache/mod_pagespeed/"
     ModPagespeedLogDir "/var/log/pagespeed"
+    # Message history is off without a buffer; the nginx config sets
+    # MessageBufferSize too, and automatic/test_no_license_apparatus.py
+    # asserts on the admin message history.
+    ModPagespeedMessageBufferSize 100000
     ModPagespeedRewriteLevel CoreFilters
     ModPagespeedStatistics on
     ModPagespeedStatisticsLogging on

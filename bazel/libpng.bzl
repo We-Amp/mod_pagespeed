@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 libpng_build_rule = """
 
 # TODO(oschaaf): we need to revisit this for linking against the system library

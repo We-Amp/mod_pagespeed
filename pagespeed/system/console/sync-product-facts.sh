@@ -1,4 +1,7 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 # Sync the product-facts single source of truth into the console tree.
 #
 # The console chrome (title, logo line, footer/legal links) derives from the

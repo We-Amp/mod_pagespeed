@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 # libavif build rules for PageSpeed — Stream 0 / Stream A
 #
 # Builds libavif from source via cmake through rules_foreign_cc, with the AV1

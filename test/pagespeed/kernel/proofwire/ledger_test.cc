@@ -1,7 +1,6 @@
 // Copyright 2026 We-Amp B.V.
 //
-// Licensed under the We-Amp Business Source License 1.1 (the "License");
-// you may not use this file except in compliance with the License.
+// SPDX-License-Identifier: Apache-2.0
 
 #include "pagespeed/kernel/proofwire/ledger.h"
 
@@ -17,9 +16,8 @@ namespace proofwire {
 namespace {
 
 // Mints a deterministic Ed25519 keypair from a fixed 32-byte seed via @ed25519's
-// own ed25519_create_keypair. This keeps the test fully offline -- it avoids the
-// //pagespeed/kernel/license_v2 CreateKeypair fixture, whose transitive
-// @modpagespeed2 git dependency would otherwise require GitHub credentials.
+// own ed25519_create_keypair. This keeps the test fully offline: no fixture from
+// another package, no network.
 void MakeKeypair(StringPiece seed, GoogleString* public_key,
                  GoogleString* private_key) {
   unsigned char pub[kEd25519PublicKeyLen];

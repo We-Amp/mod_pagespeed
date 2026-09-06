@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 # test_iis_cache_diagnostic.ps1 - Regression guard for the
 # X-Pagespeed-Init-Status response header emitted by
 # pagespeed/iis/iis_process_context.cpp + iis_http_module.cpp when the
@@ -44,7 +47,7 @@
 # the healthy state returns.
 #
 # Pre-conditions (asserted; aborts cleanly if absent):
-#   - PageSpeed IIS module already installed + registered + LICENSED
+#   - PageSpeed IIS module already installed + registered
 #   - Default IIS site responding on http://localhost/
 #   - Healthy state: X-Page-Speed header present, no X-Pagespeed-Init-Status
 #

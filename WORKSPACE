@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 workspace(name = "mod_pagespeed")
 
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")

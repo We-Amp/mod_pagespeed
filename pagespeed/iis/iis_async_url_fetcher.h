@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+
 #ifndef IISASYNCURLFETCHER_H
 #define IISASYNCURLFETCHER_H
 #include "pagespeed/iis/asyncwinhttp.h" 

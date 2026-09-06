@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: BUSL-1.1
+# SPDX-License-Identifier: Apache-2.0
 # Ported from pagespeed-optimizer tools/ci/ (corp the design record hub) -- keep the copies in sync.
 # Windows counterpart to invalidate-stale-artifacts.sh. Wipes a local CI
 # artifacts staging dir whose metadata.json reports a different commit SHA

@@ -1,4 +1,7 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 #
 # Runs the browser-based client-JS integration tests in headless Chromium.
 # Installs playwright + a chromium binary on first run (cached afterwards:

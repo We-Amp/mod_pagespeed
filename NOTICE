@@ -1,8 +1,9 @@
-PageSpeed
+mod_pagespeed
+Copyright (c) 2024-2026 We-Amp B.V.
 Copyright 2018 The Apache Software Foundation
 
 This product includes software developed at
-  - We-Amp B.V.
+  - We-Amp B.V. (https://we-amp.com/)
   - The Apache Software Foundation (http://www.apache.org/).
   - Google Inc.
 
@@ -22,6 +23,7 @@ You may obtain a copy of the License at
 
 Files: *
 Copyright: 2016 Google Inc.
+           2024-2026 We-Amp B.V.
 License: Apache-2.0
 
 Files: src/third_party/aprutil/apr_memcache2.*

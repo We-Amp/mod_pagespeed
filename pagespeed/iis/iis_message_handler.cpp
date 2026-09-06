@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+
 #include "pagespeed/iis/iis_message_handler.h"                                      
 #include "pagespeed/iis/iis_global_constants.h"
 #include "pagespeed/kernel/sharedmem/shared_circular_buffer.h"

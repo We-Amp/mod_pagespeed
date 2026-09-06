@@ -1,8 +1,11 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+
 // Fixture entry for the js-minify corpus bundle builds. First-party toy code
-// (We-Amp, BUSL-1.1 like the rest of this tree) — deliberately exercises a
-// module graph with a few modern-syntax shapes so the bundled output carries
-// them into the corpus: arrow functions, template literals, optional
-// chaining, nullish coalescing, spread, and a lazy dynamic-import chunk.
+// that deliberately exercises a module graph with a few modern-syntax shapes
+// so the bundled output carries them into the corpus: arrow functions,
+// template literals, optional chaining, nullish coalescing, spread, and a
+// lazy dynamic-import chunk.
 import { clamp, movingAverage } from "./math.js";
 import { shout, slugify } from "./strings.js";
 import { createPalette, DEFAULTS } from "./palette.js";

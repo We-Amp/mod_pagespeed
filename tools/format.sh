@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
 
 # Single entry point for C/C++ formatting. Byte-matches the CI clang-format lint.
 #
@@ -89,8 +91,7 @@ EOF
 }
 
 # --- repo CI scope (mirror of the CI workflow's "clang-format check") ---
-# Skip vendored/generated files carrying the banner (e.g. license crypto
-# vendored from ModPageSpeed 2.0, the design record — guarded by crypto-drift-check).
+# Skip vendored/generated files carrying the banner.
 banner_free() { ! grep -q 'DO NOT EDIT BY HAND' "$1"; }
 in_scope() {
   case "$1" in

@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 # install-cpanel-on-guest.sh - install cPanel + WHM on a fresh AlmaLinux
 # guest. Runs INSIDE the VM as root. Idempotent enough to re-run if the
 # installer pauses for transient errors.

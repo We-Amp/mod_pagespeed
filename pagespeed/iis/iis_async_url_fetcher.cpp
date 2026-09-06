@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
 
 #include "pagespeed/iis/iis_async_url_fetcher.h"
 

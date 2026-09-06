@@ -1,4 +1,7 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 # build_sanitizer_module.sh SAN — build a mod_pagespeed.so under an extra
 # sanitizer from a scratch repo (which has the fix applied), into a
 # DISTINCT output_base so it doesn't clobber the proven ASan build. Copies the

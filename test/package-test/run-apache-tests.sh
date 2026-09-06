@@ -1,4 +1,7 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 #
 # Entrypoint script for Apache package test containers.
 # Detects Debian vs RHEL layout, installs test content, configures Apache,

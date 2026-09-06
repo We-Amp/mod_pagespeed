@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 <#
 .SYNOPSIS
   Stand up an isolated IIS site/pool serving the ASan-instrumented pagespeed_iis.dll,

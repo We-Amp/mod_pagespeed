@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 # Lint environment for mod_pagespeed 1.1
 # Extends the dev image with clang-tidy-20 and clang-format-20.
 # Build: docker build -t pagespeed1.1-lint:latest -f docker/Dockerfile.lint docker/

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 
 def pagespeed_cc_benchmark(

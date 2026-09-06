@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text.RegularExpressions;

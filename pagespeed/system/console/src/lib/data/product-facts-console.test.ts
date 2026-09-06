@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+
 import { describe, expect, it } from "vitest";
 import * as canonical from "./product-facts.mjs";
 import {

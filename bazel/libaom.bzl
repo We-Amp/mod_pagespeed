@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 # libaom (AV1) build rules for PageSpeed — Stream 0 / Stream A
 #
 # Builds libaom from source via cmake through rules_foreign_cc.

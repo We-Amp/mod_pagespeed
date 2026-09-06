@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 # test_iis_cache_autocreate.ps1 - Pins the cache auto-initialization contract
 # for the IIS module under the CYCLONE cache (mod_pagespeed 1.15 / v1.15.0+).
 #
@@ -40,7 +43,7 @@
 # in setup, not teardown, with pre-state asserted.
 #
 # Pre-conditions (asserted; aborts cleanly if absent):
-#   - PageSpeed IIS module installed + registered + LICENSED
+#   - PageSpeed IIS module installed + registered
 #   - Default IIS site responding on http://localhost/
 #   - Healthy state: X-Page-Speed present, no X-Pagespeed-Init-Status
 #
@@ -247,9 +250,9 @@ try {
     }
     Write-Host "Cyclone store auto-created: $($store.Name)"
 
-    # Assert: module is healthy + licensed (optimizing -> X-Page-Speed present).
+    # Assert: module is healthy (optimizing -> X-Page-Speed present).
     $xps = Wait-ForHeader -u $Url -name "X-Page-Speed" -timeoutSec $PollSeconds
-    if (-not $xps) { throw "Positive path: X-Page-Speed header absent (module not optimizing/licensed)." }
+    if (-not $xps) { throw "Positive path: X-Page-Speed header absent (module not optimizing)." }
     Write-Host "PASS: positive path (Cyclone store $($store.Name) created, X-Page-Speed=$xps, no init-status)."
 
     # ============================================================

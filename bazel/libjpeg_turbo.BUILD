@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 # Native Bazel BUILD file for upstream libjpeg-turbo.
 #
 # Upstream (vs. the Chromium fork) ships only the CMake input templates

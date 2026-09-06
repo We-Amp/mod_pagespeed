@@ -1,4 +1,7 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 #
 # assert_symbol_hygiene.sh — deterministic symbol-leak check
 # on the built ngx_pagespeed_module.so. Run in BOTH build scripts and reused as

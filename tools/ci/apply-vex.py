@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 """Apply OpenVEX not_affected/fixed suppressions to a grype JSON report, then
 fail on any remaining finding at/above a severity cutoff.
 

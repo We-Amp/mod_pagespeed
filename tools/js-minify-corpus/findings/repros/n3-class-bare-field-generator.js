@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+
 // Bare class field followed by a generator method: the linebreak after
 // the field is ASI-load-bearing. Dropping it fuses `x` and `*gen()` into
 // one invalid element (the `*` reads as a multiplication in initializer

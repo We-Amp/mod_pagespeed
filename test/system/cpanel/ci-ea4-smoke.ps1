@@ -1,10 +1,13 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 # ci-ea4-smoke.ps1 - Hyper-V VM EA4/cPanel smoke test for CI.
 #
 # Drives one matrix cell of the ea4-cpanel-smoke job:
 #   1. Revert the VM to its cPanel-clean checkpoint.
 #   2. Start the VM and discover its NAT IP via host ARP-by-MAC.
-#   3. SCP the candidate ea-apache24-mod_pagespeed RPM + CI license token
-#      + the target-side smoke script into the guest.
+#   3. SCP the candidate ea-apache24-mod_pagespeed RPM + the target-side
+#      smoke script into the guest.
 #   4. SSH in and run the smoke script. It exercises:
 #        dnf install <rpm> -> /scripts/restartsrv_httpd -> curl + header
 #        assertion -> dnf remove -> verify clean removal.
@@ -51,7 +54,6 @@
 
 param(
     [Parameter(Mandatory=$true)][string]$RpmPath,
-    [Parameter(Mandatory=$true)][string]$TokenPath,
     # EL8 revived — see release.yml ea4-build matrix comment.
     [Parameter(Mandatory=$true)][ValidateSet('el9','el8')][string]$Os,
     [string]$ReleaseTag = $env:RELEASE_TAG,
@@ -85,13 +87,11 @@ Write-Host "=== ea4-cpanel-smoke ($Os) ==="
 Write-Host "VM:        $VMName"
 Write-Host "Snapshot:  $Snapshot"
 Write-Host "RPM:       $RpmPath"
-Write-Host "Token:     $TokenPath"
 Write-Host "Release:   $ReleaseTag"
 Write-Host "Expected:  $ExpectedVersionString"
 Write-Host ""
 
 if (-not (Test-Path $RpmPath))      { throw "RPM not found: $RpmPath" }
-if (-not (Test-Path $TokenPath))    { throw "License token not found: $TokenPath" }
 if (-not (Test-Path $SmokeScript))  { throw "Smoke script not found: $SmokeScript" }
 
 # --- Validate VM + snapshot exist (Hyper-V cmdlets: hard-fail locally) ---
@@ -309,8 +309,6 @@ try {
     $rpmLeaf = Split-Path $RpmPath -Leaf
     $rc = Invoke-Scp -LocalPath $RpmPath     -RemotePath "root@${ip}:/tmp/ea4-smoke/$rpmLeaf"
     if ($rc -ne 0) { throw "scp RPM failed (exit $rc)" }
-    $rc = Invoke-Scp -LocalPath $TokenPath   -RemotePath "root@${ip}:/tmp/ea4-smoke/ci-license-token"
-    if ($rc -ne 0) { throw "scp license token failed (exit $rc)" }
     $rc = Invoke-Scp -LocalPath $SmokeScript -RemotePath "root@${ip}:/tmp/ea4-smoke/ea4-smoke-target.sh"
     if ($rc -ne 0) { throw "scp smoke script failed (exit $rc)" }
     # NOTE: we deliberately do NOT rely on chmod +x. scp from a Windows

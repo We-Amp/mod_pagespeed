@@ -1,4 +1,7 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 # Drift-guard: verify the checked-in src/lib/data/product-facts.mjs copy is in
 # sync with the canonical product-facts single source (see sync-product-facts.sh
 # for what it is and why it is copied verbatim).

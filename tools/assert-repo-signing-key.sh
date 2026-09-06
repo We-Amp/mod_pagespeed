@@ -1,4 +1,7 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 #
 # assert-repo-signing-key.sh — guard that the apt/rpm installer
 # fragments embed a real repository signing key, not a TODO or an empty

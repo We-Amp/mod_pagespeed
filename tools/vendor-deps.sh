@@ -1,4 +1,7 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 # vendor-deps.sh - Populate a vendor directory with all dependencies for offline builds.
 #
 # Usage: tools/vendor-deps.sh [vendor-dir]

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+
 #ifndef IIS_REWRITE_DRIVER_FACTORY_H_
 #define IIS_REWRITE_DRIVER_FACTORY_H_
 

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+
 #include "pagespeed/iis/iis_module_base_fetch.h"
 #include "pagespeed/iis/iis_global_constants.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -75,11 +78,8 @@ const char* kPassThroughRequestAttributes[10] = {
 	HttpAttributes::kUserAgent,
 	HttpAttributes::kAccept,
 	HttpAttributes::kCookie,
-	// Content-Type is needed by AdminLicenseHandler's CSRF gate
-	// (pagespeed/system/admin_license_handler.cc): mutation endpoints
-	// require Content-Type: application/json. Without forwarding it
-	// here, the gate rejects every license POST regardless of what
-	// the browser sent.
+	// Content-Type is forwarded so JSON-API POSTs reach the admin handlers
+	// with the type the browser sent.
 	HttpAttributes::kContentType,
 	// Note: These headers are listed so that the headers we see contain them,
 	// but should immediately be detected and removed by RewriteQuery::Scan().
@@ -111,10 +111,9 @@ void IisModuleBaseFetch::PopulateRequestHeaders(IHttpContext* http_context, Requ
 	}
 
 	// Pass through all PageSpeed/ModPagespeed option headers (not just the whitelist).
-	// Also pass through X-Requested-With, which AdminLicenseHandler's CSRF gate
-	// requires on mutation endpoints. X-Requested-With is an HTTP Unknown Header
-	// in IIS (not in HTTP_HEADER_ID), so it falls into pUnknownHeaders rather
-	// than KnownHeaders.
+	// Also pass through X-Requested-With (JSON-API request marker). It is an
+	// HTTP Unknown Header in IIS (not in HTTP_HEADER_ID), so it falls into
+	// pUnknownHeaders rather than KnownHeaders.
 	HTTP_REQUEST_HEADERS& reqHeaders =
 	    http_context->GetRequest()->GetRawHttpRequest()->Headers;
 	for (USHORT i = 0; i < reqHeaders.UnknownHeaderCount; i++) {
@@ -891,44 +890,6 @@ int IisModuleBaseFetch::CollectHeaders()
 			r->SetHeader(name_gs.c_str() + headerOffset, value_gs.c_str(), value_gs.length(), true);
 		}
 		log("replace header [%s:%s]", name_gs.c_str() + headerOffset, value_gs.c_str());
-	}
-	// the design record (D2): soft enforcement — on the optimized HTML path, when running
-	// unlicensed (live signal), add the soft warn header. Read at serve time
-	// from the LIVE license atomic (ShouldOptimize), keyed on the same atomic
-	// that encodes the grace window (R6); suppressed until the first license
-	// check completes (R5, LicenseCheckedOnce). Added to the IIS transport
-	// header map (IHttpResponse::SetHeader) only — never to a cached artifact,
-	// Vary, or cache-key.
-	if (fetch_type_ == FetchType::kHtml &&
-		ctx_->server_context()->LicenseCheckedOnce() &&
-		!ctx_->server_context()->ShouldOptimize())
-	{
-		r->SetHeader("x-pagespeed-warn", "unlicensed",
-			(USHORT)strlen("unlicensed"), TRUE);
-	}
-	// the design record: over-cap detection on the optimized HTML path, keyed on the
-	// request Host. Runs for ANY license state — an active scope=site license
-	// can be over-cap even while fully licensed, so this is independent of the
-	// unlicensed gate above. Self-guards (a no-op unless a site policy is armed)
-	// and never gates optimization.
-	if (fetch_type_ == FetchType::kHtml)
-	{
-		USHORT host_len = 0;
-		PCSTR host = http_context_->GetRequest()->GetHeader("Host", &host_len);
-		if (host != nullptr && host_len > 0)
-		{
-			ctx_->server_context()->MaybeFlagOverCap(
-				StringPiece(host, host_len));
-		}
-		// the design record: emit the soft over-cap warn header (a sibling
-		// x-pagespeed-warn value, appended not replaced; mutually exclusive in
-		// practice with "unlicensed" above, since over-cap requires an active
-		// site license). Display/telemetry only.
-		if (ctx_->server_context()->IsOverCap())
-		{
-			r->SetHeader("x-pagespeed-warn", "over-cap",
-				(USHORT)strlen("over-cap"), FALSE);
-		}
 	}
 	if (fetch_type_ == FetchType::kInPlace || fetch_type_ == FetchType::kResource)
 	{

@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 r"""assert-git-repository-vendored.py — guard that every `git_repository`
 dependency is vendored so it never has to be git-cloned at build time.
 

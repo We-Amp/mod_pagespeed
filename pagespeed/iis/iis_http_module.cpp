@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+
 #include "pagespeed/iis/iis_http_module.h"
 
 #define _WINSOCKAPI_
@@ -714,9 +717,6 @@ namespace net_instaweb
 			int64 now_ms = timer.NowMs();
 			ctx->base_fetch()->response_headers()->SetDateAndCaching(
 				now_ms, 0 /* max-age */, ", no-cache");
-			if (!server_context->ShouldOptimize()) {
-				ctx->base_fetch()->response_headers()->Add("x-need-renew", "1");
-			}
 
 			if (response_category == RequestRouting::kStatistics ||
 				response_category == RequestRouting::kGlobalStatistics) {
@@ -735,12 +735,8 @@ namespace net_instaweb
 			}
 			else if (response_category == RequestRouting::kAdmin ||
 				response_category == RequestRouting::kGlobalAdmin) {
-				// Read POST body for JSON-API endpoints (/v1/license/*).
-				// AdminLicenseHandler's mutation handlers (apply, activate,
-				// trial, consent) ExtractJsonStringField from this body;
-				// without forwarding it, every license POST 400s with a
-				// missing-field error. The Apache, nginx, and Envoy ports
-				// already read+pass the body here -- IIS was missing parity.
+				// Read POST body for JSON-API endpoints, matching the Apache,
+				// nginx and Envoy ports (which read+pass the body here too).
 				StringPiece request_body;
 				if (StringCaseEqual(pHttpContext->GetRequest()->GetHttpMethod(),
 				                    "POST")) {
@@ -944,11 +940,6 @@ namespace net_instaweb
 			log(pHttpContext, "OnSendResponse - no request_context, bail");
 			return RQ_NOTIFICATION_CONTINUE;
 		}
-
-		// the design record: soft enforcement — do NOT bail on the optimized response
-		// path when unlicensed. Optimization always proceeds; the unlicensed
-		// state is signalled softly via the "x-pagespeed-warn: unlicensed"
-		// header added in IisModuleBaseFetch::CollectHeaders.
 
 		if (request_context->has_nextstatus())
 		{			

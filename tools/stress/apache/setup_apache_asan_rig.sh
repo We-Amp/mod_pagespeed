@@ -1,4 +1,7 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 # Stand up an ASan-instrumented Apache running the canonical system-test config,
 # for the shutdown/graceful-restart memory-bug stress rig. Companion to the IIS and nginx rigs.
 #
@@ -17,7 +20,6 @@ DOCROOT="${DOCROOT:-/var/www/html}"
 PORT="${PORT:-18085}"
 RIG_DIR="${RIG_DIR:-${TMPDIR:-/tmp}/apache-asan-rig}"
 ERRLOG="${ERRLOG:-/var/log/apache2/error.log}"
-LICENSE_TOKEN="${LICENSE_TOKEN:-}"
 ASAN_RUNTIME="${ASAN_RUNTIME:-}"
 ENVV=/etc/apache2/envvars
 
@@ -50,8 +52,8 @@ sudo pkill -9 -x apache2 2>/dev/null || true
 # 1. Inject ASan env into /etc/apache2/envvars (markered + backed up so cleanup
 #    restores it verbatim). apache2ctl sources this on every start, so the module's
 #    ASan instrumentation gets its runtime and options. detect_leaks=0: the server
-#    has intentional at-exit leaks (log_message_handler, admin_license, mod_instaweb
-#    pool) — UAF/overflow detection stays ON; exitcode=66 makes a hit unmistakable.
+#    has intentional at-exit leaks (log_message_handler, mod_instaweb pool) —
+#    UAF/overflow detection stays ON; exitcode=66 makes a hit unmistakable.
 echo "=== injecting ASan envvars into $ENVV ==="
 sudo cp "$ENVV" "$RIG_DIR/envvars.bak"
 sudo sed -i '/# ASAN-STRESS-BEGIN/,/# ASAN-STRESS-END/d' "$ENVV"
@@ -66,10 +68,10 @@ ENVEOF
 # 2a. Install the ASan module + canonical vhost + cache via setup_apache_test.sh.
 #     Its final step starts Apache via systemctl, which does NOT apply the envvars
 #     LD_PRELOAD (and an ASan-preloaded apache fails under systemd) — that failure
-#     is EXPECTED and tolerated; the config (module/vhost/cache/license) is complete
-#     by then. LICENSE_TOKEN optional (nag mode without it).
+#     is EXPECTED and tolerated; the config (module/vhost/cache) is complete
+#     by then.
 echo "=== setup_apache_test.sh (config; systemd start fails under ASan — expected) ==="
-( cd "$REPO_DIR" && MODULE_PATH="$MODULE_SO" LICENSE_TOKEN="$LICENSE_TOKEN" \
+( cd "$REPO_DIR" && MODULE_PATH="$MODULE_SO" \
     bash test/system/setup_apache_test.sh start ) 2>&1 | tail -20 || true
 
 # 2a'. Defensive: own the vhost on $PORT serving $DOCROOT, regardless of any

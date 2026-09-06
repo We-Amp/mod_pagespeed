@@ -1,3 +1,8 @@
+<!--
+  SPDX-License-Identifier: Apache-2.0
+  Copyright (c) 2024-2026 We-Amp B.V.
+-->
+
 <script lang="ts">
   // Daemon status: health of the optimizer daemon via the module's read-only
   // /v1/daemon/ proxy. The daemon is an optional companion — a 502 means it is

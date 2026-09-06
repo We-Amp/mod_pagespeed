@@ -1,4 +1,7 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 #
 # build_nginx_deb.sh — package the 1.1 ngx_pagespeed dynamic module as
 # nginx-module-pagespeed_<ver>-r<N>_amd64.deb for Ubuntu 24.04 (noble).
@@ -158,7 +161,7 @@ ln -s "../../../usr/share/nginx/modules-available/mod-pagespeed.conf" \
   "${STAGEDIR}${NGINX_MODENABLED}/50-mod-pagespeed.conf"
 
 # Sample config + admin-restrict snippet + README (authored below; verbatim from
-# build_nginx_package.sh with the corrected compat string + BYOL + cache note).
+# build_nginx_package.sh with the corrected compat string + the cache note).
 "${SCRIPTDIR}/nginx_package_docs.sh" "${STAGEDIR}${NGINX_DOCDIR}" "${VERSION}" "deb" \
   "${NGINX_UPSTREAM_VERSION}"
 
@@ -177,10 +180,9 @@ Homepage: ${PRODUCTURL}
 Description: nginx module to optimize web content (mod_pagespeed 1.15)
  ngx_pagespeed is the nginx port of mod_pagespeed: it rewrites web pages and
  their resources (CSS, JavaScript, images) to apply web performance best
- practices automatically. Free to install; optimization activates with a valid
- license token (BYOL, the design record/018). Pinned to the exact stock nginx version it
- was built against — nginx refuses to load a dynamic module built for a
- different version.
+ practices automatically. Pinned to the exact stock nginx version it was built
+ against — nginx refuses to load a dynamic module built for a different
+ version.
 EOF
 chmod 644 "${STAGEDIR}/DEBIAN/control"
 

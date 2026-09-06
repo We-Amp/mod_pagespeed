@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 # Build the Apache module .so (//:libmod_pagespeed.so) NATIVELY on EL10 (glibc
 # 2.39) so it loads on RHEL/Rocky/AlmaLinux/CloudLinux 10, then wrap it into the
 # stock mod-pagespeed-<ver>.x86_64.rpm that the EA4 repackager spec

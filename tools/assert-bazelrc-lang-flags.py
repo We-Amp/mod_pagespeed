@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 r"""assert-bazelrc-lang-flags.py — guard that single-language compiler flags are
 never passed through Bazel's language-agnostic --copt / --host_copt.
 

@@ -1,4 +1,7 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 # run_matrix.sh — drive the full shutdown-race stress MATRIX on
 # the single Apache rig: sanitizer x filter-set x corpus cells, run STRICTLY
 # SEQUENTIALLY (they share one port/module/caches). Long + gentle chaos. Cells

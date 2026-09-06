@@ -1,4 +1,7 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 # Build the admin console SPA into a single index.html file.
 # This script is run OUTSIDE of Bazel (before `bazel build`).
 # The output dist/index.html is checked into the repo for hermeticity.

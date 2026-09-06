@@ -1,7 +1,6 @@
 // Copyright 2026 We-Amp B.V.
 //
-// Licensed under the We-Amp Business Source License 1.1 (the "License");
-// you may not use this file except in compliance with the License.
+// SPDX-License-Identifier: Apache-2.0
 //
 // ProofWire served-evidence ledger (FREE LOCAL tier).
 //

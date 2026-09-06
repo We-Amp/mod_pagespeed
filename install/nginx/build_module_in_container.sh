@@ -1,4 +1,7 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 #
 # build_module_in_container.sh — build the ABI-correct
 # ngx_pagespeed_module.so for ONE target distro, INSIDE that distro's container.

@@ -1,4 +1,7 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 # Adjudicate ASan / crash evidence after a run. Exit non-zero on any
 # hit so CI goes red. ASan writes reports to <RIG_DIR>/logs/asan.<pid> (log_path
 # set in run-nginx.sh) AND may emit into error.log; check both, plus the cores dir.

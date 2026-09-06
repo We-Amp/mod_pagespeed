@@ -1,4 +1,7 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 # Refresh src/lib/data/stat-names.fixture.json from a running server.
 #
 # The fixture is the set of statistics variable names a real server emits. The

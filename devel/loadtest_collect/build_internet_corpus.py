@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 """build_internet_corpus.py — assemble an internet-variety replay corpus for the
 mod_pagespeed shutdown-race stress harness.
 

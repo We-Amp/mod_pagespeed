@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: BUSL-1.1
+# SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2024-2026 We-Amp B.V.
 """Generate (or verify) the SPDX 2.3 SBOM for mod_pagespeed 1.1.
 
@@ -132,7 +132,7 @@ CPP_DEPS = [
      "holder": "Brian Aker / awesomized", "repo": "awesomized/libmemcached", "purl_version": None},
     {"name": "ed25519", "version": {"literal": "b1f19fab4aebe607805620d25a5e42566ce46a0e"}, "license": "Zlib",
      "holder": "Orson Peters", "repo": "orlp/ed25519", "purl_version": None},
-    {"name": "cyclone", "version": {"literal": "main"}, "license": "BUSL-1.1",
+    {"name": "cyclone", "version": {"literal": "main"}, "license": "Apache-2.0",
      "holder": "We-Amp B.V.", "repo": "We-Amp/cyclone-cache", "purl_version": None},
     # Bundled matched-pair nginx for the design record ASP.NET Core sidecar (1.30 stable
     # branch). Version is NOT a repositories.bzl constant (nginx is built from upstream
@@ -224,8 +224,8 @@ def generate_sbom():
         "supplier": "Organization: We-Amp B.V.",
         "downloadLocation": "https://github.com/We-Amp/mod_pagespeed",
         "filesAnalyzed": False,
-        "licenseConcluded": "BUSL-1.1",
-        "licenseDeclared": "BUSL-1.1",
+        "licenseConcluded": "Apache-2.0",
+        "licenseDeclared": "Apache-2.0",
         "copyrightText": "Copyright (c) 2024-2026 We-Amp B.V.",
         "externalRefs": [],
     }

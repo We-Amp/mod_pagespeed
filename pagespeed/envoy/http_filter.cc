@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+
 #include "http_filter.h"
 
 #include <memory>
@@ -656,10 +659,6 @@ FilterHeadersStatus HttpPageSpeedDecoderFilter::decodeHeaders(
     }
   }
 
-  // the design record: soft enforcement — optimization always proceeds regardless of
-  // license state. The unlicensed state is signalled softly via a response
-  // header on the optimized path, not by passing through here.
-
   // Create request context with actual host from request headers.
   // The NewRequestContext method parses the port from hostname if present.
   net_instaweb::RequestContextPtr request_context(
@@ -1052,10 +1051,6 @@ FilterHeadersStatus HttpPageSpeedDecoderFilter::encodeHeaders(
     return FilterHeadersStatus::Continue;
   }
 
-  // the design record: soft enforcement — IPRO/HTML rewriting always proceeds
-  // regardless of license state; unlicensed is signalled via a soft response
-  // header on the optimized path instead of skipping here.
-
   auto* envoy_options =
       net_instaweb::EnvoyRewriteOptions::DynamicCast(options_);
   bool pagespeed_enabled = options_->enabled();
@@ -1129,18 +1124,6 @@ FilterHeadersStatus HttpPageSpeedDecoderFilter::encodeHeaders(
       }
       envoy_async_fetch_->response_headers()->set_status_code(
           ps_response_headers->status_code());
-      // the design record (D2): soft enforcement — on the optimized HTML path, when
-      // running unlicensed (live signal), add the soft warn header. Read at
-      // serve time from the LIVE license atomic (ShouldOptimize), keyed on the
-      // same atomic that encodes the grace window (R6); suppressed until the
-      // first license check completes (R5, LicenseCheckedOnce). This is a live
-      // HTML rewrite (recorder cancelled above) — never a cached artifact, and
-      // never added to Vary or the cache-key.
-      if (server_context_->LicenseCheckedOnce() &&
-          !server_context_->ShouldOptimize()) {
-        envoy_async_fetch_->response_headers()->Add("x-pagespeed-warn",
-                                                    "unlicensed");
-      }
       // ComputeCaching() must be called after modifying headers, before
       // ProxyFetch accesses caching-related fields like date_ms().
       envoy_async_fetch_->response_headers()->ComputeCaching();

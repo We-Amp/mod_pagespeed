@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+# Copyright the Envoy project authors
 
 # Except for the targets (search for @@@) this file is a 1:1 copy of Envoy's
 
@@ -72,12 +74,6 @@ def isCompileTarget(target, args):
 
   # memcached_cache.cc requires libmemcached headers which only build on x64
   if filename.endswith("pagespeed/system/memcached_cache.cc"):
-    return False
-
-  # admin_license_handler.cc uses PAGESPEED_SERVER/OS/ARCH/DISTRIBUTION macros
-  # that are passed as unquoted -D flags by Bazel, causing clang-tidy to see
-  # them as undeclared identifiers rather than string literals.
-  if filename.endswith("pagespeed/system/admin_license_handler.cc"):
     return False
 
   return True

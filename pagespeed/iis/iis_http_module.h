@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+
 #ifndef IIS_HTTP_MODULE_H_
 #define IIS_HTTP_MODULE_H_
 

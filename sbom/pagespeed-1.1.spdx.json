@@ -3,9 +3,9 @@
   "dataLicense": "CC0-1.0",
   "SPDXID": "SPDXRef-DOCUMENT",
   "name": "pagespeed-1.1",
-  "documentNamespace": "https://spdx.org/spdxdocs/pagespeed-1.1-2026-08-27T16:29:47Z",
+  "documentNamespace": "https://spdx.org/spdxdocs/pagespeed-1.1-2026-09-04T17:15:42Z",
   "creationInfo": {
-    "created": "2026-08-27T16:29:47Z",
+    "created": "2026-09-04T17:15:42Z",
     "creators": [
       "Tool: generate-sbom.py-1.0",
       "Organization: We-Amp B.V."
@@ -20,8 +20,8 @@
       "supplier": "Organization: We-Amp B.V.",
       "downloadLocation": "https://github.com/We-Amp/mod_pagespeed",
       "filesAnalyzed": false,
-      "licenseConcluded": "BUSL-1.1",
-      "licenseDeclared": "BUSL-1.1",
+      "licenseConcluded": "Apache-2.0",
+      "licenseDeclared": "Apache-2.0",
       "copyrightText": "Copyright (c) 2024-2026 We-Amp B.V.",
       "externalRefs": []
     },
@@ -500,8 +500,8 @@
       "supplier": "Organization: We-Amp B.V.",
       "downloadLocation": "https://github.com/We-Amp/cyclone-cache",
       "filesAnalyzed": false,
-      "licenseConcluded": "BUSL-1.1",
-      "licenseDeclared": "BUSL-1.1",
+      "licenseConcluded": "Apache-2.0",
+      "licenseDeclared": "Apache-2.0",
       "copyrightText": "Copyright We-Amp B.V.",
       "externalRefs": [
         {

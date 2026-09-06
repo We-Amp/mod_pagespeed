@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 <#
 .SYNOPSIS
   Collect + adjudicate ASan / crash evidence after a rig run.

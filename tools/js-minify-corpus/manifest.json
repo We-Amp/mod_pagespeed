@@ -187,12 +187,12 @@
         "bytes": 1375
       },
       "rollup-esm.js": {
-        "sha256": "6213ae2b9c117956b0f3464a89a43d7d3e8af6c56d4f051295647922361d2e85",
-        "bytes": 2584
+        "sha256": "3cf117fbed6a95b438787fc41e03b34d62c9b87ce6b25963020ff17eba84cab7",
+        "bytes": 2601
       },
       "rollup-iife-banner.js": {
-        "sha256": "7937b6a43bc8ccae65da3bcc41ecb276d40662a3095ba5822756e36560b057e4",
-        "bytes": 3012
+        "sha256": "2fa1aa78832780e9fb72343368714a0cf4e207e61b5f237fea4873f23a473233",
+        "bytes": 3039
       },
       "webpack-minified-banner.js": {
         "sha256": "a9f70d45411bd270e2e579cd08078298ae3319cfbd2784b9a257f40390d9b8e4",
@@ -203,20 +203,20 @@
         "bytes": 488
       },
       "webpack-sourcemap.js": {
-        "sha256": "a4b850645d49a97c2e5a3574e5a460be3e4b97b8a19fcade74305718aef09316",
-        "bytes": 14006
+        "sha256": "e182b7ebf15ee24f5b16ad8a32187f1ec9cd72a34db4dcdb032123299e0ac31e",
+        "bytes": 14277
       },
       "webpack-sourcemap.lazy-chunk.js": {
-        "sha256": "4993199bfb30842737556200d112e9b1afe1417e191c292db439752e57f7221b",
-        "bytes": 604
+        "sha256": "4ca4af4cdf0a152cc0db7b6a9352dfc98f4da40799123ae7d3838f70f89c9958",
+        "bytes": 683
       },
       "webpack-unminified.js": {
-        "sha256": "cad0316d81e8e0d277bf03b7248fcea146030f0df4b2ba0162cab843e71e221f",
-        "bytes": 13961
+        "sha256": "9e0ec5a7f6955ac8b702bd04c1382b865a7b57dc024f7637e1d16f0f7b3d77d5",
+        "bytes": 14232
       },
       "webpack-unminified.lazy-chunk.js": {
-        "sha256": "310b18c2508c2d1bd2b2b2d2bdfe661e830e83b7f3f66733a7ffbb02d1dee890",
-        "bytes": 547
+        "sha256": "08957ba0dbb81534f1530b56bd649e9572c4a5cbfe3d01b6076ee0dbdbd83d1a",
+        "bytes": 626
       }
     }
   }

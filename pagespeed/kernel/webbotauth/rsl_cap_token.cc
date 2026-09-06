@@ -1,7 +1,6 @@
 // Copyright 2026 We-Amp B.V.
 //
-// Licensed under the Business Source License 1.1 (BUSL-1.1).
-// See the LICENSE file in the repository root for terms.
+// SPDX-License-Identifier: Apache-2.0
 //
 // Author: agentpass scaffolding (A3 — RSL-CAP token enforcement)
 

@@ -2,199 +2,199 @@
  "schema": 1,
  "probe_mode": "tokenizer",
  "generator_sha256": {
-  "gen_goldens.py": "d9e29f318412c200526490314bd999c5b577bd8a6e521586445bfabe879f742c",
-  "generate_synthetic.py": "d7888e63afc7e7bc4e3392e7b97fef4205b9906fbe67aa934ee2ef44e78fe84c"
+  "gen_goldens.py": "89c83c523524e21a2a9c3c2de3dd94189b044097c3c4d1dbce1731a8cad83493",
+  "generate_synthetic.py": "68a5eff5f89191a6dff85625ef39e3d7c9754bed7d5e209c8159da788546b323"
  },
  "entries": [
   {
    "input": "bundle-fixtures/src/entry.js",
-   "input_sha256": "132c83bfe3af21d25275ac41dd63b919b818dcd2031703b4ab9240378aff2aa7",
+   "input_sha256": "f3425d967cc3cf9c88850d668cd640d1b0fc4e657fb4db7011a5701a994b5a92",
    "status": "ok",
    "output_sha256": "62c8a0ac46006e04c004ccf14ee60ef1118df6b53d4979a89fd06d157cc67224"
   },
   {
    "input": "bundle-fixtures/src/lazy.js",
-   "input_sha256": "fd01df94825c1258770c6f20317ecbeda7d2196628fb91526fd68c156a01ee06",
+   "input_sha256": "03864e8948e6311786c2095e2ad9e1af246b0ed0237617744fb722cf7cad34a9",
    "status": "ok",
    "output_sha256": "b1db2abeab170279d7da39f6362915c6d7cd85a62ecebc90d78a24f036e76423"
   },
   {
    "input": "bundle-fixtures/src/math.js",
-   "input_sha256": "9a6c739606172253b52a25cc487b16fa9afd73abddfd0d5c672766e3492eb1d8",
+   "input_sha256": "5badb64979f4e1e019cfffb8ad1d6d80007b6062e015724db28af542db51737e",
    "status": "ok",
    "output_sha256": "c563c1cf36384ed14954825cdd1e2f29722257280add34ba43a0f5164383eb3c"
   },
   {
    "input": "bundle-fixtures/src/palette.js",
-   "input_sha256": "1805490c50a7f869a18ab754d9c2e1bcc8e538af161d1d54ec13d0d29440e3f8",
+   "input_sha256": "d80d67e2e342d8d3d8b2e0d2eb055dbc4c3f93096a8c65a5070a2f18e93f831e",
    "status": "ok",
    "output_sha256": "0f04fff28078b53e4e62f33702a17decf3baf7a64db029e5cf37d1dedb4093ef"
   },
   {
    "input": "bundle-fixtures/src/strings.js",
-   "input_sha256": "c74a0d2b1330bf00a4cbb22dbecdfb94b63566c2f3e3b78684f5e7b77057e3d8",
+   "input_sha256": "04f7c7bc46f1831dbd2b59d940b61a74106918021f39de244ee40b2c1e64a966",
    "status": "ok",
    "output_sha256": "db95eab3c0da63f7ea78be29f8127570df0a634691842a3f91763f802d5d0b0a"
   },
   {
    "input": "findings/repros/k1-import-regex-control.mjs",
-   "input_sha256": "37abe4813f00c903e1a1288e9b7c334b58a143639d32340f47b7e47088297cef",
+   "input_sha256": "9fafb6f499159c4f8b932eb623bdfede44904029ef3313910b2dab3236f75805",
    "status": "ok",
    "output_sha256": "0cc60594688f1d1ac112e9b59159b4479270774484c7e594940b25571e2b3d00"
   },
   {
    "input": "findings/repros/k3-export-default-regex.mjs",
-   "input_sha256": "34ab55be161257c574b46bffc7d6227935073566571877cef0b4590587a1d850",
+   "input_sha256": "5399085aa9b3a8edd97557685cb8d806ca0ddf64f3c0347360e06bb1cd0d5c04",
    "status": "ok",
    "output_sha256": "0090fa1bf81e90db98f8d3d82f94b80136216d36062585aa84e93931e31a7d8e"
   },
   {
    "input": "findings/repros/k4-class.js",
-   "input_sha256": "e3d99f0039cb39f7f714562dde4bb005ada28809ad7fa322c7c3d7b186f4c115",
+   "input_sha256": "e842d23031bcd1601150b423003e3bf9c4db8d092c7a02ba26a20b2868f612b2",
    "status": "ok",
    "output_sha256": "a75de6d3bf24ba45400f02988427fe7b3fbba0c281ece270e5f41d10efaa7d22"
   },
   {
    "input": "findings/repros/n1-spread-array.js",
-   "input_sha256": "f02e9a0b35437bab39df6d005bbf26171b8c4963be3d74be0de2aff873cfda45",
+   "input_sha256": "45a71de26edd784edc1f8a0f0752003f01880fc1fd985555fddefdd86017c0d7",
    "status": "ok",
    "output_sha256": "66d3263ddddeb5c3ec72d35bd4368cbfb4391a351993ee69a2f83b3216a2525a"
   },
   {
    "input": "findings/repros/n1-spread-call.js",
-   "input_sha256": "05162dae49cee24441f4899ec886ddda8212e9c344712dee1665108690f0ec24",
+   "input_sha256": "be0f2445d17c154321b167da0ad182c18d3c1839113aefb5a459e9254769888e",
    "status": "ok",
    "output_sha256": "2d0660dccb4dbea08bf11f5bae0813b3dc0f20e146290e24d10c14e8b9832796"
   },
   {
    "input": "findings/repros/n1-spread-object.js",
-   "input_sha256": "7082c782e0036ec5e084443229e06c037f7e8ee042704be55ffa0f039f1bd380",
+   "input_sha256": "bd47085bcef0e602afbc9b792cfc4a04ecff0b8968bf4c3bac5bd4ba08f605fa",
    "status": "ok",
    "output_sha256": "5c1120c77f7481f8263608876a082d1ca05fd41da340838224e2fa17d07ede54"
   },
   {
    "input": "findings/repros/n2-async-generator.js",
-   "input_sha256": "2a91d20e5e39fd3f231d8b411cc9f9a8ae43879ef8db4d9c540d4e0dba442ac8",
+   "input_sha256": "fb1d874535990dfba16ee48756403b6356acb0adca336a004533da588290b167",
    "status": "ok",
    "output_sha256": "dd8d538eaae6afbe6c3ffb4d2b63c8bcbba84cb1bc09866a31ec767c488445e2"
   },
   {
    "input": "findings/repros/n2-generator-decl.js",
-   "input_sha256": "a56ada289229fa3deb71679d992438500de2298248e6c1e5d69ca77ce82c711d",
+   "input_sha256": "f21a9ae4d14fb7704be6f7e10c2b45b48108284d37f0b4e0279a17bb9de2a623",
    "status": "ok",
    "output_sha256": "2eba96d81936efa24f48c952a881f146be7bb19d1389fd4441f90d0960bfd47a"
   },
   {
    "input": "findings/repros/n2-generator-expr.js",
-   "input_sha256": "0cf4665951f064503d6ccc68a0adf590476f3e319a90c8dfa5689b6f36122d5a",
+   "input_sha256": "2e4ffe039480b0c0b3f8eb12a7c66fbe05569865e077589ecf33ea919cbbfded",
    "status": "ok",
    "output_sha256": "fc2b3515ab24bc0d8913ca37c4bd702364663dba0f898ac747e1fe845d6e16d3"
   },
   {
    "input": "findings/repros/n2-generator-method.js",
-   "input_sha256": "ad5c260b3d5c0c3018feee95d68dda62c3bc560fab2548294b1bef4716ee0333",
+   "input_sha256": "4adf1c24dea0f23c09ee34de5c5b386bb866a57b76b824c95b0928da5b827347",
    "status": "ok",
    "output_sha256": "1a1964163c5c715c26dabe5cd907c436fabac435d5d51bc0c77d98a9a3416aa5"
   },
   {
    "input": "findings/repros/n3-async-method.js",
-   "input_sha256": "0bb12e0695f1ea4c4bb9a72d21c4e349a0ea7883b50ed1cca8e972e775f04f7e",
+   "input_sha256": "677d65b0a46a2c3c1291f7a893cb5f0bf1e9f6e925298adf94546b343143dc67",
    "status": "ok",
    "output_sha256": "19e90d869503b64897ccc9e35a125eea33f6de38722aa0afc97ea2f627ae482e"
   },
   {
    "input": "findings/repros/n3-class-bare-field-generator.js",
-   "input_sha256": "bd50f6ed07b54f0cc504502e2f0436761567673074b38be44d28e714dc7f4b68",
+   "input_sha256": "b876799e2a820f4aa0d4c98d1783119334c6a00b18486e5ff0e31a134aa041d4",
    "status": "ok",
    "output_sha256": "91f69e71dd8d720cb7b19525f24d2d82cc4842e1dfe358d3560f09bc234e8cb7"
   },
   {
    "input": "findings/repros/n3-computed-getter.js",
-   "input_sha256": "2f9afef5be67a1419d88fbff4eafdf4e4be5d1799b13e238ae0e2c51ad430441",
+   "input_sha256": "358ea3161215ce0536b3e955a0398afdffdb40a50f0e0d75e0a54ab825380c37",
    "status": "ok",
    "output_sha256": "6e03db94ac93b40f7e318401aa458099aee91e38c3de20db9fc355149439e04d"
   },
   {
    "input": "findings/repros/n3-object-getter.js",
-   "input_sha256": "86c1af15d303bd3b6996bca4228715929f620f855a923551873c5fd2dfa67a7f",
+   "input_sha256": "9815cfea3f27ca7f92b373146b47d1f26b86c2c3918dcb4be4706382816bced7",
    "status": "ok",
    "output_sha256": "1bbd7ab2530a7f6ce67799406c174802f0cd2513249983492be7665695c264d3"
   },
   {
    "input": "findings/repros/n3-object-method.js",
-   "input_sha256": "4b9168f78f79701e0dc3ffe29e3d8790686cdbb16a548e7f1c193006e47aef88",
+   "input_sha256": "d1b4e246ebfe37c6fae56ffc6825378d6ea20cd4477dfc7dbfd9b1eeb331dbcb",
    "status": "ok",
    "output_sha256": "a78ebc415a31dfb49e8dfbb211c18e549ce2aaf6ea6869de550be3e360bd26a9"
   },
   {
    "input": "findings/repros/n3-object-setter.js",
-   "input_sha256": "803f42aeda4fcfd32f69c98691ab5b7fa4a964f25110ddf8de05fed8e37a54dd",
+   "input_sha256": "f90dbe2eb58dd042864e29a373e5d4dcee1fec9ceb2c5bd08da48ce6fdb175cd",
    "status": "ok",
    "output_sha256": "fee15e7a75285d2e6161509f9406325a96cb5207da1ce60bfb7f400200167ca8"
   },
   {
    "input": "findings/repros/n4-u2028-in-string.js",
-   "input_sha256": "65414bb941ec0a71d92ca9db789365f4511a0efc318e3b097766868ddb95a5eb",
+   "input_sha256": "06c450f80ae4fab0fdfdf0e2715be1e672717d6a90b5bab73e5fd480c4e047f7",
    "status": "ok",
    "output_sha256": "3c5355fa6b67552172054d487abf5b6cff63d5b4a501ae942cfbe403ff149860"
   },
   {
    "input": "findings/repros/n4-u2029-in-string.js",
-   "input_sha256": "9a41514f17d6f2af8835894dbc1bdc9c47ea6110f717d3e7da897c458fb97fc9",
+   "input_sha256": "d4b3197c81035e7a9f863bcbd81072cd0f672eba51b9956b3e1ee0ab38ca3437",
    "status": "ok",
    "output_sha256": "c48a2450d288b844884378164ea0393cce6d5730611ba55dfcafb2ef8929ae1a"
   },
   {
    "input": "findings/repros/n4-yield-brace-linebreak-decline.js",
-   "input_sha256": "c962f4c99e61ed6b9d5d54aea17db0003ebb33a26249c2f63130982709b937fc",
+   "input_sha256": "9bbda7c9fc7f280a1f0e6f2a14c240391267d2c5d549e3917f5b19fede2b1d37",
    "status": "unmodelable",
    "output_sha256": "f6555b42c845b7612c0a80ee38a751b42862791c94aaee7a147935d6f90d0da3"
   },
   {
    "input": "findings/repros/n4-yield-object-literal.js",
-   "input_sha256": "3a901bb2bab154138ddb0b44fed1972fe0f742c0b823f63f44853a80d8b2b98e",
+   "input_sha256": "276ae455b9c9092e6c5eecc42939a722e855e0d3c43bb0b4e9d5eabcf1107c26",
    "status": "ok",
    "output_sha256": "0d9a0ee55d52e726f04448df0fbe7a0f26849dc1bd2531b9542addb8594a479e"
   },
   {
    "input": "findings/repros/n5-class-await-name.js",
-   "input_sha256": "b0681976cb358f316830d938daf3311c00a790f1ff5dc52f9802e2b5438a3d7a",
+   "input_sha256": "af9ec48bbce106f8bfaff7417af978b00a595d33e06413b73dc5f7434a491567",
    "status": "ok",
    "output_sha256": "0175fb1091c8fbc4e48f092823b043da9699c32682261c161acc282817a35e22"
   },
   {
    "input": "findings/repros/n5-shebang.js",
-   "input_sha256": "3388bdcb3357ff9d77d7ce14aa651fddff5c86c076293859496e99868584f8fc",
+   "input_sha256": "50789c63662a83568bf4d19fdfff03745ce954199e8f1defa3fe6cbf71e4a445",
    "status": "ok",
    "output_sha256": "b228a66725db4a4040fcaf0b14408e0e4973d775c6052abbf796728144b09f1b"
   },
   {
    "input": "findings/repros/n6-arrow-for-in.js",
-   "input_sha256": "62cb5cb0851bc4aeee1b016f44bf5788c46d5dce79302740679e962f1b91ed4e",
+   "input_sha256": "1db3afc8d9a5b234b82c7146a1a0b467af610780a58565f7f264418c26971567",
    "status": "ok",
    "output_sha256": "030c8149afcd4c9560007d5a9fdaf976c9ee67542f60ef0f307f40a0c34c7f4f"
   },
   {
    "input": "findings/repros/n6-arrow-try-catch.js",
-   "input_sha256": "a3f3f0a4b91e62a30faa143dca4948fd21fcf8024667bb78fe8144ea7f25e20a",
+   "input_sha256": "0b0e1172e2d1b0318099ebbe44bfe97e94d22bc82e7ae5b53c7f1adceef5eaaa",
    "status": "ok",
    "output_sha256": "4360aa67a2e145ef4d8e368470728725090206eb2f3f4e13a9ef053e05b4b6f7"
   },
   {
    "input": "findings/repros/n6-arrow-while.js",
-   "input_sha256": "27f8ed917406d74d1b176ec5a6d50d2554d5af078f5d05f1ea504121b29356df",
+   "input_sha256": "a905d8c0e77a144d8b6ef5d7c2e63ae2e7931887796e62cf0288c95803db94dc",
    "status": "ok",
    "output_sha256": "5c573358f5b9613b364fc921ff5e177c32926f528ab0b16e73c5923a31f766fd"
   },
   {
    "input": "findings/repros/n7-generator-method-member-comma.js",
-   "input_sha256": "f7a5f8f3e35b75862805601f44a4d57ccb1eae183c0c92de0d882c057997fb7f",
+   "input_sha256": "477f62fec4b45f9df49a384ce7f89f19a4d3593ee3a9a46db6d3feb41b721a4f",
    "status": "ok",
    "output_sha256": "f80118410dcec20591d83af0872091c687a193260f79c482253863f506909bca"
   },
   {
    "input": "findings/repros/n8-object-spread-call.js",
-   "input_sha256": "820dea053282e073af1d6b7e8f8190cf6159bc78ad2c5451a0bff3c90ee5bb7f",
+   "input_sha256": "b398785c17e51d8d85dc0d3547c364c66c213e10ebdd95245544fd378842d56d",
    "status": "ok",
    "output_sha256": "c615367643589f12373e0cfbd4103566ba067bf71a208f982491b56c74b8baeb"
   },

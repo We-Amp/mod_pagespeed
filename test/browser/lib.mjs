@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+
 // Shared helpers for the browser-based client-JS integration tests.
 
 import { readFileSync } from 'node:fs';

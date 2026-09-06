@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+
 /**
  * The Support panel's dismissed state, remembered across page loads.
  * Same storage-failure tolerance as stat-table.ts: Safari's private mode and

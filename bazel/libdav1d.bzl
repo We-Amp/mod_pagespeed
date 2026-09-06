@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 # dav1d (AV1 decoder) build rules for PageSpeed — Stream 0 / Stream A
 #
 # dav1d is Meson-native upstream (no CMake). This was the flagged #1 build-

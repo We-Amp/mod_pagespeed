@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# SPDX-License-Identifier: BUSL-1.1
+# SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2026 We-Amp B.V.
 #
 # classify-js-fuzz-artifacts.sh - bucket libFuzzer crash artifacts from the

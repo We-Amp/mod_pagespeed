@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+
 // Webpack fixture builds for the js-minify corpus. Three production-mode
 // shapes, all deterministic (fixed filenames, no content hashing):
 //

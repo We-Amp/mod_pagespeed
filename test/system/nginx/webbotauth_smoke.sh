@@ -1,4 +1,7 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 # AgentPass A1 live Day-0 smoke for the nginx Web-Bot-Auth wiring.
 #
 # Proves, against a RUNNING nginx loading ngx_pagespeed_module.so, that the

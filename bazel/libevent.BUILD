@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 # Build file for libevent - cross-platform event notification library
 # Used by LibeventDispatcher for standalone event loop (Apache deployments)
 #

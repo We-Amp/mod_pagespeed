@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 <#
 .SYNOPSIS
     Fail loud when an IIS worker process died during a verified test run.

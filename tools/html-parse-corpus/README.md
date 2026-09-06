@@ -10,7 +10,12 @@ Layout:
   residual-divergence policy. Normative.
 - `EXCLUSIONS.md` — inputs excluded from cross-product goldens, with
   reasons. Starts empty (see SPEC.md §5).
-- `seeds/` — hand-written input battery (checked in).
+- `seeds/` — hand-written input battery (checked in). Each seed carries the
+  project's SPDX header as a leading HTML comment — placed after the doctype
+  line(s) in the doctype battery so the doctype position under test never
+  moves — except the three seeds whose test is their exact byte content
+  (`empty.html`, `whitespace-only.html`, `text-only.html`), which carry none.
+  The goldens record that comment as the first event of every headered seed.
 - `gen_extra_inputs.py` — deterministic generator for inputs too large to
   check in (regenerated into a temp dir on every goldens run).
 - `gen_goldens.py` — goldens generator / freshness gate.

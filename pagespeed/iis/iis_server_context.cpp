@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+
 #include "pagespeed/iis/iis_server_context.h"
 
 #include "pagespeed/kernel/cache/purge_context.h"

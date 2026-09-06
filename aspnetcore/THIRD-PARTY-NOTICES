@@ -40,7 +40,8 @@ mod_pagespeed / PageSpeed Optimization Library (PSOL)
   https://www.apache.org/licenses/LICENSE-2.0
 
 Cyclone Cache (We-Amp B.V.)
-  Proprietary — (c) 2024-2026 We-Amp B.V. (We-Amp's own component; see NOTICE).
+  License: Apache-2.0
+  Copyright (c) 2024-2026 We-Amp B.V. (We-Amp's own component; see NOTICE).
 
 BoringSSL
   License: OpenSSL License / SSLeay License / ISC / MIT (per-file)

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 # Docker development environment for mod_pagespeed
 # Based on Envoy's build image which includes clang, bazel, and most dependencies
 

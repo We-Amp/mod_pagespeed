@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+
 import { test, expect } from "@playwright/test";
 
 // Use the Vite dev server (which proxies API calls to the real backend)

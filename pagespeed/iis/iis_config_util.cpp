@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+
 // Shared pagespeed.config resolution.
 //
 // Single source of truth for the config precedence chain, replacing the two

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+
 import { describe, it, expect } from "vitest";
 import { ApiError } from "$lib/api/client";
 import {

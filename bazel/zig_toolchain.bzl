@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 # Zig cross-compilation toolchain for Windows targets.
 #
 # This file provides Bazel toolchain configuration for cross-compiling

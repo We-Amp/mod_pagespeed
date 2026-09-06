@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# SPDX-License-Identifier: BUSL-1.1
+# SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2024-2026 We-Amp B.V.
 
 # CI pytest exit-status guard: a test file whose __main__ block calls

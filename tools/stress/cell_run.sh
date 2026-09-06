@@ -1,4 +1,7 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 # cell_run.sh — run ONE sanitizer x filter-set stress cell of the defect
 # shutdown-race matrix against the single Apache rig on :18080. Encapsulates all
 # the fragile rig manipulation (module swap, sanitizer LD_PRELOAD, per-cell

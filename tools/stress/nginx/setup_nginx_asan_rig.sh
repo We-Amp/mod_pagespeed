@@ -1,4 +1,7 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 # Stand up a self-contained nginx rig serving the ASan-instrumented
 # ngx_pagespeed_module.so, for the shutdown/reload memory-bug stress rig
 #.

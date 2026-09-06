@@ -1,4 +1,7 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 # AgentPass A2 live smoke for the nginx Web-Bot-Auth NETWORK
 # key-directory warm-fetch.
 #

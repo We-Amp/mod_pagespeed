@@ -1,4 +1,7 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 # Print a deterministic SHA-256 over the console SPA's build-determining source
 # inputs (the Svelte/TS source, entry HTML, vite/svelte/ts config, and the
 # dependency manifests). Test-only files (e2e/, playwright.config.ts,

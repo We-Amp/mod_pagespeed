@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 # libmemcached build rules for PageSpeed
 #
 # Builds libmemcached from source using cmake via rules_foreign_cc

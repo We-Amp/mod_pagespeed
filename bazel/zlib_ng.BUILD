@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Portions Copyright (c) 2024-2026 We-Amp B.V.
+
 # Native Bazel BUILD file for zlib-ng.
 # Based on envoyproxy/toolshed bazel-registry/modules/zlib-ng BUILD file,
 # which is derived from LLVM's zlib-ng.BUILD.

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+
 // Unit tests for the cross-platform IIS config tokenizer.
 // These tests are platform-independent and can run on any OS.
 

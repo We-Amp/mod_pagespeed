@@ -1,3 +1,8 @@
+<!--
+  SPDX-License-Identifier: Apache-2.0
+  Copyright (c) 2024-2026 We-Amp B.V.
+-->
+
 <script lang="ts">
   // Daemon cache: the optimizer daemon's cache occupancy and serve-savings
   // counters via /v1/daemon/stats. The serve-savings table reuses the

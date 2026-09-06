@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 # Regenerate the linux/arm64 APR + apr-util pre-generated configure headers by
 # running the real ./configure on aarch64 Linux, in the same base image the
 # arm64 CI lane compiles in. Requires arm64 Docker (native on Apple Silicon).

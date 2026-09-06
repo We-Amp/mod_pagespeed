@@ -1,4 +1,7 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 # regenerate-rewriter-js.sh — Rebuild pre-compiled JS from source.
 #
 # This script re-runs the Closure Compiler and data2c pipeline that was

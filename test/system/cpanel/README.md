@@ -14,7 +14,7 @@ Builds on the same Hyper-V-on-a-Windows-host pattern as the IIS rig
                 │   Restore-VMSnapshot ─┐                        │
                 │   Start-VM            │                        │
                 │   ARP-by-MAC lookup ──┼──► guest IP            │
-                │   scp RPM/token/sh ───┘                        │
+                │   scp RPM/sh ─────────┘                        │
                 │   ssh + run target script                      │
                 │                                                │
                 │   ┌──── Hyper-V (Default Switch / NAT) ────┐   │
@@ -72,7 +72,11 @@ and does NOT block the el8 prod-promote.
    - `ea4-cpanel-smoke` runs on every release tag once the snapshot exists.
      `hv-check` step skips cleanly if the snapshot is missing.
 
-## License model
+## cPanel license (guest VM dependency)
+
+This is cPanel's own product license for the guest — nothing the module
+needs (mod_pagespeed carries no license apparatus). It matters only because
+an unlicensed cPanel stops serving, which takes the rig down with it:
 
 - Trial: free, 15 days, auto-activates per IP. After expiry the cpanel
   service stops serving - the rig stops working.
@@ -88,12 +92,3 @@ host's `Get-NetNeighbor -InterfaceAlias '*Default*'` table is populated
 as soon as the guest sends a DHCP request, so we filter by the VM's MAC
 address (`(Get-VMNetworkAdapter).MacAddress`) to discover the assigned
 IP without depending on guest-side packages.
-
-## License token path inside the guest
-
-`pagespeed/kernel/license_v2/license_file.cc` derives the license file
-location from `FileCachePath.parent_path() / "pagespeed.license"`. The
-shipped `pagespeed.conf` (part of `ea-apache24-mod_pagespeed.rpm`) sets
-`FileCachePath = /var/cache/mod_pagespeed`, so the license lands at
-`/var/cache/pagespeed.license` with mode `0644` owned by `nobody:nobody`
-(ea-apache24's default httpd user).

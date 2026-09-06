@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 # Switch between the lean WORKSPACE (default) and the Envoy WORKSPACE.
 #
 # Usage:

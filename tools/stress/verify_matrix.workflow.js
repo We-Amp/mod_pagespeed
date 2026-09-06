@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+
 export const meta = {
   name: 'verify-shutdown-matrix',
   description: 'Triage + adversarially verify the defect multi-sanitizer stress-matrix results (ASan/UBSan/TSan x filter-sets on the multi-site corpus)',

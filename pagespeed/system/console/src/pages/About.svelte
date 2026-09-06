@@ -1,3 +1,8 @@
+<!--
+  SPDX-License-Identifier: Apache-2.0
+  Copyright (c) 2024-2026 We-Amp B.V.
+-->
+
 <script lang="ts">
   // About page: build/version info and the legal links (Privacy Policy +
   // Terms of Service). Product names and URLs come from the product-facts

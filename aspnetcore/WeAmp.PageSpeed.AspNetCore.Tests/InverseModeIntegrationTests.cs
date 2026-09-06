@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+
 using System.Net;
 using System.Runtime.InteropServices;
 using FluentAssertions;
@@ -15,7 +18,7 @@ namespace WeAmp.PageSpeed.AspNetCore.Tests;
 
 /// <summary>
 /// Tier 2 — LIVE nginx, Linux/docker only. Runs in sidecar-pair-build.yml's PW-2
-/// licensed-optimize gate, NOT the default unit pass. Every test is gated on
+/// live-optimize gate, NOT the default unit pass. Every test is gated on
 /// Linux AND the bundled 1.15 nginx+module pair being resolvable; on a non-Linux
 /// dev box (macOS) every test no-ops via <see cref="SkipUnlessLiveNginx"/> so the
 /// default `dotnet test` run is green without a live nginx.
@@ -144,6 +147,10 @@ public class InverseModeIntegrationTests
         var body = await resp.Content.ReadAsStringAsync();
 
         resp.Headers.Contains("X-Page-Speed").Should().BeTrue("the optimized top-level HTML must carry X-Page-Speed");
+        // mod_pagespeed 2.1 has no licensing: no optimized response carries the old
+        // evaluation-mode warning header. (Requires a bundled module without licensing.)
+        resp.Headers.Contains("X-PageSpeed-Warn").Should().BeFalse(
+            "no X-PageSpeed-Warn header may appear on any optimized response");
         // The IsHtmlLike gate optimizes the non-browser loopback sub-request: the
         // external <link> should be inlined/minified into a <style>, NEVER a literal
         // ".pagespeed." substring in the top-level HTML.

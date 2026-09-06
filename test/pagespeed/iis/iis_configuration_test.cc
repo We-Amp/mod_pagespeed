@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+
 // Unit tests for IIS configuration file parsing (ConfigurationFile).
 // These tests exercise ParseConfigText via CreateTestConfigFile, using
 // an injected expand_env function to avoid real Windows API calls.

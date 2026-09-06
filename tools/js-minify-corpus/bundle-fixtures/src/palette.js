@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+
 export const DEFAULTS = Object.freeze({ accent: "#ff6600", contrast: 4.5 });
 
 // Deliberately class-free, with a plain function property instead of method

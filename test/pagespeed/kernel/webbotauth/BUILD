@@ -13,9 +13,8 @@ licenses(["notice"])
 # pagespeed_cc_test auto-injects //test:main + //test/pagespeed/kernel/base:
 # pagespeed_gtest (bazel/pagespeed_test.bzl:54-56), so NO @googletest//:gtest_main
 # dep. Cross-package self-refs (:webbotauth_core) become absolute labels.
-# rsl_cap_validator_test.cc is BUSL-1.1; the other five are Apache-2.0 -- the
-# per-file prose license headers stand on their own, package-level licenses(["notice"])
-# mirrors the proofwire reference.
+# All six test sources are Apache-2.0 -- the per-file license headers stand on
+# their own, package-level licenses(["notice"]) mirrors the proofwire reference.
 
 # Hermetic, offline. Deterministic Ed25519 keypair (fixed seed), fixed now_ clock
 # passed explicitly, FakeKeyDirectoryProvider. No network/threads/filesystem.

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 aprutil_build_rule = """
 
 # Linux/arm64 selector for the arm64 pre-generated apr-util headers. Defined

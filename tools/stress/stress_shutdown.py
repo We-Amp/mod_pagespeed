@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 # Licensed under the Apache License, Version 2.0.
 """
 Shutdown / restart stress harness for ModPageSpeed 1.x .

@@ -1,3 +1,8 @@
+<!--
+  SPDX-License-Identifier: Apache-2.0
+  Copyright (c) 2024-2026 We-Amp B.V.
+-->
+
 <script lang="ts">
   // Support: the console's single, gentle pointer to support subscriptions.
   // No license state, no activation flow, no nag — a dismissible panel; the

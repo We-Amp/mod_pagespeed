@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+
 using System.Runtime.InteropServices;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
@@ -19,38 +22,38 @@ namespace WeAmp.PageSpeed.AspNetCore.Tests;
 /// </summary>
 public class SidecarHardeningTests
 {
-    // ---------------- SEC-1: artifact / license-token cleanup ----------------
+    // ---------------- SEC-1: artifact / secret cleanup ----------------
 
     [Fact]
-    public void CleanupArtifacts_WhenOwned_RemovesTheWholeDirIncludingLicenseToken()
+    public void CleanupArtifacts_WhenOwned_RemovesTheWholeDirIncludingOtherFiles()
     {
         var dir = NewTempDir();
         var conf = Path.Combine(dir, "nginx.conf");
-        var license = Path.Combine(dir, "pagespeed.license");
+        var other = Path.Combine(dir, "operator.secret");
         File.WriteAllText(conf, "# generated");
-        File.WriteAllText(license, "secret-token");
+        File.WriteAllText(other, "secret-value");
 
         ProcessSidecarManager.CleanupArtifacts(dir, ownsConfigDir: true, configPath: conf);
 
-        Directory.Exists(dir).Should().BeFalse("a sidecar-owned temp dir (with the 0600 license token) must be reaped");
+        Directory.Exists(dir).Should().BeFalse("a sidecar-owned temp dir (the bearer-token conf and anything beside it) must be reaped");
     }
 
     [Fact]
-    public void CleanupArtifacts_WhenOperatorPinned_RemovesOnlyTheGeneratedConf_KeepsLicense()
+    public void CleanupArtifacts_WhenOperatorPinned_RemovesOnlyTheGeneratedConf_KeepsOtherFiles()
     {
         var dir = NewTempDir();
         var conf = Path.Combine(dir, "nginx.conf");
-        var license = Path.Combine(dir, "pagespeed.license");
+        var other = Path.Combine(dir, "operator.secret");
         File.WriteAllText(conf, "# generated");
-        File.WriteAllText(license, "secret-token");
+        File.WriteAllText(other, "secret-value");
         try
         {
             ProcessSidecarManager.CleanupArtifacts(dir, ownsConfigDir: false, configPath: conf);
 
             Directory.Exists(dir).Should().BeTrue("an operator-pinned ConfigDirectory must be left intact");
             File.Exists(conf).Should().BeFalse("the generated nginx.conf is still removed");
-            File.Exists(license).Should().BeTrue(
-                "the license token must persist in a pinned dir so the worker-renewal never-clobber works across restarts");
+            File.Exists(other).Should().BeTrue(
+                "files the operator keeps in a pinned dir (cache, their own secrets) are theirs to keep");
         }
         finally { TryDeleteDir(dir); }
     }

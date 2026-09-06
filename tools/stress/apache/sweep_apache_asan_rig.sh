@@ -1,4 +1,7 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 # Adjudicate ASan / crash evidence after a run. Exit non-zero on any
 # hit so CI goes red. Apache under ASan prints its report to stderr -> error.log
 # (abort_on_error may also drop a core). error.log is the primary signal; cores

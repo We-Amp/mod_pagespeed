@@ -1,7 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using WeAmp.PageSpeed.AspNetCore.Config;
@@ -127,14 +129,10 @@ public class ProcessSidecarManager : ISidecarManager, IDisposable
             _binaryPath = binaryPath;
 
             // Generate configuration into a private, per-app directory (0700) so
-            // the generated conf (which embeds the admin bearer token) and the
-            // license file are never readable by other local users (D8).
+            // the generated conf (which embeds the admin bearer token) is never
+            // readable by other local users (D8).
             var configDir = ResolveConfigDirectory(opts.Sidecar);
             _configPath = Path.Combine(configDir, "nginx.conf");
-
-            // BYOL: write the license token to disk BEFORE launching nginx so the
-            // module reads it on startup.
-            MaybeWriteLicenseFile(opts);
 
             AdminToken = _configGenerator.GenerateConfigFile(opts, _configPath, binaryPath);
             _logger.LogInformation("Generated configuration at {ConfigPath}", _configPath);
@@ -333,20 +331,20 @@ public class ProcessSidecarManager : ISidecarManager, IDisposable
 
     /// <summary>
     /// Resolves the private directory that holds the generated nginx.conf, the
-    /// embedded-token config, and (by default) the cache/log/license tree. When
-    /// the operator pins <see cref="SidecarOptions.ConfigDirectory"/> it is used
+    /// embedded-token config, and (by default) the cache/log tree. When the
+    /// operator pins <see cref="SidecarOptions.ConfigDirectory"/> it is used
     /// as-is; otherwise a per-app, per-pid directory is created under the system
-    /// temp root. Either way it is chmod 0700 so the bearer token + license are
-    /// not readable by other local users (D8) — never the world-traversable
-    /// shared <c>Path.GetTempPath()/pagespeed_sidecar</c> the prototype used.
+    /// temp root. Either way it is chmod 0700 so the bearer token is not readable
+    /// by other local users (D8) — never the world-traversable shared
+    /// <c>Path.GetTempPath()/pagespeed_sidecar</c> the prototype used.
     /// </summary>
     private string ResolveConfigDirectory(SidecarOptions sidecar)
     {
         var dir = sidecar.ConfigDirectory
             ?? Path.Combine(Path.GetTempPath(), $"ps-sidecar-{Environment.ProcessId}-{Guid.NewGuid():N}".Substring(0, 24));
         // Track ownership so Dispose only reaps the directory the sidecar created
-        // itself (which holds the bearer-token conf + the 0600 license token). An
-        // operator-pinned ConfigDirectory is left intact (their cache/license persist).
+        // itself (which holds the bearer-token conf). An operator-pinned
+        // ConfigDirectory is left intact (their cache persists).
         _configDir = dir;
         _ownsConfigDir = sidecar.ConfigDirectory == null;
         Directory.CreateDirectory(dir);
@@ -375,7 +373,7 @@ public class ProcessSidecarManager : ISidecarManager, IDisposable
     /// <see cref="Process"/> tracks the master directly.
     /// </summary>
     internal static ProcessStartInfo BuildStartInfo(
-        string binaryPath, string configPath, PageSpeedOptions opts, Action<string>? warn = null)
+        string binaryPath, string configPath, PageSpeedOptions opts)
     {
         // the design record UX-7: a tiny native launch shim (`pagespeed-nginx-launch`, bundled
         // next to nginx) sets PR_SET_PDEATHSIG before exec'ing nginx so a hard
@@ -414,7 +412,7 @@ public class ProcessSidecarManager : ISidecarManager, IDisposable
         startInfo.ArgumentList.Add("-g");
         startInfo.ArgumentList.Add("daemon off;");
 
-        foreach (var (key, value) in BuildChildEnvironment(opts, warn))
+        foreach (var (key, value) in BuildChildEnvironment(opts))
         {
             startInfo.Environment[key] = value;
         }
@@ -423,39 +421,18 @@ public class ProcessSidecarManager : ISidecarManager, IDisposable
     }
 
     /// <summary>
-    /// Builds the environment variables applied to the nginx child process: the
-    /// operator-supplied <see cref="SidecarOptions.EnvironmentVariables"/> escape
-    /// hatch, plus a validated <c>PAGESPEED_LICENSE_SERVICE_URL</c> when
-    /// <see cref="PageSpeedOptions.LicenseServiceUrl"/> is set. The
-    /// typed option overrides any same-named entry in the dictionary. A malformed
-    /// URL is dropped with a warning (never passed to the child) so the worker
-    /// falls back to its built-in default endpoint — always functional.
-    /// There is no shell, so values reach the child via the process environment
-    /// dictionary directly (no shell-injection surface).
+    /// Builds the environment variables applied to the nginx child process: exactly
+    /// the operator-supplied <see cref="SidecarOptions.EnvironmentVariables"/> escape
+    /// hatch — the package adds no entries of its own. There is no shell, so values
+    /// reach the child via the process environment dictionary directly (no
+    /// shell-injection surface).
     /// </summary>
-    internal static Dictionary<string, string> BuildChildEnvironment(
-        PageSpeedOptions opts, Action<string>? warn = null)
+    internal static Dictionary<string, string> BuildChildEnvironment(PageSpeedOptions opts)
     {
         var env = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var (key, value) in opts.Sidecar.EnvironmentVariables)
         {
             env[key] = value;
-        }
-
-        var url = opts.LicenseServiceUrl;
-        if (!string.IsNullOrWhiteSpace(url))
-        {
-            if (Uri.TryCreate(url, UriKind.Absolute, out var uri) &&
-                (uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp))
-            {
-                env["PAGESPEED_LICENSE_SERVICE_URL"] = url!.Trim();
-            }
-            else
-            {
-                warn?.Invoke(
-                    $"Ignoring PageSpeed:LicenseServiceUrl='{url}' — not an absolute http(s) URL; " +
-                    "the worker will use its built-in default license endpoint.");
-            }
         }
 
         return env;
@@ -565,8 +542,7 @@ public class ProcessSidecarManager : ISidecarManager, IDisposable
     {
         var opts = _options.Value;
 
-        var startInfo = BuildStartInfo(binaryPath, _configPath!, opts,
-            warn => _logger.LogWarning("{Message}", warn));
+        var startInfo = BuildStartInfo(binaryPath, _configPath!, opts);
 
         _logger.LogDebug("Starting {Binary} {Args}", binaryPath,
             string.Join(" ", startInfo.ArgumentList));
@@ -876,328 +852,6 @@ public class ProcessSidecarManager : ISidecarManager, IDisposable
         }
     }
 
-    /// <summary>
-    /// BYOL: write the configured license token to
-    /// <c>parent_path(FileCachePath)/pagespeed.license</c> (mirrors the C++
-    /// LicenseFilePath) with the subscription-aware never-clobber invariant. Before
-    /// writing, decode the token (no secret needed — base64url + JSON only) and log
-    /// a clear warning for any worker-detectable problem (over-cap lifetime, expired,
-    /// wrong product scope); this NEVER blocks startup.
-    /// The sidecar is a producer only; it never mints, signs, or renews — the worker
-    /// is the cryptographic authority.
-    /// </summary>
-    private void MaybeWriteLicenseFile(PageSpeedOptions opts)
-    {
-        var key = opts.LicenseKey;
-        if (string.IsNullOrWhiteSpace(key))
-        {
-            return;
-        }
-
-        var prefix = Path.GetDirectoryName(Path.GetFullPath(_configPath!))!;
-        var licensePath = ResolveLicenseFilePath(prefix, opts.Cache.FileCachePath);
-
-        // Decode-only sanity check (no signing key needed): surface a clear,
-        // early warning for a token the worker will reject, instead of a silent
-        // "still unlicensed". Best-effort — an undecodable or future-format token
-        // is still written and the worker remains the authority.
-        var claims = TryDecodeLicenseToken(key!);
-        if (claims == null)
-        {
-            _logger.LogWarning(
-                "Configured PageSpeed license token could not be decoded; writing it anyway " +
-                "(the worker is the authority and will reject it if invalid).");
-        }
-        else
-        {
-            var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            foreach (var problem in DescribeLicenseTokenProblems(claims, now))
-            {
-                _logger.LogWarning("PageSpeed license token problem: {Problem}", problem);
-            }
-        }
-
-        if (WriteLicenseFileIfNeeded(licensePath, key!))
-        {
-            _logger.LogInformation("Wrote BYOL license token to {Path} (0600)", licensePath);
-        }
-        else
-        {
-            _logger.LogDebug(
-                "pagespeed.license at {Path} is already current; not rewriting (never-clobber)",
-                licensePath);
-        }
-    }
-
-    // ===================== License-file helpers (testable) =====================
-    // These mirror the C++ license_v2 semantics (license_file.cc / license_token.cc
-    // / license_verifier.cc on origin/master). They are decode-only and never touch
-    // any signing/verification key — the nginx worker performs the cryptographic
-    // verification. Extracted as internal statics so the never-clobber state machine
-    // and the duration/scope checks are unit-testable without a running nginx.
-
-    // kSignatureSize in license_token.cc — an Ed25519 signature precedes the JSON.
-    private const int LicenseSignatureSize = 64;
-    // kMaxTokenLifetimeSec in license_verifier.cc — 730 days (365.25 * 2 * 86400).
-    private const long MaxTokenLifetimeSec = 63072000;
-
-    /// <summary>
-    /// Decode-only view of a license token's duration/scope claims (NOT verified).
-    /// </summary>
-    internal sealed record LicenseTokenClaims(
-        string Sub, string Sid, long Iat, long Exp, IReadOnlyList<string> Products);
-
-    /// <summary>
-    /// Mirror of the C++ LicenseFilePath: the license file sits next to the cache
-    /// directory — <c>parent_path(FileCachePath)/pagespeed.license</c>. Trailing
-    /// separators are stripped BEFORE taking the parent (else a trailing-slash cache
-    /// path yields the wrong directory). With no configured cache path the cache
-    /// defaults to <c>&lt;configPrefix&gt;/cache</c>.
-    /// </summary>
-    internal static string ResolveLicenseFilePath(string configPrefix, string? fileCachePath)
-    {
-        var cacheDir = Path.GetFullPath(
-            string.IsNullOrWhiteSpace(fileCachePath)
-                ? Path.Combine(configPrefix, "cache")
-                : fileCachePath!);
-        var parent = Path.GetDirectoryName(
-            cacheDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))!;
-        return Path.Combine(parent, "pagespeed.license");
-    }
-
-    /// <summary>
-    /// Subscription-aware never-clobber decision. Returns true (write the configured
-    /// key) when the file is ABSENT or holds a DIFFERENT license (operator rotation);
-    /// false (preserve on-disk) when the content is identical OR the on-disk token is
-    /// a worker-renewed descendant of the same subscription. This is stricter than a
-    /// naive "write if differs": the worker renews the token IN PLACE (admin_license_
-    /// handler.cc MaybeRenew), so on restart the renewed token differs from the
-    /// configured key — reverting it could roll back to an already-expired token.
-    /// When neither token decodes to a subscription identity, the operator's key wins.
-    /// </summary>
-    internal static bool ShouldWriteLicense(string? existingOnDisk, string configuredKey)
-    {
-        if (existingOnDisk == null)
-        {
-            return true;
-        }
-        if (existingOnDisk.Trim() == configuredKey.Trim())
-        {
-            return false;
-        }
-        var existingId = SubscriptionIdentity(TryDecodeLicenseToken(existingOnDisk));
-        var configuredId = SubscriptionIdentity(TryDecodeLicenseToken(configuredKey));
-        if (existingId != null && configuredId != null &&
-            string.Equals(existingId, configuredId, StringComparison.Ordinal))
-        {
-            // Same subscription, different bytes ⇒ the worker renewed it in place;
-            // never clobber a renewal.
-            return false;
-        }
-        return true;
-    }
-
-    private static string? SubscriptionIdentity(LicenseTokenClaims? claims)
-    {
-        if (claims == null)
-        {
-            return null;
-        }
-        if (!string.IsNullOrEmpty(claims.Sid))
-        {
-            return claims.Sid;
-        }
-        return string.IsNullOrEmpty(claims.Sub) ? null : claims.Sub;
-    }
-
-    /// <summary>
-    /// Never-clobber atomic 0600 write. Writes <paramref name="token"/> to
-    /// <paramref name="licensePath"/> only when <see cref="ShouldWriteLicense"/> says
-    /// so. The temp file is created owner-only (0600) ATOMICALLY via UnixCreateMode
-    /// (no default-umask window — TOCTOU-safe) with a unique suffix so
-    /// concurrent writers to the same directory can't corrupt each other, then
-    /// atomically renamed over the target. Returns true if the file was (re)written,
-    /// false on a never-clobber no-op.
-    /// </summary>
-    internal static bool WriteLicenseFileIfNeeded(string licensePath, string token)
-    {
-        var parent = Path.GetDirectoryName(Path.GetFullPath(licensePath))!;
-        Directory.CreateDirectory(parent);
-
-        var existing = File.Exists(licensePath) ? File.ReadAllText(licensePath) : null;
-        if (!ShouldWriteLicense(existing, token))
-        {
-            return false;
-        }
-
-        // Unique temp name (<path>.tmp.<pid>.<rand>) mirrors the C++ writer.
-        var tmp = $"{licensePath}.tmp.{Environment.ProcessId}.{Guid.NewGuid():N}";
-        var tmpOptions = new FileStreamOptions
-        {
-            Mode = FileMode.CreateNew,
-            Access = FileAccess.Write,
-            Share = FileShare.None,
-        };
-        if (!OperatingSystem.IsWindows())
-        {
-            tmpOptions.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
-        }
-        try
-        {
-            using (var fs = new FileStream(tmp, tmpOptions))
-            using (var writer = new StreamWriter(fs))
-            {
-                writer.Write(token);
-            }
-            File.Move(tmp, licensePath, overwrite: true);
-        }
-        catch
-        {
-            try { if (File.Exists(tmp)) File.Delete(tmp); } catch { /* best effort */ }
-            throw;
-        }
-        return true;
-    }
-
-    /// <summary>
-    /// Decode a license token's claims WITHOUT verifying its signature (no secret
-    /// required): base64url-decode, drop the leading 64-byte Ed25519 signature, parse
-    /// the remaining JSON payload (license_token.cc SplitToken / ParsePayload).
-    /// Returns null when the token is empty, not base64url, too short, or not a JSON
-    /// object — callers then defer entirely to the worker.
-    /// </summary>
-    internal static LicenseTokenClaims? TryDecodeLicenseToken(string token)
-    {
-        if (string.IsNullOrWhiteSpace(token) || !TryBase64UrlDecode(token.Trim(), out var raw))
-        {
-            return null;
-        }
-        if (raw.Length <= LicenseSignatureSize)
-        {
-            return null;
-        }
-        try
-        {
-            var jsonMem = new ReadOnlyMemory<byte>(raw, LicenseSignatureSize, raw.Length - LicenseSignatureSize);
-            using var doc = JsonDocument.Parse(jsonMem);
-            var root = doc.RootElement;
-            if (root.ValueKind != JsonValueKind.Object)
-            {
-                return null;
-            }
-            var products = new List<string>();
-            if (root.TryGetProperty("products", out var p) && p.ValueKind == JsonValueKind.Array)
-            {
-                foreach (var e in p.EnumerateArray())
-                {
-                    if (e.ValueKind == JsonValueKind.String)
-                    {
-                        products.Add(e.GetString()!);
-                    }
-                }
-            }
-            return new LicenseTokenClaims(
-                ReadString(root, "sub"), ReadString(root, "sid"),
-                ReadInt64(root, "iat"), ReadInt64(root, "exp"), products);
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// Decode-only validation mirroring the worker's duration checks
-    /// (license_verifier.cc): only when exp != 0 — reject a negative iat/exp, an
-    /// expiry preceding issuance, and a lifetime exceeding 730 days; also flag an
-    /// already-expired token and a product scope that does not authorize "mps1". The
-    /// scope check mirrors CheckProductAuthorization (license_verifier.cc:205), which
-    /// treats an EMPTY/absent products array as unauthorized — so an mps1-less token,
-    /// including one with no products at all, is flagged. Returns human-readable
-    /// problem strings (empty = none detected). These are logged as warnings only and
-    /// NEVER block startup.
-    /// </summary>
-    internal static IReadOnlyList<string> DescribeLicenseTokenProblems(
-        LicenseTokenClaims claims, long nowUnixSeconds)
-    {
-        var problems = new List<string>();
-        if (claims.Exp != 0)
-        {
-            if (claims.Iat < 0 || claims.Exp < 0)
-            {
-                problems.Add("token contains a negative iat/exp timestamp");
-            }
-            else if (claims.Exp < claims.Iat)
-            {
-                problems.Add("token expiry (exp) precedes its issuance (iat)");
-            }
-            else
-            {
-                if (claims.Exp - claims.Iat > MaxTokenLifetimeSec)
-                {
-                    problems.Add(
-                        $"token lifetime {claims.Exp - claims.Iat}s exceeds the " +
-                        $"{MaxTokenLifetimeSec}s (730-day) maximum — the worker will reject it");
-                }
-                if (nowUnixSeconds > 0 && claims.Exp < nowUnixSeconds)
-                {
-                    problems.Add("token has already expired");
-                }
-            }
-        }
-        // CheckProductAuthorization (license_verifier.cc) treats an empty products
-        // array as unauthorized, so flag any token that does not authorize "mps1" —
-        // including one with no products claim at all.
-        if (!claims.Products.Contains("mps1"))
-        {
-            problems.Add(
-                "token product scope does not authorize \"mps1\" (this sidecar ships mod_pagespeed 1.1)");
-        }
-        return problems;
-    }
-
-    private static long ReadInt64(JsonElement obj, string name)
-        => obj.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number &&
-           v.TryGetInt64(out var n) ? n : 0;
-
-    private static string ReadString(JsonElement obj, string name)
-        => obj.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String
-            ? v.GetString() ?? string.Empty : string.Empty;
-
-    /// <summary>
-    /// Decode base64url (RFC 4648 §5, no padding required) to bytes, accepting the
-    /// URL-safe alphabet (<c>-_</c>). Returns false on any invalid character/length.
-    /// </summary>
-    private static bool TryBase64UrlDecode(string input, out byte[] bytes)
-    {
-        bytes = Array.Empty<byte>();
-        if (string.IsNullOrEmpty(input))
-        {
-            return false;
-        }
-        var s = input.Replace('-', '+').Replace('_', '/');
-        switch (s.Length % 4)
-        {
-            case 1:
-                return false; // a lone trailing char can't encode a whole byte
-            case 2:
-                s += "==";
-                break;
-            case 3:
-                s += "=";
-                break;
-        }
-        try
-        {
-            bytes = Convert.FromBase64String(s);
-            return true;
-        }
-        catch (FormatException)
-        {
-            return false;
-        }
-    }
-
     private void SetState(SidecarState newState)
     {
         lock (_lock)
@@ -1215,12 +869,11 @@ public class ProcessSidecarManager : ISidecarManager, IDisposable
     /// <summary>
     /// Best-effort teardown of the generated artifacts. When the sidecar created its
     /// OWN private per-app directory (<paramref name="ownsConfigDir"/>) the whole tree
-    /// is removed — it embeds the admin bearer token (nginx.conf) AND, for BYOL, the
-    /// 0600 license token (parent_path(cache)/pagespeed.license defaults INSIDE this
-    /// dir): leaving it behind leaks the secret into the temp root and accumulates one
-    /// copy per process recycle. When the operator PINNED ConfigDirectory only the
-    /// generated nginx.conf is removed — the directory, cache, and license file are
-    /// theirs to keep (the license MUST persist for the worker-renewal never-clobber).
+    /// is removed — it embeds the admin bearer token (nginx.conf): leaving it behind
+    /// leaks the secret into the temp root and accumulates one copy per process
+    /// recycle. When the operator PINNED ConfigDirectory only the generated nginx.conf
+    /// is removed — the directory and whatever else the operator keeps in it (cache,
+    /// their own files) are theirs to keep.
     /// Extracted as an internal static so the cleanup contract is unit-testable.
     /// </summary>
     internal static void CleanupArtifacts(string? configDir, bool ownsConfigDir, string? configPath)

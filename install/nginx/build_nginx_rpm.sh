@@ -1,4 +1,7 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 #
 # build_nginx_rpm.sh — package the 1.1 ngx_pagespeed dynamic module as
 # nginx-module-pagespeed-<ver>-<N>.el9.x86_64.rpm for AlmaLinux/RHEL/Rocky 9.
@@ -88,7 +91,7 @@ MAINTNAME="mod_pagespeed developers"
 MAINTMAIL="info@we-amp.com"
 PRODUCTURL="https://github.com/we-amp/mod_pagespeed/"
 SHORTDESC="nginx module to optimize web content (mod_pagespeed 1.15)."
-FULLDESC="ngx_pagespeed is the nginx port of mod_pagespeed: it rewrites web pages and their resources (CSS, JavaScript, images) to apply web performance best practices automatically. Free to install; optimization activates with a valid license token (BYOL). Pinned to the exact stock nginx version it was built against."
+FULLDESC="ngx_pagespeed is the nginx port of mod_pagespeed: it rewrites web pages and their resources (CSS, JavaScript, images) to apply web performance best practices automatically. Pinned to the exact stock nginx version it was built against."
 
 # --- exact-version nginx pin (model (a')) -----------------------------------
 # Confirm the el9 stock nginx upstream version + EPOCH and pin to it exactly.

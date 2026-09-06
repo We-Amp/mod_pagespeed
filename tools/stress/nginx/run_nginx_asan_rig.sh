@@ -1,4 +1,7 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 # Start the ASan nginx rig and drive tools/stress/stress_shutdown.py against it
 # with periodic reload / restart / cache-flush chaos.
 #

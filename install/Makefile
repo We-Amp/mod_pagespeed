@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2015 Google Inc.
+
 # This Makefile is used to help drive the installation of mod_pagespeed into
 # an Apache installation.
 #

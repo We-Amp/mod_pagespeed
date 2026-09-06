@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+
 // Generated from pagespeed_iis.rc.in by Bazel version_header() -- DO NOT EDIT.
 //
 // VS_VERSION_INFO resource for pagespeed_iis.dll. Embeds proper FILEVERSION

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# SPDX-License-Identifier: BUSL-1.1
+# SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2024-2026 We-Amp B.V.
 
 # CI doc-drift guard (BLOCKING): clang-format / clang-tidy version literals.

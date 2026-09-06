@@ -1,3 +1,8 @@
+<!--
+  SPDX-License-Identifier: Apache-2.0
+  Copyright (c) 2024-2026 We-Amp B.V.
+-->
+
 <script lang="ts">
   // Daemon back-pressure: where the optimizer daemon sheds load — thread-pool
   // occupancy, dropped notifications, connection pressure, and the cache

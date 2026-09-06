@@ -1,4 +1,7 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 #
 # assert-binary-hardening.sh — verify a shipped binary carries the
 # binary-hardening flags from the .bazelrc :hardening config. Run at release time

@@ -1,4 +1,7 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 # Fail-closed smoke for native-fetcher TLS certificate verification
 # (UseNativeFetcher + FetchHttps). Three vhosts on one worker:
 #

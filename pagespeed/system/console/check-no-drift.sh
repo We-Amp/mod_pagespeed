@@ -1,4 +1,7 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 # Drift-guard: verify the checked-in admin_console.html is not stale relative to
 # the console source.
 #

@@ -1,3 +1,8 @@
+<!--
+  SPDX-License-Identifier: Apache-2.0
+  Copyright (c) 2024-2026 We-Amp B.V.
+-->
+
 <script lang="ts">
   // Inline "last refresh failed" banner. Shown above stale data when a poll
   // fails but we still have previously-fetched data to display, so a transient

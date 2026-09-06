@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 # Bazel build for libpsl (https://github.com/rockdaboot/libpsl), the maintained
 # Public Suffix List library that replaces the dead Apache-incubator
 # domain_registry_provider ("drp"). See pagespeed/kernel/http/domain_registry.cc.

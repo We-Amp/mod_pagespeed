@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
 
 #ifndef LOG_MESSAGE_HANDLER_H_
 #define LOG_MESSAGE_HANDLER_H_

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 jsoncpp_build_rule = """
 cc_library(
     name = "jsoncpp",

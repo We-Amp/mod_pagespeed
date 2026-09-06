@@ -1,4 +1,7 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 # Workspace status script for Bazel.
 # Provides git-based version information to the build.
 echo "STABLE_GIT_COMMIT $(git rev-parse --short HEAD 2>/dev/null || echo unknown)"

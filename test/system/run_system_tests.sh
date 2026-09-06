@@ -1,4 +1,7 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 #
 # Builds mod_pagespeed, sets up Apache, and runs Python system tests.
 #
@@ -9,7 +12,6 @@
 #   --build-only    Only build the module, don't run tests
 #   --skip-build    Skip building, assume module is already built
 #   --keep-running  Keep Apache running after tests
-#   --license       Build token generator and pre-seed a test license token
 #   --help          Show this help message
 #
 # Examples:
@@ -56,7 +58,6 @@ Options:
   --build-only    Only build the module, don't run tests
   --skip-build    Skip building, assume module is already built
   --keep-running  Keep Apache running after tests (for debugging)
-  --license       Build token generator and pre-seed a test license token
   --gcc           Use GCC 13 for building (recommended for Cyclone cache)
   --help          Show this help message
 
@@ -82,7 +83,6 @@ EOF
 BUILD_ONLY=false
 SKIP_BUILD=false
 KEEP_RUNNING=false
-USE_LICENSE=false
 BAZEL_CONFIG="${BAZEL_CONFIG:---config=gcc}"
 PYTEST_ARGS=()
 
@@ -100,10 +100,6 @@ while [[ $# -gt 0 ]]; do
             KEEP_RUNNING=true
             shift
             ;;
-        --license)
-            USE_LICENSE=true
-            shift
-            ;;
         --gcc)
             BAZEL_CONFIG="--config=gcc"
             shift
@@ -119,12 +115,6 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Validate flag combinations
-if [ "$USE_LICENSE" = true ] && [ "$SKIP_BUILD" = true ]; then
-    log_error "--license requires building; cannot be used with --skip-build"
-    exit 1
-fi
-
 # Build the module
 build_module() {
     log_step "Building mod_pagespeed module..."
@@ -138,28 +128,6 @@ build_module() {
     fi
 
     log_info "Module built successfully: bazel-bin/libmod_pagespeed.so"
-
-    # Generate and export a test license token using a local signing key.
-    if [ "$USE_LICENSE" = true ]; then
-        log_step "Building test token generator..."
-        if ! bazel build $BAZEL_CONFIG //pagespeed/kernel/license_v2:generate_license_token; then
-            log_error "Failed to build generate_license_token"
-            exit 1
-        fi
-        local key_path="${PAGESPEED_SIGNING_KEY:-$HOME/.weamp/license-signing-key}"
-        if [ ! -f "$key_path" ]; then
-            log_error "No signing key at $key_path — set PAGESPEED_SIGNING_KEY or place key there"
-            exit 1
-        fi
-        export LICENSE_TOKEN
-        LICENSE_TOKEN=$("$PROJECT_ROOT/bazel-bin/pagespeed/kernel/license_v2/generate_license_token" \
-            --key "$key_path" --sub "test@system-test.local" --exp-duration 3600)
-        if [ -z "$LICENSE_TOKEN" ]; then
-            log_error "generate_license_token produced empty output"
-            exit 1
-        fi
-        log_info "Test license token generated"
-    fi
 }
 
 # Setup and start Apache

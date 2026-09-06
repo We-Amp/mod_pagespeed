@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+
 /**
  * Example JavaScript file for testing IPRO.
  * This file should be minified by PageSpeed.

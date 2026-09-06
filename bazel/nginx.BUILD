@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 # Build file for NGINX headers
 #
 # This BUILD file exposes NGINX header files as a cc_library for use with

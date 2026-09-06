@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 # libcurl build rules for PageSpeed
 #
 # Builds libcurl from source using cmake via rules_foreign_cc

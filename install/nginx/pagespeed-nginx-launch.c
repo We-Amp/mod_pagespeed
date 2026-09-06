@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+
 /* pagespeed-nginx-launch — the design record UX-7 launch shim.
  *
  * Sets PR_SET_PDEATHSIG so the bundled nginx receives SIGTERM if the parent

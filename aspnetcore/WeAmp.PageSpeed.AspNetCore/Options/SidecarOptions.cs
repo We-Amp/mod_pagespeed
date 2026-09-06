@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+
 namespace WeAmp.PageSpeed.AspNetCore.Options;
 
 /// <summary>
@@ -202,12 +205,9 @@ public class SidecarOptions
     public int ShutdownTimeoutMs { get; set; } = 10000;
 
     /// <summary>
-    /// Escape-hatch environment variables to set on the nginx child process. For the
-    /// license renewal endpoint prefer the validated
-    /// <see cref="PageSpeedOptions.LicenseServiceUrl"/> (it is checked for an absolute
-    /// http(s) URL and takes precedence over a <c>PAGESPEED_LICENSE_SERVICE_URL</c>
-    /// entry here). Values reach the child via the process environment dictionary
-    /// directly (no shell, no injection surface).
+    /// Escape-hatch environment variables to set on the nginx child process. Values
+    /// reach the child via the process environment dictionary directly (no shell, no
+    /// injection surface). The package adds no entries of its own.
     /// </summary>
     public Dictionary<string, string> EnvironmentVariables { get; set; } = [];
 }

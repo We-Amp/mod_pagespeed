@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 # test_iis_logdir_autocreate.ps1 - Pins the design record §Operational +
 # the referenced issue contract for LogDir auto-create on IIS. Notes:
 #

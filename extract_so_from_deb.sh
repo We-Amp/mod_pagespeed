@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2017 Google Inc.
+
 #
 # Given a deb, extract mod_pagespeed.so and mod_pagespeed_ap24.so.  This is
 # useful for running load tests on prior releases.  The files are left in a temp

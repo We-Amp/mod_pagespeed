@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+
 #include "pagespeed/iis/iis_request_context.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "pagespeed/system/in_place_resource_recorder.h"

@@ -1,7 +1,6 @@
 // Copyright 2026 We-Amp B.V.
 //
-// Licensed under the Business Source License 1.1 (BUSL-1.1).
-// See the LICENSE file in the repository root for terms.
+// SPDX-License-Identifier: Apache-2.0
 //
 // Author: agentpass scaffolding (A3 — RSL-CAP token enforcement)
 
@@ -87,7 +86,7 @@ RslCapStatus RslCapValidator::Validate(StringPiece auth_header,
   // 6. Verify the Ed25519 signature over the ORIGINAL received signing input
   //    (never re-encoded). This runs BEFORE expiry/authorization so a tampered
   //    exp or lic[]/scope[] can never influence those checks. Same call shape
-  //    as verifier.cc:115 (sig, msg, msg_len, pub) and license_v2.
+  //    as verifier.cc:115 (sig, msg, msg_len, pub).
   if (token->signature_bytes.size() != kEd25519SignatureBytes) {
     return RslCapStatus::kBadSignature;
   }

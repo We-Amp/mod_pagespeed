@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 # Build rules for Cyclone Cache library
 #
 # Cyclone is a high-performance disk cache with scan-resistant CLFUS algorithm,

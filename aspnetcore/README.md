@@ -70,10 +70,6 @@ binary and the sidecar fails to start:
 dotnet publish -c Release -r linux-x64    # or: -r linux-arm64
 ```
 
-With no license key, optimization runs in evaluation mode and adds an
-`X-PageSpeed-Warn: unlicensed` header. That is expected; set `PageSpeed:LicenseKey` to
-clear it.
-
 ## Usage
 
 Register the services and add the middleware. The optimizer runs out of process in the
@@ -97,7 +93,6 @@ Or configure in code:
 builder.Services.AddPageSpeed(options =>
 {
     options.RewriteLevel = "CoreFilters";
-    options.LicenseKey = builder.Configuration["PageSpeed:LicenseKey"]; // BYOL, from a secret
 });
 ```
 
@@ -166,8 +161,8 @@ it's shown to name the keys.
 | `Cache.FileCacheSizeKb` | `10240000` (10 GB) | optional | File-cache size cap, in KB. |
 | `AdminAuth.Enabled` | `true` | optional | Gates the `/pagespeed_*` admin endpoints behind a bearer token. Required to be `true` if `Sidecar.AllowPublicAdmin = true` (the bearer is the only gate for public access). |
 
-Source `LicenseKey` and `AdminAuth.Token` from a secret store or environment variable.
-Do not put them in `appsettings.json`.
+Source `AdminAuth.Token` from a secret store or environment variable. Do not put it in
+`appsettings.json`.
 
 ### Host authorization
 
@@ -247,10 +242,8 @@ curl -sI http://localhost:8080/ | grep -i x-page-speed
 
 In Process mode, curl the public nginx port (`Sidecar.ListenPort`) instead.
 
-A present `X-Page-Speed` header confirms the optimizer is in the path. During evaluation
-you will also see `X-PageSpeed-Warn: unlicensed` — that is expected, not an error; set
-`PageSpeed:LicenseKey` to clear it. For per-filter rewrite counts, check
-`/pagespeed_statistics` (see below for how it's exposed).
+A present `X-Page-Speed` header confirms the optimizer is in the path. For per-filter
+rewrite counts, check `/pagespeed_statistics` (see below for how it's exposed).
 
 ## Admin endpoints
 
@@ -268,18 +261,9 @@ In Process mode the endpoints are gated to the loopback ACL (`AdminAuth.AllowedI
 default loopback only) and, when `AdminAuth.Enabled`, behind the bearer token. Widen
 `AdminAuth.AllowedIps` only if you understand the exposure.
 
-## Licensing
+## License
 
-The product is commercially licensed under the Business Source License 1.1 (BUSL-1.1; see
-the bundled `LICENSE`). Production use requires a BUSL-1.1 license. Without a license key,
-optimization runs in evaluation mode and adds an `X-PageSpeed-Warn: unlicensed` header.
-Provide your license token via `PageSpeed:LicenseKey` (BYOL) to clear the warning; the
-sidecar writes it next to the cache and the nginx worker remains the cryptographic
-authority.
-
-Under BUSL-1.1, each version becomes available under the Apache License 2.0 four years
-after its first public release (the **Change Date**; see the packaged `LICENSE` for the
-exact date and terms).
+Apache License 2.0. See the bundled `LICENSE` file.
 
 ## Platform support
 
@@ -294,4 +278,4 @@ and the [mod_pagespeed 1.15 overview](https://modpagespeed.com/1.1/).
 
 ---
 
-© 2024–2026 We-Amp B.V. Licensed under the Business Source License 1.1 (BUSL-1.1).
+© 2024–2026 We-Amp B.V. Licensed under the Apache License 2.0.

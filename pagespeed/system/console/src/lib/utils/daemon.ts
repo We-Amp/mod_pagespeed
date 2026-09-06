@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+
 /**
  * Presentation helpers for the daemon panels: formatting, and normalization
  * of the daemon's management-API JSON.

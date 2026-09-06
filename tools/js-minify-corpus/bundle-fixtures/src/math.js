@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+
 export function clamp(value, lo, hi) {
   if (Number.isNaN(value)) return lo;
   return Math.min(hi, Math.max(lo, value));

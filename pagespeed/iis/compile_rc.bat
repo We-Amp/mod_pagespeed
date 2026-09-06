@@ -1,4 +1,7 @@
 @echo off
+REM SPDX-License-Identifier: Apache-2.0
+REM Copyright (c) 2024-2026 We-Amp B.V.
+
 :: compile_rc.bat -- find a usable rc.exe / llvm-rc.exe across runner
 :: configurations and invoke it. Used by pagespeed_iis_res_gen genrule.
 ::

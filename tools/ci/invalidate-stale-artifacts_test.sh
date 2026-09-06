@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: BUSL-1.1
+# SPDX-License-Identifier: Apache-2.0
 # Ported from pagespeed-optimizer tools/ci/ (corp the design record hub) — keep the copies in sync.
 # Smoke tests for invalidate-stale-artifacts.sh.
 set -euo pipefail

@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 # ea4-smoke-target.sh - runs inside the cPanel guest VM.
 # Exercises the ea-apache24-mod_pagespeed install -> EA4 reload -> page-fetch
 # -> uninstall lifecycle against a real cPanel + ea-apache24 host.
@@ -16,8 +19,6 @@
 #   - cPanel is installed and active (otherwise /scripts/restartsrv_httpd
 #     is missing and we fail fast).
 #   - ea-apache24 is the running Apache.
-#   - License token is at /tmp/ea4-smoke/ci-license-token (the caller scps
-#     it there alongside the RPM).
 #
 # Lifecycle steps mirror package-smoke-rpm: install -> verify -> uninstall
 # -> verify clean. No "old MSI" warm-upgrade equivalent here yet; the EA4
@@ -84,7 +85,6 @@ RELEASE_TAG="${RELEASE_TAG:-<unknown>}"
 
 cd /tmp/ea4-smoke
 [ -f "$RPM_NAME" ] || fail "RPM missing: /tmp/ea4-smoke/$RPM_NAME"
-[ -s ci-license-token ] || fail "License token empty/missing"
 
 log "=== ea4-smoke-target.sh ==="
 log "RPM:      $RPM_NAME"
@@ -109,13 +109,13 @@ $EA4_HTTPD_BIN -v || true
 # --- Resolve nobody:nobody UID/GID once (varies across EL8/EL9) ---
 # EL8: nobody = 99:99 (historic). EL9: nobody = 65534:65534 (matches
 # systemd-userdb DynamicUser convention). We resolve symbolically and let
-# `install -o nobody -g nobody` handle it, but cache the numeric IDs for
-# the diagnostic log so a misfile is obvious in the CI log.
+# `chown nobody:nobody` handle it, but cache the numeric IDs for the
+# diagnostic log so a misfile is obvious in the CI log.
 NOBODY_UID="$(id -u nobody 2>/dev/null || echo unknown)"
 NOBODY_GID="$(id -g nobody 2>/dev/null || echo unknown)"
 log "nobody: uid=${NOBODY_UID} gid=${NOBODY_GID}"
 if [ "$NOBODY_UID" = "unknown" ]; then
-    fail "user 'nobody' missing - cannot stage license token"
+    fail "user 'nobody' missing - cannot chown the test document to the httpd user"
 fi
 
 # --- Phase 1: Install the candidate RPM ---
@@ -139,8 +139,8 @@ if rpm -q ea-apache24-mod_ruid2 >/dev/null 2>&1; then
     log "Removing ea-apache24-mod_ruid2 (conflicts with mod_pagespeed)"
     EA4_AUTO_RELOAD=0 dnf remove -y ea-apache24-mod_ruid2 2>&1 | tail -10
 fi
-# Disable EA4_AUTO_RELOAD so the %post script doesn't bounce httpd before
-# we've staged the license. We'll restart explicitly in Phase 2.
+# Disable EA4_AUTO_RELOAD so the %post script doesn't bounce httpd behind
+# our back. We restart explicitly (and observably) in Phase 2.
 EA4_AUTO_RELOAD=0 dnf install -y --refresh "/tmp/ea4-smoke/$RPM_NAME" 2>&1 | tail -30
 
 # Confirm files landed where the spec says they should.
@@ -151,21 +151,10 @@ EA4_AUTO_RELOAD=0 dnf install -y --refresh "/tmp/ea4-smoke/$RPM_NAME" 2>&1 | tai
 [ -f /etc/apache2/modules/mod_pagespeed.so ] \
     || fail "mod_pagespeed.so missing in /etc/apache2/modules/"
 
-# --- Phase 2: Drop the license token where mod_pagespeed_v2 looks ---
-# pagespeed/kernel/license_v2/license_file.cc derives the license file from
-# FileCachePath: <cache_path>.parent_path() / "pagespeed.license".
-# pagespeed.conf ships FileCachePath = /var/cache/mod_pagespeed, so the
-# token lives at /var/cache/pagespeed.license. The spec creates
-# /var/cache/mod_pagespeed in %install (which makes /var/cache exist
-# already, but we belt-and-suspenders mkdir it anyway in case a future
-# spec change drops the dir).
-log "=== Phase 2: Stage license token + restart Apache ==="
-mkdir -p /var/cache
-# `install` here (not `cp`) so the mode/owner change is atomic with the
-# rename — Apache children watching the file via inotify never see a
-# half-written temp.
-install -m 0644 -o nobody -g nobody ci-license-token /var/cache/pagespeed.license
-log "License staged: $(stat -c '%n mode=%a owner=%U:%G size=%s' /var/cache/pagespeed.license)"
+# --- Phase 2: Restart Apache so the freshly installed module loads ---
+# Nothing to stage: the module needs no license file; the RPM's
+# pagespeed.conf + LoadModule fragment are all it takes.
+log "=== Phase 2: Restart Apache ==="
 
 # Capture pre-restart Apache pids so we can confirm the restart actually
 # replaced them (cPanel's restartsrv_httpd can return 0 even when Apache
@@ -224,16 +213,16 @@ fi
 log "pagespeed_module loaded OK"
 
 # Need to give Apache a moment after restart before issuing the first request
-# so the license init and cache prime finish; the rpm smoke uses the same
-# warm-up retry pattern (release.yml:1670 region).
+# so the cache prime finishes; the rpm smoke uses the same warm-up retry
+# pattern (release.yml package-smoke-rpm).
 mkdir -p /var/www/html
 echo '<html><body><p>EA4 smoke</p></body></html>' > /var/www/html/index.html
 chown nobody:nobody /var/www/html/index.html
 
 HDR_VALUE=""
-# 12 attempts × 2s = 24s upper bound. License v2 init has been observed
-# to take up to ~12s on a cold cache dir under EL9 (slower disk on the
-# CI VM); the previous 16s budget (8×2s) was just on the edge.
+# 12 attempts × 2s = 24s upper bound. First-request readiness has been
+# observed to take up to ~12s on a cold cache dir under EL9 (slower disk
+# on the CI VM); the previous 16s budget (8×2s) was just on the edge.
 for attempt in $(seq 1 12); do
     CURL_HEAD="$(curl -sI --max-time 5 -H 'Host: localhost' http://localhost/ 2>&1 || true)"
     HDR_LINE="$(printf '%s\n' "$CURL_HEAD" \
@@ -258,6 +247,14 @@ if ! echo "$HDR_VALUE" | grep -qF "$EXPECTED_VERSION_STRING"; then
     fail "Header '$HDR_VALUE' does not contain expected version '$EXPECTED_VERSION_STRING'"
 fi
 log "Version assertion passed"
+
+# The module carries no license apparatus: an optimized response
+# must never carry X-PageSpeed-Warn. Judge the same response that carried
+# the version header.
+if printf '%s\n' "$CURL_HEAD" | grep -qi '^X-PageSpeed-Warn'; then
+    fail "X-PageSpeed-Warn header present on an optimized response: $(printf '%s\n' "$CURL_HEAD" | grep -i '^X-PageSpeed-Warn' | tr -d '\r')"
+fi
+log "No X-PageSpeed-Warn header (module optimizes unconditionally)"
 
 # --- Phase 3b: Absent-.so degradation ---
 # With the module .so missing, the <IfFile>-guarded LoadModule in

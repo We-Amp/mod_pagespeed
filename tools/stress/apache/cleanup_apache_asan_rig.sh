@@ -1,4 +1,7 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 # Tear down the ASan Apache rig. MUST run even on failure. Stops
 # Apache and restores /etc/apache2/envvars verbatim from the setup backup (removing
 # the LD_PRELOAD injection), so the next non-ASan Apache System Tests run is not

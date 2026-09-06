@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+
 // Rollup fixture builds for the js-minify corpus:
 //
 //   rollup-iife-banner.js  single-scope IIFE bundle + legal banner comment.

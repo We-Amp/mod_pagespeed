@@ -1,4 +1,7 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 # Regression smoke for the 2014 stale-event race, per HTTP protocol version.
 #
 # History: upstream ngx_pagespeed #788 (SPDY + IPRO -> protocol errors, broken
