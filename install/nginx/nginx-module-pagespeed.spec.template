@@ -1,5 +1,8 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 #------------------------------------------------------------------------------
-#   nginx-module-pagespeed.spec 
+#   nginx-module-pagespeed.spec
 #
 #   Packages the 1.1 ngx_pagespeed dynamic module for el9 (AlmaLinux 9 /
 #   RHEL 9 / Rocky 9). Built and linked INSIDE an almalinux:9 container so the
@@ -10,7 +13,7 @@
 #------------------------------------------------------------------------------
 
 Summary         : @@SHORTDESC@@
-License         : Apache Software License
+License         : Apache-2.0
 Name            : @@PACKAGE@@
 Version         : @@VERSION@@
 Release         : @@REVISION@@@@DIST@@
@@ -62,6 +65,8 @@ rm -rf "$RPM_BUILD_ROOT"
 @@NGINX_MODULEDIR@@/ngx_pagespeed_module.so
 %config(noreplace) @@NGINX_LOADDIR@@/mod-pagespeed.conf
 %dir @@NGINX_DOCDIR@@
+%license @@NGINX_DOCDIR@@/LICENSE
+%doc @@NGINX_DOCDIR@@/NOTICE
 @@NGINX_DOCDIR@@/README.md
 @@NGINX_DOCDIR@@/pagespeed.conf.sample
 @@NGINX_DOCDIR@@/pagespeed_admin_restrict.conf.sample
@@ -74,7 +79,7 @@ exit 0
 # MAIN context (not http{}), so mod-pagespeed.conf's load_module takes effect on
 # the next `nginx -t`/reload. (load_module is a main-context-only directive — it
 # cannot be loaded from http{}/conf.d.) The FileCachePath dir is auto-created at
-# config-parse time — no manual
+# config-parse time (ngx_pagespeed.cc ps_init_dir) — no manual
 # mkdir/chown needed.
 
 # Join the web-server user to the `pagespeed` group. After the optimizer

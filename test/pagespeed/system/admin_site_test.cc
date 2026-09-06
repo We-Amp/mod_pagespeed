@@ -21,7 +21,11 @@
 
 #include "pagespeed/system/admin_site.h"
 
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <memory>
+#include <string>
 
 #include "net/instaweb/http/public/async_fetch.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
@@ -74,9 +78,8 @@ class AdminSiteTest : public CustomRewriteTestBase<SystemRewriteOptions> {
   virtual void SetUp() {
     CustomRewriteTestBase<SystemRewriteOptions>::SetUp();
     server_context_.reset(SetupServerContext(options_.release()));
-    admin_site_ = std::make_unique<AdminSite>(
-        timer(), thread_system_.get(), message_handler(), nullptr /* fetcher */,
-        "/tmp/admin_site_test", nullptr /* daemon_reader */);
+    admin_site_ = std::make_unique<AdminSite>(timer(), message_handler(),
+                                              nullptr /* daemon_reader */);
   }
 
   virtual void TearDown() { RewriteTestBase::TearDown(); }
@@ -279,14 +282,29 @@ TEST_F(AdminExposureWarningTest, NullHandlerIsSafe) {
 }
 
 // =============================================================================
-// Decoding-stub license regression tests.
+// PostInitHook: AdminSite construction and the absence of license state
+// (; the design record D3; the design record D2 drop-in compatibility).
 // =============================================================================
 
-// A decoding stub context must skip admin/license setup in PostInitHook():
-// it runs on default options (no FileCachePath) and never serves requests,
-// so initializing the license machinery there logged a spurious per-process
-// UNLICENSED warning on licensed installs.
-TEST_F(AdminSiteTest, DecodingStubSkipsAdminAndLicenseInit) {
+// Builds a serving (non-stub) SystemServerContext whose FileCachePath is
+// |file_cache_path| and runs its PostInitHook, as every port does at startup.
+std::unique_ptr<SystemServerContext> ServingContextOn(
+    RewriteDriverFactory* factory, ThreadSystem* thread_system,
+    MessageHandler* handler, const GoogleString& file_cache_path) {
+  std::unique_ptr<SystemServerContext> sc(
+      new SystemServerContextNoProxyHtml(factory));
+  SystemRewriteOptions* opts = new SystemRewriteOptions(thread_system);
+  opts->set_file_cache_path(file_cache_path);
+  sc->reset_global_options(opts);
+  sc->set_statistics(factory->statistics());
+  sc->set_message_handler(handler);
+  sc->PostInitHook();
+  return sc;
+}
+
+// A decoding stub context must skip AdminSite setup in PostInitHook(): it
+// runs on default options (no FileCachePath) and never serves requests.
+TEST_F(AdminSiteTest, DecodingStubSkipsAdminSiteInit) {
   std::unique_ptr<SystemServerContext> stub(
       new SystemServerContextNoProxyHtml(factory()));
   stub->reset_global_options(new SystemRewriteOptions(thread_system_.get()));
@@ -295,32 +313,93 @@ TEST_F(AdminSiteTest, DecodingStubSkipsAdminAndLicenseInit) {
   stub->set_is_decoding_stub(true);
   stub->PostInitHook();
   EXPECT_EQ(nullptr, stub->admin_site());
-  GoogleString messages;
-  StringWriter writer(&messages);
-  message_handler()->Dump(&writer);
-  EXPECT_THAT(messages, ::testing::Not(::testing::HasSubstr("UNLICENSED")));
 }
 
-// Control: a regular (serving) context with no license file still builds its
-// AdminSite and logs the UNLICENSED warning — the real unlicensed path stays
-// intact.
-TEST_F(AdminSiteTest, ServingContextWithoutLicenseFileStillWarns) {
-  std::unique_ptr<SystemServerContext> sc(
-      new SystemServerContextNoProxyHtml(factory()));
-  SystemRewriteOptions* opts = new SystemRewriteOptions(thread_system_.get());
-  // Pin the license lookup to a path that cannot exist so the assertion is
-  // deterministic regardless of the host (the license file is resolved as a
-  // sibling of the file cache path).
-  opts->set_file_cache_path(StrCat(GTestTempDir(), "/no-such-dir/cache"));
-  sc->reset_global_options(opts);
-  sc->set_statistics(factory()->statistics());
-  sc->set_message_handler(message_handler());
-  sc->PostInitHook();
+// the design record D3: there is no license state. A serving context with no license
+// file anywhere builds its AdminSite and logs nothing about licensing -- the
+// old startup UNLICENSED warning is gone.
+TEST_F(AdminSiteTest, ServingContextLogsNoLicenseMessage) {
+  ResetStaleLicenseFileNoticeForTesting();
+  std::unique_ptr<SystemServerContext> sc =
+      ServingContextOn(factory(), thread_system_.get(), message_handler(),
+                       StrCat(GTestTempDir(), "/no-such-dir/cache"));
   EXPECT_NE(nullptr, sc->admin_site());
   GoogleString messages;
   StringWriter writer(&messages);
   message_handler()->Dump(&writer);
-  EXPECT_THAT(messages, ::testing::HasSubstr("UNLICENSED"));
+  EXPECT_THAT(messages, ::testing::Not(::testing::HasSubstr("UNLICENSED")));
+  EXPECT_THAT(messages, ::testing::Not(::testing::HasSubstr("icense")));
+}
+
+// the design record D2 drop-in compatibility: a pagespeed.license left behind by an
+// earlier release -- next to FileCachePath, where those releases kept it -- is
+// ignored: never read, never deleted, and mentioned exactly once per process
+// at INFO so the operator knows it can go. Two serving contexts (Apache: one
+// per vhost) share the one notice; a trailing separator on the cache path is
+// stripped, as the old reader did, so the sibling file is still found.
+TEST_F(AdminSiteTest, StaleLicenseFileNoticedOnceAtInfoAndLeftAlone) {
+  ResetStaleLicenseFileNoticeForTesting();
+  namespace fs = std::filesystem;
+  const fs::path root = fs::path(GTestTempDir()) / "stale-license-notice";
+  fs::remove_all(root);
+  const fs::path cache_dir = root / "cache";
+  ASSERT_TRUE(fs::create_directories(cache_dir));
+  const fs::path license_file = root / "pagespeed.license";
+  const char kStaleToken[] = "stale-token-from-a-previous-release";
+  {
+    std::ofstream out(license_file);
+    out << kStaleToken;
+  }
+  ASSERT_TRUE(fs::exists(license_file));
+
+  const GoogleString cache_path = StrCat(cache_dir.string(), "/");
+  std::unique_ptr<SystemServerContext> first = ServingContextOn(
+      factory(), thread_system_.get(), message_handler(), cache_path);
+  std::unique_ptr<SystemServerContext> second = ServingContextOn(
+      factory(), thread_system_.get(), message_handler(), cache_path);
+  EXPECT_NE(nullptr, first->admin_site());
+  EXPECT_NE(nullptr, second->admin_site());
+
+  GoogleString messages;
+  StringWriter writer(&messages);
+  message_handler()->Dump(&writer);
+  const GoogleString notice =
+      StrCat(license_file.string(),
+             ": this file is no longer read since 2.1 and can be removed");
+  EXPECT_EQ(1, CountSubstring(messages, notice)) << messages;
+  // INFO, not a warning: MockMessageHandler prefixes each line with its type.
+  EXPECT_THAT(messages,
+              ::testing::HasSubstr(StrCat("[Info] [00000] ", notice)));
+  EXPECT_THAT(messages, ::testing::Not(::testing::HasSubstr("UNLICENSED")));
+
+  // Left alone: still there, byte-identical.
+  ASSERT_TRUE(fs::exists(license_file));
+  std::ifstream in(license_file);
+  const std::string contents((std::istreambuf_iterator<char>(in)),
+                             std::istreambuf_iterator<char>());
+  EXPECT_EQ(kStaleToken, contents);
+  fs::remove_all(root);
+}
+
+// With no stale file next to the cache directory nothing is logged, and the
+// process-wide latch stays unset for a later context that does have one.
+TEST_F(AdminSiteTest, NoStaleLicenseFileMeansNoNotice) {
+  ResetStaleLicenseFileNoticeForTesting();
+  namespace fs = std::filesystem;
+  const fs::path root = fs::path(GTestTempDir()) / "no-stale-license";
+  fs::remove_all(root);
+  ASSERT_TRUE(fs::create_directories(root / "cache"));
+  std::unique_ptr<SystemServerContext> sc =
+      ServingContextOn(factory(), thread_system_.get(), message_handler(),
+                       (root / "cache").string());
+  EXPECT_NE(nullptr, sc->admin_site());
+  GoogleString messages;
+  StringWriter writer(&messages);
+  message_handler()->Dump(&writer);
+  EXPECT_THAT(
+      messages,
+      ::testing::Not(::testing::HasSubstr("is no longer read since 2.1")));
+  fs::remove_all(root);
 }
 
 // The factory marks the context it builds through
@@ -383,9 +462,8 @@ class AdminSiteDaemonTest : public AdminSiteTest {
     AdminSiteTest::SetUp();
     // daemon_site_ takes ownership of the reader.
     fake_reader_ = new FakeDaemonReader(message_handler());
-    daemon_site_ = std::make_unique<AdminSite>(
-        timer(), thread_system_.get(), message_handler(),
-        nullptr /* fetcher */, "/tmp/admin_site_test", fake_reader_);
+    daemon_site_ =
+        std::make_unique<AdminSite>(timer(), message_handler(), fake_reader_);
   }
 
   // Issues a request for `url` against `site`'s AdminPage and returns the
@@ -608,6 +686,29 @@ TEST_F(AdminSiteDaemonTest, PerEndpointSlotsDoNotBlockEachOther) {
   ASSERT_TRUE(fake_reader_->held_fetch_ != nullptr);
   fake_reader_->Complete(fake_reader_->held_fetch_);
   ASSERT_TRUE(first->done());
+}
+
+// the design record D3: the /v1/license/* admin API is gone. Its former routes fall
+// through to leaf dispatch and answer 404 JSON -- never a config dump, never a
+// 5xx -- and a POST no longer meets a CSRF gate (403). The daemon proxy next
+// to it is untouched.
+TEST_F(AdminSiteDaemonTest, RetiredLicenseRoutesAnswer404) {
+  for (const char* leaf : {"status", "apply", "activate", "consent"}) {
+    for (RequestHeaders::Method method :
+         {RequestHeaders::kGet, RequestHeaders::kPost}) {
+      GoogleString buffer;
+      auto fetch = FetchAdminPage(
+          daemon_site_.get(),
+          StrCat("http://localhost/pagespeed_global_admin/v1/license/", leaf),
+          method, &buffer);
+      ASSERT_TRUE(fetch->done()) << leaf;
+      EXPECT_EQ(HttpStatus::kNotFound, fetch->response_headers()->status_code())
+          << leaf << " method=" << static_cast<int>(method);
+      EXPECT_THAT(buffer, ::testing::HasSubstr("Unknown admin page")) << leaf;
+      EXPECT_THAT(buffer, ::testing::Not(::testing::HasSubstr("CSRF"))) << leaf;
+      EXPECT_EQ(0, fake_reader_->call_count_) << leaf;
+    }
+  }
 }
 
 }  // namespace

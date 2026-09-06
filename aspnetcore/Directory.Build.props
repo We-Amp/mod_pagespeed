@@ -1,15 +1,15 @@
 <Project>
 
   <!--
-    Shared build + NuGet packaging properties for the ASP.NET Core nginx sidecar
-   . Mirrors pagespeed-optimizer/samples/aspnetcore/Directory.Build.props (§7a)
-    with two deliberate sidecar divergences:
+    Shared build + NuGet packaging properties for the ASP.NET Core nginx sidecar.
+    Mirrors pagespeed-optimizer/samples/aspnetcore/Directory.Build.props with two
+    deliberate sidecar divergences:
       * LICENSE/NOTICE/THIRD-PARTY-NOTICES/icon/README are referenced SAME-DIR via
         $(MSBuildThisFileDirectory)<file> — NOT 2.0's `../../<file>`. 2.0's props
         lives two dirs above its repo-root LICENSE; this props lives at aspnetcore/,
         so `../../` would resolve OUTSIDE the repo. Same-dir is robust regardless of
         each packable project's depth.
-      * The BUSL-1.1 LICENSE/NOTICE/THIRD-PARTY-NOTICES live next to THIS file.
+      * The LICENSE/NOTICE/THIRD-PARTY-NOTICES live next to THIS file.
     Package metadata applies only to packable projects (IsPackable != false); the
     test + sample projects opt out via <IsPackable>false</IsPackable>.
   -->
@@ -29,34 +29,36 @@
          visible to the *item* condition — leaving PackageReadmeFile pointing at a README
          that isn't packed (NU5039). MSBuildProjectName is stable across both phases. -->
     <PackThinReadme Condition="'$(PackThinReadme)' == '' and '$(MSBuildProjectName)' == 'WeAmp.PageSpeed.Sidecar.NativeAssets.Linux'">false</PackThinReadme>
-    <!-- Version on the 1.15 line, plain semver, NO +rN. GA. -->
+    <!-- Version on the 1.15 line, plain semver, NO +rN: the engine revision is deliberately not encoded in the package version. GA. -->
     <Version>1.15.0</Version>
     <Authors>We-Amp</Authors>
     <Company>We-Amp B.V.</Company>
-    <Copyright>Copyright (c) 2024-2026 We-Amp B.V. All rights reserved.</Copyright>
-    <!-- BUSL-1.1 ships as a FILE, not an SPDX expression: BUSL-1.1
-         is not on NuGet's SPDX allow-list, so PackageLicenseExpression would fail pack. -->
-    <PackageLicenseFile>LICENSE</PackageLicenseFile>
-    <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
+    <Copyright>Copyright (c) 2024-2026 We-Amp B.V.</Copyright>
+    <!-- Apache-2.0 is on NuGet's SPDX allow-list, so the license ships as an SPDX
+         expression; the LICENSE and NOTICE files are still packed (see below). -->
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <PackageProjectUrl>https://modpagespeed.com/</PackageProjectUrl>
     <!-- Both the PackageReadmeFile designation and the packed file (below) are gated on
          PackThinReadme (set above) so pack stays consistent — a designated-but-unpacked
          README is NU5039. PackThinReadme=false ⇒ no readme (NM-3). -->
     <PackageReadmeFile Condition="'$(PackThinReadme)' != 'false'">README.md</PackageReadmeFile>
     <PackageIcon>icon.png</PackageIcon>
-    <PackageReleaseNotes>1.15.0.7 (packaging revision; engine v1.15.0+r18, bundled nginx 1.30.3): native-engine refresh from r17 to r18. Serving performance: cached resources are served with substantially less copying, including an experimental zero-copy serve mode for memory-mapped cache hits, and HTTP/2 and HTTP/3 cached serves stream through a bounded copy ring. Caching: metadata and page-property entries move to a dedicated small-object tier so they stay warm across restarts independent of payload traffic (on file caches of ~256 MB or larger the first restart after upgrading rebuilds the payload cache once; set FileCacheSmallTierPercent 0 to disable), and the default file cache size is raised to 1 GB. Correctness: stricter configuration validation (out-of-range option values now fail configuration load, and an invalid ?PageSpeedFilters= name consistently rejects the query), critical-CSS and Content-Security-Policy fixes (script-injecting filters back off under a restrictive policy when HonorCsp is enabled), a native loading="lazy" mode for lazyload_images, and the legacy JavaScript minifier now passes template literals through unmodified. Security hardening across input validation and output escaping, an updated bundled HTTPS fetch library (curl 8.21.0), and cache-library fixes including a concurrent-startup initialization race; update recommended. The embedded admin console also gets a reliability and usability pass. No change to the bundled nginx (still 1.30.3) and no managed-code changes; 1.15.0 installs keep working, including with newly issued license keys.
+    <PackageReleaseNotes>Next release: mod_pagespeed 2.1 is licensed under the Apache License 2.0; LICENSE and NOTICE continue to ship in the package.
 
-1.15.0.6 (packaging revision; engine v1.15.0+r17, bundled nginx 1.30.3): security fix in the bundled nginx module — a malformed request could crash an nginx worker process (remotely triggerable denial of service, no authentication required); update strongly recommended. Optimization and page-property caches now persist across restarts, so the server comes back warm after a restart or deploy instead of re-optimizing from scratch. Also includes the engine's experimental, default-off Web Bot Auth updates (real-world signer interop and the opt-in AI-crawl counter). No change to the bundled nginx (still 1.30.3) and no managed-code changes; 1.15.0 installs keep working, including with newly issued license keys.
+1.15.0.7 (packaging revision; engine v1.15.0+r18, bundled nginx 1.30.3): native-engine refresh from r17 to r18. Serving performance: cached resources are served with substantially less copying, including an experimental zero-copy serve mode for memory-mapped cache hits, and HTTP/2 and HTTP/3 cached serves stream through a bounded copy ring. Caching: metadata and page-property entries move to a dedicated small-object tier so they stay warm across restarts independent of payload traffic (on file caches of ~256 MB or larger the first restart after upgrading rebuilds the payload cache once; set FileCacheSmallTierPercent 0 to disable), and the default file cache size is raised to 1 GB. Correctness: stricter configuration validation (out-of-range option values now fail configuration load, and an invalid ?PageSpeedFilters= name consistently rejects the query), critical-CSS and Content-Security-Policy fixes (script-injecting filters back off under a restrictive policy when HonorCsp is enabled), a native loading="lazy" mode for lazyload_images, and the legacy JavaScript minifier now passes template literals through unmodified. Security hardening across input validation and output escaping, an updated bundled HTTPS fetch library (curl 8.21.0), and cache-library fixes including a concurrent-startup initialization race; update recommended. The embedded admin console also gets a reliability and usability pass. No change to the bundled nginx (still 1.30.3) and no managed-code changes; 1.15.0 installs keep working.
 
-1.15.0.5 (packaging revision; engine v1.15.0+r16, bundled nginx 1.30.3): security-maintenance update to the bundled reverse proxy. The bundled nginx moves from 1.30.2 to 1.30.3 on the 1.30 stable branch, picking up upstream fixes for a buffer-overflow issue in nginx's upstream proxy/gRPC handling (CVE-2026-42055) and a lower-severity charset buffer-overread (CVE-2026-48142); update recommended. No change to optimization behavior and no managed-code changes — the native engine is unchanged (v1.15.0+r16). 1.15.0 installs keep working, including with newly issued license keys.
+1.15.0.6 (packaging revision; engine v1.15.0+r17, bundled nginx 1.30.3): security fix in the bundled nginx module — a malformed request could crash an nginx worker process (remotely triggerable denial of service, no authentication required); update strongly recommended. Optimization and page-property caches now persist across restarts, so the server comes back warm after a restart or deploy instead of re-optimizing from scratch. Also includes the engine's experimental, default-off Web Bot Auth updates (real-world signer interop and the opt-in AI-crawl counter). No change to the bundled nginx (still 1.30.3) and no managed-code changes; 1.15.0 installs keep working.
 
-1.15.0.4 (packaging revision; engine v1.15.0+r16, bundled nginx 1.30.2): native-engine refresh from r15 to r16, with no change to optimization behavior or bundled nginx (still 1.30.2). The embedded admin console adds an informational over-capacity indicator: when a licensed install is optimizing a site outside its licensed domain, the console shows a non-blocking notice with a link to license the additional site — optimization always continues (no lockout). This build also picks up minor engine correctness and shutdown-path hardening from r16. No managed-code changes; 1.15.0 installs keep working, including with newly issued license keys.
+1.15.0.5 (packaging revision; engine v1.15.0+r16, bundled nginx 1.30.3): security-maintenance update to the bundled reverse proxy. The bundled nginx moves from 1.30.2 to 1.30.3 on the 1.30 stable branch, picking up upstream fixes for a buffer-overflow issue in nginx's upstream proxy/gRPC handling (CVE-2026-42055) and a lower-severity charset buffer-overread (CVE-2026-48142); update recommended. No change to optimization behavior and no managed-code changes — the native engine is unchanged (v1.15.0+r16). 1.15.0 installs keep working.
 
-1.15.0.3 (packaging revision; engine v1.15.0+r15, bundled nginx 1.30.2): native-engine refresh from r10 to r15 — a security-maintenance update to the bundled module, with no change to optimization behavior or bundled nginx (still 1.30.2). The shipped .so is now built with binary hardening (full RELRO/BIND_NOW, -fstack-protector-strong, _FORTIFY_SOURCE=2, and CET/BTI), asserted on every release artifact. The rewrite path picks up memory-safety and resource-exhaustion fixes, along with explicit bounds on header count and HTML nesting depth; update recommended. The module's attack surface is further reduced by removing unused third-party components and updating the remaining vendored dependencies to maintained versions. /v1/license/status now reports an honest license_file_error when a license file is present but unreadable, instead of falling silently to UNLICENSED. No managed-code changes; 1.15.0 installs keep working, including with newly issued license keys.
+1.15.0.4 (packaging revision; engine v1.15.0+r16, bundled nginx 1.30.2): native-engine refresh from r15 to r16, with no change to optimization behavior or bundled nginx (still 1.30.2). This build picks up minor engine correctness and shutdown-path hardening from r16. No managed-code changes; 1.15.0 installs keep working.
+
+1.15.0.3 (packaging revision; engine v1.15.0+r15, bundled nginx 1.30.2): native-engine refresh from r10 to r15 — a security-maintenance update to the bundled module, with no change to optimization behavior or bundled nginx (still 1.30.2). The shipped .so is now built with binary hardening (full RELRO/BIND_NOW, -fstack-protector-strong, _FORTIFY_SOURCE=2, and CET/BTI), asserted on every release artifact. The rewrite path picks up memory-safety and resource-exhaustion fixes, along with explicit bounds on header count and HTML nesting depth; update recommended. The module's attack surface is further reduced by removing unused third-party components and updating the remaining vendored dependencies to maintained versions. No managed-code changes; 1.15.0 installs keep working.
 
 1.15.0.2 (packaging revision; engine v1.15.0+r10, bundled nginx 1.30.2): NuGet packaging refresh on the same native engine as 1.15.0.1.
 
-1.15.0.1 (packaging revision; engine v1.15.0+r10, bundled nginx 1.30.2): refreshed embedded admin console — Purchase points at the current per-site plans, and the License page shows the scope and licensed site for tokens that carry them. The native engine also picks up the runtime ABI guard (inert for the bundled matched pair; relevant only in External mode against a drifted host nginx). No managed-code changes; 1.15.0 installs keep working, including with newly issued license keys.
+1.15.0.1 (packaging revision; engine v1.15.0+r10, bundled nginx 1.30.2): refreshed embedded admin console. The native engine also picks up the runtime ABI guard (inert for the bundled matched pair; relevant only in External mode against a drifted host nginx). No managed-code changes; 1.15.0 installs keep working.
 
 1.15.0 (GA): the Inverse topology is the default. Add services.AddPageSpeed(config) + app.UsePageSpeed() to your ASP.NET Core app and your Kestrel server stays the public front door — it owns the listening socket, TLS, auth and routing exactly as before. The bundled nginx + ngx_pagespeed runs loopback-only behind your app as an optimize-proxy: the middleware streams optimizable responses over loopback (YARP) to nginx, which optimizes and proxy_pass-es back to a private raw-origin Kestrel endpoint where the middleware bypasses itself. Non-optimizable requests, and any request while the sidecar isn't running, pass straight through un-optimized (always-functional). By default (Sidecar.OwnPublicPort = true) the package binds the public port (Sidecar.ListenPort, 8080) as a code endpoint; set OwnPublicPort = false to bind it yourself via Kestrel:Endpoints (e.g. for in-process TLS). For edge TLS, front the public port with a terminator or load balancer; the loopback hop to nginx is plain HTTP with a single validated X-Forwarded-Proto so optimized asset URLs root at the public scheme.
 

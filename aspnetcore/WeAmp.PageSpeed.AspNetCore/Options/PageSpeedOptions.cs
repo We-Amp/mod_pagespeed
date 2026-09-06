@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+
 namespace WeAmp.PageSpeed.AspNetCore.Options;
 
 /// <summary>
@@ -80,26 +83,14 @@ public class PageSpeedOptions
     public Dictionary<string, string> CustomOptions { get; set; } = [];
 
     /// <summary>
-    /// BYOL license token (Ed25519, "mps1" product scope). When set, the sidecar
-    /// writes it to <c>parent_path(FileCachePath)/pagespeed.license</c> (0600,
-    /// never-clobber) before launching nginx, so the module reads it on startup
-    ///. Source from a secret /
-    /// environment, NOT appsettings. Null = unlicensed (soft-enforcement: core
-    /// still optimizes, an X-PageSpeed-Warn: unlicensed header is emitted).
-    /// The sidecar is a license <em>producer</em> only — it never mints, signs, or
-    /// renews; the nginx worker remains the cryptographic authority and will reject
-    /// an invalid token (the sidecar only logs decode-only warnings, the design record D9).
+    /// Retired setting from 2.0; accepted and ignored.
     /// </summary>
+    [Obsolete("No longer used; the setting is ignored.")]
     public string? LicenseKey { get; set; }
 
     /// <summary>
-    /// Optional override for the license renewal/validation service endpoint,
-    /// passed to the nginx worker as the <c>PAGESPEED_LICENSE_SERVICE_URL</c>
-    /// environment variable. When null the worker uses its built-in
-    /// default endpoint. Must be an absolute http(s) URL; a malformed value is
-    /// ignored with a warning (the worker falls back to its default — always
-    /// functional). Takes precedence over any same-named entry in
-    /// <see cref="SidecarOptions.EnvironmentVariables"/>.
+    /// Retired setting from 2.0; accepted and ignored.
     /// </summary>
+    [Obsolete("No longer used; the setting is ignored.")]
     public string? LicenseServiceUrl { get; set; }
 }

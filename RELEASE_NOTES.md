@@ -1,10 +1,41 @@
 # mod_pagespeed 1.16.0 Release Notes
 
-**Release candidate:** 1.16.0-rc.13
-**Release date:** 2026-09-02
+**Release candidate:** 1.16.0-rc.14
+**Release date:** 2026-09-06
 **Status:** Release candidate
 
 ## Highlights
+
+- **mod_pagespeed 2.1 is licensed under the Apache License 2.0.** Every
+  feature is available to everyone. The license text (`LICENSE`) and the
+  attribution notices (`NOTICE`) ship in every package: the Apache module deb
+  and rpm (including the cPanel EasyApache 4 build), the nginx module deb and
+  rpm, the IIS installer and the NuGet package. Ships in 1.16.0-rc.14.
+
+- **The system-call filter is enforced by default.** The optimizer daemon,
+  and the headless browser when browser analysis is enabled, now run under an
+  enforcing system-call filter out of the box; a call outside the filter is
+  refused and logged instead of only logged. The shipped drop-in that enables
+  enforcement can be removed to return to log-only mode. Hardens the daemon
+  against local exploitation. **Update recommended.**
+
+- **The optimizer sends no telemetry and opens no outbound connection of its
+  own accord.** The only traffic that leaves the host is what the operator
+  configures: origin fetches and, when enabled, browser-analysis targets.
+
+- **The module packages now install the daemon configuration.** Upgrading the
+  Apache or nginx module deb/rpm from 1.15 to 1.16 needs no manual daemon
+  setup; the module finds the optimizer through the configuration the package
+  installs.
+
+- **The optimizer packages ship `THIRD-PARTY-NOTICES`** alongside `LICENSE`
+  and `NOTICE`, listing every bundled third-party component with its license,
+  version and upstream location.
+
+- **The optimizer service starts ahead of the web servers and counts as
+  started once its socket exists**, so a web server coming up at boot finds
+  the daemon ready rather than retrying.
+
 
 - **The optimizer daemon now runs as an unprivileged user, and its cache and
   sockets are scoped to a single group.** The daemon that performs in-place
@@ -53,6 +84,16 @@
   cache volume that already carries the intended permissions. Affects
   installations running the 1.16.0-rc.7 package pair; fixed in 1.16.0-rc.8.
   **Update recommended.**
+
+- **The module packages now install the daemon configuration.** The deb and
+  rpm packages ship an Apache configuration file, `pagespeed_daemon.conf`,
+  that points the module at the optimizer daemon installed alongside it (its
+  notification socket and its cache volume, at the optimizer package's
+  defaults), so an upgrade from 1.15 reaches the daemon without editing any
+  configuration. The package manager treats it as a configuration file, so
+  edits to it survive later upgrades. Existing hand-written
+  `ModPagespeedDaemonSocketPath` / `ModPagespeedDaemonVolumePath` directives
+  keep working. See *Packaging and platform notes* for the paths.
 
 - **Bundled apr-util updated to 1.6.5.** Picks up the upstream fixes for
   CVE-2026-32327 (CVSS 9.1), CVE-2026-34191 (CVSS 9.1), CVE-2025-49506
@@ -273,7 +314,9 @@
   that sets `ModPagespeedDaemonVolumePath` and `ModPagespeedDaemonSocketPath`
   explicitly must repoint both** at the new locations. A module still pointing
   at the previous locations logs the reason at startup and runs with in-place
-  optimization off.
+  optimization off. A server upgrading from 1.15, or installing fresh, sets
+  nothing: the module packages now install both directives at the new
+  locations (see *Packaging and platform notes*).
 
 - **Restart the web server after upgrading.** The module packages add the web
   server's user to the daemon's group in their post-install step, and group
@@ -305,6 +348,40 @@
 
 ## Packaging and platform notes
 
+- **The module packages install `pagespeed_daemon.conf`, the configuration
+  that points the module at the optimizer daemon.** Debian/Ubuntu:
+  `/etc/apache2/conf-available/pagespeed_daemon.conf`, enabled by the package
+  with `a2enconf pagespeed_daemon` and disabled again when the package is
+  removed; a dpkg conffile. Red Hat family:
+  `/etc/httpd/conf.d/pagespeed_daemon.conf`, marked `%config(noreplace)`.
+  The file sets `ModPagespeedDaemonSocketPath` and
+  `ModPagespeedDaemonVolumePath` to the optimizer package's defaults
+  (`/run/pagespeed-optimizer/notify.sock` and
+  `/var/cache/pagespeed-optimizer/v1/cache`) inside
+  `<IfModule pagespeed_module>`. Its name deliberately sorts after
+  `pagespeed.conf`: on the Red Hat family `conf.d/*.conf` is read in name
+  order and `pagespeed.conf` is the file that loads the module, so a drop-in
+  sorting before it would be read while the module is not yet loaded and be
+  skipped without a message. A server that already carries the two directives
+  in a file of its own (for example a hand-written `pagespeed-daemon.conf`
+  from an earlier candidate's instructions) keeps working: both files are
+  read, and where they set the same directive the one read later — the
+  packaged file, whose name sorts after — is the effective value, so
+  identical values change nothing. Remove the hand-written file once the
+  packaged one is in place, so there is one place to edit. A file created by
+  hand earlier at the packaged file's own path is treated as a locally
+  modified configuration file: on Debian/Ubuntu dpkg asks what to do with it,
+  which stops an unattended upgrade at that question, so remove such a copy
+  before upgrading (or install with `--force-confold` to keep it); on the Red
+  Hat family the packaged copy is written beside it as
+  `pagespeed_daemon.conf.rpmnew`. If the daemon is
+  not running when the web server starts, in-place optimization is off for
+  that web-server process and one startup line names the cause; start the
+  daemon and restart the web server. To use the module's own in-place path
+  instead, comment out both directives in the packaged file; the package
+  manager keeps that edit across upgrades. The file is included only in
+  module packages that depend on the `pagespeed-optimizer` package; a module
+  package built without that dependency does not carry it.
 - **The module packages join the web-server user to the `pagespeed` group in
   postinst.** With the optimizer daemon's privilege drop, the daemon's
   cache volume, notify socket and shared configuration are group-scoped

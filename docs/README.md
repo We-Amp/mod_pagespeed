@@ -33,7 +33,7 @@ build/test workflow, start at the root [`CLAUDE.md`](../CLAUDE.md). Customer-fac
 | [envoy-limitations.md](envoy-limitations.md) | Known Envoy limitations. |
 | [iis-limitations.md](iis-limitations.md) | Known IIS limitations. |
 | [operations-monitoring.md](operations-monitoring.md) | Operations and monitoring. |
-| [the design record-autocreate-doc-snippet.md] | AutoCreateCachePath / AutoCreateLogDir directive snippets. |
+| [autocreate-directive-snippets.md](autocreate-directive-snippets.md) | AutoCreateCachePath / AutoCreateLogDir directive snippets. |
 
 ## Plans and historical
 

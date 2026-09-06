@@ -25,7 +25,7 @@ hardened: a malformed line cannot crash the module at startup, unknown
 options are reported instead of silently ignored, and option scoping is
 enforced on IIS as on the other ports.
 
-### Startup diagnostics (1.1.0+r11 era, the design record)
+### Startup diagnostics (1.1.0+r11 era)
 
 - The cache directory is auto-created (with a conditional ACL grant for the
   worker identity) when it lives under a canonical prefix
@@ -83,7 +83,8 @@ propagate:
   `RewriteDriver::FetchInPlaceResource`, and responses are recorded via
   `InPlaceResourceRecorder` (`iis_http_module.cpp`,
   `iis_process_context.cpp`). The old "async cache stubs return misses /
-  re-optimized on each request" behavior is gone.
+  re-optimized on each request" behavior is gone since the IISpeed code
+  base was adopted for the IIS port.
 - **Beacon data** — no longer discarded. `/mod_pagespeed_beacon`
   GET+POST requests are routed (`RequestRouting::kBeacon`) and handed to
   `ServerContext::HandleBeacon` with a POST size cap; the factory returns
@@ -94,7 +95,7 @@ propagate:
   `HandleBeacon` still returns 204 (see the TODO in
   `iis_http_module.cpp`), so beacon rejection is not client-visible.
 - **Zero-copy serve** — memory-mapped (Cyclone) cache hits are served
-  zero-copy on IIS as of r18 (`CycloneZeroCopyServe`, the design record;
+  zero-copy on IIS as of r18 (`CycloneZeroCopyServe`;
   `iis_zerocopy_serve.h`, `iis_module_base_fetch.cpp`).
 
 ## Configuration Caveats

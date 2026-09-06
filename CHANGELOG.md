@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Every module package now carries the license text and the attribution
+  notices.** The Apache module deb and rpm (including the cPanel EasyApache 4
+  build), the nginx module deb and rpm and the IIS installer include the
+  Apache License 2.0 text (`LICENSE`) and the attribution notices (`NOTICE`):
+  under `/usr/share/doc/<package>/` on Linux, next to the module DLL on
+  Windows. Previously only the NuGet package shipped them.
+
+- **The module deb and rpm packages now install the daemon configuration.**
+  `pagespeed_daemon.conf` — `/etc/apache2/conf-available/` on Debian/Ubuntu
+  (enabled by the package with `a2enconf`, a dpkg conffile) and
+  `/etc/httpd/conf.d/` on the Red Hat family (`%config(noreplace)`) — sets
+  `ModPagespeedDaemonSocketPath` and `ModPagespeedDaemonVolumePath` to the
+  optimizer package's defaults inside `<IfModule pagespeed_module>`, so an
+  upgrade from 1.15 reaches the daemon without hand-editing. The name sorts
+  after `pagespeed.conf`, which on the Red Hat family is the file that loads
+  the module. Existing hand-written directives keep working; where both set
+  the same directive the packaged file, read later, is the effective value.
+
 - **The module now records the serve-time bandwidth savings it produces into
   the optimizer daemon's statistics.** In the topology where the daemon only
   writes optimized variants and the module serves them in place, the daemon
@@ -39,13 +57,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the module's `/v1/daemon/` endpoints. When the daemon is unreachable or not
   configured the panels say so plainly; the module's own pages are unaffected.
 
-### Removed
+- **The admin console's navigation now carries a dismissible Support panel**
+  pointing at support subscriptions; the dismissal is remembered.
 
-- **The admin console's License tab is gone.** In its navigation slot is a
-  single gentle, dismissible Support panel pointing at support subscriptions;
-  the dismissal is remembered. The unlicensed and over-cap banners in the top
-  bar are removed with it. The underlying `/v1/license/*` endpoints are
-  untouched and still answer.
+### Changed
+
+- License — Apache License 2.0 (was BUSL-1.1). Every feature is available to
+  everyone. Every file now carries an SPDX `Apache-2.0` header or is a
+  documented exception, verified with Apache RAT (Release Audit Tool).
 
 ### Fixed
 
@@ -84,17 +103,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   trigger this, so a plain browser reload can never evict a URL's optimized
   variants. Affected only deployments running the optional optimizer daemon;
   the classic in-place cache was not affected.
-
-- **Licensed installs no longer log a spurious per-process UNLICENSED
-  warning.** An internal helper context used only for decoding
-  `.pagespeed.` URLs ran the license check against a path that never
-  holds a license file, so every worker process logged the "running
-  UNLICENSED" warning at startup even when the real serving contexts
-  had loaded a valid license. Served responses were never affected (no
-  `X-PageSpeed-Warn` header was emitted); the warning was cosmetic but
-  landed in the error log and the admin message page on every worker
-  spawn. The helper context now skips license initialization. All
-  server flavors were affected.
 
 - **A cached WebP or AVIF image selected by one browser's Accept header can
   no longer be reused for a browser that did not advertise the format, when
@@ -720,7 +728,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Version line renumbered 1.1 -> 1.15**. mod_pagespeed 1.15 is the
+- **Version line renumbered 1.1 -> 1.15.** mod_pagespeed 1.15 is the
   maintained continuation of the Apache-lineage codebase and the direct successor
   to Google's final mod_pagespeed release (1.14.36.1); the prior "1.1" numbering
   read as older than Google's line on package/version surfaces. This is a

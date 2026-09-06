@@ -65,9 +65,9 @@ effect on those ports.
 - File the actual edit against `pagespeed-optimizer/website/` in the
   directive reference page (search the website source for
   `EnableCachePurge` to locate it).
-- Per the design record Decision §5 and the design record/060: no marketing copy, no
+- Keep the entries to the decided scope: no marketing copy, no
   "auto-heal" framing, no MSI-property reference.
-- Per the design record Decision §5: the module also emits a single INFO log
+- As decided for these directives, the module also emits a single INFO log
   line at startup naming the resolved state
   (`AutoCreateCachePath: on`). This is operator-facing log output,
   not directive-reference content, and does not belong in the entry
