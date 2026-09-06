@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 %global mps_version 1.15.0
 %global mps_release 1
 %global upstream_rpm mod-pagespeed-%{mps_version}-%{mps_release}.x86_64.rpm
@@ -137,6 +140,15 @@ sed -e 's|/etc/httpd/|/etc/apache2/|g' \
 install -d -m 0750 %{buildroot}/var/cache/mod_pagespeed
 install -d -m 0750 %{buildroot}/var/log/pagespeed
 
+# 5. License text + attribution notices, as extracted from the upstream rpm
+# (which carries them under its own /usr/share/doc/mod-pagespeed/). An
+# Apache-2.0 distribution ships both next to the binaries; this package's
+# own docdir keeps them out of the upstream package's namespace.
+install -d -m 0755 %{buildroot}/usr/share/doc/%{name}
+install -m 0644 usr/share/doc/mod-pagespeed/LICENSE \
+                usr/share/doc/mod-pagespeed/NOTICE \
+                %{buildroot}/usr/share/doc/%{name}/
+
 %files
 %{_httpd_moddir}/mod_pagespeed.so
 %{_httpd_modconfdir}/490_mod_pagespeed.conf
@@ -144,6 +156,9 @@ install -d -m 0750 %{buildroot}/var/log/pagespeed
 %config            %{_httpd_confdir}/pagespeed_libraries.conf
 %attr(0750,nobody,nobody) %dir /var/cache/mod_pagespeed
 %attr(0750,nobody,nobody) %dir /var/log/pagespeed
+%dir /usr/share/doc/%{name}
+%license /usr/share/doc/%{name}/LICENSE
+%doc /usr/share/doc/%{name}/NOTICE
 
 %post
 # Trigger an EA4 Apache reload so the new module takes effect. Skipped if the

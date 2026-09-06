@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: BUSL-1.1
+# SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2024-2026 We-Amp B.V.
 # Comprehensive dependency CVE scan — the design record (1.1 port).
 #
@@ -209,7 +209,11 @@ assert_npm_coverage() {
   registered="$(printf '%s\n' "$NPM_LOCKFILES" | awk 'NF{print $2}')"
   local f
   for f in $tracked; do
-    printf '%s\n' "$registered" | grep -qxF "$f" || missing="${missing}${f} "
+    # Herestring, not a pipe: `grep -q` exits on the first match and a
+    # `printf | grep -q` pipeline then fails under pipefail whenever printf
+    # loses the race to write ("printf: write error: Broken pipe"), which
+    # reported a REGISTERED lockfile as unscanned and failed the gate.
+    grep -qxF -- "$f" <<<"$registered" || missing="${missing}${f} "
   done
   [ -z "$missing" ] && { note "npm lockfile coverage: all $(printf '%s\n' "$tracked" | grep -c .) committed lockfile(s) registered"; return; }
   warn "UNSCANNED committed npm lockfile(s) — add them to NPM_LOCKFILES: ${missing}"

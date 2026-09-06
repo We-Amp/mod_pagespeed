@@ -7,11 +7,15 @@ case "$1" in
           # a2disconf is available; use it.
           test -L /etc/apache2/conf-enabled/pagespeed_libraries.conf && \
             a2disconf pagespeed_libraries
+          test -L /etc/apache2/conf-enabled/pagespeed_daemon.conf && \
+            a2disconf pagespeed_daemon
         else
           # If we don't have a2disconf, then the symlink is in conf.d instead of
           # conf-enabled.
           test -L /etc/apache2/conf.d/pagespeed_libraries.conf && \
                rm /etc/apache2/conf.d/pagespeed_libraries.conf
+          test -L /etc/apache2/conf.d/pagespeed_daemon.conf && \
+               rm /etc/apache2/conf.d/pagespeed_daemon.conf
         fi
     ;;
     upgrade|deconfigure|failed-upgrade)

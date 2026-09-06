@@ -80,6 +80,7 @@ process_template() (
     -e "s#@@SSL_CERT_DIR@@#${SSL_CERT_DIR}#g" \
     -e "s#@@SSL_CERT_FILE_COMMAND@@#${SSL_CERT_FILE_COMMAND}#g" \
     -e "s#@@PAGESPEED_CONF_PREFIX@@#${PAGESPEED_CONF_PREFIX}#g" \
+    -e "s#@@DAEMON_DROPIN_FILES@@#${DAEMON_DROPIN_FILES}#g" \
     > "$TMPLOUT" <<< "$TMPLINCL"
 
   if grep "@@" "$TMPLOUT"; then
@@ -162,4 +163,13 @@ stage_install_common() {
     echo "ERROR: mod_pagespeed.so not found at ${BAZEL_SO} or ${BUILDDIR}/libmod_pagespeed.so" >&2
     exit 1
   fi
+
+  # The license text and the attribution notices, next to the binaries as the
+  # Apache-2.0 terms ask. The repo-root LICENSE and NOTICE are the single
+  # source, copied verbatim; both Apache packages (deb and rpm) stage them
+  # here under the package's own /usr/share/doc directory. The rpm spec lists
+  # them as %license and %doc.
+  install -m 755 -d "${STAGEDIR}/usr/share/doc/${PACKAGE}"
+  install -m 644 "${SRCDIR}/LICENSE" "${SRCDIR}/NOTICE" \
+    "${STAGEDIR}/usr/share/doc/${PACKAGE}/"
 }

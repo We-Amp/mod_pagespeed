@@ -1,2 +1,5 @@
 # Initial clang-format-20 pass (Google style) — formatting only, no logic changes
 fd4deb7434939d2e38e95b30c283f94aeaebffb0
+
+# Relicense to Apache-2.0: license header sweep and audit headers (squash-merged 2026-09-05)
+5a4bb449d62dbb3fcdb5d023ab9366bafbc9b787

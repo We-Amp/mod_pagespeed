@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
+  SPDX-License-Identifier: Apache-2.0
+  Copyright (c) 2024-2026 We-Amp B.V.
+-->
+
+<!--
   WiX v5 MSI installer for We-Amp PageSpeed IIS module.
 
   Build:
@@ -130,6 +135,20 @@
     <Component Id="SampleConfig" Directory="INSTALLDIR" Guid="*">
       <File Id="web.config.sample"
             Source="$(var.SrcDir)\install\iis\web.config.sample"
+            KeyPath="yes" />
+    </Component>
+
+    <!-- License text and attribution notices, next to the module as the
+         Apache-2.0 terms ask. Sourced verbatim from the repository root
+         (the same files every other package ships). -->
+    <Component Id="LicenseFile" Directory="INSTALLDIR" Guid="*">
+      <File Id="LICENSE"
+            Source="$(var.SrcDir)\LICENSE"
+            KeyPath="yes" />
+    </Component>
+    <Component Id="NoticeFile" Directory="INSTALLDIR" Guid="*">
+      <File Id="NOTICE"
+            Source="$(var.SrcDir)\NOTICE"
             KeyPath="yes" />
     </Component>
 
@@ -272,6 +291,8 @@
     <Feature Id="ProductFeature" Title="PageSpeed for IIS" Level="1">
       <ComponentRef Id="MainDll" />
       <ComponentRef Id="SampleConfig" />
+      <ComponentRef Id="LicenseFile" />
+      <ComponentRef Id="NoticeFile" />
       <ComponentRef Id="IisServiceControl" />
       <ComponentRef Id="CacheDirComp" />
       <ComponentRef Id="LogDirComp" />

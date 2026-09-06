@@ -1,12 +1,16 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 #
 # nginx_package_docs.sh — author the docs shipped INSIDE both the deb
-# and rpm: pagespeed.conf.sample, pagespeed_admin_restrict.conf.sample, README.md.
+# and rpm: pagespeed.conf.sample, pagespeed_admin_restrict.conf.sample, README.md,
+# plus the repo-root LICENSE and NOTICE copied verbatim.
 #
 # The sample-config + admin-restrict snippet are reused verbatim from
 # install/nginx/build_nginx_package.sh (the tarball builder). The README is
 # rewritten to fix the false "Tested with nginx 1.29.x" string (M0 proved
-# exact-version pinning is mandatory), and to state BYOL + the cache-dir
+# exact-version pinning is mandatory), and to state the license + the cache-dir
 # auto-create note.
 #
 # Usage: nginx_package_docs.sh <docdir> <version> <deb|rpm> <nginx_upstream_ver> [<distro_major>]
@@ -19,6 +23,13 @@ NGINX_VER="$4"          # exact stock nginx version this module is pinned to
 DISTRO_MAJOR="${5:-9}"  # RHEL-family major (9|10) for the rpm README wording; deb ignores it
 
 mkdir -p "${DOCDIR}"
+
+# --- license text + attribution notices --------------------------------------
+# The Apache-2.0 terms want both next to the binaries. The repo-root files are
+# the single source; copied verbatim, never re-authored here. The rpm spec
+# lists them as %license and %doc; the deb ships the staged tree as is.
+SRCDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+install -m 644 "${SRCDIR}/LICENSE" "${SRCDIR}/NOTICE" "${DOCDIR}/"
 
 # --- sample config (verbatim from build_nginx_package.sh) -------------------
 cat > "${DOCDIR}/pagespeed.conf.sample" << 'CONF'
@@ -122,12 +133,11 @@ pagespeed FileCachePath /var/cache/ngx_pagespeed;
 The \`FileCachePath\` directory is created automatically at config-parse time
 and chowned to the worker user — **no manual \`mkdir\`/\`chown\` needed**.
 
-## Licensing — Bring Your Own License (BYOL)
+## License
 
-This package is **free to install**. PageSpeed runs in **pass-through mode** (no
-optimization, nginx serves origin content unchanged) until a valid license token
-is present; with a valid token, optimization activates. No license material ships
-in the package — see https://modpagespeed.com/pricing/ for activation and license tokens.
+This package is licensed under the Apache License 2.0. The license text
+(\`LICENSE\`) and the attribution notices (\`NOTICE\`) are installed next to
+this file.
 
 ## Admin endpoints (localhost-only by default)
 

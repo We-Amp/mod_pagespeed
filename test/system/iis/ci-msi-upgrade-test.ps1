@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 # === DAY-2 SNAPSHOT -- IMPORTANT FOR LOCAL REPRODUCTION ===
 #
 # The Hyper-V snapshot `02-iis-ready` on the rig host is INTENTIONALLY
@@ -29,7 +32,6 @@
 #
 # Parameters:
 #   -MsiPath                 Path to the MSI to test (on the host)
-#   -TokenPath               Path to the CI license token file (on the host)
 #   -OldMsiPath              Optional path to a synthetic-old MSI on the host.
 #                            When supplied, runs flow-b (warm upgrade) instead
 #                            of flow-a (clean install). Empty = flow-a.
@@ -47,9 +49,6 @@
 param(
     [Parameter(Mandatory=$true)]
     [string]$MsiPath,
-
-    [Parameter(Mandatory=$true)]
-    [string]$TokenPath,
 
     # Optional: when non-empty, install this OLD MSI first, iisreset, warm a
     # worker via HTTP, then install the NEW MSI on top. Reproduces the warm-IIS
@@ -105,10 +104,6 @@ if (-not (Test-Path $MsiPath)) {
     Write-Error "MSI not found: $MsiPath"
     exit 1
 }
-if (-not (Test-Path $TokenPath)) {
-    Write-Error "License token not found: $TokenPath"
-    exit 1
-}
 # Only validate OldMsiPath when non-empty: PowerShell Test-Path "" returns
 # $false, so a naked Test-Path on an empty string would trip the error path.
 if ($OldMsiPath -and -not (Test-Path $OldMsiPath)) {
@@ -116,7 +111,6 @@ if ($OldMsiPath -and -not (Test-Path $OldMsiPath)) {
     exit 1
 }
 
-$token = Get-Content $TokenPath -Raw
 $msiName = Split-Path $MsiPath -Leaf
 $oldMsiName = if ($OldMsiPath) { Split-Path $OldMsiPath -Leaf } else { "" }
 $adminPass = ConvertTo-SecureString 'Hv!PassThr0w' -AsPlainText -Force
@@ -169,14 +163,6 @@ $baselineScript = {
 Invoke-Command -VMName $VMName -Credential $cred -ScriptBlock $baselineScript
 
 # --- Step 2: Prepare artifacts directory in VM ---
-# Note: license token is NOT deployed here. The IIS module derives the
-# license path from the configured FileCachePath (see
-# pagespeed/kernel/license_v2/license_file.cc:24 LicenseFilePath: token
-# lives alongside the cache directory, one level up). FileCachePath is
-# set in pagespeed.config which the MSI ships and installs into
-# %ProgramData%\We-Amp\IISWebSpeed\. The target directory therefore
-# only exists AFTER MSI install, so license deployment moved to a
-# dedicated step (4b) below.
 Write-Host "Preparing artifacts staging in VM..."
 $prepScript = {
     New-Item -ItemType Directory -Path "C:\artifacts" -Force | Out-Null
@@ -337,66 +323,48 @@ $installScript = {
         }
     }
     Write-Host "PageSpeedModule registered OK"
+
+    # The license text and the attribution notices install next to the module
+    # (Apache-2.0 terms). Missing or empty is a packaging regression.
+    $installDir = "C:\Program Files\We-Amp\PageSpeed"
+    foreach ($f in @('LICENSE', 'NOTICE')) {
+        $p = Join-Path $installDir $f
+        if (-not (Test-Path -LiteralPath $p)) {
+            Get-Content $log -Tail 30 | Write-Host
+            throw "$f not installed at $p (the MSI must ship LICENSE and NOTICE alongside pagespeed_iis.dll)"
+        }
+        if ((Get-Item -LiteralPath $p).Length -eq 0) {
+            throw "$p is empty"
+        }
+    }
+    if (-not (Select-String -LiteralPath (Join-Path $installDir 'LICENSE') -Pattern 'Apache License' -Quiet)) {
+        throw "$installDir\LICENSE is not the Apache License text"
+    }
+    Write-Host "LICENSE + NOTICE installed alongside the module"
 }
 Invoke-Command -VMName $VMName -Credential $cred -ScriptBlock $installScript -ArgumentList $msiName
 
-# --- Step 4b: Deploy license token into VM at the path the IIS module expects ---
-# The shipped pagespeed.config sets FileCachePath = C:\ProgramData\We-Amp\PageSpeed\cache.
-# pagespeed/kernel/license_v2/license_file.cc:LicenseFilePath() derives the
-# license file path as <cache_path>.parent_path() / "pagespeed.license",
-# i.e. C:\ProgramData\We-Amp\PageSpeed\pagespeed.license. The MSI's CacheDir
-# component (Product.wxs) creates C:\ProgramData\We-Amp\PageSpeed\cache, so
-# the parent directory exists after install - we just write the file.
-Write-Host "Deploying license token to FileCachePath-derived location..."
-$licenseDeployScript = {
-    param($tkn)
-    $licenseDir  = "C:\ProgramData\We-Amp\PageSpeed"
-    $licensePath = Join-Path $licenseDir "pagespeed.license"
-    if (-not (Test-Path $licenseDir)) {
-        # Defensive: the MSI's CacheDir component should have created the
-        # parent already, but if a future MSI restructure moves cache, we
-        # don't want the test to silently misroute the license.
-        Write-Host "::warning::License dir $licenseDir not created by MSI; creating manually. Verify pagespeed.config FileCachePath still matches this layout."
-        New-Item -ItemType Directory -Path $licenseDir -Force | Out-Null
-    }
-    # Write as ASCII (no BOM) to avoid any chance of a BOM byte tripping
-    # the license parser. The token is base64-style ASCII; ASCII encoding
-    # is byte-for-byte safe.
-    [System.IO.File]::WriteAllText($licensePath, $tkn, [System.Text.Encoding]::ASCII)
-    Write-Host "License written: $licensePath ($([System.IO.File]::ReadAllBytes($licensePath).Length) bytes)"
-}
-Invoke-Command -VMName $VMName -Credential $cred -ScriptBlock $licenseDeployScript -ArgumentList $token
-
-# --- Step 5: Smoke test (license-tolerant) ---
-# The CI VM may or may not validate the license token (cert state, signing
-# identity, etc. can drift independently of this test). To keep the test
-# useful as a structural check across all environments:
-#   - If the X-Page-Speed header IS present, the module is in licensed state
-#     and we HARD-FAIL on a version-string mismatch (the original intent).
-#   - If the header is absent after the poll window, the module is in
-#     unlicensed state (per the IIS unification: no header emitted).
-#     Treat this as a CI-environment WARN and skip the version assertions;
-#     install/register/uninstall behaviour is still covered by the
-#     surrounding steps.
-# Same tolerance for the admin HTML: if PSOL isn't rewriting unlicensed,
-# /pagespeed_admin/ may also not be served. Don't hard-fail on that path
-# when we already know the module is unlicensed.
-Write-Host "Smoke testing PageSpeed header + admin page (license-tolerant)..."
+# --- Step 5: Smoke test (strict) ---
+# The module always optimizes (there is no license state), so both probes
+# below are HARD asserts: the X-Page-Speed header must appear within the poll
+# window and the admin HTML must be served. A missing header after a clean
+# MSI install is a real regression (module not registered, w3wp not loading
+# the DLL, init failure without a diagnostic header) and fails the gate; it
+# is no longer downgraded to a warning.
+Write-Host "Smoke testing PageSpeed header + admin page (strict)..."
 $smokeScript = {
     param($expectedTag, $expectedVersion)
     & iisreset /restart 2>&1 | Out-Null
     Start-Sleep -Seconds 5
 
     # --- Cache-ACL hard-fail probe ---
-    # Before any license-tolerant logic, check for the
+    # Before the header poll, check for the
     # X-Pagespeed-Init-Status=cache-path-not-writable diagnostic header.
     # This is the loud signal emitted by iis_process_context.cpp when the
     # MSI's GrantCacheAcl deferred-exe CA failed to grant IIS_IUSRS
-    # write on C:\ProgramData\We-Amp\PageSpeed\cache. Without this
-    # explicit check the failure mode is invisible: the module's
-    # license-unsuccessful path also omits X-Page-Speed, so the
-    # surrounding license-tolerant smoke would mistakenly classify a
-    # cache-ACL regression as "module unlicensed; skip assertions".
+    # write on C:\ProgramData\We-Amp\PageSpeed\cache. Checking it first
+    # turns a bare "X-Page-Speed absent" failure into the actionable
+    # cache-ACL diagnosis instead of a generic module-not-running error.
     # Probe both / and /pagespeed_admin/ - the diagnostic page is
     # served local-only on the same handler.
     $diagHdr = $null
@@ -435,12 +403,11 @@ $smokeScript = {
     }
 
     if (-not $hdr) {
-        Write-Host "::warning::X-Page-Speed header not present after 15 attempts; module appears unlicensed on this VM. Skipping header + admin HTML version assertions. (Install/register/uninstall behaviour still validated.)"
-        return
+        throw "X-Page-Speed header not present on http://localhost/ after 15 attempts. The module always optimizes, so a missing header after install means it is not running (not registered, DLL not loaded, or init failed without a diagnostic header). Inspect C:\artifacts\install.log + module init logs."
     }
 
     Write-Host "X-Page-Speed header: $hdr"
-    # Module is in licensed state - hard-assert the version string.
+    # Hard-assert the version string.
     # kModPagespeedVersion shape: MAJOR.MINOR.BUILD[-PRERELEASE]
     # e.g. "1.1.0-beta.10" or "1.1.0" for a stable release.
     if ($expectedVersion -and ($hdr -notmatch [regex]::Escape($expectedVersion))) {
@@ -449,17 +416,18 @@ $smokeScript = {
 
     # --- Admin HTML check ---
     $adminBody = $null
+    $adminErr = $null
     foreach ($path in @('/pagespeed_admin/', '/pagespeed_global_admin/')) {
         try {
             $r = Invoke-WebRequest -Uri "http://localhost$path" -UseBasicParsing -TimeoutSec 5
             if ($r.Content) { $adminBody = $r.Content; break }
         } catch {
             # try next path
+            $adminErr = $_.Exception.Message
         }
     }
     if (-not $adminBody) {
-        Write-Host "::warning::Could not fetch /pagespeed_admin/ or /pagespeed_global_admin/ despite licensed header. Skipping admin HTML assertion."
-        return
+        throw "Could not fetch /pagespeed_admin/ or /pagespeed_global_admin/ although X-Page-Speed is present. The admin handler must serve HTML on a fresh install. Last error: $adminErr"
     }
     if ($expectedTag) {
         if ($adminBody -notmatch [regex]::Escape($expectedTag)) {
@@ -475,7 +443,7 @@ $smokeScript = {
 }
 Invoke-Command -VMName $VMName -Credential $cred -ScriptBlock $smokeScript `
     -ArgumentList $ReleaseTag, $ExpectedVersionString
-Write-Host "Smoke step complete (any warnings above indicate license-tolerant skip)"
+Write-Host "Smoke step complete"
 
 # --- Step 5b: the design record port fixtures ---
 # Each fixture pins one contract surface (cache autocreate, log autocreate,
@@ -486,7 +454,7 @@ Write-Host "Smoke step complete (any warnings above indicate license-tolerant sk
 # re-wired as hard gates once and proved fragile on the warm day-2 upgrade VM
 # (e.g. the cache-diagnostic fixture deletes FileCachePath + recycles the
 # AppPool, which does not reliably force a config re-read inside the poll
-# window). The core install/register/licensed-header/uninstall
+# window). The core install/register/header/uninstall
 # assertions above still gate. The fixtures clear their own state in setup
 # and restore pagespeed.config on teardown.
 Write-Host ""
@@ -579,6 +547,11 @@ $uninstallScript = {
     }
     if (Test-Path "C:\Program Files\We-Amp\PageSpeed\pagespeed_iis.dll") {
         throw "pagespeed_iis.dll still present after uninstall"
+    }
+    foreach ($f in @('LICENSE', 'NOTICE')) {
+        if (Test-Path -LiteralPath "C:\Program Files\We-Amp\PageSpeed\$f") {
+            throw "$f still present after uninstall"
+        }
     }
     Write-Host "Clean uninstall verified"
 }

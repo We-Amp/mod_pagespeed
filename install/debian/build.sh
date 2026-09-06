@@ -69,6 +69,20 @@ stage_install_debian() {
   process_template "${BUILDDIR}/install/common/pagespeed.conf.template" \
     "${STAGEDIR}${APACHE_CONFDIR}/pagespeed.conf"
   chmod 644 "${STAGEDIR}${APACHE_CONFDIR}/pagespeed.conf"
+  # The daemon drop-in: the two directives that point the module at the
+  # optimizer daemon this package depends on. A dpkg conffile (appended to
+  # DEBIAN/conffiles here), enabled by postinst with a2enconf. Shipped ONLY by
+  # a build that carries the optimizer dependency (-d): a module pointed at a
+  # daemon that is not installed runs with in-place optimization OFF -- it
+  # does not fall back to its classic in-place path -- so a dependency-free
+  # build (the synthetic upgrade fixture, a local build without -d) must not
+  # carry the file. postinst/prerm guard on the file's presence.
+  if [ -n "${OPTIMIZER_DEB_VERSION}" ]; then
+    install -m 644 "${BUILDDIR}/install/common/pagespeed_daemon.conf" \
+      "${STAGEDIR}${APACHE_CONF_AVAILABLE_DIR}/pagespeed_daemon.conf"
+    echo "${APACHE_CONF_AVAILABLE_DIR}/pagespeed_daemon.conf" \
+      >> "${STAGEDIR}/DEBIAN/conffiles"
+  fi
   # Install pagespeed_libraries.conf if available
   # Try Bazel output path first, then legacy GYP path
   local LIBRARIES_CONF="${BUILDDIR}/net/instaweb/genfiles/conf/pagespeed_libraries.conf"
@@ -137,7 +151,8 @@ usage() {
   echo "-o dir     package output directory [${OUTPUTDIR}]"
   echo "-b dir     build input directory    [${BUILDDIR}]"
   echo "-c channel (ignored, kept for backward compatibility)"
-  echo "-d version pagespeed-optimizer version for an exact-version Depends"
+  echo "-d version pagespeed-optimizer version for an exact-version Depends;"
+  echo "           also ships the daemon drop-in pagespeed_daemon.conf (pair builds only)"
   echo "           (omitting it packages without the dependency, with a warning)"
   echo "-h         this help message"
 }

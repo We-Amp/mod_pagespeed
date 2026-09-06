@@ -40,6 +40,21 @@ stage_install_rpm() {
       "${STAGEDIR}${APACHE_CONFDIR}/${PAGESPEED_CONF_PREFIX}pagespeed.conf"
   fi
   chmod 644 "${STAGEDIR}${APACHE_CONFDIR}/${PAGESPEED_CONF_PREFIX}pagespeed.conf"
+  # The daemon drop-in: the two directives that point the module at the
+  # optimizer daemon this package depends on. %config(noreplace) in the spec
+  # (via DAEMON_DROPIN_FILES, set in do_package). Shipped ONLY by a build that
+  # carries the optimizer dependency (-d): a module pointed at a daemon that is
+  # not installed runs with in-place optimization OFF -- it does not fall back
+  # to its classic in-place path -- so the dependency-free builds (EA4, el8,
+  # el10, the synthetic upgrade fixture) must not carry the file.
+  # httpd reads conf.d/*.conf in sort order and the LoadModule line lives in
+  # pagespeed.conf, so the name must sort AFTER it ('_' > '.'); a name sorting
+  # before it is read before the module exists and its <IfModule> block is
+  # skipped without a word.
+  if [ -n "${OPTIMIZER_RPM_VERSION}" ]; then
+    install -m 644 "${BUILDDIR}/install/common/pagespeed_daemon.conf" \
+      "${STAGEDIR}${APACHE_CONFDIR}/${PAGESPEED_CONF_PREFIX}pagespeed_daemon.conf"
+  fi
   # Install pagespeed_libraries.conf if available
   # Try Bazel output path first, then legacy GYP path
   local LIBRARIES_CONF="${BUILDDIR}/net/instaweb/genfiles/conf/pagespeed_libraries.conf"
@@ -73,12 +88,16 @@ do_package() {
   fi
   DEPENDS="$DEPENDS, \
   libstdc++ >= 4.1.2"
+  # The %files entry for the daemon drop-in; empty in a dependency-free build,
+  # which does not stage the file either (see stage_install_rpm).
+  DAEMON_DROPIN_FILES=""
   if [ -n "${OPTIMIZER_RPM_VERSION}" ]; then
     # Exact-version dependency: the module serves through the optimizer
     # daemon, and the pair is only supported at matching versions --
     # upgrades and rollbacks move both packages together.
     DEPENDS="$DEPENDS, \
   pagespeed-optimizer = ${OPTIMIZER_RPM_VERSION}"
+    DAEMON_DROPIN_FILES="%config(noreplace) ${APACHE_CONFDIR}/${PAGESPEED_CONF_PREFIX}pagespeed_daemon.conf"
   else
     echo "warning: packaging WITHOUT a pagespeed-optimizer dependency;" \
       "a serving pair build must pass -d <optimizer-rpm-version>" >&2
@@ -123,7 +142,8 @@ usage() {
   echo "-o dir     package output directory [${OUTPUTDIR}]"
   echo "-b dir     build input directory    [${BUILDDIR}]"
   echo "-p         cPanel EasyApache 4 build"
-  echo "-d version exact pagespeed-optimizer version to depend on"
+  echo "-d version exact pagespeed-optimizer version to depend on; also ships"
+  echo "           the daemon drop-in pagespeed_daemon.conf (pair builds only)"
   echo "-c channel (ignored, kept for backward compatibility)"
   echo "-h         this help message"
 }

@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2015 Google Inc.
+# Modifications Copyright (c) 2024-2026 We-Amp B.V.
+
 #------------------------------------------------------------------------------
 #   mod-pagespeed.spec
 #------------------------------------------------------------------------------
@@ -6,7 +10,7 @@
 #   Prologue information
 #------------------------------------------------------------------------------
 Summary         : @@SHORTDESC@@
-License         : Apache Software License
+License         : Apache-2.0
 Name            : @@PACKAGE@@
 Version         : @@VERSION@@
 Release         : @@REVISION@@
@@ -67,8 +71,12 @@ rm -rf "$RPM_BUILD_ROOT"
 %files
 %defattr(-,root,root)
 @@APACHE_MODULEDIR@@/mod_pagespeed.so
+%dir /usr/share/doc/@@PACKAGE@@
+%license /usr/share/doc/@@PACKAGE@@/LICENSE
+%doc /usr/share/doc/@@PACKAGE@@/NOTICE
 %config(noreplace) @@APACHE_CONFDIR@@/@@PAGESPEED_CONF_PREFIX@@pagespeed.conf
 %config(noreplace) @@APACHE_CONFDIR@@/@@PAGESPEED_CONF_PREFIX@@pagespeed_libraries.conf
+@@DAEMON_DROPIN_FILES@@
 %attr(-, @@APACHE_USER@@, @@APACHE_USER@@) @@MOD_PAGESPEED_CACHE@@
 %attr(-, @@APACHE_USER@@, @@APACHE_USER@@) @@MOD_PAGESPEED_LOG@@
 

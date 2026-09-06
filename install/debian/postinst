@@ -20,6 +20,26 @@ case "$1" in
           fi
         fi
 
+        # Enable the daemon drop-in (conf-available/pagespeed_daemon.conf):
+        # the two directives that point the module at the optimizer daemon
+        # this package depends on, so an upgrade from a release without the
+        # daemon reaches it without hand-editing. Same enable path as
+        # pagespeed_libraries.conf. The file is a dpkg conffile, so operator
+        # edits survive upgrades; it documents how to opt out (comment out
+        # the directives -- a2enconf here runs on every configure).
+        if [ -f /etc/apache2/conf-available/pagespeed_daemon.conf ]; then
+          if hash a2enconf 2> /dev/null; then
+            a2enconf pagespeed_daemon
+          elif [ -d /etc/apache2/conf.d/ ]; then
+            if [ -e /etc/apache2/conf.d/pagespeed_daemon.conf ]; then
+              echo "Not symlinking on top of existing pagespeed_daemon.conf"
+            else
+              ln -s ../conf-available/pagespeed_daemon.conf \
+                    /etc/apache2/conf.d/
+            fi
+          fi
+        fi
+
         # Join the web-server user to the `pagespeed` group. After the
         # optimizer daemon's privilege drop (2.1) its cache volume, notify
         # socket and shared config are group-rw (0660/0640
