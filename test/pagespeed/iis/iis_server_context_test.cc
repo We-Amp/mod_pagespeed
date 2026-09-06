@@ -83,16 +83,6 @@ TEST_F(IisServerContextTest, FactoryAccessor) {
 }
 
 // ============================================================================
-// License Validation Tests
-// ============================================================================
-
-TEST_F(IisServerContextTest, LicenseValidByDefault) {
-  // TODO: integrate with license_v2
-  // Currently always returns true as a stub.
-  EXPECT_TRUE(server_context_->IsLicenseValid());
-}
-
-// ============================================================================
 // Configuration Tests
 // ============================================================================
 

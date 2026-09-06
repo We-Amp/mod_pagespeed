@@ -427,7 +427,6 @@ class MockConfigBuilder {
   MockConfigBuilder& SetWebpQuality(int quality);
   MockConfigBuilder& SetAdminEnabled(bool enabled);
   MockConfigBuilder& SetAdminPath(const GoogleString& path);
-  MockConfigBuilder& SetLicenseKey(const GoogleString& key);
 
   std::unique_ptr<MockAppHostElement> Build();
 

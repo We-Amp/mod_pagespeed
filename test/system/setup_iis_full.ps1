@@ -164,7 +164,7 @@ function Reset-PageSpeedTestCache {
     #     install/iis/pagespeed.config line 17 -- safety net in case a
     #     misconfigured run falls back to the production default)
     #   - C:\PageSpeed\cache                         (legacy IISpeed XML
-    #     schema default, installer/pagespeed_schema.xml line 29)
+    #     schema default)
     #
     # The whole block is best-effort but LOUD about partial failures:
     # purge errors get surfaced via Write-Status Yellow so a future
@@ -239,8 +239,7 @@ function Initialize-TestEnvironment {
 
     # Create directories
     # Include C:\PageSpeed\cache as a safety net -- the legacy IISpeed XML
-    # schema (installer/pagespeed_schema.xml line 29) defaults
-    # fileCachePath to this path. The shipped install/iis/pagespeed.config
+    # schema defaulted fileCachePath to this path. The shipped install/iis/pagespeed.config
     # uses C:\ProgramData\We-Amp\PageSpeed\cache instead, but cold runners
     # may have either present.
     @($WebRoot, $CacheDir, $LogDir, "C:\PageSpeed", "C:\PageSpeed\cache") | ForEach-Object {

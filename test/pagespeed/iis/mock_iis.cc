@@ -468,14 +468,6 @@ MockConfigBuilder& MockConfigBuilder::SetAdminPath(const GoogleString& path) {
   return *this;
 }
 
-MockConfigBuilder& MockConfigBuilder::SetLicenseKey(const GoogleString& key) {
-  auto* settings = root_->GetChildElement("settings");
-  if (settings) {
-    settings->SetAttribute("licenseKey", key);
-  }
-  return *this;
-}
-
 std::unique_ptr<MockAppHostElement> MockConfigBuilder::Build() {
   // Apply enabled/disabled filters
   auto* settings = root_->GetChildElement("settings");

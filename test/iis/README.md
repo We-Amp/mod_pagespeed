@@ -32,7 +32,6 @@ Tests are organized by functionality and marked with pytest markers:
 | `ipro` | In-Place Resource Optimization tests |
 | `html_rewrite` | HTML rewriting filter tests |
 | `admin` | Admin UI and statistics tests |
-| `license` | License validation tests |
 | `slow` | Tests that take longer to run |
 
 ### Running Specific Tests
@@ -61,7 +60,6 @@ Tests are organized by functionality and marked with pytest markers:
 | `PAGESPEED_TEST_ROOT` | Path prefix for test pages | `/mod_pagespeed_test` |
 | `PAGESPEED_EXAMPLE_ROOT` | Path prefix for example pages | `/mod_pagespeed_example` |
 | `IIS_EXPRESS` | Set to `1` when using IIS Express | `0` |
-| `PAGESPEED_LICENSE_KEY` | License key for license tests | (none) |
 
 **Important:** When test files are at the site root (not in subdirectories), set
 `PAGESPEED_TEST_ROOT=` and `PAGESPEED_EXAMPLE_ROOT=` to empty strings (not `/`)
@@ -75,7 +73,6 @@ to avoid double-slash URL issues.
 | `test_ipro.py` | CSS, JS, and image optimization tests |
 | `test_html_rewrite.py` | HTML rewriting filter tests |
 | `test_admin.py` | Admin UI and statistics endpoint tests |
-| `test_license.py` | License validation tests |
 | `conftest.py` | Pytest fixtures and configuration |
 
 ## Test Site

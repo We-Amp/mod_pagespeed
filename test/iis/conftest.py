@@ -116,9 +116,6 @@ def pytest_configure(config):
         "markers", "admin: marks tests that require admin path access"
     )
     config.addinivalue_line(
-        "markers", "license: marks tests that require a valid license key"
-    )
-    config.addinivalue_line(
         "markers", "ipro: marks IPRO (In-Place Resource Optimization) tests"
     )
     config.addinivalue_line(

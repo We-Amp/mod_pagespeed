@@ -639,11 +639,6 @@ TEST_F(IisHttpModuleTest, TracksAuthenticatedUser) {
 // possible on Windows with the real IIS SDK. They are marked as stubs with
 // comments explaining what they would test.
 
-TEST_F(IisHttpModuleTest, LicenseValidationRequired) {
-  // Note: Full test requires Windows and IisServerContext
-  // Would verify that optimization is blocked without a valid license key
-}
-
 TEST_F(IisHttpModuleTest, OnBeginRequestProcessesIpro) {
   // Note: Full test requires Windows IIS module
   // Would verify OnBeginRequest detects and handles .pagespeed. URLs
