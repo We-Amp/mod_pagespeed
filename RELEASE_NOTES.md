@@ -1,10 +1,86 @@
 # mod_pagespeed 1.16.0 Release Notes
 
-**Release candidate:** 1.16.0-rc.14
-**Release date:** 2026-09-06
+**Release candidate:** 1.16.0-rc.15
+**Release date:** 2026-09-07
 **Status:** Release candidate
 
 ## Highlights
+
+- **Plan for this before you upgrade: the disk cache starts empty, and the
+  optimizer daemon must be started first.** This release moves to a new
+  on-disk cache format. The new binaries open a new cache file instead of
+  converting the old one, so every deployment begins with a cold cache that
+  refills as traffic arrives: expect a temporary drop in cache hit rate and a
+  matching rise in origin fetches and optimization work until it is warm, and
+  prefer a quiet hour if your origin is sensitive to that. Nothing is lost
+  that cannot be rebuilt and no configuration change is needed.
+
+  **Check free space before you upgrade.** The previous cache file is left on
+  disk and the new one grows to the full configured cache size as it fills, so
+  the cache directory must have room for both: free space of at least the
+  configured cache size on top of what the current cache occupies. **If the
+  directory is sized for exactly one cache file, delete the old file before
+  starting the new binary, not after** — on Linux the new file is sparse, so
+  too little space does not fail the start, it fails hours later as the cache
+  warms; on Windows the space is taken immediately. Nothing checks this for
+  you. The directory holds files named `<cache name>-<format number>-<hash>`;
+  remove the one with the **lower** format number, with the server or daemon
+  stopped. Downgrading is safe and warm while that file is still there — an
+  earlier binary reopens its own previous cache file untouched — so on a
+  directory with room for both, keep it until you are confident you will not
+  roll back. Where the Apache module serves from the optimizer
+  daemon's cache volume, **upgrade and start the daemon before restarting
+  Apache**: the daemon owns that volume, and an Apache started before the
+  daemon has created its new-format volume refuses to start and says so,
+  rather than quietly running a cache of its own. At boot there is nothing to
+  do for Apache, and nothing to do for nginx from a packaged 2.1 optimizer
+  onward — but a host still carrying a 2.0-era optimizer package orders only
+  Apache, so an nginx deployment that upgrades this module first is raced at
+  every boot; and a web server under any other unit name needs an ordering
+  drop-in of its own. A running daemon holds the old cache file open, so
+  deleting it does not return the space until the daemon restarts.
+
+- **The cache now refuses a single object larger than 64 MiB (67,108,864
+  bytes).** The cache library enforces a per-object ceiling it previously
+  declared but never applied, and this release has no directive to raise or
+  disable it. Most deployments cannot reach it:
+  `ModPagespeedMaxCacheableContentLength` defaults to 16777216 (16 MiB) and
+  excludes larger responses well before the new ceiling — you are exposed only
+  if you raised it above 67108864 or set it to `-1`. An affected response is
+  never cached, so it is fetched from the origin on every request permanently,
+  while everything else caches normally; that asymmetry is how it is told
+  apart from a full cache, which fails every write. Each refusal counts in
+  `cyclone_cache_failures` and the sampled log warning now names the size
+  limit instead of reporting "cache may be full". If you were relying on
+  caching larger objects, set `ModPagespeedMaxCacheableContentLength` to
+  67108864 or less so those responses are excluded before they reach the
+  cache.
+
+- **A URL whose optimized variants were re-recorded many times could
+  permanently stop accepting new ones, and no longer does.** The stored chain
+  for such a URL used to grow on every refresh, until it reached its limit and
+  every further write to that URL was refused. The URL then froze: reads kept
+  succeeding, so nothing looked wrong, but the browser was served an
+  increasingly stale version that was never replaced. Superseded copies are
+  now unlinked as the replacement is written, so the chain no longer grows
+  with refreshes. A URL that had already frozen is recovered too: the
+  optimizer clears its cache entry at the next revalidation and optimizes it
+  again from the fresh origin response, instead of serving the stale copy
+  forever.
+
+- **A cache purge, and the automatic recovery that runs when the cache cannot
+  be opened, no longer delete a cache file left by a previous release's
+  on-disk format.** Both used to clear every cache file belonging to the
+  cache whatever format it was written in, so either one silently removed the
+  file an operator was keeping in order to roll back. Files written in another
+  format are now left alone — they are not this build's data to remove — which
+  also means they stay on disk until you delete them yourself.
+
+- **After content was re-optimized, replaced or purged, the in-memory cache
+  tier could keep serving the superseded copy** until it happened to be
+  evicted. The stale in-memory entry is now dropped when the content behind it
+  is re-recorded or removed, so a refresh takes effect immediately instead of
+  after an unpredictable delay.
 
 - **mod_pagespeed 2.1 is licensed under the Apache License 2.0.** Every
   feature is available to everyone. The license text (`LICENSE`) and the
@@ -32,9 +108,13 @@
   and `NOTICE`, listing every bundled third-party component with its license,
   version and upstream location.
 
-- **The optimizer service starts ahead of the web servers and counts as
+- **The optimizer service starts ahead of Apache and nginx and counts as
   started once its socket exists**, so a web server coming up at boot finds
-  the daemon ready rather than retrying.
+  the daemon ready rather than retrying. Ordering only: neither service
+  requires the other, so each still starts without the other. nginx ordering
+  is new in 2.1 — a host still running a 2.0-era optimizer package orders
+  Apache alone. A web server under any other unit name is not ordered against
+  the daemon and needs an ordering drop-in.
 
 
 - **The optimizer daemon now runs as an unprivileged user, and its cache and

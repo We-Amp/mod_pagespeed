@@ -274,6 +274,13 @@ class FakeDaemonAbi : public DaemonAbi {
   void ServeStatsClose(void* /*handle*/) const override {}
 
   // `<stem>-6-<size>` — the shape DaemonAdapter::VolumeFiles recognises.
+  // The digit is the cache's on-disk FORMAT MAJOR.  Neither the matcher nor
+  // this fake reads it: `VolumeFiles` requires a digit after the separator
+  // and nothing more, so every case below is about where the "-N-<size>"
+  // insert LANDS relative to the extension, not about which N it is.  The
+  // literal 6 is the major that was in force when these were written and is
+  // deliberately left alone across format bumps; pinning it would assert
+  // something the code does not check.
   // For an extensioned stem the real cache layer INSERTS "-6-<size>" before
   // the extension ("cache.vol" -> "cache-6-<size>.vol"), splitting on the
   // LAST dot the way std::filesystem does: a leading dot is no extension

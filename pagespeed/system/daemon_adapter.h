@@ -188,6 +188,27 @@ class DaemonAdapter {
   // (substrate down, fail open to plain serving) -- the two layouts share
   // nothing, and a quiet attach would be a split-brain.  A daemon publishing
   // none (a pre-H1 package) is tolerated as the legacy layout; see Resolve.
+  //
+  // WHEN N MOVES, and why it did NOT move for the cache format major going
+  // 6 -> 7 in this train.  The daemon side owns this rule and states it in
+  // full; the short form, kept here so the two records agree, is that N
+  // counts SHIPPED generations.  The daemon's privilege drop introduced v1
+  // and the format major bumped in the SAME unreleased train, so both
+  // triggers collapse into the single 0 -> 1 move: no released binary ever
+  // resolved a v1 directory, so there is no peer to skew against.  A format
+  // major that bumps after this train ships takes N to 2, in both products
+  // at once.
+  //
+  // What that leaves uncovered here, and what covers it instead.  Across a
+  // format-major skew at the same N the handshake above passes (1 == 1) and
+  // cannot be the thing that catches it.  On THIS side it does not have to
+  // be: Resolve counts the volume files around its probe open, and a module
+  // that lands on a different format major creates a file rather than
+  // attaching to one -- which is a refusal to start, not a quiet split.  So
+  // the skew is loud here by a different mechanism.  Do not read that as
+  // permission to let N drift from the daemon's: a generation mismatch and a
+  // format mismatch are different failures and only one of them is caught
+  // twice.
   static constexpr uint32_t kCacheDirGeneration = 1;
 
   // What stands between this process and the directory the daemon's volume

@@ -652,8 +652,15 @@ DaemonStartupStatus DaemonAdapter::Resolve(GoogleString* error) {
               JoinCollection(before, ", "),
               ") instead of attaching to it. The two would share nothing and "
               "each run a permanently cold cache, with no error to show for "
-              "it. Remove the file this start just created, then install a "
-              "module and daemon package pair that agree.");
+              "it. The usual cause is start order during an upgrade: the "
+              "optimizer daemon has a new on-disk cache format and has not "
+              "restarted onto it yet, so its new volume does not exist for "
+              "this server to attach to. Start the optimizer daemon first, "
+              "let it create its volume, then start this server; the file "
+              "this start created can be removed once the daemon is running. "
+              "If the daemon is already running on its current volume, the "
+              "sizes genuinely disagree: remove the file this start created "
+              "and install a module and daemon package pair that agree.");
     return DaemonStartupStatus::kRefuseToStart;
   }
 

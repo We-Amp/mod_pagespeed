@@ -132,7 +132,13 @@ CPP_DEPS = [
      "holder": "Brian Aker / awesomized", "repo": "awesomized/libmemcached", "purl_version": None},
     {"name": "ed25519", "version": {"literal": "b1f19fab4aebe607805620d25a5e42566ce46a0e"}, "license": "Zlib",
      "holder": "Orson Peters", "repo": "orlp/ed25519", "purl_version": None},
-    {"name": "cyclone", "version": {"literal": "main"}, "license": "Apache-2.0",
+    # Cyclone records the PINNED COMMIT rather than the branch it is cut from.
+    # The licence of this dependency is a property of the commit, not of the
+    # branch: the library was relicensed part-way along `main`, so a bill of
+    # materials that says "main" cannot be checked against the bits we ship.
+    # The commit can. Tracks CYCLONE_COMMIT the same way every other C++ dep
+    # tracks its repositories.bzl constant.
+    {"name": "cyclone", "version": {"key": "CYCLONE_COMMIT"}, "license": "Apache-2.0",
      "holder": "We-Amp B.V.", "repo": "We-Amp/cyclone-cache", "purl_version": None},
     # Bundled matched-pair nginx for the design record ASP.NET Core sidecar (1.30 stable
     # branch). Version is NOT a repositories.bzl constant (nginx is built from upstream

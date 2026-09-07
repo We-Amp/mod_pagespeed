@@ -362,7 +362,25 @@ static CycloneError CycloneCacheWriteInternal(CycloneCacheHandle* cache,
   auto handle_result = cache->impl->write_sync(ckey, data_len, tier);
 
   if (!handle_result) {
-    SetLastError("Failed to allocate space for write - cache may be full");
+    // Two very different conditions arrive here and they used to be reported
+    // identically.  Since the cache library began enforcing its per-object
+    // ceiling, an over-size put fails at this same call -- before anything is
+    // buffered -- and reporting it as "cache may be full" points the operator
+    // at the one remedy that cannot work: enlarging the cache does not make a
+    // 65 MB object fit under a 64 MB per-object bound, and nothing else in
+    // the product ever says the words "size limit".  Name the real cause.
+    //
+    // The status code is deliberately unchanged.  CycloneError is the
+    // wrapper's ABI and this is a diagnostic fix, not a behaviour change; a
+    // caller that treats a failed write as a failed write keeps working, and
+    // a distinct code can be minted later if one is wanted.
+    if (handle_result.error() == cyclone::CacheError::ObjectTooLarge) {
+      SetLastError(
+          "Object exceeds the cache's per-object size limit - not stored "
+          "(enlarging the cache does not raise this limit)");
+    } else {
+      SetLastError("Failed to allocate space for write - cache may be full");
+    }
     return CYCLONE_RESOURCE_EXHAUSTED;
   }
 

@@ -9,9 +9,14 @@
     "verifies the manifest against this hash and every artifact against the",
     "manifest. Update this file as part of cutting each train: cut the",
     "optimizer release FIRST, record the pin, then cut the module release.",
-    "A PLACEHOLDER tag makes the release lane refuse loudly."
+    "A PLACEHOLDER tag makes the release lane refuse loudly.",
+    "",
+    "This train's optimizer release was cut from an optimizer commit carrying the",
+    "same cache-library commit this module links (on-disk format major 7), so",
+    "the pair speaks one cache format. The pin-pair check in CI asserts that",
+    "equality; do not hand-edit this file without re-running it."
   ],
-  "tag": "optimizer-v1.16.0-rc.14",
-  "mps2_commit": "301faf7d0d6690b7c08e44467417ddcd21541136",
-  "sha256sums_sha256": "5e4d7852c367a475f3cfb9a391da3480508f75b9e804223d683875db912f44c2"
+  "tag": "optimizer-v1.16.0-rc.15",
+  "mps2_commit": "1e3f30fab527c224de6264de5d6d67063c93549e",
+  "sha256sums_sha256": "18c60d0d8363bab110321ee1d7931282353e97fcc7ab00763e038cc4fbad0cc0"
 }

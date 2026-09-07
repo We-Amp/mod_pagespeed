@@ -239,7 +239,77 @@ APRUTIL_SHA = "804b8b276b346a69ca91bc704198de9ff4956a9a60a2f1212f350c230ee3dd03"
 # three new counters are appended at the stats-struct tail and surfaced
 # via the console backend stats.  On-disk format UNCHANGED.  Still a
 # pin-pair bump per the design record: the module and the optimizer must pin the SAME commit.
-CYCLONE_COMMIT = "edecf16a4c07fbd5f07ba1c7121b9fcacfc2da07"
+#
+# Bumped to cyclone 6286a06 (23 commits).  Still a pin-pair bump: the
+# optimizer pins this SAME commit, and the module and the optimizer must pin it.  Three
+# things matter here.
+#
+# 1. LICENCE.  Cyclone is Apache-2.0 from the relicense commit in this range
+#    onward; every commit up to and including the previous pin was BUSL-1.1,
+#    while this repo's SBOM and NOTICE already described the library as
+#    Apache-2.0.  At this pin that is finally true of the commit we build.
+#
+# 2. BREAKING -- ON-DISK FORMAT MAJOR 7 (volume header and
+#    document move in lockstep).  The volume filename carries the format
+#    major, so an upgraded binary opens a NEW file rather than resetting the
+#    old one: every deployment starts with an EMPTY CACHE that refills as
+#    traffic arrives.  Rollback stays warm (a format-6 binary reopens its own
+#    untouched file).  The superseded file is left on disk -- the opt-in
+#    startup GC of superseded volumes is still default-off and
+#    not enabled here, so reclaim it manually.
+#    START ORDER, and it is load-bearing for the shared-volume deployments:
+#    the optimizer daemon must be upgraded and started BEFORE the module
+#    process restarts.  This module does not parse the volume format -- the
+#    serve path is handed pointer+length by the cache reader, and on the
+#    shared-volume path every field arrives through a dynamically loaded
+#    daemon accessor -- so format 7 flows through it transparently.  But the
+#    module's attach check refuses to start when it sees more than one volume
+#    file beside the configured stem, and a module that restarts while the
+#    old format-6 file is still the only one on disk and the format-7 daemon
+#    has not yet created its own will see exactly that second file appear.
+#
+# 3. THE DEFECT a Cyclone change FIXES, which has already bitten deployed caches.
+#    Re-recording the same alternate id left every superseded document linked
+#    in the chain forever: physical chain depth grew one per re-record while
+#    the unique-id count stayed put, until the traversal cap refused every
+#    further write to that key.  The key then froze -- reads kept serving the
+#    last-landed version with no error, so it was served stale and never
+#    re-optimised, with no self-healing path.  Post-wrap a dominant key's
+#    chain could additionally turn cyclic and wedge earlier.  The write path
+#    now unlinks the superseded same-id node during the chain walk it already
+#    performs (no extra I/O), refuses to link a new head to nodes from a
+#    previous wrap epoch, and carries a single-id conditional chain reset that
+#    lets an already-wedged chain accept writes again.  Splicing is
+#    best-effort: a splice that cannot proceed safely is deferred and counted,
+#    never failing the caller's write.  Default ON; the upstream kill switch
+#    is not set here.
+#
+# Also in the delta, reaching this repo with no config change on our side:
+# Cyclone changes make CacheConfig::max_object_size live (declared but never
+# read until now), so the 64 MB default is ENFORCED and an over-size put fails
+# with the tail-appended CacheError::ObjectTooLarge.  Cyclone changes make
+# both built-in alternate selectors treat a non-empty acceptable_alternates
+# set as a HARD restriction rather than a hint.  Cyclone changes stop
+# the RAM tier from serving an entry that a re-record or a removal should have
+# invalidated.  A Cyclone change zeroes a wrap deadline left uninitialised in
+# MmapDirectory::init.  A Cyclone change adds opt-in cross-process RAM-cache
+# coherence: default OFF and not plumbed through this repo's cache config, so
+# it is inert here.  A Cyclone change plus one change's alternate-chain counters
+# tail-append to the stats structs, transparent to this repo's field-by-field
+# stats consumers; surfacing them is a follow-up.  CacheConfig::min_object_size
+# was removed upstream; this repo never set it.  The vendored
+# build glue in //bazel:cyclone.bzl needs no change: the delta adds test
+# sources only, and every glob in cyclone_build_rule matches the same file set
+# at both pins.
+#
+# A Cyclone change fixes a use-after-free on the write path: a Cyclone change made the
+# per-object bound read Volume::config() at the top of every write, which
+# turned the write handle's long-standing raw Volume* into a live
+# use-after-free the moment a handle outlived its volume -- a cache reset or a
+# teardown under an open handle.  The handle now holds a weak reference, pins
+# the volume for the duration of write() and the commit, and reports
+# CacheError::Closed when the volume is gone.  Module and optimizer pin the same commit; the pin-pair gate checks that.
+CYCLONE_COMMIT = "962f2e8458db72ef6aaa808b317253baac04ce78"
 
 # Libevent - cross-platform event notification library
 # Used by LibeventDispatcher for standalone event loop (Apache deployments)

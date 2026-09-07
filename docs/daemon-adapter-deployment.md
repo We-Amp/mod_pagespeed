@@ -134,14 +134,75 @@ the daemon's volume:
   so the extras are wasted disk rather than a split cache. They can be deleted
   while the daemon is stopped.
 * **If opening at the daemon's published size creates a second volume file**,
-  the server **refuses to start** and names the file it just created. The
-  published size disagrees with the volume on disk. Remove the file the start
-  created, then install a module and daemon package pair that agree.
+  the server **refuses to start** and names the file it just created. There
+  are two ways to reach it, and the message distinguishes them.
+
+  The common one is **start order during an upgrade to a release that changes
+  the on-disk cache format**. The daemon's volume filename carries the format,
+  so a daemon on a new format opens a new file; until it has restarted and
+  created it, the only volume in the directory is the previous format's, and a
+  web server that starts in that window creates the new file itself instead of
+  attaching to the daemon's. **Upgrade and start the optimizer daemon first,
+  let it create its volume, then start the web server.** The file the refused
+  start created can be removed once the daemon is up.
+
+  **At boot, whether you need to do anything depends on your web server.**
+  The optimizer's service counts as started only once its notify socket
+  exists, so a web server ordered after it is not released until the volume is
+  there. It is ordered ahead of Apache (`apache2.service`, `httpd.service`),
+  and, from a packaged 2.1 optimizer install onward, ahead of `nginx.service`
+  as well. Two consequences worth being precise about: a host still running a
+  2.0-era optimizer package has the Apache-only unit, so an **nginx**
+  deployment that upgrades this module before the optimizer is still raced at
+  every boot, not just once at upgrade; and a web server under any other unit
+  name is not ordered at all, so add an ordering drop-in for it
+  (`Before=<your unit>` on the optimizer service, or `After=` on yours). The
+  ordering is ordering only — the daemon is not required by the web server, so
+  a web server still starts when the daemon is absent, and the daemon still
+  starts when no web server is installed.
+
+  The other is a genuine disagreement: the published size does not match the
+  volume on disk. Remove the file the start created, then install a module and
+  daemon package pair that agree.
 
 That last one is the only condition that stops the server. It earns it because
 it is the only one an operator cannot otherwise see: everything else announces
 itself in the log and the server starts. In particular, a routine cache resize
 must never prevent a start.
+
+### The cache directory needs room for two volumes across a format change
+
+A release that changes the on-disk cache format leaves the old volume file in
+place and creates a new one beside it. Both count against the same filesystem,
+and the new one grows to the daemon's **full configured cache size** as it
+fills — the daemon extends it at startup, before any reclamation runs. So the
+directory needs free space of at least the daemon's cache size on top of what
+the existing volume already occupies.
+
+**If the directory is sized for exactly one volume, delete the old file before
+starting the new daemon, not after.** This is the opposite of the usual advice
+to tidy up afterwards, and the reason is that on Linux the new volume is
+allocated sparsely: too little space does not fail the start. It fails hours
+later, mid-traffic, as the cache warms and the sparse file becomes real. On
+Windows the space is claimed at creation, so the failure is immediate instead.
+Neither the module nor the daemon checks free space, so this is an operator
+check.
+
+The procedure, with the daemon stopped:
+
+1. List the directory. Volume files are named `<stem>-<format number>-<hash>`,
+   where `<stem>` is the last path element of `ModPagespeedDaemonVolumePath`
+   (`cache` for the packaged default, which has no file extension).
+2. The file to remove is the one whose **format number is lower**. A file with
+   a different hash and the same format number is a leftover from an earlier
+   cache size, not from an earlier format; those are safe to remove too.
+3. Remove it, then start the daemon, then start the web server.
+
+Removing the old file gives up a warm rollback — an earlier daemon would have
+reopened it untouched. Where there is room for both, keep it until you are
+confident you will not roll back, and reclaim it then. A running daemon holds
+its volume open, so deleting a file while it runs does not return the space
+until it restarts.
 
 The module never enables a per-process memory tier over the daemon's volume,
 regardless of the daemon's own defaults. Such a tier is keyed without any

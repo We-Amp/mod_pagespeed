@@ -62,11 +62,108 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Plan for this before you upgrade: the disk cache starts empty.** This
+  release moves to a new on-disk cache format. The new binaries open a new
+  cache file instead of converting the old one, so every deployment begins
+  with a cold cache that refills as traffic arrives. Nothing is lost that
+  cannot be rebuilt and no configuration change is needed, but expect a
+  temporary drop in cache hit rate and a matching rise in origin fetches and
+  optimization work until traffic has warmed the cache again — so upgrade at
+  a quiet hour if your origin is sensitive to that.
+
+  **Check free space first: the cache directory holds two cache files at
+  once.** The previous file is not removed, and the new one grows to the full
+  configured cache size as it fills, so the directory needs room for both —
+  free space of at least the configured cache size (`ModPagespeedFileCacheSizeKb`,
+  or the optimizer daemon's cache size where the daemon owns the volume) on
+  top of what the existing cache already occupies. **If the directory is sized
+  for exactly one cache file, delete the old file before starting the new
+  binary, not after.** On Linux the new file is allocated sparsely, so a
+  directory that is too small does not fail at startup — it fills up hours
+  later, mid-traffic, as the cache warms. On Windows the space is taken at
+  once. Nothing in the product checks free space for you.
+
+  The cache directory holds files named `<cache name>-<format number>-<hash>`;
+  the one to remove is the one with the **lower** format number, and it should
+  be removed with the server (or, on the daemon topology, the daemon) stopped,
+  since a running process holds its file open and the space is not returned
+  until it exits. Removing it gives up the warm rollback described next, so on
+  a directory with room for both, keep it until you are confident you will not
+  roll back.
+
+  Downgrading is safe and warm as long as the old file is still there: an
+  earlier binary reopens its own previous cache file untouched.
+
+  **Where the optimizer daemon is in use, upgrade and start the daemon
+  first.** The daemon owns the cache volume and the Apache module attaches to
+  it; Apache restarted after the daemon package is upgraded but before the
+  daemon has restarted and created its new-format volume will refuse to
+  start, and say so, rather than quietly running a cache of its own. Starting
+  the daemon and restarting Apache clears it.
+
+  **At boot there is nothing to do for Apache, and nothing to do for nginx
+  from a packaged 2.1 optimizer onward.** The optimizer service counts as
+  started only once its notify socket exists, and is ordered ahead of
+  apache2/httpd and — new in 2.1 — nginx, so those web servers are not
+  released until the cache volume is there. A host still carrying a 2.0-era
+  optimizer package has the Apache-only ordering, so an **nginx** deployment
+  that upgrades this module before the optimizer is raced at every boot rather
+  than once at upgrade. A web server under any other unit name is not ordered
+  against the daemon; add an ordering drop-in. The ordering never makes one
+  service require the other — each still starts without the other.
+
+- **The cache now refuses a single object larger than 64 MiB (67,108,864
+  bytes).** The cache library enforces a per-object ceiling it previously
+  declared but never applied. There is no directive to raise or disable it in
+  this release.
+
+  **Most deployments cannot reach it.** `ModPagespeedMaxCacheableContentLength`
+  defaults to 16777216 (16 MiB) and is applied to the HTTP cache, so a larger
+  response is already excluded long before the new ceiling. You are exposed
+  only if you have raised that directive above 67108864, or set it to `-1`
+  (unlimited).
+
+  **What you would see.** An affected response is simply never cached. It is
+  fetched from the origin on every request — permanently, not as part of the
+  post-upgrade warm-up — while everything else caches normally. Each refusal
+  increments `cyclone_cache_failures`, and a warning naming the size limit is
+  logged (sampled, one in every 1024 write failures).
+
+  **Telling it apart from a genuinely full cache.** A full or unwritable cache
+  fails *every* write: `cyclone_cache_failures` climbs with all traffic, the
+  hit rate collapses across the board, and nothing new is stored. The size
+  ceiling fails only the over-size objects: ordinary pages, scripts, styles
+  and images keep being cached and the hit rate for them is unchanged. The log
+  message distinguishes the two — an over-size write now says so, where it
+  previously reported "cache may be full" and pointed at the one remedy that
+  cannot help (enlarging the cache does not raise a per-object bound).
+
+  **If you were relying on caching larger objects,** set
+  `ModPagespeedMaxCacheableContentLength` to 67108864 or less. That excludes
+  those responses before they reach the cache, so the work of trying is not
+  spent on every request; they are then served straight from the origin, as
+  they will be in any case.
+
 - License — Apache License 2.0 (was BUSL-1.1). Every feature is available to
   everyone. Every file now carries an SPDX `Apache-2.0` header or is a
   documented exception, verified with Apache RAT (Release Audit Tool).
 
+- The bundled Cyclone cache library, statically linked into every shipped
+  module, is licensed under the Apache License 2.0, matching the rest of the
+  distribution. `NOTICE` and the SBOM record it.
+
 ### Fixed
+
+- **A URL whose optimized variants were re-recorded many times could
+  permanently stop accepting new ones.** Every re-record used to leave the
+  superseded copy linked behind the new one, so the stored chain for that URL
+  grew on every refresh while the number of distinct variants stayed put,
+  until it reached its limit and every further write to that URL was refused.
+  The URL then froze: reads kept succeeding, so nothing looked wrong, but the
+  browser was served an increasingly stale version that was never replaced.
+  Superseded copies are now unlinked as the replacement is written, so the
+  chain no longer grows with refreshes, and a chain that does reach the limit
+  resets and accepts writes again instead of staying frozen.
 
 - **A cache volume path whose name ends in a dot now attaches to the
   optimizer daemon's volume instead of disabling in-place optimization.**
