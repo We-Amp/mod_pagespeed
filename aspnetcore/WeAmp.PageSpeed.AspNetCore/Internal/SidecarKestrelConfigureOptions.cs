@@ -192,7 +192,7 @@ internal sealed class SidecarKestrelConfigureOptions : IConfigureOptions<Kestrel
     /// Builds a short, per-app Unix-domain socket path under a 0700 directory,
     /// or returns null if a usable path can't be created (caller falls back to
     /// loopback). Kept short to stay under the sun_path limit (108 bytes on
-    /// Linux, 104 on macOS) — see the design record P1 sun_path caveat.
+    /// Linux, 104 on macOS) — exceeding it fails the bind at runtime.
     /// </summary>
     private string? TryBuildUnixSocketPath()
     {

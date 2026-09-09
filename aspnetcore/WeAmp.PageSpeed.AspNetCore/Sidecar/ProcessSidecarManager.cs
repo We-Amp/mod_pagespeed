@@ -35,7 +35,7 @@ public class ProcessSidecarManager : ISidecarManager, IDisposable
     private bool _shuttingDown;
     private readonly object _lock = new();
 
-    // the design record UX-7 (GA): the bundled nginx is launched through the native
+    // The bundled nginx is launched through the native
     // pagespeed-nginx-launch shim, which arms PR_SET_PDEATHSIG so a hard
     // SIGKILL/OOM-kill/container-hard-stop of THIS host process cannot orphan nginx
     // (it would otherwise reparent to init and keep holding its loopback port).
@@ -151,7 +151,8 @@ public class ProcessSidecarManager : ISidecarManager, IDisposable
 
             // Validate the generated config (nginx -t) BEFORE launching, so a bad
             // config surfaces as a clear error carrying nginx's own stderr rather than
-            // an opaque "process exited with code N".
+            // an opaque "process exited with code N". nginx -t MUST pass before the
+            // sidecar reports Running, with nginx's stderr captured on failure.
             await ValidateGeneratedConfigAsync(binaryPath, _configPath, cancellationToken);
 
             // Start process
@@ -375,7 +376,7 @@ public class ProcessSidecarManager : ISidecarManager, IDisposable
     internal static ProcessStartInfo BuildStartInfo(
         string binaryPath, string configPath, PageSpeedOptions opts)
     {
-        // the design record UX-7: a tiny native launch shim (`pagespeed-nginx-launch`, bundled
+        // A tiny native launch shim (`pagespeed-nginx-launch`, bundled
         // next to nginx) sets PR_SET_PDEATHSIG before exec'ing nginx so a hard
         // SIGKILL/OOM-kill/container-hard-stop of the host process can't orphan nginx.
         // ON by default (Sidecar.UseLaunchShim): the fork runs on a single long-lived
@@ -491,7 +492,7 @@ public class ProcessSidecarManager : ISidecarManager, IDisposable
     /// <summary>
     /// Runs <c>nginx -t</c> against the generated config and throws an
     /// <see cref="InvalidOperationException"/> carrying nginx's captured stderr when
-    /// the test fails (non-zero exit). the design record D6 / Constraints require this to pass
+    /// the test fails (non-zero exit). This must pass
     /// before the sidecar reaches <see cref="SidecarState.Running"/>, so a malformed
     /// generated config is reported with a precise diagnostic instead of an opaque
     /// "process exited" surfaced later by the health wait.
@@ -828,7 +829,7 @@ public class ProcessSidecarManager : ISidecarManager, IDisposable
     private async Task SendGracefulShutdownAsync(CancellationToken cancellationToken)
     {
         // nginx graceful stop is a SECOND short-lived process, NOT an HTTP POST:
-        //   nginx -p <prefix> -c <conf> -s quit     
+        //   nginx -p <prefix> -c <conf> -s quit
         // It reads the master PID from the conf's `pid` directive and signals it.
         if (_binaryPath == null || _configPath == null)
         {

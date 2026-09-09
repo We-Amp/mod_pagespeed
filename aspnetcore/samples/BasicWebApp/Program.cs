@@ -9,9 +9,10 @@ var builder = WebApplication.CreateBuilder(args);
 // DEFAULT topology is now Inverse: THIS Kestrel app is the public front door (it
 // owns the public socket/TLS/auth/routing) and the bundled (nginx +
 // ngx_pagespeed.so) matched pair runs LOOPBACK-ONLY behind it as an optimize-proxy
-//. The middleware streams optimizable responses to nginx, which
-// proxy_pass-es back to a private raw-origin Kestrel endpoint where the middleware
-// bypasses itself.
+// (SidecarMode.Inverse). It is the default because the operator then has no
+// separate front proxy to run, terminate TLS on, or keep in sync with the app: the
+// middleware streams optimizable responses to nginx, which proxy_pass-es back to a
+// private raw-origin Kestrel endpoint where the middleware bypasses itself.
 //
 // In Inverse the operator MAY own the public bind (the common edge-TLS case):
 // configure your public endpoint via --urls / UseUrls / Kestrel:Endpoints, or set
@@ -39,12 +40,13 @@ app.MapPageSpeedInfo("/pagespeed/info");
 // Origin HTML referencing an EXTERNAL stylesheet so PageSpeed fetches, minifies
 // and inlines it (CoreFilters: rewrite_css + inline_css). Prove optimization via
 // the minified <style> + the X-Page-Speed header + css_filter_* stats — NEVER a
-// ".pagespeed." substring (it false-positives on page text; the design record S0 Finding #2).
+// ".pagespeed." substring (it false-positives whenever the page's own text
+// happens to mention it).
 app.MapGet("/", () => Results.Content("""
     <!DOCTYPE html>
     <html>
     <head>
-        <title>the design record nginx sidecar sample</title>
+        <title>PageSpeed nginx sidecar sample</title>
         <link rel="stylesheet" href="/style.css">
     </head>
     <body>

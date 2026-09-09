@@ -113,7 +113,8 @@ public static class PageSpeedServiceCollectionExtensions
     /// <summary>
     /// Adds PageSpeed optimization for connecting to an externally-managed nginx
     /// reverse proxy (operator-run; the package does not spawn or manage it).
-    /// k8s/replica topologies are out of scope.
+    /// The package does not model orchestrated multi-replica topologies: it points
+    /// at one operator-run nginx and coordinates nothing across replicas.
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <param name="configure">Configuration action.</param>
@@ -156,7 +157,8 @@ public static class PageSpeedServiceCollectionExtensions
         // Pin Kestrel to the internal sidecar RAW-ORIGIN (UDS or loopback in
         // Process; forced loopback-TCP + marker tag in Inverse) and publish it
         // into InternalSidecarEndpoint so the generated nginx proxy_pass and the
-        // Kestrel bind never disagree. No-op for Docker/External modes.
+        // Kestrel bind never disagree. No-op for Docker/External modes, where the
+        // package does not own the Kestrel bind.
         services.TryAddEnumerable(
             ServiceDescriptor.Singleton<IConfigureOptions<KestrelServerOptions>, SidecarKestrelConfigureOptions>());
 

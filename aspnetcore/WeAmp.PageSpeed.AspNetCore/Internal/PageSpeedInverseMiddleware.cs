@@ -147,8 +147,8 @@ internal sealed class PageSpeedInverseMiddleware
             return;
         }
 
-        // (4) Sidecar not running → graceful degradation (serve un-optimized,
-        // the design record always-functional) rather than 502.
+        // (4) Sidecar not running → graceful degradation rather than 502: an
+        // optimizer outage must never fail a request, so serve un-optimized.
         if (_sidecar.State != SidecarState.Running)
         {
             await _next(context);

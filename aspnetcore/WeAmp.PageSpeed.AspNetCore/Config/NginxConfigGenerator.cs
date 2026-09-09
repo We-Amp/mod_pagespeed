@@ -28,7 +28,7 @@ namespace WeAmp.PageSpeed.AspNetCore.Config;
 /// safe tuning directives are emitted; admin/path/fetch/script directives are
 /// rejected). The directive allowlist is a reviewed security artifact pinned to
 /// the bundled mod_pagespeed source (an unknown key fails nginx config-load =
-/// fail-safe; see the design record P1).
+/// fail-safe).
 /// </summary>
 public class NginxConfigGenerator
 {
@@ -75,7 +75,10 @@ public class NginxConfigGenerator
 
     /// <summary>
     /// Pure-string variant for tests: returns the generated conf and the admin
-    /// token. Cache/log dirs are pre-created. The proxy origin
+    /// token. Cache/log dirs are pre-created here so the sidecar owns their
+    /// ownership and permissions (nginx chowns them only when it runs as root,
+    /// which the sidecar does not) and because nginx creates the cache dir at
+    /// directive-parse time but never the log dir. The proxy origin
     /// is read from <see cref="InternalSidecarEndpoint"/>, which must already be
     /// pinned (the Kestrel configurator does this at host build).
     /// </summary>
@@ -119,13 +122,13 @@ public class NginxConfigGenerator
             // Running the host as root makes nginx workers — which terminate untrusted
             // public traffic and run the optimizer C++ on attacker-supplied bodies —
             // run as root too (the 0700 cache is root-owned, so the compiled-in
-            // unprivileged worker user cannot write it). the design record D8 prescribes a
-            // non-root deployment; warn loudly so this isn't a silent loss of the
-            // standard nginx privilege-drop.
+            // unprivileged worker user cannot write it). The sidecar is designed to
+            // run unprivileged — high listen port, no privileged bind, no setuid — so
+            // warn loudly rather than silently lose the standard nginx privilege-drop.
             _logger.LogWarning(
                 "PageSpeed sidecar host is running as root: nginx workers (which process untrusted " +
                 "traffic + run the optimizer) will also run as root, removing the standard privilege-drop. " +
-                "the design record D8 strongly recommends running the host as a non-root user.");
+                "Run the sidecar host as a non-root user: it needs no privileged port or capability.");
             sb.AppendLine("user root;");
         }
         sb.AppendLine("worker_processes 1;");
@@ -364,22 +367,22 @@ public class NginxConfigGenerator
     /// <see cref="PageSpeedOptions.CustomOptions"/>; <see cref="PageSpeedOptions.Redis"/>
     /// and the domain rewrite/origin/shard mappings are NOT yet emitted by the nginx
     /// generator in this preview, so warn rather than silently dropping operator config
-    /// (a silent-trap robustness gap). the design record §scope: dropped surfaces get a note.
+    /// (a silent-trap robustness gap): every deliberately-unmapped surface gets a note.
     /// </summary>
     private void WarnUnmappedOptions(PageSpeedOptions o)
     {
         if (o.Redis is not null && !string.IsNullOrWhiteSpace(o.Redis.Host))
             _logger.LogWarning(
                 "PageSpeed:Redis is configured but the nginx sidecar does not emit a RedisServer directive in " +
-                "this preview; the file cache is used instead.");
+                "this preview; the file cache is used instead (use CustomOptions for directives the generator does not model).");
         if (o.Domains.RewriteMappings.Count > 0 || o.Domains.OriginMappings.Count > 0 || o.Domains.Shards.Count > 0)
             _logger.LogWarning(
                 "PageSpeed:Domains rewrite/origin/shard mappings are configured but not emitted by the nginx sidecar " +
-                "in this preview; they are ignored.");
+                "in this preview; they are ignored (use CustomOptions for directives the generator does not model).");
         if (o.VirtualHosts.Count > 0)
             _logger.LogWarning(
                 "PageSpeed:VirtualHosts are configured but per-virtual-host config is not emitted by the nginx sidecar " +
-                "in this preview; they are ignored.");
+                "in this preview; they are ignored (use CustomOptions for directives the generator does not model).");
     }
 
     private static string ResolveCacheDir(PageSpeedOptions o, string prefix) =>
@@ -414,8 +417,8 @@ public class NginxConfigGenerator
     // Default-deny allowlist of CustomOptions directives that are safe to expose
     // to customer config — scalar tuning knobs only (inlining thresholds,
     // compression quality, parallel-rewrite caps, cache TTLs, boolean flags). A
-    // reviewed security artifact pinned to the bundled mod_pagespeed source
-    //. Compared ordinally (directive names are PascalCase).
+    // reviewed security artifact pinned to the bundled mod_pagespeed source.
+    // Compared ordinally (directive names are PascalCase).
     private static readonly HashSet<string> SafeCustomOptionKeys = new(StringComparer.Ordinal)
     {
         "CssInlineMaxBytes", "CssFlattenMaxBytes", "CssImageInlineMaxBytes", "CssOutlineMinBytes",

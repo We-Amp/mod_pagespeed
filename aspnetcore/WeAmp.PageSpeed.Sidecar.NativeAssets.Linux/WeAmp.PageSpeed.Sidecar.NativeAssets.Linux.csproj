@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <!-- Aligned to the thin package. Content-only, so the
+    <!-- Aligned to the thin package (net8.0;net10.0). Content-only, so the
          TFM only shapes the (dependency-free) nuspec groups. Default net8.0; the release
          pipeline flips on net10 with -p:IncludeNet10=true (literal values — see thin csproj). -->
     <TargetFrameworks>net8.0</TargetFrameworks>

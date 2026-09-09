@@ -15,7 +15,7 @@ using Xunit;
 namespace WeAmp.PageSpeed.AspNetCore.Tests;
 
 /// <summary>
-/// Regression tests for the design record review hardening pass: artifact/secret cleanup on
+/// Regression tests for the sidecar review hardening pass: artifact/secret cleanup on
 /// Dispose (SEC-1), options validation incl. unsupported Docker mode (DI-1/DI-2),
 /// module-path-follows-binary resolution (PKG-3), the nginx -t config-test invocation
 /// (SPEC-1), and the unmapped-option warnings (SPEC-2).

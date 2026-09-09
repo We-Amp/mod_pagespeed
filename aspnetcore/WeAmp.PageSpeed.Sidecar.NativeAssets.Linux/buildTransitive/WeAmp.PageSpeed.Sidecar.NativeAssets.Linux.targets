@@ -7,8 +7,8 @@
   -->
 
   <!-- MSBuild strips the executable bit when copying content to the output/publish
-       dir, so re-set it on the bundled nginx AND the pagespeed-nginx-launch shim
-      . The .so is dlopen'd, not exec'd. The shim may be absent on an
+       dir, so re-set it on the bundled nginx AND the pagespeed-nginx-launch shim.
+       The .so is dlopen'd, not exec'd. The shim may be absent on an
        older pair, so its chmods are Exists-guarded and IgnoreExitCode like nginx's. -->
   <Target Name="WeAmpSidecarSetNginxExecutable"
           AfterTargets="Build;Publish"
@@ -42,7 +42,7 @@
        because it ships all four RIDs.) -->
   <Target Name="WeAmpSidecarRidGuard" BeforeTargets="Build;Publish">
     <Error Condition="'$(RuntimeIdentifier)' != '' AND !$(RuntimeIdentifier.StartsWith('linux-'))"
-           Text="WeAmp.PageSpeed.Sidecar bundles a Linux nginx binary and supports only linux-x64 / linux-arm64. RuntimeIdentifier '$(RuntimeIdentifier)' is not supported — on Windows use the IIS module; on macOS, Windows, or containers use WeAmp.PageSpeed.AspNetCore (ModPageSpeed 2.0)." />
+           Text="WeAmp.PageSpeed.Sidecar bundles a Linux nginx binary and supports only linux-x64 / linux-arm64. RuntimeIdentifier '$(RuntimeIdentifier)' is not supported — on Windows use the mod_pagespeed IIS module; on macOS, Windows, or containers use WeAmp.PageSpeed.AspNetCore (ModPageSpeed 2.0)." />
   </Target>
 
 </Project>

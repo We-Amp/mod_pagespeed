@@ -24,8 +24,10 @@ namespace WeAmp.PageSpeed.AspNetCore.Tests;
 ///       Host-keyed cache surface is bounded + Host-fragmented — parity with
 ///       running nginx+pagespeed in front of the app). The strict allowlist is an
 ///       OFF-by-default opt-in (Sidecar.RestrictToAuthorizedHosts); loopback is
-///       ALWAYS allowed. (Revised from the original default-deny per the design record
-///       forward-all analysis — see the ADR amendment.)
+///       ALWAYS allowed. (Revised from an original default-deny once it was
+///       confirmed the module authorizes a request's own same-origin resources
+///       with no domain configuration at all, which made the allowlist a pure
+///       operator obligation that bought no security.)
 /// </summary>
 public class InverseHardeningTests
 {

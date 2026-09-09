@@ -15,7 +15,10 @@ namespace WeAmp.PageSpeed.AspNetCore.Tests;
 
 /// <summary>
 /// Security-hardening regression tests for the nginx sidecar manager and config
-/// generator (corp codebase audit 2026-05-29; the design record D8).
+/// generator: the admin surface stays loopback-only behind a generated bearer, the
+/// child is spawned through an argument list rather than a joined command string,
+/// and every operator-supplied value is escaped or allowlisted into the generated
+/// config.
 /// </summary>
 public class SidecarSecurityTests
 {
@@ -105,8 +108,8 @@ public class SidecarSecurityTests
     }
 
     // ---- admin endpoints bind loopback-only by default ----
-    // ngx_pagespeed has no native admin auth; the generated nginx ACL IS the gate
-    //.
+    // ngx_pagespeed has no native admin auth; the generated nginx ACL IS the gate,
+    // and it defaults to loopback with no option to widen the bind to 0.0.0.0.
 
     [Fact]
     public void GeneratedConfig_AdminEndpoints_AreLoopbackOnlyAndBearerGated()

@@ -25,7 +25,8 @@ public enum SidecarMode
     Inverse,
 
     /// <summary>
-    /// Manage nginx via a Docker container (deferred — the design record D4).
+    /// Manage nginx via a Docker container. Reserved for a future release and not
+    /// implemented — Process and External cover the deployments this package targets.
     /// </summary>
     Docker,
 
@@ -45,7 +46,7 @@ public class SidecarOptions
     /// package defaults to <see cref="SidecarMode.Inverse"/> — Kestrel is
     /// the public front door, nginx runs loopback-only behind it (acceptable as
     /// the default only because the loop-break + admin-authz blockers are closed
-    /// by construction; see the design record amendment).
+    /// by construction).
     /// </summary>
     public SidecarMode Mode { get; set; } = SidecarMode.Inverse;
 
@@ -114,7 +115,7 @@ public class SidecarOptions
     /// knob for operators who want to pin which hosts are optimized; the Host-keyed
     /// cache surface is bounded (size-capped, Host-fragmented caches) either way, so
     /// the default forward-all matches running nginx+pagespeed in front of the app.
-    /// Ignored in Process/External modes. See the design record amendment.
+    /// Ignored in Process/External modes.
     /// </summary>
     public bool RestrictToAuthorizedHosts { get; set; } = false;
 
@@ -133,15 +134,17 @@ public class SidecarOptions
 
     /// <summary>
     /// Path to the bundled nginx binary. If not set, searches
-    /// AppContext.BaseDirectory first (the bundled runtimes/{rid}/native/ layout,
-    /// the design record D5), then well-known locations and PATH.
+    /// AppContext.BaseDirectory first (the bundled runtimes/{rid}/native/ layout),
+    /// then well-known locations and PATH. The bundled binary is probed first so the
+    /// nginx that matches the bundled module always wins over any system nginx.
     /// </summary>
     public string? BinaryPath { get; set; }
 
     /// <summary>
     /// Path to the matched ngx_pagespeed_module.so. If not set, resolves to
     /// "ngx_pagespeed_module.so" next to the nginx binary (the bundled matched
-    /// pair, the design record D3/D5).
+    /// pair). nginx refuses to load a module built against any other nginx version,
+    /// down to the patch level, so the two halves always travel and resolve together.
     /// </summary>
     public string? ModulePath { get; set; }
 

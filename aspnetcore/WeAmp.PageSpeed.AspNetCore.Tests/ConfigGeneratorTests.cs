@@ -339,7 +339,7 @@ public class ConfigGeneratorTests
     }
 
     // ---- config-injection matrix: every class must fail closed ---------
-    //
+    // (The eight adversarial-input classes from the config-injection review.)
 
     [Fact]
     public void Injection1_DomainBreakout_FailsClosed()
@@ -472,7 +472,7 @@ public class ConfigGeneratorTests
 
     private static Action Invoking(PageSpeedOptions options) => () => Generate(options);
 
-    // ---- Inverse-mode generation ---------------------
+    // ---- Inverse-mode generation ---------------------------------------
 
     [Fact]
     public void Inverse_ListenIsLoopbackOnly()

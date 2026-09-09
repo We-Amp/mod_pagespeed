@@ -107,7 +107,8 @@ public class InverseRequestClassifierTests
 
         await mw.InvokeAsync(ctx);
 
-        fwd.SendCount.Should().Be(0, "the design record always-functional: serve un-optimized rather than 502");
+        fwd.SendCount.Should().Be(0,
+            "an optimizer outage must never fail the request: serve un-optimized rather than 502");
         InverseTestSupport.NextWasCalled(ctx).Should().BeTrue();
     }
 
