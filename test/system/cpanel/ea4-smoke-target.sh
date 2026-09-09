@@ -256,7 +256,7 @@ if printf '%s\n' "$CURL_HEAD" | grep -qi '^X-PageSpeed-Warn'; then
 fi
 log "No X-PageSpeed-Warn header (module optimizes unconditionally)"
 
-# --- Phase 3b: Absent-.so degradation ---
+# --- Phase 3b: Absent-.so degradation (<IfFile> fail-safe) ---
 # With the module .so missing, the <IfFile>-guarded LoadModule in
 # 490_mod_pagespeed.conf must be skipped, and the <IfModule pagespeed_module>
 # directive block in pagespeed.conf must go inert, so httpd starts as PLAIN

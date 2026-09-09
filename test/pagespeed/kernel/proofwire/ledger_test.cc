@@ -226,9 +226,9 @@ TEST_F(LedgerTest, MalformedKeypairRefusesAppend) {
 // for prev_hash=GenesisPrevHash(), seq=0, timestamp_us=42, payload="abc".
 //
 // NB: this pins the CURRENT free-tier construction, not a frozen public wire
-// contract -- the design record's record gains fields (content fingerprint, transforms
-// bitmap, client class) and a domain-separation tag when a real emitter is
-// wired in; update this vector in that same change.
+// contract -- the record is designed to gain fields (content fingerprint,
+// transforms bitmap, client class) and a domain-separation tag when a real
+// emitter is wired in; update this vector in that same change.
 TEST(LedgerHashVectorTest, ComputeRecordHashKnownAnswer) {
   const GoogleString hash = Ledger::ComputeRecordHash(
       GenesisPrevHash(), /*seq=*/0, /*timestamp_us=*/42, "abc");

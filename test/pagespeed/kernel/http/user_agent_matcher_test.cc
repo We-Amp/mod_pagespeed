@@ -234,7 +234,7 @@ TEST_F(UserAgentMatcherTest, DoesntSupportWebp) {
   EXPECT_FALSE(user_agent_matcher_->LegacyWebp(kWindowsPhoneUserAgent));
 }
 
-// the design record: browsers that decode WebP but omit image/webp from the navigation
+// Browsers that decode WebP but omit image/webp from the navigation
 // Accept header. Safari 16+ and Firefox 132+.
 TEST_F(UserAgentMatcherTest, SupportsWebpButOmitsNavigationAccept) {
   // Safari, at and above the Version/16 floor. Safari 26 is deliberately far
@@ -264,7 +264,7 @@ TEST_F(UserAgentMatcherTest, DoesntSupportWebpButOmitsNavigationAccept) {
   // Below the Safari floor. 14 and 15 are the load-bearing rows: they DO
   // decode WebP on a new enough macOS, but not on Catalina, and their frozen
   // "10_15_7" OS token (these constants are byte-identical to real Catalina
-  // UAs) makes the distinction undecidable -- so the design record floor denies
+  // UAs) makes the distinction undecidable -- so the Version/16 floor denies
   // them. A grant here would render broken images on real Catalina machines.
   EXPECT_FALSE(user_agent_matcher_->SupportsWebpButOmitsNavigationAccept(
       kSafari14UserAgent));

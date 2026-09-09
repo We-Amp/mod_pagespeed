@@ -2,7 +2,7 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 //
 // Unit tests for KeyDirectoryWarmer::RefreshOnce -- the synchronous fetch+
-// populate cycle of the design record A2 background warmer. Two fakes drive the real
+// populate cycle of the background warmer. Two fakes drive the real
 // SyncFetcherAdapterCallback: an inline fake (completes the fetch synchronously
 // inside Fetch(), exercising the already-done fast path plus status/success/
 // size-cap handling and the D4 no-clobber-on-failure invariant), and a deferred

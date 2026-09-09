@@ -136,7 +136,7 @@ class ConversionVarChecker {
 
     options->webp_conversion_variables = &webp_conversion_variables_;
 
-    // AVIF family.  Same shape as the WebP
+    // AVIF family ( follow-up).  Same shape as the WebP
     // family above, minus the opaque/alpha buckets, which the AVIF encode
     // funnel has no transparency signal for.
     avif_conversion_variables_.Get(Image::ConversionVariables::FROM_PNG)
@@ -1077,7 +1077,7 @@ TEST_F(ImageTest, JpegToWebpDoesNotTimeOutTest) {
                               true);
 }
 
-// the design record Stream E: a refused speculative AVIF probe (WebP disabled) must not
+// A refused speculative AVIF probe (WebP disabled) must not
 // starve the guaranteed jpeg-recompress fallback -- the output must be the
 // RECOMPRESSED JPEG, never the original bytes.
 //
@@ -1174,7 +1174,7 @@ TEST_F(ImageTest, JpegToWebpAndAvifBothTimeOutToJpegRecompressTest) {
                               true);
 }
 
-// the design record pre-merge (expert review): POSITIVE AVIF coverage. The timeout tests
+// POSITIVE AVIF coverage. The timeout tests
 // above only prove the fallback chain; this proves a real AVIF encode
 // SUCCEEDS end to end -- correct content type, genuinely AVIF bytes, smaller
 // than the JPEG input. A codec-less libavif build (no AOM encoder threaded)
@@ -1838,7 +1838,7 @@ TEST_F(ImageTest, AnimatedGifToWebpTest) {
 }  // namespace
 
 // ----------------------------------------------------------------------------
-// the design record: C2PA / Content-Credentials preserve-by-default (best-of consolidation).
+// C2PA / Content-Credentials preserve-by-default.
 //
 // Two mechanisms, exercised through ImageImpl::ComputeOutputContents():
 //  * Codec carry (jpeg_optimizer.cc): a JPEG that is recompressed but NOT resized
@@ -1877,7 +1877,7 @@ GoogleString SpliceC2paApp11IntoJpeg(const GoogleString& jpeg) {
   return out;
 }
 
-// ---- the design record Level A PNG carry-through fixtures ----
+// ---- Opt-in PNG carry-through fixtures (ImageProvenanceCarry) ----
 // The detector + ExtractPngC2paChunks key off a "jumb"/"jumd"/"c2pa" JUMBF byte
 // signature inside a caBX chunk, so a spliced stub trips them without any real
 // signing -- the tests stay hermetic.
@@ -1975,7 +1975,7 @@ GoogleString SpliceXmpItxtIntoPng(const GoogleString& png) {
   return out;
 }
 
-// the design record Stream H: appends a top-level ISO-BMFF "uuid" box tagged with the
+// Appends a top-level ISO-BMFF "uuid" box tagged with the
 // C2PA manifest UUID (d8fec3d6-1b0e-483c-9297-5828877ec481) to an AVIF.
 // Appended at the END of the file -- inserting it mid-stream would shift mdat
 // and invalidate the meta box's absolute iloc offsets, corrupting the decode;
@@ -2218,8 +2218,8 @@ TEST_F(ImageTest, PreserveC2paJpegToWebpStaysJpeg) {
   EXPECT_NE(out, off_out);
 }
 
-// the design record pre-merge (expert review): the design record skip-not-strip floor extends
-// to the AVIF conversion path. The AVIF encoder does not carry an APP11/JUMBF
+// The preserve-by-default skip-not-strip floor extends to the AVIF
+// conversion path. The AVIF encoder does not carry an APP11/JUMBF
 // manifest, so a manifest-bearing JPEG must NOT be converted to AVIF under the
 // default -- it stays a (recompressed) JPEG that keeps the manifest, and is
 // NEVER served as a provenance-stripped AVIF.
@@ -2310,7 +2310,7 @@ TEST_F(ImageTest, PreserveC2paAvifInputSkipsRecompress) {
   EXPECT_NE(with_c2pa, off_out);
 }
 
-// ---- the design record Level A: PNG carry-through (ImageProvenanceCarry) ----
+// ---- Opt-in PNG carry-through (ImageProvenanceCarry) ----
 // JPEG carry is already covered by the PreserveC2pa* tests above (jpeg_optimizer
 // carries APP11/JUMBF through a recompress via libjpeg's marker API). These tests
 // cover the PNG path the carry flag adds: recompress AND re-splice the original

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2024-2026 We-Amp B.V.
 
-# the design record Bar-A opt-in counter endpoint (EXPERIMENTAL, default off) live Day-0
+# Opt-in Web-Bot-Auth counter endpoint (EXPERIMENTAL, default off) live Day-0
 # smoke for the nginx wiring. Mirrors ModPageSpeed 2.0's t/105-webbotauth-counter
 # against a RUNNING nginx loading ngx_pagespeed_module.so, proving the
 # /.well-known/webbotauth-counter endpoint honors the operator-configured mode

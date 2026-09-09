@@ -270,7 +270,7 @@ class ImageRewriteTest : public RewriteTestBase {
     // since the clock -after- rewrite is non-deterministic, but it must be
     // at the initial value at the time of the rewrite. This first
     // comparison is against the raw STORED cache entry, which does not
-    // carry the design record serving-time upgrade.
+    // carry the serving-time 'public, immutable' upgrade.
     GoogleString expect_headers;
     AppendDefaultHeadersWithCanonical(content_type, kPuzzleUrl,
                                       &expect_headers, false /* served */);
@@ -315,7 +315,7 @@ class ImageRewriteTest : public RewriteTestBase {
     lru_cache()->Clear();
 
     // New time --- new timestamp. This comparison is against a SERVED
-    // response, which carries the design record 'public, immutable' upgrade.
+    // response, which carries the serving-time 'public, immutable' upgrade.
     expect_headers.clear();
     AppendDefaultHeadersWithCanonical(content_type, kPuzzleUrl,
                                       &expect_headers, true /* served */);
@@ -3388,7 +3388,7 @@ TEST_F(ImageRewriteTest, AvifStatsAreRegisteredAndIncremented) {
   EXPECT_EQ(0, avif_from_jpeg_timeouts->Get());
 }
 
-// the design record: the AVIF sibling of ServeWebpFromColdCache. Mint a committed
+// The AVIF sibling of ServeWebpFromColdCache. Mint a committed
 // ".avif" URL with a both-capable client, then prove: cache-served fetches do
 // not re-rewrite; cold-cache reconstruction (including by a NON-capable
 // client, via the committed-URL reconcile + serve-to-any-agent) reproduces the
@@ -3499,7 +3499,7 @@ TEST_F(ImageRewriteTest, ServeAvifFromColdCache) {
   EXPECT_STREQ(kAvifMimeType, response.Lookup1(HttpAttributes::kContentType));
 }
 
-// ---- the design record Stream G: committed-URL cache-key reconcile ----
+// ---- Committed-URL cache-key reconcile ----
 //
 // The metadata cache key folds BOTH capability dimensions (libwebp_level and
 // avif_level). When a committed rewritten URL (".avif"/".webp") is re-fetched
@@ -4238,7 +4238,7 @@ TEST_F(ImageRewriteTest, NoAcceptHeaderMeansNoWebpFromUserAgentAlone) {
   EXPECT_EQ(ResourceContext::LIBWEBP_NONE, context.libwebp_level());
 }
 
-// the design record D1: the one exception to the rule above. Safari 16+ and Firefox
+// The one exception to the rule above. Safari 16+ and Firefox
 // 132+ decode WebP but omit image/webp from a navigation Accept, so for
 // exactly that population the capability is derived from the user-agent
 // string -- by setting the same accepts_webp_ bit an Accept header sets.
@@ -4663,7 +4663,8 @@ namespace {
 
 // PNG C2PA test fixtures, mirrored from image_test.cc and kept local to this
 // translation unit. They build a manifest-bearing PNG with a stub caBX chunk
-// (no real signing) so the carry tests below stay hermetic. See the design record Level A.
+// (no real signing) so the carry tests below stay hermetic. The carry itself is
+// the opt-in ImageProvenanceCarry layer above the preserve-by-default floor.
 
 // CRC-32 (ISO 3309 / PNG) over a byte range; a valid CRC keeps the spliced caBX
 // chunk well-formed so libpng decodes the image cleanly.
@@ -4724,7 +4725,7 @@ GoogleString SpliceC2paCaBxIntoPng(const GoogleString& png,
 
 }  // namespace
 
-// the design record Level A: the C2PA carry-through must survive the full image-rewrite
+// The opt-in C2PA carry-through must survive the full image-rewrite
 // pipeline driven by the RewriteOptions flag (ImageProvenanceCarry), not just the
 // codec in isolation. image_test.cc covers Image::CompressionOptions::c2pa_carry
 // directly; these two tests cover the options -> ImageRewriteFilter -> Image

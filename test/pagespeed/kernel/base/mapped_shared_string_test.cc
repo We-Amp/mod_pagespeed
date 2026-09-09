@@ -519,7 +519,7 @@ TEST_F(MappedSharedStringTest, OwnedSharedStringSharesPointer) {
 }
 
 // ============================================================================
-// CopyMappedVerified
+// CopyMappedVerified (lease-verified de-alias)
 // ============================================================================
 
 namespace {

@@ -211,7 +211,7 @@ try {
     # --- Setup: clear cache state in setup, not teardown. INSIDE
     #     the try so a setup-time throw both runs the finally (backup-file
     #     cleanup) and lets the trap restore (never blank) the config. ---
-    Write-Host "=== Setup: clear cache contents ==="
+    Write-Host "=== Setup: clear cache contents (in setup, not teardown) ==="
     Clear-CacheContents -root $CacheRoot
     Write-Host "Pre-state OK: cache root present, Cyclone store cleared ($CacheRoot)."
 

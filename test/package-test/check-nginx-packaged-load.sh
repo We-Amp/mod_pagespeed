@@ -3,7 +3,7 @@
 # Copyright (c) 2024-2026 We-Amp B.V.
 
 #
-# check-nginx-packaged-load.sh  —  the design record GATE 1 (packaged-nginx load-check)
+# check-nginx-packaged-load.sh  —  GATE 1 (packaged-nginx load-check)
 #
 # THE gate that makes the distro-stock matrix model (a′) safe.
 #
@@ -117,11 +117,11 @@ $out" 2
   echo "$out"
 }
 
-echo "==> the design record GATE 1: packaged-nginx load-check (distro=$DISTRO)"
+echo "==> GATE 1: packaged-nginx load-check (distro=$DISTRO)"
 echo "    package: $PKG"
 
 case "$DISTRO" in
-  # the design record P3: all Debian/Ubuntu deb suites take the same apt install path —
+  # All Debian/Ubuntu deb suites take the same apt install path —
   # stock packaged nginx auto-includes the .deb's modules-enabled load_module
   # snippet, so the gate logic below is identical across them.
   noble|bullseye|bookworm|trixie|jammy)

@@ -1,7 +1,7 @@
 // Copyright 2026 We-Amp B.V.
 // Licensed under the Apache License, Version 2.0 (the "License").
 //
-// Hermetic unit tests for the design record A2 cache layer: WarmKeyDirectoryCache
+// Hermetic unit tests for the key-directory cache layer: WarmKeyDirectoryCache
 // (whole-directory population), CachedKeyDirectoryProvider read-through vs
 // cache-only (the non-blocking request path), ChainedKeyDirectoryProvider, and
 // ExtractAllEd25519Keys. No network, no nginx, no threads -- a real in-memory

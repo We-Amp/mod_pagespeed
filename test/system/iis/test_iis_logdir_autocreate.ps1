@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2024-2026 We-Amp B.V.
 
-# test_iis_logdir_autocreate.ps1 - Pins the design record §Operational +
-# the referenced issue contract for LogDir auto-create on IIS. Notes:
+# test_iis_logdir_autocreate.ps1 - Pins the operational contract for LogDir
+# auto-create on IIS: on a successful start the configured
+# LogDir must exist and be writable by the worker identity. Notes:
 #
 #   - The target directory is the configured LogDir (the literal value from
 #     pagespeed.config, e.g. ...\PageSpeed\logs); there is no per-site suffix.
@@ -13,8 +14,10 @@
 #     Product.wxs GrantLogAcl. The positive-path ACE assertion
 #     accepts EITHER an explicit RX+W (= ReadAndExecute + Write) on
 #     the worker SID OR an inherited Modify from the well-known SIDs
-#     the installer ships (S-1-5-32-568 / S-1-5-20) — both are valid
-#     per the design record §3 common case.
+#     the installer ships (S-1-5-32-568 / S-1-5-20) — both are valid:
+#     in the common case the bare mkdir suffices because the worker
+#     already inherits Modify, and the explicit ACE is granted only
+#     when a writability probe fails.
 #
 #   - The NEGATIVE path (log-dir-create-failed) is RETIRED (VM-verified
 #     2026-06-22 on v1.15.0): a non-creatable LogDir is NON-FATAL — the module
@@ -31,10 +34,10 @@
 # = <site root>\pagespeed.config (the file the module actually reads), not the
 # legacy ProgramData/IISWebSpeed path the old default pointed at.
 #
-# Per the design record §6 + Constraints, logs state is cleared in setup, not
-# teardown, with pre-state asserted - otherwise the diagnostic fixture
-# (which never reads the logs dir) and this fixture (which depends on
-# its absence) can mask each other on a shared host.
+# Logs state is cleared in setup, not teardown, with pre-state asserted -
+# otherwise the diagnostic fixture (which never reads the logs dir) and
+# this fixture (which depends on its absence) can mask each other on a
+# shared host.
 #
 # Pre-conditions (the test asserts these and aborts cleanly if absent):
 #   - PageSpeed IIS module already installed + registered
@@ -180,7 +183,7 @@ function Restore-AllState {
 trap { Restore-AllState; break }
 
 # --- Setup: clear LogDir state in setup, not teardown ---
-Write-Host "=== Setup: clear LogDir ==="
+Write-Host "=== Setup: clear LogDir (in setup, not teardown) ==="
 Stop-W3SVC
 Clear-LogDir -dir $LogDir
 Write-Host "Pre-state OK: $LogDir does not exist."
@@ -256,20 +259,22 @@ try {
     }
 
     # Assert: LogDir exists and is a real directory (not a reparse
-    # point — the design record §3d applies to all EnsureDirectoryWritable
-    # callers, cache or LogDir).
+    # point — the reparse-point rejection applies to all
+    # EnsureDirectoryWritable callers, cache or LogDir, because
+    # canonicalizing a path does not resolve junctions).
     if (-not (Test-Path -LiteralPath $LogDir -PathType Container)) {
         throw "Positive path: LogDir was not created: $LogDir"
     }
     $info = Get-Item -LiteralPath $LogDir -Force
     if ($info.Attributes -match 'ReparsePoint') {
         throw ("Positive path: LogDir is a reparse point " +
-               "(attrs=$($info.Attributes)); the design record §3d should have rejected this.")
+               "(attrs=$($info.Attributes)); the reparse-point check should " +
+               "have rejected this.")
     }
     Write-Host "LogDir exists and is a real directory: $LogDir"
 
-    # Assert: worker has at least RX+W on the new dir. Per the design record §3
-    # common case + the narrower grant, this is satisfied EITHER
+    # Assert: worker has at least RX+W on the new dir. Under the common
+    # case + the narrower grant, this is satisfied EITHER
     # by an explicit RX+W ACE for the worker SID (auto-create's
     # conditional ACL leg fired because inheritance was broken — note
     # the absence of DELETE relative to the cache fixture) OR by an

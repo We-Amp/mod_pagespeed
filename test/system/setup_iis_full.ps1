@@ -142,7 +142,8 @@ function Invoke-AppCmd {
 function Reset-PageSpeedTestCache {
     # Recycle the IIS app pool first, then purge the on-disk PageSpeed file
     # cache. Order matters: a w3wp from a prior workflow job may still be
-    # running on a persistent Windows runner and holding file handles on cache entries. If we
+    # running on a persistent Windows runner and holding file handles on
+    # cache entries. If we
     # purge before the recycle, Remove-Item partially fails on locked files
     # (silently, under -ErrorAction SilentlyContinue) and the w3wp may also
     # service one more request in the gap, rewriting cache entries with the
@@ -604,7 +605,8 @@ function New-WebConfig {
     Write-Status "Creating web.config and pagespeed.config..."
 
     # Write web.config with IIS settings only (no <pagespeed> XML section).
-    # The IISpeed-adopted module reads pagespeed.config flat files.
+    # The IISpeed-adopted module reads pagespeed.config flat files, not a
+    # <pagespeed> section in web.config.
     $webConfig = @"
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration>
@@ -951,7 +953,8 @@ function Start-IISSite {
     # unchanged -- we still only declare ready when /pagespeed_admin/ returns
     # 200 WITHOUT an X-Pagespeed-Init-Status header (i.e. ProcessContext init
     # actually succeeded). The larger budget only gives a heavily-loaded
-    # shared Windows runner (several runners share one box) more wall-clock for a slow-but-eventually-successful init,
+    # shared Windows runner (several runners share one box) more wall-clock
+    # for a slow-but-eventually-successful init,
     # instead of `exit 1`-ing the whole job at 60s. A genuinely broken init
     # (header never clears, or DLL never loads) still fails -- just later --
     # so this does not mask a real init regression. (IIS init-load flake.)

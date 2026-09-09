@@ -4,8 +4,8 @@
 # test_iis_config_fallback.ps1 - Pins the canonical config-path contract for
 # iis_module_factory.cpp's config-path resolution.
 #
-# The MSI now files pagespeed.config into the
-# canonical product directory
+# The MSI now
+# files pagespeed.config into the canonical product directory
 #   C:\ProgramData\We-Amp\PageSpeed\pagespeed.config
 # alongside the cache + logs subdirectories. Upgrade-from-IISpeed and
 # upgrade-from-1.1-legacy customers keep their config at the legacy

@@ -331,9 +331,10 @@ void RewriteTestBase::AppendDefaultHeaders(const ContentType& content_type,
                                            GoogleString* text) {
   ResponseHeaders headers;
   PopulateDefaultHeaders(content_type, 0, &headers);
-  // Served (not stored) rewritten-resource headers carry the design record
-  // serving-time upgrade; the Replace-based setters also move Cache-Control
-  // to the end, mirroring ServerContext::ApplyRewrittenUrlCacheControl.
+  // Served (not stored) rewritten-resource headers carry the serving-time
+  // 'public, immutable' upgrade; the Replace-based setters also move
+  // Cache-Control to the end, mirroring
+  // ServerContext::ApplyRewrittenUrlCacheControl.
   headers.SetCacheControlPublic();
   headers.SetCacheControlImmutable();
   StringWriter writer(text);
@@ -363,8 +364,8 @@ void RewriteTestBase::AppendDefaultHeadersWithCanonical(
 
   if (served) {
     // A response actually served under the .pagespeed. URL carries the
-    // the design record serving-time upgrade (stored cache entries do not); the
-    // Replace-based setters move Cache-Control after
+    // serving-time 'public, immutable' upgrade (stored cache entries do
+    // not); the Replace-based setters move Cache-Control after
     // X-Original-Content-Length, mirroring
     // ServerContext::ApplyRewrittenUrlCacheControl running after the
     // stored headers were copied.

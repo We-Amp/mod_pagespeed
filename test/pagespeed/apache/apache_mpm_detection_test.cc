@@ -87,7 +87,7 @@ TEST(ApacheMpmDetectionTest, DynamicallyThreadedMpm) {
 }
 
 // ---------------------------------------------------------------------------
-// the design record D1: the process-concurrency divisor Apache supplies.
+// The process-concurrency divisor Apache supplies.
 //
 // AP_MPMQ_MAX_DAEMONS is the divisor directly, with no arithmetic of ours:
 // prefork answers with MaxRequestWorkers, worker and event answer with
@@ -115,7 +115,8 @@ TEST(ApacheProcessConcurrencyTest, SingleChild) {
 
 // Asked before httpd's check_config phase computed the child count, the MPM
 // answers zero.  Zero is not a number to divide by, and guessing is exactly
-// what the design record forbids.
+// what the policy forbids: an undeterminable divisor must resolve to the
+// floor of one thread per pool.
 TEST(ApacheProcessConcurrencyTest, ZeroChildrenIsUnknown) {
   EXPECT_EQ(kUnknownProcessConcurrency,
             ProcessConcurrencyFromMpmInfo(MakeProcessInfo(true, 0)));
@@ -132,8 +133,9 @@ TEST(ApacheProcessConcurrencyTest, MpmNotLoadedYetIsUnknown) {
             ProcessConcurrencyFromMpmInfo(MakeProcessInfo(false, 8)));
 }
 
-// The key itself is the decision, not an
-// implementation detail of QueryMpmProcessInfo().  Every alternative below
+// The key itself is the decision -- the divisor is AP_MPMQ_MAX_DAEMONS
+// exactly, not a ratio computed from it -- and not an implementation detail
+// of QueryMpmProcessInfo().  Every alternative below
 // compiles and returns a number, and swapping one in would change what the
 // whole policy divides by without failing anything -- so pin it.
 TEST(ApacheProcessConcurrencyTest, DivisorComesFromMaxDaemons) {

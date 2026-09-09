@@ -2160,8 +2160,8 @@ TEST_F(RewriteDriverTest, ValidateCacheResponseRewrittenWebp) {
       kOriginUrl, *options(), request_context, response_headers));
 
   // vary:accept with only the broad accepts_webp bit set: this is the shape a
-  // user-agent-derived grant produces (legacy Android, or the design record
-  // Safari/Firefox fallback). The client could decode the bytes, but the
+  // user-agent-derived grant produces (legacy Android, or the Safari 16+ /
+  // Firefox 132+ fallback). The client could decode the bytes, but the
   // entry's "Vary: Accept" claim would be false as-selected, so the entry is
   // NOT valid -- the request revalidates against the origin instead.
   request_context->SetAcceptsWebp(true);
@@ -2360,7 +2360,7 @@ TEST_F(RewriteDriverTest, SetRequestHeadersPopulatesWebpNoAccept) {
       rewrite_driver()->request_context()->accepts_webp_via_accept_header());
 }
 
-// Same split for the design record fallback population: Safari 16+ with no image
+// Same split for the user-agent fallback population: Safari 16+ with no image
 // types in its navigation Accept gets the broad bit (rewritten URLs may serve
 // WebP) but never the Accept-derived bit (a cached origin-URL WebP response
 // carrying "Vary: Accept" is not treated as valid for it).

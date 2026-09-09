@@ -1,7 +1,7 @@
 // Copyright 2026 We-Amp B.V.
 // Licensed under the Apache License, Version 2.0 (the "License").
 //
-// Unit tests for the design record Bar-A opt-in counter store: the FNV-1a-64 keyid
+// Unit tests for the opt-in Web-Bot-Auth counter store: the FNV-1a-64 keyid
 // hash (asserted cross-engine compatible with ModPageSpeed 2.0), the lock-free
 // slot find-or-claim + overflow (single-threaded and under contention), the
 // verify-latency bucketing, the boot-identity minting, and the open/create/

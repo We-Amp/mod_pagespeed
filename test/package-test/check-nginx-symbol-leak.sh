@@ -3,7 +3,7 @@
 # Copyright (c) 2024-2026 We-Amp B.V.
 
 #
-# check-nginx-symbol-leak.sh  —  the design record GATE 2 (symbol-leak gate)
+# check-nginx-symbol-leak.sh  —  GATE 2 (symbol-leak gate)
 #
 # Independent, deterministic CI gate that asserts the packaged nginx
 # mod_pagespeed module (.so) does NOT leak the bundled OpenSSL/BoringSSL.
@@ -23,7 +23,7 @@
 #       own symbols of the same name and corrupt the process.
 #
 # This is the SAME assertion the Phase-B build scripts run in-build, but
-# wired as an INDEPENDENT, BLOCKING CI gate per the design record D5.3 (defence in
+# wired as an INDEPENDENT, BLOCKING CI gate (defence in
 # depth: the gate must catch a build script whose internal assertion was
 # accidentally disabled or which produced a package out-of-band).
 #
@@ -59,7 +59,7 @@ trap 'rm -rf "$WORK"' EXIT
 
 # ---------------------------------------------------------------------------
 # Resolve the .so to check (extract from package if needed).
-# Module layout per the design record Phase-B build-script contract:
+# Module layout per the Phase-B build-script contract:
 #   deb: /usr/lib/nginx/modules/ngx_pagespeed_module.so
 #   rpm: /usr/lib64/nginx/modules/ngx_pagespeed_module.so
 # We don't hard-code the path — we glob for ngx_pagespeed*_module.so under

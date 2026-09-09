@@ -19,9 +19,10 @@
 
 // Test-only CacheInterface wrapper that re-delivers every cache hit as a
 // memory-mapped MappedSharedString view, emulating CycloneCache's zero-copy
-// borrow path (mmap-backed read handles, the design record) on top of any delegate
-// cache.  Used to exercise HTTPCache/HTTPValue zero-copy serving
-// (CycloneZeroCopy / HTTPValue::LinkMapped) without a real Cyclone cache.
+// borrow path (mmap-backed read handles held under a renewable lease) on top
+// of any delegate cache.  Used to exercise HTTPCache/HTTPValue zero-copy
+// serving (CycloneZeroCopy / HTTPValue::LinkMapped) without a real Cyclone
+// cache.
 //
 // CRITICAL FOR THE LIFETIME TESTS: the bytes handed to the callback live in
 // their own page-aligned mmap region, and the release callback (invoked when
@@ -76,7 +77,7 @@ class MappedBackendCache : public CacheInterface {
 
   // Number of mapped views handed out on hits.
   int mapped_hits() const { return shared_->mapped_hits; }
-  // Scripts the design record intent-checked renewal verdict every outstanding
+  // Scripts the intent-checked lease-renewal verdict every outstanding
   // (and future) view's RenewLeaseStrict() reports.  Defaults to kOk (a
   // live, unchallenged lease); set kTorn to emulate a wrap committing over
   // the borrow between the cache read and a consumer's verify.
@@ -133,7 +134,7 @@ class MappedBackendCache : public CacheInterface {
     Region* region;
   };
 
-  // the design record lease hooks for the views: renew always succeeds, the strict
+  // Lease hooks for the views: renew always succeeds, the strict
   // verdict is scripted (see set_strict_verdict), and no forced wrap is
   // ever imminent.
   static int RenewView(void* /*user_data*/) { return 1; }

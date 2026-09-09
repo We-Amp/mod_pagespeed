@@ -17,9 +17,9 @@
  * under the License.
  */
 
-// Unit tests for the PAGESPEED_MMAP aliasing bucket,
-// against the real APR bucket API.  The Cyclone lease is scripted through
-// the MappedSharedString hook callbacks, so every barrier verdict --
+// Unit tests for the PAGESPEED_MMAP aliasing bucket (the Apache zero-copy
+// sink), against the real APR bucket API.  The Cyclone lease is scripted
+// through the MappedSharedString hook callbacks, so every barrier verdict --
 // alias, de-alias-by-copy, torn -- is driven deterministically, and the
 // "poison" pattern (overwrite the fake mapped region after a copy-out)
 // proves no aliased read survives a de-alias.

@@ -947,7 +947,7 @@ TEST_F(InPlaceRewriteContextTest, CacheableJpgUrlRewritingSucceeds) {
   EXPECT_EQ(0, css_filter_->num_rewrites());
 }
 
-// the design record pin: a successfully in-place-optimized resource served at its
+// Pin: a successfully in-place-optimized resource served at its
 // ORIGINAL URL must not gain 'public' or 'immutable'. Those tokens are a
 // serving-time upgrade reserved for hash-committed .pagespeed. URLs
 // (ServerContext::ApplyRewrittenUrlCacheControl). The nested rewritten
@@ -1497,7 +1497,7 @@ TEST_F(InPlaceRewriteContextTest, InPlaceDoesNotEncodeBrowserCapabilities) {
   EXPECT_EQ(0, js_filter_->num_encode_user_agent());
 }
 
-// the design record companion to the three request-independence tests above, exercising
+// Companion to the three request-independence tests above, exercising
 // the one population they do not: a client whose WebP capability is DERIVED
 // FROM THE USER-AGENT STRING (Safari 16+ sends no image types in a navigation
 // Accept), rather than from an Accept header.  That verdict is a guess, so it

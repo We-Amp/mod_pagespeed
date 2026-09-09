@@ -170,7 +170,7 @@ GoogleString MakeFtypBox(const GoogleString& major_brand,
 
 }  // namespace
 
-// the design record Stream D: ISO-BMFF / AVIF sniffing in ComputeImageType. The probe is
+// ISO-BMFF / AVIF sniffing in ComputeImageType. The probe is
 // keyed on an "ftyp" box whose major or compatible brand is an AVIF brand, so
 // non-AVIF ISO-BMFF (mp4/HEIC) and truncated/hostile inputs never
 // misclassify -- and never crash.
@@ -237,7 +237,7 @@ TEST(ImageUtilTest, ComputeImageTypeAvifSniffingHostileBuffers) {
   EXPECT_EQ(net_instaweb::IMAGE_AVIF, ComputeImageType(with_tail));
 }
 
-// the design record Stream H: the ISO-BMFF C2PA carrier -- a top-level "uuid" box tagged
+// The ISO-BMFF C2PA carrier -- a top-level "uuid" box tagged
 // with the C2PA manifest UUID (d8fec3d6-1b0e-483c-9297-5828877ec481) -- must
 // trip ImageHasC2paManifest, and only when the buffer is actually ISO-BMFF
 // (an "ftyp" box gate prevents false positives on random binary data).
@@ -279,7 +279,7 @@ TEST(ImageUtilTest, IsoBmffUuidC2paDetection) {
   EXPECT_FALSE(ImageHasC2paManifest(ftyp));
 }
 
-// the design record: the C2PA / Content-Credentials provenance detector.
+// The C2PA / Content-Credentials provenance detector.
 TEST(ImageUtilTest, C2paManifestDetection) {
   using pagespeed::image_compression::ImageHasC2paManifest;
   using pagespeed::image_compression::ImageHasXmpC2pa;
@@ -308,7 +308,8 @@ TEST(ImageUtilTest, C2paManifestDetection) {
       ImageHasC2paManifest("a perfectly ordinary caption, no markers"));
 }
 
-// the design record Level A: PNG carrier-chunk extractor (the JPEG path needs no extractor;
+// Opt-in carry-through: the PNG carrier-chunk extractor (the JPEG path needs
+// no extractor;
 // jpeg_optimizer carries APP11/JUMBF via libjpeg's marker API).
 TEST(ImageUtilTest, ExtractPngC2paChunks) {
   using pagespeed::image_compression::ExtractPngC2paChunks;

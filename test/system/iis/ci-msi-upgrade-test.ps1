@@ -19,8 +19,10 @@
 #     checkpointing, or (b) accept that the "baseline probe" below
 #     will report "No pre-existing install".
 #
-# See corp/the internal planning notes and the design record for
-# the full story.
+# The upgrade sequence being exercised: the MSI stops the WAS service
+# (w3wp's parent in the IIS process tree) and issues a defensive taskkill
+# of w3wp before InstallFiles, so nothing is holding a handle to the DLL
+# when it is replaced.
 #
 # === END DAY-2 SNAPSHOT NOTE ===
 #
@@ -169,7 +171,7 @@ $prepScript = {
 }
 Invoke-Command -VMName $VMName -Credential $cred -ScriptBlock $prepScript
 
-# --- Step 3: Copy MSI(s) + the design record port fixtures into VM ---
+# --- Step 3: Copy MSI(s) + port-parity fixtures into VM ---
 Write-Host "Copying MSI to VM..."
 $session = New-PSSession -VMName $VMName -Credential $cred
 Copy-Item -Path $MsiPath -Destination "C:\artifacts\$msiName" -ToSession $session -Force
@@ -178,7 +180,7 @@ if ($OldMsiPath) {
     Copy-Item -Path $OldMsiPath -Destination "C:\artifacts\$oldMsiName" -ToSession $session -Force
 }
 
-# the design record: copy port-level fixtures into VM. These run AFTER MSI install
+# Copy port-level fixtures into VM. These run AFTER MSI install
 # (Step 5b below) against the freshly-installed module to pin the auto-
 # create + diagnostic-page + config-fallback contracts on each release.
 #
@@ -445,20 +447,20 @@ Invoke-Command -VMName $VMName -Credential $cred -ScriptBlock $smokeScript `
     -ArgumentList $ReleaseTag, $ExpectedVersionString
 Write-Host "Smoke step complete"
 
-# --- Step 5b: the design record port fixtures ---
+# --- Step 5b: port-parity fixtures ---
 # Each fixture pins one contract surface (cache autocreate, log autocreate,
 # config canonical+fallback path resolution, diagnostic-page failure-kind
 # coverage). Run in sequence inside the VM against the freshly-installed
 # module. NON-GATING: a fixture's non-zero exit emits a ::warning:: rather
-# than failing the gating MSI-upgrade job. These the design record fixtures were
+# than failing the gating MSI-upgrade job. These fixtures were
 # re-wired as hard gates once and proved fragile on the warm day-2 upgrade VM
 # (e.g. the cache-diagnostic fixture deletes FileCachePath + recycles the
 # AppPool, which does not reliably force a config re-read inside the poll
 # window). The core install/register/header/uninstall
 # assertions above still gate. The fixtures clear their own state in setup
-# and restore pagespeed.config on teardown.
+# rather than teardown, and restore pagespeed.config on teardown.
 Write-Host ""
-Write-Host "=== Step 5b: the design record port fixtures ==="
+Write-Host "=== Step 5b: port-parity fixtures ==="
 $portFixtureScript = {
     param($spec)
     $fixtures = @($spec.fixtures)
@@ -500,7 +502,7 @@ $portFixtureScript = {
         Write-Host ""
     }
     if ($failed.Count -gt 0) {
-        Write-Host "::warning::the design record port fixtures with non-zero exit (non-gating): $($failed -join ', ')"
+        Write-Host "::warning::port fixtures with non-zero exit (non-gating): $($failed -join ', ')"
     }
 }
 # These fixtures are GATING (fixed + VM-validated). config_fallback
@@ -529,7 +531,7 @@ if ($nonGatingFixtures.Count -gt 0) {
     Invoke-Command -VMName $VMName -Credential $cred -ScriptBlock $portFixtureScript `
         -ArgumentList @{ fixtures = $nonGatingFixtures; gating = $false }
 }
-Write-Host "the design record port fixtures complete (GATING: cache-diagnostic, cache-autocreate, logdir; NON-gating: config_fallback)."
+Write-Host "Port-parity fixtures complete (GATING: cache-diagnostic, cache-autocreate, logdir; NON-gating: config_fallback)."
 
 # --- Step 6: Uninstall ---
 Write-Host "Uninstalling..."

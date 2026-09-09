@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2024-2026 We-Amp B.V.
 
-# the design record PW-2: smoke a sidecar matched (nginx + ngx_pagespeed_module.so) pair.
+# Smoke a sidecar matched (nginx + ngx_pagespeed_module.so) pair.
 #
 # Runs the pair inside a clean distro container (no host nginx) and asserts, in
 # order of strength:

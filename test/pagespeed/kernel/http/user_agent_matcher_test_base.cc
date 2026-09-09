@@ -323,7 +323,7 @@ const char UserAgentMatcherTestBase::kSafari9UserAgent[] =
 const char UserAgentMatcherTestBase::kSafari13UserAgent[] =
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
     "(KHTML, like Gecko) Version/13.1.2 Safari/605.1.15";
-// Safari 14 and 15 sit below the design record Version/16 floor: their WebP decode
+// Safari 14 and 15 sit below the Version/16 WebP floor: their WebP decode
 // is OS-gated (none on Catalina), and the frozen "10_15_7" OS token -- which
 // every modern macOS reports -- makes the real OS undecidable from the UA.
 // These two constants are byte-identical to a real Catalina UA.
@@ -333,7 +333,7 @@ const char UserAgentMatcherTestBase::kSafari14UserAgent[] =
 const char UserAgentMatcherTestBase::kSafari15UserAgent[] =
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
     "(KHTML, like Gecko) Version/15.6.1 Safari/605.1.15";
-// Safari 16 is the design record floor: the first Safari that cannot run on
+// Safari 16 is that floor: the first Safari that cannot run on
 // Catalina, hence the first whose WebP decoder is provable from the UA alone.
 // Note the OS token still reads 10_15_7 -- that is the frozen value, not
 // Catalina.
@@ -379,8 +379,8 @@ const char UserAgentMatcherTestBase::kAndroidWebView114UserAgent[] =
     "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) "
     "Version/4.0 Chrome/114.0.0.0 Mobile Safari/537.36";
 // The one widely deployed crawler that advertises "Version/N... Safari/" with
-// N above the design record floor; the crawler deny entry, not the version floor, is
-// what keeps it out.
+// N above the Version/16 floor; the crawler deny entry, not the version
+// floor, is what keeps it out.
 const char UserAgentMatcherTestBase::kApplebotSafari16UserAgent[] =
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
     "(KHTML, like Gecko) Version/16.4 Safari/605.1.15 (Applebot/0.1; "

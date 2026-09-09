@@ -74,7 +74,7 @@ pagespeed_cc_test(
         "-Iexternal/apr/",
     ],
     data = [
-        # the design record: apache_mpm_detection_test.cc reads this source to pin the
+        # apache_mpm_detection_test.cc reads this source to pin the
         # FinalizeThreadCounts() call site in the post-config hook.
         # daemon_seam_test.cc reads mod_instaweb.cc and instaweb_handler.cc for
         # the same reason: both call sites need a live httpd to execute.

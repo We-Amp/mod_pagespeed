@@ -399,7 +399,7 @@ TEST_F(ImageUrlEncoderTest, CacheKey) {
   EXPECT_EQ(".d", ImageUrlEncoder::CacheKeyFromResourceContext(context));
 }
 
-// the design record Stream G: the AVIF capability token rides in the metadata cache key
+// The AVIF capability token rides in the metadata cache key
 // INDEPENDENTLY of the WebP token, in a disjoint 'A'-prefixed alphabet.
 TEST_F(ImageUrlEncoderTest, CacheKeyAvifTokens) {
   ResourceContext context;
@@ -716,7 +716,7 @@ TEST_F(ImageUrlEncoderTest, WebpDetection) {
   EXPECT_FALSE(IsPagespeedWebp("http://example.com/x.jpg.pagespeed.ce.0.webp"));
 }
 
-// the design record: IsAvifRewrittenUrl keys on the committed ".avif" output extension
+// IsAvifRewrittenUrl keys on the committed ".avif" output extension
 // of an ImageRewriteFilter ("ic") URL, exactly as IsWebpRewrittenUrl keys on
 // ".webp". This drives the committed-URL reconcile in SetAvifCapability.
 TEST_F(ImageUrlEncoderTest, AvifDetection) {

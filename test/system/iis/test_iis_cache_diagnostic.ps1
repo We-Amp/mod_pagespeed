@@ -140,7 +140,9 @@ function Recycle-AppPool {
 }
 
 # Resolve the %ProgramData% machine-global base config (the NON-authoritative
-# twin, the design record tiers 1/2). Mirrors iis_config_util::ResolveProgramDataConfig:
+# twin: the two machine-global tiers of the config precedence chain, both of
+# which a per-site file overrides). Mirrors
+# iis_config_util::ResolveProgramDataConfig:
 # PageSpeed\ first, then legacy IISWebSpeed\, pagespeed.config before
 # iiswebspeed.config. Returns $null when no base config exists.
 function Resolve-ProgramDataConfigPath {
@@ -154,7 +156,7 @@ function Resolve-ProgramDataConfigPath {
     return $null
 }
 
-# Look for the design record config-drift warning in the Windows Application event
+# Look for the config-drift warning in the Windows Application event
 # log. IisMessageHandler writes kWarning to event source "IISpeed", so the
 # factory's drift warning lands here. Returns:
 #   $true  - a matching drift event was found at/after $since
@@ -336,7 +338,7 @@ try {
         if ($drift -eq $true) {
             Write-Host "PASS (c): config-drift warning present in Application event log (source IISpeed)."
         } elseif ($drift -eq $false) {
-            throw "Regression: expected an the design record config-drift warning in the Application event log after the twin diverged from the per-site file; none found."
+            throw "Regression: expected a config-drift warning in the Application event log after the twin diverged from the per-site file; none found."
         } else {
             Write-Host "::warning::Could not query the Application event log for the IISpeed drift warning (permissions / provider). Drift-warning assertion (c) INCONCLUSIVE."
         }

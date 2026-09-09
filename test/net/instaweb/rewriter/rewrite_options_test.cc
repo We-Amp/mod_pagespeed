@@ -4005,7 +4005,7 @@ TEST_F(RewriteOptionsTest, SupportSaveData) {
 }
 
 
-// the design record P4: the agent_optimize toggle round-trips and merges.
+// The agent_optimize toggle round-trips and merges.
 TEST_F(RewriteOptionsTest, AgentOptimizeOptionRoundTrip) {
   EXPECT_FALSE(options_.agent_optimize());  // OFF by default.
   options_.set_agent_optimize(true);
@@ -4027,7 +4027,7 @@ TEST_F(RewriteOptionsTest, AgentOptimizeOptionRoundTrip) {
   EXPECT_TRUE(dest.agent_optimize());
 }
 
-// the design record P4 config-parity: 2.0-only render directives are rejected at parse
+// Config-parity: 2.0-only render directives are rejected at parse
 // time on 1.1 (no headless browser) with a helpful message — one shared
 // rejection point, so all four ports error identically.
 TEST_F(RewriteOptionsTest, RenderOnlyDirectivesRejectedOn11) {

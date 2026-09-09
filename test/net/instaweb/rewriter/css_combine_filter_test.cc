@@ -2119,8 +2119,8 @@ TEST_F(CssCombineMaxSizeTest, ReconstructedResourceExpectedHeaders) {
       "Etag: W/\"0\"\r\n"
       "Last-Modified: Tue, 02 Feb 2010 18:51:26 GMT\r\n"
       "X-Original-Content-Length: 85\r\n"
-      // the design record serving-time upgrade replaces Cache-Control last, so it
-      // trails the stored-header order.
+      // The serving-time 'public, immutable' upgrade replaces Cache-Control
+      // last, so it trails the stored-header order.
       "Cache-Control: max-age=31536000, public, immutable\r\n"
       "\r\n",
       headers.ToString());

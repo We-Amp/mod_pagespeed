@@ -18,7 +18,7 @@
  */
 
 // Unit tests for the zero-copy aliased serve decision core
-// (CycloneZeroCopyServe, the design record).  These encode the safety rules the IIS
+// (CycloneZeroCopyServe).  These encode the safety rules the IIS
 // sink relies on; every rule here maps to a hazard class from the nginx
 // default-on review (poll-not-barrier forced wrap, check-then-copy TOCTOU,
 // fail-closed-when-copy-possible).

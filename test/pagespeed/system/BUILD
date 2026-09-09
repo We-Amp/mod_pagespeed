@@ -444,7 +444,7 @@ pagespeed_cc_test(
     ],
 )
 
-# the design record optimization thread-count policy: the effective-CPU-budget
+# Optimization thread-count policy: the effective-CPU-budget
 # arithmetic (min of online CPUs / affinity mask / cgroup quota), the cgroup
 # file parsing, and the budget formula.  Pure unit test -- no server, no
 # container, no dependence on the host's core count.

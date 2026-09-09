@@ -1447,8 +1447,9 @@ TEST_F(RewriteContextTest, TestRewritesOnEmptyPublicResources) {
     EXPECT_TRUE(FetchResource(kTestDomain, "ce", "test.css", "css", &content,
                               &headers));
     EXPECT_EQ("", content);
-    // the design record: hash-committed rewritten outputs are served with an explicit
-    // 'public' and RFC 8246 'immutable' when they are publicly cacheable.
+    // Hash-committed rewritten outputs are served with an explicit 'public'
+    // and RFC 8246 'immutable' when they are publicly cacheable: the URL
+    // embeds the content hash, so the bytes behind it can never change.
     EXPECT_STREQ("max-age=31536000, public, immutable",
                  headers.LookupJoined(HttpAttributes::kCacheControl));
   }
@@ -1536,7 +1537,7 @@ TEST_F(RewriteContextTest, EmptyOutputResources) {
                               &headers));
     EXPECT_EQ("", content);  // Result is empty. That's fine.
     // And serves with full public 1year cache lifetime (made explicit, plus
-    // RFC 8246 'immutable', per the design record).
+    // RFC 8246 'immutable', because a hash-committed URL's bytes are fixed).
     EXPECT_STREQ("max-age=31536000, public, immutable",
                  headers.LookupJoined(HttpAttributes::kCacheControl));
   }
@@ -1776,7 +1777,7 @@ TEST_F(RewriteContextTest, CacheExtendCacheableResource) {
     EXPECT_TRUE(FetchResource(kTestDomain, TrimWhitespaceSyncFilter::kFilterId,
                               "a.css", "css", &content, &headers));
     EXPECT_EQ("a", content);
-    // the design record: served hash-committed responses carry 'public, immutable'.
+    // Served hash-committed responses carry 'public, immutable'.
     EXPECT_STREQ(absl::StrFormat("max-age=%lld, public, immutable",
                                  static_cast<long long int>(
                                      ServerContext::kGeneratedMaxAgeMs / 1000)),
@@ -2140,7 +2141,7 @@ class StoredHeadersCallback : public OptionsAwareHTTPCacheCallback {
   StoredHeadersCallback& operator=(const StoredHeadersCallback&) = delete;
 };
 
-// the design record pin: chained rewrites fetch .pagespeed. INPUTS through a nested
+// Pin: chained rewrites fetch .pagespeed. INPUTS through a nested
 // driver (RewriteContext::FetchInputs); those internal fetches must not
 // receive the serving-time 'public, immutable' upgrade, or
 // ApplyInputCacheControl would read the synthetic 'public' as an

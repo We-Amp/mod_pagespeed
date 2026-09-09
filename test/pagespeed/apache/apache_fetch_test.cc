@@ -649,7 +649,7 @@ TEST_F(ApacheFetchTest, NoContentType204Unbuffered) {
 }
 
 // ---------------------------------------------------------------------------
-// Zero-copy ALIASED serve (CycloneZeroCopyServe, the design record) -- the Apache
+// Zero-copy ALIASED serve (CycloneZeroCopyServe) -- the Apache
 // WriteMapped sink.  The Cyclone lease is scripted through the
 // MappedSharedString hooks; MockApache's functional ap_pass_brigade reads
 // every bucket (running the PAGESPEED_MMAP read barrier) and logs the

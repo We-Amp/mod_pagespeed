@@ -210,7 +210,7 @@ pagespeed_cc_test(
 # Platform-independent test (uses zlib)
 pagespeed_cc_test(
     name = "iis_content_decoder_test",
-    tags = ["manual"],  # Excluded: old 1.1 iis_content_decoder target removed by the design record
+    tags = ["manual"],  # Excluded: old 1.1 iis_content_decoder target dropped in the IISpeed adoption
     srcs = ["iis_content_decoder_test.cc"],
     deps = [
         "//pagespeed/iis:iis_content_decoder",
@@ -221,7 +221,7 @@ pagespeed_cc_test(
 # Platform-independent test (mock IIS types used on Linux)
 pagespeed_cc_test(
     name = "iis_streaming_fetch_test",
-    tags = ["manual"],  # Excluded: old 1.1 iis_streaming_fetch target removed by the design record
+    tags = ["manual"],  # Excluded: old 1.1 iis_streaming_fetch target dropped in the IISpeed adoption
     srcs = ["iis_streaming_fetch_test.cc"],
     deps = [
         ":mock_iis",
@@ -236,7 +236,7 @@ pagespeed_cc_test(
 # Platform-independent test (uses mock notification class on Linux)
 pagespeed_cc_test(
     name = "iis_flush_notification_test",
-    tags = ["manual"],  # Excluded: old 1.1 iis_flush_notification target removed by the design record
+    tags = ["manual"],  # Excluded: old 1.1 iis_flush_notification target dropped in the IISpeed adoption
     srcs = ["iis_flush_notification_test.cc"],
     deps = [
         "//pagespeed/iis:iis_flush_notification",

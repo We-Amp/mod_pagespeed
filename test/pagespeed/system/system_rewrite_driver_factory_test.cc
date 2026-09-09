@@ -17,7 +17,7 @@
  * under the License.
  */
 
-// the design record thread-count resolution, at the factory level.
+// Optimization thread-count resolution, at the factory level.
 //
 // optimization_thread_policy_test.cc pins the arithmetic.  This file pins how
 // the factory feeds that arithmetic and how it reconciles the result with the
@@ -33,8 +33,8 @@
 //     orderings;
 //   * a negative count is rejected at parse time, naming the directive.
 //
-// The deployment shapes below are the ADR's consequences table driven through
-// the factory rather than the formula, so a change to either layer fails here.
+// The deployment shapes below are the consequences table driven through the
+// factory rather than the formula, so a change to either layer fails here.
 
 #include "pagespeed/system/system_rewrite_driver_factory.h"
 
@@ -184,7 +184,7 @@ class SystemThreadCountTest : public testing::Test {
 };
 
 // ---------------------------------------------------------------------------
-// the design record D1: the divisor defaults to "unknown", and unknown means one.
+// The divisor defaults to "unknown", and unknown means one thread per pool.
 // ---------------------------------------------------------------------------
 
 // The default the base class ships.  Every port that has not implemented the
@@ -200,8 +200,8 @@ TEST_F(SystemThreadCountTest, UnknownDivisorResolvesToOneOfEach) {
   EXPECT_EQ(1, factory_->num_expensive_rewrite_threads());
 }
 
-// A threaded server with an unknown divisor is still 1 + 1: since the design record the
-// threading model is not an input to the count, only to the log line.
+// A threaded server with an unknown divisor is still 1 + 1: under this policy
+// the threading model is not an input to the count, only to the log line.
 TEST_F(SystemThreadCountTest, ThreadingModelDoesNotChangeTheCount) {
   factory_->set_threaded(true);
   Init();
@@ -274,7 +274,7 @@ TEST_F(SystemThreadCountTest, ExplicitCountsWinWhenSetAfterResolution) {
   EXPECT_EQ(3, factory_->num_expensive_rewrite_threads());
 }
 
-// the design record D4.  `0` is documented as auto-detect; before this change, set after
+// `0` is documented as auto-detect; before this change, set after
 // resolution it stuck as a literal 0 and produced a pool that accepts work and
 // never runs it.  It must resolve to the policy's answer in this ordering too.
 TEST_F(SystemThreadCountTest, ZeroMeansAutoWhenSetAfterResolution) {
@@ -371,7 +371,7 @@ TEST_F(SystemThreadCountTest, ZeroMeansAutoWhenSetBeforeResolution) {
 }
 
 // ---------------------------------------------------------------------------
-// the design record D4: negative counts are rejected at parse time.
+// Negative counts are rejected at parse time.
 // ---------------------------------------------------------------------------
 
 // A negative count used to convert to size_t as SIZE_MAX on its way to the

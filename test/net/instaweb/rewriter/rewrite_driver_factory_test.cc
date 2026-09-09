@@ -17,9 +17,9 @@
  * under the License.
  */
 
-// the design record hygiene: parity tests for the cross-port virtuals on
-// RewriteDriverFactory. The Apache, nginx, and Envoy ports inherit the
-// base-class defaults; the IIS port overrides them. These tests pin the
+// Port-parity hygiene for the cross-port init-time filesystem-prep
+// virtuals on RewriteDriverFactory. The Apache, nginx, and Envoy ports
+// inherit the base-class defaults; the IIS port overrides them. These pin the
 // base defaults so a future POSIX-port override that breaks the no-op
 // contract is caught at test time, even though Apache/nginx/Envoy do not
 // (yet) have factory-level unit-test targets in-tree.
@@ -38,13 +38,13 @@ namespace net_instaweb {
 namespace {
 
 // Uses RewriteTestBase purely for its TestRewriteDriverFactory plumbing.
-// TestRewriteDriverFactory does not override the design record virtuals, so
-// calling them through factory() exercises the base-class defaults that
+// TestRewriteDriverFactory does not override those virtuals, so calling
+// them through factory() exercises the base-class defaults that
 // Apache/nginx/Envoy inherit.
 class RewriteDriverFactoryTest : public RewriteTestBase {};
 
 TEST_F(RewriteDriverFactoryTest, EnsureDirectoryWritableDefaultIsNoOp) {
-  // the design record: Apache/nginx/Envoy factories inherit the base default
+  // Apache/nginx/Envoy factories inherit the base default
   // (return true, error_message untouched). The IIS factory overrides
   // with mkdir+ACL semantics. This test pins the base default so a
   // future override that breaks the POSIX-port no-op contract is
@@ -64,7 +64,7 @@ TEST_F(RewriteDriverFactoryTest, EnsureDirectoryWritableNullErrorMessage) {
 }
 
 TEST_F(RewriteDriverFactoryTest, IsPathInAutoCreatePrefixDefaultIsTrue) {
-  // the design record: POSIX ports' directive-parser mkdir handles the full
+  // POSIX ports' directive-parser mkdir handles the full
   // FileCachePath at config-parse time, so the prefix gate at
   // server-context init returns true (auto-create skipped, but the
   // path was already prepared). Pin the default for any path shape.

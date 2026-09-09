@@ -1966,7 +1966,7 @@ class PointerCapturingMockFetch : public MockFetch {
   const char** last_write_data_;
 };
 
-// the design record: a raw mapped pointer must NEVER reach a port-facing Write() from
+// A raw mapped pointer must NEVER reach a port-facing Write() from
 // the cache-hit serve -- ports may hand it to a client-paced send with no
 // barrier and RecordingFetch records whatever it is handed.  The serve must
 // deliver a verified COPY: the written bytes must not point into the mapped

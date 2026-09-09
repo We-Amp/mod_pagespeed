@@ -75,7 +75,7 @@ pagespeed_cc_test(
     ],
 )
 
-# AVIF codec tests
+# AVIF codec tests (mirrors :webp_test wiring)
 pagespeed_cc_test(
     name = "avif_test",
     srcs = ["avif_optimizer_test.cc"],

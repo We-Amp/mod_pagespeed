@@ -71,7 +71,7 @@ GoogleString ActionsSinceLastCall();
 
 // When enabled, ap_pass_brigade models httpd's core-output-filter
 // deferred-write geometry for the first data bucket instead of consuming
-// everything in one read: read it (a PAGESPEED_MMAP bucket runs its the design record
+// everything in one read: read it (a PAGESPEED_MMAP bucket runs its lease
 // barrier here), "send" the first half (split + delete), apr_bucket_setaside
 // the remainder (the deferred-write park -- copy-out or poison for a mapped
 // bucket), then RE-READ the remainder (the re-entry barrier of the next send

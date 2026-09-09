@@ -146,7 +146,7 @@ NOT_FINALIZED = (
     "were resolved"
 )
 
-# the design record, pagespeed/system/optimization_thread_policy.h.
+# Mirrors the share constants in pagespeed/system/optimization_thread_policy.h.
 CPU_SHARE_NUMERATOR = 1
 CPU_SHARE_DENOMINATOR = 2
 
@@ -202,7 +202,8 @@ def _expected_budget(effective_cores: int, concurrent_processes: int) -> int:
     pagespeed/system/optimization_thread_policy.cc.
 
     budget = max(1, floor(effective_cores * share / concurrent_processes))
-    and both pools get the whole budget.
+    and both pools get the whole budget: the share is per pool, so neither
+    pool is sized against the other.
     """
     if effective_cores < 1:
         effective_cores = 1
@@ -346,9 +347,9 @@ class TestMpmThreadCountResolution:
             expected = _expected_budget(cores, children)
             assert rewrite == expected and expensive == expected, (
                 f"Resolution computed {rewrite} rewrite / {expensive} expensive "
-                f"threads, but the design record's policy on {cores} effective cores "
-                f"across {children} httpd children gives {expected} for each "
-                f"pool (max(1, floor(cores * "
+                f"threads, but the thread-count policy on {cores} effective "
+                f"cores across {children} httpd children gives {expected} for "
+                f"each pool (max(1, floor(cores * "
                 f"{CPU_SHARE_NUMERATOR}/{CPU_SHARE_DENOMINATOR} / children))).\n"
                 f"  {line}"
             )

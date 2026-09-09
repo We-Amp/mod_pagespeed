@@ -17,7 +17,7 @@
  * under the License.
  */
 
-// the design record pre-merge (expert review): kernel-level POSITIVE coverage for the
+// Kernel-level POSITIVE coverage for the
 // AVIF codec (avif_optimizer.cc), the sibling of webp_optimizer_test.cc. A
 // genuine encode -> decode round trip through AvifFrameWriter/AvifFrameReader
 // (via the read_image.cc adapters): dimensions must survive and the decoded

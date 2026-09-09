@@ -17,15 +17,18 @@
  * under the License.
  */
 
-// the design record unit tests: the effective-CPU-budget arithmetic and the thread-count
-// formula, both of which are pure functions here precisely so they can be
-// pinned without a container, a server, or a particular host.
+// Optimization thread-count policy unit tests: the effective-CPU-budget
+// arithmetic and the thread-count formula, both of which are pure functions
+// here precisely so they can be pinned without a container, a server, or a
+// particular host.
 //
-// The DeploymentShapes suite is the consequences table.  the design record shipped one,
-// and amendment A6 superseded it without supplying a replacement, because it
-// had been built from the children a server happens to run rather than the
-// ceiling it is configured for.  So this table is now the authoritative one --
-// if the share or the flooring changes, these cases fail, which is the point:
+// The DeploymentShapes suite is the consequences table -- the counts each
+// deployment shape is expected to resolve to.  An earlier table was built
+// from the children a server happens to be running rather than the ceiling it
+// is configured for, so it was wrong for a stock Apache configuration and
+// was withdrawn without a replacement.  So this table is now the
+// authoritative one -- if the share or the flooring changes, these cases
+// fail, which is the point:
 // the numbers are the decision, not an implementation detail.
 
 #include "pagespeed/system/optimization_thread_policy.h"
@@ -53,7 +56,8 @@ TEST(CgroupV2Test, TwoWholeCpus) {
   EXPECT_EQ(2, ParseCgroupV2CpuMax("200000 100000\n"));
 }
 
-// The container this ADR is about: two CPUs granted on a much larger host.
+// The container the effective-CPU-budget rule exists for: two CPUs granted
+// on a much larger host.
 TEST(CgroupV2Test, TwoCpusNoTrailingNewline) {
   EXPECT_EQ(2, ParseCgroupV2CpuMax("200000 100000"));
 }
@@ -366,8 +370,8 @@ TEST(EffectiveCpuBudgetTest, NoLimitsMeansOnlineCpus) {
   EXPECT_EQ(kCpuBudgetFromOnlineCpus, budget.source);
 }
 
-// The case the design record D2a exists for: a 2-CPU container on a 64-core host.  The
-// host's 64 must never enter the arithmetic.
+// The case the effective-CPU-budget rule exists for: a 2-CPU container on a
+// 64-core host.  The host's 64 must never enter the arithmetic.
 TEST(EffectiveCpuBudgetTest, CgroupQuotaBeatsHostCpuCount) {
   EffectiveCpuBudget budget = CombineCpuBudget(64, kNoCpuLimit, 2);
   EXPECT_EQ(2, budget.effective_cores);
@@ -431,8 +435,10 @@ TEST(EffectiveCpuBudgetTest, LiveDetectionIsSane) {
 // ---------------------------------------------------------------------------
 
 TEST(ThreadCountFormulaTest, UnknownDivisorTakesTheFloor) {
-  // the design record D1: a port that cannot determine its divisor resolves to one
-  // thread per pool.  It must never guess higher, however large the machine.
+  // A port that cannot determine its process-concurrency divisor resolves to
+  // one thread per pool.  It must never guess higher, however large the
+  // machine: silently oversubscribing the box is the failure mode the policy
+  // exists to end.
   OptimizationThreadCounts counts =
       ComputeOptimizationThreadCounts(96, kUnknownProcessConcurrency);
   EXPECT_EQ(1, counts.rewrite);
@@ -444,9 +450,9 @@ TEST(ThreadCountFormulaTest, UnknownDivisorTakesTheFloor) {
   EXPECT_EQ(1, counts.expensive);
 }
 
-// the design record A5.  The share is per pool, so neither pool is sized against the
-// other: both get the whole budget.  The earlier 2/3 - 1/3 split was justified
-// by the IIS module's halving, which on reading turned out to be
+// The share is per pool, so neither pool is sized against the other: both get
+// the whole budget.  The earlier 2/3 - 1/3 split was justified by the IIS
+// module's halving, which on reading turned out to be
 // optimization-versus-HTML rather than expensive-versus-rewrite -- both IIS
 // optimization pools are max(4, nCPU >> 1).  The intent behind that halving
 // (heavy image compute must not starve request serving) is carried by `share`
@@ -495,9 +501,9 @@ TEST(ThreadCountFormulaTest, BudgetFloorsAtOneRatherThanZero) {
 }
 
 // The bound the header states, swept rather than asserted.  Every previous
-// statement of this bound in this file and in the ADR was an unverified claim
-// about arithmetic nobody had enumerated, and two of them were wrong; this
-// sweep is what makes the current one a fact.
+// statement of this bound was an unverified claim about arithmetic nobody
+// had enumerated, and two of them were wrong; this sweep is what makes the
+// current one a fact.
 //
 // The window below is a sample, not the argument range -- the range is int, and
 // the next test feeds it kint32max.  The bound is general for the reason the
@@ -538,7 +544,7 @@ TEST(ThreadCountFormulaTest, AggregateBoundHoldsAcrossEveryShape) {
             << cores << " cores, " << processes << " processes";
       }
 
-      // And the union of the two, which is the form the ADR quotes.
+      // And the union of the two, which is the form the bound is stated in.
       EXPECT_LE(per_process * processes, 2 * share + 2 * processes)
           << cores << " cores, " << processes << " processes";
     }
@@ -568,7 +574,7 @@ TEST(ThreadCountFormulaTest, DegenerateInputsStillYieldAWorkingPool) {
 }
 
 // ---------------------------------------------------------------------------
-// Every row of the design record consequences table, at share = 1/2.
+// Every row of the consequences table, at share = 1/2.
 // ---------------------------------------------------------------------------
 
 struct Shape {
@@ -583,8 +589,8 @@ struct Shape {
 TEST(DeploymentShapesTest, MatchesTheAdrConsequencesTable) {
   // Every divisor here is the *configured* ceiling -- AP_MPMQ_MAX_DAEMONS,
   // worker_processes -- and not the number of children a server happens to be
-  // running.  the design record A6: the original table conflated the two and was wrong
-  // for a default configuration on every Apache row.
+  // running.  The original table conflated the two and so was wrong for a
+  // stock configuration on every Apache row.
   const Shape kShapes[] = {
       // Apache prefork, MaxRequestWorkers 256, 8 cores: the budget floor
       // wins.  prefork is not threaded, so this is also what it ran before.

@@ -283,7 +283,7 @@ TEST_F(AdminExposureWarningTest, NullHandlerIsSafe) {
 
 // =============================================================================
 // PostInitHook: AdminSite construction and the absence of license state
-// (; the design record D3; the design record D2 drop-in compatibility).
+//, and drop-in compatibility with releases that had it.
 // =============================================================================
 
 // Builds a serving (non-stub) SystemServerContext whose FileCachePath is
@@ -315,7 +315,7 @@ TEST_F(AdminSiteTest, DecodingStubSkipsAdminSiteInit) {
   EXPECT_EQ(nullptr, stub->admin_site());
 }
 
-// the design record D3: there is no license state. A serving context with no license
+// There is no license state. A serving context with no license
 // file anywhere builds its AdminSite and logs nothing about licensing -- the
 // old startup UNLICENSED warning is gone.
 TEST_F(AdminSiteTest, ServingContextLogsNoLicenseMessage) {
@@ -331,7 +331,7 @@ TEST_F(AdminSiteTest, ServingContextLogsNoLicenseMessage) {
   EXPECT_THAT(messages, ::testing::Not(::testing::HasSubstr("icense")));
 }
 
-// the design record D2 drop-in compatibility: a pagespeed.license left behind by an
+// Drop-in compatibility: a pagespeed.license left behind by an
 // earlier release -- next to FileCachePath, where those releases kept it -- is
 // ignored: never read, never deleted, and mentioned exactly once per process
 // at INFO so the operator knows it can go. Two serving contexts (Apache: one
@@ -688,7 +688,7 @@ TEST_F(AdminSiteDaemonTest, PerEndpointSlotsDoNotBlockEachOther) {
   ASSERT_TRUE(first->done());
 }
 
-// the design record D3: the /v1/license/* admin API is gone. Its former routes fall
+// The /v1/license/* admin API is gone. Its former routes fall
 // through to leaf dispatch and answer 404 JSON -- never a config dump, never a
 // 5xx -- and a POST no longer meets a CSRF gate (403). The daemon proxy next
 // to it is untouched.

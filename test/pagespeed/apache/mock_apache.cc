@@ -176,7 +176,7 @@ apr_status_t ap_get_brigade(ap_filter_t*, apr_bucket_brigade*, ap_input_mode_t,
 }
 
 // Functional mock: consumes the brigade the way a downstream chain would,
-// reading every data bucket (which runs a PAGESPEED_MMAP bucket's the design record
+// reading every data bucket (which runs a PAGESPEED_MMAP bucket's lease
 // read barrier) and logging the concatenated bytes.  Read failures (e.g. a
 // torn mapped borrow) propagate to the caller like a downstream error.
 apr_status_t ap_pass_brigade(ap_filter_t*, apr_bucket_brigade* bb) {

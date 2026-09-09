@@ -192,9 +192,10 @@ TEST_F(DevicePropertiesTest, WebpWithoutAcceptOnlyLegacyAndroidIsRewritten) {
   ExpectNoWebpSupport(UserAgentMatcherTestBase::kSafariUserAgent);
 }
 
-// the design record. A navigation request from Safari 16+ or Firefox 132+ carries no
+// A navigation request from Safari 16+ or Firefox 132+ carries no
 // "image/webp" in Accept, but the browser decodes WebP. Derive the capability
-// from the user agent -- and confine the result to rewritten URLs.
+// from the user agent -- and confine the result to rewritten URLs, whose
+// format is committed in the URL, because a UA-derived verdict is a guess.
 TEST_F(DevicePropertiesTest, WebpFromUserAgentWhenAcceptOmitsIt) {
   // A navigation Accept header from Safari: no image types at all.
   RequestHeaders headers;
@@ -222,7 +223,7 @@ TEST_F(DevicePropertiesTest, WebpFromUserAgentWhenAcceptOmitsIt) {
 
   // Below the floors, nothing changes. Safari 15 is the sharp edge: its UA is
   // byte-identical to a real Catalina Safari 15, which has no WebP decoder,
-  // so the design record Version/16 floor must deny it.
+  // so the Version/16 floor must deny it.
   DeviceProperties safari15(&user_agent_matcher_);
   safari15.SetUserAgent(UserAgentMatcherTestBase::kSafari15UserAgent);
   safari15.ParseRequestHeaders(headers);
@@ -264,7 +265,7 @@ TEST_F(DevicePropertiesTest, WebpInPlaceStillGrantedOnRealAcceptHeader) {
   EXPECT_TRUE(safari.SupportsWebpRewrittenUrls());
 }
 
-// the design record constraint 4. accepts_webp_ is not reset by SetUserAgent, and
+// Order independence. accepts_webp_ is not reset by SetUserAgent, and
 // ParseRequestHeaders may only run once, so making WebP capability
 // UA-dependent could have turned "SetUserAgent before ParseRequestHeaders"
 // into an unchecked invariant. It did not: whichever call runs second

@@ -154,7 +154,8 @@ $webConfig = @"
 $webConfig | Out-File -FilePath (Join-Path $SitePath "web.config") -Encoding utf8
 Write-Host "  Created web.config" -ForegroundColor Green
 
-# Step 7b: Create pagespeed.config flat file (IISpeed format, the design record)
+# Step 7b: Create pagespeed.config flat file (the flat-file directive format
+# the IIS module reads, inherited from IISpeed -- not a web.config section)
 Write-Host "Creating pagespeed.config..." -ForegroundColor Yellow
 $pagespeedConfig = @"
 pagespeed on
