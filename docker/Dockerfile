@@ -42,7 +42,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # flex and bison for building libmemcached from source
     flex \
     bison \
-    # AV1 stack (libaom/dav1d/libavif, the design record): nasm for x86_64 SIMD --
+    # AV1 stack (libaom/dav1d/libavif): nasm for x86_64 SIMD --
     # bazel/libaom.bzl sets ENABLE_NASM=1, which hard-fails configure without
     # nasm; meson + ninja for dav1d (Meson-native, see bazel/libdav1d.bzl)
     nasm \

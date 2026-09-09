@@ -11,7 +11,7 @@ process-lifecycle teardown path is a structural blind spot. Both the spdlog
 use-after-free on shutdown) and the `__asan_default_options` drive-letter
 crash-loop) lived in that path and were caught only by a **hand-run** rig on the
 build host. These scripts promote that rig into version control so it
-can run as standing CI (a nightly IIS ASan lane), instead of
+can run as standing CI (the nightly IIS ASan lane), instead of
 living on one machine's `D:\` drive.
 
 ## Key mechanics

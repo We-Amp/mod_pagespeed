@@ -79,7 +79,7 @@ EXEMPT_RE='(^|/)(test|tests|testdata)/|(^|/)[^/]*_tests?/|(^|/)[^/]*_test\.(cc|c
 # The waiver. A reason is mandatory: the point is to record the judgement, not
 # to provide a mute button. Accepts `-`, `:`, an en dash or an em dash as the
 # separator, because people type all four.
-WAIVER_RE='^[[:space:]]*Release-Note:[[:space:]]*none[[:space:]]*[-:–—][[:space:]]*'
+WAIVER_RE='^[[:space:]]*Release-Note:[[:space:]]*none[[:space:]]*[-:–—]+[[:space:]]*'
 WAIVER_MIN_REASON=12
 
 # ---------------------------------------------------------------------------
@@ -113,11 +113,24 @@ evaluate_release_note() {
     return 0
   fi
 
-  waiver_line="$(printf '%s\n' "$haystack" | grep -iE "$WAIVER_RE" | head -n 1 || true)"
-  if [ -n "$waiver_line" ]; then
-    reason="$(printf '%s\n' "$waiver_line" | sed -E "s/$WAIVER_RE//I")"
-    # Trim.
-    reason="$(printf '%s' "$reason" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
+  # A waiver reason wraps. The gate's own suggested form is a sentence, and a
+  # sentence in a commit message runs onto the next line -- so read the waiver
+  # line plus its continuation, stopping at a blank line or at the next trailer
+  # (Co-Authored-By: and friends). Reading only the first physical line both
+  # under-reports the judgement this gate exists to record and can fail the
+  # minimum-length check on a reason that is in fact perfectly good.
+  waiver_start="$(printf '%s\n' "$haystack" | grep -niE "$WAIVER_RE" | head -n 1 | cut -d: -f1 || true)"
+  if [ -n "$waiver_start" ]; then
+    waiver_line="$(printf '%s\n' "$haystack" | sed -n "${waiver_start}p")"
+    reason="$(printf '%s\n' "$haystack" | awk -v s="$waiver_start" '
+        NR < s  { next }
+        NR == s { buf = $0; next }
+        /^[[:space:]]*$/ { exit }
+        /^[[:space:]]*[A-Za-z][A-Za-z-]*:[[:space:]]/ { exit }
+        { buf = buf " " $0 }
+        END { print buf }' | sed -E "s/$WAIVER_RE//I")"
+    # Collapse the joined whitespace, then trim.
+    reason="$(printf '%s' "$reason" | sed -E 's/[[:space:]]+/ /g; s/^[[:space:]]+//; s/[[:space:]]+$//')"
     if [ "${#reason}" -lt "$WAIVER_MIN_REASON" ]; then
       echo "" >&2
       echo "FAILED: the release-note waiver has no usable reason." >&2
@@ -269,6 +282,21 @@ self_test() {
   check "waiver with a token reason          -> BLOCK" 1 \
     "$(printf 'pagespeed/a.cc\n')" "Release-Note: none - nfc"
 
+  # The separator is a RUN, not one character. The gate's own help text
+  # suggests `Release-Note: none -- <why>`, so the double hyphen has to work;
+  # before it did, the second `-` survived into the reason and counted toward
+  # the minimum length.
+  check "waiver with a double hyphen         -> pass" 0 \
+    "$(printf 'pagespeed/a.cc\n')" "Release-Note: none -- dead code deleted, never compiled in"
+
+  check "double hyphen does not pad a token  -> BLOCK" 1 \
+    "$(printf 'pagespeed/a.cc\n')" "Release-Note: none -- nfc"
+
+  # A reason that wraps is read whole, and stops before the next trailer.
+  check "waiver wrapping onto the next line  -> pass" 0 \
+    "$(printf 'pagespeed/a.cc\n')" \
+    "$(printf 'fix: something\n\nRelease-Note: none --\n  the whole reason lives on the following line\n\nCo-Authored-By: Someone <x@example.invalid>\n')"
+
   check "waiver must not match a mention     -> BLOCK" 1 \
     "$(printf 'pagespeed/a.cc\n')" \
     "I wondered whether to write Release-Note: none but decided against it"
@@ -297,9 +325,7 @@ self_test() {
     "$(printf 'pagespeed/envoy/README.md\n')" ""
 
   check "docs and CI only                    -> pass" 0 \
-    "$(printf 'docs/GLOSSARY.md
-.github/dependabot.yml
-')" ""
+    "$(printf 'docs/GLOSSARY.md\n.github/dependabot.yml\n')" ""
 
   check "tools/ and bazel/ only              -> pass" 0 \
     "$(printf 'tools/format.sh\nbazel/pagespeed_test.bzl\n')" ""

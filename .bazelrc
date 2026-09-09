@@ -378,7 +378,8 @@ build:windows --features=fully_static_link
 build:windows --features=static_link_msvcrt
 build:windows --dynamic_mode=off
 
-# Windows AddressSanitizer via clang-cl
+# Windows AddressSanitizer via clang-cl (runtime half of the Windows
+# memory-safety hardening; the compile-time half is --config=win-analyze below)
 # Detects heap/stack buffer overflows, use-after-free, use-after-return.
 # Uses clang-cl (not MSVC cl.exe) because the codebase and its dependencies
 # (abseil, libpsl) rely on GCC/Clang extensions (__inline__, sanitizer headers)
@@ -421,7 +422,8 @@ build:win-asan --features=-static_link_msvcrt
 build:win-asan --define=avif_crt=dynamic
 build:win-asan --dynamic_mode=off
 
-# Windows MSVC /analyze static analysis
+# Windows MSVC /analyze static analysis (compile-time half of the Windows
+# memory-safety hardening; the runtime half is --config=win-asan above)
 # Zero-cost compile-time detection of null derefs, buffer overruns, UB patterns.
 # Can be added to regular Windows builds (no separate pass needed).
 build:win-analyze --copt=/analyze

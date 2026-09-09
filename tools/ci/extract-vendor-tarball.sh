@@ -31,7 +31,7 @@
 #      each attempt. A flaky/partial/vanished local file heals from the
 #      authoritative source instead of cascading downstream failures.
 #   3. IN-FLIGHT TTL EXTENSION. On every successful hub fetch we `touch` the
-#      remote tarball so the design record's 3-day cleanup measures "days since last
+#      remote tarball so the hub's 3-day cleanup measures "days since last
 #      consumed" rather than "days since vendored". A workflow rerun within the
 #      window keeps its artifact alive without weakening cleanup for idle repos.
 #   4. FAIL LOUD. When the artifact is genuinely gone from both the local disk
@@ -205,12 +205,15 @@ fetch_from_hub() {
 
     if rsync -a -e "ssh ${SSH_OPTS}" "$REMOTE_PATH" "$dest_path"; then
       if verify_tarball "$dest_path"; then
-        # Extend in-flight TTL: re-stamp mtime so the design record cleanup counts from
-        # last consumption, not from vendoring. Best-effort; never fatal.
+        # Extend in-flight TTL: re-stamp mtime so the hub's cleanup counts
+        # from last consumption, not from vendoring. Best-effort; never fatal.
         # SSH_OPTS is an intentional multi-token option list -> must word-split.
         # shellcheck disable=SC2029,SC2086
+        # The sidecar is touched only when present: `touch` on an absent
+        # path would CREATE an empty sidecar, which disables the digest
+        # check (empty want-line) and outlives its tarball as an orphan.
         ssh ${SSH_OPTS} "${CI_HUB_USER}@${CI_HUB_ADDR}" \
-          "touch ${CI_HUB_VENDOR_DIR}/${BASENAME} ${CI_HUB_VENDOR_DIR}/${BASENAME}.sha256 2>/dev/null || true" \
+          "touch ${CI_HUB_VENDOR_DIR}/${BASENAME} 2>/dev/null || true; [ ! -f ${CI_HUB_VENDOR_DIR}/${BASENAME}.sha256 ] || touch ${CI_HUB_VENDOR_DIR}/${BASENAME}.sha256 2>/dev/null || true" \
           >/dev/null 2>&1 || true
         log "Fetched and verified ${BASENAME} from the CI hub."
         return 0

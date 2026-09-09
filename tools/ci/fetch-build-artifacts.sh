@@ -10,7 +10,7 @@
 #   build-artifacts fetch sitting next to it in the CI workflow was a bare single-shot
 #   rsync: one transient LAN hiccup failed the job, a truncated transfer went
 #   straight into `tar`, and -- because nothing ever touched the remote file --
-#   the design record's cleanup measured "days since staged" instead of "days since last
+#   the hub's cleanup measured "days since staged" instead of "days since last
 #   consumed", so a rerun outside that window died on a file that had been
 #   silently reaped. This script closes all three gaps.
 #
@@ -73,8 +73,8 @@ while [ "$attempt" -le "$RETRIES" ]; do
   rm -f "$OUT"
   if rsync -a --partial --inplace -e "ssh ${SSH_OPTS}" \
        "${CI_HUB_USER}@${CI_HUB_ADDR}:${REMOTE}" "$OUT" 2>&1 && verify "$OUT"; then
-    # TTL extension: the design record cleanup is mtime-based, so a consumed artifact must
-    # look recently used, not recently staged. Best-effort; never fatal.
+    # TTL extension: the hub's cleanup is mtime-based, so a consumed artifact
+    # must look recently used, not recently staged. Best-effort; never fatal.
     ssh ${SSH_OPTS} "${CI_HUB_USER}@${CI_HUB_ADDR}" "touch '${REMOTE}'" 2>/dev/null || true
     echo "[fetch-build-artifacts] ok ($(wc -c < "$OUT") bytes, attempt ${attempt})"
     exit 0

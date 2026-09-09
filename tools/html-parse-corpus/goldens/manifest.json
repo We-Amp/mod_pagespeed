@@ -2,8 +2,8 @@
  "schema": 1,
  "spec": "SPEC.md v1",
  "generator_sha256": {
-  "gen_goldens.py": "220651b6f4c9bd5111e7b1b76ebad2eb71f8100fcf28c485b27518040ab040ff",
-  "gen_extra_inputs.py": "f01687e93e55ae0081eb19eb80b8c1711ab7d615099b387544c018b5ab3dd9c8"
+  "gen_goldens.py": "bd8b870b63bb1b84a494ba6cb9d0d5c1679b7577d5a9b57d24d863438988683f",
+  "gen_extra_inputs.py": "0fce04efd29c1019b7183d0de0c1a52a6974a734c61ee3295c3581a946aafcc4"
  },
  "entries": [
   {

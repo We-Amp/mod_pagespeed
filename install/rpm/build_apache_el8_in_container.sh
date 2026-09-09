@@ -7,7 +7,7 @@
 # it into the stock mod-pagespeed-<ver>.x86_64.rpm that the EA4 repackager spec
 # (packaging/cpanel/ea-apache24-mod_pagespeed.spec) consumes.
 #
-# WHY: the default Apache .so is built once in the
+# WHY (the EL8 revival): the default Apache .so is built once in the
 # pagespeed1.1-dev image (FROM envoyproxy/envoy-build-ubuntu, glibc >= 2.34) and
 # physically will not dlopen on EL8's glibc 2.28 — the confirmed root cause of the
 # 2026-05-21 EL8 drop. The fix is purely the glibc build floor: build the SAME
@@ -141,7 +141,7 @@ fi
 #    links the C++ runtime into the .so.
 # ---------------------------------------------------------------------------
 BAZEL_STARTUP=( "--output_user_root=/tmp/bazel-out" )
-# NO --disk_cache: per the design record P3 (build_module_in_container.sh) a warm disk
+# NO --disk_cache: as in build_module_in_container.sh, a warm disk
 # cache silently drops foreign_cc merged-archive members (libmemcached's
 # libmemcached.a/libhashkit.a/libmemcachedutil.a), surfacing as "output was not
 # created" at link. Cold builds only.
@@ -161,7 +161,8 @@ BUILT="${SRCDIR}/bazel-bin/libmod_pagespeed.so"
 [ -f "${BUILT}" ] || { echo "ERROR: bazel produced no libmod_pagespeed.so" >&2; exit 1; }
 
 # ---------------------------------------------------------------------------
-# 4. The glibc-floor gate. NEVER publish on an ELF-pass alone — the live
+# 4. The glibc-floor gate (ported from build_module_in_container.sh with
+#    GLIBC_FLOOR=2.28). NEVER publish on an ELF-pass alone — the live
 #    cPanel smoke is the authoritative dlopen check — but this is the cheapest
 #    place to catch a glibc-2.34 leak.
 # ---------------------------------------------------------------------------

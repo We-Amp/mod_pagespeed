@@ -237,8 +237,9 @@
       <CreateFolder />
     </Component>
 
-    <!-- THE machine-global default pagespeed.config — the design record tier 1, the
-         base layer of the documented single source of truth. This is the ONE
+    <!-- THE machine-global default pagespeed.config — tier 1 of the config
+         resolution order documented at the top of pagespeed.config itself:
+         the base layer of the documented single source of truth. This is the ONE
          seeded default; the wwwroot copy below is a per-site override SAMPLE,
          not a second competing default. NeverOverwrite preserves
          admin edits across upgrades; Permanent leaves the file on uninstall so
@@ -247,7 +248,7 @@
          Filed into PAGESPEEDDATA (C:\ProgramData\We-Amp\PageSpeed\)
          alongside the cache + logs subdirectories — one canonical product
          directory. The legacy C:\ProgramData\We-Amp\IISWebSpeed\ path
-         is no longer created by fresh installs;
+         (tier 2 of that same chain) is no longer created by fresh installs;
          iis_config_util.cpp keeps a runtime fallback on it for
          upgrade-from-IISpeed and upgrade-from-1.1-pre-this-change customers
          whose config survives via NeverOverwrite. -->
@@ -259,7 +260,7 @@
             KeyPath="yes" />
     </Component>
 
-    <!-- Per-site override SAMPLE — the design record tier 3, authoritative when present
+    <!-- Per-site override SAMPLE — tier 3 of that chain, authoritative when present
         . This is NOT a second copy of the machine-global default
          above: it is the drop-in per-site override surface (the IISpeed /
          IISWebSpeed backward-compat model), seeded into the Default Web Site's

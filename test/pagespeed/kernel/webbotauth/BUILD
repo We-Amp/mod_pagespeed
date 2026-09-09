@@ -4,7 +4,7 @@ licenses(["notice"])
 
 # Web-Bot-Auth (RFC 9421) unit tests -- relocated here from
 # //pagespeed/kernel/webbotauth so the CI //test/pagespeed/kernel/... build and
-# the CI test globs actually COMPILE and RUN them across
+# test globs in CI actually COMPILE and RUN them across
 # every job (Linux x64/ARM64, Windows, ASan+UBSan, TSan, system). Before this
 # move they were linted (gen_compilation_database //pagespeed/...) but NEVER
 # built or run -- no //pagespeed/kernel/webbotauth/... glob exists. The
@@ -30,7 +30,7 @@ pagespeed_cc_test(
     ],
 )
 
-# the design record Bar-A opt-in counter store: FNV-1a-64 keyid hash (asserted cross-engine
+# Opt-in Web-Bot-Auth counter store: FNV-1a-64 keyid hash (asserted cross-engine
 # compatible with the 2.0 optimizer line), lock-free slot claim + overflow (single-threaded and
 # under 8-thread contention), latency bucketing, boot-identity minting, and the
 # mmap open/create/self-heal round-trip. Uses a temp file; no network.

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# Ported from pagespeed-optimizer tools/ci/ (corp the design record hub) — keep the copies in sync.
+# Ported from pagespeed-optimizer tools/ci/ (shared CI artifact hub) — keep the copies in sync.
 # Invalidate a local CI artifacts staging dir if its metadata.json reports a
 # different commit SHA than the one expected by the caller. Protects against
 # concurrent-PR contamination on dedicated shared runners: when two PRs run

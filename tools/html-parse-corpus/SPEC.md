@@ -1,4 +1,4 @@
-# the design record D2 — HTML parse event-stream spec (v1)
+# HTML parse event-stream spec (v1)
 
 Canonical contract for the differential HTML parse harness shared by
 mod_pagespeed 1.15 (`pagespeed/kernel/html`) and ModPageSpeed 2.0

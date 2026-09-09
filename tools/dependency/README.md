@@ -7,7 +7,7 @@ This directory holds the CVE scanner for mod_pagespeed 1.1's **vendored
 C/C++ Bazel dependencies** — the ~27 `http_archive` / `git_repository` deps
 declared in [`bazel/repositories.bzl`](../../bazel/repositories.bzl).
 
-It is the C/C++ half of [the design record](../../../corp/decisions/065-comprehensive-dependency-verification.md).
+It is the C/C++ half of our dependency verification.
 The npm / Docker-image / lockfile half is handled by the SBOM + grype + OpenVEX
 gate (`tools/generate-sbom.py`, `tools/ci/validate-vex.py`, `sbom/`). **These are
 separate surfaces** — grype meaningfully matches only the npm rows; it cannot match
@@ -58,7 +58,7 @@ The dep enumeration and version resolution are **reused from
 the SBOM and this matcher can never disagree about which deps exist or what
 version is pinned.
 
-## The reproducible NVD snapshot
+## The reproducible NVD snapshot (per-PR offline matching)
 
 Hitting NVD live is slow and non-reproducible: unauthenticated callers are
 rate-limited to ~5 requests / 30s, and the same CPE returns different CVE sets
@@ -83,7 +83,7 @@ seconds**:
   diffable nor durable (7-day LRU eviction breaks reproducibility for older PRs).
 - **No extra auth / no network on the PR path.** GCS (Envoy-style) would need a
   service-account key that lives on one machine only, *not* on the CI runner
-  runner that runs this workflow — so GCS was rejected. The snapshot needs
+  that runs this workflow — so GCS was rejected. The snapshot needs
   nothing but `git checkout`.
 - **Fast.** Local file read → the whole 19-CPE scan runs in ~0.05 s.
 
@@ -149,12 +149,14 @@ limit. The scanner is **report-only by default** (exits 0); pass `--fail-on
 
 ## Report-only → ratchet (the flip-to-blocking step)
 
-Per the design record, both NVD-touching paths land **report-only**: the matcher prints a
-per-dep findings table and writes a JSON report, but never fails CI by default.
+Both NVD-touching paths land **report-only** first, so a flood of untriaged
+findings on a brand-new scanning surface cannot block every PR on day one: the
+matcher prints a per-dep findings table and writes a JSON report, but never
+fails CI by default.
 
 The per-PR `pr-snapshot-scan` job is structured so flipping it to **blocking is a
 one-line change**: in
-the CVE-scan CI lane,
+the scheduled C/C++ CVE-scan lane,
 set the `FAIL_ON` env var on that job (empty = report-only; `high` /
 `critical` / `medium` = fail the PR on a finding at/above that severity). The job
 already forwards a non-empty `FAIL_ON` to `cve_scan.py --fail-on`.

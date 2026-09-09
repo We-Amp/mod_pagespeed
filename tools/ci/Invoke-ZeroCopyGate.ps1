@@ -25,7 +25,9 @@
 
     Providers deliberately match Invoke-AppVerifMatrix's base set (Leak stays
     off -- immortal singletons fail-fast it on recycle). Machine-global IFEO
-    state is always disabled in the finally block.
+    state is always disabled in the finally block, even on failure -- leftover
+    IFEO settings would silently affect every later w3wp.exe launch on the
+    machine.
 #>
 [CmdletBinding()]
 param(

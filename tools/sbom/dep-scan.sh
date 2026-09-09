@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2024-2026 We-Amp B.V.
-# Comprehensive dependency CVE scan — the design record (1.1 port).
+# Comprehensive dependency CVE scan (1.1 port).
 #
 # Generates SBOMs from DETERMINISTIC, COMMITTED inputs and scans them with grype:
 #   - npm    : EVERY committed npm lockfile in the tree — the admin-console SPA
@@ -22,7 +22,7 @@
 #              docker cache. This is the OS / apt / dnf / built-module layer
 #              grype matches reliably — the shipped C/C++ product surface, the
 #              1.1 analogue of the 2.0 optimizer line's modpagespeed/worker + /nginx runtime images
-#             . We deliberately do NOT scan the pagespeed1.1-dev build
+#              We deliberately do NOT scan the pagespeed1.1-dev build
 #              image or the bare distro base images: a base/build image is false
 #              confidence — it misses the package layer the product actually adds.
 #
@@ -43,7 +43,7 @@
 # gate, so dev deps are included everywhere. (pnpm-lock.yaml is unaffected —
 # syft's pnpm cataloger already reports the full `packages:` section.)
 #
-# NOT covered here (tracked in the design record / README):
+# NOT covered here (tracked in the README):
 #   - .NET (the aspnetcore middleware + WeAmpSite): its real surface is the
 #     built .nupkg / publish output, not a dev-time `dotnet restore` — deferred
 #     to a post-build scan, same as the 2.0 optimizer line.
@@ -57,9 +57,9 @@
 #     it is committed, so it does not exist in a CI checkout and scanning it
 #     would report findings that no reviewer can act on from this repo. A
 #     `vendor/modpagespeed2/` tree may linger on a developer box as a leftover
-#     of the pre-the design record `@modpagespeed2` Bazel git_repository; it is a stale
-#     copy of a DIFFERENT repo's source, not a 1.1 dependency, and its CVEs
-#     belong to pagespeed-optimizer. Do not add it here.
+#     of the `@modpagespeed2` Bazel git_repository this build no longer uses;
+#     it is a stale copy of a DIFFERENT repo's source, not a 1.1 dependency,
+#     and its CVEs belong to pagespeed-optimizer. Do not add it here.
 #
 # TWO MODES:
 #   REPORT-ONLY (default): prints a per-source severity histogram, writes SBOMs
@@ -70,7 +70,7 @@
 #     available, and always at High/Critical. Restrict the scanned set with
 #     --surfaces to keep still-report-only surfaces out of the gate.
 #
-# the design record RATCHET STATE: the npm surface is BLOCKING as of this change — all
+# RATCHET STATE: the npm surface is BLOCKING as of this change — all
 # four committed lockfiles are clean at medium+ with NO VEX suppressions, so
 # the gate is honest rather than a filter over a triaged backlog. Images remain
 # report-only here (see dep-scan.yml). The curated medium+ gate in the CI workflow
@@ -402,7 +402,7 @@ EOF
   {
     echo ""
     if [ -n "$FAIL_ON" ]; then
-      echo "_Blocking gate. npm: ANY finding at or above \`${FAIL_ON}\` fails."
+      echo "_Blocking gate (the ratchet). npm: ANY finding at or above \`${FAIL_ON}\` fails."
       echo "Images: findings at or above \`${FAIL_ON}\` fail when a fix is available; High/Critical always fail."
       echo "The out is a bump/rebuild, or an evidence-backed \`sbom/*.vex.json\` entry — never a filter._"
     else

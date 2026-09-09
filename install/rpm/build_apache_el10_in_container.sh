@@ -8,7 +8,7 @@
 # (packaging/cpanel/ea-apache24-mod_pagespeed.spec) consumes AND that the plain
 # dnf/yum el10 channel ships.
 #
-# WHY a native el10 build: the
+# WHY a native el10 build (the EL8 glibc lesson): the
 # default Apache .so is built once in the pagespeed1.1-dev image (Ubuntu, glibc
 # >= 2.34) and the el8 .so is floored at glibc 2.28 — neither is the right
 # artifact for an el10 yum tree. We build the SAME bazel target inside

@@ -1,8 +1,7 @@
 # mod_pagespeed 1.15 — cPanel EasyApache 4 packaging
 
 Ships `ea-apache24-mod_pagespeed` for cPanel WHM operators on EL8 and EL9
-(AlmaLinux / Rocky; CloudLinux caveat below). Built as part of the design record
-Track A3.
+(AlmaLinux / Rocky; CloudLinux caveat below).
 
 `ea-apache24-mod_pagespeed` ships for **both EL8 and EL9** from
 `packages.modpagespeed.com` (yum repo paths `ea4/el8` and `ea4/el9`;

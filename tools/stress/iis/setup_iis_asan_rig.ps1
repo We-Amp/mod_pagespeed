@@ -157,7 +157,7 @@ if ($LASTEXITCODE -ne 0) { Write-Error "gen-corpus failed (exit $LASTEXITCODE)";
 </configuration>
 '@ | Set-Content "$RigDir\html\web.config" -Encoding UTF8
 
-# 6. Site-level pagespeed.config (flat file in docroot, the design record)
+# 6. Site-level pagespeed.config (the IIS module reads a flat file from the docroot)
 @"
 pagespeed on
 pagespeed RewriteLevel CoreFilters

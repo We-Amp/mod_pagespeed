@@ -120,7 +120,7 @@ if ($LASTEXITCODE -ne 0) {
 $signTool = Get-Command signtool -ErrorAction SilentlyContinue
 if ($signTool) {
     Write-Host "TODO: Authenticode signing not yet configured. MSI is unsigned."
-    Write-Host "  See the design record Phase 6: Azure Trusted Signing setup required."
+    Write-Host "  Azure Trusted Signing must be set up before the MSI can be signed."
 } else {
     Write-Host "WARNING: signtool not found. MSI is unsigned."
     Write-Host "  Unsigned MSI will trigger SmartScreen warnings."

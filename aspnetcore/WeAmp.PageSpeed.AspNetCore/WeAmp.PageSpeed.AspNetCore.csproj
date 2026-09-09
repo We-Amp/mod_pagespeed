@@ -1,10 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <!-- the design record D5: ship net8.0;net10.0 (mirrors 2.0). Defaults to net8.0 so the
-         in-tree build stays green on net9-only dev/CI boxes; the release pipeline
+    <!-- Ship net8.0;net10.0 (mirrors 2.0 — both LTS, deliberately skipping the net9
+         STS). Defaults to net8.0 so the in-tree build stays green on net9-only
+         dev/CI boxes; the release pipeline
          flips on the second TFM with -p:IncludeNet10=true on a box that has the .NET
-         10 SDK (see the sidecar NuGet lane). The TargetFrameworks values
+         10 SDK (see the sidecar NuGet CI lane). The TargetFrameworks values
          are LITERAL (not a passed list) so MSBuild's multi-target outer/inner split
          works and we avoid command-line ';' escaping. -->
     <TargetFrameworks>net8.0</TargetFrameworks>
@@ -31,15 +32,15 @@
 
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
-    <!-- the design record INVERSE: YARP supplies IHttpForwarder for the streaming loopback
+    <!-- Inverse topology: YARP supplies IHttpForwarder for the streaming loopback
          forward from the public Kestrel front door to the bundled nginx
          optimize-proxy. 2.3.0 targets net8.0 (forward-compatible with the
-         conditional net10.0 TFM via roll-forward). Flag for the SBOM/CVE map per
-         the design record BR-4 alongside the bundled nginx. -->
+         conditional net10.0 TFM via roll-forward). Track it in the SBOM/CVE map
+         alongside the bundled nginx — both are third-party code we redistribute. -->
     <PackageReference Include="Yarp.ReverseProxy" Version="2.3.0" />
   </ItemGroup>
 
-  <!-- the design record: auto-pull the native engine, mirroring 2.0's AspNetCore->PageSpeed->
+  <!-- Auto-pull the native engine, mirroring 2.0's AspNetCore->PageSpeed->
        NativeAssets dependency chain. A ProjectReference becomes a NuGet <dependency>
        at pack time (same version), so `dotnet add package WeAmp.PageSpeed.Sidecar`
        brings the matched nginx + module automatically — a thin-only install no longer

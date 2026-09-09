@@ -71,28 +71,30 @@ while getopts ":o:h" opt; do
   esac
 done
 
-# Per-distro target nginx version AND its verified upstream sha256. The sha256s were captured by downloading the tarballs from
-# nginx.org and `sha256sum` (2026-05-27); they match nginx.org's
+# Per-distro target nginx version AND its verified upstream sha256 (the
+# supply-chain pin). The sha256s were captured by downloading the tarballs from
+# nginx.org and checking `sha256sum` (2026-05-27); they match nginx.org's
 # published release hashes. The wget below ALWAYS verifies against these (the
 # check is no longer opt-in), so a tampered/corrupt mirror download hard-fails.
 case "${DISTRO}" in
   noble) DEF_NGINX_VER="1.24.0"
          DEF_NGINX_SHA256="77a2541637b92a621e3ee76776c8b7b40cf6d707e69ba53a940283e30ff2f55d" ;;
-  # focal is the design record SIDECAR portable path ONLY (not a distro-stock package
-  # target). Its nginx is bumped to the 1.30 stable branch for GA: newer branch, smaller CVE backlog than 1.24.0 (2023).
+  # focal is the SIDECAR portable path ONLY (not a distro-stock package
+  # target). Its nginx is bumped to the 1.30 stable branch for GA (decided
+  # 2026-06-03): newer branch, smaller CVE backlog than 1.24.0 (2023).
   # sha256 captured from nginx.org/download/nginx-1.30.4.tar.gz 2026-07-23 (security bump 1.30.3 -> 1.30.4: CVE-2026-42533, CVE-2026-60005, CVE-2026-56434).
   focal) DEF_NGINX_VER="1.30.4"
          DEF_NGINX_SHA256="4261dc90e9e47c1c4041276e9aaa3d48ebe2e664f728e14fa95ae6c67d57a08b" ;;
   el9)   DEF_NGINX_VER="1.20.1"
          DEF_NGINX_SHA256="e462e11533d5c30baa05df7652160ff5979591d291736cfa5edb9fd2edb48c49" ;;
-  # el10 (AlmaLinux/RHEL/Rocky/CloudLinux 10, the design record): distro-source mode like
+  # el10 (AlmaLinux/RHEL/Rocky/CloudLinux 10): distro-source mode like
   # el9 — this literal is only a pre-resolution fallback; the SRPM branch below
   # overwrites NGINX_SRC_VERSION from `dnf repoquery` (AlmaLinux 10 AppStream
   # ships non-modular nginx 1.26.3-1.el10 today). sha256 = the verified
   # nginx.org/download/nginx-1.26.3.tar.gz hash (same pin as trixie).
   el10)  DEF_NGINX_VER="1.26.3"
          DEF_NGINX_SHA256="69ee2b237744036e61d24b836668aad3040dda461fe6f570f1787eab570c75aa" ;;
-  # the design record P3 — Debian/Ubuntu distro-stock prebuilt nginx-module-pagespeed
+  # Debian/Ubuntu distro-stock prebuilt nginx-module-pagespeed
   # targets. Each pins the EXACT nginx version of that distro's stock `nginx`
   # package so the module's embedded module->version + NGX_MODULE_SIGNATURE match
   # what the host's apt-installed nginx loads (the ABI contract; M0-proven pins).
@@ -117,7 +119,7 @@ if [ -z "${NGINX_SRC_SHA256:-}" ]; then
     NGINX_SRC_SHA256="${DEF_NGINX_SHA256}"
   else
     echo "ERROR: NGINX_SRC_VERSION overridden to ${NGINX_SRC_VERSION} but no NGINX_SRC_SHA256 set;" >&2
-    echo "       refusing to download an unverified nginx tarball (supply-chain pin, the design record)." >&2
+    echo "       refusing to download an unverified nginx tarball (supply-chain pin)." >&2
     exit 1
   fi
 fi
@@ -161,7 +163,8 @@ case "${DISTRO}" in
 esac
 
 # ---------------------------------------------------------------------------
-# NGX_SRC_MODE — where the @nginx ABI source comes from.
+# NGX_SRC_MODE — where the @nginx ABI source comes from (the 2026-06-08 nginx
+# distro-drift fix).
 #
 # distro  : the DISTRO's OWN patched nginx tree, pinned to the exact stock
 #           candidate the host runs (deb: `apt-get source nginx`; el9: AlmaLinux's
@@ -193,9 +196,9 @@ esac
 #             potential ABI breakage and keep all 3rd-party modules compatible
 #             without recompilation" — so vanilla-built modules stay ABI-correct
 #             and the proven-passing Debian builds are left untouched.
-#           - focal: the design record sidecar PORTABLE build (a newer 1.30 branch,
+#           - focal: the sidecar PORTABLE build (a newer 1.30 branch,
 #             not a distro-stock package).
-#           (Debian suites validated unaffected 2026-06-08; see the design record P4/P5.)
+#           (Debian suites validated unaffected 2026-06-08.)
 #
 # Canonical (unlike Debian) shipped CVE-2026-49975 by editing the core request
 # structs in place, in BOTH noble (1.24.0-2ubuntu7.10) and jammy
@@ -205,7 +208,7 @@ esac
 # revision it was built against. If a distro ships ANOTHER struct-changing
 # security revision AFTER this build, a customer who upgrades nginx past it would
 # hit the same drift. The backstop is the runtime ABI guard in ngx_pagespeed.cc
-# (ps_preaccess_handler / ps_report_abi_mismatch, the design record P5): it cannot refuse
+# (ps_preaccess_handler / ps_report_abi_mismatch): it cannot refuse
 # to LOAD (nginx exposes neither its struct layout nor its distro revision at
 # runtime), but it detects the drift on the first request and degrades the module
 # to pass-through + one ALERT log instead of silently hanging the worker.
@@ -233,7 +236,7 @@ deb_triplet() {
 }
 
 echo "============================================================"
-echo "the design record in-container module build"
+echo "in-container nginx module build"
 echo "  distro          : ${DISTRO}"
 echo "  target nginx    : ${NGINX_SRC_VERSION}"
 echo "  source root     : ${SRCDIR}"
@@ -256,8 +259,8 @@ echo "============================================================"
 # fetching the mutable "latest" URL and exec'ing it unverified as the release
 # build toolchain. The launcher asset is arch-specific, so the same recipe can
 # build the matched (nginx + module) pair on both linux-amd64 and linux-arm64
-#. Update the version and BOTH per-arch checksums
-# together when bumping.
+# (the sidecar package ships both RIDs). Update the version and BOTH
+# per-arch checksums together when bumping.
 BAZELISK_VERSION="v1.29.0"
 BAZELISK_SHA256_AMD64="5a408715e932c0250d28bd84555f12edbf70117de42f9181691c736eacc4a992"
 BAZELISK_SHA256_ARM64="e20e8b0f4f240091b7a55bf17b9398bd4f40ee70ae0208dff95dd4c445fb4010"
@@ -365,7 +368,7 @@ install_deps_el9() {
 }
 
 install_deps_el10() {
-  # el10 (almalinux:10, the design record): gcc-toolset-15 (gt-15 libstdc++, C++23-complete
+  # el10 (almalinux:10): gcc-toolset-15 (gt-15 libstdc++, C++23-complete
   # for Cyclone; base gcc is 14.x) + system clang-21 (AppStream — already >= the
   # clang-20 abseil absl_nonnull floor, so NO sideload) + pcre2-devel (el10 dropped
   # pcre1). gperf/bison/flex + some -devel live in CRB on el10, so enable it first.
@@ -402,7 +405,7 @@ install_deps_el10() {
   install_bazelisk
 }
 
-# --- the design record P3 Debian/Ubuntu distro-stock targets -------------------------
+# --- Debian/Ubuntu distro-stock targets ------------------------------------
 # Shared apt baseline: ca-certs/build tools/nginx build-deps. NO g++/clang here;
 # the per-distro function adds the C++23 toolchain (sources differ per distro).
 install_deps_debian_common() {
@@ -476,7 +479,7 @@ install_llvm_clang() {
 # /usr/include/<triplet>/c++/13, /usr/lib/gcc/<triplet>/13). clang supplies its
 # own builtin C headers, so no gcc-13 binary is needed at all.
 #
-# WHICH gcc-13 libstdc++ (the binding constraint, the design record P3 / the EA4 lesson):
+# WHICH gcc-13 libstdc++ (the binding constraint, the EA4 lesson):
 # the CURRENT trixie gcc-13 (13.3.0) was compiled against glibc >= 2.38, so its
 # libstdc++.a's eh_alloc.o/debug.o reference __isoc23_strtoul@GLIBC_2.38. Static-
 # linking THAT into the module would (a) HARD-FAIL the link on bullseye (glibc
@@ -689,7 +692,7 @@ BAZEL_FLAGS=(
   "--define=go_build=disabled"
 )
 # NOTE: we deliberately do NOT add --disk_cache here, even when BAZEL_DISK_CACHE
-# is set. The merged PSOL archive is
+# is set (the GA-blocking materialization fix). The merged PSOL archive is
 # assembled (step 4) from the LOOSE .pic.o link-input files in the execroot. When
 # a warm --disk_cache satisfies the .so link as a cache hit, Bazel does NOT stage
 # the intermediate compile outputs loose into bazel-out (it never needs them as
@@ -711,7 +714,7 @@ fi
 
 # ---------------------------------------------------------------------------
 # 2a. Fetch + ./configure the TARGET nginx BEFORE the Bazel build, and point the
-#     Bazel @nginx repo at it via NGINX_PATH.
+#     Bazel @nginx repo at it via NGINX_PATH (the GA-blocking SIGSEGV fix).
 #
 #     ROOT CAUSE THIS FIXES: the module ABI is split across two compilers. The
 #     nginx-make half (ngx_pagespeed.cc, via --add-dynamic-module) compiles
@@ -743,7 +746,7 @@ echo "==> fetch + pre-configure target nginx (mode=${NGX_SRC_MODE}) for @nginx A
 rm -rf "${NGX_BUILD_DIR}"
 mkdir -p "${NGX_BUILD_DIR}"
 if [ "${NGX_SRC_MODE}" = "distro" ] && { [ "${DISTRO}" = "el9" ] || [ "${DISTRO}" = "el10" ]; }; then
-  # the design record P4 ABI-drift fix, el9 + el10 — the rpm/dnf analog of the deb
+  # ABI-drift fix, el9 + el10 — the rpm/dnf analog of the deb
   # apt-get-source path. Build against AlmaLinux's OWN signed, patched nginx
   # SOURCE rpm so the module's struct offsets match the stock nginx it dlopen's.
   # el9/el10 stock nginx is the frozen AppStream stream and does NOT backport the
@@ -755,7 +758,8 @@ if [ "${NGX_SRC_MODE}" = "distro" ] && { [ "${DISTRO}" = "el9" ] || [ "${DISTRO}
   # versioned per distro: RPM-GPG-KEY-AlmaLinux-9 (el9) vs -10 (el10).
   rpm --import "/etc/pki/rpm-gpg/RPM-GPG-KEY-AlmaLinux-${DISTRO#el}" 2>/dev/null || true
   # Derive the host RPM arch (x86_64 | aarch64) so elN-arm64 resolves its OWN stock
-  # nginx candidate. AlmaLinux 9/10 aarch64 ships the same stock nginx epoch:version as
+  # nginx candidate (the el9 aarch64 expansion; this path was x86_64-only
+  # before). AlmaLinux 9/10 aarch64 ships the same stock nginx epoch:version as
   # x86_64, so the build_nginx_rpm.sh pin holds. Pin the EXACT stock candidate the
   # smoke (and customers) run. repoquery %{version} is already epoch-free; NVR selects.
   NGX_RPM_ARCH="$(rpm --eval '%{_arch}')"
@@ -790,7 +794,7 @@ if [ "${NGX_SRC_MODE}" = "distro" ] && { [ "${DISTRO}" = "el9" ] || [ "${DISTRO}
     || { echo "ERROR: rpmbuild -bp did not produce a prepped nginx-${NGINX_SRC_VERSION} tree under ${SRPM_TOPDIR}/BUILD" >&2; exit 1; }
   echo "    distro nginx source: ${NGX_SRC} (Alma-signed SRPM; NGINX_VERSION $(awk -F'"' '/define NGINX_VERSION/{print $2}' "${NGX_SRC}/src/core/nginx.h"))"
 elif [ "${NGX_SRC_MODE}" = "distro" ]; then
-  # the design record P4 ABI-drift fix — build against the DISTRO's OWN patched nginx
+  # ABI-drift fix — build against the DISTRO's OWN patched nginx
   # source so the module's struct offsets match the stock nginx it dlopen's
   # (see the NGX_SRC_MODE block near the top for the CVE-2026-49975 root cause).
   enable_deb_src
@@ -931,7 +935,7 @@ elif [ "${DISTRO}" = "el10" ]; then
     "--features=-parse_headers"
     "--features=-use_header_modules"
   )
-  # KNOWN INTRODUCTION-PHASE GAP (the design record D8): like el9 (gt-13), el10
+  # KNOWN INTRODUCTION-PHASE GAP: like el9 (gt-13), el10
   # builds the module against gt-15's libstdc++ but DEB_STATIC_STDCXX=0, so the
   # module .so links libstdc++ DYNAMICALLY. The sibling Apache el10 build instead
   # force-statics libstdc++ + hard floor-gates it (build_apache_el10_in_container.sh
@@ -939,13 +943,14 @@ elif [ "${DISTRO}" = "el10" ]; then
   # — a dynamic GLIBCXX NEEDED could exceed what a stock el10 host ships. The el9
   # analog (gt-13 dynamic) loads fine on stock el9, so this is LIKELY fine on el10,
   # but it is NOT statically proven here and there is NO blocking gate: the DETECTION
-  # is the (currently soft/continue-on-error) el10 dlopen load-check + the D8 real-
-  # host smoke. DO NOT promote the el10 nginx channel to prod, nor harden the el10
-  # nginx legs to blocking, until D8 confirms the module dlopens on stock AlmaLinux
-  # 10. If D8 shows a GLIBCXX gap, static-link libstdc++ here like the focal/
-  # DEB_STATIC_STDCXX path (and add a floor-gate mirroring the Apache build).
+  # is the (currently soft/continue-on-error) el10 dlopen load-check plus a smoke
+  # test on a real stock AlmaLinux 10 host. DO NOT promote the el10 nginx channel
+  # to prod, nor harden the el10 nginx legs to blocking, until that smoke confirms
+  # the module dlopens on stock AlmaLinux 10. If it shows a GLIBCXX gap, static-
+  # link libstdc++ here like the focal/DEB_STATIC_STDCXX path (and add a floor-
+  # gate mirroring the Apache build).
 elif [ "${DEB_STATIC_STDCXX}" = "1" ]; then
-  # the design record P3 Debian/Ubuntu distro-stock targets. GCC-13 libstdc++ already sits
+  # Debian/Ubuntu distro-stock targets. GCC-13 libstdc++ already sits
   # at the standard paths --config=clang-libstdcxx13 hardcodes (native on
   # trixie/jammy, sideloaded from the trixie .deb on bullseye/bookworm). The
   # modern apt.llvm.org clang (18) enforces the same layering_check/header-modules
@@ -1169,7 +1174,7 @@ export PAGESPEED_PSOL_ARCHIVE="${MERGED}"
     export CC=gcc-13
     CONFIGURE_ARGS+=( --with-ld-opt="-static-libstdc++ -static-libgcc" )
   elif [ "${DEB_STATIC_STDCXX}" = "1" ]; then
-    # the design record P3 distro-stock targets. We do NOT override CC here: nginx's
+    # Distro-stock targets. We do NOT override CC here: nginx's
     # configure pollutes the global CFLAGS with the module config's `-std=c++17`
     # and then runs C probes (int-size etc.) with it. The stock gcc CC (from
     # build-essential) merely WARNS on -std=c++17 for a .c probe (like focal's
@@ -1261,7 +1266,7 @@ fi
 "${SCRIPTDIR}/assert_symbol_hygiene.sh" "${OUT_SO}"
 
 # ---------------------------------------------------------------------------
-# 7b. glibc-floor check. For the Debian/Ubuntu
+# 7b. glibc-floor check (the EA4 lesson). For the Debian/Ubuntu
 #     distro-stock targets, assert (a) NO libstdc++.so.6 / libgcc_s NEEDED (the
 #     static link took) and (b) the highest GLIBC_x.y symbol the .so references
 #     is <= the target distro's glibc floor, so it loads on a STOCK host. Builds
@@ -1276,7 +1281,7 @@ if [ "${DEB_STATIC_STDCXX}" = "1" ]; then
     trixie)   GLIBC_FLOOR="2.41" ;;
     *)        GLIBC_FLOOR="" ;;
   esac
-  echo "=== the design record P3 glibc-floor check (${DISTRO}, floor ${GLIBC_FLOOR}) ==="
+  echo "=== glibc-floor check (${DISTRO}, floor ${GLIBC_FLOOR}) ==="
   NEEDED_CXX="$(readelf -d "${OUT_SO}" 2>/dev/null | awk '/\(NEEDED\)/{gsub(/[][]/,"",$NF);print $NF}' | grep -iE '^lib(stdc\+\+|gcc_s)' || true)"
   if [ -n "${NEEDED_CXX}" ]; then
     echo "FAIL: module has a C++ runtime NEEDED (static link did not take):" >&2

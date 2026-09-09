@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2024-2026 We-Amp B.V.
 
-# libaom (AV1) build rules for PageSpeed — Stream 0 / Stream A
+# libaom (AV1) build rules for PageSpeed — part of the AVIF codec stack.
 #
 # Builds libaom from source via cmake through rules_foreign_cc.
 # libaom is the AV1 *reference* codec and provides BOTH an encoder and a
@@ -43,7 +43,7 @@ def _simd_assert(arch_macro, cpu):
       A bash fragment for the cmake() rule's postfix_script.
     """
     return """
-# the design record: fail loudly rather than shipping a silently scalar AV1 encoder.
+# Fail loudly rather than shipping a silently scalar AV1 encoder.
 aom_cfg="$$BUILD_TMPDIR$$/config/aom_config.h"
 if [ ! -f "$aom_cfg" ]; then
   echo "libaom SIMD assertion: expected generated config at $aom_cfg, not found." >&2
@@ -105,7 +105,8 @@ def libaom_from_source():
             # from configure exiting 0.
             "ENABLE_NASM": "1",
             # Force lib/ over the RHEL/el9 GNUInstallDirs lib64/ default so
-            # rules_foreign_cc finds the archive at out_static_libs.
+            # rules_foreign_cc finds the archive at out_static_libs (el9 is a
+            # packaging target).
             "CMAKE_INSTALL_LIBDIR": "lib",
         } | select({
             # Static CRT ONLY when the rest of the build is using one. Keyed on

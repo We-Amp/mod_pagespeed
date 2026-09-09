@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2024-2026 We-Amp B.V.
 
-# dav1d (AV1 decoder) build rules for PageSpeed — Stream 0 / Stream A
+# dav1d (AV1 decoder) build rules for PageSpeed — part of the AVIF codec stack.
 #
 # dav1d is Meson-native upstream (no CMake). This was the flagged #1 build-
 # system friction point for the AV1 stack. rules_foreign_cc 0.11.1 DOES export
@@ -20,7 +20,7 @@
 #
 # Source: GitHub mirror videolan/dav1d release tag (byte-stable http_archive),
 # NOT the code.videolan.org GitLab archive (non-byte-stable auto-tarballs, a
-# pinned sha256 there fails verification intermittently — the design record Stream 0).
+# pinned sha256 there fails verification intermittently).
 
 load("@rules_foreign_cc//foreign_cc:defs.bzl", "meson")
 

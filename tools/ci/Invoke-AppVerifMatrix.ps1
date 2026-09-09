@@ -269,8 +269,8 @@ try {
         }
     }
 } finally {
-    # MUST run even on failure: leaving IFEO verifier
-    # settings armed would slow, and eventually fail-fast, every later job.
+    # MUST run even on failure: leaving IFEO verifier settings armed would
+    # slow, and eventually fail-fast, every later job on this machine.
     Disable-Verifier
     Write-Host 'AppVerif + page heap disabled.'
 }

@@ -15,8 +15,8 @@ Three layers, deliberately separate:
 > `sbom/pagespeed-1.1.vex.json` suppressions). This comprehensive scan is now
 > **blocking for npm** (`blocking-dep-scan`, medium+, pinned DB) and
 > report-only for images. The "no drift" payoff lands later, when these
-> ground-truth surfaces are ratcheted in to *replace* the hand-curated SBOM rows
->. The transitive vendored C/C++ surface (Envoy / libwebp / optipng /
+> ground-truth surfaces are ratcheted in to *replace* the hand-curated SBOM rows.
+> The transitive vendored C/C++ surface (Envoy / libwebp / optipng /
 > …) is **not** covered here at all — it is handled by the separate
 > `cpp-cve-matcher` work (an Envoy-style per-dep `cpe`+`release_date`+NVD model),
 > because grype rarely matches CVEs off the `pkg:github` PURLs those deps carry.
@@ -85,7 +85,7 @@ unpinned tool could fail it open.
 `vendor/` is `.gitignored` and **generated** by `tools/vendor-deps.sh` (a Bazel
 repo-cache plus a Cyclone checkout). Nothing in it is committed, so it does not
 exist in a CI checkout. A `vendor/modpagespeed2/` tree may linger on a developer
-box as a leftover of the pre-the design record `@modpagespeed2` Bazel `git_repository`
+box as a leftover of the `@modpagespeed2` Bazel `git_repository`
 (1.1 no longer consumes 2.0 that way). It is a stale
 copy of a *different repo's* source; its CVEs are pagespeed-optimizer's to fix and
 are not actionable from this repo. Do not add it to `NPM_LOCKFILES`.
@@ -99,7 +99,7 @@ workflows install the same pins). The grype **DB posture differs by mode**:
 - **blocking** (`blocking-dep-scan`) uses the **pinned** DB in
   `tools/sbom/grype-db-pin.json`, imported by `tools/sbom/provision-grype-db.sh`
   into a job-local `GRYPE_DB_CACHE_DIR` with `GRYPE_DB_AUTO_UPDATE=false` — the
-  snapshotted feed the design record calls for. A gate whose verdict depends on the day
+  snapshotted feed a blocking gate needs. A gate whose verdict depends on the day
   would redden in-flight PRs that changed nothing. To bump the pin: take the
   current archive from `grype db list -o raw`, update `path`/`checksum`/`built`,
   and review it like any dependency bump.
@@ -115,13 +115,14 @@ Two workflows, mirroring pagespeed-optimizer:
 
 The scheduled dependency-scan lane — the **report-only** live-DB sweep. Runs the
 npm surface on every push/PR to `master` (fast) and the heavier image scan on
-the daily schedule + `workflow_dispatch`. Runs on a dedicated Linux x64 CI runner, self-installs the pinned
+the daily schedule + `workflow_dispatch`. Runs on a dedicated self-hosted
+Linux x64 runner, self-installs the pinned
 syft/grype (no third-party scanner action — same supply-chain-conservative
 choice as the 2.0 optimizer line source), writes the severity table to the Summary tab,
 uploads SBOMs + grype reports, and files/closes a tracking issue. It **never**
 fails the build.
 
-`blocking-dep-scan` ("Blocking Dep Scan (npm)") —
+CI's `blocking-dep-scan` job ("Blocking Dep Scan (npm)") —
 the **blocking** npm gate: `dep-scan.sh --fail-on medium --surfaces npm` against
 the pinned DB. Box-independent (any Linux x64 CI runner), no vendor tarball
 or Docker.
@@ -133,7 +134,7 @@ or Docker.
 > (never a `0/0/0/0`), but "no image findings" on a scheduled run means "no
 > images", not "no CVEs". This is why images are **not** in the blocking set.
 
-## Why report-only (the ratchet — the design record)
+## Why report-only (the ratchet)
 
 A raw scan surfaces a backlog, much of it not-applicable (vulnerable code not on
 an execute path, dev/test-only deps). Failing on it immediately would wall every

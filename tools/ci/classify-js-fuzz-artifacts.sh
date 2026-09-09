@@ -6,7 +6,7 @@
 # classify-js-fuzz-artifacts.sh - bucket libFuzzer crash artifacts from the
 # JS minify harness (pagespeed/kernel/js/js_minify_fuzz.cc) against the
 # documented known-find classes, so the nightly fuzz job
-# (the nightly CSS-fuzz lane, fuzz-js) posts only
+# (the nightly CSS-fuzz lane, job fuzz-js) posts only
 # POTENTIALLY-NEW findings to the js-fuzz-finding tracking issue instead of
 # re-filing the disclosed over-catch classes every night. Port of the
 # optimizer's tools/ci/classify-css-fuzz-artifacts.sh to the JS harness's

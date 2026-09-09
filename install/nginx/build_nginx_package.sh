@@ -169,7 +169,7 @@ nginx with PageSpeed compiled in.
 This tarball ships the module .so built against the dev nginx (currently
 1.30.3). nginx dynamic modules are pinned to the EXACT nginx version they were
 built against -- nginx refuses to load a module built for any other version, and
---with-compat does NOT relax this (confirmed empirically, the design record M0: a module
+--with-compat does NOT relax this (confirmed empirically: a module
 built against 1.30.2 will not even load into 1.30.3). To use this .so you must
 run the exact nginx version it was built against, or rebuild from source against
 your nginx with the included build_nginx_with_pagespeed.sh. For one-step

@@ -3,7 +3,7 @@
 # Copyright (c) 2024-2026 We-Amp B.V.
 
 # Push gate: re-checks clang-format on the C/C++ commits being pushed, in the
-# same scope as the CI "clang-format check" step in the CI workflow,
+# same scope as the CI "clang-format check" step,
 # using the pinned clang-format 20.x. tools/format.sh resolves the version (a
 # local clang-format-20, else a pinned pip wheel) so this needs no remote
 # formatter box.

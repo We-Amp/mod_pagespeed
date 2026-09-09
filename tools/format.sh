@@ -4,7 +4,7 @@
 
 # Single entry point for C/C++ formatting. Byte-matches the CI clang-format lint.
 #
-# CI (the "clang-format check" workflow step, run in the lint Docker
+# CI ("clang-format check", run in the lint Docker
 # image) runs clang-format 20 over `pagespeed net`, excluding `pagespeed/iis/*`
 # and vendored/generated files that carry a "DO NOT EDIT BY HAND" banner. The
 # pinned version is the mirrors-clang-format rev in .pre-commit-config.yaml (and

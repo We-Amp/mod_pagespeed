@@ -34,7 +34,7 @@ OUTPUTDIR="${PWD}"
 SO_PATH=""
 HOST_ARCH="x86_64"
 # Distro dist-tag stamped into the .rpm name + Release (.el9 default; the el10 leg
-# passes -d .el10, the design record). Drives corp classify_rpm_tree's `.elN.` self-routing
+# passes -d .el10). Drives corp classify_rpm_tree's `.elN.` self-routing
 # in the default publish run — so the el10 nginx module needs NO separate publish
 # invocation (unlike the dist-tagless stock Apache RPM).
 DIST="${DIST:-.el9}"

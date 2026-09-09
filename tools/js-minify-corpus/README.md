@@ -87,7 +87,7 @@ python3 tools/js-minify-corpus/minimize.py \
 pass-through contract — but the pass-through rate is a health metric for the
 minifier's syntax coverage.
 
-## Goldens manifest (shared expected outputs, the design record D1)
+## Goldens manifest (shared expected outputs)
 
 `goldens/manifest.json` pins the minifier's expected behavior over the
 DETERMINISTIC corpora: the checked-in inputs (`bundle-fixtures/src/`,

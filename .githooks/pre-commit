@@ -3,7 +3,7 @@
 # Copyright (c) 2024-2026 We-Amp B.V.
 
 # Runs clang-format-20 --dry-run --Werror on staged C/C++ files in the same
-# scope as the CI "clang-format check" step in the CI workflow.
+# scope as the CI "clang-format check" step.
 #
 # Install once: tools/install-hooks.sh
 # Bypass for one commit: git commit --no-verify

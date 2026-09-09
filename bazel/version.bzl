@@ -65,7 +65,8 @@ def version_header(
             FILEVERSION_FLAGS="0x0L"
         fi
 
-        # Resolve commit SHA. Priority chain:
+        # Resolve commit SHA so a shipped binary can be traced back to the
+        # exact source it was built from. Priority chain:
         #   1. GIT_COMMIT file (if not "dev" and not empty)
         #   2. LASTCHANGE from VERSION file (backward compat for source tarballs)
         #   3. git rev-parse (local dev builds, needs local=True)

@@ -46,7 +46,7 @@ VERSION_FILE = os.path.join(REPO_ROOT, "net", "instaweb", "public", "VERSION")
 def read_product_version():
     """Product version MAJOR.MINOR.BUILD from the canonical VERSION file.
 
-    Sourced (not hardcoded) so a renumber auto-tracks here instead of
+    Sourced (not hardcoded) so a version renumber auto-tracks here instead of
     drifting against a literal. PRERELEASE is intentionally excluded, matching
     the prior committed value (a bare base semver).
     """
@@ -140,7 +140,7 @@ CPP_DEPS = [
     # tracks its repositories.bzl constant.
     {"name": "cyclone", "version": {"key": "CYCLONE_COMMIT"}, "license": "Apache-2.0",
      "holder": "We-Amp B.V.", "repo": "We-Amp/cyclone-cache", "purl_version": None},
-    # Bundled matched-pair nginx for the design record ASP.NET Core sidecar (1.30 stable
+    # Bundled matched-pair nginx for the ASP.NET Core sidecar (1.30 stable
     # branch). Version is NOT a repositories.bzl constant (nginx is built from upstream
     # source, not a Bazel http_archive), so it is pinned inline as a literal. Keep this
     # lockstep with DEF_NGINX_VER (focal path) in install/nginx/build_module_in_container.sh

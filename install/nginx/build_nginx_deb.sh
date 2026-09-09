@@ -71,7 +71,7 @@ BUILDDIR="${SRCDIR}"
 source "${SRCDIR}/install/common/installer.include"
 get_version_info
 
-# the design record P3: per-suite version suffix. Each distro ships a DISTINCT .so (exact
+# Per-suite version suffix. Each distro ships a DISTINCT .so (exact
 # stock-nginx ABI + glibc floor), so the .deb version MUST encode the suite:
 # apt/aptly identify a package by name+version+arch, and two suites sharing those
 # three with different .so bytes would collide in the aptly pool and serve the

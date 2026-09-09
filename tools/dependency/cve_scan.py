@@ -20,7 +20,7 @@ Report-only (v1): exits 0 by default. A per-dep findings table is printed and a
 machine-readable JSON report is written (default: tools/dependency/.cve-cache/
 report.json, gitignored). The completeness gate (validate-deps.py) is the
 blocking part. Pass --fail-on <severity> to flip to blocking (the per-PR ratchet
-— see the design record Phase C and the workflow).
+— see the workflow).
 
 Data sources (in priority order, controlled by flags):
   * --snapshot <file>  read the committed compact NVD snapshot

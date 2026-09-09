@@ -3,7 +3,7 @@
 # Copyright (c) 2024-2026 We-Amp B.V.
 
 # Reformats C/C++ sources in the same scope as CI's clang-format check
-# (see the CI workflow's "clang-format check" step). Mirrors CI's find
+# (see CI's "clang-format check" step). Mirrors CI's find
 # filter AND its `grep -L "DO NOT EDIT BY HAND"` skip, so it never reformats
 # generated/vendored files carrying that banner. The only difference from CI is
 # `-i` (fix) vs `--dry-run`.

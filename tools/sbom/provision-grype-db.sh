@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2024-2026 We-Amp B.V.
 #
-# Provision the PINNED grype vulnerability DB for the blocking dep-scan path
-#, and report how stale that pin is. Reads
+# Provision the PINNED grype vulnerability DB for the blocking dep-scan path,
+# and report how stale that pin is. Reads
 # tools/sbom/grype-db-pin.json and `grype db import`s that exact dated archive
 # (checksum-verified) into GRYPE_DB_CACHE_DIR. The caller then runs grype with
 # GRYPE_DB_AUTO_UPDATE=false so the gate is deterministic: a newly-published

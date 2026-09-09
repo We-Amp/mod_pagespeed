@@ -42,8 +42,7 @@ Name:    ea-apache24-mod_pagespeed
 # of ours. Verified on a real cPanel rig 2026-06-01 (the epoch is in cPanel's
 # actual RPM header, not just repodata). Epoch:2 puts us above cPanel's 1 so
 # ours wins the default resolution. Never lower this; only raise it if cPanel
-# ever ships an epoch >= 2. See corp the design record (Epoch amendment) + the memory
-# note reference_ea4_epoch_conflict.
+# ever ships an epoch >= 2.
 Epoch:   2
 Version: %{mps_version}
 Release: %{mps_release}%{?dist}.cpanel

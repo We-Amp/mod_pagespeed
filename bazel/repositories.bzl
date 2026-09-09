@@ -26,7 +26,7 @@ load(":zlib_compat.bzl", "zlib_ng_alias_repository")
 # memcached. The cmake() macros in those .bzl files are loaded later, at BUILD
 # loading time, which is fine.
 
-# the design record / CVE matcher: every vendored C/C++ dep below carries a CPE +
+# CVE matcher: every vendored C/C++ dep below carries a CPE +
 # release_date annotation in tools/dependency/cpe-map.yaml, scanned daily
 # against NVD by tools/dependency/cve_scan.py. tools/dependency/validate-deps.py
 # fails CI on any dep here that lacks an entry (or an explicit cpe: "N/A" +
@@ -200,7 +200,7 @@ APRUTIL_SHA = "804b8b276b346a69ca91bc704198de9ff4956a9a60a2f1212f350c230ee3dd03"
 # MSVC/AppVerifier CI lane upstream. On-disk format UNCHANGED: no cache
 # reset on upgrade or rollback.
 # This bump (cyclone 330035e: PRs several changes + the upgrade-safety stack
-# several changes, corp the design record) completes the multi-process silent-corruption
+# several changes) completes the multi-process silent-corruption
 # fix line and makes cross-format upgrades unilaterally safe: one change fixes
 # shared-cursor wrap adoption (a stale-high peer could re-wrap and reserve
 # an OVERLAPPING range -> CRC-clean corruption); one change adds the lifetime-lock
@@ -228,7 +228,9 @@ APRUTIL_SHA = "804b8b276b346a69ca91bc704198de9ff4956a9a60a2f1212f350c230ee3dd03"
 # unsized (size==0) open mode.  mod_pagespeed itself always opens with an
 # explicit size and never touches the volume file by name, so this is a
 # pin-pair bump: the module and the optimizer must pin the SAME cache-library commit (the 2.0
-# nginx integration needs these; see the design record's one-release constraint).
+# nginx integration needs these, and the filename fingerprint, the format
+# bump and the superseded-file GC only make cross-format upgrades safe if
+# all three ship in ONE release).
 #
 # This bump (cyclone edecf16): one change fixes the write path when a
 # directory bucket fills with current-phase entries -- the amplifier that
@@ -238,7 +240,7 @@ APRUTIL_SHA = "804b8b276b346a69ca91bc704198de9ff4956a9a60a2f1212f350c230ee3dd03"
 # (resets_gate_verified / resets_under_degraded_gate) plus tests.  The
 # three new counters are appended at the stats-struct tail and surfaced
 # via the console backend stats.  On-disk format UNCHANGED.  Still a
-# pin-pair bump per the design record: the module and the optimizer must pin the SAME commit.
+# pin-pair bump: the module and the optimizer must pin the SAME commit.
 #
 # Bumped to cyclone 6286a06 (23 commits).  Still a pin-pair bump: the
 # optimizer pins this SAME commit, and the module and the optimizer must pin it.  Three
@@ -334,7 +336,8 @@ LIBMEMCACHED_SHA = "c477e1f6510e1dc698e84f3717ce690a8f65b94c616ecaa62306cce0f5e3
 # (videolan/dav1d), NOT the code.videolan.org GitLab auto-tarball; aom uses a
 # git_repository commit pin (aomedia.googlesource.com is git-only and its
 # archive tarballs are not byte-stable), mirroring the cyclone pattern.
-# NOTE: each dep also needs a tools/dependency/cpe-map.yaml entry.
+# NOTE: each dep also needs a tools/dependency/cpe-map.yaml entry — the
+# completeness gate fails CI on a dep that has none.
 LIBAVIF_VERSION = "1.4.2"
 LIBAVIF_SHA = "2b645287340ba5a631d268b551dc2d72bd73ac33335962dd36dcdb6d8366921d"
 DAV1D_VERSION = "1.5.1"
@@ -669,7 +672,7 @@ cc_library(
         build_file_content = _ALL_SRCS_BUILD_FILE,
     )
 
-    # ---- AVIF stack --------------------------------------------
+    # ---- AVIF stack ------------------------------------------------------
     # libavif source - built via cmake in //bazel:avif (codecs threaded as
     # cmake deps; see bazel/libavif.bzl).
     http_archive(

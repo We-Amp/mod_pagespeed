@@ -123,7 +123,7 @@ cmake(
         "ENABLE_UNIX_SOCKETS": "ON",
         # Force lib/ over the RHEL/el9 GNUInstallDirs default lib64/ so
         # rules_foreign_cc finds libcurl.a at the out_static_libs path on el9
-        # (harmless on Debian/Ubuntu/macOS; the design record el9 packaging build).
+        # (harmless on Debian/Ubuntu/macOS; el9 is a packaging target).
         "CMAKE_INSTALL_LIBDIR": "lib",
     } | select({
         "@platforms//os:macos": {
@@ -243,7 +243,7 @@ cmake(
         # Force lib/ (not the RHEL/el9 GNUInstallDirs default lib64/) so
         # rules_foreign_cc finds the .a at the out_static_libs path on every
         # distro. Harmless on Debian/Ubuntu where lib/ is already the default
-        #.
+        # (el9 is a packaging target).
         "CMAKE_INSTALL_LIBDIR": "lib",
     },
     visibility = ["//visibility:public"],

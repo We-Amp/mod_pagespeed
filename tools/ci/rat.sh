@@ -5,7 +5,7 @@
 # License audit: run Apache RAT (Release Audit Tool) over the repository and
 # fail unless every file it classifies either carries an approved license
 # header or is listed in .rat-excludes. Backs the "License audit (Apache RAT)"
-# job in the maintainer CI workflow and runs the same way locally
+# job in CI and runs the same way locally
 # (needs java on PATH; the first run downloads the pinned jar).
 #
 #   tools/ci/rat.sh                 audit the repository root

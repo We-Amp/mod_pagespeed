@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2024-2026 We-Amp B.V.
 
-# libavif build rules for PageSpeed — Stream 0 / Stream A
+# libavif build rules for PageSpeed — part of the AVIF codec stack.
 #
 # Builds libavif from source via cmake through rules_foreign_cc, with the AV1
 # codecs threaded as its OWN cmake() deps. This is the #1 integration risk:
@@ -58,7 +58,7 @@ def libavif_from_source(with_dav1d = False):
         "AVIF_BUILD_EXAMPLES": "OFF",
         "AVIF_JPEG": "OFF",
         "AVIF_ZLIBPNG": "OFF",
-        "CMAKE_INSTALL_LIBDIR": "lib",  # el9 lib64/ -> lib/
+        "CMAKE_INSTALL_LIBDIR": "lib",  # el9 defaults to lib64/; force lib/
     }
 
     # AOM_LIBRARY must name the archive EXACTLY as :aom installed it, or

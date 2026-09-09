@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2024-2026 We-Amp B.V.
 
-/* pagespeed-nginx-launch — the design record UX-7 launch shim.
+/* pagespeed-nginx-launch — process-lifetime shim for the bundled nginx.
  *
  * Sets PR_SET_PDEATHSIG so the bundled nginx receives SIGTERM if the parent
  * (the ASP.NET Core host process) dies abruptly — SIGKILL / OOM-kill /
