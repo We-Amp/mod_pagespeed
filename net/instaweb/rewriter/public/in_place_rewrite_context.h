@@ -200,11 +200,12 @@ class RecordingFetch : public SharedAsyncFetch {
   void HandleDone(bool success) override;
 
   // A zero-copy aliased serve must NOT bypass IPRO recording: de-alias
-  // with the design record verified copy, then run the copying Write() so
-  // HandleWrite records the bytes for optimization.  The verify (after the
-  // memcpy) matters doubly here: recorded bytes are written back into the
-  // cache, so a torn borrow would otherwise become PERSISTENT poisoning,
-  // not just one bad response.  Torn => fail the write (recording aborts).
+  // with the verified copy (CopyMappedVerified), then run the copying
+  // Write() so HandleWrite records the bytes for optimization.  The verify
+  // (after the memcpy) matters doubly here: recorded bytes are written back
+  // into the cache, so a torn borrow would otherwise become PERSISTENT
+  // poisoning, not just one bad response.  Torn => fail the write
+  // (recording aborts).
   bool WriteMapped(const StringPiece& mmap_sp,
                    const MappedSharedString& keepalive,
                    MessageHandler* handler) override {

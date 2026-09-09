@@ -28,9 +28,11 @@ cc_library(
     ],
 )
 
-# Reference probe for the design record D2 differential HTML parse harness:
-# renders the SPEC.md parse event stream for one input. Driven by
-# tools/html-parse-corpus/gen_goldens.py; see tools/html-parse-corpus/.
+# Reference probe for the differential HTML parse harness -- this parser
+# against ModPageSpeed 2.0's independent re-implementation, which must
+# agree event for event on the same input. Renders the SPEC.md parse event
+# stream for one input. Driven by tools/html-parse-corpus/gen_goldens.py;
+# see tools/html-parse-corpus/.
 cc_binary(
     name = "html_parse_probe",
     srcs = ["html_parse_probe.cc"],

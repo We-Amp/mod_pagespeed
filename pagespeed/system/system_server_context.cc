@@ -248,7 +248,8 @@ SystemRewriteOptions* SystemServerContext::global_system_rewrite_options() {
 
 namespace {
 
-// mod_pagespeed 2.1 has no license state. Releases before it read
+// mod_pagespeed 2.1 has no license state: production use is free, so there is
+// nothing to assert and the token machinery is gone. Releases before it read
 // a token from <parent of FileCachePath>/pagespeed.license, so an upgraded
 // install may still carry that file. It is ignored — never read, never
 // deleted — and mentioned once per process at INFO so the operator knows it

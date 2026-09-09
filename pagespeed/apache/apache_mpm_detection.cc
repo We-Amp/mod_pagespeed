@@ -76,8 +76,9 @@ int ProcessConcurrencyFromMpmInfo(const MpmProcessInfo& info) {
   if (!info.query_ok || info.max_daemons <= 0) {
     // Either the MPM could not answer, or it answered 0 because we asked
     // before check_config computed the child count.  Neither is a number to
-    // divide by, and the design record D1 says not to guess: report "unknown" and let
-    // the policy take its one-thread floor.
+    // divide by, and the policy never guesses a divisor -- silently
+    // oversubscribing the machine is the failure mode it exists to prevent --
+    // so report "unknown" and let the policy take its one-thread floor.
     return kUnknownProcessConcurrency;
   }
   return info.max_daemons;

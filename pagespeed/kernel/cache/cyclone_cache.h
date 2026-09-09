@@ -166,7 +166,7 @@ class CycloneCache : public CacheInterface {
   void ShutDown() override;
 
   // Appends Cyclone's internal counters (tier hits, sizes, eviction,
-  // write-buffer wrap and the design record lease telemetry) to *out as
+  // write-buffer wrap and lease telemetry) to *out as
   // "Label: value" lines.  No-op when the cache is unavailable.
   void PrintStats(GoogleString* out) const;
 

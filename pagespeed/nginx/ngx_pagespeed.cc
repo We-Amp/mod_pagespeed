@@ -246,13 +246,13 @@ namespace ps_base_fetch {
 ngx_http_output_header_filter_pt ngx_http_next_header_filter;
 ngx_http_output_body_filter_pt ngx_http_next_body_filter;
 
-// the design record forced-wrap safety margin.  Keep aliasing only while a ceiling-
+// Forced-wrap safety margin.  Keep aliasing only while a ceiling-
 // forced wrap is at least this far off (>> one drain's writev burst); below
 // it, de-alias the tail proactively.  Far under the lease ceiling, so a
 // normal-speed serve stays aliased its whole life.
 const uint64_t kBarrierMarginNs = 1000ULL * 1000 * 1000;  // 1 s
 
-// the design record per-drain zero-copy barrier.  Runs in the write call stack (this is
+// Per-drain zero-copy barrier.  Runs in the write call stack (this is
 // the top body filter, re-entered by ngx_http_writer -> ngx_http_output_filter
 // before every socket drain) BEFORE the aliased buf is handed to the write
 // filter, so an aliased writev is always immediately preceded (same stack, µs)
@@ -435,7 +435,7 @@ ngx_int_t ps_base_fetch_filter(ngx_http_request_t* r, ngx_chain_t* in) {
   if (r->header_only) {
     return NGX_OK;
   }
-  // the design record: run the per-drain barrier BEFORE the base_fetch-null early return
+  // Run the per-drain barrier BEFORE the base_fetch-null early return
   // below -- the aliased buf can still be in r->out after the NgxBaseFetch was
   // released mid-drain, and it must be revalidated/de-aliased before any
   // further writev.  Keyed only off the request-scoped ctx + pool-scoped pin.
@@ -1011,7 +1011,7 @@ enum Response : std::uint8_t {
   kGlobalAdmin,
   kPagespeedSubrequest,
   kErrorResponse,
-  // the design record Bar-A opt-in counter (experimental): GET/HEAD
+  // Opt-in counter (experimental): GET/HEAD
   // /.well-known/webbotauth-counter when the mode is non-off. Off (default) never
   // matches -> the request falls through to normal handling (404).
   kWebBotAuthCounter,
@@ -2169,7 +2169,7 @@ RequestRouting::Response ps_route_request(ngx_http_request_t* r) {
     return RequestRouting::kBeacon;
   }
 
-  // the design record Bar-A opt-in counter endpoint (experimental). Only match GET/HEAD
+  // Opt-in counter endpoint (experimental). Only match GET/HEAD
   // when the mode is non-off; POST/other methods and mode==off fall through to
   // normal handling (so they 404). The token/coarse-vs-exact/hide decision is
   // made in the handler. The fixed well-known path is not an operator option.
@@ -3424,7 +3424,7 @@ ngx_int_t ps_content_handler(ngx_http_request_t* r) {
     case RequestRouting::kBeacon:
       return ps_beacon_handler(r);
     case RequestRouting::kWebBotAuthCounter: {
-      // the design record Bar-A opt-in counter (experimental). Build the coarse/exact doc
+      // Opt-in counter (experimental). Build the coarse/exact doc
       // (or hide it) in the webbotauth handler, then emit it. Hiding (mode
       // private + no valid token) declines -> normal 404. HEAD is honored by
       // send_out_headers_and_body (r->header_only sends headers, no body).
@@ -3546,7 +3546,8 @@ using fix_headers::ps_html_rewrite_fix_headers_filter_init;
 // mis-installs its content checker, and the worker SPINS forever (silent hang).
 // `nginx -t` still passes, so nothing catches it at load time.
 //
-// This module is built against the distro's own patched nginx source so offsets match at ship time; this guard is the backstop for AFTER ship,
+// This module is built against the distro's own patched nginx source, so
+// offsets match at ship time; this guard is the backstop for AFTER ship,
 // when a customer upgrades nginx past the revision we built against.
 //
 // We cannot reject at load time: nginx exposes neither its struct layout nor
@@ -3594,7 +3595,7 @@ void ps_report_abi_mismatch(ngx_http_request_t* r) {
       "target (nginx %s; the running nginx's exact build is not "
       "introspectable at runtime). This typically means a distro "
       "security update changed nginx's struct layout without a version "
-      "bump (see the design record / CVE-2026-49975). PageSpeed optimization is "
+      "bump (see CVE-2026-49975). PageSpeed optimization is "
       "now DISABLED (pass-through) on this worker to prevent a worker "
       "hang. Reinstall nginx-module-pagespeed built for your current "
       "nginx, or contact We-Amp.",
@@ -3733,10 +3734,10 @@ ngx_int_t ps_init(ngx_conf_t* cf) {
     }
     *wba_h = ps_webbotauth_preaccess_handler;
 
-    // RSL-CAP enforcement, default-off. Registered last, and
-    // nginx installs same-phase handlers in REVERSE registration order, so
-    // this runs FIRST in the phase (before the observe-only A1 classifier
-    // above); early-returns NGX_DECLINED unless RslCapEnforcement is enabled,
+    // RSL-CAP enforcement, default-off. Registered last, and nginx installs
+    // same-phase handlers in REVERSE registration order, so this runs FIRST
+    // in the phase (before the observe-only classifier above);
+    // early-returns NGX_DECLINED unless RslCapEnforcement is enabled,
     // otherwise maps the validator verdict to an inline 401/402.
     ngx_http_handler_pt* rce_h = static_cast<ngx_http_handler_pt*>(
         ngx_array_push(&cmcf->phases[phase].handlers));
@@ -3842,7 +3843,7 @@ ngx_int_t ps_init_module(ngx_cycle_t* cycle) {
     cfg_m->driver_factory->LoggingInit(cycle->log, true);
     cfg_m->driver_factory->RootInit();
 
-    // the design record Bar-A opt-in counter (experimental): map (or create on first run)
+    // Opt-in counter (experimental): map (or create on first run)
     // the shared counter file HERE in the master, before workers fork, so the
     // MAP_SHARED region is inherited by every worker and they all increment the
     // same physical counters. Only when some server has Web Bot Auth enabled or
@@ -3904,7 +3905,7 @@ ngx_int_t ps_init_module(ngx_cycle_t* cycle) {
   return NGX_OK;
 }
 
-// the design record A2: this worker's background key-directory warmers (one per configured
+// This worker's background key-directory warmers (one per configured
 // remote directory). Each forked nginx worker has its own copy (fork semantics);
 // stopped+joined in ps_exit_child_process BEFORE the factory tears down the
 // fetcher/cache they borrow. Populated in ps_init_child_process.
@@ -3914,7 +3915,7 @@ std::vector<std::unique_ptr<webbotauth::KeyDirectoryWarmer> >
 void ps_exit_child_process(ngx_cycle_t* cycle) {
   ps_main_conf_t* cfg_m = static_cast<ps_main_conf_t*>(
       ngx_http_cycle_get_module_main_conf(cycle, ngx_pagespeed));
-  // the design record A2: stop+join the warmer threads BEFORE the factory tears down the
+  // Stop+join the warmer threads BEFORE the factory tears down the
   // fetcher/cache they borrow. Each Stop() signals quit and joins.
   for (size_t i = 0; i < g_key_directory_warmers.size(); ++i) {
     g_key_directory_warmers[i]->Stop();
@@ -4066,7 +4067,7 @@ ngx_int_t ps_init_child_process(ngx_cycle_t* cycle) {
     return NGX_ERROR;
   }
 
-  // the design record Bar-A opt-in counter (experimental): read the SECRET bearer token
+  // Opt-in counter (experimental): read the SECRET bearer token
   // gating the exact counter document from this worker's environment (populated
   // by nginx's `env` directive). Never logged as a value. The counter file was
   // already mapped by the master (ps_init_module) and inherited across fork.
@@ -4085,8 +4086,7 @@ ngx_int_t ps_init_child_process(ngx_cycle_t* cycle) {
 
   // Iterate over all configured server{} blocks, and find our context in it,
   // so we can create and set a ProxyFetchFactory for it.
-  std::set<GoogleString>
-      warmer_seen;  // the design record A2: dedup (host,url) per worker
+  std::set<GoogleString> warmer_seen;  // Dedup (host,url) per worker
   for (s = 0; s < cmcf->servers.nelts; s++) {
     ps_srv_conf_t* cfg_s = static_cast<ps_srv_conf_t*>(
         cscfp[s]->ctx->srv_conf[ngx_pagespeed.ctx_index]);
@@ -4099,7 +4099,7 @@ ngx_int_t ps_init_child_process(ngx_cycle_t* cycle) {
       cfg_m->driver_factory->SetServerContextMessageHandler(
           cfg_s->server_context, clcf->error_log);
 
-      // the design record A2: start the background key-directory warmer(s) for any server
+      // Start the background key-directory warmer(s) for any server
       // whose feature is enabled AND has a remote directory configured. No-op
       // (default-safe) otherwise. The curl fetcher's poll thread is already up
       // by here (created during ChildInit), which the blocking fetch relies on.

@@ -62,7 +62,7 @@ class SimpleBufferedApacheFetch : public AsyncFetch {
   bool IsCachedResultValid(const ResponseHeaders& headers) override
       LOCKS_EXCLUDED(mutex_);
 
-  // Zero-copy serve of a mapped cache value (CycloneZeroCopyServe, the design record):
+  // Zero-copy serve of a mapped cache value (CycloneZeroCopyServe):
   // this fetch always buffers, so it de-aliases with the verified copy
   // (copy-then-verify) and buffers the owned bytes; a torn borrow fails the
   // write instead of buffering garbage.  Never forwards a raw mapped

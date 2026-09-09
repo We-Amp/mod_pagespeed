@@ -9,8 +9,8 @@ exports_files(
     visibility = ["//visibility:public"],
 )
 
-# the design record: the post-config hook is the only place Apache resolves its thread
-# counts, and that is one hand-written call that no unit test can reach.
+# The post-config hook is the only place Apache resolves its thread counts,
+# and that is one hand-written call that no unit test can reach.
 # test/pagespeed/apache/apache_mpm_detection_test.cc reads this source to
 # assert the call site still exists; see the test for why.
 filegroup(
@@ -161,8 +161,8 @@ cc_library(
         "//pagespeed/system:daemon_record_arm",
         "//pagespeed/system:daemon_serve_arm",
         "//pagespeed/system:curl_fetcher",
-        # the design record: apache_mpm_detection.cc and apache_rewrite_driver_factory.cc
-        # include the thread-count policy header directly.
+        # apache_mpm_detection.cc and apache_rewrite_driver_factory.cc include
+        # the thread-count policy header directly.
         "//pagespeed/system:optimization_thread_policy",
         # @aprutil supplies the bucket-brigade glue (apr_brigade_create in
         # instaweb_context.cc) and the httpd util_filter API; it is no longer

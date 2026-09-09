@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2024-2026 We-Amp B.V.
 
-"""the design record P4: agent_optimize negotiation / cloaking-safety parity.
+"""agent_optimize negotiation / cloaking-safety parity.
 
 mod_pagespeed 1.1 has NO markdown render moat (no headless browser). Whatever the
 agent_optimize configuration, an ``Accept: text/markdown`` request for an HTML
@@ -12,11 +12,12 @@ safety property, and because this file runs under EVERY port's system-test job
 
 The positive negotiation assertion (an ``Accept: text/markdown`` HTML response
 advertises ``Vary: Accept``) requires a server configured with
-``AgentOptimize on`` — the operator flag is the only gate. It is
-gated behind PAGESPEED_AGENT_OPTIMIZE_ENABLED=1 and skips otherwise.
+``AgentOptimize on`` — the operator flag is the only gate, with no
+server-side entitlement of any kind. It is gated behind
+PAGESPEED_AGENT_OPTIMIZE_ENABLED=1 and skips otherwise.
 
-Ported intent: the design record §8.4 port-parity (negotiation/safety; render-fidelity
-rows n/a on 1.1).
+Ported intent: port-parity for negotiation and safety; the render-fidelity
+rows do not apply on 1.1, which has no headless browser.
 """
 
 import os
@@ -36,7 +37,7 @@ _HTML_PAGE = "extend_cache.html"
 class TestAgentNegotiationSafety:
     """Invariants that hold on the DEFAULT server config (agent_optimize off).
 
-    These need no special licensing or configuration, so they run — and must
+    These need no special configuration, so they run — and must
     pass identically — on every port.
     """
 
@@ -82,18 +83,18 @@ class TestAgentNegotiationSafety:
 @pytest.mark.skipif(
     os.environ.get("PAGESPEED_AGENT_OPTIMIZE_ENABLED") != "1",
     reason=(
-        "needs a server with 'AgentOptimize on' AND an agent_optimize-entitled "
-        "license; set PAGESPEED_AGENT_OPTIMIZE_ENABLED=1 on such a rig."
+        "needs a server with 'AgentOptimize on' -- that flag is the only "
+        "gate; set PAGESPEED_AGENT_OPTIMIZE_ENABLED=1 on such a rig."
     ),
 )
-class TestAgentNegotiationEntitled:
-    """The positive negotiation path on an entitled, agent_optimize-on server.
+class TestAgentNegotiationEnabled:
+    """The positive negotiation path on an agent_optimize-on server.
 
-    Same URL, no body change: an entitled Accept: text/markdown request gets the
-    normal optimized HTML plus ``Vary: Accept``; a browser request is untouched.
+    Same URL, no body change: an Accept: text/markdown request gets the normal
+    optimized HTML plus ``Vary: Accept``; a browser request is untouched.
     """
 
-    def test_entitled_markdown_request_adds_vary_accept(
+    def test_markdown_request_adds_vary_accept(
         self, client: PageSpeedClient, example_root: str
     ):
         response = client.get(

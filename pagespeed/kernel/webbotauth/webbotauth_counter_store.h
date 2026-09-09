@@ -1,7 +1,7 @@
 // Copyright 2026 We-Amp B.V.
 // Licensed under the Apache License, Version 2.0 (the "License").
 //
-// Web Bot Auth opt-in counter store.
+// Web Bot Auth opt-in counter store (EXPERIMENTAL, default off).
 //
 // A small memory-mapped, cross-process counter file that records verified
 // AI-crawl volume per signer identity plus a coarse verify-latency histogram,

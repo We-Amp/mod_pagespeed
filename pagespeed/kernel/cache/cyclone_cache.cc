@@ -43,7 +43,7 @@ void ReleaseReadHandle(void* user_data) {
   cyclone_read_handle_unref(handle);
 }
 
-// the design record lease hooks threaded to the zero-copy embedder via
+// Lease hooks threaded to the zero-copy embedder via
 // MappedSharedString (user_data is the same CycloneReadHandle*).
 int RenewReadHandleLease(void* user_data) {
   return cyclone_read_handle_renew_lease(

@@ -92,7 +92,7 @@ class FallbackCallback : public CacheInterface::Callback {
       SharedString new_value;
       if (mapped_value.is_mapped()) {
         // De-alias the borrowed (e.g. Cyclone zero-copy) bytes with the
-        // verified copy (copy-then-verify, the design record); a torn borrow is treated
+        // verified copy (copy-then-verify); a torn borrow is treated
         // as a miss via the same not-found path used for a bad encoding below.
         GoogleString devalias;
         if (!CopyMappedVerified(mapped_value.Value(), mapped_value,

@@ -29,8 +29,8 @@ bool FileExists(const std::string& path) {
 // %ProgramData% base directories in canonical-first order (tiers 1/2). The
 // trailing backslash lets the CONFIGFILE_* append below join cleanly.
 const char* const kProgramDataDirs[] = {
-    "\\We-Amp\\PageSpeed\\",    // the design record tier 1: machine-global base default
-    "\\We-Amp\\IISWebSpeed\\",  // the design record tier 2: legacy IISpeed fallback (upgrade only)
+    "\\We-Amp\\PageSpeed\\",    // Tier 1: machine-global base default
+    "\\We-Amp\\IISWebSpeed\\",  // Tier 2: legacy IISpeed fallback (upgrade only)
 };
 
 }  // namespace

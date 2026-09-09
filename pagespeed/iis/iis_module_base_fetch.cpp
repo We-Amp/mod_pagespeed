@@ -273,7 +273,7 @@ bool IisModuleBaseFetch::HandleWrite(const StringPiece& sp,
 	return true;
 }
 
-// ==== Zero-copy aliased serve (CycloneZeroCopyServe, the design record) =============
+// ==== Zero-copy aliased serve (CycloneZeroCopyServe) ======================
 
 // Guards that must disqualify aliasing at write time.  Runs on the PSOL
 // delivery thread while the request is parked (single-operator invariant:
@@ -502,7 +502,7 @@ IisModuleBaseFetch::ZcDrive IisModuleBaseFetch::DriveZeroCopyServe()
 			http_context_->SetRequestHandled();
 			return ZcDrive::kFinished;
 		}
-		// the design record submit-time decision.  RenewLeaseStrict re-stamps the
+		// Submit-time aliasing decision.  RenewLeaseStrict re-stamps the
 		// read lease (keeping NORMAL wraps blocked for a fresh T while the
 		// client keeps up -- the between-chunks renewal) AND Dekker-
 		// revalidates the borrow; NsUntilForcedWrap is the ceiling-forced

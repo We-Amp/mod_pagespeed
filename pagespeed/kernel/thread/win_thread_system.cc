@@ -15,7 +15,8 @@
  */
 
 // Adapted from pthreads implementation.
-// pthread_create replaced with std::thread per the design record.
+// pthread_create replaced with std::thread: this is the Windows build, which
+// has no pthreads.
 
 #include "pagespeed/kernel/thread/win_thread_system.h"
 

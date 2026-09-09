@@ -241,9 +241,10 @@ bool ConversionTimeoutHandler::Continue(int percent, void* user_data) {
 
 ScanlineWriterConfig::~ScanlineWriterConfig() {}
 
-// the design record C2PA / Content-Credentials provenance detector. Conservative, signature-only
+// C2PA / Content-Credentials provenance detector. Conservative, signature-only
 // substring scan over the raw original bytes. It intentionally does NOT decode the
-// container, validate a signature, or re-serialize anything. Two carrier classes are distinguished because
+// container, validate a signature, or re-serialize anything: re-emitting a third
+// party's manifest is out of bounds. Two carrier classes are distinguished because
 // the JPEG codec can carry only one of them through a recompress:
 //   * JUMBF/box form -- FourCCs "jumb"/"jumd"/"c2pa" (JPEG APP11 + generic containers)
 //     and the PNG C2PA chunk type "caBX". For JPEG this lives in APP11, which the codec
@@ -277,7 +278,7 @@ bool HasJumbfC2pa(StringPiece bytes) {
   return false;
 }
 
-// the design record Stream H: explicit ISO-BMFF / AVIF C2PA carrier detection. A C2PA
+// Explicit ISO-BMFF / AVIF C2PA carrier detection. A C2PA
 // manifest in an ISO-BMFF container (AVIF, HEIF, MP4) is stored either as a
 // JUMBF superbox ("jumb", already caught by HasJumbfC2pa above) or inside a
 // top-level "uuid" box tagged with the C2PA manifest UUID
@@ -333,13 +334,14 @@ uint32_t ReadBE32(const char* p) {
 }  // namespace
 
 net_instaweb::StringPieceVector ExtractPngC2paChunks(StringPiece bytes) {
-  // the design record Level A: capture the verbatim bytes of the C2PA carrier chunk
-  // ("caBX") and the linked XMP chunk ("iTXt"). Whole chunks (length + type +
-  // data + ORIGINAL CRC) are returned as views into `bytes` so the carry path
-  // splices them unmodified; the original CRC is carried as-is, never recomputed
-  // (the chunk data and its CRC travel together, so the CRC stays self-consistent
-  // even though the chunk is relocated). The bytes are never decoded or
-  // re-authored. Returns empty on any structural anomaly, on which
+  // Provenance carry-through (Level A): capture the verbatim bytes of the C2PA
+  // carrier chunk ("caBX") and the linked XMP chunk ("iTXt"). Whole chunks
+  // (length + type + data + ORIGINAL CRC) are returned as views into `bytes` so
+  // the carry path splices them unmodified; the original CRC is carried as-is,
+  // never recomputed (the chunk data and its CRC travel together, so the CRC
+  // stays self-consistent even though the chunk is relocated). The bytes are
+  // never decoded or re-authored -- a third party's manifest is carried verbatim
+  // or not at all. Returns empty on any structural anomaly, on which
   // the caller MUST fall back to Level B (detect-and-skip) rather than emit a
   // stripped image.
   net_instaweb::StringPieceVector chunks;

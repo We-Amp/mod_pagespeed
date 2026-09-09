@@ -54,7 +54,7 @@ export const PRIVACY_URL = `${WEBSITE}/privacy/`;
 export const TERMS_URL = `${WEBSITE}/terms/`;
 export const SUPPORT_URL = `${WEBSITE}/pricing/`;
 
-// --- Pricing (USD, per-site ladder — the design record) ---------------------------------
+// --- Pricing (USD, per-site ladder) ------------------------------------------
 // One ladder, all engines, licensed per site. PRICING_TIERS below is the
 // canonical shape; every pricing surface derives from it. The pre-2026-06
 // per-server prices (long retired) are retired — nothing may
@@ -185,7 +185,7 @@ export const PRICE_VALID_UNTIL = '2026-12-31';
 // Canonical promo facts. launch-promo.ts re-exports this as LAUNCH_PROMO so the
 // ~6 existing page consumers are unchanged.
 export const PROMO = {
-  // the design record A3: the ladder launched at list price — no promo carryover. The
+  // The ladder launched at list price — no promo carryover. The
   // legacy discount promo died with the per-server SKUs; never re-activate
   // without new SKU-side discounts to back it (checkout must grant what
   // banners promise).
@@ -216,7 +216,7 @@ export const RASTER_VARIANTS = 36; // 3 formats x 3 viewports x 2 densities x 2 
 // upstream release, 1.14.36.1 — the final Apache-incubator release; Google's
 // last stable was 1.13.35.2). NOTE: this is the marketing LINE version that appears in
 // human-facing copy — it is NOT the per-release semver (that lives in the
-// release manifests, releases/{1.1,2.0}.yaml, per the design record). /1.1/ URL paths are
+// release manifests, releases/{1.1,2.0}.yaml). /1.1/ URL paths are
 // intentionally frozen and are NOT derived from V1_LINE.
 export const V1_LINE = '1.15';
 export const V1_RENUMBERED_FROM = '1.1';

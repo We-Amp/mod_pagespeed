@@ -71,12 +71,12 @@ class InflatingFetch : public SharedAsyncFetch {
                         MessageHandler* handler);
 
   // A memory-mapped (zero-copy) serve must not bypass inflation: de-alias
-  // with the design record verified copy, then run the copying Write() so
-  // HandleWrite can inflate when required.  The inflater (and any port
-  // underneath) may hold its input pointer across blocking downstream
-  // writes, so raw mapped bytes must not enter it; and a torn borrow
-  // (verify fails after the memcpy) fails the fetch rather than inflating
-  // garbage.
+  // with the verified copy (CopyMappedVerified), then run the copying
+  // Write() so HandleWrite can inflate when required.  The inflater (and
+  // any port underneath) may hold its input pointer across blocking
+  // downstream writes, so raw mapped bytes must not enter it; and a torn
+  // borrow (verify fails after the memcpy) fails the fetch rather than
+  // inflating garbage.
   bool WriteMapped(const StringPiece& mmap_sp,
                    const MappedSharedString& keepalive,
                    MessageHandler* handler) override {

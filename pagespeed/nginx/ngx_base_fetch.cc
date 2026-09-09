@@ -52,7 +52,7 @@ int NgxBaseFetch::active_base_fetches = 0;
 
 namespace {
 
-// the design record zero-copy aliased serve.  A .pagespeed. cache hit is served by
+// Zero-copy aliased serve.  A .pagespeed. cache hit is served by
 // handing the Cyclone mmap bytes into r->out by reference (b->memory=1)
 // rather than copying.  Correctness comes from a PER-DRAIN barrier
 // (ps_zerocopy_barrier in ngx_pagespeed.cc): because that barrier lives in
@@ -393,7 +393,7 @@ ngx_int_t NgxBaseFetch::CopyBufferToNginx(ngx_chain_t** link_ptr) {
       has_borrowed_ = false;
       pinned_pending_ = MappedSharedString();
     } else {
-      // the design record emit-time decision (intent-checked).  RenewLeaseStrict()
+      // Emit-time aliasing decision (intent-checked).  RenewLeaseStrict()
       // stamps a fresh lease AND Dekker-revalidates the borrow (wrap_intent
       // loaded before epoch), the same protocol the initial borrow uses --
       // unlike the epoch-only renew it is sound for the aliased path, whose
@@ -451,7 +451,7 @@ ngx_int_t NgxBaseFetch::CopyBufferToNginx(ngx_chain_t** link_ptr) {
       // kRingSlotBytes windows are copied out of the pinned region on
       // demand as the flow-control window drains, refilled by
       // ps_base_fetch_filter on the same top-filter re-entry clock the
-      // the design record barrier uses.  Filters that set filter_need_in_memory /
+      // per-drain barrier uses.  Filters that set filter_need_in_memory /
       // temporary retain raw pointers across invocations, so buffer
       // recycling under them corrupts -- they keep the whole-body copy.
       // done_called_ is required so the final window can carry last_buf (a

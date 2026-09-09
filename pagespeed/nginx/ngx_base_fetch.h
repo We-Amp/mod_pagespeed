@@ -140,7 +140,7 @@ class NgxBaseFetch : public AsyncFetch {
 
   // Zero-copy ALIASED serve (CycloneZeroCopyServe).  Records the mmap
   // region as a BORROWED blob (no copy) and stashes 'keepalive' (which
-  // carries the design record force-wrap-deadline hook); CopyBufferToNginx emits
+  // carries the lease force-wrap-deadline hook); CopyBufferToNginx emits
   // the aliased ngx_buf_t on the nginx thread and, for the aliased path,
   // arms a single-shot timer that copies the tail out if the client is
   // slow.  A mapped serve is a single Write.

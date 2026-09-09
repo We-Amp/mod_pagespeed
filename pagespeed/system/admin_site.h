@@ -63,8 +63,8 @@ enum class AdminHandlerFamily {
 // process lifetime. This does NOT block the request — admins may have
 // legitimately widened access (CDN admin IP, ops VLAN). The warning is a
 // hint that the web-server-layer ACL the deployment relies on may not be
-// effective. See the design record hardening notes and the docs link in the warning
-// text. Safe to call from any thread; idempotent via atomic flag.
+// effective; the warning text carries a link to the hardening docs. Safe to
+// call from any thread; idempotent via atomic flag.
 //
 // `client_ip` is a textual IP (IPv4 dotted-quad or IPv6); empty string is
 // treated as non-loopback (caller couldn't determine — flag it loudly).

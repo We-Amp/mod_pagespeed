@@ -78,11 +78,11 @@ class IisModuleBaseFetch : public IisBaseFetch {
   void SendData(MessageHandler* handler, bool flush);  
   bool HasChunk(HTTP_DATA_CHUNK* chunk);
 
-  // ==== Zero-copy aliased serve (CycloneZeroCopyServe, the design record) ==========
+  // ==== Zero-copy aliased serve (CycloneZeroCopyServe) ====================
   // The '.pagespeed.' resource cache-hit serve (rewrite_driver.cc
   // CacheCallback::DeliverDone) calls WriteMapped with a StringPiece
   // aliasing a Cyclone mmap region and a MappedSharedString pin (read-lease
-  // keep-alive carrying the design record renew / force-wrap hooks).  Instead of
+  // keep-alive carrying the lease renew / force-wrap hooks).  Instead of
   // the request-pool copy HandleWrite would do, this override records the
   // borrowed span; HandleDone then serves it as a sequence of aliased
   // chunks, each pushed with WriteEntityChunkByReference + an async Flush

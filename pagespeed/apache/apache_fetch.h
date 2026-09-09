@@ -90,7 +90,7 @@ class ApacheFetch : public AsyncFetch {
   bool IsCachedResultValid(const ResponseHeaders& headers) override
       LOCKS_EXCLUDED(scheduler_->mutex());
 
-  // Zero-copy ALIASED serve (CycloneZeroCopyServe, the design record).  Called on
+  // Zero-copy ALIASED serve (CycloneZeroCopyServe).  Called on
   // the request thread by the '.pagespeed.' cache-hit serve
   // (rewrite_driver.cc CacheCallback::DeliverDone) with a body StringPiece
   // aliasing a Cyclone mmap region and its pinning keepalive.  When the

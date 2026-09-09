@@ -102,10 +102,11 @@ namespace net_instaweb
 	bool has_own_iispeed_config(IHttpContext *pHttpContext)
 	{
 		// Engage gate: a site engages when it has its OWN per-site config
-		//. Routed through the shared resolver's tier-3
-		// primitive so the gate, the request-time merge, and the FileID watch
-		// probe the exact same file. Deliberately scoped to the per-site file
-		// (not the %ProgramData% base): a site without its own config stays
+		// (tier 3 of the precedence chain documented in iis_config_util.h).
+		// Routed through the shared resolver's tier-3 primitive so the gate,
+		// the request-time merge, and the FileID watch probe the exact same
+		// file. Deliberately scoped to the per-site file (not the
+		// %ProgramData% base): a site without its own config stays
 		// disengaged, so single-site behavior — including opt-out by removing
 		// the per-site file — is unchanged.
 		return iis_config_util::SiteConfigExists(
@@ -544,7 +545,7 @@ namespace net_instaweb
 						"...then recycle the application pool.\n"), &handler);
 					break;
 				case IisProcessContext::InitFailureKind::kLogDirCreateFailed: {
-					// the referenced issue, the design record §Operational. Parallel to
+					// the referenced issue. Parallel to
 					// kCachePathCreateFailed above but for the LogDir
 					// path. The narrower icacls hint — (RX,W) instead
 					// of M — mirrors Product.wxs GrantLogAcl: workers

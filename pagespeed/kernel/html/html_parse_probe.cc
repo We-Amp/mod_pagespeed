@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 We-Amp B.V.
 //
-// html_parse_probe: reference probe for the design record D2 differential HTML
-// parse harness. Reads an HTML file (argv[1], or stdin when omitted or "-"),
+// html_parse_probe: reference probe for the differential HTML parse
+// harness. Reads an HTML file (argv[1], or stdin when omitted or "-"),
 // runs it through HtmlParse with the recording filter, and writes the parse
 // event stream (tools/html-parse-corpus/SPEC.md v1) to stdout.
 //

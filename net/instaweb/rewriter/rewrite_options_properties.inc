@@ -210,9 +210,10 @@
     "Whether to respect Vary headers for resources. " \
     "Vary is always respected for HTML.", true) \
   X(false, agent_optimize_, "ao", kAgentOptimize, kDirectoryScope, \
-    "the design record: recognize Accept: text/markdown agent requests, license/" \
-    "entitlement-gate them, and add Vary: Accept on HTML. 1.1 always serves " \
-    "optimized HTML (no markdown render).", true) \
+    "Recognize Accept: text/markdown agent requests and add Vary: Accept " \
+    "on HTML. This flag is the only gate: no license or entitlement check " \
+    "sits behind it. 1.1 always serves optimized HTML (no markdown " \
+    "render).", true) \
   X(false, respect_x_forwarded_proto_, "rxfp", \
     kRespectXForwardedProto, kDirectoryScope, \
     "Whether to respect the X-Forwarded-Proto header.", true) \
@@ -231,7 +232,7 @@
     true) \
   X(false, image_provenance_carry_, "ipc", \
     kImageProvenanceCarry, kDirectoryScope, \
-    "the design record Level A carry-through: when true (and PreserveImageProvenance is "\
+    "Provenance carry-through: when true (and PreserveImageProvenance is "\
     "on), PNG images carrying a C2PA / Content Credentials manifest are "\
     "recompressed AND their original manifest chunks (caBX/iTXt) are carried "\
     "into the optimized output unmodified, keeping both the byte savings and "\
@@ -239,7 +240,7 @@
     "through recompression under PreserveImageProvenance.) Cases where the "\
     "carrier cannot be preserved byte-exactly -- resize, format conversion "\
     "(PNG->JPEG/WebP), GIF, or extraction failure -- fall back to the default "\
-    "detect-and-skip (Level B) pass-through. No effect when "\
+    "detect-and-skip pass-through. No effect when "\
     "PreserveImageProvenance is false.", true) \
   X(false, js_preserve_urls_, "jpu", \
     kJsPreserveURLs, kDirectoryScope, \

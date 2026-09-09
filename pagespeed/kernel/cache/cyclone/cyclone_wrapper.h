@@ -273,19 +273,19 @@ int cyclone_read_handle_refcount(const CycloneReadHandle* handle);
 // It is safe to call this with a NULL handle.
 void cyclone_read_handle_close(CycloneReadHandle* handle);
 
-// the design record: re-stamp the read lease pinning this handle's borrow.  Returns
+// Re-stamp the read lease pinning this handle's borrow.  Returns
 // 1 if still valid (lease extended, epoch unchanged), 0 if the borrowed
 // region may have been overwritten (embedder must copy) or not applicable.
 int cyclone_read_handle_renew_lease(CycloneReadHandle* handle);
 
-// the design record (2026-07-07): intent-checked renewal for the ALIASED zero-copy
+// Intent-checked renewal for the ALIASED zero-copy
 // path (per aliased send).  Returns a cyclone::LeaseRenewal value as int:
 // 0 = kOk (keep aliasing), 1 = kCopyNow (de-alias by copying, region
 // intact), 2 = kTorn (abort — region may be overwritten), 3 = kLeasesOff
 // (no lease protection; copy, do not abort).  NULL/RAM handle => 3.
 int cyclone_read_handle_renew_lease_strict(CycloneReadHandle* handle);
 
-// the design record: ns until a ceiling-forced wrap could overwrite this borrow;
+// Ns until a ceiling-forced wrap could overwrite this borrow;
 // UINT64_MAX when none is deferred / not applicable.
 uint64_t cyclone_read_handle_ns_until_forced_wrap(
     const CycloneReadHandle* handle);

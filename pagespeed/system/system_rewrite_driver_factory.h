@@ -220,9 +220,9 @@ class SystemRewriteDriverFactory : public RewriteDriverFactory {
   // The *configured* counts, as NumRewriteThreads /
   // NumExpensiveRewriteThreads set them.  kAutoThreadCount (which is what
   // both `auto` and `0` parse to, and the initial value) means "compute it
-  // from the design record policy".  A positive value always wins over the computed
-  // one, whichever order parsing and detection happen in: setting one after
-  // the counts have been finalized re-resolves them.
+  // from the thread-count policy".  A positive value always wins over the
+  // computed one, whichever order parsing and detection happen in: setting one
+  // after the counts have been finalized re-resolves them.
   //
   // constexpr, not `static const int`, so it has no out-of-class definition to
   // forget: an in-class-initialized `static const int` still needs one for any
@@ -249,7 +249,7 @@ class SystemRewriteDriverFactory : public RewriteDriverFactory {
   // loop and can keep with the default of false, while Apache with a threaded
   // multiprocessing module (MPM) overrides this method to return true.
   //
-  // Since the design record this no longer feeds the thread-count policy -- request
+  // This no longer feeds the thread-count policy -- request
   // concurrency is not the constraint on CPU-bound optimization work, and the
   // divisor that matters is ConcurrentProcessCount().  It is still reported in
   // the startup log, because it describes the deployment shape an operator is
@@ -262,7 +262,7 @@ class SystemRewriteDriverFactory : public RewriteDriverFactory {
   // that might be used for handling user requests.
   virtual int LookupThreadLimit() { return 1; }
 
-  // the design record D1.  How many server processes on this machine each build their
+  // How many server processes on this machine each build their
   // own optimization worker pools -- Apache's configured child count, nginx's
   // worker_processes, the IIS application pool's worker-process count, Envoy's
   // concurrency.  It is the divisor that keeps the aggregate bounded: without
@@ -272,7 +272,7 @@ class SystemRewriteDriverFactory : public RewriteDriverFactory {
   // The default is kUnknownProcessConcurrency, and a port that leaves it there
   // resolves to one thread in each pool and logs that it did.  It deliberately
   // does not guess a larger number: silently oversubscribing a machine is the
-  // failure mode the design record exists to end.
+  // failure mode the thread-count policy exists to end.
   virtual int ConcurrentProcessCount() { return kUnknownProcessConcurrency; }
 
   // Returns false on platforms that cannot answer IsServerThreaded() /
@@ -338,7 +338,7 @@ class SystemRewriteDriverFactory : public RewriteDriverFactory {
 
   // Reads the effective CPU budget and the process-concurrency divisor, then
   // resolves num_rewrite_threads_ and num_expensive_rewrite_threads_ from the
-  // the design record policy for any count the operator did not set explicitly.
+  // thread-count policy for any count the operator did not set explicitly.
   // Idempotent; the first call is the one that counts.
   virtual void AutoDetectThreadCounts();
 
@@ -354,7 +354,7 @@ class SystemRewriteDriverFactory : public RewriteDriverFactory {
   bool thread_counts_finalized() { return thread_counts_finalized_; }
 
  private:
-  // Applies the design record formula to cpu_budget_ / concurrent_processes_ and
+  // Applies the policy formula to cpu_budget_ / concurrent_processes_ and
   // writes the result into num_rewrite_threads_ and
   // num_expensive_rewrite_threads_, except where the operator configured a
   // positive count.

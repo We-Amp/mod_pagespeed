@@ -4,9 +4,8 @@
 // Implementation of the nginx Web-Bot-Auth (RFC 9421) wiring -- observe-only
 // unless WebBotAuthBotDetection is on, in which case a verified signature also
 // classifies the request as an automated client for PageSpeed's own bot
-// detection (see ngx_webbotauth_handler.h). the design record Amendment A1: the FREE
-// verifier -- no 401/402, no enforcement, no RSL-CAP, no metering beyond an
-// opt-in counter.
+// detection (see ngx_webbotauth_handler.h). This is the FREE verifier -- no
+// 401/402, no enforcement, no RSL-CAP, no metering beyond an opt-in counter.
 //
 // A1 v1 scope: signer keys come from an operator-LOCAL JWKS file
 // (WebBotAuthKeyDirectoryFile) and are resolved SYNCHRONOUSLY in-memory. The
@@ -84,7 +83,7 @@ const int64_t kMaxKeyDirectoryFileBytes = int64_t{256} * 1024;
 const size_t kMaxRslCapAuthHeaderBytes = size_t{8} * 1024;
 
 // =================================================================
-// Web Bot Auth opt-in counter state + doc builder
+// Web Bot Auth opt-in counter (experimental) state + doc builder
 // =================================================================
 
 // The shared memory-mapped counter store. Mapped once by the master in
@@ -746,7 +745,7 @@ ngx_int_t ps_webbotauth_preaccess_handler(ngx_http_request_t* r) {
       ClassifyRequest(r, server_context, options, &bot_name, &keyid,
                       &other_signature, &verify_latency_us);
 
-  // the design record Bar-A opt-in counter (experimental): record into the shared
+  // Opt-in counter (experimental): record into the shared
   // memory-mapped counter store whenever Web Bot Auth is enabled -- INDEPENDENT
   // of WebBotAuthTelemetry (the first-party statistics counters) and of the
   // counter MODE (which gates only PUBLICATION at the well-known endpoint).

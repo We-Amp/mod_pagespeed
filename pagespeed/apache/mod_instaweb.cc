@@ -1001,7 +1001,7 @@ int pagespeed_post_config(apr_pool_t* pool, apr_pool_t* plog, apr_pool_t* ptemp,
 
   // Thread-count resolution is deferred to here: ap_mpm_query() cannot report
   // the MPM's threading model, the configured ThreadsPerChild, or the child
-  // count the design record policy divides by until the configuration has been
+  // count the thread-count policy divides by until the configuration has been
   // processed, and it can't answer at all if the MPM module is loaded after
   // mod_pagespeed.  This must run before anything reads the thread counts,
   // and after directives have been parsed so an explicit NumRewriteThreads /

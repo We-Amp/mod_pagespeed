@@ -155,7 +155,7 @@ class RequestContext : public RefCounted<RequestContext> {
   // Refinement of accepts_webp(): true only when the WebP capability was
   // asserted by the request's own "Accept: image/webp" header. accepts_webp()
   // is broader -- it also carries user-agent-derived grants (the legacy
-  // Android allow-list and the design record no-navigation-Accept fallback), which
+  // Android allow-list and the no-navigation-Accept fallback), which
   // is right for choosing what to serve on rewritten URLs but wrong for
   // deciding whether a cached response carrying "Vary: Accept" is valid
   // as-selected for this request (see

@@ -92,8 +92,8 @@ class DeviceProperties {
   // the defer_javascript family is disabled (js_defer_disabled, js_disable,
   // defer_iframe, fix_reflow and the support_noscript fallback all gate on
   // SupportsJsDefer), background fetches are skipped when
-  // DisableBackgroundFetchesForBots is on (default off), the design record WebP
-  // user-agent fallback declines to grant WebP from the UA
+  // DisableBackgroundFetchesForBots is on (default off), the user-agent
+  // WebP fallback declines to grant WebP from the UA
   // (ApplyUserAgentWebpFallback in device_properties.cc), and the request is
   // logged as a bot by LogDeviceInfo.
   //
@@ -189,7 +189,7 @@ class DeviceProperties {
   // first been read is not retroactive. Set the verdict before any consumer
   // runs. The nginx port does (SetRequestHeaders, then the verdict, both before
   // the driver starts parsing); any port wiring this up later must too. One
-  // consumer is structurally out of reach of that rule: the design record WebP
+  // consumer is structurally out of reach of that rule: the user-agent WebP
   // fallback reads IsBot() inside ParseRequestHeaders itself, i.e. before any
   // port can call SetWebBotAuthVerdict -- see the timing caveat at
   // SetWebBotAuthVerdict above for the (bounded) consequence.

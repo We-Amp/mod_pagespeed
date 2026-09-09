@@ -60,7 +60,7 @@ class IisRewriteOptions : public SystemRewriteOptions {
   const GoogleString& global_admin_path() const {
 	  return global_admin_path_.value();
   }
-  // the design record §5: default-on; opt-out via `AutoCreateCachePath off` in
+  // Default-on; opt-out via `AutoCreateCachePath off` in
   // pagespeed.config. Read by IisProcessContext::GetServerContext after
   // the per-site options merge and consumed by
   // IisRewriteDriverFactory::EnsureDirectoryWritable. When off, the
@@ -69,7 +69,7 @@ class IisRewriteOptions : public SystemRewriteOptions {
   bool auto_create_cache_path() const {
 	  return auto_create_cache_path_.value();
   }
-  // the design record §Operational + the referenced issue: default-on; opt-out via
+  // default-on; opt-out via
   // `AutoCreateLogDir off` in pagespeed.config. Mirrors
   // auto_create_cache_path() but gates the LogDir parallel auto-create
   // flow. When off, the LogDir is left untouched at startup (no mkdir,

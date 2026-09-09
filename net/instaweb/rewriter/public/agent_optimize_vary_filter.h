@@ -18,8 +18,11 @@
  */
 
 //
-// the design record: the AgentOptimizeVaryFilter advertises `Vary: Accept` on an HTML
-// response when an agent_optimize negotiation is active. mod_
+// The AgentOptimizeVaryFilter advertises `Vary: Accept` on an HTML response
+// when an agent_optimize negotiation is active. Agents request the markdown
+// representation with `Accept: text/markdown` (RFC 7763), so any response
+// whose content could turn on that header must declare it, or a shared cache
+// may hand one representation to a client that asked for the other. mod_
 // pagespeed 1.1 has NO markdown render moat (no headless browser), so the
 // response BODY is never changed and no markdown is ever served — this filter
 // is the negotiation/cloaking-safety signal only. It lives in the shared
@@ -39,7 +42,8 @@ class RewriteDriver;
 
 // Adds `Vary: Accept` to the HTML response when:
 //   options()->agent_optimize()  (gates this filter's presence, set at AddFilters;
-//                                 the operator flag is the only gate, the design record D2)
+//                                 the operator flag is the only gate — the
+//                                 feature carries no license/entitlement check)
 //   AND the request's Accept header contains the text/markdown token.
 // Never modifies the body. Idempotent (won't duplicate an existing Vary: Accept).
 class AgentOptimizeVaryFilter : public CommonFilter {
@@ -56,6 +60,14 @@ class AgentOptimizeVaryFilter : public CommonFilter {
   // Returns true if any of the request's Accept header values contains the
   // `text/markdown` media-range token — the agent_optimize negotiation
   // signal. Null request_headers (or no Accept header) returns false.
+  //
+  // Callers outside this filter: InsertSpeculationRulesFilter consults this
+  // to skip injecting speculation rules for a markdown-negotiating agent. It
+  // is gated by its OWN option (insert_speculation_rules), not by
+  // agent_optimize — so the Accept header can change output with
+  // agent_optimize off. Do not move this behind an agent_optimize check
+  // without auditing that caller: it would silently start emitting the tag
+  // into the markdown-negotiated variant.
   static bool RequestAcceptsMarkdown(const RequestHeaders* request_headers);
 
  private:

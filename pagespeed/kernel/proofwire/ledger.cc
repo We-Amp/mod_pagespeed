@@ -37,7 +37,9 @@ const unsigned char* UC(StringPiece s) {
 
 // Best-effort secure wipe whose volatile writes the optimizer may not elide.
 // ProofWire depends only on //pagespeed/kernel/base and @ed25519 -- it has NO
-// OpenSSL/BoringSSL dependency, so OPENSSL_cleanse / explicit_bzero are deliberately not used.
+// OpenSSL/BoringSSL dependency, by design: no new crypto dependency and no
+// parallel crypto path, so OPENSSL_cleanse / explicit_bzero are deliberately
+// not used.
 void SecureWipe(GoogleString* s) {
   if (s->empty()) {
     return;

@@ -17,7 +17,7 @@
  * under the License.
  */
 
-// the design record Stream B/C build-validation harness. NOT a shipping target.
+// AVIF decode/encode build-validation harness. NOT a shipping target.
 //
 // 1. Encodes a representative RGB image to AVIF through the real read_image
 //    factory + AvifFrameWriter, and times the aom still-image encode.

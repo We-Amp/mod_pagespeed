@@ -17,7 +17,7 @@
  * under the License.
  */
 
-// the design record Streams B (decode) and C (encode + animation): the AVIF codec kernel.
+// The AVIF codec kernel: decode, encode, and animation.
 //
 // This is the sibling of webp_optimizer.{h,cc}. Every surface here parallels a
 // WebP surface so a reviewer can diff "what WebP does" against "what AVIF does":
@@ -115,15 +115,16 @@ struct AvifConfiguration : public ScanlineWriterConfig {
   // the work; the alternative is to compute a result and then throw it away.
   int64 encode_budget_ms;
 
-  // the design record Stream H metadata carry (mirrors JpegCompressionOptions'
+  // Metadata carry (mirrors JpegCompressionOptions'
   // retain_exif_data / retain_color_profile). When a retain_* flag is true AND
   // the matching blob below is non-empty, AvifFrameWriter attaches it to the
   // encoded primary image via libavif's exif/icc/xmp surfaces (avifImage->exif,
   // ->icc, ->xmp), so orientation/color/provenance survive the transcode. The
   // blobs are the caller-extracted SOURCE metadata; the codec never parses or
-  // re-authors them. Empty blobs are a no-op,
-  // so the still-image WebP-parity path (WebP carries no metadata) is unaffected
-  // when the caller supplies nothing.
+  // re-authors them -- a third party's XMP/C2PA provenance manifest is carried
+  // verbatim or not at all, never re-signed or re-emitted. Empty blobs are a
+  // no-op, so the still-image WebP-parity path (WebP carries no metadata) is
+  // unaffected when the caller supplies nothing.
   bool retain_exif;
   bool retain_color_profile;
   bool retain_xmp;

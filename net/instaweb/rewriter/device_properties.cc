@@ -92,11 +92,14 @@ void DeviceProperties::SetUserAgent(const StringPiece& user_agent_string) {
   }
 }
 
-// the design record.  Grants WebP to browsers that decode it but omit "image/webp" from
+// Grants WebP to browsers that decode it but omit "image/webp" from
 // the navigation Accept header (Safari 16+, Firefox 132+ -- the Safari floor
 // is Version/16, not 14: see the rationale at kWebpNoNavigationAcceptAllowlist
-// in user_agent_matcher.cc).  Precondition: accepts_webp_ == kFalse, i.e. the
-// Accept header has been examined and did not advertise WebP.
+// in user_agent_matcher.cc).  Without this fallback those browsers -- close to
+// a fifth of global traffic -- silently keep the original JPEG/PNG; measured
+// against the same source image, that is several times the bytes a browser
+// that does advertise WebP receives.  Precondition: accepts_webp_ == kFalse,
+// i.e. the Accept header has been examined and did not advertise WebP.
 //
 // Bots are excluded independently of the UA matcher's own crawler denies: a
 // crawler that fetches a WebP variant can cache and redistribute it to clients

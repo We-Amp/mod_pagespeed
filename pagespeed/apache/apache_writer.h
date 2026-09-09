@@ -47,7 +47,7 @@ class ApacheWriter : public Writer {
   bool Write(const StringPiece& str, MessageHandler* handler) override;
   bool Flush(MessageHandler* handler) override;
 
-  // Zero-copy ALIASED serve (CycloneZeroCopyServe, the design record).  True when
+  // Zero-copy ALIASED serve (CycloneZeroCopyServe).  True when
   // this request's body bytes travel to the network verbatim: a main
   // (non-sub, non-internal-redirect) request, not header-only, no Range,
   // and every filter on the output chain -- request-level through the

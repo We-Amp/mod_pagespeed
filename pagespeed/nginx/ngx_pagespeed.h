@@ -51,7 +51,7 @@ class InPlaceResourceRecorder;
 class MappedSharedString;
 class Variable;
 
-// the design record (2026-07-07) per-drain zero-copy barrier state.  When a
+// Per-drain zero-copy barrier state.  When a
 // .pagespeed. resource cache hit is served zero-copy (aliased mmap bytes
 // handed into r->out by reference), this pool-scoped struct carries the
 // lease pin + the aliased buf so ps_base_fetch_filter can revalidate the
@@ -172,7 +172,7 @@ typedef struct {
   bool psol_vary_accept_only;
   bool follow_flushes;
 
-  // the design record per-drain zero-copy barrier (nullptr unless this request is
+  // Per-drain zero-copy barrier (nullptr unless this request is
   // serving a .pagespeed. cache hit zero-copy).  Set by NgxBaseFetch at
   // emit; consulted by ps_base_fetch_filter before every drain.
   PsZeroCopyAlias* zerocopy_alias;

@@ -146,16 +146,16 @@ namespace net_instaweb
 		// kinds, the cache path; for kLogDirCreateFailed, the
 		// LogDir path. Renamed from failed_cache_path_ to reflect the
 		// generalization; same lifecycle (populated only on failure
-		// paths, per the design record §4 last paragraph).
+		// paths).
 		GoogleString failed_init_path_;
 		GoogleString app_pool_identity_;  // e.g. "IIS APPPOOL\\DefaultAppPool"
 
 		// Captured at ctor (before CloseHandle on the worker token) so the
 		// IIS factory's EnsureDirectoryWritable can build an ACE for the
 		// worker without re-resolving via the locale-fragile
-		// LookupAccountNameW path under restricted AppPool tokens
-		//. Empty if SID capture failed; worker_sid()
-		// returns nullptr in that case.
+		// LookupAccountNameW path under restricted AppPool tokens.
+		// Empty if SID capture failed; worker_sid() returns nullptr
+		// in that case.
 		std::vector<BYTE> worker_sid_buf_;
 	};
 }                                                                     

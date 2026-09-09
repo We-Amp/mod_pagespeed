@@ -144,8 +144,8 @@ TEST_F(ToStringTest, CalcAdditionOperator) {
 }
 
 // Modern-CSS serialization cases ported from mod_pagespeed 2.0's
-// css_minify_test.cc, adapted to this parser's serialization
-// semantics.
+// css_minify_test.cc, adapted to this parser's serialization semantics — the
+// two CSS implementations share test material, not code.
 TEST_F(ToStringTest, ModernCssCustomProperties) {
   // the 2.0 optimizer line: CssCustomProperties. Colors are canonicalized even inside
   // custom-property values.

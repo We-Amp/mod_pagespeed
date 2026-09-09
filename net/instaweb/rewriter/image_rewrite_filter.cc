@@ -645,7 +645,7 @@ void SetWebpCompressionOptions(
   image_options->webp_conversion_variables = webp_conversion_variables;
 }
 
-// the design record Stream E: AVIF sibling of SetWebpCompressionOptions. Translates the
+// AVIF sibling of SetWebpCompressionOptions. Translates the
 // pre-decode AVIF request-capability level (resource_context.avif_level(), set
 // by ImageUrlEncoder::SetAvifLevel) into the encode-side capability fields
 // preferred_avif / allow_avif_alpha / allow_avif_animated. This runs in PARALLEL
@@ -1095,7 +1095,7 @@ Image::CompressionOptions* ImageRewriteFilter::ImageOptionsForLoadedResource(
     SetWebpCompressionOptions(resource_context, *options, input_resource->url(),
                               &webp_conversion_variables_, image_options);
   }
-  // the design record Stream E: set AVIF capability options in parallel with WebP. Both
+  // Set AVIF capability options in parallel with WebP. Both
   // may be active for a both-capable request; the format choice is made at
   // encode time (pick-smaller), not here.
   if (resource_context.avif_level() != ResourceContext::AVIF_NONE) {
@@ -1116,7 +1116,7 @@ Image::CompressionOptions* ImageRewriteFilter::ImageOptionsForLoadedResource(
       options->Enabled(RewriteOptions::kConvertGifToPng);
   image_options->convert_jpeg_to_webp =
       options->Enabled(RewriteOptions::kConvertJpegToWebp);
-  // the design record Stream E: kConvertJpegToAvif is the lossy-AVIF-allowed flag for
+  // kConvertJpegToAvif is the lossy-AVIF-allowed flag for
   // every raster source (JPEG, PNG, GIF), mirroring how kConvertJpegToWebp gates
   // lossy WebP across formats in the GIF/PNG ladder. There is no separate
   // per-source AVIF filter.

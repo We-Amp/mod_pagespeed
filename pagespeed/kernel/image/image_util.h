@@ -206,7 +206,7 @@ struct ScanlineWriterConfig {
   virtual ~ScanlineWriterConfig();
 };
 
-// the design record: Conservative, signature-only detection of a C2PA / Content-Credentials
+// Conservative, signature-only detection of a C2PA / Content-Credentials
 // provenance manifest in raw image bytes (JPEG, PNG, WebP, GIF). This NEVER parses,
 // validates, or re-emits the manifest -- it only scans for well-known marker/box
 // signatures so the image-rewrite path can pass a manifest-bearing image through
@@ -215,13 +215,13 @@ struct ScanlineWriterConfig {
 // to the current strip behavior. Intended to run once per image.
 bool ImageHasC2paManifest(StringPiece bytes);
 
-// the design record: detects specifically the XMP-carried Content-Credentials form ("cr:" inside
+// Detects specifically the XMP-carried Content-Credentials form ("cr:" inside
 // an XMP packet). For JPEG this lives in APP1 (shared with EXIF), so the codec carries
 // it only when EXIF/APP1 is retained -- the rewrite gate uses this to skip-not-strip a
 // manifest the codec cannot guarantee carrying. Subset of ImageHasC2paManifest.
 bool ImageHasXmpC2pa(StringPiece bytes);
 
-// the design record Level A (carry-through), PNG only. Walks a PNG chunk stream (8-byte
+// Level A (carry-through), PNG only. Walks a PNG chunk stream (8-byte
 // signature -> length-prefixed chunks) and returns the VERBATIM byte ranges
 // (views into `bytes`) of every C2PA carrier chunk ("caBX") and linked XMP chunk
 // ("iTXt"), in original file order. Each range is the WHOLE chunk (4-byte length,

@@ -3409,12 +3409,13 @@ TEST_F(ParserTest, CalcAdditionOperator) {
 
 // =============================================================================
 // Modern-CSS regression cases ported from mod_pagespeed 2.0's
-// test/lib/css/css_minify_test.cc. 2.0 asserts minified string
-// output; here we port the constructs and assert this parser's
+// test/lib/css/css_minify_test.cc. The two CSS implementations stay separate
+// on purpose and share test material rather than code: 2.0 asserts minified
+// string output, while here we port the constructs and assert this parser's
 // tree/serialization behavior instead. Cases that expose known AST-parser
 // limitations pin the exact current behavior with a comment — teaching the
-// AST parser full modern-CSS semantics is a separate parser-feature
-// decision, not something these tests require.
+// AST parser full modern-CSS semantics would be a parser-feature change in
+// its own right, and nothing these tests check requires it.
 // =============================================================================
 
 TEST_F(ParserTest, ModernCssCustomProperties) {

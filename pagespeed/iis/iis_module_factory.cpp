@@ -61,7 +61,7 @@ IisProcessContext* IisModuleFactory::GetProcessContext(const GoogleString& site_
 	// (iis_http_module.cpp) can never diverge — that split-brain was the
 	// config-drift defect this shared helper exists to eliminate. This base drives the process-level
 	// global/root options and FileID1 change-detection below; site_root
-	// (the per-site override, the design record tier 3) drives FileID2, so editing
+	// (the per-site override, tier 3) drives FileID2, so editing
 	// EITHER the base or the authoritative per-site file re-inits the
 	// process context.
 	bool pd_config_exists = false;
@@ -69,8 +69,8 @@ IisProcessContext* IisModuleFactory::GetProcessContext(const GoogleString& site_
 		iis_config_util::ResolveProgramDataConfig(&pd_config_exists);
 
 	if (message_handler_) {
-		// Effective winner: the per-site
-		// override when present, else the %ProgramData% base.
+		// Effective winner (last existing file in the chain wins): the
+		// per-site override when present, else the %ProgramData% base.
 		const bool site_config_exists =
 			!site_root.empty() &&
 			GetFileAttributesA(site_root.c_str()) != INVALID_FILE_ATTRIBUTES;
@@ -91,7 +91,7 @@ IisProcessContext* IisModuleFactory::GetProcessContext(const GoogleString& site_
 			message_handler_->Message(kWarning,
 				"IisModuleFactory: multiple pagespeed.config files present with "
 				"differing content; per-site '%s' overrides machine-global '%s'. "
-				"Edit the per-site file to change behavior.",
+				"Edit the per-site file to change behavior; it wins the resolution order.",
 				site_root.c_str(), config_path.c_str());
 		}
 	}

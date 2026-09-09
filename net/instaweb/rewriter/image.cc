@@ -271,8 +271,9 @@ class ImageImpl : public Image {
 
  private:
   // Maximum number of libpagespeed conversion attempts per image. Three
-  // conversion sites can share this budget on the JPEG path: the speculative WebP probe, the speculative AVIF probe (pick-smaller),
-  // and the guaranteed jpeg-recompress fallback. The cap bounds CPU spent on
+  // conversion sites can share this budget on the JPEG path: the speculative
+  // WebP probe, the speculative AVIF probe (pick-smaller), and the
+  // guaranteed jpeg-recompress fallback. The cap bounds CPU spent on
   // pathological images while guaranteeing the recompress fallback stays
   // reachable after BOTH speculative lossy probes fail; at the pre-AVIF value
   // of 2, a both-capable request whose WebP and AVIF encodes both failed would
@@ -285,9 +286,9 @@ class ImageImpl : public Image {
   bool ComputeOutputContents() override;
 
   // 'suppress_avif_candidate' disables the speculative AVIF pick-smaller
-  // probe; used by the design record PNG carry path, where a winning AVIF candidate
-  // would be discarded anyway (the caBX/iTXt manifest can only be spliced back
-  // into a PNG output).
+  // probe; used by the PNG provenance-carry path, where a winning AVIF
+  // candidate would be discarded anyway (the caBX/iTXt manifest can only be
+  // spliced back into a PNG output).
   bool ComputeOutputContentsFromGifOrPng(
       const GoogleString& string_for_image,
       const PngReaderInterface* png_reader, bool fall_back_to_png,
@@ -334,7 +335,7 @@ class ImageImpl : public Image {
 
   static bool ContinueWebpConversion(int percent, void* user_data);
 
-  // the design record Stream E: AVIF encode entry points, siblings of the WebP converters
+  // AVIF encode entry points, siblings of the WebP converters
   // above. All drive the AVIF frame writer (AvifFrameWriter + AvifConfiguration)
   // through the shared RewriteToAvif() pipe, which reads `src_format` frames and
   // encodes them as AVIF. The per-image AVIF-vs-WebP-vs-original choice
@@ -887,7 +888,7 @@ bool ImageImpl::ComputeOutputContents() {
       contents = original_contents_;
     }
 
-    // the design record C2PA / Content-Credentials preserve-by-default fallback.
+    // C2PA / Content-Credentials preserve-by-default fallback.
     // The JPEG codec carries the APP11/JUMBF manifest THROUGH a recompress
     // (jpeg_optimizer.cc), but only for a JPEG that is not resized and stays JPEG:
     // the resize path re-encodes via the ScanlineWriter (which copies no markers),
@@ -910,7 +911,7 @@ bool ImageImpl::ComputeOutputContents() {
     const bool xmp_would_strip =
         has_c2pa && !options_->retain_exif_data &&
         pagespeed::image_compression::ImageHasXmpC2pa(original_contents_);
-    // the design record Level A (opt-in, ImageProvenanceCarry): a non-resized PNG carrying a
+    // Carry-through (opt-in, ImageProvenanceCarry): a non-resized PNG carrying a
     // manifest is NOT skipped -- it is recompressed and its caBX/iTXt chunks are
     // spliced back into the optimized output below. The PNG optimizer strips
     // ancillary chunks, so unlike the JPEG codec (jpeg_optimizer.cc, which already
@@ -965,7 +966,7 @@ bool ImageImpl::ComputeOutputContents() {
       case IMAGE_AVIF:
       case IMAGE_AVIF_LOSSLESS_OR_ALPHA:
       case IMAGE_AVIF_ANIMATED:
-        // the design record Stream E: recompress a stored-as-AVIF input in place at the
+        // Recompress a stored-as-AVIF input in place at the
         // configured AVIF quality, carrying EXIF/ICC/XMP through the transcode
         // (Stream H). image_type_ is left unchanged (the AVIF subtype is
         // preserved). The has_c2pa guard is upstream (a manifest-bearing AVIF is
@@ -979,7 +980,7 @@ bool ImageImpl::ComputeOutputContents() {
         }
         break;
       case IMAGE_JPEG:
-        // the design record: a manifest-bearing JPEG must not be converted to WebP/AVIF
+        // A manifest-bearing JPEG must not be converted to WebP/AVIF
         // (neither encoder carries the APP11/JUMBF or APP1/XMP manifest yet).
         // !has_c2pa skips both conversions so it falls through to the JPEG
         // recompress branch below, where the codec preserves the manifest.
@@ -998,7 +999,7 @@ bool ImageImpl::ComputeOutputContents() {
             PS_LOG_INFO(handler_, "Failed to create webp!");
           }
         }
-        // AVIF candidate. Both encoders are set
+        // AVIF candidate (pick-smaller). Both encoders are set
         // up when both capabilities are present, so this is a genuine per-image
         // decision: encode AVIF into a scratch buffer and adopt it only if it
         // beats the WebP/keep candidate (or if WebP was not produced). AVIF
@@ -1065,12 +1066,13 @@ bool ImageImpl::ComputeOutputContents() {
             false /* suppress_avif_candidate */);
         break;
     }
-    // the design record Level A PNG carry-through: splice the ORIGINAL caBX/iTXt manifest
-    // chunks into the recompressed PNG, immediately before the trailing IEND
-    // chunk. Fail-safe to Level B (serve the original bytes byte-for-byte) on ANY
-    // anomaly -- the PNG was converted to another format (the PNG carrier no
-    // longer fits), recompression failed, extraction found no carrier, or the
-    // output has no well-formed IEND -- so a manifest is never silently dropped.
+    // PNG carry-through: splice the ORIGINAL caBX/iTXt manifest chunks into
+    // the recompressed PNG, immediately before the trailing IEND chunk.
+    // Fail-safe to skip-not-strip (serve the original bytes byte-for-byte) on
+    // ANY anomaly -- the PNG was converted to another format (the PNG carrier
+    // no longer fits), recompression failed, extraction found no carrier, or
+    // the output has no well-formed IEND -- so a manifest is never silently
+    // dropped.
     // The bytes are never parsed or re-authored.
     if (png_carry) {
       bool carried = false;
@@ -1589,13 +1591,13 @@ inline bool ImageImpl::ComputeOutputContentsFromGifOrPng(
     }
   }
 
-  // the design record Stream E pick-smaller for GIF/PNG sources. Attempt an AVIF encode of
+  // AVIF pick-smaller for GIF/PNG sources. Attempt an AVIF encode of
   // the same source and adopt it only if it succeeds and is smaller than the
   // WebP/JPEG/PNG candidate produced above (or if nothing was produced). The
   // AVIF class mirrors the WebP ladder: animated -> AVIS, photographic -> lossy
   // AVIF (alpha gated by allow_avif_alpha), otherwise lossless AVIF. C2PA is
   // guarded upstream: a manifest-bearing non-JPEG source already returned
-  // skip-not-strip in ComputeOutputContents, EXCEPT the design record PNG carry
+  // skip-not-strip in ComputeOutputContents, EXCEPT the PNG carry
   // path, which reaches here with suppress_avif_candidate set (the carry
   // splice only fits a PNG output, so an AVIF winner would be discarded).
   // Gate on the cheap capability check first; MayConvert() (which consumes a

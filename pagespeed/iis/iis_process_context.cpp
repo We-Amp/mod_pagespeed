@@ -137,7 +137,7 @@ GoogleString ResolveWorkerIdentity(std::vector<BYTE>* sid_out) {
 }  // namespace
 
 
-// the design record §5: gate the "AutoCreateCachePath: on|off" INFO line so it
+// Gate the "AutoCreateCachePath: on|off" INFO line so it
 // fires once per process, not once per site. IisProcessContext is
 // per-site (constructed in iis_module_factory.cpp per site_app_id), but
 // the AutoCreateCachePath directive is process-scope (kProcessScopeStrict
@@ -177,7 +177,7 @@ IisProcessContext::IisProcessContext(
 	// on the worker token in ResolveWorkerIdentity) so the factory's
 	// EnsureDirectoryWritable can build an ACE without re-resolving via
 	// the locale-fragile LookupAccountNameW path under restricted AppPool
-	// tokens. See the design record §3a.
+	// tokens.
 	app_pool_identity_ = ResolveWorkerIdentity(&worker_sid_buf_);
 }
 
@@ -284,9 +284,9 @@ IisServerContext* IisProcessContext::GetServerContext(const GoogleString& site_a
 
 		// Verify the cache path is configured, exists, and is writable by the
 		// worker identity. Each failure mode populates init_failure_kind_ +
-		// init_error_message_ + failed_init_path_ (set on failure only per
-		// the design record §4 last paragraph; renamed from failed_cache_path_ per
-		// since LogDir failures now use the same member) so the
+		// init_error_message_ + failed_init_path_ (set on failure paths
+		// only; renamed from failed_cache_path_ since LogDir
+		// failures now use the same member) so the
 		// local-only error page in
 		// IisHttpModule::OnBeginRequest can render an actionable diagnostic
 		// (which path, which identity, which OS error) and a stable
@@ -308,7 +308,7 @@ IisServerContext* IisProcessContext::GetServerContext(const GoogleString& site_a
 			return NULL;
 		}
 
-		// the design record §5: emit the AutoCreateCachePath status once per
+		// Emit the AutoCreateCachePath status once per
 		// process (this IisProcessContext is per-site; the directive is
 		// process-scope). The std::call_once gate ensures multi-site
 		// hosts get one line not N.
@@ -320,7 +320,7 @@ IisServerContext* IisProcessContext::GetServerContext(const GoogleString& site_a
 				"AutoCreateCachePath: %s", on ? "on" : "off");
 		});
 
-		// the design record §3 +: when AutoCreateCachePath is on
+		// when AutoCreateCachePath is on
 		// (default) AND the path passes the hardcoded prefix guardrail
 		// (PageSpeed\cache\ OR IISWebSpeed\cache\), delegate to the
 		// factory's mkdir+probe+conditional-ACL sequence. On success,
@@ -445,7 +445,7 @@ IisServerContext* IisProcessContext::GetServerContext(const GoogleString& site_a
 			return NULL;
 		}
 
-		// LogDir auto-create — the referenced issue, the design record §Operational.
+		// LogDir auto-create — the referenced issue.
 		// Parallel structure to the cache path block above; deliberately
 		// placed AFTER cache succeeds so cache failures (the louder,
 		// trial-customer-visible class) render their dedicated

@@ -7,10 +7,11 @@
 // touches the network.
 //
 // CachedKeyDirectoryProvider memoizes an inner provider's results in a Cyclone
-// CacheInterface. Cyclone exposes only
-// Get/Put/Delete (NO per-entry TTL), so the TTL/expiry is encoded INSIDE the
-// serialized value and checked on Get; negative (not-found / error) results are
-// cached with a shorter TTL to prevent fetch storms. Delete() invalidates.
+// CacheInterface -- the engine's own cache, deliberately not a second, parallel
+// cache stack. Cyclone exposes only Get/Put/Delete (NO per-entry TTL), so the
+// TTL/expiry is encoded INSIDE the serialized value and checked on Get;
+// negative (not-found / error) results are cached with a shorter TTL to prevent
+// fetch storms. Delete() invalidates.
 
 #ifndef PAGESPEED_KERNEL_WEBBOTAUTH_KEY_DIRECTORY_H_
 #define PAGESPEED_KERNEL_WEBBOTAUTH_KEY_DIRECTORY_H_
@@ -89,8 +90,7 @@ bool DeserializeCacheEntry(StringPiece blob, KeyLookupResult::Status* status,
 // literal JWKS document. `cache` must be a BLOCKING CacheInterface; a null or
 // non-blocking cache writes nothing (the cache-only request reader can only read
 // a blocking cache). Only positive entries are written -- the warmer never caches
-// negatives or errors (strict-expiry: stale entries lapse on their own TTL, see
-// the design record A2 D4).
+// negatives or errors (strict-expiry: stale entries lapse on their own TTL).
 // If `written_kids` is non-null it is filled with the set of kids written, so a
 // caller (the warmer) can prune kids that have vanished from the directory since
 // the previous refresh.
@@ -150,10 +150,11 @@ class CachedKeyDirectoryProvider : public KeyDirectoryProvider {
 
 // Resolves a key by trying each provider in order and returning the first
 // kFound. Used by the nginx request path to layer a cache-only remote directory
-// (warm-fetched keys) in FRONT of the operator-local StaticKeyDirectory file
-//: a managed remote directory wins, the static file is the seed /
-// fallback, and with no remote layer configured the chain is just the local
-// file (behavior identical to A1 v1). Does NOT own the providers.
+// (warm-fetched keys) in FRONT of the operator-local StaticKeyDirectory file:
+// a managed remote directory wins, the static file is the seed / fallback, and
+// with no remote layer configured the chain is just the local file (behavior
+// identical to the original local-file-only verifier). Does NOT own the
+// providers.
 //
 // If no provider returns kFound, the chain returns kNotFound when ANY provider
 // reported kNotFound (the host was reachable but the key is absent) and kError

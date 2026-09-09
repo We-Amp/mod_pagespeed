@@ -278,7 +278,6 @@ class RewriteDriverFactory {
   // to require the canonical "PageSpeed\\cache\\" or
   // "IISWebSpeed\\cache\\" prefix; see iis_rewrite_driver_factory.cpp.
   //
-  // See the design record, the referenced issue.
   virtual bool IsPathInAutoCreatePrefix(const GoogleString& path) {
     return true;
   }
@@ -294,7 +293,6 @@ class RewriteDriverFactory {
   // parameter on IsPathInAutoCreatePrefix) so the caller's intent is
   // clear at the call site and POSIX overrides remain trivial defaults.
   //
-  // See the design record §Operational, the referenced issue.
   virtual bool IsLogDirInAutoCreatePrefix(const GoogleString& path) {
     return true;
   }
@@ -336,7 +334,6 @@ class RewriteDriverFactory {
   // overrides ignore the parameter — directive-parse-time mkdir has
   // already established ownership/permissions via umask.
   //
-  // See the design record, the referenced issue.
   virtual bool EnsureDirectoryWritable(const GoogleString& path,
                                        GoogleString* error_message,
                                        uint32_t acl_mask = 0);

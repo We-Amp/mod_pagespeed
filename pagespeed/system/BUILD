@@ -22,7 +22,7 @@ licenses(["notice"])  # Apache 2
 # Edit them there — that is the single source of truth.
 
 # =============================================================================
-# the design record optimization thread-count policy.
+# Optimization thread-count policy.
 # Standalone so the effective-CPU-budget detection and the budget arithmetic
 # can be unit-tested without a server, a container, or a particular host.
 # =============================================================================

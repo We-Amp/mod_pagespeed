@@ -17,7 +17,7 @@
  * under the License.
  */
 
-// the design record: how many optimization threads a single server process runs.
+// How many optimization threads a single server process runs.
 //
 // Optimization work -- image transcode, CSS and JavaScript parse and minify --
 // is CPU-bound, so the budget is cores.  But every supported server runs
@@ -87,11 +87,11 @@
 
 namespace net_instaweb {
 
-// the design record D2, as amended by A5.  The fraction of the machine that *one*
-// optimization worker pool may occupy under sustained load, across all server
-// processes.  Half the machine leaves the other half for serving requests,
-// which is the concern behind both the historical "cap it at 4" and the IIS
-// module's halving of its optimization pools relative to its HTML pool.
+// The fraction of the machine that *one* optimization worker pool may occupy
+// under sustained load, across all server processes.  Half the machine leaves
+// the other half for serving requests, which is the concern behind both the
+// historical "cap it at 4" and the IIS module's halving of its optimization
+// pools relative to its HTML pool.
 //
 // Per pool, not shared between the two: see the aggregate bound at the top of
 // this file, and the exception the per-process floor makes to it.  The
@@ -112,10 +112,9 @@ const int kOptimizationCpuShareDenominator = 2;
 // NumExpensiveRewriteThreads will install in a worker pool.  It is applied
 // where the directive argument is parsed, so it does not bound the computed
 // path, which needs no bound of its own: that path is already a fraction of
-// the machine.  the design record D4 asks for a max(1, ...) clamp
-// at pool construction as a backstop; this upper bound is an addition made
-// during implementation and is not in the ADR, so it is stated here rather
-// than cited (an ADR amendment should pick it up).  A larger
+// the machine.  The policy proper asks only for a max(1, ...) clamp at pool
+// construction as a backstop; this upper bound is an addition made during
+// implementation, so its whole rationale is stated here.  A larger
 // value is clamped to this and a warning naming both numbers is logged: an
 // explicit count that would create thousands of threads per server process is
 // a typo far more often than an intention, and "never oversubscribe the
@@ -125,7 +124,7 @@ const int kOptimizationCpuShareDenominator = 2;
 const int kMaxOptimizationThreadsPerPool = 1024;
 
 // Returned by a port that cannot say how many peer processes share the
-// machine with it.  the design record D1: such a port resolves to one thread per pool
+// machine with it.  Such a port resolves to one thread per pool
 // and logs that it did.  It never guesses a larger number -- silently
 // oversubscribing a machine is the failure mode this policy exists to end.
 const int kUnknownProcessConcurrency = -1;
@@ -143,7 +142,7 @@ enum CpuBudgetSource {
   kCpuBudgetFromCgroupQuota,
 };
 
-// the design record D2a.  effective_cores = min(online CPUs, affinity mask, cgroup
+// effective_cores = min(online CPUs, affinity mask, cgroup
 // quota).  Never the host's CPU count alone: a 2-CPU container on a 64-core
 // host reports 64, and getting that wrong is how such a container decides it
 // may run 32 optimization threads.
@@ -266,7 +265,7 @@ struct OptimizationThreadCounts {
   int expensive = 1;
 };
 
-// Applies the design record formula.  concurrent_processes of
+// Applies the policy formula.  concurrent_processes of
 // kUnknownProcessConcurrency (or anything <= 0) yields the minimum, 1 + 1:
 // a port that cannot determine its divisor never guesses higher.
 OptimizationThreadCounts ComputeOptimizationThreadCounts(

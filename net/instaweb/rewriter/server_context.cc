@@ -477,7 +477,7 @@ void ServerContext::ApplyInputCacheControl(const ResourceVector& inputs,
 }
 
 void ServerContext::ApplyRewrittenUrlCacheControl(ResponseHeaders* headers) {
-  // the design record: a rewritten output's URL embeds its content hash -- changed
+  // A rewritten output's URL embeds its content hash -- changed
   // content mints a new URL -- so the bytes behind a hash-committed
   // .pagespeed. URL can never change. When such a response is publicly
   // cacheable, say 'public' explicitly (unlocks shared caches that require

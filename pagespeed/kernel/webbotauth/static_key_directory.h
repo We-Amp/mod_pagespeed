@@ -7,8 +7,8 @@
 // safe to call directly on the request thread -- unlike NetFetchKeyDirectory,
 // whose async fetch cannot complete inline in an nginx phase handler.
 //
-// the design record Amendment A1, v1 scope: the FREE verifier resolves keys from an
-// operator-local key directory file. Automatic network refresh of the directory
+// v1 scope: the FREE verifier resolves keys from an operator-local key
+// directory file. Automatic network refresh of the directory
 // (NetFetchKeyDirectory + an off-request-path warm) is a deliberate FOLLOW-UP.
 //
 // Construction is from the JWKS document STRING (the nginx wiring reads the file

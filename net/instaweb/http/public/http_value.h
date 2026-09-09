@@ -79,8 +79,8 @@ class HTTPValue : public Writer {
   // StringPiece aliasing the mapped region (identical bytes to
   // ExtractContents) and *keepalive to a copy of the underlying
   // MappedSharedString (a cheap refcount bump on the Cyclone read handle,
-  // carrying the design record renew/force-wrap-deadline hooks).  The bytes in
-  // *str remain valid as long as *keepalive (or any copy) is alive.
+  // carrying the lease-renewal and forced-wrap-deadline hooks).  The bytes
+  // in *str remain valid as long as *keepalive (or any copy) is alive.
   // Returns false if not mapped or the entry is corrupt.
   bool ExtractMappedContents(StringPiece* str,
                              MappedSharedString* keepalive) const;
@@ -105,8 +105,10 @@ class HTTPValue : public Writer {
   // without copying.
   //
   // LIFETIME RULE: a mapped HTTPValue borrows cache-owned memory whose
-  // protection window is bounded (Cyclone lease pinning, the design record).  It must
-  // be consumed within the cache-callback / request-serving scope.  Any
+  // protection window is bounded: Cyclone pins the region only for the
+  // duration of a time-limited read lease, after which a wrapping writer
+  // may overwrite those bytes in place.  It must therefore be consumed
+  // within the cache-callback / request-serving scope.  Any
   // operation that lets the bytes escape into longer-lived objects --
   // share() (cache Put), Link(HTTPValue*) (e.g. Resource::LinkFallbackValue),
   // or a mutation (Write/SetHeaders) -- first collapses this value to owned

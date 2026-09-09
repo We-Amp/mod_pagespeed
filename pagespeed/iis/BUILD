@@ -51,8 +51,8 @@ cc_library(
     visibility = ["//visibility:public"],
 )
 
-# Decision core for the zero-copy aliased serve (CycloneZeroCopyServe,
-# the design record): chunking, copy-out and abort policy.  Header-only and free of
+# Decision core for the zero-copy aliased serve (CycloneZeroCopyServe):
+# chunking, copy-out and abort policy.  Header-only and free of
 # IIS/Windows headers (same pattern as iis_proxy_fetch_completion) so the
 # safety rules are unit-testable on every platform.
 cc_library(
@@ -65,7 +65,7 @@ cc_library(
 )
 
 # =============================================================================
-# IIS Native Module for PageSpeed — IISpeed adoption
+# IIS Native Module for PageSpeed — built on the adopted IISpeed code base
 # =============================================================================
 # Build with: bazel build --config=windows --config=clang-cl //pagespeed/iis:pagespeed_iis
 

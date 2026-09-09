@@ -40,12 +40,12 @@ namespace net_instaweb {
 
 namespace {
 
-// the design record emit-time forced-wrap margin: if a ceiling-forced wrap -- which
-// ignores the read lease -- is already reachable within this window when
-// the body is emitted, the stripe is too contended to alias; serve a
-// verified copy instead.  Strictly larger than the bucket's read-barrier
-// margin so an admitted serve is never de-aliased (and double-counted) by
-// its very first read.
+// Emit-time forced-wrap margin for the lease-pinned zero-copy serve: if a
+// ceiling-forced wrap -- which ignores the read lease -- is already
+// reachable within this window when the body is emitted, the stripe is too
+// contended to alias; serve a verified copy instead.  Strictly larger than
+// the bucket's read-barrier margin so an admitted serve is never de-aliased
+// (and double-counted) by its very first read.
 const uint64_t kEmitMarginNs = 2 * kMmapAliasReadBarrierMarginNs;
 
 // Whether the opted-in-but-ineligible diagnosis was already logged.  An
@@ -300,7 +300,7 @@ bool ApacheFetch::WriteMapped(const StringPiece& mmap_sp,
     }
   }
   if (alias_eligible) {
-    // the design record emit-time decision (intent-checked).  RenewLeaseStrict()
+    // Emit-time aliasing decision (intent-checked).  RenewLeaseStrict()
     // stamps a fresh lease AND revalidates the borrow, the same protocol
     // the initial cache read used; kOk means no wrap can overwrite the
     // region while the lease stays renewed, which the bucket's read()
@@ -329,7 +329,7 @@ bool ApacheFetch::WriteMapped(const StringPiece& mmap_sp,
     // protection), or a forced wrap within the margin: fall through to the
     // verified copy.
   }
-  // De-alias by copying, with the design record copy-then-verify
+  // De-alias by copying, with the copy-then-verify protocol
   // (CopyMappedVerified): a forced wrap ignores the lease and can race the
   // memcpy, so the borrow is re-checked AFTER the bytes were copied.  kTorn
   // fails closed; kOk/kCopyNow (region intact) and kLeasesOff (legacy, no

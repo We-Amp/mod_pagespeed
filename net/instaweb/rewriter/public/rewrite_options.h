@@ -355,8 +355,9 @@ class RewriteOptions {
   static const char kImageWebpRecompressionQualityForSmallScreens[];
   static const char kImageWebpAnimatedRecompressionQuality[];
   static const char kImageWebpTimeoutMs[];
-  // AVIF recompression-quality option names, mirroring the
-  // WebP quality options above.
+  // AVIF recompression-quality option names, mirroring the WebP quality
+  // options above one-for-one: AVIF is held at full WebP parity, so every
+  // WebP knob has an AVIF sibling with the same name shape and semantics.
   static const char kImageAvifQualityForSaveData[];
   static const char kImageAvifRecompressionQuality[];
   static const char kImageAvifRecompressionQualityForSmallScreens[];
@@ -1955,10 +1956,10 @@ class RewriteOptions {
   void set_respect_vary(bool x) { set_option(x, &respect_vary_); }
   bool respect_vary() const { return respect_vary_.value(); }
 
-  // the design record: agent_optimize negotiation toggle (OFF by default). On 1.1 this
+  // agent_optimize negotiation toggle (OFF by default). On 1.1 this
   // only enables Accept: text/markdown recognition + Vary: Accept on HTML; it
   // never changes the body (no markdown render). The operator flag is the
-  // only gate.
+  // only gate — no license or entitlement check sits behind it.
   void set_agent_optimize(bool x) { set_option(x, &agent_optimize_); }
   bool agent_optimize() const { return agent_optimize_.value(); }
 
@@ -2184,9 +2185,11 @@ class RewriteOptions {
     set_option(x, &preserve_image_provenance_);
   }
 
-  // the design record Level A: when true (and preserve_image_provenance() is on), JPEG and
-  // PNG manifest-bearing images are recompressed with their original C2PA
-  // manifest bytes carried into the output unmodified. No effect unless
+  // Opt-in provenance carry-through: when true (and preserve_image_provenance()
+  // is on), JPEG and PNG manifest-bearing images are recompressed with their
+  // original C2PA manifest bytes carried into the output unmodified. Without
+  // it the engine still never strips a manifest -- it declines the rewrite
+  // instead -- so this only upgrades skip-not-strip to carry. No effect unless
   // preserve_image_provenance() is also true.
   bool image_provenance_carry() const {
     return image_provenance_carry_.value();
@@ -3749,8 +3752,7 @@ class RewriteOptions {
   RangeBoundedOption<int64, -1, 100> image_webp_quality_for_save_data_;
   Option<int64> image_webp_timeout_ms_;
 
-  // Options related to AVIF compression, mirroring the WebP
-  // members above.
+  // Options related to AVIF compression, mirroring the WebP members above.
   RangeBoundedOption<int64, -1, 100> image_avif_recompress_quality_;
   RangeBoundedOption<int64, -1, 100>
       image_avif_recompress_quality_for_small_screens_;
@@ -3817,7 +3819,7 @@ class RewriteOptions {
   Option<bool> lowercase_html_names_;
   Option<bool> always_rewrite_css_;  // For tests/debugging.
   Option<bool> respect_vary_;
-  Option<bool> agent_optimize_;  // the design record
+  Option<bool> agent_optimize_;  // Accept: text/markdown negotiation.
   Option<bool> respect_x_forwarded_proto_;
   Option<bool> flush_html_;
   // If set to true, ProxyFetch will request a flush on its RewriteDriver when

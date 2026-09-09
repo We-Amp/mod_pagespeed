@@ -69,7 +69,7 @@
 
 namespace net_instaweb {
 
-// the design record (2026-07-07): result of the intent-checked renewal a zero-copy
+// Result of the intent-checked lease renewal a zero-copy
 // embedder must call before every aliased send of a borrowed region
 // (RenewLeaseStrict).  Mirrors cyclone::LeaseRenewal (kept an independent
 // embedder-side type so this header does not depend on cyclone).
@@ -84,14 +84,14 @@ enum class LeaseRenewal : std::uint8_t {
 // The callback receives a user-provided data pointer.
 using MappedReleaseCallback = void (*)(void* user_data);
 
-// the design record zero-copy lease hooks (optional).  Re-stamp the read lease
+// Zero-copy lease hooks (optional).  Re-stamp the read lease
 // pinning the mapped region; returns nonzero if still valid, 0 if the
 // region may have been overwritten (embedder must copy).
 using MappedRenewCallback = int (*)(void* user_data);
 // Ns until a ceiling-forced wrap could overwrite the mapped region;
 // UINT64_MAX when none is deferred.
 using MappedNsUntilForcedWrapCallback = uint64_t (*)(void* user_data);
-// the design record intent-checked renewal for the aliased path; returns a
+// Intent-checked renewal for the aliased path; returns a
 // LeaseRenewal value as int (see RenewLeaseStrict()).
 using MappedRenewStrictCallback = int (*)(void* user_data);
 
@@ -129,7 +129,7 @@ class MappedSharedString {
       const char* data, size_t size, MappedReleaseCallback release_callback,
       void* release_data);
 
-  // As above, additionally carrying the design record lease hooks so a zero-copy
+  // As above, additionally carrying the lease hooks so a zero-copy
   // embedder can renew the lease and query the force-wrap deadline while it
   // holds the borrow.  release_data is passed to all three callbacks.
   static MappedSharedString FromMappedView(
@@ -168,18 +168,18 @@ class MappedSharedString {
   // Returns true if this is the only reference to the underlying storage.
   bool unique() const;
 
-  // the design record: re-stamp the read lease pinning a mapped view.  Returns true
+  // Re-stamp the read lease pinning a mapped view.  Returns true
   // if still valid (epoch unchanged), false if the region may have been
   // overwritten (embedder must copy) or not applicable (owned / no hook).
   bool RenewLease() const;
-  // the design record (2026-07-07): intent-checked renewal for the ALIASED zero-copy
+  // Intent-checked renewal for the ALIASED zero-copy
   // path.  The embedder MUST call this before every aliased send of the
   // borrowed region and act on the result (kOk keep aliasing; kCopyNow /
   // kLeasesOff de-alias by copying; kTorn abort).  Owned string / no hook
   // returns kLeasesOff (no lease to check).  See RenewLease() for the
   // epoch-only variant used by the copy-then-verify path.
   LeaseRenewal RenewLeaseStrict() const;
-  // the design record: ns until a ceiling-forced wrap could overwrite a mapped view;
+  // Ns until a ceiling-forced wrap could overwrite a mapped view;
   // UINT64_MAX when none deferred / not applicable (owned / no hook).
   uint64_t NsUntilForcedWrap() const;
 
@@ -221,7 +221,7 @@ class MappedSharedString {
   std::variant<SharedString, std::shared_ptr<MappedView>> storage_;
 };
 
-// the design record verified de-alias, the one blessed way to turn borrowed mapped
+// Verified de-alias, the one blessed way to turn borrowed mapped
 // bytes into owned bytes: copies 'span' (which must alias the region pinned
 // by 'keepalive') into *out, then re-checks the borrow AFTER the memcpy
 // (copy-then-verify -- a ceiling-forced wrap ignores the read lease and can

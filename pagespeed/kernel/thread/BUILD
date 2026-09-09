@@ -140,7 +140,7 @@ cc_library(
 )
 
 # Windows-native threading using Win32 primitives (CRITICAL_SECTION, SRWLOCK,
-# CONDITION_VARIABLE). Adopted from IISpeed per the design record.
+# CONDITION_VARIABLE). Adopted from the IISpeed code base.
 # Use this for IIS module builds on Windows.
 cc_library(
     name = "win_thread",

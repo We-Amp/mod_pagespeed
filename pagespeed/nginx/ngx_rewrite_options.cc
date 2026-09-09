@@ -155,7 +155,7 @@ void NgxRewriteOptions::AddProperties() {
       "backing the /v1/daemon/* admin endpoints.  Empty disables them.",
       true);
 
-  // the design record A1 Web-Bot-Auth (observe-only RFC 9421 verifier). All default off /
+  // Web-Bot-Auth (observe-only RFC 9421 verifier). All default off /
   // empty: zero behavior change unless the operator opts in.
   add_ngx_option(false, &NgxRewriteOptions::web_bot_auth_, "wba", kWebBotAuth,
                  kServerScope,
@@ -184,7 +184,7 @@ void NgxRewriteOptions::AddProperties() {
       "the measurement beacons and lazyload for that request; never blocks it. "
       "Requires WebBotAuth. Default off (verdict stays observe-only).",
       false);
-  // the design record Bar-A (experimental): opt-in verified-crawl counter mode. One of
+  // Experimental: opt-in verified-crawl counter mode. One of
   // off (default) | private | public; gates the well-known counter endpoint
   // /.well-known/webbotauth-counter. NON-secret; the gating bearer token is a
   // SEPARATE secret carried via the PAGESPEED_WEB_BOT_AUTH_COUNTER_TOKEN env
@@ -201,7 +201,8 @@ void NgxRewriteOptions::AddProperties() {
   add_ngx_option(
       "", &NgxRewriteOptions::web_bot_auth_directory_host_, "wbadh",
       kWebBotAuthDirectoryHost, kServerScope,
-      "The signer directory's host identity: the warm-fetch cache key, paired with WebBotAuthKeyDirectoryUrl. Ignored by the local-file "
+      "The signer directory's host identity: the warm-fetch cache key, "
+      "paired with WebBotAuthKeyDirectoryUrl. Ignored by the local-file "
       "static provider. Never request-derived. Default empty.",
       false);
   add_ngx_option("", &NgxRewriteOptions::web_bot_auth_verified_bots_, "wbavb",
@@ -214,7 +215,7 @@ void NgxRewriteOptions::AddProperties() {
                  "directory, copied locally by the operator) used to verify "
                  "signatures. A1 v1: no network fetch. Default empty.",
                  false);
-  // the design record A2 network warm-fetch (default empty => off; A1 v1 behavior intact).
+  // Network warm-fetch (default empty => off; local-file behavior intact).
   add_ngx_option(
       "", &NgxRewriteOptions::web_bot_auth_key_directory_url_, "wbakdu",
       kWebBotAuthKeyDirectoryUrl, kServerScope,
@@ -238,7 +239,7 @@ void NgxRewriteOptions::AddProperties() {
       "3600. Default empty.",
       false);
 
-  // the design record A3 RSL-CAP enforcement (PAID; demand-gated). All default off /
+  // RSL-CAP enforcement (PAID; demand-gated). All default off /
   // empty: zero behavior change unless the operator explicitly opts in. When
   // enabled, the validator verdict maps to an inline 401/402; the engine never
   // settles/meters money.
@@ -282,7 +283,7 @@ void NgxRewriteOptions::AddProperties() {
                  "whose iss != this value is rejected (401). Use when a "
                  "directory host may serve multiple issuers. Default empty.",
                  false);
-  // the design record A2 network warm-fetch for the RSL-CAP issuer directory (mirrors the
+  // Network warm-fetch for the RSL-CAP issuer directory (mirrors the
   // WebBotAuth* warm-fetch options; default empty => v1 static-file behavior).
   add_ngx_option(
       "", &NgxRewriteOptions::rsl_cap_key_directory_url_, "rckdu",

@@ -44,7 +44,7 @@ cc_library(
     ],
 )
 
-# Web Bot Auth opt-in counter store:
+# Web Bot Auth opt-in counter store (EXPERIMENTAL, default off):
 # a fixed-layout, memory-mapped, cross-process counter file (per-signer slot
 # table + coarse verify-latency histogram + a boot identity) that the nginx
 # module maps and the /.well-known/webbotauth-counter endpoint reads. Kept
@@ -77,7 +77,7 @@ cc_library(
     ],
 )
 
-# the design record A2 background key-directory warmer: a dedicated per-worker thread that
+# Background key-directory warmer: a dedicated per-worker thread that
 # does a bounded, SSRF-guarded blocking HTTPS fetch of the directory JWKS off the
 # request path and populates the shared blocking cache (the request path reads
 # cache-only). Pulls the engine fetcher + http stack + threading; SEPARATE from

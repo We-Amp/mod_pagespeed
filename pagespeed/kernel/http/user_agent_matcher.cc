@@ -170,7 +170,7 @@ const char* kLegacyWebpBlockedlist[] = {
 //                   Catalina and Sequoia read identically.  Safari 16 is the
 //                   first version that cannot run on Catalina, which makes
 //                   Version/16 the earliest decoder-safe floor derivable from
-//                   the UA alone.  See the design record amendment of 2026-08-02.
+//                   the UA alone.
 //   Firefox 132+ -- WebP since Firefox 65 on every OS (not OS-gated, so no
 //                   Safari-style consideration applies), but Firefox 132
 //                   dropped image types from the navigation Accept header
@@ -255,7 +255,7 @@ const char* kWebpNoNavigationAcceptBlockedlist[] = {
     // have never existed and, under Apple's OS-aligned renumbering (Safari 26
     // shipped alongside macOS 26 in 2025, incrementing yearly), cannot exist
     // before the scheme reaches triple digits around the year 2099.  No real
-    // population is lost -- the design record "never lose a real population" rule is
+    // population is lost -- the "never lose a real population" rule is
     // satisfied vacuously -- while single- and two-digit futures (16-19, 26+,
     // 99) are untouched, which is exactly why the same catch-all shape is NOT
     // usable for single-digit majors: "*Version/1*Safari/*" would swallow
@@ -543,7 +543,7 @@ UserAgentMatcher::UserAgentMatcher()
     legacy_webp_.Disallow(kLegacyWebpBlockedlist[i]);
   }
 
-  // the design record.  Allows first, denies second: FastWildcardGroup lets the
+  // Allows first, denies second: FastWildcardGroup lets the
   // latest-registered matching rule win, so registering the block list after
   // the allow list is what makes "deny beats allow" true here.
   for (int i = 0, n = arraysize(kWebpNoNavigationAcceptAllowlist); i < n; ++i) {

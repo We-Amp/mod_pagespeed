@@ -254,7 +254,7 @@ void RewriteDriver::PopulateRequestContext() {
     request_context_->SetAcceptsWebp(
         request_properties_->SupportsWebpRewrittenUrls());
     // The broad bit above includes user-agent-derived grants (the legacy
-    // Android allow-list and the design record no-navigation-Accept fallback). The
+    // Android allow-list and the no-navigation-Accept fallback). The
     // second bit records the narrower "the request itself advertised
     // image/webp" fact -- RequestProperties::SupportsWebpInPlace() is exactly
     // that predicate -- so that the Vary: Accept cache-validity check can
@@ -1350,9 +1350,9 @@ class CacheCallback : public OptionsAwareHTTPCacheCallback {
       // region into the port output buffer.  The mmap StringPiece is
       // extracted BEFORE output_resource_->Link collapses the mapped value
       // (Link -> HTTPValue::share() -> owned copy), and mapped_keepalive
-      // pins the read handle (with the design record renew/force-wrap hooks)
-      // until the port send completes.  Recording/transforming wrappers
-      // override WriteMapped to force the copying Write.
+      // pins the read handle (with its lease-renewal and wrap-detection
+      // hooks) until the port send completes.  Recording/transforming
+      // wrappers override WriteMapped to force the copying Write.
       HTTPCache* http_cache = driver_->server_context()->http_cache();
       MappedSharedString mapped_keepalive;
       const bool alias_serve =
@@ -1376,7 +1376,7 @@ class CacheCallback : public OptionsAwareHTTPCacheCallback {
         success = alias_serve || value->ExtractContents(&content);
       }
       if (success) {
-        // the design record: this is a hash-committed .pagespeed. URL serve, so
+        // This is a hash-committed .pagespeed. URL serve, so
         // upgrade to 'public, immutable' where publicly cacheable. Applied
         // to the wire response only -- the cached entry stays unstamped --
         // and only for external serving: a nested driver here means a
@@ -1417,7 +1417,7 @@ class CacheCallback : public OptionsAwareHTTPCacheCallback {
                         (ResponseHeaders::GetVaryOption(
                             driver_->options()->respect_vary())),
                         response_headers, content, handler_);
-        // the design record: stamp the wire response only, after the unstamped
+        // Stamp the wire response only, after the unstamped
         // headers went into the cache above; external serving only (see
         // the is_nested() rationale on the cache-hit branch above).
         if (!driver_->is_nested()) {
@@ -2588,12 +2588,13 @@ bool OptionsAwareHTTPCacheCallback::IsCacheValid(
   // A cached WebP response that says "Vary: Accept" was selected by an Accept
   // header, so it is valid for this request only if this request's own Accept
   // header would have selected it too. The narrow accepts_webp bit is used
-  // deliberately: a user-agent-derived grant (legacy Android, or the design record
-  // Safari/Firefox fallback) means the client would DECODE the bytes, but the
-  // entry's Vary claim would be false as-selected, so those requests
-  // revalidate against the origin instead of reusing the entry. This is
-  // stricter than the pre-the design record behavior, which reused such entries for the
-  // legacy-Android UA grant as well. The .pagespeed. resource path
+  // deliberately: a user-agent-derived grant (legacy Android, or the
+  // Safari/Firefox no-navigation-Accept fallback) means the client would
+  // DECODE the bytes, but the entry's Vary claim would be false as-selected,
+  // so those requests revalidate against the origin instead of reusing the
+  // entry. This is stricter than the behavior before the Safari/Firefox
+  // fallback existed, which reused such entries for the legacy-Android UA
+  // grant as well. The .pagespeed. resource path
   // (CacheCallback::IsCacheValid in this file) intentionally keeps consulting
   // the broad accepts_webp() bit -- there the format is committed in the URL
   // and rewritten .webp entries carry no Vary: Accept, so this clause does

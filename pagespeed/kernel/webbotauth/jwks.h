@@ -29,8 +29,8 @@ bool ExtractEd25519Key(StringPiece jwks_document, StringPiece kid,
 
 // Enumerate EVERY kid-bearing OKP/Ed25519 key in `jwks_document`, appending each
 // as a (kid, raw_key_32) pair to *out. This is the whole-directory-per-host read
-// the background warmer uses to populate the cache from one fetch
-// (D2): the request path then resolves each kid cache-only, never fetching.
+// the background warmer uses to populate the cache from one fetch: the request
+// path then resolves each kid cache-only, never fetching.
 //
 // kid-LESS entries are intentionally SKIPPED: a cache entry is keyed by
 // (host, kid), so a key with no kid cannot be pre-populated under the keyid the

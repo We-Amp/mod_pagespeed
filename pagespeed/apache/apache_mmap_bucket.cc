@@ -85,7 +85,7 @@ void PoisonBucket(apr_bucket* b) {
 }
 
 // De-aliases 'b' in place: morphs it into a heap bucket over an owned copy
-// of its window, with the design record copy-then-verify -- a ceiling-forced
+// of its window, with a copy-then-verify -- a ceiling-forced
 // wrap ignores the lease and can race the memcpy, so the borrow is
 // re-checked AFTER the bytes were copied.  On kTorn the copied bytes may
 // be garbage: fail so the serve is aborted before the Content-Length
@@ -127,7 +127,7 @@ apr_status_t MmapBucketCopyOut(apr_bucket* b) {
 apr_status_t MmapBucketRead(apr_bucket* b, const char** str, apr_size_t* len,
                             apr_read_type_e block) {
   MmapBucketData* d = static_cast<MmapBucketData*>(b->data);
-  // the design record per-send barrier.  The core output filter re-reads every
+  // Per-send lease barrier.  The core output filter re-reads every
   // pending bucket (a fresh apr_bucket_read per bucket) when it rebuilds
   // its writev iovecs after every poll wait, so this intent-checked
   // revalidation runs in the same stack, microseconds before the kernel

@@ -714,7 +714,7 @@ bool RewriteDriverFactory::EnsureDirectoryWritable(
 
 void RewriteDriverFactory::InitStats(Statistics* statistics) {
   HTTPCache::InitStats(statistics);
-  // the design record CycloneZeroCopyServe observability (0 when the flag is off):
+  // CycloneZeroCopyServe observability (0 when the flag is off):
   // aliased = serves that took the zero-copy aliased path; copied_out =
   // serves whose aliased tail was copied out before a reachable
   // ceiling-forced wrap or an in-flight wrap on the stripe (the read-side

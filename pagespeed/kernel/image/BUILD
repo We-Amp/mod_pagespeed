@@ -22,7 +22,7 @@ libaom_from_source()
 
 libavif_from_source()  # add with_dav1d = True once :dav1d is enabled
 
-# AVIF codec cc_library — mirrors :webp (below). Wraps the
+# AVIF codec cc_library (decode + encode) — mirrors :webp (below). Wraps the
 # libavif static lib (:avif_lib, codecs threaded via cmake) with the
 # AvifFrameReader (decode + animation) and AvifFrameWriter (encode + animation).
 cc_library(

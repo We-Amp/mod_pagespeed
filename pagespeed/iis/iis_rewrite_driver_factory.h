@@ -32,7 +32,7 @@ class IisRewriteDriverFactory : public SystemRewriteDriverFactory {
   IisRewriteDriverFactory(IisProcessContext* process_context, std::wstring app_pool_name, SystemThreadSystem* thread_system, AbstractSharedMem* shm_runtime);
   virtual ~IisRewriteDriverFactory();
 
-  // the design record §3b +: IIS-specific override of the cross-port
+  // IIS-specific override of the cross-port
   // prefix-scope predicate. Canonicalizes |path| via GetFullPathNameW
   // and case-insensitively requires it to begin with one of the
   // hardcoded prefixes:
@@ -43,7 +43,7 @@ class IisRewriteDriverFactory : public SystemRewriteDriverFactory {
   // to enforce).
   bool IsPathInAutoCreatePrefix(const GoogleString& path) override;
 
-  // the design record §Operational + the referenced issue: IIS-specific prefix-scope
+  // IIS-specific prefix-scope
   // predicate for the LogDir auto-create flow. Same canonicalize +
   // case-insensitive comparison shape as IsPathInAutoCreatePrefix
   // above, but the hardcoded prefixes target the logs tree:
@@ -53,7 +53,7 @@ class IisRewriteDriverFactory : public SystemRewriteDriverFactory {
   // no diagnostic page — legacy behaviour).
   bool IsLogDirInAutoCreatePrefix(const GoogleString& path) override;
 
-  // the design record §3: IIS-specific implementation of the cross-port
+  // IIS-specific implementation of the cross-port
   // server-context init-time filesystem-prep hook. Sequence:
   //   (c) cheap belt: mkdir  — RecursivelyMakeDir (same primitive Apache
   //                            uses at directive-parse time)
@@ -72,14 +72,14 @@ class IisRewriteDriverFactory : public SystemRewriteDriverFactory {
                                GoogleString* error_message,
                                uint32_t acl_mask = 0) override;
 
-  // the design record §3f cache-path ACL mask: Modify
+  // Cache-path ACL mask: Modify
   // (FILE_GENERIC_READ | FILE_GENERIC_WRITE | FILE_GENERIC_EXECUTE |
   // DELETE), mirroring Product.wxs GrantCacheAcl. Returned as uint32_t
   // to keep the header platform-neutral; implementation in the .cpp
   // casts to DWORD where needed.
   uint32_t CachePathAclMask() const;
 
-  // the design record §Operational + the referenced issue LogDir ACL mask: RX+W
+  // the referenced issue LogDir ACL mask: RX+W
   // (FILE_GENERIC_READ | FILE_GENERIC_WRITE | FILE_GENERIC_EXECUTE,
   // NO DELETE), mirroring Product.wxs GrantLogAcl. Narrower than
   // CachePathAclMask() because workers append to logs but admin owns

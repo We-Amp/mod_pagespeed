@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 We-Amp B.V.
 //
-// Shared machinery for the design record D2 differential HTML parse harness
+// Shared machinery for the differential HTML parse harness
 // (tools/html-parse-corpus/SPEC.md): a recording HtmlFilter that renders the
 // parse event stream, plus the parse-session driver. Header-only so the
 // probe (html_parse_probe.cc) and the fuzz target (html_fuzz.cc) exercise

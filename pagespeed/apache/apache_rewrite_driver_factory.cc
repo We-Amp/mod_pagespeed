@@ -167,7 +167,9 @@ void ApacheRewriteDriverFactory::LogThreadCountResolution() {
   const int processes = concurrent_process_count();
 
   // kWarning throughout: Apache's default LogLevel is warn, and a resolution
-  // an operator cannot see is a resolution nobody made.
+  // an operator cannot see is a resolution nobody made: emitting this below
+  // the default level is most of why Apache ran a single optimization thread
+  // for years without anyone noticing.
   if (processes <= 0) {
     message_handler()->Message(
         kWarning,

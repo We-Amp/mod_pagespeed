@@ -91,8 +91,9 @@ void AgentOptimizeVaryFilter::StartDocumentImpl() {
   }
 
   // This filter is only added when options()->agent_optimize() is set (see
-  // rewrite_driver_filter_init.cc) — the operator flag is the whole gate
-  //. The remaining condition is an Accept: text/markdown request.
+  // rewrite_driver_filter_init.cc) — the operator flag is the whole gate; the
+  // feature carries no license/entitlement check of its own. The remaining
+  // condition is an Accept: text/markdown request.
   // 1.1 never serves markdown — the sole effect here is the Vary: Accept signal.
   if (!RequestAcceptsMarkdown(driver()->request_headers())) {
     return;

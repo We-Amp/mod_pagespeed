@@ -56,18 +56,20 @@ struct MpmProcessInfo {
   // False if ap_mpm_query() could not answer.
   bool query_ok;
   // AP_MPMQ_MAX_DAEMONS: the configured child-process count.  This is exactly
-  // the design record process-concurrency divisor on all three POSIX MPMs, without
-  // any arithmetic of our own: prefork answers with MaxRequestWorkers, worker
-  // and event answer with MaxRequestWorkers / ThreadsPerChild.  Reads as 0
-  // before httpd's check_config phase has run.
+  // the process-concurrency divisor the thread-count policy needs -- each
+  // child builds its own optimization pools, so the machine's CPU budget is
+  // split this many ways -- on all three POSIX MPMs, without any arithmetic
+  // of our own: prefork answers with MaxRequestWorkers, worker and event
+  // answer with MaxRequestWorkers / ThreadsPerChild.  Reads as 0 before
+  // httpd's check_config phase has run.
   int max_daemons;
 };
 
 // The ap_mpm_query() key QueryMpmProcessInfo() asks with.  Exposed only so
 // that the *choice* of key is pinned by a test instead of living as one
-// identifier inside one call: which key supplies the design record divisor is the
-// decision, not an implementation detail, and every plausible alternative
-// compiles and returns a number.
+// identifier inside one call: which key supplies the process-concurrency
+// divisor is the decision, not an implementation detail, and every plausible
+// alternative compiles and returns a number.
 //
 //   AP_MPMQ_MAX_DAEMONS         the configured child count -- what we want.
 //   AP_MPMQ_MAX_DAEMON_USED     the high-water mark of children actually
@@ -85,7 +87,7 @@ extern const int kMpmProcessConcurrencyQuery;
 // post-config.
 MpmProcessInfo QueryMpmProcessInfo();
 
-// the design record process-concurrency divisor implied by info, or
+// The process-concurrency divisor implied by info, or
 // kUnknownProcessConcurrency (-1) when httpd could not tell us -- in which
 // case the policy takes the one-thread floor rather than guessing.  Pure;
 // exposed for testing.

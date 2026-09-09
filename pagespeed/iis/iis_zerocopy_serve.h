@@ -17,14 +17,14 @@
  * under the License.
  */
 
-// Decision core for the IIS zero-copy aliased serve (CycloneZeroCopyServe,
-// the design record).  Kept free of IIS/Windows headers (pure logic) so the safety
-// rules it encodes are unit-testable on every platform, following the
+// Decision core for the IIS zero-copy aliased serve (CycloneZeroCopyServe).
+// Kept free of IIS/Windows headers (pure logic) so the safety rules it
+// encodes are unit-testable on every platform, following the
 // iis_proxy_fetch_completion.h pattern.
 //
 // Model: the '.pagespeed.' rewritten-resource cache hit hands the port a
 // StringPiece aliasing a Cyclone mmap region plus a MappedSharedString pin
-// (read-lease keep-alive with the design record renew / force-wrap-deadline
+// (read-lease keep-alive with the renew / force-wrap-deadline
 // hooks).  The IIS sink serves the region as a sequence of bounded chunks,
 // each submitted with WriteEntityChunkByReference + an ASYNC flush; the
 // flush completion is IIS's authoritative "HTTP.sys is done reading this

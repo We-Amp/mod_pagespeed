@@ -90,7 +90,7 @@ const char kTrackOriginalContentLength[] = "TrackOriginalContentLength";
 const char kCreateSharedMemoryMetadataCache[] =
     "CreateSharedMemoryMetadataCache";
 
-// The literal that asks for the design record policy by name.
+// The literal that asks for the computed policy by name.
 const char kAutoThreadCountLiteral[] = "auto";
 
 // Parses a NumRewriteThreads / NumExpensiveRewriteThreads argument.  Accepts
@@ -102,7 +102,7 @@ const char kAutoThreadCountLiteral[] = "auto";
 // rejected, with a warning naming both the requested and the resolved count.
 // An explicit count is an override, so it is not the policy's business to
 // refuse it -- but installing thousands of threads per server process because
-// a digit was mistyped, silently, is exactly what the design record exists to stop.
+// a digit was mistyped, silently, is exactly what this policy exists to stop.
 bool ParseThreadCountArgument(StringPiece option, StringPiece arg, int* count,
                               GoogleString* msg, MessageHandler* handler) {
   if (StringCaseEqual(arg, kAutoThreadCountLiteral)) {
@@ -292,8 +292,9 @@ void SystemRewriteDriverFactory::WarnIfThreadCountsNotFinalized() {
   // call site is deleted -- the Apache one lives in a hand-written post-config
   // hook -- falls back to one worker in each pool and, because the resolution
   // never ran, never logs the line that would have said so.  That is the
-  // silent-failure mode the design record D6 is about, so say it out loud in every
-  // build, not only in debug ones.
+  // silent failure the policy's "always report the resolved counts" rule
+  // exists to prevent, so say it out loud in every build, not only in debug
+  // ones.
   DCHECK(thread_counts_finalized_)
       << "Rewrite worker pool created before thread counts were finalized";
   message_handler()->Message(
@@ -469,7 +470,7 @@ SystemRewriteDriverFactory::ParseAndSetOption1(StringPiece option,
   }
 
   // The two thread counts accept `auto` as a literal, with `0` as its alias,
-  // and reject anything negative.  the design record D4: a negative count used to
+  // and reject anything negative: a negative count used to
   // convert to size_t as SIZE_MAX on its way to the worker pools, which means
   // unbounded thread creation and a CHECK failure at child init.  Nothing
   // validated it, so the only symptom was the crash.

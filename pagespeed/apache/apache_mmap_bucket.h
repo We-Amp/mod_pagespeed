@@ -17,14 +17,14 @@
  * under the License.
  */
 
-// Zero-copy ALIASED serve, Apache sink (CycloneZeroCopyServe, the design record).
+// Zero-copy ALIASED serve, Apache sink (CycloneZeroCopyServe).
 //
 // A custom apr_bucket type whose window aliases a Cyclone memory-mapped
 // cache region, pinned by a refcounted MappedSharedString read-handle
 // reference.  Cyclone read leases defend the borrowed region against
 // NORMAL cache wraps only while freshly stamped, and a ceiling-FORCED
 // wrap overwrites pinned regions regardless, so the bucket enforces the
-// the design record barrier discipline through the bucket API itself:
+// lease barrier discipline through the bucket API itself:
 //
 //  * read() is the per-send barrier.  httpd's core output filter calls
 //    apr_bucket_read on every pending bucket to rebuild its writev iovecs
@@ -38,9 +38,9 @@
 //  * setaside() RETAINS BY COPY.  A bucket parked past the current filter
 //    pass (deferred core-filter writes via ap_save_brigade, mod_http2
 //    beams, async MPM write completion) would outlive any lease guarantee,
-//    so it morphs into an owned heap bucket, with the design record
-//    copy-then-verify: the borrow is re-checked AFTER the memcpy, because
-//    a forced wrap ignores the lease and can race the copy.
+//    so it morphs into an owned heap bucket, with a copy-then-verify:
+//    the borrow is re-checked AFTER the memcpy, because a forced wrap
+//    ignores the lease and can race the copy.
 //
 //  * destroy() drops this bucket's reference; the last reference releases
 //    the pin (and with it the Cyclone read handle).  split()/copy() share
@@ -64,7 +64,7 @@ namespace net_instaweb {
 
 class Variable;
 
-// the design record read-barrier forced-wrap margin: a bucket read keeps aliasing
+// Read-barrier forced-wrap margin: a bucket read keeps aliasing
 // only while a ceiling-forced wrap -- which ignores the read lease -- is at
 // least this far off.  The exposure the margin must cover is one
 // nonblocking writev burst issued in the same stack as the read
@@ -77,7 +77,7 @@ constexpr uint64_t kMmapAliasReadBarrierMarginNs =
     1000ULL * 1000 * 1000;  // 1 s
 
 // Creates a bucket whose window aliases 'span', which must point into the
-// mapped region pinned by 'pin' (is_mapped() and carrying the design record
+// mapped region pinned by 'pin' (is_mapped() and carrying the lease
 // renew/force-wrap hooks).  The bucket holds its own reference on the pin.
 // 'copied_out_stat' / 'renew_fail_stat' may be null; they count de-alias
 // copies and torn-borrow serve failures.  Returns nullptr on allocation

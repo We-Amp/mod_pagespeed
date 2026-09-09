@@ -83,11 +83,11 @@ GoogleString FactoryWin32ErrorString(DWORD code) {
 	return out;
 }
 
-// the design record §3b: prefix scope guardrail. Canonicalize via
-// GetFullPathNameW (resolves "." / ".." / relative segments BUT does
-// NOT resolve symlinks / junctions — that's why the reparse-point
-// check in §3d is also mandatory) and require the result to begin
-// (case-insensitive) with one of the supplied hardcoded prefixes.
+// Prefix scope guardrail. Canonicalize via GetFullPathNameW (resolves
+// "." / ".." / relative segments BUT does NOT resolve symlinks /
+// junctions — that's why the reparse-point check in
+// EnsureDirectoryWritable is also mandatory) and require the result to
+// begin (case-insensitive) with one of the supplied hardcoded prefixes.
 // Operator cannot widen the prefix via config — by design.
 //
 // Shared between IsPathInAutoCreatePrefixImpl (cache) and
@@ -132,7 +132,7 @@ bool IsPathInPrefixListImpl(const GoogleString& path,
 	return false;
 }
 
-// the design record §3b: prefix scope guardrail for the cache tree. See
+// Prefix scope guardrail for the cache tree. See
 // IsPathInPrefixListImpl above for the canonicalize+compare shape.
 //
 // thin wrapper IisRewriteDriverFactory::IsPathInAutoCreatePrefix
@@ -148,7 +148,7 @@ bool IsPathInAutoCreatePrefixImpl(const GoogleString& path) {
 		sizeof(kCachePrefixes) / sizeof(kCachePrefixes[0]));
 }
 
-// the design record §Operational + the referenced issue: prefix scope guardrail for
+// prefix scope guardrail for
 // the logs tree. Same shape as IsPathInAutoCreatePrefixImpl above but
 // with the logs-tree prefixes. Out-of-prefix LogDir values cause the
 // caller in IisProcessContext::GetServerContext to skip auto-create
@@ -289,7 +289,7 @@ private:
 		}
 	}
 
-	// the design record §3b + IIS prefix-scope predicate (cache).
+	// IIS prefix-scope predicate (cache).
 	// Thin wrapper over the file-scope helper so the cross-port virtual
 	// on RewriteDriverFactory can be overridden without exposing the
 	// Win32-specific implementation in the header.
@@ -298,7 +298,7 @@ private:
 		return IsPathInAutoCreatePrefixImpl(path);
 	}
 
-	// the design record §Operational + the referenced issue IIS prefix-scope predicate
+	// the referenced issue IIS prefix-scope predicate
 	// (logs). Parallel to IsPathInAutoCreatePrefix but matches the
 	// logs-tree prefixes. Caller in iis_process_context.cpp gates on
 	// this BEFORE delegating to EnsureDirectoryWritable, so the
@@ -310,7 +310,7 @@ private:
 		return IsLogDirInAutoCreatePrefixImpl(path);
 	}
 
-	// the design record §3f cache-path ACL mask: Modify, mirroring
+	// Cache-path ACL mask: Modify, mirroring
 	// Product.wxs GrantCacheAcl. Returned as uint32_t (not DWORD) to
 	// keep the header platform-neutral; identical underlying values.
 	uint32_t IisRewriteDriverFactory::CachePathAclMask() const {
@@ -318,7 +318,7 @@ private:
 			FILE_GENERIC_EXECUTE | DELETE;
 	}
 
-	// the design record §Operational + the referenced issue LogDir ACL mask: RX+W
+	// the referenced issue LogDir ACL mask: RX+W
 	// (no DELETE), mirroring Product.wxs GrantLogAcl. Workers append
 	// to logs but admin owns rotation, so DELETE is intentionally
 	// withheld — matches the WiX-side narrower grant.
@@ -327,7 +327,8 @@ private:
 			FILE_GENERIC_EXECUTE;
 	}
 
-	// the design record §3 IIS implementation. See header for sequence overview.
+	// IIS implementation of the cross-port init-time filesystem-prep
+	// hook. See header for sequence overview.
 	// Caller (IisProcessContext::GetServerContext) is expected to gate
 	// on IsPathInAutoCreatePrefix() / IsLogDirInAutoCreatePrefix() FIRST
 	// and skip this hook for out-of-prefix paths — removed
@@ -480,12 +481,12 @@ private:
 			return false;
 		}
 
-		// Construct an EXPLICIT_ACCESS_W directly. the design record §3f spec
-		// calls `BuildExplicitAccessWithSidW(...)` — that helper is
-		// not in the Windows SDK aclapi.h (only the *Name* and *Sid*
-		// (no W suffix) overloads exist, and the Sid overload takes
-		// the PSID via TRUSTEE.ptstrName cast). The structure init
-		// is straightforward and avoids any signature ambiguity.
+		// Construct an EXPLICIT_ACCESS_W directly. The obvious helper
+		// `BuildExplicitAccessWithSidW(...)` does not exist in the
+		// Windows SDK aclapi.h (only the *Name* and *Sid* (no W
+		// suffix) overloads exist, and the Sid overload takes the
+		// PSID via TRUSTEE.ptstrName cast). The structure init is
+		// straightforward and avoids any signature ambiguity.
 		// Mask is parameterized: |effective_acl_mask| resolves to
 		// CachePathAclMask() (Modify = RX+W+DELETE) for cache callers,
 		// or LogDirAclMask() (RX+W, no DELETE) for the LogDir caller

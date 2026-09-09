@@ -81,11 +81,12 @@ class AsyncFetch : public Writer {
 
   // Zero-copy serve of a memory-mapped cache value (CycloneZeroCopyServe).
   // 'mmap_sp' aliases bytes in a Cyclone mmap region; 'keepalive' pins the
-  // read handle (and carries the design record renew/force-wrap hooks) for as
-  // long as any copy of it is alive.  The default COPIES (via Write);
-  // NgxBaseFetch overrides it to alias the region into an nginx buffer and
-  // hold 'keepalive' until the send completes.  Wrapping fetches
-  // (SharedAsyncFetch) forward; recording/transforming wrappers force-copy.
+  // read handle (and carries the hooks that renew its lease and detect a
+  // forced wrap) for as long as any copy of it is alive.  The default
+  // COPIES (via Write); NgxBaseFetch overrides it to alias the region into
+  // an nginx buffer and hold 'keepalive' until the send completes.
+  // Wrapping fetches (SharedAsyncFetch) forward; recording/transforming
+  // wrappers force-copy.
   virtual bool WriteMapped(const StringPiece& mmap_sp,
                            const MappedSharedString& keepalive,
                            MessageHandler* handler) {

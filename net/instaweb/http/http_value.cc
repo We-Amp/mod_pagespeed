@@ -66,7 +66,7 @@ void HTTPValue::CollapseToOwned() {
   // StringPieces point into the mapped region and must stay valid for the
   // life of this HTTPValue (or until Clear()).
   //
-  // the design record note -- this copy is deliberately NOT epoch-verified.  A
+  // Borrow-safety note -- this copy is deliberately NOT epoch-verified.  A
   // verified collapse would need a failure channel, and none exists
   // cleanly: (a) the API is void and its callers (share() during
   // OutputResource::Link, CopyOnWrite before any mutation) have no failure

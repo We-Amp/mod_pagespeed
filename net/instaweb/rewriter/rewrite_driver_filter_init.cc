@@ -491,9 +491,9 @@ void RewriteDriver::AddPostRenderFilters() {
   if (rewrite_options->Enabled(RewriteOptions::kConvertMetaTags)) {
     AddOwnedPostRenderFilter(new MetaTagFilter(this));
   }
-  // the design record: when agent_optimize is on, advertise Vary: Accept on HTML for an
-  // entitled Accept: text/markdown request (no body change — 1.1 never renders
-  // markdown). Entitlement + Accept are checked inside the filter.
+  // When agent_optimize is on, advertise Vary: Accept on HTML for an
+  // Accept: text/markdown request (no body change — 1.1 never renders
+  // markdown). This flag is the whole gate; the filter checks only Accept.
   if (rewrite_options->agent_optimize()) {
     AddOwnedPostRenderFilter(new AgentOptimizeVaryFilter(this));
   }

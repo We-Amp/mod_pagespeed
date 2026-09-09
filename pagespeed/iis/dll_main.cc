@@ -18,7 +18,9 @@
  */
 
 // DLL entry point and IIS RegisterModule for PageSpeed IIS module.
-// Merges IISpeed's iisps.cpp initialization into 1.1's dll_main.cc.
+// Merges IISpeed's iisps.cpp initialization into 1.1's dll_main.cc: the IIS
+// port adopted IISpeed's production-hardened module code, so the two process
+// entry points became one.
 
 #define _WINSOCKAPI_
 #define WIN32_LEAN_AND_MEAN
@@ -135,7 +137,8 @@ BOOL APIENTRY DllMain(HMODULE hModule,
 
 
       // Create thread system and message handler.
-      // SystemThreadSystem uses WinThreadSystem on Windows.
+      // SystemThreadSystem uses WinThreadSystem on Windows -- the native
+      // Windows threading primitives adopted from IISpeed.
       // Keep the thread system + timer in globals so DLL_PROCESS_DETACH can free
       // them (message_handler owns only the mutex). See dll_thread_system above.
       net_instaweb::dll_thread_system = new net_instaweb::SystemThreadSystem();

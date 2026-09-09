@@ -102,8 +102,9 @@ class ApacheRewriteDriverFactory : public SystemRewriteDriverFactory {
   bool IsServerThreaded() override;
   int LookupThreadLimit() override;
 
-  // the design record D1.  httpd's configured child-process count, which is the number
-  // of processes that will each build their own optimization worker pools.
+  // The thread-count policy's process-concurrency divisor: httpd's configured
+  // child-process count, which is the number of processes that will each build
+  // their own optimization worker pools.
   // Available from post-config onwards, which is where FinalizeThreadCounts()
   // runs.
   int ConcurrentProcessCount() override;

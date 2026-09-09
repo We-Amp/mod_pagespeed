@@ -17,7 +17,7 @@
 // record. A relying party must form its own judgement about the observations
 // themselves.
 //
-// Scope guardrails:
+// Scope guardrails (FREE LOCAL tier only):
 //   * No Merkle-root anchoring, no transparency-log / Rekor anchoring.
 //   * No queryable API, no retention service, no entitlement / settlement.
 //     Those belong to the PAID anchored tier and are intentionally out of
@@ -99,7 +99,7 @@ struct VerifyResult {
 // protocols cannot be confused) is DEFERRED to the serving-path wiring pass: it
 // changes the signed-byte construction and must land -- with an updated
 // known-answer test vector -- before the first real emitter persists or exports
-// any chain. Zero chains are persisted today, so deferral is free. See the design record.
+// any chain. Zero chains are persisted today, so deferral is free.
 class Ledger {
  public:
   // |public_key| must be 32 bytes and |private_key| 64 bytes (raw @ed25519

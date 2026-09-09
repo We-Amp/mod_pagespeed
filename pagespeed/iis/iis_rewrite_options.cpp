@@ -125,7 +125,7 @@ void IisRewriteOptions::AddProperties() {
 		"/pagespeed_global_admin", &IisRewriteOptions::global_admin_path_, "ngap", kGlobalAdminPath,
 		kProcessScopeStrict, "Set the global admin path.  Ex: /pagespeed_global_admin",
 		false);
-	// the design record §5: default-on auto-create of the per-site cache subdir
+	// Default-on auto-create of the per-site cache subdir
 	// under either C:\ProgramData\We-Amp\PageSpeed\cache\ or
 	// C:\ProgramData\We-Amp\IISWebSpeed\cache\ (hardcoded prefix scope
 	// in the factory override). Operator opt-out via
@@ -135,7 +135,7 @@ void IisRewriteOptions::AddProperties() {
 		kAutoCreateCachePath, kProcessScopeStrict,
 		"Auto-create the per-site cache subdirectory if missing (on|off, default on).",
 		false);
-	// the design record §Operational + the referenced issue: default-on auto-create of
+	// default-on auto-create of
 	// the LogDir under either C:\ProgramData\We-Amp\PageSpeed\logs\ or
 	// C:\ProgramData\We-Amp\IISWebSpeed\logs\ (hardcoded prefix scope
 	// in the factory override). Operator opt-out via

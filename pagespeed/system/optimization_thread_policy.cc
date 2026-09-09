@@ -383,8 +383,9 @@ OptimizationThreadCounts ComputeOptimizationThreadCounts(
   }
 
   if (concurrent_processes <= 0) {
-    // the design record D1: the divisor is unknown, so we take the floor rather than
-    // guess.  One thread in each pool.
+    // The divisor is unknown, so take the floor rather than guess: silently
+    // oversubscribing the machine is the failure mode this policy exists to
+    // prevent.  One thread in each pool.
     counts.budget = 1;
   } else {
     // Integer division is the floor the policy asks for.
@@ -396,7 +397,7 @@ OptimizationThreadCounts ComputeOptimizationThreadCounts(
     counts.budget = static_cast<int>(std::max<int64>(1, budget));
   }
 
-  // the design record A5: the share is per pool, so both pools get the whole budget.
+  // The share is per pool, so both pools get the whole budget.
   // No further arithmetic, and in particular no rounding: the budget is
   // already floored at 1, so neither pool can come out empty.
   counts.rewrite = counts.budget;

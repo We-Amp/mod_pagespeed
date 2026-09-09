@@ -60,7 +60,7 @@ class WriteThroughCallback : public CacheInterface::Callback {
       if (trying_cache2_) {
         // An L2 hit (e.g. a Cyclone zero-copy disk read) is promoted into L1,
         // where a torn borrow would be re-served until eviction.  De-alias
-        // with the verified copy (copy-then-verify, the design record): when the value
+        // with the verified copy (copy-then-verify): when the value
         // is mapped, copy it and re-check the borrow; if it tore, skip the L1
         // promotion entirely.  The L2 result is still delivered to the caller
         // unchanged below -- that serve path does its own verification; only

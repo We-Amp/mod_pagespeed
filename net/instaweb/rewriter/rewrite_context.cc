@@ -407,7 +407,7 @@ class RewriteContext::OutputCacheCallback : public CacheInterface::Callback {
     ArrayInputStream input(val_str.data(), val_str.size());
     if (partitions->ParseFromZeroCopyStream(&input) &&
         IsOtherDependencyValid(partitions, is_stale_rewrite)) {
-      // the design record parse-then-verify: when the bytes were borrowed from a mapped
+      // Parse-then-verify: when the bytes were borrowed from a mapped
       // (Cyclone zero-copy) region, a ceiling-forced wrap can overwrite them
       // under the parse and yield a structurally-valid protobuf carrying the
       // wrong fields (most acute with CompressMetadataCache off, where there
@@ -805,7 +805,7 @@ class RewriteContext::FetchContext {
         response_headers->CopyFrom(*(output_resource_->response_headers()));
         // Use the most conservative Cache-Control considering all inputs.
         AdjustCacheControl();
-        // the design record: the requested URL committed to exactly this content by
+        // The requested URL committed to exactly this content by
         // hash, so where the response is publicly cacheable serve it as
         // 'public, immutable'. Serving-time only -- stored output headers
         // stay unstamped ('public' there still means "every input said

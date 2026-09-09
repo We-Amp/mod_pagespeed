@@ -41,8 +41,8 @@ class ResponseHeaders;
 // the request proceeds untouched -- observe-only, never blocks.
 ngx_int_t ps_webbotauth_preaccess_handler(ngx_http_request_t* r);
 
-// PREACCESS/PRECONTENT phase handler for the design record A3 RSL-CAP ENFORCEMENT (the
-// PAID sibling of the observe-only A1 handler above). When RslCapEnforcement is
+// PREACCESS/PRECONTENT phase handler for RSL-CAP ENFORCEMENT (the PAID sibling
+// of the observe-only verifier handler above). When RslCapEnforcement is
 // enabled, it validates the request's Authorization: License capability token
 // and maps the verdict to an inline status: authorized -> NGX_DECLINED (allow);
 // no/invalid/expired/unknown-issuer/bad-signature token -> 401; valid identity
@@ -87,7 +87,7 @@ void ps_webbotauth_init_stats(Statistics* statistics);
 // can store the computed verdict once. Called from ps_init.
 void ps_webbotauth_set_var_index(ngx_int_t index);
 
-// the design record Bar-A opt-in counter (EXPERIMENTAL, default off).
+// Opt-in counter (EXPERIMENTAL, default off).
 //
 // Map (or, on first run, create) the shared memory-mapped counter file at
 // `path` ONCE, in the master before workers fork; the MAP_SHARED region is then

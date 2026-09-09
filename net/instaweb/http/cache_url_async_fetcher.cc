@@ -320,8 +320,9 @@ class CacheFindCallback : public HTTPCache::Callback {
           // non-chunked responses.
           StringPiece contents;
           http_value()->ExtractContents(&contents);
-          // Zero-copy note: with CycloneZeroCopy, http_value() may
-          // be a borrowed mmap view.  A raw mapped pointer must NEVER reach a
+          // Zero-copy note: with CycloneZeroCopy, http_value() may be a
+          // borrowed view into the shared cache mapping, valid only while
+          // its read lease is live.  A raw mapped pointer must NEVER reach a
           // port Write() on this path: ports do not copy synchronously in all
           // cases (Apache's ap_rwrite wraps writes larger than its 8000-byte
           // buffer in a TRANSIENT bucket whose deferred remainder drains

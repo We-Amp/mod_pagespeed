@@ -2292,7 +2292,7 @@ RewriteOptions::OptionSettingResult RewriteOptions::FormatSetOptionMessage(
 
 namespace {
 
-// the design record config-parity: directives that require markdown RENDERING. These are
+// Config-parity: directives that require markdown RENDERING. These are
 // 2.0-only (1.1 has no headless browser). 1.1 rejects them at config-parse time
 // with a helpful message rather than silently ignoring them, so a config that
 // is shared with — or ported from — 2.0 fails loudly on all four 1.1 ports
@@ -2436,7 +2436,7 @@ RewriteOptions::ParseAndSetOptionFromNameWithScope(
   } else if (StringCaseEqual(name, kPermitIdsForCssCombining)) {
     AddCssCombiningWildcard(arg);
   } else if (IsRenderOnlyDirectiveName(name)) {
-    // the design record config-parity: render-only directives are 2.0-only. Reject loudly
+    // Config-parity: render-only directives are 2.0-only. Reject loudly
     // so a shared/ported config fails at parse time instead of silently no-op.
     *msg = StrCat("Directive '", name,
                   "' requires markdown rendering, which is unavailable in "
@@ -3583,7 +3583,7 @@ GoogleString RewriteOptions::OptionsToString() const {
     // STATUS_BREAKPOINT. With manifests unregistered on the runner that
     // breakpoint surfaces as a swallowed SEH exception, abandoning the
     // /pagespeed_admin/config response (HTTP.SYS logs
-    // Connection_Abandoned_By_ReqQueue). See the design record bisect.
+    // Connection_Abandoned_By_ReqQueue).
     ThreadSystem::ScopedReader read_lock(cache_purge_mutex_.get());
     if (purge_set_->has_global_invalidation_timestamp_ms()) {
       int64 cache_invalidation_ms =
