@@ -1,10 +1,39 @@
 # mod_pagespeed 1.16.0 Release Notes
 
-**Release candidate:** 1.16.0-rc.15
-**Release date:** 2026-09-07
+**Release candidate:** 1.16.0-rc.16
+**Release date:** 2026-09-10
 **Status:** Release candidate
 
 ## Highlights
+
+- **The Enterprise Linux rpm now ships the optimizer daemon's SELinux
+  policy.** On a host running SELinux in enforcing mode, installing the rpm
+  loads a policy module that lets the daemon, and the web server it serves,
+  run under the system policy without denials; previously that confinement
+  had to be built by hand. Hosts without SELinux are unaffected.
+
+- **The third-party attribution is corrected and now ships in the Linux
+  module packages.** The attribution notices (`NOTICE`) now carry every
+  statement the bundled components require, and the Apache and nginx module
+  deb and rpm packages — including the cPanel EasyApache 4 build — now
+  install a `THIRD-PARTY-NOTICES` file next to `LICENSE` and `NOTICE`,
+  generated from the software bill of materials and listing every bundled
+  third-party component with its license, version and upstream location.
+
+- **The admin console shows the product's own description of itself.** The
+  console's product facts — what the product is called and what it does — are
+  now drawn from the same source the optimizer and the website use, so the
+  console no longer carries its own drifting copy.
+
+- **A browser-analysis probe that never answered could be recorded as a
+  final verdict.** The optimizer probes the headless browser's sandbox once
+  per process to decide how to run it; a probe that never replied was banked
+  as a timeout verdict for the life of the process. The probe is now retried
+  instead, so a slow first answer does not settle the question wrongly.
+
+- **The `AgentOptimize` help text no longer claims a license gate that does
+  not exist.** The feature is gated by its operator flag alone, which is what
+  the rest of the feature already said; the built-in help text now agrees.
 
 - **Plan for this before you upgrade: the disk cache starts empty, and the
   optimizer daemon must be started first.** This release moves to a new
@@ -387,6 +416,19 @@
 
 ## Action required when upgrading
 
+- **On SELinux-enforcing EL9-family hosts, enable
+  `httpd_can_network_connect`.** The stock Red Hat family policy denies the
+  web server outbound network connections by default, and the module fetches
+  subresources over HTTP — including from the server itself over loopback —
+  so on RHEL, AlmaLinux and Rocky hosts running SELinux in Enforcing mode
+  the fetcher is blocked and resources are served unoptimized. Set the
+  boolean persistently: `sudo setsebool -P httpd_can_network_connect 1`.
+  This is the same setting other Apache modules that fetch over HTTP
+  require; it permits the web server to open outbound TCP connections, both
+  loopback and external. The restriction predates this release — it applies
+  to earlier versions on the same hosts — and it does not affect Debian and
+  Ubuntu, which use AppArmor rather than SELinux.
+
 - **The daemon's default cache and socket paths have changed.** The cache
   directory is now `/var/cache/pagespeed-optimizer/v1/` and the notify socket
   is now `/run/pagespeed-optimizer/notify.sock`. Earlier 1.16 release
@@ -428,6 +470,23 @@
 
 ## Packaging and platform notes
 
+- **The Red Hat family module rpm now ships and installs the SELinux policy
+  for the optimizer daemon.** On a stock enforcing host the distribution
+  policy gives the web server no access to the daemon's cache volume and
+  notify socket, so in-place optimization could never turn on there. The rpm
+  carries the compiled `pagespeed-optimizer` policy module and installs it
+  in its post-install step: the daemon runs confined as its own
+  `pagespeed_t` domain, its cache directory and runtime sockets get their
+  own types (the file contexts are registered in the policy store, so they
+  survive a relabel), and the web server domains get exactly the access the
+  module needs — the cache volume, and the notify socket only, not the
+  daemon's management sockets. Installation happens only when SELinux is
+  enabled on the host — Permissive counts as enabled — and a failure there
+  does not fail the package install: the module logs its degraded state at
+  startup instead. Removing the module rpm removes the policy again. The deb
+  packages are unchanged: Debian and Ubuntu confine with AppArmor, not
+  SELinux. Module packages built without the optimizer dependency do not
+  carry the policy.
 - **The module packages install `pagespeed_daemon.conf`, the configuration
   that points the module at the optimizer daemon.** Debian/Ubuntu:
   `/etc/apache2/conf-available/pagespeed_daemon.conf`, enabled by the package

@@ -324,8 +324,6 @@ Run tests:
 ./test/system/run_envoy_tests.sh -k sanity      # Quick sanity check
 ```
 
-See `ENVOY_TEST_PROGRESS.md` for detailed tracking.
-
 ### Apache System Test Status
 
 Run `./test/system/run_system_tests.sh`; see `docs/test-catalog.md` for current pass/skip counts.
@@ -650,8 +648,6 @@ leaves the build green while the real code is untouched.
 - `test/system/pagespeed_test_framework/` - Shared system-test framework (client, assertions)
 - `test/system/cpanel/README.md` - cPanel system-test notes
 - `pagespeed/envoy/README.md` - Envoy filter internals
-- `ENVOY_TEST_PROGRESS.md` - Envoy test validation tracking and known limitations
-- `docs/plans/` - Historical planning documents (Envoy, IIS, nginx, WASM)
 
 ## Git Workflow Rules
 

@@ -60,9 +60,10 @@ enforced on IIS as on the other ports.
   (`iis_rewrite_driver_factory.cpp`).
 - A true `WindowsSharedMem` implementation exists
   (`pagespeed/kernel/sharedmem/windows_shared_mem.cc`, unit-tested) but is
-  not wired into the IIS module; cross-process alignment concerns are
-  documented in
-  [WINDOWS_SHARED_MEM_ALIGNMENT_PLAN.md](WINDOWS_SHARED_MEM_ALIGNMENT_PLAN.md)
+  not wired into the IIS module: the shared-memory cache metadata assumes
+  8-byte mutex alignment, which Windows x64 violates (`CRITICAL_SECTION`
+  requires 16-byte alignment), so wiring it in safely takes a per-platform
+  layout pass that has not happened yet
 
 ### External Cache
 - Redis only. Memcached support is compile-time excluded on non-Linux
