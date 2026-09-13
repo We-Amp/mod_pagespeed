@@ -35,10 +35,10 @@ namespace {
 // This literal has SEVERAL COPIES in the tree and they must agree. The others:
 // the sibling implementation of the same never-record rule on the IIS seam
 // (pagespeed/iis/iis_inplace_resource_handler.cc, kPageSpeedMarker), the URL
-// escaper (pagespeed/kernel/util/url_escaper.cc), and the harness's executable
-// forms (tools/parity/adapter_asserts/driver.py's fixture name,
-// tools/parity/daemon-probe/peer_sim.cc's IsPageSpeedShapedUrl,
-// tools/parity/transition_load/harvest_log_mix.py). There is no shared home
+// escaper (pagespeed/kernel/util/url_escaper.cc), and the internal parity
+// harness's executable forms (its assertion driver's fixture name, its peer
+// simulator's IsPageSpeedShapedUrl, its transition-load log mixer). There is
+// no shared home
 // for all of them: the harness peers are built against the OTHER product's
 // tree and cannot include anything from here. Changing the marker means
 // changing every copy.

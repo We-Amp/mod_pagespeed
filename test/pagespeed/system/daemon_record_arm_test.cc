@@ -367,7 +367,7 @@ TEST_F(DaemonRecordArmTest, TheStampedBitDoesNotCollideWithTheOptimizersOwn) {
   // NOT establish that the mirror matches what the peer publishes: the module
   // cannot include the peer's header, so nothing here can compare against it,
   // and that comparison is made at COMPILE time inside the peer's own tree
-  // (tools/parity/daemon-probe/volume_inspect.cc, built at the pin).  What is
+  // (by the internal parity harness, built at the pin).  What is
   // checkable here is the collision: the bit this module stamps must not be
   // the optimizer's worker-processed bit, because a module that set THAT
   // would make its own recording indistinguishable from optimized output.
@@ -380,8 +380,8 @@ TEST_F(DaemonRecordArmTest, TheStampedBitDoesNotCollideWithTheOptimizersOwn) {
 
 // --- rule 6: the origin sent something no serve from here can put back -----
 //
-// The predicate is the PRE-SIDECAR one, and the cases below are the checked-in
-// table's rows (tools/parity/adapter_asserts/reconstructible.py) evaluated
+// The predicate is the PRE-SIDECAR one, and the cases below are the internal
+// parity harness's checked-in table rows evaluated
 // with an EMPTY sidecar set -- which is what this module's serving stack is.
 // The rows where the two answers DIFFER are asserted explicitly rather than
 // left implicit, because reusing the peer's verdict here is the one wrong

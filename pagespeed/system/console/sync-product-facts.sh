@@ -6,14 +6,16 @@
 #
 # The console chrome (title, logo line, footer/legal links) derives from the
 # canonical product-facts.mjs so a product rename or URL change is a one-file
-# edit upstream. The canonical file lives in the website repo; this script
-# copies it VERBATIM to src/lib/data/product-facts.mjs, which is checked in
-# (the console builds hermetically, without the website repo). A verbatim copy
-# keeps the drift guard a plain byte compare -- see check-product-facts.sh.
+# edit upstream. The canonical file is shared/product-facts.mjs at the root of
+# the pagespeed-optimizer repo — the identity-only, pricing-free module the website
+# itself re-exports from; this script copies it VERBATIM to
+# src/lib/data/product-facts.mjs, which is checked in (the console builds
+# hermetically, without the pagespeed-optimizer repo). A verbatim copy keeps the
+# drift guard a plain byte compare -- see check-product-facts.sh.
 #
 # Source resolution, first hit wins:
 #   1. $PRODUCT_FACTS_SOURCE            (explicit path to the canonical file)
-#   2. $MODPAGESPEED2_DIR/website/src/data/product-facts.mjs
+#   2. $MODPAGESPEED2_DIR/shared/product-facts.mjs
 #   3. a "pagespeed-optimizer" checkout next to this repository checkout
 #   4. the origin/main blob of that checkout (when its working tree predates
 #      the file)
@@ -22,7 +24,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
-FACTS_REL="website/src/data/product-facts.mjs"
+FACTS_REL="shared/product-facts.mjs"
 COPY="src/lib/data/product-facts.mjs"
 
 # Print the canonical file's content on stdout; exit 1 when no source found.

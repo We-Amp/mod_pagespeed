@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Every Linux module package now also carries `THIRD-PARTY-NOTICES`.** The
+  Apache module deb and rpm and the nginx module deb and rpm install it next
+  to `LICENSE` and `NOTICE` under `/usr/share/doc/<package>/`: the full
+  attribution for every statically linked third-party component — license,
+  copyright holders, and for the BSD/MIT/Zlib-class licenses the license
+  text itself, quoted from the pinned upstream, since those licenses'
+  terms require the text to accompany a binary redistribution — including
+  the required Independent JPEG Group statement for the statically linked
+  libjpeg-turbo. The file is curated from and continuously cross-checked
+  against the drift-gated SBOM (`sbom/pagespeed-1.1.spdx.json`) by a new CI
+  gate, `tools/sbom/check-third-party-notices.py`, which fails the build
+  when the notices and the SBOM disagree in either direction. The root
+  `NOTICE` was corrected in the same pass: stanzas for code no longer in
+  the tree (serf, the chromium family, closure_library, base64, modp_b64,
+  apr_memcache2) were removed, the remaining stanza paths now match the
+  live tree layout, and stanzas for the vendored css_parser (+ its nested
+  Lucent `utf` library) and redis-crc were added. The googleurl (gurl)
+  dependency moved from `WORKSPACE` into `bazel/repositories.bzl` so this
+  chain covers it; it had shipped statically linked with no attribution the
+  gate could see.
+
 - **Every module package now carries the license text and the attribution
   notices.** The Apache module deb and rpm (including the cPanel EasyApache 4
   build), the nginx module deb and rpm and the IIS installer include the
@@ -61,6 +82,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pointing at support subscriptions; the dismissal is remembered.
 
 ### Changed
+
+- **The admin console's product-facts data no longer carries the retired
+  license pricing.** The console now syncs its facts copy verbatim from
+  `shared/product-facts.mjs` at the pagespeed-optimizer repo root — the
+  identity-only, pricing-free module (names, canonical URLs, the one
+  product statement, the support-terms URL) that replaced the website's
+  much larger facts file as the sync source. The per-site license ladder,
+  its dollar figures and the launch-promo metadata are gone from the
+  shipped copy. The console UI is unchanged: it renders only product names
+  and URLs from this file, and the rebuilt `admin_console.html` differs
+  only in its version stamp.
 
 - **Plan for this before you upgrade: the disk cache starts empty.** This
   release moves to a new on-disk cache format. The new binaries open a new
@@ -153,6 +185,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   distribution. `NOTICE` and the SBOM record it.
 
 ### Fixed
+
+- **The admin console no longer reports a version stamp that exists in no
+  commit.** The console bundle shipped with the product-facts sync carried a
+  `-dirty` build stamp because it had been built with uncommitted changes in
+  its worktree; the About page and the top bar displayed that stamp. The
+  bundle is rebuilt from a clean checkout and now reports the release
+  version. Bundle content is otherwise unchanged.
 
 - **A URL whose optimized variants were re-recorded many times could
   permanently stop accepting new ones.** Every re-record used to leave the

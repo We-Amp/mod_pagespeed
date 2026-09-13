@@ -297,8 +297,8 @@ DaemonRecordDecision EvaluateDaemonRecordGate(const DaemonAbi& abi,
 //                     downstream cache needs in order not to serve one
 //                     client's copy to everybody IS emitted, which is the
 //                     fidelity question rule 6 asks.  The checked-in table
-//                     carries the same reading (tools/parity/adapter_asserts/
-//                     reconstructible.py, HANDLED_VARY) and declares the
+//                     carries the same reading in the internal parity
+//                     harness's assertion table (HANDLED_VARY) and declares the
 //                     divergence from the peer's store-side gate there.
 //
 // AND ONE IGNORED CLASS: headers the serving stack stamps per response rather

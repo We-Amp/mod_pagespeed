@@ -199,8 +199,8 @@ inline constexpr uint8_t kPsSentinelOriginal = 0x0C;
 //
 // The value is hand-copied because nothing from the peer's tree may be
 // included here.  It is checked against the peer's own header exactly once, at
-// compile time, in the harness overlay that IS built inside that tree at the
-// pin: tools/parity/daemon-probe/volume_inspect.cc.  A pin bump that renumbers
+// compile time, in the internal parity harness's overlay that IS built inside
+// that tree at the pin.  A pin bump that renumbers
 // the bit fails that build rather than letting this stamp a bit that has come
 // to mean something else.
 inline constexpr uint8_t kPsFlagOriginVariesAccept = 0x04;
@@ -245,9 +245,8 @@ inline constexpr uint8_t kPsFlagOriginVariesAccept = 0x04;
 // validator for a marked entry, because it never serves one.
 //
 // The value is hand-copied for the same reason kPsFlagOriginVariesAccept is,
-// and is checked against the peer's own header at compile time in the harness
-// overlay built inside that tree at the pin
-// (tools/parity/daemon-probe/volume_inspect.cc).
+// and is checked against the peer's own header at compile time in the
+// internal parity harness's overlay built inside that tree at the pin.
 inline constexpr uint8_t kPsFlagOriginHeadersNotReproducible = 0x08;
 
 // The response-header sidecar class, mirrored from the peer's
@@ -289,8 +288,8 @@ inline constexpr uint8_t kPsSentinelHeadersSidecar = 0x6C;
 // ranking as permission.  So the format axis is read here, from the two bits
 // the peer's own header documents as the format field, and the disqualify is
 // this module's.  WHAT IS CHECKED AT COMPILE TIME, stated exactly because
-// the checking is uneven: in the harness overlay that is built inside the
-// peer's tree (tools/parity/daemon-probe/volume_inspect.cc), the two flag
+// the checking is uneven: in the internal parity harness's overlay that is
+// built inside the peer's tree, the two flag
 // mirrors above are asserted against the peer's own PS_FLAG_* macros, and
 // the viewport constants below through every PS_SENTINEL_* id the peer's
 // header publishes -- each asserted to sit at the reserved viewport value,
@@ -364,8 +363,8 @@ inline constexpr uint32_t kPsViewportSentinel = 3;
 // sentinel space above.
 //
 // HAND-COPIED like the flag mirrors above, for the same reason, and checked
-// the same way: the harness overlay built inside the peer's tree at the pin
-// (tools/parity/daemon-probe/volume_inspect.cc) asserts it against the
+// the same way: the internal parity harness's overlay built inside the peer's
+// tree at the pin asserts it against the
 // peer's own constant at compile time, so a pin that renumbers the value
 // fails that build rather than letting this module send a mask the worker
 // no longer reads as the sentinel.

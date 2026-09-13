@@ -19,7 +19,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
-FACTS_REL="website/src/data/product-facts.mjs"
+FACTS_REL="shared/product-facts.mjs"
 COPY="src/lib/data/product-facts.mjs"
 
 # Same resolution order as sync-product-facts.sh (keep in sync).

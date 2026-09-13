@@ -4,7 +4,8 @@
 /**
  * Type declarations for the synced product-facts copy (./product-facts.mjs —
  * see ../sync-product-facts.sh). Only the exports the console consumes are
- * declared; the canonical file exports many more for the website.
+ * declared; the canonical shared file also exports PRODUCT_STATEMENT and
+ * SUPPORT_TERMS_URL, which no console code imports today.
  */
 export const VENDOR: string;
 export const VENDOR_URL: string;
