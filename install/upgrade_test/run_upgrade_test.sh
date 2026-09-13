@@ -42,10 +42,10 @@
 #      1.16.0-rc.14 on ship it; for an older pair the script writes the two
 #      directives itself, as the release notes for those candidates
 #      instruct, and says so. Also asserts the module package carries the
-#      license text and the attribution notices (LICENSE, NOTICE) under
-#      /usr/share/doc/mod-pagespeed/: owned by the package, present on disk
-#      and, on rpm, flagged as license and documentation. Then restarts the
-#      web server as the notes instruct,
+#      license text and the attribution notices (LICENSE, NOTICE and, from
+#      1.16.0 on, THIRD-PARTY-NOTICES) under /usr/share/doc/mod-pagespeed/:
+#      owned by the package, present on disk and, on rpm, flagged as license
+#      and documentation. Then restarts the web server as the notes instruct,
 #   6. asserts the silent-degrade class is ABSENT: zero error-log lines of either
 #      signature after the restart, the daemon active as user pagespeed, the
 #      web-server user in group pagespeed, socket + cache-dir modes as
@@ -230,6 +230,10 @@ DROPIN_SINCE="1.16.0-rc.14"
 # attribution notices under /usr/share/doc/mod-pagespeed/ (the Apache-2.0
 # terms want both next to the binaries). Below it the gap is noted, not failed.
 LICENSE_SINCE="1.16.0-rc.14"
+# First upstream version whose module packages also carry THIRD-PARTY-NOTICES
+# (the statically linked BSD/MIT/Zlib/IJG components ask that their notices
+# accompany a binary redistribution). Below it the gap is noted, not failed.
+TPN_SINCE="1.16.0"
 PKG_DOCDIR=/usr/share/doc/mod-pagespeed
 DAEMON_UNIT=pagespeed-optimizer
 DAEMON_RUN=/run/pagespeed-optimizer
@@ -252,6 +256,27 @@ fail() { FAILS=$((FAILS + 1)); printf 'FAIL  %s\n' "$*"; }
 note() { printf 'note  %s\n' "$*"; }
 step() { printf '\n==> %s\n' "$*"; }
 die()  { printf 'error: %s\n' "$*" >&2; exit 1; }
+
+# gh_release_download_wait <description> <gh release download args...>
+# A release publish uploads assets AFTER the release object exists, so a
+# rehearsal fired the moment a tag lands can outrun its own assets (the
+# 2026-09-07 rc.15 failure: the run started four minutes before the publish
+# finished). Poll with backoff instead of dying on the first 404. Bounded:
+# ~15 minutes, then the original error, so a genuinely missing asset still
+# fails loudly rather than hanging the lane.
+gh_release_download_wait() {
+  local desc="$1"; shift
+  local attempt=1 max=30
+  until gh release download "$@" 2>/dev/null; do
+    if [[ "$attempt" -ge "$max" ]]; then
+      # Surface the real error on the last failure.
+      gh release download "$@" || die "$desc (does the release carry the assets? still missing after $max attempts)"
+    fi
+    note "$desc not available yet (attempt $attempt/$max) — the release publish may still be in flight; waiting 30s"
+    sleep 30
+    attempt=$((attempt + 1))
+  done
+}
 
 # check <label> <expected> <actual>
 check() {
@@ -387,15 +412,15 @@ if [[ -z "$REPO_URL" ]]; then
       note "nothing in ${PKGS_DIR} matches '$p' (or its '~' spelling); downloading it from release ${RELEASE_TAG}"
       command -v gh >/dev/null 2>&1 || die "missing gh (needed to download the packages ${PKGS_DIR} lacks)"
     fi
-    gh release download "$RELEASE_TAG" -R "$RELEASE_REPO" -D "$WORK/pkgs" --clobber -p "$p" -p "${p}.asc" \
-      || die "gh release download failed for pattern '$p' (does ${RELEASE_TAG} carry ${ARCH} ${FAMILY} assets?)"
+    gh_release_download_wait "release asset '$p' for ${RELEASE_TAG}" \
+      "$RELEASE_TAG" -R "$RELEASE_REPO" -D "$WORK/pkgs" --clobber -p "$p" -p "${p}.asc"
     DOWNLOADED=1
   done
   ls -la "$WORK/pkgs"
 fi
 if [[ -z "$REPO_URL" && "$DOWNLOADED" -eq 1 ]]; then
-  gh release download "$RELEASE_TAG" -R "$RELEASE_REPO" -D "$WORK" --clobber -p SHA256SUMS -p weamp-pkg-public.asc \
-    || die "gh release download failed for SHA256SUMS"
+  gh_release_download_wait "SHA256SUMS for ${RELEASE_TAG}" \
+    "$RELEASE_TAG" -R "$RELEASE_REPO" -D "$WORK" --clobber -p SHA256SUMS -p weamp-pkg-public.asc
 
   step "verifying the downloaded pair (sha256 against SHA256SUMS, gpg against the published key)"
   curl -fsSL "$PUBKEY_URL" -o "$WORK/pubkey-site.asc" || die "cannot fetch the public signing key from $PUBKEY_URL"
@@ -455,6 +480,9 @@ echo "  daemon drop-in: ${DAEMON_DROPIN} expected from ${DROPIN_SINCE} on -- ass
 LICENSE_STRICT=0
 if [[ "$MODULE_IS_LOCAL" -eq 1 ]] || semver_ge "$RC" "$LICENSE_SINCE"; then LICENSE_STRICT=1; fi
 echo "  license files:  ${PKG_DOCDIR}/{LICENSE,NOTICE} expected from ${LICENSE_SINCE} on -- assertion $( [[ "$LICENSE_STRICT" -eq 1 ]] && echo strict || echo 'advisory (older pair)')"
+TPN_STRICT=0
+if [[ "$MODULE_IS_LOCAL" -eq 1 ]] || semver_ge "$RC" "$TPN_SINCE"; then TPN_STRICT=1; fi
+echo "  notices:        ${PKG_DOCDIR}/THIRD-PARTY-NOTICES -- strict whenever the package under test ships it; an absence fails from ${TPN_SINCE} on (currently $( [[ "$TPN_STRICT" -eq 1 ]] && echo strict || echo 'advisory (older pair)'))"
 
 # ---------------------------------------------------------------------------
 # 1. Fixture: a page with an image and a stylesheet
@@ -740,7 +768,7 @@ if [[ "$FAMILY" == rpm ]]; then
   note "rpm signature status: $(in_ctr "rpm -q --qf '%{NAME}: %{SIGPGP:pgpsig}\n' mod-pagespeed pagespeed-optimizer 2>/dev/null | tr '\n' ';'" || true)"
 fi
 
-step "the module package's license files: ${PKG_DOCDIR}/{LICENSE,NOTICE}"
+step "the module package's license files: ${PKG_DOCDIR}/{LICENSE,NOTICE,THIRD-PARTY-NOTICES}"
 # An Apache-2.0 distribution carries the license text and the attribution
 # notices next to the binaries. Each must be listed by the package manager as
 # the module package's (dpkg -L / rpm -ql) and be present, non-empty, on disk
@@ -770,6 +798,41 @@ for f in LICENSE NOTICE; do
     fail "${PKG_DOCDIR}/${f} is listed by the package but missing or empty on disk"
   fi
 done
+# THIRD-PARTY-NOTICES ships from 1.16.0 on (the statically linked
+# BSD/MIT/Zlib/IJG components ask that their notices accompany a binary
+# redistribution). The gate is presence-based: a package that SHIPS the file
+# is held to it strictly whatever its version -- there is no legitimate way
+# for a shipped file to be empty or stripped of the IJG statement -- while an
+# absent file fails only when the package is at/past TPN_SINCE (or a local
+# build), and is merely noted for an older published pair. The advisory path
+# must not touch license_files_ok: an older pair lacking the file is not a
+# defect, and clearing the flag would skip the LICENSE-text and rpm-flag
+# assertions below that predated this gate.
+f=THIRD-PARTY-NOTICES
+if [[ "$FAMILY" == deb ]]; then
+  listed="$(in_ctr "dpkg -L mod-pagespeed 2>/dev/null | grep -x ${PKG_DOCDIR}/${f}" || true)"
+else
+  listed="$(in_ctr "rpm -ql mod-pagespeed 2>/dev/null | grep -x ${PKG_DOCDIR}/${f}" || true)"
+fi
+if [[ -n "$listed" ]]; then
+  if in_ctr "test -s ${PKG_DOCDIR}/${f}"; then
+    pass "${PKG_DOCDIR}/${f} is owned by mod-pagespeed and present on disk"
+    if in_ctr "grep -q 'Independent JPEG Group' ${PKG_DOCDIR}/${f}"; then
+      pass "${PKG_DOCDIR}/${f} carries the Independent JPEG Group statement"
+    else
+      license_files_ok=0
+      fail "${PKG_DOCDIR}/${f} lacks the Independent JPEG Group statement (libjpeg-turbo is statically linked)"
+    fi
+  else
+    license_files_ok=0
+    fail "${PKG_DOCDIR}/${f} is listed by the package but missing or empty on disk"
+  fi
+elif [[ "$TPN_STRICT" -eq 1 ]]; then
+  license_files_ok=0
+  fail "module package ${MOD_VERSION} does not ship ${PKG_DOCDIR}/${f} (packages from ${TPN_SINCE} on carry it)"
+else
+  note "module package ${MOD_VERSION} predates the packaged ${f} (ships from ${TPN_SINCE})"
+fi
 if [[ "$license_files_ok" -eq 1 ]]; then
   if in_ctr "grep -q 'Apache License' ${PKG_DOCDIR}/LICENSE"; then
     pass "${PKG_DOCDIR}/LICENSE is the Apache License text"
