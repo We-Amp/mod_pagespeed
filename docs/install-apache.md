@@ -30,6 +30,36 @@ sudo systemctl restart httpd                               # EL9
 > Building from source uses the public mod_pagespeed source tree (see
 > `DEVELOPER.md`); the published packages are the supported path for most users.
 
+## SELinux (RHEL / AlmaLinux / Rocky 9)
+
+Two things apply on EL9-family hosts running SELinux in Enforcing mode; both
+are the standard posture for third-party Apache modules, not extra hardening.
+
+**The rpm ships the SELinux policy for the optimizer daemon.** On a stock
+enforcing host the distribution policy gives Apache no access to the
+daemon's cache volume and notify socket, so in-place optimization could
+never turn on. The rpm therefore installs the `pagespeed-optimizer` policy
+module in its post-install step. It does this whenever SELinux is on —
+Enforcing or Permissive — and skips it only where SELinux is disabled.
+This needs no operator action.
+
+**The module's fetcher needs the `httpd_can_network_connect` boolean.** The
+module fetches subresources over HTTP — including from the server itself
+over loopback — and the stock EL9 policy denies Apache outbound network
+connections by default. Set the boolean persistently:
+
+```bash
+sudo setsebool -P httpd_can_network_connect 1
+```
+
+This is the same requirement other Apache modules that fetch over HTTP
+document; the boolean permits Apache to open outbound TCP connections, both
+loopback and external. Without it the module logs fetch failures and serves
+resources unoptimized.
+
+Debian and Ubuntu use AppArmor rather than SELinux; neither item applies
+there, and the deb ships no SELinux policy.
+
 ## Configuration
 
 Basic configuration in Apache config:

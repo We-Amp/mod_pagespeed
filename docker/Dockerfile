@@ -71,6 +71,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Packaging tools for building deb and rpm packages
 RUN apt-get update && apt-get install -y --no-install-recommends \
     dpkg-dev fakeroot devscripts rpm \
+    # selinux-policy-dev provides /usr/share/selinux/devel/Makefile, which the
+    # serving-pair rpm build needs to compile the daemon's SELinux policy
+    # module (install/rpm/build.sh).
+    selinux-policy-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Node.js 20 LTS (required for npx google-closure-compiler)

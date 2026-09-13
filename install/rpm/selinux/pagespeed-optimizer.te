@@ -1,0 +1,136 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+#
+# pagespeed-optimizer SELinux policy, shipped by the mod-pagespeed rpm
+# (the package that owns the httpd_t peer rules; the daemon package stays
+# policy-free).  Built to a .pp at rpm build time and installed from %post;
+# the file contexts in pagespeed-optimizer.fc ride inside the .pp, so the
+# labels survive restorecon and a full relabel.
+#
+# Model: the daemon runs confined as pagespeed_t; its versioned cache
+# directory and everything in it (volume files, shared config, serve-stats
+# mmap) is pagespeed_cache_t; the runtime dir is pagespeed_runtime_t with
+# the notify socket pair split out as pagespeed_notify_t. The web-server
+# domains (httpd_t, nginx_t) are the only peers: they mmap-rw the volume
+# and write the notify socket fire-and-forget, matching the group
+# `pagespeed` boundary the DAC side enforces -- and no further (the
+# management sockets stay daemon-only).
+#
+# Every rule below carries its own justification.  Measured on AlmaLinux
+# 9.8 (selinux-policy-targeted 38.1.75) with SELinux Enforcing, dontaudit
+# disabled, through the el9-selinux upgrade rehearsal: a 1.15 -> 1.16
+# upgrade followed by in-place optimization through the daemon.
+
+policy_module(pagespeed-optimizer, 1.0.0)
+
+########################################
+# Types
+
+type pagespeed_t;
+type pagespeed_exec_t;
+init_daemon_domain(pagespeed_t, pagespeed_exec_t)
+
+# The unit runs NoNewPrivileges=yes, so systemd's domain transition into
+# pagespeed_t is an nnp transition; without this the daemon stays init_t
+# and the new labels break its own cache access (measured: 2x
+# nnp_transition denials, then "Cache unavailable ... degraded mode").
+allow init_t pagespeed_t:process2 nnp_transition;
+
+type pagespeed_cache_t;
+files_type(pagespeed_cache_t)
+
+type pagespeed_runtime_t;
+files_type(pagespeed_runtime_t)
+
+# The notify socket pair the web-server peers talk to, split from the rest
+# of the runtime dir so the peers' sock_file access covers exactly the
+# sockets the module uses -- not the management plane (api.sock,
+# notify.sock.mgmt), which stays pagespeed_runtime_t and daemon-only.
+type pagespeed_notify_t;
+files_type(pagespeed_notify_t)
+
+########################################
+# Daemon: full management of its own cache + runtime dirs, mmap included
+# (the cyclone volume is opened O_RDWR and mapped shared).
+
+manage_dirs_pattern(pagespeed_t, pagespeed_cache_t, pagespeed_cache_t)
+manage_files_pattern(pagespeed_t, pagespeed_cache_t, pagespeed_cache_t)
+# The cache volume is memory-mapped shared and writable; manage_files_pattern
+# covers everything except map (measured: the daemon refuses to start without
+# it).
+allow pagespeed_t pagespeed_cache_t:file map;
+
+manage_dirs_pattern(pagespeed_t, pagespeed_runtime_t, pagespeed_runtime_t)
+manage_files_pattern(pagespeed_t, pagespeed_runtime_t, pagespeed_runtime_t)
+# The notify/health/mgmt/api unix sockets live in the runtime dir.
+manage_sock_files_pattern(pagespeed_t, pagespeed_runtime_t, pagespeed_runtime_t)
+manage_sock_files_pattern(pagespeed_t, pagespeed_notify_t, pagespeed_notify_t)
+
+# The daemon binds the notify pair by name; without these transitions a
+# fresh socket would inherit the runtime dir's type like the management
+# sockets, and the peers' pagespeed_notify_t rules would not match it.
+type_transition pagespeed_t pagespeed_runtime_t:sock_file pagespeed_notify_t "notify.sock";
+type_transition pagespeed_t pagespeed_runtime_t:sock_file pagespeed_notify_t "notify.sock.health";
+
+# systemd (pid 1) removes the unit's RuntimeDirectory on stop. Measured:
+# dir { rmdir } on every stop, and dir { remove_name } per socket when a
+# hard-killed daemon left them behind; the sock_file unlink is the
+# file-class half of that same unlink(2). Scoped to our runtime types only
+# (the stock policy grants each daemon's runtime type its own equivalent --
+# e.g. fwupd_cache_t -- there is no generic init_t rule to inherit).
+allow init_t pagespeed_runtime_t:dir { remove_name rmdir };
+allow init_t pagespeed_runtime_t:sock_file unlink;
+allow init_t pagespeed_notify_t:sock_file unlink;
+
+# The cache directory tree is owned by the daemon package's tmpfiles.d
+# lines, and systemd-tmpfiles labels what it creates from the policy store,
+# so the shipped .fc gives a recreated tree pagespeed_cache_t without any
+# rule here (measured: rm -rf + systemd-tmpfiles --create relabels
+# correctly). Deliberately no var_t write for the daemon: recreating the
+# cache ROOT itself at runtime would need it, and a missing cache root is a
+# deliberate, loud refusal-to-start in the unit's design, not something to
+# self-heal by widening the daemon into /var/cache.
+
+########################################
+# Peers: the serving module's web-server workers.  They never CREATE
+# anything (the daemon is the sole author); they mmap the volume rw and
+# connect the notify socket fire-and-forget.
+
+gen_require(`
+    type httpd_t;
+')
+
+# Measured: 4x dir { read } on .../v1 -- the module lists the versioned
+# cache directory to discover the volume file and the daemon-published
+# pagespeed-shared.conf; getattr+search alone leaves the module logging the
+# misleading group-hint message.
+allow httpd_t pagespeed_cache_t:dir { getattr read search };
+# The volume is opened O_RDWR and mapped shared (the reader half of the
+# single-writer protocol); pagespeed-shared.conf is read for the published
+# cache-volume size -- without it in-place optimization never turns on
+# (measured: 4x file { read } when the file carried var_t). `lock` is the
+# advisory lock the module takes on the volume to coordinate with the
+# daemon's writer (measured: 2x file { lock }).
+allow httpd_t pagespeed_cache_t:file { getattr open read write map lock };
+allow httpd_t pagespeed_runtime_t:dir { getattr search };
+# Fire-and-forget notify: the module writes to the notify socket and never
+# reads. Scoped to pagespeed_notify_t: the management sockets (api.sock,
+# notify.sock.mgmt) stay daemon-only even though DAC (0660, group
+# pagespeed) would let the web-server user reach them -- the shipped
+# policy is deliberately tighter than the DAC floor.
+allow httpd_t pagespeed_notify_t:sock_file { getattr write };
+allow httpd_t pagespeed_t:unix_stream_socket connectto;
+
+optional_policy(`
+    gen_require(`
+        type nginx_t;
+    ')
+
+    # Same peer surface as httpd_t above: ngx_pagespeed opens the volume
+    # itself and notifies fire-and-forget.
+    allow nginx_t pagespeed_cache_t:dir { getattr read search };
+    allow nginx_t pagespeed_cache_t:file { getattr open read write map lock };
+    allow nginx_t pagespeed_runtime_t:dir { getattr search };
+    allow nginx_t pagespeed_notify_t:sock_file { getattr write };
+    allow nginx_t pagespeed_t:unix_stream_socket connectto;
+')

@@ -25,11 +25,14 @@ DISTRO_MAJOR="${5:-9}"  # RHEL-family major (9|10) for the rpm README wording; d
 mkdir -p "${DOCDIR}"
 
 # --- license text + attribution notices --------------------------------------
-# The Apache-2.0 terms want both next to the binaries. The repo-root files are
-# the single source; copied verbatim, never re-authored here. The rpm spec
-# lists them as %license and %doc; the deb ships the staged tree as is.
+# The Apache-2.0 terms want both next to the binaries; the statically linked
+# BSD/MIT/Zlib/IJG-licensed components ask the same of their notices, so
+# THIRD-PARTY-NOTICES ships alongside. The repo-root files are the single
+# source; copied verbatim, never re-authored here. The rpm spec lists them as
+# %license and %doc; the deb ships the staged tree as is.
 SRCDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-install -m 644 "${SRCDIR}/LICENSE" "${SRCDIR}/NOTICE" "${DOCDIR}/"
+install -m 644 "${SRCDIR}/LICENSE" "${SRCDIR}/NOTICE" \
+  "${SRCDIR}/THIRD-PARTY-NOTICES" "${DOCDIR}/"
 
 # --- sample config (verbatim from build_nginx_package.sh) -------------------
 cat > "${DOCDIR}/pagespeed.conf.sample" << 'CONF'

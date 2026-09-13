@@ -71,7 +71,7 @@ if ! rpm -q gcc-toolset-15 >/dev/null 2>&1; then
     zlib-devel pcre2-devel openssl-devel \
     httpd-devel apr-devel apr-util-devel \
     python3 unzip zip gperf bison flex nasm \
-    rpm-build tar gzip make which file \
+    rpm-build tar gzip make which file selinux-policy-devel \
     >/dev/null
 fi
 # The Apache module compiles against the system Apache 2.4 headers. bazel/BUILD

@@ -102,14 +102,23 @@ CPP_DEPS = [
     {"name": "libavif", "version": {"key": "LIBAVIF_VERSION"}, "license": "BSD-2-Clause",
      "holder": "Joe Drago and libavif contributors", "repo": "AOMediaCodec/libavif", "purl_version": "v1.4.2"},
     # aom is commit-pinned (googlesource tarballs are not byte-stable — see
-    # bazel/repositories.bzl); the commit equals tag v3.12.0.
+    # bazel/repositories.bzl); the commit equals tag v3.12.0. googlesource
+    # has no purl type, so the locator uses the generic form with the
+    # dereferenced tag: it exists so the THIRD-PARTY-NOTICES gate has a
+    # release tag to check the entry's parenthetical against.
     {"name": "aom", "version": {"key": "AOM_COMMIT"}, "license": "BSD-2-Clause",
      "holder": "Alliance for Open Media", "repo": None,
-     "download": "https://aomedia.googlesource.com/aom/", "purl_version": None},
+     "download": "https://aomedia.googlesource.com/aom/", "purl_version": None,
+     "purl": "pkg:generic/aom@v3.12.0"},
     {"name": "dav1d", "version": {"key": "DAV1D_VERSION"}, "license": "BSD-2-Clause",
      "holder": "VideoLAN and dav1d authors", "repo": "videolan/dav1d", "purl_version": None},
     {"name": "sparsehash", "version": {"key": "GOOGLE_SPARSEHASH_COMMIT"}, "license": "BSD-3-Clause",
      "holder": "Google Inc.", "repo": "sparsehash/sparsehash", "purl_version": None},
+    # gurl (Chromium's URL parser) ships statically linked into core code
+    # (pagespeed/kernel/http). It is declared in bazel/repositories.bzl like
+    # every other C++ dep precisely so this chain sees it.
+    {"name": "gurl", "version": {"key": "GOOGLEURL_COMMIT"}, "license": "BSD-3-Clause",
+     "holder": "The Chromium Authors", "repo": "google/gurl", "purl_version": None},
     {"name": "gflags", "version": {"key": "GFLAGS_COMMIT"}, "license": "BSD-3-Clause",
      "holder": "Google Inc.", "repo": "gflags/gflags", "purl_version": "v2.3.0"},
     {"name": "libpsl", "version": {"key": "LIBPSL_VERSION"}, "license": "MIT",
@@ -251,7 +260,9 @@ def generate_sbom():
     for dep in CPP_DEPS:
         version = resolve_version(dep, consts)
         repo = dep.get("repo")
-        purl = ""
+        # An explicit "purl" (deps without a github locator, e.g. aom on
+        # googlesource) wins over the derived github form.
+        purl = dep.get("purl", "")
         download = dep.get("download", "")
         if repo:
             purl_ver = dep.get("purl_version") or version

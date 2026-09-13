@@ -199,7 +199,7 @@ and end:
 
 | Check | Meaning |
 |---|---|
-| `AVC/USER_AVC denials for comm=httpd since the upgrade: 0` | `httpd_t` was never denied the cache volume (`{ read write open map }` on the volume file, `search` on the dir) or the notify socket (`write` on the sock_file, `connectto` on the daemon's stream socket) |
+| `AVC/USER_AVC denials for comm=httpd since the upgrade: 0` | `httpd_t` was never denied the cache volume (`{ read write open map }` on the volume file, `search` on the dir) or the notify socket (`write` on the notify sock_file, `connectto` on the daemon's stream socket). One measured stock class is excluded and reported separately: the root httpd parent's `SO_SNDBUFFORCE` `net_admin` denial (rehearsal §4.3: not pagespeed's, dontaudited by the distro on purpose, surfaced only because `--disable-dontaudit` disables dontaudit for the run; the shipped policy carries no allow for it — see `avc_stock_net_admin` in the driver) |
 | `... for comm=pagespeed-optimizer since the upgrade: 0` | the daemon's own domain was never denied (relevant with a policy that confines it) |
 | `daemon notification counter moved` | the module really reached the socket |
 | `post-upgrade in-place optimization: Puzzle-after-upgrade.jpg served at N bytes` | in-place optimization works through the daemon |
@@ -208,7 +208,8 @@ and end:
 The summary line reads
 `=== el9-selinux (<policy> policy, baseline-selinux <mode>): P passed, F failed, W warning(s) -- 1.15.x -> 1.16.0~rc.N + optimizer ...`
 followed by `SELinux: start=Enforcing end=Enforcing; AVCs since upgrade:
-httpd=0 daemon=0 all=…`. `F = 0` is PASS.
+httpd=0 daemon=0 all=…; stock net_admin excluded=N (pre-policy A,
+post-policy B)`. `F = 0` is PASS.
 
 ### What to expect today
 

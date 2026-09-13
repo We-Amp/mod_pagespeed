@@ -68,6 +68,9 @@ process_template() (
     -e "s#@@MAINTNAME@@#${MAINTNAME}#g" \
     -e "s#@@MAINTMAIL@@#${MAINTMAIL}#g" \
     -e "s#@@REPOCONFIG@@#${REPOCONFIG}#g" \
+    -e "s#@@SELINUX_POLICY_FILES@@#${SELINUX_POLICY_FILES}#g" \
+    -e "s#@@SELINUX_REQUIRES_POST@@#${SELINUX_REQUIRES_POST}#g" \
+    -e "s#@@SELINUX_REQUIRES_POSTUN@@#${SELINUX_REQUIRES_POSTUN}#g" \
     -e "s#@@SHORTDESC@@#${SHORTDESC}#g" \
     -e "s#@@FULLDESC@@#${FULLDESC}#g" \
     -e "s#@@APACHE_CONFDIR@@#${APACHE_CONFDIR}#g" \
@@ -165,11 +168,14 @@ stage_install_common() {
   fi
 
   # The license text and the attribution notices, next to the binaries as the
-  # Apache-2.0 terms ask. The repo-root LICENSE and NOTICE are the single
-  # source, copied verbatim; both Apache packages (deb and rpm) stage them
-  # here under the package's own /usr/share/doc directory. The rpm spec lists
-  # them as %license and %doc.
+  # Apache-2.0 terms ask. The statically linked BSD/MIT/Zlib/IJG-licensed
+  # components ask the same of their notices, so THIRD-PARTY-NOTICES ships
+  # alongside. The repo-root LICENSE, NOTICE and THIRD-PARTY-NOTICES are the
+  # single source, copied verbatim; both Apache packages (deb and rpm) stage
+  # them here under the package's own /usr/share/doc directory. The rpm spec
+  # lists them as %license and %doc.
   install -m 755 -d "${STAGEDIR}/usr/share/doc/${PACKAGE}"
   install -m 644 "${SRCDIR}/LICENSE" "${SRCDIR}/NOTICE" \
+    "${SRCDIR}/THIRD-PARTY-NOTICES" \
     "${STAGEDIR}/usr/share/doc/${PACKAGE}/"
 }

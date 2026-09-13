@@ -3,9 +3,9 @@
   "dataLicense": "CC0-1.0",
   "SPDXID": "SPDXRef-DOCUMENT",
   "name": "pagespeed-1.1",
-  "documentNamespace": "https://spdx.org/spdxdocs/pagespeed-1.1-2026-09-07T07:00:36Z",
+  "documentNamespace": "https://spdx.org/spdxdocs/pagespeed-1.1-2026-09-10T06:31:22Z",
   "creationInfo": {
-    "created": "2026-09-07T07:00:36Z",
+    "created": "2026-09-10T06:31:22Z",
     "creators": [
       "Tool: generate-sbom.py-1.0",
       "Organization: We-Amp B.V."
@@ -287,7 +287,13 @@
       "licenseConcluded": "BSD-2-Clause",
       "licenseDeclared": "BSD-2-Clause",
       "copyrightText": "Copyright Alliance for Open Media",
-      "externalRefs": []
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:generic/aom@v3.12.0"
+        }
+      ]
     },
     {
       "SPDXID": "SPDXRef-Package-dav1d",
@@ -322,6 +328,24 @@
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
           "referenceLocator": "pkg:github/sparsehash/sparsehash@6ff8809259d2408cb48ae4fa694e80b15b151af3"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-gurl",
+      "name": "gurl",
+      "versionInfo": "e6c272102e0554e02c1bb317edff927ee56c7d0b",
+      "supplier": "Organization: The Chromium Authors",
+      "downloadLocation": "https://github.com/google/gurl",
+      "filesAnalyzed": false,
+      "licenseConcluded": "BSD-3-Clause",
+      "licenseDeclared": "BSD-3-Clause",
+      "copyrightText": "Copyright The Chromium Authors",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:github/google/gurl@e6c272102e0554e02c1bb317edff927ee56c7d0b"
         }
       ]
     },
@@ -650,6 +674,11 @@
       "spdxElementId": "SPDXRef-Package-pagespeed-1.1",
       "relationshipType": "DEPENDS_ON",
       "relatedSpdxElement": "SPDXRef-Package-sparsehash"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-pagespeed-1.1",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-gurl"
     },
     {
       "spdxElementId": "SPDXRef-Package-pagespeed-1.1",

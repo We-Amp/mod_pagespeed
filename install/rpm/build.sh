@@ -54,6 +54,41 @@ stage_install_rpm() {
   if [ -n "${OPTIMIZER_RPM_VERSION}" ]; then
     install -m 644 "${BUILDDIR}/install/common/pagespeed_daemon.conf" \
       "${STAGEDIR}${APACHE_CONFDIR}/${PAGESPEED_CONF_PREFIX}pagespeed_daemon.conf"
+
+    # The SELinux policy module for the optimizer daemon, shipped by the
+    # same pair builds that carry the drop-in: on an enforcing EL9 host the
+    # stock targeted policy gives httpd_t no access to the daemon's cache
+    # volume and notify socket, so in-place optimization never turns on
+    # without it. Compiled here, never committed as a binary; the spec's
+    # %post installs it via semodule and its embedded file contexts make the
+    # labels survive restorecon/relabel. The compile needs the SELinux devel
+    # Makefile — selinux-policy-devel (rpm family) / selinux-policy-dev
+    # (deb family); the package builders (the dev CI image for the release
+    # pair build, the EL containers for the Apache legs) do not all carry
+    # it, so install it on demand rather than depending on image content.
+    if [ ! -f /usr/share/selinux/devel/Makefile ]; then
+      echo "SELinux devel Makefile missing — installing the policy-devel package"
+      if command -v apt-get >/dev/null 2>&1; then
+        apt-get install -y selinux-policy-dev >/dev/null
+      elif command -v dnf >/dev/null 2>&1; then
+        dnf install -y --setopt=install_weak_deps=False selinux-policy-devel >/dev/null
+      fi
+    fi
+    local SELINUX_BUILD="${TMPFILEDIR}/selinux"
+    install -m 755 -d "${SELINUX_BUILD}"
+    cp "${BUILDDIR}/install/rpm/selinux/pagespeed-optimizer.te" \
+      "${BUILDDIR}/install/rpm/selinux/pagespeed-optimizer.fc" \
+      "${SELINUX_BUILD}/"
+    if ! ( cd "${SELINUX_BUILD}" && \
+           make -s -f /usr/share/selinux/devel/Makefile \
+             pagespeed-optimizer.pp ); then
+      echo "error: building the SELinux policy module failed (serving-pair" \
+        "builds ship it; the package builder needs selinux-policy-devel" \
+        "(rpm) / selinux-policy-dev (deb) and make)" >&2
+      exit 1
+    fi
+    install -D -m 644 "${SELINUX_BUILD}/pagespeed-optimizer.pp" \
+      "${STAGEDIR}/usr/share/selinux/targeted/pagespeed-optimizer.pp"
   fi
   # Install pagespeed_libraries.conf if available
   # Try Bazel output path first, then legacy GYP path
@@ -91,6 +126,9 @@ do_package() {
   # The %files entry for the daemon drop-in; empty in a dependency-free build,
   # which does not stage the file either (see stage_install_rpm).
   DAEMON_DROPIN_FILES=""
+  SELINUX_POLICY_FILES=""
+  SELINUX_REQUIRES_POST=""
+  SELINUX_REQUIRES_POSTUN=""
   if [ -n "${OPTIMIZER_RPM_VERSION}" ]; then
     # Exact-version dependency: the module serves through the optimizer
     # daemon, and the pair is only supported at matching versions --
@@ -98,6 +136,12 @@ do_package() {
     DEPENDS="$DEPENDS, \
   pagespeed-optimizer = ${OPTIMIZER_RPM_VERSION}"
     DAEMON_DROPIN_FILES="%config(noreplace) ${APACHE_CONFDIR}/${PAGESPEED_CONF_PREFIX}pagespeed_daemon.conf"
+    # The compiled policy module staged in stage_install_rpm, and the
+    # scriptlet toolchain its %post/%postun call (semodule, restorecon,
+    # selinuxenabled all live in policycoreutils on the EL family).
+    SELINUX_POLICY_FILES="/usr/share/selinux/targeted/pagespeed-optimizer.pp"
+    SELINUX_REQUIRES_POST="Requires(post): policycoreutils"
+    SELINUX_REQUIRES_POSTUN="Requires(postun): policycoreutils"
   else
     echo "warning: packaging WITHOUT a pagespeed-optimizer dependency;" \
       "a serving pair build must pass -d <optimizer-rpm-version>" >&2

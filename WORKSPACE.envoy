@@ -42,27 +42,11 @@ load("//bazel:nginx.bzl", "nginx_dependencies")
 
 nginx_dependencies()
 
-# Override com_googlesource_googleurl with a current, dated snapshot.
-# Snapshot e6c272102e (Aug 2025) - re-pinned from the stale undated Nov 2022
-# snapshot (dd4080fe) to pull in upstream Chromium URL-parser fixes and record
-# a dated snapshot. Source switched from the quiche-envoy-integration GCS
-# bucket (which only mirrors Envoy-pinned commits) to the canonical
-# github.com/google/gurl mirror that Envoy itself now uses.
-# This is the newest snapshot for which bazel/googleurl_visibility.patch still
-# applies cleanly (the Nov 2025 HEAD 94ff147 drifted; see commit notes).
-# Keep this in sync with the same rule in WORKSPACE.
-http_archive(
-    name = "com_googlesource_googleurl",
-    sha256 = "9b998fea702bfcfa7d8e763389e56a1e889f718a11ada6b7c4e8c77b43d5a999",
-    strip_prefix = "gurl-e6c272102e0554e02c1bb317edff927ee56c7d0b",
-    urls = ["https://github.com/google/gurl/archive/e6c272102e0554e02c1bb317edff927ee56c7d0b.tar.gz"],
-    patches = ["//bazel:googleurl_visibility.patch"],
-    patch_args = ["-p1"],
-    # NOTE: no checked_iterators.h sed here — this snapshot already carries both
-    # the old (__is_cpp17_contiguous_iterator) and new
-    # (__libcpp_is_contiguous_iterator) spellings, so renaming old->new on
-    # Darwin produces a duplicate specialization and breaks the macOS build.
-)
+# com_googlesource_googleurl comes from mod_pagespeed_dependencies() above
+# (bazel/repositories.bzl, GOOGLEURL_COMMIT) — the single declaration the
+# SBOM generator and the THIRD-PARTY-NOTICES drift gate read. This lane
+# previously carried its own copy here, which under WORKSPACE last-wins
+# semantics would silently shadow a future pin bump in repositories.bzl.
 
 local_repository(
     name = "envoy_build_config",

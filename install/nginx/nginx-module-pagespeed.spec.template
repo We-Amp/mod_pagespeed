@@ -67,6 +67,7 @@ rm -rf "$RPM_BUILD_ROOT"
 %dir @@NGINX_DOCDIR@@
 %license @@NGINX_DOCDIR@@/LICENSE
 %doc @@NGINX_DOCDIR@@/NOTICE
+%doc @@NGINX_DOCDIR@@/THIRD-PARTY-NOTICES
 @@NGINX_DOCDIR@@/README.md
 @@NGINX_DOCDIR@@/pagespeed.conf.sample
 @@NGINX_DOCDIR@@/pagespeed_admin_restrict.conf.sample

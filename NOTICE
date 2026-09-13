@@ -16,6 +16,10 @@ shipped module:
 
 ~~
 
+This software is based in part on the work of the Independent JPEG Group.
+
+~~
+
 Codebase originally donated by Google Inc:
 
 Copyright (C) 2010-2017 Google Inc.
@@ -28,93 +32,61 @@ You may obtain a copy of the License at
 
 ~~
 
+The binary packages ship THIRD-PARTY-NOTICES next to this file: the full
+attribution for every statically linked third-party dependency, cross-checked
+in CI against the drift-gated SBOM (sbom/pagespeed-1.1.spdx.json). The stanzas
+below cover the third-party source vendored in this tree.
+
+~~
+
 Files: *
 Copyright: 2016 Google Inc.
            2024-2026 We-Amp B.V.
 License: Apache-2.0
 
-Files: src/third_party/aprutil/apr_memcache2.*
+Files: third_party/apr/*
+       third_party/aprutil/*
 Copyright: Apache Software Foundation
 License: Apache-2.0
 
-Files: src/third_party/base64/*
-Copyright: 2004-2008 René Nyffenegger
-License: Zlib
-
-Files: src/third_party/chromium/*
-Copyright: 2014 The Chromium Authors
-License: BSD-3-clause
-
-Files: src/third_party/chromium/src/base/third_party/dmg_fp/*
-Copyright: 1991, 2000, 2001 by Lucent Technologies
-License: dtoac
-
-Files: src/third_party/chromium/src/base/third_party/dynamic_annotations/*
-Copyright: 2008-2009 Google Inc.
-License: BSD-variant
-
-Files: src/third_party/chromium/src/base/third_party/icu/*
-       src/third_party/chromium/src/base/i18n/icu_string_conversions.cc
-Copyright: 1995-2009 International Business Machines Corporation and others
-License: ICU
-
-Files: src/third_party/chromium/src/base/third_party/nspr/*
-Copyright: 1998-2000 Netscape Communications Corporation
-           2011 Google Inc.
-License: MPL-1.1 or GPL-2+ or LGPL-2.1+
-
-Files: src/third_party/chromium/src/base/third_party/superfasthash/*
-Copyright: 2010 Paul Hsieh
-License: BSD-3-clause
-
-Files: src/third_party/chromium/src/base/third_party/symbolize/*
-Copyright: 2006 Google Inc.
-License: BSD-3-clause
-
-Files: src/third_party/chromium/src/base/third_party/valgrind/*
-Copyright: 2000-2010 Julian Seward
-License: libbz2
-
-Files: src/third_party/chromium/src/googleurl/*
-Copyright: 2007 Google Inc.
-License: BSD-3-clause
-
-Files: src/third_party/chromium/src/googleurl/src/url_parse.cc
-Copyright: 1998 Netscape Communications Corporation
-License: MPL-1.1 or GPL-2+ or LGPL-2.1+
-
-Files: src/third_party/closure_library/*
-Copyright: 2006-2013 The Closure Library Authors
+Files: third_party/css_parser/*
+Copyright: Google Inc.
 License: Apache-2.0
+Comment: Google's css-parser, donated to the ASF with the rest of the
+ codebase. The nested third_party/utf directory is Lucent code, covered by
+ the stanza below.
 
-Files: external/libpsl/* (https://github.com/rockdaboot/libpsl)
-Copyright: 2014-2024 Tim Ruehsen and the libpsl contributors
-License: MIT
+Files: third_party/css_parser/src/third_party/utf/*
+Copyright: 1998-2002 Lucent Technologies
+License: Lucent permissive
+Comment: The authors of this software are Rob Pike and Ken Thompson. The
+ license terms require this entire notice to be included in all copies of
+ the software and in all copies of its supporting documentation:
+   The authors of this software are Rob Pike and Ken Thompson.
+                Copyright (c) 1998-2002 by Lucent Technologies.
+   Permission to use, copy, modify, and distribute this software for any
+   purpose without fee is hereby granted, provided that this entire notice
+   is included in all copies of any software which is or includes a copy
+   or modification of this software and in all copies of the supporting
+   documentation for such software.
+   THIS SOFTWARE IS BEING PROVIDED "AS IS", WITHOUT ANY EXPRESS OR IMPLIED
+   WARRANTY.  IN PARTICULAR, NEITHER THE AUTHORS NOR LUCENT TECHNOLOGIES MAKE ANY
+   REPRESENTATION OR WARRANTY OF ANY KIND CONCERNING THE MERCHANTABILITY
+   OF THIS SOFTWARE OR ITS FITNESS FOR A PARTICULAR PURPOSE.
 
-Files: external/libpsl/src/psl-make-dafsa, external/libpsl/src/lookup_string_in_fixed_set.c
-Copyright: 2014 The Chromium Authors
-License: BSD-3-Clause
-
-Files: external/libpsl/list/public_suffix_list.dat (Mozilla Public Suffix List)
-Copyright: Mozilla Foundation and contributors
-License: MPL-2.0
-
-Files: src/third_party/google-sparsehash/*
+Files: third_party/google-sparsehash/*
 Copyright: 2005 Google Inc.
 License: BSD-3-clause
 
-Files: src/third_party/libwebp/*
-Copyright: 2010 Google Inc.
+Files: external/com_googlesource_googleurl (google/gurl, Bazel http_archive
+       pinned in bazel/repositories.bzl)
+Copyright: 2015 The Chromium Authors
 License: BSD-3-clause
 
-Files: src/third_party/modp_b64/*
-Copyright: 2005, 2006  Nick Galbreath -- nickg [at] modp [dot] com
+Files: external/com_googlesource_googleurl/url/third_party/mozilla/url_parse.cc
+Copyright: 1998 Netscape Communications Corporation
+License: MPL-1.1 or GPL-2+ or LGPL-2.1+
+
+Files: third_party/redis-crc/*
+Copyright: 2006-2015 Salvatore Sanfilippo
 License: BSD-3-clause
-
-Files: src/third_party/optipng/*
-Copyright: 2001-2012 Cosmin Truta and the Contributing Authors
-License: Zlib
-
-Files: src/third_party/serf/*
-Copyright: 2002-2012 Justin Erenkrantz and Greg Stein
-License: Apache-2.0

@@ -26,6 +26,8 @@ Packager        : @@MAINTNAME@@ <@@MAINTMAIL@@>
 
 Provides        : @@PROVIDES@@ = %{version}
 Requires        : @@DEPENDS@@
+@@SELINUX_REQUIRES_POST@@
+@@SELINUX_REQUIRES_POSTUN@@
 
 #------------------------------------------------------------------------------
 #   Description
@@ -74,9 +76,11 @@ rm -rf "$RPM_BUILD_ROOT"
 %dir /usr/share/doc/@@PACKAGE@@
 %license /usr/share/doc/@@PACKAGE@@/LICENSE
 %doc /usr/share/doc/@@PACKAGE@@/NOTICE
+%doc /usr/share/doc/@@PACKAGE@@/THIRD-PARTY-NOTICES
 %config(noreplace) @@APACHE_CONFDIR@@/@@PAGESPEED_CONF_PREFIX@@pagespeed.conf
 %config(noreplace) @@APACHE_CONFDIR@@/@@PAGESPEED_CONF_PREFIX@@pagespeed_libraries.conf
 @@DAEMON_DROPIN_FILES@@
+@@SELINUX_POLICY_FILES@@
 %attr(-, @@APACHE_USER@@, @@APACHE_USER@@) @@MOD_PAGESPEED_CACHE@@
 %attr(-, @@APACHE_USER@@, @@APACHE_USER@@) @@MOD_PAGESPEED_LOG@@
 
@@ -109,6 +113,45 @@ if getent group pagespeed >/dev/null 2>&1; then
   done
 fi
 
+# SELinux policy for the optimizer daemon. The .pp is shipped only by
+# serving-pair builds (-d), so the file guard makes every line a no-op on
+# builds without it and on hosts with SELinux disabled. On an enforcing EL9
+# host the stock targeted policy gives httpd_t no access to the daemon's
+# cache volume and notify socket, so in-place optimization never turns on
+# without this module. Same philosophy as the group join above: a policy
+# hiccup must not fail the install -- the module logs the degraded state
+# loudly at startup instead.
+if [ -f /usr/share/selinux/targeted/pagespeed-optimizer.pp ] && \
+   /usr/sbin/selinuxenabled 2>/dev/null; then
+  # Install (or upgrade) the module. Its embedded file contexts (from
+  # pagespeed-optimizer.fc) register in the policy store here, so the
+  # labels applied below survive restorecon and a full relabel. A failure
+  # stays non-fatal (the package itself is fine; the module logs its
+  # degraded state at startup) but must not be silent either.
+  if ! /usr/sbin/semodule -i \
+       /usr/share/selinux/targeted/pagespeed-optimizer.pp; then
+    echo "mod-pagespeed: could not install the pagespeed-optimizer SELinux" \
+      "policy module. On SELinux-enforcing hosts the web server cannot" \
+      "reach the optimizer daemon, so in-place optimization stays off;" \
+      "everything else is unaffected. Retry as root with: semodule -i" \
+      "/usr/share/selinux/targeted/pagespeed-optimizer.pp" >&2
+  fi
+  # Relabel the daemon's paths now that the types exist -- the daemon
+  # package creates them under the generic var_t / var_run_t / bin_t labels.
+  for p in /usr/bin/pagespeed-optimizer \
+           /var/cache/pagespeed-optimizer \
+           /run/pagespeed-optimizer; do
+    if [ -e "$p" ]; then
+      /usr/sbin/restorecon -R "$p" || true
+    fi
+  done
+  # A daemon already running under the old unconfined label only enters
+  # pagespeed_t through a fresh exec. try-restart is a no-op when the daemon
+  # is not running (fresh installs where it has not started yet transition
+  # on its first start).
+  systemctl try-restart pagespeed-optimizer.service >/dev/null 2>&1 || true
+fi
+
 exit 0
 
 #------------------------------------------------------------------------------
@@ -131,5 +174,35 @@ exit 0
 #   Post uninstallation script
 #------------------------------------------------------------------------------
 %postun
+
+if [ "$1" -eq "0" ] && /usr/sbin/selinuxenabled 2>/dev/null && \
+   /usr/sbin/semodule -l 2>/dev/null | grep -q '^pagespeed-optimizer'; then
+  # Final erase. Stop a running daemon FIRST, while its domain still exists
+  # in the policy: after semodule -r its type is gone, a still-running
+  # daemon's context becomes unlabeled_t, and that is a type even systemd
+  # cannot signal (measured: 22x init_t -> unlabeled_t { signal signull
+  # sigkill } denials, and a daemon init could not stop). Then remove the
+  # module, put the labels back to stock, and start the daemon again --
+  # it comes up in its stock (unconfined_service_t) domain, the pre-policy
+  # status quo. Best-effort throughout: a partially removed policy must not
+  # fail the erase. NB: %postun runs after this package's files are gone, so
+  # the guard keys on the installed module, not on the shipped .pp file.
+  daemon_was_active=0
+  if systemctl is-active --quiet pagespeed-optimizer.service; then
+    daemon_was_active=1
+    systemctl stop pagespeed-optimizer.service || true
+  fi
+  /usr/sbin/semodule -r pagespeed-optimizer 2>/dev/null || true
+  for p in /usr/bin/pagespeed-optimizer \
+           /var/cache/pagespeed-optimizer \
+           /run/pagespeed-optimizer; do
+    if [ -e "$p" ]; then
+      /usr/sbin/restorecon -R "$p" || true
+    fi
+  done
+  if [ "$daemon_was_active" -eq 1 ]; then
+    systemctl start pagespeed-optimizer.service >/dev/null 2>&1 || true
+  fi
+fi
 
 exit 0

@@ -74,6 +74,19 @@ GOOGLE_SPARSEHASH_COMMIT = "6ff8809259d2408cb48ae4fa694e80b15b151af3"
 GOOGLE_SPARSEHASH_SHA = "4ae105acb6b53f957b6005fa103a9fd342c39dbc7c87673663e782325b8296b3"
 GFLAGS_COMMIT = "de1b8d3daa40b5b07208ec9e82f223d430e2ecc1"  # v2.3.0 - Updated Jan 2026
 GFLAGS_SHA = "b563851a60342abc35281fa9c684de7e9604a2bf1982c85035180b9ce3afa774"
+# googleurl (gurl) — Chromium's URL parser, used by pagespeed/kernel/http for
+# URL parsing (parses attacker-controllable href/src/url()). Originally an
+# Envoy dep, but referenced directly by core PageSpeed code. Fully
+# encapsulated behind the GoogleUrl wrapper.
+# Snapshot e6c272102e (Aug 2025) - re-pinned from the stale undated Nov 2022
+# snapshot (dd4080fe) to pull in upstream Chromium URL-parser fixes and record
+# a dated snapshot. Source is the canonical github.com/google/gurl mirror
+# that Envoy itself now uses (the quiche-envoy-integration GCS bucket only
+# mirrors Envoy-pinned commits). This is the newest snapshot for which
+# bazel/googleurl_visibility.patch still applies cleanly (the Nov 2025 HEAD
+# 94ff147 drifted; see openQuestions).
+GOOGLEURL_COMMIT = "e6c272102e0554e02c1bb317edff927ee56c7d0b"
+GOOGLEURL_SHA = "9b998fea702bfcfa7d8e763389e56a1e889f718a11ada6b7c4e8c77b43d5a999"
 # libpsl — maintained Public Suffix List library. Replaces the dead
 # Apache-incubator domain_registry_provider ("drp"); same Mozilla PSL dataset,
 # built builtin-only with no IDNA runtime. Release dist tarball (ships a
@@ -584,6 +597,21 @@ cc_library(
         sha256 = GOOGLE_SPARSEHASH_SHA,
         patches = ["@mod_pagespeed//bazel:sparsehash_cstring.patch"],
         patch_args = ["-p1"],
+    )
+
+    http_archive(
+        name = "com_googlesource_googleurl",
+        sha256 = GOOGLEURL_SHA,
+        strip_prefix = "gurl-%s" % GOOGLEURL_COMMIT,
+        urls = ["https://github.com/google/gurl/archive/%s.tar.gz" % GOOGLEURL_COMMIT],
+        patches = ["@mod_pagespeed//bazel:googleurl_visibility.patch"],
+        patch_args = ["-p1"],
+        # NOTE: the former Darwin-only patch_cmds sed renaming
+        # __is_cpp17_contiguous_iterator -> __libcpp_is_contiguous_iterator
+        # was removed: current libc++ (Xcode 16+ / macOS 26) already uses the
+        # new spelling, and the pinned gurl snapshot now carries an upstream
+        # block with that spelling too, so the sed produced a
+        # duplicate-definition error.
     )
 
     http_archive(

@@ -332,10 +332,40 @@ avc_since() {
   if [[ -f "$AUDIT_LOG" ]]; then
     tail -c +$((off + 1)) "$AUDIT_LOG" 2>/dev/null | grep -E '^type=(AVC|USER_AVC) ' || true
   else
-    journalctl -k -o cat --since "$START_TS" 2>/dev/null | grep -E 'avc: +denied' || true
+    journalctl -k -o cat --since "@$(date -d "$START_TS" +%s)" 2>/dev/null | grep -E 'avc: +denied' || true
   fi | { if [[ -n "$comm" ]]; then grep -E "comm=\"?(${comm})" || true; else cat; fi; }
 }
 avc_count() { avc_since "$@" | grep -c . || true; }
+# Stock-stack net_admin exclusion (rehearsal finding 4.3). The root httpd
+# parent's setsockopt(SOL_SOCKET, SO_SNDBUFFORCE) is denied CAP_NET_ADMIN at
+# every httpd (re)start on a stock EL9 host; the rehearsal's isolation work
+# proved it comes from the stock EL9 module stack, not mod_pagespeed, and
+# the distro policy dontaudits it deliberately -- it is exactly the class
+# --disable-dontaudit exists to surface, so with -DB it appears at every
+# (re)start of the run. The shipped pagespeed policy deliberately carries
+# NO allow for it: an allow would hand every root-context httpd_t process
+# real CAP_NET_ADMIN (netlink, iptables) to silence a harmless hidden EPERM
+# in another component's syscall. The gate therefore excludes the class
+# from the httpd denial count, scoped to precisely the measured shape
+# (capability net_admin, httpd_t -> httpd_t), and reports the excluded
+# records separately, split at the moment the shipped policy could first
+# exist on the host (POLICY_TS): before it the denial precedes any
+# installable policy by construction; after it the record is the same
+# dontaudited stock class, visible only because this run disabled dontaudit.
+avc_stock_net_admin() {
+  grep -E 'avc: +denied +\{ net_admin \}.*scontext=\S+:httpd_t:\S+ +tcontext=\S+:httpd_t:\S+ +tclass=capability' || true
+}
+avc_drop_stock_net_admin() {
+  grep -vE 'avc: +denied +\{ net_admin \}.*scontext=\S+:httpd_t:\S+ +tcontext=\S+:httpd_t:\S+ +tclass=capability' || true
+}
+# policy_load_ts <byte-offset>: epoch of the first kernel policy load the
+# audit log records after <byte-offset>; empty when there is none.
+policy_load_ts() {
+  [[ -f "$AUDIT_LOG" ]] || return 0
+  tail -c +$(($1 + 1)) "$AUDIT_LOG" 2>/dev/null \
+    | grep -m1 -E '^type=MAC_POLICY_LOAD ' \
+    | sed -E 's/.*msg=audit\(([0-9]+).*/\1/' || true
+}
 # avc_summary: one line per (comm, class, perms, target type, path) group.
 avc_summary() {
   sed -E 's/.*denied +\{ ([^}]*)\}.*comm="([^"]*)".*/\2|\1|&/' \
@@ -360,6 +390,11 @@ avc_classes() {
   printf '%s\n' "$in" | grep -q -E "pagespeed-optimizer/v1|pagespeed_cache_t|cache-[0-9]" && echo "  class: daemon cache volume (${DAEMON_CACHE})"
   printf '%s\n' "$in" | grep -q -E "mod_pagespeed|/var/log/pagespeed" && echo "  class: the module's own cache/log directories (1.15-era layout)"
   printf '%s\n' "$in" | grep -q -E 'comm="pagespeed-optim' && echo "  class: the daemon itself (comm=pagespeed-optimizer)"
+  # A record set matching none of the classes above is still a valid outcome
+  # (e.g. the stock-module-stack startup denials); without this the last
+  # grep's status leaks out of the function and kills the set -e/pipefail
+  # run right here, mid-report, before the gate phase.
+  return 0
 }
 
 OFF_START="$(audit_offset)"
@@ -403,9 +438,9 @@ collect_diagnostics() {
     echo "getenforce: $(getenforce 2>/dev/null || echo ?)"
     sestatus 2>/dev/null || true
   } > "$d/selinux-status.txt"
-  ausearch -m AVC,USER_AVC -ts "$START_TS" -i > "$d/avc-since-start.txt" 2>&1 || true
+  ausearch -m AVC,USER_AVC -ts "${START_TS% *}" "${START_TS#* }" -i > "$d/avc-since-start.txt" 2>&1 || true
   avc_since "$OFF_START" > "$d/avc-since-start.raw" 2>/dev/null || true
-  ausearch -m AVC,USER_AVC -ts "$START_TS" 2>/dev/null | audit2allow -m pagespeed_rehearsal > "$d/audit2allow.te" 2>&1 || true
+  ausearch -m AVC,USER_AVC -ts "${START_TS% *}" "${START_TS#* }" 2>/dev/null | audit2allow -m pagespeed_rehearsal > "$d/audit2allow.te" 2>&1 || true
   semodule -l 2>/dev/null | grep -i pagespeed > "$d/semodule-pagespeed.txt" || echo "(no pagespeed module loaded)" > "$d/semodule-pagespeed.txt"
   journalctl -u "$DAEMON_UNIT" --no-pager -n 200 > "$d/daemon-journal.log" 2>&1 || true
   $WEB_CTL -t -D DUMP_INCLUDES > "$d/httpd-dump-includes.txt" 2>&1 || true
@@ -582,7 +617,7 @@ else
   avc_since "$OFF_START" 'httpd' | avc_classes
 fi
 avc_since "$OFF_START" > "$ARTIFACTS/avc-baseline.raw" 2>/dev/null || true
-ausearch -m AVC,USER_AVC -ts "$START_TS" -i > "$ARTIFACTS/avc-baseline.txt" 2>&1 || true
+ausearch -m AVC,USER_AVC -ts "${START_TS% *}" "${START_TS#* }" -i > "$ARTIFACTS/avc-baseline.txt" 2>&1 || true
 
 # Everything from here on is the upgrade's doing.
 OFF_UPGRADE="$(audit_offset)"
@@ -641,8 +676,8 @@ if [[ -f "${DROPIN_DIR}/${DAEMON_DROPIN}" ]]; then
   check "drop-in socket path" "${DAEMON_RUN}/notify.sock" "$(awk '$1=="ModPagespeedDaemonSocketPath"{print $2}' "${DROPIN_DIR}/${DAEMON_DROPIN}")"
   check "drop-in volume path" "${DAEMON_CACHE}/cache" "$(awk '$1=="ModPagespeedDaemonVolumePath"{print $2}' "${DROPIN_DIR}/${DAEMON_DROPIN}")"
   $WEB_CTL -t -D DUMP_INCLUDES > "$ARTIFACTS/dump-includes.log" 2>/dev/null || true
-  loader_at="$(grep -n -F -- "${LOADER_CONF}" "$ARTIFACTS/dump-includes.log" | head -1 | cut -d: -f1)"
-  dropin_at="$(grep -n -F -- "/${DAEMON_DROPIN}" "$ARTIFACTS/dump-includes.log" | head -1 | cut -d: -f1)"
+  loader_at="$(grep -n -F -- "${LOADER_CONF}" "$ARTIFACTS/dump-includes.log" | head -1 | cut -d: -f1 || true)"
+  dropin_at="$(grep -n -F -- "/${DAEMON_DROPIN}" "$ARTIFACTS/dump-includes.log" | head -1 | cut -d: -f1 || true)"
   if [[ -z "$dropin_at" || -z "$loader_at" ]]; then
     fail "the web server's include dump does not list both ${DAEMON_DROPIN} and the module loader"
   elif (( dropin_at > loader_at )); then
@@ -658,6 +693,18 @@ else
   write_dropin_by_hand
 fi
 
+# The moment the shipped policy could first exist on this host, used to
+# split the excluded stock net_admin records (see avc_stock_net_admin).
+# With a policy-carrying rpm it is the module's %post semodule -i inside
+# the upgrade transaction (the first kernel policy load since OFF_UPGRADE);
+# with --policy draft it is the driver's own install below. Empty when no
+# policy load was recorded (dependency-free packages): every excluded
+# record then counts as pre-policy.
+POLICY_TS=""
+if [[ "$POLICY" == none ]]; then
+  POLICY_TS="$(policy_load_ts "$OFF_UPGRADE")"
+fi
+
 if [[ "$POLICY" == draft ]]; then
   step "loading the daemon's DRAFT SELinux policy module (--policy draft)"
   dnf install -y -q --setopt=install_weak_deps=False selinux-policy-devel make >"$ARTIFACTS/policy-devel-dnf.log" 2>&1 \
@@ -671,6 +718,7 @@ if [[ "$POLICY" == draft ]]; then
   fi
   if [[ -f /root/selinux-build/pagespeed-optimizer.pp ]] && semodule -i /root/selinux-build/pagespeed-optimizer.pp >"$ARTIFACTS/policy-install.log" 2>&1; then
     pass "draft policy installed: $(semodule -l | grep -i pagespeed | tr '\n' ' ')"
+    POLICY_TS="$(date +%s)"
     restorecon -Rv "$DAEMON_BIN" /var/cache/pagespeed-optimizer "$DAEMON_RUN" > "$ARTIFACTS/policy-restorecon.log" 2>&1 || true
     note "after restorecon: binary $(label_of "$DAEMON_BIN")  cache $(label_of "$DAEMON_CACHE")  run $(label_of "$DAEMON_RUN")"
     systemctl restart "$DAEMON_UNIT" || fail "daemon did not restart under the draft policy"
@@ -813,9 +861,26 @@ fi
 step "SELinux verdict: denials since the upgrade began"
 ENFORCE_AT_END="$(getenforce 2>/dev/null || echo unknown)"
 check "SELinux still Enforcing at the end" "Enforcing" "$ENFORCE_AT_END"
-HTTPD_AVCS="$(avc_count "$OFF_UPGRADE" 'httpd')"
+# The gate counts httpd denials minus the excluded stock net_admin class
+# (see avc_stock_net_admin for the scoping and the reasoning); the excluded
+# records are reported, split at POLICY_TS, never silently dropped.
+STOCK_NA="$(avc_since "$OFF_UPGRADE" 'httpd' | avc_stock_net_admin)"
+HTTPD_AVCS="$(avc_since "$OFF_UPGRADE" 'httpd' | avc_drop_stock_net_admin | grep -c . || true)"
 DAEMON_AVCS="$(avc_count "$OFF_UPGRADE" 'pagespeed-optim')"
 ALL_AVCS="$(avc_count "$OFF_UPGRADE")"
+STOCK_NA_N=0 STOCK_NA_PRE=0 STOCK_NA_POST=0
+if [[ -n "$STOCK_NA" ]]; then
+  STOCK_NA_N="$(printf '%s\n' "$STOCK_NA" | grep -c . || true)"
+  while read -r ts; do
+    [[ -n "$ts" ]] || continue
+    if [[ -z "$POLICY_TS" || "$ts" -lt "$POLICY_TS" ]]; then
+      STOCK_NA_PRE=$((STOCK_NA_PRE + 1))
+    else
+      STOCK_NA_POST=$((STOCK_NA_POST + 1))
+    fi
+  done < <(printf '%s\n' "$STOCK_NA" | sed -E 's/.*msg=audit\(([0-9]+).*/\1/')
+  note "excluded stock-stack net_admin denial(s): ${STOCK_NA_N} total, ${STOCK_NA_PRE} before the shipped policy could first exist, ${STOCK_NA_POST} after (httpd parent SO_SNDBUFFORCE, rehearsal 4.3, dontaudited by the distro; only visible under --disable-dontaudit)"
+fi
 check "AVC/USER_AVC denials for comm=httpd since the upgrade (the gate)" "0" "$HTTPD_AVCS"
 check "AVC/USER_AVC denials for comm=pagespeed-optimizer since the upgrade (the gate)" "0" "$DAEMON_AVCS"
 note "all AVC/USER_AVC denials since the upgrade, any process: ${ALL_AVCS}"
@@ -824,11 +889,11 @@ if [[ "$HTTPD_AVCS" != 0 || "$DAEMON_AVCS" != 0 ]]; then
   avc_since "$OFF_UPGRADE" 'httpd|pagespeed-optim' | avc_summary | head -20
   avc_since "$OFF_UPGRADE" 'httpd|pagespeed-optim' | avc_classes
   echo "  --- the rules a policy would need (audit2allow, since the upgrade) ---"
-  ausearch -m AVC,USER_AVC -ts "$UPGRADE_TS" 2>/dev/null | audit2allow 2>/dev/null | sed 's/^/  /' | head -40 || true
+  ausearch -m AVC,USER_AVC -ts "${UPGRADE_TS% *}" "${UPGRADE_TS#* }" 2>/dev/null | audit2allow 2>/dev/null | sed 's/^/  /' | head -40 || true
 fi
 avc_since "$OFF_UPGRADE" > "$ARTIFACTS/avc-since-upgrade.raw" 2>/dev/null || true
-ausearch -m AVC,USER_AVC -ts "$UPGRADE_TS" -i > "$ARTIFACTS/avc-since-upgrade.txt" 2>&1 || true
-ausearch -m AVC,USER_AVC -ts "$UPGRADE_TS" 2>/dev/null | audit2allow -m pagespeed_rehearsal > "$ARTIFACTS/audit2allow-since-upgrade.te" 2>&1 || true
+ausearch -m AVC,USER_AVC -ts "${UPGRADE_TS% *}" "${UPGRADE_TS#* }" -i > "$ARTIFACTS/avc-since-upgrade.txt" 2>&1 || true
+ausearch -m AVC,USER_AVC -ts "${UPGRADE_TS% *}" "${UPGRADE_TS#* }" 2>/dev/null | audit2allow -m pagespeed_rehearsal > "$ARTIFACTS/audit2allow-since-upgrade.te" 2>&1 || true
 
 # ---------------------------------------------------------------------------
 # Summary
@@ -836,7 +901,7 @@ ausearch -m AVC,USER_AVC -ts "$UPGRADE_TS" 2>/dev/null | audit2allow -m pagespee
 collect_diagnostics "$( [[ "$FAILS" -gt 0 ]] && echo 1 || echo 0 )"
 echo
 echo "=== el9-selinux (${POLICY} policy, baseline-selinux ${BASELINE_SELINUX}): ${PASSES} passed, ${FAILS} failed, ${WARNS} warning(s) -- ${BASELINE_VERSION} -> ${MOD_VERSION} + optimizer ${OPT_VERSION}"
-echo "    SELinux: start=${ENFORCE_AT_START} end=${ENFORCE_AT_END}; AVCs since upgrade: httpd=${HTTPD_AVCS} daemon=${DAEMON_AVCS} all=${ALL_AVCS}; baseline httpd AVCs=${BASELINE_AVCS}"
+echo "    SELinux: start=${ENFORCE_AT_START} end=${ENFORCE_AT_END}; AVCs since upgrade: httpd=${HTTPD_AVCS} daemon=${DAEMON_AVCS} all=${ALL_AVCS}; baseline httpd AVCs=${BASELINE_AVCS}; stock net_admin excluded=${STOCK_NA_N} (pre-policy ${STOCK_NA_PRE}, post-policy ${STOCK_NA_POST})"
 echo "    artifacts: ${ARTIFACTS}"
 if [[ "$FAILS" -gt 0 ]]; then
   echo "--- error log after the upgrade restart (tail) ---"; tail -20 "$ARTIFACTS/error-log-after-upgrade.log" 2>/dev/null || true

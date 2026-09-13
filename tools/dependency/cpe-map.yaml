@@ -140,6 +140,11 @@ deps:
     justification: "gflags has no NVD CPE; command-line flag parsing lib, no public CVEs"
     release_date: "2018-11-11"                  # v2.3.0 (de1b8d3)
 
+  gurl:
+    cpe: "N/A"
+    justification: "google/gurl (standalone mirror of Chromium's url/ library) has no NVD CPE of its own; google:chrome would false-positive against a 2025-08 snapshot that postdates the fixes those CVEs name"
+    release_date: "2025-08-28"                  # e6c272102e — commit committer.date (GitHub API), the pin convention for commit-pinned deps
+
   libpsl:
     cpe: "N/A"
     justification: "rockdaboot/libpsl (Public Suffix List parser) has no NVD CPE; replaced the dead apache/incubator-pagespeed-drp (SEC drp->libpsl)"
