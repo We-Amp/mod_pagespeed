@@ -290,7 +290,7 @@ class SystemRewriteDriverFactory : public RewriteDriverFactory {
 
   // The CPU budget and process-concurrency divisor the resolved counts were
   // computed from.  Only meaningful once thread_counts_finalized().  Exposed
-  // so ports can report them; the admin/statistics surface is's
+  // so ports can report them; the admin/statistics surface is a planned
   // follow-up.
   const EffectiveCpuBudget& cpu_budget() const { return cpu_budget_; }
   int concurrent_process_count() const { return concurrent_processes_; }

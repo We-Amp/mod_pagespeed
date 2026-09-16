@@ -19,7 +19,8 @@ IisPsolRequestContext::IisPsolRequestContext(AbstractMutex* logging_mutex, Timer
 	  ,check_third_part_cookie_()
 {
 	// Transport scheme of the incoming connection, consumed by
-	// LoopbackRouteFetcher when munging unknown-origin URLs.
+	// LoopbackRouteFetcher when munging unknown-origin URLs (the loopback
+	// fetch must speak the connection's scheme, not the URL's).
 	set_local_scheme(local_scheme);
 }
 

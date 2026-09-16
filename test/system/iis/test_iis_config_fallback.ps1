@@ -1,14 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2024-2026 We-Amp B.V.
 
-# test_iis_config_fallback.ps1 - Pins the canonical config-path contract for
-# iis_module_factory.cpp's config-path resolution.
+# test_iis_config_fallback.ps1 - Pins the canonical-config-with-legacy-
+# fallback contract for iis_module_factory.cpp's config-path resolution.
 #
-# The MSI now
-# files pagespeed.config into the canonical product directory
+# The MSI now files pagespeed.config into the canonical product directory
 #   C:\ProgramData\We-Amp\PageSpeed\pagespeed.config
 # alongside the cache + logs subdirectories. Upgrade-from-IISpeed and
-# upgrade-from-1.1-legacy customers keep their config at the legacy
+# upgrade-from-early-1.1 customers keep their config at the legacy
 #   C:\ProgramData\We-Amp\IISWebSpeed\pagespeed.config
 # via NeverOverwrite="yes" on Product.wxs:228. iis_module_factory.cpp
 # resolves canonical-first with a runtime fallback to the legacy path.

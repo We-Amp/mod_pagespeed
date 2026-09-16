@@ -5,7 +5,7 @@
 # extract-vendor-tarball.sh - Robust cross-runner fetch + integrity-checked
 # extraction of the hermetic vendor tarball produced by the `vendor` job.
 #
-# Why this script exists (recurring):
+# Why this script exists (the cross-runner artifact-fetch flake, recurring):
 #   The vendor job writes the tarball to per-machine local storage
 #   (a machine-local path on each x64 builder, all of which share one runner
 #   label) and rsyncs a copy to the CI hub shared dir.
@@ -24,8 +24,8 @@
 #      NEVER reaches tar.
 #   2. SELF-HEALING FALLBACK. If the local copy is missing, fails integrity,
 #      OR FAILS EXTRACTION (a verified file can still vanish -- or its DrvFs
-#      mount flap -- between `zstd -t` and `tar`: Linux Build lane, run
-#      29756918487, "Local tarball present and verified" then seconds later
+#      mount flap -- between `zstd -t` and `tar`: on the Linux Build lane a
+#      run logged "Local tarball present and verified" then seconds later
 #      "Cannot open: No such file or directory"), we re-fetch from the
 #      authoritative CI hub shared dir with retries + backoff, re-verifying
 #      each attempt. A flaky/partial/vanished local file heals from the
@@ -180,7 +180,8 @@ resolve_hub() {
     # resolve-cache-host.sh probes TCP/22 on every resolved address and prints
     # the first that answers -- the bare first-resolved-address idiom this
     # replaces pre-collapsed to whatever stale A-record DNS listed first and
-    # died with "No route to host" (see resolve-cache-host.sh's header).
+    # died with "No route to host" (the stale-A-record flake; see
+    # resolve-cache-host.sh's header).
     CI_HUB_ADDR="$(bash "$(dirname "${BASH_SOURCE[0]}")/resolve-cache-host.sh" 2>/dev/null || true)"
     : "${CI_HUB_ADDR:=${CI_HUB_IP:-}}"
   fi
@@ -236,8 +237,8 @@ fetch_from_hub() {
 #   Extracts a tarball that has ALREADY passed verify_tarball into $DEST.
 #   Returns tar's (or the pipeline's, under pipefail) exit status so the
 #   caller can self-heal: a verified file can still vanish -- or its DrvFs
-#   mount flap -- between verification and extraction (Linux Build lane, run
-#   29756918487: "Local tarball present and verified" followed seconds later
+#   mount flap -- between verification and extraction (on the Linux Build lane
+#   a run logged "Local tarball present and verified" followed seconds later
 #   by tar's "Cannot open: No such file or directory"). Called under `if`, so
 #   `set -e` is intentionally suppressed inside; the last command's status is
 #   the function's return value (pipefail keeps a zstd-side failure in the

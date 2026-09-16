@@ -17,8 +17,8 @@
 #   idiom -- `getent hosts <hub> | awk '{print $1; exit}'` -- grabbed the FIRST
 #   resolved address and assumed any resolved IP reaches the host. That premise
 #   is false: when DNS lists a dead record first, every fetch that pre-collapsed
-#   to that single IP died with "No route to host" (a cross-runner artifact
-#   flake; the maintainer CI went red 2026-06-23).
+#   to that single IP died with "No route to host" (the cross-runner artifact
+#   fetch flake; master CI red on 2026-06-23).
 #   (ssh/rsync given the *hostname* survive this because OpenSSH iterates all
 #   resolved addresses -- it's only the pre-resolved-to-one-IP call sites and
 #   `docker --add-host`, which needs a single IP, that break.)

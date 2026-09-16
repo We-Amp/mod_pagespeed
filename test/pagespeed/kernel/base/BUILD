@@ -81,7 +81,8 @@ pagespeed_cc_test(
     ],
 )
 
-# authoritative TSan verdict on the shutdown logging race.
+# Authoritative TSan verdict on the shutdown logging race (a worker thread
+# logging during static destruction).
 # Isolated binary — see the exclusion in base_test above.
 pagespeed_cc_test(
     name = "logging_shutdown_tsan_race_test",

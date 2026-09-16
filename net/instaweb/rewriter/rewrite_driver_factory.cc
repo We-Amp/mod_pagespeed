@@ -732,8 +732,9 @@ void RewriteDriverFactory::InitStats(Statistics* statistics) {
   // because the request failed an eligibility gate (Apache: subrequest /
   // header-only / Range / a non-verbatim output filter on the chain).
   // Distinguishes "aliasing configured but structurally blocked" from a
-  // dead upstream path (the defect existed because this degrade was
-  // silent).  The first blocked serve also logs its blocking condition at
+  // dead upstream path (the zero-copy eligibility defect went unnoticed
+  // because this degrade was silent).  The first blocked serve also logs
+  // its blocking condition at
   // INFO, once per process.
   statistics->AddVariable("zerocopy_serve_ineligible");
   // IIS sink: aliased-serve aborts NOT caused by a torn borrow

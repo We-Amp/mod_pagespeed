@@ -180,7 +180,8 @@ TEST_F(LoopbackRouteFetcherTest, LoopbackRouteFetcherWorks) {
                dest6.response_headers()->Lookup1("Host"));
 }
 
-// defect B: when X-Forwarded-Proto is in play the resource URL's
+// The X-Forwarded-Proto scheme defect: when X-Forwarded-Proto is in play
+// the resource URL's
 // scheme reflects the original client connection, not the transport this
 // server actually speaks on own_port. Munging must use the connection's
 // transport scheme, otherwise we synthesize structurally unfetchable URLs

@@ -171,8 +171,8 @@ BOOL APIENTRY DllMain(HMODULE hModule,
       google::protobuf::ShutdownProtobufLibrary();
       net_instaweb::HtmlKeywords::ShutDown();
 
-      // Route any further LOG() to stderr (IIS counterpart of
-      // Apache's child-exit ordering). Placed here, not at the top
+      // Route any further LOG() to stderr (the IIS counterpart of
+      // Apache's pagespeed_child_exit shutdown ordering). Placed here, not at the top
       // of DETACH, so teardown diagnostics above keep flowing through the
       // sink while the message handler is still alive. What this closes:
       // the handler is deleted next, and this DLL's static destructors run

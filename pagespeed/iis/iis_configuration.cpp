@@ -60,8 +60,7 @@ class ConfigurationFile:public ReferenceCounter
 	// hitting the same cached ConfigurationFile* race on these non-atomic
 	// fields and on the CreateFileA/GetFileTime file I/O. This is a real
 	// data race regardless of whether the platform-specific verifier
-	// instrumentation catches it today; see the deferred peer-defect
-	// list.
+	// instrumentation catches it today.
 	//
 	// We use a CRITICAL_SECTION (cheap on Windows, recursive-safe within a
 	// single thread, no kernel transition in the uncontended case) rather
@@ -377,8 +376,8 @@ public:
 		// lock does not serialize readers against each other, so without this
 		// per-instance critical section two concurrent IIS worker threads can
 		// race on expiresat (writes at "expiresat=GetTickCount64()+1000;"
-		// below) and on the CreateFileA/GetFileTime file I/O.
-		// sibling defects.
+		// below) and on the CreateFileA/GetFileTime file I/O — the sibling
+		// defects of the same shared-lock class.
 		EnterCriticalSection(&expired_lock_);
 		bool expired=expiresat<GetTickCount64();
 		if (expired && path!="")

@@ -260,8 +260,8 @@
             KeyPath="yes" />
     </Component>
 
-    <!-- Per-site override SAMPLE — tier 3 of that chain, authoritative when present
-        . This is NOT a second copy of the machine-global default
+    <!-- Per-site override SAMPLE — tier 3 of that chain, authoritative when
+         present. This is NOT a second copy of the machine-global default
          above: it is the drop-in per-site override surface (the IISpeed /
          IISWebSpeed backward-compat model), seeded into the Default Web Site's
          physical root so a bare install engages out of the box (the module's

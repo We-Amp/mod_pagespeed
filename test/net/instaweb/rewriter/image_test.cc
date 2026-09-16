@@ -136,7 +136,7 @@ class ConversionVarChecker {
 
     options->webp_conversion_variables = &webp_conversion_variables_;
 
-    // AVIF family ( follow-up).  Same shape as the WebP
+    // AVIF conversion-statistics family.  Same shape as the WebP
     // family above, minus the opaque/alpha buckets, which the AVIF encode
     // funnel has no transparency signal for.
     avif_conversion_variables_.Get(Image::ConversionVariables::FROM_PNG)
@@ -1353,7 +1353,8 @@ TEST_F(ImageTest, JpegToAvifRefusedJustBelowBudgetBoundaryTest) {
                    Image::ConversionVariables::FROM_JPEG));
 }
 
-// The encode-budget contract, end to end: AvifTimeoutMs must be MONOTONE, and crossing the
+// The encode-budget contract, end to end: AvifTimeoutMs must be MONOTONE,
+// and crossing the
 // old 2000 ms speed cliff must not silently change the encode.
 //
 // This is the test that was missing. The timeout used to select the

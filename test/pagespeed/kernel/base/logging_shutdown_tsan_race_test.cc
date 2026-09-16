@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 We-Amp B.V.
 //
-// Fully-instrumented concurrent repro for an authoritative
+// Fully-instrumented concurrent repro — an authoritative
 // ThreadSanitizer verdict on the shutdown logging race.
 //
 // The other two shutdown tests cannot give TSan a verdict:
@@ -23,7 +23,8 @@
 // workers and the teardown; the only ordering is the atomic
 // g_logging_shutdown flag and spdlog's own internals, exactly as in prod.
 //
-// Before the fix (LogMessage re-fetched spdlog's registry default logger on every
+// Before the fix (LogMessage re-fetched spdlog's registry default logger on
+// every
 // call): the registry teardown destroys the logger object while a worker is
 // dereferencing it -> TSan reports a data race / heap-use-after-free.
 // With the fix (immortal held logger + atomic flag): every worker access lands

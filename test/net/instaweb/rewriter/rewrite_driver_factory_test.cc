@@ -23,8 +23,6 @@
 // base defaults so a future POSIX-port override that breaks the no-op
 // contract is caught at test time, even though Apache/nginx/Envoy do not
 // (yet) have factory-level unit-test targets in-tree.
-//
-// See GitHub.
 
 #include "net/instaweb/rewriter/public/rewrite_driver_factory.h"
 

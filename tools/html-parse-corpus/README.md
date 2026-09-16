@@ -2,7 +2,7 @@
 
 Canonical differential HTML parse harness for mod_pagespeed 1.15 and
 ModPageSpeed 2.0. **Read `SPEC.md` first** — it is the contract phase 2
-implements against in the 2.0 optimizer line.
+implements against in the optimizer.
 
 Layout:
 
@@ -41,7 +41,7 @@ python3 tools/html-parse-corpus/gen_goldens.py --check  # freshness gate (CI)
 
 `--check` exits non-zero with a unified diff if parser behavior or any
 corpus/generator input changed without regenerating the manifest. Phase 2
-wires this into CI alongside the 2.0 optimizer line differential run; no CI workflow is
+wires this into CI alongside the optimizer differential run; no CI workflow is
 added in phase 1.
 
 ## Fuzzing

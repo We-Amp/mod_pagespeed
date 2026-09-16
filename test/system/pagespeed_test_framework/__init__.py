@@ -70,7 +70,7 @@ __all__ = [
     "assert_stat_unchanged",
     "assert_file_size",
     "assert_image_format",
-    # Require (fail-with-context, never skip --)
+    # Require (fail-with-context, never skip)
     "require_match",
     "require_status_ok",
     "require_no_auth_gate",

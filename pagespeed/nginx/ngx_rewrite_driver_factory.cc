@@ -218,6 +218,7 @@ void NgxRewriteDriverFactory::StartThreads() {
     return;
   }
   // TODO(jefftk): use a native nginx timer instead of running our own thread.
+  // Tracked upstream as ngx_pagespeed.
   SchedulerThread* thread = new SchedulerThread(thread_system(), scheduler());
   bool ok = thread->Start();
   CHECK(ok) << "Unable to start scheduler thread";

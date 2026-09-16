@@ -2,7 +2,7 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 //
 // Kept in sync manually with pagespeed-optimizer src/crypto/webbotauth/
-// header_parser.h (this change upstreams the optimizer line: RFC 9421 `tag` selection
+// header_parser.h (this change upstreams the optimizer's RFC 9421 `tag` selection
 // -- only signatures tagged "web-bot-auth" are web-bot-auth material; the Web
 // Bot Auth architecture draft requires the tag -- multi-signature
 // Signature-Input dictionaries (first tagged member wins, deterministically),

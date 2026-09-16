@@ -262,7 +262,7 @@ log "No X-PageSpeed-Warn header (module optimizes unconditionally)"
 # directive block in pagespeed.conf must go inert, so httpd starts as PLAIN
 # Apache (site unoptimized) instead of refusing to start. WITHOUT the <IfFile>
 # guard this restart fails — httpd will not parse a LoadModule pointing at a
-# missing file. This phase is the RED/GREEN for the guard added.
+# missing file. This phase is the RED/GREEN for the absent-module <IfFile> guard.
 log "=== Phase 3b: Absent-.so degradation (<IfFile> fail-safe) ==="
 SO_PATH=/etc/apache2/modules/mod_pagespeed.so
 SO_BAK=/tmp/ea4-smoke/mod_pagespeed.so.absent-test

@@ -9,8 +9,8 @@
 .DESCRIPTION
   The recycle (appcmd recycle apppool) and stop/start cycles exercise
   DLL_PROCESS_DETACH and worker-vs-static teardown under live load -- the exact
-  window where the shutdown-race (spdlog UAF) and dll_main.cc memory bugs live and
-  which the win-asan unit-test job structurally cannot reach.
+  window where the shutdown-race (spdlog UAF) and dll_main.cc memory bugs live
+  and which the win-asan unit-test job structurally cannot reach.
 
   Exit code is the harness's: non-zero on any ASan/crash hit or post-restart
   non-200. Evidence lands in <RigDir>\logs.
@@ -53,9 +53,9 @@ $rc = $LASTEXITCODE
 "done $(Get-Date -Format o)" | Add-Content "$RigDir\logs\harness.exit"
 Write-Host "harness exit=$rc (log: $RigDir\logs\harness.log)"
 if ($rc -eq 0) {
-  # The harness only sees HTTP responses and its own tailed logs -- it printed
-  # PASS over 8 w3wp faults in (the dying pools surfaced as 503s,
+  # The harness only sees HTTP responses and its own tailed logs -- it once
+  # printed PASS over 8 w3wp faults (the dying pools surfaced as 503s,
   # which it does not treat as crashes). The event-log/dump sweep is the verdict.
-  Write-Host "NOTE: harness rc=0 is NOT the verdict -- sweep_iis_asan_rig.ps1 adjudicates (rig gap 3)"
+  Write-Host "NOTE: harness rc=0 is NOT the verdict -- sweep_iis_asan_rig.ps1 adjudicates"
 }
 exit $rc

@@ -6,7 +6,8 @@
 // (tools/ci/classify-js-fuzz-artifacts.sh). Replaces `node --check` as the
 // validity axis: node v24's CJS/ambiguous --check path has an ESM-detection
 // fallback that returns rc=0 whenever an import/export token breaks the CJS
-// parse — even for input unparseable in BOTH goals (the minifier-rewrite triage; minimal
+// parse — even for input unparseable in BOTH goals (the minifier-rewrite
+// triage; minimal
 // proof: `export&\n&` passes --check silently while execution, vm.Script and
 // .mjs --check all reject; `a&\n&` without the export token is honestly
 // rejected). That quirk misrouted an entire nightly needs-triage bucket.

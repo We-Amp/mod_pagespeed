@@ -16,7 +16,8 @@
 # a future regression silently drops the header, so this test pins the
 # header-emission contract.
 #
-# Live-VM verified on the Windows Server 2016 IIS base image, 2026-06-22 - two earlier
+# Live-VM verified on the Windows Server 2016 IIS base image,
+# 2026-06-22 - two earlier
 # bugs in this fixture are fixed here:
 #
 #   1. WRONG CONFIG FILE. At request time the module resolves its config via

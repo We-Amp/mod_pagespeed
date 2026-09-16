@@ -598,7 +598,7 @@ TEST_F(VerifierTest, KeyNotFoundIsUnknown) {
   EXPECT_EQ(Verdict::kUnknown, r.verdict) << "reason=" << r.reason;
 }
 
-// --- Covered-components / tag-filtering (upstreamed from the optimizer line) ---
+// --- Covered-components / tag-filtering (upstreamed from the optimizer) ---
 
 // The scanner probe shape -- ("@authority" "signature-agent"), created/
 // expires/keyid/alg/nonce/tag="web-bot-auth", quoted sf-string

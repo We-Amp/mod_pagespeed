@@ -17,8 +17,8 @@
 pytest.main() only *returns* its exit code; it does not exit the process.
 A py_test wrapper whose __main__ block calls pytest.main(...) and drops
 the return value exits 0 no matter how many cases failed, and bazel
-reports the target PASS on a red suite -- a silently green lane
-(). Routing the __main__ block through run_pytest() makes the
+reports the target PASS on a red suite -- a silently green lane.
+Routing the __main__ block through run_pytest() makes the
 process exit code equal pytest's, so a failing case turns the bazel
 target red.
 

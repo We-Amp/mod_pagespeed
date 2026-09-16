@@ -155,8 +155,8 @@ APRUTIL_SHA = "804b8b276b346a69ca91bc704198de9ff4956a9a60a2f1212f350c230ee3dd03"
 # creator to finish initialization: closes a multi-process cache-open race
 # where a second opener could observe a half-initialized volume and corrupt
 # it or spuriously fail initialization (the lock is kernel-dropped on
-# process death, so crash recovery is automatic); it also brings a Cyclone change,
-# which removes the dead WriteAggregator and reclaims ~4 MB of committed RSS
+# process death, so crash recovery is automatic); it also removes the dead
+# WriteAggregator and reclaims ~4 MB of committed RSS
 # per cache stripe with no API impact.
 # This bump makes wrap gating borrow-scoped:
 # the per-stripe read lease defers wraps only while read handles are actually
@@ -172,7 +172,7 @@ APRUTIL_SHA = "804b8b276b346a69ca91bc704198de9ff4956a9a60a2f1212f350c230ee3dd03"
 # contention (a same-machine cache A/B showed a ~5x read-throughput gain and
 # turned a memory-pressure regime that used to lose to the file cache into a
 # win). It also drops the per-write fsync in multi-process mode (removes the
-# journal-commit convoy -> higher fill throughput, lower RSS, a Cyclone change),
+# journal-commit convoy -> higher fill throughput, lower RSS),
 # and fixes auto stripe sizing: the stripe count now derives from a 32MB
 # granularity so small auto-sized volumes get enough stripes for lease-based
 # region pinning to stay local (a 256MB cache goes ~70%->90% hit under mixed
@@ -189,43 +189,42 @@ APRUTIL_SHA = "804b8b276b346a69ca91bc704198de9ff4956a9a60a2f1212f350c230ee3dd03"
 # STATUS_STACK_OVERFLOW -- caught by the Windows/IIS port's unit tests.
 # sizeof(Volume) drops to ~8.5 KB (one pointer indirection on the read path,
 # negligible); a static_assert guard keeps future large inline members out.
-# No format or API change. Also brings a Cyclone change: the same fix for
+# No format or API change. Also brings the same fix for
 # HitTracker (its 4096-stripe array made sizeof(HitTracker) ~1 MB under
 # MSVC -- a stack-allocated tracker overflowed the Windows 1 MB default
 # thread stack; now heap-backed, sizeof ~120 bytes, static_assert guard).
 # This bump hardens the zero-copy read protocol:
-# one change adds the reader-side acquire fences the copy-then-verify epoch
+# it adds the reader-side acquire fences the copy-then-verify epoch
 # rechecks needed on weakly-ordered CPUs (no-op on x86) and makes the
 # aliased-serving contract explicit (forced-wrap deadline polling is
-# normative -- the module's serve paths already comply); one change closes a
+# normative -- the module's serve paths already comply); closes a
 # wrap-survivor window where a stale directory entry or chain node could
 # hand out a borrow that the ordinary forward fill then overwrote
-# undetected (positional guard at both read choke points); one change stops the
+# undetected (positional guard at both read choke points); and stops the
 # multi-process write lock from force-releasing a live-but-stalled holder
 # (liveness proof + takeover-generation guard -- overlapping-write fix).
-# This bump (wave-3 hardening batch): one change holds the
+# This bump (a wave-3 hardening batch) holds the
 # per-stripe write lock across the pwrite, closing a microsecond
 # reservation-to-pwrite tear window a concurrent reader could observe;
-# one change also routes in-place volume-header updates through the mapping on
+# also routes in-place volume-header updates through the mapping on
 # Windows, fixing fd writes to mmap'd ranges being silently swallowed on
-# some Windows configurations (relevant to the Windows/IIS port). several changes
-# add libFuzzer read-gauntlet + nightly stress harnesses and a Windows
+# some Windows configurations (relevant to the Windows/IIS port); and
+# adds libFuzzer read-gauntlet + nightly stress harnesses and a Windows
 # MSVC/AppVerifier CI lane upstream. On-disk format UNCHANGED: no cache
 # reset on upgrade or rollback.
-# This bump (cyclone 330035e: PRs several changes + the upgrade-safety stack
-# several changes) completes the multi-process silent-corruption
-# fix line and makes cross-format upgrades unilaterally safe: one change fixes
+# This bump (cyclone 330035e) completes the multi-process silent-corruption
+# fix line and makes cross-format upgrades unilaterally safe: it fixes
 # shared-cursor wrap adoption (a stale-high peer could re-wrap and reserve
-# an OVERLAPPING range -> CRC-clean corruption); one change adds the lifetime-lock
+# an OVERLAPPING range -> CRC-clean corruption); adds the lifetime-lock
 # reset gate (never reset()/wipe a volume under a live peer -- refuse to
-# open instead); one change bumps the on-disk format to v6 (8-aligned header tail
+# open instead); bumps the on-disk format to v6 (8-aligned header tail
 # + 8-byte document-slot padding) and fixes the header read-modify-write
-# races on the hit-count and remove-alternate paths; one change encodes
+# races on the hit-count and remove-alternate paths; encodes
 # format+geometry into the cache FILENAME (cyclone.dat ->
 # cyclone-6-<geohash>.dat), so binaries that disagree on on-disk layout
 # open DIFFERENT files and cross-format upgrade overlap (nginx SIGHUP/USR2,
 # apachectl graceful, IIS overlapped recycle) can no longer corrupt a live
-# peer's cache, regardless of release order; one change adds opt-in startup GC of
+# peer's cache, regardless of release order; and adds opt-in startup GC of
 # superseded fingerprint files (CacheConfig::gc_superseded_on_start,
 # default OFF; we do not enable it, and a legacy cyclone.dat is never
 # auto-deleted).
@@ -236,7 +235,7 @@ APRUTIL_SHA = "804b8b276b346a69ca91bc704198de9ff4956a9a60a2f1212f350c230ee3dd03"
 # manually or via the opt-in GC), and ROLLBACK is WARM: the old binary
 # finds its own file untouched.
 #
-# Bumped to a Cyclone change: Cache::volume_files() (embedder access to the actual
+# This bump brings Cache::volume_files() (embedder access to the actual
 # fingerprint-named on-disk path) and fingerprint-aware resolution for the
 # unsized (size==0) open mode.  mod_pagespeed itself always opens with an
 # explicit size and never touches the volume file by name, so this is a
@@ -245,11 +244,11 @@ APRUTIL_SHA = "804b8b276b346a69ca91bc704198de9ff4956a9a60a2f1212f350c230ee3dd03"
 # bump and the superseded-file GC only make cross-format upgrades safe if
 # all three ship in ONE release).
 #
-# This bump (cyclone edecf16): one change fixes the write path when a
+# This bump (cyclone edecf16) fixes the write path when a
 # directory bucket fills with current-phase entries -- the amplifier that
 # makes the post-upgrade refill window worse -- and counts the resulting
-# evictions (bucket_full_evictions); one change brings the cross-process reset
-# gate (one change) to Windows and adds reset-gate observability
+# evictions (bucket_full_evictions); it also brings the cross-process reset
+# gate to Windows and adds reset-gate observability
 # (resets_gate_verified / resets_under_degraded_gate) plus tests.  The
 # three new counters are appended at the stats-struct tail and surfaced
 # via the console backend stats.  On-disk format UNCHANGED.  Still a
@@ -283,7 +282,8 @@ APRUTIL_SHA = "804b8b276b346a69ca91bc704198de9ff4956a9a60a2f1212f350c230ee3dd03"
 #    old format-6 file is still the only one on disk and the format-7 daemon
 #    has not yet created its own will see exactly that second file appear.
 #
-# 3. THE DEFECT a Cyclone change FIXES, which has already bitten deployed caches.
+# 3. THE DEFECT THE FORMAT-7 LINE FIXES, which has already bitten deployed
+#    caches.
 #    Re-recording the same alternate id left every superseded document linked
 #    in the chain forever: physical chain depth grew one per re-record while
 #    the unique-id count stayed put, until the traversal cap refused every
@@ -300,16 +300,16 @@ APRUTIL_SHA = "804b8b276b346a69ca91bc704198de9ff4956a9a60a2f1212f350c230ee3dd03"
 #    is not set here.
 #
 # Also in the delta, reaching this repo with no config change on our side:
-# Cyclone changes make CacheConfig::max_object_size live (declared but never
+# CacheConfig::max_object_size is now live (declared but never
 # read until now), so the 64 MB default is ENFORCED and an over-size put fails
-# with the tail-appended CacheError::ObjectTooLarge.  Cyclone changes make
-# both built-in alternate selectors treat a non-empty acceptable_alternates
-# set as a HARD restriction rather than a hint.  Cyclone changes stop
-# the RAM tier from serving an entry that a re-record or a removal should have
-# invalidated.  A Cyclone change zeroes a wrap deadline left uninitialised in
-# MmapDirectory::init.  A Cyclone change adds opt-in cross-process RAM-cache
+# with the tail-appended CacheError::ObjectTooLarge.  Both built-in alternate
+# selectors now treat a non-empty acceptable_alternates
+# set as a HARD restriction rather than a hint.  The RAM tier no longer serves
+# an entry that a re-record or a removal should have
+# invalidated.  A wrap deadline left uninitialised in
+# MmapDirectory::init is now zeroed.  A new opt-in adds cross-process RAM-cache
 # coherence: default OFF and not plumbed through this repo's cache config, so
-# it is inert here.  A Cyclone change plus one change's alternate-chain counters
+# it is inert here.  The alternate-chain counters and one further counter
 # tail-append to the stats structs, transparent to this repo's field-by-field
 # stats consumers; surfacing them is a follow-up.  CacheConfig::min_object_size
 # was removed upstream; this repo never set it.  The vendored
@@ -317,14 +317,20 @@ APRUTIL_SHA = "804b8b276b346a69ca91bc704198de9ff4956a9a60a2f1212f350c230ee3dd03"
 # sources only, and every glob in cyclone_build_rule matches the same file set
 # at both pins.
 #
-# A Cyclone change fixes a use-after-free on the write path: a Cyclone change made the
+# The same delta also fixes a use-after-free on the write path: the
+# max_object_size enforcement made the
 # per-object bound read Volume::config() at the top of every write, which
 # turned the write handle's long-standing raw Volume* into a live
 # use-after-free the moment a handle outlived its volume -- a cache reset or a
 # teardown under an open handle.  The handle now holds a weak reference, pins
 # the volume for the duration of write() and the commit, and reports
 # CacheError::Closed when the volume is gone.  Module and optimizer pin the same commit; the pin-pair gate checks that.
-CYCLONE_COMMIT = "962f2e8458db72ef6aaa808b317253baac04ce78"
+#
+# C1 is the orphan-landed sanitized tree in the library's home
+# (We-Amp/cyclone-cache): content == the pre-relocation pin, comment-only
+# delta, on-disk cache format major 7 unchanged.
+# Import rewritten pre-flip (owner-ruled); new root tree byte-identical.
+CYCLONE_COMMIT = "e5503d1fff5e8faccfd95fd9fb626820dc932e0a"
 
 # Libevent - cross-platform event notification library
 # Used by LibeventDispatcher for standalone event loop (Apache deployments)
@@ -438,7 +444,7 @@ def mod_pagespeed_dependencies():
         url = "https://github.com/google/boringssl/archive/%s.tar.gz" % BORINGSSL_VERSION,
         sha256 = BORINGSSL_SHA,
         # Add CRYPTO_thread_local_cleanup() so pagespeed_iis.dll can release
-        # the BoringSSL TLS slot on DLL unload (issue one change).
+        # the BoringSSL TLS slot on DLL unload.
         patches = ["@mod_pagespeed//bazel:boringssl_dll_unload_tls_cleanup.patch"],
         patch_args = ["-p1"],
     )

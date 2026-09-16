@@ -13,7 +13,7 @@
 //     (base64 inside colons, `:...:`).
 //
 // Kept in sync manually with pagespeed-optimizer src/crypto/webbotauth/sfv.h (this
-// change upstreams the optimizer line: bounded multi-member `Signature-Input`
+// change upstreams the optimizer's bounded multi-member `Signature-Input`
 // dictionaries (ParseSignatureInputDict) and component-parameter tolerance
 // (any_component_params), both needed for Web Bot Auth tag selection when a
 // request carries several RFC 9421 signatures, e.g. CDN + bot).

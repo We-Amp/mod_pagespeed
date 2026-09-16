@@ -20,8 +20,8 @@
 // Unit tests for HtmlElement: attribute handling (with focus on valueless
 // attributes such as <input disabled> whose escaped value is nullptr) and
 // ToString serialization.  The attribute-manipulation and ToString cases
-// are ported from pagespeed-optimizer's test/lib/html/html_element_test.cc
-//; the ToString partial-line-number cases were dropped in the
+// are ported from pagespeed-optimizer's test/lib/html/html_element_test.cc;
+// the ToString partial-line-number cases were dropped in the
 // vendoring migration because canonical granted no test peer access to the
 // line-number setters (now provided via HtmlTestingPeer).
 
@@ -140,7 +140,7 @@ TEST_F(HtmlElementTest, SetValueKeepsDecodedStateConsistent) {
   EXPECT_FALSE(copy->decoding_error());
 }
 
-// --- DeleteAttribute tests (ported from the 2.0 optimizer line) ---
+// --- DeleteAttribute tests (ported from the optimizer's suite) ---
 
 TEST_F(HtmlElementTest, DeleteAttributeByKeyword) {
   HtmlElement* div = NewElement(HtmlName::kDiv);

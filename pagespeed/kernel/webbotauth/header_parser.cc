@@ -2,7 +2,7 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 //
 // Kept in sync manually with pagespeed-optimizer src/crypto/webbotauth/
-// header_parser.cc (this change upstreams the optimizer line: tag selection,
+// header_parser.cc (this change upstreams the optimizer's tag selection,
 // multi-signature dictionaries, and HTTP field covered components, see
 // header_parser.h).
 

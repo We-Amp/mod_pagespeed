@@ -111,11 +111,13 @@
   is re-recorded or removed, so a refresh takes effect immediately instead of
   after an unpredictable delay.
 
-- **mod_pagespeed 2.1 is licensed under the Apache License 2.0.** Every
+- **mod_pagespeed 2.1 (module 1.16 + optimizer 2.1) is licensed under the
+  Apache License 2.0.** Every
   feature is available to everyone. The license text (`LICENSE`) and the
   attribution notices (`NOTICE`) ship in every package: the Apache module deb
   and rpm (including the cPanel EasyApache 4 build), the nginx module deb and
-  rpm, the IIS installer and the NuGet package. Ships in 1.16.0-rc.14.
+  rpm, the IIS installer and the NuGet package. Ships in module 1.16.0-rc.14
+  and the 2.1 optimizer.
 
 - **The system-call filter is enforced by default.** The optimizer daemon,
   and the headless browser when browser analysis is enabled, now run under an

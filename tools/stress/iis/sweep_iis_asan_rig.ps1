@@ -25,7 +25,7 @@ $hits = 0
 # harness-start marker as fallback), minus a small skew buffer -- ONE timezone,
 # covering the whole rig lifetime. The old default, sweep-start minus 2h, was
 # wrong twice over: it was anchored to the wrong moment AND only matched events
-# via a UTC-vs-local rendering skew (rig gap 2).
+# via a UTC-vs-local rendering skew.
 if ($Since -eq [datetime]::MinValue) {
   $marker = @("$RigDir\logs\rig.setup.started", "$RigDir\logs\harness.started") |
     Where-Object { Test-Path $_ } | Select-Object -First 1

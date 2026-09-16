@@ -50,7 +50,8 @@ class IisRewriteDriverFactory : public SystemRewriteDriverFactory {
   //   C:\ProgramData\We-Amp\PageSpeed\logs\    (canonical 1.1 path)
   //   C:\ProgramData\We-Amp\IISWebSpeed\logs\  (legacy upgrade path)
   // Out-of-prefix LogDir values fall through unchanged (no auto-create,
-  // no diagnostic page — legacy behaviour).
+  // no diagnostic page — the behaviour from before LogDir auto-create
+  // existed).
   bool IsLogDirInAutoCreatePrefix(const GoogleString& path) override;
 
   // IIS-specific implementation of the cross-port
@@ -79,7 +80,7 @@ class IisRewriteDriverFactory : public SystemRewriteDriverFactory {
   // casts to DWORD where needed.
   uint32_t CachePathAclMask() const;
 
-  // the referenced issue LogDir ACL mask: RX+W
+  // LogDir ACL mask: RX+W
   // (FILE_GENERIC_READ | FILE_GENERIC_WRITE | FILE_GENERIC_EXECUTE,
   // NO DELETE), mirroring Product.wxs GrantLogAcl. Narrower than
   // CachePathAclMask() because workers append to logs but admin owns

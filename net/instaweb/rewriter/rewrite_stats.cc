@@ -88,8 +88,8 @@ const char kIproDaemonFallbackNotifyFailed[] =
 // counts origin-refreshed sentinels sent on AGE-EXPIRED VARIANT fall-throughs
 // -- declines of a selected variant that aged past its effective freshness
 // lifetime, the one fall-through the worker cannot recover from on its own
-// because its processed-set dedup swallows the plain re-record notification
-//.  Every one of them is already inside `ipro_daemon_fallthrough`.
+// because its processed-set dedup swallows the plain re-record notification.
+// Every one of them is already inside `ipro_daemon_fallthrough`.
 // What it observes is the heal: how often this substrate asked the worker to
 // purge a stale variant set and rebuild from the re-fetched original.
 const char kIproDaemonRefreshNotified[] = "ipro_daemon_refresh_notified";

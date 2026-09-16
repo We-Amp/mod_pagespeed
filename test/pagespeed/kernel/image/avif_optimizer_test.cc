@@ -376,7 +376,7 @@ TEST_F(AvifOptimizerTest, StillEncodeIgnoresProgressHook) {
 }
 
 // ---------------------------------------------------------------------------
-// the still-image encode budget must be MONOTONE.
+// The still-image encode budget must be MONOTONE.
 //
 // The encode speed used to be chosen in image.cc by stepping on a fixed
 // 2000 ms threshold (below it: speed 8; at or above it: speed 6) while the

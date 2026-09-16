@@ -59,7 +59,8 @@ IisProcessContext* IisModuleFactory::GetProcessContext(const GoogleString& site_
 	// single shared helper in iis_config_util so the factory, the
 	// request-time merge (iis_misc.cpp), and the engage gate
 	// (iis_http_module.cpp) can never diverge — that split-brain was the
-	// config-drift defect this shared helper exists to eliminate. This base drives the process-level
+	// config-drift defect this shared helper exists to eliminate. This base
+	// drives the process-level
 	// global/root options and FileID1 change-detection below; site_root
 	// (the per-site override, tier 3) drives FileID2, so editing
 	// EITHER the base or the authoritative per-site file re-inits the

@@ -444,7 +444,7 @@ ngx_int_t NgxBaseFetch::CopyBufferToNginx(ngx_chain_t** link_ptr) {
           stats != nullptr
               ? stats->FindVariable("zerocopy_serve_renew_fail_reset")
               : nullptr;
-      // Bounded-copy ring : when the ONLY must_copy cause is the
+      // Bounded-copy ring: when the ONLY must_copy cause is the
       // protocol (h2/h3 framing -- lease state permits, no in-memory
       // filter, no Range, main request, ctx present), the whole-body copy's
       // O(body) per-stream residency is bounded to O(ring) instead:

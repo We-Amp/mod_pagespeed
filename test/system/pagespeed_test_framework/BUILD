@@ -53,7 +53,7 @@ py_test(
     python_version = "PY3",
 )
 
-# Regression guard for: the py_test wrapper must propagate
+# Regression guard: the py_test wrapper must propagate
 # pytest's exit status, so a failing case turns the bazel target red.
 # test_framework.py rides along in srcs so the guard can subprocess-run the
 # exact file bazel uses as the test_framework target's main -- welding the

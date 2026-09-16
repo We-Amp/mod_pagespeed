@@ -67,10 +67,10 @@ else
   # Download with curl (resume + retries) and verify the sha256 ourselves, then
   # import the LOCAL file. grype's own Go downloader has no resume/retry and
   # dies on transient TLS corruption ("tls: bad record MAC" — root-caused
-  # 2026-08-26 to the self-hosted runners' USB-ethernet / virtualized-NIC
+  # 2026-08-26 to the CI runners' USB-ethernet / virtualized-NIC
   # receive paths), turning a flaky link into a red gate. The import itself is
-  # offline: `grype db import <file>` never touches the network. Same fix as
-  # keep the two scripts in sync.
+  # offline: `grype db import <file>` never touches the network. Mirrors the
+  # same fix in the sibling provisioning script — keep the two in sync.
   TMP_DB="$(mktemp -t grype-db.XXXXXX.tar.zst)"
   trap 'rm -f "$TMP_DB"' EXIT
   curl -fSL --retry 5 --retry-all-errors -C - -o "$TMP_DB" "${URL_BASE}/${DB_PATH}"

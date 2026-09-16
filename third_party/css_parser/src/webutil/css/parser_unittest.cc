@@ -3419,7 +3419,7 @@ TEST_F(ParserTest, CalcAdditionOperator) {
 // =============================================================================
 
 TEST_F(ParserTest, ModernCssCustomProperties) {
-  // the 2.0 optimizer line: CssCustomProperties, CssVarUsage, CssVarWithFallback.
+  // Optimizer suite: CssCustomProperties, CssVarUsage, CssVarWithFallback.
   for (bool preserve : {false, true}) {
     SCOPED_TRACE(preserve ? "preservation" : "non-preservation");
 
@@ -3452,7 +3452,7 @@ TEST_F(ParserTest, ModernCssCustomProperties) {
     EXPECT_EQ("h1 {color: var(--my-color, #ffff00)}",
               t3->ruleset(0).ToString());
 
-    // the 2.0 optimizer line: DoubleHyphenClassSelectorNotOpaque — a double hyphen inside a
+    // Optimizer suite: DoubleHyphenClassSelectorNotOpaque — a double hyphen inside a
     // class name is an ordinary identifier, not a custom property.
     Parser s(".foo--bar:hover { color: red }");
     s.set_preservation_mode(preserve);
@@ -3468,7 +3468,7 @@ TEST_F(ParserTest, ModernCssCustomPropertyValues) {
   for (bool preserve : {false, true}) {
     SCOPED_TRACE(preserve ? "preservation" : "non-preservation");
 
-    // the 2.0 optimizer line: CustomPropertyCommentBecomesTokenSeparator — the comment is
+    // Optimizer suite: CustomPropertyCommentBecomesTokenSeparator — the comment is
     // stripped but keeps the tokens apart, matching 2.0.
     Parser p(":root { --x: a/*c*/b; }");
     p.set_preservation_mode(preserve);
@@ -3478,7 +3478,7 @@ TEST_F(ParserTest, ModernCssCustomPropertyValues) {
     ASSERT_EQ(1, t->rulesets().size());
     EXPECT_EQ(":root {--x: a b}", t->ruleset(0).ToString());
 
-    // the 2.0 optimizer line: CustomPropertyInternalSpaceRunsPreserved. DOCUMENTED DIFFERENCE:
+    // Optimizer suite: CustomPropertyInternalSpaceRunsPreserved. DOCUMENTED DIFFERENCE:
     // 2.0 preserves interior whitespace runs; this parser stores values as a
     // token vector, so the run collapses to a single space.
     Parser q(":root { --msg: a   b; }");
@@ -3489,7 +3489,7 @@ TEST_F(ParserTest, ModernCssCustomPropertyValues) {
     ASSERT_EQ(1, t2->rulesets().size());
     EXPECT_EQ(":root {--msg: a b}", t2->ruleset(0).ToString());
 
-    // the 2.0 optimizer line: CustomPropertySelectorFragmentPreserved. KNOWN LIMITATION: a
+    // Optimizer suite: CustomPropertySelectorFragmentPreserved. KNOWN LIMITATION: a
     // selector fragment is not a representable value here — the declaration
     // is dropped in non-preservation mode and passed through verbatim in
     // preservation mode.
@@ -3513,7 +3513,7 @@ TEST_F(ParserTest, ModernCssCustomPropertyValues) {
       EXPECT_EQ(":root {}", t3->ruleset(0).ToString());
     }
 
-    // the 2.0 optimizer line: CustomPropertyValueWithBalancedBraces. KNOWN LIMITATION: a {}
+    // Optimizer suite: CustomPropertyValueWithBalancedBraces. KNOWN LIMITATION: a {}
     // block inside a value is not representable — dropped/verbatim as
     // above; surrounding declarations still parse either way.
     Parser s(".a{--x: {a:b};color: red}");
@@ -3539,7 +3539,7 @@ TEST_F(ParserTest, ModernCssCustomPropertyValues) {
 }
 
 TEST_F(ParserTest, ModernCssCustomPropertyUnterminated) {
-  // the 2.0 optimizer line: CustomPropertyUnterminatedValueDoesNotCrash. The unterminated
+  // Optimizer suite: CustomPropertyUnterminatedValueDoesNotCrash. The unterminated
   // ruleset raises kRulesetError but must not crash; the declaration itself
   // parses and survives.
   for (bool preserve : {false, true}) {
@@ -3554,7 +3554,7 @@ TEST_F(ParserTest, ModernCssCustomPropertyUnterminated) {
 }
 
 TEST_F(ParserTest, ModernCssFunctionalPseudoclassParams) {
-  // the 2.0 optimizer line: SelectorSpaceBeforeWhere/Is/Not/Has, CompoundSelectorNoSpace.
+  // Optimizer suite: SelectorSpaceBeforeWhere/Is/Not/Has, CompoundSelectorNoSpace.
   //
   // Functional pseudo-class arguments are captured verbatim and re-emitted
   // on serialization (opaque pass-through), so these parse
@@ -3593,7 +3593,7 @@ TEST_F(ParserTest, ModernCssFunctionalPseudoclassParams) {
 }
 
 TEST_F(ParserTest, ModernCssTailwindTypographyPattern) {
-  // the 2.0 optimizer line: TailwindTypographyPattern — real-world Tailwind CSS v4 selector
+  // Optimizer suite: TailwindTypographyPattern — real-world Tailwind CSS v4 selector
   // with nested functional pseudo-classes and attribute selectors. The
   // nested balanced argument text round-trips verbatim in
   // both modes; this used to serialize as the matches-nothing
@@ -3623,7 +3623,7 @@ TEST_F(ParserTest, ModernCssTailwindTypographyPattern) {
 }
 
 TEST_F(ParserTest, ModernCssFunctionalPseudoclassRoundTrip) {
-  // functional pseudo-class argument pass-through. Each
+  // Functional pseudo-class argument pass-through. Each
   // selector parses with kNoError in non-preservation mode and serializes
   // with its argument text verbatim, and serialization is idempotent
   // (parse -> ToString -> re-parse -> identical ToString).
@@ -3668,8 +3668,8 @@ TEST_F(ParserTest, ModernCssFunctionalPseudoclassRoundTrip) {
 }
 
 TEST_F(ParserTest, ModernCssFunctionalPseudoclassMalformed) {
-  // an unbalanced argument list (EOF before ')') keeps the
-  // legacy kSelectorError behavior.
+  // An unbalanced argument list (EOF before ')') keeps the
+  // pre-pass-through kSelectorError behavior.
   Parser p(".a:where(h2{ color:red }");
   std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
   EXPECT_TRUE(Parser::kSelectorError & p.errors_seen_mask());
@@ -3688,9 +3688,10 @@ TEST_F(ParserTest, ModernCssFunctionalPseudoclassMalformed) {
 }
 
 TEST_F(ParserTest, ModernCssDescendantCombinatorInsideAtRules) {
-  // the 2.0 optimizer line: DescendantCombinatorInsideAtLayer,
+  // Optimizer suite: DescendantCombinatorInsideAtLayer,
   // DescendantCombinatorInsideNestedAtRules. The @layer/@supports group
-  // structure itself parses cleanly, and since the inner
+  // structure itself parses cleanly, and with functional pseudo-class
+  // pass-through the inner
   // functional-pseudo-class ruleset parses cleanly too.
   for (bool preserve : {false, true}) {
     SCOPED_TRACE(preserve ? "preservation" : "non-preservation");
@@ -3724,7 +3725,7 @@ TEST_F(ParserTest, ModernCssDescendantCombinatorInsideAtRules) {
 }
 
 TEST_F(ParserTest, ModernCssMediaFeatureColonSpace) {
-  // the 2.0 optimizer line: MediaFeatureColonSpacePreserved. Accepted without error in both
+  // Optimizer suite: MediaFeatureColonSpacePreserved. Accepted without error in both
   // modes; serialization normalizes "max-width :" to "max-width:", which is
   // semantically safe.
   for (bool preserve : {false, true}) {
@@ -3741,7 +3742,7 @@ TEST_F(ParserTest, ModernCssMediaFeatureColonSpace) {
 }
 
 TEST_F(ParserTest, ModernCssDescendantBeforePseudoClass) {
-  // the 2.0 optimizer line: SelectorSpaceBeforeHover, SelectorSpaceBeforeFirstChild,
+  // Optimizer suite: SelectorSpaceBeforeHover, SelectorSpaceBeforeFirstChild,
   // SelectorSpaceBeforePseudoElement. A descendant combinator before a
   // non-functional pseudo-class/element parses cleanly — the space is
   // preserved as DESCENDANT, not glued into a compound selector.
@@ -3775,7 +3776,7 @@ TEST_F(ParserTest, ModernCssDescendantBeforePseudoClass) {
 }
 
 TEST_F(ParserTest, ModernCssEscapedSpaceInSelector) {
-  // the 2.0 optimizer line: EscapedSpaceInSelectorPreserved,
+  // Optimizer suite: EscapedSpaceInSelectorPreserved,
   // EscapedSpaceBeforeCombinatorPreserved. The escaped space is part of the
   // class identifier and must survive; the serializer emits it as "\ ".
   for (bool preserve : {false, true}) {
@@ -3798,7 +3799,7 @@ TEST_F(ParserTest, ModernCssEscapedSpaceInSelector) {
 }
 
 TEST_F(ParserTest, ModernCssTrailingBackslashAtEof) {
-  // the 2.0 optimizer line: TrailingBackslashAtEofDoesNotCrash. The dangling escape raises
+  // Optimizer suite: TrailingBackslashAtEofDoesNotCrash. The dangling escape raises
   // kSelectorError but the preceding ruleset survives and nothing crashes.
   for (bool preserve : {false, true}) {
     SCOPED_TRACE(preserve ? "preservation" : "non-preservation");
@@ -3813,7 +3814,7 @@ TEST_F(ParserTest, ModernCssTrailingBackslashAtEof) {
 }
 
 TEST_F(ParserTest, ModernCssDeepNestingDoesNotCrash) {
-  // the 2.0 optimizer line: Phase5DeepNestingDoesNotCrash. 200 nested blocks far exceed
+  // Optimizer suite: Phase5DeepNestingDoesNotCrash. 200 nested blocks far exceed
   // kMaxGroupRuleDepth; the parser must terminate without crashing.
   string css;
   for (int i = 0; i < 200; ++i) {

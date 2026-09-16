@@ -416,7 +416,7 @@ class PageSpeedClient:
             detail_fn: Optional callable mapping the last Response to a short
                 description of how close the condition was (e.g. "matches=1
                 expected=2"); included in the TimeoutError and the on-failure
-                evidence so a timeout is diagnosable after the fact
+                evidence so a timeout is diagnosable after the fact.
 
         Returns:
             Response that satisfied the condition

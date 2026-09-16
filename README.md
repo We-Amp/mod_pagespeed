@@ -11,9 +11,9 @@ Originally created by Google, now maintained by [We-Amp](https://we-amp.com).
 | Platform | Module | Status |
 |----------|--------|--------|
 | **Apache 2.4+** | `mod_pagespeed.so` | Stable |
-| **Nginx 1.26/1.27** | `ngx_pagespeed_module.so` | Stable |
+| **Nginx (per-distro stock)** | `ngx_pagespeed_module.so` | Stable |
 | **Envoy** | `pagespeed_filter.so` / `envoy_pagespeed` | Experimental |
-| **IIS 10+** | `pagespeed_iis.dll` | Experimental |
+| **IIS 10+** | `pagespeed_iis.dll` | Stable |
 
 ## Features
 

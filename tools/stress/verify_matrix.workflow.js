@@ -3,7 +3,7 @@
 
 export const meta = {
   name: 'verify-shutdown-matrix',
-  description: 'Triage + adversarially verify the defect multi-sanitizer stress-matrix results (ASan/UBSan/TSan x filter-sets on the multi-site corpus)',
+  description: 'Triage + adversarially verify the shutdown-race multi-sanitizer stress-matrix results (ASan/UBSan/TSan x filter-sets on the multi-site corpus)',
   phases: [
     { title: 'Gather' },
     { title: 'Triage' },
@@ -140,9 +140,9 @@ Classify:
 - 'suppressed-known': matches an existing suppression / already-known benign pattern.
 - 'needs-human': cannot determine from source alone.
 
-CRITICAL question: is_shutdown_related — is this the worker-thread-during-static-destruction UAF class that is about (LogMessage/spdlog, CSS kClass/kId statics, or any static touched by a rewrite worker at teardown)? If so it is high-priority regardless of sanitizer.
+CRITICAL question: is_shutdown_related — is this the worker-thread-during-static-destruction UAF class this matrix exists to hunt (LogMessage/spdlog, CSS kClass/kId statics, or any static touched by a rewrite worker at teardown)? If so it is high-priority regardless of sanitizer.
 
-recommended_action: one line (e.g. "none — benign", "add immortal-static fix", "add tsan suppression", "file follow-up").`,
+recommended_action: one line (e.g. "none — benign", "add immortal-static fix (lock-free held logger)", "add tsan suppression", "file follow-up").`,
       { phase: 'Triage', label: `triage:${f.id}`, schema: VERDICT_SCHEMA }
     ).then((v) => ({ ...v, finding: f })).catch(() => null)
   ))
@@ -174,7 +174,7 @@ phase('Synthesize')
 const realBugs = verdicts.filter((v) => v.classification === 'real-bug')
 const shutdownRelated = verdicts.filter((v) => v.is_shutdown_related)
 const report = await agent(
-  `Write the final verdict for the defect multi-sanitizer stress matrix as concise markdown.
+  `Write the final verdict for the shutdown-race multi-sanitizer stress matrix as concise markdown.
 
 Cells: ${JSON.stringify(data.cells)}
 Finding verdicts: ${JSON.stringify(verdicts.map((v) => ({ id: v.id, san: v.finding?.san_type, classification: v.classification, is_shutdown_related: v.is_shutdown_related, rationale: v.rationale, action: v.recommended_action })))}
@@ -185,7 +185,7 @@ Produce:
 1. **Headline verdict** — does the shutdown-UAF fix hold across the matrix (ASan/UBSan/TSan x filter-sets, multi-site corpus, long+gentle chaos)? Any NEW real or shutdown-related finding?
 2. **Per-sanitizer result** — ASan (the authoritative UAF check), UBSan (catalog of UB sites + benign/real triage), TSan (note the best-effort/die_after_fork + uninstrumented-apache caveat — low confidence).
 3. **Completeness** — were all cells real (no false-greens)?
-4. **Actions** — only if real-bug or shutdown-related: what to change (immortal-static fix branch, lock-free) and re-verify; otherwise state "no code change — fix holds".
+4. **Actions** — only if real-bug or shutdown-related: what to change (immortal-static fix, lock-free) and re-verify; otherwise state "no code change — fix holds".
 5. Keep disclosure discipline: this is product-internal verification; no customer-facing claims.
 Be honest about limits (TSan confidence, UBSan benign-UB noise). Return the markdown only.`,
   { phase: 'Synthesize' }

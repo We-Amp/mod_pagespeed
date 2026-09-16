@@ -57,7 +57,7 @@ const char kWebBotAuthVerifiedSignedRequests[] =
 // silently ignored. Bare/unparseable signature material (e.g. draft-cavage
 // `Signature` headers from fediverse/webhook signers) cannot be attributed to
 // any scheme, so it fail-closes to "unknown" and is counted NOWHERE -- the
-// verdict variable is its only surface. (Upstreamed from the optimizer line.)
+// verdict variable is its only surface. (Upstreamed from the optimizer.)
 const char kWebBotAuthOtherSignatureRequests[] =
     "web_bot_auth_other_signature_requests";
 

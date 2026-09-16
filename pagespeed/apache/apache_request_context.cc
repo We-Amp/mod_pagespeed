@@ -44,7 +44,7 @@ ApacheRequestContext::ApacheRequestContext(AbstractMutex* logging_mutex,
 
   // Transport scheme of the incoming connection ("https" iff mod_ssl handled
   // it), consumed by LoopbackRouteFetcher when munging unknown-origin URLs
-  //. Deliberately NOT the request URL's scheme, which may reflect
+  // Deliberately NOT the request URL's scheme, which may reflect
   // X-Forwarded-Proto.
   const char* scheme = ap_http_scheme(req);
   if (scheme != nullptr) {

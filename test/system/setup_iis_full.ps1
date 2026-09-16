@@ -67,7 +67,7 @@ $AppPoolName = "PageSpeedTestPool"
 $WebRoot = "C:\inetpub\pagespeed_test"
 $CacheDir = "C:\pagespeed_cache"
 $LogDir = "C:\pagespeed_logs"
-# HTTPS test binding. Full IIS only -- run_iis_tests.ps1 exports the
+# HTTPS test binding (loopback TLS coverage). Full IIS only -- run_iis_tests.ps1 exports the
 # matching PAGESPEED_HTTPS_PORT for the pytest HTTPS suite.
 $HttpsPort = 8443
 
@@ -150,14 +150,14 @@ function Reset-PageSpeedTestCache {
     # prior job's Last-Modified header before the recycle drops the
     # in-memory LRU. Recycle first -> wait for the old w3wp to actually exit
     # (a recycle only INITIATES the drain, and AppVerifier + page heap make
-    # the teardown slow --) -> then purge.
+    # the teardown slow) -> then purge.
     #
     # mod_pagespeed's rewrite cache is keyed by input URL + content hash --
     # NOT by file mtime -- so a cached rewrite from a previous job hits on
     # the same Puzzle.jpg bytes and serves back the prior job's embedded
     # Last-Modified header, while origin (?PageSpeed=off) honestly serves
-    # the freshly-stamped fixture mtime. That divergence is the root cause
-    # of.
+    # the freshly-stamped fixture mtime. That divergence is the stale
+    # Last-Modified defect this purge exists to prevent.
     #
     # Cache paths purged:
     #   - $CacheDir                                  (test config: C:\pagespeed_cache)
@@ -186,7 +186,8 @@ function Reset-PageSpeedTestCache {
     # may still be writing (cyclone.dat is held open for the process
     # lifetime). A recycle only INITIATES the drain, and under AppVerifier +
     # page heap a w3wp teardown runs far past the blind 2s sleep this
-    # replaces (locked-file purge failures in 4 of 8 nightly
+    # replaces (the blind sleep produced locked-file purge failures in
+    # 4 of 8 nightly
     # iterations). Poll via appcmd -- same idiom as the rest of this script,
     # no WebAdministration dependency; an erroring/empty listing (pool not
     # created yet on a cold runner) reads as "no worker", the goal state.
@@ -491,11 +492,12 @@ function New-HttpsBinding {
     #      without it SChannel cannot present the credential and the handshake
     #      fails (event 36870 / SEC_E_NO_CREDENTIALS);
     #   3. trust in LocalMachine\Root (+ an IP:127.0.0.1 SAN).
-    # (3) and the IP SAN are forward-looking: the module's WinHTTP sub-resource
-    # fetcher (asyncwinhttp.cpp) currently omits WINHTTP_FLAG_SECURE and cannot
-    # fetch over TLS, so HTTPS *resource rewriting* is not exercised here yet
-    #. These tests cover the HTTPS
-    # *listener*: serving, headers, and the admin endpoint over TLS.
+    # (3) and the IP SAN are what the module's WinHTTP sub-resource fetcher
+    # (asyncwinhttp.cpp) needs to fetch sub-resources over the loopback TLS
+    # connection: it sets WINHTTP_FLAG_SECURE, so the self-signed cert must
+    # validate for the fetch to succeed. The suite covers both the HTTPS
+    # *listener* (serving, headers, and the admin endpoint over TLS) and
+    # *resource rewriting* over TLS (test_iis_https.py).
     Write-Status "Configuring HTTPS binding on port $HttpsPort..." "Gray"
 
     $certFriendlyName = "PageSpeedTestHttps"

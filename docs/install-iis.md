@@ -14,8 +14,9 @@ Download the signed installer **`pagespeed-iis-<version>-win-x64.msi`** from the
 [downloads page](https://modpagespeed.com/1.1/docs/downloads/) and run it — it
 installs the native module (`pagespeed_iis.dll`) and registers it with IIS.
 
-> Building from source requires the (private) mod_pagespeed source tree and a
-> Windows build toolchain; it is not available to external users.
+> Building from source uses the public mod_pagespeed source tree and a Windows
+> build toolchain (see `DEVELOPER.md`); the signed MSI is the supported path for
+> everyone else.
 
 ## Configuration
 

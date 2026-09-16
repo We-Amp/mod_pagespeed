@@ -647,8 +647,8 @@ bool InstawebHandler::ServeFromDaemonSubstrate() {
     // in the expiry lifecycle clears the dedup entry.  The variant is
     // declined on freshness on EVERY request and the notification that
     // would rebuild it is swallowed every time: the URL regresses to
-    // origin-serving one freshness lifetime after optimization, permanently
-    //.  The origin-refreshed sentinel is the worker's heal for
+    // origin-serving one freshness lifetime after optimization, permanently.
+    // The origin-refreshed sentinel is the worker's heal for
     // exactly this transition -- it purges the stale variant set, clears
     // dedup and rebuilds -- so the flagged fall-through is answered with it
     // here, before the re-record it precedes.

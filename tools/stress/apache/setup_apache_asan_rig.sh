@@ -3,7 +3,8 @@
 # Copyright (c) 2024-2026 We-Amp B.V.
 
 # Stand up an ASan-instrumented Apache running the canonical system-test config,
-# for the shutdown/graceful-restart memory-bug stress rig. Companion to the IIS and nginx rigs.
+# for the shutdown/graceful-restart memory-bug stress rig (the Apache leg of
+# the shutdown-race stress campaign). Companion to the IIS and nginx rigs.
 #
 # Reuses the repo's own test/system/setup_apache_test.sh (the exact config the CI
 # Apache System Tests use — CoreFilters, IPRO, small prefork MPM) for the module +

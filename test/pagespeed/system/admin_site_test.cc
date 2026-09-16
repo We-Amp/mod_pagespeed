@@ -282,8 +282,8 @@ TEST_F(AdminExposureWarningTest, NullHandlerIsSafe) {
 }
 
 // =============================================================================
-// PostInitHook: AdminSite construction and the absence of license state
-//, and drop-in compatibility with releases that had it.
+// PostInitHook: AdminSite construction and the absence of license state,
+// and drop-in compatibility with releases that had it.
 // =============================================================================
 
 // Builds a serving (non-stub) SystemServerContext whose FileCachePath is

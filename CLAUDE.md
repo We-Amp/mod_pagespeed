@@ -63,12 +63,12 @@ docker compose down
 | `--config=gcc` | GCC 13 native (works, slower diagnostics) |
 | `--config=clang-asan` | Address sanitizer |
 | `--config=clang-tsan` | Thread sanitizer |
-| `--config=ci-linux-arm64` | ARM64 Linux (Docker on Apple Silicon or native ARM64); CI: `linux-arm64-build` job |
+| `--config=ci-linux-arm64` | ARM64 Linux (Docker on Apple Silicon or native ARM64); matches the maintainer CI's arm64 build |
 
 **Windows ASan**: `--config=win-asan` requires the LLVM ASan runtime DLL on PATH at test runtime:
 
 ```powershell
-# The Windows CI runner installs/uses LLVM 19, so the ASan runtime lives under clang\19.
+# The Windows build machines install/use LLVM 19, so the ASan runtime lives under clang\19.
 # Verify the LLVM version actually installed on your Windows box and adjust the path to match.
 $env:PATH = "C:\Program Files\LLVM\lib\clang\19\lib\windows;$env:PATH"
 bazelisk test --config=vendored --config=windows --config=clang-cl --config=win-asan //test/pagespeed/iis/...
@@ -76,7 +76,7 @@ bazelisk test --config=vendored --config=windows --config=clang-cl --config=win-
 
 ASan in IIS context requires `halt_on_error=0` (set in `dll_main.cc`) because `w3wp.exe` handles many requests and a halt would kill the process pool. ASan logs are written to `C:\pagespeed_asan*`.
 
-**LLVM version divergence:** the Linux dev container and CI use **clang-20** (`docker/Dockerfile`, `clang-format-20`/`clang-tidy-20`). The Windows side uses **LLVM 19**, pre-installed on the Windows build machines. The Windows CI jobs (Windows Build, Windows Unit Tests, IIS System Tests, Windows ASan) prepend the `C:\Program Files\LLVM\lib\clang\19\lib\windows` ASan runtime dir, and `.bazelrc` `build:win-asan` (lines ~343 and ~356) uses that same `LLVM\lib\clang\19\lib\windows` runtime path. The CI jobs and `.bazelrc` agree on the clang 19 runtime, so `win-asan` resolves the correct ASan runtime both in CI and on a local Windows box with LLVM 19 installed.
+**LLVM version divergence:** the Linux dev container and the maintainer CI use **clang-20** (`docker/Dockerfile`, `clang-format-20`/`clang-tidy-20`). The Windows side uses **LLVM 19**, pre-installed on the Windows build machines. The Windows CI lanes (Windows Build, Windows Unit Tests, IIS System Tests, Windows ASan — maintainer-side) prepend the `C:\Program Files\LLVM\lib\clang\19\lib\windows` ASan runtime dir, and `.bazelrc` `build:win-asan` (lines ~343 and ~356) uses that same `LLVM\lib\clang\19\lib\windows` runtime path. The lanes and `.bazelrc` agree on the clang 19 runtime, so `win-asan` resolves the correct ASan runtime both in CI and on a local Windows box with LLVM 19 installed.
 
 **Important:** Do NOT use `--jobs` to limit parallelism. Bazel manages resources automatically. Restricting jobs causes massive slowdowns especially for sanitizer builds.
 
@@ -144,7 +144,7 @@ must look under `net/instaweb/rewriter/`.
 | `system/` | System abstractions (admin UI, cache backends) |
 | `automatic/` | ProxyFetch - standalone rewriting engine shared by all deployment modes |
 
-The admin console is a Svelte/Vite single-page app under `pagespeed/system/console/`. Its compiled output, `pagespeed/system/console/admin_console.html`, is a **GENERATED single-file Vite bundle — DO NOT EDIT BY HAND.** Edit the SPA source under `pagespeed/system/console/src/` and rebuild via `pagespeed/system/console/build.sh`; the checked-in bundle is guarded by the `console-drift` CI job (`pagespeed/system/console/check-no-drift.sh`) against `pagespeed/system/console/admin_console.html.srchash`.
+The admin console is a Svelte/Vite single-page app under `pagespeed/system/console/`. Its compiled output, `pagespeed/system/console/admin_console.html`, is a **GENERATED single-file Vite bundle — DO NOT EDIT BY HAND.** Edit the SPA source under `pagespeed/system/console/src/` and rebuild via `pagespeed/system/console/build.sh`; the checked-in bundle is guarded by `pagespeed/system/console/check-no-drift.sh` (run in the maintainer CI as `console-drift`) against `pagespeed/system/console/admin_console.html.srchash`.
 
 ### Key Abstractions
 
@@ -396,24 +396,6 @@ bazel build --config=vendored --config=windows --config=clang-cl -c opt //pagesp
 
 The `--config=vendored` flag uses the `vendor/repo-cache` repository cache and the vendored Cyclone source. The tarball is produced by `tools/vendor-deps.sh` in CI. The `git_repository` dep (Cyclone) is vendored — no SSH keys or network access needed.
 
-### Remote Development (Linux → Windows VM)
-
-```bash
-# Start Windows VM (first boot: 15-30 min)
-./windows-dev/start-windows-dev.sh
-./windows-dev/wait-for-windows.sh
-
-# Build via SSH
-./windows-dev/build-on-windows.sh //pagespeed/iis:pagespeed_iis.dll
-
-# Interactive shell
-./windows-dev/build-on-windows.sh --shell
-```
-
-**Connection:** `ssh -p 2222 Developer@localhost` (password: `ChangeMe1`)
-
-**SSH Agent Required:** Set `SSH_AUTH_SOCK` before running Windows build commands.
-
 ### IIS Module Architecture
 
 See `pagespeed/iis/CLAUDE.md` for the authoritative file map (key files, request-pipeline notifications, state-machine flags). Two facts worth restating here:
@@ -557,8 +539,6 @@ which is gitignored):
 10. **IIS Express vs full IIS port conflict** - If full IIS (W3SVC, PID 4) is running on the same port, it handles requests instead of IIS Express. Stop W3SVC/WAS before starting IIS Express: `Stop-Service W3SVC -Force; Stop-Service WAS -Force`. Verify with `netstat -ano | grep :8080`
 11. **IIS Express `allowDefinition` must use `AppHostOnly`** - When full IIS is also installed, `allowDefinition="MachineOnly"` in IIS Express's `applicationhost.config` causes startup failure ("Configuration section can only be set in machine.config"). Use `AppHostOnly` instead
 
-See `windows-dev/README.md` for detailed troubleshooting.
-
 ### CI-Specific Notes
 
 The Windows CI runs as a GitHub Actions runner **service** (not interactive), which has a minimal environment:
@@ -567,7 +547,6 @@ The Windows CI runs as a GitHub Actions runner **service** (not interactive), wh
 - **`--incompatible_strict_action_env`** (`.bazelrc` line 29) sanitizes the environment. Env vars like `PROGRAMFILES` must be set explicitly with a value in `--action_env=VAR=value`, not just forwarded with `--action_env=VAR`.
 - **PATH must include Python and Git tools** — the service doesn't inherit the interactive user's PATH. Python must come before Git's `usr/bin` (Git ships a broken `python3` stub). Set per-step in the CI workflow.
 - **`--workspace_status_command`** — the tarball has no `.git` directory, so the default workspace status script (`bazel/get_workspace_status`) fails. Override with `--workspace_status_command="cmd /c echo."` for Windows.
-- **Runner services** run as Windows services managed via `sc.exe`, set to `start=auto` for boot persistence.
 
 ## IIS Platform Internals
 
@@ -643,7 +622,6 @@ leaves the build green while the real code is untouched.
 - `DEVELOPER.md` - Contributor setup: Docker dev container, native Linux deps, single-test examples, common build issues
 - `docs/GLOSSARY.md` - Load-bearing terms (PSOL, IPRO, instaweb, ProxyFetch, DomainLawyer, beacon, CLFUS)
 - `docs/README.md` - Index of the `docs/` tree
-- `windows-dev/README.md` - Detailed Windows/IIS setup
 - `pagespeed-envoy.yaml` - Production Envoy configuration
 - `test/system/pagespeed_test_framework/` - Shared system-test framework (client, assertions)
 - `test/system/cpanel/README.md` - cPanel system-test notes
@@ -656,7 +634,7 @@ leaves the build green while the real code is untouched.
 - Never use `git commit --amend` unless the user explicitly requests it.
 - Always `git push` after committing unless told otherwise.
 - When working across branches, confirm the target branch with the user before committing.
-- **Release-note gate (blocking CI, `release-note-guard`).** A PR touching `pagespeed/`, `net/`, or `install/` — excluding tests, `BUILD` files, and `*.md` — must also touch `RELEASE_NOTES.md` (in-development section at the top) **or** `CHANGELOG.md` (under `## [Unreleased]`); either satisfies it. Note `pagespeed/iis/` is product code here and is **not** exempt (the formatting scripts exclude it, this gate does not).
+- **Release-note gate (a blocking check, `release-note-guard` in the maintainer CI).** A PR touching `pagespeed/`, `net/`, or `install/` — excluding tests, `BUILD` files, and `*.md` — must also touch `RELEASE_NOTES.md` (in-development section at the top) **or** `CHANGELOG.md` (under `## [Unreleased]`); either satisfies it. Note `pagespeed/iis/` is product code here and is **not** exempt (the formatting scripts exclude it, this gate does not).
 - If the change is genuinely invisible to users, waive it with a mandatory reason in a commit message or the PR body: `Release-Note: none - <why this is invisible to users>` (`-`, `:`, en dash or em dash all work; the reason must be at least 12 characters).
 - Check it locally before pushing: `bash tools/ci/check_release_note.sh --base origin/master --head HEAD` (self-test: `--self-test`).
 

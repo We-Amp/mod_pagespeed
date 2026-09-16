@@ -23,7 +23,8 @@
 #   - Cross-box / stale (stamp missing or for a different SHA): clear any stale
 #     (possibly root-owned) tree, then fetch + extract the vendor tarball from
 #     the authoritative CI hub shared dir via extract-vendor-tarball.sh
-#     (integrity-checked, retried --). The downstream sanitizer jobs
+#     (integrity-checked, retried -- the cross-runner artifact-fetch flake
+#     this shape hardens against). The downstream sanitizer jobs
 #     rebuild from source under their own config, so a source-only workspace is
 #     sufficient; the only cost on the rare split is a colder bazel cache.
 #

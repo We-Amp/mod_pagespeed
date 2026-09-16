@@ -78,7 +78,7 @@ namespace net_instaweb
 		};
 		InitFailureKind init_failure_kind() const { return init_failure_kind_; }
 		const GoogleString& init_error_message() const { return init_error_message_; }
-		// The rename: this accessor previously named
+		// Rename note: this accessor previously named
 		// failed_cache_path() returned the cache path on every failure
 		// mode. Now that LogDir failures also populate it, the name was
 		// misleading — it is "the directory whose init failed,"

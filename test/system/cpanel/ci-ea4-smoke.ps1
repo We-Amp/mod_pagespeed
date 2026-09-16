@@ -100,7 +100,7 @@ if (-not $vm) { throw "Hyper-V VM '$VMName' not found on $env:COMPUTERNAME" }
 
 $snap = Get-VMSnapshot -VMName $VMName -Name $Snapshot -ErrorAction SilentlyContinue
 if (-not $snap) {
-    throw "Checkpoint '$Snapshot' not found on $VMName - has cPanel been installed yet? See the internal planning notes Phase 3."
+    throw "Checkpoint '$Snapshot' not found on $VMName - has cPanel been installed on the base VM yet? Install it, then take the checkpoint this script restores."
 }
 
 # --- Stdin/cleanup state for Start-Process ssh/scp ---

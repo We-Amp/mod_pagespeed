@@ -207,7 +207,7 @@ namespace ps_base_fetch {
 
 ngx_int_t ps_base_fetch_handler(ngx_http_request_t* r);
 
-// Bounded-copy ring : copies the next window out of the pinned region
+// Bounded-copy ring: copies the next window out of the pinned region
 // into the oldest drained slot (or, under wrap pressure, the whole remaining
 // tail into a one-shot pool buffer) and returns exactly one chain link in
 // *out.  Marks ring->done and releases the pin once the emitted link carries

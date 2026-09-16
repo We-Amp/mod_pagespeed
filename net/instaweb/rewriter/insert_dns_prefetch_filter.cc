@@ -325,8 +325,8 @@ void InsertDnsPrefetchFilter::MarkAlreadyInHead(
 // kMaxDomainDiff, then the list is considered stable and this method returns
 // true in that case.
 //
-// Deliberately count-only, not content-strict (decision recorded 2026-07,
-// from the review trail): a page whose domain SET changes completely
+// Deliberately count-only, not content-strict (decision recorded 2026-07):
+// a page whose domain SET changes completely
 // between rewrites but keeps a count within kMaxDomainDiff is judged stable,
 // and hints are then emitted for the stored (stale) list. That trade-off is
 // accepted because:

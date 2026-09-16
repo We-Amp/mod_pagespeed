@@ -31,7 +31,7 @@ pagespeed_cc_test(
 )
 
 # Opt-in Web-Bot-Auth counter store: FNV-1a-64 keyid hash (asserted cross-engine
-# compatible with the 2.0 optimizer line), lock-free slot claim + overflow (single-threaded and
+# compatible with the optimizer), lock-free slot claim + overflow (single-threaded and
 # under 8-thread contention), latency bucketing, boot-identity minting, and the
 # mmap open/create/self-heal round-trip. Uses a temp file; no network.
 pagespeed_cc_test(

@@ -95,7 +95,7 @@ void LoopbackRouteFetcher::Fetch(const GoogleString& original_url,
     // Includes leading slash.
     parsed_url.PathAndLeaf().CopyToString(&path_and_leaf);
 
-    // defect B: the resource URL's scheme may reflect
+    // The resource URL's scheme may reflect
     // X-Forwarded-Proto rather than the transport this server speaks on
     // own_port_ (e.g. https page URLs synthesized from an XFP header received
     // on a plain-http listener). The munged URL connects to own_port_, so it

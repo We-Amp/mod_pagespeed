@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Regression guard for.
+"""Regression guard for the silently-green-lane defect.
 
 The py_test wrapper must propagate pytest's exit status: a failing pytest
 case must turn the bazel target red, not pass silently. Before the fix,

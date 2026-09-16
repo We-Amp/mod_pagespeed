@@ -21,7 +21,7 @@ by-type harnesses (AddOutputFilterByType for MOD_PAGESPEED_OUTPUT_FILTER
 and DEFLATE) in every request's output chain.  A warm cache-hit resource
 serve must still take the ALIASED path.
 
-The regression guarded here is the defect itself: eligibility silently
+The regression guarded here: eligibility silently
 fail-closing on every default install, with the serve degrading to the
 verified copy and no counter explaining why (aliased=0, copied_out=0).
 """
@@ -128,5 +128,6 @@ class TestZeroCopyAliasedServe:
 
 if __name__ == "__main__":
     # Route through SystemExit: a bare pytest.main(...) only returns its
-    # status, and a test main that drops it exits 0 on a red suite -- vacuously green, the gate cannot report failure.
+    # status, and a test main that drops it exits 0 on a red suite --
+    # vacuously green, the gate cannot report failure.
     raise SystemExit(pytest.main([__file__, "-v"]))

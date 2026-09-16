@@ -4,7 +4,7 @@
 
 # Stand up a self-contained nginx rig serving the ASan-instrumented
 # ngx_pagespeed_module.so, for the shutdown/reload memory-bug stress rig
-#.
+# (the nginx leg of the shutdown-race stress campaign).
 #
 # Mirrors the hand-built ~/nginx-stress rig the campaign started from. Unlike the IIS rig this is
 # fully self-contained in RIG_DIR (its own prefix) — no shared-infra mutation, so

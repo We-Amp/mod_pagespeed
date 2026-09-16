@@ -49,7 +49,7 @@
 .PARAMETER UseFullIIS
     Use Full IIS (Windows Service) instead of IIS Express.
     Required when running from a Windows service (Session 0), e.g. GitHub Actions
-    self-hosted runners installed as services. IIS Express cannot start in Session 0.
+    runners installed as services. IIS Express cannot start in Session 0.
 
 .EXAMPLE
     .\run_iis_tests.ps1
@@ -309,7 +309,8 @@ function Run-Tests {
     # over TLS) plus the cross-platform automatic/test_https.py, both enabled by
     # PAGESPEED_HTTPS_HOST under -UseFullIIS. They self-skip when HTTPS is
     # unconfigured (e.g. IIS Express) via a module-level skipif. Sub-resource
-    # rewriting over TLS works via the WINHTTP_FLAG_SECURE fix.
+    # rewriting over TLS works via the WinHTTP fetcher's WINHTTP_FLAG_SECURE
+    # handling.
     $pytestArgs += @(
         "-m", "not requires_secondary"
     )

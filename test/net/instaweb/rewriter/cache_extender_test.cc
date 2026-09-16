@@ -797,7 +797,8 @@ TEST_F(CacheExtenderTest, ExtendIfShardedToHttps) {
 }
 
 TEST_F(CacheExtenderTest, ExtendIfShardedAndRewritingAndMappingHttps) {
-  // This test started out trying to unit test mod_pagespeed by
+  // This test started out trying to reproduce a user-reported sharded
+  // rewrite-and-map-https configuration by
   // replicating the settings the poster used. They didn't work, basically
   // because the wildcard directive for *test.com conflicted with the later
   // non-wildcard ones. After much experimentation we came up with these

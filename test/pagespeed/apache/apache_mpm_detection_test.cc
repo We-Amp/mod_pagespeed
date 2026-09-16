@@ -64,7 +64,7 @@ TEST(ApacheMpmDetectionTest, ThreadedMpmWithOneThreadPerChild) {
   EXPECT_FALSE(IsThreadedFromMpmInfo(MakeInfo(true, AP_MPMQ_STATIC, 1)));
 }
 
-// The bug in: asked before configuration was processed, a threaded
+// Asked before configuration was processed, a threaded
 // MPM reports zero threads.  The predicate is right to call that
 // non-threaded -- the fix is to ask later, not to answer differently.
 TEST(ApacheMpmDetectionTest, ThreadedMpmQueriedTooEarly) {
@@ -212,8 +212,8 @@ TEST(ApachePostConfigWiringTest, PostConfigFinalizesThreadCounts) {
   EXPECT_HAS_SUBSTR("factory->FinalizeThreadCounts();", source)
       << "pagespeed_post_config() must call FinalizeThreadCounts(): "
          "ap_mpm_query() cannot report the MPM's threading model or the "
-         "configured child count until the configuration has been processed "
-         "(), so nothing else resolves the counts on Apache. "
+         "configured child count until the configuration has been processed, "
+         "so nothing else resolves the counts on Apache. "
          "Without this call both optimization pools silently fall back to a "
          "single worker and no resolution is logged at all.";
 

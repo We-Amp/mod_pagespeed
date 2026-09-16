@@ -20,7 +20,7 @@ Ported from: pagespeed/automatic/system_test_helpers.sh
 
 Covers the full prioritize_critical_css loop against a live server:
 instrumented page -> beacon POST -> critical rules inlined; plus the
-beacon overflow signal (`of=1`) added in the same change, which must increment
+beacon overflow signal (`of=1`), which must increment
 the beacon_overflow_count statistic (and only for the literal value "1").
 
 The client-side halves of this pipeline (viewport-aware selector
@@ -231,5 +231,6 @@ class TestPrioritizeCriticalCssLayers:
 
 if __name__ == "__main__":
     # Route through SystemExit: a bare pytest.main(...) only returns its
-    # status, and a test main that drops it exits 0 on a red suite -- vacuously green, the gate cannot report failure.
+    # status, and a test main that drops it exits 0 on a red suite --
+    # vacuously green, the gate cannot report failure.
     raise SystemExit(pytest.main([__file__, "-v"]))

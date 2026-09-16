@@ -69,11 +69,12 @@ class IisRewriteOptions : public SystemRewriteOptions {
   bool auto_create_cache_path() const {
 	  return auto_create_cache_path_.value();
   }
-  // default-on; opt-out via
+  // Default-on; opt-out via
   // `AutoCreateLogDir off` in pagespeed.config. Mirrors
   // auto_create_cache_path() but gates the LogDir parallel auto-create
   // flow. When off, the LogDir is left untouched at startup (no mkdir,
-  // no ACL touch, no diagnostic page on absence — legacy behaviour).
+  // no ACL touch, no diagnostic page on absence — the behaviour from
+  // before LogDir auto-create existed).
   bool auto_create_log_dir() const {
 	  return auto_create_log_dir_.value();
   }

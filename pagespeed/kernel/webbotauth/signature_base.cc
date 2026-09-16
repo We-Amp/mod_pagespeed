@@ -2,7 +2,7 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 //
 // Kept in sync manually with pagespeed-optimizer src/crypto/webbotauth/
-// signature_base.cc (this change upstreams the optimizer line: RFC 9421 section 2.1
+// signature_base.cc (this change upstreams the optimizer's RFC 9421 section 2.1
 // HTTP field components, see signature_base.h).
 
 #include "pagespeed/kernel/webbotauth/signature_base.h"

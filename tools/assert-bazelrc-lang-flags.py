@@ -138,7 +138,8 @@ AGNOSTIC_VALUE_PREFIXES = ("-fsanitize=", "-fno-sanitize=", "-fsanitize-")
 # that could widen it. Checking that a regex merely MENTIONS ".cc" would accept
 # "//a/.*\.cc,//net/.*" (second element hits every C file under //net),
 # "third_party/foo.cc-tools/.*" (extension as a directory substring) and
-# ".*\.cpp|.*\.c" (alternation reaching C) — all of which reintroduce the cross-language flag leak with
+# ".*\.cpp|.*\.c" (alternation reaching C) — all of which reintroduce the
+# cross-language flag leak with
 # the guard green. Both `\.` and the `\\.` spelling used in our bazelrc match.
 _NO_WIDENING = r"[^|()\[\]]*"
 ANCHORED_CXX_EXT = re.compile(_NO_WIDENING + r"\\{1,2}\.(cpp|cc|cxx|hpp|hh)\$?$")

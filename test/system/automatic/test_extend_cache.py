@@ -210,7 +210,7 @@ class TestLegacyUrls:
         assert_http_status(response, 200)
 
 
-@pytest.mark.skip(reason="extend_cache_pdfs count mismatch on IIS — see internal records project_extend_cache_pdfs_bug.md")
+@pytest.mark.skip(reason="extend_cache_pdfs count mismatch on IIS — known product defect, pending investigation")
 class TestExtendCachePdfs:
     """Tests for PDF cache extension.
 

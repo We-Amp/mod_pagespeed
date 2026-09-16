@@ -126,7 +126,7 @@ class TestCacheFlush:
     # flush in 1.1 today. pagespeed/iis/iis_admin_handler.cc defines a POST
     # /cache?action=flush dispatch, but that file's HandleRequest is dead
     # code (iis_http_module.cpp calls server_context->AdminPage() directly
-    # and never delegates to IisAdminHandler) -- The
+    # and never delegates to IisAdminHandler). The
     # cross-server AdminSite::PrintCaches doesn't honor "cache=flush"
     # query either -- it only acts on url=, new_set=, purge=. Cache flush
     # on IIS today goes through the file-based cache.flush touch, which
@@ -252,7 +252,8 @@ class TestCacheFlushStatistics:
 
         The IIS rig runs with EnableCachePurge on, so the live flush path
         is the purge machinery, not the legacy cache.flush file-watch:
-        GET /pagespeed_admin/cache?purge=* routes through AdminSite::PurgeHandler
+        GET /pagespeed_admin/cache?purge=* routes (the dead IisAdminHandler
+        was removed, so this is the live path) through AdminSite::PurgeHandler
         -> PurgeContext::SetCachePurgeGlobalTimestampMs, and the next
         request's FlushCacheIfNecessary -> PollFileSystem applies the new
         purge set and bumps cache_flush_count via UpdateCachePurgeSet
@@ -468,7 +469,8 @@ class TestCachePurge:
     PurgeHandler; when disabled it returns a JSON success:false error.
 
     Note: the IIS-specific POST /cache?action=purge handler in
-    iis_admin_handler.cc::HandleCachePurge is dead code,
+    iis_admin_handler.cc::HandleCachePurge is dead code (it is never
+    dispatched; the module calls AdminPage directly),
     so these tests target the cross-server GET path that AdminPage
     actually dispatches in 1.1 today.
     """
@@ -646,5 +648,6 @@ class TestCacheIntegration:
 
 if __name__ == "__main__":
     # Route through SystemExit: a bare pytest.main(...) only returns its
-    # status, and a test main that drops it exits 0 on a red suite -- vacuously green, the gate cannot report failure.
+    # status, and a test main that drops it exits 0 on a red suite --
+    # vacuously green, the gate cannot report failure.
     raise SystemExit(pytest.main([__file__, "-v"]))

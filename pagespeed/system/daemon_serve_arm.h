@@ -952,8 +952,8 @@ bool DaemonServeFallbackRenotify(const DaemonAbi& abi, StringPiece socket_path,
 // "already processed, skipping", because the URL was optimized once and
 // nothing in the expiry lifecycle clears the dedup entry.  Declined on
 // every request, swallowed on every notification: the URL regresses to
-// origin-serving one freshness lifetime after optimization, permanently
-//.  The sentinel is the worker's heal for exactly this transition --
+// origin-serving one freshness lifetime after optimization, permanently.
+// The sentinel is the worker's heal for exactly this transition --
 // it purges the stale variant set, clears dedup, rate-limits per URL and
 // inline-rebuilds.
 //

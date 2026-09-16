@@ -4,7 +4,7 @@ Canonical contract for the differential HTML parse harness shared by
 mod_pagespeed 1.15 (`pagespeed/kernel/html`) and ModPageSpeed 2.0
 (`lib/html`). Phase 1 (this directory, in the mpp repo) implements the
 reference probe, seed corpus and goldens. Phase 2 re-implements a probe in
-the 2.0 optimizer line that produces **byte-identical** streams for the same inputs, and the
+the optimizer that produces **byte-identical** streams for the same inputs, and the
 checked-in `goldens/manifest.json` gates both repos.
 
 Tracking: the pagespeed-optimizer issue tracker. Pattern mirrored from the D1
@@ -18,7 +18,7 @@ conform to this spec iff their probes emit the same stream for every input.
 ## 1. Scope: what the stream does and does not capture
 
 The stream contains ONLY behavior both products are expected to agree on
-post-convergence (the module side / the optimizer side):
+post-convergence (both repos landed their convergence changes):
 
 - the sequence of parse events: document start/end, element start (with
   attributes in parse order), element end (with close style), characters,

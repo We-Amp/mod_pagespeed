@@ -949,7 +949,7 @@ TEST_F(JavascriptFilterTest, RewriteExternalModuleScript) {
 }
 
 TEST_F(JavascriptFilterTest, ModuleResourceFetchIsTokenizerMinified) {
-  // Regression test for.  A `.pagespeed.jm.` URL for a module can
+  // Regression test: a `.pagespeed.jm.` URL for a module can
   // be fetched directly, with no HTML scan in front of it.  Module
   // eligibility used to be decided only in the HTML scanner, so this path
   // could minify a module with the legacy minifier -- which predates module

@@ -100,8 +100,8 @@ class SystemServerContext : public ServerContext {
   bool ProxiesHtml() const override { return false; }
 
   // Creates the DaemonReader backing the admin console's /v1/daemon/*
-  // endpoints (a read-only proxy to the optimizer daemon's management API,
-  //).  Called once from PostInitHook(); the AdminSite takes
+  // endpoints (a read-only proxy to the optimizer daemon's management API).
+  // Called once from PostInitHook(); the AdminSite takes
   // ownership.  The default implementation returns nullptr -- ports without
   // a daemon transport override nothing, and the endpoints then report the
   // daemon unreachable (502).

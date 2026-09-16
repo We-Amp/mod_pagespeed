@@ -200,7 +200,7 @@ IisServerContext* IisProcessContext::GetServerContext(const GoogleString& site_a
 		// under recycle stress this is a routine lost race, so surface NULL
 		// (the caller renders the diagnostic page) instead of CHECK-failing,
 		// which fail-fasted the whole worker (the 0xc0000409 ucrtbase
-		// cluster seen under recycle stress).
+		// fail-fast cluster seen under recycle stress).
 		return NULL;
 	}
 
@@ -285,7 +285,8 @@ IisServerContext* IisProcessContext::GetServerContext(const GoogleString& site_a
 		// Verify the cache path is configured, exists, and is writable by the
 		// worker identity. Each failure mode populates init_failure_kind_ +
 		// init_error_message_ + failed_init_path_ (set on failure paths
-		// only; renamed from failed_cache_path_ since LogDir
+		// only; renamed from failed_cache_path_ when LogDir auto-create
+		// landed, since LogDir
 		// failures now use the same member) so the
 		// local-only error page in
 		// IisHttpModule::OnBeginRequest can render an actionable diagnostic
@@ -320,7 +321,7 @@ IisServerContext* IisProcessContext::GetServerContext(const GoogleString& site_a
 				"AutoCreateCachePath: %s", on ? "on" : "off");
 		});
 
-		// when AutoCreateCachePath is on
+		// When AutoCreateCachePath is on
 		// (default) AND the path passes the hardcoded prefix guardrail
 		// (PageSpeed\cache\ OR IISWebSpeed\cache\), delegate to the
 		// factory's mkdir+probe+conditional-ACL sequence. On success,
@@ -445,7 +446,7 @@ IisServerContext* IisProcessContext::GetServerContext(const GoogleString& site_a
 			return NULL;
 		}
 
-		// LogDir auto-create — the referenced issue.
+		// LogDir auto-create.
 		// Parallel structure to the cache path block above; deliberately
 		// placed AFTER cache succeeds so cache failures (the louder,
 		// trial-customer-visible class) render their dedicated
@@ -456,7 +457,8 @@ IisServerContext* IisProcessContext::GetServerContext(const GoogleString& site_a
 		//   - LogDir in one of the canonical logs prefixes
 		//     (PageSpeed\logs\ or IISWebSpeed\logs\) — out-of-prefix
 		//     LogDir values are operator-customized and we leave them
-		//     untouched, preserving legacy behaviour.
+		//     untouched, preserving the behaviour from before LogDir
+		//     auto-create existed.
 		// ACL grant on the conditional suspenders leg is RX+W (no
 		// DELETE), mirroring Product.wxs GrantLogAcl — workers append
 		// to logs but admin owns rotation.

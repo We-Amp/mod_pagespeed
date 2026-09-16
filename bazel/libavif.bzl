@@ -18,7 +18,7 @@
 #   AVIF_CODEC_DAV1D = SYSTEM  -> faster decode via :dav1d (optional; aom
 #                                 already decodes, so dav1d is layered in only
 #                                 once its Meson build is wired — see
-#                                 libdav1d.bzl and docs/spikes/avif-stream0/README.md).
+#                                 libdav1d.bzl).
 
 load("@rules_foreign_cc//foreign_cc:defs.bzl", "cmake")
 

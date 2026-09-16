@@ -45,7 +45,7 @@ version\.h\.in
 # install/rpm/build.sh) carry their original BSD-style notice, which RAT's
 # matchers do not recognise. Basename matching also hides two first-party
 # scripts that do carry the SPDX header: pagespeed/system/console/build.sh
-# and docs/spikes/avif-stream0/native/build.sh.
+# and the AVIF spike's native build script.
 build\.sh
 
 # Corpora, goldens and byte-exact test fixtures. Every first-party synthetic
@@ -54,13 +54,13 @@ build\.sh
 # headered bytes. What stays listed, and why:
 #   units             the parity corpus units: imported third-party content
 #                     plus content-addressed first-party units whose sha256
-#                     is their identity (tools/parity/corpus/units)
+#                     is their identity
 #   goldens           generated expected-output manifests (html-parse,
 #                     js-minify, parity)
 #   testdata          the heritage unit-test trees (test/**/testdata):
 #                     binary images and raw pixel dumps, third-party JS, and
 #                     inputs whose .gold expected outputs are byte-exact
-#   vendor            the vendored csstree copy under tools/parity/corpus
+#   vendor            the vendored csstree copy under the parity corpus
 #   .*\.jsonl         the transition-load request mixes (data lines, no
 #                     comment syntax)
 #   empty.html, whitespace-only.html, text-only.html

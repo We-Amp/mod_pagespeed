@@ -95,7 +95,7 @@ void WinHTTP::OnHandleClosing(HINTERNET handle) {
 		session=NULL;
 		if (retry_scheduled_ && status!=WinHTTPStatus::Cancelled)
 		{
-			// the pinned loopback attempt failed before any response
+			// The pinned loopback attempt failed before any response
 			// data and every handle is now gone -- restart the request once
 			// against the other loopback family. endEvent stays unset until
 			// that attempt completes, keeping Wait()/CleanUp semantics intact.
@@ -214,7 +214,7 @@ void WinHTTP::OnRequestError(WINHTTP_ASYNC_RESULT *result)
 	status=WinHTTPStatus::Error;
 	dwError=result->dwError;
 	dwResult=result->dwResult;
-	// a pinned loopback attempt that failed before any response
+	// A pinned loopback attempt that failed before any response
 	// data (typically ERROR_WINHTTP_CANNOT_CONNECT when only the other
 	// loopback family is listening) is retried once; OnHandleClosing
 	// restarts it after the close cascade below releases the handles.
@@ -532,7 +532,8 @@ bool WinHTTP::StartRequest()
 			// Use TLS for https URLs. WinHttpCrackUrl populated urlComp.nScheme;
 			// without WINHTTP_FLAG_SECURE the request goes out as cleartext on
 			// the TLS port and the fetch fails -- so the module could not fetch
-			// any https-origin sub-resource (loopback or remote).
+			// any https-origin sub-resource (loopback or remote) before this
+			// flag was wired through.
 			DWORD requestFlags=WINHTTP_FLAG_REFRESH;
 			if (urlComp.nScheme==INTERNET_SCHEME_HTTPS)
 			{
@@ -572,7 +573,7 @@ bool WinHTTP::StartRequest()
 				if (!result)
 				{
 					firstError=GetLastError();
-					// schedule the loopback fallback before CleanUp --
+					// Schedule the loopback fallback before CleanUp --
 					// the close cascade may run inline and consult the flag.
 					bool retrying=LoopbackRetryEligible();
 					if (retrying)

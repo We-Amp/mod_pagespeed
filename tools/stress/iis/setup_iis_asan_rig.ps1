@@ -4,7 +4,8 @@
 <#
 .SYNOPSIS
   Stand up an isolated IIS site/pool serving the ASan-instrumented pagespeed_iis.dll,
-  for the shutdown/recycle memory-bug stress rig.
+  for the shutdown/recycle memory-bug stress rig (the IIS leg of the
+  shutdown-race stress campaign).
 
 .DESCRIPTION
   Mirrors the hand-built D:\stress349 rig that first surfaced the
@@ -41,8 +42,8 @@ $ErrorActionPreference = 'Continue'
 $ProgressPreference = 'SilentlyContinue'
 $ac = "$env:SystemRoot\System32\inetsrv\appcmd.exe"
 
-# 0. Hermetic-IIS preamble ( validation-run finding). The runner is
-# shared with the CI workflow's Windows AppVerif / IIS jobs: a LEFTOVER w3wp from a prior
+# 0. Hermetic-IIS preamble (a validation-run finding). The runner is
+# shared with the Windows AppVerif / IIS CI jobs: a LEFTOVER w3wp from a prior
 # job -- possibly spawned under full Application Verifier -- can idle into our
 # stress window and die there (verifier Leak stop at DLL unload), which our
 # machine-wide WER LocalDumps + event sweep then attribute to this rig
@@ -90,10 +91,10 @@ New-Item -ItemType File -Path "$RigDir\logs\error.log" -Force | Out-Null
 # 1b. Rig-start marker: sweep_iis_asan_rig.ps1 derives its event/dump window from
 # this, so the sweep covers the whole rig lifetime (setup included) in ONE
 # timezone. Previously the sweep window was sweep-start-based and only matched the
-# stress window via an accidental UTC-vs-local skew (rig gap 2).
+# stress window via an accidental UTC-vs-local skew.
 "started $(Get-Date -Format o)" | Set-Content "$RigDir\logs\rig.setup.started"
 
-# 1c. WER LocalDumps for w3wp.exe (rig gap 1). procdump -e -w attaches
+# 1c. WER LocalDumps for w3wp.exe. procdump -e -w attaches
 # to the FIRST w3wp instance only, so under recycle churn nearly every crashing
 # worker was a later, unmonitored instance: 8 w3wp faults, zero dumps captured.
 # LocalDumps is consulted by WER per-crash, so EVERY w3wp instance is covered.

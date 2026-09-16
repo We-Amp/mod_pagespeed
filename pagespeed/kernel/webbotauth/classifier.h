@@ -27,7 +27,7 @@ enum class Verdict {
   // wiring's no-material short-circuit, kHuman is reachable ONLY via the
   // untagged/other-tag path -- do not add other kHuman returns to
   // VerifyAndClassify without revisiting the wiring's label/counter logic.
-  // (Upstreamed from the optimizer line.)
+  // (Upstreamed from the optimizer.)
   kHuman,
   kSignedAgent,  // valid Ed25519 signature; keyid NOT in verified-bot map
   kVerifiedBot,  // valid signature AND keyid present in operator verified-bot map

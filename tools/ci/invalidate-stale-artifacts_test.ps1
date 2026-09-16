@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Ported from pagespeed-optimizer tools/ci/ (shared CI artifact hub) -- keep the copies in sync.
-# Smoke tests for invalidate-stale-artifacts.ps1 ( follow-up).
+# Smoke tests for invalidate-stale-artifacts.ps1.
 # Mirrors invalidate-stale-artifacts_test.sh. No Pester dependency.
 #
 # Run:   pwsh -NoProfile -File tools/ci/invalidate-stale-artifacts_test.ps1

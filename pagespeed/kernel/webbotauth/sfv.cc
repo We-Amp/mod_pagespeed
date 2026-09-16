@@ -2,7 +2,7 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 //
 // Kept in sync manually with pagespeed-optimizer src/crypto/webbotauth/sfv.cc
-// (this change upstreams the optimizer line: bounded multi-member Signature-Input
+// (this change upstreams the optimizer's bounded multi-member Signature-Input
 // dictionary parsing + component-parameter tolerance, see sfv.h).
 
 #include "pagespeed/kernel/webbotauth/sfv.h"

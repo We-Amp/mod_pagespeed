@@ -5,7 +5,7 @@
 // hash (asserted cross-engine compatible with ModPageSpeed 2.0), the lock-free
 // slot find-or-claim + overflow (single-threaded and under contention), the
 // verify-latency bucketing, the boot-identity minting, and the open/create/
-// self-heal round-trip. Mirrors the intent of the 2.0 optimizer line's serve_stats_test.cc v6
+// self-heal round-trip. Mirrors the intent of the optimizer's serve_stats_test.cc v6
 // cases.
 
 #include "pagespeed/kernel/webbotauth/webbotauth_counter_store.h"

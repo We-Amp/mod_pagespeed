@@ -13,11 +13,13 @@ its DllMain DLL_PROCESS_DETACH path. After the call BoringSSL's
 thread-local APIs become permanent no-ops in this process, which is the
 correct behavior since the DLL is on its way out.
 
-Refs https://github.com/We-Amp/mod_pagespeed/issues/59
+Motivation: an IIS native module (pagespeed_iis.dll) must release
+BoringSSL's process-wide TLS slot on DLL unload; without this entry point
+the slot leaks and thread-local state dangles.
 
 --- a/crypto/thread_win.cc
 +++ b/crypto/thread_win.cc
-@@ -68,6 +68,21 @@ static void thread_local_init(void) {
+@@ -68,6 +68,20 @@ static void thread_local_init(void) {
    g_thread_local_failed = (g_thread_local_key == TLS_OUT_OF_INDEXES);
  }
 
@@ -25,8 +27,7 @@ Refs https://github.com/We-Amp/mod_pagespeed/issues/59
 +// Intended for hosts that load BoringSSL inside a DLL that gets unloaded
 +// before process exit (e.g. an IIS native module). After this call, the
 +// per-thread BoringSSL APIs become no-ops in this process. Safe to call
-+// even if thread_local_init never ran. See:
-+//   https://github.com/We-Amp/mod_pagespeed/issues/59
++// even if thread_local_init never ran.
 +extern "C" void CRYPTO_thread_local_cleanup(void) {
 +  if (g_thread_local_failed) {
 +    return;

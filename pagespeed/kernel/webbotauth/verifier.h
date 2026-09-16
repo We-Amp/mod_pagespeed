@@ -2,7 +2,8 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 //
 // Kept in sync manually with pagespeed-optimizer src/crypto/webbotauth/verifier.h
-// (this change upstreams the optimizer line: only signatures tagged "web-bot-auth" are
+// (this change upstreams the optimizer's tag selection: only signatures
+// tagged "web-bot-auth" are
 // verified -- untagged/other-tag signature material is classified as if
 // unsigned -- and covered HTTP field components (e.g. "signature-agent")
 // resolve against the binding-provided field list).

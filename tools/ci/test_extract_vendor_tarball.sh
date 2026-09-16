@@ -4,7 +4,8 @@
 #
 # Test for tools/ci/extract-vendor-tarball.sh.
 #
-# Reproduces the defect failure modes locally, with no network and no real
+# Reproduces the cross-runner artifact-fetch failure modes locally, with no
+# network and no real
 # the CI hub, by shimming `ssh` and `rsync` so the "hub shared dir" is just a
 # local directory. Each case asserts the hardened behaviour:
 #

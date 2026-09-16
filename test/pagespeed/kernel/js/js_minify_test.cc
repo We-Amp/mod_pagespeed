@@ -269,7 +269,8 @@ TEST_F(JsMinifyTest, Es2015LetHtmlCommentBeforeBinding) {
 }
 
 TEST_F(JsMinifyTest, Es2015LetHtmlCommentIdempotent) {
-  // The minimized fuzz artifact for the HTML-comment RC-E defect: with the HTML forms missing
+  // The minimized fuzz artifact for the HTML-comment RC-E defect: with the
+  // HTML forms missing
   // from the lookahead, the first pass produced output that the second pass
   // minified further, so minification was not idempotent.
   CheckNewMinification("let\n-->\nlet\nt\n&", "let\nlet\nt&");
@@ -439,7 +440,7 @@ TEST_F(JsMinifyTest, ArrowBodyAsi) {
   CheckNewMinification("x = () => 5\n/re/g;", "x=()=>5/re/g;");
 }
 
-TEST_F(JsMinifyTest, LinebreakBeforeArrowHead) {  //
+TEST_F(JsMinifyTest, LinebreakBeforeArrowHead) {
   // ECMA-262 forbids a LineTerminator between an arrow head and its =>, so
   // the linebreak before => always inserts a semicolon and must survive.
   // The input was already invalid; the byte-preserving contract demands the
@@ -495,7 +496,7 @@ TEST_F(JsMinifyTest, Spread) {
   CheckNewMinification("function f(...args) {}", "function f(...args){}");
 }
 
-TEST_F(JsMinifyTest, ObjectSpreadCallElement) {  //
+TEST_F(JsMinifyTest, ObjectSpreadCallElement) {
   // The regression: an object-spread element whose argument is a call,
   // followed by another property.  Before the fix the callee sat in the
   // member-name position, the `(` was read as a method shorthand's
@@ -585,7 +586,7 @@ TEST_F(JsMinifyTest, Generators) {
   CheckNewMinification("yield: 1;", "yield:1;");
 }
 
-TEST_F(JsMinifyTest, GeneratorMethodCommaSeparator) {  //
+TEST_F(JsMinifyTest, GeneratorMethodCommaSeparator) {
   // A generator method whose `*` marker pushed the block keyword directly
   // onto the member-name brace used to leave that bare brace on top when the
   // body closed, so the comma separating the next member was an error and
@@ -843,7 +844,7 @@ TEST_F(JsMinifyTest, LeaveIEConditionalCompilationComments) {
       "@*/");
 }
 
-TEST_F(JsMinifyTest, RetainedCommentNoRegexGlue) {  //
+TEST_F(JsMinifyTest, RetainedCommentNoRegexGlue) {
   // Without a separator, the "/" and the retained comment's "/*" fuse into
   // "//" -- a line comment that swallows the rest of the line and silently
   // changes the program's meaning (x becomes 6 instead of 2).
@@ -854,7 +855,7 @@ TEST_F(JsMinifyTest, RetainedCommentNoRegexGlue) {  //
                        "var a=6,b=3,x;x=a/ /*@c@*/b;");
 }
 
-TEST_F(JsMinifyTest, RetainedCommentTrailingSlashNoGlue) {  //
+TEST_F(JsMinifyTest, RetainedCommentTrailingSlashNoGlue) {
   // The trailing "@*/" ends in "/", so a following "/" would form "//".
   CheckNewMinification("a = b /*@c@*/ / d;", "a=b/*@c@*/ /d;");
 }
@@ -868,11 +869,11 @@ TEST_F(JsMinifyTest, RetainedCommentTightWhenNoGlue) {
   CheckNewMinification("x = 4 /*@c@*/ 5;", "x=4/*@c@*/5;");
 }
 
-TEST_F(JsMinifyTest, RetainedCommentPreservesAsiLinebreak) {  //
+TEST_F(JsMinifyTest, RetainedCommentPreservesAsiLinebreak) {
   CheckNewMinification("return\n/*@c@*/ 42;", "return\n/*@c@*/42;");
 }
 
-TEST_F(JsMinifyTest, RetainedCommentPreservesAsiAfterComment) {  //
+TEST_F(JsMinifyTest, RetainedCommentPreservesAsiAfterComment) {
   // A comment is grammatically inert: a linebreak *after* the retained comment
   // must still trigger ASI when the token before it was a speculatively-
   // classified operator word (await / of) or a restricted-production keyword.
@@ -975,7 +976,7 @@ TEST_F(JsMinifyTest, DoNotJoinDecimalIntegerAndDot) {
   CheckNewMinification("0192  . toString()", "0192 .toString()");
 }
 
-TEST_F(JsMinifyTest, BareZeroDotPreservesSpace) {  //
+TEST_F(JsMinifyTest, BareZeroDotPreservesSpace) {
   // Bare 0 is a decimal literal that can absorb a decimal point, so
   // "0 .toString()" must keep the space before the period: "0.toString()"
   // is a SyntaxError ("0." lexes as a number and the property access is

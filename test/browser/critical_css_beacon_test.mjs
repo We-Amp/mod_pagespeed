@@ -80,7 +80,7 @@ function check(ok, label) {
 
 const browser = await chromium.launch();
 
-// --- 1. Viewport-aware criticality --------------------------------
+// --- 1. Viewport-aware criticality ----------------------------------------
 {
   const selectors = ['#hero', '.mid', '.deep', '#hidden', '.everywhere', '.absent'];
   const { body, exported } = await runBeaconPage(browser, testPage(JSON.stringify(selectors)));
@@ -105,7 +105,7 @@ const browser = await chromium.launch();
   check(params.get('of') === null, 'viewport: no overflow flag on small payload');
 }
 
-// --- 2. Overflow truncation + of=1 ---------------------------------
+// --- 2. Overflow truncation + of=1 -----------------------------------------
 {
   const longClass = 'c' + 'x'.repeat(100);
   // 2000 copies x ~101 encoded chars each is ~200KB of candidate payload,

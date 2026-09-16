@@ -14,7 +14,8 @@
 #               is exactly the version this tree stamps (derived from
 #               net/instaweb/public/VERSION; override via EXPECTED_XPS, fallback
 #               "1.15.0" when run detached from a checkout). Catches a pair built
-#               with a stale/unpatched VERSION (a "-beta.1" sidecar).
+#               with a stale/unpatched VERSION (a "-beta.1" sidecar once
+#               shipped that way).
 #   4. NO-WARN — no optimized response carries an `X-PageSpeed-Warn` header. The
 #               module has no license apparatus, so there is nothing to
 #               stage and no licensed/eval split: the header must be ABSENT on
@@ -104,7 +105,7 @@ CONF
     # 3. OPTIMIZE — drive a few requests so pagespeed processes the page, then assert
     #    the X-Page-Speed header (optimizer active in the request path) AND that its
     #    value is exactly the expected version (a presence-only check let a pair
-    #    built from an unpatched VERSION ship a prerelease stamp —).
+    #    built from an unpatched VERSION ship a prerelease stamp).
     HDRS=""
     for i in $(seq 1 12); do
       HDRS=$(curl -fsS -D - -o /dev/null "http://127.0.0.1:8099/" 2>/dev/null || true)

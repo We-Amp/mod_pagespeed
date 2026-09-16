@@ -274,7 +274,7 @@ try {
     Write-Host "LogDir exists and is a real directory: $LogDir"
 
     # Assert: worker has at least RX+W on the new dir. Under the common
-    # case + the narrower grant, this is satisfied EITHER
+    # case plus the narrower LogDir grant, this is satisfied EITHER
     # by an explicit RX+W ACE for the worker SID (auto-create's
     # conditional ACL leg fired because inheritance was broken — note
     # the absence of DELETE relative to the cache fixture) OR by an
@@ -314,7 +314,8 @@ try {
     Write-Host "PASS: positive path."
 
     # ============================================================
-    # NEGATIVE PATH (log-dir-create-failed): RETIRED (VM-verified 2026-06-22 on the Windows Server 2016 IIS base image / v1.15.0).
+    # NEGATIVE PATH (log-dir-create-failed): RETIRED (VM-verified
+    # 2026-06-22 on the Windows Server 2016 IIS base image / v1.15.0).
     # A non-creatable LogDir is NON-FATAL on this build: with the LogDir
     # parent (C:\ProgramData\We-Amp\PageSpeed) denied WRITE for IIS_IUSRS +
     # NETWORK SERVICE and the LogDir cleared, the module still serves

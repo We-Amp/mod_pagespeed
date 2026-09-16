@@ -2,7 +2,7 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 //
 // Kept in sync manually with pagespeed-optimizer src/crypto/webbotauth/verifier.cc
-// (this change upstreams the optimizer line: tag selection + HTTP field covered
+// (this change upstreams the optimizer's tag selection + HTTP field covered
 // components, see verifier.h).
 
 #include "pagespeed/kernel/webbotauth/verifier.h"

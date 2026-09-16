@@ -582,7 +582,7 @@ TEST_F(IisConfigurationTest, LoadFromFileMatchPathConversion) {
 // ==========================================================================
 
 // Regression test for the SRWLock concurrent-mutation defect in
-// ConfigFactory::GetConfiguration, fixed. Pre-fix code used
+// ConfigFactory::GetConfiguration. Pre-fix code used
 // `configurationFiles[path]` (std::map::operator[]) under an SRWLock held
 // in *shared* (reader) mode, which default-inserts a (key, nullptr) pair
 // when the key is absent. That is a mutating operation under a reader

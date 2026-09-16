@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 We-Amp B.V.
 //
-// TDD reproduction for the RESIDUAL shutdown logging race.
+// TDD reproduction of the RESIDUAL shutdown logging race.
 //
 // logging_shutdown_test.cc only exercises the g_logging_shutdown==true
 // short-circuit. This test reproduces the ACTUAL production crash window, where

@@ -932,8 +932,7 @@ class TestPytestTimeoutScaling:
     At the AppVerif matrix's values (multiplier 6, retries 1) the old
     multiplier-only cap (720s) could fire at the exact instant the retry
     budget ended -- killing a poll seconds before convergence and
-    pre-empting fetch_until's own, better-instrumented TimeoutError
-   ."""
+    pre-empting fetch_until's own, better-instrumented TimeoutError."""
 
     class _StubConfig:
         """Minimal stand-in for pytest's Config: pytest_configure reads
@@ -988,8 +987,8 @@ class TestPytestTimeoutScaling:
 
 if __name__ == "__main__":
     # run_pytest sys.exit()s pytest's return code; a bare pytest.main(...)
-    # would drop it, and the bazel py_test would report PASS on a red suite
-    #. argv passthrough: bazel invokes this main with no args,
+    # would drop it, and the bazel py_test would report PASS on a red suite.
+    # argv passthrough: bazel invokes this main with no args,
     # so the default runs this file; the exit-status regression guard passes
     # a synthetic case file, driving this exact shipped entry point.
     run_pytest(sys.argv[1:] or [__file__, "-v"])

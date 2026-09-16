@@ -3012,7 +3012,7 @@ TEST_F(JsTokenizerTest, SpreadInArrayAndObject) {
   ExpectEndOfInput();
 }
 
-TEST_F(JsTokenizerTest, SpreadCallInObjectLiteral) {  //
+TEST_F(JsTokenizerTest, SpreadCallInObjectLiteral) {
   // A spread element whose argument is a CALL: the value marker the `...`
   // installs keeps the callee off the brace, so the `(` is a call's
   // argument list (not a method shorthand's parameter list) and the `)`

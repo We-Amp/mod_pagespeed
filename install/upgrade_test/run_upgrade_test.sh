@@ -6,7 +6,8 @@
 # run_upgrade_test.sh -- scripted 1.15 -> 1.16 in-place upgrade rehearsal for
 # the Apache module packages, in a booted-systemd container.
 #
-# WHY THIS EXISTS (the silent-degrade upgrade class). With the 1.16.0-rc.7 package pair, a host
+# WHY THIS EXISTS (the silent-degrade upgrade class). With the 1.16.0-rc.7
+# package pair, a host
 # upgraded from 1.15 kept serving with X-Mod-Pagespeed intact while every
 # Apache child logged, once, that it could not open the optimizer daemon's
 # cache volume -- and in-place optimization stayed off for the life of the
@@ -980,7 +981,8 @@ check "exactly one cache volume file (no split cache)" "1" "$(printf '%s\n' "$vo
 for v in $volumes; do
   check "volume $(basename "$v") mode" "660" "$(in_ctr "stat -c %a $v" || true)"
 done
-# Group membership is only real inside the serving children (the silent-degrade log
+# Group membership is only real inside the serving children (the
+# silent-degrade log
 # line came from there, not from the parent).
 pagespeed_gid="$(in_ctr "getent group pagespeed | cut -d: -f3" || true)"
 child_groups="$(in_ctr "p=\$(pgrep -u ${WEB_USER} -x ${WEB_PROC} | head -1); [ -n \"\$p\" ] && grep -E '^Groups:' /proc/\$p/status" || true)"
@@ -1027,7 +1029,7 @@ step "in-place optimization through the daemon"
 ipro_proven=0
 if [[ -n "$api_ok" ]]; then
   # notifications.received counts the module telling the daemon "a new
-  # original is in the cache" -- the arm silently disabled.
+  # original is in the cache" -- the arm the silent-degrade class disabled.
   NOTIF_CMD="curl -s -o /dev/null '${BASE_URL}/index.html'; curl -s -o /dev/null '${BASE_URL}/${IMAGE_AFTER}'; curl -s --unix-socket ${DAEMON_RUN}/api.sock http://localhost/v1/stats | python3 -c 'import json,sys; print(json.load(sys.stdin)[\"notifications\"][\"received\"])'"
   if notif="$(fetch_until '-ge 1' 90 "$NOTIF_CMD")"; then
     pass "daemon notification counter moved: notifications.received=${notif}"
@@ -1047,7 +1049,7 @@ else
   fail "post-upgrade in-place optimization: ${IMAGE_AFTER} still ${size:-?} bytes after 150s (origin ${ORIGIN_IMAGE_BYTES})"
 fi
 note "for reference, ${IMAGE_NAME} (already in the 1.15 cache) is served at $(in_ctr "$SIZE_CMD" || echo '?') bytes"
-[[ "$ipro_proven" -eq 1 ]] || fail "no proof of in-place optimization after the upgrade"
+[[ "$ipro_proven" -eq 1 ]] || fail "no proof of in-place optimization after the upgrade (this is the silent-degrade class)"
 
 # Diagnostics for the record, whatever the outcome.
 in_ctr "journalctl -u ${DAEMON_UNIT} --no-pager -n 40" > "$WORK/logs/daemon-journal.log" 2>&1 || true

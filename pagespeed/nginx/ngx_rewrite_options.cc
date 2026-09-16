@@ -314,7 +314,7 @@ void NgxRewriteOptions::AddProperties() {
   NgxRewriteOptions dummy_config(nullptr);
   dummy_config.set_default_x_header_value(kModPagespeedVersion);
   // Zero-copy serving is opt-in on every port, nginx included: the r18
-  // default-on never actually engaged(the defect -- the port-neutral
+  // default-on never actually engaged (the port-neutral
   // CycloneZeroCopy default meant no value was ever mapped), so making it
   // genuinely-on now would jump from zero to full fleet engagement in one
   // release, alongside the r19 cache-format migration.  Enable with

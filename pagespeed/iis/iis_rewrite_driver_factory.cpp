@@ -135,7 +135,7 @@ bool IsPathInPrefixListImpl(const GoogleString& path,
 // Prefix scope guardrail for the cache tree. See
 // IsPathInPrefixListImpl above for the canonicalize+compare shape.
 //
-// thin wrapper IisRewriteDriverFactory::IsPathInAutoCreatePrefix
+// The thin wrapper IisRewriteDriverFactory::IsPathInAutoCreatePrefix
 // exposes this through the cross-port RewriteDriverFactory virtual so
 // IisProcessContext::GetServerContext can branch on prefix membership
 // without string-matching the EnsureDirectoryWritable error message.
@@ -148,12 +148,13 @@ bool IsPathInAutoCreatePrefixImpl(const GoogleString& path) {
 		sizeof(kCachePrefixes) / sizeof(kCachePrefixes[0]));
 }
 
-// prefix scope guardrail for
+// Prefix scope guardrail for
 // the logs tree. Same shape as IsPathInAutoCreatePrefixImpl above but
 // with the logs-tree prefixes. Out-of-prefix LogDir values cause the
 // caller in IisProcessContext::GetServerContext to skip auto-create
-// entirely (no mkdir, no diagnostic page) — preserving legacy
-// behaviour for operator-customized LogDir locations.
+// entirely (no mkdir, no diagnostic page) — preserving the behaviour
+// from before LogDir auto-create existed for operator-customized LogDir
+// locations.
 bool IsLogDirInAutoCreatePrefixImpl(const GoogleString& path) {
 	static const wchar_t* kLogPrefixes[] = {
 		L"C:\\ProgramData\\We-Amp\\PageSpeed\\logs\\",
@@ -298,13 +299,13 @@ private:
 		return IsPathInAutoCreatePrefixImpl(path);
 	}
 
-	// the referenced issue IIS prefix-scope predicate
+	// IIS prefix-scope predicate
 	// (logs). Parallel to IsPathInAutoCreatePrefix but matches the
 	// logs-tree prefixes. Caller in iis_process_context.cpp gates on
 	// this BEFORE delegating to EnsureDirectoryWritable, so the
 	// out-of-prefix case stays silent (no mkdir, no diagnostic page) —
-	// legacy LogDir behaviour preserved for operator-customized
-	// LogDir locations.
+	// the pre-auto-create LogDir behaviour is preserved for
+	// operator-customized LogDir locations.
 	bool IisRewriteDriverFactory::IsLogDirInAutoCreatePrefix(
 		const GoogleString& path) {
 		return IsLogDirInAutoCreatePrefixImpl(path);
@@ -318,7 +319,7 @@ private:
 			FILE_GENERIC_EXECUTE | DELETE;
 	}
 
-	// the referenced issue LogDir ACL mask: RX+W
+	// LogDir ACL mask: RX+W
 	// (no DELETE), mirroring Product.wxs GrantLogAcl. Workers append
 	// to logs but admin owns rotation, so DELETE is intentionally
 	// withheld — matches the WiX-side narrower grant.
@@ -331,8 +332,9 @@ private:
 	// hook. See header for sequence overview.
 	// Caller (IisProcessContext::GetServerContext) is expected to gate
 	// on IsPathInAutoCreatePrefix() / IsLogDirInAutoCreatePrefix() FIRST
-	// and skip this hook for out-of-prefix paths — removed
-	// the prior in-hook prefix re-check / string-matched dispatch.
+	// and skip this hook for out-of-prefix paths — the prior in-hook
+	// prefix re-check / string-matched dispatch was removed when the
+	// cross-port predicate landed.
 	// Failure modes that still surface here (return false + populated
 	// |error_message|):
 	//   - empty path                              (caller bug)
@@ -342,8 +344,8 @@ private:
 	//     fail                                     EDR blocking DACL write)
 	// |acl_mask|: granular access mask applied to the worker SID on the
 	// conditional ACL leg (step f). Value 0 means "use the cache
-	// default" (Modify), matching legacy cache callers. The LogDir
-	// caller passes LogDirAclMask() = RX+W (no DELETE),
+	// default" (Modify), matching the original cache-only callers. The
+	// LogDir caller passes LogDirAclMask() = RX+W (no DELETE),
 	// mirroring Product.wxs GrantLogAcl.
 	bool IisRewriteDriverFactory::EnsureDirectoryWritable(
 		const GoogleString& path, GoogleString* error_message,
@@ -359,7 +361,7 @@ private:
 
 		// Resolve |acl_mask|=0 (the sentinel-default for "use this
 		// implementation's default") to the cache-path Modify mask —
-		// preserves the legacy single-caller behaviour without
+		// preserves the original single-caller behaviour without
 		// requiring the cache call site to be touched. The LogDir
 		// caller passes LogDirAclMask() (RX+W, no DELETE) explicitly.
 		const DWORD effective_acl_mask = (acl_mask != 0)
@@ -489,8 +491,8 @@ private:
 		// straightforward and avoids any signature ambiguity.
 		// Mask is parameterized: |effective_acl_mask| resolves to
 		// CachePathAclMask() (Modify = RX+W+DELETE) for cache callers,
-		// or LogDirAclMask() (RX+W, no DELETE) for the LogDir caller
-		// per the referenced issue. Either way, no WRITE_DAC / WRITE_OWNER,
+		// or LogDirAclMask() (RX+W, no DELETE) for the LogDir caller.
+		// Either way, no WRITE_DAC / WRITE_OWNER,
 		// so the worker can never re-ACL the tree.
 		EXPLICIT_ACCESS_W ea = {0};
 		ea.grfAccessPermissions = effective_acl_mask;

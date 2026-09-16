@@ -2,7 +2,7 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 //
 // Kept in sync manually with pagespeed-optimizer src/crypto/webbotauth/
-// signature_base.h (this change upstreams the optimizer line: RFC 9421 section 2.1
+// signature_base.h (this change upstreams the optimizer's RFC 9421 section 2.1
 // HTTP field components -- lowercase field names, e.g. "signature-agent" --
 // in addition to the three derived components; the Web Bot Auth architecture
 // draft covers ("@authority" "signature-agent"), which the old derived-only

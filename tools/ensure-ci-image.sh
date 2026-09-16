@@ -80,7 +80,7 @@ require_docker_daemon() {
   # Poll before declaring it down. A single probe turns a transient blip (host
   # resuming, a daemon restart, a socket re-bind) into a hard failure -- the
   # recurring "Docker preflight" flake that a re-run then turns green. Same
-  # 5x/3s shape as the 2.0 optimizer line tools/ci/docker-preflight.sh (its), which hit
+  # 5x/3s shape as the optimizer's tools/ci/docker-preflight.sh, which hit
   # this class first; unlike its bare `docker info`, each probe here is bounded,
   # so a HUNG daemon still cannot wedge the job.
   for attempt in 1 2 3 4 5; do
@@ -146,7 +146,7 @@ prepull_base_images() {
   return "$rc"
 }
 
-# Some self-hosted runners (notably headless macOS) have a docker `credsStore`
+# Some CI runners (notably headless macOS) have a docker `credsStore`
 # (e.g. "desktop" / "osxkeychain") whose credential helper HANGS when invoked
 # without an interactive session -- so even an ANONYMOUS pull of a PUBLIC base
 # image stalls until the timeout kills it:

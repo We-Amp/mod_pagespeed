@@ -85,7 +85,8 @@ SystemRequestContext* NgxServerContext::NewRequestContext(
       str_to_string_piece(local_ip));
 
   // Record the transport scheme of the incoming connection so loopback
-  // fetches speak the right protocol to local_port (defect B).
+  // fetches speak the right protocol to local_port (the X-Forwarded-Proto
+  // scheme correction).
   // Same detection as ngx_http_variable_scheme / ps_is_https.
 #if (NGX_HTTP_SSL)
   ctx->set_local_scheme(r->connection->ssl != nullptr ? "https" : "http");

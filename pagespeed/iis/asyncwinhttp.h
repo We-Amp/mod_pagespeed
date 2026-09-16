@@ -80,7 +80,7 @@ class WinHTTP
 	DWORD tempbufSize;
 	WinHTTPEvents *eventhandler;
 	bool allow_self_signed_;
-	// loopback pinning state (see LoopbackConnectHost / StartRequest):
+	// Loopback pinning state (see LoopbackConnectHost / StartRequest):
 	// a pinned first attempt that fails before any response data is restarted
 	// once against the other loopback family from OnHandleClosing.
 	std::string url_;			// as passed to GetUrl; re-cracked per attempt
@@ -89,7 +89,7 @@ class WinHTTP
 	bool retry_scheduled_;		// failed pinned attempt: restart when the session closes
 	bool retry_attempted_;		// the fallback attempt is running (or finished)
 	bool response_data_seen_;	// response data reached this attempt's handler
-	// diagnostics: per-attempt trail (connect family, failure point,
+	// Loopback-fetch diagnostics: per-attempt trail (connect family, failure point,
 	// real WinHTTP error codes). Appended only on the request/callback path,
 	// read by the owner after completion; surfaces in the failure warning so
 	// "WinHTTP status=2" is never the only evidence again.
@@ -100,7 +100,7 @@ public:
 	void SetEventHandler(WinHTTPEvents *eventhandler) {this->eventhandler=eventhandler;}
 	// Relax TLS cert validation for https requests (FetchHttps allow_self_signed).
 	void SetAllowSelfSigned(bool v) { allow_self_signed_ = v; }
-	// the connect address handed to WinHttpConnect for `host`.
+	// The connect address handed to WinHttpConnect for `host`.
 	// "localhost" (case-insensitive) pins to 127.0.0.1 and retries the IPv6
 	// loopback; an explicit ::1/[::1] target retries 127.0.0.1. The IPv6
 	// loopback is always returned bracketed ("[::1]") because WinHttpConnect
@@ -142,7 +142,7 @@ public:
 protected:
 	void SetError(DWORD result,DWORD error);
 	void EventHandlerCompleted();
-	// one connection attempt for url_/host_ (factored out of GetUrl
+	// One connection attempt for url_/host_ (factored out of GetUrl
 	// so OnHandleClosing can restart the request for the loopback fallback).
 	bool StartRequest();
 	// True while a failed pinned attempt may still retry the other family.

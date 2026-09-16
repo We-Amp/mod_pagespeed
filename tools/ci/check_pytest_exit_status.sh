@@ -243,10 +243,9 @@ def main():
             file=sys.stderr,
         )
         print(
-            "       running one as its main reports PASS on a red suite",
+            "       running one as its main reports PASS on a red suite:",
             file=sys.stderr,
         )
-        print("      :", file=sys.stderr)
         for path, lineno in dropped:
             print(f"  - {path}:{lineno}", file=sys.stderr)
         print("", file=sys.stderr)
@@ -294,10 +293,10 @@ def main():
             file=sys.stderr,
         )
         print(
-            "       main they exit 0 having run zero cases -- the defect",
+            "       main they exit 0 having run zero cases -- the",
             file=sys.stderr,
         )
-        print("       defect reintroduced:", file=sys.stderr)
+        print("       vacuous-green defect reintroduced:", file=sys.stderr)
         for path in vacuous:
             print(f"  - {path}", file=sys.stderr)
         print("", file=sys.stderr)

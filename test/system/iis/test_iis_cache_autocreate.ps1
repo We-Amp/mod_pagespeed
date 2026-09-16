@@ -4,7 +4,8 @@
 # test_iis_cache_autocreate.ps1 - Pins the cache auto-initialization contract
 # for the IIS module under the CYCLONE cache (mod_pagespeed 1.15 / v1.15.0+).
 #
-# Live-VM verified 2026-06-22 on the Windows Server 2016 IIS base image / v1.15.0:
+# Live-VM verified 2026-06-22 on the Windows Server 2016 IIS base image /
+# v1.15.0:
 # the original fixture asserted the OLD per-site FILE-cache layout
 # (<FileCachePath>\<siteid>.ROOT subdirectories + per-subdir ACLs). v1.15.0 uses
 # the CYCLONE cache - a single Cyclone store under FileCachePath, with NO
@@ -60,7 +61,7 @@ param(
     [string]$CacheRoot = "C:\ProgramData\We-Amp\PageSpeed\cache",
     # Bogus FileCachePath for the negative path: explicit, OUT-OF-prefix,
     # non-existent -> the module leaves it missing and surfaces cache-path-missing.
-    [string]$OutOfPrefixPath = "C:\nonexistent-pagespeed-autocreate-182\cache",
+    [string]$OutOfPrefixPath = "C:\nonexistent-pagespeed-autocreate\cache",
     [int]$PollSeconds = 30
 )
 

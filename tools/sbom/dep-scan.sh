@@ -21,7 +21,7 @@
 #              on top (test/package-test/Dockerfile.*). Scanned from the local
 #              docker cache. This is the OS / apt / dnf / built-module layer
 #              grype matches reliably — the shipped C/C++ product surface, the
-#              1.1 analogue of the 2.0 optimizer line's modpagespeed/worker + /nginx runtime images
+#              1.1 analogue of the optimizer's modpagespeed/worker + /nginx runtime images
 #              We deliberately do NOT scan the pagespeed1.1-dev build
 #              image or the bare distro base images: a base/build image is false
 #              confidence — it misses the package layer the product actually adds.
@@ -46,7 +46,7 @@
 # NOT covered here (tracked in the README):
 #   - .NET (the aspnetcore middleware + WeAmpSite): its real surface is the
 #     built .nupkg / publish output, not a dev-time `dotnet restore` — deferred
-#     to a post-build scan, same as the 2.0 optimizer line.
+#     to a post-build scan, same as the optimizer.
 #   - cargo: 1.1 ships NO Rust — there is no Cargo.toml / Cargo.lock anywhere in
 #     the tree, so there is no cargo surface to scan (omitted, not stubbed).
 #   - transitive vendored C/C++ Bazel deps (Envoy / libwebp / optipng / …):
@@ -57,7 +57,7 @@
 #     it is committed, so it does not exist in a CI checkout and scanning it
 #     would report findings that no reviewer can act on from this repo. A
 #     `vendor/modpagespeed2/` tree may linger on a developer box as a leftover
-#     of the `@modpagespeed2` Bazel git_repository this build no longer uses;
+#     of the pagespeed-optimizer Bazel git_repository this build no longer uses;
 #     it is a stale copy of a DIFFERENT repo's source, not a 1.1 dependency,
 #     and its CVEs belong to pagespeed-optimizer. Do not add it here.
 #
@@ -263,7 +263,7 @@ run_scan() {
   l="$(jq '[.matches[]|select(.vulnerability.severity=="Low")]|length'      "$rpt")"
   note "${name} (${kind}): ${pkgs} pkgs — ${c}C/${h}H/${m}M/${l}L"
 
-  # Blocking mode. Two gate shapes by surface kind (mirrors the 2.0 optimizer line's dep-scan.sh):
+  # Blocking mode. Two gate shapes by surface kind (mirrors the optimizer's dep-scan.sh):
   #
   #   npm   : UNCONDITIONAL — any finding at/above --fail-on gates. A registry
   #     advisory with no published fix still forces a dep replacement or a

@@ -147,14 +147,14 @@ TEST_F(ToStringTest, CalcAdditionOperator) {
 // css_minify_test.cc, adapted to this parser's serialization semantics — the
 // two CSS implementations share test material, not code.
 TEST_F(ToStringTest, ModernCssCustomProperties) {
-  // the 2.0 optimizer line: CssCustomProperties. Colors are canonicalized even inside
+  // Optimizer suite: CssCustomProperties. Colors are canonicalized even inside
   // custom-property values.
   {
     Css::Parser parser("--my-color: #ff0");
     std::unique_ptr<Css::Declarations> decls(parser.ParseDeclarations());
     EXPECT_EQ("--my-color: #ffff00", decls->ToString());
   }
-  // the 2.0 optimizer line: CustomPropertyInternalSpaceRunsPreserved. DOCUMENTED DIFFERENCE:
+  // Optimizer suite: CustomPropertyInternalSpaceRunsPreserved. DOCUMENTED DIFFERENCE:
   // interior whitespace runs collapse to a single space here (values are
   // stored as a token vector, not as raw text).
   {
@@ -162,7 +162,7 @@ TEST_F(ToStringTest, ModernCssCustomProperties) {
     std::unique_ptr<Css::Declarations> decls(parser.ParseDeclarations());
     EXPECT_EQ("--msg: a b", decls->ToString());
   }
-  // the 2.0 optimizer line: CustomPropertyCommentBecomesTokenSeparator.
+  // Optimizer suite: CustomPropertyCommentBecomesTokenSeparator.
   {
     Css::Parser parser("--x: a/*c*/b");
     std::unique_ptr<Css::Declarations> decls(parser.ParseDeclarations());
@@ -175,8 +175,8 @@ TEST_F(ToStringTest, ModernCssCustomProperties) {
   TESTDECLARATIONS("width: calc(100% - 20px)");
 }
 
-// Companion to ParserTest.ModernCssFunctionalPseudoclassRoundTrip
-//: functional pseudo-class argument text round-trips
+// Companion to ParserTest.ModernCssFunctionalPseudoclassRoundTrip:
+// functional pseudo-class argument text round-trips
 // verbatim through parse + serialize.
 TEST_F(ToStringTest, ModernCssFunctionalPseudoclasses) {
   TESTSTYLESHEET(

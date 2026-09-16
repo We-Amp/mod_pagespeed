@@ -4,7 +4,7 @@
 
 # Licensed under the Apache License, Version 2.0.
 """
-Shutdown / restart stress harness for ModPageSpeed 1.x .
+Shutdown / restart stress harness for ModPageSpeed 1.x.
 
 Goal: keep worker threads mid-rewrite (InPlaceRewriteContext::Harvest /
 ResourceRevalidateDone) at the moment teardown fires, repeatedly, under
@@ -17,7 +17,7 @@ ACTIVELY rewriting rather than serving cache hits, while a chaos controller
 fires, on randomized intervals that overlap the load:
     - cache flush          (module-level: touch <cache>/cache.flush)
     - graceful reload      (per-server)
-    - full restart         (per-server — the shutdown-UAF teardown path)
+    - full restart         (per-server — the shutdown-race teardown path)
 
 Detection is built for an ASan-instrumented module: it tails the server error
 log for ASan 'ERROR'/'runtime error'/'Segmentation fault'/'signal', watches the

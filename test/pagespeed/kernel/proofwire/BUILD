@@ -9,7 +9,7 @@ licenses(["notice"])
 # across every job; the library itself stays at //pagespeed/kernel/proofwire.
 # pagespeed_cc_test injects //test:main + the shared gtest fixture, so no
 # gtest_main dep is needed here. @ed25519 is a direct dep for the
-# ed25519_create_keypair fixture (fully offline, no @modpagespeed2 fetch);
+# ed25519_create_keypair fixture (fully offline, no pagespeed-optimizer fetch);
 # //pagespeed/kernel/base is declared directly because the test #includes
 # base/string.h + string_util.h itself.
 pagespeed_cc_test(

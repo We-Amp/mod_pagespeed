@@ -1414,8 +1414,8 @@ TEST_F(CssFilterTest, ComplexCssTest) {
        ".ciuNoteBox .topLeft,\n"
        ".ciuNoteEditBox .topLeft, x:-moz-any-link {font-size:0}"},
 
-      // Parameters for pseudoclass. Since the functional
-      // pseudo-class arguments parse (opaque pass-through), so these
+      // Parameters for pseudoclass. Functional
+      // pseudo-class arguments now parse (opaque pass-through), so these
       // selectors are no longer preserved byte-exact as unparsed-selectors
       // regions: the arguments are retained verbatim, but the selector-list
       // joins now minify (", "/",\n" -> ",").

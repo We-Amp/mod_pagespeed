@@ -15,8 +15,8 @@
         stop twice over: `-e 1` catches first-chance EXCEPTIONS but not
         breakpoints (that needs `-b`), and `-w` attaches to the FIRST w3wp
         instance only, so under app-pool recycle churn nearly every crashing
-        worker is a later, unmonitored instance. The defect measured exactly
-        that on this lane: 8 w3wp faults, zero dumps captured.
+        worker is a later, unmonitored instance. Measured on this lane:
+        8 w3wp faults, zero dumps captured.
 
       * WER LocalDumps is consulted by WER per-crash, out of the registry, so
         EVERY w3wp instance is covered with no attach and no race. This is the
@@ -39,7 +39,8 @@
     INSTEAD of a ReportArchive entry, so leaving the key armed would blind the
     archive-based probe of every other job on the box.
 
-    COEXISTENCE. The original arming assumed "dedicated CI runners; nothing else configures
+    COEXISTENCE. The original arming assumed "dedicated CI runners; nothing
+    else configures
     w3wp LocalDumps on them". Once both the AppVerif lane and the ASan rig arm
     this key, that assumption is false, so both must tolerate the other:
       * Arming is idempotent (Set-ItemProperty over an existing key).

@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2024-2026 We-Amp B.V.
 
-# Provision the HTTP/3 test toolchain for the nightly protocol-matrix run
-#: a QUIC-capable TLS library, an HTTP/3 curl, and an nginx
+# Provision the HTTP/3 test toolchain for the nightly protocol-matrix run:
+# a QUIC-capable TLS library, an HTTP/3 curl, and an nginx
 # binary built --with-http_v3_module from the SAME source tree the module is
 # compiled against (module signatures are version-strict).
 #

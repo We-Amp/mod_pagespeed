@@ -353,7 +353,8 @@ bool ExpectedToBeUnnameable(RewriteOptions::Filter filter) {
 // configuration name in rewrite_filter_names.gperf, and that name must map back
 // to the same filter.  Without this, a filter can ship fully implemented and
 // still be unreachable from any configuration -- which is exactly how the AVIF
-// filters shipped.  The DCHECK in InitFilterIdToEnumArray()
+// filters shipped unreachable from any configuration.  The DCHECK in
+// InitFilterIdToEnumArray()
 // validates the enum/id table but says nothing about nameability.
 TEST_F(RewriteOptionsTest, AllFiltersAreNameable) {
   for (RewriteOptions::Filter f = RewriteOptions::kFirstFilter;
@@ -3640,7 +3641,7 @@ TEST_F(RewriteOptionsTest, OptionsToStringDoesNotRecursivelyAcquireSharedLock) {
 // writing was the upstream-PageSpeed lock-discipline defect previously
 // annotated as SHARED_LOCKS_REQUIRED; it races concurrent writers on
 // `signature_` even when the platform-specific verifier instrumentation
-// doesn't directly flag it (see the deferred peer-defect list).
+// doesn't directly flag it.
 namespace {
 
 class ModeTrackingRWLock : public ThreadSystem::RWLock {
@@ -3717,8 +3718,7 @@ TEST_F(RewriteOptionsTest, ComputeSignatureAcquiresLockExclusive) {
   // ComputeSignature() writes `signature_` (via ComputeSignatureLockHeld()).
   // Pre-fix it acquired cache_purge_mutex_ as ScopedReader (shared), which
   // races writers on `signature_` under multi-threaded use — the upstream-
-  // PageSpeed lock-discipline defect flagged in the deferred peer
-  // list.
+  // PageSpeed lock-discipline defect this guard exists to keep out.
   ModeTrackingRWLock* lock = new ModeTrackingRWLock();
   options_.set_cache_invalidation_timestamp_mutex(lock);
 

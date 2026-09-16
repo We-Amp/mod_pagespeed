@@ -85,7 +85,7 @@ unpinned tool could fail it open.
 `vendor/` is `.gitignored` and **generated** by `tools/vendor-deps.sh` (a Bazel
 repo-cache plus a Cyclone checkout). Nothing in it is committed, so it does not
 exist in a CI checkout. A `vendor/modpagespeed2/` tree may linger on a developer
-box as a leftover of the `@modpagespeed2` Bazel `git_repository`
+box as a leftover of the pagespeed-optimizer Bazel `git_repository`
 (1.1 no longer consumes 2.0 that way). It is a stale
 copy of a *different repo's* source; its CVEs are pagespeed-optimizer's to fix and
 are not actionable from this repo. Do not add it to `NPM_LOCKFILES`.
@@ -115,10 +115,10 @@ Two workflows, mirroring pagespeed-optimizer:
 
 The scheduled dependency-scan lane — the **report-only** live-DB sweep. Runs the
 npm surface on every push/PR to `master` (fast) and the heavier image scan on
-the daily schedule + `workflow_dispatch`. Runs on a dedicated self-hosted
-Linux x64 runner, self-installs the pinned
+the daily schedule + `workflow_dispatch`. Runs on a dedicated
+Linux x64 CI runner, self-installs the pinned
 syft/grype (no third-party scanner action — same supply-chain-conservative
-choice as the 2.0 optimizer line source), writes the severity table to the Summary tab,
+choice as the optimizer's source), writes the severity table to the Summary tab,
 uploads SBOMs + grype reports, and files/closes a tracking issue. It **never**
 fails the build.
 

@@ -14,7 +14,7 @@
 
 """Assertions that FAIL with context where a skip would mask a regression.
 
-a skip should assert something about the *environment*, never
+A skip should assert something about the *environment*, never
 about the *result*. When a test cannot find the artifact the rewriter was
 supposed to produce, that absence is the failure -- and it should carry
 the response body so the failure is diagnosable from CI output alone.

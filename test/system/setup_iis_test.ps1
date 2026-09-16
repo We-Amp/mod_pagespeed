@@ -98,15 +98,17 @@ function Get-IISExpressProcess {
 
 function Reset-PageSpeedTestCache {
     # Purge any persistent PageSpeed file cache from prior workflow runs on
-    # the same self-hosted Windows runner. mod_pagespeed's rewrite cache is
+    # the same Windows CI runner. mod_pagespeed's rewrite cache is
     # keyed by input URL + content hash -- NOT by file mtime -- so a cached
     # rewrite from a previous job hits on the same fixture bytes and serves
     # back the prior job's embedded Last-Modified header, while origin
     # (?PageSpeed=off) honestly serves the freshly-stamped fixture mtime.
-    # That divergence is the stale Last-Modified defect the purge prevents. The IIS Express
+    # That divergence is the stale Last-Modified defect the purge prevents.
+    # The IIS Express
     # cache lives under $env:TEMP and is not guaranteed to be cleaned
     # between runs on persistent runners. Mirrors the symmetric purge in
-    # setup_iis_full.ps1 and the AppVerif-prep step of the Windows CI workflow.
+    # setup_iis_full.ps1 and the AppVerif-prep step of the Windows CI
+    # workflow.
     #
     # Best-effort but LOUD about partial failures: any locked-file / ACL
     # error gets surfaced via Write-Status Yellow so a future regression
@@ -134,7 +136,8 @@ function Reset-PageSpeedTestCache {
 function Initialize-TestEnvironment {
     Write-Status "Initializing test environment..."
 
-    # Purge stale PageSpeed file cache from prior runs (see Reset-PageSpeedTestCache for the rationale).
+    # Purge stale PageSpeed file cache from prior runs (see
+    # Reset-PageSpeedTestCache for the rationale).
     Reset-PageSpeedTestCache
 
     # Create directories
@@ -339,7 +342,7 @@ function Start-IISExpressServer {
         Write-Status "IIS Express is already running (PID: $($existing.Id))" "Yellow"
         # Even on this early-return path, we still need to purge the stale
         # cache: a long-lived iisexpress.exe across workflow runs is exactly
-        # the scenario that produces the defect Last-Modified
+        # the scenario that produces the stale Last-Modified
         # divergence. Initialize-TestEnvironment (which normally invokes
         # Reset-PageSpeedTestCache) does not run on this path, so invoke
         # the helper directly here.

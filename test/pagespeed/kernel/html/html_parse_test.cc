@@ -1934,7 +1934,7 @@ TEST_F(EventListManipulationTest, TestCoalesceReleasesData) {
 
   // Applying a filter coalesces node2_ into node1_, marking node2_ dead.
   // The merged-away node must release its Data buffer at that point
-  //, not hold it until end-of-parse.
+  // at merge time, not hold it until end-of-parse.
   CheckExpected("12");
   EXPECT_FALSE(node2_->live());
   EXPECT_FALSE(HtmlTestingPeer::LeafNodeHasData(node2_));

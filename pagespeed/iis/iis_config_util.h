@@ -56,7 +56,8 @@ inline std::vector<std::string> tokenize(const std::string& s,
 //
 // ONE documented precedence chain, shared by the factory (process/root
 // options + FileID watch), the request-time merge, and the engage gate, so
-// they can never diverge (the split-brain failure this replaced surfaced). Lowest
+// they can never diverge (the split-brain this replaced surfaced as
+// config drift between the three readers). Lowest
 // precedence first, effective winner last:
 //
 //   1. %ProgramData%\We-Amp\PageSpeed\pagespeed.config    machine-global base default

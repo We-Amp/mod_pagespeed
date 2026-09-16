@@ -86,7 +86,7 @@ build:linux --features=per_object_debug_info
 build:linux --action_env=BAZEL_LINKLIBS=-l%:libstdc++.a
 build:linux --action_env=BAZEL_LINKOPTS=-lm
 
-# --- Binary hardening ---------------------------------------
+# --- Binary hardening -----------------------------------------------------
 # Opt-in config applied to RELEASE/shipped builds (NOT sanitizer builds — see
 # the FORTIFY=0 override on :sanitizer). The shipped artifacts are SHARED
 # OBJECTS (libmod_pagespeed.so, ngx_pagespeed_module.so): already -fPIC
@@ -161,8 +161,8 @@ build:asan --config=sanitizer
 # ASAN install its signal handler, disable ours so the stacktrace will be printed by ASAN
 build:asan --define signal_trace=disabled
 build:asan --define ENVOY_CONFIG_ASAN=1
-# -fsanitize=undefined was dropped from these two lines to allow CI/ASAN to                # unique
-# pass, then re-added (UBSAN_OPTIONS below halts on any finding).                         # unique
+# -fsanitize=undefined was dropped from these two lines to allow CI/ASAN to    # unique
+# pass, then re-added (UBSAN_OPTIONS below halts on any finding).               # unique
 build:asan --copt -fsanitize=address --copt -fsanitize=undefined                            # unique
 build:asan --linkopt -fsanitize=address --linkopt -fsanitize=undefined                      # unique
 # vptr and function sanitizer are enabled in clang-asan if it is set up via bazel/setup_clang.sh.

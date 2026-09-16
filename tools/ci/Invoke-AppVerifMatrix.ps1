@@ -72,8 +72,8 @@ param(
     # PAGESPEED_TEST_FETCH_RETRIES. Opt-in (0 everywhere it is unset), loud
     # (every retry is logged), and cannot retry a non-converging rewrite into
     # passing -- see client.py's _read_fetch_until_retries. 1 here: pairs with
-    # the multiplier to carry a poll across the 300s fetch-failure window
-    #, matching what the CI workflow's iis-sys-tests lane already runs.
+    # the multiplier to carry a poll across the 300s fetch-failure window,
+    # matching what the iis-sys-tests CI lane already runs.
     [int]$FetchRetries = 1,
 
     # Print the plan and exit, without touching machine-global verifier state.
@@ -165,11 +165,11 @@ try {
 
             Disable-Verifier
 
-            # Quiesce the workers that hold the file cache BEFORE purging it
-            #. The previous iteration's teardown only INITIATED a
+            # Quiesce the workers that hold the file cache BEFORE purging it.
+            # The previous iteration's teardown only INITIATED a
             # graceful pool stop, so its w3wp can still be draining here with
             # the cache open (cyclone.dat is process-lifetime-held); the
-            # legacy purge ran straight into that window under
+            # earlier purge ran straight into that window under
             # -ErrorAction SilentlyContinue, i.e. an invisible partial no-op,
             # and the next iteration then served stale entries into
             # Last-Modified mismatches and cold-cache slow paths. Stop both
@@ -228,7 +228,7 @@ try {
             # and Restart-WebAppPool on a stopped pool throws InvalidOperation
             # ("You have to start stopped object before restarting it") -- a
             # terminating error that -ErrorAction SilentlyContinue does NOT
-            # swallow (a dispatched run died here). An idle started
+            # swallow (a dispatched CI run died here). An idle started
             # pool has no worker; any worker spawned on a later request reads
             # the armed IFEO and is verified. PageSpeedTestPool needs no such
             # handling: setup_iis_full.ps1 deletes, recreates and starts it

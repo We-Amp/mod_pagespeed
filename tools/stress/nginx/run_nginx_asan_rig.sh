@@ -33,7 +33,8 @@ fi
 # No-Host HTTP/1.0 probes: ps_determine_host's server-IP fallback only
 # runs when the request carries no Host header, and plain HTTP/1.0 is the one
 # client shape nginx accepts without one — the stress corpus never sends such a
-# request, which is how a dead-buffer read in that fallback stayed invisible to this rig. -H 'Host:' makes
+# request, which is how a dead-buffer read in that fallback stayed invisible
+# to this rig. -H 'Host:' makes
 # curl omit the header entirely. A crashed worker shows up here as a non-200
 # (empty reply) AND as an asan.* report for the sweep.
 no_host_probe() {

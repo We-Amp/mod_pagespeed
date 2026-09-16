@@ -479,7 +479,7 @@ namespace net_instaweb
 					"(no detail captured — check the Windows Application "
 					"event log and pagespeed LogDir)\n"), &handler);
 			} else {
-				// The rename: failed_init_path() supersedes
+				// Rename note: failed_init_path() supersedes
 				// failed_cache_path(). For cache-path failure kinds it
 				// still holds the cache path; for kLogDirCreateFailed
 				// it holds the LogDir path. The local var name stays
@@ -545,7 +545,7 @@ namespace net_instaweb
 						"...then recycle the application pool.\n"), &handler);
 					break;
 				case IisProcessContext::InitFailureKind::kLogDirCreateFailed: {
-					// the referenced issue. Parallel to
+					// Parallel to
 					// kCachePathCreateFailed above but for the LogDir
 					// path. The narrower icacls hint — (RX,W) instead
 					// of M — mirrors Product.wxs GrantLogAcl: workers

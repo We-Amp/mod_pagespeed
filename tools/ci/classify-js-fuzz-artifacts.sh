@@ -18,7 +18,7 @@
 #   classify-js-fuzz-artifacts.sh --self-test
 #
 # REPLAY_BIN is the harness's deterministic (non-libFuzzer) build. Unlike
-# the 2.0 optimizer line CSS harness, its file-replay path does NOT abort on an oracle
+# the optimizer's CSS harness, its file-replay path does NOT abort on an oracle
 # trip — it prints `idempotence trip: <file>` / `token-channel trip:
 # <file>` to stderr and exits 1 if any trip was seen (a sanitizer report
 # still aborts). Each artifact is replayed singly and bucketed by oracle
@@ -35,7 +35,8 @@
 #     and module goal (vm.SourceTextModule / .mjs --check). node --check
 #     itself is unusable: node v24's CJS --check path ESM-fallback returns
 #     rc=0 on input unparseable in BOTH goals whenever an import/export
-#     token breaks the CJS parse (the minifier-rewrite triage measured it: `export&\n&` passes
+#     token breaks the CJS parse (the minifier-rewrite triage measured it:
+#     `export&\n&` passes
 #     --check silently; that quirk misrouted an entire nightly
 #     needs-triage bucket).
 #
@@ -58,7 +59,8 @@
 #     sub-classifies). The decline-path contract on invalid input remains
 #     guarded by the idempotence oracle above, not weakened here.
 #   * token-channel trip on input node CAN parse       -> NEEDS TRIAGE,
-#     ALWAYS. This is the valid-input corruption class the lane exists for; nothing
+#     ALWAYS. This is the valid-input corruption class the lane exists for;
+#     nothing
 #     in the known-bucket path may swallow it. (If node itself is missing
 #     on the runner, js_valid fails open: everything channels to TRIAGE.)
 #   * replays clean                                    -> STALE (counted).
@@ -66,7 +68,8 @@
 # FINDINGS_MD is written in APPEND mode — the caller owns truncation (the
 # workflow truncates once at step start, then seeds its own entries, e.g.
 # replay-floor red / campaign failure, BEFORE invoking this script; those
-# entries must survive classification — the optimizer line re-review lesson). An
+# entries must survive classification — the CSS classifier's re-review
+# lesson). An
 # empty file afterward means nothing needs triage (the semantics
 # tools/sbom/post-findings-issue.sh keys on: empty -> auto-close the
 # tracking issue). Bucket counts go to stdout (the workflow tees them into
@@ -132,7 +135,8 @@ PYEOF
 # node --check itself is NOT a usable proxy: node v24's CJS --check path has
 # an ESM-detection fallback that returns rc=0 for input unparseable in both
 # goals whenever an import/export token breaks the CJS parse (the
-# minifier-rewrite triage measured it — `export&\n&` passes --check silently; execution, vm.Script and
+# minifier-rewrite triage measured it — `export&\n&` passes --check
+# silently; execution, vm.Script and
 # .mjs --check all reject).
 js_valid() {
   "$NODE_BIN" "$PARSE_CHECK" "$1" >/dev/null 2>&1
@@ -142,7 +146,8 @@ js_valid() {
 # separated ONLY by whitespace and/or comments whose concatenation is a
 # valid multi-char JS punctuator (the operator-glomming mechanism:
 # `= =`->`==`, `& =`->&=, `= >`->`=>`, `. 0`->`.0`, ...). Multiline- and
-# comment-aware (python): the minifier-rewrite triage measured the old line-based grep
+# comment-aware (python): the minifier-rewrite triage measured the old
+# line-based grep
 # at a ~3x undercount (217 vs 616 mechanism-exact) because [[:space:]]
 # never matches '\n' and comments between the pair chars were missed.
 # HEURISTIC sub-classification only — gating runs on the parseability axis,

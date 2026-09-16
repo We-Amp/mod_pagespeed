@@ -141,11 +141,12 @@ install -d -m 0750 %{buildroot}/var/log/pagespeed
 
 # 5. License text + attribution notices, as extracted from the upstream rpm
 # (which carries them under its own /usr/share/doc/mod-pagespeed/). An
-# Apache-2.0 distribution ships both next to the binaries; this package's
+# Apache-2.0 distribution ships all three next to the binaries; this package's
 # own docdir keeps them out of the upstream package's namespace.
 install -d -m 0755 %{buildroot}/usr/share/doc/%{name}
 install -m 0644 usr/share/doc/mod-pagespeed/LICENSE \
                 usr/share/doc/mod-pagespeed/NOTICE \
+                usr/share/doc/mod-pagespeed/THIRD-PARTY-NOTICES \
                 %{buildroot}/usr/share/doc/%{name}/
 
 %files
@@ -158,6 +159,7 @@ install -m 0644 usr/share/doc/mod-pagespeed/LICENSE \
 %dir /usr/share/doc/%{name}
 %license /usr/share/doc/%{name}/LICENSE
 %doc /usr/share/doc/%{name}/NOTICE
+%doc /usr/share/doc/%{name}/THIRD-PARTY-NOTICES
 
 %post
 # Trigger an EA4 Apache reload so the new module takes effect. Skipped if the

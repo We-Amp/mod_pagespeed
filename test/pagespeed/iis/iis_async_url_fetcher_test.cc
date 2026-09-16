@@ -122,7 +122,7 @@ TEST(IisAsyncUrlFetcherDeriveHostTest,
 }
 
 
-// the IIS native fetcher's WinHTTP client resolves "localhost"
+// The IIS native fetcher's WinHTTP client resolves "localhost"
 // through the OS resolver, which can prefer the IPv6 loopback while the
 // origin site only answers on IPv4. The async connect then fails, PSOL
 // remembers the fetch failure, and rewrites of local sub-resources never

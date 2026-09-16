@@ -30,7 +30,7 @@
 // scanner probe's Signature-Agent sf-string. --tag defaults to
 // "web-bot-auth" (the verifier only selects tagged signatures); pass --tag=
 // to omit it, or another value to mint non-web-bot-auth material for tests.
-// (Upstreamed from the optimizer line. the 2.0 optimizer line's --emit=keystore has no analog here: the
+// (Upstreamed from the optimizer; its --emit=keystore has no analog here: the
 // 1.15 harness pre-seeds keys via the JWKS file that --emit=jwks prints.)
 //
 // For the AgentPass A3 (RSL-CAP) enforcement smoke it can also mint a signed

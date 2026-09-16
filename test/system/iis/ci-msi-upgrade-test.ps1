@@ -37,7 +37,8 @@
 #   -OldMsiPath              Optional path to a synthetic-old MSI on the host.
 #                            When supplied, runs flow-b (warm upgrade) instead
 #                            of flow-a (clean install). Empty = flow-a.
-#   -VMName                  Hyper-V VM name of the Windows Server 2016 IIS base image (required; CI passes it explicitly)
+#   -VMName                  Hyper-V VM name of the Windows Server 2016 IIS
+#                            base image (required; CI passes it explicitly)
 #   -Snapshot                Checkpoint to restore (default: 02-iis-ready)
 #   -ReleaseTag              Expected release tag (e.g. v1.1.0-beta.7); defaults
 #                            to $env:RELEASE_TAG. Used for admin-SPA assertion.
@@ -74,6 +75,10 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+if ([string]::IsNullOrEmpty($VMName)) {
+    Write-Error "Pass -VMName <your Windows Server 2016 IIS base VM> (the checkpointed Hyper-V base image this script restores and drives)."
+}
 
 # --- Derive ExpectedVersionString from ReleaseTag if not supplied ---
 # The local checkout's VERSION file lives at HEAD of master (e.g.
@@ -184,7 +189,8 @@ if ($OldMsiPath) {
 # (Step 5b below) against the freshly-installed module to pin the auto-
 # create + diagnostic-page + config-fallback contracts on each release.
 #
-# Fixture gating status (live-VM verified 2026-06-22 on the Windows Server 2016 IIS base image):
+# Fixture gating status (live-VM verified 2026-06-22 on the Windows Server
+# 2016 IIS base image):
 #   - test_iis_cache_diagnostic.ps1: GATING. Fixed + VM-validated. It
 #     now edits the config the MODULE actually reads at request time
 #     (FindConfigFile(<site physical path>) = ...\wwwroot\pagespeed.config,
@@ -205,7 +211,8 @@ if ($OldMsiPath) {
 #   - test_iis_config_fallback.ps1: still NON-GATING. It tests the
 #     ProgramData canonical->legacy FACTORY fallback, but request-time options
 #     come from FindConfigFile(<wwwroot>) — entangled with the config-resolution
-#     duality; fix once that settles which config governs what.
+#     duality between the ProgramData base and the per-site override; re-gate
+#     once it is settled which config governs what.
 $portFixtures = @(
     'test_iis_cache_diagnostic.ps1',
     'test_iis_cache_autocreate.ps1',
@@ -505,8 +512,9 @@ $portFixtureScript = {
         Write-Host "::warning::port fixtures with non-zero exit (non-gating): $($failed -join ', ')"
     }
 }
-# These fixtures are GATING (fixed + VM-validated). config_fallback
-# stays non-gating pending the config-resolution duality work.
+# The cache-diagnostic and auto-create fixtures are GATING (fixed +
+# VM-validated). config_fallback
+# stays non-gating pending the config-resolution duality question.
 $gatingFixtures    = @(
     'test_iis_cache_diagnostic.ps1',
     'test_iis_cache_autocreate.ps1',

@@ -33,7 +33,9 @@ namespace net_instaweb
 		pRawValueLengthAcceptEncoding = 0;
 		// Transport scheme of the incoming connection — what a loopback fetch
 		// to local_port must speak. The request URL's scheme can differ when
-		// X-Forwarded-Proto is honored (defect B).
+		// X-Forwarded-Proto is honored (the loopback-fetch protocol defect:
+		// a forward-proxy deployment can present an https URL over a plain
+		// http connection).
 		GoogleString local_scheme =
 			(pContext->GetRequest()->GetRawHttpRequest()->pSslInfo != NULL) ? "https" : "http";
 		requestContext_ = new IisInnerRequestContext(is_resource, url, url_len, gurl,this, process_context, server_context, local_port, local_ip_address, local_scheme);

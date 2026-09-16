@@ -26,7 +26,8 @@ non-IIS servers.
 Coverage: the HTTPS *listener* (HTML served over TLS carries the PageSpeed
 header, static assets are served, the admin endpoint is reachable) and
 *resource rewriting* over TLS -- the module fetches sub-resources over the
-loopback HTTPS connection, enabled by the WINHTTP_FLAG_SECURE fix.
+loopback HTTPS connection, which the WinHTTP fetcher's WINHTTP_FLAG_SECURE
+handling makes possible.
 """
 
 import os
@@ -90,8 +91,8 @@ class TestIisHttps:
         Exercises the module's WinHTTP loopback sub-resource fetch over TLS
         (LoopbackRouteFetcher -> 127.0.0.1:8443, validated against the
         LocalMachine\\Root-trusted cert). Regression guard for the
-        WINHTTP_FLAG_SECURE fix: before it, the fetch went out as
-        cleartext and the resource was never combined.
+        fetcher's TLS flag: without WINHTTP_FLAG_SECURE the fetch went out
+        as cleartext and the resource was never combined.
         """
         url = f"{example_root}/combine_css.html?PageSpeedFilters=combine_css"
         response = https_client.fetch_until_contains(

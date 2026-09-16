@@ -135,7 +135,7 @@ void IisRewriteOptions::AddProperties() {
 		kAutoCreateCachePath, kProcessScopeStrict,
 		"Auto-create the per-site cache subdirectory if missing (on|off, default on).",
 		false);
-	// default-on auto-create of
+	// Default-on auto-create of
 	// the LogDir under either C:\ProgramData\We-Amp\PageSpeed\logs\ or
 	// C:\ProgramData\We-Amp\IISWebSpeed\logs\ (hardcoded prefix scope
 	// in the factory override). Operator opt-out via

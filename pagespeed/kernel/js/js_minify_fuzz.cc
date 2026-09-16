@@ -3,7 +3,7 @@
 //
 // Dual-oracle fuzz harness for the JS minifier (pagespeed/kernel/js/
 // js_minify.cc), mirroring the lib/html/html_fuzz.cc two-mode pattern and
-// the 2.0 optimizer line css_minify_fuzz.cc dual-oracle shape.  The minifier runs on
+// the optimizer's css_minify_fuzz.cc dual-oracle shape.  The minifier runs on
 // *untrusted* JavaScript; the sanitizer is the memory-safety backstop:
 //
 //     bazel build --config=macos-asan -c opt //pagespeed/kernel/js:js_minify_fuzz
@@ -19,7 +19,7 @@
 //                              `--dump_corpus=DIR` instead writes the
 //                              seed set as seed-NN files into DIR
 //                              (created if missing) and exits (libFuzzer
-//                              corpus seeding, the optimizer line precedent).
+//                              corpus seeding, the optimizer's precedent).
 //   * -DJS_MINIFY_LIBFUZZER -> exposes LLVMFuzzerTestOneInput for
 //                              coverage-guided discovery when linked
 //                              with -fsanitize=fuzzer; trips abort like
@@ -67,7 +67,7 @@
 // is pinned by the byte-for-byte error-token comparison.
 //
 // Invalid-input policy (v1): both oracles run on ALL input including
-// garbage and report trips as violations (the 2.0 optimizer line css v1 posture —
+// garbage and report trips as violations (the optimizer's css v1 posture —
 // red-line, classify later).  The embedded seed battery and the existing
 // corpus (tools/js-minify-corpus + testdata) are valid JavaScript plus
 // the documented decline-path shapes, which are contract-covered, so a
@@ -437,7 +437,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
 int main(int argc, char** argv) {
   // --dump_corpus=DIR: write the seed set as seed-NN files into DIR
   // (created if missing) and exit — lets CI seed a libFuzzer corpus from
-  // the embedded set without scraping C source (the optimizer line precedent).
+  // the embedded set without scraping C source (the optimizer's precedent).
   if (argc > 1) {
     const std::string_view arg1(argv[1]);
     constexpr std::string_view kDumpPrefix = "--dump_corpus=";

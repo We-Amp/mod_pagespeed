@@ -11,8 +11,8 @@ the **exact** nginx version they were built against (down to the patch;
 `--with-compat` does not relax this). The published packages are therefore built
 against each distribution's **stock** nginx. If you run a *custom* nginx —
 including the **nginx.org** repository's `nginx` (e.g. the 1.30.x stable line) —
-no published package matches it, and the module **cannot be built from source
-externally** because the PageSpeed module source is not public. Use your
+no published package matches it; build the module from the public source tree
+against your nginx instead (see `DEVELOPER.md`). The simplest path is your
 distribution's stock nginx.
 
 ## Install
