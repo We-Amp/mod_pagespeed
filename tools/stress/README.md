@@ -3,7 +3,7 @@
 Stress-tests the process **teardown** path of ModPageSpeed 1.x under sustained
 load, to surface use-after-free / crash bugs that only happen when a worker
 thread is mid-rewrite while the server is reloading/restarting. Built for
-a tracked `spdlog::logger::sink_it_` use-after-free on Apache shutdown) and its
+a tracked `spdlog::logger::sink_it_` use-after-free on Apache shutdown and its
 cousins, but it exercises any teardown-time hazard.
 
 It is **server-agnostic at the HTTP layer** — the same load + chaos + detection
@@ -22,7 +22,7 @@ as-is.
    engine is *actively rewriting* (`InPlaceRewriteContext::Harvest`) rather than
    serving cache hits — that is what keeps the teardown race live.
 2. **Chaos** on jittered intervals that overlap the load: cache flush, graceful
-   reload, full restart (the shutdown-UAF teardown path).
+   reload, full restart (the teardown path the shutdown UAF lived on).
 3. **Detection** (built for an **ASan** build): tails the server error log and
    watches the coredump dir, splitting evidence into two classes:
    - **Hard crashes** (FAIL): `AddressSanitizer`/`ThreadSanitizer` reports,
@@ -230,5 +230,5 @@ load + chaos + ASan/coredump detection + synthetic corpus generator +
 `--url-file` real-corpus replay (headless-Chrome collector + curl→docroot
 builder), Apache/nginx ready, IIS adapter present (commands via CLI). Exercised
 on Apache under ASan with both the synthetic corpus and a 99-page real corpus
-(118.8k req / 600s / 39 teardowns, zero hits) for the shutdown-UAF fix. Not yet wired into
+(118.8k req / 600s / 39 teardowns, zero hits) against the shutdown UAF. Not yet wired into
 CI.

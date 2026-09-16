@@ -32,7 +32,8 @@ nul
 *.log
 !.vscode/*.log
 
-# Local Docker Compose overrides
+# Local Docker Compose overrides: docker-compose.override.yml is gitignored,
+# for machine-local tweaks (extra published ports, resource limits).
 docker-compose.override.yml
 
 # Local Bazel overrides (machine-specific paths and performance tuning)

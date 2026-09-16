@@ -8,8 +8,8 @@ for AddressSanitizer reports and crash dumps.
 ASan DLL but runs **unit tests only** (`//test/pagespeed/iis/...`) — those never
 link `pagespeed/iis/dll_main.cc`, so the entire `DLL_PROCESS_DETACH` /
 process-lifecycle teardown path is a structural blind spot. Both the spdlog
-use-after-free on shutdown) and the `__asan_default_options` drive-letter
-crash-loop) lived in that path and were caught only by a **hand-run** rig on the
+use-after-free on shutdown and the `__asan_default_options` drive-letter
+crash-loop lived in that path and were caught only by a **hand-run** rig on the
 build host. These scripts promote that rig into version control so it
 can run as standing CI (the nightly IIS ASan lane), instead of
 living on one machine's `D:\` drive.
@@ -48,7 +48,8 @@ living on one machine's `D:\` drive.
   nightly. Full dumps are large; they stay on the runner for on-box cdb/windbg.
 - **Gate.** The harness fails on hits in its own tailed logs, but it only sees
   HTTP responses (a dying pool surfaces as 503s, which it does not count as
-  crashes — it printed PASS over 8 `w3wp` faults in an early dry run). `sweep_*.ps1` is the
+  crashes — it printed PASS over 8 `w3wp` faults in an early dry run).
+  `sweep_*.ps1` is the
   authoritative gate: it fails on any `C:\pagespeed_asan*` report, new crash
   dump, or `w3wp` Application-Error / WER event. Its evidence window starts at
   the `rig.setup.started` marker written by setup (single timezone, whole rig
@@ -76,5 +77,6 @@ tools\stress\iis\sweep_iis_asan_rig.ps1  # exit code = pass/fail
 tools\stress\iis\cleanup_iis_asan_rig.ps1
 ```
 
-A deliberately reintroduced drive-letter-class `dll_main.cc` bug should make `sweep`
+A deliberately reintroduced drive-letter-class `dll_main.cc` bug should make
+`sweep`
 exit non-zero — that is the blind-spot-closed check.

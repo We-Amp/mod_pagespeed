@@ -35,11 +35,3 @@ build/test workflow, start at the root [`CLAUDE.md`](../CLAUDE.md). Customer-fac
 | [operations-monitoring.md](operations-monitoring.md) | Operations and monitoring. |
 | [autocreate-directive-snippets.md](autocreate-directive-snippets.md) | AutoCreateCachePath / AutoCreateLogDir directive snippets. |
 
-## Plans and historical
-
-These are point-in-time planning and release documents — read them as history,
-not as current spec.
-
-- [plans/](plans/) — historical planning documents (Apache/APR, Envoy, IIS, nginx, WASM, zero-copy cache).
-- [PACKAGE_REPO_PLAN.md](PACKAGE_REPO_PLAN.md), [release-build-parallelization.md](release-build-parallelization.md), [release-plan-1.1.0-beta.1.md](release-plan-1.1.0-beta.1.md), [WINDOWS_SHARED_MEM_ALIGNMENT_PLAN.md](WINDOWS_SHARED_MEM_ALIGNMENT_PLAN.md) — release and feature plans.
-- [ROADMAP.md](ROADMAP.md), [DECISIONS.md](DECISIONS.md), [BUSINESS_MODEL.md](BUSINESS_MODEL.md), [WASM_ARCHITECTURE.md](WASM_ARCHITECTURE.md), [WASM_HTML_PARSER.md](WASM_HTML_PARSER.md) — **HISTORICAL.** An aspirational "PageSpeed WASM" exploration that was never implemented in this repo. The paths they reference (`pagespeed/wasm/`, `pagespeed/service/`, `integrations/wordpress/`) do not exist. Each carries a banner at the top.

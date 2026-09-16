@@ -60,8 +60,7 @@ docker run --rm --platform linux/amd64 \
     # published as of 2026-05).
     #
     # Workaround: inject the EA4 macro block into /etc/rpm/macros.apache2 and
-    # build with `--nodeps`. This matches what release.yml's EA4 build cell
-    # does in CI.
+    # build with `--nodeps`. This matches what the EA4 build cell does in CI.
     cat > /etc/rpm/macros.apache2 <<MACROS
 %apache_confdir       /etc/apache2/conf.d
 %apache_modulesdir    /usr/lib64/apache2/modules
@@ -123,11 +122,10 @@ handler chain), so the operator must `dnf remove ea-apache24-mod_ruid2` or
 unselect mod_ruid2 in the EA4 profile before installing mod_pagespeed.
 This is intentional — pick one, not both.
 
-## Licensing for hosts
+## Licensing
 
-Licensing is per site (registrable domain), not per server or instance.
-A hosting provider running many customer sites on one host should use the
-Hoster tier: a per-host monthly plan covering all sites on that host; see the public licensing terms.
-Hoster setup is manual; contact https://modpagespeed.com/contact/.
-The full ladder is at https://modpagespeed.com/pricing/ and license terms
-at https://we-amp.com/licensing/.
+mod_pagespeed is open source under the Apache License 2.0 (see the
+repository's `LICENSE`). There is no per-site, per-server or per-host fee,
+and no separate commercial tier: hosting providers may install and run it
+for every customer site on a host under the same Apache-2.0 terms as any
+other user.

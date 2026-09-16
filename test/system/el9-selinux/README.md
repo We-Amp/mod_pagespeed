@@ -1,17 +1,20 @@
 # Enforcing-SELinux EL9 upgrade rehearsal (Hyper-V VM)
 
 The 1.15 → 1.16 in-place upgrade rehearsal, run on a **real, SELinux-enforcing
-AlmaLinux 9 VM** instead of a container. A tracked gap in the container rehearsal
-motivates this: a booted-systemd container shares the host kernel and can never be
-enforcing, so `install/upgrade_test/run_upgrade_test.sh` proves the upgrade
-path but not what the stock targeted policy does when `httpd_t` meets the
-optimizer daemon's memory-mapped cache volume and unix notify socket. The
-daemon's own policy module (`deploy/selinux/pagespeed-optimizer.{te,fc}` in
-the daemon repo) is a draft that no package installs. One enforcing-EL9 VM run of this rehearsal is a GA gate for 2.1: *no AVC denials on `httpd_t` against the cache volume or the notify
-socket, and in-place optimization demonstrably on, with SELinux enforcing.*
+AlmaLinux 9 VM** instead of a container. A tracked gap in the container
+rehearsal motivates this: a booted-systemd container shares the host kernel
+and can never be enforcing, so `install/upgrade_test/run_upgrade_test.sh`
+proves the upgrade path but not what the stock targeted policy does when
+`httpd_t` meets the optimizer daemon's memory-mapped cache volume and unix
+notify socket. The daemon's own policy module
+(`deploy/selinux/pagespeed-optimizer.{te,fc}` in the daemon repo) is a draft
+that no package installs. One enforcing-EL9 VM run of this rehearsal is a GA
+gate for 2.1: *no AVC denials on `httpd_t` against the cache volume or the
+notify socket, and in-place optimization demonstrably on, with SELinux
+enforcing.*
 
-The VM runs under Hyper-V on the build host, following the same pattern as the IIS rig
-(`test/system/iis/ci-msi-upgrade-test.ps1`) and the cPanel rig
+The VM runs under Hyper-V on the build host, following the same pattern as
+the IIS rig (`test/system/iis/ci-msi-upgrade-test.ps1`) and the cPanel rig
 (`test/system/cpanel/`), sitting next to their VMs.
 
 ## Architecture
@@ -150,8 +153,8 @@ directory and pass `-PackagesDir`. This is the same source the container
 rehearsal's `--packages-dir` takes; with it the packaged daemon
 drop-in `pagespeed_daemon.conf` is asserted **strictly** (owned by the
 package, `%config`, read after the module loader in `httpd -t -D
-DUMP_INCLUDES`), exactly as the container rehearsal does it. For an older pair the driver
-writes the two directives by hand and says so.
+DUMP_INCLUDES`), exactly as the container rehearsal does it. For an older
+pair the driver writes the two directives by hand and says so.
 
 ### The guest driver on its own
 
@@ -178,7 +181,8 @@ also works off-host). Phases, mirroring the container rehearsal:
    it runs as `pagespeed_t`); management API socket on; web-server restart.
 4. assertions — daemon active as `pagespeed`, web-server child carries the
    `pagespeed` gid **and still runs as `httpd_t`**, conffile untouched,
-   module loaded, version header, zero silent-degrade log signatures, the daemon's
+   module loaded, version header, zero daemon-startup log signatures, the
+   daemon's
    `notifications.received` counter moves (the module reaches the socket),
    a URL 1.15 never saw is served smaller (in-place optimization), SELinux
    still enforcing, and **zero AVC/USER_AVC denials since the upgrade began
@@ -219,7 +223,8 @@ post-policy B)`. `F = 0` is PASS.
   `var_t` / `var_run_t` labels, and the stock policy gives `httpd_t` none of
   `{ write map }` on `var_t` files, `write` on a `var_run_t` sock_file, or
   `connectto` to an `unconfined_service_t` stream socket. The expected
-  report is the silent-degrade symptom *with a misleading group hint* in the error
+  report is the known daemon-startup failure, *with a misleading group hint*
+  in the error
   log (DAC is fine; the AVC is the cause), `httpd` denials > 0, notification
   counter unchanged, image not optimized. That FAIL is the gate doing its
   job: it turns "untested" into a measured list of denials, and
@@ -284,7 +289,7 @@ best an interim note for the release notes ("on enforcing EL9, in-place
 optimization through the daemon needs the policy module; until it ships,
 …") — not a GA-quality answer.
 
-The rehearsal produces the evidence for the ruling; it does not make it.
+The rehearsal produces the evidence for the GA gate; it does not decide it.
 Attach `guest-run.log`, `avc-since-upgrade.txt` and
 `audit2allow-since-upgrade.te` from the artifacts to the gate record.
 

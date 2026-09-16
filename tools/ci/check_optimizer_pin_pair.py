@@ -17,8 +17,8 @@ A format-skewed pair therefore ships an Apache that does not come up at all, on
 every daemon-adapter deployment, until someone changes the pin. Nothing else in
 the release lane looks at this.
 
-So: read the cache-library commit this module builds, read the one the pinned
-daemon commit builds, and refuse if they differ. Usage:
+So: read the cache-library commit this module builds, read the one the
+pinned optimizer commit builds, and refuse if they differ. Usage:
 
     tools/ci/check_optimizer_pin_pair.py <pin.json> <optimizer MODULE.bazel> \\
         [bazel/repositories.bzl]
@@ -49,33 +49,35 @@ def module_cyclone_commit(repositories_bzl_text):
     return m.group(1)
 
 
-def optimizer_cyclone_commit(module_bazel_text, mps2_commit):
+def optimizer_cyclone_commit(module_bazel_text, optimizer_commit):
     m = OPTIMIZER_RE.search(module_bazel_text)
     if not m:
         raise PinError(
             "could not find the cyclone pin in the optimizer's MODULE.bazel at "
-            "%s -- the daemon repo moved its pin somewhere this gate cannot "
-            "read. Fix the gate rather than skipping it." % mps2_commit)
+            "%s -- the optimizer repo moved its pin somewhere this gate cannot "
+            "read. Fix the gate rather than skipping it." % optimizer_commit)
     return m.group(1)
 
 
 def check(pin, repositories_bzl_text, module_bazel_text):
     tag = pin.get("tag", "")
-    mps2_commit = pin.get("mps2_commit", "")
-    if not mps2_commit or mps2_commit.startswith("PLACEHOLDER"):
+    optimizer_commit = pin.get("optimizer_commit", "")
+    if not optimizer_commit or optimizer_commit.startswith("PLACEHOLDER"):
         raise PinError(
-            "optimizer-pin.json has no mps2_commit (tag %r) -- record the "
-            "daemon commit the pinned release was built from." % tag)
+            "optimizer-pin.json has no optimizer_commit (tag %r) -- record "
+            "the optimizer-repo commit the pinned release was built from."
+            % tag)
     ours = module_cyclone_commit(repositories_bzl_text)
-    theirs = optimizer_cyclone_commit(module_bazel_text, mps2_commit)
+    theirs = optimizer_cyclone_commit(module_bazel_text, optimizer_commit)
     if ours != theirs:
         raise PinError(
             "cache-library pin mismatch: this module builds %s but the pinned "
-            "optimizer release %s (daemon commit %s) builds %s. The pair must "
-            "link the SAME commit -- a format skew ships a web server that "
-            "refuses to start. Cut an optimizer release from a daemon commit "
-            "at this cache-library pin, then re-record "
-            "install/debian/optimizer-pin.json." % (ours, tag, mps2_commit, theirs))
+            "optimizer release %s (optimizer commit %s) builds %s. The pair "
+            "must link the SAME commit -- a format skew ships a web server "
+            "that refuses to start. Cut an optimizer release from an "
+            "optimizer commit at this cache-library pin, then re-record "
+            "install/debian/optimizer-pin.json."
+            % (ours, tag, optimizer_commit, theirs))
     return ours
 
 
@@ -112,23 +114,23 @@ def self_test():
         cases.append((name, ok == got, why))
 
     case("matching pair passes", True, lambda: check(
-        {"tag": "optimizer-v1.16.0", "mps2_commit": "deadbeef"},
+        {"tag": "optimizer-v1.16.0", "optimizer_commit": "deadbeef"},
         BZL_SAMPLE % A, OPTIMIZER_SAMPLE % A))
     case("skewed pair is refused", False, lambda: check(
-        {"tag": "optimizer-v1.16.0", "mps2_commit": "deadbeef"},
+        {"tag": "optimizer-v1.16.0", "optimizer_commit": "deadbeef"},
         BZL_SAMPLE % A, OPTIMIZER_SAMPLE % B))
-    case("placeholder mps2_commit is refused", False, lambda: check(
-        {"tag": "PLACEHOLDER-x", "mps2_commit": "PLACEHOLDER"},
+    case("placeholder optimizer_commit is refused", False, lambda: check(
+        {"tag": "PLACEHOLDER-x", "optimizer_commit": "PLACEHOLDER"},
         BZL_SAMPLE % A, OPTIMIZER_SAMPLE % A))
-    case("missing mps2_commit is refused", False, lambda: check(
+    case("missing optimizer_commit is refused", False, lambda: check(
         {"tag": "optimizer-v1.16.0"}, BZL_SAMPLE % A, OPTIMIZER_SAMPLE % A))
     case("unreadable optimizer pin is refused", False, lambda: check(
-        {"tag": "optimizer-v1.16.0", "mps2_commit": "deadbeef"},
+        {"tag": "optimizer-v1.16.0", "optimizer_commit": "deadbeef"},
         BZL_SAMPLE % A, "bazel_dep(name = 'rules_cc')\n"))
     # The one that matters most: the FIRST commit in the optimizer's file
     # belongs to another repository, and must never be read as cyclone's.
     case("another repo's commit is not mistaken for cyclone's", False,
-         lambda: check({"tag": "t", "mps2_commit": "deadbeef"},
+         lambda: check({"tag": "t", "optimizer_commit": "deadbeef"},
                        BZL_SAMPLE % "1111111111111111111111111111111111111111",
                        OPTIMIZER_SAMPLE % A))
 

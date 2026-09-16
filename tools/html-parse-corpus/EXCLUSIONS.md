@@ -13,8 +13,8 @@ Note: `seeds/doctype-21-lowercased-fpi.html` was previously excluded
 (1.15: `UNKNOWN`; 2.0: `XHTML_1_0_STRICT`) because 2.0 matched the FPI
 ASCII case-insensitively while 1.15 compared FPI bytes exactly. Resolved:
 canonical `pagespeed/kernel/html/doctype.cc` now matches the FPI ASCII
-case-insensitively too (browser behavior; We-Amp/pagespeed-optimizer#1110
-deviation 1 ported upstream), so both probes classify it
+case-insensitively too (browser behavior; the pagespeed-optimizer parser
+deviation 1 was ported upstream), so both probes classify it
 `XHTML_1_0_STRICT`.
 
 Note: `seeds/doctype-15-html5-legacy-compat.html` was expected to diverge

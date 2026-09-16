@@ -18,7 +18,7 @@ per-site subdirectory (`<FileCachePath>/<site_app_id>`,
 Configuration is read from `pagespeed.config` (legacy fallback name:
 `iiswebspeed.config`) — resolved against the site's application root and
 `%ProgramData%\We-Amp\PageSpeed\` (legacy `%ProgramData%\We-Amp\IISWebSpeed\`
-is still honored for upgrades from IISpeed / legacy installs). Directives
+is still honored for upgrades from IISpeed / early 1.1 installs). Directives
 use the standard `pagespeed <Option> <args>` form with RE2 match rules;
 the file is re-read on timestamp change. As of r18, configuration parsing is
 hardened: a malformed line cannot crash the module at startup, unknown

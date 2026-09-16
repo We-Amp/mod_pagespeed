@@ -7,7 +7,7 @@ Builds on the same Hyper-V-on-a-Windows-host pattern as the IIS rig
 ## Architecture
 
 ```
-                Windows rig host (CI runner)          
+                Windows rig host (CI runner)
                 ┌────────────────────────────────────────────────┐
                 │   ci-ea4-smoke.ps1                             │
                 │                                                │

@@ -693,8 +693,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   original image while the WebP is generated in the background — the same
   behaviour as any cold cache. Existing optimized images stay valid and are not
   regenerated. AVIF is unaffected and continues to be offered only to browsers
-  that ask for it by name, so these browsers receive WebP rather than AVIF
- .
+  that ask for it by name, so these browsers receive WebP rather than AVIF.
 
 ### Upgrade Notes
 
@@ -724,8 +723,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Module scripts (`<script type="module">`) are hinted again: collected module
   dependencies are emitted as `rel=modulepreload` in the `Link` response
   header. Modules carrying `integrity` or `crossorigin="use-credentials"` are
-  left unhinted. Mixed-version deployments sharing a cache degrade cleanly
- .
+  left unhinted. Mixed-version deployments sharing a cache degrade cleanly.
 - nginx: new server-scope directive `WebBotAuthBotDetection` (default off).
   When enabled, a cryptographically verified Web Bot Auth signature (RFC 9421)
   classifies the request as an automated client regardless of its user-agent

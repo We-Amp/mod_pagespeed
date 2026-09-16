@@ -46,7 +46,7 @@ differences, not bugs:
 The `combine_css` filter could time out because scheduler alarms (rewrite
 deadlines, nested fetch timeouts) had no guaranteed driver on Envoy: they
 only fired when some thread happened to call into the scheduler. Fixed by
-wiring the EventScheduler to the Envoy dispatcher: the
+wiring the EventScheduler to the Envoy dispatcher (a tracked limitation): the
 event loop now drives alarm delivery, so deadlines fire on time even with
 no blocked waiter.
 

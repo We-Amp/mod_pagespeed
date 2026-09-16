@@ -6,7 +6,8 @@
 # el9-selinux-rehearsal.sh -- the 1.15 -> 1.16 in-place upgrade rehearsal on
 # an ENFORCING-SELinux EL9 host. Runs INSIDE the guest VM as root.
 #
-# WHY THIS EXISTS (a GA-gate decision for 2.1). The
+# WHY THIS EXISTS. A tracked gap in the container rehearsal, and a
+# GA-gate decision for 2.1 that one enforcing-EL9 VM run must close it. The
 # container rehearsal (install/upgrade_test/run_upgrade_test.sh) proves the
 # upgrade path on a booted-systemd container, but a container shares the
 # host kernel and therefore can never be SELinux-enforcing. The 1.16 pair
@@ -20,7 +21,7 @@
 # WHAT IT DOES. The phases mirror the container rehearsal, minimally, so the
 # two reports read alike; anything the container script asserts that does
 # not change under SELinux is kept only where it helps tell a SELinux denial
-# from an unrelated silent-degrade failure:
+# from an unrelated daemon-startup failure:
 #   0. preflight: EL9, SELinux ENFORCING (refuses to run otherwise), auditd
 #      up, the SELinux tooling present; records the audit-log position so
 #      every denial the run causes is attributable to a phase,
@@ -812,7 +813,7 @@ else
   fail "pagespeed_module is not loaded after the upgrade"
 fi
 
-step "version header and the silent-degrade log signatures"
+step "version header and the daemon-startup log signatures"
 HDR="$(version_header "$BASE_URL/index.html")"
 case "$HDR" in
   *"${RC}"*) pass "post-upgrade version header: ${HDR}" ;;
@@ -826,7 +827,7 @@ done
 tail -c +$((LOG_OFFSET + 1)) "$ERROR_LOG" > "$ARTIFACTS/error-log-after-upgrade.log" 2>/dev/null || true
 SIG_RE='nothing will be recorded for in-place optimization|cannot open the optimizer daemon.s cache volume|not being in the .pagespeed. group|Giving up: in-place optimization stays off'
 sig_hits="$(grep -c -E "$SIG_RE" "$ARTIFACTS/error-log-after-upgrade.log" || true)"
-check "silent-degrade signature lines in the error log after the upgrade restart" "0" "$sig_hits"
+check "daemon-startup signature lines in the error log after the upgrade restart" "0" "$sig_hits"
 if [[ "$sig_hits" != "0" ]]; then grep -E "$SIG_RE" "$ARTIFACTS/error-log-after-upgrade.log" | head -5 | sed 's/^/  /'; fi
 perm_hits="$(grep -c -i -E 'permission denied.*(pagespeed-optimizer|notify\.sock|shared config)|cache_dir_generation' "$ARTIFACTS/error-log-after-upgrade.log" || true)"
 check "daemon permission/handshake complaints in the error log" "0" "$perm_hits"
@@ -856,7 +857,7 @@ if size="$(fetch_until "-lt $ORIGIN_IMAGE_BYTES" 150 "$SIZE_AFTER_CMD")"; then
 else
   fail "post-upgrade in-place optimization: ${IMAGE_AFTER} still ${size:-?} bytes after 150s (origin ${ORIGIN_IMAGE_BYTES})"
 fi
-[[ "$ipro_proven" -eq 1 ]] || fail "no proof of in-place optimization after the upgrade"
+[[ "$ipro_proven" -eq 1 ]] || fail "no proof of in-place optimization after the upgrade (the daemon-startup failure class)"
 
 step "SELinux verdict: denials since the upgrade began"
 ENFORCE_AT_END="$(getenforce 2>/dev/null || echo unknown)"

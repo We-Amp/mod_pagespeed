@@ -4,8 +4,9 @@ Runs the ASan-instrumented `libmod_pagespeed.so` under the canonical Apache
 system-test config (`test/system/setup_apache_test.sh` — CoreFilters, IPRO, small
 prefork MPM), driving `apache2 -k graceful` reloads and hard restarts under load,
 then sweeps `error.log` (and cores) for AddressSanitizer reports. This is "the
-Apache system-test rig under ASan" from the sanitizer-rig umbrella work. Companion to `../iis/` and
-`../nginx/`; driven nightly by the Apache ASan lane. Grounded in the proven shutdown-UAF recipe
+Apache system-test rig under ASan" from the sanitizer-rig umbrella work.
+Companion to `../iis/` and `../nginx/`; driven nightly by the Apache ASan
+lane. Grounded in the proven shutdown-UAF recipe
 (`../cell_run.sh` + the multi-site sanitizer matrix).
 
 ## Key mechanics

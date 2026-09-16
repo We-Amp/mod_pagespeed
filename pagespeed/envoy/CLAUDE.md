@@ -72,7 +72,7 @@ alarms (rewrite deadlines, fetch timeouts) are driven by the Envoy
 dispatcher: `EnvoyRewriteDriverFactory::CreateScheduler()` returns an
 `EventScheduler`, and `StartThreads()` attaches the dispatcher adapter so
 the event loop pumps `RunAlarms()` — alarm callbacks run ON the dispatcher
-thread and must stay cheap.
+thread and must stay cheap (a tracked limitation).
 `EnvoyAsyncFetch` uses `shared_from_this()` to prevent use-after-free when
 posting lambdas to the dispatcher thread. `EnvoyBaseFetch` uses a manual
 `std::atomic<int> references_` refcount (initial value 2: one for Envoy,

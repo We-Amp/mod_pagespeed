@@ -45,7 +45,7 @@ fi
 WINDOWS_HOST="${WINDOWS_HOST:-localhost}"
 WINDOWS_SSH_PORT="${WINDOWS_SSH_PORT:-2222}"
 WINDOWS_USER="${WINDOWS_USER:-Developer}"
-WINDOWS_PASSWORD="${WINDOWS_PASSWORD:-ChangeMe1}"
+WINDOWS_PASSWORD="${WINDOWS_PASSWORD:-}"
 IIS_PORT="${IIS_PORT:-8080}"
 
 # Test configuration
@@ -81,7 +81,7 @@ Options:
     --host HOST         Windows VM hostname (default: localhost)
     --port PORT         Windows VM SSH port (default: 2222)
     --user USER         Windows VM username (default: Developer)
-    --password PASS     Windows VM password (default: ChangeMe1)
+    --password PASS     Windows VM password (default: $WINDOWS_PASSWORD env var)
     --iis-port PORT     Port for IIS to listen on (default: 8080)
     --local             Force local execution (auto-detected on Windows)
     --remote            Force remote execution via SSH
@@ -358,14 +358,14 @@ setup_ssh() {
         log_status "Using SSH key authentication"
         SSH_CMD="ssh $SSH_OPTS -p $WINDOWS_SSH_PORT"
         SCP_CMD="scp $SSH_OPTS -P $WINDOWS_SSH_PORT"
-    elif command -v sshpass &> /dev/null; then
+    elif command -v sshpass &> /dev/null && [[ -n "$WINDOWS_PASSWORD" ]]; then
         log_status "Using password authentication (sshpass)"
         SSH_CMD="sshpass -p '$WINDOWS_PASSWORD' ssh $SSH_OPTS -p $WINDOWS_SSH_PORT"
         SCP_CMD="sshpass -p '$WINDOWS_PASSWORD' scp $SSH_OPTS -P $WINDOWS_SSH_PORT"
     else
-        log_warning "No SSH_AUTH_SOCK set and sshpass not found"
+        log_warning "No SSH_AUTH_SOCK set and no WINDOWS_PASSWORD given"
         log_warning "You may need to enter password manually"
-        log_warning "Set SSH_AUTH_SOCK or install sshpass for non-interactive operation"
+        log_warning "Set SSH_AUTH_SOCK, or set WINDOWS_PASSWORD (or pass --password) for non-interactive operation"
         SSH_CMD="ssh $SSH_OPTS -p $WINDOWS_SSH_PORT"
         SCP_CMD="scp $SSH_OPTS -P $WINDOWS_SSH_PORT"
     fi
@@ -391,9 +391,9 @@ check_windows_vm() {
     if ! eval $SSH_CMD "$WINDOWS_USER@$WINDOWS_HOST" "echo 'Connected'" &> /dev/null; then
         log_error "Cannot connect to Windows VM at $WINDOWS_HOST:$WINDOWS_SSH_PORT"
         log_error ""
-        log_error "Make sure the dockur/windows container is running:"
+        log_error "Make sure the dockur/windows container is running and the VM"
+        log_error "has finished provisioning:"
         log_error "  docker compose --profile windows-x64 up -d"
-        log_error "  ./windows-dev/wait-for-windows.sh"
         log_error ""
         if [[ -z "$SSH_AUTH_SOCK" ]]; then
             log_error "SSH key auth: Set SSH_AUTH_SOCK to your SSH agent socket"
