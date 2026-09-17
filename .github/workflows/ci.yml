@@ -1,0 +1,62 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
+name: CI
+
+# Minimal public CI for the module repository: the whole-tree Apache RAT
+# license audit (tools/ci/rat.sh, backed by .rat-excludes) and the
+# public-tree hygiene gate (tools/ci/check-public-hygiene.sh — keeps
+# private-infrastructure and private-process vocabulary out of the public
+# tree). GitHub-hosted runners ONLY — a public repo must never address the
+# private build machines, so the heavy lanes (the Bazel build and unit-test
+# matrix, sanitizers, Apache/nginx/IIS system tests, Windows/macOS builds,
+# lint, CVE scanning, packaging and release lanes) stay on the private
+# side and are deliberately not part of this workflow.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  rat:
+    name: License audit (Apache RAT)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+      # tools/ci/rat.sh fetches the SHA-1-pinned RAT jar itself (fails
+      # closed) and audits against .rat-excludes; the report is written
+      # outside the checkout so RAT never audits its own output.
+      - name: Run Apache RAT
+        env:
+          RAT_REPORT: ${{ runner.temp }}/rat-report.txt
+        run: tools/ci/rat.sh
+      - name: Upload RAT report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: rat-report
+          path: ${{ runner.temp }}/rat-report.txt
+          if-no-files-found: warn
+
+  public-hygiene:
+    name: Public-tree hygiene gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - name: Scan the tracked tree for non-public vocabulary
+        run: tools/ci/check-public-hygiene.sh
