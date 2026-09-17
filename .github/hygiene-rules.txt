@@ -1,0 +1,66 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+#
+# Public-tree hygiene rules, enforced by tools/ci/check-public-hygiene.sh
+# (the "Public-tree hygiene gate" CI job). This repository is public, so the
+# tracked tree must stay free of private-infrastructure and private-process
+# vocabulary. One rule per line:
+#
+#   <grep-flags><TAB><extended-regex pattern>
+#
+# Blank lines and lines starting with # are ignored. Flags are a subset of
+# grep's: E (extended regex, required) and i (case-insensitive).
+#
+# The classes mirror the private source repo's export-time forbidden-strings
+# gate, adapted to public-safe patterns: a rule may name a CLASS of unwanted
+# content (host names, label schemes, id shapes), never an actual private
+# value -- the credential-literal rules stay private-side only, because
+# publishing the literal would leak the very value it guards. The
+# dangling-ci-config class from the private gate is deliberately absent:
+# this tree DOES carry .github/workflows, so references to it are
+# legitimate.
+#
+# Rule classes (one rule per line below, in this order):
+#   decision-ids    internal decision-record references (the digit count is
+#                   load-bearing: records are numbered with exactly three
+#                   digits, and the trailing non-digit keeps a real Opera
+#                   Mobi user-agent fixture whose build id starts with the
+#                   same prefix from matching)
+#   internal-hosts  private build-machine and lab-VM names, incl. the
+#                   runner-pool label forms of the machine whose name is
+#                   also an ordinary English word (the bare word would match
+#                   product code and comments that leak nothing)
+#   build-infra     paths that exist only on the private build fleet
+#   license-terms   retired-license markers: the identifier header a file
+#                   still under the old license carries, and that license's
+#                   own title/parameter lines (the bare name stays allowed --
+#                   the CHANGELOG relicensing entry legitimately names it)
+#   dangling-tooling references to the private repo's publish tooling, which
+#                   this tree does not carry
+#   runner-labels   private CI runner-pool label scheme (byte-identical with
+#                   the sibling repos' gates)
+#   owner-rulings   letter-form owner-decision codes ("rulings X")
+#   security-ids    private security-review finding ids
+#   fleet-topology  private build-fleet topology words and the runs-on label
+#                   list shape
+#   dev-repo slugs  pre-publication development repository name
+#   scrub-garble    curation-side substitution garble shapes
+#   ci-run-ids      CI run ids and private CI-tracker issue citations
+E	ADR-[0-9]{3}([^0-9]|$)
+Ei	(^|[^A-Za-z0-9_])(threadripper|duster|weamp-web|mpb-?16|mpb-i9)([^A-Za-z0-9_]|$)
+Ei	(^|[^[:alnum:]_-])burst-(linux|windows|macos|wsl|x64|arm64|pool|runner)
+E	/mnt/d/ci/
+Ei	SPDX-License-Identifier:[[:space:]]*[^[:space:]]*BUSL
+E	^(Business Source License|Licensed Work:|Change Date:|Change License:)
+E	tools/publish/
+Ei	(linux|mac|macos|windows)-(x64|arm64)(-[a-z0-9]+)*-(pool|mps[0-9]+)([^a-z0-9-]|$)
+E	[Rr]ulings? [A-Z][0-9]?([^A-Za-z0-9]|$)
+E	SEC-1\.1-[0-9]{3}
+Ei	heavy-build-host
+Ei	(ci|runner)[ -]fleet
+Ei	\[self-hosted,|self-hosted([^[:alnum:]]+[[:alnum:]]+){0,2}[^[:alnum:]]+(runners?|bazel-remote)([^[:alnum:]]|$)
+E	(^|[^A-Za-z0-9_/-])mod_pagespeed_private([^A-Za-z0-9_/-]|$)
+E	WS2016-IIS-base
+Ei	(^|[^[:alnum:]_])pool-host:
+Ei	GitHub the defect|the defect[0-9]|the the defect|mod_?pagespeed the defect|ngx_pagespeed the defect|a Cyclone update
+Ei	(^|[^a-z])run [0-9]{10,}|CI #[0-9]+
