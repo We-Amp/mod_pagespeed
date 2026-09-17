@@ -81,7 +81,7 @@ if [ ! -f $version_h ]; then
 fi
 
 source net/instaweb/public/VERSION
-build_version="$MAJOR.$MINOR.$BUILD.$PATCH"
+build_version="$MAJOR.$MINOR.$BUILD"
 
 if ! grep -q "^#define MOD_PAGESPEED_VERSION_STRING \"$build_version\"$" \
           $version_h; then

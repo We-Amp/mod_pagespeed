@@ -180,7 +180,8 @@ class VectorDeque {
   size_t capacity_minus_1_;  // capacity is constrained to a power of 2.
   T* data_;
 
-  DISALLOW_COPY_AND_ASSIGN(VectorDeque);
+  VectorDeque(const VectorDeque&) = delete;
+  VectorDeque& operator=(const VectorDeque&) = delete;
 };
 
 }  // namespace net_instaweb

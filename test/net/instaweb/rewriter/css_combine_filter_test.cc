@@ -1665,6 +1665,58 @@ TEST_F(CssCombineFilterTest, RobustnessUnclosedString) {
                     StrCat(CssLinkHref(kCssA), CssLinkHref(kCssB)));
 }
 
+TEST_F(CssCombineFilterTest, CombineGroupRules) {
+  // A sheet made of conditional group rules parses cleanly (error mask 0),
+  // so it must remain combinable.
+  CssLink::Vector css_in, css_out;
+  css_in.Add("1.css", "@supports (display: grid) { .a { color: red } }\n", "",
+             true);
+  css_in.Add("2.css", "h2 { color: blue; }\n", "", true);
+  BarrierTestHelper("combine_group_rules", css_in, &css_out);
+  EXPECT_EQ(1, css_out.size());
+
+  GoogleString expected_combination =
+      "@supports (display: grid) { .a { color: red } }\n"
+      "h2 { color: blue; }\n";
+  GoogleString actual_combination;
+  EXPECT_TRUE(FetchResourceUrl(StrCat(kTestDomain, css_out[0]->url_),
+                               &actual_combination));
+  EXPECT_EQ(expected_combination, actual_combination);
+}
+
+TEST_F(CssCombineFilterTest, CombineMediaStraySemicolon) {
+  // A trailing stray ';' inside an @media block used to fail the parse, which
+  // made the sheet a combine barrier. It now parses cleanly (error mask 0),
+  // so the sheet must combine.
+  CssLink::Vector css_in, css_out;
+  css_in.Add("1.css", "@media screen { .a { color: red }; }\n", "", true);
+  css_in.Add("2.css", "h2 { color: blue; }\n", "", true);
+  BarrierTestHelper("combine_media_stray_semicolon", css_in, &css_out);
+  EXPECT_EQ(1, css_out.size());
+
+  GoogleString expected_combination =
+      "@media screen { .a { color: red }; }\n"
+      "h2 { color: blue; }\n";
+  GoogleString actual_combination;
+  EXPECT_TRUE(FetchResourceUrl(StrCat(kTestDomain, css_out[0]->url_),
+                               &actual_combination));
+  EXPECT_EQ(expected_combination, actual_combination);
+}
+
+TEST_F(CssCombineFilterTest, CombineGroupRulesWithInnerGarbage) {
+  // Unparseable statements inside a group body demote to verbatim regions
+  // and reset the error mask, so the sheet stays combinable — the same
+  // CleanParse invariant the top-level demotion path guarantees.
+  CssLink::Vector css_in, css_out;
+  css_in.Add("1.css",
+             "@supports (a:b) { @keyframes k { 0% { top: 0 } }"
+             " .a { color: red } }\n",
+             "", true);
+  css_in.Add("2.css", "h2 { color: blue; }\n", "", true);
+  BarrierTestHelper("combine_group_rules_garbage", css_in, &css_out);
+  EXPECT_EQ(1, css_out.size());
+}
+
 // See: http://www.alistapart.com/articles/alternate/
 //  and http://www.w3.org/TR/html4/present/styles.html#h-14.3.1
 TEST_F(CssCombineFilterTest, AlternateStylesheets) {
@@ -2064,10 +2116,12 @@ TEST_F(CssCombineMaxSizeTest, ReconstructedResourceExpectedHeaders) {
       "Content-Type: text/css\r\n"
       "Date: Tue, 02 Feb 2010 18:51:26 GMT\r\n"
       "Expires: Wed, 02 Feb 2011 18:51:26 GMT\r\n"
-      "Cache-Control: max-age=31536000\r\n"
       "Etag: W/\"0\"\r\n"
       "Last-Modified: Tue, 02 Feb 2010 18:51:26 GMT\r\n"
       "X-Original-Content-Length: 85\r\n"
+      // The serving-time 'public, immutable' upgrade replaces Cache-Control
+      // last, so it trails the stored-header order.
+      "Cache-Control: max-age=31536000, public, immutable\r\n"
       "\r\n",
       headers.ToString());
 }

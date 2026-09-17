@@ -57,6 +57,8 @@ void PedanticFilter::StartElement(HtmlElement* element) {
     if (type_attr == nullptr) {
       // No type and no language attributes, let's double check with
       // ScriptTagScanner that it thinks we're looking at javascript.
+      // Module scripts can never reach this AddAttribute: they require
+      // type=module, and this branch only runs when type is absent.
 
       HtmlElement::Attribute* src = nullptr;
       ScriptTagScanner::ScriptClassification classification =

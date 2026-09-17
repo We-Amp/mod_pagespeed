@@ -19,10 +19,11 @@
 
 // Unit test for PropertyStore.
 
+#include <memory>
+
 #include "pagespeed/opt/http/property_store.h"
 
 #include "pagespeed/kernel/base/callback.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/util/platform.h"
 #include "pagespeed/kernel/util/simple_stats.h"
@@ -64,7 +65,8 @@ class PropertyStoreTest : public testing::Test {
  private:
   SimpleStats stats_;
   MockTimer timer_;
-  DISALLOW_COPY_AND_ASSIGN(PropertyStoreTest);
+  PropertyStoreTest(const PropertyStoreTest&) = delete;
+  PropertyStoreTest& operator=(const PropertyStoreTest&) = delete;
 };
 
 TEST_F(PropertyStoreTest, TestNonCancellableNoFastFinishLookupDoneWithTrue) {

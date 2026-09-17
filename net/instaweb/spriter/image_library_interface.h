@@ -66,7 +66,8 @@ class ImageLibraryInterface {
     ImageLibraryInterface* lib_;
 
    private:
-    DISALLOW_COPY_AND_ASSIGN(Image);
+    Image(const Image&) = delete;
+    Image& operator=(const Image&) = delete;
   };
 
   // Read an image from disk.  Return NULL (after calling delegate
@@ -88,7 +89,8 @@ class ImageLibraryInterface {
     ImageLibraryInterface* lib_;
 
    private:
-    DISALLOW_COPY_AND_ASSIGN(Canvas);
+    Canvas(const Canvas&) = delete;
+    Canvas& operator=(const Canvas&) = delete;
   };
 
   virtual Canvas* CreateCanvas(int width, int height) = 0;
@@ -126,7 +128,8 @@ class ImageLibraryInterface {
   // error) has occurred.
   const Delegate* delegate_;
 
-  DISALLOW_COPY_AND_ASSIGN(ImageLibraryInterface);
+  ImageLibraryInterface(const ImageLibraryInterface&) = delete;
+  ImageLibraryInterface& operator=(const ImageLibraryInterface&) = delete;
 };
 
 }  // namespace spriter

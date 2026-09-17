@@ -21,6 +21,7 @@
 #define PAGESPEED_KERNEL_HTML_HTML_KEYWORDS_H_
 
 #include <algorithm>
+#include <atomic>
 #include <vector>
 
 #include "pagespeed/kernel/base/basictypes.h"
@@ -40,10 +41,8 @@ class Writer;
 // unbalanced tags.
 class HtmlKeywords {
  public:
-  // Initialize a singleton instance of this class.  This call is
-  // inherently thread unsafe, but only the first time it is called.
-  // If multi-threaded programs call this function before spawning
-  // threads then there will be no races.
+  // Initialize a singleton instance of this class.  Thread-safe:
+  // concurrent calls are serialized via double-checked locking.
   static void Init();
 
   // Tear down the singleton instance of this class, freeing any
@@ -53,7 +52,7 @@ class HtmlKeywords {
   // Returns an HTML keyword as a string, or NULL if not a keyword.
   static const StringPiece* KeywordToString(HtmlName::Keyword keyword) {
     if (keyword < HtmlName::kNotAKeyword) {
-      return &singleton_->keyword_vector_[keyword];
+      return &instance()->keyword_vector_[keyword];
     } else {
       return NULL;
     }
@@ -62,7 +61,7 @@ class HtmlKeywords {
   // Take a raw text and escape it so it's safe for an HTML attribute,
   // e.g.    a&b --> a&amp;b
   static StringPiece Escape(const StringPiece& unescaped, GoogleString* buf) {
-    return singleton_->EscapeHelper(unescaped, buf);
+    return instance()->EscapeHelper(unescaped, buf);
   }
 
   // Take escaped text and unescape it so its value can be interpreted,
@@ -74,7 +73,7 @@ class HtmlKeywords {
   // TODO(jmarantz): Support a variant where we unescape to UTF-8.
   static StringPiece Unescape(const StringPiece& escaped, GoogleString* buf,
                               bool* decoding_error) {
-    return singleton_->UnescapeHelper(escaped, buf, decoding_error);
+    return instance()->UnescapeHelper(escaped, buf, decoding_error);
   }
 
   // Note that Escape and Unescape are not guaranteed to be inverses of
@@ -92,8 +91,8 @@ class HtmlKeywords {
   // if a StartElement for tag k2 is encountered.  E.g. <tr><tbody> should
   // be transformed to <tr></tr><tbody>.
   static bool IsAutoClose(HtmlName::Keyword k1, HtmlName::Keyword k2) {
-    return std::binary_search(singleton_->auto_close_.begin(),
-                              singleton_->auto_close_.end(),
+    return std::binary_search(instance()->auto_close_.begin(),
+                              instance()->auto_close_.end(),
                               MakeKeywordPair(k1, k2));
   }
 
@@ -101,8 +100,8 @@ class HtmlKeywords {
   // if an EndElement for tag k2 is encountered.  E.g. <tbody></table> should
   // be transformed into <tbody></tbody></table>.
   static bool IsContained(HtmlName::Keyword k1, HtmlName::Keyword k2) {
-    return std::binary_search(singleton_->contained_.begin(),
-                              singleton_->contained_.end(),
+    return std::binary_search(instance()->contained_.begin(),
+                              instance()->contained_.end(),
                               MakeKeywordPair(k1, k2));
   }
 
@@ -112,8 +111,8 @@ class HtmlKeywords {
   // the distinction with tags which are *implicitly* closed in HTML such as
   // <img> and <br>.
   static bool IsOptionallyClosedTag(HtmlName::Keyword keyword) {
-    return std::binary_search(singleton_->optionally_closed_.begin(),
-                              singleton_->optionally_closed_.end(), keyword);
+    return std::binary_search(instance()->optionally_closed_.begin(),
+                              instance()->optionally_closed_.end(), keyword);
   }
 
   // Wraps text in a pre-tag using the specified style arguments and sends it
@@ -124,9 +123,9 @@ class HtmlKeywords {
                        MessageHandler* handler);
 
  private:
-  typedef int32 KeywordPair;  // Encoded via shift & OR.
-  typedef std::vector<KeywordPair> KeywordPairVec;
-  typedef std::vector<HtmlName::Keyword> KeywordVec;
+  using KeywordPair = int32;  // Encoded via shift & OR.
+  using KeywordPairVec = std::vector<KeywordPair>;
+  using KeywordVec = std::vector<HtmlName::Keyword>;
 
   HtmlKeywords();
   const char* UnescapeAttributeValue();
@@ -178,7 +177,13 @@ class HtmlKeywords {
   // Adds every space-delimited token in klist to kset.
   void AddToSet(const StringPiece& klist, KeywordVec* kset);
 
-  static HtmlKeywords* singleton_;
+  static std::atomic<HtmlKeywords*> singleton_;
+
+  // Load the singleton pointer from the atomic. All callers assume Init()
+  // has been called, so the returned pointer is never null in practice.
+  static HtmlKeywords* instance() {
+    return singleton_.load(std::memory_order_acquire);
+  }
 
   StringPiece EscapeHelper(const StringPiece& unescaped,
                            GoogleString* buf) const;
@@ -190,11 +195,11 @@ class HtmlKeywords {
   // My theory is that the maps are sufficiently small that the algorithmic
   // differences are not dominant, but keeping the data small helps the
   // processor cache behavior.
-  typedef sparse_hash_map<GoogleString, const char*, CaseFoldStringHash,
-                          CaseFoldStringEqual>
-      StringStringSparseHashMapInsensitive;
-  typedef sparse_hash_map<GoogleString, const char*, CasePreserveStringHash>
-      StringStringSparseHashMapSensitive;
+  using StringStringSparseHashMapInsensitive =
+      sparse_hash_map<GoogleString, const char*, CaseFoldStringHash,
+                      CaseFoldStringEqual>;
+  using StringStringSparseHashMapSensitive =
+      sparse_hash_map<GoogleString, const char*, CasePreserveStringHash>;
 
   StringStringSparseHashMapInsensitive unescape_insensitive_map_;
   StringStringSparseHashMapSensitive unescape_sensitive_map_;
@@ -210,7 +215,8 @@ class HtmlKeywords {
   KeywordPairVec contained_;
   KeywordVec optionally_closed_;
 
-  DISALLOW_COPY_AND_ASSIGN(HtmlKeywords);
+  HtmlKeywords(const HtmlKeywords&) = delete;
+  HtmlKeywords& operator=(const HtmlKeywords&) = delete;
 };
 
 }  // namespace net_instaweb

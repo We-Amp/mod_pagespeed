@@ -27,9 +27,10 @@
 #include "pagespeed/apache/apache_config.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/system/daemon_adapter.h"
+#include "pagespeed/system/daemon_serve_arm.h"
 #include "pagespeed/system/system_server_context.h"
 
 struct request_rec;
@@ -68,6 +69,40 @@ class ApacheServerContext : public SystemServerContext {
   ApacheConfig* global_config();
   const ApacheConfig* global_config() const;
   bool InitPath(const GoogleString& path);
+
+  // Builds this server's optimizer-daemon adapter from its configuration and
+  // resolves its health, exactly once, at post-config time.  Returns false
+  // when the server must not start; the reason has already been logged.
+  //
+  // Must run after directives are parsed and before any request is served:
+  // the serving path only ever reads the verdict, so that it neither probes
+  // nor logs per request.
+  bool RunDaemonStartupCheck();
+
+  // This server's daemon health.  kNotConfigured until
+  // RunDaemonStartupCheck() has run, which is also the correct answer for
+  // every path that reaches serving without a daemon configured.
+  DaemonHealth daemon_health() const {
+    return daemon_adapter_ == nullptr ? DaemonHealth::kNotConfigured
+                                      : daemon_adapter_->health();
+  }
+
+  // This server's daemon adapter, or nullptr before the startup check has
+  // run.  Borrowed; the record arm asks it for the per-process cache handle.
+  DaemonAdapter* daemon_adapter() { return daemon_adapter_.get(); }
+
+  // Creates the UDS-backed DaemonReader for the /v1/daemon/* admin
+  // endpoints, from this server's DaemonApiSocketPath.  See
+  // SystemServerContext::NewDaemonReader().
+  DaemonReader* NewDaemonReader() override;
+
+  // The peer's serve-stats mmap for this server, or nullptr when no daemon
+  // is configured.  Borrowed; PROCESS-lifetime, and deliberately not opened
+  // here -- the object is built at configuration time and opens the file on
+  // its first recorded serve, in whichever child process makes it.  Opening
+  // in the parent would hand every child an inherited mapping it never asked
+  // for, which is the same fork problem the record cache solves the same way.
+  DaemonServeStats* daemon_serve_stats() { return daemon_serve_stats_.get(); }
 
   // These return configuration objects that hold settings from
   // <ModPagespeedIf spdy> and <ModPagespeedIf !spdy> sections of configuration.
@@ -169,8 +204,11 @@ class ApacheServerContext : public SystemServerContext {
   std::unique_ptr<MeasurementProxyUrlNamer> measurement_url_namer_;
 
   std::unique_ptr<ProxyFetchFactory> proxy_fetch_factory_;
+  std::unique_ptr<DaemonAdapter> daemon_adapter_;
+  std::unique_ptr<DaemonServeStats> daemon_serve_stats_;
 
-  DISALLOW_COPY_AND_ASSIGN(ApacheServerContext);
+  ApacheServerContext(const ApacheServerContext&) = delete;
+  ApacheServerContext& operator=(const ApacheServerContext&) = delete;
 };
 
 }  // namespace net_instaweb

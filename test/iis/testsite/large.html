@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<!--
+  SPDX-License-Identifier: Apache-2.0
+  Copyright (c) 2024-2026 We-Amp B.V.
+-->
+
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Large HTML Test Page</title>
+    <link rel="stylesheet" href="styles/main.css">
+</head>
+<body>
+    <h1>Large HTML Test Page</h1>
+    <p>This page contains a lot of content to test handling of large documents.</p>
+
+    <!-- Section 1 -->
+    <section id="section1">
+        <h2>Section 1: Lorem Ipsum</h2>
+        <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.</p>
+        <p>Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
+    </section>
+
+    <!-- Section 2 -->
+    <section id="section2">
+        <h2>Section 2: More Content</h2>
+        <p>Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam, eaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt explicabo.</p>
+        <ul>
+            <li>Item 1: Nemo enim ipsam voluptatem quia voluptas sit aspernatur</li>
+            <li>Item 2: Neque porro quisquam est qui dolorem ipsum quia dolor</li>
+            <li>Item 3: Ut enim ad minima veniam quis nostrum exercitationem</li>
+            <li>Item 4: Quis autem vel eum iure reprehenderit qui in ea voluptate</li>
+            <li>Item 5: At vero eos et accusamus et iusto odio dignissimos ducimus</li>
+        </ul>
+    </section>
+
+    <!-- Section 3 -->
+    <section id="section3">
+        <h2>Section 3: Code Examples</h2>
+        <pre><code>
+function processDocument() {
+    // This is a sample function
+    var elements = document.querySelectorAll('.content');
+    for (var i = 0; i < elements.length; i++) {
+        elements[i].classList.add('processed');
+    }
+    return elements.length;
+}
+        </code></pre>
+    </section>
+
+    <!-- Section 4 -->
+    <section id="section4">
+        <h2>Section 4: Table Data</h2>
+        <table border="1">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Name</th>
+                    <th>Value</th>
+                    <th>Description</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr><td>1</td><td>Alpha</td><td>100</td><td>First item in the list</td></tr>
+                <tr><td>2</td><td>Beta</td><td>200</td><td>Second item in the list</td></tr>
+                <tr><td>3</td><td>Gamma</td><td>300</td><td>Third item in the list</td></tr>
+                <tr><td>4</td><td>Delta</td><td>400</td><td>Fourth item in the list</td></tr>
+                <tr><td>5</td><td>Epsilon</td><td>500</td><td>Fifth item in the list</td></tr>
+                <tr><td>6</td><td>Zeta</td><td>600</td><td>Sixth item in the list</td></tr>
+                <tr><td>7</td><td>Eta</td><td>700</td><td>Seventh item in the list</td></tr>
+                <tr><td>8</td><td>Theta</td><td>800</td><td>Eighth item in the list</td></tr>
+                <tr><td>9</td><td>Iota</td><td>900</td><td>Ninth item in the list</td></tr>
+                <tr><td>10</td><td>Kappa</td><td>1000</td><td>Tenth item in the list</td></tr>
+            </tbody>
+        </table>
+    </section>
+
+    <!-- Section 5 -->
+    <section id="section5">
+        <h2>Section 5: Repeated Content</h2>
+        <div class="content-block">
+            <h3>Block A</h3>
+            <p>Nam libero tempore, cum soluta nobis est eligendi optio cumque nihil impedit quo minus id quod maxime placeat facere possimus, omnis voluptas assumenda est, omnis dolor repellendus.</p>
+        </div>
+        <div class="content-block">
+            <h3>Block B</h3>
+            <p>Temporibus autem quibusdam et aut officiis debitis aut rerum necessitatibus saepe eveniet ut et voluptates repudiandae sint et molestiae non recusandae.</p>
+        </div>
+        <div class="content-block">
+            <h3>Block C</h3>
+            <p>Itaque earum rerum hic tenetur a sapiente delectus, ut aut reiciendis voluptatibus maiores alias consequatur aut perferendis doloribus asperiores repellat.</p>
+        </div>
+    </section>
+
+    <!-- Section 6 -->
+    <section id="section6">
+        <h2>Section 6: Form Elements</h2>
+        <form action="#" method="post">
+            <div>
+                <label for="name">Name:</label>
+                <input type="text" id="name" name="name" placeholder="Enter your name">
+            </div>
+            <div>
+                <label for="email">Email:</label>
+                <input type="email" id="email" name="email" placeholder="Enter your email">
+            </div>
+            <div>
+                <label for="message">Message:</label>
+                <textarea id="message" name="message" rows="4" placeholder="Enter your message"></textarea>
+            </div>
+            <div>
+                <button type="submit">Submit</button>
+            </div>
+        </form>
+    </section>
+
+    <!-- Section 7 -->
+    <section id="section7">
+        <h2>Section 7: Nested Structure</h2>
+        <div class="level-1">
+            <div class="level-2">
+                <div class="level-3">
+                    <div class="level-4">
+                        <div class="level-5">
+                            <p>Deeply nested content to test HTML parsing.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer>
+        <p>End of large test document. Total sections: 7</p>
+        <p>This document is designed to test PageSpeed's handling of large HTML files.</p>
+    </footer>
+
+    <script src="scripts/main.js"></script>
+</body>
+</html>

@@ -77,7 +77,8 @@ class CssResourceSlot : public ResourceSlot {
   GoogleUrl trim_url_;
   const RewriteOptions* options_;
 
-  DISALLOW_COPY_AND_ASSIGN(CssResourceSlot);
+  CssResourceSlot(const CssResourceSlot&) = delete;
+  CssResourceSlot& operator=(const CssResourceSlot&) = delete;
 };
 
 typedef RefCountedPtr<CssResourceSlot> CssResourceSlotPtr;
@@ -106,7 +107,8 @@ class CssResourceSlotFactory {
   typedef std::set<CssResourceSlotPtr, SlotComparator> SlotSet;
 
   SlotSet slots_;
-  DISALLOW_COPY_AND_ASSIGN(CssResourceSlotFactory);
+  CssResourceSlotFactory(const CssResourceSlotFactory&) = delete;
+  CssResourceSlotFactory& operator=(const CssResourceSlotFactory&) = delete;
 };
 
 }  // namespace net_instaweb

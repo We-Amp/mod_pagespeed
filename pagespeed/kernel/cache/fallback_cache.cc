@@ -20,7 +20,9 @@
 #include "pagespeed/kernel/cache/fallback_cache.h"
 
 #include "base/logging.h"
+#include "pagespeed/kernel/base/mapped_shared_string.h"
 #include "pagespeed/kernel/base/shared_string.h"
+#include "pagespeed/kernel/base/string.h"
 
 namespace {
 
@@ -84,7 +86,24 @@ class FallbackCallback : public CacheInterface::Callback {
       return true;  // The forwarding-marker in the small object cache is OK.
     } else if ((size >= 1) && (val[size - 1] == kInSmallObjectCache)) {
       // Link values together, but strip the marker from the new view.
-      SharedString new_value = value();
+      // An owned copy is required because MappedSharedString doesn't support
+      // RemoveSuffix - we need to work with the owned SharedString.
+      const MappedSharedString& mapped_value = value();
+      SharedString new_value;
+      if (mapped_value.is_mapped()) {
+        // De-alias the borrowed (e.g. Cyclone zero-copy) bytes with the
+        // verified copy (copy-then-verify); a torn borrow is treated
+        // as a miss via the same not-found path used for a bad encoding below.
+        GoogleString devalias;
+        if (!CopyMappedVerified(mapped_value.Value(), mapped_value,
+                                &devalias)) {
+          callback_->DelegatedValidateCandidate(key, CacheInterface::kNotFound);
+          return false;
+        }
+        new_value.SwapWithString(&devalias);
+      } else {
+        new_value = mapped_value.ToOwned();
+      }
       new_value.RemoveSuffix(1);
       callback_->set_value(new_value);
       return callback_->DelegatedValidateCandidate(key, state);
@@ -99,7 +118,8 @@ class FallbackCallback : public CacheInterface::Callback {
   CacheInterface* large_object_cache_;
   bool validate_candidate_called_;
 
-  DISALLOW_COPY_AND_ASSIGN(FallbackCallback);
+  FallbackCallback(const FallbackCallback&) = delete;
+  FallbackCallback& operator=(const FallbackCallback&) = delete;
 };
 
 }  // namespace
@@ -141,12 +161,20 @@ void FallbackCache::Put(const GoogleString& key, const SharedString& value) {
   store_size += 1;  // For kInSmallObjectCache marker.
 
   if (store_size > threshold_bytes_) {
+    // Write the actual value to large_object_cache_ first, then the
+    // forwarding marker to small_object_cache_. This ordering ensures
+    // that if the large cache write fails silently, readers won't find
+    // a forwarding marker pointing to non-existent data.
+    large_object_cache_->Put(key, value);
     SharedString forwarding_value;
     forwarding_value.Assign(&kInLargeObjectCache, 1);
     small_object_cache_->Put(key, forwarding_value);
-    large_object_cache_->Put(key, value);
   } else {
     SharedString wrapped_value(value);
+    // 'value' may share storage with a response that is being served (e.g. a
+    // write-through fill of a cache-hit value); appending in place could
+    // reallocate the shared bytes under a concurrent reader, so detach first.
+    wrapped_value.DetachRetainingContent();
     wrapped_value.Append(&kInSmallObjectCache, 1);
     small_object_cache_->Put(key, wrapped_value);
   }

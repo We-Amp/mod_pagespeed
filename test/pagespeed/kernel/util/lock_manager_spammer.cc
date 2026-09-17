@@ -23,7 +23,6 @@
 
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/condvar.h"
-#include "pagespeed/kernel/base/dynamic_annotations.h"
 #include "pagespeed/kernel/base/function.h"
 #include "pagespeed/kernel/base/named_lock_manager.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -35,19 +34,15 @@
 
 namespace {
 
-int WaitMs() { return RunningOnValgrind() != 0 ? 2000 : 200; }
-int StealMs() { return RunningOnValgrind() != 0 ? 1000 : 100; }
+int WaitMs() { return 200; }
+int StealMs() { return 100; }
 
 // In our test, we set the lock wait timeout at 100ms and the steal
 // time to 200ms.  But we insert timing delays of 150ms so that we
 // successfully steal a lock that is not released in the second round
 // of lock-requests.  But for the third round of lock-requests, which
 // occurs at 300ms, the timeout will expire.
-//
-// All the times are multipled by 10 for valgrind, since these are real-time.
-// Leaving them as is results in a modest percentage of flakes in valgrind
-// tests.
-int DelayMs() { return (WaitMs() + StealMs()) / 2; }  // 1500ms or 150ms.
+int DelayMs() { return (WaitMs() + StealMs()) / 2; }  // 150ms.
 
 }  // namespace
 

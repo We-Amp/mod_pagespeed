@@ -142,7 +142,8 @@ class DelayImagesFilter : public CommonFilter {
 
   bool added_image_onload_js_;
 
-  DISALLOW_COPY_AND_ASSIGN(DelayImagesFilter);
+  DelayImagesFilter(const DelayImagesFilter&) = delete;
+  DelayImagesFilter& operator=(const DelayImagesFilter&) = delete;
 };
 
 }  // namespace net_instaweb

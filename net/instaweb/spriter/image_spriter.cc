@@ -19,12 +19,12 @@
 
 #include "net/instaweb/spriter/public/image_spriter.h"
 
+#include <memory>
 #include <vector>
 
 #include "base/logging.h"
 #include "net/instaweb/spriter/image_library_interface.h"
 #include "net/instaweb/spriter/public/image_spriter.pb.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/stl_util.h"
 
 namespace net_instaweb {
@@ -34,7 +34,8 @@ ImageSpriter::ImageSpriter(ImageLibraryInterface* image_lib)
     : image_lib_(image_lib) {}
 
 SpriterResult* ImageSpriter::Sprite(const SpriterInput& spriter_input) {
-  std::unique_ptr<SpriterResult> spriter_result(new SpriterResult);
+  std::unique_ptr<SpriterResult> spriter_result =
+      std::make_unique<SpriterResult>();
 
   spriter_result->set_id(spriter_input.id());
   spriter_result->set_output_base_path(
@@ -60,8 +61,8 @@ SpriterResult* ImageSpriter::Sprite(const SpriterInput& spriter_input) {
 template <class T>
 class STLElementDeleter {
  public:
-  STLElementDeleter<T>(T* container) : container_(container) {}
-  ~STLElementDeleter<T>() { STLDeleteElements(container_); }
+  STLElementDeleter(T* container) : container_(container) {}
+  ~STLElementDeleter() { STLDeleteElements(container_); }
 
  private:
   T* container_;
@@ -69,7 +70,7 @@ class STLElementDeleter {
 
 bool ImageSpriter::DrawImagesInVerticalStrip(const SpriterInput& spriter_input,
                                              SpriterResult* spriter_result) {
-  typedef std::vector<ImageLibraryInterface::Image*> ImagePointerVector;
+  using ImagePointerVector = std::vector<ImageLibraryInterface::Image*>;
   ImagePointerVector images;
   STLElementDeleter<ImagePointerVector> images_deleter(&images);
 

@@ -22,6 +22,7 @@
 #include <cstddef>  // for size_t
 #include <iterator>
 #include <map>
+#include <memory>
 #include <set>
 #include <utility>
 #include <vector>
@@ -49,7 +50,6 @@
 #include "pagespeed/kernel/base/function.h"
 #include "pagespeed/kernel/base/md5_hasher.h"
 #include "pagespeed/kernel/base/message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/stl_util.h"
 #include "pagespeed/kernel/base/string.h"
@@ -66,7 +66,7 @@
 
 namespace net_instaweb {
 
-typedef std::map<GoogleString, const spriter::Rect*> RectMap;
+using RectMap = std::map<GoogleString, const spriter::Rect*>;
 namespace {
 
 // names for Statistics variables.
@@ -450,7 +450,8 @@ class SpriteFuture {
   int div_width_;
   int div_height_;
   bool has_position_;
-  DISALLOW_COPY_AND_ASSIGN(SpriteFuture);
+  SpriteFuture(const SpriteFuture&) = delete;
+  SpriteFuture& operator=(const SpriteFuture&) = delete;
 };
 
 // An implementation of the Spriter's ImageLibraryInterface on top of our own
@@ -484,7 +485,8 @@ class Library : public spriter::ImageLibraryInterface {
 
    private:
     net_instaweb::Image* image_;
-    DISALLOW_COPY_AND_ASSIGN(SpriterImage);
+    SpriterImage(const SpriterImage&) = delete;
+    SpriterImage& operator=(const SpriterImage&) = delete;
   };
 
   // A thin layer of glue around an Image as output from the Spriter.
@@ -505,6 +507,11 @@ class Library : public spriter::ImageLibraryInterface {
     ~Canvas() override {}
 
     bool DrawImage(const Image* image, int x, int y) override {
+      // The canvas image may be null if the blank canvas could not be
+      // materialized; fail the sprite rather than dereference it.
+      if (image_ == nullptr) {
+        return false;
+      }
       const SpriterImage* spriter_image =
           static_cast<const SpriterImage*>(image);
       return image_->DrawImage(spriter_image->image(), x, y);
@@ -516,6 +523,11 @@ class Library : public spriter::ImageLibraryInterface {
       if (format != spriter::PNG) {
         return false;
       }
+      // The canvas image may be null if the blank canvas could not be
+      // materialized; never RegisterImage(path, nullptr).
+      if (image_ == nullptr) {
+        return false;
+      }
       lib_->RegisterImage(write_path, image_.release());
       return true;
     }
@@ -524,7 +536,8 @@ class Library : public spriter::ImageLibraryInterface {
     std::unique_ptr<net_instaweb::Image> image_;
     Library* lib_;
 
-    DISALLOW_COPY_AND_ASSIGN(Canvas);
+    Canvas(const Canvas&) = delete;
+    Canvas& operator=(const Canvas&) = delete;
   };
 
   Library(Delegate* delegate, const StringPiece& tmp_dir, Timer* timer,
@@ -581,6 +594,18 @@ class Library : public spriter::ImageLibraryInterface {
         (image_type != net_instaweb::IMAGE_GIF)) {
       handler->Message(kInfo, "Cannot sprite: not PNG or GIF, %s",
                        resource->url().c_str());
+      return false;
+    }
+    // Reject non-positive dimensions.  The raw header sniffing used to
+    // extract dimensions does not validate them (a crafted PNG/GIF can
+    // declare zero width or height), and a zero-dimension image can only
+    // produce a zero-dimension canvas, which cannot be materialized as a
+    // real image.
+    net_instaweb::ImageDim dims;
+    image->Dimensions(&dims);
+    if (dims.width() <= 0 || dims.height() <= 0) {
+      handler->Message(kInfo, "Cannot sprite: bad dimensions %dx%d, %s",
+                       dims.width(), dims.height(), resource->url().c_str());
       return false;
     }
     RegisterImage(resource->url(), image.release());
@@ -735,7 +760,8 @@ class SpriteFutureSlot : public CssResourceSlot {
  private:
   std::unique_ptr<SpriteFuture> future_;
   bool may_sprite_;
-  DISALLOW_COPY_AND_ASSIGN(SpriteFutureSlot);
+  SpriteFutureSlot(const SpriteFutureSlot&) = delete;
+  SpriteFutureSlot& operator=(const SpriteFutureSlot&) = delete;
 };
 
 using SpriteFutureSlotPtr = RefCountedPtr<SpriteFutureSlot>;
@@ -774,7 +800,7 @@ class ImageCombineFilter::Context : public RewriteContext {
   // TODO(nforman): Figure out a way to test cache keys in general.
   GoogleString CacheKeySuffix() const override { return key_suffix_; }
 
-  bool AddFuture(CssResourceSlotPtr slot) {
+  bool AddFuture(const CssResourceSlotPtr& slot) {
     SpriteFutureSlot* future_slot = static_cast<SpriteFutureSlot*>(slot.get());
     StringPiece url(future_slot->future()->old_url());
     AddSlot(ResourceSlotPtr(slot));
@@ -852,6 +878,9 @@ class ImageCombineFilter::Context : public RewriteContext {
               static_cast<SpriteFutureSlot*>(slot(slot_index).get());
           SpriteFuture* future = sprite_slot->future();
           const spriter::Rect* clip_rect = url_to_clip_rect[future->old_url()];
+          if (clip_rect == nullptr) {
+            continue;
+          }
           // Check against original image dimensions.
           // If these are smaller than the div we're putting the image
           // into then we can't sprite this declaraion
@@ -859,28 +888,30 @@ class ImageCombineFilter::Context : public RewriteContext {
               clip_rect->height() < future->height()) {
             continue;
           }
-          if (clip_rect != nullptr) {
-            DCHECK(css_base_url_.IsAnyValid());
-            GoogleString new_url;
-            if (css_base_url_.IsAnyValid()) {
-              new_url = ResourceSlot::RelativizeOrPassthrough(
-                  filter_->driver()->options(), partition->url(),
-                  sprite_slot->url_relativity(), css_base_url_);
-            } else {
-              new_url = partition->url();
-            }
-
-            future->Realize(new_url.c_str(), clip_rect->x_pos(),
-                            clip_rect->y_pos());
-            MessageHandler* handler = filter_->driver()->message_handler();
-            handler->Message(kInfo, "Inserted sprite, url: %s\n",
-                             new_url.c_str());
-            replaced_urls.insert(future->old_url());
-            sprite_slot->set_may_sprite(true);
+          DCHECK(css_base_url_.IsAnyValid());
+          GoogleString new_url;
+          if (css_base_url_.IsAnyValid()) {
+            new_url = ResourceSlot::RelativizeOrPassthrough(
+                filter_->driver()->options(), partition->url(),
+                sprite_slot->url_relativity(), css_base_url_);
+          } else {
+            new_url = partition->url();
           }
+
+          future->Realize(new_url.c_str(), clip_rect->x_pos(),
+                          clip_rect->y_pos());
+          MessageHandler* handler = filter_->driver()->message_handler();
+          handler->Message(kInfo, "Inserted sprite, url: %s\n",
+                           new_url.c_str());
+          replaced_urls.insert(future->old_url());
+          sprite_slot->set_may_sprite(true);
         }
         int sprited = replaced_urls.size();
-        filter_->AddFilesReducedStat(sprited - 1);
+        // When every input was skipped (null clip rect or too-small image)
+        // nothing was sprited; don't record a negative reduction.
+        if (sprited > 0) {
+          filter_->AddFilesReducedStat(sprited - 1);
+        }
       }
     }
     Reset();
@@ -934,7 +965,8 @@ class ImageCombineFilter::Context : public RewriteContext {
 
    private:
     CachedResult* partition_;  // Does not own memory.
-    DISALLOW_COPY_AND_ASSIGN(ImageCombination);
+    ImageCombination(const ImageCombination&) = delete;
+    ImageCombination& operator=(const ImageCombination&) = delete;
   };
 
   using ImageCombinationVector = std::vector<ImageCombination*>;

@@ -113,7 +113,7 @@ void JsDisableFilter::InsertMetaTagForIE(HtmlElement* element) {
 }
 
 void JsDisableFilter::StartElementImpl(HtmlElement* element) {
-  if (element->keyword() == HtmlName::kHead) {
+  if (element->keyword() == HtmlName::kHead) {  // NOLINT(bugprone-branch-clone)
     if (!ie_meta_tag_written_) {
       InsertMetaTagForIE(element);
     }
@@ -123,8 +123,26 @@ void JsDisableFilter::StartElementImpl(HtmlElement* element) {
     }
   } else {
     HtmlElement::Attribute* src;
-    if (script_tag_scanner_.ParseScriptElement(element, &src) ==
-        ScriptTagScanner::kJavaScript) {
+    ScriptTagScanner::ScriptClassification classification =
+        script_tag_scanner_.ParseScriptElement(element, &src);
+    if (classification == ScriptTagScanner::kJavaScriptModule) {
+      // Modules are already deferred by spec, and the deferJs runtime
+      // re-executes script bodies via injected inline JS/eval, where
+      // import/export are SyntaxErrors; a re-typed src'd module would also
+      // be re-fetched as a classic script. Leave module elements alone.
+      // No log record: LogJsDisableFilter's only payload is
+      // has_pagespeed_no_defer, and logging a module skip there would
+      // conflate two distinct skip reasons in log analysis.
+      return;
+    }
+    if (classification == ScriptTagScanner::kJavaScript) {
+      // The deferJs runtime re-executes disabled scripts via injected inline
+      // JS; if the page's CSP forbids inline scripts, disabling this script
+      // would leave it dead in the browser. Back off, matching
+      // JsDeferDisabledFilter::ShouldApply().
+      if (!CspPermitsInlineScript()) {
+        return;
+      }
       if (element->FindAttribute(HtmlName::kDataPagespeedNoDefer) ||
           element->FindAttribute(HtmlName::kPagespeedNoDefer)) {
         driver()->log_record()->LogJsDisableFilter(
@@ -137,9 +155,10 @@ void JsDisableFilter::StartElementImpl(HtmlElement* element) {
         GoogleUrl abs_url(driver()->base_url(), src->DecodedValueOrNull());
         if (abs_url.IsWebValid() &&
             !driver()->options()->IsAllowed(abs_url.Spec())) {
-          driver()->log_record()->LogJsDisableFilter(
-              RewriteOptions::FilterId(RewriteOptions::kDisableJavascript),
-              true);
+          // No log record: LogJsDisableFilter's only payload is
+          // has_pagespeed_no_defer, and logging a disallow skip there would
+          // conflate an admin-config skip with an author opt-out (the same
+          // conflation the module skip path above avoids).
           return;
         }
       }
@@ -176,7 +195,11 @@ void JsDisableFilter::StartElementImpl(HtmlElement* element) {
   }
 
   HtmlElement::Attribute* onload = element->FindAttribute(HtmlName::kOnload);
-  if (onload != nullptr) {
+  // The replacement onload handler is an inline event-handler attribute
+  // whose original is only re-triggered by the deferJs runtime; leave the
+  // handler alone when the page's CSP forbids either.
+  if (onload != nullptr && CspPermitsInlineScript() &&
+      CspPermitsInlineScriptAttribute()) {
     // The onload value can be any script. It's not necessary that it is
     // always javascript. But we don't have any way of identifying it.
     // For now let us assume it is JS, which is the case in majority.
@@ -193,6 +216,13 @@ void JsDisableFilter::StartElementImpl(HtmlElement* element) {
 
 void JsDisableFilter::EndElementImpl(HtmlElement* element) {}
 
-void JsDisableFilter::EndDocument() { InsertJsDeferExperimentalScript(); }
+void JsDisableFilter::EndDocument() {
+  if (!CspPermitsInlineScript()) {
+    // The experimental-defer marker is an inline script; the CSP that
+    // suppressed script disabling above blocks it as well.
+    return;
+  }
+  InsertJsDeferExperimentalScript();
+}
 
 }  // namespace net_instaweb

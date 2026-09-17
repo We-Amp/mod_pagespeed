@@ -19,6 +19,8 @@
 
 //     and sligocki@google.com (Shawn Ligocki)
 
+#include <memory>
+
 #include "net/instaweb/rewriter/public/css_filter.h"
 
 #include "net/instaweb/http/public/async_fetch.h"
@@ -32,9 +34,7 @@
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "pagespeed/kernel/base/abstract_mutex.h"  // for ScopedMutex
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/dynamic_annotations.h"  // RunningOnValgrind
 #include "pagespeed/kernel/base/message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -485,6 +485,27 @@ TEST_F(CssFilterTest, RewriteEmptyCssTest) {
   EXPECT_EQ(0, num_parse_failures_->Get());
 }
 
+// Regression test for a "</style>" breakout XSS. When rewrite_css minifies an
+// inline <style>, the CSS parser decodes hex escapes ("\3C" -> '<') and the
+// serializer (Css::EscapeString) does not re-escape '<', '>' or '/'. A crafted
+// content string such as "\3C/style\3E\3Cscript\3E..." -- inert as authored --
+// would otherwise serialize to a literal "</style><script>...", breaking out of
+// the inline <style> element (stored/reflected XSS). The inline optimization
+// must be abandoned (element left unchanged) so the escaped text stays inert.
+TEST_F(CssFilterTest, DoesNotBreakOutOfInlineStyleViaEscapedClosingTag) {
+  const char kEvilCss[] =
+      "a::after{content:\"\\3C/style\\3E\\3Cscript\\3Ealert(1)"
+      "\\3C/script\\3E\"}";
+  GoogleString html = StrCat("<head><style>", kEvilCss, "</style></head>");
+  Parse("escaped_style_breakout", html);
+  // The rewritten HTML must not contain a live </style> breakout, nor a bare
+  // <script> materialized from the decoded CSS content string.
+  EXPECT_EQ(GoogleString::npos, output_buffer_.find("</style><script"))
+      << output_buffer_;
+  EXPECT_EQ(GoogleString::npos, output_buffer_.find("<script>alert"))
+      << output_buffer_;
+}
+
 // Make sure we allow rewriting to empty output (ex: input all commented out).
 TEST_F(CssFilterTest, EmptyOutput) {
   ValidateRewrite("empty_output", "/* body { background: blue; } */\n", "",
@@ -682,9 +703,6 @@ TEST_F(CssFilterTest, RewriteVariousCss) {
       // TODO(sligocki): rm spaces around COMMA token.
       "a{-webkit-transition-property:opacity , -webkit-transform}",
 
-      // Parameterized pseudo-selector.
-      "div:nth-child(1n) {color:red}",
-
       // IE8 Hack \0/
       // See http://dimox.net/personal-css-hacks-for-ie6-ie7-ie8/
       "a{color: red\\0/ ;background-color:green}",
@@ -692,7 +710,6 @@ TEST_F(CssFilterTest, RewriteVariousCss) {
       "@media screen and (min-width:0 \\\\0){.foo{color:red}}",
 
       "a{font:bold verdana 10px }",
-      "a{foo: +bar }",
       "a{color: rgb(foo,+,) }",
 
       // Malformed @import statements.
@@ -710,8 +727,10 @@ TEST_F(CssFilterTest, RewriteVariousCss) {
       // Important: Don't "fix" by adding space between 'and' and '('.
       "@media only screen and(min-resolution:240dpi){ .bar{ background: red; "
       "}}",
-      // Unexpected space in media feature name.
-      "@media (max-de vice-width: 850px) { .pm-thumb-106 { width: 80px; } }",
+      // Unexpected space in media feature name: a general-enclosed raw
+      // expression (MQ4), so the block minifies; the bytes inside the
+      // parens stay verbatim. The spaced form is pinned separately below.
+      "@media (max-de vice-width: 850px){.pm-thumb-106{width:80px}}",
       // Unexpected \0 in various places. Common browser hack.
       "@media screen\\0{ .select:before { width: 18px; } }",
       "@media screen and (min-width:0 \\0) { .foo { color: red; } }",
@@ -758,9 +777,6 @@ TEST_F(CssFilterTest, RewriteVariousCss) {
       // kSelectorError from Alexa-100
       // Selector list ends in comma
       ".hp .col ul, {display:inline}",
-      // Parameters for pseudoclass
-      "body:not(:target) {color:red}",
-      "a:not(.button):hover {color:red}",
       // Typos
       "# new_results_notification{font-size:12px}",
       ".bold: {font-weight:bold}",
@@ -798,6 +814,39 @@ TEST_F(CssFilterTest, RewriteVariousCss) {
     GoogleString id = absl::StrFormat("distilled_css_good%d", i);
     ValidateRewrite(id, good_examples[i], good_examples[i], kExpectSuccess);
   }
+
+  // A '+' not directly attached to a number now lexes as an OPERATOR value
+  // (for calc() addition), so this invalid declaration parses and minifies
+  // instead of round-tripping verbatim; the joined values gain a space the
+  // original did not have. Browsers drop the declaration either way.
+  ValidateRewrite("plus_operator_value", "a{foo: +bar }", "a{foo:+ bar}",
+                  kExpectSuccess);
+
+  // Functional pseudo-class arguments now round-trip (opaque
+  // pass-through) instead of failing the selector parse, so these rulesets
+  // parse and minify — arguments retained — rather than round-tripping
+  // byte-exact as preserved unparsed-selectors regions.
+  ValidateRewrite("functional_pseudo_nth_child",
+                  "div:nth-child(1n) {color:red}",
+                  "div:nth-child(1n){color:red}", kExpectSuccess);
+  ValidateRewrite("functional_pseudo_not_target",
+                  "body:not(:target) {color:red}",
+                  "body:not(:target){color:red}", kExpectSuccess);
+  ValidateRewrite("functional_pseudo_not_hover",
+                  "a:not(.button):hover {color:red}",
+                  "a:not(.button):hover{color:red}", kExpectSuccess);
+
+  // A space inside a media feature name makes the expression
+  // general-enclosed; it used to fail the media-query parse and preserve
+  // the whole block verbatim. As a raw expression the block now minifies —
+  // with the expression bytes untouched, so browsers still evaluate the
+  // query to unknown/false exactly as before.
+  ValidateRewrite("media_feature_name_space",
+                  "@media (max-de vice-width: 850px) "
+                  "{ .pm-thumb-106 { width: 80px; } }",
+                  "@media (max-de vice-width: 850px)"
+                  "{.pm-thumb-106{width:80px}}",
+                  kExpectSuccess);
 
   const char* fail_examples[] = {
       // Unclosed at-rules.
@@ -1365,7 +1414,11 @@ TEST_F(CssFilterTest, ComplexCssTest) {
        ".ciuNoteBox .topLeft,\n"
        ".ciuNoteEditBox .topLeft, x:-moz-any-link {font-size:0}"},
 
-      // Parameters for pseudoclass
+      // Parameters for pseudoclass. Functional
+      // pseudo-class arguments now parse (opaque pass-through), so these
+      // selectors are no longer preserved byte-exact as unparsed-selectors
+      // regions: the arguments are retained verbatim, but the selector-list
+      // joins now minify (", "/",\n" -> ",").
       {"/* Opera（＋Firefox、Safari） */\n"
        "body:not(:target) .sh_heading_main_b, body:not(:target) "
        ".sh_heading_main_b_wide{\n"
@@ -1393,19 +1446,18 @@ TEST_F(CssFilterTest, ComplexCssTest) {
        "from(#FFFFFF), to(#F0F0F0));\n"
        "}\n",
 
-       "body:not(:target) .sh_heading_main_b, body:not(:target) "
+       "body:not(:target) .sh_heading_main_b,body:not(:target) "
        ".sh_heading_main_b_wide{background:url(data:image/png;base64,"
        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAAoCAYAAAA/tpB3AAAAQ0lEQVR42k3EMQLAIAg"
        "EMP//WkRQVMB2YLgMae/XMhOLCMzdq3svds7B9t6VmWFrLWzOWakqJiLYGKNiZqz3jh"
        "HR+wBZbpvd95zR6QAAAABJRU5ErkJggg==) repeat-x left top}"
        "html:not([lang*="
-       "]) .sh_heading_main_b,\n"
-       "html:not([lang*="
+       "]) .sh_heading_main_b,html:not([lang*="
        "]) .sh_heading_main_b_wide{"
        "background:-moz-linear-gradient(top,#fff,#f0f0f0);"
        "background:-webkit-gradient(linear,left top,left bottom,"
        "from(#fff),to(#f0f0f0))}"
-       "html:not(:only-child:only-child) .sh_heading_main_b,\n"
+       "html:not(:only-child:only-child) .sh_heading_main_b,"
        "html:not(:only-child:only-child) .sh_heading_main_b_wide{"
        "background:-webkit-gradient(linear,left top,left bottom,"
        "from(#fff),to(#f0f0f0))}"},
@@ -1812,6 +1864,43 @@ TEST_F(CssFilterTest, NoAlwaysRewriteCss) {
   ValidateRewrite("contracting_example2", "  ", "", kExpectSuccess);
 }
 
+TEST_F(CssFilterTest, GroupRuleSheetPassesBytesGate) {
+  // Production runs with always_rewrite_css(false): a rewrite is only used
+  // when it saves bytes. A sheet wrapped whole in @layer used to be one
+  // opaque verbatim region — zero bytes saved, dropped as "Cannot improve".
+  // Minification inside the group body must flip that gate.
+  options()->ClearSignatureForTesting();
+  options()->set_always_rewrite_css(false);
+  server_context()->ComputeSignature(options());
+  ValidateRewrite("group_rule_bytes_gate",
+                  "@layer base {\n  .a { top: 0px; }\n}\n",
+                  "@layer base{.a{top:0}}", kExpectSuccess);
+}
+
+TEST_F(CssFilterTest, MediaRangeSyntaxMinified) {
+  // MQ4 range syntax is captured as a raw media expression: the block
+  // minifies with the expression bytes verbatim.
+  ValidateRewrite("media_range_syntax",
+                  "@media (width >= 768px) { .a { color: red; } }",
+                  "@media (width >= 768px){.a{color:red}}", kExpectSuccess);
+}
+
+TEST_F(CssFilterTest, MediaStraySemicolonMinified) {
+  // A trailing stray ';' inside an @media block used to fail the whole sheet,
+  // so it was served unchanged. It now parses and minifies like any other.
+  ValidateRewrite("media_stray_semicolon",
+                  "@media screen { .a { color: red }; }",
+                  "@media screen{.a{color:red}}", kExpectSuccess);
+}
+
+TEST_F(CssFilterTest, BrokenGroupRuleFallsBack) {
+  // EOF inside a group body preserves the parse error; with no fallback
+  // configured the original bytes must be served unchanged.
+  DebugWithMessage("<!--CSS rewrite failed: Parse error in %url%-->");
+  ValidateFailParse("broken_group_rule",
+                    "@supports (display: grid) { .a { color: red }");
+}
+
 TEST_F(CssFilterTest, RemoveComments) {
   ValidateRewrite("remove_comments", " /* This comment will be removed. */ ",
                   "", kExpectSuccess);
@@ -2001,10 +2090,6 @@ TEST_F(CssFilterTest, DontAbsolutifyEmptyUrl) {
 }
 
 TEST_F(CssFilterTest, WebpRewriting) {
-  if (RunningOnValgrind()) {  // Too slow under vg.
-    return;
-  }
-
   options()->ClearSignatureForTesting();
   options()->EnableFilter(RewriteOptions::kConvertJpegToWebp);
   options()->EnableFilter(RewriteOptions::kRewriteCss);
@@ -2017,10 +2102,6 @@ TEST_F(CssFilterTest, WebpRewriting) {
 }
 
 TEST_F(CssFilterTest, WebpLaRewriting) {
-  if (RunningOnValgrind()) {  // Too slow under vg.
-    return;
-  }
-
   options()->ClearSignatureForTesting();
   options()->EnableFilter(RewriteOptions::kConvertJpegToWebp);
   options()->EnableFilter(RewriteOptions::kRewriteCss);
@@ -2033,10 +2114,6 @@ TEST_F(CssFilterTest, WebpLaRewriting) {
 }
 
 TEST_F(CssFilterTest, WebpLaWithFlagRewriting) {
-  if (RunningOnValgrind()) {  // Too slow under vg.
-    return;
-  }
-
   options()->ClearSignatureForTesting();
   options()->EnableFilter(RewriteOptions::kConvertToWebpLossless);
   options()->EnableFilter(RewriteOptions::kConvertJpegToWebp);
@@ -2063,10 +2140,6 @@ TEST_F(CssFilterTest, NoWebpRewritingFromJpgIfDisabled) {
 }
 
 TEST_F(CssFilterTest, WebpRewritingFromJpgWithWebpFlagWebpLaUa) {
-  if (RunningOnValgrind()) {  // Too slow under vg.
-    return;
-  }
-
   options()->ClearSignatureForTesting();
   options()->EnableFilter(RewriteOptions::kConvertJpegToWebp);
   options()->EnableFilter(RewriteOptions::kRecompressJpeg);
@@ -2081,10 +2154,6 @@ TEST_F(CssFilterTest, WebpRewritingFromJpgWithWebpFlagWebpLaUa) {
 }
 
 TEST_F(CssFilterTest, WebpRewritingFromJpgWithWebpFlagWebpUa) {
-  if (RunningOnValgrind()) {  // Too slow under vg.
-    return;
-  }
-
   options()->ClearSignatureForTesting();
   options()->EnableFilter(RewriteOptions::kConvertJpegToWebp);
   options()->EnableFilter(RewriteOptions::kRecompressJpeg);
@@ -2211,6 +2280,65 @@ TEST_F(CssFilterTest, AbsolutifyUnparseableUrlsWithDomainMapping) {
       "absolutify_unparseable_urls_etc_without", css_input, css_output,
       true /* expect_unparseable_section */, false /* enable_image_rewriting */,
       false /* enable_proxy_mode */, true /* enable_mapping_and_sharding */);
+}
+
+TEST_F(CssFilterTest, AbsolutifyGroupRuleUrlsWithDomainMapping) {
+  // url()s inside @supports/@layer bodies are parsed declarations, so the
+  // textual unparseable-section path never sees them: absolutification must
+  // recurse into group bodies (both plain rulesets and body @font-face) or
+  // domain-mapped/proxied CSS keeps broken relative url()s. Note the group
+  // sheet parses cleanly — no unparseable section.
+  const char css_input[] =
+      "@supports (display: grid) { body { background: url(a.png) } }"
+      "@layer base { @font-face { src: url(sub/c.png) } }";
+  const char css_output[] =
+      "@supports (display: grid)"
+      "{body{background:url(http://cdn2.com/a.png)}}"
+      "@layer base{@font-face{src:url(http://cdn1.com/sub/c.png)}}";
+  TestUrlAbsolutification(
+      "absolutify_group_rule_urls", css_input, css_output,
+      false /* expect_unparseable_section */,
+      false /* enable_image_rewriting */, false /* enable_proxy_mode */,
+      true /* enable_mapping_and_sharding */);
+}
+
+TEST_F(CssFilterTest, AbsolutifyGroupRulePreludeUrlWithDomainMapping) {
+  // A url() in a group-rule prelude is invisible to the parsed-declaration
+  // walk: the prelude is opaque bytes. This sheet parses cleanly, so
+  // unparseable_detected() is false and the textual absolutify pass must be
+  // enabled by the group rule's presence alone -- pre-777f36421 the
+  // @supports block itself was an UnparsedRegion, which set the
+  // unparseable-section mask and got its prelude urls absolutified.
+  const char css_input[] =
+      "@supports (background: image-set(url(a.png) 1x)) {"
+      " body { background: url(sub/c.png) } }";
+  const char css_output[] =
+      "@supports (background: image-set(url(http://cdn2.com/a.png) 1x))"
+      "{body{background:url(http://cdn1.com/sub/c.png)}}";
+  TestUrlAbsolutification(
+      "absolutify_group_rule_prelude_url", css_input, css_output,
+      false /* expect_unparseable_section */,
+      false /* enable_image_rewriting */, false /* enable_proxy_mode */,
+      true /* enable_mapping_and_sharding */);
+}
+
+TEST_F(CssFilterTest, AbsolutifyMediaStraySemicolonUrlWithDomainMapping) {
+  // Case B of the @media stray-';' recovery: the rule AFTER the ';' used to
+  // be demoted to a dummy-selector verbatim region, which set the
+  // unparseable-section mask and routed its url()s through the textual
+  // absolutify pass. It is now a real parsed ruleset and the sheet is clean,
+  // so the parsed-declaration walk must pick the url() up instead. Either way
+  // the url has to come out absolutified -- this pins that the
+  // unparseable_detected() flip loses no url handling.
+  const char css_input[] =
+      "@media screen { .x { color: red }; .y { background: url(a.png) } }";
+  const char css_output[] =
+      "@media screen{.x{color:red}.y{background:url(http://cdn2.com/a.png)}}";
+  TestUrlAbsolutification("absolutify_media_stray_semicolon_url", css_input,
+                          css_output, false /* expect_unparseable_section */,
+                          false /* enable_image_rewriting */,
+                          false /* enable_proxy_mode */,
+                          true /* enable_mapping_and_sharding */);
 }
 
 TEST_F(CssFilterTest, DontAbsolutifyCursorUrlsWithoutDomainMapping) {

@@ -6854,14 +6854,12 @@ pagespeed.Graphs.prototype.drawVisualization = function() {
   this.drawBarChart("file_cache", "File Cache", pagespeed.Graphs.DisplayDiv.CACHE_TYPE);
   this.drawBarChart("memcached", "Memcached", pagespeed.Graphs.DisplayDiv.CACHE_TYPE);
   this.drawBarChart("redis", "Redis", pagespeed.Graphs.DisplayDiv.CACHE_TYPE);
-  this.drawBarChart("lru_cache", "LRU", pagespeed.Graphs.DisplayDiv.CACHE_TYPE);
   this.drawBarChart("shm_cache", "Shared Memory", pagespeed.Graphs.DisplayDiv.CACHE_TYPE);
   this.drawBarChart("ipro", "In place resource optimization", pagespeed.Graphs.DisplayDiv.IPRO);
   this.drawBarChart("image_rewrite", "Image rewrite", pagespeed.Graphs.DisplayDiv.REWRITE_IMAGE);
   this.drawBarChart("image_rewrites_dropped", "Image rewrites dropped", pagespeed.Graphs.DisplayDiv.REWRITE_IMAGE);
   this.drawHistoryChart("http", "Http", pagespeed.Graphs.DisplayDiv.REALTIME);
   this.drawHistoryChart("file_cache", "File Cache RT", pagespeed.Graphs.DisplayDiv.REALTIME);
-  this.drawHistoryChart("lru_cache", "LRU Cache RT", pagespeed.Graphs.DisplayDiv.REALTIME);
   this.drawHistoryChart("serf_fetch", "Serf stats RT", pagespeed.Graphs.DisplayDiv.REALTIME);
   this.drawHistoryChart("rewrite", "Rewrite stats RT", pagespeed.Graphs.DisplayDiv.REALTIME);
 };

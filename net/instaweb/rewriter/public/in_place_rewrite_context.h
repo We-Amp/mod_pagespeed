@@ -20,6 +20,8 @@
 #ifndef NET_INSTAWEB_REWRITER_PUBLIC_IN_PLACE_REWRITE_CONTEXT_H_
 #define NET_INSTAWEB_REWRITER_PUBLIC_IN_PLACE_REWRITE_CONTEXT_H_
 
+#include <memory>
+
 #include "net/instaweb/http/public/async_fetch.h"
 #include "net/instaweb/http/public/http_value.h"
 #include "net/instaweb/http/public/http_value_writer.h"
@@ -32,7 +34,7 @@
 #include "net/instaweb/rewriter/public/single_rewrite_context.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/proto_util.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
+#include "pagespeed/kernel/base/shared_string.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/http/content_type.h"
@@ -71,7 +73,9 @@ class InPlaceRewriteResourceSlot : public ResourceSlot {
   ~InPlaceRewriteResourceSlot() override;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(InPlaceRewriteResourceSlot);
+  InPlaceRewriteResourceSlot(const InPlaceRewriteResourceSlot&) = delete;
+  InPlaceRewriteResourceSlot& operator=(const InPlaceRewriteResourceSlot&) =
+      delete;
 };
 
 // Context that is used for an in-place rewrite.
@@ -107,17 +111,14 @@ class InPlaceRewriteContext : public SingleRewriteContext {
 
   int64 GetRewriteDeadlineAlarmMs() const override;
 
-  GoogleString UserAgentCacheKey(
-      const ResourceContext* resource_context) const override;
-  void EncodeUserAgentIntoResourceContext(ResourceContext* context) override;
-
   // We don't lock for IPRO because IPRO would rather stream back the original
   // resource than wait for the optimization.
   bool CreationLockBeforeStartFetch() const override { return false; }
 
   // The context nested inside this context can be scheduled via the
-  // CentralController. See comment in RewriteContext::ObtainLockForCreation.
-  bool ScheduleNestedContextViaCentalController() const override {
+  // named-lock rewrite scheduler. See comment in
+  // RewriteContext::ObtainLockForCreation.
+  bool ScheduleNestedContextViaNamedLockController() const override {
     return true;
   }
 
@@ -141,13 +142,6 @@ class InPlaceRewriteContext : public SingleRewriteContext {
   // Update the date and expiry time based on the InputInfo's.
   void UpdateDateAndExpiry(const protobuf::RepeatedPtrField<InputInfo>& inputs,
                            int64* date_ms, int64* expiry_ms);
-  // Returns true if kInPlaceOptimizeForBrowser is enabled and we
-  // actually need to do browser specific rewriting based on options.
-  bool InPlaceOptimizeForBrowserEnabled() const;
-  // Add a Vary: user-agent or Vary: Accept header as appropriate
-  // if the fetch result may be browser dependent.
-  void AddVaryIfRequired(const CachedResult& cached_result,
-                         ResponseHeaders* headers) const;
   // Image rewriting adds a Link rel=canonical header.  Because a single cached
   // result can be served from multiple urls we do need to keep generating it.
   // But when serving via IPRO we should remove it if the url hasn't changed.
@@ -181,7 +175,8 @@ class InPlaceRewriteContext : public SingleRewriteContext {
   // and let the origin itself serve the resource.
   bool proxy_mode_;
 
-  DISALLOW_COPY_AND_ASSIGN(InPlaceRewriteContext);
+  InPlaceRewriteContext(const InPlaceRewriteContext&) = delete;
+  InPlaceRewriteContext& operator=(const InPlaceRewriteContext&) = delete;
 };
 
 // Records the fetch into the provided resource and passes through events to the
@@ -203,6 +198,31 @@ class RecordingFetch : public SharedAsyncFetch {
   bool HandleFlush(MessageHandler* handler) override;
   // Implements SharedAsyncFetch::HandleDone().
   void HandleDone(bool success) override;
+
+  // A zero-copy aliased serve must NOT bypass IPRO recording: de-alias
+  // with the verified copy (CopyMappedVerified), then run the copying
+  // Write() so HandleWrite records the bytes for optimization.  The verify
+  // (after the memcpy) matters doubly here: recorded bytes are written back
+  // into the cache, so a torn borrow would otherwise become PERSISTENT
+  // poisoning, not just one bad response.  Torn => fail the write
+  // (recording aborts).
+  bool WriteMapped(const StringPiece& mmap_sp,
+                   const MappedSharedString& keepalive,
+                   MessageHandler* handler) override {
+    GoogleString owned;
+    if (!CopyMappedVerified(mmap_sp, keepalive, &owned)) {
+      return false;
+    }
+    return Write(owned, handler);
+  }
+
+  // A shared-storage serve must not bypass IPRO recording either: force
+  // the copying HandleWrite instead of forwarding the reference.
+  bool HandleWriteShared(const StringPiece& content,
+                         const SharedString& /*storage*/,
+                         MessageHandler* handler) override {
+    return HandleWrite(content, handler);
+  }
 
  private:
   void FreeDriver();
@@ -236,7 +256,8 @@ class RecordingFetch : public SharedAsyncFetch {
   std::unique_ptr<ResponseHeaders> saved_headers_;
   Variable* in_place_oversized_opt_stream_;
   Variable* in_place_uncacheable_rewrites_;
-  DISALLOW_COPY_AND_ASSIGN(RecordingFetch);
+  RecordingFetch(const RecordingFetch&) = delete;
+  RecordingFetch& operator=(const RecordingFetch&) = delete;
 };
 
 }  // namespace net_instaweb

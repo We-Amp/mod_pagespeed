@@ -19,6 +19,8 @@
 
 #include "pagespeed/kernel/html/html_attribute_quote_removal.h"
 
+#include <array>
+
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/html/doctype.h"
 #include "pagespeed/kernel/html/html_element.h"
@@ -28,10 +30,26 @@ namespace {
 
 // Explicit about signedness because we are
 // loading a 0-indexed lookup table.
-const unsigned char kNoQuoteChars[] =
+// "/" is legal in unquoted attribute values per HTML5 (the forbidden set is
+// only whitespace, '"' "'" '=' '<' '>' and backtick); the "/>" re-parse
+// hazard on brief-closed tags is guarded by HtmlWriterFilter
+// (html_writer_filter.cc).
+constexpr char kNoQuoteChars[] =
     "abcdefghijklmnopqrstuvwxyz"
     "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-    "0123456789-._:";
+    "0123456789-._:/";
+
+// Build the lookup table at compile time using constexpr.
+constexpr std::array<bool, 256> BuildNeedsNoQuotesTable() {
+  std::array<bool, 256> table = {};  // Zero-initialized
+  for (int i = 0; kNoQuoteChars[i] != '\0'; ++i) {
+    table[static_cast<unsigned char>(kNoQuoteChars[i])] = true;
+  }
+  return table;
+}
+
+// Static lookup table built at compile time.
+constexpr std::array<bool, 256> kNeedsNoQuotes = BuildNeedsNoQuotesTable();
 
 }  // namespace
 
@@ -42,24 +60,7 @@ namespace net_instaweb {
 // Remove quotes; see description in .h file.
 
 HtmlAttributeQuoteRemoval::HtmlAttributeQuoteRemoval(HtmlParse* html_parse)
-    : total_quotes_removed_(0), html_parse_(html_parse) {
-  // In pidgin Python:
-  //    needs_no_quotes[:] = false
-  //    needs_no_quotes[kNoQuoteChars] = true
-
-  // TODO(jmarantz): put this in a static Initialize method to avoid
-  // per-request construction costs.
-  memset(&needs_no_quotes_, 0, sizeof(needs_no_quotes_));
-  for (int i = 0; kNoQuoteChars[i] != '\0'; ++i) {
-    needs_no_quotes_[kNoQuoteChars[i]] = true;
-  }
-
-  // All 8-bit characters can remain unquoted.
-  // TODO(jmarantz): uncomment in a follow-up.  This should be fine.
-  // for (int i = 128; i < 256; ++i) {
-  //   needs_no_quotes_[i] = true;
-  // }
-}
+    : total_quotes_removed_(0), html_parse_(html_parse) {}
 
 HtmlAttributeQuoteRemoval::~HtmlAttributeQuoteRemoval() {}
 
@@ -69,8 +70,8 @@ bool HtmlAttributeQuoteRemoval::NeedsQuotes(const char* val) {
   if (val != nullptr) {
     for (; val[i] != '\0'; ++i) {
       // Explicit cast to unsigned char ensures that our offset
-      // into needs_no_quotes_ is positive.
-      needs_quotes = !needs_no_quotes_[static_cast<unsigned char>(val[i])];
+      // into kNeedsNoQuotes is positive.
+      needs_quotes = !kNeedsNoQuotes[static_cast<unsigned char>(val[i])];
       if (needs_quotes) {
         break;
       }

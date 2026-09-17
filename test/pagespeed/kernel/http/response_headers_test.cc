@@ -212,6 +212,16 @@ class ResponseHeadersTest : public testing::Test {
     return headers.LookupJoined(HttpAttributes::kCacheControl);
   }
 
+  // Same as AddPublicToCacheControl, but for SetCacheControlImmutable.
+  GoogleString AddImmutableToCacheControl(const StringVector& cache_control) {
+    ResponseHeaders headers;
+    for (int i = 0, n = cache_control.size(); i < n; ++i) {
+      headers.Add(HttpAttributes::kCacheControl, cache_control[i]);
+    }
+    headers.SetCacheControlImmutable();
+    return headers.LookupJoined(HttpAttributes::kCacheControl);
+  }
+
   GoogleMessageHandler message_handler_;
   ResponseHeaders response_headers_;
   ResponseHeadersParser parser_;
@@ -226,7 +236,8 @@ class ResponseHeadersTest : public testing::Test {
   const GoogleString max_age_300_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(ResponseHeadersTest);
+  ResponseHeadersTest(const ResponseHeadersTest&) = delete;
+  ResponseHeadersTest& operator=(const ResponseHeadersTest&) = delete;
 };
 
 // Parse the headers from google.com
@@ -297,6 +308,29 @@ TEST_F(ResponseHeadersTest, TestParseAndWrite) {
   ResponseHeaders response_headers3;
   ASSERT_TRUE(response_headers3.ReadFromBinary(outbuf, &message_handler_));
   CheckGoogleHeaders(response_headers3);
+}
+
+TEST_F(ResponseHeadersTest, HasValueCaseInsensitive) {
+  // #737: the case-insensitive sibling of HasValue, for header fields whose
+  // values are RFC 9110 tokens. Driven beside a byte-exact HasValue row for
+  // each case so the two methods' difference is pinned, not implied.
+  response_headers_.Add(HttpAttributes::kVary, "accept");
+  response_headers_.Add(HttpAttributes::kVary, "Accept-Encoding, Cookie");
+  // Case-variant token: only the case-insensitive form sees it.
+  EXPECT_FALSE(response_headers_.HasValue(HttpAttributes::kVary, "Accept"));
+  EXPECT_TRUE(response_headers_.HasValueCaseInsensitive(HttpAttributes::kVary,
+                                                        "Accept"));
+  // Comma-splitting applies to both (Vary is a comma-separated field).
+  EXPECT_TRUE(response_headers_.HasValueCaseInsensitive(HttpAttributes::kVary,
+                                                        "COOKIE"));
+  EXPECT_TRUE(response_headers_.HasValue(HttpAttributes::kVary, "Cookie"));
+  // Absent token: both say no.
+  EXPECT_FALSE(response_headers_.HasValueCaseInsensitive(HttpAttributes::kVary,
+                                                         "User-Agent"));
+  EXPECT_FALSE(response_headers_.HasValue(HttpAttributes::kVary, "User-Agent"));
+  // No substring matching: a token is matched whole.
+  EXPECT_FALSE(response_headers_.HasValueCaseInsensitive(HttpAttributes::kVary,
+                                                         "Accept-Enc"));
 }
 
 TEST_F(ResponseHeadersTest, TestSizeEstimate) {
@@ -2283,6 +2317,25 @@ TEST_F(ResponseHeadersTest, CacheControlPublic) {
   EXPECT_STREQ("No-Cache", AddPublicToCacheControl({"No-Cache"}));
 }
 
+TEST_F(ResponseHeadersTest, CacheControlImmutable) {
+  EXPECT_STREQ("max-age=100, immutable",
+               AddImmutableToCacheControl({"max-age=100"}));
+  EXPECT_STREQ("max-age=100, public, immutable",
+               AddImmutableToCacheControl({"max-age=100, public"}));
+  // Idempotent: a second application changes nothing.
+  EXPECT_STREQ("max-age=100, immutable",
+               AddImmutableToCacheControl({"max-age=100, immutable"}));
+  EXPECT_STREQ("max-age=100, Immutable",
+               AddImmutableToCacheControl({"max-age=100, Immutable"}));
+  // Refuses to mark non-publicly-cacheable responses.
+  EXPECT_STREQ("max-age=100, private",
+               AddImmutableToCacheControl({"max-age=100,private"}));
+  EXPECT_STREQ("no-store", AddImmutableToCacheControl({"no-store"}));
+  EXPECT_STREQ("no-cache", AddImmutableToCacheControl({"no-cache"}));
+  EXPECT_STREQ("No-Store", AddImmutableToCacheControl({"No-Store"}));
+  EXPECT_STREQ("No-Cache", AddImmutableToCacheControl({"No-Cache"}));
+}
+
 TEST_F(ResponseHeadersTest, TestHopByHopSanitization) {
   // RFC hop-by-hop list: http://tools.ietf.org/html/rfc7230#section-6.1
   ResponseHeaders headers;
@@ -2317,6 +2370,31 @@ TEST_F(ResponseHeadersTest, TestHopByHopSanitization) {
 
   EXPECT_TRUE(headers2.Sanitize());
   EXPECT_EQ("HTTP/1.0 0 (null)\r\nbar: baz\r\n\r\n", headers2.ToString());
+}
+
+// Crafted input carrying a pathological number of headers must not be able to
+// grow the protobuf without bound: Add() caps the stored header count at
+// kMaxHeaders and silently drops the overflow.
+TEST_F(ResponseHeadersTest, MaxHeaderCountGuard) {
+  const int kMax = ResponseHeaders::kMaxHeaders;
+  ResponseHeaders headers;
+
+  // Add well past the cap.
+  const int kOverflow = kMax + 500;
+  for (int i = 0; i < kOverflow; ++i) {
+    headers.Add(StrCat("X-Header-", IntegerToString(i)), "v");
+  }
+
+  // The guard must have tripped: we stored exactly kMaxHeaders, not kOverflow.
+  EXPECT_EQ(kMax, headers.NumAttributes());
+  EXPECT_LT(headers.NumAttributes(), kOverflow);
+
+  // Headers added before the cap are retained; ones past it are dropped.
+  ConstStringStarVector values;
+  EXPECT_TRUE(headers.Lookup("X-Header-0", &values));
+  EXPECT_FALSE(
+      headers.Lookup(StrCat("X-Header-", IntegerToString(kOverflow - 1)),
+                     &values));
 }
 
 }  // namespace net_instaweb

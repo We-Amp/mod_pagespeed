@@ -20,14 +20,13 @@
 #ifndef PAGESPEED_KERNEL_SHAREDMEM_SHARED_MEM_CACHE_TEST_BASE_H_
 #define PAGESPEED_KERNEL_SHAREDMEM_SHARED_MEM_CACHE_TEST_BASE_H_
 
+#include <memory>
+
 #include "pagespeed/kernel/base/abstract_shared_mem.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/md5_hasher.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/sharedmem/shared_mem_cache.h"
-#include "pagespeed/kernel/thread/slow_worker.h"
-#include "pagespeed/kernel/util/simple_stats.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/base/mem_file_system.h"
 #include "test/pagespeed/kernel/base/mock_message_handler.h"
@@ -37,7 +36,6 @@
 
 namespace net_instaweb {
 
-class SharedMemCacheDump;
 class ThreadSystem;
 
 class SharedMemCacheTestBase : public CacheTestBase {
@@ -58,17 +56,11 @@ class SharedMemCacheTestBase : public CacheTestBase {
   void TestReaderWriter();
   void TestConflict();
   void TestEvict();
-  void TestSnapshot();
-  void TestRegisterSnapshotFileCache();
-  void TestCheckpointAndRestore();
 
   void ResetCache();
 
  private:
   bool CreateChild(TestMethod method);
-
-  void CheckDumpsEqual(const SharedMemCacheDump& a, const SharedMemCacheDump& b,
-                       const char* test_label);
 
   SharedMemCache<kBlockSize>* MakeCache();
   void CheckDelete(const char* key);
@@ -87,37 +79,8 @@ class SharedMemCacheTestBase : public CacheTestBase {
 
   bool sanity_checks_enabled_;
 
-  DISALLOW_COPY_AND_ASSIGN(SharedMemCacheTestBase);
-};
-
-class FileCacheTestWrapper {
- public:
-  FileCacheTestWrapper(const GoogleString& path, ThreadSystem* thread_system,
-                       Timer* timer, MessageHandler* handler) {
-    filesystem_.reset(new MemFileSystem(thread_system, timer));
-    worker_.reset(new SlowWorker("slow worker", thread_system));
-    stats_.reset(new SimpleStats(thread_system));
-    FileCache::InitStats(stats_.get());
-    hasher_.reset(new MD5Hasher());
-    file_cache_.reset(new FileCache(
-        path, filesystem_.get(), thread_system, worker_.get(),
-        new FileCache::CachePolicy(timer, hasher_.get(),
-                                   20 * 60 * 1000,    // Clean every 20min.
-                                   10 * 1024 * 1024,  // 10Mb max size.
-                                   1024 * 1024),      // Allow 1M files.
-        stats_.get(), handler));
-  }
-  ~FileCacheTestWrapper() {}
-
-  FileCache* file_cache() { return file_cache_.get(); }
-  MemFileSystem* filesystem() { return filesystem_.get(); }
-
- private:
-  std::unique_ptr<MemFileSystem> filesystem_;
-  std::unique_ptr<SlowWorker> worker_;
-  std::unique_ptr<SimpleStats> stats_;
-  std::unique_ptr<MD5Hasher> hasher_;
-  std::unique_ptr<FileCache> file_cache_;
+  SharedMemCacheTestBase(const SharedMemCacheTestBase&) = delete;
+  SharedMemCacheTestBase& operator=(const SharedMemCacheTestBase&) = delete;
 };
 
 template <typename ConcreteTestEnv>
@@ -152,23 +115,9 @@ TYPED_TEST_P(SharedMemCacheTestTemplate, TestEvict) {
   SharedMemCacheTestBase::TestEvict();
 }
 
-TYPED_TEST_P(SharedMemCacheTestTemplate, TestSnapshot) {
-  SharedMemCacheTestBase::TestSnapshot();
-}
-
-TYPED_TEST_P(SharedMemCacheTestTemplate, TestRegisterSnapshotFileCache) {
-  SharedMemCacheTestBase::TestRegisterSnapshotFileCache();
-}
-
-TYPED_TEST_P(SharedMemCacheTestTemplate, TestCheckpointAndRestore) {
-  SharedMemCacheTestBase::TestCheckpointAndRestore();
-}
-
 REGISTER_TYPED_TEST_SUITE_P(SharedMemCacheTestTemplate, TestBasic, TestReinsert,
                             TestReplacement, TestReaderWriter, TestConflict,
-                            TestEvict, TestSnapshot,
-                            TestRegisterSnapshotFileCache,
-                            TestCheckpointAndRestore);
+                            TestEvict);
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(SharedMemCacheTestTemplate);
 
 }  // namespace net_instaweb

@@ -17,10 +17,11 @@
  * under the License.
  */
 
+#include <memory>
+
 #include "net/instaweb/rewriter/public/css_minify.h"
 
 #include "pagespeed/kernel/base/google_message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_writer.h"
 #include "test/pagespeed/kernel/base/gtest.h"
@@ -271,6 +272,142 @@ TEST_F(CssMinifyTest, CalcFunctionWithZeroValueAndUnit) {
   EXPECT_HAS_SUBSTR("width:calc(600px - 0px)", minified);
 }
 
+// checking unit is retained for zero value in calc with nested var()
+TEST_F(CssMinifyTest, CalcFunctionNestedVarKeepsZeroUnit) {
+  static const char kCss[] =
+      ".a {\n"
+      " width: calc(var(--x) - 0px)"
+      "}";
+
+  GoogleString minified;
+  StringWriter writer(&minified);
+  CssMinify minify(&writer, &handler_);
+
+  EXPECT_TRUE(minify.ParseStylesheet(kCss));
+  EXPECT_HAS_SUBSTR("width:calc(var(--x) - 0px)", minified);
+}
+
+// checking unit is retained for zero value in calc with nested min()
+TEST_F(CssMinifyTest, CalcFunctionNestedMinKeepsZeroUnit) {
+  static const char kCss[] =
+      ".a {\n"
+      " width: calc(min(100%, 50px) - 0px)"
+      "}";
+
+  GoogleString minified;
+  StringWriter writer(&minified);
+  CssMinify minify(&writer, &handler_);
+
+  EXPECT_TRUE(minify.ParseStylesheet(kCss));
+  EXPECT_HAS_SUBSTR("width:calc(min(100%,50px) - 0px)", minified);
+}
+
+// checking unit is retained for zero value in calc with nested calc()
+TEST_F(CssMinifyTest, CalcFunctionNestedCalcKeepsZeroUnit) {
+  static const char kCss[] =
+      ".a {\n"
+      " width: calc(calc(600px) - 0px)"
+      "}";
+
+  GoogleString minified;
+  StringWriter writer(&minified);
+  CssMinify minify(&writer, &handler_);
+
+  EXPECT_TRUE(minify.ParseStylesheet(kCss));
+  EXPECT_HAS_SUBSTR("width:calc(calc(600px) - 0px)", minified);
+}
+
+// checking unit is retained for zero value in -webkit-calc
+TEST_F(CssMinifyTest, WebkitCalcFunctionKeepsZeroUnit) {
+  static const char kCss[] =
+      ".a {\n"
+      " width: -webkit-calc(var(--x) - 0px)"
+      "}";
+
+  GoogleString minified;
+  StringWriter writer(&minified);
+  CssMinify minify(&writer, &handler_);
+
+  EXPECT_TRUE(minify.ParseStylesheet(kCss));
+  EXPECT_HAS_SUBSTR("width:-webkit-calc(var(--x) - 0px)", minified);
+}
+
+// checking unit is retained for zero value in uppercase CALC
+TEST_F(CssMinifyTest, CalcFunctionUppercaseKeepsZeroUnit) {
+  static const char kCss[] =
+      ".a {\n"
+      " width: CALC(var(--x) - 0px)"
+      "}";
+
+  GoogleString minified;
+  StringWriter writer(&minified);
+  CssMinify minify(&writer, &handler_);
+
+  EXPECT_TRUE(minify.ParseStylesheet(kCss));
+  EXPECT_HAS_SUBSTR("width:CALC(var(--x) - 0px)", minified);
+}
+
+// checking unit is retained for zero value in mixed-case Calc
+TEST_F(CssMinifyTest, CalcFunctionMixedCaseKeepsZeroUnit) {
+  static const char kCss[] =
+      ".a {\n"
+      " width: Calc(600px - 0px)"
+      "}";
+
+  GoogleString minified;
+  StringWriter writer(&minified);
+  CssMinify minify(&writer, &handler_);
+
+  EXPECT_TRUE(minify.ParseStylesheet(kCss));
+  EXPECT_HAS_SUBSTR("width:Calc(600px - 0px)", minified);
+}
+
+// checking unit is retained for zero value at top level of uppercase MIN
+TEST_F(CssMinifyTest, MinFunctionUppercaseKeepsZeroUnit) {
+  static const char kCss[] =
+      ".a {\n"
+      " width: MIN(100% - 0px, 200px)"
+      "}";
+
+  GoogleString minified;
+  StringWriter writer(&minified);
+  CssMinify minify(&writer, &handler_);
+
+  EXPECT_TRUE(minify.ParseStylesheet(kCss));
+  EXPECT_HAS_SUBSTR("width:MIN(100% - 0px,200px)", minified);
+}
+
+// checking unit is retained for zero value at top level of min()
+TEST_F(CssMinifyTest, MinFunctionKeepsZeroUnit) {
+  static const char kCss[] =
+      ".a {\n"
+      " width: min(100% - 0px, 200px)"
+      "}";
+
+  GoogleString minified;
+  StringWriter writer(&minified);
+  CssMinify minify(&writer, &handler_);
+
+  EXPECT_TRUE(minify.ParseStylesheet(kCss));
+  EXPECT_HAS_SUBSTR("width:min(100% - 0px,200px)", minified);
+}
+
+// checking unit is still stripped for zero value outside calc context
+TEST_F(CssMinifyTest, ZeroUnitStillStrippedOutsideCalc) {
+  static const char kCss[] =
+      ".a {\n"
+      " width: calc(600px - 0px);"
+      " margin: 0px 10px 0em 0%"
+      "}";
+
+  GoogleString minified;
+  StringWriter writer(&minified);
+  CssMinify minify(&writer, &handler_);
+
+  EXPECT_TRUE(minify.ParseStylesheet(kCss));
+  EXPECT_HAS_SUBSTR("width:calc(600px - 0px);margin:0 10px 0 0%", minified);
+}
+
 // checking unicode-range descriptor minification
 TEST_F(CssMinifyTest, CssUnicodeRangeDescriptor) {
   static const char kCss[] =
@@ -285,6 +422,137 @@ TEST_F(CssMinifyTest, CssUnicodeRangeDescriptor) {
   EXPECT_TRUE(minify.ParseStylesheet(kCss));
   EXPECT_HAS_SUBSTR("unicode-range:U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116",
                     minified);
+}
+
+TEST_F(CssMinifyTest, GroupRules) {
+  // Preludes are verbatim source bytes; bodies are minified structure.
+  // The @font-face inside @supports stays inside its condition.
+  static const char kCss[] =
+      "@supports (display: grid) {\n"
+      "  .a { top: 0px; }\n"
+      "}\n"
+      "@layer base {\n"
+      "  .b { left: 0px; }\n"
+      "}\n"
+      "@container sidebar (width >= 400px) {\n"
+      "  .c { right: 0px; }\n"
+      "}\n"
+      "@supports (font-format: woff2) {\n"
+      "  @font-face { font-family: A; src: url(a.woff2); }\n"
+      "}";
+  GoogleString minified;
+  StringWriter writer(&minified);
+  CssMinify minify(&writer, &handler_);
+  EXPECT_TRUE(minify.ParseStylesheet(kCss));
+  EXPECT_STREQ(
+      "@supports (display: grid){.a{top:0}}"
+      "@layer base{.b{left:0}}"
+      "@container sidebar (width >= 400px){.c{right:0}}"
+      "@supports (font-format: woff2)"
+      "{@font-face{font-family:A;src:url(a.woff2)}}",
+      minified);
+}
+
+TEST_F(CssMinifyTest, GroupRulesIdempotent) {
+  static const char kCss[] =
+      "@layer x { @supports (a:b) { @media screen { .a { top: 0px } } } }\n"
+      "@media (width >= 768px) { .b { left: 0px } }";
+  GoogleString minified_once;
+  {
+    StringWriter writer(&minified_once);
+    CssMinify minify(&writer, &handler_);
+    EXPECT_TRUE(minify.ParseStylesheet(kCss));
+  }
+  GoogleString minified_twice;
+  {
+    StringWriter writer(&minified_twice);
+    CssMinify minify(&writer, &handler_);
+    EXPECT_TRUE(minify.ParseStylesheet(minified_once));
+  }
+  EXPECT_EQ(minified_once, minified_twice);
+  EXPECT_STREQ(
+      "@layer x{@supports (a:b){@media screen{.a{top:0}}}}"
+      "@media (width >= 768px){.b{left:0}}",
+      minified_once);
+}
+
+TEST_F(CssMinifyTest, MediaRegroupingAroundGroupRules) {
+  // All three children of the @media carry equal media annotations (the
+  // group node included), so re-grouping emits one @media wrapper.
+  static const char kCss[] =
+      "@media screen {\n"
+      "  .a { top: 0px }\n"
+      "  @supports (a:b) { .b { left: 0px } }\n"
+      "  .c { right: 0px }\n"
+      "}";
+  GoogleString minified;
+  StringWriter writer(&minified);
+  CssMinify minify(&writer, &handler_);
+  EXPECT_TRUE(minify.ParseStylesheet(kCss));
+  EXPECT_STREQ(
+      "@media screen{.a{top:0}@supports (a:b){.b{left:0}}.c{right:0}}",
+      minified);
+}
+
+TEST_F(CssMinifyTest, MediaBodyStraySemicolon) {
+  // A stray ';' after a rule inside @media is a hand-authoring artifact
+  // browsers ignore. It is now dropped rather than surviving as a verbatim
+  // region, so both rules minify normally.
+  static const char kCss[] =
+      "@media screen {\n"
+      "  .a { top: 0px };\n"
+      "  .b { left: 0px }\n"
+      "}";
+  GoogleString minified;
+  StringWriter writer(&minified);
+  CssMinify minify(&writer, &handler_);
+  EXPECT_TRUE(minify.ParseStylesheet(kCss));
+  EXPECT_STREQ("@media screen{.a{top:0}.b{left:0}}", minified);
+}
+
+TEST_F(CssMinifyTest, RawMediaExpressions) {
+  // Raw MQ4 expressions serialize verbatim. Equal raw queries merge into one
+  // @media run; unequal raw queries stay separate (order-preserving).
+  static const char kCss[] =
+      "@media (width >= 768px) { .a { top: 0px } }\n"
+      "@media (width >= 768px) { .b { left: 0px } }\n"
+      "@media (400px <= width <= 700px) { .c { right: 0px } }\n"
+      "@media screen and (width >= 64em) { .d { bottom: 0px } }";
+  GoogleString minified;
+  StringWriter writer(&minified);
+  CssMinify minify(&writer, &handler_);
+  EXPECT_TRUE(minify.ParseStylesheet(kCss));
+  EXPECT_STREQ(
+      "@media (width >= 768px){.a{top:0}.b{left:0}}"
+      "@media (400px <= width <= 700px){.c{right:0}}"
+      "@media screen and (width >= 64em){.d{bottom:0}}",
+      minified);
+}
+
+TEST_F(CssMinifyTest, LayerStatementAndBlockOrdering) {
+  // All four top-level forms interleaved — statement-form @layer, @layer
+  // blocks, a plain ruleset, and an @media run: everything lives in one
+  // ordered sequence and cascade order must survive minification. The two
+  // contiguous equal-media rulesets regroup into a single @media wrapper;
+  // nothing else may merge or move.
+  static const char kCss[] =
+      "@layer a, b;\n"
+      "@layer b { .a { top: 0px } }\n"
+      ".plain { color: red }\n"
+      "@media screen { .m1 { top: 1px } }\n"
+      "@media screen { .m2 { top: 2px } }\n"
+      "@layer a { .b { left: 0px } }";
+  GoogleString minified;
+  StringWriter writer(&minified);
+  CssMinify minify(&writer, &handler_);
+  EXPECT_TRUE(minify.ParseStylesheet(kCss));
+  EXPECT_STREQ(
+      "@layer a, b;"
+      "@layer b{.a{top:0}}"
+      ".plain{color:red}"
+      "@media screen{.m1{top:1px}.m2{top:2px}}"
+      "@layer a{.b{left:0}}",
+      minified);
 }
 
 }  // namespace

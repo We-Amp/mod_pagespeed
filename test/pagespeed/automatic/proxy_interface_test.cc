@@ -42,7 +42,6 @@
 #include "pagespeed/kernel/base/function.h"
 #include "pagespeed/kernel/base/null_message_handler.h"
 #include "pagespeed/kernel/base/ref_counted_ptr.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -321,7 +320,8 @@ class ProxyInterfaceTest : public ProxyInterfaceTestBase {
   const GoogleString max_age_300_s_maxage_10_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(ProxyInterfaceTest);
+  ProxyInterfaceTest(const ProxyInterfaceTest&) = delete;
+  ProxyInterfaceTest& operator=(const ProxyInterfaceTest&) = delete;
 };
 
 TEST_F(ProxyInterfaceTest, LoggingInfo) {
@@ -2910,6 +2910,26 @@ TEST_F(ProxyInterfaceTest, NoStore) {
                RewriteHtmlCacheHeader("no-store2", "no-store, max-age=300"));
 }
 
+// Rewritten HTML must never invite shared caches via s-maxage: the HTML
+// embeds .pagespeed. URLs that can commit to a content variant chosen for
+// the requesting client, so a shared cache holding it can serve one
+// client's variant to another.
+TEST_F(ProxyInterfaceTest, NoSMaxAgeOnRewrittenHtml) {
+  RewriteOptions* options = server_context()->global_options();
+  options->ClearSignatureForTesting();
+  options->set_max_html_cache_time_ms(0);
+  server_context()->ComputeSignature(options);
+
+  EXPECT_STREQ("max-age=0, no-cache",
+               RewriteHtmlCacheHeader("smaxage", "max-age=300, s-maxage=10"));
+  EXPECT_STREQ("max-age=0, no-cache",
+               RewriteHtmlCacheHeader("smaxage-only", "s-maxage=10"));
+  // Directives that must survive still do.
+  EXPECT_STREQ(
+      "max-age=0, no-cache, no-store",
+      RewriteHtmlCacheHeader("smaxage-ns", "no-store, s-maxage=10"));
+}
+
 TEST_F(ProxyInterfaceTest, PropCacheFilter) {
   RewriteOptions* options = server_context()->global_options();
   options->ClearSignatureForTesting();
@@ -3509,7 +3529,8 @@ class ProxyInterfaceOriginPropertyPageTest : public ProxyInterfaceTest {
 
    private:
     RewriteDriver* driver_;
-    DISALLOW_COPY_AND_ASSIGN(PerOriginPageReaderFilter);
+    PerOriginPageReaderFilter(const PerOriginPageReaderFilter&) = delete;
+    PerOriginPageReaderFilter& operator=(const PerOriginPageReaderFilter&) = delete;
   };
 
   class PerOriginPageReaderFilterCreator
@@ -3523,7 +3544,8 @@ class ProxyInterfaceOriginPropertyPageTest : public ProxyInterfaceTest {
     }
 
    private:
-    DISALLOW_COPY_AND_ASSIGN(PerOriginPageReaderFilterCreator);
+    PerOriginPageReaderFilterCreator(const PerOriginPageReaderFilterCreator&) = delete;
+    PerOriginPageReaderFilterCreator& operator=(const PerOriginPageReaderFilterCreator&) = delete;
   };
 
   void SetUp() override {

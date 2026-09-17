@@ -20,11 +20,12 @@
 #ifndef PAGESPEED_SYSTEM_SYSTEM_SERVER_CONTEXT_H_
 #define PAGESPEED_SYSTEM_SYSTEM_SERVER_CONTEXT_H_
 
+#include <memory>
+
 #include "net/instaweb/http/public/request_context.h"
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/writer.h"
@@ -34,6 +35,7 @@
 namespace net_instaweb {
 
 class AsyncFetch;
+class DaemonReader;
 class GoogleUrl;
 class Histogram;
 class QueryParams;
@@ -51,6 +53,11 @@ class SystemRewriteOptions;
 class UpDownCounter;
 class UrlAsyncFetcherStats;
 class Variable;
+
+// Test-only: re-arms the once-per-process INFO notice about a leftover
+// pagespeed.license file (see SystemServerContext::PostInitHook) so a test can
+// observe it being logged.
+void ResetStaleLicenseFileNoticeForTesting();
 
 // A server context with features specific to a PSOL port on a unix system.
 class SystemServerContext : public ServerContext {
@@ -88,6 +95,18 @@ class SystemServerContext : public ServerContext {
   // Initialize this SystemServerContext to set up its admin site.
   void PostInitHook() override;
 
+  // SystemServerContext doesn't proxy HTML by default. Subclasses like
+  // ApacheServerContext override this to return true when appropriate.
+  bool ProxiesHtml() const override { return false; }
+
+  // Creates the DaemonReader backing the admin console's /v1/daemon/*
+  // endpoints (a read-only proxy to the optimizer daemon's management API).
+  // Called once from PostInitHook(); the AdminSite takes
+  // ownership.  The default implementation returns nullptr -- ports without
+  // a daemon transport override nothing, and the endpoints then report the
+  // daemon unreachable (502).
+  virtual DaemonReader* NewDaemonReader();
+
   static void InitStats(Statistics* statistics);
 
   // Called by SystemRewriteDriverFactory::ChildInit.  See documentation there.
@@ -103,7 +122,7 @@ class SystemServerContext : public ServerContext {
   // verify initialization proceeded properly.
   bool initialized() const { return initialized_; }
 
-  // Normally we just fetch with the default UrlAsyncFetcher, generally serf,
+  // Normally we just fetch with the default UrlAsyncFetcher, generally curl,
   // but there are some cases where we need to do something more complex:
   //  - Local requests: requests for resources on this host should go directly
   //    to the local IP.
@@ -136,15 +155,12 @@ class SystemServerContext : public ServerContext {
   void MessageHistoryHandler(const RewriteOptions& options,
                              AdminSite::AdminSource source, AsyncFetch* fetch);
 
-  // Deprecated handler for graphs in the PSOL console.
-  void StatisticsGraphsHandler(Writer* writer);
-
   // Handle a request for /pagespeed_admin/*, which is a launching
   // point for all the administrator pages including stats,
   // message-histogram, console, etc.
   void AdminPage(bool is_global, const GoogleUrl& stripped_gurl,
                  const QueryParams& query_params, const RewriteOptions* options,
-                 AsyncFetch* fetch);
+                 AsyncFetch* fetch, StringPiece request_body = StringPiece());
 
   // Handle a request for the legacy /*_pagespeed_statistics page, which also
   // serves as a launching point for a subset of the admin pages.  Because the
@@ -242,7 +258,8 @@ class SystemServerContext : public ServerContext {
 
   SystemCachePath* cache_path_;
 
-  DISALLOW_COPY_AND_ASSIGN(SystemServerContext);
+  SystemServerContext(const SystemServerContext&) = delete;
+  SystemServerContext& operator=(const SystemServerContext&) = delete;
 };
 
 }  // namespace net_instaweb

@@ -19,13 +19,14 @@
 
 // Unit tests for UserAgentSensitiveTestFetcher
 
+#include <memory>
+
 #include "test/net/instaweb/http/ua_sensitive_test_fetcher.h"
 
 #include "net/instaweb/http/public/request_context.h"
 #include "pagespeed/kernel/base/google_message_handler.h"
 #include "pagespeed/kernel/base/null_mutex.h"
 #include "pagespeed/kernel/base/ref_counted_ptr.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/base/timer.h"

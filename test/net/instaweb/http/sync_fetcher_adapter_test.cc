@@ -20,6 +20,7 @@
 // Test the blocking w/timeout callback helper.
 
 #include <algorithm>
+#include <memory>
 
 #include "base/logging.h"
 #include "net/instaweb/http/public/async_fetch.h"
@@ -27,7 +28,6 @@
 #include "net/instaweb/http/public/sync_fetcher_adapter_callback.h"
 #include "net/instaweb/http/public/url_async_fetcher.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/string_writer.h"
@@ -67,7 +67,8 @@ class TrapWriter : public Writer {
   }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(TrapWriter);
+  TrapWriter(const TrapWriter&) = delete;
+  TrapWriter& operator=(const TrapWriter&) = delete;
 };
 
 // An async fetcher that writes out a response at given number of milliseconds

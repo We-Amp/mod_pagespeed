@@ -26,6 +26,8 @@
 // TODO(jmarantz): consider making this class a special case of the
 // combination of HTTPCache, FileCache, and HttpDumpUrlFetcher.
 
+#include <memory>
+
 #include "net/instaweb/http/public/http_dump_url_fetcher.h"
 
 #include "net/instaweb/http/public/async_fetch.h"
@@ -65,7 +67,8 @@ class HttpDumpUrlFetcherTest : public testing::Test {
   GoogleMessageHandler message_handler_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(HttpDumpUrlFetcherTest);
+  HttpDumpUrlFetcherTest(const HttpDumpUrlFetcherTest&) = delete;
+  HttpDumpUrlFetcherTest& operator=(const HttpDumpUrlFetcherTest&) = delete;
 };
 
 TEST_F(HttpDumpUrlFetcherTest, TestReadWithGzip) {
@@ -130,7 +133,8 @@ class CheckDateHeaderFetch : public StringAsyncFetch {
  private:
   bool headers_complete_called_;
   const MockTimer* timer_;
-  DISALLOW_COPY_AND_ASSIGN(CheckDateHeaderFetch);
+  CheckDateHeaderFetch(const CheckDateHeaderFetch&) = delete;
+  CheckDateHeaderFetch& operator=(const CheckDateHeaderFetch&) = delete;
 };
 
 TEST_F(HttpDumpUrlFetcherTest, TestDateAdjustment) {

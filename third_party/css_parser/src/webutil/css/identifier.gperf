@@ -36,6 +36,7 @@
 * specific language governing permissions and limitations
 * under the License.
 */
+#include <cstring>
 #include "third_party/css_parser/src/webutil/css/identifier.h"
 
 #include "third_party/css_parser/src/base/googleinit.h"

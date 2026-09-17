@@ -57,6 +57,31 @@ class ApacheConfig : public SystemRewriteOptions {
   }
   const GoogleString& proxy_auth() const { return proxy_auth_.value(); }
 
+  // Path of the optimizer daemon's notification socket
+  // (ModPagespeedDaemonSocketPath).  Empty when no daemon is configured.
+  const GoogleString& daemon_socket_path() const {
+    return daemon_socket_path_.value();
+  }
+
+  // Path of the optimizer daemon's shared cache volume
+  // (ModPagespeedDaemonVolumePath).  Empty when no daemon is configured.
+  //
+  // Deliberately independent of FileCachePath: the recommended deployment
+  // keeps the two at DIFFERENT paths so one volume file's health is not a
+  // shared-fate dependency of both the classic cache and the daemon's.  See
+  // docs/daemon-adapter-deployment.md.
+  const GoogleString& daemon_volume_path() const {
+    return daemon_volume_path_.value();
+  }
+
+  // Unix socket path of the optimizer daemon's management API
+  // (ModPagespeedDaemonApiSocketPath), backing the /v1/daemon/* admin
+  // endpoints.  Empty disables them.  Note this is a different socket from
+  // DaemonSocketPath (the notification socket).
+  const GoogleString& daemon_api_socket_path() const {
+    return daemon_api_socket_path_.value();
+  }
+
   bool force_buffering() const { return force_buffering_.value(); }
   void set_force_buffering(bool x) { set_option(x, &force_buffering_); }
 
@@ -98,7 +123,7 @@ class ApacheConfig : public SystemRewriteOptions {
   // Adds an option to apache_properties_.
   template <class OptionClass>
   static void AddApacheProperty(typename OptionClass::ValueType default_value,
-                                OptionClass ApacheConfig::*offset,
+                                OptionClass ApacheConfig::* offset,
                                 const char* id, StringPiece option_name,
                                 const char* help, bool safe_to_print) {
     AddProperty(default_value, offset, id, option_name,
@@ -109,14 +134,17 @@ class ApacheConfig : public SystemRewriteOptions {
   static void AddProperties();
   void Init();
 
-  Option<bool> fetch_from_mod_spdy_;
   Option<bool> force_buffering_;
   Option<bool> proxy_all_requests_mode_;
   Option<GoogleString> proxy_auth_;  // CookieName[=Value][:RedirectUrl]
   Option<GoogleString> measurement_proxy_root_;
   Option<GoogleString> measurement_proxy_password_;
+  Option<GoogleString> daemon_socket_path_;
+  Option<GoogleString> daemon_volume_path_;
+  Option<GoogleString> daemon_api_socket_path_;
 
-  DISALLOW_COPY_AND_ASSIGN(ApacheConfig);
+  ApacheConfig(const ApacheConfig&) = delete;
+  ApacheConfig& operator=(const ApacheConfig&) = delete;
 };
 
 }  // namespace net_instaweb

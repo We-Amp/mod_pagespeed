@@ -21,12 +21,12 @@
 #define PAGESPEED_SYSTEM_SYSTEM_MESSAGE_HANDLER_H_
 
 #include <cstdarg>
+#include <memory>
 
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/google_message_handler.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/null_message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 
@@ -84,7 +84,8 @@ class SystemMessageHandler : public GoogleMessageHandler {
   GoogleString pid_string_;  // String "[pid]".
   NullMessageHandler null_handler_;
 
-  DISALLOW_COPY_AND_ASSIGN(SystemMessageHandler);
+  SystemMessageHandler(const SystemMessageHandler&) = delete;
+  SystemMessageHandler& operator=(const SystemMessageHandler&) = delete;
 };
 
 }  // namespace net_instaweb

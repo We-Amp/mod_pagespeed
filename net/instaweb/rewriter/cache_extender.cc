@@ -33,6 +33,7 @@
 #include "net/instaweb/rewriter/public/resource_tag_scanner.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
+#include "net/instaweb/rewriter/public/script_tag_scanner.h"
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "net/instaweb/rewriter/public/single_rewrite_context.h"
 #include "net/instaweb/rewriter/public/srcset_slot.h"
@@ -63,6 +64,14 @@ const char CacheExtender::kNotCacheable[] = "not_cacheable";
 // We do not want to bother to extend the cache lifetime for any resource
 // that is already cached for a month.
 const int64 kMinThresholdMs = Timer::kMonthMs;
+
+const char kModuleCrossHostMessage[] =
+    "Not cache-extending module script: rewritten URL would be on another "
+    "host";
+
+const char kIntegrityCrossHostMessage[] =
+    "Not cache-extending resource with integrity: rewritten URL would be on "
+    "another host";
 
 class CacheExtender::Context : public SingleRewriteContext {
  public:
@@ -105,7 +114,8 @@ class CacheExtender::Context : public SingleRewriteContext {
  private:
   RewriteDriver::InputRole input_role_;
   CacheExtender* extender_;
-  DISALLOW_COPY_AND_ASSIGN(Context);
+  Context(const Context&) = delete;
+  Context& operator=(const Context&) = delete;
 };
 
 CacheExtender::CacheExtender(RewriteDriver* driver) : RewriteFilter(driver) {
@@ -172,9 +182,11 @@ bool CacheExtender::ShouldRewriteResource(const ResponseHeaders* headers,
 void CacheExtender::StartElementImpl(HtmlElement* element) {
   resource_tag_scanner::UrlCategoryVector attributes;
   resource_tag_scanner::ScanElement(element, driver()->options(), &attributes);
+
   for (int i = 0, n = attributes.size(); i < n; ++i) {
     bool may_load = false;
     RewriteDriver::InputRole input_role = RewriteDriver::InputRole::kUnknown;
+
     switch (attributes[i].category) {
       case semantic_type::kStylesheet:
         may_load = driver()->MayCacheExtendCss();
@@ -184,10 +196,30 @@ void CacheExtender::StartElementImpl(HtmlElement* element) {
         may_load = driver()->MayCacheExtendImages();
         input_role = RewriteDriver::InputRole::kImg;
         break;
-      case semantic_type::kScript:
+      case semantic_type::kScript: {
         may_load = driver()->MayCacheExtendScripts();
         input_role = RewriteDriver::InputRole::kScript;
+        // A cache-extended URL is encoded with UrlNamer::kSharded, so under
+        // MapRewriteDomain or ShardDomain it lands on another host. Module
+        // fetches are CORS-mode: a relocated module fails to load without
+        // CORS headers, and its relative imports re-resolve against the
+        // wrong host. Leave a module that would be relocated untouched.
+        // js_preserve_urls is no escape hatch here: kExtendCacheScripts can
+        // override it, and the slot would still render the new URL.
+        HtmlElement::Attribute* script_src;
+        ScriptTagScanner scanner(driver());
+        GoogleUrl script_gurl(driver()->base_url(),
+                              attributes[i].url->DecodedValueOrNull());
+        if (may_load &&
+            scanner.ParseScriptElement(element, &script_src) ==
+                ScriptTagScanner::kJavaScriptModule &&
+            driver()->options()->domain_lawyer()->WillDomainChange(
+                script_gurl)) {
+          driver()->InsertDebugComment(kModuleCrossHostMessage, element);
+          may_load = false;
+        }
         break;
+      }
       default:
         // Does the url in the attribute end in .pdf, ignoring query params?
         if (attributes[i].url->DecodedValueOrNull() != nullptr &&
@@ -202,6 +234,26 @@ void CacheExtender::StartElementImpl(HtmlElement* element) {
         }
         break;
     }
+
+    // A cache-extended URL is encoded with UrlNamer::kSharded, so under
+    // MapRewriteDomain or ShardDomain it lands on another host. A no-cors
+    // script or stylesheet fetch gets an opaque response from the new host,
+    // and the browser blocks a subresource whose integrity cannot be
+    // enforced — even when the bytes match. Leave a resource carrying
+    // integrity= on its origin host. (Modules are handled above: their
+    // fetches are CORS-mode and break for the inverse reason.)
+    if (may_load &&
+        (attributes[i].category == semantic_type::kScript ||
+         attributes[i].category == semantic_type::kStylesheet) &&
+        ScriptTagScanner::HasIntegrityAttribute(element)) {
+      GoogleUrl integrity_gurl(driver()->base_url(),
+                               attributes[i].url->DecodedValueOrNull());
+      if (driver()->options()->domain_lawyer()->WillDomainChange(
+              integrity_gurl)) {
+        driver()->InsertDebugComment(kIntegrityCrossHostMessage, element);
+        may_load = false;
+      }
+    }
     if (!may_load) {
       continue;
     }
@@ -209,8 +261,9 @@ void CacheExtender::StartElementImpl(HtmlElement* element) {
     // TODO(jmarantz): We ought to be able to domain-shard even if the
     // resources are non-cacheable or privately cacheable.
     if (driver()->IsRewritable(element)) {
+      const char* url_str = attributes[i].url->DecodedValueOrNull();
       ResourcePtr input_resource(CreateInputResourceOrInsertDebugComment(
-          attributes[i].url->DecodedValueOrNull(), input_role, element));
+          url_str, input_role, element));
       if (input_resource.get() == nullptr) {
         continue;
       }

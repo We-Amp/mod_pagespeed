@@ -31,7 +31,8 @@ class StatisticsLog {
   virtual void LogStat(const char* statName, int value) = 0;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(StatisticsLog);
+  StatisticsLog(const StatisticsLog&) = delete;
+  StatisticsLog& operator=(const StatisticsLog&) = delete;
 };
 
 }  // namespace net_instaweb

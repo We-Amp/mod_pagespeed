@@ -1,0 +1,486 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+// Unit-test the MemcachedCache (libmemcached) interface.
+
+#include "pagespeed/system/memcached_cache.h"
+
+#include <cstddef>
+#include <cstdlib>
+#include <memory>
+
+#include "base/logging.h"
+#include "pagespeed/kernel/base/google_message_handler.h"
+#include "pagespeed/kernel/base/hasher.h"
+#include "pagespeed/kernel/base/md5_hasher.h"
+#include "pagespeed/kernel/base/null_mutex.h"
+#include "pagespeed/kernel/base/posix_timer.h"
+#include "pagespeed/kernel/base/stack_buffer.h"
+#include "pagespeed/kernel/base/statistics.h"
+#include "pagespeed/kernel/base/string.h"
+#include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/base/thread_system.h"
+#include "pagespeed/kernel/cache/cache_key_prepender.h"
+#include "pagespeed/kernel/cache/fallback_cache.h"
+#include "pagespeed/kernel/cache/lru_cache.h"
+#include "pagespeed/kernel/util/platform.h"
+#include "pagespeed/kernel/util/simple_stats.h"
+#include "pagespeed/system/external_server_spec.h"
+#include "test/pagespeed/kernel/base/gtest.h"
+#include "test/pagespeed/kernel/base/mock_hasher.h"
+#include "test/pagespeed/kernel/base/mock_timer.h"
+#include "test/pagespeed/kernel/cache/cache_spammer.h"
+#include "test/pagespeed/kernel/cache/cache_test_base.h"
+
+namespace net_instaweb {
+
+namespace {
+
+const int kTestValueSizeThreshold = 200;
+const size_t kLRUCacheSize = 3 * kTestValueSizeThreshold;
+const size_t kJustUnderThreshold = kTestValueSizeThreshold - 100;
+const size_t kLargeWriteSize = kTestValueSizeThreshold + 1;
+const size_t kHugeWriteSize = 2 * kTestValueSizeThreshold;
+
+}  // namespace
+
+class MemcachedCacheTest : public CacheTestBase {
+ protected:
+  MemcachedCacheTest()
+      : timer_(new NullMutex, MockTimer::kApr_5_2010_ms),
+        lru_cache_(new LRUCache(kLRUCacheSize)),
+        thread_system_(Platform::CreateThreadSystem()),
+        statistics_(thread_system_.get()) {
+    MemcachedCache::InitStats(&statistics_);
+  }
+
+  // Establishes a connection to a memcached instance on
+  // $MEMCACHED_HOST:$MEMCACHED_PORT (defaulting to localhost).
+  bool ConnectToMemcached(bool use_md5_hasher) {
+    if (cluster_spec_.empty()) {
+      const char* kPortString = getenv("MEMCACHED_PORT");
+      int port;
+      if (kPortString == nullptr || !StringToInt(kPortString, &port)) {
+        LOG(ERROR) << "MemcachedCache tests are skipped because env var "
+                   << "$MEMCACHED_PORT is not set.  Set that to the port "
+                   << "number where memcached is running to enable the "
+                   << "tests. ALL DATA ON THE SERVER WILL BE ERASED! See "
+                   << "install/run_program_with_memcached.sh as a way to "
+                   << "run separate instance of memcached for testing.";
+        return false;
+      }
+      const char* host = getenv("MEMCACHED_HOST");
+      if (host == nullptr) {
+        host = "localhost";
+      }
+      cluster_spec_.servers = {ExternalServerSpec(host, port)};
+    }
+    Hasher* hasher = &mock_hasher_;
+    if (use_md5_hasher) {
+      hasher = &md5_hasher_;
+    }
+    servers_ = std::make_unique<MemcachedCache>(cluster_spec_, 5, hasher,
+                                                &statistics_, &timer_,
+                                                &handler_);
+    // Prepend test name + timestamp to all keys for isolation between tests.
+    const ::testing::TestInfo* const test_info =
+        ::testing::UnitTest::GetInstance()->current_test_info();
+    PosixTimer timer;
+    const GoogleString memcache_prefix =
+        StrCat(test_info->test_suite_name(), ".", test_info->name(), "_",
+               Integer64ToString(timer.NowUs()), "_");
+    prefixed_memcache_ =
+        std::make_unique<CacheKeyPrepender>(memcache_prefix, servers_.get());
+
+    cache_ = std::make_unique<FallbackCache>(
+        prefixed_memcache_.get(), lru_cache_.get(), kTestValueSizeThreshold,
+        &handler_);
+
+    GoogleString buf;
+    return servers_->Connect() && servers_->GetStatus(&buf);
+  }
+
+  bool InitMemcachedOrSkip(bool use_md5_hasher) {
+    bool initialized = ConnectToMemcached(use_md5_hasher);
+    EXPECT_TRUE(initialized || cluster_spec_.empty())
+        << "Please start memcached on " << cluster_spec_.ToString();
+    return initialized;
+  }
+
+  CacheInterface* Cache() override { return cache_.get(); }
+
+  GoogleMessageHandler handler_;
+  MD5Hasher md5_hasher_;
+  MockHasher mock_hasher_;
+  MockTimer timer_;
+  std::unique_ptr<LRUCache> lru_cache_;
+  std::unique_ptr<MemcachedCache> servers_;
+  std::unique_ptr<CacheKeyPrepender> prefixed_memcache_;
+  std::unique_ptr<FallbackCache> cache_;
+  std::unique_ptr<ThreadSystem> thread_system_;
+  SimpleStats statistics_;
+  ExternalClusterSpec cluster_spec_;
+};
+
+// Simple flow of putting in an item, getting it, deleting it.
+TEST_F(MemcachedCacheTest, PutGetDelete) {
+  if (!InitMemcachedOrSkip(true)) {
+    return;
+  }
+
+  CheckPut("Name", "Value");
+  CheckGet("Name", "Value");
+  CheckNotFound("Another Name");
+
+  CheckPut("Name", "NewValue");
+  CheckGet("Name", "NewValue");
+
+  cache_->Delete("Name");
+  CheckNotFound("Name");
+  EXPECT_EQ(0, lru_cache_->size_bytes()) << "fallback not used.";
+}
+
+TEST_F(MemcachedCacheTest, MultiGet) {
+  if (!InitMemcachedOrSkip(true)) {
+    return;
+  }
+  TestMultiGet();
+  EXPECT_EQ(0, lru_cache_->size_bytes()) << "fallback not used.";
+}
+
+TEST_F(MemcachedCacheTest, MultiGetWithoutServer) {
+  cluster_spec_.servers = {ExternalServerSpec("localhost", 99999)};
+  // libmemcached-awesome connects lazily, so Connect()+GetStatus() may not
+  // detect unreachable servers. We verify by attempting an actual Put which
+  // will fail to reach the server. If ConnectToMemcached returns false, great;
+  // if it returns true, we proceed anyway — the MultiGet below will still
+  // exercise the fallback path since the server is unreachable.
+  ConnectToMemcached(true);
+
+  Callback* n0 = AddCallback();
+  Callback* not_found = AddCallback();
+  Callback* n1 = AddCallback();
+  IssueMultiGet(n0, "n0", not_found, "not_found", n1, "n1");
+  WaitAndCheckNotFound(n0);
+  WaitAndCheckNotFound(not_found);
+  WaitAndCheckNotFound(n1);
+}
+
+TEST_F(MemcachedCacheTest, BasicInvalid) {
+  if (!InitMemcachedOrSkip(true)) {
+    return;
+  }
+
+  // Check that we honor callback veto on validity.
+  CheckPut("nameA", "valueA");
+  CheckPut("nameB", "valueB");
+  CheckGet("nameA", "valueA");
+  CheckGet("nameB", "valueB");
+  set_invalid_value("valueA");
+  CheckNotFound("nameA");
+  CheckGet("nameB", "valueB");
+  EXPECT_EQ(0, lru_cache_->size_bytes()) << "fallback not used.";
+}
+
+TEST_F(MemcachedCacheTest, SizeTest) {
+  if (!InitMemcachedOrSkip(true)) {
+    return;
+  }
+
+  for (int x = 0; x < 10; ++x) {
+    for (int i = kJustUnderThreshold / 2; i < kJustUnderThreshold - 10; ++i) {
+      GoogleString value(i, 'a');
+      GoogleString key = StrCat("big", IntegerToString(i));
+      CheckPut(key, value);
+      CheckGet(key, value);
+    }
+  }
+  EXPECT_EQ(0, lru_cache_->size_bytes()) << "fallback not used.";
+}
+
+TEST_F(MemcachedCacheTest, StatsTest) {
+  if (!InitMemcachedOrSkip(true)) {
+    return;
+  }
+
+  GoogleString buf;
+  ASSERT_TRUE(servers_->GetStatus(&buf));
+  const char* expected_host = getenv("MEMCACHED_HOST");
+  if (expected_host == nullptr) {
+    expected_host = "localhost";
+  }
+  EXPECT_TRUE(buf.find(StrCat("memcached server ", expected_host, ":")) !=
+              GoogleString::npos);
+  EXPECT_TRUE(buf.find(" pid ") != GoogleString::npos);
+  EXPECT_TRUE(buf.find("\nbytes_read:") != GoogleString::npos);
+  EXPECT_TRUE(buf.find("\ncurr_connections:") != GoogleString::npos);
+  EXPECT_TRUE(buf.find("\ntotal_items:") != GoogleString::npos);
+  EXPECT_EQ(0, lru_cache_->size_bytes()) << "fallback not used.";
+}
+
+TEST_F(MemcachedCacheTest, HashCollision) {
+  if (!InitMemcachedOrSkip(false)) {
+    return;
+  }
+  CheckPut("N1", "V1");
+  CheckGet("N1", "V1");
+
+  // Since we are using a mock hasher, which always returns "0", the
+  // put on "N2" will overwrite "N1" in memcached due to hash
+  // collision.
+  CheckPut("N2", "V2");
+  CheckGet("N2", "V2");
+  CheckNotFound("N1");
+  EXPECT_EQ(0, lru_cache_->size_bytes()) << "fallback not used.";
+}
+
+TEST_F(MemcachedCacheTest, JustUnderThreshold) {
+  if (!InitMemcachedOrSkip(true)) {
+    return;
+  }
+  const GoogleString kValue(kJustUnderThreshold, 'a');
+  const char kKey[] = "just_under_threshold";
+  CheckPut(kKey, kValue);
+  CheckGet(kKey, kValue);
+  EXPECT_EQ(0, lru_cache_->size_bytes()) << "fallback not used.";
+}
+
+// Basic operation with huge values, only one of which will fit
+// in the fallback cache at a time.
+TEST_F(MemcachedCacheTest, HugeValue) {
+  if (!InitMemcachedOrSkip(true)) {
+    return;
+  }
+  const GoogleString kValue(kHugeWriteSize, 'a');
+  const char kKey1[] = "large1";
+  CheckPut(kKey1, kValue);
+  CheckGet(kKey1, kValue);
+  EXPECT_LE(kHugeWriteSize, lru_cache_->size_bytes());
+
+  // Now put in another large value, causing the 1st to get evicted from
+  // the fallback cache.
+  const char kKey2[] = "large2";
+  CheckPut(kKey2, kValue);
+  CheckGet(kKey2, kValue);
+  CheckNotFound(kKey1);
+
+  // Finally, delete the second value explicitly.
+  CheckGet(kKey2, kValue);
+  cache_->Delete(kKey2);
+  CheckNotFound(kKey2);
+}
+
+TEST_F(MemcachedCacheTest, LargeValueMultiGet) {
+  if (!InitMemcachedOrSkip(true)) {
+    return;
+  }
+  const GoogleString kLargeValue1(kLargeWriteSize, 'a');
+  const char kKey1[] = "large1";
+  CheckPut(kKey1, kLargeValue1);
+  CheckGet(kKey1, kLargeValue1);
+  EXPECT_EQ(kLargeWriteSize + STATIC_STRLEN(kKey1), lru_cache_->size_bytes());
+
+  const char kSmallKey[] = "small";
+  const char kSmallValue[] = "value";
+  CheckPut(kSmallKey, kSmallValue);
+
+  const GoogleString kLargeValue2(kLargeWriteSize, 'b');
+  const char kKey2[] = "large2";
+  CheckPut(kKey2, kLargeValue2);
+  CheckGet(kKey2, kLargeValue2);
+  EXPECT_LE(2 * kLargeWriteSize, lru_cache_->size_bytes())
+      << "Checks that both large values were written to the fallback cache";
+
+  Callback* large1 = AddCallback();
+  Callback* small = AddCallback();
+  Callback* large2 = AddCallback();
+  IssueMultiGet(large1, kKey1, small, kSmallKey, large2, kKey2);
+  WaitAndCheck(large1, kLargeValue1);
+  WaitAndCheck(small, "value");
+  WaitAndCheck(large2, kLargeValue2);
+}
+
+TEST_F(MemcachedCacheTest, MultiServerFallback) {
+  if (!InitMemcachedOrSkip(true)) {
+    return;
+  }
+
+  // Make another connection to the same memcached, but with a different
+  // fallback cache.
+  LRUCache lru_cache2(kLRUCacheSize);
+  FallbackCache mem_cache2(prefixed_memcache_.get(), &lru_cache2,
+                           kTestValueSizeThreshold, &handler_);
+
+  // Store a large object from server1, fetch from server2 — miss because
+  // they do not share fallback caches.
+  const GoogleString kLargeValue(kLargeWriteSize, 'a');
+  const char kKey1[] = "large1";
+  CheckPut(kKey1, kLargeValue);
+  CheckGet(kKey1, kLargeValue);
+
+  CheckNotFound(&mem_cache2, kKey1);
+
+  CheckPut(&mem_cache2, kKey1, kLargeValue);
+  CheckGet(&mem_cache2, kKey1, kLargeValue);
+  CheckGet(cache_.get(), kKey1, kLargeValue);
+}
+
+TEST_F(MemcachedCacheTest, KeyOver64kDropped) {
+  if (!InitMemcachedOrSkip(true)) {
+    return;
+  }
+
+  const int kBigLruSize = 1000000;
+  const int kThreshold = 200000;
+  LRUCache lru_cache2(kLRUCacheSize);
+  FallbackCache mem_cache2(prefixed_memcache_.get(), &lru_cache2, kThreshold,
+                           &handler_);
+
+  const GoogleString kKey(kBigLruSize, 'a');
+  CheckPut(&mem_cache2, kKey, "value");
+  CheckNotFound(&mem_cache2, kKey.c_str());
+}
+
+// Even keys that are over the *value* threshold can be stored in and
+// retrieved from the fallback cache.
+TEST_F(MemcachedCacheTest, LargeKeyOverThreshold) {
+  if (!InitMemcachedOrSkip(true)) {
+    return;
+  }
+
+  const GoogleString kKey(kLargeWriteSize, 'a');
+  const char kValue[] = "value";
+  CheckPut(kKey, kValue);
+  CheckGet(kKey, kValue);
+  EXPECT_EQ(kKey.size() + STATIC_STRLEN(kValue), lru_cache_->size_bytes());
+}
+
+TEST_F(MemcachedCacheTest, HealthCheck) {
+  if (!InitMemcachedOrSkip(true)) {
+    return;
+  }
+
+  const int kNumIters = 5;
+  for (int i = 0; i < kNumIters; ++i) {
+    for (int j = 0; j < MemcachedCache::kMaxErrorBurst; ++j) {
+      EXPECT_TRUE(servers_->IsHealthy());
+      servers_->RecordError();
+    }
+    EXPECT_FALSE(servers_->IsHealthy());
+    timer_.AdvanceMs(MemcachedCache::kHealthCheckpointIntervalMs - 1);
+    EXPECT_FALSE(servers_->IsHealthy());
+    timer_.AdvanceMs(2);
+  }
+  EXPECT_TRUE(servers_->IsHealthy());
+}
+
+TEST_F(MemcachedCacheTest, ThreadSafe) {
+  if (!InitMemcachedOrSkip(true)) {
+    return;
+  }
+
+  GoogleString large_pattern(kLargeWriteSize, 'a');
+  large_pattern += "%d";
+  CacheSpammer::RunTests(5 /* num_threads */, 200 /* num_iters */,
+                         10 /* num_inserts */, false, true,
+                         large_pattern.c_str(), prefixed_memcache_.get(),
+                         thread_system_.get());
+}
+
+// Tests that a very low timeout value causes a simple Get to fail.
+// This test is flaky on slow machines. Set $MEMCACHE_TIMEOUT_TEST to run it.
+TEST_F(MemcachedCacheTest, OneMicrosecondGet) {
+  if (getenv("MEMCACHE_TIMEOUT_TEST") == nullptr) {
+    LOG(WARNING) << "Skipping flaky test MemcachedCacheTest.OneMicrosecondGet, "
+                 << "set $MEMCACHE_TIMEOUT_TEST to run it";
+    return;
+  }
+
+  if (!InitMemcachedOrSkip(true)) {
+    return;
+  }
+
+  CheckPut("Name", "Value");
+  CheckGet("Name", "Value");
+
+  servers_->set_timeout_us(1);
+  CheckNotFound("Name");
+  EXPECT_EQ(1, statistics_.GetVariable("memcache_timeouts")->Get());
+}
+
+TEST_F(MemcachedCacheTest, OneMicrosecondPut) {
+  if (getenv("MEMCACHE_TIMEOUT_TEST") == nullptr) {
+    LOG(WARNING) << "Skipping flaky test MemcachedCacheTest.OneMicrosecondPut, "
+                 << "set $MEMCACHE_TIMEOUT_TEST to run it";
+    return;
+  }
+
+  if (!InitMemcachedOrSkip(true)) {
+    return;
+  }
+
+  CheckPut("Name", "Value");
+  CheckGet("Name", "Value");
+
+  servers_->set_timeout_us(1);
+  CheckPut("Name", "Value");
+  EXPECT_EQ(1, statistics_.GetVariable("memcache_timeouts")->Get());
+}
+
+TEST_F(MemcachedCacheTest, OneMicrosecondDelete) {
+  if (getenv("MEMCACHE_TIMEOUT_TEST") == nullptr) {
+    LOG(WARNING)
+        << "Skipping flaky test MemcachedCacheTest.OneMicrosecondDelete, "
+        << "set $MEMCACHE_TIMEOUT_TEST to run it";
+    return;
+  }
+
+  if (!InitMemcachedOrSkip(true)) {
+    return;
+  }
+
+  CheckPut("Name", "Value");
+  CheckGet("Name", "Value");
+
+  servers_->set_timeout_us(1);
+  CheckDelete("Name");
+  EXPECT_EQ(1, statistics_.GetVariable("memcache_timeouts")->Get());
+}
+
+// Two following tests ensure no keys are leaked between tests through
+// shared running Memcached server.
+TEST_F(MemcachedCacheTest, TestsAreIsolated1) {
+  if (!InitMemcachedOrSkip(true)) {
+    return;
+  }
+
+  CheckNotFound("SomeKey");
+  CheckPut("SomeKey", "SomeValue");
+}
+
+TEST_F(MemcachedCacheTest, TestsAreIsolated2) {
+  if (!InitMemcachedOrSkip(true)) {
+    return;
+  }
+
+  CheckNotFound("SomeKey");
+  CheckPut("SomeKey", "SomeValue");
+}
+
+}  // namespace net_instaweb

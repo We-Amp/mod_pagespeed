@@ -22,6 +22,7 @@
 #include <csetjmp>
 // 'stdio.h' provides FILE for jpeglib (needed for certain builds)
 #include <algorithm>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 
@@ -34,7 +35,7 @@ extern "C" {
 #ifdef USE_SYSTEM_LIBJPEG
 #include "jpeglib.h"  // NOLINT
 #else
-#include "external/libjpeg_turbo/jpeglib.h"
+#include "jpeglib.h"
 #endif
 }
 
@@ -134,6 +135,10 @@ void OutputMessage(j_common_ptr jpeg_decompress) {
 // Marker for APPN segment is obtained by adding N to JPEG_APP0.
 const int kColorProfileMarker = JPEG_APP0 + 2;
 const int kExifDataMarker = JPEG_APP0 + 1;
+// APP11 carries C2PA / Content-Credentials provenance (JUMBF boxes). A single
+// manifest can span multiple consecutive APP11 markers when it exceeds the
+// ~64KB per-segment limit; each is preserved verbatim below.
+const int kC2paMarker = JPEG_APP0 + 11;
 // Signifies max bytes that needs to read, while reading jpeg segments like exif
 // data, color profiles and etc.
 const int kMaxSegmentSize = 0xFFFF;
@@ -203,14 +208,18 @@ void SetJpegCompressAfterStartCompress(
     const JpegCompressionOptions& options,
     const jpeg_decompress_struct& jpeg_decompress,
     jpeg_compress_struct* jpeg_compress) {
-  if (options.retain_color_profile || options.retain_exif_data) {
+  if (options.retain_color_profile || options.retain_exif_data ||
+      options.preserve_c2pa) {
     jpeg_saved_marker_ptr marker;
     for (marker = jpeg_decompress.marker_list; marker != nullptr;
          marker = marker->next) {
-      // We only copy these headers if present in the decompress struct.
+      // We only copy these headers if present in the decompress struct. C2PA
+      // provenance (APP11/JUMBF) may span several consecutive markers; each is
+      // copied verbatim, preserving the split.
       if ((marker->marker == kExifDataMarker && options.retain_exif_data) ||
           (marker->marker == kColorProfileMarker &&
-           options.retain_color_profile)) {
+           options.retain_color_profile) ||
+          (marker->marker == kC2paMarker && options.preserve_c2pa)) {
         jpeg_write_marker(jpeg_compress, marker->marker, marker->data,
                           marker->data_length);
       }
@@ -252,7 +261,8 @@ class JpegOptimizer {
   MessageHandler* message_handler_;
   pagespeed::image_compression::JpegReader reader_;
 
-  DISALLOW_COPY_AND_ASSIGN(JpegOptimizer);
+  JpegOptimizer(const JpegOptimizer&) = delete;
+  JpegOptimizer& operator=(const JpegOptimizer&) = delete;
 };
 
 JpegOptimizer::JpegOptimizer(MessageHandler* handler)
@@ -306,8 +316,13 @@ bool JpegOptimizer::OptimizeLossy(jpeg_decompress_struct* jpeg_decompress,
   bool valid_jpeg = true;
 
   JSAMPROW row_pointer[1];
-  row_pointer[0] = static_cast<JSAMPLE*>(malloc(
-      jpeg_decompress->output_width * jpeg_decompress->output_components));
+  row_pointer[0] = static_cast<JSAMPLE*>(
+      malloc(static_cast<size_t>(jpeg_decompress->output_width) *
+             jpeg_decompress->output_components));
+  if (row_pointer[0] == nullptr) {
+    PS_LOG_ERROR(message_handler_, "Failed to allocate JPEG scanline buffer");
+    return false;
+  }
   while (jpeg_compress_.next_scanline < jpeg_compress_.image_height) {
     const JDIMENSION num_scanlines_read =
         jpeg_read_scanlines(jpeg_decompress, row_pointer, 1);
@@ -392,6 +407,11 @@ bool JpegOptimizer::DoCreateOptimizedJpeg(
 
   if (options.retain_exif_data) {
     jpeg_save_markers(jpeg_decompress, kExifDataMarker, kMaxSegmentSize);
+  }
+
+  if (options.preserve_c2pa) {
+    // Read APP11 (C2PA/JUMBF) into marker_list so it can be written back.
+    jpeg_save_markers(jpeg_decompress, kC2paMarker, kMaxSegmentSize);
   }
 
   // Read jpeg data into the decompression struct.

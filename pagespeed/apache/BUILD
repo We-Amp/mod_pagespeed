@@ -2,12 +2,94 @@ load("@rules_cc//cc:defs.bzl", "cc_library")
 
 licenses(["notice"])  # Apache 2
 
+# Linker version script to hide internal symbols (especially BoringSSL)
+# from the shared library, preventing conflicts with mod_ssl's OpenSSL.
+exports_files(
+    ["mod_pagespeed.lds"],
+    visibility = ["//visibility:public"],
+)
+
+# The post-config hook is the only place Apache resolves its thread counts,
+# and that is one hand-written call that no unit test can reach.
+# test/pagespeed/apache/apache_mpm_detection_test.cc reads this source to
+# assert the call site still exists; see the test for why.
+filegroup(
+    name = "mod_instaweb_src",
+    srcs = ["mod_instaweb.cc"],
+    visibility = ["//visibility:public"],
+)
+
+# Same reason, one file over: the in-place seam's decision to ask the record
+# gate rather than construct a recorder itself is a call site that needs a
+# live httpd to execute.  test/pagespeed/apache/daemon_seam_test.cc reads this
+# source to assert it still holds.
+filegroup(
+    name = "instaweb_handler_src",
+    srcs = ["instaweb_handler.cc"],
+    visibility = ["//visibility:public"],
+)
+
+# EVERY .cc in the port, for the pin that asserts no file here constructs the
+# in-place recorder directly.  A glob rather than a list on purpose: the
+# regression that pin exists to catch is a construction site appearing in a
+# file nobody remembered to add.
+filegroup(
+    name = "apache_sources",
+    srcs = glob(["*.cc"]),
+    visibility = ["//visibility:public"],
+)
+
+# Apache-specific system test scripts
+filegroup(
+    name = "system_test_files",
+    srcs = [
+        "gzip_test.sh",
+        "process_scope_test.sh",
+        "system_test.sh",
+    ] + glob(["system_tests/*.sh"]),
+    visibility = ["//visibility:public"],
+)
+
+# APR initialization utilities and thread-compatible pool.
+# (The APR memcached client lived here but was removed once the live
+# memcached path moved to libmemcached via //pagespeed/system MemcachedCache;
+# these remaining components use only @apr core, not @aprutil.)
 cc_library(
-    name = "apache",
+    name = "apache_apr",
+    srcs = [
+        "apr_init.cc",
+        "apr_thread_compatible_pool.cc",
+    ],
+    hdrs = [
+        "apr_init.h",
+        "apr_thread_compatible_pool.h",
+    ],
+    copts = select({
+        "//bazel:linux_arm64": ["-Ithird_party/apr/gen/arch/linux/arm64/include/"],
+        "//conditions:default": ["-Ithird_party/apr/gen/arch/linux/x64/include/"],
+    }) + [
+        "-Iexternal/apr/include/",
+        "-Iexternal/apr/include/arch/unix/",
+        "-Iexternal/apr/",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pagespeed/system:system_apache",
+        "@apr",
+    ],
+)
+
+# Core Apache library without mod_instaweb.cc.
+# Use this for tests to avoid the static ApacheProcessContext in mod_instaweb.cc
+# which conflicts with test infrastructure's RewriteTestBaseProcessContext.
+cc_library(
+    name = "apache_core",
     srcs = [
         "apache_config.cc",
         "apache_fetch.cc",
         "apache_message_handler.cc",
+        "apache_mmap_bucket.cc",
+        "apache_mpm_detection.cc",
         "apache_request_context.cc",
         "apache_rewrite_driver_factory.cc",
         "apache_server_context.cc",
@@ -16,11 +98,12 @@ cc_library(
         "apache_writer.cc",
         "apr_timer.cc",
         "header_util.cc",
+        "in_place_not_modified_vary_fetch.cc",
         "instaweb_context.cc",
         "instaweb_handler.cc",
         "log_message_handler.cc",
-        "mod_instaweb.cc",
         "simple_buffered_apache_fetch.cc",
+        "streaming_pagespeed_resource_fetch.cc",
     ],
     hdrs = [
         "apache_config.h",
@@ -28,6 +111,8 @@ cc_library(
         "apache_httpd_includes.h",
         "apache_logging_includes.h",
         "apache_message_handler.h",
+        "apache_mmap_bucket.h",
+        "apache_mpm_detection.h",
         "apache_request_context.h",
         "apache_rewrite_driver_factory.h",
         "apache_server_context.h",
@@ -35,28 +120,87 @@ cc_library(
         "apache_writer.h",
         "apr_timer.h",
         "header_util.h",
+        "in_place_not_modified_vary_fetch.h",
         "instaweb_context.h",
         "instaweb_handler.h",
         "log_message_handler.h",
         "mod_instaweb.h",
         "simple_buffered_apache_fetch.h",
+        "streaming_pagespeed_resource_fetch.h",
     ],
     copts = [
         "-I/usr/include/apache2/",
         "-Iexternal/aprutil/include/",
         "-Iexternal/aprutil/include/arch/unix/",
         "-Iexternal/aprutil/",
-        "-Ithird_party/aprutil/gen/arch/linux/x64/include/",
-        "-Ithird_party/apr/gen/arch/linux/x64/include/",
+    ] + select({
+        "//bazel:linux_arm64": [
+            "-Ithird_party/aprutil/gen/arch/linux/arm64/include/",
+            "-Ithird_party/apr/gen/arch/linux/arm64/include/",
+        ],
+        "//conditions:default": [
+            "-Ithird_party/aprutil/gen/arch/linux/x64/include/",
+            "-Ithird_party/apr/gen/arch/linux/x64/include/",
+        ],
+    }) + [
         "-Iexternal/apr/include/",
         "-Iexternal/apr/include/arch/unix/",
         "-Iexternal/apr/",
-        "-Iexternal/serf/include/",
-        "-Iexternal/serf/",
     ],
     visibility = ["//visibility:public"],
     deps = [
+        ":apache_apr",
         "//pagespeed/automatic",
-        "//pagespeed/system",
+        "//pagespeed/kernel/thread:event_scheduler",
+        "//pagespeed/kernel/thread:libevent_dispatcher",
+        "//pagespeed/system:system_apache",
+        # The startup check runs here, so THIS is where the daemon library
+        # binding (and its -ldl) enters the build -- not in the system library
+        # every port links.
+        "//pagespeed/system:daemon_adapter",
+        "//pagespeed/system:daemon_record_arm",
+        "//pagespeed/system:daemon_serve_arm",
+        "//pagespeed/system:curl_fetcher",
+        # apache_mpm_detection.cc and apache_rewrite_driver_factory.cc include
+        # the thread-count policy header directly.
+        "//pagespeed/system:optimization_thread_policy",
+        # @aprutil supplies the bucket-brigade glue (apr_brigade_create in
+        # instaweb_context.cc) and the httpd util_filter API; it is no longer
+        # for memcached. Declared here because apache_apr no longer pulls it.
+        "@aprutil",
+    ],
+)
+
+# Full Apache library including mod_instaweb.cc (Apache module entry point).
+# This includes a static ApacheProcessContext that initializes the module.
+# For tests, use :apache_core instead to avoid ProcessContext conflicts.
+cc_library(
+    name = "apache",
+    srcs = [
+        "mod_instaweb.cc",
+    ],
+    copts = [
+        "-I/usr/include/apache2/",
+        "-Iexternal/aprutil/include/",
+        "-Iexternal/aprutil/include/arch/unix/",
+        "-Iexternal/aprutil/",
+    ] + select({
+        "//bazel:linux_arm64": [
+            "-Ithird_party/aprutil/gen/arch/linux/arm64/include/",
+            "-Ithird_party/apr/gen/arch/linux/arm64/include/",
+        ],
+        "//conditions:default": [
+            "-Ithird_party/aprutil/gen/arch/linux/x64/include/",
+            "-Ithird_party/apr/gen/arch/linux/x64/include/",
+        ],
+    }) + [
+        "-Iexternal/apr/include/",
+        "-Iexternal/apr/include/arch/unix/",
+        "-Iexternal/apr/",
+    ],
+    alwayslink = True,
+    visibility = ["//visibility:public"],
+    deps = [
+        ":apache_core",
     ],
 )

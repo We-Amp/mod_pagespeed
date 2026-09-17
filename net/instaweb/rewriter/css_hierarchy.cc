@@ -28,7 +28,6 @@
 #include "net/instaweb/rewriter/public/css_util.h"
 #include "net/instaweb/rewriter/public/resource.h"
 #include "pagespeed/kernel/base/message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/stl_util.h"
 #include "pagespeed/kernel/base/string.h"
@@ -43,6 +42,24 @@ namespace net_instaweb {
 
 const char CssHierarchy::kFailureReasonPrefix[] = "Flattening failed: ";
 
+namespace {
+
+// Returns true if any top-level ruleset is a conditional group rule. Nested
+// groups imply a top-level group, and the parser annotates groups inside
+// @media into the same top-level ruleset sequence, so a shallow scan
+// suffices.
+bool HasGroupRules(const Css::Stylesheet& stylesheet) {
+  const Css::Rulesets& rulesets = stylesheet.rulesets();
+  for (int i = 0, n = rulesets.size(); i < n; ++i) {
+    if (rulesets[i]->type() == Css::Ruleset::GROUP_RULE) {
+      return true;
+    }
+  }
+  return false;
+}
+
+}  // namespace
+
 // Representation of a CSS with all the information required for import
 // flattening, image rewriting, and minifying.
 
@@ -53,6 +70,7 @@ CssHierarchy::CssHierarchy(CssFilter* filter)
       input_contents_resolved_(false),
       flattening_succeeded_(true),
       unparseable_detected_(false),
+      group_rules_seen_(false),
       flattened_result_limit_(0),
       message_handler_(nullptr) {}
 
@@ -70,6 +88,12 @@ void CssHierarchy::InitializeRoot(const GoogleUrl& css_base_url,
   input_contents_ = input_contents;
   stylesheet_.reset(stylesheet);
   unparseable_detected_ = has_unparseables;
+  // The root stylesheet is parsed by the caller (CssFilter), so Parse()
+  // below never sees it; note any group rules from the stylesheet itself.
+  // A null stylesheet means Parse() will build one from input_contents_ and
+  // do the same scan there.
+  group_rules_seen_ =
+      stylesheet_.get() != nullptr && HasGroupRules(*stylesheet_);
   flattened_result_limit_ = flattened_result_limit;
   message_handler_ = message_handler;
 }
@@ -230,9 +254,13 @@ bool CssHierarchy::Parse() {
     parser.set_preservation_mode(true);
     parser.set_quirks_mode(false);
     Css::Stylesheet* stylesheet = parser.ParseRawStylesheet();
-    // Any parser error is bad news but unparseable sections are OK because
-    // any problem with an @import results in the error mask bit kImportError
-    // being set.
+    // Any parser error is bad news but unparseable sections are OK: a failed
+    // @-rule (such as an @import using syntax the parser predates) is
+    // terminated and preserved verbatim as an unparsed ruleset, with the
+    // error demoted to unparseable_sections_seen_mask; we refuse to flatten
+    // when such an unparsed @import is present (see
+    // RefuseFlatteningOnUnparseableImport, called below and from
+    // ExpandChildren).
     if (parser.errors_seen_mask() != Css::Parser::kNoError) {
       delete stylesheet;
       stylesheet = nullptr;
@@ -244,6 +272,11 @@ bool CssHierarchy::Parse() {
       if (parser.unparseable_sections_seen_mask() != Css::Parser::kNoError) {
         unparseable_detected_ = true;
       }
+      // Note any conditional group rules: their preludes are opaque bytes
+      // that may contain url()s, so the textual absolutify pass must run
+      // even though a cleanly parsed group rule sets no unparseable-section
+      // bits.
+      group_rules_seen_ = HasGroupRules(*stylesheet);
       // Reduce the media on the to-be merged rulesets to the minimum required,
       // deleting any rulesets that end up having no applicable media types.
       Css::Rulesets& rulesets = stylesheet->mutable_rulesets();
@@ -277,12 +310,51 @@ bool CssHierarchy::Parse() {
         }
       }
       stylesheet_.reset(stylesheet);
+      // Refuse to flatten if an @import was preserved verbatim as an
+      // unparsed ruleset. Nested CSS comes through here on both the cold
+      // path (RewriteSingle) and the warm path (cached content re-parsed in
+      // Render), which never reaches ExpandChildren before being rolled up.
+      RefuseFlatteningOnUnparseableImport();
     }
   }
   return result;
 }
 
+bool CssHierarchy::RefuseFlatteningOnUnparseableImport() {
+  for (const Css::Ruleset* ruleset : stylesheet_->rulesets()) {
+    if (ruleset->type() == Css::Ruleset::UNPARSED_REGION) {
+      const CssStringPiece bytes =
+          ruleset->unparsed_region()->bytes_in_original_buffer();
+      if (StringCaseStartsWith(StringPiece(bytes.data(), bytes.size()),
+                               "@import")) {
+        // Record the veto only when it flips flattening_succeeded_ from true
+        // to false, so it is counted once per CSS even though both Parse()
+        // and ExpandChildren() perform this check.
+        if (flattening_succeeded_) {
+          if (filter_ != nullptr) {
+            filter_->num_flatten_imports_unparseable_import_->Add(1);
+          }
+          set_flattening_succeeded(false);
+          AddFlatteningFailureReason(
+              StrCat("Unparseable @import in ", url_for_humans()));
+        }
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 bool CssHierarchy::ExpandChildren() {
+  // Refuse to flatten if an @import was preserved verbatim as an unparsed
+  // ruleset: it is invisible to the import expansion below, so flattening a
+  // sibling @import would strand it mid-stylesheet where browsers ignore it.
+  // Parse() performs the same check for the CSS it parses (nested CSS, cold
+  // or from cache); the root's stylesheet is pre-parsed by CssFilter, so it
+  // is only checked here.
+  if (RefuseFlatteningOnUnparseableImport()) {
+    return false;
+  }
   bool result = false;
   Css::Imports& imports = stylesheet_->mutable_imports();
   ResizeChildren(imports.size());
@@ -368,6 +440,12 @@ void CssHierarchy::RollUpContents() {
     unparseable_detected_ = children_[i]->unparseable_detected_;
   }
 
+  // Ditto for conditional group rules: flattening merges child rulesets into
+  // this stylesheet, so their group preludes become our problem.
+  for (int i = 0; i < n && !group_rules_seen_; ++i) {
+    group_rules_seen_ = children_[i]->group_rules_seen_;
+  }
+
   // If flattening has worked so far, check that we can get all children's
   // contents. If not, we treat it the same as flattening not succeeding.
   for (int i = 0; i < n && flattening_succeeded_; ++i) {
@@ -395,11 +473,18 @@ void CssHierarchy::RollUpContents() {
 
     // @charset and @import rules are discarded by flattening, but save them
     // until we know that the regeneration and limit check both went ok so we
-    // restore the stylesheet back to its original state if not.
+    // restore the stylesheet back to its original state if not. A root
+    // stylesheet with no @imports is not rolled up into anything, so it must
+    // keep its @charset: it may be the served result's only encoding
+    // declaration. Nested stylesheets still drop these here - see
+    // RollUpStylesheets.
+    const bool discard_at_rules = (parent_ != nullptr || n > 0);
     Css::Charsets saved_charsets;
     Css::Imports saved_imports;
-    stylesheet_->mutable_charsets().swap(saved_charsets);
-    stylesheet_->mutable_imports().swap(saved_imports);
+    if (discard_at_rules) {
+      stylesheet_->mutable_charsets().swap(saved_charsets);
+      stylesheet_->mutable_imports().swap(saved_imports);
+    }
 
     // If we can't regenerate the stylesheet, or we have a result limit and the
     // flattened result is at or over that limit, flattening hasn't succeeded.
@@ -427,9 +512,13 @@ void CssHierarchy::RollUpContents() {
     }
     if (!flattening_succeeded_) {
       STLDeleteElements(&children_);  // our children are useless now
-      // Revert the stylesheet back to how it was.
-      stylesheet_->mutable_charsets().swap(saved_charsets);
-      stylesheet_->mutable_imports().swap(saved_imports);
+      // Revert the stylesheet back to how it was, if we changed it: if we
+      // did not discard the at-rules above the saved sets are empty and
+      // swapping them back in would delete the @charset instead.
+      if (discard_at_rules) {
+        stylesheet_->mutable_charsets().swap(saved_charsets);
+        stylesheet_->mutable_imports().swap(saved_imports);
+      }
       // If minification succeeded but flattening failed, it can only be
       // because we exceeded the flattening limit, in which case we must fall
       // back to the minified form of the original unflattened stylesheet.
@@ -456,10 +545,13 @@ bool CssHierarchy::RollUpStylesheets() {
     } else {
       // If the contents were loaded from cache it's possible for them to be
       // unable to be flattened. If we can parse them and they have @charset
-      // or @import rules then they must have failed to flatten when they
-      // were first cached because we expressly remove these below. The earlier
-      // failure has already been added to the statistics so don't do so here,
-      // nor do we note the reason in debug.
+      // or @import rules then they may have failed to flatten when they were
+      // first cached: nested stylesheets have these removed below when
+      // flattening succeeds, so their presence marks a failed flatten. A
+      // root stylesheet with no @imports legitimately keeps its @charset
+      // (see below), so for a root the @charset half of this check is
+      // defensive only. The earlier failure has already been added to the
+      // statistics so don't do so here, nor do we note the reason in debug.
       if (!stylesheet_->charsets().empty() || !stylesheet_->imports().empty()) {
         flattening_succeeded_ = false;
       }
@@ -481,6 +573,12 @@ bool CssHierarchy::RollUpStylesheets() {
     unparseable_detected_ = children_[i]->unparseable_detected_;
   }
 
+  // Ditto for conditional group rules: flattening merges child rulesets into
+  // this stylesheet, so their group preludes become our problem.
+  for (int i = 0; i < n && !group_rules_seen_; ++i) {
+    group_rules_seen_ = children_[i]->group_rules_seen_;
+  }
+
   // If flattening succeeded, check that we can get all child stylesheets.
   // If not, we treat it the same as flattening not succeeding. Since this
   // method can change flattening_succeeded_ we have to check it again.
@@ -495,8 +593,13 @@ bool CssHierarchy::RollUpStylesheets() {
 
   if (flattening_succeeded_) {
     // Flattening succeeded so delete our @charset and @import rules then
-    // merge our children's rulesets and @font-faces (only) into ours.
-    stylesheet_->mutable_charsets().clear();
+    // merge our children's rulesets and @font-faces (only) into ours. The
+    // children contribute only rulesets and @font-faces to the merge, so a
+    // stylesheet with no children is effectively unflattened and must keep
+    // its @charset: it may be the served result's only encoding declaration.
+    if (n > 0) {
+      stylesheet_->mutable_charsets().clear();
+    }
     STLDeleteElements(&stylesheet_->mutable_imports());
     Css::Rulesets& target = stylesheet_->mutable_rulesets();
     Css::FontFaces& fonts_target = stylesheet_->mutable_font_faces();

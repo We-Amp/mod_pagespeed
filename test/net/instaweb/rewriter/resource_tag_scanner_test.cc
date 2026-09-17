@@ -26,7 +26,6 @@
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/html/empty_html_filter.h"
 #include "pagespeed/kernel/html/html_element.h"
@@ -71,7 +70,8 @@ class ResourceCollector : public EmptyHtmlFilter {
   CategoryVector* resource_category_;
   RewriteDriver* driver_;
 
-  DISALLOW_COPY_AND_ASSIGN(ResourceCollector);
+  ResourceCollector(const ResourceCollector&) = delete;
+  ResourceCollector& operator=(const ResourceCollector&) = delete;
 };
 
 class ResourceTagScannerTest : public RewriteTestBase {
@@ -136,6 +136,15 @@ TEST_F(ResourceTagScannerTest, Prefetch) {
   ASSERT_EQ(static_cast<size_t>(1), resources_.size());
   ASSERT_EQ(static_cast<size_t>(1), resource_category_.size());
   EXPECT_STREQ("do_find_prefetch", resources_[0]);
+  EXPECT_EQ(semantic_type::kPrefetch, resource_category_[0]);
+}
+
+TEST_F(ResourceTagScannerTest, Preconnect) {
+  ValidateNoChanges("Preconnect",
+                    "<link rel=\"preconnect\" href=\"do_find_preconnect\">\n");
+  ASSERT_EQ(static_cast<size_t>(1), resources_.size());
+  ASSERT_EQ(static_cast<size_t>(1), resource_category_.size());
+  EXPECT_STREQ("do_find_preconnect", resources_[0]);
   EXPECT_EQ(semantic_type::kPrefetch, resource_category_[0]);
 }
 

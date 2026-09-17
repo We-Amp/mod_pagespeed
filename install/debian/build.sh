@@ -22,7 +22,7 @@ gen_changelog() {
 # Create the Debian control file needed by dpkg-deb.
 gen_control() {
   dpkg-gencontrol -v"${VERSIONFULL}" -c"${DEB_CONTROL}" -l"${DEB_CHANGELOG}" \
-  -f"${DEB_FILES}" -p"${PACKAGE}-${CHANNEL}" -P"${STAGEDIR}" -T"${DEB_SUBST}" \
+  -f"${DEB_FILES}" -p"${PACKAGE}" -P"${STAGEDIR}" -T"${DEB_SUBST}" \
   -O > "${STAGEDIR}/DEBIAN/control"
   rm -f "${DEB_CONTROL}"
 }
@@ -36,8 +36,6 @@ gen_substvars() {
   pushd "${SUBSTFILEDIR}" >/dev/null
   dpkg-shlibdeps "${STAGEDIR}${APACHE_MODULEDIR}/mod_pagespeed.so" \
   -O >> "${DEB_SUBST}" 2>/dev/null
-  dpkg-shlibdeps "${STAGEDIR}${APACHE_MODULEDIR}/mod_pagespeed_ap24.so" \
-  -O >> "${DEB_SUBST}" 2>/dev/null
   popd >/dev/null
 }
 
@@ -45,7 +43,6 @@ gen_substvars() {
 prep_staging_debian() {
   prep_staging_common
   install -m 755 -d "${STAGEDIR}/DEBIAN" \
-    "${STAGEDIR}/etc/cron.daily" \
     "${STAGEDIR}${APACHE_CONF_AVAILABLE_DIR}" \
     "${STAGEDIR}/usr/bin"
 }
@@ -55,9 +52,6 @@ stage_install_debian() {
   prep_staging_debian
   stage_install_common
   echo "Staging Debian install files in '${STAGEDIR}'..."
-  process_template "${BUILDDIR}/install/common/repo.cron" \
-    "${STAGEDIR}/etc/cron.daily/${PACKAGE}"
-  chmod 755 "${STAGEDIR}/etc/cron.daily/${PACKAGE}"
   process_template "${BUILDDIR}/install/debian/postinst" \
     "${STAGEDIR}/DEBIAN/postinst"
   chmod 755 "${STAGEDIR}/DEBIAN/postinst"
@@ -69,18 +63,36 @@ stage_install_debian() {
   chmod 755 "${STAGEDIR}/DEBIAN/postrm"
   install -m 644 "${BUILDDIR}/install/debian/conffiles" \
     "${STAGEDIR}/DEBIAN/conffiles"
-  echo "/etc/cron.daily/${PACKAGE}" >> "${STAGEDIR}/DEBIAN/conffiles"
   process_template "${BUILDDIR}/install/common/pagespeed.load.template" \
     "${STAGEDIR}${APACHE_CONFDIR}/pagespeed.load"
   chmod 644 "${STAGEDIR}${APACHE_CONFDIR}/pagespeed.load"
   process_template "${BUILDDIR}/install/common/pagespeed.conf.template" \
     "${STAGEDIR}${APACHE_CONFDIR}/pagespeed.conf"
-  install -m 755 "${BUILDDIR}/js_minify" \
-    "${STAGEDIR}/usr/bin/pagespeed_js_minify"
   chmod 644 "${STAGEDIR}${APACHE_CONFDIR}/pagespeed.conf"
-  install -m 644 \
-    "${BUILDDIR}/../../net/instaweb/genfiles/conf/pagespeed_libraries.conf" \
-    "${STAGEDIR}${APACHE_CONF_AVAILABLE_DIR}/pagespeed_libraries.conf"
+  # The daemon drop-in: the two directives that point the module at the
+  # optimizer daemon this package depends on. A dpkg conffile (appended to
+  # DEBIAN/conffiles here), enabled by postinst with a2enconf. Shipped ONLY by
+  # a build that carries the optimizer dependency (-d): a module pointed at a
+  # daemon that is not installed runs with in-place optimization OFF -- it
+  # does not fall back to its classic in-place path -- so a dependency-free
+  # build (the synthetic upgrade fixture, a local build without -d) must not
+  # carry the file. postinst/prerm guard on the file's presence.
+  if [ -n "${OPTIMIZER_DEB_VERSION}" ]; then
+    install -m 644 "${BUILDDIR}/install/common/pagespeed_daemon.conf" \
+      "${STAGEDIR}${APACHE_CONF_AVAILABLE_DIR}/pagespeed_daemon.conf"
+    echo "${APACHE_CONF_AVAILABLE_DIR}/pagespeed_daemon.conf" \
+      >> "${STAGEDIR}/DEBIAN/conffiles"
+  fi
+  # Install pagespeed_libraries.conf if available
+  # Try Bazel output path first, then legacy GYP path
+  local LIBRARIES_CONF="${BUILDDIR}/net/instaweb/genfiles/conf/pagespeed_libraries.conf"
+  if [ ! -f "${LIBRARIES_CONF}" ]; then
+    LIBRARIES_CONF="${BUILDDIR}/../../net/instaweb/genfiles/conf/pagespeed_libraries.conf"
+  fi
+  if [ -f "${LIBRARIES_CONF}" ]; then
+    install -m 644 "${LIBRARIES_CONF}" \
+      "${STAGEDIR}${APACHE_CONF_AVAILABLE_DIR}/pagespeed_libraries.conf"
+  fi
 }
 
 # Build the deb file within a fakeroot.
@@ -101,24 +113,18 @@ do_package() {
   echo "Packaging ${HOST_ARCH}..."
   PREDEPENDS="$COMMON_PREDEPS"
   DEPENDS="${COMMON_DEPS}"
-
-  # Generate Conflicts: and Replaces: headers for the other channel to get
-  # dpkg to seamlessly switch channels on -i
-  case $CHANNEL in
-  stable )
-    CONFLICTS=mod-pagespeed-beta
-    ;;
-  beta )
-    CONFLICTS=mod-pagespeed-stable
-    ;;
-  * )
-    echo
-    echo "ERROR: '$CHANNEL' is not a valid channel type."
-    echo
-    exit 1
-    ;;
-  esac
-  REPLACES="${CONFLICTS}"
+  if [ -n "${OPTIMIZER_DEB_VERSION}" ]; then
+    # Exact-version dependency: the module serves through the optimizer
+    # daemon, and the pair is only supported at matching versions --
+    # upgrades and rollbacks move both packages together.
+    DEPENDS="${DEPENDS}, pagespeed-optimizer (= ${OPTIMIZER_DEB_VERSION})"
+  else
+    echo "warning: packaging WITHOUT a pagespeed-optimizer dependency;" \
+      "a serving pair build must pass -d <optimizer-deb-version>" >&2
+  fi
+  PROVIDES="${PACKAGE}"
+  CONFLICTS=""
+  REPLACES=""
 
   gen_changelog
   process_template "${SCRIPTDIR}/control.template" "${DEB_CONTROL}"
@@ -140,34 +146,19 @@ cleanup() {
 }
 
 usage() {
-  echo "usage: $(basename $0) [-c channel] [-a target_arch] [-o 'dir'] [-b 'dir']"
-  echo "-c channel the package channel (unstable, beta, stable)"
-  echo "-a arch    package architecture (ia32 or x64)"
+  echo "usage: $(basename $0) [-a target_arch] [-o 'dir'] [-b 'dir']"
+  echo "-a arch    package architecture (x64 or arm64)"
   echo "-o dir     package output directory [${OUTPUTDIR}]"
   echo "-b dir     build input directory    [${BUILDDIR}]"
+  echo "-c channel (ignored, kept for backward compatibility)"
+  echo "-d version pagespeed-optimizer version for an exact-version Depends;"
+  echo "           also ships the daemon drop-in pagespeed_daemon.conf (pair builds only)"
+  echo "           (omitting it packages without the dependency, with a warning)"
   echo "-h         this help message"
 }
 
-# Check that the channel name is one of the allowable ones.
-verify_channel() {
-  case $CHANNEL in
-    stable )
-      CHANNEL=stable
-      ;;
-    testing|beta )
-      CHANNEL=beta
-      ;;
-    * )
-      echo
-      echo "ERROR: '$CHANNEL' is not a valid channel type."
-      echo
-      exit 1
-      ;;
-  esac
-}
-
 process_opts() {
-  while getopts ":o:b:c:a:h" OPTNAME
+  while getopts ":o:b:c:a:d:h" OPTNAME
   do
     case $OPTNAME in
       o )
@@ -182,6 +173,16 @@ process_opts() {
         ;;
       a )
         TARGETARCH="$OPTARG"
+        ;;
+      d )
+        OPTIMIZER_DEB_VERSION="$OPTARG"
+        case "$OPTIMIZER_DEB_VERSION" in
+          *[!A-Za-z0-9.+~-]* | "" )
+            echo "'-d' takes a Debian package version" \
+              "([A-Za-z0-9.+~-], no epochs)." >&2
+            exit 1
+            ;;
+        esac
         ;;
       h )
         usage
@@ -215,31 +216,37 @@ DEB_FILES="${TMPFILEDIR}/files"
 DEB_CONTROL="${TMPFILEDIR}/control"
 DEB_SUBST="${SUBSTFILEDIR}/debian/substvars"
 CHANNEL="beta"
+# When set (-d), the package hard-depends on pagespeed-optimizer at exactly
+# this version: the serving module and the optimizer daemon ship as a pair.
+OPTIMIZER_DEB_VERSION=""
 # Default target architecture to same as build host.
-if [ "$(uname -m)" = "x86_64" ]; then
-  TARGETARCH="x64"
-else
-  TARGETARCH="ia32"
-fi
+case "$(uname -m)" in
+  x86_64)  TARGETARCH="x64" ;;
+  aarch64) TARGETARCH="arm64" ;;
+  *)
+    echo "ERROR: Unsupported host architecture '$(uname -m)'." >&2
+    exit 1
+    ;;
+esac
 
 # call cleanup() on exit
 trap cleanup 0
 process_opts "$@"
-if [ ! "$BUILDDIR" ]; then
-  BUILDDIR=$(readlink -f "${SCRIPTDIR}/../../out/Release")
+if [ ! "${BUILDDIR:-}" ]; then
+  # Default: source tree root (Bazel build)
+  BUILDDIR=$(readlink -f "${SCRIPTDIR}/../..")
 fi
 
-source ${BUILDDIR}/install/common/installer.include
+source "${BUILDDIR}/install/common/installer.include"
 
 get_version_info
 VERSIONFULL="${VERSION}-r${REVISION}"
 
-source "${BUILDDIR}/install/common/mod-pagespeed.info"
+source "${BUILDDIR}/install/common/mod-pagespeed/mod-pagespeed.info"
 eval $(sed -e "s/^\([^=]\+\)=\(.*\)$/export \1='\2'/" \
   "${BUILDDIR}/install/common/BRANDING")
 
 REPOCONFIG=""
-verify_channel
 
 # Some Debian packaging tools want these set.
 export DEBFULLNAME="${MAINTNAME}"
@@ -264,13 +271,13 @@ SSL_CERT_DIR="/etc/ssl/certs"
 SSL_CERT_FILE_COMMAND=
 
 case "$TARGETARCH" in
-  ia32 )
-    stage_install_debian
-    do_package "i386"
-    ;;
   x64 )
     stage_install_debian
     do_package "amd64"
+    ;;
+  arm64 )
+    stage_install_debian
+    do_package "arm64"
     ;;
   * )
     echo

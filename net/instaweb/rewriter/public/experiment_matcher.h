@@ -56,7 +56,8 @@ class ExperimentMatcher {
                                    ResponseHeaders* headers);
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(ExperimentMatcher);
+  ExperimentMatcher(const ExperimentMatcher&) = delete;
+  ExperimentMatcher& operator=(const ExperimentMatcher&) = delete;
 };
 
 }  // namespace net_instaweb

@@ -46,8 +46,10 @@ pagespeed.CriticalCssLoader.addAllStyles = function() {
     div.innerHTML = e.textContent;
     var children = div.childNodes;
     for (var v = 0; v < children.length; ++v) {
-      children[v].removeAttribute('id');
-    }  
+      if (children[v].nodeType === 1) {
+        children[v].removeAttribute('id');
+      }
+    }
     document.body.appendChild(div);
   }
 };
@@ -61,12 +63,15 @@ pagespeed.CriticalCssLoader.addAllStyles = function() {
  */
 pagespeed.CriticalCssLoader.Run = function() {
   var raf = pagespeedutils.getRequestAnimationFrame();
+  // Always arm the onload fallback: requestAnimationFrame callbacks do not
+  // fire in background tabs, which would otherwise delay the full CSS until
+  // the tab is focused. addAllStyles is idempotent, so double delivery is
+  // harmless.
+  pagespeedutils.addHandler(
+      window, 'load', pagespeed.CriticalCssLoader.addAllStyles);
   if (raf) {
     raf(function() {
       window.setTimeout(pagespeed.CriticalCssLoader.addAllStyles, 0);
     });
-  } else {
-    pagespeedutils.addHandler(
-        window, 'load', pagespeed.CriticalCssLoader.addAllStyles);
   }
 };

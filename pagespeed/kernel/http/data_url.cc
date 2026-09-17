@@ -85,7 +85,9 @@ bool ParseDataUrl(const StringPiece& url, const ContentType** content_type,
   if (header_boundary == url.npos || !strings::StartsWith(url, kData)) {
     return false;
   }
-  StringPiece header(url.data(), header_boundary);
+  StringPiece header(
+      url.data(),
+      header_boundary);  // NOLINT(bugprone-suspicious-stringview-data-usage)
   size_t mime_boundary = header.find(';');
   if (mime_boundary == url.npos) {
     // no charset or base64 encoding.

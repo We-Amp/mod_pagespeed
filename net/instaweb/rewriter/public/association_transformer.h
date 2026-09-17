@@ -88,7 +88,8 @@ class AssociationTransformer : public CssTagScanner::Transformer {
 
   FRIEND_TEST(AssociationTransformerTest, TransformsCorrectly);
 
-  DISALLOW_COPY_AND_ASSIGN(AssociationTransformer);
+  AssociationTransformer(const AssociationTransformer&) = delete;
+  AssociationTransformer& operator=(const AssociationTransformer&) = delete;
 };
 
 // Extremely simple slot which just sets an association in a std::map when
@@ -139,7 +140,8 @@ class AssociationSlot : public ResourceSlot {
   StringStringMap* map_;
   GoogleString key_;
 
-  DISALLOW_COPY_AND_ASSIGN(AssociationSlot);
+  AssociationSlot(const AssociationSlot&) = delete;
+  AssociationSlot& operator=(const AssociationSlot&) = delete;
 };
 
 }  // namespace net_instaweb

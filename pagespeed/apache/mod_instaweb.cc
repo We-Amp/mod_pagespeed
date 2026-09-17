@@ -24,6 +24,7 @@
 
 #include <cerrno>
 #include <cstddef>
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <set>
@@ -48,7 +49,6 @@
 // clang-format on
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -57,8 +57,9 @@
 #include "pagespeed/kernel/http/google_url.h"
 #include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/response_headers.h"
-#include "pagespeed/system/in_place_resource_recorder.h"
+#include "pagespeed/system/ipro_recorder.h"
 #include "pagespeed/system/loopback_route_fetcher.h"
+#include "pagespeed/system/system_caches.h"
 #include "pagespeed/system/system_server_context.h"
 #include "util_filter.h"  // NOLINT
 // Note: a very useful reference is this file, which demos many Apache module
@@ -100,7 +101,7 @@ namespace net_instaweb {
 namespace {
 
 // Passed to CheckGlobalOption
-enum VHostHandling { kTolerateInVHost, kErrorInVHost };
+enum VHostHandling : std::uint8_t { kTolerateInVHost, kErrorInVHost };
 
 // TODO(sligocki): Separate options parsing from all the other stuff here.
 // Instaweb directive names -- these must match
@@ -184,7 +185,7 @@ const char kModPagespeedImageWebpRecompressionQuality[] =
 const char kModPagespeedImageWebpRecompressionQualityForSmallScreens[] =
     "ModPagespeedImageWebpRecompressionQualityForSmallScreens";
 
-enum RewriteOperation { REWRITE, FLUSH, FINISH };
+enum RewriteOperation : std::uint8_t { REWRITE, FLUSH, FINISH };
 
 // TODO(sligocki): Move inside PSOL.
 // Check if pagespeed optimization rules applicable.
@@ -293,6 +294,14 @@ class ApacheProcessContext {
   }
 
   ~ApacheProcessContext() {
+    // Redirect LOG() to stderr before destroying the factory. Worker threads
+    // may still be executing tasks (e.g., InPlaceRewriteContext::Harvest) that
+    // call LOG() during the factory shutdown sequence. Without this, those
+    // LOG() calls crash in spdlog::logger::sink_it_() because spdlog's global
+    // logger (a Meyer's singleton) may already be destroyed by the time this
+    // static destructor runs (static destruction order fiasco).
+    pagespeed_logging::ShutDownLogging();
+
     // We must delete the factory before ProcessContext's dtor is called, which
     // terminates the protobuf libraries.  It is unsafe to free our structures
     // after the protobuf library has been shut down.
@@ -335,7 +344,7 @@ class ApacheProcessContext {
   ProcessContext process_context_;
   command_rec* apache_cmds_;
 
-  typedef std::map<const command_rec*, VHostHandling> VhostCommandHandlingMap;
+  using VhostCommandHandlingMap = std::map<const command_rec*, VHostHandling>;
   VhostCommandHandlingMap vhost_command_handling_map_;
   StringVector cmd_names_;
 };
@@ -368,9 +377,7 @@ class ScopedTimer {
 InstawebContext* build_context_for_request(request_rec* request) {
   ApacheServerContext* server_context =
       InstawebContext::ServerContextFromServerRec(request->server);
-  // Escape ASAP if we're in unplugged mode, or if in proxy_all_requests_mode,
-  // which does HTML rewriting in ProxyInterface rather than via an Apache
-  // filter.
+  // Escape ASAP if we're in unplugged mode or proxy_all_requests_mode.
   if (server_context->global_config()->unplugged() ||
       server_context->global_config()->proxy_all_requests_mode()) {
     return nullptr;
@@ -712,8 +719,9 @@ apr_status_t instaweb_in_place_filter(ap_filter_t* filter,
   }
 
   // This should always be set by handle_as_in_place() in instaweb_handler.cc.
-  InPlaceResourceRecorder* recorder =
-      static_cast<InPlaceResourceRecorder*>(filter->ctx);
+  // The concrete recorder depends on which in-place substrate this server is
+  // on; these filters drive the lifecycle and do not care which.
+  IproRecorder* recorder = static_cast<IproRecorder*>(filter->ctx);
   CHECK(recorder != nullptr);
 
   bool first = true;
@@ -744,8 +752,8 @@ apr_status_t instaweb_in_place_filter(ap_filter_t* filter,
                                    request->content_type);
         }
 
-        recorder->ConsiderResponseHeaders(
-            InPlaceResourceRecorder::kPreliminaryHeaders, &response_headers);
+        recorder->ConsiderResponseHeaders(IproRecorder::kPreliminaryHeaders,
+                                          &response_headers);
       }
 
       if (recorder->failed()) {
@@ -799,8 +807,7 @@ apr_status_t instaweb_in_place_fix_headers_filter(ap_filter_t* filter,
   ApacheServerContext* server_context =
       InstawebContext::ServerContextFromServerRec(request->server);
   if (!server_context->global_config()->unplugged()) {
-    InPlaceResourceRecorder* recorder =
-        static_cast<InPlaceResourceRecorder*>(filter->ctx);
+    IproRecorder* recorder = static_cast<IproRecorder*>(filter->ctx);
     if (recorder != nullptr) {
       int s_maxage_sec =
           server_context->global_config()->EffectiveInPlaceSMaxAgeSec();
@@ -851,8 +858,7 @@ apr_status_t instaweb_in_place_check_headers_filter(ap_filter_t* filter,
   }
 
   // This should always be set by Instaweb::HandleAsInPlace().
-  InPlaceResourceRecorder* recorder =
-      static_cast<InPlaceResourceRecorder*>(filter->ctx);
+  IproRecorder* recorder = static_cast<IproRecorder*>(filter->ctx);
 
   // We do not want to call Done until the last bucket comes in, because the
   // instaweb_in_place_filter needs to record the body, so iterate to EOS
@@ -993,6 +999,18 @@ int pagespeed_post_config(apr_pool_t* pool, apr_pool_t* plog, apr_pool_t* ptemp,
   ApacheRewriteDriverFactory* factory =
       apache_process_context.factory(server_list);
 
+  // Thread-count resolution is deferred to here: ap_mpm_query() cannot report
+  // the MPM's threading model, the configured ThreadsPerChild, or the child
+  // count the thread-count policy divides by until the configuration has been
+  // processed, and it can't answer at all if the MPM module is loaded after
+  // mod_pagespeed.  This must run before anything reads the thread counts,
+  // and after directives have been parsed so an explicit NumRewriteThreads /
+  // NumExpensiveRewriteThreads still wins.
+  factory->FinalizeThreadCounts();
+  factory->caches()->set_thread_limit(factory->LookupThreadLimit() +
+                                      factory->num_rewrite_threads() +
+                                      factory->num_expensive_rewrite_threads());
+
   std::vector<SystemServerContext*> server_contexts;
   std::set<ApacheServerContext*> server_contexts_covered;
   for (server_rec* server = server_list; server != nullptr;
@@ -1039,6 +1057,24 @@ int pagespeed_post_config(apr_pool_t* pool, apr_pool_t* plog, apr_pool_t* ptemp,
     return HTTP_INTERNAL_SERVER_ERROR;
   }
 
+  // Resolve every server's relationship with the optimizer daemon before any
+  // request can be served, so the serving path only ever reads a verdict.
+  //
+  // A refusal here fails the whole start, which is the point: the single
+  // condition that refuses is a cache-volume sizing divergence between this
+  // module and the daemon, and that divergence is SILENT at run time -- the
+  // two sides would open different volume files, share nothing, and look
+  // healthy while optimizing nothing.  Every other daemon problem degrades to
+  // in-place optimization off with one loud line, and the server starts.
+  for (SystemServerContext* system_server_context : server_contexts) {
+    ApacheServerContext* server_context =
+        dynamic_cast<ApacheServerContext*>(system_server_context);
+    CHECK(server_context != nullptr);
+    if (!server_context->RunDaemonStartupCheck()) {
+      return HTTP_INTERNAL_SERVER_ERROR;
+    }
+  }
+
   // chown any directories we created. We may have to do it here in
   // post_config since we may not have our user/group yet during parse
   // (example: Fedora 11).
@@ -1078,17 +1114,20 @@ int pagespeed_modify_request(request_rec* r) {
   // This method is based in part on mod_remoteip.
   conn_rec* c = r->connection;
 
-  // Detect local requests from us.
+  // Detect local requests from us. The curl fetcher produces user-agent
+  // strings like "CurlPagespeed (mod_pagespeed/1.1.0-beta.1-hash)", so
+  // we match on the kModPagespeedSubrequestUserAgent substring.
   const char* ua = apr_table_get(r->headers_in, HttpAttributes::kUserAgent);
   if (ua != nullptr &&
-      strstr(ua, " mod_pagespeed/" MOD_PAGESPEED_VERSION_STRING) != nullptr) {
+      strstr(ua, kModPagespeedSubrequestUserAgent) != nullptr) {
 #ifdef MPS_APACHE_24
     apr_sockaddr_t* client_addr = c->client_addr;
 #else
     apr_sockaddr_t* client_addr = c->remote_addr;
 #endif
 
-    if (LoopbackRouteFetcher::IsLoopbackAddr(client_addr)) {
+    if (LoopbackRouteFetcher::IsLoopbackAddr(
+            reinterpret_cast<const struct sockaddr*>(&client_addr->sa))) {
       // Rewrite the client IP in Apache's records to 224.0.0.0, which is a
       // multicast address that should hence not be used by anyone, and at the
       // very least is clearly not 127.0.0.1.
@@ -1205,6 +1244,14 @@ void mod_pagespeed_register_hooks(apr_pool_t* pool) {
 apr_status_t pagespeed_child_exit(void* data) {
   ApacheServerContext* server_context = static_cast<ApacheServerContext*>(data);
   if (server_context->PoolDestroyed()) {
+    // Route logging to stderr before tearing down the factory/worker pools and
+    // the Apache log pool. The spdlog path is already crash-safe via the
+    // process-immortal held logger; this additionally protects the
+    // registered-sink path (SendToSinks -> ApacheGLogSink -> ap_log_perror on
+    // the Apache pool) from a worker that LOG()s while that pool is being torn
+    // down. Runs during apr pool cleanup, i.e. before C++ static destructors.
+    pagespeed_logging::ShutDownLogging();
+
     // When the last server context is destroyed, it's important that we also
     // clean up the factory, so we don't end up with dangling pointers in case
     // we are not unloaded fully on a config check (e.g. on Ubuntu 11).
@@ -1420,7 +1467,7 @@ static const char* ParseDirective(cmd_parms* cmd, void* data, const char* arg) {
     directive = kModPagespeedImageMaxRewritesAtOnce;
   }
 
-  if (strings::StartsWith(directive, prefix)) {
+  if (StringCaseStartsWith(directive, prefix)) {
     StringPiece option = directive.substr(prefix.size());
     GoogleString msg;
 
@@ -1576,7 +1623,7 @@ static const char* ParseDirective2(cmd_parms* cmd, void* data, const char* arg1,
   StringPiece prefix(RewriteQuery::kModPagespeed);
   StringPiece directive = cmd->directive->directive;
   // Go through generic path first.
-  if (strings::StartsWith(directive, prefix)) {
+  if (StringCaseStartsWith(directive, prefix)) {
     GoogleString msg;
     StringPiece option = directive.substr(prefix.size());
     RewriteOptions::OptionSettingResult result =
@@ -1593,7 +1640,8 @@ static const char* ParseDirective2(cmd_parms* cmd, void* data, const char* arg1,
     }
   }
 
-  return "Unknown directive.";
+  return apr_pstrcat(cmd->pool, cmd->directive->directive,
+                     " unknown directive.", NULL);
 }
 
 // Callback function that parses a three-argument directive.  This is called
@@ -1613,7 +1661,7 @@ static const char* ParseDirective3(cmd_parms* cmd, void* data, const char* arg1,
   StringPiece prefix(RewriteQuery::kModPagespeed);
   StringPiece directive = cmd->directive->directive;
   // Go through generic path first.
-  if (strings::StartsWith(directive, prefix)) {
+  if (StringCaseStartsWith(directive, prefix)) {
     GoogleString msg;
     RewriteOptions::OptionSettingResult result =
         config->ParseAndSetOptionFromName3(directive.substr(prefix.size()),

@@ -43,7 +43,8 @@ class CacheKeyPrependerTest : public CacheTestBase {
   CacheKeyPrepender cache_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(CacheKeyPrependerTest);
+  CacheKeyPrependerTest(const CacheKeyPrependerTest&) = delete;
+  CacheKeyPrependerTest& operator=(const CacheKeyPrependerTest&) = delete;
 };
 
 TEST_F(CacheKeyPrependerTest, Get) {

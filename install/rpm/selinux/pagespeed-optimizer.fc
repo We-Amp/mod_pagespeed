@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+#
+# File contexts for the pagespeed-optimizer SELinux policy.  These ride
+# inside the built .pp, so semodule -i registers them in the policy store
+# and the labels survive restorecon and a full `fixfiles relabel`.
+
+/usr/bin/pagespeed-optimizer                --  gen_context(system_u:object_r:pagespeed_exec_t,s0)
+
+/var/cache/pagespeed-optimizer(/.*)?            gen_context(system_u:object_r:pagespeed_cache_t,s0)
+
+# The /var/run spelling is the canonical one on the EL family: /run is an
+# equivalency alias of /var/run (file_contexts.subs) and a /run/... spec
+# silently never matches -- semanage refuses it outright ("conflicts with
+# equivalency rule"). Lookups on the /run spelling resolve through the
+# alias and match these rules. The notify pair is split out as
+# pagespeed_notify_t (see the .te); the management sockets (api.sock,
+# notify.sock.mgmt) fall through to the directory rule and stay
+# pagespeed_runtime_t. The notify specs are exact (no trailing (/.*)?), so
+# notify.sock.mgmt does NOT match them.
+/var/run/pagespeed-optimizer(/.*)?              gen_context(system_u:object_r:pagespeed_runtime_t,s0)
+/var/run/pagespeed-optimizer/notify\.sock       -s  gen_context(system_u:object_r:pagespeed_notify_t,s0)
+/var/run/pagespeed-optimizer/notify\.sock\.health   -s  gen_context(system_u:object_r:pagespeed_notify_t,s0)

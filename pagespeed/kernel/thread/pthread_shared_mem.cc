@@ -74,7 +74,8 @@ class PthreadSharedMemMutex : public AbstractMutex {
  private:
   pthread_mutex_t* external_mutex_;
 
-  DISALLOW_COPY_AND_ASSIGN(PthreadSharedMemMutex);
+  PthreadSharedMemMutex(const PthreadSharedMemMutex&) = delete;
+  PthreadSharedMemMutex& operator=(const PthreadSharedMemMutex&) = delete;
 };
 
 class PthreadSharedMemSegment : public AbstractSharedMemSegment {
@@ -127,7 +128,8 @@ class PthreadSharedMemSegment : public AbstractSharedMemSegment {
   char* const base_;
   const size_t size_;
 
-  DISALLOW_COPY_AND_ASSIGN(PthreadSharedMemSegment);
+  PthreadSharedMemSegment(const PthreadSharedMemSegment&) = delete;
+  PthreadSharedMemSegment& operator=(const PthreadSharedMemSegment&) = delete;
 };
 
 pthread_mutex_t segment_bases_lock = PTHREAD_MUTEX_INITIALIZER;

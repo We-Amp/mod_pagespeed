@@ -210,6 +210,14 @@ ImageFormat ImageOptimizer::ImageTypeToImageFormat(
     case net_instaweb::IMAGE_WEBP_ANIMATED:
       image_format = IMAGE_WEBP;
       break;
+    case net_instaweb::IMAGE_AVIF:
+    case net_instaweb::IMAGE_AVIF_LOSSLESS_OR_ALPHA:
+    case net_instaweb::IMAGE_AVIF_ANIMATED:
+      // AVIF sub-variants collapse to the single IMAGE_AVIF ImageFormat,
+      // mirroring the IMAGE_WEBP arm above (see image.cc). Codec wiring is
+      // deferred (Stream B/C).
+      image_format = IMAGE_AVIF;
+      break;
   }
   return image_format;
 }
@@ -225,6 +233,15 @@ bool ImageOptimizer::ConfigureWriter() {
   switch (optimized_format_) {
     case IMAGE_UNKNOWN:
     case IMAGE_GIF:
+      break;
+    case IMAGE_AVIF:
+      // Deliberate M2 deferral: the AVIF codec exists (avif_optimizer.cc), but
+      // this simplified ImageOptimizer pipeline does not produce AVIF in M1 --
+      // AVIF output is minted only via the ImageImpl paths in
+      // net/instaweb/rewriter/image.cc. Present so the -Wswitch exhaustiveness
+      // contract holds; wire an AvifConfiguration here in M2 if this pipeline
+      // grows an AVIF target.
+      result = false;
       break;
     case IMAGE_PNG:
       png_config = std::make_unique<PngCompressParams>(

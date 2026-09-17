@@ -42,7 +42,7 @@ class MessageHandler;
 // pagespeed optimization libraries, such as mod_pagespeed and ngx_pagespeed.
 class SystemRewriteOptions : public RewriteOptions {
  public:
-  typedef std::set<StaticAssetEnum::StaticAsset> StaticAssetSet;
+  using StaticAssetSet = std::set<StaticAssetEnum::StaticAsset>;
 
   static const char kCentralControllerPort[];
   static const char kPopularityContestMaxInFlight[];
@@ -67,21 +67,16 @@ class SystemRewriteOptions : public RewriteOptions {
 
   void Merge(const RewriteOptions& src) override;
 
+  OptionSettingResult ParseAndSetOptionFromName1(
+      StringPiece name, StringPiece arg, GoogleString* msg,
+      MessageHandler* handler) override;
+
   OptionSettingResult ParseAndSetOptionFromName2(
       StringPiece name, StringPiece arg1, StringPiece arg2, GoogleString* msg,
       MessageHandler* handler) override;
 
   GoogleString SubclassSignatureLockHeld() override;
 
-  int64 file_cache_clean_interval_ms() const {
-    return file_cache_clean_interval_ms_.value();
-  }
-  bool has_file_cache_clean_interval_ms() const {
-    return file_cache_clean_interval_ms_.was_set();
-  }
-  void set_file_cache_clean_interval_ms(int64 x) {
-    set_option(x, &file_cache_clean_interval_ms_);
-  }
   int64 file_cache_clean_size_kb() const {
     return file_cache_clean_size_kb_.value();
   }
@@ -91,14 +86,14 @@ class SystemRewriteOptions : public RewriteOptions {
   void set_file_cache_clean_size_kb(int64 x) {
     set_option(x, &file_cache_clean_size_kb_);
   }
-  int64 file_cache_clean_inode_limit() const {
-    return file_cache_clean_inode_limit_.value();
+  int file_cache_small_tier_percent() const {
+    return file_cache_small_tier_percent_.value();
   }
-  bool has_file_cache_clean_inode_limit() const {
-    return file_cache_clean_inode_limit_.was_set();
+  bool has_file_cache_small_tier_percent() const {
+    return file_cache_small_tier_percent_.was_set();
   }
-  void set_file_cache_clean_inode_limit(int64 x) {
-    set_option(x, &file_cache_clean_inode_limit_);
+  void set_file_cache_small_tier_percent(int x) {
+    set_option(x, &file_cache_small_tier_percent_);
   }
   int64 lru_cache_byte_limit() const { return lru_cache_byte_limit_.value(); }
   void set_lru_cache_byte_limit(int64 x) {
@@ -121,6 +116,31 @@ class SystemRewriteOptions : public RewriteOptions {
   }
   void set_compress_metadata_cache(bool x) {
     set_option(x, &compress_metadata_cache_);
+  }
+  bool cyclone_zero_copy() const { return cyclone_zero_copy_.value(); }
+  void set_cyclone_zero_copy(bool x) { set_option(x, &cyclone_zero_copy_); }
+  bool cyclone_zero_copy_serve() const {
+    return cyclone_zero_copy_serve_.value();
+  }
+  // Whether CycloneZeroCopyServe was explicitly configured (as opposed to
+  // taking the default).  The Apache aliased serve is opt-in experimental:
+  // it activates only on an explicit "CycloneZeroCopyServe on", mirroring
+  // the nginx rollout posture of shipping the sink default-off first.
+  bool has_cyclone_zero_copy_serve() const {
+    return cyclone_zero_copy_serve_.was_set();
+  }
+  void set_cyclone_zero_copy_serve(bool x) {
+    set_option(x, &cyclone_zero_copy_serve_);
+  }
+  int64 cyclone_ram_cache_kb() const { return cyclone_ram_cache_kb_.value(); }
+  void set_cyclone_ram_cache_kb(int64 x) {
+    set_option(x, &cyclone_ram_cache_kb_);
+  }
+  bool async_metadata_l2_writes() const {
+    return async_metadata_l2_writes_.value();
+  }
+  void set_async_metadata_l2_writes(bool x) {
+    set_option(x, &async_metadata_l2_writes_);
   }
   bool statistics_enabled() const { return statistics_enabled_.value(); }
   void set_statistics_enabled(bool x) { set_option(x, &statistics_enabled_); }
@@ -198,16 +218,6 @@ class SystemRewriteOptions : public RewriteOptions {
     set_option(x, &fetcher_proxy_);
   }
 
-  const GoogleString& controller_port() const {
-    return controller_port_.value();
-  }
-  int popularity_contest_max_inflight_requests() const {
-    return popularity_contest_max_inflight_requests_.value();
-  }
-  int popularity_contest_max_queue_size() const {
-    return popularity_contest_max_queue_size_.value();
-  }
-
   // Cache flushing configuration.
   void set_cache_flush_poll_interval_sec(int64 num_seconds) {
     set_option(num_seconds, &cache_flush_poll_interval_sec_);
@@ -242,6 +252,13 @@ class SystemRewriteOptions : public RewriteOptions {
   bool disable_loopback_routing() const {
     return disable_loopback_routing_.value();
   }
+  // OPT-IN, DEFAULT FALSE.  When false the admin/statistics/console/message
+  // access checks behave exactly as they always have (Host-header matched,
+  // default-open when no *Domains allowlist is configured).  When true the
+  // checks deny non-loopback clients unless an explicit *Domains allowlist is
+  // configured; the loopback decision uses the validated client IP supplied by
+  // the caller, never the client-controlled Host header.  See AllowDomain().
+  bool strict_admin_access() const { return strict_admin_access_.value(); }
   bool fetch_with_gzip() const { return fetch_with_gzip_.value(); }
   int64 ipro_max_response_bytes() const {
     return ipro_max_response_bytes_.value();
@@ -266,6 +283,21 @@ class SystemRewriteOptions : public RewriteOptions {
   bool AllowDomain(const GoogleUrl& url,
                    const FastWildcardGroup& wildcard_group) const;
 
+  // Strict-mode-aware variant of AllowDomain().  `client_is_loopback` must be
+  // computed by the caller from the *validated* client connection IP (e.g.
+  // Apache's useragent_ip / nginx's connection address), NOT from the
+  // client-controlled Host header.
+  //
+  // When strict_admin_access() is false this is identical to the two-argument
+  // AllowDomain() above (zero behavior change).  When strict_admin_access() is
+  // true and no explicit allowlist is configured (wildcard_group is empty),
+  // access is granted only to loopback clients; an explicitly configured
+  // allowlist is still honored (default-deny Host match) regardless of the
+  // loopback flag, so operators who deliberately widened access keep it.
+  bool AllowDomain(const GoogleUrl& url,
+                   const FastWildcardGroup& wildcard_group,
+                   bool client_is_loopback) const;
+
   // For each of these AccessAllowed() methods, the url needs to have been
   // checked to make sure it is_valid().
   bool StatisticsAccessAllowed(const GoogleUrl& url) const {
@@ -287,8 +319,38 @@ class SystemRewriteOptions : public RewriteOptions {
     return AllowDomain(url, *global_admin_domains_);
   }
 
+  // Strict-mode-aware overloads of the AccessAllowed() predicates above.  These
+  // are identical to the single-argument forms when strict_admin_access() is
+  // off; when on they additionally require either a loopback client or an
+  // explicit *Domains allowlist.  Ports that have the validated client IP
+  // available (Apache: useragent_ip) call these; ports that do not keep calling
+  // the single-argument forms (unchanged default-open behavior).
+  bool StatisticsAccessAllowed(const GoogleUrl& url,
+                               bool client_is_loopback) const {
+    return AllowDomain(url, *statistics_domains_, client_is_loopback);
+  }
+  bool GlobalStatisticsAccessAllowed(const GoogleUrl& url,
+                                     bool client_is_loopback) const {
+    return AllowDomain(url, *global_statistics_domains_, client_is_loopback);
+  }
+  bool MessagesAccessAllowed(const GoogleUrl& url,
+                             bool client_is_loopback) const {
+    return AllowDomain(url, *messages_domains_, client_is_loopback);
+  }
+  bool ConsoleAccessAllowed(const GoogleUrl& url,
+                            bool client_is_loopback) const {
+    return AllowDomain(url, *console_domains_, client_is_loopback);
+  }
+  bool AdminAccessAllowed(const GoogleUrl& url, bool client_is_loopback) const {
+    return AllowDomain(url, *admin_domains_, client_is_loopback);
+  }
+  bool GlobalAdminAccessAllowed(const GoogleUrl& url,
+                                bool client_is_loopback) const {
+    return AllowDomain(url, *global_admin_domains_, client_is_loopback);
+  }
+
   // If this is set to true, we'll turn on our fallback proxy-like behavior
-  // on non-.pagespeed. URLs without changing the main fetcher from Serf
+  // on non-.pagespeed. URLs without changing the main fetcher
   // (the way the slurp options would).
   bool test_proxy() const { return test_proxy_.value(); }
   void set_test_proxy(bool x) { set_option(x, &test_proxy_); }
@@ -315,10 +377,10 @@ class SystemRewriteOptions : public RewriteOptions {
 
   // This configures the fetcher we use for fallback handling if test_proxy()
   // is on:
-  //  - If this is empty, we use the usual fetcher (e.g. Serf)
+  //  - If this is empty, we use the usual fetcher (e.g. Curl)
   //  - If it's non-empty, the fallback URLs will be fetched from the given
   //    slurp directory.  PageSpeed resource fetches, however, will still
-  //    use the usual fetcher (e.g. Serf).
+  //    use the usual fetcher (e.g. Curl).
   GoogleString test_proxy_slurp() const { return test_proxy_slurp_.value(); }
 
   // Helper functions
@@ -385,12 +447,6 @@ class SystemRewriteOptions : public RewriteOptions {
     }
   };
 
-  class ControllerPortOption : public Option<GoogleString> {
-   public:
-    bool SetFromString(StringPiece value_string,
-                       GoogleString* error_detail) override;
-  };
-
   // Keeps the properties added by this subclass.  These are merged into
   // RewriteOptions::all_properties_ during Initialize().
   static Properties* system_properties_;
@@ -399,7 +455,7 @@ class SystemRewriteOptions : public RewriteOptions {
   //
   template <class OptionClass>
   static void AddSystemProperty(typename OptionClass::ValueType default_value,
-                                OptionClass SystemRewriteOptions::*offset,
+                                OptionClass SystemRewriteOptions::* offset,
                                 const char* id, StringPiece option_name,
                                 const char* help, bool safe_to_print) {
     AddProperty(default_value, offset, id, option_name, kServerScope, help,
@@ -408,7 +464,7 @@ class SystemRewriteOptions : public RewriteOptions {
 
   template <class OptionClass>
   static void AddSystemProperty(typename OptionClass::ValueType default_value,
-                                OptionClass SystemRewriteOptions::*offset,
+                                OptionClass SystemRewriteOptions::* offset,
                                 const char* id, StringPiece option_name,
                                 OptionScope scope, const char* help,
                                 bool safe_to_print) {
@@ -442,6 +498,21 @@ class SystemRewriteOptions : public RewriteOptions {
   Option<bool> statistics_logging_enabled_;
   Option<bool> use_shared_mem_locking_;
   Option<bool> compress_metadata_cache_;
+  // Zero-copy serving of memory-mapped cache hits (Cyclone).  Experimental,
+  // default off.
+  Option<bool> cyclone_zero_copy_;
+  // Zero-copy ALIASED serve: carry the mmap bytes into the port output
+  // buffer by reference instead of copying (nginx IPRO; default off).
+  Option<bool> cyclone_zero_copy_serve_;
+  // Size (KB) of Cyclone's internal RAM cache tier, decoupled from the
+  // PSOL LRU cache.  0 (default) disables the RAM tier (serve reads from the
+  // mmap volume); -1 inherits LRUCacheKbPerProcess (legacy coupling);
+  // >0 sets that many KB.
+  Option<int64> cyclone_ram_cache_kb_;
+  // Defer the metadata cache's blocking L2 (disk) write off the rewrite
+  // critical path via a single-thread write-behind queue.  Experimental,
+  // default off; reads and the shm L1 write stay synchronous.
+  Option<bool> async_metadata_l2_writes_;
 
   Option<bool> slurp_read_only_;
   Option<bool> test_proxy_;
@@ -451,12 +522,18 @@ class SystemRewriteOptions : public RewriteOptions {
   // localhost.
   Option<bool> disable_loopback_routing_;
 
+  // OPT-IN, DEFAULT FALSE.  See strict_admin_access() / AllowDomain() above.
+  Option<bool> strict_admin_access_;
+
   // Makes fetches from PSA to origin-server request
   // accept-encoding:gzip, even when used in a context when we want
   // cleartext.  We'll decompress as we read the content if needed.
   Option<bool> fetch_with_gzip_;
 
-  ControllerPortOption controller_port_;
+  // Deprecated no-op options, kept registered so old configs still parse.
+  // Setting any of these logs a deprecation warning (see
+  // ParseAndSetOptionFromName1); the values are never read.
+  Option<GoogleString> controller_port_;
   Option<int> popularity_contest_max_inflight_requests_;
   Option<int> popularity_contest_max_queue_size_;
 
@@ -468,9 +545,8 @@ class SystemRewriteOptions : public RewriteOptions {
   Option<int> redis_ttl_sec_;
 
   Option<int64> slow_file_latency_threshold_us_;
-  Option<int64> file_cache_clean_inode_limit_;
-  Option<int64> file_cache_clean_interval_ms_;
   Option<int64> file_cache_clean_size_kb_;
+  Option<int> file_cache_small_tier_percent_;
   Option<int64> lru_cache_byte_limit_;
   Option<int64> lru_cache_kb_per_process_;
   Option<int64> statistics_logging_interval_ms_;
@@ -494,7 +570,8 @@ class SystemRewriteOptions : public RewriteOptions {
   CopyOnWrite<FastWildcardGroup> admin_domains_;
   CopyOnWrite<FastWildcardGroup> global_admin_domains_;
 
-  DISALLOW_COPY_AND_ASSIGN(SystemRewriteOptions);
+  SystemRewriteOptions(const SystemRewriteOptions&) = delete;
+  SystemRewriteOptions& operator=(const SystemRewriteOptions&) = delete;
 };
 
 }  // namespace net_instaweb

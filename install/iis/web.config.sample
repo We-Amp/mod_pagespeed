@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+  <system.webServer>
+    <!-- PageSpeed module is registered globally by the MSI installer. -->
+    <!-- Do NOT add it here again or you'll get 500.19 errors. -->
+
+    <!-- Required for PageSpeed combined resource URLs containing '+' -->
+    <security>
+      <requestFiltering allowDoubleEscaping="true">
+        <!-- Non-serving guard. The per-site override
+             pagespeed.config / iiswebspeed.config live in the site's web root,
+             so deny serving them EXPLICITLY rather than relying on the IIS
+             *.config default alone. hiddenSegments returns 404 for any request
+             whose path contains these names. -->
+        <hiddenSegments>
+          <add segment="pagespeed.config" />
+          <add segment="iiswebspeed.config" />
+        </hiddenSegments>
+      </requestFiltering>
+    </security>
+  </system.webServer>
+</configuration>

@@ -150,7 +150,8 @@ if [ "$SECONDARY_HOSTNAME" != "" ]; then
   check_from "$OUT" grep "<!--"
 
   start_test Remote Configuration specify an experiment.
-  # Remote config url is configured to sleep an impossibly long time.
+  # The remote config explicitly enables insert_ga (experiments no longer
+  # auto-enable it), so the AnalyticsID it sets shows up in the page body.
   URL="$(generate_url remote-config-experiment.example.com \
                       /mod_pagespeed_test/forbidden.html)"
   # Some options are invalid, check that they are skipped and the rest of the

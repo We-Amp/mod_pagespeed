@@ -22,9 +22,9 @@
 #include "test/pagespeed/kernel/cache/mock_time_cache.h"
 
 #include <cstddef>
+#include <memory>
 
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/shared_string.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/cache/lru_cache.h"
@@ -66,7 +66,8 @@ class MockTimeCacheTest : public CacheTestBase {
   MockTimeCache cache_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(MockTimeCacheTest);
+  MockTimeCacheTest(const MockTimeCacheTest&) = delete;
+  MockTimeCacheTest& operator=(const MockTimeCacheTest&) = delete;
 };
 
 TEST_F(MockTimeCacheTest, NoDelayOps) {

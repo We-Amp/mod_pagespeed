@@ -62,6 +62,8 @@ class CssRewriteTestBase : public RewriteTestBase {
         statistics()->GetVariable(CssFilter::kRecursion);
     num_flatten_imports_complex_queries_ =
         statistics()->GetVariable(CssFilter::kComplexQueries);
+    num_flatten_imports_unparseable_import_ =
+        statistics()->GetVariable(CssFilter::kUnparseableImport);
   }
   ~CssRewriteTestBase() override;
 
@@ -111,6 +113,9 @@ class CssRewriteTestBase : public RewriteTestBase {
     // Flags to allow methods to know if the HTML is the test input or output.
     kInputHtml = 1 << 21,
     kOutputHtml = 1 << 22,
+
+    // Flag to check the unparseable-@import flattening failure statistic.
+    kFlattenImportsUnparseableImport = 1 << 23,
   };
 
   static bool ExactlyOneTrue(bool a, bool b) { return a ^ b; }
@@ -210,6 +215,7 @@ class CssRewriteTestBase : public RewriteTestBase {
   Variable* num_flatten_imports_minify_failed_;
   Variable* num_flatten_imports_recursion_;
   Variable* num_flatten_imports_complex_queries_;
+  Variable* num_flatten_imports_unparseable_import_;
 };
 
 }  // namespace net_instaweb

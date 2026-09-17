@@ -62,7 +62,8 @@ class LOCKABLE InProcessSharedMem::DelegateMutex : public AbstractMutex {
 
  private:
   AbstractMutex* actual_;
-  DISALLOW_COPY_AND_ASSIGN(DelegateMutex);
+  DelegateMutex(const DelegateMutex&) = delete;
+  DelegateMutex& operator=(const DelegateMutex&) = delete;
 };
 
 // Likewise for segments and AttachToSegment.
@@ -87,7 +88,8 @@ class InProcessSharedMem::DelegateSegment : public AbstractSharedMemSegment {
 
  private:
   AbstractSharedMemSegment* actual_;
-  DISALLOW_COPY_AND_ASSIGN(DelegateSegment);
+  DelegateSegment(const DelegateSegment&) = delete;
+  DelegateSegment& operator=(const DelegateSegment&) = delete;
 };
 
 class InProcessSharedMem::Segment : public AbstractSharedMemSegment {
@@ -126,7 +128,8 @@ class InProcessSharedMem::Segment : public AbstractSharedMemSegment {
   char* storage_;
   std::vector<AbstractMutex*> mutexes_;  // for memory ownership purposes.
 
-  DISALLOW_COPY_AND_ASSIGN(Segment);
+  Segment(const Segment&) = delete;
+  Segment& operator=(const Segment&) = delete;
 };
 
 InProcessSharedMem::InProcessSharedMem(ThreadSystem* thread_system)

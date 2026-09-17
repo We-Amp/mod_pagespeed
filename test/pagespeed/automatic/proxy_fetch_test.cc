@@ -33,7 +33,6 @@
 #include "pagespeed/kernel/base/function.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/null_message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/request_headers.h"
@@ -91,7 +90,8 @@ class MockProxyFetch : public ProxyFetch {
 
  private:
   bool complete_;
-  DISALLOW_COPY_AND_ASSIGN(MockProxyFetch);
+  MockProxyFetch(const MockProxyFetch&) = delete;
+  MockProxyFetch& operator=(const MockProxyFetch&) = delete;
 };
 
 // A wrapper around MockProxyFetch that manages all objects on the heap and
@@ -263,7 +263,8 @@ class ProxyFetchPropertyCallbackCollectorTest : public RewriteTestBase {
  private:
   bool post_lookup_called_;
 
-  DISALLOW_COPY_AND_ASSIGN(ProxyFetchPropertyCallbackCollectorTest);
+  ProxyFetchPropertyCallbackCollectorTest(const ProxyFetchPropertyCallbackCollectorTest&) = delete;
+  ProxyFetchPropertyCallbackCollectorTest& operator=(const ProxyFetchPropertyCallbackCollectorTest&) = delete;
 };
 
 // Test fixture for ProxyFetch.
@@ -313,7 +314,8 @@ class FlushLoggingStringAsyncFetch : public StringAsyncFetch {
   }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(FlushLoggingStringAsyncFetch);
+  FlushLoggingStringAsyncFetch(const FlushLoggingStringAsyncFetch&) = delete;
+  FlushLoggingStringAsyncFetch& operator=(const FlushLoggingStringAsyncFetch&) = delete;
 };
 
 }  // namespace
@@ -705,6 +707,35 @@ TEST_F(ProxyFetchTest, TestStickyPageSpeedOptions) {
         &response_cookies));
     EXPECT_STREQ(expired_cookies, response_cookies);
   }
+}
+
+// Verify that ProxyFetchFactory can be destroyed without crashing.
+// Regression test for a SIGSEGV in spdlog::logger::sink_it_() triggered when
+// the destructor called LOG() after the logging sink had been torn down during
+// Apache child process shutdown.
+TEST_F(ProxyFetchTest, DestroyFactoryNoCrash) {
+  // Create and immediately destroy a factory with no outstanding fetches.
+  { ProxyFetchFactory factory(server_context_); }
+  // Test passes if we get here without crashing.
+}
+
+// Same as above but with a fetch that completes before the factory is destroyed.
+TEST_F(ProxyFetchTest, DestroyFactoryAfterFetchNoCrash) {
+  NullMessageHandler handler;
+  server_context()->global_options()->ClearSignatureForTesting();
+  server_context()->global_options()->set_max_html_parse_bytes(0L);
+  server_context()->global_options()->ComputeSignature();
+  StringAsyncFetch fetch(
+      RequestContext::NewTestRequestContext(server_context()->thread_system()));
+  fetch.response_headers()->Add("Content-Type", "text/html");
+  fetch.response_headers()->ComputeCaching();
+  ProxyFetchFactory factory(server_context_);
+  MockProxyFetch* mock_proxy_fetch =
+      new MockProxyFetch(&fetch, &factory, server_context());
+  mock_proxy_fetch->Write("<html>HTML</html>.", &handler);
+  mock_proxy_fetch->Flush(&handler);
+  mock_proxy_fetch->Done(true);
+  // Factory is destroyed here — must not crash.
 }
 
 }  // namespace net_instaweb

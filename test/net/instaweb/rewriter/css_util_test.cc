@@ -28,7 +28,6 @@
 #include "base/logging.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/google_message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/html/html_element.h"
@@ -51,7 +50,8 @@ class CssUtilTest : public testing::Test {
   GoogleMessageHandler message_handler_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(CssUtilTest);
+  CssUtilTest(const CssUtilTest&) = delete;
+  CssUtilTest& operator=(const CssUtilTest&) = delete;
 };
 
 TEST_F(CssUtilTest, TestGetDimensions) {
@@ -60,7 +60,7 @@ TEST_F(CssUtilTest, TestGetDimensions) {
   html_parse.AddAttribute(img, HtmlName::kStyle,
                           "height:50px;width:80px;border-width:0px;");
 
-  std::unique_ptr<StyleExtractor> extractor(new StyleExtractor(img));
+  std::unique_ptr<StyleExtractor> extractor = std::make_unique<StyleExtractor>(img);
   EXPECT_EQ(kHasBothDimensions, extractor->state());
   EXPECT_EQ(80, extractor->width());
   EXPECT_EQ(50, extractor->height());
@@ -99,7 +99,7 @@ TEST_F(CssUtilTest, TestAnyDimensions) {
   HtmlElement* img = html_parse.NewElement(nullptr, HtmlName::kImg);
   html_parse.AddAttribute(img, HtmlName::kStyle,
                           "width:80px;border-width:0px;");
-  std::unique_ptr<StyleExtractor> extractor(new StyleExtractor(img));
+  std::unique_ptr<StyleExtractor> extractor = std::make_unique<StyleExtractor>(img);
   EXPECT_TRUE(extractor->HasAnyDimensions());
   EXPECT_EQ(kHasWidthOnly, extractor->state());
 
@@ -274,6 +274,10 @@ TEST_F(CssUtilTest, CanMediaAffectScreenTest) {
   EXPECT_FALSE(css_util::CanMediaAffectScreen("not!?#?;valid"));
   // We must handle CSS3 media queries (http://www.w3.org/TR/css3-mediaqueries/)
   EXPECT_TRUE(css_util::CanMediaAffectScreen("not print"));
+  // "not" negates the entire media query, so a negated query with a
+  // condition is still true on screens where the condition fails.
+  EXPECT_TRUE(css_util::CanMediaAffectScreen("not screen and (color)"));
+  EXPECT_TRUE(css_util::CanMediaAffectScreen("not all and (monochrome)"));
   EXPECT_TRUE(css_util::CanMediaAffectScreen(
       "only screen and (max-device-width: 480px) "));
   // "(parens)" are equivalent to "all and (parens)" -- thus screen-affecting.

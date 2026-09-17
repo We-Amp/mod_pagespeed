@@ -20,11 +20,12 @@
 // This contains things that are common between unit tests for Worker and its
 // subclasses, such as runtime creation and various closures.
 
+#include <memory>
+
 #include "base/logging.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/condvar.h"
 #include "pagespeed/kernel/base/function.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 
@@ -48,7 +49,8 @@ class WorkerTestBase : public ::testing::Test {
   std::unique_ptr<ThreadSystem> thread_runtime_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(WorkerTestBase);
+  WorkerTestBase(const WorkerTestBase&) = delete;
+  WorkerTestBase& operator=(const WorkerTestBase&) = delete;
 };
 
 // A closure that increments a variable on running.
@@ -62,7 +64,8 @@ class WorkerTestBase::CountFunction : public Function {
 
  private:
   int* variable_;
-  DISALLOW_COPY_AND_ASSIGN(CountFunction);
+  CountFunction(const CountFunction&) = delete;
+  CountFunction& operator=(const CountFunction&) = delete;
 };
 
 // A way for one thread to wait for another.
@@ -77,7 +80,8 @@ class WorkerTestBase::SyncPoint {
   bool done_;
   std::unique_ptr<ThreadSystem::CondvarCapableMutex> mutex_;
   std::unique_ptr<ThreadSystem::Condvar> notify_;
-  DISALLOW_COPY_AND_ASSIGN(SyncPoint);
+  SyncPoint(const SyncPoint&) = delete;
+  SyncPoint& operator=(const SyncPoint&) = delete;
 };
 
 // Notifies of itself having run on a given SyncPoint.
@@ -88,7 +92,8 @@ class WorkerTestBase::NotifyRunFunction : public Function {
 
  private:
   SyncPoint* sync_;
-  DISALLOW_COPY_AND_ASSIGN(NotifyRunFunction);
+  NotifyRunFunction(const NotifyRunFunction&) = delete;
+  NotifyRunFunction& operator=(const NotifyRunFunction&) = delete;
 };
 
 // Waits on a given SyncPoint before completing Run()
@@ -99,7 +104,8 @@ class WorkerTestBase::WaitRunFunction : public Function {
 
  private:
   SyncPoint* sync_;
-  DISALLOW_COPY_AND_ASSIGN(WaitRunFunction);
+  WaitRunFunction(const WaitRunFunction&) = delete;
+  WaitRunFunction& operator=(const WaitRunFunction&) = delete;
 };
 
 // Function that signals on destruction and check fails when run.
@@ -113,7 +119,8 @@ class DeleteNotifyFunction : public Function {
 
  private:
   WorkerTestBase::SyncPoint* sync_;
-  DISALLOW_COPY_AND_ASSIGN(DeleteNotifyFunction);
+  DeleteNotifyFunction(const DeleteNotifyFunction&) = delete;
+  DeleteNotifyFunction& operator=(const DeleteNotifyFunction&) = delete;
 };
 
 }  // namespace net_instaweb

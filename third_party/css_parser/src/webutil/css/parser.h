@@ -257,6 +257,12 @@ class Parser {
   // Returns true if matching '}' was found, false if EOF was reached first.
   bool SkipMatching();
 
+  // Same skip as SkipMatching() but without the kBlockError report: for
+  // callers that scan over a balanced block as part of a *successful* parse
+  // (group-rule preludes, raw media expression capture), where the skipped
+  // bytes are kept verbatim rather than discarded as an error.
+  bool SkipMatchingQuiet();
+
   // Skips following tokens until delimiter delim or end is seen, delim is
   // consumed if found. Smart enough to skip over matches inside comments,
   // quoted strings or balanced parentheses ()[]{}.
@@ -264,6 +270,11 @@ class Parser {
   //   SkipPastDelimiter(',') will result in in_ = " 1, bar".
   // Returns true if it found delim before end of file.
   bool SkipPastDelimiter(char delim);
+
+  // Same scan as SkipPastDelimiter() but built on SkipMatchingQuiet(), so
+  // crossing a nested balanced block does not set kBlockError. Used where the
+  // skipped bytes form a valid raw capture, not an error recovery.
+  bool SkipBalancedTo(char delim);
 
   // Skip until next "any" token (value which can be parsed by ParseAny).
   //
@@ -564,6 +575,23 @@ class Parser {
   void ParseStatement(const MediaQueries* media_queries,
                       Stylesheet* stylesheet);
 
+  // Parse a conditional group rule (@supports/@layer/@container block form)
+  // starting just past the at-keyword ident. at_start points at the '@' so
+  // that the prelude (and, on failure, the whole statement) can be captured
+  // verbatim. The prelude is stored structure-blind; the body is parsed
+  // recursively with the same statement loop as @media. Returns whether the
+  // statement was correctly terminated (mirroring the other at-rule branches
+  // in ParseStatement): on every bail path a parsing error has been reported
+  // first, so that ParseStatement's preservation-mode logic saves the bytes
+  // as an UnparsedRegion, or (at EOF) preserves the error.
+  bool ParseGroupRule(const char* at_start, uint64_t start_errors_seen_mask,
+                      const MediaQueries* media_queries,
+                      Stylesheet* stylesheet);
+
+  // Recursively expand shorthand declarations (background, font, ...) in
+  // stylesheet and in every group-rule body. Helper for ParseStylesheet().
+  void ExpandShorthandDeclarations(Stylesheet* stylesheet);
+
   // ParseRuleset() starts from the first character of the first
   // selector (note: it does not skip whitespace) and consumes the
   // ruleset, including the closing '}'. Return NULL if the parsing fails.
@@ -608,6 +636,18 @@ class Parser {
   // and CSS hacks) so that they can be re-serialized precisely.
   bool preservation_mode_;
   int max_function_depth_;
+
+  // Group rules nest (@supports inside @layer inside ...) and each level is
+  // one recursive ParseGroupRule/ParseStatement frame, so the depth must be
+  // capped to bound stack use on untrusted input (cf. max_function_depth_).
+  // Beyond the cap a group is consumed balanced and demoted to an
+  // UnparsedRegion in preservation mode. Real-world nesting is <= 3-4.
+  static const int kMaxGroupRuleDepth = 16;
+  // Current group-rule nesting depth (group levels only — an interleaved
+  // @media frame is not counted, but contributes at most one extra frame per
+  // level since @media-in-@media stays rejected); > 0 iff inside a
+  // group-rule body. Also gates the @import/@charset rejection there.
+  int group_rule_depth_;
 
   // errors_seen_mask_ is non-zero iff we failed to parse part of the CSS
   // and could not recover and so we have lost information.
@@ -775,6 +815,7 @@ class Ruleset {
   enum Type {
     RULESET,
     UNPARSED_REGION,
+    GROUP_RULE,
   };
 
   Ruleset()
@@ -794,7 +835,15 @@ class Ruleset {
       : type_(UNPARSED_REGION),
         media_queries_(new MediaQueries),
         unparsed_region_(unparsed_region) {}
-  ~Ruleset() {}
+  // Conditional group rule (@supports/@layer/@container block form). Takes
+  // ownership of body. prelude holds the verbatim bytes from the '@' through
+  // the last non-whitespace byte before the body's '{' (for example
+  // "@supports (display:grid)"); it is stored structure-blind and serialized
+  // unescaped, so nothing about the condition text may be normalized.
+  Ruleset(const CssStringPiece& prelude, Stylesheet* body);
+  // Defined out-of-line: the unique_ptr<Stylesheet> member's deleter needs
+  // Stylesheet complete, and Stylesheet is declared below this class.
+  ~Ruleset();
 
   // Is this actually a Ruleset or some sort of at-rule? For historical reasons
   // at-rules are also stored as Rulesets.
@@ -810,8 +859,9 @@ class Ruleset {
   }
 
   // NOTE: Only call these getters if you know that type() == RULESET.
-  // type() always == RULESET if Css::Parser::preservation_mode() is false,
-  // so getters should all be valid if preservation mode is off (default).
+  // UNPARSED_REGION rulesets only arise when Css::Parser::preservation_mode()
+  // is on, but GROUP_RULE rulesets (@supports/@layer/@container blocks) are
+  // produced regardless of preservation mode, so check type() before calling.
   const Selectors& selectors() const {
     CHECK_EQ(RULESET, type());
     return *selectors_;
@@ -858,6 +908,27 @@ class Ruleset {
     return unparsed_region_.get();
   }
 
+  // NOTE: Only call these getters if you know that type() == GROUP_RULE.
+  // The body never contains charsets or imports (both are rejected at parse
+  // time inside group rules); all body statements live in its font_faces()
+  // and rulesets() buckets, in source order.
+  const string& group_prelude() const {
+    CHECK_EQ(GROUP_RULE, type());
+    return group_prelude_;
+  }
+  string* mutable_group_prelude() {
+    CHECK_EQ(GROUP_RULE, type());
+    return &group_prelude_;
+  }
+  const Stylesheet& group_body() const {
+    CHECK_EQ(GROUP_RULE, type());
+    return *group_body_;
+  }
+  Stylesheet* mutable_group_body() {
+    CHECK_EQ(GROUP_RULE, type());
+    return group_body_.get();
+  }
+
   string ToString() const;
 
  private:
@@ -872,6 +943,10 @@ class Ruleset {
 
   // Only defined for type_ == UNPARSED_REGION.
   std::unique_ptr<UnparsedRegion> unparsed_region_;
+
+  // Only defined for type_ == GROUP_RULE.
+  string group_prelude_;
+  std::unique_ptr<Stylesheet> group_body_;
 
   DISALLOW_COPY_AND_ASSIGN(Ruleset);
 };

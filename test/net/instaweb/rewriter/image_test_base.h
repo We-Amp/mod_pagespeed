@@ -19,10 +19,11 @@
 #ifndef NET_INSTAWEB_REWRITER_PUBLIC_IMAGE_TEST_BASE_H_
 #define NET_INSTAWEB_REWRITER_PUBLIC_IMAGE_TEST_BASE_H_
 
+#include <memory>
+
 #include "net/instaweb/rewriter/public/image.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/null_mutex.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/stdio_file_system.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/http/image_types.pb.h"
@@ -72,7 +73,8 @@ class ImageTestBase : public testing::Test {
   MockMessageHandler message_handler_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(ImageTestBase);
+  ImageTestBase(const ImageTestBase&) = delete;
+  ImageTestBase& operator=(const ImageTestBase&) = delete;
 };
 
 }  // namespace net_instaweb

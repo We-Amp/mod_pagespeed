@@ -20,13 +20,13 @@
 #include "pagespeed/opt/http/cache_property_store.h"
 
 #include <algorithm>
+#include <memory>
 #include <utility>
 
 #include "base/logging.h"
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/cache_interface.h"
 #include "pagespeed/kernel/base/proto_util.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/shared_string.h"
 #include "pagespeed/kernel/base/stl_util.h"
 #include "pagespeed/kernel/base/thread_system.h"
@@ -75,7 +75,9 @@ class CachePropertyStoreGetCallback : public PropertyStoreGetCallback {
   }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(CachePropertyStoreGetCallback);
+  CachePropertyStoreGetCallback(const CachePropertyStoreGetCallback&) = delete;
+  CachePropertyStoreGetCallback& operator=(
+      const CachePropertyStoreGetCallback&) = delete;
 };
 
 // Tracks multiple cache lookups.  When they are all complete, page->Done() is
@@ -112,7 +114,10 @@ class CachePropertyStoreCallbackCollector {
   bool success_;
   std::unique_ptr<AbstractMutex> mutex_;
 
-  DISALLOW_COPY_AND_ASSIGN(CachePropertyStoreCallbackCollector);
+  CachePropertyStoreCallbackCollector(
+      const CachePropertyStoreCallbackCollector&) = delete;
+  CachePropertyStoreCallbackCollector& operator=(
+      const CachePropertyStoreCallbackCollector&) = delete;
 };
 
 // Helper class to receive low-level cache callbacks, decode them
@@ -170,7 +175,10 @@ class CachePropertyStoreCacheCallback : public CacheInterface::Callback {
   CachePropertyStoreGetCallback* property_store_callback_;
   CachePropertyStoreCallbackCollector* callback_collector_;
 
-  DISALLOW_COPY_AND_ASSIGN(CachePropertyStoreCacheCallback);
+  CachePropertyStoreCacheCallback(const CachePropertyStoreCacheCallback&) =
+      delete;
+  CachePropertyStoreCacheCallback& operator=(
+      const CachePropertyStoreCacheCallback&) = delete;
 };
 
 }  // namespace

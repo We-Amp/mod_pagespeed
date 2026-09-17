@@ -170,9 +170,14 @@ class ResponseHeaders : public Headers<HttpResponseHeaders> {
     SetDateAndCaching(date_ms, ttl_ms, "");
   }
   // Returns Cache-Control header values that we might need to preserve. This
-  // function is meant to be used with SetDateAndCaching. It currently looks for
-  // and returns no-transform and no-store if found.
-  GoogleString CacheControlValuesToPreserve();
+  // function is meant to be used with SetDateAndCaching. It currently looks
+  // for and returns no-transform and no-store if found, plus any s-maxage
+  // when preserve_s_maxage is true. Pass false for responses that must not
+  // be held by shared caches -- notably rewritten HTML, whose embedded
+  // .pagespeed. URLs can commit to a content variant chosen for the
+  // requesting client (s-maxage overrides max-age for shared caches, so
+  // preserving it would override the no-cache intent).
+  GoogleString CacheControlValuesToPreserve(bool preserve_s_maxage);
 
   // Set a time-based header, converting ms since epoch to a string.
   void SetTimeHeader(const StringPiece& header, int64 time_ms);
@@ -189,6 +194,15 @@ class ResponseHeaders : public Headers<HttpResponseHeaders> {
   // Sets the cache-control to explicitly have 'public', as long as that's
   // not in conflict with other CC headers.
   void SetCacheControlPublic();
+
+  // Sets the cache-control to explicitly have 'immutable' (RFC 8246),
+  // telling clients they may reuse the response for its full freshness
+  // lifetime without revalidating. Only appropriate for responses whose
+  // URL commits to the content (e.g. hash-signed .pagespeed. resources).
+  // As a matter of policy this refuses to mark a response that is not
+  // plainly cacheable (private/no-cache/no-store), mirroring
+  // SetCacheControlPublic; a no-op if 'immutable' is already present.
+  void SetCacheControlImmutable();
 
   // Sets the x-original-content-length header, used to relay information on
   // the original size of optimized resources.

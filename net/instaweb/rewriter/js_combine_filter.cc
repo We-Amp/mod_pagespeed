@@ -28,6 +28,7 @@
 #include "net/instaweb/rewriter/public/js_combine_filter.h"
 
 #include <map>
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -49,7 +50,6 @@
 #include "net/instaweb/rewriter/public/url_partnership.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/function.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/stl_util.h"
 #include "pagespeed/kernel/base/string.h"
@@ -175,7 +175,7 @@ class JsCombineFilter::JsCombiner : public ResourceCombiner {
   }
 
  private:
-  typedef std::map<const Resource*, JavascriptCodeBlock*> CodeBlockMap;
+  using CodeBlockMap = std::map<const Resource*, JavascriptCodeBlock*>;
 
   const ContentType* CombinationContentType() override {
     return &kContentTypeJavascript;
@@ -202,7 +202,8 @@ class JsCombineFilter::JsCombiner : public ResourceCombiner {
   std::unique_ptr<JavascriptRewriteConfig> config_;
   CodeBlockMap code_blocks_;
 
-  DISALLOW_COPY_AND_ASSIGN(JsCombiner);
+  JsCombiner(const JsCombiner&) = delete;
+  JsCombiner& operator=(const JsCombiner&) = delete;
 };
 
 class JsCombineFilter::Context : public RewriteContext {
@@ -330,7 +331,10 @@ class JsCombineFilter::Context : public RewriteContext {
   }
 
   bool PolicyPermitsRendering() const override {
-    return AreOutputsAllowedByCsp(CspDirective::kScriptSrc);
+    // The rendered output includes inline <script> bootstraps, which need
+    // inline-script permission in addition to the URL being allowed.
+    return AreOutputsAllowedByCsp(CspDirective::kScriptSrc) &&
+           Driver()->content_security_policy().PermitsInlineScript();
   }
 
   // For every partition, write a new script tag that points to the
@@ -368,7 +372,7 @@ class JsCombineFilter::Context : public RewriteContext {
             slot(partition->input(i).index())->set_disable_rendering(true);
           }
         }  // if (can_rewrite)
-      }    // if (partition_size > 1)
+      }  // if (partition_size > 1)
     }
   }
 
@@ -484,7 +488,7 @@ bool JsCombineFilter::JsCombiner::WritePiece(int index, int num_pieces,
 JavascriptCodeBlock* JsCombineFilter::JsCombiner::BlockForResource(
     const Resource* input) {
   std::pair<CodeBlockMap::iterator, bool> insert_result =
-      code_blocks_.insert(CodeBlockMap::value_type(input, NULL));
+      code_blocks_.insert(CodeBlockMap::value_type(input, nullptr));
 
   if (insert_result.second) {
     // Actually inserted, so we need a value.
@@ -492,9 +496,10 @@ JavascriptCodeBlock* JsCombineFilter::JsCombiner::BlockForResource(
       config_.reset(JavascriptFilter::InitializeConfig(rewrite_driver_));
     }
 
-    std::unique_ptr<JavascriptCodeBlock> new_block(new JavascriptCodeBlock(
-        input->ExtractUncompressedContents(), config_.get(), input->url(),
-        rewrite_driver_->message_handler()));
+    std::unique_ptr<JavascriptCodeBlock> new_block =
+        std::make_unique<JavascriptCodeBlock>(
+            input->ExtractUncompressedContents(), config_.get(), input->url(),
+            rewrite_driver_->message_handler());
     new_block->Rewrite();
     insert_result.first->second = new_block.release();
   }
@@ -576,7 +581,13 @@ void JsCombineFilter::StartElementImpl(HtmlElement* element) {
       break;
 
     case ScriptTagScanner::kUnknownScript:
-      // We have something like vbscript. Handle this as a barrier
+    case ScriptTagScanner::kJavaScriptModule:
+      // Barriers, both deliberately. Unknown types are something like
+      // vbscript. Modules have isolated top-level scope, implicit strict
+      // mode, and deferred execution, none of which the eval-based
+      // combination strategy can represent (import is a SyntaxError inside
+      // eval). The depth increment must match EndElementImpl's unconditional
+      // decrement for every </script>.
       NextCombination();
       ++script_depth_;
       break;
@@ -596,7 +607,7 @@ void JsCombineFilter::IEDirective(HtmlIEDirectiveNode* directive) {
   NextCombination();
 }
 
-void JsCombineFilter::Characters(HtmlCharactersNode* characters) {
+void JsCombineFilter::CharactersImpl(HtmlCharactersNode* characters) {
   // If a script has non-whitespace data inside of it, we cannot
   // replace its contents with a call to eval, as they may be needed.
   if (script_depth_ > 0 && !OnlyWhitespace(characters->contents())) {
@@ -622,9 +633,16 @@ void JsCombineFilter::Flush() {
 // reset.
 void JsCombineFilter::ConsiderJsForCombination(HtmlElement* element,
                                                HtmlElement::Attribute* src) {
-  if (!driver()->content_security_policy().PermitsEval()) {
+  // Combining replaces each original <script src> with an inline
+  // <script>eval(...)</script> bootstrap, so both eval and inline scripts
+  // must be permitted by the page's CSP; otherwise browsers block the
+  // bootstraps and the combined scripts silently never execute.
+  if (!driver()->content_security_policy().PermitsEval() ||
+      !CspPermitsInlineScript()) {
     driver()->InsertDebugComment(
-        "Not considering JS combining since CSP forbids eval", element);
+        "Not considering JS combining since CSP forbids eval or inline "
+        "scripts",
+        element);
     context_->Reset();
     return;
   }
@@ -670,6 +688,15 @@ void JsCombineFilter::ConsiderJsForCombination(HtmlElement* element,
   // TODO(morlovich): is it worth combining multiple scripts with
   // async/defer if the flags are the same?
   if (script_scanner_.ExecutionMode(element) != script_scanner_.kExecuteSync) {
+    NextCombination();
+    return;
+  }
+
+  // Combining stringifies each script into a variable inside a shared file
+  // and deletes the original element along with its integrity= attribute,
+  // silently discarding the author's SRI guarantee (the per-file hash could
+  // never match the combined bytes anyway). Treat it as a barrier.
+  if (ScriptTagScanner::HasIntegrityAttribute(element)) {
     NextCombination();
     return;
   }
@@ -724,7 +751,10 @@ JsCombineFilter::JsCombiner* JsCombineFilter::combiner() const {
 // In sync flow, just write out what we have so far, and then
 // reset the context.
 void JsCombineFilter::NextCombination() {
-  if (!context_->empty() && driver()->content_security_policy().PermitsEval()) {
+  // Re-check the CSP here, since a stricter policy can arrive mid-document
+  // after scripts were already accumulated into the context.
+  if (!context_->empty() && driver()->content_security_policy().PermitsEval() &&
+      CspPermitsInlineScript()) {
     driver()->InitiateRewrite(context_.release());
     context_.reset(MakeContext());
   }

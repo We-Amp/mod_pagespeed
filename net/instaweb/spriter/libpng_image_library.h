@@ -67,7 +67,8 @@ class LibpngImageLibrary : public ImageLibraryInterface {
     png_structp png_struct_;
     png_infop png_info_;
     png_bytep* rows_;
-    DISALLOW_COPY_AND_ASSIGN(Image);
+    Image(const Image&) = delete;
+    Image& operator=(const Image&) = delete;
   };
 
   // Read an image from disk.  Return NULL (after calling delegate
@@ -92,14 +93,16 @@ class LibpngImageLibrary : public ImageLibraryInterface {
     int width_;
     int height_;
     png_bytep* rows_;
-    DISALLOW_COPY_AND_ASSIGN(Canvas);
+    Canvas(const Canvas&) = delete;
+    Canvas& operator=(const Canvas&) = delete;
   };
 
   ImageLibraryInterface::Canvas* CreateCanvas(int width, int height) override;
 
  private:
   friend class LibpngImageLibraryTest;
-  DISALLOW_COPY_AND_ASSIGN(LibpngImageLibrary);
+  LibpngImageLibrary(const LibpngImageLibrary&) = delete;
+  LibpngImageLibrary& operator=(const LibpngImageLibrary&) = delete;
 };
 
 }  // namespace spriter

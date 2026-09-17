@@ -69,6 +69,18 @@ void CleanupRequest(request_rec* request);
 // appropriate.
 GoogleString ActionsSinceLastCall();
 
+// When enabled, ap_pass_brigade models httpd's core-output-filter
+// deferred-write geometry for the first data bucket instead of consuming
+// everything in one read: read it (a PAGESPEED_MMAP bucket runs its lease
+// barrier here), "send" the first half (split + delete), apr_bucket_setaside
+// the remainder (the deferred-write park -- copy-out or poison for a mapped
+// bucket), then RE-READ the remainder (the re-entry barrier of the next send
+// attempt) and consume it.  Logs
+//   ap_pass_brigade_partial(first=<bytes>,setaside=<0|status>,rest=<bytes>)
+// or ...rest=READ_ERROR) with an error return, exactly as a poisoned parked
+// bucket surfaces on the real next drain.  Reset by Initialize().
+void set_partial_pass_brigade(bool enabled);
+
 }  // namespace MockApache
 
 }  // namespace net_instaweb

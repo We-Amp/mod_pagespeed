@@ -40,16 +40,18 @@
 #include "pagespeed/kernel/base/string_writer.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/cache/async_cache.h"
+#include "pagespeed/kernel/cache/async_write_behind_cache.h"
 #include "pagespeed/kernel/cache/cache_batcher.h"
 #include "pagespeed/kernel/cache/cache_stats.h"
 #include "pagespeed/kernel/cache/compressed_cache.h"
+#include "pagespeed/kernel/cache/cyclone_cache.h"
 #include "pagespeed/kernel/cache/fallback_cache.h"
-#include "pagespeed/kernel/cache/file_cache.h"
 #include "pagespeed/kernel/cache/purge_context.h"
 #include "pagespeed/kernel/cache/write_through_cache.h"
 #include "pagespeed/kernel/thread/queued_worker_pool.h"
-#include "pagespeed/kernel/thread/slow_worker.h"
-#include "pagespeed/system/apr_mem_cache.h"
+#if PAGESPEED_ENABLE_MEMCACHED
+#include "pagespeed/system/memcached_cache.h"
+#endif
 #include "pagespeed/system/external_server_spec.h"
 #include "pagespeed/system/redis_cache.h"
 #include "pagespeed/system/system_cache_path.h"
@@ -85,38 +87,44 @@ void SystemCaches::ShutDown(MessageHandler* message_handler) {
 
   was_shut_down_ = true;
 
-  // Shut down the cache cleaning thread so we no longer have to worry about
-  // outstanding jobs in the slow_worker_ trying
-  // to access FileCache and similar objects we're about to blow away.
-  if (!is_root_process_) {
-    slow_worker_->ShutDown();
-  }
-
   // Take down any threads serving external caches, then wait for shut down to
   // complete and free memory. Note that this will block waiting for any
   // operations currently in progress to terminate. It's the reason we initiate
   // shutdown and wait for it instead of simple calling ShutDown().
   //
   // In case of memcached it can possibly require kill -9 to restart Apache if
-  // memcached is permanently hung. In pracice, the patches made in
-  // src/third_party/aprutil/apr_memcache2.c make that very unlikely.
+  // memcached is permanently hung. In practice, the libmemcached-backed
+  // MemcachedCache I/O timeouts make that very unlikely.
   //
   // The alternative scenario of exiting with pending I/O will often
   // crash and always leak memory. Note that if memcached crashes, as
   // opposed to hanging, it will probably not appear wedged.
+#if PAGESPEED_ENABLE_MEMCACHED
   if (memcached_pool_) {
     memcached_pool_->InitiateShutDown();
   }
+#endif
   if (redis_pool_) {
     redis_pool_->InitiateShutDown();
   }
+  if (metadata_write_behind_pool_) {
+    metadata_write_behind_pool_->InitiateShutDown();
+  }
+#if PAGESPEED_ENABLE_MEMCACHED
   if (memcached_pool_) {
     memcached_pool_->WaitForShutDownComplete();
     memcached_pool_.reset(nullptr);
   }
+#endif
   if (redis_pool_) {
     redis_pool_->WaitForShutDownComplete();
     redis_pool_.reset(nullptr);
+  }
+  // Drain the metadata write-behind queue before any backing store is torn
+  // down, so no deferred Put/Delete outlives the cache it writes to.
+  if (metadata_write_behind_pool_) {
+    metadata_write_behind_pool_->WaitForShutDownComplete();
+    metadata_write_behind_pool_.reset(nullptr);
   }
 
   if (is_root_process_) {
@@ -151,7 +159,6 @@ SystemCachePath* SystemCaches::GetCache(SystemRewriteOptions* config) {
     factory_->TakeOwnership(system_cache_path);
   } else {
     system_cache_path = iter->second;
-    system_cache_path->MergeConfig(config);
   }
   return system_cache_path;
 }
@@ -194,10 +201,11 @@ SystemCaches::ConstructExternalCacheInterfacesFromBlocking(
   return result;
 }
 
+#if PAGESPEED_ENABLE_MEMCACHED
 SystemCaches::ExternalCacheInterfaces SystemCaches::NewMemcached(
     SystemRewriteOptions* config) {
   const ExternalClusterSpec& servers_specs = config->memcached_servers();
-  AprMemCache* mem_cache = new AprMemCache(
+  MemcachedCache* mem_cache = new MemcachedCache(
       servers_specs, thread_limit_, &cache_hasher_, factory_->statistics(),
       factory_->timer(), factory_->message_handler());
   factory_->TakeOwnership(mem_cache);
@@ -232,6 +240,7 @@ SystemCaches::ExternalCacheInterfaces SystemCaches::NewMemcached(
         kMemcachedAsync, kMemcachedBlocking);
   }
 }
+#endif  // PAGESPEED_ENABLE_MEMCACHED
 
 SystemCaches::ExternalCacheInterfaces SystemCaches::NewRedis(
     SystemRewriteOptions* config) {
@@ -268,6 +277,7 @@ SystemCaches::ExternalCacheInterfaces SystemCaches::NewRedis(
 SystemCaches::ExternalCacheInterfaces SystemCaches::NewExternalCache(
     SystemRewriteOptions* config) {
   bool use_redis = !config->redis_server().empty();
+#if PAGESPEED_ENABLE_MEMCACHED
   bool use_memcached = !config->memcached_servers().empty();
 
   if (use_redis && use_memcached) {
@@ -277,6 +287,10 @@ SystemCaches::ExternalCacheInterfaces SystemCaches::NewExternalCache(
         "Redis and ignore Memcached");
     use_memcached = false;
   }
+#else
+  // Memcached is not available on this platform.
+  [[maybe_unused]] bool use_memcached = false;
+#endif
 
   // Some unique signature to distinguish server configurations.
   GoogleString spec_signature;
@@ -287,10 +301,12 @@ SystemCaches::ExternalCacheInterfaces SystemCaches::NewExternalCache(
                IntegerToString(config->redis_reconnection_delay_ms()), ";",
                IntegerToString(config->redis_timeout_us()), ";",
                IntegerToString(config->redis_ttl_sec()));
+#if PAGESPEED_ENABLE_MEMCACHED
   } else if (use_memcached) {
     spec_signature = StrCat("m;", config->memcached_servers().ToString(), ";",
                             IntegerToString(config->memcached_threads()), ";",
                             IntegerToString(config->memcached_timeout_us()));
+#endif
   } else {
     return ExternalCacheInterfaces();
   }
@@ -303,14 +319,17 @@ SystemCaches::ExternalCacheInterfaces SystemCaches::NewExternalCache(
     // Was not in the map, should construct new one and store it.
     if (use_redis) {
       iterator->second = NewRedis(config);
+#if PAGESPEED_ENABLE_MEMCACHED
     } else if (use_memcached) {
       iterator->second = NewMemcached(config);
+#endif
     }
   }
 
   // Some per-VirtualHost modifications follow, we do not want to store them in
   // map.
   ExternalCacheInterfaces result = iterator->second;
+#if PAGESPEED_ENABLE_MEMCACHED
   if (use_memcached) {
     // Note that a distinct FallbackCache gets created for every VirtualHost
     // that employs memcached, even if the memcached and file-cache
@@ -324,15 +343,16 @@ SystemCaches::ExternalCacheInterfaces SystemCaches::NewExternalCache(
     CacheInterface* file_cache = GetCache(config)->file_cache();
 
     result.async = new FallbackCache(result.async, file_cache,
-                                     AprMemCache::kValueSizeThreshold,
+                                     MemcachedCache::kValueSizeThreshold,
                                      factory_->message_handler());
     factory_->TakeOwnership(result.async);
 
     result.blocking = new FallbackCache(result.blocking, file_cache,
-                                        AprMemCache::kValueSizeThreshold,
+                                        MemcachedCache::kValueSizeThreshold,
                                         factory_->message_handler());
     factory_->TakeOwnership(result.blocking);
   }
+#endif
   return result;
 }
 
@@ -353,7 +373,7 @@ bool SystemCaches::CreateShmMetadataCache(StringPiece name, int64 size_kb,
     // Make sure the size cap is not unusably low. In particular, with 2K
     // inlining thresholds, something like 3K is needed. (As of time of writing,
     // that required about 4.3MiB).
-    if (size_cap < 3 * 1024) {
+    if (size_cap < static_cast<int64>(3 * 1024)) {
       metadata_shm_caches_.erase(result.first);
       *error_msg = "Shared memory cache unusably small.";
       return false;
@@ -448,6 +468,22 @@ void SystemCaches::SetupPcacheCohorts(ServerContext* server_context,
       server_context->AddCohort(RewriteDriver::kDependenciesCohort, pcache));
 }
 
+CacheInterface* SystemCaches::WrapMetadataL2WriteBehind(CacheInterface* l2,
+                                                        size_t l1_size_limit) {
+  // A single dedicated thread gives the write-behind queue strict FIFO order,
+  // so a Put and a later Delete of the same key can never reorder.  The pool is
+  // shared across vhosts (like memcached_pool_/redis_pool_) and is quiesced in
+  // ShutDown() before any backing store is destroyed.
+  if (metadata_write_behind_pool_ == nullptr) {
+    metadata_write_behind_pool_ = std::make_unique<QueuedWorkerPool>(
+        1, "metadata_write_behind", factory_->thread_system());
+  }
+  AsyncWriteBehindCache* write_behind = new AsyncWriteBehindCache(
+      l2, metadata_write_behind_pool_.get(), l1_size_limit);
+  factory_->TakeOwnership(write_behind);
+  return write_behind;
+}
+
 void SystemCaches::SetupCaches(ServerContext* server_context,
                                bool enable_property_cache) {
   SystemRewriteOptions* config =
@@ -506,6 +542,13 @@ void SystemCaches::SetupCaches(ServerContext* server_context,
   }
 
   http_cache->set_max_cacheable_response_content_length(max_content_length);
+  // Zero-copy serving of memory-mapped (Cyclone) cache hits, default off.
+  // Applies to both cache topologies above: with an LRU L1 the
+  // WriteThroughCache forwards the backend's MappedSharedString by
+  // reference, so mapped-ness survives the L1/L2 stack.
+  http_cache->set_cyclone_zero_copy_enabled(config->cyclone_zero_copy());
+  http_cache->set_cyclone_zero_copy_serve_enabled(
+      config->cyclone_zero_copy_serve());
   server_context->set_http_cache(http_cache);
 
   // And now the metadata cache. If we only have one level, it will be in
@@ -537,26 +580,59 @@ void SystemCaches::SetupCaches(ServerContext* server_context,
       // InputInfo in ../rewriter/cached_result.proto).
       server_context->set_filesystem_metadata_cache(shm_metadata_cache);
 
-      // We checkpoint the shm cache when running with external caches, and
-      // restore it (to local shm only) on restart.  Not checkpointing in this
-      // case would also be defensible, but the implementation complexity would
-      // be very high.  For example, you might have two vhosts that both use the
-      // default-enabled shared memory metadata cache, but only one has an
-      // external cache enabled.
+      // Durability here comes from the external L2 cache itself: shared memory
+      // is a volatile L1 in front of it, and any entry not resident in shm
+      // after a restart is re-fetched from the external cache on demand.
     } else {
-      // For persistence across restarts, we checkpoint the shm_metadata_cache
-      // to disk every so often, and restore it on restart. This means we don't
-      // need to write most objects through to the file cache, just ones too big
-      // to store in the SHM cache.
-      FallbackCache* metadata_fallback = new FallbackCache(
-          shm_metadata_cache, file_cache,
-          shm_metadata_cache_info->cache_backend->MaxValueSize(),
-          factory_->message_handler());
-      // SharedMemCache uses hash-produced fixed size keys internally, so its
-      // value size limit isn't affected by key length changes.
-      metadata_fallback->set_account_for_key_size(false);
-      server_context->DeleteCacheOnDestruction(metadata_fallback);
-      metadata_l2 = metadata_fallback;
+      // Persist metadata across restarts by writing every entry through to the
+      // Cyclone-backed disk cache, while serving hot reads from shared memory.
+      // The shared-memory cache is the fast L1; Cyclone is the durable L2 and
+      // source of truth, so a restart (deploy, crash, cache re-root) does not
+      // discard optimization decisions and force re-derivation on first hit.
+      // Entries larger than the shm value cap skip L1 and live in Cyclone only;
+      // small entries land in both. The WriteThroughCache is assembled below,
+      // from metadata_l1/metadata_l2, once l1_size_limit is set.
+      //
+      // Metadata routes to the small-object tier of the Cyclone cache
+      // (FileCacheSmallTierPercent): rname/ entries are tiny compared to the
+      // HTTP payloads they co-mingled with, and volume eviction churn from
+      // payload traffic used to drop them wholesale, defeating the
+      // restart-warmth this write-through exists to provide. The small tier
+      // is a physically separate volume, so payload churn can no longer
+      // evict metadata. When the tier is disabled or inactive this is the
+      // same cache as file_cache().
+      metadata_l1 = shm_metadata_cache;
+      metadata_l2 = caches_for_path->small_tier_file_cache();
+      l1_size_limit = shm_metadata_cache_info->cache_backend->MaxValueSize();
+
+      // Optionally take the blocking L2 (disk) write off the rewrite critical
+      // path.  The shm L1 above stays a synchronous write and reads consult it
+      // first, so same-machine read-your-writes is preserved; only the durable
+      // L2 write is deferred.  Entries too big for L1 keep a synchronous L2
+      // write (see AsyncWriteBehindCache).  Default off.
+      if (config->async_metadata_l2_writes()) {
+        metadata_l2 = WrapMetadataL2WriteBehind(metadata_l2, l1_size_limit);
+      }
+
+      // Give the property store the same arrangement: shared memory is the
+      // fast L1 for property lookups; Cyclone is the durable L2 so
+      // beacon-derived page properties (critical images/selectors, dom stats)
+      // survive restarts instead of waiting for beacons to re-arrive over live
+      // traffic. This is a separate WriteThroughCache instance from the
+      // metadata one assembled below, so each gets its own CompressedCache
+      // wrap when compress_metadata_cache is on. Values over the shm cap skip
+      // L1 and live in Cyclone only. Unlike FallbackCache there is no
+      // account_for_key_size(false) equivalent, so the key counts against the
+      // L1 limit too; SharedMemCache uses hash-produced fixed-size keys
+      // internally, so the slight over-counting only steers a few
+      // borderline-sized values to Cyclone alone -- same as the metadata
+      // cache above, and harmless.
+      WriteThroughCache* pcache_write_through = new WriteThroughCache(
+          shm_metadata_cache, caches_for_path->small_tier_file_cache());
+      pcache_write_through->set_cache1_limit(
+          shm_metadata_cache_info->cache_backend->MaxValueSize());
+      server_context->DeleteCacheOnDestruction(pcache_write_through);
+      property_store_cache = pcache_write_through;
 
       // TODO(jmarantz): do we really want to use the shm-cache as a
       // pcache?  The potential for inconsistent data across a
@@ -616,41 +692,10 @@ void SystemCaches::RegisterConfig(SystemRewriteOptions* config) {
 }
 
 void SystemCaches::RootInit() {
-  const SystemRewriteOptions* global_options =
-      SystemRewriteOptions::DynamicCast(factory_->default_options());
   for (MetadataShmCacheMap::iterator p = metadata_shm_caches_.begin(),
                                      e = metadata_shm_caches_.end();
        p != e; ++p) {
     MetadataShmCacheInfo* cache_info = p->second;
-
-    // If we're using the default shared memory cache and different vhosts have
-    // set the FileCachePath differently, then where should we store the
-    // snapshots?  There's no good answer here, because the FileCachePath is the
-    // only path like this we require people to specify.  To handle this,
-    // SetPathForSnapshots expects to be called multiple times and uses the file
-    // cache matching its configured path, or if none match then whichever value
-    // comes first alphabetically.
-    //
-    // We don't need separate directories here for explicit and default shm
-    // caches, because if you set an explicit shm cache for a file cache path we
-    // don't create a default one for vhosts using that path.
-    //
-    // Note: we couldn't set the FileCache when constructing the shm cache
-    // because at the time we parsed the directive to construct the shm cache
-    // we might not have seen the file cache directive yet.
-    //
-    // Tell the shm cache about file caches and let it pick one to use for
-    // checkpointing.
-    for (PathCacheMap::iterator q = path_cache_map_.begin(),
-                                f = path_cache_map_.end();
-         q != f; ++q) {
-      FileCache* file_cache = q->second->file_cache_backend();
-      // It's fine to call RegisterSnapshotFileCache multiple times: it
-      // considers all the inputs and picks the best one.
-      cache_info->cache_backend->RegisterSnapshotFileCache(
-          file_cache,
-          global_options->shm_metadata_cache_checkpoint_interval_sec());
-    }
 
     if (cache_info->cache_backend->Initialize()) {
       cache_info->initialized = true;
@@ -678,8 +723,6 @@ void SystemCaches::RootInit() {
 void SystemCaches::ChildInit() {
   is_root_process_ = false;
 
-  slow_worker_ = std::make_unique<SlowWorker>("slow_work_thread",
-                                              factory_->thread_system());
   for (MetadataShmCacheMap::iterator p = metadata_shm_caches_.begin(),
                                      e = metadata_shm_caches_.end();
        p != e; ++p) {
@@ -699,13 +742,14 @@ void SystemCaches::ChildInit() {
                               e = path_cache_map_.end();
        p != e; ++p) {
     SystemCachePath* cache = p->second;
-    cache->ChildInit(slow_worker_.get());
+    cache->ChildInit();
   }
 
   // TODO(yeputons): think about moving StartUp() to some base class of
-  // RedisCache and AprMemCache and collapsing these two loops into one.
+  // RedisCache and MemcachedCache and collapsing these two loops into one.
+#if PAGESPEED_ENABLE_MEMCACHED
   for (int i = 0, n = memcache_servers_.size(); i < n; ++i) {
-    AprMemCache* mem_cache = memcache_servers_[i];
+    MemcachedCache* mem_cache = memcache_servers_[i];
     // TODO(yeputons): looks like this line does not really "connect", but just
     // loads list of servers into apr_memcached and connects later. Maybe the
     // name should be fixed.
@@ -714,6 +758,7 @@ void SystemCaches::ChildInit() {
       abort();  // TODO(jmarantz): is there a better way to exit?
     }
   }
+#endif
 
   for (RedisCache* redis_cache : redis_servers_) {
     redis_cache->StartUp();
@@ -730,9 +775,9 @@ void SystemCaches::StopCacheActivity() {
 
   // Iterate through the map of ExternalCacheInterface objects constructed and
   // try to stop pending operations on async caches. Note that these are not
-  // typically AprMemCache* or RedisCache* objects, but instead are a hierarchy
+  // typically MemcachedCache* or RedisCache* objects, but instead are a hierarchy
   // of CacheStats*, CacheBatcher*, AsyncCache*, all of which must be stopped.
-  for (auto item : external_caches_map_) {
+  for (const auto& item : external_caches_map_) {
     ExternalCacheInterfaces cache = item.second;
     cache.async->ShutDown();
   }
@@ -741,13 +786,17 @@ void SystemCaches::StopCacheActivity() {
 }
 
 void SystemCaches::InitStats(Statistics* statistics) {
-  AprMemCache::InitStats(statistics);
-  FileCache::InitStats(statistics);
+#if PAGESPEED_ENABLE_MEMCACHED
+  MemcachedCache::InitStats(statistics);
+#endif
+  CycloneCache::InitStats(statistics);
   CacheStats::InitStats(SystemCachePath::kFileCache, statistics);
-  CacheStats::InitStats(SystemCachePath::kLruCache, statistics);
+  CacheStats::InitStats(SystemCachePath::kFileCacheSmall, statistics);
   CacheStats::InitStats(kShmCache, statistics);
+#if PAGESPEED_ENABLE_MEMCACHED
   CacheStats::InitStats(kMemcachedAsync, statistics);
   CacheStats::InitStats(kMemcachedBlocking, statistics);
+#endif
   CacheStats::InitStats(kRedisAsync, statistics);
   CacheStats::InitStats(kRedisBlocking, statistics);
   CompressedCache::InitStats(statistics);
@@ -771,17 +820,30 @@ void SystemCaches::PrintCacheStats(StatFlags flags, GoogleString* out) {
                      factory_->message_handler());
       }
     }
+
+    for (PathCacheMap::iterator p = path_cache_map_.begin(),
+                                e = path_cache_map_.end();
+         p != e; ++p) {
+      CycloneCache* cyclone_cache = p->second->cyclone_cache();
+      if (cyclone_cache != nullptr && cyclone_cache->IsHealthy()) {
+        StrAppend(out, "\nCyclone cache '", cyclone_cache->config().cache_path,
+                  "' statistics:\n");
+        cyclone_cache->PrintStats(out);
+      }
+    }
   }
 
+#if PAGESPEED_ENABLE_MEMCACHED
   if (flags & kIncludeMemcached) {
     for (int i = 0, n = memcache_servers_.size(); i < n; ++i) {
-      AprMemCache* mem_cache = memcache_servers_[i];
+      MemcachedCache* mem_cache = memcache_servers_[i];
       if (!mem_cache->GetStatus(out)) {
         StrAppend(out, "\nError getting memcached server status for ",
                   mem_cache->cluster_spec().ToString());
       }
     }
   }
+#endif
 
   if (flags & kIncludeRedis) {
     for (RedisCache* redis : redis_servers_) {

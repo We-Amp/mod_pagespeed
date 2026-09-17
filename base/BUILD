@@ -8,7 +8,6 @@ cc_library(
     hdrs = ["logging.h"],
     visibility = ["//visibility:public"],
     deps = [
-        "@com_github_gabime_spdlog//:spdlog",
-        "@glog",
+        "@spdlog//:spdlog",
     ],
 )

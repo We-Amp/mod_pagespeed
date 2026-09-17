@@ -20,11 +20,11 @@
 #include "test/pagespeed/kernel/sharedmem/shared_mem_test_base.h"
 
 #include <cstddef>
+#include <memory>
 
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/abstract_shared_mem.h"
 #include "pagespeed/kernel/base/function.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/thread_annotations.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/util/platform.h"
@@ -291,15 +291,15 @@ bool SharedMemTestBase::IncrementStorm(AbstractSharedMemSegment* seg,
   }
 
   for (int i = 0; i < kNumIncrements; ++i) {
-    ++*IntPtr(seg, mutex_size);
+    *IntPtr(seg, mutex_size) = *IntPtr(seg, mutex_size) + 1;
     if (*IntPtr(seg, mutex_size) != (i + init + 1)) {
       return false;
     }
-    ++*IntPtr(seg, mutex_size);
+    *IntPtr(seg, mutex_size) = *IntPtr(seg, mutex_size) + 1;
     if (*IntPtr(seg, mutex_size) != (i + init + 2)) {
       return false;
     }
-    --*IntPtr(seg, mutex_size);
+    *IntPtr(seg, mutex_size) = *IntPtr(seg, mutex_size) - 1;
     if (*IntPtr(seg, mutex_size) != (i + init + 1)) {
       return false;
     }

@@ -51,7 +51,8 @@ class Sequence {
   virtual void Add(Function* function) = 0;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(Sequence);
+  Sequence(const Sequence&) = delete;
+  Sequence& operator=(const Sequence&) = delete;
 };
 
 }  // namespace net_instaweb

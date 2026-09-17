@@ -20,8 +20,9 @@
 #ifndef PAGESPEED_KERNEL_THREAD_THREAD_SYSTEM_TEST_BASE_H_
 #define PAGESPEED_KERNEL_THREAD_THREAD_SYSTEM_TEST_BASE_H_
 
+#include <memory>
+
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/base/mock_message_handler.h"
@@ -52,7 +53,8 @@ class ThreadSystemTestBase : public testing::Test {
   std::unique_ptr<ThreadSystem> thread_system_;
   MockMessageHandler handler_;
 
-  DISALLOW_COPY_AND_ASSIGN(ThreadSystemTestBase);
+  ThreadSystemTestBase(const ThreadSystemTestBase&) = delete;
+  ThreadSystemTestBase& operator=(const ThreadSystemTestBase&) = delete;
 };
 
 // Passes in the appropriate ThreadSystem to ThreadSystemTestBase via a template

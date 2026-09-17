@@ -1,0 +1,207 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+#
+# CPE + release_date annotations for every vendored C/C++ Bazel dependency
+# (the deps enumerated by tools/generate-sbom.py's CPP_DEPS list, sourced from
+# bazel/repositories.bzl). This is the C++ surface of the dependency CVE
+# scan, modeled on Envoy's tools/dependency/ cpe-dependencies metadata.
+#
+# Each key is the dep `name` used in generate-sbom.py's CPP_DEPS. Versions are
+# NOT duplicated here — they live as constants in bazel/repositories.bzl and are
+# resolved at scan time, so version drift is structurally impossible.
+#
+# Fields:
+#   cpe           A `cpe:2.3:a:vendor:product` prefix (version part omitted —
+#                 the matcher appends `:*:*:...` and queries NVD by
+#                 virtualMatchString, then date-filters). Set to "N/A" for deps
+#                 with no applicable CPE in the NVD dictionary.
+#   release_date  ISO date (YYYY-MM-DD) of the pinned version's upstream release
+#                 (or, for commit pins, the commit/branch-tag date). CVEs
+#                 published BEFORE this date are pre-fix and filtered out, which
+#                 kills most false positives (Envoy's release_date filter).
+#   justification REQUIRED when cpe == "N/A": why no CPE applies. Optional but
+#                 encouraged otherwise (e.g. to note which CPE variant was chosen
+#                 over a plausible-but-wrong alternative).
+#
+# CPE choices were verified against the live NVD CPE dictionary + CVE API on
+# 2026-05-24 (totalResults shown in comments). A WRONG CPE is a silent
+# false-negative, so where the dictionary had no authoritative entry for the
+# exact upstream project we set N/A rather than guess.
+#
+# release_date INVARIANT (a prerequisite for making the matcher BLOCKING):
+# every release_date below is tied to the ACTUAL upstream release of
+# the version/commit pinned in bazel/repositories.bzl, sourced from an
+# authoritative origin (GitHub release `published_at` / annotated-tag date /
+# commit `committer.date`; SourceForge in-tarball file mtime + project NEWS for
+# giflib/optipng). It is NOT derived from the version string or from our
+# "Updated <month>" bump comment. A date set LATER than the real ship date
+# silently drops an applicable CVE (false-negative) — the one thing that must
+# never happen once this matcher is a merge gate. When bumping a dep, look up
+# the new version's real release date and update it here; if you are uncertain,
+# err EARLIER (over-reports, safe) and leave a note. Dates verified 2026-05-24.
+
+deps:
+  abseil-cpp:
+    cpe: "cpe:2.3:a:abseil:common_libraries"   # NVD: 1 CVE
+    release_date: "2026-02-11"                  # 20260107.1 — GitHub release published 2026-02-11 (the .1 patch on the 20260107 LTS branch); NOT the Jan-07 branch-cut date encoded in the version string
+
+  zlib-ng:
+    cpe: "N/A"
+    # NVD has no product-level CPE for the zlib-ng *library* — only
+    # `zlib-ng:minizip-ng` (the bundled minizip component, which we do not
+    # build) exists. zlib-ng is a separate codebase from madler's `zlib:zlib`,
+    # so asserting `zlib:zlib` here would mis-attribute upstream-zlib CVEs that
+    # may not exist in the zlib-ng fork (false positives) and miss zlib-ng-only
+    # issues (false negatives). Backstop: the runtime image / .deb/.rpm
+    # scan catches the dynamically-linked-libz exploitability path via grype.
+    justification: "no authoritative NVD CPE for the zlib-ng library; distinct codebase from zlib:zlib; covered by the runtime image scan"
+    release_date: "2025-04-14"                  # 2.3.2 release
+
+  boringssl:
+    cpe: "cpe:2.3:a:google:boringssl"           # NVD: 1 CVE
+    # BoringSSL rarely gets its own CVEs (Google fixes in-tree, no advisories);
+    # OpenSSL CVEs do NOT apply (forked, divergent). The single NVD entry is
+    # tracked here; the OS/dynamic libssl path is image-scanned instead.
+    release_date: "2026-05-08"                  # 0.20260508.0 — GitHub release + annotated tag both 2026-05-08
+
+  libevent:
+    cpe: "cpe:2.3:a:libevent_project:libevent"  # NVD: 5 CVEs
+    release_date: "2020-07-05"                  # release-2.1.12-stable — GitHub release + annotated tag both 2020-07-05
+
+  protobuf:
+    cpe: "cpe:2.3:a:google:protobuf"          # NVD: 5 CVEs (was previously pulled transitively via gRPC)
+    release_date: "2025-05-28"                  # v31.1 release commit (74211c0) — tag commit dated 2025-05-28
+
+  re2:
+    cpe: "N/A"
+    # NVD has no CPE for Google's re2. Keyword search surfaces only the
+    # unrelated `re2c:re2c` lexer generator (a different project). Asserting
+    # that would mis-attribute. re2 has had no public CVEs.
+    justification: "no NVD CPE for Google re2 (re2c:re2c is an unrelated project)"
+    release_date: "2025-11-05"                  # 2025-11-05 tag
+
+  fmt:
+    cpe: "cpe:2.3:a:fmt:fmt"                    # NVD: 1 CVE
+    release_date: "2025-10-29"                  # 12.1.0 (header-only) — GitHub release published 2025-10-29
+
+  spdlog:
+    cpe: "cpe:2.3:a:gabime:spdlog"             # NVD: 1 CVE
+    release_date: "2026-01-04"                  # v1.17.0 — GitHub release published 2026-01-04
+
+  envoy:
+    cpe: "cpe:2.3:a:envoyproxy:envoy"          # NVD: 95 CVEs
+    release_date: "2026-06-23"                  # commit f97695a5 == v1.37.5 tag (GitHub release published 2026-06-23). Bumped from v1.37.2 (2026-04-10) for the 2026-06-26 envoy CVE batch — defense-in-depth; mpp compiles none of the affected extensions (14 entries in cve-ignore.yaml). NOTE v1.37.5 (06-23) predates the batch's 06-26 disclosure, so the date heuristic still flags those 14 — the suppressions remain required even with the fix-carrying version.
+
+  hiredis:
+    cpe: "cpe:2.3:a:redislabs:hiredis"         # NVD: 1 CVE
+    release_date: "2025-04-23"                  # v1.3.0 — GitHub release published 2025-04-23
+
+  jsoncpp:
+    cpe: "cpe:2.3:a:jsoncpp_project:jsoncpp"   # NVD: CPE exists, 0 CVEs at recent versions
+    release_date: "2024-09-11"                  # 1.9.6 — GitHub release published 2024-09-11 (was over-stated as 2024-12-19)
+
+  libpng:
+    cpe: "cpe:2.3:a:libpng:libpng"             # NVD: 57 CVEs
+    release_date: "2026-04-15"                  # v1.6.58 — annotated tag date 2026-04-15 (glennrp/libpng publishes no GitHub Releases; tag is authoritative)
+
+  libwebp:
+    cpe: "cpe:2.3:a:webmproject:libwebp"       # NVD: 15 CVEs
+    release_date: "2024-12-20"                  # v1.5.0 — annotated tag date 2024-12-20 (webmproject/libwebp publishes no GitHub Releases; tag is authoritative)
+
+  # AVIF codec stack (the AV1 image path for 1.15; versions pinned in the
+  # codec-stack build spike). CPE choices + CVE counts verified against the live NVD CVE
+  # API on 2026-07-17 (virtualMatchString query, totalResults shown in the comment).
+  # Each release_date is the PINNED version's real upstream ship date, per the
+  # release_date INVARIANT above — NOT a later bump/comment date.
+  aom:
+    cpe: "cpe:2.3:a:aomedia:aomedia"           # NVD: 11 CVEs (libaom is tracked under aomedia:aomedia, e.g. the 2021-04 CVE-2021-3047x batch)
+    # v3.12.0 — commit-pinned 3b624af4 (== tag v3.12.0). committer.date 2025-02-10,
+    # which is also the AOMedia "libaom 3.12.0" release-announcement date. (author.date
+    # is 2025-02-07, 3 days earlier; committer.date is the file convention here and the
+    # announced ship date — using it does not late-drop any CVE, the 02-07..02-09 window
+    # published none.)
+    release_date: "2025-02-10"
+
+  dav1d:
+    cpe: "cpe:2.3:a:videolan:dav1d"            # NVD: 2 CVEs
+    release_date: "2025-01-21"                 # 1.5.1 "Sonic" — VideoLAN code.videolan.org GitLab release published 2025-01-21
+
+  libavif:
+    cpe: "cpe:2.3:a:aomedia:libavif"           # NVD: 3 CVEs (aomedia:libavif — the AOMediaCodec container/coordination lib, distinct from aomedia:aomedia)
+    release_date: "2026-05-26"                 # v1.4.2 — AOMediaCodec/libavif GitHub release + annotated tag both 2026-05-26
+
+  sparsehash:
+    cpe: "N/A"
+    justification: "Google sparsehash has no NVD CPE; header-only hashtable, no public CVEs"
+    release_date: "2018-01-01"                  # 6ff8809 (long-frozen pin)
+
+  gflags:
+    cpe: "N/A"
+    justification: "gflags has no NVD CPE; command-line flag parsing lib, no public CVEs"
+    release_date: "2018-11-11"                  # v2.3.0 (de1b8d3)
+
+  gurl:
+    cpe: "N/A"
+    justification: "google/gurl (standalone mirror of Chromium's url/ library) has no NVD CPE of its own; google:chrome would false-positive against a 2025-08 snapshot that postdates the fixes those CVEs name"
+    release_date: "2025-08-28"                  # e6c272102e — commit committer.date (GitHub API), the pin convention for commit-pinned deps
+
+  libpsl:
+    cpe: "N/A"
+    justification: "rockdaboot/libpsl (Public Suffix List parser) has no NVD CPE; replaced the dead apache/incubator-pagespeed-drp (SEC drp->libpsl)"
+    release_date: "2024-01-13"                  # 0.21.5 release (GitHub release date)
+
+  giflib:
+    cpe: "cpe:2.3:a:giflib_project:giflib"     # NVD: 14 CVEs
+    release_date: "2024-02-19"                  # 5.2.2 — in-tarball source mtimes all 2024-02-19; NEWS says 5.2.2 fixes CVE-2023-48161 (2023-11-22) + CVE-2022-28506, so it postdates those. (SourceForge file-upload date 2026-03-10 is a bulk re-host, NOT the release date — do not use it.)
+
+  optipng:
+    cpe: "cpe:2.3:a:optipng:optipng"           # NVD: 3 CVEs
+    release_date: "2023-11-03"                  # 0.7.8 — doc/history.txt: "Version 0.7.8   2023-nov-03"; in-tarball mtimes + SourceForge upload both 2023-11-03
+
+  libjpeg-turbo:
+    cpe: "cpe:2.3:a:libjpeg-turbo:libjpeg-turbo"  # NVD: 16 CVEs
+    release_date: "2026-03-27"                  # 3.1.4.1 — GitHub release published 2026-03-27 (tag commit 9217719 same day). (Was 2025-09-01, ~7mo too EARLY = over-reporting, the flagged inaccuracy; corrected to the real ship date.)
+
+  apr:
+    cpe: "cpe:2.3:a:apache:portable_runtime"   # NVD: 9 CVEs (APR tracked under "portable_runtime")
+    release_date: "2026-01-04"                  # commit-pinned d7a4f5b (1.7.x branch head); commit committer.date 2026-01-04 ("Update config.guess..."). NOT the "Feb 2026" bzl bump comment.
+
+  apr-util:
+    cpe: "cpe:2.3:a:apache:apr-util"           # NVD: 11 CVEs
+    release_date: "2026-08-10"                  # tag-pinned eb1f0c8 == apr-util 1.6.5, tag commit date 2026-08-10 ("release 1.6.5 from voted 1.6.5-rc1"). Was 2025-01-01 (commit-pinned efbe77e, a pre-1.6.4 1.6.x branch head). The pin now IS a release tag, so the date tracks that release — same discipline as curl: the publish-date filter then correctly drops the 2026-08-06 advisory batch (CVE-2026-32327 / -34191 / -34501 / -34502 / CVE-2025-49506), every one of which is fixed in 1.6.4 and therefore carried by 1.6.5. Bumped in the same commit as APRUTIL_COMMIT in bazel/repositories.bzl — never move this date without moving the pin.
+
+  curl:
+    cpe: "cpe:2.3:a:haxx:curl"                 # NVD: 143 CVEs (canonical; curl:curl has only 4)
+    release_date: "2026-06-24"                  # curl-8_21_0 — GitHub release published 2026-06-24. (Was 2026-04-29 = curl-8_20_0. Same discipline as before: the date tracks the PINNED release so the publish-date filter drops CVEs the pin already fixes.)
+
+  libmemcached:
+    cpe: "cpe:2.3:a:awesome:libmemcached"      # NVD: 1 CVE (the awesomized fork)
+    # 1.1.4 — awesomized/libmemcached GitHub release published 2023-03-06 ("prepare
+    # v1.1.4" commit same day). Was 2023-10-09 (~7mo too LATE = a false-negative
+    # window). NOTE: the corrected date surfaces CVE-2023-27478 (published
+    # 2023-03-07, one day after release) as a finding. That CVE is FIXED in 1.1.4
+    # (NVD range 1.0.18 .. <1.1.4; GHSA-wwmh-39wj-fx59 patched_versions=[1.1.4]),
+    # so it does NOT apply to the pinned 1.1.4 — it is a benign over-report the
+    # date-only filter cannot resolve. Suppress via cve-ignore.yaml (sibling-owned)
+    # with the GHSA justification; do NOT "fix" it by back-dating release_date.
+    release_date: "2023-03-06"
+
+  ed25519:
+    cpe: "N/A"
+    justification: "orlp/ed25519 is a small reference Ed25519 implementation with no NVD CPE; license crypto path"
+    release_date: "2017-01-01"                  # b1f19fa (frozen pin)
+
+  cyclone:
+    cpe: "N/A"
+    justification: "first-party We-Amp code (Cyclone Cache), no third-party CPE"
+    release_date: "2026-01-01"                  # branch=main during dev
+
+  nginx:
+    cpe: "cpe:2.3:a:f5:nginx"                    # NVD: nginx tracked under vendor f5 (legacy nginx:nginx also exists)
+    # Bundled matched-pair nginx for the ASP.NET Core sidecar. SHIPPED version is
+    # DEF_NGINX_VER (focal path) in install/nginx/build_module_in_container.sh = 1.30.4,
+    # the 1.30 stable branch (GA bump 2026-06-03 from 1.24.0 — newer branch, smaller CVE
+    # backlog). nginx is the ONE dep whose version is not a repositories.bzl constant, so
+    # generate-sbom.py pins it as {"literal": "1.30.4"}; keep that literal lockstep with
+    # DEF_NGINX_VER (focal) when the bundled nginx is bumped.
+    release_date: "2026-07-15"                   # nginx 1.30.4 stable — upstream release 2026-07-15 (nginx.org download Last-Modified; security: CVE-2026-42533, CVE-2026-60005, CVE-2026-56434)

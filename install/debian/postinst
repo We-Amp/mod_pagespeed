@@ -1,43 +1,57 @@
 #!/bin/sh
 
-# Based on postinst from Chromium and Google Talk.
-
-@@include@@../common/apt.include
-
-MODPAGESPEED_ENABLE_UPDATES=@@MODPAGESPEED_ENABLE_UPDATES@@
-
 case "$1" in
     configure)
-        if [ -n "${MODPAGESPEED_ENABLE_UPDATES}" -a ! -e "$DEFAULTS_FILE" ]; then
-            echo 'repo_add_once="true"' > "$DEFAULTS_FILE"
-            echo 'repo_reenable_on_distupgrade="true"' >> "$DEFAULTS_FILE"
-        fi
-
-        # Run the cron job immediately to perform repository
-        # configuration.
-        nohup sh /etc/cron.daily/@@PACKAGE@@ > /dev/null 2>&1 &
-
         test ! -e /etc/apache2/mods-enabled/pagespeed.load && \
             a2enmod pagespeed
 
-        # Enable pagespeed-libraries.conf.  On recent systems you install config
-        # files into /etc/apache2/conf-available and then use a2enconf to
-        # symlink it into /etc/apache2/conf-enabled.  On older systems there's
-        # just /etc/apache2/conf.d/, so we manually symlink it there instead.
-        # See https://github.com/apache/incubator-pagespeed-mod/issues/1389
-        if hash a2enconf 2> /dev/null; then
-          # a2enconf is available; use it.
-          a2enconf pagespeed_libraries
-        elif [ -d /etc/apache2/conf.d/ ]; then
-          # this ubuntu is too old for that; manually symlink it
-          if [ -e /etc/apache2/conf.d/pagespeed_libraries.conf ]; then
-            echo "Not symlinking on top of existing pagespeed_libraries.conf"
-          else
-            ln -s ../conf-available/pagespeed_libraries.conf \
-                  /etc/apache2/conf.d/
+        # Enable pagespeed_libraries.conf if it was installed.
+        # Bazel builds may not include this file.
+        if [ -f /etc/apache2/conf-available/pagespeed_libraries.conf ]; then
+          if hash a2enconf 2> /dev/null; then
+            a2enconf pagespeed_libraries
+          elif [ -d /etc/apache2/conf.d/ ]; then
+            if [ -e /etc/apache2/conf.d/pagespeed_libraries.conf ]; then
+              echo "Not symlinking on top of existing pagespeed_libraries.conf"
+            else
+              ln -s ../conf-available/pagespeed_libraries.conf \
+                    /etc/apache2/conf.d/
+            fi
           fi
-        else
-          echo "failed to configure pagespeed_libraries.conf" >&2
+        fi
+
+        # Enable the daemon drop-in (conf-available/pagespeed_daemon.conf):
+        # the two directives that point the module at the optimizer daemon
+        # this package depends on, so an upgrade from a release without the
+        # daemon reaches it without hand-editing. Same enable path as
+        # pagespeed_libraries.conf. The file is a dpkg conffile, so operator
+        # edits survive upgrades; it documents how to opt out (comment out
+        # the directives -- a2enconf here runs on every configure).
+        if [ -f /etc/apache2/conf-available/pagespeed_daemon.conf ]; then
+          if hash a2enconf 2> /dev/null; then
+            a2enconf pagespeed_daemon
+          elif [ -d /etc/apache2/conf.d/ ]; then
+            if [ -e /etc/apache2/conf.d/pagespeed_daemon.conf ]; then
+              echo "Not symlinking on top of existing pagespeed_daemon.conf"
+            else
+              ln -s ../conf-available/pagespeed_daemon.conf \
+                    /etc/apache2/conf.d/
+            fi
+          fi
+        fi
+
+        # Join the web-server user to the `pagespeed` group. After the
+        # optimizer daemon's privilege drop (2.1) its cache volume, notify
+        # socket and shared config are group-rw (0660/0640
+        # pagespeed:pagespeed), and group membership is what lets the module
+        # reach them. The module package performs the join because it is the
+        # package that knows its web server. Guarded and idempotent; a no-op
+        # when the optimizer package (which creates the group) is not
+        # installed, and a usermod failure must not fail the install -- the
+        # module logs the degraded state loudly at startup instead.
+        if getent group pagespeed >/dev/null 2>&1 && \
+           id www-data >/dev/null 2>&1; then
+            usermod -a -G pagespeed www-data || true
         fi
     ;;
     abort-upgrade|abort-remove|abort-deconfigure)

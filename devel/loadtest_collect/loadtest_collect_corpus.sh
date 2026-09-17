@@ -37,9 +37,18 @@ if [ ! -d loadtest_collect ]; then
   exit 1
 fi
 
-if [ ! $(which phantomjs) ]; then
-  echo "phantomjs not found, trying to install it with apt-get"
-  sudo apt-get install phantomjs
+# Slurping is driven by headless Chrome via loadtest_collect/collect.js
+# (puppeteer-core). phantomjs (the old driver) has been unmaintained since 2018.
+if [ ! $(which node) ]; then
+  echo "node not found; install Node.js (>=18) to run the headless-Chrome" \
+       "slurp driver (loadtest_collect/collect.js)." >&2
+  exit 1
+fi
+# Install the puppeteer-core dependency on first run. Set CHROME_PATH if your
+# Chrome/Chromium binary is not in a standard location.
+if [ ! -d loadtest_collect/node_modules ]; then
+  echo "Installing collect.js dependencies (puppeteer-core)..."
+  (cd loadtest_collect && npm install --silent)
 fi
 
 SLURP_TOP_DIR=$(mktemp -d)
@@ -56,10 +65,10 @@ sed -e "s^#HOME^$HOME^" -e "s^#SLURP_DIR^$SLURP_DIR^" \
   < loadtest_collect/loadtest_collect.conf > ~/apache2/conf/pagespeed.conf
 make -j8 apache_debug_restart
 
-for site in $(cat $1); do
-  echo $site
-  phantomjs --proxy=127.0.0.1:8080 loadtest_collect/script.js $site
-done
+# Drive every page through the slurp proxy with headless Chrome, waiting for
+# network idle so all sub-resources are recorded.
+node loadtest_collect/collect.js "$1" 127.0.0.1:8080
+
 cat $LOG_PATH | grep ^GET | cut -d ' ' -f 2 > $URLS_PATH
 cd $SLURP_TOP_DIR
 tar cvjf $2 *

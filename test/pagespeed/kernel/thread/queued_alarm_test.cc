@@ -21,7 +21,12 @@
 
 #include "pagespeed/kernel/thread/queued_alarm.h"
 
+#ifdef _WIN32
+#include <windows.h>
+#define usleep(us) Sleep((us) / 1000)
+#else
 #include <unistd.h>
+#endif
 
 #include <memory>
 
@@ -29,7 +34,6 @@
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/function.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/thread/queued_worker_pool.h"
@@ -107,7 +111,8 @@ class QueuedAlarmTest : public WorkerTestBase {
   bool done_, cancel_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(QueuedAlarmTest);
+  QueuedAlarmTest(const QueuedAlarmTest&) = delete;
+  QueuedAlarmTest& operator=(const QueuedAlarmTest&) = delete;
 };
 
 // A class that keeps track of an alarm object and runs ops on it in a sequence.
@@ -163,7 +168,8 @@ class TestAlarmHandler {
   WorkerTestBase::SyncPoint* sync_;
   QueuedAlarm* alarm_;
   bool fired_;
-  DISALLOW_COPY_AND_ASSIGN(TestAlarmHandler);
+  TestAlarmHandler(const TestAlarmHandler&) = delete;
+  TestAlarmHandler& operator=(const TestAlarmHandler&) = delete;
 };
 
 TEST_F(QueuedAlarmTest, BasicOperation) {

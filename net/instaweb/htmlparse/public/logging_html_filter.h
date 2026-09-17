@@ -102,7 +102,8 @@ class LoggingFilter : public EmptyHtmlFilter {
  private:
   int stats_[MAX_STAT];
 
-  DISALLOW_COPY_AND_ASSIGN(LoggingFilter);
+  LoggingFilter(const LoggingFilter&) = delete;
+  LoggingFilter& operator=(const LoggingFilter&) = delete;
 };
 
 }  // namespace net_instaweb

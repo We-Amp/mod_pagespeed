@@ -32,6 +32,7 @@
 #include "net/instaweb/rewriter/public/critical_images_finder.h"
 #include "net/instaweb/rewriter/public/critical_selector_finder.h"
 #include "net/instaweb/rewriter/public/experiment_matcher.h"
+#include "net/instaweb/rewriter/public/named_lock_schedule_rewrite_controller.h"
 #include "net/instaweb/rewriter/public/process_context.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
@@ -40,20 +41,16 @@
 #include "net/instaweb/rewriter/public/static_asset_manager.h"
 #include "net/instaweb/rewriter/public/url_namer.h"
 #include "net/instaweb/rewriter/public/usage_data_reporter.h"
+#include "net/instaweb/rewriter/public/work_bound_expensive_operation_controller.h"
 #include "net/instaweb/util/public/property_store.h"
-#include "pagespeed/controller/central_controller.h"
-#include "pagespeed/controller/compatible_central_controller.h"
-#include "pagespeed/controller/in_process_central_controller.h"
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/checking_thread_system.h"
-#include "pagespeed/kernel/base/dynamic_annotations.h"  // RunningOnValgrind
 #include "pagespeed/kernel/base/file_system.h"
 #include "pagespeed/kernel/base/function.h"
 #include "pagespeed/kernel/base/hasher.h"
 #include "pagespeed/kernel/base/hostname_util.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/named_lock_manager.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/sha1_signature.h"
 #include "pagespeed/kernel/base/stl_util.h"
 #include "pagespeed/kernel/base/string.h"
@@ -66,8 +63,8 @@
 #include "pagespeed/kernel/http/user_agent_normalizer.h"
 #include "pagespeed/kernel/thread/queued_worker_pool.h"
 #include "pagespeed/kernel/thread/scheduler.h"
-#include "pagespeed/kernel/util/file_system_lock_manager.h"
 #include "pagespeed/kernel/util/nonce_generator.h"
+#include "pagespeed/kernel/util/threadsafe_lock_manager.h"
 
 namespace net_instaweb {
 
@@ -326,8 +323,7 @@ RewriteDriverFactory::user_agent_normalizers() {
 }
 
 NamedLockManager* RewriteDriverFactory::DefaultLockManager() {
-  return new FileSystemLockManager(file_system(), LockFilePrefix(), scheduler(),
-                                   message_handler());
+  return new ThreadSafeLockManager(scheduler());
 }
 
 UrlNamer* RewriteDriverFactory::DefaultUrlNamer() { return new UrlNamer(); }
@@ -345,8 +341,12 @@ CriticalImagesFinder* RewriteDriverFactory::DefaultCriticalImagesFinder(
     ServerContext* server_context) {
   // TODO(pulkitg): Don't create BeaconCriticalImagesFinder if beacon cohort is
   // not added.
-  return new BeaconCriticalImagesFinder(server_context->beacon_cohort(),
-                                        nonce_generator(), statistics());
+  const PropertyCache::Cohort* cohort = server_context->beacon_cohort();
+  NonceGenerator* nonce = nonce_generator();
+  Statistics* stats = statistics();
+  BeaconCriticalImagesFinder* finder =
+      new BeaconCriticalImagesFinder(cohort, nonce, stats);
+  return finder;
 }
 
 CriticalSelectorFinder* RewriteDriverFactory::DefaultCriticalSelectorFinder(
@@ -458,14 +458,26 @@ void RewriteDriverFactory::InitServerContext(ServerContext* server_context) {
   }
   SetupCaches(server_context);
   if (server_context->lock_manager() == nullptr) {
-    server_context->set_lock_manager(lock_manager());
+    NamedLockManager* lm = lock_manager();
+    server_context->set_lock_manager(lm);
   }
-  if (!server_context->has_default_system_fetcher()) {
-    server_context->set_default_system_fetcher(ComputeUrlAsyncFetcher());
+  bool has_fetcher = server_context->has_default_system_fetcher();
+  if (!has_fetcher) {
+    UrlAsyncFetcher* fetcher = ComputeUrlAsyncFetcher();
+    server_context->set_default_system_fetcher(fetcher);
   }
 
-  server_context->set_central_controller(
-      GetCentralController(server_context->lock_manager()));
+  server_context->set_expensive_operation_controller(
+      std::make_shared<WorkBoundExpensiveOperationController>(
+          // Treat 0 as -1 (unlimited) for backward compatibility with the
+          // old image_max_rewrites_at_once semantics.
+          default_options()->image_max_rewrites_at_once() > 0
+              ? default_options()->image_max_rewrites_at_once()
+              : -1,
+          statistics()));
+  server_context->set_schedule_rewrite_controller(
+      std::make_shared<NamedLockScheduleRewriteController>(
+          server_context->lock_manager(), thread_system(), statistics()));
   if (server_context->url_namer() == nullptr) {
     server_context->set_url_namer(url_namer());
   }
@@ -479,8 +491,8 @@ void RewriteDriverFactory::InitServerContext(ServerContext* server_context) {
   server_context->set_signature(signature());
   server_context->set_message_handler(message_handler());
   server_context->set_static_asset_manager(static_asset_manager());
-  server_context->set_critical_images_finder(
-      DefaultCriticalImagesFinder(server_context));
+  CriticalImagesFinder* cif = DefaultCriticalImagesFinder(server_context);
+  server_context->set_critical_images_finder(cif);
   server_context->set_critical_selector_finder(
       DefaultCriticalSelectorFinder(server_context));
   server_context->set_hostname(hostname_);
@@ -503,13 +515,6 @@ void RewriteDriverFactory::InitServerContext(ServerContext* server_context) {
       server_context->global_options()->Clone());
   server_context->GetRemoteOptions(remote_options.get(),
                                    true /* startup fetch */);
-}
-
-std::shared_ptr<CentralController> RewriteDriverFactory::GetCentralController(
-    NamedLockManager* lock_manager) {
-  return std::make_shared<CompatibleCentralController>(
-      default_options()->image_max_rewrites_at_once(), statistics(),
-      thread_system(), lock_manager);
 }
 
 void RewriteDriverFactory::RebuildDecodingDriverForTests(
@@ -545,6 +550,9 @@ void RewriteDriverFactory::InitDecodingDriver(ServerContext* server_context) {
 }
 
 void RewriteDriverFactory::InitStubDecodingServerContext(ServerContext* sc) {
+  // Mark the context as a decoding stub before PostInitHook() runs so
+  // subclass hooks can skip serving-only setup.
+  sc->set_is_decoding_stub(true);
   sc->set_timer(timer());
   sc->set_url_namer(url_namer());
   sc->set_hasher(hasher());
@@ -658,13 +666,13 @@ void RewriteDriverFactory::ShutDown() {
   }
 
   // Now get active RewriteDrivers for each manager to wrap up.
-  int timeout_secs = RunningOnValgrind() ? 20 : 5;
+  int timeout_secs = 5;
   int64 cutoff_time_ms = timer_->NowMs() + timeout_secs * Timer::kSecondMs;
 
   for (ServerContextSet::iterator p = server_contexts_.begin();
        p != server_contexts_.end(); ++p) {
     ServerContext* server_context = *p;
-    server_context->central_controller()->ShutDown();
+    server_context->schedule_rewrite_controller()->ShutDown();
     server_context->ShutDownDrivers(cutoff_time_ms);
   }
 
@@ -694,12 +702,51 @@ void RewriteDriverFactory::AddCreatedDirectory(const GoogleString& dir) {
   created_directories_.insert(dir);
 }
 
+bool RewriteDriverFactory::EnsureDirectoryWritable(
+    const GoogleString& /*path*/, GoogleString* /*error_message*/,
+    uint32_t /*acl_mask*/) {
+  // POSIX default: directive-parser mkdir already covered the path,
+  // and ownership/permissions were established at mkdir time via the
+  // process umask. The |acl_mask| parameter is Win32-specific and is
+  // ignored here. IIS overrides this.
+  return true;
+}
+
 void RewriteDriverFactory::InitStats(Statistics* statistics) {
   HTTPCache::InitStats(statistics);
+  // CycloneZeroCopyServe observability (0 when the flag is off):
+  // aliased = serves that took the zero-copy aliased path; copied_out =
+  // serves whose aliased tail was copied out before a reachable
+  // ceiling-forced wrap or an in-flight wrap on the stripe (the read-side
+  // degradation signal); renew_fail_reset = serves reset because the borrow
+  // epoch moved (a wrap committed) between read and send — the fail-closed
+  // torn-body guard.  A nonzero renew_fail_reset rate is the operator's
+  // signal that a stripe is hot enough to warrant tuning.  ring_refills
+  // counts windows served through the h2/h3 bounded-copy ring; a
+  // ring serve shows aliased=0, copied_out=0, ring_refills>0, and a
+  // mid-stream degrade additionally bumps copied_out.
+  statistics->AddVariable("zerocopy_serve_aliased");
+  statistics->AddVariable("zerocopy_serve_copied_out");
+  statistics->AddVariable("zerocopy_serve_renew_fail_reset");
+  // ineligible = opted-in serves that never reached the aliased path
+  // because the request failed an eligibility gate (Apache: subrequest /
+  // header-only / Range / a non-verbatim output filter on the chain).
+  // Distinguishes "aliasing configured but structurally blocked" from a
+  // dead upstream path (the zero-copy eligibility defect went unnoticed
+  // because this degrade was silent).  The first blocked serve also logs
+  // its blocking condition at
+  // INFO, once per process.
+  statistics->AddVariable("zerocopy_serve_ineligible");
+  // IIS sink: aliased-serve aborts NOT caused by a torn borrow
+  // (allocation / submit failures); torn borrows stay in
+  // zerocopy_serve_renew_fail_reset so its meaning matches nginx.
+  statistics->AddVariable("zerocopy_serve_aborted");
+  statistics->AddVariable("zerocopy_serve_ring_refills");
   RewriteDriver::InitStats(statistics);
   RewriteStats::InitStats(statistics);
   CacheBatcher::InitStats(statistics);
-  InProcessCentralController::InitStats(statistics);
+  WorkBoundExpensiveOperationController::InitStats(statistics);
+  NamedLockScheduleRewriteController::InitStats(statistics);
   CriticalImagesFinder::InitStats(statistics);
   CriticalSelectorFinder::InitStats(statistics);
   PropertyStoreGetCallback::InitStats(statistics);

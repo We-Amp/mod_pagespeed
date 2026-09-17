@@ -19,12 +19,16 @@
 
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 
+#include <memory>
+
 #include "net/instaweb/http/public/async_fetch.h"
 #include "net/instaweb/http/public/counting_url_async_fetcher.h"
+#include "net/instaweb/http/public/http_cache.h"
 #include "net/instaweb/http/public/logging_proto_impl.h"
 #include "net/instaweb/http/public/wait_url_async_fetcher.h"
 #include "net/instaweb/rewriter/public/domain_lawyer.h"
 #include "net/instaweb/rewriter/public/file_load_policy.h"
+#include "net/instaweb/rewriter/public/image_rewrite_filter.h"
 #include "net/instaweb/rewriter/public/output_resource_kind.h"
 #include "net/instaweb/rewriter/public/request_properties.h"
 #include "net/instaweb/rewriter/public/resource.h"
@@ -52,6 +56,7 @@
 #include "pagespeed/kernel/http/request_headers.h"
 #include "pagespeed/kernel/http/semantic_type.h"
 #include "pagespeed/opt/logging/log_record.h"
+#include "test/net/instaweb/http/mapped_backend_cache.h"
 #include "test/net/instaweb/http/mock_url_fetcher.h"
 #include "test/net/instaweb/rewriter/mock_resource_callback.h"
 #include "test/net/instaweb/rewriter/rewrite_test_base.h"
@@ -163,7 +168,8 @@ class RewriteDriverTest : public RewriteTestBase {
   }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(RewriteDriverTest);
+  RewriteDriverTest(const RewriteDriverTest&) = delete;
+  RewriteDriverTest& operator=(const RewriteDriverTest&) = delete;
 };
 
 namespace {
@@ -327,6 +333,49 @@ TEST_F(RewriteDriverTest, TestModernUrl) {
   EXPECT_FALSE(CanDecodeUrl(encoded_url));
 }
 
+TEST_F(RewriteDriverTest, TestForbiddenCompoundFilterIds) {
+  rewrite_driver()->AddFilters();
+
+  GoogleString ce_url =
+      Encode("http://example.com/", "ce", "HASH", "Puzzle.jpg", "jpg");
+  // The leaf of an image URL must start with an image code (the "x"
+  // separator) or ImageUrlEncoder::Decode rejects it before the
+  // forbidden-filter check runs.
+  GoogleString ic_url =
+      Encode("http://example.com/", "ic", "HASH", "xPuzzle.jpg", "jpg");
+  EXPECT_TRUE(CanDecodeUrl(ce_url));
+  EXPECT_TRUE(CanDecodeUrl(ic_url));
+
+  // The driver's own options freeze on first use, so the forbid variations
+  // below decode against freshly-constructed options (as production does for
+  // query- or vhost-scoped options), using the same decode path and the same
+  // forbidden-filter gate.
+  StringVector decoded_urls;
+  RewriteOptions forbid_options(factory()->thread_system());
+
+  // Partial forbid: the other cache-extension filters can still produce
+  // "ce" URLs, so decoding them stays allowed.
+  forbid_options.ForbidFilter(RewriteOptions::kExtendCacheImages);
+  EXPECT_TRUE(rewrite_driver()->DecodeUrlGivenOptions(
+      GoogleUrl(ce_url), &forbid_options, server_context()->url_namer(),
+      &decoded_urls));
+
+  forbid_options.ForbidFilter(RewriteOptions::kExtendCacheCss);
+  forbid_options.ForbidFilter(RewriteOptions::kExtendCachePdfs);
+  forbid_options.ForbidFilter(RewriteOptions::kExtendCacheScripts);
+  EXPECT_FALSE(rewrite_driver()->DecodeUrlGivenOptions(
+      GoogleUrl(ce_url), &forbid_options, server_context()->url_namer(),
+      &decoded_urls));
+
+  RewriteOptions forbid_image_options(factory()->thread_system());
+  for (int i = 0; i < ImageRewriteFilter::kRelatedFiltersSize; ++i) {
+    forbid_image_options.ForbidFilter(ImageRewriteFilter::kRelatedFilters[i]);
+  }
+  EXPECT_FALSE(rewrite_driver()->DecodeUrlGivenOptions(
+      GoogleUrl(ic_url), &forbid_image_options, server_context()->url_namer(),
+      &decoded_urls));
+}
+
 class RewriteDriverTestUrlNamer : public RewriteDriverTest {
  public:
   RewriteDriverTestUrlNamer() { SetUseTestUrlNamer(true); }
@@ -483,6 +532,57 @@ TEST_F(RewriteDriverTest, TestCacheUse) {
   EXPECT_TRUE(TryFetchResource(css_minified_url));
   EXPECT_EQ(cold_num_inserts, lru_cache()->num_inserts());
   EXPECT_EQ(0, lru_cache()->num_identical_reinserts());
+}
+
+// Flag-on variant of the warm cache-hit serving path with a memory-mapped
+// backend (CycloneZeroCopy): CacheCallback::DeliverDone extracts contents
+// from a mapped HTTPValue, links it into the OutputResource (which collapses
+// the borrow to owned bytes via HTTPValue::share()), and only then streams
+// the previously extracted StringPiece to the fetch.  Under ASan this
+// verifies the keep-alive that makes that ordering safe.
+TEST_F(RewriteDriverTest, TestCacheUseWithCycloneZeroCopy) {
+  AddFilter(RewriteOptions::kRewriteCss);
+
+  const char kCss[] = "* { display: none; }";
+  const char kMinCss[] = "*{display:none}";
+  SetResponseWithDefaultHeaders("a.css", kContentTypeCss, kCss, 100);
+
+  GoogleString css_minified_url =
+      Encode(kTestDomain, RewriteOptions::kCssFilterId, hasher()->Hash(kMinCss),
+             "a.css", "css");
+
+  // Cold load populates the HTTP cache (through the factory's own cache).
+  GoogleString contents;
+  ResponseHeaders response;
+  ASSERT_TRUE(FetchResourceUrl(css_minified_url, &contents, &response));
+  EXPECT_EQ(kMinCss, contents);
+
+  // Interpose a backend that delivers every hit as a memory-mapped view
+  // (emulating Cyclone's zero-copy borrow) and enable zero-copy serving.
+  MappedBackendCache* mapped_backend = new MappedBackendCache(lru_cache());
+  server_context()->DeleteCacheOnDestruction(mapped_backend);
+  HTTPCache* zero_copy_cache =
+      new HTTPCache(mapped_backend, timer(), hasher(), statistics());
+  zero_copy_cache->set_cyclone_zero_copy_enabled(true);
+  server_context()->set_http_cache(zero_copy_cache);  // Takes ownership.
+
+  // Warm load: served from the HTTP cache off mapped bytes.
+  contents.clear();
+  response.Clear();
+  ASSERT_TRUE(FetchResourceUrl(css_minified_url, &contents, &response));
+  EXPECT_EQ(kMinCss, contents);
+  EXPECT_LE(1, mapped_backend->mapped_hits());
+  // Every mapped borrow has been returned by the end of the request:
+  // nothing keeps mmap-backed bytes alive past the serving scope.
+  EXPECT_EQ(mapped_backend->mapped_hits(), mapped_backend->release_count());
+
+  // And again, to make sure the collapsed/linked state left everything
+  // consistent for repeat serving.
+  contents.clear();
+  response.Clear();
+  ASSERT_TRUE(FetchResourceUrl(css_minified_url, &contents, &response));
+  EXPECT_EQ(kMinCss, contents);
+  EXPECT_EQ(mapped_backend->mapped_hits(), mapped_backend->release_count());
 }
 
 // Test to make sure when we fetch a with a Via header, "public"
@@ -1546,7 +1646,7 @@ TEST_F(RewriteDriverTest, SetSessionFetcherTest) {
 
   // Load up a different file into a second fetcher.
   // We misappropriate the response_headers from previous fetch for simplicity.
-  std::unique_ptr<MockUrlFetcher> mock2(new MockUrlFetcher);
+  std::unique_ptr<MockUrlFetcher> mock2 = std::make_unique<MockUrlFetcher>();
   mock2->SetResponse(AbsolutifyUrl("a.css"), response_headers, kFetcher2Css);
 
   // Switch over to new fetcher, making sure to set two of them to exercise
@@ -1623,7 +1723,8 @@ class InPlaceTest : public RewriteTestBase {
   }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(InPlaceTest);
+  InPlaceTest(const InPlaceTest&) = delete;
+  InPlaceTest& operator=(const InPlaceTest&) = delete;
 };
 
 TEST_F(InPlaceTest, FetchInPlaceResource) {
@@ -1891,7 +1992,8 @@ class RenderDoneCheckingFilter : public EmptyHtmlFilter {
  private:
   HtmlElement* element_;
   GoogleString src_;
-  DISALLOW_COPY_AND_ASSIGN(RenderDoneCheckingFilter);
+  RenderDoneCheckingFilter(const RenderDoneCheckingFilter&) = delete;
+  RenderDoneCheckingFilter& operator=(const RenderDoneCheckingFilter&) = delete;
 };
 
 TEST_F(RewriteDriverTest, RenderDoneTest) {
@@ -2057,14 +2159,168 @@ TEST_F(RewriteDriverTest, ValidateCacheResponseRewrittenWebp) {
   EXPECT_FALSE(OptionsAwareHTTPCacheCallback::IsCacheValid(
       kOriginUrl, *options(), request_context, response_headers));
 
-  // vary:accept, accepts_webp true.
+  // vary:accept with only the broad accepts_webp bit set: this is the shape a
+  // user-agent-derived grant produces (legacy Android, or the Safari 16+ /
+  // Firefox 132+ fallback). The client could decode the bytes, but the
+  // entry's "Vary: Accept" claim would be false as-selected, so the entry is
+  // NOT valid -- the request revalidates against the origin instead.
   request_context->SetAcceptsWebp(true);
+  options()->set_serve_rewritten_webp_urls_to_any_agent(true);
+  EXPECT_FALSE(OptionsAwareHTTPCacheCallback::IsCacheValid(
+      kOriginUrl, *options(), request_context, response_headers));
+  options()->set_serve_rewritten_webp_urls_to_any_agent(false);
+  EXPECT_FALSE(OptionsAwareHTTPCacheCallback::IsCacheValid(
+      kOriginUrl, *options(), request_context, response_headers));
+
+  // vary:accept with an Accept-derived verdict: the request itself advertised
+  // image/webp, the Vary claim holds as-selected, the entry is valid.
+  request_context->SetAcceptsWebpViaAcceptHeader(true);
   options()->set_serve_rewritten_webp_urls_to_any_agent(true);
   EXPECT_TRUE(OptionsAwareHTTPCacheCallback::IsCacheValid(
       kOriginUrl, *options(), request_context, response_headers));
   options()->set_serve_rewritten_webp_urls_to_any_agent(false);
   EXPECT_TRUE(OptionsAwareHTTPCacheCallback::IsCacheValid(
       kOriginUrl, *options(), request_context, response_headers));
+
+  // #737: "Vary: accept" (lowercase) is the SAME as-selected claim -- a Vary
+  // value lists field names, which are case-insensitive tokens. The guard
+  // must fire for a non-advertising request exactly as it does for the
+  // canonical spelling above.
+  RequestContextPtr lc_context(
+      new RequestContext(kDefaultHttpOptionsForTests, new NullMutex, timer()));
+  lc_context->SetAcceptsWebp(false);
+  ResponseHeaders lc_headers;
+  lc_headers.Add(HttpAttributes::kContentType, kWebpMimeType);
+  lc_headers.SetDateAndCaching(MockTimer::kApr_5_2010_ms,
+                               300 * Timer::kSecondMs, "");
+  lc_headers.Add(HttpAttributes::kVary, "accept");
+  lc_headers.ComputeCaching();
+  EXPECT_FALSE(OptionsAwareHTTPCacheCallback::IsCacheValid(
+      kOriginUrl, *options(), lc_context, lc_headers));
+
+  // #737: "Vary: *" varies on dimensions nobody can restate, so it is never
+  // valid as-selected for a non-advertising request...
+  ResponseHeaders star_headers;
+  star_headers.Add(HttpAttributes::kContentType, kWebpMimeType);
+  star_headers.SetDateAndCaching(MockTimer::kApr_5_2010_ms,
+                                 300 * Timer::kSecondMs, "");
+  star_headers.Add(HttpAttributes::kVary, "*");
+  star_headers.ComputeCaching();
+  EXPECT_FALSE(OptionsAwareHTTPCacheCallback::IsCacheValid(
+      kOriginUrl, *options(), lc_context, star_headers));
+
+  // ...while a request that DID advertise the format is outside these arms'
+  // decode-safety question: the wildcard entry is reused exactly as before
+  // the fix (general Vary: * policy belongs to RespectVaryOnResources, not
+  // a format guard).
+  RequestContextPtr adv_context(
+      new RequestContext(kDefaultHttpOptionsForTests, new NullMutex, timer()));
+  adv_context->SetAcceptsWebpViaAcceptHeader(true);
+  EXPECT_TRUE(OptionsAwareHTTPCacheCallback::IsCacheValid(
+      kOriginUrl, *options(), adv_context, star_headers));
+}
+
+// The AVIF mirror of ValidateCacheResponseRewrittenWebp above. AVIF has only
+// the one, Accept-derived capability bit (no user-agent-derived grant exists
+// to be broader than it), so the "broad bit only" row has no AVIF counterpart.
+TEST_F(RewriteDriverTest, ValidateCacheResponseRewrittenAvif) {
+  const StringPiece kAvifMimeType = kContentTypeAvif.mime_type();
+  RequestContextPtr request_context(
+      new RequestContext(kDefaultHttpOptionsForTests, new NullMutex, timer()));
+  options()->ClearSignatureForTesting();
+  ResponseHeaders response_headers;
+  response_headers.Add(HttpAttributes::kContentType, kAvifMimeType);
+  response_headers.SetDateAndCaching(MockTimer::kApr_5_2010_ms,
+                                     300 * Timer::kSecondMs, "");
+  response_headers.ComputeCaching();
+  const char kOriginUrl[] = "foo.avif";
+
+  // No vary:accept: the entry makes no as-selected claim, so the client's AVIF
+  // capability is irrelevant and the entry stays valid either way. This is the
+  // row that keeps the fix from invalidating in-place AVIF output, which
+  // carries no Vary.
+  request_context->SetAcceptsAvifViaAcceptHeader(false);
+  options()->set_serve_rewritten_avif_urls_to_any_agent(true);
+  EXPECT_TRUE(OptionsAwareHTTPCacheCallback::IsCacheValid(
+      kOriginUrl, *options(), request_context, response_headers));
+  options()->set_serve_rewritten_avif_urls_to_any_agent(false);
+  EXPECT_TRUE(OptionsAwareHTTPCacheCallback::IsCacheValid(
+      kOriginUrl, *options(), request_context, response_headers));
+
+  request_context->SetAcceptsAvifViaAcceptHeader(true);
+  EXPECT_TRUE(OptionsAwareHTTPCacheCallback::IsCacheValid(
+      kOriginUrl, *options(), request_context, response_headers));
+
+  // Now add a Vary: Accept and the client's own Accept header starts to
+  // matter.
+  response_headers.Add(HttpAttributes::kVary, HttpAttributes::kAccept);
+  response_headers.ComputeCaching();
+
+  // vary:accept, the request never advertised image/avif: the entry's Vary
+  // claim would be false as-selected, so it is NOT valid and the request
+  // revalidates against the origin rather than being handed AVIF bytes it did
+  // not ask for.
+  request_context->SetAcceptsAvifViaAcceptHeader(false);
+  options()->set_serve_rewritten_avif_urls_to_any_agent(true);
+  EXPECT_FALSE(OptionsAwareHTTPCacheCallback::IsCacheValid(
+      kOriginUrl, *options(), request_context, response_headers));
+  options()->set_serve_rewritten_avif_urls_to_any_agent(false);
+  EXPECT_FALSE(OptionsAwareHTTPCacheCallback::IsCacheValid(
+      kOriginUrl, *options(), request_context, response_headers));
+
+  // vary:accept with an Accept-derived verdict: the Vary claim holds
+  // as-selected, the entry is valid.
+  request_context->SetAcceptsAvifViaAcceptHeader(true);
+  options()->set_serve_rewritten_avif_urls_to_any_agent(true);
+  EXPECT_TRUE(OptionsAwareHTTPCacheCallback::IsCacheValid(
+      kOriginUrl, *options(), request_context, response_headers));
+  options()->set_serve_rewritten_avif_urls_to_any_agent(false);
+  EXPECT_TRUE(OptionsAwareHTTPCacheCallback::IsCacheValid(
+      kOriginUrl, *options(), request_context, response_headers));
+
+  // The WebP arm is untouched by the AVIF arm: a WebP entry under the same
+  // Vary: Accept is still decided by the WebP bit alone, which this request
+  // never set.
+  ResponseHeaders webp_headers;
+  webp_headers.Add(HttpAttributes::kContentType, kContentTypeWebp.mime_type());
+  webp_headers.SetDateAndCaching(MockTimer::kApr_5_2010_ms,
+                                 300 * Timer::kSecondMs, "");
+  webp_headers.Add(HttpAttributes::kVary, HttpAttributes::kAccept);
+  webp_headers.ComputeCaching();
+  EXPECT_FALSE(OptionsAwareHTTPCacheCallback::IsCacheValid(
+      "foo.webp", *options(), request_context, webp_headers));
+
+  // #737 mirror rows: the widened Vary test moves on both arms together.
+  // Lowercase "vary: accept" fires for a non-advertising request...
+  RequestContextPtr lc_context(
+      new RequestContext(kDefaultHttpOptionsForTests, new NullMutex, timer()));
+  lc_context->SetAcceptsAvifViaAcceptHeader(false);
+  ResponseHeaders lc_headers;
+  lc_headers.Add(HttpAttributes::kContentType, kAvifMimeType);
+  lc_headers.SetDateAndCaching(MockTimer::kApr_5_2010_ms,
+                               300 * Timer::kSecondMs, "");
+  lc_headers.Add(HttpAttributes::kVary, "accept");
+  lc_headers.ComputeCaching();
+  EXPECT_FALSE(OptionsAwareHTTPCacheCallback::IsCacheValid(
+      kOriginUrl, *options(), lc_context, lc_headers));
+
+  // ...as does "Vary: *"...
+  ResponseHeaders star_headers;
+  star_headers.Add(HttpAttributes::kContentType, kAvifMimeType);
+  star_headers.SetDateAndCaching(MockTimer::kApr_5_2010_ms,
+                                 300 * Timer::kSecondMs, "");
+  star_headers.Add(HttpAttributes::kVary, "*");
+  star_headers.ComputeCaching();
+  EXPECT_FALSE(OptionsAwareHTTPCacheCallback::IsCacheValid(
+      kOriginUrl, *options(), lc_context, star_headers));
+
+  // ...and an advertising request keeps reusing the wildcard entry, same
+  // scope rule as the WebP arm.
+  RequestContextPtr adv_context(
+      new RequestContext(kDefaultHttpOptionsForTests, new NullMutex, timer()));
+  adv_context->SetAcceptsAvifViaAcceptHeader(true);
+  EXPECT_TRUE(OptionsAwareHTTPCacheCallback::IsCacheValid(
+      kOriginUrl, *options(), adv_context, star_headers));
 }
 
 TEST_F(RewriteDriverTest, SetRequestHeadersPopulatesWebpAccept) {
@@ -2078,6 +2334,11 @@ TEST_F(RewriteDriverTest, SetRequestHeadersPopulatesWebpAccept) {
   EXPECT_TRUE(request_properties->SupportsWebpInPlace());
   EXPECT_TRUE(request_properties->SupportsWebpRewrittenUrls());
   EXPECT_TRUE(request_properties->SupportsWebpLosslessAlpha());
+  EXPECT_TRUE(request_properties->SupportsWebpAnimated());
+  // An observed Accept header populates both RequestContext bits.
+  EXPECT_TRUE(rewrite_driver()->request_context()->accepts_webp());
+  EXPECT_TRUE(
+      rewrite_driver()->request_context()->accepts_webp_via_accept_header());
 }
 
 TEST_F(RewriteDriverTest, SetRequestHeadersPopulatesWebpNoAccept) {
@@ -2088,8 +2349,69 @@ TEST_F(RewriteDriverTest, SetRequestHeadersPopulatesWebpNoAccept) {
   const RequestProperties* request_properties =
       rewrite_driver()->request_properties();
   EXPECT_FALSE(request_properties->SupportsWebpInPlace());
+  // The legacy no-Accept carve-out grants the lossy tier only.
   EXPECT_TRUE(request_properties->SupportsWebpRewrittenUrls());
   EXPECT_FALSE(request_properties->SupportsWebpLosslessAlpha());
+  EXPECT_FALSE(request_properties->SupportsWebpAnimated());
+  // A user-agent-derived grant reaches only the broad RequestContext bit; the
+  // Accept-derived bit stays false, so Vary: Accept cache entries revalidate.
+  EXPECT_TRUE(rewrite_driver()->request_context()->accepts_webp());
+  EXPECT_FALSE(
+      rewrite_driver()->request_context()->accepts_webp_via_accept_header());
+}
+
+// Same split for the user-agent fallback population: Safari 16+ with no image
+// types in its navigation Accept gets the broad bit (rewritten URLs may serve
+// WebP) but never the Accept-derived bit (a cached origin-URL WebP response
+// carrying "Vary: Accept" is not treated as valid for it).
+TEST_F(RewriteDriverTest, SetRequestHeadersPopulatesWebpUaFallback) {
+  RequestHeaders headers;
+  headers.Add(HttpAttributes::kAccept, "text/html");
+  headers.Add(HttpAttributes::kUserAgent,
+              UserAgentMatcherTestBase::kSafari16UserAgent);
+  rewrite_driver()->SetRequestHeaders(headers);
+  const RequestProperties* request_properties =
+      rewrite_driver()->request_properties();
+  EXPECT_FALSE(request_properties->SupportsWebpInPlace());
+  EXPECT_TRUE(request_properties->SupportsWebpRewrittenUrls());
+  EXPECT_TRUE(rewrite_driver()->request_context()->accepts_webp());
+  EXPECT_FALSE(
+      rewrite_driver()->request_context()->accepts_webp_via_accept_header());
+}
+
+// The AVIF bit reaches the RequestContext, which is what the cache-validity
+// check reads. Without this wiring the guard arm above can never fire.
+TEST_F(RewriteDriverTest, SetRequestHeadersPopulatesAvifAccept) {
+  RequestHeaders headers;
+  headers.Add(HttpAttributes::kAccept, "image/avif");
+  headers.Add(HttpAttributes::kUserAgent,
+              UserAgentMatcherTestBase::kChrome42UserAgent);
+  rewrite_driver()->SetRequestHeaders(headers);
+  const RequestProperties* request_properties =
+      rewrite_driver()->request_properties();
+  EXPECT_TRUE(request_properties->SupportsAvifInPlace());
+  EXPECT_TRUE(
+      rewrite_driver()->request_context()->accepts_avif_via_accept_header());
+  // Advertising AVIF says nothing about WebP.
+  EXPECT_FALSE(
+      rewrite_driver()->request_context()->accepts_webp_via_accept_header());
+}
+
+// No "image/avif" in Accept means no AVIF bit -- there is no user-agent
+// fallback that could grant it, so this stays false for every UA.
+TEST_F(RewriteDriverTest, SetRequestHeadersPopulatesAvifNoAccept) {
+  RequestHeaders headers;
+  headers.Add(HttpAttributes::kAccept, "image/webp");
+  headers.Add(HttpAttributes::kUserAgent,
+              UserAgentMatcherTestBase::kChrome42UserAgent);
+  rewrite_driver()->SetRequestHeaders(headers);
+  const RequestProperties* request_properties =
+      rewrite_driver()->request_properties();
+  EXPECT_FALSE(request_properties->SupportsAvifInPlace());
+  EXPECT_FALSE(
+      rewrite_driver()->request_context()->accepts_avif_via_accept_header());
+  EXPECT_TRUE(
+      rewrite_driver()->request_context()->accepts_webp_via_accept_header());
 }
 
 // Test classes created for using a managed rewrite driver, so that downstream

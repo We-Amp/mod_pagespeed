@@ -212,7 +212,8 @@ class CacheUrlAsyncFetcher : public UrlAsyncFetcher {
   int64 serve_stale_while_revalidate_threshold_sec_;
   Sequence* response_sequence_;
 
-  DISALLOW_COPY_AND_ASSIGN(CacheUrlAsyncFetcher);
+  CacheUrlAsyncFetcher(const CacheUrlAsyncFetcher&) = delete;
+  CacheUrlAsyncFetcher& operator=(const CacheUrlAsyncFetcher&) = delete;
 };
 
 }  // namespace net_instaweb

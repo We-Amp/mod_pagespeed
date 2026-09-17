@@ -22,6 +22,8 @@
 #ifndef PAGESPEED_APACHE_INSTAWEB_HANDLER_H_
 #define PAGESPEED_APACHE_INSTAWEB_HANDLER_H_
 
+#include <memory>
+
 #include "apr_pools.h"  // for apr_status_t
 #include "net/instaweb/http/public/request_context.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
@@ -29,7 +31,6 @@
 #include "net/instaweb/rewriter/public/rewrite_query.h"
 #include "pagespeed/apache/apache_fetch.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/http/content_type.h"
@@ -48,7 +49,10 @@ class ApacheConfig;
 class ApacheRequestContext;
 class ApacheRewriteDriverFactory;
 class ApacheServerContext;
-class InPlaceResourceRecorder;
+class IproRecorder;
+struct DaemonRecordRequest;
+struct DaemonServeDecision;
+struct DaemonServeRequest;
 
 // Context for handling a request, computing options and request headers in
 // the constructor.
@@ -171,10 +175,47 @@ class InstawebHandler {
   // To prevent that, we hook map_to_storage for our own purposes.
   static apr_status_t instaweb_map_to_storage(request_rec* request);
 
-  // This must be called on any InPlaceResourceRecorder allocated by
+  // This must be called on any in-place recorder allocated by
   // instaweb_handler before calling DoneAndSetHeaders() on it.
   static void AboutToBeDoneWithRecorder(request_rec* request,
-                                        InPlaceResourceRecorder* recorder);
+                                        IproRecorder* recorder);
+
+  // Attaches an in-place recorder to this response, transferring ownership to
+  // the request pool.  The in-place output filters drive its lifecycle.
+  //
+  // `rewrite_caching_headers` is a SUBSTRATE decision -- see the definition.
+  void AttachInPlaceRecorder(IproRecorder* recorder,
+                             bool rewrite_caching_headers);
+
+  // One request header, read straight off the Apache request rather than off
+  // request_headers_, which has been stripped for resource fetching.
+  StringPiece RequestHeader(const char* name) const;
+
+  // Gathers what the daemon-side recorder needs about the request, before the
+  // response starts.  See the definition for why it cannot wait.
+  void BuildDaemonRecordRequest(
+      const RequestHeaders::Properties& request_properties,
+      DaemonRecordRequest* request);
+
+  // The four request fields the peer's classifier derives a capability mask
+  // from.  ONE reader for both arms; see the definition.
+  void CapabilityHeaders(StringPiece* accept, StringPiece* user_agent,
+                         StringPiece* save_data,
+                         StringPiece* accept_encoding) const;
+
+  // Gathers what the daemon-side SERVE arm needs about the request.
+  void BuildDaemonServeRequest(DaemonServeRequest* request);
+
+  // Records one serve class against the peer's serve-stats mmap.
+  void RecordDaemonServeClass(int serve_class);
+
+  // Records one worker-processed serve HIT against the peer's serve-stats
+  // mmap.  The GATE is the caller's; see ServeFromDaemonSubstrate.
+  void RecordDaemonServeHit(const DaemonServeDecision& decision);
+
+  // Answers this request from the optimizer daemon's shared cache if it can.
+  // A false return is the substrate declining, not an error.
+  bool ServeFromDaemonSubstrate();
 
  private:
   // Evaluate custom_options based upon global_options, directory-specific
@@ -182,8 +223,6 @@ class InstawebHandler {
   // in custom_options_ if needed.  Sets options_ to point to the correct
   // options to use.
   void ComputeCustomOptions();
-
-  static bool IsCompressibleContentType(const char* content_type);
 
   static void send_out_headers_and_body(request_rec* request,
                                         const ResponseHeaders& response_headers,
@@ -239,6 +278,11 @@ class InstawebHandler {
   static bool parse_body_from_post(const request_rec* request,
                                    GoogleString* data, apr_status_t* ret);
 
+  // Read the raw POST body without content-type validation.
+  // Used for JSON API endpoints.
+  static bool read_post_body(const request_rec* request, GoogleString* data,
+                             apr_status_t* ret);
+
   static apr_status_t instaweb_beacon_handler(
       request_rec* request, ApacheServerContext* server_context);
 
@@ -248,6 +292,12 @@ class InstawebHandler {
   request_rec* request_;
   RequestContextPtr request_context_;
   ApacheRequestContext* apache_request_context_;  // owned by request_context_.
+  // Storage the daemon serve request's StringPieces borrow from.  Members
+  // rather than locals because the request outlives the frame that fills it.
+  GoogleString daemon_serve_url_;
+  GoogleString daemon_serve_host_;
+  GoogleString daemon_serve_scheme_;
+
   ApacheServerContext* server_context_;
   std::unique_ptr<RequestHeaders> request_headers_;
   std::unique_ptr<ResponseHeaders> response_headers_;
@@ -270,7 +320,8 @@ class InstawebHandler {
   RewriteQuery rewrite_query_;
   ApacheFetch* fetch_;
 
-  DISALLOW_COPY_AND_ASSIGN(InstawebHandler);
+  InstawebHandler(const InstawebHandler&) = delete;
+  InstawebHandler& operator=(const InstawebHandler&) = delete;
 };
 
 }  // namespace net_instaweb

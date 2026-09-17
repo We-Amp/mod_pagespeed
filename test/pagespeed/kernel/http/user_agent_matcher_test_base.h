@@ -20,7 +20,8 @@
 #ifndef PAGESPEED_KERNEL_HTTP_USER_AGENT_MATCHER_TEST_BASE_H_
 #define PAGESPEED_KERNEL_HTTP_USER_AGENT_MATCHER_TEST_BASE_H_
 
-#include "pagespeed/kernel/base/scoped_ptr.h"
+#include <memory>
+
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/http/user_agent_matcher.h"
 #include "test/pagespeed/kernel/base/gtest.h"
@@ -47,7 +48,9 @@ class UserAgentMatcherTestBase : public testing::Test {
   static const char kBenqUserAgent[];
   static const char kBlackBerryOS5UserAgent[];
   static const char kBlackBerryOS6UserAgent[];
+  static const char kChrome100UserAgent[];
   static const char kChrome12UserAgent[];
+  static const char kChrome137UserAgent[];
   static const char kChrome15UserAgent[];
   static const char kChrome18UserAgent[];
   static const char kChrome31UserAgent[];
@@ -55,13 +58,17 @@ class UserAgentMatcherTestBase : public testing::Test {
   static const char kChrome37UserAgent[];
   static const char kChrome41UserAgent[];
   static const char kChrome42UserAgent[];
+  static const char kChrome99UserAgent[];
   static const char kChrome9UserAgent[];
   static const char kChromeUserAgent[];
   static const char kCompalUserAgent[];
+  static const char kCriOS137UserAgent[];
   static const char kCriOS31UserAgent[];
   static const char kCriOS32UserAgent[];
   static const char kCriOS48UserAgent[];
+  static const char kCriOS9UserAgent[];
   static const char kDoCoMoMobileUserAgent[];
+  static const char kEdge137UserAgent[];
   static const char kFirefox1UserAgent[];
   static const char kFirefox3UserAgent[];
   static const char kFirefox42AndroidUserAgent[];
@@ -113,6 +120,7 @@ class UserAgentMatcherTestBase : public testing::Test {
   static const char kNokiaUserAgent[];
   static const char kOpera1101UserAgent[];
   static const char kOpera1110UserAgent[];
+  static const char kOpera119UserAgent[];
   static const char kOpera18UserAgent[];
   static const char kOpera19UserAgent[];
   static const char kOpera5UserAgent[];
@@ -132,6 +140,20 @@ class UserAgentMatcherTestBase : public testing::Test {
   static const char kSafariUserAgent[];
   static const char kSafari6UserAgent[];
   static const char kSafari9UserAgent[];
+  static const char kSafari13UserAgent[];
+  static const char kSafari14UserAgent[];
+  static const char kSafari15UserAgent[];
+  static const char kSafari16UserAgent[];
+  static const char kSafari17IPhoneUserAgent[];
+  static const char kSafari18UserAgent[];
+  static const char kSafari26UserAgent[];
+  static const char kFirefox131UserAgent[];
+  static const char kFirefox132UserAgent[];
+  static const char kFirefox141UserAgent[];
+  static const char kFirefox141AndroidUserAgent[];
+  static const char kFxiOS126UserAgent[];
+  static const char kAndroidWebView114UserAgent[];
+  static const char kApplebotSafari16UserAgent[];
   static const char kSAGEMMobileUserAgent[];
   static const char kSAGEMUserAgent[];
   static const char kSAMSUNGMobileUserAgent[];

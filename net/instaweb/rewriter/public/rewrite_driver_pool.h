@@ -55,7 +55,8 @@ class RewriteDriverPool {
   // a lot of them lying around winds up wasting a lot of memory instead.
   static const int kMaxDriversInPool = 50;
 
-  DISALLOW_COPY_AND_ASSIGN(RewriteDriverPool);
+  RewriteDriverPool(const RewriteDriverPool&) = delete;
+  RewriteDriverPool& operator=(const RewriteDriverPool&) = delete;
 };
 
 }  // namespace net_instaweb

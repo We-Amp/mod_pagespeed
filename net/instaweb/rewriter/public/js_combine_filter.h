@@ -25,13 +25,14 @@
 #ifndef NET_INSTAWEB_REWRITER_PUBLIC_JS_COMBINE_FILTER_H_
 #define NET_INSTAWEB_REWRITER_PUBLIC_JS_COMBINE_FILTER_H_
 
+#include <memory>
+
 #include "net/instaweb/rewriter/public/rewrite_context.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_filter.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/script_tag_scanner.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/html/html_element.h"
@@ -97,7 +98,7 @@ class JsCombineFilter : public RewriteFilter {
   void StartDocumentImpl() override;
   void StartElementImpl(HtmlElement* element) override;
   void EndElementImpl(HtmlElement* element) override;
-  void Characters(HtmlCharactersNode* characters) override;
+  void CharactersImpl(HtmlCharactersNode* characters) override;
   void Flush() override;
   void IEDirective(HtmlIEDirectiveNode* directive) override;
   const char* Name() const override { return "JsCombine"; }
@@ -130,7 +131,8 @@ class JsCombineFilter : public RewriteFilter {
   std::unique_ptr<Context> context_;
   UrlMultipartEncoder encoder_;
 
-  DISALLOW_COPY_AND_ASSIGN(JsCombineFilter);
+  JsCombineFilter(const JsCombineFilter&) = delete;
+  JsCombineFilter& operator=(const JsCombineFilter&) = delete;
 };
 
 }  // namespace net_instaweb

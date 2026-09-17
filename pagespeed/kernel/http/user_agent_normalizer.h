@@ -46,7 +46,8 @@ class UserAgentNormalizer {
       const GoogleString& ua_in);
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(UserAgentNormalizer);
+  UserAgentNormalizer(const UserAgentNormalizer&) = delete;
+  UserAgentNormalizer& operator=(const UserAgentNormalizer&) = delete;
 };
 
 // This normalizes some common UA strings for Android devices

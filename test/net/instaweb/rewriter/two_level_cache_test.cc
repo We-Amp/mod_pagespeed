@@ -20,6 +20,7 @@
 // Test the interaction of L1 and L2 cache for the metadata cache.
 
 #include <utility>
+#include <memory>
 
 #include "net/instaweb/http/public/counting_url_async_fetcher.h"
 #include "net/instaweb/http/public/http_cache.h"
@@ -32,7 +33,6 @@
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/cache_interface.h"
 #include "pagespeed/kernel/base/ref_counted_ptr.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/cache/lru_cache.h"
@@ -123,7 +123,8 @@ class CustomRewriteDriverFactory : public TestRewriteDriverFactory {
   LRUCache* cache2_;
   bool use_write_through_cache_;
 
-  DISALLOW_COPY_AND_ASSIGN(CustomRewriteDriverFactory);
+  CustomRewriteDriverFactory(const CustomRewriteDriverFactory&) = delete;
+  CustomRewriteDriverFactory& operator=(const CustomRewriteDriverFactory&) = delete;
 };
 
 }  // namespace

@@ -269,15 +269,15 @@ class StatisticsTemplate : public Statistics {
   }
 
  private:
-  typedef std::vector<Var*> VarVector;
-  typedef std::map<GoogleString, Var*> VarMap;
-  typedef std::vector<UpDown*> UpDownVector;
-  typedef std::map<GoogleString, UpDown*> UpDownMap;
-  typedef std::vector<Hist*> HistVector;
-  typedef std::map<GoogleString, Hist*> HistMap;
+  using VarVector = std::vector<Var*>;
+  using VarMap = std::map<GoogleString, Var*>;
+  using UpDownVector = std::vector<UpDown*>;
+  using UpDownMap = std::map<GoogleString, UpDown*>;
+  using HistVector = std::vector<Hist*>;
+  using HistMap = std::map<GoogleString, Hist*>;
 
-  typedef std::vector<TimedVar*> TimedVarVector;
-  typedef std::map<GoogleString, TimedVar*> TimedVarMap;
+  using TimedVarVector = std::vector<TimedVar*>;
+  using TimedVarMap = std::map<GoogleString, TimedVar*>;
   VarVector variables_;
   VarMap variable_map_;
   UpDownVector up_downs_;
@@ -292,7 +292,8 @@ class StatisticsTemplate : public Statistics {
   StringVector up_down_names_;
   StringVector histogram_names_;
 
-  DISALLOW_COPY_AND_ASSIGN(StatisticsTemplate);
+  StatisticsTemplate(const StatisticsTemplate&) = delete;
+  StatisticsTemplate& operator=(const StatisticsTemplate&) = delete;
 };
 
 // Helper class to create Variable interface implementations given a
@@ -323,7 +324,8 @@ class VarTemplate : public Variable {
  private:
   Impl impl_;
 
-  DISALLOW_COPY_AND_ASSIGN(VarTemplate);
+  VarTemplate(const VarTemplate&) = delete;
+  VarTemplate& operator=(const VarTemplate&) = delete;
 };
 
 // Helper class to create UpDownCounter interface implementations given a
@@ -346,7 +348,8 @@ class UpDownTemplate : public UpDownCounter {
  private:
   Impl impl_;
 
-  DISALLOW_COPY_AND_ASSIGN(UpDownTemplate);
+  UpDownTemplate(const UpDownTemplate&) = delete;
+  UpDownTemplate& operator=(const UpDownTemplate&) = delete;
 };
 
 // A specialization of StatisticsTemplate for implementations where the
@@ -359,10 +362,10 @@ class ScalarStatisticsTemplate
                                 TVarC> {
  public:
   // Add typedefs for template class args to make them visible to subclasses.
-  typedef VarTemplate<Impl> Var;
-  typedef UpDownTemplate<Impl> UpDown;
-  typedef HistC Hist;
-  typedef TVarC TVar;
+  using Var = VarTemplate<Impl>;
+  using UpDown = UpDownTemplate<Impl>;
+  using Hist = HistC;
+  using TVar = TVarC;
 
   ScalarStatisticsTemplate() {}
   ~ScalarStatisticsTemplate() override {}

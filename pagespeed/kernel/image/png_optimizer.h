@@ -34,10 +34,10 @@ extern "C" {
 #include <setjmp.h>
 
 #include <cstddef>
+#include <memory>
 
 #include "external/optipng/src/opngreduc/opngreduc.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/image/image_util.h"
 #include "pagespeed/kernel/image/scanline_interface.h"
@@ -87,7 +87,10 @@ struct PngCompressParams : public ScanlineWriterConfig {
 // Helper that manages the lifetime of the png_ptr and info_ptr.
 class ScopedPngStruct {
  public:
-  enum Type { READ, WRITE };
+  // Fixed underlying type: holding an out-of-range value (e.g. the death
+  // test's Type(-1)) is then defined behavior, so the constructor's
+  // type == READ || type == WRITE check — not UB — is what fires.
+  enum Type : int { READ, WRITE };
 
   ScopedPngStruct(Type type, MessageHandler* handler);
   ~ScopedPngStruct();
@@ -154,7 +157,8 @@ class PngReaderInterface {
                                    MessageHandler* handler);
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(PngReaderInterface);
+  PngReaderInterface(const PngReaderInterface&) = delete;
+  PngReaderInterface& operator=(const PngReaderInterface&) = delete;
 };
 
 // Reader for PNG-encoded data.
@@ -214,7 +218,8 @@ class PngScanlineReader : public ScanlineReaderInterface {
   bool require_opaque_;
   MessageHandler* message_handler_;
 
-  DISALLOW_COPY_AND_ASSIGN(PngScanlineReader);
+  PngScanlineReader(const PngScanlineReader&) = delete;
+  PngScanlineReader& operator=(const PngScanlineReader&) = delete;
 };
 
 class PngOptimizer {
@@ -258,7 +263,8 @@ class PngOptimizer {
   bool best_compression_;
   MessageHandler* message_handler_;
 
-  DISALLOW_COPY_AND_ASSIGN(PngOptimizer);
+  PngOptimizer(const PngOptimizer&) = delete;
+  PngOptimizer& operator=(const PngOptimizer&) = delete;
 };
 
 // Reader for PNG-encoded data.
@@ -275,7 +281,8 @@ class PngReader : public PngReaderInterface {
 
  private:
   MessageHandler* message_handler_;
-  DISALLOW_COPY_AND_ASSIGN(PngReader);
+  PngReader(const PngReader&) = delete;
+  PngReader& operator=(const PngReader&) = delete;
 };
 
 // Class PngScanlineReaderRaw decodes PNG images and outputs the raw pixel data,
@@ -331,8 +338,8 @@ class PngScanlineReaderRaw : public ScanlineReaderInterface {
   size_t bytes_per_row_;
   size_t row_;
   bool was_initialized_;
-  net_instaweb::scoped_array<png_byte> image_buffer_;
-  net_instaweb::scoped_array<png_bytep> row_pointers_;
+  std::unique_ptr<png_byte[]> image_buffer_;
+  std::unique_ptr<png_bytep[]> row_pointers_;
   std::unique_ptr<ScopedPngStruct> png_struct_;
   // png_input_ stores a pointer to the input image stream. It also keeps
   // tracking the length of data that libpng has read. It is initialized
@@ -340,7 +347,8 @@ class PngScanlineReaderRaw : public ScanlineReaderInterface {
   std::unique_ptr<ScanlineStreamInput> png_input_;
   MessageHandler* message_handler_;
 
-  DISALLOW_COPY_AND_ASSIGN(PngScanlineReaderRaw);
+  PngScanlineReaderRaw(const PngScanlineReaderRaw&) = delete;
+  PngScanlineReaderRaw& operator=(const PngScanlineReaderRaw&) = delete;
 };
 
 // Class PngScanlineWriter writes a PNG image. It supports Gray_8, RGB_888,
@@ -388,10 +396,11 @@ class PngScanlineWriter : public ScanlineWriterInterface {
   std::unique_ptr<ScopedPngStruct> png_struct_;
   bool was_initialized_;
   bool try_best_compression_;
-  net_instaweb::scoped_array<unsigned char> pixel_buffer_;
+  std::unique_ptr<unsigned char[]> pixel_buffer_;
   MessageHandler* message_handler_;
 
-  DISALLOW_COPY_AND_ASSIGN(PngScanlineWriter);
+  PngScanlineWriter(const PngScanlineWriter&) = delete;
+  PngScanlineWriter& operator=(const PngScanlineWriter&) = delete;
 };
 
 }  // namespace image_compression

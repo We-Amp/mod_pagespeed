@@ -19,7 +19,14 @@
 
 #include "pagespeed/system/loopback_route_fetcher.h"
 
-#include "apr_network_io.h"
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
+#include <netinet/in.h>
+#include <sys/socket.h>
+#endif
+
 #include "base/logging.h"
 #include "net/instaweb/http/public/async_fetch.h"
 #include "net/instaweb/http/public/request_context.h"
@@ -39,10 +46,12 @@ class MessageHandler;
 LoopbackRouteFetcher::LoopbackRouteFetcher(const RewriteOptions* options,
                                            const GoogleString& own_ip,
                                            int own_port,
+                                           const GoogleString& own_scheme,
                                            UrlAsyncFetcher* backend_fetcher)
     : options_(options),
       own_ip_(own_ip),
       own_port_(own_port),
+      own_scheme_(own_scheme),
       backend_fetcher_(backend_fetcher) {
   if (own_ip_.empty()) {
     own_ip_ = "127.0.0.1";
@@ -86,7 +95,17 @@ void LoopbackRouteFetcher::Fetch(const GoogleString& original_url,
     // Includes leading slash.
     parsed_url.PathAndLeaf().CopyToString(&path_and_leaf);
 
-    StringPiece scheme = parsed_url.Scheme();
+    // The resource URL's scheme may reflect
+    // X-Forwarded-Proto rather than the transport this server speaks on
+    // own_port_ (e.g. https page URLs synthesized from an XFP header received
+    // on a plain-http listener). The munged URL connects to own_port_, so it
+    // must use the connection's transport scheme when the port plumbed it —
+    // otherwise we attempt a TLS handshake against a plain port (or vice
+    // versa), a structurally unfetchable URL whose guaranteed failure the
+    // HTTP cache then remembers. The Host header set above keeps the original
+    // authority, so cache keys and vhost routing are unaffected.
+    StringPiece scheme =
+        own_scheme_.empty() ? parsed_url.Scheme() : StringPiece(own_scheme_);
     GoogleString port_section = "";
     if (!((own_port_ == 80 && scheme == "http") ||
           (own_port_ == 443 && scheme == "https"))) {
@@ -102,7 +121,7 @@ void LoopbackRouteFetcher::Fetch(const GoogleString& original_url,
 
     // Note that we end up with host: containing the actual URL's host, but
     // the URL containing just our IP. This is technically wrong, but the
-    // Serf fetcher will interpret it in the way we want it to --- it will
+    // The fetcher will interpret it in the way we want it to --- it will
     // connect to our IP, pass only the path portion to the host, and
     // keep the host: header matching what's in the request_headers.
   }
@@ -110,16 +129,19 @@ void LoopbackRouteFetcher::Fetch(const GoogleString& original_url,
   backend_fetcher_->Fetch(url, message_handler, fetch);
 }
 
-bool LoopbackRouteFetcher::IsLoopbackAddr(const apr_sockaddr_t* addr) {
-  if (addr->family == APR_INET) {
+bool LoopbackRouteFetcher::IsLoopbackAddr(const struct sockaddr* addr) {
+  if (addr->sa_family == AF_INET) {
+    const struct sockaddr_in* addr_v4 =
+        reinterpret_cast<const struct sockaddr_in*>(addr);
     // 127.0.0.0/8 is the IPv4 loopback.
-    // Note: is network byte order, so we can do char-wide indexing into it
-    // consistently (but not look at the whole thing).
+    // Network byte order, so char-wide indexing works consistently.
     const char* ipbytes =
-        reinterpret_cast<const char*>(&addr->sa.sin.sin_addr.s_addr);
+        reinterpret_cast<const char*>(&addr_v4->sin_addr.s_addr);
     return (ipbytes[0] == 127);
-  } else if (addr->family == APR_INET6) {
-    const in6_addr& addr_v6 = addr->sa.sin6.sin6_addr;
+  } else if (addr->sa_family == AF_INET6) {
+    const struct sockaddr_in6* addr_v6_sock =
+        reinterpret_cast<const struct sockaddr_in6*>(addr);
+    const struct in6_addr& addr_v6 = addr_v6_sock->sin6_addr;
 
     // There are a couple of ways we can see loopbacks in IPv6: as the
     // proper IPv6 loopback, ::1, or as "IPv4-compatible IPv6 address"

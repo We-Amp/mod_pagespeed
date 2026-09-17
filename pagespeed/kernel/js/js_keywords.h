@@ -20,6 +20,8 @@
 #ifndef PAGESPEED_KERNEL_JS_JS_KEYWORDS_H_
 #define PAGESPEED_KERNEL_JS_JS_KEYWORDS_H_
 
+#include <cstdint>
+
 #include "pagespeed/kernel/base/string_util.h"
 
 namespace net_instaweb {
@@ -30,7 +32,7 @@ namespace pagespeed {
 
 class JsKeywords {
  public:
-  enum Type {
+  enum Type : std::uint8_t {
     // literals
     kNull,
     kTrue,
@@ -84,21 +86,30 @@ class JsKeywords {
     kStatic,
     kYield,
 
-    // Sentinel value for gperf.
+    // contextual keyword (ES2017 async functions)
+    kAwait,
+
+    // Sentinel value.
     kNotAKeyword,
 
-    // Other types of lexical tokens; returned by lexer, but not gperf.
+    // Other types of lexical tokens; returned by lexer, but not keyword lookup.
     kComment,        // A block or line comment (not including the linebreak).
     kWhitespace,     // Whitespace not containing any linebreaks.
     kLineSeparator,  // Whitespace with linebreaks, but no semicolon insertion.
     kSemiInsert,     // Whitespace that triggers semicolon insertion.
     kRegex,          // A regex literal, such as /foo/i or /a+b*/
     kStringLiteral,  // A string literal, such as 'foo' or "bar"
-    kNumber,         // A numeric literal, such as 3.5 or 017 or .2e+10
-    kOperator,       // An operator or symbol, such as && or <<= or (
-    kIdentifier,     // An identifier (variable name, label, etc).
-    kEndOfInput,     // End of input was reached without errors.
-    kError           // A syntax error occurred.
+    kTemplateLiteral,  // A chunk of an ES6 template literal.  One of: a
+                       // whole no-substitution template `abc`; a template
+                       // head `abc${; a template middle }abc${; or a
+                       // template tail }abc`.  The JavaScript inside each
+                       // ${...} interpolation is tokenized separately as
+                       // ordinary tokens between the chunks.
+    kNumber,           // A numeric literal, such as 3.5 or 017 or .2e+10
+    kOperator,         // An operator or symbol, such as && or <<= or (
+    kIdentifier,       // An identifier (variable name, label, etc).
+    kEndOfInput,       // End of input was reached without errors.
+    kError             // A syntax error occurred.
   };
 
   static bool IsAKeyword(Type type) { return type < kNotAKeyword; }
@@ -108,7 +119,7 @@ class JsKeywords {
   // but keywords such as 'while' cannot.
   static bool CanKeywordPrecedeRegEx(const StringPiece& name);
 
-  enum Flag {
+  enum Flag : std::uint8_t {
     kNone,
     kIsValue,
     kIsReservedNonStrict,

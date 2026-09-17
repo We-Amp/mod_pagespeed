@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<!--
+  SPDX-License-Identifier: Apache-2.0
+  Copyright (c) 2024-2026 We-Amp B.V.
+-->
+
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>DNS Prefetch Test</title>
+    <link rel="stylesheet" href="../styles/main.css">
+</head>
+<body>
+    <h1>DNS Prefetch Test</h1>
+
+    <p>This page includes resources from external domains.
+       PageSpeed should insert DNS prefetch hints for these domains.</p>
+
+    <h2>External Resources</h2>
+
+    <!-- External CSS -->
+    <link rel="stylesheet" href="https://cdn.example.com/styles/theme.css">
+
+    <!-- External images -->
+    <img src="https://images.example.com/photo1.jpg" alt="External image 1">
+    <img src="https://images.example.com/photo2.jpg" alt="External image 2">
+    <img src="https://static.example.org/logo.png" alt="External logo">
+
+    <!-- External scripts -->
+    <script src="https://scripts.example.com/analytics.js"></script>
+    <script src="https://api.example.net/widget.js"></script>
+
+    <p>Check the page source for dns-prefetch link tags in the head.</p>
+</body>
+</html>

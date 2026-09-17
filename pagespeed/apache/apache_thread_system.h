@@ -37,7 +37,8 @@ class ApacheThreadSystem : public SystemThreadSystem {
   Timer* NewTimer() override;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(ApacheThreadSystem);
+  ApacheThreadSystem(const ApacheThreadSystem&) = delete;
+  ApacheThreadSystem& operator=(const ApacheThreadSystem&) = delete;
 };
 
 }  // namespace net_instaweb

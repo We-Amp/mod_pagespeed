@@ -20,6 +20,8 @@
 #ifndef PAGESPEED_APACHE_FETCH_H_
 #define PAGESPEED_APACHE_FETCH_H_
 
+#include <memory>
+
 #include "net/instaweb/http/public/async_fetch.h"
 #include "net/instaweb/http/public/request_context.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
@@ -27,7 +29,6 @@
 #include "pagespeed/apache/apache_writer.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_annotations.h"
@@ -63,7 +64,7 @@ class ApacheFetch : public AsyncFetch {
   // send that to the client.  So for ipro we suppress reporting errors
   // in this flow.
   //
-  // TODO(jmarantz): consider allowing serf fetches in ipro when running as
+  // TODO(jmarantz): consider allowing fetches in ipro when running as
   // a reverse-proxy.
   void set_handle_error(bool x) { handle_error_ = x; }
 
@@ -78,7 +79,31 @@ class ApacheFetch : public AsyncFetch {
 
   bool status_ok() const { return status_ok_; }
 
+  // Whether this fetch has already sent response headers (and possibly body
+  // bytes) to the client.  Once true, the caller must not emit a response of
+  // its own (e.g. an error page), even if status_ok() is false:
+  // SendOutHeaders() can commit a 403 for a response that lacked a
+  // Content-Type regardless of handle_error.  Only meaningful on the request
+  // thread; for the buffered case only after Wait() has returned.
+  bool response_committed() const { return headers_sent_; }
+
   bool IsCachedResultValid(const ResponseHeaders& headers) override
+      LOCKS_EXCLUDED(scheduler_->mutex());
+
+  // Zero-copy ALIASED serve (CycloneZeroCopyServe).  Called on
+  // the request thread by the '.pagespeed.' cache-hit serve
+  // (rewrite_driver.cc CacheCallback::DeliverDone) with a body StringPiece
+  // aliasing a Cyclone mmap region and its pinning keepalive.  When the
+  // Apache opt-in gate and the verbatim-serve guards hold, the body goes
+  // out as a PAGESPEED_MMAP bucket that revalidates the read lease before
+  // every send and copies out on setaside (apache_mmap_bucket.h);
+  // otherwise the bytes are de-aliased here by a verified copy
+  // (copy-then-verify) and served through the classic Write path.  A torn
+  // borrow (epoch moved) fails the serve closed instead of completing a
+  // corrupt body.
+  bool WriteMapped(const StringPiece& mmap_sp,
+                   const MappedSharedString& keepalive,
+                   MessageHandler* handler) override
       LOCKS_EXCLUDED(scheduler_->mutex());
 
   // By default ApacheFetch is not intended for proxying third party content.
@@ -107,6 +132,12 @@ class ApacheFetch : public AsyncFetch {
   bool wait_called_;
   bool handle_error_;
   bool squelch_output_;
+  // Whether SendOutHeaders() actually handed headers to the ApacheWriter.
+  // False when handle_error_ is false and the response was an error: in
+  // that case the caller answers the request itself and we must not write
+  // anything (ApacheWriter requires OutputHeaders() before Write()).
+  // Only read/written on the request thread.
+  bool headers_sent_;
   bool status_ok_;
   bool is_proxy_;
   bool buffered_;
@@ -115,7 +146,8 @@ class ApacheFetch : public AsyncFetch {
   RewriteDriver* driver_;
   Scheduler* scheduler_;
 
-  DISALLOW_COPY_AND_ASSIGN(ApacheFetch);
+  ApacheFetch(const ApacheFetch&) = delete;
+  ApacheFetch& operator=(const ApacheFetch&) = delete;
 };
 
 }  // namespace net_instaweb

@@ -69,7 +69,8 @@ class NullCondvar : public ThreadSystem::Condvar {
   StringVector actions_;
   TimedWaitCallback* timed_wait_callback_;
 
-  DISALLOW_COPY_AND_ASSIGN(NullCondvar);
+  NullCondvar(const NullCondvar&) = delete;
+  NullCondvar& operator=(const NullCondvar&) = delete;
 };
 
 // Mock condvar-capable mutex.  Note that this does no actual locking,
@@ -84,7 +85,8 @@ class NullCondvarCapableMutex : public ThreadSystem::CondvarCapableMutex {
   NullCondvar* NewCondvar() override;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(NullCondvarCapableMutex);
+  NullCondvarCapableMutex(const NullCondvarCapableMutex&) = delete;
+  NullCondvarCapableMutex& operator=(const NullCondvarCapableMutex&) = delete;
 };
 
 // Mock thread system.  This can create mutexes that do no locking, condvars
@@ -109,7 +111,8 @@ class NullThreadSystem : public ThreadSystem {
  private:
   int thread_id_;
 
-  DISALLOW_COPY_AND_ASSIGN(NullThreadSystem);
+  NullThreadSystem(const NullThreadSystem&) = delete;
+  NullThreadSystem& operator=(const NullThreadSystem&) = delete;
 };
 
 }  // namespace net_instaweb

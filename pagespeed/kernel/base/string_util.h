@@ -22,6 +22,7 @@
 
 #include <cctype>  // for isascii
 #include <cstddef>
+#include <cstdio>   // std::snprintf (for JsonEscape)
 #include <cstdlib>  // NOLINT
 #include <iostream>
 #include <map>
@@ -98,7 +99,7 @@ class StringPiece : public absl::string_view {
 void StringAppendV(std::string* dst, const char* format, va_list ap);
 
 // XXX(oschaaf): check(!!)
-typedef size_t stringpiece_ssize_type;
+using stringpiece_ssize_type = size_t;
 
 namespace strings {
 using absl::EndsWith;
@@ -108,22 +109,23 @@ using absl::StartsWith;
 // Quick macro to get the size of a static char[] without trailing '\0'.
 // Note: Cannot be used for char*, std::string, etc.
 
+// Match Envoy's definition exactly to avoid redefinition warnings
 #ifndef STATIC_STRLEN
-#define STATIC_STRLEN(static_string) (arraysize(static_string) - 1)
+#define STATIC_STRLEN(X) (sizeof(X) - 1)
 #endif
 namespace net_instaweb {
 
 struct StringCompareInsensitive;
 
-typedef std::map<GoogleString, GoogleString> StringStringMap;
-typedef std::map<GoogleString, int> StringIntMap;
-typedef std::set<GoogleString> StringSet;
-typedef std::set<GoogleString, StringCompareInsensitive> StringSetInsensitive;
-typedef std::vector<GoogleString> StringVector;
-typedef std::vector<StringPiece> StringPieceVector;
-typedef std::vector<const GoogleString*> ConstStringStarVector;
-typedef std::vector<GoogleString*> StringStarVector;
-typedef std::vector<const char*> CharStarVector;
+using StringStringMap = std::map<GoogleString, GoogleString>;
+using StringIntMap = std::map<GoogleString, int>;
+using StringSet = std::set<GoogleString>;
+using StringSetInsensitive = std::set<GoogleString, StringCompareInsensitive>;
+using StringVector = std::vector<GoogleString>;
+using StringPieceVector = std::vector<StringPiece>;
+using ConstStringStarVector = std::vector<const GoogleString*>;
+using StringStarVector = std::vector<GoogleString*>;
+using CharStarVector = std::vector<const char*>;
 
 inline GoogleString IntegerToString(const int i) { return absl::StrCat(i); }
 
@@ -352,6 +354,15 @@ bool StringEqualConcat(StringPiece str, StringPiece first, StringPiece second);
 // See http://codahale.com/a-lesson-in-timing-attacks/
 int CountCharacterMismatches(StringPiece s1, StringPiece s2);
 
+// Constant-time string comparison to prevent timing attacks.
+// Returns true if both strings are equal in length and content.
+// Unlike standard comparison operators, this function always compares all
+// bytes in constant time (relative to string length) to avoid leaking
+// information about string content through timing side channels.
+// Use this for comparing security-sensitive values like tokens, signatures,
+// or passwords.
+bool ConstantTimeCompare(StringPiece a, StringPiece b);
+
 struct CharStarCompareInsensitive {
   bool operator()(const char* s1, const char* s2) const {
     return (StringCaseCompare(s1, s2) < 0);
@@ -454,6 +465,50 @@ inline bool IsAscii(char c) { return isascii(static_cast<unsigned char>(c)); }
 // Tests if c is a standard (non-control) ASCII char 0x20-0x7E.
 // Note: This does not include TAB (0x09), LF (0x0A) or CR (0x0D).
 inline bool IsNonControlAscii(char c) { return ('\x20' <= c) && (c <= '\x7E'); }
+
+// Escape a string for embedding in JSON. Handles all required JSON escapes
+// (RFC 8259 §7) plus control characters as \u00xx.
+// Canonical source: pagespeed-optimizer lib/base/string_util.h.
+inline GoogleString JsonEscape(StringPiece s) {
+  GoogleString out;
+  out.reserve(s.size());
+  for (char c : s) {
+    switch (c) {
+      case '"':
+        out.append("\\\"");
+        break;
+      case '\\':
+        out.append("\\\\");
+        break;
+      case '\b':
+        out.append("\\b");
+        break;
+      case '\f':
+        out.append("\\f");
+        break;
+      case '\n':
+        out.append("\\n");
+        break;
+      case '\r':
+        out.append("\\r");
+        break;
+      case '\t':
+        out.append("\\t");
+        break;
+      default:
+        if (static_cast<unsigned char>(c) < 0x20) {
+          char buf[8];
+          std::snprintf(buf, sizeof(buf), "\\u%04x",
+                        static_cast<unsigned>(static_cast<unsigned char>(c)));
+          out.append(buf);
+        } else {
+          out.push_back(c);
+        }
+        break;
+    }
+  }
+  return out;
+}
 
 }  // namespace net_instaweb
 

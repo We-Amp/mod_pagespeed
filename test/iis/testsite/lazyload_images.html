@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<!--
+  SPDX-License-Identifier: Apache-2.0
+  Copyright (c) 2024-2026 We-Amp B.V.
+-->
+
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Lazyload Images Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        h1 { color: #333; }
+        .image-gallery { display: flex; flex-wrap: wrap; gap: 20px; }
+        .image-item { text-align: center; margin-bottom: 20px; }
+        .image-item img { border: 1px solid #ddd; padding: 5px; }
+        .spacer { height: 1000px; background: linear-gradient(#f0f0f0, #e0e0e0); margin: 20px 0; }
+        .spacer-text { padding: 20px; text-align: center; color: #666; }
+    </style>
+</head>
+<body>
+    <h1>Lazyload Images Test Page</h1>
+    <p>This page tests the lazyload_images filter which defers loading of below-the-fold images.</p>
+
+    <!-- Above the fold image - may not be lazyloaded -->
+    <div class="image-item">
+        <h2>Above the Fold</h2>
+        <img src="images/pagespeed_logo.png" alt="PageSpeed Logo" width="200" height="50">
+        <p>This image is above the fold.</p>
+    </div>
+
+    <!-- Spacer to push images below the fold -->
+    <div class="spacer">
+        <div class="spacer-text">
+            <p>Scroll down to see more images...</p>
+            <p>The images below should be lazy-loaded.</p>
+        </div>
+    </div>
+
+    <!-- Below the fold images - should be lazyloaded -->
+    <div class="image-gallery">
+        <div class="image-item">
+            <h3>Image with src</h3>
+            <img src="images/Puzzle2.jpg" alt="Puzzle Image 2" width="300" height="200">
+            <p>Basic image with src attribute.</p>
+        </div>
+
+        <div class="image-item">
+            <h3>Image with srcset</h3>
+            <img src="images/Puzzle2.jpg"
+                 srcset="images/Puzzle.jpg 2x"
+                 alt="Puzzle with srcset"
+                 width="300" height="200">
+            <p>Responsive image with srcset attribute.</p>
+        </div>
+
+        <div class="image-item">
+            <h3>Beach Photo</h3>
+            <img src="images/Beach.jpg" alt="Beach" width="400" height="300">
+            <p>A JPEG beach photo.</p>
+        </div>
+
+        <div class="image-item">
+            <h3>Animated GIF</h3>
+            <img src="images/IronChef2.gif" alt="Iron Chef Animation" width="100" height="100">
+            <p>A GIF animation.</p>
+        </div>
+    </div>
+
+    <!-- Another spacer -->
+    <div class="spacer">
+        <div class="spacer-text">
+            <p>More content below...</p>
+        </div>
+    </div>
+
+    <!-- More images even further down -->
+    <div class="image-gallery">
+        <div class="image-item">
+            <h3>Additional Image 1</h3>
+            <img src="images/Puzzle.jpg" alt="Puzzle 1" width="250" height="200">
+            <p>Another puzzle image.</p>
+        </div>
+
+        <div class="image-item">
+            <h3>Additional Image 2</h3>
+            <img src="images/BikeCrashIcn.png" alt="Bike Icon" width="150" height="150">
+            <p>A PNG icon image.</p>
+        </div>
+
+        <div class="image-item">
+            <h3>Additional Image 3</h3>
+            <img src="images/Cuppa.png" alt="Cup" width="200" height="200">
+            <p>A PNG cup image.</p>
+        </div>
+
+        <div class="image-item">
+            <h3>Image with multiple srcset</h3>
+            <img src="images/Beach.jpg"
+                 srcset="images/Beach.jpg 1x, images/Puzzle.jpg 2x"
+                 sizes="(max-width: 600px) 300px, 400px"
+                 alt="Responsive Beach Photo"
+                 width="400" height="300">
+            <p>Image with multiple srcset descriptors.</p>
+        </div>
+    </div>
+
+    <footer>
+        <p>End of lazyload test page.</p>
+    </footer>
+</body>
+</html>

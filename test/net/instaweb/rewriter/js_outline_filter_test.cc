@@ -162,9 +162,6 @@ TEST_F(JsOutlineFilterTest, OutlineScriptWithBase) {
 
 // Negative test.
 TEST_F(JsOutlineFilterTest, NoOutlineScript) {
-  GoogleString file_prefix = GTestTempDir() + "/no_outline";
-  GoogleString url_prefix = "http://mysite/no_outline";
-
   options()->SoftEnableFilterForTesting(RewriteOptions::kOutlineCss);
   SetupOutliner();
 
@@ -177,6 +174,40 @@ TEST_F(JsOutlineFilterTest, NoOutlineScript) {
       "  <!-- Script ends here -->\n"
       "</head>";
   ValidateNoChanges("no_outline_script", html_input);
+}
+
+// Module scripts are never outlined: outlining would move import resolution
+// from the document base URL to the outlined script URL and create an
+// import.meta.url that did not exist.
+TEST_F(JsOutlineFilterTest, DoNotOutlineModuleScript) {
+  SetupOutliner();
+  ValidateNoChanges("module_not_outlined",
+                    "<script type=\"module\">export const x = 1;</script>");
+}
+
+TEST_F(JsOutlineFilterTest, DoNotOutlineModuleScriptDebug) {
+  SetupDebug(
+      "<!--JS not outlined: module scripts are never outlined "
+      "(import resolution would change)-->");
+  Parse("module_not_outlined_debug",
+        "<script type=\"module\">export const x = 1;</script>");
+  EXPECT_HAS_SUBSTR(StrCat("<script type=\"module\">export const x = 1;"
+                           "</script>",
+                           debug_message_),
+                    output_buffer_);
+  EXPECT_HAS_SUBSTR(debug_suffix_, output_buffer_);
+}
+
+// Browsers ignore integrity= on an inline script, but outlining clones the
+// attribute onto the new external element, where it is suddenly enforced
+// against the outlined bytes. A hash that does not match those bytes exactly
+// (harmless while inline) would make the browser block the script, so such
+// scripts are left inline. The attribute name match is ASCII-case-insensitive.
+TEST_F(JsOutlineFilterTest, DoNotOutlineIntegrityScript) {
+  SetupOutliner();
+  ValidateNoChanges("integrity_not_outlined",
+                    "<script integrity=\"sha384-x\">alert('foo');</script>"
+                    "<script Integrity=\"sha384-y\">alert('bar');</script>");
 }
 
 // By default we succeed at outlining.

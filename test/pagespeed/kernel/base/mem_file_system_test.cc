@@ -19,12 +19,13 @@
 
 // Unit-test the in-memory filesystem
 
+#include <memory>
+
 #include "test/pagespeed/kernel/base/mem_file_system.h"
 
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/file_system.h"
 #include "pagespeed/kernel/base/google_message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_system.h"
@@ -62,7 +63,8 @@ class MemFileSystemTest : public FileSystemTest {
   MemFileSystem mem_file_system_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(MemFileSystemTest);
+  MemFileSystemTest(const MemFileSystemTest&) = delete;
+  MemFileSystemTest& operator=(const MemFileSystemTest&) = delete;
 };
 
 // Write a named file, then read it.
@@ -76,6 +78,8 @@ TEST_F(MemFileSystemTest, TestAppend) { TestAppend(); }
 
 // Write a temp file, rename it, then read it.
 TEST_F(MemFileSystemTest, TestRename) { TestRename(); }
+
+TEST_F(MemFileSystemTest, TestRenameReplace) { TestRenameReplace(); }
 
 // Write a file and successfully delete it.
 TEST_F(MemFileSystemTest, TestRemove) { TestRemove(); }
@@ -136,12 +140,6 @@ TEST_F(MemFileSystemTest, TestSizeOld) {
   EXPECT_TRUE(file_system()->Size(filename2, &size, &handler_));
   EXPECT_EQ(10, size);
 }
-
-TEST_F(MemFileSystemTest, TestLock) { TestLock(); }
-
-TEST_F(MemFileSystemTest, TestLockTimeout) { TestLockTimeout(); }
-
-TEST_F(MemFileSystemTest, TestLockBumping) { TestLockBumping(); }
 
 // Since this filesystem doesn't support directories, we skip these tests:
 // TestIsDir

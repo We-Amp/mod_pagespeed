@@ -20,6 +20,7 @@
 #ifndef NET_INSTAWEB_REWRITER_PUBLIC_REWRITE_CONTEXT_H_
 #define NET_INSTAWEB_REWRITER_PUBLIC_REWRITE_CONTEXT_H_
 
+#include <memory>
 #include <set>
 #include <vector>
 
@@ -31,12 +32,11 @@
 #include "net/instaweb/rewriter/public/resource.h"
 #include "net/instaweb/rewriter/public/resource_slot.h"
 #include "net/instaweb/rewriter/public/rewrite_result.h"
+#include "net/instaweb/rewriter/public/schedule_rewrite_callback.h"
 #include "net/instaweb/rewriter/public/server_context.h"
-#include "pagespeed/controller/schedule_rewrite_callback.h"
 #include "pagespeed/kernel/base/atomic_bool.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/function.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/http/google_url.h"
@@ -183,7 +183,9 @@ class RewriteContext {
                       CacheLookupResult* result) = 0;
 
    private:
-    DISALLOW_COPY_AND_ASSIGN(CacheLookupResultCallback);
+    CacheLookupResultCallback(const CacheLookupResultCallback&) = delete;
+    CacheLookupResultCallback& operator=(const CacheLookupResultCallback&) =
+        delete;
   };
 
   // Takes ownership of resource_context, which must be NULL or
@@ -268,6 +270,13 @@ class RewriteContext {
   // Returns true if this is a child rewriter and its parent has the given
   // id.
   bool IsNestedIn(StringPiece id) const;
+
+  // Returns true if any ancestor of this context is the in-place resource
+  // optimization context.  In-place responses are cached and served under a
+  // request-independent key with no Vary: header, so rewrites reached through
+  // this chain must not consult per-request state (such as user-agent derived
+  // request properties) when producing output bytes.
+  bool HasInPlaceRewriteAncestor() const;
 
   // Checks to make sure that partitions_ is not frozen when it is
   // about to be modified, calling LOG(DFATAL) if there is a problem.
@@ -608,17 +617,18 @@ class RewriteContext {
   // expected contents.
   virtual bool FailOnHashMismatch() const { return false; }
 
-  // Whether the CentralController should be used to schedule this rewrite.
-  // Expensive RewriteContexts (CSS, Images) should override this to return
-  // true, allowing more intelligent prioritization.
-  virtual bool ScheduleViaCentralController() { return false; }
+  // Whether the per-key rewrite scheduler (NamedLockScheduleRewriteController)
+  // should be used to schedule this rewrite. Expensive RewriteContexts (CSS,
+  // Images) should override this to return true, allowing more intelligent
+  // prioritization.
+  virtual bool ScheduleViaNamedLockController() { return false; }
 
-  // In general, ScheduleViaCentralController() is ignored for nested Contexts.
-  // However, in the case of (at least) IPRO we need to schedule the inner
-  // context via the Controller. This can be overridden by such contexts, which
-  // are DHCHECKed to have at most one nested context.
+  // In general, ScheduleViaNamedLockController() is ignored for nested
+  // Contexts. However, in the case of (at least) IPRO we need to schedule the
+  // inner context via the scheduler. This can be overridden by such contexts,
+  // which are DHCHECKed to have at most one nested context.
   // See longer comment in ObtainLockForCreation implementation.
-  virtual bool ScheduleNestedContextViaCentalController() const {
+  virtual bool ScheduleNestedContextViaNamedLockController() const {
     return false;
   }
 
@@ -627,7 +637,7 @@ class RewriteContext {
   void ObtainLockForCreation(ServerContext* server_context, Function* callback);
 
   // Release whichever lock was obtained above. succeeded will be used to
-  // inform the CentralController if it should retry (when success = false). If
+  // inform the rewrite scheduler if it should retry (when success = false). If
   // this is not explicitly called, the lock will be released when "this" is
   // destroyed.
   void ReleaseCreationLock(bool succeeded);
@@ -676,7 +686,10 @@ class RewriteContext {
   void OutputCacheHit(bool write_partitions);
   void OutputCacheRevalidate(const InputInfoStarVector& to_revalidate);
   void OutputCacheMiss();
-  void ResourceFetchDone(bool success, ResourcePtr resource, int slot_index);
+  void ResourceFetchDone(
+      bool success,
+      ResourcePtr resource,  // NOLINT(performance-unnecessary-value-param)
+      int slot_index);
   void ResourceRevalidateDone(InputInfo* input_info, bool success);
   void LogMetadataCacheInfo(bool cache_ok, bool can_revalidate);
 
@@ -1035,13 +1048,14 @@ class RewriteContext {
   // Map to dedup partitions other dependency field.
   StringIntMap other_dependency_map_;
 
-  // Transaction context from CentralController, if
-  // ScheduleViaCentralController() returned true. Communicates back to
-  // CentralController on destruction, or when explicitly invoked.
+  // Transaction context from the rewrite scheduler, if
+  // ScheduleViaNamedLockController() returned true. Communicates back to
+  // the scheduler on destruction, or when explicitly invoked.
   std::unique_ptr<ScheduleRewriteContext> schedule_rewrite_context_;
 
   Variable* const num_rewrites_abandoned_for_lock_contention_;
-  DISALLOW_COPY_AND_ASSIGN(RewriteContext);
+  RewriteContext(const RewriteContext&) = delete;
+  RewriteContext& operator=(const RewriteContext&) = delete;
 };
 
 }  // namespace net_instaweb

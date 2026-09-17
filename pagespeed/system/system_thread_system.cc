@@ -19,7 +19,12 @@
 
 #include "pagespeed/system/system_thread_system.h"
 
-#include "apr_thread_proc.h"  // NOLINT
+#ifndef _WIN32
+
+#include <pthread.h>
+
+#include <csignal>
+
 #include "base/logging.h"
 
 namespace net_instaweb {
@@ -38,7 +43,9 @@ void SystemThreadSystem::BeforeThreadRunHook() {
   // way.  For example, we don't want Apache's use of SIGTERM to cause the
   // 'delete everything' handler to be run everywhere.  (This is only needed for
   // prefork, threaded MPMs do it already.)
-  apr_setup_signal_thread();
+  sigset_t set;
+  sigfillset(&set);
+  pthread_sigmask(SIG_SETMASK, &set, nullptr);
 
   // If this fails you can get a backtrace from gdb by setting a breakpoint on
   // "pthread_create".
@@ -46,3 +53,5 @@ void SystemThreadSystem::BeforeThreadRunHook() {
 }
 
 }  // namespace net_instaweb
+
+#endif  // !_WIN32

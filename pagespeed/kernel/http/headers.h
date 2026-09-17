@@ -21,11 +21,11 @@
 #define PAGESPEED_KERNEL_HTTP_HEADERS_H_
 
 #include <map>
+#include <memory>
 #include <utility>
 
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/proto_util.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 
@@ -41,10 +41,17 @@ template <class Proto>
 class Headers {
  public:
   // typedef's for manipulating the cookie multimap.
-  typedef std::pair<StringPiece, StringPiece> ValueAndAttributes;
-  typedef std::multimap<StringPiece, ValueAndAttributes> CookieMultimap;
-  typedef std::multimap<StringPiece, ValueAndAttributes>::const_iterator
-      CookieMultimapConstIter;
+  using ValueAndAttributes = std::pair<StringPiece, StringPiece>;
+  using CookieMultimap = std::multimap<StringPiece, ValueAndAttributes>;
+  using CookieMultimapConstIter =
+      std::multimap<StringPiece, ValueAndAttributes>::const_iterator;
+
+  // Maximum number of headers we will store.  A response carrying tens of
+  // thousands of small headers would otherwise exhaust memory via unbounded
+  // growth of the protobuf repeated field (a DoS via crafted upstream
+  // content).  Add() silently drops headers beyond this cap.  This is far
+  // above what any legitimate HTTP message needs.
+  static const int kMaxHeaders = 1000;
 
   Headers();
   virtual ~Headers();
@@ -97,6 +104,14 @@ class Headers {
 
   // Is value one of the values in Lookup(name)?
   bool HasValue(const StringPiece& name, const StringPiece& value) const;
+
+  // Like HasValue, but compares the value case-insensitively. For header
+  // fields whose values are RFC 9110 tokens (e.g. the field names listed in
+  // a Vary value), token comparison is case-insensitive, and the byte-exact
+  // HasValue above silently misses legal spellings. Callers that
+  // compare opaque or case-significant values must keep using HasValue.
+  bool HasValueCaseInsensitive(const StringPiece& name,
+                               const StringPiece& value) const;
 
   // NumAttributeNames is also const but not thread-safe.
   int NumAttributeNames() const;
@@ -242,7 +257,8 @@ class Headers {
   // being set multiple times though we don't necessarily handle that correctly.
   mutable std::unique_ptr<CookieMultimap> cookies_;
 
-  DISALLOW_COPY_AND_ASSIGN(Headers);
+  Headers(const Headers&) = delete;
+  Headers& operator=(const Headers&) = delete;
 };
 
 }  // namespace net_instaweb

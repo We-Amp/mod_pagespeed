@@ -348,8 +348,17 @@ GoogleString CachingHeaders::GenerateDisabledCacheControl() {
         StringPiece name = name_value[0];
         TrimWhitespace(&name);
         // See http://www.w3.org/Protocols/rfc2616/rfc2616-sec14.html#sec14.9.1
+        //
+        // s-maxage must not survive here either: it overrides max-age for
+        // shared caches, so preserving it would invite a shared cache to
+        // hold a response we are explicitly disabling caching for. This
+        // path runs on rewritten HTML, whose embedded .pagespeed. URLs can
+        // commit to a content variant chosen for the requesting client; a
+        // shared cache serving one client's HTML to another client defeats
+        // that (see the max-age=0/no-cache/s-maxage=10 interaction).
         if (!StringCaseEqual(name, HttpAttributes::kNoCache) &&
             !StringCaseEqual(name, HttpAttributes::kMaxAge) &&
+            !StringCaseEqual(name, HttpAttributes::kSMaxAge) &&
             !StringCaseEqual(name, HttpAttributes::kPrivate) &&
             !StringCaseEqual(name, HttpAttributes::kPublic)) {
           StrAppend(&new_cache_control, ", ", pieces[i]);

@@ -106,7 +106,8 @@ class Function {
   bool cancel_called_;
   bool delete_after_callback_;
 
-  DISALLOW_COPY_AND_ASSIGN(Function);
+  Function(const Function&) = delete;
+  Function& operator=(const Function&) = delete;
 };
 
 // A Macro is recommended for making a readable call to a pointer-to-member
@@ -129,7 +130,7 @@ class MemberFunctionBase : public Function {
 template <class C>
 class MemberFunction0 : public MemberFunctionBase<C> {
  public:
-  typedef void (C::*Func)();
+  using Func = void (C::*)();
 
   // Constructor supplying a Run method, but no Cancel method.
   MemberFunction0(Func f, C* c)
@@ -156,7 +157,7 @@ class MemberFunction0 : public MemberFunctionBase<C> {
 template <class C, typename T1>
 class MemberFunction1 : public MemberFunctionBase<C> {
  public:
-  typedef void (C::*Func)(T1);
+  using Func = void (C::*)(T1);
 
   // Constructor supplying a Run method, but no Cancel method.
   MemberFunction1(Func f, C* c, T1 v1)
@@ -184,7 +185,7 @@ class MemberFunction1 : public MemberFunctionBase<C> {
 template <class C, typename T1, typename T2>
 class MemberFunction2 : public MemberFunctionBase<C> {
  public:
-  typedef void (C::*Func)(T1, T2);
+  using Func = void (C::*)(T1, T2);
 
   // Constructor supplying a Run method, but no Cancel method.
   MemberFunction2(Func f, C* c, T1 v1, T2 v2)
@@ -213,7 +214,7 @@ class MemberFunction2 : public MemberFunctionBase<C> {
 template <class C, typename T1, typename T2, typename T3>
 class MemberFunction3 : public MemberFunctionBase<C> {
  public:
-  typedef void (C::*Func)(T1, T2, T3);
+  using Func = void (C::*)(T1, T2, T3);
 
   // Constructor supplying a Run method, but no Cancel method.
   MemberFunction3(Func f, C* c, T1 v1, T2 v2, T3 v3)
@@ -253,7 +254,7 @@ class MemberFunction3 : public MemberFunctionBase<C> {
 template <class C, typename T1, typename T2, typename T3, typename T4>
 class MemberFunction4 : public MemberFunctionBase<C> {
  public:
-  typedef void (C::*Func)(T1, T2, T3, T4);
+  using Func = void (C::*)(T1, T2, T3, T4);
 
   // Constructor supplying a Run method, but no Cancel method.
   MemberFunction4(Func f, C* c, T1 v1, T2 v2, T3 v3, T4 v4)

@@ -67,7 +67,8 @@ class SimpleTextFilter : public RewriteFilter {
     virtual ~Rewriter();
 
    private:
-    DISALLOW_COPY_AND_ASSIGN(Rewriter);
+    Rewriter(const Rewriter&) = delete;
+    Rewriter& operator=(const Rewriter&) = delete;
   };
 
   typedef RefCountedPtr<Rewriter> RewriterPtr;
@@ -91,7 +92,8 @@ class SimpleTextFilter : public RewriteFilter {
    private:
     RewriterPtr rewriter_;
 
-    DISALLOW_COPY_AND_ASSIGN(Context);
+    Context(const Context&) = delete;
+    Context& operator=(const Context&) = delete;
   };
 
   SimpleTextFilter(Rewriter* rewriter, RewriteDriver* driver);
@@ -115,7 +117,8 @@ class SimpleTextFilter : public RewriteFilter {
  private:
   RewriterPtr rewriter_;
 
-  DISALLOW_COPY_AND_ASSIGN(SimpleTextFilter);
+  SimpleTextFilter(const SimpleTextFilter&) = delete;
+  SimpleTextFilter& operator=(const SimpleTextFilter&) = delete;
 };
 
 }  // namespace net_instaweb

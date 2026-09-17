@@ -55,7 +55,10 @@ if $host_is_32bit && ! $build_32bit; then
 fi
 
 source net/instaweb/public/VERSION
-build_version="$MAJOR.$MINOR.$BUILD.$PATCH"
+build_version="$MAJOR.$MINOR.$BUILD"
+if [ -n "${PRERELEASE:-}" ]; then
+  build_version="${build_version}-${PRERELEASE}"
+fi
 
 release_dir="release/${build_version}"
 if $build_32bit; then

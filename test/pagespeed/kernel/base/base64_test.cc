@@ -106,7 +106,8 @@ class Base64Test : public testing::Test {
   MimeBase64Codec mime64_codec_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(Base64Test);
+  Base64Test(const Base64Test&) = delete;
+  Base64Test& operator=(const Base64Test&) = delete;
 };
 
 TEST_F(Base64Test, Chinese) {

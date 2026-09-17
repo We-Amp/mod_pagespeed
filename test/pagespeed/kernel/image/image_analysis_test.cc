@@ -23,10 +23,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <memory>
 
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/null_mutex.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/image/read_image.h"
 #include "pagespeed/kernel/image/scanline_interface.h"
@@ -123,13 +123,13 @@ class ImageAnalysisTest : public testing::Test {
         GetNumChannelsFromPixelFormat(pixel_format, &message_handler_);
 
     // Synthesize the image.
-    net_instaweb::scoped_array<uint8_t> image(
+    std::unique_ptr<uint8_t[]> image(
         new uint8_t[bytes_per_line * height]);
     SynthesizeImage(width, height, bytes_per_line, num_channels, seed_value,
                     delta_x, delta_y, image.get());
 
     // Compute gradient.
-    net_instaweb::scoped_array<uint8_t> gradient(new uint8_t[width * height]);
+    std::unique_ptr<uint8_t[]> gradient(new uint8_t[width * height]);
     ASSERT_TRUE(SobelGradient(image.get(), width, height, bytes_per_line,
                               pixel_format, &message_handler_, gradient.get()));
 
@@ -185,7 +185,8 @@ class ImageAnalysisTest : public testing::Test {
   float expected_hist_[kNumColorHistogramBins];
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(ImageAnalysisTest);
+  ImageAnalysisTest(const ImageAnalysisTest&) = delete;
+  ImageAnalysisTest& operator=(const ImageAnalysisTest&) = delete;
 };
 
 TEST_F(ImageAnalysisTest, GradientOfWhiteImage) {
@@ -200,7 +201,7 @@ TEST_F(ImageAnalysisTest, GradientOfWhiteImage) {
       GetNumChannelsFromPixelFormat(pixel_format, &message_handler_);
 
   uint8_t seed[] = {0};
-  net_instaweb::scoped_array<uint8_t> expected_gradient(
+  std::unique_ptr<uint8_t[]> expected_gradient(
       new uint8_t[width * height]);
   SynthesizeImage(width, height, width, num_channels, seed, delta_x, delta_y,
                   expected_gradient.get());
@@ -225,7 +226,7 @@ TEST_F(ImageAnalysisTest, GradientOfIncreasingPixelValues) {
   //   max( 2 * (delta_x[0] + delta_x[1] + delta_x[2]) / 3,
   //        2 * (delta_y[0] + delta_y[1] + delta_y[2]) / 3 )
   // which is 40.
-  net_instaweb::scoped_array<uint8_t> expected_gradient(
+  std::unique_ptr<uint8_t[]> expected_gradient(
       new uint8_t[width * height]);
   memset(expected_gradient.get(), 0, width * height);
   for (int y = 1; y < height - 1; ++y) {
@@ -270,7 +271,7 @@ TEST_F(ImageAnalysisTest, HistogramOfBlankImage) {
   const int delta_x[] = {0};
   const int delta_y[] = {0};
 
-  net_instaweb::scoped_array<uint8_t> image(
+  std::unique_ptr<uint8_t[]> image(
       new uint8_t[bytes_per_line * height]);
   SynthesizeImage(width, height, bytes_per_line, num_channels, seed_value,
                   delta_x, delta_y, image.get());
@@ -297,7 +298,7 @@ TEST_F(ImageAnalysisTest, HistogramOfIncreasingPixelValues) {
   const int delta_x[] = {1};
   const int delta_y[] = {9};
 
-  net_instaweb::scoped_array<uint8_t> image(
+  std::unique_ptr<uint8_t[]> image(
       new uint8_t[bytes_per_line * height]);
   SynthesizeImage(width, height, bytes_per_line, num_channels, seed_value,
                   delta_x, delta_y, image.get());

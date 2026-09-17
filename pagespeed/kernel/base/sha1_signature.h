@@ -49,7 +49,8 @@ class SHA1Signature : public Signature {
  private:
   int max_chars_;
 
-  DISALLOW_COPY_AND_ASSIGN(SHA1Signature);
+  SHA1Signature(const SHA1Signature&) = delete;
+  SHA1Signature& operator=(const SHA1Signature&) = delete;
 };
 
 }  // namespace net_instaweb

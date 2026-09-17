@@ -26,7 +26,6 @@
 #include "pagespeed/kernel/base/atomic_bool.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/condvar.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/thread.h"
 #include "pagespeed/kernel/base/thread_annotations.h"
@@ -57,7 +56,8 @@ class SchedulerBasedAbstractLockTest : public testing::Test {
   MockScheduler scheduler_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(SchedulerBasedAbstractLockTest);
+  SchedulerBasedAbstractLockTest(const SchedulerBasedAbstractLockTest&) = delete;
+  SchedulerBasedAbstractLockTest& operator=(const SchedulerBasedAbstractLockTest&) = delete;
 };
 
 // A mock lock base class
@@ -76,7 +76,8 @@ class MockLockBase : public SchedulerBasedAbstractLock {
   bool held_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(MockLockBase);
+  MockLockBase(const MockLockBase&) = delete;
+  MockLockBase& operator=(const MockLockBase&) = delete;
 };
 
 // A mock lock that always claims locking happened
@@ -95,7 +96,8 @@ class AlwaysLock : public MockLockBase {
   GoogleString name() const override { return GoogleString("AlwaysLock"); }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(AlwaysLock);
+  AlwaysLock(const AlwaysLock&) = delete;
+  AlwaysLock& operator=(const AlwaysLock&) = delete;
 };
 
 // A mock lock that always claims lock attempts failed
@@ -108,7 +110,8 @@ class NeverLock : public MockLockBase {
   GoogleString name() const override { return GoogleString("NeverLock"); }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(NeverLock);
+  NeverLock(const NeverLock&) = delete;
+  NeverLock& operator=(const NeverLock&) = delete;
 };
 
 // A mock lock that can only be locked by stealing after a timeout.
@@ -133,7 +136,8 @@ class StealOnlyLock : public NeverLock {
  private:
   int64 last_hold_time_ms_;
 
-  DISALLOW_COPY_AND_ASSIGN(StealOnlyLock);
+  StealOnlyLock(const StealOnlyLock&) = delete;
+  StealOnlyLock& operator=(const StealOnlyLock&) = delete;
 };
 
 // Simple tests that involve either failed try or successfully obtaining lock.
@@ -397,7 +401,8 @@ class ThreadedSchedulerBasedLockTest : public SchedulerBasedAbstractLockTest {
 
    private:
     ThreadedSchedulerBasedLockTest* test_;
-    DISALLOW_COPY_AND_ASSIGN(HelperThread);
+    HelperThread(const HelperThread&) = delete;
+    HelperThread& operator=(const HelperThread&) = delete;
   };
 
   AtomicBool ready_to_start_;
@@ -406,7 +411,8 @@ class ThreadedSchedulerBasedLockTest : public SchedulerBasedAbstractLockTest {
   std::unique_ptr<HelperThread> helper_thread_;
   HelperThreadMethod helper_thread_method_;
 
-  DISALLOW_COPY_AND_ASSIGN(ThreadedSchedulerBasedLockTest);
+  ThreadedSchedulerBasedLockTest(const ThreadedSchedulerBasedLockTest&) = delete;
+  ThreadedSchedulerBasedLockTest& operator=(const ThreadedSchedulerBasedLockTest&) = delete;
 };
 
 // Meta-Test that all is well.

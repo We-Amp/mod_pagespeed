@@ -19,9 +19,10 @@
 
 #include "net/instaweb/rewriter/public/rewrite_stats.h"
 
+#include <memory>
+
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "pagespeed/kernel/base/statistics.h"
-#include "pagespeed/kernel/base/stl_util.h"
 #include "pagespeed/kernel/base/waveform.h"
 
 namespace net_instaweb {
@@ -51,6 +52,55 @@ const char kIproServed[] = "ipro_served";
 const char kIproNotInCache[] = "ipro_not_in_cache";
 const char kIproNotRewritable[] = "ipro_not_rewritable";
 
+// The daemon substrate's serving counters, and they are deliberately NOT the
+// three above.  Those three partition the CLASSIC in-place path -- served
+// from this module's own cache, missing from it, or not rewritable by it --
+// and a substrate that never consults that cache would leave all three at
+// zero however busy it was.  These two partition the other substrate's
+// serves: handed back from the optimizer's shared cache, or declined, in
+// which case the request goes out by the plain (non-in-place) path exactly as
+// if this module were not installed.  Their SUM is the number of in-place
+// eligible requests on that substrate, which is what makes them continuous
+// with the classic three rather than a parallel vocabulary.
+const char kIproDaemonServed[] = "ipro_daemon_served";
+const char kIproDaemonFallthrough[] = "ipro_daemon_fallthrough";
+
+// NOT PART OF THE PARTITION ABOVE, and deliberately so.  This counts the
+// worker re-notifies sent on FALLBACK HITS -- serves of a variant that is not
+// the one the client's mask names on the viewport, density, Save-Data or
+// format axes.  Every one of them is already inside `ipro_daemon_served` (a
+// fallback hit IS a serve), so adding it to that sum would double-count.
+// What it observes is the convergence mechanism itself: how often this
+// substrate had to ask the worker for a variant the family did not hold.
+const char kIproDaemonFallbackNotified[] = "ipro_daemon_fallback_notified";
+
+// The failure half of the pair, and the pair is the point: a re-notify send
+// is fire-and-forget, so without this counter a dead notify socket is
+// indistinguishable from a quiet converged family -- both leave
+// `ipro_daemon_fallback_notified` flat.  Only SEND OUTCOMES move these two:
+// a suppressed re-notify (the Vary: Accept gate, an unnameable option
+// context) moves neither, so suppression reads as both flat while fallback
+// serves continue, and a delivery failure reads as this one climbing.
+const char kIproDaemonFallbackNotifyFailed[] =
+    "ipro_daemon_fallback_notify_failed";
+
+// THE SECOND NOTIFICATION PAIR, and likewise NOT part of the partition: this
+// counts origin-refreshed sentinels sent on AGE-EXPIRED VARIANT fall-throughs
+// -- declines of a selected variant that aged past its effective freshness
+// lifetime, the one fall-through the worker cannot recover from on its own
+// because its processed-set dedup swallows the plain re-record notification.
+// Every one of them is already inside `ipro_daemon_fallthrough`.
+// What it observes is the heal: how often this substrate asked the worker to
+// purge a stale variant set and rebuild from the re-fetched original.
+const char kIproDaemonRefreshNotified[] = "ipro_daemon_refresh_notified";
+
+// The failure half, on the same terms as the fallback pair: only SEND
+// OUTCOMES move these two, so a suppression (an unflagged fall-through, an
+// unnameable option context) reads as both flat while fall-throughs
+// continue, and a dead notify socket reads as this one climbing.
+const char kIproDaemonRefreshNotifyFailed[] =
+    "ipro_daemon_refresh_notify_failed";
+
 const char* kWaveFormCounters[RewriteDriverFactory::kNumWorkerPools] = {
     "html-worker-queue-depth", "rewrite-worker-queue-depth",
     "low-priority-worked-queue-depth"};
@@ -63,11 +113,19 @@ const char* kWaveFormCounters[RewriteDriverFactory::kNumWorkerPools] = {
 // We also keep a histogram, kBeaconTimingsMsHistogram of these.
 const char kTotalPageLoadMs[] = "total_page_load_ms";
 const char kPageLoadCount[] = "page_load_count";
+const char kBeaconOverflowCount[] = "beacon_overflow_count";
 
 const int kNumWaveformSamples = 200;
 
 // Histogram names.
 const char kBeaconTimingsMsHistogram[] = "Beacon Reported Load Time (ms)";
+// Core Web Vitals histograms fed by the add_instrumentation beacon.  CLS is
+// reported in fixed-point milli-units (a CLS of 0.1 arrives as 100) so it
+// stays an integer end-to-end.
+const char kBeaconLcpMsHistogram[] = "Beacon Reported LCP (ms)";
+const char kBeaconClsMilliHistogram[] = "Beacon Reported CLS (milli-units)";
+const char kBeaconInpMsHistogram[] = "Beacon Reported INP (ms)";
+const char kBeaconTtfbMsHistogram[] = "Beacon Reported TTFB (ms)";
 const char kFetchLatencyHistogram[] = "Pagespeed Resource Latency Histogram";
 const char kRewriteLatencyHistogram[] = "Rewrite Latency Histogram";
 const char kBackendLatencyHistogram[] =
@@ -96,6 +154,9 @@ const char RewriteStats::kResourceUrlDomainAcceptances[] =
 // because of the domain they are on.
 const char RewriteStats::kResourceUrlDomainRejections[] =
     "resource_url_domain_rejections";
+// Num of rewrites suppressed because a Content-Security-Policy on the
+// page did not permit them (input use, output rendering, or inlining).
+const char RewriteStats::kCspBlockedRewrites[] = "csp_blocked_rewrites";
 
 const char RewriteStats::kDownstreamCachePurgeAttempts[] =
     "downstream_cache_purge_attempts";
@@ -110,6 +171,7 @@ const char RewriteStats::kSuccessfulDownstreamCachePurges[] =
 void RewriteStats::InitStats(Statistics* statistics) {
   statistics->AddVariable(kResourceUrlDomainAcceptances);
   statistics->AddVariable(kResourceUrlDomainRejections);
+  statistics->AddVariable(kCspBlockedRewrites);
   statistics->AddVariable(kCachedOutputMissedDeadline);
   statistics->AddVariable(kCachedOutputHits);
   statistics->AddVariable(kCachedOutputMisses);
@@ -117,6 +179,7 @@ void RewriteStats::InitStats(Statistics* statistics) {
   statistics->AddVariable(kInstawebSlurp404Count);
   statistics->AddVariable(kTotalPageLoadMs);
   statistics->AddVariable(kPageLoadCount);
+  statistics->AddVariable(kBeaconOverflowCount);
   statistics->AddVariable(kResourceFetchesCached);
   statistics->AddVariable(kResourceFetchConstructSuccesses);
   statistics->AddVariable(kResourceFetchConstructFailures);
@@ -124,6 +187,10 @@ void RewriteStats::InitStats(Statistics* statistics) {
   statistics->AddVariable(kNumCacheControlNotRewritableResources);
   statistics->AddVariable(kNumFlushes);
   statistics->AddHistogram(kBeaconTimingsMsHistogram);
+  statistics->AddHistogram(kBeaconLcpMsHistogram);
+  statistics->AddHistogram(kBeaconClsMilliHistogram);
+  statistics->AddHistogram(kBeaconInpMsHistogram);
+  statistics->AddHistogram(kBeaconTtfbMsHistogram);
   statistics->AddHistogram(kFetchLatencyHistogram);
   statistics->AddHistogram(kRewriteLatencyHistogram);
   statistics->AddHistogram(kBackendLatencyHistogram);
@@ -134,6 +201,12 @@ void RewriteStats::InitStats(Statistics* statistics) {
   statistics->AddVariable(kIproServed);
   statistics->AddVariable(kIproNotInCache);
   statistics->AddVariable(kIproNotRewritable);
+  statistics->AddVariable(kIproDaemonServed);
+  statistics->AddVariable(kIproDaemonFallthrough);
+  statistics->AddVariable(kIproDaemonFallbackNotified);
+  statistics->AddVariable(kIproDaemonFallbackNotifyFailed);
+  statistics->AddVariable(kIproDaemonRefreshNotified);
+  statistics->AddVariable(kIproDaemonRefreshNotifyFailed);
   statistics->AddVariable(kDownstreamCachePurgeAttempts);
   statistics->AddVariable(kSuccessfulDownstreamCachePurges);
   statistics->AddTimedVariable(kTotalFetchCount, Statistics::kDefaultGroup);
@@ -167,12 +240,14 @@ RewriteStats::RewriteStats(bool has_waveforms, Statistics* stats,
       num_cache_control_not_rewritable_resources_(
           stats->GetVariable(kNumCacheControlNotRewritableResources)),
       num_flushes_(stats->GetVariable(kNumFlushes)),
+      beacon_overflow_count_(stats->GetVariable(kBeaconOverflowCount)),
       page_load_count_(stats->GetVariable(kPageLoadCount)),
       resource_404_count_(stats->GetVariable(kInstawebResource404Count)),
       resource_url_domain_acceptances_(
           stats->GetVariable(kResourceUrlDomainAcceptances)),
       resource_url_domain_rejections_(
           stats->GetVariable(kResourceUrlDomainRejections)),
+      csp_blocked_rewrites_(stats->GetVariable(kCspBlockedRewrites)),
       slurp_404_count_(stats->GetVariable(kInstawebSlurp404Count)),
       succeeded_filter_resource_fetches_(
           stats->GetVariable(kResourceFetchConstructSuccesses)),
@@ -186,12 +261,27 @@ RewriteStats::RewriteStats(bool has_waveforms, Statistics* stats,
       ipro_served_(stats->GetVariable(kIproServed)),
       ipro_not_in_cache_(stats->GetVariable(kIproNotInCache)),
       ipro_not_rewritable_(stats->GetVariable(kIproNotRewritable)),
+      ipro_daemon_served_(stats->GetVariable(kIproDaemonServed)),
+      ipro_daemon_fallthrough_(stats->GetVariable(kIproDaemonFallthrough)),
+      ipro_daemon_fallback_notified_(
+          stats->GetVariable(kIproDaemonFallbackNotified)),
+      ipro_daemon_fallback_notify_failed_(
+          stats->GetVariable(kIproDaemonFallbackNotifyFailed)),
+      ipro_daemon_refresh_notified_(
+          stats->GetVariable(kIproDaemonRefreshNotified)),
+      ipro_daemon_refresh_notify_failed_(
+          stats->GetVariable(kIproDaemonRefreshNotifyFailed)),
       downstream_cache_purge_attempts_(
           stats->GetVariable(kDownstreamCachePurgeAttempts)),
       successful_downstream_cache_purges_(
           stats->GetVariable(kSuccessfulDownstreamCachePurges)),
       beacon_timings_ms_histogram_(
           stats->GetHistogram(kBeaconTimingsMsHistogram)),
+      beacon_lcp_ms_histogram_(stats->GetHistogram(kBeaconLcpMsHistogram)),
+      beacon_cls_milli_histogram_(
+          stats->GetHistogram(kBeaconClsMilliHistogram)),
+      beacon_inp_ms_histogram_(stats->GetHistogram(kBeaconInpMsHistogram)),
+      beacon_ttfb_ms_histogram_(stats->GetHistogram(kBeaconTtfbMsHistogram)),
       fetch_latency_histogram_(stats->GetHistogram(kFetchLatencyHistogram)),
       rewrite_latency_histogram_(stats->GetHistogram(kRewriteLatencyHistogram)),
       backend_latency_histogram_(stats->GetHistogram(kBackendLatencyHistogram)),
@@ -211,15 +301,15 @@ RewriteStats::RewriteStats(bool has_waveforms, Statistics* stats,
 
   for (int i = 0; i < RewriteDriverFactory::kNumWorkerPools; ++i) {
     if (has_waveforms) {
-      thread_queue_depths_.push_back(
-          new Waveform(thread_system, timer, kNumWaveformSamples,
-                       stats->GetUpDownCounter(kWaveFormCounters[i])));
+      thread_queue_depths_.push_back(std::make_unique<Waveform>(
+          thread_system, timer, kNumWaveformSamples,
+          stats->GetUpDownCounter(kWaveFormCounters[i])));
     } else {
       thread_queue_depths_.push_back(nullptr);
     }
   }
 }
 
-RewriteStats::~RewriteStats() { STLDeleteElements(&thread_queue_depths_); }
+RewriteStats::~RewriteStats() = default;
 
 }  // namespace net_instaweb

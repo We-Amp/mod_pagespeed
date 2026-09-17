@@ -46,15 +46,14 @@
 namespace net_instaweb {
 
 HtmlParse::HtmlParse(MessageHandler* message_handler)
-    : lexer_(nullptr),  // Can't initialize here, since "this" should not be
-                        // used in the initializer list (it generates an error
-                        // in Visual Studio builds).
+    : lexer_(std::make_unique<HtmlLexer>(this)),
       current_(queue_.end()),
       message_handler_(message_handler),
       line_number_(1),
       skip_increment_(false),
       determine_filter_behavior_called_(false),
       can_modify_urls_(false),
+      determine_enabled_filters_called_(false),
       need_sanity_check_(false),
       coalesce_characters_(true),
       need_coalesce_characters_(false),
@@ -66,14 +65,11 @@ HtmlParse::HtmlParse(MessageHandler* message_handler)
       timer_(nullptr),
       current_filter_(nullptr),
       dynamically_disabled_filter_list_(nullptr) {
-  lexer_ = new HtmlLexer(this);
   HtmlKeywords::Init();
 }
 
 HtmlParse::~HtmlParse() {
-  delete lexer_;
   STLDeleteElements(&queue_);
-  STLDeleteElements(&event_listeners_);
   ClearElements();
 }
 
@@ -82,6 +78,7 @@ void HtmlParse::AddFilter(HtmlFilter* html_filter) {
 }
 
 HtmlEventListIterator HtmlParse::Last() {
+  DCHECK(!queue_.empty());
   HtmlEventListIterator p = queue_.end();
   --p;
   return p;
@@ -129,7 +126,7 @@ void HtmlParse::AddEvent(HtmlEvent* event) {
     running_filters_ = true;
     for (FilterVector::iterator it = event_listeners_.begin();
          it != event_listeners_.end(); ++it) {
-      event->Run(*it);
+      event->Run(it->get());
     }
     running_filters_ = false;
   }
@@ -261,7 +258,7 @@ bool HtmlParse::StartParseId(const StringPiece& url, const StringPiece& id,
   if (dynamically_disabled_filter_list_ != nullptr) {
     dynamically_disabled_filter_list_->clear();
   }
-  url.CopyToString(&url_);
+  url_.assign(url.data(), url.size());
   GoogleUrl gurl(url);
   // TODO(sligocki): Use IsWebValid() here. For now we need to allow file://
   // URLs as well because some tools use them.
@@ -273,8 +270,8 @@ bool HtmlParse::StartParseId(const StringPiece& url, const StringPiece& id,
     string_table_.Clear();
     google_url_.Swap(&gurl);
     line_number_ = 1;
-    id.CopyToString(&id_);
-    if (log_rewrite_timing_) {
+    id_.assign(id.data(), id.size());
+    if (log_rewrite_timing_ && timer_ != nullptr) {
       parse_start_time_us_ = timer_->NowUs();
       InfoHere("HtmlParse::StartParse");
     }
@@ -285,13 +282,13 @@ bool HtmlParse::StartParseId(const StringPiece& url, const StringPiece& id,
 }
 
 void HtmlParse::SetUrlForTesting(const StringPiece& url) {
-  url.CopyToString(&url_);
+  url_.assign(url.data(), url.size());
   bool ok = google_url_.Reset(url);
   CHECK(ok) << url;
 }
 
 void HtmlParse::ShowProgress(const char* message) {
-  if (log_rewrite_timing_) {
+  if (log_rewrite_timing_ && timer_ != nullptr) {
     long delta = static_cast<long>(timer_->NowUs() - parse_start_time_us_);
     InfoHere("%ldus: HtmlParse::%s", delta, message);
   }
@@ -435,6 +432,12 @@ void HtmlParse::CoalesceAdjacentCharactersNodes() {
       current_ = queue_.erase(current_);  // returns element after erased
       delete event;
       node->MarkAsDead(queue_.end());
+      // Release the merged-away node's contents eagerly.  The node has no
+      // event left in the queue, so ClearEvents() never sees it and its
+      // Data would otherwise be held until ClearElements() runs the arena
+      // destructors at EndFinishParse.  FreeData() is exactly-once: it
+      // resets the node's unique_ptr, and the destructor later is a no-op.
+      node->FreeData();
       need_sanity_check_ = true;
     } else {
       ++current_;
@@ -703,7 +706,13 @@ void HtmlParse::InsertNodeAfterCurrent(HtmlNode* new_node) {
     } else {
       parent = (*current_)->GetElementIfStartEvent();
       if (parent == nullptr) {
-        parent = (*current_)->GetNode()->parent();
+        // GetNode() returns nullptr for events that carry no node, such as
+        // StartDocument/EndDocument; leave the parent null in that case
+        // rather than dereferencing a null node.
+        HtmlNode* current_node = (*current_)->GetNode();
+        if (current_node != nullptr) {
+          parent = current_node->parent();
+        }
       }
     }
     new_node->set_parent(parent);
@@ -1142,8 +1151,9 @@ void HtmlParse::FatalErrorHere(const char* msg, ...) {
 void HtmlParse::CloseElement(HtmlElement* element, HtmlElement::Style style,
                              int line_number) {
   if (delayed_start_literal_.get() != nullptr) {
-    HtmlElement* element = delayed_start_literal_->GetElementIfStartEvent();
-    DCHECK(element != nullptr);
+    HtmlElement* delayed_element =
+        delayed_start_literal_->GetElementIfStartEvent();
+    DCHECK(delayed_element != nullptr);
     bool insert_at_begin = true;
     if (!queue_.empty()) {
       // We have been holding back "<script>" until the lexer tells us the
@@ -1162,7 +1172,7 @@ void HtmlParse::CloseElement(HtmlElement* element, HtmlElement::Style style,
       if (node != nullptr) {
         if (p != queue_.begin()) {
           --p;
-          element->set_begin(
+          delayed_element->set_begin(
               queue_.insert(p, delayed_start_literal_.release()));
           insert_at_begin = false;
         }
@@ -1181,7 +1191,7 @@ void HtmlParse::CloseElement(HtmlElement* element, HtmlElement::Style style,
     }
     if (insert_at_begin) {
       queue_.push_front(delayed_start_literal_.release());
-      element->set_begin(queue_.begin());
+      delayed_element->set_begin(queue_.begin());
     }
     DCHECK(delayed_start_literal_.get() == nullptr);
   }
@@ -1217,7 +1227,7 @@ HtmlName HtmlParse::MakeName(const StringPiece& str_piece) {
 }
 
 void HtmlParse::add_event_listener(HtmlFilter* listener) {
-  event_listeners_.push_back(listener);
+  event_listeners_.emplace_back(listener);
 }
 
 void HtmlParse::set_size_limit(int64 x) { lexer_->set_size_limit(x); }
@@ -1304,8 +1314,10 @@ void HtmlParse::DeferCurrentNode() {
   //      StartElement event is not in the flush window.  We avoid this
   //      case by requiring that callers run DeferCurentNode from the
   //      StartElement event.
-  HtmlEventList* node_events = new HtmlEventList;
-  deferred_nodes_[node] = node_events;
+  std::unique_ptr<HtmlEventList> node_events =
+      std::make_unique<HtmlEventList>();
+  HtmlEventList* node_events_ptr = node_events.get();
+  deferred_nodes_[node] = std::move(node_events);
   HtmlEventListIterator node_last = node->end();
   if (node_last != queue_.end()) {
     // Case 1: node is totally in flush window.
@@ -1318,13 +1330,14 @@ void HtmlParse::DeferCurrentNode() {
     CHECK(element != nullptr)
         << "Only HtmlElements can cut across flush windows.";
     DCHECK(current_filter_ != nullptr);
-    open_deferred_nodes_[current_filter_] = DeferredNode(node, node_events);
+    open_deferred_nodes_[current_filter_] = DeferredNode(node, node_events_ptr);
   }
 
   current_ = node_last;
   skip_increment_ = true;
 
-  node_events->splice(node_events->end(), queue_, node->begin(), node_last);
+  node_events_ptr->splice(node_events_ptr->end(), queue_, node->begin(),
+                          node_last);
   need_sanity_check_ = true;
 
   // We will attempt to coalesce Characters nodes brought together as a
@@ -1350,12 +1363,14 @@ void HtmlParse::RestoreDeferredNode(HtmlNode* deferred_node) {
       << "You cannot restore a deleted node";
 
   // Remove the previously deferred node from the list of deferred nodes.
+  // Move the unique_ptr out of the map first, then erase the (now-empty)
+  // map entry, then splice the events back into the queue.
   NodeToEventListMap::iterator p = deferred_nodes_.find(deferred_node);
   if (p == deferred_nodes_.end()) {
     LOG(DFATAL) << "Restoring a node that was not deferred";
     return;
   }
-  HtmlEventList* event_list = p->second;
+  std::unique_ptr<HtmlEventList> event_list = std::move(p->second);
   deferred_nodes_.erase(p);
 
   // Correct the parent-pointer, as the new location for removed_node may be
@@ -1370,7 +1385,6 @@ void HtmlParse::RestoreDeferredNode(HtmlNode* deferred_node) {
 
   NextEvent();
   queue_.splice(current_, *event_list, event_list->begin(), event_list->end());
-  delete event_list;
   current_ = deferred_node->begin();
   DCHECK(!skip_increment_) << "Always false coming out of NextEvent()";
   need_sanity_check_ = true;
@@ -1386,13 +1400,14 @@ void HtmlParse::ClearDeferredNodes() {
                                     e = deferred_nodes_.end();
        p != e; ++p) {
     const HtmlNode* node = p->first;
-    HtmlEventList* events = p->second;
+    HtmlEventList* events = p->second.get();
     if (deferred_deleted_nodes_.find(node) == deferred_deleted_nodes_.end()) {
       message_handler_->Message(kWarning, "Removed node %s never replaced",
                                 node->ToString().c_str());
     }
+    // The HtmlEvents themselves stay raw-owned (out of scope here), but the
+    // list is freed by the unique_ptr in deferred_nodes_.
     STLDeleteElements(events);
-    delete events;
   }
   deferred_nodes_.clear();
   deferred_deleted_nodes_.clear();

@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<!--
+  SPDX-License-Identifier: Apache-2.0
+  Copyright (c) 2024-2026 We-Amp B.V.
+-->
+
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Move CSS to Head Test</title>
+</head>
+<body>
+    <h1>Move CSS to Head Test</h1>
+    <p>The CSS below is in the body and should be moved to the head.</p>
+
+    <!-- This CSS link is in the body and should be moved to head -->
+    <link rel="stylesheet" href="styles/main.css">
+
+    <div class="container">
+        <div class="box red">Red Box</div>
+        <div class="box green">Green Box</div>
+    </div>
+
+    <!-- Another CSS in body -->
+    <link rel="stylesheet" href="styles/colors.css">
+</body>
+</html>

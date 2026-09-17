@@ -22,10 +22,11 @@
 #ifndef NET_INSTAWEB_HTTP_PUBLIC_SYNC_FETCHER_ADAPTER_CALLBACK_H_
 #define NET_INSTAWEB_HTTP_PUBLIC_SYNC_FETCHER_ADAPTER_CALLBACK_H_
 
+#include <memory>
+
 #include "net/instaweb/http/public/async_fetch.h"
 #include "net/instaweb/http/public/request_context.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_annotations.h"
 #include "pagespeed/kernel/base/thread_system.h"
@@ -114,7 +115,8 @@ class SyncFetcherAdapterCallback : public AsyncFetch {
     SyncFetcherAdapterCallback* callback_;
     Writer* orig_writer_ GUARDED_BY(callback_->mutex_);
 
-    DISALLOW_COPY_AND_ASSIGN(ProtectedWriter);
+    ProtectedWriter(const ProtectedWriter&) = delete;
+    ProtectedWriter& operator=(const ProtectedWriter&) = delete;
   };
   ~SyncFetcherAdapterCallback() override;
 
@@ -126,7 +128,9 @@ class SyncFetcherAdapterCallback : public AsyncFetch {
   bool released_ GUARDED_BY(mutex_);
   std::unique_ptr<Writer> writer_;
 
-  DISALLOW_COPY_AND_ASSIGN(SyncFetcherAdapterCallback);
+  SyncFetcherAdapterCallback(const SyncFetcherAdapterCallback&) = delete;
+  SyncFetcherAdapterCallback& operator=(const SyncFetcherAdapterCallback&) =
+      delete;
 };
 
 }  // namespace net_instaweb

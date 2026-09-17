@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<!--
+  SPDX-License-Identifier: Apache-2.0
+  Copyright (c) 2024-2026 We-Amp B.V.
+-->
+
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>CSS Combine Test</title>
+    <!-- Multiple CSS files that should be combined -->
+    <link rel="stylesheet" href="../css/multi/a.css">
+    <link rel="stylesheet" href="../css/multi/b.css">
+    <link rel="stylesheet" href="../css/multi/c.css">
+</head>
+<body>
+    <header class="header">
+        <h1>CSS Combine Test</h1>
+        <nav>
+            <a href="/">Home</a>
+            <a href="/about">About</a>
+            <a href="/contact">Contact</a>
+        </nav>
+    </header>
+
+    <main class="content">
+        <article>
+            <h2>Testing CSS Combination</h2>
+            <p>This page includes three separate CSS files that should be combined
+               into a single file by PageSpeed's combine_css filter.</p>
+            <p>Check the page source to verify that the CSS files have been combined.</p>
+        </article>
+    </main>
+
+    <footer class="footer">
+        <p>&copy; 2024 PageSpeed Test Site</p>
+        <div class="social-links">
+            <a href="#">F</a>
+            <a href="#">T</a>
+            <a href="#">L</a>
+        </div>
+    </footer>
+</body>
+</html>

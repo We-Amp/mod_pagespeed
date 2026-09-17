@@ -48,7 +48,8 @@ class GoogleMessageHandler : public MessageHandler {
   GoogleString Format(const char* msg, va_list args);
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(GoogleMessageHandler);
+  GoogleMessageHandler(const GoogleMessageHandler&) = delete;
+  GoogleMessageHandler& operator=(const GoogleMessageHandler&) = delete;
 };
 
 }  // namespace net_instaweb

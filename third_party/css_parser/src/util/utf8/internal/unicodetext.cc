@@ -363,6 +363,10 @@ int UnicodeText::size() const {
 bool operator==(const UnicodeText& lhs, const UnicodeText& rhs) {
   if (&lhs == &rhs) return true;
   if (lhs.repr_.size_ != rhs.repr_.size_) return false;
+  // Local patch: memcmp's args are declared nonnull even when
+  // n == 0, and empty texts have data_ == NULL, so guard the zero-length
+  // case to avoid UB under UBSan.
+  if (lhs.repr_.size_ == 0) return true;
   return memcmp(lhs.repr_.data_, rhs.repr_.data_, lhs.repr_.size_) == 0;
 }
 

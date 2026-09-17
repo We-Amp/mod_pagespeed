@@ -20,10 +20,11 @@
 #ifndef NET_INSTAWEB_HTTP_PUBLIC_HTTP_DUMP_URL_FETCHER_H_
 #define NET_INSTAWEB_HTTP_PUBLIC_HTTP_DUMP_URL_FETCHER_H_
 
+#include <memory>
+
 #include "net/instaweb/http/public/url_async_fetcher.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/file_system.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 
@@ -94,7 +95,8 @@ class HttpDumpUrlFetcher : public UrlAsyncFetcher {
 
   std::unique_ptr<StringSet> urls_;
 
-  DISALLOW_COPY_AND_ASSIGN(HttpDumpUrlFetcher);
+  HttpDumpUrlFetcher(const HttpDumpUrlFetcher&) = delete;
+  HttpDumpUrlFetcher& operator=(const HttpDumpUrlFetcher&) = delete;
 };
 
 }  // namespace net_instaweb

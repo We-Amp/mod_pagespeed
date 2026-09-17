@@ -19,7 +19,13 @@
 
 #include "pagespeed/system/system_server_context.h"
 
+#include <algorithm>
+#include <atomic>
+#include <cctype>
+#include <filesystem>
 #include <memory>
+#include <string>
+#include <system_error>
 
 #include "base/logging.h"
 #include "net/instaweb/http/public/url_async_fetcher.h"
@@ -39,6 +45,7 @@
 #include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/http/google_url.h"
 #include "pagespeed/kernel/sharedmem/shared_mem_statistics.h"
+#include "pagespeed/kernel/util/statistics_logger.h"
 #include "pagespeed/system/add_headers_fetcher.h"
 #include "pagespeed/system/loopback_route_fetcher.h"
 #include "pagespeed/system/system_cache_path.h"
@@ -100,6 +107,21 @@ void SystemServerContext::FlushCacheIfNecessary() {
   } else {
     CheckLegacyGlobalCacheFlushFile();
   }
+
+  // Advance the statistics log on a wall-clock cadence that does not depend on
+  // this request having driven an HTML rewrite or a pagespeed-resource fetch.
+  // Those are the only paths that otherwise call UpdateAndDumpIfRequired(), so
+  // under pass-through/static/cached traffic the log never grows and the
+  // /pagespeed_admin Graphs page flatlines even though the live Statistics
+  // counters keep moving. This hook runs on every request across all ports
+  // (nginx, Apache, IIS); UpdateAndDumpIfRequired() is internally throttled to
+  // StatisticsLoggingIntervalMs via a non-blocking TryLock on the logger's own
+  // timestamp mutex, so on all but ~one request per interval it is a cheap
+  // no-op and can neither block nor contend with the cache-flush mutex above.
+  StatisticsLogger* stats_logger = statistics()->console_logger();
+  if (stats_logger != nullptr) {
+    stats_logger->UpdateAndDumpIfRequired();
+  }
 }
 
 void SystemServerContext::CheckLegacyGlobalCacheFlushFile() {
@@ -130,14 +152,35 @@ void SystemServerContext::CheckLegacyGlobalCacheFlushFile() {
       if (cache_flush_filename.empty()) {
         cache_flush_filename = "cache.flush";
       }
-      if (cache_flush_filename[0] != '/') {
-        // Implementations must ensure the file cache path is an absolute path.
-        // mod_pagespeed checks in mod_instaweb.cc:pagespeed_post_config while
-        // ngx_pagespeed checks in ngx_pagespeed.cc:ps_merge_srv_conf.
-        DCHECK_EQ('/', global_system_rewrite_options()->file_cache_path()[0]);
-        cache_flush_filename =
-            StrCat(global_system_rewrite_options()->file_cache_path(), "/",
-                   cache_flush_filename);
+      if (cache_flush_filename[0] != '/'
+#ifdef _WIN32
+          &&
+          !(cache_flush_filename.size() >= 3 &&
+            cache_flush_filename[1] == ':' &&
+            (cache_flush_filename[2] == '\\' || cache_flush_filename[2] == '/'))
+#endif
+      ) {
+        // cache_flush_filename is relative — prepend file_cache_path.
+        // The path must be absolute and at least one subdirectory deep
+        // (not empty or filesystem root).
+        const GoogleString& fcp =
+            global_system_rewrite_options()->file_cache_path();
+#ifdef _WIN32
+        // Windows absolute: "X:\subdir" — drive letter + colon + sep + name.
+        DCHECK(fcp.size() >= 4 && fcp[1] == ':' &&
+               (fcp[2] == '\\' || fcp[2] == '/'))
+            << "file_cache_path must be an absolute path at least one "
+               "subdirectory deep, got: "
+            << fcp;
+        cache_flush_filename = StrCat(fcp, "/", cache_flush_filename);
+#else
+        // Unix absolute: "/subdir" — starts with / and has more after it.
+        DCHECK(fcp.size() >= 2 && fcp[0] == '/')
+            << "file_cache_path must be an absolute path at least one "
+               "subdirectory deep, got: "
+            << fcp;
+        cache_flush_filename = StrCat(fcp, "/", cache_flush_filename);
+#endif
       }
       int64 cache_flush_timestamp_sec;
       NullMessageHandler null_handler;
@@ -203,10 +246,67 @@ SystemRewriteOptions* SystemServerContext::global_system_rewrite_options() {
   return out;
 }
 
+namespace {
+
+// mod_pagespeed 2.1 has no license state: production use is free, so there is
+// nothing to assert and the token machinery is gone. Releases before it read
+// a token from <parent of FileCachePath>/pagespeed.license, so an upgraded
+// install may still carry that file. It is ignored — never read, never
+// deleted — and mentioned once per process at INFO so the operator knows it
+// can go. Process-wide latch: Apache runs PostInitHook once per vhost and one
+// line is enough.
+std::atomic<bool> stale_license_file_noticed{false};
+
+void NoticeStaleLicenseFileOnce(const GoogleString& file_cache_path,
+                                MessageHandler* handler) {
+  if (file_cache_path.empty() ||
+      stale_license_file_noticed.load(std::memory_order_relaxed)) {
+    return;
+  }
+  // Same derivation the old reader used: strip trailing separators, then take
+  // the parent of the cache directory.
+  GoogleString dir(file_cache_path);
+  while (dir.size() > 1 && (dir.back() == '/' || dir.back() == '\\')) {
+    dir.pop_back();
+  }
+  const std::filesystem::path license_file =
+      std::filesystem::path(dir).parent_path() / "pagespeed.license";
+  std::error_code ec;
+  if (!std::filesystem::exists(license_file, ec)) {
+    return;
+  }
+  if (stale_license_file_noticed.exchange(true, std::memory_order_relaxed)) {
+    return;
+  }
+  handler->Message(kInfo,
+                   "%s: this file is no longer read since 2.1 and can be "
+                   "removed",
+                   license_file.string().c_str());
+}
+
+}  // namespace
+
+void ResetStaleLicenseFileNoticeForTesting() {
+  stale_license_file_noticed.store(false, std::memory_order_relaxed);
+}
+
 void SystemServerContext::PostInitHook() {
   ServerContext::PostInitHook();
-  admin_site_ = std::make_unique<AdminSite>(static_asset_manager(), timer(),
-                                            message_handler());
+  if (is_decoding_stub()) {
+    // The stub decoding context exists only to back the shared decoding
+    // driver: it runs on default options (no FileCachePath) and never
+    // serves requests, so it gets no AdminSite.
+    return;
+  }
+  admin_site_ = std::make_unique<AdminSite>(timer(), message_handler(),
+                                            NewDaemonReader());
+  NoticeStaleLicenseFileOnce(global_system_rewrite_options()->file_cache_path(),
+                             message_handler());
+}
+
+DaemonReader* SystemServerContext::NewDaemonReader() {
+  // No daemon transport by default; ports with a curl-based fetcher override.
+  return nullptr;
 }
 
 void SystemServerContext::CreateLocalStatistics(
@@ -299,6 +399,7 @@ void SystemServerContext::ApplySessionFetchers(const RequestContextPtr& request,
   const SystemRewriteOptions* conf =
       SystemRewriteOptions::DynamicCast(driver->options());
   CHECK(conf != nullptr);
+
   SystemRequestContext* system_request =
       SystemRequestContext::DynamicCast(request.get());
   if (system_request == nullptr) {
@@ -309,7 +410,7 @@ void SystemServerContext::ApplySessionFetchers(const RequestContextPtr& request,
   // added: the last one added here is the first one applied and vice versa.
   //
   // Currently, we want AddHeadersFetcher running first, then
-  // LoopbackRouteFetcher (and then Serf).
+  // LoopbackRouteFetcher (and then the base fetcher).
   SystemRewriteOptions* options = global_system_rewrite_options();
   if (!options->disable_loopback_routing() && !options->slurping_enabled() &&
       !options->test_proxy()) {
@@ -317,7 +418,8 @@ void SystemServerContext::ApplySessionFetchers(const RequestContextPtr& request,
     // LoopbackRouteFetcher may decide we should be talking to ourselves.
     driver->SetSessionFetcher(new LoopbackRouteFetcher(
         driver->options(), system_request->local_ip(),
-        system_request->local_port(), driver->async_fetcher()));
+        system_request->local_port(), system_request->local_scheme(),
+        driver->async_fetcher()));
   }
 
   if (driver->options()->num_custom_fetch_headers() > 0) {
@@ -391,13 +493,14 @@ void SystemServerContext::AdminPage(bool is_global,
                                     const GoogleUrl& stripped_gurl,
                                     const QueryParams& query_params,
                                     const RewriteOptions* options,
-                                    AsyncFetch* fetch) {
+                                    AsyncFetch* fetch,
+                                    StringPiece request_body) {
   Statistics* stats = is_global ? factory()->statistics() : statistics();
-  admin_site_->AdminPage(is_global, stripped_gurl, query_params, options,
-                         cache_path(), fetch, system_caches_,
-                         filesystem_metadata_cache(), http_cache(),
-                         metadata_cache(), page_property_cache(), this,
-                         statistics(), stats, global_system_rewrite_options());
+  admin_site_->AdminPage(
+      is_global, stripped_gurl, query_params, options, cache_path(), fetch,
+      system_caches_, filesystem_metadata_cache(), http_cache(),
+      metadata_cache(), page_property_cache(), this, statistics(), stats,
+      global_system_rewrite_options(), request_body);
 }
 
 void SystemServerContext::StatisticsPage(bool is_global,

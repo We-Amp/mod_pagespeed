@@ -10,7 +10,12 @@
 // Version Information
 
 #define MOD_PAGESPEED_VERSION @MAJOR@,@MINOR@,@BUILD@,@PATCH@
-#define MOD_PAGESPEED_VERSION_STRING "@MAJOR@.@MINOR@.@BUILD@.@PATCH@"
+#define MOD_PAGESPEED_VERSION_STRING "@MAJOR@.@MINOR@.@BUILD@"
+#define MOD_PAGESPEED_PRERELEASE "@PRERELEASE@"
+
+// Full version: "1.15.0-beta.1" (with prerelease) or "1.15.0" (without).
+// PRERELEASE_SUFFIX is set by the genrule to "-beta.1" or "" accordingly.
+#define MOD_PAGESPEED_FULL_VERSION_STRING MOD_PAGESPEED_VERSION_STRING "@PRERELEASE_SUFFIX@"
 
 // Branding Information
 
@@ -24,12 +29,11 @@
 // Changelist Information
 
 #define LASTCHANGE_STRING "@LASTCHANGE@"
+#define GIT_COMMIT_FULL_STRING "@GIT_COMMIT_FULL@"
 
 namespace net_instaweb {
 
-// TODO(jmarantz): determine the version-number from SVN at build time.
-const char kModPagespeedVersion[] =
-    MOD_PAGESPEED_VERSION_STRING "-" LASTCHANGE_STRING;
+const char kModPagespeedVersion[] = MOD_PAGESPEED_FULL_VERSION_STRING;
 
 }
 

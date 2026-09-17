@@ -1,0 +1,119 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+// TODO(jefftk): share more of this code with apache's log_message_handler
+
+#include "log_message_handler.h"
+
+#include <unistd.h>
+
+#include <limits>
+#include <memory>
+#include <string>
+
+#include "base/logging.h"
+#include "net/instaweb/public/version.h"
+#include "pagespeed/kernel/base/string_util.h"
+
+// Make sure we don't attempt to use LOG macros here, since doing so
+// would cause us to go into an infinite log loop.
+#undef LOG
+#define LOG USING_LOG_HERE_WOULD_CAUSE_INFINITE_RECURSION
+
+namespace {
+
+ngx_log_t* ngx_log = nullptr;
+
+ngx_uint_t GetNgxLogLevel(int severity) {
+  switch (severity) {
+    case logging::LOG_INFO:
+      return NGX_LOG_INFO;
+    case logging::LOG_WARNING:
+      return NGX_LOG_WARN;
+    case logging::LOG_ERROR:
+      return NGX_LOG_ERR;
+    case logging::LOG_FATAL:
+      return NGX_LOG_ALERT;
+    default:  // For VLOG(s)
+      return NGX_LOG_DEBUG;
+  }
+}
+
+bool LogMessageHandler(int severity, const char* file, int line,
+                       const GoogleString& str) {
+  ngx_uint_t this_log_level = GetNgxLogLevel(severity);
+
+  GoogleString message = str;
+
+  // Trim the newline off the end of the message string.
+  size_t last_msg_character_index = message.length() - 1;
+  if (message[last_msg_character_index] == '\n') {
+    message.resize(last_msg_character_index);
+  }
+
+  ngx_log_error(this_log_level, ngx_log, 0, "[ngx_pagespeed %s] %s",
+                net_instaweb::kModPagespeedVersion, message.c_str());
+
+  return true;
+}
+
+}  // namespace
+
+namespace net_instaweb {
+
+namespace log_message_handler {
+
+// Log sink that routes to nginx error log
+class NgxGLogSink : public PageSpeedGLogSink {
+ public:
+  void send(int severity, const char* full_filename, const char* base_filename,
+            int line, const char* message, size_t message_len) override {
+    LogMessageHandler(severity, base_filename, line,
+                      std::string(message, message_len));
+  }
+};
+
+std::unique_ptr<NgxGLogSink> ngx_glog_sink = nullptr;
+
+void Install(ngx_log_t* log_in) {
+  ngx_log = log_in;
+  ngx_glog_sink = std::make_unique<NgxGLogSink>();
+
+  // All VLOG(2) and higher will be displayed as DEBUG logs if the nginx log
+  // level is DEBUG.
+  if (ngx_log->log_level >= NGX_LOG_DEBUG) {
+    ngx_glog_sink->setMinLogLevel(-2);
+  }
+}
+
+void ShutDown() {
+  if (ngx_glog_sink != nullptr) {
+    // Unregister BEFORE destroying: the automatic removal runs in the BASE
+    // class dtor (~PageSpeedLogSink), so during ~NgxGLogSink a concurrent
+    // SendToSinks could still virtual-dispatch into a half-destroyed object.
+    // RemoveLogSink serializes with in-flight send() under g_sinks_mutex;
+    // the second removal from the base dtor is then a harmless no-op.
+    pagespeed_logging::RemoveLogSink(ngx_glog_sink.get());
+  }
+  ngx_glog_sink.reset();
+}
+
+}  // namespace log_message_handler
+
+}  // namespace net_instaweb

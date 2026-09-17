@@ -24,6 +24,7 @@
 #include "pagespeed/kernel/thread/worker.h"
 
 #include <deque>
+#include <memory>
 
 #include "base/logging.h"
 #include "pagespeed/kernel/base/abstract_mutex.h"
@@ -31,7 +32,6 @@
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/condvar.h"
 #include "pagespeed/kernel/base/function.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/thread.h"
 #include "pagespeed/kernel/base/thread_annotations.h"
 #include "pagespeed/kernel/base/thread_system.h"
@@ -180,7 +180,8 @@ class Worker::WorkThread : public ThreadSystem::Thread {
   bool started_ GUARDED_BY(mutex_);
   AtomicBool quit_requested_;
 
-  DISALLOW_COPY_AND_ASSIGN(WorkThread);
+  WorkThread(const WorkThread&) = delete;
+  WorkThread& operator=(const WorkThread&) = delete;
 };
 
 Worker::Worker(StringPiece thread_name, ThreadSystem* runtime)

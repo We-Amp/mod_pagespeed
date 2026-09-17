@@ -29,7 +29,7 @@ HtmlNode::~HtmlNode() {}
 HtmlLeafNode::HtmlLeafNode(HtmlElement* parent,
                            const HtmlEventListIterator& iter,
                            const StringPiece& contents)
-    : HtmlNode(parent), data_(new Data(iter, contents)) {}
+    : HtmlNode(parent), data_(std::make_unique<Data>(iter, contents)) {}
 
 HtmlLeafNode::~HtmlLeafNode() {}
 

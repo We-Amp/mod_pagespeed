@@ -21,10 +21,11 @@
 
 #include <csetjmp>
 #include <cstdlib>
+#include <memory>
 
 #include "pagespeed/kernel/base/message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
+#include "pagespeed/kernel/image/avif_optimizer.h"
 #include "pagespeed/kernel/image/frame_interface_optimizer.h"
 #include "pagespeed/kernel/image/gif_reader.h"
 #include "pagespeed/kernel/image/image_frame_interface.h"
@@ -82,6 +83,21 @@ ScanlineReaderInterface* InstantiateScanlineReader(ImageFormat image_type,
       }
       reader = new FrameToScanlineReaderAdapter(
           new MultipleFramePaddingReader(mf_reader.release()));
+      break;
+    }
+
+    case IMAGE_AVIF: {
+      // AVIF has a native MultipleFrameReader (AvifFrameReader). For the
+      // still-image scanline path, wrap it in a FrameToScanlineReaderAdapter
+      // (the GIF pattern; AVIF needs no quirks mode or frame padding since each
+      // decoded frame is already a full-canvas image).
+      which = "FrameToScanlineReaderAdapter(AvifFrameReader)";
+      std::unique_ptr<MultipleFrameReader> mf_reader(
+          InstantiateImageFrameReader(image_type, handler, status));
+      if (!status->Success()) {
+        return nullptr;
+      }
+      reader = new FrameToScanlineReaderAdapter(mf_reader.release());
       break;
     }
 
@@ -165,6 +181,14 @@ ScanlineWriterInterface* InstantiateScanlineWriter(ImageFormat image_type,
           InstantiateImageFrameWriter(image_type, handler, status));
       break;
 
+    case pagespeed::image_compression::IMAGE_AVIF:
+      // AVIF has a native frame writer (AvifFrameWriter); wrap it exactly as
+      // WebP does above.
+      which = "FrameToScanlineWriterAdapter(AvifFrameWriter)";
+      writer = new FrameToScanlineWriterAdapter(
+          InstantiateImageFrameWriter(image_type, handler, status));
+      break;
+
     case IMAGE_GIF:
       // This library does not implement a GIF writer; intentional
       // fall-through.
@@ -220,6 +244,14 @@ MultipleFrameReader* InstantiateImageFrameReader(ImageFormat image_type,
           PS_LOGGED_STATUS(PS_LOG_ERROR, handler, SCANLINE_STATUS_MEMORY_ERROR,
                            SCANLINE_UTIL, "failed to allocate GifFrameReader");
     }
+  } else if (image_type == IMAGE_AVIF) {
+    // Native ImageFrame implementation (decode + animation).
+    reader = new AvifFrameReader(handler);
+    if (reader == nullptr) {
+      *status =
+          PS_LOGGED_STATUS(PS_LOG_ERROR, handler, SCANLINE_STATUS_MEMORY_ERROR,
+                           SCANLINE_UTIL, "failed to allocate AvifFrameReader");
+    }
   } else {
     // Image formats for which we do not have an ImageFrame
     // implementation result in a wrapper around the corresponding
@@ -266,6 +298,14 @@ MultipleFrameWriter* InstantiateImageFrameWriter(ImageFormat image_type,
       *status =
           PS_LOGGED_STATUS(PS_LOG_ERROR, handler, SCANLINE_STATUS_MEMORY_ERROR,
                            SCANLINE_UTIL, "failed to allocate WebpFrameReader");
+    }
+  } else if (image_type == IMAGE_AVIF) {
+    // Native ImageFrame implementation (encode + animation).
+    allocated_writer = new AvifFrameWriter(handler);
+    if (allocated_writer == nullptr) {
+      *status =
+          PS_LOGGED_STATUS(PS_LOG_ERROR, handler, SCANLINE_STATUS_MEMORY_ERROR,
+                           SCANLINE_UTIL, "failed to allocate AvifFrameWriter");
     }
   } else {
     // Image formats for which we do not have an ImageFrame
@@ -336,7 +376,11 @@ bool ReadImage(ImageFormat image_type, const void* image_buffer,
     return true;
   }
   *pixels = nullptr;
-  const size_t data_length = reader->GetImageHeight() * bytes_per_row4;
+  size_t data_length;
+  if (!CheckedMulSize(static_cast<size_t>(reader->GetImageHeight()),
+                      bytes_per_row4, &data_length)) {
+    return false;
+  }
   unsigned char* image_data = static_cast<unsigned char*>(malloc(data_length));
   if (image_data == nullptr) {
     return false;

@@ -33,7 +33,8 @@ class HtmlName {
  public:
   // We keep both attribute names and tag names in the same space
   // for convenience.  This list must be kept in alpha-order and
-  // in sync with the static array in html_name.cc.
+  // in sync with html_name.gperf (from which the build generates
+  // html_name.gp.cc).
   //
   // Note that this list does not need to cover all HTML keywords --
   // only the ones that we are interested in for rewriting.
@@ -43,6 +44,7 @@ class HtmlName {
     kAbbr,
     kAction,
     kAddress,
+    kAllowfullscreen,
     kAlt,
     kAmp,
     kArea,
@@ -75,6 +77,7 @@ class HtmlName {
     kCommand,
     kContent,
     kControls,
+    kCrossorigin,
     kData,
     kDatalist,
     kDataActualHeight,
@@ -99,17 +102,20 @@ class HtmlName {
     kDataPagespeedPrioritize,
     kDataPagespeedResponsiveTemp,
     kDataPagespeedSize,
+    kDataPagespeedSrcsetUrlHashes,
     kDataPagespeedUrlHash,
     kDataSrc,
     kDataSrcset,
     kDd,
     kDeclare,
+    kDecoding,
     kDefaultchecked,
     kDefaultselected,
     kDefer,
     kDel,
     kDetails,
     kDfn,
+    kDialog,
     kDir,
     kDisabled,
     kDisplay,
@@ -120,6 +126,7 @@ class HtmlName {
     kEmbed,
     kEnctype,
     kEvent,
+    kFetchpriority,
     kFieldset,
     kFont,
     kFooter,
@@ -151,6 +158,7 @@ class HtmlName {
     kIndeterminate,
     kIns,
     kInput,
+    kIntegrity,
     kIsmap,
     kItemProp,
     kKbd,
@@ -161,6 +169,7 @@ class HtmlName {
     kLegend,
     kLi,
     kLink,
+    kLoading,
     kLongdesc,
     kLoop,
     kMain,
@@ -196,6 +205,8 @@ class HtmlName {
     kPagespeedNoDefer,
     kPagespeedNoTransform,
     kParam,
+    kPicture,
+    kPlaysinline,
     kPoster,
     kPre,
     kProfile,
@@ -231,6 +242,7 @@ class HtmlName {
     kTag,
     kTbody,
     kTd,
+    kTemplate,
     kTest,
     kTextarea,
     kTfoot,

@@ -1,9 +1,22 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 aprutil_build_rule = """
+
+# Linux/arm64 selector for the arm64 pre-generated apr-util headers. Defined
+# inline (like //third_party/libwebp's is_x86) so it is visible inside the
+# @aprutil repo.
+config_setting(
+    name = "linux_arm64",
+    constraint_values = [
+        "@platforms//os:linux",
+        "@platforms//cpu:arm64",
+    ],
+)
 
 cc_library(
     name = "aprutil",
     srcs = [
-        "@mod_pagespeed//third_party/aprutil:aprutil_pagespeed_memcache_c",
         'buckets/apr_brigade.c',
         'buckets/apr_buckets.c',
         'buckets/apr_buckets_alloc.c',
@@ -30,7 +43,8 @@ cc_library(
         'hooks/apr_hooks.c',
         #'ldap/apr_ldap_stub.c',
         #'ldap/apr_ldap_url.c',
-        'memcache/apr_memcache.c',
+        # memcache/apr_memcache.c removed: mod_pagespeed's memcached path uses
+        # libmemcached (//pagespeed/system MemcachedCache), not apr-util memcache.
         'misc/apr_date.c',
         'misc/apr_queue.c',
         'misc/apr_reslist.c',
@@ -71,7 +85,6 @@ cc_library(
         "include/apr_hooks.h",
         "include/apr_date.h",
         "include/apr_reslist.h",
-        "include/apr_memcache.h",
         "include/apr_uuid.h",
         "include/apr_base64.h",
         "include/apr_sha1.h",
@@ -90,16 +103,29 @@ cc_library(
         "include/apr_ldap_init.h",
         "include/apr_crypto.h",
     ],
-    copts = [
-      "-Ithird_party/aprutil/gen/arch/linux/x64/include/",
-      "-Ithird_party/aprutil/gen/arch/linux/x64/include/private",
-      "-Iexternal/aprutil/include/",
-      "-Iexternal/aprutil/include/private/",
-      "-Iexternal/aprutil/include/arch/unix/",
-      "-Iexternal/aprutil/",
-      "-Iexternal/apr/include/",
-      "-Iexternal/apr/include/arch/unix/",
-      "-Ithird_party/apr/gen/arch/linux/x64/include/",
+    copts = select({
+        "@platforms//os:macos": [
+            "-Ithird_party/aprutil/gen/arch/mac/x64/include/",
+            "-Ithird_party/aprutil/gen/arch/mac/x64/include/private",
+            "-Ithird_party/apr/gen/arch/mac/x64/include/",
+        ],
+        ":linux_arm64": [
+            "-Ithird_party/aprutil/gen/arch/linux/arm64/include/",
+            "-Ithird_party/aprutil/gen/arch/linux/arm64/include/private",
+            "-Ithird_party/apr/gen/arch/linux/arm64/include/",
+        ],
+        "//conditions:default": [
+            "-Ithird_party/aprutil/gen/arch/linux/x64/include/",
+            "-Ithird_party/aprutil/gen/arch/linux/x64/include/private",
+            "-Ithird_party/apr/gen/arch/linux/x64/include/",
+        ],
+    }) + [
+        "-Iexternal/aprutil/include/",
+        "-Iexternal/aprutil/include/private/",
+        "-Iexternal/aprutil/include/arch/unix/",
+        "-Iexternal/aprutil/",
+        "-Iexternal/apr/include/",
+        "-Iexternal/apr/include/arch/unix/",
     ],
     deps = [
         "@apr//:apr",
@@ -108,4 +134,4 @@ cc_library(
 )
 """
 
-# find | grep .h$ | while read line; do echo "\"$line\","; done 
+# find | grep .h$ | while read line; do echo "\"$line\","; done

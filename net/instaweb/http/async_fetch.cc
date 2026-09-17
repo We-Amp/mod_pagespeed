@@ -91,6 +91,23 @@ bool AsyncFetch::Write(const StringPiece& sp, MessageHandler* handler) {
   return ret;
 }
 
+bool AsyncFetch::WriteShared(const StringPiece& content,
+                             const SharedString& storage,
+                             MessageHandler* handler) {
+  bool ret = true;
+  if (!content.empty()) {
+    if (!headers_complete_) {
+      HeadersComplete();
+    }
+    if (request_headers()->method() == RequestHeaders::kHead) {
+      // Don't write the body of a HEAD response.
+      return ret;
+    }
+    ret = HandleWriteShared(content, storage, handler);
+  }
+  return ret;
+}
+
 bool AsyncFetch::Flush(MessageHandler* handler) {
   if (!headers_complete_) {
     HeadersComplete();

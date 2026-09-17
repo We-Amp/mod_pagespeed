@@ -44,7 +44,8 @@ class NullMessageHandler : public MessageHandler {
                         const GoogleString& message) override;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(NullMessageHandler);
+  NullMessageHandler(const NullMessageHandler&) = delete;
+  NullMessageHandler& operator=(const NullMessageHandler&) = delete;
 };
 
 }  // namespace net_instaweb

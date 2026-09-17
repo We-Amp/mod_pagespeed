@@ -97,7 +97,7 @@ class SymbolTable {
     }
   };
 
-  typedef dense_hash_map<StringPiece, StringPiece*, Hash, Comparator> SymbolMap;
+  using SymbolMap = dense_hash_map<StringPiece, StringPiece*, Hash, Comparator>;
   SymbolMap string_map_;
 
   // Since we don't want to have Atom include both base and size, it keeps
@@ -126,11 +126,12 @@ class SymbolTable {
   char* next_ptr_;  // Used for bump-pointer pooled allocation of strings.
   size_t string_bytes_allocated_;
 
-  DISALLOW_COPY_AND_ASSIGN(SymbolTable);
+  SymbolTable(const SymbolTable&) = delete;
+  SymbolTable& operator=(const SymbolTable&) = delete;
 };
 
-typedef SymbolTable<CaseFold> SymbolTableInsensitive;
-typedef SymbolTable<CasePreserve> SymbolTableSensitive;
+using SymbolTableInsensitive = SymbolTable<CaseFold>;
+using SymbolTableSensitive = SymbolTable<CasePreserve>;
 
 }  // namespace net_instaweb
 

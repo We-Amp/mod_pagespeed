@@ -39,7 +39,8 @@ class MockNonceGenerator : public NonceGenerator {
  private:
   uint64 counter_;
 
-  DISALLOW_COPY_AND_ASSIGN(MockNonceGenerator);
+  MockNonceGenerator(const MockNonceGenerator&) = delete;
+  MockNonceGenerator& operator=(const MockNonceGenerator&) = delete;
 };
 
 }  // namespace net_instaweb

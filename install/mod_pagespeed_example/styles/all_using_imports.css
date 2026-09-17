@@ -1,3 +1,7 @@
 @import url(yellow.css);
 @import url(blue.css);
 @import url(bold.css);
+@font-face {
+  font-family: 'ExampleFont';
+  src: url(example.woff2) format('woff2');
+}

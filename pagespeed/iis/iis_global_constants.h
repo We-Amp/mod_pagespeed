@@ -1,0 +1,209 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+
+#ifndef GLOBAL_CONSTANTS_H
+#define GLOBAL_CONSTANTS_H
+
+#include "net/instaweb/public/version.h"
+// WinSock2.h must come before http.h (which also includes it).
+// _WINSOCKAPI_ is defined globally to prevent Windows.h from pulling in
+// the older winsock.h, so we temporarily undef it here.
+#undef _WINSOCKAPI_
+#include <WinSock2.h>
+#include <http.h>
+
+// Not const, because it will be a setting
+extern bool REDUCE_LOG;
+
+static const size_t ERROR_BUFFER_SIZE=1024*16;
+
+static HTTP_DATA_CHUNK emptydatachunk = {};
+static const char emptystring[]="";
+
+static const char *httpKnownHeadersAscii[]={
+	"Cache-Control",
+	"Connection",
+	"Date",
+	"Keep-Alive",  
+	"Pragma", //HttpHeaderPragma              = 4,
+	"Trailer", //HttpHeaderTrailer             = 5, 
+	"Transfer-Encoding", //HttpHeaderTransferEncoding    = 6, 
+	"Upgrade", //HttpHeaderUpgrade             = 7,
+	"Via",//HttpHeaderVia                 = 8,
+	"Warning",//HttpHeaderWarning             = 9,
+	"Allow",//HttpHeaderAllow               = 10, 
+	"Content-Length",//HttpHeaderContentLength       = 11,
+	"Content-Type",//HttpHeaderContentType         = 12,
+	"Content-Encoding",//HttpHeaderContentEncoding     = 13,
+	"Content-Language",//HttpHeaderContentLanguage     = 14,
+	"Content-Location",//HttpHeaderContentLocation     = 15,
+	"Content-MD5",//HttpHeaderContentMd5          = 16,
+	"Content-Range",//HttpHeaderContentRange        = 17,
+	"Content-Expires",//HttpHeaderExpires             = 18,
+	"Last-Modified",//HttpHeaderLastModified        = 19,
+	"Accept",//HttpHeaderAccept              = 20,
+	"Accept-Charset",//HttpHeaderAcceptCharset       = 21,
+	"Accept-Encoding",//HttpHeaderAcceptEncoding      = 22,
+	"Accept-Language",//HttpHeaderAcceptLanguage      = 23,
+	"Authorization",//HttpHeaderAuthorization       = 24,
+	"Cookie",//HttpHeaderCookie              = 25,
+	"Expect",//HttpHeaderExpect              = 26,
+	"From",//HttpHeaderFrom                = 27,
+	"Host",//HttpHeaderHost                = 28,
+	"If-Match",//HttpHeaderIfMatch             = 29,
+	"If-Modified-Since",//HttpHeaderIfModifiedSince     = 30,
+	"If-None-Match",//HttpHeaderIfNoneMatch         = 31,
+	"If-Range",//HttpHeaderIfRange             = 32,
+	"If-Unmodified-Since",//HttpHeaderIfUnmodifiedSince   = 33,
+	"Max-Forwards",//HttpHeaderMaxForwards         = 34,
+	"Proxy-Authorization",//HttpHeaderProxyAuthorization  = 35,
+	"Referer",//HttpHeaderReferer             = 36,
+	"Range",//HttpHeaderRange               = 37,
+	"TE",//HttpHeaderTe                  = 38,
+	"Translate",//HttpHeaderTranslate           = 39,
+	"User-Agent",//HttpHeaderUserAgent           = 40,
+	"Request-Maximum",//HttpHeaderRequestMaximum      = 41,
+	"Accept-Ranges",//HttpHeaderAcceptRanges        = 20,
+	"Age",//HttpHeaderAge                 = 21,
+	"ETag",//HttpHeaderEtag                = 22,
+	"Location",//HttpHeaderLocation            = 23,
+	"Proxy-Authenticate", //  HttpHeaderProxyAuthenticate   = 24,
+	"Retry-After",//HttpHeaderRetryAfter          = 25,
+	"Server",//HttpHeaderServer              = 26,
+	"Set-Cookie",//HttpHeaderSetCookie           = 27,
+	"Vary",//HttpHeaderVary                = 28,
+	"Www-Authenticate",//HttpHeaderWwwAuthenticate     = 29,
+	"Response-Maximum",//HttpHeaderResponseMaximum     = 30,
+	"Undefined-Header1",
+	"Undefined-Header2",
+	"Undefined-Header3",
+	"Undefined-Header4",
+	"Undefined-Header5",
+	"Undefined-Header6",
+	"Undefined-Header7",
+	"Undefined-Header8",
+	"Undefined-Header9",
+	"Undefined-Header10",
+	"Undefined-Header11",
+	"Undefined-Header12",
+};
+
+
+static const char *HTTP_HEADER_ID_STRINGS_REQUEST[] =
+{
+    "CacheControl",
+    "Connection",
+    "Date",
+    "KeepAlive",
+    "Pragma",
+    "Trailer",
+    "TransferEncoding",
+    "Upgrade",
+    "Via",
+    "Warning",
+    "Allow",
+    "ContentLength",
+    "ContentType",
+    "ContentEncoding",
+    "ContentLanguage",
+    "ContentLocation",
+    "ContentMd5",
+    "ContentRange",
+    "Expires",
+    "LastModified",
+
+    "Accept",
+    "AcceptCharset",
+    "AcceptEncoding",
+    "AcceptLanguage",
+    "Authorization",
+    "Cookie",
+    "Expect",
+    "From",
+    "Host",
+    "IfMatch",
+    "IfModifiedSince",
+    "IfNoneMatch",
+    "IfRange",
+    "IfUnmodifiedSince",
+    "MaxForwards",
+    "ProxyAuthorization",
+    "Referer",
+    "Range",
+    "Te",
+    "Translate",
+    "UserAgent",
+};
+
+static const char *HTTP_HEADER_ID_STRINGS_RESPONSE[] =
+{
+    "Cache-Control",
+    "Connection",
+    "Date",
+    "Keep-Alive",
+    "Pragma",
+    "Trailer",
+    "Transfer-Encoding",
+    "Upgrade",
+    "Via",
+    "Warning",
+    "Allow",
+    "Content-Length",
+    "Content-Type",
+    "Content-Encoding",
+    "Content-Language",
+    "Content-Location",
+    "Content-Md5",
+    "Content-Range",
+    "Expires",
+    "Last-Modified",
+    "Accept-Ranges",
+    "Age",
+    "E-Tag",
+    "Location",
+    "Proxy-Authenticate",
+    "Retry-After",
+    "Server",
+    "Set-Cookie",
+    "Vary",
+    "Www-Authenticate", 
+};
+
+static const char *HTTP_HEADER_ID_STRINGS_RESPONSE_CACHE[] =
+{
+	"__x_Cache-Control",
+	NULL,//"Connection",
+	NULL,//"Date",
+	NULL,//"Keep-Alive",
+	NULL,//"Pragma",
+	NULL,//"Trailer",
+	NULL,//"Transfer-Encoding",
+	NULL,//"Upgrade",
+	NULL,//"Via",
+	NULL,//"Warning",
+	NULL,//"Allow",
+	NULL,//"Content-Length",
+	NULL,//"Content-Type",
+	NULL,//"Content-Encoding",
+	NULL,//"Content-Language",
+	NULL,//"Content-Location",
+	NULL,//"Content-Md5",
+	NULL,//"Content-Range",
+	"__x_Expires",
+	"__x_Last-Modified",
+	"__x_Accept-Ranges",
+	NULL,//"Age",
+	"__x_E-Tag",
+	NULL,//"Location",
+	NULL,//"Proxy-Authenticate",
+	NULL,//"Retry-After",
+	NULL,//"Server",
+	NULL,//"Set-Cookie",
+	NULL,//"Vary",
+	NULL,//"Www-Authenticate",
+};
+
+
+
+
+#endif

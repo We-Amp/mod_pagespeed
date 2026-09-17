@@ -22,6 +22,7 @@
 #include "net/instaweb/http/public/logging_proto_impl.h"
 #include "net/instaweb/http/public/request_context.h"
 #include "net/instaweb/public/global_constants.h"
+#include "net/instaweb/rewriter/critical_keys.pb.h"
 #include "net/instaweb/rewriter/public/beacon_critical_images_finder.h"
 #include "net/instaweb/rewriter/public/critical_images_finder.h"
 #include "net/instaweb/rewriter/public/lazyload_images_filter.h"
@@ -111,10 +112,47 @@ class CriticalImagesBeaconFilterTest : public RewriteTestBase {
         server_context()->beacon_cohort());
   }
 
+  // Simulates the beacon response arriving for the nonce handed out by the
+  // most recent injection, recording `critical_key` as the html critical
+  // image set.
+  void SimulateBeaconResponse(StringPiece critical_key) {
+    // The injected beacon init call ends with the quoted nonce as its last
+    // argument; the first pass emits no other "');" sequence.
+    size_t end = output_buffer_.rfind("');");
+    ASSERT_NE(GoogleString::npos, end);
+    size_t start = output_buffer_.rfind('\'', end - 1);
+    ASSERT_NE(GoogleString::npos, start);
+    GoogleString nonce = output_buffer_.substr(start + 1, end - start - 1);
+    StringSet html_critical_images;
+    html_critical_images.insert(critical_key.as_string());
+    EXPECT_TRUE(BeaconCriticalImagesFinder::UpdateCriticalImagesCacheEntry(
+        &html_critical_images, nullptr, nullptr, nonce,
+        server_context()->beacon_cohort(), rewrite_driver()->property_page(),
+        factory()->mock_timer()));
+    WriteToPropertyCache();
+  }
+
+  void ReinstrumentAndReprocess() {
+    factory()->mock_timer()->AdvanceMs(
+        options()->beacon_reinstrument_time_sec() * 1000);
+    ResetDriver();
+    SetupAndProcessUrl();
+  }
+
   void PrepareInjection() {
     rewrite_driver()->AddFilters();
     AddFileToMockFetcher(image_gurl_.Spec(), kChefGifFile, kContentTypeJpeg,
                          100);
+  }
+
+  // Srcset candidates get input resources created for them, so they need
+  // mock fetcher entries of their own.
+  void PrepareSrcsetInjection() {
+    PrepareInjection();
+    AddFileToMockFetcher(StrCat(kTestDomain, "small.jpg"), kChefGifFile,
+                         kContentTypeJpeg, 100);
+    AddFileToMockFetcher(StrCat(kTestDomain, "large.jpg"), kChefGifFile,
+                         kContentTypeJpeg, 100);
   }
 
   void AddImageTags(GoogleString* html) {
@@ -187,18 +225,31 @@ class CriticalImagesBeaconFilterTest : public RewriteTestBase {
     return UintToString(hash_val);
   }
 
+  // Hash of `url` resolved against the page, mirroring the production code.
+  GoogleString UrlHash(StringPiece url) {
+    GoogleUrl gurl(rewrite_driver()->base_url(), url);
+    unsigned int hash_val = HashString<CasePreserve, unsigned int>(
+        gurl.spec_c_str(), strlen(gurl.spec_c_str()));
+    return UintToString(hash_val);
+  }
+
   GoogleString CreateInitString() {
     GoogleString url;
     EscapeToJsStringLiteral(rewrite_driver()->google_url().Spec(), false, &url);
-    StringPiece beacon_url = https_mode_ ? options()->beacon_url().https
-                                         : options()->beacon_url().http;
+    // Mirror the production code, which JS-escapes the beacon URL before
+    // splicing it into the single-quoted Run(...) argument.
+    StringPiece raw_beacon_url = https_mode_ ? options()->beacon_url().https
+                                             : options()->beacon_url().http;
+    GoogleString beacon_url;
+    EscapeToJsStringLiteral(raw_beacon_url, false, &beacon_url);
     GoogleString options_signature_hash =
         rewrite_driver()->server_context()->hasher()->Hash(
             rewrite_driver()->options()->signature());
     bool lazyload_will_run_beacon =
         rewrite_driver()->options()->Enabled(RewriteOptions::kLazyloadImages) &&
         LazyloadImagesFilter::ShouldApply(rewrite_driver()) ==
-            RewriterHtmlApplication::ACTIVE;
+            RewriterHtmlApplication::ACTIVE &&
+        !LazyloadImagesFilter::ShouldApplyNativeMode(rewrite_driver());
     GoogleString str = "pagespeed.CriticalImages.Run(";
     StrAppend(&str, "'", beacon_url, "',");
     StrAppend(&str, "'", url, "',");
@@ -215,6 +266,36 @@ class CriticalImagesBeaconFilterTest : public RewriteTestBase {
   bool https_mode_;
   GoogleUrl image_gurl_;
 };
+
+TEST_F(CriticalImagesBeaconFilterTest, CspForbidsInlineScript) {
+  // Under a script-src policy without 'unsafe-inline' the browser would
+  // block the beacon script and the onload handlers, so the page must not
+  // be instrumented at all.
+  PrepareInjection();
+  GoogleString html =
+      "<head><meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"script-src *;\"></head><body>";
+  AddImageTags(&html);
+  StrAppend(&html, "</body>");
+  ParseUrl(GetTestUrl(), html);
+  VerifyNoInjection(0);
+  EXPECT_THAT(output_buffer_, Not(HasSubstr("data-pagespeed-url-hash")));
+  EXPECT_THAT(output_buffer_,
+              Not(HasSubstr(CriticalImagesBeaconFilter::kImageOnloadCode)));
+}
+
+TEST_F(CriticalImagesBeaconFilterTest, CspAllowsInlineScript) {
+  // With 'unsafe-inline' permitted the filter behaves as usual.
+  PrepareInjection();
+  GoogleString html =
+      "<head><meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"script-src * 'unsafe-inline';\"></head><body>";
+  AddImageTags(&html);
+  StrAppend(&html, "</body>");
+  ParseUrl(GetTestUrl(), html);
+  VerifyInjection(1);
+  VerifyWithNoImageRewrite();
+}
 
 TEST_F(CriticalImagesBeaconFilterTest, ScriptInjection) {
   RunInjection();
@@ -269,6 +350,80 @@ TEST_F(CriticalImagesBeaconFilterTest, ScriptInjectionWithImageInlining) {
   EXPECT_TRUE(output_buffer_.find(hash_str) != GoogleString::npos);
   EXPECT_EQ(-1, logging_info()->num_html_critical_images());
   EXPECT_EQ(-1, logging_info()->num_css_critical_images());
+}
+
+// A srcset-only image (no src attribute) carries no data-pagespeed-url-hash.
+// Instead the filter stamps the hashes of all srcset candidates positionally,
+// so the beacon JS can report the candidate the browser actually selected
+// (matched against currentSrc); the candidate hashes are registered as beacon
+// candidates alongside the src hashes.
+TEST_F(CriticalImagesBeaconFilterTest, ScriptInjectionSrcsetOnly) {
+  PrepareSrcsetInjection();
+  ParseUrl(GetTestUrl(),
+           "<head></head><body>"
+           "<img srcset=\"small.jpg 480w, large.jpg 1024w\"/>"
+           "</body>");
+  VerifyInjection(1);
+  // Positional candidate hashes, resolved against the page URL.
+  EXPECT_THAT(
+      output_buffer_,
+      HasSubstr(StrCat("data-pagespeed-srcset-url-hashes=\"",
+                       UrlHash("small.jpg"), ",", UrlHash("large.jpg"), "\"")));
+  // No src attribute means no src hash is stamped (the attribute-usage form
+  // excludes the literal appearing inside the injected beacon JS).
+  EXPECT_THAT(output_buffer_, Not(HasSubstr("data-pagespeed-url-hash=\"")));
+  // The image-onload criticality hook is added, as for src images.
+  EXPECT_THAT(
+      output_buffer_,
+      HasSubstr(StrCat("onload=\"",
+                       CriticalImagesBeaconFilter::kImageOnloadCode, "\"")));
+}
+
+// Mixed <img src srcset> markup keeps src-keyed stamping: the beacon reports
+// the src hash, and fetchpriority is element-level so it raises whichever
+// candidate the browser selects. No candidate hash list is emitted.
+TEST_F(CriticalImagesBeaconFilterTest, ScriptInjectionMixedSrcSrcset) {
+  PrepareSrcsetInjection();
+  ParseUrl(GetTestUrl(),
+           StrCat("<head></head><body>"
+                  "<img src=\"",
+                  kChefGifFile, "\" srcset=\"large.jpg 1024w\" ", kChefGifDims,
+                  ">"
+                  "</body>"));
+  VerifyInjection(1);
+  VerifyWithNoImageRewrite();
+  // Attribute-usage form: the literal also appears inside the beacon JS.
+  EXPECT_THAT(output_buffer_,
+              Not(HasSubstr("data-pagespeed-srcset-url-hashes=\"")));
+}
+
+// The srcset candidate hashes are registered as beacon candidate keys
+// alongside src hashes, so candidate-aware beacon responses follow the same
+// re-beacon scheduling as src-keyed ones.
+TEST_F(CriticalImagesBeaconFilterTest, SrcsetCandidatesRegisteredForBeaconing) {
+  PrepareSrcsetInjection();
+  ParseUrl(GetTestUrl(),
+           "<head></head><body>"
+           "<img srcset=\"small.jpg 480w, large.jpg 1024w\"/>"
+           "</body>");
+  VerifyInjection(1);
+  // Capture the expected hashes before ResetDriver() clears the base URL.
+  const GoogleString small_hash = UrlHash("small.jpg");
+  const GoogleString large_hash = UrlHash("large.jpg");
+  WriteToPropertyCache();
+
+  ResetDriver();
+  CriticalImagesFinder* finder = server_context()->critical_images_finder();
+  ASSERT_TRUE(finder->IsCriticalImageInfoPresent(rewrite_driver()));
+  const CriticalKeys& keys = rewrite_driver()
+                                 ->critical_images_info()
+                                 ->proto.html_critical_image_support();
+  StringSet candidate_keys;
+  for (int i = 0; i < keys.key_evidence_size(); ++i) {
+    candidate_keys.insert(keys.key_evidence(i).key());
+  }
+  EXPECT_NE(0, candidate_keys.count(small_hash));
+  EXPECT_NE(0, candidate_keys.count(large_hash));
 }
 
 TEST_F(CriticalImagesBeaconFilterTest, NoScriptInjectionWithNoScript) {
@@ -355,6 +510,80 @@ TEST_F(CriticalImagesBeaconFilterTest, LazyloadEnabled) {
   ResetDriver();
   SetupAndProcessUrl();
   VerifyInjection(2);
+}
+
+// Native-mode lazyload injects no JavaScript, so the beacon must run its
+// onload handler itself. The send-at-onload flag is the argument after the
+// quoted options hash, hence the "',true," pattern.
+TEST_F(CriticalImagesBeaconFilterTest, LazyloadNativeModeBeaconsAtOnload) {
+  options()->EnableFilter(RewriteOptions::kLazyloadImages);
+  options()->set_lazyload_images_mode(
+      RewriteOptions::kLazyloadImagesModeNative);
+  RunInjection();
+  VerifyInjection(1);
+  EXPECT_THAT(output_buffer_, HasSubstr("',true,"));
+}
+
+// In JS mode the lazyload loader fires the beacon once it has loaded all
+// images, so the beacon must not also fire at onload.
+TEST_F(CriticalImagesBeaconFilterTest, LazyloadJsModeDelegatesBeacon) {
+  options()->EnableFilter(RewriteOptions::kLazyloadImages);
+  options()->set_lazyload_images_mode(RewriteOptions::kLazyloadImagesModeJs);
+  // First access: no critical image data yet, so js lazyload is disabled and
+  // the beacon fires at onload.
+  RunInjection();
+  VerifyInjection(1);
+  EXPECT_THAT(output_buffer_, HasSubstr("',true,"));
+
+  // Simulate the beacon response arriving with a hash that matches no image
+  // on the page, so the page's images stay non-critical.
+  SimulateBeaconResponse("1234");
+
+  // Re-instrument with data present: lazyload is active and owns the beacon.
+  ReinstrumentAndReprocess();
+  VerifyInjection(2);
+  EXPECT_THAT(output_buffer_, HasSubstr("',false,"));
+  // The lazyload machinery actually rewrote the images (attribute form, to
+  // not match the attribute name appearing as a literal in the loader js).
+  EXPECT_THAT(output_buffer_, HasSubstr("data-pagespeed-lazy-src=\""));
+}
+
+// Even when every image on the page is critical (nothing gets lazyloaded),
+// an active js-mode lazyload must still emit its loader so the delegated
+// beacon fires.
+TEST_F(CriticalImagesBeaconFilterTest, LazyloadJsModeAllCriticalStillBeacons) {
+  options()->EnableFilter(RewriteOptions::kLazyloadImages);
+  options()->set_lazyload_images_mode(RewriteOptions::kLazyloadImagesModeJs);
+  RunInjection();
+  VerifyInjection(1);
+
+  // The beacon response marks the page's only image critical, keyed by the
+  // same url hash BeaconCriticalImagesFinder::GetKeyForUrl computes.
+  SimulateBeaconResponse(UintToString(HashString<CasePreserve, unsigned int>(
+      image_gurl_.Spec().data(), image_gurl_.Spec().size())));
+
+  ReinstrumentAndReprocess();
+  VerifyInjection(2);
+  // Delegated to lazyload...
+  EXPECT_THAT(output_buffer_, HasSubstr("',false,"));
+  // ...whose loader must therefore be present despite zero rewritten images
+  // (the attribute-form check skips the literals inside the loader js).
+  EXPECT_THAT(output_buffer_, HasSubstr("pagespeed.lazyLoadInit"));
+  EXPECT_THAT(output_buffer_, Not(HasSubstr("data-pagespeed-lazy-src=\"")));
+}
+
+// Regression: the beacon URL is JS-escaped (matching the page URL) before it
+// is spliced into the single-quoted argument of pagespeed.CriticalImages.Run,
+// so a single quote in the (admin-configured) beacon URL is emitted as \' and
+// cannot terminate the JS string literal early.
+TEST_F(CriticalImagesBeaconFilterTest, BeaconUrlJsEscaped) {
+  options()->set_beacon_url("http://example.com/beacon'x");
+  RunInjection();
+  VerifyInjection(1);
+  // The single quote is backslash-escaped in the emitted Run(...) call.
+  EXPECT_THAT(output_buffer_, HasSubstr("'http://example.com/beacon\\'x','"));
+  // The raw, unescaped single-quote form must not appear.
+  EXPECT_THAT(output_buffer_, Not(HasSubstr("beacon'x")));
 }
 
 }  // namespace net_instaweb

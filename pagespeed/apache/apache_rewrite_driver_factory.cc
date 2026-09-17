@@ -29,6 +29,7 @@
 #include "pagespeed/apache/apache_config.h"
 #include "pagespeed/apache/apache_httpd_includes.h"
 #include "pagespeed/apache/apache_message_handler.h"
+#include "pagespeed/apache/apache_mpm_detection.h"
 #include "pagespeed/apache/apache_server_context.h"
 #include "pagespeed/apache/apache_thread_system.h"
 #include "pagespeed/apache/apr_timer.h"
@@ -40,10 +41,12 @@
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/sharedmem/shared_circular_buffer.h"
+#include "pagespeed/kernel/thread/event_scheduler.h"
+#include "pagespeed/kernel/thread/libevent_dispatcher.h"
 #include "pagespeed/kernel/thread/pthread_shared_mem.h"
-#include "pagespeed/kernel/thread/scheduler_thread.h"
-#include "pagespeed/kernel/thread/slow_worker.h"
-#include "pagespeed/system/controller_manager.h"
+#include "pagespeed/system/curl_url_async_fetcher.h"
+#include "pagespeed/system/optimization_thread_policy.h"
+#include "pagespeed/system/system_rewrite_options.h"
 
 namespace net_instaweb {
 
@@ -56,7 +59,6 @@ ApacheRewriteDriverFactory::ApacheRewriteDriverFactory(
                                  nullptr, /* default shared memory runtime */
                                  server->server_hostname, server->port),
       server_rec_(server),
-      scheduler_thread_(nullptr),
       version_(version.data(), version.size()),
       apache_message_handler_(new ApacheMessageHandler(
           server_rec_, version_, timer(), thread_system()->NewMutex())),
@@ -82,31 +84,22 @@ ApacheRewriteDriverFactory::~ApacheRewriteDriverFactory() {
   // clean up properly.
   ShutDown();
 
+  // Quiesce the dispatcher's event loop, then detach the scheduler from it
+  // BEFORE the dispatcher member is destroyed: the scheduler (owned by the
+  // base factory) outlives the dispatcher, and detaching releases its pump
+  // timers while the libevent base they reference is still alive.
+  if (event_dispatcher_ != nullptr) {
+    event_dispatcher_->InitiateShutdown();
+    event_dispatcher_->WaitForShutdown();
+    if (event_scheduler_ != nullptr) {
+      event_scheduler_->DetachDispatcher();
+    }
+  }
+
   apr_pool_destroy(pool_);
 
   // We still have registered a pool deleter here, right?  This seems risky...
   STLDeleteElements(&uninitialized_server_contexts_);
-
-  // Apache startup is pretty weird, in that it initializes twice:
-  // first to check configuration, then for real. In between the two runs,
-  // it cleans us up very thoroughly, including unloading our module, so if we
-  // are here at the end of run 1, we are about to forget all about the
-  // controller process hanging around, while the FD to it will be kept around
-  // (including accross daemonization), keeping it alive.
-  //
-  // So here we drop the FD, to get the controller to exit, letting us start
-  // it again (and we want it to exit on regular exit, too).
-  //
-  // This call is a no-op if nothing was started.
-  //
-  // This is done in Apache-specific code rather than System* because
-  // nginx has other challenges: it can create multiple
-  // SystemRewriteDriverFactory's at once when reloading config, and
-  // ~SystemRewriteDriverFactory for the old one happens too late to be useful,
-  // so there we are better off just using global state to keep track of
-  // the controller (as there are no pesky dlunload's making us forget all of
-  // it!).
-  ControllerManager::DetachFromControllerProcess();
 }
 
 Timer* ApacheRewriteDriverFactory::DefaultTimer() { return new AprTimer(); }
@@ -133,29 +126,76 @@ void ApacheRewriteDriverFactory::SetupCaches(ServerContext* server_context) {
   apache_server_context->InitProxyFetchFactory();
 }
 
+Scheduler* ApacheRewriteDriverFactory::CreateScheduler() {
+  // Called lazily via RewriteDriverFactory::scheduler(), which owns the
+  // result. Created unattached; SetNeedSchedulerThread() attaches the
+  // libevent dispatcher when configuration requires driven alarms.
+  DCHECK(event_scheduler_ == nullptr);
+  event_scheduler_ = new EventScheduler(thread_system(), timer());
+  return event_scheduler_;
+}
+
 void ApacheRewriteDriverFactory::SetNeedSchedulerThread() {
-  if (scheduler_thread_ == nullptr) {
-    scheduler_thread_ = new SchedulerThread(thread_system(), scheduler());
-    defer_cleanup(scheduler_thread_->MakeDeleter());
-    scheduler_thread_->Start();
+  if (event_dispatcher_ == nullptr) {
+    // LibeventDispatcher runs libevent in a background thread, providing
+    // the same functionality as SchedulerThread but with a unified
+    // EventDispatcher abstraction. Attaching it to the EventScheduler makes
+    // the event loop drive alarm delivery, so alarms fire on time even with
+    // no thread blocked in the scheduler.
+    event_dispatcher_ =
+        std::make_unique<LibeventDispatcher>(thread_system(), timer());
+    bool ok = event_dispatcher_->Start();
+    CHECK(ok) << "Unable to start event dispatcher";
+    scheduler();  // Ensure the scheduler exists (created via CreateScheduler).
+    CHECK(event_scheduler_ != nullptr);
+    event_scheduler_->AttachDispatcher(event_dispatcher_.get());
   }
 }
 
 bool ApacheRewriteDriverFactory::IsServerThreaded() {
-  // Detect whether we're using a threaded MPM.
-  apr_status_t status;
-  int result = 0, threads = 1;
-  status = ap_mpm_query(AP_MPMQ_IS_THREADED, &result);
-  if (status == APR_SUCCESS &&
-      (result == AP_MPMQ_STATIC || result == AP_MPMQ_DYNAMIC)) {
-    // Number of configured threads.
-    status = ap_mpm_query(AP_MPMQ_MAX_THREADS, &threads);
-    if (status != APR_SUCCESS) {
-      return false;  // Assume non-thready by default.
-    }
+  return IsThreadedFromMpmInfo(QueryMpmThreadInfo());
+}
+
+int ApacheRewriteDriverFactory::ConcurrentProcessCount() {
+  return ProcessConcurrencyFromMpmInfo(QueryMpmProcessInfo());
+}
+
+void ApacheRewriteDriverFactory::LogThreadCountResolution() {
+  // Report the divisor the counts were actually computed from, not a fresh
+  // query: if the two ever disagreed, the log has to name the one that was
+  // used.
+  const int processes = concurrent_process_count();
+
+  // kWarning throughout: Apache's default LogLevel is warn, and a resolution
+  // an operator cannot see is a resolution nobody made: emitting this below
+  // the default level is most of why Apache ran a single optimization thread
+  // for years without anyone noticing.
+  if (processes <= 0) {
+    message_handler()->Message(
+        kWarning,
+        "PageSpeed optimization threads: %d rewrite, %d expensive rewrite "
+        "(per httpd child). Could not read the configured child-process count "
+        "from the MPM, so the minimum was used. If the MPM module is loaded "
+        "after mod_pagespeed, load it first; otherwise set NumRewriteThreads "
+        "and NumExpensiveRewriteThreads explicitly. Effective CPU budget: %d "
+        "whole cores (limited by %s).",
+        num_rewrite_threads(), num_expensive_rewrite_threads(),
+        cpu_budget().effective_cores, CpuBudgetSourceName(cpu_budget().source));
+    return;
   }
 
-  return threads > 1;
+  const MpmThreadInfo thread_info = QueryMpmThreadInfo();
+  message_handler()->Message(
+      kWarning,
+      "PageSpeed optimization threads: %d rewrite, %d expensive rewrite "
+      "(per httpd child). Effective CPU budget: %d whole cores (limited by "
+      "%s); httpd children: %d; MPM: %s (ThreadsPerChild=%d). Override with "
+      "NumRewriteThreads and NumExpensiveRewriteThreads.",
+      num_rewrite_threads(), num_expensive_rewrite_threads(),
+      cpu_budget().effective_cores, CpuBudgetSourceName(cpu_budget().source),
+      processes,
+      IsThreadedFromMpmInfo(thread_info) ? "threaded" : "non-threaded",
+      thread_info.max_threads);
 }
 
 int ApacheRewriteDriverFactory::LookupThreadLimit() {
@@ -204,11 +244,26 @@ void ApacheRewriteDriverFactory::Initialize() {
   RewriteDriverFactory::Initialize();
 }
 
+UrlAsyncFetcher* ApacheRewriteDriverFactory::AllocateFetcher(
+    SystemRewriteOptions* config) {
+  CurlUrlAsyncFetcher* fetcher = new CurlUrlAsyncFetcher(
+      config->fetcher_proxy().c_str(), thread_system(), statistics(), timer(),
+      config->blocking_fetch_timeout_ms(), message_handler());
+  fetcher->set_list_outstanding_urls_on_error(list_outstanding_urls_on_error());
+  fetcher->set_fetch_with_gzip(config->fetch_with_gzip());
+  fetcher->set_track_original_content_length(track_original_content_length());
+  fetcher->SetHttpsOptions(config->https_options());
+  fetcher->SetSslCertificatesDir(config->ssl_cert_directory());
+  fetcher->SetSslCertificatesFile(config->ssl_cert_file());
+  return fetcher;
+}
+
 void ApacheRewriteDriverFactory::InitStats(Statistics* statistics) {
   // Init standard system stats.
   SystemRewriteDriverFactory::InitStats(statistics);
 
   // Init Apache-specific stats.
+  CurlUrlAsyncFetcher::InitStats(statistics);
   ApacheServerContext::InitStats(statistics);
 }
 

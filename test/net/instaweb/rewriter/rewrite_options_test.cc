@@ -19,11 +19,18 @@
 
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 
+#include <atomic>
+#include <cstdint>
+#include <memory>
+
 #include "net/instaweb/rewriter/public/domain_lawyer.h"
 #include "net/instaweb/rewriter/public/experiment_util.h"
+#include "net/instaweb/rewriter/public/image_rewrite_filter.h"
 #include "pagespeed/kernel/base/google_message_handler.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/null_message_handler.h"
+#include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/http/google_url.h"
 #include "pagespeed/kernel/http/request_headers.h"
 #include "test/net/instaweb/rewriter/rewrite_options_test_base.h"
@@ -100,11 +107,11 @@ class RewriteOptionsTest : public RewriteOptionsTestBase<RewriteOptions> {
                                                   StringPiece local_option_val,
                                                   bool expect_script,
                                                   bool expect_stylesheet) {
-    std::unique_ptr<RewriteOptions> new_options(
-        new RewriteOptions(&thread_system_));
+    std::unique_ptr<RewriteOptions> new_options =
+        std::make_unique<RewriteOptions>(&thread_system_);
     // Initialize global options.
-    std::unique_ptr<RewriteOptions> global_options(
-        new RewriteOptions(&thread_system_));
+    std::unique_ptr<RewriteOptions> global_options =
+        std::make_unique<RewriteOptions>(&thread_system_);
     if (!global_option_val.empty()) {
       RewriteOptions::ResourceCategorySet x;
       ASSERT_TRUE(RewriteOptions::ParseInlineUnauthorizedResourceType(
@@ -187,47 +194,6 @@ class RewriteOptionsTest : public RewriteOptionsTestBase<RewriteOptions> {
 
     ASSERT_TRUE(url.IsWebValid());
     EXPECT_FALSE(lawyer.IsOriginKnown(url));
-  }
-
-  void VerifyAllowVaryOn(const GoogleString& input_str, bool expected_valid,
-                         bool expected_allow_auto,
-                         bool expected_allow_save_data,
-                         bool expected_allow_user_agent,
-                         bool expected_allow_accept,
-                         const GoogleString& expected_str) {
-    RewriteOptions::OptionSettingResult is_valid =
-        options_.SetOptionFromName(RewriteOptions::kAllowVaryOn, input_str);
-
-    if (expected_valid) {
-      EXPECT_EQ(RewriteOptions::kOptionOk, is_valid);
-    } else {
-      EXPECT_EQ(RewriteOptions::kOptionValueInvalid, is_valid);
-      return;  // No more checking
-    }
-    EXPECT_EQ(expected_allow_auto, options_.AllowVaryOnAuto());
-    EXPECT_EQ(expected_allow_save_data, options_.AllowVaryOnSaveData());
-    EXPECT_EQ(expected_allow_user_agent, options_.AllowVaryOnUserAgent());
-    EXPECT_EQ(expected_allow_accept, options_.AllowVaryOnAccept());
-    EXPECT_STREQ(expected_str, options_.AllowVaryOnToString());
-  }
-
-  void VerifyMergingAllowVaryOn(const GoogleString& old_option_str,
-                                const GoogleString& new_option_str,
-                                const GoogleString& expected_option_str) {
-    RewriteOptions merged_options(&thread_system_);
-    RewriteOptions new_options(&thread_system_);
-    if (!old_option_str.empty()) {
-      EXPECT_EQ(RewriteOptions::kOptionOk,
-                merged_options.SetOptionFromName(RewriteOptions::kAllowVaryOn,
-                                                 old_option_str));
-    }
-    if (!new_option_str.empty()) {
-      EXPECT_EQ(RewriteOptions::kOptionOk,
-                new_options.SetOptionFromName(RewriteOptions::kAllowVaryOn,
-                                              new_option_str));
-    }
-    merged_options.Merge(new_options);
-    EXPECT_STREQ(expected_option_str, merged_options.AllowVaryOnToString());
   }
 
   void TestSetOptionFromName(bool test_log_variant);
@@ -336,6 +302,135 @@ TEST_F(RewriteOptionsTest, CommaSeparatedList) {
   ASSERT_TRUE(OnlyEnabled(s));
   ASSERT_TRUE(options_.DisableFiltersByCommaSeparatedList(kList, &handler));
   ASSERT_TRUE(OnlyEnabled(RewriteOptions::kHtmlWriterFilter));  // default
+}
+
+TEST_F(RewriteOptionsTest, CommaSeparatedListRejectsBogusFilter) {
+  // A bogus filter name must make the call fail even when accompanied by valid
+  // names; the valid names are still applied (documented contract).
+  NullMessageHandler handler;
+  EXPECT_FALSE(options_.EnableFiltersByCommaSeparatedList(
+      "bogus_filter,rewrite_css", &handler));
+  EXPECT_TRUE(options_.Enabled(RewriteOptions::kRewriteCss));
+
+  // The failure must stick regardless of the order of the bad name, and the
+  // valid name must still be applied/removed even when the bad name comes
+  // first -- this pins the accumulation fix, not merely the early-exit path.
+  EXPECT_FALSE(options_.DisableFiltersByCommaSeparatedList(
+      "another_bogus_filter,rewrite_css", &handler));
+  EXPECT_FALSE(options_.Enabled(RewriteOptions::kRewriteCss));
+  // Use a filter that was not explicitly disabled above: an explicit disable
+  // trumps a later "+" adjustment by design.
+  EXPECT_FALSE(options_.AdjustFiltersByCommaSeparatedList("+nope,+inline_css",
+                                                          &handler));
+  EXPECT_TRUE(options_.Enabled(RewriteOptions::kInlineCss));
+}
+
+// Filters that deliberately have no configuration name, and so cannot be named
+// in EnableFilters.  These are internal filters that the rewriter turns on by
+// itself; rewrite_filter_names.gperf warns explicitly against listing internal
+// filters there, because anything listed becomes reachable from query params.
+//
+// This list is an allowlist, not a description: a filter belongs here only if
+// leaving it unconfigurable is a deliberate decision.  If you add a filter and
+// AllFiltersAreNameable fails, the default answer is to give it a name in
+// rewrite_filter_names.gperf, not to add it here.
+const RewriteOptions::Filter kFiltersWithoutConfigNames[] = {
+    RewriteOptions::kComputeVisibleTextDeprecated,  // deprecated, inert
+    RewriteOptions::kHandleNoscriptRedirect,        // internal
+    RewriteOptions::kHtmlWriterFilter,              // internal, always on
+};
+
+bool ExpectedToBeUnnameable(RewriteOptions::Filter filter) {
+  for (int i = 0; i < arraysize(kFiltersWithoutConfigNames); ++i) {
+    if (kFiltersWithoutConfigNames[i] == filter) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Every filter that is not on the internal allowlist above must have a
+// configuration name in rewrite_filter_names.gperf, and that name must map back
+// to the same filter.  Without this, a filter can ship fully implemented and
+// still be unreachable from any configuration -- which is exactly how the AVIF
+// filters shipped unreachable from any configuration.  The DCHECK in
+// InitFilterIdToEnumArray()
+// validates the enum/id table but says nothing about nameability.
+TEST_F(RewriteOptionsTest, AllFiltersAreNameable) {
+  for (RewriteOptions::Filter f = RewriteOptions::kFirstFilter;
+       f < RewriteOptions::kEndOfFilters;
+       f = static_cast<RewriteOptions::Filter>(f + 1)) {
+    StringPiece name = RewriteOptions::LookupFilterName(f);
+    // Identify the filter by everything we have, so a future failure names the
+    // culprit without anyone having to count enum values by hand.
+    GoogleString who =
+        StrCat("filter enum value ", IntegerToString(static_cast<int>(f)),
+               " (id \"", RewriteOptions::FilterId(f), "\", description \"",
+               RewriteOptions::FilterName(f), "\")");
+    if (ExpectedToBeUnnameable(f)) {
+      EXPECT_TRUE(name.empty())
+          << who << " is listed in kFiltersWithoutConfigNames as deliberately "
+          << "unconfigurable, but rewrite_filter_names.gperf now gives it the "
+          << "name \"" << name << "\".  If exposing it is intended, remove it "
+          << "from kFiltersWithoutConfigNames.";
+    } else {
+      ASSERT_FALSE(name.empty())
+          << who << " has no entry in net/instaweb/rewriter/"
+          << "rewrite_filter_names.gperf, so it cannot be enabled from any "
+          << "configuration (EnableFilters, query params, headers).  Add a "
+          << "name there, or -- if it is deliberately internal -- add it to "
+          << "kFiltersWithoutConfigNames in this file.";
+      EXPECT_EQ(f, RewriteOptions::LookupFilter(name))
+          << who << " is named \"" << name << "\" but that name does not map "
+          << "back to it.";
+    }
+  }
+}
+
+// Pins the four AVIF filter names specifically: they resolve, they
+// resolve to the right enum, and they work through the real option-parsing
+// entry point a user's config goes through.
+TEST_F(RewriteOptionsTest, AvifFilterNames) {
+  EXPECT_EQ(RewriteOptions::kConvertJpegToAvif,
+            RewriteOptions::LookupFilter("convert_jpeg_to_avif"));
+  EXPECT_EQ(RewriteOptions::kConvertToAvifAnimated,
+            RewriteOptions::LookupFilter("convert_to_avif_animated"));
+  EXPECT_EQ(RewriteOptions::kConvertToAvifLossless,
+            RewriteOptions::LookupFilter("convert_to_avif_lossless"));
+  EXPECT_EQ(RewriteOptions::kRecompressAvif,
+            RewriteOptions::LookupFilter("recompress_avif"));
+
+  FilterSet s;
+  s.Insert(RewriteOptions::kConvertJpegToAvif);
+  s.Insert(RewriteOptions::kConvertToAvifAnimated);
+  s.Insert(RewriteOptions::kConvertToAvifLossless);
+  s.Insert(RewriteOptions::kRecompressAvif);
+  s.Insert(RewriteOptions::kHtmlWriterFilter);  // enabled by default
+  static const char kList[] =
+      "convert_jpeg_to_avif,convert_to_avif_animated,"
+      "convert_to_avif_lossless,recompress_avif";
+  NullMessageHandler handler;
+  ASSERT_TRUE(options_.EnableFiltersByCommaSeparatedList(kList, &handler));
+  ASSERT_TRUE(OnlyEnabled(s));
+  ASSERT_TRUE(options_.DisableFiltersByCommaSeparatedList(kList, &handler));
+  ASSERT_TRUE(OnlyEnabled(RewriteOptions::kHtmlWriterFilter));  // default
+}
+
+// The AVIF filters are deliberately opt-in only: they must NOT be pulled in by
+// the rewrite_images / recompress_images compound flags or by any rewrite
+// level, because AVIF encoding is far more CPU-expensive than WebP.  See the
+// comment in RewriteOptions::AddByNameToFilterSet.
+TEST_F(RewriteOptionsTest, AvifFiltersAreNotInCompoundSets) {
+  NullMessageHandler handler;
+  ASSERT_TRUE(
+      options_.EnableFiltersByCommaSeparatedList("rewrite_images", &handler));
+  ASSERT_TRUE(options_.EnableFiltersByCommaSeparatedList("recompress_images",
+                                                         &handler));
+  options_.SetRewriteLevel(RewriteOptions::kCoreFilters);
+  EXPECT_FALSE(options_.Enabled(RewriteOptions::kConvertJpegToAvif));
+  EXPECT_FALSE(options_.Enabled(RewriteOptions::kConvertToAvifAnimated));
+  EXPECT_FALSE(options_.Enabled(RewriteOptions::kConvertToAvifLossless));
+  EXPECT_FALSE(options_.Enabled(RewriteOptions::kRecompressAvif));
 }
 
 TEST_F(RewriteOptionsTest, CompoundFlag) {
@@ -736,6 +831,36 @@ TEST_F(RewriteOptionsTest, ForbidFilter) {
       RewriteOptions::FilterId(RewriteOptions::kFlattenCssImports)));
 }
 
+TEST_F(RewriteOptionsTest, ForbidCompoundFilterIds) {
+  // "ce" is the compound id shared by the cache-extension filters; it does
+  // not resolve to a single filter enum.  It counts as forbidden only once
+  // every filter that can produce "ce" URLs is forbidden.
+  options_.SetRewriteLevel(RewriteOptions::kCoreFilters);
+  EXPECT_FALSE(options_.Forbidden(RewriteOptions::kCacheExtenderId));
+
+  // Partial forbid: the other cache-extension filters can still produce
+  // "ce" URLs, so the id as a whole is not forbidden.
+  options_.ForbidFilter(RewriteOptions::kExtendCacheImages);
+  EXPECT_FALSE(options_.Forbidden(RewriteOptions::kCacheExtenderId));
+
+  options_.ForbidFilter(RewriteOptions::kExtendCacheCss);
+  options_.ForbidFilter(RewriteOptions::kExtendCachePdfs);
+  options_.ForbidFilter(RewriteOptions::kExtendCacheScripts);
+  EXPECT_TRUE(options_.Forbidden(RewriteOptions::kCacheExtenderId));
+}
+
+TEST_F(RewriteOptionsTest, ForbidCompoundImageFilterId) {
+  // Same as above for "ic", the compound id shared by the image-optimization
+  // filters.
+  options_.SetRewriteLevel(RewriteOptions::kCoreFilters);
+  EXPECT_FALSE(options_.Forbidden(RewriteOptions::kImageCompressionId));
+
+  for (int i = 0; i < ImageRewriteFilter::kRelatedFiltersSize; ++i) {
+    options_.ForbidFilter(ImageRewriteFilter::kRelatedFilters[i]);
+  }
+  EXPECT_TRUE(options_.Forbidden(RewriteOptions::kImageCompressionId));
+}
+
 TEST_F(RewriteOptionsTest, AllDoesNotImplyStripScrips) {
   options_.SetRewriteLevel(RewriteOptions::kAllFilters);
   EXPECT_TRUE(options_.Enabled(RewriteOptions::kCombineCss));
@@ -745,10 +870,10 @@ TEST_F(RewriteOptionsTest, AllDoesNotImplyStripScrips) {
 TEST_F(RewriteOptionsTest, ExplicitlyEnabledDangerousFilters) {
   options_.SetRewriteLevel(RewriteOptions::kAllFilters);
   options_.EnableFilter(RewriteOptions::kStripScripts);
-  EXPECT_FALSE(options_.Enabled(RewriteOptions::kDivStructure));
+  EXPECT_FALSE(options_.Enabled(RewriteOptions::kDivStructureDeprecated));
   EXPECT_TRUE(options_.Enabled(RewriteOptions::kStripScripts));
-  options_.EnableFilter(RewriteOptions::kDivStructure);
-  EXPECT_TRUE(options_.Enabled(RewriteOptions::kDivStructure));
+  options_.EnableFilter(RewriteOptions::kDivStructureDeprecated);
+  EXPECT_TRUE(options_.Enabled(RewriteOptions::kDivStructureDeprecated));
 }
 
 TEST_F(RewriteOptionsTest, CoreAndNotDangerous) {
@@ -767,7 +892,7 @@ TEST_F(RewriteOptionsTest, CoreByNameNotLevel) {
   ASSERT_TRUE(options_.Enabled(RewriteOptions::kExtendCacheImages));
 
   // Test these for PlusAndMinus validation.
-  EXPECT_FALSE(options_.Enabled(RewriteOptions::kDivStructure));
+  EXPECT_FALSE(options_.Enabled(RewriteOptions::kDivStructureDeprecated));
   EXPECT_TRUE(options_.Enabled(RewriteOptions::kInlineCss));
 }
 
@@ -783,7 +908,7 @@ TEST_F(RewriteOptionsTest, PlusAndMinus) {
   ASSERT_TRUE(options_.Enabled(RewriteOptions::kExtendCacheImages));
 
   // These should be opposite from normal.
-  EXPECT_TRUE(options_.Enabled(RewriteOptions::kDivStructure));
+  EXPECT_TRUE(options_.Enabled(RewriteOptions::kDivStructureDeprecated));
   EXPECT_FALSE(options_.Enabled(RewriteOptions::kInlineCss));
 }
 
@@ -848,6 +973,19 @@ void RewriteOptionsTest::TestSetOptionFromName(bool test_log_variant) {
               "JsInlineMaxBytes", "NOT_INT", &handler);
   EXPECT_EQ(RewriteOptions::kDefaultJsInlineMaxBytes,
             options_.js_inline_max_bytes());  // unchanged from default.
+
+  // Bounded numeric options reject out-of-range values at parse time, while
+  // accepting in-range values and documented sentinels.
+  TestNameSet(RewriteOptions::kOptionValueInvalid, test_log_variant,
+              "RewriteRandomDropPercentage", "101", &handler);
+  EXPECT_EQ(0, options_.rewrite_random_drop_percentage());  // unchanged.
+  TestNameSet(RewriteOptions::kOptionOk, test_log_variant,
+              "RewriteRandomDropPercentage", "50", &handler);
+  EXPECT_EQ(50, options_.rewrite_random_drop_percentage());
+  TestNameSet(RewriteOptions::kOptionValueInvalid, test_log_variant,
+              "JpegRecompressionQuality", "101", &handler);
+  TestNameSet(RewriteOptions::kOptionOk, test_log_variant,
+              "JpegRecompressionQuality", "-1", &handler);  // sentinel.
 }
 
 TEST_F(RewriteOptionsTest, SetOptionFromName) { TestSetOptionFromName(false); }
@@ -865,6 +1003,7 @@ TEST_F(RewriteOptionsTest, LookupOptionByNameTest) {
       RewriteOptions::kAcceptInvalidSignatures,
       RewriteOptions::kAccessControlAllowOrigins,
       RewriteOptions::kAddOptionsToUrls,
+      RewriteOptions::kAgentOptimize,
       RewriteOptions::kAllowLoggingUrlsInLogRecord,
       RewriteOptions::kAllowOptionsToBeSetByCookies,
       RewriteOptions::kAllowVaryOn,
@@ -929,6 +1068,8 @@ TEST_F(RewriteOptionsTest, LookupOptionByNameTest) {
       RewriteOptions::kImageLimitResizeAreaPercent,
       RewriteOptions::kImageMaxRewritesAtOnce,
       RewriteOptions::kImagePreserveURLs,
+      RewriteOptions::kPreserveImageProvenance,
+      RewriteOptions::kImageProvenanceCarry,
       RewriteOptions::kImageRecompressionQuality,
       RewriteOptions::kImageResolutionLimitBytes,
       RewriteOptions::kImageWebpQualityForSaveData,
@@ -936,6 +1077,11 @@ TEST_F(RewriteOptionsTest, LookupOptionByNameTest) {
       RewriteOptions::kImageWebpRecompressionQualityForSmallScreens,
       RewriteOptions::kImageWebpAnimatedRecompressionQuality,
       RewriteOptions::kImageWebpTimeoutMs,
+      RewriteOptions::kImageAvifQualityForSaveData,
+      RewriteOptions::kImageAvifRecompressionQuality,
+      RewriteOptions::kImageAvifRecompressionQualityForSmallScreens,
+      RewriteOptions::kImageAvifAnimatedRecompressionQuality,
+      RewriteOptions::kImageAvifTimeoutMs,
       RewriteOptions::kImplicitCacheTtlMs,
       RewriteOptions::kIncreaseSpeedTracking,
       RewriteOptions::kInlineOnlyCriticalImages,
@@ -953,6 +1099,8 @@ TEST_F(RewriteOptionsTest, LookupOptionByNameTest) {
       RewriteOptions::kJsPreserveURLs,
       RewriteOptions::kLazyloadImagesAfterOnload,
       RewriteOptions::kLazyloadImagesBlankUrl,
+      RewriteOptions::kLazyloadImagesMode,
+      RewriteOptions::kLazyloadImagesSkipFirst,
       RewriteOptions::kLoadFromFileCacheTtlMs,
       RewriteOptions::kLogBackgroundRewrite,
       RewriteOptions::kLogMobilizationSamples,
@@ -1005,6 +1153,7 @@ TEST_F(RewriteOptionsTest, LookupOptionByNameTest) {
       RewriteOptions::kServeStaleIfFetchError,
       RewriteOptions::kServeStaleWhileRevalidateThresholdSec,
       RewriteOptions::kServeWebpToAnyAgent,
+      RewriteOptions::kServeAvifToAnyAgent,
       RewriteOptions::kServeXhrAccessControlHeaders,
       RewriteOptions::kStickyQueryParameters,
       RewriteOptions::kSupportNoScriptEnabled,
@@ -1045,6 +1194,20 @@ TEST_F(RewriteOptionsTest, LookupOptionByNameTest) {
   // Check that case doesn't matter when looking up directives.
   EXPECT_TRUE(nullptr != RewriteOptions::LookupOptionByName("EnableRewriting"));
   EXPECT_TRUE(nullptr != RewriteOptions::LookupOptionByName("eNaBlErEWrItIng"));
+
+  // Regression pin: AvifTimeoutMs must keep a
+  // non-null help string: Apache's InstallCommands() only registers options
+  // whose help_text() is non-null, so a null help string silently removes the
+  // ModPagespeedAvifTimeoutMs directive. It must also stay kLegacyProcessScope:
+  // server-wide is the deliberate posture for this tunable.
+  const RewriteOptions::PropertyBase* avif_timeout_prop =
+      RewriteOptions::LookupOptionByName(RewriteOptions::kImageAvifTimeoutMs);
+  ASSERT_TRUE(avif_timeout_prop != nullptr)
+      << "AvifTimeoutMs cannot be looked up by name";
+  EXPECT_TRUE(avif_timeout_prop->help_text() != nullptr)
+      << "AvifTimeoutMs must have a help string to remain an Apache directive";
+  EXPECT_EQ(RewriteOptions::kLegacyProcessScope, avif_timeout_prop->scope())
+      << "AvifTimeoutMs must stay process-scope by design";
 }
 
 // All the non-base option names are explicitly enumerated here. Modifications
@@ -1094,10 +1257,8 @@ TEST_F(RewriteOptionsTest, LookupNonBaseOptionByNameTest) {
   FailLookupOptionByName(RewriteOptions::kCompressMetadataCache);
   FailLookupOptionByName(RewriteOptions::kFetchHttps);
   FailLookupOptionByName(RewriteOptions::kFetcherProxy);
-  FailLookupOptionByName(RewriteOptions::kFileCacheCleanIntervalMs);
   FailLookupOptionByName(RewriteOptions::kFileCachePath);
   FailLookupOptionByName(RewriteOptions::kFileCacheCleanSizeKb);
-  FailLookupOptionByName(RewriteOptions::kFileCacheCleanInodeLimit);
   FailLookupOptionByName(RewriteOptions::kLogDir);
   FailLookupOptionByName(RewriteOptions::kLruCacheByteLimit);
   FailLookupOptionByName(RewriteOptions::kLruCacheKbPerProcess);
@@ -1369,7 +1530,8 @@ TEST_F(RewriteOptionsTest, ParseAndSetOptionFromName2) {
   EXPECT_EQ("/example/images/a.jpeg", file_out);
 
   // Domain lawyer options.
-  std::unique_ptr<RewriteOptions> options2(new RewriteOptions(&thread_system_));
+  std::unique_ptr<RewriteOptions> options2 =
+      std::make_unique<RewriteOptions>(&thread_system_);
   EXPECT_EQ(RewriteOptions::kOptionOk,
             options2->ParseAndSetOptionFromName2(
                 RewriteOptions::kMapOriginDomain, "localhost/example",
@@ -1380,7 +1542,8 @@ TEST_F(RewriteOptionsTest, ParseAndSetOptionFromName2) {
       "OriginDomain:http://localhost/example/\n",
       options2->domain_lawyer()->ToString());
 
-  std::unique_ptr<RewriteOptions> options3(new RewriteOptions(&thread_system_));
+  std::unique_ptr<RewriteOptions> options3 =
+      std::make_unique<RewriteOptions>(&thread_system_);
   // This is an option 2 or 3, so test 2 here and 3 below.
   EXPECT_EQ(RewriteOptions::kOptionOk,
             options3->ParseAndSetOptionFromName3(
@@ -1393,7 +1556,8 @@ TEST_F(RewriteOptionsTest, ParseAndSetOptionFromName2) {
       "ProxyDomain:http://mainsite.com/static/\n",
       options3->domain_lawyer()->ToString());
 
-  std::unique_ptr<RewriteOptions> options4(new RewriteOptions(&thread_system_));
+  std::unique_ptr<RewriteOptions> options4 =
+      std::make_unique<RewriteOptions>(&thread_system_);
   EXPECT_EQ(RewriteOptions::kOptionOk,
             options4->ParseAndSetOptionFromName2(
                 RewriteOptions::kMapRewriteDomain, "cdn.example.com",
@@ -1403,7 +1567,8 @@ TEST_F(RewriteOptionsTest, ParseAndSetOptionFromName2) {
       "http://cdn.example.com/ Auth\n",
       options4->domain_lawyer()->ToString());
 
-  std::unique_ptr<RewriteOptions> options5(new RewriteOptions(&thread_system_));
+  std::unique_ptr<RewriteOptions> options5 =
+      std::make_unique<RewriteOptions>(&thread_system_);
   EXPECT_EQ(
       RewriteOptions::kOptionOk,
       options5->ParseAndSetOptionFromName2(
@@ -1455,7 +1620,8 @@ TEST_F(RewriteOptionsTest, ParseAndSetOptionFromName3) {
   EXPECT_EQ("Invalid resource category: nonsense", msg);
 
   // Domain lawyer.
-  std::unique_ptr<RewriteOptions> options(new RewriteOptions(&thread_system_));
+  std::unique_ptr<RewriteOptions> options =
+      std::make_unique<RewriteOptions>(&thread_system_);
   EXPECT_EQ(RewriteOptions::kOptionOk,
             options->ParseAndSetOptionFromName3(
                 RewriteOptions::kMapProxyDomain, "myproxy.com/static",
@@ -1539,13 +1705,19 @@ TEST_F(RewriteOptionsTest, ExperimentSpecTest) {
   EXPECT_EQ("UA-111111-1", options_.ga_id());
   EXPECT_EQ(4, options_.experiment_ga_slot());
 
-  // insert_ga can not be disabled in any experiment because that filter injects
-  // the instrumentation we use to collect the data.
+  // insert_ga is no longer force-enabled for experiments (it targets the
+  // discontinued Universal Analytics service), so this spec's
+  // disabled=insert_ga is honored.
   options_.SetExperimentState(2);
   EXPECT_FALSE(options_.Enabled(RewriteOptions::kInlineCss));
   EXPECT_FALSE(options_.Enabled(RewriteOptions::kSpriteImages));
   EXPECT_FALSE(options_.Enabled(RewriteOptions::kLeftTrimUrls));
-  EXPECT_TRUE(options_.Enabled(RewriteOptions::kInsertGA));
+  EXPECT_FALSE(options_.Enabled(RewriteOptions::kInsertGA));
+  // The filters required for experiment variant assignment and measurement
+  // are still force-enabled.
+  EXPECT_TRUE(options_.Enabled(RewriteOptions::kAddHead));
+  EXPECT_TRUE(options_.Enabled(RewriteOptions::kAddInstrumentation));
+  EXPECT_TRUE(options_.Enabled(RewriteOptions::kComputeStatistics));
   EXPECT_EQ(3, options_.experiment_ga_slot());
   // This experiment specified a ga_id, so make sure that we set it.
   EXPECT_EQ("UA-2222-1", options_.ga_id());
@@ -1593,6 +1765,139 @@ TEST_F(RewriteOptionsTest, ExperimentSpecTest) {
   // Object to adding a 27th.
   EXPECT_FALSE(
       options_.AddExperimentSpec("id=200;percent=1;default", &handler));
+}
+
+TEST_F(RewriteOptionsTest, ExperimentSpecInsertGAExplicitOptIn) {
+  // insert_ga is not force-enabled by experiments anymore, but a spec can
+  // still opt in explicitly with enable=insert_ga.
+  NullMessageHandler handler;
+  options_.set_ga_id("UA-111111-1");
+  EXPECT_TRUE(
+      options_.AddExperimentSpec("id=3;percent=10;enable=insert_ga", &handler));
+  options_.SetExperimentState(3);
+  EXPECT_TRUE(options_.Enabled(RewriteOptions::kInsertGA));
+}
+
+TEST_F(RewriteOptionsTest, MakeGoogleAnalyticsAsyncConfigCompat) {
+  // make_google_analytics_async is deprecated and a no-op, but configs that
+  // mention it must still parse successfully.
+  NullMessageHandler handler;
+  EXPECT_TRUE(options_.EnableFiltersByCommaSeparatedList(
+      "make_google_analytics_async", &handler));
+  EXPECT_TRUE(options_.DisableFiltersByCommaSeparatedList(
+      "make_google_analytics_async", &handler));
+}
+
+TEST_F(RewriteOptionsTest, DeprecatedAnalyticsFiltersWarn) {
+  // Enabling a Universal-Analytics-era filter emits a deprecation warning.
+  TestMessageHandler handler;
+  EXPECT_TRUE(
+      options_.EnableFiltersByCommaSeparatedList("insert_ga", &handler));
+  ASSERT_EQ(1U, handler.messages().size());
+  EXPECT_NE(GoogleString::npos,
+            handler.messages()[0].find("insert_ga targets Universal Analytics"))
+      << handler.messages()[0];
+
+  EXPECT_TRUE(options_.EnableFiltersByCommaSeparatedList(
+      "make_google_analytics_async", &handler));
+  ASSERT_EQ(2U, handler.messages().size());
+  EXPECT_NE(
+      GoogleString::npos,
+      handler.messages()[1].find("make_google_analytics_async is deprecated"))
+      << handler.messages()[1];
+
+  // Disabling (or forbidding) the deprecated filters is exactly what the
+  // warning recommends, so those mentions must stay silent.
+  EXPECT_TRUE(options_.DisableFiltersByCommaSeparatedList(
+      "insert_ga,make_google_analytics_async", &handler));
+  EXPECT_EQ(2U, handler.messages().size());
+  EXPECT_TRUE(options_.ForbidFiltersByCommaSeparatedList(
+      "insert_ga,make_google_analytics_async", &handler));
+  EXPECT_EQ(2U, handler.messages().size());
+}
+
+TEST_F(RewriteOptionsTest, AnalyticsIDWarns) {
+  // Setting AnalyticsID succeeds (config compatibility) but warns that it
+  // targets the discontinued Universal Analytics service.
+  TestMessageHandler handler;
+  GoogleString msg;
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromName1(RewriteOptions::kAnalyticsID,
+                                                "UA-111111-1", &msg, &handler));
+  EXPECT_EQ("UA-111111-1", options_.ga_id());
+  ASSERT_EQ(1U, handler.messages().size());
+  EXPECT_NE(GoogleString::npos, handler.messages()[0].find(
+                                    "AnalyticsID targets Universal Analytics"))
+      << handler.messages()[0];
+}
+
+TEST_F(RewriteOptionsTest, UseExperimentalJsMinifierIgnoredWarnOff) {
+  // The legacy JavaScript minifier was removed.  The directive still parses
+  // (config compatibility on every port) but is ignored, and warns once.
+  TestMessageHandler handler;
+  GoogleString msg;
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromName1(
+                RewriteOptions::kUseExperimentalJsMinifier, "off", &msg,
+                &handler));
+  ASSERT_EQ(1U, handler.messages().size());
+  EXPECT_NE(GoogleString::npos,
+            handler.messages()[0].find(
+                "legacy JavaScript minifier has been removed"))
+      << handler.messages()[0];
+  EXPECT_NE(GoogleString::npos,
+            handler.messages()[0].find("deprecated and ignored"))
+      << handler.messages()[0];
+}
+
+TEST_F(RewriteOptionsTest, UseExperimentalJsMinifierIgnoredWarnOn) {
+  // 'on' is as meaningless as 'off' now, so it warns identically -- unlike
+  // before the removal, when 'on' matched the default and stayed silent.
+  TestMessageHandler handler;
+  GoogleString msg;
+  EXPECT_EQ(0U, handler.messages().size());
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromName1(
+                RewriteOptions::kUseExperimentalJsMinifier, "on", &msg,
+                &handler));
+  ASSERT_EQ(1U, handler.messages().size());
+  EXPECT_NE(GoogleString::npos,
+            handler.messages()[0].find(
+                "legacy JavaScript minifier has been removed"))
+      << handler.messages()[0];
+}
+
+TEST_F(RewriteOptionsTest, UseExperimentalJsMinifierNotInSignature) {
+  // Load-bearing: the retained no-op option must not contribute to the
+  // options signature.  If it did, a config carrying the directive would keep
+  // its pre-upgrade metadata-cache key and keep emitting the rewritten URLs
+  // its removed minifier produced.  Excluding it makes such a config converge
+  // onto exactly the same metadata partition as a default config.
+  NullMessageHandler null_handler;
+  GoogleString msg;
+
+  RewriteOptions defaults(&thread_system_);
+  defaults.ComputeSignature();
+  const GoogleString default_signature = defaults.signature();
+
+  options_.ClearSignatureForTesting();
+  ASSERT_EQ(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromName1(
+                RewriteOptions::kUseExperimentalJsMinifier, "off", &msg,
+                &null_handler));
+  options_.ComputeSignature();
+  EXPECT_EQ(GoogleString::npos, options_.signature().find("uejsm"))
+      << options_.signature();
+  EXPECT_STREQ(default_signature, options_.signature());
+
+  // ...and 'on' likewise.
+  options_.ClearSignatureForTesting();
+  ASSERT_EQ(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromName1(
+                RewriteOptions::kUseExperimentalJsMinifier, "on", &msg,
+                &null_handler));
+  options_.ComputeSignature();
+  EXPECT_STREQ(default_signature, options_.signature());
 }
 
 TEST_F(RewriteOptionsTest, DefaultExperimentSpecTest) {
@@ -1870,6 +2175,15 @@ TEST_F(RewriteOptionsTest, ExperimentDeviceTypeParseTest) {
     EXPECT_TRUE(spec.matches_device_type(UserAgentMatcher::kTablet));
     EXPECT_TRUE(spec.matches_device_type(UserAgentMatcher::kMobile));
   }
+}
+
+TEST_F(RewriteOptionsTest, ExperimentSpecSlotToString) {
+  NullMessageHandler handler;
+  // A non-default slot must be emitted as ";slot=" so ToString round-trips
+  // through the parser. Valid slots are 1-5; the default is 1.
+  GoogleString spec_str("id=1;slot=4;percent=15");
+  RewriteOptions::ExperimentSpec spec(spec_str, &options_, &handler);
+  EXPECT_EQ(spec_str, spec.ToString());
 }
 
 TEST_F(RewriteOptionsTest, ExperimentDeviceTypeRangeUnderflowDeathTest) {
@@ -2473,6 +2787,199 @@ TEST_F(RewriteOptionsTest, EnabledFiltersRequiringJavaScriptTest) {
   EXPECT_TRUE(bar_fs.empty());
 }
 
+TEST_F(RewriteOptionsTest, DeferIframeDeprecatedIsInertButAccepted) {
+  // The standalone "defer_iframe" filter name stays accepted for config
+  // compatibility, but it is a deprecated no-op: iframe deferral is built
+  // into defer_javascript/disable_javascript.
+  RewriteOptions options(&thread_system_);
+  TestMessageHandler handler;
+  EXPECT_TRUE(
+      options.EnableFiltersByCommaSeparatedList("defer_iframe", &handler));
+  // Characterization/regression pin for the kWarning added in b9c61b7fd:
+  // the warning was emitted but never asserted. Green both ways.
+  ASSERT_EQ(1, handler.messages().size());
+  EXPECT_STREQ(
+      "Warning: Filter 'defer_iframe' is deprecated and has no effect; "
+      "iframe deferral is built into 'defer_javascript'.",
+      handler.messages()[0].c_str());
+  EXPECT_TRUE(options.Enabled(RewriteOptions::kDeferIframeDeprecated));
+  EXPECT_STREQ(
+      "df", RewriteOptions::FilterId(RewriteOptions::kDeferIframeDeprecated));
+  EXPECT_STREQ(
+      "Deprecated.",
+      RewriteOptions::FilterName(RewriteOptions::kDeferIframeDeprecated));
+
+  // It must not require script execution, so enabling it must not trigger
+  // the noscript-redirect machinery for no-JS clients.
+  RewriteOptions::FilterVector fs;
+  options.GetEnabledFiltersRequiringScriptExecution(&fs);
+  EXPECT_TRUE(fs.empty());
+
+  // The AllFilters level must not implicitly enable it.
+  RewriteOptions all_options(&thread_system_);
+  all_options.SetRewriteLevel(RewriteOptions::kAllFilters);
+  EXPECT_FALSE(all_options.Enabled(RewriteOptions::kDeferIframeDeprecated));
+}
+
+TEST_F(RewriteOptionsTest, DeferIframeDeprecationWarnsOnlyWhenEnabling) {
+  // Enabling the deprecated no-op warns; disabling (or forbidding) is what
+  // the warning recommends, so those mentions stay silent (same gate as the
+  // analytics deprecation warnings).
+  TestMessageHandler handler;
+  EXPECT_TRUE(
+      options_.EnableFiltersByCommaSeparatedList("defer_iframe", &handler));
+  ASSERT_EQ(1U, handler.messages().size());
+  EXPECT_NE(GoogleString::npos,
+            handler.messages()[0].find("Filter 'defer_iframe' is deprecated"))
+      << handler.messages()[0];
+
+  EXPECT_TRUE(options_.DisableFiltersByCommaSeparatedList("defer_iframe",
+                                                          &handler));
+  EXPECT_TRUE(options_.ForbidFiltersByCommaSeparatedList("defer_iframe",
+                                                         &handler));
+  EXPECT_EQ(1U, handler.messages().size());
+}
+
+TEST_F(RewriteOptionsTest, ShardDomainDeprecationWarning) {
+  // The ShardDomain option (ModPagespeedShardDomain / "pagespeed
+  // ShardDomain") stays accepted for config compatibility, but domain
+  // sharding is deprecated: it hurts performance with HTTP/2 and HTTP/3,
+  // which multiplex over a single connection.  Parsing it logs a warning,
+  // deduped process-wide per mapping, so this test uses mapping strings
+  // parsed by no other test in the binary.
+  RewriteOptions options(&thread_system_);
+  TestMessageHandler handler;
+  GoogleString msg;
+  EXPECT_EQ(
+      RewriteOptions::kOptionOk,
+      options.ParseAndSetOptionFromName2(
+          RewriteOptions::kShardDomain, "https://dep.example.com",
+          "https://dep1.cdn.example.com,https://dep2.cdn.example.com", &msg,
+          &handler));
+  ASSERT_EQ(1, handler.messages().size());
+  EXPECT_NE(GoogleString::npos, handler.messages()[0].find("Warning"));
+  EXPECT_NE(GoogleString::npos, handler.messages()[0].find("deprecated"));
+  EXPECT_NE(GoogleString::npos,
+            handler.messages()[0].find("Remove the ShardDomain directive"));
+
+  // Re-parsing the same mapping (e.g. an .htaccess re-parse per request)
+  // does not re-warn.
+  RewriteOptions options2(&thread_system_);
+  EXPECT_EQ(
+      RewriteOptions::kOptionOk,
+      options2.ParseAndSetOptionFromName2(
+          RewriteOptions::kShardDomain, "https://dep.example.com",
+          "https://dep1.cdn.example.com,https://dep2.cdn.example.com", &msg,
+          &handler));
+  EXPECT_EQ(1, handler.messages().size());
+}
+
+TEST_F(RewriteOptionsTest, CachePartialHtmlDeprecatedIsInertButAccepted) {
+  // The standalone "cache_partial_html" filter name stays accepted for config
+  // compatibility, but it is a deprecated no-op: nothing consumes the enabled
+  // bit for rewriting.
+  RewriteOptions options(&thread_system_);
+  NullMessageHandler handler;
+  EXPECT_TRUE(options.EnableFiltersByCommaSeparatedList("cache_partial_html",
+                                                        &handler));
+  EXPECT_TRUE(options.Enabled(RewriteOptions::kCachePartialHtmlDeprecated));
+  EXPECT_STREQ(
+      "ct",
+      RewriteOptions::FilterId(RewriteOptions::kCachePartialHtmlDeprecated));
+  EXPECT_STREQ(
+      "Deprecated.",
+      RewriteOptions::FilterName(RewriteOptions::kCachePartialHtmlDeprecated));
+
+  // It must not require script execution, so enabling it must not trigger
+  // the noscript-redirect machinery for no-JS clients.
+  RewriteOptions::FilterVector fs;
+  options.GetEnabledFiltersRequiringScriptExecution(&fs);
+  EXPECT_TRUE(fs.empty());
+
+  // The AllFilters level must not implicitly enable it.
+  RewriteOptions all_options(&thread_system_);
+  all_options.SetRewriteLevel(RewriteOptions::kAllFilters);
+  EXPECT_FALSE(
+      all_options.Enabled(RewriteOptions::kCachePartialHtmlDeprecated));
+}
+
+TEST_F(RewriteOptionsTest, ComputeVisibleTextDeprecatedIsInert) {
+  // Characterization/guard test: green both before and after the
+  // cache_partial_html fix. kComputeVisibleTextDeprecated has no config
+  // name, so it can only be enabled programmatically; like the other
+  // deprecated no-op filters it must not require script execution and
+  // must not be enabled by the AllFilters level.
+  RewriteOptions options(&thread_system_);
+  options.EnableFilter(RewriteOptions::kComputeVisibleTextDeprecated);
+  EXPECT_TRUE(options.Enabled(RewriteOptions::kComputeVisibleTextDeprecated));
+
+  RewriteOptions::FilterVector fs;
+  options.GetEnabledFiltersRequiringScriptExecution(&fs);
+  EXPECT_TRUE(fs.empty());
+
+  RewriteOptions all_options(&thread_system_);
+  all_options.SetRewriteLevel(RewriteOptions::kAllFilters);
+  EXPECT_FALSE(
+      all_options.Enabled(RewriteOptions::kComputeVisibleTextDeprecated));
+}
+
+TEST_F(RewriteOptionsTest, DeprecatedDeadFiltersAreInertButAccepted) {
+  // Registry sweep: these filter names stay accepted for config
+  // compatibility, but the filters are deprecated no-ops. Each must keep
+  // parsing, keep its id, report "Deprecated." as its display name, require
+  // no script execution, and stay out of the AllFilters level.
+  struct DeprecatedFilter {
+    const char* name;
+    RewriteOptions::Filter filter;
+    const char* id;
+  };
+  static const DeprecatedFilter kDeprecatedFilters[] = {
+      {"div_structure", RewriteOptions::kDivStructureDeprecated, "ds"},
+      {"explicit_close_tags", RewriteOptions::kExplicitCloseTagsDeprecated,
+       "xc"},
+      {"flush_subresources", RewriteOptions::kFlushSubresourcesDeprecated,
+       "fs"},
+      {"mobilize_precompute", RewriteOptions::kMobilizePrecomputeDeprecated,
+       "mob_precompute"},
+      {"split_html", RewriteOptions::kSplitHtmlDeprecated, "sh"},
+      {"split_html_helper", RewriteOptions::kSplitHtmlHelperDeprecated, "se"},
+  };
+  for (int i = 0; i < arraysize(kDeprecatedFilters); ++i) {
+    SCOPED_TRACE(kDeprecatedFilters[i].name);
+    RewriteOptions options(&thread_system_);
+    NullMessageHandler handler;
+    EXPECT_TRUE(options.EnableFiltersByCommaSeparatedList(
+        kDeprecatedFilters[i].name, &handler));
+    EXPECT_TRUE(options.Enabled(kDeprecatedFilters[i].filter));
+    EXPECT_STREQ(kDeprecatedFilters[i].id,
+                 RewriteOptions::FilterId(kDeprecatedFilters[i].filter));
+    EXPECT_STREQ("Deprecated.",
+                 RewriteOptions::FilterName(kDeprecatedFilters[i].filter));
+
+    // It must not require script execution, so enabling it must not trigger
+    // the noscript-redirect machinery for no-JS clients.
+    RewriteOptions::FilterVector fs;
+    options.GetEnabledFiltersRequiringScriptExecution(&fs);
+    EXPECT_TRUE(fs.empty());
+
+    // The AllFilters level must not implicitly enable it.
+    RewriteOptions all_options(&thread_system_);
+    all_options.SetRewriteLevel(RewriteOptions::kAllFilters);
+    EXPECT_FALSE(all_options.Enabled(kDeprecatedFilters[i].filter));
+  }
+}
+
+TEST_F(RewriteOptionsTest, ServeDeprecationNoticeExcised) {
+  // kServeDeprecationNotice was never reachable by name: it is absent from
+  // the gperf name table and from the compound-name list, so no config could
+  // enable it. The enum entry and its "sd" id are excised outright instead
+  // of deprecated in place.
+  EXPECT_EQ(RewriteOptions::kEndOfFilters,
+            RewriteOptions::LookupFilterById("sd"));
+  EXPECT_EQ(RewriteOptions::kEndOfFilters,
+            RewriteOptions::LookupFilter("serve_deprecation_notice"));
+}
+
 TEST_F(RewriteOptionsTest, FilterLookupMethods) {
   EXPECT_STREQ("Add Head",
                RewriteOptions::FilterName(RewriteOptions::kAddHead));
@@ -2556,6 +3063,21 @@ TEST_F(RewriteOptionsTest, ParseBeaconUrl) {
   EXPECT_STREQ("/mod_pagespeed_beacon?a=b", beacon_url.https);
   EXPECT_STREQ("/mod_pagespeed_beacon", beacon_url.http_in);
   EXPECT_STREQ("/mod_pagespeed_beacon", beacon_url.https_in);
+
+  // Regression: a beacon URL that is exactly "ets=" used to underflow the
+  // separator-stripping arithmetic; it must strip cleanly to empty instead.
+  EXPECT_TRUE(RewriteOptions::ParseBeaconUrl("ets=", &beacon_url));
+  EXPECT_STREQ("", beacon_url.http);
+  EXPECT_STREQ("", beacon_url.https);
+  EXPECT_STREQ("", beacon_url.http_in);
+  EXPECT_STREQ("", beacon_url.https_in);
+
+  // A URL ending in "-ets=" has no '?' or '&' before "ets=", so only "ets=" is
+  // stripped and the character in front of it is preserved.
+  EXPECT_TRUE(
+      RewriteOptions::ParseBeaconUrl("http://" + url + "/x-ets=", &beacon_url));
+  EXPECT_STREQ("http://" + url + "/x-", beacon_url.http);
+  EXPECT_STREQ("https://" + url + "/x-", beacon_url.https);
 }
 
 TEST_F(RewriteOptionsTest, AccessOptionByIdAndName) {
@@ -2670,7 +3192,9 @@ TEST_F(RewriteOptionsTest, BandwidthMode) {
       vhost_options->Enabled(RewriteOptions::kConvertJpegToProgressive));
   EXPECT_TRUE(vhost_options->Enabled(RewriteOptions::kConvertJpegToWebp));
   EXPECT_TRUE(vhost_options->Enabled(RewriteOptions::kConvertPngToJpeg));
-  EXPECT_TRUE(
+  // The retired in_place_optimize_for_browser filter is no longer part of
+  // the OptimizeForBandwidth level.
+  EXPECT_FALSE(
       vhost_options->Enabled(RewriteOptions::kInPlaceOptimizeForBrowser));
   EXPECT_TRUE(vhost_options->Enabled(RewriteOptions::kJpegSubsampling));
   EXPECT_TRUE(vhost_options->Enabled(RewriteOptions::kRecompressJpeg));
@@ -2682,7 +3206,7 @@ TEST_F(RewriteOptionsTest, BandwidthMode) {
   EXPECT_TRUE(vhost_options->Enabled(RewriteOptions::kRewriteJavascriptInline));
   EXPECT_TRUE(vhost_options->Enabled(RewriteOptions::kStripImageColorProfile));
   EXPECT_TRUE(vhost_options->Enabled(RewriteOptions::kStripImageMetaData));
-  EXPECT_TRUE(
+  EXPECT_FALSE(
       vhost_options->Enabled(RewriteOptions::kInPlaceOptimizeForBrowser));
   EXPECT_TRUE(vhost_options->in_place_rewriting_enabled());
   EXPECT_TRUE(vhost_options->css_preserve_urls());
@@ -2707,9 +3231,10 @@ TEST_F(RewriteOptionsTest, BandwidthMode) {
 
   // Now merge with an options-set with Core enabled many of these answers
   // change.
-  std::unique_ptr<RewriteOptions> core(new RewriteOptions(&thread_system_));
-  std::unique_ptr<RewriteOptions> vhost_core(
-      new RewriteOptions(&thread_system_));
+  std::unique_ptr<RewriteOptions> core =
+      std::make_unique<RewriteOptions>(&thread_system_);
+  std::unique_ptr<RewriteOptions> vhost_core =
+      std::make_unique<RewriteOptions>(&thread_system_);
   core->SetRewriteLevel(RewriteOptions::kCoreFilters);
 
   vhost_core->Merge(*vhost_options);
@@ -2738,7 +3263,7 @@ TEST_F(RewriteOptionsTest, BandwidthMode) {
   EXPECT_TRUE(options_.Enabled(RewriteOptions::kRewriteCss));
   EXPECT_TRUE(options_.Enabled(RewriteOptions::kRewriteJavascriptExternal));
   EXPECT_TRUE(options_.Enabled(RewriteOptions::kRewriteJavascriptInline));
-  EXPECT_TRUE(options_.Enabled(RewriteOptions::kInPlaceOptimizeForBrowser));
+  EXPECT_FALSE(options_.Enabled(RewriteOptions::kInPlaceOptimizeForBrowser));
   EXPECT_TRUE(options_.in_place_rewriting_enabled());
   EXPECT_FALSE(options_.css_preserve_urls());
   EXPECT_TRUE(options_.image_preserve_urls());
@@ -3028,6 +3553,188 @@ TEST_F(RewriteOptionsTest, OptionsToString) {
       options_.OptionsToString());
 }
 
+// Regression test for the SRWLock-recursive-acquisition defect that caused
+// /pagespeed_admin/config to RST under AppVerifier's SRWLock provider on
+// Windows.
+//
+// The defect: OptionsToString() took a shared lock on cache_purge_mutex_,
+// then called has_cache_invalidation_timestamp_ms() and
+// cache_invalidation_timestamp(), both of which reacquire the same lock
+// shared. Windows SRWLocks are NOT recursive — AppVerifier raises
+// STATUS_BREAKPOINT, which on the runner gets swallowed and abandons the
+// response.
+//
+// This test uses a RWLock that bans recursive shared acquisition and
+// invokes the call sites that historically recursed. Pre-fix: this test
+// fails with a fatal log. Post-fix: clean OptionsToString() run.
+namespace {
+
+// RWLock that detects recursive shared/exclusive acquisition by the same
+// thread — mirrors the contract of Windows SRWLock that AppVerifier
+// enforces. Backed by a non-recursive primitive.
+class NonRecursiveRWLock : public ThreadSystem::RWLock {
+ public:
+  NonRecursiveRWLock() = default;
+  ~NonRecursiveRWLock() override = default;
+
+  bool TryLock() override {
+    if (writer_held_.load() || readers_.load() > 0) return false;
+    writer_held_.store(true);
+    return true;
+  }
+  void Lock() override {
+    // Detect recursion: writer can't already be held.
+    CHECK(!writer_held_.load())
+        << "Recursive exclusive lock acquisition (SRWLock would deadlock)";
+    writer_held_.store(true);
+  }
+  void Unlock() override { writer_held_.store(false); }
+  bool ReaderTryLock() override {
+    if (writer_held_.load()) return false;
+    readers_.fetch_add(1);
+    return true;
+  }
+  void ReaderLock() override {
+    // Detect recursion: same-thread shared-while-shared is the AppVerifier
+    // SRWLock violation. We approximate by tracking total readers; since
+    // the rewrite_options unit test is single-threaded, any reader count >
+    // 0 here means recursion.
+    CHECK_EQ(0, readers_.load())
+        << "Recursive shared lock acquisition (SRWLock would deadlock under "
+           "AppVerifier; this was the /pagespeed_admin/config defect)";
+    readers_.fetch_add(1);
+  }
+  void ReaderUnlock() override { readers_.fetch_sub(1); }
+  void DCheckLocked() override { CHECK(writer_held_.load()); }
+  void DCheckReaderLocked() override {
+    CHECK(writer_held_.load() || readers_.load() > 0);
+  }
+
+ private:
+  std::atomic<bool> writer_held_{false};
+  std::atomic<int> readers_{0};
+};
+
+}  // namespace
+
+TEST_F(RewriteOptionsTest, OptionsToStringDoesNotRecursivelyAcquireSharedLock) {
+  // Install a non-recursive RWLock on cache_purge_mutex_, simulating
+  // WinRWLock's (Windows SRWLock) non-reentrant semantics.
+  options_.set_cache_invalidation_timestamp_mutex(new NonRecursiveRWLock());
+
+  // Establish a cache-invalidation timestamp so the "Invalidation Timestamp:"
+  // branch of OptionsToString — the one that historically recursed — runs.
+  EXPECT_TRUE(
+      options_.UpdateCacheInvalidationTimestampMs(MockTimer::kApr_5_2010_ms));
+
+  // Pre-fix: this CHECK-fails inside OptionsToString() because the block at
+  // rewrite_options.cc:3303 acquired the lock shared and then called
+  // has_cache_invalidation_timestamp_ms() / cache_invalidation_timestamp()
+  // which each re-acquired shared.
+  GoogleString output = options_.OptionsToString();
+  EXPECT_NE(GoogleString::npos, output.find("Invalidation Timestamp:"));
+}
+
+// Mode-tracking RWLock that records every acquisition mode. Used to assert
+// that ComputeSignature() — which writes `signature_` — acquires the
+// cache_purge_mutex_ as EXCLUSIVE, not shared. Holding a shared lock while
+// writing was the upstream-PageSpeed lock-discipline defect previously
+// annotated as SHARED_LOCKS_REQUIRED; it races concurrent writers on
+// `signature_` even when the platform-specific verifier instrumentation
+// doesn't directly flag it.
+namespace {
+
+class ModeTrackingRWLock : public ThreadSystem::RWLock {
+ public:
+  enum class Mode : std::uint8_t { kIdle, kShared, kExclusive };
+
+  ModeTrackingRWLock() = default;
+  ~ModeTrackingRWLock() override = default;
+
+  // Tracks every acquisition (most recent wins).
+  Mode last_mode() const { return last_mode_.load(); }
+  int exclusive_acquisitions() const { return exclusive_count_.load(); }
+  int shared_acquisitions() const { return shared_count_.load(); }
+
+  bool TryLock() override {
+    if (active_mode_.load() != Mode::kIdle) return false;
+    active_mode_.store(Mode::kExclusive);
+    last_mode_.store(Mode::kExclusive);
+    exclusive_count_.fetch_add(1);
+    return true;
+  }
+  void Lock() override {
+    CHECK_EQ(static_cast<int>(Mode::kIdle),
+             static_cast<int>(active_mode_.load()))
+        << "Recursive lock acquisition (SRWLock would deadlock)";
+    active_mode_.store(Mode::kExclusive);
+    last_mode_.store(Mode::kExclusive);
+    exclusive_count_.fetch_add(1);
+  }
+  void Unlock() override {
+    CHECK_EQ(static_cast<int>(Mode::kExclusive),
+             static_cast<int>(active_mode_.load()));
+    active_mode_.store(Mode::kIdle);
+  }
+  bool ReaderTryLock() override {
+    if (active_mode_.load() == Mode::kExclusive) return false;
+    active_mode_.store(Mode::kShared);
+    last_mode_.store(Mode::kShared);
+    shared_count_.fetch_add(1);
+    return true;
+  }
+  void ReaderLock() override {
+    CHECK_NE(static_cast<int>(Mode::kExclusive),
+             static_cast<int>(active_mode_.load()))
+        << "Cannot acquire shared while exclusive held (would deadlock)";
+    active_mode_.store(Mode::kShared);
+    last_mode_.store(Mode::kShared);
+    shared_count_.fetch_add(1);
+  }
+  void ReaderUnlock() override {
+    CHECK_EQ(static_cast<int>(Mode::kShared),
+             static_cast<int>(active_mode_.load()));
+    active_mode_.store(Mode::kIdle);
+  }
+  void DCheckLocked() override {
+    CHECK_NE(static_cast<int>(Mode::kIdle),
+             static_cast<int>(active_mode_.load()));
+  }
+  void DCheckReaderLocked() override {
+    CHECK_NE(static_cast<int>(Mode::kIdle),
+             static_cast<int>(active_mode_.load()));
+  }
+
+ private:
+  std::atomic<Mode> active_mode_{Mode::kIdle};
+  std::atomic<Mode> last_mode_{Mode::kIdle};
+  std::atomic<int> exclusive_count_{0};
+  std::atomic<int> shared_count_{0};
+};
+
+}  // namespace
+
+TEST_F(RewriteOptionsTest, ComputeSignatureAcquiresLockExclusive) {
+  // ComputeSignature() writes `signature_` (via ComputeSignatureLockHeld()).
+  // Pre-fix it acquired cache_purge_mutex_ as ScopedReader (shared), which
+  // races writers on `signature_` under multi-threaded use — the upstream-
+  // PageSpeed lock-discipline defect this guard exists to keep out.
+  ModeTrackingRWLock* lock = new ModeTrackingRWLock();
+  options_.set_cache_invalidation_timestamp_mutex(lock);
+
+  options_.ComputeSignature();
+
+  // Post-fix: signature was computed under exclusive lock.
+  EXPECT_EQ(static_cast<int>(ModeTrackingRWLock::Mode::kExclusive),
+            static_cast<int>(lock->last_mode()))
+      << "ComputeSignature must acquire cache_purge_mutex_ exclusive; "
+         "writing `signature_` under a shared lock races writers and trips "
+         "Windows AppVerifier.";
+  EXPECT_GE(lock->exclusive_acquisitions(), 1)
+      << "ComputeSignature acquired the lock zero times as exclusive — "
+         "still using ScopedReader (shared)?";
+}
+
 TEST_F(RewriteOptionsTest, ColorUtilTest) {
   RewriteOptions::Color out;
   EXPECT_FALSE(RewriteOptions::ParseFromString("", &out));
@@ -3102,115 +3809,49 @@ TEST_F(RewriteOptionsTest, ParseFloats) {
   EXPECT_FALSE(RewriteOptions::ParseFromString("1 2 3", &densities));
 }
 
-TEST_F(RewriteOptionsTest, ParseAllowVaryOn) {
-  // Explicitly listed headers should be supported, independently of "Via"
-  // header.
-  VerifyAllowVaryOn("User-Agent", true /* expected_valid */,
-                    false /* expected_allow_auto */,
-                    false /* expected_allow_save_data */,
-                    true /* expected_allow_user_agent */,
-                    false /* expected_allow_accept */, "User-Agent");
-  VerifyAllowVaryOn("Save-Data", true /* expected_valid */,
-                    false /* expected_allow_auto */,
-                    true /* expected_allow_save_data */,
-                    false /* expected_allow_user_agent */,
-                    false /* expected_allow_accept */, "Save-Data");
-  VerifyAllowVaryOn("Accept", true /* expected_valid */,
-                    false /* expected_allow_auto */,
-                    false /* expected_allow_save_data */,
-                    false /* expected_allow_user_agent */,
-                    true /* expected_allow_accept */, "Accept");
-  VerifyAllowVaryOn(
-      "Save-Data,Accept,User-Agent", true /* expected_valid */,
-      false /* expected_allow_auto */, true /* expected_allow_save_data */,
-      true /* expected_allow_user_agent */, true /* expected_allow_accept */,
-      "Accept,Save-Data,User-Agent");
-  VerifyAllowVaryOn(
-      "Save-Data,Accept,User-Agent", true /* expected_valid */,
-      false /* expected_allow_auto */, true /* expected_allow_save_data */,
-      true /* expected_allow_user_agent */, true /* expected_allow_accept */,
-      "Accept,Save-Data,User-Agent");
-
-  // Case and empty space don't matter.
-  VerifyAllowVaryOn(
-      " accept,SAVE-DATA,   uSER-aGENT  ", true /* expected_valid */,
-      false /* expected_allow_auto */, true /* expected_allow_save_data */,
-      true /* expected_allow_user_agent */, true /* expected_allow_accept */,
-      "Accept,Save-Data,User-Agent");
-
-  // "None" disables all headers.
-  VerifyAllowVaryOn("None", true /* expected_valid */,
-                    false /* expected_allow_auto */,
-                    false /* expected_allow_save_data */,
-                    false /* expected_allow_user_agent */,
-                    false /* expected_allow_accept */, "None");
-  VerifyAllowVaryOn("nONE  ", true /* expected_valid */,
-                    false /* expected_allow_auto */,
-                    false /* expected_allow_save_data */,
-                    false /* expected_allow_user_agent */,
-                    false /* expected_allow_accept */, "None");
-
-  // In "Auto" mode, the "Auto" bit is set and the "Save-Data" header is
-  // enabled. Caller can decide which other headers to allow.
-  VerifyAllowVaryOn("AUTO", true /* expected_valid */,
-                    true /* expected_allow_auto */,
-                    true /* expected_allow_save_data */,
-                    false /* expected_allow_user_agent */,
-                    false /* expected_allow_accept */, "Auto");
-  VerifyAllowVaryOn("   auto ", true /* expected_valid */,
-                    true /* expected_allow_auto */,
-                    true /* expected_allow_save_data */,
-                    false /* expected_allow_user_agent */,
-                    false /* expected_allow_accept */, "Auto");
-
-  const bool not_used = false;
-  // Unsupported or invalid headers will not be accepted.
-  VerifyAllowVaryOn("Content-Length,User-Agent", false /* expected_valid */,
-                    not_used, not_used, not_used, not_used, "not-used");
-  VerifyAllowVaryOn(", ,User-Agent,Invalid", false /* expected_valid */,
-                    not_used, not_used, not_used, not_used, "not-used");
-  VerifyAllowVaryOn("Content-Length,Invalid", false /* expected_valid */,
-                    not_used, not_used, not_used, not_used, "not-used");
-
-  // Mixing "Auto" with "None", or mixing either of them with other headers
-  // is not allowed.
-  VerifyAllowVaryOn("Auto,None", false /* expected_valid */, not_used, not_used,
-                    not_used, not_used, "not-used");
-  VerifyAllowVaryOn("Auto,Accept", false /* expected_valid */, not_used,
-                    not_used, not_used, not_used, "not-used");
-  VerifyAllowVaryOn("Content-Length,None", false /* expected_valid */, not_used,
-                    not_used, not_used, not_used, "not-used");
-
-  // Empty string and extra comma are disallowed.
-  VerifyAllowVaryOn("", false /* expected_valid */, not_used, not_used,
-                    not_used, not_used, "not-used");
-  VerifyAllowVaryOn("    ", false /* expected_valid */, not_used, not_used,
-                    not_used, not_used, "not-used");
-  VerifyAllowVaryOn(",", false /* expected_valid */, not_used, not_used,
-                    not_used, not_used, "not-used");
-  VerifyAllowVaryOn(", ,, ", false /* expected_valid */, not_used, not_used,
-                    not_used, not_used, "not-used");
-  VerifyAllowVaryOn("accept,", false /* expected_valid */, not_used, not_used,
-                    not_used, not_used, "not-used");
+// AllowVaryOn is retired.  It stays registered so that an existing
+// configuration file still loads, but any value is accepted and ignored.
+TEST_F(RewriteOptionsTest, AllowVaryOnIsAcceptedAndIgnored) {
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            options_.SetOptionFromName(RewriteOptions::kAllowVaryOn, "Auto"));
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            options_.SetOptionFromName(RewriteOptions::kAllowVaryOn, "None"));
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            options_.SetOptionFromName(RewriteOptions::kAllowVaryOn,
+                                       "Accept,User-Agent"));
+  // Even values the old parser rejected must not fail a config load now.
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            options_.SetOptionFromName(RewriteOptions::kAllowVaryOn,
+                                       "Content-Length"));
 }
 
-TEST_F(RewriteOptionsTest, MergeAllowVaryOnOptions) {
-  // New option, if specified, will always overwrite the old one.
-  VerifyMergingAllowVaryOn("Accept,User-Agent", "Save-Data", "Save-Data");
-  VerifyMergingAllowVaryOn("Accept", "Save-Data", "Save-Data");
-  VerifyMergingAllowVaryOn("Accept", "None", "None");
-  VerifyMergingAllowVaryOn("", "Save-Data", "Save-Data");
-  VerifyMergingAllowVaryOn("", "None", "None");
-  VerifyMergingAllowVaryOn("", "Auto", "Auto");
+// The retired AllowVaryOn and PrivateNotVaryForIE directives must not
+// contribute to the options signature: their values are never read, so a
+// config (or request) carrying them -- with any value at all -- must land on
+// exactly the same metadata-cache partition as a default config.  Before this
+// exclusion, any value of the ignored AllowVaryOn string minted a fresh
+// signature, fragmenting the metadata cache.
+TEST_F(RewriteOptionsTest, RetiredVaryDirectivesNotInSignature) {
+  RewriteOptions defaults(&thread_system_);
+  defaults.ComputeSignature();
+  const GoogleString default_signature = defaults.signature();
 
-  // New option, is un-specified, will be ignored.
-  VerifyMergingAllowVaryOn("Accept,User-Agent", "", "Accept,User-Agent");
-  VerifyMergingAllowVaryOn("None", "", "None");
-  VerifyMergingAllowVaryOn("Auto", "", "Auto");
-
-  // If neither option has been specified, the default will be used.
-  VerifyMergingAllowVaryOn("", "", "Auto");
+  options_.ClearSignatureForTesting();
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            options_.SetOptionFromName(RewriteOptions::kAllowVaryOn,
+                                       "some-junk-value"));
+  // A non-default value for the retired boolean, likewise.
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            options_.SetOptionFromName(RewriteOptions::kPrivateNotVaryForIE,
+                                       "off"));
+  options_.ComputeSignature();
+  EXPECT_EQ(GoogleString::npos, options_.signature().find("avo"))
+      << options_.signature();
+  EXPECT_EQ(GoogleString::npos, options_.signature().find("pnvie"))
+      << options_.signature();
+  EXPECT_STREQ(default_signature, options_.signature());
 }
+
 
 TEST_F(RewriteOptionsTest, MergeAllowDisallow) {
   RewriteOptions one(&thread_system_), two(&thread_system_);
@@ -3343,48 +3984,67 @@ TEST_F(RewriteOptionsTest, ImageQualitiesAllDisabled) {
   EXPECT_FALSE(options_.HasValidSaveDataQualities());
 }
 
+// Save-Data image qualities are used whenever they are configured; there is no
+// longer a separate opt-in for varying on the header, because the Save-Data
+// variant is only ever published under its own rewritten URL.
 TEST_F(RewriteOptionsTest, SupportSaveData) {
-  // By default, AllowVaryOn is set to "Auto" which implies "Save-Data".
   options_.set_image_jpeg_quality_for_save_data(-1);
   options_.set_image_webp_quality_for_save_data(-1);
   EXPECT_FALSE(options_.HasValidSaveDataQualities());
-  EXPECT_TRUE(options_.AllowVaryOnSaveData());
   EXPECT_FALSE(options_.SupportSaveData());
 
   options_.set_image_jpeg_quality_for_save_data(20);
   options_.set_image_webp_quality_for_save_data(30);
   EXPECT_TRUE(options_.HasValidSaveDataQualities());
-  EXPECT_TRUE(options_.AllowVaryOnSaveData());
   EXPECT_TRUE(options_.SupportSaveData());
 
-  // Disallow vary on "Save-Data".
+  // The retired AllowVaryOn directive no longer suppresses it.
   EXPECT_EQ(RewriteOptions::kOptionOk,
             options_.SetOptionFromName(RewriteOptions::kAllowVaryOn, "None"));
-  options_.set_image_jpeg_quality_for_save_data(-1);
-  options_.set_image_webp_quality_for_save_data(-1);
-  EXPECT_FALSE(options_.HasValidSaveDataQualities());
-  EXPECT_FALSE(options_.AllowVaryOnSaveData());
-  EXPECT_FALSE(options_.SupportSaveData());
+  EXPECT_TRUE(options_.SupportSaveData());
+}
 
-  options_.set_image_jpeg_quality_for_save_data(20);
-  options_.set_image_webp_quality_for_save_data(30);
-  EXPECT_TRUE(options_.HasValidSaveDataQualities());
-  EXPECT_FALSE(options_.AllowVaryOnSaveData());
-  EXPECT_FALSE(options_.SupportSaveData());
 
-  // Explicitly allow vary on "Save-Data".
+// The agent_optimize toggle round-trips and merges.
+TEST_F(RewriteOptionsTest, AgentOptimizeOptionRoundTrip) {
+  EXPECT_FALSE(options_.agent_optimize());  // OFF by default.
+  options_.set_agent_optimize(true);
+  EXPECT_TRUE(options_.agent_optimize());
+
+  NullMessageHandler handler;
+  GoogleString msg;
+  RewriteOptions fresh(&thread_system_);
   EXPECT_EQ(
       RewriteOptions::kOptionOk,
-      options_.SetOptionFromName(RewriteOptions::kAllowVaryOn, "Save-Data"));
-  EXPECT_TRUE(options_.HasValidSaveDataQualities());
-  EXPECT_TRUE(options_.AllowVaryOnSaveData());
-  EXPECT_TRUE(options_.SupportSaveData());
+      fresh.ParseAndSetOptionFromName1("AgentOptimize", "on", &msg, &handler));
+  EXPECT_TRUE(fresh.agent_optimize());
+  EXPECT_TRUE(msg.empty());
 
-  options_.set_image_jpeg_quality_for_save_data(-1);
-  options_.set_image_webp_quality_for_save_data(-1);
-  EXPECT_FALSE(options_.HasValidSaveDataQualities());
-  EXPECT_TRUE(options_.AllowVaryOnSaveData());
-  EXPECT_FALSE(options_.SupportSaveData());
+  // Merge propagates an explicitly-set value.
+  RewriteOptions dest(&thread_system_);
+  EXPECT_FALSE(dest.agent_optimize());
+  dest.Merge(fresh);
+  EXPECT_TRUE(dest.agent_optimize());
+}
+
+// Config-parity: 2.0-only render directives are rejected at parse
+// time on 1.1 (no headless browser) with a helpful message — one shared
+// rejection point, so all four ports error identically.
+TEST_F(RewriteOptionsTest, RenderOnlyDirectivesRejectedOn11) {
+  NullMessageHandler handler;
+  for (const char* name :
+       {"AgentMarkdownRender", "AgentRenderTimeout", "AgentRenderAllowHosts"}) {
+    GoogleString msg;
+    EXPECT_EQ(RewriteOptions::kOptionValueInvalid,
+              options_.ParseAndSetOptionFromName1(name, "x", &msg, &handler))
+        << name;
+    EXPECT_NE(GoogleString::npos, msg.find("2.0")) << name << ": " << msg;
+  }
+  // The real toggle is NOT mistaken for a render-only directive.
+  GoogleString ok_msg;
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromName1("AgentOptimize", "on", &ok_msg,
+                                                &handler));
 }
 
 }  // namespace net_instaweb

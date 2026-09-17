@@ -29,7 +29,6 @@
 
 #include "base/logging.h"
 #include "pagespeed/kernel/base/proto_util.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_multi_map.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -121,7 +120,7 @@ class MessageHandler;
 
 template <class Proto>
 Headers<Proto>::Headers() {
-  proto_.reset(new Proto);
+  proto_ = std::make_unique<Proto>();
   Clear();
 }
 
@@ -284,6 +283,20 @@ bool Headers<Proto>::HasValue(const StringPiece& name,
   return false;
 }
 
+template <class Proto>
+bool Headers<Proto>::HasValueCaseInsensitive(const StringPiece& name,
+                                             const StringPiece& value) const {
+  ConstStringStarVector values;
+  Lookup(name, &values);
+  for (ConstStringStarVector::const_iterator iter = values.begin();
+       iter != values.end(); ++iter) {
+    if (StringCaseEqual(value, **iter)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 namespace {
 
 bool IsCommaSeparatedField(const StringPiece& name) {
@@ -326,6 +339,14 @@ void SplitValues(StringPiece name, StringPiece comma_separated_values,
 
 template <class Proto>
 void Headers<Proto>::Add(const StringPiece& name, const StringPiece& value) {
+  // Guard against unbounded growth of the protobuf repeated field from crafted
+  // input carrying a pathological number of headers.  Once we hit the cap we
+  // silently drop further headers rather than risk exhausting memory.
+  if (proto_->header_size() >= kMaxHeaders) {
+    LOG(WARNING) << "Dropping header '" << name
+                 << "': exceeded maximum header count (" << kMaxHeaders << ")";
+    return;
+  }
   NameValue* name_value = proto_->add_header();
   name_value->set_name(name.data(), name.size());
   name_value->set_value(value.data(), value.size());
@@ -521,7 +542,7 @@ bool Headers<Proto>::RemoveIfNotIn(const Headers& keep) {
   // and executing any partial removals.
   std::vector<bool> to_keep;
   bool ret = false;
-  typedef std::map<StringPiece, int> StringPieceBag;
+  using StringPieceBag = std::map<StringPiece, int>;
   using ValueBagMap = std::map<StringPiece, StringPieceBag>;
   ValueBagMap value_bag_map;
 
@@ -606,7 +627,7 @@ template <class Proto>
 void Headers<Proto>::UpdateFrom(const Headers<Proto>& other) {
   // Get set of names to remove.
   int n = other.NumAttributes();
-  scoped_array<StringPiece> removing_names(new StringPiece[n]);
+  std::unique_ptr<StringPiece[]> removing_names(new StringPiece[n]);
   for (int i = 0; i < n; ++i) {
     removing_names[i] = other.Name(i);
   }

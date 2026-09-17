@@ -82,7 +82,7 @@ struct AtomCompare {
 
 // A set of atoms can be constructed very efficiently.  Note that
 // iteration over this set will *not* be in alphabetical order.
-typedef std::set<Atom, AtomCompare> AtomSet;
+using AtomSet = std::set<Atom, AtomCompare>;
 
 }  // namespace net_instaweb
 

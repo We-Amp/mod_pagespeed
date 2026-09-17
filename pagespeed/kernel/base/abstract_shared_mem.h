@@ -62,7 +62,8 @@ class AbstractSharedMemSegment {
   virtual AbstractMutex* AttachToSharedMutex(size_t offset) = 0;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(AbstractSharedMemSegment);
+  AbstractSharedMemSegment(const AbstractSharedMemSegment&) = delete;
+  AbstractSharedMemSegment& operator=(const AbstractSharedMemSegment&) = delete;
 };
 
 // Interface for creating and attaching to named shared memory segments.
@@ -121,7 +122,8 @@ class AbstractSharedMem {
   virtual bool IsDummy() { return false; }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(AbstractSharedMem);
+  AbstractSharedMem(const AbstractSharedMem&) = delete;
+  AbstractSharedMem& operator=(const AbstractSharedMem&) = delete;
 };
 
 }  // namespace net_instaweb

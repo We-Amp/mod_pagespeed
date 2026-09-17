@@ -73,7 +73,8 @@ class RewriteGflags {
   // There is no data in this class because the underlying gflags
   // class holds the parsed options in globals.
 
-  DISALLOW_COPY_AND_ASSIGN(RewriteGflags);
+  RewriteGflags(const RewriteGflags&) = delete;
+  RewriteGflags& operator=(const RewriteGflags&) = delete;
 };
 
 }  // namespace net_instaweb

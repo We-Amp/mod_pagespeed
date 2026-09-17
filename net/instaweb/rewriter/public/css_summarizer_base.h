@@ -20,12 +20,12 @@
 #ifndef NET_INSTAWEB_REWRITER_PUBLIC_CSS_SUMMARIZER_BASE_H_
 #define NET_INSTAWEB_REWRITER_PUBLIC_CSS_SUMMARIZER_BASE_H_
 
+#include <memory>
 #include <vector>
 
 #include "net/instaweb/rewriter/public/resource_slot.h"
 #include "net/instaweb/rewriter/public/rewrite_filter.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/html/html_element.h"
@@ -108,6 +108,12 @@ class CssSummarizerBase : public RewriteFilter {
     // If it's an external stylesheet, the value of the rel attribute
     GoogleString rel;
 
+    // If it's an external stylesheet, the charset it is in: as declared by
+    // the resource itself (header, @charset, or BOM), falling back to the
+    // charset attribute on the link. Empty means it inherits the page's
+    // charset.
+    GoogleString charset;
+
     // True if it's a <link rel=stylesheet href=>, false for <style>
     bool is_external;
 
@@ -124,6 +130,13 @@ class CssSummarizerBase : public RewriteFilter {
   // we'll just throw it away when we're done anyway).  By default all CSS
   // must be summarized.
   virtual bool MustSummarize(HtmlElement* element) const { return true; }
+
+  // This should be overridden if rendering the summary would conflict with the
+  // page's Content-Security-Policy (e.g. the subclass inlines external CSS
+  // into <style> blocks). When this returns false, WillNotRenderSummary() is
+  // invoked instead of RenderSummary(). Called from a rewrite thread. The
+  // default permits rendering unconditionally.
+  virtual bool PolicyPermitsRendering() const { return true; }
 
   // This should be overridden to compute a per-resource summary.
   // The method should not modify the object state, and only
@@ -201,7 +214,7 @@ class CssSummarizerBase : public RewriteFilter {
   void StartDocumentImpl() override;
   void EndDocument() override;
   void StartElementImpl(HtmlElement* element) override;
-  void Characters(HtmlCharactersNode* characters) override;
+  void CharactersImpl(HtmlCharactersNode* characters) override;
   void EndElementImpl(HtmlElement* element) override;
   void RenderDone() override;
 
@@ -256,7 +269,8 @@ class CssSummarizerBase : public RewriteFilter {
   Variable* num_css_used_for_critical_css_computation_;
   Variable* num_css_not_used_for_critical_css_computation_;
 
-  DISALLOW_COPY_AND_ASSIGN(CssSummarizerBase);
+  CssSummarizerBase(const CssSummarizerBase&) = delete;
+  CssSummarizerBase& operator=(const CssSummarizerBase&) = delete;
 };
 
 }  // namespace net_instaweb

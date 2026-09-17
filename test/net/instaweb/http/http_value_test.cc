@@ -23,6 +23,7 @@
 
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/google_message_handler.h"
+#include "pagespeed/kernel/base/mapped_shared_string.h"
 #include "pagespeed/kernel/base/shared_string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/http/http_names.h"
@@ -53,10 +54,35 @@ class HTTPValueTest : public testing::Test {
     return value->ComputeContentsSize();
   }
 
+  // Builds the canonical encoded form (headers-first) of a response with
+  // FillResponseHeaders() headers and body "body", as stored in a cache.
+  GoogleString BuildEncodedValue() {
+    HTTPValue value;
+    ResponseHeaders headers;
+    FillResponseHeaders(&headers);
+    value.SetHeaders(&headers);
+    value.Write("body", &message_handler_);
+    return value.share().Value().as_string();
+  }
+
+  static void CountingRelease(void* user_data) {
+    ++*static_cast<int*>(user_data);
+  }
+
+  // Wraps 'buffer' in a mapped-mode MappedSharedString whose release bumps
+  // *release_count.
+  static MappedSharedString MapBuffer(const GoogleString& buffer,
+                                      int* release_count) {
+    return MappedSharedString::FromMappedView(buffer.data(), buffer.size(),
+                                              &HTTPValueTest::CountingRelease,
+                                              release_count);
+  }
+
   GoogleMessageHandler message_handler_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(HTTPValueTest);
+  HTTPValueTest(const HTTPValueTest&) = delete;
+  HTTPValueTest& operator=(const HTTPValueTest&) = delete;
 };
 
 TEST_F(HTTPValueTest, Empty) {
@@ -194,6 +220,198 @@ TEST_F(HTTPValueTest, LinkCorrupt) {
   ASSERT_FALSE(value.Link(storage, &headers, &message_handler_));
   storage.Append("xyz");
   ASSERT_FALSE(value.Link(storage, &headers, &message_handler_));
+}
+
+// ============================================================================
+// LinkMapped (zero-copy borrowed views) — see HTTPValue::LinkMapped.
+// ============================================================================
+
+TEST_F(HTTPValueTest, LinkMappedZeroCopy) {
+  GoogleString buffer = BuildEncodedValue();
+  int releases = 0;
+  HTTPValue value;
+  ResponseHeaders check_headers;
+  ASSERT_TRUE(value.LinkMapped(MapBuffer(buffer, &releases), &check_headers,
+                               &message_handler_));
+  EXPECT_TRUE(value.is_mapped());
+  EXPECT_FALSE(value.Empty());
+  EXPECT_EQ(buffer.size(), value.size());
+  CheckResponseHeaders(check_headers);
+
+  // Zero-copy: the extracted contents point directly into the mapped
+  // buffer.  Headers-first encoding puts the 4-byte body last.
+  StringPiece body;
+  ASSERT_TRUE(value.ExtractContents(&body));
+  EXPECT_EQ("body", body.as_string());
+  EXPECT_EQ(buffer.data() + buffer.size() - body.size(), body.data());
+  EXPECT_EQ(body.size(), ComputeContentsSize(&value));
+
+  // ExtractHeaders re-parses correctly from the mapped bytes.
+  ResponseHeaders again;
+  ASSERT_TRUE(value.ExtractHeaders(&again, &message_handler_));
+  CheckResponseHeaders(again);
+
+  EXPECT_EQ(0, releases);
+  value.Clear();
+  EXPECT_TRUE(value.Empty());
+  EXPECT_EQ(1, releases);  // Clear() drops the borrowed view.
+}
+
+TEST_F(HTTPValueTest, LinkMappedOwnedFallsBackToLink) {
+  // A non-mapped MappedSharedString behaves exactly like classic Link.
+  GoogleString buffer = BuildEncodedValue();
+  SharedString shared(buffer);
+  MappedSharedString owned(shared);
+  HTTPValue value;
+  ResponseHeaders check_headers;
+  ASSERT_TRUE(value.LinkMapped(owned, &check_headers, &message_handler_));
+  EXPECT_FALSE(value.is_mapped());
+  CheckResponseHeaders(check_headers);
+  StringPiece body;
+  ASSERT_TRUE(value.ExtractContents(&body));
+  EXPECT_EQ("body", body.as_string());
+}
+
+TEST_F(HTTPValueTest, LinkMappedCorrupt) {
+  int releases = 0;
+  HTTPValue value;
+  ResponseHeaders headers;
+  GoogleString empty;
+  EXPECT_FALSE(value.LinkMapped(MapBuffer(empty, &releases), &headers,
+                                &message_handler_));
+  GoogleString corrupt("h9999xyz");
+  EXPECT_FALSE(value.LinkMapped(MapBuffer(corrupt, &releases), &headers,
+                                &message_handler_));
+  EXPECT_FALSE(value.is_mapped());
+  EXPECT_TRUE(value.Empty());
+  // Both temporary views were released on failure.
+  EXPECT_EQ(2, releases);
+
+  // A failed LinkMapped must not disturb previously linked good state.
+  GoogleString buffer = BuildEncodedValue();
+  ASSERT_TRUE(value.LinkMapped(MapBuffer(buffer, &releases), &headers,
+                               &message_handler_));
+  EXPECT_FALSE(value.LinkMapped(MapBuffer(corrupt, &releases), &headers,
+                                &message_handler_));
+  EXPECT_TRUE(value.is_mapped());
+  StringPiece body;
+  ASSERT_TRUE(value.ExtractContents(&body));
+  EXPECT_EQ("body", body.as_string());
+  EXPECT_EQ(buffer.data() + buffer.size() - body.size(), body.data());
+}
+
+TEST_F(HTTPValueTest, ShareCollapsesMappedToOwned) {
+  GoogleString buffer = BuildEncodedValue();
+  int releases = 0;
+  HTTPValue value;
+  ResponseHeaders check_headers;
+  ASSERT_TRUE(value.LinkMapped(MapBuffer(buffer, &releases), &check_headers,
+                               &message_handler_));
+  StringPiece mapped_body;
+  ASSERT_TRUE(value.ExtractContents(&mapped_body));
+
+  // share() is the cache-Put / Resource::Link escape: it must produce owned
+  // bytes that are safe past the borrow window.
+  const SharedString& shared = value.share();
+  EXPECT_FALSE(value.is_mapped());
+  EXPECT_EQ(buffer, shared.Value().as_string());
+  EXPECT_NE(buffer.data(), shared.data());  // Owned copy, not the mmap.
+
+  // After the collapse, extraction reads from owned storage...
+  StringPiece owned_body;
+  ASSERT_TRUE(value.ExtractContents(&owned_body));
+  EXPECT_EQ("body", owned_body.as_string());
+  EXPECT_NE(mapped_body.data(), owned_body.data());
+
+  // ...but the earlier StringPiece stays valid: the collapse retains the
+  // mapped view (keep-alive) until Clear()/destruction.  This mirrors
+  // RewriteDriver::CacheCallback::DeliverDone, which extracts contents
+  // BEFORE Resource::Link (share) and writes them to the fetch AFTER.
+  EXPECT_EQ(0, releases);
+  EXPECT_EQ("body", mapped_body.as_string());
+  value.Clear();
+  EXPECT_EQ(1, releases);
+}
+
+TEST_F(HTTPValueTest, LinkHTTPValueCollapsesSource) {
+  GoogleString buffer = BuildEncodedValue();
+  int releases = 0;
+  ResponseHeaders check_headers;
+  {
+    HTTPValue mapped_value;
+    ASSERT_TRUE(mapped_value.LinkMapped(MapBuffer(buffer, &releases),
+                                        &check_headers, &message_handler_));
+    // Link(HTTPValue*) is the fallback/output-resource escape: the
+    // destination may outlive the borrow window, so the source collapses
+    // first and the destination only ever sees owned bytes.
+    HTTPValue linked;
+    linked.Link(&mapped_value);
+    EXPECT_FALSE(mapped_value.is_mapped());
+    EXPECT_FALSE(linked.is_mapped());
+
+    StringPiece src_body, dst_body;
+    ASSERT_TRUE(mapped_value.ExtractContents(&src_body));
+    ASSERT_TRUE(linked.ExtractContents(&dst_body));
+    EXPECT_EQ("body", dst_body.as_string());
+    EXPECT_EQ(src_body.data(), dst_body.data());  // Owned buffer sharing.
+    EXPECT_TRUE(dst_body.data() < buffer.data() ||
+                dst_body.data() >= buffer.data() + buffer.size());
+    EXPECT_EQ(0, releases);  // Keep-alive still held by mapped_value.
+  }
+  EXPECT_EQ(1, releases);  // Destruction drops the borrowed view.
+}
+
+TEST_F(HTTPValueTest, WriteCollapsesMapped) {
+  GoogleString buffer = BuildEncodedValue();
+  int releases = 0;
+  HTTPValue value;
+  ResponseHeaders check_headers;
+  ASSERT_TRUE(value.LinkMapped(MapBuffer(buffer, &releases), &check_headers,
+                               &message_handler_));
+  value.Write("+more", &message_handler_);
+  EXPECT_FALSE(value.is_mapped());
+  StringPiece body;
+  ASSERT_TRUE(value.ExtractContents(&body));
+  EXPECT_EQ("body+more", body.as_string());
+  EXPECT_EQ(body.size(), ComputeContentsSize(&value));
+  ResponseHeaders again;
+  ASSERT_TRUE(value.ExtractHeaders(&again, &message_handler_));
+  CheckResponseHeaders(again);
+}
+
+TEST_F(HTTPValueTest, LinkSharedStringReplacesMapped) {
+  GoogleString buffer = BuildEncodedValue();
+  int releases = 0;
+  HTTPValue value;
+  ResponseHeaders check_headers;
+  ASSERT_TRUE(value.LinkMapped(MapBuffer(buffer, &releases), &check_headers,
+                               &message_handler_));
+
+  // Re-linking owned storage (e.g. the ungzip path in HTTPCache) replaces
+  // the mapped view wholesale and drops the borrow.
+  GoogleString buffer2 = BuildEncodedValue();
+  SharedString owned(buffer2);
+  ASSERT_TRUE(value.Link(owned, &check_headers, &message_handler_));
+  EXPECT_FALSE(value.is_mapped());
+  EXPECT_EQ(1, releases);
+
+  // And a FAILED owned re-link must preserve the mapped state.  Declare the
+  // release counter BEFORE the HTTPValue so it outlives value2: value2 retains
+  // the mapped view (a still-mapped value) and fires the release callback at
+  // its own destruction, which must not touch an already-out-of-scope
+  // counter.  (In production the release_data is the heap Cyclone read handle,
+  // which likewise outlives every borrowing HTTPValue.)
+  int releases2 = 0;
+  HTTPValue value2;
+  ASSERT_TRUE(value2.LinkMapped(MapBuffer(buffer, &releases2), &check_headers,
+                                &message_handler_));
+  SharedString corrupt("h9999xyz");
+  ASSERT_FALSE(value2.Link(corrupt, &check_headers, &message_handler_));
+  EXPECT_TRUE(value2.is_mapped());
+  StringPiece body;
+  ASSERT_TRUE(value2.ExtractContents(&body));
+  EXPECT_EQ("body", body.as_string());
+  EXPECT_EQ(0, releases2);
 }
 
 class HTTPValueEncodeTest : public testing::Test {

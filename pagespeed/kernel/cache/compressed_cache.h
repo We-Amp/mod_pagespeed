@@ -70,7 +70,8 @@ class CompressedCache : public CacheInterface {
   Variable* original_size_;
   Variable* compressed_size_;
 
-  DISALLOW_COPY_AND_ASSIGN(CompressedCache);
+  CompressedCache(const CompressedCache&) = delete;
+  CompressedCache& operator=(const CompressedCache&) = delete;
 };
 
 }  // namespace net_instaweb

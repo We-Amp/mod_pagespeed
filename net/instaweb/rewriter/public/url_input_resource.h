@@ -59,7 +59,8 @@ class UrlInputResource : public CacheableResourceBase {
   // considered to be a safe action.
   GoogleString origin_;
 
-  DISALLOW_COPY_AND_ASSIGN(UrlInputResource);
+  UrlInputResource(const UrlInputResource&) = delete;
+  UrlInputResource& operator=(const UrlInputResource&) = delete;
 };
 
 }  // namespace net_instaweb

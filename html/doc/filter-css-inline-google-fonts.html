@@ -1,3 +1,21 @@
+<!-- =======================================================================
+     ARCHIVE - DO NOT EDIT.
+
+     This is the mod_pagespeed 1.0 documentation as it shipped, published
+     unchanged as the /1.0/ archive on modpagespeed.com. It describes what
+     that release did, which is why it is NOT updated when behaviour
+     changes: an archive that tracks the current product is a record of
+     nothing.
+
+     If you got here by grepping for prose that is now out of date, the
+     change belongs in the pagespeed-optimizer repository instead:
+
+         2.0    website/src/content/docs/       -> modpagespeed.com/docs/
+         1.15   website/src/content/docs-1.1/   -> modpagespeed.com/1.1/docs/
+
+     CI enforces this. tools/ci/check_legacy_docs.sh fails any pull request
+     that changes a file under html/.
+     ======================================================================= -->
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
 or more contributor license agreements.  See the NOTICE file
@@ -69,7 +87,19 @@ fonts over HTTPS:
      >pagespeed CssInlineMaxBytes bytes;</pre>
 </dl>
 <p>
-This is the maximum size in bytes of any CSS file that will be inlined.
+This is the maximum size in bytes of any CSS file that will be inlined. As of
+1.15, the default is 49152 bytes (48 KiB); earlier versions defaulted to 3072
+bytes, which is smaller than typical Fonts API responses and prevented most of
+them from being inlined.
+</p>
+<p>
+Note for upgrades: pagespeed caches its "too large to inline" decisions in the
+metadata cache, keyed by an options signature that unset defaults do not
+perturb. Raising the default therefore does not invalidate entries recorded
+under the old default, so on a deployment with a warm cache the revival of
+inlining can lag by up to the Font Service's own cache lifetime (currently
+<code>max-age=86400</code>, about one day) until those entries expire. The
+preconnect hint described below is not affected and appears immediately.
 </p>
 <h2>Description</h2>
 <p>
@@ -85,6 +115,22 @@ When the 'Inline Google Fonts API CSS' filter is enabled, the contents of the
 small external CSS resources produced to load the fonts are written directly
 into the HTML document; the browser does not need to request those CSS
 resources independently.
+</p>
+<p>
+As of 1.15, the filter also inserts a <code>&lt;link rel="preconnect"
+href="https://fonts.gstatic.com" crossorigin&gt;</code> hint ahead of the font
+CSS. The font files themselves are still served from
+<code>fonts.gstatic.com</code>, so warming up that connection while the
+inlined CSS is being parsed hides most of the connection setup latency. The
+hint is inserted once per page whenever a Google Fonts API stylesheet is
+recognized&mdash;even when the CSS itself cannot be inlined, since the
+remaining stylesheet link still triggers font downloads from that host. It
+uses the same scheme as the font stylesheet link, and carries
+<code>crossorigin</code> because browsers fetch fonts in anonymous CORS mode.
+If the page already contains its own <code>crossorigin</code> preconnect hint
+for <code>fonts.gstatic.com</code> ahead of the font stylesheet, the filter
+does not add another one; a hint appearing only later in the page results in
+a harmless duplicate that browsers deduplicate.
 </p>
 <p>
 For example, if the HTML document looks like this:
@@ -113,11 +159,12 @@ something like:
 &lt;html>
   &lt;head>
     &lt;title>inline_google_font_css example&lt;/title>
+    &lt;link rel="preconnect" href="http://fonts.gstatic.com" crossorigin>
     &lt;style>@font-face {
       font-family: 'Roboto';
       font-style: normal;
       font-weight: 400;
-      src: local('Roboto Regular'), local('Roboto-Regular'), url(http://themes.googleusercontent.com/static/fonts/roboto/v9/abcd.woff) format('woff');
+      src: local('Roboto Regular'), local('Roboto-Regular'), url(http://fonts.gstatic.com/s/roboto/v9/abcd.woff) format('woff');
     }
     &lt;/style>
     &lt;style>
@@ -134,7 +181,8 @@ something like:
 <p>
 This eliminates the browser request to <code>fonts.googleapis.com</code> and
 potentially the need for the browser to perform a DNS lookup and connect to
-that host entirely.
+that host entirely, while the preconnect hint warms up the connection to
+<code>fonts.gstatic.com</code> that the font downloads will use.
 
 <h3>Example</h3>
 <p>

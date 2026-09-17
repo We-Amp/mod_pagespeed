@@ -1,6 +1,12 @@
 # modifications for pagespeed over Envoy's stock config
 
-build --linkopt -ldl
+# Persistent caches on SSD for faster rebuilds
+#build --disk_cache=/ssd-cache/disk-cache
+#build --repository_cache=/ssd-cache/repo-cache
+
+# POSIX-specific configuration (Linux, macOS)
+build:linux --linkopt -ldl
+build:macos --linkopt -ldl
 
 build:clang-asan --linkopt=-fno-sanitize=alignment
 build:asan --copt=-fno-sanitize=alignment
@@ -10,21 +16,210 @@ test --test_env=REDIS_PORT=6379
 test --test_env=MEMCACHED_PORT=11211
 test --test_env=HTTPS_TEST=1
 
-build --copt="-Iexternal/aprutil/include/"
-build --copt="-Iexternal/aprutil/include/private/"
-build --copt="-Iexternal/aprutil/include/arch/unix/"
-build --copt="-Iexternal/aprutil/"
-build --copt="-Ithird_party/aprutil/gen/arch/linux/x64/include/"
-build --copt="-Ithird_party/apr/gen/arch/linux/x64/include/"
-build --copt="-Iexternal/apr/include/"
-build --copt="-Iexternal/apr/include/arch/unix/"
-build --copt="-Iexternal/apr/"
-build --copt="-Iexternal/serf/include/"
-build --copt="-Iexternal/serf/"
-build --copt="-DPAGESPEED_SUPPORT_POSIX_SHARED_MEM=1"
+# POSIX-specific: APR includes for Apache module (not used on Windows)
+build:linux --copt="-Iexternal/aprutil/include/"
+build:linux --copt="-Iexternal/aprutil/include/private/"
+build:linux --copt="-Iexternal/aprutil/include/arch/unix/"
+build:linux --copt="-Iexternal/aprutil/"
+build:linux --copt="-Ithird_party/aprutil/gen/arch/linux/x64/include/"
+build:linux --copt="-Ithird_party/apr/gen/arch/linux/x64/include/"
+build:linux --copt="-Iexternal/apr/include/"
+build:linux --copt="-Iexternal/apr/include/arch/unix/"
+build:linux --copt="-Iexternal/apr/"
+build:linux --copt="-DPAGESPEED_SUPPORT_POSIX_SHARED_MEM=1"
+
+# macOS-specific: APR includes for Apache module
+build:macos --copt="-Iexternal/aprutil/include/"
+build:macos --copt="-Iexternal/aprutil/include/private/"
+build:macos --copt="-Iexternal/aprutil/include/arch/unix/"
+build:macos --copt="-Iexternal/aprutil/"
+build:macos --copt="-Ithird_party/aprutil/gen/arch/linux/x64/include/"
+build:macos --copt="-Ithird_party/apr/gen/arch/linux/x64/include/"
+build:macos --copt="-Iexternal/apr/include/"
+build:macos --copt="-Iexternal/apr/include/arch/unix/"
+build:macos --copt="-Iexternal/apr/"
+build:macos --copt="-DPAGESPEED_SUPPORT_POSIX_SHARED_MEM=1"
+
+# Windows-specific: No POSIX shared memory, no APR
+build:windows --copt="-DPAGESPEED_SUPPORT_POSIX_SHARED_MEM=0"
 
 build --action_env=ABSL_LEGACY_THREAD_ANNOTATIONS=1
 build --copt="-DABSL_LEGACY_THREAD_ANNOTATIONS=1"
 build --cxxopt="-DABSL_LEGACY_THREAD_ANNOTATIONS=1"
 
-build --action_env=BAZEL_CXXOPTS="-std=c++17"
+# =============================================================================
+# C++23 Support for Cyclone Cache
+# =============================================================================
+#
+# Cyclone Cache requires C++23 (for std::expected). The main codebase uses C++20.
+#
+# Build options:
+#   1. --config=gcc (recommended) - Uses GCC 13 with native C++23 support
+#   2. --config=clang-libstdcxx13 - Uses Clang with GCC 13's libstdc++
+#
+# Example:
+#   docker compose exec dev bazel build --config=gcc //...
+#   docker compose exec dev bazel build --config=clang-libstdcxx13 //...
+#
+# Architecture: C++20 code -> C ABI wrapper (C++23) -> Cyclone library (C++23)
+# See //pagespeed/kernel/cache/cyclone/BUILD for details.
+#
+# Technical details:
+# - Cyclone uses std::expected<T,E> which requires __cpp_concepts >= 202002L
+# - Clang 17 reports __cpp_concepts = 201907 (C++20 draft value)
+# - GCC 13's libstdc++ guards std::expected with __cpp_concepts >= 202002L
+# - Solution: Force the macro for Cyclone files when using Clang + GCC 13 libstdc++
+# =============================================================================
+
+# Note: BAZEL_CXXOPTS is NOT set here - we rely on .bazelrc config:linux/macos
+# to set the C++ standard. Setting BAZEL_CXXOPTS would conflict with per_file_copt.
+
+# Cyclone Cache requires C++23 - override the default standard for cyclone source files.
+# On Windows, the cyclone BUILD rule sets /std:c++latest via copts select() in cyclone.bzl,
+# so the per_file_copt here is only needed for Linux/macOS (clang-cl rejects -std=c++23).
+# Windows uses --config=windows which does NOT inherit these global lines because we gate
+# the -std=c++23 flag behind config:linux and config:macos only.
+build:linux --per_file_copt=external/cyclone/.*\\.cpp@-std=c++23
+build:linux --per_file_copt=pagespeed/kernel/cache/cyclone/.*\\.cc@-std=c++23
+build:macos --per_file_copt=external/cyclone/.*\\.cpp@-std=c++23
+build:macos --per_file_copt=pagespeed/kernel/cache/cyclone/.*\\.cc@-std=c++23
+
+# =============================================================================
+# Clang with GCC 13 libstdc++ configuration
+# =============================================================================
+# Use this config to build with Clang while still supporting Cyclone cache.
+# Clang 17's __cpp_concepts macro (201907) is lower than what GCC 13's libstdc++
+# requires for std::expected (202002L). We force the macro for Cyclone files.
+#
+# Note: This config includes both aarch64 and x86_64 paths. Non-existent
+# paths are silently ignored by the compiler, so this works on either arch.
+# =============================================================================
+build:clang-libstdcxx13 --config=clang
+
+# Force __cpp_concepts=202002L and use GCC 13 libstdc++ for Cyclone files only
+build:clang-libstdcxx13 --per_file_copt=external/cyclone/.*\\.cpp@-D__cpp_concepts=202002L,-nostdinc++,-I/usr/include/c++/13,-I/usr/include/aarch64-linux-gnu/c++/13,-I/usr/include/x86_64-linux-gnu/c++/13
+build:clang-libstdcxx13 --per_file_copt=pagespeed/kernel/cache/cyclone/.*\\.cc@-D__cpp_concepts=202002L,-nostdinc++,-I/usr/include/c++/13,-I/usr/include/aarch64-linux-gnu/c++/13,-I/usr/include/x86_64-linux-gnu/c++/13
+
+# Link against GCC 13's libstdc++ (include both arch paths; non-existent is ignored)
+build:clang-libstdcxx13 --linkopt=-L/usr/lib/gcc/aarch64-linux-gnu/13
+build:clang-libstdcxx13 --linkopt=-L/usr/lib/gcc/x86_64-linux-gnu/13
+
+# =============================================================================
+# Clang with GCC 15 libstdc++ configuration (EL10 native build)
+# =============================================================================
+# Identical in shape to clang-libstdcxx13 but pointing at GCC 15's libstdc++,
+# for the EL10 (RHEL/Rocky/AlmaLinux/CloudLinux 10) leg
+# (install/rpm/build_apache_el10_in_container.sh). EL10 ships gcc-toolset-15 (not
+# -13), so the /usr/include/c++/13 + /usr/lib/gcc/.../13 paths the clang-libstdcxx13
+# config hardcodes do not exist; the el10 recipe's symlink dance maps gt-15's
+# libstdc++ into the /15 paths below. The system clang on el10 is 21 (>= the
+# clang-20 abseil absl_nonnull requirement), so no LLVM sideload is needed.
+# Non-existent paths are silently ignored, so this is safe on either arch.
+# =============================================================================
+build:clang-libstdcxx15 --config=clang
+
+# Force __cpp_concepts=202002L and use GCC 15 libstdc++ for Cyclone files only
+build:clang-libstdcxx15 --per_file_copt=external/cyclone/.*\\.cpp@-D__cpp_concepts=202002L,-nostdinc++,-I/usr/include/c++/15,-I/usr/include/aarch64-linux-gnu/c++/15,-I/usr/include/x86_64-linux-gnu/c++/15
+build:clang-libstdcxx15 --per_file_copt=pagespeed/kernel/cache/cyclone/.*\\.cc@-D__cpp_concepts=202002L,-nostdinc++,-I/usr/include/c++/15,-I/usr/include/aarch64-linux-gnu/c++/15,-I/usr/include/x86_64-linux-gnu/c++/15
+
+# Link against GCC 15's libstdc++ (include both arch paths; non-existent is ignored)
+build:clang-libstdcxx15 --linkopt=-L/usr/lib/gcc/aarch64-linux-gnu/15
+build:clang-libstdcxx15 --linkopt=-L/usr/lib/gcc/x86_64-linux-gnu/15
+
+# =============================================================================
+# Offline build from vendored source tarball
+# =============================================================================
+# Use with source tarballs that include vendor/ directory (built by tools/vendor-deps.sh).
+# All http_archive deps are served from the repository cache; Cyclone is
+# overridden from its vendored source copy.
+#
+# Examples:
+#   Linux:   bazel build --config=vendored --config=clang-libstdcxx13 -c opt //:libmod_pagespeed.so
+#   Windows: bazel build --config=vendored --config=windows --config=clang-cl -c opt //pagespeed/iis:pagespeed_iis.dll
+# =============================================================================
+build:vendored --repository_cache=vendor/repo-cache
+build:vendored --override_repository=cyclone=vendor/cyclone
+build:vendored --override_repository=aom_src=vendor/aom
+
+# =============================================================================
+# Windows performance tuning for high-core-count machines
+# =============================================================================
+# The JVM may not detect all processor groups, causing Bazel to undercount
+# available CPUs. Explicitly advertise HOST_CPUS so scheduling uses all cores.
+# Limit --jobs below physical core count to avoid CreateProcessW OOM (error 8).
+build:windows --local_resources=cpu=HOST_CPUS
+
+# =============================================================================
+# Remote cache via a shared bazel-remote (one central cache for CI)
+# =============================================================================
+# Shared L2 cache across all CI runners and runs. Used alongside --disk_cache (L1).
+# No authentication required — the cache is on the local network.
+#
+# The endpoint is addressed through the environment-neutral alias
+# `bazel-remote-cache`; NO environment-specific hostname or address is stored in
+# this tree (they live in GitHub repository variables).
+#   * CI Linux jobs run in Docker and map the alias with
+#     `--add-host=bazel-remote-cache:${BAZEL_CACHE_HOST}`.
+#   * CI Windows jobs build natively and pass `--remote_cache` explicitly.
+#   * Locally, either add a `bazel-remote-cache` entry to /etc/hosts, or put
+#     `build:remote-cache --remote_cache=http://<host>:9090` in user.bazelrc
+#     (gitignored, try-import'ed at the END of .bazelrc so it wins). Use the
+#     `build:remote-cache` prefix, not bare `build`: for a given config the
+#     last matching option wins, so an override on the same config is what
+#     actually takes effect.
+build:remote-cache --remote_cache=http://bazel-remote-cache:9090
+build:remote-cache --remote_upload_local_results=true
+build:remote-cache --remote_timeout=120
+# A shared LRU remote cache can evict a blob that an in-flight build still
+# references; re-execute the action on evicted-blob detection instead of
+# hard-failing. Kept consistent with the Windows legs (below), which already
+# set the same retry count via build:windows.
+build:remote-cache --experimental_remote_cache_eviction_retries=5
+# Windows is a read-only remote-cache consumer (no --remote_upload_local_results).
+# Windows jobs build natively (no Docker, so no --add-host alias): the workflows
+# pass --remote_cache=http://<hub>:9090 explicitly from a repository variable.
+# The on-demand output prefetcher writes a temp file then renames it into bazel-out;
+# on Windows that rename/open intermittently loses a race and fails with
+# "permission denied" on freshly-materialized generated headers (e.g. protobuf
+# _virtual_includes/*.pb.h) — bazelbuild/bazel#25800, #9072. Retry transient
+# cache errors instead of failing the action. The ASan job, which loses this
+# race most often, drops the remote cache entirely (see build:win-asan below).
+build:windows --experimental_remote_cache_eviction_retries=5
+
+# =============================================================================
+# CI configuration (tarball-first: deps come from the vendored tarball)
+# =============================================================================
+# Used by the GitHub Actions CI workflow on the CI runners.
+# Linux CI builds run inside the envoyproxy Docker container.
+build:ci --config=vendored
+build:ci --config=clang-libstdcxx13
+build:ci --config=remote-cache
+build:ci --jobs=32
+build:ci --nostamp
+build:ci --define=go_build=disabled
+# Force C++20 for all targets — the Envoy toolchain defaults to C++14
+# but newer abseil requires C++20 for _Nonnull pointer annotations.
+build:ci --cxxopt=-std=c++20 --host_cxxopt=-std=c++20
+test:ci --test_output=errors
+# Note: --override_repository maps vendor/cyclone/ into the execroot as
+# external/cyclone/, so the existing per_file_copt patterns from build:linux
+# and build:clang-libstdcxx13 match correctly. No vendored-path duplicates needed.
+
+# =============================================================================
+# CI arm64 configuration (the arm64 leg of the multi-arch CI matrix)
+# =============================================================================
+# Used for native arm64 Linux Docker builds on Mac primary (Apple Silicon).
+# Inherits from ci config but reduces jobs for Mac hardware (10 performance cores).
+# Bazel auto-detects available CPUs — no --jobs override needed unless contention
+# is observed. The config exists mainly to provide a named config for arm64 builds.
+build:ci-linux-arm64 --config=ci
+build:ci-linux-arm64 --nostamp
+# arm64 APR/apr-util pre-generated header paths. build:linux (auto-applied via
+# enable_platform_specific_config) injects the x64 gen -I globally; on arm64
+# the //bazel:linux_arm64 select places only the arm64 gen tree in the sandbox,
+# so the x64 -I resolves nothing and these supply the arm64 tree for targets
+# that rely on the global include (e.g. tests including apr_network_io.h with
+# no local copts). Both -I sets coexist harmlessly: in sandboxed builds only
+# the selected tree exists, and clang ignores nonexistent include dirs.
+build:ci-linux-arm64 --copt="-Ithird_party/aprutil/gen/arch/linux/arm64/include/"
+build:ci-linux-arm64 --copt="-Ithird_party/apr/gen/arch/linux/arm64/include/"

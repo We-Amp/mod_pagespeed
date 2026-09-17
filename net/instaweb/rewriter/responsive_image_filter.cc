@@ -46,6 +46,32 @@ const char ResponsiveImageFirstFilter::kInlinableVirtualImage[] =
 const char ResponsiveImageFirstFilter::kFullsizedVirtualImage[] =
     "fullsized-virtual";
 
+namespace {
+
+// Scales an author-provided image dimension by a display density.
+//
+// orig comes from the author's width=/height= attributes and can be close to
+// INT_MAX, so the product orig * resolution may exceed INT_MAX. Converting
+// such an out-of-range double directly to int is undefined behavior and
+// previously emitted a garbage (typically negative) dimension on the virtual
+// candidate, which then drove the resize target. Compute in double, truncate
+// toward zero to preserve the historical rounding for in-range inputs, and
+// clamp to the int range so the emitted attribute stays a valid int. Callers
+// currently pass orig > 1 and resolution > 0 (so scaled is positive), but the
+// lower clamp keeps this file-local helper safe if it is ever reused.
+int ScaleDimension(int orig, double resolution) {
+  double scaled = orig * resolution;
+  if (scaled >= static_cast<double>(kint32max)) {
+    return kint32max;
+  }
+  if (scaled <= static_cast<double>(kint32min)) {
+    return kint32min;
+  }
+  return static_cast<int>(scaled);
+}
+
+}  // namespace
+
 ResponsiveImageFirstFilter::ResponsiveImageFirstFilter(RewriteDriver* driver)
     : CommonFilter(driver),
       densities_(driver->options()->responsive_image_densities()) {
@@ -156,11 +182,15 @@ ResponsiveImageCandidate ResponsiveImageFirstFilter::AddHiResVersion(
   driver()->AddAttribute(new_img, HtmlName::kDataPagespeedResponsiveTemp,
                          responsive_attribute_value);
   if (resolution > 0) {
-    // Note: We truncate width and height to integers here.
+    // Note: We truncate width and height to integers here. ScaleDimension()
+    // guards the double->int narrowing against overflow for very large author
+    // dimensions (see its comment).
+    int scaled_width = ScaleDimension(orig_width, resolution);
+    int scaled_height = ScaleDimension(orig_height, resolution);
     driver()->AddAttribute(new_img, HtmlName::kWidth,
-                           IntegerToString(orig_width * resolution));
+                           IntegerToString(scaled_width));
     driver()->AddAttribute(new_img, HtmlName::kHeight,
-                           IntegerToString(orig_height * resolution));
+                           IntegerToString(scaled_height));
   }
   driver()->InsertNodeBeforeNode(img, new_img);
   ResponsiveImageCandidate candidate(new_img, resolution);

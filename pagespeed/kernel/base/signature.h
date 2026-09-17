@@ -64,7 +64,8 @@ class Signature {
   virtual int RawSignatureSizeInBytes() const = 0;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(Signature);
+  Signature(const Signature&) = delete;
+  Signature& operator=(const Signature&) = delete;
 };
 
 }  // namespace net_instaweb

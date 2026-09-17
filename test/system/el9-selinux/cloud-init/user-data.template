@@ -1,0 +1,34 @@
+#cloud-config
+# NoCloud seed for the enforcing-SELinux EL9 rehearsal VM.
+# Rendered by provision-el9-vm.ps1, which fills the HOSTNAME and
+# SSH_PUBLIC_KEY placeholders (the tokens between double at-signs below).
+#
+# SELinux is DELIBERATELY left at the image default, which is ENFORCING on
+# the AlmaLinux 9 GenericCloud image. Do not add setenforce / SELINUX= lines
+# here (the cPanel seeds do, for cPanel's sake): the whole point of this VM
+# is to measure the upgrade under enforcing.
+hostname: @@HOSTNAME@@
+fqdn: @@HOSTNAME@@.lab.local
+preserve_hostname: false
+
+# Key-only root SSH: the runner drives the guest as root over the Hyper-V
+# Default Switch (NAT), the same way the cPanel rig does.
+users:
+  - name: root
+    lock_passwd: true
+    ssh_authorized_keys:
+      - @@SSH_PUBLIC_KEY@@
+disable_root: false
+ssh_pwauth: false
+
+# The root filesystem grows into the resized VHDX on first boot (cloud-init's
+# growpart + resizefs defaults); nothing to configure.
+package_update: false
+
+runcmd:
+  # No background dnf metadata refresh fighting the rehearsal's dnf runs.
+  - systemctl disable --now dnf-makecache.timer || true
+  # A first-boot record the provisioning script reads back and asserts.
+  - [ sh, -c, "getenforce > /root/first-boot-getenforce.txt 2>&1 || true" ]
+
+final_message: "el9-selinux rehearsal image ready after $UPTIME seconds"

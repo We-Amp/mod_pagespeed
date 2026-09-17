@@ -75,6 +75,20 @@ TEST_F(DocTypeTest, DetectXhtml5) {
   TestParse("<!DOCTYPE html>", kContentTypeXml, DocType::kXHTML5);
 }
 
+TEST_F(DocTypeTest, DetectHtml5AboutLegacyCompat) {
+  // Per the HTML spec, <!DOCTYPE html SYSTEM "about:legacy-compat"> is an
+  // HTML5 doctype.
+  TestParse("<!DOCTYPE html SYSTEM \"about:legacy-compat\">", kContentTypeHtml,
+            DocType::kHTML5);
+  TestParse("<!doctype html system \"about:legacy-compat\">", kContentTypeHtml,
+            DocType::kHTML5);
+  TestParse("<!DOCTYPE html SYSTEM \"about:legacy-compat\">",
+            kContentTypeXhtml, DocType::kXHTML5);
+  // A different system identifier is not about:legacy-compat.
+  TestParse("<!DOCTYPE html SYSTEM \"http://example.com/foo.dtd\">",
+            kContentTypeHtml, DocType::kUnknown);
+}
+
 TEST_F(DocTypeTest, DetectHtml4) {
   TestParse(
       "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.01//EN\" "
@@ -102,6 +116,29 @@ TEST_F(DocTypeTest, DetectXhtml10) {
       "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\" "
       "\"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\">",
       kContentTypeXhtml, DocType::kXHTML10Transitional);
+}
+
+TEST_F(DocTypeTest, CaseInsensitiveFpi) {
+  // Browsers sniff doctypes ASCII case-insensitively; a lowercased FPI must
+  // still classify.  (Byte-exact FPI matching returns UNKNOWN here.)
+  TestParse(
+      "<!DOCTYPE html PUBLIC \"-//w3c//dtd xhtml 1.0 strict//en\" "
+      "\"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd\">",
+      kContentTypeHtml, DocType::kXHTML10Strict);
+  TestParse(
+      "<!DOCTYPE HTML PUBLIC \"-//w3c//dtd html 4.01//en\" "
+      "\"http://www.w3.org/TR/html4/strict.dtd\">",
+      kContentTypeHtml, DocType::kHTML4Strict);
+  // The lowercase "public" keyword and arbitrary extra whitespace are
+  // accepted too (pre-existing behavior, kept).
+  TestParse(
+      "<!DOCTYPE html public \"-//W3C//DTD XHTML 1.0 Strict//EN\" "
+      "\"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd\">",
+      kContentTypeHtml, DocType::kXHTML10Strict);
+  TestParse(
+      "<!DOCTYPE  html  PUBLIC  \"-//W3C//DTD HTML 4.01//EN\"  "
+      "\"http://www.w3.org/TR/html4/strict.dtd\">",
+      kContentTypeHtml, DocType::kHTML4Strict);
 }
 
 TEST_F(DocTypeTest, DetectVariousXhtmlTypes) {
@@ -133,6 +170,90 @@ TEST_F(DocTypeTest, DetectVariousXhtmlTypes) {
       IsXhtml("<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.01//EN\" "
               "\"http://www.w3.org/TR/html4/strict.dtd\">",
               kContentTypeHtml));
+}
+
+// --- Ported from pagespeed-optimizer's doctype_test.cc: the exact
+// parser must reject what a substring-heuristic cascade would misclassify.
+
+TEST_F(DocTypeTest, NotADoctype) {
+  // "doctype" as a mere prefix must not parse: the first shell-token has to
+  // be exactly "doctype" (doctype.cc's token-vs-prefix rejection).
+  TestParseFailure("<!DOCTYPEhtml>", kContentTypeHtml);
+  TestParseFailure("<!garbage>", kContentTypeHtml);
+  TestParseFailure("<!>", kContentTypeHtml);
+  TestParseFailure("<!XYDOCTYPE html>", kContentTypeHtml);
+  // A bare "DOCTYPE" keyword is a doctype directive with unknown type.
+  TestParse("<!DOCTYPE>", kContentTypeHtml, DocType::kUnknown);
+}
+
+TEST_F(DocTypeTest, UnrecognizedDoctypesDegradeToUnknown) {
+  // HTML 4.01 Frameset: no frameset bucket exists.
+  TestParse(
+      "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.01 Frameset//EN\" "
+      "\"http://www.w3.org/TR/html4/frameset.dtd\">",
+      kContentTypeHtml, DocType::kUnknown);
+  // Known FPIs without a system identifier are not matched (the exact
+  // parser requires the full PUBLIC "FPI" "URL" form).
+  TestParse("<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.01//EN\">",
+            kContentTypeHtml, DocType::kUnknown);
+  TestParse("<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.01 Transitional//EN\">",
+            kContentTypeHtml, DocType::kUnknown);
+  // Non-W3C XHTML FPI (XHTML Mobile 1.2).
+  TestParse(
+      "<!DOCTYPE html PUBLIC \"-//WAPFORUM//DTD XHTML Mobile 1.2//EN\" "
+      "\"http://www.openmobilealliance.org/tech/DTD/xhtml-mobile12.dtd\">",
+      kContentTypeHtml, DocType::kUnknown);
+  // HTML 2.0 / HTML 3.2 FPIs.
+  TestParse("<!DOCTYPE HTML PUBLIC \"-//IETF//DTD HTML 2.0//EN\">",
+            kContentTypeHtml, DocType::kUnknown);
+  TestParse("<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 3.2 Final//EN\">",
+            kContentTypeHtml, DocType::kUnknown);
+  // Trailing junk, dangling PUBLIC, unbalanced quote, unquoted FPI.
+  TestParse("<!DOCTYPE html foo>", kContentTypeHtml, DocType::kUnknown);
+  TestParse("<!DOCTYPE html PUBLIC>", kContentTypeHtml, DocType::kUnknown);
+  TestParse("<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Strict//EN\">",
+            kContentTypeHtml, DocType::kUnknown);
+  TestParse(
+      "<!DOCTYPE html PUBLIC -//W3C//DTD HTML 4.01//EN "
+      "http://www.w3.org/TR/html4/strict.dtd>",
+      kContentTypeHtml, DocType::kUnknown);
+  // Non-html root element.
+  TestParse("<!DOCTYPE svg>", kContentTypeHtml, DocType::kUnknown);
+  // Unregistered / garbage FPIs: no Strict-from-substring hallucination.
+  TestParse("<!DOCTYPE html PUBLIC \"-//W3C//DTD HTML 4.01 Strict//EN\">",
+            kContentTypeHtml, DocType::kUnknown);
+  TestParse("<!DOCTYPE html PUBLIC \"garbage strict garbage\">",
+            kContentTypeHtml, DocType::kUnknown);
+  TestParse("<!DOCTYPE html PUBLIC \"garbage\">", kContentTypeHtml,
+            DocType::kUnknown);
+  // "xhtml" as a bare substring must not flip IsXhtml under text/html.
+  TestParse("<!DOCTYPE html PUBLIC \"xhtml-ish garbage\">", kContentTypeHtml,
+            DocType::kUnknown);
+}
+
+TEST_F(DocTypeTest, FpiIsAuthoritativeOverSystemIdentifier) {
+  // Transitional FPI + strict system identifier: the FPI wins.  A
+  // substring cascade would match "strict" in the URL and override the FPI.
+  TestParse(
+      "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\" "
+      "\"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd\">",
+      kContentTypeHtml, DocType::kXHTML10Transitional);
+}
+
+TEST_F(DocTypeTest, SingleQuotedFpi) {
+  // ParseShellLikeString treats single quotes like double quotes.
+  TestParse(
+      "<!DOCTYPE html PUBLIC '-//W3C//DTD HTML 4.01//EN' "
+      "'http://www.w3.org/TR/html4/strict.dtd'>",
+      kContentTypeHtml, DocType::kHTML4Strict);
+}
+
+TEST_F(DocTypeTest, WhitespaceSeparators) {
+  TestParse("<!DOCTYPE   html>", kContentTypeHtml, DocType::kHTML5);
+  TestParse("<!DOCTYPE\thtml>", kContentTypeHtml, DocType::kHTML5);
+  TestParse("<!DOCTYPE\nhtml>", kContentTypeHtml, DocType::kHTML5);
+  // Trailing whitespace after "html" still parses as HTML5.
+  TestParse("<!DOCTYPE html >", kContentTypeHtml, DocType::kHTML5);
 }
 
 }  // namespace net_instaweb

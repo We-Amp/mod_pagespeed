@@ -38,15 +38,14 @@ class AtomicBool {
 
   ~AtomicBool() {}
 
-  bool value() const {
-    return value_.load(std::memory_order::memory_order_acquire);
-  }
+  bool value() const { return value_.load(std::memory_order_acquire); }
 
   void set_value(bool v) { value_.store(v, std::memory_order_release); }
 
  private:
   std::atomic<bool> value_;
-  DISALLOW_COPY_AND_ASSIGN(AtomicBool);
+  AtomicBool(const AtomicBool&) = delete;
+  AtomicBool& operator=(const AtomicBool&) = delete;
 };
 
 }  // namespace net_instaweb

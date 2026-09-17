@@ -22,6 +22,7 @@
 #include "base/logging.h"
 #include "net/instaweb/public/version.h"
 #include "pagespeed/kernel/base/thread_system.h"
+#include "pagespeed/system/daemon_reader.h"
 
 namespace net_instaweb {
 
@@ -31,6 +32,9 @@ const char kProxyAuth[] = "ProxyAuth";
 const char kForceBuffering[] = "ForceBuffering";
 const char kProxyAllRequests[] = "ExperimentalProxyAllRequests";
 const char kMeasurementProxy[] = "ExperimentalMeasurementProxy";
+const char kDaemonSocketPath[] = "DaemonSocketPath";
+const char kDaemonVolumePath[] = "DaemonVolumePath";
+const char kDaemonApiSocketPath[] = "DaemonApiSocketPath";
 
 }  // namespace
 
@@ -88,6 +92,28 @@ void ApacheConfig::AddProperties() {
       "Experimental mode where mod_pagespeed acts entirely as a proxy, and "
       "doesn't attempt to work with any local serving. ",
       false /* safe_to_print*/);
+
+  AddApacheProperty(
+      "", &ApacheConfig::daemon_socket_path_, "dmsp", kDaemonSocketPath,
+      "Path of the optimizer daemon's notification socket. Set this together "
+      "with DaemonVolumePath to hand in-place optimization to the daemon; "
+      "leave both unset to keep the classic in-place path.",
+      true /* safe_to_print */);
+
+  AddApacheProperty(
+      "", &ApacheConfig::daemon_volume_path_, "dmvp", kDaemonVolumePath,
+      "Path of the optimizer daemon's shared cache volume. Keep this on a "
+      "DIFFERENT path from FileCachePath. Set this together with "
+      "DaemonSocketPath; leave both unset to keep the classic in-place path.",
+      true /* safe_to_print */);
+
+  AddApacheProperty(
+      kDefaultDaemonApiSocketPath, &ApacheConfig::daemon_api_socket_path_,
+      "dasp", kDaemonApiSocketPath,
+      "Path of the optimizer daemon's management API unix socket, backing "
+      "the /v1/daemon/* admin endpoints. Empty disables them. This is a "
+      "different socket from DaemonSocketPath (the notification socket).",
+      true /* safe_to_print */);
 
   // Register deprecated options.
   AddDeprecatedProperty("CollectRefererStatistics",

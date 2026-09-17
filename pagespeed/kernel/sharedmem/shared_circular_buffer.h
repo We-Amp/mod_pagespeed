@@ -20,8 +20,9 @@
 #ifndef PAGESPEED_KERNEL_SHAREDMEM_SHARED_CIRCULAR_BUFFER_H_
 #define PAGESPEED_KERNEL_SHAREDMEM_SHARED_CIRCULAR_BUFFER_H_
 
+#include <memory>
+
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/writer.h"
@@ -89,7 +90,8 @@ class SharedCircularBuffer : public Writer {
   // Shared memory segment.
   std::unique_ptr<AbstractSharedMemSegment> segment_;
 
-  DISALLOW_COPY_AND_ASSIGN(SharedCircularBuffer);
+  SharedCircularBuffer(const SharedCircularBuffer&) = delete;
+  SharedCircularBuffer& operator=(const SharedCircularBuffer&) = delete;
 };
 
 }  // namespace net_instaweb

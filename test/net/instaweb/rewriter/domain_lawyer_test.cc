@@ -1327,6 +1327,32 @@ TEST_F(DomainLawyerTest, ConflictedOrigin2) {
   EXPECT_STREQ("http://origin1.com/y", mapped);
 }
 
+TEST_F(DomainLawyerTest, ShardDeprecationWarning) {
+  // Declaring a shard logs a deprecation warning: sharding is an
+  // HTTP/1-era workaround that hurts performance with HTTP/2 and HTTP/3.
+  // The warning is deduped process-wide per mapping, so this test uses
+  // mapping strings declared by no other test in the binary.
+  EXPECT_EQ(0, message_handler_.MessagesOfType(kWarning));
+  ASSERT_TRUE(AddShard("dep-cdn.com", "dep-s1.com,dep-s2.com"));
+  EXPECT_EQ(1, message_handler_.MessagesOfType(kWarning));
+  EXPECT_EQ(1, message_handler_.SeriousMessages());
+
+  // The warning fires once per process per mapping: re-declaring the
+  // same mapping (e.g. an .htaccess re-parse per request) does not
+  // re-warn, even from a fresh DomainLawyer.
+  DomainLawyer other_lawyer;
+  ASSERT_TRUE(other_lawyer.AddShard("dep-cdn.com", "dep-s1.com,dep-s2.com",
+                                    &message_handler_));
+  EXPECT_EQ(1, message_handler_.MessagesOfType(kWarning));
+  EXPECT_EQ(1, message_handler_.SeriousMessages());
+
+  // A failed shard declaration emits no deprecation warning, only the
+  // conflict error from the mapping helper.
+  ASSERT_FALSE(AddShard("dep-cdn2.com", "dep-s2.com,dep-s3.com"));
+  EXPECT_EQ(1, message_handler_.MessagesOfType(kWarning));
+  EXPECT_EQ(2, message_handler_.SeriousMessages());
+}
+
 TEST_F(DomainLawyerTest, NoShardConflict) {
   // We are origin-mapping multiple source domains to the same domain.
   // Even though we've overspecified the origin domain in this graph,
@@ -1338,7 +1364,8 @@ TEST_F(DomainLawyerTest, NoShardConflict) {
   ASSERT_TRUE(AddRewriteDomainMapping("cdn.com", "myhost1.com,myhost2.com"));
   EXPECT_EQ(0, message_handler_.SeriousMessages());
   ASSERT_TRUE(AddShard("cdn.com", "s1.com,s2.com"));
-  EXPECT_EQ(0, message_handler_.SeriousMessages());
+  // +1: shard deprecation warning.
+  EXPECT_EQ(1, message_handler_.SeriousMessages());
 
   // Unambiguous mappings from either shard or rewrite domain.
   GoogleString mapped;
@@ -1355,56 +1382,64 @@ TEST_F(DomainLawyerTest, NoShardConflict) {
 TEST_F(DomainLawyerTest, NoShardConflictReverse) {
   // This is the same exact test as NoShardConflict, but now we set up
   // the shards first, then the rewrite domain, then the origin mappings.
-  ASSERT_TRUE(AddShard("cdn.com", "s1.com,s2.com"));
-  EXPECT_EQ(0, message_handler_.SeriousMessages());
-  ASSERT_TRUE(AddRewriteDomainMapping("cdn.com", "myhost1.com,myhost2.com"));
-  EXPECT_EQ(0, message_handler_.SeriousMessages());
+  // Distinct shard domains keep the process-wide deprecation-warning
+  // dedupe (and hence the counts) order-independent across tests.
+  // +1 on all counts: shard deprecation warning.
+  ASSERT_TRUE(AddShard("rcdn.com", "rs1.com,rs2.com"));
+  EXPECT_EQ(1, message_handler_.SeriousMessages());
+  ASSERT_TRUE(AddRewriteDomainMapping("rcdn.com", "myhost1.com,myhost2.com"));
+  EXPECT_EQ(1, message_handler_.SeriousMessages());
   ASSERT_TRUE(AddOriginDomainMapping("localhost", "myhost1.com"));
-  EXPECT_EQ(0, message_handler_.SeriousMessages());
+  EXPECT_EQ(1, message_handler_.SeriousMessages());
   ASSERT_TRUE(AddOriginDomainMapping("localhost", "myhost2.com"));
-  EXPECT_EQ(0, message_handler_.SeriousMessages());
+  EXPECT_EQ(1, message_handler_.SeriousMessages());
 
   // Unambiguous mappings from either shard or rewrite domain.
   GoogleString mapped;
-  ASSERT_TRUE(MapOrigin("http://cdn.com/x", &mapped));
+  ASSERT_TRUE(MapOrigin("http://rcdn.com/x", &mapped));
   EXPECT_STREQ("http://localhost/x", mapped);
   mapped.clear();
-  ASSERT_TRUE(MapOrigin("http://s1.com/x", &mapped));
+  ASSERT_TRUE(MapOrigin("http://rs1.com/x", &mapped));
   EXPECT_STREQ("http://localhost/x", mapped);
   mapped.clear();
-  ASSERT_TRUE(MapOrigin("http://s2.com/x", &mapped));
+  ASSERT_TRUE(MapOrigin("http://rs2.com/x", &mapped));
   EXPECT_STREQ("http://localhost/x", mapped);
 }
 
 TEST_F(DomainLawyerTest, NoShardConflictScramble) {
   // Yet another copy of NoShardConflict, but do the rewrite-mapping last.
-  ASSERT_TRUE(AddShard("cdn.com", "s1.com,s2.com"));
-  EXPECT_EQ(0, message_handler_.SeriousMessages());
+  // Distinct shard domains keep the process-wide deprecation-warning
+  // dedupe (and hence the counts) order-independent across tests.
+  // +1 on all counts: shard deprecation warning.
+  ASSERT_TRUE(AddShard("scdn.com", "ss1.com,ss2.com"));
+  EXPECT_EQ(1, message_handler_.SeriousMessages());
   ASSERT_TRUE(AddOriginDomainMapping("localhost", "myhost1.com"));
-  EXPECT_EQ(0, message_handler_.SeriousMessages());
+  EXPECT_EQ(1, message_handler_.SeriousMessages());
   ASSERT_TRUE(AddOriginDomainMapping("localhost", "myhost2.com"));
-  EXPECT_EQ(0, message_handler_.SeriousMessages());
-  ASSERT_TRUE(AddRewriteDomainMapping("cdn.com", "myhost1.com,myhost2.com"));
-  EXPECT_EQ(0, message_handler_.SeriousMessages());
+  EXPECT_EQ(1, message_handler_.SeriousMessages());
+  ASSERT_TRUE(AddRewriteDomainMapping("scdn.com", "myhost1.com,myhost2.com"));
+  EXPECT_EQ(1, message_handler_.SeriousMessages());
 
   // Unambiguous mappings from either shard or rewrite domain.
   GoogleString mapped;
-  ASSERT_TRUE(MapOrigin("http://cdn.com/x", &mapped));
+  ASSERT_TRUE(MapOrigin("http://scdn.com/x", &mapped));
   EXPECT_STREQ("http://localhost/x", mapped);
   mapped.clear();
-  ASSERT_TRUE(MapOrigin("http://s1.com/x", &mapped));
+  ASSERT_TRUE(MapOrigin("http://ss1.com/x", &mapped));
   EXPECT_STREQ("http://localhost/x", mapped);
   mapped.clear();
-  ASSERT_TRUE(MapOrigin("http://s2.com/x", &mapped));
+  ASSERT_TRUE(MapOrigin("http://ss2.com/x", &mapped));
   EXPECT_STREQ("http://localhost/x", mapped);
 }
 
 TEST_F(DomainLawyerTest, ShardConflict1) {
+  // +1 on both counts: shard deprecation warning (the failed AddShard
+  // below emits no warning, only its conflict error).
   ASSERT_TRUE(AddShard("cdn1.com", "s1.com,s2.com"));
-  EXPECT_EQ(0, message_handler_.SeriousMessages());
+  EXPECT_EQ(1, message_handler_.SeriousMessages());
 
   ASSERT_FALSE(AddShard("cdn2.com", "s2.com,s3.com"));
-  EXPECT_EQ(1, message_handler_.SeriousMessages());
+  EXPECT_EQ(2, message_handler_.SeriousMessages());
 }
 
 TEST_F(DomainLawyerTest, RewriteOriginCycle) {
@@ -1415,16 +1450,17 @@ TEST_F(DomainLawyerTest, RewriteOriginCycle) {
   // graph traversal that can detect it until we start applying origin
   // domains, which auto-propagate.
   //
-  // We will have no serious errors reported until we create the
-  // conflict which will chase pointers in a cycle, which gets cut
-  // by breadcrumbing, but we wind up with 2 serious errors from
-  // one call.
+  // Apart from the shard deprecation warning, we will have no serious
+  // errors reported until we create the conflict which will chase
+  // pointers in a cycle, which gets cut by breadcrumbing, but we wind
+  // up with 2 serious errors from one call.
 
-  EXPECT_EQ(0, message_handler_.SeriousMessages());
+  // +1 on all counts: shard deprecation warning.
+  EXPECT_EQ(1, message_handler_.SeriousMessages());
   ASSERT_TRUE(AddOriginDomainMapping("origin1.com", "a.com"));
-  EXPECT_EQ(0, message_handler_.SeriousMessages());
+  EXPECT_EQ(1, message_handler_.SeriousMessages());
   ASSERT_TRUE(AddOriginDomainMapping("origin2.com", "b.com"));
-  EXPECT_EQ(2, message_handler_.SeriousMessages());
+  EXPECT_EQ(3, message_handler_.SeriousMessages());
 }
 
 TEST_F(DomainLawyerTest, WildcardOrder) {

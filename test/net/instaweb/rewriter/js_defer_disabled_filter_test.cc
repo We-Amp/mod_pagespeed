@@ -25,7 +25,6 @@
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "net/instaweb/rewriter/public/static_asset_manager.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "test/net/instaweb/rewriter/rewrite_test_base.h"
@@ -43,6 +42,12 @@ class JsDeferDisabledFilterTest : public RewriteTestBase {
   // TODO(matterbury): Delete this method as it should be redundant.
   void SetUp() override {
     RewriteTestBase::SetUp();
+    // RewriteTestBase sends an empty user agent, which BotChecker classifies as
+    // a bot, and DeviceProperties::SupportsJsDefer withholds the whole
+    // defer_javascript family from bots. Speak as a browser, exactly as
+    // LazyloadImagesFilterTest::SetUp does for the same reason. Individual
+    // tests below override this to exercise the non-browser paths.
+    SetCurrentUserAgent(UserAgentMatcherTestBase::kChrome18UserAgent);
     SetHtmlMimetype();  // Prevent insertion of CDATA tags to static JS.
   }
 
@@ -135,6 +140,36 @@ TEST_F(JsDeferDisabledFilterTest, DeferScriptDebug) {
       << "js_defer_debug.js should have been included";
 }
 
+TEST_F(JsDeferDisabledFilterTest, CspForbidsInlineScript) {
+  // Under a script-src policy without 'unsafe-inline' the deferJs runtime
+  // (which re-executes deferred scripts via inline JS) would be blocked by
+  // the browser, so the filter must not add its bootstrap script.
+  InitJsDeferDisabledFilter(false);
+  ValidateNoChanges("csp_no_inline",
+                    "<html><head>"
+                    "<meta http-equiv=\"Content-Security-Policy\" "
+                    "content=\"script-src *;\">"
+                    "<script type='text/psajs' src='a.js'></script>"
+                    "</head><body>Hello, world!</body></html>");
+}
+
+TEST_F(JsDeferDisabledFilterTest, CspAllowsInlineScript) {
+  // With 'unsafe-inline' permitted the filter behaves as usual.
+  InitJsDeferDisabledFilter(false);
+  const char kCsp[] =
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"script-src * 'unsafe-inline';\">";
+  ValidateExpected(
+      "csp_unsafe_inline",
+      StrCat("<html><head>", kCsp,
+             "<script type='text/psajs' src='a.js'></script>"
+             "</head><body>Hello, world!</body></html>"),
+      StrCat("<html><head>", kCsp,
+             "<script type='text/psajs' src='a.js'></script>"
+             "</head><body>Hello, world!",
+             kDeferJsCodeNonGStatic, "</body></html>"));
+}
+
 TEST_F(JsDeferDisabledFilterTest, InvalidUserAgent) {
   InitJsDeferDisabledFilter(false);
   SetCurrentUserAgent("BlackListUserAgent");
@@ -147,6 +182,31 @@ TEST_F(JsDeferDisabledFilterTest, InvalidUserAgent) {
       "</head><body>Hello, world!</body>";
 
   ValidateNoChanges("defer_script", script);
+}
+
+// The decision record for #558: Googlebot loses defer_javascript, deliberately.
+// kDeferJSAllowlist in user_agent_matcher.cc still names *Googlebot* -- that
+// entry dates from 2013 and its comment read "Do allow googlebot, since we run
+// defer js for modern browsers." That stance is reversed here: the !IsBot() term
+// in DeviceProperties::SupportsJsDefer overrides the allowlist, so a crawler
+// receives the page exactly as authored -- real type="text/javascript", real
+// src, no injected deferral runtime -- rather than a psajs rewrite it would have
+// to re-execute serially. Deliberately parallel to
+// LazyloadImagesFilterTest.LazyloadDisabledForGooglebot, which has shipped the
+// same behaviour for the sibling filter for years.
+TEST_F(JsDeferDisabledFilterTest, DeferDisabledForGooglebot) {
+  InitJsDeferDisabledFilter(false);
+  SetCurrentUserAgent(UserAgentMatcherTestBase::kGooglebotUserAgent);
+  const char script[] =
+      "<head>"
+      "<script type='text/psajs' "
+      "src='http://www.google.com/javascript/ajax_apis.js'></script>"
+      "<script type='text/psajs'"
+      "> func();</script>"
+      "</head><body>Hello, world!</body>";
+
+  // No js_defer.js runtime is appended: the filter did not apply at all.
+  ValidateNoChanges("googlebot_useragent", script);
 }
 
 TEST_F(JsDeferDisabledFilterTest, AllowMobileUserAgent) {

@@ -26,7 +26,6 @@
 
 #include "pagespeed/kernel/base/cache_interface.h"
 #include "pagespeed/kernel/base/callback.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/shared_string.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/cache/lru_cache.h"
@@ -115,7 +114,8 @@ class CachePropertyStoreTest : public testing::Test {
   bool cache_lookup_status_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(CachePropertyStoreTest);
+  CachePropertyStoreTest(const CachePropertyStoreTest&) = delete;
+  CachePropertyStoreTest& operator=(const CachePropertyStoreTest&) = delete;
 };
 
 TEST_F(CachePropertyStoreTest, TestNoResultAvailable) {

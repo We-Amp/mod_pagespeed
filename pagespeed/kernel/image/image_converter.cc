@@ -23,6 +23,7 @@ using net_instaweb::MessageHandler;
 
 #include <csetjmp>
 #include <cstddef>
+#include <memory>
 
 extern "C" {
 #ifdef USE_SYSTEM_LIBPNG
@@ -31,16 +32,11 @@ extern "C" {
 #include "external/libpng/png.h"
 #endif
 
-#ifdef USE_SYSTEM_ZLIB
-#include "zlib.h"
-#else
-#include "external/envoy/bazel/foreign_cc/zlib/include/zlib.h"
-#endif
+#include <zlib.h>  // Provided by @envoy//bazel:zlib
 }  // extern "C"
 
 #include "base/logging.h"
 #include "pagespeed/kernel/base/message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/image/image_frame_interface.h"
 #include "pagespeed/kernel/image/image_util.h"
@@ -443,7 +439,7 @@ bool GenerateBlankImage(size_t width, size_t height, bool has_transparency,
   // Create a transparent scanline.
   const size_t bytes_per_scanline =
       width * GetNumChannelsFromPixelFormat(pixel_format, handler);
-  net_instaweb::scoped_array<unsigned char> scanline(
+  std::unique_ptr<unsigned char[]> scanline(
       new unsigned char[bytes_per_scanline]);
   memset(scanline.get(), 0, bytes_per_scanline);
 

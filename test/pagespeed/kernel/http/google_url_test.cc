@@ -19,10 +19,11 @@
 
 // Unit-test the string-splitter.
 
+#include <memory>
+
 #include "pagespeed/kernel/http/google_url.h"
 
 #include "pagespeed/kernel/base/null_mutex.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/util/simple_random.h"
@@ -204,9 +205,12 @@ TEST_F(GoogleUrlTest, TestDecode) {
   EXPECT_EQ("http://www.example.com/foo%2Fbar.html", url3.Spec());
   GoogleUrl url3b("http://www.example.com/foo%2fbar.html");
   EXPECT_EQ("http://www.example.com/foo%2fbar.html", url3b.Spec());
-  // Other
+  // Other: percent-encoded unreserved chars are now preserved verbatim (no
+  // decode/re-encode round-trip), per the WHATWG URL Standard. Upstream
+  // googleurl removed the IE-era unreserved-decode (crbug.com/1509295), so
+  // %53%2D%38 is no longer decoded to "S-8".
   GoogleUrl url4("http://www.example.com/%53%2D%38%25%32%35");
-  EXPECT_EQ("http://www.example.com/S-8%2525", url4.Spec());
+  EXPECT_EQ("http://www.example.com/%53%2D%38%25%32%35", url4.Spec());
 }
 
 TEST_F(GoogleUrlTest, TestCopyAndAddQueryParam) {
@@ -701,7 +705,10 @@ TEST_F(GoogleUrlTest, DefaultPortForScheme) {
 TEST_F(GoogleUrlTest, CanonicalizePath) {
   // Some cleverness around / vs. %2f, etc.
   EXPECT_EQ("/foo%2fbar", GoogleUrl::CanonicalizePath("/foo%2fbar"));
-  EXPECT_EQ("/bar", GoogleUrl::CanonicalizePath("/b%61r"));
+  // WHATWG/RFC-3986: percent-encoded unreserved chars are preserved verbatim,
+  // not decoded. Upstream googleurl removed the IE-era decode (crbug.com/1509295),
+  // so %61 stays %61 instead of collapsing to "a".
+  EXPECT_EQ("/b%61r", GoogleUrl::CanonicalizePath("/b%61r"));
 }
 
 }  // namespace net_instaweb

@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>rewrite_javascript module example</title>
+  </head>
+  <body>
+    <p>
+      This page loads JavaScript modules. With the rewrite_javascript filter
+      enabled, module bodies are minified while the type="module" attribute
+      and the relative import specifiers are preserved.
+    </p>
+    <p id="module_inline">Inline module did not run</p>
+    <p id="module_external">External module did not run</p>
+    <script type="module">
+      // This comment will be removed
+      import { moduleLabel } from './rewrite_javascript_module_util.js';
+      document.getElementById("module_inline").textContent =
+          "Inline " + moduleLabel();
+    </script>
+    <script type="module" src="rewrite_javascript_module.js"></script>
+  </body>
+</html>

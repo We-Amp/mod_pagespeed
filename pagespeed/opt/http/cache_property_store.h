@@ -101,13 +101,14 @@ class CachePropertyStore : public PropertyStore {
 
  private:
   GoogleString cache_key_prefix_;
-  typedef std::map<GoogleString, CacheInterface*> CohortCacheMap;
+  using CohortCacheMap = std::map<GoogleString, CacheInterface*>;
   CohortCacheMap cohort_cache_map_;
   CacheInterface* default_cache_;
   Timer* timer_;
   Statistics* stats_;
   ThreadSystem* thread_system_;
-  DISALLOW_COPY_AND_ASSIGN(CachePropertyStore);
+  CachePropertyStore(const CachePropertyStore&) = delete;
+  CachePropertyStore& operator=(const CachePropertyStore&) = delete;
 };
 
 }  // namespace net_instaweb

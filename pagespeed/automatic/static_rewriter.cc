@@ -67,9 +67,9 @@ class FileServerContext : public ServerContext {
   explicit FileServerContext(RewriteDriverFactory* factory)
       : ServerContext(factory) {}
 
-  virtual ~FileServerContext() {}
+  ~FileServerContext() override {}
 
-  virtual bool ProxiesHtml() const { return false; }
+  bool ProxiesHtml() const override { return false; }
 };
 
 }  // namespace
@@ -158,10 +158,10 @@ StaticRewriter::StaticRewriter(const ProcessContext& process_context, int* argc,
                                char*** argv)
     : gflags_((*argv)[0], argc, argv),
       file_rewriter_(process_context, &gflags_, true),
-      server_context_(NULL) {
+      server_context_(nullptr) {
   SystemRewriteOptions* options =
       SystemRewriteOptions::DynamicCast(file_rewriter_.default_options());
-  CHECK(options != NULL);
+  CHECK(options != nullptr);
   if (!gflags_.SetOptions(&file_rewriter_, options)) {
     exit(1);
   }

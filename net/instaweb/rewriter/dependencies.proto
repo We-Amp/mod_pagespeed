@@ -23,6 +23,29 @@ package net_instaweb;
 enum DependencyType {
   DEP_JAVASCRIPT = 1;
   DEP_CSS = 2;
+
+  // Fonts discovered inside collected CSS (@font-face src). Dependencies of
+  // this type must be serialized ONLY into the dedicated font fields
+  // (Dependencies.font_dependency, CachedResult.collected_font_dependency),
+  // never into the pre-existing Dependency fields: proto2 enums are closed,
+  // so a binary that predates DEP_FONT reading value 3 from the old fields
+  // would move it to the unknown-field set and content_type() would read as
+  // the field default (DEP_JAVASCRIPT), emitting as=script for a font.
+  // Keeping fonts in new fields makes old binaries skip them entirely as
+  // unknown fields instead.
+  DEP_FONT = 3;
+
+  // Scripts loaded as <script type="module">. Dependencies of this type must
+  // be serialized ONLY into the dedicated module fields
+  // (Dependencies.module_dependency, CachedResult.collected_module_dependency),
+  // never into the pre-existing Dependency fields: proto2 enums are closed,
+  // so a binary that predates DEP_MODULE reading value 4 from the old fields
+  // would move it to the unknown-field set and content_type() would read as
+  // the field default (DEP_JAVASCRIPT), emitting rel=preload; as=script for a
+  // module -- a hint that lands in a different preload-cache slot than the
+  // module map fetch, so the browser fetches twice. Keeping modules in new
+  // fields makes old binaries skip them entirely as unknown fields.
+  DEP_MODULE = 4;
 }
 
 // A single candidate for pushing or preloading.
@@ -52,4 +75,15 @@ message Dependency {
 // All the candidates for pushing or preloading.
 message Dependencies {
   repeated Dependency dependency = 1;
+
+  // Font candidates (content_type == DEP_FONT). Fonts serialize ONLY into
+  // this field, never into 'dependency' above, so binaries that predate
+  // DEP_FONT skip them as unknown fields (see the DEP_FONT comment).
+  repeated Dependency font_dependency = 2;
+
+  // Module script candidates (content_type == DEP_MODULE). Modules serialize
+  // ONLY into this field, never into 'dependency' above, so binaries that
+  // predate DEP_MODULE skip them as unknown fields (see the DEP_MODULE
+  // comment).
+  repeated Dependency module_dependency = 3;
 }

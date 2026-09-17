@@ -21,16 +21,15 @@
 #define PAGESPEED_KERNEL_SHAREDMEM_SHARED_MEM_CACHE_H_
 
 #include <cstddef>
+#include <memory>
 #include <vector>
 
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/cache_interface.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/shared_string.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_annotations.h"
-#include "pagespeed/kernel/cache/file_cache.h"
 #include "pagespeed/kernel/sharedmem/shared_mem_cache_data.h"
 
 namespace net_instaweb {
@@ -39,7 +38,6 @@ class AbstractSharedMem;
 class AbstractSharedMemSegment;
 class Hasher;
 class MessageHandler;
-class SharedMemCacheDump;
 class Timer;
 
 // Abstract interface for a cache.
@@ -102,27 +100,6 @@ class SharedMemCache : public CacheInterface {
   // Statistics system (or pull to it from these).
   GoogleString DumpStats();
 
-  // Tries to dump the contents the specified sector to *dest, aborts early if a
-  // different thread is already working on it, and returns whether it was
-  // successful.  To make sure only one thread ends up dumping the sector it
-  // compares the last_checkpoint_ms provided to the one in the sector, and only
-  // continues with the dump if they match.  After a successful dump, it updates
-  // the last_checkpoint_ms in the sector to the current time.
-  //
-  // Note: other accesses to the sector will be locked out for the duration.
-  bool AddSectorToSnapshot(int sector_num, int64 last_checkpoint_ms,
-                           SharedMemCacheDump* dest);
-
-  // Restores entries stored in the dump into this cache. The dump
-  // may contain multiple sectors.
-  void RestoreSnapshot(const SharedMemCacheDump& dump);
-
-  // Encode/Decode SharedMemCacheDump objects.
-  static void MarshalSnapshot(const SharedMemCacheDump& dump,
-                              GoogleString* out);
-  static void DemarshalSnapshot(const StringPiece& marshaled,
-                                SharedMemCacheDump* out);
-
   void Get(const GoogleString& key, Callback* callback) override;
   void Put(const GoogleString& key, const SharedString& value) override;
   void Delete(const GoogleString& key) override;
@@ -138,27 +115,7 @@ class SharedMemCache : public CacheInterface {
   // Sanity check the cache data structures.
   void SanityCheck();
 
-  // Use the specified FileCache for loading and storing snapshots.  This may be
-  // called multiple times with different FileCaches but we pick one.  If the
-  // cache has the same path we were constructed with, use that.  Otherwise, to
-  // handle the default shm cache case, use the cache with the path that comes
-  // first alphabetically.
-  void RegisterSnapshotFileCache(FileCache* potential_file_cache,
-                                 int checkpoint_interval_sec);
-
-  StringPiece snapshot_path() const { return snapshot_path_; }
-  FileCache* file_cache() const { return file_cache_; }
-
-  int64 GetLastWriteMsForTesting(int sector_num);
-  void SetLastWriteMsForTesting(int sector_num, int64 last_checkpoint_ms);
-
-  void WriteOutSnapshotForTesting(int sector_num, int64 last_checkpoint_ms) {
-    WriteOutSnapshotFromWorkerThread(sector_num, last_checkpoint_ms);
-  }
-
  private:
-  class WriteOutSnapshotFunction;
-
   // Describes potential placements of a key
   struct Position {
     int sector;
@@ -167,14 +124,9 @@ class SharedMemCache : public CacheInterface {
 
   bool InitCache(bool parent);
 
-  // PutRawHash can be used in either realtime mode or in restore mode.  In
-  // realtime mode (checkpoint_ok=true) a put can trigger a checkpoint and
-  // last_use_timestamp_ms should be the current time.  In restore mode, a put
-  // shouldn't checkpointing because we're in the middle of restoring a
-  // checkpoint and last_use_timestamp_ms should be the timestamp to restore for
-  // the entry.
+  // Internal helper for Put - writes the value using the pre-computed raw hash.
   void PutRawHash(const GoogleString& raw_hash, int64 last_use_timestamp_ms,
-                  const SharedString& value, bool checkpoint_ok);
+                  const SharedString& value);
 
   // Finish a get, with the entry matching and sector lock held.  Releases lock
   // while performing the read, but takes it again before returning.
@@ -234,29 +186,6 @@ class SharedMemCache : public CacheInterface {
                              SharedMemCacheData::CacheEntry* entry)
       EXCLUSIVE_LOCKS_REQUIRED(sector->mutex());
 
-  // Restore snapshots from the file cache, if set.
-  void RestoreFromDisk();
-
-  // Helper for PutRawHash that decides whether to call ScheduleSnapshot and
-  // then makes the call if appropriate.
-  void ScheduleSnapshotIfNecessary(bool checkpoint_ok,
-                                   int64 last_use_timestamp_ms,
-                                   int64 last_checkpoint_ms, int sector_num);
-
-  // Write out the specified sector to the file cache so it will survive process
-  // restarts.  We pass along last_checkpoint_ms so that if another thread or
-  // process succeeds at snapshotting before we do we can abort quickly.
-  void ScheduleSnapshot(int sector_num, int64 last_checkpoint_ms);
-
-  // ScheduleSnapshot asks the FileCache's slow worker thread to call this.
-  void WriteOutSnapshotFromWorkerThread(int sector_num,
-                                        int64 last_checkpoint_ms);
-
-  // Key to store the snapshot of this sector under.  If two SharedMemCaches
-  // have the same cache key it's safe to restore a snapshot dumped from one
-  // into the other.
-  GoogleString SnapshotCacheKey(int sector_num) const;
-
   AbstractSharedMem* shm_runtime_;
   const Hasher* hasher_;
   Timer* timer_;
@@ -264,17 +193,15 @@ class SharedMemCache : public CacheInterface {
   int num_sectors_;
   int entries_per_sector_;
   int blocks_per_sector_;
-  int checkpoint_interval_sec_;
   MessageHandler* handler_;
-  GoogleString snapshot_path_;
-  FileCache* file_cache_;
 
   std::unique_ptr<AbstractSharedMemSegment> segment_;
   std::vector<SharedMemCacheData::Sector<kBlockSize>*> sectors_;
 
   GoogleString name_;
 
-  DISALLOW_COPY_AND_ASSIGN(SharedMemCache);
+  SharedMemCache(const SharedMemCache&) = delete;
+  SharedMemCache& operator=(const SharedMemCache&) = delete;
 };
 
 }  // namespace net_instaweb

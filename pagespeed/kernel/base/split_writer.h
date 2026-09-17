@@ -52,7 +52,8 @@ class SplitWriter : public Writer {
   Writer* writer1_;
   Writer* writer2_;
 
-  DISALLOW_COPY_AND_ASSIGN(SplitWriter);
+  SplitWriter(const SplitWriter&) = delete;
+  SplitWriter& operator=(const SplitWriter&) = delete;
 };
 
 }  // namespace net_instaweb

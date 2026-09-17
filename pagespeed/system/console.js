@@ -272,8 +272,8 @@ pagespeed.Console.prototype.initGraphs = function() {
 
   this.addGraph('Resources not loaded because of fetch failures',
                 'fetch-failure',
-                percent(v('serf_fetch_failure_count'),
-                        v('serf_fetch_request_count')));
+                percent(v('curl_fetch_failure_count'),
+                        v('curl_fetch_request_count')));
   this.addGraph("Resources not rewritten because domain wasn't authorized",
                 'not-authorized',
                 percent_total(v('resource_url_domain_rejections'),

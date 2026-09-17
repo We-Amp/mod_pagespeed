@@ -371,7 +371,7 @@ class ResizeRowArea : public ResizeRow {
   const int num_channels_;
   int pixels_per_row_;
   float* output_buffer_;  // Not owned
-  net_instaweb::scoped_array<ResizeTableEntry> table_;
+  std::unique_ptr<ResizeTableEntry[]> table_;
 };
 
 bool ResizeRowArea::Initialize(int in_size, int out_size, double ratio,
@@ -409,6 +409,8 @@ const void* ResizeRowArea::Resize(const uint8_t* in_data) {
     case 4:  // RGBA_8888
       ResizeRowAreaRGBA(table_.get(), pixels_per_row_, in_data, output_buffer_);
       break;
+    default:
+      break;
   }
 
   return output_buffer_;
@@ -438,8 +440,8 @@ class ResizeColArea : public ResizeCol {
   void AppendLastRow(const BufferType* in_data, float weight);
   void ComputeOutput(const float* in_data, uint8_t* out_data);
 
-  net_instaweb::scoped_array<ResizeTableEntry> table_;
-  net_instaweb::scoped_array<float> buffer_;
+  std::unique_ptr<ResizeTableEntry[]> table_;
+  std::unique_ptr<float[]> buffer_;
   uint8_t* output_buffer_;  // Not owned
   int elements_per_row_;
   // elements_per_row_4_ is the largest multiple of 4 which is smaller than

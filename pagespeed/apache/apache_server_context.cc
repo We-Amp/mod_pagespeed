@@ -22,7 +22,7 @@
 #include <memory>
 
 // http_protocol.h includes httpd.h. We need to include httpd_includes.h, which
-// works around a conflicting definition of OK in gRPC.
+// captures Apache's OK macro as APACHE_OK and undefines it.
 #include "http_protocol.h"  // NOLINT
 #include "net/instaweb/rewriter/config/measurement_proxy_rewrite_options_manager.h"
 #include "net/instaweb/rewriter/public/measurement_proxy_url_namer.h"
@@ -38,6 +38,7 @@
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/http/http_names.h"
+#include "pagespeed/system/uds_daemon_reader.h"
 
 namespace net_instaweb {
 
@@ -83,8 +84,31 @@ bool ApacheServerContext::InitPath(const GoogleString& path) {
   return ok;
 }
 
+bool ApacheServerContext::RunDaemonStartupCheck() {
+  const ApacheConfig* config = global_config();
+  daemon_adapter_ = std::make_unique<DaemonAdapter>(
+      config->daemon_socket_path(), config->daemon_volume_path(),
+      message_handler());
+  const bool ok = daemon_adapter_->StartupCheck() == DaemonStartupStatus::kOk;
+  // Built whatever the verdict, and holding nothing open.  The serve arm
+  // records exactly one class per response through it, and a null object
+  // here would make "the daemon was not usable" and "this serve was not
+  // counted" the same absence in the counters.
+  if (daemon_adapter_->abi() != nullptr) {
+    daemon_serve_stats_ = std::make_unique<DaemonServeStats>(
+        daemon_adapter_->abi(), daemon_adapter_->volume_path());
+  }
+  return ok;
+}
+
 ApacheConfig* ApacheServerContext::global_config() {
   return ApacheConfig::DynamicCast(global_options());
+}
+
+DaemonReader* ApacheServerContext::NewDaemonReader() {
+  return new UdsDaemonReader(thread_system(), timer(),
+                             global_config()->daemon_api_socket_path(),
+                             message_handler());
 }
 
 const ApacheConfig* ApacheServerContext::global_config() const {
@@ -118,7 +142,15 @@ ApacheConfig* ApacheServerContext::NonSpdyConfigOverlay() {
 
 void ApacheServerContext::CollapseConfigOverlaysAndComputeSignatures() {
   // These days we ignore the spdy overlay and merge-in the non-spdy one
-  // unconditionally.
+  // unconditionally. A non-null spdy overlay means a <ModPagespeedIf spdy>
+  // block carried directives, which are now silently dropped; warn once per
+  // config load so the operator can remove the dead block.
+  if (spdy_config_overlay_.get() != nullptr) {
+    message_handler()->Message(
+        kWarning,
+        "<ModPagespeedIf spdy> is deprecated; its directives are ignored. "
+        "Please remove the block from your configuration.");
+  }
   if (non_spdy_config_overlay_.get() != nullptr) {
     global_config()->Merge(*non_spdy_config_overlay_);
   }

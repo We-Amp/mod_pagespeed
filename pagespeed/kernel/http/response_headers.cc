@@ -500,6 +500,38 @@ void ResponseHeaders::SetCacheControlPublic() {
   cache_fields_dirty_ = dirty;
 }
 
+void ResponseHeaders::SetCacheControlImmutable() {
+  // Note: like SetCacheControlPublic above, the refusal below matches
+  // 'private'/'no-cache' as exact tokens, so the qualified RFC forms
+  // (e.g. private="set-cookie") slip past it. That is unreachable from the
+  // rewritten-resource paths that call this today -- their Cache-Control is
+  // synthesized by SetDateAndCaching/ApplyInputCacheControl, which never
+  // emit qualified directives -- but callers feeding origin-authored
+  // headers here would need to strengthen the check first.
+  ConstStringStarVector values;
+  if (Lookup(HttpAttributes::kCacheControl, &values)) {
+    for (int i = 0, n = values.size(); i < n; ++i) {
+      StringPiece val = *(values[i]);
+      if (StringCaseEqual(val, HttpAttributes::kImmutable) ||
+          StringCaseEqual(val, "private") || StringCaseEqual(val, "no-cache") ||
+          StringCaseEqual(val, "no-store")) {
+        return;
+      }
+    }
+  }
+
+  // 'immutable' is not one of the directives ComputeCaching() parses, so
+  // adding it does not change any of the precomputed bools we've stored;
+  // keep the 'dirty' bit unchanged across this operation (same reasoning
+  // as SetCacheControlPublic above).
+  bool dirty = cache_fields_dirty_;
+  GoogleString new_value = JoinStringStar(values, ", ");
+  StrAppend(&new_value,
+            new_value.empty() ? HttpAttributes::kImmutable : ", immutable");
+  Replace(HttpAttributes::kCacheControl, new_value);
+  cache_fields_dirty_ = dirty;
+}
+
 void ResponseHeaders::SetTimeHeader(const StringPiece& header, int64 time_ms) {
   GoogleString time_string;
   if (ConvertTimeToString(time_ms, &time_string)) {
@@ -691,7 +723,8 @@ class InstawebCacheComputer : public CachingHeaders {
 
  private:
   const ResponseHeaders& response_headers_;
-  DISALLOW_COPY_AND_ASSIGN(InstawebCacheComputer);
+  InstawebCacheComputer(const InstawebCacheComputer&) = delete;
+  InstawebCacheComputer& operator=(const InstawebCacheComputer&) = delete;
 };
 
 }  // namespace
@@ -790,7 +823,11 @@ void ResponseHeaders::ComputeCaching() {
       DCHECK(has_date);
       DCHECK(cache_ttl_ms == http_options_.implicit_cache_ttl_ms);
       proto->set_is_implicitly_cacheable(true);
-      SetDateAndCaching(date_ms, cache_ttl_ms, CacheControlValuesToPreserve());
+      // Resources keep an injected s-maxage (the short shared-cache window
+      // the IPRO flow puts on not-yet-optimized resources); the HTML path
+      // that must not preserve s-maxage does not come through here.
+      SetDateAndCaching(date_ms, cache_ttl_ms,
+                        CacheControlValuesToPreserve(true));
     }
   } else {
     proto->set_expiration_time_ms(0);
@@ -799,7 +836,8 @@ void ResponseHeaders::ComputeCaching() {
   cache_fields_dirty_ = false;
 }
 
-GoogleString ResponseHeaders::CacheControlValuesToPreserve() {
+GoogleString ResponseHeaders::CacheControlValuesToPreserve(
+    bool preserve_s_maxage) {
   GoogleString to_preserve;
   if (HasValue(HttpAttributes::kCacheControl, "no-transform")) {
     to_preserve = ", no-transform";
@@ -808,11 +846,13 @@ GoogleString ResponseHeaders::CacheControlValuesToPreserve() {
     to_preserve += ", no-store";
   }
 
-  ConstStringStarVector cc_values;
-  Lookup(HttpAttributes::kCacheControl, &cc_values);
-  for (auto value : cc_values) {
-    if (StringCaseStartsWith(*value, "s-maxage=")) {
-      to_preserve += ", " + *value;
+  if (preserve_s_maxage) {
+    ConstStringStarVector cc_values;
+    Lookup(HttpAttributes::kCacheControl, &cc_values);
+    for (auto value : cc_values) {
+      if (StringCaseStartsWith(*value, "s-maxage=")) {
+        to_preserve += ", " + *value;
+      }
     }
   }
 
@@ -1261,7 +1301,8 @@ bool ResponseHeaders::ApplySMaxAge(int s_maxage_sec,
       StringPiece existing_value_s = segment;
       existing_value_s.remove_prefix(STATIC_STRLEN("s-maxage="));
       int existing_value;
-      if (!StringToInt(existing_value_s, &existing_value)) {
+      if (!StringToInt(existing_value_s,
+                       &existing_value)) {  // NOLINT(bugprone-branch-clone)
         // Failed to parse existing s-maxage value; leave it alone.
       } else if (existing_value <= s_maxage_sec) {
         // It's already small enough, don't change this one.  But there might be

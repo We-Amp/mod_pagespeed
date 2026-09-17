@@ -17,6 +17,8 @@
  * under the License.
  */
 
+#include <memory>
+
 #include "pagespeed/kernel/thread/scheduler.h"
 
 #include "pagespeed/kernel/base/abstract_mutex.h"
@@ -65,7 +67,8 @@ class SchedulerTest : public WorkerTestBase {
   Scheduler scheduler_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(SchedulerTest);
+  SchedulerTest(const SchedulerTest&) = delete;
+  SchedulerTest& operator=(const SchedulerTest&) = delete;
 };
 
 namespace {
@@ -284,7 +287,8 @@ class RetryWaitFunction : public Function {
   int64 start_ms_;
   Scheduler* scheduler_;
   int* counter_;
-  DISALLOW_COPY_AND_ASSIGN(RetryWaitFunction);
+  RetryWaitFunction(const RetryWaitFunction&) = delete;
+  RetryWaitFunction& operator=(const RetryWaitFunction&) = delete;
 };
 
 TEST_F(SchedulerTest, TimedWaitFromSignalWakeup) {

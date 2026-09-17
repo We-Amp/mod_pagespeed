@@ -1,0 +1,30 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: '\.(rgba|gif|png|jpg|jpeg|webp)$'
+      - id: end-of-file-fixer
+        exclude: '\.(rgba|gif|png|jpg|jpeg|webp)$'
+      - id: check-yaml
+      - id: check-added-large-files
+        args: ['--maxkb=500']
+
+  - repo: https://github.com/pre-commit/mirrors-clang-format
+    rev: v20.1.8
+    hooks:
+      - id: clang-format
+        types_or: [c, c++]
+        # pagespeed/iis/ uses Windows-specific include ordering that conflicts
+        # with SortIncludes:true in Google style (winsock2.h before windows.h).
+        # net/instaweb/rewriter/generated/ is data2c output, never hand-formatted.
+        exclude: '^(third_party|pagespeed/iis|net/instaweb/rewriter/generated)/'
+
+  - repo: local
+    hooks:
+      - id: doc-version-literals
+        name: Doc version-literal drift (CLAUDE.md/AGENTS.md vs clang-format pin)
+        entry: tools/ci/check_doc_commands.sh
+        language: script
+        pass_filenames: false
+        files: '^(CLAUDE\.md|AGENTS\.md|\.pre-commit-config\.yaml)$'

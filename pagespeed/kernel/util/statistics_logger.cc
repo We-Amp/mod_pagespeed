@@ -51,8 +51,8 @@ namespace {
 // Variables used in /pagespeed_console. These will all be logged and
 // are the default set of variables sent back in JSON requests.
 const char* const kConsoleVars[] = {
-    "serf_fetch_failure_count",
-    "serf_fetch_request_count",
+    "curl_fetch_failure_count",
+    "curl_fetch_request_count",
     "resource_url_domain_rejections",
     "resource_url_domain_acceptances",
     "num_cache_control_not_rewritable_resources",
@@ -92,8 +92,8 @@ const char* const kOtherLoggedVars[] = {
     "num_rewrites_executed",
     "num_rewrites_dropped",
     "resource_404_count",
-    "serf_fetch_request_count",
-    "serf_fetch_bytes_count",
+    "curl_fetch_request_count",
+    "curl_fetch_bytes_count",
     "image_ongoing_rewrites",
     "javascript_total_bytes_saved",
     "css_filter_total_bytes_saved",
@@ -127,22 +127,18 @@ const char* const kGraphsVars[] = {
     "rewrite_cached_output_misses",
     "url_input_resource_hit",
     "url_input_resource_recent_fetch_failure",
-    "serf_fetch_bytes_count",
+    "curl_fetch_bytes_count",
     "url_input_resource_recent_uncacheable_miss",
     "url_input_resource_recent_uncacheable_failure",
     "url_input_resource_miss",
-    "serf_fetch_request_count",
-    "lru_cache_hits",
-    "serf_fetch_time_duration_ms",
-    "serf_fetch_cancel_count",
-    "serf_fetch_timeout_count",
-    "serf_fetch_failure_count",
+    "curl_fetch_request_count",
+    "curl_fetch_time_duration_ms",
+    "curl_fetch_cancel_count",
+    "curl_fetch_timeout_count",
+    "curl_fetch_failure_count",
     "http_bytes_fetched",
-    "serf_fetch_active_count",
-    "lru_cache_deletes",
-    "serf_fetch_cert_errors",
-    "lru_cache_inserts",
-    "lru_cache_misses",
+    "curl_fetch_active_count",
+    "curl_fetch_cert_errors",
     "file_cache_bytes_freed_in_cleanup",
     "file_cache_cleanups",
     "file_cache_disk_checks",
@@ -171,6 +167,10 @@ const char* const kGraphsVars[] = {
     "image_rewrites_dropped_nosaving_noresize",
     "ipro_served",
     "ipro_not_rewritable",
+    "ipro_daemon_served",
+    "ipro_daemon_fallthrough",
+    "ipro_daemon_fallback_notified",
+    "ipro_daemon_fallback_notify_failed",
     "ipro_recorder_resources",
     "cache_deletes",
     "ipro_recorder_inserted_into_cache",
@@ -262,8 +262,15 @@ void StatisticsLogger::InitStatsForTest() {
 void StatisticsLogger::AddVariable(StringPiece var_name) {
   VariableOrCounter var_or_counter;
   var_or_counter.first = statistics_->FindVariable(var_name);
-  if (var_or_counter.first == NULL) {
-    var_or_counter.second = statistics_->GetUpDownCounter(var_name);
+  if (var_or_counter.first == nullptr) {
+    // Use FindUpDownCounter instead of GetUpDownCounter to avoid CHECK failure
+    // when statistics aren't registered (e.g., curl_fetch_* when using native
+    // Envoy fetcher instead of Serf/Curl).
+    var_or_counter.second = statistics_->FindUpDownCounter(var_name);
+    if (var_or_counter.second == nullptr) {
+      // Statistic not registered - skip it rather than crashing.
+      return;
+    }
   }
   variables_to_log_[var_name] = var_or_counter;
 }
@@ -315,8 +322,9 @@ void StatisticsLogger::DumpConsoleVarsToWriter(int64 current_time_ms,
        iter != variables_to_log_.end(); ++iter) {
     StringPiece var_name = iter->first;
     VariableOrCounter var_or_counter = iter->second;
-    int64 val = (var_or_counter.first != NULL) ? var_or_counter.first->Get()
-                                               : var_or_counter.second->Get();
+    int64 val = (var_or_counter.first != nullptr)
+                    ? var_or_counter.first->Get()
+                    : var_or_counter.second->Get();
     writer->Write(StrCat(var_name, ": ", Integer64ToString(val), "\n"),
                   message_handler_);
   }
@@ -539,7 +547,15 @@ bool StatisticsLogfileReader::ReadNextDataBlock(int64* timestamp,
       return true;
     }
     *timestamp = old_timestamp;
-
+    // No more "timestamp: " markers in the file: return false rather than
+    // letting offset = npos feed into the next loop iteration, where
+    // StringPiece(buffer_).substr(npos) would throw std::out_of_range and
+    // abort the worker. See regression tests
+    // StatisticsLoggerTest.{ReadNextDataBlockAllOutOfRange,
+    // DumpJsonRangeAfterAllEntriesDoesNotThrow}.
+    if (next_timestamp_pos == GoogleString::npos) {
+      return false;
+    }
     offset = next_timestamp_pos;
   }
   return false;

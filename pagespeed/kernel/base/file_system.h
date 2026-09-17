@@ -303,50 +303,6 @@ class FileSystem {
   virtual bool Size(const StringPiece& path, int64* size,
                     MessageHandler* handler) const = 0;
 
-  // Attempts to obtain a global (cross-process, cross-thread) lock of the given
-  // name (which should be a valid filename, not otherwise used, in an extant
-  // directory).  If someone else has this lock, returns False immediately.  If
-  // anything goes wrong, returns Error.  On success, returns True: then you
-  // must call Unlock when you are done.
-  virtual BoolOrError TryLock(const StringPiece& lock_name,
-                              MessageHandler* handler) = 0;
-
-  // Like TryLock, but may attempt to break stale locks, though the default
-  // implementation never actually breaks any.  A lock is stale if it was taken
-  // (or last bumped) more than timeout_millis ms ago.
-  //
-  // If you obtain a lock through this method, there are no hard guarantees that
-  // nobody else has it too.
-  // <blink> If you use this function, your lock becomes "best-effort". </blink>
-  //
-  // If you override this function, you need to override BumpLockTimeout as
-  // well.
-  virtual BoolOrError TryLockWithTimeout(const StringPiece& lock_name,
-                                         int64 timeout_millis,
-                                         const Timer* timer,
-                                         MessageHandler* handler) {
-    return TryLock(lock_name, handler);
-  }
-
-  // If you're holding a lock for a long running task you want to avoid someone
-  // else receiving the lock if they request it with TryLockWithTimeout because
-  // you've been working for longer than the timeout, you should bump it often
-  // enough that it doesn't expire.
-  virtual bool BumpLockTimeout(const StringPiece& lock_name,
-                               MessageHandler* handler) {
-    // Default implementation does nothing, since the default implementation of
-    // TryLockWithTimeout doesn't do anything either.
-    return true;
-  }
-
-  // Attempts to release a lock previously obtained through TryLock.  If your
-  // thread did not previously obtain the lock, the behavior is undefined.
-  // Returns true if we successfully release the lock.  Returns false if we were
-  // unable to release the lock (e.g. somebody came along and write-protected
-  // the lockfile).  You might try again, or start using a different lock name.
-  virtual bool Unlock(const StringPiece& lock_name,
-                      MessageHandler* handler) = 0;
-
  protected:
   // These interfaces must be defined by implementers of FileSystem.
   // They may assume the directory already exists.

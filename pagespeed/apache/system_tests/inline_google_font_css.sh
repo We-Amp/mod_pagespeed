@@ -17,10 +17,14 @@ if ! "$SKIP_EXTERNAL_RESOURCE_TESTS"; then
   URL="$TEST_ROOT/move_font_css_to_head.html"
   URL+="?PageSpeedFilters=inline_google_font_css,"
   URL+="move_css_to_head,move_css_above_scripts"
-  # Make sure the font CSS link tag is eliminated.
-  fetch_until -save $URL 'grep -c link' 0
+  # Make sure the font CSS stylesheet link tag is eliminated. We can't count
+  # all <link> tags: the filter also inserts a fonts.gstatic.com preconnect
+  # <link> that stays in the page.
+  fetch_until -save $URL 'grep -c rel=\"stylesheet\"' 0
   # Check that we added fonts to the page.
   check [ $(fgrep -c '@font-face' $FETCH_FILE) -gt 0 ]
+  # Check that exactly one preconnect hint was inserted for the font files.
+  check [ $(fgrep -c 'rel="preconnect"' $FETCH_FILE) -eq 1 ]
   # Make sure last style line is before first script line.
   last_style=$(fgrep -n '<style>' $FETCH_FILE | tail -1 | grep -o '^[^:]*')
   first_script=$(\

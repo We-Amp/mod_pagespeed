@@ -258,7 +258,8 @@ class CriticalImagesFinder {
   Variable* critical_images_expired_count_;
   Variable* critical_images_not_found_count_;
 
-  DISALLOW_COPY_AND_ASSIGN(CriticalImagesFinder);
+  CriticalImagesFinder(const CriticalImagesFinder&) = delete;
+  CriticalImagesFinder& operator=(const CriticalImagesFinder&) = delete;
 };
 
 }  // namespace net_instaweb

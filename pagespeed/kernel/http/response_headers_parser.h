@@ -53,7 +53,8 @@ class ResponseHeadersParser {
   GoogleString parse_name_;
   GoogleString parse_value_;
 
-  DISALLOW_COPY_AND_ASSIGN(ResponseHeadersParser);
+  ResponseHeadersParser(const ResponseHeadersParser&) = delete;
+  ResponseHeadersParser& operator=(const ResponseHeadersParser&) = delete;
 };
 
 }  // namespace net_instaweb

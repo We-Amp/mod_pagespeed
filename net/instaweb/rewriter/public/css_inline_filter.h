@@ -96,7 +96,8 @@ class CssInlineFilter : public CommonFilter {
   Variable* num_css_inlined_;
   bool in_body_;
 
-  DISALLOW_COPY_AND_ASSIGN(CssInlineFilter);
+  CssInlineFilter(const CssInlineFilter&) = delete;
+  CssInlineFilter& operator=(const CssInlineFilter&) = delete;
 };
 
 }  // namespace net_instaweb

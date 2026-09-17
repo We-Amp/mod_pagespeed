@@ -44,8 +44,6 @@ struct TagAttr {
 };
 
 const TagAttr kBooleanAttrs[] = {
-    // http://www.w3.org/TR/html4/struct/objects.html#h-13.6.1
-    {HtmlName::kArea, HtmlName::kNohref},
     // http://www.w3.org/TR/html5/video.html#media-elements
     {HtmlName::kAudio, HtmlName::kAutoplay},
     {HtmlName::kAudio, HtmlName::kControls},
@@ -54,41 +52,37 @@ const TagAttr kBooleanAttrs[] = {
     // http://www.w3.org/TR/html5/the-button-element.html#the-button-element
     {HtmlName::kButton, HtmlName::kAutofocus},
     {HtmlName::kButton, HtmlName::kDisabled},
-    // http://www.w3.org/TR/html5/interactive-elements.html#the-command
-    {HtmlName::kCommand, HtmlName::kChecked},
-    {HtmlName::kCommand, HtmlName::kDisabled},
     // http://www.w3.org/TR/html5/interactive-elements.html#the-details-element
     {HtmlName::kDetails, HtmlName::kOpen},
+    // https://html.spec.whatwg.org/multipage/interactive-elements.html#
+    // the-dialog-element
+    {HtmlName::kDialog, HtmlName::kOpen},
+    // https://html.spec.whatwg.org/multipage/form-elements.html#
+    // the-fieldset-element
+    {HtmlName::kFieldset, HtmlName::kDisabled},
     // http://www.w3.org/TR/html5/association-of-controls-and-forms.html#
     // attributes-for-form-submission
     {HtmlName::kForm, HtmlName::kNovalidate},
     // http://www.w3.org/TR/html4/present/frames.html#h-16.2.2
     {HtmlName::kFrame, HtmlName::kNoresize},
-    // http://www.w3.org/TR/html5/the-button-element.html#the-keygen-element
-    {HtmlName::kKeygen, HtmlName::kAutofocus},
-    {HtmlName::kKeygen, HtmlName::kDisabled},
-    // http://www.w3.org/TR/html5/the-iframe-element.html#the-iframe-element
-    {HtmlName::kIframe, HtmlName::kSeamless},
+    // https://html.spec.whatwg.org/multipage/iframe-embed-object.html#
+    // the-iframe-element
+    {HtmlName::kIframe, HtmlName::kAllowfullscreen},
     // http://www.w3.org/TR/html5/embedded-content-1.html#the-img-element
     {HtmlName::kImg, HtmlName::kIsmap},
     // http://www.w3.org/TR/html5/the-input-element.html#the-input-element
     {HtmlName::kInput, HtmlName::kAutofocus},
     {HtmlName::kInput, HtmlName::kChecked},
-    {HtmlName::kInput, HtmlName::kDefaultchecked},
     {HtmlName::kInput, HtmlName::kDisabled},
     {HtmlName::kInput, HtmlName::kFormnovalidate},
-    {HtmlName::kInput, HtmlName::kIndeterminate},
     {HtmlName::kInput, HtmlName::kMultiple},
     {HtmlName::kInput, HtmlName::kReadonly},
     {HtmlName::kInput, HtmlName::kRequired},
-    // http://www.w3.org/TR/html4/struct/objects.html#h-13.3
-    {HtmlName::kObject, HtmlName::kDeclare},
     // http://www.w3.org/TR/html5/grouping-content.html#the-ol-element
     {HtmlName::kOl, HtmlName::kReversed},
     // http://www.w3.org/TR/html5/the-button-element.html#the-optgroup-element
     {HtmlName::kOptgroup, HtmlName::kDisabled},
     // http://www.w3.org/TR/html5/the-button-element.html#the-option-element
-    {HtmlName::kOption, HtmlName::kDefaultselected},
     {HtmlName::kOption, HtmlName::kDisabled},
     {HtmlName::kOption, HtmlName::kSelected},
     // http://www.w3.org/TR/html5/scripting-1.html#script
@@ -99,8 +93,6 @@ const TagAttr kBooleanAttrs[] = {
     {HtmlName::kSelect, HtmlName::kDisabled},
     {HtmlName::kSelect, HtmlName::kMultiple},
     {HtmlName::kSelect, HtmlName::kRequired},
-    // http://www.w3.org/TR/html5/semantics.html#the-style-element
-    {HtmlName::kStyle, HtmlName::kScoped},
     // http://www.w3.org/TR/html5/the-button-element.html#the-textarea-element
     {HtmlName::kTextarea, HtmlName::kAutofocus},
     {HtmlName::kTextarea, HtmlName::kDisabled},
@@ -111,6 +103,8 @@ const TagAttr kBooleanAttrs[] = {
     {HtmlName::kVideo, HtmlName::kControls},
     {HtmlName::kVideo, HtmlName::kLoop},
     {HtmlName::kVideo, HtmlName::kMuted},
+    // https://html.spec.whatwg.org/multipage/media.html#the-video-element
+    {HtmlName::kVideo, HtmlName::kPlaysinline},
 };
 
 // An attribute can be removed from a tag if its name and value is in
@@ -144,11 +138,10 @@ const TagAttrValue kDefaultList[] = {
     {HtmlName::kArea, HtmlName::kShape, "rect", false},
     // 4: http://www.w3.org/TR/html4/interact/forms.html#h-17.5
     // 5: http://www.w3.org/TR/html5/the-button-element.html#the-button-element
-    // IE does not support this default.
+    // Not elided: CSS attribute selectors such as button[type=submit] are
+    // common in the wild and would break (cf. input type=text, see
+    // elide_attributes_filter_test.cc DoNotRemoveTypeAttribute).
     // {HtmlName::kButton, HtmlName::kType, "submit", false},
-    // 4: The <command> tag does not exist in HTML 4.
-    // 5: http://www.w3.org/TR/html5/interactive-elements.html#the-command
-    {HtmlName::kCommand, HtmlName::kType, "command", true},
     // 4: The <form> tag's autocomplete attribute does not exist in HTML 4.
     // 5: http://www.w3.org/TR/html5/forms.html#the-form-element
     {HtmlName::kForm, HtmlName::kAutocomplete, "on", true},
@@ -168,9 +161,24 @@ const TagAttrValue kDefaultList[] = {
     //    http://www.w3.org/TR/html5/obsolete.html#non-conforming-features
     {HtmlName::kIframe, HtmlName::kFrameborder, "1", false},
     {HtmlName::kIframe, HtmlName::kScrolling, "auto", false},
-    // 4: The <keygen> tag does not exist in HTML 4.
-    // 5: http://www.w3.org/TR/html5/the-button-element.html#the-keygen-element
-    {HtmlName::kKeygen, HtmlName::kKeytype, "rsa", true},
+    // 4: These attributes do not exist in HTML 4.
+    // 5: https://html.spec.whatwg.org/multipage/embedded-content.html#
+    //    the-img-element
+    {HtmlName::kImg, HtmlName::kLoading, "eager", true},
+    {HtmlName::kImg, HtmlName::kDecoding, "auto", true},
+    // 4: This attribute does not exist in HTML 4.
+    // 5: https://html.spec.whatwg.org/multipage/urls-and-fetching.html#
+    //    fetch-priority-attributes
+    {HtmlName::kImg, HtmlName::kFetchpriority, "auto", true},
+    // 4: This attribute has a _different_ default value ("screen") in
+    //    HTML 4 (see style media below).
+    //    http://www.w3.org/TR/html4/present/styles.html#h-14.2.3
+    // 5: https://html.spec.whatwg.org/multipage/semantics.html#the-link-element
+    {HtmlName::kLink, HtmlName::kMedia, "all", true},
+    // 4: This attribute does not exist in HTML 4.
+    // 5: https://html.spec.whatwg.org/multipage/urls-and-fetching.html#
+    //    fetch-priority-attributes
+    {HtmlName::kLink, HtmlName::kFetchpriority, "auto", true},
     // 4: The <menu> tag seems to mean something different in HTML 4.
     // 5: http://www.w3.org/TR/html5/interactive-elements.html#menus
     {HtmlName::kMenu, HtmlName::kType, "list", true},
@@ -184,6 +192,10 @@ const TagAttrValue kDefaultList[] = {
     // 5: http://www.w3.org/TR/html5/scripting-1.html
     {HtmlName::kScript, HtmlName::kLanguage, "javascript", true},
     {HtmlName::kScript, HtmlName::kType, "text/javascript", true},
+    // 4: This attribute does not exist in HTML 4.
+    // 5: https://html.spec.whatwg.org/multipage/urls-and-fetching.html#
+    //    fetch-priority-attributes
+    {HtmlName::kScript, HtmlName::kFetchpriority, "auto", true},
     // 4: The <source> tag does not exist in HTML 4.
     // 5: http://www.w3.org/TR/html5/video.html#the-source-element
     {HtmlName::kSource, HtmlName::kMedia, "all", true},

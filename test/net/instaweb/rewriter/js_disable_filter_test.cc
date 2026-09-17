@@ -51,6 +51,12 @@ class JsDisableFilterTest : public RewriteTestBase {
  protected:
   void SetUp() override {
     RewriteTestBase::SetUp();
+    // RewriteTestBase sends an empty user agent, which BotChecker classifies as
+    // a bot, and DeviceProperties::SupportsJsDefer withholds the whole
+    // defer_javascript family from bots. Speak as a browser, exactly as
+    // LazyloadImagesFilterTest::SetUp does for the same reason. Individual
+    // tests below override this to exercise the non-browser paths.
+    SetCurrentUserAgent(UserAgentMatcherTestBase::kChrome18UserAgent);
     options()->EnableFilter(RewriteOptions::kDisableJavascript);
     options()->Disallow("*donotmove*");
   }
@@ -99,12 +105,14 @@ TEST_F(JsDisableFilterTest, DisablesScript) {
           "</body>"));
 
   ValidateExpectedUrl("http://example.com/", input_html, expected);
+  // The Disallow'ed something-donotmove script is left untouched and emits
+  // no log record (see DisallowedScriptEmitsNoLogRecord).
+  ASSERT_EQ(5, logging_info()->rewriter_info_size());
   ExpectLogRecord(0, RewriterApplication::APPLIED_OK, false);
   ExpectLogRecord(1, RewriterApplication::APPLIED_OK, false);
   ExpectLogRecord(2, RewriterApplication::APPLIED_OK, false);
   ExpectLogRecord(3, RewriterApplication::APPLIED_OK, true);
   ExpectLogRecord(4, RewriterApplication::APPLIED_OK, true);
-  ExpectLogRecord(5, RewriterApplication::APPLIED_OK, true);
   rewrite_driver_->log_record()->WriteLog();
   for (int i = 0; i < logging_info()->rewriter_stats_size(); i++) {
     if (logging_info()->rewriter_stats(i).id() == "jd" &&
@@ -115,11 +123,102 @@ TEST_F(JsDisableFilterTest, DisablesScript) {
           logging_info()->rewriter_stats(i).status_counts(0);
       EXPECT_EQ(RewriterApplication::APPLIED_OK,
                 count_applied.application_status());
-      EXPECT_EQ(6, count_applied.count());
+      EXPECT_EQ(5, count_applied.count());
       return;
     }
   }
   FAIL();
+}
+
+TEST_F(JsDisableFilterTest, ModuleScriptNotDisabled) {
+  // Modules are deferred by spec and the psajs re-execution path cannot run
+  // module syntax, so module elements keep type="module" untouched (no
+  // text/psajs, no data-pagespeed-orig-type, no data-pagespeed-orig-index)
+  // while classic scripts around them are still disabled. A module's onload
+  // handler is also left alone: the module is not deferred by this filter,
+  // so rerouting its handler through the deferJs re-trigger would decouple
+  // it from the actual load.
+  const GoogleString input_html =
+      StrCat("<body>",
+             "<script type=\"module\" src=\"blah1.js\" onload=\"foo();\">"
+             "</script>"
+             "<script type=\"module\">import './x.js';</script>"
+             "<script src=\"blah2\"></script>",
+             "</body>");
+  const GoogleString expected =
+      StrCat("<body>",
+             "<script type=\"module\" src=\"blah1.js\" onload=\"foo();\">"
+             "</script>"
+             "<script type=\"module\">import './x.js';</script>"
+             "<script src=\"blah2\" type=\"text/psajs\""
+             " data-pagespeed-orig-index=\"0\"></script>",
+             "</body>");
+  ValidateExpectedUrl("http://example.com/", input_html, expected);
+  // The skipped modules emit no log record; only the disabled classic
+  // script is logged.
+  ASSERT_EQ(1, logging_info()->rewriter_info_size());
+  ExpectLogRecord(0, RewriterApplication::APPLIED_OK, false);
+}
+
+TEST_F(JsDisableFilterTest, DisallowedScriptEmitsNoLogRecord) {
+  // A script skipped because its src matches a Disallow pattern carries no
+  // pagespeed_no_defer attribute, so it must not log a no-defer record:
+  // RewriteResourceInfo has no skip-reason field, and logging one would
+  // conflate an admin-config skip with an author opt-out in log analysis.
+  const GoogleString input_html =
+      StrCat("<body>",
+             "<script src=\"something-donotmove\"></script>"
+             "<script src=\"blah1\"></script>"
+             "<script src=\"blah2\" data-pagespeed-no-defer=\"\"></script>",
+             "</body>");
+  const GoogleString expected =
+      StrCat("<body>",
+             "<script src=\"something-donotmove\"></script>"
+             "<script src=\"blah1\" type=\"text/psajs\""
+             " data-pagespeed-orig-index=\"0\"></script>"
+             "<script src=\"blah2\" data-pagespeed-no-defer=\"\"></script>",
+             "</body>");
+  ValidateExpectedUrl("http://example.com/", input_html, expected);
+  // Only the disabled classic script and the author no-defer opt-out are
+  // logged; the Disallow'ed script emits no record.
+  ASSERT_EQ(2, logging_info()->rewriter_info_size());
+  ExpectLogRecord(0, RewriterApplication::APPLIED_OK, false);
+  ExpectLogRecord(1, RewriterApplication::APPLIED_OK, true);
+}
+
+TEST_F(JsDisableFilterTest, CspForbidsInlineScript) {
+  // Under a script-src policy without 'unsafe-inline' the deferJs runtime
+  // (which re-executes disabled scripts via inline JS) would be blocked,
+  // so scripts and onload handlers must be left alone.
+  const GoogleString input_html = StrCat(
+      "<head>"
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"script-src *;\">"
+      "</head><body>",
+      "<script src=\"blah1\" random=\"true\">hi1</script>"
+      "<img src=\"abc.jpg\" onload=\"foo1('abc');foo2();\">"
+      "</body>");
+  ValidateNoChanges("csp_no_inline", input_html);
+}
+
+TEST_F(JsDisableFilterTest, CspAllowsInlineScript) {
+  // With 'unsafe-inline' permitted the filter behaves as usual.
+  const char kCsp[] =
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"script-src * 'unsafe-inline';\">";
+  const GoogleString input_html =
+      StrCat("<head>", kCsp, "</head><body>",
+             "<script src=\"blah1\" random=\"true\">hi1</script>"
+             "<img src=\"abc.jpg\" onload=\"foo1('abc');foo2();\">"
+             "</body>");
+  const GoogleString expected = StrCat(
+      "<head>", kCsp, "</head><body>",
+      "<script src=\"blah1\" random=\"true\" type=\"text/psajs\""
+      " data-pagespeed-orig-index=\"0\">hi1</script>"
+      "<img src=\"abc.jpg\" data-pagespeed-onload=\"foo1('abc');foo2();\" "
+      "onload=\"",
+      JsDisableFilter::kElementOnloadCode, "\"></body>");
+  ValidateExpected("csp_unsafe_inline", input_html, expected);
 }
 
 TEST_F(JsDisableFilterTest, InvalidUserAgent) {
@@ -249,6 +348,33 @@ TEST_F(JsDisableFilterTest, DisablesScriptOnlyFromFirstSrc) {
       "</script></body>");
 
   ValidateExpected("http://example.com/", input_html, expected);
+}
+
+// End-to-end proof of the #558 gate at the markup layer: an automated client
+// gets the document as authored. Scripts keep their original type (no
+// text/psajs), pick up no data-pagespeed-orig-index, keep their onload=
+// handlers, and -- because support_noscript rides on the same
+// SupportsJsDefer seam -- get no <noscript> redirect banner either. Compare
+// DisablesScriptOnlyFromFirstSrc above, which is the identical input under a
+// browser user agent.
+TEST_F(JsDisableFilterTest, NoDeferMarkupForBots) {
+  options_->EnableFilter(RewriteOptions::kDeferJavascript);
+  const GoogleString input_html =
+      StrCat("<body>", kUnrelatedNoscriptTags,
+             "<script random=\"true\">hi1</script>", kUnrelatedTags,
+             "<img src=\"abc.jpg\" onload=\"foo1('abc');foo2();\">"
+             "<script src=\"1.js\"></script></body>");
+
+  const char* kBotUserAgents[] = {
+      UserAgentMatcherTestBase::kGooglebotUserAgent, "Mediapartners-Google",
+      "Wget/1.21.4",
+      "",  // No user agent at all -- a bot under BotChecker.
+  };
+  for (const char* user_agent : kBotUserAgents) {
+    SCOPED_TRACE(user_agent);
+    SetCurrentUserAgent(user_agent);
+    ValidateNoChanges("bot_useragent", input_html);
+  }
 }
 
 TEST_F(JsDisableFilterTest, AddsMetaTagForIE) {

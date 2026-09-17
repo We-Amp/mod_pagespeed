@@ -60,7 +60,8 @@ class MockTimeCache::DelayCallback : public CacheInterface::Callback {
   MockTimeCache* parent_;
   Callback* orig_callback_;
 
-  DISALLOW_COPY_AND_ASSIGN(DelayCallback);
+  DelayCallback(const DelayCallback&) = delete;
+  DelayCallback& operator=(const DelayCallback&) = delete;
 };
 
 MockTimeCache::MockTimeCache(Scheduler* scheduler, CacheInterface* cache)

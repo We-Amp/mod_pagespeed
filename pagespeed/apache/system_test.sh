@@ -120,6 +120,9 @@ fi
 
 SYSTEM_TEST_DIR="$(dirname "${BASH_SOURCE[0]}")/system_tests/"
 run_test statistics
+# Zero-copy aliased serving E2E; self-gated on the conf
+# enabling CycloneZeroCopy(+Serve).
+run_test zerocopy_serve
 # As we updated our uri parser dependency, the handler quoting tests broke for a good reason:
 # our parser now declines when handed these evil urls.
 # TODO(oschaaf): add a unit test to ensure that behaviour stays put, as we now depend on it.

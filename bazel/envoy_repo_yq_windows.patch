@@ -1,0 +1,23 @@
+--- a/bazel/repo.bzl	2026-03-18 13:39:10
++++ b/bazel/repo.bzl	2026-03-18 13:39:25
+@@ -67,7 +67,11 @@
+ 
+     # parse container information for use in RBE
+     json_result = repository_ctx.execute([
+-        repository_ctx.path(repository_ctx.attr.yq),
++        # On Windows, use the yq_windows path directly to avoid symlink issues.
++        # The @yq package creates a symlink that doesn't work with CreateProcessW.
++        repository_ctx.path(repository_ctx.attr.yq_windows)
++            if repository_ctx.os.name.startswith("windows")
++            else repository_ctx.path(repository_ctx.attr.yq),
+         repository_ctx.path(repository_ctx.attr.envoy_ci_config),
+         "-ojson",
+     ])
+@@ -305,6 +309,7 @@
+         "envoy_version": attr.label(default = "@envoy//:VERSION.txt"),
+         "envoy_api_version": attr.label(default = "@envoy//:API_VERSION.txt"),
+         "envoy_ci_config": attr.label(default = "@envoy//:.github/config.yml"),
++        "yq_windows": attr.label(default = "@yq_windows_amd64//:yq.exe"),
+         "yq": attr.label(default = "@yq"),
+     },
+     environ = ["BAZEL_LLVM_PATH", "BAZEL_USE_HOST_SYSROOT"],

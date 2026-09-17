@@ -24,6 +24,7 @@
 #include <cstddef>
 #include <list>
 #include <map>
+#include <memory>
 #include <set>
 #include <utility>
 #include <vector>
@@ -31,7 +32,6 @@
 #include "pagespeed/kernel/base/arena.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/printf_format.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/symbol_table.h"
@@ -50,7 +50,7 @@ class HtmlLexer;
 class MessageHandler;
 class Timer;
 
-typedef std::set<const HtmlEvent*> ConstHtmlEventSet;
+using ConstHtmlEventSet = std::set<const HtmlEvent*>;
 
 // Streaming Html Parser API.  Callbacks defined in HtmlFilter are
 // called on each parser token.
@@ -304,9 +304,12 @@ class HtmlParse {
   }
   HtmlElement* NewElement(HtmlElement* parent, const HtmlName& name);
 
-  // For both versions of AddAttribute
-  // Pass in NULL for value to add an attribute with no value at all
+  // For both versions of AddAttribute:
+  // Pass a default-constructed StringPiece (data() == nullptr) to add an
+  // attribute with no value at all
   //   ex: <script data-pagespeed-no-transform>
+  // Never construct the piece from a null const char*, which is undefined
+  // behavior for std::string_view-backed StringPiece dialects.
   // Pass in "" for value if you want the value to be the empty string
   //   ex: <div style="">
   void AddAttribute(HtmlElement* element, HtmlName::Keyword keyword,
@@ -510,12 +513,13 @@ class HtmlParse {
   bool can_modify_urls() { return can_modify_urls_; }
 
  protected:
-  typedef std::vector<HtmlFilter*> FilterVector;
-  typedef std::list<HtmlFilter*> FilterList;
-  typedef std::pair<HtmlNode*, HtmlEventList*> DeferredNode;
-  typedef std::map<const HtmlNode*, HtmlEventList*> NodeToEventListMap;
-  typedef std::map<HtmlFilter*, DeferredNode> FilterElementMap;
-  typedef std::set<const HtmlNode*> NodeSet;
+  using FilterVector = std::vector<std::unique_ptr<HtmlFilter>>;
+  using FilterList = std::list<HtmlFilter*>;
+  using DeferredNode = std::pair<HtmlNode*, HtmlEventList*>;
+  using NodeToEventListMap =
+      std::map<const HtmlNode*, std::unique_ptr<HtmlEventList>>;
+  using FilterElementMap = std::map<HtmlFilter*, DeferredNode>;
+  using NodeSet = std::set<const HtmlNode*>;
 
   // HtmlParse::FinishParse() is equivalent to the sequence of
   // BeginFinishParse(); Flush(); EndFinishParse().
@@ -633,7 +637,7 @@ class HtmlParse {
   FilterVector event_listeners_;
   SymbolTableSensitive string_table_;
   FilterList filters_;
-  HtmlLexer* lexer_;
+  std::unique_ptr<HtmlLexer> lexer_;
   Arena<HtmlNode> nodes_;
   HtmlEventList queue_;
   HtmlEventListIterator current_;
@@ -677,7 +681,8 @@ class HtmlParse {
 
   StringVector* dynamically_disabled_filter_list_;
 
-  DISALLOW_COPY_AND_ASSIGN(HtmlParse);
+  HtmlParse(const HtmlParse&) = delete;
+  HtmlParse& operator=(const HtmlParse&) = delete;
 };
 
 }  // namespace net_instaweb

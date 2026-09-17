@@ -24,25 +24,21 @@
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/named_lock_manager.h"
 #include "pagespeed/kernel/base/null_statistics.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/thread_system.h"
-#include "pagespeed/kernel/thread/scheduler_based_abstract_lock.h"
-#include "pagespeed/kernel/util/file_system_lock_manager.h"
+#include "pagespeed/kernel/util/threadsafe_lock_manager.h"
 #include "pagespeed/kernel/util/platform.h"
 #include "pagespeed/kernel/util/simple_stats.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/base/mem_file_system.h"
 #include "test/pagespeed/kernel/base/mock_message_handler.h"
 #include "test/pagespeed/kernel/base/mock_timer.h"
-#include "test/pagespeed/kernel/base/named_lock_tester.h"
 #include "test/pagespeed/kernel/thread/mock_scheduler.h"
 
 namespace {
 
 const int kMaxBytes = 100;
 const char kPurgeFile[] = "/cache/cache.flush";
-const char kBasePath[] = "/cache";
 
 }  // namespace
 
@@ -51,19 +47,6 @@ namespace net_instaweb {
 class PurgeContextTest : public ::testing::Test,
                          public ::testing::WithParamInterface<bool> {
  public:
-  void CorruptWrittenFileHook(const GoogleString& filename) {
-    EXPECT_TRUE(
-        file_system_.WriteFile(filename.c_str(), "bogus", &message_handler_));
-  }
-
-  void CorruptFileAndAddNewUpdate(const GoogleString& filename) {
-    EXPECT_TRUE(
-        file_system_.WriteFile(filename.c_str(), "bogus", &message_handler_));
-    lock_->Unlock();
-    ASSERT_TRUE(lock_tester_.LockTimedWaitStealOld(0, 0, lock_.get()));
-    purge_context1_->AddPurgeUrl("a", 500000, ExpectSuccess());
-  }
-
   bool PollAndTest(const GoogleString& url, int64 now_ms,
                    const CopyOnWrite<PurgeSet>& purge_set,
                    PurgeContext* purge_context) {
@@ -86,8 +69,7 @@ class PurgeContextTest : public ::testing::Test,
         message_handler_(thread_system_->NewMutex()),
         file_system_(thread_system_.get(), &timer_),
         scheduler_(thread_system_.get(), &timer_),
-        lock_manager_(&file_system_, kBasePath, &scheduler_, &message_handler_),
-        lock_tester_(thread_system_.get()) {
+        lock_manager_(&scheduler_) {
     if (HasValidStats()) {
       statistics_ = std::make_unique<SimpleStats>(thread_system_.get());
     } else {
@@ -113,47 +95,9 @@ class PurgeContextTest : public ::testing::Test,
                             statistics_.get(), &message_handler_);
   }
 
-  GoogleString LockName() { return purge_context1_->LockName(); }
-
   void ExpectSuccessHelper(bool x, StringPiece reason) { EXPECT_TRUE(x); }
   PurgeContext::PurgeCallback* ExpectSuccess() {
     return NewCallback(this, &PurgeContextTest::ExpectSuccessHelper);
-  }
-
-  void ExpectFailureHelper(bool x, StringPiece reason) { EXPECT_FALSE(x); }
-  PurgeContext::PurgeCallback* ExpectFailure() {
-    return NewCallback(this, &PurgeContextTest::ExpectFailureHelper);
-  }
-
-  int64 LockContentionStart(PurgeContext::PurgeCallback* callback) {
-    scheduler_.AdvanceTimeMs(10 * Timer::kSecondMs);
-    lock_.reset(lock_manager_.CreateNamedLock(LockName()));
-    EXPECT_TRUE(lock_tester_.LockTimedWaitStealOld(0, 0, lock_.get()));
-    EXPECT_TRUE(lock_->Held());
-    int64 now_ms = timer_.NowMs();
-    purge_context1_->SetCachePurgeGlobalTimestampMs(now_ms, callback);
-
-    // We don't check pending_purges_ in PollAndTestValid; the invalidation will
-    // only be visible to purge_context1 when it can acquire the lock and
-    // write its records.
-    EXPECT_TRUE(PollAndTest1("b", now_ms - 1));
-    EXPECT_TRUE(PollAndTest2("b", now_ms - 1));
-
-    // Advance time by a second; which is not enough to steal the lock,
-    // so we still consider 'b' to be valid in both contexts.
-    scheduler_.AdvanceTimeMs(1 * Timer::kSecondMs);
-    EXPECT_TRUE(PollAndTest1("b", now_ms - 1));
-    EXPECT_TRUE(PollAndTest2("b", now_ms - 1));
-    scheduler_.AdvanceTimeMs(1 * Timer::kSecondMs);  // Not enough to steal it.
-    return now_ms;
-  }
-
-  int num_cancellations() {
-    return statistics_->GetVariable(PurgeContext::kCancellations)->Get();
-  }
-
-  int num_contentions() {
-    return statistics_->GetVariable(PurgeContext::kContentions)->Get();
   }
 
   int file_parse_failures() {
@@ -185,14 +129,12 @@ class PurgeContextTest : public ::testing::Test,
   MockMessageHandler message_handler_;
   MemFileSystem file_system_;
   MockScheduler scheduler_;
-  FileSystemLockManager lock_manager_;
+  ThreadSafeLockManager lock_manager_;
   std::unique_ptr<Statistics> statistics_;
   std::unique_ptr<PurgeContext> purge_context1_;
   std::unique_ptr<PurgeContext> purge_context2_;
   CopyOnWrite<PurgeSet> purge_set1_;
   CopyOnWrite<PurgeSet> purge_set2_;
-  std::unique_ptr<NamedLock> lock_;
-  NamedLockTester lock_tester_;
 };
 
 TEST_P(PurgeContextTest, Empty) { EXPECT_TRUE(PollAndTest1("a", 500)); }
@@ -289,70 +231,11 @@ TEST_P(PurgeContextTest, EmptyPurgeFile) {
   EXPECT_EQ(0, file_parse_failures());
 }
 
-TEST_P(PurgeContextTest, LockContentionFailure) {
-  int64 now_ms = LockContentionStart(ExpectFailure());
-
-  // Release & retake the lock making it harder to steal by refreshing it.
-  lock_->Unlock();
-  ASSERT_TRUE(lock_tester_.LockTimedWaitStealOld(0, 0, lock_.get()));
-
-  // Get our ExpectFailure callback called and confirm that the invalidation
-  // didn't have any effect.
-  scheduler_.AdvanceTimeMs(10 * Timer::kSecondMs);
-  EXPECT_TRUE(PollAndTest1("b", now_ms - 1));
-  EXPECT_TRUE(PollAndTest2("b", now_ms - 1));
-  EXPECT_EQ(ExpectStat(1), num_cancellations());
-  EXPECT_EQ(ExpectStat(0), num_contentions());
-  EXPECT_EQ(ExpectStat(0), file_parse_failures());
-}
-
-TEST_P(PurgeContextTest, LockContentionSuccess) {
-  int64 now_ms = LockContentionStart(ExpectSuccess());
-
-  // Now advance time by 10 seconds; this should ensure that we steal
-  // the lock and can write the invalidation records for all to see.
-  scheduler_.AdvanceTimeMs(10 * Timer::kSecondMs);
-  EXPECT_FALSE(PollAndTest1("b", now_ms - 1));
-  EXPECT_FALSE(PollAndTest2("b", now_ms - 1));
-  EXPECT_EQ(0, num_cancellations());
-  EXPECT_EQ(0, num_contentions());
-  EXPECT_EQ(0, file_parse_failures());
-}
-
-TEST_P(PurgeContextTest, FileWriteConflict) {
-  int64 now_ms = LockContentionStart(ExpectSuccess());
-  file_system_.set_write_callback(
-      NewCallback(this, &PurgeContextTest::CorruptWrittenFileHook));
-
-  // Now advance time by 10 seconds; this should ensure that we steal
-  // the lock and can write the invalidation records for all to see.
-  // Unfortunately the file-write will not be verified and will have
-  // to grab the lock and do it again.
-  scheduler_.AdvanceTimeMs(10 * Timer::kSecondMs);
-  EXPECT_FALSE(PollAndTest1("b", now_ms - 1));
-  EXPECT_FALSE(PollAndTest2("b", now_ms - 1));
-  EXPECT_EQ(0, num_cancellations());
-  EXPECT_EQ(ExpectStat(1), num_contentions());
-  EXPECT_EQ(ExpectStat(1), file_parse_failures());
-}
-
-TEST_P(PurgeContextTest, FileWriteConflictWithInterveningUpdate) {
-  int64 now_ms = LockContentionStart(ExpectSuccess());
-
-  file_system_.set_write_callback(
-      NewCallback(this, &PurgeContextTest::CorruptFileAndAddNewUpdate));
-
-  // Now advance time by 10 seconds; this should ensure that we steal
-  // the lock and can write the invalidation records for all to see.
-  // Unfortunately the file-write will not be verified and will have
-  // to grab the lock and do it again.
-  scheduler_.AdvanceTimeMs(10 * Timer::kSecondMs);
-  EXPECT_FALSE(PollAndTest1("b", now_ms - 1));
-  EXPECT_FALSE(PollAndTest2("b", now_ms - 1));
-  EXPECT_EQ(0, num_cancellations());
-  EXPECT_EQ(ExpectStat(1), num_contentions());
-  EXPECT_EQ(ExpectStat(1), file_parse_failures());
-}
+// NOTE: LockContentionFailure, LockContentionSuccess, FileWriteConflict, and
+// FileWriteConflictWithInterveningUpdate tests were removed when
+// FileSystemLockManager was replaced by ThreadSafeLockManager. These tests
+// tested file-based lock stealing behavior that doesn't apply to in-memory
+// locking.
 
 TEST_P(PurgeContextTest, InvalidTimestampInPurgeRecord) {
   ASSERT_TRUE(

@@ -77,7 +77,9 @@ class CssInlineImportToLinkFilter : public EmptyHtmlFilter {
   // Statistics count of the number of times we rewrite a style element.
   Variable* counter_;
 
-  DISALLOW_COPY_AND_ASSIGN(CssInlineImportToLinkFilter);
+  CssInlineImportToLinkFilter(const CssInlineImportToLinkFilter&) = delete;
+  CssInlineImportToLinkFilter& operator=(const CssInlineImportToLinkFilter&) =
+      delete;
 };
 
 }  // namespace net_instaweb

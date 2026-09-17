@@ -17,6 +17,8 @@
  * under the License.
  */
 
+#include <memory>
+
 #include "net/instaweb/rewriter/public/rewrite_query.h"
 
 #include "base/logging.h"
@@ -371,7 +373,7 @@ TEST_F(RewriteQueryTest, SetFiltersQueryCorePlusMinus) {
   CheckExtendCache(*options, true);
   EXPECT_TRUE(options->Enabled(RewriteOptions::kExtendCacheCss));
   EXPECT_TRUE(options->Enabled(RewriteOptions::kExtendCacheImages));
-  EXPECT_TRUE(options->Enabled(RewriteOptions::kDivStructure));
+  EXPECT_TRUE(options->Enabled(RewriteOptions::kDivStructureDeprecated));
   EXPECT_FALSE(options->Enabled(RewriteOptions::kInlineCss));
   // Unlike above, these are true because 'core' is in the filter list.
   EXPECT_TRUE(options->Enabled(RewriteOptions::kCombineCss));
@@ -476,7 +478,7 @@ TEST_F(RewriteQueryTest, QueryAndRequestAndResponseAndCookies) {
   EXPECT_FALSE(options->Enabled(RewriteOptions::kInlineCss));
   EXPECT_FALSE(options->Enabled(RewriteOptions::kRemoveQuotes));
 
-  EXPECT_FALSE(options->Enabled(RewriteOptions::kDivStructure));
+  EXPECT_FALSE(options->Enabled(RewriteOptions::kDivStructureDeprecated));
   EXPECT_TRUE(options->Enabled(RewriteOptions::kExtendCacheCss));
 
   // PageSpeed option cookies have been squirreled away.
@@ -524,7 +526,7 @@ TEST_F(RewriteQueryTest, CannotSetOptionsByCookiesWhenDisabled) {
             options->css_inline_max_bytes());
 
   // The query parameter options should still have taken effect.
-  EXPECT_FALSE(options->Enabled(RewriteOptions::kDivStructure));
+  EXPECT_FALSE(options->Enabled(RewriteOptions::kDivStructureDeprecated));
   EXPECT_TRUE(options->Enabled(RewriteOptions::kExtendCacheCss));
 }
 

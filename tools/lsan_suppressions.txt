@@ -1,0 +1,4 @@
+# LeakSanitizer suppressions for mod_pagespeed 1.1
+#
+# Format: leak:<function_or_source_pattern>
+# See: https://github.com/google/sanitizers/wiki/AddressSanitizerLeakSanitizer

@@ -23,7 +23,6 @@
 
 #include "base/logging.h"
 #include "pagespeed/kernel/base/message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/image/scanline_utils.h"
 
@@ -38,11 +37,7 @@
 #endif
 
 extern "C" {
-#ifdef USE_SYSTEM_ZLIB
-#include "zlib.h"  // NOLINT
-#else
-#include "external/envoy/bazel/foreign_cc/zlib/include/zlib.h"
-#endif
+#include <zlib.h>  // Provided by @envoy//bazel:zlib
 
 #include "external/optipng/src/opngreduc/opngreduc.h"
 }
@@ -56,6 +51,9 @@ namespace {
 // deterministically.
 void* PngWrapMalloc(png_structp ptr, png_size_t size) {
   if ((size & 7) == 0) {
+    // Aligned size: no padding needed. NULL return is safe here — libpng
+    // handles it via png_error() → longjmp, unlike the unaligned path below
+    // which dereferences the pointer for memset before returning.
     return malloc(size);
   } else {
     png_size_t extra = 8 - (size & 7);
@@ -65,6 +63,9 @@ void* PngWrapMalloc(png_structp ptr, png_size_t size) {
       return nullptr;
     }
     char* p = reinterpret_cast<char*>(malloc(rounded));
+    if (p == nullptr) {
+      return nullptr;
+    }
     memset(p + (rounded - 8), 0, 8);
     return p;
   }
@@ -1253,8 +1254,7 @@ ScanlineStatus PngScanlineWriter::FinalizeWriteWithStatus() {
         SCANLINE_PNGWRITER, "not initialized or not all rows written");
   }
 
-  net_instaweb::scoped_array<unsigned char*> row_pointers(
-      new unsigned char*[height_]);
+  std::unique_ptr<unsigned char*[]> row_pointers(new unsigned char*[height_]);
   for (size_t row = 0; row < height_; ++row) {
     row_pointers[row] = pixel_buffer_.get() + row * bytes_per_row_;
   }

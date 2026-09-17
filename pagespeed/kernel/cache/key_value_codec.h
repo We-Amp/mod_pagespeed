@@ -29,8 +29,8 @@ class SharedString;
 
 namespace key_value_codec {
 
-// Takes a key and a value, and encodes the pair of them into key_and_value,
-// sharing storage with value.
+// Takes a key and a value, and encodes the pair of them into key_and_value
+// (in its own storage, detached from value).
 //
 // Returns false if the key's size was too large (65535 max) to fit into the
 // encoding.

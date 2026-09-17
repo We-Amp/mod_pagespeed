@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<!--
+  SPDX-License-Identifier: Apache-2.0
+  Copyright (c) 2024-2026 We-Amp B.V.
+-->
+
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>JavaScript Combine Test</title>
+    <link rel="stylesheet" href="../styles/main.css">
+</head>
+<body>
+    <h1>JavaScript Combine Test</h1>
+
+    <p>This page includes three separate JavaScript files that should be combined.</p>
+
+    <div id="output">
+        <h2>Test Results:</h2>
+        <ul id="results"></ul>
+    </div>
+
+    <!-- Multiple JS files that should be combined -->
+    <script src="../js/multi/a.js"></script>
+    <script src="../js/multi/b.js"></script>
+    <script src="../js/multi/c.js"></script>
+
+    <script>
+        // Test that all modules are loaded
+        document.addEventListener('DOMContentLoaded', function() {
+            var results = document.getElementById('results');
+
+            function addResult(message, success) {
+                var li = document.createElement('li');
+                li.textContent = message;
+                li.style.color = success ? 'green' : 'red';
+                results.appendChild(li);
+            }
+
+            // Test AppA
+            if (typeof AppA !== 'undefined') {
+                addResult('AppA loaded - version: ' + AppA.getVersion(), true);
+            } else {
+                addResult('AppA not loaded', false);
+            }
+
+            // Test AppB
+            if (typeof AppB !== 'undefined') {
+                AppB.addItem('test');
+                addResult('AppB loaded - count: ' + AppB.getCount(), true);
+            } else {
+                addResult('AppB not loaded', false);
+            }
+
+            // Test AppC
+            if (typeof AppC !== 'undefined') {
+                addResult('AppC loaded', true);
+            } else {
+                addResult('AppC not loaded', false);
+            }
+        });
+    </script>
+</body>
+</html>

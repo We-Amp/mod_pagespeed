@@ -66,7 +66,8 @@ class FakeFilter : public RewriteFilter {
 
    private:
     FakeFilter* filter_;
-    DISALLOW_COPY_AND_ASSIGN(Context);
+    Context(const Context&) = delete;
+    Context& operator=(const Context&) = delete;
   };
 
   FakeFilter(const char* id, RewriteDriver* rewrite_driver,
@@ -125,7 +126,8 @@ class FakeFilter : public RewriteFilter {
   const ContentType* output_content_type_;
   mutable int num_calls_to_encode_user_agent_;
   semantic_type::Category category_;
-  DISALLOW_COPY_AND_ASSIGN(FakeFilter);
+  FakeFilter(const FakeFilter&) = delete;
+  FakeFilter& operator=(const FakeFilter&) = delete;
 };
 
 }  // namespace net_instaweb

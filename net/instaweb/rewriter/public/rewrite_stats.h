@@ -20,6 +20,7 @@
 #ifndef NET_INSTAWEB_REWRITER_PUBLIC_REWRITE_STATS_H_
 #define NET_INSTAWEB_REWRITER_PUBLIC_REWRITE_STATS_H_
 
+#include <memory>
 #include <vector>
 
 #include "net/instaweb/rewriter/public/rewrite_driver_factory.h"
@@ -41,6 +42,7 @@ class RewriteStats {
   static const char kNumResourceFetchFailures[];
   static const char kResourceUrlDomainAcceptances[];
   static const char kResourceUrlDomainRejections[];
+  static const char kCspBlockedRewrites[];
 
   // Variable tracking number of downstream cache purges issued.
   static const char kDownstreamCachePurgeAttempts[];
@@ -77,6 +79,7 @@ class RewriteStats {
   Variable* resource_url_domain_rejections() {
     return resource_url_domain_rejections_;
   }
+  Variable* csp_blocked_rewrites() { return csp_blocked_rewrites_; }
   Variable* slurp_404_count() { return slurp_404_count_; }
   Variable* succeeded_filter_resource_fetches() {
     return succeeded_filter_resource_fetches_;
@@ -85,6 +88,9 @@ class RewriteStats {
   // Note: page_load_count is a misnomer, it is really beacon count.
   // TODO(sligocki): Rename to something more clear.
   Variable* page_load_count() { return page_load_count_; }
+  // Number of beacon POSTs that arrived flagged as truncated: the client
+  // overflowed its payload budget and dropped part of its data.
+  Variable* beacon_overflow_count() { return beacon_overflow_count_; }
   Variable* fallback_responses_served() { return fallback_responses_served_; }
 
   Variable* num_proactively_freshen_user_facing_request() {
@@ -101,6 +107,34 @@ class RewriteStats {
   Variable* ipro_not_in_cache() { return ipro_not_in_cache_; }
   Variable* ipro_not_rewritable() { return ipro_not_rewritable_; }
 
+  // The daemon substrate's two serving outcomes; see the comment beside
+  // their names in rewrite_stats.cc for why they are not the three above.
+  Variable* ipro_daemon_served() { return ipro_daemon_served_; }
+  Variable* ipro_daemon_fallthrough() { return ipro_daemon_fallthrough_; }
+
+  // Worker re-notifies sent on fallback hits, and sends that FAILED.  NOT
+  // partition members: every fallback hit is already counted in
+  // ipro_daemon_served.  Only send outcomes move these two -- see the
+  // comment beside their names in rewrite_stats.cc.
+  Variable* ipro_daemon_fallback_notified() {
+    return ipro_daemon_fallback_notified_;
+  }
+  Variable* ipro_daemon_fallback_notify_failed() {
+    return ipro_daemon_fallback_notify_failed_;
+  }
+
+  // Origin-refreshed sentinels sent on age-expired variant fall-throughs,
+  // and sends that FAILED.  NOT partition members either: every flagged
+  // fall-through is already counted in ipro_daemon_fallthrough.  Only send
+  // outcomes move these two -- see the comment beside their names in
+  // rewrite_stats.cc.
+  Variable* ipro_daemon_refresh_notified() {
+    return ipro_daemon_refresh_notified_;
+  }
+  Variable* ipro_daemon_refresh_notify_failed() {
+    return ipro_daemon_refresh_notify_failed_;
+  }
+
   Variable* downstream_cache_purge_attempts() {
     return downstream_cache_purge_attempts_;
   }
@@ -111,6 +145,14 @@ class RewriteStats {
   Histogram* beacon_timings_ms_histogram() {
     return beacon_timings_ms_histogram_;
   }
+  // Core Web Vitals reported by the add_instrumentation beacon.
+  Histogram* beacon_lcp_ms_histogram() { return beacon_lcp_ms_histogram_; }
+  // CLS in fixed-point milli-units: a CLS of 0.1 is recorded as 100.
+  Histogram* beacon_cls_milli_histogram() {
+    return beacon_cls_milli_histogram_;
+  }
+  Histogram* beacon_inp_ms_histogram() { return beacon_inp_ms_histogram_; }
+  Histogram* beacon_ttfb_ms_histogram() { return beacon_ttfb_ms_histogram_; }
   // .pagespeed. resource latency in ms.
   Histogram* fetch_latency_histogram() { return fetch_latency_histogram_; }
   // HTML rewrite latency in ms.
@@ -125,7 +167,7 @@ class RewriteStats {
   // Returns a waveform object for recording the current thread-queue depth.
   // Note: for servers that don't support waveforms, null will be returned.
   Waveform* thread_queue_depth(RewriteDriverFactory::WorkerPoolCategory pool) {
-    return thread_queue_depths_[pool];
+    return thread_queue_depths_[pool].get();
   }
 
   TimedVariable* num_rewrites_executed() { return num_rewrites_executed_; }
@@ -140,10 +182,12 @@ class RewriteStats {
   Variable* num_cache_control_rewritable_resources_;
   Variable* num_cache_control_not_rewritable_resources_;
   Variable* num_flushes_;
+  Variable* beacon_overflow_count_;
   Variable* page_load_count_;
   Variable* resource_404_count_;
   Variable* resource_url_domain_acceptances_;
   Variable* resource_url_domain_rejections_;
+  Variable* csp_blocked_rewrites_;
   Variable* slurp_404_count_;
   Variable* succeeded_filter_resource_fetches_;
   Variable* total_page_load_ms_;
@@ -154,10 +198,20 @@ class RewriteStats {
   Variable* ipro_served_;
   Variable* ipro_not_in_cache_;
   Variable* ipro_not_rewritable_;
+  Variable* ipro_daemon_served_;
+  Variable* ipro_daemon_fallthrough_;
+  Variable* ipro_daemon_fallback_notified_;
+  Variable* ipro_daemon_fallback_notify_failed_;
+  Variable* ipro_daemon_refresh_notified_;
+  Variable* ipro_daemon_refresh_notify_failed_;
   Variable* downstream_cache_purge_attempts_;
   Variable* successful_downstream_cache_purges_;
 
   Histogram* beacon_timings_ms_histogram_;
+  Histogram* beacon_lcp_ms_histogram_;
+  Histogram* beacon_cls_milli_histogram_;
+  Histogram* beacon_inp_ms_histogram_;
+  Histogram* beacon_ttfb_ms_histogram_;
   Histogram* fetch_latency_histogram_;
   Histogram* rewrite_latency_histogram_;
   Histogram* backend_latency_histogram_;
@@ -167,9 +221,10 @@ class RewriteStats {
   TimedVariable* num_rewrites_executed_;
   TimedVariable* num_rewrites_dropped_;
 
-  std::vector<Waveform*> thread_queue_depths_;
+  std::vector<std::unique_ptr<Waveform>> thread_queue_depths_;
 
-  DISALLOW_COPY_AND_ASSIGN(RewriteStats);
+  RewriteStats(const RewriteStats&) = delete;
+  RewriteStats& operator=(const RewriteStats&) = delete;
 };
 
 }  // namespace net_instaweb

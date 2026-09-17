@@ -38,8 +38,7 @@
 // default prints the minified code for that file to stdout.  If
 // --print_size_and_hash is specified, it instead prints the size of the
 // minified file (in bytes) and its minified md5 sum, suitable for configuring
-// library recognition in mod_pagespeed. If --use_experimental_minifier is
-// specified, use the new JS minifier.
+// library recognition in mod_pagespeed.
 
 namespace net_instaweb {
 
@@ -49,10 +48,6 @@ DEFINE_bool(print_size_and_hash, false,
             "This yields results suitable for a "
             "ModPagespeedLibrary directive.");
 
-DEFINE_bool(use_experimental_minifier, true,
-            "Use the new JS minifier to minify the input instead "
-            "of the old one.");
-
 namespace {
 
 bool JSMinifyMain(int argc, char** argv) {
@@ -61,10 +56,8 @@ bool JSMinifyMain(int argc, char** argv) {
   if (argc >= 4) {
     handler.Message(kError,
                     "Usage: \n"
-                    "  js_minify [--print_size_and_hash] "
-                    "[--nouse_experimental_minifier] foo.js\n"
-                    "  js_minify [--print_size_and_hash] "
-                    "[--nouse_experimental_minifier] < foo.js\n"
+                    "  js_minify [--print_size_and_hash] foo.js\n"
+                    "  js_minify [--print_size_and_hash] < foo.js\n"
                     "Without --print_size_and_hash prints minified foo.js\n"
                     "With --print_size_and_hash instead prints minified "
                     "size and content hash suitable for ModPagespeedLibrary\n");
@@ -82,15 +75,9 @@ bool JSMinifyMain(int argc, char** argv) {
   if (!file_system.ReadFile(input, &original, &handler)) {
     return false;
   }
-  // Decide which minifier we are using.
   GoogleString stripped;
-  bool result;
-  if (FLAGS_use_experimental_minifier) {
-    pagespeed::js::JsTokenizerPatterns patterns;
-    result = pagespeed::js::MinifyUtf8Js(&patterns, original, &stripped);
-  } else {
-    result = pagespeed::js::MinifyJs(original, &stripped);
-  }
+  pagespeed::js::JsTokenizerPatterns patterns;
+  bool result = pagespeed::js::MinifyUtf8Js(&patterns, original, &stripped);
   if (!result) {
     handler.Message(kError,
                     "%s: Couldn't minify; "

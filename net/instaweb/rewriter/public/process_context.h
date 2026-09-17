@@ -20,8 +20,9 @@
 #ifndef NET_INSTAWEB_REWRITER_PUBLIC_PROCESS_CONTEXT_H_
 #define NET_INSTAWEB_REWRITER_PUBLIC_PROCESS_CONTEXT_H_
 
+#include <memory>
+
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 
 namespace pagespeed {
 namespace js {
@@ -59,7 +60,8 @@ class ProcessContext {
  private:
   std::unique_ptr<pagespeed::js::JsTokenizerPatterns> js_tokenizer_patterns_;
 
-  DISALLOW_COPY_AND_ASSIGN(ProcessContext);
+  ProcessContext(const ProcessContext&) = delete;
+  ProcessContext& operator=(const ProcessContext&) = delete;
 };
 
 }  // namespace net_instaweb

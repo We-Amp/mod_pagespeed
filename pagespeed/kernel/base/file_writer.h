@@ -40,7 +40,8 @@ class FileWriter : public Writer {
  private:
   FileSystem::OutputFile* file_;
 
-  DISALLOW_COPY_AND_ASSIGN(FileWriter);
+  FileWriter(const FileWriter&) = delete;
+  FileWriter& operator=(const FileWriter&) = delete;
 };
 
 }  // namespace net_instaweb

@@ -812,6 +812,10 @@ TEST_F(ResponsiveImageFilterTest, Lazyload) {
   options()->EnableFilter(RewriteOptions::kLazyloadImages);
   // Disable beaconing so that the image is automatically lazyloaded.
   options()->set_critical_images_beacon_enabled(false);
+  // Without critical-image data, lazyload skips the first
+  // LazyloadImagesSkipFirst images (LCP protection); disable that here so
+  // the single image in this test is lazyloaded.
+  options()->set_lazyload_images_skip_first(0);
   // Set User-Agent so that Lazyload will work.
   SetCurrentUserAgent(UserAgentMatcherTestBase::kChrome18UserAgent);
   SetHtmlMimetype();  // Prevent insertion of CDATA tags to static JS.
@@ -831,6 +835,44 @@ TEST_F(ResponsiveImageFilterTest, Lazyload) {
       "onerror=\"this.onerror=null;pagespeed.lazyLoadImages."
       "loadIfVisibleAndMaybeBeacon(this);\">");
   ValidateExpected("lazyload", input_html, output_html);
+}
+
+// Regression test for a double->int narrowing overflow in AddHiResVersion().
+// Author width/height are parsed as int and can be close to INT_MAX; scaling
+// them by a display density (e.g. 1.5x/2x/3x) produces a double that exceeds
+// INT_MAX. Narrowing such an out-of-range double to int is undefined behavior
+// and previously emitted a garbage/negative width/height on the virtual
+// candidate, which then drove the resize target. The dimension must be clamped
+// to a sane, non-negative value (kint32max) instead.
+//
+// Observation limitation: a true INT_MAX-scale image cannot be exercised
+// end-to-end here -- such author dimensions vastly exceed the mock image's
+// native size (1023x766), so ImageRewriteFilter would never upscale and the
+// clamped dimension would not surface in a rewritten srcset. We instead point
+// the <img> at an unauthorized domain (never fetched/resized), so the virtual
+// candidates keep the exact width/height the filter emitted, and read them
+// back from the debug placeholder comments that echo those attributes verbatim.
+TEST_F(ResponsiveImageFilterTest, LargeDimensionsNoNarrowingOverflow) {
+  options()->EnableFilter(RewriteOptions::kResponsiveImages);
+  options()->EnableFilter(RewriteOptions::kResizeImages);
+  rewrite_driver()->AddFilters();
+  EnableDebug();
+
+  // 2000000000 fits in int (< kint32max == 2147483647), but multiplying it by
+  // the default densities {1.5, 2, 3} all exceed kint32max.
+  Parse("large_dims",
+        "<img src=http://other-domain.com/a.jpg "
+        "width=2000000000 height=2000000000>");
+
+  // Fixed behavior: scaled dimensions are clamped to kint32max.
+  EXPECT_THAT(output_buffer_, ::testing::HasSubstr("width=2147483647"));
+  EXPECT_THAT(output_buffer_, ::testing::HasSubstr("height=2147483647"));
+  // Pre-fix the UB narrowing emitted INT_MIN (-2147483648) on common targets.
+  // Key on that magnitude: it appears only in the broken negative value, never
+  // in the clamped kint32max (2147483647). (A looser "=-" match would spuriously
+  // hit the "height=-->" of the full-sized candidate, whose dims are empty.)
+  EXPECT_THAT(output_buffer_,
+              ::testing::Not(::testing::HasSubstr("2147483648")));
 }
 
 }  // namespace

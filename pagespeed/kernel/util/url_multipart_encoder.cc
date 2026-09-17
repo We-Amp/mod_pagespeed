@@ -52,6 +52,21 @@ void UrlMultipartEncoder::Encode(const StringVector& urls,
   // URLs and concatenate them together with + signs, escaping
   // any + signs that appear in the URLs themselves.  Since the
   // escape for this encoder is '=' we must escape that too.
+
+  // Pre-allocate buffer capacity: sum of URL lengths + separators + 10%
+  // overhead for escape sequences (characters like '=' and '+' get doubled).
+  size_t estimated_size = 0;
+  for (const GoogleString& url : urls) {
+    estimated_size += url.size();
+  }
+  // Add space for separators between URLs.
+  if (!urls.empty()) {
+    estimated_size += urls.size() - 1;
+  }
+  // Add 10% overhead for escape sequences.
+  estimated_size += estimated_size / 10;
+  buf.reserve(estimated_size);
+
   for (int i = 0, n = urls.size(); i < n; ++i) {
     if (i != 0) {
       buf += kSeparator;

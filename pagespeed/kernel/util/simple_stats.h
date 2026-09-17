@@ -20,9 +20,10 @@
 #ifndef PAGESPEED_KERNEL_UTIL_SIMPLE_STATS_H_
 #define PAGESPEED_KERNEL_UTIL_SIMPLE_STATS_H_
 
+#include <memory>
+
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/statistics_template.h"
 #include "pagespeed/kernel/base/string.h"
@@ -49,7 +50,8 @@ class SimpleStatsVariable : public MutexedScalar {
  private:
   int64 value_;
   std::unique_ptr<AbstractMutex> mutex_;
-  DISALLOW_COPY_AND_ASSIGN(SimpleStatsVariable);
+  SimpleStatsVariable(const SimpleStatsVariable&) = delete;
+  SimpleStatsVariable& operator=(const SimpleStatsVariable&) = delete;
 };
 
 // Simple name/value pair statistics implementation.
@@ -70,7 +72,8 @@ class SimpleStats : public ScalarStatisticsTemplate<SimpleStatsVariable> {
  private:
   ThreadSystem* thread_system_;  // Not owned by this class.
 
-  DISALLOW_COPY_AND_ASSIGN(SimpleStats);
+  SimpleStats(const SimpleStats&) = delete;
+  SimpleStats& operator=(const SimpleStats&) = delete;
 };
 
 }  // namespace net_instaweb

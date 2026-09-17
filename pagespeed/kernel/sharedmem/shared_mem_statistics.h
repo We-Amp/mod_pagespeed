@@ -21,11 +21,11 @@
 #define PAGESPEED_KERNEL_SHAREDMEM_SHARED_MEM_STATISTICS_H_
 
 #include <cstddef>
+#include <memory>
 
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/abstract_shared_mem.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/statistics_template.h"
 #include "pagespeed/kernel/base/string.h"
@@ -89,7 +89,8 @@ class SharedMemVariable : public MutexedScalar {
   // The data...
   volatile int64* value_ptr_;
 
-  DISALLOW_COPY_AND_ASSIGN(SharedMemVariable);
+  SharedMemVariable(const SharedMemVariable&) = delete;
+  SharedMemVariable& operator=(const SharedMemVariable&) = delete;
 };
 
 class SharedMemHistogram : public Histogram {
@@ -177,7 +178,8 @@ class SharedMemHistogram : public Histogram {
   // Number of buckets in this histogram.
   int num_buckets_;
   HistogramBody* buffer_;  // may be NULL if init failed.
-  DISALLOW_COPY_AND_ASSIGN(SharedMemHistogram);
+  SharedMemHistogram(const SharedMemHistogram&) = delete;
+  SharedMemHistogram& operator=(const SharedMemHistogram&) = delete;
 };
 
 class SharedMemStatistics
@@ -238,7 +240,8 @@ class SharedMemStatistics
   // TODO(sligocki): Rename.
   std::unique_ptr<StatisticsLogger> console_logger_;
 
-  DISALLOW_COPY_AND_ASSIGN(SharedMemStatistics);
+  SharedMemStatistics(const SharedMemStatistics&) = delete;
+  SharedMemStatistics& operator=(const SharedMemStatistics&) = delete;
 };
 
 }  // namespace net_instaweb

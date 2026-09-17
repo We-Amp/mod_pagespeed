@@ -26,8 +26,9 @@
 #ifndef PAGESPEED_OPT_HTTP_FALLBACK_PROPERTY_PAGE_H_
 #define PAGESPEED_OPT_HTTP_FALLBACK_PROPERTY_PAGE_H_
 
+#include <memory>
+
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/cache/cache_interface.h"
@@ -91,7 +92,8 @@ class FallbackPropertyPage : public AbstractPropertyPage {
  private:
   std::unique_ptr<PropertyPage> actual_property_page_;
   std::unique_ptr<PropertyPage> property_page_with_fallback_values_;
-  DISALLOW_COPY_AND_ASSIGN(FallbackPropertyPage);
+  FallbackPropertyPage(const FallbackPropertyPage&) = delete;
+  FallbackPropertyPage& operator=(const FallbackPropertyPage&) = delete;
 };
 
 }  // namespace net_instaweb

@@ -1,0 +1,34 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+
+/**
+ * Main JavaScript file for PageSpeed IIS test site.
+ */
+
+(function() {
+    'use strict';
+
+    /**
+     * Initialize the page.
+     */
+    function init() {
+        console.log('PageSpeed IIS Test Site initialized');
+        addEventListeners();
+    }
+
+    /**
+     * Add event listeners.
+     */
+    function addEventListeners() {
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('DOM fully loaded');
+        });
+    }
+
+    // Initialize on load
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
+    }
+})();

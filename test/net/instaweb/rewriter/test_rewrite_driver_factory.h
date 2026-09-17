@@ -21,11 +21,11 @@
 #define NET_INSTAWEB_REWRITER_PUBLIC_TEST_REWRITE_DRIVER_FACTORY_H_
 
 #include <vector>
+#include <memory>
 
 #include "net/instaweb/rewriter/public/rewrite_driver_factory.h"
 #include "net/instaweb/util/public/property_cache.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -84,7 +84,8 @@ class TestRewriteDriverFactory : public RewriteDriverFactory {
     virtual HtmlFilter* Done(RewriteDriver* driver) = 0;
 
    private:
-    DISALLOW_COPY_AND_ASSIGN(CreateFilterCallback);
+    CreateFilterCallback(const CreateFilterCallback&) = delete;
+    CreateFilterCallback& operator=(const CreateFilterCallback&) = delete;
   };
 
   class CreateRewriterCallback {
@@ -94,7 +95,8 @@ class TestRewriteDriverFactory : public RewriteDriverFactory {
     virtual RewriteFilter* Done(RewriteDriver* driver) = 0;
 
    private:
-    DISALLOW_COPY_AND_ASSIGN(CreateRewriterCallback);
+    CreateRewriterCallback(const CreateRewriterCallback&) = delete;
+    CreateRewriterCallback& operator=(const CreateRewriterCallback&) = delete;
   };
 
   class PlatformSpecificConfigurationCallback {
@@ -104,7 +106,8 @@ class TestRewriteDriverFactory : public RewriteDriverFactory {
     virtual void Done(RewriteDriver* driver) = 0;
 
    private:
-    DISALLOW_COPY_AND_ASSIGN(PlatformSpecificConfigurationCallback);
+    PlatformSpecificConfigurationCallback(const PlatformSpecificConfigurationCallback&) = delete;
+    PlatformSpecificConfigurationCallback& operator=(const PlatformSpecificConfigurationCallback&) = delete;
   };
 
   TestRewriteDriverFactory(const ProcessContext& process_context,

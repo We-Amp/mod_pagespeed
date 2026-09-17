@@ -209,6 +209,24 @@ TEST_F(ScanFilterTest, CspParse) {
       GoogleUrl("http://www.example.org/foo.png"), CspDirective::kImgSrc));
 }
 
+TEST_F(ScanFilterTest, CspParseCommaCoalesced) {
+  // Two policies coalesced into one header value must be enforced as
+  // two separate policies, not corrupted into one.
+  ResponseHeaders headers;
+  headers.Add("Content-Security-Policy",
+              "img-src https:, script-src 'none'");
+  rewrite_driver()->set_response_headers_ptr(&headers);
+  ValidateNoChanges("csp_comma", "<head></head>");
+  EXPECT_EQ(2, rewrite_driver()->content_security_policy().policies_size());
+  EXPECT_TRUE(rewrite_driver()->IsLoadPermittedByCsp(
+      GoogleUrl("https://www.example.com/foo.png"), CspDirective::kImgSrc));
+  EXPECT_FALSE(rewrite_driver()->IsLoadPermittedByCsp(
+      GoogleUrl("http://www.example.com/foo.png"), CspDirective::kImgSrc));
+  EXPECT_FALSE(rewrite_driver()->IsLoadPermittedByCsp(
+      GoogleUrl("https://www.example.com/foo.js"),
+      CspDirective::kScriptSrc));
+}
+
 TEST_F(ScanFilterTest, CspParseOff) {
   options()->set_honor_csp(false);
 
@@ -253,6 +271,74 @@ TEST_F(ScanFilterTest, CspBase2) {
   static const char kCsp[] =
       "<meta http-equiv=\"Content-Security-Policy\" "
       "content=\"base-uri www.example.com\">";
+  ValidateExpected(
+      kTestName,
+      StrCat("<head>", kCsp, "<base href=\"", kNewBase,
+             "\">"
+             "</head>"),
+      StrCat("<head>", kCsp, "<base href=\"", kNewBase,
+             "\">"
+             "<!--Unable to check safety of a base with CSP base-uri, "
+             "proceeding conservatively.-->"
+             "</head>"));
+  EXPECT_TRUE(rewrite_driver()->other_base_problem());
+}
+
+// base-uri 'none' provably makes the browser ignore every <base>, so the tag
+// is inert: rewriting proceeds (no base problem) and the base is not honored.
+TEST_F(ScanFilterTest, CspBaseNeutralizedByNone) {
+  rewrite_driver()->AddFilters();
+  EnableDebug();
+  static const char kTestName[] = "set_base";
+  static const char kNewBase[] = "http://example.com/index.html";
+  static const char kCsp[] =
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"base-uri 'none'\">";
+  ValidateExpected(
+      kTestName,
+      StrCat("<head>", kCsp, "<base href=\"", kNewBase,
+             "\">"
+             "</head>"),
+      StrCat("<head>", kCsp, "<base href=\"", kNewBase,
+             "\">"
+             "<!--CSP base-uri neutralizes this base (the browser ignores it), "
+             "so it is treated as inert and rewriting proceeds.-->"
+             "</head>"));
+  EXPECT_FALSE(rewrite_driver()->other_base_problem());
+}
+
+// An empty base-uri source list is equivalent to 'none' and likewise inert.
+TEST_F(ScanFilterTest, CspBaseNeutralizedByEmptyList) {
+  rewrite_driver()->AddFilters();
+  EnableDebug();
+  static const char kTestName[] = "set_base";
+  static const char kNewBase[] = "http://example.com/index.html";
+  static const char kCsp[] =
+      "<meta http-equiv=\"Content-Security-Policy\" content=\"base-uri\">";
+  ValidateExpected(
+      kTestName,
+      StrCat("<head>", kCsp, "<base href=\"", kNewBase,
+             "\">"
+             "</head>"),
+      StrCat("<head>", kCsp, "<base href=\"", kNewBase,
+             "\">"
+             "<!--CSP base-uri neutralizes this base (the browser ignores it), "
+             "so it is treated as inert and rewriting proceeds.-->"
+             "</head>"));
+  EXPECT_FALSE(rewrite_driver()->other_base_problem());
+}
+
+// Adversarial: base-uri 'self' still permits a same-origin <base> that can
+// change the path (and thus relative-URL resolution), so we must NOT relax ---
+// the conservative bail is preserved.
+TEST_F(ScanFilterTest, CspBaseSelfStillBails) {
+  rewrite_driver()->AddFilters();
+  EnableDebug();
+  static const char kTestName[] = "set_base";
+  static const char kNewBase[] = "http://example.com/index.html";
+  static const char kCsp[] =
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"base-uri 'self'\">";
   ValidateExpected(
       kTestName,
       StrCat("<head>", kCsp, "<base href=\"", kNewBase,

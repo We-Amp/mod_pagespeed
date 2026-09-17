@@ -19,21 +19,29 @@
 
 #pragma once
 
+#include <memory>
 #include <set>
 
 #include "pagespeed/envoy/envoy_rewrite_driver_factory.h"
 #include "pagespeed/kernel/base/md5_hasher.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
+#include "pagespeed/system/circuit_breaker.h"
 #include "pagespeed/system/system_rewrite_driver_factory.h"
+
+namespace Envoy {
+namespace Event {
+class Dispatcher;
+}  // namespace Event
+}  // namespace Envoy
 
 namespace net_instaweb {
 
+class EnvoyDispatcherAdapter;
 class EnvoyMessageHandler;
 class EnvoyRewriteOptions;
 class EnvoyServerContext;
+class EventScheduler;
 class SharedCircularBuffer;
 class SharedMemRefererStatistics;
-class SlowWorker;
 class Statistics;
 class SystemThreadSystem;
 
@@ -57,6 +65,12 @@ class EnvoyRewriteDriverFactory : public SystemRewriteDriverFactory {
   RewriteOptions* NewRewriteOptionsForQuery() override;
   ServerContext* NewDecodingServerContext() override;
 
+  // Returns an EventScheduler so that, once StartThreads() attaches the
+  // Envoy dispatcher, alarms are driven by the event loop rather than
+  // firing only opportunistically. Called lazily (possibly before
+  // SetEnvoyDispatcher()), hence the attach-later pattern.
+  Scheduler* CreateScheduler() override;
+
   // Initializes all the statistics objects created transitively by
   // EnvoyRewriteDriverFactory, including envoy-specific and
   // platform-independent statistics.
@@ -65,19 +79,39 @@ class EnvoyRewriteDriverFactory : public SystemRewriteDriverFactory {
   ServerContext* NewServerContext() override;
   void ShutDown() override;
 
-  // Starts pagespeed threads if they've not been started already.  Must be
-  // called after the caller has finished any forking it intends to do.
+  // Starts pagespeed threads if they've not been started already.
+  // IMPORTANT: This must be called explicitly after construction.
+  // Call SetEnvoyDispatcher() before this to use Envoy's native event loop.
+  // If an Envoy dispatcher has been set via SetEnvoyDispatcher(), uses
+  // EventScheduler with that dispatcher. Otherwise, falls back to
+  // the traditional SchedulerThread approach.
   void StartThreads();
+
+  // Sets the Envoy dispatcher to use for scheduling. Must be called before
+  // StartThreads(). When set, PageSpeed will use Envoy's native event loop
+  // for timer operations instead of running a separate SchedulerThread.
+  void SetEnvoyDispatcher(Envoy::Event::Dispatcher* dispatcher);
 
   EnvoyMessageHandler* envoy_message_handler() {
     return envoy_message_handler_;
   }
+
+  // Returns the start time in milliseconds since epoch.
+  int64 start_time_ms() const { return start_time_ms_; }
 
   void NonStaticInitStats(Statistics* statistics) override {
     InitStats(statistics);
   }
 
   void SetMainConf(EnvoyRewriteOptions* main_conf);
+
+  // Configure circuit breaker for resource fetching.
+  // Must be called before StartThreads().
+  void SetCircuitBreakerConfig(bool enabled, int failure_threshold,
+                               int success_threshold, int64 timeout_ms);
+
+  // Returns the current circuit breaker (may be nullptr if disabled).
+  CircuitBreaker* circuit_breaker() { return circuit_breaker_.get(); }
 
   void LoggingInit(bool may_install_crash_handler);
 
@@ -87,23 +121,36 @@ class EnvoyRewriteDriverFactory : public SystemRewriteDriverFactory {
 
   void SetCircularBuffer(SharedCircularBuffer* buffer) override;
 
-  void PrepareForkedProcess(const char* name) override;
-
-  void NameProcess(const char* name) override;
-
  private:
   // Timer *timer_;
 
   bool threads_started_;
   EnvoyMessageHandler* envoy_message_handler_;
   EnvoyMessageHandler* envoy_html_parse_message_handler_;
-  typedef std::set<EnvoyMessageHandler*> EnvoyMessageHandlerSet;
+  using EnvoyMessageHandlerSet = std::set<EnvoyMessageHandler*>;
   EnvoyMessageHandlerSet server_context_message_handlers_;
   SharedCircularBuffer* envoy_shared_circular_buffer_;
   GoogleString hostname_;
   int port_;
   bool shut_down_;
-  DISALLOW_COPY_AND_ASSIGN(EnvoyRewriteDriverFactory);
+
+  // Envoy dispatcher integration. When envoy_dispatcher_ is set,
+  // StartThreads() attaches the EnvoyDispatcherAdapter to the EventScheduler
+  // (created by CreateScheduler and owned by the base factory) so the Envoy
+  // event loop drives scheduler alarms instead of a SchedulerThread.
+  Envoy::Event::Dispatcher* envoy_dispatcher_;
+  std::unique_ptr<EnvoyDispatcherAdapter> event_dispatcher_;
+  EventScheduler* event_scheduler_;  // Owned by RewriteDriverFactory.
+
+  // Time when the factory was created, for uptime calculation.
+  int64 start_time_ms_;
+
+  // Circuit breaker for resource fetching reliability.
+  std::unique_ptr<CircuitBreaker> circuit_breaker_;
+
+  EnvoyRewriteDriverFactory(const EnvoyRewriteDriverFactory&) = delete;
+  EnvoyRewriteDriverFactory& operator=(const EnvoyRewriteDriverFactory&) =
+      delete;
 };
 
 }  // namespace net_instaweb

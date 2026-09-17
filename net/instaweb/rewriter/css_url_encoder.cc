@@ -68,7 +68,9 @@ bool CssUrlEncoder::Decode(const StringPiece& encoded, StringVector* urls,
       data->set_libwebp_level(ResourceContext::LIBWEBP_NONE);
       data->set_inline_images(true);
       break;
-    case 'A':
+    case 'A':  // NOLINT(bugprone-branch-clone)
+      break;
+    default:
       break;
   }
 

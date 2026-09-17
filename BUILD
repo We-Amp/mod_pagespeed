@@ -1,7 +1,8 @@
 load("@rules_cc//cc:defs.bzl", "cc_binary")
-load("@envoy//bazel:envoy_build_system.bzl", "envoy_cc_binary")
 
 licenses(["notice"])  # Apache 2
+
+exports_files(["GIT_COMMIT"])
 
 cc_binary(
     name = "mod_pagespeed",
@@ -13,18 +14,17 @@ cc_binary(
 
 cc_binary(
     name = "libmod_pagespeed.so",
+    linkopts = [
+        # Version script hides all symbols except pagespeed_module (the Apache
+        # module entry point). This prevents BoringSSL symbols linked into
+        # mod_pagespeed from conflicting with system OpenSSL in mod_ssl.
+        "-Wl,--version-script,$(location //pagespeed/apache:mod_pagespeed.lds)",
+    ],
     linkshared = 1,
-    linkstatic = 0,
+    linkstatic = 1,
     visibility = ["//visibility:public"],
-    deps = ["//pagespeed/apache"],
-)
-
-envoy_cc_binary(
-    name = "envoy",
-    repository = "@envoy",
     deps = [
-        "//pagespeed/envoy:envoy_fetcher",
-        "//pagespeed/envoy:http_filter_config",
-        "@envoy//source/exe:envoy_main_entry_lib",
+        "//pagespeed/apache",
+        "//pagespeed/apache:mod_pagespeed.lds",
     ],
 )

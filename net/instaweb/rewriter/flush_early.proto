@@ -25,7 +25,9 @@ package net_instaweb;
 // NextId: 13
 message FlushEarlyInfo {
   reserved 1, 2, 3, 4;
-  // Domains for which DNS prefetch tags will be inserted in <head>.
+  // Domains for which DNS prefetch tags will be inserted in <head>, stored as
+  // scheme-qualified origins (scheme://host[:port]). Entries written by older
+  // revisions hold a bare host and are emitted scheme-relative.
   repeated string dns_prefetch_domains = 5;
 
   // Total number of domains in the page for which DNS prefetch tags could be

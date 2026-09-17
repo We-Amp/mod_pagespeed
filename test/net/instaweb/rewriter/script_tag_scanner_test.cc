@@ -83,7 +83,8 @@ class ScriptTagScannerTest : public HtmlParseTestBase {
     std::vector<ScriptInfo> scripts_;
     ScriptTagScanner script_tag_scanner_;
 
-    DISALLOW_COPY_AND_ASSIGN(ScriptCollector);
+    ScriptCollector(const ScriptCollector&) = delete;
+    ScriptCollector& operator=(const ScriptCollector&) = delete;
   };
 
   struct TestSpec {
@@ -121,7 +122,8 @@ class ScriptTagScannerTest : public HtmlParseTestBase {
   ScriptCollector collector_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(ScriptTagScannerTest);
+  ScriptTagScannerTest(const ScriptTagScannerTest&) = delete;
+  ScriptTagScannerTest& operator=(const ScriptTagScannerTest&) = delete;
 };
 
 // Note: kNonScript is covered by the length counts,
@@ -289,6 +291,68 @@ TEST_F(ScriptTagScannerTest, TypeScriptsNormalize) {
   }
 }
 
+TEST_F(ScriptTagScannerTest, TypeModule) {
+  ValidateNoChanges("module scripts",
+                    "<script type=\"module\"></script>"
+                    "<script type=\"module\" src=\"a.js\"></script>");
+  ASSERT_EQ(2, collector_.Size());
+  EXPECT_EQ(GoogleString(), collector_.UrlAt(0));
+  EXPECT_EQ(ScriptTagScanner::kJavaScriptModule,
+            collector_.ClassificationAt(0));
+  EXPECT_EQ(GoogleString("a.js"), collector_.UrlAt(1));
+  EXPECT_EQ(ScriptTagScanner::kJavaScriptModule,
+            collector_.ClassificationAt(1));
+}
+
+TEST_F(ScriptTagScannerTest, TypeModuleNormalize) {
+  // The "module" script type is matched after removal of leading/trailing
+  // whitespace and case folding, like the mimetypes above.
+  ValidateNoChanges("module normalize", ScriptWithType(" module ") +
+                                            ScriptWithType("MODULE") +
+                                            ScriptWithType("\tModule "));
+  ASSERT_EQ(3, collector_.Size());
+  for (int i = 0; i <= 2; ++i) {
+    EXPECT_EQ(GoogleString(), collector_.UrlAt(i));
+    EXPECT_EQ(ScriptTagScanner::kJavaScriptModule,
+              collector_.ClassificationAt(i));
+  }
+}
+
+TEST_F(ScriptTagScannerTest, TypeModuleLookalikesUnknown) {
+  // Only the exact (normalized) "module" token is a module; other script
+  // types such as importmap and speculationrules stay unknown.
+  ValidateNoChanges("module lookalikes",
+                    ScriptWithType("modulex") + ScriptWithType("module/x") +
+                        ScriptWithType("text/module") +
+                        ScriptWithType("importmap") +
+                        ScriptWithType("speculationrules"));
+  ASSERT_EQ(5, collector_.Size());
+  for (int i = 0; i <= 4; ++i) {
+    EXPECT_EQ(GoogleString(), collector_.UrlAt(i));
+    EXPECT_EQ(ScriptTagScanner::kUnknownScript, collector_.ClassificationAt(i));
+  }
+}
+
+TEST_F(ScriptTagScannerTest, LanguageModuleIsUnknown) {
+  // The language attribute cannot declare a module; it probes the mimetype
+  // list with "text/module", which is not JS.
+  ValidateNoChanges("language module", ScriptWithLang("module"));
+  ASSERT_EQ(1, collector_.Size());
+  EXPECT_EQ(GoogleString(), collector_.UrlAt(0));
+  EXPECT_EQ(ScriptTagScanner::kUnknownScript, collector_.ClassificationAt(0));
+}
+
+TEST_F(ScriptTagScannerTest, ModuleExecutionMode) {
+  // ExecutionMode reports attribute presence only: a module's implicit
+  // deferral is not a flag, while async is meaningful on modules.
+  TestSpec module_tests[] = {
+      {"type=module async src=a", ScriptTagScanner::kExecuteAsync},
+      {"type=module src=a", ScriptTagScanner::kExecuteSync},
+      {"type=module", ScriptTagScanner::kExecuteSync},
+      {nullptr, ScriptTagScanner::kExecuteSync}};
+  TestFlags(module_tests);
+}
+
 TEST_F(ScriptTagScannerTest, LangScripts) {
   // for language attribute, we are supposed to test text/lang
   // against the valid mimetypes list
@@ -367,12 +431,40 @@ TEST_F(ScriptTagScannerTest, LangScriptsNormalizeWhitespace) {
   }
 }
 
+TEST_F(ScriptTagScannerTest, IsKnownNonJsScriptType) {
+  // The known data-block script types are recognized after Normalized()
+  // folding (leading/trailing whitespace trimmed, ASCII-lowercased).
+  EXPECT_TRUE(ScriptTagScanner::IsKnownNonJsScriptType("application/ld+json"));
+  EXPECT_TRUE(ScriptTagScanner::IsKnownNonJsScriptType("application/json"));
+  EXPECT_TRUE(ScriptTagScanner::IsKnownNonJsScriptType("importmap"));
+  EXPECT_TRUE(ScriptTagScanner::IsKnownNonJsScriptType("speculationrules"));
+  EXPECT_TRUE(ScriptTagScanner::IsKnownNonJsScriptType("text/template"));
+  EXPECT_TRUE(
+      ScriptTagScanner::IsKnownNonJsScriptType("  Application/LD+JSON\t"));
+  EXPECT_TRUE(ScriptTagScanner::IsKnownNonJsScriptType("IMPORTMAP"));
+
+  // Everything else -- JS mimetypes, module, genuinely unknown types, empty
+  // and null -- is not a known data-block type.
+  EXPECT_FALSE(ScriptTagScanner::IsKnownNonJsScriptType("text/javascript"));
+  EXPECT_FALSE(ScriptTagScanner::IsKnownNonJsScriptType("module"));
+  EXPECT_FALSE(ScriptTagScanner::IsKnownNonJsScriptType("text/x-nope"));
+  EXPECT_FALSE(ScriptTagScanner::IsKnownNonJsScriptType("json"));
+  EXPECT_FALSE(ScriptTagScanner::IsKnownNonJsScriptType("text/json"));
+  EXPECT_FALSE(ScriptTagScanner::IsKnownNonJsScriptType(""));
+  EXPECT_FALSE(ScriptTagScanner::IsKnownNonJsScriptType(StringPiece()));
+}
+
 TEST_F(ScriptTagScannerTest, ForEvent) {
   TestSpec for_event_tests[] = {
       {"for event", ScriptTagScanner::kExecuteForEvent},
       {"for=\"\" event=\"\"", ScriptTagScanner::kExecuteForEvent},
-      {"for", ScriptTagScanner::kExecuteSync},
-      {"event", ScriptTagScanner::kExecuteSync},
+      // Only one of for/event present: HTML5's 'prepare a script' says the
+      // script must not execute at all, no matter the value, so the
+      // conservative kExecuteForEvent applies here as well.
+      {"for", ScriptTagScanner::kExecuteForEvent},
+      {"event", ScriptTagScanner::kExecuteForEvent},
+      {"for=\"window\"", ScriptTagScanner::kExecuteForEvent},
+      {"event=\"onload\"", ScriptTagScanner::kExecuteForEvent},
       {"for=\"a\" event=\"b\"", ScriptTagScanner::kExecuteForEvent},
       {"for=\"window\" event=\"b\"", ScriptTagScanner::kExecuteForEvent},
       {"for=\"window\" event=\"b\" async",

@@ -61,7 +61,8 @@ class JsDeferDisabledFilter : public CommonFilter {
 
   void InsertJsDeferCode();
 
-  DISALLOW_COPY_AND_ASSIGN(JsDeferDisabledFilter);
+  JsDeferDisabledFilter(const JsDeferDisabledFilter&) = delete;
+  JsDeferDisabledFilter& operator=(const JsDeferDisabledFilter&) = delete;
 };
 
 }  // namespace net_instaweb

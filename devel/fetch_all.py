@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
 #
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -30,11 +30,11 @@ followed by a dash.
 __author__ = "morlovich@google.com (Maksim Orlovich)"
 
 import getopt
-import httplib
+import http.client as httplib
 import socket
 import sys
 import time
-import urlparse
+from urllib.parse import urljoin
 
 
 def OpenProxy(config):
@@ -72,10 +72,10 @@ class Configuration(object):
                               ["ssl", "js=", "proxy_host=", "proxy_port=",
                                "urls_file=", "user_agent="])
     except getopt.GetoptError as err:
-      print str(err)
-      print ("Usage: devel/fetch_all.py [--ssl] [--js test_cat] "
-             "[--proxy_host host] [--proxy_port port] [--urls_file file] "
-             "[--user_agent user_agent]")
+      print(str(err))
+      print("Usage: devel/fetch_all.py [--ssl] [--js test_cat] "
+            "[--proxy_host host] [--proxy_port port] [--urls_file file] "
+            "[--user_agent user_agent]")
       sys.exit(2)
 
     self.ssl_mode = False
@@ -106,7 +106,7 @@ def main():
   proxy = OpenProxy(conf)
 
   if conf.js_mode:
-    print "{"
+    print("{")
 
   f = open(conf.urls_file, "rt")
   for url in f:
@@ -138,28 +138,27 @@ def main():
           proxy = ReopenProxy(conf, proxy)
 
         # Report.
-        print FormatResult(conf, str((stop - start)*1000),
-                           str(status), url)
+        print(FormatResult(conf, str((stop - start)*1000),
+                           str(status), url))
 
         # Handle redirections
         if 301 <= status <= 303 or status == 307:
-          url = urlparse.urljoin(url,
-                                 response.getheader("Location", default=""))
+          url = urljoin(url, response.getheader("Location", default=""))
           followed += 1
         else:
           break
     except httplib.BadStatusLine:
-      print FormatResult(conf, "0", "BadStatusLine", url)
+      print(FormatResult(conf, "0", "BadStatusLine", url))
       proxy = ReopenProxy(conf, proxy)
     except httplib.IncompleteRead:
-      print FormatResult(conf, "0", "IncompleteRead", url)
+      print(FormatResult(conf, "0", "IncompleteRead", url))
       proxy = ReopenProxy(conf, proxy)
     except socket.error:
-      print FormatResult(conf, "0", "SocketError", url)
+      print(FormatResult(conf, "0", "SocketError", url))
       proxy = ReopenProxy(conf, proxy)
 
   if conf.js_mode:
-    print "}"
+    print("}")
 
   f.close()
 

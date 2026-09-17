@@ -26,6 +26,7 @@
 #include "pagespeed/kernel/base/string_util.h"
 #include "test/net/instaweb/rewriter/rewrite_test_base.h"
 #include "test/pagespeed/kernel/base/gtest.h"
+#include "test/pagespeed/kernel/http/user_agent_matcher_test_base.h"
 
 namespace net_instaweb {
 
@@ -33,6 +34,11 @@ class DeferIframeFilterTest : public RewriteTestBase {
  protected:
   void SetUp() override {
     RewriteTestBase::SetUp();
+    // RewriteTestBase sends an empty user agent, which BotChecker classifies as
+    // a bot, and DeviceProperties::SupportsJsDefer withholds the whole
+    // defer_javascript family from bots. Speak as a browser, exactly as
+    // LazyloadImagesFilterTest::SetUp does for the same reason.
+    SetCurrentUserAgent(UserAgentMatcherTestBase::kChrome18UserAgent);
     SetHtmlMimetype();  // Prevent insertion of CDATA tags to static JS.
     rewrite_driver_->AddOwnedPostRenderFilter(
         new DeferIframeFilter(rewrite_driver_));
@@ -61,6 +67,41 @@ TEST_F(DeferIframeFilterTest, TestDeferIframe) {
              defer_iframe_js_code, "pagespeed.deferIframeInit();</script>",
              GeneratePagespeedIframeTag("http://test.com/1.html"), "</body>");
   ValidateExpected("defer_iframe", input_html, output_html);
+}
+
+TEST_F(DeferIframeFilterTest, CspForbidsInlineScript) {
+  // Under a script-src policy without 'unsafe-inline' the browser would
+  // block the inline iframe-swap scripts, so the iframe must be left
+  // untouched.
+  GoogleString input_html =
+      "<head>"
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"script-src *;\">"
+      "</head>"
+      "<body>"
+      "<iframe src=\"http://test.com/1.html\"/>"
+      "</body>";
+  ValidateExpected("defer_iframe_csp_no_inline", input_html, input_html);
+}
+
+TEST_F(DeferIframeFilterTest, CspAllowsInlineScript) {
+  // With 'unsafe-inline' permitted the filter behaves as usual.
+  const char kCsp[] =
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"script-src * 'unsafe-inline';\">";
+  StringPiece defer_iframe_js_code =
+      server_context()->static_asset_manager()->GetAsset(
+          StaticAssetEnum::DEFER_IFRAME, options());
+  GoogleString input_html = StrCat("<head>", kCsp,
+                                   "</head>"
+                                   "<body>"
+                                   "<iframe src=\"http://test.com/1.html\"/>"
+                                   "</body>");
+  GoogleString output_html =
+      StrCat("<head>", kCsp, "</head><body><script type=\"text/javascript\">",
+             defer_iframe_js_code, "pagespeed.deferIframeInit();</script>",
+             GeneratePagespeedIframeTag("http://test.com/1.html"), "</body>");
+  ValidateExpected("defer_iframe_csp_unsafe_inline", input_html, output_html);
 }
 
 TEST_F(DeferIframeFilterTest, TestNoIframePresent) {

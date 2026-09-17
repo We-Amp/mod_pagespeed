@@ -313,15 +313,12 @@ bool OutputResource::CheckSignature() {
       CountCharacterMismatches(computed_signature, provided_signature) == 0;
   if (!valid) {
     MessageHandler* handler = server_context_->message_handler();
-    GoogleString message =
-        StrCat("Invalid resource signature for ", UrlEvenIfHashNotSet(),
-               " provided. Expected ", computed_signature, " Received ",
-               provided_signature);
     handler->Message(
         kInfo,
         "Invalid resource signature for %s provided. Expected %s Received %s",
         UrlEvenIfHashNotSet().c_str(), computed_signature.c_str(),
-        provided_signature.data());
+        provided_signature
+            .data());  // NOLINT(bugprone-suspicious-stringview-data-usage)
   }
   // If signing isn't enforced, return true always, but do this after checking
   // if the signature was correct for logging purposes.

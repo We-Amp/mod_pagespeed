@@ -48,7 +48,9 @@ class StripSubresourceHintsFilter : public EmptyHtmlFilter {
   bool remove_image_;
   bool remove_any_;
 
-  DISALLOW_COPY_AND_ASSIGN(StripSubresourceHintsFilter);
+  StripSubresourceHintsFilter(const StripSubresourceHintsFilter&) = delete;
+  StripSubresourceHintsFilter& operator=(const StripSubresourceHintsFilter&) =
+      delete;
 };
 
 }  // namespace net_instaweb

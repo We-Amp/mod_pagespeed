@@ -50,7 +50,7 @@ class JsInlineFilter : public CommonFilter {
   void EndDocument() override;
   void StartElementImpl(HtmlElement* element) override;
   void EndElementImpl(HtmlElement* element) override;
-  void Characters(HtmlCharactersNode* characters) override;
+  void CharactersImpl(HtmlCharactersNode* characters) override;
   const char* Name() const override { return "InlineJs"; }
   // Inlining javascript from unauthorized domains into HTML is considered
   // safe because it does not cause any new content to be executed compared
@@ -87,7 +87,8 @@ class JsInlineFilter : public CommonFilter {
 
   Variable* num_js_inlined_;
 
-  DISALLOW_COPY_AND_ASSIGN(JsInlineFilter);
+  JsInlineFilter(const JsInlineFilter&) = delete;
+  JsInlineFilter& operator=(const JsInlineFilter&) = delete;
 };
 
 }  // namespace net_instaweb

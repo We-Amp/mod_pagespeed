@@ -21,11 +21,11 @@
 #define PAGESPEED_KERNEL_HTTP_USER_AGENT_MATCHER_H_
 
 #include <map>
+#include <memory>
 #include <utility>
 
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/fast_wildcard_group.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/util/re2.h"
@@ -50,8 +50,13 @@ class UserAgentMatcher {
   static const char kTestUserAgentWebP[];  // webp user agent
   // Note that this must not contain the substring "webp".
   static const char kTestUserAgentNoWebP[];  // non-webp user agent
+  static const char kTestUserAgentAvif[];    // avif user agent
 
-  enum DeviceType {
+  // Fixed underlying type: holding an out-of-range value (e.g. the death
+  // test's DeviceType(-1)) is then defined behavior, so the defensive
+  // range check in ExperimentSpec::matches_device_type — not UB — is what
+  // fires.
+  enum DeviceType : int {
     kDesktop,
     kTablet,
     kMobile,
@@ -69,10 +74,17 @@ class UserAgentMatcher {
   // this only to force edge compatibility mode and to work around a persistent
   // IE Vary: caching bug.
   bool IsIe(const StringPiece& user_agent) const;
-  bool IsIe9(const StringPiece& user_agent) const;
 
   virtual bool SupportsImageInlining(const StringPiece& user_agent) const;
   bool SupportsLazyloadImages(StringPiece user_agent) const;
+
+  // Returns true if the user agent is known to support the native
+  // loading="lazy" attribute on <img> elements. This is a conservative
+  // allow-list: Chromium >= 77 (Chrome, Edge, Opera, all of which carry a
+  // Chrome/<version> token), Firefox >= 75, and Safari >= 15.4. Unknown user
+  // agents return false so that callers can fall back to the script-based
+  // lazyload implementation.
+  bool SupportsNativeLazyLoading(StringPiece user_agent) const;
 
   // Returns the DeviceType for the given user agent string.
   virtual DeviceType GetDeviceTypeForUA(const StringPiece& user_agent) const;
@@ -94,26 +106,39 @@ class UserAgentMatcher {
 
   // Returns true if the user agent includes a legacy browser that supports
   // webp, but does not issue Accept:image/webp.  At the moment, this means
-  // only Android 4.0+ (excluding Firefox).
+  // only Android 4.0+ (excluding Firefox).  This is the ONLY UA-derived WebP
+  // signal that remains: which WebP flavours a client can decode (lossy,
+  // lossless/alpha, animated) is read off the Accept: image/webp header in
+  // DeviceProperties, not from any browser-version list here.
   bool LegacyWebp(const StringPiece& user_agent) const;
 
-  // Returns true if the user agent includes a string indicating WebP lossy
-  // or WebP alpha support. If the browser does indeed support WebP, it also
-  // needs to send out an "accept: webp" header.
-  bool SupportsWebpLosslessAlpha(const StringPiece& user_agent) const;
+  // Returns true if the user agent decodes WebP but is known not to advertise
+  // "image/webp" in the Accept header of a navigation request -- Safari 16+
+  // and Firefox 132+.  This answers a strictly narrower question
+  // than LegacyWebp() above, which covers the old Android population.
+  //
+  // The verdict is a guess derived from a client-controlled string, so it may
+  // only ever shape responses whose representation is named by the URL itself
+  // -- rewritten .pagespeed. URLs.  It must never shape a response that a
+  // shared cache would file under a request-header key: the request's Accept
+  // header did not determine it, and a cache keyed on Accept would hand the
+  // result to clients that cannot decode it.  The in-place path, the one
+  // place that used to serve per-request bytes from the ORIGINAL URL, is
+  // request-independent since #640 and never consults request-derived WebP
+  // capability, so this confinement holds structurally; DeviceProperties
+  // additionally keeps SupportsWebpInPlace() strictly Accept-driven so the
+  // logged capability stays honest.
+  bool SupportsWebpButOmitsNavigationAccept(
+      const StringPiece& user_agent) const;
 
-  // Returns true if the user agent includes an animated WebP capable
-  // sub-string. If the browser does indeed support WebP, it also needs to send
-  // out an "accept: webp" header.
-  bool SupportsWebpAnimated(const StringPiece& user_agent) const;
+  // AVIF support. Like WebP above, AVIF capability is decided from the
+  // Accept: image/avif header in DeviceProperties; unlike WebP there is not
+  // even a legacy no-Accept UA population, so there is deliberately no
+  // allow/block list and no LegacyAvif() analogue. These UA-only
+  // queries therefore carry no signal and report false.
+  bool SupportsAvifLosslessAlpha(const StringPiece& user_agent) const;
+  bool SupportsAvifAnimated(const StringPiece& user_agent) const;
 
-  // IE9 does not implement <link rel=dns-prefetch ...>. Instead it does DNS
-  // preresolution when it sees <link rel=prefetch ...>. This method returns
-  // true if the browser support DNS prefetch using rel=prefetch.
-  // Refer:
-  // http://blogs.msdn.com/b/ie/archive/2011/03/17/internet-explorer-9-network-performance-improvements.aspx
-  // NOLINT
-  bool SupportsDnsPrefetchUsingRelPrefetch(const StringPiece& user_agent) const;
   bool SupportsDnsPrefetch(const StringPiece& user_agent) const;
 
   virtual bool IsAndroidUserAgent(const StringPiece& user_agent) const;
@@ -144,8 +169,7 @@ class UserAgentMatcher {
   FastWildcardGroup defer_js_allowlist_;
   FastWildcardGroup defer_js_mobile_allowlist_;
   FastWildcardGroup legacy_webp_;
-  FastWildcardGroup supports_webp_lossless_alpha_;
-  FastWildcardGroup supports_webp_animated_;
+  FastWildcardGroup webp_no_navigation_accept_;
   FastWildcardGroup supports_dns_prefetch_;
   FastWildcardGroup mobile_user_agents_;
   FastWildcardGroup tablet_user_agents_;
@@ -156,7 +180,8 @@ class UserAgentMatcher {
   std::unique_ptr<RE2> known_devices_pattern_;
   mutable map<GoogleString, pair<int, int> > screen_dimensions_map_;
 
-  DISALLOW_COPY_AND_ASSIGN(UserAgentMatcher);
+  UserAgentMatcher(const UserAgentMatcher&) = delete;
+  UserAgentMatcher& operator=(const UserAgentMatcher&) = delete;
 };
 
 }  // namespace net_instaweb

@@ -75,7 +75,8 @@ class UrlLeftTrimFilter : public CommonFilter {
   Variable* trim_count_;
   Variable* trim_saved_bytes_;
 
-  DISALLOW_COPY_AND_ASSIGN(UrlLeftTrimFilter);
+  UrlLeftTrimFilter(const UrlLeftTrimFilter&) = delete;
+  UrlLeftTrimFilter& operator=(const UrlLeftTrimFilter&) = delete;
 };
 
 }  // namespace net_instaweb

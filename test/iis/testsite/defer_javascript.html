@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<!--
+  SPDX-License-Identifier: Apache-2.0
+  Copyright (c) 2024-2026 We-Amp B.V.
+-->
+
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Defer JavaScript Test</title>
+    <link rel="stylesheet" href="styles/main.css">
+</head>
+<body>
+    <h1>Defer JavaScript Test</h1>
+    <p>This page has multiple JavaScript files that should be deferred by PageSpeed.</p>
+    <p>When defer_javascript filter is enabled:</p>
+    <ul>
+        <li>Script tags should have type="text/psajs"</li>
+        <li>The js_defer library should be included</li>
+        <li>A noscript fallback should be present</li>
+    </ul>
+    <div id="output"></div>
+
+    <!-- These script files should be deferred by PageSpeed -->
+    <script src="scripts/util.js"></script>
+    <script src="scripts/helper.js"></script>
+    <script src="scripts/main.js"></script>
+    <script src="scripts/example.js"></script>
+</body>
+</html>

@@ -1,3 +1,21 @@
+<!-- =======================================================================
+     ARCHIVE - DO NOT EDIT.
+
+     This is the mod_pagespeed 1.0 documentation as it shipped, published
+     unchanged as the /1.0/ archive on modpagespeed.com. It describes what
+     that release did, which is why it is NOT updated when behaviour
+     changes: an archive that tracks the current product is a record of
+     nothing.
+
+     If you got here by grepping for prose that is now out of date, the
+     change belongs in the pagespeed-optimizer repository instead:
+
+         2.0    website/src/content/docs/       -> modpagespeed.com/docs/
+         1.15   website/src/content/docs-1.1/   -> modpagespeed.com/1.1/docs/
+
+     CI enforces this. tools/ci/check_legacy_docs.sh fails any pull request
+     that changes a file under html/.
+     ======================================================================= -->
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
 or more contributor license agreements.  See the NOTICE file
@@ -84,6 +102,8 @@ The current set of filters fits in these categories as follows:
       shard domains</a></li>
   <li><a href="filter-image-sprite">Sprite Images</a></li>
   <li><a href="filter-insert-dns-prefetch">Pre-Resolve DNS</a></li>
+  <li><a href="filter-insert-speculation-rules"
+      >Insert Speculation Rules</a></li>
 </ul>
 
 <a target="_blank" href="https://developers.google.com/speed/docs/best-practices/request">
@@ -126,6 +146,8 @@ The current set of filters fits in these categories as follows:
   <li><a href="filter-image-responsive">Make Images Responsive</a></li>
   <li><a href="filter-css-to-head">Move CSS to Head</a></li>
   <li><a href="filter-image-optimize">Optimize Images</a></li>
+  <li><a href="filter-prioritize-critical-images"
+      >Prioritize Critical Images</a></li>
   <li><a href="reference-image-optimize#progressive"
       >Convert JPEG to Progressive</a></li>
   <li><a href="filter-rewrite-style-attributes"

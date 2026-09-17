@@ -1,0 +1,14 @@
+--- a/absl/base/nullability.h
++++ b/absl/base/nullability.h
+@@ -222,7 +222,10 @@
+ // No-op except for being a human readable signal.
+ #define ABSL_POINTERS_DEFAULT_NONNULL
+
+-#if defined(__clang__) && !defined(__OBJC__) && \
++// _Nonnull annotations cause parse errors in template parameter positions
++// (e.g. absl::Flag<T>* _Nonnull flag) with certain Clang toolchains.
++// Disable nullability annotations entirely; they are for static analysis only.
++#if 0 && defined(__clang__) && !defined(__OBJC__) && \
+     ABSL_HAVE_FEATURE(nullability_on_classes)
+ // absl_nonnull (default with `ABSL_POINTERS_DEFAULT_NONNULL`)
+ //

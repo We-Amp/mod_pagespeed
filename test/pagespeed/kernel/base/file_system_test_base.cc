@@ -24,6 +24,10 @@
 #include <memory>
 #include <vector>
 
+#ifndef _WIN32
+#include <unistd.h>  // getuid()
+#endif
+
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/file_system.h"
 #include "pagespeed/kernel/base/google_message_handler.h"
@@ -163,6 +167,19 @@ void FileSystemTest::TestRename() {
   CheckRead(to_file, from_text);
 }
 
+// Renaming onto an existing path must atomically replace it (POSIX rename
+// semantics). WriteFileAtomic -- and through it PurgeContext's cache.purge
+// updates -- depends on this contract on every platform.
+void FileSystemTest::TestRenameReplace() {
+  GoogleString from_text = "replacement";
+  GoogleString to_file = WriteNewFile("/to_replace.txt", "original");
+  GoogleString from_file = WriteNewFile("/from_replace.txt", from_text);
+  ASSERT_TRUE(
+      file_system()->RenameFile(from_file.c_str(), to_file.c_str(), &handler_));
+  CheckDoesNotExist(from_file);
+  CheckRead(to_file, from_text);
+}
+
 // Write a file and successfully delete it.
 void FileSystemTest::TestRemove() {
   GoogleString filename = WriteNewFile("/remove.txt", "Goodbye, world!");
@@ -262,6 +279,15 @@ void FileSystemTest::TestRecursivelyMakeDir() {
 // Check that we cannot create a directory we do not have permissions for.
 // Note: depends upon root dir not being writable.
 void FileSystemTest::TestRecursivelyMakeDir_NoPermission() {
+#ifdef _WIN32
+  // On Windows, "/bogus-dir" resolves to the root of the current drive
+  // (e.g., C:\bogus-dir) where the user typically has write access.
+  // The Unix permission model doesn't apply, so skip this test.
+  GTEST_SKIP() << "Windows does not restrict directory creation the same way";
+#else
+  if (getuid() == 0) {
+    GTEST_SKIP() << "Root can create directories anywhere, test requires non-root";
+  }
   GoogleString base = "/bogus-dir";
   GoogleString path = base + "/no/permission/to/make/this/dir";
 
@@ -269,6 +295,7 @@ void FileSystemTest::TestRecursivelyMakeDir_NoPermission() {
   ASSERT_TRUE(file_system()->Exists(base.c_str(), &handler_).is_false());
   // We do not have permission to create it.
   ASSERT_FALSE(file_system()->RecursivelyMakeDir(path, &handler_));
+#endif
 }
 
 // Check that we cannot create a directory below a file.
@@ -447,108 +474,6 @@ void FileSystemTest::TestDirInfo() {
   EXPECT_STREQ(full_path1, dir_info.files[0].name);
   EXPECT_STREQ(full_path2, dir_info.files[1].name);
   EXPECT_EQ(static_cast<size_t>(1), dir_info.empty_dirs.size());
-}
-
-void FileSystemTest::TestLock() {
-  GoogleString dir_name = StrCat(test_tmpdir(), "/make_dir");
-  DeleteRecursively(dir_name);
-  ASSERT_TRUE(file_system()->MakeDir(dir_name.c_str(), &handler_));
-  GoogleString lock_name = dir_name + "/lock";
-  // Acquire the lock
-  EXPECT_TRUE(file_system()->TryLock(lock_name, &handler_).is_true());
-  // Can't re-acquire the lock
-  EXPECT_TRUE(file_system()->TryLock(lock_name, &handler_).is_false());
-  // Release the lock
-  EXPECT_TRUE(file_system()->Unlock(lock_name, &handler_));
-  // Do it all again to make sure the release worked.
-  EXPECT_TRUE(file_system()->TryLock(lock_name, &handler_).is_true());
-  EXPECT_TRUE(file_system()->TryLock(lock_name, &handler_).is_false());
-  EXPECT_TRUE(file_system()->Unlock(lock_name, &handler_));
-}
-
-// Test lock timeout; assumes the file system has at least 1-second creation
-// granularity.
-void FileSystemTest::TestLockTimeout() {
-  GoogleString dir_name = StrCat(test_tmpdir(), "/make_dir");
-  DeleteRecursively(dir_name);
-  ASSERT_TRUE(file_system()->MakeDir(dir_name.c_str(), &handler_));
-  GoogleString lock_name = dir_name + "/lock";
-  // Acquire the lock
-  EXPECT_TRUE(
-      file_system()
-          ->TryLockWithTimeout(lock_name, Timer::kSecondMs, timer(), &handler_)
-          .is_true());
-  // Immediate re-acquire should fail.  Steal time deliberately long so we don't
-  // steal by mistake (since we're running in non-mock time).
-  EXPECT_TRUE(
-      file_system()
-          ->TryLockWithTimeout(lock_name, Timer::kMinuteMs, timer(), &handler_)
-          .is_false());
-  // Wait just over 1 second so that we're past the timout.
-  // Now we should seize lock.
-  timer()->SleepMs(Timer::kSecondMs + 1);
-  EXPECT_TRUE(
-      file_system()
-          ->TryLockWithTimeout(lock_name, Timer::kSecondMs, timer(), &handler_)
-          .is_true());
-  // Lock should still be held.
-  EXPECT_TRUE(file_system()->TryLock(lock_name, &handler_).is_false());
-  EXPECT_TRUE(file_system()->Unlock(lock_name, &handler_));
-  // The result of this second unlock is unknown, but it ought not to crash.
-  file_system()->Unlock(lock_name, &handler_);
-  // Lock should now be unambiguously unlocked.
-  EXPECT_TRUE(file_system()->TryLock(lock_name, &handler_).is_true());
-}
-
-void FileSystemTest::TestLockBumping() {
-  const GoogleString dir_name = StrCat(test_tmpdir(), "/make_dir");
-  DeleteRecursively(dir_name);
-  ASSERT_TRUE(file_system()->MakeDir(dir_name.c_str(), &handler_));
-  const GoogleString lock_name = dir_name + "/lock";
-
-  // No one holds the lock, so it can't be bumped.
-  EXPECT_FALSE(file_system()->BumpLockTimeout(lock_name, &handler_));
-
-  // Take the lock.
-  EXPECT_TRUE(file_system()
-                  ->TryLockWithTimeout(lock_name, Timer::kSecondMs * 3, timer(),
-                                       &handler_)
-                  .is_true());
-
-  // Sleep 2s.  We still hold the lock.
-  timer()->SleepMs(Timer::kSecondMs * 2);
-
-  // Bump the lock.
-  EXPECT_TRUE(file_system()->BumpLockTimeout(lock_name, &handler_));
-
-  // Try to take the lock again.  This should fail even if bumping didn't work
-  // because the original lock was only 2s old anyway.
-  EXPECT_FALSE(file_system()
-                   ->TryLockWithTimeout(lock_name, Timer::kSecondMs * 3,
-                                        timer(), &handler_)
-                   .is_true());
-
-  // Bump the lock again to deflake this test on the CI vm.
-  EXPECT_TRUE(file_system()->BumpLockTimeout(lock_name, &handler_));
-
-  // Sleep 2s.  We still hold the lock, because we bumped it.
-  timer()->SleepMs(Timer::kSecondMs * 2);
-
-  // Try to take the lock again.  If bumping didn't work, then the lock would
-  // have expired 1s ago and we could have taken it here.
-  EXPECT_FALSE(file_system()
-                   ->TryLockWithTimeout(lock_name, Timer::kSecondMs * 3,
-                                        timer(), &handler_)
-                   .is_true());
-
-  // Sleep 2s.  The lock is now fully timed out.
-  timer()->SleepMs(Timer::kSecondMs * 2);
-
-  // With the lock timed out it's available for the taking.
-  EXPECT_TRUE(file_system()
-                  ->TryLockWithTimeout(lock_name, Timer::kSecondMs * 3, timer(),
-                                       &handler_)
-                  .is_true());
 }
 
 }  // namespace net_instaweb

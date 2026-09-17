@@ -58,7 +58,8 @@ class CacheKeyPrepender::KeyPrependerCallback : public DelegatingCacheCallback {
  private:
   SharedString prefix_;
 
-  DISALLOW_COPY_AND_ASSIGN(KeyPrependerCallback);
+  KeyPrependerCallback(const KeyPrependerCallback&) = delete;
+  KeyPrependerCallback& operator=(const KeyPrependerCallback&) = delete;
 };
 
 void CacheKeyPrepender::Get(const GoogleString& key, Callback* callback) {

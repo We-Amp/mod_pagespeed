@@ -19,6 +19,8 @@
 
 #include "pagespeed/kernel/util/url_to_filename_encoder.h"
 
+#include <cstdint>
+
 #include "base/logging.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -109,7 +111,7 @@ void UrlToFilenameEncoder::EncodeSegment(const StringPiece& filename_prefix,
 
     // Note: instead of outputting an empty segment, we let the second slash
     // be escaped below.
-    if ((ch == dir_separator) && !segment.empty()) {
+    if ((ch == static_cast<unsigned char>(dir_separator)) && !segment.empty()) {
       AppendSegment(&segment, encoded_filename);
       encoded_filename->push_back(dir_separator);
       segment.clear();
@@ -157,7 +159,13 @@ void UrlToFilenameEncoder::EncodeSegment(const StringPiece& filename_prefix,
 bool UrlToFilenameEncoder::Decode(const StringPiece& encoded_filename,
                                   GoogleString* decoded_url) {
   const char kDirSeparator = '/';
-  enum State { kStart, kEscape, kFirstDigit, kTruncate, kEscapeDot };
+  enum State : std::uint8_t {
+    kStart,
+    kEscape,
+    kFirstDigit,
+    kTruncate,
+    kEscapeDot
+  };
   State state = kStart;
   char hex_buffer[3] = {'\0', '\0', '\0'};
   for (int i = 0, n = encoded_filename.size(); i < n; ++i) {

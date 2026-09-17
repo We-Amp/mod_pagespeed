@@ -20,13 +20,13 @@
 #include "pagespeed/kernel/util/statistics_logger.h"
 
 #include <map>
+#include <memory>
 #include <set>
 #include <vector>
 
 #include "pagespeed/kernel/base/file_system.h"
 #include "pagespeed/kernel/base/json.h"
 #include "pagespeed/kernel/base/message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/statistics_template.h"
 #include "pagespeed/kernel/base/string.h"
@@ -204,6 +204,15 @@ TEST_F(StatisticsLoggerTest, TestParseDataForGraphs) {
   // Though the fake log file only contains 4 variables, the method should
   // still return all the variables needed by the graphs page with 0 as
   // place holders.
+  //
+  // THE NUMBER IS THE SIZE OF THE GRAPHS PAGE'S VARIABLE LIST, and it moves
+  // whenever a counter is added to it (statistics_logger.cc, kGraphsVars --
+  // NOT kOtherLoggedVars, which is the neighbouring list this comment first
+  // named by mistake). It is written out rather than derived because that list
+  // is file-local to the implementation; when it changes, this is the line
+  // that says so, which is the intent -- a counter reaching the graphs page is
+  // a user-visible surface change and should not slip in silently. Last moved
+  // when the daemon substrate's fallback re-notify failure counter was added.
   EXPECT_EQ(92, parsed_var_data.size());
   EXPECT_EQ(4, list_of_timestamps.size());
   file_system_.Close(log_file, &handler_);
@@ -289,6 +298,77 @@ TEST_F(StatisticsLoggerTest, TestNextDataBlock) {
   EXPECT_EQ(initial_timestamp + 50, timestamp);
 
   file_system_.Close(log_file, &handler_);
+}
+
+// Regression test: when every logged timestamp lies outside the query
+// window (typical right after an Apache restart, or when the operator
+// queries a future window), ReadNextDataBlock used to walk past the last
+// "timestamp: " marker, observe next_timestamp_pos == npos, assign
+// offset = npos, and on the next loop iteration throw std::out_of_range
+// from StringPiece::substr(npos). Uncaught, the throw terminated the
+// Apache worker with SIGABRT. Verified in production on
+// demo-httpd-1.1.modpagespeed.com on 2026-05-11.
+TEST_F(StatisticsLoggerTest, ReadNextDataBlockAllOutOfRange) {
+  const int64 base = MockTimer::kApr_5_2010_ms;
+  GoogleString input;
+  for (int i = 0; i < 3; ++i) {
+    StrAppend(&input, "timestamp: ", Integer64ToString(base + i * 10), "\n",
+              "num_flushes: ", Integer64ToString(i), "\n");
+  }
+  GoogleString file_name;
+  ASSERT_TRUE(
+      file_system_.WriteTempFile("/prefix/", input, &file_name, &handler_));
+  FileSystem::InputFile* log_file =
+      file_system_.OpenInputFile(file_name.c_str(), &handler_);
+  ASSERT_TRUE(log_file != nullptr);
+
+  // Query a window that starts long after every recorded timestamp.
+  const int64 start_time = base + 1000 * Timer::kDayMs;
+  const int64 end_time = start_time + Timer::kDayMs;
+  const int64 granularity_ms = 5;
+  StatisticsLogfileReader reader(log_file, start_time, end_time, granularity_ms,
+                                 &handler_);
+
+  // Draining the reader must return false cleanly, not throw.
+  int64 timestamp = -1;
+  GoogleString output;
+  EXPECT_NO_THROW({
+    bool success = reader.ReadNextDataBlock(&timestamp, &output);
+    EXPECT_FALSE(success);
+  });
+
+  file_system_.Close(log_file, &handler_);
+}
+
+// Higher-level regression test that mirrors the production crash path:
+// AdminSite::ConsoleJsonHandler -> StatisticsLogger::DumpJSON with a
+// time range that lies entirely past the end of the statistics log.
+TEST_F(StatisticsLoggerTest, DumpJsonRangeAfterAllEntriesDoesNotThrow) {
+  GoogleString log;
+  const int64 base = MockTimer::kApr_5_2010_ms;
+  for (int i = 0; i < 3; ++i) {
+    StrAppend(&log, "timestamp: ", Integer64ToString(base + i * 10), "\n",
+              "num_flushes: ", Integer64ToString(i), "\n");
+  }
+  ASSERT_TRUE(file_system_.WriteFile(kStatsLogFile, log, &handler_));
+
+  std::set<GoogleString> var_titles;
+  var_titles.insert("num_flushes");
+  const int64 start_time = base + 1000 * Timer::kDayMs;
+  const int64 end_time = start_time + Timer::kDayMs;
+
+  GoogleString json_dump;
+  StringWriter writer(&json_dump);
+  EXPECT_NO_THROW(logger_.DumpJSON(true /* show_graphs */, var_titles,
+                                   start_time, end_time, kLoggingIntervalMs,
+                                   &writer, &handler_));
+  // Output should still be parseable JSON.
+  Json::Value parsed;
+  Json::CharReaderBuilder reader_builder;
+  std::string errs;
+  std::stringstream ss(json_dump);
+  EXPECT_TRUE(Json::parseFromStream(reader_builder, ss, &parsed, &errs))
+      << json_dump;
 }
 
 // Creates fake logfile data and tests that the data containing the variable

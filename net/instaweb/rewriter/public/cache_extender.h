@@ -89,7 +89,8 @@ class CacheExtender : public RewriteFilter {
   Variable* extension_count_;
   Variable* not_cacheable_count_;
 
-  DISALLOW_COPY_AND_ASSIGN(CacheExtender);
+  CacheExtender(const CacheExtender&) = delete;
+  CacheExtender& operator=(const CacheExtender&) = delete;
 };
 
 }  // namespace net_instaweb

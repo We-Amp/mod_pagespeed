@@ -22,14 +22,19 @@
 
 #include "pagespeed/kernel/sharedmem/inprocess_shared_mem.h"
 
+#ifdef _WIN32
+#include <windows.h>
+#include <memory>
+#define usleep(us) Sleep((us) / 1000)
+#else
 #include <unistd.h>
+#endif
 
 #include <vector>
 
 #include "base/logging.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/function.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/stl_util.h"
 #include "pagespeed/kernel/base/thread.h"
 #include "pagespeed/kernel/base/thread_system.h"
@@ -96,7 +101,8 @@ class InProcessSharedMemEnv : public SharedMemTestEnv {
 
    private:
     Function* fn_;
-    DISALLOW_COPY_AND_ASSIGN(RunFunctionThread);
+    RunFunctionThread(const RunFunctionThread&) = delete;
+    RunFunctionThread& operator=(const RunFunctionThread&) = delete;
   };
 
   std::unique_ptr<ThreadSystem> thread_system_;

@@ -21,6 +21,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdio>
 #include <memory>
 
 #include "base/logging.h"
@@ -84,10 +85,14 @@ ProxyFetchFactory::ProxyFetchFactory(ServerContext* server_context)
 ProxyFetchFactory::~ProxyFetchFactory() {
   // Factory should outlive all fetches.
   DCHECK(outstanding_proxy_fetches_.empty());
-  // Note: access to the set-size is not mutexed but in theory we should
-  // be quiesced by this point.
-  LOG(INFO) << "ProxyFetchFactory exiting with "
-            << outstanding_proxy_fetches_.size() << " outstanding requests.";
+  // Avoid LOG() in destructor — the logging sink may already be torn down
+  // during process shutdown, causing a use-after-free crash (SIGSEGV in
+  // spdlog::logger::sink_it_).
+  if (!outstanding_proxy_fetches_.empty()) {
+    fprintf(stderr,
+            "ProxyFetchFactory exiting with %zu outstanding requests.\n",
+            outstanding_proxy_fetches_.size());
+  }
 }
 
 ProxyFetch* ProxyFetchFactory::CreateNewProxyFetch(
@@ -99,8 +104,10 @@ ProxyFetch* ProxyFetchFactory::CreateNewProxyFetch(
   // Check whether this an encoding of a non-rewritten resource served
   // from a non-transparently proxied domain.
   UrlNamer* namer = server_context_->url_namer();
+
   GoogleString decoded_resource;
   GoogleUrl gurl(url_in);
+
   DCHECK(!server_context_->IsPagespeedResource(gurl))
       << "expect ResourceFetch called for pagespeed resources, not ProxyFetch";
 
@@ -223,8 +230,13 @@ ProxyFetchPropertyCallbackCollector::~ProxyFetchPropertyCallbackCollector() {
   ThreadSynchronizer* sync = server_context_->thread_synchronizer();
   server_context_->html_workers()->FreeSequence(sequence_);
   if (!post_lookup_task_vector_.empty()) {
-    LOG(DFATAL) << "ProxyFetchPropertyCallbackCollector function vector is not "
-                << "empty.";
+    // Use fprintf instead of LOG() — the logging sink may already be torn down
+    // during process shutdown, causing a use-after-free crash.
+    DCHECK(false) << "ProxyFetchPropertyCallbackCollector function vector is "
+                     "not empty.";
+    fprintf(stderr,
+            "ProxyFetchPropertyCallbackCollector function vector is not "
+            "empty.\n");
   }
   STLDeleteElements(&pending_callbacks_);
   STLDeleteValues(&property_pages_);
@@ -486,6 +498,7 @@ ProxyFetch::ProxyFetch(
       property_cache_callback_(property_cache_callback),
       original_content_fetch_(original_content_fetch),
       driver_(driver),
+      options_(driver->options()),
       queue_run_job_created_(false),
       mutex_(server_context->thread_system()->NewMutex()),
       network_flush_outstanding_(false),
@@ -497,10 +510,10 @@ ProxyFetch::ProxyFetch(
       idle_alarm_(nullptr),
       factory_(factory),
       trusted_input_(false) {
+  DCHECK(options_ != nullptr);
   driver_->SetWriter(async_fetch);
   set_request_headers(async_fetch->request_headers());
   set_response_headers(async_fetch->response_headers());
-
   DCHECK(driver_->request_headers() != nullptr);
   driver_->EnableBlockingRewrite(request_headers());
 
@@ -559,7 +572,7 @@ bool ProxyFetch::StartParse() {
   }
 }
 
-const RewriteOptions* ProxyFetch::Options() { return driver_->options(); }
+const RewriteOptions* ProxyFetch::Options() const { return options_; }
 
 void ProxyFetch::HandleHeadersComplete() {
   const RewriteOptions* options = Options();
@@ -677,9 +690,14 @@ void ProxyFetch::SetupForHtml() {
                                        "must-revalidate")) {
         ttl_ms = 0;
         cache_control_suffix = ", no-cache";
-        // Preserve values like no-store and no-transform.
+        // Preserve values like no-store and no-transform, but not s-maxage:
+        // rewritten HTML embeds .pagespeed. URLs that can commit to a
+        // content variant chosen for the requesting client, so an s-maxage
+        // inviting shared caches to hold it would let one client's variant
+        // be served to another.
         cache_control_suffix +=
-            response_headers()->CacheControlValuesToPreserve();
+            response_headers()->CacheControlValuesToPreserve(
+                false /* preserve_s_maxage */);
       } else {
         ttl_ms = std::min(options->max_html_cache_time_ms(),
                           response_headers()->cache_ttl_ms());
@@ -735,7 +753,7 @@ void ProxyFetch::DoFetch(bool prepare_success) {
     return;
   }
 
-  const RewriteOptions* options = driver_->options();
+  const RewriteOptions* options = Options();
   const bool is_allowed = options->IsAllowed(url_);
   const bool is_enabled = options->enabled();
   {
@@ -808,32 +826,37 @@ void ProxyFetch::ScheduleQueueExecutionIfNeeded() {
 
 void ProxyFetch::PropertyCacheComplete(
     ProxyFetchPropertyCallbackCollector* callback_collector) {
-  driver_->TraceLiteral("PropertyCache lookup completed");
-  ScopedMutex lock(mutex_.get());
+  ProxyFetchPropertyCallbackCollector* to_delete = nullptr;
+  {
+    ScopedMutex lock(mutex_.get());
 
-  if (driver_ == nullptr) {
-    LOG(DFATAL) << "Expected non-null driver.";
-  } else {
-    // Set the page property and device property objects in the driver.
-    driver_->set_fallback_property_page(
-        callback_collector->ReleaseFallbackPropertyPage());
-    driver_->set_origin_property_page(
-        callback_collector->ReleaseOriginPropertyPage());
-    driver_->set_device_type(callback_collector->device_type());
-    driver_->PropertyCacheSetupDone();
+    if (driver_ == nullptr) {
+      LOG(DFATAL) << "Expected non-null driver.";
+    } else {
+      driver_->TraceLiteral("PropertyCache lookup completed");
+      // Set the page property and device property objects in the driver.
+      driver_->set_fallback_property_page(
+          callback_collector->ReleaseFallbackPropertyPage());
+      driver_->set_origin_property_page(
+          callback_collector->ReleaseOriginPropertyPage());
+      driver_->set_device_type(callback_collector->device_type());
+      driver_->PropertyCacheSetupDone();
+    }
+    // Null the pointer under the lock so ScheduleQueueExecutionIfNeeded and
+    // Finish() see nullptr.  Defer the actual delete until after the lock is
+    // released to avoid holding mutex_ across a potentially non-trivial
+    // destructor (mirrors the deferred-delete pattern in Finish()).
+    if (property_cache_callback_ == nullptr) {
+      LOG(DFATAL) << "Expected non-null property_cache_callback_.";
+    } else {
+      to_delete = property_cache_callback_;
+      property_cache_callback_ = nullptr;
+    }
+    if (sequence_ != nullptr) {
+      ScheduleQueueExecutionIfNeeded();
+    }
   }
-  // We have to set the callback to NULL to let ScheduleQueueExecutionIfNeeded
-  // proceed (it waits until it's NULL). And we have to delete it because then
-  // we have no reference to it to delete it in Finish.
-  if (property_cache_callback_ == nullptr) {
-    LOG(DFATAL) << "Expected non-null property_cache_callback_.";
-  } else {
-    delete property_cache_callback_;
-    property_cache_callback_ = nullptr;
-  }
-  if (sequence_ != nullptr) {
-    ScheduleQueueExecutionIfNeeded();
-  }
+  delete to_delete;
 }
 
 bool ProxyFetch::HandleWrite(const StringPiece& str,
@@ -859,6 +882,19 @@ bool ProxyFetch::HandleWrite(const StringPiece& str,
 
       // Now we're done mucking about with headers, add one noting our
       // involvement.
+      //
+      // NOTE: There is a known benign TSAN race here. The fetcher thread's
+      // wrapper chain (e.g. CachePutFetch::HandleDone) may read status_code()
+      // from the shared response headers protobuf while the sequence thread
+      // writes new headers via HandleHeadersComplete on the base fetch. The
+      // race is at the protobuf internal byte level (different logical fields,
+      // same message). The status_code value is set much earlier and is never
+      // modified concurrently. Fixing this properly would require decoupling
+      // the shared response headers between ProxyFetch and the URL fetcher
+      // wrapper chain, which is a significant refactor. Calling
+      // SharedAsyncFetch::HandleHeadersComplete() here to propagate early
+      // is not possible because downstream code (e.g. convert_meta_tags,
+      // property cache filters) expects headers to not yet be complete.
       AddPagespeedHeader();
 
       if ((property_cache_callback_ != nullptr) && started_parse_) {
@@ -901,6 +937,9 @@ bool ProxyFetch::HandleWrite(const StringPiece& str,
     }
 
     {
+      // Acquire mutex before queuing text to establish happens-before
+      // with the sequence thread, ensuring header modifications from
+      // SetupForHtml/AddPagespeedHeader above are visible.
       ScopedMutex lock(mutex_.get());
       text_queue_.insert(text_queue_.end(), chunks.begin(), chunks.end());
       ScheduleQueueExecutionIfNeeded();
@@ -1189,11 +1228,21 @@ void ProxyFetch::HandleIdleAlarm() {
   // Clear references to the alarm object as it will be deleted once we exit.
   idle_alarm_ = nullptr;
 
-  if (waiting_for_flush_to_finish_ || done_outstanding_ || finishing_) {
-    return;
+  {
+    // waiting_for_flush_to_finish_ and done_outstanding_ are written under
+    // mutex_ from the fetcher thread, so we must hold it to read them safely.
+    ScopedMutex lock(mutex_.get());
+    if (waiting_for_flush_to_finish_ || done_outstanding_ || finishing_) {
+      return;
+    }
   }
 
   // Inject an own flush, and queue up its dispatch.
+  // driver_ access is safe here: HandleIdleAlarm runs on sequence_, and
+  // driver_ is only nulled from CompleteFinishParse (also on sequence_)
+  // or from the Finish path in ExecuteQueued (which cancels the alarm
+  // via CancelIdleAlarm before calling Finish).  Sequence serialization
+  // prevents concurrent execution of these callbacks.
   driver_->ShowProgress("- Flush injected due to input idleness -");
   driver_->RequestFlush();
   Flush(factory_->message_handler());
@@ -1232,6 +1281,7 @@ bool UrlMightHavePropertyCacheEntry(const GoogleUrl& url) {
     case ContentType::kJpeg:
     case ContentType::kSwf:
     case ContentType::kWebp:
+    case ContentType::kAvif:
     case ContentType::kIco:
     case ContentType::kPdf:
     case ContentType::kOther:
@@ -1269,10 +1319,10 @@ ProxyFetchFactory::InitiatePropertyCacheLookup(const bool is_resource_fetch,
   UserAgentMatcher::DeviceType device_type =
       server_context->user_agent_matcher()->GetDeviceTypeForUA(user_agent);
 
-  std::unique_ptr<ProxyFetchPropertyCallbackCollector> callback_collector(
-      new ProxyFetchPropertyCallbackCollector(server_context,
-                                              request_url.Spec(), request_ctx,
-                                              options, device_type));
+  std::unique_ptr<ProxyFetchPropertyCallbackCollector> callback_collector =
+      std::make_unique<ProxyFetchPropertyCallbackCollector>(
+          server_context, request_url.Spec(), request_ctx, options,
+          device_type);
   bool added_callback = false;
   PropertyPageStarVector property_callbacks;
 

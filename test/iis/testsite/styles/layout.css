@@ -1,0 +1,36 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright (c) 2024-2026 We-Amp B.V.
+ */
+
+/* Layout utilities for PageSpeed IIS test site */
+.flex { display: flex; }
+.flex-wrap { flex-wrap: wrap; }
+.flex-center { justify-content: center; align-items: center; }
+.flex-between { justify-content: space-between; }
+.grid { display: grid; gap: 20px; }
+.grid-2 { grid-template-columns: repeat(2, 1fr); }
+.grid-3 { grid-template-columns: repeat(3, 1fr); }
+.mt-1 { margin-top: 0.5rem; }
+.mt-2 { margin-top: 1rem; }
+.mb-1 { margin-bottom: 0.5rem; }
+.mb-2 { margin-bottom: 1rem; }
+.p-1 { padding: 0.5rem; }
+.p-2 { padding: 1rem; }
+.w-100 { width: 100%; }
+@media (max-width: 768px) {
+    .grid-2, .grid-3 { grid-template-columns: 1fr; }
+}
+.container-sm { max-width: 540px; margin: 0 auto; padding: 0 15px; }
+.container-md { max-width: 720px; margin: 0 auto; padding: 0 15px; }
+.row { display: flex; flex-wrap: wrap; margin: 0 -15px; }
+.col { flex: 1; padding: 0 15px; }
+.col-6 { flex: 0 0 50%; max-width: 50%; padding: 0 15px; }
+.col-4 { flex: 0 0 33.333%; max-width: 33.333%; padding: 0 15px; }
+.col-3 { flex: 0 0 25%; max-width: 25%; padding: 0 15px; }
+.d-none { display: none; }
+.d-block { display: block; }
+.d-flex { display: flex; }
+.text-center { text-align: center; }
+.text-right { text-align: right; }
+.mx-auto { margin-left: auto; margin-right: auto; }

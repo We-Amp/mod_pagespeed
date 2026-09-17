@@ -145,7 +145,8 @@ class CachingHeaders {
     T value_;
     bool has_value_;
 
-    DISALLOW_COPY_AND_ASSIGN(Optional);
+    Optional(const Optional&) = delete;
+    Optional& operator=(const Optional&) = delete;
   };
 
   int status_code_;
@@ -176,7 +177,8 @@ class CachingHeaders {
   Optional<bool> is_heuristically_cacheable_;
   Optional<bool> has_explicit_no_cache_directive_;
 
-  DISALLOW_COPY_AND_ASSIGN(CachingHeaders);
+  CachingHeaders(const CachingHeaders&) = delete;
+  CachingHeaders& operator=(const CachingHeaders&) = delete;
 };
 
 }  // namespace net_instaweb

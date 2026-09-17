@@ -34,6 +34,7 @@
 #include "net/instaweb/rewriter/public/rewrite_context.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_result.h"
+#include "net/instaweb/rewriter/public/script_tag_scanner.h"
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/string.h"
@@ -47,8 +48,321 @@
 #include "pagespeed/kernel/http/semantic_type.h"
 #include "third_party/css_parser/src/util/utf8/public/unicodetext.h"
 #include "third_party/css_parser/src/webutil/css/parser.h"
+#include "third_party/css_parser/src/webutil/css/value.h"
 
 namespace net_instaweb {
+
+namespace {
+
+// Fonts are only worth preloading when they plausibly affect first render of
+// ordinary text. A @font-face whose unicode-range does not intersect
+// printable ASCII (U+0020 - U+007E) is a specialized subset (symbols-only,
+// non-latin-only extension slices, etc.) that the first view likely never
+// renders, so we skip it rather than risk preloading unused bytes.
+const uint32 kBasicCoverageBegin = 0x20;
+const uint32 kBasicCoverageEnd = 0x7E;
+
+// Parses one unicode-range token --- U+XXXX, U+XXXX-YYYY, U+XX??, or U+??
+// --- into an inclusive [begin, end] codepoint range. Returns false for
+// anything else.
+bool ParseUnicodeRangeToken(StringPiece token, uint32* begin_out,
+                            uint32* end_out) {
+  TrimWhitespace(&token);
+  int n = token.size();
+  int pos = 0;
+  if (n < 3 || (token[0] != 'U' && token[0] != 'u') || token[1] != '+') {
+    return false;
+  }
+  pos = 2;
+
+  uint32 begin = 0;
+  int num_digits = 0;
+  while (pos < n && num_digits < 6 && AccumulateHexValue(token[pos], &begin)) {
+    ++pos;
+    ++num_digits;
+  }
+
+  // Wildcard form: remaining chars must all be '?', each widening the range
+  // by one hex digit (U+30?? means U+3000 - U+30FF). Valid without leading
+  // hex digits too: U+?? means U+00 - U+FF.
+  if (pos < n && token[pos] == '?') {
+    uint32 end = begin;
+    while (pos < n && token[pos] == '?' && num_digits < 6) {
+      begin *= 16;
+      end = end * 16 + 0xF;
+      ++pos;
+      ++num_digits;
+    }
+    if (pos != n) {
+      return false;
+    }
+    *begin_out = begin;
+    *end_out = end;
+    return true;
+  }
+
+  if (num_digits == 0) {
+    return false;
+  }
+
+  if (pos == n) {  // Single codepoint.
+    *begin_out = begin;
+    *end_out = begin;
+    return true;
+  }
+
+  if (token[pos] != '-') {
+    return false;
+  }
+  ++pos;
+
+  uint32 end = 0;
+  num_digits = 0;
+  while (pos < n && num_digits < 6 && AccumulateHexValue(token[pos], &end)) {
+    ++pos;
+    ++num_digits;
+  }
+  if (num_digits == 0 || pos != n || end < begin) {
+    return false;
+  }
+  *begin_out = begin;
+  *end_out = end;
+  return true;
+}
+
+// True if any well-formed token in a unicode-range value (comma-separated
+// list) intersects printable ASCII. Tokens we cannot parse contribute no
+// coverage, so a fully malformed value reads as "no basic coverage" ---
+// erring towards not preloading.
+bool UnicodeRangeIntersectsBasicText(StringPiece value_text) {
+  StringPieceVector tokens;
+  SplitStringPieceToVector(value_text, ",", &tokens, true /* omit_empty */);
+  for (StringPiece token : tokens) {
+    uint32 begin, end;
+    if (ParseUnicodeRangeToken(token, &begin, &end) &&
+        begin <= kBasicCoverageEnd && end >= kBasicCoverageBegin) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Reconstructs the value text of a cleanly-parsed (Property::OTHER)
+// unicode-range declaration from its parsed values, returning false when the
+// values take any other shape. Digit-leading, wildcard-free tokens lex as an
+// IDENT "U" followed by NUMBER values whose "-XXXX" tail became a dimension
+// unit (see FontFaceCoversBasicText); preservation mode stores each number's
+// verbatim bytes, so IDENT text + verbatim number bytes + dimension unit
+// text reproduces the original token exactly, with COMMA values as ","
+// separators. Letter-leading tokens (U+FEFF) lex as IDENT "U" + OPERATOR "+"
+// + IDENT "FEFF", so the OPERATOR's verbatim text fills the gap between the
+// two idents. Anything else (strings, functions, ...) cannot be
+// reconstructed faithfully, and a NUMBER without verbatim bytes (parsing
+// without preservation mode) has unrecoverable text.
+bool ReconstructUnicodeRangeValue(const Css::Declaration& decl,
+                                  GoogleString* text_out) {
+  if (decl.values() == nullptr) {
+    return false;
+  }
+  GoogleString text;
+  const Css::Values& values = *decl.values();
+  for (int i = 0, n = values.size(); i < n; ++i) {
+    const Css::Value* value = values.get(i);
+    switch (value->GetLexicalUnitType()) {
+      case Css::Value::IDENT:
+        text += UnicodeTextToUTF8(value->GetIdentifierText());
+        break;
+      case Css::Value::NUMBER: {
+        CssStringPiece bytes = value->bytes_in_original_buffer();
+        if (bytes.empty()) {
+          return false;
+        }
+        text.append(bytes.data(), bytes.size());
+        text += value->GetDimensionUnitText();
+        break;
+      }
+      case Css::Value::COMMA:
+        text += ",";
+        break;
+      case Css::Value::OPERATOR:
+        // Letter-leading ranges (U+FEFF) lex the '+' as an OPERATOR; its
+        // text is verbatim ("+").
+        text += UnicodeTextToUTF8(value->GetStringValue());
+        break;
+      default:
+        return false;
+    }
+  }
+  *text_out = text;
+  return true;
+}
+
+// Decides whether a face's unicode-range (if any) plausibly covers ordinary
+// text. The CSS parser has no notion of unicode-range, and its declarations
+// reach us in one of two shapes:
+//  - Wildcard forms (U+26??) fail value parsing; in preservation mode the
+//    whole declaration is demoted to a Property::UNPARSEABLE dummy carrying
+//    verbatim bytes (without setting the parser error mask). We scan those
+//    bytes for ASCII intersection.
+//  - Wildcard-free forms (U+0400-045F, U+FEFF) lex CLEANLY --- digit-leading
+//    ones as IDENT "U" plus a NUMBER whose "-045F" tail becomes a unit
+//    (ParseNumber accepts '-' as a unit start via StartsIdent),
+//    letter-leading ones as IDENT "U" + OPERATOR "+" + IDENT "FEFF" --- so
+//    the declaration comes out as ordinary Property::OTHER. The original
+//    token text is then rebuilt from the parsed values (see
+//    ReconstructUnicodeRangeValue) and evaluated the same way; only values
+//    we cannot reconstruct stay unevaluatable and read as "no basic
+//    coverage".
+// Per CSS cascade the last unicode-range declaration in the face wins; a
+// face without any unicode-range declaration is assumed to cover basic
+// text.
+bool FontFaceCoversBasicText(const Css::FontFace& face) {
+  bool has_range = false;
+  bool winner_scannable = false;
+  GoogleString range_text;
+  for (const Css::Declaration* decl : face.declarations()) {
+    if (decl->property().prop() == Css::Property::OTHER) {
+      if (StringCaseEqual(decl->prop_text(), "unicode-range")) {
+        // Parsed cleanly: rebuild the token text from the parsed values
+        // (digit-leading ranges lex as IDENT "U" + NUMBERs) and evaluate it.
+        has_range = true;
+        winner_scannable = ReconstructUnicodeRangeValue(*decl, &range_text);
+      }
+      continue;
+    }
+    if (decl->property().prop() != Css::Property::UNPARSEABLE) {
+      continue;
+    }
+    CssStringPiece raw = decl->bytes_in_original_buffer();
+    StringPiece bytes(raw.data(), raw.size());
+    stringpiece_ssize_type colon = bytes.find(':');
+    if (colon == StringPiece::npos) {
+      continue;
+    }
+    StringPiece name = bytes.substr(0, colon);
+    TrimWhitespace(&name);
+    if (!StringCaseEqual(name, "unicode-range")) {
+      continue;
+    }
+    has_range = true;
+    winner_scannable = true;
+    range_text = bytes.substr(colon + 1).as_string();
+  }
+  if (!has_range) {
+    return true;
+  }
+  if (!winner_scannable) {
+    return false;
+  }
+  return UnicodeRangeIntersectsBasicText(range_text);
+}
+
+// Finds the first woff2 candidate in the face's src declaration (per CSS
+// cascade, the last src declaration in the face). A candidate is a url()
+// value immediately followed by format("woff2"), or a bare url() --- no
+// format() hint --- whose path, resolved against base_url, ends in .woff2.
+// A url() explicitly declared as another format is never a candidate, and a
+// face without any woff2 candidate is skipped entirely: guessing among
+// fallback sources is user-agent-dependent, and a wrong guess means a double
+// fetch. Returns true and sets *url_out to the URL as written in the CSS.
+bool FindWoff2SrcUrl(const Css::FontFace& face, const GoogleUrl& base_url,
+                     GoogleString* url_out) {
+  const Css::Declaration* src_decl = nullptr;
+  for (const Css::Declaration* decl : face.declarations()) {
+    // src is not in the parser's property table, so it comes out as OTHER
+    // with the property text preserved.
+    if (decl->property().prop() == Css::Property::OTHER &&
+        StringCaseEqual(decl->prop_text(), "src")) {
+      src_decl = decl;  // Last src declaration wins.
+    }
+  }
+  if (src_decl == nullptr || src_decl->values() == nullptr) {
+    return false;
+  }
+
+  const Css::Values& values = *src_decl->values();
+  for (int i = 0, n = values.size(); i < n; ++i) {
+    const Css::Value* value = values.get(i);
+    if (value->GetLexicalUnitType() != Css::Value::URI) {
+      continue;
+    }
+    GoogleString url = UnicodeTextToUTF8(value->GetStringValue());
+
+    const Css::Value* next = (i + 1 < n) ? values.get(i + 1) : nullptr;
+    if (next != nullptr && next->GetLexicalUnitType() == Css::Value::FUNCTION &&
+        StringCaseEqual(UnicodeTextToUTF8(next->GetFunctionName()), "format")) {
+      // Explicit format hint: trust it, in either direction.
+      const Css::Values* params = next->GetParameters();
+      if (params != nullptr && params->size() >= 1) {
+        const Css::Value* param = params->get(0);
+        GoogleString format;
+        if (param->GetLexicalUnitType() == Css::Value::STRING) {
+          format = UnicodeTextToUTF8(param->GetStringValue());
+        } else if (param->GetLexicalUnitType() == Css::Value::IDENT) {
+          format = UnicodeTextToUTF8(param->GetIdentifierText());
+        }
+        if (StringCaseEqual(format, "woff2")) {
+          *url_out = url;
+          return true;
+        }
+      }
+      continue;
+    }
+
+    // No format() hint: accept when the URL path itself says woff2.
+    GoogleUrl resolved(base_url, url);
+    if (resolved.IsWebValid() &&
+        StringCaseEndsWith(resolved.PathSansQuery(), ".woff2")) {
+      *url_out = url;
+      return true;
+    }
+  }
+  return false;
+}
+
+// A modulepreload does not populate the preload cache; it populates the module
+// map, whose entries are keyed on the URL and the module type and are reused
+// by the element (and by every later import) naming that URL. Dependency can
+// carry neither integrity metadata nor a credentials mode, so two cases are
+// left unhinted:
+//
+//   - integrity= : the hint would fetch and map the module with no integrity
+//     metadata attached, and that entry is what the <script integrity=...>
+//     element then reuses --- the hint would stand in for the check the author
+//     asked for.
+//   - crossorigin=use-credentials : that is credentials mode 'include', while
+//     a hint carrying no crossorigin fetches same-origin. Those are different
+//     map entries, so the hinted fetch is never reused --- a wasted request.
+//
+// Both skips are no-regressions: such modules got no hint at all before
+// modulepreload emission existed.
+//
+// The skip is write-side, so there is a one-request stale-hint window: after
+// an author adds integrity= or crossorigin=use-credentials, the pcache entry
+// from the previous request still emits its now-unmatched hint until this
+// parse rewrites that entry. Self-healing, and the same class of staleness as
+// any other edit to the HTML.
+//
+// crossorigin is not an HtmlName keyword, so it is matched by name (see
+// google_font_css_inline_filter.cc). Anonymous is the attribute's default
+// state and is exactly what a modulepreload fetches with, and per HTML any
+// unrecognized value --- including a padded " use-credentials " --- maps to
+// Anonymous, so only the exact value is excluded and the value is compared
+// unmodified.
+bool ModuleCanBeHinted(const HtmlElement* element) {
+  if (ScriptTagScanner::HasIntegrityAttribute(element)) {
+    return false;
+  }
+  const HtmlElement::Attribute* crossorigin =
+      element->FindAttribute("crossorigin");
+  if (crossorigin == nullptr) {
+    return true;
+  }
+  const char* mode = crossorigin->DecodedValueOrNull();
+  return mode == nullptr || !StringCaseEqual(mode, "use-credentials");
+}
+
+}  // namespace
 
 class CollectDependenciesFilter::Context : public RewriteContext {
  public:
@@ -117,7 +431,13 @@ class CollectDependenciesFilter::Context : public RewriteContext {
     if (!resource->HttpStatusOk()) {
       return;
     }
-    Css::Parser parser(resource->ExtractUncompressedContents().data());
+    // Parse over the full byte range. ExtractUncompressedContents() returns a
+    // StringPiece with no NUL-termination guarantee, so the single-arg
+    // Css::Parser(const char*) ctor (which does strlen()) would over-read past
+    // the buffer, and any embedded '\0' in the CSS would truncate parsing and
+    // silently drop later @imports. Bound parsing by size() instead.
+    StringPiece css = resource->ExtractUncompressedContents();
+    Css::Parser parser(css.data(), css.data() + css.size());
     parser.set_preservation_mode(true);
     // We avoid quirks-mode so that we do not "fix" something we shouldn't have.
     parser.set_quirks_mode(false);
@@ -143,9 +463,74 @@ class CollectDependenciesFilter::Context : public RewriteContext {
     }
   }
 
+  // Collects woff2 fonts declared by @font-face rules in the CSS, into the
+  // dedicated collected_font_dependency field --- never into
+  // collected_dependency, so binaries that predate DEP_FONT skip them as
+  // unknown fields (see dependencies.proto). Unlike the @import preamble
+  // scan above, this needs a full stylesheet parse; it runs only on metadata
+  // cache misses (Report() replays cached results).
+  void ExtractFontDependencies(const Dependency* parent_dep,
+                               const ResourcePtr& resource,
+                               CachedResult* partition) {
+    if (!resource->HttpStatusOk()) {
+      return;
+    }
+    // Parse over the full byte range, as in ExtractNestedCssDependencies
+    // above: the strlen-based ctor would read whatever follows the
+    // un-terminated body in the backing buffer (e.g. serialized headers),
+    // poisoning the error mask and vetoing the harvest below.
+    StringPiece css = resource->ExtractUncompressedContents();
+    Css::Parser parser(css.data(), css.data() + css.size());
+    parser.set_preservation_mode(true);
+    // We avoid quirks-mode so that we do not "fix" something we shouldn't
+    // have.
+    parser.set_quirks_mode(false);
+    std::unique_ptr<Css::Stylesheet> stylesheet(parser.ParseStylesheet());
+    if (stylesheet == nullptr ||
+        parser.errors_seen_mask() != Css::Parser::kNoError) {
+      // Don't harvest fonts from CSS we could not fully make sense of.
+      // Note that in preservation mode, declarations whose values fail to
+      // lex (such as wildcard unicode-range forms) are demoted to
+      // unparseable dummies and do not set the error mask; wildcard-free
+      // unicode-range forms lex cleanly and never error (see
+      // FontFaceCoversBasicText).
+      return;
+    }
+    GoogleUrl base_url(resource->url());
+    for (const Css::FontFace* face : stylesheet->font_faces()) {
+      // Same conservative media rule as for imports: anything we can't
+      // evaluate is treated as potentially unneeded.
+      StringVector media_types;
+      if (!css_util::ConvertMediaQueriesToStringVector(face->media_queries(),
+                                                       &media_types) ||
+          !DefinitelyNeededToRender(media_types)) {
+        continue;
+      }
+      if (!FontFaceCoversBasicText(*face)) {
+        continue;
+      }
+      GoogleString rel_url;
+      if (!FindWoff2SrcUrl(*face, base_url, &rel_url)) {
+        continue;
+      }
+      GoogleUrl full_url(base_url, rel_url);
+      if (full_url.IsWebValid()) {
+        Dependency* dep = partition->add_collected_font_dependency();
+        dep->set_url(full_url.Spec().as_string());
+        dep->set_content_type(DEP_FONT);
+        *dep->mutable_validity_info() = parent_dep->validity_info();
+      }
+    }
+  }
+
   void Rewrite(int partition_index, CachedResult* partition,
                const OutputResourcePtr& output_resource) override {
-    Dependency* dep = partition->add_collected_dependency();
+    // Modules go into their own field: a DEP_MODULE value read out of
+    // collected_dependency by a binary that predates it would come back as
+    // the closed-enum field default, DEP_JAVASCRIPT (see dependencies.proto).
+    Dependency* dep = (dep_type_ == DEP_MODULE)
+                          ? partition->add_collected_module_dependency()
+                          : partition->add_collected_dependency();
     dep->set_url(slot(0)->resource()->url());
     dep->set_content_type(dep_type_);
 
@@ -173,6 +558,7 @@ class CollectDependenciesFilter::Context : public RewriteContext {
     // validity_info.
     if (dep_type_ == DEP_CSS) {
       ExtractNestedCssDependencies(dep, slot(0)->resource(), partition);
+      ExtractFontDependencies(dep, slot(0)->resource(), partition);
     }
 
     // TODO(morlovich): is_pagespeed_resource is not currently set, but I am not
@@ -229,16 +615,41 @@ class CollectDependenciesFilter::Context : public RewriteContext {
     // We already allocated dep_id_, so we should report on it, with either
     // the first dependency we collected, or nullptr.
     if (num_output_partitions() == 1 &&
-        output_partition(0)->collected_dependency_size() > 0) {
+        (output_partition(0)->collected_dependency_size() > 0 ||
+         output_partition(0)->collected_module_dependency_size() > 0)) {
       // Deep copy here because output_partition is already written, and it
       // makes no sense to mutate it.
       CachedResult result = *output_partition(0);
 
-      // Top-level stuff just gets its dep_id_ as the sorting key.
-      result.mutable_collected_dependency(0)->add_order_key(dep_id_);
+      // The primary dependency is whichever of the two fields the collector
+      // filled: Rewrite() writes it to collected_module_dependency when
+      // dep_type_ is DEP_MODULE and to collected_dependency otherwise, so
+      // exactly one of them holds it.
+      Dependency* primary = result.collected_module_dependency_size() > 0
+                                ? result.mutable_collected_module_dependency(0)
+                                : result.mutable_collected_dependency(0);
 
-      dep_tracker->ReportDependencyCandidate(dep_id_,
-                                             &result.collected_dependency(0));
+      // The cdf metadata cache key does not include the dependency type, so a
+      // partition written for a URL loaded as a classic script gets replayed
+      // verbatim for a page that loads the same URL as a module --- and the
+      // same holds for the pre-existing CSS/JS pair. dep_type_ comes from
+      // *this* page's parse and is authoritative; without this the replay
+      // would hint a module with as=script, a classic script with
+      // modulepreload, or a script with the stale as=style of a URL some other
+      // page loads as a stylesheet. The tracker re-routes by content_type, so
+      // the pcache fields follow from this too.
+      //
+      // This repairs the primary only. The children reported below still come
+      // from the cached partition, so a stylesheet partition replayed on a
+      // page that loads the same URL as a script still reports that
+      // stylesheet's @import and font children --- pre-existing behaviour of
+      // the shared key, unchanged here.
+      primary->set_content_type(dep_type_);
+
+      // Top-level stuff just gets its dep_id_ as the sorting key.
+      primary->add_order_key(dep_id_);
+
+      dep_tracker->ReportDependencyCandidate(dep_id_, primary);
 
       // Any other dependencies stored in result->collected_dependency >= 1
       // are things we discovered *inside* whatever is described by
@@ -259,6 +670,19 @@ class CollectDependenciesFilter::Context : public RewriteContext {
         child_dep->add_order_key(c);
         dep_tracker->ReportDependencyCandidate(additional_dep_id, child_dep);
       }
+
+      // Fonts discovered inside collected_dependency(0) are children in the
+      // same sense as the entries above, so they continue the same child
+      // index sequence --- one single (dep_id_, c) key space for imports and
+      // fonts --- keeping order keys lexicographically consistent.
+      int next_child_index = result.collected_dependency_size();
+      for (int f = 0; f < result.collected_font_dependency_size(); ++f) {
+        int additional_dep_id = dep_tracker->RegisterDependencyCandidate();
+        Dependency* font_dep = result.mutable_collected_font_dependency(f);
+        font_dep->add_order_key(dep_id_);
+        font_dep->add_order_key(next_child_index + f);
+        dep_tracker->ReportDependencyCandidate(additional_dep_id, font_dep);
+      }
     } else {
       dep_tracker->ReportDependencyCandidate(dep_id_, nullptr);
     }
@@ -269,7 +693,8 @@ class CollectDependenciesFilter::Context : public RewriteContext {
   DependencyType dep_type_;
   int dep_id_;
 
-  DISALLOW_COPY_AND_ASSIGN(Context);
+  Context(const Context&) = delete;
+  Context& operator=(const Context&) = delete;
 };
 
 CollectDependenciesFilter::CollectDependenciesFilter(RewriteDriver* driver)
@@ -297,6 +722,22 @@ void CollectDependenciesFilter::StartElementImpl(HtmlElement* element) {
         continue;
       }
 
+      // Module scripts are collected as DEP_MODULE so they can be hinted with
+      // rel=modulepreload; a plain as=script preload occupies a different
+      // preload-cache slot than the module map fetch, so it would only cause
+      // a double fetch.
+      bool is_module = false;
+      if (attributes[i].category == semantic_type::kScript) {
+        const HtmlElement::Attribute* type =
+            element->FindAttribute(HtmlName::kType);
+        is_module = type != nullptr && type->DecodedValueOrNull() != nullptr &&
+                    ScriptTagScanner::Normalized(type->DecodedValueOrNull()) ==
+                        "module";
+      }
+      if (is_module && !ModuleCanBeHinted(element)) {
+        continue;
+      }
+
       // Check media on standard stylesheets.
       if (attributes[i].category == semantic_type::kStylesheet &&
           element->keyword() == HtmlName::kLink &&
@@ -306,12 +747,14 @@ void CollectDependenciesFilter::StartElementImpl(HtmlElement* element) {
         if (media != nullptr) {
           if (media->DecodedValueOrNull() == nullptr) {
             // Encoding weirdness with media attribute -> don't push
+            // skip CSS with null media
             continue;
           }
           StringVector media_vector;
           css_util::VectorizeMediaAttribute(media->DecodedValueOrNull(),
                                             &media_vector);
           if (!Context::DefinitelyNeededToRender(media_vector)) {
+            // skip CSS not needed to render
             continue;
           }
         }
@@ -333,10 +776,11 @@ void CollectDependenciesFilter::StartElementImpl(HtmlElement* element) {
       }
       ResourceSlotPtr slot(driver()->GetSlot(resource, element, attr));
       slot->set_need_aggregate_input_info(true);
-      Context* context = new Context(
-          attributes[i].category == semantic_type::kStylesheet ? DEP_CSS
-                                                               : DEP_JAVASCRIPT,
-          driver());
+      DependencyType dep_type = DEP_CSS;
+      if (attributes[i].category == semantic_type::kScript) {
+        dep_type = is_module ? DEP_MODULE : DEP_JAVASCRIPT;
+      }
+      Context* context = new Context(dep_type, driver());
       context->AddSlot(slot);
       if (driver()->InitiateRewrite(context)) {
         context->Initiated();

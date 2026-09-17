@@ -21,10 +21,10 @@
 #define PAGESPEED_KERNEL_IMAGE_PIXEL_FORMAT_OPTIMIZER_H_
 
 #include <cstddef>
+#include <memory>
 
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/image/image_util.h"
 #include "pagespeed/kernel/image/scanline_interface.h"
 #include "pagespeed/kernel/image/scanline_status.h"
@@ -91,17 +91,18 @@ class PixelFormatOptimizer : public ScanlineReaderInterface {
   bool was_initialized_;
 
   // Buffer for storing decoded scanlines.
-  net_instaweb::scoped_array<uint8_t> input_lines_;
+  std::unique_ptr<uint8_t[]> input_lines_;
 
   // Number of rows which have been examined and buffered.
   size_t input_row_;
 
   // Buffer for storing a single converted scanline.
-  net_instaweb::scoped_array<uint8_t> output_line_;
+  std::unique_ptr<uint8_t[]> output_line_;
 
   net_instaweb::MessageHandler* message_handler_;
 
-  DISALLOW_COPY_AND_ASSIGN(PixelFormatOptimizer);
+  PixelFormatOptimizer(const PixelFormatOptimizer&) = delete;
+  PixelFormatOptimizer& operator=(const PixelFormatOptimizer&) = delete;
 };
 
 }  // namespace image_compression

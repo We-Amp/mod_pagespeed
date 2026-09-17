@@ -74,7 +74,8 @@ class MemInputFile : public FileSystem::InputFile {
   const GoogleString filename_;
   int offset_;
 
-  DISALLOW_COPY_AND_ASSIGN(MemInputFile);
+  MemInputFile(const MemInputFile&) = delete;
+  MemInputFile& operator=(const MemInputFile&) = delete;
 };
 
 class MemOutputFile : public FileSystem::OutputFile {
@@ -114,12 +115,12 @@ class MemOutputFile : public FileSystem::OutputFile {
   const GoogleString filename_;
   GoogleString written_;
 
-  DISALLOW_COPY_AND_ASSIGN(MemOutputFile);
+  MemOutputFile(const MemOutputFile&) = delete;
+  MemOutputFile& operator=(const MemOutputFile&) = delete;
 };
 
 MemFileSystem::MemFileSystem(ThreadSystem* threads, Timer* timer)
-    : lock_map_mutex_(threads->NewMutex()),
-      all_else_mutex_(threads->NewMutex()),
+    : all_else_mutex_(threads->NewMutex()),
       enabled_(true),
       timer_(timer),
       mock_timer_(nullptr),
@@ -346,61 +347,6 @@ bool MemFileSystem::Size(const StringPiece& path, int64* size,
   } else {
     return false;
   }
-}
-
-BoolOrError MemFileSystem::TryLock(const StringPiece& lock_name,
-                                   MessageHandler* handler) {
-  ScopedMutex lock(lock_map_mutex_.get());
-
-  auto ret =
-      lock_map_.insert(std::make_pair(lock_name.as_string(), timer_->NowMs()));
-  bool inserted = ret.second;
-  return BoolOrError(inserted);
-}
-
-BoolOrError MemFileSystem::TryLockWithTimeout(const StringPiece& lock_name,
-                                              int64 timeout_ms,
-                                              const Timer* timer,
-                                              MessageHandler* handler) {
-  ScopedMutex lock(lock_map_mutex_.get());
-
-  DCHECK_EQ(timer, timer_);
-  int64 now = timer->NowMs();
-  auto ret = lock_map_.insert(std::make_pair(lock_name.as_string(), now));
-  auto iter = ret.first;
-  bool inserted = ret.second;
-  if (inserted) {
-    // Lock wasn't already held, successfully issued.
-    return BoolOrError(true);
-  } else if (now <= iter->second + timeout_ms) {
-    // Lock was held, timeout hasn't expired.
-    return BoolOrError(false);
-  } else {
-    // Steal lock.
-    iter->second = now;
-    return BoolOrError(true);
-  }
-}
-
-bool MemFileSystem::BumpLockTimeout(const StringPiece& lock_name,
-                                    MessageHandler* handler) {
-  ScopedMutex lock(lock_map_mutex_.get());
-
-  auto iter = lock_map_.find(lock_name.as_string());
-  if (iter == lock_map_.end()) {
-    handler->Info(lock_name.as_string().c_str(), 0,
-                  "Failed to bump lock: lock not held");
-    return false;
-  } else {
-    iter->second = timer_->NowMs();
-    return true;
-  }
-}
-
-bool MemFileSystem::Unlock(const StringPiece& lock_name,
-                           MessageHandler* handler) {
-  ScopedMutex lock(lock_map_mutex_.get());
-  return (lock_map_.erase(lock_name.as_string()) == 1);
 }
 
 bool MemFileSystem::WriteFile(const char* filename, const StringPiece& buffer,

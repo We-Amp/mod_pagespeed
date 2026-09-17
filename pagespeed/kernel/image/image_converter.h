@@ -127,7 +127,8 @@ class ImageConverter {
   ImageConverter();
   ~ImageConverter();
 
-  DISALLOW_COPY_AND_ASSIGN(ImageConverter);
+  ImageConverter(const ImageConverter&) = delete;
+  ImageConverter& operator=(const ImageConverter&) = delete;
 };
 
 // Returns a blank PNG image with specified size and transparency.

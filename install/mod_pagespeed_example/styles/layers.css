@@ -1,0 +1,14 @@
+@layer base, components;
+
+@layer base {
+  .layer-critical {
+    color: blue;
+    font-size: 1.25em;
+  }
+}
+
+@layer components {
+  .layer-noncritical {
+    border: 2px solid red;
+  }
+}

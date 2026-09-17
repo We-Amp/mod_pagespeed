@@ -21,12 +21,12 @@
 
 #include "pagespeed/kernel/thread/thread_synchronizer.h"
 
+#include <memory>
+
 #include "base/logging.h"
 ////#include "strings/stringpiece_utils.h"
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/condvar.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
-#include "pagespeed/kernel/base/stl_util.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/base/timer.h"
 
@@ -92,7 +92,8 @@ class ThreadSynchronizer::SyncPoint {
   GoogleString key_;  // for debugging;
   bool allow_sloppy_;
 
-  DISALLOW_COPY_AND_ASSIGN(SyncPoint);
+  SyncPoint(const SyncPoint&) = delete;
+  SyncPoint& operator=(const SyncPoint&) = delete;
 };
 
 ThreadSynchronizer::ThreadSynchronizer(ThreadSystem* thread_system)
@@ -101,17 +102,16 @@ ThreadSynchronizer::ThreadSynchronizer(ThreadSystem* thread_system)
       map_mutex_(thread_system->NewMutex()),
       timer_(thread_system->NewTimer()) {}
 
-ThreadSynchronizer::~ThreadSynchronizer() { STLDeleteValues(&sync_map_); }
+ThreadSynchronizer::~ThreadSynchronizer() = default;
 
 ThreadSynchronizer::SyncPoint* ThreadSynchronizer::GetSyncPoint(
     const GoogleString& key) {
   ScopedMutex lock(map_mutex_.get());
-  SyncPoint* sync_point = sync_map_[key];
+  auto& sync_point = sync_map_[key];
   if (sync_point == nullptr) {
-    sync_point = new SyncPoint(thread_system_, key);
-    sync_map_[key] = sync_point;
+    sync_point = std::make_unique<SyncPoint>(thread_system_, key);
   }
-  return sync_point;
+  return sync_point.get();
 }
 
 void ThreadSynchronizer::DoWait(const char* key) {

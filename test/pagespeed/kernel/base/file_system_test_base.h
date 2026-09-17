@@ -93,6 +93,7 @@ class FileSystemTest : public testing::Test {
   void TestTemp();
   void TestAppend();
   void TestRename();
+  void TestRenameReplace();
   void TestRemove();
   void TestExists();
   void TestCreateFileInDir();
@@ -106,9 +107,6 @@ class FileSystemTest : public testing::Test {
   void TestAtime();
   void TestMtime();
   void TestDirInfo();
-  void TestLock();
-  void TestLockTimeout();
-  void TestLockBumping();
 
   GoogleMessageHandler handler_;
   GoogleString test_tmpdir_;
@@ -117,7 +115,8 @@ class FileSystemTest : public testing::Test {
   // Default file system block size is 4KB.
   static const int kBlockSize = 4096;
 
-  DISALLOW_COPY_AND_ASSIGN(FileSystemTest);
+  FileSystemTest(const FileSystemTest&) = delete;
+  FileSystemTest& operator=(const FileSystemTest&) = delete;
 };
 
 class CountingProgressNotifier : public FileSystem::ProgressNotifier {

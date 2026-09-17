@@ -24,7 +24,6 @@
 #include "base/logging.h"
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/stl_util.h"
 #include "pagespeed/kernel/base/string.h"
 
@@ -48,7 +47,8 @@ class WaitUrlAsyncFetcher::DelayedFetch {
   MessageHandler* handler_;
   AsyncFetch* base_fetch_;
 
-  DISALLOW_COPY_AND_ASSIGN(DelayedFetch);
+  DelayedFetch(const DelayedFetch&) = delete;
+  DelayedFetch& operator=(const DelayedFetch&) = delete;
 };
 
 WaitUrlAsyncFetcher::~WaitUrlAsyncFetcher() {}

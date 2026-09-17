@@ -23,9 +23,10 @@
 #ifndef NET_INSTAWEB_HTTP_PUBLIC_COUNTING_URL_ASYNC_FETCHER_H_
 #define NET_INSTAWEB_HTTP_PUBLIC_COUNTING_URL_ASYNC_FETCHER_H_
 
+#include <memory>
+
 #include "net/instaweb/http/public/url_async_fetcher.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/util/platform.h"
@@ -93,7 +94,8 @@ class CountingUrlAsyncFetcher : public UrlAsyncFetcher {
   std::unique_ptr<ThreadSystem> thread_system_;  // Thread system for mutex.
   std::unique_ptr<AbstractMutex> mutex_;         // Mutex Protect.
 
-  DISALLOW_COPY_AND_ASSIGN(CountingUrlAsyncFetcher);
+  CountingUrlAsyncFetcher(const CountingUrlAsyncFetcher&) = delete;
+  CountingUrlAsyncFetcher& operator=(const CountingUrlAsyncFetcher&) = delete;
 };
 
 }  // namespace net_instaweb

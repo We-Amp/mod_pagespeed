@@ -1,0 +1,48 @@
+<Project>
+
+  <!--
+    Auto-imported into any project that references WeAmp.PageSpeed.Sidecar.NativeAssets.Linux
+    (the filename MUST equal the package id, or NuGet won't import it). Mirrors 2.0's
+    factory_worker chmod target (§7c), renamed for nginx, plus the D4 Linux-only guard.
+  -->
+
+  <!-- MSBuild strips the executable bit when copying content to the output/publish
+       dir, so re-set it on the bundled nginx AND the pagespeed-nginx-launch shim.
+       The .so is dlopen'd, not exec'd. The shim may be absent on an
+       older pair, so its chmods are Exists-guarded and IgnoreExitCode like nginx's. -->
+  <Target Name="WeAmpSidecarSetNginxExecutable"
+          AfterTargets="Build;Publish"
+          Condition="'$(OS)' != 'Windows_NT'">
+    <Exec Command="chmod +x &quot;$(OutputPath)nginx&quot;"
+          IgnoreExitCode="true" StandardErrorImportance="low"
+          Condition="Exists('$(OutputPath)nginx')" />
+    <Exec Command="chmod +x &quot;$(PublishDir)nginx&quot;"
+          IgnoreExitCode="true" StandardErrorImportance="low"
+          Condition="'$(PublishDir)' != '' AND Exists('$(PublishDir)nginx')" />
+    <Exec Command="chmod +x &quot;$(OutputPath)pagespeed-nginx-launch&quot;"
+          IgnoreExitCode="true" StandardErrorImportance="low"
+          Condition="Exists('$(OutputPath)pagespeed-nginx-launch')" />
+    <Exec Command="chmod +x &quot;$(PublishDir)pagespeed-nginx-launch&quot;"
+          IgnoreExitCode="true" StandardErrorImportance="low"
+          Condition="'$(PublishDir)' != '' AND Exists('$(PublishDir)pagespeed-nginx-launch')" />
+  </Target>
+
+  <!-- A framework-dependent publish (no RID) does NOT copy runtimes/<rid>/native/*,
+       so the bundled nginx never lands next to the app and the sidecar fails to start.
+       Warn at publish time and point at the required Linux RID. (Build/run dev loops
+       that use a system/BinaryPath nginx are unaffected — this fires only on Publish.) -->
+  <Target Name="WeAmpSidecarWarnMissingRid" BeforeTargets="Publish"
+          Condition="'$(RuntimeIdentifier)' == ''">
+    <Warning Text="WeAmp.PageSpeed.Sidecar: publishing without a runtime identifier — the bundled nginx binary will NOT be included and the sidecar will fail to start at runtime. Publish with a Linux RID: `dotnet publish -r linux-x64` (or `-r linux-arm64`)." />
+  </Target>
+
+  <!-- D4 RID guard: the sidecar bundles a Linux nginx ELF + a GNU-ld .so, so it
+       supports ONLY linux-x64 / linux-arm64. Fail clearly on any other published
+       RID rather than shipping a package that can't start. (2.0 has no guard
+       because it ships all four RIDs.) -->
+  <Target Name="WeAmpSidecarRidGuard" BeforeTargets="Build;Publish">
+    <Error Condition="'$(RuntimeIdentifier)' != '' AND !$(RuntimeIdentifier.StartsWith('linux-'))"
+           Text="WeAmp.PageSpeed.Sidecar bundles a Linux nginx binary and supports only linux-x64 / linux-arm64. RuntimeIdentifier '$(RuntimeIdentifier)' is not supported — on Windows use the mod_pagespeed IIS module; on macOS, Windows, or containers use WeAmp.PageSpeed.AspNetCore (ModPageSpeed 2.0)." />
+  </Target>
+
+</Project>

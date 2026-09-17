@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<!--
+  SPDX-License-Identifier: Apache-2.0
+  Copyright (c) 2024-2026 We-Amp B.V.
+-->
+
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Local Storage Cache Test</title>
+    <link rel="stylesheet" href="../styles/yellow.css">
+    <link rel="stylesheet" href="../styles/main.css">
+</head>
+<body>
+    <h1>Local Storage Cache Test</h1>
+    <p>This page tests the local_storage_cache filter.</p>
+
+    <p>When combined with inline_css or inline_javascript, the filter should
+       add code to cache the inlined resources in localStorage for faster
+       subsequent page loads.</p>
+
+    <div class="content">
+        <p>Some styled content here.</p>
+    </div>
+
+    <script src="../scripts/example.js"></script>
+</body>
+</html>

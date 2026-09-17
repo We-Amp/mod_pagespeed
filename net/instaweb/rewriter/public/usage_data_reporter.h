@@ -65,7 +65,8 @@ class UsageDataReporter {
                                int64 bandwidth, StringPiece referer) {}
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(UsageDataReporter);
+  UsageDataReporter(const UsageDataReporter&) = delete;
+  UsageDataReporter& operator=(const UsageDataReporter&) = delete;
 };
 
 }  // namespace net_instaweb

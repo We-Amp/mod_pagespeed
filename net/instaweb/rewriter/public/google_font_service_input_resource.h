@@ -68,7 +68,10 @@ class GoogleFontServiceInputResource : public CacheableResourceBase {
   GoogleString user_agent_;
   bool is_https_;
 
-  DISALLOW_COPY_AND_ASSIGN(GoogleFontServiceInputResource);
+  GoogleFontServiceInputResource(const GoogleFontServiceInputResource&) =
+      delete;
+  GoogleFontServiceInputResource& operator=(
+      const GoogleFontServiceInputResource&) = delete;
 };
 
 }  // namespace net_instaweb

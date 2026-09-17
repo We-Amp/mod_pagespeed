@@ -68,7 +68,8 @@ class FileRewriter : public RewriteDriverFactory {
   SimpleStats simple_stats_;
   bool echo_errors_to_stdout_;
 
-  DISALLOW_COPY_AND_ASSIGN(FileRewriter);
+  FileRewriter(const FileRewriter&) = delete;
+  FileRewriter& operator=(const FileRewriter&) = delete;
 };
 
 // Encapsulates the instantiation of a FileRewriter & a simple one-shot
@@ -92,7 +93,8 @@ class StaticRewriter {
   FileRewriter file_rewriter_;
   ServerContext* server_context_;
 
-  DISALLOW_COPY_AND_ASSIGN(StaticRewriter);
+  StaticRewriter(const StaticRewriter&) = delete;
+  StaticRewriter& operator=(const StaticRewriter&) = delete;
 };
 
 }  // namespace net_instaweb

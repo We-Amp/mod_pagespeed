@@ -20,6 +20,7 @@
 #include "pagespeed/kernel/util/threadsafe_lock_manager.h"
 
 #include <cstddef>
+#include <memory>
 #include <set>
 #include <utility>
 #include <vector>
@@ -29,7 +30,6 @@
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/function.h"
 #include "pagespeed/kernel/base/ref_counted_ptr.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/thread_annotations.h"
 #include "pagespeed/kernel/base/thread_system.h"
@@ -48,7 +48,7 @@ class ThreadSafeLockManager::LockHolder : public RefCounted<LockHolder> {
   class ScopedLockRunningDelayedCallbacks;
   friend class ScopedLockRunningDelayedCallbacks;
   friend class Lock;  // Needed by thread annotation for mutex_.
-  typedef std::set<Lock*> LockSet;
+  using LockSet = std::set<Lock*>;
   using DelayedCall = std::pair<Function*, bool>;
   using DelayedCalls = std::vector<DelayedCall>;
 
@@ -66,7 +66,7 @@ class ThreadSafeLockManager::LockHolder : public RefCounted<LockHolder> {
   void ManagerDestroyed();
 
   // Reschedules any outstanding alarms if the wakeup time has changed.
-  void UpdateAlarmMutexHeldAndRelease() UNLOCK_FUNCTION() {
+  void UpdateAlarmMutexHeldAndRelease() UNLOCK_FUNCTION(mutex_) {
     int64 wakeup_time_us = kWakeupNotSet;
     if (manager_ != nullptr) {
       int64 wakeup_time_ms = manager_->NextWakeupTimeMs();
@@ -310,7 +310,11 @@ void ThreadSafeLockManager::LockHolder::CancelAlarmSchedulerLockHeld() {
   }
 }
 
-void ThreadSafeLockManager::LockHolder::ManagerDestroyed() {
+// The thread-safety analyzer can't determine that each Lock's
+// lock_holder_->mutex_ is the same as this->mutex_ held by
+// ScopedLockRunningDelayedCallbacks.
+void ThreadSafeLockManager::LockHolder::ManagerDestroyed()
+    NO_THREAD_SAFETY_ANALYSIS {
   {
     ScopedMutex lock(scheduler_->mutex());
     CancelAlarmSchedulerLockHeld();

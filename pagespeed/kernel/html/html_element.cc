@@ -20,9 +20,11 @@
 #include "pagespeed/kernel/html/html_element.h"
 
 #include <cstdio>
+#include <cstring>
+#include <functional>
+#include <memory>
 
 #include "base/logging.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/html/html_event.h"
@@ -34,7 +36,7 @@ namespace net_instaweb {
 HtmlElement::HtmlElement(HtmlElement* parent, const HtmlName& name,
                          const HtmlEventListIterator& begin,
                          const HtmlEventListIterator& end)
-    : HtmlNode(parent), data_(new Data(name, begin, end)) {}
+    : HtmlNode(parent), data_(std::make_unique<Data>(name, begin, end)) {}
 
 HtmlElement::~HtmlElement() {}
 
@@ -119,63 +121,87 @@ const HtmlElement::Attribute* HtmlElement::FindAttribute(
 
 GoogleString HtmlElement::ToString() const {
   GoogleString buf;
-  StrAppend(&buf, "<", data_->name_.value());
+
+  // Estimate size to reduce allocations: tag name + attributes + closing +
+  // line numbers. Most elements are small, but reserve a reasonable baseline.
+  size_t estimated_size = 64;  // Base estimate for small elements
+  StringPiece tag_name = data_->name_.value();
+  estimated_size += tag_name.size() * 2;  // Tag appears up to twice
+  for (AttributeConstIterator iter = attributes().begin();
+       iter != attributes().end(); ++iter) {
+    const Attribute& attribute = *iter;
+    estimated_size += attribute.name_str().size() + 4;  // name + ' =' + quotes
+    const char* escaped = attribute.escaped_value();
+    if (escaped != nullptr) {
+      estimated_size += strlen(escaped);
+    }
+  }
+  buf.reserve(estimated_size);
+
+  StrAppend(&buf, "<", tag_name);
 
   for (AttributeConstIterator iter = attributes().begin();
        iter != attributes().end(); ++iter) {
     const Attribute& attribute = *iter;
-    StrAppend(&buf, " ", attribute.name_str());
     const char* value = attribute.DecodedValueOrNull();
     if (attribute.decoding_error()) {
       // This is a debug method; not used in serialization.
-      buf += "<DECODING ERROR>";
+      StrAppend(&buf, " ", attribute.name_str(), "<DECODING ERROR>");
     } else if (value != nullptr) {
-      buf += "=";
       const char* quote = attribute.quote_str();
-      buf += quote;
-      buf += value;
-      buf += quote;
+      StrAppend(&buf, " ", attribute.name_str(), "=", quote, value, quote);
+    } else {
+      StrAppend(&buf, " ", attribute.name_str());
     }
   }
+
   switch (data_->style_) {
     case AUTO_CLOSE:
-      buf += "> (not yet closed)";
+      StrAppend(&buf, "> (not yet closed)");
       break;
     case IMPLICIT_CLOSE:
-      buf += ">";
+      StrAppend(&buf, ">");
       break;
     case EXPLICIT_CLOSE:
-      StrAppend(&buf, "></", data_->name_.value(), ">");
+      StrAppend(&buf, "></", tag_name, ">");
       break;
     case BRIEF_CLOSE:
-      buf += "/>";
+      StrAppend(&buf, "/>");
       break;
     case UNCLOSED:
-      buf += "> (unclosed)";
+      StrAppend(&buf, "> (unclosed)");
       break;
     case INVISIBLE:
-      buf += "> (invisible)";
+      StrAppend(&buf, "> (invisible)");
       break;
   }
-  if ((data_->begin_line_number_ != Data::kMaxLineNumber) ||
-      (data_->end_line_number_ != Data::kMaxLineNumber)) {
-    buf += " ";
-    if (data_->begin_line_number_ != Data::kMaxLineNumber) {
-      buf += IntegerToString(data_->begin_line_number_);
-    }
-    buf += "...";
-    if (data_->end_line_number_ != Data::kMaxLineNumber) {
-      buf += IntegerToString(data_->end_line_number_);
-    }
+
+  const bool has_begin_line =
+      (data_->begin_line_number_ != Data::kMaxLineNumber);
+  const bool has_end_line = (data_->end_line_number_ != Data::kMaxLineNumber);
+  if (has_begin_line && has_end_line) {
+    StrAppend(&buf, " ", data_->begin_line_number_, "...",
+              data_->end_line_number_);
+  } else if (has_begin_line) {
+    StrAppend(&buf, " ", data_->begin_line_number_, "...");
+  } else if (has_end_line) {
+    StrAppend(&buf, " ...", data_->end_line_number_);
   }
+
   return buf;
 }
 
 void HtmlElement::DebugPrint() const { puts(ToString().c_str()); }
 
 void HtmlElement::AddAttribute(const Attribute& src_attr) {
-  Attribute* attr = new Attribute(src_attr.name(), src_attr.escaped_value(),
-                                  src_attr.quote_style());
+  // escaped_value() returns nullptr for valueless attributes (e.g.
+  // <tag disabled>); constructing a StringPiece from a null const char*
+  // is undefined behavior, so handle the null case explicitly.
+  const char* escaped_value = src_attr.escaped_value();
+  StringPiece escaped_sp =
+      (escaped_value != nullptr) ? StringPiece(escaped_value) : StringPiece();
+  Attribute* attr =
+      new Attribute(src_attr.name(), escaped_sp, src_attr.quote_style());
   if (src_attr.decoded_value_computed_) {
     attr->decoded_value_computed_ = true;
     attr->decoding_error_ = src_attr.decoding_error_;
@@ -204,7 +230,7 @@ void HtmlElement::AddEscapedAttribute(const HtmlName& name,
 }
 
 void HtmlElement::Attribute::CopyValue(const StringPiece& src,
-                                       scoped_array<char>* dst) {
+                                       std::unique_ptr<char[]>* dst) {
   if (src.data() == nullptr) {
     // This case indicates attribute without value <tag attr>, as opposed
     // to data()=="", which implies an empty value <tag attr=>.
@@ -236,15 +262,22 @@ void HtmlElement::Attribute::SetValue(const StringPiece& decoded_value) {
   // is a substring of value_.  This copies the value just prior
   // to deallocation of the old value_.
   const char* escaped_chars = escaped_value_.get();
-  DCHECK(decoded_value.data() + decoded_value.size() < escaped_chars ||
-         escaped_chars + strlen(escaped_chars) < decoded_value.data())
+  // escaped_chars is nullptr for valueless attributes (e.g. <tag disabled>),
+  // and comparing unrelated pointers with operator< is undefined behavior,
+  // so use std::less for the overlap check.
+  DCHECK(escaped_chars == nullptr ||
+         std::less<const char*>()(decoded_value.data() + decoded_value.size(),
+                                  escaped_chars) ||
+         std::less<const char*>()(escaped_chars + strlen(escaped_chars),
+                                  decoded_value.data()))
       << "Setting unescaped value from substring of escaped value.";
   CopyValue(HtmlKeywords::Escape(decoded_value, &buf), &escaped_value_);
   CopyValue(decoded_value, &decoded_value_);
+  decoded_value_computed_ = true;
+  decoding_error_ = false;
 }
 
 void HtmlElement::Attribute::SetEscapedValue(const StringPiece& escaped_value) {
-  GoogleString buf;
   // Note that we execute the lines in this order in case value
   // is a substring of value_.  This copies the value just prior
   // to deallocation of the old value_.
@@ -275,6 +308,13 @@ const char* HtmlElement::Attribute::quote_str() const {
 }
 
 void HtmlElement::Attribute::ComputeDecodedValue() const {
+  if (escaped_value_.get() == nullptr) {
+    // Valueless attribute (e.g. <input disabled>): no value to decode.
+    decoded_value_.reset();
+    decoding_error_ = false;
+    decoded_value_computed_ = true;
+    return;
+  }
   GoogleString buf;
   StringPiece unescaped_value =
       HtmlKeywords::Unescape(escaped_value_.get(), &buf, &decoding_error_);

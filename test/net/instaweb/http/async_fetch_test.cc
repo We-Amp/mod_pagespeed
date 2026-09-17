@@ -22,6 +22,7 @@
 #include "net/instaweb/http/public/request_context.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/null_mutex.h"
+#include "pagespeed/kernel/base/shared_string.h"
 #include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/http_options.h"
 #include "pagespeed/kernel/http/response_headers.h"
@@ -39,7 +40,36 @@ class TestSharedAsyncFetch : public SharedAsyncFetch {
   ~TestSharedAsyncFetch() override {}
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(TestSharedAsyncFetch);
+  TestSharedAsyncFetch(const TestSharedAsyncFetch&) = delete;
+  TestSharedAsyncFetch& operator=(const TestSharedAsyncFetch&) = delete;
+};
+
+// Records whether the body arrived over the shared-storage write path (and
+// from where), in addition to buffering it like StringAsyncFetch.
+class SharedCapturingAsyncFetch : public StringAsyncFetch {
+ public:
+  explicit SharedCapturingAsyncFetch(const RequestContextPtr& ctx)
+      : StringAsyncFetch(ctx), shared_writes_(0), last_shared_data_(nullptr) {}
+
+  int shared_writes() const { return shared_writes_; }
+  const char* last_shared_data() const { return last_shared_data_; }
+
+ protected:
+  bool HandleWriteShared(const StringPiece& content,
+                         const SharedString& storage,
+                         MessageHandler* handler) override {
+    ++shared_writes_;
+    last_shared_data_ = content.data();
+    return HandleWrite(content, handler);
+  }
+
+ private:
+  int shared_writes_;
+  const char* last_shared_data_;
+
+  SharedCapturingAsyncFetch(const SharedCapturingAsyncFetch&) = delete;
+  SharedCapturingAsyncFetch& operator=(const SharedCapturingAsyncFetch&) =
+      delete;
 };
 
 // Tests the AsyncFetch class and some of its derivations.
@@ -112,6 +142,55 @@ TEST_F(AsyncFetchTest, LackOfContentLengthPropagatesToConditional) {
   EXPECT_FALSE(fetch.content_length_known());
   fetch.HeadersComplete();
   EXPECT_FALSE(string_fetch_.content_length_known());
+}
+
+TEST_F(AsyncFetchTest, WriteSharedDefaultCopies) {
+  string_fetch_.response_headers()->set_status_code(HttpStatus::kOK);
+  SharedString storage("shared body");
+  EXPECT_TRUE(string_fetch_.WriteShared(storage.Value(), storage, &handler_));
+  EXPECT_EQ("shared body", string_fetch_.buffer());
+  EXPECT_TRUE(string_fetch_.headers_complete());
+}
+
+TEST_F(AsyncFetchTest, WriteSharedSkipsBodyForHead) {
+  string_fetch_.request_headers()->set_method(RequestHeaders::kHead);
+  string_fetch_.response_headers()->set_status_code(HttpStatus::kOK);
+  SharedString storage("shared body");
+  EXPECT_TRUE(string_fetch_.WriteShared(storage.Value(), storage, &handler_));
+  EXPECT_TRUE(string_fetch_.buffer().empty());
+}
+
+TEST_F(AsyncFetchTest, WriteSharedForwardsReferenceThroughShared) {
+  SharedCapturingAsyncFetch capturing_fetch(request_context_);
+  TestSharedAsyncFetch fetch(&capturing_fetch);
+  fetch.response_headers()->set_status_code(HttpStatus::kOK);
+  SharedString storage("shared body");
+  EXPECT_TRUE(fetch.WriteShared(storage.Value(), storage, &handler_));
+  EXPECT_EQ("shared body", capturing_fetch.buffer());
+  EXPECT_EQ(1, capturing_fetch.shared_writes());
+  // The pass-through wrapper must forward the reference, not a copy.
+  EXPECT_EQ(storage.Value().data(), capturing_fetch.last_shared_data());
+}
+
+TEST_F(AsyncFetchTest, WriteSharedDroppedWhileServingFallback) {
+  ResponseHeaders fallback_headers;
+  fallback_headers.set_major_version(1);
+  fallback_headers.set_minor_version(1);
+  fallback_headers.SetStatusAndReason(HttpStatus::kOK);
+  fallback_value_.SetHeaders(&fallback_headers);
+  fallback_value_.Write("stale body", &handler_);
+  // Heap-allocated: FallbackSharedAsyncFetch deletes itself in HandleDone.
+  FallbackSharedAsyncFetch* fetch =
+      new FallbackSharedAsyncFetch(&string_fetch_, &fallback_value_, &handler_);
+  fetch->response_headers()->set_status_code(HttpStatus::kInternalServerError);
+  fetch->HeadersComplete();
+  ASSERT_TRUE(fetch->serving_fallback());
+  SharedString storage("origin body");
+  EXPECT_TRUE(fetch->WriteShared(storage.Value(), storage, &handler_));
+  // The origin's bytes must be dropped, leaving only the fallback body.
+  EXPECT_EQ("stale body", string_fetch_.buffer());
+  fetch->Done(false);
+  EXPECT_TRUE(string_fetch_.success());
 }
 
 TEST_F(AsyncFetchTest, ContentLengthPropagatesToConditional) {

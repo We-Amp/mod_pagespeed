@@ -20,10 +20,11 @@
 #ifndef PAGESPEED_KERNEL_BASE_CHECKING_THREAD_SYSTEM_H_
 #define PAGESPEED_KERNEL_BASE_CHECKING_THREAD_SYSTEM_H_
 
+#include <memory>
+
 #include "pagespeed/kernel/base/atomic_bool.h"
 #include "pagespeed/kernel/base/atomic_int32.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/thread_annotations.h"
 #include "pagespeed/kernel/base/thread_system.h"
 
@@ -77,7 +78,8 @@ class CheckingThreadSystem : public ThreadSystem {
 
     std::unique_ptr<ThreadSystem::CondvarCapableMutex> mutex_;
     AtomicBool locked_;
-    DISALLOW_COPY_AND_ASSIGN(Mutex);
+    Mutex(const Mutex&) = delete;
+    Mutex& operator=(const Mutex&) = delete;
   };
 
   // We also expose CheckingThreadSystem::RWLock, which wraps a
@@ -108,7 +110,8 @@ class CheckingThreadSystem : public ThreadSystem {
 
     std::unique_ptr<ThreadSystem::RWLock> lock_;
     AtomicInt32 locked_;
-    DISALLOW_COPY_AND_ASSIGN(RWLock);
+    RWLock(const RWLock&) = delete;
+    RWLock& operator=(const RWLock&) = delete;
   };
 
   explicit CheckingThreadSystem(ThreadSystem* thread_system)
@@ -128,7 +131,8 @@ class CheckingThreadSystem : public ThreadSystem {
   ThreadImpl* NewThreadImpl(Thread* wrapper, ThreadFlags flags) override;
 
   std::unique_ptr<ThreadSystem> thread_system_;
-  DISALLOW_COPY_AND_ASSIGN(CheckingThreadSystem);
+  CheckingThreadSystem(const CheckingThreadSystem&) = delete;
+  CheckingThreadSystem& operator=(const CheckingThreadSystem&) = delete;
 };
 
 }  // namespace net_instaweb

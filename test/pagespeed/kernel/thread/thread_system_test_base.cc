@@ -19,6 +19,8 @@
 
 // This contains very basic smoke tests for ThreadSystem subclass operation
 
+#include <memory>
+
 #include "test/pagespeed/kernel/thread/thread_system_test_base.h"
 
 #include "pagespeed/kernel/base/abstract_mutex.h"  // for ScopedMutex, etc

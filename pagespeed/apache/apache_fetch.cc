@@ -20,16 +20,42 @@
 #include "pagespeed/apache/apache_fetch.h"
 
 #include <algorithm>
+#include <atomic>
 
 #include "base/logging.h"
+#include "net/instaweb/rewriter/public/server_context.h"
+#include "pagespeed/apache/apache_mmap_bucket.h"
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/basictypes.h"
+#include "pagespeed/kernel/base/mapped_shared_string.h"
+#include "pagespeed/kernel/base/statistics.h"
+#include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/thread/scheduler_sequence.h"
+#include "pagespeed/system/system_rewrite_options.h"
 
 namespace net_instaweb {
+
+namespace {
+
+// Emit-time forced-wrap margin for the lease-pinned zero-copy serve: if a
+// ceiling-forced wrap -- which ignores the read lease -- is already
+// reachable within this window when the body is emitted, the stripe is too
+// contended to alias; serve a verified copy instead.  Strictly larger than
+// the bucket's read-barrier margin so an admitted serve is never de-aliased
+// (and double-counted) by its very first read.
+const uint64_t kEmitMarginNs = 2 * kMmapAliasReadBarrierMarginNs;
+
+// Whether the opted-in-but-ineligible diagnosis was already logged.  An
+// ineligible chain disqualifies EVERY serve on it, so the log names the
+// first blocker once per process and the zerocopy_serve_ineligible counter
+// carries the ongoing signal (without either, the degrade was
+// indistinguishable from a dead code path).
+std::atomic<bool> ineligible_serve_logged{false};
+
+}  // namespace
 
 ApacheFetch::ApacheFetch(const GoogleString& mapped_url, StringPiece debug_info,
                          RewriteDriver* driver, ApacheWriter* apache_writer,
@@ -45,6 +71,7 @@ ApacheFetch::ApacheFetch(const GoogleString& mapped_url, StringPiece debug_info,
       wait_called_(false),
       handle_error_(true),
       squelch_output_(false),
+      headers_sent_(false),
       status_ok_(false),
       is_proxy_(false),
       buffered_(true),
@@ -120,8 +147,14 @@ void ApacheFetch::SendOutHeaders() {
 
     // TODO(sligocki): Add X-Mod-Pagespeed header.
 
-    // Default cache-control to nocache.
-    if (!response_headers()->Has(HttpAttributes::kCacheControl)) {
+    // Default cache-control to nocache.  304 and 204 responses are exempt,
+    // like they are for the Content-Type check above: introducing a
+    // Cache-Control on a 304 that the full response never had would make
+    // clients update their stored response with it (RFC 7232 section 4.1),
+    // e.g. poisoning a long-TTL .pagespeed. resource with no-cache.
+    if ((status_code != HttpStatus::kNotModified) &&
+        (status_code != HttpStatus::kNoContent) &&
+        !response_headers()->Has(HttpAttributes::kCacheControl)) {
       response_headers()->Add(HttpAttributes::kCacheControl,
                               HttpAttributes::kNoCacheMaxAge0);
     }
@@ -131,6 +164,7 @@ void ApacheFetch::SendOutHeaders() {
       apache_writer_->set_content_length(content_length());
     }
     apache_writer_->OutputHeaders(response_headers());
+    headers_sent_ = true;
     if (!error_message.empty()) {
       if (buffered_) {
         error_message.CopyToString(&output_bytes_);
@@ -139,6 +173,12 @@ void ApacheFetch::SendOutHeaders() {
       }
       squelch_output_ = true;
     }
+  } else {
+    // We are not handling this error response; the caller will answer the
+    // request itself after Wait().  Suppress any output the fetch may still
+    // produce: nothing may be written to the ApacheWriter before
+    // OutputHeaders(), and we must not emit a second response's bytes.
+    squelch_output_ = true;
   }
 }
 
@@ -165,6 +205,174 @@ void ApacheFetch::HandleDone(bool success) {
   }
 }
 
+bool ApacheFetch::WriteMapped(const StringPiece& mmap_sp,
+                              const MappedSharedString& keepalive,
+                              MessageHandler* handler) {
+  // Complete headers even for an empty body, mirroring AsyncFetch::Write's
+  // contract (headers-complete precedes any body decision).
+  if (!headers_complete()) {
+    HeadersComplete();
+  }
+  if (mmap_sp.empty()) {
+    return true;  // Mirror Write(): empty writes are no-ops.
+  }
+  if (request_headers()->method() == RequestHeaders::kHead) {
+    return true;  // Mirror Write(): no body bytes on a HEAD response.
+  }
+  if (squelch_output_) {
+    return true;  // Suppressing further output after an error message.
+  }
+  // Apache posture: the aliased sink is opt-in experimental.  The engine
+  // routes mapped bytes here whenever CycloneZeroCopyServe is enabled
+  // (default on for the nginx GA), but Apache aliases only when the option
+  // was EXPLICITLY configured on; otherwise it serves a verified copy.
+  bool alias_opted_in = false;
+  {
+    ScopedMutex lock(scheduler_->mutex());
+    // Plain dynamic_cast, not SystemRewriteOptions::DynamicCast: the
+    // latter DCHECKs non-null, but a bare RewriteOptions (no system scope,
+    // e.g. under test) simply means there is no opt-in.
+    const SystemRewriteOptions* system_options =
+        dynamic_cast<const SystemRewriteOptions*>(options_);
+    alias_opted_in = system_options != nullptr &&
+                     system_options->cyclone_zero_copy_serve() &&
+                     system_options->has_cyclone_zero_copy_serve();
+  }
+  Statistics* stats = driver_->server_context()->statistics();
+  Variable* aliased_stat = stats != nullptr
+                               ? stats->FindVariable("zerocopy_serve_aliased")
+                               : nullptr;
+  Variable* copied_stat = stats != nullptr
+                              ? stats->FindVariable("zerocopy_serve_copied_out")
+                              : nullptr;
+  Variable* renew_fail_stat =
+      stats != nullptr ? stats->FindVariable("zerocopy_serve_renew_fail_reset")
+                       : nullptr;
+  // Alias only a committed, verbatim 200 on the unbuffered request-thread
+  // streaming path.  RequestServesBodyVerbatim() excludes subrequests,
+  // header-only, Range, and any output filter (deflate/ssl/http2/unknown)
+  // that could transform, re-slice, or retain the aliased bytes.  An
+  // opted-in serve that fails these gates is counted (and its first
+  // blocker logged once per process): the operator asked for aliasing and
+  // is not getting it, and without the signal that degrade reads as
+  // aliased=0/copied_out=0 -- a dead path.
+  bool alias_eligible = false;
+  if (alias_opted_in) {
+    GoogleString blocker;
+    if (buffered_) {
+      blocker = "buffered (non-streaming) fetch";
+    } else if (!headers_sent_) {
+      blocker = "headers not sent before body";
+    } else if (response_headers()->status_code() != HttpStatus::kOK) {
+      blocker =
+          StrCat("status ", IntegerToString(response_headers()->status_code()),
+                 " (only 200 aliases)");
+    } else {
+      // Let self-dispatching filters settle against the committed
+      // response before the walk: a mod_filter harness
+      // (AddOutputFilterByType / FilterChain) sits in EVERY request's
+      // output chain until the first brigade, then dispatches on the
+      // response and removes itself when no provider matches.  One empty
+      // brigade runs exactly that dispatch, so an unmatched harness
+      // (e.g. a by-type DEFLATE harness on an image response) leaves the
+      // chain before the walk, while a matched harness stays and
+      // correctly disqualifies aliasing.
+      apache_writer_->SettleOutputFilters();
+      if (apache_writer_->RequestServesBodyVerbatim(&blocker)) {
+        alias_eligible = true;
+      }
+    }
+    if (!alias_eligible) {
+      Variable* ineligible_stat =
+          stats != nullptr ? stats->FindVariable("zerocopy_serve_ineligible")
+                           : nullptr;
+      if (ineligible_stat != nullptr) {
+        ineligible_stat->Add(1);
+      }
+      if (!ineligible_serve_logged.exchange(true)) {
+        message_handler_->Message(
+            kInfo,
+            "CycloneZeroCopyServe: serve for %s is not alias-eligible (%s); "
+            "serving a verified copy. Counted in zerocopy_serve_ineligible; "
+            "logged once per process.",
+            mapped_url_.c_str(), blocker.c_str());
+      }
+    }
+  }
+  if (alias_eligible) {
+    // Emit-time aliasing decision (intent-checked).  RenewLeaseStrict()
+    // stamps a fresh lease AND revalidates the borrow, the same protocol
+    // the initial cache read used; kOk means no wrap can overwrite the
+    // region while the lease stays renewed, which the bucket's read()
+    // barrier does before every send.
+    const LeaseRenewal verdict = keepalive.RenewLeaseStrict();
+    if (verdict == LeaseRenewal::kOk &&
+        keepalive.NsUntilForcedWrap() > kEmitMarginNs) {
+      if (aliased_stat != nullptr) {
+        aliased_stat->Add(1);
+      }
+      return apache_writer_->WriteMappedAliased(mmap_sp, keepalive, copied_stat,
+                                                renew_fail_stat, handler);
+    }
+    if (verdict == LeaseRenewal::kTorn) {
+      // The borrow was already overwritten: there are no correct bytes to
+      // serve.  Headers (with Content-Length) are on the wire, so fail
+      // closed by aborting the connection -- never a corrupt-but-complete
+      // body.
+      if (renew_fail_stat != nullptr) {
+        renew_fail_stat->Add(1);
+      }
+      apache_writer_->AbortConnection();
+      return false;
+    }
+    // kCopyNow (wrap in flight, region intact), kLeasesOff (no lease
+    // protection), or a forced wrap within the margin: fall through to the
+    // verified copy.
+  }
+  // De-alias by copying, with the copy-then-verify protocol
+  // (CopyMappedVerified): a forced wrap ignores the lease and can race the
+  // memcpy, so the borrow is re-checked AFTER the bytes were copied.  kTorn
+  // fails closed; kOk/kCopyNow (region intact) and kLeasesOff (legacy, no
+  // protection) serve the copy -- leases-off must never turn every serve
+  // into a reset.
+  GoogleString owned;
+  if (!CopyMappedVerified(mmap_sp, keepalive, &owned)) {
+    if (renew_fail_stat != nullptr) {
+      renew_fail_stat->Add(1);
+    }
+    if (headers_sent_) {
+      // The response (and its Content-Length promise) is committed: abort
+      // the connection so the truncation is unambiguous on the wire.
+      apache_writer_->AbortConnection();
+    } else {
+      // Uncommitted (buffered, or a suppressed-error flow that never sent
+      // headers): poison the response so Wait()/SendOutHeaders can never
+      // emit the promised 200 over a missing body.  A torn borrow has no
+      // correct bytes; a clean 200 + Content-Length + empty body would be
+      // a corrupt-but-complete response, the exact class this feature must
+      // never produce.
+      response_headers()->SetStatusAndReason(HttpStatus::kInternalServerError);
+      // Drop the cached 200's freshness headers: a poisoned 500 carrying
+      // "public, max-age=..." could be stored by an intermediary.  With
+      // Cache-Control absent, SendOutHeaders adds no-cache.
+      response_headers()->RemoveAll(HttpAttributes::kCacheControl);
+      response_headers()->RemoveAll(HttpAttributes::kExpires);
+      set_content_length(kContentLengthUnknown);
+      output_bytes_.clear();
+      squelch_output_ = true;
+    }
+    return false;
+  }
+  // The copied-out counter tracks the read-side degradation of
+  // alias-ELIGIBLE serves only (mirroring the nginx sink); the ordinary
+  // not-opted-in verified copy is this port's classic serve, not a
+  // degrade.
+  if (alias_eligible && copied_stat != nullptr) {
+    copied_stat->Add(1);
+  }
+  return Write(owned, handler);
+}
+
 bool ApacheFetch::HandleWrite(const StringPiece& sp, MessageHandler* handler) {
   if (squelch_output_) {
     return true;  // Suppressing further output after writing error message.
@@ -176,8 +384,10 @@ bool ApacheFetch::HandleWrite(const StringPiece& sp, MessageHandler* handler) {
 }
 
 bool ApacheFetch::HandleFlush(MessageHandler* handler) {
-  if (buffered_) {
-    return true;  // Don't pass flushes through.
+  if (squelch_output_ || buffered_) {
+    // Don't pass flushes through when buffering, and never touch the
+    // ApacheWriter for a squelched (suppressed error) response.
+    return true;
   }
   return apache_writer_->Flush(handler);
 }
@@ -228,7 +438,9 @@ void ApacheFetch::Wait() {
   }
   if (buffered_) {
     SendOutHeaders();
-    if (!output_bytes_.empty()) {
+    // Only write the body if headers actually went out; when handle_error_
+    // is false and the response was an error, nothing may be sent.
+    if (headers_sent_ && !output_bytes_.empty()) {
       apache_writer_->Write(output_bytes_, message_handler_);
     }
   }

@@ -104,12 +104,14 @@ InsertGAFilter::~InsertGAFilter() {}
 bool InsertGAFilter::StringLiteralMatches(StringPiece literal,
                                           StringPiece desired) {
   // Literal includes the beginning and ending quotes; need to exclude them.
+  if (literal.size() < 2) return false;
   return literal.substr(1, literal.size() - 2) == desired;
 }
 
 bool InsertGAFilter::StringLiteralEndsWith(StringPiece literal,
                                            StringPiece desired) {
   // Literal includes the beginning and ending quotes; need to exclude them.
+  if (literal.size() < 2) return false;
   return literal.substr(1, literal.size() - 2).ends_with(desired);
 }
 
@@ -118,6 +120,7 @@ void InsertGAFilter::StartDocumentImpl() {
   script_element_ = nullptr;
   added_analytics_js_ = false;
   added_experiment_snippet_ = false;
+  seen_sync_ga_js_ = false;
   if (driver()->options()->running_experiment()) {
     driver()->message_handler()->Message(
         kInfo, "run_experiment: %s",
@@ -155,7 +158,8 @@ InsertGAFilter::AnalyticsStatus InsertGAFilter::FindSnippetInScript(
   if (s.find(".google-analytics.com/urchin.js") != GoogleString::npos) {
     return kUnusableSnippetFound;  // urchin.js is too old.
   } else if (s.find(".google-analytics.com/ga.js") != GoogleString::npos ||
-             s.find("stats.g.doubleclick.net/dc.js") != GoogleString::npos) {
+             s.find("stats.g.doubleclick.net/dc.js") !=
+                 GoogleString::npos) {  // NOLINT(bugprone-branch-clone)
     // With the async snippet there is one part that first loads ga.js
     // (using [.google-analytics.com/ga.js], with initial dot) and then has the
     // ga_id (which we checked for above).
@@ -166,7 +170,8 @@ InsertGAFilter::AnalyticsStatus InsertGAFilter::FindSnippetInScript(
     // loading then one to do the initialization and page tracking.  We want to
     // process the second one.
     return kGaJs;  // Syncronous ga.js
-  } else if (s.find(".google-analytics.com/analytics.js")) {
+  } else if (s.find(".google-analytics.com/analytics.js") !=
+             GoogleString::npos) {
     return kAnalyticsJs;
   }
   return kUnusableSnippetFound;
@@ -209,6 +214,11 @@ GoogleString InsertGAFilter::GaJsExperimentSnippet() const {
 // data being lost.
 void InsertGAFilter::EndDocument() {
   if (found_snippet_ || added_analytics_js_ || ga_id_.empty()) {
+    return;
+  }
+  if (!CspPermitsInlineScript()) {
+    // The GA snippet is injected as an inline script, which the page's
+    // CSP forbids; the browser would never run it.
     return;
   }
 
@@ -328,7 +338,8 @@ void InsertGAFilter::RewriteInlineScript(HtmlCharactersNode* characters) {
       }
       if (token_type == pagespeed::JsKeywords::kComment ||
           token_type == pagespeed::JsKeywords::kWhitespace ||
-          token_type == pagespeed::JsKeywords::kLineSeparator) {
+          token_type == pagespeed::JsKeywords::
+                            kLineSeparator) {  // NOLINT(bugprone-branch-clone)
         // All states allow these, so stay in the same state.  kLineSeparator is
         // specifically for newlines that don't trigger semicolon insertion.
       } else if (state == kInitial &&
@@ -342,7 +353,8 @@ void InsertGAFilter::RewriteInlineScript(HtmlCharactersNode* characters) {
         state = kGotGaFuncCall;
       } else if (state == kGotGaFuncCall &&
                  token_type == pagespeed::JsKeywords::kStringLiteral &&
-                 StringLiteralMatches(token, "create")) {
+                 StringLiteralMatches(
+                     token, "create")) {  // NOLINT(bugprone-branch-clone)
         state = kGotGaCreate;
       } else if (state == kGotGaFuncCall &&
                  token_type == pagespeed::JsKeywords::kStringLiteral &&
@@ -473,9 +485,13 @@ void InsertGAFilter::EndElementImpl(HtmlElement* element) {
   }
 }
 
-void InsertGAFilter::Characters(HtmlCharactersNode* characters) {
+void InsertGAFilter::CharactersImpl(HtmlCharactersNode* characters) {
+  // Don't touch existing inline scripts when the page's CSP forbids inline
+  // script execution: editing one would invalidate a hash-sourced
+  // allowance, and the ga.js content-experiment path re-injects the script
+  // body as new inline scripts the browser would block.
   if (script_element_ != nullptr && !found_snippet_ &&
-      !added_experiment_snippet_) {
+      !added_experiment_snippet_ && CspPermitsInlineScript()) {
     RewriteInlineScript(characters);
   }
 }

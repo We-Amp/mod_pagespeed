@@ -21,11 +21,11 @@
 #define PAGESPEED_KERNEL_SHAREDMEM_SHARED_DYNAMIC_STRING_MAP_H_
 
 #include <cstddef>
+#include <memory>
 
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/abstract_shared_mem.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 
@@ -230,7 +230,8 @@ class SharedDynamicStringMap {
   AbstractSharedMem* shm_runtime_;
   std::unique_ptr<AbstractSharedMemSegment> segment_;
 
-  DISALLOW_COPY_AND_ASSIGN(SharedDynamicStringMap);
+  SharedDynamicStringMap(const SharedDynamicStringMap&) = delete;
+  SharedDynamicStringMap& operator=(const SharedDynamicStringMap&) = delete;
 };
 
 }  // namespace net_instaweb

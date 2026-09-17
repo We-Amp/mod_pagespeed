@@ -23,12 +23,12 @@
 #define PAGESPEED_KERNEL_CACHE_CACHE_TEST_BASE_H_
 
 #include <vector>
+#include <memory>
 
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/cache_interface.h"
 #include "pagespeed/kernel/base/null_mutex.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/shared_string.h"
 #include "pagespeed/kernel/base/stl_util.h"
 #include "pagespeed/kernel/base/string.h"
@@ -98,7 +98,8 @@ class CacheTestBase : public testing::Test {
     const char* invalid_value_;
     const char* invalid_key_;
 
-    DISALLOW_COPY_AND_ASSIGN(Callback);
+    Callback(const Callback&) = delete;
+    Callback& operator=(const Callback&) = delete;
   };
 
  protected:

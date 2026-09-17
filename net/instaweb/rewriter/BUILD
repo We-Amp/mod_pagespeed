@@ -1,154 +1,69 @@
 load("@rules_proto//proto:defs.bzl", "proto_library")
 load("@rules_cc//cc:defs.bzl", "cc_library", "cc_proto_library")
-load("//bazel:data2c.bzl", "data2c_gen2", "data2c_gen2_opt")
-load("//bazel:closure_compiler.bzl", "closure_compiler_gen", "closure_compiler_without_dependency_mode")
 
 licenses(["notice"])  # Apache 2
 
-closure_compiler_gen(
-    name = "critical_css_loader_dbg",
-    entry_points = [
-        "goog:pagespeed.CriticalCssLoader",
-    ],
-    js_dir = "rewriter",
-    js_includes = [
-        "net/instaweb/js/js_utils.js",
-    ],
-    js_src = "net/instaweb/rewriter/critical_css_loader.js",
-    opt = False,
-)
+# Pre-compiled JS embedded as C++ string constants live in generated/.
+# Source JS: *.js in this directory.  To regenerate: tools/regenerate-rewriter-js.sh
+#
+# The verify_generated_js genrule hashes the source JS on every build and
+# compares against the recorded hash in generated/.source-hash.  If a source
+# file changes without regenerating, the build fails with a clear message.
 
-closure_compiler_gen(
-    name = "critical_css_loader_opt",
-    entry_points = [
-        "goog:pagespeed.CriticalCssLoader",
-    ],
-    js_dir = "rewriter",
-    js_includes = [
-        "net/instaweb/js/js_utils.js",
-    ],
-    js_src = "net/instaweb/rewriter/critical_css_loader.js",
-    opt = True,
-)
+_JS_SOURCES = [
+    "add_instrumentation.js",
+    "client_domain_rewriter.js",
+    "critical_css_beacon.js",
+    "critical_css_loader.js",
+    "critical_images_beacon.js",
+    "dedup_inlined_images.js",
+    "defer_iframe.js",
+    "delay_images.js",
+    "delay_images_inline.js",
+    "deterministic.js",
+    "extended_instrumentation.js",
+    "js_defer.js",
+    "lazyload_images.js",
+    "local_storage_cache.js",
+    "responsive_js.js",
+]
 
-closure_compiler_gen(
-    name = "critical_images_beacon_dbg",
-    entry_points = [
-        "goog:pagespeed.CriticalImages",
+genrule(
+    name = "verify_generated_js",
+    srcs = _JS_SOURCES + [
+        "//net/instaweb/js:js_utils.js",
+        "//net/instaweb/js:externs.js",
+        "generated/.source-hash",
     ],
-    js_dir = "rewriter",
-    js_includes = [
-        "net/instaweb/js/js_utils.js",
-    ],
-    js_src = "net/instaweb/rewriter/critical_images_beacon.js",
-    opt = False,
-)
-
-closure_compiler_gen(
-    name = "critical_images_beacon_opt",
-    entry_points = [
-        "goog:pagespeed.CriticalImages",
-    ],
-    js_dir = "rewriter",
-    js_includes = [
-        "net/instaweb/js/js_utils.js",
-    ],
-    js_src = "net/instaweb/rewriter/critical_images_beacon.js",
-    opt = True,
-)
-
-closure_compiler_gen(
-    name = "responsive_js_dbg",
-    entry_points = [
-        "goog:pagespeed.Responsive",
-    ],
-    js_dir = "rewriter",
-    js_src = "net/instaweb/rewriter/responsive_js.js",
-    opt = False,
-)
-
-closure_compiler_gen(
-    name = "responsive_js_opt",
-    entry_points = [
-        "goog:pagespeed.Responsive",
-    ],
-    js_dir = "rewriter",
-    js_src = "net/instaweb/rewriter/responsive_js.js",
-    opt = True,
-)
-
-closure_compiler_without_dependency_mode(
-    name = "without_dependency",
-    externs = [
-        "net/instaweb/js/externs.js",
-    ],
-    js_dir = "rewriter",
-    js_src = [
-        "net/instaweb/rewriter/add_instrumentation.js",
-        "net/instaweb/rewriter/client_domain_rewriter.js",
-        "net/instaweb/rewriter/dedup_inlined_images.js",
-        "net/instaweb/rewriter/defer_iframe.js",
-        "net/instaweb/rewriter/delay_images_inline.js",
-        "net/instaweb/rewriter/deterministic.js",
-        "net/instaweb/rewriter/extended_instrumentation.js",
-    ],
-    opt = False,
-)
-
-closure_compiler_without_dependency_mode(
-    name = "without_dependency",
-    externs = [
-        "net/instaweb/js/externs.js",
-    ],
-    js_dir = "rewriter",
-    js_src = [
-        "net/instaweb/rewriter/add_instrumentation.js",
-        "net/instaweb/rewriter/client_domain_rewriter.js",
-        "net/instaweb/rewriter/dedup_inlined_images.js",
-        "net/instaweb/rewriter/defer_iframe.js",
-        "net/instaweb/rewriter/delay_images_inline.js",
-        "net/instaweb/rewriter/deterministic.js",
-        "net/instaweb/rewriter/extended_instrumentation.js",
-    ],
-    opt = True,
-)
-
-closure_compiler_without_dependency_mode(
-    name = "with_dependency",
-    externs = [
-        "net/instaweb/js/externs.js",
-    ],
-    js_dir = "rewriter",
-    js_includes = [
-        "net/instaweb/js/js_utils.js",
-    ],
-    js_src = [
-        "net/instaweb/rewriter/critical_css_beacon.js",
-        "net/instaweb/rewriter/lazyload_images.js",
-        "net/instaweb/rewriter/delay_images.js",
-        "net/instaweb/rewriter/js_defer.js",
-        "net/instaweb/rewriter/local_storage_cache.js",
-    ],
-    opt = False,
-)
-
-closure_compiler_without_dependency_mode(
-    name = "with_dependency",
-    externs = [
-        "net/instaweb/js/externs.js",
-    ],
-    js_dir = "rewriter",
-    js_includes = [
-        "net/instaweb/js/js_utils.js",
-    ],
-    js_src = [
-        "net/instaweb/rewriter/critical_css_beacon.js",
-        "net/instaweb/rewriter/lazyload_images.js",
-        "net/instaweb/rewriter/delay_images.js",
-        "net/instaweb/rewriter/js_defer.js",
-        "net/instaweb/rewriter/local_storage_cache.js",
-    ],
-    opt = True,
+    outs = ["generated_js_verified.stamp"],
+    # Bazel runs genrule commands via bash on all platforms (including Windows
+    # via MSYS2/Git Bash).  MSYS2 ships sha256sum; macOS ships shasum instead.
+    cmd = select({
+        "@platforms//os:macos": (
+            "ACTUAL=$$(cat " +
+            " ".join(["$(execpath %s)" % f for f in _JS_SOURCES]) +
+            " $(execpath //net/instaweb/js:js_utils.js)" +
+            " $(execpath //net/instaweb/js:externs.js)" +
+            " | shasum -a 256 | cut -d' ' -f1) && " +
+            "EXPECTED=$$(cat $(execpath generated/.source-hash) | tr -d '[:space:]') && " +
+            "if [ \"$$ACTUAL\" != \"$$EXPECTED\" ]; then " +
+            "echo '\\nERROR: Source JS changed but generated/ is stale.\\n" +
+            "Run: tools/regenerate-rewriter-js.sh\\n' >&2; exit 1; fi && " +
+            "echo ok > $@"
+        ),
+        "//conditions:default": (
+            "ACTUAL=$$(cat " +
+            " ".join(["$(execpath %s)" % f for f in _JS_SOURCES]) +
+            " $(execpath //net/instaweb/js:js_utils.js)" +
+            " $(execpath //net/instaweb/js:externs.js)" +
+            " | sha256sum | cut -d' ' -f1) && " +
+            "EXPECTED=$$(cat $(execpath generated/.source-hash) | tr -d '[:space:]') && " +
+            "if [ \"$$ACTUAL\" != \"$$EXPECTED\" ]; then " +
+            "echo '\\nERROR: Source JS changed but generated/ is stale.\\n" +
+            "Run: tools/regenerate-rewriter-js.sh\\n' >&2; exit 1; fi && " +
+            "echo ok > $@"
+        ),
+    }),
 )
 
 genrule(
@@ -191,51 +106,6 @@ cc_proto_library(
     ],
 )
 
-data2c_gen2(
-    name = "data2c_generated",
-    srcs = [
-        "add_instrumentation",
-        "client_domain_rewriter",
-        "critical_css_beacon",
-        "critical_css_loader",
-        "critical_images_beacon",
-        "dedup_inlined_images",
-        "defer_iframe",
-        "delay_images",
-        "delay_images_inline",
-        "deterministic",
-        "extended_instrumentation",
-        "js_defer",
-        "lazyload_images",
-        "local_storage_cache",
-        "responsive_js",
-    ],
-)
-
-data2c_gen2_opt(
-    name = "data2c_generated",
-    srcs = [
-        "add_instrumentation",
-        "client_domain_rewriter",
-        "critical_css_beacon",
-        "critical_css_loader",
-        "critical_images_beacon",
-        "dedup_inlined_images",
-        "defer_iframe",
-        "delay_images",
-        "delay_images_inline",
-        "deterministic",
-        "extended_instrumentation",
-        "js_defer",
-        "lazyload_images",
-        "local_storage_cache",
-        "responsive_js",
-    ],
-)
-
-#"js_minify_main.cc",
-#"css_minify_main.cc",
-
 cc_library(
     name = "html_minifier_main_lib",
     srcs = [
@@ -248,104 +118,49 @@ cc_library(
 )
 
 cc_library(
-    name = "rewriter",
+    name = "rewriter_core",
     srcs = [
-        "add_head_filter.cc",
-        "add_ids_filter.cc",
-        "add_instrumentation_filter.cc",
-        "association_transformer.cc",
-        "base_tag_filter.cc",
-        "beacon_critical_images_finder.cc",
-        "cache_extender.cc",
         "cacheable_resource_base.cc",
-        "collect_dependencies_filter.cc",
         "common_filter.cc",
+        # css_outline_filter.cc and js_outline_filter.cc are here because
+        # rewrite_driver.cc uses CssOutlineFilter::kFilterId and
+        # JsOutlineFilter::kFilterId constants.
+        "css_outline_filter.cc",
+        "js_outline_filter.cc",
         "config/measurement_proxy_rewrite_options_manager.cc",
         "config/rewrite_options_manager.cc",
-        "critical_css_beacon_filter.cc",
         "critical_finder_support_util.cc",
-        "critical_images_beacon_filter.cc",
         "critical_images_finder.cc",
-        "critical_selector_filter.cc",
         "critical_selector_finder.cc",
         "csp.cc",
-        "css_absolutify.cc",
-        "css_combine_filter.cc",
-        "css_filter.cc",
-        "css_hierarchy.cc",
-        "css_image_rewriter.cc",
-        "css_inline_filter.cc",
-        "css_inline_import_to_link_filter.cc",
-        "css_minify.cc",
-        "css_move_to_head_filter.cc",
-        "css_outline_filter.cc",
         "css_resource_slot.cc",
-        "css_summarizer_base.cc",
         "css_tag_scanner.cc",
-        "css_url_counter.cc",
-        "css_url_encoder.cc",
-        "css_url_extractor.cc",
         "css_util.cc",
         "data_url_input_resource.cc",
-        "debug_filter.cc",
-        "decode_rewritten_urls_filter.cc",
-        "dedup_inlined_images_filter.cc",
-        "defer_iframe_filter.cc",
-        "delay_images_filter.cc",
         "dependency_tracker.cc",
-        "deterministic_js_filter.cc",
         "device_properties.cc",
-        "dom_stats_filter.cc",
         "domain_lawyer.cc",
         "domain_rewrite_filter.cc",
         "downstream_cache_purger.cc",
         "downstream_caching_directives.cc",
         "experiment_matcher.cc",
         "experiment_util.cc",
-        "fake_filter.cc",
+        "expensive_operation_callback.cc",
         "file_input_resource.cc",
         "file_load_mapping.cc",
         "file_load_policy.cc",
         "file_load_rule.cc",
-        "fix_reflow_filter.cc",
-        "flush_html_filter.cc",
-        "google_analytics_filter.cc",
-        "google_font_css_inline_filter.cc",
         "google_font_service_input_resource.cc",
-        "handle_noscript_redirect_filter.cc",
-        "image.cc",
-        "image_combine_filter.cc",
-        "image_rewrite_filter.cc",
-        "image_url_encoder.cc",
         "in_place_rewrite_context.cc",
         "inline_attribute_slot.cc",
         "inline_output_resource.cc",
         "inline_resource_slot.cc",
         "inline_rewrite_context.cc",
         "input_info_utils.cc",
-        "insert_amp_link_filter.cc",
-        "insert_dns_prefetch_filter.cc",
-        "insert_ga_filter.cc",
-        "javascript_code_block.cc",
-        "javascript_filter.cc",
-        "javascript_library_identification.cc",
-        "js_combine_filter.cc",
-        "js_defer_disabled_filter.cc",
-        "js_disable_filter.cc",
-        "js_inline_filter.cc",
-        "js_outline_filter.cc",
-        "js_replacer.cc",
-        "lazyload_images_filter.cc",
-        "local_storage_cache_filter.cc",
-        "make_show_ads_async_filter.cc",
-        "measurement_proxy_url_namer.cc",
-        "meta_tag_filter.cc",
+        "named_lock_schedule_rewrite_controller.cc",
+        "option_context.cc",
         "output_resource.cc",
-        "pedantic_filter.cc",
-        "process_context.cc",
         "property_cache_util.cc",
-        "push_preload_filter.cc",
-        "redirect_on_size_limit_filter.cc",
         "request_properties.cc",
         "resource.cc",
         "resource_combiner.cc",
@@ -353,7 +168,6 @@ cc_library(
         "resource_namer.cc",
         "resource_slot.cc",
         "resource_tag_scanner.cc",
-        "responsive_image_filter.cc",
         "rewrite_context.cc",
         "rewrite_driver.cc",
         "rewrite_driver_factory.cc",
@@ -361,65 +175,33 @@ cc_library(
         "rewrite_filter.cc",
         "rewrite_gflags.cc",
         "rewrite_options.cc",
-        "rewrite_query.cc",
         "rewrite_stats.cc",
-        "rewritten_content_scanning_filter.cc",
         "scan_filter.cc",
+        "schedule_rewrite_callback.cc",
         "script_tag_scanner.cc",
         "server_context.cc",
-        "simple_text_filter.cc",
         "single_rewrite_context.cc",
         "srcset_slot.cc",
         "static_asset_manager.cc",
-        "strip_scripts_filter.cc",
-        "strip_subresource_hints_filter.cc",
-        "support_noscript_filter.cc",
         "url_input_resource.cc",
         "url_left_trim_filter.cc",
         "url_namer.cc",
         "url_partnership.cc",
         "usage_data_reporter.cc",
-        "webp_optimizer.cc",
+        "work_bound_expensive_operation_controller.cc",
         ":csp_directive_gperf",
-        ":data2c_generated_add_instrumentation",
-        ":data2c_generated_add_instrumentation_opt",
-        ":data2c_generated_client_domain_rewriter",
-        ":data2c_generated_client_domain_rewriter_opt",
-        ":data2c_generated_critical_css_beacon",
-        ":data2c_generated_critical_css_beacon_opt",
-        ":data2c_generated_critical_css_loader",
-        ":data2c_generated_critical_css_loader_opt",
-        ":data2c_generated_critical_images_beacon",
-        ":data2c_generated_critical_images_beacon_opt",
-        ":data2c_generated_dedup_inlined_images",
-        ":data2c_generated_dedup_inlined_images_opt",
-        ":data2c_generated_defer_iframe",
-        ":data2c_generated_defer_iframe_opt",
-        ":data2c_generated_delay_images",
-        ":data2c_generated_delay_images_inline",
-        ":data2c_generated_delay_images_inline_opt",
-        ":data2c_generated_delay_images_opt",
-        ":data2c_generated_deterministic",
-        ":data2c_generated_deterministic_opt",
-        ":data2c_generated_extended_instrumentation",
-        ":data2c_generated_extended_instrumentation_opt",
-        ":data2c_generated_js_defer",
-        ":data2c_generated_js_defer_opt",
-        ":data2c_generated_lazyload_images",
-        ":data2c_generated_lazyload_images_opt",
-        ":data2c_generated_local_storage_cache",
-        ":data2c_generated_local_storage_cache_opt",
-        ":data2c_generated_responsive_js",
-        ":data2c_generated_responsive_js_opt",
         ":rewrite_filter_names_gperf",
+    ],
+    textual_hdrs = [
+        "rewrite_options_properties.inc",
     ],
     hdrs = [
         "config/measurement_proxy_rewrite_options_manager.h",
         "config/rewrite_options_manager.h",
-        "google_analytics_snippet.h",
         "public/add_head_filter.h",
         "public/add_ids_filter.h",
         "public/add_instrumentation_filter.h",
+        "public/agent_optimize_vary_filter.h",
         "public/association_transformer.h",
         "public/base_tag_filter.h",
         "public/beacon_critical_images_finder.h",
@@ -469,6 +251,7 @@ cc_library(
         "public/downstream_caching_directives.h",
         "public/experiment_matcher.h",
         "public/experiment_util.h",
+        "public/expensive_operation_callback.h",
         "public/fake_filter.h",
         "public/file_input_resource.h",
         "public/file_load_mapping.h",
@@ -476,7 +259,6 @@ cc_library(
         "public/file_load_rule.h",
         "public/fix_reflow_filter.h",
         "public/flush_html_filter.h",
-        "public/google_analytics_filter.h",
         "public/google_font_css_inline_filter.h",
         "public/google_font_service_input_resource.h",
         "public/handle_noscript_redirect_filter.h",
@@ -494,6 +276,7 @@ cc_library(
         "public/insert_amp_link_filter.h",
         "public/insert_dns_prefetch_filter.h",
         "public/insert_ga_filter.h",
+        "public/insert_speculation_rules_filter.h",
         "public/javascript_code_block.h",
         "public/javascript_filter.h",
         "public/javascript_library_identification.h",
@@ -508,9 +291,12 @@ cc_library(
         "public/make_show_ads_async_filter.h",
         "public/measurement_proxy_url_namer.h",
         "public/meta_tag_filter.h",
+        "public/named_lock_schedule_rewrite_controller.h",
+        "public/option_context.h",
         "public/output_resource.h",
         "public/output_resource_kind.h",
         "public/pedantic_filter.h",
+        "public/prioritize_critical_images_filter.h",
         "public/process_context.h",
         "public/property_cache_util.h",
         "public/push_preload_filter.h",
@@ -533,9 +319,10 @@ cc_library(
         "public/rewrite_query.h",
         "public/rewrite_result.h",
         "public/rewrite_stats.h",
-        "public/rewritten_content_scanning_filter.h",
         "public/scan_filter.h",
+        "public/schedule_rewrite_callback.h",
         "public/script_tag_scanner.h",
+        "public/sequence_bound_callback.h",
         "public/server_context.h",
         "public/simple_text_filter.h",
         "public/single_rewrite_context.h",
@@ -550,17 +337,138 @@ cc_library(
         "public/url_partnership.h",
         "public/usage_data_reporter.h",
         "public/webp_optimizer.h",
+        "public/work_bound_expensive_operation_controller.h",
     ],
     visibility = ["//visibility:public"],
     deps = [
         ":rewriter_protos_cc",
         "//net/instaweb:net_instaweb_lib",
         "//net/instaweb/http",
-        "//net/instaweb/spriter",
         "//net/instaweb/util",
-        "//pagespeed/controller",
         "//pagespeed/kernel/base:pagespeed_base",
         "//pagespeed/kernel/cache",
+        "//third_party/css_parser",
+        # option_context.cc signs the canonical option-context payload with
+        # SHA-256.  Unconditional by design: the SHA1Signature path compiles
+        # out under ENABLE_URL_SIGNATURES=0 and returns zeros, which would
+        # collapse every option context into one.
+        "@boringssl//:crypto",
+    ],
+)
+
+cc_library(
+    name = "rewriter",
+    srcs = [
+        "add_head_filter.cc",
+        "add_ids_filter.cc",
+        "add_instrumentation_filter.cc",
+        "agent_optimize_vary_filter.cc",
+        "association_transformer.cc",
+        "base_tag_filter.cc",
+        "beacon_critical_images_finder.cc",
+        "cache_extender.cc",
+        "collect_dependencies_filter.cc",
+        "critical_css_beacon_filter.cc",
+        "critical_images_beacon_filter.cc",
+        "critical_selector_filter.cc",
+        "css_absolutify.cc",
+        "css_combine_filter.cc",
+        "css_filter.cc",
+        "css_hierarchy.cc",
+        "css_image_rewriter.cc",
+        "css_inline_filter.cc",
+        "css_inline_import_to_link_filter.cc",
+        "css_minify.cc",
+        "css_move_to_head_filter.cc",
+        "css_summarizer_base.cc",
+        "css_url_counter.cc",
+        "css_url_encoder.cc",
+        "css_url_extractor.cc",
+        "debug_filter.cc",
+        "decode_rewritten_urls_filter.cc",
+        "dedup_inlined_images_filter.cc",
+        "defer_iframe_filter.cc",
+        "delay_images_filter.cc",
+        "deterministic_js_filter.cc",
+        "dom_stats_filter.cc",
+        "fake_filter.cc",
+        "fix_reflow_filter.cc",
+        "flush_html_filter.cc",
+        "google_font_css_inline_filter.cc",
+        "handle_noscript_redirect_filter.cc",
+        "image.cc",
+        "image_combine_filter.cc",
+        "image_rewrite_filter.cc",
+        "image_url_encoder.cc",
+        "insert_amp_link_filter.cc",
+        "insert_dns_prefetch_filter.cc",
+        "insert_ga_filter.cc",
+        "insert_speculation_rules_filter.cc",
+        "javascript_code_block.cc",
+        "javascript_filter.cc",
+        "javascript_library_identification.cc",
+        "js_combine_filter.cc",
+        "js_defer_disabled_filter.cc",
+        "js_disable_filter.cc",
+        "js_inline_filter.cc",
+        "js_replacer.cc",
+        "lazyload_images_filter.cc",
+        "local_storage_cache_filter.cc",
+        "make_show_ads_async_filter.cc",
+        "measurement_proxy_url_namer.cc",
+        "meta_tag_filter.cc",
+        "pedantic_filter.cc",
+        "prioritize_critical_images_filter.cc",
+        "process_context.cc",
+        "push_preload_filter.cc",
+        "redirect_on_size_limit_filter.cc",
+        "resource_tag_scanner.cc",
+        "responsive_image_filter.cc",
+        "rewrite_driver_filter_init.cc",
+        "rewrite_query.cc",
+        "simple_text_filter.cc",
+        "strip_scripts_filter.cc",
+        "strip_subresource_hints_filter.cc",
+        "support_noscript_filter.cc",
+        "webp_optimizer.cc",
+        "generated/add_instrumentation.cc",
+        "generated/add_instrumentation_opt.cc",
+        "generated/client_domain_rewriter.cc",
+        "generated/client_domain_rewriter_opt.cc",
+        "generated/critical_css_beacon.cc",
+        "generated/critical_css_beacon_opt.cc",
+        "generated/critical_css_loader.cc",
+        "generated/critical_css_loader_opt.cc",
+        "generated/critical_images_beacon.cc",
+        "generated/critical_images_beacon_opt.cc",
+        "generated/dedup_inlined_images.cc",
+        "generated/dedup_inlined_images_opt.cc",
+        "generated/defer_iframe.cc",
+        "generated/defer_iframe_opt.cc",
+        "generated/delay_images.cc",
+        "generated/delay_images_inline.cc",
+        "generated/delay_images_inline_opt.cc",
+        "generated/delay_images_opt.cc",
+        "generated/deterministic.cc",
+        "generated/deterministic_opt.cc",
+        "generated/extended_instrumentation.cc",
+        "generated/extended_instrumentation_opt.cc",
+        "generated/js_defer.cc",
+        "generated/js_defer_opt.cc",
+        "generated/lazyload_images.cc",
+        "generated/lazyload_images_opt.cc",
+        "generated/local_storage_cache.cc",
+        "generated/local_storage_cache_opt.cc",
+        "generated/responsive_js.cc",
+        "generated/responsive_js_opt.cc",
+    ],
+    alwayslink = True,
+    # Stamp dependency ensures source JS hasn't changed without regenerating.
+    data = [":verify_generated_js"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":rewriter_core",
+        "//net/instaweb/spriter",
         "//pagespeed/kernel/image",
         "//pagespeed/kernel/js",
         "//pagespeed/opt/ads",

@@ -1,0 +1,11 @@
+--- a/crosstool/osx_cc_configure.bzl	2026-07-20 16:10:40
++++ b/crosstool/osx_cc_configure.bzl	2026-07-20 16:10:40
+@@ -102,8 +102,6 @@
+         "arm64",
+         "-arch",
+         "x86_64",
+-        "-Wl,-no_adhoc_codesign",
+-        "-Wl,-no_uuid",
+         "-O3",
+         "-o",
+         out_name,

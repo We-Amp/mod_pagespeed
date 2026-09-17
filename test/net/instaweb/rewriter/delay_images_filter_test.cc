@@ -279,6 +279,50 @@ TEST_F(DelayImagesFilterTest, DelayImagesPreserveURLsOn) {
   MatchOutputAndCountBytes(kInputHtml, kInputHtml);
 }
 
+TEST_F(DelayImagesFilterTest, CspForbidsInlineScript) {
+  // Under a script-src policy without 'unsafe-inline' the browser would
+  // block the inline swap scripts and onload handlers, so the image must
+  // be left alone (the low-res preview marker is dropped).
+  options()->DisableFilter(RewriteOptions::kInlineImages);
+  AddFilter(RewriteOptions::kDelayImages);
+  AddFileToMockFetcher("http://test.com/1.webp", kSampleWebpFile,
+                       kContentTypeWebp, 100);
+  const char kCsp[] =
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"script-src *;\">";
+  GoogleString input_html = StrCat("<head>", kCsp,
+                                   "</head>"
+                                   "<body>"
+                                   "<img src=\"http://test.com/1.webp\"/>"
+                                   "</body>");
+  GoogleString output_html =
+      StrCat("<head>", kCsp, "</head><body>", GetNoscript(),
+             "<img src=\"http://test.com/1.webp\"/></body>");
+  MatchOutputAndCountBytes(input_html, output_html);
+}
+
+TEST_F(DelayImagesFilterTest, CspAllowsInlineScript) {
+  // With 'unsafe-inline' permitted the filter behaves as usual.
+  options()->DisableFilter(RewriteOptions::kInlineImages);
+  AddFilter(RewriteOptions::kDelayImages);
+  AddFileToMockFetcher("http://test.com/1.webp", kSampleWebpFile,
+                       kContentTypeWebp, 100);
+  const char kCsp[] =
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"script-src * 'unsafe-inline';\">";
+  GoogleString input_html = StrCat("<head>", kCsp,
+                                   "</head>"
+                                   "<body>"
+                                   "<img src=\"http://test.com/1.webp\"/>"
+                                   "</body>");
+  GoogleString output_html = StrCat(
+      "<head>", kCsp, "</head><body>", GetNoscript(),
+      GetImageOnloadScriptBlock(),
+      GenerateRewrittenImageTag("http://test.com/1.webp", kSampleWebpData),
+      "</body>");
+  MatchOutputAndCountBytes(input_html, output_html);
+}
+
 TEST_F(DelayImagesFilterTest, DelayImageInsideNoscript) {
   AddFilter(RewriteOptions::kDelayImages);
   AddFileToMockFetcher("http://test.com/1.webp", kSampleWebpFile,
@@ -491,6 +535,66 @@ TEST_F(DelayImagesFilterTest, DelayImageWithMobileAggressiveEnabled) {
              GenerateAddLowResScript("http://test.com/1.jpeg", kSampleJpegData),
              GetHighResScript(), "</body>"));
   MatchOutputAndCountBytes(input_html, output_html);
+}
+
+// Regression test: on the deferred (non-inplace) mobile path the original
+// image src URL becomes the key of low_res_data_map_ and is spliced into the
+// single-quoted JS string literal of addLowResImages('<url>', '<data>'). A
+// crafted src containing a single quote must not be able to break out of that
+// literal and inject script. XSS vector: src = ...?a=');delayImagesXss()//
+TEST_F(DelayImagesFilterTest, DeferredLowResUrlIsJsEscapedAgainstXss) {
+  options()->set_enable_aggressive_rewriters_for_mobile(true);
+  AddFilter(RewriteOptions::kDelayImages);
+  SetupUserAgentTest(UserAgentMatcherTestBase::kAndroidICSUserAgent);
+  // The single quote in the src is the breakout character; the rest is a
+  // representative (inert) script-injection payload. Two URL forms are in play
+  // and keeping them apart is what makes this test actually exercise the
+  // escaped-JS path:
+  //   * kSrcUrl is the raw HTML attribute value. The map key spliced into the
+  //     JS literal is src->DecodedValueOrNull(), i.e. the HTML-unescaped
+  //     attribute value (7-bit ASCII passthrough, no GoogleUrl canonicaliza-
+  //     tion), so the literal single quote survives into the JS string --
+  //     precisely the byte that must be escaped.
+  //   * kFetchUrl is the GoogleUrl-canonicalized form the filter fetches to
+  //     build the low-res preview. Open-source GoogleUrl percent-encodes a
+  //     single quote in the query (' -> %27; see google_url_test.cc,
+  //     kBadQueryString / good_query_param2), so the low-res generator must be
+  //     primed under this canonicalized URL. (The original bug in this test:
+  //     the mock fetcher was registered under the raw single-quote URL, the
+  //     canonicalized fetch missed, no low-res was generated, and the
+  //     addLowResImages(...) JS -- hence the escaped-JS path -- was never
+  //     emitted at all, so the positive assertion could never hold.)
+  const char kSrcUrl[] = "http://test.com/1.jpeg?a=');delayImagesXss()//";
+  const char kFetchUrl[] = "http://test.com/1.jpeg?a=%27);delayImagesXss()//";
+  AddFileToMockFetcher(kFetchUrl, kSampleJpgFile, kContentTypeJpeg, 100);
+  Parse("inline_preview_images",
+        StrCat("<head></head><body><img src=\"", kSrcUrl, "\"/></body>"));
+  // Positive: EscapeToJsStringLiteral(add_quotes=false) turns the single quote
+  // into \' and leaves the parentheses and slashes untouched (there is no
+  // "/script" sequence to trigger slash-escaping), so the whole URL stays
+  // inside the single-quoted JS argument and is terminated by the template's
+  // "', '" separator. Asserting on that exact call context proves both that
+  // the addLowResImages(...) JS was emitted and that the breakout quote was
+  // escaped.
+  EXPECT_NE(GoogleString::npos,
+            output_buffer_.find("addLowResImages('http://test.com/1.jpeg?a=\\');"
+                                "delayImagesXss()//', '"))
+      << "Expected the src single quote to be JS-escaped inside the "
+         "addLowResImages call: "
+      << output_buffer_;
+  // Negative: the UNescaped breakout must not appear in the JS-call context.
+  // The deferred path also renames src to a data-pagespeed-high-res-src
+  // attribute that retains the raw value (...?a=');delayImagesXss()//"), so the
+  // bare payload survives inertly there regardless of escaping. Two anchors
+  // keep this matching only a real breakout: the "', '" suffix (the argument
+  // separator, which follows the URL only inside the JS call, never the
+  // attribute -- there the URL is followed by a closing double quote) and the
+  // "?a='" prefix with the quote immediately after "a=" and no backslash
+  // (present only when the quote was NOT escaped; post-fix it reads "?a=\'").
+  EXPECT_EQ(GoogleString::npos,
+            output_buffer_.find("?a=');delayImagesXss()//', '"))
+      << "Unescaped src broke out of the JS string literal (XSS): "
+      << output_buffer_;
 }
 
 TEST_F(DelayImagesFilterTest, DelayImageMobileWithUrlValuedAttribute) {

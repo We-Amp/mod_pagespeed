@@ -21,6 +21,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
 
 #include "base/logging.h"
@@ -71,7 +72,8 @@ namespace {
 // to within image.
 void ImageFill(WebPPicture* image, size_px left, size_px top, size_px width,
                size_px height, uint32_t color) {
-  uint32_t* row = image->argb + left + top * image->argb_stride;
+  uint32_t* row =
+      image->argb + left + static_cast<size_t>(top * image->argb_stride);
   for (size_px row_number = 0; row_number < height; ++row_number) {
     std::fill(row, row + width, color);
     row += image->argb_stride;
@@ -82,8 +84,10 @@ void ImageFill(WebPPicture* image, size_px left, size_px top, size_px width,
 // regions are within src and dst.
 void BlitRect(const WebPPicture* src, WebPPicture* dst, int src_left,
               int src_top, int dst_left, int dst_top, int width, int height) {
-  uint32_t* src_row = src->argb + src_left + src_top * src->argb_stride;
-  uint32_t* dst_row = dst->argb + dst_left + dst_top * dst->argb_stride;
+  uint32_t* src_row =
+      src->argb + src_left + static_cast<ptrdiff_t>(src_top * src->argb_stride);
+  uint32_t* dst_row =
+      dst->argb + dst_left + static_cast<ptrdiff_t>(dst_top * dst->argb_stride);
   for (int y = 0; y < height; ++y) {
     std::copy(src_row, src_row + width, dst_row);
     src_row += src->argb_stride;
@@ -511,8 +515,9 @@ ScanlineStatus WebpFrameWriter::PrepareNextFrame(const FrameSpec* frame_spec) {
     frame_position_px_ = nullptr;
   } else {
     frame_stride_px_ = webp_image_.argb_stride;
-    frame_position_px_ = webp_image_.argb + frame_spec_.left +
-                         frame_spec_.top * webp_image_.argb_stride;
+    frame_position_px_ =
+        webp_image_.argb + frame_spec_.left +
+        static_cast<size_t>(frame_spec_.top * webp_image_.argb_stride);
   }
 
   frame_bytes_per_pixel_ = GetBytesPerPixel(frame_spec_.pixel_format);

@@ -20,10 +20,10 @@
 #include "pagespeed/kernel/base/string_util.h"
 
 #include <algorithm>
+#include <cstdarg>
 #include <cstddef>
 #include <cstdlib>
 #include <vector>
-#include <stdarg.h>  
 
 #include "pagespeed/kernel/base/string.h"
 
@@ -358,7 +358,8 @@ StringPiece PieceAfterEquals(StringPiece piece) {
     TrimWhitespace(&ret);
     return ret;
   }
-  return StringPiece(piece.data(), 0);
+  return StringPiece(piece.data(),
+                     0);  // NOLINT(bugprone-suspicious-stringview-data-usage)
 }
 
 int CountCharacterMismatches(StringPiece s1, StringPiece s2) {
@@ -369,6 +370,26 @@ int CountCharacterMismatches(StringPiece s1, StringPiece s2) {
     mismatches += s1[i] != s2[i];
   }
   return mismatches + std::abs(s1_length - s2_length);
+}
+
+bool ConstantTimeCompare(StringPiece a, StringPiece b) {
+  // Constant-time comparison to prevent timing attacks on token validation.
+  // Does NOT short-circuit on length mismatch, eliminating the length-oracle
+  // timing channel. Runs in O(max(|a|,|b|)) time unconditionally.
+  volatile unsigned char result = 0;
+  size_t max_len = (a.size() > b.size()) ? a.size() : b.size();
+  for (size_t i = 0; i < max_len; ++i) {
+    unsigned char ca = (i < a.size()) ? static_cast<unsigned char>(a[i]) : 0;
+    unsigned char cb = (i < b.size()) ? static_cast<unsigned char>(b[i]) : 0;
+    result |= ca ^ cb;
+  }
+  // Fold all bytes of the size difference so any length mismatch fails,
+  // including cases where sizes differ by a multiple of 256.
+  size_t len_diff = a.size() ^ b.size();
+  for (size_t byte_idx = 0; byte_idx < sizeof(size_t); ++byte_idx) {
+    result |= static_cast<unsigned char>(len_diff >> (byte_idx * 8));
+  }
+  return result == 0;
 }
 
 void ParseShellLikeString(StringPiece input,
@@ -457,9 +478,11 @@ bool TrimTrailingWhitespace(StringPiece* str) {
 }
 
 bool TrimWhitespace(StringPiece* str) {
-  // We *must* trim *both* leading and trailing spaces, so we use the
-  // non-shortcut bitwise | on the boolean results.
-  return TrimLeadingWhitespace(str) | TrimTrailingWhitespace(str);
+  // We *must* trim *both* leading and trailing spaces, so evaluate both
+  // before returning.
+  bool trimmed_leading = TrimLeadingWhitespace(str);
+  bool trimmed_trailing = TrimTrailingWhitespace(str);
+  return trimmed_leading || trimmed_trailing;
 }
 
 namespace {

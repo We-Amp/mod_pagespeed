@@ -1,54 +1,127 @@
 # mod_pagespeed
 
-**mod_pagespeed, maintained again.**
+Web performance optimization middleware that automatically applies 40+
+optimization filters to web pages, including image compression/resizing,
+CSS/JS minification, cache extension, and more.
 
-Google released its final version of mod_pagespeed in 2020. We-Amp picked it up. [**mod_pagespeed 1.15**](https://modpagespeed.com/1.1/) is the maintained continuation of the original open-source module — a drop-in replacement with the same configuration, the same filters, and the same behavior, plus ongoing security patches, the new [Cyclone Cache](https://modpagespeed.com/1.1/#cyclone), and direct support from the people who know the codebase best.
+Originally created by Google, now maintained by [We-Amp](https://we-amp.com).
 
-The project is led by [Otto van der Schaaf](https://github.com/oschaaf), Apache PageSpeed committer and IPMC member, with 360+ pull requests across the upstream codebase.
+## Platforms
 
-| | |
-|---|---|
-| **Install (Apache)** | [Quickstart →](https://modpagespeed.com/1.1/docs/getting-started/) |
-| **Install (nginx)** | [Quickstart →](https://modpagespeed.com/1.1/docs/getting-started/) |
-| **Install (IIS)** | [Quickstart →](https://modpagespeed.com/1.1/docs/getting-started/) |
-| **Download packages** | [.deb / .rpm / .msi →](https://modpagespeed.com/download/) |
-| **Upgrade from open-source** | [Migration guide →](https://modpagespeed.com/1.1/docs/upgrading-from-open-source/) |
-| **Support** | [Email the maintainer →](https://modpagespeed.com/contact/) |
+| Platform | Module | Status |
+|----------|--------|--------|
+| **Apache 2.4+** | `mod_pagespeed.so` | Stable |
+| **Nginx (per-distro stock)** | `ngx_pagespeed_module.so` | Stable |
+| **Envoy** | `pagespeed_filter.so` / `envoy_pagespeed` | Experimental |
+| **IIS 10+** | `pagespeed_iis.dll` | Stable |
 
-## What's in 1.15
+## Features
 
-- **Drop-in replacement.** Same configuration directives, same filters, same `mod_pagespeed.so` semantics. Your existing config keeps working.
-- **Security patches** for known CVEs that accumulated against the archived upstream + much more. Hardened builds. Active supply chain management.
-- **Cyclone Cache** — a new C++23 lock-free shared-memory cache that replaces the legacy file cache. No tuning required; warm-up is automatic.
-- **First-class IIS** — native module for Windows Server 2019+ (IIS 10+, 64-bit only) with `.msi` installer.
-- **Modern build** — Bazel-based, pre-built binaries for Debian/Ubuntu (amd64 + arm64), RHEL-family (x86_64 + aarch64), and Windows.
-- **Direct maintainer support** included with every license.
+- Image optimization: compression, resizing, format conversion (WebP)
+- CSS & JavaScript: concatenation, minification, inlining
+- Cache extension, domain sharding, domain rewriting
+- Deferred loading of JavaScript and image resources
+- DNS prefetching, preload hints
+- 40+ configurable optimization filters
+- Security patches for the CVEs that accumulated against the archived
+  upstream, hardened builds, and active supply-chain management
 
-## Currently shipping
+## Quick Start
 
-| Platform | Status | Packages |
-|---|---|---|
-| **Apache** (amd64 + arm64) | GA | `.deb`, `.rpm`, `.so` |
-| **nginx** (amd64 + arm64) | GA | signed apt/yum dynamic module `nginx-module-pagespeed` (`.deb`, `.rpm`) |
-| **IIS** (Windows Server 2019+) | GA | `.msi` |
-| **Envoy** | Experimental | experimental HTTP filter |
+### Pre-built packages
 
-The nginx dynamic module ships prebuilt and signed for Debian 11/12/13 and Ubuntu 22.04/24.04 (amd64 + arm64), each pinned to that distribution's stock nginx version. Install via the signed apt/yum repository at [packages.modpagespeed.com](https://packages.modpagespeed.com). The Envoy HTTP filter is experimental — [contact us](https://modpagespeed.com/contact/) for setup guidance.
+All packages and installers are on the
+[downloads page](https://modpagespeed.com/1.1/docs/downloads/): signed apt/dnf
+packages for Apache (`mod-pagespeed`) and Nginx (`nginx-module-pagespeed`) via
+`packages.modpagespeed.com`, and the signed IIS MSI. The nginx dynamic
+module ships prebuilt and signed for Debian 11/12/13 and Ubuntu 22.04/24.04
+(amd64 + arm64), each pinned to that distribution's stock nginx version.
+Then see the per-platform installation guides:
 
-[Download and run →](https://modpagespeed.com/download/)
+- [Apache](docs/install-apache.md)
+- [Nginx](docs/install-nginx.md)
+- [IIS](docs/install-iis.md)
+- [Envoy](docs/install-envoy.md) — experimental
 
-## About this repository
+### Configuration and operations
 
-This repository exists as a public landing point for the mod_pagespeed project under We-Amp's stewardship. Active development happens in a separate repository; **all downloads, documentation, and support are at [modpagespeed.com](https://modpagespeed.com/1.1/)**.
+Full product documentation lives on modpagespeed.com:
 
-For issues or questions about a running deployment, please [contact the maintainer](https://modpagespeed.com/contact/) — that's the fastest path to a response.
+- [Filter selection](https://modpagespeed.com/1.1/docs/filter-selection/) -- rewrite levels and per-filter enable/disable
+- [Filter reference](https://modpagespeed.com/1.1/docs/filter-reference/) -- what each filter does and which level enables it
+- [Configuration](https://modpagespeed.com/1.1/docs/configuration/) -- directives and baseline setup
+- [Admin console](https://modpagespeed.com/1.1/docs/admin-console/) -- statistics, cache inspection, and purging
+
+### Build from Source
+
+All builds run inside a Docker container (provides Clang, GCC 13, Bazel 7.x):
+
+```bash
+# Start development environment (includes Redis and Memcached)
+docker compose up -d
+docker compose exec dev bash
+
+# Build for your target platform
+bazel build --config=clang-libstdcxx13 //:libmod_pagespeed.so                   # Apache
+bazel build --config=clang-libstdcxx13 //pagespeed/nginx:ngx_pagespeed_module.so # Nginx
+bazel build --config=clang-libstdcxx13 //pagespeed/envoy:envoy_pagespeed         # Envoy
+
+# Run C++ unit tests
+bazel test --config=clang-libstdcxx13 \
+  --test_env=REDIS_PORT=6379 --test_env=REDIS_HOST=redis \
+  --test_env=MEMCACHED_PORT=11211 --test_env=MEMCACHED_HOST=memcached \
+  //test/pagespeed/... //test/net/...
+
+docker compose down
+```
+
+IIS builds require Windows with clang-cl:
+```powershell
+bazel build --config=windows --config=clang-cl //pagespeed/iis:pagespeed_iis.dll
+```
+
+See [CLAUDE.md](CLAUDE.md) for detailed build configuration options and
+architecture documentation.
+
+## System Tests
+
+```bash
+./test/system/run_system_tests.sh          # Apache
+./test/system/run_nginx_tests.sh           # Nginx
+./test/system/run_envoy_tests.sh           # Envoy
+./test/system/run_iis_tests.sh sanity      # IIS (from Linux, requires Windows VM)
+```
+
+## Documentation
+
+- [CHANGELOG.md](CHANGELOG.md) -- Release history
+- [RELEASE_NOTES.md](RELEASE_NOTES.md) -- Current release details
+- [CLAUDE.md](CLAUDE.md) -- Build system, architecture, and development guide
+- [docs/](docs/) -- Installation guides, platform limitations, test catalog
 
 ## License
 
-mod_pagespeed 1.15 is distributed under the [Business Source License 1.1](https://modpagespeed.com/license/). Source publication is planned, with no date committed. You can install and run the module unlicensed to evaluate it — it fully optimizes and simply adds an `X-PageSpeed-Warn: unlicensed` response header (plus an admin-console notice and a startup-log warning). A commercial license is required for production use. See [pricing](https://modpagespeed.com/pricing/) for license details.
+Apache License 2.0. See [LICENSE](LICENSE) for details.
+
+## Links
+
+| | |
+|---|---|
+| Source | https://github.com/we-amp/mod_pagespeed |
+| Issues | https://github.com/we-amp/mod_pagespeed/issues |
+| Downloads | https://modpagespeed.com/1.1/docs/downloads/ |
+| Upgrade from open-source | https://modpagespeed.com/1.1/docs/upgrading-from-open-source/ |
+| Support | https://modpagespeed.com/contact/ |
 
 ## Background
 
-mod_pagespeed was created at Google in 2010 and powered web performance optimization across hundreds of thousands of sites. We-Amp's role is documented in primary sources: the [Apache Incubator PageSpeed proposal](https://cwiki.apache.org/confluence/display/INCUBATOR/PageSpeedProposal) lists We-Amp B.V. as a founding committer organization alongside Google, and [Google's 2013 ngx_pagespeed announcement](https://developers.googleblog.com/en/speed-up-your-sites-with-pagespeed-for-nginx/) named We-Amp among the module's contributors. After Google archived the project, We-Amp B.V. continued active development in the Apache PageSpeed incubator project and after that under the mod_pagespeed 1.15 line, alongside a ground-up rewrite, [ModPageSpeed 2.0](https://modpagespeed.com/).
-
-Learn more about We-Amp's open-source work: [we-amp.com/open-source/](https://we-amp.com/open-source/).
+mod_pagespeed was created at Google in 2010 and went on to power web
+performance optimization across hundreds of thousands of sites. We-Amp's
+role is documented in primary sources: the
+[Apache Incubator PageSpeed proposal](https://cwiki.apache.org/confluence/display/INCUBATOR/PageSpeedProposal)
+lists We-Amp B.V. as a founding committer organization alongside Google,
+and
+[Google's 2013 ngx_pagespeed announcement](https://developers.googleblog.com/en/speed-up-your-sites-with-pagespeed-for-nginx/)
+named We-Amp among the module's contributors. After Google archived the
+project, We-Amp continued development — first the maintained 1.x line, and
+now the 2.x line this repository carries.

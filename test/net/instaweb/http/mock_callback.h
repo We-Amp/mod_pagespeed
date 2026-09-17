@@ -50,7 +50,8 @@ class ExpectStringAsyncFetch : public StringAsyncFetch {
  private:
   bool expect_success_;
 
-  DISALLOW_COPY_AND_ASSIGN(ExpectStringAsyncFetch);
+  ExpectStringAsyncFetch(const ExpectStringAsyncFetch&) = delete;
+  ExpectStringAsyncFetch& operator=(const ExpectStringAsyncFetch&) = delete;
 };
 
 }  // namespace net_instaweb

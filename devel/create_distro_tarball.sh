@@ -168,11 +168,9 @@ tar cj --dereference --exclude='.git' --exclude='.svn' --exclude='.hg' -f $TARBA
     $DIR/third_party/closure/ \
     $DIR/third_party/closure_library/ \
     $DIR/third_party/css_parser \
-    $DIR/third_party/domain_registry_provider \
     $GFLAGS \
     $GIFLIB \
     $DIR/third_party/google-sparsehash \
-    $DIR/third_party/grpc \
     $DIR/third_party/hiredis \
     $ICU \
     $JSONCPP \

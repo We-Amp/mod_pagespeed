@@ -64,7 +64,8 @@ class ManuallyRefCounted {
  private:
   AtomicInt32 n_active;
 
-  DISALLOW_COPY_AND_ASSIGN(ManuallyRefCounted);
+  ManuallyRefCounted(const ManuallyRefCounted&) = delete;
+  ManuallyRefCounted& operator=(const ManuallyRefCounted&) = delete;
 };
 
 }  // namespace net_instaweb

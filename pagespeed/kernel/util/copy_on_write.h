@@ -82,7 +82,7 @@ class CopyOnWrite {
   }
 
  private:
-  typedef RefCountedObj<T> Reference;
+  using Reference = RefCountedObj<T>;
 
   Reference reference_;
 

@@ -254,6 +254,41 @@ TEST_F(CssImageCombineTest, NoCrashUnknownType) {
   ParseUrl(kTestDomain, before);
 }
 
+TEST_F(CssImageCombineTest, NoCrashZeroDimensionImage) {
+  // Regression test: a crafted PNG whose IHDR declares zero width and height
+  // must not crash the spriter.  FindPngSize reads the dimensions straight
+  // from the header bytes without validating them, so such an image used to
+  // reach the sprite canvas as a 0x0 blank image, which cannot be generated
+  // (BlankImageWithOptions returns nullptr), and the null canvas image was
+  // dereferenced in Canvas::DrawImage.
+  const GoogleString kZeroPng(
+      "\x89PNG\r\n\x1a\n"  // 8-byte signature
+      "\0\0\0\x0d"         // IHDR chunk length (13)
+      "IHDR"
+      "\0\0\0\0"           // width = 0
+      "\0\0\0\0",          // height = 0
+      24);
+  SetResponseWithDefaultHeaders("zero1.png", kContentTypePng, kZeroPng, 100);
+  SetResponseWithDefaultHeaders("zero2.png", kContentTypePng, kZeroPng, 100);
+
+  const GoogleString before =
+      "<head><style>"
+      "#div1 { background-image:url('zero1.png');width:0px;height:0px}"
+      "#div2 { background-image:url('zero2.png');width:0px;height:0px}"
+      "</style></head>";
+
+  // Spriting must fail gracefully, leaving the originals untouched (the CSS
+  // parser normalizes quoting, whitespace and 0px units on serialization, so
+  // pin the exact serialized form).  Before the fix this crashed the test
+  // binary (SIGSEGV in Canvas::DrawImage).
+  const GoogleString after =
+      "<head><style>"
+      "#div1{background-image:url(zero1.png);width:0;height:0}"
+      "#div2{background-image:url(zero2.png);width:0;height:0}"
+      "</style></head>";
+  ValidateExpected("zero_dimension_sprite", before, after);
+}
+
 TEST_F(CssImageCombineTest, SpritesImagesExternal) {
   SetupWaitFetcher();
 

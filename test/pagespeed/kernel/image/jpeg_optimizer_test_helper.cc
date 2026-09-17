@@ -29,7 +29,7 @@ extern "C" {
 #ifdef USE_SYSTEM_LIBJPEG
 #include "jpeglib.h"  // NOLINT
 #else
-#include "external/libjpeg_turbo/jpeglib.h"
+#include "jpeglib.h"
 #endif
 }
 
@@ -46,6 +46,8 @@ namespace image_compression {
 // profile information.
 const int kColorProfileMarker = JPEG_APP0 + 2;
 const int kExifDataMarker = JPEG_APP0 + 1;
+// APP11 carries C2PA / Content-Credentials provenance (JUMBF boxes).
+const int kC2paMarker = JPEG_APP0 + 11;
 
 bool GetJpegNumComponentsAndSamplingFactors(const GoogleString& jpeg,
                                             int* out_num_components,
@@ -132,6 +134,8 @@ int GetNumScansInJpeg(const GoogleString& data) {
 int GetColorProfileMarker() { return kColorProfileMarker; }
 
 int GetExifDataMarker() { return kExifDataMarker; }
+
+int GetC2paMarker() { return kC2paMarker; }
 
 }  // namespace image_compression
 }  // namespace pagespeed_testing

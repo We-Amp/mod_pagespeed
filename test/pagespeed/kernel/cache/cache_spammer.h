@@ -22,8 +22,9 @@
 #ifndef PAGESPEED_KERNEL_CACHE_CACHE_SPAMMER_H_
 #define PAGESPEED_KERNEL_CACHE_CACHE_SPAMMER_H_
 
+#include <memory>
+
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread.h"
 #include "pagespeed/kernel/base/thread_annotations.h"
@@ -73,7 +74,8 @@ class CacheSpammer : public ThreadSystem::Thread {
   std::unique_ptr<ThreadSystem::Condvar> condvar_;
   int pending_gets_ GUARDED_BY(mutex_);
 
-  DISALLOW_COPY_AND_ASSIGN(CacheSpammer);
+  CacheSpammer(const CacheSpammer&) = delete;
+  CacheSpammer& operator=(const CacheSpammer&) = delete;
 };
 
 }  // namespace net_instaweb

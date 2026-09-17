@@ -51,7 +51,8 @@ class InlineResourceSlot : public ResourceSlot {
   HtmlCharactersNode* char_node_;
   const GoogleString location_;
 
-  DISALLOW_COPY_AND_ASSIGN(InlineResourceSlot);
+  InlineResourceSlot(const InlineResourceSlot&) = delete;
+  InlineResourceSlot& operator=(const InlineResourceSlot&) = delete;
 };
 
 typedef RefCountedPtr<InlineResourceSlot> InlineResourceSlotPtr;

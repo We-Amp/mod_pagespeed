@@ -20,11 +20,11 @@
 #ifndef NET_INSTAWEB_REWRITER_PUBLIC_CSS_HIERARCHY_H_
 #define NET_INSTAWEB_REWRITER_PUBLIC_CSS_HIERARCHY_H_
 
+#include <memory>
 #include <vector>
 
 #include "net/instaweb/rewriter/public/resource.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/http/data_url.h"
@@ -150,6 +150,12 @@ class CssHierarchy {
   bool unparseable_detected() const { return unparseable_detected_; }
   void set_unparseable_detected(bool ok) { unparseable_detected_ = ok; }
 
+  // Whether any conditional group rules (@supports/@layer/@container) were
+  // seen in this CSS. Their preludes are opaque bytes that may contain
+  // url()s, so absolutification must run its textual pass over them even
+  // though a cleanly parsed group rule sets no unparseable-section bits.
+  bool group_rules_seen() const { return group_rules_seen_; }
+
   int64 flattened_result_limit() const { return flattened_result_limit_; }
   void set_flattened_result_limit(int64 x) { flattened_result_limit_ = x; }
 
@@ -191,22 +197,32 @@ class CssHierarchy {
 
   // Recursively roll up this CSS's textual form such that minified_contents()
   // returns the flattened version of this CSS with @import's replaced with the
-  // contents of the imported file, all @charset rules removed, and the entire
-  // result minified. Intended for use by nested hierarchies that need to
+  // contents of the imported file, and the entire result minified. @charset
+  // and @import rules are removed only when this CSS is rolled up into
+  // something else - a nested stylesheet (which is merged into its parent),
+  // or any stylesheet whose @import rules were actually flattened - because
+  // the combined result is decoded with the enclosing context's charset. A
+  // root stylesheet with no @imports is not rolled up into anything, so it
+  // keeps its @charset, which may be the served result's only encoding
+  // declaration. Intended for use by nested hierarchies that need to
   // produce their flattened+minimized CSS for their parent to incorporate
   // into their own flattened+minimized CSS. If anything goes wrong with the
   // rolling up then the minified contents are set to the original contents.
   // If the textual form hasn't yet been parsed this method will do so by
   // invoking Parse, since the parsed form is required for minification.
-  // If rolling up succeeds, any charset and imports are removed from the
-  // parsed stylesheet, to match the flattened+minimized CSS for the input
-  // contents (without charset/imports), and to help speed up the ultimate
-  // call to RollUpStylesheets().
+  // If rolling up succeeds, any charset and imports removed per the above
+  // are removed from the parsed stylesheet too, to match the
+  // flattened+minimized CSS for the input contents (without charset/imports),
+  // and to help speed up the ultimate call to RollUpStylesheets().
   void RollUpContents();
 
   // Recursively roll up this CSS's parsed form such that stylesheet() returns
   // the flattened version of it, with child CSSs' rulesets merged into this
-  // one's and all imports and charsets removed. It is a pre-requisite that
+  // one's and all imports removed. Charsets are removed only when there were
+  // children to merge: children contribute only rulesets and @font-faces to
+  // the merge, so a stylesheet with no children is effectively unflattened
+  // and keeps its @charset (it may be the served result's only encoding
+  // declaration). It is a pre-requisite that
   // any *children* have had RollUpContents() invoked on them; it is *not*
   // required that it has been invoked on 'this' but it is OK if it has. It is
   // also a pre-requisite that if the CSS has not yet been parsed then it must
@@ -252,6 +268,19 @@ class CssHierarchy {
   // returned and the ruleset doesn't have to be processed at all (it can
   // be omitted), else true is returned.
   bool DetermineRulesetMedia(StringVector* ruleset_media);
+
+  // An @import that the parser could not parse (e.g. one using cascade
+  // layer or other unrecognized import syntax) is preserved verbatim as an
+  // unparsed ruleset, which import expansion cannot see; flattening a
+  // sibling @import would strand the verbatim @import mid-stylesheet where
+  // browsers ignore it. So if stylesheet_ contains such an @import, refuse
+  // to flatten:
+  // flattening_succeeded_ is set to false and the failure reason and the
+  // flatten_imports_unparseable_import statistic are recorded, but only when
+  // this call flips flattening_succeeded_ from true to false, so the veto is
+  // counted once per CSS even though both Parse() and ExpandChildren()
+  // perform this check. Returns true if such an @import is present.
+  bool RefuseFlatteningOnUnparseableImport();
 
   // The filter that owns us, used for recording statistics.
   CssFilter* filter_;
@@ -326,6 +355,10 @@ class CssHierarchy {
   // An indication of whether anything unparseable was detected in this CSS.
   bool unparseable_detected_;
 
+  // An indication of whether any conditional group rules were seen in this
+  // CSS (see group_rules_seen()).
+  bool group_rules_seen_;
+
   // The limit to the size of the result of flattening (0 means no limit).
   // If the flattened result would be this much or more, flattening will be
   // aborted. TODO(matterbury): Investigate whether we can, or ought to,
@@ -339,7 +372,8 @@ class CssHierarchy {
   // For logging messages.
   MessageHandler* message_handler_;
 
-  DISALLOW_COPY_AND_ASSIGN(CssHierarchy);
+  CssHierarchy(const CssHierarchy&) = delete;
+  CssHierarchy& operator=(const CssHierarchy&) = delete;
 };
 
 }  // namespace net_instaweb

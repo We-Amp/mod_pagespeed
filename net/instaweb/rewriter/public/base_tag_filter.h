@@ -45,7 +45,8 @@ class BaseTagFilter : public EmptyHtmlFilter {
   bool added_base_tag_;
   RewriteDriver* driver_;
 
-  DISALLOW_COPY_AND_ASSIGN(BaseTagFilter);
+  BaseTagFilter(const BaseTagFilter&) = delete;
+  BaseTagFilter& operator=(const BaseTagFilter&) = delete;
 };
 
 }  // namespace net_instaweb

@@ -71,7 +71,8 @@ class MetaTagFilter : public CommonFilter {
   // Stats on how many tags we moved.
   Variable* converted_meta_tag_count_;
 
-  DISALLOW_COPY_AND_ASSIGN(MetaTagFilter);
+  MetaTagFilter(const MetaTagFilter&) = delete;
+  MetaTagFilter& operator=(const MetaTagFilter&) = delete;
 };
 
 }  // namespace net_instaweb

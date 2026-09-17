@@ -1,0 +1,50 @@
+#!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
+# Push gate: re-checks clang-format on the C/C++ commits being pushed, in the
+# same scope as the CI "clang-format check" step,
+# using the pinned clang-format 20.x. tools/format.sh resolves the version (a
+# local clang-format-20, else a pinned pip wheel) so this needs no remote
+# formatter box.
+#
+# git feeds "<local_ref> <local_sha> <remote_ref> <remote_sha>" per pushed ref
+# on stdin; we export that exact range to tools/format.sh (as
+# PRE_COMMIT_FROM_REF/PRE_COMMIT_TO_REF, the same contract pre-commit uses) so
+# precisely the pushed commits are checked. New branches (all-zeros remote sha)
+# and a manual run with no stdin fall back to the merge-base range inside
+# format.sh, which FAILS CLOSED if no base can be resolved.
+#
+# Installed via tools/install-hooks.sh (core.hooksPath=.githooks).
+# Bypass for one push: git push --no-verify
+
+set -eu
+REPO_ROOT=$(git rev-parse --show-toplevel)
+ZEROS=0000000000000000000000000000000000000000
+
+status=0
+saw_ref=0
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [ -z "$local_ref" ] && continue
+  saw_ref=1
+  # Branch deletion: nothing to check.
+  [ "$local_sha" = "$ZEROS" ] && continue
+  if [ "$remote_sha" != "$ZEROS" ] \
+     && git rev-parse -q --verify "${remote_sha}^{commit}" >/dev/null 2>&1; then
+    PRE_COMMIT_FROM_REF="$remote_sha"
+  else
+    # New branch or unknown remote sha: let format.sh use its merge-base
+    # fallback (fail-closed).
+    PRE_COMMIT_FROM_REF=""
+  fi
+  PRE_COMMIT_TO_REF="$local_sha"
+  export PRE_COMMIT_FROM_REF PRE_COMMIT_TO_REF
+  "$REPO_ROOT/tools/format.sh" --check --changed || status=1
+done
+
+# Hook invoked without ref lines (e.g. run by hand): still check, merge-base range.
+if [ "$saw_ref" -eq 0 ]; then
+  "$REPO_ROOT/tools/format.sh" --check --changed || status=1
+fi
+
+exit $status

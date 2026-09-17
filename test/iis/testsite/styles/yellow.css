@@ -1,0 +1,38 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright (c) 2024-2026 We-Amp B.V.
+ */
+
+/* Yellow theme stylesheet for testing */
+
+.yellow-theme {
+    background-color: #fffde7;
+    color: #f57f17;
+}
+
+.yellow-bg {
+    background-color: #ffeb3b;
+}
+
+.yellow-text {
+    color: #ffc107;
+}
+
+.highlight {
+    background-color: #fff176;
+    padding: 2px 4px;
+    border-radius: 2px;
+}
+
+/* Button styles */
+.btn-yellow {
+    background-color: #ffc107;
+    border: 1px solid #ff8f00;
+    color: #333;
+    padding: 8px 16px;
+    cursor: pointer;
+}
+
+.btn-yellow:hover {
+    background-color: #ffb300;
+}

@@ -26,6 +26,7 @@
 #define PAGESPEED_AUTOMATIC_PROXY_FETCH_H_
 
 #include <map>
+#include <memory>
 #include <set>
 #include <vector>
 
@@ -38,7 +39,7 @@
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/function.h"
 #include "pagespeed/kernel/base/gtest_prod.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
+#include "pagespeed/kernel/base/shared_string.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/http/http_names.h"
@@ -113,7 +114,8 @@ class ProxyFetchFactory {
   std::unique_ptr<AbstractMutex> outstanding_proxy_fetches_mutex_;
   std::set<ProxyFetch*> outstanding_proxy_fetches_;
 
-  DISALLOW_COPY_AND_ASSIGN(ProxyFetchFactory);
+  ProxyFetchFactory(const ProxyFetchFactory&) = delete;
+  ProxyFetchFactory& operator=(const ProxyFetchFactory&) = delete;
 };
 
 // Tracks a single property-cache lookup. These lookups are initiated
@@ -145,7 +147,9 @@ class ProxyFetchPropertyCallback : public PropertyPage {
   UserAgentMatcher::DeviceType device_type_;
   ProxyFetchPropertyCallbackCollector* collector_;
   GoogleString url_;
-  DISALLOW_COPY_AND_ASSIGN(ProxyFetchPropertyCallback);
+  ProxyFetchPropertyCallback(const ProxyFetchPropertyCallback&) = delete;
+  ProxyFetchPropertyCallback& operator=(const ProxyFetchPropertyCallback&) =
+      delete;
 };
 
 // Tracks a collection of property-cache lookups occurring in parallel.
@@ -287,7 +291,10 @@ class ProxyFetchPropertyCallbackCollector {
   std::unique_ptr<FallbackPropertyPage> fallback_property_page_;
   std::unique_ptr<PropertyPage> origin_property_page_;
 
-  DISALLOW_COPY_AND_ASSIGN(ProxyFetchPropertyCallbackCollector);
+  ProxyFetchPropertyCallbackCollector(
+      const ProxyFetchPropertyCallbackCollector&) = delete;
+  ProxyFetchPropertyCallbackCollector& operator=(
+      const ProxyFetchPropertyCallbackCollector&) = delete;
 };
 
 // Manages a single fetch of an HTML or resource file from the original server.
@@ -344,6 +351,13 @@ class ProxyFetch : public SharedAsyncFetch {
   void HandleHeadersComplete() override;
   bool HandleWrite(const StringPiece& content,
                    MessageHandler* handler) override;
+  // A shared-storage serve must not bypass the HTML parser: route it
+  // through HandleWrite.
+  bool HandleWriteShared(const StringPiece& content,
+                         const SharedString& /*storage*/,
+                         MessageHandler* handler) override {
+    return HandleWrite(content, handler);
+  }
   bool HandleFlush(MessageHandler* handler) override;
   void HandleDone(bool success) override;
   bool IsCachedResultValid(const ResponseHeaders& headers) override;
@@ -369,7 +383,9 @@ class ProxyFetch : public SharedAsyncFetch {
              ProxyFetchFactory* factory);
   ~ProxyFetch() override;
 
-  const RewriteOptions* Options();
+  // Returns the RewriteOptions for this fetch.  Cached at construction to
+  // avoid racing on driver_ which can be nulled from another thread.
+  const RewriteOptions* Options() const;
 
   // Once we have decided this is HTML, begin parsing and set headers.
   void SetupForHtml();
@@ -462,6 +478,11 @@ class ProxyFetch : public SharedAsyncFetch {
   // putting them back.
   RewriteDriver* driver_;
 
+  // Snapshot of driver_->options() taken at construction.  Options are
+  // immutable for the lifetime of a fetch, so this avoids racing on
+  // driver_ which can be nulled from another thread during cleanup.
+  const RewriteOptions* options_;
+
   // True if we have queued up ExecuteQueued but did not
   // execute it yet.
   bool queue_run_job_created_;
@@ -509,7 +530,8 @@ class ProxyFetch : public SharedAsyncFetch {
   // (non-proxied) content.
   bool trusted_input_;
 
-  DISALLOW_COPY_AND_ASSIGN(ProxyFetch);
+  ProxyFetch(const ProxyFetch&) = delete;
+  ProxyFetch& operator=(const ProxyFetch&) = delete;
 };
 
 }  // namespace net_instaweb

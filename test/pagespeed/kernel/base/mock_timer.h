@@ -21,9 +21,9 @@
 #define PAGESPEED_KERNEL_BASE_MOCK_TIMER_H_
 
 #include <vector>  // for vector
+#include <memory>
 
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/timer.h"
 
 namespace net_instaweb {
@@ -81,7 +81,8 @@ class MockTimer : public Timer {
   std::vector<TimeAndCallback> deltas_us_;
   mutable unsigned int next_delta_;
 
-  DISALLOW_COPY_AND_ASSIGN(MockTimer);
+  MockTimer(const MockTimer&) = delete;
+  MockTimer& operator=(const MockTimer&) = delete;
 };
 
 }  // namespace net_instaweb

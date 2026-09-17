@@ -21,6 +21,7 @@
 
 #include <cstddef>
 
+#include "pagespeed/kernel/base/mapped_shared_string.h"
 #include "pagespeed/kernel/base/shared_string.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/cache/cache_interface.h"
@@ -57,7 +58,26 @@ class WriteThroughCallback : public CacheInterface::Callback {
   void Done(CacheInterface::KeyState state) override {
     if (state == CacheInterface::kAvailable) {
       if (trying_cache2_) {
-        write_through_cache_->PutInCache1(key_, value());
+        // An L2 hit (e.g. a Cyclone zero-copy disk read) is promoted into L1,
+        // where a torn borrow would be re-served until eviction.  De-alias
+        // with the verified copy (copy-then-verify): when the value
+        // is mapped, copy it and re-check the borrow; if it tore, skip the L1
+        // promotion entirely.  The L2 result is still delivered to the caller
+        // unchanged below -- that serve path does its own verification; only
+        // the promotion must be gated here.
+        const MappedSharedString& mapped_value = value();
+        if (mapped_value.is_mapped()) {
+          GoogleString devalias;
+          if (CopyMappedVerified(mapped_value.Value(), mapped_value,
+                                 &devalias)) {
+            SharedString owned;
+            owned.SwapWithString(&devalias);
+            write_through_cache_->PutInCache1(key_, owned);
+          }
+          // Torn borrow: do not promote possibly-garbage bytes into L1.
+        } else {
+          write_through_cache_->PutInCache1(key_, mapped_value.ToOwned());
+        }
       }
       callback_->DelegatedDone(state);
       delete this;

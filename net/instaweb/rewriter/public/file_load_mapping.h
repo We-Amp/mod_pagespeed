@@ -56,7 +56,8 @@ class FileLoadMappingLiteral : public FileLoadMapping {
   const GoogleString url_prefix_;
   const GoogleString filename_prefix_;
 
-  DISALLOW_COPY_AND_ASSIGN(FileLoadMappingLiteral);
+  FileLoadMappingLiteral(const FileLoadMappingLiteral&) = delete;
+  FileLoadMappingLiteral& operator=(const FileLoadMappingLiteral&) = delete;
 };
 
 // If a mapping is too complicated to represent with a simple literal with
@@ -80,7 +81,8 @@ class FileLoadMappingRegexp : public FileLoadMapping {
   const GoogleString url_regexp_str_;
   const GoogleString filename_prefix_;
 
-  DISALLOW_COPY_AND_ASSIGN(FileLoadMappingRegexp);
+  FileLoadMappingRegexp(const FileLoadMappingRegexp&) = delete;
+  FileLoadMappingRegexp& operator=(const FileLoadMappingRegexp&) = delete;
 };
 
 }  // namespace net_instaweb

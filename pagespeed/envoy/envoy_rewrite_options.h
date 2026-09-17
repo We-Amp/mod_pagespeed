@@ -64,6 +64,24 @@ class EnvoyRewriteOptions : public SystemRewriteOptions {
   const GoogleString& global_admin_path() const {
     return global_admin_path_.value();
   }
+  const GoogleString& daemon_api_socket_path() const {
+    return daemon_api_socket_path_.value();
+  }
+
+  // HTML rewriting options.
+  // Returns true if HTML rewriting is enabled.
+  bool enable_html_rewriting() const { return enable_html_rewriting_.value(); }
+
+  // Maximum time in milliseconds to wait for HTML rewriting to complete.
+  int64 html_rewrite_deadline_ms() const {
+    return html_rewrite_deadline_ms_.value();
+  }
+
+  // Maximum size in bytes of HTML responses to rewrite.
+  int64 max_html_buffer_bytes() const { return max_html_buffer_bytes_.value(); }
+
+  // Health check endpoint path.
+  const GoogleString& health_path() const { return health_path_.value(); }
 
  private:
   // Keeps the properties added by this subclass.  These are merged into
@@ -79,7 +97,7 @@ class EnvoyRewriteOptions : public SystemRewriteOptions {
   // Add an option to envoy_properties_
   template <class OptionClass>
   static void add_envoy_option(typename OptionClass::ValueType default_value,
-                               OptionClass EnvoyRewriteOptions::*offset,
+                               OptionClass EnvoyRewriteOptions::* offset,
                                const char* id, StringPiece option_name,
                                OptionScope scope, const char* help,
                                bool safe_to_print) {
@@ -93,6 +111,15 @@ class EnvoyRewriteOptions : public SystemRewriteOptions {
   Option<GoogleString> messages_path_;
   Option<GoogleString> admin_path_;
   Option<GoogleString> global_admin_path_;
+  Option<GoogleString> daemon_api_socket_path_;
+
+  // HTML rewriting options.
+  Option<bool> enable_html_rewriting_;
+  Option<int64> html_rewrite_deadline_ms_;
+  Option<int64> max_html_buffer_bytes_;
+
+  // Health check endpoint path.
+  Option<GoogleString> health_path_;
 
   // Helper for ParseAndSetOptions.  Returns whether the two directives equal,
   // ignoring case.
@@ -103,7 +130,8 @@ class EnvoyRewriteOptions : public SystemRewriteOptions {
 
   // TODO(jefftk): support fetch proxy in server and location blocks.
 
-  DISALLOW_COPY_AND_ASSIGN(EnvoyRewriteOptions);
+  EnvoyRewriteOptions(const EnvoyRewriteOptions&) = delete;
+  EnvoyRewriteOptions& operator=(const EnvoyRewriteOptions&) = delete;
 };
 
 }  // namespace net_instaweb

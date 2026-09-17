@@ -101,7 +101,7 @@ else
   echo WGET = $WGET
 fi
 
-if ! $WGET --version | head -1 | grep -q "1\.1[2-9]"; then
+if ! $WGET --version | head -1 | grep -qE "1\.(1[2-9]|[2-9][0-9])"; then
   echo "You have the wrong version of wget. >1.12 is required."
   exit 1
 fi

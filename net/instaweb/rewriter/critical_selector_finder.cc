@@ -20,6 +20,7 @@
 #include "net/instaweb/rewriter/public/critical_selector_finder.h"
 
 #include <map>
+#include <memory>
 
 #include "base/logging.h"
 #include "net/instaweb/rewriter/critical_keys.pb.h"
@@ -30,7 +31,6 @@
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "net/instaweb/util/public/property_cache.h"
 #include "pagespeed/kernel/base/message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"

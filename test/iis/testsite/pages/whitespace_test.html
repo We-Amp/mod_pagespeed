@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<!--
+  SPDX-License-Identifier: Apache-2.0
+  Copyright (c) 2024-2026 We-Amp B.V.
+-->
+
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Whitespace Collapse Test</title>
+    <link rel="stylesheet" href="../styles/main.css">
+</head>
+<body>
+
+
+
+    <h1>Whitespace          Collapse          Test</h1>
+
+
+
+    <p>This    page    has    excessive    whitespace    that    should    be    collapsed.</p>
+
+
+    <div>
+
+        <p>Multiple blank lines between elements.</p>
+
+    </div>
+
+
+
+    <pre>
+        This is preformatted text.
+        Whitespace here should be preserved.
+            Including indentation.
+    </pre>
+
+
+    <textarea>
+        Textarea content should also
+        preserve its whitespace.
+    </textarea>
+
+
+    <code>var x = "whitespace in code";</code>
+
+    <script>
+        // Whitespace in scripts is typically preserved
+        var message = "Hello    World";
+        console.log(message);
+    </script>
+
+
+
+</body>
+</html>

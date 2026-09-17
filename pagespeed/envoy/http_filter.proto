@@ -1,10 +1,247 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+
 syntax = "proto3";
 
 package pagespeed;
 
 import "validate/validate.proto";
 
+// Server specification for external cache servers.
+message ServerSpec {
+    string host = 1;
+    int32 port = 2;
+}
+
+// Redis cache configuration.
+message RedisConfig {
+    // Redis server host and port. If not set, Redis is disabled.
+    ServerSpec server = 1;
+
+    // Timeout for Redis operations in microseconds. Default: 5000000 (5 seconds).
+    int64 timeout_us = 2;
+
+    // Delay between reconnection attempts in milliseconds. Default: 5.
+    int64 reconnection_delay_ms = 3;
+
+    // Redis database index (0-15). Default: 0.
+    int32 database_index = 4;
+
+    // TTL for cached items in seconds. Default: system default.
+    int32 ttl_sec = 5;
+}
+
+// Memcached cache configuration.
+message MemcachedConfig {
+    // List of memcached servers. If empty, Memcached is disabled.
+    repeated ServerSpec servers = 1;
+
+    // Number of threads for memcached operations. Default: 1.
+    int32 threads = 2;
+
+    // Timeout for memcached operations in microseconds. Default: system default.
+    int64 timeout_us = 3;
+}
+
+// Domain rewrite mapping: maps resources from one domain to another for CDN.
+// Example: map from "www.example.com" to "cdn.example.com"
+message RewriteDomainMapping {
+    // Target domain for rewritten URLs (e.g., "cdn.example.com").
+    string to_domain = 1;
+
+    // Source domains, comma-separated. Wildcards (*, ?) allowed.
+    // Example: "www.example.com,*.example.com"
+    string from_domains = 2;
+}
+
+// Origin domain mapping: maps requests to a different origin for fetching.
+// Used to fetch resources from internal/local servers.
+message OriginDomainMapping {
+    // Origin domain to fetch from (e.g., "localhost:8080").
+    string to_domain = 1;
+
+    // Source domains, comma-separated. Wildcards (*, ?) allowed.
+    string from_domains = 2;
+
+    // Host header to use when fetching. If empty, uses the from_domain.
+    string host_header = 3;
+}
+
+// Admin authentication configuration.
+// Controls access to admin endpoints (/pagespeed_admin, /pagespeed_statistics).
+message AdminAuthConfig {
+    // Whether admin authentication is enabled. Default: false.
+    bool enabled = 1;
+
+    // Bearer token for authentication. Required if enabled is true.
+    // Clients must provide this in the Authorization header:
+    // "Authorization: Bearer <token>"
+    string token = 2;
+
+    // Allowed IP addresses/ranges in CIDR notation.
+    // If non-empty, requests must originate from these IPs.
+    // Examples: "10.0.0.0/8", "192.168.1.0/24", "127.0.0.1/32"
+    repeated string allowed_ips = 3;
+
+    // Rate limit in requests per minute. Default: 100.
+    // Set to 0 to disable rate limiting.
+    int32 rate_limit_rpm = 4;
+}
+
+// Circuit breaker configuration for resource fetching.
+// Protects against cascade failures when upstream services are unavailable.
+message CircuitBreakerConfig {
+    // Whether circuit breaker is enabled. Default: true.
+    // Presence-aware (proto3 optional): when unset, treated as enabled.
+    optional bool enabled = 1;
+
+    // Number of consecutive failures before opening the circuit. Default: 5.
+    int32 failure_threshold = 2;
+
+    // Number of consecutive successes in HALF_OPEN state before closing. Default: 2.
+    int32 success_threshold = 3;
+
+    // Time in milliseconds to wait in OPEN state before testing. Default: 30000.
+    int64 timeout_ms = 4;
+}
+
+// Domain sharding: distribute resources across multiple equivalent domains.
+// Improves browser download parallelism.
+message DomainShard {
+    // Base domain to shard.
+    string domain = 1;
+
+    // Shard domains, comma-separated (e.g., "s1.example.com,s2.example.com").
+    string shards = 2;
+}
+
+// Domain configuration.
+message DomainConfig {
+    // Domains authorized for rewriting, comma-separated.
+    // Wildcards (*, ?) allowed. Example: "*.example.com"
+    repeated string authorized_domains = 1;
+
+    // Rewrite domain mappings (for CDN integration).
+    repeated RewriteDomainMapping rewrite_mappings = 2;
+
+    // Origin domain mappings (for fetch routing).
+    repeated OriginDomainMapping origin_mappings = 3;
+
+    // Domain sharding configuration.
+    repeated DomainShard shards = 4;
+}
+
+// Per-VirtualHost PageSpeed options.
+// These options can override the global defaults for specific hosts.
+message VirtualHostOptions {
+    // Rewrite level: PassThrough, CoreFilters, MobilizeFilters, TestingCoreFilters, AllFilters
+    string rewrite_level = 1;
+
+    // Whether PageSpeed is enabled for this host. Default: true.
+    // Set to false to disable all optimization for matching hosts.
+    // Presence-aware (proto3 optional): when unset, treated as enabled.
+    optional bool enabled = 2;
+
+    // Enable specific filters (comma-separated filter names).
+    // Example: "rewrite_css,rewrite_javascript,recompress_images"
+    string enabled_filters = 3;
+
+    // Disable specific filters (comma-separated filter names).
+    // Disabled filters override enabled filters.
+    string disabled_filters = 4;
+
+    // Custom PageSpeed options as key-value pairs.
+    // Keys are PageSpeed directive names (e.g., "CssInlineMaxBytes").
+    // Values are the directive values as strings.
+    map<string, string> custom_options = 5;
+
+    // Domain configuration specific to this virtual host.
+    // Merged with global domain configuration.
+    DomainConfig domains = 6;
+}
+
+// Virtual host configuration: matches requests by host pattern.
+message VirtualHostConfig {
+    // Host pattern to match against the Host header.
+    // Supports wildcards: * matches any sequence, ? matches single character.
+    // Examples:
+    //   "www.example.com" - exact match
+    //   "*.example.com" - matches any subdomain of example.com
+    //   "api-?.example.com" - matches api-1.example.com, api-2.example.com, etc.
+    string host_pattern = 1;
+
+    // Priority for matching (lower = higher priority). Default: 0.
+    // When multiple patterns match, the one with lowest priority wins.
+    // Patterns with the same priority are matched in order of appearance.
+    int32 priority = 2;
+
+    // Options to apply for this virtual host.
+    VirtualHostOptions options = 3;
+}
+
+// PageSpeed filter configuration.
 message Decoder {
+    // Deprecated: legacy key/val fields (kept for backward compatibility).
     string key = 1 [(validate.rules).string.min_bytes = 1];
     string val = 2 [(validate.rules).string.min_bytes = 1];
+
+    // Redis cache configuration.
+    RedisConfig redis = 3;
+
+    // Memcached cache configuration.
+    MemcachedConfig memcached = 4;
+
+    // File cache path. Default: /tmp/envoy_pagespeed_cache/
+    string file_cache_path = 5;
+
+    // Log directory. Default: /tmp/envoy_pagespeed_log/
+    string log_dir = 6;
+
+    // LRU cache size in KB per process. Default: 512000 (500 MB).
+    int64 lru_cache_kb_per_process = 7;
+
+    // File cache size limit in KB. Default: 10240000 (10 GB).
+    int64 file_cache_size_kb = 8;
+
+    // Domain configuration (authorization, mappings, sharding).
+    DomainConfig domains = 9;
+
+    // Per-VirtualHost configurations.
+    // Requests are matched against host_pattern in priority order.
+    // Matching options are merged with global options.
+    repeated VirtualHostConfig virtual_hosts = 10;
+
+    // Admin authentication configuration.
+    // Controls access to admin endpoints (/pagespeed_admin, /pagespeed_statistics).
+    AdminAuthConfig admin_auth = 20;
+
+    // Circuit breaker configuration for resource fetching.
+    // When enabled, protects against cascade failures by temporarily
+    // blocking requests to failing origins.
+    CircuitBreakerConfig circuit_breaker = 21;
+
+    // JavaScript library canonicalization entries.
+    // Format: "size_bytes md5_hash canonical_url"
+    // Example: "43 1o978_K0_LNE5_ystNklf http://www.modpagespeed.com/rewrite_javascript.js"
+    // When the canonicalize_javascript_libraries filter is enabled, PageSpeed
+    // identifies known libraries by minifying JavaScript content and computing
+    // an MD5 hash. If the hash matches a registered library, the URL is
+    // rewritten to the canonical version.
+    repeated string libraries = 22;
+
+    // Key for X-PSA-Blocking-Rewrite header support.
+    // When set, requests with "X-PSA-Blocking-Rewrite: <key>" will wait for
+    // all rewrites to complete before sending the response, instead of
+    // streaming partially-optimized HTML. The header value must match this key.
+    // Example: "psatest"
+    string blocking_rewrite_key = 23;
+
+    // HTTPS fetch options for the curl-based resource fetcher.
+    // Comma-separated list of keywords controlling HTTPS certificate
+    // verification when fetching sub-resources (e.g., for CSS combination).
+    // Keywords: enable, disable, allow_self_signed,
+    //   allow_unknown_certificate_authority, allow_certificate_not_yet_valid
+    // Default: "enable" (HTTPS enabled with strict certificate verification).
+    // Example: "enable,allow_self_signed" for self-signed certificates.
+    string fetch_https_options = 24;
 }

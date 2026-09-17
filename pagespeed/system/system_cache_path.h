@@ -20,10 +20,10 @@
 #ifndef PAGESPEED_SYSTEM_SYSTEM_CACHE_PATH_H_
 #define PAGESPEED_SYSTEM_SYSTEM_CACHE_PATH_H_
 
+#include <memory>
 #include <set>
 
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_annotations.h"
@@ -34,15 +34,15 @@ namespace net_instaweb {
 class AbstractMutex;
 class AbstractSharedMem;
 class CacheInterface;
-class FileCache;
-class FileSystemLockManager;
+class CycloneCache;
+class LRUCache;
 class MessageHandler;
 class NamedLockManager;
 class PurgeContext;
 class PurgeSet;
 class RewriteDriverFactory;
 class SharedMemLockManager;
-class SlowWorker;
+class ThreadSafeLockManager;
 class SystemServerContext;
 class SystemRewriteOptions;
 
@@ -53,7 +53,7 @@ class SystemCachePath {
  public:
   // CacheStats prefixes.
   static const char kFileCache[];
-  static const char kLruCache[];
+  static const char kFileCacheSmall[];
 
   SystemCachePath(const StringPiece& path, const SystemRewriteOptions* config,
                   RewriteDriverFactory* factory,
@@ -70,20 +70,37 @@ class SystemCachePath {
   // Per-machine file cache with any stats wrappers.
   CacheInterface* file_cache() { return file_cache_; }
 
+  // Small-object-tier routed view over the same on-disk cache, with its own
+  // stats wrapper ("file_cache_small").  Intended for metadata and
+  // property-cache entries so payload churn in the default volume cannot
+  // evict them.  Three shapes, precisely:
+  //   - FileCacheSmallTierPercent 0 (or the LRU fallback when Cyclone is
+  //     unavailable): literally aliases file_cache() -- same object, stats
+  //     label "file_cache".
+  //   - Percent > 0 but the cache is below the tier's sizing floor: a
+  //     distinct CacheStats labeled "file_cache_small" whose operations
+  //     Cyclone routes back to the default keyspace.  Same keyspace as
+  //     file_cache(), different stats label.
+  //   - Percent > 0 and the tier is active: "file_cache_small" routing to
+  //     the physically separate small volume.
+  // Always safe to use.
+  CacheInterface* small_tier_file_cache() { return small_tier_file_cache_; }
+
   // Access to backend for testing.  Do not use this directly in production
   // as it lacks statistics wrappers, etc.
-  FileCache* file_cache_backend() { return file_cache_backend_; }
+  // Returns the underlying cache (CycloneCache or fallback LRU).
+  CacheInterface* cache_backend() { return cache_backend_; }
+
+  // The CycloneCache backend, or NULL when Cyclone failed to start and the
+  // LRU fallback is in use.  For telemetry (e.g. the global caches page);
+  // production cache traffic should go through file_cache().
+  CycloneCache* cyclone_cache() { return cyclone_cache_; }
   NamedLockManager* lock_manager() { return lock_manager_; }
 
   // See comments in SystemCaches for calling conventions on these.
   void RootInit();
-  void ChildInit(SlowWorker* cache_clean_worker);
+  void ChildInit();
   void GlobalCleanup(MessageHandler* handler);  // only called in root process
-
-  // When there are multiple configurations which specify the same cache
-  // path, we must merge the other settings: the cleaning interval, size, and
-  // inode count.
-  void MergeConfig(const SystemRewriteOptions* config);
 
   // Associates a ServerContext with this CachePath, enabling cache purges
   // to propagate into the ServerContext's global options.
@@ -101,29 +118,9 @@ class SystemCachePath {
   PurgeContext* purge_context() { return purge_context_.get(); }
 
  private:
-  typedef std::set<SystemServerContext*> ServerContextSet;
+  using ServerContextSet = std::set<SystemServerContext*>;
 
-  void FallBackToFileBasedLocking();
   GoogleString LockManagerSegmentName() const;
-
-  // Merge a value taken from a config file against the value already
-  // initialized in a cache policy, reporting a Warning if they were
-  // explicitly set and have conflicting values.  Whenever one of the
-  // values was taken from the options defaults, we select the explicit
-  // one without issuing a warning.
-  //
-  // For the interval, we take the minimum of the two values
-  // (take_larger==false), and for the sizes we take the larger
-  // (take_larger==true).
-  //
-  // If necessary, *policy_value is updated with the resolved value,
-  // which is computed from the old *policy_value and config_value.
-  //
-  // 'name' is used in a warning message printed whenever resolution was
-  // required.
-  void MergeEntries(int64 config_value, bool config_was_set, bool take_larger,
-                    const char* name, int64* policy_value,
-                    bool* has_explicit_policy);
 
   // Transmits cache-purge-set updates to all live server contexts.
   void UpdateCachePurgeSet(const CopyOnWrite<PurgeSet>& purge_set);
@@ -133,17 +130,18 @@ class SystemCachePath {
   RewriteDriverFactory* factory_;
   AbstractSharedMem* shm_runtime_;
   std::unique_ptr<SharedMemLockManager> shared_mem_lock_manager_;
-  std::unique_ptr<FileSystemLockManager> file_system_lock_manager_;
+  std::unique_ptr<ThreadSafeLockManager> fallback_lock_manager_;
   NamedLockManager* lock_manager_;
-  FileCache* file_cache_backend_;  // owned by file_cache_
+  CacheInterface* cache_backend_;  // Cyclone or fallback LRU, owned by factory
+  CycloneCache* cyclone_cache_;    // cache_backend_ as CycloneCache, or NULL
   CacheInterface* lru_cache_;
   CacheInterface* file_cache_;
+  CacheInterface* small_tier_file_cache_;
+  std::unique_ptr<LRUCache>
+      fallback_lru_cache_;  // Used when CycloneCache fails
   GoogleString cache_flush_filename_;
   bool unplugged_;
   bool enable_cache_purge_;
-  bool clean_interval_explicitly_set_;
-  bool clean_size_explicitly_set_;
-  bool clean_inode_limit_explicitly_set_;
 
   std::unique_ptr<PurgeContext> purge_context_;
 

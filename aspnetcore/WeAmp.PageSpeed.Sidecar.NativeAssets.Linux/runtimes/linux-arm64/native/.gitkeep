@@ -1,0 +1,3 @@
+# The matched (nginx + ngx_pagespeed_module.so) linux-arm64 pair is built per-release
+# and dropped here by the release pipeline. Both halves must be built together —
+# nginx refuses a module from any other build — so neither is checked in.

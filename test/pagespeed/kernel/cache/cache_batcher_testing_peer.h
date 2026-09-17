@@ -38,7 +38,8 @@ class CacheBatcherTestingPeer {
   }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(CacheBatcherTestingPeer);
+  CacheBatcherTestingPeer(const CacheBatcherTestingPeer&) = delete;
+  CacheBatcherTestingPeer& operator=(const CacheBatcherTestingPeer&) = delete;
 };
 
 }  // namespace net_instaweb

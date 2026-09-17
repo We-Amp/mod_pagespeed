@@ -84,7 +84,8 @@ class DelayCache::DelayCallback : public CacheInterface::Callback {
   GoogleString key_;
   KeyState state_;
 
-  DISALLOW_COPY_AND_ASSIGN(DelayCallback);
+  DelayCallback(const DelayCallback&) = delete;
+  DelayCallback& operator=(const DelayCallback&) = delete;
 };
 
 DelayCache::DelayCache(CacheInterface* cache, ThreadSystem* thread_system)

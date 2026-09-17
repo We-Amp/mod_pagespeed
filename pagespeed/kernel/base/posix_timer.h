@@ -31,10 +31,12 @@ class PosixTimer : public Timer {
   ~PosixTimer() override;
 
   int64 NowUs() const override;
+  int64 NowMonotonicUs() const override;
   void SleepUs(int64 us) override;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(PosixTimer);
+  PosixTimer(const PosixTimer&) = delete;
+  PosixTimer& operator=(const PosixTimer&) = delete;
 };
 
 }  // namespace net_instaweb

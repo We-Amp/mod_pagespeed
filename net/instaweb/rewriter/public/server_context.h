@@ -23,6 +23,7 @@
 #define NET_INSTAWEB_REWRITER_PUBLIC_SERVER_CONTEXT_H_
 
 #include <cstddef>  // for size_t
+#include <memory>
 #include <set>
 #include <utility>
 #include <vector>
@@ -31,10 +32,11 @@
 #include "net/instaweb/http/public/http_cache.h"
 #include "net/instaweb/http/public/request_context.h"
 #include "net/instaweb/http/public/url_async_fetcher.h"
+#include "net/instaweb/rewriter/public/named_lock_schedule_rewrite_controller.h"
 #include "net/instaweb/rewriter/public/output_resource.h"
 #include "net/instaweb/rewriter/public/resource.h"
+#include "net/instaweb/rewriter/public/work_bound_expensive_operation_controller.h"
 #include "net/instaweb/util/public/property_cache.h"
-#include "pagespeed/controller/central_controller.h"
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/atomic_bool.h"
 #include "pagespeed/kernel/base/basictypes.h"
@@ -43,7 +45,6 @@
 #include "pagespeed/kernel/base/hasher.h"
 #include "pagespeed/kernel/base/md5_hasher.h"
 #include "pagespeed/kernel/base/ref_counted_ptr.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_system.h"
@@ -160,6 +161,16 @@ class ServerContext {
   // assumption, a resource can only be no-store if it is also no-cache.
   void ApplyInputCacheControl(const ResourceVector& inputs,
                               ResponseHeaders* headers);
+
+  // Upgrades the Cache-Control of a response being served under a
+  // hash-committed .pagespeed. URL with explicit 'public' plus RFC 8246
+  // 'immutable', if and only if the response is already publicly
+  // cacheable. Serving-time only: never apply this to headers that are
+  // stored in a cache or copied into derived (e.g. in-place) responses --
+  // stored entries carry 'public' only when every input explicitly said
+  // so, and the in-place fallback path relies on that as a signal. See the
+  // implementation comment for the full reasoning.
+  void ApplyRewrittenUrlCacheControl(ResponseHeaders* headers);
 
   // Is this URL a ref to a Pagespeed resource?
   bool IsPagespeedResource(const GoogleUrl& url) const;
@@ -522,6 +533,14 @@ class ServerContext {
   // To set up AdminSite for SystemServerContext.
   virtual void PostInitHook();
 
+  // True for the factory's stub decoding server context (see
+  // RewriteDriverFactory::InitStubDecodingServerContext): a context that
+  // only backs the shared decoding driver and never serves requests.
+  // Subclasses use this to skip serving-only initialization such as
+  // admin/license setup.
+  bool is_decoding_stub() const { return is_decoding_stub_; }
+  void set_is_decoding_stub(bool x) { is_decoding_stub_ = x; }
+
   // Returns whether or not this attribute can be merged into headers
   // without additional considerations.
   static bool IsExcludedAttribute(const char* attribute);
@@ -551,11 +570,23 @@ class ServerContext {
   const GoogleString& hostname() const { return hostname_; }
   void set_hostname(const GoogleString& x) { hostname_ = x; }
 
-  void set_central_controller(std::shared_ptr<CentralController> controller) {
-    central_controller_ = controller;
+  void set_expensive_operation_controller(
+      std::shared_ptr<WorkBoundExpensiveOperationController> controller) {
+    expensive_operation_controller_ = std::move(controller);
   }
 
-  CentralController* central_controller() { return central_controller_.get(); }
+  WorkBoundExpensiveOperationController* expensive_operation_controller() {
+    return expensive_operation_controller_.get();
+  }
+
+  void set_schedule_rewrite_controller(
+      std::shared_ptr<NamedLockScheduleRewriteController> controller) {
+    schedule_rewrite_controller_ = std::move(controller);
+  }
+
+  NamedLockScheduleRewriteController* schedule_rewrite_controller() {
+    return schedule_rewrite_controller_.get();
+  }
 
   // Adds an X-Original-Content-Length header to the response headers
   // based on the size of the input resources.
@@ -662,7 +693,7 @@ class ServerContext {
   // result is ignored. Startup fetches are only used for populating the cache.
   GoogleString FetchRemoteConfig(const GoogleString& url, int64 timeout_ms,
                                  bool on_startup,
-                                 RequestContextPtr request_ctx);
+                                 const RequestContextPtr& request_ctx);
 
   // These are normally owned by the RewriteDriverFactory that made 'this'.
   ThreadSystem* thread_system_;
@@ -698,6 +729,7 @@ class ServerContext {
 
   bool store_outputs_in_file_system_;
   bool response_headers_finalized_;
+  bool is_decoding_stub_;
   bool enable_property_cache_;
 
   NamedLockManager* lock_manager_;
@@ -780,9 +812,13 @@ class ServerContext {
 
   std::unique_ptr<CachePropertyStore> cache_property_store_;
 
-  std::shared_ptr<CentralController> central_controller_;
+  std::shared_ptr<WorkBoundExpensiveOperationController>
+      expensive_operation_controller_;
+  std::shared_ptr<NamedLockScheduleRewriteController>
+      schedule_rewrite_controller_;
 
-  DISALLOW_COPY_AND_ASSIGN(ServerContext);
+  ServerContext(const ServerContext&) = delete;
+  ServerContext& operator=(const ServerContext&) = delete;
 };
 
 }  // namespace net_instaweb

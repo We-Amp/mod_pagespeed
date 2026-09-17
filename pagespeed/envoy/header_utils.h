@@ -1,4 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 We-Amp B.V.
+
 #pragma once
+
+#include <memory>
 
 #include "absl/strings/numbers.h"
 #include "envoy/http/header_map.h"

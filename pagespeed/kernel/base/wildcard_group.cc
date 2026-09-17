@@ -22,32 +22,29 @@
 
 #include "pagespeed/kernel/base/wildcard_group.h"
 
+#include <memory>
 #include <vector>
 
 #include "base/logging.h"
-#include "pagespeed/kernel/base/stl_util.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
-#include "pagespeed/kernel/base/wildcard.h"
 
 namespace net_instaweb {
 
 WildcardGroup::~WildcardGroup() { Clear(); }
 
 void WildcardGroup::Clear() {
-  STLDeleteElements(&wildcards_);
+  wildcards_.clear();
   allow_.clear();
 }
 
 void WildcardGroup::Allow(const StringPiece& expr) {
-  Wildcard* wildcard = new Wildcard(expr);
-  wildcards_.push_back(wildcard);
+  wildcards_.push_back(std::make_unique<Wildcard>(expr));
   allow_.push_back(true);
 }
 
 void WildcardGroup::Disallow(const StringPiece& expr) {
-  Wildcard* wildcard = new Wildcard(expr);
-  wildcards_.push_back(wildcard);
+  wildcards_.push_back(std::make_unique<Wildcard>(expr));
   allow_.push_back(false);
 }
 
@@ -71,7 +68,7 @@ void WildcardGroup::CopyFrom(const WildcardGroup& src) {
 void WildcardGroup::AppendFrom(const WildcardGroup& src) {
   CHECK_EQ(src.wildcards_.size(), src.allow_.size());
   for (int i = 0, n = src.wildcards_.size(); i < n; ++i) {
-    wildcards_.push_back(src.wildcards_[i]->Duplicate());
+    wildcards_.emplace_back(src.wildcards_[i]->Duplicate());
     allow_.push_back(src.allow_[i]);
   }
 }

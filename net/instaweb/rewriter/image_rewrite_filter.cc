@@ -19,12 +19,18 @@
 
 #include "net/instaweb/rewriter/public/image_rewrite_filter.h"
 
+#ifndef _WIN32
 #include <sys/resource.h>
 #include <sys/time.h>
+
+#include <memory>
+#endif
 
 #include <algorithm>
 #include <climits>
 #include <cstdarg>
+#include <cstddef>
+#include <cstdint>
 #include <utility>
 #include <vector>
 
@@ -35,9 +41,11 @@
 #include "net/instaweb/rewriter/cached_result.pb.h"
 #include "net/instaweb/rewriter/public/critical_images_beacon_filter.h"
 #include "net/instaweb/rewriter/public/critical_images_finder.h"
+#include "net/instaweb/rewriter/public/csp.h"
 #include "net/instaweb/rewriter/public/css_url_encoder.h"
 #include "net/instaweb/rewriter/public/css_util.h"
 #include "net/instaweb/rewriter/public/domain_rewrite_filter.h"
+#include "net/instaweb/rewriter/public/expensive_operation_callback.h"
 #include "net/instaweb/rewriter/public/image.h"
 #include "net/instaweb/rewriter/public/local_storage_cache_filter.h"
 #include "net/instaweb/rewriter/public/output_resource.h"
@@ -51,16 +59,15 @@
 #include "net/instaweb/rewriter/public/rewrite_context.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
+#include "net/instaweb/rewriter/public/rewrite_stats.h"
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "net/instaweb/rewriter/public/single_rewrite_context.h"
 #include "net/instaweb/rewriter/public/srcset_slot.h"
+#include "net/instaweb/rewriter/public/work_bound_expensive_operation_controller.h"
 #include "net/instaweb/util/public/property_cache.h"
-#include "pagespeed/controller/central_controller.h"
-#include "pagespeed/controller/expensive_operation_callback.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/escaping.h"
 #include "pagespeed/kernel/base/message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -92,6 +99,9 @@ void DetermineQualities(const RewriteOptions& options,
     image_options->webp_quality = options.ImageWebpQualityForSaveData();
     image_options->webp_animated_quality =
         options.ImageWebpQualityForSaveData();
+    image_options->avif_quality = options.ImageAvifQualityForSaveData();
+    image_options->avif_animated_quality =
+        options.ImageAvifQualityForSaveData();
     image_options->jpeg_quality = options.ImageJpegQualityForSaveData();
     image_options->jpeg_num_progressive_scans =
         options.image_jpeg_num_progressive_scans();
@@ -99,6 +109,8 @@ void DetermineQualities(const RewriteOptions& options,
     // Use small screen qualities.
     image_options->webp_quality = options.ImageWebpQualityForSmallScreen();
     image_options->webp_animated_quality = options.ImageWebpAnimatedQuality();
+    image_options->avif_quality = options.ImageAvifQualityForSmallScreen();
+    image_options->avif_animated_quality = options.ImageAvifAnimatedQuality();
     image_options->jpeg_quality = options.ImageJpegQualityForSmallScreen();
     image_options->jpeg_num_progressive_scans =
         options.ImageJpegNumProgressiveScansForSmallScreen();
@@ -106,6 +118,8 @@ void DetermineQualities(const RewriteOptions& options,
     // Use regular (desktop) qualities.
     image_options->webp_quality = options.ImageWebpQuality();
     image_options->webp_animated_quality = options.ImageWebpAnimatedQuality();
+    image_options->avif_quality = options.ImageAvifQuality();
+    image_options->avif_animated_quality = options.ImageAvifAnimatedQuality();
     image_options->jpeg_quality = options.ImageJpegQuality();
     image_options->jpeg_num_progressive_scans =
         options.image_jpeg_num_progressive_scans();
@@ -126,7 +140,7 @@ int64 GetPageWidth(const int64 page_height, const int64 image_width,
 
 int64 GetPageHeight(const int64 page_width, const int64 image_height,
                     const int64 image_width) {
-  if (image_height > 0) {
+  if (image_width > 0) {
     return (page_width * image_height + image_width / 2) / image_width;
   } else {
     // The client should ensure that "image_width > 0". If this condition is
@@ -191,25 +205,31 @@ const char* const kRelatedOptions[] = {
     RewriteOptions::kImageWebpRecompressionQualityForSmallScreens,
     RewriteOptions::kImageWebpAnimatedRecompressionQuality,
     RewriteOptions::kImageWebpQualityForSaveData,
+    RewriteOptions::kImageAvifRecompressionQuality,
+    RewriteOptions::kImageAvifRecompressionQualityForSmallScreens,
+    RewriteOptions::kImageAvifAnimatedRecompressionQuality,
+    RewriteOptions::kImageAvifQualityForSaveData,
     RewriteOptions::kProgressiveJpegMinBytes};
 
 }  // namespace
 
 // Expose kRelatedFilters as a class variable for the benefit of
 // static-init-time merging in css_filter.cc.
+// Keep in sync with kImageCompressionIdFilters in rewrite_options.cc.
 const RewriteOptions::Filter ImageRewriteFilter::kRelatedFilters[] = {
-    RewriteOptions::kConvertGifToPng,
-    RewriteOptions::kConvertJpegToProgressive,
-    RewriteOptions::kConvertJpegToWebp,
-    RewriteOptions::kConvertPngToJpeg,
+    RewriteOptions::kConvertGifToPng, RewriteOptions::kConvertJpegToProgressive,
+    RewriteOptions::kConvertJpegToWebp, RewriteOptions::kConvertPngToJpeg,
     RewriteOptions::kConvertToWebpAnimated,
     RewriteOptions::kConvertToWebpLossless,
-    RewriteOptions::kJpegSubsampling,
-    RewriteOptions::kRecompressJpeg,
-    RewriteOptions::kRecompressPng,
-    RewriteOptions::kRecompressWebp,
-    RewriteOptions::kResizeImages,
-    RewriteOptions::kResizeMobileImages,
+    // AVIF convert filters are enum ordinals immediately after
+    // kConvertToWebpLossless (kConvertJpegToAvif < kConvertToAvifLossless <
+    // kConvertToAvifAnimated); kRelatedFilters must stay in strict enum-value
+    // order (runtime CHECK in ImageRewriteFilter).
+    RewriteOptions::kConvertJpegToAvif, RewriteOptions::kConvertToAvifLossless,
+    RewriteOptions::kConvertToAvifAnimated, RewriteOptions::kJpegSubsampling,
+    RewriteOptions::kRecompressJpeg, RewriteOptions::kRecompressPng,
+    RewriteOptions::kRecompressWebp, RewriteOptions::kRecompressAvif,
+    RewriteOptions::kResizeImages, RewriteOptions::kResizeMobileImages,
     RewriteOptions::kStripImageColorProfile,
     RewriteOptions::kStripImageMetaData};
 const int ImageRewriteFilter::kRelatedFiltersSize = arraysize(kRelatedFilters);
@@ -296,6 +316,52 @@ const char ImageRewriteFilter::kImageWebpOpaqueSuccessMs[] =
 const char ImageRewriteFilter::kImageWebpOpaqueFailureMs[] =
     "image_webp_opaque_failure_ms";
 
+// AVIF counter family (mirrors the WebP names above).
+const char ImageRewriteFilter::kImageAvifRewrites[] = "image_avif_rewrites";
+
+const char ImageRewriteFilter::kImageAvifFromPngTimeouts[] =
+    "image_avif_conversion_png_timeouts";
+const char ImageRewriteFilter::kImageAvifFromJpegTimeouts[] =
+    "image_avif_conversion_jpeg_timeouts";
+const char ImageRewriteFilter::kImageAvifFromGifAnimatedTimeouts[] =
+    "image_avif_conversion_gif_animated_timeouts";
+const char ImageRewriteFilter::kImageAvifFromAvifTimeouts[] =
+    "image_avif_conversion_avif_timeouts";
+
+// Encodes that DID emit an image but ran past avif_conversion_timeout_ms.
+// Named "overruns" rather than folded into the "timeouts" above because the
+// two need opposite operator responses: a timeout means AVIF was not produced
+// (raise the budget to get the optimization back), an overrun means AVIF WAS
+// produced and served but cost more latency than budgeted (the estimate in
+// avif_optimizer.cc is running low for this traffic/host).  A single number
+// covering both would be unactionable.
+const char ImageRewriteFilter::kImageAvifFromPngOverruns[] =
+    "image_avif_conversion_png_overruns";
+const char ImageRewriteFilter::kImageAvifFromJpegOverruns[] =
+    "image_avif_conversion_jpeg_overruns";
+const char ImageRewriteFilter::kImageAvifFromGifAnimatedOverruns[] =
+    "image_avif_conversion_gif_animated_overruns";
+const char ImageRewriteFilter::kImageAvifFromAvifOverruns[] =
+    "image_avif_conversion_avif_overruns";
+
+const char ImageRewriteFilter::kImageAvifFromPngSuccessMs[] =
+    "image_avif_conversion_png_success_ms";
+const char ImageRewriteFilter::kImageAvifFromJpegSuccessMs[] =
+    "image_avif_conversion_jpeg_success_ms";
+const char ImageRewriteFilter::kImageAvifFromGifAnimatedSuccessMs[] =
+    "image_avif_conversion_gif_animated_success_ms";
+const char ImageRewriteFilter::kImageAvifFromAvifSuccessMs[] =
+    "image_avif_conversion_avif_success_ms";
+
+const char ImageRewriteFilter::kImageAvifFromPngFailureMs[] =
+    "image_avif_conversion_png_failure_ms";
+const char ImageRewriteFilter::kImageAvifFromJpegFailureMs[] =
+    "image_avif_conversion_jpeg_failure_ms";
+const char ImageRewriteFilter::kImageAvifFromGifAnimatedFailureMs[] =
+    "image_avif_conversion_gif_animated_failure_ms";
+const char ImageRewriteFilter::kImageAvifFromAvifFailureMs[] =
+    "image_avif_conversion_avif_failure_ms";
+
 const int kNotCriticalIndex = INT_MAX;
 
 // This is the resized placeholder image width for mobile.
@@ -362,6 +428,11 @@ const char* MessageForInlineResult(InlineResult inline_result) {
     case INLINE_SHORTCUT:
       message = "The image was not inlined because it is a shortcut icon.";
       break;
+    case INLINE_DISALLOWED_BY_CSP:
+      message =
+          "The image was not inlined because the Content-Security-Policy "
+          "on the page does not permit data: images.";
+      break;
     case INLINE_INTERNAL_ERROR:
       message =
           "The image was not inlined because the internal data was "
@@ -375,7 +446,7 @@ const char* MessageForInlineResult(InlineResult inline_result) {
 
 class ImageRewriteFilter::Context : public SingleRewriteContext {
  public:
-  enum class Place {
+  enum class Place : std::uint8_t {
     kCss,
     kFetch,
     kHtmlAttr,
@@ -426,7 +497,7 @@ class ImageRewriteFilter::Context : public SingleRewriteContext {
 
   friend class ImageRewriteFilter;
 
-  bool ScheduleViaCentralController() override { return true; }
+  bool ScheduleViaNamedLockController() override { return true; }
 
   int64 css_image_inline_max_bytes_;
   ImageRewriteFilter* filter_;
@@ -435,7 +506,8 @@ class ImageRewriteFilter::Context : public SingleRewriteContext {
   bool in_noscript_element_;
   bool is_resized_using_rendered_dimensions_;
 
-  DISALLOW_COPY_AND_ASSIGN(Context);
+  Context(const Context&) = delete;
+  Context& operator=(const Context&) = delete;
 };
 
 class ImageRewriteFilter::Context::InvokeRewriteFunction
@@ -474,8 +546,53 @@ class ImageRewriteFilter::Context::InvokeRewriteFunction
   const ResourcePtr input_resource_;
   const OutputResourcePtr output_resource_;
 
-  DISALLOW_COPY_AND_ASSIGN(InvokeRewriteFunction);
+  InvokeRewriteFunction(const InvokeRewriteFunction&) = delete;
+  InvokeRewriteFunction& operator=(const InvokeRewriteFunction&) = delete;
 };
+
+namespace {
+
+// Transaction context handed to an ExpensiveOperationCallback scheduled on a
+// WorkBoundExpensiveOperationController. Notifies the controller exactly once
+// when the operation completes, on explicit Done() call or on destruction.
+// Construction schedules the operation; the context is owned by the callback
+// and deletes itself when the callback does.
+class ExpensiveOperationContextImpl : public ExpensiveOperationContext {
+ public:
+  ExpensiveOperationContextImpl(
+      WorkBoundExpensiveOperationController* controller,
+      ExpensiveOperationCallback* callback)
+      : controller_(controller), callback_(callback) {
+    // SetTransactionContext steals ownership, which means we will never outlive
+    // the callback.
+    callback_->SetTransactionContext(this);
+    controller_->ScheduleExpensiveOperation(
+        MakeFunction(this, &ExpensiveOperationContextImpl::CallRun,
+                     &ExpensiveOperationContextImpl::CallCancel));
+  }
+
+  ~ExpensiveOperationContextImpl() override { Done(); }
+
+  void Done() override {
+    if (controller_ != nullptr) {
+      controller_->NotifyExpensiveOperationComplete();
+      controller_ = nullptr;
+    }
+  }
+
+ private:
+  void CallRun() { callback_->CallRun(); }
+
+  void CallCancel() {
+    controller_ = nullptr;  // Controller denied us, so don't try to release.
+    callback_->CallCancel();
+  }
+
+  WorkBoundExpensiveOperationController* controller_;
+  ExpensiveOperationCallback* callback_;
+};
+
+}  // namespace
 
 // TODO(huibao): Move the logic for determining output format to a centralized
 // method which should consider all relevant factors.
@@ -528,6 +645,61 @@ void SetWebpCompressionOptions(
   image_options->webp_conversion_variables = webp_conversion_variables;
 }
 
+// AVIF sibling of SetWebpCompressionOptions. Translates the
+// pre-decode AVIF request-capability level (resource_context.avif_level(), set
+// by ImageUrlEncoder::SetAvifLevel) into the encode-side capability fields
+// preferred_avif / allow_avif_alpha / allow_avif_animated. This runs in PARALLEL
+// with SetWebpCompressionOptions when both capabilities are present (both levels
+// can be non-NONE); the per-image AVIF-vs-WebP-vs-original choice is made later,
+// at encode time, in Image::ComputeOutputContents (pick-smaller).
+void SetAvifCompressionOptions(const ResourceContext& resource_context,
+                               const RewriteOptions& options,
+                               Image::CompressionOptions* image_options) {
+  switch (resource_context.avif_level()) {
+    case ResourceContext::AVIF_NONE:
+      image_options->preferred_avif =
+          pagespeed::image_compression::LIBAVIF_NONE;
+      image_options->allow_avif_alpha = false;
+      VLOG(1) << "User agent is not avif capable";
+      break;
+
+    case ResourceContext::AVIF_LOSSY_ONLY:
+      image_options->preferred_avif =
+          pagespeed::image_compression::LIBAVIF_LOSSY;
+      image_options->allow_avif_alpha = false;
+      VLOG(1) << "User agent is avif lossy capable";
+      break;
+
+    case ResourceContext::AVIF_ANIMATED:
+      if (options.Enabled(RewriteOptions::kConvertToAvifAnimated)) {
+        image_options->preferred_avif =
+            pagespeed::image_compression::LIBAVIF_ANIMATED;
+        image_options->allow_avif_animated = true;
+        image_options->allow_avif_alpha = true;
+        break;
+      }
+      VLOG(1) << "User agent is avif animated capable";
+      FALLTHROUGH_INTENDED;
+
+    case ResourceContext::AVIF_LOSSY_LOSSLESS_ALPHA:
+      image_options->allow_avif_alpha = true;
+      if (options.Enabled(RewriteOptions::kConvertToAvifLossless)) {
+        image_options->preferred_avif =
+            pagespeed::image_compression::LIBAVIF_LOSSLESS;
+        VLOG(1) << "User agent is avif lossless+alpha capable "
+                << "and lossless images preferred";
+      } else {
+        image_options->preferred_avif =
+            pagespeed::image_compression::LIBAVIF_LOSSY;
+        VLOG(1) << "User agent is avif lossless+alpha capable "
+                << "and lossy images preferred";
+      }
+      break;
+    default:
+      LOG(DFATAL) << "Unhandled avif_level";
+  }
+}
+
 void ImageRewriteFilter::Context::RewriteSingle(
     const ResourcePtr& input_resource,
     const OutputResourcePtr& output_resource) {
@@ -548,7 +720,9 @@ void ImageRewriteFilter::Context::RewriteSingle(
   bool is_ipro = IsNestedIn(RewriteOptions::kInPlaceRewriteId);
   AttachDependentRequestTrace(is_ipro ? "IproProcessImage" : "ProcessImage");
   AddLinkRelCanonical(input_resource, output_resource->response_headers());
-  FindServerContext()->central_controller()->ScheduleExpensiveOperation(
+  // Starts the transaction and deletes itself when done.
+  new ExpensiveOperationContextImpl(
+      FindServerContext()->expensive_operation_controller(),
       new InvokeRewriteFunction(this, filter_, input_resource,
                                 output_resource));
 }
@@ -571,8 +745,16 @@ void ImageRewriteFilter::Context::Render() {
   if (place_ == Place::kCss || !has_parent()) {
     InlineResult inline_result;
     if (place_ == Place::kCss) {
+      // Whether an image may be inlined into CSS is a per-browser decision
+      // (request_properties()->SupportsImageInlining() in TryInline).  CSS
+      // optimized in place is cached under a request-independent key and
+      // served with no Vary: header, so the decision must not be consulted
+      // there: pass 0 so no image is ever inlined into in-place CSS, keeping
+      // the output bytes identical for every client.
+      int64 css_image_inline_max_bytes =
+          HasInPlaceRewriteAncestor() ? 0 : css_image_inline_max_bytes_;
       rewrote_url = filter_->FinishRewriteCssImageUrl(
-          css_image_inline_max_bytes_, result, resource_slot, &inline_result);
+          css_image_inline_max_bytes, result, resource_slot, &inline_result);
       if (Driver()->options()->Enabled(RewriteOptions::kInlineImages)) {
         const char* message = MessageForInlineResult(inline_result);
         if (message != nullptr) {
@@ -670,6 +852,7 @@ ImageRewriteFilter::ImageRewriteFilter(RewriteDriver* driver)
   image_rewrite_uses_ = stats->GetVariable(kImageRewriteUses);
   image_inline_count_ = stats->GetVariable(kImageInline);
   image_webp_rewrites_ = stats->GetVariable(kImageWebpRewrites);
+  image_avif_rewrites_ = stats->GetVariable(kImageAvifRewrites);
   image_rewrite_latency_total_ms_ =
       stats->GetVariable(kImageRewriteLatencyTotalMs);
 
@@ -713,6 +896,42 @@ ImageRewriteFilter::ImageRewriteFilter(RewriteDriver* driver)
       ->success_ms = stats->GetHistogram(kImageWebpOpaqueSuccessMs);
   webp_conversion_variables_.Get(Image::ConversionVariables::OPAQUE)
       ->failure_ms = stats->GetHistogram(kImageWebpOpaqueFailureMs);
+
+  avif_conversion_variables_.Get(Image::ConversionVariables::FROM_PNG)
+      ->timeout_count = stats->GetVariable(kImageAvifFromPngTimeouts);
+  avif_conversion_variables_.Get(Image::ConversionVariables::FROM_JPEG)
+      ->timeout_count = stats->GetVariable(kImageAvifFromJpegTimeouts);
+  avif_conversion_variables_.Get(Image::ConversionVariables::FROM_GIF_ANIMATED)
+      ->timeout_count = stats->GetVariable(kImageAvifFromGifAnimatedTimeouts);
+  avif_conversion_variables_.Get(Image::ConversionVariables::FROM_AVIF)
+      ->timeout_count = stats->GetVariable(kImageAvifFromAvifTimeouts);
+
+  avif_conversion_variables_.Get(Image::ConversionVariables::FROM_PNG)
+      ->overrun_count = stats->GetVariable(kImageAvifFromPngOverruns);
+  avif_conversion_variables_.Get(Image::ConversionVariables::FROM_JPEG)
+      ->overrun_count = stats->GetVariable(kImageAvifFromJpegOverruns);
+  avif_conversion_variables_.Get(Image::ConversionVariables::FROM_GIF_ANIMATED)
+      ->overrun_count = stats->GetVariable(kImageAvifFromGifAnimatedOverruns);
+  avif_conversion_variables_.Get(Image::ConversionVariables::FROM_AVIF)
+      ->overrun_count = stats->GetVariable(kImageAvifFromAvifOverruns);
+
+  avif_conversion_variables_.Get(Image::ConversionVariables::FROM_PNG)
+      ->success_ms = stats->GetHistogram(kImageAvifFromPngSuccessMs);
+  avif_conversion_variables_.Get(Image::ConversionVariables::FROM_JPEG)
+      ->success_ms = stats->GetHistogram(kImageAvifFromJpegSuccessMs);
+  avif_conversion_variables_.Get(Image::ConversionVariables::FROM_GIF_ANIMATED)
+      ->success_ms = stats->GetHistogram(kImageAvifFromGifAnimatedSuccessMs);
+  avif_conversion_variables_.Get(Image::ConversionVariables::FROM_AVIF)
+      ->success_ms = stats->GetHistogram(kImageAvifFromAvifSuccessMs);
+
+  avif_conversion_variables_.Get(Image::ConversionVariables::FROM_PNG)
+      ->failure_ms = stats->GetHistogram(kImageAvifFromPngFailureMs);
+  avif_conversion_variables_.Get(Image::ConversionVariables::FROM_JPEG)
+      ->failure_ms = stats->GetHistogram(kImageAvifFromJpegFailureMs);
+  avif_conversion_variables_.Get(Image::ConversionVariables::FROM_GIF_ANIMATED)
+      ->failure_ms = stats->GetHistogram(kImageAvifFromGifAnimatedFailureMs);
+  avif_conversion_variables_.Get(Image::ConversionVariables::FROM_AVIF)
+      ->failure_ms = stats->GetHistogram(kImageAvifFromAvifFailureMs);
 
   image_rewrite_latency_ok_ms_ = stats->GetHistogram(kImageRewriteLatencyOkMs);
   image_rewrite_latency_failed_ms_ =
@@ -776,6 +995,28 @@ void ImageRewriteFilter::InitStats(Statistics* statistics) {
   statistics->AddVariable(kImageWebpOpaqueTimeouts);
   statistics->AddHistogram(kImageWebpOpaqueSuccessMs);
   statistics->AddHistogram(kImageWebpOpaqueFailureMs);
+
+  statistics->AddVariable(kImageAvifRewrites);
+
+  statistics->AddVariable(kImageAvifFromPngTimeouts);
+  statistics->AddVariable(kImageAvifFromJpegTimeouts);
+  statistics->AddVariable(kImageAvifFromGifAnimatedTimeouts);
+  statistics->AddVariable(kImageAvifFromAvifTimeouts);
+
+  statistics->AddVariable(kImageAvifFromPngOverruns);
+  statistics->AddVariable(kImageAvifFromJpegOverruns);
+  statistics->AddVariable(kImageAvifFromGifAnimatedOverruns);
+  statistics->AddVariable(kImageAvifFromAvifOverruns);
+
+  statistics->AddHistogram(kImageAvifFromPngSuccessMs);
+  statistics->AddHistogram(kImageAvifFromJpegSuccessMs);
+  statistics->AddHistogram(kImageAvifFromGifAnimatedSuccessMs);
+  statistics->AddHistogram(kImageAvifFromAvifSuccessMs);
+
+  statistics->AddHistogram(kImageAvifFromPngFailureMs);
+  statistics->AddHistogram(kImageAvifFromJpegFailureMs);
+  statistics->AddHistogram(kImageAvifFromGifAnimatedFailureMs);
+  statistics->AddHistogram(kImageAvifFromAvifFailureMs);
 }
 
 void ImageRewriteFilter::Initialize() {
@@ -854,6 +1095,12 @@ Image::CompressionOptions* ImageRewriteFilter::ImageOptionsForLoadedResource(
     SetWebpCompressionOptions(resource_context, *options, input_resource->url(),
                               &webp_conversion_variables_, image_options);
   }
+  // Set AVIF capability options in parallel with WebP. Both
+  // may be active for a both-capable request; the format choice is made at
+  // encode time (pick-smaller), not here.
+  if (resource_context.avif_level() != ResourceContext::AVIF_NONE) {
+    SetAvifCompressionOptions(resource_context, *options, image_options);
+  }
 
   DetermineQualities(*options, resource_context,
                      *driver()->request_properties(), image_options);
@@ -869,19 +1116,45 @@ Image::CompressionOptions* ImageRewriteFilter::ImageOptionsForLoadedResource(
       options->Enabled(RewriteOptions::kConvertGifToPng);
   image_options->convert_jpeg_to_webp =
       options->Enabled(RewriteOptions::kConvertJpegToWebp);
+  // kConvertJpegToAvif is the lossy-AVIF-allowed flag for
+  // every raster source (JPEG, PNG, GIF), mirroring how kConvertJpegToWebp gates
+  // lossy WebP across formats in the GIF/PNG ladder. There is no separate
+  // per-source AVIF filter.
+  image_options->convert_jpeg_to_avif =
+      options->Enabled(RewriteOptions::kConvertJpegToAvif);
+  image_options->convert_png_to_avif =
+      options->Enabled(RewriteOptions::kConvertJpegToAvif);
+  image_options->convert_gif_to_avif =
+      options->Enabled(RewriteOptions::kConvertJpegToAvif);
   image_options->recompress_jpeg =
       options->Enabled(RewriteOptions::kRecompressJpeg);
   image_options->recompress_png =
       options->Enabled(RewriteOptions::kRecompressPng);
   image_options->recompress_webp =
       options->Enabled(RewriteOptions::kRecompressWebp);
+  image_options->recompress_avif =
+      options->Enabled(RewriteOptions::kRecompressAvif);
   image_options->retain_color_profile =
       !options->Enabled(RewriteOptions::kStripImageColorProfile);
   image_options->retain_exif_data =
       !options->Enabled(RewriteOptions::kStripImageMetaData);
+  // C2PA/Content-Credentials provenance is preserved by default (turn off only via
+  // PreserveImageProvenance). The APP11/JUMBF form is carried by the JPEG codec
+  // independent of EXIF stripping; the XMP form lives in APP1 (shared with EXIF), so
+  // when EXIF is stripped the rewrite gate (image.cc) skip-not-strips it instead of
+  // recompressing (which would drop the APP1/XMP manifest).
+  image_options->preserve_c2pa = options->preserve_image_provenance();
+  image_options->c2pa_carry = options->image_provenance_carry();
   image_options->retain_color_sampling =
       !options->Enabled(RewriteOptions::kJpegSubsampling);
   image_options->webp_conversion_timeout_ms = options->image_webp_timeout_ms();
+  image_options->avif_conversion_timeout_ms = options->image_avif_timeout_ms();
+  // Attached unconditionally, unlike the WebP family (which rides along with
+  // SetWebpCompressionOptions and so is skipped when the request has no WebP
+  // capability).  The AVIF->AVIF recompress path is not gated on the request's
+  // avif_level, so gating the stats on it would silently lose exactly the
+  // failures we want to see.
+  image_options->avif_conversion_variables = &avif_conversion_variables_;
 
   return image_options;
 }
@@ -979,8 +1252,17 @@ bool ImageRewriteFilter::ShouldResize(const ResourceContext& resource_context,
           static_cast<int64>(desired_dim->width()) * desired_dim->height();
       const int64 image_area =
           static_cast<int64>(image_dim.width()) * image_dim.height();
-      if (page_area * 100 <
-          image_area * options->image_limit_resize_area_percent()) {
+      // Overflow-safe comparison. page_area and image_area can each approach
+      // 2^62 for large dimensions, so the original
+      // `page_area * 100 < image_area * image_limit_resize_area_percent()`
+      // overflows int64 and can yield a wrong resize decision. Compare as
+      // doubles instead. This code runs only after the resolution guard above,
+      // which bounds the areas to image_resolution_limit_bytes()/4 (~2^23 by
+      // default); the products area*100 therefore stay well under 2^53 and are
+      // represented exactly, so legitimate images keep identical behavior.
+      if (static_cast<double>(page_area) * 100.0 <
+          static_cast<double>(image_area) *
+              options->image_limit_resize_area_percent()) {
         DCHECK_LT(0, desired_dim->width());
         DCHECK_LT(0, desired_dim->height());
         return true;
@@ -1049,8 +1331,8 @@ RewriteResult ImageRewriteFilter::RewriteLoadedResourceImpl(
   // Initialize logging data.
   ImageType original_image_type = image->image_type();
   ImageType optimized_image_type = original_image_type;
-  int original_size = image->input_size();
-  int optimized_size = original_size;
+  int64 original_size = image->input_size();
+  int64 optimized_size = original_size;
   bool is_recompressed = false;
   bool is_resized = false;
   image->SetDebugMessageUrl(UrlForDebugMessages(rewrite_context));
@@ -1071,9 +1353,21 @@ RewriteResult ImageRewriteFilter::RewriteLoadedResourceImpl(
 
   ImageDim image_dim;
   image->Dimensions(&image_dim);
-  int64 image_width = image_dim.width(), image_height = image_dim.height();
-  if ((image_width * image_height * 4) >
-      options->image_resolution_limit_bytes()) {
+  const int64 image_width = image_dim.width();
+  const int64 image_height = image_dim.height();
+  // Overflow-safe resolution guard. Computing image_width * image_height * 4
+  // directly overflows int64 for large, attacker-controlled dimensions (each
+  // up to ~2^31 as read straight from PNG IHDR / GIF header bytes with no
+  // upper bound): the product wraps negative, so `negative > limit` is false
+  // and the oversized image slips past this anti-DoS limit (and would feed
+  // huge downstream allocations). Compare against the pixel budget using
+  // division so the multiplication can never overflow. The image_height > 0
+  // check short-circuits before the division, so it is always safe.
+  const int64 kBytesPerPixel = 4;
+  const int64 max_pixels =
+      options->image_resolution_limit_bytes() / kBytesPerPixel;
+  if (image_width <= 0 || image_height <= 0 ||
+      image_width > max_pixels / image_height) {
     image_rewrites_dropped_intentionally_->Add(1);
     image_norewrites_high_resolution_->Add(1);
     return kRewriteFailed;
@@ -1105,6 +1399,7 @@ RewriteResult ImageRewriteFilter::RewriteLoadedResourceImpl(
       result->mutable_full_name()->set_name(name);
     } else {
       LOG(DFATAL) << "Failed to generate name and URL for the output resource.";
+      image_ongoing_rewrites_->Add(-1);
       return kRewriteFailed;
     }
   }
@@ -1150,11 +1445,22 @@ RewriteResult ImageRewriteFilter::RewriteLoadedResourceImpl(
 
         // Update stats.
         image_rewrites_->Add(1);
-        image_rewrite_total_bytes_saved_->Add(image->input_size() -
-                                              image->output_size());
+        // Guard against unsigned underflow: with ImageLimitOptimizedPercent set
+        // above 100 the recompressed output can be larger than the input yet
+        // still reach this path. input_size() - output_size() is size_t, so when
+        // output > input it wraps near 2^64; feeding that to Variable::Add
+        // (which takes a non-negative int64) corrupts the counter and violates
+        // its DCHECK. Compute a signed delta and only add a real saving.
+        const int64 bytes_saved = static_cast<int64>(image->input_size()) -
+                                  static_cast<int64>(image->output_size());
+        if (bytes_saved > 0) {
+          image_rewrite_total_bytes_saved_->Add(bytes_saved);
+        }
         image_rewrite_total_original_bytes_->Add(image->input_size());
         if (result->type()->type() == ContentType::kWebp) {
           image_webp_rewrites_->Add(1);
+        } else if (result->type()->type() == ContentType::kAvif) {
+          image_avif_rewrites_->Add(1);
         }
 
         rewrite_result = kRewriteOk;
@@ -1212,10 +1518,16 @@ RewriteResult ImageRewriteFilter::RewriteLoadedResourceImpl(
     Image::CompressionOptions* image_options = new Image::CompressionOptions();
     SetWebpCompressionOptions(resource_context, *options, input_resource->url(),
                               &webp_conversion_variables_, image_options);
+    if (resource_context.avif_level() != ResourceContext::AVIF_NONE) {
+      SetAvifCompressionOptions(resource_context, *options, image_options);
+    }
+    image_options->avif_conversion_variables = &avif_conversion_variables_;
 
     image_options->jpeg_quality = options->ImageJpegQuality();
     image_options->webp_quality = options->ImageWebpQuality();
     image_options->webp_animated_quality = options->ImageWebpAnimatedQuality();
+    image_options->avif_quality = options->ImageAvifQuality();
+    image_options->avif_animated_quality = options->ImageAvifAnimatedQuality();
     image_options->progressive_jpeg = false;
     image_options->convert_png_to_jpeg =
         options->Enabled(RewriteOptions::kConvertPngToJpeg);
@@ -1225,11 +1537,15 @@ RewriteResult ImageRewriteFilter::RewriteLoadedResourceImpl(
     image_options->recompress_jpeg = true;
     image_options->recompress_png = true;
     image_options->recompress_webp = true;
+    image_options->recompress_avif = true;
 
     // Since these are replaced with their high res versions, stripping
-    // them off for low res images will further reduce bytes.
+    // them off for low res images will further reduce bytes. Provenance on a
+    // throwaway low-res placeholder is meaningless; the high-res version that
+    // actually replaces it preserves C2PA via the main path.
     image_options->retain_color_profile = false;
     image_options->retain_exif_data = false;
+    image_options->preserve_c2pa = false;
     image_options->retain_color_sampling = false;
     image_options->jpeg_num_progressive_scans =
         options->image_jpeg_num_progressive_scans();
@@ -1241,24 +1557,36 @@ RewriteResult ImageRewriteFilter::RewriteLoadedResourceImpl(
           BlankImageWithOptions(image_width, image_height, IMAGE_PNG,
                                 server_context()->filename_prefix(), timer,
                                 message_handler, image_options));
-      low_image->EnsureLoaded(true);
+      if (low_image == nullptr) {
+        // The dimensions were validated above, so a null blank image can
+        // only mean writer initialization or resource failure.  Skip the
+        // low-res preview; the main rewrite is unaffected.
+        driver()->InfoAt(rewrite_context,
+                         "%s: Failed to create blank image for inline "
+                         "preview; low-res preview skipped.",
+                         input_resource->url().c_str());
+      } else {
+        low_image->EnsureLoaded(true);
+      }
     } else {
       low_image.reset(NewImage(image->Contents(), input_resource->url(),
                                server_context()->filename_prefix(),
                                image_options, timer, message_handler));
       low_image->SetDebugMessageUrl(UrlForDebugMessages(rewrite_context));
     }
-    low_image->SetTransformToLowRes();
-    if (ShouldInlinePreview(low_image->Contents().size(),
-                            image->Contents().size(), options)) {
-      if (resource_context.mobile_user_agent()) {
-        ResizeLowQualityImage(low_image.get(), input_resource, cached);
-      } else {
-        cached->set_low_resolution_inlined_data(low_image->Contents().data(),
-                                                low_image->Contents().size());
+    if (low_image != nullptr) {
+      low_image->SetTransformToLowRes();
+      if (ShouldInlinePreview(low_image->Contents().size(),
+                              image->Contents().size(), options)) {
+        if (resource_context.mobile_user_agent()) {
+          ResizeLowQualityImage(low_image.get(), input_resource, cached);
+        } else {
+          cached->set_low_resolution_inlined_data(low_image->Contents().data(),
+                                                  low_image->Contents().size());
+        }
+        cached->set_low_resolution_inlined_image_type(
+            static_cast<int>(low_image->image_type()));
       }
-      cached->set_low_resolution_inlined_image_type(
-          static_cast<int>(low_image->image_type()));
     }
   }
   image_ongoing_rewrites_->Add(-1);
@@ -1289,9 +1617,9 @@ RewriteResult ImageRewriteFilter::RewriteLoadedResourceImpl(
       driver(),
       rewrite_result == kRewriteOk ? RewriterApplication::APPLIED_OK
                                    : RewriterApplication::NOT_APPLIED,
-      input_resource->url(), LoggingId(), original_size, optimized_size,
-      is_recompressed, original_image_type, optimized_image_type, is_resized,
-      image_width, image_height,
+      input_resource->url(), LoggingId(), static_cast<int>(original_size),
+      static_cast<int>(optimized_size), is_recompressed, original_image_type,
+      optimized_image_type, is_resized, image_width, image_height,
       rewrite_context->is_resized_using_rendered_dimensions_,
       post_resize_dim.width(), post_resize_dim.height());
 
@@ -1345,7 +1673,7 @@ void ImageRewriteFilter::ResizeLowQualityImage(
           "%dx%d(%d bytes) to %dx%d(%d bytes)",
           input_resource->url().c_str(), image_dim.width(), image_dim.height(),
           static_cast<int>(old_contents.size()), resized_dim.width(),
-          resized_dim.width(), static_cast<int>(contents.size()));
+          resized_dim.height(), static_cast<int>(contents.size()));
     } else {
       message_handler->Message(
           kInfo,
@@ -1413,7 +1741,8 @@ void ImageRewriteFilter::ComputePreserveUrls(const RewriteOptions* options,
 
 void ImageRewriteFilter::BeginRewriteImageUrl(HtmlElement* element,
                                               HtmlElement::Attribute* src) {
-  std::unique_ptr<ResourceContext> resource_context(new ResourceContext);
+  std::unique_ptr<ResourceContext> resource_context =
+      std::make_unique<ResourceContext>();
   const RewriteOptions* options = driver()->options();
   bool is_resized_using_rendered_dimensions = false;
 
@@ -1474,7 +1803,8 @@ void ImageRewriteFilter::BeginRewriteSrcSet(HtmlElement* element,
       continue;
     }
 
-    std::unique_ptr<ResourceContext> resource_context(new ResourceContext);
+    std::unique_ptr<ResourceContext> resource_context =
+        std::make_unique<ResourceContext>();
     EncodeUserAgentIntoResourceContext(resource_context.get());
 
     Context* context =
@@ -1572,7 +1902,7 @@ void DeleteMatchingImageDimsAfterInline(const CachedResult* cached,
   // if all dimensions that are present match the actual post-optimization image
   // dimensions.
   if (cached->has_image_file_dims()) {
-    int attribute_width, attribute_height = -1;
+    int attribute_width = -1, attribute_height = -1;
     if (GetDimensionAttribute(element, HtmlName::kWidth, &attribute_width)) {
       if (cached->image_file_dims().width() == attribute_width) {
         // Width matches, height must either be absent or match.
@@ -1960,8 +2290,9 @@ void ImageRewriteFilter::GetDimensions(
   // If the area of image using rendered dimensions is less than the dimensions
   // from the style or image tag attributes, then only resize using rendered
   // dimensions.
-  int64 rendered_area = rendered_width * rendered_height;
-  int64 image_attribute_area = page_dim->width() * page_dim->height();
+  int64 rendered_area = static_cast<int64>(rendered_width) * rendered_height;
+  int64 image_attribute_area =
+      static_cast<int64>(page_dim->width()) * page_dim->height();
   // Note: we check for image_attribute_area = 1 (-1 * -1 = 1) when we have
   // -1(unset) for both height and width from the image attributes.
   if (rendered_area != 0 &&
@@ -2009,6 +2340,17 @@ InlineResult ImageRewriteFilter::TryInline(bool is_html, bool is_critical,
   // inlining. After this point, we may skip inlining an image, but not
   // because of properties of the image.
   const RewriteOptions* options = driver()->options();
+
+  // In CSP, host sources and '*' do not match data: URLs, so inlining
+  // is only permitted when the governing source list (img-src, falling
+  // back to default-src) explicitly allows the data: scheme. This also
+  // covers images inlined into CSS, which reach here via
+  // FinishRewriteCssImageUrl.
+  if (!driver()->content_security_policy().PermitsDataImage()) {
+    server_context()->rewrite_stats()->csp_blocked_rewrites()->Add(1);
+    return INLINE_DISALLOWED_BY_CSP;
+  }
+
   if (options->cache_small_images_unrewritten()) {
     // Skip rewriting, record the URL for storage in the property cache,
     // suppress future rewrites to this slot, and return immediately.
@@ -2087,6 +2429,11 @@ const UrlSegmentEncoder* ImageRewriteFilter::encoder() const {
 void ImageRewriteFilter::EncodeUserAgentIntoResourceContext(
     ResourceContext* context) const {
   ImageUrlEncoder::SetWebpAndMobileUserAgent(*driver(), context);
+  // AVIF is an INDEPENDENT capability from WebP: a both-capable request carries
+  // both avif_level and libwebp_level non-NONE, and both ride in the metadata
+  // cache key. SetAvifCapability applies the committed-".avif"-URL reconcile
+  // rule, mirroring SetWebpAndMobileUserAgent's WebP reconcile.
+  ImageUrlEncoder::SetAvifCapability(*driver(), context);
   CssUrlEncoder::SetInliningImages(*driver()->request_properties(), context);
   ImageUrlEncoder::SetSmallScreen(*driver(), context);
 
@@ -2122,6 +2469,12 @@ RewriteContext* ImageRewriteFilter::MakeNestedRewriteContextForCss(
     // checks only UserAgentSupportsWebp when creating the context, but while
     // rewriting the image, rewrite options should also be checked.
     ImageUrlEncoder::SetLibWebpLevel(
+        *driver()->options(), *driver()->request_properties(), cloned_context);
+  }
+  if (cloned_context->avif_level() != ResourceContext::AVIF_NONE) {
+    // Same rationale as the libwebp_level re-derivation above: re-check the
+    // AVIF capability against the current rewrite options while rewriting.
+    ImageUrlEncoder::SetAvifLevel(
         *driver()->options(), *driver()->request_properties(), cloned_context);
   }
   Context* context = new Context(

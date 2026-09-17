@@ -19,6 +19,8 @@
 
 #include "pagespeed/kernel/sharedmem/shared_dynamic_string_map.h"
 
+#include <memory>
+
 #include "base/logging.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/rolling_hash.h"
@@ -178,11 +180,13 @@ int SharedDynamicStringMap::FindEntry(const StringPiece& string, bool lock,
     *entry_pointer_pointer = GetEntry(entry);
     char* entry_string_data =
         GetStringAtOffset((*entry_pointer_pointer)->string_offset);
-    if ((*entry_pointer_pointer)->value == 0) {
+    if ((*entry_pointer_pointer)->value ==
+        0) {  // NOLINT(bugprone-branch-clone)
       // If the value is 0 the string is not yet in the table and/or this is the
       // place to insert it.
       return entry;
-    } else if (strcmp(entry_string_data, string.data()) == 0) {
+    } else if (strcmp(entry_string_data, string.data()) ==
+               0) {  // NOLINT(bugprone-suspicious-stringview-data-usage)
       // We've found the string
       return entry;
     } else {

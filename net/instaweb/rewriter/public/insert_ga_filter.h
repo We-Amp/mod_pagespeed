@@ -139,7 +139,7 @@ class InsertGAFilter : public CommonFilter {
   void StartElementImpl(HtmlElement* element) override;
   void EndElementImpl(HtmlElement* element) override;
   // HTML Events we expect to be in <script> elements.
-  void Characters(HtmlCharactersNode* characters) override;
+  void CharactersImpl(HtmlCharactersNode* characters) override;
 
   const char* Name() const override { return "InsertGASnippet"; }
   ScriptUsage GetScriptUsage() const override { return kWillInjectScripts; }
@@ -233,7 +233,8 @@ class InsertGAFilter : public CommonFilter {
   // when it gets the end element event for the script.
   GoogleString postponed_script_body_;
 
-  DISALLOW_COPY_AND_ASSIGN(InsertGAFilter);
+  InsertGAFilter(const InsertGAFilter&) = delete;
+  InsertGAFilter& operator=(const InsertGAFilter&) = delete;
 };
 
 }  // namespace net_instaweb

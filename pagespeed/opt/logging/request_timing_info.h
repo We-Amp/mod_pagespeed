@@ -173,7 +173,8 @@ class RequestTimingInfo {
   int64 http_cache_latency_ms_;
   int64 l2http_cache_latency_ms_;
 
-  DISALLOW_COPY_AND_ASSIGN(RequestTimingInfo);
+  RequestTimingInfo(const RequestTimingInfo&) = delete;
+  RequestTimingInfo& operator=(const RequestTimingInfo&) = delete;
 };
 
 }  // namespace net_instaweb

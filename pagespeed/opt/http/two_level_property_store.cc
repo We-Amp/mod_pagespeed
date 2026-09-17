@@ -19,10 +19,12 @@
 
 #include "pagespeed/opt/http/two_level_property_store.h"
 
+#include <cstdint>
+#include <memory>
+
 #include "base/logging.h"
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/callback.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/opt/http/abstract_property_store_get_callback.h"
@@ -55,7 +57,7 @@ namespace {
 class TwoLevelPropertyStoreGetCallback
     : public AbstractPropertyStoreGetCallback {
  public:
-  typedef Callback1<bool> BoolCallback;
+  using BoolCallback = Callback1<bool>;
   TwoLevelPropertyStoreGetCallback(
       const GoogleString& url, const GoogleString& options_signature_hash,
       const GoogleString& cache_key_suffix,
@@ -277,7 +279,7 @@ class TwoLevelPropertyStoreGetCallback
     return true;
   }
 
-  enum LookupLevel {
+  enum LookupLevel : std::uint8_t {
     kFirstLevelLooking,   // Lookup from primary_property_store is in progress.
     kSecondLevelLooking,  // Lookup from secondary_property_store is in
                           // progress.
@@ -300,7 +302,10 @@ class TwoLevelPropertyStoreGetCallback
   bool first_level_result_;
   bool secondary_lookup_;
   PropertyCache::CohortVector secondary_lookup_cohort_list_;
-  DISALLOW_COPY_AND_ASSIGN(TwoLevelPropertyStoreGetCallback);
+  TwoLevelPropertyStoreGetCallback(const TwoLevelPropertyStoreGetCallback&) =
+      delete;
+  TwoLevelPropertyStoreGetCallback& operator=(
+      const TwoLevelPropertyStoreGetCallback&) = delete;
 };
 
 }  // namespace

@@ -1,4 +1,6 @@
 #!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2017 Google Inc.
 
 # When setting up a new modpagespeed.com instance, this script goes in
 # /var/www/scripts/install_examples.sh

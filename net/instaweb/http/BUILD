@@ -7,6 +7,7 @@ cc_library(
     srcs = [
         "async_fetch.cc",
         "async_fetch_with_lock.cc",
+        "buffering_async_fetch.cc",
         "cache_url_async_fetcher.cc",
         "counting_url_async_fetcher.cc",
         "external_url_fetcher.cc",

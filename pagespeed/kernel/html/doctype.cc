@@ -83,29 +83,41 @@ bool DocType::Parse(const StringPiece& directive,
   // See http://en.wikipedia.org/wiki/DOCTYPE
   doctype_ = UNKNOWN;
   if (parts.size() >= 2 && StringCaseEqual(parts[1], "html")) {
-    if (parts.size() == 2) {
+    if (parts.size() == 2 ||
+        (parts.size() == 4 && StringCaseEqual(parts[2], "system") &&
+         StringCaseEqual(parts[3], "about:legacy-compat"))) {
+      // Per the HTML spec, both <!DOCTYPE html> and
+      // <!DOCTYPE html SYSTEM "about:legacy-compat"> are HTML5 doctypes
+      // (the latter for documents that must carry a DOCTYPE but cannot
+      // use the short form, e.g. XSLT output).
       if (content_type.IsXmlLike()) {
         doctype_ = XHTML_5;
       } else {
         doctype_ = HTML_5;
       }
     } else if (parts.size() == 5 && StringCaseEqual(parts[2], "public")) {
+      // The FPI (parts[3]) is authoritative; the system identifier (parts[4])
+      // is ignored.  FPI matching is ASCII case-insensitive, matching how
+      // browsers sniff doctypes: a lowercased FPI still classifies.
       const StringPiece parts3(parts[3]);
-      if (strings::StartsWith(parts3, "-//W3C//DTD XHTML")) {
-        if (parts3 == "-//W3C//DTD XHTML 1.1//EN") {
+      if (StringCaseStartsWith(parts3, "-//W3C//DTD XHTML")) {
+        if (StringCaseEqual(parts3, "-//W3C//DTD XHTML 1.1//EN")) {
           doctype_ = XHTML_1_1;
-        } else if (parts3 == "-//W3C//DTD XHTML 1.0 Strict//EN") {
+        } else if (StringCaseEqual(parts3,
+                                   "-//W3C//DTD XHTML 1.0 Strict//EN")) {
           doctype_ = XHTML_1_0_STRICT;
-        } else if (parts3 == "-//W3C//DTD XHTML 1.0 Transitional//EN") {
+        } else if (StringCaseEqual(parts3,
+                                   "-//W3C//DTD XHTML 1.0 Transitional//EN")) {
           doctype_ = XHTML_1_0_TRANSITIONAL;
         } else {
           // This should catch other weird XHTML cases (e.g. XHTML+RDFa,
           // XHTML+MathML+SVG, and so forth).
           doctype_ = OTHER_XHTML;
         }
-      } else if (parts3 == "-//W3C//DTD HTML 4.01//EN") {
+      } else if (StringCaseEqual(parts3, "-//W3C//DTD HTML 4.01//EN")) {
         doctype_ = HTML_4_STRICT;
-      } else if (parts3 == "-//W3C//DTD HTML 4.01 Transitional//EN") {
+      } else if (StringCaseEqual(parts3,
+                                 "-//W3C//DTD HTML 4.01 Transitional//EN")) {
         doctype_ = HTML_4_TRANSITIONAL;
       }
     }

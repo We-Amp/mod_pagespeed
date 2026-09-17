@@ -124,7 +124,7 @@ bool ExtractMediaFromStyle(const HtmlElement* style_element,
 bool MediaMatch(const GoogleString& media_attribute,
                 const Css::Import* import) {
   bool result = false;
-  if (media_attribute.empty()) {
+  if (media_attribute.empty()) {  // NOLINT(bugprone-branch-clone)
     // The style doesn't have a media attribute to match against.
   } else if (import->media_queries().size() != 1) {
     // The import doesn't have a single media.
@@ -155,7 +155,8 @@ bool CheckConversionOfImportToLink(const Css::Import* import,
   if (import->link().utf8_length() == 0) {
     // Empty URLs are problematic so we give up if we hit any.
     return false;
-  } else if (import->media_queries().empty()) {
+  } else if (import->media_queries()
+                 .empty()) {  // NOLINT(bugprone-branch-clone)
     // No media queries is easy - just copy any media into the link.
   } else if (MediaMatch(media_attribute, import)) {
     // A 'simple' media query that matches the style's is also good.

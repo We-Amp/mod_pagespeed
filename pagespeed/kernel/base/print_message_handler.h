@@ -38,7 +38,8 @@ class PrintMessageHandler : public MessageHandler {
                         const GoogleString& message) override;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(PrintMessageHandler);
+  PrintMessageHandler(const PrintMessageHandler&) = delete;
+  PrintMessageHandler& operator=(const PrintMessageHandler&) = delete;
 };
 
 }  // namespace net_instaweb

@@ -1,0 +1,10 @@
+--- a/bazel/expanded_template/expand_template.cc
++++ b/bazel/expanded_template/expand_template.cc
+@@ -2,6 +2,7 @@
+ #include <regex>
+ #include <streambuf>
+ #include <string>
++#include <cstring>
+ #include <vector>
+
+ struct Substitution {

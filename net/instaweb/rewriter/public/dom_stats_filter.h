@@ -60,7 +60,8 @@ class DomStatsFilter : public CommonFilter {
   int num_critical_images_used_;
   ScriptTagScanner script_tag_scanner_;
 
-  DISALLOW_COPY_AND_ASSIGN(DomStatsFilter);
+  DomStatsFilter(const DomStatsFilter&) = delete;
+  DomStatsFilter& operator=(const DomStatsFilter&) = delete;
 };
 
 }  // namespace net_instaweb

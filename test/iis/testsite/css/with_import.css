@@ -1,0 +1,27 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright (c) 2024-2026 We-Amp B.V.
+ */
+
+/* CSS file with @import for flatten tests */
+
+@import url("imported.css");
+
+/* Additional styles after import */
+
+.page-wrapper {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.main-content {
+    flex: 1;
+    padding: 40px 20px;
+}
+
+/* Override some imported styles */
+.button.large {
+    padding: 15px 30px;
+    font-size: 18px;
+}

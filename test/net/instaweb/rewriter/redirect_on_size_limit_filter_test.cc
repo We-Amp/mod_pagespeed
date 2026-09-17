@@ -92,7 +92,8 @@ class RedirectOnSizeLimitFilterTest : public RewriteTestBase {
  private:
   StringWriter writer_;
 
-  DISALLOW_COPY_AND_ASSIGN(RedirectOnSizeLimitFilterTest);
+  RedirectOnSizeLimitFilterTest(const RedirectOnSizeLimitFilterTest&) = delete;
+  RedirectOnSizeLimitFilterTest& operator=(const RedirectOnSizeLimitFilterTest&) = delete;
 };
 
 TEST_F(RedirectOnSizeLimitFilterTest, TestOneFlushWindow) {

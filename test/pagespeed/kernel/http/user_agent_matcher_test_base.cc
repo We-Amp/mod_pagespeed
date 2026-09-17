@@ -22,7 +22,6 @@
 #include <memory>
 
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/http/user_agent_matcher.h"
 #include "test/pagespeed/kernel/base/gtest.h"
@@ -73,15 +72,26 @@ const char UserAgentMatcherTestBase::kBlackBerryOS5UserAgent[] =
 const char UserAgentMatcherTestBase::kBlackBerryOS6UserAgent[] =
     "Mozilla/5.0 (BlackBerry; U; BlackBerry 9800; en-US) AppleWebKit/534.11+ "
     "(KHTML, like Gecko) Version/6.0.0.141 Mobile Safari/534.11+";
+// First three-digit major version; regression guard for #555.
+const char UserAgentMatcherTestBase::kChrome100UserAgent[] =
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/100.0.4896.75 Safari/537.36";
 const char UserAgentMatcherTestBase::kChrome12UserAgent[] =  // webp capable
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_6_4) "
     "AppleWebKit/534.30 (KHTML, like Gecko) Chrome/12.0.742.100 Safari/534.30";
+const char UserAgentMatcherTestBase::kChrome137UserAgent[] =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36";
 const char UserAgentMatcherTestBase::kChrome15UserAgent[] =  // Not webp capable
     "Mozilla/5.0 (Windows; U; Windows NT 6.1; en-US) "
     "AppleWebKit/534.13 (KHTML, like Gecko) Chrome/15.0.597.19 Safari/534.13";
 const char UserAgentMatcherTestBase::kChrome18UserAgent[] =  // webp capable
     "Mozilla/5.0 (Windows; U; Windows NT 6.1; en-US) "
     "AppleWebKit/534.13 (KHTML, like Gecko) Chrome/18.0.597.19 Safari/534.13";
+// Last two-digit major version; pairs with kChrome100UserAgent for #555.
+const char UserAgentMatcherTestBase::kChrome99UserAgent[] =
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/99.0.4844.51 Safari/537.36";
 const char UserAgentMatcherTestBase::kChrome9UserAgent[] =  // Not webp capable
     "Mozilla/5.0 (Windows; U; Windows NT 6.1; en-US) "
     "AppleWebKit/534.13 (KHTML, like Gecko) Chrome/9.0.597.19 Safari/534.13";
@@ -104,6 +114,10 @@ const char UserAgentMatcherTestBase::kChromeUserAgent[] =
     "Mozilla/5.0 (Windows; U; Windows NT 5.1; en-US) "
     "AppleWebKit/525.13 (KHTML, like Gecko) Chrome/0.A.B.C Safari/525.13";
 const char UserAgentMatcherTestBase::kCompalUserAgent[] = "Compal-A618";
+const char UserAgentMatcherTestBase::kCriOS137UserAgent[] =
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) "
+    "AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/137.0.7151.51 "
+    "Mobile/15E148 Safari/604.1";
 const char UserAgentMatcherTestBase::kCriOS31UserAgent[] =
     "Mozilla/5.0 (iPhone; CPU iPhone OS 7_0_3 like Mac OS X) "
     "AppleWebKit/537.51.1 (KHTML, like Gecko) CriOS/31.0.1650.18 Mobile/11B511 "
@@ -116,8 +130,18 @@ const char UserAgentMatcherTestBase::kCriOS48UserAgent[] =
     "Mozilla/5.0 (iPhone; CPU iPhone OS 9_2 like Mac OS X) "
     "AppleWebKit/601.1 (KHTML, like Gecko) CriOS/48.0.2564.87 "
     "Mobile/13C75 Safari/601.1.46";
+// Single-digit iOS Chrome major: below both WebP floors, and the one shape an
+// open-ended allow entry only stays safe against if the block lists carry a
+// single-digit pattern of their own.
+const char UserAgentMatcherTestBase::kCriOS9UserAgent[] =
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 6_0 like Mac OS X) "
+    "AppleWebKit/536.26 (KHTML, like Gecko) CriOS/9.0.0.0 Mobile/10A403 "
+    "Safari/8536.25";
 const char UserAgentMatcherTestBase::kDoCoMoMobileUserAgent[] =
     "DoCoMo/1.0/D505iS/c20/TB/W20H10";
+const char UserAgentMatcherTestBase::kEdge137UserAgent[] =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36 Edg/137.0.3296.68";
 const char UserAgentMatcherTestBase::kFirefox1UserAgent[] =
     "Mozilla/5.0 (X11; U; Linux i686; en-US; rv:1.8.0.7) "
     "Gecko/20060909 Firefox/1.5.0.7 MG (Novarra-Vision/6.1)";
@@ -254,6 +278,9 @@ const char UserAgentMatcherTestBase::kOpera5UserAgent[] =
     "Opera/5.0 (SunOS 5.8 sun4u; U) [en]";
 const char UserAgentMatcherTestBase::kOpera8UserAgent[] =
     "Opera/8.01 (J2ME/MIDP; Opera Mini/1.1.2666/1724; en; U; ssr)";
+const char UserAgentMatcherTestBase::kOpera119UserAgent[] =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36 OPR/119.0.0.0";
 const char UserAgentMatcherTestBase::kOpera18UserAgent[] =
     "Mozilla/5.0 (Windows NT 6.2; WOW64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/31.0.1650.63 Safari/537.36 OPR/18.0.1284.68";
@@ -292,6 +319,72 @@ const char UserAgentMatcherTestBase::kSafari6UserAgent[] =
 const char UserAgentMatcherTestBase::kSafari9UserAgent[] =
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_5) AppleWebKit/601.6.17 "
     "(KHTML, like Gecko) Version/9.1.1 Safari/601.6.17";
+// Safari 13 has no WebP decoder on any OS: below even the pre-amendment floor.
+const char UserAgentMatcherTestBase::kSafari13UserAgent[] =
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
+    "(KHTML, like Gecko) Version/13.1.2 Safari/605.1.15";
+// Safari 14 and 15 sit below the Version/16 WebP floor: their WebP decode
+// is OS-gated (none on Catalina), and the frozen "10_15_7" OS token -- which
+// every modern macOS reports -- makes the real OS undecidable from the UA.
+// These two constants are byte-identical to a real Catalina UA.
+const char UserAgentMatcherTestBase::kSafari14UserAgent[] =
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
+    "(KHTML, like Gecko) Version/14.0 Safari/605.1.15";
+const char UserAgentMatcherTestBase::kSafari15UserAgent[] =
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
+    "(KHTML, like Gecko) Version/15.6.1 Safari/605.1.15";
+// Safari 16 is that floor: the first Safari that cannot run on
+// Catalina, hence the first whose WebP decoder is provable from the UA alone.
+// Note the OS token still reads 10_15_7 -- that is the frozen value, not
+// Catalina.
+const char UserAgentMatcherTestBase::kSafari16UserAgent[] =
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
+    "(KHTML, like Gecko) Version/16.6 Safari/605.1.15";
+const char UserAgentMatcherTestBase::kSafari17IPhoneUserAgent[] =
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) "
+    "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 "
+    "Safari/604.1";
+const char UserAgentMatcherTestBase::kSafari18UserAgent[] =
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
+    "(KHTML, like Gecko) Version/18.3 Safari/605.1.15";
+// Two-digit major well past the floor: pins that the open-ended allow entry
+// survives the version-digit rollover that broke "*Chrome/??.*".
+const char UserAgentMatcherTestBase::kSafari26UserAgent[] =
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
+    "(KHTML, like Gecko) Version/26.0 Safari/605.1.15";
+// Firefox 131 still advertises image/webp on navigation; 132 is the release
+// that dropped image types from the navigation Accept header.
+const char UserAgentMatcherTestBase::kFirefox131UserAgent[] =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:131.0) Gecko/20100101 "
+    "Firefox/131.0";
+const char UserAgentMatcherTestBase::kFirefox132UserAgent[] =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 "
+    "Firefox/132.0";
+const char UserAgentMatcherTestBase::kFirefox141UserAgent[] =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:141.0) Gecko/20100101 "
+    "Firefox/141.0";
+// Firefox for Android carries no Safari/ token, which is why the Android deny
+// is scoped to "*Android*Safari/*" rather than a blanket "*Android*".
+const char UserAgentMatcherTestBase::kFirefox141AndroidUserAgent[] =
+    "Mozilla/5.0 (Android 14; Mobile; rv:141.0) Gecko/141.0 Firefox/141.0";
+// Firefox for iOS: WebKit underneath, but its UA carries neither Version/ nor
+// Firefox/, so it matches no allow entry. A deliberate false negative.
+const char UserAgentMatcherTestBase::kFxiOS126UserAgent[] =
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) "
+    "AppleWebKit/605.1.15 (KHTML, like Gecko) FxiOS/126.0 Mobile/15E148 "
+    "Safari/605.1.15";
+// Android WebView: emits "Version/4.0 ... Safari/537.36" and so reaches the
+// Safari-shaped rule; denied by Chrome/, by Android*Safari/ and by the floor.
+const char UserAgentMatcherTestBase::kAndroidWebView114UserAgent[] =
+    "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Version/4.0 Chrome/114.0.0.0 Mobile Safari/537.36";
+// The one widely deployed crawler that advertises "Version/N... Safari/" with
+// N above the Version/16 floor; the crawler deny entry, not the version
+// floor, is what keeps it out.
+const char UserAgentMatcherTestBase::kApplebotSafari16UserAgent[] =
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
+    "(KHTML, like Gecko) Version/16.4 Safari/605.1.15 (Applebot/0.1; "
+    "+http://www.apple.com/go/applebot)";
 const char UserAgentMatcherTestBase::kSAGEMMobileUserAgent[] =
     "SAGEM-my202C/Orange1.0 UP.Browser/5.0.5.6 (GUI)";
 const char UserAgentMatcherTestBase::kSAGEMUserAgent[] = "SAGEM-942";

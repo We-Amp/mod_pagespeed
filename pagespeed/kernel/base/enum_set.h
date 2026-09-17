@@ -84,7 +84,7 @@ class EnumSet {
   bool operator==(const EnumSet& that) const { return bits_ == that.bits_; }
 
  private:
-  typedef std::bitset<NumEnums> BitSet;
+  using BitSet = std::bitset<NumEnums>;
   BitSet bits_;
 
   // Implicit copy and assign will work perfectly and are required.

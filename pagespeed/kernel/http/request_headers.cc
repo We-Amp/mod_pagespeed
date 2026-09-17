@@ -234,7 +234,7 @@ bool RequestHeaders::HasCookie(StringPiece cookie_name) const {
 bool RequestHeaders::HasCookieValue(StringPiece cookie_name,
                                     StringPiece cookie_value) const {
   const CookieMultimap& cookies = GetAllCookies();
-  typedef CookieMultimap::const_iterator Iter;
+  using Iter = CookieMultimap::const_iterator;
   std::pair<Iter, Iter> range = cookies.equal_range(cookie_name);
   for (Iter p = range.first; p != range.second; ++p) {
     const ValueAndAttributes& value_attr = p->second;

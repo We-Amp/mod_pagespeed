@@ -37,7 +37,8 @@ class PedanticFilterTest : public HtmlParseTestBase {
  private:
   PedanticFilter pedantic_filter_;
 
-  DISALLOW_COPY_AND_ASSIGN(PedanticFilterTest);
+  PedanticFilterTest(const PedanticFilterTest&) = delete;
+  PedanticFilterTest& operator=(const PedanticFilterTest&) = delete;
 };
 
 TEST_F(PedanticFilterTest, ChangeStyleWithNoType) {
@@ -70,6 +71,13 @@ TEST_F(PedanticFilterTest, DoNotBreakScriptType) {
   ValidateNoChanges("do_not_break_script_type",
                     "<head><script type=\"text/ecmascript\">var x=1;</script>"
                     "</head>");
+}
+
+TEST_F(PedanticFilterTest, ModuleTypeUntouched) {
+  // A module script always carries type=module, so the no-type
+  // text/javascript injection can never reach it, HTML4 doctype or not.
+  ValidateNoChanges("module_type_untouched",
+                    "<head><script type=\"module\">var x=1;</script></head>");
 }
 
 TEST_F(PedanticFilterTest, DoNotAlterHTML5Script) {

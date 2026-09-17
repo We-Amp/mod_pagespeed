@@ -41,6 +41,46 @@ class DevicePropertiesTest : public testing::Test {
     EXPECT_EQ(expected_value, device_properties.RequestsSaveData());
   }
 
+  // Every WebP capability is false: the request advertised no "Accept:
+  // image/webp" and the user agent is not in the legacy no-Accept population.
+  void ExpectNoWebpSupport(const char* user_agent) {
+    SCOPED_TRACE(user_agent);
+    device_properties_.SetUserAgent(user_agent);
+    EXPECT_FALSE(device_properties_.SupportsWebpInPlace());
+    EXPECT_FALSE(device_properties_.SupportsWebpRewrittenUrls());
+    EXPECT_FALSE(device_properties_.SupportsWebpLosslessAlpha());
+    EXPECT_FALSE(device_properties_.SupportsWebpAnimated());
+  }
+
+  // The legacy no-Accept population (the Android browser): lossy WebP on
+  // rewritten URLs only. This is the ONE capability still derived from the
+  // user-agent string, via UserAgentMatcher::LegacyWebp().
+  void ExpectLegacyRewrittenUrlWebpOnly(const char* user_agent) {
+    SCOPED_TRACE(user_agent);
+    device_properties_.SetUserAgent(user_agent);
+    EXPECT_FALSE(device_properties_.SupportsWebpInPlace());
+    EXPECT_TRUE(device_properties_.SupportsWebpRewrittenUrls());
+    EXPECT_FALSE(device_properties_.SupportsWebpLosslessAlpha());
+    EXPECT_FALSE(device_properties_.SupportsWebpAnimated());
+  }
+
+  // "Accept: image/webp" was seen, so every capability is granted regardless
+  // of the user agent.
+  void ExpectFullWebpSupport(const char* user_agent) {
+    SCOPED_TRACE(user_agent);
+    device_properties_.SetUserAgent(user_agent);
+    EXPECT_TRUE(device_properties_.SupportsWebpInPlace());
+    EXPECT_TRUE(device_properties_.SupportsWebpRewrittenUrls());
+    EXPECT_TRUE(device_properties_.SupportsWebpLosslessAlpha());
+    EXPECT_TRUE(device_properties_.SupportsWebpAnimated());
+  }
+
+  void AcceptWebp() {
+    RequestHeaders headers;
+    headers.Add(HttpAttributes::kAccept, "image/webp");
+    device_properties_.ParseRequestHeaders(headers);
+  }
+
   UserAgentMatcher user_agent_matcher_;
   DeviceProperties device_properties_;
 };
@@ -51,36 +91,18 @@ TEST_F(DevicePropertiesTest, WebpUserAgentIdentificationNoAccept) {
   // device_properties_.
   //
   // Note: these are all false due to the lack of accept:webp.
-  device_properties_.SetUserAgent(UserAgentMatcherTestBase::kIe7UserAgent);
-  EXPECT_FALSE(device_properties_.SupportsWebpInPlace());
-  EXPECT_FALSE(device_properties_.SupportsWebpRewrittenUrls());
-  EXPECT_FALSE(device_properties_.SupportsWebpLosslessAlpha());
+  ExpectNoWebpSupport(UserAgentMatcherTestBase::kIe7UserAgent);
+  ExpectNoWebpSupport(UserAgentMatcherTestBase::kTestingWebp);
+  ExpectNoWebpSupport(UserAgentMatcherTestBase::kTestingWebpLosslessAlpha);
+  ExpectNoWebpSupport(UserAgentMatcherTestBase::kTestingWebpAnimated);
 
-  device_properties_.SetUserAgent(UserAgentMatcherTestBase::kTestingWebp);
-  EXPECT_FALSE(device_properties_.SupportsWebpInPlace());
-  EXPECT_FALSE(device_properties_.SupportsWebpRewrittenUrls());
-  EXPECT_FALSE(device_properties_.SupportsWebpLosslessAlpha());
+  AcceptWebp();
 
-  device_properties_.SetUserAgent(
-      UserAgentMatcherTestBase::kTestingWebpLosslessAlpha);
-  EXPECT_FALSE(device_properties_.SupportsWebpInPlace());
-  EXPECT_FALSE(device_properties_.SupportsWebpRewrittenUrls());
-  EXPECT_FALSE(device_properties_.SupportsWebpLosslessAlpha());
-
-  RequestHeaders headers;
-  headers.Add(HttpAttributes::kAccept, "image/webp");
-  device_properties_.ParseRequestHeaders(headers);
-
-  device_properties_.SetUserAgent(UserAgentMatcherTestBase::kTestingWebp);
-  EXPECT_TRUE(device_properties_.SupportsWebpInPlace());
-  EXPECT_TRUE(device_properties_.SupportsWebpRewrittenUrls());
-  EXPECT_FALSE(device_properties_.SupportsWebpLosslessAlpha());
-
-  device_properties_.SetUserAgent(
-      UserAgentMatcherTestBase::kTestingWebpLosslessAlpha);
-  EXPECT_TRUE(device_properties_.SupportsWebpInPlace());
-  EXPECT_TRUE(device_properties_.SupportsWebpRewrittenUrls());
-  EXPECT_TRUE(device_properties_.SupportsWebpLosslessAlpha());
+  // With the header the internal testing user agents stop differing: capability
+  // is read off the Accept header, not off the user-agent string.
+  ExpectFullWebpSupport(UserAgentMatcherTestBase::kTestingWebp);
+  ExpectFullWebpSupport(UserAgentMatcherTestBase::kTestingWebpLosslessAlpha);
+  ExpectFullWebpSupport(UserAgentMatcherTestBase::kTestingWebpAnimated);
 }
 
 // See https://github.com/apache/incubator-pagespeed-mod/issues/978
@@ -94,59 +116,26 @@ TEST_F(DevicePropertiesTest, WebpRequireAcceptHeaderExceptAndroid) {
   // Android Browser is OK -- we will serve it webp without an accept header.
   // Mobile IE actually *does* masquerade as IE as of August 2014, but
   // it's easy to avoid confusion because the UA includes 'Windows Phone'.
-  device_properties_.SetUserAgent(
+  ExpectLegacyRewrittenUrlWebpOnly(
       UserAgentMatcherTestBase::kAndroidICSUserAgent);
-  EXPECT_FALSE(device_properties_.SupportsWebpInPlace());
-  EXPECT_TRUE(device_properties_.SupportsWebpRewrittenUrls());
-  EXPECT_FALSE(device_properties_.SupportsWebpLosslessAlpha());
 
-  device_properties_.SetUserAgent(
-      UserAgentMatcherTestBase::kWindowsPhoneUserAgent);
-  EXPECT_FALSE(device_properties_.SupportsWebpInPlace());
-  EXPECT_FALSE(device_properties_.SupportsWebpRewrittenUrls());
-  EXPECT_FALSE(device_properties_.SupportsWebpLosslessAlpha());
+  ExpectNoWebpSupport(UserAgentMatcherTestBase::kWindowsPhoneUserAgent);
 
   // However Chrome will generally send us an Accept:image/webp header, whereas
   // other browsers such as (we think) IE11 in the future, will not send
   // such Accept headers.  Unfortunately, Chrome only started sending
   // accept:image/webp at version 25, so version 18 will no longer get webp
   // as of this change.
-  device_properties_.SetUserAgent(UserAgentMatcherTestBase::kChrome18UserAgent);
-  EXPECT_FALSE(device_properties_.SupportsWebpInPlace());
-  EXPECT_FALSE(device_properties_.SupportsWebpRewrittenUrls());
-  EXPECT_FALSE(device_properties_.SupportsWebpLosslessAlpha());
-
-  device_properties_.SetUserAgent(
-      UserAgentMatcherTestBase::kAndroidChrome21UserAgent);
-  EXPECT_FALSE(device_properties_.SupportsWebpInPlace());
-  EXPECT_FALSE(device_properties_.SupportsWebpRewrittenUrls());
-  EXPECT_FALSE(device_properties_.SupportsWebpLosslessAlpha());
-
-  device_properties_.SetUserAgent(UserAgentMatcherTestBase::kCriOS48UserAgent);
-  EXPECT_FALSE(device_properties_.SupportsWebpInPlace());
-  EXPECT_FALSE(device_properties_.SupportsWebpRewrittenUrls());
-  EXPECT_FALSE(device_properties_.SupportsWebpLosslessAlpha());
+  ExpectNoWebpSupport(UserAgentMatcherTestBase::kChrome18UserAgent);
+  ExpectNoWebpSupport(UserAgentMatcherTestBase::kAndroidChrome21UserAgent);
+  ExpectNoWebpSupport(UserAgentMatcherTestBase::kCriOS48UserAgent);
 
   // However, Chrome 25 and 37 will get webp due to the accept header.
-  RequestHeaders headers;
-  headers.Add(HttpAttributes::kAccept, "image/webp");
-  device_properties_.ParseRequestHeaders(headers);
+  AcceptWebp();
 
-  device_properties_.SetUserAgent(UserAgentMatcherTestBase::kChrome37UserAgent);
-  EXPECT_TRUE(device_properties_.SupportsWebpInPlace());
-  EXPECT_TRUE(device_properties_.SupportsWebpRewrittenUrls());
-  EXPECT_TRUE(device_properties_.SupportsWebpLosslessAlpha());
-
-  device_properties_.SetUserAgent(
-      UserAgentMatcherTestBase::kOpera1110UserAgent);
-  EXPECT_TRUE(device_properties_.SupportsWebpInPlace());
-  EXPECT_TRUE(device_properties_.SupportsWebpRewrittenUrls());
-  EXPECT_FALSE(device_properties_.SupportsWebpLosslessAlpha());
-
-  device_properties_.SetUserAgent(UserAgentMatcherTestBase::kCriOS48UserAgent);
-  EXPECT_TRUE(device_properties_.SupportsWebpInPlace());
-  EXPECT_TRUE(device_properties_.SupportsWebpRewrittenUrls());
-  EXPECT_TRUE(device_properties_.SupportsWebpLosslessAlpha());
+  ExpectFullWebpSupport(UserAgentMatcherTestBase::kChrome37UserAgent);
+  ExpectFullWebpSupport(UserAgentMatcherTestBase::kOpera1110UserAgent);
+  ExpectFullWebpSupport(UserAgentMatcherTestBase::kCriOS48UserAgent);
 }
 
 TEST_F(DevicePropertiesTest, WebpUserAgentIdentificationAccept) {
@@ -156,21 +145,185 @@ TEST_F(DevicePropertiesTest, WebpUserAgentIdentificationAccept) {
   headers.Add(HttpAttributes::kAccept, "text/html");
   device_properties_.ParseRequestHeaders(headers);
 
-  device_properties_.SetUserAgent(UserAgentMatcherTestBase::kIe7UserAgent);
-  EXPECT_TRUE(device_properties_.SupportsWebpInPlace());
-  EXPECT_TRUE(device_properties_.SupportsWebpRewrittenUrls());
-  EXPECT_FALSE(device_properties_.SupportsWebpLosslessAlpha());
+  ExpectFullWebpSupport(UserAgentMatcherTestBase::kIe7UserAgent);
+  ExpectFullWebpSupport(UserAgentMatcherTestBase::kTestingWebp);
+  ExpectFullWebpSupport(UserAgentMatcherTestBase::kTestingWebpLosslessAlpha);
+}
 
-  device_properties_.SetUserAgent(UserAgentMatcherTestBase::kTestingWebp);
-  EXPECT_TRUE(device_properties_.SupportsWebpInPlace());
-  EXPECT_TRUE(device_properties_.SupportsWebpRewrittenUrls());
-  EXPECT_FALSE(device_properties_.SupportsWebpLosslessAlpha());
+// A client that advertises "Accept: image/webp" is taken at its word for every
+// WebP flavour, exactly as AVIF has always been handled. No
+// hand-maintained browser-version list is consulted any more, so browsers that
+// were never on those lists -- Safari most prominently -- now get the full set,
+// and a user agent nobody has ever seen gets it too.
+TEST_F(DevicePropertiesTest, WebpAcceptGrantsEveryCapabilityRegardlessOfUa) {
+  AcceptWebp();
 
-  device_properties_.SetUserAgent(
-      UserAgentMatcherTestBase::kTestingWebpLosslessAlpha);
-  EXPECT_TRUE(device_properties_.SupportsWebpInPlace());
-  EXPECT_TRUE(device_properties_.SupportsWebpRewrittenUrls());
-  EXPECT_TRUE(device_properties_.SupportsWebpLosslessAlpha());
+  ExpectFullWebpSupport(UserAgentMatcherTestBase::kSafariUserAgent);
+  ExpectFullWebpSupport(UserAgentMatcherTestBase::kSafari9UserAgent);
+  ExpectFullWebpSupport(UserAgentMatcherTestBase::kIPhone4Safari);
+  ExpectFullWebpSupport(UserAgentMatcherTestBase::kFirefox7UserAgent);
+  ExpectFullWebpSupport(UserAgentMatcherTestBase::kNokiaUserAgent);
+  ExpectFullWebpSupport(UserAgentMatcherTestBase::kAndroidHCUserAgent);
+  ExpectFullWebpSupport("Totally-Unknown-Agent/1.0");
+  ExpectFullWebpSupport("");
+  // The remaining matrix cell: the legacy no-Accept carve-out user agent, this
+  // time WITH the header. Accept wins -- the carve-out only ever adds the lossy
+  // tier on top, it never caps a request that advertises WebP.
+  ExpectFullWebpSupport(UserAgentMatcherTestBase::kAndroidICSUserAgent);
+}
+
+// The other direction, and the one that pins what survives of user-agent
+// detection: without the Accept header the user-agent string alone can grant
+// nothing beyond the legacy Android carve-out, and never lossless/alpha or
+// animated. Chromium and Firefox agents that used to be on the (now deleted)
+// lossless and animated allowlists are included deliberately.
+TEST_F(DevicePropertiesTest, WebpWithoutAcceptOnlyLegacyAndroidIsRewritten) {
+  ExpectLegacyRewrittenUrlWebpOnly(
+      UserAgentMatcherTestBase::kAndroidICSUserAgent);
+
+  ExpectNoWebpSupport(UserAgentMatcherTestBase::kChrome137UserAgent);
+  ExpectNoWebpSupport(UserAgentMatcherTestBase::kCriOS137UserAgent);
+  ExpectNoWebpSupport(UserAgentMatcherTestBase::kChrome37UserAgent);
+  ExpectNoWebpSupport(UserAgentMatcherTestBase::kFirefox7UserAgent);
+  // Firefox on Android is excluded from the legacy carve-out.
+  ExpectNoWebpSupport(UserAgentMatcherTestBase::kFirefox42AndroidUserAgent);
+  // Android 3 and older are below the legacy carve-out's floor.
+  ExpectNoWebpSupport(UserAgentMatcherTestBase::kAndroidHCUserAgent);
+  ExpectNoWebpSupport(UserAgentMatcherTestBase::kSafariUserAgent);
+}
+
+// A navigation request from Safari 16+ or Firefox 132+ carries no
+// "image/webp" in Accept, but the browser decodes WebP. Derive the capability
+// from the user agent -- and confine the result to rewritten URLs, whose
+// format is committed in the URL, because a UA-derived verdict is a guess.
+TEST_F(DevicePropertiesTest, WebpFromUserAgentWhenAcceptOmitsIt) {
+  // A navigation Accept header from Safari: no image types at all.
+  RequestHeaders headers;
+  headers.Add(HttpAttributes::kAccept,
+              "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
+
+  DeviceProperties safari(&user_agent_matcher_);
+  safari.SetUserAgent(UserAgentMatcherTestBase::kSafari17IPhoneUserAgent);
+  safari.ParseRequestHeaders(headers);
+  // Rewritten URLs carry the capability in the URL itself, so a guess is safe
+  // there...
+  EXPECT_TRUE(safari.SupportsWebpRewrittenUrls());
+  // ...but SupportsWebpInPlace() must keep reporting only an observed
+  // "Accept: image/webp" header, never a user-agent guess: its remaining
+  // consumer is device logging, and (should any per-request in-place behavior
+  // ever return) a response shaped by a guess could not honestly claim
+  // "Vary: Accept".
+  EXPECT_FALSE(safari.SupportsWebpInPlace());
+
+  DeviceProperties firefox(&user_agent_matcher_);
+  firefox.SetUserAgent(UserAgentMatcherTestBase::kFirefox141UserAgent);
+  firefox.ParseRequestHeaders(headers);
+  EXPECT_TRUE(firefox.SupportsWebpRewrittenUrls());
+  EXPECT_FALSE(firefox.SupportsWebpInPlace());
+
+  // Below the floors, nothing changes. Safari 15 is the sharp edge: its UA is
+  // byte-identical to a real Catalina Safari 15, which has no WebP decoder,
+  // so the Version/16 floor must deny it.
+  DeviceProperties safari15(&user_agent_matcher_);
+  safari15.SetUserAgent(UserAgentMatcherTestBase::kSafari15UserAgent);
+  safari15.ParseRequestHeaders(headers);
+  EXPECT_FALSE(safari15.SupportsWebpRewrittenUrls());
+  EXPECT_FALSE(safari15.SupportsWebpInPlace());
+
+  DeviceProperties safari13(&user_agent_matcher_);
+  safari13.SetUserAgent(UserAgentMatcherTestBase::kSafari13UserAgent);
+  safari13.ParseRequestHeaders(headers);
+  EXPECT_FALSE(safari13.SupportsWebpRewrittenUrls());
+  EXPECT_FALSE(safari13.SupportsWebpInPlace());
+
+  DeviceProperties firefox131(&user_agent_matcher_);
+  firefox131.SetUserAgent(UserAgentMatcherTestBase::kFirefox131UserAgent);
+  firefox131.ParseRequestHeaders(headers);
+  EXPECT_FALSE(firefox131.SupportsWebpRewrittenUrls());
+  EXPECT_FALSE(firefox131.SupportsWebpInPlace());
+
+  // A crawler is never granted the guess, even when its UA is Safari-shaped and
+  // above the floor.
+  DeviceProperties applebot(&user_agent_matcher_);
+  applebot.SetUserAgent(UserAgentMatcherTestBase::kApplebotSafari16UserAgent);
+  applebot.ParseRequestHeaders(headers);
+  EXPECT_FALSE(applebot.SupportsWebpRewrittenUrls());
+  EXPECT_FALSE(applebot.SupportsWebpInPlace());
+}
+
+// A real "Accept: image/webp" still reads as an in-place-capable client. Only
+// the UA-derived verdict is excluded from SupportsWebpInPlace() -- the guess
+// must not change what is reported for honest Accept-advertising clients.
+TEST_F(DevicePropertiesTest, WebpInPlaceStillGrantedOnRealAcceptHeader) {
+  RequestHeaders headers;
+  headers.Add(HttpAttributes::kAccept, "image/webp");
+
+  DeviceProperties safari(&user_agent_matcher_);
+  safari.SetUserAgent(UserAgentMatcherTestBase::kSafari17IPhoneUserAgent);
+  safari.ParseRequestHeaders(headers);
+  EXPECT_TRUE(safari.SupportsWebpInPlace());
+  EXPECT_TRUE(safari.SupportsWebpRewrittenUrls());
+}
+
+// Order independence. accepts_webp_ is not reset by SetUserAgent, and
+// ParseRequestHeaders may only run once, so making WebP capability
+// UA-dependent could have turned "SetUserAgent before ParseRequestHeaders"
+// into an unchecked invariant. It did not: whichever call runs second
+// establishes the verdict, and both orders agree.
+TEST_F(DevicePropertiesTest, WebpFromUserAgentIsOrderIndependent) {
+  RequestHeaders headers;
+  headers.Add(HttpAttributes::kAccept, "text/html,*/*;q=0.8");
+
+  DeviceProperties ua_first(&user_agent_matcher_);
+  ua_first.SetUserAgent(UserAgentMatcherTestBase::kSafari16UserAgent);
+  ua_first.ParseRequestHeaders(headers);
+
+  DeviceProperties headers_first(&user_agent_matcher_);
+  headers_first.ParseRequestHeaders(headers);
+  headers_first.SetUserAgent(UserAgentMatcherTestBase::kSafari16UserAgent);
+
+  EXPECT_TRUE(ua_first.SupportsWebpRewrittenUrls());
+  EXPECT_TRUE(headers_first.SupportsWebpRewrittenUrls());
+  EXPECT_FALSE(ua_first.SupportsWebpInPlace());
+  EXPECT_FALSE(headers_first.SupportsWebpInPlace());
+}
+
+// Replacing the user agent must withdraw a grant that the previous user agent
+// earned; otherwise a UA-derived kTrue would masquerade as a real Accept
+// header for the rest of the object's life.
+TEST_F(DevicePropertiesTest, WebpFromUserAgentWithdrawnOnUserAgentChange) {
+  RequestHeaders headers;
+  headers.Add(HttpAttributes::kAccept, "text/html,*/*;q=0.8");
+
+  DeviceProperties device_properties(&user_agent_matcher_);
+  device_properties.SetUserAgent(UserAgentMatcherTestBase::kSafari16UserAgent);
+  device_properties.ParseRequestHeaders(headers);
+  EXPECT_TRUE(device_properties.SupportsWebpRewrittenUrls());
+
+  device_properties.SetUserAgent(UserAgentMatcherTestBase::kSafari13UserAgent);
+  EXPECT_FALSE(device_properties.SupportsWebpRewrittenUrls());
+  EXPECT_FALSE(device_properties.SupportsWebpInPlace());
+
+  // ...and re-granted when the user agent qualifies again.
+  device_properties.SetUserAgent(UserAgentMatcherTestBase::kFirefox132UserAgent);
+  EXPECT_TRUE(device_properties.SupportsWebpRewrittenUrls());
+  EXPECT_FALSE(device_properties.SupportsWebpInPlace());
+}
+
+// A real Accept: image/webp must survive a later SetUserAgent, including one
+// naming a browser below the floor: the header said what it said.
+TEST_F(DevicePropertiesTest, RealAcceptHeaderSurvivesUserAgentChange) {
+  RequestHeaders headers;
+  headers.Add(HttpAttributes::kAccept, "image/webp");
+
+  DeviceProperties device_properties(&user_agent_matcher_);
+  device_properties.SetUserAgent(UserAgentMatcherTestBase::kSafari16UserAgent);
+  device_properties.ParseRequestHeaders(headers);
+  EXPECT_TRUE(device_properties.SupportsWebpInPlace());
+
+  device_properties.SetUserAgent(UserAgentMatcherTestBase::kSafari13UserAgent);
+  EXPECT_TRUE(device_properties.SupportsWebpInPlace());
+  EXPECT_TRUE(device_properties.SupportsWebpRewrittenUrls());
 }
 
 TEST_F(DevicePropertiesTest, ProcessSaveDataHeader) {
@@ -204,6 +357,166 @@ TEST_F(DevicePropertiesTest, ProcessViaHeader) {
   headers3.Add(HttpAttributes::kVia, "");
   device_properties3.ParseRequestHeaders(headers3);
   EXPECT_TRUE(device_properties3.HasViaHeader());
+}
+
+// A stock browser user agent, byte-identical to what a human's browser sends.
+// No user-agent list can tell this apart from a human -- that is the whole
+// point of the signature override below.
+const char kSpoofedBrowserUserAgent[] =
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36";
+
+// Default: no verdict was set, so IsBot() is decided by the user-agent string
+// alone, exactly as before.
+TEST_F(DevicePropertiesTest, IsBotFallsBackToUserAgentWithoutVerdict) {
+  device_properties_.SetUserAgent(kSpoofedBrowserUserAgent);
+  EXPECT_FALSE(device_properties_.IsBot());
+
+  DeviceProperties bot_properties(&user_agent_matcher_);
+  bot_properties.SetUserAgent("Googlebot/2.1 (+http://www.google.com/bot.html)");
+  EXPECT_TRUE(bot_properties.IsBot());
+}
+
+// A verified signature outranks the user-agent string: the request is an
+// automated client even though its user agent is a real browser's.
+TEST_F(DevicePropertiesTest, WebBotAuthVerdictForcesBot) {
+  device_properties_.SetUserAgent(kSpoofedBrowserUserAgent);
+  device_properties_.SetWebBotAuthVerdict(true);
+  EXPECT_TRUE(device_properties_.IsBot());
+}
+
+// The override is one-directional. It can only ever move a request from human
+// to bot, never the other way: a signature proves bot-ness, never humanity, and
+// "no signature material present" is the overwhelmingly common case for bots.
+TEST_F(DevicePropertiesTest, WebBotAuthVerdictNeverClearsBotness) {
+  device_properties_.SetUserAgent("Googlebot/2.1");
+  device_properties_.SetWebBotAuthVerdict(false);
+  EXPECT_TRUE(device_properties_.IsBot());
+
+  DeviceProperties human(&user_agent_matcher_);
+  human.SetUserAgent(kSpoofedBrowserUserAgent);
+  human.SetWebBotAuthVerdict(false);
+  EXPECT_FALSE(human.IsBot());
+}
+
+// The memoisation trap. SetUserAgent resets is_bot_ along with every other
+// user-agent-derived cache, but the signature verdict is a property of the
+// request's signature headers, not of the user-agent string -- exactly like
+// accepts_avif_. It must survive a later SetUserAgent, in either call order.
+TEST_F(DevicePropertiesTest, WebBotAuthVerdictSurvivesSetUserAgent) {
+  device_properties_.SetWebBotAuthVerdict(true);
+  device_properties_.SetUserAgent(kSpoofedBrowserUserAgent);
+  EXPECT_TRUE(device_properties_.IsBot());
+
+  DeviceProperties reversed(&user_agent_matcher_);
+  reversed.SetUserAgent(kSpoofedBrowserUserAgent);
+  reversed.SetWebBotAuthVerdict(true);
+  EXPECT_TRUE(reversed.IsBot());
+  // Re-setting the user agent resets is_bot_ along with every other
+  // user-agent-derived cache. The verdict is not one of them, so the answer
+  // must not change.
+  reversed.SetUserAgent(kSpoofedBrowserUserAgent);
+  EXPECT_TRUE(reversed.IsBot());
+}
+
+// Setting the verdict after IsBot() has already memoised kFalse must still take
+// effect. is_bot_ is left holding kFalse here -- nothing clears it -- so this
+// passes only because IsBot() tests the override BEFORE reading the memo. Fold
+// the override into the memo-miss branch instead and this is the assertion that
+// catches it.
+TEST_F(DevicePropertiesTest, WebBotAuthVerdictOverridesMemoisedResult) {
+  device_properties_.SetUserAgent(kSpoofedBrowserUserAgent);
+  EXPECT_FALSE(device_properties_.IsBot());
+  device_properties_.SetWebBotAuthVerdict(true);
+  EXPECT_TRUE(device_properties_.IsBot());
+}
+
+// The signalled-bot consequences a signed agent inherits: no beaconing, no
+// lazyload. These are the consumers that make the classification matter.
+TEST_F(DevicePropertiesTest, WebBotAuthVerdictSuppressesBeaconing) {
+  RequestHeaders headers;
+  device_properties_.ParseRequestHeaders(headers);
+  device_properties_.SetUserAgent(kSpoofedBrowserUserAgent);
+  EXPECT_TRUE(device_properties_.SupportsCriticalImagesBeacon());
+  EXPECT_TRUE(device_properties_.SupportsLazyloadImages());
+
+  DeviceProperties signed_agent(&user_agent_matcher_);
+  RequestHeaders signed_headers;
+  signed_agent.ParseRequestHeaders(signed_headers);
+  signed_agent.SetUserAgent(kSpoofedBrowserUserAgent);
+  signed_agent.SetWebBotAuthVerdict(true);
+  EXPECT_FALSE(signed_agent.SupportsCriticalImagesBeacon());
+  EXPECT_FALSE(signed_agent.SupportsLazyloadImages());
+}
+
+// defer_javascript retypes every script to text/psajs, which only PageSpeed's
+// client-side runtime can execute. A client that does not run JavaScript
+// receives an inert page, so bots are excluded at the same seam lazyload uses.
+TEST_F(DevicePropertiesTest, JsDeferDisabledForBots) {
+  const char* kBotUserAgents[] = {
+      UserAgentMatcherTestBase::kGooglebotUserAgent,
+      "Mediapartners-Google",
+      "Wget/1.21.4",
+      "python-requests/2.31.0",
+      "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; "
+      "ChatGPT-User/1.0; +https://openai.com/bot",
+      "curl/8.4.0",
+  };
+  for (const char* user_agent : kBotUserAgents) {
+    SCOPED_TRACE(user_agent);
+    DeviceProperties device_properties(&user_agent_matcher_);
+    device_properties.SetUserAgent(user_agent);
+    ASSERT_TRUE(device_properties.IsBot());
+    EXPECT_FALSE(device_properties.SupportsJsDefer(false));
+
+    // allow_mobile is memoised with the result, so re-check on a fresh object.
+    DeviceProperties mobile_allowed(&user_agent_matcher_);
+    mobile_allowed.SetUserAgent(user_agent);
+    EXPECT_FALSE(mobile_allowed.SupportsJsDefer(true));
+  }
+}
+
+// Ordinary desktop browsers are untouched: this is the population the filter
+// was written for and the only one that can run the deferral runtime.
+TEST_F(DevicePropertiesTest, JsDeferAllowedForBrowsers) {
+  const char* kBrowserUserAgents[] = {
+      UserAgentMatcherTestBase::kChromeUserAgent,
+      UserAgentMatcherTestBase::kChrome18UserAgent,
+      UserAgentMatcherTestBase::kFirefoxUserAgent,
+      UserAgentMatcherTestBase::kSafariUserAgent,
+  };
+  for (const char* user_agent : kBrowserUserAgents) {
+    SCOPED_TRACE(user_agent);
+    DeviceProperties device_properties(&user_agent_matcher_);
+    device_properties.SetUserAgent(user_agent);
+    ASSERT_FALSE(device_properties.IsBot());
+    EXPECT_TRUE(device_properties.SupportsJsDefer(false));
+  }
+}
+
+// Behaviour change, pinned deliberately. UserAgentMatcher::SupportsJsDefer
+// returns true for an empty user agent (user_agent_matcher.cc), but a client
+// that sends no user agent at all is a bot under BotChecker and is the least
+// plausible thing on the internet to execute a deferral runtime.
+TEST_F(DevicePropertiesTest, JsDeferDisabledForEmptyUserAgent) {
+  device_properties_.SetUserAgent("");
+  EXPECT_TRUE(user_agent_matcher_.SupportsJsDefer("", false));
+  EXPECT_TRUE(device_properties_.IsBot());
+  EXPECT_FALSE(device_properties_.SupportsJsDefer(false));
+}
+
+// Ties the Web Bot Auth verdict to this consumer: an agent presenting a
+// byte-identical stock-Chrome user agent is invisible to every user-agent list,
+// so only a verified signature can classify it. When one is present, defer is
+// withheld along with the beacons and lazyload.
+TEST_F(DevicePropertiesTest, JsDeferDisabledByWebBotAuthVerdict) {
+  device_properties_.SetUserAgent(kSpoofedBrowserUserAgent);
+  EXPECT_TRUE(device_properties_.SupportsJsDefer(false));
+
+  DeviceProperties signed_agent(&user_agent_matcher_);
+  signed_agent.SetUserAgent(kSpoofedBrowserUserAgent);
+  signed_agent.SetWebBotAuthVerdict(true);
+  EXPECT_FALSE(signed_agent.SupportsJsDefer(false));
 }
 
 }  // namespace net_instaweb

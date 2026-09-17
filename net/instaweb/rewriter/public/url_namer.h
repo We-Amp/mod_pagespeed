@@ -104,7 +104,8 @@ class UrlNamer {
  private:
   GoogleString proxy_domain_;
 
-  DISALLOW_COPY_AND_ASSIGN(UrlNamer);
+  UrlNamer(const UrlNamer&) = delete;
+  UrlNamer& operator=(const UrlNamer&) = delete;
 };
 
 }  // namespace net_instaweb

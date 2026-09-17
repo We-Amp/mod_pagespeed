@@ -17,15 +17,18 @@
  * under the License.
  */
 
-// Include Apache's httpd.h without conflicting with grpc OK enum.
+// Include Apache's httpd.h and capture its "OK" macro as the APACHE_OK enum,
+// then undefine it, so the short macro name cannot collide with third-party
+// enums in translation units that also include Apache headers.
 
 #ifndef PAGESPEED_APACHE_APACHE_HTTPD_INCLUDES_H_
 #define PAGESPEED_APACHE_APACHE_HTTPD_INCLUDES_H_
 
 #include "httpd.h"
 
-// Apache defines "OK" which conflicts with a gGRPC status code of the same
-// name. Expand the macro out into APACHE_OK and then undefine it.
+// Apache defines "OK" as a macro, which can collide with same-named enum
+// values in other libraries. Expand the macro out into APACHE_OK and then
+// undefine it.
 enum { APACHE_OK = OK };
 #undef OK
 

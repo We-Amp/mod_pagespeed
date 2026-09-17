@@ -22,7 +22,6 @@
 #include <memory>
 
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "test/net/instaweb/rewriter/rewrite_test_base.h"
@@ -165,6 +164,16 @@ const char kShowAdsHtmlPageWithInvalidGoogleAdFormat[] =
     "google_ad_height = 92;"
     "google_ad_format = \"weird_722x92_as_rimg\";"
     "//-->";
+// A well-formed showads data snippet (parses cleanly) whose google_ad_width is
+// non-numeric, so IsApplicableShowAds rejects it. It still "looked like" a
+// showads snippet, so it must be counted as not-converted.
+const char kShowAdsHtmlPageWithNonNumericWidth[] =
+    "<!--"
+    "google_ad_client = \"test-publishercode-expected\"; "
+    "google_ad_slot = \"1234567\";"
+    "google_ad_width = \"not_a_number\";"
+    "google_ad_height = 90;"
+    "//-->";
 
 // Test fixture for MakeShowAdsAsyncFilter unit tests.
 class MakeShowAdsAsyncFilterTest : public RewriteTestBase {
@@ -231,6 +240,43 @@ TEST_F(MakeShowAdsAsyncFilterTest, OneShowAds) {
       GetPage(StrCat(GetShowAdsDataSnippetWithContent(GetShowAdsDataContent1()),
                      kShowAdsApiCall)),
       GetPage(GetShowAdsDataFormat1Output()));
+  CheckStatForShowAds(1);
+}
+
+TEST_F(MakeShowAdsAsyncFilterTest, CspForbidsInlineScript) {
+  // The conversion re-injects the showads API call as a new inline script,
+  // which a script-src policy without 'unsafe-inline' would block; the
+  // original snippets must be left untouched.
+  GoogleString html = StrCat(
+      "<head><title>Something</title>"
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"script-src *;\">"
+      "</head><body>",
+      GetShowAdsDataSnippetWithContent(GetShowAdsDataContent1()),
+      kShowAdsApiCall, "</body>");
+  ValidateNoChanges(test_info_->name(), html);
+  // The snippet is a valid showads snippet that we deliberately leave
+  // untouched because CSP forbids re-injecting the inline API call; it is a
+  // genuine missed conversion and is counted as not-converted.
+  EXPECT_EQ(0, GetStatShowAdsSnippetsConverted());
+  EXPECT_EQ(1, GetStatShowAdsSnippetsNotConverted());
+  EXPECT_EQ(0, GetStatShowAdsapiReplaced());
+}
+
+TEST_F(MakeShowAdsAsyncFilterTest, CspAllowsInlineScript) {
+  // With 'unsafe-inline' permitted the filter behaves as usual.
+  const char kCsp[] =
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"script-src * 'unsafe-inline';\">";
+  GoogleString html_in = StrCat(
+      "<head><title>Something</title>", kCsp, "</head><body>",
+      StrCat(GetShowAdsDataSnippetWithContent(GetShowAdsDataContent1()),
+             kShowAdsApiCall),
+      "</body>");
+  GoogleString html_out =
+      StrCat("<head><title>Something</title>", kCsp, "</head><body>",
+             GetShowAdsDataFormat1Output(), "</body>");
+  ValidateExpected(test_info_->name(), html_in, html_out);
   CheckStatForShowAds(1);
 }
 
@@ -374,7 +420,23 @@ TEST_F(MakeShowAdsAsyncFilterTest, ShowAdsMissingAttribute) {
   ValidateNoChanges(test_info_->name(),
                     GetPage(GetShowAdsDataSnippetWithContent(
                         kShowAdsHtmlPageWithMissingAttribute)));
-  CheckStatForNoApplicableAds();
+  // The snippet parses as a showads data snippet but is missing google_ad_width,
+  // so it is (correctly) left unconverted -- and counted as not-converted.
+  EXPECT_EQ(0, GetStatShowAdsSnippetsConverted());
+  EXPECT_EQ(1, GetStatShowAdsSnippetsNotConverted());
+  EXPECT_EQ(0, GetStatShowAdsapiReplaced());
+}
+
+TEST_F(MakeShowAdsAsyncFilterTest, ShowAdsNonNumericDimensionsCounted) {
+  // A snippet that looks like showads (parses cleanly, has google_ad_client)
+  // but has a non-numeric google_ad_width fails applicability and is left
+  // unconverted; the not-converted statistic must reflect that.
+  ValidateNoChanges(test_info_->name(),
+                    GetPage(GetShowAdsDataSnippetWithContent(
+                        kShowAdsHtmlPageWithNonNumericWidth)));
+  EXPECT_EQ(0, GetStatShowAdsSnippetsConverted());
+  EXPECT_EQ(1, GetStatShowAdsSnippetsNotConverted());
+  EXPECT_EQ(0, GetStatShowAdsapiReplaced());
 }
 
 TEST_F(MakeShowAdsAsyncFilterTest, ShowAdsUnexpectedStatement) {

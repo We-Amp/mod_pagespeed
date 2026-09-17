@@ -20,12 +20,12 @@
 #ifndef PAGESPEED_KERNEL_THREAD_SCHEDULER_H_
 #define PAGESPEED_KERNEL_THREAD_SCHEDULER_H_
 
+#include <memory>
 #include <set>
 
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/condvar.h"
 #include "pagespeed/kernel/base/function.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/thread_annotations.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/base/timer.h"
@@ -187,6 +187,17 @@ class Scheduler {
   // are no timers currently active.
   virtual void AwaitWakeupUntilUs(int64 wakeup_time_us);
 
+  // Hook invoked, with mutex held, whenever the earliest outstanding-alarm
+  // deadline moves earlier (including insertion into an empty alarm set).
+  // Subclasses that integrate with an external event loop can override this
+  // to (re)arm a loop timer that drives RunAlarms(); see EventScheduler.
+  // The default implementation does nothing: the base class relies on the
+  // condvar broadcast in InsertAlarmAtUsMutexHeld to wake a blocked waiter,
+  // and on some thread (e.g. SchedulerThread) calling ProcessAlarmsOrWaitUs.
+  //
+  // Implementations must not block and must not re-enter the scheduler.
+  virtual void EarliestWakeupChangedMutexHeld(int64 wakeup_time_us) {}
+
   bool running_waiting_alarms() const { return running_waiting_alarms_; }
 
  private:
@@ -194,7 +205,7 @@ class Scheduler {
   class CondVarCallbackTimeout;
   friend class SchedulerTest;
 
-  typedef std::set<Alarm*, CompareAlarms> AlarmSet;
+  using AlarmSet = std::set<Alarm*, CompareAlarms>;
 
   // Inserts an alarm, optionally broadcasting if the wakeup time has
   // changed.
@@ -217,7 +228,8 @@ class Scheduler {
   AlarmSet waiting_alarms_;      // Alarms waiting for signal_count to change
   bool running_waiting_alarms_;  // True if we're in process of invoking
                                  // user callbacks...
-  DISALLOW_COPY_AND_ASSIGN(Scheduler);
+  Scheduler(const Scheduler&) = delete;
+  Scheduler& operator=(const Scheduler&) = delete;
 };
 
 // A simple adapter class that permits blocking until an alarm has been run or
@@ -239,7 +251,9 @@ class SchedulerBlockingFunction : public Function {
   Scheduler* scheduler_;
   bool success_;
   bool done_;  // protected by scheduler_->mutex()
-  DISALLOW_COPY_AND_ASSIGN(SchedulerBlockingFunction);
+  SchedulerBlockingFunction(const SchedulerBlockingFunction&) = delete;
+  SchedulerBlockingFunction& operator=(const SchedulerBlockingFunction&) =
+      delete;
 };
 
 }  // namespace net_instaweb

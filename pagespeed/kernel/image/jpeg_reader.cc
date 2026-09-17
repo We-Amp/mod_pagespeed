@@ -30,8 +30,8 @@ extern "C" {
 #include "jerror.h"   // NOLINT
 #include "jpeglib.h"  // NOLINT
 #else
-#include "external/libjpeg_turbo/jerror.h"
-#include "external/libjpeg_turbo/jpeglib.h"
+#include "jerror.h"
+#include "jpeglib.h"
 #endif
 }
 
@@ -118,29 +118,21 @@ struct JpegEnv {
   jmp_buf jmp_buf_env_;
 };
 
-JpegReader::JpegReader(MessageHandler* handler) : message_handler_(handler) {
-  jpeg_decompress_ = static_cast<jpeg_decompress_struct*>(
-      malloc(sizeof(jpeg_decompress_struct)));
-  decompress_error_ =
-      static_cast<jpeg_error_mgr*>(malloc(sizeof(jpeg_error_mgr)));
-  memset(jpeg_decompress_, 0, sizeof(jpeg_decompress_struct));
-  memset(decompress_error_, 0, sizeof(jpeg_error_mgr));
-
-  jpeg_decompress_->err = jpeg_std_error(decompress_error_);
+JpegReader::JpegReader(MessageHandler* handler)
+    : jpeg_decompress_(std::make_unique<jpeg_decompress_struct>()),
+      decompress_error_(std::make_unique<jpeg_error_mgr>()),
+      message_handler_(handler) {
+  jpeg_decompress_->err = jpeg_std_error(decompress_error_.get());
   decompress_error_->error_exit = &ErrorExit;
   decompress_error_->output_message = &OutputMessage;
-  jpeg_create_decompress(jpeg_decompress_);
+  jpeg_create_decompress(jpeg_decompress_.get());
 }
 
-JpegReader::~JpegReader() {
-  jpeg_destroy_decompress(jpeg_decompress_);
-  free(decompress_error_);
-  free(jpeg_decompress_);
-}
+JpegReader::~JpegReader() { jpeg_destroy_decompress(jpeg_decompress_.get()); }
 
 void JpegReader::PrepareForRead(const void* image_data, size_t image_length) {
   // Prepare to read from a string.
-  JpegStringReader(jpeg_decompress_, image_data, image_length);
+  JpegStringReader(jpeg_decompress_.get(), image_data, image_length);
 }
 
 JpegScanlineReader::JpegScanlineReader(MessageHandler* handler)
@@ -185,6 +177,11 @@ ScanlineStatus JpegScanlineReader::InitializeWithStatus(const void* image_data,
     Reset();
   } else if (jpeg_env_ == nullptr) {
     jpeg_env_ = static_cast<JpegEnv*>(malloc(sizeof(JpegEnv)));
+    if (jpeg_env_ == nullptr) {
+      return PS_LOGGED_STATUS(PS_LOG_ERROR, message_handler_,
+                              SCANLINE_STATUS_MEMORY_ERROR, SCANLINE_JPEGREADER,
+                              "Failed to allocate memory for JpegEnv.");
+    }
     memset(jpeg_env_, 0, sizeof(JpegEnv));
   }
 
@@ -228,7 +225,12 @@ ScanlineStatus JpegScanlineReader::InitializeWithStatus(const void* image_data,
   } else {
     jpeg_decompress->out_color_space = JCS_RGB;
     pixel_format_ = RGB_888;
-    bytes_per_row_ = 3 * width_;
+    if (!CheckedMulSize(size_t{3}, width_, &bytes_per_row_)) {
+      Reset();
+      return PS_LOGGED_STATUS(PS_LOG_ERROR, message_handler_,
+                              SCANLINE_STATUS_INTERNAL_ERROR,
+                              SCANLINE_JPEGREADER, "image width overflow");
+    }
   }
   is_progressive_ = jpeg_decompress->progressive_mode;
 
@@ -260,6 +262,12 @@ ScanlineStatus JpegScanlineReader::ReadNextScanlineWithStatus(
   jpeg_decompress_struct* jpeg_decompress = &(jpeg_env_->jpeg_decompress_);
   if (row_ == 0) {
     row_pointer_[0] = static_cast<JSAMPLE*>(malloc(bytes_per_row_));
+    if (row_pointer_[0] == nullptr) {
+      Reset();
+      return PS_LOGGED_STATUS(PS_LOG_ERROR, message_handler_,
+                              SCANLINE_STATUS_MEMORY_ERROR, SCANLINE_JPEGREADER,
+                              "Failed to allocate scanline buffer.");
+    }
     jpeg_start_decompress(jpeg_decompress);
   }
 

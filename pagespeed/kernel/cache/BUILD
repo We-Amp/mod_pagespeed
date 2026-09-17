@@ -6,6 +6,7 @@ cc_library(
     name = "cache",
     srcs = [
         "async_cache.cc",
+        "async_write_behind_cache.cc",
         "cache_batcher.cc",
         "cache_key_prepender.cc",
         "cache_stats.cc",
@@ -13,7 +14,6 @@ cc_library(
         "delay_cache.cc",
         "delegating_cache_callback.cc",
         "fallback_cache.cc",
-        "file_cache.cc",
         "in_memory_cache.cc",
         "key_value_codec.cc",
         "lru_cache.cc",
@@ -24,6 +24,7 @@ cc_library(
     ],
     hdrs = [
         "async_cache.h",
+        "async_write_behind_cache.h",
         "cache_batcher.h",
         "cache_interface.h",
         "cache_key_prepender.h",
@@ -32,7 +33,6 @@ cc_library(
         "delay_cache.h",
         "delegating_cache_callback.h",
         "fallback_cache.h",
-        "file_cache.h",
         "in_memory_cache.h",
         "key_value_codec.h",
         "lru_cache.h",
@@ -47,5 +47,19 @@ cc_library(
         "//pagespeed/kernel/base:pagespeed_base",
         "//pagespeed/kernel/thread",
         "//pagespeed/kernel/util",
+    ],
+)
+
+# CycloneCache - high-performance disk cache using the Cyclone library.
+# This is a separate target because it depends on the C++23 Cyclone wrapper.
+cc_library(
+    name = "cyclone_cache",
+    srcs = ["cyclone_cache.cc"],
+    hdrs = ["cyclone_cache.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":cache",
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/kernel/cache/cyclone:cyclone_wrapper",
     ],
 )

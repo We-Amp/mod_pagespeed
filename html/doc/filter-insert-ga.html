@@ -1,3 +1,21 @@
+<!-- =======================================================================
+     ARCHIVE - DO NOT EDIT.
+
+     This is the mod_pagespeed 1.0 documentation as it shipped, published
+     unchanged as the /1.0/ archive on modpagespeed.com. It describes what
+     that release did, which is why it is NOT updated when behaviour
+     changes: an archive that tracks the current product is a record of
+     nothing.
+
+     If you got here by grepping for prose that is now out of date, the
+     change belongs in the pagespeed-optimizer repository instead:
+
+         2.0    website/src/content/docs/       -> modpagespeed.com/docs/
+         1.15   website/src/content/docs-1.1/   -> modpagespeed.com/1.1/docs/
+
+     CI enforces this. tools/ci/check_legacy_docs.sh fails any pull request
+     that changes a file under html/.
+     ======================================================================= -->
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
 or more contributor license agreements.  See the NOTICE file
@@ -30,7 +48,14 @@ under the License.
   <div id=content>
 <h1>Insert Google Analytics</h1>
 
-
+<p class="note">
+<strong>Deprecated.</strong>  This filter injects a Universal Analytics
+(<code>ga.js</code>/<code>analytics.js</code>) tracking snippet.  Universal
+Analytics was discontinued in July 2023, so the injected tracker reports to a
+dead service; no GA4 replacement snippet is generated.  The filter is kept only
+for configuration compatibility &mdash; enabling it emits a warning, and
+experiments no longer auto-enable it.  Use your own analytics instead.
+</p>
 
 <h2>Configuration</h2>
 <p>
@@ -67,8 +92,9 @@ configuration file matches the one used on your site.
 </p>
 <p>
 This filter does <em>not</em> require
-the <code>make_google_analytics_async</code> filter.  The Google Analytics
-snippets inserted by <code>insert_ga</code> are already asynchronous.
+the <code>make_google_analytics_async</code> filter (itself deprecated and now
+a no-op).  The Google Analytics snippets inserted by <code>insert_ga</code> are
+already asynchronous.
 </p>
 <p>
 See <a href="http://modpagespeed.com/insert_ga.html">this example</a> of this

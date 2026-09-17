@@ -118,7 +118,8 @@ class ResourceNamer {
   GoogleString experiment_;
   GoogleString signature_;
 
-  DISALLOW_COPY_AND_ASSIGN(ResourceNamer);
+  ResourceNamer(const ResourceNamer&) = delete;
+  ResourceNamer& operator=(const ResourceNamer&) = delete;
 };
 
 }  // namespace net_instaweb

@@ -160,10 +160,9 @@ DEFINE_bool(in_place_preemptive_rewrite_javascript, true,
             "when configured to use IPRO. If --js_preserve_urls is not set, "
             "this flag has no effect.");
 DEFINE_bool(private_not_vary_for_ie, true,
-            "If set, use Cache-Control: private rather than Vary: Accept when "
-            "serving IPRO resources to IE.  This avoids the need for an "
-            "if-modified-since request from IE, but prevents proxy caching of "
-            "these resources.");
+            "Deprecated and ignored: in-place optimized resources never "
+            "carry a Vary header and are never served as Cache-Control: "
+            "private, so there is nothing left for this flag to control.");
 DEFINE_bool(image_preserve_urls, false,
             "Boolean to indicate whether image"
             "URLs should be preserved.");
@@ -223,7 +222,7 @@ DEFINE_string(shard_domain_map, "",
               "Semicolon-separated list of shard_domain maps. "
               "Each domain-map is of the form master=shard1,shard2,shard3");
 
-DEFINE_int64(lru_cache_size_bytes, 10 * 1024 * 1024, "LRU cache size");
+DEFINE_int64(lru_cache_size_bytes, 10L * 1024 * 1024, "LRU cache size");
 DEFINE_bool(force_caching, false,
             "Ignore caching headers and cache everything.");
 DEFINE_bool(flush_html, false, "Pass fetcher-generated flushes through HTML");
@@ -376,10 +375,6 @@ DEFINE_bool(proactive_resource_freshening, false,
 DEFINE_bool(enable_extended_instrumentation, false,
             "If set to true, additional instrumentation js added to that "
             "page that adds more information to the beacon.");
-
-DEFINE_bool(use_experimental_js_minifier, false,
-            "If set to true, uses the new JsTokenizer-based minifier. "
-            "This option will be removed when that minifier has matured.");
 
 DEFINE_string(blocking_rewrite_key, RewriteOptions::kDefaultBlockingRewriteKey,
               "Enables rewrites to finish before the response is sent to "
@@ -870,10 +865,6 @@ bool RewriteGflags::SetupOptionsOnly(RewriteOptions* options,
   if (WasExplicitlySet("enable_extended_instrumentation")) {
     options->set_enable_extended_instrumentation(
         FLAGS_enable_extended_instrumentation);
-  }
-  if (WasExplicitlySet("use_experimental_js_minifier")) {
-    options->set_use_experimental_js_minifier(
-        FLAGS_use_experimental_js_minifier);
   }
   if (WasExplicitlySet("enable_cache_purge")) {
     options->set_enable_cache_purge(FLAGS_enable_cache_purge);

@@ -37,11 +37,32 @@ pagespeed_cc_test_library(
 
 pagespeed_cc_test(
     name = "sharedmem",
-    srcs = glob(["*_test.cc"]),
+    srcs = glob(
+        ["*_test.cc"],
+        exclude = [
+            # Pthread test doesn't build on Windows.
+            "pthread_shared_mem_test.cc",
+            # Windows test doesn't build on non-Windows.
+            "windows_shared_mem_test.cc",
+        ],
+    ),
     shard_count = 1,
     deps = [
         "//pagespeed/kernel/cache",
         "//pagespeed/kernel/sharedmem",
+        "//test/pagespeed/kernel/sharedmem:test_base",
+    ],
+)
+
+# Windows-specific shared memory test
+pagespeed_cc_test(
+    name = "windows_sharedmem",
+    srcs = ["windows_shared_mem_test.cc"],
+    shard_count = 1,
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        "//pagespeed/kernel/sharedmem",
+        "//pagespeed/kernel/util",
         "//test/pagespeed/kernel/sharedmem:test_base",
     ],
 )

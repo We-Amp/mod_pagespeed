@@ -22,7 +22,9 @@
 #include "pagespeed/kernel/cache/write_through_cache.h"
 
 #include "pagespeed/kernel/base/basictypes.h"
+#include "pagespeed/kernel/base/mapped_shared_string.h"
 #include "pagespeed/kernel/cache/lru_cache.h"
+#include "test/net/instaweb/http/mapped_backend_cache.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/cache/cache_test_base.h"
 
@@ -46,7 +48,8 @@ class WriteThroughCacheTest : public CacheTestBase {
   }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(WriteThroughCacheTest);
+  WriteThroughCacheTest(const WriteThroughCacheTest&) = delete;
+  WriteThroughCacheTest& operator=(const WriteThroughCacheTest&) = delete;
 };
 
 // Simple flow of putting in an item, getting it, deleting it.
@@ -106,6 +109,45 @@ TEST_F(WriteThroughCacheTest, SizeLimit) {
   CheckGet(&small_cache_, "Name", "Value");
   CheckGet(&write_through_cache_, "Name", "Value");
   CheckGet(&big_cache_, "Name", "Value");
+}
+
+// When an L2 hit is delivered as a memory-mapped zero-copy view (emulating
+// CycloneCache) whose borrow has torn under the read, the value must still be
+// delivered to the caller, but it must NOT be promoted into L1 -- a torn copy
+// in L1 would be re-served until eviction.
+TEST_F(WriteThroughCacheTest, MappedPromotionSkippedOnTorn) {
+  MappedBackendCache mapped_l2(&big_cache_);
+  WriteThroughCache wtc(&small_cache_, &mapped_l2);
+
+  // Seed only L2 (the wrapper forwards Put straight to big_cache_); L1 empty.
+  CheckPut(&big_cache_, "Name", "Value");
+  CheckNotFound(&small_cache_, "Name");
+
+  // Emulate a wrap committing over the borrow between the read and the verify.
+  mapped_l2.set_strict_verdict(LeaseRenewal::kTorn);
+
+  // The L2 result is delivered to the caller unchanged...
+  CheckGet(&wtc, "Name", "Value");
+  EXPECT_LE(1, mapped_l2.mapped_hits());
+  // ...but the torn borrow was not promoted into L1.
+  CheckNotFound(&small_cache_, "Name");
+}
+
+// The clean-borrow counterpart: a live, unchallenged mapped L2 hit is copied
+// via the verified primitive and promoted into L1 as owned bytes.
+TEST_F(WriteThroughCacheTest, MappedPromotionHappensWhenClean) {
+  MappedBackendCache mapped_l2(&big_cache_);
+  WriteThroughCache wtc(&small_cache_, &mapped_l2);
+
+  CheckPut(&big_cache_, "Name", "Value");
+  CheckNotFound(&small_cache_, "Name");
+
+  // Default verdict is kOk (a live lease).
+  CheckGet(&wtc, "Name", "Value");
+  EXPECT_LE(1, mapped_l2.mapped_hits());
+  // The verified copy was promoted into L1, and it survives independently of
+  // the borrowed region.
+  CheckGet(&small_cache_, "Name", "Value");
 }
 
 TEST_F(WriteThroughCacheTest, FindShadowedValid) {

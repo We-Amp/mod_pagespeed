@@ -111,13 +111,14 @@ class LRUCache : public CacheInterface {
       return true;
     }
   };
-  typedef LRUCacheBase<SharedString, SharedStringHelper> Base;
+  using Base = LRUCacheBase<SharedString, SharedStringHelper>;
 
   Base base_;
   bool is_healthy_;
   SharedStringHelper value_helper_;
 
-  DISALLOW_COPY_AND_ASSIGN(LRUCache);
+  LRUCache(const LRUCache&) = delete;
+  LRUCache& operator=(const LRUCache&) = delete;
 };
 
 }  // namespace net_instaweb

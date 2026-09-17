@@ -7,9 +7,9 @@ licenses(["notice"])  # Apache 2
 
 pagespeed_cc_benchmark(
     name = "cache",
-    srcs = glob(["*.cc"]),
+    srcs = ["disk_cache_speed_test.cc"],
     deps = [
-        "//benchmark",
         "//pagespeed/kernel/cache",
+        "//pagespeed/kernel/cache:cyclone_cache",
     ],
 )

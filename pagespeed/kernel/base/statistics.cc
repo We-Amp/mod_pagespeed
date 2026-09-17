@@ -42,6 +42,12 @@ const double kBarHeightPerBucket = 20;
 // out of total counts.
 // The width of a bucket is percentage_of_bucket_value * kBarWidthTotal.
 const double kBarWidthTotal = 400;
+// Minimum number of samples required before percentile estimates
+// (median/90/95/99) are meaningful. Below this the estimate degrades to a
+// near-minimum bucket bound (e.g. -5000 on a negative-bucket latency
+// histogram), so we omit the percentile cells rather than emit that no-data
+// value to any consumer of the histogram table.
+const double kMinSamplesForPercentiles = 5;
 }  // namespace
 
 class MessageHandler;
@@ -217,8 +223,8 @@ const char kHistogramRowFormat[] =
     "        <td><label><input type='radio' name='choose_histogram'%s\n"
     "                   onchange='setHistogram(%d)'>%s</label></td>\n"
     "        <td>%.0f</td><td>%.1f</td><td>%.1f</td>\n"  // count, avg, stddev
-    "        <td>%.0f</td><td>%.0f</td><td>%.0f</td>\n"  // min, median, max
-    "        <td>%.0f</td><td>%.0f</td><td>%.0f</td>\n"  // 90%, 95%, 99%
+    "        <td>%.0f</td><td>%s</td><td>%.0f</td>\n"    // min, median, max
+    "        <td>%s</td><td>%s</td><td>%s</td>\n"        // 90%, 95%, 99%
     "     </tr>\n";
 
 const char kHistogramEpilog[] =
@@ -316,12 +322,23 @@ void Statistics::RenderHistograms(Writer* writer, MessageHandler* handler) {
 
 GoogleString Histogram::HtmlTableRow(const GoogleString& title, int index) {
   ScopedMutex hold(lock());
+  // Percentile estimates need a meaningful number of samples; with only a
+  // handful they collapse onto a near-minimum bucket bound (e.g. -5000) that
+  // is not a real latency/size. Below the threshold we render the four
+  // percentile cells (median/90/95/99) empty, so no consumer of this table --
+  // the admin console or the raw /histograms output -- sees a no-data value.
+  const bool show_percentiles = CountInternal() >= kMinSamplesForPercentiles;
+  auto percentile_cell = [&](double perc) -> GoogleString {
+    return show_percentiles ? absl::StrFormat("%.0f", PercentileInternal(perc))
+                            : GoogleString();
+  };
   return absl::StrFormat(
       kHistogramRowFormat, index, (index == 0) ? " selected" : "", index,
       title.c_str(), CountInternal(), AverageInternal(),
-      StandardDeviationInternal(), MinimumInternal(), PercentileInternal(50),
-      MaximumInternal(), PercentileInternal(90), PercentileInternal(95),
-      PercentileInternal(99));
+      StandardDeviationInternal(), MinimumInternal(),
+      percentile_cell(50).c_str(), MaximumInternal(),
+      percentile_cell(90).c_str(), percentile_cell(95).c_str(),
+      percentile_cell(99).c_str());
 }
 
 void Statistics::RenderTimedVariables(Writer* writer,
@@ -376,7 +393,7 @@ int64 Statistics::LookupValue(StringPiece stat_name) {
   if (tvar != nullptr) {
     return tvar->Get(TimedVariable::START);
   }
-  LOG(FATAL) << "Could not find stat: " << stat_name;
+  LOG(ERROR) << "Could not find stat: " << stat_name << " (returning 0)";
   return 0;
 }
 

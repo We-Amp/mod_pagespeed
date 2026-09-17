@@ -20,9 +20,10 @@
 #ifndef PAGESPEED_KERNEL_SHAREDMEM_SHARED_MEM_STATISTICS_TEST_BASE_H_
 #define PAGESPEED_KERNEL_SHAREDMEM_SHARED_MEM_STATISTICS_TEST_BASE_H_
 
+#include <memory>
+
 #include "pagespeed/kernel/base/abstract_shared_mem.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/sharedmem/shared_mem_statistics.h"
@@ -57,6 +58,7 @@ class SharedMemStatisticsTestBase : public testing::Test {
   void TestSetReturningPrevious();
   void TestHistogram();
   void TestHistogramRender();
+  void TestHistogramPercentileSmallSample();
   void TestHistogramNoExtraClear();
   void TestHistogramExtremeBuckets();
   void TestTimedVariableEmulation();
@@ -92,7 +94,8 @@ class SharedMemStatisticsTestBase : public testing::Test {
   std::unique_ptr<AbstractSharedMem> shmem_runtime_;
   std::unique_ptr<MockTimer> timer_;
 
-  DISALLOW_COPY_AND_ASSIGN(SharedMemStatisticsTestBase);
+  SharedMemStatisticsTestBase(const SharedMemStatisticsTestBase&) = delete;
+  SharedMemStatisticsTestBase& operator=(const SharedMemStatisticsTestBase&) = delete;
 };
 
 template <typename ConcreteTestEnv>
@@ -132,6 +135,11 @@ TYPED_TEST_P(SharedMemStatisticsTestTemplate, TestHistogramRender) {
   SharedMemStatisticsTestBase::TestHistogramRender();
 }
 
+TYPED_TEST_P(SharedMemStatisticsTestTemplate,
+             TestHistogramPercentileSmallSample) {
+  SharedMemStatisticsTestBase::TestHistogramPercentileSmallSample();
+}
+
 TYPED_TEST_P(SharedMemStatisticsTestTemplate, TestHistogramExtremeBuckets) {
   SharedMemStatisticsTestBase::TestHistogramExtremeBuckets();
 }
@@ -144,12 +152,11 @@ TYPED_TEST_P(SharedMemStatisticsTestTemplate, TestTimedVariableEmulation) {
   SharedMemStatisticsTestBase::TestTimedVariableEmulation();
 }
 
-REGISTER_TYPED_TEST_SUITE_P(SharedMemStatisticsTestTemplate, TestCreate,
-                            TestSet, TestClear, TestAdd,
-                            TestSetReturningPrevious, TestHistogram,
-                            TestHistogramRender, TestHistogramNoExtraClear,
-                            TestHistogramExtremeBuckets,
-                            TestTimedVariableEmulation);
+REGISTER_TYPED_TEST_SUITE_P(
+    SharedMemStatisticsTestTemplate, TestCreate, TestSet, TestClear, TestAdd,
+    TestSetReturningPrevious, TestHistogram, TestHistogramRender,
+    TestHistogramPercentileSmallSample, TestHistogramNoExtraClear,
+    TestHistogramExtremeBuckets, TestTimedVariableEmulation);
 
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(SharedMemStatisticsTestTemplate);
 

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2015 Google Inc.
+
 # This Makefile is used to help drive the installation of mod_pagespeed into
 # an Apache installation.
 #
@@ -56,7 +59,6 @@ APACHE_HTTPS_DOMAIN   = localhost
 APACHE_PORT           = 80
 APACHE_SECONDARY_PORT = 8087
 APACHE_TERTIARY_PORT  = 8088
-CONTROLLER_PORT       = 8090
 RCPORT                = 8091
 
 SSL_CERT_DIR          = /etc/ssl/certs
@@ -210,7 +212,7 @@ TESTS=REDIS MEMCACHED STRESS REWRITE LOADTEST PROXY SLURP SHARED_MEM_LOCKS \
       IPRO_PRESERVE_LOADTEST MEMCACHED_LOADTEST REDIS_LOADTEST \
       PURGING_LOADTEST SPELING GZIP EXPERIMENT_GA EXPERIMENT_NO_GA HTTPS \
       ALL_DIRECTIVES PER_VHOST_STATS NO_PER_VHOST_STATS STATS_LOGGING EXTCACHE \
-      PROCESS_SCOPE VALGRIND REMOTE_CONFIG CONTROLLER
+      PROCESS_SCOPE VALGRIND REMOTE_CONFIG
 
 ifeq ($(REDIS_TEST),1)
   EXTCACHE_TEST=1
@@ -257,7 +259,6 @@ $(STAGING_DIR)/pagespeed.conf : common/pagespeed.conf.template debug.conf.templa
 	    -e "s!@@APACHE_MODULES@@!$(APACHE_MODULES)!g" \
 	    -e "s!@@APACHE_SECONDARY_PORT@@!$(APACHE_SECONDARY_PORT)!g" \
 	    -e "s!@@APACHE_TERTIARY_PORT@@!$(APACHE_TERTIARY_PORT)!g" \
-	    -e "s!@@CONTROLLER_PORT@@!$(CONTROLLER_PORT)!g" \
 	    -e "s!@@PAGESPEED-TEST-HOST@@!$(PAGESPEED_TEST_HOST)!g" \
 	    -e "s!@@MOD_PAGESPEED_CACHE@@!$(MOD_PAGESPEED_CACHE)!g" \
 	    -e "s!@@MOD_PAGESPEED_LOG@@!$(MOD_PAGESPEED_LOG)!g" \
@@ -411,7 +412,7 @@ enable_ports_and_file_access :
 	if [[ -x /usr/sbin/semanage && ! -f /tmp/semanage.set ]]; then \
 	  set -x; \
 	  for port in 1023 8081 8082 $(APACHE_SECONDARY_PORT) \
-	      $(APACHE_TERTIARY_PORT) $(CONTROLLER_PORT); do \
+	      $(APACHE_TERTIARY_PORT); do \
 	      sudo /usr/sbin/semanage port -a -t http_port_t -p tcp $$port || \
 	      sudo /usr/sbin/semanage port -m -t http_port_t -p tcp $$port; \
 	  done; \

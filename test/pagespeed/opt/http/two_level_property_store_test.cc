@@ -25,7 +25,6 @@
 #include "base/logging.h"
 #include "pagespeed/kernel/base/cache_interface.h"
 #include "pagespeed/kernel/base/callback.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/cache/delay_cache.h"
 #include "pagespeed/kernel/cache/lru_cache.h"
@@ -167,7 +166,8 @@ class TwoLevelPropertyStoreTest : public testing::Test {
   std::unique_ptr<MockPropertyPage> page_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(TwoLevelPropertyStoreTest);
+  TwoLevelPropertyStoreTest(const TwoLevelPropertyStoreTest&) = delete;
+  TwoLevelPropertyStoreTest& operator=(const TwoLevelPropertyStoreTest&) = delete;
 };
 
 TEST_F(TwoLevelPropertyStoreTest, TestBothCacheMiss) {

@@ -19,16 +19,68 @@
 
 #include "pagespeed/apache/apache_writer.h"
 
+#include "apr_buckets.h"  // NOLINT
 #include "apr_strings.h"  // for apr_pstrdup    // NOLINT
 #include "base/logging.h"
 #include "http_protocol.h"  // NOLINT
 #include "net/instaweb/http/public/async_fetch.h"
+#include "pagespeed/apache/apache_mmap_bucket.h"
 #include "pagespeed/apache/header_util.h"
+#include "pagespeed/kernel/base/mapped_shared_string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/response_headers.h"
+#include "util_filter.h"  // NOLINT - for ap_pass_brigade
 
 namespace net_instaweb {
+
+namespace {
+
+// Output filters known to hand DATA buckets to the network without
+// transforming, re-slicing, or retaining raw pointers into their bytes
+// across blocking waits: the stock httpd 2.4 straight-line serve chain.
+// Everything else (deflate/brotli, ssl, http2, substitute, includes,
+// ratelimit, third-party filters) disables aliasing, fail-closed.  httpd
+// stores registered filter names lowercased; compare case-insensitively
+// anyway.
+const char* const kVerbatimOutputFilters[] = {
+    "byterange",         // partitions via bucket split(), never reads.  In
+                         // practice unreachable for aliasing: the Range
+                         // check in RequestServesBodyVerbatim() already
+                         // forces the copy path for any ranged request;
+                         // listed so the ever-present filter does not
+                         // disqualify plain requests.
+    "chunk",             // brackets data buckets with metadata only.
+    "content_length",    // counts known-length buckets without reading.
+    "core",              // the send engine; re-reads before every writev.
+    "http_header",       // emits headers, passes body through.
+    "http_outerror",     // error bookkeeping passthrough.
+    "log_input_output",  // mod_logio byte counting, no data access.
+    "logio_ttfb_out",    // mod_logio first-byte timestamp passthrough.
+    "old_write",         // ap_rwrite shim; flushes its own buffer, then
+                         // passes foreign brigades through untouched.
+    "reqtimeout",        // mod_reqtimeout's output filter (reqtimeout_eor,
+                         // httpd 2.4 modules/filters/mod_reqtimeout.c):
+                         // input-timeout bookkeeping only.  It looks at
+                         // whether the brigade's LAST bucket is the EOR
+                         // metadata bucket (to reset its per-connection
+                         // timeout stage) and then ap_pass_brigade()s the
+                         // brigade on untouched -- it never reads,
+                         // re-slices, or retains data buckets.  Enabled by
+                         // default on Debian/Ubuntu; omitting it disabled
+                         // aliasing on every stock install.
+};
+
+bool IsVerbatimOutputFilter(const char* name) {
+  for (size_t i = 0; i < arraysize(kVerbatimOutputFilters); ++i) {
+    if (StringCaseEqual(name, kVerbatimOutputFilters[i])) {
+      return true;
+    }
+  }
+  return false;
+}
+
+}  // namespace
 
 ApacheWriter::ApacheWriter(request_rec* r, ThreadSystem* thread_system)
     : request_(r),
@@ -54,6 +106,112 @@ bool ApacheWriter::Flush(MessageHandler* handler) {
   DCHECK(headers_out_);
   ap_rflush(request_);
   return true;
+}
+
+void ApacheWriter::SettleOutputFilters() {
+  DCHECK(apache_request_thread_->IsCurrentThread());
+  DCHECK(headers_out_);
+  conn_rec* c = request_->connection;
+  if (c == nullptr) {
+    return;  // Nothing to settle; the eligibility walk fails closed.
+  }
+  apr_bucket_brigade* bb = apr_brigade_create(request_->pool, c->bucket_alloc);
+  // The return status is deliberately ignored: no body bytes were sent,
+  // and a filter that errors on an empty brigade will error again on the
+  // body pass, where the serve's normal failure handling applies.
+  ap_pass_brigade(request_->output_filters, bb);
+  apr_brigade_destroy(bb);
+}
+
+bool ApacheWriter::RequestServesBodyVerbatim(GoogleString* blocker) const {
+  request_rec* r = request_;
+  if (r->main != nullptr || r->prev != nullptr || r->next != nullptr) {
+    if (blocker != nullptr) {
+      *blocker = "subrequest or internal-redirect chain";
+    }
+    return false;
+  }
+  if (r->header_only) {
+    if (blocker != nullptr) {
+      *blocker = "header-only request";
+    }
+    return false;
+  }
+  if (r->connection == nullptr) {
+    if (blocker != nullptr) {
+      *blocker = "no connection";
+    }
+    return false;
+  }
+  if (apr_table_get(r->headers_in, "Range") != nullptr) {
+    if (blocker != nullptr) {
+      *blocker = "Range request";  // The byterange filter would re-slice.
+    }
+    return false;
+  }
+  // Walk the output chain: the request-level list links onward into the
+  // connection-level filters, ending at the core network filter.  Every
+  // hop must be a known verbatim pass-through; ssl / http2 / deflate /
+  // anything unrecognized disables aliasing (fail-closed).
+  for (ap_filter_t* f = r->output_filters; f != nullptr; f = f->next) {
+    if (f->frec == nullptr || f->frec->name == nullptr ||
+        !IsVerbatimOutputFilter(f->frec->name)) {
+      if (blocker != nullptr) {
+        *blocker = StrCat("output filter '",
+                          (f->frec != nullptr && f->frec->name != nullptr)
+                              ? f->frec->name
+                              : "(unnamed)",
+                          "' is not a known verbatim pass-through");
+      }
+      return false;
+    }
+  }
+  return true;
+}
+
+bool ApacheWriter::WriteMappedAliased(const StringPiece& span,
+                                      const MappedSharedString& pin,
+                                      Variable* copied_out_stat,
+                                      Variable* renew_fail_stat,
+                                      MessageHandler* handler) {
+  DCHECK(apache_request_thread_->IsCurrentThread());
+  DCHECK(headers_out_);
+  conn_rec* c = request_->connection;
+  apr_bucket_brigade* bb = apr_brigade_create(request_->pool, c->bucket_alloc);
+  apr_bucket* b = CreateMmapAliasBucket(span, pin, copied_out_stat,
+                                        renew_fail_stat, c->bucket_alloc);
+  if (b == nullptr) {
+    AbortConnection();
+    return false;
+  }
+  APR_BRIGADE_INSERT_TAIL(bb, b);
+  // Synchronous on the request thread.  Downstream, the bucket's read()
+  // barrier revalidates the lease before every writev burst and the
+  // setaside() hook copies out anything parked past this pass; the pin is
+  // released by the bucket's destroy() when the last reference dies.
+  const apr_status_t rv = ap_pass_brigade(request_->output_filters, bb);
+  // Filters must consume the brigade (send, buffer, or setaside).  Buckets
+  // left behind mean some downstream hop bailed without an error httpd
+  // propagated -- the swallowed-failure class -- and those bytes will never
+  // reach the client; treat it as a failed serve rather than report success
+  // with a silently truncated body.
+  const bool leftover = (rv == APR_SUCCESS) && !APR_BRIGADE_EMPTY(bb);
+  apr_brigade_destroy(bb);
+  if (rv != APR_SUCCESS || leftover) {
+    // Either a downstream write error or the barrier detected a torn
+    // borrow.  The Content-Length promise cannot be met any more; abort
+    // the connection rather than let a truncated-or-corrupt body pass as
+    // complete.
+    AbortConnection();
+    return false;
+  }
+  return true;
+}
+
+void ApacheWriter::AbortConnection() {
+  if (request_->connection != nullptr) {
+    request_->connection->aborted = 1;
+  }
 }
 
 void ApacheWriter::OutputHeaders(ResponseHeaders* response_headers) {

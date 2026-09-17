@@ -20,9 +20,10 @@
 #ifndef PAGESPEED_KERNEL_UTIL_NONCE_GENERATOR_H_
 #define PAGESPEED_KERNEL_UTIL_NONCE_GENERATOR_H_
 
+#include <memory>
+
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 
 namespace net_instaweb {
 
@@ -44,7 +45,8 @@ class NonceGenerator {
  private:
   std::unique_ptr<AbstractMutex> mutex_;
 
-  DISALLOW_COPY_AND_ASSIGN(NonceGenerator);
+  NonceGenerator(const NonceGenerator&) = delete;
+  NonceGenerator& operator=(const NonceGenerator&) = delete;
 };
 
 }  // namespace net_instaweb

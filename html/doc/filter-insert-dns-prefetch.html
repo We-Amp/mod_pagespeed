@@ -1,3 +1,21 @@
+<!-- =======================================================================
+     ARCHIVE - DO NOT EDIT.
+
+     This is the mod_pagespeed 1.0 documentation as it shipped, published
+     unchanged as the /1.0/ archive on modpagespeed.com. It describes what
+     that release did, which is why it is NOT updated when behaviour
+     changes: an archive that tracks the current product is a record of
+     nothing.
+
+     If you got here by grepping for prose that is now out of date, the
+     change belongs in the pagespeed-optimizer repository instead:
+
+         2.0    website/src/content/docs/       -> modpagespeed.com/docs/
+         1.15   website/src/content/docs-1.1/   -> modpagespeed.com/1.1/docs/
+
+     CI enforces this. tools/ci/check_legacy_docs.sh fails any pull request
+     that changes a file under html/.
+     ======================================================================= -->
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
 or more contributor license agreements.  See the NOTICE file
@@ -59,9 +77,11 @@ browser to pre-resolve DNS for resources on the page.
 
 <h2>Operation</h2>
 <p>
-This filter inserts the tag <code>&lt;link rel="dns-prefetch"&gt;</code> (or
-<code>&lt;link rel="prefetch"&gt;</code> for IE9) in the HEAD section, for all
-domains present in the HTML document.
+This filter inserts connection warm-up hint tags in the HEAD section, for all
+domains present in the HTML document. The first two domains get a
+<code>&lt;link rel="preconnect"&gt;</code> tag, which warms up a full
+connection; the remaining domains get the cheaper
+<code>&lt;link rel="dns-prefetch"&gt;</code> tag, which only pre-resolves DNS.
 </p>
 
 <h2>Example</h2>
@@ -87,8 +107,8 @@ and after rewriting:
 <pre class="prettyprint">
 &lt;html&gt;
   &lt;head&gt;
-    &lt;link rel="dns-prefetch" href="//www.domain1.com"&gt;
-    &lt;link rel="dns-prefetch" href="//www.domain2.com"&gt;
+    &lt;link rel="preconnect" href="https://www.domain1.com"&gt;
+    &lt;link rel="preconnect" href="https://www.domain2.com"&gt;
   &lt;/head&gt;
   &lt;body&gt;
     &lt;img src="www.domain1.com/image1.jpeg"&gt;

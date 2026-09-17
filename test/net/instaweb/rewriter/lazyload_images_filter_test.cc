@@ -26,7 +26,8 @@
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/server_context.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
+#include "pagespeed/kernel/base/escaping.h"
+#include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/http/http_names.h"
@@ -38,6 +39,16 @@
 #include "test/pagespeed/kernel/http/user_agent_matcher_test_base.h"
 
 namespace net_instaweb {
+
+namespace {
+
+// A user agent modern enough to support the native loading="lazy" attribute
+// (Chromium >= 77); auto mode selects native for it.
+const char kChrome120UserAgent[] =
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/120.0.0.0 Safari/537.36";
+
+}  // namespace
 
 class LazyloadImagesFilterTest : public RewriteTestBase {
  protected:
@@ -51,10 +62,18 @@ class LazyloadImagesFilterTest : public RewriteTestBase {
   }
 
   virtual void InitLazyloadImagesFilter(bool debug) {
+    // Most tests in this file predate LazyloadImagesSkipFirst; disable the
+    // LCP protection so they exercise the unskipped behavior. Dedicated
+    // tests cover the skip-first logic.
+    InitLazyloadImagesFilterWithSkipFirst(debug, 0);
+  }
+
+  void InitLazyloadImagesFilterWithSkipFirst(bool debug, int skip_first) {
     if (debug) {
       options()->EnableFilter(RewriteOptions::kDebug);
     }
     options()->DisallowTroublesomeResources();
+    options()->set_lazyload_images_skip_first(skip_first);
     lazyload_images_filter_ =
         std::make_unique<LazyloadImagesFilter>(rewrite_driver());
     rewrite_driver()->AddFilter(lazyload_images_filter_.get());
@@ -78,6 +97,10 @@ class LazyloadImagesFilterTest : public RewriteTestBase {
     EXPECT_EQ(is_blacklisted,
               rewriter_info.rewrite_resource_info().is_blacklisted());
     EXPECT_EQ(is_critical, rewriter_info.rewrite_resource_info().is_critical());
+  }
+
+  int64 StatValue(const char* name) {
+    return statistics()->GetVariable(name)->Get();
   }
 
   GoogleString blank_image_src_;
@@ -113,8 +136,7 @@ TEST_F(LazyloadImagesFilterTest, SingleHead) {
       "<img src=\"1.jpg\" onload=\"blah();\" />"
       "<img src=\"1.jpg\" class=\"123 dfcg-metabox\" />"
       "</body>",
-      StrCat("<head>", GetLazyloadScriptHtml(),
-             "</head><body><img/>"
+      StrCat("<head></head><body><img/>"
              "<img src=\"\"/>"
              "<noscript>"
              "<img src=\"noscript.jpg\"/>"
@@ -125,6 +147,7 @@ TEST_F(LazyloadImagesFilterTest, SingleHead) {
              "<marquee>"
              "<img src=\"marquee.jpg\"/>"
              "</marquee>",
+             GetLazyloadScriptHtml(),
              GenerateRewrittenImageTag("img", "1.jpg", ""),
              "<img src=\"1.jpg\" data-pagespeed-no-defer />"
              "<img src=\"1.jpg\" pagespeed_no_defer />"
@@ -148,6 +171,8 @@ TEST_F(LazyloadImagesFilterTest, SingleHead) {
   ExpectLogRecord(
       3, RewriterApplication::NOT_APPLIED /* img with src 1.jpg and onload */,
       false, false);
+  EXPECT_EQ(2, StatValue(LazyloadImagesFilter::kLazyloadImagesApplied));
+  EXPECT_EQ(0, StatValue(LazyloadImagesFilter::kLazyloadImagesNativeApplied));
 }
 
 TEST_F(LazyloadImagesFilterTest, Blacklist) {
@@ -164,9 +189,9 @@ TEST_F(LazyloadImagesFilterTest, Blacklist) {
 
   ValidateExpected(
       "lazyload_images", input_html,
-      StrCat("<head>", GetLazyloadScriptHtml(),
-             "</head><body>"
+      StrCat("<head></head><body>"
              "<img src=\"http://www.1.com/blacklist.jpg\"/>",
+             GetLazyloadScriptHtml(),
              GenerateRewrittenImageTag("img", "http://www.1.com/img1", ""),
              GenerateRewrittenImageTag("img", "img2", ""),
              GetLazyloadPostscriptHtml(), "</body>"));
@@ -204,9 +229,9 @@ TEST_F(LazyloadImagesFilterTest, CriticalImages) {
 
   ValidateExpected(
       "lazyload_images", input_html,
-      StrCat("<head>", GetLazyloadScriptHtml(),
-             "</head><body>"
+      StrCat("<head></head><body>"
              "<img src=\"http://www.1.com/critical\"/>",
+             GetLazyloadScriptHtml(),
              GenerateRewrittenImageTag("img", "http://www.1.com/critical2", ""),
              "<img src=\"critical3\"/>"
              "<img src=\"",
@@ -218,6 +243,8 @@ TEST_F(LazyloadImagesFilterTest, CriticalImages) {
   ExpectLogRecord(3, RewriterApplication::NOT_APPLIED, false, true);
   EXPECT_EQ(-1, logging_info()->num_html_critical_images());
   EXPECT_EQ(-1, logging_info()->num_css_critical_images());
+  EXPECT_EQ(3,
+            StatValue(LazyloadImagesFilter::kLazyloadImagesSkippedCritical));
   rewrite_driver_->log_record()->WriteLog();
   for (int i = 0; i < logging_info()->rewriter_stats_size(); i++) {
     if (logging_info()->rewriter_stats(i).id() == "ll" &&
@@ -248,9 +275,9 @@ TEST_F(LazyloadImagesFilterTest, SingleHeadLoadOnOnload) {
                    "<body>"
                    "<img src=\"1.jpg\" />"
                    "</body>",
-                   StrCat("<head>", GetLazyloadScriptHtml(),
-                          "</head>"
+                   StrCat("<head></head>"
                           "<body>",
+                          GetLazyloadScriptHtml(),
                           GenerateRewrittenImageTag("img", "1.jpg", ""),
                           GetLazyloadPostscriptHtml(), "</body>"));
 }
@@ -258,19 +285,15 @@ TEST_F(LazyloadImagesFilterTest, SingleHeadLoadOnOnload) {
 // Verify that lazyload_images does not get applied on image elements that have
 // an onload handler defined for them whose value does not match the
 // CriticalImagesBeaconFilter::kImageOnloadCode, indicating that this is
-// not an onload attribute added by PageSpeed.
+// not an onload attribute added by PageSpeed. Since no image is rewritten,
+// no loader script is injected either.
 TEST_F(LazyloadImagesFilterTest, NoLazyloadImagesWithOnloadAttribute) {
   InitLazyloadImagesFilter(false);
-  ValidateExpected("lazyload_images",
-                   "<head></head>"
-                   "<body>"
-                   "<img src=\"1.jpg\" onload=\"do_something();\"/>"
-                   "</body>",
-                   StrCat("<head>", GetLazyloadScriptHtml(),
-                          "</head>"
-                          "<body>"
-                          "<img src=\"1.jpg\" onload=\"do_something();\"/>"
-                          "</body>"));
+  ValidateNoChanges("lazyload_images",
+                    "<head></head>"
+                    "<body>"
+                    "<img src=\"1.jpg\" onload=\"do_something();\"/>"
+                    "</body>");
 }
 
 // Verify that lazyload_images gets applied on image elements that have an
@@ -284,9 +307,9 @@ TEST_F(LazyloadImagesFilterTest, LazyloadWithPagespeedAddedOnloadAttribute) {
                           CriticalImagesBeaconFilter::kImageOnloadCode,
                           "\"/>"
                           "</body>"),
-                   StrCat("<head>", GetLazyloadScriptHtml(),
-                          "</head>"
+                   StrCat("<head></head>"
                           "<body>",
+                          GetLazyloadScriptHtml(),
                           GenerateRewrittenImageTag("img", "1.jpg", ""),
                           GetLazyloadPostscriptHtml(), "</body>"));
 }
@@ -304,7 +327,7 @@ TEST_F(LazyloadImagesFilterTest, MultipleBodies) {
       "<img src=\"3.jpg\" />"
       "<script></script>"
       "</body>",
-      StrCat(GetLazyloadScriptHtml(), "<body>",
+      StrCat("<body>", GetLazyloadScriptHtml(),
              GenerateRewrittenImageTag("img", "1.jpg", ""),
              GetLazyloadPostscriptHtml(),
              "</body><body></body><body>"
@@ -321,7 +344,7 @@ TEST_F(LazyloadImagesFilterTest, NoHeadTag) {
                    "<body>"
                    "<img src=\"1.jpg\" />"
                    "</body>",
-                   StrCat(GetLazyloadScriptHtml(), "<body>",
+                   StrCat("<body>", GetLazyloadScriptHtml(),
                           GenerateRewrittenImageTag("img", "1.jpg", ""),
                           GetLazyloadPostscriptHtml(), "</body>"));
 }
@@ -349,56 +372,65 @@ TEST_F(LazyloadImagesFilterTest, CustomImageUrl) {
                    "<body>"
                    "<img src=\"1.jpg\" />"
                    "</body>",
-                   StrCat(GetLazyloadScriptHtml(), "<body>",
+                   StrCat("<body>", GetLazyloadScriptHtml(),
                           GenerateRewrittenImageTag("img", "1.jpg", ""),
                           GetLazyloadPostscriptHtml(), "</body>"));
 }
 
+// The configurable blank image url is spliced into the inline loader script,
+// so it must be escaped as a JS string literal.
+TEST_F(LazyloadImagesFilterTest, BlankImageUrlIsJsEscaped) {
+  GoogleString blank_image_url = "http://blank.com/1\".gif";
+  options()->set_lazyload_images_blank_url(blank_image_url);
+  InitLazyloadImagesFilter(false);
+  Parse("blank_url_escaping",
+        "<head></head><body><img src=\"1.jpg\"></body>");
+  GoogleString escaped;
+  EscapeToJsStringLiteral(blank_image_url, true /* add_quotes */, &escaped);
+  EXPECT_NE(GoogleString::npos, output_buffer_.find(escaped))
+      << "The blank image url should appear JS-escaped in the loader script";
+  EXPECT_EQ(GoogleString::npos,
+            output_buffer_.find(StrCat("\"", blank_image_url, "\"")))
+      << "The raw blank image url must not appear unescaped in a script";
+}
+
 TEST_F(LazyloadImagesFilterTest, DfcgClass) {
   InitLazyloadImagesFilter(false);
-  GoogleString input_html =
-      "<body class=\"dfcg-slideshow\">"
-      "<img src=\"1.jpg\"/>"
-      "<div class=\"dfcg\">"
-      "<img src=\"1.jpg\"/>"
-      "</div>"
-      "</body>";
-  ValidateExpected("DfcgClass", input_html,
-                   StrCat(GetLazyloadScriptHtml(), input_html));
+  ValidateNoChanges("DfcgClass",
+                    "<body class=\"dfcg-slideshow\">"
+                    "<img src=\"1.jpg\"/>"
+                    "<div class=\"dfcg\">"
+                    "<img src=\"1.jpg\"/>"
+                    "</div>"
+                    "</body>");
 }
 
 TEST_F(LazyloadImagesFilterTest, NivoClass) {
   InitLazyloadImagesFilter(false);
-  GoogleString input_html =
-      "<body>"
-      "<div class=\"nivo_sl\">"
-      "<img src=\"1.jpg\"/>"
-      "</div>"
-      "<img class=\"nivo\" src=\"1.jpg\"/>"
-      "</body>";
-  ValidateExpected("NivoClass", input_html,
-                   StrCat(GetLazyloadScriptHtml(), input_html));
+  ValidateNoChanges("NivoClass",
+                    "<body>"
+                    "<div class=\"nivo_sl\">"
+                    "<img src=\"1.jpg\"/>"
+                    "</div>"
+                    "<img class=\"nivo\" src=\"1.jpg\"/>"
+                    "</body>");
 }
 
 TEST_F(LazyloadImagesFilterTest, ClassContainsSlider) {
   InitLazyloadImagesFilter(false);
-  GoogleString input_html =
-      "<body>"
-      "<div class=\"SliderName2\">"
-      "<img src=\"1.jpg\"/>"
-      "</div>"
-      "<img class=\"my_sLiDer\" src=\"1.jpg\"/>"
-      "</body>";
-  ValidateExpected("SliderClass", input_html,
-                   StrCat(GetLazyloadScriptHtml(), input_html));
+  ValidateNoChanges("SliderClass",
+                    "<body>"
+                    "<div class=\"SliderName2\">"
+                    "<img src=\"1.jpg\"/>"
+                    "</div>"
+                    "<img class=\"my_sLiDer\" src=\"1.jpg\"/>"
+                    "</body>");
 }
 
+// With lazy script injection, pages without eligible images stay untouched.
 TEST_F(LazyloadImagesFilterTest, NoImages) {
   InitLazyloadImagesFilter(false);
-  GoogleString input_html = "<head></head><body></body>";
-  ValidateExpected(
-      "NoImages", input_html,
-      StrCat("<head>", GetLazyloadScriptHtml(), "</head><body></body>"));
+  ValidateNoChanges("NoImages", "<head></head><body></body>");
   EXPECT_EQ(0, logging_info()->rewriter_info().size());
 }
 
@@ -418,35 +450,27 @@ TEST_F(LazyloadImagesFilterTest, LazyloadScriptDebug) {
 
 TEST_F(LazyloadImagesFilterTest, LazyloadDisabledWithJquerySlider) {
   InitLazyloadImagesFilter(false);
-  GoogleString input_html =
-      "<body>"
-      "<head>"
-      "<script src=\"jquery.sexyslider.js\"/>"
-      "</head>"
-      "<body>"
-      "<img src=\"1.jpg\"/>"
-      "</body>";
-  // No change in the html.
-  ValidateExpected("JQuerySlider", input_html,
-                   StrCat(GetLazyloadScriptHtml(), input_html));
+  // No change in the html: the jquery slider script aborts the rewrite
+  // before any image is touched, so no loader script is injected either.
+  ValidateNoChanges("JQuerySlider",
+                    "<body>"
+                    "<head>"
+                    "<script src=\"jquery.sexyslider.js\"/>"
+                    "</head>"
+                    "<body>"
+                    "<img src=\"1.jpg\"/>"
+                    "</body>");
 }
 
 TEST_F(LazyloadImagesFilterTest, LazyloadDisabledWithJquerySliderAfterHead) {
   InitLazyloadImagesFilter(false);
-  GoogleString input_html =
-      "<head>"
-      "</head>"
-      "<body>"
-      "<script src=\"jquery.sexyslider.js\"/>"
-      "<img src=\"1.jpg\"/>"
-      "</body>";
-  GoogleString expected_html = StrCat("<head>", GetLazyloadScriptHtml(),
-                                      "</head>"
-                                      "<body>"
-                                      "<script src=\"jquery.sexyslider.js\"/>"
-                                      "<img src=\"1.jpg\"/>"
-                                      "</body>");
-  ValidateExpected("abort_script_inserted", input_html, expected_html);
+  ValidateNoChanges("abort_script_inserted",
+                    "<head>"
+                    "</head>"
+                    "<body>"
+                    "<script src=\"jquery.sexyslider.js\"/>"
+                    "<img src=\"1.jpg\"/>"
+                    "</body>");
 }
 
 TEST_F(LazyloadImagesFilterTest, LazyloadDisabledForOldBlackberry) {
@@ -508,6 +532,390 @@ TEST_F(LazyloadImagesFilterTest, LazyloadDisabledForXHR) {
     }
   }
   FAIL();
+}
+
+// A Content-Security-Policy that forbids inline script disables the js
+// machinery: the blanked-out images would never be restored.
+TEST_F(LazyloadImagesFilterTest, CspBlocksJsMode) {
+  InitLazyloadImagesFilter(false);
+  ValidateNoChanges(
+      "lazyload_csp_no_inline",
+      "<head><meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"script-src 'self';\"></head>"
+      "<body><img src=\"1.jpg\"/></body>");
+  EXPECT_EQ(1, StatValue(LazyloadImagesFilter::kLazyloadImagesSkippedCsp));
+  EXPECT_EQ(0, StatValue(LazyloadImagesFilter::kLazyloadImagesApplied));
+}
+
+// 'unsafe-inline' permits the inline loader script and the inline
+// onload/onerror handlers, so js mode applies normally.
+TEST_F(LazyloadImagesFilterTest, CspUnsafeInlineAllowsJsMode) {
+  InitLazyloadImagesFilter(false);
+  static const char kCsp[] =
+      "<head><meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"script-src * 'unsafe-inline';\"></head>";
+  ValidateExpected(
+      "lazyload_csp_unsafe_inline",
+      StrCat(kCsp, "<body><img src=\"1.jpg\"/></body>"),
+      StrCat(kCsp, "<body>", GetLazyloadScriptHtml(),
+             GenerateRewrittenImageTag("img", "1.jpg", ""),
+             GetLazyloadPostscriptHtml(), "</body>"));
+  EXPECT_EQ(0, StatValue(LazyloadImagesFilter::kLazyloadImagesSkippedCsp));
+}
+
+// Native mode injects no JavaScript, so it stays enabled under a strict CSP.
+TEST_F(LazyloadImagesFilterTest, CspDoesNotDisableNativeMode) {
+  options()->set_lazyload_images_mode(
+      RewriteOptions::kLazyloadImagesModeNative);
+  InitLazyloadImagesFilter(false);
+  static const char kCsp[] =
+      "<head><meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"script-src 'self';\"></head>";
+  ValidateExpected(
+      "lazyload_csp_native",
+      StrCat(kCsp, "<body><img src=\"1.jpg\"/></body>"),
+      StrCat(kCsp,
+             "<body><img src=\"1.jpg\" loading=\"lazy\" decoding=\"async\"/>"
+             "</body>"));
+  EXPECT_EQ(0, StatValue(LazyloadImagesFilter::kLazyloadImagesSkippedCsp));
+  EXPECT_EQ(1, StatValue(LazyloadImagesFilter::kLazyloadImagesNativeApplied));
+}
+
+TEST_F(LazyloadImagesFilterTest, NativeModeAddsAttributes) {
+  options()->set_lazyload_images_mode(
+      RewriteOptions::kLazyloadImagesModeNative);
+  InitLazyloadImagesFilter(false);
+  ValidateExpected(
+      "native_mode",
+      "<head></head>"
+      "<body>"
+      "<img src=\"1.jpg\"/>"
+      "<img src=\"2.jpg\" srcset=\"2.jpg 1x, 2x.jpg 2x\"/>"
+      "<img src=\"3.jpg\" decoding=\"sync\"/>"
+      "</body>",
+      "<head></head>"
+      "<body>"
+      "<img src=\"1.jpg\" loading=\"lazy\" decoding=\"async\"/>"
+      "<img src=\"2.jpg\" srcset=\"2.jpg 1x, 2x.jpg 2x\" loading=\"lazy\" "
+      "decoding=\"async\"/>"
+      "<img src=\"3.jpg\" decoding=\"sync\" loading=\"lazy\"/>"
+      "</body>");
+  EXPECT_EQ(3, StatValue(LazyloadImagesFilter::kLazyloadImagesNativeApplied));
+  EXPECT_EQ(0, StatValue(LazyloadImagesFilter::kLazyloadImagesApplied));
+}
+
+TEST_F(LazyloadImagesFilterTest, NativeModeCriticalGetsFetchPriority) {
+  options()->set_lazyload_images_mode(
+      RewriteOptions::kLazyloadImagesModeNative);
+  InitLazyloadImagesFilter(false);
+  MockCriticalImagesFinder* finder = new MockCriticalImagesFinder(statistics());
+  server_context()->set_critical_images_finder(finder);
+  StringSet* critical_images = new StringSet;
+  critical_images->insert("http://test.com/critical.jpg");
+  finder->set_critical_images(critical_images);
+  ValidateExpected(
+      "native_critical",
+      "<head></head>"
+      "<body>"
+      "<img src=\"critical.jpg\"/>"
+      "<img src=\"other.jpg\"/>"
+      "</body>",
+      "<head></head>"
+      "<body>"
+      "<img src=\"critical.jpg\" fetchpriority=\"high\" decoding=\"async\"/>"
+      "<img src=\"other.jpg\" loading=\"lazy\" decoding=\"async\"/>"
+      "</body>");
+  EXPECT_EQ(1, StatValue(LazyloadImagesFilter::kLazyloadImagesNativeApplied));
+  EXPECT_EQ(1,
+            StatValue(LazyloadImagesFilter::kLazyloadImagesSkippedCritical));
+}
+
+// Srcset-only images have no src to defer, but a beacon-critical candidate
+// earns the same eager-fetch treatment as a critical src: fetchpriority=high
+// and decoding=async. A non-critical srcset-only image gets loading="lazy"
+// like a non-critical src (covered in detail by
+// NativeModeNonCriticalSrcsetOnlyGetsLazy).
+TEST_F(LazyloadImagesFilterTest, NativeModeCriticalSrcsetOnlyGetsFetchPriority) {
+  options()->set_lazyload_images_mode(
+      RewriteOptions::kLazyloadImagesModeNative);
+  InitLazyloadImagesFilter(false);
+  MockCriticalImagesFinder* finder = new MockCriticalImagesFinder(statistics());
+  server_context()->set_critical_images_finder(finder);
+  StringSet* critical_images = new StringSet;
+  critical_images->insert("http://test.com/hires.jpg");
+  finder->set_critical_images(critical_images);
+  ValidateExpected(
+      "native_critical_srcset_only",
+      "<head></head>"
+      "<body>"
+      "<img srcset=\"lowres.jpg 1x, hires.jpg 2x\"/>"
+      "<img srcset=\"other.jpg 1x\"/>"
+      "</body>",
+      "<head></head>"
+      "<body>"
+      "<img srcset=\"lowres.jpg 1x, hires.jpg 2x\" fetchpriority=\"high\" "
+      "decoding=\"async\"/>"
+      "<img srcset=\"other.jpg 1x\" loading=\"lazy\" decoding=\"async\"/>"
+      "</body>");
+  EXPECT_EQ(1, StatValue(LazyloadImagesFilter::kLazyloadImagesNativeApplied));
+  EXPECT_EQ(1,
+            StatValue(LazyloadImagesFilter::kLazyloadImagesSkippedCritical));
+}
+
+// Author attributes win over the srcset-only critical treatment, mirroring
+// the src path: loading= opts the element out entirely; an author
+// fetchpriority= is kept (decoding is still added when absent); an author
+// decoding= is kept (fetchpriority is still added when absent).
+TEST_F(LazyloadImagesFilterTest,
+       NativeModeCriticalSrcsetOnlyAuthorAttributesRespected) {
+  options()->set_lazyload_images_mode(
+      RewriteOptions::kLazyloadImagesModeNative);
+  InitLazyloadImagesFilter(false);
+  MockCriticalImagesFinder* finder = new MockCriticalImagesFinder(statistics());
+  server_context()->set_critical_images_finder(finder);
+  StringSet* critical_images = new StringSet;
+  critical_images->insert("http://test.com/hires.jpg");
+  finder->set_critical_images(critical_images);
+  ValidateExpected(
+      "native_critical_srcset_only_author_attributes",
+      "<head></head>"
+      "<body>"
+      "<img srcset=\"lowres.jpg 1x, hires.jpg 2x\" loading=\"lazy\"/>"
+      "<img srcset=\"lowres.jpg 1x, hires.jpg 2x\" fetchpriority=\"low\"/>"
+      "<img srcset=\"lowres.jpg 1x, hires.jpg 2x\" decoding=\"sync\"/>"
+      "</body>",
+      "<head></head>"
+      "<body>"
+      "<img srcset=\"lowres.jpg 1x, hires.jpg 2x\" loading=\"lazy\"/>"
+      "<img srcset=\"lowres.jpg 1x, hires.jpg 2x\" fetchpriority=\"low\" "
+      "decoding=\"async\"/>"
+      "<img srcset=\"lowres.jpg 1x, hires.jpg 2x\" decoding=\"sync\" "
+      "fetchpriority=\"high\"/>"
+      "</body>");
+  // Only the latter two images were treated as critical; the loading= image
+  // was left alone before the critical check ran.
+  EXPECT_EQ(2,
+            StatValue(LazyloadImagesFilter::kLazyloadImagesSkippedCritical));
+}
+
+// A non-critical srcset-only image has no src to defer, but native mode
+// still applies loading="lazy" (plus decoding="async" when absent), exactly
+// like a non-critical src. An author-supplied loading or decoding attribute
+// wins, as it does for images with a src.
+TEST_F(LazyloadImagesFilterTest, NativeModeNonCriticalSrcsetOnlyGetsLazy) {
+  options()->set_lazyload_images_mode(
+      RewriteOptions::kLazyloadImagesModeNative);
+  InitLazyloadImagesFilter(false);
+  MockCriticalImagesFinder* finder = new MockCriticalImagesFinder(statistics());
+  server_context()->set_critical_images_finder(finder);
+  StringSet* critical_images = new StringSet;
+  critical_images->insert("http://test.com/hires.jpg");
+  finder->set_critical_images(critical_images);
+  ValidateExpected(
+      "native_noncritical_srcset_only",
+      "<head></head>"
+      "<body>"
+      "<img srcset=\"lowres.jpg 1x, hires.jpg 2x\"/>"
+      "<img srcset=\"other.jpg 1x\"/>"
+      "<img srcset=\"other2.jpg 1x\" decoding=\"sync\"/>"
+      "<img srcset=\"other3.jpg 1x\" loading=\"eager\"/>"
+      "</body>",
+      "<head></head>"
+      "<body>"
+      "<img srcset=\"lowres.jpg 1x, hires.jpg 2x\" fetchpriority=\"high\" "
+      "decoding=\"async\"/>"
+      "<img srcset=\"other.jpg 1x\" loading=\"lazy\" decoding=\"async\"/>"
+      "<img srcset=\"other2.jpg 1x\" decoding=\"sync\" loading=\"lazy\"/>"
+      "<img srcset=\"other3.jpg 1x\" loading=\"eager\"/>"
+      "</body>");
+  EXPECT_EQ(2, StatValue(LazyloadImagesFilter::kLazyloadImagesNativeApplied));
+  EXPECT_EQ(1,
+            StatValue(LazyloadImagesFilter::kLazyloadImagesSkippedCritical));
+}
+
+// Without critical-image data the skip-first LCP protection covers
+// srcset-only images too, mirroring the src path: the first N otherwise
+// eligible images are left untouched.
+TEST_F(LazyloadImagesFilterTest, SkipFirstSrcsetOnlyInNativeMode) {
+  options()->set_lazyload_images_mode(
+      RewriteOptions::kLazyloadImagesModeNative);
+  InitLazyloadImagesFilterWithSkipFirst(false, 1);
+  ValidateExpected(
+      "native_skip_first_srcset_only",
+      "<body>"
+      "<img srcset=\"1.jpg 1x\"/>"
+      "<img srcset=\"2.jpg 1x\"/>"
+      "</body>",
+      "<body>"
+      "<img srcset=\"1.jpg 1x\"/>"
+      "<img srcset=\"2.jpg 1x\" loading=\"lazy\" decoding=\"async\"/>"
+      "</body>");
+}
+
+// The src path's author opt-out attributes win on src-less images too:
+// pagespeed_no_defer/data-pagespeed-no-defer leave the element completely
+// untouched, and a data-pagespeed-lazy-src/data-src marker (a third-party
+// loader's) is left alone. The guards run ahead of the critical check, as
+// in the src path, so even a beacon-critical candidate is not promoted.
+TEST_F(LazyloadImagesFilterTest,
+       NativeModeSrcsetOnlyAuthorOptOutAttributesRespected) {
+  options()->set_lazyload_images_mode(
+      RewriteOptions::kLazyloadImagesModeNative);
+  InitLazyloadImagesFilter(false);
+  MockCriticalImagesFinder* finder = new MockCriticalImagesFinder(statistics());
+  server_context()->set_critical_images_finder(finder);
+  StringSet* critical_images = new StringSet;
+  critical_images->insert("http://test.com/hires.jpg");
+  finder->set_critical_images(critical_images);
+  ValidateNoChanges(
+      "native_srcset_only_author_optouts",
+      "<head></head>"
+      "<body>"
+      "<img srcset=\"lowres.jpg 1x, hires.jpg 2x\" data-pagespeed-no-defer />"
+      "<img srcset=\"other.jpg 1x\" pagespeed_no_defer />"
+      "<img srcset=\"lowres.jpg 1x, hires.jpg 2x\" "
+      "data-pagespeed-lazy-src=\"lowres.jpg\"/>"
+      "<img srcset=\"other.jpg 1x\" data-src=\"other.jpg\"/>"
+      "</body>");
+  EXPECT_EQ(0, StatValue(LazyloadImagesFilter::kLazyloadImagesNativeApplied));
+  EXPECT_EQ(0,
+            StatValue(LazyloadImagesFilter::kLazyloadImagesSkippedCritical));
+}
+
+// Auto mode selects native for a user agent supporting loading="lazy".
+TEST_F(LazyloadImagesFilterTest, AutoModeUsesNativeForModernUa) {
+  SetCurrentUserAgent(kChrome120UserAgent);
+  InitLazyloadImagesFilter(false);
+  ValidateExpected(
+      "auto_native",
+      "<body><img src=\"1.jpg\"/></body>",
+      "<body><img src=\"1.jpg\" loading=\"lazy\" decoding=\"async\"/></body>");
+  EXPECT_EQ(1, StatValue(LazyloadImagesFilter::kLazyloadImagesNativeApplied));
+  EXPECT_EQ(0, StatValue(LazyloadImagesFilter::kLazyloadImagesApplied));
+}
+
+// Auto mode falls back to the js machinery for older user agents; the SetUp
+// user agent (Chrome 18) predates native lazyload support.
+TEST_F(LazyloadImagesFilterTest, AutoModeUsesJsForOldUa) {
+  InitLazyloadImagesFilter(false);
+  ValidateExpected("auto_js",
+                   "<body><img src=\"1.jpg\"/></body>",
+                   StrCat("<body>", GetLazyloadScriptHtml(),
+                          GenerateRewrittenImageTag("img", "1.jpg", ""),
+                          GetLazyloadPostscriptHtml(), "</body>"));
+  EXPECT_EQ(0, StatValue(LazyloadImagesFilter::kLazyloadImagesNativeApplied));
+  EXPECT_EQ(1, StatValue(LazyloadImagesFilter::kLazyloadImagesApplied));
+}
+
+// When critical image data is unavailable (beaconing disabled), the first
+// LazyloadImagesSkipFirst eligible images are left untouched to protect the
+// likely LCP image.
+TEST_F(LazyloadImagesFilterTest, SkipFirstImageWhenNoCriticalImageData) {
+  InitLazyloadImagesFilterWithSkipFirst(false, 1);
+  ValidateExpected(
+      "js_skip_first",
+      "<body><img src=\"1.jpg\"/><img src=\"2.jpg\"/></body>",
+      StrCat("<body><img src=\"1.jpg\"/>", GetLazyloadScriptHtml(),
+             GenerateRewrittenImageTag("img", "2.jpg", ""),
+             GetLazyloadPostscriptHtml(), "</body>"));
+}
+
+TEST_F(LazyloadImagesFilterTest, SkipFirstImageInNativeMode) {
+  options()->set_lazyload_images_mode(
+      RewriteOptions::kLazyloadImagesModeNative);
+  InitLazyloadImagesFilterWithSkipFirst(false, 1);
+  ValidateExpected(
+      "native_skip_first",
+      "<body><img src=\"1.jpg\"/><img src=\"2.jpg\"/></body>",
+      "<body><img src=\"1.jpg\"/>"
+      "<img src=\"2.jpg\" loading=\"lazy\" decoding=\"async\"/></body>");
+}
+
+TEST_F(LazyloadImagesFilterTest, SkipFirstCountsOnlyEligibleImages) {
+  InitLazyloadImagesFilterWithSkipFirst(false, 1);
+  // The data: image is not eligible, so it does not consume the skip slot.
+  ValidateExpected(
+      "js_skip_first_eligible",
+      "<body>"
+      "<img src=\"data:image/png;base64,iVBORw0KGgoAAAANSUhE\"/>"
+      "<img src=\"1.jpg\"/>"
+      "<img src=\"2.jpg\"/>"
+      "</body>",
+      StrCat("<body>"
+             "<img src=\"data:image/png;base64,iVBORw0KGgoAAAANSUhE\"/>"
+             "<img src=\"1.jpg\"/>",
+             GetLazyloadScriptHtml(),
+             GenerateRewrittenImageTag("img", "2.jpg", ""),
+             GetLazyloadPostscriptHtml(), "</body>"));
+}
+
+// In js mode an <img> inside <picture> must stay untouched: the sibling
+// <source> elements are not rewritten and would either load eagerly or make
+// the browser pick the blank pixel.
+TEST_F(LazyloadImagesFilterTest, PictureImgSkippedInJsMode) {
+  InitLazyloadImagesFilter(false);
+  ValidateExpected(
+      "picture_js",
+      "<body>"
+      "<picture>"
+      "<source srcset=\"1.webp\"/>"
+      "<img src=\"1.jpg\"/>"
+      "</picture>"
+      "<img src=\"2.jpg\"/>"
+      "</body>",
+      StrCat("<body>"
+             "<picture>"
+             "<source srcset=\"1.webp\"/>"
+             "<img src=\"1.jpg\"/>"
+             "</picture>",
+             GetLazyloadScriptHtml(),
+             GenerateRewrittenImageTag("img", "2.jpg", ""),
+             GetLazyloadPostscriptHtml(), "</body>"));
+}
+
+// The native loading="lazy" attribute is valid and effective on an <img>
+// inside <picture>, so native mode does rewrite it.
+TEST_F(LazyloadImagesFilterTest, PictureImgAppliedInNativeMode) {
+  options()->set_lazyload_images_mode(
+      RewriteOptions::kLazyloadImagesModeNative);
+  InitLazyloadImagesFilter(false);
+  ValidateExpected(
+      "picture_native",
+      "<body>"
+      "<picture>"
+      "<source srcset=\"1.webp\"/>"
+      "<img src=\"1.jpg\"/>"
+      "</picture>"
+      "</body>",
+      "<body>"
+      "<picture>"
+      "<source srcset=\"1.webp\"/>"
+      "<img src=\"1.jpg\" loading=\"lazy\" decoding=\"async\"/>"
+      "</picture>"
+      "</body>");
+}
+
+// An author-supplied loading attribute is respected in all modes: the
+// element is left completely untouched.
+TEST_F(LazyloadImagesFilterTest, AuthorLoadingAttributeRespectedJsMode) {
+  InitLazyloadImagesFilter(false);
+  ValidateNoChanges("author_loading_js",
+                    "<body>"
+                    "<img loading=\"lazy\" src=\"1.jpg\"/>"
+                    "<img loading=\"eager\" src=\"2.jpg\"/>"
+                    "</body>");
+}
+
+TEST_F(LazyloadImagesFilterTest, AuthorLoadingAttributeRespectedNativeMode) {
+  options()->set_lazyload_images_mode(
+      RewriteOptions::kLazyloadImagesModeNative);
+  InitLazyloadImagesFilter(false);
+  ValidateNoChanges("author_loading_native",
+                    "<body>"
+                    "<img loading=\"lazy\" src=\"1.jpg\"/>"
+                    "<img loading=\"eager\" src=\"2.jpg\"/>"
+                    "</body>");
+  EXPECT_EQ(0, StatValue(LazyloadImagesFilter::kLazyloadImagesNativeApplied));
 }
 
 }  // namespace net_instaweb

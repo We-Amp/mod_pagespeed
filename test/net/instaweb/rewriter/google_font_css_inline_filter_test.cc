@@ -24,6 +24,7 @@
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "pagespeed/kernel/base/ref_counted_ptr.h"
+#include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/http/content_type.h"
@@ -39,6 +40,15 @@ namespace net_instaweb {
 namespace {
 
 const char kRoboto[] = "http://fonts.googleapis.com/css?family=Roboto";
+const char kRobotoSsl[] = "https://fonts.googleapis.com/css?family=Roboto";
+const char kLato[] = "http://fonts.googleapis.com/css?family=Lato";
+
+// Preconnect hints the filter inserts ahead of the font CSS; the scheme
+// follows the font link's scheme.
+const char kPreconnectHttp[] =
+    "<link rel=\"preconnect\" href=\"http://fonts.gstatic.com\" crossorigin>";
+const char kPreconnectHttps[] =
+    "<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>";
 
 class GoogleFontCssInlineFilterTestBase : public RewriteTestBase {
  protected:
@@ -54,29 +64,28 @@ class GoogleFontCssInlineFilterTestBase : public RewriteTestBase {
     server_context()->ComputeSignature(options());
   }
 
-  void ResetUserAgent(StringPiece user_agent) {
-    ClearRewriteDriver();
-    rewrite_driver()->SetSessionFetcher(
-        new UserAgentSensitiveTestFetcher(rewrite_driver()->async_fetcher()));
-
+  void SetFontCssResponse(StringPiece url_with_ua, StringPiece content) {
     // Font loader CSS gets Cache-Control:private, max-age=86400
     ResponseHeaders response_headers;
     SetDefaultLongCacheHeaders(&kContentTypeCss, &response_headers);
     response_headers.SetDateAndCaching(timer()->NowMs(),
                                        86400 * Timer::kSecondMs, ", private");
+    SetFetchResponse(url_with_ua, response_headers, content);
+  }
+
+  void ResetUserAgent(StringPiece user_agent) {
+    ClearRewriteDriver();
+    rewrite_driver()->SetSessionFetcher(
+        new UserAgentSensitiveTestFetcher(rewrite_driver()->async_fetcher()));
 
     // Now upload some UA-specific CSS where UaSensitiveFetcher will find it,
     // for two fake UAs: Chromezilla and Safieri, used since they are short,
     // unlike real UA strings.
-    SetFetchResponse(StrCat(kRoboto, "&UA=Chromezilla"), response_headers,
-                     "font_chromezilla");
-
-    SetFetchResponse(StrCat(kRoboto, "&UA=Safieri"), response_headers,
-                     "font_safieri");
+    SetFontCssResponse(StrCat(kRoboto, "&UA=Chromezilla"), "font_chromezilla");
+    SetFontCssResponse(StrCat(kRoboto, "&UA=Safieri"), "font_safieri");
 
     // If other filters will try to fetch this, they won't have a UA.
-    SetFetchResponse(StrCat(kRoboto, "&UA=unknown"), response_headers,
-                     "font_huh");
+    SetFontCssResponse(StrCat(kRoboto, "&UA=unknown"), "font_huh");
     SetCurrentUserAgent(user_agent);
   }
 };
@@ -92,12 +101,147 @@ class GoogleFontCssInlineFilterTest : public GoogleFontCssInlineFilterTestBase {
 TEST_F(GoogleFontCssInlineFilterTest, BasicOperation) {
   ResetUserAgent("Chromezilla");
   ValidateExpected("simple", CssLinkHref(kRoboto),
-                   "<style>font_chromezilla</style>");
+                   StrCat(kPreconnectHttp, "<style>font_chromezilla</style>"));
 
   // Different UAs get different cache entries
   ResetUserAgent("Safieri");
   ValidateExpected("simple2", CssLinkHref(kRoboto),
-                   "<style>font_safieri</style>");
+                   StrCat(kPreconnectHttp, "<style>font_safieri</style>"));
+}
+
+TEST_F(GoogleFontCssInlineFilterTest, LargeCssNowInlines) {
+  // Real Font Service CSS responses typically run well past the old 3K
+  // default; make sure a response of realistic size inlines under the
+  // default configuration.
+  ResetUserAgent("Chromezilla");
+  GoogleString large_css(20 * 1024, 'a');
+  SetFontCssResponse(StrCat(kRoboto, "&UA=Chromezilla"), large_css);
+  ValidateExpected(
+      "large_css", CssLinkHref(kRoboto),
+      StrCat(kPreconnectHttp, "<style>", large_css, "</style>"));
+}
+
+TEST_F(GoogleFontCssInlineFilterTest, OverDefaultLimitDoesNotInline) {
+  // Pin the upper edge of the raised default: a response over 48 KiB stays
+  // external under default configuration, but still gets the hint.
+  ResetUserAgent("Chromezilla");
+  GoogleString oversize_css(48 * 1024 + 1, 'a');
+  SetFontCssResponse(StrCat(kRoboto, "&UA=Chromezilla"), oversize_css);
+  ValidateExpected(
+      "oversize_css", CssLinkHref(kRoboto),
+      StrCat(kPreconnectHttp, CssLinkHref(kRoboto),
+             "<!--CSS not inlined since it&#39;s bigger than 49152 bytes-->"));
+}
+
+TEST_F(GoogleFontCssInlineFilterTest, PreconnectFollowsLinkScheme) {
+  // The loader CSS references fonts.gstatic.com over the scheme it was
+  // fetched with, so an https font link must produce an https hint.
+  ResetUserAgent("Chromezilla");
+  SetFontCssResponse(StrCat(kRobotoSsl, "&UA=Chromezilla"),
+                     "sfont_chromezilla");
+  ValidateExpected(
+      "https_link", CssLinkHref(kRobotoSsl),
+      StrCat(kPreconnectHttps, "<style>sfont_chromezilla</style>"));
+}
+
+TEST_F(GoogleFontCssInlineFilterTest, PreconnectInsertedOnce) {
+  // Two links to different font families: the hint is once-per-document,
+  // not once-per-URL.
+  ResetUserAgent("Chromezilla");
+  SetFontCssResponse(StrCat(kLato, "&UA=Chromezilla"), "lato_chromezilla");
+  ValidateExpected("two_font_links",
+                   StrCat(CssLinkHref(kRoboto), CssLinkHref(kLato)),
+                   StrCat(kPreconnectHttp, "<style>font_chromezilla</style>",
+                          "<style>lato_chromezilla</style>"));
+}
+
+TEST_F(GoogleFontCssInlineFilterTest, AuthorPreconnectRespected) {
+  // An author-supplied crossorigin preconnect for the font file host,
+  // appearing ahead of the font link, suppresses ours; the href is resolved,
+  // so a protocol-relative hint counts too.
+  ResetUserAgent("Chromezilla");
+  const char kAuthorPreconnect[] =
+      "<link rel=\"preconnect\" href=\"//fonts.gstatic.com/\" crossorigin>";
+  ValidateExpected(
+      "author_preconnect", StrCat(kAuthorPreconnect, CssLinkHref(kRoboto)),
+      StrCat(kAuthorPreconnect, "<style>font_chromezilla</style>"));
+}
+
+TEST_F(GoogleFontCssInlineFilterTest, AuthorMultiTokenRelPreconnectRespected) {
+  // HTML link types are a space-separated token list, so
+  // rel="preconnect dns-prefetch" is a valid author preconnect and must
+  // suppress our hint exactly like the single-token form does.
+  ResetUserAgent("Chromezilla");
+  const char kAuthorPreconnect[] =
+      "<link rel=\"preconnect dns-prefetch\" href=\"//fonts.gstatic.com/\" "
+      "crossorigin>";
+  ValidateExpected(
+      "author_multi_token_preconnect",
+      StrCat(kAuthorPreconnect, CssLinkHref(kRoboto)),
+      StrCat(kAuthorPreconnect, "<style>font_chromezilla</style>"));
+}
+
+TEST_F(GoogleFontCssInlineFilterTest, AuthorPreconnectUnrelatedHost) {
+  // A preconnect for some other host does not suppress the font hint.
+  ResetUserAgent("Chromezilla");
+  const char kCdnPreconnect[] =
+      "<link rel=\"preconnect\" href=\"//cdn.example.com/\" crossorigin>";
+  ValidateExpected(
+      "author_preconnect_unrelated",
+      StrCat(kCdnPreconnect, CssLinkHref(kRoboto)),
+      StrCat(kCdnPreconnect, kPreconnectHttp,
+             "<style>font_chromezilla</style>"));
+}
+
+TEST_F(GoogleFontCssInlineFilterTest, AuthorPreconnectWithoutCrossorigin) {
+  // Fonts are fetched in CORS mode: an author preconnect without crossorigin
+  // opens a connection the font fetch can't use, so ours is still inserted.
+  ResetUserAgent("Chromezilla");
+  const char kNonCorsPreconnect[] =
+      "<link rel=\"preconnect\" href=\"//fonts.gstatic.com/\">";
+  ValidateExpected(
+      "author_preconnect_non_cors",
+      StrCat(kNonCorsPreconnect, CssLinkHref(kRoboto)),
+      StrCat(kNonCorsPreconnect, kPreconnectHttp,
+             "<style>font_chromezilla</style>"));
+}
+
+TEST_F(GoogleFontCssInlineFilterTest, AuthorUseCredentialsPreconnect) {
+  // crossorigin="use-credentials" warms a credentialed connection, but the
+  // font fetch is CORS-mode with same-origin credentials, so it can't reuse
+  // it either: like the missing-attribute case, it must not suppress ours.
+  ResetUserAgent("Chromezilla");
+  const char kCredentialedPreconnect[] =
+      "<link rel=\"preconnect\" href=\"//fonts.gstatic.com/\" "
+      "crossorigin=\"use-credentials\">";
+  ValidateExpected(
+      "author_use_credentials_preconnect",
+      StrCat(kCredentialedPreconnect, CssLinkHref(kRoboto)),
+      StrCat(kCredentialedPreconnect, kPreconnectHttp,
+             "<style>font_chromezilla</style>"));
+
+  // CORS settings attribute keywords match ASCII case-insensitively.
+  const char kCredentialedUpperPreconnect[] =
+      "<link rel=\"preconnect\" href=\"//fonts.gstatic.com/\" "
+      "crossorigin=\"USE-CREDENTIALS\">";
+  ValidateExpected(
+      "author_use_credentials_upper_preconnect",
+      StrCat(kCredentialedUpperPreconnect, CssLinkHref(kRoboto)),
+      StrCat(kCredentialedUpperPreconnect, kPreconnectHttp,
+             "<style>font_chromezilla</style>"));
+}
+
+TEST_F(GoogleFontCssInlineFilterTest, AuthorAnonymousPreconnect) {
+  // crossorigin="anonymous" spelled out is the same Anonymous state as the
+  // value-less attribute, so it suppresses our hint too.
+  ResetUserAgent("Chromezilla");
+  const char kAuthorPreconnect[] =
+      "<link rel=\"preconnect\" href=\"//fonts.gstatic.com/\" "
+      "crossorigin=\"anonymous\">";
+  ValidateExpected(
+      "author_anonymous_preconnect",
+      StrCat(kAuthorPreconnect, CssLinkHref(kRoboto)),
+      StrCat(kAuthorPreconnect, "<style>font_chromezilla</style>"));
 }
 
 TEST_F(GoogleFontCssInlineFilterTest, UsageRestrictions) {
@@ -106,8 +250,10 @@ TEST_F(GoogleFontCssInlineFilterTest, UsageRestrictions) {
   options()->ClearSignatureForTesting();
   options()->set_modify_caching_headers(false);
   server_context()->ComputeSignature(options());
+  // Even though inlining is blocked, the surviving <link> still fetches from
+  // fonts.gstatic.com, so the preconnect hint is inserted regardless.
   ValidateExpected("incompat1", CssLinkHref(kRoboto),
-                   StrCat(CssLinkHref(kRoboto),
+                   StrCat(kPreconnectHttp, CssLinkHref(kRoboto),
                           "<!--Cannot inline font loader CSS when "
                           "ModifyCachingHeaders is off-->"));
 
@@ -116,7 +262,7 @@ TEST_F(GoogleFontCssInlineFilterTest, UsageRestrictions) {
   options()->set_downstream_cache_purge_location_prefix("foo");
   server_context()->ComputeSignature(options());
   ValidateExpected("incompat2", CssLinkHref(kRoboto),
-                   StrCat(CssLinkHref(kRoboto),
+                   StrCat(kPreconnectHttp, CssLinkHref(kRoboto),
                           "<!--Cannot inline font loader CSS when "
                           "using downstream cache-->"));
 }
@@ -125,7 +271,7 @@ TEST_F(GoogleFontCssInlineFilterTest, ProtocolRelative) {
   ResetUserAgent("Chromezilla");
   ValidateExpected("proto_rel",
                    CssLinkHref("//fonts.googleapis.com/css?family=Roboto"),
-                   "<style>font_chromezilla</style>");
+                   StrCat(kPreconnectHttp, "<style>font_chromezilla</style>"));
 }
 
 class GoogleFontCssInlineFilterSizeLimitTest
@@ -143,15 +289,17 @@ class GoogleFontCssInlineFilterSizeLimitTest
 };
 
 TEST_F(GoogleFontCssInlineFilterSizeLimitTest, SizeLimit) {
+  // The over-cap link survives, and still triggers font file fetches, so the
+  // preconnect hint is inserted for it as well.
   ResetUserAgent("Chromezilla");
   ValidateExpected(
       "slightly_long", CssLinkHref(kRoboto),
-      StrCat(CssLinkHref(kRoboto),
+      StrCat(kPreconnectHttp, CssLinkHref(kRoboto),
              "<!--CSS not inlined since it&#39;s bigger than 12 bytes-->"));
 
   ResetUserAgent("Safieri");
   ValidateExpected("short", CssLinkHref(kRoboto),
-                   "<style>font_safieri</style>");
+                   StrCat(kPreconnectHttp, "<style>font_safieri</style>"));
 }
 
 class GoogleFontCssInlineFilterAndImportTest
@@ -171,12 +319,12 @@ TEST_F(GoogleFontCssInlineFilterAndImportTest, ViaInlineImport) {
   ResetUserAgent("Chromezilla");
   ValidateExpected("import",
                    absl::StrFormat("<style>@import \"%s\";</style>", kRoboto),
-                   "<style>font_chromezilla</style>");
+                   StrCat(kPreconnectHttp, "<style>font_chromezilla</style>"));
 
   ResetUserAgent("Safieri");
   ValidateExpected("import",
                    absl::StrFormat("<style>@import \"%s\";</style>", kRoboto),
-                   "<style>font_safieri</style>");
+                   StrCat(kPreconnectHttp, "<style>font_safieri</style>"));
 }
 
 class GoogleFontCssInlineFilterAndWidePermissionsTest
@@ -196,7 +344,7 @@ class GoogleFontCssInlineFilterAndWidePermissionsTest
 TEST_F(GoogleFontCssInlineFilterAndWidePermissionsTest, WithWideAuthorization) {
   ResetUserAgent("Chromezilla");
   ValidateExpected("with_domain_*", CssLinkHref(kRoboto),
-                   "<style>font_chromezilla</style>");
+                   StrCat(kPreconnectHttp, "<style>font_chromezilla</style>"));
 }
 
 // Negative test for the above, with font filter off, to make sure
@@ -227,6 +375,52 @@ TEST_F(NoGoogleFontCssInlineFilterAndWidePermissionsTest,
                    StrCat(CssLinkHref(kRoboto),
                           "<!--Uncacheable content, preventing rewriting of "
                           "http://fonts.googleapis.com/css?family=Roboto-->"));
+}
+
+class GoogleFontCssInlineFilterDnsPrefetchTest
+    : public GoogleFontCssInlineFilterTestBase {
+ protected:
+  void SetUp() override {
+    GoogleFontCssInlineFilterTestBase::SetUp();
+    options()->set_support_noscript_enabled(false);
+    options()->EnableFilter(RewriteOptions::kInsertDnsPrefetch);
+    SetUpForFontFilterTest(RewriteOptions::kInlineGoogleFontCss);
+  }
+};
+
+TEST_F(GoogleFontCssInlineFilterDnsPrefetchTest, SingleHintWithDnsPrefetch) {
+  // A UA that both supports DNS prefetch (matches *Chrome/*) and is easy for
+  // UserAgentSensitiveTestFetcher to key on. The fetcher escapes the UA when
+  // appending it as a query param.
+  ResetUserAgent("Chromezilla Chrome/42");
+  SetFontCssResponse(StrCat(kRoboto, "&UA=Chromezilla+Chrome%2f42"),
+                     "font_chrome");
+
+  // A body resource on a third-party domain gives insert_dns_prefetch a
+  // domain to act on once its stored domain list stabilizes.
+  const char kBody[] =
+      "<body><img src=\"http://cdn.example.com/a.jpg\"></body>";
+  const char kCdnPreconnect[] =
+      "<link rel=\"preconnect\" href=\"http://cdn.example.com\">";
+  GoogleString input =
+      StrCat("<head>", CssLinkHref(kRoboto), "</head>", kBody);
+  GoogleString head_content =
+      StrCat(kPreconnectHttp, "<style>font_chrome</style>");
+
+  // First rewrite: insert_dns_prefetch has no stored domain list yet (it is
+  // written at the end of this rewrite), so ours is the only hint.
+  ValidateExpected("dns_prefetch_1", input,
+                   StrCat("<head>", head_content, "</head>", kBody));
+  // Later rewrites: the stored list is stable, so insert_dns_prefetch warms
+  // up cdn.example.com at the end of the head. It must never add a second
+  // fonts.gstatic.com hint (ours is already in the head) nor one for
+  // fonts.googleapis.com (whose <link> is in the head, then inlined away).
+  ValidateExpected(
+      "dns_prefetch_2", input,
+      StrCat("<head>", head_content, kCdnPreconnect, "</head>", kBody));
+  ValidateExpected(
+      "dns_prefetch_3", input,
+      StrCat("<head>", head_content, kCdnPreconnect, "</head>", kBody));
 }
 
 }  // namespace

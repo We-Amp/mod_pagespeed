@@ -20,6 +20,7 @@
 #include "net/instaweb/rewriter/public/critical_images_finder.h"
 
 #include <map>
+#include <memory>
 
 #include "base/logging.h"
 #include "net/instaweb/http/public/request_context.h"
@@ -35,7 +36,6 @@
 #include "pagespeed/kernel/base/json.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/proto_util.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/http/google_url.h"
@@ -51,13 +51,20 @@ const char kOriginalImageJsonWidthKey[] = "ow";
 const char kOriginalImageJsonHeightKey[] = "oh";
 const char kEmptyValuePlaceholder[] = "\n";
 
+// Upper bound on a beacon-supplied image side, in pixels. The beacon JSON is
+// untrusted; capping each dimension here keeps the width*height and the
+// subsequent 100*area and area*percent products comfortably within int64,
+// while still being far larger than any real rendered image (a ~1M-pixel side).
+constexpr int kMaxBeaconImageDim = 1 << 20;
+
 // Create CriticalImagesInfo object from the value of property_value.  NULL if
 // no value is found, or if the property value reflects that no results are
 // available.  Result is owned by caller.
 CriticalImagesInfo* CriticalImagesInfoFromPropertyValue(
     int percent_seen_for_critical, const PropertyValue* property_value) {
   DCHECK(property_value != nullptr);
-  std::unique_ptr<CriticalImagesInfo> info(new CriticalImagesInfo());
+  std::unique_ptr<CriticalImagesInfo> info =
+      std::make_unique<CriticalImagesInfo>();
   if (!CriticalImagesFinder::PopulateCriticalImagesFromPropertyValue(
           property_value, &info->proto)) {
     return nullptr;
@@ -391,7 +398,8 @@ RenderedImages* CriticalImagesFinder::JsonMapToRenderedImagesMap(
       return nullptr;
     }
     // Put the extracted map into RenderedImages proto data.
-    RenderedImages* rendered_images = new RenderedImages();
+    std::unique_ptr<RenderedImages> rendered_images =
+        std::make_unique<RenderedImages>();
     Json::Value::Members imgs = json_rendered_image_map.getMemberNames();
     for (int i = 0, n = imgs.size(); i < n; ++i) {
       const GoogleString& img_src = imgs[i];
@@ -407,8 +415,18 @@ RenderedImages* CriticalImagesFinder::JsonMapToRenderedImagesMap(
       int rendered_height = json_rendered_image_map[img_src]
                                 .get(kRenderedImageJsonHeightKey, 0)
                                 .asInt();
-      int original_area = (original_width * original_height);
-      int rendered_area = (rendered_width * rendered_height);
+      // The dimensions come from untrusted beacon JSON; reject entries with
+      // out-of-range values so the area products below cannot overflow int64.
+      if (original_width < 0 || original_width > kMaxBeaconImageDim ||
+          original_height < 0 || original_height > kMaxBeaconImageDim ||
+          rendered_width < 0 || rendered_width > kMaxBeaconImageDim ||
+          rendered_height < 0 || rendered_height > kMaxBeaconImageDim) {
+        continue;
+      }
+      int64 original_area =
+          static_cast<int64>(original_width) * original_height;
+      int64 rendered_area =
+          static_cast<int64>(rendered_width) * rendered_height;
       // Store renderedWidth and renderedHeight for the image only if
       // the rendered sizes are lower than the original sizes by at least the
       // percentage threshold set.
@@ -420,7 +438,7 @@ RenderedImages* CriticalImagesFinder::JsonMapToRenderedImagesMap(
         images->set_rendered_height(rendered_height);
       }
     }
-    return rendered_images;
+    return rendered_images.release();
   } catch (std::exception& e) {
     LOG(WARNING) << "Bad Json rendered image dimensions map";
     return nullptr;

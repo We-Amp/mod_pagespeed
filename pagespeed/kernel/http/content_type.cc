@@ -54,7 +54,7 @@ const ContentType kTypes[] = {
     // also fine; application/json, less so). Using the right MIME type
     // and charset is critical; never use text/plain or text/html, and
     // do not mistype utf-8 as utf8.
-    {"application/javascript", ".json", ContentType::kJson},
+    {"application/json", ".json", ContentType::kJson},
     {"application/javascript", ".map", ContentType::kSourceMap},
     {"application/pdf", ".pdf", ContentType::kPdf},  // RFC 3778
     {"application/octet-stream", ".bin", ContentType::kOctetStream},
@@ -63,6 +63,12 @@ const ContentType kTypes[] = {
     // be very careful not to just lump them in with images for all purposes, to
     // avoid creating security vulnerabilities.
     {"image/svg+xml", ".svg", ContentType::kXml},
+
+    // AVIF. Appended at the end of the canonical block (index 18) rather than
+    // beside webp so the existing index-referenced kContentType* handles below
+    // (kTypes[0]..kTypes[16]) keep their indices. Drives the ".avif" output-URL
+    // extension via NameExtensionToContentType.
+    {"image/avif", ".avif", ContentType::kAvif},  // kTypes[18]
 
     // Synonyms; Note that the canonical types above are referenced by index
     // in the named references declared below.  The synonyms below are not
@@ -132,8 +138,13 @@ const ContentType& kContentTypePdf = kTypes[15];
 
 const ContentType& kContentTypeBinaryOctetStream = kTypes[16];
 
+// kTypes[17] is image/svg+xml (no named reference; maps to kXml).
+const ContentType& kContentTypeAvif = kTypes[18];
+
 int ContentType::MaxProducedExtensionLength() {
-  return 4;  // .jpeg or .webp
+  // Counts extension characters WITHOUT the dot: "jpeg", "webp", and "avif"
+  // are all 4.
+  return 4;
 }
 
 bool ContentType::IsCss() const { return type_ == kCss; }
@@ -184,6 +195,7 @@ bool ContentType::IsImage() const {
     case kGif:
     case kJpeg:
     case kWebp:
+    case kAvif:
       return true;
     default:
       return false;
@@ -253,7 +265,7 @@ bool ParseContentType(const StringPiece& content_type_str,
   if (semi_split.size() == 0) {
     return false;
   }
-  semi_split[0].CopyToString(mime_type);
+  mime_type->assign(semi_split[0].data(), semi_split[0].size());
   for (int i = 1, n = semi_split.size(); i < n; ++i) {
     StringPieceVector eq_split;
     SplitStringPieceToVector(semi_split[i], "=", &eq_split, false);
@@ -261,7 +273,7 @@ bool ParseContentType(const StringPiece& content_type_str,
       TrimWhitespace(&eq_split[0]);
       if (StringCaseEqual(eq_split[0], "charset")) {
         TrimWhitespace(&eq_split[1]);
-        eq_split[1].CopyToString(charset);
+        charset->assign(eq_split[1].data(), eq_split[1].size());
         break;
       }
     }
@@ -281,11 +293,19 @@ void MimeTypeListToContentTypeSet(const GoogleString& in,
   SplitStringPieceToVector(in, ",", &strings, true /* omit_empty */);
   for (StringPieceVector::const_iterator i = strings.begin(), e = strings.end();
        i != e; ++i) {
-    const ContentType* ct = MimeTypeToContentType(*i);
+    // Mime-type lists are commonly written with whitespace after the
+    // commas (e.g. "text/html, application/xhtml+xml"); trim each entry
+    // before lookup.
+    StringPiece trimmed(*i);
+    TrimWhitespace(&trimmed);
+    if (trimmed.empty()) {
+      continue;
+    }
+    const ContentType* ct = MimeTypeToContentType(trimmed);
     if (ct == nullptr) {
-      LOG(WARNING) << "'" << *i << "' is not a recognized mime-type.";
+      LOG(WARNING) << "'" << trimmed << "' is not a recognized mime-type.";
     } else {
-      VLOG(1) << "Adding '" << *i << "' to the content-type set.";
+      VLOG(1) << "Adding '" << trimmed << "' to the content-type set.";
       out->insert(ct);
     }
   }
@@ -319,6 +339,7 @@ bool ContentType::IsLikelyStaticResource() const {
     case kVideo:
     case kAudio:
     case kWebp:
+    case kAvif:
       return true;
   };
   LOG(DFATAL) << "Unexpected content type: " << type_;

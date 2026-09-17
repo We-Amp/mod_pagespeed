@@ -17,11 +17,12 @@
  * under the License.
  */
 
+#include <memory>
+
 #include "net/instaweb/spriter/public/image_spriter.h"
 
 #include "net/instaweb/spriter/image_library_interface.h"
 #include "net/instaweb/spriter/public/image_spriter.pb.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "test/net/instaweb/spriter/mock_image_library_interface.h"
 #include "test/pagespeed/kernel/base/gmock.h"
 #include "test/pagespeed/kernel/base/gtest.h"
@@ -79,7 +80,8 @@ TEST(SpriterTest, ZeroImages) {
   FailOnImageLibError no_failures_allowed;
 
   std::unique_ptr<StrictMock<MockImageLibraryInterface::MockCanvas> >
-      mock_canvas(new StrictMock<MockImageLibraryInterface::MockCanvas>);
+      mock_canvas =
+          std::make_unique<StrictMock<MockImageLibraryInterface::MockCanvas>>();
 
   testing::StrictMock<MockImageLibraryInterface> mock_image_lib(
       kInBasePath, kOutBasePath, &no_failures_allowed);
@@ -115,10 +117,12 @@ TEST(SpriterTest, OneImage) {
   FailOnImageLibError no_failures_allowed;
 
   std::unique_ptr<StrictMock<MockImageLibraryInterface::MockCanvas> >
-      mock_canvas(new StrictMock<MockImageLibraryInterface::MockCanvas>);
+      mock_canvas =
+          std::make_unique<StrictMock<MockImageLibraryInterface::MockCanvas>>();
 
   std::unique_ptr<StrictMock<MockImageLibraryInterface::MockImage> >
-      mock_image_a(new StrictMock<MockImageLibraryInterface::MockImage>);
+      mock_image_a =
+          std::make_unique<StrictMock<MockImageLibraryInterface::MockImage>>();
 
   testing::StrictMock<MockImageLibraryInterface> mock_image_lib(
       kInBasePath, kOutBasePath, &no_failures_allowed);
@@ -168,13 +172,16 @@ TEST(SpriterTest, TwoImages) {
   FailOnImageLibError no_failures_allowed;
 
   std::unique_ptr<StrictMock<MockImageLibraryInterface::MockCanvas> >
-      mock_canvas(new StrictMock<MockImageLibraryInterface::MockCanvas>);
+      mock_canvas =
+          std::make_unique<StrictMock<MockImageLibraryInterface::MockCanvas>>();
 
   std::unique_ptr<StrictMock<MockImageLibraryInterface::MockImage> >
-      mock_image_a(new StrictMock<MockImageLibraryInterface::MockImage>);
+      mock_image_a =
+          std::make_unique<StrictMock<MockImageLibraryInterface::MockImage>>();
 
   std::unique_ptr<StrictMock<MockImageLibraryInterface::MockImage> >
-      mock_image_b(new StrictMock<MockImageLibraryInterface::MockImage>);
+      mock_image_b =
+          std::make_unique<StrictMock<MockImageLibraryInterface::MockImage>>();
 
   testing::StrictMock<MockImageLibraryInterface> mock_image_lib(
       kInBasePath, kOutBasePath, &no_failures_allowed);

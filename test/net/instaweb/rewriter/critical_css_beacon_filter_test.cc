@@ -28,6 +28,7 @@
 #include "net/instaweb/rewriter/public/static_asset_manager.h"
 #include "net/instaweb/util/public/mock_property_page.h"
 #include "net/instaweb/util/public/property_cache.h"
+#include "pagespeed/kernel/base/escaping.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -133,9 +134,13 @@ class CriticalCssBeaconFilterTestBase : public RewriteTestBase {
                server_context()->static_asset_manager()->GetAsset(
                    StaticAssetEnum::CRITICAL_CSS_BEACON_JS, options()),
                "pagespeed.selectors=[", selectors, "];");
-    StrAppend(&html, "pagespeed.criticalCssBeaconInit('",
-              options()->beacon_url().http, "','", kTestDomain, "','0','",
-              ExpectedNonce(),
+    // Mirror the production code, which JS-escapes the beacon URL before
+    // splicing it into the single-quoted criticalCssBeaconInit(...) argument.
+    GoogleString escaped_beacon_url;
+    EscapeToJsStringLiteral(options()->beacon_url().http,
+                            false /* add_quotes */, &escaped_beacon_url);
+    StrAppend(&html, "pagespeed.criticalCssBeaconInit('", escaped_beacon_url,
+              "','", kTestDomain, "','0','", ExpectedNonce(),
               "',pagespeed.selectors);"
               "</script></body>");
     return html;
@@ -152,7 +157,8 @@ class CriticalCssBeaconFilterTestBase : public RewriteTestBase {
   }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(CriticalCssBeaconFilterTestBase);
+  CriticalCssBeaconFilterTestBase(const CriticalCssBeaconFilterTestBase&) = delete;
+  CriticalCssBeaconFilterTestBase& operator=(const CriticalCssBeaconFilterTestBase&) = delete;
 };
 
 // Standard test setup enables filter via RewriteOptions.
@@ -169,12 +175,130 @@ class CriticalCssBeaconFilterTest : public CriticalCssBeaconFilterTestBase {
   }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(CriticalCssBeaconFilterTest);
+  CriticalCssBeaconFilterTest(const CriticalCssBeaconFilterTest&) = delete;
+  CriticalCssBeaconFilterTest& operator=(const CriticalCssBeaconFilterTest&) = delete;
 };
 
 TEST_F(CriticalCssBeaconFilterTest, ExtractFromInlineStyle) {
   ValidateExpectedUrl(kTestDomain, InputHtml(kInlineStyle),
                       BeaconHtml(kInlineStyle, kSelectorsInline));
+}
+
+TEST_F(CriticalCssBeaconFilterTest, GroupRuleSelectorsBeaconed) {
+  // Selectors inside conditional group rules (@supports/@layer/@container)
+  // are beacon candidates: the condition cannot be evaluated server-side,
+  // the beacon JS tests candidates against the rendered DOM regardless of
+  // whether any rule under them applies, and the selector filter keeps
+  // survivors wrapped in their group prelude so the browser re-evaluates
+  // the condition — a candidate under a false condition can only cost
+  // subset bytes, never styling.
+  const char kInlineWithGroup[] =
+      "<style>"
+      "a{color:red}"
+      "@supports (display: grid){section{display:grid}}"
+      "p{color:green}"
+      "</style>";
+  ValidateExpectedUrl(kTestDomain, InputHtml(kInlineWithGroup),
+                      BeaconHtml(kInlineWithGroup, "\"a\",\"p\",\"section\""));
+}
+
+TEST_F(CriticalCssBeaconFilterTest, NestedGroupSelectorsBeaconed) {
+  // Selectors from nested group bodies are collected once and deduped with
+  // top-level occurrences of the same selector.
+  const char kInlineNestedGroups[] =
+      "<style>"
+      "a{color:red}"
+      "@layer l{@supports (display: grid){a{color:green}section{display:grid}}}"
+      "</style>";
+  ValidateExpectedUrl(kTestDomain, InputHtml(kInlineNestedGroups),
+                      BeaconHtml(kInlineNestedGroups, "\"a\",\"section\""));
+}
+
+TEST_F(CriticalCssBeaconFilterTest, GroupMediaGatesBeaconing) {
+  // The group node's media annotation (from an enclosing top-level @media)
+  // gates the whole body BEFORE recursion: "aside" sits under a print-only
+  // @media, and the body ruleset's own empty annotation must not let it
+  // leak into the candidate set.
+  const char kInlinePrintGatedGroup[] =
+      "<style>"
+      "a{color:red}"
+      "p{color:green}"
+      "@media print{@supports (display: grid){aside{color:red}}}"
+      "</style>";
+  ValidateExpectedUrl(kTestDomain, InputHtml(kInlinePrintGatedGroup),
+                      BeaconHtml(kInlinePrintGatedGroup, kSelectorsInline));
+}
+
+TEST_F(CriticalCssBeaconFilterTest, GroupUnderScreenMediaBeaconed) {
+  const char kInlineScreenGatedGroup[] =
+      "<style>"
+      "a{color:red}"
+      "p{color:green}"
+      "@media screen{@supports (display: grid){aside{color:red}}}"
+      "</style>";
+  ValidateExpectedUrl(kTestDomain, InputHtml(kInlineScreenGatedGroup),
+                      BeaconHtml(kInlineScreenGatedGroup,
+                                 "\"a\",\"aside\",\"p\""));
+}
+
+TEST_F(CriticalCssBeaconFilterTest, GroupUnderRawMediaQueryBeaconed) {
+  // A raw MQ4 media form ("(width >= 768px)") cannot be evaluated
+  // server-side; CanMediaAffectScreen treats it as screen-affecting, so the
+  // gated group's selectors are conservatively collected.
+  const char kInlineRawMediaGroup[] =
+      "<style>"
+      "a{color:red}"
+      "p{color:green}"
+      "@media (width >= 768px){@supports (display: grid){aside{color:red}}}"
+      "</style>";
+  ValidateExpectedUrl(kTestDomain, InputHtml(kInlineRawMediaGroup),
+                      BeaconHtml(kInlineRawMediaGroup,
+                                 "\"a\",\"aside\",\"p\""));
+}
+
+TEST_F(CriticalCssBeaconFilterTest, PureGroupRuleArmsBeacon) {
+  // A sheet whose every rule lives inside @layer (Tailwind-v4 default
+  // output) must still produce candidates: with an empty candidate set
+  // PrepareForBeaconInsertion returns kDoNotBeacon and the page would never
+  // instrument, permanently disabling prioritize_critical_css for it.
+  const char kInlinePureLayer[] = "<style>@layer base{p{color:green}}</style>";
+  ValidateExpectedUrl(kTestDomain, InputHtml(kInlinePureLayer),
+                      BeaconHtml(kInlinePureLayer, "\"p\""));
+}
+
+// Regression: the beacon URL is JS-escaped (matching page_url) before it is
+// spliced into the single-quoted criticalCssBeaconInit(...) argument, so a
+// single quote in the (admin-configured) beacon URL is emitted as \' and
+// cannot terminate the JS string literal early. BeaconHtml() applies the same
+// escaping, so the exact-match validation fails if the filter emits a raw
+// quote.
+TEST_F(CriticalCssBeaconFilterTest, BeaconUrlJsEscaped) {
+  options()->ClearSignatureForTesting();
+  options()->set_beacon_url("http://test.com/beacon'x");
+  options()->ComputeSignature();
+  ValidateExpectedUrl(kTestDomain, InputHtml(kInlineStyle),
+                      BeaconHtml(kInlineStyle, kSelectorsInline));
+  // The raw, unescaped single-quote form must not appear in the output.
+  EXPECT_EQ(GoogleString::npos, output_buffer_.find("beacon'x"));
+}
+
+TEST_F(CriticalCssBeaconFilterTest, CspForbidsInlineScript) {
+  // The beacon bootstrap is an inline script; under a script-src policy
+  // without 'unsafe-inline' the browser blocks it, so no beaconing.
+  const char kCsp[] =
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"script-src *;\">";
+  ValidateNoChanges(kTestDomain, InputHtml(StrCat(kCsp, kInlineStyle)));
+}
+
+TEST_F(CriticalCssBeaconFilterTest, CspAllowsInlineScript) {
+  // With 'unsafe-inline' permitted the filter behaves as usual.
+  const char kCsp[] =
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"script-src * 'unsafe-inline';\">";
+  GoogleString head = StrCat(kCsp, kInlineStyle);
+  ValidateExpectedUrl(kTestDomain, InputHtml(head),
+                      BeaconHtml(head, kSelectorsInline));
 }
 
 TEST_F(CriticalCssBeaconFilterTest, DisabledForIE) {
@@ -355,7 +479,8 @@ class CriticalCssBeaconOnlyTest : public CriticalCssBeaconFilterTestBase {
  private:
   CriticalCssBeaconFilter* filter_;  // Owned by rewrite_driver()
 
-  DISALLOW_COPY_AND_ASSIGN(CriticalCssBeaconOnlyTest);
+  CriticalCssBeaconOnlyTest(const CriticalCssBeaconOnlyTest&) = delete;
+  CriticalCssBeaconOnlyTest& operator=(const CriticalCssBeaconOnlyTest&) = delete;
 };
 
 // Make sure we re-beacon if candidate data changes.

@@ -46,7 +46,8 @@ class DeterministicJsFilter : public CommonFilter {
  private:
   bool found_head_;
 
-  DISALLOW_COPY_AND_ASSIGN(DeterministicJsFilter);
+  DeterministicJsFilter(const DeterministicJsFilter&) = delete;
+  DeterministicJsFilter& operator=(const DeterministicJsFilter&) = delete;
 };
 
 }  // namespace net_instaweb

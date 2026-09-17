@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<!--
+  SPDX-License-Identifier: Apache-2.0
+  Copyright (c) 2024-2026 We-Amp B.V.
+-->
+
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Rewrite JavaScript Test</title>
+    <link rel="stylesheet" href="../styles/main.css">
+</head>
+<body>
+    <h1>Rewrite JavaScript Test</h1>
+    <p>This page tests the rewrite_javascript filter that minifies JavaScript files.</p>
+    <p>When rewrite_javascript filter is enabled:</p>
+    <ul>
+        <li>External JS files should be minified</li>
+        <li>Comments should be removed</li>
+        <li>Whitespace should be reduced</li>
+        <li>Functionality should be preserved</li>
+    </ul>
+    <div id="output"></div>
+
+    <!-- Inline JavaScript block for testing inline minification -->
+    <script id="int1">
+        // This comment will be removed
+        var state = 0;
+        document.write("Hello from inline script");
+        /* preserved */
+    </script>
+
+    <!-- External JavaScript files that should be minified -->
+    <script src="../scripts/example.js"></script>
+    <script src="../scripts/helper.js"></script>
+</body>
+</html>

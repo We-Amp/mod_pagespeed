@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 google_sparsehash_build_rule = """
 cc_library(
     name = "google_sparsehash",
@@ -12,6 +15,11 @@ cc_library(
         "src/google/sparsehash/sparsehashtable.h",
         "src/google/type_traits.h",
     ],
+    # Add cstring include for memset/memcpy - newer GCC requires explicit include
+    copts = select({
+        "@platforms//os:windows": [],
+        "//conditions:default": ["-include", "cstring"],
+    }),
     visibility = ["//visibility:public"],
     strip_include_prefix = "src/",
 

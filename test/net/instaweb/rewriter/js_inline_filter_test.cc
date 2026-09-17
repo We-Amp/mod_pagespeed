@@ -173,6 +173,168 @@ TEST_F(JsInlineFilterTest, DoInlineJavascriptSimpleHtml) {
                        "function id(x) { return x; }\n", true);
 }
 
+TEST_F(JsInlineFilterTest, DoNotInlineDeferScript) {
+  SetHtmlMimetype();
+  AddFilter(RewriteOptions::kInlineJavascript);
+
+  static const char kJs[] = "function id(x) { return x; }\n";
+  SetResponseWithDefaultHeaders("script.js", kContentTypeJavascript, kJs, 3000);
+
+  ValidateNoChanges("defer", "<script src=\"script.js\" defer></script>");
+  EXPECT_EQ(0, statistics()->GetVariable(JsInlineFilter::kNumJsInlined)->Get());
+}
+
+TEST_F(JsInlineFilterTest, DoNotInlineDeferScriptWithWhitespace) {
+  SetHtmlMimetype();
+  AddFilter(RewriteOptions::kInlineJavascript);
+
+  static const char kJs[] = "function id(x) { return x; }\n";
+  SetResponseWithDefaultHeaders("script.js", kContentTypeJavascript, kJs, 3000);
+
+  // Once the non-sync bail fires, Characters() must not strip the
+  // intra-element whitespace either: the tag round-trips unchanged.
+  ValidateNoChanges("defer_ws", "<script src=\"script.js\" defer> </script>");
+  EXPECT_EQ(0, statistics()->GetVariable(JsInlineFilter::kNumJsInlined)->Get());
+}
+
+TEST_F(JsInlineFilterTest, DoNotInlineAsyncScript) {
+  SetHtmlMimetype();
+  AddFilter(RewriteOptions::kInlineJavascript);
+
+  static const char kJs[] = "function id(x) { return x; }\n";
+  SetResponseWithDefaultHeaders("script.js", kContentTypeJavascript, kJs, 3000);
+
+  ValidateNoChanges("async", "<script src=\"script.js\" async></script>");
+  EXPECT_EQ(0, statistics()->GetVariable(JsInlineFilter::kNumJsInlined)->Get());
+}
+
+TEST_F(JsInlineFilterTest, DoNotInlineAsyncDeferScript) {
+  SetHtmlMimetype();
+  AddFilter(RewriteOptions::kInlineJavascript);
+
+  static const char kJs[] = "function id(x) { return x; }\n";
+  SetResponseWithDefaultHeaders("script.js", kContentTypeJavascript, kJs, 3000);
+
+  ValidateNoChanges("async_defer",
+                    "<script src=\"script.js\" async defer></script>");
+  EXPECT_EQ(0, statistics()->GetVariable(JsInlineFilter::kNumJsInlined)->Get());
+}
+
+TEST_F(JsInlineFilterTest, DoNotInlineForEventScript) {
+  SetHtmlMimetype();
+  AddFilter(RewriteOptions::kInlineJavascript);
+
+  static const char kJs[] = "function id(x) { return x; }\n";
+  SetResponseWithDefaultHeaders("script.js", kContentTypeJavascript, kJs, 3000);
+
+  // IE legacy for=/event= scripts don't run synchronously either.
+  ValidateNoChanges(
+      "for_event",
+      "<script src=\"script.js\" for=\"window\" event=\"onclick\"></script>");
+  EXPECT_EQ(0, statistics()->GetVariable(JsInlineFilter::kNumJsInlined)->Get());
+}
+
+TEST_F(JsInlineFilterTest, DoNotInlineForOnlyScript) {
+  SetHtmlMimetype();
+  AddFilter(RewriteOptions::kInlineJavascript);
+
+  static const char kJs[] = "function id(x) { return x; }\n";
+  SetResponseWithDefaultHeaders("script.js", kContentTypeJavascript, kJs, 3000);
+
+  // HTML5: for= without event= means the script must not execute at all,
+  // even with the magic value that would be ignored if event= were present.
+  // Inlining it would make a never-running script execute synchronously.
+  ValidateNoChanges("for_only",
+                    "<script src=\"script.js\" for=\"window\"></script>");
+  EXPECT_EQ(0, statistics()->GetVariable(JsInlineFilter::kNumJsInlined)->Get());
+}
+
+TEST_F(JsInlineFilterTest, DoNotInlineEventOnlyScript) {
+  SetHtmlMimetype();
+  AddFilter(RewriteOptions::kInlineJavascript);
+
+  static const char kJs[] = "function id(x) { return x; }\n";
+  SetResponseWithDefaultHeaders("script.js", kContentTypeJavascript, kJs, 3000);
+
+  // Same for event= without for=.
+  ValidateNoChanges("event_only",
+                    "<script src=\"script.js\" event=\"onload\"></script>");
+  EXPECT_EQ(0, statistics()->GetVariable(JsInlineFilter::kNumJsInlined)->Get());
+}
+
+TEST_F(JsInlineFilterTest, DoInlineSyncScriptControl) {
+  SetHtmlMimetype();
+  AddFilter(RewriteOptions::kInlineJavascript);
+
+  static const char kJs[] = "function id(x) { return x; }\n";
+  SetResponseWithDefaultHeaders("script.js", kContentTypeJavascript, kJs, 3000);
+
+  // Same setup without async/defer must still inline.
+  ValidateExpected("sync_control", "<script src=\"script.js\"></script>",
+                   StrCat("<script>", kJs, "</script>"));
+  EXPECT_EQ(1, statistics()->GetVariable(JsInlineFilter::kNumJsInlined)->Get());
+}
+
+TEST_F(JsInlineFilterTest, DoInlineForWindowOnloadScript) {
+  SetHtmlMimetype();
+  AddFilter(RewriteOptions::kInlineJavascript);
+
+  static const char kJs[] = "function id(x) { return x; }\n";
+  SetResponseWithDefaultHeaders("script.js", kContentTypeJavascript, kJs, 3000);
+
+  // HTML5 says for="window" event="onload" is handled as if absent, so the
+  // scanner reports kExecuteSync and inlining proceeds. RenderInline only
+  // deletes src=; the for/event attributes are preserved.
+  ValidateExpected(
+      "for_window_onload",
+      "<script src=\"script.js\" for=\"window\" event=\"onload\"></script>",
+      StrCat("<script for=\"window\" event=\"onload\">", kJs, "</script>"));
+  EXPECT_EQ(1, statistics()->GetVariable(JsInlineFilter::kNumJsInlined)->Get());
+}
+
+TEST_F(JsInlineFilterTest, DeferScriptDebugMessage) {
+  SetHtmlMimetype();
+  AddFilter(RewriteOptions::kInlineJavascript);
+  EnableDebug();
+
+  static const char kJs[] = "function id(x) { return x; }\n";
+  SetResponseWithDefaultHeaders("script.js", kContentTypeJavascript, kJs, 3000);
+
+  ValidateExpected("defer_debug", "<script src=\"script.js\" defer></script>",
+                   "<script src=\"script.js\" defer></script>"
+                   "<!--JS not inlined because of the async, defer, for, "
+                   "or event attribute-->");
+}
+
+TEST_F(JsInlineFilterTest, DoNotInlineModuleScript) {
+  SetHtmlMimetype();
+  AddFilter(RewriteOptions::kInlineJavascript);
+
+  static const char kJs[] = "export function id(x) { return x; }\n";
+  SetResponseWithDefaultHeaders("script.js", kContentTypeJavascript, kJs, 3000);
+
+  // Inlining a module would change the base URL its relative imports resolve
+  // against, change import.meta.url, and drop the CORS-mode fetch context.
+  ValidateNoChanges("module",
+                    "<script src=\"script.js\" type=\"module\"></script>");
+  EXPECT_EQ(0, statistics()->GetVariable(JsInlineFilter::kNumJsInlined)->Get());
+}
+
+TEST_F(JsInlineFilterTest, ModuleScriptDebugMessage) {
+  SetHtmlMimetype();
+  AddFilter(RewriteOptions::kInlineJavascript);
+  EnableDebug();
+
+  static const char kJs[] = "export function id(x) { return x; }\n";
+  SetResponseWithDefaultHeaders("script.js", kContentTypeJavascript, kJs, 3000);
+
+  ValidateExpected("module_debug",
+                   "<script src=\"script.js\" type=\"module\"></script>",
+                   "<script src=\"script.js\" type=\"module\"></script>"
+                   "<!--JS not inlined: module scripts are never inlined "
+                   "(import resolution and fetch semantics would change)-->");
+}
+
 class JsInlineFilterTestCustomOptions : public JsInlineFilterTest {
  protected:
   void SetUp() override {}
@@ -305,6 +467,21 @@ TEST_F(JsInlineFilterTest, DoNotInlineJavascriptXhtmlWithCdataEnd) {
   TestInlineJavascriptXhtml("http://www.example.com/index.html",
                             "http://www.example.com/script.js",
                             "function end(x) { return ']]>'; }\n", false);
+}
+
+TEST_F(JsInlineFilterTest, XhtmlCdataEndDoesNotCountAsInlined) {
+  // Regression: in XHTML, an external script whose body contains "]]>" cannot
+  // be wrapped in a CDATA block and is deliberately left external.  The
+  // num_js_inlined statistic must not be incremented for a script that was not
+  // actually inlined (it used to be over-counted on this skip path).
+  Variable* num_js_inlined =
+      statistics()->GetVariable(JsInlineFilter::kNumJsInlined);
+  EXPECT_EQ(0, num_js_inlined->Get());
+  TestInlineJavascriptXhtml("http://www.example.com/index.html",
+                            "http://www.example.com/script.js",
+                            "function end(x) { return ']]>'; }\n",
+                            false);  // not inlined
+  EXPECT_EQ(0, num_js_inlined->Get());
 }
 
 TEST_F(JsInlineFilterTest, CachedRewrite) {

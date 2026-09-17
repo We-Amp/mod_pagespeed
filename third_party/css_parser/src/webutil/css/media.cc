@@ -51,8 +51,23 @@ MediaQuery* MediaQuery::DeepCopy() const {
   return copy;
 }
 
+MediaExpression* MediaExpression::NewRaw(const CssStringPiece& bytes) {
+  MediaExpression* expression = new MediaExpression(UnicodeText());
+  expression->has_value_ = true;
+  expression->is_raw_ = true;
+  expression->value_.CopyUTF8(bytes.data(), bytes.size());
+  return expression;
+}
+
 MediaExpression* MediaExpression::DeepCopy() const {
-  if (this->has_value()) {
+  if (this->is_raw()) {
+    // The raw flag must survive every copy: @media annotations are DeepCopy'd
+    // onto each enclosed ruleset, and a raw value serialized through the
+    // name:value form would corrupt the query.
+    MediaExpression* copy = new MediaExpression(this->name(), this->value());
+    copy->is_raw_ = true;
+    return copy;
+  } else if (this->has_value()) {
     return new MediaExpression(this->name(), this->value());
   } else {
     return new MediaExpression(this->name());

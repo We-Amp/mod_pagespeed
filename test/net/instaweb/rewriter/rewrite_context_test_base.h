@@ -25,6 +25,7 @@
 
 #include <utility>
 #include <vector>
+#include <memory>
 
 #include "net/instaweb/rewriter/cached_result.pb.h"
 #include "net/instaweb/rewriter/public/output_resource.h"
@@ -40,7 +41,6 @@
 #include "net/instaweb/rewriter/public/single_rewrite_context.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/timer.h"
@@ -88,7 +88,8 @@ class TrimWhitespaceRewriter : public SimpleTextFilter::Rewriter {
 
   int num_rewrites_;
 
-  DISALLOW_COPY_AND_ASSIGN(TrimWhitespaceRewriter);
+  TrimWhitespaceRewriter(const TrimWhitespaceRewriter&) = delete;
+  TrimWhitespaceRewriter& operator=(const TrimWhitespaceRewriter&) = delete;
 };
 
 // Test filter that replaces a CSS resource URL with a corresponding Pagespeed
@@ -109,7 +110,8 @@ class TrimWhitespaceSyncFilter : public SimpleTextFilter {
   virtual const char* name() { return "TrimWhitespaceSync"; }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(TrimWhitespaceSyncFilter);
+  TrimWhitespaceSyncFilter(const TrimWhitespaceSyncFilter&) = delete;
+  TrimWhitespaceSyncFilter& operator=(const TrimWhitespaceSyncFilter&) = delete;
 };
 
 // A similarly structured test-filter: this one just upper-cases its text.
@@ -154,7 +156,8 @@ class UpperCaseRewriter : public SimpleTextFilter::Rewriter {
   OutputResourceKind kind_;
   int num_rewrites_;
 
-  DISALLOW_COPY_AND_ASSIGN(UpperCaseRewriter);
+  UpperCaseRewriter(const UpperCaseRewriter&) = delete;
+  UpperCaseRewriter& operator=(const UpperCaseRewriter&) = delete;
 };
 
 // Filter that contains nested resources that must themselves
@@ -235,7 +238,8 @@ class NestedFilter : public RewriteFilter {
     bool chain_;
     ResourceSlotVector nested_slots_;
 
-    DISALLOW_COPY_AND_ASSIGN(Context);
+    Context(const Context&) = delete;
+    Context& operator=(const Context&) = delete;
   };
 
   RewriteContext* MakeRewriteContext() override {
@@ -264,7 +268,8 @@ class NestedFilter : public RewriteFilter {
   // Stats
   int num_top_rewrites_;
 
-  DISALLOW_COPY_AND_ASSIGN(NestedFilter);
+  NestedFilter(const NestedFilter&) = delete;
+  NestedFilter& operator=(const NestedFilter&) = delete;
 };
 
 // Simple version of CombineCssFilter.
@@ -422,7 +427,8 @@ class CombiningFilter : public RewriteFilter {
   bool disable_successors_;  // if true, will disable successors for all
                              // slots, not just mutated ones.
 
-  DISALLOW_COPY_AND_ASSIGN(CombiningFilter);
+  CombiningFilter(const CombiningFilter&) = delete;
+  CombiningFilter& operator=(const CombiningFilter&) = delete;
 };
 
 class RewriteContextTestBase : public RewriteTestBase {

@@ -28,13 +28,13 @@
 #include "net/instaweb/rewriter/public/rewrite_driver_factory.h"
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "net/instaweb/util/public/property_cache.h"
+#include "pagespeed/envoy/envoy_dispatcher_adapter.h"
 #include "pagespeed/envoy/envoy_message_handler.h"
 #include "pagespeed/envoy/envoy_rewrite_options.h"
 #include "pagespeed/envoy/envoy_server_context.h"
 #include "pagespeed/envoy/log_message_handler.h"
 #include "pagespeed/kernel/base/google_message_handler.h"
 #include "pagespeed/kernel/base/null_shared_mem.h"
-#include "pagespeed/kernel/base/posix_timer.h"
 #include "pagespeed/kernel/base/stdio_file_system.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -42,11 +42,14 @@
 #include "pagespeed/kernel/http/content_type.h"
 #include "pagespeed/kernel/sharedmem/shared_circular_buffer.h"
 #include "pagespeed/kernel/sharedmem/shared_mem_statistics.h"
+#include "pagespeed/kernel/thread/event_scheduler.h"
 #include "pagespeed/kernel/thread/pthread_shared_mem.h"
 #include "pagespeed/kernel/thread/scheduler_thread.h"
-#include "pagespeed/kernel/thread/slow_worker.h"
+#include "pagespeed/kernel/util/platform.h"
+#include "pagespeed/kernel/util/threadsafe_lock_manager.h"
+#include "pagespeed/system/circuit_breaker_fetcher.h"
+#include "pagespeed/system/curl_url_async_fetcher.h"
 #include "pagespeed/system/in_place_resource_recorder.h"
-#include "pagespeed/system/serf_url_async_fetcher.h"
 #include "pagespeed/system/system_caches.h"
 #include "pagespeed/system/system_rewrite_options.h"
 
@@ -78,7 +81,12 @@ EnvoyRewriteDriverFactory::EnvoyRewriteDriverFactory(
       envoy_shared_circular_buffer_(nullptr),
       hostname_(hostname.as_string()),
       port_(port),
-      shut_down_(false) {
+      shut_down_(false),
+      envoy_dispatcher_(nullptr),
+      event_scheduler_(nullptr),
+      start_time_ms_(0) {
+  // Record start time before any other initialization.
+  start_time_ms_ = timer()->NowMs();
   InitializeDefaultOptions();
   default_options()->set_beacon_url("/envoy_pagespeed_beacon");
   default_options()->set_enabled(RewriteOptions::kEnabledOn);
@@ -91,7 +99,6 @@ EnvoyRewriteDriverFactory::EnvoyRewriteDriverFactory(
   // ExternalClusterSpec spec = {{ExternalServerSpec("127.0.0.1", 11211)}};
   // system_options->set_memcached_servers(spec);
 
-  system_options->set_file_cache_clean_inode_limit(500000);
   system_options->set_file_cache_clean_size_kb(1024 * 10000);  // 10 GB
   system_options->set_avoid_renaming_introspective_javascript(true);
   system_options->set_file_cache_path("/tmp/envoy_pagespeed_cache/");
@@ -111,7 +118,9 @@ EnvoyRewriteDriverFactory::EnvoyRewriteDriverFactory(
   set_message_buffer_size(1024 * 128);
   set_message_handler(envoy_message_handler_);
   set_html_parse_message_handler(envoy_html_parse_message_handler_);
-  StartThreads();
+  // Note: StartThreads() is NOT called here. It must be called explicitly
+  // after construction, optionally after SetEnvoyDispatcher() is called.
+  // This allows using Envoy's native scheduler when a dispatcher is available.
 }
 
 EnvoyRewriteDriverFactory::~EnvoyRewriteDriverFactory() {
@@ -127,7 +136,28 @@ Hasher* EnvoyRewriteDriverFactory::NewHasher() { return new MD5Hasher; }
 
 UrlAsyncFetcher* EnvoyRewriteDriverFactory::AllocateFetcher(
     SystemRewriteOptions* config) {
-  return SystemRewriteDriverFactory::AllocateFetcher(config);
+  // Use curl-based fetcher for all resource fetching.
+  // Curl operates independently of Envoy's ClusterManager, avoiding
+  // TLS initialization issues that previously blocked HTML rewriting.
+  CurlUrlAsyncFetcher* curl_fetcher = new CurlUrlAsyncFetcher(
+      config->fetcher_proxy().c_str(), thread_system(), statistics(), timer(),
+      config->blocking_fetch_timeout_ms(), message_handler());
+  curl_fetcher->set_track_original_content_length(
+      track_original_content_length());
+  curl_fetcher->set_fetch_with_gzip(config->fetch_with_gzip());
+  curl_fetcher->SetHttpsOptions(config->https_options());
+  curl_fetcher->SetSslCertificatesDir(config->ssl_cert_directory());
+  curl_fetcher->SetSslCertificatesFile(config->ssl_cert_file());
+  LOG(INFO) << "Using curl-based fetcher for resource fetching";
+
+  // Wrap with circuit breaker if enabled.
+  if (circuit_breaker_ != nullptr) {
+    LOG(INFO) << "Wrapping fetcher with circuit breaker";
+    return new CircuitBreakerFetcher(curl_fetcher, circuit_breaker_.get(),
+                                     message_handler());
+  }
+
+  return curl_fetcher;
 }
 
 MessageHandler* EnvoyRewriteDriverFactory::DefaultHtmlParseMessageHandler() {
@@ -142,11 +172,14 @@ FileSystem* EnvoyRewriteDriverFactory::DefaultFileSystem() {
   return new StdioFileSystem();
 }
 
-Timer* EnvoyRewriteDriverFactory::DefaultTimer() { return new PosixTimer; }
+Timer* EnvoyRewriteDriverFactory::DefaultTimer() {
+  return Platform::CreateTimer();
+}
 
 NamedLockManager* EnvoyRewriteDriverFactory::DefaultLockManager() {
-  CHECK(false);
-  return nullptr;
+  // Envoy is single-process, multi-threaded. ThreadSafeLockManager provides
+  // in-process thread coordination which is appropriate for this deployment.
+  return new ThreadSafeLockManager(scheduler());
 }
 
 RewriteOptions* EnvoyRewriteDriverFactory::NewRewriteOptions() {
@@ -186,7 +219,21 @@ ServerContext* EnvoyRewriteDriverFactory::NewServerContext() {
 void EnvoyRewriteDriverFactory::ShutDown() {
   if (!shut_down_) {
     shut_down_ = true;
+
+    // Shut down the event dispatcher if we're using Envoy-native scheduling.
+    if (event_dispatcher_ != nullptr) {
+      event_dispatcher_->InitiateShutdown();
+    }
+
     SystemRewriteDriverFactory::ShutDown();
+
+    // Detach the scheduler from the dispatcher before destroying the
+    // adapter; the scheduler itself is owned (and later destroyed) by the
+    // base factory.
+    if (event_scheduler_ != nullptr) {
+      event_scheduler_->DetachDispatcher();
+    }
+    event_dispatcher_.reset();
   }
 }
 
@@ -201,15 +248,49 @@ void EnvoyRewriteDriverFactory::ShutDownMessageHandlers() {
   server_context_message_handlers_.clear();
 }
 
+void EnvoyRewriteDriverFactory::SetEnvoyDispatcher(
+    Envoy::Event::Dispatcher* dispatcher) {
+  CHECK(!threads_started_)
+      << "SetEnvoyDispatcher must be called before StartThreads";
+  envoy_dispatcher_ = dispatcher;
+}
+
+Scheduler* EnvoyRewriteDriverFactory::CreateScheduler() {
+  // Called lazily via RewriteDriverFactory::scheduler(), which owns the
+  // result. Created unattached because the Envoy dispatcher may not be known
+  // yet; StartThreads() attaches it (or starts a SchedulerThread fallback).
+  DCHECK(event_scheduler_ == nullptr);
+  event_scheduler_ = new EventScheduler(thread_system(), timer());
+  return event_scheduler_;
+}
+
 void EnvoyRewriteDriverFactory::StartThreads() {
   if (threads_started_) {
     return;
   }
-  // TODO(oschaaf): Can we use Envoy-native scheduling?
-  SchedulerThread* thread = new SchedulerThread(thread_system(), scheduler());
-  bool ok = thread->Start();
-  CHECK(ok) << "Unable to start scheduler thread";
-  defer_cleanup(thread->MakeDeleter());
+
+  // Ensure the scheduler exists (created via CreateScheduler above).
+  scheduler();
+  CHECK(event_scheduler_ != nullptr);
+
+  if (envoy_dispatcher_ != nullptr) {
+    // Use Envoy's native dispatcher for scheduling: attach it to the
+    // EventScheduler so the event loop drives alarm delivery (rewrite
+    // deadlines, fetch timeouts) without a dedicated SchedulerThread.
+    event_dispatcher_ =
+        std::make_unique<EnvoyDispatcherAdapter>(envoy_dispatcher_, timer());
+    event_scheduler_->AttachDispatcher(event_dispatcher_.get());
+    LOG(INFO) << "Scheduler alarms driven by Envoy dispatcher";
+  } else {
+    // Fallback: Use traditional SchedulerThread approach.
+    // This is used when no Envoy dispatcher is available (e.g., unit tests).
+    SchedulerThread* thread = new SchedulerThread(thread_system(), scheduler());
+    bool ok = thread->Start();
+    CHECK(ok) << "Unable to start scheduler thread";
+    defer_cleanup(thread->MakeDeleter());
+    LOG(INFO) << "Using traditional SchedulerThread for scheduling";
+  }
+
   threads_started_ = true;
 }
 
@@ -219,6 +300,28 @@ void EnvoyRewriteDriverFactory::SetMainConf(EnvoyRewriteOptions* main_options) {
   if (main_options != nullptr) {
     default_options()->MergeOnlyProcessScopeOptions(*main_options);
   }
+}
+
+void EnvoyRewriteDriverFactory::SetCircuitBreakerConfig(bool enabled,
+                                                        int failure_threshold,
+                                                        int success_threshold,
+                                                        int64 timeout_ms) {
+  if (!enabled) {
+    circuit_breaker_.reset();
+    LOG(INFO) << "Circuit breaker disabled";
+    return;
+  }
+
+  CircuitBreaker::Config config;
+  config.failure_threshold = failure_threshold > 0 ? failure_threshold : 5;
+  config.success_threshold = success_threshold > 0 ? success_threshold : 2;
+  config.timeout_ms = timeout_ms > 0 ? timeout_ms : 30000;
+
+  circuit_breaker_ = std::make_unique<CircuitBreaker>(config, timer());
+  LOG(INFO) << "Circuit breaker enabled: failure_threshold="
+            << config.failure_threshold
+            << ", success_threshold=" << config.success_threshold
+            << ", timeout_ms=" << config.timeout_ms;
 }
 
 void EnvoyRewriteDriverFactory::LoggingInit(bool may_install_crash_handler) {
@@ -260,19 +363,7 @@ void EnvoyRewriteDriverFactory::InitStats(Statistics* statistics) {
   // Init Envoy-specific stats.
   EnvoyServerContext::InitStats(statistics);
   InPlaceResourceRecorder::InitStats(statistics);
-}
-
-void EnvoyRewriteDriverFactory::PrepareForkedProcess(const char* name) {
-  // envoy_pid = envoy_getpid(); // Needed for logging to have the right PIDs.
-  SystemRewriteDriverFactory::PrepareForkedProcess(name);
-}
-
-void EnvoyRewriteDriverFactory::NameProcess(const char* name) {
-  SystemRewriteDriverFactory::NameProcess(name);
-  // char name_for_setproctitle[32];
-  // snprintf(name_for_setproctitle, sizeof(name_for_setproctitle),
-  //         "pagespeed %s", name);
-  // envoy_setproctitle(name_for_setproctitle);
+  CurlUrlAsyncFetcher::InitStats(statistics);
 }
 
 }  // namespace net_instaweb

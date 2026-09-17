@@ -51,7 +51,8 @@ class SchedulerThread::CleanupFunction : public Function {
 
  private:
   SchedulerThread* parent_;
-  DISALLOW_COPY_AND_ASSIGN(CleanupFunction);
+  CleanupFunction(const CleanupFunction&) = delete;
+  CleanupFunction& operator=(const CleanupFunction&) = delete;
 };
 
 SchedulerThread::SchedulerThread(ThreadSystem* thread_system,

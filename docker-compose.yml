@@ -1,0 +1,70 @@
+# Docker Compose configuration for mod_pagespeed development
+# Usage:
+#   docker compose up -d          # Start all services
+#   docker compose exec dev bash  # Enter dev container
+#   docker compose down           # Stop all services
+
+services:
+  dev:
+    build:
+      context: ./docker
+      dockerfile: Dockerfile
+    container_name: pagespeed-dev
+    stdin_open: true
+    tty: true
+    volumes:
+      # Mount source code from host
+      - .:/src
+      # Persistent Bazel cache (named volume, works on any machine)
+      - pagespeed-bazel-cache:/home/dev/.cache/bazel
+      # SSH agent forwarding (optional, for private repo fetches during dev)
+      - ${SSH_AUTH_SOCK:-/dev/null}:/ssh-agent
+    environment:
+      # Set PATH explicitly to avoid inheriting host PATH
+      - PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      # Test environment variables for cache backends
+      - REDIS_PORT=6379
+      - MEMCACHED_PORT=11211
+      # Point tests to cache services
+      - REDIS_HOST=redis
+      - MEMCACHED_HOST=memcached
+      # Home directory for dev user
+      - HOME=/home/dev
+      # SSH agent forwarding
+      - SSH_AUTH_SOCK=/ssh-agent
+    depends_on:
+      - redis
+      - memcached
+    # Allow personality() syscall for ThreadSanitizer (TSAN) ASLR control.
+    # Docker's default seccomp profile blocks personality(), causing TSAN
+    # to crash with "CHECK failed: tsan_platform_linux.cpp" in WSL2/Docker.
+    security_opt:
+      - seccomp:unconfined
+    # IPC mode needed for shared memory support in some tests
+    ipc: host
+    # Increase ulimits for bazel
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+
+  redis:
+    image: redis:7-alpine
+    container_name: pagespeed-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
+  memcached:
+    image: memcached:1.6-alpine
+    container_name: pagespeed-memcached
+    ports:
+      - "11211:11211"
+    command: memcached -m 64
+
+volumes:
+  pagespeed-bazel-cache:

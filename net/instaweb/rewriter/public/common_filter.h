@@ -76,8 +76,8 @@ class CommonFilter : public EmptyHtmlFilter {
   // is incredibly ugly). It can be necessitated by other post-</html> content,
   // or by flushes in the body.
   //
-  // Note that if a subclass overloads the Characters function, it needs to call
-  // the parent implementation for this function to be correct.
+  // The required Characters() bookkeeping always runs (Characters() is
+  // sealed), so overriding CharactersImpl() cannot break this.
   void InsertNodeAtBodyEnd(HtmlNode* data);
 
   // Note: Don't overload these methods, overload the implementers instead!
@@ -85,10 +85,9 @@ class CommonFilter : public EmptyHtmlFilter {
   void StartElement(HtmlElement* element) override;
   void EndElement(HtmlElement* element) override;
 
-  // If a subclass overloads this function and wishes to use
-  // InsertNodeAtBodyEnd(), it needs to make an upcall to this implementation
-  // for InsertNodeAtBodyEnd() to work correctly.
-  void Characters(HtmlCharactersNode* characters) override;
+  // Characters() is sealed: it performs the end-of-body bookkeeping that
+  // InsertNodeAtBodyEnd() depends on, then delegates to CharactersImpl().
+  void Characters(HtmlCharactersNode* characters) final;
 
   // Creates an input resource with the url evaluated based on input_url
   // which may need to be absolutified relative to base_url(). Returns NULL
@@ -115,6 +114,18 @@ class CommonFilter : public EmptyHtmlFilter {
   void ResolveUrl(StringPiece input_url, GoogleUrl* out_url);
 
   bool IsRelativeUrlLoadPermittedByCsp(StringPiece url, CspDirective role);
+
+  // Returns true unless the page's Content-Security-Policy forbids execution
+  // of inline <script> elements. The policy is only tracked when the HonorCsp
+  // option is on; otherwise it is empty, which permits everything. Filters
+  // that inject inline scripts must consult this at each injection point --
+  // and before any DOM mutation that depends on the injected script running
+  // -- since a <meta>-delivered policy can arrive mid-document.
+  bool CspPermitsInlineScript() const;
+
+  // Like CspPermitsInlineScript(), but for inline event-handler attributes
+  // (e.g. onload) that a filter would add to an element.
+  bool CspPermitsInlineScriptAttribute() const;
 
   // Returns whether or not the base url is valid.  This value will change
   // as a filter processes the document.  E.g. If there are url refs before
@@ -186,6 +197,12 @@ class CommonFilter : public EmptyHtmlFilter {
   virtual void StartElementImpl(HtmlElement* element) = 0;
   virtual void EndElementImpl(HtmlElement* element) = 0;
 
+  // Characters bookkeeping (tracking of the end-of-body insertion point used
+  // by InsertNodeAtBodyEnd) is done in the sealed Characters() wrapper; it
+  // always runs, so overriders need no upcall. Unlike the hooks above this one
+  // is not pure: most filters ignore character nodes.
+  virtual void CharactersImpl(HtmlCharactersNode* characters);
+
   // ID string used in logging. Inheritors should supply whatever short ID
   // string they use.
   virtual const char* LoggingId() { return Name(); }
@@ -200,7 +217,8 @@ class CommonFilter : public EmptyHtmlFilter {
   HtmlElement* end_body_point_;
   bool seen_base_;
 
-  DISALLOW_COPY_AND_ASSIGN(CommonFilter);
+  CommonFilter(const CommonFilter&) = delete;
+  CommonFilter& operator=(const CommonFilter&) = delete;
 };
 
 }  // namespace net_instaweb

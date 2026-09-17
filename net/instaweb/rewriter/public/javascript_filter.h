@@ -20,6 +20,8 @@
 #ifndef NET_INSTAWEB_REWRITER_PUBLIC_JAVASCRIPT_FILTER_H_
 #define NET_INSTAWEB_REWRITER_PUBLIC_JAVASCRIPT_FILTER_H_
 
+#include <memory>
+
 #include "net/instaweb/rewriter/public/javascript_code_block.h"
 #include "net/instaweb/rewriter/public/resource_slot.h"
 #include "net/instaweb/rewriter/public/rewrite_context.h"
@@ -28,7 +30,6 @@
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/script_tag_scanner.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/html/html_element.h"
 #include "pagespeed/kernel/html/html_filter.h"
@@ -65,7 +66,7 @@ class JavascriptFilter : public RewriteFilter {
 
   void StartDocumentImpl() override { InitializeConfigIfNecessary(); }
   void StartElementImpl(HtmlElement* element) override;
-  void Characters(HtmlCharactersNode* characters) override;
+  void CharactersImpl(HtmlCharactersNode* characters) override;
   void EndElementImpl(HtmlElement* element) override;
   void IEDirective(HtmlIEDirectiveNode* directive) override;
 
@@ -105,7 +106,8 @@ class JavascriptFilter : public RewriteFilter {
   std::unique_ptr<JavascriptRewriteConfig> config_;
   ScriptTagScanner script_tag_scanner_;
 
-  DISALLOW_COPY_AND_ASSIGN(JavascriptFilter);
+  JavascriptFilter(const JavascriptFilter&) = delete;
+  JavascriptFilter& operator=(const JavascriptFilter&) = delete;
 };
 
 class JavascriptSourceMapFilter : public JavascriptFilter {

@@ -1,0 +1,117 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright (c) 2024-2026 We-Amp B.V.
+ */
+
+:root {
+  /* Colors */
+  --ps-primary: #1d4ed8;
+  --ps-primary-hover: #1e40af;
+  --ps-primary-light: #dbeafe;
+  --ps-secondary: #78716c;
+  --ps-success: #1e8e3e;
+  --ps-warning: #f9ab00;
+  --ps-error: #d93025;
+
+  /* Surfaces */
+  --ps-bg: #ffffff;
+  --ps-bg-secondary: #fafaf9;
+  --ps-bg-tertiary: #f5f5f4;
+  --ps-surface: #ffffff;
+  --ps-surface-hover: #f5f5f4;
+
+  /* Text */
+  --ps-text: #1c1917;
+  --ps-text-secondary: #78716c;
+  --ps-text-tertiary: #a8a29e;
+  --ps-text-inverse: #ffffff;
+
+  /* Borders */
+  --ps-border: #e7e5e4;
+  --ps-border-light: #f5f5f4;
+
+  /* Typography */
+  --ps-font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  --ps-font-mono: 'JetBrains Mono', 'Consolas', 'Courier New', monospace;
+  --ps-font-size-xs: 0.75rem;
+  --ps-font-size-sm: 0.875rem;
+  --ps-font-size-base: 1rem;
+  --ps-font-size-lg: 1.125rem;
+  --ps-font-size-xl: 1.25rem;
+  --ps-font-size-2xl: 1.5rem;
+
+  /* Spacing */
+  --ps-space-xs: 0.25rem;
+  --ps-space-sm: 0.5rem;
+  --ps-space-md: 1rem;
+  --ps-space-lg: 1.5rem;
+  --ps-space-xl: 2rem;
+  --ps-space-2xl: 3rem;
+
+  /* Layout */
+  --ps-sidebar-width: 220px;
+  --ps-topbar-height: 48px;
+  --ps-border-radius: 4px;
+  --ps-border-radius-lg: 8px;
+
+  /* Shadows */
+  --ps-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.1);
+  --ps-shadow-md: 0 2px 6px rgba(0, 0, 0, 0.15);
+  --ps-shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ps-primary: #93c5fd;
+    --ps-primary-hover: #bfdbfe;
+    --ps-primary-light: #1e3a5f;
+    --ps-secondary: #a8a29e;
+    --ps-success: #81c995;
+    --ps-warning: #fdd663;
+    --ps-error: #f28b82;
+
+    --ps-bg: #1c1917;
+    --ps-bg-secondary: #292524;
+    --ps-bg-tertiary: #44403c;
+    --ps-surface: #292524;
+    --ps-surface-hover: #44403c;
+
+    --ps-text: #fafaf9;
+    --ps-text-secondary: #d6d3d1;
+    --ps-text-tertiary: #a8a29e;
+    --ps-text-inverse: #1c1917;
+
+    --ps-border: #44403c;
+    --ps-border-light: #292524;
+  }
+}
+
+/* Reset & base styles */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+  font-family: var(--ps-font-family);
+  font-size: var(--ps-font-size-base);
+  color: var(--ps-text);
+  background: var(--ps-bg);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+#app {
+  height: 100%;
+}
+
+code,
+pre {
+  font-family: var(--ps-font-mono);
+  font-size: var(--ps-font-size-sm);
+}

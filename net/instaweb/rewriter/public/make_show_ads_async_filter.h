@@ -51,10 +51,10 @@ class MakeShowAdsAsyncFilter : public CommonFilter {
   void StartDocumentImpl() override;
   void StartElementImpl(HtmlElement* element) override;
   void EndElementImpl(HtmlElement* element) override;
+  void CharactersImpl(HtmlCharactersNode* characters) override;
 
   // Overrides HtmlFilter
   const char* Name() const override { return "MakeShowAdsAsyncFilter"; }
-  void Characters(HtmlCharactersNode* characters) override;
   ScriptUsage GetScriptUsage() const override { return kWillInjectScripts; }
 
  private:
@@ -126,7 +126,8 @@ class MakeShowAdsAsyncFilter : public CommonFilter {
   Variable* show_ads_snippets_not_converted_count_;
   Variable* show_ads_api_replaced_for_async_;
 
-  DISALLOW_COPY_AND_ASSIGN(MakeShowAdsAsyncFilter);
+  MakeShowAdsAsyncFilter(const MakeShowAdsAsyncFilter&) = delete;
+  MakeShowAdsAsyncFilter& operator=(const MakeShowAdsAsyncFilter&) = delete;
 };
 
 }  // namespace net_instaweb

@@ -254,6 +254,11 @@ string Value::ToString() const {
       return Css::EscapeIdentifier(GetIdentifierText());
     case COMMA:
       return ",";
+    case OPERATOR:
+      // Operators (currently just the calc() '+') serialize verbatim; they
+      // must NOT go through EscapeIdentifier, which would emit "\+" — an
+      // escaped-plus identifier, not the addition operator.
+      return string(str_.utf8_data(), str_.utf8_length());
     case UNKNOWN:
       return "UNKNOWN";
     case DEFAULT:
@@ -325,11 +330,21 @@ string SimpleSelector::ToString() const {
       return absl::StrFormat(".%s", Css::EscapeIdentifier(value()).c_str());
     case ID:
       return absl::StrFormat("#%s", Css::EscapeIdentifier(value()).c_str());
-    case PSEUDOCLASS:
-      return absl::StrFormat("%s%s",
-                             // pseudoclass_separator() is either ":" or "::".
-                             UnicodeTextToUTF8(pseudoclass_separator()).c_str(),
-                             Css::EscapeIdentifier(pseudoclass()).c_str());
+    case PSEUDOCLASS: {
+      string result = absl::StrFormat(
+          "%s%s",
+          // pseudoclass_separator() is either ":" or "::".
+          UnicodeTextToUTF8(pseudoclass_separator()).c_str(),
+          Css::EscapeIdentifier(pseudoclass()).c_str());
+      // Functional pseudo-class argument pass-through: the
+      // argument text was captured verbatim, re-emit it inside the parens.
+      if (has_function_arguments()) {
+        result += "(";
+        result += UnicodeTextToUTF8(function_arguments());
+        result += ")";
+      }
+      return result;
+    }
     case LANG:
       return absl::StrFormat(":lang(%s)",
                              Css::EscapeIdentifier(lang()).c_str());
@@ -420,12 +435,24 @@ string UnparsedRegion::ToString() const {
 
 string MediaExpression::ToString() const {
   string result = "(";
-  result += Css::EscapeIdentifier(name());
-  if (has_value()) {
-    result += ": ";
-    // Note: While this is not a string, it is a mixture of text that should
-    // be escaped in roughly the same way.
-    result += Css::EscapeString(value());
+  if (is_raw()) {
+    // Raw expression: the bytes must stay textually faithful — this string
+    // feeds CanMediaAffectScreen(), whose token scan treats a leading '(' as
+    // "may affect screen" (conservative keep). A ',' inside the raw bytes
+    // cannot flip that scan to a false "no": a media type or '(' precedes it,
+    // so an earlier fragment already answered yes. (A NOT-qualified raw
+    // query can still answer "no" — correct, and identical to both the
+    // pre-raw "not all" demotion and MQ4 unknown-value semantics.)
+    // No escaping.
+    result.append(value().utf8_data(), value().utf8_length());
+  } else {
+    result += Css::EscapeIdentifier(name());
+    if (has_value()) {
+      result += ": ";
+      // Note: While this is not a string, it is a mixture of text that should
+      // be escaped in roughly the same way.
+      result += Css::EscapeString(value());
+    }
   }
   result += ")";
   return result;
@@ -468,6 +495,25 @@ string Ruleset::ToString() const {
     case UNPARSED_REGION:
       result = unparsed_region()->ToString();
       break;
+    case GROUP_RULE: {
+      // Body charsets/imports are empty by construction; emit the two
+      // populated buckets in the same order as Stylesheet::ToString().
+      string body;
+      if (!group_body().font_faces().empty()) {
+        body = JoinElementStrings(group_body().font_faces(), " ");
+      }
+      string body_rulesets = JoinElementStrings(group_body().rulesets(), " ");
+      if (!body_rulesets.empty()) {
+        if (!body.empty()) body += " ";
+        body += body_rulesets;
+      }
+      result += group_prelude() + " {";
+      if (!body.empty()) {
+        result += " " + body;
+      }
+      result += " }";
+      break;
+    }
   }
   if (!media_queries().empty()) result += " }";
   return result;

@@ -48,7 +48,11 @@ enum ImageFormat {
   IMAGE_JPEG,
   IMAGE_PNG,
   IMAGE_GIF,
-  IMAGE_WEBP
+  IMAGE_WEBP,
+  // AVIF collapses to a single ImageFormat value (mirroring IMAGE_WEBP), even
+  // though the proto net_instaweb::ImageType distinguishes the lossless/alpha
+  // and animated sub-variants. Codec wiring is deferred (Stream B/C).
+  IMAGE_AVIF
 };
 
 enum PixelFormat {
@@ -74,9 +78,25 @@ enum PreferredLibwebpLevel {
   WEBP_ANIMATED
 };
 
+// Request-capability level for AVIF, mirroring PreferredLibwebpLevel. This is a
+// pure pre-decode capability derived from the request (Accept: image/avif and
+// options); it is computed independently of the libwebp level and both may ride
+// in the metadata cache key. The per-image AVIF-vs-WebP-vs-original choice is an
+// encode-time decision (Stream E) recorded in the .avif extension, not here.
+enum PreferredAvifLevel {
+  // Disjoint LIBAVIF_ prefix (mirroring how PreferredLibwebpLevel's WEBP_*
+  // enumerators stay disjoint from the proto LibWebpLevel's LIBWEBP_* values) so
+  // these do NOT share exact spelling with the proto ResourceContext::AVIF_*
+  // enumerators and cannot collide if both are brought unqualified into scope.
+  LIBAVIF_NONE = 0,
+  LIBAVIF_LOSSY,
+  LIBAVIF_LOSSLESS,
+  LIBAVIF_ANIMATED
+};
+
 const uint8_t kAlphaOpaque = 255;
 const uint8_t kAlphaTransparent = 0;
-typedef uint8_t PixelRgbaChannels[RGBA_NUM_CHANNELS];
+using PixelRgbaChannels = uint8_t[RGBA_NUM_CHANNELS];
 
 // Packs four uint8_ts into a single uint32_t in the high-to-low order
 // given.
@@ -113,7 +133,7 @@ inline uint32_t GrayscaleToPackedArgb(const uint8_t luminance) {
 // Sizes that can be measured in units of pixels: width, height,
 // number of frames (a third dimension of the image), and indices into
 // the same.
-typedef uint32 size_px;
+using size_px = uint32;
 
 // Returns the MIME-type string corresponding to the given ImageFormat.
 const char* ImageFormatToMimeTypeString(ImageFormat image_type);
@@ -127,6 +147,15 @@ const char* GetPixelFormatString(PixelFormat pixel_format);
 // Returns the number of bytes needed to encode each pixel in the
 // given format.
 size_t GetBytesPerPixel(PixelFormat pixel_format);
+
+// Checked size_t multiplication. Returns false if a * b would overflow size_t.
+inline bool CheckedMulSize(size_t a, size_t b, size_t* result) {
+  if (a != 0 && b > static_cast<size_t>(-1) / a) {
+    return false;
+  }
+  *result = a * b;
+  return true;
+}
 
 // Returns format of the image by inspecting magic numbers (cetain values at
 // cetain bytes) in the file content. This method is super fast, but if a
@@ -176,6 +205,37 @@ class ConversionTimeoutHandler {
 struct ScanlineWriterConfig {
   virtual ~ScanlineWriterConfig();
 };
+
+// Conservative, signature-only detection of a C2PA / Content-Credentials
+// provenance manifest in raw image bytes (JPEG, PNG, WebP, GIF). This NEVER parses,
+// validates, or re-emits the manifest -- it only scans for well-known marker/box
+// signatures so the image-rewrite path can pass a manifest-bearing image through
+// unmodified instead of recompressing (which would strip the manifest). A false
+// positive only costs a skipped optimization (fail-safe); a false negative degrades
+// to the current strip behavior. Intended to run once per image.
+bool ImageHasC2paManifest(StringPiece bytes);
+
+// Detects specifically the XMP-carried Content-Credentials form ("cr:" inside
+// an XMP packet). For JPEG this lives in APP1 (shared with EXIF), so the codec carries
+// it only when EXIF/APP1 is retained -- the rewrite gate uses this to skip-not-strip a
+// manifest the codec cannot guarantee carrying. Subset of ImageHasC2paManifest.
+bool ImageHasXmpC2pa(StringPiece bytes);
+
+// Level A (carry-through), PNG only. Walks a PNG chunk stream (8-byte
+// signature -> length-prefixed chunks) and returns the VERBATIM byte ranges
+// (views into `bytes`) of every C2PA carrier chunk ("caBX") and linked XMP chunk
+// ("iTXt"), in original file order. Each range is the WHOLE chunk (4-byte length,
+// 4-byte type, data, 4-byte original CRC carried as-is). The returned StringPieces
+// alias `bytes`, so the original buffer must outlive them; the carry path splices
+// these unmodified bytes into the recompressed PNG, never decoding or re-authoring
+// the manifest. Returns empty on any structural anomaly, an
+// unrecognized format, or when no carrier is found -- on which the caller MUST
+// fall back to Level B (detect-and-skip) rather than emit a stripped image.
+//
+// (JPEG needs no equivalent: jpeg_optimizer.cc already carries APP11/JUMBF through
+// a recompress via libjpeg's marker API, with correct marker ordering and
+// multi-segment support, whenever preserve_c2pa is set.)
+net_instaweb::StringPieceVector ExtractPngC2paChunks(StringPiece bytes);
 
 }  // namespace image_compression
 

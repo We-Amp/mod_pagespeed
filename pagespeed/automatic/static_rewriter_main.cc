@@ -86,5 +86,5 @@ int main(int argc, char** argv) {
 
   net_instaweb::RewriteDriverFactory::Terminate();
   net_instaweb::SystemRewriteOptions::Terminate();
-  return 0;
+  return exit_status;
 }

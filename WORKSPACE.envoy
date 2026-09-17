@@ -1,0 +1,103 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
+workspace(name = "mod_pagespeed")
+
+load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
+# Override com_github_libevent_libevent with the Envoy-pinned snapshot.
+# mod_pagespeed_dependencies() registers vanilla libevent (sufficient for the
+# lean workspace), but Envoy's own event loop requires its patched snapshot
+# (event2/watch.h "prepare"/"check" watchers); envoy_dependencies() would
+# skip its registration because the name already exists. Define it here,
+# BEFORE mod_pagespeed_dependencies() (whose maybe()-wrapped registration
+# then defers to this one). Keep the sha in sync with Envoy's
+# bazel/repository_locations.bzl entry when bumping ENVOY_COMMIT.
+http_archive(
+    name = "com_github_libevent_libevent",
+    strip_prefix = "libevent-62c152d9a7cd264b993dad730c4163c6ede2e0a3",
+    urls = ["https://github.com/libevent/libevent/archive/62c152d9a7cd264b993dad730c4163c6ede2e0a3.tar.gz"],
+    sha256 = "4c80e5fe044ce5f8055b20a2f141ee32ec2614000f3e95d2aa81611a4c8f5213",
+    build_file_content = """
+filegroup(
+    name = "all_srcs",
+    srcs = glob(["**"]),
+    visibility = ["//visibility:public"],
+)
+filegroup(
+    name = "all",
+    srcs = glob(["**"]),
+    visibility = ["//visibility:public"],
+)
+""",
+)
+
+load("//bazel:repositories.bzl", "mod_pagespeed_dependencies")
+
+mod_pagespeed_dependencies()
+
+# NGINX external dependency (for pagespeed/nginx module)
+# Requires NGINX_PATH env var or nginx source at third_party/nginx
+load("//bazel:nginx.bzl", "nginx_dependencies")
+
+nginx_dependencies()
+
+# com_googlesource_googleurl comes from mod_pagespeed_dependencies() above
+# (bazel/repositories.bzl, GOOGLEURL_COMMIT) — the single declaration the
+# SBOM generator and the THIRD-PARTY-NOTICES drift gate read. This lane
+# previously carried its own copy here, which under WORKSPACE last-wins
+# semantics would silently shadow a future pin bump in repositories.bzl.
+
+local_repository(
+    name = "envoy_build_config",
+    path = ".",
+)
+
+load("@envoy//bazel:api_binding.bzl", "envoy_api_binding")
+
+envoy_api_binding()
+
+load("@envoy//bazel:api_repositories.bzl", "envoy_api_dependencies")
+
+envoy_api_dependencies()
+
+load("@envoy//bazel:repositories.bzl", "envoy_dependencies")
+
+envoy_dependencies()
+
+load("@envoy//bazel:bazel_deps.bzl", "envoy_bazel_dependencies")
+
+envoy_bazel_dependencies()
+
+load("@envoy//bazel:repositories_extra.bzl", "envoy_dependencies_extra")
+
+envoy_dependencies_extra()
+
+load("@envoy//bazel:python_dependencies.bzl", "envoy_python_dependencies")
+
+envoy_python_dependencies()
+
+load("@envoy//bazel:dependency_imports.bzl", "envoy_dependency_imports")
+
+envoy_dependency_imports()
+
+load("@envoy//bazel:repo.bzl", "envoy_repo")
+
+envoy_repo()
+
+# NOTE: pip_install has been removed from rules_python in favor of bzlmod.
+# If Python pip dependencies are needed, migrate to MODULE.bazel.
+
+# rules_foreign_cc - for building cmake/autoconf projects
+# Must come after Envoy dependencies to avoid conflicts with rules_python
+http_archive(
+    name = "rules_foreign_cc",
+    sha256 = "4b33d62cf109bcccf286b30ed7121129cc34cf4f4ed9d8a11f38d9108f40ba74",
+    strip_prefix = "rules_foreign_cc-0.11.1",
+    url = "https://github.com/bazelbuild/rules_foreign_cc/releases/download/0.11.1/rules_foreign_cc-0.11.1.tar.gz",
+)
+
+load("@rules_foreign_cc//foreign_cc:repositories.bzl", "rules_foreign_cc_dependencies")
+
+# Don't register toolchains to avoid conflicts with Envoy's rules_python setup
+rules_foreign_cc_dependencies(register_default_tools = False)

@@ -46,7 +46,8 @@ class CanonicalAttributes : public EmptyHtmlFilter {
   int num_changes_;
   int num_errors_;
 
-  DISALLOW_COPY_AND_ASSIGN(CanonicalAttributes);
+  CanonicalAttributes(const CanonicalAttributes&) = delete;
+  CanonicalAttributes& operator=(const CanonicalAttributes&) = delete;
 };
 
 }  // namespace net_instaweb

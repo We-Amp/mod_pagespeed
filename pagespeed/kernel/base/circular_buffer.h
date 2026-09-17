@@ -78,7 +78,8 @@ class CircularBuffer {
   // Buffer.
   char buffer_[1];
 
-  DISALLOW_COPY_AND_ASSIGN(CircularBuffer);
+  CircularBuffer(const CircularBuffer&) = delete;
+  CircularBuffer& operator=(const CircularBuffer&) = delete;
 };
 
 }  // namespace net_instaweb

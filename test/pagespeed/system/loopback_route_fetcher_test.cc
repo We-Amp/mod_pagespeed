@@ -6,9 +6,9 @@
  * to you under the Apache License, Version 2.0 (the
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
- * 
+ *
  *   http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
  * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
@@ -22,10 +22,15 @@
 //
 #include "pagespeed/system/loopback_route_fetcher.h"
 
-#include <cstdlib>
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
 
-#include "apr_network_io.h"
-#include "apr_pools.h"
+#include <cstdlib>
+#include <cstring>
+#include <memory>
+
 #include "net/instaweb/http/public/request_context.h"
 #include "net/instaweb/rewriter/config/rewrite_options_manager.h"
 #include "net/instaweb/rewriter/public/domain_lawyer.h"
@@ -33,7 +38,6 @@
 #include "pagespeed/kernel/base/callback.h"
 #include "pagespeed/kernel/base/google_message_handler.h"
 #include "pagespeed/kernel/base/ref_counted_ptr.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/http/request_headers.h"
@@ -50,38 +54,59 @@ namespace {
 
 const char kOwnIp[] = "198.51.100.1";
 
+// RAII wrapper for addrinfo results from getaddrinfo.
+struct AddrInfoDeleter {
+  void operator()(struct addrinfo* ai) const {
+    if (ai != nullptr) {
+      freeaddrinfo(ai);
+    }
+  }
+};
+using AddrInfoPtr = std::unique_ptr<struct addrinfo, AddrInfoDeleter>;
+
+// Helper to resolve an IP address string to a sockaddr using getaddrinfo.
+// Returns the addrinfo (caller owns via unique_ptr), or nullptr on failure.
+AddrInfoPtr ResolveAddr(const char* ip, int family) {
+  struct addrinfo hints;
+  memset(&hints, 0, sizeof(hints));
+  hints.ai_family = family;
+  hints.ai_flags = AI_NUMERICHOST;
+  struct addrinfo* result = nullptr;
+  int err = getaddrinfo(ip, "80", &hints, &result);
+  if (err != 0) {
+    return nullptr;
+  }
+  return AddrInfoPtr(result);
+}
+
 class LoopbackRouteFetcherTest : public RewriteOptionsTestBase<RewriteOptions> {
  public:
   LoopbackRouteFetcherTest()
-      : pool_(nullptr),
-        thread_system_(Platform::CreateThreadSystem()),
+      : thread_system_(Platform::CreateThreadSystem()),
         options_(thread_system_.get()),
-        loopback_route_fetcher_(&options_, kOwnIp, 42, &reflecting_fetcher_) {}
-
-  static void SetUpTestSuite() {
-    apr_initialize();
-    atexit(apr_terminate);
-  }
-
-  void SetUp() override { apr_pool_create(&pool_, nullptr); }
-
-  void TearDown() override { apr_pool_destroy(pool_); }
+        loopback_route_fetcher_(&options_, kOwnIp, 42, "",
+                                &reflecting_fetcher_),
+        plain_http_fetcher_(&options_, kOwnIp, 8080, "http",
+                            &reflecting_fetcher_),
+        tls_fetcher_(&options_, kOwnIp, 8443, "https", &reflecting_fetcher_),
+        tls_default_port_fetcher_(&options_, kOwnIp, 443, "https",
+                                  &reflecting_fetcher_) {}
 
   void PrepareDone(bool ok) { EXPECT_TRUE(ok); }
 
  protected:
-  char* DumpAddr(apr_sockaddr_t* addr) {
-    char* dbg = nullptr;
-    apr_sockaddr_ip_get(&dbg, addr);
-    return dbg;  // it's in pool_
-  }
-
-  apr_pool_t* pool_;
   GoogleMessageHandler handler_;
   ReflectingTestFetcher reflecting_fetcher_;
   std::unique_ptr<ThreadSystem> thread_system_;
   RewriteOptions options_;
+  // No connection scheme plumbed — legacy behavior.
   LoopbackRouteFetcher loopback_route_fetcher_;
+  // Connection came in over plain http on port 8080.
+  LoopbackRouteFetcher plain_http_fetcher_;
+  // Connection came in over TLS on port 8443.
+  LoopbackRouteFetcher tls_fetcher_;
+  // Connection came in over TLS on port 443.
+  LoopbackRouteFetcher tls_default_port_fetcher_;
 };
 
 TEST_F(LoopbackRouteFetcherTest, LoopbackRouteFetcherWorks) {
@@ -155,50 +180,105 @@ TEST_F(LoopbackRouteFetcherTest, LoopbackRouteFetcherWorks) {
                dest6.response_headers()->Lookup1("Host"));
 }
 
+// The X-Forwarded-Proto scheme defect: when X-Forwarded-Proto is in play
+// the resource URL's
+// scheme reflects the original client connection, not the transport this
+// server actually speaks on own_port. Munging must use the connection's
+// transport scheme, otherwise we synthesize structurally unfetchable URLs
+// like https://127.0.0.1:<plain-http-port>/... — a guaranteed TLS handshake
+// failure whose result is then remembered by the 300s failure cache.
+TEST_F(LoopbackRouteFetcherTest, MungesWithConnectionSchemeOverPlainHttp) {
+  // https resource URL (from an X-Forwarded-Proto: https page) arriving over
+  // the plain-http listener on 8080 must loop back over plain http.
+  ExpectStringAsyncFetch dest(
+      true, RequestContext::NewTestRequestContext(thread_system_.get()));
+  plain_http_fetcher_.Fetch("https://somehost.com/style.css", &handler_,
+                            &dest);
+  EXPECT_STREQ(StrCat("http://", kOwnIp, ":8080/style.css"), dest.buffer());
+  // The Host header still carries the original authority, so cache keys and
+  // virtual-host routing are unaffected.
+  EXPECT_STREQ("somehost.com", dest.response_headers()->Lookup1("Host"));
+}
+
+TEST_F(LoopbackRouteFetcherTest, MungesWithConnectionSchemeOverTls) {
+  // Mirror image: http resource URL arriving over a TLS listener loops back
+  // over TLS.
+  ExpectStringAsyncFetch dest(
+      true, RequestContext::NewTestRequestContext(thread_system_.get()));
+  tls_fetcher_.Fetch("http://somehost.com/app.js", &handler_, &dest);
+  EXPECT_STREQ(StrCat("https://", kOwnIp, ":8443/app.js"), dest.buffer());
+  EXPECT_STREQ("somehost.com", dest.response_headers()->Lookup1("Host"));
+}
+
+TEST_F(LoopbackRouteFetcherTest, ElidesDefaultPortOfConnectionScheme) {
+  // Port elision must follow the connection scheme too: 443 is default for
+  // the https transport even when the resource URL says http.
+  ExpectStringAsyncFetch dest(
+      true, RequestContext::NewTestRequestContext(thread_system_.get()));
+  tls_default_port_fetcher_.Fetch("http://somehost.com/app.js", &handler_,
+                                  &dest);
+  EXPECT_STREQ(StrCat("https://", kOwnIp, "/app.js"), dest.buffer());
+  EXPECT_STREQ("somehost.com", dest.response_headers()->Lookup1("Host"));
+}
+
+TEST_F(LoopbackRouteFetcherTest, EmptyConnectionSchemeKeepsResourceScheme) {
+  // Ports that don't plumb the connection scheme keep the legacy behavior:
+  // the resource URL's scheme survives into the munged URL.
+  ExpectStringAsyncFetch dest(
+      true, RequestContext::NewTestRequestContext(thread_system_.get()));
+  loopback_route_fetcher_.Fetch("https://somehost.com/style.css", &handler_,
+                                &dest);
+  EXPECT_STREQ(StrCat("https://", kOwnIp, ":42/style.css"), dest.buffer());
+  EXPECT_STREQ("somehost.com", dest.response_headers()->Lookup1("Host"));
+}
+
+TEST_F(LoopbackRouteFetcherTest, ConnectionSchemeDoesNotAffectKnownOrigins) {
+  // Known origins are still fetched exactly as given (same mapping as in
+  // LoopbackRouteFetcherWorks above).
+  options_.WriteableDomainLawyer()->AddOriginDomainMapping(
+      "somehost.cdn.com", "somehost.com", "", &handler_);
+  ExpectStringAsyncFetch dest(
+      true, RequestContext::NewTestRequestContext(thread_system_.get()));
+  plain_http_fetcher_.Fetch("http://somehost.com/url", &handler_, &dest);
+  EXPECT_STREQ("http://somehost.com/url", dest.buffer());
+}
+
 TEST_F(LoopbackRouteFetcherTest, CanDetectSelfSrc) {
-  apr_sockaddr_t* loopback_1 = nullptr;
-  ASSERT_EQ(APR_SUCCESS, apr_sockaddr_info_get(&loopback_1, "127.0.0.1",
-                                               APR_INET, 80, 0, pool_));
+  AddrInfoPtr loopback_1 = ResolveAddr("127.0.0.1", AF_INET);
+  ASSERT_NE(nullptr, loopback_1.get());
 
-  apr_sockaddr_t* loopback_2 = nullptr;
-  ASSERT_EQ(APR_SUCCESS, apr_sockaddr_info_get(&loopback_2, "127.12.34.45",
-                                               APR_INET, 80, 0, pool_));
+  AddrInfoPtr loopback_2 = ResolveAddr("127.12.34.45", AF_INET);
+  ASSERT_NE(nullptr, loopback_2.get());
 
-  apr_sockaddr_t* loopback_3 = nullptr;
-  ASSERT_EQ(APR_SUCCESS,
-            apr_sockaddr_info_get(&loopback_3, "::1", APR_INET6, 80, 0, pool_));
+  AddrInfoPtr loopback_3 = ResolveAddr("::1", AF_INET6);
+  ASSERT_NE(nullptr, loopback_3.get());
 
-  apr_sockaddr_t* loopback_4 = nullptr;
-  ASSERT_EQ(APR_SUCCESS, apr_sockaddr_info_get(&loopback_4, "::FFFF:127.0.0.2",
-                                               APR_INET6, 80, 0, pool_));
+  AddrInfoPtr loopback_4 = ResolveAddr("::FFFF:127.0.0.2", AF_INET6);
+  ASSERT_NE(nullptr, loopback_4.get());
 
-  apr_sockaddr_t* not_loopback_1 = nullptr;
-  ASSERT_EQ(APR_SUCCESS, apr_sockaddr_info_get(&not_loopback_1, "128.0.0.1",
-                                               APR_INET, 80, 0, pool_));
+  AddrInfoPtr not_loopback_1 = ResolveAddr("128.0.0.1", AF_INET);
+  ASSERT_NE(nullptr, not_loopback_1.get());
 
-  apr_sockaddr_t* not_loopback_2 = nullptr;
-  ASSERT_EQ(APR_SUCCESS, apr_sockaddr_info_get(&not_loopback_2, "::1:1",
-                                               APR_INET6, 80, 0, pool_));
+  AddrInfoPtr not_loopback_2 = ResolveAddr("::1:1", AF_INET6);
+  ASSERT_NE(nullptr, not_loopback_2.get());
 
-  apr_sockaddr_t* not_loopback_3 = nullptr;
-  ASSERT_EQ(APR_SUCCESS,
-            apr_sockaddr_info_get(&not_loopback_3, "::1:FFFF:127.0.0.1",
-                                  APR_INET6, 80, 0, pool_));
+  AddrInfoPtr not_loopback_3 = ResolveAddr("::1:FFFF:127.0.0.1", AF_INET6);
+  ASSERT_NE(nullptr, not_loopback_3.get());
 
-  EXPECT_TRUE(LoopbackRouteFetcher::IsLoopbackAddr(loopback_1))
-      << DumpAddr(loopback_1);
-  EXPECT_TRUE(LoopbackRouteFetcher::IsLoopbackAddr(loopback_2))
-      << DumpAddr(loopback_2);
-  EXPECT_TRUE(LoopbackRouteFetcher::IsLoopbackAddr(loopback_3))
-      << DumpAddr(loopback_3);
-  EXPECT_TRUE(LoopbackRouteFetcher::IsLoopbackAddr(loopback_4))
-      << DumpAddr(loopback_4);
-  EXPECT_FALSE(LoopbackRouteFetcher::IsLoopbackAddr(not_loopback_1))
-      << DumpAddr(not_loopback_1);
-  EXPECT_FALSE(LoopbackRouteFetcher::IsLoopbackAddr(not_loopback_2))
-      << DumpAddr(not_loopback_2);
-  EXPECT_FALSE(LoopbackRouteFetcher::IsLoopbackAddr(not_loopback_3))
-      << DumpAddr(not_loopback_3);
+  EXPECT_TRUE(
+      LoopbackRouteFetcher::IsLoopbackAddr(loopback_1->ai_addr));
+  EXPECT_TRUE(
+      LoopbackRouteFetcher::IsLoopbackAddr(loopback_2->ai_addr));
+  EXPECT_TRUE(
+      LoopbackRouteFetcher::IsLoopbackAddr(loopback_3->ai_addr));
+  EXPECT_TRUE(
+      LoopbackRouteFetcher::IsLoopbackAddr(loopback_4->ai_addr));
+  EXPECT_FALSE(
+      LoopbackRouteFetcher::IsLoopbackAddr(not_loopback_1->ai_addr));
+  EXPECT_FALSE(
+      LoopbackRouteFetcher::IsLoopbackAddr(not_loopback_2->ai_addr));
+  EXPECT_FALSE(
+      LoopbackRouteFetcher::IsLoopbackAddr(not_loopback_3->ai_addr));
 }
 
 TEST_F(LoopbackRouteFetcherTest, ProxySuffix) {

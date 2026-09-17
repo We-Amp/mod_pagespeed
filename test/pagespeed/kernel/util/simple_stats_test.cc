@@ -19,10 +19,11 @@
 
 // Unit-test the simple statistics implementation.
 
+#include <memory>
+
 #include "pagespeed/kernel/util/simple_stats.h"
 
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/util/platform.h"
@@ -48,7 +49,8 @@ class SimpleStatsTest : public testing::Test {
   SimpleStats stats_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(SimpleStatsTest);
+  SimpleStatsTest(const SimpleStatsTest&) = delete;
+  SimpleStatsTest& operator=(const SimpleStatsTest&) = delete;
 };
 
 TEST_F(SimpleStatsTest, TestSimpleUpDownCounters) {

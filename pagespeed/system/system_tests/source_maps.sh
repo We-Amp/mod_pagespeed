@@ -12,7 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-start_test UseExperimentalJsMinifier
+start_test JS minification and cache extension
 URL="$TEST_ROOT/experimental_js_minifier/index.html"
 URL+="?PageSpeedFilters=rewrite_javascript"
 # External scripts rewritten.

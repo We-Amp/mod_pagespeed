@@ -19,6 +19,8 @@
 
 #include "net/instaweb/rewriter/public/critical_images_beacon_filter.h"
 
+#include <vector>
+
 #include "base/logging.h"
 #include "net/instaweb/rewriter/public/critical_images_finder.h"
 #include "net/instaweb/rewriter/public/lazyload_images_filter.h"
@@ -26,6 +28,7 @@
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/server_context.h"
+#include "net/instaweb/rewriter/public/srcset_slot.h"
 #include "net/instaweb/rewriter/public/static_asset_manager.h"
 #include "pagespeed/kernel/base/escaping.h"
 #include "pagespeed/kernel/base/hasher.h"
@@ -93,6 +96,12 @@ void CriticalImagesBeaconFilter::InitStats(Statistics* statistics) {
 }
 
 void CriticalImagesBeaconFilter::EndDocument() {
+  // Re-checked here for pages without images, so the finder isn't told a
+  // beacon was initiated when CSP suppressed the beacon JS.
+  if (insert_beacon_js_ && !added_beacon_js_ &&
+      (!CspPermitsInlineScript() || !CspPermitsInlineScriptAttribute())) {
+    insert_beacon_js_ = false;
+  }
   CriticalImagesFinder* finder =
       driver()->server_context()->critical_images_finder();
   finder->UpdateCandidateImagesForBeaconing(image_url_hashes_, driver(),
@@ -118,20 +127,29 @@ void CriticalImagesBeaconFilter::MaybeAddBeaconJavascript(
   GoogleString html_url;
   EscapeToJsStringLiteral(driver()->google_url().Spec(), false, /* no quotes */
                           &html_url);
+  // Escape the beacon URL for parity with html_url above. It comes from
+  // admin-configured options rather than end-user input, but escaping keeps
+  // the value a well-formed JS string literal regardless of its contents.
+  GoogleString escaped_beacon_url;
+  EscapeToJsStringLiteral(*beacon_url, false, /* no quotes */
+                          &escaped_beacon_url);
   GoogleString options_signature_hash =
       driver()->server_context()->hasher()->Hash(
           driver()->options()->signature());
-  // If lazyload is enabled, it will run the beacon after it has loaded all the
-  // images. Otherwise, run it at page onload.
+  // If lazyload is enabled in JS mode, its loader script will run the beacon
+  // after it has loaded all the images. Native-mode lazyload injects no
+  // JavaScript, so the beacon must run at page onload, as it does when
+  // lazyload is off.
   bool lazyload_will_beacon =
       driver()->options()->Enabled(RewriteOptions::kLazyloadImages) &&
       LazyloadImagesFilter::ShouldApply(driver()) ==
-          RewriterHtmlApplication::ACTIVE;
+          RewriterHtmlApplication::ACTIVE &&
+      !LazyloadImagesFilter::ShouldApplyNativeMode(driver());
   GoogleString send_beacon_at_onload = BoolToString(!lazyload_will_beacon);
   GoogleString resize_rendered_image_dimensions_enabled =
       BoolToString(driver()->options()->Enabled(
           RewriteOptions::kResizeToRenderedImageDimensions));
-  StrAppend(&js, "\npagespeed.CriticalImages.Run('", *beacon_url, "','",
+  StrAppend(&js, "\npagespeed.CriticalImages.Run('", escaped_beacon_url, "','",
             html_url, "','", options_signature_hash, "',");
   StrAppend(&js, send_beacon_at_onload, ",",
             resize_rendered_image_dimensions_enabled, ",'",
@@ -156,43 +174,88 @@ void CriticalImagesBeaconFilter::Clear() {
 }
 
 void CriticalImagesBeaconFilter::EndElementImpl(HtmlElement* element) {
+  // The beacon is an inline script wired to inline onload handlers; if the
+  // page's CSP forbids either, don't instrument the page. The finder then
+  // sees no beacon initiated and keeps following its usual no-data path.
+  // Once the beacon JS is committed to the page we keep annotating images
+  // so the instrumentation stays consistent.
+  if (insert_beacon_js_ && !added_beacon_js_ &&
+      (!CspPermitsInlineScript() || !CspPermitsInlineScriptAttribute())) {
+    insert_beacon_js_ = false;
+  }
   if (element->keyword() != HtmlName::kImg &&
       element->keyword() != HtmlName::kInput) {
     return;
   }
   // TODO(jud): Verify this logic works correctly with input tags, then remove
   // the check for img tag here.
-  if (element->keyword() == HtmlName::kImg && driver()->IsRewritable(element)) {
-    // Add a data-pagespeed-url-hash attribute to the image with the hash of the
-    // original URL. This is what the beacon will send back as the identifier
-    // for critical images.
-    HtmlElement::Attribute* src = element->FindAttribute(HtmlName::kSrc);
-    if (src != nullptr && src->DecodedValueOrNull() != nullptr) {
-      StringPiece url(src->DecodedValueOrNull());
-      GoogleUrl gurl(driver()->base_url(), url);
-      if (gurl.IsAnyValid()) {
-        unsigned int hash_val = HashString<CasePreserve, unsigned int>(
-            gurl.spec_c_str(), strlen(gurl.spec_c_str()));
-        GoogleString hash_str = UintToString(hash_val);
-        image_url_hashes_.insert(hash_str);
-        if (insert_beacon_js_) {
-          driver()->AddAttribute(element, HtmlName::kDataPagespeedUrlHash,
-                                 hash_str);
-          if (element->keyword() == HtmlName::kImg &&
-              CanAddPagespeedOnloadToImage(*element)) {
-            // Add an onload handler only if one is not already specified on the
-            // non-rewritten page.
-            driver()->AddAttribute(element, HtmlName::kOnload,
-                                   kImageOnloadCode);
-            // TODO(sligocki): Should we add onerror handler here too?
-            // If beacon javascript has not been added yet, we need to add it
-            // before the current node because we are going to use the js for
-            // the image criticality check on image-onload.
-            MaybeAddBeaconJavascript(element);
+  if (element->keyword() != HtmlName::kImg ||
+      !driver()->IsRewritable(element)) {
+    return;
+  }
+  // Add a data-pagespeed-url-hash attribute to the image with the hash of the
+  // original URL. This is what the beacon will send back as the identifier
+  // for critical images. A srcset-only image has no src to key on; stamp the
+  // hashes of all its candidates positionally instead, and the beacon JS
+  // reports the one matching currentSrc, i.e. the candidate the browser
+  // actually displayed.
+  HtmlName::Keyword stamp_attribute = HtmlName::kDataPagespeedUrlHash;
+  GoogleString stamp_value;
+  HtmlElement::Attribute* src = element->FindAttribute(HtmlName::kSrc);
+  if (src != nullptr && src->DecodedValueOrNull() != nullptr) {
+    StringPiece url(src->DecodedValueOrNull());
+    GoogleUrl gurl(driver()->base_url(), url);
+    if (gurl.IsAnyValid()) {
+      unsigned int hash_val = HashString<CasePreserve, unsigned int>(
+          gurl.spec_c_str(), strlen(gurl.spec_c_str()));
+      stamp_value = UintToString(hash_val);
+      image_url_hashes_.insert(stamp_value);
+    }
+  } else if (const HtmlElement::Attribute* srcset =
+                 element->FindAttribute(HtmlName::kSrcset)) {
+    const char* srcset_value = srcset->DecodedValueOrNull();
+    if (srcset_value != nullptr) {
+      std::vector<SrcSetSlotCollection::ImageCandidate> candidates;
+      SrcSetSlotCollection::ParseSrcSet(srcset_value, &candidates);
+      bool any_valid = false;
+      for (int i = 0, n = candidates.size(); i < n; ++i) {
+        if (i != 0) {
+          StrAppend(&stamp_value, ",");
+        }
+        if (!candidates[i].url.empty()) {
+          GoogleUrl gurl(driver()->base_url(), candidates[i].url);
+          if (gurl.IsAnyValid()) {
+            unsigned int hash_val = HashString<CasePreserve, unsigned int>(
+                gurl.spec_c_str(), strlen(gurl.spec_c_str()));
+            GoogleString hash_str = UintToString(hash_val);
+            image_url_hashes_.insert(hash_str);
+            StrAppend(&stamp_value, hash_str);
+            any_valid = true;
           }
         }
+        // Candidates without a resolvable URL leave an empty segment so the
+        // list stays positionally aligned with the srcset attribute.
+      }
+      if (any_valid) {
+        stamp_attribute = HtmlName::kDataPagespeedSrcsetUrlHashes;
+      } else {
+        stamp_value.clear();
       }
     }
+  }
+  if (stamp_value.empty() || !insert_beacon_js_) {
+    return;
+  }
+  driver()->AddAttribute(element, stamp_attribute, stamp_value);
+  if (CanAddPagespeedOnloadToImage(*element)) {
+    // Add an onload handler only if one is not already specified on the
+    // non-rewritten page.
+    driver()->AddAttribute(element, HtmlName::kOnload, kImageOnloadCode);
+    // TODO(sligocki): Should we add onerror handler here too?
+    // If beacon javascript has not been added yet, we need to add it
+    // before the current node because we are going to use the js for
+    // the image criticality check on image-onload.
+    MaybeAddBeaconJavascript(element);
   }
 }
 

@@ -19,11 +19,17 @@
 
 // Unit-test for Scheduler::Sequence.
 
+// The thread-safety analyzer cannot determine that scheduler_.mutex() is
+// the same as sequence_->scheduler_->mutex_ through the indirection.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wthread-safety-precise"
+
+#include <memory>
+
 #include "pagespeed/kernel/thread/scheduler_sequence.h"
 
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/function.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/thread/queued_worker_pool.h"
 #include "pagespeed/kernel/thread/scheduler.h"
@@ -61,7 +67,8 @@ class Increment : public Function {
   int expected_value_;
   int* count_;
 
-  DISALLOW_COPY_AND_ASSIGN(Increment);
+  Increment(const Increment&) = delete;
+  Increment& operator=(const Increment&) = delete;
 };
 
 class SchedulerSequenceTest : public WorkerTestBase {
@@ -150,8 +157,8 @@ TEST_F(SchedulerSequenceTest, RunOnRequestThreadThenSwitch) {
 
   // Now forward the sequence, including the outstanding increment to 11, and
   // any new tasks, to a pool-based sequence that runs in a separate thread.
-  std::unique_ptr<QueuedWorkerPool> pool(new QueuedWorkerPool(
-      2, "queued_worker_pool_test", thread_runtime_.get()));
+  std::unique_ptr<QueuedWorkerPool> pool = std::make_unique<QueuedWorkerPool>(
+      2, "queued_worker_pool_test", thread_runtime_.get());
   Sequence* pool_sequence = pool->NewSequence();
   {
     ScopedMutex lock(scheduler_.mutex());
@@ -165,3 +172,5 @@ TEST_F(SchedulerSequenceTest, RunOnRequestThreadThenSwitch) {
 }  // namespace
 
 }  // namespace net_instaweb
+
+#pragma clang diagnostic pop

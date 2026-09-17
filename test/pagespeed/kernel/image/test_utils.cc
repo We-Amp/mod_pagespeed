@@ -23,11 +23,11 @@
 #include <cstdint>
 #include <cstdlib>
 #include <vector>
+#include <memory>
 
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/null_mutex.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/stdio_file_system.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/string_writer.h"
@@ -236,9 +236,9 @@ void CompareImageRegionsByPSNR(const uint8_t* image1, PixelFormat format1,
   int bytes_per_line = num_cols * num_channels;
 
   int bytes_per_image = bytes_per_line * num_rows;
-  net_instaweb::scoped_array<uint8_t> image_buffer1(
+  std::unique_ptr<uint8_t[]> image_buffer1(
       new uint8_t[bytes_per_image]);
-  net_instaweb::scoped_array<uint8_t> image_buffer2(
+  std::unique_ptr<uint8_t[]> image_buffer2(
       new uint8_t[bytes_per_image]);
   ASSERT_TRUE(image_buffer1 != nullptr && image_buffer2 != nullptr);
 
@@ -290,7 +290,7 @@ void SynthesizeImage(int width, int height, int bytes_per_line,
   ASSERT_GT(height, 0);
   ASSERT_GE(bytes_per_line, width);
 
-  net_instaweb::scoped_array<uint8_t> current_value(new uint8_t[num_channels]);
+  std::unique_ptr<uint8_t[]> current_value(new uint8_t[num_channels]);
   memcpy(current_value.get(), seed_value, num_channels * sizeof(seed_value[0]));
 
   for (int y = 0; y < height; ++y) {

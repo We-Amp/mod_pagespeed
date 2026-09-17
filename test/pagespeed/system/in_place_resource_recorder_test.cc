@@ -19,6 +19,9 @@
 
 // Unit tests for InPlaceResourceRecorder.
 
+#include <memory>
+#include <vector>
+
 #include "pagespeed/system/in_place_resource_recorder.h"
 
 #include "net/instaweb/http/public/http_cache.h"
@@ -26,13 +29,15 @@
 #include "net/instaweb/http/public/http_value.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/server_context.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
+#include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/base/string_writer.h"
 #include "pagespeed/kernel/http/content_type.h"
 #include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/request_headers.h"
 #include "pagespeed/kernel/http/response_headers.h"
 #include "test/net/instaweb/rewriter/rewrite_test_base.h"
+#include "test/pagespeed/kernel/base/gmock.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/base/mock_message_handler.h"
 
@@ -168,6 +173,35 @@ class InPlaceResourceRecorderTest : public RewriteTestBase {
     }
     return "none";
   }
+
+  int64 IproVar(const char* name) {
+    return statistics()->GetVariable(name)->Get();
+  }
+
+  // Every recording ends in exactly one terminal outcome: it is either
+  // inserted into cache or lands in one specific counter. The specific
+  // counters are mutually exclusive, so their sum plus the inserts must equal
+  // the number of recordings started. Valid for scenarios where every
+  // recorder that was constructed is driven to a terminal state.
+  void ExpectTerminalInvariant() {
+    int64 terminal = IproVar("ipro_recorder_inserted_into_cache") +
+                     IproVar("ipro_recorder_not_cacheable") +
+                     IproVar("ipro_recorder_failed") +
+                     IproVar("ipro_recorder_dropped_due_to_load") +
+                     IproVar("ipro_recorder_dropped_due_to_size") +
+                     IproVar("ipro_recorder_dropped_content_type") +
+                     IproVar("ipro_recorder_error_status") +
+                     IproVar("ipro_recorder_skipped_transient") +
+                     IproVar("ipro_recorder_empty");
+    EXPECT_EQ(IproVar("ipro_recorder_resources"), terminal);
+  }
+
+  GoogleString MessageDump() {
+    GoogleString messages;
+    StringWriter writer(&messages);
+    message_handler()->Dump(&writer);
+    return messages;
+  }
 };
 
 TEST_F(InPlaceResourceRecorderTest, BasicOperation) {
@@ -192,6 +226,12 @@ TEST_F(InPlaceResourceRecorderTest, BasicOperation) {
   StringPiece contents;
   EXPECT_TRUE(value_out.ExtractContents(&contents));
   EXPECT_EQ(StrCat(kHello, kBye), contents);
+
+  // A successful recording inserts into cache and touches no failure/skip
+  // counter.
+  EXPECT_EQ(1, IproVar("ipro_recorder_inserted_into_cache"));
+  EXPECT_EQ(0, IproVar("ipro_recorder_failed"));
+  ExpectTerminalInvariant();
 }
 
 TEST_F(InPlaceResourceRecorderTest, IncompleteResponse) {
@@ -212,6 +252,15 @@ TEST_F(InPlaceResourceRecorderTest, IncompleteResponse) {
   ResponseHeaders headers_out;
   EXPECT_EQ(kNotFoundResult,
             HttpBlockingFind(kTestUrl, http_cache(), &value_out, &headers_out));
+
+  // A truncated response is a genuine recording failure: it bumps failed and
+  // no more-specific counter, and logs a warning naming the URL.
+  EXPECT_EQ(1, IproVar("ipro_recorder_failed"));
+  EXPECT_EQ(0, IproVar("ipro_recorder_empty"));
+  EXPECT_EQ(0, IproVar("ipro_recorder_inserted_into_cache"));
+  ExpectTerminalInvariant();
+  EXPECT_THAT(MessageDump(),
+              ::testing::HasSubstr("incomplete/truncated response"));
 }
 
 TEST_F(InPlaceResourceRecorderTest, CheckCacheableContentTypes) {
@@ -227,6 +276,11 @@ TEST_F(InPlaceResourceRecorderTest, NotCacheableContentTypeFull) {
             NotCacheableContentType(&kContentTypePdf,
                                     InPlaceResourceRecorder::kFullHeaders,
                                     true /* expect_failure */));
+  // A non-rewritable content type is an expected bail, not a failure.
+  EXPECT_EQ(1, IproVar("ipro_recorder_dropped_content_type"));
+  EXPECT_EQ(0, IproVar("ipro_recorder_failed"));
+  ExpectTerminalInvariant();
+  EXPECT_THAT(MessageDump(), ::testing::HasSubstr("content type is not"));
 }
 
 TEST_F(InPlaceResourceRecorderTest, NotCacheableContentTypePreliminary) {
@@ -234,6 +288,10 @@ TEST_F(InPlaceResourceRecorderTest, NotCacheableContentTypePreliminary) {
             NotCacheableContentType(
                 &kContentTypePdf, InPlaceResourceRecorder::kPreliminaryHeaders,
                 true /* expect_failure */));
+  // The preliminary-headers content-type bail also counts as a dropped
+  // content type, never as a failure.
+  EXPECT_EQ(1, IproVar("ipro_recorder_dropped_content_type"));
+  EXPECT_EQ(0, IproVar("ipro_recorder_failed"));
 }
 
 TEST_F(InPlaceResourceRecorderTest, UnknownContentTypeFull) {
@@ -242,6 +300,9 @@ TEST_F(InPlaceResourceRecorderTest, UnknownContentTypeFull) {
                             kFetchStatusUncacheable200),
       NotCacheableContentType(nullptr, InPlaceResourceRecorder::kFullHeaders,
                               true /* expect_failure */));
+  EXPECT_EQ(1, IproVar("ipro_recorder_dropped_content_type"));
+  EXPECT_EQ(0, IproVar("ipro_recorder_failed"));
+  ExpectTerminalInvariant();
 }
 
 TEST_F(InPlaceResourceRecorderTest, UnknownContentTypePreliminary) {
@@ -294,6 +355,13 @@ TEST_F(InPlaceResourceRecorderTest, DontRemember304) {
   // This should be not found, not one of the RememberNot... statuses
   EXPECT_EQ(kNotFoundResult,
             HttpBlockingFind(kTestUrl, http_cache(), &value_out, &headers_out));
+
+  // A 304 is a transient non-200: counted as skipped, not failed.
+  EXPECT_EQ(1, IproVar("ipro_recorder_skipped_transient"));
+  EXPECT_EQ(0, IproVar("ipro_recorder_failed"));
+  EXPECT_EQ(0, IproVar("ipro_recorder_error_status"));
+  ExpectTerminalInvariant();
+  EXPECT_THAT(MessageDump(), ::testing::HasSubstr("transient status"));
 }
 
 TEST_F(InPlaceResourceRecorderTest, Remember500AsFetchFailed) {
@@ -317,6 +385,13 @@ TEST_F(InPlaceResourceRecorderTest, Remember500AsFetchFailed) {
   EXPECT_EQ(
       HTTPCache::FindResult(HTTPCache::kRecentFailure, kFetchStatusOtherError),
       HttpBlockingFind(kTestUrl, http_cache(), &value_out, &headers_out));
+
+  // A 5xx origin response is a broken-resource signal, counted separately
+  // from genuine recorder failures.
+  EXPECT_EQ(1, IproVar("ipro_recorder_error_status"));
+  EXPECT_EQ(0, IproVar("ipro_recorder_failed"));
+  ExpectTerminalInvariant();
+  EXPECT_THAT(MessageDump(), ::testing::HasSubstr("origin returned 500"));
 }
 
 TEST_F(InPlaceResourceRecorderTest, RememberEmpty) {
@@ -333,6 +408,12 @@ TEST_F(InPlaceResourceRecorderTest, RememberEmpty) {
   // Remember recent empty.
   EXPECT_EQ(HTTPCache::FindResult(HTTPCache::kRecentFailure, kFetchStatusEmpty),
             HttpBlockingFind(kTestUrl, http_cache(), &value_out, &headers_out));
+
+  // A legal empty 200 is a deliberate cache-the-skip, not a malfunction.
+  EXPECT_EQ(1, IproVar("ipro_recorder_empty"));
+  EXPECT_EQ(0, IproVar("ipro_recorder_failed"));
+  ExpectTerminalInvariant();
+  EXPECT_THAT(MessageDump(), ::testing::HasSubstr("empty 200 response"));
 }
 
 TEST_F(InPlaceResourceRecorderTest, DecompressGzipIfNeeded) {
@@ -378,6 +459,99 @@ TEST_F(InPlaceResourceRecorderTest, BailEarlyOnUnexpectedContentType) {
   // the preliminary round, we may not know the correct content type
   // yet, so we need to be conservative and let the processing continue.
   EXPECT_STREQ("full", BailsForContentType(nullptr));
+}
+
+TEST_F(InPlaceResourceRecorderTest,
+       NotCacheableCacheControlCountsNotCacheable) {
+  // A rewritable content type (CSS) whose Cache-Control forbids proxy caching
+  // reaches the is-cacheable check and bails there: an expected policy
+  // outcome, counted as not-cacheable and never as a failure.
+  ResponseHeaders headers;
+  SetDefaultLongCacheHeaders(&kContentTypeCss, &headers);
+  headers.Replace(HttpAttributes::kCacheControl, "private, max-age=300");
+  headers.ComputeCaching();
+
+  std::unique_ptr<InPlaceResourceRecorder> recorder(MakeRecorder(kTestUrl));
+  recorder->ConsiderResponseHeaders(InPlaceResourceRecorder::kFullHeaders,
+                                    &headers);
+  EXPECT_TRUE(recorder->failed());
+  recorder.release()->DoneAndSetHeaders(&headers, true /* complete response */);
+
+  EXPECT_EQ(1, IproVar("ipro_recorder_not_cacheable"));
+  EXPECT_EQ(0, IproVar("ipro_recorder_failed"));
+  EXPECT_EQ(0, IproVar("ipro_recorder_dropped_content_type"));
+  ExpectTerminalInvariant();
+  EXPECT_THAT(MessageDump(), ::testing::HasSubstr("not cacheable"));
+}
+
+TEST_F(InPlaceResourceRecorderTest, OversizeCountsDroppedDueToSize) {
+  // Writing more than max_response_bytes bumps the size counter, not failed.
+  ResponseHeaders prelim_headers;
+  prelim_headers.set_status_code(HttpStatus::kOK);
+  ResponseHeaders ok_headers;
+  SetDefaultLongCacheHeaders(&kContentTypeCss, &ok_headers);
+
+  std::unique_ptr<InPlaceResourceRecorder> recorder(MakeRecorder(kTestUrl));
+  recorder->ConsiderResponseHeaders(
+      InPlaceResourceRecorder::kPreliminaryHeaders, &prelim_headers);
+  const GoogleString too_big(kMaxResponseBytes + 100, 'a');
+  recorder->Write(too_big, message_handler());
+  recorder.release()->DoneAndSetHeaders(&ok_headers, true /* complete */);
+
+  EXPECT_EQ(1, IproVar("ipro_recorder_dropped_due_to_size"));
+  EXPECT_EQ(0, IproVar("ipro_recorder_failed"));
+  ExpectTerminalInvariant();
+  EXPECT_THAT(MessageDump(), ::testing::HasSubstr("exceeds the size limit"));
+}
+
+TEST_F(InPlaceResourceRecorderTest, LoadShedCountsDroppedDueToLoad) {
+  // MakeRecorder allows 4 concurrent recordings. Hold 4 alive to fill the
+  // slots so the 5th is load-shed at construction: it counts as dropped due
+  // to load, never as a failure. (No terminal invariant here -- the 4
+  // blockers are deliberately abandoned mid-recording.)
+  std::vector<std::unique_ptr<InPlaceResourceRecorder>> blockers;
+  for (int i = 0; i < 4; ++i) {
+    blockers.emplace_back(MakeRecorder(kTestUrl));
+  }
+  InPlaceResourceRecorder* shed = MakeRecorder(kTestUrl);
+  EXPECT_TRUE(shed->failed());
+
+  ResponseHeaders ok_headers;
+  SetDefaultLongCacheHeaders(&kContentTypeCss, &ok_headers);
+  shed->DoneAndSetHeaders(&ok_headers, true /* complete response */);
+
+  EXPECT_EQ(1, IproVar("ipro_recorder_dropped_due_to_load"));
+  EXPECT_EQ(0, IproVar("ipro_recorder_failed"));
+  EXPECT_THAT(MessageDump(),
+              ::testing::HasSubstr("too many concurrent recordings"));
+}
+
+TEST_F(InPlaceResourceRecorderTest, WriteInflateFailureCountsFailed) {
+  // A response declared gzip whose body is not valid gzip makes the inflater
+  // error: a genuine recording malfunction, counted as failed and logged at
+  // warning severity with the URL.
+  DisableGzip();
+  ResponseHeaders prelim_headers;
+  prelim_headers.set_status_code(HttpStatus::kOK);
+  prelim_headers.Add(HttpAttributes::kContentEncoding, HttpAttributes::kGzip);
+
+  ResponseHeaders final_headers;
+  SetDefaultLongCacheHeaders(&kContentTypeCss, &final_headers);
+  final_headers.Add(HttpAttributes::kContentEncoding, HttpAttributes::kGzip);
+  final_headers.ComputeCaching();
+
+  std::unique_ptr<InPlaceResourceRecorder> recorder(MakeRecorder(kTestUrl));
+  recorder->ConsiderResponseHeaders(
+      InPlaceResourceRecorder::kPreliminaryHeaders, &prelim_headers);
+  recorder->Write("this is definitely not valid gzip data, no magic bytes",
+                  message_handler());
+  recorder.release()->DoneAndSetHeaders(&final_headers, true /* complete */);
+
+  EXPECT_EQ(1, IproVar("ipro_recorder_failed"));
+  EXPECT_EQ(0, IproVar("ipro_recorder_dropped_due_to_size"));
+  EXPECT_EQ(0, IproVar("ipro_recorder_empty"));
+  ExpectTerminalInvariant();
+  EXPECT_THAT(MessageDump(), ::testing::HasSubstr("write/inflate error"));
 }
 
 }  // namespace

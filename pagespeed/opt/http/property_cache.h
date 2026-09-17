@@ -95,11 +95,11 @@
 #define PAGESPEED_OPT_HTTP_PROPERTY_CACHE_H_
 
 #include <map>
+#include <memory>
 #include <vector>
 
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/ref_counted_ptr.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/cache/cache_interface.h"
@@ -118,7 +118,7 @@ class Statistics;
 class ThreadSystem;
 class Timer;
 
-typedef std::vector<PropertyPage*> PropertyPageStarVector;
+using PropertyPageStarVector = std::vector<PropertyPage*>;
 
 // Holds the value & stability-metadata for a property.
 class PropertyValue {
@@ -175,7 +175,8 @@ class PropertyValue {
   bool valid_;
   bool was_read_;
 
-  DISALLOW_COPY_AND_ASSIGN(PropertyValue);
+  PropertyValue(const PropertyValue&) = delete;
+  PropertyValue& operator=(const PropertyValue&) = delete;
 };
 
 // Adds property-semantics to a raw cache API.
@@ -193,10 +194,11 @@ class PropertyCache {
    private:
     GoogleString name_;
 
-    DISALLOW_COPY_AND_ASSIGN(Cohort);
+    Cohort(const Cohort&) = delete;
+    Cohort& operator=(const Cohort&) = delete;
   };
 
-  typedef std::vector<const Cohort*> CohortVector;
+  using CohortVector = std::vector<const Cohort*>;
 
   // Does not take ownership of the property_store, timer, stats, or threads
   // objects.
@@ -276,13 +278,14 @@ class PropertyCache {
   ThreadSystem* thread_system_;
 
   int mutations_per_1000_writes_threshold_;
-  typedef std::map<GoogleString, Cohort*> CohortMap;
+  using CohortMap = std::map<GoogleString, Cohort*>;
   CohortMap cohorts_;
   // For MutltiRead to scan all cohorts.
   CohortVector cohort_list_;
   bool enabled_;
 
-  DISALLOW_COPY_AND_ASSIGN(PropertyCache);
+  PropertyCache(const PropertyCache&) = delete;
+  PropertyCache& operator=(const PropertyCache&) = delete;
 };
 
 // Abstract interface for implementing a PropertyPage.
@@ -443,7 +446,7 @@ class PropertyPage : public AbstractPropertyPage {
     Done(success);
   }
 
-  typedef std::map<GoogleString, PropertyValue*> PropertyMap;
+  using PropertyMap = std::map<GoogleString, PropertyValue*>;
 
   struct PropertyMapStruct {
     explicit PropertyMapStruct(AbstractLogRecord* log)
@@ -454,8 +457,8 @@ class PropertyPage : public AbstractPropertyPage {
     CacheInterface::KeyState cache_state;
     bool has_value;
   };
-  typedef std::map<const PropertyCache::Cohort*, PropertyMapStruct*>
-      CohortDataMap;
+  using CohortDataMap =
+      std::map<const PropertyCache::Cohort*, PropertyMapStruct*>;
   CohortDataMap cohort_data_map_;
   std::unique_ptr<AbstractMutex> mutex_;
   GoogleString url_;
@@ -471,7 +474,8 @@ class PropertyPage : public AbstractPropertyPage {
   AbstractPropertyStoreGetCallback* property_store_callback_;
   PageType page_type_;
 
-  DISALLOW_COPY_AND_ASSIGN(PropertyPage);
+  PropertyPage(const PropertyPage&) = delete;
+  PropertyPage& operator=(const PropertyPage&) = delete;
 };
 
 }  // namespace net_instaweb

@@ -36,7 +36,8 @@ class CollapseWhitespaceFilterTest : public HtmlParseTestBase {
 
  private:
   CollapseWhitespaceFilter filter_;
-  DISALLOW_COPY_AND_ASSIGN(CollapseWhitespaceFilterTest);
+  CollapseWhitespaceFilterTest(const CollapseWhitespaceFilterTest&) = delete;
+  CollapseWhitespaceFilterTest& operator=(const CollapseWhitespaceFilterTest&) = delete;
 };
 
 TEST_F(CollapseWhitespaceFilterTest, NoChange) {

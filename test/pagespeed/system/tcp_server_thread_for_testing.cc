@@ -26,7 +26,7 @@
 #include "apr_network_io.h"
 #include "base/logging.h"
 #include "pagespeed/kernel/base/abstract_mutex.h"
-#include "pagespeed/system/apr_thread_compatible_pool.h"
+#include "pagespeed/apache/apr_thread_compatible_pool.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 
 namespace net_instaweb {

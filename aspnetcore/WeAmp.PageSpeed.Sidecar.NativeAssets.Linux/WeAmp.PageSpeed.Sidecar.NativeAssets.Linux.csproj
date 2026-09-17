@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- Aligned to the thin package (net8.0;net10.0). Content-only, so the
+         TFM only shapes the (dependency-free) nuspec groups. Default net8.0; the release
+         pipeline flips on net10 with -p:IncludeNet10=true (literal values — see thin csproj). -->
+    <TargetFrameworks>net8.0</TargetFrameworks>
+    <TargetFrameworks Condition="'$(IncludeNet10)' == 'true'">net8.0;net10.0</TargetFrameworks>
+    <!-- Content-only package: the matched (nginx + ngx_pagespeed) Linux binaries
+         under runtimes/<rid>/native/. No managed output, no transitive deps. -->
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+    <!-- NM-3: this content-only package ships NO consumer README (it would document a
+         managed API absent here). The opt-out (PackThinReadme=false) is applied centrally
+         in ../Directory.Build.props keyed on this project name — it must be set during
+         property evaluation, which happens before this PropertyGroup is read. -->
+
+    <PackageId>WeAmp.PageSpeed.Sidecar.NativeAssets.Linux</PackageId>
+    <Title>WeAmp.PageSpeed.Sidecar Native Binaries — Linux (x64, arm64)</Title>
+    <Description>Matched (nginx + ngx_pagespeed) Linux binaries for WeAmp.PageSpeed.Sidecar. Reference this alongside WeAmp.PageSpeed.Sidecar to supply the bundled reverse-proxy engine for linux-x64 / linux-arm64.</Description>
+    <PackageTags>pagespeed mod-pagespeed mod_pagespeed nginx ngx-pagespeed weamp native linux x64 arm64</PackageTags>
+  </PropertyGroup>
+
+  <!-- The matched pair per RID: `nginx` + `ngx_pagespeed_module.so`. No conf
+       template — NginxConfigGenerator builds the full nginx.conf at runtime.
+       .gitkeep is excluded; CI/P4 fills these with the per-RID matched build. -->
+  <ItemGroup>
+    <None Include="runtimes/linux-x64/native/**" Exclude="**/.gitkeep"
+          Pack="true" PackagePath="runtimes/linux-x64/native/"
+          Condition="Exists('runtimes/linux-x64/native')" />
+    <None Include="runtimes/linux-arm64/native/**" Exclude="**/.gitkeep"
+          Pack="true" PackagePath="runtimes/linux-arm64/native/"
+          Condition="Exists('runtimes/linux-arm64/native')" />
+  </ItemGroup>
+
+  <!-- buildTransitive/<package-id>.targets auto-imports into consumers (chmod +x
+       nginx + the Linux-only RID guard). -->
+  <ItemGroup>
+    <None Include="buildTransitive/**" Pack="true" PackagePath="buildTransitive/" />
+  </ItemGroup>
+
+</Project>

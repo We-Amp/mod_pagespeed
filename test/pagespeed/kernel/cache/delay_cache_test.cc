@@ -22,9 +22,9 @@
 #include "pagespeed/kernel/cache/delay_cache.h"
 
 #include <cstddef>
+#include <memory>
 
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/shared_string.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/cache/lru_cache.h"
@@ -53,7 +53,8 @@ class DelayCacheTest : public CacheTestBase {
   DelayCache cache_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(DelayCacheTest);
+  DelayCacheTest(const DelayCacheTest&) = delete;
+  DelayCacheTest& operator=(const DelayCacheTest&) = delete;
 };
 
 TEST_F(DelayCacheTest, NoDelayOps) {

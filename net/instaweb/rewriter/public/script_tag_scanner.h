@@ -30,7 +30,12 @@ class HtmlParse;
 
 class ScriptTagScanner {
  public:
-  enum ScriptClassification { kNonScript, kUnknownScript, kJavaScript };
+  enum ScriptClassification {
+    kNonScript,
+    kUnknownScript,
+    kJavaScript,        // classic script
+    kJavaScriptModule,  // <script type=module> (HTML "module" script type)
+  };
 
   // Bit flags that specify when the script is to be run
   enum ExecutionModeFlags {
@@ -53,16 +58,37 @@ class ScriptTagScanner {
 
   // Returns which execution model attributes are set.
   // Keep in mind, however, that HTML5 browsers will ignore
-  // kExecuteDefer and kExecuteAsync on elements without src=''
+  // kExecuteDefer and kExecuteAsync on elements without src=''.
+  // Module scripts are implicitly deferred by spec; this only reports
+  // attribute presence (async is meaningful on modules, defer is a no-op).
   int ExecutionMode(const HtmlElement* element) const;
 
- private:
-  // Normalizes the input str by trimming whitespace and lowercasing.
+  // Normalizes the input str the way browsers match enumerated attribute
+  // values: trim surrounding whitespace and lowercase.
   static GoogleString Normalized(const StringPiece& str);
 
+  // Returns true if type (a <script type> attribute value) names a known
+  // data-block script type that the browser never executes as JavaScript --
+  // JSON-LD, plain JSON data blocks, import maps, speculation rules, and the
+  // inert text/template type. These classify as kUnknownScript (they are not
+  // JS), but they are well-understood, deliberate markup rather than an
+  // authoring mistake, so callers can suppress the "Unrecognized script"
+  // diagnostic for them. The value is matched after Normalized() folding.
+  static bool IsKnownNonJsScriptType(StringPiece type);
+
+  // Returns true if the element carries an integrity= attribute. A filter
+  // that changes such a script's bytes (minify, combine, outline) breaks
+  // the browser's subresource-integrity check, so it must leave the script
+  // untouched. There is no HtmlName keyword for "integrity", so match by
+  // attribute name; parsed attribute names are not guaranteed to be
+  // case-folded.
+  static bool HasIntegrityAttribute(const HtmlElement* element);
+
+ private:
   bool IsJsMime(const GoogleString& type_str);
 
-  DISALLOW_COPY_AND_ASSIGN(ScriptTagScanner);
+  ScriptTagScanner(const ScriptTagScanner&) = delete;
+  ScriptTagScanner& operator=(const ScriptTagScanner&) = delete;
 };
 
 }  // namespace net_instaweb

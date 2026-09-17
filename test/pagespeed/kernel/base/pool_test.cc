@@ -41,7 +41,8 @@ class IntElement : public PoolElement<IntElement> {
  private:
   int num_;
 
-  DISALLOW_COPY_AND_ASSIGN(IntElement);
+  IntElement(const IntElement&) = delete;
+  IntElement& operator=(const IntElement&) = delete;
 };
 
 typedef Pool<IntElement> IntPool;
@@ -125,7 +126,8 @@ class PoolTest : public testing::Test {
   IntElement elements_[4];
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(PoolTest);
+  PoolTest(const PoolTest&) = delete;
+  PoolTest& operator=(const PoolTest&) = delete;
 };
 
 TEST_F(PoolTest, TestInsertAndOrderedRemoveOldest) {

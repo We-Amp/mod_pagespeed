@@ -20,6 +20,8 @@
 #ifndef NET_INSTAWEB_REWRITER_PUBLIC_CSS_FILTER_H_
 #define NET_INSTAWEB_REWRITER_PUBLIC_CSS_FILTER_H_
 
+#include <memory>
+
 #include "net/instaweb/rewriter/cached_result.pb.h"
 #include "net/instaweb/rewriter/public/css_hierarchy.h"
 #include "net/instaweb/rewriter/public/css_resource_slot.h"
@@ -34,7 +36,6 @@
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "net/instaweb/rewriter/public/single_rewrite_context.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/html/html_element.h"
@@ -96,7 +97,7 @@ class CssFilter : public RewriteFilter {
 
   void StartDocumentImpl() override;
   void StartElementImpl(HtmlElement* element) override;
-  void Characters(HtmlCharactersNode* characters) override;
+  void CharactersImpl(HtmlCharactersNode* characters) override;
   void EndElementImpl(HtmlElement* element) override;
 
   const char* Name() const override { return "CssFilter"; }
@@ -118,6 +119,7 @@ class CssFilter : public RewriteFilter {
   static const char kMinifyFailed[];
   static const char kRecursion[];
   static const char kComplexQueries[];
+  static const char kUnparseableImport[];
 
   RewriteContext* MakeNestedFlatteningContextInNewSlot(
       const ResourcePtr& resource, const GoogleString& location,
@@ -233,6 +235,10 @@ class CssFilter : public RewriteFilter {
   Variable* num_flatten_imports_recursion_;
   // # of times CSS was not flattened because it had complex media queries.
   Variable* num_flatten_imports_complex_queries_;
+  // # of times CSS was not flattened because it contained an @import that
+  // the parser could not parse (e.g. one using cascade layer or range
+  // media query syntax), which is preserved verbatim as an unparsed ruleset.
+  Variable* num_flatten_imports_unparseable_import_;
 
   CssUrlEncoder encoder_;
 
@@ -243,7 +249,8 @@ class CssFilter : public RewriteFilter {
   // The options related to this filter.
   static StringPieceVector* related_options_;
 
-  DISALLOW_COPY_AND_ASSIGN(CssFilter);
+  CssFilter(const CssFilter&) = delete;
+  CssFilter& operator=(const CssFilter&) = delete;
 };
 
 // Context used by CssFilter under async flow.
@@ -342,7 +349,7 @@ class CssFilter::Context : public SingleRewriteContext {
   // file.
   int64 ImageInlineMaxBytes() const;
 
-  bool ScheduleViaCentralController() override { return true; }
+  bool ScheduleViaNamedLockController() override { return true; }
 
   CssFilter* filter_;
   std::unique_ptr<CssImageRewriter> css_image_rewriter_;
@@ -392,7 +399,8 @@ class CssFilter::Context : public SingleRewriteContext {
   ResourcePtr input_resource_;
   OutputResourcePtr output_resource_;
 
-  DISALLOW_COPY_AND_ASSIGN(Context);
+  Context(const Context&) = delete;
+  Context& operator=(const Context&) = delete;
 };
 
 }  // namespace net_instaweb

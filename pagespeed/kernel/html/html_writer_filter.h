@@ -99,7 +99,8 @@ class HtmlWriterFilter : public HtmlFilter {
   bool case_fold_;
   GoogleString case_fold_buffer_;
 
-  DISALLOW_COPY_AND_ASSIGN(HtmlWriterFilter);
+  HtmlWriterFilter(const HtmlWriterFilter&) = delete;
+  HtmlWriterFilter& operator=(const HtmlWriterFilter&) = delete;
 };
 
 }  // namespace net_instaweb

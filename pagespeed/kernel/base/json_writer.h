@@ -40,7 +40,7 @@ class HtmlElement;
 class MessageHandler;
 
 // Pair of panel json and start Element corresponding to the panel.
-typedef std::pair<HtmlElement*, Json::Value*> ElementJsonPair;
+using ElementJsonPair = std::pair<HtmlElement*, Json::Value*>;
 
 // Writes bytes to top json of the stack.
 class JsonWriter : public Writer {
@@ -61,7 +61,8 @@ class JsonWriter : public Writer {
   GoogleString buffer_;
   const std::vector<ElementJsonPair>* element_json_stack_;
 
-  DISALLOW_COPY_AND_ASSIGN(JsonWriter);
+  JsonWriter(const JsonWriter&) = delete;
+  JsonWriter& operator=(const JsonWriter&) = delete;
 };
 
 }  // namespace net_instaweb

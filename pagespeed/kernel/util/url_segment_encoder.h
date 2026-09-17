@@ -53,7 +53,8 @@ class UrlSegmentEncoder {
                       ResourceContext* out_data, MessageHandler* handler) const;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(UrlSegmentEncoder);
+  UrlSegmentEncoder(const UrlSegmentEncoder&) = delete;
+  UrlSegmentEncoder& operator=(const UrlSegmentEncoder&) = delete;
 };
 
 }  // namespace net_instaweb

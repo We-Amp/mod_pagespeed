@@ -20,12 +20,12 @@
 #ifndef PAGESPEED_OPT_HTTP_REQUEST_CONTEXT_H_
 #define PAGESPEED_OPT_HTTP_REQUEST_CONTEXT_H_
 
+#include <memory>
 #include <set>
 
 #include "base/logging.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/ref_counted_ptr.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/http/http_options.h"
@@ -40,7 +40,7 @@ class RequestTrace;
 class ThreadSystem;
 class Timer;
 
-typedef RefCountedPtr<RequestContext> RequestContextPtr;
+using RequestContextPtr = RefCountedPtr<RequestContext>;
 
 // A class which wraps state associated with a request.
 //
@@ -152,6 +152,34 @@ class RequestContext : public RefCounted<RequestContext> {
   void SetAcceptsWebp(bool x);
   bool accepts_webp() const { return accepts_webp_; }
 
+  // Refinement of accepts_webp(): true only when the WebP capability was
+  // asserted by the request's own "Accept: image/webp" header. accepts_webp()
+  // is broader -- it also carries user-agent-derived grants (the legacy
+  // Android allow-list and the no-navigation-Accept fallback), which
+  // is right for choosing what to serve on rewritten URLs but wrong for
+  // deciding whether a cached response carrying "Vary: Accept" is valid
+  // as-selected for this request (see
+  // OptionsAwareHTTPCacheCallback::IsCacheValid). Always a subset of
+  // accepts_webp().
+  void SetAcceptsWebpViaAcceptHeader(bool x);
+  bool accepts_webp_via_accept_header() const {
+    return accepts_webp_via_accept_header_;
+  }
+
+  // The AVIF counterpart of accepts_webp_via_accept_header(): true only when
+  // the request's own "Accept: image/avif" header asserted the capability.
+  // There is deliberately no broad accepts_avif() twin -- AVIF has no
+  // user-agent-derived grant to be broader than (no legacy allow-list, no
+  // no-navigation-Accept fallback), so the Accept-header fact is the only AVIF
+  // capability fact there is. Consumed by
+  // OptionsAwareHTTPCacheCallback::IsCacheValid to decide whether a cached
+  // AVIF response carrying "Vary: Accept" is valid as-selected for this
+  // request.
+  void SetAcceptsAvifViaAcceptHeader(bool x);
+  bool accepts_avif_via_accept_header() const {
+    return accepts_avif_via_accept_header_;
+  }
+
   // Indicates whether the request-headers tell us that a browser can extract
   // gzip compressed data.
   void SetAcceptsGzip(bool x);
@@ -251,6 +279,8 @@ class RequestContext : public RefCounted<RequestContext> {
 
   bool using_http2_;
   bool accepts_webp_;
+  bool accepts_webp_via_accept_header_;
+  bool accepts_avif_via_accept_header_;
   bool accepts_gzip_;
   bool frozen_;
   GoogleString minimal_private_suffix_;
@@ -264,7 +294,8 @@ class RequestContext : public RefCounted<RequestContext> {
   bool options_set_;
   HttpOptions options_;
 
-  DISALLOW_COPY_AND_ASSIGN(RequestContext);
+  RequestContext(const RequestContext&) = delete;
+  RequestContext& operator=(const RequestContext&) = delete;
 };
 
 }  // namespace net_instaweb

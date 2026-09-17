@@ -1,0 +1,41 @@
+# Allowlist for tools/ci/check_tests_in_test_tree.sh
+#
+# *_test.cc files that intentionally live OUTSIDE the test/ tree. Each entry is a
+# repo-relative path. Lines beginning with '#' and blank lines are ignored.
+# Trailing '#...' comments and surrounding whitespace are stripped. Add a
+# one-line reason above each entry. Anything here is exempt from the
+# "tests-must-live-under-test/" guard; everything else MUST be relocated to
+# test/<mirror>/ so the CI //test/... globs compile and run it.
+#
+# The guard also fails on STALE entries (paths git no longer tracks outside
+# test/), so this file cannot silently accrue cruft.
+#
+# After the kernel test relocation the kernel tests are gone from this list
+# (they now live under test/pagespeed/kernel/<pkg>/). The remaining 17 below are
+# pre-existing, intentionally-out-of-test/ files unrelated to this work.
+
+# --- benchmarks (pagespeed_cc_benchmark): tagged `manual`, so they are NOT in
+# the default CI build/test set by design; microbenchmarks, not unit tests, run
+# on demand. Their srcs are named *_speed_test.cc. ---
+benchmark/net/instaweb/rewriter/css_minify_speed_test.cc
+benchmark/net/instaweb/rewriter/domain_lawyer_speed_test.cc
+benchmark/net/instaweb/rewriter/image_speed_test.cc
+benchmark/net/instaweb/rewriter/javascript_minify_speed_test.cc
+benchmark/net/instaweb/rewriter/rewrite_driver_speed_test.cc
+benchmark/pagespeed/automatic/rewriter_speed_test.cc
+benchmark/pagespeed/kernel/base/fast_wildcard_group_speed_test.cc
+benchmark/pagespeed/kernel/base/file_system_speed_test.cc
+benchmark/pagespeed/kernel/base/string_multi_map_speed_test.cc
+benchmark/pagespeed/kernel/cache/disk_cache_speed_test.cc
+benchmark/pagespeed/kernel/html/html_parse_speed_test.cc
+benchmark/pagespeed/kernel/util/deque_speed_test.cc
+benchmark/pagespeed/kernel/util/url_escaper_speed_test.cc
+
+# --- vendored upstream css_parser (third_party): carried verbatim from the
+# upstream Google css_parser drop, NO cc_test target in their BUILD (not built
+# as tests here). Vendored code is out of scope for relocation; left in place to
+# keep the upstream tree intact. ---
+third_party/css_parser/src/webutil/css/identifier_test.cc
+third_party/css_parser/src/webutil/css/property_test.cc
+third_party/css_parser/src/webutil/css/tostring_test.cc
+third_party/css_parser/src/webutil/css/util_test.cc

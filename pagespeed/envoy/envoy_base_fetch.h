@@ -19,6 +19,8 @@
 
 #pragma once
 
+#include <atomic>
+
 #include "net/instaweb/http/public/async_fetch.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "pagespeed/envoy/envoy_server_context.h"
@@ -43,15 +45,19 @@ class EnvoyBaseFetch : public AsyncFetch {
  public:
   EnvoyBaseFetch(StringPiece url, EnvoyServerContext* server_context,
                  const RequestContextPtr& request_ctx,
-                 PreserveCachingHeaders preserve_caching_headers,
                  const RewriteOptions* options,
                  Envoy::Http::HttpPageSpeedDecoderFilter* decoder);
 
   // Called by Envoy to decrement the refcount.
+  // Returns the new reference count.
   int DecrementRefCount();
   // Called by pagespeed to increment the refcount.
+  // Returns the new reference count.
   int IncrementRefCount();
   bool IsCachedResultValid(const ResponseHeaders& headers) override;
+  // Called when the filter is being destroyed to prevent use-after-free.
+  // Must be called from the dispatcher thread before the filter is destroyed.
+  void DetachDecoder() { decoder_.store(nullptr, std::memory_order_release); }
 
  private:
   bool HandleWrite(const StringPiece& sp, MessageHandler* handler) override;
@@ -59,19 +65,28 @@ class EnvoyBaseFetch : public AsyncFetch {
   void HandleHeadersComplete() override;
   void HandleDone(bool success) override;
 
+  // Decrements reference count and deletes if zero. Returns new count.
   int DecrefAndDeleteIfUnreferenced();
 
   GoogleString url_;
   GoogleString buffer_;
   EnvoyServerContext* server_context_{nullptr};
   const RewriteOptions* options_{nullptr};
-  uint32_t references_{2};
-  PreserveCachingHeaders preserve_caching_headers_;
-  // Set to true just before the Envoy side releases its reference
-  bool have_ipro_response_{false};
-  Envoy::Http::HttpPageSpeedDecoderFilter* decoder_{nullptr};
+  // Reference count using std::atomic for proper thread-safety.
+  // Starts at 2: one for the Envoy filter, one for PageSpeed.
+  // Uses memory_order_acq_rel for modifications to ensure visibility
+  // across threads, and memory_order_acquire for the final read before delete.
+  std::atomic<int> references_{2};
+  // Whether we have an IPRO response (cache hit with valid status).
+  // Atomic: written in HandleHeadersComplete (network thread),
+  // read in HandleDone (possibly different thread).
+  std::atomic<bool> have_ipro_response_{false};
+  // Atomic pointer to avoid race between worker threads and dispatcher thread.
+  // Use memory_order_acquire for loads, memory_order_release for stores.
+  std::atomic<Envoy::Http::HttpPageSpeedDecoderFilter*> decoder_{nullptr};
 
-  DISALLOW_COPY_AND_ASSIGN(EnvoyBaseFetch);
+  EnvoyBaseFetch(const EnvoyBaseFetch&) = delete;
+  EnvoyBaseFetch& operator=(const EnvoyBaseFetch&) = delete;
 };
 
 }  // namespace net_instaweb

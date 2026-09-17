@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<!--
+  SPDX-License-Identifier: Apache-2.0
+  Copyright (c) 2024-2026 We-Amp B.V.
+-->
+
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Move Scripts Test</title>
+    <link rel="stylesheet" href="styles/main.css">
+    <!-- These scripts should be moved below CSS or to bottom -->
+    <script src="scripts/app.js"></script>
+    <script src="scripts/utils.js"></script>
+</head>
+<body>
+    <h1>Move Scripts Test</h1>
+    <p>Scripts should be moved to allow CSS to load first for better rendering.</p>
+
+    <div class="container">
+        <div class="box">Content loads first</div>
+    </div>
+</body>
+</html>

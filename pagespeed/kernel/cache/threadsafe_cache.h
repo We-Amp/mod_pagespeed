@@ -20,9 +20,10 @@
 #ifndef PAGESPEED_KERNEL_CACHE_THREADSAFE_CACHE_H_
 #define PAGESPEED_KERNEL_CACHE_THREADSAFE_CACHE_H_
 
+#include <memory>
+
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/shared_string.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -62,7 +63,8 @@ class ThreadsafeCache : public CacheInterface {
   CacheInterface* cache_;
   std::unique_ptr<AbstractMutex> mutex_;
 
-  DISALLOW_COPY_AND_ASSIGN(ThreadsafeCache);
+  ThreadsafeCache(const ThreadsafeCache&) = delete;
+  ThreadsafeCache& operator=(const ThreadsafeCache&) = delete;
 };
 
 }  // namespace net_instaweb

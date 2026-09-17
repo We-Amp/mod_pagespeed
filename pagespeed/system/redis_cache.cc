@@ -19,7 +19,11 @@
 
 #include "pagespeed/system/redis_cache.h"
 
+#ifndef _WIN32
 #include <sys/time.h>
+#else
+#include <winsock2.h>  // struct timeval on Windows
+#endif
 
 #include <algorithm>
 #include <cstddef>
@@ -358,7 +362,7 @@ ExternalServerSpec RedisCache::ParseRedirectionError(StringPiece error) {
 }
 
 RedisCache::Connection* RedisCache::GetOrCreateConnection(
-    ExternalServerSpec spec, const int database_index) {
+    const ExternalServerSpec& spec, const int database_index) {
   Connection* result;
   bool should_start_up = false;
   {
@@ -538,7 +542,8 @@ RedisCache::Connection::Connection(RedisCache* redis_cache, StringPiece host,
       redis_(nullptr),
       state_(kShutDown),
       next_reconnect_at_ms_(redis_cache_->timer_->NowMs()),
-      database_index_(database_index) {}
+      database_index_(database_index),
+      database_selected_(false) {}
 
 void RedisCache::Connection::StartUp(bool connect_now) {
   CHECK_NE("", host_);
@@ -574,6 +579,7 @@ void RedisCache::Connection::ShutDown() {
   // called while there are some unfinished requests, they should return.
   redis_.reset();
   state_ = kShutDown;
+  database_selected_ = false;
 }
 
 bool RedisCache::Connection::EnsureConnectionAndDatabaseSelection() {
@@ -593,6 +599,10 @@ bool RedisCache::Connection::EnsureConnection() {
     }
     redis_.reset();
     state_ = kConnecting;
+    // A fresh connection starts on the default database, so any previously
+    // issued SELECT no longer applies -- force EnsureDatabaseSelection() to
+    // re-select once this new connection is established.
+    database_selected_ = false;
   }
 
   // redis_mutex_ is held on entry to EnsureConnection().
@@ -621,9 +631,18 @@ bool RedisCache::Connection::EnsureConnection() {
 }
 
 bool RedisCache::Connection::EnsureDatabaseSelection() {
-  // dont select database if database index property not specified in config
-  if (database_index_ != kRedisDatabaseIndexNotSet) {
-    RedisReply reply = RedisCommand(
+  // dont select database if database index property not specified in config,
+  // or if it has already been selected on this connection (the SELECT only
+  // needs to happen once per connection; database_selected_ is reset whenever
+  // a new connection is established).
+  if (database_index_ != kRedisDatabaseIndexNotSet && !database_selected_) {
+    // EnsureConnection() has already succeeded by the time we get here (we are
+    // called as EnsureConnection() && EnsureDatabaseSelection()), so issue the
+    // SELECT directly on the live connection.  Routing it through RedisCommand()
+    // would re-enter EnsureConnectionAndDatabaseSelection() -> this method ->
+    // RedisCommand() -> ... and recurse until the stack overflowed (a crash on
+    // StartUp() for any configured Redis database index).
+    RedisReply reply = RedisCommandOnConnection(
         StrCat("SELECT ", IntegerToString(database_index_)).c_str(),
         REDIS_REPLY_STRING);
     if (reply == nullptr) {
@@ -632,6 +651,7 @@ bool RedisCache::Connection::EnsureDatabaseSelection() {
       redis_.reset();
       return false;
     }
+    database_selected_ = true;
   }
   return true;
 }
@@ -675,7 +695,9 @@ bool RedisCache::Connection::IsHealthyLockHeld() const {
       return true;
   }
   // gcc thinks following lines are reachable.
-  LOG(FATAL) << "Invalid state_ in IsHealthyLockHeld()";
+  LOG(ERROR) << "Invalid state_ in IsHealthyLockHeld(): "
+             << static_cast<int>(state_)
+             << " (returning false as safe default)";
   return false;
 }
 
@@ -690,17 +712,30 @@ void RedisCache::Connection::UpdateState() {
   }
 }
 
-RedisCache::RedisReply RedisCache::Connection::RedisCommand(const char* format,
-                                                            va_list args) {
-  if (!EnsureConnectionAndDatabaseSelection()) {
-    return nullptr;
-  }
-
+RedisCache::RedisReply RedisCache::Connection::RedisCommandOnConnection(
+    const char* format, va_list args) {
   void* result = redisvCommand(redis_.get(), format, args);
   redis_cache_->thread_synchronizer_->Signal("RedisCommand.After.Signal");
   redis_cache_->thread_synchronizer_->Wait("RedisCommand.After.Wait");
 
   return RedisReply(static_cast<redisReply*>(result));
+}
+
+RedisCache::RedisReply RedisCache::Connection::RedisCommandOnConnection(
+    const char* format, ...) {
+  va_list args;
+  va_start(args, format);
+  RedisCache::RedisReply reply = RedisCommandOnConnection(format, args);
+  va_end(args);
+  return reply;
+}
+
+RedisCache::RedisReply RedisCache::Connection::RedisCommand(const char* format,
+                                                            va_list args) {
+  if (!EnsureConnectionAndDatabaseSelection()) {
+    return nullptr;
+  }
+  return RedisCommandOnConnection(format, args);
 }
 
 RedisCache::RedisReply RedisCache::Connection::RedisCommand(const char* format,
@@ -749,13 +784,13 @@ bool RedisCache::Connection::ValidateRedisReply(
     if (!valid) {
       if (reply->type == REDIS_REPLY_ERROR) {
         GoogleString error(reply->str, reply->len);
-        LOG(DFATAL) << command_executed << ": redis returned error: " << error;
+        LOG(ERROR) << command_executed << ": redis returned error: " << error;
         redis_cache_->message_handler_->Message(
             kError, "%s: redis returned error: %s", command_executed,
             error.c_str());
       } else {
-        LOG(DFATAL) << command_executed
-                    << ": unexpected reply type from redis: " << reply->type;
+        LOG(ERROR) << command_executed
+                   << ": unexpected reply type from redis: " << reply->type;
         redis_cache_->message_handler_->Message(
             kError, "%s: unexpected reply type from redis: %d",
             command_executed, reply->type);

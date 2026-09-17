@@ -21,10 +21,10 @@
 #define PAGESPEED_KERNEL_SHAREDMEM_SHARED_DYNAMIC_STRING_MAP_TEST_BASE_H_
 
 #include <vector>
+#include <memory>
 
 #include "pagespeed/kernel/base/abstract_shared_mem.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/base/mock_message_handler.h"
@@ -82,7 +82,8 @@ class SharedDynamicStringMapTestBase : public testing::Test {
   std::unique_ptr<ThreadSystem> thread_system_;
   MockMessageHandler handler_;
 
-  DISALLOW_COPY_AND_ASSIGN(SharedDynamicStringMapTestBase);
+  SharedDynamicStringMapTestBase(const SharedDynamicStringMapTestBase&) = delete;
+  SharedDynamicStringMapTestBase& operator=(const SharedDynamicStringMapTestBase&) = delete;
 };
 
 template <typename ConcreteTestEnv>

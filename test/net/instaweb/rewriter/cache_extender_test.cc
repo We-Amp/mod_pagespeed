@@ -21,6 +21,8 @@
 
 #include "net/instaweb/rewriter/public/cache_extender.h"
 
+#include <cstdint>
+
 #include "net/instaweb/http/public/counting_url_async_fetcher.h"
 #include "net/instaweb/http/public/logging_proto.h"
 #include "net/instaweb/http/public/logging_proto_impl.h"
@@ -87,7 +89,7 @@ const int kLongTtlSec = 100000000;
 
 class CacheExtenderTest : public RewriteTestBase {
  protected:
-  enum InputOrOutput { kInput, kOutput, kBoth };
+  enum InputOrOutput : std::uint8_t { kInput, kOutput, kBoth };
 
   CacheExtenderTest()
       : kCssData(CssData("")),
@@ -682,6 +684,97 @@ TEST_F(CacheExtenderTest, ExtendIfShardedAndRewritten) {
           Encode("http://shard0.com/", kFilterId, "0", "c.js", "js"), kOutput));
 }
 
+TEST_F(CacheExtenderTest, ModuleScriptNotRelocatedByMapRewriteDomain) {
+  // A cache-extended URL is encoded with UrlNamer::kSharded, so with
+  // MapRewriteDomain configured the module would be relocated to the CDN
+  // host. Module fetches are CORS-mode: the fetch fails outright without
+  // Access-Control-Allow-Origin and relative imports re-resolve against the
+  // wrong host, so the src must be left untouched.
+  InitTest(kShortTtlSec);
+  EXPECT_TRUE(AddRewriteDomainMapping("cdn.com", kTestDomain));
+  ValidateNoChanges("module_map_rewrite_domain",
+                    "<script type=\"module\" src=\"c.js\"></script>");
+  EXPECT_EQ(0, num_cache_extended_->Get())
+      << "Number of cache extended resources is wrong";
+}
+
+TEST_F(CacheExtenderTest, ModuleScriptNotRelocatedByShardDomain) {
+  // Same relocation hazard via ShardDomain: the cache-extended URL would be
+  // encoded onto one of the shard hosts, so the module src must stay on the
+  // origin host.
+  InitTest(kShortTtlSec);
+  EXPECT_TRUE(AddShard(kTestDomain, "shard0.com,shard1.com"));
+  ValidateNoChanges("module_shard_domain",
+                    "<script type=\"module\" src=\"c.js\"></script>");
+  EXPECT_EQ(0, num_cache_extended_->Get())
+      << "Number of cache extended resources is wrong";
+}
+
+TEST_F(CacheExtenderTest, ModuleScriptExtendedOnSameHost) {
+  // Control: with no domain mapping or sharding, cache extension keeps the
+  // module on its origin host and in its source directory, so relative
+  // imports keep resolving and the rewrite is safe.
+  InitTest(kShortTtlSec);
+  const char kModuleScript[] = "<script type=\"module\" src=\"c.js\"></script>";
+  ValidateExpected("module_extended_same_host", kModuleScript,
+                   StrCat("<script type=\"module\" src=\"",
+                          Encode("", kFilterId, "0", "c.js", "js"),
+                          "\"></script>"));
+  EXPECT_EQ(1, num_cache_extended_->Get())
+      << "Number of cache extended resources is wrong";
+}
+
+TEST_F(CacheExtenderTest, IntegrityScriptNotRelocatedByShardDomain) {
+  // A no-cors classic script fetch yields an opaque response on a shard
+  // host, and the browser blocks a subresource whose integrity cannot be
+  // enforced — even when the bytes match. A script carrying integrity=
+  // must therefore stay on the origin host.
+  InitTest(kShortTtlSec);
+  EXPECT_TRUE(AddShard(kTestDomain, "shard0.com,shard1.com"));
+  ValidateNoChanges("integrity_shard_domain",
+                    "<script src=\"c.js\" integrity=\"sha384-x\"></script>");
+  EXPECT_EQ(0, num_cache_extended_->Get())
+      << "Number of cache extended resources is wrong";
+}
+
+TEST_F(CacheExtenderTest, IntegrityScriptNotRelocatedByMapRewriteDomain) {
+  // Same relocation hazard via MapRewriteDomain.
+  InitTest(kShortTtlSec);
+  EXPECT_TRUE(AddRewriteDomainMapping("cdn.com", kTestDomain));
+  ValidateNoChanges("integrity_map_rewrite_domain",
+                    "<script src=\"c.js\" integrity=\"sha384-x\"></script>");
+  EXPECT_EQ(0, num_cache_extended_->Get())
+      << "Number of cache extended resources is wrong";
+}
+
+TEST_F(CacheExtenderTest, IntegrityScriptExtendedOnSameHost) {
+  // Control: a same-host cache extension keeps the fetch same-origin, so
+  // the browser still enforces integrity= against the unchanged bytes and
+  // the rewrite is safe.
+  InitTest(kShortTtlSec);
+  const char kIntegrityScript[] =
+      "<script src=\"c.js\" integrity=\"sha384-x\"></script>";
+  ValidateExpected("integrity_extended_same_host", kIntegrityScript,
+                   StrCat("<script src=\"",
+                          Encode("", kFilterId, "0", "c.js", "js"),
+                          "\" integrity=\"sha384-x\"></script>"));
+  EXPECT_EQ(1, num_cache_extended_->Get())
+      << "Number of cache extended resources is wrong";
+}
+
+TEST_F(CacheExtenderTest, IntegrityStylesheetNotRelocatedByShardDomain) {
+  // Stylesheets with integrity= are blocked on opaque responses just like
+  // scripts, so a stylesheet carrying integrity= must not be relocated
+  // either.
+  InitTest(kShortTtlSec);
+  EXPECT_TRUE(AddShard(kTestDomain, "shard0.com,shard1.com"));
+  ValidateNoChanges("integrity_css_shard_domain",
+                    "<link rel=\"stylesheet\" href=\"sub/a.css?v=1\" "
+                    "type=\"text/css\" integrity=\"sha384-x\">");
+  EXPECT_EQ(0, num_cache_extended_->Get())
+      << "Number of cache extended resources is wrong";
+}
+
 TEST_F(CacheExtenderTest, ExtendIfShardedToHttps) {
   InitTest(kLongTtlSec);
 
@@ -704,7 +797,8 @@ TEST_F(CacheExtenderTest, ExtendIfShardedToHttps) {
 }
 
 TEST_F(CacheExtenderTest, ExtendIfShardedAndRewritingAndMappingHttps) {
-  // This test started out trying to unit test mod_pagespeed issue #400 by
+  // This test started out trying to reproduce a user-reported sharded
+  // rewrite-and-map-https configuration by
   // replicating the settings the poster used. They didn't work, basically
   // because the wildcard directive for *test.com conflicted with the later
   // non-wildcard ones. After much experimentation we came up with these

@@ -35,7 +35,7 @@ namespace net_instaweb {
 template <class T>
 class PoolElement {
  public:
-  typedef typename std::list<T*>::iterator Position;
+  using Position = typename std::list<T*>::iterator;
 
   PoolElement() {}
 
@@ -46,7 +46,8 @@ class PoolElement {
  private:
   Position pool_position_;
 
-  DISALLOW_COPY_AND_ASSIGN(PoolElement);
+  PoolElement(const PoolElement&) = delete;
+  PoolElement& operator=(const PoolElement&) = delete;
 };
 
 }  // namespace net_instaweb

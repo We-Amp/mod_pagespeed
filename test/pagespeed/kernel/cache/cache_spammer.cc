@@ -24,7 +24,6 @@
 #include "base/logging.h"
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/condvar.h"
-#include "pagespeed/kernel/base/dynamic_annotations.h"
 #include "pagespeed/kernel/base/shared_string.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -88,7 +87,8 @@ class SpammerCallback : public CacheInterface::Callback {
   GoogleString key_;
   GoogleString expected_;
 
-  DISALLOW_COPY_AND_ASSIGN(SpammerCallback);
+  SpammerCallback(const SpammerCallback&) = delete;
+  SpammerCallback& operator=(const SpammerCallback&) = delete;
 };
 
 }  // namespace
@@ -127,8 +127,7 @@ void CacheSpammer::Run() {
     inserts[j].Assign(absl::StrFormat("%s%d", value_prefix_, j));
   }
 
-  int iter_limit = RunningOnValgrind() ? num_iters_ / 100 : num_iters_;
-  for (int i = 0; i < iter_limit; ++i) {
+  for (int i = 0; i < num_iters_; ++i) {
     for (int j = 0; j < num_inserts_; ++j) {
       cache_->Put(absl::StrFormat(name_pattern, j), inserts[j]);
     }

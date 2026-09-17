@@ -1,3 +1,21 @@
+<!-- =======================================================================
+     ARCHIVE - DO NOT EDIT.
+
+     This is the mod_pagespeed 1.0 documentation as it shipped, published
+     unchanged as the /1.0/ archive on modpagespeed.com. It describes what
+     that release did, which is why it is NOT updated when behaviour
+     changes: an archive that tracks the current product is a record of
+     nothing.
+
+     If you got here by grepping for prose that is now out of date, the
+     change belongs in the pagespeed-optimizer repository instead:
+
+         2.0    website/src/content/docs/       -> modpagespeed.com/docs/
+         1.15   website/src/content/docs-1.1/   -> modpagespeed.com/1.1/docs/
+
+     CI enforces this. tools/ci/check_legacy_docs.sh fails any pull request
+     that changes a file under html/.
+     ======================================================================= -->
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
 or more contributor license agreements.  See the NOTICE file
@@ -55,8 +73,10 @@ in the configuration file.
   We introduced a new minification parser in version 1.8.31.2 that
   improves on some of the shortcomings of the previous parser
   (for example, correct tokenizing of regular expressions). As of 1.10.33.0,
-  the new parser is used by default, but you can revert back to the old
-  parser with this configuration flag:
+  the new parser is used by default. As of 1.15.0, the old parser is
+  deprecated and will be removed in a future release; until then you can
+  revert back to it with this configuration flag, which logs a deprecation
+  warning at configuration load:
 </p>
 <dl>
   <dt>Apache<dd><pre class="prettyprint"
@@ -166,6 +186,24 @@ contain:
 <pre class="prettyprint">
 document.write("External "+state);state+=1;
 </pre>
+</p>
+
+<h3>Module scripts</h3>
+<p>
+<code>&lt;script type="module"&gt;</code> elements are minified too, both
+inline and external. Module minification requires the default minification
+parser (see <a href="#new-minifier">New Minification Parser</a> above); with
+<code>UseExperimentalJsMinifier off</code> module scripts are served
+unchanged. The <code>type="module"</code> attribute and all other
+attributes are preserved, <code>import</code> specifiers are never altered,
+and a rewritten external module keeps its original directory, so relative
+imports keep resolving identically. Module scripts carrying an
+<code>integrity</code> attribute are left untouched, and module bodies using
+syntax the minifier does not yet support are served unchanged. Module
+scripts are not eligible for
+<a href="filter-canonicalize-js">library canonicalization</a>: modules are
+fetched with CORS semantics and resolve imports relative to their own URL, so
+substituting a different host could break the page.
 </p>
 
 <h3>Example</h3>

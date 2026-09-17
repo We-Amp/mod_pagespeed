@@ -76,6 +76,15 @@ TEST_F(DomStatsFilterTest, NumScriptsTest) {
   EXPECT_EQ(2, filter_->num_scripts());
 }
 
+TEST_F(DomStatsFilterTest, CountsModuleScripts) {
+  // A module is JavaScript too; classic and module scripts both count.
+  const GoogleString input_html =
+      "<html><body><script src='abc'></script>"
+      "<script type='module' src='def'></script></body></html>";
+  ValidateNoChanges("counts_module_scripts", input_html);
+  EXPECT_EQ(2, filter_->num_scripts());
+}
+
 TEST_F(DomStatsFilterTest, CriticalImagesUsedTest) {
   const GoogleString input_html =
       "<html><body><img src='a'><img src='a'><img src='b'></body></html>";

@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>rewrite_css group rules example</title>
+    <style type='text/css'>
+      /* This comment will be removed */
+      @supports (display: grid) {
+        body {
+          background: url(images/Cuppa.png) no-repeat center;
+        }
+      }
+    </style>
+    <link rel="stylesheet" type="text/css" href="styles/rewrite_css_group_rules.css">
+  </head>
+  <body>
+    <p>
+      This page styles its content from inside CSS conditional group rules.
+      With the rewrite_css filter enabled, the contents of @supports,
+      @layer, and @container blocks are minified and the images referenced
+      inside them are optimized, while the group conditions themselves are
+      preserved byte for byte.
+    </p>
+    <div class="group-rule-box"></div>
+  </body>
+</html>

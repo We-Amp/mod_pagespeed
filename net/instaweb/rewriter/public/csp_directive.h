@@ -49,7 +49,17 @@ enum class CspDirective {
   // media-src
   // object-src
   kScriptSrc,
+  // CSP3 directives specializing script-src: -elem governs
+  // element-created loads and inline <script> blocks, -attr governs
+  // inline event handlers. Each falls back to script-src, then
+  // default-src.
+  kScriptSrcAttr,
+  kScriptSrcElem,
   kStyleSrc,
+  // CSP3 directives specializing style-src, analogously to the
+  // script-src ones above.
+  kStyleSrcAttr,
+  kStyleSrcElem,
   // worker-src
   kBaseUri,
   // form-action

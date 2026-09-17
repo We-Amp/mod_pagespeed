@@ -143,7 +143,8 @@ class DomainRewriteFilter : public CommonFilter {
   // Stats on how much domain-rewriting we've done.
   Variable* rewrite_count_;
 
-  DISALLOW_COPY_AND_ASSIGN(DomainRewriteFilter);
+  DomainRewriteFilter(const DomainRewriteFilter&) = delete;
+  DomainRewriteFilter& operator=(const DomainRewriteFilter&) = delete;
 };
 
 }  // namespace net_instaweb

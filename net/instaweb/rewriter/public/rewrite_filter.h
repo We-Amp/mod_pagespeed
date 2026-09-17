@@ -147,7 +147,8 @@ class RewriteFilter : public CommonFilter {
   // large amount of useless entries.
   virtual bool UsesPropertyCacheDomCohort() const { return false; }
 
-  DISALLOW_COPY_AND_ASSIGN(RewriteFilter);
+  RewriteFilter(const RewriteFilter&) = delete;
+  RewriteFilter& operator=(const RewriteFilter&) = delete;
 };
 
 }  // namespace net_instaweb

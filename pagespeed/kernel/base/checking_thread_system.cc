@@ -19,6 +19,8 @@
 
 #include "pagespeed/kernel/base/checking_thread_system.h"
 
+#include <memory>
+
 #include "base/logging.h"
 #include "pagespeed/kernel/base/atomic_bool.h"
 #include "pagespeed/kernel/base/basictypes.h"
@@ -54,7 +56,8 @@ class CheckingThreadSystem::CheckingCondvar : public ThreadSystem::Condvar {
  private:
   CheckingThreadSystem::Mutex* mutex_;
   std::unique_ptr<ThreadSystem::Condvar> condvar_;
-  DISALLOW_COPY_AND_ASSIGN(CheckingCondvar);
+  CheckingCondvar(const CheckingCondvar&) = delete;
+  CheckingCondvar& operator=(const CheckingCondvar&) = delete;
 };
 
 // Destructor and methods for CheckingThreadSystem::Mutex

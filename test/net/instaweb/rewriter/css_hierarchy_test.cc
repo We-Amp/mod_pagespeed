@@ -162,7 +162,8 @@ class CssHierarchyTest : public RewriteTestBase {
   GoogleString nested_child2_css_;
   GoogleString flattened_css_;  // Flattened version of the entire hierarchy.
 
-  DISALLOW_COPY_AND_ASSIGN(CssHierarchyTest);
+  CssHierarchyTest(const CssHierarchyTest&) = delete;
+  CssHierarchyTest& operator=(const CssHierarchyTest&) = delete;
 };
 
 void CssHierarchyTest::InitializeCss(const StringPiece top_media,
@@ -354,6 +355,126 @@ TEST_F(CssHierarchyTest, RollUpStylesheetsFlat) {
   StringWriter writer(&out_text);
   CssMinify::Stylesheet(*top.stylesheet(), &writer, message_handler());
   EXPECT_EQ(flat_top_css(), out_text);
+}
+
+TEST_F(CssHierarchyTest, RollUpContentsFlatKeepsCharset) {
+  // A flat root (no @imports) is not rolled up into anything, so it must
+  // keep its @charset: for a root that may be the served result's only
+  // encoding declaration.
+  CssHierarchy top(nullptr);
+  InitializeCss("", "");  // to initialize flat_top_css().
+  const GoogleString charset_top_css =
+      StrCat("@charset \"UTF-8\";", flat_top_css());
+  top.InitializeRoot(top_url(), top_url(), charset_top_css,
+                     false /* has_unparseables */,
+                     0 /* flattened_result_limit */, nullptr /* stylesheet */,
+                     message_handler());
+
+  top.RollUpContents();
+  EXPECT_EQ(charset_top_css, top.minified_contents());
+}
+
+TEST_F(CssHierarchyTest, RollUpStylesheetsFlatKeepsCharset) {
+  // Same as above but via RollUpStylesheets, driven the way CssFilter drives
+  // it: with an already-parsed stylesheet, so the contents are not re-parsed
+  // here and the loaded-from-cache veto does not apply.
+  CssHierarchy top(nullptr);
+  InitializeCss("", "");  // to initialize flat_top_css().
+  const GoogleString charset_top_css =
+      StrCat("@charset \"UTF-8\";", flat_top_css());
+  CssStringPiece parseable(charset_top_css.data(), charset_top_css.size());
+  Css::Parser parser(parseable);
+  parser.set_preservation_mode(true);
+  parser.set_quirks_mode(false);
+  top.InitializeRoot(top_url(), top_url(), charset_top_css,
+                     false /* has_unparseables */,
+                     0 /* flattened_result_limit */,
+                     parser.ParseRawStylesheet(), message_handler());
+
+  top.RollUpStylesheets();
+  EXPECT_TRUE(nullptr != top.stylesheet());
+
+  // Re-serialize stylesheet and check it matches.
+  GoogleString out_text;
+  StringWriter writer(&out_text);
+  CssMinify::Stylesheet(*top.stylesheet(), &writer, message_handler());
+  EXPECT_EQ(charset_top_css, out_text);
+}
+
+TEST_F(CssHierarchyTest, RollUpContentsFlatOverLimitKeepsCharset) {
+  // A flat root whose minified result exceeds the flattening limit fails
+  // flattening and falls back to the minified original - which must still
+  // have its @charset: the failure-restore must not swap the empty saved
+  // at-rule sets back into the stylesheet.
+  CssHierarchy top(nullptr);
+  InitializeCss("", "");  // to initialize flat_top_css().
+  const GoogleString charset_top_css =
+      StrCat("@charset \"UTF-8\";", flat_top_css());
+  top.InitializeRoot(top_url(), top_url(), charset_top_css,
+                     false /* has_unparseables */,
+                     0 /* flattened_result_limit */, nullptr /* stylesheet */,
+                     message_handler());
+  top.set_flattened_result_limit(10L);
+
+  top.RollUpContents();
+  EXPECT_FALSE(top.flattening_succeeded());
+  EXPECT_EQ(charset_top_css, top.minified_contents());
+}
+
+TEST_F(CssHierarchyTest, RollUpContentsNestedDropsCharset) {
+  // A root whose @import was actually flattened must still drop its @charset:
+  // the combined result is decoded with the enclosing context's charset.
+  CssHierarchy top(nullptr);
+  InitializeCss("", "");  // to initialize flat_top_css().
+  const GoogleString charset_nested_top_css =
+      StrCat("@charset \"UTF-8\";",
+             MakeAtImport(StrCat(top_url().Spec(), "nested1.css"), ""),
+             flat_top_css());
+  top.InitializeRoot(top_url(), top_url(), charset_nested_top_css,
+                     false /* has_unparseables */,
+                     0 /* flattened_result_limit */, nullptr /* stylesheet */,
+                     message_handler());
+  EXPECT_TRUE(top.Parse());
+  EXPECT_TRUE(top.ExpandChildren());
+  ASSERT_EQ(1, top.children().size());
+  CssHierarchy* child = top.children()[0];
+  child->set_input_contents(kTopChild1Css);
+  EXPECT_TRUE(child->Parse());
+  EXPECT_FALSE(child->ExpandChildren());
+
+  top.RollUpContents();
+  EXPECT_TRUE(top.flattening_succeeded());
+  EXPECT_EQ(StrCat(kTopChild1Css, flat_top_css()), top.minified_contents());
+}
+
+TEST_F(CssHierarchyTest, RollUpStylesheetsNestedDropsCharset) {
+  // Same as above but via RollUpStylesheets.
+  CssHierarchy top(nullptr);
+  InitializeCss("", "");  // to initialize flat_top_css().
+  const GoogleString charset_nested_top_css =
+      StrCat("@charset \"UTF-8\";",
+             MakeAtImport(StrCat(top_url().Spec(), "nested1.css"), ""),
+             flat_top_css());
+  top.InitializeRoot(top_url(), top_url(), charset_nested_top_css,
+                     false /* has_unparseables */,
+                     0 /* flattened_result_limit */, nullptr /* stylesheet */,
+                     message_handler());
+  EXPECT_TRUE(top.Parse());
+  EXPECT_TRUE(top.ExpandChildren());
+  ASSERT_EQ(1, top.children().size());
+  CssHierarchy* child = top.children()[0];
+  child->set_input_contents(kTopChild1Css);
+  EXPECT_TRUE(child->Parse());
+  EXPECT_FALSE(child->ExpandChildren());
+
+  top.RollUpStylesheets();
+  EXPECT_TRUE(top.flattening_succeeded());
+
+  // Re-serialize stylesheet and check the @charset is gone.
+  GoogleString out_text;
+  StringWriter writer(&out_text);
+  CssMinify::Stylesheet(*top.stylesheet(), &writer, message_handler());
+  EXPECT_EQ(StrCat(kTopChild1Css, flat_top_css()), out_text);
 }
 
 TEST_F(CssHierarchyTest, ParseNested) {

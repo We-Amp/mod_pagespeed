@@ -29,13 +29,13 @@
 
 #include <cstddef>  // for size_t
 #include <deque>
+#include <memory>
 #include <set>
 #include <vector>
 
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/function.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_annotations.h"
@@ -85,7 +85,8 @@ class QueuedWorkerPool {
      private:
       net_instaweb::Sequence* sequence_;
       Function* callback_;
-      DISALLOW_COPY_AND_ASSIGN(AddFunction);
+      AddFunction(const AddFunction&) = delete;
+      AddFunction& operator=(const AddFunction&) = delete;
     };
 
     // Adds 'function' to a sequence.  Note that this can occur at any time
@@ -158,10 +159,11 @@ class QueuedWorkerPool {
     Waveform* queue_size_;
     size_t max_queue_size_;
 
-    DISALLOW_COPY_AND_ASSIGN(Sequence);
+    Sequence(const Sequence&) = delete;
+    Sequence& operator=(const Sequence&) = delete;
   };
 
-  typedef std::set<Sequence*> SequenceSet;
+  using SequenceSet = std::set<Sequence*>;
 
   // Sequence is owned by the pool, and will be automatically freed when
   // the pool is finally freed (e.g. on server shutdown).  But the sequence
@@ -249,7 +251,8 @@ class QueuedWorkerPool {
   Waveform* queue_size_;
   int load_shedding_threshold_;
 
-  DISALLOW_COPY_AND_ASSIGN(QueuedWorkerPool);
+  QueuedWorkerPool(const QueuedWorkerPool&) = delete;
+  QueuedWorkerPool& operator=(const QueuedWorkerPool&) = delete;
 };
 
 }  // namespace net_instaweb

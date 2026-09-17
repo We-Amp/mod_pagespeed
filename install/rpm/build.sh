@@ -18,7 +18,7 @@ gen_spec() {
 # Setup the installation directory hierachy in the package staging area.
 prep_staging_rpm() {
   prep_staging_common
-  install -m 755 -d "${STAGEDIR}/etc/cron.daily" "${STAGEDIR}/usr/bin"
+  install -m 755 -d "${STAGEDIR}/usr/bin"
 }
 
 # Put the package contents in the staging area.
@@ -26,12 +26,6 @@ stage_install_rpm() {
   prep_staging_rpm
   stage_install_common
   echo "Staging RPM install files in '${STAGEDIR}'..."
-  if [ "$CPANEL" = false ]; then
-    process_template "${BUILDDIR}/install/common/rpmrepo.cron" \
-      "${STAGEDIR}/etc/cron.daily/${PACKAGE}"
-    chmod 755 "${STAGEDIR}/etc/cron.daily/${PACKAGE}"
-  fi
-
   # For CentOS, the load and conf files are combined into a single
   # 'conf' file. So we install the load template as the conf file, and
   # then concatenate the actual conf file.
@@ -45,60 +39,134 @@ stage_install_rpm() {
     cat "${BUILDDIR}/install/rpm/pagespeed.cpanel.conf" >> \
       "${STAGEDIR}${APACHE_CONFDIR}/${PAGESPEED_CONF_PREFIX}pagespeed.conf"
   fi
-  install -m 755 "${BUILDDIR}/js_minify" \
-    "${STAGEDIR}/usr/bin/pagespeed_js_minify"
   chmod 644 "${STAGEDIR}${APACHE_CONFDIR}/${PAGESPEED_CONF_PREFIX}pagespeed.conf"
-  install -m 644 \
-    "${BUILDDIR}/../../net/instaweb/genfiles/conf/pagespeed_libraries.conf" \
-    "${STAGEDIR}${APACHE_CONFDIR}/${PAGESPEED_CONF_PREFIX}pagespeed_libraries.conf"
+  # The daemon drop-in: the two directives that point the module at the
+  # optimizer daemon this package depends on. %config(noreplace) in the spec
+  # (via DAEMON_DROPIN_FILES, set in do_package). Shipped ONLY by a build that
+  # carries the optimizer dependency (-d): a module pointed at a daemon that is
+  # not installed runs with in-place optimization OFF -- it does not fall back
+  # to its classic in-place path -- so the dependency-free builds (EA4, el8,
+  # el10, the synthetic upgrade fixture) must not carry the file.
+  # httpd reads conf.d/*.conf in sort order and the LoadModule line lives in
+  # pagespeed.conf, so the name must sort AFTER it ('_' > '.'); a name sorting
+  # before it is read before the module exists and its <IfModule> block is
+  # skipped without a word.
+  if [ -n "${OPTIMIZER_RPM_VERSION}" ]; then
+    install -m 644 "${BUILDDIR}/install/common/pagespeed_daemon.conf" \
+      "${STAGEDIR}${APACHE_CONFDIR}/${PAGESPEED_CONF_PREFIX}pagespeed_daemon.conf"
+
+    # The SELinux policy module for the optimizer daemon, shipped by the
+    # same pair builds that carry the drop-in: on an enforcing EL9 host the
+    # stock targeted policy gives httpd_t no access to the daemon's cache
+    # volume and notify socket, so in-place optimization never turns on
+    # without it. Compiled here, never committed as a binary; the spec's
+    # %post installs it via semodule and its embedded file contexts make the
+    # labels survive restorecon/relabel. The compile needs the SELinux devel
+    # Makefile — selinux-policy-devel (rpm family) / selinux-policy-dev
+    # (deb family); the package builders (the dev CI image for the release
+    # pair build, the EL containers for the Apache legs) do not all carry
+    # it, so install it on demand rather than depending on image content.
+    if [ ! -f /usr/share/selinux/devel/Makefile ]; then
+      echo "SELinux devel Makefile missing — installing the policy-devel package"
+      if command -v apt-get >/dev/null 2>&1; then
+        apt-get install -y selinux-policy-dev >/dev/null
+      elif command -v dnf >/dev/null 2>&1; then
+        dnf install -y --setopt=install_weak_deps=False selinux-policy-devel >/dev/null
+      fi
+    fi
+    local SELINUX_BUILD="${TMPFILEDIR}/selinux"
+    install -m 755 -d "${SELINUX_BUILD}"
+    cp "${BUILDDIR}/install/rpm/selinux/pagespeed-optimizer.te" \
+      "${BUILDDIR}/install/rpm/selinux/pagespeed-optimizer.fc" \
+      "${SELINUX_BUILD}/"
+    if ! ( cd "${SELINUX_BUILD}" && \
+           make -s -f /usr/share/selinux/devel/Makefile \
+             pagespeed-optimizer.pp ); then
+      echo "error: building the SELinux policy module failed (serving-pair" \
+        "builds ship it; the package builder needs selinux-policy-devel" \
+        "(rpm) / selinux-policy-dev (deb) and make)" >&2
+      exit 1
+    fi
+    install -D -m 644 "${SELINUX_BUILD}/pagespeed-optimizer.pp" \
+      "${STAGEDIR}/usr/share/selinux/targeted/pagespeed-optimizer.pp"
+  fi
+  # Install pagespeed_libraries.conf if available
+  # Try Bazel output path first, then legacy GYP path
+  local LIBRARIES_CONF="${BUILDDIR}/net/instaweb/genfiles/conf/pagespeed_libraries.conf"
+  if [ ! -f "${LIBRARIES_CONF}" ]; then
+    LIBRARIES_CONF="${BUILDDIR}/../../net/instaweb/genfiles/conf/pagespeed_libraries.conf"
+  fi
+  if [ -f "${LIBRARIES_CONF}" ]; then
+    install -m 644 "${LIBRARIES_CONF}" \
+      "${STAGEDIR}${APACHE_CONFDIR}/${PAGESPEED_CONF_PREFIX}pagespeed_libraries.conf"
+  fi
 }
 
 # Actually generate the package file.
 do_package() {
   echo "Packaging ${HOST_ARCH}..."
   PROVIDES="${PACKAGE}"
-  local REPS="$REPLACES"
   REPLACES=""
-  for rep in $REPS; do
-    if [ -z "$REPLACES" ]; then
-      REPLACES="$PACKAGE-$rep"
-    else
-      REPLACES="$REPLACES $PACKAGE-$rep"
-    fi
-  done
 
   # If we specify a dependecy of foo.so below, we would depend on both the
   # 32 and 64-bit versions on a 64-bit machine. The current version of RPM
   # we use is too old and doesn't provide %{_isa}, so we do this manually.
-  if [ "$HOST_ARCH" = "x86_64" ] ; then
+  if [ "$HOST_ARCH" = "x86_64" ] || [ "$HOST_ARCH" = "aarch64" ] ; then
     local EMPTY_VERSION="()"
     local PKG_ARCH="(64bit)"
-  elif [ "$HOST_ARCH" = "i386" ] ; then
-    local EMPTY_VERSION=""
-    local PKG_ARCH=""
   fi
 
-  DEPENDS="httpd >= 2.2, \
-  at"
+  DEPENDS="httpd >= 2.4"
   if [ "$CPANEL" = true ]; then
     DEPENDS="ea-apache24 >= 2.4, \
     ea-apache24-mod_version >= 2.4"
   fi
   DEPENDS="$DEPENDS, \
   libstdc++ >= 4.1.2"
+  # The %files entry for the daemon drop-in; empty in a dependency-free build,
+  # which does not stage the file either (see stage_install_rpm).
+  DAEMON_DROPIN_FILES=""
+  SELINUX_POLICY_FILES=""
+  SELINUX_REQUIRES_POST=""
+  SELINUX_REQUIRES_POSTUN=""
+  if [ -n "${OPTIMIZER_RPM_VERSION}" ]; then
+    # Exact-version dependency: the module serves through the optimizer
+    # daemon, and the pair is only supported at matching versions --
+    # upgrades and rollbacks move both packages together.
+    DEPENDS="$DEPENDS, \
+  pagespeed-optimizer = ${OPTIMIZER_RPM_VERSION}"
+    DAEMON_DROPIN_FILES="%config(noreplace) ${APACHE_CONFDIR}/${PAGESPEED_CONF_PREFIX}pagespeed_daemon.conf"
+    # The compiled policy module staged in stage_install_rpm, and the
+    # scriptlet toolchain its %post/%postun call (semodule, restorecon,
+    # selinuxenabled all live in policycoreutils on the EL family).
+    SELINUX_POLICY_FILES="/usr/share/selinux/targeted/pagespeed-optimizer.pp"
+    SELINUX_REQUIRES_POST="Requires(post): policycoreutils"
+    SELINUX_REQUIRES_POSTUN="Requires(postun): policycoreutils"
+  else
+    echo "warning: packaging WITHOUT a pagespeed-optimizer dependency;" \
+      "a serving pair build must pass -d <optimizer-rpm-version>" >&2
+  fi
   gen_spec
 
-  # Create temporary rpmbuild dirs.
+  # Create temporary rpmbuild dirs. Keep the buildroot (%install staging) DISTINCT
+  # from %_builddir (BUILD). On EL10's rpm 4.20 the build tree is auto-removed in a
+  # post-%clean "rmbuild" stage that chdir's into %_builddir; with buildroot==_builddir
+  # (both .../BUILD) the spec's `%clean: rm -rf $RPM_BUILD_ROOT` deletes the dir rmbuild
+  # then needs -> "Bad exit status from ... (rmbuild)" and the build fails AFTER the rpm
+  # is already written. el8/el9's older rpm tolerated the alias; el10 does not. Pointing
+  # --buildroot at its own dir is the correct convention and also silences the %install
+  # `getcwd: cannot access parent directories` warnings (the old alias deleted its cwd).
   RPMBUILD_DIR=$(mktemp -d -t rpmbuild.XXXXXX) || exit 1
   mkdir -p "$RPMBUILD_DIR/BUILD"
+  mkdir -p "$RPMBUILD_DIR/BUILDROOT"
   mkdir -p "$RPMBUILD_DIR/RPMS"
 
-  rpmbuild --buildroot="$RPMBUILD_DIR/BUILD" -bb \
+  rpmbuild --buildroot="$RPMBUILD_DIR/BUILDROOT" -bb \
     --target="$HOST_ARCH" --rmspec \
     --define "_topdir $RPMBUILD_DIR" \
     --define "_binary_payload w9.bzdio" \
     "${SPEC}"
-  PKGNAME="${PACKAGE}-${CHANNEL}-${VERSION}-${REVISION}"
+  PKGNAME="${PACKAGE}-${VERSION}-${REVISION}"
   mv "$RPMBUILD_DIR/RPMS/$HOST_ARCH/${PKGNAME}.${HOST_ARCH}.rpm" "${OUTPUTDIR}"
   # Make sure the package is world-readable, otherwise it causes problems when
   # copied to share drive.
@@ -113,41 +181,19 @@ cleanup() {
 }
 
 usage() {
-  echo "usage: $(basename $0) [-c channel] [-a target_arch] [-o 'dir'] [-b 'dir'] [-p]"
-  echo "-c channel the package channel (unstable, beta, stable)"
-  echo "-a arch    package architecture (ia32 or x64)"
+  echo "usage: $(basename $0) [-a target_arch] [-o 'dir'] [-b 'dir'] [-p]"
+  echo "-a arch    package architecture (x64 or arm64)"
   echo "-o dir     package output directory [${OUTPUTDIR}]"
   echo "-b dir     build input directory    [${BUILDDIR}]"
   echo "-p         cPanel EasyApache 4 build"
+  echo "-d version exact pagespeed-optimizer version to depend on; also ships"
+  echo "           the daemon drop-in pagespeed_daemon.conf (pair builds only)"
+  echo "-c channel (ignored, kept for backward compatibility)"
   echo "-h         this help message"
 }
 
-# Check that the channel name is one of the allowable ones.
-verify_channel() {
-  case $CHANNEL in
-    stable )
-      CHANNEL=stable
-      REPLACES="unstable beta"
-      ;;
-    unstable|dev|alpha )
-      CHANNEL=unstable
-      REPLACES="stable beta"
-      ;;
-    testing|beta )
-      CHANNEL=beta
-      REPLACES="unstable stable"
-      ;;
-    * )
-      echo
-      echo "ERROR: '$CHANNEL' is not a valid channel type."
-      echo
-      exit 1
-      ;;
-  esac
-}
-
 process_opts() {
-  while getopts ":o:b:c:a:ph" OPTNAME
+  while getopts ":o:b:c:a:d:ph" OPTNAME
   do
     case $OPTNAME in
       o )
@@ -159,13 +205,22 @@ process_opts() {
         ;;
       c )
         CHANNEL="$OPTARG"
-        verify_channel
         ;;
       a )
         TARGETARCH="$OPTARG"
         ;;
       p )
         CPANEL=true
+        ;;
+      d )
+        OPTIMIZER_RPM_VERSION="$OPTARG"
+        case "$OPTIMIZER_RPM_VERSION" in
+          *[!A-Za-z0-9.~^+]* | "" )
+            echo "'-d' takes an RPM package version" \
+              "([A-Za-z0-9.~^+], no epochs, no release suffix)." >&2
+            exit 1
+            ;;
+        esac
         ;;
       h )
         usage
@@ -195,31 +250,37 @@ STAGEDIR=$(mktemp -d -t rpm.build.XXXXXX) || exit 1
 TMPFILEDIR=$(mktemp -d -t rpm.tmp.XXXXXX) || exit 1
 CHANNEL="beta"
 # Default target architecture to same as build host.
-if [ "$(uname -m)" = "x86_64" ]; then
-  TARGETARCH="x64"
-else
-  TARGETARCH="ia32"
-fi
+case "$(uname -m)" in
+  x86_64)  TARGETARCH="x64" ;;
+  aarch64) TARGETARCH="arm64" ;;
+  *)
+    echo "ERROR: Unsupported host architecture '$(uname -m)'." >&2
+    exit 1
+    ;;
+esac
 SPEC="${TMPFILEDIR}/mod-pagespeed.spec"
 CPANEL=false
+# When set (-d), the package hard-depends on pagespeed-optimizer at exactly
+# this version (the serving-pair contract).
+OPTIMIZER_RPM_VERSION=""
 
 # call cleanup() on exit
 trap cleanup 0
 process_opts "$@"
-if [ ! "$BUILDDIR" ]; then
-  BUILDDIR=$(readlink -f "${SCRIPTDIR}/../../out/Release")
+if [ ! "${BUILDDIR:-}" ]; then
+  # Default: source tree root (Bazel build)
+  BUILDDIR=$(readlink -f "${SCRIPTDIR}/../..")
 fi
 
-source ${BUILDDIR}/install/common/installer.include
+source "${BUILDDIR}/install/common/installer.include"
 
 get_version_info
 
-source "${BUILDDIR}/install/common/mod-pagespeed.info"
+source "${BUILDDIR}/install/common/mod-pagespeed/mod-pagespeed.info"
 eval $(sed -e "s/^\([^=]\+\)=\(.*\)$/export \1='\2'/" \
   "${BUILDDIR}/install/common/BRANDING")
 
 REPOCONFIG=""
-verify_channel
 
 APACHE_CONFDIR="/etc/httpd/conf.d"
 MOD_PAGESPEED_CACHE="/var/cache/mod_pagespeed"
@@ -228,7 +289,6 @@ APACHE_USER="apache"
 COMMENT_OUT_DEFLATE=
 SSL_CERT_DIR="/etc/pki/tls/certs"
 SSL_CERT_FILE_COMMAND="ModPagespeedSslCertFile /etc/pki/tls/cert.pem"
-APACHE_MODULEDIR_IA32="/usr/lib/httpd/modules"
 APACHE_MODULEDIR_X64="/usr/lib64/httpd/modules"
 PAGESPEED_CONF_PREFIX=""
 
@@ -236,7 +296,6 @@ if [ "$CPANEL" = true ]; then
   APACHE_CONFDIR="/etc/apache2/conf.modules.d"
   APACHE_USER="nobody"
   PACKAGE="ea-apache24-$(echo $PACKAGE | tr - _)"
-  APACHE_MODULEDIR_IA32="/usr/lib/apache2/modules"
   APACHE_MODULEDIR_X64="/usr/lib64/apache2/modules"
   PAGESPEED_CONF_PREFIX="456_"
   COMMENT_OUT_CRON="\# "
@@ -246,14 +305,14 @@ fi
 cd "${OUTPUTDIR}"
 
 case "$TARGETARCH" in
-  ia32 )
-    export APACHE_MODULEDIR=$APACHE_MODULEDIR_IA32
-    export HOST_ARCH="i386"
-    stage_install_rpm
-    ;;
   x64 )
     export APACHE_MODULEDIR=$APACHE_MODULEDIR_X64
     export HOST_ARCH="x86_64"
+    stage_install_rpm
+    ;;
+  arm64 )
+    export APACHE_MODULEDIR=$APACHE_MODULEDIR_X64
+    export HOST_ARCH="aarch64"
     stage_install_rpm
     ;;
   * )

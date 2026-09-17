@@ -73,7 +73,8 @@ class MockTimeCache : public CacheInterface {
   int64 delay_us_;
   GoogleString name_;
 
-  DISALLOW_COPY_AND_ASSIGN(MockTimeCache);
+  MockTimeCache(const MockTimeCache&) = delete;
+  MockTimeCache& operator=(const MockTimeCache&) = delete;
 };
 
 }  // namespace net_instaweb

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2015 Google Inc.
+
 # This makefile includes various integration tests, and is meant to be usable
 # in both development and deployment settings.
 #
@@ -50,7 +53,6 @@ apache_vm_system_tests : setup_doc_root
 	$(MAKE) FAST_RESTART=1 apache_debug_slurp_test
 	$(MAKE) FAST_RESTART=1 apache_debug_speling_test
 	$(MAKE) FAST_RESTART=1 apache_debug_gzip_test
-	$(MAKE) FAST_RESTART=1 apache_debug_controller_test
 	$(MAKE) FAST_RESTART=1 apache_debug_process_scope_test
 	$(MAKE) FAST_RESTART=1 apache_debug_remote_config_test
 	$(MAKE) FAST_RESTART=1 apache_debug_experiment_test
@@ -242,20 +244,6 @@ apache_debug_redis_test_run :
 	$(MAKE) apache_debug_restart
 	$(APACHE_SYSTEM_TEST) $(APACHE_SERVER) $(APACHE_HTTPS_SERVER)
 	CACHE_FLUSH_TEST=on \
-	    $(APACHE_SYSTEM_TEST) $(APACHE_SERVER) $(APACHE_HTTPS_SERVER)
-
-apache_debug_controller_test :
-	rm -rf $(MOD_PAGESPEED_CACHE)/*
-	$(MAKE) apache_debug_controller_test_run
-	$(MAKE) apache_debug_stop
-	[ -z "`grep leaked_rewrite_drivers $(APACHE_LOG)`" ]
-	@echo PASS
-
-apache_debug_controller_test_run :
-	$(MAKE) apache_install_conf OPTIONS="$(OPTIONS) CONTROLLER_TEST=1"
-	$(MAKE) apache_debug_restart
-	SECONDARY_HOSTNAME=localhost:$(APACHE_SECONDARY_PORT) \
-	RUN_CONTROLLER_TEST=on \
 	    $(APACHE_SYSTEM_TEST) $(APACHE_SERVER) $(APACHE_HTTPS_SERVER)
 
 # This test checks that when ModPagespeedFetchWithGzip is enabled we

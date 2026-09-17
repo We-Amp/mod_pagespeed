@@ -17,9 +17,10 @@
  * under the License.
  */
 
+#include <memory>
+
 #include "pagespeed/kernel/base/wildcard.h"
 
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 

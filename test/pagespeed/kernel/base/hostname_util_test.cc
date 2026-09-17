@@ -19,7 +19,14 @@
 
 #include "pagespeed/kernel/base/hostname_util.h"
 
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#else
 #include <unistd.h>
+#endif
 
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/string.h"
@@ -34,14 +41,21 @@ class HostnameUtilTest : public testing::Test {
   HostnameUtilTest() {}
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(HostnameUtilTest);
+  HostnameUtilTest(const HostnameUtilTest&) = delete;
+  HostnameUtilTest& operator=(const HostnameUtilTest&) = delete;
 };
 
 TEST_F(HostnameUtilTest, GetHostname) {
   // Highly questionable test since it reimplements GetHostname, however it's
   // here in an attempt at a black-box test of GetHostname, in case it changes.
   char our_hostname[1024];
+#ifdef _WIN32
+  // On Windows, GetHostname() uses GetComputerNameA (no Winsock required).
+  DWORD size = sizeof(our_hostname);
+  GetComputerNameA(our_hostname, &size);
+#else
   gethostname(our_hostname, sizeof(our_hostname) - 1);
+#endif
 
   GoogleString hostname(GetHostname());
   EXPECT_STREQ(our_hostname, hostname);

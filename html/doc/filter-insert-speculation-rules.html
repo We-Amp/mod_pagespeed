@@ -1,0 +1,176 @@
+<!-- =======================================================================
+     ARCHIVE - DO NOT EDIT.
+
+     This is the mod_pagespeed 1.0 documentation as it shipped, published
+     unchanged as the /1.0/ archive on modpagespeed.com. It describes what
+     that release did, which is why it is NOT updated when behaviour
+     changes: an archive that tracks the current product is a record of
+     nothing.
+
+     If you got here by grepping for prose that is now out of date, the
+     change belongs in the pagespeed-optimizer repository instead:
+
+         2.0    website/src/content/docs/       -> modpagespeed.com/docs/
+         1.15   website/src/content/docs-1.1/   -> modpagespeed.com/1.1/docs/
+
+     CI enforces this. tools/ci/check_legacy_docs.sh fails any pull request
+     that changes a file under html/.
+     ======================================================================= -->
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Insert Speculation Rules</title>
+    <link rel="stylesheet" href="doc.css">
+  </head>
+  <body>
+<!--#include virtual="_header.html" -->
+
+
+  <div id=content>
+<h1>Insert Speculation Rules</h1>
+<h2>Objective</h2>
+<p>
+Speed up same-origin navigations by letting the browser prefetch links before
+the user clicks them.
+</p>
+
+  <h2>Configuration</h2>
+  <p>
+  The 'Insert Speculation Rules' filter is enabled by specifying:
+</p>
+<dl>
+  <dt>Apache:<dd><pre class="prettyprint"
+     >ModPagespeedEnableFilters insert_speculation_rules</pre>
+  <dt>Nginx:<dd><pre class="prettyprint"
+     >pagespeed EnableFilters insert_speculation_rules;</pre>
+</dl>
+<p>
+in the configuration file. The filter is not part of any rewrite level, so it
+is always opt-in.
+</p>
+
+<h2>Description</h2>
+<p>
+The <a href="https://developer.mozilla.org/docs/Web/API/Speculation_Rules_API"
+>Speculation Rules API</a> lets a page declare which links the browser may
+fetch speculatively, ahead of the user's click. This filter injects a
+conservative ruleset that prefetches same-origin documents with
+<code>moderate</code> eagerness, which means the browser typically starts the
+prefetch when the user hovers over or starts interacting with a link. When the
+user then navigates, the destination document is already in the browser's
+cache, making the navigation feel near-instant.
+</p>
+
+<h2>Operation</h2>
+<p>
+This filter inserts a single script tag at the end of the body:
+</p>
+
+<pre class="prettyprint">
+&lt;script type="speculationrules"&gt;
+{"prefetch":[{"where":{"href_matches":"/*"},"eagerness":"moderate"}]}
+&lt;/script&gt;
+</pre>
+
+<p>
+The <code>href_matches</code> pattern is resolved against the document's own
+origin, so only same-origin links are ever prefetched. The filter backs off
+and injects nothing when:
+</p>
+<ul>
+  <li>the document is an AMP document, where
+    <code>&lt;script type="speculationrules"&gt;</code> is not valid;</li>
+  <li>the document already contains a
+    <code>&lt;script type="speculationrules"&gt;</code> ruleset of its own;</li>
+  <li>the response status is not 200, or the response sets cookies, or is
+    marked <code>Cache-Control: no-store</code>;</li>
+  <li>the page's Content-Security-Policy does not permit inline scripts;</li>
+  <li>the request negotiates an AI-agent variant
+    (<code>Accept: text/markdown</code>), keeping agent-facing payloads free
+    of browser-only hints.</li>
+</ul>
+
+<h2>Example</h2>
+<p>
+The example below shows the HTML before rewriting:
+</p>
+
+<pre class="prettyprint">
+&lt;html&gt;
+  &lt;head&gt;
+  &lt;/head&gt;
+  &lt;body&gt;
+    &lt;a href="/products.html"&gt;Products&lt;/a&gt;
+    &lt;a href="/contact.html"&gt;Contact&lt;/a&gt;
+  &lt;/body&gt;
+&lt;/html&gt;
+</pre>
+
+<p>
+and after rewriting:
+</p>
+
+<pre class="prettyprint">
+&lt;html&gt;
+  &lt;head&gt;
+  &lt;/head&gt;
+  &lt;body&gt;
+    &lt;a href="/products.html"&gt;Products&lt;/a&gt;
+    &lt;a href="/contact.html"&gt;Contact&lt;/a&gt;
+    &lt;script type="speculationrules"&gt;{"prefetch":[{"where":{"href_matches":"/*"},"eagerness":"moderate"}]}&lt;/script&gt;
+  &lt;/body&gt;
+&lt;/html&gt;
+</pre>
+
+<h2>Limitations</h2>
+<p>
+The Speculation Rules API is currently implemented in Chromium-based browsers
+(Chrome, Edge, Opera). Other browsers ignore the script tag entirely, so the
+only cost there is a few extra bytes of HTML.
+</p>
+<p>
+This version of the filter does not support exclusion patterns. If your site
+has same-origin links whose fetch has side effects (for example logout links
+implemented as GET requests), either fix those endpoints to require POST, or
+add your own speculation-rules script to the page &mdash; the filter never
+injects a second ruleset next to an existing one. A configurable exclusion
+list may be added as an option in a future release.
+</p>
+
+<h2>Risks</h2>
+<p>
+This filter is considered low risk for typical content sites. Prefetching adds
+some extra load on the server for links the user may never click; the
+<code>moderate</code> eagerness setting keeps this modest.
+</p>
+<p>
+If a downstream cache serves the HTML to all clients regardless of browser,
+the injected tag is still harmless for non-supporting browsers. The filter
+suppresses injection for AI-agent requests that negotiate
+<code>Accept: text/markdown</code>, matching the <code>Vary: Accept</code>
+key used by the agent-optimize negotiation, so cached agent-facing variants
+stay clean.
+</p>
+</div>
+  <!--#include virtual="_footer.html" -->
+  </body>
+</html>

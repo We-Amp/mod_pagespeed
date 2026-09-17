@@ -26,8 +26,9 @@
 // 1) We don't fully parse some kinds of source expressions, like nonce and
 //    hash ones.
 // 2) Only some of the directives are parsed.
-// 3) URL matching doesn't support WebSocket (ws: and wss:) schemes, since
-//    mod_pagespeed doesn't, and they make for some really ugly conditionals.
+// 3) URL matching mostly doesn't support WebSocket (ws: and wss:)
+//    schemes, since mod_pagespeed doesn't rewrite them; the lone-*
+//    source does cover them per spec, however.
 
 #ifndef NET_INSTAWEB_REWRITER_PUBLIC_CSP_H_
 #define NET_INSTAWEB_REWRITER_PUBLIC_CSP_H_
@@ -125,7 +126,7 @@ class CspSourceExpression {
 
   const UrlData& url_data() const {
     if (url_data_.get() == nullptr) {
-      url_data_.reset(new UrlData());
+      url_data_ = std::make_unique<UrlData>();
     }
     return *url_data_.get();
   }
@@ -146,7 +147,7 @@ class CspSourceExpression {
 
   UrlData* mutable_url_data() {
     if (url_data_.get() == nullptr) {
-      url_data_.reset(new UrlData());
+      url_data_ = std::make_unique<UrlData>();
     }
     return url_data_.get();
   }
@@ -180,6 +181,27 @@ class CspSourceList {
 
   bool Matches(const GoogleUrl& origin_url, const GoogleUrl& url) const;
 
+  // Whether the list contains a scheme-source for 'scheme' (lowercase,
+  // without the colon), e.g. "data". Host sources and '*' do not match
+  // data: URLs, so this is what decides whether data: content may be
+  // introduced under this list.
+  bool HasSchemeSource(StringPiece scheme) const;
+
+  // Whether this source list can match no URL whatsoever: it holds no
+  // source expressions, so Matches() returns false for every URL. This is
+  // the representation of 'none' and of an empty source list (keyword-only
+  // sources such as 'unsafe-inline' or nonces/hashes contribute no matchable
+  // expression either). For the base-uri directive this is the provably-safe
+  // signal that the browser will ignore every <base> element, since no
+  // <base href> value can satisfy the policy.
+  //
+  // Caveat: "matches no URL" does not imply "blocks everything" for every
+  // directive. Where non-URL sources can authorize loads (e.g. nonces,
+  // hashes, or 'unsafe-inline' under script-src), a list with an empty
+  // expression set may still permit content; only draw the blocks-all
+  // conclusion for directives matched purely by URL, such as base-uri.
+  bool MatchesNothing() const { return expressions_.empty(); }
+
  private:
   std::vector<CspSourceExpression> expressions_;
   bool saw_unsafe_inline_;
@@ -209,6 +231,11 @@ class CspPolicy {
   bool PermitsInlineStyle() const;
   bool PermitsInlineStyleAttribute() const;
 
+  // Whether an image with a data: URL is permitted: img-src (falling
+  // back to default-src) must either be absent or contain an explicit
+  // data: scheme-source.
+  bool PermitsDataImage() const;
+
   // Tests whether 'url' can be loaded within 'origin_url' as 'role', where
   // 'role' should be kStyleSrc, kScriptSrc or kImgSrc.
   bool CanLoadUrl(CspDirective role, const GoogleUrl& origin_url,
@@ -217,7 +244,24 @@ class CspPolicy {
   bool IsBasePermitted(const GoogleUrl& previous_origin,
                        const GoogleUrl& base_candidate) const;
 
+  // Whether this policy's base-uri directive provably neutralizes any <base>
+  // element on the page: the directive is present and its source list matches
+  // no URL (e.g. base-uri 'none' or an empty base-uri list), so the browser
+  // ignores every <base>, leaving relative-URL resolution anchored at the
+  // document URL. When true a <base> tag cannot change resolution and may be
+  // treated as inert. Returns false when base-uri is absent (no restriction on
+  // <base>) or names any source that some <base href> could match --- in
+  // particular 'self' or a host/scheme list, which still permit a same-origin
+  // <base> to change the path and thus resolution.
+  bool BaseUriDisablesAllBases() const;
+
  private:
+  // Returns the source list that effectively governs 'specific',
+  // following the CSP3 fallback chain: 'specific' if present, else
+  // 'base', else default-src. May return null if none are present.
+  const CspSourceList* EffectiveSourceList(CspDirective specific,
+                                           CspDirective base) const;
+
   // The expectation is that some of these may be null.
   std::vector<std::unique_ptr<CspSourceList>> policies_;
 };
@@ -225,6 +269,12 @@ class CspPolicy {
 // A set of all policies (maybe none!) on the page. Note that we do not track
 // those with report disposition, only those that actually enforce --- reporting
 // seems like it would keep the page author informed about our effects as it is.
+//
+// Thread-safety: RewriteDriver publishes CspContext objects copy-on-write
+// (see RewriteDriver::AddCspPolicy) --- a published context is never
+// mutated again, so it may be read from rewrite threads without locking.
+// Copying a context is cheap: the policies themselves are shared, not
+// duplicated.
 class CspContext {
  public:
   bool PermitsEval() const { return AllPermit(&CspPolicy::PermitsEval); }
@@ -245,8 +295,12 @@ class CspContext {
     return AllPermit(&CspPolicy::PermitsInlineStyleAttribute);
   }
 
+  bool PermitsDataImage() const {
+    return AllPermit(&CspPolicy::PermitsDataImage);
+  }
+
   bool CanLoadUrl(CspDirective role, const GoogleUrl& origin_url,
-                  const GoogleUrl& url) {
+                  const GoogleUrl& url) const {
     // All policies must OK, with base case being 'true'.
     for (const auto& policy : policies_) {
       if (!policy->CanLoadUrl(role, origin_url, url)) {
@@ -266,6 +320,22 @@ class CspContext {
     return true;
   }
 
+  // Whether the combined page policy provably neutralizes every <base>
+  // element: some enforced policy's base-uri matches nothing. CSP is a
+  // conjunction, so a single policy that blocks all <base> URLs is enough to
+  // make the browser ignore <base> entirely, regardless of what the other
+  // policies allow. When true, rewriting can treat a <base> tag as inert
+  // instead of bailing. Conservative: false unless at least one policy
+  // provably blocks all bases.
+  bool IsBaseNeutralizedByCsp() const {
+    for (const auto& policy : policies_) {
+      if (policy->BaseUriDisablesAllBases()) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   bool HasDirective(CspDirective directive) const {
     for (const auto& policy : policies_) {
       if (policy->SourceListFor(directive) != nullptr) {
@@ -279,6 +349,19 @@ class CspContext {
     for (const auto& policy : policies_) {
       if (policy->SourceListFor(directive) != nullptr ||
           policy->SourceListFor(CspDirective::kDefaultSrc) != nullptr) {
+        return true;
+      }
+      // The CSP3 -elem/-attr variants govern the same content classes,
+      // so their presence matters just as much to callers asking
+      // whether any applicable policy exists.
+      if (directive == CspDirective::kScriptSrc &&
+          (policy->SourceListFor(CspDirective::kScriptSrcElem) != nullptr ||
+           policy->SourceListFor(CspDirective::kScriptSrcAttr) != nullptr)) {
+        return true;
+      }
+      if (directive == CspDirective::kStyleSrc &&
+          (policy->SourceListFor(CspDirective::kStyleSrcElem) != nullptr ||
+           policy->SourceListFor(CspDirective::kStyleSrcAttr) != nullptr)) {
         return true;
       }
     }
@@ -305,7 +388,7 @@ class CspContext {
     return true;
   }
 
-  std::vector<std::unique_ptr<CspPolicy>> policies_;
+  std::vector<std::shared_ptr<const CspPolicy>> policies_;
 };
 
 }  // namespace net_instaweb

@@ -178,7 +178,7 @@ TEST_F(DownstreamCachePurgerTest, TestWithPostOnOriginalRequest) {
       0, factory()->rewrite_stats()->downstream_cache_purge_attempts()->Get());
 }
 
-// Issue #921. Verify that trailing slashes from purge URLs are removed so that
+// Verify that trailing slashes from purge URLs are removed so that
 // the purge request URL doesn't have double slashes in it.
 TEST_F(DownstreamCachePurgerTest, TestPurgeUrlTrailingSlash) {
   DownstreamCachePurger dcache(rewrite_driver());

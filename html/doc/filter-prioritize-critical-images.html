@@ -1,0 +1,163 @@
+<!-- =======================================================================
+     ARCHIVE - DO NOT EDIT.
+
+     This is the mod_pagespeed 1.0 documentation as it shipped, published
+     unchanged as the /1.0/ archive on modpagespeed.com. It describes what
+     that release did, which is why it is NOT updated when behaviour
+     changes: an archive that tracks the current product is a record of
+     nothing.
+
+     If you got here by grepping for prose that is now out of date, the
+     change belongs in the pagespeed-optimizer repository instead:
+
+         2.0    website/src/content/docs/       -> modpagespeed.com/docs/
+         1.15   website/src/content/docs-1.1/   -> modpagespeed.com/1.1/docs/
+
+     CI enforces this. tools/ci/check_legacy_docs.sh fails any pull request
+     that changes a file under html/.
+     ======================================================================= -->
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Prioritize Critical Images</title>
+    <link rel="stylesheet" href="doc.css">
+  </head>
+  <body>
+<!--#include virtual="_header.html" -->
+
+
+  <div id=content>
+<h1>Prioritize Critical Images</h1>
+<h2>Configuration</h2>
+<p>
+The 'Prioritize Critical Images' filter is enabled by specifying
+<dl>
+  <dt>Apache:<dd><pre class="prettyprint"
+     >ModPagespeedEnableFilters prioritize_critical_images</pre>
+  <dt>Nginx:<dd><pre class="prettyprint"
+     >pagespeed EnableFilters prioritize_critical_images;</pre>
+</dl>
+in the configuration file.
+
+<h2>Objective</h2>
+<p>
+Improve Largest Contentful Paint by raising the fetch priority of the images
+that render above the fold, so the browser frontloads the fetches that
+determine when the page appears complete.
+</p>
+
+<h2>Description</h2>
+<p>
+The prioritize_critical_images filter adds
+<code>fetchpriority="high"</code> to <code>&lt;img&gt;</code> elements that
+a <a href="faq#beacons">beacon</a> has reported as visible in the client's
+initial viewport (<em>above the fold</em>). Browsers schedule such images
+ahead of other resources, which typically moves the largest above-the-fold
+image &mdash; the Largest Contentful Paint candidate &mdash; earlier in the
+load.
+</p>
+<p>
+Criticality is keyed on the image's <code>src</code> attribute URL: the
+beacon instrumentation stamps a hash of the resolved <code>src</code> on each
+<code>&lt;img&gt;</code>, and the beacon reports the stamped URLs of the
+images seen in the initial viewport. For responsive images this still raises
+the right fetch: per specification, <code>fetchpriority</code> on the
+<code>&lt;img&gt;</code> applies to whichever <code>srcset</code> candidate
+the browser selects, so annotating on a critical <code>src</code> also
+prioritizes a selected srcset candidate. Images with no <code>src</code> at
+all (srcset-only markup) are eligible too, keyed on the candidate the browser
+actually displays: the beacon stamps the hashes of all <code>srcset</code>
+candidates and reports the one matching <code>currentSrc</code>, and the
+filter annotates the element when any of its candidates is critical.
+</p>
+<p>
+<code>fetchpriority="high"</code> is a scarce signal: every prioritized fetch
+competes with render-critical resources. The filter therefore annotates at
+most 2 images per page, in document order. An image whose author already set
+<code>fetchpriority="high"</code> counts against that budget. Duplicate
+<code>&lt;img&gt;</code> tags referencing the same critical URL each count
+against it as well, even though browsers coalesce them into a single fetch.
+The budget governs only this filter; it is not a page-wide guarantee. In
+particular, when <code>lazyload_images</code> also runs in
+<code>native</code> mode (ModPagespeedLazyloadImagesMode), that filter adds
+<code>fetchpriority="high"</code> to <em>every</em> beacon-critical image it
+keeps eager, with no cap, so the page can end up with more than two
+high-priority images in total.
+</p>
+
+<h2 id="beacons">Beacon dependency</h2>
+<p>
+This filter relies entirely on critical-image beaconing: enabling it
+instruments the page with the critical-images beacon JavaScript, and it takes
+a few accesses of a page for the beacon data to be reported back and
+processed. Until the data is available the filter is a strict no-op &mdash;
+it never guesses which images are critical, because raising the priority of
+a below-the-fold image would slow down the images that matter.
+</p>
+<p>
+If beaconing is disabled with the
+<a href="config_filters#beacons">ModPagespeedCriticalImagesBeaconEnabled</a>
+directive, no data ever arrives and the filter remains inactive.
+</p>
+
+<h2 id="author-markup">Author markup</h2>
+<p>
+An author-supplied <code>fetchpriority</code> attribute always wins, whatever
+its value: the filter never modifies or overrides it. As noted above, an
+author <code>fetchpriority="high"</code> does consume one slot of the
+2-image budget.
+</p>
+
+<h2 id="save-data">Save-Data</h2>
+<p>
+For requests carrying the <code>Save-Data</code> header the filter is
+disabled (when <a href="reference-image-optimize#AllowVaryOn">Save-Data
+support</a> is active): a client asking to conserve data should not have
+image fetches frontloaded.
+</p>
+
+<h2>Example</h2>
+<p>
+The effect of this filter can be observed by comparing the
+image request priorities <a
+  href="https://www.modpagespeed.com/examples/prioritize_critical_images.html?ModPagespeed=off">
+  before</a>
+and <a
+  href="https://www.modpagespeed.com/examples/prioritize_critical_images.html?ModPagespeed=on&ModPagespeedFilters=prioritize_critical_images">
+  after</a> rewriting.
+After the beacon data for the page has been collected, the above-the-fold
+image carries <code>fetchpriority="high"</code>.
+</p>
+
+<h2>Risks</h2>
+<p>
+This filter is considered low risk: it only adds an attribute, injects no
+scripts of its own beyond the beacon instrumentation, and does nothing until
+beacon data is available. If a page's layout changes so that previously
+beaconed images move below the fold, they may briefly keep their raised
+priority until fresh beacon results replace the stale data.
+</p>
+
+</div>
+  <!--#include virtual="_footer.html" -->
+  </body>
+</html>

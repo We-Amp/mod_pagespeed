@@ -17,9 +17,10 @@
  * under the License.
  */
 
+#include <memory>
+
 #include "pagespeed/kernel/base/waveform.h"
 
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/statistics_template.h"
 #include "pagespeed/kernel/base/string.h"

@@ -1,0 +1,50 @@
+libavif 1.4.2: fix the static-library merge under clang-cl (Windows).
+
+For a static build libavif installs `avif_static`, an archive merged from the
+`avif` object library by cmake/Modules/merge_static_libs.cmake. That function
+picks its bundling tool by compiler ID, and clang-cl reports
+CMAKE_C_COMPILER_ID = "Clang" (with an MSVC ABI, so CMake also sets MSVC=1).
+It therefore took the GNU `ar` branch and ran `${CMAKE_AR} -M <script.ar`,
+but on this toolchain CMAKE_AR is llvm-lib.exe -- a lib.exe-compatible driver
+that rejects `-M`:
+
+    Linking C static library avif.lib; Merge static libraries with ar
+    ignoring unknown argument: -M
+    warning: no input files, not writing output file
+    CMake Error at cmake_install.cmake:36 (file):
+      file INSTALL cannot find ".../avif.lib"
+
+so no archive was produced and install failed. Pointing CMAKE_AR at llvm-ar
+instead is not a fix: CMake's MSVC-style archive rule drives it with lib.exe
+`/OUT:` syntax, which llvm-ar rejects in turn.
+
+This patch (1) excludes MSVC-ABI compilers from the `ar` branch so clang-cl
+falls through to the lib.exe branch, and (2) lets that branch use CMAKE_AR as
+the bundler. CMAKE_AR is supplied by the Bazel cc_toolchain via
+rules_foreign_cc, which keeps the fix hermetic -- the pre-existing
+find_program(lib) fallback would search the host PATH and finds nothing next
+to clang-cl.exe.
+
+Non-Windows legs are unaffected: MSVC is false there, so the `ar` branch
+condition is unchanged.
+
+--- a/cmake/Modules/merge_static_libs.cmake
++++ b/cmake/Modules/merge_static_libs.cmake
+@@ -93,7 +93,7 @@
+             COMMENT "Merge static libraries with libtool"
+             COMMAND xcrun libtool -static -o $<TARGET_FILE:${target}> -no_warning_for_no_symbols ${libs}
+         )
+-    elseif(CMAKE_C_COMPILER_ID MATCHES "^(Clang|GNU|Intel|IntelLLVM)$")
++    elseif(CMAKE_C_COMPILER_ID MATCHES "^(Clang|GNU|Intel|IntelLLVM)$" AND NOT MSVC)
+         add_custom_command(
+             TARGET ${target}
+             POST_BUILD
+@@ -116,6 +116,8 @@
+     elseif(MSVC)
+         if(CMAKE_LIBTOOL)
+             set(BUNDLE_TOOL ${CMAKE_LIBTOOL})
++        elseif(CMAKE_AR)
++            set(BUNDLE_TOOL ${CMAKE_AR})
+         else()
+             find_program(BUNDLE_TOOL lib HINTS "${CMAKE_C_COMPILER}/..")
+ 

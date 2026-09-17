@@ -64,7 +64,7 @@ class JavascriptRewriteConfig {
   static const char kJSFailedToWrite[];
 
   JavascriptRewriteConfig(
-      Statistics* statistics, bool minify, bool use_experimental_minifier,
+      Statistics* statistics, bool minify,
       const JavascriptLibraryIdentification* identification,
       const pagespeed::js::JsTokenizerPatterns* js_tokenizer_patterns);
 
@@ -72,10 +72,6 @@ class JavascriptRewriteConfig {
 
   // Whether to minify javascript output.
   bool minify() const { return minify_; }
-  // Whether to use the new JsTokenizer-based minifier.
-  // TODO(sligocki): Once that minifier has been around for a while, we
-  // should deprecate this option.
-  bool use_experimental_minifier() const { return use_experimental_minifier_; }
   const JavascriptLibraryIdentification* library_identification() const {
     return library_identification_;
   }
@@ -97,7 +93,6 @@ class JavascriptRewriteConfig {
 
  private:
   bool minify_;
-  bool use_experimental_minifier_;
   // Library identifier.  NULL if library identification should be skipped.
   const JavascriptLibraryIdentification* library_identification_;
   const pagespeed::js::JsTokenizerPatterns* js_tokenizer_patterns_;
@@ -131,7 +126,8 @@ class JavascriptRewriteConfig {
   // Number of scipts we failed to write out.
   Variable* failed_to_write_;
 
-  DISALLOW_COPY_AND_ASSIGN(JavascriptRewriteConfig);
+  JavascriptRewriteConfig(const JavascriptRewriteConfig&) = delete;
+  JavascriptRewriteConfig& operator=(const JavascriptRewriteConfig&) = delete;
 };
 
 // Object representing a block of Javascript code that might be a
@@ -237,10 +233,6 @@ class JavascriptCodeBlock {
   // Is this URL sanitary to be appended (in a line comment) to the JS doc?
   static bool IsSanitarySourceMapUrl(StringPiece url);
 
-  // Temporary wrapper around calling new or old version of JS minifier.
-  bool MinifyJs(StringPiece input, GoogleString* output,
-                source_map::MappingVector* source_mappings);
-
   JavascriptRewriteConfig* config_;
   const GoogleString message_id_;  // ID to stick at begining of message.
   const GoogleString original_code_;
@@ -254,7 +246,8 @@ class JavascriptCodeBlock {
 
   MessageHandler* handler_;
 
-  DISALLOW_COPY_AND_ASSIGN(JavascriptCodeBlock);
+  JavascriptCodeBlock(const JavascriptCodeBlock&) = delete;
+  JavascriptCodeBlock& operator=(const JavascriptCodeBlock&) = delete;
 };
 
 }  // namespace net_instaweb

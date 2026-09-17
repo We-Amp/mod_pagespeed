@@ -116,7 +116,8 @@ class DebugFilter : public EmptyHtmlFilter {
 
   StringVector dynamically_disabled_filter_list_;
 
-  DISALLOW_COPY_AND_ASSIGN(DebugFilter);
+  DebugFilter(const DebugFilter&) = delete;
+  DebugFilter& operator=(const DebugFilter&) = delete;
 };
 
 }  // namespace net_instaweb

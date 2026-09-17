@@ -47,7 +47,8 @@ class AddHeadFilter : public EmptyHtmlFilter {
   bool found_head_;
   HtmlElement* head_element_;
 
-  DISALLOW_COPY_AND_ASSIGN(AddHeadFilter);
+  AddHeadFilter(const AddHeadFilter&) = delete;
+  AddHeadFilter& operator=(const AddHeadFilter&) = delete;
 };
 
 }  // namespace net_instaweb

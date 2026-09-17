@@ -24,6 +24,11 @@
 
 #include <cstdlib>
 
+#ifdef _WIN32
+// Windows doesn't have random(), use rand() instead
+#define random rand
+#endif
+
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "pagespeed/kernel/base/time_util.h"
 #include "pagespeed/kernel/http/google_url.h"

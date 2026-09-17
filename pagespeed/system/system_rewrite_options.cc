@@ -25,10 +25,10 @@
 #include "base/logging.h"
 //#include "strings/stringpiece_utils.h"
 #include "pagespeed/kernel/base/basictypes.h"
+#include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/base/timer.h"
-#include "pagespeed/system/serf_url_async_fetcher.h"
 
 namespace net_instaweb {
 
@@ -166,31 +166,27 @@ void SystemRewriteOptions::AddProperties() {
   // Takes about 0.1s to parse 1MB file for modpagespeed.com/pagespeed_console
   // TODO(sligocki): Increase once we have a better method for reading
   // historical data.
-  AddSystemProperty(1 * 1024 /* 1 Megabytes */,
+  AddSystemProperty(1L * 1024 /* 1 Megabytes */,
                     &SystemRewriteOptions::statistics_logging_max_file_size_kb_,
                     "aslfs", RewriteOptions::kStatisticsLoggingMaxFileSizeKb,
                     "Max size for statistics logging file.", false);
   AddSystemProperty(true, &SystemRewriteOptions::use_shared_mem_locking_,
                     "ausml", RewriteOptions::kUseSharedMemLocking,
                     "Use shared memory for internal named lock service", true);
-  AddSystemProperty(
-      Timer::kHourMs, &SystemRewriteOptions::file_cache_clean_interval_ms_,
-      "afcci", RewriteOptions::kFileCacheCleanIntervalMs,
-      "Set the interval (in ms) for cleaning the file cache, -1 to disable "
-      "cleaning",
-      true);
-  AddSystemProperty(100 * 1024 /* 100 megabytes */,
+  AddSystemProperty(1024L * 1024 /* 1 gigabyte */,
                     &SystemRewriteOptions::file_cache_clean_size_kb_, "afc",
                     RewriteOptions::kFileCacheCleanSizeKb,
                     "Set the target size (in kilobytes) for file cache", true);
-  // Default to no inode limit so that existing installations are not affected.
-  // pagespeed.conf.template contains suggested limit for new installations.
-  // TODO(morlovich): Inject this as an argument, since we want a different
-  // default for ngx_pagespeed?
-  AddSystemProperty(0, &SystemRewriteOptions::file_cache_clean_inode_limit_,
-                    "afcl", RewriteOptions::kFileCacheCleanInodeLimit,
-                    "Set the target number of inodes for the file cache; 0 "
-                    "means no limit",
+  AddSystemProperty(10, &SystemRewriteOptions::file_cache_small_tier_percent_,
+                    "afstp", RewriteOptions::kFileCacheSmallTierPercent,
+                    "Percentage of the file cache carved out as a separate "
+                    "small-object volume that protects metadata and property "
+                    "entries from payload churn. 0 disables the tier; values "
+                    "are clamped to [0, 50]. Below roughly 256 MB of total "
+                    "file cache the tier disables itself and entries share "
+                    "the main volume. Applies in the default shared-memory "
+                    "metadata cache configuration; with the shm metadata "
+                    "cache disabled, metadata stays on the main volume.",
                     true);
   AddSystemProperty(0, &SystemRewriteOptions::lru_cache_byte_limit_, "alcb",
                     RewriteOptions::kLruCacheByteLimit,
@@ -220,10 +216,52 @@ void SystemRewriteOptions::AddProperties() {
                     "Whether to compress cache entries before writing them to "
                     "memory or disk.",
                     true);
+  AddSystemProperty(false, &SystemRewriteOptions::cyclone_zero_copy_, "aczc",
+                    RewriteOptions::kCycloneZeroCopy,
+                    "Serve HTTP cache hits directly from the Cyclone cache's "
+                    "memory-mapped storage without copying the payload "
+                    "(zero-copy).  Off by default on every port; set it on "
+                    "explicitly to opt in.",
+                    true);
+  AddSystemProperty(true, &SystemRewriteOptions::cyclone_zero_copy_serve_,
+                    "aczs", RewriteOptions::kCycloneZeroCopyServe,
+                    "Carry memory-mapped Cyclone cache-hit bytes into the "
+                    "port output buffer by reference (aliased) instead of "
+                    "copying them; the serve safely copies the tail out "
+                    "before a cache eviction can overwrite it.  Engages only "
+                    "once CycloneZeroCopy maps cache values; on Apache the "
+                    "aliased serve is experimental "
+                    "and activates only when this option is explicitly set. "
+                    "Apache aliases only plain-HTTP/1.x main-request 200s "
+                    "of at least 16KB served verbatim (no Range, no "
+                    "deflate/ssl/http2 or other transforming filter), and "
+                    "bytes an output filter parks for a slow client are "
+                    "copied out at that point; everything else serves a "
+                    "verified copy.",
+                    true);
+  AddSystemProperty(static_cast<int64>(0),
+                    &SystemRewriteOptions::cyclone_ram_cache_kb_, "acrk",
+                    RewriteOptions::kCycloneRamCacheKb,
+                    "Set the size, in KB, of Cyclone's internal RAM cache "
+                    "tier, decoupled from LRUCacheKbPerProcess.  0 (the "
+                    "default) disables the RAM tier -- reads are served "
+                    "from the memory-mapped volume, which the OS page cache "
+                    "already keeps hot; -1 inherits LRUCacheKbPerProcess.",
+                    true);
+  AddSystemProperty(false, &SystemRewriteOptions::async_metadata_l2_writes_,
+                    "amlw", RewriteOptions::kAsyncMetadataL2Writes,
+                    "Defer the metadata cache's blocking L2 (disk) write off "
+                    "the rewrite critical path onto a single-thread "
+                    "write-behind queue.  Reads and the shared-memory L1 write "
+                    "stay synchronous, so same-machine read-your-writes is "
+                    "preserved.  Experimental; off by default.",
+                    true);
   AddSystemProperty(
       "enable", &SystemRewriteOptions::https_options_, "fhs", kFetchHttps,
       "Controls direct fetching of HTTPS resources."
-      "  Value is comma-separated list of keywords: " SERF_HTTPS_KEYWORDS,
+      "  Value is comma-separated list of keywords: "
+      "enable,disable,allow_self_signed,"
+      "allow_unknown_certificate_authority,allow_certificate_not_yet_valid",
       false);
   AddSystemProperty("", &SystemRewriteOptions::ssl_cert_directory_, "assld",
                     RewriteOptions::kSslCertDirectory,
@@ -262,29 +300,43 @@ void SystemRewriteOptions::AddProperties() {
   AddSystemProperty("", &SystemRewriteOptions::controller_port_, "ccp",
                     SystemRewriteOptions::kCentralControllerPort,
                     kProcessScopeStrict,
-                    "TCP port for central controller processes", false);
+                    "Deprecated and ignored: the experimental gRPC central "
+                    "controller was removed",
+                    false);
   AddSystemProperty(
       10, &SystemRewriteOptions::popularity_contest_max_inflight_requests_,
       "pci", SystemRewriteOptions::kPopularityContestMaxInFlight,
       kProcessScopeStrict,
-      "Max simultaneous requests allowed to proceed "
-      "out of the popularity contest",
+      "Deprecated and ignored: the experimental gRPC central "
+      "controller was removed",
       false);
   AddSystemProperty(
       1000, &SystemRewriteOptions::popularity_contest_max_queue_size_, "pcq",
       SystemRewriteOptions::kPopularityContestMaxQueueSize, kProcessScopeStrict,
-      "Max number of queued rewrites allowed in the popularity contest", false);
+      "Deprecated and ignored: the experimental gRPC central "
+      "controller was removed",
+      false);
   AddSystemProperty(false, &SystemRewriteOptions::disable_loopback_routing_,
                     "adlr", "DangerPermitFetchFromUnknownHosts",
                     kProcessScopeStrict,
                     "Disable security checks that prohibit fetching from "
                     "hostnames mod_pagespeed does not know about",
                     false);
+  AddSystemProperty(false, &SystemRewriteOptions::strict_admin_access_, "saa",
+                    "StrictAdminAccess", kProcessScopeStrict,
+                    "OPT-IN, default off. When on, the admin, statistics, "
+                    "console and message handlers deny "
+                    "non-loopback clients unless an explicit *Domains "
+                    "allowlist is configured. The loopback decision uses the "
+                    "validated client connection IP, not the Host header. "
+                    "When off (default) access checks behave exactly as "
+                    "before.",
+                    false);
   AddSystemProperty(false, &SystemRewriteOptions::fetch_with_gzip_, "afg",
                     "FetchWithGzip", kLegacyProcessScope,
                     "Request http content from origin servers using gzip",
                     true);
-  AddSystemProperty(1024 * 1024 * 10, /* 10 Megabytes */
+  AddSystemProperty(1024L * 1024 * 10, /* 10 Megabytes */
                     &SystemRewriteOptions::ipro_max_response_bytes_, "imrb",
                     "IproMaxResponseBytes", kLegacyProcessScope,
                     "Limit allowed size of IPRO responses. "
@@ -293,7 +345,7 @@ void SystemRewriteOptions::AddProperties() {
   AddSystemProperty(10, &SystemRewriteOptions::ipro_max_concurrent_recordings_,
                     "imcr", "IproMaxConcurrentRecordings", kLegacyProcessScope,
                     "Limit allowed number of IPRO recordings", true);
-  AddSystemProperty(1024 * 50, /* 50 Megabytes */
+  AddSystemProperty(1024L * 50, /* 50 Megabytes */
                     &SystemRewriteOptions::default_shared_memory_cache_kb_,
                     "dsmc", "DefaultSharedMemoryCacheKB", kLegacyProcessScope,
                     "Size of the default shared memory cache used by all "
@@ -314,7 +366,6 @@ void SystemRewriteOptions::AddProperties() {
                     "this is set to PURGE, but you must ensure that only "
                     "authorized clients have access to this method.",
                     false);
-
   AddSystemProperty("", &SystemRewriteOptions::static_assets_to_cdn_, "sacdn",
                     kStaticAssetCDN, kProcessScopeStrict,
                     "Configures serving of helper scripts from external "
@@ -340,12 +391,27 @@ void SystemRewriteOptions::AddProperties() {
 
 SystemRewriteOptions* SystemRewriteOptions::Clone() const {
   SystemRewriteOptions* options = NewOptions();
+  if (options == nullptr) {
+    return nullptr;
+  }
+
   options->Merge(*this);
+
+  // Reset frozen_ and modified_ after Merge, just like base class Clone() does.
+  // This is critical because the source options may be frozen (e.g., factory's
+  // default_options), but the cloned options must be unfrozen to allow
+  // configuration modifications.
+  options->ClearFrozenAndModified();
+
   return options;
 }
 
 SystemRewriteOptions* SystemRewriteOptions::NewOptions() const {
-  return new SystemRewriteOptions("new_options", thread_system());
+  ThreadSystem* ts = thread_system();
+  if (ts == nullptr) {
+    return nullptr;
+  }
+  return new SystemRewriteOptions("new_options", ts);
 }
 
 const SystemRewriteOptions* SystemRewriteOptions::DynamicCast(
@@ -363,33 +429,45 @@ SystemRewriteOptions* SystemRewriteOptions::DynamicCast(
   return config;
 }
 
-bool SystemRewriteOptions::ControllerPortOption::SetFromString(
-    StringPiece value_string, GoogleString* error_detail) {
-  // Valid values are: unix:<path> or a tcp port number.
-  if (strings::StartsWith(value_string, "unix:") &&
-      value_string.size() > 5 /*strlen("unix:")*/) {
-    set(value_string.as_string());
-    return true;
+RewriteOptions::OptionSettingResult
+SystemRewriteOptions::ParseAndSetOptionFromName1(StringPiece name,
+                                                 StringPiece arg,
+                                                 GoogleString* msg,
+                                                 MessageHandler* handler) {
+  // The experimental gRPC central controller was removed; these options are
+  // kept registered so old configs still parse, but they no longer do
+  // anything. Warn when they are set.
+  if (StringCaseEqual(name, kCentralControllerPort) ||
+      StringCaseEqual(name, kPopularityContestMaxInFlight) ||
+      StringCaseEqual(name, kPopularityContestMaxQueueSize)) {
+    handler->Message(kWarning,
+                     "'%s' is deprecated and ignored; the experimental gRPC "
+                     "central controller was removed.",
+                     name.as_string().c_str());
   }
-  int port;
-  if (!StringToInt(value_string, &port)) {
-    *error_detail =
-        StrCat(kCentralControllerPort,
-               " is not a valid number or 'unix:' path: '", value_string, "'");
-    return false;
-  }
-  // Prepend the port with localhost: before saving it into the option.
-  set(StrCat("localhost:", value_string));
-  return true;
+  return RewriteOptions::ParseAndSetOptionFromName1(name, arg, msg, handler);
 }
 
 bool SystemRewriteOptions::HttpsOptions::SetFromString(
     StringPiece value, GoogleString* error_detail) {
-  bool success = SerfUrlAsyncFetcher::ValidateHttpsOptions(value, error_detail);
-  if (success) {
-    set(value.as_string());
+  StringPieceVector keywords;
+  SplitStringPieceToVector(value, ",", &keywords, true);
+  for (int i = 0, n = keywords.size(); i < n; ++i) {
+    StringPiece keyword = keywords[i];
+    if (!StringCaseEqual(keyword, "enable") &&
+        !StringCaseEqual(keyword, "disable") &&
+        !StringCaseEqual(keyword, "allow_self_signed") &&
+        !StringCaseEqual(keyword, "allow_unknown_certificate_authority") &&
+        !StringCaseEqual(keyword, "allow_certificate_not_yet_valid")) {
+      StrAppend(error_detail, "Invalid HTTPS keyword: ", keyword,
+                ", legal options are: enable,disable,allow_self_signed,"
+                "allow_unknown_certificate_authority,"
+                "allow_certificate_not_yet_valid");
+      return false;
+    }
   }
-  return success;
+  set(value.as_string());
+  return true;
 }
 
 bool SystemRewriteOptions::StaticAssetCDNOptions::SetFromString(
@@ -401,19 +479,21 @@ bool SystemRewriteOptions::StaticAssetCDNOptions::SetFromString(
     return false;
   }
 
-  StaticAssetSet* new_set = static_assets_to_cdn_.MakeWriteable();
-  new_set->clear();
+  // Parse into a local set and commit only on full success, so a bad label
+  // partway through doesn't destroy the previously configured set.
+  StaticAssetSet parsed;
   for (int i = 1, n = args.size(); i < n; ++i) {
     StaticAssetEnum::StaticAsset value;
     TrimWhitespace(&args[i]);
     if (StaticAssetEnum::StaticAsset_Parse(args[i].as_string(), &value)) {
-      new_set->insert(value);
+      parsed.insert(value);
     } else {
       *error_detail = StrCat("Invalid static asset label: ", args[i]);
       return false;
     }
   }
 
+  *static_assets_to_cdn_.MakeWriteable() = parsed;
   args[0].CopyToString(&mutable_value());
   return true;
 }
@@ -544,6 +624,33 @@ bool SystemRewriteOptions::AllowDomain(
     return true;  // Allow unless they disallowed anything.
   }
   // Otherwise, allow only if this host is whitelisted.
+  return wildcard_group.Match(host.as_string(), false /* default deny */);
+}
+
+bool SystemRewriteOptions::AllowDomain(const GoogleUrl& url,
+                                       const FastWildcardGroup& wildcard_group,
+                                       bool client_is_loopback) const {
+  if (!strict_admin_access_.value()) {
+    // Default (opt-out) path: behave exactly as the two-argument form. The
+    // client_is_loopback signal is intentionally ignored so there is zero
+    // behavior change for deployments that have not opted in.
+    return AllowDomain(url, wildcard_group);
+  }
+
+  // Strict mode. If the operator configured an explicit allowlist we honor it
+  // unchanged (Host match, default-deny) so deliberately-widened access keeps
+  // working. The only behavior change strict mode makes is to the previously
+  // default-OPEN case: an empty allowlist no longer means "allow everyone" --
+  // it means "loopback only", decided from the validated client IP rather than
+  // the client-controlled Host header.
+  if (wildcard_group.empty()) {
+    return client_is_loopback;
+  }
+  StringPiece host = url.Host();
+  if (host.empty()) {
+    DCHECK(false);
+    return false;
+  }
   return wildcard_group.Match(host.as_string(), false /* default deny */);
 }
 

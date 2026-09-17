@@ -73,7 +73,8 @@ class JsDisableFilter : public CommonFilter {
   int index_;
   bool ie_meta_tag_written_;
 
-  DISALLOW_COPY_AND_ASSIGN(JsDisableFilter);
+  JsDisableFilter(const JsDisableFilter&) = delete;
+  JsDisableFilter& operator=(const JsDisableFilter&) = delete;
 };
 
 }  // namespace net_instaweb

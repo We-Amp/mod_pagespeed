@@ -1,0 +1,415 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SPDX-License-Identifier: Apache-2.0
+  Copyright (c) 2024-2026 We-Amp B.V.
+-->
+
+<!--
+  WiX v5 MSI installer for We-Amp PageSpeed IIS module.
+
+  Build:
+    wix build install\iis\Product.wxs ^
+        -d ProductVersion=1.15.0 -d DisplayVersion=1.15.0-beta.1 ^
+        -d UpgradeCode=77EA515C-A077-4D56-B92A-58E65D713423 ^
+        -d BinDir=bazel-bin\pagespeed\iis -d SrcDir=. ^
+        -arch x64 -o pagespeed-iis-1.15.0-beta.1-win-x64.msi
+
+  Architecture notes:
+    - W3SVC stop/start uses <ServiceControl> (MSI-native, no CA).
+    - appcmd module register/unregister + icacls ACL grants use Type 34
+      deferred exe CAs (Windows Installer's built-in exe launcher — does
+      NOT depend on Wix4UtilCA_X64 / WixQuietExec64). This avoids the
+      C/C++ runtime dependency that broke stock Windows Server 2016
+      installs. We deliberately do NOT use util:PermissionEx for the
+      cache + logs dir ACLs: upstream WiX v5.0.2 emits it as
+      Wix4SchedSecureObjects + Wix4ExecSecureObjects references that
+      pull Wix4UtilCA_X64.dll (CRT-dependent) into the Binary table,
+      reintroducing the exact failure mode the Type-34 CAs were chosen
+      to avoid. The deferred icacls CAs (GrantCacheAcl / GrantLogAcl)
+      below are the sole ACL mechanism, by design.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+
+  <Package Name="We-Amp PageSpeed for IIS $(var.DisplayVersion)"
+           Manufacturer="We-Amp B.V."
+           Version="$(var.ProductVersion)"
+           UpgradeCode="$(var.UpgradeCode)"
+           Language="1033"
+           Codepage="1252"
+           InstallerVersion="500"
+           Scope="perMachine">
+
+    <!-- Upgrade: default (afterInstallValidate) schedule. RemoveExistingProducts
+         runs BEFORE the new product installs, so W3SVC stops once for the old
+         uninstall and starts once after the new install - a single
+         <ServiceControl> cycle instead of two.
+
+         Trade-off vs. afterInstallExecute: a failed new install no longer
+         leaves the old product intact; the user is left with neither installed.
+         We accept this because the double-cycle caused IIS lockups on warm
+         systems (beta.9 upgrade-over-running-IIS), which is far more common
+         in practice than mid-upgrade failures. -->
+    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+
+    <Media Id="1" Cabinet="pagespeed.cab" EmbedCab="yes" />
+
+    <!-- Add/Remove Programs metadata -->
+    <Property Id="ARPURLINFOABOUT" Value="https://modpagespeed.com" />
+    <Property Id="ARPHELPLINK" Value="https://modpagespeed.com" />
+
+    <!-- Force overwrite on every install/upgrade transaction.
+         Default REINSTALLMODE is "omus" — "o" means "overwrite if the source
+         is newer than the destination". With pagespeed_iis.dll embedding
+         VS_VERSION_INFO (1.15.0.<beta-num>), the upgrade scenarios already
+         compare correctly. But if a customer ever ends up with a file on
+         disk that doesn't match its component-cache state (manual replace,
+         antivirus quarantine, corrupted prior install), MSI would silently
+         leave it in place. "amus" forces always-overwrite, eliminating that
+         class of silent-no-op. The cost is a few extra disk writes on
+         no-change reinstalls, which is negligible. -->
+    <Property Id="REINSTALLMODE" Value="amus" />
+
+    <!-- Detect IIS via registry -->
+    <Property Id="IISMAJORVERSION">
+      <RegistrySearch Id="IISVersionSearch" Root="HKLM"
+                      Key="SOFTWARE\Microsoft\InetStp"
+                      Name="MajorVersion" Type="raw" />
+    </Property>
+    <Launch Condition="Installed OR IISMAJORVERSION"
+            Message="IIS is required. Please install IIS (Web Server role) before running this installer." />
+
+    <!-- Resolve the default wwwroot physical path. IIS records it in the
+         registry; on stock installs this is C:\inetpub\wwwroot, but admins
+         who moved it will have the real path here. If the key is missing
+         we fall back to the conventional location below. -->
+    <Property Id="IISWWWROOT">
+      <RegistrySearch Id="WwwRootSearch" Root="HKLM"
+                      Key="SOFTWARE\Microsoft\InetStp"
+                      Name="PathWWWRoot" Type="raw" />
+    </Property>
+    <SetProperty Id="IISWWWROOT" Value="C:\inetpub\wwwroot"
+                 After="AppSearch" Sequence="both"
+                 Condition="NOT IISWWWROOT" />
+    <!-- WWWROOTDIR is a Directory table id; MSI resolves it during
+         CostFinalize. The SetProperty must fire BEFORE CostFinalize so
+         the directory resolves to [IISWWWROOT] rather than the default
+         (TARGETDIR). -->
+    <SetProperty Id="WWWROOTDIR" Value="[IISWWWROOT]"
+                 Before="CostFinalize" Sequence="both" />
+
+    <!-- ================================================================ -->
+    <!--  Directory layout                                                -->
+    <!-- ================================================================ -->
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="WEAMPDIR" Name="We-Amp">
+        <Directory Id="INSTALLDIR" Name="PageSpeed" />
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="CommonAppDataFolder">
+      <Directory Id="WEAMPDATADIR" Name="We-Amp">
+        <Directory Id="PAGESPEEDDATA" Name="PageSpeed">
+          <Directory Id="CACHEDIR" Name="cache" />
+          <Directory Id="LOGDIR" Name="logs" />
+        </Directory>
+      </Directory>
+    </StandardDirectory>
+
+    <!-- Default wwwroot — path resolved at install time via IISWWWROOT property. -->
+    <StandardDirectory Id="TARGETDIR">
+      <Directory Id="WWWROOTDIR" />
+    </StandardDirectory>
+
+    <!-- ================================================================ -->
+    <!--  Components                                                      -->
+    <!-- ================================================================ -->
+
+    <!-- Main DLL -->
+    <Component Id="MainDll" Directory="INSTALLDIR" Guid="*">
+      <File Id="pagespeed_iis.dll"
+            Source="$(var.BinDir)\pagespeed_iis.dll"
+            KeyPath="yes" />
+    </Component>
+
+    <!-- Sample configuration -->
+    <Component Id="SampleConfig" Directory="INSTALLDIR" Guid="*">
+      <File Id="web.config.sample"
+            Source="$(var.SrcDir)\install\iis\web.config.sample"
+            KeyPath="yes" />
+    </Component>
+
+    <!-- License text and attribution notices, next to the module as the
+         Apache-2.0 terms ask. Sourced verbatim from the repository root
+         (the same files every other package ships). -->
+    <Component Id="LicenseFile" Directory="INSTALLDIR" Guid="*">
+      <File Id="LICENSE"
+            Source="$(var.SrcDir)\LICENSE"
+            KeyPath="yes" />
+    </Component>
+    <Component Id="NoticeFile" Directory="INSTALLDIR" Guid="*">
+      <File Id="NOTICE"
+            Source="$(var.SrcDir)\NOTICE"
+            KeyPath="yes" />
+    </Component>
+
+    <!--
+      IIS service control — cycles BOTH the Windows Process Activation
+      Service (WAS) and the World Wide Web Publishing Service (W3SVC)
+      during install/upgrade/uninstall so that pagespeed_iis.dll is
+      released by every w3wp.exe worker before InstallFiles tries to
+      replace it.
+
+      Why stop WAS, not just W3SVC?
+        w3wp.exe worker processes are children of WAS, not W3SVC
+        (despite a common misreading of IIS architecture docs).
+        W3SVC depends on WAS. Stopping W3SVC alone leaves WAS up and
+        does NOT force-terminate live workers — they drain their
+        application-pool shutdown timeout (default 90s, often longer
+        on warm production sites with long-running requests), during
+        which they continue to hold pagespeed_iis.dll mapped. MSI's
+        InstallFiles then SILENTLY skips the in-use file (Windows
+        Installer schedules a pending-reboot replace and returns
+        success), so the customer ends up with a "successful upgrade"
+        that still serves the old DLL after the post-install iisreset.
+        This is the root cause of the beta.10-through-beta.14 stale
+        X-Page-Speed header bug.
+
+      Why also taskkill w3wp.exe (see ForceKillW3wp CustomAction)?
+        WAS-stop is supposed to synchronously terminate workers, but
+        a handful of community reports describe edge cases (crash-
+        dump in flight, app-domain shutdown hang) where WAS returns
+        before its workers are fully gone. A defensive `taskkill /F`
+        scheduled AFTER WAS stop and BEFORE InstallFiles is cheap
+        insurance. If no workers remain, taskkill returns 128 ("no
+        matching processes") which we mask with Return="ignore".
+
+      Both ServiceControl rows are MSI-native (no Wix4UtilCA CRT
+      dependency, same reasoning as the appcmd Type-34 CAs below).
+      Wait="yes" makes the InstallExecuteSequence block on the stop
+      completing.
+    -->
+    <Component Id="IisServiceControl" Directory="INSTALLDIR"
+               Guid="A1B2C3D4-1001-4000-8000-000000000003">
+      <RegistryValue Root="HKLM"
+                     Key="SOFTWARE\We-Amp\PageSpeed"
+                     Name="ServiceControlKey"
+                     Type="integer" Value="1" KeyPath="yes" />
+      <!-- Stop WAS first; w3wp.exe workers are children of WAS, not W3SVC.
+           No Start attribute - W3SVC depends on WAS, so starting W3SVC
+           below transitively starts WAS. -->
+      <ServiceControl Id="WAS"
+                      Name="WAS"
+                      Stop="both"
+                      Wait="yes" />
+      <ServiceControl Id="W3SVC"
+                      Name="W3SVC"
+                      Start="both"
+                      Stop="both"
+                      Wait="yes" />
+    </Component>
+
+    <!-- Cache directory — IIS_IUSRS + NETWORK SERVICE get Modify via the
+         GrantCacheAcl deferred icacls CA (locale-safe via well-known SIDs,
+         no Wix4UtilCA CRT dependency; see comment block on the CA below).
+         The AppPool worker writes per-vhost subdirs under this path;
+         icacls is invoked with (OI)(CI) so children inherit. Permanent="yes"
+         preserves the directory AND its ACLs across uninstall, so a
+         repeated icacls /grant on the same SID is a no-op (the OS de-dupes
+         identical ACEs rather than appending). Without this grant the
+         v1.1.0 IIS module fails to start with "FileCachePath not writable"
+         on first request and serves the diagnostic page instead of
+         running. -->
+    <Component Id="CacheDirComp" Directory="CACHEDIR"
+               Guid="A1B2C3D4-1001-4000-8000-000000000001"
+               KeyPath="yes" Permanent="yes">
+      <CreateFolder />
+    </Component>
+
+    <!-- Log directory — same deferred-icacls approach as cache, but the
+         GrantLogAcl CA grants only (RX,W) (read/execute/write) rather than
+         M (modify), so the worker can append to logs but not delete them;
+         rotation is admin-driven. Permanent="yes" preserves the directory
+         AND its ACLs across uninstall (identical SIDs are de-duped on
+         repeat install, not appended). -->
+    <Component Id="LogDirComp" Directory="LOGDIR"
+               Guid="A1B2C3D4-1001-4000-8000-000000000002"
+               KeyPath="yes" Permanent="yes">
+      <CreateFolder />
+    </Component>
+
+    <!-- THE machine-global default pagespeed.config — tier 1 of the config
+         resolution order documented at the top of pagespeed.config itself:
+         the base layer of the documented single source of truth. This is the ONE
+         seeded default; the wwwroot copy below is a per-site override SAMPLE,
+         not a second competing default. NeverOverwrite preserves
+         admin edits across upgrades; Permanent leaves the file on uninstall so
+         a reinstall picks up existing customizations.
+
+         Filed into PAGESPEEDDATA (C:\ProgramData\We-Amp\PageSpeed\)
+         alongside the cache + logs subdirectories — one canonical product
+         directory. The legacy C:\ProgramData\We-Amp\IISWebSpeed\ path
+         (tier 2 of that same chain) is no longer created by fresh installs;
+         iis_config_util.cpp keeps a runtime fallback on it for
+         upgrade-from-IISpeed and upgrade-from-1.1-pre-this-change customers
+         whose config survives via NeverOverwrite. -->
+    <Component Id="PagespeedConfig" Directory="PAGESPEEDDATA"
+               Guid="A1B2C3D4-1001-4000-8000-000000000004"
+               NeverOverwrite="yes" Permanent="yes">
+      <File Id="pagespeed.config"
+            Source="$(var.SrcDir)\install\iis\pagespeed.config"
+            KeyPath="yes" />
+    </Component>
+
+    <!-- Per-site override SAMPLE — tier 3 of that chain, authoritative when
+         present. This is NOT a second copy of the machine-global default
+         above: it is the drop-in per-site override surface (the IISpeed /
+         IISWebSpeed backward-compat model), seeded into the Default Web Site's
+         physical root so a bare install engages out of the box (the module's
+         engage gate requires a per-site config under the application's physical
+         path — a bare install would otherwise be a no-op module) and so
+         operators have a per-site file to edit. Its content layers LAST over
+         the machine-global base, so any directive here wins for this site.
+         NeverOverwrite preserves existing IISpeed configs (and admin edits) on
+         upgrade; Permanent keeps admin edits through uninstall/reinstall.
+         Conditional on IISWWWROOT in case the registry lookup and the
+         fallback both leave the property empty on exotic setups.
+         Non-serving of this web-root config file is asserted by the
+         requestFiltering deny in web.config.sample (do not rely on the IIS
+         *.config default alone). -->
+    <Component Id="SitePagespeedConfig" Directory="WWWROOTDIR"
+               Guid="A1B2C3D4-1001-4000-8000-000000000005"
+               NeverOverwrite="yes" Permanent="yes"
+               Condition="IISWWWROOT">
+      <File Id="site_pagespeed.config"
+            Name="pagespeed.config"
+            Source="$(var.SrcDir)\install\iis\pagespeed.config"
+            KeyPath="yes" />
+    </Component>
+
+    <!-- ================================================================ -->
+    <!--  Feature                                                         -->
+    <!-- ================================================================ -->
+    <Feature Id="ProductFeature" Title="PageSpeed for IIS" Level="1">
+      <ComponentRef Id="MainDll" />
+      <ComponentRef Id="SampleConfig" />
+      <ComponentRef Id="LicenseFile" />
+      <ComponentRef Id="NoticeFile" />
+      <ComponentRef Id="IisServiceControl" />
+      <ComponentRef Id="CacheDirComp" />
+      <ComponentRef Id="LogDirComp" />
+      <ComponentRef Id="PagespeedConfig" />
+      <ComponentRef Id="SitePagespeedConfig" />
+    </Feature>
+
+    <!-- ================================================================ -->
+    <!--  appcmd module registration — Type 34 deferred exe CAs           -->
+    <!--                                                                  -->
+    <!--  Type 34 = Source is a Directory table id (resolved to literal   -->
+    <!--  path at exec time); Target is the command line, where the       -->
+    <!--  first token is the exe path relative to that directory. No      -->
+    <!--  third-party CA DLL — Windows Installer launches the exe         -->
+    <!--  directly. Sidesteps the Wix4UtilCA_X64 CRT dependency that      -->
+    <!--  broke stock Windows Server 2016 installs.                       -->
+    <!--                                                                  -->
+    <!--  Deferred CAs receive formatted data via the CustomActionData    -->
+    <!--  property, populated by a paired SetProperty (auto-generated by  -->
+    <!--  WiX for attributes that contain [INSTALLDIR] tokens).           -->
+    <!-- ================================================================ -->
+
+    <!-- Defensive force-kill of any lingering w3wp.exe worker after
+         StopServices but before InstallFiles. See the IisServiceControl
+         comment block above for rationale. taskkill /F returns 128 when
+         no matching processes exist; Return="ignore" masks that. -->
+    <CustomAction Id="ForceKillW3wp"
+                  Directory="SystemFolder"
+                  ExeCommand='taskkill.exe /F /IM w3wp.exe /T'
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="ignore" />
+
+    <CustomAction Id="CleanRegistration"
+                  Directory="SystemFolder"
+                  ExeCommand="inetsrv\appcmd.exe uninstall module PageSpeedModule"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="ignore" />
+
+    <CustomAction Id="RegisterModule"
+                  Directory="SystemFolder"
+                  ExeCommand='inetsrv\appcmd.exe install module /name:PageSpeedModule /image:"[INSTALLDIR]pagespeed_iis.dll" /add:true'
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="check" />
+
+    <!-- Full uninstall: remove the module registration before files disappear.
+         Skipped on MajorUpgrade (UPGRADINGPRODUCTCODE is set then) so the
+         freshly-registered new version survives the old product's removal. -->
+    <CustomAction Id="UnregisterModule"
+                  Directory="SystemFolder"
+                  ExeCommand="inetsrv\appcmd.exe uninstall module PageSpeedModule"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="ignore" />
+
+    <!-- ACL grants on cache + logs dirs, using well-known SIDs
+         S-1-5-32-568 (IIS_IUSRS) + S-1-5-20 (NETWORK SERVICE) which are
+         locale-independent (avoids the localized-account-name failure
+         mode on de-DE / fr-FR / ja-JP Windows). icacls.exe lives in
+         C:\Windows\System32 (= SystemFolder), so Directory="SystemFolder"
+         + ExeCommand starting with "icacls.exe ..." resolves to a
+         literal absolute path at exec time — matches the existing
+         RegisterModule pattern above which uses "inetsrv\appcmd.exe"
+         relative to the same SystemFolder. No cmd.exe /c wrapper:
+         Type-34 launches the exe directly (no shell, no extra process
+         layer), same as RegisterModule. The [CACHEDIR] / [LOGDIR]
+         expansion already appends a trailing "\"; icacls accepts that
+         form, so we don't add a redundant trailing "." or anything else.
+         NETWORK SERVICE is granted as secondary for legacy AppPool
+         models that don't run under ApplicationPoolIdentity.
+
+         Return="ignore": icacls failures are masked because the new
+         X-Pagespeed-Init-Status: cache-path-not-writable diagnostic
+         page surfaces this failure mode loudly to localhost admin on
+         first request, providing a louder signal than a deferred-CA
+         hard-fail mid-install (which would roll back the entire MSI
+         and leave the customer with no module at all). -->
+    <CustomAction Id="GrantCacheAcl"
+                  Directory="SystemFolder"
+                  ExeCommand='icacls.exe "[CACHEDIR]" /grant "*S-1-5-32-568:(OI)(CI)M" /grant "*S-1-5-20:(OI)(CI)M"'
+                  Execute="deferred" Impersonate="no" Return="ignore" />
+
+    <CustomAction Id="GrantLogAcl"
+                  Directory="SystemFolder"
+                  ExeCommand='icacls.exe "[LOGDIR]" /grant "*S-1-5-32-568:(OI)(CI)(RX,W)" /grant "*S-1-5-20:(OI)(CI)(RX,W)"'
+                  Execute="deferred" Impersonate="no" Return="ignore" />
+
+    <InstallExecuteSequence>
+      <!-- Defensive w3wp kill: scheduled AFTER StopServices (which runs the
+           WAS+W3SVC <ServiceControl> Stop rows from IisServiceControl) and
+           BEFORE InstallFiles, so any worker that survived WAS-stop is gone
+           before the DLL replace. -->
+      <Custom Action="ForceKillW3wp" After="StopServices" />
+      <!-- Install/repair: remove any stale registration, then register. -->
+      <Custom Action="CleanRegistration" After="InstallFiles"
+              Condition="NOT Installed OR REINSTALL" />
+      <Custom Action="RegisterModule" After="CleanRegistration"
+              Condition="NOT Installed OR REINSTALL" />
+      <!-- ACL grants on cache + logs dirs via well-known SIDs (locale-
+           independent). Sole ACL mechanism: util:PermissionEx was
+           considered and rejected because WiX v5.0.2 emits it as
+           Wix4SchedSecureObjects / Wix4ExecSecureObjects references
+           that pull Wix4UtilCA_X64.dll (CRT-dependent) into the MSI
+           Binary table — the exact failure mode the Type-34 deferred-
+           exe CAs are designed to avoid. See the GrantCacheAcl
+           CustomAction comment block above. -->
+      <Custom Action="GrantCacheAcl" After="RegisterModule"
+              Condition="NOT Installed OR REINSTALL" />
+      <Custom Action="GrantLogAcl" After="GrantCacheAcl"
+              Condition="NOT Installed OR REINSTALL" />
+      <!-- Uninstall: remove IIS module registration before files go away. -->
+      <Custom Action="UnregisterModule" Before="RemoveFiles"
+              Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+    </InstallExecuteSequence>
+
+  </Package>
+</Wix>

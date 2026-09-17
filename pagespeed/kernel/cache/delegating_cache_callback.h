@@ -47,7 +47,8 @@ class DelegatingCacheCallback : public CacheInterface::Callback {
   CacheInterface::Callback* callback_;
   bool validate_candidate_called_;
 
-  DISALLOW_COPY_AND_ASSIGN(DelegatingCacheCallback);
+  DelegatingCacheCallback(const DelegatingCacheCallback&) = delete;
+  DelegatingCacheCallback& operator=(const DelegatingCacheCallback&) = delete;
 };
 
 }  // namespace net_instaweb

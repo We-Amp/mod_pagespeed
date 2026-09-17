@@ -41,7 +41,9 @@ class DecodeRewrittenUrlsFilter : public EmptyHtmlFilter {
  private:
   RewriteDriver* driver_;
 
-  DISALLOW_COPY_AND_ASSIGN(DecodeRewrittenUrlsFilter);
+  DecodeRewrittenUrlsFilter(const DecodeRewrittenUrlsFilter&) = delete;
+  DecodeRewrittenUrlsFilter& operator=(const DecodeRewrittenUrlsFilter&) =
+      delete;
 };
 
 }  // namespace net_instaweb

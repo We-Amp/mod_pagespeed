@@ -20,10 +20,11 @@
 #ifndef NET_INSTAWEB_REWRITER_PUBLIC_REQUEST_PROPERTIES_H_
 #define NET_INSTAWEB_REWRITER_PUBLIC_REQUEST_PROPERTIES_H_
 
+#include <memory>
+
 #include "net/instaweb/rewriter/public/device_properties.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/gtest_prod.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/http/user_agent_matcher.h"
 
@@ -63,7 +64,18 @@ class RequestProperties {
   bool SupportsWebpRewrittenUrls() const;
   bool SupportsWebpLosslessAlpha() const;
   bool SupportsWebpAnimated() const;
+  // AVIF capability queries. These AND the DeviceProperties Accept-driven
+  // capability with the downstream cache's advertised AVIF capability, exactly
+  // as the SupportsWebp* wrappers do. Stream G's SetAvifLevel calls these.
+  bool SupportsAvifInPlace() const;
+  bool SupportsAvifRewrittenUrls() const;
+  bool SupportsAvifLosslessAlpha() const;
+  bool SupportsAvifAnimated() const;
   bool IsBot() const;
+  // Forwards the Web Bot Auth verification outcome to the underlying
+  // DeviceProperties object; see device_properties.h for the contract. Only a
+  // true verdict has any effect, and it can only ever make IsBot() true.
+  void SetWebBotAuthVerdict(bool signature_verified_agent);
   UserAgentMatcher::DeviceType GetDeviceType() const;
   bool IsMobile() const;
   bool IsTablet() const;
@@ -88,8 +100,13 @@ class RequestProperties {
   mutable LazyBool supports_webp_rewritten_urls_;
   mutable LazyBool supports_webp_lossless_alpha_;
   mutable LazyBool supports_webp_animated_;
+  mutable LazyBool supports_avif_in_place_;
+  mutable LazyBool supports_avif_rewritten_urls_;
+  mutable LazyBool supports_avif_lossless_alpha_;
+  mutable LazyBool supports_avif_animated_;
 
-  DISALLOW_COPY_AND_ASSIGN(RequestProperties);
+  RequestProperties(const RequestProperties&) = delete;
+  RequestProperties& operator=(const RequestProperties&) = delete;
 };
 
 }  // namespace net_instaweb

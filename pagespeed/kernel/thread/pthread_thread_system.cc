@@ -53,7 +53,8 @@ class PthreadId : public ThreadSystem::ThreadId {
  private:
   pthread_t id_;
 
-  DISALLOW_COPY_AND_ASSIGN(PthreadId);
+  PthreadId(const PthreadId&) = delete;
+  PthreadId& operator=(const PthreadId&) = delete;
 };
 
 }  // namespace
@@ -124,7 +125,8 @@ class PthreadThreadImpl : public ThreadSystem::ThreadImpl {
   ThreadSystem::ThreadFlags flags_;
   pthread_t thread_obj_;
 
-  DISALLOW_COPY_AND_ASSIGN(PthreadThreadImpl);
+  PthreadThreadImpl(const PthreadThreadImpl&) = delete;
+  PthreadThreadImpl& operator=(const PthreadThreadImpl&) = delete;
 };
 
 PthreadThreadSystem::PthreadThreadSystem() {}

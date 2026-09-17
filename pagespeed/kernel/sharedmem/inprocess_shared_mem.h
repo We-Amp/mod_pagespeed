@@ -59,12 +59,13 @@ class InProcessSharedMem : public AbstractSharedMem {
   class DelegateMutex;
   class DelegateSegment;
   class Segment;
-  typedef std::map<GoogleString, Segment*> SegmentMap;
+  using SegmentMap = std::map<GoogleString, Segment*>;
 
   ThreadSystem* thread_system_;
   SegmentMap segments_;
 
-  DISALLOW_COPY_AND_ASSIGN(InProcessSharedMem);
+  InProcessSharedMem(const InProcessSharedMem&) = delete;
+  InProcessSharedMem& operator=(const InProcessSharedMem&) = delete;
 };
 
 }  // namespace net_instaweb

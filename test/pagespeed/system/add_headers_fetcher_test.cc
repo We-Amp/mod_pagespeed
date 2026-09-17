@@ -20,12 +20,13 @@
 //
 // Unit tests for AddHeadersFetcher.
 //
+#include <memory>
+
 #include "pagespeed/system/add_headers_fetcher.h"
 
 #include "net/instaweb/http/public/request_context.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "pagespeed/kernel/base/google_message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_system.h"  // for ThreadSystem
 #include "pagespeed/kernel/http/request_headers.h"
@@ -47,8 +48,8 @@ class AddHeadersFetcherTest : public RewriteOptionsTestBase<RewriteOptions> {
         options_(thread_system_.get()) {
     options_.AddCustomFetchHeader("Custom", "custom-header");
     options_.AddCustomFetchHeader("Extra", "extra-header");
-    add_headers_fetcher_.reset(
-        new AddHeadersFetcher(&options_, &reflecting_fetcher_));
+    add_headers_fetcher_ =
+        std::make_unique<AddHeadersFetcher>(&options_, &reflecting_fetcher_);
   }
 
  protected:

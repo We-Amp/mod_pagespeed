@@ -19,12 +19,12 @@
 
 #include "net/instaweb/rewriter/public/google_font_service_input_resource.h"
 
+#include <memory>
 #include <vector>
 
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_driver_factory.h"
 #include "net/instaweb/rewriter/public/server_context.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/http/content_type.h"
 #include "pagespeed/kernel/http/google_url.h"
@@ -100,8 +100,8 @@ void GoogleFontServiceInputResource::InitStats(Statistics* stats) {
 void GoogleFontServiceInputResource::PrepareRequest(
     const RequestContextPtr& request_context, RequestHeaders* headers) {
   // We want to give the font service the UA the client used, so that it can
-  // optimize for the visitor's browser, and not something like Serf/1.1
-  // mod_pagespeed/x.y
+  // optimize for the visitor's browser, and not something like
+  // CurlPagespeed mod_pagespeed/x.y
   headers->Replace(HttpAttributes::kUserAgent, user_agent_);
 
   request_context->AddSessionAuthorizedFetchOrigin(

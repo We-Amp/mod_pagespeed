@@ -19,10 +19,11 @@
 
 #include "net/instaweb/rewriter/public/redirect_on_size_limit_filter.h"
 
+#include <memory>
+
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_query.h"
 #include "pagespeed/kernel/base/escaping.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/html/html_element.h"

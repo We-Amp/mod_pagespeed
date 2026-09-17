@@ -20,10 +20,12 @@
 #ifndef NET_INSTAWEB_HTTP_PUBLIC_INFLATING_FETCH_H_
 #define NET_INSTAWEB_HTTP_PUBLIC_INFLATING_FETCH_H_
 
+#include <memory>
+
 #include "net/instaweb/http/public/async_fetch.h"
 #include "net/instaweb/http/public/http_value.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
+#include "pagespeed/kernel/base/shared_string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/http/response_headers.h"
 #include "pagespeed/kernel/util/gzip_inflater.h"
@@ -68,10 +70,35 @@ class InflatingFetch : public SharedAsyncFetch {
                         HTTPValue* compressed_value, ResponseHeaders* headers,
                         MessageHandler* handler);
 
+  // A memory-mapped (zero-copy) serve must not bypass inflation: de-alias
+  // with the verified copy (CopyMappedVerified), then run the copying
+  // Write() so HandleWrite can inflate when required.  The inflater (and
+  // any port underneath) may hold its input pointer across blocking
+  // downstream writes, so raw mapped bytes must not enter it; and a torn
+  // borrow (verify fails after the memcpy) fails the fetch rather than
+  // inflating garbage.
+  bool WriteMapped(const StringPiece& mmap_sp,
+                   const MappedSharedString& keepalive,
+                   MessageHandler* handler) override {
+    GoogleString owned;
+    if (!CopyMappedVerified(mmap_sp, keepalive, &owned)) {
+      return false;
+    }
+    return Write(owned, handler);
+  }
+
  protected:
   // If inflation is required, inflates and passes bytes to the linked fetch,
   // otherwise just passes bytes.
   bool HandleWrite(const StringPiece& sp, MessageHandler* handler) override;
+
+  // A shared-storage serve must not bypass inflation either: force the
+  // copying HandleWrite instead of forwarding the reference.
+  bool HandleWriteShared(const StringPiece& content,
+                         const SharedString& /*storage*/,
+                         MessageHandler* handler) override {
+    return HandleWrite(content, handler);
+  }
 
   // Analyzes headers and depending on the request settings and flags will
   // either setup inflater or not.
@@ -98,7 +125,8 @@ class InflatingFetch : public SharedAsyncFetch {
   // gets reset.
   bool inflate_failure_;
 
-  DISALLOW_COPY_AND_ASSIGN(InflatingFetch);
+  InflatingFetch(const InflatingFetch&) = delete;
+  InflatingFetch& operator=(const InflatingFetch&) = delete;
 };
 
 }  // namespace net_instaweb

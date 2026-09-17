@@ -68,7 +68,7 @@ class MemLockManager : public NamedLockManager {
   bool IsHeldInOrderedSet(MemLock* lock) const;
 
  private:
-  typedef std::map<StringPiece, MemLockState*> MemLockStateMap;
+  using MemLockStateMap = std::map<StringPiece, MemLockState*>;
 
   // Helper methods accessed by MemLockState
   void RemoveLockState(MemLockState* name_state);

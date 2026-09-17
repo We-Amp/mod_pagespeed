@@ -28,6 +28,7 @@
 #ifndef NET_INSTAWEB_REWRITER_PUBLIC_RESOURCE_H_
 #define NET_INSTAWEB_REWRITER_PUBLIC_RESOURCE_H_
 
+#include <memory>
 #include <vector>
 
 #include "base/logging.h"
@@ -220,7 +221,8 @@ class Resource : public RefCounted<Resource> {
 
    private:
     ResourcePtr resource_;
-    DISALLOW_COPY_AND_ASSIGN(AsyncCallback);
+    AsyncCallback(const AsyncCallback&) = delete;
+    AsyncCallback& operator=(const AsyncCallback&) = delete;
   };
 
   // An AsyncCallback for a freshen. The Done() callback in the default
@@ -240,7 +242,8 @@ class Resource : public RefCounted<Resource> {
     void Done(bool lock_failure, bool resource_ok) override { delete this; }
 
    private:
-    DISALLOW_COPY_AND_ASSIGN(FreshenCallback);
+    FreshenCallback(const FreshenCallback&) = delete;
+    FreshenCallback& operator=(const FreshenCallback&) = delete;
   };
 
   // Links in the HTTP contents and header from a fetched value.
@@ -346,7 +349,8 @@ class Resource : public RefCounted<Resource> {
   mutable GoogleString extracted_contents_;
   mutable std::unique_ptr<ResponseHeaders> extracted_headers_;
 
-  DISALLOW_COPY_AND_ASSIGN(Resource);
+  Resource(const Resource&) = delete;
+  Resource& operator=(const Resource&) = delete;
 };
 
 // Sometimes some portions of URL space need to be handled differently

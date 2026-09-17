@@ -27,15 +27,13 @@
 
 #include "net/instaweb/rewriter/public/rewrite_driver_factory.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
-#include "pagespeed/controller/central_controller.h"
-#include "pagespeed/controller/central_controller_rpc_client.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/hasher.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/thread/queued_worker_pool.h"
+#include "pagespeed/system/optimization_thread_policy.h"
 
 namespace net_instaweb {
 
@@ -75,10 +73,6 @@ class SystemRewriteDriverFactory : public RewriteDriverFactory {
                              StringPiece hostname, int port);
   ~SystemRewriteDriverFactory() override;
   void Init();
-
-  // If the server using this isn't using APR natively, call this to initialize
-  // the APR library.
-  static void InitApr();
 
   AbstractSharedMem* shared_mem_runtime() const {
     return shared_mem_runtime_.get();
@@ -192,11 +186,14 @@ class SystemRewriteDriverFactory : public RewriteDriverFactory {
     return track_original_content_length_;
   }
 
-  // When Serf gets a system error during polling, to avoid spamming
+  // When the fetcher gets a system error during polling, to avoid spamming
   // the log we just print the number of outstanding fetch URLs.  To
   // debug this it's useful to print the complete set of URLs, in
   // which case this should be turned on.
-  void list_outstanding_urls_on_error(bool x) {
+  bool list_outstanding_urls_on_error() const {
+    return list_outstanding_urls_on_error_;
+  }
+  void set_list_outstanding_urls_on_error(bool x) {
     list_outstanding_urls_on_error_ = x;
   }
 
@@ -212,13 +209,32 @@ class SystemRewriteDriverFactory : public RewriteDriverFactory {
   }
   const GoogleString& static_asset_prefix() { return static_asset_prefix_; }
 
+  // The resolved counts: what the worker pools will actually be built with.
+  // Only meaningful once thread_counts_finalized(); before that they read as
+  // kAutoThreadCount.
   int num_rewrite_threads() const { return num_rewrite_threads_; }
-  void set_num_rewrite_threads(int x) { num_rewrite_threads_ = x; }
   int num_expensive_rewrite_threads() const {
     return num_expensive_rewrite_threads_;
   }
+
+  // The *configured* counts, as NumRewriteThreads /
+  // NumExpensiveRewriteThreads set them.  kAutoThreadCount (which is what
+  // both `auto` and `0` parse to, and the initial value) means "compute it
+  // from the thread-count policy".  A positive value always wins over the
+  // computed one, whichever order parsing and detection happen in: setting one
+  // after the counts have been finalized re-resolves them.
+  //
+  // constexpr, not `static const int`, so it has no out-of-class definition to
+  // forget: an in-class-initialized `static const int` still needs one for any
+  // ODR use, and an EXPECT_EQ() or a std::max() against it would fail to link.
+  static constexpr int kAutoThreadCount = 0;
+  void set_num_rewrite_threads(int x) {
+    configured_rewrite_threads_ = x;
+    ReresolveIfFinalized();
+  }
   void set_num_expensive_rewrite_threads(int x) {
-    num_expensive_rewrite_threads_ = x;
+    configured_expensive_rewrite_threads_ = x;
+    ReresolveIfFinalized();
   }
   bool use_per_vhost_statistics() const { return use_per_vhost_statistics_; }
   void set_use_per_vhost_statistics(bool x) { use_per_vhost_statistics_ = x; }
@@ -232,6 +248,12 @@ class SystemRewriteDriverFactory : public RewriteDriverFactory {
   // Check whether the server is threaded.  For example, Nginx uses an event
   // loop and can keep with the default of false, while Apache with a threaded
   // multiprocessing module (MPM) overrides this method to return true.
+  //
+  // This no longer feeds the thread-count policy -- request
+  // concurrency is not the constraint on CPU-bound optimization work, and the
+  // divisor that matters is ConcurrentProcessCount().  It is still reported in
+  // the startup log, because it describes the deployment shape an operator is
+  // looking at.
   virtual bool IsServerThreaded() {
     return false;  // Most new servers are non-threaded nowadays.
   }
@@ -240,26 +262,38 @@ class SystemRewriteDriverFactory : public RewriteDriverFactory {
   // that might be used for handling user requests.
   virtual int LookupThreadLimit() { return 1; }
 
-  // By default this uses the ControllerManager to fork off some processes to
-  // handle the Controller.  If you're on a system where fork doesn't make
-  // sense or running the Controller in its own process doesn't make sense, this
-  // is a hook where you can start the controller in whatever way makes sense
-  // for your platform.
-  virtual void StartController(const SystemRewriteOptions& options);
+  // How many server processes on this machine each build their
+  // own optimization worker pools -- Apache's configured child count, nginx's
+  // worker_processes, the IIS application pool's worker-process count, Envoy's
+  // concurrency.  It is the divisor that keeps the aggregate bounded: without
+  // it a per-process count oversubscribes the machine by exactly the process
+  // count.
+  //
+  // The default is kUnknownProcessConcurrency, and a port that leaves it there
+  // resolves to one thread in each pool and logs that it did.  It deliberately
+  // does not guess a larger number: silently oversubscribing a machine is the
+  // failure mode the thread-count policy exists to end.
+  virtual int ConcurrentProcessCount() { return kUnknownProcessConcurrency; }
 
-  // Set the name of this process, for debugging visibility.
-  virtual void NameProcess(const char* name);
+  // Returns false on platforms that cannot answer IsServerThreaded() /
+  // ConcurrentProcessCount() / LookupThreadLimit() correctly until after
+  // configuration has been processed; such platforms must call
+  // FinalizeThreadCounts() themselves once the answers are available, and
+  // update the cache thread limit with caches()->set_thread_limit().
+  virtual bool ThreadCountsKnownAtInit() { return true; }
 
-  // Hook for handling any process-specific initialization the host webserver
-  // might need when we manually fork off a process.  Children should call the
-  // superclass method when overriding (so it can set the process name).  See
-  // NgxRewriteDriverFactory::PrepareForkedProcess.
-  virtual void PrepareForkedProcess(const char* name);
+  // Runs thread-count resolution if it hasn't run yet.  Platforms that return
+  // false from ThreadCountsKnownAtInit() must call this as soon as
+  // ConcurrentProcessCount() can be answered, and before anything reads the
+  // thread counts.  Idempotent.
+  void FinalizeThreadCounts() { AutoDetectThreadCounts(); }
 
-  // Once we've created the controller process, we need to initialize it like we
-  // would one of our normal parent or child processes.  The controller manager
-  // will call this once it has a process it needs prepared.
-  virtual void PrepareControllerProcess();
+  // The CPU budget and process-concurrency divisor the resolved counts were
+  // computed from.  Only meaningful once thread_counts_finalized().  Exposed
+  // so ports can report them; the admin/statistics surface is a planned
+  // follow-up.
+  const EffectiveCpuBudget& cpu_budget() const { return cpu_budget_; }
+  int concurrent_process_count() const { return concurrent_processes_; }
 
  protected:
   // Initializes all the statistics objects created transitively by
@@ -290,28 +324,56 @@ class SystemRewriteDriverFactory : public RewriteDriverFactory {
   // so that SystemRewriteDriverFactory::ChildInit can iterate over all
   // the server contexts that need to be ChildInit'd, and so that we can free
   // them in the Root process that does not run ChildInit.
-  typedef std::set<SystemServerContext*> SystemServerContextSet;
+  using SystemServerContextSet = std::set<SystemServerContext*>;
   SystemServerContextSet uninitialized_server_contexts_;
 
-  // Allocates a serf fetcher.  Implementations may override this method to
-  // supply other kinds of fetchers.  For example, ngx_pagespeed may return
-  // either a serf fetcher or an nginx-native fetcher depending on options.
-  virtual UrlAsyncFetcher* AllocateFetcher(SystemRewriteOptions* config);
+  // Allocates a fetcher for the given config.  Implementations must override
+  // this method to supply an appropriate fetcher.  For example, the Apache
+  // module returns a Curl fetcher, while the Envoy filter returns an
+  // Envoy-native fetcher.
+  virtual UrlAsyncFetcher* AllocateFetcher(SystemRewriteOptions* config) = 0;
 
   FileSystem* DefaultFileSystem() override;
   NamedLockManager* DefaultLockManager() override;
 
-  // Updates num_rewrite_threads_ and num_expensive_rewrite_threads_
-  // with sensible values if they are not explicitly set.
+  // Reads the effective CPU budget and the process-concurrency divisor, then
+  // resolves num_rewrite_threads_ and num_expensive_rewrite_threads_ from the
+  // thread-count policy for any count the operator did not set explicitly.
+  // Idempotent; the first call is the one that counts.
   virtual void AutoDetectThreadCounts();
+
+  // Logs the resolved counts and everything they were derived from.
+  //
+  // This is emitted at kWarning, not kInfo, on purpose: Apache's default
+  // LogLevel is warn, and a resolution reported below the default log level is
+  // indistinguishable from one that never happened -- which is a large part of
+  // why the old behaviour went unnoticed for years.  Ports that
+  // can describe their deployment shape in more detail override this.
+  virtual void LogThreadCountResolution();
 
   bool thread_counts_finalized() { return thread_counts_finalized_; }
 
-  // Delegate from RewriteDriverFactory to construct CentralController.
-  std::shared_ptr<CentralController> GetCentralController(
-      NamedLockManager* lock_manager) override;
-
  private:
+  // Applies the policy formula to cpu_budget_ / concurrent_processes_ and
+  // writes the result into num_rewrite_threads_ and
+  // num_expensive_rewrite_threads_, except where the operator configured a
+  // positive count.
+  void ResolveThreadCounts();
+
+  // Called when a directive is set.  If the counts were already resolved --
+  // which happens on the ports that read configuration after Init() -- redo
+  // the resolution so the explicitly configured count wins regardless of
+  // ordering, and report the new answer.
+  void ReresolveIfFinalized();
+
+  // Calls LogThreadCountResolution() unless the resolved pair is what was
+  // logged last.
+  void LogThreadCountResolutionIfChanged();
+
+  // Complains, in every build and not only in debug ones, if a worker pool is
+  // built before thread-count resolution has run.  See the definition.
+  void WarnIfThreadCountsNotFinalized();
+
   // Build global shared-memory statistics, taking ownership.  This is invoked
   // if at least one server context (global or VirtualHost) enables statistics.
   Statistics* SetUpGlobalSharedMemStatistics(
@@ -362,13 +424,13 @@ class SystemRewriteDriverFactory : public RewriteDriverFactory {
   // fetcher (the thing that takes a thread) needs to know about various
   // options.  The inner cache is base_fetcher_map_ which GetBaseFetcher() uses
   // to keep track of what fetchers it has requested from AllocateFetcher().
-  // Base fetchers are all serf fetchers with various options unless an
+  // Base fetchers are all curl fetchers with various options unless an
   // implementation overrides AllocateFetcher() to return other kinds of
   // fetchers.  The outer cache is fetcher_map_, used by GetFetcher(), and is
   // fragmented on every option that affects fetching.  All of these fetchers
   // are either exactly as returned by GetBaseFetcher() or first wrapped in
   // slurping or rate-limiting.
-  typedef std::map<GoogleString, UrlAsyncFetcher*> FetcherMap;
+  using FetcherMap = std::map<GoogleString, UrlAsyncFetcher*>;
   FetcherMap base_fetcher_map_;
   FetcherMap fetcher_map_;
 
@@ -389,13 +451,29 @@ class SystemRewriteDriverFactory : public RewriteDriverFactory {
   // true iff we ran through AutoDetectThreadCounts().
   bool thread_counts_finalized_;
 
-  // These are <= 0 if we should autodetect.
+  // What the operator configured.  kAutoThreadCount means "apply the
+  // policy"; that is both the initial value and what `auto` and `0` parse to.
+  int configured_rewrite_threads_;
+  int configured_expensive_rewrite_threads_;
+
+  // What the pools will be built with.  kAutoThreadCount until resolution has
+  // run.
   int num_rewrite_threads_;
   int num_expensive_rewrite_threads_;
 
-  std::shared_ptr<CentralControllerRpcClient> central_controller_;
+  // The inputs the resolved counts came from, kept for logging and for
+  // re-resolution when a directive arrives after finalization.
+  EffectiveCpuBudget cpu_budget_;
+  int concurrent_processes_;
 
-  DISALLOW_COPY_AND_ASSIGN(SystemRewriteDriverFactory);
+  // The last pair LogThreadCountResolution() was called with, so a
+  // re-resolution that changes nothing does not repeat itself.
+  int logged_rewrite_threads_;
+  int logged_expensive_rewrite_threads_;
+
+  SystemRewriteDriverFactory(const SystemRewriteDriverFactory&) = delete;
+  SystemRewriteDriverFactory& operator=(const SystemRewriteDriverFactory&) =
+      delete;
 };
 
 }  // namespace net_instaweb

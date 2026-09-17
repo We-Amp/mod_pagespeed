@@ -213,7 +213,8 @@ class CssFlattenImportsContext : public SingleRewriteContext {
   CssHierarchy* hierarchy_;
   ResourcePtr input_resource_;
   OutputResourcePtr output_resource_;
-  DISALLOW_COPY_AND_ASSIGN(CssFlattenImportsContext);
+  CssFlattenImportsContext(const CssFlattenImportsContext&) = delete;
+  CssFlattenImportsContext& operator=(const CssFlattenImportsContext&) = delete;
 };
 
 }  // namespace net_instaweb

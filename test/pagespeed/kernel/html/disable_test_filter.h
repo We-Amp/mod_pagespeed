@@ -58,7 +58,8 @@ class DisableTestFilter : public EmptyHtmlFilter {
   bool is_enabled_;
   GoogleString disabled_reason_;
 
-  DISALLOW_COPY_AND_ASSIGN(DisableTestFilter);
+  DisableTestFilter(const DisableTestFilter&) = delete;
+  DisableTestFilter& operator=(const DisableTestFilter&) = delete;
 };
 
 }  // namespace net_instaweb

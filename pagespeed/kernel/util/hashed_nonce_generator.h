@@ -20,9 +20,10 @@
 #ifndef PAGESPEED_KERNEL_UTIL_HASHED_NONCE_GENERATOR_H_
 #define PAGESPEED_KERNEL_UTIL_HASHED_NONCE_GENERATOR_H_
 
+#include <memory>
+
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/util/nonce_generator.h"
 
@@ -53,11 +54,12 @@ class HashedNonceGenerator : public NonceGenerator {
 
  private:
   const Hasher* hasher_;
-  scoped_array<char> key_;
+  std::unique_ptr<char[]> key_;
   int key_size_;
   uint64 counter_;
 
-  DISALLOW_COPY_AND_ASSIGN(HashedNonceGenerator);
+  HashedNonceGenerator(const HashedNonceGenerator&) = delete;
+  HashedNonceGenerator& operator=(const HashedNonceGenerator&) = delete;
 };
 
 }  // namespace net_instaweb

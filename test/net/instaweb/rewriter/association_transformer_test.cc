@@ -27,7 +27,6 @@
 #include "net/instaweb/rewriter/public/resource_slot.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "pagespeed/kernel/base/null_message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/string_writer.h"
@@ -58,7 +57,8 @@ class DummyResource : public Resource {
  private:
   GoogleString url_;
 
-  DISALLOW_COPY_AND_ASSIGN(DummyResource);
+  DummyResource(const DummyResource&) = delete;
+  DummyResource& operator=(const DummyResource&) = delete;
 };
 
 namespace {
@@ -74,7 +74,8 @@ class DummyTransformer : public CssTagScanner::Transformer {
   }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(DummyTransformer);
+  DummyTransformer(const DummyTransformer&) = delete;
+  DummyTransformer& operator=(const DummyTransformer&) = delete;
 };
 
 }  // namespace

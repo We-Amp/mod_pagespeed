@@ -59,7 +59,7 @@ class PthreadSharedMem : public AbstractSharedMem {
   static void Terminate();
 
  private:
-  typedef std::map<GoogleString, std::pair<char*, size_t> > SegmentBaseMap;
+  using SegmentBaseMap = std::map<GoogleString, std::pair<char*, size_t> >;
 
   // Accessor for below. Note that the segment_bases_lock will be held at exit.
   static SegmentBaseMap* AcquireSegmentBases();
@@ -82,7 +82,8 @@ class PthreadSharedMem : public AbstractSharedMem {
   // created, before destroying the old one.
   size_t instance_number_;
 
-  DISALLOW_COPY_AND_ASSIGN(PthreadSharedMem);
+  PthreadSharedMem(const PthreadSharedMem&) = delete;
+  PthreadSharedMem& operator=(const PthreadSharedMem&) = delete;
 };
 
 }  // namespace net_instaweb

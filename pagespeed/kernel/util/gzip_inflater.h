@@ -25,7 +25,7 @@
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/string_util.h"
 
-typedef struct z_stream_s z_stream;
+using z_stream = struct z_stream_s;
 
 namespace net_instaweb {
 
@@ -100,7 +100,8 @@ class GzipInflater {
   bool finished_;
   bool error_;
 
-  DISALLOW_COPY_AND_ASSIGN(GzipInflater);
+  GzipInflater(const GzipInflater&) = delete;
+  GzipInflater& operator=(const GzipInflater&) = delete;
 };
 
 }  // namespace net_instaweb

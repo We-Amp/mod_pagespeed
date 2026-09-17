@@ -77,6 +77,11 @@ class ImageUrlEncoderTest : public ::testing::Test {
     return ImageUrlEncoder::IsWebpRewrittenUrl(gurl);
   }
 
+  bool IsPagespeedAvif(StringPiece url) {
+    GoogleUrl gurl(url);
+    return ImageUrlEncoder::IsAvifRewrittenUrl(gurl);
+  }
+
   ImageUrlEncoder encoder_;
   GoogleMessageHandler handler_;
 };
@@ -394,6 +399,117 @@ TEST_F(ImageUrlEncoderTest, CacheKey) {
   EXPECT_EQ(".d", ImageUrlEncoder::CacheKeyFromResourceContext(context));
 }
 
+// The AVIF capability token rides in the metadata cache key
+// INDEPENDENTLY of the WebP token, in a disjoint 'A'-prefixed alphabet.
+TEST_F(ImageUrlEncoderTest, CacheKeyAvifTokens) {
+  ResourceContext context;
+
+  // AVIF_NONE emits no token: pre-AVIF keys are byte-for-byte unchanged.
+  context.set_avif_level(ResourceContext::AVIF_NONE);
+  EXPECT_EQ(".", ImageUrlEncoder::CacheKeyFromResourceContext(context));
+  context.Clear();
+
+  // Per-level AVIF tokens: 'Af' lossy, 'Ag' lossy+lossless+alpha,
+  // 'Ah' animated (appended after the WebP token, here LIBWEBP_NONE = '.').
+  context.set_avif_level(ResourceContext::AVIF_LOSSY_ONLY);
+  EXPECT_EQ(".Af", ImageUrlEncoder::CacheKeyFromResourceContext(context));
+  context.set_avif_level(ResourceContext::AVIF_LOSSY_LOSSLESS_ALPHA);
+  EXPECT_EQ(".Ag", ImageUrlEncoder::CacheKeyFromResourceContext(context));
+  context.set_avif_level(ResourceContext::AVIF_ANIMATED);
+  EXPECT_EQ(".Ah", ImageUrlEncoder::CacheKeyFromResourceContext(context));
+  context.Clear();
+
+  // A both-capable request emits BOTH the 'v' and 'Ag' tokens in one key.
+  context.set_libwebp_level(ResourceContext::LIBWEBP_LOSSY_LOSSLESS_ALPHA);
+  context.set_avif_level(ResourceContext::AVIF_LOSSY_LOSSLESS_ALPHA);
+  EXPECT_EQ("vAg", ImageUrlEncoder::CacheKeyFromResourceContext(context));
+  context.Clear();
+
+  // A WebP-only request emits no 'A' token at all (the alphabets are
+  // disjoint, so this proves no AVIF contribution to the key).
+  context.set_libwebp_level(ResourceContext::LIBWEBP_LOSSY_LOSSLESS_ALPHA);
+  GoogleString webp_only_key =
+      ImageUrlEncoder::CacheKeyFromResourceContext(context);
+  EXPECT_EQ("v", webp_only_key);
+  EXPECT_EQ(GoogleString::npos, webp_only_key.find('A'));
+  context.Clear();
+
+  // An AVIF-only committed context emits the WebP-NONE token plus the AVIF
+  // token, and no other WebP token ('w'/'v'/'a').
+  context.set_libwebp_level(ResourceContext::LIBWEBP_NONE);
+  context.set_avif_level(ResourceContext::AVIF_LOSSY_LOSSLESS_ALPHA);
+  GoogleString avif_only_key =
+      ImageUrlEncoder::CacheKeyFromResourceContext(context);
+  EXPECT_EQ(".Ag", avif_only_key);
+  EXPECT_EQ(GoogleString::npos, avif_only_key.find('w'));
+  EXPECT_EQ(GoogleString::npos, avif_only_key.find('v'));
+
+  // The quality-modifier keys are unchanged by the AVIF token, which is
+  // always appended last (after 'd'/'ss').
+  context.set_may_use_save_data_quality(true);
+  EXPECT_EQ(".dAg", ImageUrlEncoder::CacheKeyFromResourceContext(context));
+}
+
+// Every (libwebp_level, avif_level) combination must produce a distinct
+// metadata cache key -- the two token alphabets are disjoint by design, so no
+// AVIF-capable key can ever collide with a WebP-only key (the Stream G
+// acceptance that guards against serving an AVIF payload under a WebP key).
+TEST_F(ImageUrlEncoderTest, DifferentWebpAndAvifLevelCombinations) {
+  std::set<GoogleString> seen;
+  int valid_combinations = 0;
+  for (int webp_level = ResourceContext::LibWebpLevel_MIN;
+       webp_level <= ResourceContext::LibWebpLevel_MAX; ++webp_level) {
+    if (!ResourceContext::LibWebpLevel_IsValid(webp_level)) {
+      continue;
+    }
+    for (int avif_level = ResourceContext::AvifLevel_MIN;
+         avif_level <= ResourceContext::AvifLevel_MAX; ++avif_level) {
+      if (!ResourceContext::AvifLevel_IsValid(avif_level)) {
+        continue;
+      }
+      ResourceContext ctx;
+      ctx.set_libwebp_level(
+          static_cast<ResourceContext::LibWebpLevel>(webp_level));
+      ctx.set_avif_level(static_cast<ResourceContext::AvifLevel>(avif_level));
+      GoogleString cache_key =
+          ImageUrlEncoder::CacheKeyFromResourceContext(ctx);
+      EXPECT_EQ(seen.find(cache_key), seen.end())
+          << "duplicate key " << cache_key << " at webp_level=" << webp_level
+          << " avif_level=" << avif_level;
+      seen.insert(cache_key);
+      ++valid_combinations;
+    }
+  }
+  EXPECT_EQ(valid_combinations, static_cast<int>(seen.size()));
+}
+
+// A legacy 'w'/'v'-terminated URL committed the resource to WebP before AVIF
+// existed, so decoding one must CLEAR any avif_level pre-set on the context:
+// the stored key for such a URL never carried an A-token, and leaving the
+// level set would recompute a different (self-missing) key.
+TEST_F(ImageUrlEncoderTest, LegacyWebpTerminatorClearsAvifLevel) {
+  const char kLegacyWebpUrl[] = "17x33w,hencoded.url,_with,_various.stuff";
+  const char kLegacyWebpLaUrl[] = "17x33v,hencoded.url,_with,_various.stuff";
+  const char* kLegacyWebpUrls[] = {kLegacyWebpUrl, kLegacyWebpLaUrl};
+  for (const char* url : kLegacyWebpUrls) {
+    ResourceContext context;
+    context.set_avif_level(ResourceContext::AVIF_LOSSY_LOSSLESS_ALPHA);
+    StringVector urls;
+    EXPECT_TRUE(encoder_.Decode(url, &urls, &context, &handler_));
+    EXPECT_FALSE(context.has_avif_level()) << url;
+    EXPECT_EQ(ResourceContext::AVIF_NONE, context.avif_level()) << url;
+  }
+
+  // The legacy 'x' terminator does not commit to any format, so (mirroring
+  // how libwebp_level is left alone) a pre-set avif_level survives.
+  ResourceContext context;
+  context.set_avif_level(ResourceContext::AVIF_LOSSY_LOSSLESS_ALPHA);
+  StringVector urls;
+  EXPECT_TRUE(encoder_.Decode(kDimsUrl, &urls, &context, &handler_));
+  EXPECT_TRUE(context.has_avif_level());
+  EXPECT_EQ(ResourceContext::AVIF_LOSSY_LOSSLESS_ALPHA, context.avif_level());
+}
+
 TEST_F(ImageUrlEncoderTest, DifferentWebpLevels) {
   // Make sure different levels of WebP support get different cache keys.
   std::set<GoogleString> seen;
@@ -598,6 +714,36 @@ TEST_F(ImageUrlEncoderTest, WebpDetection) {
   EXPECT_FALSE(IsPagespeedWebp("http://example.com/foo.jpg"));
   EXPECT_FALSE(IsPagespeedWebp("http://example.com/x.jpg.pagespeed.cd.0.jpeg"));
   EXPECT_FALSE(IsPagespeedWebp("http://example.com/x.jpg.pagespeed.ce.0.webp"));
+}
+
+// IsAvifRewrittenUrl keys on the committed ".avif" output extension
+// of an ImageRewriteFilter ("ic") URL, exactly as IsWebpRewrittenUrl keys on
+// ".webp". This drives the committed-URL reconcile in SetAvifCapability.
+TEST_F(ImageUrlEncoderTest, AvifDetection) {
+  // Valid committed-AVIF URLs.
+  EXPECT_TRUE(IsPagespeedAvif("http://example.com/xa.jpg.pagespeed.ic.0.avif"));
+  EXPECT_TRUE(IsPagespeedAvif("http://example.com/xa.png.pagespeed.ic.0.avif"));
+  EXPECT_TRUE(IsPagespeedAvif("http://example.com/xa.gif.pagespeed.ic.0.avif"));
+  EXPECT_TRUE(
+      IsPagespeedAvif("http://example.com/xa.avif.pagespeed.ic.0.avif"));
+  EXPECT_TRUE(
+      IsPagespeedAvif("http://example.com/17x33a.jpg.pagespeed.ic.0.avif"));
+
+  // Invalid: wrong extension, wrong filter id, or not a pagespeed URL at all.
+  EXPECT_FALSE(IsPagespeedAvif("http://example.com/xa.jpg.XXXXXXXX.ic.0.avif"));
+  EXPECT_FALSE(
+      IsPagespeedAvif("http://example.com/xa.jpg.pagespeed.ic.0.webp"));
+  EXPECT_FALSE(
+      IsPagespeedAvif("http://example.com/xa.avif.pagespeed.ic.0.jpeg"));
+  EXPECT_FALSE(IsPagespeedAvif("http://example.com/foo.avif"));
+  EXPECT_FALSE(IsPagespeedAvif("http://example.com/foo.jpg"));
+  EXPECT_FALSE(IsPagespeedAvif("http://example.com/x.jpg.pagespeed.ce.0.avif"));
+
+  // The WebP and AVIF detectors never both claim one URL.
+  EXPECT_FALSE(
+      IsPagespeedWebp("http://example.com/xa.jpg.pagespeed.ic.0.avif"));
+  EXPECT_FALSE(
+      IsPagespeedAvif("http://example.com/xa.jpg.pagespeed.ic.0.webp"));
 }
 
 }  // namespace net_instaweb

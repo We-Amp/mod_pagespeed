@@ -1,0 +1,256 @@
+#!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
+# nginx module configuration for ngx_pagespeed
+#
+# This config file is used by nginx's configure script when using:
+#   ./configure --add-module=/path/to/mod_pagespeed/pagespeed/nginx
+#
+# Prerequisites:
+# 1. Build the PageSpeed static archive first:
+#    bazel build --config=clang-libstdcxx13 //pagespeed/nginx:ngx_pagespeed_archive
+#
+# 2. Set MOD_PAGESPEED_DIR to point to the mod_pagespeed source root:
+#    export MOD_PAGESPEED_DIR=/path/to/mod_pagespeed
+#
+# 3. Run nginx configure:
+#    ./configure --add-module=$MOD_PAGESPEED_DIR/pagespeed/nginx [other-options]
+
+# Get the directory where this config file resides
+ngx_addon_dir=${ngx_addon_dir:-$(dirname $0)}
+
+# Resolve MOD_PAGESPEED_DIR - either from environment or relative to this file
+if [ -z "$MOD_PAGESPEED_DIR" ]; then
+    # Go up two levels from pagespeed/nginx to get project root
+    MOD_PAGESPEED_DIR=$(cd "$ngx_addon_dir/../.." && pwd)
+fi
+
+# Resolve the PageSpeed PSOL archive.
+#
+# The archive target //pagespeed/nginx:ngx_pagespeed_archive is built under the
+# clang-libstdcxx13 configuration. Two facts make a hard-coded bazel-bin path
+# wrong:
+#   1. The bare `bazel-bin` convenience symlink points at the DEFAULT output
+#      config (e.g. bazel-out/k8-fastbuild/bin), which is not necessarily where
+#      the clang-libstdcxx13 build placed the artifact.
+#   2. The target is a cc_library with linkstatic/alwayslink, so Bazel emits
+#      `libngx_pagespeed_archive.lo` (an ar archive), NOT a `.a`.
+# So we resolve it from the config-specific output, in priority order:
+#   (a) explicit PAGESPEED_ARCHIVE env override (lets Phase B / CI pin a path),
+#   (b) `bazel cquery --config=clang-libstdcxx13 --output=files` (authoritative),
+#   (c) fall back to the legacy bazel-bin path, trying both .lo and .a.
+ARCHIVE_TARGET="//pagespeed/nginx:ngx_pagespeed_archive"
+if [ -n "$PAGESPEED_ARCHIVE" ]; then
+    : # use caller-provided path verbatim
+elif command -v bazel >/dev/null 2>&1 && \
+     PAGESPEED_ARCHIVE=$(cd "$MOD_PAGESPEED_DIR" && \
+       bazel cquery --config=clang-libstdcxx13 --output=files "$ARCHIVE_TARGET" \
+       2>/dev/null | head -n1) && [ -n "$PAGESPEED_ARCHIVE" ]; then
+    # cquery returns a workspace-relative path; make it absolute.
+    case "$PAGESPEED_ARCHIVE" in
+        /*) ;;
+        *) PAGESPEED_ARCHIVE="$MOD_PAGESPEED_DIR/$PAGESPEED_ARCHIVE" ;;
+    esac
+else
+    BAZEL_BIN="$MOD_PAGESPEED_DIR/bazel-bin"
+    if [ -f "$BAZEL_BIN/pagespeed/nginx/libngx_pagespeed_archive.lo" ]; then
+        PAGESPEED_ARCHIVE="$BAZEL_BIN/pagespeed/nginx/libngx_pagespeed_archive.lo"
+    else
+        PAGESPEED_ARCHIVE="$BAZEL_BIN/pagespeed/nginx/libngx_pagespeed_archive.a"
+    fi
+fi
+
+# Check if the archive exists
+if [ ! -f "$PAGESPEED_ARCHIVE" ]; then
+    cat <<EOF >&2
+ERROR: PageSpeed archive not found at: $PAGESPEED_ARCHIVE
+
+Please build it first with:
+  cd $MOD_PAGESPEED_DIR
+  bazel build --config=clang-libstdcxx13 //pagespeed/nginx:ngx_pagespeed_archive
+
+EOF
+    exit 1
+fi
+
+# Module name
+ngx_addon_name=ngx_pagespeed
+
+# Source files - nginx will compile these
+# Note: The actual implementation is in the archive, these are just the nginx entry points
+NGX_PAGESPEED_SRCS="
+    $ngx_addon_dir/ngx_pagespeed.cc
+"
+
+# Header files
+NGX_PAGESPEED_INCS="
+    $ngx_addon_dir
+    $MOD_PAGESPEED_DIR
+    $MOD_PAGESPEED_DIR/third_party/css_parser/src
+"
+
+# Header include directories for the PageSpeed dependency graph.
+#
+# The glue (ngx_pagespeed.cc) pulls in the full PageSpeed header tree, which
+# in turn references abseil, protobuf, boringssl, sparsehash, apr, gtest and a
+# long tail of vendored deps -- plus Bazel-GENERATED headers (version.h, the
+# protobuf *.pb.h, and per-target _virtual_includes/ roots). Hand-maintaining
+# that list is brittle (the archive's CppCompile action carries ~70 distinct
+# include dirs). Instead, harvest the EXACT include set Bazel uses to compile
+# the same sources, straight from `bazel aquery`, so this config can never
+# drift from the build.
+#
+# All harvested paths are relative to the Bazel execution_root, so we resolve
+# that and absolutize. We deliberately DROP every `external/nginx/...` entry:
+# those are Bazel's pinned nginx headers (a different version), and for an
+# --add-dynamic-module build the glue MUST compile against the TARGET nginx's
+# own headers (added first by nginx's configure). Letting Bazel's nginx headers
+# leak in would compile the glue against the wrong nginx ABI.
+BAZEL_EXECROOT=""
+if command -v bazel >/dev/null 2>&1; then
+    BAZEL_EXECROOT=$(cd "$MOD_PAGESPEED_DIR" && \
+        bazel info --config=clang-libstdcxx13 execution_root 2>/dev/null)
+fi
+if [ -z "$BAZEL_EXECROOT" ] || [ ! -d "$BAZEL_EXECROOT" ]; then
+    # Fall back to the bazel-<workspace> convenience symlink.
+    for _cand in "$MOD_PAGESPEED_DIR"/bazel-*; do
+        if [ -d "$_cand/external/abseil-cpp" ]; then
+            BAZEL_EXECROOT=$(cd "$_cand" && pwd -P)
+            break
+        fi
+    done
+fi
+
+if [ -n "$BAZEL_EXECROOT" ] && command -v bazel >/dev/null 2>&1; then
+    # Pull -I / -iquote / -isystem dirs from the archive's compile actions.
+    _ps_incs=$(cd "$MOD_PAGESPEED_DIR" && bazel aquery --config=clang-libstdcxx13 \
+        "mnemonic(CppCompile, //pagespeed/nginx:ngx_pagespeed_archive)" 2>/dev/null \
+        | sed 's/\\$//' | tr '\n' ' ' \
+        | grep -oE '\-I[^ ]+|-iquote +[^ ]+|-isystem +[^ ]+' \
+        | sed -E 's/^-I//; s/^-(iquote|isystem) +//' \
+        | grep -vE '(^|/)external/nginx(/|$)' \
+        | sort -u)
+    for _d in $_ps_incs; do
+        case "$_d" in
+            .)  _abs="$BAZEL_EXECROOT" ;;
+            /*) _abs="$_d" ;;
+            *)  _abs="$BAZEL_EXECROOT/$_d" ;;
+        esac
+        if [ -d "$_abs" ]; then
+            NGX_PAGESPEED_INCS="$NGX_PAGESPEED_INCS
+        $_abs"
+        fi
+    done
+fi
+
+# Libraries to link.
+#
+# The thin $PAGESPEED_ARCHIVE only carries the nginx-glue support objects; the
+# full PageSpeed/PSOL code (and its vendored curl, hiredis, BoringSSL, brotli,
+# protobuf, abseil, ...) lives in the rest of the Bazel object graph.
+# nginx must link ALL of it into the module .so, or the link fails with a wall
+# of undefined net_instaweb / curl / redis symbols.
+#
+# We link a single fully-merged PSOL archive, resolved in priority order:
+#   (a) explicit $PAGESPEED_PSOL_ARCHIVE env override (Phase B / CI pins this),
+#   (b) a libpagespeed_psol_full.a sitting next to $PAGESPEED_ARCHIVE,
+#   (c) the thin $PAGESPEED_ARCHIVE as a last resort (link will be incomplete --
+#       loud and obvious rather than silently wrong).
+# The merged archive is a normal ar(1) archive, so it already has lazy,
+# first-definition-wins member resolution. We link it directly (NOT wrapped in
+# --start-lib/--end-lib): nginx's make links with the system linker /usr/bin/ld
+# (GNU BFD), which does not understand the LLD-only --start-lib option.
+# Intentional intra-archive duplicates (e.g. zlib vs zlib_ng) are harmless under
+# standard archive semantics -- the first object that satisfies a symbol wins
+# and the duplicate member is simply not pulled.
+#
+# Because curl and hiredis are vendored INSIDE that archive, we do NOT add
+# -lcurl / -lhiredis (doing so would either duplicate or pull an ABI-mismatched
+# system copy). Only genuine system libs are linked.
+if [ -z "$PAGESPEED_PSOL_ARCHIVE" ]; then
+    _psol_dir=$(dirname "$PAGESPEED_ARCHIVE")
+    if [ -f "$_psol_dir/libpagespeed_psol_full.a" ]; then
+        PAGESPEED_PSOL_ARCHIVE="$_psol_dir/libpagespeed_psol_full.a"
+    fi
+fi
+
+if [ -n "$PAGESPEED_PSOL_ARCHIVE" ] && [ -f "$PAGESPEED_PSOL_ARCHIVE" ]; then
+    # Wrap in --start-group/--end-group (GNU-ld compatible) so the linker
+    # re-scans the archive until all inter-member references are resolved;
+    # the PSOL object graph has circular dependencies that a single pass
+    # would leave undefined.
+    PAGESPEED_LINK_ARCHIVE="-Wl,--start-group $PAGESPEED_PSOL_ARCHIVE -Wl,--end-group"
+else
+    cat <<EOF >&2
+WARNING: full PSOL archive not found; falling back to the thin archive
+  ($PAGESPEED_ARCHIVE). The module link will likely fail with undefined
+  net_instaweb symbols. Set PAGESPEED_PSOL_ARCHIVE to the merged archive.
+EOF
+    PAGESPEED_LINK_ARCHIVE="$PAGESPEED_ARCHIVE"
+fi
+
+# Hide all non-nginx symbols (BoringSSL/curl/protobuf/...) so they cannot
+# collide with nginx's own system OpenSSL / zlib loaded in the same process;
+# export only the ngx_modules* trio. Matches the Bazel-native .so link.
+NGX_PAGESPEED_VERSION_SCRIPT=""
+if [ -f "$ngx_addon_dir/ngx_pagespeed.lds" ]; then
+    NGX_PAGESPEED_VERSION_SCRIPT="-Wl,--version-script,$ngx_addon_dir/ngx_pagespeed.lds"
+fi
+
+NGX_PAGESPEED_LIBS="
+    $PAGESPEED_LINK_ARCHIVE
+    $NGX_PAGESPEED_VERSION_SCRIPT
+    -lpthread
+    -ldl
+    -lrt
+    -lz
+    -lstdc++
+"
+
+# Register the module with nginx
+if test -n "$ngx_module_link"; then
+    # nginx 1.9.11+
+    ngx_module_type=HTTP_AUX_FILTER
+    ngx_module_name=ngx_pagespeed
+    ngx_module_srcs="$NGX_PAGESPEED_SRCS"
+    ngx_module_libs="$NGX_PAGESPEED_LIBS"
+    ngx_module_incs="$NGX_PAGESPEED_INCS"
+
+    . auto/module
+else
+    # older nginx
+    HTTP_AUX_FILTER_MODULES="$HTTP_AUX_FILTER_MODULES ngx_pagespeed"
+    NGX_ADDON_SRCS="$NGX_ADDON_SRCS $NGX_PAGESPEED_SRCS"
+    NGX_ADDON_DEPS="$NGX_ADDON_DEPS"
+    CORE_INCS="$CORE_INCS $NGX_PAGESPEED_INCS"
+    CORE_LIBS="$CORE_LIBS $NGX_PAGESPEED_LIBS"
+fi
+
+# Check for required C++17 support
+cat << END > $NGX_AUTOTEST.c
+#include <string_view>
+int main() {
+    std::string_view sv = "test";
+    return 0;
+}
+END
+
+ngx_test="$CC $CC_TEST_FLAGS $CC_AUX_FLAGS -std=c++17 \
+          -o $NGX_AUTOTEST $NGX_AUTOTEST.c"
+
+if $ngx_test >/dev/null 2>&1; then
+    NGX_PAGESPEED_CXXFLAGS="-std=c++17"
+else
+    cat <<EOF >&2
+WARNING: C++17 support not detected. PageSpeed requires C++17.
+Please use a compiler that supports C++17 (GCC 7+ or Clang 5+).
+EOF
+fi
+
+# Add C++ flags
+CFLAGS="$CFLAGS $NGX_PAGESPEED_CXXFLAGS"
+
+echo "ngx_pagespeed module configured successfully"
+echo "  MOD_PAGESPEED_DIR: $MOD_PAGESPEED_DIR"
+echo "  Archive: $PAGESPEED_ARCHIVE"

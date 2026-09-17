@@ -23,11 +23,11 @@
 #define PAGESPEED_KERNEL_UTIL_LOCK_MANAGER_SPAMMER_H_
 
 #include <vector>
+#include <memory>
 
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/condvar.h"
 #include "pagespeed/kernel/base/named_lock_manager.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread.h"
 #include "pagespeed/kernel/base/thread_annotations.h"
@@ -98,7 +98,8 @@ class LockManagerSpammer : public ThreadSystem::Thread {
   LockVector queued_unlocks_ GUARDED_BY(mutex_);
   CountDown* pending_threads_;
 
-  DISALLOW_COPY_AND_ASSIGN(LockManagerSpammer);
+  LockManagerSpammer(const LockManagerSpammer&) = delete;
+  LockManagerSpammer& operator=(const LockManagerSpammer&) = delete;
 };
 
 }  // namespace net_instaweb

@@ -116,38 +116,43 @@ struct GoldImageCompressionInfo : public ImageCompressionInfo {
   bool transparency;
 };
 
+// Note: compressed_size_best / compressed_size_default are exact deflate byte
+// counts pinned to the vendored @libpng / @optipng / @zlib_ng. The build links a
+// single deflate (zlib-ng; @zlib is aliased to @zlib_ng, bazel/zlib_compat.bzl),
+// so the output is deterministic and arch-invariant -- regenerate these values
+// only when those deps bump.
 const GoldImageCompressionInfo kValidGifImages[] = {
-    GoldImageCompressionInfo("basi0g01", 153, 166, 166, 32, 32, 8, 3, 1, 3,
+    GoldImageCompressionInfo("basi0g01", 153, 166, 165, 32, 32, 8, 3, 1, 3,
                              false),
-    GoldImageCompressionInfo("basi0g02", 185, 112, 112, 32, 32, 8, 3, 2, 3,
+    GoldImageCompressionInfo("basi0g02", 185, 112, 114, 32, 32, 8, 3, 2, 3,
                              false),
-    GoldImageCompressionInfo("basi0g04", 344, 144, 186, 32, 32, 8, 3, 4, 3,
+    GoldImageCompressionInfo("basi0g04", 344, 144, 190, 32, 32, 8, 3, 4, 3,
                              false),
     GoldImageCompressionInfo("basi0g08", 1736, 116, 714, 32, 32, 8, 3, 8, 0,
                              false),
-    GoldImageCompressionInfo("basi3p01", 138, 96, 96, 32, 32, 8, 3, 1, 3,
+    GoldImageCompressionInfo("basi3p01", 138, 96, 99, 32, 32, 8, 3, 1, 3,
                              false),
-    GoldImageCompressionInfo("basi3p02", 186, 115, 115, 32, 32, 8, 3, 2, 3,
+    GoldImageCompressionInfo("basi3p02", 186, 115, 116, 32, 32, 8, 3, 2, 3,
                              false),
-    GoldImageCompressionInfo("basi3p04", 344, 185, 185, 32, 32, 8, 3, 4, 3,
+    GoldImageCompressionInfo("basi3p04", 344, 185, 190, 32, 32, 8, 3, 4, 3,
                              false),
-    GoldImageCompressionInfo("basi3p08", 1737, 1270, 1270, 32, 32, 8, 3, 8, 3,
+    GoldImageCompressionInfo("basi3p08", 1737, 1270, 1904, 32, 32, 8, 3, 8, 3,
                              false),
-    GoldImageCompressionInfo("basn0g01", 153, 166, 166, 32, 32, 8, 3, 1, 3,
+    GoldImageCompressionInfo("basn0g01", 153, 166, 165, 32, 32, 8, 3, 1, 3,
                              false),
-    GoldImageCompressionInfo("basn0g02", 185, 112, 112, 32, 32, 8, 3, 2, 3,
+    GoldImageCompressionInfo("basn0g02", 185, 112, 114, 32, 32, 8, 3, 2, 3,
                              false),
-    GoldImageCompressionInfo("basn0g04", 344, 144, 186, 32, 32, 8, 3, 4, 3,
+    GoldImageCompressionInfo("basn0g04", 344, 144, 190, 32, 32, 8, 3, 4, 3,
                              false),
     GoldImageCompressionInfo("basn0g08", 1736, 116, 714, 32, 32, 8, 3, 8, 0,
                              false),
-    GoldImageCompressionInfo("basn3p01", 138, 96, 96, 32, 32, 8, 3, 1, 3,
+    GoldImageCompressionInfo("basn3p01", 138, 96, 99, 32, 32, 8, 3, 1, 3,
                              false),
-    GoldImageCompressionInfo("basn3p02", 186, 115, 115, 32, 32, 8, 3, 2, 3,
+    GoldImageCompressionInfo("basn3p02", 186, 115, 116, 32, 32, 8, 3, 2, 3,
                              false),
-    GoldImageCompressionInfo("basn3p04", 344, 185, 185, 32, 32, 8, 3, 4, 3,
+    GoldImageCompressionInfo("basn3p04", 344, 185, 190, 32, 32, 8, 3, 4, 3,
                              false),
-    GoldImageCompressionInfo("basn3p08", 1737, 1270, 1270, 32, 32, 8, 3, 8, 3,
+    GoldImageCompressionInfo("basn3p08", 1737, 1270, 1904, 32, 32, 8, 3, 8, 3,
                              false),
 
     // These files have been transformed by rounding the original png

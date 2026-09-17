@@ -67,7 +67,8 @@ class ThreadSystem::Condvar {
   virtual void TimedWait(int64 timeout_ms) = 0;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(Condvar);
+  Condvar(const Condvar&) = delete;
+  Condvar& operator=(const Condvar&) = delete;
 };
 
 }  // namespace net_instaweb

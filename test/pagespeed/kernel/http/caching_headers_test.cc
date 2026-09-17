@@ -21,7 +21,6 @@
 
 #include <memory>
 
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/http/http_names.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 
@@ -68,7 +67,8 @@ class TestCachingHeaders : public CachingHeaders {
   bool likely_static_resource_type_;
   bool cacheable_resource_status_code_;
 
-  DISALLOW_COPY_AND_ASSIGN(TestCachingHeaders);
+  TestCachingHeaders(const TestCachingHeaders&) = delete;
+  TestCachingHeaders& operator=(const TestCachingHeaders&) = delete;
 };
 
 class CachingHeadersTest : public testing::Test {
@@ -116,6 +116,27 @@ TEST_F(CachingHeadersTest, DisableNostoreRetainNoCache) {
   EXPECT_STREQ(StrCat(HttpAttributes::kNoCacheMaxAge0, ", must-revalidate, ",
                       HttpAttributes::kNoStore),
                DisableCacheControl());
+}
+
+TEST_F(CachingHeadersTest, DisableSMaxAge) {
+  // s-maxage overrides max-age for shared caches, so letting it survive
+  // would invite a shared cache to keep serving a response whose caching we
+  // are disabling (rewritten HTML once went out as
+  // "max-age=0, no-cache, s-maxage=10").
+  SetCacheControl("s-maxage=10");
+  EXPECT_STREQ(HttpAttributes::kNoCacheMaxAge0, DisableCacheControl());
+
+  SetCacheControl("max-age=60, s-maxage=10");
+  EXPECT_STREQ(HttpAttributes::kNoCacheMaxAge0, DisableCacheControl());
+
+  SetCacheControl("public, max-age=300, s-maxage=3600");
+  EXPECT_STREQ(HttpAttributes::kNoCacheMaxAge0, DisableCacheControl());
+
+  // Other directives around a dropped s-maxage are still preserved.
+  SetCacheControl("no-cache, s-maxage=600, no-store");
+  EXPECT_STREQ(
+      StrCat(HttpAttributes::kNoCacheMaxAge0, ", ", HttpAttributes::kNoStore),
+      DisableCacheControl());
 }
 
 TEST_F(CachingHeadersTest, IsCacheable) {

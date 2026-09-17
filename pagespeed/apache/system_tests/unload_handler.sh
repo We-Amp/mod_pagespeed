@@ -12,12 +12,16 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-  start_test add_instrumentation has added unload handler with \
+  start_test add_instrumentation with the deprecated no-op \
     ModPagespeedReportUnloadTime enabled in APACHE_SECONDARY_PORT.
+# ReportUnloadTime used to inject a third, beforeunload-driven beacon
+# script.  The collector now always reports on page-hide, so the option is
+# a no-op: the output is identical to plain add_instrumentation (two
+# script tags, one three-argument init call, no beforeunload handler).
 URL="$SECONDARY_TEST_ROOT/add_instrumentation.html\
 ?PageSpeedFilters=add_instrumentation"
 echo http_proxy=$SECONDARY_HOSTNAME $WGET -O $WGET_OUTPUT $URL
 http_proxy=$SECONDARY_HOSTNAME $WGET -O $WGET_OUTPUT $URL
-check [ $(grep -o "<script" $WGET_OUTPUT|wc -l) = 3 ]
-check [ $(grep -c "pagespeed.addInstrumentationInit('/$BEACON_HANDLER', 'beforeunload', '', '$SECONDARY_TEST_ROOT/add_instrumentation.html');" $WGET_OUTPUT) = 1 ]
-check [ $(grep -c "pagespeed.addInstrumentationInit('/$BEACON_HANDLER', 'load', '', '$SECONDARY_TEST_ROOT/add_instrumentation.html');" $WGET_OUTPUT) = 1 ]
+check [ $(grep -o "<script" $WGET_OUTPUT|wc -l) = 2 ]
+check [ $(grep -c "pagespeed.addInstrumentationInit('/$BEACON_HANDLER', '', '$SECONDARY_TEST_ROOT/add_instrumentation.html');" $WGET_OUTPUT) = 1 ]
+check [ $(grep -c "beforeunload" $WGET_OUTPUT) = 0 ]

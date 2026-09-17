@@ -40,7 +40,8 @@ CssMoveToHeadFilter::CssMoveToHeadFilter(RewriteDriver* driver)
       move_css_to_head_(
           driver->options()->Enabled(RewriteOptions::kMoveCssToHead)),
       move_css_above_scripts_(
-          driver->options()->Enabled(RewriteOptions::kMoveCssAboveScripts)) {
+          driver->options()->Enabled(RewriteOptions::kMoveCssAboveScripts)),
+      element_is_head_(false) {
   Statistics* stats = driver->statistics();
   css_elements_moved_ = stats->GetVariable(kCssElementsMoved);
 }
@@ -51,7 +52,10 @@ void CssMoveToHeadFilter::InitStats(Statistics* statistics) {
   statistics->AddVariable(kCssElementsMoved);
 }
 
-void CssMoveToHeadFilter::StartDocumentImpl() { move_to_element_ = nullptr; }
+void CssMoveToHeadFilter::StartDocumentImpl() {
+  move_to_element_ = nullptr;
+  element_is_head_ = false;
+}
 
 void CssMoveToHeadFilter::EndElementImpl(HtmlElement* element) {
   HtmlElement::Attribute* href;

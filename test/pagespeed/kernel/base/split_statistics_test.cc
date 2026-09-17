@@ -17,10 +17,11 @@
  * under the License.
  */
 
+#include <memory>
+
 #include "pagespeed/kernel/base/split_statistics.h"
 
 #include "pagespeed/kernel/base/google_message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_writer.h"
 #include "pagespeed/kernel/base/thread_system.h"

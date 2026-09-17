@@ -21,6 +21,7 @@
 
 #include "base/logging.h"
 #include "net/instaweb/http/public/async_fetch.h"
+#include "pagespeed/kernel/base/shared_string.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -45,7 +46,9 @@ class UrlAsyncFetcherStats::StatsAsyncFetch : public SharedAsyncFetch {
  public:
   StatsAsyncFetch(UrlAsyncFetcherStats* stats_fetcher, AsyncFetch* base_fetch)
       : SharedAsyncFetch(base_fetch), stats_fetcher_(stats_fetcher), size_(0) {
-    start_time_us_ = stats_fetcher_->timer_->NowUs();
+    // Fetch latency is an elapsed-time delta, so it uses the monotonic clock
+    // to stay non-negative across wall-clock steps.
+    start_time_us_ = stats_fetcher_->timer_->NowMonotonicUs();
   }
 
   ~StatsAsyncFetch() override {}
@@ -57,7 +60,7 @@ class UrlAsyncFetcherStats::StatsAsyncFetch : public SharedAsyncFetch {
   }
 
   void HandleDone(bool success) override {
-    int64 end_time_us = stats_fetcher_->timer_->NowUs();
+    int64 end_time_us = stats_fetcher_->timer_->NowMonotonicUs();
     stats_fetcher_->fetch_latency_us_histogram_->Add(end_time_us -
                                                      start_time_us_);
     stats_fetcher_->fetches_->Add(1);
@@ -73,12 +76,21 @@ class UrlAsyncFetcherStats::StatsAsyncFetch : public SharedAsyncFetch {
     return SharedAsyncFetch::HandleWrite(content, handler);
   }
 
+  // A shared-storage serve must not bypass the byte count: route it
+  // through HandleWrite.
+  bool HandleWriteShared(const StringPiece& content,
+                         const SharedString& /*storage*/,
+                         MessageHandler* handler) override {
+    return HandleWrite(content, handler);
+  }
+
  private:
   UrlAsyncFetcherStats* stats_fetcher_;
   int64 start_time_us_;
   int64 size_;
 
-  DISALLOW_COPY_AND_ASSIGN(StatsAsyncFetch);
+  StatsAsyncFetch(const StatsAsyncFetch&) = delete;
+  StatsAsyncFetch& operator=(const StatsAsyncFetch&) = delete;
 };
 
 UrlAsyncFetcherStats::UrlAsyncFetcherStats(StringPiece prefix,

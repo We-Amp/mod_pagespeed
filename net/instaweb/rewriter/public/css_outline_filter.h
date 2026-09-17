@@ -51,7 +51,7 @@ class CssOutlineFilter : public CommonFilter {
   void Flush() override;
 
   // HTML Events we expect to be in <style> elements.
-  void Characters(HtmlCharactersNode* characters) override;
+  void CharactersImpl(HtmlCharactersNode* characters) override;
 
   const char* Name() const override { return "OutlineCss"; }
 
@@ -68,7 +68,8 @@ class CssOutlineFilter : public CommonFilter {
   size_t size_threshold_bytes_;
   // HTML strings interned into a symbol table.
 
-  DISALLOW_COPY_AND_ASSIGN(CssOutlineFilter);
+  CssOutlineFilter(const CssOutlineFilter&) = delete;
+  CssOutlineFilter& operator=(const CssOutlineFilter&) = delete;
 };
 
 }  // namespace net_instaweb

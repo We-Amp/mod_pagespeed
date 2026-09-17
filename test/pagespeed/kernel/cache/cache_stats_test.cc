@@ -27,7 +27,6 @@
 #include <memory>
 
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/shared_string.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
@@ -68,7 +67,8 @@ class CacheStatsTest : public testing::Test {
   std::unique_ptr<CacheStats> cache_stats_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(CacheStatsTest);
+  CacheStatsTest(const CacheStatsTest&) = delete;
+  CacheStatsTest& operator=(const CacheStatsTest&) = delete;
 };
 
 TEST_F(CacheStatsTest, BasicOperation) {

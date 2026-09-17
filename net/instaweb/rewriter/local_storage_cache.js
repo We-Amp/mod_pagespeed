@@ -94,7 +94,15 @@ pagespeed.LocalStorageCache.prototype['replaceLastScript'] =
  * @param {string} url is the URL of the CSS to inline.
  */
 pagespeed.LocalStorageCache.prototype.inlineCss = function(url) {
-  var obj = window.localStorage.getItem('pagespeed_lsc_url:' + url);
+  // Storage access can throw (e.g. SecurityError when storage is disabled
+  // by browser policy); fall back to the original resource so the element
+  // this script replaced is never lost.
+  var obj = null;
+  try {
+    obj = window.localStorage.getItem('pagespeed_lsc_url:' + url);
+  } catch (e) {
+    // Handled below: a null obj restores the resource from the network.
+  }
   var newNode = document.createElement(obj ? 'style' : 'link');
   if (obj && !this.hasExpired(obj)) {
     newNode.type = 'text/css';
@@ -117,8 +125,16 @@ pagespeed.LocalStorageCache.prototype['inlineCss'] =
  * @param {string} hash is the hash of the image to inline.
  */
 pagespeed.LocalStorageCache.prototype.inlineImg = function(url, hash) {
-  var obj = window.localStorage.getItem('pagespeed_lsc_url:' + url + ' ' +
-                                        'pagespeed_lsc_hash:' + hash);
+  // Storage access can throw (e.g. SecurityError when storage is disabled
+  // by browser policy); fall back to the original resource so the element
+  // this script replaced is never lost.
+  var obj = null;
+  try {
+    obj = window.localStorage.getItem('pagespeed_lsc_url:' + url + ' ' +
+                                      'pagespeed_lsc_hash:' + hash);
+  } catch (e) {
+    // Handled below: a null obj restores the resource from the network.
+  }
   var newNode = document.createElement('img');
   if (obj && !this.hasExpired(obj)) {
     newNode.src = this.getData(obj);
@@ -170,14 +186,24 @@ pagespeed.LocalStorageCache.prototype.processTags_ = function(tagName,
       if (!data) {
         // img.src is set to a data URI on the repeat view but is missing
         // thereafter, and we must not forget it once we have it.
-        var obj = window.localStorage.getItem(urlkey);
+        var obj = null;
+        try {
+          obj = window.localStorage.getItem(urlkey);
+        } catch (e) {
+          // Storage unavailable; treat as a cache miss.
+        }
         if (obj) {
           data = this.getData(obj);
         }
       }
       if (data) {
-        window.localStorage.setItem(urlkey, millis + ' ' + hash + ' ' + data);
-        this.regenerate_cookie_ = true;
+        try {
+          window.localStorage.setItem(urlkey,
+                                      millis + ' ' + hash + ' ' + data);
+          this.regenerate_cookie_ = true;
+        } catch (e) {
+          // Quota exceeded or storage disabled; skip this element.
+        }
       }
     }
   }
@@ -210,31 +236,45 @@ pagespeed.LocalStorageCache.prototype.generateCookie_ = function() {
     var minExpiry = 0;
     var currentTime = pagespeedutils.now();
     // Process every local storage object of ours.
-    for (var i = 0, n = window.localStorage.length; i < n; ++i) {
-      var key = window.localStorage.key(i);
-      if (key.indexOf('pagespeed_lsc_url:')) continue;  // Not one of ours.
-      var obj = window.localStorage.getItem(key);
-      var pos1 = obj.indexOf(' ');
-      var expiry = parseInt(obj.substring(0, pos1), 10);
-      if (!isNaN(expiry)) {
-        if (expiry <= currentTime) {
-          deadUns.push(key);
-          continue;
-        } else if (expiry < minExpiry || minExpiry == 0) {
-          minExpiry = expiry;
+    var numItems = 0;
+    try {
+      numItems = window.localStorage.length;
+    } catch (e) {
+      // Storage unavailable; regenerate nothing.
+    }
+    for (var i = 0, n = numItems; i < n; ++i) {
+      try {
+        var key = window.localStorage.key(i);
+        if (key.indexOf('pagespeed_lsc_url:')) continue;  // Not one of ours.
+        var obj = window.localStorage.getItem(key);
+        var pos1 = obj.indexOf(' ');
+        var expiry = parseInt(obj.substring(0, pos1), 10);
+        if (!isNaN(expiry)) {
+          if (expiry <= currentTime) {
+            deadUns.push(key);
+            continue;
+          } else if (expiry < minExpiry || minExpiry == 0) {
+            minExpiry = expiry;
+          }
         }
+        var pos2 = obj.indexOf(' ', pos1 + 1);
+        var hash = obj.substring(pos1 + 1, pos2);
+        goodUns.push(hash);
+      } catch (e) {
+        continue;  // Skip entries we cannot read.
       }
-      var pos2 = obj.indexOf(' ', pos1 + 1);
-      var hash = obj.substring(pos1 + 1, pos2);
-      goodUns.push(hash);
     }
     // Set the cookie.
     var expires = '';
     if (minExpiry) expires = '; expires=' + (new Date(minExpiry)).toUTCString();
-    document.cookie = '_GPSLSC=' + goodUns.join('!') + expires;
+    document.cookie = '_GPSLSC=' + goodUns.join('!') + ';path=/' + expires;
     // Remove all expired objects.
     for (var i = 0, n = deadUns.length; i < n; ++i) {
-      window.localStorage.removeItem(deadUns[i]);
+      try {
+        window.localStorage.removeItem(deadUns[i]);
+      } catch (e) {
+        // Storage unavailable; leave the expired entry.
+      }
     }
     this.regenerate_cookie_ = false;
   }
@@ -245,19 +285,20 @@ pagespeed.LocalStorageCache.prototype.generateCookie_ = function() {
  * Initializes the local storage cache module.
  */
 pagespeed.localStorageCacheInit = function() {
-  // Do nothing if any required API is missing.
-  if (window.localStorage) {
-    var temp = new pagespeed.LocalStorageCache();
-    pagespeed['localStorageCache'] = temp;
-    pagespeedutils.addHandler(window, 'load',
-        function() {
-          temp.saveInlinedData_();
-        });
-    pagespeedutils.addHandler(window, 'load',
-        function() {
-          temp.generateCookie_();
-        });
-  }
+  // Always create the cache object, even when storage is missing or throws:
+  // merely reading window.localStorage can throw (e.g. SecurityError when
+  // storage is disabled by browser policy), so storage access is guarded at
+  // the point of use rather than gated here.
+  var temp = new pagespeed.LocalStorageCache();
+  pagespeed['localStorageCache'] = temp;
+  pagespeedutils.addHandler(window, 'load',
+      function() {
+        temp.saveInlinedData_();
+      });
+  pagespeedutils.addHandler(window, 'load',
+      function() {
+        temp.generateCookie_();
+      });
 };
 
 pagespeed['localStorageCacheInit'] = pagespeed.localStorageCacheInit;

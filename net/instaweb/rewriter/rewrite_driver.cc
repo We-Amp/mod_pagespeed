@@ -40,96 +40,48 @@
 #include "net/instaweb/http/public/url_async_fetcher.h"
 #include "net/instaweb/rewriter/cached_result.pb.h"
 #include "net/instaweb/rewriter/flush_early.pb.h"
-#include "net/instaweb/rewriter/public/add_head_filter.h"
-#include "net/instaweb/rewriter/public/add_ids_filter.h"
-#include "net/instaweb/rewriter/public/add_instrumentation_filter.h"
-#include "net/instaweb/rewriter/public/base_tag_filter.h"
-#include "net/instaweb/rewriter/public/cache_extender.h"
-#include "net/instaweb/rewriter/public/collect_dependencies_filter.h"
 #include "net/instaweb/rewriter/public/common_filter.h"
-#include "net/instaweb/rewriter/public/critical_css_beacon_filter.h"
-#include "net/instaweb/rewriter/public/critical_images_beacon_filter.h"
-#include "net/instaweb/rewriter/public/critical_selector_filter.h"
 #include "net/instaweb/rewriter/public/critical_selector_finder.h"
-#include "net/instaweb/rewriter/public/css_combine_filter.h"
-#include "net/instaweb/rewriter/public/css_filter.h"
-#include "net/instaweb/rewriter/public/css_inline_filter.h"
-#include "net/instaweb/rewriter/public/css_inline_import_to_link_filter.h"
-#include "net/instaweb/rewriter/public/css_move_to_head_filter.h"
 #include "net/instaweb/rewriter/public/css_outline_filter.h"
-#include "net/instaweb/rewriter/public/css_summarizer_base.h"
 #include "net/instaweb/rewriter/public/css_tag_scanner.h"
 #include "net/instaweb/rewriter/public/data_url_input_resource.h"
 #include "net/instaweb/rewriter/public/debug_filter.h"
-#include "net/instaweb/rewriter/public/decode_rewritten_urls_filter.h"
-#include "net/instaweb/rewriter/public/dedup_inlined_images_filter.h"
-#include "net/instaweb/rewriter/public/defer_iframe_filter.h"
-#include "net/instaweb/rewriter/public/delay_images_filter.h"
 #include "net/instaweb/rewriter/public/dependency_tracker.h"
-#include "net/instaweb/rewriter/public/deterministic_js_filter.h"
 #include "net/instaweb/rewriter/public/dom_stats_filter.h"
 #include "net/instaweb/rewriter/public/domain_lawyer.h"
 #include "net/instaweb/rewriter/public/domain_rewrite_filter.h"
 #include "net/instaweb/rewriter/public/downstream_cache_purger.h"
 #include "net/instaweb/rewriter/public/file_input_resource.h"
 #include "net/instaweb/rewriter/public/file_load_policy.h"
-#include "net/instaweb/rewriter/public/fix_reflow_filter.h"
-#include "net/instaweb/rewriter/public/flush_html_filter.h"
-#include "net/instaweb/rewriter/public/google_analytics_filter.h"
-#include "net/instaweb/rewriter/public/google_font_css_inline_filter.h"
-#include "net/instaweb/rewriter/public/handle_noscript_redirect_filter.h"
-#include "net/instaweb/rewriter/public/image_combine_filter.h"
-#include "net/instaweb/rewriter/public/image_rewrite_filter.h"
 #include "net/instaweb/rewriter/public/in_place_rewrite_context.h"
-#include "net/instaweb/rewriter/public/insert_amp_link_filter.h"
-#include "net/instaweb/rewriter/public/insert_dns_prefetch_filter.h"
-#include "net/instaweb/rewriter/public/insert_ga_filter.h"
-#include "net/instaweb/rewriter/public/javascript_filter.h"
-#include "net/instaweb/rewriter/public/js_combine_filter.h"
-#include "net/instaweb/rewriter/public/js_defer_disabled_filter.h"
-#include "net/instaweb/rewriter/public/js_disable_filter.h"
-#include "net/instaweb/rewriter/public/js_inline_filter.h"
 #include "net/instaweb/rewriter/public/js_outline_filter.h"
-#include "net/instaweb/rewriter/public/lazyload_images_filter.h"
-#include "net/instaweb/rewriter/public/local_storage_cache_filter.h"
-#include "net/instaweb/rewriter/public/make_show_ads_async_filter.h"
-#include "net/instaweb/rewriter/public/meta_tag_filter.h"
 #include "net/instaweb/rewriter/public/output_resource.h"
 #include "net/instaweb/rewriter/public/output_resource_kind.h"
-#include "net/instaweb/rewriter/public/pedantic_filter.h"
 #include "net/instaweb/rewriter/public/property_cache_util.h"
-#include "net/instaweb/rewriter/public/push_preload_filter.h"
-#include "net/instaweb/rewriter/public/redirect_on_size_limit_filter.h"
 #include "net/instaweb/rewriter/public/request_properties.h"
 #include "net/instaweb/rewriter/public/resource.h"
 #include "net/instaweb/rewriter/public/resource_namer.h"
 #include "net/instaweb/rewriter/public/resource_slot.h"
-#include "net/instaweb/rewriter/public/responsive_image_filter.h"
 #include "net/instaweb/rewriter/public/rewrite_context.h"
 #include "net/instaweb/rewriter/public/rewrite_driver_factory.h"
 #include "net/instaweb/rewriter/public/rewrite_filter.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/rewrite_query.h"
 #include "net/instaweb/rewriter/public/rewrite_stats.h"
-#include "net/instaweb/rewriter/public/rewritten_content_scanning_filter.h"
 #include "net/instaweb/rewriter/public/scan_filter.h"
 #include "net/instaweb/rewriter/public/server_context.h"
-#include "net/instaweb/rewriter/public/strip_scripts_filter.h"
-#include "net/instaweb/rewriter/public/strip_subresource_hints_filter.h"
-#include "net/instaweb/rewriter/public/support_noscript_filter.h"
 #include "net/instaweb/rewriter/public/url_input_resource.h"
 #include "net/instaweb/rewriter/public/url_left_trim_filter.h"
 #include "net/instaweb/rewriter/public/url_namer.h"
 #include "net/instaweb/util/public/fallback_property_page.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/callback.h"
 #include "pagespeed/kernel/base/file_system.h"
 #include "pagespeed/kernel/base/function.h"
 #include "pagespeed/kernel/base/hasher.h"
+#include "pagespeed/kernel/base/mapped_shared_string.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/proto_util.h"
 #include "pagespeed/kernel/base/request_trace.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/sha1_signature.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/stl_util.h"
@@ -138,17 +90,12 @@
 #include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/base/writer.h"
 #include "pagespeed/kernel/cache/cache_interface.h"
-#include "pagespeed/kernel/html/amp_document_filter.h"
-#include "pagespeed/kernel/html/collapse_whitespace_filter.h"
-#include "pagespeed/kernel/html/elide_attributes_filter.h"
-#include "pagespeed/kernel/html/html_attribute_quote_removal.h"
 #include "pagespeed/kernel/html/html_element.h"
 #include "pagespeed/kernel/html/html_filter.h"
 #include "pagespeed/kernel/html/html_keywords.h"
 #include "pagespeed/kernel/html/html_node.h"
 #include "pagespeed/kernel/html/html_parse.h"
 #include "pagespeed/kernel/html/html_writer_filter.h"
-#include "pagespeed/kernel/html/remove_comments_filter.h"
 #include "pagespeed/kernel/http/content_type.h"
 #include "pagespeed/kernel/http/google_url.h"
 #include "pagespeed/kernel/http/http_names.h"
@@ -166,24 +113,6 @@ namespace {
 
 const int kTestTimeoutMs = 10000;
 const char kDeadlineExceeded[] = "deadline_exceeded";
-
-// Implementation of RemoveCommentsFilter::OptionsInterface that wraps
-// a RewriteOptions instance.
-class RemoveCommentsFilterOptions
-    : public RemoveCommentsFilter::OptionsInterface {
- public:
-  explicit RemoveCommentsFilterOptions(const RewriteOptions* options)
-      : options_(options) {}
-
-  bool IsRetainedComment(const StringPiece& comment) const override {
-    return options_->IsRetainedComment(comment);
-  }
-
- private:
-  const RewriteOptions* options_;
-
-  DISALLOW_COPY_AND_ASSIGN(RemoveCommentsFilterOptions);
-};
 
 // Provides hook to CacheUrlAsyncFetcher to protect the lifetime of the
 // RewriteDriver which owns fetcher, otherwise, fetcher may be deleted
@@ -213,7 +142,29 @@ class RewriteDriverCacheUrlAsyncFetcherAsyncOpHooks
  private:
   RewriteDriver* rewrite_driver_;
 
-  DISALLOW_COPY_AND_ASSIGN(RewriteDriverCacheUrlAsyncFetcherAsyncOpHooks);
+  RewriteDriverCacheUrlAsyncFetcherAsyncOpHooks(
+      const RewriteDriverCacheUrlAsyncFetcherAsyncOpHooks&) = delete;
+  RewriteDriverCacheUrlAsyncFetcherAsyncOpHooks& operator=(
+      const RewriteDriverCacheUrlAsyncFetcherAsyncOpHooks&) = delete;
+};
+
+// RAII guard that calls StatisticsLogger::UpdateAndDumpIfRequired() on
+// destruction.  Used in Fetch methods where "this" may be deleted before
+// the function returns, so the logger pointer must be captured up front.
+class ScopedStatsLoggerUpdate {
+ public:
+  explicit ScopedStatsLoggerUpdate(StatisticsLogger* logger)
+      : logger_(logger) {}
+  ~ScopedStatsLoggerUpdate() {
+    if (logger_ != nullptr) {
+      logger_->UpdateAndDumpIfRequired();
+    }
+  }
+
+ private:
+  StatisticsLogger* const logger_;
+  ScopedStatsLoggerUpdate(const ScopedStatsLoggerUpdate&) = delete;
+  ScopedStatsLoggerUpdate& operator=(const ScopedStatsLoggerUpdate&) = delete;
 };
 
 }  // namespace
@@ -291,12 +242,37 @@ RewriteDriver::RewriteDriver(MessageHandler* message_handler,
   early_pre_render_filters_.push_back(&scan_filter_);
 
   dependency_tracker_ = std::make_unique<DependencyTracker>(this);
+
+  // Publish the initial (empty) CSP context version so that
+  // content_security_policy() is always dereferenceable, even before
+  // the first Clear().
+  ClearCspPolicies();
 }
 
 void RewriteDriver::PopulateRequestContext() {
   if ((request_context_.get() != nullptr && (request_headers_ != nullptr))) {
     request_context_->SetAcceptsWebp(
         request_properties_->SupportsWebpRewrittenUrls());
+    // The broad bit above includes user-agent-derived grants (the legacy
+    // Android allow-list and the no-navigation-Accept fallback). The
+    // second bit records the narrower "the request itself advertised
+    // image/webp" fact -- RequestProperties::SupportsWebpInPlace() is exactly
+    // that predicate -- so that the Vary: Accept cache-validity check can
+    // distinguish an observed Accept header from a UA guess (see
+    // OptionsAwareHTTPCacheCallback::IsCacheValid).
+    request_context_->SetAcceptsWebpViaAcceptHeader(
+        request_properties_->SupportsWebpInPlace());
+    // The AVIF counterpart, for the same cache-validity check. AVIF has no
+    // user-agent-derived grant, so there is no broad bit to set
+    // alongside it. SupportsAvifInPlace() ANDs the Accept-header fact with the
+    // downstream cache's advertised AVIF capability, exactly as its WebP twin
+    // above does -- so behind a PS-CapabilityList that omits the AVIF filter
+    // id the bit is false even for a request that advertised image/avif. That
+    // is the conservative direction (extra revalidation, never wrong bytes).
+    // Must be stamped here, before the Freeze() below -- every setter
+    // DCHECKs !frozen_.
+    request_context_->SetAcceptsAvifViaAcceptHeader(
+        request_properties_->SupportsAvifInPlace());
     request_context_->SetAcceptsGzip(request_properties_->AcceptsGzip());
     request_context_->Freeze();
   }
@@ -319,6 +295,10 @@ void RewriteDriver::SetRequestHeaders(const RequestHeaders& headers) {
 
   request_properties_->ParseRequestHeaders(*request_headers_);
   PopulateRequestContext();
+}
+
+void RewriteDriver::SetWebBotAuthVerdict(bool signature_verified_agent) {
+  request_properties_->SetWebBotAuthVerdict(signature_verified_agent);
 }
 
 void RewriteDriver::set_request_context(const RequestContextPtr& x) {
@@ -368,7 +348,7 @@ RewriteDriver::~RewriteDriver() {
         low_priority_rewrite_worker_);
   }
   Clear();
-  STLDeleteElements(&filters_to_delete_);
+  filters_to_delete_.clear();
   STLDeleteElements(&resource_claimants_);
 }
 
@@ -488,7 +468,7 @@ void RewriteDriver::Clear() NO_THREAD_SAFETY_ANALYSIS {
   ClearRequestProperties();
   user_agent_.clear();
 
-  csp_context_.Clear();
+  ClearCspPolicies();
 }
 
 // Must be called with rewrite_mutex() held.
@@ -787,7 +767,6 @@ void RewriteDriver::FlushAsyncDone(int num_rewrites, Function* callback) {
       if (options()->Enabled(RewriteOptions::kDebug)) {
         for (int i = 0, n = rewrite_context->num_slots(); i < n; ++i) {
           ResourceSlotPtr slot = rewrite_context->slot(i);
-          GoogleString suffix;
           const char* id = rewrite_context->id();
           StringFilterMap::const_iterator p = resource_filter_map_.find(id);
           if (p != resource_filter_map_.end()) {
@@ -811,7 +790,7 @@ void RewriteDriver::FlushAsyncDone(int num_rewrites, Function* callback) {
     slots_.clear();
     inline_slots_.clear();
     inline_attribute_slots_.clear();
-    for (auto c : srcset_collections_) {
+    for (const auto& c : srcset_collections_) {
       c->Detach();
     }
     srcset_collections_.clear();
@@ -847,54 +826,9 @@ GoogleString RewriteDriver::DeadlineExceededMessage(StringPiece filter_name) {
   return StrCat(kDeadlineExceeded, " for filter ", filter_name);
 }
 
-void RewriteDriver::Initialize() {
-  ++initialized_count_;
-  if (initialized_count_ == 1) {
-    RewriteOptions::Initialize();
-    ImageRewriteFilter::Initialize();
-    CssFilter::Initialize();
-  }
-}
-
-void RewriteDriver::InitStats(Statistics* statistics) {
-  AddInstrumentationFilter::InitStats(statistics);
-  CacheExtender::InitStats(statistics);
-  CriticalCssBeaconFilter::InitStats(statistics);
-  CriticalImagesBeaconFilter::InitStats(statistics);
-  CssCombineFilter::InitStats(statistics);
-  CssFilter::InitStats(statistics);
-  CssInlineFilter::InitStats(statistics);
-  CssInlineImportToLinkFilter::InitStats(statistics);
-  CssMoveToHeadFilter::InitStats(statistics);
-  CssSummarizerBase::InitStats(statistics);
-  DedupInlinedImagesFilter::InitStats(statistics);
-  DomainRewriteFilter::InitStats(statistics);
-  GoogleAnalyticsFilter::InitStats(statistics);
-  GoogleFontCssInlineFilter::InitStats(statistics);
-  ImageCombineFilter::InitStats(statistics);
-  ImageRewriteFilter::InitStats(statistics);
-  InPlaceRewriteContext::InitStats(statistics);
-  InsertGAFilter::InitStats(statistics);
-  JavascriptFilter::InitStats(statistics);
-  JsCombineFilter::InitStats(statistics);
-  JsInlineFilter::InitStats(statistics);
-  LocalStorageCacheFilter::InitStats(statistics);
-  MakeShowAdsAsyncFilter::InitStats(statistics);
-  MetaTagFilter::InitStats(statistics);
-  RewriteContext::InitStats(statistics);
-  UrlInputResource::InitStats(statistics);
-  UrlLeftTrimFilter::InitStats(statistics);
-}
-
-void RewriteDriver::Terminate() {
-  // Clean up statics.
-  --initialized_count_;
-  if (initialized_count_ == 0) {
-    CssFilter::Terminate();
-    ImageRewriteFilter::Terminate();
-    RewriteOptions::Terminate();
-  }
-}
+// Initialize(), InitStats(), and Terminate() are defined in
+// rewrite_driver_filter_init.cc to keep filter dependencies out of the
+// core driver.
 
 void RewriteDriver::SetServerContext(ServerContext* server_context)
     NO_THREAD_SAFETY_ANALYSIS {
@@ -912,31 +846,7 @@ void RewriteDriver::SetServerContext(ServerContext* server_context)
   scheduler_->RegisterWorker(low_priority_rewrite_worker_);
   dependency_tracker_->SetServerContext(server_context);
 
-  DCHECK(resource_filter_map_.empty());
-
-  // Add the rewriting filters to the map unconditionally -- we may
-  // need them to process resource requests due to a query-specific
-  // 'rewriters' specification.  We still use the passed-in options
-  // to determine whether they get added to the html parse filter chain.
-  // Note: RegisterRewriteFilter takes ownership of these filters.
-  CacheExtender* cache_extender = new CacheExtender(this);
-  ImageCombineFilter* image_combiner = new ImageCombineFilter(this);
-  ImageRewriteFilter* image_rewriter = new ImageRewriteFilter(this);
-
-  RegisterRewriteFilter(new CssCombineFilter(this));
-  RegisterRewriteFilter(
-      new CssFilter(this, cache_extender, image_rewriter, image_combiner));
-  RegisterRewriteFilter(new JavascriptFilter(this));
-  RegisterRewriteFilter(new JsCombineFilter(this));
-  RegisterRewriteFilter(image_rewriter);
-  RegisterRewriteFilter(cache_extender);
-  RegisterRewriteFilter(image_combiner);
-  RegisterRewriteFilter(new LocalStorageCacheFilter(this));
-  RegisterRewriteFilter(new JavascriptSourceMapFilter(this));
-
-  // These filters are needed to rewrite and trim urls in modified CSS files.
-  domain_rewriter_ = std::make_unique<DomainRewriteFilter>(this, statistics());
-  url_trim_filter_ = std::make_unique<UrlLeftTrimFilter>(this, statistics());
+  RegisterBuiltinRewriteFilters();
 }
 
 PropertyCache::CohortVector RewriteDriver::GetCohortList(
@@ -984,383 +894,22 @@ void RewriteDriver::TraceString(const GoogleString& s) {
   trace_context()->TraceString(s);
 }
 
-void RewriteDriver::AddFilters() {
-  CHECK(html_writer_filter_ == nullptr);
-  CHECK(!filters_added_);
-  server_context_->ComputeSignature(options_.get());
-  filters_added_ = true;
-
-  AddPreRenderFilters();
-  AddPostRenderFilters();
-}
-
-void RewriteDriver::AddPreRenderFilters() {
-  // This function defines the order that filters are run.  We document
-  // in pagespeed.conf.template that the order specified in the conf
-  // file does not matter, but we give the filters there in the order
-  // they are actually applied, for the benefit of the understanding
-  // of the site owner.  So if you change that here, change it in
-  // install/common/pagespeed.conf.template as well.
-  //
-  // Also be sure to update the doc in net/instaweb/doc/docs/config_filters.ezt.
-  //
-  // Now process boolean options, which may include propagating non-boolean
-  // and boolean parameter settings to filters.
-  const RewriteOptions* rewrite_options = options();
-
-  if (rewrite_options->flush_html()) {
-    // Note that this does not get hooked into the normal html-parse
-    // filter-chain as it gets run immediately after every call to
-    // ParseText, possibly inducing the system to trigger a Flush
-    // based on the content it sees.
-    add_event_listener(new FlushHtmlFilter(this));
-  }
-  add_event_listener(new AmpDocumentFilter(
-      this, NewPermanentCallback(this, &RewriteDriver::SetIsAmpDocument)));
-
-  if (rewrite_options->Enabled(RewriteOptions::kComputeStatistics)) {
-    dom_stats_filter_ = new DomStatsFilter(this);
-    AddOwnedEarlyPreRenderFilter(dom_stats_filter_);
-  }
-  if (!rewrite_options->preserve_subresource_hints()) {
-    AddOwnedEarlyPreRenderFilter(new StripSubresourceHintsFilter(this));
-  }
-  if (rewrite_options->Enabled(RewriteOptions::kDecodeRewrittenUrls)) {
-    AddOwnedEarlyPreRenderFilter(new DecodeRewrittenUrlsFilter(this));
-  }
-
-  if (rewrite_options->Enabled(RewriteOptions::kResponsiveImages) &&
-      rewrite_options->Enabled(RewriteOptions::kResizeImages)) {
-    ResponsiveImageFirstFilter* resp_filter1 =
-        new ResponsiveImageFirstFilter(this);
-    AddOwnedEarlyPreRenderFilter(resp_filter1);
-
-    ResponsiveImageSecondFilter* resp_filter2 =
-        new ResponsiveImageSecondFilter(this, resp_filter1);
-    AddOwnedPostRenderFilter(resp_filter2);
-  }
-
-  if (rewrite_options->RequiresAddHead()) {
-    // Adds a filter that adds a 'head' section to html documents if
-    // none found prior to the body.
-    AddOwnedEarlyPreRenderFilter(new AddHeadFilter(
-        this, rewrite_options->Enabled(RewriteOptions::kCombineHeads)));
-  }
-  if (rewrite_options->Enabled(RewriteOptions::kAddBaseTag)) {
-    AddOwnedEarlyPreRenderFilter(new BaseTagFilter(this));
-  }
-  if (rewrite_options->Enabled(RewriteOptions::kAddIds)) {
-    AddOwnedEarlyPreRenderFilter(new AddIdsFilter(this));
-  }
-  if (rewrite_options->Enabled(RewriteOptions::kStripScripts)) {
-    // Experimental filter that blindly strips all scripts from a page.
-    AppendOwnedPreRenderFilter(new StripScriptsFilter(this));
-  }
-  if (is_critical_images_beacon_enabled()) {
-    // This filter should be enabled early, at least before image rewriting,
-    // because it depends on seeing the original image URLs.
-    AppendOwnedPreRenderFilter(new CriticalImagesBeaconFilter(this));
-  }
-  if (rewrite_options->Enabled(RewriteOptions::kMakeShowAdsAsync)) {
-    // We want this filter early in case we ever inline the loader JS.
-    AppendOwnedPreRenderFilter(new MakeShowAdsAsyncFilter(this));
-  }
-  if (rewrite_options->Enabled(RewriteOptions::kInlineImportToLink) ||
-      (!rewrite_options->Forbidden(RewriteOptions::kInlineImportToLink) &&
-       (rewrite_options->Enabled(RewriteOptions::kPrioritizeCriticalCss) ||
-        rewrite_options->Enabled(RewriteOptions::kComputeCriticalCss)))) {
-    // If we're converting simple embedded CSS @imports into a href link
-    // then we need to do that before any other CSS processing.
-    AppendOwnedPreRenderFilter(
-        new CssInlineImportToLinkFilter(this, statistics()));
-  }
-  if (!rewrite_options->Enabled(RewriteOptions::kPrioritizeCriticalCss) &&
-      // If we're inlining styles that resolved initially, skip outlining
-      // css since that works against this.
-      rewrite_options->Enabled(RewriteOptions::kOutlineCss)) {
-    // Cut out inlined styles and make them into external resources.
-    // This can only be called once and requires a server_context_ to be set.
-    CHECK(server_context_ != nullptr);
-    AppendOwnedPreRenderFilter(new CssOutlineFilter(this));
-  }
-  if (rewrite_options->Enabled(RewriteOptions::kInlineGoogleFontCss)) {
-    // Inline small Google Font Service CSS files.
-    // Do this before MoveCssToHead / MoveCssAboveScripts.
-    AppendOwnedPreRenderFilter(new GoogleFontCssInlineFilter(this));
-  }
-  if (rewrite_options->Enabled(RewriteOptions::kMoveCssToHead) ||
-      rewrite_options->Enabled(RewriteOptions::kMoveCssAboveScripts)) {
-    // It's good to move CSS links to the head prior to running CSS combine,
-    // which only combines CSS links that are already in the head.
-    AppendOwnedPreRenderFilter(new CssMoveToHeadFilter(this));
-  }
-  if (rewrite_options->Enabled(RewriteOptions::kCombineCss)) {
-    // Combine external CSS resources after we've outlined them.
-    // CSS files in html document.  This can only be called
-    // once and requires a server_context_ to be set.
-    EnableRewriteFilter(RewriteOptions::kCssCombinerId);
-  }
-  if (rewrite_options->Enabled(RewriteOptions::kRewriteCss) ||
-      (!rewrite_options->Forbidden(RewriteOptions::kRewriteCss) &&
-       FlattenCssImportsEnabled())) {
-    // Since AddFilters only applies to the HTML rewrite path, we check here
-    // if IPRO preemptive rewrites are disabled and skip the filter if so.
-    if (!rewrite_options->css_preserve_urls() ||
-        rewrite_options->in_place_preemptive_rewrite_css()) {
-      EnableRewriteFilter(RewriteOptions::kCssFilterId);
-    }
-  }
-  if ((rewrite_options->Enabled(RewriteOptions::kPrioritizeCriticalCss) &&
-       server_context()->factory()->UseBeaconResultsInFilters()) ||
-      rewrite_options->Enabled(RewriteOptions::kComputeCriticalCss)) {
-    // Add the critical selector instrumentation before the rewriting filter.
-    AppendOwnedPreRenderFilter(new CriticalCssBeaconFilter(this));
-  }
-  if (rewrite_options->Enabled(RewriteOptions::kPrioritizeCriticalCss)) {
-    AppendOwnedPreRenderFilter(new CriticalSelectorFilter(this));
-  }
-  if (rewrite_options->Enabled(RewriteOptions::kInlineCss)) {
-    // Inline small CSS files.  Give CSS minification and flattening a chance to
-    // run before we decide what counts as "small".
-    CHECK(server_context_ != nullptr);
-    AppendOwnedPreRenderFilter(new CssInlineFilter(this));
-  }
-  if (rewrite_options->Enabled(RewriteOptions::kOutlineJavascript)) {
-    // Cut out inlined scripts and make them into external resources.
-    // This can only be called once and requires a server_context_ to be set.
-    CHECK(server_context_ != nullptr);
-    AppendOwnedPreRenderFilter(new JsOutlineFilter(this));
-  }
-  if (rewrite_options->Enabled(RewriteOptions::kMakeGoogleAnalyticsAsync)) {
-    // Converts sync loads of Google Analytics javascript to async loads.
-    // This needs to be listed before rewrite_javascript because it injects
-    // javascript that has comments and extra whitespace.
-    AppendOwnedPreRenderFilter(new GoogleAnalyticsFilter(this, statistics()));
-  }
-  if ((rewrite_options->Enabled(RewriteOptions::kInsertGA) ||
-       rewrite_options->running_experiment()) &&
-      rewrite_options->ga_id() != "") {
-    // Like MakeGoogleAnalyticsAsync, InsertGA should be before js rewriting.
-    AppendOwnedPreRenderFilter(new InsertGAFilter(this));
-  }
-  if (rewrite_options->Enabled(RewriteOptions::kCombineJavascript)) {
-    // Combine external JS resources. Done after minification and analytics
-    // detection, as it converts script sources into string literals, making
-    // them opaque to analysis.
-    EnableRewriteFilter(RewriteOptions::kJavascriptCombinerId);
-  }
-  if (rewrite_options->Enabled(RewriteOptions::kRewriteJavascriptExternal) ||
-      rewrite_options->Enabled(RewriteOptions::kRewriteJavascriptInline) ||
-      rewrite_options->Enabled(
-          RewriteOptions::kCanonicalizeJavascriptLibraries)) {
-    // Since AddFilters only applies to the HTML rewrite path, we check here
-    // if IPRO preemptive rewrites are disabled and skip the filter if so.
-    //
-    // Note that we minify before we inline, so if you enable
-    // rewrite_javascript_inline but not rewrite_javascript_external, we
-    // will only minify the already-inlined JavaScript, and we will not
-    // minify external JS that we decided later to inline.  It seems unlikely
-    // that someone would want to enable inline_javascript and not enable
-    // rewrite_javascript_external though.
-    if (!rewrite_options->js_preserve_urls() ||
-        rewrite_options->in_place_preemptive_rewrite_javascript() ||
-        rewrite_options->Enabled(RewriteOptions::kRewriteJavascriptInline)) {
-      // Rewrite (minify etc.) JavaScript code to reduce time to first
-      // interaction.
-      EnableRewriteFilter(RewriteOptions::kJavascriptMinId);
-    }
-  }
-
-  if (rewrite_options->Enabled(RewriteOptions::kInlineJavascript)) {
-    // Inline small Javascript files.  Give JS minification a chance to run
-    // before we decide what counts as "small".
-    CHECK(server_context_ != nullptr);
-    AppendOwnedPreRenderFilter(new JsInlineFilter(this));
-  }
-  if (rewrite_options->Enabled(RewriteOptions::kConvertJpegToProgressive) ||
-      rewrite_options->ImageOptimizationEnabled() ||
-      rewrite_options->Enabled(RewriteOptions::kResizeImages) ||
-      rewrite_options->Enabled(
-          RewriteOptions::kResizeToRenderedImageDimensions) ||
-      rewrite_options->Enabled(RewriteOptions::kInlineImages) ||
-      rewrite_options->Enabled(RewriteOptions::kInsertImageDimensions) ||
-      rewrite_options->Enabled(RewriteOptions::kJpegSubsampling) ||
-      rewrite_options->Enabled(RewriteOptions::kStripImageColorProfile) ||
-      rewrite_options->Enabled(RewriteOptions::kStripImageMetaData) ||
-      rewrite_options->Enabled(RewriteOptions::kDelayImages)) {
-    // Since AddFilters only applies to the HTML rewrite path, we check here
-    // if IPRO preemptive rewrites are disabled and skip the filter if so.
-    if (!rewrite_options->image_preserve_urls() ||
-        rewrite_options->in_place_preemptive_rewrite_images()) {
-      EnableRewriteFilter(RewriteOptions::kImageCompressionId);
-    }
-  }
-  if (rewrite_options->Enabled(RewriteOptions::kRemoveComments)) {
-    AppendOwnedPreRenderFilter(new RemoveCommentsFilter(
-        this, new RemoveCommentsFilterOptions(rewrite_options)));
-  }
-  if (rewrite_options->Enabled(RewriteOptions::kElideAttributes)) {
-    // Remove HTML element attribute values where
-    // http://www.w3.org/TR/html4/loose.dtd says that the name is all
-    // that's necessary
-    AppendOwnedPreRenderFilter(new ElideAttributesFilter(this));
-  }
-  if (rewrite_options->Enabled(RewriteOptions::kExtendCacheCss) ||
-      rewrite_options->Enabled(RewriteOptions::kExtendCacheImages) ||
-      rewrite_options->Enabled(RewriteOptions::kExtendCachePdfs) ||
-      rewrite_options->Enabled(RewriteOptions::kExtendCacheScripts)) {
-    // Extend the cache lifetime of resources.
-    EnableRewriteFilter(RewriteOptions::kCacheExtenderId);
-  }
-  if (rewrite_options->Enabled(RewriteOptions::kSpriteImages)) {
-    EnableRewriteFilter(RewriteOptions::kImageCombineId);
-  }
-  if (rewrite_options->Enabled(RewriteOptions::kLocalStorageCache)) {
-    EnableRewriteFilter(RewriteOptions::kLocalStorageCacheId);
-  }
-
-  if (options()->NeedsDependenciesCohort()) {
-    AppendOwnedPreRenderFilter(new CollectDependenciesFilter(this));
-  }
-}
-
-void RewriteDriver::AddPostRenderFilters() {
-  const RewriteOptions* rewrite_options = options();
-  if (rewrite_options->Enabled(RewriteOptions::kFlushSubresources) &&
-      !options()->pre_connect_url().empty()) {
-    AddOwnedPostRenderFilter(new RewrittenContentScanningFilter(this));
-  }
-  if (rewrite_options->Enabled(RewriteOptions::kInsertDnsPrefetch)) {
-    InsertDnsPrefetchFilter* insert_dns_prefetch_filter =
-        new InsertDnsPrefetchFilter(this);
-    AddOwnedPostRenderFilter(insert_dns_prefetch_filter);
-  }
-  if (rewrite_options->Enabled(RewriteOptions::kInsertAmpLink)) {
-    InsertAmpLinkFilter* insert_amp_link_filter = new InsertAmpLinkFilter(this);
-    AddOwnedPostRenderFilter(insert_amp_link_filter);
-  }
-  if (rewrite_options->Enabled(RewriteOptions::kAddInstrumentation)) {
-    // Inject javascript to instrument loading-time. This should run before
-    // defer js so that its onload handler can fire before JS starts executing.
-    AddOwnedPostRenderFilter(new AddInstrumentationFilter(this));
-  }
-  if (rewrite_options->Enabled(RewriteOptions::kDeferJavascript)) {
-    // Defers javascript download and execution to post onload. This filter
-    // should be applied before JsDisableFilter and JsDeferFilter.
-    // kDeferIframe filter should never be turned on when either defer_js
-    // or disable_js is enabled.
-    AddOwnedPostRenderFilter(new DeferIframeFilter(this));
-    AddOwnedPostRenderFilter(new JsDisableFilter(this));
-    // Though we are adding JsDeferDisabledFilter here, if we are flushing
-    // cached html or we have flushed cached html, this filter will disable
-    // itself.
-    AddOwnedPostRenderFilter(new JsDeferDisabledFilter(this));
-  }
-  if (rewrite_options->Enabled(RewriteOptions::kFixReflows)) {
-    AddOwnedPostRenderFilter(new FixReflowFilter(this));
-  }
-  if (rewrite_options->Enabled(RewriteOptions::kDeterministicJs)) {
-    AddOwnedPostRenderFilter(new DeterministicJsFilter(this));
-  }
-  if (rewrite_options->Enabled(RewriteOptions::kConvertMetaTags)) {
-    AddOwnedPostRenderFilter(new MetaTagFilter(this));
-  }
-  if (rewrite_options->Enabled(RewriteOptions::kDisableJavascript)) {
-    // kDeferIframe filter should never be turned on when either defer_js
-    // or disable_js is enabled.
-    AddOwnedPostRenderFilter(new DeferIframeFilter(this));
-    AddOwnedPostRenderFilter(new JsDisableFilter(this));
-  }
-  if (rewrite_options->Enabled(RewriteOptions::kDelayImages)) {
-    // kInsertImageDimensions should be enabled to avoid drastic reflows.
-    AddOwnedPostRenderFilter(new DelayImagesFilter(this));
-  }
-  if (rewrite_options->Enabled(RewriteOptions::kDedupInlinedImages)) {
-    AddOwnedPostRenderFilter(new DedupInlinedImagesFilter(this));
-  }
-  // TODO(nikhilmadan): Should we disable this for bots?
-  // LazyLoadImagesFilter should be applied after DelayImagesFilter.
-  if (rewrite_options->Enabled(RewriteOptions::kLazyloadImages)) {
-    AddOwnedPostRenderFilter(new LazyloadImagesFilter(this));
-  }
-  if (rewrite_options->support_noscript_enabled()) {
-    AddOwnedPostRenderFilter(new SupportNoscriptFilter(this));
-  }
-
-  if (rewrite_options->Enabled(RewriteOptions::kHandleNoscriptRedirect)) {
-    AddOwnedPostRenderFilter(new HandleNoscriptRedirectFilter(this));
-  }
-
-  if (rewrite_options->max_html_parse_bytes() > 0) {
-    AddOwnedPostRenderFilter(new RedirectOnSizeLimitFilter(this));
-    set_size_limit(rewrite_options->max_html_parse_bytes());
-  }
-
-  if (rewrite_options->Enabled(RewriteOptions::kPedantic)) {
-    // Add HTML type attributes where HTML4 says that it's necessary.
-    PedanticFilter* filter = new PedanticFilter(this);
-    AddOwnedPostRenderFilter(filter);
-  }
-  // All filters that might add urls should come before the domain rewriter,
-  // so they'll get rewritten.
-  if (rewrite_options->domain_lawyer()->can_rewrite_domains() &&
-      rewrite_options->Enabled(RewriteOptions::kRewriteDomains)) {
-    // Rewrite mapped domains and shard any resources not otherwise rewritten.
-    // We want do do this after all the content-changing rewrites, because they
-    // will map & shard as part of their execution.
-    //
-    // TODO(jmarantz): Consider removing all the domain-mapping functionality
-    // from other rewrites and do it exclusively in this filter.  Before we
-    // do that we'll need to validate this filter so we can turn it on by
-    // default.
-    //
-    // Note that the "domain_lawyer" filter controls whether we rewrite
-    // domains for resources in HTML files.  However, when we cache-extend
-    // CSS files, we rewrite the domains in them whether this filter is
-    // specified or not.
-    AddUnownedPostRenderFilter(domain_rewriter_.get());
-  }
-  if (rewrite_options->Enabled(RewriteOptions::kLeftTrimUrls)) {
-    // Trim extraneous prefixes from urls in attribute values.
-    // Happens before RemoveQuotes but after everything else.  Note:
-    // we Must left trim urls BEFORE quote removal.
-    AddUnownedPostRenderFilter(url_trim_filter_.get());
-  }
-  // Remove quotes and collapse whitespace at the very end for maximum effect.
-  if (rewrite_options->Enabled(RewriteOptions::kRemoveQuotes)) {
-    // Remove extraneous quotes from html attributes.
-    AddOwnedPostRenderFilter(new HtmlAttributeQuoteRemoval(this));
-  }
-  if (rewrite_options->Enabled(RewriteOptions::kCollapseWhitespace)) {
-    // Remove excess whitespace in HTML.
-    AddOwnedPostRenderFilter(new CollapseWhitespaceFilter(this));
-  }
-  if (options()->Enabled(RewriteOptions::kHintPreloadSubresources)) {
-    AppendOwnedPreRenderFilter(new PushPreloadFilter(this));
-  }
-
-  if (DebugMode()) {
-    debug_filter_ = new DebugFilter(this);
-    AddOwnedPostRenderFilter(debug_filter_);
-  }
-
-  // NOTE(abliss): Adding a new filter?  Does it export any statistics?  If it
-  // doesn't, it probably should.  If it does, be sure to add it to the
-  // InitStats() function above or it will break under Apache!
-}
+// AddFilters(), AddPreRenderFilters(), and AddPostRenderFilters() are
+// defined in rewrite_driver_filter_init.cc to keep filter dependencies
+// out of the core driver.
 
 void RewriteDriver::AddOwnedEarlyPreRenderFilter(HtmlFilter* filter) {
-  filters_to_delete_.push_back(filter);
+  filters_to_delete_.emplace_back(filter);
   early_pre_render_filters_.push_back(filter);
 }
 
 void RewriteDriver::PrependOwnedPreRenderFilter(HtmlFilter* filter) {
-  filters_to_delete_.push_back(filter);
+  filters_to_delete_.emplace_back(filter);
   pre_render_filters_.push_front(filter);
 }
 
 void RewriteDriver::AppendOwnedPreRenderFilter(HtmlFilter* filter) {
-  filters_to_delete_.push_back(filter);
+  filters_to_delete_.emplace_back(filter);
   pre_render_filters_.push_back(filter);
 }
 
@@ -1369,7 +918,7 @@ void RewriteDriver::AppendUnownedPreRenderFilter(HtmlFilter* filter) {
 }
 
 void RewriteDriver::AddOwnedPostRenderFilter(HtmlFilter* filter) {
-  filters_to_delete_.push_back(filter);
+  filters_to_delete_.emplace_back(filter);
   AddUnownedPostRenderFilter(filter);
 }
 
@@ -1407,7 +956,7 @@ void RewriteDriver::RegisterRewriteFilter(RewriteFilter* filter) {
   //
   // TODO(sligocki): It'd be nice to get this into the constructor.
   resource_filter_map_[filter->id()] = filter;
-  filters_to_delete_.push_back(filter);
+  filters_to_delete_.emplace_back(filter);
 }
 
 void RewriteDriver::SetWriter(Writer* writer) {
@@ -1742,26 +1291,114 @@ class CacheCallback : public OptionsAwareHTTPCacheCallback {
         !async_fetch_->request_context()->accepts_webp()) {
       return false;
     }
+    // The same for AVIF. This is a distinct concern from the "Vary: Accept"
+    // check in OptionsAwareHTTPCacheCallback::IsCacheValid below, and is NOT
+    // covered by it: .pagespeed. output carries no Vary at all, so that clause
+    // never fires here. The exposure this closes is that the HTTP cache key is
+    // OutputResource::HttpCacheKey() -- the decoded, domain-mapped, unsharded
+    // URL -- which does not encode the requester's capabilities. A committed
+    // ".avif" entry minted by an AVIF-capable client is therefore a warm HIT
+    // for a client that cannot decode AVIF, and reconstruction (where
+    // ImageUrlEncoder's committed-URL reconcile lives) is short-circuited by
+    // that hit. accepts_avif_via_accept_header() is used rather than a broad
+    // twin because AVIF has only the one bit; it is the exact analogue of
+    // accepts_webp() above, which is broad only because WebP has a
+    // user-agent-derived grant to be broad about.
+    if (!driver_->options()->serve_rewritten_avif_urls_to_any_agent() &&
+        (headers.DetermineContentType() == &kContentTypeAvif) &&
+        !async_fetch_->request_context()->accepts_avif_via_accept_header()) {
+      return false;
+    }
     return OptionsAwareHTTPCacheCallback::IsCacheValid(key, headers);
   }
 
   void Done(HTTPCache::FindResult find_result) override {
+    // The cache may call us back on one of its own threads, but the fetch
+    // we are feeding may only be safe to touch from the request thread
+    // (e.g. Apache's unbuffered ApacheFetch, which streams straight to the
+    // client).  When the driver has been switched to run its tasks on the
+    // request thread (RewriteDriver::RunTasksOnRequestThread), deliver the
+    // response there -- the same contract CacheUrlAsyncFetcher honors via
+    // set_response_sequence for in-place fetches.  Otherwise deliver
+    // inline, as before.
+    Scheduler::Sequence* sequence = driver_->scheduler_sequence();
+    if (sequence != nullptr) {
+      sequence->Add(
+          MakeFunction(this, &CacheCallback::DeliverDone, find_result));
+    } else {
+      DeliverDone(find_result);
+    }
+  }
+
+  void DeliverDone(HTTPCache::FindResult find_result) {
     StringPiece content;
     ResponseHeaders* response_headers = async_fetch_->response_headers();
     if (find_result.status == HTTPCache::kFound) {
       RewriteStats* stats = driver_->server_context()->rewrite_stats();
       stats->cached_resource_fetches()->Add(1);
 
+      // Bodies below this size keep the cheap copy: a dedicated aliased
+      // ngx_buf_t + copy-out timer is not worth it for tiny resources.
+      const size_t kZeroCopyServeMinBytes = size_t{16} * 1024;
       HTTPValue* value = http_value();
-      bool success = (value->ExtractContents(&content) &&
-                      value->ExtractHeaders(response_headers, handler_));
+      // Zero-copy ALIASED serve (CycloneZeroCopyServe).  This is the
+      // '.pagespeed.' rewritten-resource cache-hit serve: 'value' is the
+      // single canonical optimized OutputResource, and async_fetch_ is a
+      // pass-through ResourceFetch(SharedAsyncFetch) over the port base
+      // fetch with NO RecordingFetch in the chain, so 'content' is served
+      // verbatim; when it is a borrowed Cyclone mmap view we alias the
+      // region into the port output buffer.  The mmap StringPiece is
+      // extracted BEFORE output_resource_->Link collapses the mapped value
+      // (Link -> HTTPValue::share() -> owned copy), and mapped_keepalive
+      // pins the read handle (with its lease-renewal and wrap-detection
+      // hooks) until the port send completes.  Recording/transforming
+      // wrappers override WriteMapped to force the copying Write.
+      HTTPCache* http_cache = driver_->server_context()->http_cache();
+      MappedSharedString mapped_keepalive;
+      const bool alias_serve =
+          http_cache->cyclone_zero_copy_serve_enabled() && value->is_mapped() &&
+          value->ExtractMappedContents(&content, &mapped_keepalive) &&
+          content.size() >= kZeroCopyServeMinBytes;
+      bool success = value->ExtractHeaders(response_headers, handler_);
       if (success) {
+        // output_resource_->Link routes to HTTPValue::share(), which
+        // collapses a mapped (Cyclone zero-copy) value to owned storage --
+        // the OutputResource outlives this serving scope.  For the aliased
+        // serve 'content' was extracted before the collapse (it must alias
+        // the mmap region) and stays valid via the HTTPValue's retained
+        // keep-alive.  For the copying serve 'content' is extracted AFTER
+        // the collapse, so it aliases the collapsed owned storage and the
+        // WriteShared below hands the refcounted bytes to the port fetch
+        // with no body copy.  ExtractContents cannot fail here: it checks a
+        // strict subset of what ExtractHeaders just validated.
         output_resource_->Link(value, handler_);
         output_resource_->SetWritten(true);
+        success = alias_serve || value->ExtractContents(&content);
+      }
+      if (success) {
+        // This is a hash-committed .pagespeed. URL serve, so
+        // upgrade to 'public, immutable' where publicly cacheable. Applied
+        // to the wire response only -- the cached entry stays unstamped --
+        // and only for external serving: a nested driver here means a
+        // chained rewrite is fetching a .pagespeed. INPUT internally
+        // (RewriteContext::FetchInputs), and stamping that would let
+        // ApplyInputCacheControl read the synthetic 'public' as an
+        // explicitly-public input and bake it into the outer stored entry.
+        if (!driver_->is_nested()) {
+          driver_->server_context()->ApplyRewrittenUrlCacheControl(
+              response_headers);
+        }
         async_fetch_->set_content_length(content.size());
         async_fetch_->FixCacheControlForGoogleCache();
         async_fetch_->HeadersComplete();
-        success = async_fetch_->Write(content, handler_);
+        // value->share() is owned heap storage by construction (share()
+        // collapses any mapped view first); mapped bytes never ride the
+        // WriteShared path -- their protection window is bounded, and they
+        // go through WriteMapped with their keepalive instead.
+        success =
+            alias_serve
+                ? async_fetch_->WriteMapped(content, mapped_keepalive, handler_)
+                : async_fetch_->WriteShared(content, value->share(), handler_);
       }
       async_fetch_->Done(success);
       driver_->FetchComplete();
@@ -1780,6 +1417,12 @@ class CacheCallback : public OptionsAwareHTTPCacheCallback {
                         (ResponseHeaders::GetVaryOption(
                             driver_->options()->respect_vary())),
                         response_headers, content, handler_);
+        // Stamp the wire response only, after the unstamped
+        // headers went into the cache above; external serving only (see
+        // the is_nested() rationale on the cache-hit branch above).
+        if (!driver_->is_nested()) {
+          server_context->ApplyRewrittenUrlCacheControl(response_headers);
+        }
         async_fetch_->Done(async_fetch_->Write(content, handler_));
         driver_->FetchComplete();
       } else {
@@ -1872,9 +1515,8 @@ void RewriteDriver::FetchInPlaceResource(const GoogleUrl& gurl, bool proxy_mode,
   InPlaceRewriteContext* context = new InPlaceRewriteContext(this, gurl.Spec());
   context->set_proxy_mode(proxy_mode);
 
-  // Save pointer to stats_logger before "this" is deleted.
-  StatisticsLogger* stats_logger =
-      server_context_->statistics()->console_logger();
+  ScopedStatsLoggerUpdate stats_update(
+      server_context_->statistics()->console_logger());
 
   if (!context->Fetch(output_resource, async_fetch, message_handler())) {
     // RewriteContext::Fetch can fail if the input URLs are undecodeable
@@ -1888,11 +1530,6 @@ void RewriteDriver::FetchInPlaceResource(const GoogleUrl& gurl, bool proxy_mode,
 
   // Note: "this" may have been deleted by this point. It is not safe to
   // reference data members.
-
-  // Update statistics log.
-  if (stats_logger != nullptr) {
-    stats_logger->UpdateAndDumpIfRequired();
-  }
 }
 
 bool RewriteDriver::FetchOutputResource(
@@ -1907,9 +1544,8 @@ bool RewriteDriver::FetchOutputResource(
   // that's in the browser's cache must be correct.
   bool queued = false;
   ConstStringStarVector values;
-  // Save pointer to stats_logger before "this" is deleted.
-  StatisticsLogger* stats_logger =
-      server_context_->statistics()->console_logger();
+  ScopedStatsLoggerUpdate stats_update(
+      server_context_->statistics()->console_logger());
   if (async_fetch->request_headers()->Lookup(HttpAttributes::kIfModifiedSince,
                                              &values)) {
     async_fetch->response_headers()->SetStatusAndReason(
@@ -1932,11 +1568,6 @@ bool RewriteDriver::FetchOutputResource(
       cache_callback->Find();
       queued = true;
     }
-  }
-
-  // Update statistics log.
-  if (stats_logger != nullptr) {
-    stats_logger->UpdateAndDumpIfRequired();
   }
 
   return queued;
@@ -2007,6 +1638,7 @@ ResourcePtr RewriteDriver::CreateInputResource(
   } else if (decoded_base_url_.IsAnyValid()) {
     if (!IsLoadPermittedByCsp(input_url, role)) {
       *is_authorized = false;
+      server_context_->rewrite_stats()->csp_blocked_rewrites()->Add(1);
       message_handler()->Message(kInfo, "CSP prevents use of '%s'",
                                  input_url.spec_c_str());
       return resource;
@@ -2914,6 +2546,31 @@ OptionsAwareHTTPCacheCallback::OptionsAwareHTTPCacheCallback(
 
 OptionsAwareHTTPCacheCallback::~OptionsAwareHTTPCacheCallback() {}
 
+namespace {
+
+// #737: does this cached entry claim it was selected by the request's Accept
+// header -- or vary on dimensions nobody can restate? Case-insensitive
+// because a Vary value lists field NAMES, which are RFC 9110 tokens ("Vary:
+// accept" is the same claim as "Vary: Accept"); and "Vary: *" means the
+// response varies on unspecified dimensions, so reusing it as-selected is
+// never safe (RFC 9110 section 12.5.5). The byte-exact HasValue this
+// replaces missed both legal spellings, which let an origin's lowercase
+// Vary or wildcard bypass the WebP/AVIF as-selected guards entirely.
+// SCOPE, stated because the wildcard invites a broader reading: these arms
+// fire only for a request whose Accept did NOT advertise the format -- the
+// decode-safety question they exist for. For an advertising request a
+// Vary: * entry is reused exactly as before this fix; whether Vary: *
+// should revalidate for EVERY request is general Vary policy
+// (RespectVaryOnResources), deliberately not decided inside a format
+// guard.
+bool VaryClaimsAcceptOrWildcard(const ResponseHeaders& headers) {
+  return headers.HasValueCaseInsensitive(HttpAttributes::kVary,
+                                         HttpAttributes::kAccept) ||
+         headers.HasValueCaseInsensitive(HttpAttributes::kVary, "*");
+}
+
+}  // namespace
+
 bool OptionsAwareHTTPCacheCallback::IsCacheValid(
     const GoogleString& key, const ResponseHeaders& headers) {
   return IsCacheValid(key, *rewrite_options_, request_context(), headers);
@@ -2928,9 +2585,41 @@ OptionsAwareHTTPCacheCallback::RespectVaryOnResources() const {
 bool OptionsAwareHTTPCacheCallback::IsCacheValid(
     const GoogleString& url, const RewriteOptions& rewrite_options,
     const RequestContextPtr& request_ctx, const ResponseHeaders& headers) {
+  // A cached WebP response that says "Vary: Accept" was selected by an Accept
+  // header, so it is valid for this request only if this request's own Accept
+  // header would have selected it too. The narrow accepts_webp bit is used
+  // deliberately: a user-agent-derived grant (legacy Android, or the
+  // Safari/Firefox no-navigation-Accept fallback) means the client would
+  // DECODE the bytes, but the entry's Vary claim would be false as-selected,
+  // so those requests revalidate against the origin instead of reusing the
+  // entry. This is stricter than the behavior before the Safari/Firefox
+  // fallback existed, which reused such entries for the legacy-Android UA
+  // grant as well. The .pagespeed. resource path
+  // (CacheCallback::IsCacheValid in this file) intentionally keeps consulting
+  // the broad accepts_webp() bit -- there the format is committed in the URL
+  // and rewritten .webp entries carry no Vary: Accept, so this clause does
+  // not fire for them.
+  // The Vary test is the case-insensitive token-plus-wildcard one:
+  // "Vary: accept" makes the same as-selected claim, and a "Vary: *" entry
+  // varies on dimensions this callback cannot restate, so neither is valid
+  // for a request whose own Accept header did not select it.
   if ((headers.DetermineContentType() == &kContentTypeWebp) &&
-      !request_ctx->accepts_webp() &&
-      headers.HasValue(HttpAttributes::kVary, HttpAttributes::kAccept)) {
+      !request_ctx->accepts_webp_via_accept_header() &&
+      VaryClaimsAcceptOrWildcard(headers)) {
+    return false;
+  }
+
+  // The same rule for AVIF. Without this arm a cached image/avif response that
+  // an origin selected on Accept is reused for clients that never advertised
+  // image/avif -- bytes they cannot decode. AVIF has no user-agent-derived
+  // grant to reason about (there is no legacy no-Accept AVIF population), so
+  // there is only the one bit and the arm is the strict mirror of the WebP one
+  // above: same narrow Accept-header-only test, same widened #737 Vary test
+  // (case-insensitive token, wildcard included). Entries with no such Vary claim are
+  // untouched, as are all .pagespeed. resource URLs.
+  if ((headers.DetermineContentType() == &kContentTypeAvif) &&
+      !request_ctx->accepts_avif_via_accept_header() &&
+      VaryClaimsAcceptOrWildcard(headers)) {
     return false;
   }
 
@@ -2983,7 +2672,7 @@ bool RewriteDriver::ShouldAbsolutifyUrl(const GoogleUrl& input_base,
   bool proxying_on_output =
       (url_namer->ProxyMode() == UrlNamer::ProxyExtent::kFull);
 
-  if (proxying_on_output) {
+  if (proxying_on_output) {  // NOLINT(bugprone-branch-clone)
     result = true;
   } else if (input_base.AllExceptLeaf() != output_base.AllExceptLeaf()) {
     result = true;
@@ -3245,6 +2934,7 @@ bool RewriteDriver::is_critical_images_beacon_enabled() {
   return (options()->Enabled(RewriteOptions::kLazyloadImages) ||
           options()->Enabled(RewriteOptions::kInlineImages) ||
           options()->Enabled(RewriteOptions::kDelayImages) ||
+          options()->Enabled(RewriteOptions::kPrioritizeCriticalImages) ||
           options()->Enabled(
               RewriteOptions::kResizeToRenderedImageDimensions)) &&
          options()->critical_images_beacon_enabled() &&
@@ -3254,8 +2944,12 @@ bool RewriteDriver::is_critical_images_beacon_enabled() {
 
 bool RewriteDriver::Write(const ResourceVector& inputs,
                           const StringPiece& contents, const ContentType* type,
-                          StringPiece charset, OutputResource* output) {
+                          StringPiece charset, OutputResource* output,
+                          StringPiece ext_override) {
   output->SetType(type);
+  if (!ext_override.empty()) {
+    output->mutable_full_name()->set_ext(ext_override);
+  }
   output->set_charset(charset);
   ResponseHeaders* meta_data = output->response_headers();
   bool clear_last_modified = false;
@@ -3369,7 +3063,9 @@ bool RewriteDriver::SetOrClearPageSpeedOptionCookies(
     // one in the configuration.
     set_cookies = true;
   } else if (!pagespeed_option_cookies_.empty() && !required_token.empty() &&
-             !provided_token.empty() && required_token != provided_token) {
+             !provided_token.empty() &&
+             required_token !=
+                 provided_token) {  // NOLINT(bugprone-branch-clone)
     // Clear the current option cookies if there are any, there is a token
     // specified in the configuration, there is a token in the request, and
     // the token specified in the request does NOT match the one in the
@@ -3463,7 +3159,9 @@ void RewriteDriver::RunTasksOnRequestThread() {
   scheduler_sequence_.reset(scheduler_->NewSequence());
 }
 
-void RewriteDriver::SwitchToQueuedWorkerPool() {
+// ForwardToSequence internally acquires the scheduler mutex; the analyzer
+// cannot determine the lock through the indirection of scheduler_sequence_.
+void RewriteDriver::SwitchToQueuedWorkerPool() NO_THREAD_SAFETY_ANALYSIS {
   scheduler_sequence_->ForwardToSequence(rewrite_worker_);
 }
 
@@ -3489,13 +3187,37 @@ void RewriteDriver::SetIsAmpDocument(bool is_amp) {
   set_buffer_events(false);
 }
 
+void RewriteDriver::ClearCspPolicies() {
+  csp_context_versions_.clear();
+  csp_context_versions_.push_back(std::make_unique<CspContext>());
+  csp_context_snapshot_.store(csp_context_versions_.back().get(),
+                              std::memory_order_release);
+}
+
+void RewriteDriver::AddCspPolicy(std::unique_ptr<CspPolicy> policy) {
+  if (policy == nullptr) {
+    return;
+  }
+  // Copy-on-write: rewrite threads may be reading the current version
+  // concurrently, so a published version is never mutated in place.
+  // Copying shares the (immutable) policies rather than duplicating
+  // them.
+  auto new_version =
+      std::make_unique<CspContext>(*csp_context_versions_.back());
+  new_version->AddPolicy(std::move(policy));
+  csp_context_versions_.push_back(std::move(new_version));
+  csp_context_snapshot_.store(csp_context_versions_.back().get(),
+                              std::memory_order_release);
+}
+
 bool RewriteDriver::IsLoadPermittedByCsp(const GoogleUrl& url,
                                          CspDirective role) {
-  if (csp_context_.empty()) {
+  const CspContext& csp_context = content_security_policy();
+  if (csp_context.empty()) {
     return true;
   }
 
-  return csp_context_.CanLoadUrl(role, google_url(), url);
+  return csp_context.CanLoadUrl(role, google_url(), url);
 }
 
 bool RewriteDriver::IsLoadPermittedByCsp(const GoogleUrl& url, InputRole role) {
@@ -3508,7 +3230,7 @@ bool RewriteDriver::IsLoadPermittedByCsp(const GoogleUrl& url, InputRole role) {
       return IsLoadPermittedByCsp(url, CspDirective::kImgSrc);
     case InputRole::kUnknown:
       // Weird type, not sure what policy to check.
-      return csp_context_.empty();
+      return content_security_policy().empty();
     case InputRole::kReconstruction:
       // All OK.
       return true;

@@ -1,10 +1,48 @@
-load("@rules_cc//cc:defs.bzl", "cc_library")
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
 load(
     "//bazel:pagespeed_test.bzl",
     "pagespeed_cc_test",
 )
 
 licenses(["notice"])  # Apache 2
+
+# Memory-safety harness for the CSS parser. Drives untrusted CSS
+# through every public Parser entry point; AddressSanitizer is the oracle.
+# Build/run under release-DCHECK-off + ASan:
+#   bazel run --config=asan -c opt //third_party/css_parser:parser_fuzz
+# Add -DCSS_PARSER_LIBFUZZER + -fsanitize=fuzzer linkopts for coverage-guided
+# discovery (see the file header).
+cc_binary(
+    name = "parser_fuzz",
+    srcs = ["src/webutil/css/parser_fuzz.cc"],
+    copts = [
+        "-funsigned-char",
+    ],
+    tags = ["manual"],  # opt-in: built explicitly, not on a bare //... wildcard
+    deps = [
+        ":css_parser",
+    ],
+)
+
+# Deterministic embedded-corpus regression test (same source, non-libfuzzer
+# mode). DEFAULT-OFF via the `manual` tag: excluded from every `//...` wildcard
+# (build AND test), so it never runs on a bare `bazel test //...` and is not
+# wired into the every-PR ASan job. Run it explicitly, ideally release-DCHECK-off:
+#   bazel test --config=asan -c opt //third_party/css_parser:parser_fuzz_corpus_test
+# (Note: do NOT add a `no_san` tag — the sanitizer config sets
+# --build_tag_filters=-no_san, which would exclude the target from the very ASan
+# build you want to run it under.)
+cc_test(
+    name = "parser_fuzz_corpus_test",
+    srcs = ["src/webutil/css/parser_fuzz.cc"],
+    copts = [
+        "-funsigned-char",
+    ],
+    tags = ["manual"],
+    deps = [
+        ":css_parser",
+    ],
+)
 
 cc_library(
     name = "utf",
@@ -123,6 +161,7 @@ cc_library(
     ] + glob(["src/util/gtl/*.h"]),
     copts = [
         "-funsigned-char",
+        "-Wno-register",  # gperf-generated code uses deprecated 'register' keyword
     ],
     visibility = ["//visibility:public"],
     deps = [

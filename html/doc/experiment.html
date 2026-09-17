@@ -1,3 +1,21 @@
+<!-- =======================================================================
+     ARCHIVE - DO NOT EDIT.
+
+     This is the mod_pagespeed 1.0 documentation as it shipped, published
+     unchanged as the /1.0/ archive on modpagespeed.com. It describes what
+     that release did, which is why it is NOT updated when behaviour
+     changes: an archive that tracks the current product is a record of
+     nothing.
+
+     If you got here by grepping for prose that is now out of date, the
+     change belongs in the pagespeed-optimizer repository instead:
+
+         2.0    website/src/content/docs/       -> modpagespeed.com/docs/
+         1.15   website/src/content/docs-1.1/   -> modpagespeed.com/1.1/docs/
+
+     CI enforces this. tools/ci/check_legacy_docs.sh fails any pull request
+     that changes a file under html/.
+     ======================================================================= -->
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
 or more contributor license agreements.  See the NOTICE file
@@ -33,13 +51,18 @@ under the License.
 <p>
 The <a href="module-run-experiment.html">Run Experiment</a> module allows you to
 gather data on what filters perform best for your site using A/B testing.  It
-reports to your <a href="http://www.google.com/analytics/">Google Analytics</a>
-account, storing data in
-a <a href="/analytics/devguides/collection/gajs/gaTrackingCustomVariables">custom
-variable</a>.  It often makes sense to first experiment manually using the
-per-request configuration described below to get an idea of which filters might
-help your site, and then <a href="module-run-experiment.html">run a controlled
-experiment</a> to test whether these filters actually speed it up in practice.
+assigns each visitor to an experiment variant and records that assignment in
+the <code>PageSpeedExperiment</code> cookie.  PageSpeed no longer injects
+Google Analytics reporting for experiments: the Universal Analytics service it
+reported to was discontinued in July 2023.  Reporting is bring-your-own
+analytics &mdash; read the variant server-side from the
+<code>PageSpeedExperiment</code> cookie, or use the experiment id included in
+the <a href="filter-instrumentation-add.html">instrumentation beacon</a>, and
+feed the data to your own analytics tool.  It often makes sense to first
+experiment manually using the per-request configuration described below to get
+an idea of which filters might help your site, and then
+<a href="module-run-experiment.html">run a controlled experiment</a> to test
+whether these filters actually speed it up in practice.
 </p>
 
 <h2 id="PerRequest">Per-request configuration</h2>

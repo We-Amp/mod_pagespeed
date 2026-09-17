@@ -35,6 +35,7 @@
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "net/instaweb/rewriter/public/static_asset_manager.h"
+#include "pagespeed/kernel/base/escaping.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/html/html_element.h"
 #include "pagespeed/kernel/html/html_name.h"
@@ -129,6 +130,16 @@ void DelayImagesFilter::EndElementImpl(HtmlElement* element) {
         element->FindAttribute(HtmlName::kDataPagespeedLowResSrc);
     if (low_res_src == nullptr ||
         low_res_src->DecodedValueOrNull() == nullptr) {
+      return;
+    }
+    // The low-res swap runs from injected inline scripts (and, when
+    // rewriting in place, from inline onload handlers); if the page's CSP
+    // forbids those, renaming src would break the image entirely. Leave the
+    // high-res image untouched and drop the low-res preview marker. Checked
+    // per element because a meta-tag policy can arrive mid-document.
+    if (!CspPermitsInlineScript() || (insert_low_res_images_inplace_ &&
+                                      !CspPermitsInlineScriptAttribute())) {
+      element->DeleteAttribute(HtmlName::kDataPagespeedLowResSrc);
       return;
     }
     HtmlElement::Attribute* src = element->FindAttribute(HtmlName::kSrc);
@@ -232,11 +243,22 @@ void DelayImagesFilter::InsertLowResImagesAndJs(HtmlElement* element,
   // base64 encoded data url as its value. This map is added to the
   // html at the end of last low res image.
   GoogleString inline_data_script;
-  for (StringStringMap::iterator it = low_res_data_map_.begin();
-       it != low_res_data_map_.end(); ++it) {
+  for (const auto& [url, data] : low_res_data_map_) {
+    // The map key is the image's original src URL, which is author-controlled
+    // and may originate from untrusted/UGC markup; the value is the generated
+    // base64 low-res data URL. AddJsToElement only wraps the snippet in CDATA
+    // and does NOT escape its contents, so a src such as  x');evil()//  would
+    // otherwise break out of the single-quoted JS string literal below and
+    // inject script (XSS). Mirror the lazyload/beacon/dedup filters and run
+    // each spliced value through EscapeToJsStringLiteral with add_quotes=false,
+    // since the surrounding quotes are supplied by the template. The base64
+    // value is escaped too for defense-in-depth.
+    GoogleString escaped_url, escaped_data;
+    EscapeToJsStringLiteral(url, false /* add_quotes */, &escaped_url);
+    EscapeToJsStringLiteral(data, false /* add_quotes */, &escaped_data);
     inline_data_script =
-        StrCat("\npagespeed.delayImagesInline.addLowResImages('", it->first,
-               "', '", it->second, "');");
+        StrCat("\npagespeed.delayImagesInline.addLowResImages('", escaped_url,
+               "', '", escaped_data, "');");
     StrAppend(&inline_data_script,
               "\npagespeed.delayImagesInline.replaceWithLowRes();\n");
     HtmlElement* low_res_element =

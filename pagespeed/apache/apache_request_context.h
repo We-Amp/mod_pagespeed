@@ -49,7 +49,8 @@ class ApacheRequestContext : public SystemRequestContext {
   ~ApacheRequestContext() override;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(ApacheRequestContext);
+  ApacheRequestContext(const ApacheRequestContext&) = delete;
+  ApacheRequestContext& operator=(const ApacheRequestContext&) = delete;
 };
 
 }  // namespace net_instaweb

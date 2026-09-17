@@ -56,6 +56,15 @@ void DeferIframeFilter::StartElementImpl(HtmlElement* element) {
     return;
   }
   if (element->keyword() == HtmlName::kIframe) {
+    // Deferral renames the iframe to <pagespeed_iframe> and restores it
+    // from injected inline scripts; if the page's CSP forbids inline
+    // scripts the rename would break the iframe outright, so leave it
+    // alone. Checked before the first mutation because a meta-tag policy
+    // can arrive mid-document. Iframes renamed before the policy arrived
+    // still get their conversion script in EndElementImpl.
+    if (!CspPermitsInlineScript()) {
+      return;
+    }
     if (!script_inserted_) {
       HtmlElement* script =
           driver()->NewElement(element->parent(), HtmlName::kScript);

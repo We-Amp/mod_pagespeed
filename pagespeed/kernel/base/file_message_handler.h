@@ -47,7 +47,8 @@ class FileMessageHandler : public MessageHandler {
  private:
   FILE* file_;
 
-  DISALLOW_COPY_AND_ASSIGN(FileMessageHandler);
+  FileMessageHandler(const FileMessageHandler&) = delete;
+  FileMessageHandler& operator=(const FileMessageHandler&) = delete;
 };
 
 }  // namespace net_instaweb

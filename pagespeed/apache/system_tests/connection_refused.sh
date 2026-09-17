@@ -14,9 +14,9 @@
 # limitations under the License.
 # connection_refused.html references modpagespeed.com:1023/someimage.png.
 # mod_pagespeed will attempt to connect to that host and port to fetch the
-# input resource using serf.  We expect the connection to be refused.  Relies
+# input resource.  We expect the connection to be refused.  Relies
 # on "ModPagespeedDomain modpagespeed.com:1023" in debug.conf.template.  Also
-# relies on running after a cache-flush to avoid bypassing the serf fetch,
+# relies on running after a cache-flush to avoid bypassing the fetch,
 # since mod_pagespeed remembers fetch-failures in its cache for 5 minutes.
 
 if ! "$SKIP_EXTERNAL_RESOURCE_TESTS" && \
@@ -24,7 +24,7 @@ if ! "$SKIP_EXTERNAL_RESOURCE_TESTS" && \
   start_test Connection refused handling
 
   # Monitor the Apache log starting now.  tail -F will catch log rotations.
-  SERF_REFUSED_PATH=$TESTTMP/instaweb_apache_serf_refused
+  SERF_REFUSED_PATH=$TESTTMP/instaweb_apache_fetch_refused
   rm -f $SERF_REFUSED_PATH
   echo APACHE_LOG = $APACHE_LOG
   tail --sleep-interval=0.1 -F $APACHE_LOG > $SERF_REFUSED_PATH &
@@ -47,7 +47,7 @@ if ! "$SKIP_EXTERNAL_RESOURCE_TESTS" && \
   sleep 1
   # Wait up to 10 seconds for the background fetch of someimage.png to fail.
   for i in {1..100}; do
-    ERRS=$(grep -c "Serf status 111" $SERF_REFUSED_PATH || true)
+    ERRS=$(grep -c "Fetch failed" $SERF_REFUSED_PATH || true)
     if [ $ERRS -ge 1 ]; then
       break;
     fi;
@@ -61,7 +61,7 @@ if ! "$SKIP_EXTERNAL_RESOURCE_TESTS" && \
   check [ $ERRS -ge 1 ]
   # Make sure we have the URL detail we expect because
   # ModPagespeedListOutstandingUrlsOnError is on in debug.conf.template.
-  echo Check that ModPagespeedSerfListOutstandingUrlsOnError works
+  echo Check that ModPagespeedListOutstandingUrlsOnError works
   check grep "URL http://modpagespeed.com:1023/someimage.png active for " \
       $SERF_REFUSED_PATH
 fi

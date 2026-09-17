@@ -68,4 +68,29 @@ TEST_F(RequestPropertiesTest, SupportsImageInliningViaRequestHeaders) {
   EXPECT_TRUE(request_properties.SupportsImageInlining());
 }
 
+// A Web Bot Auth signature reaches every bot-gated capability through
+// DeviceProperties, even though the user agent is a real browser's. These are
+// the three consumers that decide whether a client is allowed to write into the
+// shared, per-URL beacon data.
+TEST_F(RequestPropertiesTest, WebBotAuthVerdictSuppressesBeaconing) {
+  const char kSpoofedBrowserUserAgent[] =
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+      "(KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36";
+
+  RequestProperties human(&user_agent_matcher_);
+  human.SetUserAgent(kSpoofedBrowserUserAgent);
+  EXPECT_FALSE(human.IsBot());
+  EXPECT_TRUE(human.SupportsCriticalCssBeacon());
+  EXPECT_TRUE(human.SupportsCriticalImagesBeacon());
+  EXPECT_TRUE(human.SupportsLazyloadImages());
+
+  RequestProperties signed_agent(&user_agent_matcher_);
+  signed_agent.SetUserAgent(kSpoofedBrowserUserAgent);
+  signed_agent.SetWebBotAuthVerdict(true);
+  EXPECT_TRUE(signed_agent.IsBot());
+  EXPECT_FALSE(signed_agent.SupportsCriticalCssBeacon());
+  EXPECT_FALSE(signed_agent.SupportsCriticalImagesBeacon());
+  EXPECT_FALSE(signed_agent.SupportsLazyloadImages());
+}
+
 }  // namespace net_instaweb

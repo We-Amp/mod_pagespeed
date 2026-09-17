@@ -79,7 +79,8 @@ class ScanlineReaderInterface {
   virtual bool IsProgressive() = 0;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(ScanlineReaderInterface);
+  ScanlineReaderInterface(const ScanlineReaderInterface&) = delete;
+  ScanlineReaderInterface& operator=(const ScanlineReaderInterface&) = delete;
 };
 
 class ScanlineWriterInterface {
@@ -114,7 +115,8 @@ class ScanlineWriterInterface {
   inline bool FinalizeWrite() { return FinalizeWriteWithStatus().Success(); }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(ScanlineWriterInterface);
+  ScanlineWriterInterface(const ScanlineWriterInterface&) = delete;
+  ScanlineWriterInterface& operator=(const ScanlineWriterInterface&) = delete;
 };
 
 }  // namespace image_compression

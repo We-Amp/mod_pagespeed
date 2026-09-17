@@ -37,6 +37,9 @@ DownstreamCachingDirectives::DownstreamCachingDirectives()
       supports_webp_(kNotSet),
       supports_webp_lossless_alpha_(kNotSet),
       supports_webp_animated_(kNotSet),
+      supports_avif_(kNotSet),
+      supports_avif_lossless_alpha_(kNotSet),
+      supports_avif_animated_(kNotSet),
       capabilities_to_be_supported_(kNoCapabilitiesSpecified) {}
 
 DownstreamCachingDirectives::~DownstreamCachingDirectives() {}
@@ -54,6 +57,9 @@ void DownstreamCachingDirectives::ParseCapabilityListFromRequestHeaders(
   supports_webp_ = kNotSet;
   supports_webp_lossless_alpha_ = kNotSet;
   supports_webp_animated_ = kNotSet;
+  supports_avif_ = kNotSet;
+  supports_avif_lossless_alpha_ = kNotSet;
+  supports_avif_animated_ = kNotSet;
 }
 
 bool DownstreamCachingDirectives::IsPropertySupported(
@@ -61,7 +67,8 @@ bool DownstreamCachingDirectives::IsPropertySupported(
     const GoogleString& supported_capabilities) {
   if (*stored_property_support == kNotSet) {
     if (supported_capabilities ==
-        DownstreamCachingDirectives::kNoCapabilitiesSpecified) {
+        DownstreamCachingDirectives::
+            kNoCapabilitiesSpecified) {  // NOLINT(bugprone-branch-clone)
       *stored_property_support = kTrue;
     } else if (supported_capabilities == capability) {
       // Matches "ii" exactly.
@@ -126,6 +133,30 @@ bool DownstreamCachingDirectives::SupportsWebpAnimated() const {
   return IsPropertySupported(
       &supports_webp_animated_,
       RewriteOptions::FilterId(RewriteOptions::kConvertToWebpAnimated),
+      capabilities_to_be_supported_);
+}
+
+// AVIF siblings. These mirror the WebP directives above exactly, keying on the
+// corresponding AVIF Filter ids (kConvertJpegToAvif / kConvertToAvifLossless /
+// kConvertToAvifAnimated).
+bool DownstreamCachingDirectives::SupportsAvif() const {
+  return IsPropertySupported(
+      &supports_avif_,
+      RewriteOptions::FilterId(RewriteOptions::kConvertJpegToAvif),
+      capabilities_to_be_supported_);
+}
+
+bool DownstreamCachingDirectives::SupportsAvifLosslessAlpha() const {
+  return IsPropertySupported(
+      &supports_avif_lossless_alpha_,
+      RewriteOptions::FilterId(RewriteOptions::kConvertToAvifLossless),
+      capabilities_to_be_supported_);
+}
+
+bool DownstreamCachingDirectives::SupportsAvifAnimated() const {
+  return IsPropertySupported(
+      &supports_avif_animated_,
+      RewriteOptions::FilterId(RewriteOptions::kConvertToAvifAnimated),
       capabilities_to_be_supported_);
 }
 

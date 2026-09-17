@@ -44,7 +44,10 @@ class AbstractPropertyStoreGetCallback {
   virtual ~AbstractPropertyStoreGetCallback();
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(AbstractPropertyStoreGetCallback);
+  AbstractPropertyStoreGetCallback(const AbstractPropertyStoreGetCallback&) =
+      delete;
+  AbstractPropertyStoreGetCallback& operator=(
+      const AbstractPropertyStoreGetCallback&) = delete;
 };
 
 }  // namespace net_instaweb

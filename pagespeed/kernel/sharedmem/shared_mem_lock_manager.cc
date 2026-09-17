@@ -20,6 +20,7 @@
 #include "pagespeed/kernel/sharedmem/shared_mem_lock_manager.h"
 
 #include <cstddef>
+#include <memory>
 
 #include "base/logging.h"
 #include "pagespeed/kernel/base/abstract_mutex.h"
@@ -27,7 +28,6 @@
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/hasher.h"
 #include "pagespeed/kernel/base/message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/timer.h"
@@ -260,7 +260,8 @@ class SharedMemLock : public SchedulerBasedAbstractLock {
   // base pointer for the bucket we are in.
   Data::Bucket* bucket_;
 
-  DISALLOW_COPY_AND_ASSIGN(SharedMemLock);
+  SharedMemLock(const SharedMemLock&) = delete;
+  SharedMemLock& operator=(const SharedMemLock&) = delete;
 };
 
 SharedMemLockManager::SharedMemLockManager(AbstractSharedMem* shm,

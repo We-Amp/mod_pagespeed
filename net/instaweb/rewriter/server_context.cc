@@ -21,6 +21,7 @@
 
 #include <algorithm>  // for std::binary_search
 #include <cstddef>    // for size_t
+#include <memory>
 #include <set>
 
 #include "base/logging.h"  // for operator<<, etc
@@ -57,7 +58,6 @@
 #include "pagespeed/kernel/base/md5_hasher.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/named_lock_manager.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/stl_util.h"  // for STLDeleteElements
 #include "pagespeed/kernel/base/string.h"
@@ -90,7 +90,22 @@ const char kBeaconOptionsHashQueryParam[] = "oh";
 const char kBeaconCriticalImagesQueryParam[] = "ci";
 const char kBeaconRenderedDimensionsQueryParam[] = "rd";
 const char kBeaconCriticalCssQueryParam[] = "cs";
+const char kBeaconOverflowQueryParam[] = "of";
 const char kBeaconNonceQueryParam[] = "n";
+// Core Web Vitals params reported by the add_instrumentation collector.
+// Each is an optional non-negative decimal integer, parsed independently.
+// Note: client TTFB is "c_ttfb" (absolute responseStart), a fresh name; the
+// legacy "ttfb" param carried responseStart - requestStart and stays
+// ignored so the two semantics never mix in one histogram.
+const char kBeaconLcpQueryParam[] = "lcp";
+const char kBeaconClsQueryParam[] = "cls";  // fixed-point milli-units
+const char kBeaconInpQueryParam[] = "inp";
+const char kBeaconTtfbQueryParam[] = "c_ttfb";
+
+// Sanity clamps for beacon-reported metrics; values beyond these are
+// dropped as garbage rather than skewing the histograms.
+const int kMaxBeaconMetricMs = 10 * 60 * 1000;  // 10 minutes
+const int kMaxBeaconClsMilli = 100000;          // CLS of 100
 
 // Attributes that should not be automatically copied from inputs to outputs
 const char* kExcludedAttributes[] = {
@@ -179,7 +194,8 @@ class BeaconPropertyCallback : public PropertyPage {
   std::unique_ptr<StringSet> critical_css_selector_set_;
   std::unique_ptr<RenderedImages> rendered_images_set_;
   GoogleString nonce_;
-  DISALLOW_COPY_AND_ASSIGN(BeaconPropertyCallback);
+  BeaconPropertyCallback(const BeaconPropertyCallback&) = delete;
+  BeaconPropertyCallback& operator=(const BeaconPropertyCallback&) = delete;
 };
 
 }  // namespace
@@ -247,6 +263,7 @@ ServerContext::ServerContext(RewriteDriverFactory* factory)
       metadata_cache_(nullptr),
       store_outputs_in_file_system_(false),
       response_headers_finalized_(true),
+      is_decoding_stub_(false),
       enable_property_cache_(true),
       lock_manager_(nullptr),
       message_handler_(nullptr),
@@ -459,6 +476,36 @@ void ServerContext::ApplyInputCacheControl(const ResourceVector& inputs,
   }
 }
 
+void ServerContext::ApplyRewrittenUrlCacheControl(ResponseHeaders* headers) {
+  // A rewritten output's URL embeds its content hash -- changed
+  // content mints a new URL -- so the bytes behind a hash-committed
+  // .pagespeed. URL can never change. When such a response is publicly
+  // cacheable, say 'public' explicitly (unlocks shared caches that require
+  // the token, e.g. Google Cloud CDN, cf. FixCacheControlForGoogleCache)
+  // and add RFC 8246 'immutable' (Firefox 49+ and Safari 11+ skip
+  // revalidation for the full TTL; Chrome currently ignores it).
+  //
+  // This is applied ONLY when serving a hash-committed .pagespeed. URL,
+  // never to the stored output headers. Stored entries keep the historical
+  // shape -- 'public' only when every input explicitly said so -- because
+  // derived serving paths depend on that as a signal: the in-place
+  // (original-URL) fallback path re-adds 'public' to its response exactly
+  // when the nested rewritten resource's stored headers carry it
+  // (RewriteContext::FetchContext::FetchFallbackDoneImpl), and an
+  // unconditional stored 'public' would upgrade original-URL responses the
+  // origin never marked public (RFC 9111 s3.5: explicit 'public' newly
+  // authorizes shared caches to store Authorization-bearing responses).
+  //
+  // Privacy floor: both setters refuse to touch a response carrying
+  // private/no-cache/no-store, and input-driven downgrades have already
+  // been applied to the headers by ApplyInputCacheControl by the time any
+  // serving path calls this. Hash-mismatch and fallback-to-original serving
+  // rebuild Cache-Control via SetDateAndCaching and are deliberately not
+  // stamped.
+  headers->SetCacheControlPublic();
+  headers->SetCacheControlImmutable();
+}
+
 void ServerContext::AddOriginalContentLengthHeader(const ResourceVector& inputs,
                                                    ResponseHeaders* headers) {
   // Determine the total original content length for input resource, and
@@ -587,7 +634,7 @@ bool ServerContext::HandleBeacon(StringPiece params, StringPiece user_agent,
   if (query_params.Lookup1Unescaped(kBeaconEtsQueryParam, &query_param_str)) {
     int value = -1;
 
-    size_t index = query_param_str.find(":");
+    size_t index = query_param_str.find(':');
     if (index != GoogleString::npos && index < query_param_str.size()) {
       GoogleString load_time_str = query_param_str.substr(index + 1);
       if (!(StringToInt(load_time_str, &value) && value >= 0)) {
@@ -598,6 +645,47 @@ bool ServerContext::HandleBeacon(StringPiece params, StringPiece user_agent,
         rewrite_stats_->beacon_timings_ms_histogram()->Add(value);
       }
     }
+  }
+
+  // Extract the Core Web Vitals metrics.  Each parameter is optional and
+  // parsed independently: the values come from separate client-side
+  // observers, so one malformed or out-of-range value is dropped silently
+  // without affecting the others or the beacon status.
+  struct CwvBeaconParam {
+    const char* name;
+    Histogram* histogram;
+    int max_value;
+  };
+  const CwvBeaconParam cwv_params[] = {
+      {kBeaconLcpQueryParam, rewrite_stats_->beacon_lcp_ms_histogram(),
+       kMaxBeaconMetricMs},
+      {kBeaconClsQueryParam, rewrite_stats_->beacon_cls_milli_histogram(),
+       kMaxBeaconClsMilli},
+      {kBeaconInpQueryParam, rewrite_stats_->beacon_inp_ms_histogram(),
+       kMaxBeaconMetricMs},
+      {kBeaconTtfbQueryParam, rewrite_stats_->beacon_ttfb_ms_histogram(),
+       kMaxBeaconMetricMs},
+  };
+  for (const CwvBeaconParam& param : cwv_params) {
+    if (query_params.Lookup1Unescaped(param.name, &query_param_str)) {
+      int value = -1;
+      if (StringToInt(query_param_str, &value) && value >= 0 &&
+          value <= param.max_value) {
+        param.histogram->Add(value);
+      }
+    }
+  }
+
+  // The client flags truncated payloads (e.g. the critical-CSS beacon drops
+  // selectors once it overflows its POST budget) so the data loss is
+  // observable here instead of silent.
+  if (query_params.Lookup1Unescaped(kBeaconOverflowQueryParam,
+                                    &query_param_str) &&
+      query_param_str == "1") {
+    rewrite_stats_->beacon_overflow_count()->Add(1);
+    message_handler_->Message(
+        kWarning, "Beacon reported truncated (overflowed) data for %s",
+        url_query_param.spec_c_str());
   }
 
   // Process data from critical image and CSS beacons.
@@ -682,10 +770,12 @@ RewriteDriver* ServerContext::NewCustomRewriteDriver(
     RewriteOptions* options, const RequestContextPtr& request_ctx) {
   RewriteDriver* rewrite_driver = NewUnmanagedRewriteDriver(
       nullptr /* no pool as custom*/, options, request_ctx);
+
   {
     ScopedMutex lock(rewrite_drivers_mutex_.get());
     active_rewrite_drivers_.insert(rewrite_driver);
   }
+
   if (factory_ != nullptr) {
     factory_->ApplyPlatformSpecificConfiguration(rewrite_driver);
   }
@@ -701,15 +791,18 @@ RewriteDriver* ServerContext::NewUnmanagedRewriteDriver(
     const RequestContextPtr& request_ctx) {
   RewriteDriver* rewrite_driver = new RewriteDriver(
       message_handler_, file_system_, default_system_fetcher_);
+
   rewrite_driver->set_options_for_pool(pool, options);
   rewrite_driver->SetServerContext(this);
   rewrite_driver->ClearRequestProperties();
   rewrite_driver->set_request_context(request_ctx);
+
   // Set the initial reference, as the expectation is that the client
   // will need to call Cleanup() or FinishParse()
   rewrite_driver->AddUserReference();
 
   ApplySessionFetchers(request_ctx, rewrite_driver);
+
   return rewrite_driver;
 }
 
@@ -846,7 +939,11 @@ size_t ServerContext::num_active_rewrite_drivers() {
 
 RewriteOptions* ServerContext::global_options() {
   if (base_class_options_.get() == nullptr) {
-    base_class_options_.reset(factory_->default_options()->Clone());
+    RewriteOptions* def_opts = factory_->default_options();
+    if (def_opts == nullptr) {
+      return nullptr;
+    }
+    base_class_options_.reset(def_opts->Clone());
   }
   return base_class_options_.get();
 }
@@ -1197,9 +1294,9 @@ void ServerContext::ShowCacheHandler(Format format, StringPiece url,
   }
 }
 
-GoogleString ServerContext::FetchRemoteConfig(const GoogleString& url,
-                                              int64 timeout_ms, bool on_startup,
-                                              RequestContextPtr request_ctx) {
+GoogleString ServerContext::FetchRemoteConfig(
+    const GoogleString& url, int64 timeout_ms, bool on_startup,
+    const RequestContextPtr& request_ctx) {
   CHECK(!url.empty());
   // Set up the fetcher.
   GoogleString out_str;

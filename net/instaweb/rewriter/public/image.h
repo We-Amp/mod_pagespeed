@@ -53,11 +53,31 @@ class Image {
 
   struct ConversionBySourceVariable {
     ConversionBySourceVariable()
-        : timeout_count(NULL), success_ms(NULL), failure_ms(NULL) {}
+        : timeout_count(NULL),
+          overrun_count(NULL),
+          success_ms(NULL),
+          failure_ms(NULL) {}
 
-    Variable* timeout_count;  // # of timed-out conversions.
-    Histogram* success_ms;    // Successful conversion duration.
-    Histogram* failure_ms;    // Failed (and non-timed-out) conversion duration.
+    Variable* timeout_count;  // # of conversions that did not produce output
+                              // because of the timeout: either aborted
+                              // mid-encode, or (AVIF stills) declined up front
+                              // because the estimated cost did not fit.
+    // # of conversions that DID produce output but took longer than the
+    // configured timeout allowed.  Orthogonal to the timeout/success/failure
+    // trichotomy above rather than a fourth value of it: an overrun is a
+    // SUCCESS that cost too much, so it lands in success_ms as well.  Only the
+    // AVIF family populates this; a WebP ConversionVariables leaves it NULL,
+    // which UpdateConversionStats tolerates.
+    //
+    // This bucket exists because an AVIF still encode cannot be interrupted
+    // (see AvifConfiguration::encode_budget_ms): once admitted it always runs
+    // to completion, so exceeding the budget is a thing that is OBSERVED after
+    // the fact, never a thing that is prevented.  Without a separate counter
+    // such an overrun would be invisible -- timeout_count only ever sees
+    // conversions that produced nothing.
+    Variable* overrun_count;
+    Histogram* success_ms;  // Successful conversion duration.
+    Histogram* failure_ms;  // Failed (and non-timed-out) conversion duration.
   };
 
   struct ConversionVariables {
@@ -69,6 +89,11 @@ class Image {
       OPAQUE,
       NONOPAQUE,
       FROM_GIF_ANIMATED,
+      // Source was already in the target format and is being recompressed in
+      // place (AVIF->AVIF).  The WebP family never uses this bucket -- WebP
+      // recompression is not instrumented -- so for a WebP ConversionVariables
+      // this slot stays NULL, which UpdateConversionStats tolerates.
+      FROM_AVIF,
       NUM_VARIABLE_TYPE
     };
     ConversionBySourceVariable* Get(VariableType var_type) {
@@ -88,6 +113,11 @@ class Image {
           allow_webp_animated(false),
           webp_quality(RewriteOptions::kDefaultImageRecompressQuality),
           webp_animated_quality(RewriteOptions::kDefaultImageRecompressQuality),
+          preferred_avif(pagespeed::image_compression::LIBAVIF_NONE),
+          allow_avif_alpha(false),
+          allow_avif_animated(false),
+          avif_quality(RewriteOptions::kDefaultImageRecompressQuality),
+          avif_animated_quality(RewriteOptions::kDefaultImageRecompressQuality),
           jpeg_quality(RewriteOptions::kDefaultImageRecompressQuality),
           progressive_jpeg_min_bytes(
               RewriteOptions::kDefaultProgressiveJpegMinBytes),
@@ -95,19 +125,27 @@ class Image {
           convert_gif_to_png(false),
           convert_png_to_jpeg(false),
           convert_jpeg_to_webp(false),
+          convert_jpeg_to_avif(false),
+          convert_png_to_avif(false),
+          convert_gif_to_avif(false),
           recompress_jpeg(false),
           recompress_png(false),
           recompress_webp(false),
+          recompress_avif(false),
           retain_color_profile(false),
           retain_color_sampling(false),
           retain_exif_data(false),
+          preserve_c2pa(true),
+          c2pa_carry(false),
           use_transparent_for_blank_image(false),
           jpeg_num_progressive_scans(
               RewriteOptions::kDefaultImageJpegNumProgressiveScans),
           webp_conversion_timeout_ms(-1),
+          avif_conversion_timeout_ms(-1),
           conversions_attempted(0),
           preserve_lossless(false),
-          webp_conversion_variables(NULL) {}
+          webp_conversion_variables(NULL),
+          avif_conversion_variables(NULL) {}
 
     // These options are set by the client to specify what type of
     // conversion to perform:
@@ -116,21 +154,47 @@ class Image {
     bool allow_webp_animated;
     int64 webp_quality;
     int64 webp_animated_quality;
+    // AVIF request-capability + quality knobs, siblings of the
+    // WebP fields. preferred_avif is a pure request capability set by
+    // SetAvifCompressionOptions; it and preferred_webp may BOTH be non-NONE for a
+    // both-capable request. The per-image AVIF-vs-WebP-vs-original choice is made
+    // at encode time in ComputeOutputContents (pick-smaller), never here.
+    pagespeed::image_compression::PreferredAvifLevel preferred_avif;
+    bool allow_avif_alpha;
+    bool allow_avif_animated;
+    int64 avif_quality;
+    int64 avif_animated_quality;
     int64 jpeg_quality;
     int64 progressive_jpeg_min_bytes;
     bool progressive_jpeg;
     bool convert_gif_to_png;
     bool convert_png_to_jpeg;
     bool convert_jpeg_to_webp;
+    bool convert_jpeg_to_avif;
+    bool convert_png_to_avif;
+    bool convert_gif_to_avif;
     bool recompress_jpeg;
     bool recompress_png;
     bool recompress_webp;
+    bool recompress_avif;
     bool retain_color_profile;
     bool retain_color_sampling;
     bool retain_exif_data;
+    // Preserve C2PA/Content-Credentials provenance (APP11/JUMBF) through
+    // optimization. Defaults true; independent of retain_exif_data.
+    bool preserve_c2pa;
+    // Carry-through: when true (and preserve_c2pa is also true), JPEG and PNG
+    // manifest-bearing images are recompressed with their ORIGINAL manifest
+    // bytes carried (spliced) into the output unmodified, keeping both the byte
+    // savings and the provenance. When false (default), or for formats/inputs
+    // where carry cannot be honored byte-exactly, the image falls back to
+    // skip-not-strip (detect-and-skip, byte-identical pass-through). Never
+    // re-emits a modified manifest.
+    bool c2pa_carry;
     bool use_transparent_for_blank_image;
     int64 jpeg_num_progressive_scans;
     int64 webp_conversion_timeout_ms;
+    int64 avif_conversion_timeout_ms;
 
     // These fields are set by the conversion routines to report
     // characteristics of the conversion process.
@@ -138,6 +202,7 @@ class Image {
     bool preserve_lossless;
 
     ConversionVariables* webp_conversion_variables;
+    ConversionVariables* avif_conversion_variables;
   };
 
   virtual ~Image();
@@ -242,7 +307,8 @@ class Image {
   friend class ImageTestingPeer;
   friend class ImageTest;
 
-  DISALLOW_COPY_AND_ASSIGN(Image);
+  Image(const Image&) = delete;
+  Image& operator=(const Image&) = delete;
 };
 
 // Image owns none of its inputs.  All of the arguments to NewImage(...) (the
@@ -262,6 +328,8 @@ Image* NewImage(const StringPiece& original_contents, const GoogleString& url,
 
 // Creates a blank image of the given dimensions and type.
 // For now, this is assumed to be an 8-bit 4-channel image transparent image.
+// Returns nullptr if the blank image cannot be generated (e.g. non-positive
+// dimensions or writer initialization failure).
 Image* BlankImageWithOptions(int width, int height, ImageType type,
                              const StringPiece& tmp_dir, Timer* timer,
                              MessageHandler* handler,

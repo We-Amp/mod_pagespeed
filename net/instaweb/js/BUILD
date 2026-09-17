@@ -1,3 +1,8 @@
+exports_files([
+    "externs.js",
+    "js_utils.js",
+])
+
 cc_library(
     name = "data2c_lib",
     srcs = [

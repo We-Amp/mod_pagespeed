@@ -1,0 +1,17 @@
+<!doctype html>
+<html>
+<!-- Zero-copy aliased-serve M1 merge-gate fixture (multi-chunk).
+
+     Resizes the large, high-entropy zc_noise_src.jpg (generated into the
+     example images dir by setup_iis_full.ps1 when the rig is configured for
+     the zero-copy M1 gate, PAGESPEED_ZEROCOPY_GATE=1) down to 1200x900. The
+     resize is an actual byte saving, so the rewrite is not dropped, and the
+     noise content keeps the rewritten .pagespeed.ic. artifact large (~0.5 MB
+     -- several 128 KB aliased chunks) so the aliased serve runs its full
+     repeated submit -> async-flush -> completion loop, not a single-chunk
+     special case. See iis/test_iis_zerocopy_gate.py. -->
+<head><title>zerocopy multi-chunk gate image</title></head>
+<body>
+  <img src="/mod_pagespeed_example/images/zc_noise_src.jpg" width="1200" height="900">
+</body>
+</html>

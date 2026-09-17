@@ -34,7 +34,6 @@
 #include "net/instaweb/util/public/property_cache.h"
 #include "pagespeed/kernel/base/base64_util.h"
 #include "pagespeed/kernel/base/message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/http/request_headers.h"
@@ -44,7 +43,7 @@ namespace net_instaweb {
 
 namespace {
 
-typedef std::map<GoogleString, int> SupportMap;
+using SupportMap = std::map<GoogleString, int>;
 
 // *dest += addend, but capping at kint32max
 inline void SaturatingAddTo(int32 addend, int32* dest) {

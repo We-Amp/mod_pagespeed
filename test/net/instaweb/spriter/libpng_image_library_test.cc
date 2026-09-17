@@ -20,8 +20,11 @@
 #include "net/instaweb/spriter/libpng_image_library.h"
 
 #include <memory>
+#include <sys/stat.h>
+#if defined(_WIN32)
+#include <direct.h>
+#endif
 
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 
@@ -45,7 +48,11 @@ class LibpngImageLibraryTest : public testing::Test {
   };
   void SetUp() override {
     delegate_ = std::make_unique<LogDelegate>();
+#if defined(_WIN32)
+    _mkdir(GTestTempDir().c_str());
+#else
     mkdir(GTestTempDir().c_str(), 0777);
+#endif
     src_library_ = std::make_unique<LibpngImageLibrary>(
         StrCat(GTestSrcDir(), kTestData), StrCat(GTestTempDir(), "/"),
         delegate_.get());

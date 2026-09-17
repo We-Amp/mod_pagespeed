@@ -24,7 +24,6 @@
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "net/instaweb/rewriter/public/static_asset_manager.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "test/net/instaweb/rewriter/rewrite_test_base.h"
@@ -48,7 +47,8 @@ class DeterministicJsFilterTest : public RewriteTestBase {
  private:
   std::unique_ptr<DeterministicJsFilter> deterministic_js_filter_;
 
-  DISALLOW_COPY_AND_ASSIGN(DeterministicJsFilterTest);
+  DeterministicJsFilterTest(const DeterministicJsFilterTest&) = delete;
+  DeterministicJsFilterTest& operator=(const DeterministicJsFilterTest&) = delete;
 };
 
 TEST_F(DeterministicJsFilterTest, DeterministicJsInjection) {
@@ -65,6 +65,35 @@ TEST_F(DeterministicJsFilterTest, DeterministicJsInjection) {
   EXPECT_NE(GoogleString::npos, deterministic_js_code.find("Math.random"));
   // Check if the deterministic js is inserted correctly.
   ValidateExpected("deterministicJs_injection", "<head></head><body></body>",
+                   expected_str);
+}
+
+TEST_F(DeterministicJsFilterTest, CspForbidsInlineScript) {
+  // The Date()/random() overrides are an inline script, which a
+  // script-src policy without 'unsafe-inline' would block; the page must
+  // be left untouched.
+  ValidateNoChanges("csp_no_inline",
+                    "<head>"
+                    "<meta http-equiv=\"Content-Security-Policy\" "
+                    "content=\"script-src *;\">"
+                    "</head><body></body>");
+}
+
+TEST_F(DeterministicJsFilterTest, CspAllowsInlineScript) {
+  // With 'unsafe-inline' permitted the filter behaves as usual. The
+  // script is injected at the start of <head>, before the policy tag.
+  const char kCsp[] =
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"script-src * 'unsafe-inline';\">";
+  StringPiece deterministic_js_code =
+      server_context()->static_asset_manager()->GetAsset(
+          StaticAssetEnum::DETERMINISTIC_JS, options());
+  GoogleString expected_str =
+      StrCat("<head><script type=\"text/javascript\" "
+             "data-pagespeed-no-defer>",
+             deterministic_js_code, "</script>", kCsp, "</head><body></body>");
+  ValidateExpected("csp_unsafe_inline",
+                   StrCat("<head>", kCsp, "</head><body></body>"),
                    expected_str);
 }
 

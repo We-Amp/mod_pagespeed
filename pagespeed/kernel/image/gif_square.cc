@@ -42,7 +42,7 @@ const GifColorType GifSquare::kGifGreen = {0x00, 0xFF, 0x00};
 const GifColorType GifSquare::kGifBlue = {0x00, 0x00, 0xFF};
 const GifColorType GifSquare::kGifYellow = {0xFF, 0xFF, 0x00};
 
-#define LOBYTE(x) ((x)&0xff)
+#define LOBYTE(x) ((x) & 0xff)
 #define HIBYTE(x) (((x) >> 8) & 0xff)
 
 #if GIFLIB_MAJOR < 5
@@ -124,7 +124,7 @@ bool GifSquare::PrepareScreen(bool gif89, size_px width, size_px height,
   colormaps_.push_back(GifMakeMapObject(num_colors, color_map));
 
 #if GIFLIB_MAJOR >= 5
-  colormaps_[0]->SortFlag = 0;  // not initialized above
+  colormaps_[0]->SortFlag = false;  // not initialized above
   EGifSetGifVersion(gif_file_, gif89);
 #else
   EGifSetGifVersion("89a");

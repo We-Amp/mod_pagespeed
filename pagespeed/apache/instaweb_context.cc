@@ -81,7 +81,8 @@ class PropertyCallback : public PropertyPage {
  private:
   RewriteDriver* driver_;
   AtomicBool done_;
-  DISALLOW_COPY_AND_ASSIGN(PropertyCallback);
+  PropertyCallback(const PropertyCallback&) = delete;
+  PropertyCallback& operator=(const PropertyCallback&) = delete;
 };
 
 }  // namespace

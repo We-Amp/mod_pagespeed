@@ -60,7 +60,8 @@ class Wildcard {
   int num_blocks_;
   int last_block_offset_;
   bool is_simple_;
-  DISALLOW_COPY_AND_ASSIGN(Wildcard);
+  Wildcard(const Wildcard&) = delete;
+  Wildcard& operator=(const Wildcard&) = delete;
 };
 
 }  // namespace net_instaweb

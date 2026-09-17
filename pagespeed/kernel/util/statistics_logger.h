@@ -76,14 +76,14 @@ class StatisticsLogger {
  private:
   friend class StatisticsLoggerTest;
 
-  typedef std::vector<GoogleString> VariableInfo;
-  typedef std::map<GoogleString, VariableInfo> VarMap;
+  using VariableInfo = std::vector<GoogleString>;
+  using VarMap = std::map<GoogleString, VariableInfo>;
 
   // Note that exactly one of these will be non-null; this is really
   // a union, but I'm too lazy to make the enum tag, and there's no
   // space advantage to doing so when there are only two choices.
-  typedef std::pair<Variable*, UpDownCounter*> VariableOrCounter;
-  typedef std::map<StringPiece, VariableOrCounter> VariableMap;
+  using VariableOrCounter = std::pair<Variable*, UpDownCounter*>;
+  using VariableMap = std::map<StringPiece, VariableOrCounter>;
 
   // Export statistics to a writer. Only export stats needed for console.
   // current_time_ms: The time at which the dump was triggered.
@@ -131,7 +131,8 @@ class StatisticsLogger {
   GoogleString logfile_name_;
   VariableMap variables_to_log_;
 
-  DISALLOW_COPY_AND_ASSIGN(StatisticsLogger);
+  StatisticsLogger(const StatisticsLogger&) = delete;
+  StatisticsLogger& operator=(const StatisticsLogger&) = delete;
 };
 
 // Handles reading the logfile created by StatisticsLogger.
@@ -163,7 +164,8 @@ class StatisticsLogfileReader {
   // Logfile buffer.
   GoogleString buffer_;
 
-  DISALLOW_COPY_AND_ASSIGN(StatisticsLogfileReader);
+  StatisticsLogfileReader(const StatisticsLogfileReader&) = delete;
+  StatisticsLogfileReader& operator=(const StatisticsLogfileReader&) = delete;
 };
 
 }  // namespace net_instaweb

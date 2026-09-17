@@ -266,7 +266,8 @@ class CacheableResourceBase::FetchCallbackBase : public AsyncFetchWithLock {
 
   FallbackSharedAsyncFetch* fallback_fetch_;
 
-  DISALLOW_COPY_AND_ASSIGN(FetchCallbackBase);
+  FetchCallbackBase(const FetchCallbackBase&) = delete;
+  FetchCallbackBase& operator=(const FetchCallbackBase&) = delete;
 };
 
 // Writes result into cache. Use this when you do not need to wait for the
@@ -330,7 +331,8 @@ class CacheableResourceBase::FreshenFetchCallback : public FetchCallbackBase {
   CacheableResourceBase* resource_;
   ResourcePtr own_resource_;  // keep alive resource since callback may be NULL
 
-  DISALLOW_COPY_AND_ASSIGN(FreshenFetchCallback);
+  FreshenFetchCallback(const FreshenFetchCallback&) = delete;
+  FreshenFetchCallback& operator=(const FreshenFetchCallback&) = delete;
 };
 
 // Fetch callback that writes result directly into a resource.
@@ -397,7 +399,8 @@ class CacheableResourceBase::LoadFetchCallback : public FetchCallbackBase {
   HTTPValueWriter http_value_writer_;
   ResponseHeaders::VaryOption respect_vary_;
 
-  DISALLOW_COPY_AND_ASSIGN(LoadFetchCallback);
+  LoadFetchCallback(const LoadFetchCallback&) = delete;
+  LoadFetchCallback& operator=(const LoadFetchCallback&) = delete;
 };
 
 class CacheableResourceBase::LoadHttpCacheCallback
@@ -417,7 +420,8 @@ class CacheableResourceBase::LoadHttpCacheCallback
   CacheableResourceBase* resource_;
   Resource::AsyncCallback* resource_callback_;
   Resource::NotCacheablePolicy not_cacheable_policy_;
-  DISALLOW_COPY_AND_ASSIGN(LoadHttpCacheCallback);
+  LoadHttpCacheCallback(const LoadHttpCacheCallback&) = delete;
+  LoadHttpCacheCallback& operator=(const LoadHttpCacheCallback&) = delete;
 };
 
 CacheableResourceBase::LoadHttpCacheCallback::LoadHttpCacheCallback(
@@ -511,7 +515,8 @@ void CacheableResourceBase::LoadHttpCacheCallback::LoadAndSaveToCache() {
   if (not_cacheable_policy_ == Resource::kLoadEvenIfNotCacheable) {
     cb->set_no_cache_ok(true);
   }
-  cb->Start(resource_->rewrite_driver()->async_fetcher());
+  UrlAsyncFetcher* fetcher = resource_->rewrite_driver()->async_fetcher();
+  cb->Start(fetcher);
 }
 
 // HTTPCache::Callback which checks if we have a fresh response in the cache.
@@ -580,7 +585,8 @@ class CacheableResourceBase::FreshenHttpCacheCallback
   // Note that we need to own the resource since callback_ might be NULL.
   ResourcePtr own_resource_;
   Resource::FreshenCallback* callback_;
-  DISALLOW_COPY_AND_ASSIGN(FreshenHttpCacheCallback);
+  FreshenHttpCacheCallback(const FreshenHttpCacheCallback&) = delete;
+  FreshenHttpCacheCallback& operator=(const FreshenHttpCacheCallback&) = delete;
 };
 
 CacheableResourceBase::CacheableResourceBase(StringPiece stat_prefix,

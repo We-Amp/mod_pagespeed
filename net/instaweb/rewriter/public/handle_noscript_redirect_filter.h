@@ -50,7 +50,9 @@ class HandleNoscriptRedirectFilter : public EmptyHtmlFilter {
   bool canonical_present_;
   bool canonical_inserted_;
 
-  DISALLOW_COPY_AND_ASSIGN(HandleNoscriptRedirectFilter);
+  HandleNoscriptRedirectFilter(const HandleNoscriptRedirectFilter&) = delete;
+  HandleNoscriptRedirectFilter& operator=(const HandleNoscriptRedirectFilter&) =
+      delete;
 };
 
 }  // namespace net_instaweb

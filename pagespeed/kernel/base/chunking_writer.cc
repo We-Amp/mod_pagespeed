@@ -53,7 +53,9 @@ bool ChunkingWriter::Write(const StringPiece& str_orig,
                           flush_limit_ - unflushed_bytes_);
     }
 
-    if (!writer_->Write(StringPiece(str.data(), to_write), handler)) {
+    if (!writer_->Write(
+            StringPiece(str.data(), to_write),
+            handler)) {  // NOLINT(bugprone-suspicious-stringview-data-usage)
       return false;
     }
 

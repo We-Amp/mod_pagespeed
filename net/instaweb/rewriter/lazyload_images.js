@@ -197,34 +197,6 @@ pagespeed.LazyloadImages.prototype.offset_ = function(element) {
 
 
 /**
- * Returns the value of the given style property for the element.
- * @param {Element} element DOM element whose style property is to be computed.
- * @param {string} property The CSS property we are trying to find.
- * @return {string} The given property if found, and empty string otherwise.
- * @private
- */
-pagespeed.LazyloadImages.prototype.getStyle_ = function(element, property) {
-  if (element.currentStyle) {
-    // IE.
-    return element.currentStyle[property];
-  }
-  if (document.defaultView &&
-      document.defaultView.getComputedStyle) {
-    // Other browsers.
-    var style = document.defaultView.getComputedStyle(element, null);
-    if (style) {
-      return style.getPropertyValue(property);
-    }
-  }
-  if (element.style && element.style[property]) {
-    return element.style[property];
-  }
-  // Fallback.
-  return '';
-};
-
-
-/**
  * Returns true if an element is currently visible or within the buffer.
  * @param {Element} element The DOM element to check for visibility.
  * @return {boolean} True if the element is visible.
@@ -237,16 +209,6 @@ pagespeed.LazyloadImages.prototype.isVisible_ = function(element) {
     // Since we don't know when the element will become visible, we'll try to
     // load the image after onload, so that we can improve PLT.
     return false;
-  }
-
-  var element_position = this.getStyle_(element, 'position');
-  if (element_position == 'relative') {
-    // TODO(ksimbili): Check if this code is still needed. Find out if any other
-    // alternative will solve this.
-    // If the element contains a "position: relative" style attribute, assume
-    // it is visible since getBoundingClientRect() doesn't seem to work
-    // correctly here.
-    return true;
   }
 
   var viewport = this.viewport_();
@@ -309,14 +271,33 @@ pagespeed.LazyloadImages.prototype.loadIfVisibleAndMaybeBeacon =
           // checkImageForCriticality logic because the lazyload_images_filter
           // would have removed this.
           if (pagespeed.CriticalImages) {
-            pagespeedutils.addHandler(element, 'load', function(e) {
-              pagespeed.CriticalImages.checkImageForCriticality(this);
+            /**
+             * Guards against decrementing the beacon countdown twice for one
+             * element ('load' and 'error' can in principle both fire).
+             * @type {boolean}
+             */
+            var counted = false;
+            var decrementAndMaybeBeacon = function() {
+              if (counted) {
+                return;
+              }
+              counted = true;
               if (context.onload_done_) {
                 context.imgs_to_load_before_beaconing_--;
                 if (context.imgs_to_load_before_beaconing_ == 0) {
                   pagespeed.CriticalImages.checkCriticalImages();
                 }
               }
+            };
+            pagespeedutils.addHandler(element, 'load', function(e) {
+              pagespeed.CriticalImages.checkImageForCriticality(this);
+              decrementAndMaybeBeacon();
+            });
+            // An image that fails to load never fires 'load'. Without also
+            // counting 'error', the countdown would never reach zero and the
+            // critical-images beacon would starve.
+            pagespeedutils.addHandler(element, 'error', function(e) {
+              decrementAndMaybeBeacon();
             });
           }
         }
@@ -354,6 +335,17 @@ pagespeed.LazyloadImages.prototype['loadIfVisibleAndMaybeBeacon'] =
 pagespeed.LazyloadImages.prototype.loadAllImages = function() {
   this.force_load_ = true;
   this.loadVisible_();
+  // Safety net: sweep the DOM for images still carrying
+  // data-pagespeed-lazy-src that never made it into the deferred queue
+  // (for example because their placeholder onload never fired). Images
+  // already restored above are skipped, since the attribute is removed on
+  // load.
+  var images = document.getElementsByTagName('img');
+  for (var i = 0, element; element = images[i]; i++) {
+    if (this.hasAttribute_(element, 'data-pagespeed-lazy-src')) {
+      this.loadIfVisibleAndMaybeBeacon(element);
+    }
+  }
 };
 
 pagespeed.LazyloadImages.prototype['loadAllImages'] =
@@ -469,8 +461,10 @@ pagespeed.lazyLoadInit = function(loadAfterOnload, blankImageSrc) {
   };
   pagespeedutils.addHandler(window, 'load', lazy_onload);
 
-  // Pre-load the blank image placeholder.
-  if (blankImageSrc.indexOf('data') != 0) {
+  // Pre-load the blank image placeholder, unless it is an inline data: URI.
+  // Note: prefix match on 'data:', so that regular paths like /data/1.gif
+  // are still pre-loaded.
+  if (blankImageSrc.indexOf('data:') != 0) {
     new Image().src = blankImageSrc;
   }
 

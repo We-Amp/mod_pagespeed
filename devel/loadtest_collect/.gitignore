@@ -1,0 +1,11 @@
+node_modules/
+
+# Collected corpora are large runtime artifacts — never commit them. The build
+# scripts (collect.js, build_docroot.sh, build_internet_corpus.sh) are the
+# source of truth; the corpus they produce lives on the test host, not in git.
+corpus/
+corpus-*/
+*-corpus/
+corpus_*.txt
+*.tar.bz2
+slurp/

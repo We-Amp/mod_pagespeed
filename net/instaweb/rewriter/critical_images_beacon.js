@@ -131,6 +131,126 @@ pagespeed.CriticalImages.Beacon_.prototype.isCritical_ = function(element) {
 
 
 /**
+ * Returns true if the character is an HTML space, matching the whitespace
+ * definition SrcSetSlotCollection::ParseSrcSet uses on the server.
+ * @param {string} c Single-character string to test.
+ * @return {boolean}
+ * @private
+ */
+pagespeed.CriticalImages.isHtmlSpace_ = function(c) {
+  return c == ' ' || c == '\t' || c == '\n' || c == '\f' || c == '\r';
+};
+
+
+/**
+ * Splits a srcset attribute value into its candidate URLs, in order. Mirrors
+ * SrcSetSlotCollection::ParseSrcSet on the server: the positional alignment
+ * between this list and data-pagespeed-srcset-url-hashes is the contract, so
+ * the tokenization must match exactly.
+ * @param {string} srcset The srcset attribute value.
+ * @return {!Array.<string>} The candidate URLs (possibly empty strings).
+ * @private
+ */
+pagespeed.CriticalImages.parseSrcSetUrls_ = function(srcset) {
+  var urls = [];
+  var i = 0;
+  var n = srcset.length;
+  while (true) {
+    // Strip leading whitespace and commas.
+    while (i < n &&
+           (pagespeed.CriticalImages.isHtmlSpace_(srcset.charAt(i)) ||
+            srcset.charAt(i) == ',')) {
+      ++i;
+    }
+    if (i >= n) {
+      break;
+    }
+    // The URL runs up to the first whitespace character.
+    var end = i;
+    while (end < n && !pagespeed.CriticalImages.isHtmlSpace_(
+        srcset.charAt(end))) {
+      ++end;
+    }
+    var url = srcset.substring(i, end);
+    i = end;
+    // A URL with trailing commas carries no descriptor.
+    var expectDescriptor = true;
+    while (url.charAt(url.length - 1) == ',') {
+      url = url.substring(0, url.length - 1);
+      expectDescriptor = false;
+    }
+    if (expectDescriptor) {
+      // The descriptor runs up to the next comma outside parentheses.
+      var insideParen = false;
+      while (i < n) {
+        var c = srcset.charAt(i);
+        if (c == '(') {
+          insideParen = true;
+        } else if (c == ')' && insideParen) {
+          insideParen = false;
+        } else if (c == ',' && !insideParen) {
+          break;
+        }
+        ++i;
+      }
+    }
+    urls.push(url);
+  }
+  return urls;
+};
+
+
+/**
+ * Resolves a (possibly relative) URL against the document base, matching how
+ * the browser resolves srcset candidates into currentSrc.
+ * @param {string} url The URL to resolve.
+ * @return {string} The absolute URL.
+ * @private
+ */
+pagespeed.CriticalImages.absolutifyUrl_ = function(url) {
+  var a = document.createElement('a');
+  a.href = url;
+  return a.href;
+};
+
+
+/**
+ * Returns the key identifying the image an element actually displays: the
+ * stamped data-pagespeed-url-hash for images with a src attribute, or — for
+ * srcset-only images — the entry of the stamped
+ * data-pagespeed-srcset-url-hashes list positionally matching the candidate
+ * the browser selected (currentSrc).
+ * @param {!Element} element The DOM element to identify.
+ * @return {?string} The image key, or null if it cannot be determined.
+ * @private
+ */
+pagespeed.CriticalImages.Beacon_.prototype.imageKey_ = function(element) {
+  var key = element.getAttribute('data-pagespeed-url-hash');
+  if (key) {
+    return key;
+  }
+  var hashes = element.getAttribute('data-pagespeed-srcset-url-hashes');
+  if (!hashes) {
+    return null;
+  }
+  var currentSrc = element.currentSrc;
+  if (!currentSrc) {
+    return null;
+  }
+  var candidates = pagespeed.CriticalImages.parseSrcSetUrls_(
+      element.getAttribute('srcset') || '');
+  var hashList = hashes.split(',');
+  for (var i = 0; i < candidates.length && i < hashList.length; ++i) {
+    if (hashList[i] &&
+        pagespeed.CriticalImages.absolutifyUrl_(candidates[i]) == currentSrc) {
+      return hashList[i];
+    }
+  }
+  return null;
+};
+
+
+/**
  * Inserts the image key string into criticalImages_ and criticalImagesKeys_
  * if it is critical (visible).
  * @param {!Element} element The DOM element to check for visibility.
@@ -138,7 +258,7 @@ pagespeed.CriticalImages.Beacon_.prototype.isCritical_ = function(element) {
  */
 pagespeed.CriticalImages.Beacon_.prototype.insertIfImageIsCritical_ =
     function(element) {
-  var key = element.getAttribute('data-pagespeed-url-hash');
+  var key = this.imageKey_(element);
   if (key && !(key in this.criticalImagesKeys_) &&
       this.isCritical_(element)) {
     this.criticalImages_.push(key);
@@ -267,8 +387,9 @@ pagespeed.CriticalImages.Beacon_.prototype.checkCriticalImages_ = function() {
  *     rw: number,
  *     rh: number,
  *     ow: number,
- *     oh: number}>} Object mapping an image's data-pagespeed-url-hash to its
- *     original and rendered widths and heights.
+ *     oh: number}>} Object mapping an image's key (its url hash, or the
+ *     selected srcset candidate's hash) to its original and rendered widths
+ *     and heights.
  */
 pagespeed.CriticalImages.Beacon_.prototype.getImageRenderedMap = function() {
   var renderedImageDimensions = {};
@@ -284,7 +405,7 @@ pagespeed.CriticalImages.Beacon_.prototype.getImageRenderedMap = function() {
   if (!('naturalWidth' in img) || !('naturalHeight' in img)) { return {}; }
 
   for (var i = 0; img = images[i]; ++i) {
-    var key = img.getAttribute('data-pagespeed-url-hash');
+    var key = this.imageKey_(img);
     if (!key) { continue; }
     if ((!(key in renderedImageDimensions) &&
              img.width > 0 && img.height > 0 &&

@@ -20,6 +20,7 @@
 #include "net/instaweb/http/public/http_cache.h"
 
 #include <algorithm>
+#include <memory>
 
 #include "base/logging.h"
 #include "net/instaweb/http/public/http_cache_failure.h"
@@ -28,7 +29,6 @@
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/hasher.h"
 #include "pagespeed/kernel/base/message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -132,6 +132,23 @@ class HTTPCacheCallback : public CacheInterface::Callback {
         cache_level_(0) {
     start_us_ = http_cache_->timer()->NowUs();
     start_ms_ = start_us_ / 1000;
+    // Latency is measured against a monotonic clock so a wall-clock step
+    // (NTP/hypervisor sync) can't produce a negative delta; start_us_/start_ms_
+    // stay on the wall clock because they feed cache freshness/expiry math.
+    start_monotonic_us_ = http_cache_->timer()->NowMonotonicUs();
+  }
+
+  // Links the backend value into the callback's HTTPValue.  With the
+  // zero-copy flag on and a memory-mapped backend value (Cyclone), the
+  // HTTPValue borrows the mapped bytes directly (no copy); consumers that
+  // let the value escape the request-serving scope collapse it to owned
+  // storage (see HTTPValue::LinkMapped).  Otherwise this is the classic
+  // owned-copy Link.
+  bool LinkHttpValue(ResponseHeaders* headers) {
+    if (http_cache_->cyclone_zero_copy_enabled() && value().is_mapped()) {
+      return callback_->http_value()->LinkMapped(value(), headers, handler_);
+    }
+    return callback_->http_value()->Link(value().ToOwned(), headers, handler_);
   }
 
   bool ValidateCandidate(const GoogleString& key,
@@ -139,10 +156,11 @@ class HTTPCacheCallback : public CacheInterface::Callback {
     ++cache_level_;
     int64 now_us = http_cache_->timer()->NowUs();
     int64 now_ms = now_us / 1000;
+    int64 now_monotonic_us = http_cache_->timer()->NowMonotonicUs();
     ResponseHeaders* headers = callback_->response_headers();
     bool is_expired = false;
     if ((backend_state == CacheInterface::kAvailable) &&
-        callback_->http_value()->Link(value(), headers, handler_) &&
+        LinkHttpValue(headers) &&
         (http_cache_->force_caching_ ||
          headers->IsProxyCacheable(callback_->req_properties(),
                                    callback_->RespectVaryOnResources(),
@@ -219,6 +237,14 @@ class HTTPCacheCallback : public CacheInterface::Callback {
             StringPiece content;
             callback_->http_value()->ExtractContents(&content);
             callback_->http_value()->Clear();
+            // Zero-copy note: when http_value() is a mapped view, 'content'
+            // points into the mmap region and Clear() has just dropped the
+            // HTTPValue's own keep-alive reference to it.  The bytes remain
+            // valid across the Write() below because CacheInterface::
+            // Callback::value_ (this callback's MappedSharedString) still
+            // holds a reference for the whole ValidateCandidate call, i.e.
+            // until HTTPCacheCallback::Done -- that is the pin here, not the
+            // HTTPValue keep-alive.  Write() then copies into owned storage.
             callback_->http_value()->Write(content, handler_);
             callback_->http_value()->SetHeaders(headers);
           }
@@ -244,7 +270,8 @@ class HTTPCacheCallback : public CacheInterface::Callback {
     }
 
     // TODO(gee): Perhaps all of this belongs in TimingInfo.
-    int64 elapsed_us = std::max(static_cast<int64>(0), now_us - start_us_);
+    // Monotonic delta: non-decreasing by construction, so no clamp is needed.
+    int64 elapsed_us = now_monotonic_us - start_monotonic_us_;
     http_cache_->cache_time_us()->Add(elapsed_us);
     callback_->ReportLatencyMs(elapsed_us / 1000);
     if (cache_level_ == http_cache_->cache_levels() ||
@@ -260,7 +287,6 @@ class HTTPCacheCallback : public CacheInterface::Callback {
     } else if (!callback_->request_context()->accepts_gzip() &&
                headers->IsGzipped()) {
       HTTPValue new_value;
-      GoogleString inflated;
       if (InflatingFetch::UnGzipValueIfCompressed(
               *callback_->http_value(), headers, &new_value, handler_)) {
         callback_->http_value()->Link(&new_value);
@@ -268,6 +294,7 @@ class HTTPCacheCallback : public CacheInterface::Callback {
     }
     start_ms_ = now_ms;
     start_us_ = now_us;
+    start_monotonic_us_ = now_monotonic_us;
     return result_.status == HTTPCache::kFound;
   }
 
@@ -286,9 +313,11 @@ class HTTPCacheCallback : public CacheInterface::Callback {
   HTTPCache::FindResult result_;
   int64 start_us_;
   int64 start_ms_;
+  int64 start_monotonic_us_;
   int cache_level_;
 
-  DISALLOW_COPY_AND_ASSIGN(HTTPCacheCallback);
+  HTTPCacheCallback(const HTTPCacheCallback&) = delete;
+  HTTPCacheCallback& operator=(const HTTPCacheCallback&) = delete;
 };
 
 void HTTPCache::Find(const GoogleString& key, const GoogleString& fragment,
@@ -395,8 +424,9 @@ HTTPValue* HTTPCache::ApplyHeaderChangesForPut(int64 start_us,
 
 void HTTPCache::PutInternal(bool preserve_response_headers,
                             const GoogleString& key,
-                            const GoogleString& fragment, int64 start_us,
-                            HTTPValue* value, ResponseHeaders* response_headers,
+                            const GoogleString& fragment,
+                            int64 start_monotonic_us, HTTPValue* value,
+                            ResponseHeaders* response_headers,
                             MessageHandler* handler) {
   HTTPValue working_value;
 
@@ -454,7 +484,10 @@ void HTTPCache::PutInternal(bool preserve_response_headers,
   // directly to a client through InflatingFetch.
   cache_->Put(CompositeKey(key, fragment), value->share());
   if (cache_time_us_ != nullptr) {
-    int64 delta_us = timer_->NowUs() - start_us;
+    // Latency is measured against a monotonic clock, which is non-decreasing by
+    // construction, so a wall-clock step (NTP/hypervisor sync) can no longer
+    // feed Add a negative delta and no clamp is needed.
+    int64 delta_us = timer_->NowMonotonicUs() - start_monotonic_us;
     cache_time_us_->Add(delta_us);
   }
 }
@@ -467,6 +500,7 @@ void HTTPCache::Put(const GoogleString& key, const GoogleString& fragment,
                     const HttpOptions& http_options, HTTPValue* value,
                     MessageHandler* handler) {
   int64 start_us = timer_->NowUs();
+  int64 start_monotonic_us = timer_->NowMonotonicUs();
   // Extract headers and contents.
   ResponseHeaders headers(http_options);
   bool success = value->ExtractHeaders(&headers, handler);
@@ -489,8 +523,8 @@ void HTTPCache::Put(const GoogleString& key, const GoogleString& fragment,
       ApplyHeaderChangesForPut(start_us, nullptr, &headers, value, handler);
   // Put into underlying cache.
   if (new_value != nullptr) {
-    PutInternal(false /* preserve_response_headers */, key, fragment, start_us,
-                new_value, &headers, handler);
+    PutInternal(false /* preserve_response_headers */, key, fragment,
+                start_monotonic_us, new_value, &headers, handler);
     if (cache_inserts_ != nullptr) {
       cache_inserts_->Add(1);
     }
@@ -511,6 +545,7 @@ void HTTPCache::Put(const GoogleString& key, const GoogleString& fragment,
     return;
   }
   int64 start_us = timer_->NowUs();
+  int64 start_monotonic_us = timer_->NowMonotonicUs();
   int64 now_ms = start_us / 1000;
   if ((IsExpired(*headers, now_ms) ||
        !headers->IsProxyCacheable(req_properties, respect_vary_on_resources,
@@ -526,8 +561,8 @@ void HTTPCache::Put(const GoogleString& key, const GoogleString& fragment,
       ApplyHeaderChangesForPut(start_us, &content, headers, nullptr, handler));
   // Put into underlying cache.
   if (value.get() != nullptr) {
-    PutInternal(true /* preserve_response_headers */, key, fragment, start_us,
-                value.get(), headers, handler);
+    PutInternal(true /* preserve_response_headers */, key, fragment,
+                start_monotonic_us, value.get(), headers, handler);
     if (cache_inserts_ != nullptr) {
       cache_inserts_->Add(1);
     }

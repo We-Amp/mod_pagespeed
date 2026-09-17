@@ -37,7 +37,8 @@ class SimpleClass {
 
  private:
   int index_;
-  DISALLOW_COPY_AND_ASSIGN(SimpleClass);
+  SimpleClass(const SimpleClass&) = delete;
+  SimpleClass& operator=(const SimpleClass&) = delete;
 };
 
 class BaseClass : public RefCounted<BaseClass> {
@@ -51,7 +52,8 @@ class BaseClass : public RefCounted<BaseClass> {
 
  private:
   SimpleClass simple_;
-  DISALLOW_COPY_AND_ASSIGN(BaseClass);
+  BaseClass(const BaseClass&) = delete;
+  BaseClass& operator=(const BaseClass&) = delete;
 };
 
 struct DerivedA : public BaseClass {};

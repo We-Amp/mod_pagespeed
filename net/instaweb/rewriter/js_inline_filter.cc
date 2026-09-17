@@ -71,7 +71,8 @@ class JsInlineFilter::Context : public InlineRewriteContext {
 
  private:
   JsInlineFilter* filter_;
-  DISALLOW_COPY_AND_ASSIGN(Context);
+  Context(const Context&) = delete;
+  Context& operator=(const Context&) = delete;
 };
 
 JsInlineFilter::JsInlineFilter(RewriteDriver* driver)
@@ -97,9 +98,31 @@ void JsInlineFilter::StartElementImpl(HtmlElement* element) {
   DCHECK(!should_inline_);
 
   HtmlElement::Attribute* src;
-  if (script_tag_scanner_.ParseScriptElement(element, &src) ==
-      ScriptTagScanner::kJavaScript) {
+  ScriptTagScanner::ScriptClassification classification =
+      script_tag_scanner_.ParseScriptElement(element, &src);
+  if (classification == ScriptTagScanner::kJavaScript) {
     should_inline_ = (src != nullptr) && (src->DecodedValueOrNull() != nullptr);
+    // Inlining a script with async/defer (or IE for/event) would change its
+    // execution semantics: async/defer are ignored on scripts without src=,
+    // so the script would run synchronously mid-parse instead.
+    if (should_inline_ && script_tag_scanner_.ExecutionMode(element) !=
+                              ScriptTagScanner::kExecuteSync) {
+      should_inline_ = false;
+      driver()->InsertDebugComment(
+          "JS not inlined because of the async, defer, for, "
+          "or event attribute",
+          element);
+    }
+  } else if (classification == ScriptTagScanner::kJavaScriptModule &&
+             src != nullptr && src->DecodedValueOrNull() != nullptr) {
+    // Inlining a module would change the base URL its relative imports
+    // resolve against (script URL -> document base URL, including any
+    // <base href>), change import.meta.url, and drop the CORS-mode fetch
+    // context of the original response.
+    driver()->InsertDebugComment(
+        "JS not inlined: module scripts are never inlined (import "
+        "resolution and fetch semantics would change)",
+        element);
   }
 }
 
@@ -114,8 +137,6 @@ void JsInlineFilter::EndElementImpl(HtmlElement* element) {
 
     // StartInlining() transfers ownership of ctx to RewriteDriver, or deletes
     // it on failure.
-    // TODO(morlovich): Consider async/defer here; it may not be a good
-    // idea to inline async scripts in particular.
     Context* ctx = new Context(this, element, attr);
     ctx->StartInlining();
   }
@@ -215,6 +236,7 @@ void JsInlineFilter::RenderInline(const ResourcePtr& resource,
   // we have to hide the CDATA delimiters behind Javascript comments.
   // See http://lachy.id.au/log/2006/11/xhtml-script
   // and http://github.com/apache/incubator-pagespeed-mod/issues/125
+  bool did_inline = false;
   if (driver()->MimeTypeXhtmlStatus() != RewriteDriver::kIsNotXhtml) {
     // CDATA sections cannot be nested because they end with the first
     // occurrence of "]]>", so if the script contains that string
@@ -227,6 +249,7 @@ void JsInlineFilter::RenderInline(const ResourcePtr& resource,
       node->Append("\n//]]>");
       driver()->AppendChild(element, node);
       element->DeleteAttribute(HtmlName::kSrc);
+      did_inline = true;
     }
   } else {
     // If we're not in XHTML, we can simply paste in the external script
@@ -234,11 +257,16 @@ void JsInlineFilter::RenderInline(const ResourcePtr& resource,
     driver()->AppendChild(
         element, driver()->NewCharactersNode(element, escaped_contents));
     element->DeleteAttribute(HtmlName::kSrc);
+    did_inline = true;
   }
-  num_js_inlined_->Add(1);
+  // Only count scripts we actually inlined; the XHTML "]]>" skip above leaves
+  // the script external, so it must not increment num_js_inlined_.
+  if (did_inline) {
+    num_js_inlined_->Add(1);
+  }
 }
 
-void JsInlineFilter::Characters(HtmlCharactersNode* characters) {
+void JsInlineFilter::CharactersImpl(HtmlCharactersNode* characters) {
   if (should_inline_) {
     HtmlElement* script_element = characters->parent();
     DCHECK(script_element != nullptr);

@@ -25,10 +25,10 @@
 
 #include <cstddef>
 #include <vector>
+#include <memory>
 
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/null_mutex.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/image/gif_square.h"
@@ -160,7 +160,8 @@ class GifReaderTest : public testing::Test {
   ScopedPngStruct read_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(GifReaderTest);
+  GifReaderTest(const GifReaderTest&) = delete;
+  GifReaderTest& operator=(const GifReaderTest&) = delete;
 };
 
 TEST_F(GifReaderTest, LoadValidGifsWithoutTransforms) {
@@ -348,7 +349,8 @@ class GifScanlineReaderRawTest : public testing::Test {
   GoogleString input_image_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(GifScanlineReaderRawTest);
+  GifScanlineReaderRawTest(const GifScanlineReaderRawTest&) = delete;
+  GifScanlineReaderRawTest& operator=(const GifScanlineReaderRawTest&) = delete;
 };
 
 TEST_F(GifScanlineReaderRawTest, CorruptHeader) {
@@ -1146,7 +1148,8 @@ class GifAnimationTest : public testing::Test {
   static const GifColorType kAlternateColorMap[];
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(GifAnimationTest);
+  GifAnimationTest(const GifAnimationTest&) = delete;
+  GifAnimationTest& operator=(const GifAnimationTest&) = delete;
 };
 
 const int GifAnimationTest::kNumColors = 8;

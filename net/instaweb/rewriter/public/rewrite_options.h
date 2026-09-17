@@ -23,6 +23,7 @@
 #include <bitset>
 #include <cstddef>
 #include <map>
+#include <memory>
 #include <set>
 #include <utility>
 #include <vector>
@@ -42,7 +43,6 @@
 #include "pagespeed/kernel/base/hasher.h"
 #include "pagespeed/kernel/base/md5_hasher.h"
 #include "pagespeed/kernel/base/proto_util.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/sha1_signature.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_hash.h"
@@ -128,19 +128,26 @@ class RewriteOptions {
     kConvertPngToJpeg,
     kConvertToWebpAnimated,
     kConvertToWebpLossless,
+    kConvertJpegToAvif,
+    kConvertToAvifLossless,
+    kConvertToAvifAnimated,
     kDebug,
     kDecodeRewrittenUrls,
     kDedupInlinedImages,
-    kDeferIframe,
+    // Accepted-but-inert. DeferIframeFilter runs only as a built-in helper of
+    // defer_js/disable_js.
+    kDeferIframeDeprecated,
     kDeferJavascript,
     kDelayImages,
     kDeterministicJs,
     kDisableJavascript,
-    kDivStructure,
+    // Accepted-but-inert; nothing consumes the enabled bit.
+    kDivStructureDeprecated,
     kElideAttributes,
     kExperimentCollectMobImageInfo,
     kExperimentHttp2,  // used while developing proper HTTP2 features.
-    kExplicitCloseTags,
+    // Accepted-but-inert; nothing consumes the enabled bit.
+    kExplicitCloseTagsDeprecated,
     kExtendCacheCss,
     kExtendCacheImages,
     kExtendCachePdfs,
@@ -148,7 +155,8 @@ class RewriteOptions {
     kFallbackRewriteCssUrls,
     kFixReflows,
     kFlattenCssImports,
-    kFlushSubresources,
+    // Accepted-but-inert; the flush-early flow it fed was removed.
+    kFlushSubresourcesDeprecated,
     kHandleNoscriptRedirect,
     kHintPreloadSubresources,
     kHtmlWriterFilter,
@@ -163,23 +171,29 @@ class RewriteOptions {
     kInsertDnsPrefetch,
     kInsertGA,
     kInsertImageDimensions,
+    kInsertSpeculationRules,
     kJpegSubsampling,
     kLazyloadImages,
     kLeftTrimUrls,
     kLocalStorageCache,
-    kMakeGoogleAnalyticsAsync,
+    kMakeGoogleAnalyticsAsyncDeprecated,
     kMakeShowAdsAsync,
+    // Load-bearing bit: gates UsePerOriginPropertyCachePage(), membership in
+    // kAddHeadFilters, and the MobilizeFilters level head. Do not deprecate.
     kMobilize,
-    kMobilizePrecompute,  // TODO(jud): This is unused, remove it.
+    // Accepted-but-inert; never had a consumer.
+    kMobilizePrecomputeDeprecated,
     kMoveCssAboveScripts,
     kMoveCssToHead,
     kOutlineCss,
     kOutlineJavascript,
     kPedantic,
     kPrioritizeCriticalCss,
+    kPrioritizeCriticalImages,
     kRecompressJpeg,
     kRecompressPng,
     kRecompressWebp,
+    kRecompressAvif,
     kRemoveComments,
     kRemoveQuotes,
     kResizeImages,
@@ -193,9 +207,9 @@ class RewriteOptions {
     kRewriteJavascriptInline,
     kRewriteStyleAttributes,
     kRewriteStyleAttributesWithUrl,
-    kServeDeprecationNotice,
-    kSplitHtml,
-    kSplitHtmlHelper,
+    // Accepted-but-inert; nothing consumes the enabled bits.
+    kSplitHtmlDeprecated,
+    kSplitHtmlHelperDeprecated,
     kSpriteImages,
     kStripImageColorProfile,
     kStripImageMetaData,
@@ -242,6 +256,21 @@ class RewriteOptions {
     kEnabledStandby,
   };
 
+  // Application modes for the lazyload_images filter.
+  enum LazyloadImagesMode {
+    // Pick kLazyloadImagesModeNative or kLazyloadImagesModeJs per request,
+    // based on whether the user agent supports the native loading="lazy"
+    // attribute.
+    kLazyloadImagesModeAuto,
+    // Annotate non-critical images with loading="lazy" (and critical images
+    // with fetchpriority="high"), keeping src/srcset intact and injecting no
+    // JavaScript.
+    kLazyloadImagesModeNative,
+    // Legacy behavior: blank out the src and restore it with an injected
+    // JavaScript loader.
+    kLazyloadImagesModeJs,
+  };
+
   // Any new Option added should have a corresponding name here that must be
   // passed in when Add*Property is called in AddProperties(). You must also
   // update the LookupOptionByNameTest method in rewrite_options_test.cc. If
@@ -251,6 +280,7 @@ class RewriteOptions {
   static const char kAcceptInvalidSignatures[];
   static const char kAccessControlAllowOrigins[];
   static const char kAddOptionsToUrls[];
+  static const char kAgentOptimize[];
   static const char kAllowLoggingUrlsInLogRecord[];
   static const char kAllowOptionsToBeSetByCookies[];
   static const char kAllowVaryOn[];
@@ -317,6 +347,7 @@ class RewriteOptions {
   static const char kImageLimitResizeAreaPercent[];
   static const char kImageMaxRewritesAtOnce[];
   static const char kImagePreserveURLs[];
+  static const char kImageProvenanceCarry[];
   static const char kImageRecompressionQuality[];
   static const char kImageResolutionLimitBytes[];
   static const char kImageWebpQualityForSaveData[];
@@ -324,6 +355,14 @@ class RewriteOptions {
   static const char kImageWebpRecompressionQualityForSmallScreens[];
   static const char kImageWebpAnimatedRecompressionQuality[];
   static const char kImageWebpTimeoutMs[];
+  // AVIF recompression-quality option names, mirroring the WebP quality
+  // options above one-for-one: AVIF is held at full WebP parity, so every
+  // WebP knob has an AVIF sibling with the same name shape and semantics.
+  static const char kImageAvifQualityForSaveData[];
+  static const char kImageAvifRecompressionQuality[];
+  static const char kImageAvifRecompressionQualityForSmallScreens[];
+  static const char kImageAvifAnimatedRecompressionQuality[];
+  static const char kImageAvifTimeoutMs[];
   static const char kImplicitCacheTtlMs[];
   static const char kIncreaseSpeedTracking[];
   static const char kInlineOnlyCriticalImages[];
@@ -340,6 +379,8 @@ class RewriteOptions {
   static const char kJsPreserveURLs[];
   static const char kLazyloadImagesAfterOnload[];
   static const char kLazyloadImagesBlankUrl[];
+  static const char kLazyloadImagesMode[];
+  static const char kLazyloadImagesSkipFirst[];
   static const char kLoadFromFileCacheTtlMs[];
   static const char kLogBackgroundRewrite[];
   static const char kLogMobilizationSamples[];
@@ -368,6 +409,7 @@ class RewriteOptions {
   static const char kObliviousPagespeedUrls[];
   static const char kOptionCookiesDurationMs[];
   static const char kOverrideCachingTtlMs[];
+  static const char kPreserveImageProvenance[];
   static const char kPreserveSubresourceHints[];
   static const char kPreserveUrlRelativity[];
   static const char kPrivateNotVaryForIE[];
@@ -436,12 +478,15 @@ class RewriteOptions {
   static const char kCacheFlushFilename[];
   static const char kCacheFlushPollIntervalSec[];
   static const char kCompressMetadataCache[];
+  static const char kCycloneZeroCopy[];
+  static const char kCycloneZeroCopyServe[];
+  static const char kCycloneRamCacheKb[];
+  static const char kAsyncMetadataL2Writes[];
   static const char kFetcherProxy[];
   static const char kFetchHttps[];
-  static const char kFileCacheCleanInodeLimit[];
-  static const char kFileCacheCleanIntervalMs[];
   static const char kFileCacheCleanSizeKb[];
   static const char kFileCachePath[];
+  static const char kFileCacheSmallTierPercent[];
   static const char kLogDir[];
   static const char kLruCacheByteLimit[];
   static const char kLruCacheKbPerProcess[];
@@ -451,6 +496,7 @@ class RewriteOptions {
   static const char kProxySuffix[];
   static const char kRateLimitBackgroundFetches[];
   static const char kServeWebpToAnyAgent[];
+  static const char kServeAvifToAnyAgent[];
   static const char kSlurpDirectory[];
   static const char kSlurpFlushLimit[];
   static const char kSlurpReadOnly[];
@@ -507,62 +553,12 @@ class RewriteOptions {
   // version for parsing densities.
   class ResponsiveDensities : public std::vector<double> {};
 
-  class AllowVaryOn {
-   public:
-    // Strings for display.
-    static const char kNoneString[];
-    static const char kAutoString[];
-
-    AllowVaryOn()
-        : allow_auto_(false),
-          allow_accept_(false),
-          allow_save_data_(false),
-          allow_user_agent_(false) {}
-
-    GoogleString ToString() const;
-
-    bool allow_auto() const { return allow_auto_; }
-    void set_allow_auto(bool v) { allow_auto_ = v; }
-    bool allow_accept() const { return allow_accept_; }
-    void set_allow_accept(bool v) { allow_accept_ = v; }
-    bool allow_save_data() const { return allow_save_data_ || allow_auto_; }
-    void set_allow_save_data(bool v) { allow_save_data_ = v; }
-    bool allow_user_agent() const { return allow_user_agent_; }
-    void set_allow_user_agent(bool v) { allow_user_agent_ = v; }
-
-   private:
-    // All of the properties must be included in
-    // RewriteOptions::OptionSignature.
-    bool allow_auto_;
-    bool allow_accept_;
-    bool allow_save_data_;
-    bool allow_user_agent_;
-  };
-
-  bool AllowVaryOnAuto() const { return allow_vary_on_.value().allow_auto(); }
-  bool AllowVaryOnAccept() const {
-    return allow_vary_on_.value().allow_accept();
-  }
-  bool AllowVaryOnSaveData() const {
-    return allow_vary_on_.value().allow_save_data();
-  }
-  bool AllowVaryOnUserAgent() const {
-    return allow_vary_on_.value().allow_user_agent();
-  }
-  GoogleString AllowVaryOnToString() const {
-    return ToString(allow_vary_on_.value());
-  }
-
-  // Returns true if PageSpeed responds differently for image requests with
-  // Save-Data header, i.e., using a unique quality and adding
-  // "Vary: Save-Data" header.
-  bool SupportSaveData() const {
-    return (HasValidSaveDataQualities() && AllowVaryOnSaveData());
-  }
-
-  void set_allow_vary_on(const AllowVaryOn& x) {
-    set_option(x, &allow_vary_on_);
-  }
+  // Returns true if PageSpeed may use the Save-Data image qualities, i.e.
+  // serve a smaller image to a client that asked for one with "Save-Data: on".
+  // The response carries no Vary: Save-Data header -- the Save-Data quality is
+  // folded into the metadata cache key instead, and the varying bytes are only
+  // ever published under a distinct rewritten URL.
+  bool SupportSaveData() const { return HasValidSaveDataQualities(); }
 
   // Image qualities and parameters, after applying the inheritance rules.
   int64 ImageJpegQuality() const;
@@ -572,6 +568,13 @@ class RewriteOptions {
   int64 ImageWebpQualityForSmallScreen() const;
   int64 ImageWebpQualityForSaveData() const;
   int64 ImageWebpAnimatedQuality() const;
+  // AVIF recompression-quality accessors, mirroring the WebP
+  // accessors above (fall back to ImageAvifQuality()/ImageRecompressionQuality
+  // when unset, exactly as WebP does).
+  int64 ImageAvifQuality() const;
+  int64 ImageAvifQualityForSmallScreen() const;
+  int64 ImageAvifQualityForSaveData() const;
+  int64 ImageAvifAnimatedQuality() const;
   int64 ImageJpegNumProgressiveScansForSmallScreen() const;
   // Returns true if any quality for small screen is valid and different from
   // the base quality.
@@ -596,6 +599,23 @@ class RewriteOptions {
   // This version number should be incremented if any default-values
   // are changed, either in an Add*Property() call or via
   // options->set_default.
+  //
+  // A DEFAULT CHANGE NOW HAS A SECOND OBLIGATION, and it is not satisfied by
+  // bumping this number.  The per-request option context
+  // (net/instaweb/rewriter/public/option_context.h) is deliberately NOT
+  // sensitive to this version — that is the property that lets it survive an
+  // upgrade — and it carries only options somebody explicitly SET.  So a
+  // release that changes a default changes behaviour for every configuration
+  // that never set that option WITHOUT moving its option-context signature,
+  // and work already cached under that signature stays reachable and stale.
+  //
+  // The lever for that is kOptionContextFormatVersion, and it is deliberately
+  // expensive: bumping it re-keys every option context everywhere, which is a
+  // COLD CACHE on this side and on the component consuming the context.  So it
+  // is a judgement call, not a reflex — bump it when a default change alters
+  // what bytes a client receives, and leave it when the change is invisible to
+  // output.  Either way, decide explicitly; the failure mode of forgetting is
+  // silent stale content, not an error.
   static constexpr int kOptionsVersion = 15;
 
   // Number of bytes used for signature hashing.
@@ -666,8 +686,12 @@ class RewriteOptions {
   // filter(s) to the given set. If the given name doesn't match -and- if
   // handler is not NULL, logs a warning message to handler. Returns true if
   // the name matched and the set was updated, false otherwise.
+  // 'enabling' says whether the set being built enables the named filters;
+  // deprecated analytics filters (insert_ga, make_google_analytics_async) log
+  // a deprecation warning only when enabling is true, so disable/forbid
+  // mentions stay silent.
   static bool AddByNameToFilterSet(const StringPiece& option, FilterSet* set,
-                                   MessageHandler* handler);
+                                   MessageHandler* handler, bool enabling);
 
   // Convenience name for (name,value) pairs of options (typically filter
   // parameters), as well as sets of those pairs.
@@ -720,10 +744,11 @@ class RewriteOptions {
     StringPiece option_name_;  // Key into all_options_.
     OptionScope scope_;
     bool do_not_use_for_signature_computation_;  // Default is false.
-    bool safe_to_print_;  // Safe to print in debug filter output.
+    bool safe_to_print_ = false;  // Safe to print in debug filter output.
     int index_;
 
-    DISALLOW_COPY_AND_ASSIGN(PropertyBase);
+    PropertyBase(const PropertyBase&) = delete;
+    PropertyBase& operator=(const PropertyBase&) = delete;
   };
 
   typedef std::vector<PropertyBase*> PropertyVector;
@@ -799,7 +824,6 @@ class RewriteOptions {
     kOptionValueInvalid
   };
 
-  static const char kDefaultAllowVaryOn[];
   static const int kDefaultBeaconReinstrumentTimeSec;
   static const int64 kDefaultCssFlattenMaxBytes;
   static const int64 kDefaultCssImageInlineMaxBytes;
@@ -838,6 +862,14 @@ class RewriteOptions {
   static const int64 kDefaultImageWebpAnimatedRecompressQuality;
   static const int64 kDefaultImageWebpRecompressQualityForSmallScreens;
   static const int64 kDefaultImageWebpTimeoutMs;
+  // AVIF defaults. Quality default mirrors the WebP default
+  // shape (-1 falls back to ImageRecompressionQuality); see the spike outcome
+  // (quality ~50-60) for the encoder default applied in image.cc.
+  static const int64 kDefaultImageAvifQualityForSaveData;
+  static const int64 kDefaultImageAvifRecompressQuality;
+  static const int64 kDefaultImageAvifAnimatedRecompressQuality;
+  static const int64 kDefaultImageAvifRecompressQualityForSmallScreens;
+  static const int64 kDefaultImageAvifTimeoutMs;
   static const int kDefaultDomainShardCount;
   static const int64 kDefaultOptionCookiesDurationMs;
   static const int64 kDefaultLoadFromFileCacheTtlMs;
@@ -1021,7 +1053,8 @@ class RewriteOptions {
     typedef std::vector<AlternateOriginDomainSpec> AlternateOriginDomains;
     AlternateOriginDomains alternate_origin_domains_;
 
-    DISALLOW_COPY_AND_ASSIGN(ExperimentSpec);
+    ExperimentSpec(const ExperimentSpec&) = delete;
+    ExperimentSpec& operator=(const ExperimentSpec&) = delete;
   };
 
   // Represents the content type of user-defined url-valued attributes.
@@ -1277,7 +1310,7 @@ class RewriteOptions {
   bool HasInlineUnauthorizedResourceType(
       semantic_type::Category category) const;
   void ClearInlineUnauthorizedResourceTypes();
-  void set_inline_unauthorized_resource_types(ResourceCategorySet x);
+  void set_inline_unauthorized_resource_types(const ResourceCategorySet& x);
 
   // Store size, md5 hash and canonical url for library recognition.
   bool RegisterLibrary(uint64 bytes, StringPiece md5_hash,
@@ -1475,6 +1508,8 @@ class RewriteOptions {
   // Option<T>::value_ from a string representation of it.
   static bool ParseFromString(StringPiece value_string, bool* value);
   static bool ParseFromString(StringPiece value_string, EnabledEnum* value);
+  static bool ParseFromString(StringPiece value_string,
+                              LazyloadImagesMode* value);
   static bool ParseFromString(StringPiece value_string, int* value) {
     return StringToInt(value_string, value);
   }
@@ -1504,8 +1539,6 @@ class RewriteOptions {
                               ResponsiveDensities* value);
   static bool ParseFromString(StringPiece value_string,
                               protobuf::MessageLite* proto);
-  static bool ParseFromString(StringPiece value_string,
-                              AllowVaryOn* allow_vary_on);
 
   // TODO(jmarantz): consider setting flags in the set_ methods so that
   // first's explicit settings can override default values from second.
@@ -1886,9 +1919,6 @@ class RewriteOptions {
   void set_private_not_vary_for_ie(bool x) {
     set_option(x, &private_not_vary_for_ie_);
   }
-  bool private_not_vary_for_ie() const {
-    return private_not_vary_for_ie_.value();
-  }
 
   void set_combine_across_paths(bool x) {
     set_option(x, &combine_across_paths_);
@@ -1925,6 +1955,13 @@ class RewriteOptions {
 
   void set_respect_vary(bool x) { set_option(x, &respect_vary_); }
   bool respect_vary() const { return respect_vary_.value(); }
+
+  // agent_optimize negotiation toggle (OFF by default). On 1.1 this
+  // only enables Accept: text/markdown recognition + Vary: Accept on HTML; it
+  // never changes the body (no markdown render). The operator flag is the
+  // only gate — no license or entitlement check sits behind it.
+  void set_agent_optimize(bool x) { set_option(x, &agent_optimize_); }
+  bool agent_optimize() const { return agent_optimize_.value(); }
 
   void set_respect_x_forwarded_proto(bool x) {
     set_option(x, &respect_x_forwarded_proto_);
@@ -2047,6 +2084,20 @@ class RewriteOptions {
   void set_lazyload_images_blank_url(StringPiece p) {
     set_option(GoogleString(p.data(), p.size()), &lazyload_images_blank_url_);
   }
+
+  void set_lazyload_images_mode(LazyloadImagesMode x) {
+    set_option(x, &lazyload_images_mode_);
+  }
+  LazyloadImagesMode lazyload_images_mode() const {
+    return lazyload_images_mode_.value();
+  }
+
+  void set_lazyload_images_skip_first(int x) {
+    set_option(x, &lazyload_images_skip_first_);
+  }
+  int lazyload_images_skip_first() const {
+    return lazyload_images_skip_first_.value();
+  }
   const GoogleString& lazyload_images_blank_url() const {
     return lazyload_images_blank_url_.value();
   }
@@ -2123,6 +2174,26 @@ class RewriteOptions {
     return CheckBandwidthOption(image_preserve_urls_);
   }
   void set_image_preserve_urls(bool x) { set_option(x, &image_preserve_urls_); }
+
+  // Preserve C2PA/Content-Credentials provenance (JPEG APP11/JUMBF) through
+  // image optimization. On by default; opt out with `PreserveImageProvenance
+  // off`. Independent of image metadata (EXIF) stripping.
+  bool preserve_image_provenance() const {
+    return preserve_image_provenance_.value();
+  }
+  void set_preserve_image_provenance(bool x) {
+    set_option(x, &preserve_image_provenance_);
+  }
+
+  // Opt-in provenance carry-through: when true (and preserve_image_provenance()
+  // is on), JPEG and PNG manifest-bearing images are recompressed with their
+  // original C2PA manifest bytes carried into the output unmodified. Without
+  // it the engine still never strips a manifest -- it declines the rewrite
+  // instead -- so this only upgrades skip-not-strip to carry. No effect unless
+  // preserve_image_provenance() is also true.
+  bool image_provenance_carry() const {
+    return image_provenance_carry_.value();
+  }
 
   bool js_preserve_urls() const {
     return CheckBandwidthOption(js_preserve_urls_);
@@ -2268,6 +2339,24 @@ class RewriteOptions {
   int64 image_webp_timeout_ms() const { return image_webp_timeout_ms_.value(); }
   void set_image_webp_timeout_ms(int64 x) {
     set_option(x, &image_webp_timeout_ms_);
+  }
+
+  // AVIF quality/timeout setters, mirroring the WebP setters.
+  void set_image_avif_recompress_quality(int64 x) {
+    set_option(x, &image_avif_recompress_quality_);
+  }
+  void set_image_avif_recompress_quality_for_small_screens(int64 x) {
+    set_option(x, &image_avif_recompress_quality_for_small_screens_);
+  }
+  void set_image_avif_animated_recompress_quality(int64 x) {
+    set_option(x, &image_avif_animated_recompress_quality_);
+  }
+  void set_image_avif_quality_for_save_data(int64 x) {
+    set_option(x, &image_avif_quality_for_save_data_);
+  }
+  int64 image_avif_timeout_ms() const { return image_avif_timeout_ms_.value(); }
+  void set_image_avif_timeout_ms(int64 x) {
+    set_option(x, &image_avif_timeout_ms_);
   }
 
   bool domain_rewrite_hyperlinks() const {
@@ -2449,13 +2538,6 @@ class RewriteOptions {
     set_option(x, &enable_extended_instrumentation_);
   }
 
-  bool use_experimental_js_minifier() const {
-    return use_experimental_js_minifier_.value();
-  }
-  void set_use_experimental_js_minifier(bool x) {
-    set_option(x, &use_experimental_js_minifier_);
-  }
-
   void set_max_combined_css_bytes(int64 x) {
     set_option(x, &max_combined_css_bytes_);
   }
@@ -2556,6 +2638,13 @@ class RewriteOptions {
   }
   bool serve_rewritten_webp_urls_to_any_agent() const {
     return serve_rewritten_webp_urls_to_any_agent_.value();
+  }
+
+  void set_serve_rewritten_avif_urls_to_any_agent(bool x) {
+    set_option(x, &serve_rewritten_avif_urls_to_any_agent_);
+  }
+  bool serve_rewritten_avif_urls_to_any_agent() const {
+    return serve_rewritten_avif_urls_to_any_agent_.value();
   }
 
   void set_cache_fragment(StringPiece p) {
@@ -2799,7 +2888,15 @@ class RewriteOptions {
   // Computing a signature "freezes" the class instance.  Attempting
   // to modify a RewriteOptions after freezing will DCHECK.
   void ComputeSignature() LOCKS_EXCLUDED(cache_purge_mutex_.get());
-  void ComputeSignatureLockHeld() SHARED_LOCKS_REQUIRED(cache_purge_mutex_);
+  // ComputeSignatureLockHeld() writes `signature_` and toggles
+  // `options_uniqueness_checked_`; the lock must be held exclusive. The
+  // previous SHARED_LOCKS_REQUIRED annotation was a defect: clang's
+  // thread-safety analyzer accepted a shared lock at the call site even
+  // though the body is write-shaped, which would race writers on
+  // `signature_`. All current callers (this file: ComputeSignature,
+  // UpdateCacheInvalidationTimestampMs, UpdateCachePurgeSet) hold the
+  // lock exclusive.
+  void ComputeSignatureLockHeld() EXCLUSIVE_LOCKS_REQUIRED(cache_purge_mutex_);
 
   // If you subclass RewriteOptions and store any configuration data that's not
   // an Option, use this hook to include the signature of your additional data.
@@ -2833,8 +2930,10 @@ class RewriteOptions {
     return frozen;
   }
 
-  // Returns the computed signature.
-  const GoogleString& signature() const {
+  // Returns the computed signature by value, so the copy is made while the
+  // reader-lock below is held rather than handing back a reference into
+  // signature_ that a concurrent cache flush could rebuild.
+  GoogleString signature() const {
     // We take a reader-lock because we may be looking at the
     // global_options signature concurrent with updating it if someone
     // flushes cache.  Note that the default mutex implementation is
@@ -2870,6 +2969,15 @@ class RewriteOptions {
 
   // Convert the filter name to a Filter.
   static Filter LookupFilter(const StringPiece& filter_name);
+
+  // Inverse of LookupFilter: returns the configuration name that a user would
+  // write in EnableFilters for `filter`, or an empty StringPiece if the filter
+  // has no configuration name (deliberately-internal filters).  If several
+  // names alias the same filter, an arbitrary one of them is returned.
+  //
+  // This exists so tests can assert that every user-facing filter is actually
+  // reachable from configuration; see RewriteOptionsTest.AllFiltersAreNameable.
+  static StringPiece LookupFilterName(Filter filter);
 
   // Looks up an option id/name and returns the corresponding PropertyBase if
   // found, or NULL if the id/name is not found.
@@ -3014,7 +3122,8 @@ class RewriteOptions {
     T value_;
     const Property<T>* property_;
 
-    DISALLOW_COPY_AND_ASSIGN(OptionTemplateBase);
+    OptionTemplateBase(const OptionTemplateBase&) = delete;
+    OptionTemplateBase& operator=(const OptionTemplateBase&) = delete;
   };
 
   // Subclassing OptionTemplateBase so that the conversion functions that need
@@ -3046,14 +3155,44 @@ class RewriteOptions {
     }
 
    private:
-    DISALLOW_COPY_AND_ASSIGN(Option);
+    Option(const Option&) = delete;
+    Option& operator=(const Option&) = delete;
+  };
+
+  // An integer-valued Option that rejects, at parse time, any value outside
+  // the inclusive range [kMin, kMax].  A sentinel value that a consumer treats
+  // specially (e.g. -1 meaning "unset"/"fall back") must lie within the range.
+  template <class T, int kMin, int kMax>
+  class RangeBoundedOption : public Option<T> {
+   public:
+    RangeBoundedOption() {}
+
+    bool SetFromString(StringPiece value_string,
+                       GoogleString* error_detail) override {
+      T value;
+      if (!RewriteOptions::ParseFromString(value_string, &value)) {
+        return false;
+      }
+      if (value < kMin || value > kMax) {
+        *error_detail =
+            StrCat("Value out of range; must be in [", IntegerToString(kMin),
+                   ",", IntegerToString(kMax), "].");
+        return false;
+      }
+      this->set(value);
+      return true;
+    }
+
+   private:
+    RangeBoundedOption(const RangeBoundedOption&) = delete;
+    RangeBoundedOption& operator=(const RangeBoundedOption&) = delete;
   };
 
  protected:
   // Adds a new Property to 'properties' (the last argument).
   template <class RewriteOptionsSubclass, class OptionClass>
   static void AddProperty(typename OptionClass::ValueType default_value,
-                          OptionClass RewriteOptionsSubclass::*offset,
+                          OptionClass RewriteOptionsSubclass::* offset,
                           const char* id, StringPiece option_name,
                           OptionScope scope, const char* help_text,
                           bool safe_to_print, Properties* properties) {
@@ -3107,6 +3246,15 @@ class RewriteOptions {
 
   // Marks the config as modified.
   void Modify();
+
+  // Clears the frozen and modified state. Called by derived class Clone()
+  // implementations after Merge() to ensure the cloned options are mutable.
+  // This is necessary because the source options may be frozen, but cloned
+  // options should always be unfrozen to allow configuration modifications.
+  void ClearFrozenAndModified() {
+    frozen_ = false;
+    modified_ = false;
+  }
 
   // Sets the global default value for 'x_header_value'.  Note that setting
   // this Option reaches through to the underlying property and sets the
@@ -3175,7 +3323,8 @@ class RewriteOptions {
    private:
     ValueType default_value_;
 
-    DISALLOW_COPY_AND_ASSIGN(Property);
+    Property(const Property&) = delete;
+    Property& operator=(const Property&) = delete;
   };
 
   // Leaf subclass of Property<ValueType>, which is templated on the class of
@@ -3198,7 +3347,7 @@ class RewriteOptions {
     // Fancy C++ pointers to members; a typesafe version of offsetof.  See
     // http://publib.boulder.ibm.com/infocenter/comphelp/v8v101/index.jsp?
     // topic=%2Fcom.ibm.xlcpp8a.doc%2Flanguage%2Fref%2Fcplr034.htm
-    typedef OptionClass RewriteOptionsSubclass::*OptionOffset;
+    typedef OptionClass RewriteOptionsSubclass::* OptionOffset;
     typedef typename OptionClass::ValueType ValueType;
 
     PropertyLeaf(ValueType default_value, OptionOffset offset, const char* id,
@@ -3218,7 +3367,8 @@ class RewriteOptions {
    private:
     OptionOffset offset_;
 
-    DISALLOW_COPY_AND_ASSIGN(PropertyLeaf);
+    PropertyLeaf(const PropertyLeaf&) = delete;
+    PropertyLeaf& operator=(const PropertyLeaf&) = delete;
   };
 
  private:
@@ -3361,7 +3511,7 @@ class RewriteOptions {
   // should be moved into RequestContext.
   template <class OptionClass>
   static void AddRequestProperty(typename OptionClass::ValueType default_value,
-                                 OptionClass RewriteOptions::*offset,
+                                 OptionClass RewriteOptions::* offset,
                                  const char* id, bool safe_to_print) {
     AddProperty(default_value, offset, id, kNullOption, kProcessScopeStrict,
                 NULL, safe_to_print, properties_);
@@ -3371,7 +3521,7 @@ class RewriteOptions {
   // SetOptionFromName.
   template <class OptionClass>
   static void AddBaseProperty(typename OptionClass::ValueType default_value,
-                              OptionClass RewriteOptions::*offset,
+                              OptionClass RewriteOptions::* offset,
                               const char* id, StringPiece option_name,
                               OptionScope scope, const char* help,
                               bool safe_to_print) {
@@ -3382,10 +3532,12 @@ class RewriteOptions {
   static void AddProperties();
   bool AddCommaSeparatedListToFilterSetState(const StringPiece& filters,
                                              FilterSet* set,
-                                             MessageHandler* handler);
+                                             MessageHandler* handler,
+                                             bool enabling);
   static bool AddCommaSeparatedListToFilterSet(const StringPiece& filters,
                                                FilterSet* set,
-                                               MessageHandler* handler);
+                                               MessageHandler* handler,
+                                               bool enabling);
   // Initialize the Filter id to enum reverse array used for fast lookups.
   static void InitFilterIdToEnumArray();
   static void InitOptionIdToPropertyArray();
@@ -3424,15 +3576,13 @@ class RewriteOptions {
   static GoogleString OptionSignature(const GoogleString& x,
                                       const Hasher* hasher);
   static GoogleString OptionSignature(RewriteLevel x, const Hasher* hasher);
-  static GoogleString OptionSignature(ResourceCategorySet x,
+  static GoogleString OptionSignature(const ResourceCategorySet& x,
                                       const Hasher* hasher);
   static GoogleString OptionSignature(const BeaconUrl& beacon_url,
                                       const Hasher* hasher);
   static GoogleString OptionSignature(const MobTheme& mob_theme,
                                       const Hasher* hasher);
   static GoogleString OptionSignature(const ResponsiveDensities& densities,
-                                      const Hasher* hasher);
-  static GoogleString OptionSignature(const AllowVaryOn& allow_vary_on,
                                       const Hasher* hasher);
   static GoogleString OptionSignature(const protobuf::MessageLite& proto,
                                       const Hasher* hasher);
@@ -3444,13 +3594,13 @@ class RewriteOptions {
   static GoogleString ToString(int64 x) { return Integer64ToString(x); }
   static GoogleString ToString(const GoogleString& x) { return x; }
   static GoogleString ToString(RewriteLevel x);
+  static GoogleString ToString(LazyloadImagesMode x);
   static GoogleString ToString(const ResourceCategorySet& x);
   static GoogleString ToString(const BeaconUrl& beacon_url);
   static GoogleString ToString(const MobTheme& mob_theme);
   static GoogleString ToString(const Color& color);
   static GoogleString ToString(const ResponsiveDensities& densities);
   static GoogleString ToString(const protobuf::MessageLite& proto);
-  static GoogleString ToString(const AllowVaryOn& allow_vary_on);
 
   // Returns true if p1's option_name is less than p2's. Used to order
   // all_properties_ and all_options_.
@@ -3554,6 +3704,8 @@ class RewriteOptions {
   Option<bool> css_preserve_urls_;
   Option<bool> js_preserve_urls_;
   Option<bool> image_preserve_urls_;
+  Option<bool> preserve_image_provenance_;
+  Option<bool> image_provenance_carry_;
 
   Option<int64> image_inline_max_bytes_;
   Option<int64> js_inline_max_bytes_;
@@ -3576,14 +3728,16 @@ class RewriteOptions {
 
   // Option related to generic image quality. This is overridden by
   // image(jpeg/webp) specific options.
-  Option<int64> image_recompress_quality_;
+  RangeBoundedOption<int64, -1, 100> image_recompress_quality_;
 
   // Options related to jpeg compression.
-  Option<int64> image_jpeg_recompress_quality_;
-  Option<int64> image_jpeg_recompress_quality_for_small_screens_;
-  Option<int64> image_jpeg_quality_for_save_data_;
-  Option<int64> image_jpeg_num_progressive_scans_;
-  Option<int64> image_jpeg_num_progressive_scans_for_small_screens_;
+  RangeBoundedOption<int64, -1, 100> image_jpeg_recompress_quality_;
+  RangeBoundedOption<int64, -1, 100>
+      image_jpeg_recompress_quality_for_small_screens_;
+  RangeBoundedOption<int64, -1, 100> image_jpeg_quality_for_save_data_;
+  RangeBoundedOption<int64, -1, 10> image_jpeg_num_progressive_scans_;
+  RangeBoundedOption<int64, -1, 10>
+      image_jpeg_num_progressive_scans_for_small_screens_;
 
   // Options governing when to retain optimized images vs keep original
   Option<int> image_limit_optimized_percent_;
@@ -3591,11 +3745,20 @@ class RewriteOptions {
   Option<int> image_limit_rendered_area_percent_;
 
   // Options related to webp compression.
-  Option<int64> image_webp_recompress_quality_;
-  Option<int64> image_webp_recompress_quality_for_small_screens_;
-  Option<int64> image_webp_animated_recompress_quality_;
-  Option<int64> image_webp_quality_for_save_data_;
+  RangeBoundedOption<int64, -1, 100> image_webp_recompress_quality_;
+  RangeBoundedOption<int64, -1, 100>
+      image_webp_recompress_quality_for_small_screens_;
+  RangeBoundedOption<int64, -1, 100> image_webp_animated_recompress_quality_;
+  RangeBoundedOption<int64, -1, 100> image_webp_quality_for_save_data_;
   Option<int64> image_webp_timeout_ms_;
+
+  // Options related to AVIF compression, mirroring the WebP members above.
+  RangeBoundedOption<int64, -1, 100> image_avif_recompress_quality_;
+  RangeBoundedOption<int64, -1, 100>
+      image_avif_recompress_quality_for_small_screens_;
+  RangeBoundedOption<int64, -1, 100> image_avif_animated_recompress_quality_;
+  RangeBoundedOption<int64, -1, 100> image_avif_quality_for_save_data_;
+  Option<int64> image_avif_timeout_ms_;
 
   Option<int> image_max_rewrites_at_once_;
   Option<int> max_url_segment_size_;  // For http://a/b/c.d, use strlen("c.d").
@@ -3656,6 +3819,7 @@ class RewriteOptions {
   Option<bool> lowercase_html_names_;
   Option<bool> always_rewrite_css_;  // For tests/debugging.
   Option<bool> respect_vary_;
+  Option<bool> agent_optimize_;  // Accept: text/markdown negotiation.
   Option<bool> respect_x_forwarded_proto_;
   Option<bool> flush_html_;
   // If set to true, ProxyFetch will request a flush on its RewriteDriver when
@@ -3690,6 +3854,13 @@ class RewriteOptions {
   // The initial image url to load in the lazyload images filter. If this is not
   // specified, we use a 1x1 inlined image.
   Option<GoogleString> lazyload_images_blank_url_;
+  // How the lazyload_images filter is applied: native loading="lazy"
+  // attributes, the JavaScript loader, or per-user-agent selection.
+  Option<LazyloadImagesMode> lazyload_images_mode_;
+  // When critical image data is unavailable, leave the first N otherwise
+  // eligible images of the document untouched to protect likely LCP
+  // candidates.
+  Option<int> lazyload_images_skip_first_;
   // Whether inline preview should use a blank image instead of a low resolution
   // version of the original image.
   Option<bool> use_blank_image_for_inline_preview_;
@@ -3737,6 +3908,7 @@ class RewriteOptions {
   Option<bool> report_unload_time_;
 
   Option<bool> serve_rewritten_webp_urls_to_any_agent_;
+  Option<bool> serve_rewritten_avif_urls_to_any_agent_;
 
   // Enables experimental code in defer js.
   Option<bool> enable_defer_js_experimental_;
@@ -3802,7 +3974,7 @@ class RewriteOptions {
   Option<int64> max_image_size_low_resolution_bytes_;
   // Percentage (an integer between 0 and 100 inclusive) of images rewrites to
   // drop.
-  Option<int> rewrite_random_drop_percentage_;
+  RangeBoundedOption<int, 0, 100> rewrite_random_drop_percentage_;
 
   // For proxies operating in in-place mode this allows fetching optimized
   // resources from sites that have MPS, etc configured.
@@ -3903,6 +4075,9 @@ class RewriteOptions {
   // reports more information in the beacon.
   Option<bool> enable_extended_instrumentation_;
 
+  // Retained only so configurations that still carry the directive keep
+  // parsing; the legacy JavaScript minifier it selected was removed and this
+  // value is never read.  Excluded from the options signature.
   Option<bool> use_experimental_js_minifier_;
 
   // Maximum size allowed for the combined CSS resource.
@@ -3958,7 +4133,7 @@ class RewriteOptions {
   Option<int64> remote_configuration_timeout_ms_;
 
   // The level to set the gzip compression of HTTPCache items.
-  Option<int> http_cache_compression_level_;
+  RangeBoundedOption<int, -1, 9> http_cache_compression_level_;
 
   // Pass this string in url to allow for pagespeed options.
   Option<GoogleString> request_option_override_;
@@ -4039,8 +4214,13 @@ class RewriteOptions {
 
   Option<int64> noop_;
 
-  // Comma separated list of headers which we can vary-on, or "Auto", or "None".
-  Option<AllowVaryOn> allow_vary_on_;
+  // Retired: AllowVaryOn used to select which request headers the in-place
+  // path was permitted to Vary on.  The in-place path no longer produces
+  // browser-dependent bytes, so there is nothing left to vary on.  The option
+  // is kept registered -- as a free-form string that is parsed and discarded --
+  // purely so that an existing configuration file still loads.  Removing the
+  // registration would make Apache and nginx refuse to start.
+  Option<GoogleString> allow_vary_on_deprecated_;
 
   CopyOnWrite<JavascriptLibraryIdentification>
       javascript_library_identification_;
@@ -4083,7 +4263,8 @@ class RewriteOptions {
   // usage within the class implementation, however.
   std::unique_ptr<ThreadSystem::ThreadId> last_thread_id_;
 
-  DISALLOW_COPY_AND_ASSIGN(RewriteOptions);
+  RewriteOptions(const RewriteOptions&) = delete;
+  RewriteOptions& operator=(const RewriteOptions&) = delete;
 };
 
 }  // namespace net_instaweb

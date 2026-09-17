@@ -20,6 +20,7 @@
 #include "net/instaweb/rewriter/public/css_tag_scanner.h"
 
 #include <cstddef>
+#include <cstdint>
 
 #include "base/logging.h"
 #include "net/instaweb/rewriter/public/domain_rewrite_filter.h"
@@ -143,12 +144,33 @@ inline bool PopFirst(StringPiece* in, char* c) {
 // Since we handle incomplete input, in some cases we may not have enough of it
 // available to accept or reject a construct --- in which case the routines
 // will return kLexInterrupted.
-enum LexResult { kLexNo, kLexYes, kLexInterrupted };
+enum LexResult : std::uint8_t { kLexNo, kLexYes, kLexInterrupted };
 
 // If in starts with expected, returns kLexYes and consumes it.
 inline LexResult EatLiteral(CssTagScanner::InputPortion input_kind,
                             StringPiece expected, StringPiece* in) {
   if (in->starts_with(expected)) {
+    in->remove_prefix(expected.size());
+    return kLexYes;
+  }
+
+  if (input_kind == CssTagScanner::kInputIncludesEnd) {
+    return kLexNo;
+  }
+
+  if (in->size() >= expected.size()) {
+    return kLexNo;
+  }
+
+  // This is conservative: we may already see a difference at this point.
+  return kLexInterrupted;
+}
+
+// Like EatLiteral, but matches expected case-insensitively (expected must be
+// lowercase). CSS functional notation and @-keywords are case-insensitive.
+inline LexResult EatLiteralNoCase(CssTagScanner::InputPortion input_kind,
+                                  StringPiece expected, StringPiece* in) {
+  if (StringCaseStartsWith(*in, expected)) {
     in->remove_prefix(expected.size());
     return kLexYes;
   }
@@ -383,7 +405,7 @@ bool CssTagScanner::TransformUrlsStreaming(
       // end point for batch write to exclude the @, so if we
       // write out with transformed URL, we should start with
       // @import.
-      switch (EatLiteral(input_portion, "import", &remaining)) {
+      switch (EatLiteralNoCase(input_portion, "import", &remaining)) {
         case kLexYes: {
           TrimLeadingWhitespace(&remaining);
           // The code here handles @import "foo" and @import 'foo';
@@ -406,13 +428,13 @@ bool CssTagScanner::TransformUrlsStreaming(
         case kLexNo:
           break;
       }
-    } else if (c == 'u') {
+    } else if (c == 'u' || c == 'U') {
       // See if we are at url(. Also provisionally set an
       // end point for batch write to exclude the u, so if we
       // write out with transformed URL, we should start with
       // url(
       GoogleString wrapped_url;
-      switch (EatLiteral(input_portion, "rl(", &remaining)) {
+      switch (EatLiteralNoCase(input_portion, "rl(", &remaining)) {
         case kLexYes: {
           TrimLeadingWhitespace(&remaining);
           // Note if we have a quoted URL inside url(), it needs to be
@@ -521,7 +543,8 @@ bool CssTagScanner::HasImport(const StringPiece& contents,
 }
 
 bool CssTagScanner::HasUrl(const StringPiece& contents) {
-  return (contents.find(CssTagScanner::kUriValue) != StringPiece::npos);
+  return (FindIgnoreCase(contents, CssTagScanner::kUriValue) !=
+          StringPiece::npos);
 }
 
 bool CssTagScanner::IsStylesheetOrAlternate(

@@ -20,10 +20,11 @@
 #ifndef NET_INSTAWEB_REWRITER_PUBLIC_CSS_COMBINE_FILTER_H_
 #define NET_INSTAWEB_REWRITER_PUBLIC_CSS_COMBINE_FILTER_H_
 
+#include <memory>
+
 #include "net/instaweb/rewriter/public/rewrite_filter.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/util/url_multipart_encoder.h"
 
@@ -81,7 +82,8 @@ class CssCombineFilter : public RewriteFilter {
 
   Variable* css_combine_opportunities_;
 
-  DISALLOW_COPY_AND_ASSIGN(CssCombineFilter);
+  CssCombineFilter(const CssCombineFilter&) = delete;
+  CssCombineFilter& operator=(const CssCombineFilter&) = delete;
 };
 
 }  // namespace net_instaweb

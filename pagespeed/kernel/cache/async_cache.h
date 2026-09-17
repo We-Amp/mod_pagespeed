@@ -58,7 +58,7 @@ class AsyncCache : public CacheInterface {
   // other users.
   //
   // Note that in the future we may try to add multi-threaded access
-  // to the underlying cache (e.g. AprMemCache supports this), so we
+  // to the underlying cache (e.g. MemcachedCache supports this), so we
   // take the pool as the constructor arg.
   AsyncCache(CacheInterface* cache, QueuedWorkerPool* pool);
   ~AsyncCache() override;
@@ -116,7 +116,8 @@ class AsyncCache : public CacheInterface {
   AtomicBool stopped_;
   AtomicInt32 outstanding_operations_;
 
-  DISALLOW_COPY_AND_ASSIGN(AsyncCache);
+  AsyncCache(const AsyncCache&) = delete;
+  AsyncCache& operator=(const AsyncCache&) = delete;
 };
 
 }  // namespace net_instaweb

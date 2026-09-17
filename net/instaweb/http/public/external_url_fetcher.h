@@ -75,7 +75,8 @@ class ExternalUrlFetcher : public UrlAsyncFetcher {
       const GoogleString& escaped_url, const char* user_agent,
       const StringVector& escaped_headers) = 0;
 
-  DISALLOW_COPY_AND_ASSIGN(ExternalUrlFetcher);
+  ExternalUrlFetcher(const ExternalUrlFetcher&) = delete;
+  ExternalUrlFetcher& operator=(const ExternalUrlFetcher&) = delete;
 };
 
 }  // namespace net_instaweb

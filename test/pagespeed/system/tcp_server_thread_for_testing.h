@@ -20,10 +20,11 @@
 #ifndef PAGESPEED_KERNEL_BASE_TCP_SERVER_THREAD_FOR_TESTING_H_
 #define PAGESPEED_KERNEL_BASE_TCP_SERVER_THREAD_FOR_TESTING_H_
 
+#include <memory>
+
 #include "apr_network_io.h"
 #include "apr_pools.h"
 #include "pagespeed/kernel/base/condvar.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread.h"
 #include "pagespeed/kernel/base/thread_annotations.h"

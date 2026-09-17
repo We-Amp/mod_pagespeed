@@ -24,6 +24,7 @@
 
 #include <utility>
 #include <vector>
+#include <memory>
 
 #include "net/instaweb/http/public/http_cache.h"
 #include "net/instaweb/http/public/http_value.h"
@@ -48,7 +49,6 @@
 #include "test/pagespeed/kernel/base/mock_hasher.h"
 #include "test/pagespeed/kernel/base/mock_message_handler.h"
 // We need to include mock_timer.h to allow upcast to Timer*.
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -158,6 +158,14 @@ class RewriteTestBase : public RewriteOptionsTestBase {
   // on the main rewrite driver.
   void SetBaseUrlForFetch(const StringPiece& url);
 
+  // Puts the main rewrite driver into the state RewriteDriver::FetchResource()
+  // leaves it in for 'url' -- fetch_url() non-empty and the (decoded) base URL
+  // pointing at the committed URL -- WITHOUT running an actual fetch. Lets
+  // unit tests drive the committed-URL reconcile logic
+  // (ImageUrlEncoder::SetWebpAndMobileUserAgent / SetAvifCapability) directly.
+  // Uses RewriteTestBase's friend access to RewriteDriver.
+  void SetDriverFetchUrlForTesting(const StringPiece& url);
+
   // Populates request-headers based on the current user-agent and
   // the attributes added via AddRequestAttribute and installs them
   // into rewrite_driver_.
@@ -181,14 +189,19 @@ class RewriteTestBase : public RewriteOptionsTestBase {
   // be used with extreme care.
   Timer* timer() { return factory()->mock_timer(); }
 
-  // Append default headers to the given string.
+  // Append the default headers a rewritten resource is SERVED with to the
+  // given string (includes the serving-time 'public, immutable' upgrade;
+  // stored cache entries do not carry it).
   void AppendDefaultHeaders(const ContentType& content_type,
                             GoogleString* text);
 
   // Like above, but also include a Link: <..>; rel="canonical" header.
+  // 'served' selects between the wire shape (true: with the serving-time
+  // 'public, immutable' upgrade) and the stored-cache-entry shape (false:
+  // without it).
   void AppendDefaultHeadersWithCanonical(const ContentType& content_type,
                                          StringPiece canonical_url,
-                                         GoogleString* text);
+                                         GoogleString* text, bool served);
 
   void ServeResourceFromManyContexts(const GoogleString& resource_url,
                                      const StringPiece& expected_content);
@@ -568,6 +581,14 @@ class RewriteTestBase : public RewriteOptionsTestBase {
                                          HTTPValue* value_out,
                                          ResponseHeaders* headers);
 
+
+  // Like HttpBlockingFind but uses an explicit cache fragment instead of
+  // rewrite_driver_->CacheFragment().  Needed when ClearRewriteDriver()
+  // may have changed the fragment since the cache entry was stored.
+  HTTPCache::FindResult HttpBlockingFindWithFragment(
+      const GoogleString& key, const GoogleString& fragment,
+      HTTPCache* http_cache, HTTPValue* value_out,
+      ResponseHeaders* headers);
   // The same as the above function, but doesn't need an HTTPValue or
   // ResponseHeaders.
   HTTPCache::FindResult HttpBlockingFindStatus(const GoogleString& key,

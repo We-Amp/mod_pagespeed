@@ -22,11 +22,11 @@
 
 #include <cstddef>
 #include <list>
+#include <memory>
 
 #include "base/logging.h"
 #include "pagespeed/kernel/base/arena.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 
@@ -35,8 +35,8 @@ namespace net_instaweb {
 class HtmlElement;
 class HtmlEvent;
 
-typedef std::list<HtmlEvent*> HtmlEventList;
-typedef HtmlEventList::iterator HtmlEventListIterator;
+using HtmlEventList = std::list<HtmlEvent*>;
+using HtmlEventListIterator = HtmlEventList::iterator;
 
 // Base class for HtmlElement and HtmlLeafNode.  Generally represents all
 // lexical tokens in HTML, except that for subclass HtmlElement, which
@@ -98,7 +98,8 @@ class HtmlNode {
   void set_parent(HtmlElement* parent) { parent_ = parent; }
 
   HtmlElement* parent_;
-  DISALLOW_COPY_AND_ASSIGN(HtmlNode);
+  HtmlNode(const HtmlNode&) = delete;
+  HtmlNode& operator=(const HtmlNode&) = delete;
 };
 
 class HtmlLeafNode : public HtmlNode {
@@ -136,6 +137,8 @@ class HtmlLeafNode : public HtmlNode {
     HtmlEventListIterator iter_;
   };
 
+  friend class HtmlTestingPeer;
+
   std::unique_ptr<Data> data_;
 };
 
@@ -154,7 +157,8 @@ class HtmlCdataNode : public HtmlLeafNode {
                 const HtmlEventListIterator& iter)
       : HtmlLeafNode(parent, iter, contents) {}
 
-  DISALLOW_COPY_AND_ASSIGN(HtmlCdataNode);
+  HtmlCdataNode(const HtmlCdataNode&) = delete;
+  HtmlCdataNode& operator=(const HtmlCdataNode&) = delete;
 };
 
 // Leaf node representing raw characters in HTML
@@ -178,7 +182,8 @@ class HtmlCharactersNode : public HtmlLeafNode {
                      const HtmlEventListIterator& iter)
       : HtmlLeafNode(parent, iter, contents) {}
 
-  DISALLOW_COPY_AND_ASSIGN(HtmlCharactersNode);
+  HtmlCharactersNode(const HtmlCharactersNode&) = delete;
+  HtmlCharactersNode& operator=(const HtmlCharactersNode&) = delete;
 };
 
 // Leaf node representing an HTML comment
@@ -196,7 +201,8 @@ class HtmlCommentNode : public HtmlLeafNode {
                   const HtmlEventListIterator& iter)
       : HtmlLeafNode(parent, iter, contents) {}
 
-  DISALLOW_COPY_AND_ASSIGN(HtmlCommentNode);
+  HtmlCommentNode(const HtmlCommentNode&) = delete;
+  HtmlCommentNode& operator=(const HtmlCommentNode&) = delete;
 };
 
 // Leaf node representing an HTML IE directive
@@ -214,7 +220,8 @@ class HtmlIEDirectiveNode : public HtmlLeafNode {
                       const HtmlEventListIterator& iter)
       : HtmlLeafNode(parent, iter, contents) {}
 
-  DISALLOW_COPY_AND_ASSIGN(HtmlIEDirectiveNode);
+  HtmlIEDirectiveNode(const HtmlIEDirectiveNode&) = delete;
+  HtmlIEDirectiveNode& operator=(const HtmlIEDirectiveNode&) = delete;
 };
 
 // Leaf node representing an HTML directive
@@ -232,7 +239,8 @@ class HtmlDirectiveNode : public HtmlLeafNode {
                     const HtmlEventListIterator& iter)
       : HtmlLeafNode(parent, iter, contents) {}
 
-  DISALLOW_COPY_AND_ASSIGN(HtmlDirectiveNode);
+  HtmlDirectiveNode(const HtmlDirectiveNode&) = delete;
+  HtmlDirectiveNode& operator=(const HtmlDirectiveNode&) = delete;
 };
 
 }  // namespace net_instaweb

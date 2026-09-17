@@ -60,7 +60,8 @@ class SingleRewriteContext : public RewriteContext {
   void AddLinkRelCanonicalForFallbackHeaders(ResponseHeaders* output);
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(SingleRewriteContext);
+  SingleRewriteContext(const SingleRewriteContext&) = delete;
+  SingleRewriteContext& operator=(const SingleRewriteContext&) = delete;
 };
 
 }  // namespace net_instaweb

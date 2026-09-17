@@ -21,6 +21,7 @@
 
 #include <cstddef>
 #include <memory>
+#include <vector>
 
 #include "net/instaweb/http/public/async_fetch.h"
 #include "net/instaweb/http/public/counting_url_async_fetcher.h"
@@ -33,7 +34,7 @@
 #include "pagespeed/kernel/base/function.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/null_message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
+#include "pagespeed/kernel/base/shared_string.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/statistics_template.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -46,11 +47,13 @@
 #include "pagespeed/kernel/http/request_headers.h"
 #include "pagespeed/kernel/http/response_headers.h"
 #include "pagespeed/kernel/thread/queued_worker_pool.h"
+#include "pagespeed/kernel/thread/sequence.h"
 #include "pagespeed/kernel/thread/thread_synchronizer.h"
-#include "pagespeed/kernel/util/file_system_lock_manager.h"
 #include "pagespeed/kernel/util/platform.h"
 #include "pagespeed/kernel/util/simple_stats.h"
+#include "pagespeed/kernel/util/threadsafe_lock_manager.h"
 #include "pagespeed/opt/logging/log_record.h"
+#include "test/net/instaweb/http/mapped_backend_cache.h"
 #include "test/net/instaweb/http/mock_url_fetcher.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/base/mem_file_system.h"
@@ -123,7 +126,72 @@ class MockFetch : public AsyncFetch {
   bool* is_origin_cacheable_;
   bool cache_result_valid_;
 
-  DISALLOW_COPY_AND_ASSIGN(MockFetch);
+  MockFetch(const MockFetch&) = delete;
+  MockFetch& operator=(const MockFetch&) = delete;
+};
+
+// Backend fetcher that delivers its body over the shared-storage write path,
+// used to verify that the cache-put wrapper still records the bytes.
+class WriteSharedUrlFetcher : public UrlAsyncFetcher {
+ public:
+  WriteSharedUrlFetcher(MockTimer* timer, const GoogleString& body,
+                        int64 ttl_ms)
+      : timer_(timer), body_(body), ttl_ms_(ttl_ms), fetch_count_(0) {}
+
+  void Fetch(const GoogleString& url, MessageHandler* message_handler,
+             AsyncFetch* fetch) override {
+    ++fetch_count_;
+    ResponseHeaders* headers = fetch->response_headers();
+    headers->set_major_version(1);
+    headers->set_minor_version(1);
+    headers->SetStatusAndReason(HttpStatus::kOK);
+    headers->Replace(HttpAttributes::kContentType, kContentTypeCss.mime_type());
+    headers->SetDateAndCaching(timer_->NowMs(), ttl_ms_);
+    headers->ComputeCaching();
+    fetch->HeadersComplete();
+    SharedString storage(body_);
+    fetch->WriteShared(storage.Value(), storage, message_handler);
+    fetch->Done(true);
+  }
+
+  int fetch_count() const { return fetch_count_; }
+
+ private:
+  MockTimer* timer_;
+  GoogleString body_;
+  int64 ttl_ms_;
+  int fetch_count_;
+
+  WriteSharedUrlFetcher(const WriteSharedUrlFetcher&) = delete;
+  WriteSharedUrlFetcher& operator=(const WriteSharedUrlFetcher&) = delete;
+};
+
+// A Sequence that captures queued functions instead of running them, so a
+// test can drain them deterministically after the enqueuing call has fully
+// returned (and its transient objects have been destroyed).  Used to model
+// CacheUrlAsyncFetcher's deferred response_sequence_ delivery without threads.
+class CapturingSequence : public Sequence {
+ public:
+  CapturingSequence() {}
+  ~CapturingSequence() override {
+    for (Function* f : queue_) {
+      f->CallCancel();
+    }
+  }
+  void Add(Function* function) override { queue_.push_back(function); }
+  void RunAll() {
+    std::vector<Function*> to_run;
+    to_run.swap(queue_);
+    for (Function* f : to_run) {
+      f->CallRun();
+    }
+  }
+
+ private:
+  std::vector<Function*> queue_;
+
+  CapturingSequence(const CapturingSequence&) = delete;
+  CapturingSequence& operator=(const CapturingSequence&) = delete;
 };
 
 class MockCacheUrlAsyncFetcherAsyncOpHooks
@@ -145,7 +213,10 @@ class MockCacheUrlAsyncFetcherAsyncOpHooks
 
  private:
   int count_;
-  DISALLOW_COPY_AND_ASSIGN(MockCacheUrlAsyncFetcherAsyncOpHooks);
+  MockCacheUrlAsyncFetcherAsyncOpHooks(
+      const MockCacheUrlAsyncFetcherAsyncOpHooks&) = delete;
+  MockCacheUrlAsyncFetcherAsyncOpHooks& operator=(
+      const MockCacheUrlAsyncFetcherAsyncOpHooks&) = delete;
 };
 
 class DelayedMockUrlFetcher : public MockUrlFetcher {
@@ -161,7 +232,8 @@ class DelayedMockUrlFetcher : public MockUrlFetcher {
 
  private:
   ThreadSynchronizer* sync_;
-  DISALLOW_COPY_AND_ASSIGN(DelayedMockUrlFetcher);
+  DelayedMockUrlFetcher(const DelayedMockUrlFetcher&) = delete;
+  DelayedMockUrlFetcher& operator=(const DelayedMockUrlFetcher&) = delete;
 };
 
 class CacheUrlAsyncFetcherTest : public ::testing::Test {
@@ -247,7 +319,7 @@ class CacheUrlAsyncFetcherTest : public ::testing::Test {
         counting_fetcher_(&mock_fetcher_),
         scheduler_(thread_system_.get(), &timer_),
         file_system_(thread_system_.get(), &timer_),
-        lock_manager_(&file_system_, GTestTempDir(), &scheduler_, &handler_) {
+        lock_manager_(&scheduler_) {
     HTTPCache::InitStats(&statistics_);
     http_cache_ = std::make_unique<HTTPCache>(&lru_cache_, &timer_,
                                               &mock_hasher_, &statistics_);
@@ -619,9 +691,62 @@ class CacheUrlAsyncFetcherTest : public ::testing::Test {
   CountingUrlAsyncFetcher counting_fetcher_;
   MockScheduler scheduler_;
   MemFileSystem file_system_;
-  FileSystemLockManager lock_manager_;
+  ThreadSafeLockManager lock_manager_;
   MockCacheUrlAsyncFetcherAsyncOpHooks mock_async_op_hooks_;
 };
+
+// A backend that writes its body via WriteShared must still have the bytes
+// recorded into the HTTP cache by the cache-put wrapper and served to the
+// client; a bypass here would silently cache a truncated value.
+TEST_F(CacheUrlAsyncFetcherTest, WriteSharedBodyIsCachedOnMiss) {
+  const GoogleString url = "http://www.example.com/write_shared.css";
+  const GoogleString body = "write-shared body";
+  WriteSharedUrlFetcher backend(&timer_, body, ttl_ms_);
+  CacheUrlAsyncFetcher fetcher(&mock_hasher_, &lock_manager_, http_cache_.get(),
+                               fragment_, &mock_async_op_hooks_, &backend);
+
+  GoogleString content;
+  bool done = false;
+  bool success = false;
+  bool cacheable = false;
+  ResponseHeaders response_headers;
+  MockFetch* fetch =
+      new MockFetch(RequestContextPtr(new RequestContext(
+                        http_options_, thread_system_->NewMutex(), nullptr)),
+                    &content, &done, &success, &cacheable);
+  fetch->set_response_headers(&response_headers);
+  fetcher.Fetch(url, &handler_, fetch);
+  EXPECT_TRUE(done);
+  EXPECT_TRUE(success);
+  EXPECT_EQ(1, backend.fetch_count());
+  EXPECT_EQ(body, content);
+
+  // The full body must be in the cache now.
+  HTTPValue value;
+  ResponseHeaders headers;
+  EXPECT_EQ(HTTPCache::FindResult(HTTPCache::kFound, kFetchStatusOK),
+            Find(url, &value, &headers, &handler_));
+  StringPiece cached_contents;
+  ASSERT_TRUE(value.ExtractContents(&cached_contents));
+  EXPECT_EQ(body, cached_contents);
+
+  // A second fetch is served from the cache without touching the backend.
+  GoogleString content2;
+  bool done2 = false;
+  bool success2 = false;
+  bool cacheable2 = false;
+  ResponseHeaders response_headers2;
+  MockFetch* fetch2 =
+      new MockFetch(RequestContextPtr(new RequestContext(
+                        http_options_, thread_system_->NewMutex(), nullptr)),
+                    &content2, &done2, &success2, &cacheable2);
+  fetch2->set_response_headers(&response_headers2);
+  fetcher.Fetch(url, &handler_, fetch2);
+  EXPECT_TRUE(done2);
+  EXPECT_TRUE(success2);
+  EXPECT_EQ(body, content2);
+  EXPECT_EQ(1, backend.fetch_count());
+}
 
 TEST_F(CacheUrlAsyncFetcherTest, CacheableUrl) {
   ClearStats();
@@ -1750,6 +1875,178 @@ TEST_F(CacheUrlAsyncFetcherTest, TestParallelBackgroundFreshenCalls) {
   EXPECT_EQ(1, counting_fetcher_.fetch_count());
   EXPECT_EQ(1, http_cache_->cache_inserts()->Get());
   EXPECT_EQ(0, cache_fetcher_->fallback_responses_served()->Get());
+}
+
+// Deferred-delivery zero-copy serving (CycloneZeroCopy).  Drives a cache-hit
+// serve through the response-sequence path: CacheFindCallback::Done defers
+// Finish onto a worker-pool sequence, and the inner HTTPCacheCallback (which
+// owns the CacheInterface mapped ref) is deleted as soon as Done returns --
+// BEFORE Finish runs on the other thread.  So across the thread hop the
+// CacheFindCallback's own http_value() keep-alive is the SOLE pin on the
+// mmap region.  The backend poisons (mprotect PROT_NONE) each region on
+// last-reference release, so a too-early keep-alive drop would fault when
+// Finish calls ExtractContents.
+TEST_F(CacheUrlAsyncFetcherTest, CycloneZeroCopyDeferredDelivery) {
+  ClearStats();
+  // Populate the shared LRU cache with a fresh cacheable entry.
+  ResponseHeaders headers;
+  DefaultResponseHeaders(kContentTypeCss, 100, &headers);
+  http_cache_->Put(cache_url_, fragment_,
+                   empty_request_headers_.GetProperties(),
+                   ResponseHeaders::kRespectVaryOnResources, &headers,
+                   ".a { color: red; }", &handler_);
+
+  // A zero-copy HTTPCache over a poisoning mapped backend, and a fetcher
+  // whose delivery is deferred onto a sequence we drain by hand, so the
+  // "inner HTTPCacheCallback deleted before Finish" ordering is
+  // deterministic, not racy.
+  MappedBackendCache mapped_backend(&lru_cache_);
+  HTTPCache zero_copy_cache(&mapped_backend, &timer_, &mock_hasher_,
+                            &statistics_);
+  zero_copy_cache.set_cyclone_zero_copy_enabled(true);
+  // No backup fetcher: set_response_sequence requires fetcher_ == NULL, and a
+  // pure cache-hit serve needs none.
+  CacheUrlAsyncFetcher fetcher(&mock_hasher_, &lock_manager_, &zero_copy_cache,
+                               fragment_, &mock_async_op_hooks_, nullptr);
+  CapturingSequence sequence;
+  fetcher.set_response_sequence(&sequence);
+
+  GoogleString content;
+  bool done = false, success = false, cacheable = false;
+  MockFetch* fetch =
+      new MockFetch(RequestContextPtr(new RequestContext(
+                        http_options_, thread_system_->NewMutex(), nullptr)),
+                    &content, &done, &success, &cacheable);
+  fetch->request_headers()->CopyFrom(empty_request_headers_);
+  ResponseHeaders fetch_response_headers;
+  fetch->set_response_headers(&fetch_response_headers);
+
+  fetcher.Fetch(cache_url_, &handler_, fetch);
+  // Delivery was deferred: the Find hit already ran (a mapped view was handed
+  // out) and the inner HTTPCacheCallback has been destroyed, dropping its
+  // mapped ref.  Nothing is delivered yet, and the borrow is still held --
+  // its sole remaining pin is the CacheFindCallback's own http_value()
+  // keep-alive.
+  EXPECT_FALSE(done);
+  EXPECT_EQ(1, mapped_backend.mapped_hits());
+  EXPECT_EQ(0, mapped_backend.release_count());
+  // Run the deferred Finish: it reads the (still-valid) mapped bytes, copies
+  // them into the fetch, then self-deletes CacheFindCallback -- dropping the
+  // last ref and poisoning the region.  A too-early keep-alive drop would
+  // have faulted here.
+  sequence.RunAll();
+
+  EXPECT_TRUE(done);
+  EXPECT_TRUE(success);
+  EXPECT_EQ(".a { color: red; }", content);
+  EXPECT_EQ(1, mapped_backend.mapped_hits());
+  // Every borrow returned: no mmap-backed bytes outlive the serve.
+  EXPECT_EQ(mapped_backend.mapped_hits(), mapped_backend.release_count());
+}
+
+// A MockFetch that additionally captures the data POINTER of every
+// HandleWrite, so a test can prove which storage the port-facing write
+// aliased.
+class PointerCapturingMockFetch : public MockFetch {
+ public:
+  PointerCapturingMockFetch(const RequestContextPtr& ctx, GoogleString* content,
+                            bool* done, bool* success,
+                            bool* is_origin_cacheable,
+                            const char** last_write_data)
+      : MockFetch(ctx, content, done, success, is_origin_cacheable),
+        last_write_data_(last_write_data) {}
+
+  bool HandleWrite(const StringPiece& content,
+                   MessageHandler* handler) override {
+    *last_write_data_ = content.data();
+    return MockFetch::HandleWrite(content, handler);
+  }
+
+ private:
+  const char** last_write_data_;
+};
+
+// A raw mapped pointer must NEVER reach a port-facing Write() from
+// the cache-hit serve -- ports may hand it to a client-paced send with no
+// barrier and RecordingFetch records whatever it is handed.  The serve must
+// deliver a verified COPY: the written bytes must not point into the mapped
+// region.
+TEST_F(CacheUrlAsyncFetcherTest, CycloneZeroCopyHitServesVerifiedCopy) {
+  ClearStats();
+  ResponseHeaders headers;
+  DefaultResponseHeaders(kContentTypeCss, 100, &headers);
+  http_cache_->Put(cache_url_, fragment_,
+                   empty_request_headers_.GetProperties(),
+                   ResponseHeaders::kRespectVaryOnResources, &headers,
+                   ".a { color: red; }", &handler_);
+
+  MappedBackendCache mapped_backend(&lru_cache_);
+  HTTPCache zero_copy_cache(&mapped_backend, &timer_, &mock_hasher_,
+                            &statistics_);
+  zero_copy_cache.set_cyclone_zero_copy_enabled(true);
+  CacheUrlAsyncFetcher fetcher(&mock_hasher_, &lock_manager_, &zero_copy_cache,
+                               fragment_, &mock_async_op_hooks_, nullptr);
+
+  GoogleString content;
+  bool done = false, success = false, cacheable = false;
+  const char* write_data = nullptr;
+  PointerCapturingMockFetch* fetch = new PointerCapturingMockFetch(
+      RequestContextPtr(new RequestContext(
+          http_options_, thread_system_->NewMutex(), nullptr)),
+      &content, &done, &success, &cacheable, &write_data);
+  fetch->request_headers()->CopyFrom(empty_request_headers_);
+  ResponseHeaders fetch_response_headers;
+  fetch->set_response_headers(&fetch_response_headers);
+
+  fetcher.Fetch(cache_url_, &handler_, fetch);
+
+  EXPECT_TRUE(done);
+  EXPECT_TRUE(success);
+  EXPECT_EQ(".a { color: red; }", content);
+  EXPECT_EQ(1, mapped_backend.mapped_hits());
+  ASSERT_TRUE(write_data != nullptr);
+  // The de-aliased serve: the bytes handed to Write() are owned, never a
+  // pointer into the mmap region.
+  EXPECT_FALSE(mapped_backend.ContainsPointer(write_data));
+}
+
+// A torn borrow (the wrap epoch moved between the cache read and the
+// verified copy) must fail the cache serve closed -- headers uncommitted,
+// no body -- rather than deliver garbage.
+TEST_F(CacheUrlAsyncFetcherTest, CycloneZeroCopyHitTornFailsClosed) {
+  ClearStats();
+  ResponseHeaders headers;
+  DefaultResponseHeaders(kContentTypeCss, 100, &headers);
+  http_cache_->Put(cache_url_, fragment_,
+                   empty_request_headers_.GetProperties(),
+                   ResponseHeaders::kRespectVaryOnResources, &headers,
+                   ".a { color: red; }", &handler_);
+
+  MappedBackendCache mapped_backend(&lru_cache_);
+  mapped_backend.set_strict_verdict(LeaseRenewal::kTorn);
+  HTTPCache zero_copy_cache(&mapped_backend, &timer_, &mock_hasher_,
+                            &statistics_);
+  zero_copy_cache.set_cyclone_zero_copy_enabled(true);
+  CacheUrlAsyncFetcher fetcher(&mock_hasher_, &lock_manager_, &zero_copy_cache,
+                               fragment_, &mock_async_op_hooks_, nullptr);
+
+  GoogleString content;
+  bool done = false, success = false, cacheable = false;
+  MockFetch* fetch =
+      new MockFetch(RequestContextPtr(new RequestContext(
+                        http_options_, thread_system_->NewMutex(), nullptr)),
+                    &content, &done, &success, &cacheable);
+  fetch->request_headers()->CopyFrom(empty_request_headers_);
+  ResponseHeaders fetch_response_headers;
+  fetch->set_response_headers(&fetch_response_headers);
+
+  fetcher.Fetch(cache_url_, &handler_, fetch);
+
+  EXPECT_TRUE(done);
+  EXPECT_FALSE(success);
+  EXPECT_EQ("", content);
+  // The borrow was returned despite the failed serve.
+  EXPECT_EQ(mapped_backend.mapped_hits(), mapped_backend.release_count());
 }
 
 }  // namespace

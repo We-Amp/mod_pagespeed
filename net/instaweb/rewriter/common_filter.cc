@@ -131,7 +131,11 @@ void CommonFilter::Characters(net_instaweb::HtmlCharactersNode* characters) {
   if (end_body_point_ != nullptr && !OnlyWhitespace(characters->contents())) {
     end_body_point_ = nullptr;
   }
+  // Run actual filter's CharactersImpl.
+  CharactersImpl(characters);
 }
+
+void CommonFilter::CharactersImpl(HtmlCharactersNode* characters) {}
 
 // Returns whether or not we can resolve against the base tag.  References
 // that occur before the base tag can not be resolved against it.
@@ -169,6 +173,14 @@ bool CommonFilter::IsRelativeUrlLoadPermittedByCsp(StringPiece url,
   } else {
     return false;
   }
+}
+
+bool CommonFilter::CspPermitsInlineScript() const {
+  return driver_->content_security_policy().PermitsInlineScript();
+}
+
+bool CommonFilter::CspPermitsInlineScriptAttribute() const {
+  return driver_->content_security_policy().PermitsInlineScriptAttribute();
 }
 
 ResourcePtr CommonFilter::CreateInputResource(StringPiece input_url,

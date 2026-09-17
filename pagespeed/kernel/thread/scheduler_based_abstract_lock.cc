@@ -75,7 +75,7 @@ int64 IntervalWithEnd(Timer* timer, int64 interval_ms, int64 max_interval_ms,
 // delete_after_callback_ bit.
 class TimedWaitPollState : public Function {
  public:
-  typedef bool (SchedulerBasedAbstractLock::*TryLockMethod)(int64 steal_ms);
+  using TryLockMethod = bool (SchedulerBasedAbstractLock::*)(int64 steal_ms);
 
   TimedWaitPollState(Scheduler* scheduler, Function* callback,
                      SchedulerBasedAbstractLock* lock, TryLockMethod try_lock,

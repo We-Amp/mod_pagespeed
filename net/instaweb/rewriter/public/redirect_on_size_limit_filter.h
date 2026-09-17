@@ -47,7 +47,9 @@ class RedirectOnSizeLimitFilter : public CommonFilter {
 
   bool redirect_inserted_;
 
-  DISALLOW_COPY_AND_ASSIGN(RedirectOnSizeLimitFilter);
+  RedirectOnSizeLimitFilter(const RedirectOnSizeLimitFilter&) = delete;
+  RedirectOnSizeLimitFilter& operator=(const RedirectOnSizeLimitFilter&) =
+      delete;
 };
 
 }  // namespace net_instaweb

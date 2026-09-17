@@ -20,6 +20,8 @@
 #include "pagespeed/apache/apache_request_context.h"
 
 #include "base/logging.h"
+// Declares ap_run_http_scheme, which the ap_http_scheme macro expands to.
+#include "http_protocol.h"
 #include "net/instaweb/http/public/request_context.h"
 #include "pagespeed/apache/apache_httpd_includes.h"
 
@@ -38,6 +40,15 @@ ApacheRequestContext::ApacheRequestContext(AbstractMutex* logging_mutex,
   // This includes the local port (for loopback fetches) and whether H2 is on.
   if (req->proto_num == 2000) {
     set_using_http2(true);
+  }
+
+  // Transport scheme of the incoming connection ("https" iff mod_ssl handled
+  // it), consumed by LoopbackRouteFetcher when munging unknown-origin URLs
+  // Deliberately NOT the request URL's scheme, which may reflect
+  // X-Forwarded-Proto.
+  const char* scheme = ap_http_scheme(req);
+  if (scheme != nullptr) {
+    set_local_scheme(scheme);
   }
 
   const char* via_header = apr_table_get(req->headers_in, "Via");

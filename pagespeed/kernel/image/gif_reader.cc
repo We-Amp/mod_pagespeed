@@ -22,10 +22,10 @@
 #include <csetjmp>
 #include <cstddef>
 #include <memory>
+#include <new>
 
 #include "base/logging.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/image/image_frame_interface.h"
 #include "pagespeed/kernel/image/image_util.h"
 
@@ -172,6 +172,10 @@ bool ReadImageDescriptor(GifFileType* gif_file, png_structp png_ptr,
   }
 
   png_bytepp rows = png_get_rows(png_ptr, info_ptr);
+  if (rows == nullptr) {
+    PS_DLOG_INFO(handler, "Failed to get PNG row pointers.");
+    return false;
+  }
   if (gif_file->Image.Interlace == 0) {
     // Not interlaced. Read each line into the PNG buffer.
     for (GifWord i = 0; i < height; ++i) {
@@ -308,6 +312,9 @@ bool ExpandColorMap(png_structp paletted_png_ptr, png_infop paletted_info_ptr,
   png_bytepp rgb_row_pointers = png_get_rows(rgb_png_ptr, rgb_info_ptr);
   png_bytepp pal_row_pointers =
       png_get_rows(paletted_png_ptr, paletted_info_ptr);
+  if (rgb_row_pointers == nullptr || pal_row_pointers == nullptr) {
+    return false;
+  }
   for (png_uint_32 row = 0; row < height; ++row) {
     png_bytep rgb_next_byte = rgb_row_pointers[row];
     if (have_alpha) {
@@ -384,6 +391,10 @@ bool ReadGifToPng(GifFileType* gif_file, png_structp png_ptr,
 
   // Fill the rows with the background color.
   png_bytepp row_pointers = png_get_rows(paletted_png_ptr, paletted_info_ptr);
+  if (row_pointers == nullptr) {
+    PS_DLOG_INFO(handler, "Failed to get PNG row pointers.");
+    return false;
+  }
   memset(row_pointers[0], gif_file->SBackGroundColor, row_size);
   png_uint_32 height =
       png_get_image_height(paletted_png_ptr, paletted_info_ptr);
@@ -679,6 +690,7 @@ ScanlineStatus GifFrameReader::Reset() {
     gif_struct_->Reset(&status);
   }
 
+  frame_pixel_count_ = 0;
   frame_palette_size_ = 0;
   frame_eagerly_read_ = false;
 
@@ -727,7 +739,7 @@ ScanlineStatus GifFrameReader::ProcessExtensionAffectingFrame() {
     const int dispose = (flags >> kGifGceDisposeShift) & kGifGceDisposeMask;
     const int delay = extension[kGifGceDelayLoIndex] |
                       (extension[kGifGceDelayHiIndex] << 8);  // In 10 ms units.
-    frame_spec_.duration_ms = delay * 10;
+    frame_spec_.duration_ms = static_cast<size_t>(delay) * 10;
 
     FrameSpec::DisposalMethod frame_dispose =
         GifDisposalToFrameSpecDisposal(dispose);
@@ -1196,7 +1208,8 @@ ScanlineStatus GifFrameReader::DecodeProgressiveGif() {
   for (int pass = 0; pass < kInterlaceNumPass; ++pass) {
     for (size_px y = kInterlaceOffsets[pass]; y < frame_spec_.height;
          y += kInterlaceJumps[pass]) {
-      GifPixelType* row_pointer = frame_index_.get() + y * frame_spec_.width;
+      GifPixelType* row_pointer =
+          frame_index_.get() + static_cast<size_t>(y) * frame_spec_.width;
       if (DGifGetLine(gif_file, row_pointer, frame_spec_.width) == GIF_ERROR) {
         return PS_LOGGED_STATUS(PS_LOG_INFO, message_handler(),
                                 SCANLINE_STATUS_INTERNAL_ERROR, FRAME_GIFREADER,
@@ -1210,8 +1223,7 @@ ScanlineStatus GifFrameReader::DecodeProgressiveGif() {
 ScanlineStatus GifFrameReader::DecodeNonProgressiveGif() {
   GifFileType* gif_file = gif_struct_->gif_file();
   GifPixelType* row_pointer = frame_index_.get();
-  const GifPixelType* row_pointer_end =
-      frame_index_.get() + frame_spec_.height * frame_spec_.width;
+  const GifPixelType* row_pointer_end = frame_index_.get() + frame_pixel_count_;
   for (; row_pointer < row_pointer_end; row_pointer += frame_spec_.width) {
     if (DGifGetLine(gif_file, row_pointer, frame_spec_.width) == GIF_ERROR) {
       return PS_LOGGED_STATUS(PS_LOG_INFO, message_handler(),
@@ -1225,7 +1237,7 @@ ScanlineStatus GifFrameReader::DecodeNonProgressiveGif() {
 // Helper function for PrepareNextFrame(). This returns true if any of
 // the 'num_pixel' pixel entries starting at 'px' reference a palette
 // value greater than 'frame_palette_size'.
-inline bool FrameHasOutOfRangePixels(GifPixelType* px, const size_px num_pixels,
+inline bool FrameHasOutOfRangePixels(GifPixelType* px, const size_t num_pixels,
                                      const int frame_palette_size) {
   const GifPixelType* end_px = px + num_pixels;
   for (; px < end_px; ++px) {
@@ -1336,18 +1348,25 @@ ScanlineStatus GifFrameReader::PrepareNextFrame() {
 
   if (!frame_eagerly_read_) {
     // We only read one row at a time.
-    frame_index_.reset(new GifPixelType[frame_spec_.width]);
+    frame_index_.reset(new (std::nothrow) GifPixelType[frame_spec_.width]);
   } else {
     // We need to read all the rows before the first call to
     // ReadNextScanline().
-    frame_index_.reset(
-        new GifPixelType[frame_spec_.width * frame_spec_.height]);
+    if (!CheckedMulSize(static_cast<size_t>(frame_spec_.width),
+                        static_cast<size_t>(frame_spec_.height),
+                        &frame_pixel_count_)) {
+      Reset();
+      return PS_LOGGED_STATUS(PS_LOG_ERROR, message_handler(),
+                              SCANLINE_STATUS_MEMORY_ERROR, FRAME_GIFREADER,
+                              "frame dimensions overflow");
+    }
+    frame_index_.reset(new (std::nothrow) GifPixelType[frame_pixel_count_]);
   }
   if (frame_index_ == nullptr) {
     Reset();
     return PS_LOGGED_STATUS(PS_LOG_ERROR, message_handler(),
                             SCANLINE_STATUS_MEMORY_ERROR, FRAME_GIFREADER,
-                            "new GiPixelType[] for frame_index_");
+                            "new GifPixelType[] for frame_index_");
   }
 
   next_row_ = 0;
@@ -1364,8 +1383,7 @@ ScanlineStatus GifFrameReader::PrepareNextFrame() {
     }
 
     if (!is_originally_rgba &&
-        FrameHasOutOfRangePixels(frame_index_.get(),
-                                 frame_spec_.width * frame_spec_.height,
+        FrameHasOutOfRangePixels(frame_index_.get(), frame_pixel_count_,
                                  frame_palette_size_)) {
       frame_spec_.pixel_format = RGBA_8888;
       PS_DLOG_INFO(
@@ -1377,14 +1395,20 @@ ScanlineStatus GifFrameReader::PrepareNextFrame() {
 
   // Now that we have the correct pixel_format, allocate the memory
   // we'll need to read the image data in ReadNextScanline().
-  size_t bytes_per_row =
-      GetBytesPerPixel(frame_spec_.pixel_format) * frame_spec_.width;
-  frame_buffer_.reset(new GifPixelType[bytes_per_row]);
+  size_t bytes_per_row;
+  if (!CheckedMulSize(GetBytesPerPixel(frame_spec_.pixel_format),
+                      static_cast<size_t>(frame_spec_.width), &bytes_per_row)) {
+    Reset();
+    return PS_LOGGED_STATUS(PS_LOG_ERROR, message_handler(),
+                            SCANLINE_STATUS_MEMORY_ERROR, FRAME_GIFREADER,
+                            "frame_buffer_ size overflow");
+  }
+  frame_buffer_.reset(new (std::nothrow) GifPixelType[bytes_per_row]);
   if (frame_buffer_ == nullptr) {
     Reset();
     return PS_LOGGED_STATUS(PS_LOG_ERROR, message_handler(),
                             SCANLINE_STATUS_MEMORY_ERROR, FRAME_GIFREADER,
-                            "new GiPixelType[] for frame_buffer_ ");
+                            "new GifPixelType[] for frame_buffer_");
   }
 
   return ScanlineStatus(SCANLINE_STATUS_SUCCESS);
@@ -1418,7 +1442,8 @@ ScanlineStatus GifFrameReader::ReadNextScanline(
   } else {
     // We simply point the output to the corresponding row because
     // the image has already been decoded.
-    index_buffer = frame_index_.get() + next_row_ * frame_spec_.width;
+    index_buffer =
+        frame_index_.get() + static_cast<size_t>(next_row_) * frame_spec_.width;
   }
 
   for (size_px pixel_index = 0; pixel_index < frame_spec_.width;

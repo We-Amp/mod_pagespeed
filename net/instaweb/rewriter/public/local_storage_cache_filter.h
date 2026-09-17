@@ -159,7 +159,8 @@ class LocalStorageCacheFilter : public RewriteFilter {
   // # of times we removed the lsc attributes from a candidate img/link.
   Variable* num_local_storage_cache_candidates_removed_;
 
-  DISALLOW_COPY_AND_ASSIGN(LocalStorageCacheFilter);
+  LocalStorageCacheFilter(const LocalStorageCacheFilter&) = delete;
+  LocalStorageCacheFilter& operator=(const LocalStorageCacheFilter&) = delete;
 };
 
 }  // namespace net_instaweb

@@ -239,6 +239,10 @@ class DomainLawyer {
 
   // Specifies domain-sharding.  This implicitly calls AddDomain(to_domain).
   //
+  // Deprecated: sharding is an HTTP/1-era optimization that is
+  // counterproductive with HTTP/2 and HTTP/3; AddShard logs a kWarning,
+  // once per process per mapping.
+  //
   // Wildcards may not be used in the to_domain or the from_domain.
   bool AddShard(const StringPiece& to_domain,
                 const StringPiece& comma_separated_shards,
@@ -319,6 +323,8 @@ class DomainLawyer {
   // .suffix.net so we can optimize them.  This can be implemented by
   // integrating the proxy_suffix into MapRewriteDomain and MapOriginDomain,
   // as a variation on MapProxyDomain.
+  void set_authorize_all_domains(bool v) { authorize_all_domains_ = v; }
+
   void set_proxy_suffix(const GoogleString& suffix) { proxy_suffix_ = suffix; }
   const GoogleString& proxy_suffix() const { return proxy_suffix_; }
 

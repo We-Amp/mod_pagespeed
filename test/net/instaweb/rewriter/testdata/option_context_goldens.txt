@@ -1,0 +1,122 @@
+# Canonical option-context golden vectors -- payload format "psoc1".
+#
+# WHAT THIS PINS. Each vector is one canonical payload and the signature over
+# it. The signature is what separates cache contexts, so it is not free to
+# drift: a signature that changed shape would not fail loudly, it would quietly
+# strand every optimized variant already stored under the old one.
+#
+# THE FILE IS SHARED and must stay byte-identical wherever it is checked in.
+# One side produces payloads and signs them; the other verifies a signature it
+# is handed. Those are two implementations of one contract, built by different
+# toolchains -- which is exactly the situation a checked-in vector exists for.
+# Each side hashes this whole file and compares against a constant in its own
+# source, so editing one copy alone fails there. (The hash is taken with CR
+# bytes removed, so a CRLF checkout on Windows does not read as a divergence.)
+#
+# TWO KINDS OF VECTOR, and the distinction is the point:
+#
+#   recipe "-"   a hand-written byte string. Pins the FORMAT and the hash
+#                function. These would survive an option being renamed or the
+#                sort order changing, because they never touch a live
+#                configuration.
+#
+#   named recipe a construction the producing side actually performs. It builds
+#                that configuration, serializes it, and requires the bytes AND
+#                the signature to match. THESE are what make a rename, a record
+#                prefix change, or a reordering fail. The consuming side cannot
+#                build a configuration -- it has no options table, by design --
+#                so it only checks that the recipes are still here.
+#
+# WHAT IT DELIBERATELY DOES NOT CONTAIN. No release number, no build metadata,
+# no git hash, no timestamp, no server-flavour tail. That absence is the
+# cross-release stability property, and it is checked directly rather than
+# trusted to this comment.
+#
+# FORMAT. Lines beginning with '#' are comments; blank lines are ignored.
+# Every other line is
+#
+#     <recipe-name-or-dash> TAB <escaped payload> TAB <lowercase hex sha256>
+#
+# The payload is escaped with the same escape the format uses for option values
+# -- a backslash doubles, and every byte outside printable ASCII becomes \xHH --
+# which is what keeps a payload on one line here.
+#
+# THE SHARED SIZE BOUND lives on the line below. Both sides parse it and compare
+# it against their own constant, so a one-sided raise fails a test instead of
+# becoming a peer whose notifications are refused for being too large. It is
+# DERIVED from the largest options class that ships, not chosen.
+
+# bound: 16384
+
+# - The empty context: the format version token and nothing else. This signature
+#   is the DEFAULT CONTEXT -- what a peer means by "no option context supplied".
+#   Both sides hardcode it; if these two constants ever disagree, every request
+#   looks like a non-default context to one of them.
+-	psoc1\x0a	c0908a1c05a3d6b96d4ea614f60993a83b1eabc4cf7dccfd2899610749554f01
+
+# - Filters only, sorted by id. Hand-written, so it pins the FORMAT; the
+#   `four-filters` recipe below pins that real FilterId() output still lands here.
+-	psoc1\x0af:ai\x0af:ce\x0af:ii\x0af:jm\x0a	70a8146e3e48774a4bd87ef1a1a0ec7d56e28a671f3892a01795ad7a04c3a1ee
+
+# - Integer options, values carried verbatim, keyed by configuration name.
+-	psoc1\x0ao:ImageInlineMaxBytes=3072\x0ao:JsInlineMaxBytes=2048\x0a	f81d3d8cee09f5b8a2277cfceeac2058dd1ac78e8c3d45618867dacd0beab2ad
+
+# - A bool and an enum, in the exact spelling RewriteOptions::ToString produces.
+#   Note the space inside "Core Filters": a value is carried byte-for-byte and
+#   the format adds no whitespace of its own, so there is nothing to normalize.
+-	psoc1\x0ao:AvoidRenamingIntrospectiveJavascript=True\x0ao:RewriteLevel=Core Filters\x0a	9f333ac5a0141c0a2d733a02df8a7a9902b6355d526cd6ab8c9c4a001383bfdd
+
+# - A REDACTED option -- tag 'r'. UrlSigningKey is registered safe_to_print=false,
+#   so the payload carries SHA-256 of the value (here of "hunter2") instead of
+#   the value. A different key still yields a different signature, so contexts
+#   stay separated, but the key itself is not in the bytes that travel.
+-	psoc1\x0ar:UrlSigningKey=f52fbd32b2b3b86ff88ef6c490628285f482af15ddcb29541f94bcf526a3f6c7\x0a	b126a0627aae306f9029f8361a68eec40bb16b0b1085f25bb9c490ce54ba8426
+
+# - Escaping. The stored value is the six bytes  a \ b LF c 0x80 . A backslash
+#   doubles and anything outside printable ASCII becomes \xHH, so a record is
+#   always one line and always splits at its first '='.
+-	psoc1\x0ao:XHeaderValue=a\\\\b\\x0ac\\x80\x0a	e998fe88eb1d7b398bb69d13d9a6b726a309cddb18b5c30abd0e81bfeff8ab6b
+
+# - An option registered without a configuration name (AddRequestProperty passes
+#   kNullOption), keyed by its short id behind '@'. No configuration name begins
+#   with '@', so the two key namespaces cannot collide.
+-	psoc1\x0ao:@pcu=https://cdn.example.com/\x0a	1edafc6c871f999c9c7ec7befec307f0ade09ee6a7d49d27a151cd745b8b2123
+
+# - All three record kinds at once, showing the whole-payload sort: 'f' < 'o' <
+#   'r', and within the option run '@' (0x40) sorts ahead of 'I' (0x49).
+-	psoc1\x0af:ce\x0af:ii\x0ao:@pcu=https://cdn.example.com/\x0ao:ImageInlineMaxBytes=3072\x0ar:UrlSigningKey=f52fbd32b2b3b86ff88ef6c490628285f482af15ddcb29541f94bcf526a3f6c7\x0a	565b82c37a99c73214fd36c60edff2fffd1f53f81785839c1165458b2dba8909
+
+# - An empty string value. It is a value, not an absence: an option explicitly set
+#   to "" signs differently from the same option never set at all.
+-	psoc1\x0ao:XHeaderValue=\x0a	c4a5c158e7d88156d29bb6656bd62a137df3971dab5703e8504a00bf60abd866
+
+# --- construction recipes: built, serialized and compared by the producing
+#     side. A rename, a prefix change or a reordering fails here. ---
+
+# - untouched: Nothing configured at all. NOT the empty payload: the structural HTML
+#   writer is enabled at every rewrite level, which is a fact about the build
+#   that this vector pins.
+untouched	psoc1\x0af:hw\x0a	89dd72d80cf7dc7f10500739dbb8a82cd5a991448ca389780208da1df0699baa
+
+# - inline-max-bytes: Two integer setters. CssImageInlineMaxBytes rides along because
+#   set_image_inline_max_bytes sets both -- a property of the setter that the
+#   payload shows rather than hides.
+inline-max-bytes	psoc1\x0af:hw\x0ao:CssImageInlineMaxBytes=3072\x0ao:ImageInlineMaxBytes=3072\x0ao:JsInlineMaxBytes=2048\x0a	327937e3630520a71bb515bd5bfae49bec0f162f2b930fc6e7ed53ec035ee4db
+
+# - four-filters: Four filters enabled in neither enum nor id order. Pins that real
+#   FilterId() output is what lands in the payload, and that it is sorted.
+four-filters	psoc1\x0af:ai\x0af:ec\x0af:hw\x0af:ii\x0af:jm\x0a	cc0b8039d2c2ca8198654e686482be223ac0952272516da348730e2f288d950e
+
+# - redacted-signing-key: A safe_to_print=false option: the value is replaced by its hash.
+#   Rename the option or change the redaction tag and this vector fails.
+redacted-signing-key	psoc1\x0af:hw\x0ar:UrlSigningKey=f52fbd32b2b3b86ff88ef6c490628285f482af15ddcb29541f94bcf526a3f6c7\x0a	d8f587ed3032d2e3f3e66d0a1e1528d728b86d5d2395d0924c7bf989d8d0c341
+
+# - escaped-x-header: A value containing a backslash, a newline and a high byte.
+escaped-x-header	psoc1\x0af:hw\x0ao:XHeaderValue=a\\\\b\\x0ac\\x80\x0a	f991d327cd9ce8033161a7ca35868a4d850755cc1daa637f0c72334e4ba8522f
+
+# - empty-x-header: An option explicitly set to the empty string.
+empty-x-header	psoc1\x0af:hw\x0ao:XHeaderValue=\x0a	716bb74a70a2cb9409fb0a3cca03ecd219d50c481f6a6a19874fb46044d50144
+
+# - mixed: A filter, a plain option and a redacted option together, exercising the
+#   whole-payload sort against real names.
+mixed	psoc1\x0af:hw\x0af:ii\x0ao:CssImageInlineMaxBytes=3072\x0ao:ImageInlineMaxBytes=3072\x0ar:UrlSigningKey=f52fbd32b2b3b86ff88ef6c490628285f482af15ddcb29541f94bcf526a3f6c7\x0a	0351e2c46997b12c41808d132e4a18d51f17041d5a0efb54c4bfad6bc1149093

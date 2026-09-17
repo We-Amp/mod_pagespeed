@@ -97,16 +97,27 @@ class AddInstrumentationFilterTest : public RewriteTestBase {
                   "index.html?a&b");
   }
 
-  GoogleString CreateInitString(StringPiece beacon_url, StringPiece event,
+  GoogleString CreateInitString(StringPiece beacon_url,
                                 StringPiece extra_params) {
     GoogleString url;
     EscapeToJsStringLiteral(rewrite_driver()->google_url().Spec(), false, &url);
     GoogleString str = "pagespeed.addInstrumentationInit(";
     StrAppend(&str, "'", beacon_url, "', ");
-    StrAppend(&str, "'", event, "', ");
     StrAppend(&str, "'", extra_params, "', ");
     StrAppend(&str, "'", url, "');");
     return str;
+  }
+
+  // Number of occurrences of the init call in the output.
+  int CountInitCalls() {
+    int count = 0;
+    size_t pos = 0;
+    while ((pos = output_buffer_.find("pagespeed.addInstrumentationInit(",
+                                      pos)) != GoogleString::npos) {
+      ++count;
+      ++pos;
+    }
+    return count;
   }
 
   bool report_unload_time_;
@@ -119,16 +130,55 @@ class AddInstrumentationFilterTest : public RewriteTestBase {
 TEST_F(AddInstrumentationFilterTest, ScriptInjection) {
   RunInjection();
   EXPECT_TRUE(output_buffer_.find(
-                  CreateInitString(options()->beacon_url().http, "load", "")) !=
+                  CreateInitString(options()->beacon_url().http, "")) !=
               GoogleString::npos);
 }
 
+TEST_F(AddInstrumentationFilterTest, CspForbidsInlineScript) {
+  // Under a script-src policy without 'unsafe-inline' the browser would
+  // block both the head timing script and the onload beacon script, so
+  // neither may be injected.
+  AddFilters();
+  ParseUrl(GetTestUrl(),
+           "<head><meta http-equiv=\"Content-Security-Policy\" "
+           "content=\"script-src *;\"></head><body></body>");
+  EXPECT_EQ(
+      0, statistics()
+             ->GetVariable(
+                 AddInstrumentationFilter::kInstrumentationScriptAddedCount)
+             ->Get());
+  EXPECT_EQ(GoogleString::npos, output_buffer_.find("mod_pagespeed_start"));
+  EXPECT_EQ(GoogleString::npos,
+            output_buffer_.find("pagespeed.addInstrumentationInit"));
+}
+
+TEST_F(AddInstrumentationFilterTest, CspAllowsInlineScript) {
+  // With 'unsafe-inline' permitted the filter behaves as usual.
+  AddFilters();
+  ParseUrl(GetTestUrl(),
+           "<head><meta http-equiv=\"Content-Security-Policy\" "
+           "content=\"script-src * 'unsafe-inline';\"></head>"
+           "<body></body>");
+  EXPECT_EQ(
+      1, statistics()
+             ->GetVariable(
+                 AddInstrumentationFilter::kInstrumentationScriptAddedCount)
+             ->Get());
+  EXPECT_TRUE(output_buffer_.find(
+                  CreateInitString(options()->beacon_url().http, "")) !=
+              GoogleString::npos);
+}
+
+// ReportUnloadTime is a deprecated no-op: the collector always reports on
+// page-hide, so no second (beforeunload) script may be injected.
 TEST_F(AddInstrumentationFilterTest, ScriptInjectionWithNavigation) {
   report_unload_time_ = true;
   RunInjection();
-  EXPECT_TRUE(output_buffer_.find(CreateInitString(options()->beacon_url().http,
-                                                   "beforeunload", "")) !=
+  EXPECT_TRUE(output_buffer_.find(
+                  CreateInitString(options()->beacon_url().http, "")) !=
               GoogleString::npos);
+  EXPECT_EQ(1, CountInitCalls());
+  EXPECT_EQ(GoogleString::npos, output_buffer_.find("beforeunload"));
 }
 
 // Test an https fetch.
@@ -136,11 +186,11 @@ TEST_F(AddInstrumentationFilterTest, TestScriptInjectionWithHttps) {
   AssumeHttps();
   RunInjection();
   EXPECT_TRUE(output_buffer_.find(CreateInitString(
-                  options()->beacon_url().https, "load", "")) !=
-              GoogleString::npos);
+                  options()->beacon_url().https, "")) != GoogleString::npos);
 }
 
-// Test an https fetch, reporting unload and using Xhtml
+// Test an https fetch using Xhtml, with the deprecated no-op
+// ReportUnloadTime option enabled.
 TEST_F(AddInstrumentationFilterTest,
        TestScriptInjectionWithHttpsUnloadAndXhtml) {
   SetMimetypeToXhtml();
@@ -148,8 +198,9 @@ TEST_F(AddInstrumentationFilterTest,
   report_unload_time_ = true;
   RunInjection();
   EXPECT_TRUE(output_buffer_.find(CreateInitString(
-                  options()->beacon_url().https, "beforeunload", "")) !=
-              GoogleString::npos);
+                  options()->beacon_url().https, "")) != GoogleString::npos);
+  EXPECT_EQ(1, CountInitCalls());
+  EXPECT_EQ(GoogleString::npos, output_buffer_.find("beforeunload"));
 }
 
 // Test that experiment id reporting is done correctly.
@@ -162,7 +213,7 @@ TEST_F(AddInstrumentationFilterTest, TestExperimentIdReporting) {
   options()->SetExperimentState(2);
   RunInjection();
   EXPECT_TRUE(output_buffer_.find(CreateInitString(options()->beacon_url().http,
-                                                   "load", "&exptid=2")) !=
+                                                   "&exptid=2")) !=
               GoogleString::npos);
 }
 
@@ -171,10 +222,20 @@ TEST_F(AddInstrumentationFilterTest, TestExtendedInstrumentation) {
   options()->set_enable_extended_instrumentation(true);
   RunInjection();
   EXPECT_TRUE(output_buffer_.find(
-                  CreateInitString(options()->beacon_url().http, "load", "")) !=
+                  CreateInitString(options()->beacon_url().http, "")) !=
               GoogleString::npos);
   EXPECT_TRUE(output_buffer_.find("getResourceTimingData=function()") !=
               GoogleString::npos);
+}
+
+// The shipped collector asset must be the PerformanceObserver/sendBeacon
+// implementation, with the legacy IE8/early-Chrome paths gone.
+TEST_F(AddInstrumentationFilterTest, TestNoAttachEventInAsset) {
+  RunInjection();
+  EXPECT_NE(GoogleString::npos, output_buffer_.find("sendBeacon"));
+  EXPECT_NE(GoogleString::npos, output_buffer_.find("PerformanceObserver"));
+  EXPECT_EQ(GoogleString::npos, output_buffer_.find("attachEvent"));
+  EXPECT_EQ(GoogleString::npos, output_buffer_.find("chrome.loadTimes"));
 }
 
 // Test that headers fetch timing reporting is done correctly.
@@ -189,7 +250,7 @@ TEST_F(AddInstrumentationFilterTest, TestHeadersFetchTimingReporting) {
   timing_info->FetchFinished();
   RunInjection();
   EXPECT_TRUE(output_buffer_.find(CreateInitString(
-                  options()->beacon_url().http, "load",
+                  options()->beacon_url().http,
                   "&hft=200&ft=500&s_ttfb=300")) != GoogleString::npos)
       << output_buffer_;
 }
@@ -222,7 +283,7 @@ TEST_F(AddInstrumentationFilterTest, TestNon200Response) {
                     AddInstrumentationFilter::kInstrumentationScriptAddedCount)
                 ->Get());
   EXPECT_TRUE(output_buffer_.find(CreateInitString(options()->beacon_url().http,
-                                                   "load", "&rc=403")) !=
+                                                   "&rc=403")) !=
               GoogleString::npos);
 }
 
@@ -230,14 +291,14 @@ TEST_F(AddInstrumentationFilterTest, TestRequestId) {
   rewrite_driver()->request_context()->set_request_id(1234567890L);
   RunInjection();
   EXPECT_TRUE(output_buffer_.find(CreateInitString(options()->beacon_url().http,
-                                                   "load", "&id=1234567890")) !=
+                                                   "&id=1234567890")) !=
               GoogleString::npos);
 }
 
 TEST_F(AddInstrumentationFilterTest, TestNoDeferInstrumentationScript) {
   RunInjection();
   EXPECT_TRUE(output_buffer_.find(
-                  CreateInitString(options()->beacon_url().http, "load", "")) !=
+                  CreateInitString(options()->beacon_url().http, "")) !=
               GoogleString::npos);
   const StringPiece* nodefer =
       HtmlKeywords::KeywordToString(HtmlName::kDataPagespeedNoDefer);
@@ -248,7 +309,7 @@ TEST_F(AddInstrumentationFilterTest, TestDeferInstrumentationScript) {
   rewrite_driver()->set_defer_instrumentation_script(true);
   RunInjection();
   EXPECT_TRUE(output_buffer_.find(
-                  CreateInitString(options()->beacon_url().http, "load", "")) !=
+                  CreateInitString(options()->beacon_url().http, "")) !=
               GoogleString::npos);
   const StringPiece* nodefer =
       HtmlKeywords::KeywordToString(HtmlName::kDataPagespeedNoDefer);

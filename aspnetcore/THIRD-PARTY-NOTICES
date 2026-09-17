@@ -1,0 +1,147 @@
+THIRD-PARTY-NOTICES
+===================
+
+WeAmp.PageSpeed.Sidecar (mod_pagespeed 1.15) — the ASP.NET Core nginx sidecar —
+redistributes the third-party software listed below. The native package
+(WeAmp.PageSpeed.Sidecar.NativeAssets.Linux) physically ships, per Linux runtime
+identifier (linux-x64, linux-arm64): a bundled nginx executable, and
+ngx_pagespeed_module.so, which statically links the PageSpeed Optimization Library
+(PSOL) and its dependencies. This file lists each component, its license, and
+copyright holders; full license texts are available at the URLs given.
+
+This software is based in part on the work of the Independent JPEG Group.
+
+
+===============================================================================
+BUNDLED NATIVE BINARIES (shipped as files in the package)
+===============================================================================
+
+nginx 1.30.4  (the bundled reverse-proxy executable, built without an SSL module —
+               no libssl/libcrypto host dependency)
+  License: BSD-2-Clause
+  Copyright (c) 2002-2024 Igor Sysoev
+  Copyright (c) 2011-2024 Nginx, Inc.
+  https://nginx.org/LICENSE
+
+ngx_pagespeed  (the nginx module glue, in ngx_pagespeed_module.so)
+  License: Apache-2.0
+  Copyright (c) Google Inc.; Copyright (c) We-Amp B.V.
+  https://github.com/apache/incubator-pagespeed-ngx/blob/master/LICENSE
+
+
+===============================================================================
+STATICALLY LINKED INTO ngx_pagespeed_module.so
+===============================================================================
+
+mod_pagespeed / PageSpeed Optimization Library (PSOL)
+  License: Apache-2.0
+  Copyright (c) 2010-2017 Google Inc.
+  Copyright (c) 2018 The Apache Software Foundation
+  https://www.apache.org/licenses/LICENSE-2.0
+
+Cyclone Cache (We-Amp B.V.)
+  License: Apache-2.0
+  Copyright (c) 2024-2026 We-Amp B.V. (We-Amp's own component; see NOTICE).
+
+BoringSSL
+  License: OpenSSL License / SSLeay License / ISC / MIT (per-file)
+  Copyright (c) Google Inc. and contributors; Copyright (c) 1995-1998 Eric Young;
+  Copyright (c) 1998-2011 The OpenSSL Project
+  https://boringssl.googlesource.com/boringssl/+/master/LICENSE
+
+abseil-cpp
+  License: Apache-2.0
+  Copyright (c) Google Inc.
+  https://github.com/abseil/abseil-cpp/blob/master/LICENSE
+
+Protocol Buffers (protobuf)
+  License: BSD-3-Clause
+  Copyright (c) Google Inc.
+  https://github.com/protocolbuffers/protobuf/blob/main/LICENSE
+
+RE2
+  License: BSD-3-Clause
+  Copyright (c) Google Inc.
+  https://github.com/google/re2/blob/main/LICENSE
+
+International Components for Unicode (ICU)
+  License: Unicode License (ICU)
+  Copyright (c) 1991-2024 Unicode, Inc. and others; International Business Machines Corporation
+  https://github.com/unicode-org/icu/blob/main/LICENSE
+
+libjpeg-turbo
+  License: BSD-3-Clause AND IJG
+  Copyright (c) 2009-2024 D. R. Commander
+  Copyright (c) 1991-2024 Independent JPEG Group
+  https://github.com/libjpeg-turbo/libjpeg-turbo/blob/main/LICENSE.md
+
+libpng 1.6.58
+  License: PNG Reference Library License (libpng)
+  Copyright (c) 1995-2024 The PNG Reference Library Authors
+  https://github.com/pnggroup/libpng/blob/libpng16/LICENSE
+
+libwebp
+  License: BSD-3-Clause
+  Copyright (c) Google Inc.
+  https://github.com/webmproject/libwebp/blob/main/COPYING
+
+giflib
+  License: MIT
+  Copyright (c) 1997 Eric S. Raymond
+  https://sourceforge.net/p/giflib/code/ci/master/tree/COPYING
+
+optipng
+  License: Zlib
+  Copyright (c) 2001-2023 Cosmin Truta and the Contributing Authors
+  https://optipng.sourceforge.net/
+
+zlib 1.3.1
+  License: Zlib
+  Copyright (c) 1995-2024 Jean-loup Gailly and Mark Adler
+  https://github.com/madler/zlib/blob/develop/LICENSE
+
+google-sparsehash
+  License: BSD-3-Clause
+  Copyright (c) Google Inc.
+  https://github.com/sparsehash/sparsehash/blob/master/COPYING
+
+Chromium base (incl. dmg_fp/dtoa, dynamic_annotations, superfasthash, NSPR-derived,
+               ICU-conversion helpers)
+  License: BSD-3-Clause (with dtoa, BSD-variant, MPL-1.1/GPL-2+/LGPL-2.1+ for NSPR-derived parts)
+  Copyright (c) 2014 The Chromium Authors; 1991-2001 Lucent Technologies;
+  1998-2000 Netscape Communications Corporation; 2010 Paul Hsieh
+  https://chromium.googlesource.com/chromium/src/+/main/LICENSE
+
+base64 (René Nyffenegger)
+  License: Zlib
+  Copyright (c) 2004-2008 René Nyffenegger
+
+The PageSpeed engine derives from Apache PageSpeed (mod_pagespeed); its complete
+upstream third-party attribution is reproduced in the bundled NOTICE file and at
+https://github.com/apache/incubator-pagespeed-mod/blob/master/NOTICE .
+
+
+===============================================================================
+RUNTIME (dynamically linked from the host; NOT redistributed in this package)
+===============================================================================
+
+The bundled nginx binary dynamically links the following HOST system libraries —
+they are provided by the operating system / base image and are NOT shipped in this
+package (listed for completeness only):
+
+  PCRE      (libpcre.so.3 / "libpcre3")     — BSD-2-Clause-like; https://www.pcre.org/licence.txt
+  zlib      (libz.so.1 / "zlib1g")          — Zlib
+  libcrypt  (libcrypt.so.1 / "libcrypt1")   — system C library component
+
+(The C++ runtime — libstdc++/libgcc — and OpenSSL are STATICALLY linked into the
+module, so they are not host runtime dependencies.)
+
+
+===============================================================================
+INDEPENDENT JPEG GROUP ACKNOWLEDGMENT
+===============================================================================
+
+This software is based in part on the work of the Independent JPEG Group.
+
+  This software is copyright (C) 1991-2024, Thomas G. Lane, Guido Vollbeding.
+  All Rights Reserved except as specified in the libjpeg-turbo / IJG license above.

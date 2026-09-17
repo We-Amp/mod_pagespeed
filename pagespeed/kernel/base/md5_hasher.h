@@ -39,7 +39,8 @@ class MD5Hasher : public Hasher {
   int RawHashSizeInBytes() const override;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(MD5Hasher);
+  MD5Hasher(const MD5Hasher&) = delete;
+  MD5Hasher& operator=(const MD5Hasher&) = delete;
 };
 
 }  // namespace net_instaweb

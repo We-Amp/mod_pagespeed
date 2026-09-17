@@ -20,12 +20,12 @@
 #pragma once
 #include <inttypes.h>
 
-typedef int64_t int64;
-typedef uint64_t uint64;
-typedef uint32_t uint32;
-typedef int32_t int32;
-typedef uint8_t uint8;
-typedef int8_t int8;
+using int64 = int64_t;
+using uint64 = uint64_t;
+using uint32 = uint32_t;
+using int32 = int32_t;
+using uint8 = uint8_t;
+using int8 = int8_t;
 
 #define arraysize(a)            \
   ((sizeof(a) / sizeof(*(a))) / \
@@ -77,10 +77,6 @@ typedef int8_t int8;
 
 // Lazily-initialized boolean value
 enum LazyBool { kNotSet = -1, kFalse = 0, kTrue = 1 };
-
-#define DISALLOW_COPY_AND_ASSIGN(TypeName) \
-  TypeName(const TypeName&);               \
-  void operator=(const TypeName&)
 
 // XXX(oschaaf): check licence. copied this in here because chromium dropped it.
 /*

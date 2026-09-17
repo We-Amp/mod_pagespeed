@@ -24,11 +24,7 @@
 #include <memory>
 
 extern "C" {
-#ifdef USE_SYSTEM_ZLIB
-#include "zlib.h"
-#else
-#include "external/envoy/bazel/foreign_cc/zlib/include/zlib.h"
-#endif
+#include <zlib.h>  // Provided by @envoy//bazel:zlib
 }  // extern "C"
 
 #include "base/logging.h"
@@ -39,11 +35,11 @@ extern "C" {
 #include "pagespeed/kernel/base/annotated_message_handler.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/http/content_type.h"
+#include "pagespeed/kernel/image/avif_optimizer.h"
 #include "pagespeed/kernel/image/gif_reader.h"
 #include "pagespeed/kernel/image/image_analysis.h"
 #include "pagespeed/kernel/image/image_converter.h"
@@ -137,19 +133,47 @@ const char kGifString[] = "gif";
 const char kPngString[] = "png";
 const uint8 kAlphaOpaque = 255;
 
-void UpdateWebpStats(bool ok, bool was_timed_out, int64 time_elapsed_ms,
-                     Image::ConversionVariables::VariableType var_type,
-                     Image::ConversionVariables* conversion_vars) {
+// Records the outcome of one encode attempt into the per-source-format stats
+// bucket `var_type` of `conversion_vars` (the WebP family or the AVIF family).
+// Each individual pointer is null-checked: a ConversionVariables family only
+// registers the buckets it actually uses, so an unregistered bucket must be a
+// no-op rather than a crash.
+//
+// `was_timed_out` and `overran_budget` describe two DIFFERENT things and are
+// deliberately not folded together:
+//
+//   was_timed_out  The conversion produced NO usable output because of the
+//                  timeout -- it was aborted at a frame boundary, or (an AVIF
+//                  still) declined before it started.  Mutually exclusive with
+//                  ok, which the DCHECK below still enforces.
+//   overran_budget The conversion DID produce usable output, but took longer
+//                  than the caller's timeout allowed.  This is orthogonal to
+//                  the timeout/success/failure trichotomy, not a fourth value
+//                  of it: the encode succeeded, so it is also recorded in
+//                  success_ms and `ok` stays true.  Counting it as a timeout
+//                  instead would both trip that DCHECK and misreport a served
+//                  image as a conversion that never happened.
+void UpdateConversionStats(bool ok, bool was_timed_out, bool overran_budget,
+                           int64 time_elapsed_ms,
+                           Image::ConversionVariables::VariableType var_type,
+                           Image::ConversionVariables* conversion_vars) {
   if (conversion_vars != nullptr) {
     Image::ConversionBySourceVariable* the_var = conversion_vars->Get(var_type);
     if (the_var != nullptr) {
+      if (overran_budget && the_var->overrun_count != nullptr) {
+        the_var->overrun_count->Add(1);
+      }
       if (was_timed_out) {
-        the_var->timeout_count->Add(1);
         DCHECK(!ok);
-      } else {
-        if (ok) {
+        if (the_var->timeout_count != nullptr) {
+          the_var->timeout_count->Add(1);
+        }
+      } else if (ok) {
+        if (the_var->success_ms != nullptr) {
           the_var->success_ms->Add(time_elapsed_ms);
-        } else {
+        }
+      } else {
+        if (the_var->failure_ms != nullptr) {
           the_var->failure_ms->Add(time_elapsed_ms);
         }
       }
@@ -178,11 +202,21 @@ ImageFormat ImageTypeToImageFormat(ImageType type) {
     case IMAGE_WEBP_ANIMATED:
       format = pagespeed::image_compression::IMAGE_WEBP;
       break;
+    case IMAGE_AVIF:
+    case IMAGE_AVIF_LOSSLESS_OR_ALPHA:
+    case IMAGE_AVIF_ANIMATED:
+      // AVIF sub-variants collapse to the single IMAGE_AVIF ImageFormat,
+      // mirroring the WebP collapse above.
+      format = pagespeed::image_compression::IMAGE_AVIF;
+      break;
   }
   return format;
 }
 
 ImageFormat GetOutputImageFormat(ImageFormat in_format) {
+  // GIF is decoded/re-encoded as PNG; every other format (JPEG, PNG, WebP, and
+  // now IMAGE_AVIF) is its own output format and passes through unchanged. AVIF
+  // therefore needs no explicit case here.
   if (in_format == pagespeed::image_compression::IMAGE_GIF) {
     return pagespeed::image_compression::IMAGE_PNG;
   } else {
@@ -236,19 +270,30 @@ class ImageImpl : public Image {
   StringPiece original_contents() { return original_contents_; }
 
  private:
-  // Maximum number of libpagespeed conversion attempts.
+  // Maximum number of libpagespeed conversion attempts per image. Three
+  // conversion sites can share this budget on the JPEG path: the speculative
+  // WebP probe, the speculative AVIF probe (pick-smaller), and the
+  // guaranteed jpeg-recompress fallback. The cap bounds CPU spent on
+  // pathological images while guaranteeing the recompress fallback stays
+  // reachable after BOTH speculative lossy probes fail; at the pre-AVIF value
+  // of 2, a both-capable request whose WebP and AVIF encodes both failed would
+  // exhaust the budget and serve the original bytes.
   // TODO(vchudnov): Consider making this tunable.
-  static const int kMaxConversionAttempts = 2;
+  static const int kMaxConversionAttempts = 3;
 
   // Concrete helper methods called by parent class
   void ComputeImageType() override;
   bool ComputeOutputContents() override;
 
+  // 'suppress_avif_candidate' disables the speculative AVIF pick-smaller
+  // probe; used by the PNG provenance-carry path, where a winning AVIF
+  // candidate would be discarded anyway (the caBX/iTXt manifest can only be
+  // spliced back into a PNG output).
   bool ComputeOutputContentsFromGifOrPng(
       const GoogleString& string_for_image,
       const PngReaderInterface* png_reader, bool fall_back_to_png,
       const char* dbg_input_format, ImageType input_type,
-      ConversionVariables::VariableType var_type);
+      ConversionVariables::VariableType var_type, bool suppress_avif_candidate);
 
   // Helper methods
   static bool ComputePngTransparency(const StringPiece& buf);
@@ -290,6 +335,34 @@ class ImageImpl : public Image {
 
   static bool ContinueWebpConversion(int percent, void* user_data);
 
+  // AVIF encode entry points, siblings of the WebP converters
+  // above. All drive the AVIF frame writer (AvifFrameWriter + AvifConfiguration)
+  // through the shared RewriteToAvif() pipe, which reads `src_format` frames and
+  // encodes them as AVIF. The per-image AVIF-vs-WebP-vs-original choice
+  // (pick-smaller) is made by the callers in ComputeOutputContents /
+  // ComputeOutputContentsFromGifOrPng, never here.
+  bool ConvertJpegToAvif(const GoogleString& original_jpeg,
+                         int configured_quality, GoogleString* compressed_avif);
+  bool ConvertPngToAvif(const GoogleString& original_png, bool lossless,
+                        int configured_quality, GoogleString* compressed_avif);
+  bool ConvertAnimatedGifToAvif(const GoogleString& original_gif,
+                                int configured_quality,
+                                GoogleString* compressed_avif);
+  // Recompress an existing AVIF (decode + re-encode at configured_quality),
+  // carrying EXIF/ICC/XMP through the transcode. Sibling of ReduceWebpImageQuality
+  // (whose body lives in webp_optimizer); the AVIF body reuses the RewriteToAvif
+  // pipe since the frame reader/writer already round-trips AVIF.
+  bool ReduceAvifImageQuality(const GoogleString& original_avif,
+                              int configured_quality,
+                              GoogleString* compressed_avif);
+  // Shared decode->AVIF-encode pipe. `src_format` is the input format
+  // (IMAGE_JPEG/PNG/GIF/AVIF). `lossless` selects the lossless encoder path.
+  // When `src_format` is IMAGE_AVIF the source's EXIF/ICC/XMP are carried through
+  // (Stream H); source-metadata extraction for JPEG/PNG inputs is a TODO.
+  bool RewriteToAvif(pagespeed::image_compression::ImageFormat src_format,
+                     const GoogleString& src, bool lossless,
+                     int configured_quality, GoogleString* output);
+
   // Determines whether we can attempt a libpagespeed conversion
   // without exceeding kMaxConversionAttempts. If so, increments the
   // number of attempts.
@@ -329,7 +402,8 @@ class ImageImpl : public Image {
   GoogleString resize_debug_message_;
   GoogleString debug_message_url_;
 
-  DISALLOW_COPY_AND_ASSIGN(ImageImpl);
+  ImageImpl(const ImageImpl&) = delete;
+  ImageImpl& operator=(const ImageImpl&) = delete;
 };
 
 void ImageImpl::SetTransformToLowRes() {
@@ -546,6 +620,15 @@ void ImageImpl::ComputeImageType() {
     case IMAGE_WEBP_ANIMATED:
       FindWebpSize();
       break;
+    case IMAGE_AVIF:
+    case IMAGE_AVIF_LOSSLESS_OR_ALPHA:
+    case IMAGE_AVIF_ANIMATED:
+      // TODO(avif): implement FindAvifSize() (parse the ISO-BMFF ispe box) to
+      // fill dims_, mirroring FindWebpSize(). Deliberate M2 follow-up: the M1
+      // cut ships without AVIF dimension extraction, so dims_ stays unset for
+      // AVIF sources (ResizeTo guards against this). image_type_ is still
+      // classified correctly by ComputeImageType() above; only dimension
+      // extraction is pending.
     case IMAGE_UNKNOWN:
       break;
   }
@@ -569,6 +652,11 @@ const ContentType* Image::TypeToContentType(ImageType image_type) {
     case IMAGE_WEBP_LOSSLESS_OR_ALPHA:
     case IMAGE_WEBP_ANIMATED:
       res = &kContentTypeWebp;
+      break;
+    case IMAGE_AVIF:
+    case IMAGE_AVIF_LOSSLESS_OR_ALPHA:
+    case IMAGE_AVIF_ANIMATED:
+      res = &kContentTypeAvif;
       break;
   }
   return res;
@@ -657,6 +745,13 @@ bool ImageImpl::ResizeTo(const ImageDim& new_dim) {
   // We have the tools ready but no tests.
   const ImageFormat original_format = ImageTypeToImageFormat(image_type());
   if (original_format == pagespeed::image_compression::IMAGE_WEBP) {
+    return false;
+  }
+  // AVIF sources are likewise not resized in M1 (no FindAvifSize yet, so dims_
+  // is never valid for them anyway); bail out here like WebP so a future
+  // dimension source cannot route AVIF into the DFATAL default of the writer
+  // switch below.
+  if (original_format == pagespeed::image_compression::IMAGE_AVIF) {
     return false;
   }
 
@@ -793,6 +888,45 @@ bool ImageImpl::ComputeOutputContents() {
       contents = original_contents_;
     }
 
+    // C2PA / Content-Credentials preserve-by-default fallback.
+    // The JPEG codec carries the APP11/JUMBF manifest THROUGH a recompress
+    // (jpeg_optimizer.cc), but only for a JPEG that is not resized and stays JPEG:
+    // the resize path re-encodes via the ScanlineWriter (which copies no markers),
+    // and the JPEG->WebP / PNG / GIF encoders do not carry the manifest at all. For
+    // every path the codec cannot cover, fail safe -- pass the ORIGINAL bytes through
+    // byte-for-byte (skip optimization) rather than silently strip provenance. This
+    // only detects and preserves; it never parses, validates, or re-emits the
+    // manifest. Tradeoff: a manifest-bearing image is not resized or
+    // format-converted under the default; opt out with `PreserveImageProvenance off`.
+    // Computed once here so the byte scan does not run per format branch.
+    const bool has_c2pa =
+        options_.get() != nullptr && options_->preserve_c2pa &&
+        pagespeed::image_compression::ImageHasC2paManifest(original_contents_);
+    // The JPEG codec carry (jpeg_optimizer.cc) preserves the APP11/JUMBF form, but a
+    // Content-Credentials manifest carried in XMP lives in APP1 (shared with EXIF) and
+    // survives a recompress only when EXIF/APP1 is retained -- which is FALSE under
+    // StripImageMetaData, a DEFAULT CoreFilters / optimize-for-bandwidth filter. So a
+    // non-resized JPEG carrying the XMP form that would be stripped must also fall back
+    // to skip-not-strip, or provenance would be silently lost.
+    const bool xmp_would_strip =
+        has_c2pa && !options_->retain_exif_data &&
+        pagespeed::image_compression::ImageHasXmpC2pa(original_contents_);
+    // Carry-through (opt-in, ImageProvenanceCarry): a non-resized PNG carrying a
+    // manifest is NOT skipped -- it is recompressed and its caBX/iTXt chunks are
+    // spliced back into the optimized output below. The PNG optimizer strips
+    // ancillary chunks, so unlike the JPEG codec (jpeg_optimizer.cc, which already
+    // carries APP11/JUMBF through a recompress) it cannot preserve the manifest on
+    // its own. The carry flag is therefore PNG-only here; every other manifest
+    // case still falls back to skip-not-strip below.
+    const bool png_carry = has_c2pa && options_->c2pa_carry && !resized &&
+                           image_type() == IMAGE_PNG;
+    if (has_c2pa && !png_carry &&
+        (resized || image_type() != IMAGE_JPEG || xmp_would_strip)) {
+      output_contents_ = original_contents_.as_string();
+      output_valid_ = true;
+      return true;
+    }
+
     // Take image contents and re-compress them.
     // The basic logic is this:
     // * low_quality_enabled_ acts as though convert_gif_to_png and
@@ -829,20 +963,68 @@ bool ImageImpl::ComputeOutputContents() {
         // TODO(huibao): Recompress animated WebP.
         ok = false;
         break;
+      case IMAGE_AVIF:
+      case IMAGE_AVIF_LOSSLESS_OR_ALPHA:
+      case IMAGE_AVIF_ANIMATED:
+        // Recompress a stored-as-AVIF input in place at the
+        // configured AVIF quality, carrying EXIF/ICC/XMP through the transcode
+        // (Stream H). image_type_ is left unchanged (the AVIF subtype is
+        // preserved). The has_c2pa guard is upstream (a manifest-bearing AVIF is
+        // a non-JPEG type, so it already returned as skip-not-strip above); the
+        // explicit !has_c2pa here documents that floor at the branch.
+        if ((resized || options_->recompress_avif) && !has_c2pa &&
+            MayConvert()) {
+          ok = ReduceAvifImageQuality(string_for_image, options_->avif_quality,
+                                      &output_contents_);
+          VLOG(1) << "Image conversion: " << ok << " avif->avif for " << url_;
+        }
+        break;
       case IMAGE_JPEG:
-        if (MayConvert() && options_->convert_jpeg_to_webp &&
-            (options_->preferred_webp != WEBP_NONE)) {
+        // A manifest-bearing JPEG must not be converted to WebP/AVIF
+        // (neither encoder carries the APP11/JUMBF or APP1/XMP manifest yet).
+        // !has_c2pa skips both conversions so it falls through to the JPEG
+        // recompress branch below, where the codec preserves the manifest.
+        // MayConvert() is checked LAST (matching the AVIF block below) so a
+        // disabled/inapplicable webp path does not burn a conversion attempt and
+        // starve the jpeg-recompress fallback.
+        if (options_->convert_jpeg_to_webp && !has_c2pa &&
+            (options_->preferred_webp != WEBP_NONE) && MayConvert()) {
           ok = ConvertJpegToWebp(string_for_image, options_->webp_quality,
                                  &output_contents_);
           VLOG(1) << "Image conversion: " << ok << " jpeg->webp for " << url_;
-          if (!ok) {
+          if (ok) {
+            image_type_ = IMAGE_WEBP;
+          } else {
             // Image is not going to be webp-converted!
             PS_LOG_INFO(handler_, "Failed to create webp!");
           }
         }
-        if (ok) {
-          image_type_ = IMAGE_WEBP;
-        } else if (MayConvert() && (resized || options_->recompress_jpeg)) {
+        // AVIF candidate (pick-smaller). Both encoders are set
+        // up when both capabilities are present, so this is a genuine per-image
+        // decision: encode AVIF into a scratch buffer and adopt it only if it
+        // beats the WebP/keep candidate (or if WebP was not produced). AVIF
+        // generally wins on lossy photographic JPEGs; where it regresses the
+        // smaller WebP/JPEG output is kept. The chosen format is recorded via
+        // image_type_ (-> the .avif/.webp output extension), never in the key.
+        // NOTE: MayConvert() is checked LAST (it consumes one of the
+        // kMaxConversionAttempts). Gating it behind the cheap flag checks means
+        // a non-AVIF request does not burn a conversion attempt here and starve
+        // the JPEG-recompress fallback below.
+        if (options_->convert_jpeg_to_avif && !has_c2pa &&
+            (options_->preferred_avif !=
+             pagespeed::image_compression::LIBAVIF_NONE) &&
+            MayConvert()) {
+          GoogleString avif_out;
+          if (ConvertJpegToAvif(string_for_image, options_->avif_quality,
+                                &avif_out) &&
+              (!ok || avif_out.size() < output_contents_.size())) {
+            output_contents_.swap(avif_out);
+            image_type_ = IMAGE_AVIF;
+            ok = true;
+            VLOG(1) << "Image conversion: chose jpeg->avif for " << url_;
+          }
+        }
+        if (!ok && MayConvert() && (resized || options_->recompress_jpeg)) {
           JpegCompressionOptions jpeg_options;
           ConvertToJpegOptions(*options_.get(), &jpeg_options);
           ok = OptimizeJpegWithOptions(string_for_image, &output_contents_,
@@ -852,10 +1034,15 @@ bool ImageImpl::ComputeOutputContents() {
         break;
       case IMAGE_PNG:
         png_reader = std::make_unique<PngReader>(handler_.get());
+        // When png_carry is active, suppress the AVIF pick-smaller candidate:
+        // the carry splice below only fits a PNG output, so a winning AVIF
+        // would fail the carry and regress to the original bytes (Level B),
+        // wasting the expensive AVIF encode on the way.
         ok = ComputeOutputContentsFromGifOrPng(
             string_for_image, png_reader.get(),
             (resized || options_->recompress_png) /* fall_back_to_png */,
-            kPngString, IMAGE_PNG, Image::ConversionVariables::FROM_PNG);
+            kPngString, IMAGE_PNG, Image::ConversionVariables::FROM_PNG,
+            png_carry /* suppress_avif_candidate */);
         break;
       case IMAGE_GIF:
         ImageType current_image_type = IMAGE_GIF;
@@ -865,7 +1052,9 @@ bool ImageImpl::ComputeOutputContents() {
           png_reader = std::make_unique<PngReader>(handler_.get());
           current_image_type = IMAGE_PNG;
         } else if (options_->convert_gif_to_png || low_quality_enabled_ ||
-                   options_->allow_webp_animated) {
+                   options_->allow_webp_animated ||
+                   options_->convert_gif_to_avif ||
+                   options_->allow_avif_animated) {
           png_reader = std::make_unique<GifReader>(handler_.get());
         } else {
           break;
@@ -873,8 +1062,51 @@ bool ImageImpl::ComputeOutputContents() {
         ok = ComputeOutputContentsFromGifOrPng(
             string_for_image, png_reader.get(),
             options_->convert_gif_to_png /* fall_back_to_png */, kGifString,
-            current_image_type, Image::ConversionVariables::FROM_GIF);
+            current_image_type, Image::ConversionVariables::FROM_GIF,
+            false /* suppress_avif_candidate */);
         break;
+    }
+    // PNG carry-through: splice the ORIGINAL caBX/iTXt manifest chunks into
+    // the recompressed PNG, immediately before the trailing IEND chunk.
+    // Fail-safe to skip-not-strip (serve the original bytes byte-for-byte) on
+    // ANY anomaly -- the PNG was converted to another format (the PNG carrier
+    // no longer fits), recompression failed, extraction found no carrier, or
+    // the output has no well-formed IEND -- so a manifest is never silently
+    // dropped.
+    // The bytes are never parsed or re-authored.
+    if (png_carry) {
+      bool carried = false;
+      if (ok && image_type() == IMAGE_PNG) {
+        const StringPieceVector chunks =
+            pagespeed::image_compression::ExtractPngC2paChunks(
+                original_contents_);
+        const size_t n = output_contents_.size();
+        // The trailing IEND chunk is exactly 12 bytes:
+        // length(4) + "IEND"(4) + CRC(4); its type sits at offset n-8.
+        if (!chunks.empty() && n >= 12 &&
+            output_contents_.compare(n - 8, 4, "IEND") == 0) {
+          GoogleString carrier;
+          for (const StringPiece& chunk : chunks) {
+            chunk.AppendToString(&carrier);
+          }
+          // Splice unless the recompressed output already contains these EXACT
+          // carrier bytes (the PNG optimizer strips ancillary chunks, so it
+          // normally has not -- this guards only against a future chunk-preserving
+          // optimizer double-adding them). This is a content-EXACT check on the
+          // full carrier, never a short signature scan, so a chance token
+          // collision in the compressed IDAT cannot mistakenly skip the splice
+          // and silently strip the manifest.
+          if (output_contents_.find(carrier) == GoogleString::npos) {
+            output_contents_.insert(n - 12, carrier);
+          }
+          carried = true;
+        }
+      }
+      if (!carried) {
+        output_contents_ = original_contents_.as_string();
+        image_type_ = IMAGE_PNG;
+        ok = true;
+      }
     }
     output_valid_ = ok;
   }
@@ -895,13 +1127,13 @@ inline bool ImageImpl::ConvertJpegToWebp(const GoogleString& original_jpeg,
   bool was_timed_out = timeout_handler.was_timed_out();
   int64 time_elapsed_ms = timeout_handler.time_elapsed_ms();
 
-  UpdateWebpStats(ok, was_timed_out, time_elapsed_ms,
-                  Image::ConversionVariables::FROM_JPEG,
-                  options_->webp_conversion_variables);
+  UpdateConversionStats(ok, was_timed_out, false /* overran_budget */,
+                        time_elapsed_ms, Image::ConversionVariables::FROM_JPEG,
+                        options_->webp_conversion_variables);
 
-  UpdateWebpStats(ok, was_timed_out, time_elapsed_ms,
-                  Image::ConversionVariables::OPAQUE,
-                  options_->webp_conversion_variables);
+  UpdateConversionStats(ok, was_timed_out, false /* overran_budget */,
+                        time_elapsed_ms, Image::ConversionVariables::OPAQUE,
+                        options_->webp_conversion_variables);
   return ok;
 }
 
@@ -966,22 +1198,300 @@ bool ImageImpl::ConvertAnimatedGifToWebp(bool has_transparency) {
   int64 time_elapsed_ms = timeout_handler.time_elapsed_ms();
   bool ok = status.Success();
 
-  UpdateWebpStats(ok, was_timed_out, time_elapsed_ms,
-                  Image::ConversionVariables::FROM_GIF_ANIMATED,
-                  options_->webp_conversion_variables);
+  UpdateConversionStats(ok, was_timed_out, false /* overran_budget */,
+                        time_elapsed_ms,
+                        Image::ConversionVariables::FROM_GIF_ANIMATED,
+                        options_->webp_conversion_variables);
 
-  UpdateWebpStats(ok, was_timed_out, time_elapsed_ms,
-                  (has_transparency ? Image::ConversionVariables::NONOPAQUE
-                                    : Image::ConversionVariables::OPAQUE),
-                  options_->webp_conversion_variables);
+  UpdateConversionStats(
+      ok, was_timed_out, false /* overran_budget */, time_elapsed_ms,
+      (has_transparency ? Image::ConversionVariables::NONOPAQUE
+                        : Image::ConversionVariables::OPAQUE),
+      options_->webp_conversion_variables);
 
   return ok;
+}
+
+namespace {
+// Maps the source format handed to RewriteToAvif() onto the AVIF stats bucket
+// it should be counted in.  Every encode entry point funnels through
+// RewriteToAvif(), so this is the single place the mapping is decided.
+Image::ConversionVariables::VariableType AvifVariableTypeForSource(
+    pagespeed::image_compression::ImageFormat src_format) {
+  switch (src_format) {
+    case pagespeed::image_compression::IMAGE_JPEG:
+      return Image::ConversionVariables::FROM_JPEG;
+    case pagespeed::image_compression::IMAGE_PNG:
+      return Image::ConversionVariables::FROM_PNG;
+    case pagespeed::image_compression::IMAGE_GIF:
+      // The only GIF->AVIF caller is ConvertAnimatedGifToAvif().
+      return Image::ConversionVariables::FROM_GIF_ANIMATED;
+    case pagespeed::image_compression::IMAGE_AVIF:
+      return Image::ConversionVariables::FROM_AVIF;
+    default:
+      return Image::ConversionVariables::FROM_UNKNOWN_FORMAT;
+  }
+}
+}  // namespace
+
+bool ImageImpl::RewriteToAvif(
+    pagespeed::image_compression::ImageFormat src_format,
+    const GoogleString& src, bool lossless, int configured_quality,
+    GoogleString* output) {
+  output->clear();
+
+  // avif_conversion_timeout_ms is enforced by two different mechanisms,
+  // because AV1 has no single one that works for both shapes of input:
+  //
+  //   * ANIMATION -- the frame-boundary progress hook below. Frames are handed
+  //     to libavif one at a time, so refusing at a boundary really does stop
+  //     the remaining work. This is a deadline.
+  //   * STILL -- an up-front admission test inside the writer
+  //     (AvifConfiguration::encode_budget_ms). libavif encodes a single-frame
+  //     image entirely inside one avifEncoderAddImage() call, and AV1 offers
+  //     no way to interrupt it (aom_codec_encode() has no deadline parameter;
+  //     avifEncoder has no cancel flag), so a check at the frame boundary
+  //     would fire only after the encode was already paid for and would
+  //     discard a finished result. Instead the writer estimates the cost from
+  //     pixel count and speed and declines BEFORE encoding. This is a
+  //     refusal, not a deadline: a still encode that is admitted always runs
+  //     to completion, even if it overruns.
+  ConversionTimeoutHandler timeout_handler(options_->avif_conversion_timeout_ms,
+                                           timer_, handler_.get());
+
+  pagespeed::image_compression::AvifConfiguration avif_config;
+  avif_config.lossless = lossless ? 1 : 0;
+  if (!lossless && configured_quality > 0) {
+    avif_config.quality = configured_quality;
+  }
+  // Speed knob (aom cpu-used analogue): we set only the FLOOR here, the
+  // AvifConfiguration default of 6, and let the writer decide the rest.
+  //
+  // This used to be chosen here, by stepping on a fixed timeout threshold: a
+  // sub-2s avif_conversion_timeout_ms selected speed 8, anything else speed 6.
+  // That was a defect, because the same option also funds the
+  // writer's admission test and the two disagreed about direction. Crossing the
+  // threshold changes encode cost by ~5x (single-threaded, x86-64: ~445 ms/Mpx
+  // at speed 6 vs ~86 at speed 8; 200 vs 31 on 64-bit ARM), so a 1999 ms budget
+  // admitted several times more megapixels than a 2000 ms one -- RAISING the
+  // timeout made the rewriter refuse SMALLER images, and the 5000 ms default
+  // admitted less than a "tighter" 1999 ms.
+  //
+  // The speed is now derived per image inside
+  // AvifFrameWriter::PrepareImage(), which is the only place that knows both
+  // the budget AND the pixel count: it picks the slowest (best
+  // quality-per-byte) speed at or above this floor whose estimated cost fits
+  // the budget, and declines only if not even the fastest known speed fits.
+  // That makes the option monotone -- more budget never admits less and never
+  // silently degrades quality -- and it keeps a tight budget emitting AVIF at
+  // a faster speed rather than routinely aborting to WebP, which was the
+  // original point of the speed-8 branch.
+  //
+  // Consequence worth knowing when reading logs: a sub-2s budget does not imply
+  // speed 8. It selects speed 6 on images that fit at speed 6 and steps up
+  // (7, 8, ...) only on images that do not, so a small image under a tight
+  // budget encodes slower, and better, than the budget alone would suggest.
+  //
+  // (The per-megapixel calibration lives in kAvifEncodeMsPerMpxBySpeed,
+  // avif_optimizer.cc -- keep the figures quoted above in step with it.)
+  avif_config.progress_hook = ConversionTimeoutHandler::Continue;
+  avif_config.user_data = &timeout_handler;
+  // Still-image admission budget. Set from the same option that drives the
+  // animation deadline, so one configured number governs both shapes; the
+  // writer applies it only to stills, and derives the encode speed from it.
+  avif_config.encode_budget_ms = options_->avif_conversion_timeout_ms;
+
+  // Stream H metadata carry. libavif exposes the source's EXIF/ICC/XMP only for
+  // an AVIF input (post-parse); JPEG/PNG source-metadata extraction is a TODO,
+  // so carry is wired for the AVIF->AVIF recompress path here. Empty blobs are a
+  // no-op in the codec.
+  if (src_format == pagespeed::image_compression::IMAGE_AVIF) {
+    GoogleString exif, icc, xmp;
+    if (pagespeed::image_compression::AvifExtractMetadata(
+            src, &exif, &icc, &xmp, handler_.get())) {
+      // retain_exif_data gates both EXIF and the APP1/XMP-carried provenance,
+      // matching how the JPEG codec treats APP1; retain_color_profile gates ICC.
+      avif_config.retain_exif = options_->retain_exif_data;
+      avif_config.retain_xmp = options_->retain_exif_data;
+      avif_config.retain_color_profile = options_->retain_color_profile;
+      avif_config.exif_data.swap(exif);
+      avif_config.icc_data.swap(icc);
+      avif_config.xmp_data.swap(xmp);
+    }
+  }
+
+  // Every exit path below records into the AVIF stats family, including the
+  // two early codec-setup failures: an AVIF encode that fails or times out has
+  // to be visible on the stats page, not merely logged at INFO.
+  const Image::ConversionVariables::VariableType var_type =
+      AvifVariableTypeForSource(src_format);
+
+  pagespeed::image_compression::ScanlineStatus status;
+  std::unique_ptr<pagespeed::image_compression::MultipleFrameReader> reader(
+      pagespeed::image_compression::CreateImageFrameReader(
+          src_format, src.data(), src.length(), handler_.get(), &status));
+  if (!status.Success()) {
+    PS_LOG_INFO(handler_, "AVIF: cannot read source image for encode.");
+    timeout_handler.Stop();
+    UpdateConversionStats(false /* ok */, false /* was_timed_out */,
+                          false /* overran_budget */,
+                          timeout_handler.time_elapsed_ms(), var_type,
+                          options_->avif_conversion_variables);
+    return false;
+  }
+
+  std::unique_ptr<pagespeed::image_compression::MultipleFrameWriter> writer(
+      pagespeed::image_compression::CreateImageFrameWriter(
+          pagespeed::image_compression::IMAGE_AVIF, &avif_config, output,
+          handler_.get(), &status));
+  if (!status.Success()) {
+    PS_LOG_INFO(handler_, "AVIF: cannot create AVIF writer for output.");
+    timeout_handler.Stop();
+    UpdateConversionStats(false /* ok */, false /* was_timed_out */,
+                          false /* overran_budget */,
+                          timeout_handler.time_elapsed_ms(), var_type,
+                          options_->avif_conversion_variables);
+    return false;
+  }
+
+  timeout_handler.Start(output);
+
+  pagespeed::image_compression::ImageSpec image_spec;
+  pagespeed::image_compression::FrameSpec frame_spec;
+  const void* scan_row = nullptr;
+  const bool prepared = reader->GetImageSpec(&image_spec, &status) &&
+                        writer->PrepareImage(&image_spec, &status);
+  // Whether PrepareImage() refused the image up front because its estimated
+  // encode cost did not fit avif_conversion_timeout_ms. This has to be latched
+  // here: FinalizeWrite() below runs unconditionally and overwrites 'status'
+  // with its own "no frames written" error, which would otherwise erase the
+  // distinction between a budget refusal and an ordinary codec failure.
+  const bool declined_over_budget =
+      !prepared &&
+      status.type() ==
+          pagespeed::image_compression::SCANLINE_STATUS_TIMEOUT_ERROR;
+  if (prepared) {
+    while (reader->HasMoreFrames() && reader->PrepareNextFrame(&status) &&
+           reader->GetFrameSpec(&frame_spec, &status) &&
+           writer->PrepareNextFrame(&frame_spec, &status)) {
+      while (reader->HasMoreScanlines() &&
+             reader->ReadNextScanline(&scan_row, &status) &&
+             writer->WriteNextScanline(scan_row, &status)) {
+        // intentional empty loop body
+      }
+    }
+  }
+  writer->FinalizeWrite(&status);
+
+  timeout_handler.Stop();
+  bool ok = status.Success();
+  // SEMANTIC CHANGE, deliberate: this counter no longer means only "an encode
+  // was started and ran out of time". For a still image it now also -- in
+  // practice, always -- means "an encode was REFUSED before it started,
+  // because its estimated cost did not fit the budget". Both are the same
+  // operational signal (AvifTimeoutMs is turning conversions away, consider
+  // raising it), which is why they share a bucket, but they are not the same
+  // event: a refusal costs no CPU, whereas the expiry it replaced burned a
+  // full encode and then discarded the result.
+  //
+  // The two are still separable by BUCKET, which is why they were not split
+  // into two counters: the admission test applies only to stills and the
+  // progress hook only to animation, so image_avif_conversion_gif_animated_*
+  // counts genuine expiries while the still buckets (png/jpeg/avif) count
+  // refusals.
+  //
+  // What this counter never covers is an admitted still that ran over budget
+  // anyway -- that produces an image, so it cannot be a timeout. It is counted
+  // separately, as an overrun, just below.
+  const bool was_timed_out =
+      timeout_handler.was_timed_out() || declined_over_budget;
+  if (!ok) {
+    // Never leave a partial .avif for a caller to serve; the fallback chain
+    // (avif->webp->original) relies on a clean empty result here.
+    output->clear();
+  }
+
+  // Still-image OVERRUN detection. The admission test in PrepareImage() works
+  // off an ESTIMATE, so it is wrong sometimes: an image whose estimated cost
+  // fit the budget can still exceed it in reality (an unusually hard source, a
+  // loaded or slower machine, an arch the table under-predicts). Because a
+  // still encode cannot be interrupted, there is nothing to do about that
+  // while it happens -- but it must not be SILENT, which is what it would
+  // otherwise be: the admission test only ever counts refusals, so a genuine
+  // expiry would leave no trace on the stats page at all.
+  //
+  // The result is deliberately KEPT. Discarding a finished encode is the exact
+  // defect this whole change exists to remove; the CPU is already spent, and
+  // throwing the output away converts a slow success into a total loss for no
+  // gain. So this reports and moves on.
+  //
+  // Consequently ok stays true here while a timeout-flavoured event is
+  // recorded -- which is precisely why this is a SEPARATE counter and not
+  // `was_timed_out`. Feeding it into was_timed_out would trip
+  // UpdateConversionStats' DCHECK(!ok) in debug builds, and would also be a
+  // lie: the conversion did happen and the image is being served.
+  //
+  // Stills only. An animated encode has a real deadline (the frame-boundary
+  // progress hook), so for animation an over-budget encode is aborted and
+  // already counted as a timeout; it can never reach here having succeeded.
+  // "Still" is spelled num_frames <= 1 to match AvifFrameWriter's own
+  // definition of `animated` exactly -- the two must not be able to disagree
+  // about which mechanism governed a given image.
+  const bool overran_budget =
+      ok && image_spec.num_frames <= 1 &&
+      options_->avif_conversion_timeout_ms > 0 &&
+      timeout_handler.time_elapsed_ms() > options_->avif_conversion_timeout_ms;
+  if (overran_budget) {
+    PS_LOG_INFO(
+        handler_,
+        "AVIF: still-image encode overran its budget (%s ms elapsed "
+        "vs %s ms allowed); keeping the result -- an AV1 still encode "
+        "cannot be interrupted once started.",
+        Integer64ToString(timeout_handler.time_elapsed_ms()).c_str(),
+        Integer64ToString(options_->avif_conversion_timeout_ms).c_str());
+  }
+
+  UpdateConversionStats(ok, was_timed_out, overran_budget,
+                        timeout_handler.time_elapsed_ms(), var_type,
+                        options_->avif_conversion_variables);
+  return ok;
+}
+
+bool ImageImpl::ConvertJpegToAvif(const GoogleString& original_jpeg,
+                                  int configured_quality,
+                                  GoogleString* compressed_avif) {
+  return RewriteToAvif(pagespeed::image_compression::IMAGE_JPEG, original_jpeg,
+                       false /* lossless */, configured_quality,
+                       compressed_avif);
+}
+
+bool ImageImpl::ConvertPngToAvif(const GoogleString& original_png,
+                                 bool lossless, int configured_quality,
+                                 GoogleString* compressed_avif) {
+  return RewriteToAvif(pagespeed::image_compression::IMAGE_PNG, original_png,
+                       lossless, configured_quality, compressed_avif);
+}
+
+bool ImageImpl::ConvertAnimatedGifToAvif(const GoogleString& original_gif,
+                                         int configured_quality,
+                                         GoogleString* compressed_avif) {
+  return RewriteToAvif(pagespeed::image_compression::IMAGE_GIF, original_gif,
+                       false /* lossless */, configured_quality,
+                       compressed_avif);
+}
+
+bool ImageImpl::ReduceAvifImageQuality(const GoogleString& original_avif,
+                                       int configured_quality,
+                                       GoogleString* compressed_avif) {
+  return RewriteToAvif(pagespeed::image_compression::IMAGE_AVIF, original_avif,
+                       false /* lossless */, configured_quality,
+                       compressed_avif);
 }
 
 inline bool ImageImpl::ComputeOutputContentsFromGifOrPng(
     const GoogleString& string_for_image, const PngReaderInterface* png_reader,
     bool fall_back_to_png, const char* dbg_input_format, ImageType input_type,
-    ConversionVariables::VariableType var_type) {
+    ConversionVariables::VariableType var_type, bool suppress_avif_candidate) {
   // Don't try to optimize empty images, it just messes things up.
   if (dims_.width() <= 0 || dims_.height() <= 0) {
     return false;
@@ -1081,6 +1591,81 @@ inline bool ImageImpl::ComputeOutputContentsFromGifOrPng(
     }
   }
 
+  // AVIF pick-smaller for GIF/PNG sources. Attempt an AVIF encode of
+  // the same source and adopt it only if it succeeds and is smaller than the
+  // WebP/JPEG/PNG candidate produced above (or if nothing was produced). The
+  // AVIF class mirrors the WebP ladder: animated -> AVIS, photographic -> lossy
+  // AVIF (alpha gated by allow_avif_alpha), otherwise lossless AVIF. C2PA is
+  // guarded upstream: a manifest-bearing non-JPEG source already returned
+  // skip-not-strip in ComputeOutputContents, EXCEPT the PNG carry
+  // path, which reaches here with suppress_avif_candidate set (the carry
+  // splice only fits a PNG output, so an AVIF winner would be discarded).
+  // Gate on the cheap capability check first; MayConvert() (which consumes a
+  // conversion attempt) is deferred to the actual encode below so a non-AVIF
+  // request does not burn an attempt and starve the WebP/PNG/JPEG fallbacks.
+  if (!suppress_avif_candidate &&
+      options_->preferred_avif != pagespeed::image_compression::LIBAVIF_NONE) {
+    bool avif_eligible = false;
+    bool avif_lossless = false;
+    int avif_quality = options_->avif_quality;
+    ImageType avif_type = IMAGE_UNKNOWN;
+    // Per-source lossy gate mirrors WebP's reuse of convert_jpeg_to_webp: the
+    // lossy-AVIF-allowed flag is convert_png_to_avif for a PNG source and
+    // convert_gif_to_avif for a GIF source.
+    const bool lossy_avif_allowed = (input_type == IMAGE_PNG)
+                                        ? options_->convert_png_to_avif
+                                        : options_->convert_gif_to_avif;
+    if (is_animated) {
+      if (options_->allow_avif_animated &&
+          options_->preferred_avif ==
+              pagespeed::image_compression::LIBAVIF_ANIMATED &&
+          options_->avif_animated_quality > 0) {
+        avif_eligible = true;
+        avif_quality = options_->avif_animated_quality;
+        avif_type = IMAGE_AVIF_ANIMATED;
+      }
+    } else if (is_photo && lossy_avif_allowed && options_->avif_quality > 0) {
+      if (!has_transparency) {
+        avif_eligible = true;
+        avif_type = IMAGE_AVIF;
+      } else if (options_->allow_avif_alpha) {
+        avif_eligible = true;
+        avif_type = IMAGE_AVIF_LOSSLESS_OR_ALPHA;
+      }
+    } else if (options_->preferred_avif ==
+                   pagespeed::image_compression::LIBAVIF_LOSSLESS ||
+               options_->preferred_avif ==
+                   pagespeed::image_compression::LIBAVIF_ANIMATED) {
+      // Non-photo -> lossless AVIF (mirrors the WebP lossless arm).
+      avif_eligible = true;
+      avif_lossless = true;
+      avif_type = IMAGE_AVIF_LOSSLESS_OR_ALPHA;
+    }
+
+    if (avif_eligible && MayConvert()) {
+      GoogleString avif_out;
+      bool avif_ok;
+      if (is_animated) {
+        avif_ok =
+            ConvertAnimatedGifToAvif(string_for_image, avif_quality, &avif_out);
+      } else if (input_type == IMAGE_PNG) {
+        avif_ok = ConvertPngToAvif(string_for_image, avif_lossless,
+                                   avif_quality, &avif_out);
+      } else {
+        // Still GIF (or other frame-readable source): read via its native
+        // format rather than the PNG path.
+        avif_ok =
+            RewriteToAvif(ImageTypeToImageFormat(input_type), string_for_image,
+                          avif_lossless, avif_quality, &avif_out);
+      }
+      if (avif_ok && (!ok || avif_out.size() < output_contents_.size())) {
+        output_contents_.swap(avif_out);
+        output_type = avif_type;
+        ok = true;
+      }
+    }
+  }
+
   if (ok) {
     image_type_ = output_type;
   } else {
@@ -1148,13 +1733,15 @@ bool ImageImpl::ConvertPngToWebp(const PngReaderInterface& png_reader,
   bool was_timed_out = timeout_handler.was_timed_out();
   int64 time_elapsed_ms = timeout_handler.time_elapsed_ms();
 
-  UpdateWebpStats(ok, was_timed_out, time_elapsed_ms, var_type,
-                  options_->webp_conversion_variables);
+  UpdateConversionStats(ok, was_timed_out, false /* overran_budget */,
+                        time_elapsed_ms, var_type,
+                        options_->webp_conversion_variables);
 
-  UpdateWebpStats(ok, was_timed_out, time_elapsed_ms,
-                  (has_transparency ? Image::ConversionVariables::NONOPAQUE
-                                    : Image::ConversionVariables::OPAQUE),
-                  options_->webp_conversion_variables);
+  UpdateConversionStats(
+      ok, was_timed_out, false /* overran_budget */, time_elapsed_ms,
+      (has_transparency ? Image::ConversionVariables::NONOPAQUE
+                        : Image::ConversionVariables::OPAQUE),
+      options_->webp_conversion_variables);
 
   return ok;
 }
@@ -1193,6 +1780,7 @@ void ImageImpl::ConvertToJpegOptions(const Image::CompressionOptions& options,
   int input_quality = GetJpegQualityFromImage(original_contents_);
   jpeg_options->retain_color_profile = options.retain_color_profile;
   jpeg_options->retain_exif_data = options.retain_exif_data;
+  jpeg_options->preserve_c2pa = options.preserve_c2pa;
   int output_quality = EstimateQualityForResizedJpeg();
 
   if (options.jpeg_quality > 0) {
@@ -1294,7 +1882,7 @@ bool ImageImpl::DrawImage(Image* image, int x, int y) {
   const size_t bytes_per_pixel =
       GetNumChannelsFromPixelFormat(output_pixel_format, handler_.get());
   const size_t bytes_per_scanline = canvas_width * bytes_per_pixel;
-  scoped_array<uint8> scanline(new uint8[bytes_per_scanline]);
+  std::unique_ptr<uint8[]> scanline(new uint8[bytes_per_scanline]);
 
   // Create a writer for writing the new canvas image.
   GoogleString canvas_image;

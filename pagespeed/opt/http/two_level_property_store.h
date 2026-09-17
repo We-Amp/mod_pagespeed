@@ -64,7 +64,8 @@ class TwoLevelPropertyStore : public PropertyStore {
   PropertyStore* primary_property_store_;
   PropertyStore* secondary_property_store_;
   ThreadSystem* thread_system_;
-  DISALLOW_COPY_AND_ASSIGN(TwoLevelPropertyStore);
+  TwoLevelPropertyStore(const TwoLevelPropertyStore&) = delete;
+  TwoLevelPropertyStore& operator=(const TwoLevelPropertyStore&) = delete;
 };
 
 }  // namespace net_instaweb

@@ -46,7 +46,8 @@ class FlushHtmlFilter : public CommonFilter {
  private:
   int score_;
 
-  DISALLOW_COPY_AND_ASSIGN(FlushHtmlFilter);
+  FlushHtmlFilter(const FlushHtmlFilter&) = delete;
+  FlushHtmlFilter& operator=(const FlushHtmlFilter&) = delete;
 };
 
 }  // namespace net_instaweb

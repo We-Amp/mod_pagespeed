@@ -20,6 +20,8 @@
 #ifndef WEBUTIL_CSS_OPEN_SOURCE_STRING_USING_H_
 #define WEBUTIL_CSS_OPEN_SOURCE_STRING_USING_H_
 
+#include <string>
+
 using std::string;
 
 #endif  // WEBUTIL_CSS_OPEN_SOURCE_STRING_USING_H_

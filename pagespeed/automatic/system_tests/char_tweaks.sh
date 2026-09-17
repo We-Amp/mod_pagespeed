@@ -29,7 +29,7 @@ check grep -q preserved $FETCHED  # preserves IE directives
 test_filter remove_quotes does what it says on the tin.
 check run_wget_with_args $URL
 num_quoted=$(sed 's/ /\n/g' $FETCHED | grep -c '"')
-check [ $num_quoted -eq 2 ]       # 2 quoted attrs
+check [ $num_quoted -eq 1 ]       # only alt="" stays quoted
 check_not grep -q "'" $FETCHED    # no apostrophes
 
 test_filter trim_urls makes urls relative

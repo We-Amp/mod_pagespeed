@@ -46,7 +46,7 @@ class AmpDocumentFilter : public EmptyHtmlFilter {
   static constexpr char kUtf8LightningBolt[] = "\xe2\x9a\xa1";
   static const char kInvalidAmpDirectiveComment[];
 
-  typedef Callback1<bool> BoolCallback;
+  using BoolCallback = Callback1<bool>;
 
   // When the filter discovers whether a document is AMP-compatible, it will
   // call discovered->Run(is_amp).  The callback will be called exactly
@@ -69,7 +69,8 @@ class AmpDocumentFilter : public EmptyHtmlFilter {
   bool saw_doctype_;
   std::unique_ptr<BoolCallback> discovered_;
 
-  DISALLOW_COPY_AND_ASSIGN(AmpDocumentFilter);
+  AmpDocumentFilter(const AmpDocumentFilter&) = delete;
+  AmpDocumentFilter& operator=(const AmpDocumentFilter&) = delete;
 };
 
 }  // namespace net_instaweb

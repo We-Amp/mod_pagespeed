@@ -38,7 +38,8 @@ class IntElement : public InlineSListElement<IntElement> {
  private:
   int num_;
 
-  DISALLOW_COPY_AND_ASSIGN(IntElement);
+  IntElement(const IntElement&) = delete;
+  IntElement& operator=(const IntElement&) = delete;
 };
 
 typedef InlineSList<IntElement> IntList;

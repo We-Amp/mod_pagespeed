@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<!--
+  SPDX-License-Identifier: Apache-2.0
+  Copyright (c) 2024-2026 We-Amp B.V.
+-->
+
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>CSS @import Flatten Test</title>
+    <!-- CSS file with @import that should be flattened -->
+    <link rel="stylesheet" href="../css/with_import.css">
+</head>
+<body class="page-wrapper">
+    <div class="main-content">
+        <h1>CSS @import Flatten Test</h1>
+
+        <p>This page uses a CSS file that contains an @import rule.
+           PageSpeed should flatten the import and inline the imported styles.</p>
+
+        <div class="alert alert-success">
+            This is a success alert from the imported styles.
+        </div>
+
+        <div class="alert alert-error">
+            This is an error alert from the imported styles.
+        </div>
+
+        <p>
+            <a href="#" class="button">Default Button</a>
+            <a href="#" class="button secondary">Secondary Button</a>
+            <a href="#" class="button large">Large Button</a>
+        </p>
+    </div>
+</body>
+</html>

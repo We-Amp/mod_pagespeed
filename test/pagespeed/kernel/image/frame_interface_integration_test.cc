@@ -18,11 +18,11 @@
  */
 
 #include <cstddef>
+#include <memory>
 
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/null_mutex.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/image/frame_interface_optimizer.h"
 #include "pagespeed/kernel/image/gif_reader.h"
@@ -103,7 +103,8 @@ class FrameScanlineAdapterWithPaddingTest : public testing::Test {
   MockMessageHandler message_handler_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(FrameScanlineAdapterWithPaddingTest);
+  FrameScanlineAdapterWithPaddingTest(const FrameScanlineAdapterWithPaddingTest&) = delete;
+  FrameScanlineAdapterWithPaddingTest& operator=(const FrameScanlineAdapterWithPaddingTest&) = delete;
 };
 
 TEST_F(FrameScanlineAdapterWithPaddingTest, ReaderPadsLines) {

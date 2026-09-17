@@ -48,7 +48,8 @@ class PthreadCondvar : public ThreadSystem::Condvar {
   PthreadMutex* mutex_;
   pthread_cond_t condvar_;
 
-  DISALLOW_COPY_AND_ASSIGN(PthreadCondvar);
+  PthreadCondvar(const PthreadCondvar&) = delete;
+  PthreadCondvar& operator=(const PthreadCondvar&) = delete;
 };
 
 }  // namespace net_instaweb

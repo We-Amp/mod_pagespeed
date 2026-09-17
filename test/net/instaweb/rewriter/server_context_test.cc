@@ -22,6 +22,7 @@
 #include "net/instaweb/rewriter/public/server_context.h"
 
 #include <cstddef>  // for size_t
+#include <memory>
 
 #include "base/logging.h"
 #include "net/instaweb/http/public/async_fetch.h"
@@ -42,6 +43,7 @@
 #include "net/instaweb/rewriter/public/resource.h"
 #include "net/instaweb/rewriter/public/resource_namer.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
+#include "net/instaweb/rewriter/public/rewrite_stats.h"
 #include "net/instaweb/rewriter/public/rewrite_filter.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/rewrite_query.h"
@@ -50,7 +52,6 @@
 #include "net/instaweb/util/public/property_cache.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/ref_counted_ptr.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_hash.h"
@@ -429,14 +430,8 @@ TEST_F(ServerContextTest, CustomOptionsWithNoUrlNamerOptions) {
   options->EnableFilter(RewriteOptions::kDelayImages);
   EXPECT_FALSE(options->Enabled(RewriteOptions::kDelayImages));
 
-  options->EnableFilter(RewriteOptions::kCachePartialHtmlDeprecated);
-  EXPECT_FALSE(options->Enabled(RewriteOptions::kCachePartialHtmlDeprecated));
-  options->EnableFilter(RewriteOptions::kDeferIframe);
-  EXPECT_FALSE(options->Enabled(RewriteOptions::kDeferIframe));
   options->EnableFilter(RewriteOptions::kDeferJavascript);
   EXPECT_FALSE(options->Enabled(RewriteOptions::kDeferJavascript));
-  options->EnableFilter(RewriteOptions::kFlushSubresources);
-  EXPECT_FALSE(options->Enabled(RewriteOptions::kFlushSubresources));
   options->EnableFilter(RewriteOptions::kLazyloadImages);
   EXPECT_FALSE(options->Enabled(RewriteOptions::kLazyloadImages));
   options->EnableFilter(RewriteOptions::kLocalStorageCache);
@@ -631,7 +626,8 @@ class MockRewriteFilter : public RewriteFilter {
   void EndElementImpl(HtmlElement* element) override {}
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(MockRewriteFilter);
+  MockRewriteFilter(const MockRewriteFilter&) = delete;
+  MockRewriteFilter& operator=(const MockRewriteFilter&) = delete;
 };
 
 class CreateMockRewriterCallback
@@ -644,7 +640,8 @@ class CreateMockRewriterCallback
   }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(CreateMockRewriterCallback);
+  CreateMockRewriterCallback(const CreateMockRewriterCallback&) = delete;
+  CreateMockRewriterCallback& operator=(const CreateMockRewriterCallback&) = delete;
 };
 
 class MockPlatformConfigCallback
@@ -657,7 +654,8 @@ class MockPlatformConfigCallback
 
  private:
   RewriteDriver** result_ptr_;
-  DISALLOW_COPY_AND_ASSIGN(MockPlatformConfigCallback);
+  MockPlatformConfigCallback(const MockPlatformConfigCallback&) = delete;
+  MockPlatformConfigCallback& operator=(const MockPlatformConfigCallback&) = delete;
 };
 
 // Tests that platform-specific configuration hook runs for various
@@ -1083,6 +1081,86 @@ TEST_F(ServerContextTest, TestHandleBeacon) {
   EXPECT_TRUE(server_context()->HandleBeacon(
       "url=http%3A%2F%2Flocalhost%3A8080%2Findex.html&ets=load:34",
       UserAgentMatcherTestBase::kChromeUserAgent, CreateRequestContext()));
+}
+
+TEST_F(ServerContextTest, TestHandleBeaconOverflowFlag) {
+  // A beacon carrying of=1 reports that the client truncated its payload;
+  // the loss is counted so it is observable server-side.
+  Variable* overflow_count =
+      server_context()->rewrite_stats()->beacon_overflow_count();
+  EXPECT_EQ(0, overflow_count->Get());
+  EXPECT_TRUE(server_context()->HandleBeacon(
+      "url=http%3A%2F%2Flocalhost%3A8080%2Findex.html&ets=load:34&of=1",
+      UserAgentMatcherTestBase::kChromeUserAgent, CreateRequestContext()));
+  EXPECT_EQ(1, overflow_count->Get());
+  // Anything other than "1" doesn't count.
+  EXPECT_TRUE(server_context()->HandleBeacon(
+      "url=http%3A%2F%2Flocalhost%3A8080%2Findex.html&ets=load:34&of=0",
+      UserAgentMatcherTestBase::kChromeUserAgent, CreateRequestContext()));
+  EXPECT_EQ(1, overflow_count->Get());
+}
+
+TEST_F(ServerContextTest, TestHandleBeaconCwvParams) {
+  // Each Core Web Vitals param lands in its own histogram.  CLS arrives in
+  // fixed-point milli-units.  (SimpleStats histograms only record counts,
+  // so values themselves cannot be asserted here.)
+  RewriteStats* stats = server_context()->rewrite_stats();
+  EXPECT_TRUE(server_context()->HandleBeacon(
+      "url=http%3A%2F%2Flocalhost%3A8080%2Findex.html"
+      "&lcp=1234&cls=100&inp=250&c_ttfb=90",
+      UserAgentMatcherTestBase::kChromeUserAgent, CreateRequestContext()));
+  EXPECT_EQ(1, stats->beacon_lcp_ms_histogram()->Count());
+  EXPECT_EQ(1, stats->beacon_cls_milli_histogram()->Count());
+  EXPECT_EQ(1, stats->beacon_inp_ms_histogram()->Count());
+  EXPECT_EQ(1, stats->beacon_ttfb_ms_histogram()->Count());
+}
+
+TEST_F(ServerContextTest, TestHandleBeaconCwvAndLegacyCoexist) {
+  RewriteStats* stats = server_context()->rewrite_stats();
+  // An old-JS GET beacon (full legacy grammar, including params the new
+  // client no longer sends) is still accepted and feeds the legacy stats.
+  // Its ttfb param carried a different semantic (responseStart -
+  // requestStart) and must NOT feed the new TTFB histogram, which only
+  // accepts the new c_ttfb param.
+  EXPECT_TRUE(server_context()->HandleBeacon(
+      "url=http%3A%2F%2Flocalhost%3A8080%2Findex.html&ets=load:34&rload=30"
+      "&nav=5&dns=2&connect=3&req_start=10&ttfb=12&dwld=8&dom_c=20&nt=0"
+      "&fp=25&ifr=0&dpr=2",
+      UserAgentMatcherTestBase::kChromeUserAgent, CreateRequestContext()));
+  EXPECT_EQ(1, stats->page_load_count()->Get());
+  EXPECT_EQ(34, stats->total_page_load_ms()->Get());
+  EXPECT_EQ(0, stats->beacon_ttfb_ms_histogram()->Count());
+  EXPECT_EQ(0, stats->beacon_lcp_ms_histogram()->Count());
+  EXPECT_EQ(0, stats->beacon_cls_milli_histogram()->Count());
+  EXPECT_EQ(0, stats->beacon_inp_ms_histogram()->Count());
+
+  // A combined new-style beacon feeds both the legacy stats and the CWV
+  // histograms.
+  EXPECT_TRUE(server_context()->HandleBeacon(
+      "url=http%3A%2F%2Flocalhost%3A8080%2Findex.html&ets=load:56"
+      "&lcp=800&cls=0&inp=40&c_ttfb=70",
+      UserAgentMatcherTestBase::kChromeUserAgent, CreateRequestContext()));
+  EXPECT_EQ(2, stats->page_load_count()->Get());
+  EXPECT_EQ(34 + 56, stats->total_page_load_ms()->Get());
+  EXPECT_EQ(1, stats->beacon_lcp_ms_histogram()->Count());
+  EXPECT_EQ(1, stats->beacon_cls_milli_histogram()->Count());
+  EXPECT_EQ(1, stats->beacon_inp_ms_histogram()->Count());
+  EXPECT_EQ(1, stats->beacon_ttfb_ms_histogram()->Count());
+}
+
+TEST_F(ServerContextTest, TestHandleBeaconCwvInvalidValues) {
+  // Malformed, negative, or absurdly large values are dropped per-param
+  // without failing the beacon.
+  RewriteStats* stats = server_context()->rewrite_stats();
+  EXPECT_TRUE(server_context()->HandleBeacon(
+      "url=http%3A%2F%2Flocalhost%3A8080%2Findex.html"
+      "&lcp=abc&cls=-5&inp=999999999&c_ttfb=15",
+      UserAgentMatcherTestBase::kChromeUserAgent, CreateRequestContext()));
+  EXPECT_EQ(0, stats->beacon_lcp_ms_histogram()->Count());
+  EXPECT_EQ(0, stats->beacon_cls_milli_histogram()->Count());
+  EXPECT_EQ(0, stats->beacon_inp_ms_histogram()->Count());
+  // A valid param in the same beacon is still recorded.
+  EXPECT_EQ(1, stats->beacon_ttfb_ms_histogram()->Count());
 }
 
 class BeaconTest : public ServerContextTest {
@@ -1609,6 +1687,11 @@ TEST_F(ServerContextTest, WriteChecksInputVector) {
                           output_resource.get());
   ResponseHeaders* headers = output_resource->response_headers();
   EXPECT_FALSE(headers->HasValue(HttpAttributes::kCacheControl, "public"));
+  // Stored output headers never carry 'immutable' -- the
+  // 'public, immutable' upgrade is applied only when serving a
+  // hash-committed URL (ServerContext::ApplyRewrittenUrlCacheControl), and
+  // a private input must never yield it anywhere.
+  EXPECT_FALSE(headers->HasValue(HttpAttributes::kCacheControl, "immutable"));
   EXPECT_TRUE(headers->HasValue(HttpAttributes::kCacheControl, "private"));
   EXPECT_TRUE(headers->HasValue(HttpAttributes::kCacheControl, "max-age=400"));
   EXPECT_STREQ("text/plain; charset=\"\\koi8-r\"",
@@ -1643,7 +1726,7 @@ TEST_F(ServerContextTest, PartlyFailedFetch) {
   SetFetchResponse(abs_url, non_cacheable, "foo");
 
   // We tell the fetcher to quash the zero-bytes writes, as that behavior
-  // (which Serf has) made the bug more severe, with not only
+  // (which some fetchers exhibit) made the bug more severe, with not only
   // loaded() and HttpStatusOk() lying, but also contents() crashing.
   mock_url_fetcher()->set_omit_empty_writes(true);
 

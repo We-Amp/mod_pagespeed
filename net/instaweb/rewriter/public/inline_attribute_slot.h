@@ -41,7 +41,8 @@ class InlineAttributeSlot : public ResourceSlot {
   HtmlElement::Attribute* attribute_;
   GoogleString location_;
 
-  DISALLOW_COPY_AND_ASSIGN(InlineAttributeSlot);
+  InlineAttributeSlot(const InlineAttributeSlot&) = delete;
+  InlineAttributeSlot& operator=(const InlineAttributeSlot&) = delete;
 };
 
 typedef RefCountedPtr<InlineAttributeSlot> InlineAttributeSlotPtr;

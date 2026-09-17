@@ -61,7 +61,8 @@ class MockPropertyPage : public PropertyPage {
   bool valid_;
   int64 time_ms_;
 
-  DISALLOW_COPY_AND_ASSIGN(MockPropertyPage);
+  MockPropertyPage(const MockPropertyPage&) = delete;
+  MockPropertyPage& operator=(const MockPropertyPage&) = delete;
 };
 }  // namespace net_instaweb
 

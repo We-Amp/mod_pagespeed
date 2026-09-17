@@ -21,11 +21,11 @@
 #define NET_INSTAWEB_HTTP_PUBLIC_RATE_CONTROLLER_H_
 
 #include <map>
+#include <memory>
 
 #include "pagespeed/kernel/base/atomic_bool.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/ref_counted_ptr.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/thread_annotations.h"
 
@@ -109,7 +109,8 @@ class RateController {
 
   AtomicBool shutdown_;
 
-  DISALLOW_COPY_AND_ASSIGN(RateController);
+  RateController(const RateController&) = delete;
+  RateController& operator=(const RateController&) = delete;
 };
 
 }  // namespace net_instaweb

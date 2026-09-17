@@ -101,7 +101,8 @@ class DependencyTracker {
   // cache once number of outstanding candidates goes to 0.
   bool saw_end_ GUARDED_BY(mutex_);
 
-  DISALLOW_COPY_AND_ASSIGN(DependencyTracker);
+  DependencyTracker(const DependencyTracker&) = delete;
+  DependencyTracker& operator=(const DependencyTracker&) = delete;
 };
 
 // Compares two Dependency objects based on the order_key field.

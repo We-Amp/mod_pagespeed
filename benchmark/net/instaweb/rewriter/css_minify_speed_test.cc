@@ -47,10 +47,11 @@
 // can be misleading.  When contemplating an algorithm change, always do
 // interleaved runs with the old & new algorithm.
 
+#include <memory>
+
 #include "benchmark/benchmark.h"
 #include "net/instaweb/rewriter/public/css_minify.h"
 #include "pagespeed/kernel/base/null_message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_writer.h"
 #include "third_party/css_parser/src/webutil/css/parser.h"

@@ -1,3 +1,21 @@
+<!-- =======================================================================
+     ARCHIVE - DO NOT EDIT.
+
+     This is the mod_pagespeed 1.0 documentation as it shipped, published
+     unchanged as the /1.0/ archive on modpagespeed.com. It describes what
+     that release did, which is why it is NOT updated when behaviour
+     changes: an archive that tracks the current product is a record of
+     nothing.
+
+     If you got here by grepping for prose that is now out of date, the
+     change belongs in the pagespeed-optimizer repository instead:
+
+         2.0    website/src/content/docs/       -> modpagespeed.com/docs/
+         1.15   website/src/content/docs-1.1/   -> modpagespeed.com/1.1/docs/
+
+     CI enforces this. tools/ci/check_legacy_docs.sh fails any pull request
+     that changes a file under html/.
+     ======================================================================= -->
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
 or more contributor license agreements.  See the NOTICE file
@@ -111,6 +129,11 @@ the <code>span</code> would have been created outside and after the
 <p>
 Any <code>document.body.appendChild</code> calls will always get appended to
 the bottom of the page.
+</p>
+<p>
+Module scripts (<code>&lt;script type="module"&gt;</code>) are left unchanged
+by this filter: browsers already defer module execution natively, and the
+re-execution mechanism used by defer_javascript cannot run module syntax.
 </p>
 <h2>Requirements</h2>
 <p>

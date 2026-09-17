@@ -244,7 +244,8 @@ class HTTPCache {
     int cache_level_;
     bool is_background_;
 
-    DISALLOW_COPY_AND_ASSIGN(Callback);
+    Callback(const Callback&) = delete;
+    Callback& operator=(const Callback&) = delete;
   };
 
   // Makes the cache ignore put requests that do not record successes.
@@ -356,6 +357,24 @@ class HTTPCache {
   }
   int compression_level() const { return compression_level_; }
 
+  // When enabled, cache hits whose backend value is backed by memory-mapped
+  // storage (e.g. Cyclone) are linked into the callback's HTTPValue as a
+  // borrowed zero-copy view (HTTPValue::LinkMapped) instead of being copied
+  // to owned storage.  Default off; wired from the CycloneZeroCopy option.
+  void set_cyclone_zero_copy_enabled(bool x) { cyclone_zero_copy_enabled_ = x; }
+  bool cyclone_zero_copy_enabled() const { return cyclone_zero_copy_enabled_; }
+
+  // When enabled (and the value is a borrowed mmap view), the serve path
+  // aliases the mmap bytes into the port output buffer instead of copying
+  // them (CycloneZeroCopyServe).  Independent of the cache-layer borrow
+  // above.  Default off.
+  void set_cyclone_zero_copy_serve_enabled(bool x) {
+    cyclone_zero_copy_serve_enabled_ = x;
+  }
+  bool cyclone_zero_copy_serve_enabled() const {
+    return cyclone_zero_copy_serve_enabled_;
+  }
+
   GoogleString Name() const { return FormatName(cache_->Name()); }
   static GoogleString FormatName(StringPiece cache);
 
@@ -373,8 +392,11 @@ class HTTPCache {
 
   // If headers is passed as NULL, the response headers will be extracted from
   // the HTTPValue. Otherwise, the headers passed in will be used.
+  // start_monotonic_us is a Timer::NowMonotonicUs() reading captured by the
+  // caller at the start of the Put; it is used only for the insert-latency
+  // stat (cache_time_us_), never for header/freshness math.
   void PutInternal(bool preserve_response_headers, const GoogleString& key,
-                   const GoogleString& fragment, int64 start_us,
+                   const GoogleString& fragment, int64 start_monotonic_us,
                    HTTPValue* value, ResponseHeaders* headers,
                    MessageHandler* handler);
   void DeleteInternal(const GoogleString& key_fragment);
@@ -413,6 +435,8 @@ class HTTPCache {
 
   int cache_levels_;
   int compression_level_;
+  bool cyclone_zero_copy_enabled_ = false;
+  bool cyclone_zero_copy_serve_enabled_ = false;
 
   // Total cumulative time spent accessing backend cache.
   Variable* cache_time_us_;
@@ -437,7 +461,8 @@ class HTTPCache {
 
   GoogleString version_prefix_;
 
-  DISALLOW_COPY_AND_ASSIGN(HTTPCache);
+  HTTPCache(const HTTPCache&) = delete;
+  HTTPCache& operator=(const HTTPCache&) = delete;
 };
 
 }  // namespace net_instaweb

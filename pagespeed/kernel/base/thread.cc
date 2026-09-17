@@ -23,8 +23,9 @@
 
 #include "pagespeed/kernel/base/thread.h"
 
+#include <cstdio>
+
 #include "base/logging.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_system.h"
 
@@ -41,7 +42,10 @@ ThreadSystem::Thread::Thread(ThreadSystem* runtime, StringPiece name,
 
 ThreadSystem::Thread::~Thread() {
   if ((flags_ & ThreadSystem::kJoinable) && started_ && !join_called_) {
-    LOG(DFATAL) << "Joinable thread was started and not joined";
+    // Use DCHECK + fprintf instead of LOG(DFATAL) — the logging sink may
+    // already be torn down during process shutdown, causing a use-after-free.
+    DCHECK(false) << "Joinable thread was started and not joined";
+    fprintf(stderr, "Joinable thread was started and not joined\n");
   }
 }
 

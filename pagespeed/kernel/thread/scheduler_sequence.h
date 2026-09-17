@@ -70,7 +70,8 @@ class Scheduler::Sequence : public net_instaweb::Sequence {
   Scheduler* scheduler_;
   net_instaweb::Sequence* forwarding_sequence_ GUARDED_BY(scheduler_->mutex());
 
-  DISALLOW_COPY_AND_ASSIGN(Sequence);
+  Sequence(const Sequence&) = delete;
+  Sequence& operator=(const Sequence&) = delete;
 };
 
 }  // namespace net_instaweb

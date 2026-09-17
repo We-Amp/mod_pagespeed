@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
 #
 # Copyright 2016 Google Inc.
 #
@@ -123,6 +123,10 @@ _responses = {
         "RunExperiment on\n"
         "AnalyticsID UA-MyExperimentID-1\n"
         "UseAnalyticsJs false\n"
+        # insert_ga is deprecated and no longer auto-enabled by experiments;
+        # enable it explicitly so remote_config_test.sh can observe the
+        # AnalyticsID being applied from remote config.
+        "EnableFilters insert_ga\n"
         "EndRemoteConfig\n",
         _nohook),
 

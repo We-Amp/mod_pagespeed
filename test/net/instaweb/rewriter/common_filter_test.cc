@@ -25,7 +25,6 @@
 #include "net/instaweb/rewriter/public/resource.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/html/html_node.h"
@@ -44,13 +43,17 @@ class CountingFilter : public CommonFilter {
       : CommonFilter(driver),
         start_doc_calls_(0),
         start_element_calls_(0),
-        end_element_calls_(0) {}
+        end_element_calls_(0),
+        characters_calls_(0) {}
 
   void StartDocumentImpl() override { ++start_doc_calls_; }
   void StartElementImpl(HtmlElement* element) override {
     ++start_element_calls_;
   }
   void EndElementImpl(HtmlElement* element) override { ++end_element_calls_; }
+  void CharactersImpl(HtmlCharactersNode* characters) override {
+    ++characters_calls_;
+  }
 
   const char* Name() const override {
     return "CommonFilterTest.CountingFilter";
@@ -59,6 +62,7 @@ class CountingFilter : public CommonFilter {
   int start_doc_calls_;
   int start_element_calls_;
   int end_element_calls_;
+  int characters_calls_;
 };
 
 class CommonFilterTest : public RewriteTestBase {
@@ -110,6 +114,11 @@ TEST_F(CommonFilterTest, DoesCallImpls) {
   EXPECT_EQ(0, filter_->end_element_calls_);
   filter_->EndElement(element);
   EXPECT_EQ(1, filter_->end_element_calls_);
+
+  HtmlCharactersNode* characters = driver->NewCharactersNode(element, "text");
+  EXPECT_EQ(0, filter_->characters_calls_);
+  filter_->Characters(characters);
+  EXPECT_EQ(1, filter_->characters_calls_);
 }
 
 TEST_F(CommonFilterTest, StoresCorrectBaseUrl) {
@@ -382,6 +391,48 @@ TEST_F(CommonFilterInsertNodeAtBodyEndTest, TextAfterCloseHtml) {
 TEST_F(CommonFilterInsertNodeAtBodyEndTest, BodyInNoscript) {
   GoogleString expected = FullTest(
       "<html><head></head><noscript><body></body></noscript>", "</html>");
+  EXPECT_STREQ(expected, output_buffer_);
+}
+
+// Overrides CharactersImpl() with an empty body and no upcall. The end-of-body
+// bookkeeping used by InsertNodeAtBodyEnd() lives in the sealed Characters()
+// wrapper, so it must still run for this filter.
+class NonUpcallingCharactersFilter : public EndDocumentInserterFilter {
+ public:
+  explicit NonUpcallingCharactersFilter(RewriteDriver* driver)
+      : EndDocumentInserterFilter(driver) {}
+
+  void CharactersImpl(HtmlCharactersNode* characters) override {}
+
+  const char* Name() const override {
+    return "CommonFilterTest.NonUpcallingCharactersFilter";
+  }
+};
+
+class CommonFilterNonUpcallingCharactersTest
+    : public CommonFilterInsertNodeAtBodyEndTest {
+ protected:
+  void SetUp() override {
+    RewriteTestBase::SetUp();
+    filter_ = std::make_unique<NonUpcallingCharactersFilter>(rewrite_driver());
+    rewrite_driver()->AddFilter(filter_.get());
+    SetupWriter();
+  }
+};
+
+// Mirrors CommonFilterInsertNodeAtBodyEndTest.TextAfterCloseBody: the stray
+// text after </body> must still push the comment to the end of the document
+// even though the filter's CharactersImpl() does nothing.
+TEST_F(CommonFilterNonUpcallingCharactersTest, TextAfterCloseBody) {
+  GoogleString expected =
+      FullTest("<html><head></head><body></body>extra text", "</html>");
+  EXPECT_STREQ(expected, output_buffer_);
+}
+
+// Mirrors CommonFilterInsertNodeAtBodyEndTest.TextAfterCloseHtml.
+TEST_F(CommonFilterNonUpcallingCharactersTest, TextAfterCloseHtml) {
+  GoogleString expected =
+      FullTest("<html><head></head><body></body></html>extra text", "");
   EXPECT_STREQ(expected, output_buffer_);
 }
 

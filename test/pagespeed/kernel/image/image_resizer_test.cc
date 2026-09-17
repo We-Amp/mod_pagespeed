@@ -17,11 +17,12 @@
  * under the License.
  */
 
+#include <memory>
+
 #include "pagespeed/kernel/image/image_resizer.h"
 
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/null_mutex.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/image/jpeg_optimizer.h"
@@ -117,7 +118,8 @@ class ScanlineResizerTest : public testing::Test {
   void* scanline_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(ScanlineResizerTest);
+  ScanlineResizerTest(const ScanlineResizerTest&) = delete;
+  ScanlineResizerTest& operator=(const ScanlineResizerTest&) = delete;
 };
 
 // Read the gold file. Size of the gold file is embedded in its name.
@@ -186,7 +188,9 @@ void ScanlineResizerTest::ResizeAndValidateImage(const char* file_name,
           reinterpret_cast<void**>(&gold_scanline)));
 
       for (size_t i = 0; i < resizer_.GetBytesPerScanline(); ++i) {
-        ASSERT_EQ(gold_scanline[i], resized_scanline[i]);
+        // Allow off-by-one differences due to floating point rounding
+        // across platforms (e.g., ARM vs x86).
+        ASSERT_NEAR(gold_scanline[i], resized_scanline[i], 1);
       }
     }
 

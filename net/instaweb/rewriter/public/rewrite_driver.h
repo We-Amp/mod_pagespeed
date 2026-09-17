@@ -20,7 +20,9 @@
 #ifndef NET_INSTAWEB_REWRITER_PUBLIC_REWRITE_DRIVER_H_
 #define NET_INSTAWEB_REWRITER_PUBLIC_REWRITE_DRIVER_H_
 
+#include <atomic>
 #include <map>
+#include <memory>
 #include <set>
 #include <vector>
 
@@ -52,7 +54,6 @@
 #include "pagespeed/kernel/base/function.h"
 #include "pagespeed/kernel/base/printf_format.h"
 #include "pagespeed/kernel/base/proto_util.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_annotations.h"
@@ -270,6 +271,18 @@ class RewriteDriver : public HtmlParse {
   //
   // This method also sets up the user-agent and device properties.
   void SetRequestHeaders(const RequestHeaders& headers);
+
+  // Records the outcome of Web Bot Auth (RFC 9421 HTTP message signature)
+  // verification for this request; see DeviceProperties::SetWebBotAuthVerdict
+  // for the full contract. A true verdict makes request_properties()->IsBot()
+  // true regardless of the user-agent string; false is "no opinion" and leaves
+  // the user-agent heuristic in charge.
+  //
+  // MUST be called AFTER SetRequestHeaders, which recreates the
+  // RequestProperties object and would discard an earlier verdict. Only a port
+  // that implements Web Bot Auth calls this at all; the others never do, and
+  // their behaviour is byte-identical to before it existed.
+  void SetWebBotAuthVerdict(bool signature_verified_agent);
 
   const RequestHeaders* request_headers() const {
     return request_headers_.get();
@@ -1143,9 +1156,13 @@ class RewriteDriver : public HtmlParse {
   //
   // Callers should take care that dangerous types like 'text/html' do not
   // sneak into content_type.
+  // If ext_override is non-empty, it overrides the file extension that
+  // SetType() would normally derive from the content type. This allows
+  // the response Content-Type and the cache key extension to differ,
+  // e.g. serving application/json content with a .js cache key extension.
   bool Write(const ResourceVector& inputs, const StringPiece& contents,
              const ContentType* type, StringPiece charset,
-             OutputResource* output);
+             OutputResource* output, StringPiece ext_override = StringPiece());
 
   void set_defer_instrumentation_script(bool x) {
     defer_instrumentation_script_ = x;
@@ -1214,8 +1231,20 @@ class RewriteDriver : public HtmlParse {
   void SetIsAmpDocument(bool is_amp);
   bool is_amp_document() const { return is_amp_; }
 
-  const CspContext& content_security_policy() const { return csp_context_; }
-  CspContext* mutable_content_security_policy() { return &csp_context_; }
+  // The currently active Content-Security-Policy. The returned
+  // reference stays valid for the rest of the request even if a later
+  // <meta> tag publishes a newer version (superseded versions are
+  // retained), so it is safe to consult from rewrite threads.
+  const CspContext& content_security_policy() const {
+    return *csp_context_snapshot_.load(std::memory_order_acquire);
+  }
+  // Publishes a new CSP context version consisting of the current
+  // policies plus 'policy' (copy-on-write; null is ignored). Must only
+  // be called from the HTML-parse thread.
+  void AddCspPolicy(std::unique_ptr<CspPolicy> policy);
+  // Resets the CSP context to empty. Must only be called from the
+  // HTML-parse thread, and not while rewrites are in flight.
+  void ClearCspPolicies();
   bool IsLoadPermittedByCsp(const GoogleUrl& url, InputRole role);
   bool IsLoadPermittedByCsp(const GoogleUrl& url, CspDirective role);
 
@@ -1326,6 +1355,10 @@ class RewriteDriver : public HtmlParse {
 
   void AddPreRenderFilters();
   void AddPostRenderFilters();
+
+  // Registers all built-in rewrite filters (CssFilter, ImageRewriteFilter,
+  // etc.) in SetServerContext(). Defined in rewrite_driver_filter_init.cc.
+  void RegisterBuiltinRewriteFilters();
 
   // Helper function to decode the pagespeed url.
   bool DecodeOutputResourceNameHelper(
@@ -1717,10 +1750,21 @@ class RewriteDriver : public HtmlParse {
   // Any PageSpeed option cookies from the original request.
   GoogleString pagespeed_option_cookies_;
 
-  // Currently active Content-Security-Policy
-  CspContext csp_context_;
+  // Currently active Content-Security-Policy, stored copy-on-write.
+  // HTML-parse-thread events (response headers at StartDocument, <meta>
+  // tags mid-document) publish a fresh immutable CspContext version via
+  // AddCspPolicy/ClearCspPolicies instead of mutating in place, because
+  // rewrite threads read the context concurrently (e.g.
+  // RewriteContext::AreOutputsAllowedByCsp when a rewrite outlives its
+  // flush window, or CreateInputResource from nested CSS rewrites).
+  // Superseded versions are retained until Clear() so a reference
+  // obtained earlier stays valid. csp_context_versions_ is only touched
+  // on the HTML-parse thread; readers go through the atomic snapshot.
+  std::vector<std::unique_ptr<CspContext>> csp_context_versions_;
+  std::atomic<const CspContext*> csp_context_snapshot_{nullptr};
 
-  DISALLOW_COPY_AND_ASSIGN(RewriteDriver);
+  RewriteDriver(const RewriteDriver&) = delete;
+  RewriteDriver& operator=(const RewriteDriver&) = delete;
 };
 
 // Subclass of HTTPCache::Callback that incorporates a given RewriteOptions'
@@ -1750,7 +1794,9 @@ class OptionsAwareHTTPCacheCallback : public HTTPCache::Callback {
  private:
   const RewriteOptions* rewrite_options_;
 
-  DISALLOW_COPY_AND_ASSIGN(OptionsAwareHTTPCacheCallback);
+  OptionsAwareHTTPCacheCallback(const OptionsAwareHTTPCacheCallback&) = delete;
+  OptionsAwareHTTPCacheCallback& operator=(
+      const OptionsAwareHTTPCacheCallback&) = delete;
 };
 
 }  // namespace net_instaweb

@@ -38,6 +38,11 @@ void DeterministicJsFilter::StartDocumentImpl() { found_head_ = false; }
 void DeterministicJsFilter::StartElementImpl(HtmlElement* element) {
   if (!found_head_ && element->keyword() == HtmlName::kHead) {
     found_head_ = true;
+    // The Date()/random() overrides run as an inline script, which the
+    // page's CSP may forbid; in that case inject nothing.
+    if (!CspPermitsInlineScript()) {
+      return;
+    }
     HtmlElement* script = driver()->NewElement(element, HtmlName::kScript);
     driver()->InsertNodeAfterCurrent(script);
     StaticAssetManager* static_asset_manager =

@@ -20,6 +20,7 @@
 #include "pagespeed/kernel/base/posix_timer.h"
 
 #include <sys/time.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <cerrno>
@@ -39,6 +40,14 @@ int64 PosixTimer::NowUs() const {
     LOG(FATAL) << "Could not determine time of day: " << strerror(errno);
   }
   return (static_cast<int64>(tv.tv_sec) * 1000000) + tv.tv_usec;
+}
+
+int64 PosixTimer::NowMonotonicUs() const {
+  struct timespec ts;
+  if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) {
+    LOG(FATAL) << "Could not read monotonic clock: " << strerror(errno);
+  }
+  return (static_cast<int64>(ts.tv_sec) * 1000000) + (ts.tv_nsec / 1000);
 }
 
 void PosixTimer::SleepUs(int64 us) { usleep(us); }

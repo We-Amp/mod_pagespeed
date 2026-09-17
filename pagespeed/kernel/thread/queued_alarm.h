@@ -20,10 +20,11 @@
 #ifndef PAGESPEED_KERNEL_THREAD_QUEUED_ALARM_H_
 #define PAGESPEED_KERNEL_THREAD_QUEUED_ALARM_H_
 
+#include <memory>
+
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/function.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/thread/scheduler.h"
 #include "pagespeed/kernel/thread/sequence.h"
 

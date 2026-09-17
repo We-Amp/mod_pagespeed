@@ -19,6 +19,9 @@ build:macos --copt -UDEBUG                                                      
 # Startup options cannot be selected via config.
 startup --host_jvm_args=-Xmx3g
 
+# Disable bzlmod to use WORKSPACE dependencies only
+common --noenable_bzlmod
+
 run --color=yes
 
 build --color=yes
@@ -62,15 +65,65 @@ common --experimental_allow_tags_propagation
 # (Workaround for https://github.com/bazelbuild/rules_foreign_cc/issues/421)
 build:linux --copt=-fPIC
 build:linux --copt=-Wno-deprecated-declarations
-build:linux --cxxopt=-std=c++17 --host_cxxopt=-std=c++17
+# -Wdangling-reference is a GCC C++/ObjC++-only warning, so this suppression
+# MUST be a --cxxopt, never a --copt. As a --copt it also lands on every C
+# compile, where GCC answers with
+#   cc1: warning: command-line option '-Wno-dangling-reference' is valid for
+#        C++/ObjC++ but not for C
+# That is harmless for our own C code, but rules_foreign_cc bakes the C copts
+# into CMAKE_C_FLAGS for every cmake() dependency, and CMake's
+# check_c_compiler_flag() treats that GNU "valid for ... but not for" line as a
+# FAIL_REGEX hit. Every probe then reports the flag as unsupported, so libaom's
+# require_c_flag(-std=c99) hard-fails configure on any leg that builds with
+# plain host GCC. Clang legs never saw it because --config=clang
+# adds -Wno-unknown-warning-option, which silences clang's equivalent complaint.
+# Guarded by tools/assert-bazelrc-lang-flags.sh.
+build:linux --cxxopt=-Wno-dangling-reference
+build:linux --cxxopt=-std=c++20 --host_cxxopt=-std=c++20
 build:linux --conlyopt=-fexceptions
 build:linux --fission=dbg,opt
 build:linux --features=per_object_debug_info
 build:linux --action_env=BAZEL_LINKLIBS=-l%:libstdc++.a
 build:linux --action_env=BAZEL_LINKOPTS=-lm
 
+# --- Binary hardening -----------------------------------------------------
+# Opt-in config applied to RELEASE/shipped builds (NOT sanitizer builds — see
+# the FORTIFY=0 override on :sanitizer). The shipped artifacts are SHARED
+# OBJECTS (libmod_pagespeed.so, ngx_pagespeed_module.so): already -fPIC
+# (build:linux) and ET_DYN, so -pie/-fPIE do NOT apply to them. We add:
+#   - _FORTIFY_SOURCE=2  : fortified libc calls (needs optimization; pair w/ -c opt)
+#   - stack-protector-strong : stack canaries on at-risk frames
+#   - full RELRO + BIND_NOW  : GOT/PLT read-only, resolve at load (no lazy clobber)
+# Verified to land on the linked .so (readelf): GNU_RELRO segment, FLAGS_1 NOW,
+# __stack_chk_fail, and _FORTIFY_SOURCE _chk symbols. These four are what
+# tools/assert-binary-hardening.sh asserts on each shipped .so at release time.
+build:hardening --copt=-D_FORTIFY_SOURCE=2
+build:hardening --copt=-fstack-protector-strong
+build:hardening --linkopt=-Wl,-z,relro
+build:hardening --linkopt=-Wl,-z,now
+# Branch-protection is arch-specific and BEST-EFFORT: the compiler instruments
+# OUR code (x86-64 endbr / arm64 BTI landing pads + PAC), but the binary-level
+# CET/BTI *enforcement* GNU-property note is only set when EVERY statically
+# linked object (libstdc++.a, vendored C) is also branch-protection-compiled —
+# which they are not — so readelf will not show the note. arm64 PAC still
+# enforces intrinsically. Kept for the per-object hardening + forward-compat; the
+# release-time assertion does NOT hard-fail on the absent note. Compose per arch:
+#   x86-64 : --config=hardening --config=hardening-cet
+#   arm64  : --config=hardening --config=hardening-bti
+build:hardening-cet --copt=-fcf-protection=full
+build:hardening-bti --copt=-mbranch-protection=standard
+
 # We already have absl in the build, define absl=1 to tell googletest to use absl for backtrace.
 build --define absl=1
+
+# CRT for the AVIF codec stack. The AV1 codecs are built by cmake via
+# rules_foreign_cc, which does not see Bazel's --features, so the CRT choice has
+# to be mirrored into a --define that //bazel:windows_static_crt can select on.
+# `static` matches the static_link_msvcrt feature --config=windows enables;
+# --config=win-asan flips it to `dynamic` below, in step with the
+# --features=-static_link_msvcrt it already sets. Declared as a plain `build`
+# line so it lands before any --config expansion and stays order-independent.
+build --define=avif_crt=static
 
 # Disable ICU linking for googleurl.
 build --@com_googlesource_googleurl//build_config:system_icu=0
@@ -80,11 +133,18 @@ build:sanitizer --define tcmalloc=disabled
 build:sanitizer --linkopt -ldl
 build:sanitizer --build_tag_filters=-no_san
 build:sanitizer --test_tag_filters=-no_san
+# _FORTIFY_SOURCE requires optimization and conflicts with ASan/MSan interceptors
+# (false positives / build warnings). Force it OFF under every sanitizer so the
+# :hardening config (FORTIFY=2) can never compose badly with a sanitizer build.
+# This is the ONLY place FORTIFY is disabled; shipped builds get FORTIFY=2.
+build:sanitizer --copt=-D_FORTIFY_SOURCE=0
 
 # Common flags for Clang
 build:clang --action_env=BAZEL_COMPILER=clang
 build:clang --action_env=CC=clang --action_env=CXX=clang++
 build:clang --linkopt=-fuse-ld=lld
+# Don't error on GCC-specific warning flags like -Wno-dangling-reference
+build:clang --copt=-Wno-unknown-warning-option
 
 # Flags for Clang + PCH
 build:clang-pch --spawn_strategy=local
@@ -92,6 +152,8 @@ build:clang-pch --define=ENVOY_CLANG_PCH=1
 
 # Use gold linker for gcc compiler.
 build:gcc --linkopt=-fuse-ld=gold
+# GCC 13 has full C++23 support including std::expected
+build:gcc --action_env=CC=gcc-13 --action_env=CXX=g++-13
 
 # Basic ASAN/UBSAN that works for gcc
 build:asan --action_env=ENVOY_ASAN=1
@@ -99,10 +161,10 @@ build:asan --config=sanitizer
 # ASAN install its signal handler, disable ours so the stacktrace will be printed by ASAN
 build:asan --define signal_trace=disabled
 build:asan --define ENVOY_CONFIG_ASAN=1
-# The following two lines were manually edited due to #593.                                 # unique
-# Flag undefined was dropped from both the lines to allow CI/ASAN to pass.                  # unique
-build:asan --copt -fsanitize=address                                                        # unique
-build:asan --linkopt -fsanitize=address                                                     # unique
+# -fsanitize=undefined was dropped from these two lines to allow CI/ASAN to    # unique
+# pass, then re-added (UBSAN_OPTIONS below halts on any finding).               # unique
+build:asan --copt -fsanitize=address --copt -fsanitize=undefined                            # unique
+build:asan --linkopt -fsanitize=address --linkopt -fsanitize=undefined                      # unique
 # vptr and function sanitizer are enabled in clang-asan if it is set up via bazel/setup_clang.sh.
 build:asan --copt -fno-sanitize=vptr,function
 build:asan --linkopt -fno-sanitize=vptr,function
@@ -117,29 +179,32 @@ build:asan --copt -O1
 build:asan --copt -fno-optimize-sibling-calls
 
 # Clang ASAN/UBSAN
-build:clang-asan --config=clang
+build:clang-asan --config=clang-libstdcxx13
 build:clang-asan --config=asan
 build:clang-asan --linkopt -fuse-ld=lld
-build:clang-asan --linkopt --rtlib=compiler-rt
-build:clang-asan --linkopt --unwindlib=libgcc
 
 # macOS
-build:macos --cxxopt=-std=c++17 --host_cxxopt=-std=c++17
+build:macos --cxxopt=-std=c++20 --host_cxxopt=-std=c++20
 build:macos --action_env=PATH=/opt/homebrew/bin:/opt/local/bin:/usr/local/bin:/usr/bin:/bin
 build:macos --host_action_env=PATH=/opt/homebrew/bin:/opt/local/bin:/usr/local/bin:/usr/bin:/bin
 build:macos --define tcmalloc=disabled
+# Enable aligned allocation (required by absl). C++-only (clang rejects it for
+# C), so --cxxopt, not --copt — see the -Wno-dangling-reference note above.
+build:macos --cxxopt=-faligned-allocation --host_cxxopt=-faligned-allocation
+# Suppress 'register' keyword errors from gperf-generated code (deprecated in
+# C++17). -Wregister is C++/ObjC++-only, hence --cxxopt.
+build:macos --cxxopt=-Wno-register --host_cxxopt=-Wno-register
 
 # macOS ASAN/UBSAN
 build:macos-asan --config=asan
 # Workaround, see https://github.com/bazelbuild/bazel/issues/6932
 build:macos-asan --copt -Wno-macro-redefined
 build:macos-asan --copt -D_FORTIFY_SOURCE=0
-# Workaround, see https://github.com/bazelbuild/bazel/issues/4341
-build:macos-asan --copt -DGRPC_BAZEL_BUILD
 # Dynamic link cause issues like: `dyld: malformed mach-o: load commands size (59272) > 32768`
 build:macos-asan --dynamic_mode=off
 
 # Clang TSAN
+build:clang-tsan --config=clang-libstdcxx13
 build:clang-tsan --action_env=ENVOY_TSAN=1
 build:clang-tsan --config=sanitizer
 build:clang-tsan --define ENVOY_CONFIG_TSAN=1
@@ -153,10 +218,10 @@ build:clang-tsan --test_tag_filters=-no_san,-no_tsan
 build:clang-tsan --copt -DEVENT__DISABLE_DEBUG_MODE
 # https://github.com/abseil/abseil-cpp/issues/760
 # https://github.com/google/sanitizers/issues/953
-build:clang-tsan --test_env="TSAN_OPTIONS=report_atomic_races=0"
+build:clang-tsan --test_env="TSAN_OPTIONS=report_atomic_races=0:detect_deadlocks=0:suppressions=/src/tools/tsan_suppressions.txt"
 
-# Clang MSAN - this is the base config for remote-msan and docker-msan. To run this config without
-# our build image, follow https://github.com/google/sanitizers/wiki/MemorySanitizerLibcxxHowTo
+# Clang MSAN - to run this config without our build image, follow
+# https://github.com/google/sanitizers/wiki/MemorySanitizerLibcxxHowTo
 # with libc++ instruction and provide corresponding `--copt` and `--linkopt` as well.
 build:clang-msan --action_env=ENVOY_MSAN=1
 build:clang-msan --config=sanitizer
@@ -197,8 +262,9 @@ build:coverage --test_timeout=390,750,1500,5700
 build:coverage --define=dynamic_link_tests=true
 build:coverage --define=ENVOY_CONFIG_COVERAGE=1
 build:coverage --cxxopt="-DENVOY_CONFIG_COVERAGE=1"
-build:coverage --coverage_support=@envoy//bazel/coverage:coverage_support
-build:coverage --test_env=CC_CODE_COVERAGE_SCRIPT=external/envoy/bazel/coverage/collect_cc_coverage.sh  # unique
+# Envoy-only: requires WORKSPACE.envoy (see scripts/use-envoy-workspace.sh)
+# build:coverage --coverage_support=@envoy//bazel/coverage:coverage_support
+# build:coverage --test_env=CC_CODE_COVERAGE_SCRIPT=external/envoy/bazel/coverage/collect_cc_coverage.sh
 build:coverage --test_env=HEAPCHECK=
 build:coverage --combined_report=lcov
 build:coverage --strategy=TestRunner=sandboxed,local
@@ -210,152 +276,13 @@ build:coverage --instrumentation_filter="//source(?!/common/quic/platform)[/:],/
 build:test-coverage --test_arg="-l trace"
 build:test-coverage --test_arg="--log-path /dev/null"
 build:fuzz-coverage --config=plain-fuzzer
-build:fuzz-coverage --run_under=@envoy//bazel/coverage:fuzz_coverage_wrapper.sh
-
-# Remote execution: https://docs.bazel.build/versions/master/remote-execution.html
-build:rbe-toolchain --action_env=BAZEL_DO_NOT_DETECT_CPP_TOOLCHAIN=1
-
-build:rbe-toolchain-clang --config=rbe-toolchain
-build:rbe-toolchain-clang --platforms=@envoy_build_tools//toolchains:rbe_linux_clang_platform
-build:rbe-toolchain-clang --host_platform=@envoy_build_tools//toolchains:rbe_linux_clang_platform
-build:rbe-toolchain-clang --crosstool_top=@envoy_build_tools//toolchains/configs/linux/clang/cc:toolchain
-build:rbe-toolchain-clang --extra_toolchains=@envoy_build_tools//toolchains/configs/linux/clang/config:cc-toolchain
-build:rbe-toolchain-clang --action_env=CC=clang --action_env=CXX=clang++ --action_env=PATH=/usr/sbin:/usr/bin:/sbin:/bin:/opt/llvm/bin
-
-build:rbe-toolchain-clang-libc++ --config=rbe-toolchain
-build:rbe-toolchain-clang-libc++ --platforms=@envoy_build_tools//toolchains:rbe_linux_clang_libcxx_platform
-build:rbe-toolchain-clang-libc++ --host_platform=@envoy_build_tools//toolchains:rbe_linux_clang_libcxx_platform
-build:rbe-toolchain-clang-libc++ --crosstool_top=@envoy_build_tools//toolchains/configs/linux/clang_libcxx/cc:toolchain
-build:rbe-toolchain-clang-libc++ --extra_toolchains=@envoy_build_tools//toolchains/configs/linux/clang_libcxx/config:cc-toolchain
-build:rbe-toolchain-clang-libc++ --action_env=CC=clang --action_env=CXX=clang++ --action_env=PATH=/usr/sbin:/usr/bin:/sbin:/bin:/opt/llvm/bin
-build:rbe-toolchain-clang-libc++ --action_env=CXXFLAGS=-stdlib=libc++
-build:rbe-toolchain-clang-libc++ --action_env=LDFLAGS=-stdlib=libc++
-build:rbe-toolchain-clang-libc++ --define force_libcpp=enabled
-
-# Do not inherit from "clang-asan" to avoid picking up flags from local clang.bazelrc.
-build:rbe-toolchain-asan --config=asan
-build:rbe-toolchain-asan --linkopt -fuse-ld=lld
-build:rbe-toolchain-asan --action_env=ENVOY_UBSAN_VPTR=1
-build:rbe-toolchain-asan --copt=-fsanitize=vptr,function
-build:rbe-toolchain-asan --linkopt=-fsanitize=vptr,function
-build:rbe-toolchain-asan --linkopt='-L/opt/llvm/lib/clang/14.0.0/lib/x86_64-unknown-linux-gnu'
-build:rbe-toolchain-asan --linkopt=-l:libclang_rt.ubsan_standalone.a
-build:rbe-toolchain-asan --linkopt=-l:libclang_rt.ubsan_standalone_cxx.a
-
-build:rbe-toolchain-msan --linkopt=-L/opt/libcxx_msan/lib
-build:rbe-toolchain-msan --linkopt=-Wl,-rpath,/opt/libcxx_msan/lib
-build:rbe-toolchain-msan --config=clang-msan
-
-build:rbe-toolchain-tsan --linkopt=-L/opt/libcxx_tsan/lib
-build:rbe-toolchain-tsan --linkopt=-Wl,-rpath,/opt/libcxx_tsan/lib
-build:rbe-toolchain-tsan --config=clang-tsan
-
-build:rbe-toolchain-gcc --config=rbe-toolchain
-build:rbe-toolchain-gcc --platforms=@envoy_build_tools//toolchains:rbe_linux_gcc_platform
-build:rbe-toolchain-gcc --host_platform=@envoy_build_tools//toolchains:rbe_linux_gcc_platform
-build:rbe-toolchain-gcc --crosstool_top=@envoy_build_tools//toolchains/configs/linux/gcc/cc:toolchain
-build:rbe-toolchain-gcc --extra_toolchains=@envoy_build_tools//toolchains/configs/linux/gcc/config:cc-toolchain
-
-build:rbe-toolchain-msvc-cl --host_platform=@envoy_build_tools//toolchains:rbe_windows_msvc_cl_platform
-build:rbe-toolchain-msvc-cl --platforms=@envoy_build_tools//toolchains:rbe_windows_msvc_cl_platform
-build:rbe-toolchain-msvc-cl --crosstool_top=@envoy_build_tools//toolchains/configs/windows/msvc-cl/cc:toolchain
-build:rbe-toolchain-msvc-cl --extra_toolchains=@envoy_build_tools//toolchains/configs/windows/msvc-cl/config:cc-toolchain
-
-build:rbe-toolchain-clang-cl --host_platform=@envoy_build_tools//toolchains:rbe_windows_clang_cl_platform
-build:rbe-toolchain-clang-cl --platforms=@envoy_build_tools//toolchains:rbe_windows_clang_cl_platform
-build:rbe-toolchain-clang-cl --crosstool_top=@envoy_build_tools//toolchains/configs/windows/clang-cl/cc:toolchain
-build:rbe-toolchain-clang-cl --extra_toolchains=@envoy_build_tools//toolchains/configs/windows/clang-cl/config:cc-toolchain
-
-build:remote --spawn_strategy=remote,sandboxed,local
-build:remote --strategy=Javac=remote,sandboxed,local
-build:remote --strategy=Closure=remote,sandboxed,local
-build:remote --strategy=Genrule=remote,sandboxed,local
-build:remote --remote_timeout=7200
-build:remote --google_default_credentials=true
-build:remote --remote_download_toplevel
-build:remote --nobuild_runfile_links
-
-# Windows bazel does not allow sandboxed as a spawn strategy
-build:remote-windows --spawn_strategy=remote,local
-build:remote-windows --strategy=Javac=remote,local
-build:remote-windows --strategy=Closure=remote,local
-build:remote-windows --strategy=Genrule=remote,local
-build:remote-windows --remote_timeout=7200
-build:remote-windows --google_default_credentials=true
-build:remote-windows --remote_download_toplevel
-
-build:remote-clang --config=remote
-build:remote-clang --config=rbe-toolchain-clang
-
-build:remote-clang-libc++ --config=remote
-build:remote-clang-libc++ --config=rbe-toolchain-clang-libc++
-
-build:remote-gcc --config=remote
-build:remote-gcc --config=rbe-toolchain-gcc
-
-build:remote-asan --config=remote
-build:remote-asan --config=rbe-toolchain-clang-libc++
-build:remote-asan --config=rbe-toolchain-asan
-
-build:remote-msan --config=remote
-build:remote-msan --config=rbe-toolchain-clang-libc++
-build:remote-msan --config=rbe-toolchain-msan
-
-build:remote-tsan --config=remote
-build:remote-tsan --config=rbe-toolchain-clang-libc++
-build:remote-tsan --config=rbe-toolchain-tsan
-
-build:remote-msvc-cl --config=remote-windows
-build:remote-msvc-cl --config=msvc-cl
-build:remote-msvc-cl --config=rbe-toolchain-msvc-cl
-
-build:remote-clang-cl --config=remote-windows
-build:remote-clang-cl --config=clang-cl
-build:remote-clang-cl --config=rbe-toolchain-clang-cl
-
-# Docker sandbox
-# NOTE: Update this from https://github.com/envoyproxy/envoy-build-tools/blob/main/toolchains/rbe_toolchains_config.bzl#L8
-build:docker-sandbox --experimental_docker_image=envoyproxy/envoy-build-ubuntu:41c5a05d708972d703661b702a63ef5060125c33
-build:docker-sandbox --spawn_strategy=docker
-build:docker-sandbox --strategy=Javac=docker
-build:docker-sandbox --strategy=Closure=docker
-build:docker-sandbox --strategy=Genrule=docker
-build:docker-sandbox --define=EXECUTOR=remote
-build:docker-sandbox --experimental_docker_verbose
-build:docker-sandbox --experimental_enable_docker_sandbox
-
-build:docker-clang --config=docker-sandbox
-build:docker-clang --config=rbe-toolchain-clang
-
-build:docker-clang-libc++ --config=docker-sandbox
-build:docker-clang-libc++ --config=rbe-toolchain-clang-libc++
-
-build:docker-gcc --config=docker-sandbox
-build:docker-gcc --config=rbe-toolchain-gcc
-
-build:docker-asan --config=docker-sandbox
-build:docker-asan --config=rbe-toolchain-clang-libc++
-build:docker-asan --config=rbe-toolchain-asan
-
-build:docker-msan --config=docker-sandbox
-build:docker-msan --config=rbe-toolchain-clang-libc++
-build:docker-msan --config=rbe-toolchain-msan
-
-build:docker-tsan --config=docker-sandbox
-build:docker-tsan --config=rbe-toolchain-clang-libc++
-build:docker-tsan --config=rbe-toolchain-tsan
+# Envoy-only: requires WORKSPACE.envoy (see scripts/use-envoy-workspace.sh)
+# build:fuzz-coverage --run_under=@envoy//bazel/coverage:fuzz_coverage_wrapper.sh
 
 # CI configurations
-build:remote-ci --remote_cache=grpcs://remotebuildexecution.googleapis.com
-build:remote-ci --remote_executor=grpcs://remotebuildexecution.googleapis.com
-build:remote-ci --config=ci
 # Note this config is used by mobile CI also.
 build:ci --noshow_progress
 build:ci --noshow_loading_progress
-
-# Build Event Service
-build:google-bes --bes_backend=grpcs://buildeventservice.googleapis.com
-build:google-bes --bes_results_url=https://source.cloud.google.com/results/invocations/
 
 # Fuzz builds
 
@@ -399,13 +326,17 @@ build:compdb --build_tag_filters=-nocompdb
 
 # Windows build quirks
 build:windows --action_env=TMPDIR
+build:windows --action_env=PROGRAMFILES=C:/progra~1
 build:windows --define signal_trace=disabled
 build:windows --define hot_restart=disabled
 build:windows --define tcmalloc=disabled
 build:windows --define wasm=disabled
 build:windows --define manual_stamp=manual_stamp
-build:windows --cxxopt="/std:c++17"
+build:windows --cxxopt="/std:c++20"
+build:windows --host_cxxopt="/std:c++20"
 build:windows --output_groups=+pdb_file
+# Windows PageSpeed: Exclude Apache module (POSIX-only), use cross-platform Std* implementations
+build:windows --define=apache_module=false
 
 # TODO(wrowe,sunjayBhatia): Resolve bugs upstream in curl and rules_foreign_cc
 # See issue https://github.com/bazelbuild/rules_foreign_cc/issues/301
@@ -433,7 +364,8 @@ build:clang-cl --copt="-Wno-builtin-macro-redefined"
 # ./test/mocks/http/stream.h(16,21): error: 'addCallbacks'
 #     overrides a member function but is not marked 'override'
 #   MOCK_METHOD(void, addCallbacks, (StreamCallbacks & callbacks));
-build:clang-cl --copt="-Wno-inconsistent-missing-override"
+# -Winconsistent-missing-override is a C++-only clang warning, hence --cxxopt.
+build:clang-cl --cxxopt="-Wno-inconsistent-missing-override"
 
 # Defaults to 'auto' - Off for windows, so override to linux behavior
 build:windows --enable_runfiles=yes
@@ -446,9 +378,113 @@ build:windows --features=fully_static_link
 build:windows --features=static_link_msvcrt
 build:windows --dynamic_mode=off
 
+# Windows AddressSanitizer via clang-cl (runtime half of the Windows
+# memory-safety hardening; the compile-time half is --config=win-analyze below)
+# Detects heap/stack buffer overflows, use-after-free, use-after-return.
+# Uses clang-cl (not MSVC cl.exe) because the codebase and its dependencies
+# (abseil, libpsl) rely on GCC/Clang extensions (__inline__, sanitizer headers)
+# that MSVC does not support. Use alongside --config=clang-cl.
+# Scope ASan instrumentation to project sources only — not external deps.
+# rules_foreign_cc (curl cmake) fails if ASan flags leak into CMake's
+# configure test binaries (__asan_init undefined). Using per_file_copt
+# restricts -fsanitize=address to project and third_party sources.
+build:win-asan --per_file_copt=//pagespeed/.*,//net/.*,//third_party/.*,//test/.*@-fsanitize=address
+build:win-asan --per_file_copt=//pagespeed/.*,//net/.*,//third_party/.*,//test/.*@-fno-sanitize=vptr
+build:win-asan --per_file_copt=//pagespeed/.*,//net/.*,//third_party/.*,//test/.*@-fno-sanitize=function
+build:win-asan --per_file_copt=//pagespeed/.*,//net/.*,//third_party/.*,//test/.*@-fno-sanitize-blacklist
+# Link clang's ASan runtime explicitly. Bazel invokes lld-link directly (not
+# via clang-cl driver), so -fsanitize=address as a linkopt is meaningless.
+# We must pass the .lib files and their search path directly.
+# Use 8.3 short path to avoid spaces in LIBPATH (bazelrc can't quote linkopt values)
+build:win-asan --linkopt=/LIBPATH:C:/PROGRA~1/LLVM/lib/clang/19/lib/windows
+build:win-asan --linkopt=clang_rt.asan_dynamic-x86_64.lib
+build:win-asan --linkopt=clang_rt.asan_dynamic_runtime_thunk-x86_64.lib
+# Suppress MSVC's stl_asan.lib (x64 version not installed, not needed with clang runtime)
+build:win-asan --linkopt=/NODEFAULTLIB:stl_asan.lib
+build:win-asan --linkopt=/INCREMENTAL:NO
+build:win-asan --linkopt=/DEBUG
+build:win-asan --strip=never
+build:win-asan --build_tag_filters=-no_san
+build:win-asan --test_tag_filters=-no_san
+build:win-asan --copt=-DADDRESS_SANITIZER=1
+build:win-asan --copt=-D__SANITIZE_ADDRESS__
+# Test binaries need the ASan runtime DLL on PATH at runtime.
+build:win-asan --test_env=PATH=C:\\PROGRA~1\\LLVM\\lib\\clang\\19\\lib\\windows;C:\\PROGRA~1\\LLVM\\bin;C:\\Windows\\System32
+# ASan needs -O1 for reasonable performance (default /Od is very slow)
+build:win-asan --copt=-O1
+# ASan needs the dynamic CRT (static CRT is incompatible with ASan DLL model)
+build:win-asan --features=-fully_static_link
+build:win-asan --features=-static_link_msvcrt
+# ...and the same for the cmake-built AV1 codecs, which cannot see --features.
+# Without this they keep the static CRT: lld-link downgrades the mix to the
+# LNK4098 *warning*, so the leg stays green while ASan's interceptors -- which
+# hook the dynamic CRT -- stop covering allocations inside the codec.
+build:win-asan --define=avif_crt=dynamic
+build:win-asan --dynamic_mode=off
+
+# Windows MSVC /analyze static analysis (compile-time half of the Windows
+# memory-safety hardening; the runtime half is --config=win-asan above)
+# Zero-cost compile-time detection of null derefs, buffer overruns, UB patterns.
+# Can be added to regular Windows builds (no separate pass needed).
+build:win-analyze --copt=/analyze
+build:win-analyze --copt=/analyze:external-
+
+# Zig cross-compilation from Linux to Windows (MinGW ABI).
+# Requires hermetic_cc_toolchain in WORKSPACE — see bazel/zig_toolchain.bzl.
+# Usage: bazel build --config=zig-windows //pagespeed/windows:pagespeed_c_api
+#
+# NOTE: Does NOT inherit from build:windows because that uses MSVC-style flags
+# (e.g., /std:c++20) which Zig doesn't understand. Zig uses GCC-style flags.
+build:zig-windows --incompatible_enable_cc_toolchain_resolution
+build:zig-windows --platforms=@zig_sdk//platform:windows_amd64
+build:zig-windows --extra_toolchains=@zig_sdk//toolchain:windows_amd64
+# Host toolchain uses Linux GCC-13 for tools (default gcc is too old for C++20)
+# Must set action_env for both host and target; Bazel's toolchain detection uses these
+build:zig-windows --action_env=CC=gcc-13
+build:zig-windows --action_env=CXX=g++-13
+build:zig-windows --host_action_env=CC=gcc-13
+build:zig-windows --host_action_env=CXX=g++-13
+build:zig-windows --host_cxxopt=-std=c++20
+# C++ standard for cross-compiled code (Zig uses GCC-style flags, not MSVC)
+build:zig-windows --cxxopt=-std=c++20
+# Windows-specific defines (copied from build:windows but without MSVC flags)
+build:zig-windows --define signal_trace=disabled
+build:zig-windows --define hot_restart=disabled
+build:zig-windows --define tcmalloc=disabled
+build:zig-windows --define wasm=disabled
+build:zig-windows --define=apache_module=false
+build:zig-windows --copt=-DCARES_STATICLIB
+build:zig-windows --copt=-DNGHTTP2_STATICLIB
+build:zig-windows --copt=-DCURL_STATICLIB
+build:zig-windows --enable_runfiles=yes
+build:zig-windows --dynamic_mode=off
+# Windows API level (Windows 7+) and common defines
+build:zig-windows --copt=-D_WIN32_WINNT=0x0601
+build:zig-windows --copt=-DNOMINMAX
+build:zig-windows --copt=-DWIN32_LEAN_AND_MEAN
+# Define WIN32 for code that checks it (Zig/MinGW only defines _WIN32)
+build:zig-windows --copt=-DWIN32
+# Note: Boringssl is NOT used on Windows - we use Windows BCrypt API instead.
+# This avoids pthread issues with Zig's MinGW target.
+# No POSIX shared memory on Windows
+build:zig-windows --copt=-DPAGESPEED_SUPPORT_POSIX_SHARED_MEM=0
+# Disable POSIX-only memcached backend
+build:zig-windows --define=enable_memcached=false
+
+# Envoy-workspace filter builds (WORKSPACE.envoy; scripts/use-envoy-workspace.sh).
+# googleurl's ICU IDNA variant needs system ICU headers the dev images lack;
+# the lean workspace already pins system_icu=0 globally.
+build:envoy-filter --config=clang-libstdcxx13
+build:envoy-filter --@googleurl//build_config:system_icu=0
+# Selects the EXT_BUILD_DEPS spelling the Envoy rules_foreign_cc pin accepts
+# (//bazel:rules_foreign_cc_envoy_pin config_setting).
+build:envoy-filter --define=rules_foreign_cc_pin=envoy
+
 try-import %workspace%/clang.bazelrc
-try-import %workspace%/user.bazelrc
 try-import %workspace%/local_tsan.bazelrc
 
 ###### modifications for pagespeed
 import %workspace%/pagespeed.bazelrc
+
+# User overrides (imported last so they can override pagespeed.bazelrc settings)
+try-import %workspace%/user.bazelrc

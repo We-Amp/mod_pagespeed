@@ -140,11 +140,3 @@
    ...
    fun:_ZZN3re23RE24InitERKNS_11StringPieceERKNS0_7OptionsEENKUlvE_clEv
 }
-
-{
-   grpc error "leak" -- TODO(cheesy): find the root cause and eliminate.
-   Memcheck:Leak
-   ...
-   fun:grpc_error_create
-   fun:grpc_server_add_insecure_http2_port
-}

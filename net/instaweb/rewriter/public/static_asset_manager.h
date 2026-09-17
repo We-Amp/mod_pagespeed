@@ -22,12 +22,12 @@
 
 #include <cstddef>  // for size_t
 #include <map>
+#include <memory>
 #include <vector>
 
 #include "net/instaweb/rewriter/static_asset_config.pb.h"
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_annotations.h"
@@ -183,7 +183,8 @@ class StaticAssetManager {
   GoogleString cache_header_with_long_ttl_ GUARDED_BY(lock_);
   GoogleString cache_header_with_private_ttl_ GUARDED_BY(lock_);
 
-  DISALLOW_COPY_AND_ASSIGN(StaticAssetManager);
+  StaticAssetManager(const StaticAssetManager&) = delete;
+  StaticAssetManager& operator=(const StaticAssetManager&) = delete;
 };
 
 }  // namespace net_instaweb

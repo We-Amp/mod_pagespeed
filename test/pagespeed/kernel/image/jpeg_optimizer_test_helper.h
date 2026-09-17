@@ -47,6 +47,10 @@ int GetColorProfileMarker();
 // Helper function to return the exif data segment marker.
 int GetExifDataMarker();
 
+// Helper function to return the C2PA / Content-Credentials (APP11/JUMBF)
+// segment marker.
+int GetC2paMarker();
+
 }  // namespace image_compression
 }  // namespace pagespeed_testing
 

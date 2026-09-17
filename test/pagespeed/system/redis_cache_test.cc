@@ -22,6 +22,7 @@
 #include "pagespeed/system/redis_cache.h"
 
 #include <cstdlib>
+#include <memory>
 
 #include "apr_network_io.h"  // NOLINT
 #include "base/logging.h"
@@ -33,8 +34,8 @@
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/util/platform.h"
 #include "pagespeed/kernel/util/simple_stats.h"
-#include "pagespeed/system/tcp_connection_for_testing.h"
-#include "pagespeed/system/tcp_server_thread_for_testing.h"
+#include "test/pagespeed/system/tcp_connection_for_testing.h"
+#include "test/pagespeed/system/tcp_server_thread_for_testing.h"
 #include "test/pagespeed/kernel/base/gmock.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/base/mock_timer.h"
@@ -54,15 +55,16 @@ static const char kSomeValue[] = "SomeValue";
 
 using testing::HasSubstr;
 
-// TODO(yeputons): refactor this class with AprMemCacheTest, see details in
-// apr_mem_cache_test.cc
+// TODO(yeputons): refactor this class with MemcachedCacheTest, see details in
+// memcached_cache_test.cc
 class RedisCacheTest : public CacheTestBase {
  protected:
   RedisCacheTest()
       : thread_system_(Platform::CreateThreadSystem()),
         statistics_(thread_system_.get()),
         timer_(new NullMutex, 0),
-        redis_port_env_(0) {
+        redis_port_env_(0),
+        redis_host_env_("localhost") {
     RedisCache::InitStats(&statistics_);
   }
 
@@ -78,10 +80,14 @@ class RedisCacheTest : public CacheTestBase {
     }
 
     redis_port_env_ = port;
+    const char* hostString = getenv("REDIS_HOST");
+    if (hostString != nullptr) {
+      redis_host_env_ = hostString;
+    }
 
     {
       TcpConnectionForTesting conn;
-      CHECK(conn.Connect("localhost", port))
+      CHECK(conn.Connect(redis_host_env_.c_str(), port))
           << "Cannot connect to Redis server";
       conn.Send("FLUSHALL\r\n");
       CHECK_EQ("+OK\r\n", conn.ReadLineCrLf());
@@ -90,7 +96,7 @@ class RedisCacheTest : public CacheTestBase {
   }
 
   void InitRedisWithCustomDatabaseIndex(const int database_index) {
-    cache_.emplace_back(new RedisCache("localhost", redis_port_env_,
+    cache_.emplace_back(new RedisCache(redis_host_env_, redis_port_env_,
                                        thread_system_.get(), &handler_, &timer_,
                                        kReconnectionDelayMs, kTimeoutUs,
                                        &statistics_, database_index, kTTLSec));
@@ -123,8 +129,8 @@ class RedisCacheTest : public CacheTestBase {
   template <class ServerThread>
   bool StartCustomServer() {
     WaitForCustomServerShutdown();
-    custom_server_.reset(
-        new ServerThread(custom_server_port_, thread_system_.get()));
+    custom_server_ = std::make_unique<ServerThread>(custom_server_port_,
+                                                    thread_system_.get());
     if (!custom_server_->Start()) {
       return false;
     }
@@ -151,6 +157,7 @@ class RedisCacheTest : public CacheTestBase {
   std::unique_ptr<TcpServerThreadForTesting> custom_server_;
   static apr_port_t custom_server_port_;
   int redis_port_env_;
+  GoogleString redis_host_env_;
 };
 
 apr_port_t RedisCacheTest::custom_server_port_ = 0;

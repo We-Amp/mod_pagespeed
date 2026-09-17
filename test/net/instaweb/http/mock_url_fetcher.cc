@@ -247,7 +247,7 @@ void MockUrlFetcher::Fetch(const GoogleString& url_in,
             int mid = response->body().size() / 2;
             StringPiece body = response->body();
             StringPiece head = body.substr(0, mid);
-            StringPiece tail = body.substr(mid, StringPiece::npos);
+            StringPiece tail = body.substr(mid);
             if (!(head.empty() && omit_empty_writes)) {
               fetch->Write(head, message_handler);
             }

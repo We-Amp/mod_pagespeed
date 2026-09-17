@@ -56,7 +56,8 @@ class TcpConnectionForTesting {
   apr_pool_t* pool_;
   apr_socket_t* socket_;
 
-  DISALLOW_COPY_AND_ASSIGN(TcpConnectionForTesting);
+  TcpConnectionForTesting(const TcpConnectionForTesting&) = delete;
+  TcpConnectionForTesting& operator=(const TcpConnectionForTesting&) = delete;
 };
 
 }  // namespace net_instaweb

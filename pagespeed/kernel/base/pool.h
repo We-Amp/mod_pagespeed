@@ -44,8 +44,8 @@ template <class T>
 class Pool {
  public:
   // We can iterate over a pool using this iterator type.
-  typedef typename PoolElement<T>::Position iterator;
-  typedef typename std::list<T*>::const_iterator const_iterator;
+  using iterator = typename PoolElement<T>::Position;
+  using const_iterator = typename std::list<T*>::const_iterator;
 
   Pool() {}
 
@@ -122,7 +122,8 @@ class Pool {
  private:
   std::list<T*> contents_;
 
-  DISALLOW_COPY_AND_ASSIGN(Pool);
+  Pool(const Pool&) = delete;
+  Pool& operator=(const Pool&) = delete;
 };
 
 }  // namespace net_instaweb

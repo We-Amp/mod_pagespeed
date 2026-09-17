@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 def data2c_gen2(name, srcs):
     for f in srcs:
         native.genrule(

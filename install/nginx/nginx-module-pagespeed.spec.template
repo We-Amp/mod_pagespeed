@@ -1,0 +1,111 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
+#------------------------------------------------------------------------------
+#   nginx-module-pagespeed.spec
+#
+#   Packages the 1.1 ngx_pagespeed dynamic module for el9 (AlmaLinux 9 /
+#   RHEL 9 / Rocky 9). Built and linked INSIDE an almalinux:9 container so the
+#   module's glibc/libstdc++ ABI matches the target (EA4 glibc lesson), and
+#   pinned to the EXACT el9 stock nginx version it was compiled against
+#   (model (a'): nginx dynamic modules carry an exact-version signature that
+#   --with-compat does NOT relax; M0 proved a one-patch gap fails to load).
+#------------------------------------------------------------------------------
+
+Summary         : @@SHORTDESC@@
+License         : Apache-2.0
+Name            : @@PACKAGE@@
+Version         : @@VERSION@@
+Release         : @@REVISION@@@@DIST@@
+Group           : System Environment/Daemons
+Vendor          : @@COMPANY_FULLNAME@@
+Url             : @@PRODUCTURL@@
+Packager        : @@MAINTNAME@@ <@@MAINTMAIL@@>
+
+# Exact-version pin to el9 stock nginx (model (a')). nginx refuses to load a
+# dynamic module whose embedded nginx_version != the running nginx's, down to
+# the patch level; --with-compat only canonicalizes the configure-option part
+# of the signature, NOT the version check (M0, 2026-05-27). The pin is on the
+# upstream version number (e.g. 1.20.1 -> 1020001), stable across el9 packaging
+# revisions but breaking — by design, with a build-time load-check alarm — on a
+# distro nginx-minor rebase.
+Requires        : @@NGINX_DEP@@
+
+# PSOL / Cyclone / BoringSSL / curl are statically linked inside the .so and
+# every internal symbol is hidden by the version script (D4), so there is NO
+# Requires on any We-Amp runtime and NO collision with nginx's system OpenSSL.
+# The only external runtime deps are the distro libc/libstdc++ (auto-detected).
+AutoReqProv     : yes
+
+%Description
+@@FULLDESC@@
+
+%build
+
+%install
+rm -rf "$RPM_BUILD_ROOT"
+
+if [ -z "@@STAGEDIR@@" -o ! -d "@@STAGEDIR@@" ] ; then
+    echo "@@STAGEDIR@@ appears to be incorrectly set - aborting"
+    exit 1
+fi
+
+install -m 755 -d "$RPM_BUILD_ROOT/usr"
+# Copy each top-level staged dir that exists (el9 nginx layout is entirely
+# under /usr/: module .so, load snippet, docs — no /etc/ tree).
+for d in etc usr var; do
+  [ -d "@@STAGEDIR@@/$d" ] && cp -a "@@STAGEDIR@@/$d/" "$RPM_BUILD_ROOT/"
+done
+
+%clean
+rm -rf "$RPM_BUILD_ROOT"
+
+%files
+%defattr(-,root,root)
+@@NGINX_MODULEDIR@@/ngx_pagespeed_module.so
+%config(noreplace) @@NGINX_LOADDIR@@/mod-pagespeed.conf
+%dir @@NGINX_DOCDIR@@
+%license @@NGINX_DOCDIR@@/LICENSE
+%doc @@NGINX_DOCDIR@@/NOTICE
+%doc @@NGINX_DOCDIR@@/THIRD-PARTY-NOTICES
+@@NGINX_DOCDIR@@/README.md
+@@NGINX_DOCDIR@@/pagespeed.conf.sample
+@@NGINX_DOCDIR@@/pagespeed_admin_restrict.conf.sample
+
+%pre
+exit 0
+
+%post
+# stock el9 nginx.conf auto-includes /usr/share/nginx/modules/*.conf from the
+# MAIN context (not http{}), so mod-pagespeed.conf's load_module takes effect on
+# the next `nginx -t`/reload. (load_module is a main-context-only directive — it
+# cannot be loaded from http{}/conf.d.) The FileCachePath dir is auto-created at
+# config-parse time (ngx_pagespeed.cc ps_init_dir) — no manual
+# mkdir/chown needed.
+
+# Join the web-server user to the `pagespeed` group. After the optimizer
+# daemon's privilege drop (2.1) its cache volume, notify socket and shared
+# config are group-rw (0660/0640 pagespeed:pagespeed), and group membership is
+# what lets the module reach them. Guarded and idempotent; a no-op when the
+# optimizer package (which creates the group) is not installed, and a usermod
+# failure must not fail the install: the module logs the degraded state loudly
+# at startup instead.
+if getent group pagespeed >/dev/null 2>&1 && id nginx >/dev/null 2>&1; then
+  usermod -a -G pagespeed nginx || true
+fi
+
+exit 0
+
+%preun
+if [ "$1" -eq "0" ]; then
+  # Uninstall: comment out load_module so a stale .so reference can't wedge
+  # `nginx -t` after the file is removed.
+  if [ -f @@NGINX_LOADDIR@@/mod-pagespeed.conf ]; then
+    sed -i 's/^load_module/#load_module/' \
+      @@NGINX_LOADDIR@@/mod-pagespeed.conf 2>/dev/null || true
+  fi
+fi
+exit 0
+
+%postun
+exit 0

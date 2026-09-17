@@ -39,7 +39,8 @@ class StripScriptsFilter : public EmptyHtmlFilter {
  private:
   HtmlParse* html_parse_;
 
-  DISALLOW_COPY_AND_ASSIGN(StripScriptsFilter);
+  StripScriptsFilter(const StripScriptsFilter&) = delete;
+  StripScriptsFilter& operator=(const StripScriptsFilter&) = delete;
 };
 
 }  // namespace net_instaweb

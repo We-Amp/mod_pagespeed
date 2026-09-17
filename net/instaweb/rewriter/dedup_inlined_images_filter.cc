@@ -26,6 +26,7 @@
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "net/instaweb/rewriter/public/static_asset_manager.h"
+#include "pagespeed/kernel/base/escaping.h"
 #include "pagespeed/kernel/base/hasher.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
@@ -136,9 +137,24 @@ void DedupInlinedImagesFilter::EndElementImpl(HtmlElement* element) {
       //                                          "pagespeed_img_87654321",
       //                                          "pagespeed_script_1");
       //   </script>
+      // The id attributes are author-controlled (and may originate from
+      // untrusted/UGC markup), so they must be escaped before being spliced
+      // into the single-quoted JS string literals below. AddJsToElement only
+      // wraps the snippet in CDATA and does NOT escape its contents, so an id
+      // such as  x');evil()//  would otherwise break out of the literal and
+      // inject script (stored XSS). Mirror the lazyload/beacon filters and run
+      // each value through EscapeToJsStringLiteral with add_quotes=false, since
+      // the surrounding quotes are provided by the template.
+      GoogleString escaped_from_img_id, escaped_element_id, escaped_script_id;
+      EscapeToJsStringLiteral(from_img_id, false /* add_quotes */,
+                              &escaped_from_img_id);
+      EscapeToJsStringLiteral(element_id, false /* add_quotes */,
+                              &escaped_element_id);
+      EscapeToJsStringLiteral(script_id, false /* add_quotes */,
+                              &escaped_script_id);
       GoogleString snippet("pagespeed.dedupInlinedImages.");
-      StrAppend(&snippet, "inlineImg('", from_img_id, "','", element_id, "','",
-                script_id, "');");
+      StrAppend(&snippet, "inlineImg('", escaped_from_img_id, "','",
+                escaped_element_id, "','", escaped_script_id, "');");
       HtmlElement* script = driver()->NewElement(element, HtmlName::kScript);
       driver()->InsertElementAfterElement(element, script);
       AddJsToElement(snippet, script);
@@ -153,11 +169,16 @@ void DedupInlinedImagesFilter::EndElementImpl(HtmlElement* element) {
 bool DedupInlinedImagesFilter::IsDedupCandidate(HtmlElement* element,
                                                 StringPiece* src_iff_true) {
   // Ignore images inside a <noscript> as inserting any JS is pointless.
+  // Ignore all images when the page's CSP forbids inline scripts, since the
+  // dedup mechanism restores each duplicate from an inline script that the
+  // browser would block, leaving a blank image. Checked per element because
+  // a meta-tag policy can arrive mid-document.
   // Ignore images that aren't inlined (a data URI).
   // Ignore images that are smaller than the cutoff, current set to roughly
   // the size of the JS snippet we insert (ignoring the functions JS overhead).
   // TODO(matterbury): Also handle input tags.
-  if (noscript_element() == nullptr && element->keyword() == HtmlName::kImg) {
+  if (noscript_element() == nullptr && element->keyword() == HtmlName::kImg &&
+      CspPermitsInlineScript()) {
     const StringPiece src(element->AttributeValue(HtmlName::kSrc));
     if (IsDataImageUrl(src) && src.size() > kMinimumImageCutoff) {
       *src_iff_true = src;

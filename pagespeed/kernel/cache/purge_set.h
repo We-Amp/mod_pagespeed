@@ -22,9 +22,9 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <memory>
 
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/cache/lru_cache_base.h"
@@ -42,10 +42,10 @@ namespace net_instaweb {
 // the global invalidation timestamp to cover the evicted purges.
 class PurgeSet {
   class InvalidationTimestampHelper;
-  typedef LRUCacheBase<int64, InvalidationTimestampHelper> Lru;
+  using Lru = LRUCacheBase<int64, InvalidationTimestampHelper>;
 
  public:
-  typedef Lru::Iterator Iterator;
+  using Iterator = Lru::Iterator;
 
   // Used for sanity checking timestamps read from the cache.flush file,
   // allowing for small skew and system clock adjustments.  Setting this

@@ -24,8 +24,9 @@
 #ifndef PAGESPEED_KERNEL_THREAD_WORKER_H_
 #define PAGESPEED_KERNEL_THREAD_WORKER_H_
 
+#include <memory>
+
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string_util.h"
 
 namespace net_instaweb {
@@ -37,7 +38,7 @@ class Waveform;
 // This class is a base for various mechanisms of running things in background.
 //
 // If you just want to run something in background, you want to use a subclass
-// of this, such as a SlowWorker or QueuedWorker instance.
+// of this, such as a QueuedWorker instance.
 //
 // Subclasses should implement bool PermitQueue() and provide an appropriate
 // wrapper around QueueIfPermitted().
@@ -92,7 +93,8 @@ class Worker {
   std::unique_ptr<WorkThread> thread_;
   Waveform* queue_size_;
 
-  DISALLOW_COPY_AND_ASSIGN(Worker);
+  Worker(const Worker&) = delete;
+  Worker& operator=(const Worker&) = delete;
 };
 
 }  // namespace net_instaweb

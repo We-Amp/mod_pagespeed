@@ -41,7 +41,8 @@ class ImageSpriter {
 
   ImageLibraryInterface* image_lib_;
 
-  DISALLOW_COPY_AND_ASSIGN(ImageSpriter);
+  ImageSpriter(const ImageSpriter&) = delete;
+  ImageSpriter& operator=(const ImageSpriter&) = delete;
 };
 
 }  // namespace spriter

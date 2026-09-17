@@ -123,7 +123,8 @@ class FileLoadPolicy {
   typedef std::list<FileLoadRule*> FileLoadRules;
   FileLoadRules file_load_rules_;
 
-  DISALLOW_COPY_AND_ASSIGN(FileLoadPolicy);
+  FileLoadPolicy(const FileLoadPolicy&) = delete;
+  FileLoadPolicy& operator=(const FileLoadPolicy&) = delete;
 };
 
 }  // namespace net_instaweb

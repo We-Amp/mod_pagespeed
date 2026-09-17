@@ -50,7 +50,8 @@ class InlineSListElement {
   void set_next(T* new_next) { next_ = new_next; }
 
   T* next_;
-  DISALLOW_COPY_AND_ASSIGN(InlineSListElement);
+  InlineSListElement(const InlineSListElement&) = delete;
+  InlineSListElement& operator=(const InlineSListElement&) = delete;
 };
 
 // A simple linked list that's optimized for memory usage,
@@ -150,7 +151,7 @@ class InlineSList {
     Iterator(const InlineSList<T>* list, T* prev) : IterBase(list, prev) {}
   };
 
-  typedef Iterator iterator;
+  using iterator = Iterator;
 
   // Read-only iterator type; cannot be used for deletion or to modify
   // the contained items.
@@ -177,7 +178,7 @@ class InlineSList {
     ConstIterator(const InlineSList<T>* list, T* prev) : IterBase(list, prev) {}
   };
 
-  typedef ConstIterator const_iterator;
+  using const_iterator = ConstIterator;
 
   InlineSList() : tail_(NULL) {}
 
@@ -223,7 +224,8 @@ class InlineSList {
   // yet still have easy front-to-end traversal.
   T* tail_;
 
-  DISALLOW_COPY_AND_ASSIGN(InlineSList);
+  InlineSList(const InlineSList&) = delete;
+  InlineSList& operator=(const InlineSList&) = delete;
 };
 
 template <class T>

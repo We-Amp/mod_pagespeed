@@ -24,12 +24,13 @@
 #ifndef NET_INSTAWEB_REWRITER_PUBLIC_PROPERTY_CACHE_UTIL_H_
 #define NET_INSTAWEB_REWRITER_PUBLIC_PROPERTY_CACHE_UTIL_H_
 
+#include <memory>
+
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "net/instaweb/util/public/property_cache.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/proto_util.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 
@@ -69,7 +70,7 @@ T* DecodeFromPropertyCache(const PropertyCache* cache,
     return NULL;
   }
 
-  std::unique_ptr<T> result(new T);
+  std::unique_ptr<T> result = std::make_unique<T>();
   ArrayInputStream input(property_value->value().data(),
                          property_value->value().size());
   if (!result->ParseFromZeroCopyStream(&input)) {

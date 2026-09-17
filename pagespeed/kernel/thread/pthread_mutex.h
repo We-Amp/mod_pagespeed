@@ -42,7 +42,8 @@ class PthreadMutex : public ThreadSystem::CondvarCapableMutex {
 
   pthread_mutex_t mutex_;
 
-  DISALLOW_COPY_AND_ASSIGN(PthreadMutex);
+  PthreadMutex(const PthreadMutex&) = delete;
+  PthreadMutex& operator=(const PthreadMutex&) = delete;
 };
 
 }  // namespace net_instaweb

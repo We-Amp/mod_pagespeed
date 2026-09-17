@@ -19,6 +19,8 @@
 
 #include "pagespeed/system/system_cache_path.h"
 
+#include <algorithm>
+#include <cstddef>
 #include <memory>
 
 #include "base/logging.h"
@@ -32,20 +34,19 @@
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/cache/cache_interface.h"
 #include "pagespeed/kernel/cache/cache_stats.h"
-#include "pagespeed/kernel/cache/file_cache.h"
+#include "pagespeed/kernel/cache/cyclone_cache.h"
 #include "pagespeed/kernel/cache/lru_cache.h"
 #include "pagespeed/kernel/cache/purge_context.h"
 #include "pagespeed/kernel/cache/purge_set.h"
-#include "pagespeed/kernel/cache/threadsafe_cache.h"
 #include "pagespeed/kernel/sharedmem/shared_mem_lock_manager.h"
-#include "pagespeed/kernel/util/file_system_lock_manager.h"
+#include "pagespeed/kernel/util/threadsafe_lock_manager.h"
 #include "pagespeed/system/system_rewrite_options.h"
 #include "pagespeed/system/system_server_context.h"
 
 namespace net_instaweb {
 
 const char SystemCachePath::kFileCache[] = "file_cache";
-const char SystemCachePath::kLruCache[] = "lru_cache";
+const char SystemCachePath::kFileCacheSmall[] = "file_cache_small";
 
 // The SystemCachePath encapsulates a cache-sharing model where a user specifies
 // a file-cache path per virtual-host.  With each file-cache object we keep
@@ -58,17 +59,14 @@ SystemCachePath::SystemCachePath(const StringPiece& path,
       factory_(factory),
       shm_runtime_(shm_runtime),
       lock_manager_(nullptr),
-      file_cache_backend_(nullptr),
+      cache_backend_(nullptr),
+      cyclone_cache_(nullptr),
       lru_cache_(nullptr),
       file_cache_(nullptr),
+      small_tier_file_cache_(nullptr),
       cache_flush_filename_(config->cache_flush_filename()),
       unplugged_(config->unplugged()),
       enable_cache_purge_(config->enable_cache_purge()),
-      clean_interval_explicitly_set_(
-          config->has_file_cache_clean_interval_ms()),
-      clean_size_explicitly_set_(config->has_file_cache_clean_size_kb()),
-      clean_inode_limit_explicitly_set_(
-          config->has_file_cache_clean_inode_limit()),
       mutex_(factory->thread_system()->NewMutex()) {
   if (cache_flush_filename_.empty()) {
     if (enable_cache_purge_) {
@@ -77,27 +75,28 @@ SystemCachePath::SystemCachePath(const StringPiece& path,
       cache_flush_filename_ = "cache.flush";
     }
   }
-  if (cache_flush_filename_[0] != '/') {
-    // Implementations must ensure the file cache path is an absolute path.
-    // mod_pagespeed checks in mod_instaweb.cc:pagespeed_post_config while
-    // ngx_pagespeed checks in ngx_pagespeed.cc:ps_merge_srv_conf.
-    // There is at least one example where this check is violated in
-    // ngx_pagespeed. Example:
-    // server {
-    //   pagespeed off;
-    //   pagespeed FileCachePath "/tmp";
-    //   location / {
-    //     pagespeed on;
-    //   }
-    // }
-    //
-    // Fixing this would require knowing if pagespeed is ever switched on within
-    // a deeper level of the block. When this is parsed, we just have knowledge
-    // of the higher-level server block.
+  if (cache_flush_filename_[0] != '/'
+#ifdef _WIN32
+      &&
+      !(cache_flush_filename_.size() >= 3 && cache_flush_filename_[1] == ':' &&
+        (cache_flush_filename_[2] == '\\' || cache_flush_filename_[2] == '/'))
+#endif
+  ) {
+    // cache_flush_filename_ is relative — prepend file_cache_path.
+    // There is at least one example where the file cache path check is
+    // violated in ngx_pagespeed (server-level pagespeed off with
+    // FileCachePath set, then pagespeed on in a location block).
     StringPiece path(config->file_cache_path());
-    cache_flush_filename_ = StrCat(
-        path, (path.size() > 0 && strings::EndsWith(path, "/")) ? "" : "/",
-        cache_flush_filename_);
+    cache_flush_filename_ =
+        StrCat(path,
+               (path.size() > 0 && (strings::EndsWith(path, "/")
+#ifdef _WIN32
+                                    || strings::EndsWith(path, "\\")
+#endif
+                                        ))
+                   ? ""
+                   : "/",
+               cache_flush_filename_);
   }
 
   if (config->use_shared_mem_locking()) {
@@ -106,38 +105,122 @@ SystemCachePath::SystemCachePath(const StringPiece& path,
         factory->hasher(), factory->message_handler());
     lock_manager_ = shared_mem_lock_manager_.get();
   } else {
-    FallBackToFileBasedLocking();
+    factory->message_handler()->Message(
+        kWarning,
+        "Shared memory locking disabled; inter-process coordination "
+        "will not be available for path: %s",
+        path_.c_str());
+    // Use ThreadSafeLockManager for single-process locking when shared memory
+    // is not available. This provides thread-safety but not inter-process
+    // coordination.
+    fallback_lock_manager_ =
+        std::make_unique<ThreadSafeLockManager>(factory->scheduler());
+    lock_manager_ = fallback_lock_manager_.get();
   }
 
-  FileCache::CachePolicy* policy =
-      new FileCache::CachePolicy(factory->timer(), factory->hasher(),
-                                 config->file_cache_clean_interval_ms(),
-                                 config->file_cache_clean_size_kb() * 1024,
-                                 config->file_cache_clean_inode_limit());
-  file_cache_backend_ =
-      new FileCache(config->file_cache_path(), factory->file_system(),
-                    factory->thread_system(), nullptr, policy,
-                    factory->statistics(), factory->message_handler());
-  factory->TakeOwnership(file_cache_backend_);
-  file_cache_ = new CacheStats(kFileCache, file_cache_backend_,
-                               factory->timer(), factory->statistics());
-  factory->TakeOwnership(file_cache_);
+  // Create the CycloneCache disk cache backend.
+  // CycloneCache handles its own eviction using scan-resistant CLFUS algorithm
+  // and does not need external cleaning workers.
+  CycloneCache::Config cyclone_config;
+  cyclone_config.cache_path = StrCat(config->file_cache_path(), "/cyclone.dat");
+  cyclone_config.cache_size_bytes = config->file_cache_clean_size_kb() * 1024;
+  // Cyclone's internal RAM cache tier size.  Decoupled from the PSOL LRU
+  // cache via CycloneRamCacheKb; the default (0) disables the tier -- reads
+  // come straight from the memory-mapped volume, so a per-process RAM copy
+  // only duplicates what the OS page cache already holds.  The -1 sentinel
+  // opts back into the legacy coupling to LRUCacheKbPerProcess.
+  const int64 cyclone_ram_cache_kb = config->cyclone_ram_cache_kb();
+  cyclone_config.ram_cache_size_bytes =
+      (cyclone_ram_cache_kb < 0 ? config->lru_cache_kb_per_process()
+                                : cyclone_ram_cache_kb) *
+      1024;
+  cyclone_config.enable_checksum = true;
+  cyclone_config.num_segments = 0;  // Use default
+  // Carve out a separate small-object volume for metadata/property entries
+  // so payload churn in the main volume cannot evict them.  There is no
+  // framework-level bounds validation on the directive, so clamp here.
+  int small_tier_percent =
+      std::min(50, std::max(0, config->file_cache_small_tier_percent()));
+  cyclone_config.small_tier_percent = small_tier_percent;
 
-  if (config->lru_cache_kb_per_process() != 0) {
-    LRUCache* lru_cache =
-        new LRUCache(config->lru_cache_kb_per_process() * 1024);
-    factory->TakeOwnership(lru_cache);
+  CycloneCache* cyclone_cache = new CycloneCache(
+      cyclone_config, factory->statistics(), factory->message_handler());
+  factory->TakeOwnership(cyclone_cache);
 
-    // We only add the threadsafe-wrapper to the LRUCache.  The FileCache
-    // is naturally thread-safe because it's got no writable member variables.
-    // And surrounding that slower-running class with a mutex would likely
-    // cause contention.
-    ThreadsafeCache* ts_cache =
-        new ThreadsafeCache(lru_cache, factory->thread_system()->NewMutex());
-    factory->TakeOwnership(ts_cache);
-    lru_cache_ = new CacheStats(kLruCache, ts_cache, factory->timer(),
-                                factory->statistics());
-    factory->TakeOwnership(lru_cache_);
+  // Check if CycloneCache started successfully
+  if (cyclone_cache->IsHealthy()) {
+    cache_backend_ = cyclone_cache;
+    cyclone_cache_ = cyclone_cache;
+    // Register cyclone.dat so Apache's post_config chown sweep fixes ownership.
+    factory->AddCreatedDirectory(cyclone_config.cache_path);
+    if (cyclone_cache->small_tier_active()) {
+      // The small-object tier is a physically separate volume file that needs
+      // the same ownership treatment.
+      factory->AddCreatedDirectory(StrCat(cyclone_config.cache_path, ".small"));
+    }
+    file_cache_ = new CacheStats(kFileCache, cache_backend_, factory->timer(),
+                                 factory->statistics());
+    factory->TakeOwnership(file_cache_);
+
+    if (small_tier_percent > 0) {
+      if (!cyclone_cache->small_tier_active() &&
+          config->has_file_cache_small_tier_percent()) {
+        // The carve-out could not give both volumes their sizing floor, so
+        // Cyclone silently disabled the tier; small-tier operations fall back
+        // to default routing.  Warn only when the directive was set
+        // explicitly: stated intent that cannot be honored deserves a
+        // warning, while the unset default staying below the floor (e.g. the
+        // 100 MB default cache size) is normal and logs nothing.
+        factory->message_handler()->Message(
+            kWarning,
+            "FileCacheSmallTierPercent=%d is set, but the file cache "
+            "(FileCacheSizeKb) is too small to host the small-object tier "
+            "(needs roughly 256 MB of total file cache). Metadata and "
+            "property-cache entries will share the main volume at %s.",
+            small_tier_percent, cyclone_config.cache_path.c_str());
+      }
+      small_tier_file_cache_ =
+          new CacheStats(kFileCacheSmall, cyclone_cache->small_tier_view(),
+                         factory->timer(), factory->statistics());
+      factory->TakeOwnership(small_tier_file_cache_);
+    } else {
+      // Feature off: keep the wiring simple by aliasing the default cache.
+      small_tier_file_cache_ = file_cache_;
+    }
+
+    if (cyclone_config.ram_cache_size_bytes > 0) {
+      factory->message_handler()->Message(
+          kInfo, "CycloneCache enabled with %lld byte RAM cache at %s",
+          static_cast<long long>(cyclone_config.ram_cache_size_bytes),
+          cyclone_config.cache_path.c_str());
+    } else {
+      factory->message_handler()->Message(kInfo, "CycloneCache enabled at %s",
+                                          cyclone_config.cache_path.c_str());
+    }
+  } else {
+    // CycloneCache failed to start - fall back to LRU-only cache.
+    // This can happen on platforms where CycloneCache isn't fully supported
+    // (e.g., Windows) or when the cache directory isn't writable.
+    factory->message_handler()->Message(kWarning,
+                                        "CycloneCache failed to start at %s. "
+                                        "Falling back to LRU-only cache.",
+                                        cyclone_config.cache_path.c_str());
+
+    // Create an LRU cache to use as the file_cache fallback.
+    // This means we won't have persistent disk caching, but rewriting
+    // will still work using the in-memory LRU cache.
+    int64 lru_size = config->lru_cache_kb_per_process() * 1024;
+    if (lru_size == 0) {
+      // Ensure at least some cache space if LRU was configured to 0
+      lru_size = static_cast<int64>(50 * 1024 * 1024);  // 50 MB default
+    }
+    fallback_lru_cache_ = std::make_unique<LRUCache>(lru_size);
+    cache_backend_ = fallback_lru_cache_.get();
+    file_cache_ = new CacheStats(kFileCache, cache_backend_, factory->timer(),
+                                 factory->statistics());
+    factory->TakeOwnership(file_cache_);
+    // No Cyclone, no tiers: the fallback LRU serves both roles.
+    small_tier_file_cache_ = file_cache_;
   }
 }
 
@@ -152,67 +235,25 @@ GoogleString SystemCachePath::CachePath(SystemRewriteOptions* config) {
                        config->cache_flush_filename()));
 }
 
-void SystemCachePath::MergeConfig(const SystemRewriteOptions* config) {
-  FileCache::CachePolicy* policy = file_cache_backend_->mutable_cache_policy();
-
-  // For the interval, we take the smaller of the specified intervals, so
-  // we get at least as much cache cleaning as each vhost owner wants.
-  MergeEntries(config->file_cache_clean_interval_ms(),
-               config->has_file_cache_clean_interval_ms(),
-               false /* take_larger */, "IntervalMs",
-               &policy->clean_interval_ms, &clean_interval_explicitly_set_);
-
-  // For the sizes, we take the maximum value, so that the owner of any
-  // vhost gets at least as much disk space as they asked for.  Note,
-  // an argument could be made either way, but there's really no right
-  // answer here, which is why MergeEntries prints a warning on a conflict.
-  MergeEntries(config->file_cache_clean_size_kb() * 1024,
-               config->has_file_cache_clean_size_kb(), true, "SizeKb",
-               &policy->target_size_bytes, &clean_size_explicitly_set_);
-  MergeEntries(config->file_cache_clean_inode_limit(),
-               config->has_file_cache_clean_inode_limit(), true, "InodeLimit",
-               &policy->target_inode_count, &clean_inode_limit_explicitly_set_);
-}
-
-void SystemCachePath::MergeEntries(int64 config_value, bool config_was_set,
-                                   bool take_larger, const char* name,
-                                   int64* policy_value, bool* policy_was_set) {
-  if (config_value != *policy_value) {
-    // If only one of these values was explicitly set, then just silently
-    // update to the explicitly set one.
-    if (config_was_set && !*policy_was_set) {
-      *policy_value = config_value;
-      *policy_was_set = true;
-    } else if (!config_was_set && *policy_was_set) {
-      // No action required; ignore default value coming from the new config.
-    } else {
-      DCHECK(config_was_set && *policy_was_set);
-      *policy_was_set = true;
-      factory_->message_handler()->Message(
-          kWarning,
-          "Conflicting settings %s!=%s for FileCacheClean%s for file-cache %s, "
-          "keeping the %s value",
-          Integer64ToString(config_value).c_str(),
-          Integer64ToString(*policy_value).c_str(), name, path_.c_str(),
-          take_larger ? "larger" : "smaller");
-      if ((take_larger && (config_value > *policy_value)) ||
-          (!take_larger && (config_value < *policy_value))) {
-        *policy_value = config_value;
-      }
-    }
-  }
-}
-
 void SystemCachePath::RootInit() {
   factory_->message_handler()->Message(
       kInfo, "Initializing shared memory for path: %s.", path_.c_str());
   if ((shared_mem_lock_manager_.get() != nullptr) &&
       !shared_mem_lock_manager_->Initialize()) {
-    FallBackToFileBasedLocking();
+    factory_->message_handler()->Message(
+        kError,
+        "Failed to initialize shared memory lock manager for path: %s. "
+        "Falling back to in-process locking.",
+        path_.c_str());
+    shared_mem_lock_manager_.reset(nullptr);
+    // Fall back to ThreadSafeLockManager
+    fallback_lock_manager_ =
+        std::make_unique<ThreadSafeLockManager>(factory_->scheduler());
+    lock_manager_ = fallback_lock_manager_.get();
   }
 }
 
-void SystemCachePath::ChildInit(SlowWorker* cache_clean_worker) {
+void SystemCachePath::ChildInit() {
   if (unplugged_) {
     return;
   }
@@ -220,12 +261,17 @@ void SystemCachePath::ChildInit(SlowWorker* cache_clean_worker) {
       kInfo, "Reusing shared memory for path: %s.", path_.c_str());
   if ((shared_mem_lock_manager_.get() != nullptr) &&
       !shared_mem_lock_manager_->Attach()) {
-    FallBackToFileBasedLocking();
+    factory_->message_handler()->Message(
+        kError,
+        "Failed to attach to shared memory lock manager for path: %s. "
+        "Falling back to in-process locking.",
+        path_.c_str());
+    shared_mem_lock_manager_.reset(nullptr);
+    // Fall back to ThreadSafeLockManager
+    fallback_lock_manager_ =
+        std::make_unique<ThreadSafeLockManager>(factory_->scheduler());
+    lock_manager_ = fallback_lock_manager_.get();
   }
-  if (file_cache_backend_ != nullptr) {
-    file_cache_backend_->set_worker(cache_clean_worker);
-  }
-
   purge_context_ = std::make_unique<PurgeContext>(
       cache_flush_filename_, factory_->file_system(), factory_->timer(),
       RewriteOptions::kCachePurgeBytes, factory_->thread_system(),
@@ -240,17 +286,6 @@ void SystemCachePath::GlobalCleanup(MessageHandler* handler) {
   if (shared_mem_lock_manager_.get() != nullptr) {
     shared_mem_lock_manager_->GlobalCleanup(shm_runtime_,
                                             LockManagerSegmentName(), handler);
-  }
-}
-
-void SystemCachePath::FallBackToFileBasedLocking() {
-  if ((shared_mem_lock_manager_.get() != nullptr) ||
-      (lock_manager_ == nullptr)) {
-    shared_mem_lock_manager_.reset(nullptr);
-    file_system_lock_manager_ = std::make_unique<FileSystemLockManager>(
-        factory_->file_system(), path_, factory_->scheduler(),
-        factory_->message_handler());
-    lock_manager_ = file_system_lock_manager_.get();
   }
 }
 

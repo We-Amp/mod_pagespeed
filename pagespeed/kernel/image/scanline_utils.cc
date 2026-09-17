@@ -19,6 +19,8 @@
 
 #include "pagespeed/kernel/image/scanline_utils.h"
 
+#include <cstddef>
+
 #include "pagespeed/kernel/base/message_handler.h"
 
 namespace pagespeed {
@@ -54,8 +56,15 @@ bool ExpandPixelFormat(size_t num_pixels, PixelFormat src_format,
       GetNumChannelsFromPixelFormat(dst_format, handler);
   const int rgb_num_channels = GetNumChannelsFromPixelFormat(RGB_888, handler);
   const int opaque_channel = rgb_num_channels;
-  src_data += src_offset * src_num_channels;
-  dst_data += dst_offset * dst_num_channels;
+  size_t src_copy_size;
+  if (!CheckedMulSize(num_pixels, static_cast<size_t>(src_num_channels),
+                      &src_copy_size)) {
+    return false;
+  }
+  src_data += static_cast<ptrdiff_t>(static_cast<size_t>(src_offset) *
+                                     static_cast<size_t>(src_num_channels));
+  dst_data += static_cast<ptrdiff_t>(static_cast<size_t>(dst_offset) *
+                                     static_cast<size_t>(dst_num_channels));
 
   bool is_ok = true;
   switch (dst_format) {
@@ -69,7 +78,7 @@ bool ExpandPixelFormat(size_t num_pixels, PixelFormat src_format,
           }
           break;
         case RGB_888:
-          memcpy(dst_data, src_data, num_pixels * src_num_channels);
+          memcpy(dst_data, src_data, src_copy_size);
           break;
         default:
           is_ok = false;
@@ -97,7 +106,7 @@ bool ExpandPixelFormat(size_t num_pixels, PixelFormat src_format,
           }
           break;
         case RGBA_8888:
-          memcpy(dst_data, src_data, num_pixels * src_num_channels);
+          memcpy(dst_data, src_data, src_copy_size);
           break;
         default:
           is_ok = false;

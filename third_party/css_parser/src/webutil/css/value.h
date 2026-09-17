@@ -60,6 +60,7 @@ class Value {
     STRING,
     IDENT,
     COMMA,
+    OPERATOR,
     UNKNOWN,
     DEFAULT
   };
@@ -102,7 +103,7 @@ class Value {
   // not a known unit, we use the OTHER enum and save the text.
   Value(double num, const UnicodeText& unit);
 
-  // Any of the string types (URI, STRING). For IDENT, use the next
+  // Any of the string types (URI, STRING, OPERATOR). For IDENT, use the next
   // constructor instead.
   Value(ValueType ty, const UnicodeText& str);
 
@@ -160,7 +161,7 @@ class Value {
   // FUNCITON: the function parameters with separator information.
   const FunctionParameters* GetParametersWithSeparators() const;
   const UnicodeText& GetFunctionName() const;  // FUNCTION: the function name.
-  const UnicodeText& GetStringValue() const;   // URI, STRING: the string value
+  const UnicodeText& GetStringValue() const;   // URI, STRING, OPERATOR: text
   UnicodeText GetIdentifierText() const;       // IDENT: the ident as a string.
   const Identifier& GetIdentifier() const;     // IDENT: identifier.
   const HtmlColor& GetColorValue() const;      // COLOR: the color value
@@ -184,7 +185,8 @@ class Value {
   Unit unit_;                                   // for NUMBER
   HtmlColor color_;                             // COLOR
   Identifier identifier_;                       // for IDENT
-  UnicodeText str_;  // for NUMBER (OTHER unit_), URI, STRING, FUNCTION
+  UnicodeText str_;  // for NUMBER (OTHER unit_), URI, STRING, FUNCTION,
+                     // OPERATOR
 
   string bytes_in_original_buffer_;
 

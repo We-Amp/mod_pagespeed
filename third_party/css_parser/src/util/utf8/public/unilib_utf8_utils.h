@@ -23,7 +23,8 @@
 // These definitions are self-contained and have no dependencies.
 // They are also exported from unilib.h for legacy reasons.
 
-#include "third_party/css_parser/src/base/integral_types.h"  // for char32, uint32
+#include <cstdint>
+#include "third_party/css_parser/src/base/integral_types.h"  // for char32
 
 namespace UniLib {
 

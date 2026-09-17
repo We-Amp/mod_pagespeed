@@ -22,6 +22,8 @@
 #ifndef NET_INSTAWEB_HTTP_PUBLIC_FETCHER_TEST_H_
 #define NET_INSTAWEB_HTTP_PUBLIC_FETCHER_TEST_H_
 
+#include <memory>
+
 #include "base/logging.h"
 #include "net/instaweb/http/public/async_fetch.h"
 #include "net/instaweb/http/public/counting_url_async_fetcher.h"
@@ -29,7 +31,6 @@
 #include "net/instaweb/http/public/wait_url_async_fetcher.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/google_message_handler.h"
-#include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_system.h"
@@ -88,7 +89,8 @@ class FetcherTest : public testing::Test {
     bool check_error_message_;
     bool* callback_called_;
 
-    DISALLOW_COPY_AND_ASSIGN(CheckCallback);
+    CheckCallback(const CheckCallback&) = delete;
+    CheckCallback& operator=(const CheckCallback&) = delete;
   };
 
   // This checks that response matches the mock response we setup.
@@ -136,7 +138,8 @@ class FetcherTest : public testing::Test {
   void Populate(const char* cache_control, ResponseHeaders* response_headers,
                 GoogleString* content);
 
-  DISALLOW_COPY_AND_ASSIGN(FetcherTest);
+  FetcherTest(const FetcherTest&) = delete;
+  FetcherTest& operator=(const FetcherTest&) = delete;
 };
 
 }  // namespace net_instaweb

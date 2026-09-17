@@ -27,6 +27,9 @@ bool AccumulateDecimalValue(char c, uint32* value) {
   if ((c >= '0') && (c <= '9')) {
     *value *= 10;
     *value += c - '0';
+    if (*value > 0x110000) {
+      *value = 0x110000;  // Clamp above Unicode max to avoid uint32 wrap.
+    }
   } else {
     ret = false;
   }
@@ -45,6 +48,9 @@ bool AccumulateHexValue(char c, uint32* value) {
     return false;
   }
   *value = *value * 16 + digit;
+  if (*value > 0x110000) {
+    *value = 0x110000;  // Clamp above Unicode max to avoid uint32 wrap.
+  }
   return true;
 }
 

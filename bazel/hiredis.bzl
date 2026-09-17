@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 hiredis_build_rule = """
 cc_library(
     name = "hiredis",
@@ -8,11 +11,13 @@ cc_library(
         "read.c",
         "sds.c",
         "alloc.c",
+        "sockcompat.c",
     ],
     hdrs = [
         # adding dict.c here since async.c includes it
         "dict.c",
         "async.h",
+        "async_private.h",
         "dict.h",
         "hiredis.h",
         "net.h",
@@ -21,7 +26,13 @@ cc_library(
         "alloc.h",
         "sdsalloc.h",
         "fmacros.h",
+        "sockcompat.h",
+        "win32.h",
     ],
+    linkopts = select({
+        "@platforms//os:windows": ["ws2_32.lib"],
+        "//conditions:default": [],
+    }),
     visibility = ["//visibility:public"],
 )
 """

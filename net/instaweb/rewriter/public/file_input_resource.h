@@ -72,7 +72,8 @@ class FileInputResource : public Resource {
   int64 load_from_file_cache_ttl_ms_;
   bool load_from_file_ttl_set_;
 
-  DISALLOW_COPY_AND_ASSIGN(FileInputResource);
+  FileInputResource(const FileInputResource&) = delete;
+  FileInputResource& operator=(const FileInputResource&) = delete;
 };
 
 }  // namespace net_instaweb

@@ -122,7 +122,8 @@ class FallbackPropertyPageTest : public testing::Test {
   const PropertyCache::Cohort* cohort_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(FallbackPropertyPageTest);
+  FallbackPropertyPageTest(const FallbackPropertyPageTest&) = delete;
+  FallbackPropertyPageTest& operator=(const FallbackPropertyPageTest&) = delete;
 };
 
 TEST_F(FallbackPropertyPageTest, TestIfNoFallbackPageSet) {

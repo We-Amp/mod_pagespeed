@@ -91,8 +91,9 @@ const char kAlternateDomain[] = "http://alternate.com/";
 class JsCombineFilterTest : public RewriteTestBase {
  public:
   struct ScriptInfo {
-    HtmlElement* element;
+    HtmlElement* element;  // Only valid during parsing; dangles after.
     GoogleString url;  // if empty, the <script> didn't have a src
+    GoogleString type;  // if empty, the <script> didn't have a type
     GoogleString text_content;
   };
 
@@ -127,6 +128,10 @@ class JsCombineFilterTest : public RewriteTestBase {
         if (url_cstr != nullptr) {
           info.url = GoogleString(url_cstr);
         }
+        const char* type_cstr = element->AttributeValue(HtmlName::kType);
+        if (type_cstr != nullptr) {
+          info.type = GoogleString(type_cstr);
+        }
         info.text_content = script_content_;
         output_->push_back(info);
         active_script_ = nullptr;
@@ -140,7 +145,8 @@ class JsCombineFilterTest : public RewriteTestBase {
     GoogleString script_content_;  // contents of any script tag, if any.
     HtmlElement* active_script_;   // any script we're in.
 
-    DISALLOW_COPY_AND_ASSIGN(ScriptCollector);
+    ScriptCollector(const ScriptCollector&) = delete;
+    ScriptCollector& operator=(const ScriptCollector&) = delete;
   };
 
   void SetUp() override {
@@ -327,7 +333,9 @@ class JsCombineFilterCustomOptions : public JsCombineFilterTest {
 
 TEST_F(JsCombineFilterCustomOptions, CombineJsPreserveURLsOn) {
   options()->set_js_preserve_urls(true);
-  JsCombineFilterTest::SetUp();
+  // Deliberately qualified: this fixture overrides SetUp() with a no-op so
+  // options land first; invoke the base implementation explicitly.
+  JsCombineFilterTest::SetUp();  // NOLINT(bugprone-parent-virtual-call)
   ValidateNoChanges("combine_js_preserve_urls_on",
                     StrCat("<script src=", kJsUrl1, "></script>",
                            "<script src=", kJsUrl2, "></script>"));
@@ -647,6 +655,91 @@ TEST_F(JsCombineFilterTest, TestBarriers) {
   ValidateNoChanges("introspective2",
                     StrCat("<script src=", kJsUrl1, "></script>",
                            "<script src=", kIntrospectiveUrl2, "></script>"));
+}
+
+// Module scripts act as a deliberate combination barrier: their isolated
+// top-level scope, implicit strict mode, and deferred execution cannot be
+// represented by the eval-based combination strategy.
+TEST_F(JsCombineFilterTest, ModuleIsCombinationBarrier) {
+  // Classic scripts on either side of a module are not combined across it,
+  // and the module itself is untouched.
+  ValidateNoChanges("module_barrier",
+                    StrCat("<script src=", kJsUrl1,
+                           "></script>"
+                           "<script type=\"module\" src=",
+                           kJsUrl2,
+                           "></script>"
+                           "<script src=",
+                           kJsUrl3, "></script>"));
+}
+
+TEST_F(JsCombineFilterTest, ModulesNeverCombined) {
+  ValidateNoChanges("modules_never_combined",
+                    StrCat("<script type=\"module\" src=", kJsUrl1,
+                           "></script>"
+                           "<script type=\"module\" src=",
+                           kJsUrl2, "></script>"));
+}
+
+TEST_F(JsCombineFilterTest, IntegrityIsCombinationBarrier) {
+  // Combining stringifies each script into a variable inside a shared file
+  // and deletes the original element along with its integrity= attribute,
+  // silently discarding the author's SRI guarantee (the per-file hash could
+  // never match the combined bytes anyway). An integrity-bearing classic
+  // script must pass through untouched and act as a barrier: classic scripts
+  // on either side of it are not combined across it.
+  ValidateNoChanges("integrity_barrier",
+                    StrCat("<script src=", kJsUrl1,
+                           "></script>"
+                           "<script src=", kJsUrl2,
+                           " integrity=\"sha384-x\"></script>"
+                           "<script src=", kJsUrl3, "></script>"));
+}
+
+TEST_F(JsCombineFilterTest, IntegrityScriptsNeverCombined) {
+  // A script carrying integrity= must never enter a combination, however
+  // the attribute name is capitalized. The capitalized-Integrity script
+  // precedes two plain scripts, which still combine among themselves: if
+  // the attribute-name match regressed to case-sensitive, the first script
+  // would be missed and all three would combine into one partition.
+  ScriptInfoVector scripts;
+  PrepareToCollectScriptsInto(&scripts);
+  ParseUrl(kTestDomain,
+           StrCat("<script src=", kJsUrl1,
+                  " Integrity=\"sha384-x\"></script>"
+                  "<script src=", kJsUrl2, "></script>"
+                  "<script src=", kJsUrl3, "></script>"));
+  ASSERT_EQ(4, scripts.size());
+  EXPECT_EQ(GoogleString(kJsUrl1), scripts[0].url);
+  EXPECT_TRUE(scripts[0].text_content.empty());
+  VerifyCombined(scripts[1], MultiUrl(kJsUrl2, kJsUrl3));
+  VerifyUse(scripts[2], kJsUrl2);
+  VerifyUse(scripts[3], kJsUrl3);
+}
+
+TEST_F(JsCombineFilterTest, IntegrityBarrierPartitionsCombination) {
+  // The barrier partitions the combination but does not disable it: the
+  // two classic scripts before an integrity-bearing script still combine,
+  // and so do the two after it, while the barrier script itself passes
+  // through untouched.
+  ScriptInfoVector scripts;
+  PrepareToCollectScriptsInto(&scripts);
+  ParseUrl(kTestDomain,
+           StrCat("<script src=", kJsUrl1, "></script>"
+                  "<script src=", kJsUrl2, "></script>"
+                  "<script src=", kJsUrl3,
+                  " integrity=\"sha384-x\"></script>"
+                  "<script src=", kJsUrl4, "></script>"
+                  "<script src=", kPseudoStrictUrl1, "></script>"));
+  ASSERT_EQ(7, scripts.size());
+  VerifyCombined(scripts[0], MultiUrl(kJsUrl1, kJsUrl2));
+  VerifyUse(scripts[1], kJsUrl1);
+  VerifyUse(scripts[2], kJsUrl2);
+  EXPECT_EQ(GoogleString(kJsUrl3), scripts[3].url);
+  EXPECT_TRUE(scripts[3].text_content.empty());
+  VerifyCombined(scripts[4], MultiUrl(kJsUrl4, kPseudoStrictUrl1));
+  VerifyUse(scripts[5], kJsUrl4);
+  VerifyUse(scripts[6], kPseudoStrictUrl1);
 }
 
 // Make sure that rolling back a <script> that has both a source and inline data
@@ -1290,9 +1383,11 @@ TEST_F(JsCombineFilterTest, Csp) {
       StrCat(kCsp, "<script src=", kJsUrl1, "></script>",
              "<script src=", kJsUrl2, "></script>"),
       StrCat(kCsp, "<script src=", kJsUrl1, "></script>",
-             "<!--Not considering JS combining since CSP forbids eval-->",
+             "<!--Not considering JS combining since CSP forbids eval or "
+             "inline scripts-->",
              "<script src=", kJsUrl2, "></script>",
-             "<!--Not considering JS combining since CSP forbids eval-->"));
+             "<!--Not considering JS combining since CSP forbids eval or "
+             "inline scripts-->"));
 }
 
 TEST_F(JsCombineFilterTest, Csp2) {
@@ -1301,10 +1396,36 @@ TEST_F(JsCombineFilterTest, Csp2) {
   options()->SoftEnableFilterForTesting(RewriteOptions::kDebug);
   server_context()->ComputeSignature(options());
 
-  // This one has unsafe-eval, so we can work.
+  // 'unsafe-eval' without 'unsafe-inline' permits eval() but forbids the
+  // inline <script> bootstrap that combining replaces each original
+  // <script src> with, so every bootstrap would be browser-blocked and the
+  // combined scripts would silently never execute. Combining must not
+  // happen: the originals are preserved.
   static const char kCsp[] =
       "<meta http-equiv=\"Content-Security-Policy\" "
       "content=\"script-src * 'unsafe-eval'\">";
+  ValidateExpected(
+      "csp",
+      StrCat(kCsp, "<script src=", kJsUrl1, "></script>",
+             "<script src=", kJsUrl2, "></script>"),
+      StrCat(kCsp, "<script src=", kJsUrl1, "></script>",
+             "<!--Not considering JS combining since CSP forbids eval or "
+             "inline scripts-->",
+             "<script src=", kJsUrl2, "></script>",
+             "<!--Not considering JS combining since CSP forbids eval or "
+             "inline scripts-->"));
+}
+
+TEST_F(JsCombineFilterTest, Csp3) {
+  // Can't use EnableDebug since fixture uses SoftEnableFilterForTesting.
+  options()->ClearSignatureForTesting();
+  options()->SoftEnableFilterForTesting(RewriteOptions::kDebug);
+  server_context()->ComputeSignature(options());
+
+  // With both 'unsafe-eval' and 'unsafe-inline', combining works.
+  static const char kCsp[] =
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"script-src * 'unsafe-eval' 'unsafe-inline'\">";
   ValidateExpected(
       "csp",
       StrCat(kCsp, "<script src=", kJsUrl1, "></script>",
@@ -1313,6 +1434,49 @@ TEST_F(JsCombineFilterTest, Csp2) {
              "<script src=\"a.js+b.js.pagespeed.jc.g2Xe9o4bQ2.js\"></script>",
              "<script>eval(mod_pagespeed_KecOGCIjKt);</script>",
              "<script>eval(mod_pagespeed_dzsx6RqvJJ);</script>"));
+}
+
+// A script carrying only one of the IE-proprietary for/event attributes
+// must not execute at all per HTML5's 'prepare a script' algorithm, so it
+// is a combination barrier just like a for/event pair: combining it would
+// make a never-running script execute synchronously.
+TEST_F(JsCombineFilterTest, ForOnlyScriptNotCombined) {
+  ValidateNoChanges("for_only",
+                    StrCat("<script src=", kJsUrl1, " for=window></script>",
+                           "<script src=", kJsUrl2, "></script>"));
+}
+
+TEST_F(JsCombineFilterTest, EventOnlyScriptNotCombined) {
+  ValidateNoChanges("event_only",
+                    StrCat("<script src=", kJsUrl1, "></script>",
+                           "<script src=", kJsUrl2, " event=onload></script>"));
+}
+
+// Strengthens ModuleIsCombinationBarrier: with two classic scripts on each
+// side of the module, combining must produce an independent combination on
+// each side. A single script per side would also pass if combining never
+// resumed after a module barrier.
+TEST_F(JsCombineFilterTest, ModuleBarrierCombiningResumes) {
+  ScriptInfoVector scripts;
+  PrepareToCollectScriptsInto(&scripts);
+  ParseUrl(kTestDomain,
+           StrCat("<script src=", kJsUrl1, "></script>",
+                  "<script src=", kJsUrl2, "></script>",
+                  "<script type=\"module\" src=\"module.js\"></script>",
+                  "<script src=", kJsUrl3, "></script>",
+                  "<script src=", kJsUrl4, "></script>"));
+
+  // Seven script elements: combined[A+B], eval(A), eval(B), the untouched
+  // module, combined[C+D], eval(C), eval(D).
+  ASSERT_EQ(7, scripts.size());
+  VerifyCombined(scripts[0], MultiUrl(kJsUrl1, kJsUrl2));
+  VerifyUse(scripts[1], kJsUrl1);
+  VerifyUse(scripts[2], kJsUrl2);
+  EXPECT_EQ("module.js", scripts[3].url);
+  EXPECT_EQ("module", scripts[3].type);
+  VerifyCombined(scripts[4], MultiUrl(kJsUrl3, kJsUrl4));
+  VerifyUse(scripts[5], kJsUrl3);
+  VerifyUse(scripts[6], kJsUrl4);
 }
 
 }  // namespace net_instaweb

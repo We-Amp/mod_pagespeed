@@ -43,7 +43,8 @@ class DummyHasher : public Hasher {
   }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(DummyHasher);
+  DummyHasher(const DummyHasher&) = delete;
+  DummyHasher& operator=(const DummyHasher&) = delete;
 };
 
 TEST(HasherTest, HashToUint64) {

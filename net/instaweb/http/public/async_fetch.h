@@ -27,6 +27,8 @@
 #include "net/instaweb/http/public/http_value.h"
 #include "net/instaweb/http/public/request_context.h"
 #include "pagespeed/kernel/base/basictypes.h"
+#include "pagespeed/kernel/base/mapped_shared_string.h"
+#include "pagespeed/kernel/base/shared_string.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/writer.h"
@@ -76,6 +78,33 @@ class AsyncFetch : public Writer {
   // must override HandlerWrite and HandleFlush.
   bool Write(const StringPiece& content, MessageHandler* handler) override;
   bool Flush(MessageHandler* handler) override;
+
+  // Zero-copy serve of a memory-mapped cache value (CycloneZeroCopyServe).
+  // 'mmap_sp' aliases bytes in a Cyclone mmap region; 'keepalive' pins the
+  // read handle (and carries the hooks that renew its lease and detect a
+  // forced wrap) for as long as any copy of it is alive.  The default
+  // COPIES (via Write); NgxBaseFetch overrides it to alias the region into
+  // an nginx buffer and hold 'keepalive' until the send completes.
+  // Wrapping fetches (SharedAsyncFetch) forward; recording/transforming
+  // wrappers force-copy.
+  virtual bool WriteMapped(const StringPiece& mmap_sp,
+                           const MappedSharedString& keepalive,
+                           MessageHandler* handler) {
+    return Write(mmap_sp, handler);
+  }
+
+  // Copy-free serve of an owned, refcounted cache value.  'content' MUST
+  // point into the bytes kept alive by 'storage'.  Unlike WriteMapped this
+  // path carries owned heap storage with refcount lifetime only -- never
+  // mapped/borrowed memory, whose protection window is bounded (a mapped
+  // HTTPValue must be collapsed to owned storage before its bytes reach
+  // this method; HTTPValue::share() does that by construction).  Same
+  // Write() contract otherwise (headers-complete, HEAD, empty writes);
+  // implementations that can retain a reference to 'storage' override
+  // HandleWriteShared to avoid copying the body, and by default the
+  // bytes are copied via HandleWrite.
+  bool WriteShared(const StringPiece& content, const SharedString& storage,
+                   MessageHandler* handler);
 
   // Is the cache entry corresponding to headers valid? Default is that it is
   // valid. Sub-classes can provide specific implementations, e.g., based on
@@ -168,6 +197,12 @@ class AsyncFetch : public Writer {
 
  protected:
   virtual bool HandleWrite(const StringPiece& sp, MessageHandler* handler) = 0;
+  // See WriteShared.  The default copies via HandleWrite.
+  virtual bool HandleWriteShared(const StringPiece& content,
+                                 const SharedString& storage,
+                                 MessageHandler* handler) {
+    return HandleWrite(content, handler);
+  }
   virtual bool HandleFlush(MessageHandler* handler) = 0;
   virtual void HandleDone(bool success) = 0;
   virtual void HandleHeadersComplete() = 0;
@@ -183,7 +218,8 @@ class AsyncFetch : public Writer {
   bool headers_complete_;
   int64 content_length_;
 
-  DISALLOW_COPY_AND_ASSIGN(AsyncFetch);
+  AsyncFetch(const AsyncFetch&) = delete;
+  AsyncFetch& operator=(const AsyncFetch&) = delete;
 };
 
 // Class to represent an Async fetch that collects the response-data into
@@ -247,7 +283,8 @@ class StringAsyncFetch : public AsyncFetch {
   bool success_;
   bool done_;
 
-  DISALLOW_COPY_AND_ASSIGN(StringAsyncFetch);
+  StringAsyncFetch(const StringAsyncFetch&) = delete;
+  StringAsyncFetch& operator=(const StringAsyncFetch&) = delete;
 };
 
 // Creates an AsyncFetch object using an existing Writer* object,
@@ -266,7 +303,8 @@ class AsyncFetchUsingWriter : public AsyncFetch {
 
  private:
   Writer* writer_;
-  DISALLOW_COPY_AND_ASSIGN(AsyncFetchUsingWriter);
+  AsyncFetchUsingWriter(const AsyncFetchUsingWriter&) = delete;
+  AsyncFetchUsingWriter& operator=(const AsyncFetchUsingWriter&) = delete;
 };
 
 // Creates an AsyncFetch object using an existing AsyncFetcher*,
@@ -284,12 +322,32 @@ class SharedAsyncFetch : public AsyncFetch {
     return base_fetch_->request_context();
   }
 
+  // Forward the aliased (zero-copy) serve to the wrapped fetch so the alias
+  // survives pass-through wrapper layers (e.g. ResourceFetch) down to the
+  // port base fetch.  Wrappers that RECORD or TRANSFORM the byte stream
+  // override WriteMapped to force the copying Write() instead.
+  bool WriteMapped(const StringPiece& content,
+                   const MappedSharedString& keepalive,
+                   MessageHandler* handler) override {
+    return base_fetch_->WriteMapped(content, keepalive, handler);
+  }
+
  protected:
   void HandleDone(bool success) override { base_fetch_->Done(success); }
 
   bool HandleWrite(const StringPiece& content,
                    MessageHandler* handler) override {
     return base_fetch_->Write(content, handler);
+  }
+
+  // Forward the shared-storage serve to the wrapped fetch so the reference
+  // survives pass-through wrapper layers (e.g. ResourceFetch) down to the
+  // port base fetch.  Wrappers that RECORD or TRANSFORM the byte stream
+  // override this to force the copying HandleWrite instead.
+  bool HandleWriteShared(const StringPiece& content,
+                         const SharedString& storage,
+                         MessageHandler* handler) override {
+    return base_fetch_->WriteShared(content, storage, handler);
   }
 
   bool HandleFlush(MessageHandler* handler) override {
@@ -311,7 +369,8 @@ class SharedAsyncFetch : public AsyncFetch {
 
  private:
   AsyncFetch* base_fetch_;
-  DISALLOW_COPY_AND_ASSIGN(SharedAsyncFetch);
+  SharedAsyncFetch(const SharedAsyncFetch&) = delete;
+  SharedAsyncFetch& operator=(const SharedAsyncFetch&) = delete;
 };
 
 // Creates a SharedAsyncFetch object using an existing AsyncFetch and a fallback
@@ -338,6 +397,13 @@ class FallbackSharedAsyncFetch : public SharedAsyncFetch {
   void HandleDone(bool success) override;
   bool HandleWrite(const StringPiece& content,
                    MessageHandler* handler) override;
+  // While serving the fallback the origin's bytes are dropped; route a
+  // shared-storage write through HandleWrite so that logic applies.
+  bool HandleWriteShared(const StringPiece& content,
+                         const SharedString& /*storage*/,
+                         MessageHandler* handler) override {
+    return HandleWrite(content, handler);
+  }
   bool HandleFlush(MessageHandler* handler) override;
   void HandleHeadersComplete() override;
 
@@ -348,7 +414,8 @@ class FallbackSharedAsyncFetch : public SharedAsyncFetch {
   bool serving_fallback_;
   Variable* fallback_responses_served_;  // may be NULL.
 
-  DISALLOW_COPY_AND_ASSIGN(FallbackSharedAsyncFetch);
+  FallbackSharedAsyncFetch(const FallbackSharedAsyncFetch&) = delete;
+  FallbackSharedAsyncFetch& operator=(const FallbackSharedAsyncFetch&) = delete;
 };
 
 // Creates a SharedAsyncFetch object using an existing AsyncFetch and a cached
@@ -374,6 +441,13 @@ class ConditionalSharedAsyncFetch : public SharedAsyncFetch {
   void HandleDone(bool success) override;
   bool HandleWrite(const StringPiece& content,
                    MessageHandler* handler) override;
+  // While serving the cached value the origin's bytes are dropped; route a
+  // shared-storage write through HandleWrite so that logic applies.
+  bool HandleWriteShared(const StringPiece& content,
+                         const SharedString& /*storage*/,
+                         MessageHandler* handler) override {
+    return HandleWrite(content, handler);
+  }
   bool HandleFlush(MessageHandler* handler) override;
   void HandleHeadersComplete() override;
 
@@ -389,7 +463,9 @@ class ConditionalSharedAsyncFetch : public SharedAsyncFetch {
 
   Variable* num_conditional_refreshes_;  // may be NULL.
 
-  DISALLOW_COPY_AND_ASSIGN(ConditionalSharedAsyncFetch);
+  ConditionalSharedAsyncFetch(const ConditionalSharedAsyncFetch&) = delete;
+  ConditionalSharedAsyncFetch& operator=(const ConditionalSharedAsyncFetch&) =
+      delete;
 };
 
 }  // namespace net_instaweb
