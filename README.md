@@ -33,9 +33,12 @@ Originally created by Google, now maintained by [We-Amp](https://we-amp.com).
 All packages and installers are on the
 [downloads page](https://modpagespeed.com/1.1/docs/downloads/): signed apt/dnf
 packages for Apache (`mod-pagespeed`) and Nginx (`nginx-module-pagespeed`) via
-`packages.modpagespeed.com`, and the signed IIS MSI. The nginx dynamic
-module ships prebuilt and signed for Debian 11/12/13 and Ubuntu 22.04/24.04
+`packages.modpagespeed.com`, and the signed IIS MSI. The Apache module
+package pairs with the `pagespeed-optimizer` daemon package at the same
+version and pulls it in as a dependency. The nginx dynamic
+module ships prebuilt and signed for Debian 12/13 and Ubuntu 22.04/24.04
 (amd64 + arm64), each pinned to that distribution's stock nginx version.
+Debian 11 stays on the 1.15 line.
 Then see the per-platform installation guides:
 
 - [Apache](docs/install-apache.md)

@@ -1,8 +1,8 @@
-# mod_pagespeed 1.16.0 Release Notes
+# mod_pagespeed 2.1.0 Release Notes
 
-**Release candidate:** 1.16.0-rc.16
-**Release date:** 2026-09-10
-**Status:** Release candidate
+**Release date:** 2026-09-17
+**Status:** Stable
+**Packages:** module `mod-pagespeed` 1.16.0-r1 + `pagespeed-optimizer` 1.16.0 (the source tree is versioned 2.1.0; the signed packages carry the 1.16.0 pairing).
 
 ## Highlights
 
