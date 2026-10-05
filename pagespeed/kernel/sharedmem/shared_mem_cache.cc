@@ -412,7 +412,9 @@ void SharedMemCache<kBlockSize>::PutRawHash(const GoogleString& raw_hash,
     return;
   }
   if (sector->disabled()) {
-    // Disabled while EnsureReadyForWriting waited without the lock.
+    // Defensive: EnsureReadyForWriting() does not release the lock here, as
+    // best is Writeable(), but if that ever changes the sector may have been
+    // disabled meanwhile.
     best->set_creating(false);
     return;
   }
@@ -513,8 +515,10 @@ void SharedMemCache<kBlockSize>::Get(const GoogleString& key,
         EntryNum cand_key = pos.keys[p];
         CacheEntry* cand = sector->EntryAt(cand_key);
         if (KeyMatch(cand, raw_hash)) {
-          ++stats->num_get_hit;
           key_state = GetFromEntry(key, sector, cand_key, callback);
+          if (key_state == kAvailable) {
+            ++stats->num_get_hit;
+          }
           break;
         }
       }
@@ -775,9 +779,11 @@ bool SharedMemCache<kBlockSize>::EnsureReadyForWriting(
   // entry after a while. It then stays marked as being created: readers and
   // writers keep away from it, and its blocks stay in use, until the server
   // is restarted.
-  int64 give_up_us = timer_->NowUs() + kMaxWaitForReadersUs;
+  // On a timer without a monotonic clock, AprTimer among them,
+  // NowMonotonicUs() is the wall clock.
+  int64 give_up_us = timer_->NowMonotonicUs() + kMaxWaitForReadersUs;
   while (entry->open_count() > 0 && !sector->disabled()) {
-    if (timer_->NowUs() >= give_up_us) {
+    if (timer_->NowMonotonicUs() >= give_up_us) {
       handler_->Message(kWarning,
                         "SharedMemCache: gave up waiting for the readers of a "
                         "cache entry, probably a process or thread that "

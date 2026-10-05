@@ -20,6 +20,7 @@
 #ifndef PAGESPEED_KERNEL_SHAREDMEM_SHARED_MEM_CACHE_TEST_BASE_H_
 #define PAGESPEED_KERNEL_SHAREDMEM_SHARED_MEM_CACHE_TEST_BASE_H_
 
+#include <atomic>
 #include <memory>
 #include <vector>
 
@@ -95,10 +96,22 @@ class SharedMemCacheTestBase : public CacheTestBase {
    public:
     SleepHookTimer(AbstractMutex* mutex, int64 time_ms)
         : MockTimer(mutex, time_ms) {}
-    void set_sleep_hook(Function* hook) { sleep_hook_ = hook; }
+    // A hook that never ran is cancelled, as Function requires.
+    ~SleepHookTimer() override {
+      Function* hook = sleep_hook_.exchange(nullptr);
+      if (hook != nullptr) {
+        hook->CallCancel();
+      }
+    }
+    void set_sleep_hook(Function* hook) {
+      Function* old = sleep_hook_.exchange(hook);
+      if (old != nullptr) {
+        old->CallCancel();
+      }
+    }
     void SleepUs(int64 us) override {
-      Function* hook = sleep_hook_;
-      sleep_hook_ = nullptr;
+      // Several threads may sleep at once in the thread environment.
+      Function* hook = sleep_hook_.exchange(nullptr);
       if (hook != nullptr) {
         hook->CallRun();
       }
@@ -106,12 +119,12 @@ class SharedMemCacheTestBase : public CacheTestBase {
     }
 
    private:
-    Function* sleep_hook_ = nullptr;
+    std::atomic<Function*> sleep_hook_{nullptr};
   };
 
   std::unique_ptr<SharedMemTestEnv> test_env_;
   std::unique_ptr<AbstractSharedMem> shmem_runtime_;
-  std::unique_ptr<SharedMemCache<kBlockSize> > cache_;
+  std::unique_ptr<SharedMemCache<kBlockSize>> cache_;
   MD5Hasher hasher_;
   std::unique_ptr<ThreadSystem> thread_system_;
   MockMessageHandler handler_;
