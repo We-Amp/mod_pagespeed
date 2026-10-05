@@ -53,6 +53,12 @@ class PthreadSharedMemEnvBase : public SharedMemTestEnv {
   }
 
   void ShortSleep() override { usleep(1000); }
+
+  // Robust mutexes notice both a process and a thread that terminates while
+  // holding them, so this holds for the process and the thread variant.
+  bool RecoversAbandonedMutexes() const override {
+    return PthreadSharedMem::RecoversAbandonedMutexes();
+  }
 };
 
 class PthreadSharedMemThreadEnv : public PthreadSharedMemEnvBase {

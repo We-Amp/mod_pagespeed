@@ -58,6 +58,11 @@ class PthreadSharedMem : public AbstractSharedMem {
   // Frees all lazy-initialized memory used to track shared-memory segments.
   static void Terminate();
 
+  // Whether a lock operation takes over a mutex whose holder terminated while
+  // holding it, instead of blocking forever. True where the platform has
+  // robust mutexes (Linux, FreeBSD).
+  static bool RecoversAbandonedMutexes();
+
  private:
   using SegmentBaseMap = std::map<GoogleString, std::pair<char*, size_t> >;
 

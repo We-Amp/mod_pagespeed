@@ -54,6 +54,21 @@ pagespeed_cc_test(
     ],
 )
 
+# PthreadSharedMem, the shared memory runtime of the Apache and nginx
+# modules. Linux only: it is POSIX-specific, and its abandoned-mutex tests
+# rely on robust mutexes.
+pagespeed_cc_test(
+    name = "pthread_sharedmem",
+    srcs = ["pthread_shared_mem_test.cc"],
+    shard_count = 1,
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = [
+        "//pagespeed/kernel/sharedmem",
+        "//pagespeed/kernel/thread:pthread_thread",
+        "//test/pagespeed/kernel/sharedmem:test_base",
+    ],
+)
+
 # Windows-specific shared memory test
 pagespeed_cc_test(
     name = "windows_sharedmem",

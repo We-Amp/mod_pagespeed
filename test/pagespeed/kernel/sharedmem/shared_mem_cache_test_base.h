@@ -21,12 +21,15 @@
 #define PAGESPEED_KERNEL_SHAREDMEM_SHARED_MEM_CACHE_TEST_BASE_H_
 
 #include <memory>
+#include <vector>
 
 #include "pagespeed/kernel/base/abstract_shared_mem.h"
 #include "pagespeed/kernel/base/basictypes.h"
+#include "pagespeed/kernel/base/function.h"
 #include "pagespeed/kernel/base/md5_hasher.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/sharedmem/shared_mem_cache.h"
+#include "pagespeed/kernel/sharedmem/shared_mem_cache_data.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/base/mem_file_system.h"
 #include "test/pagespeed/kernel/base/mock_message_handler.h"
@@ -56,6 +59,8 @@ class SharedMemCacheTestBase : public CacheTestBase {
   void TestReaderWriter();
   void TestConflict();
   void TestEvict();
+  void TestAbandonedSectorLocks();
+  void TestAbandonedLockWhileWriterWaits();
 
   void ResetCache();
 
@@ -66,13 +71,50 @@ class SharedMemCacheTestBase : public CacheTestBase {
   void CheckDelete(const char* key);
   void TestReaderWriterChild();
 
+  using SectorVector =
+      std::vector<std::unique_ptr<SharedMemCacheData::Sector<kBlockSize>>>;
+
+  // Attaches to the cache's segment and each of its sectors, the way another
+  // process does. Returns false on failure.
+  bool AttachSectors(std::unique_ptr<AbstractSharedMemSegment>* segment,
+                     SectorVector* sectors);
+
+  // Takes the lock of every sector of the cache, garbles the sectors and
+  // exits without releasing the locks, like a process that terminates in the
+  // middle of cache operations.
+  void AbandonSectorLocksChild();
+
+  // Runs AbandonSectorLocksChild() and waits for it to finish.
+  void AbandonSectorLocksAndWait();
+
+  // A MockTimer that runs a callback, once, at the start of the next
+  // SleepUs(). SharedMemCache sleeps only while a writer waits for the
+  // readers of an entry, and without holding the sector's lock.
+  class SleepHookTimer : public MockTimer {
+   public:
+    SleepHookTimer(AbstractMutex* mutex, int64 time_ms)
+        : MockTimer(mutex, time_ms) {}
+    void set_sleep_hook(Function* hook) { sleep_hook_ = hook; }
+    void SleepUs(int64 us) override {
+      Function* hook = sleep_hook_;
+      sleep_hook_ = nullptr;
+      if (hook != nullptr) {
+        hook->CallRun();
+      }
+      MockTimer::SleepUs(us);
+    }
+
+   private:
+    Function* sleep_hook_ = nullptr;
+  };
+
   std::unique_ptr<SharedMemTestEnv> test_env_;
   std::unique_ptr<AbstractSharedMem> shmem_runtime_;
   std::unique_ptr<SharedMemCache<kBlockSize> > cache_;
   MD5Hasher hasher_;
   std::unique_ptr<ThreadSystem> thread_system_;
   MockMessageHandler handler_;
-  MockTimer timer_;
+  SleepHookTimer timer_;
 
   GoogleString large_;
   GoogleString gigantic_;
@@ -115,9 +157,18 @@ TYPED_TEST_P(SharedMemCacheTestTemplate, TestEvict) {
   SharedMemCacheTestBase::TestEvict();
 }
 
+TYPED_TEST_P(SharedMemCacheTestTemplate, TestAbandonedSectorLocks) {
+  SharedMemCacheTestBase::TestAbandonedSectorLocks();
+}
+
+TYPED_TEST_P(SharedMemCacheTestTemplate, TestAbandonedLockWhileWriterWaits) {
+  SharedMemCacheTestBase::TestAbandonedLockWhileWriterWaits();
+}
+
 REGISTER_TYPED_TEST_SUITE_P(SharedMemCacheTestTemplate, TestBasic, TestReinsert,
                             TestReplacement, TestReaderWriter, TestConflict,
-                            TestEvict);
+                            TestEvict, TestAbandonedSectorLocks,
+                            TestAbandonedLockWhileWriterWaits);
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(SharedMemCacheTestTemplate);
 
 }  // namespace net_instaweb

@@ -86,10 +86,33 @@ Sector<kBlockSize>::~Sector() {}
 
 template <size_t kBlockSize>
 bool Sector<kBlockSize>::Attach(MessageHandler* handler) {
+  handler_ = handler;
   // Compute the aligned mutex offset (same calculation as in MemLayout)
   size_t mutex_offset = sector_offset_ + AlignForMutex(sizeof(SectorHeader));
-  mutex_.reset(segment_->AttachToSharedMutex(mutex_offset));
+  mutex_.reset(segment_->AttachToSharedMutexWithRecovery(mutex_offset, this));
   return (mutex_.get() != nullptr);
+}
+
+template <size_t kBlockSize>
+void Sector<kBlockSize>::OnOwnerDied() {
+  // The terminated holder may have been anywhere in a critical section, e.g.
+  // half-way through relinking the LRU or the freelist, so none of the
+  // sector's structures can be trusted any more; following a corrupted list
+  // could even loop forever. Rebuilding them in place is not safe either:
+  // readers and writers in other processes may at this moment be copying
+  // data out of or into blocks of this sector without holding the lock (see
+  // the creating/open_count protocol in shared_mem_cache.cc). So the sector
+  // is retired instead. That costs its share of the cache until the server
+  // is restarted, which is cheap next to the alternative.
+  if (sector_header_->disabled == 0) {
+    sector_header_->disabled = 1;
+    if (handler_ != nullptr) {
+      handler_->Message(kWarning,
+                        "SharedMemCache: the lock of a cache sector was held "
+                        "by a process or thread that terminated; the sector "
+                        "is disabled until the server is restarted");
+    }
+  }
 }
 
 template <size_t kBlockSize>
@@ -105,6 +128,8 @@ bool Sector<kBlockSize>::Initialize(MessageHandler* handler)
   if (!Attach(handler)) {
     return false;
   }
+
+  sector_header_->disabled = 0;
 
   // Initialize the LRU and the cache entry.
   sector_header_->lru_list_front = kInvalidEntry;

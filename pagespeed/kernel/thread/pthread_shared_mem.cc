@@ -56,23 +56,70 @@ void CheckedClose(int fd, MessageHandler* message_handler) {
   }
 }
 
+// Robust mutexes (POSIX.1-2008) let a lock operation take over a mutex whose
+// holder terminated while holding it, instead of blocking forever. glibc,
+// musl and FreeBSD provide them; macOS does not.
+#if defined(__linux__) || defined(__FreeBSD__)
+#define PAGESPEED_HAVE_ROBUST_MUTEXES 1
+#endif
+
 // Unlike PthreadMutex this doesn't own the lock, but rather refers to an
 // external one.
+//
+// The mutex is robust where the platform supports it (see
+// InitializeSharedMutex below): when a process or thread terminates while
+// holding it, e.g. a server child process killed by a signal, the next lock
+// operation acquires it with EOWNERDEAD. Without that, every thread of every
+// process attached to the segment that needs this mutex would block forever.
 class PthreadSharedMemMutex : public AbstractMutex {
  public:
-  explicit PthreadSharedMemMutex(pthread_mutex_t* external_mutex)
-      : external_mutex_(external_mutex) {}
+  explicit PthreadSharedMemMutex(pthread_mutex_t* external_mutex,
+                                 AbstractSharedMemSegment::MutexRecoveryHandler*
+                                     recovery_handler = nullptr)
+      : external_mutex_(external_mutex), recovery_handler_(recovery_handler) {}
 
   bool TryLock() override {
-    return (pthread_mutex_trylock(external_mutex_) == 0);
+    int result = pthread_mutex_trylock(external_mutex_);
+    if (result == EOWNERDEAD) {
+      RecoverFromOwnerDeath();
+      return true;
+    }
+    return (result == 0);
   }
 
-  void Lock() override { pthread_mutex_lock(external_mutex_); }
+  void Lock() override {
+    int result = pthread_mutex_lock(external_mutex_);
+    if (result == EOWNERDEAD) {
+      RecoverFromOwnerDeath();
+    } else if (result != 0) {
+      LOG(DFATAL) << "pthread_mutex_lock failed with error " << result;
+    }
+  }
 
   void Unlock() override { pthread_mutex_unlock(external_mutex_); }
 
  private:
+  // We hold the mutex, acquired from a holder that terminated while holding
+  // it. Marks it consistent, so that it keeps working after we unlock it
+  // (unlocking it without that makes it permanently unusable), and lets the
+  // owner of the protected data deal with whatever the holder left behind.
+  void RecoverFromOwnerDeath() {
+#ifdef PAGESPEED_HAVE_ROBUST_MUTEXES
+    // If this failed, unlocking would make the mutex unusable for every
+    // process (ENOTRECOVERABLE), and they would all run without exclusion.
+    int result = pthread_mutex_consistent(external_mutex_);
+    CHECK_EQ(0, result) << "pthread_mutex_consistent failed with error "
+                        << result;
+#endif
+    LOG(WARNING) << "Took over a shared memory mutex whose holder terminated "
+                    "while holding it";
+    if (recovery_handler_ != nullptr) {
+      recovery_handler_->OnOwnerDied();
+    }
+  }
+
   pthread_mutex_t* external_mutex_;
+  AbstractSharedMemSegment::MutexRecoveryHandler* recovery_handler_;
 
   PthreadSharedMemMutex(const PthreadSharedMemMutex&) = delete;
   PthreadSharedMemMutex& operator=(const PthreadSharedMemMutex&) = delete;
@@ -105,6 +152,18 @@ class PthreadSharedMemSegment : public AbstractSharedMemSegment {
       return false;
     }
 
+#ifdef PAGESPEED_HAVE_ROBUST_MUTEXES
+    // See PthreadSharedMemMutex. Without this a mutex still works, it just
+    // stays locked forever if its holder terminates, so carry on if it fails.
+    int robust_result =
+        pthread_mutexattr_setrobust(&attr, PTHREAD_MUTEX_ROBUST);
+    if (robust_result != 0) {
+      handler->Message(kWarning,
+                       "pthread_mutexattr_setrobust failed with error:%d",
+                       robust_result);
+    }
+#endif
+
     if (pthread_mutex_init(MutexPtr(offset), &attr) != 0) {
       pthread_mutexattr_destroy(&attr);
       handler->Message(kError, "pthread_mutex_init failed with errno:%d",
@@ -118,6 +177,11 @@ class PthreadSharedMemSegment : public AbstractSharedMemSegment {
 
   AbstractMutex* AttachToSharedMutex(size_t offset) override {
     return new PthreadSharedMemMutex(MutexPtr(offset));
+  }
+
+  AbstractMutex* AttachToSharedMutexWithRecovery(
+      size_t offset, MutexRecoveryHandler* handler) override {
+    return new PthreadSharedMemMutex(MutexPtr(offset), handler);
   }
 
  private:
@@ -143,6 +207,14 @@ PthreadSharedMem::SegmentBaseMap* PthreadSharedMem::segment_bases_ = nullptr;
 PthreadSharedMem::PthreadSharedMem() { instance_number_ = ++s_instance_count_; }
 
 PthreadSharedMem::~PthreadSharedMem() {}
+
+bool PthreadSharedMem::RecoversAbandonedMutexes() {
+#ifdef PAGESPEED_HAVE_ROBUST_MUTEXES
+  return true;
+#else
+  return false;
+#endif
+}
 
 size_t PthreadSharedMem::SharedMutexSize() const {
   return sizeof(pthread_mutex_t);

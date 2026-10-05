@@ -127,7 +127,7 @@ TEST(SharedMemStructuresTest, SectorStatsSize) {
 
 TEST(SharedMemStructuresTest, SectorHeaderSize) {
   // SectorHeader has:
-  // - 3x int32 (12 bytes) + 1x int32 padding (4 bytes) = 16 bytes
+  // - 4x int32 (16 bytes): freelist and LRU heads, disabled flag
   // - SectorStats (88 bytes)
   // Total: 104 bytes
   EXPECT_GE(sizeof(SectorHeader), 96u);

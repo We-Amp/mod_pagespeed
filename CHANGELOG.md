@@ -32,6 +32,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   passed an empty CA file name to libcurl, and every HTTPS fetch failed with
   curl error 77 (`CURLE_SSL_CACERT_BADFILE`). The fetcher now uses the
   directory on its own.
+- **A server process that dies while holding a shared-memory lock no longer
+  hangs every other process.** The mutexes the Apache and nginx modules keep
+  in shared memory (metadata cache sectors, statistics, the message buffer,
+  named locks) were not robust. When a server child process terminated while
+  one of its threads held such a mutex, for example when it was killed by a
+  signal or crashed, the mutex stayed locked for good: every thread of every
+  process that needed it blocked, and the sites hung until the server was
+  restarted. The next process to lock such a mutex now takes it over and logs
+  a warning. This needs robust mutexes, which Linux and FreeBSD have; on
+  macOS such a mutex still stays locked. A metadata cache sector taken over
+  this way is disabled and acts as empty until the next restart, as its
+  contents may have been left half-updated. A server that hangs this way at
+  the time of the upgrade needs a full stop and start: a graceful restart
+  gives the new child processes robust mutexes, but the old, stuck ones keep
+  waiting on the old mutexes.
 
 ## [2.1.0] - 2026-09-17
 
