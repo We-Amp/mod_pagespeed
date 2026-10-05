@@ -99,6 +99,9 @@ class CurlTestServer : public ThreadSystem::Thread {
     return StrCat("127.0.0.1:", IntegerToString(listen_port_));
   }
 
+  // kHttpProxy: the number of CONNECT tunnels opened so far.
+  int tunnels() const { return tunnels_; }
+
  private:
   // Per-connection worker thread (defined in the .cc).
   class ConnectionThread;
@@ -124,6 +127,7 @@ class CurlTestServer : public ThreadSystem::Thread {
   int listen_fd_;
   int listen_port_;
   std::atomic<bool> terminating_;
+  std::atomic<int> tunnels_{0};
   bool started_;
   bool shut_down_;
 
