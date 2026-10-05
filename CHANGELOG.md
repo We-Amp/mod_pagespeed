@@ -58,7 +58,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   good, and the next write or delete of the same key waited for it forever:
   the request hung, and an Apache child stuck this way did not exit on a
   graceful restart. A writer now gives up after one second, logs a warning
-  and drops the write. The entry stays unusable until the server is
+  and drops the write. That key is not cached again until the server is
   restarted.
 
 ## [2.1.0] - 2026-09-17

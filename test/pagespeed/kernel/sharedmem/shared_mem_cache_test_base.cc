@@ -370,6 +370,48 @@ void SharedMemCacheTestBase::TestAbandonedReader() {
   CheckNotFound("200");
   CheckDelete("200");
   EXPECT_EQ(1, handler_.MessagesOfType(kWarning));
+
+  // A read of the stuck entry misses and is not counted as a hit.
+  auto get_hits = [&sectors]() {
+    int64 hits = 0;
+    for (const auto& sector : sectors) {
+      ScopedMutex lock(sector->mutex());
+      hits += sector->sector_stats()->num_get_hit;
+    }
+    return hits;
+  };
+  int64 hits = get_hits();
+  CheckNotFound("200");
+  EXPECT_EQ(hits, get_hits());
+
+  // If the reader leaves after all, the entry stays out of use: it keeps its
+  // block, and writes that need room evict everything around it but not it.
+  for (const auto& sector : sectors) {
+    ScopedMutex lock(sector->mutex());
+    for (int e = 0; e < kSectorEntries; ++e) {
+      sector->EntryAt(e)->decrement_open_count();
+    }
+  }
+  // 2000 values of 3 blocks each need about 3000 blocks in each of the two
+  // 2000-block sectors, and far more entries than a sector's 256, so the
+  // writes have to evict around the stuck entry.
+  for (int i = 0; i < 2000; ++i) {
+    cache_->Put(StrCat("evict", IntegerToString(i)), SharedString(large_));
+  }
+  SanityCheck();
+  CheckNotFound("200");
+  int stuck = 0;
+  for (const auto& sector : sectors) {
+    ScopedMutex lock(sector->mutex());
+    for (int e = 0; e < kSectorEntries; ++e) {
+      const SharedMemCacheData::CacheEntry* entry = sector->EntryAt(e);
+      if (entry->creating()) {
+        ++stuck;
+        EXPECT_NE(SharedMemCacheData::kInvalidBlock, entry->first_block);
+      }
+    }
+  }
+  EXPECT_EQ(1, stuck);
 }
 
 void SharedMemCacheTestBase::AbandonSectorLocksAndWait() {
