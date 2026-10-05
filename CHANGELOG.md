@@ -22,6 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   connects to that address. This also applies to an HTTPS origin that
   `MapOriginDomain` maps to an IP address. Fetches to a host name, and
   fetches through a proxy, are unchanged.
+- **HTTPS fetches through a proxy work.** With `ModPagespeedFetchProxy`, or
+  a proxy from the environment, an HTTPS fetch goes through a CONNECT
+  tunnel. The fetcher took the proxy's answer to CONNECT for the origin's
+  response headers and ignored the real ones, so every such fetch ended with
+  status 0. The proxy's answer now stays with libcurl.
 - **The source tree builds with Bazel again.** The 2.1.0 `VERSION` file has
   no `PRERELEASE=` line, and the genrule that writes `version.h` stopped with
   `PRERELEASE: unbound variable`, so building the module failed on the

@@ -44,6 +44,10 @@
 //                  disabled), used for the "fails for self-signed" cases.
 //   kHostName   -> a self-signed certificate for pagespeed.test only, not for
 //                  the address 127.0.0.1 the server listens on.
+//
+// Scheme kHttpProxy makes it an HTTP proxy instead: it answers
+// "CONNECT <IPv4 address>:<port>" with 200 and relays bytes both ways until
+// either side closes, and drops any other request.
 
 #ifndef TEST_PAGESPEED_SYSTEM_CURL_TEST_SERVER_H_
 #define TEST_PAGESPEED_SYSTEM_CURL_TEST_SERVER_H_
@@ -72,7 +76,7 @@ namespace net_instaweb {
 // fetches (e.g. the BoringSSL EAGAIN regression test) are served in parallel.
 class CurlTestServer : public ThreadSystem::Thread {
  public:
-  enum Scheme { kHttp, kHttps };
+  enum Scheme { kHttp, kHttps, kHttpProxy };
   // Which certificate the HTTPS server presents.
   enum TlsCert { kTrustedCa, kSelfSigned, kHostName };
 
@@ -102,6 +106,8 @@ class CurlTestServer : public ThreadSystem::Thread {
   void Run() override;
   // Handles one client fd to completion (parse request, write response).
   void HandleConnection(int client_fd);
+  // kHttpProxy: serves one CONNECT tunnel on client_fd.
+  void TunnelConnection(int client_fd);
   // Writes one HTTP response for the parsed method+path over a generic writer.
   // The writer abstracts plain-socket vs TLS I/O.
   template <typename WriteFn>
