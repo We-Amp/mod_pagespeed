@@ -19,7 +19,11 @@
 
 #include "pagespeed/system/curl_fetch.h"
 
+#include <arpa/inet.h>
+#include <netinet/in.h>
+
 #include <cstddef>
+#include <cstdlib>
 
 #include "net/instaweb/http/public/async_fetch.h"
 #include "net/instaweb/public/global_constants.h"
@@ -27,6 +31,7 @@
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/timer.h"
+#include "pagespeed/kernel/http/google_url.h"
 #include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/request_headers.h"
 #include "pagespeed/kernel/http/response_headers.h"
@@ -41,6 +46,31 @@ static constexpr size_t kMaxResponseBodyBytes =
     static_cast<const size_t>(256 * 1024 * 1024);
 static constexpr size_t kMaxHeaderBytes =
     static_cast<const size_t>(1 * 1024 * 1024);
+
+// True for "192.0.2.1" and "[2001:db8::1]", the forms GoogleUrl::Host() has
+// for an IP address.
+static bool IsIpLiteral(StringPiece host) {
+  struct in6_addr addr;
+  if (host.size() > 2 && host[0] == '[' && host[host.size() - 1] == ']') {
+    GoogleString ip(host.data() + 1, host.size() - 2);
+    return inet_pton(AF_INET6, ip.c_str(), &addr) == 1;
+  }
+  GoogleString ip(host.data(), host.size());
+  return inet_pton(AF_INET, ip.c_str(), &addr) == 1;
+}
+
+// Whether libcurl takes a proxy for https URLs from the environment.
+static bool HasEnvironmentProxy() {
+  static const char* const kVariables[] = {"https_proxy", "HTTPS_PROXY",
+                                           "all_proxy", "ALL_PROXY"};
+  for (const char* name : kVariables) {
+    const char* value = getenv(name);
+    if (value != nullptr && *value != '\0') {
+      return true;
+    }
+  }
+  return false;
+}
 
 CurlFetch::CurlFetch(const GoogleString& url, AsyncFetch* async_fetch,
                      MessageHandler* message_handler, Timer* timer)
@@ -60,6 +90,9 @@ CurlFetch::CurlFetch(const GoogleString& url, AsyncFetch* async_fetch,
 CurlFetch::~CurlFetch() {
   if (request_headers_list_ != nullptr) {
     curl_slist_free_all(request_headers_list_);
+  }
+  if (connect_to_list_ != nullptr) {
+    curl_slist_free_all(connect_to_list_);
   }
   if (curl_handle_ != nullptr) {
     curl_easy_cleanup(curl_handle_);
@@ -129,6 +162,34 @@ bool CurlFetch::InitCurl(CurlUrlAsyncFetcher* fetcher) {
                        fetcher->ssl_certificates_file().c_str());
     } else if (!fetcher->ssl_certificates_dir().empty()) {
       curl_easy_setopt(curl_handle_, CURLOPT_CAINFO, "");
+    }
+
+    // Like serf, take the TLS server name (SNI and certificate check) from
+    // the Host header when the URL names the server by IP address:
+    // LoopbackRouteFetcher fetches a site's resources from the server's own
+    // IP address, with the site's name in the Host header. libcurl takes the
+    // name from the URL, so put the Host header's name into the URL and keep
+    // the connection on the URL's address with CURLOPT_CONNECT_TO. URLs with
+    // a host name keep it. So do fetches through a proxy, configured or from
+    // the environment (libcurl matches no_proxy against the URL host), and
+    // over a Unix socket.
+    GoogleUrl gurl(url_);
+    const char* host_header =
+        async_fetch_->request_headers()->Lookup1(HttpAttributes::kHost);
+    if (host_header != nullptr && gurl.IsWebValid() && gurl.SchemeIs("https") &&
+        IsIpLiteral(gurl.Host()) && fetcher->proxy().empty() &&
+        !HasEnvironmentProxy() && unix_socket_path_.empty()) {
+      GoogleUrl tls_name(StrCat("https://", host_header, "/"));
+      if (tls_name.IsWebValid() && tls_name.Host() != gurl.Host()) {
+        GoogleString port = IntegerToString(gurl.EffectiveIntPort());
+        connect_to_list_ = curl_slist_append(
+            nullptr, StrCat("::", gurl.Host(), ":", port).c_str());
+        curl_easy_setopt(curl_handle_, CURLOPT_CONNECT_TO, connect_to_list_);
+        curl_easy_setopt(
+            curl_handle_, CURLOPT_URL,
+            StrCat("https://", tls_name.Host(), ":", port, gurl.PathAndLeaf())
+                .c_str());
+      }
     }
   }
 
