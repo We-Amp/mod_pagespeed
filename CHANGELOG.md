@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **HTTPS resources that mod_pagespeed fetches from its own server no
+  longer fail certificate verification.** For a resource on an origin that
+  no domain directive (such as `ModPagespeedDomain`) names, mod_pagespeed
+  connects to its own server's IP address and sends the site's name in the
+  `Host` header. The serf fetcher of 1.x sent that name as SNI and checked
+  the certificate against it. The curl fetcher took both from the URL, that
+  is, the IP address: the server presented its default certificate,
+  verification failed with curl error 60, and the resource stayed
+  unoptimized. When the URL names the server by IP address, the fetcher now
+  takes the TLS server name from the `Host` header, as serf did, and still
+  connects to that address. This also applies to an HTTPS origin that
+  `MapOriginDomain` maps to an IP address. Fetches to a host name, and
+  fetches through a proxy, are unchanged.
 - **The source tree builds with Bazel again.** The 2.1.0 `VERSION` file has
   no `PRERELEASE=` line, and the genrule that writes `version.h` stopped with
   `PRERELEASE: unbound variable`, so building the module failed on the

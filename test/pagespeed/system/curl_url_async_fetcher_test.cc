@@ -585,6 +585,68 @@ TEST_F(CurlUrlAsyncFetcherTest, TestHttpsWithExplicitHost) {
   ValidateMonitoringStats(1, 0);
 }
 
+TEST_F(CurlUrlAsyncFetcherTest, TestHttpsUsesHostHeaderName) {
+  // LoopbackRouteFetcher fetches a site's resources from the server's own IP
+  // address, with the site's name in the Host header. As with serf, that name,
+  // not the URL's host, must go out as SNI and be checked against the
+  // certificate. This server's certificate names only pagespeed.test, a
+  // reserved name (RFC 6761) that does not resolve: the connection must go to
+  // the URL's host.
+  GoogleString ca_file = StrCat(GTestTempDir(), "/curl_test_host_name.pem");
+  StdioFileSystem file_system;
+  NullMessageHandler handler;
+  ASSERT_TRUE(
+      file_system.WriteFile(ca_file.c_str(), kTestHostNameCertPem, &handler));
+  CurlTestServer server(CurlTestServer::kHttps, CurlTestServer::kHostName,
+                        thread_system_.get());
+  ASSERT_TRUE(server.StartAndWait());
+  curl_fetcher_->SetHttpsOptions("enable");
+  curl_fetcher_->SetSslCertificatesFile(ca_file);
+  int index = AddTestUrl(StrCat("https://", server.host_port(), "/html"),
+                         "<!DOCTYPE html>");
+  request_headers(index)->Add(
+      HttpAttributes::kHost,
+      StrCat("pagespeed.test:", IntegerToString(server.port())));
+  StartFetches(index, index);
+  ExpectHttpsSucceeds(index);
+  ValidateMonitoringStats(1, 0);
+  server.ShutDown();
+}
+
+TEST_F(CurlUrlAsyncFetcherTest, TestHttpsKeepsUrlHostName) {
+  // The Host header names the TLS server only when the URL host is an IP
+  // address. Here the URL names localhost, which the trusted server's
+  // certificate covers and pagespeed.test does not.
+  curl_fetcher_->SetHttpsOptions("enable");
+  GoogleString port = IntegerToString(https_ca_server_->port());
+  int index = AddTestUrl(StrCat("https://localhost:", port, "/html"),
+                         "<!DOCTYPE html>");
+  request_headers(index)->Add(HttpAttributes::kHost,
+                              StrCat("pagespeed.test:", port));
+  StartFetches(index, index);
+  ExpectHttpsSucceeds(index);
+  ValidateMonitoringStats(1, 0);
+}
+
+TEST_F(CurlUrlAsyncFetcherTest, TestHttpsKeepsUrlHostWithEnvironmentProxy) {
+  // libcurl matches no_proxy against the URL host, so with a proxy in the
+  // environment the URL stays as it is: this fetch must still go direct,
+  // not to the "proxy", a plain HTTP server that answers CONNECT with 404.
+  setenv("https_proxy", StrCat("http://", test_host_).c_str(), 1);
+  setenv("no_proxy", "127.0.0.1", 1);
+  curl_fetcher_->SetHttpsOptions("enable");
+  int index = AddTestUrl(StrCat("https://", https_host_, "/html"),
+                         "<!DOCTYPE html>");
+  request_headers(index)->Add(
+      HttpAttributes::kHost,
+      StrCat("pagespeed.test:", IntegerToString(https_ca_server_->port())));
+  StartFetches(index, index);
+  ExpectHttpsSucceeds(index);
+  unsetenv("https_proxy");
+  unsetenv("no_proxy");
+  ValidateMonitoringStats(1, 0);
+}
+
 TEST_F(CurlUrlAsyncFetcherTest, TestHttpsSucceedsWhenEnabled) {
   curl_fetcher_->SetHttpsOptions("enable,allow_self_signed");
   EXPECT_TRUE(curl_fetcher_->SupportsHttps());

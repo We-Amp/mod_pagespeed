@@ -181,6 +181,9 @@ bool CurlTestServer::EnsureSslCtx() {
   if (tls_cert_ == kTrustedCa) {
     cert_pem = kTestServerCertPem;
     key_pem = kTestServerKeyPem;
+  } else if (tls_cert_ == kHostName) {
+    cert_pem = kTestHostNameCertPem;
+    key_pem = kTestHostNameKeyPem;
   } else {
     cert_pem = kTestSelfSignedCertPem;
     key_pem = kTestSelfSignedKeyPem;

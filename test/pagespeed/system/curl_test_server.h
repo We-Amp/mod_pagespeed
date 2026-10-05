@@ -42,6 +42,8 @@
 //   kTrustedCa  -> leaf signed by the test CA (curl trusts it via CAINFO)
 //   kSelfSigned -> a self-signed leaf (curl rejects it unless verification is
 //                  disabled), used for the "fails for self-signed" cases.
+//   kHostName   -> a self-signed certificate for pagespeed.test only, not for
+//                  the address 127.0.0.1 the server listens on.
 
 #ifndef TEST_PAGESPEED_SYSTEM_CURL_TEST_SERVER_H_
 #define TEST_PAGESPEED_SYSTEM_CURL_TEST_SERVER_H_
@@ -72,7 +74,7 @@ class CurlTestServer : public ThreadSystem::Thread {
  public:
   enum Scheme { kHttp, kHttps };
   // Which certificate the HTTPS server presents.
-  enum TlsCert { kTrustedCa, kSelfSigned };
+  enum TlsCert { kTrustedCa, kSelfSigned, kHostName };
 
   // For HTTP, tls_cert is ignored.
   CurlTestServer(Scheme scheme, TlsCert tls_cert, ThreadSystem* thread_system);

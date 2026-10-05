@@ -90,6 +90,7 @@ class CurlFetch : public PoolElement<CurlFetch> {
   Timer* timer_;
   CURL* curl_handle_;
   struct curl_slist* request_headers_list_;
+  struct curl_slist* connect_to_list_ = nullptr;  // CURLOPT_CONNECT_TO
   bool headers_complete_;
   size_t bytes_received_;
   size_t header_bytes_received_;

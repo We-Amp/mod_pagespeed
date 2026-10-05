@@ -21,7 +21,7 @@ hermetic local HTTPS server (`curl_test_server.{h,cc}`). The fixtures let the
 test run with **zero public-internet dependency**: it no longer touches
 httpbin.org, self-signed.badssl.com, or www.google.com.
 
-There are three identities:
+There are four identities:
 
 - **Test root CA** (`kTestCaCertPem`) — the test injects this as libcurl's
   `CAINFO` so the fetcher trusts the server leaf in the "succeeds" cases.
@@ -31,6 +31,12 @@ There are three identities:
 - **Self-signed leaf** (`kTestSelfSignedCertPem` / `kTestSelfSignedKeyPem`) —
   its own root, NOT in the trusted bundle, used for the "fails for self-signed"
   cases.
+- **Host-name certificate** (`kTestHostNameCertPem` / `kTestHostNameKeyPem`):
+  self-signed, with `subjectAltName = DNS:pagespeed.test` and no IP, so it
+  does not match `127.0.0.1`. `TestHttpsUsesHostHeaderName` trusts it as
+  `CAINFO` and fetches `https://127.0.0.1:<port>/html` with
+  `Host: pagespeed.test:<port>`, which succeeds only if the TLS server name
+  comes from the Host header.
 
 Validity is 100 years so the fixtures do not expire in CI.
 
@@ -71,6 +77,12 @@ openssl req -x509 -newkey rsa:2048 -nodes -keyout selfsigned.key \
   -subj "/O=mod_pagespeed test self-signed/CN=127.0.0.1" \
   -addext "subjectAltName=IP:127.0.0.1,DNS:localhost" \
   -addext "basicConstraints=CA:FALSE"
+
+# Host-name certificate (self-signed CA), SAN = DNS:pagespeed.test only
+openssl req -x509 -newkey rsa:2048 -nodes -keyout hostname.key \
+  -out hostname.crt -days $DAYS \
+  -subj "/O=mod_pagespeed test host name/CN=pagespeed.test" \
+  -addext "subjectAltName=DNS:pagespeed.test"
 ```
 
 Then paste each `*.crt` / `*.key` into the corresponding `R"PEM(...)PEM"`
@@ -79,4 +91,8 @@ literal in `curl_test_certs.h`. Sanity-check the chain:
 ```sh
 openssl verify -CAfile ca.crt server.crt        # must print: server.crt: OK
 openssl verify -CAfile ca.crt selfsigned.crt    # must FAIL (self-signed)
+openssl verify -CAfile hostname.crt -verify_hostname pagespeed.test \
+  hostname.crt                                  # must print: hostname.crt: OK
+openssl verify -CAfile hostname.crt -verify_ip 127.0.0.1 \
+  hostname.crt                                  # must FAIL (no IP SAN)
 ```

@@ -34,6 +34,11 @@
 //                            the trusted CA bundle), SAN = IP:127.0.0.1. Used
 //                            for the "fails for self-signed" cases.
 //   kTestSelfSignedKeyPem -- Private key for the self-signed certificate.
+//   kTestHostNameCertPem  -- A self-signed certificate for the host name only,
+//                            SAN = DNS:pagespeed.test (no IP). A test that
+//                            trusts it passes it as the CA file. Added on
+//                            2026-10-05, valid 100 years from then.
+//   kTestHostNameKeyPem   -- Private key for the host-name certificate.
 
 #ifndef TEST_PAGESPEED_SYSTEM_CURL_TEST_CERTS_H_
 #define TEST_PAGESPEED_SYSTEM_CURL_TEST_CERTS_H_
@@ -172,6 +177,61 @@ J5fUMxy7cGiG2aq4iRHEeh+Ppu8yEIDZmvWne7UkKM6JV5/H7PHdtig54I8jIPLD
 bCygDvfA3G3xFkDeTXHgcEPyFNpInrlBV9SjtMJNeN5zHXZG2kttQ3kh+pUMXf58
 SiyVzNMKTOFGNJzqpvvp8dyNTHkKEQASiLrjtu7vwqri+FZ/7KGi7G7sV4bQ0aS9
 7gokVO7kikSmAAYFawc6Xnk=
+-----END PRIVATE KEY-----
+)PEM";
+
+inline const char kTestHostNameCertPem[] = R"PEM(
+-----BEGIN CERTIFICATE-----
+MIIDfjCCAmagAwIBAgIUKczvaOv640bAhLaWGCyZ8W17HFYwDQYJKoZIhvcNAQEL
+BQAwQDElMCMGA1UECgwcbW9kX3BhZ2VzcGVlZCB0ZXN0IGhvc3QgbmFtZTEXMBUG
+A1UEAwwOcGFnZXNwZWVkLnRlc3QwIBcNMjYxMDA1MDgyMTE3WhgPMjEyNjA5MTEw
+ODIxMTdaMEAxJTAjBgNVBAoMHG1vZF9wYWdlc3BlZWQgdGVzdCBob3N0IG5hbWUx
+FzAVBgNVBAMMDnBhZ2VzcGVlZC50ZXN0MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8A
+MIIBCgKCAQEAy4TQsX6467hhVCunyiCQWgFFb11cHxJacDfmPElvvMHslDAPcdAH
+Xdif8+ZlbVR2kBawsIGgUHVhELJyeyxJLs1C3MScCpKdeGHvpbSyYdtyZFv0BP82
+r6mTL/MbBkY7sQdfCxg174dh3jPPk7EVnBWhTV8yUIZcxqyokHz/qah80tkl9UAC
+udIOjQm40WBcyE5OKkQqFjr8hvEXVvwh3fCYUors8oO4Jr9poETaf9syNGx8+7G8
+qifN28AQEU4arDr26KRa4cEpaad3LEybk6mY+vm3UvZP5zoY3hnZlsM/xRJHaPbj
+vQ3lKH0ZHnSg9kdpBdJexMJq7W8NnAVnBQIDAQABo24wbDAdBgNVHQ4EFgQUw7JO
+Royb0Yts9lCeIUHSx8fN+2MwHwYDVR0jBBgwFoAUw7JORoyb0Yts9lCeIUHSx8fN
++2MwDwYDVR0TAQH/BAUwAwEB/zAZBgNVHREEEjAQgg5wYWdlc3BlZWQudGVzdDAN
+BgkqhkiG9w0BAQsFAAOCAQEAxdPRxHS9rc8aPG8xIvB6ExXEiZCevOvFUEXrON7Q
+VH5lSHT2AzmZIpzZxGet1382Ag6NOznzcaWdV3rPnxwfn+b++3mYOmcSAqU3feFj
+g3kbyBbuTVAAwvg8eLBopjfffBTZ25ppR9MaBrYB/C7PLRWxRlsvqnJFlM96wXcT
+Dj/Ta9R8EwGb+vPqH6ZLbpDZjyVPH3Xg0haXSb3nAn3b6hDBcYVQlzYV2E+iG6sX
+D2Vo4TN52u44NGlmB7hHu9Ke7vWGmeNRW7M0Bu70BAhWGoqngl2p6irt4sITVKid
+JPxcLh4U30Y98oTrTvGw1kVJSzukeloKDMjmebT6Oc8PZQ==
+-----END CERTIFICATE-----
+)PEM";
+
+inline const char kTestHostNameKeyPem[] = R"PEM(
+-----BEGIN PRIVATE KEY-----
+MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDLhNCxfrjruGFU
+K6fKIJBaAUVvXVwfElpwN+Y8SW+8weyUMA9x0Add2J/z5mVtVHaQFrCwgaBQdWEQ
+snJ7LEkuzULcxJwKkp14Ye+ltLJh23JkW/QE/zavqZMv8xsGRjuxB18LGDXvh2He
+M8+TsRWcFaFNXzJQhlzGrKiQfP+pqHzS2SX1QAK50g6NCbjRYFzITk4qRCoWOvyG
+8RdW/CHd8JhSiuzyg7gmv2mgRNp/2zI0bHz7sbyqJ83bwBARThqsOvbopFrhwSlp
+p3csTJuTqZj6+bdS9k/nOhjeGdmWwz/FEkdo9uO9DeUofRkedKD2R2kF0l7Ewmrt
+bw2cBWcFAgMBAAECgf9NeRcEw2989q060TK/DkTY8ikIo1bVuiC/ftEsRn8kGK5F
+uvmsOyk9ZaDTetsVQ2EbzgFQO9djjIhIOoFNw7iqZ4T6F602ieKYuh0Yd1VwcRMU
+mxEGK0WTvbaxqJaCieSEhXR+E/ArE9IPK7YcM5Ak1JD6VudcjzcXXgQiUe0BA1Yl
+ASKpGqG87AoAOd2JQPiy6pIaDjCoKZvi9QuNH6plTwWgvuO5NcrBqfDbrltGWWYg
+cgvJr0a4TrQ1BdEGMbZCu+/gC2ejsF46V9HAPa/R8yzPHpFo2XpQf+blKBxWbTcL
+SEzj2NIRIhsvzF6qfrDt5Xayj8iTdmMAmXzV0xECgYEA7C7SIuYOW8De49YTOqPF
+2kEd90svGbRQ234ruA2ph4+oozWebzvSP1F1KUlJ0sP7DLNY8PDovm4fYNajJrll
+ee9cJKe10cDuCyrcSA2rDTlScTrPVX/ke7QDm6rmL63fhpm63Sqp8w7vGiomR2p1
+O6SZVilVSmjrUgVMG0dQfJkCgYEA3Jhft5IpUPL94o08hS66o20m3+yi1thzaCUe
+Pd1c6oBCm2a2d9pVLR2FdtJwPXOYU0nRu5boOQcmRcP4Yp8ezDNZRFzgKkNqlZ0O
+/BXnZUmYJzIJ3lbx+ewYViKZKQSP1hR02E8NFy82CwNX6/DlwIW9DZxwDq5BRdg5
+LTuOdU0CgYEAmn7OKtH+lnqF0tfYYEV9SRXLelaOCuxu8AWKp60YNnr8vzZ12yFw
+mMa6MzWjuuFEObyf84xDUz5J/FirBMvF24t95ORoBTuE+30f92opeE8E5Nipg65T
+UbAhpBSY2puMWkn5eG9OGJauRZlIzPKQmWFEhJ4pErGrLU4VyMpPlhECgYEAtIGu
+2SytyEJ9w3Nk0WpSaMY5aERfX0SQ8uhknaTUkkLPvg/HQb2Tsy4T9w3tsCs1uvmN
+uF2cuoWCKNZaGoEwF1HxOsJw38R4o+J3z4kw5q3Y5kHI13n32VT6+QiooWrNNBVb
+I2FUSeNk6pAa0sM1jVsiPtAC1dB7MubiqoOwZ4UCgYEAxPYYyrfsLrssx20bzbwe
+JrlsSj4apYXT8F3REgZ2yAkf0dGZymd0Alvqtk78PTN2bCc9MKHY/ioaSUuEJTFj
+kC3cnsYvWmFXVzCf44N/STznf9kClfnmJy63ZgSwNmJAATbIbszvjpLibazlMawK
+VPlLjiiBlCMQvliaIVvtb2k=
 -----END PRIVATE KEY-----
 )PEM";
 
