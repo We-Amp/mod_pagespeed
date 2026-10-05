@@ -398,6 +398,7 @@ void CurlTestServer::TunnelConnection(int client_fd) {
     static const char kEstablished[] =
         "HTTP/1.1 200 Connection established\r\n\r\n";
     send(client_fd, kEstablished, sizeof(kEstablished) - 1, MSG_NOSIGNAL);
+    ++tunnels_;
     // Relay until either side closes.
     struct pollfd fds[2] = {{client_fd, POLLIN, 0}, {upstream, POLLIN, 0}};
     char buf[kStackBufferSize];

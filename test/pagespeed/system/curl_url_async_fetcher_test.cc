@@ -60,6 +60,32 @@ namespace net_instaweb {
 namespace {
 const int kFetcherTimeoutMs = 5 * 1000;
 
+// Sets an environment variable and restores its previous value on
+// destruction, so that a test that fails early leaves no trace.
+class ScopedEnv {
+ public:
+  ScopedEnv(const char* name, const GoogleString& value) : name_(name) {
+    const char* old = getenv(name);
+    had_old_ = (old != nullptr);
+    if (had_old_) {
+      old_ = old;
+    }
+    setenv(name, value.c_str(), 1);
+  }
+  ~ScopedEnv() {
+    if (had_old_) {
+      setenv(name_, old_.c_str(), 1);
+    } else {
+      unsetenv(name_);
+    }
+  }
+
+ private:
+  const char* name_;
+  bool had_old_;
+  GoogleString old_;
+};
+
 const int kModpagespeedSite = 0;
 const int kGoogleFavicon = 1;
 const int kGoogleLogo = 2;
@@ -632,8 +658,8 @@ TEST_F(CurlUrlAsyncFetcherTest, TestHttpsKeepsUrlHostWithEnvironmentProxy) {
   // libcurl matches no_proxy against the URL host, so with a proxy in the
   // environment the URL stays as it is: this fetch must still go direct,
   // not to the "proxy", a plain HTTP server that answers CONNECT with 405.
-  setenv("https_proxy", StrCat("http://", test_host_).c_str(), 1);
-  setenv("no_proxy", "127.0.0.1", 1);
+  ScopedEnv https_proxy("https_proxy", StrCat("http://", test_host_));
+  ScopedEnv no_proxy("no_proxy", "127.0.0.1");
   curl_fetcher_->SetHttpsOptions("enable");
   int index = AddTestUrl(StrCat("https://", https_host_, "/html"),
                          "<!DOCTYPE html>");
@@ -642,8 +668,6 @@ TEST_F(CurlUrlAsyncFetcherTest, TestHttpsKeepsUrlHostWithEnvironmentProxy) {
       StrCat("pagespeed.test:", IntegerToString(https_ca_server_->port())));
   StartFetches(index, index);
   ExpectHttpsSucceeds(index);
-  unsetenv("https_proxy");
-  unsetenv("no_proxy");
   ValidateMonitoringStats(1, 0);
 }
 
@@ -692,12 +716,10 @@ TEST_F(CurlUrlAsyncFetcherTest, TestHttpsFailsWhenProxyRefusesConnect) {
   // The "proxy" in the environment is the plain HTTP test server, which
   // answers CONNECT with 405. The fetch must fail as a fetch, not take the
   // proxy's answer for the origin's response headers.
-  setenv("https_proxy", StrCat("http://", test_host_).c_str(), 1);
-  setenv("no_proxy", "example.invalid", 1);
+  ScopedEnv https_proxy("https_proxy", StrCat("http://", test_host_));
+  ScopedEnv no_proxy("no_proxy", "example.invalid");
   curl_fetcher_->SetHttpsOptions("enable");
   TestHttpsFails(StrCat("https://", https_host_, "/html"));
-  unsetenv("https_proxy");
-  unsetenv("no_proxy");
   ValidateMonitoringStats(0, 1);
 }
 
@@ -928,6 +950,9 @@ TEST_F(CurlUrlAsyncFetcherTestWithProxy, TestBlankUrl) {
 class CurlUrlAsyncFetcherTestWithTunnel : public CurlUrlAsyncFetcherTest {
  protected:
   void SetUp() override {
+    // libcurl applies no_proxy from the environment to a configured proxy
+    // too, and a common default such as 127.0.0.1 would bypass the tunnel.
+    no_proxy_ = std::make_unique<ScopedEnv>("no_proxy", "example.invalid");
     tunnel_ = std::make_unique<CurlTestServer>(CurlTestServer::kHttpProxy,
                                                CurlTestServer::kTrustedCa,
                                                thread_system_.get());
@@ -938,8 +963,10 @@ class CurlUrlAsyncFetcherTestWithTunnel : public CurlUrlAsyncFetcherTest {
   void TearDown() override {
     CurlUrlAsyncFetcherTest::TearDown();
     tunnel_->ShutDown();
+    no_proxy_.reset();
   }
 
+  std::unique_ptr<ScopedEnv> no_proxy_;
   std::unique_ptr<CurlTestServer> tunnel_;
 };
 
@@ -950,6 +977,7 @@ TEST_F(CurlUrlAsyncFetcherTestWithTunnel, TestHttpsThroughProxy) {
   TestHttpsSucceeds(StrCat("https://", https_host_, "/html"),
                     "<!DOCTYPE html>");
   ValidateMonitoringStats(1, 0);
+  EXPECT_EQ(1, tunnel_->tunnels());
 }
 
 // ---- Fake web server tests (matching Serf, using POSIX sockets) ----
