@@ -102,15 +102,15 @@ void Sector<kBlockSize>::OnOwnerDied() {
   // readers and writers in other processes may at this moment be copying
   // data out of or into blocks of this sector without holding the lock (see
   // the creating/open_count protocol in shared_mem_cache.cc). So the sector
-  // is retired instead. That costs its share of the cache until the segment
-  // is recreated, which is cheap next to the alternative.
+  // is retired instead. That costs its share of the cache until the server
+  // is restarted, which is cheap next to the alternative.
   if (sector_header_->disabled == 0) {
     sector_header_->disabled = 1;
     if (handler_ != nullptr) {
       handler_->Message(kWarning,
                         "SharedMemCache: the lock of a cache sector was held "
                         "by a process or thread that terminated; the sector "
-                        "is disabled until the cache is recreated");
+                        "is disabled until the server is restarted");
     }
   }
 }

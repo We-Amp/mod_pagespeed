@@ -40,9 +40,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal or crashed, the mutex stayed locked for good: every thread of every
   process that needed it blocked, and the sites hung until the server was
   restarted. The next process to lock such a mutex now takes it over and logs
-  a warning. A metadata cache sector taken over this way is disabled and acts
-  as empty until the next restart, as its contents may have been left
-  half-updated.
+  a warning. This needs robust mutexes, which Linux and FreeBSD have; on
+  macOS such a mutex still stays locked. A metadata cache sector taken over
+  this way is disabled and acts as empty until the next restart, as its
+  contents may have been left half-updated. A server that hangs this way at
+  the time of the upgrade needs a full stop and start: a graceful restart
+  gives the new child processes robust mutexes, but the old, stuck ones keep
+  waiting on the old mutexes.
 
 ## [2.1.0] - 2026-09-17
 

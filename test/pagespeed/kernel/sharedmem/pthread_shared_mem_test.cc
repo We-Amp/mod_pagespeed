@@ -56,7 +56,9 @@ class PthreadSharedMemEnvBase : public SharedMemTestEnv {
 
   // Robust mutexes notice both a process and a thread that terminates while
   // holding them, so this holds for the process and the thread variant.
-  bool RecoversAbandonedMutexes() const override { return true; }
+  bool RecoversAbandonedMutexes() const override {
+    return PthreadSharedMem::RecoversAbandonedMutexes();
+  }
 };
 
 class PthreadSharedMemThreadEnv : public PthreadSharedMemEnvBase {

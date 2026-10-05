@@ -71,9 +71,10 @@ class AbstractSharedMemSegment {
   // to the caller. The object returned is outside shared memory,
   // and acts a helper for referring to the shared state.
   //
-  // Implementations that can detect it (PthreadSharedMem) do not leave a
-  // mutex locked forever when its holder terminates while holding it: the
-  // next lock operation takes the mutex over instead of blocking.
+  // Implementations that can detect it (PthreadSharedMem on Linux and
+  // FreeBSD) do not leave a mutex locked forever when its holder terminates
+  // while holding it: the next lock operation takes the mutex over instead
+  // of blocking.
   virtual bool InitializeSharedMutex(size_t offset,
                                      MessageHandler* handler) = 0;
   virtual AbstractMutex* AttachToSharedMutex(size_t offset) = 0;

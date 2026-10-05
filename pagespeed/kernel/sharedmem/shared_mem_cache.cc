@@ -401,6 +401,11 @@ void SharedMemCache<kBlockSize>::PutRawHash(const GoogleString& raw_hash,
 
   // Wait for readers before touching the key.
   EnsureReadyForWriting(sector, best);
+  if (sector->disabled()) {
+    // Disabled while EnsureReadyForWriting waited without the lock.
+    best->set_creating(false);
+    return;
+  }
   std::memcpy(best->hash_bytes, raw_hash.data(), kHashSize);
   PutIntoEntry(sector, best_key, last_use_timestamp_ms, value);
 }
@@ -489,17 +494,19 @@ void SharedMemCache<kBlockSize>::Get(const GoogleString& key,
   Sector<kBlockSize>* sector = sectors_[pos.sector];
   {
     ScopedMutex lock(sector->mutex());
-    SectorStats* stats = sector->sector_stats();
-    ++stats->num_get;
+    // A disabled sector acts as empty; see Sector::OnOwnerDied().
+    if (!sector->disabled()) {
+      SectorStats* stats = sector->sector_stats();
+      ++stats->num_get;
 
-    // A disabled sector is treated as empty; see Sector::OnOwnerDied().
-    for (int p = 0; p < kAssociativity && !sector->disabled(); ++p) {
-      EntryNum cand_key = pos.keys[p];
-      CacheEntry* cand = sector->EntryAt(cand_key);
-      if (KeyMatch(cand, raw_hash)) {
-        ++stats->num_get_hit;
-        key_state = GetFromEntry(key, sector, cand_key, callback);
-        break;
+      for (int p = 0; p < kAssociativity; ++p) {
+        EntryNum cand_key = pos.keys[p];
+        CacheEntry* cand = sector->EntryAt(cand_key);
+        if (KeyMatch(cand, raw_hash)) {
+          ++stats->num_get_hit;
+          key_state = GetFromEntry(key, sector, cand_key, callback);
+          break;
+        }
       }
     }
   }

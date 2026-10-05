@@ -88,8 +88,11 @@ class PthreadSharedMemMutex : public AbstractMutex {
   }
 
   void Lock() override {
-    if (pthread_mutex_lock(external_mutex_) == EOWNERDEAD) {
+    int result = pthread_mutex_lock(external_mutex_);
+    if (result == EOWNERDEAD) {
       RecoverFromOwnerDeath();
+    } else if (result != 0) {
+      LOG(DFATAL) << "pthread_mutex_lock failed with error " << result;
     }
   }
 
@@ -102,10 +105,11 @@ class PthreadSharedMemMutex : public AbstractMutex {
   // owner of the protected data deal with whatever the holder left behind.
   void RecoverFromOwnerDeath() {
 #ifdef PAGESPEED_HAVE_ROBUST_MUTEXES
+    // If this failed, unlocking would make the mutex unusable for every
+    // process (ENOTRECOVERABLE), and they would all run without exclusion.
     int result = pthread_mutex_consistent(external_mutex_);
-    if (result != 0) {
-      LOG(DFATAL) << "pthread_mutex_consistent failed with error " << result;
-    }
+    CHECK_EQ(0, result) << "pthread_mutex_consistent failed with error "
+                        << result;
 #endif
     LOG(WARNING) << "Took over a shared memory mutex whose holder terminated "
                     "while holding it";
@@ -203,6 +207,14 @@ PthreadSharedMem::SegmentBaseMap* PthreadSharedMem::segment_bases_ = nullptr;
 PthreadSharedMem::PthreadSharedMem() { instance_number_ = ++s_instance_count_; }
 
 PthreadSharedMem::~PthreadSharedMem() {}
+
+bool PthreadSharedMem::RecoversAbandonedMutexes() {
+#ifdef PAGESPEED_HAVE_ROBUST_MUTEXES
+  return true;
+#else
+  return false;
+#endif
+}
 
 size_t PthreadSharedMem::SharedMutexSize() const {
   return sizeof(pthread_mutex_t);
