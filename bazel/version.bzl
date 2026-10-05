@@ -30,8 +30,8 @@ def version_header(
     Args:
         name: Rule name
         template: The version.h.in template file
-        version_file: The VERSION file containing MAJOR, MINOR, BUILD, PATCH and,
-            for a prerelease, PRERELEASE
+        version_file: The VERSION file containing MAJOR, MINOR, BUILD and
+            PATCH and, for a prerelease, PRERELEASE
         out: Output filename (version.h)
         company_fullname: Company full name string
         company_shortname: Company short name string
