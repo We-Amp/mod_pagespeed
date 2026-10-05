@@ -313,6 +313,10 @@ void CurlTestServer::Run() {
 }
 
 void CurlTestServer::HandleConnection(int client_fd) {
+  if (scheme_ == kHttpProxy) {
+    TunnelConnection(client_fd);
+    return;
+  }
   if (scheme_ == kHttp) {
     auto read_some = [&](char* buf, int cap) -> int {
       return static_cast<int>(read(client_fd, buf, cap));
@@ -363,6 +367,53 @@ void CurlTestServer::HandleConnection(int client_fd) {
   }
   SSL_shutdown(ssl);
   SSL_free(ssl);
+}
+
+void CurlTestServer::TunnelConnection(int client_fd) {
+  auto read_some = [&](char* buf, int cap) -> int {
+    return static_cast<int>(read(client_fd, buf, cap));
+  };
+  GoogleString method, target, body;
+  if (!ReadRequest(read_some, &method, &target, &body) || method != "CONNECT") {
+    return;
+  }
+  size_t colon = target.rfind(':');
+  int port = 0;
+  struct sockaddr_in addr;
+  memset(&addr, 0, sizeof(addr));
+  addr.sin_family = AF_INET;
+  if (colon == GoogleString::npos ||
+      !StringToInt(target.substr(colon + 1), &port) ||
+      inet_pton(AF_INET, target.substr(0, colon).c_str(), &addr.sin_addr) !=
+          1) {
+    return;
+  }
+  addr.sin_port = htons(port);
+  int upstream = socket(AF_INET, SOCK_STREAM, 0);
+  if (upstream < 0) {
+    return;
+  }
+  if (connect(upstream, reinterpret_cast<struct sockaddr*>(&addr),
+              sizeof(addr)) == 0) {
+    static const char kEstablished[] =
+        "HTTP/1.1 200 Connection established\r\n\r\n";
+    send(client_fd, kEstablished, sizeof(kEstablished) - 1, MSG_NOSIGNAL);
+    // Relay until either side closes.
+    struct pollfd fds[2] = {{client_fd, POLLIN, 0}, {upstream, POLLIN, 0}};
+    char buf[kStackBufferSize];
+    bool relaying = body.empty() ||
+                    send(upstream, body.data(), body.size(), MSG_NOSIGNAL) ==
+                        static_cast<ssize_t>(body.size());
+    while (relaying && !terminating_ && poll(fds, 2, 100) >= 0) {
+      for (int i = 0; relaying && i < 2; ++i) {
+        if ((fds[i].revents & (POLLIN | POLLHUP | POLLERR)) != 0) {
+          ssize_t n = read(fds[i].fd, buf, sizeof(buf));
+          relaying = n > 0 && send(fds[1 - i].fd, buf, n, MSG_NOSIGNAL) == n;
+        }
+      }
+    }
+  }
+  close(upstream);
 }
 
 template <typename WriteFn>

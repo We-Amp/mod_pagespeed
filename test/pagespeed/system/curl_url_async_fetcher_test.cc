@@ -631,7 +631,7 @@ TEST_F(CurlUrlAsyncFetcherTest, TestHttpsKeepsUrlHostName) {
 TEST_F(CurlUrlAsyncFetcherTest, TestHttpsKeepsUrlHostWithEnvironmentProxy) {
   // libcurl matches no_proxy against the URL host, so with a proxy in the
   // environment the URL stays as it is: this fetch must still go direct,
-  // not to the "proxy", a plain HTTP server that answers CONNECT with 404.
+  // not to the "proxy", a plain HTTP server that answers CONNECT with 405.
   setenv("https_proxy", StrCat("http://", test_host_).c_str(), 1);
   setenv("no_proxy", "127.0.0.1", 1);
   curl_fetcher_->SetHttpsOptions("enable");
@@ -686,6 +686,19 @@ TEST_F(CurlUrlAsyncFetcherTest, TestHttpsSucceedsWithCertDirOnly) {
   TestHttpsSucceeds(StrCat("https://", https_host_, "/html"),
                     "<!DOCTYPE html>");
   ValidateMonitoringStats(1, 0);
+}
+
+TEST_F(CurlUrlAsyncFetcherTest, TestHttpsFailsWhenProxyRefusesConnect) {
+  // The "proxy" in the environment is the plain HTTP test server, which
+  // answers CONNECT with 405. The fetch must fail as a fetch, not take the
+  // proxy's answer for the origin's response headers.
+  setenv("https_proxy", StrCat("http://", test_host_).c_str(), 1);
+  setenv("no_proxy", "example.invalid", 1);
+  curl_fetcher_->SetHttpsOptions("enable");
+  TestHttpsFails(StrCat("https://", https_host_, "/html"));
+  unsetenv("https_proxy");
+  unsetenv("no_proxy");
+  ValidateMonitoringStats(0, 1);
 }
 
 // ---- Connection refused tests (matching Serf) ----
@@ -908,6 +921,35 @@ TEST_F(CurlUrlAsyncFetcherTestWithProxy, TestBlankUrl) {
   ASSERT_TRUE(fetches_[index]->IsDone());
   EXPECT_EQ(HttpStatus::kNotFound, response_headers(index)->status_code());
   ValidateMonitoringStats(0, 1);
+}
+
+// Fetches through CurlTestServer's CONNECT proxy, set as the fetcher's proxy
+// the way ModPagespeedFetchProxy does.
+class CurlUrlAsyncFetcherTestWithTunnel : public CurlUrlAsyncFetcherTest {
+ protected:
+  void SetUp() override {
+    tunnel_ = std::make_unique<CurlTestServer>(CurlTestServer::kHttpProxy,
+                                               CurlTestServer::kTrustedCa,
+                                               thread_system_.get());
+    ASSERT_TRUE(tunnel_->StartAndWait());
+    SetUpWithProxy(tunnel_->host_port().c_str());
+  }
+
+  void TearDown() override {
+    CurlUrlAsyncFetcherTest::TearDown();
+    tunnel_->ShutDown();
+  }
+
+  std::unique_ptr<CurlTestServer> tunnel_;
+};
+
+TEST_F(CurlUrlAsyncFetcherTestWithTunnel, TestHttpsThroughProxy) {
+  // The proxy's "200 Connection established" must not be taken for the
+  // origin's response.
+  curl_fetcher_->SetHttpsOptions("enable");
+  TestHttpsSucceeds(StrCat("https://", https_host_, "/html"),
+                    "<!DOCTYPE html>");
+  ValidateMonitoringStats(1, 0);
 }
 
 // ---- Fake web server tests (matching Serf, using POSIX sockets) ----

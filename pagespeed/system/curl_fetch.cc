@@ -139,6 +139,10 @@ bool CurlFetch::InitCurl(CurlUrlAsyncFetcher* fetcher) {
     if (!fetcher->proxy().empty()) {
       curl_easy_setopt(curl_handle_, CURLOPT_PROXY, fetcher->proxy().c_str());
     }
+    // Through a proxy, configured or from the environment, an https fetch
+    // first gets the proxy's answer to CONNECT. Keep it from HeaderCallback(),
+    // which would take its end for the end of the response headers.
+    curl_easy_setopt(curl_handle_, CURLOPT_SUPPRESS_CONNECT_HEADERS, 1L);
   } else {
     curl_easy_setopt(curl_handle_, CURLOPT_PROXY, "");
   }
