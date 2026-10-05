@@ -36,6 +36,16 @@ namespace net_instaweb {
 namespace {
 const char kTestSegment[] = "segment1";
 const char kOtherSegment[] = "segment2";
+
+class CountingRecoveryHandler
+    : public AbstractSharedMemSegment::MutexRecoveryHandler {
+ public:
+  void OnOwnerDied() override { ++calls_; }
+  int calls() const { return calls_; }
+
+ private:
+  int calls_ = 0;
+};
 }  // namespace
 
 SharedMemTestEnv::~SharedMemTestEnv() {}
@@ -279,6 +289,62 @@ void SharedMemTestBase::MutexChild() {
     return;
   }
   mutex->Unlock();
+}
+
+void SharedMemTestBase::TestAbandonedMutex() NO_THREAD_SAFETY_ANALYSIS {
+  if (!test_env_->RecoversAbandonedMutexes()) {
+    GTEST_SKIP() << "This runtime leaves an abandoned mutex locked.";
+  }
+  std::unique_ptr<AbstractSharedMemSegment> seg(CreateDefault());
+  ASSERT_TRUE(seg.get() != nullptr);
+  ASSERT_TRUE(CreateChild(&SharedMemTestBase::AbandonMutexChild));
+  test_env_->WaitForChildren();
+
+  // The child terminated holding the mutex. It must be taken over rather
+  // than stay busy forever, and work normally after that.
+  std::unique_ptr<AbstractMutex> mutex(AttachDefaultMutex(seg.get()));
+  ASSERT_TRUE(mutex->TryLock());
+  mutex->Unlock();
+  ASSERT_TRUE(mutex->TryLock());
+  mutex->Unlock();
+  DestroyDefault();
+}
+
+void SharedMemTestBase::TestAbandonedMutexRecoveryHandler()
+    NO_THREAD_SAFETY_ANALYSIS {
+  if (!test_env_->RecoversAbandonedMutexes()) {
+    GTEST_SKIP() << "This runtime leaves an abandoned mutex locked.";
+  }
+  std::unique_ptr<AbstractSharedMemSegment> seg(CreateDefault());
+  ASSERT_TRUE(seg.get() != nullptr);
+  ASSERT_TRUE(CreateChild(&SharedMemTestBase::AbandonMutexChild));
+  test_env_->WaitForChildren();
+
+  CountingRecoveryHandler recovery;
+  // Offset 4 is the default mutex, as in AttachDefaultMutex().
+  std::unique_ptr<AbstractMutex> mutex(
+      seg->AttachToSharedMutexWithRecovery(4, &recovery));
+  mutex->Lock();
+  EXPECT_EQ(1, recovery.calls());
+  mutex->Unlock();
+
+  // Later acquisitions are ordinary ones.
+  mutex->Lock();
+  mutex->Unlock();
+  EXPECT_EQ(1, recovery.calls());
+  DestroyDefault();
+}
+
+void SharedMemTestBase::AbandonMutexChild() NO_THREAD_SAFETY_ANALYSIS {
+  std::unique_ptr<AbstractSharedMemSegment> seg(AttachDefault());
+  if (seg.get() == nullptr) {
+    test_env_->ChildFailed();
+    return;
+  }
+  std::unique_ptr<AbstractMutex> mutex(AttachDefaultMutex(seg.get()));
+  mutex->Lock();
+  // Return without unlocking, so that this child process or thread
+  // terminates while holding the mutex.
 }
 
 // Returns if successful

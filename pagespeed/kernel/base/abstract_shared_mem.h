@@ -34,6 +34,19 @@ class MessageHandler;
 // that may contain mutexes.
 class AbstractSharedMemSegment {
  public:
+  // Told when a shared mutex is taken over from a holder (a process or a
+  // thread) that terminated while holding it. See
+  // AttachToSharedMutexWithRecovery().
+  class MutexRecoveryHandler {
+   public:
+    virtual ~MutexRecoveryHandler() = default;
+
+    // Called with the mutex held, before the Lock() or TryLock() that
+    // acquired it returns. The terminated holder may have left the data the
+    // mutex protects half-updated; this is the place to repair or retire it.
+    virtual void OnOwnerDied() = 0;
+  };
+
   AbstractSharedMemSegment() {}
 
   // Destroying the segment object detaches from it, making all pointers into it
@@ -57,9 +70,22 @@ class AbstractSharedMemSegment {
   // AttachToSharedMutex returns a fresh object, giving ownership
   // to the caller. The object returned is outside shared memory,
   // and acts a helper for referring to the shared state.
+  //
+  // Implementations that can detect it (PthreadSharedMem) do not leave a
+  // mutex locked forever when its holder terminates while holding it: the
+  // next lock operation takes the mutex over instead of blocking.
   virtual bool InitializeSharedMutex(size_t offset,
                                      MessageHandler* handler) = 0;
   virtual AbstractMutex* AttachToSharedMutex(size_t offset) = 0;
+
+  // Like AttachToSharedMutex(), but also tells `handler` each time a lock
+  // operation on the returned mutex takes it over from a terminated holder.
+  // `handler` is not owned and must outlive the returned mutex.
+  // Implementations that cannot detect terminated holders never call it.
+  virtual AbstractMutex* AttachToSharedMutexWithRecovery(
+      size_t offset, MutexRecoveryHandler* /* handler */) {
+    return AttachToSharedMutex(offset);
+  }
 
  private:
   AbstractSharedMemSegment(const AbstractSharedMemSegment&) = delete;

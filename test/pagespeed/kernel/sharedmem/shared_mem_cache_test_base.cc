@@ -28,9 +28,13 @@
 
 #include <cstddef>  // for size_t
 #include <memory>
+#include <vector>
 
 #include "base/logging.h"  // for Check_EQImpl, CHECK_EQ
+#include "pagespeed/kernel/base/abstract_mutex.h"
+#include "pagespeed/kernel/base/abstract_shared_mem.h"
 #include "pagespeed/kernel/base/function.h"
+#include "pagespeed/kernel/base/thread_annotations.h"
 #include "pagespeed/kernel/base/shared_string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_system.h"
@@ -290,6 +294,55 @@ void SharedMemCacheTestBase::TestEvict() {
   }
 
   small_cache->GlobalCleanup(shmem_runtime_.get(), kAltSegment, &handler_);
+}
+
+void SharedMemCacheTestBase::TestAbandonedSectorLocks() {
+  if (!test_env_->RecoversAbandonedMutexes()) {
+    GTEST_SKIP() << "This runtime leaves an abandoned mutex locked.";
+  }
+  CheckPut("200", "OK");
+  CheckGet("200", "OK");
+
+  ASSERT_TRUE(CreateChild(&SharedMemCacheTestBase::AbandonSectorLocksChild));
+  test_env_->WaitForChildren();
+
+  // The child terminated holding every sector's lock, so none of these may
+  // block. What the sectors hold can no longer be trusted, so from now on
+  // they act as empty: the old entry is gone and new ones are dropped.
+  CheckNotFound("200");
+  CheckPut("200", "OK");
+  CheckNotFound("200");
+  CheckDelete("200");
+
+  // Each sector reports being retired once, when its lock is first taken
+  // over; DumpStats() takes every sector's lock.
+  cache_->DumpStats();
+  EXPECT_EQ(kSectors, handler_.MessagesOfType(kWarning));
+}
+
+void SharedMemCacheTestBase::AbandonSectorLocksChild()
+    NO_THREAD_SAFETY_ANALYSIS {
+  using SharedMemCacheData::Sector;
+  size_t sector_size = Sector<kBlockSize>::RequiredSize(
+      shmem_runtime_.get(), kSectorEntries, kSectorBlocks);
+  std::unique_ptr<AbstractSharedMemSegment> segment(
+      shmem_runtime_->AttachToSegment(kSegment, kSectors * sector_size,
+                                      &handler_));
+  if (segment.get() == nullptr) {
+    test_env_->ChildFailed();
+    return;
+  }
+  std::vector<std::unique_ptr<Sector<kBlockSize>>> sectors;
+  for (int s = 0; s < kSectors; ++s) {
+    sectors.push_back(std::make_unique<Sector<kBlockSize>>(
+        segment.get(), s * sector_size, kSectorEntries, kSectorBlocks));
+    if (!sectors.back()->Attach(&handler_)) {
+      test_env_->ChildFailed();
+      return;
+    }
+    sectors.back()->mutex()->Lock();
+  }
+  // Return without unlocking anything.
 }
 
 void SharedMemCacheTestBase::CheckDelete(const char* key) {

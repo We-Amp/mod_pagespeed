@@ -346,6 +346,9 @@ void SharedMemCache<kBlockSize>::PutRawHash(const GoogleString& raw_hash,
   SectorStats* stats = sector->sector_stats();
 
   ScopedMutex lock(sector->mutex());
+  if (sector->disabled()) {
+    return;  // See Sector::OnOwnerDied().
+  }
   ++stats->num_put;
 
   // See if our key already exists. Note that if it does, we will attempt to
@@ -412,6 +415,13 @@ void SharedMemCache<kBlockSize>::PutIntoEntry(Sector<kBlockSize>* sector,
 
   CacheEntry* entry = sector->EntryAt(entry_num);
   DCHECK(entry->creating());
+
+  // EnsureReadyForWriting may have released the lock while waiting, and
+  // the sector may have been disabled meanwhile.
+  if (sector->disabled()) {
+    entry->set_creating(false);
+    return;
+  }
   DCHECK_EQ(0u, entry->open_count());
 
   // Adjust space allocation....
@@ -482,7 +492,8 @@ void SharedMemCache<kBlockSize>::Get(const GoogleString& key,
     SectorStats* stats = sector->sector_stats();
     ++stats->num_get;
 
-    for (int p = 0; p < kAssociativity; ++p) {
+    // A disabled sector is treated as empty; see Sector::OnOwnerDied().
+    for (int p = 0; p < kAssociativity && !sector->disabled(); ++p) {
       EntryNum cand_key = pos.keys[p];
       CacheEntry* cand = sector->EntryAt(cand_key);
       if (KeyMatch(cand, raw_hash)) {
@@ -545,6 +556,9 @@ void SharedMemCache<kBlockSize>::Delete(const GoogleString& key) {
 
   Sector<kBlockSize>* sector = sectors_[pos.sector];
   ScopedMutex lock(sector->mutex());
+  if (sector->disabled()) {
+    return;  // See Sector::OnOwnerDied().
+  }
 
   for (int p = 0; p < kAssociativity; ++p) {
     EntryNum cand_key = pos.keys[p];
@@ -567,6 +581,11 @@ void SharedMemCache<kBlockSize>::DeleteEntry(Sector<kBlockSize>* sector,
     return;
   }
   EnsureReadyForWriting(sector, entry);
+  if (sector->disabled()) {
+    // Disabled while EnsureReadyForWriting waited without the lock.
+    entry->set_creating(false);
+    return;
+  }
   BlockVector blocks;
   sector->BlockListForEntry(entry, &blocks);
   sector->ReturnBlocksToFreeList(blocks);
@@ -579,6 +598,9 @@ void SharedMemCache<kBlockSize>::SanityCheck() {
   for (int i = 0; i < num_sectors_; ++i) {
     Sector<kBlockSize>* sector = sectors_[i];
     ScopedMutex lock(sector->mutex());
+    if (sector->disabled()) {
+      continue;  // Its structures are not expected to be consistent.
+    }
 
     // Make sure that all blocks are accounted for exactly once.
 
@@ -728,8 +750,9 @@ void SharedMemCache<kBlockSize>::EnsureReadyForWriting(
   //
   entry->set_creating(true);
 
-  // Now just wait for previous readers to leave.
-  while (entry->open_count() > 0) {
+  // Now just wait for previous readers to leave. If the sector gets disabled
+  // meanwhile the callers give up, so there is nothing to wait for any more.
+  while (entry->open_count() > 0 && !sector->disabled()) {
     ++sector->sector_stats()->num_put_spins;
     sector->mutex()->Unlock();
     timer_->SleepUs(50);

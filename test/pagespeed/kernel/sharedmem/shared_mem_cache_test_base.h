@@ -56,6 +56,7 @@ class SharedMemCacheTestBase : public CacheTestBase {
   void TestReaderWriter();
   void TestConflict();
   void TestEvict();
+  void TestAbandonedSectorLocks();
 
   void ResetCache();
 
@@ -65,6 +66,10 @@ class SharedMemCacheTestBase : public CacheTestBase {
   SharedMemCache<kBlockSize>* MakeCache();
   void CheckDelete(const char* key);
   void TestReaderWriterChild();
+
+  // Takes the lock of every sector of the cache and exits without releasing
+  // them, like a process that terminates in the middle of cache operations.
+  void AbandonSectorLocksChild();
 
   std::unique_ptr<SharedMemTestEnv> test_env_;
   std::unique_ptr<AbstractSharedMem> shmem_runtime_;
@@ -115,9 +120,13 @@ TYPED_TEST_P(SharedMemCacheTestTemplate, TestEvict) {
   SharedMemCacheTestBase::TestEvict();
 }
 
+TYPED_TEST_P(SharedMemCacheTestTemplate, TestAbandonedSectorLocks) {
+  SharedMemCacheTestBase::TestAbandonedSectorLocks();
+}
+
 REGISTER_TYPED_TEST_SUITE_P(SharedMemCacheTestTemplate, TestBasic, TestReinsert,
                             TestReplacement, TestReaderWriter, TestConflict,
-                            TestEvict);
+                            TestEvict, TestAbandonedSectorLocks);
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(SharedMemCacheTestTemplate);
 
 }  // namespace net_instaweb
