@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The source tree builds with Bazel again.** The 2.1.0 `VERSION` file has
+  no `PRERELEASE=` line, and the genrule that writes `version.h` stopped with
+  `PRERELEASE: unbound variable`, so building the module failed on the
+  `v2.1.0` tag and on master.
+
 ## [2.1.0] - 2026-09-17
 
 ### Added

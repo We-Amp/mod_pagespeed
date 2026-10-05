@@ -30,7 +30,8 @@ def version_header(
     Args:
         name: Rule name
         template: The version.h.in template file
-        version_file: The VERSION file containing MAJOR, MINOR, BUILD, PATCH, PRERELEASE
+        version_file: The VERSION file containing MAJOR, MINOR, BUILD and
+            PATCH and, for a prerelease, PRERELEASE
         out: Output filename (version.h)
         company_fullname: Company full name string
         company_shortname: Company short name string
@@ -43,6 +44,10 @@ def version_header(
     cmd = """
         # Read version values from VERSION file
         . $(location {version_file})
+
+        # A final release's VERSION has no PRERELEASE line, and genrules run
+        # under `set -u`, so default it to empty before the first use.
+        PRERELEASE="$${{PRERELEASE:-}}"
 
         # Compute PRERELEASE_SUFFIX: "-beta.1" when set, "" when empty
         if [ -n "$$PRERELEASE" ]; then
