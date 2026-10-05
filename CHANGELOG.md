@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no `PRERELEASE=` line, and the genrule that writes `version.h` stopped with
   `PRERELEASE: unbound variable`, so building the module failed on the
   `v2.1.0` tag and on master.
+- **HTTPS fetches work with a certificate directory alone.** With
+  `ModPagespeedSslCertDirectory` set and no `ModPagespeedSslCertFile`, as in
+  the configuration the Debian and Ubuntu packages install, the fetcher
+  passed an empty CA file name to libcurl, and every HTTPS fetch failed with
+  curl error 77 (`CURLE_SSL_CACERT_BADFILE`). The fetcher now uses the
+  directory on its own.
 
 ## [2.1.0] - 2026-09-17
 

@@ -602,6 +602,28 @@ TEST_F(CurlUrlAsyncFetcherTest, TestHttpsFailsForBogusCertDir) {
   curl_fetcher_->SetSslCertificatesFile("");
   TestHttpsFails(StrCat("https://", https_host_, "/image/png"));
   ValidateMonitoringStats(0, 1);
+  // Error 60 counts as a certificate error, 77 (a bad CA file) does not.
+  EXPECT_EQ(1,
+            statistics_->GetVariable(CurlStats::kCurlFetchCertErrors)->Get());
+}
+
+TEST_F(CurlUrlAsyncFetcherTest, TestHttpsSucceedsWithCertDirOnly) {
+  curl_fetcher_->SetHttpsOptions("enable");
+  // A CA directory and no CA file, as with SslCertDirectory alone. The
+  // directory names each CA by its subject hash: acfeca04 is
+  // `openssl x509 -subject_hash` of kTestCaCertPem, which depends only on
+  // the CA's subject.
+  GoogleString cert_dir = StrCat(GTestTempDir(), "/curl_test_ca_dir");
+  StdioFileSystem file_system;
+  NullMessageHandler handler;
+  ASSERT_TRUE(file_system.RecursivelyMakeDir(cert_dir, &handler));
+  ASSERT_TRUE(file_system.WriteFile(StrCat(cert_dir, "/acfeca04.0").c_str(),
+                                    kTestCaCertPem, &handler));
+  curl_fetcher_->SetSslCertificatesDir(cert_dir);
+  curl_fetcher_->SetSslCertificatesFile("");
+  TestHttpsSucceeds(StrCat("https://", https_host_, "/html"),
+                    "<!DOCTYPE html>");
+  ValidateMonitoringStats(1, 0);
 }
 
 // ---- Connection refused tests (matching Serf) ----
