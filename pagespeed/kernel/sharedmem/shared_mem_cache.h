@@ -181,8 +181,9 @@ class SharedMemCache : public CacheInterface {
   void ExtractPosition(const GoogleString& raw_hash, Position* out_pos);
 
   // Makes sure we have exclusive write access to the entry, with no concurrent
-  // readers. Must be called with sector lock held.
-  void EnsureReadyForWriting(SharedMemCacheData::Sector<kBlockSize>* sector,
+  // readers. Must be called with sector lock held. Returns false if it gave up
+  // waiting for the readers; the caller must then leave the entry alone.
+  bool EnsureReadyForWriting(SharedMemCacheData::Sector<kBlockSize>* sector,
                              SharedMemCacheData::CacheEntry* entry)
       EXCLUSIVE_LOCKS_REQUIRED(sector->mutex());
 

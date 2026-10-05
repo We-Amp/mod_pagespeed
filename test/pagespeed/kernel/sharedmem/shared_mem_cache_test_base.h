@@ -61,6 +61,7 @@ class SharedMemCacheTestBase : public CacheTestBase {
   void TestEvict();
   void TestAbandonedSectorLocks();
   void TestAbandonedLockWhileWriterWaits();
+  void TestAbandonedReader();
 
   void ResetCache();
 
@@ -165,10 +166,15 @@ TYPED_TEST_P(SharedMemCacheTestTemplate, TestAbandonedLockWhileWriterWaits) {
   SharedMemCacheTestBase::TestAbandonedLockWhileWriterWaits();
 }
 
+TYPED_TEST_P(SharedMemCacheTestTemplate, TestAbandonedReader) {
+  SharedMemCacheTestBase::TestAbandonedReader();
+}
+
 REGISTER_TYPED_TEST_SUITE_P(SharedMemCacheTestTemplate, TestBasic, TestReinsert,
                             TestReplacement, TestReaderWriter, TestConflict,
                             TestEvict, TestAbandonedSectorLocks,
-                            TestAbandonedLockWhileWriterWaits);
+                            TestAbandonedLockWhileWriterWaits,
+                            TestAbandonedReader);
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(SharedMemCacheTestTemplate);
 
 }  // namespace net_instaweb

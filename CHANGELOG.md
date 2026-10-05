@@ -47,6 +47,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the time of the upgrade needs a full stop and start: a graceful restart
   gives the new child processes robust mutexes, but the old, stuck ones keep
   waiting on the old mutexes.
+- **A process that dies while reading from the shared-memory cache no longer
+  hangs the next writer.** A process or thread that terminated while it
+  copied a value out of the cache left that entry marked as being read for
+  good, and the next write or delete of the same key waited for it forever:
+  the request hung, and an Apache child stuck this way did not exit on a
+  graceful restart. A writer now gives up after one second, logs a warning
+  and drops the write. The entry stays unusable until the server is
+  restarted.
 
 ## [2.1.0] - 2026-09-17
 

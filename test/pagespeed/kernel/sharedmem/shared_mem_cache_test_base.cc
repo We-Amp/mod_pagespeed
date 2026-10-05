@@ -347,6 +347,31 @@ void SharedMemCacheTestBase::TestAbandonedLockWhileWriterWaits() {
   CheckNotFound("200");
 }
 
+void SharedMemCacheTestBase::TestAbandonedReader() {
+  CheckPut("200", "OK");
+
+  // A reader that terminated while copying a value out leaves the entry's
+  // open count raised for good. Leave every entry in that state.
+  std::unique_ptr<AbstractSharedMemSegment> segment;
+  SectorVector sectors;
+  ASSERT_TRUE(AttachSectors(&segment, &sectors));
+  for (const auto& sector : sectors) {
+    ScopedMutex lock(sector->mutex());
+    for (int e = 0; e < kSectorEntries; ++e) {
+      sector->EntryAt(e)->increment_open_count();
+    }
+  }
+
+  // A write of "200" waits for that reader only for a while, then gives up
+  // on the entry. From then on the entry is skipped without waiting.
+  CheckPut("200", "NEW");
+  CheckNotFound("200");
+  CheckPut("200", "NEWER");
+  CheckNotFound("200");
+  CheckDelete("200");
+  EXPECT_EQ(1, handler_.MessagesOfType(kWarning));
+}
+
 void SharedMemCacheTestBase::AbandonSectorLocksAndWait() {
   EXPECT_TRUE(CreateChild(&SharedMemCacheTestBase::AbandonSectorLocksChild));
   test_env_->WaitForChildren();
