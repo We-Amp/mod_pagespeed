@@ -128,7 +128,10 @@ bool CurlFetch::InitCurl(CurlUrlAsyncFetcher* fetcher) {
       curl_easy_setopt(curl_handle_, CURLOPT_CAINFO,
                        fetcher->ssl_certificates_file().c_str());
     } else if (!fetcher->ssl_certificates_dir().empty()) {
-      curl_easy_setopt(curl_handle_, CURLOPT_CAINFO, "");
+      // Directory only: NULL turns off libcurl's built-in CA file. An empty
+      // string would be taken as a file name, and every fetch would fail
+      // with CURLE_SSL_CACERT_BADFILE.
+      curl_easy_setopt(curl_handle_, CURLOPT_CAINFO, nullptr);
     }
   }
 
