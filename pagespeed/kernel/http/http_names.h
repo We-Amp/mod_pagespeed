@@ -243,6 +243,10 @@ enum Code {
   // Corresponds to kFetchStatusDropped.
   kRememberDroppedStatusCode = 10006,
 
+  // For remembering that a fetch did not complete (timeout, connection
+  // failure) or was answered 5xx. Corresponds to kFetchStatusTransientError.
+  kRememberTransientFailureStatusCode = 10007,
+
   // End point of failure caching range, in the usual [a, b) meaning.
   kRememberFailureRangeEnd,
 

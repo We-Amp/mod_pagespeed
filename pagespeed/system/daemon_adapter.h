@@ -20,8 +20,13 @@
 #ifndef PAGESPEED_SYSTEM_DAEMON_ADAPTER_H_
 #define PAGESPEED_SYSTEM_DAEMON_ADAPTER_H_
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
+
+#ifndef _WIN32
+#include <sys/types.h>  // uid_t
+#endif
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -209,7 +214,11 @@ class DaemonAdapter {
   // permission to let N drift from the daemon's: a generation mismatch and a
   // format mismatch are different failures and only one of them is caught
   // twice.
-  static constexpr uint32_t kCacheDirGeneration = 1;
+  //
+  // N = 2: the cache format major went 7 -> 8 (CRC-32C) after generation 1
+  // shipped, so the daemon moved to /var/cache/pagespeed-optimizer/v2 and
+  // publishes cache_dir_generation=2.  This moves with it, in lockstep.
+  static constexpr uint32_t kCacheDirGeneration = 2;
 
   // What stands between this process and the directory the daemon's volume
   // lives in.  After the privilege drop the volume, socket and shared config
@@ -221,9 +230,9 @@ class DaemonAdapter {
 
   // Whether the directory holding the daemon's volume for `volume_path` can
   // be looked inside: the path itself when it names a directory, its parent
-  // otherwise.  kDenied means permission denied (EACCES/EPERM), kAbsent any
-  // other failure.  On Windows there is no distinction and this always
-  // reports kAbsent.
+  // otherwise.  kDenied means permission denied (EACCES/EPERM on POSIX, a
+  // listing refused with access denied on Windows), kAbsent any other
+  // failure.
   static DirAccess VolumeDirAccess(StringPiece volume_path);
 
   // `socket_path` and `volume_path` come straight from configuration; either
@@ -249,6 +258,14 @@ class DaemonAdapter {
 
   DaemonHealth health() const { return health_; }
 
+  // Logs the start-up refusal once more, as a warning, through the same
+  // handler; nothing when the start-up check left the arm ready or found no
+  // daemon configured.  For a serving child process, once its message
+  // history is attached: the web server runs StartupCheck() in its parent,
+  // before that buffer exists, so the first line never reaches the admin
+  // console.  At most once per distinct text per process.
+  void ReannounceStartupRefusal();
+
   // The bound client library, or nullptr when there is none.  Borrowed.
   const DaemonAbi* abi() const { return abi_.get(); }
 
@@ -258,12 +275,14 @@ class DaemonAdapter {
   // OPENED HERE, NOT AT STARTUP, and the difference is the fork.  The startup
   // check runs in the server's parent process and closes the volume again
   // precisely so that no child inherits a handle it never asked for.  A
-  // request-serving process opens its own, once, and keeps it: the handle is
-  // per-process state, and there is no correct way to have made it before the
-  // process existed.
+  // request-serving process opens its own and keeps it -- until the daemon
+  // replaces its volume, when it opens the new one (see "a volume the daemon
+  // replaced" below): the handle is per-process state, and there is no
+  // correct way to have made it before the process existed.
   //
   // Thread-safe; at most one open is in flight per adapter however many
-  // threads race for it, and a successful handle is opened exactly once.
+  // threads race for it, and a successful handle is opened exactly once
+  // per volume the daemon has published.
   //
   // RETRIES ON A BOUNDED BACKOFF rather than latching on the first failure --
   // see kRecordCacheMaxAttempts.  Returns nullptr while the arm is between
@@ -271,6 +290,186 @@ class DaemonAdapter {
   // two outcomes it always did; nothing blocks and nothing sleeps on a
   // request thread.
   void* RecordCache();
+
+  // Closes this process's volume handle if one is open, and clears it.  For
+  // a port that tears workers down and wants the close -- and the storage
+  // layer's background-thread joins that come with it -- to happen inside
+  // the worker's own shutdown sequence rather than at adapter destruction.
+  //
+  // IDEMPOTENT: a second call is a no-op, and it is safe when no handle was
+  // ever opened.  FINAL: afterwards RecordCache() returns nullptr and never
+  // reopens.  Finality has its own flag rather than reusing the retry
+  // schedule's "gave up" latch: giving up is an operator-visible failure, a
+  // clean close is not, and nothing that later reports the one may mistake
+  // it for the other.  The attempt counter and next-attempt time are left
+  // alone because they cannot fire once the handle is closed.  THREAD-SAFE the same
+  // way RecordCache() is: it takes record_cache_mutex_, the lock RecordCache
+  // holds across the whole open, so a concurrent RecordCache() and
+  // CloseRecordCache() cannot race on the handle -- one of them completes
+  // first, and the loser either reopens nothing or has its fresh handle
+  // closed.
+  //
+  // ~DaemonAdapter keeps closing a handle that is still open (ports that
+  // never call this rely on the destructor), and never closes a second time
+  // after this method has run.
+  void CloseRecordCache();
+
+  // The volume handle this process already holds, or nullptr when there is
+  // none.  For ports whose caller must not wait: on nginx the caller is the
+  // event-loop thread, and nothing on it may block.
+  //
+  // NEVER OPENS THE VOLUME: performs no volume open and consumes nothing from
+  // the retry schedule -- the attempt counter, the next-attempt time and the gave-up
+  // latch are untouched, and nothing is logged, so a following RecordCache()
+  // behaves exactly as if the accessor had not been called.  NEVER WAITS: it
+  // reads the handle off an atomic that RecordCache() publishes under its
+  // mutex after a successful open, so it returns promptly even while another
+  // thread sits inside a slow open with record_cache_mutex_ held.  After
+  // CloseRecordCache() it returns nullptr, and so it does from the moment a
+  // replaced volume is noticed until RecordCache() has opened the new one.
+  // To notice, it reads the daemon's generation file -- one small file beside
+  // the volume -- at most once per kVolumeGenerationCheckIntervalMs across
+  // all callers; on a port whose caller is an event loop that read runs on
+  // the loop, so a cache directory on a file system that hangs would stall
+  // it for that read.  Callers that need the open to
+  // happen call RecordCache() instead; this accessor only reports what
+  // already is.
+  //
+  // Unlike RecordCache() it does not consult health(): it reports what was
+  // published, and a caller that must honour the health verdict checks it
+  // first, as both recorder factories do.
+  //
+  // The handle is BORROWED, and this accessor is a report, not a lease:
+  // nothing here keeps it open.  CloseRecordCache() and ~DaemonAdapter
+  // invalidate it, and a holder that outlives either -- a recorder keeps the
+  // handle until DoneAndSetHeaders -- uses a closed handle.  A port that
+  // closes at worker exit must have finished or joined every holder before
+  // it closes.
+  void* RecordCacheIfOpen() const;
+
+  // ---- a volume the daemon replaced ---------------------------------------
+  //
+  // A full cache purge makes the daemon delete its volume file and create a
+  // new one.  A process that keeps the handle it opened before keeps the
+  // DELETED file: it records originals nobody reads, never sees what the
+  // daemon writes into the new file, and can go on serving copies the purge
+  // was meant to drop.  The daemon publishes every replacement by rewriting
+  // "<volume path>.gen" with a new number, and this adapter reads that file
+  // at most once per kVolumeGenerationCheckIntervalMs per process.
+  //
+  // THE RULE IS TO FAIL CLOSED.  Whenever it is not certain that a handle is
+  // on the daemon's current volume, no handle is handed out and requests are
+  // answered by the origin, which is always safe.
+  //
+  // A HANDLE IS HELD AGAINST A NUMBER.  The number is read just before the
+  // open and again just after it; the handle is handed out only when both
+  // reads answered and agree.  While the number cannot be read nothing is
+  // opened, and a handle whose number moved during its open was never
+  // handed out, so it is closed at once and the open is tried again.
+  //
+  // WHEN THE NUMBER MOVED, in this order:
+  //   1. RecordCacheIfOpen() returns nullptr from that moment;
+  //   2. the next RecordCache() decides again under its lock.  A number that
+  //      was read and differs is a replacement; a number that was read and
+  //      is the handle's own puts the handle back in use; a read that gave
+  //      no answer changes nothing -- the handle stays out of use and the
+  //      question is asked again one interval later;
+  //   3. on a replacement the old handle is set aside and the volume is
+  //      opened again on the ordinary retry schedule.  Set-aside handles are
+  //      closed only by CloseRecordCache() and the destructor: a recorder
+  //      borrows the handle until its response is complete, so closing one
+  //      earlier could pull a mapping out from under a request.  A failed
+  //      reopen stays closed; it never falls back to the old handle.
+  //
+  // WHEN THE NUMBER CANNOT BE READ and nothing has been detected -- the file
+  // is there but could not be opened, or does not hold a complete number --
+  // nothing is decided: the handle in use stays in use and the next look
+  // asks again.  Only a number that was read and differs from the handle's
+  // own is a replacement.
+  //
+  // EVERY OPEN LOOKS BEFORE AND AFTER, AND THIS MODULE DELETES NOTHING.  The
+  // daemon's library has one open call, and it creates the volume file it
+  // does not find.  A volume file this module's open created is one the
+  // daemon never reads, so every open in a serving process -- a process's
+  // first as much as a reopen -- asks the daemon for the size it publishes
+  // NOW (not the one this server read when it started) and looks at the
+  // disk first.  Only volume files of the CURRENT cache format count: the
+  // daemon's purge removes its own format's files and deliberately keeps one
+  // written in an earlier format, which is therefore never a candidate and
+  // never in the way.  No published size, or no current-format file:
+  // nothing is opened, and the retry schedule asks again.  A reopen also
+  // needs that file to be the only one of its format -- a purge leaves
+  // exactly one, so a second one was created by some process by mistake and
+  // nothing here can tell the two apart; a first open tolerates several, as
+  // the start-up check does after a resize.
+  //
+  // After the open it looks once more.  If a volume file has appeared or
+  // gone, or a file is no longer the same file, the open may itself have
+  // created a volume file: the handle is closed without ever having been
+  // handed out, every file is LEFT WHERE IT IS, in-place optimization is off
+  // in this process until it ends, and one error line names the files.  A
+  // file left that way then keeps the other processes of the server from
+  // reopening too (they find two), which is the intent: an operator has to
+  // look.  So this module CAN create a volume file in that one way; what it
+  // guarantees is that it notices, does not use it, says so, and removes
+  // nothing.
+  //
+  // When the configured path is a directory the volume file cannot be told
+  // from the other files in it.  No supported configuration has that shape.
+  // There a first open is made unchecked, as it always was, and there is no
+  // reopen: the process stops using the cache at the first replacement,
+  // with one error line.
+  //
+  // A SECOND PURGE WHILE A PROCESS IS REOPENING AFTER THE FIRST.  Four
+  // outcomes, by where this process's open falls; each window is a few
+  // milliseconds wide, and each ends safe and logged:
+  //   1. the open and the look after it come before the daemon deletes the
+  //      file: the handle is handed out, and the next check sees the newer
+  //      number and sets it aside like any replaced volume (one info line);
+  //   2. the look after the open finds no file, or another file under the
+  //      name: the handle is not used and the process stops using the cache
+  //      (one error line);
+  //   3. the look before the open already saw the second purge's file but
+  //      the first purge's number: the handle is handed out on the CURRENT
+  //      file, and the next check sets it aside and opens the same file
+  //      again.  Harmless, but it spends one of the kMaxVolumeReplacements
+  //      and leaves a second mapping of the live file until the process
+  //      ends (one info line);
+  //   4. the open falls between the daemon's delete and its create: the
+  //      look before it saw the old file, the open creates the file, the
+  //      look after it sees another file under the name -- outcome 2 for
+  //      this process.  The daemon then attaches to the file this process
+  //      made, so the cache works for everyone else; the file is owned by
+  //      the web server's user.
+  // A daemon that replaced its volume without publishing a new number is
+  // not noticed at all.
+  //
+  // THE BOUND, and what it costs.  Each set-aside handle keeps one deleted
+  // volume file open and mapped, so its disk space and this process's
+  // address space for it are held until the process ends.  The bound is per
+  // adapter, and a server has one adapter per virtual host that uses the
+  // daemon: each of them follows the daemon through kMaxVolumeReplacements
+  // replacements; the next one sets the handle aside like the others and
+  // then stops: nothing is handed out any more, in-place optimization is
+  // off for that virtual host in this process until it ends, and one error
+  // line says so.  At that point it holds kMaxVolumeReplacements + 1
+  // replaced volumes.  Disk: up to five times the configured cache size on
+  // the host, whatever the number of processes and virtual hosts (they all
+  // hold the same deleted files).  Address space: up to five times the
+  // cache size per virtual host, in each worker process.
+  static constexpr int64_t kVolumeGenerationCheckIntervalMs = 1000;
+  static constexpr int kMaxVolumeReplacements = 4;
+
+  // Reads the generation the daemon has published for the volume at
+  // `volume_path`: the decimal number in "<volume_path>.gen".  Returns true
+  // when the answer is KNOWN, with it in *generation: the number in the
+  // file, or 0 when the file does not exist (a daemon that has never
+  // replaced its volume has not written one).  Returns false, with
+  // *generation 0, when the answer is UNKNOWN: the file exists but could not
+  // be opened or read, or does not hold a number followed by a newline (a
+  // carriage return before the newline is accepted).
+  static bool ReadVolumeGeneration(StringPiece volume_path,
+                                   uint64_t* generation);
 
   bool configured() const {
     return !socket_path_.empty() && !volume_path_.empty();
@@ -309,6 +508,23 @@ class DaemonAdapter {
   // process-wide by design, and a test binary is one process.
   static void ResetAnnouncementsForTesting();
 
+#ifndef _WIN32
+  // Replaces the user id the refused-start owner guard compares against
+  // (nullptr restores the kernel's answer).  Tests only: an ordinary-user
+  // run cannot chown a file to another user, so this is the one way a
+  // non-root test can stage a file it owns as another user's.
+  using EffectiveUidFn = uid_t (*)();
+  static void SetEffectiveUidForTesting(EffectiveUidFn uid_fn);
+#endif
+
+  // Forget every latched probe verdict, and restore the latch interval to
+  // its default.  Tests only: the latch is process-wide by design, and a
+  // test binary is one process.
+  static void ResetSocketVerdictsForTesting();
+
+  // Overrides the probe verdict latch interval.  Tests only.
+  static void SetSocketVerdictLatchMsForTesting(int64_t latch_ms);
+
  private:
   static bool SocketAnswers(StringPiece path, GoogleString* error);
 
@@ -321,6 +537,16 @@ class DaemonAdapter {
   // backoff doubled each time and then capped.
   static int64_t BackoffMsAfter(int attempts);
 
+  // Whether the daemon has replaced its volume since this process opened
+  // the handle it holds.  Reads the generation file at most once per
+  // kVolumeGenerationCheckIntervalMs across all threads; in between it
+  // answers from the last read.  Takes no lock and never opens the VOLUME,
+  // so the accessor that must not wait can call it -- but the read itself
+  // is one open, one small read and one close of a file beside the volume,
+  // on the calling thread.  Once it has answered yes it keeps answering
+  // yes until RecordCache() has decided under its lock.
+  bool VolumeWasReplaced() const;
+
   GoogleString socket_path_;
   GoogleString volume_path_;
   GoogleString library_path_;
@@ -328,13 +554,21 @@ class DaemonAdapter {
   AbiLoader abi_loader_;
   std::unique_ptr<DaemonAbi> abi_;
   DaemonHealth health_ = DaemonHealth::kNotConfigured;
-  // The size the daemon published, kept from the startup check so the
-  // per-process open uses the same one rather than asking again -- a second
-  // read could see a different answer and open a different file.
+  // The size the daemon published when the start-up check ran.  A serving
+  // process's open asks the daemon again and looks at the disk before and
+  // after (see "a volume the daemon replaced"); this one is used only where
+  // that look is not possible, a configured path that is a directory.
   uint64_t inherited_volume_size_ = 0;
   MonotonicClock monotonic_clock_;
   std::mutex record_cache_mutex_;
   void* record_cache_ = nullptr;
+  // What RecordCacheIfOpen() reads: the handle, published under
+  // record_cache_mutex_ after a successful open and cleared by
+  // CloseRecordCache() and the destructor, so the accessor never has to take
+  // the mutex to learn whether there is one.  The destructor's clear is
+  // unsynchronized: destruction already requires every user to have
+  // quiesced.
+  std::atomic<void*> record_cache_published_{nullptr};
   // The retry schedule's state, all of it guarded by record_cache_mutex_.
   // Per-adapter and therefore per-process, which is the right scope: the
   // handle being opened is per-process state (see RecordCache), so a
@@ -343,6 +577,34 @@ class DaemonAdapter {
   int record_cache_attempts_ = 0;
   int64_t record_cache_next_attempt_ms_ = 0;
   bool record_cache_gave_up_ = false;
+  // Set by CloseRecordCache(), guarded by the same mutex.  Final: a closed
+  // adapter never reopens.  Deliberately not the gave-up latch above.
+  bool record_cache_closed_ = false;
+  // The daemon's volume generation record_cache_ is held against: the number
+  // read just before the open that produced it and read again, unchanged,
+  // just after.  A handle is never published without one.
+  mutable std::atomic<uint64_t> record_cache_generation_{0};
+  // The next moment a read of the generation file is due.  Claimed by
+  // compare-and-swap, so one thread reads per interval.
+  mutable std::atomic<int64_t> generation_next_check_ms_{0};
+  // Set by a read that found another generation.  While set,
+  // RecordCacheIfOpen() hands out nothing.  Cleared only by RecordCache(),
+  // under its lock, and only on a KNOWN answer: the handle was set aside,
+  // or the number read is the handle's own after all.
+  mutable std::atomic<bool> record_cache_replaced_{false};
+  // When RecordCache() may next ask again after its own read of the
+  // generation gave no answer.  Guarded by record_cache_mutex_, like the
+  // three members below.
+  int64_t replaced_recheck_ms_ = 0;
+  // Handles to volumes the daemon has since replaced.  Kept open until
+  // CloseRecordCache() or destruction, because a recorder may still hold
+  // one.  Never more than kMaxVolumeReplacements + 1.
+  std::vector<void*> retired_record_caches_;
+  // How many replacements this process has seen.
+  int volume_replacements_ = 0;
+  // Set once a replacement has been seen: every open from then on is a
+  // REOPEN, which needs the current-format volume file to be the only one.
+  bool record_cache_reopening_ = false;
   // Set when the volume directory holds left-over files from an earlier cache
   // size.  Reported on the healthy path, where nothing else would mention it.
   GoogleString extra_volume_warning_;
@@ -350,6 +612,11 @@ class DaemonAdapter {
   // the legacy layout.  Reported once on the healthy path, where the
   // tolerance would otherwise be invisible.
   bool legacy_generation_layout_ = false;
+
+  // The text StartupCheck() logged when its verdict left in-place
+  // optimization off; empty otherwise (including the healthy-path notes).
+  // Repeated by ReannounceStartupRefusal().
+  GoogleString startup_refusal_;
 };
 
 }  // namespace net_instaweb

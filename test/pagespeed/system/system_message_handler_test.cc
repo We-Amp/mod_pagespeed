@@ -20,14 +20,21 @@
 //
 // Unit tests for SystemMessageHandler
 
-#include <memory>
-
 #include "pagespeed/system/system_message_handler.h"
 
+#include <memory>
+
+#include "net/instaweb/http/public/async_fetch.h"
 #include "pagespeed/kernel/base/string.h"
+#include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/string_writer.h"
 #include "pagespeed/kernel/base/thread_system.h"
+#include "pagespeed/kernel/http/query_params.h"
+#include "pagespeed/kernel/sharedmem/inprocess_shared_mem.h"
+#include "pagespeed/kernel/sharedmem/shared_circular_buffer.h"
 #include "pagespeed/kernel/util/platform.h"
+#include "pagespeed/system/admin_site.h"
+#include "pagespeed/system/system_rewrite_options.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/base/mock_timer.h"
 
@@ -104,6 +111,48 @@ TEST_F(SystemMessageHandlerTest, AddsFileLineInfoWrapLongLines) {
       "[test_file.cc:4321] Test message with\n"
       "Inew line.\n",
       buffer_);
+}
+
+// The message-history endpoint over a real, wrapped SharedCircularBuffer:
+// a `since` older than the retained window returns everything retained, and
+// the partial line the wrap leaves at the start of the dump is never
+// returned as a message.
+TEST_F(SystemMessageHandlerTest, WrappedBufferSinceOlderThanRetained) {
+  InProcessSharedMem shm(thread_system_.get());
+  SharedCircularBuffer ring(&shm, 400, "/prefix", "wrap");
+  ASSERT_TRUE(ring.InitSegment(true, &system_message_handler_));
+  system_message_handler_.set_buffer(&ring);
+  for (int i = 0; i < 20; ++i) {
+    AddMessage(kInfo, StrCat("msg-", (i < 10 ? "0" : ""), IntegerToString(i),
+                             "-abcdefghij"));
+  }
+  SystemRewriteOptions::Initialize();
+  // Unused by the handler, but it takes a reference.
+  auto options = std::make_unique<SystemRewriteOptions>(thread_system_.get());
+  AdminSite site(&timer_, &system_message_handler_, nullptr);
+  auto history = [&](const QueryParams& params) {
+    GoogleString body;
+    StringAsyncFetch fetch(
+        RequestContext::NewTestRequestContext(thread_system_.get()), &body);
+    site.MessageHistoryHandler(*options, AdminSite::kPageSpeedAdmin, params,
+                               &fetch);
+    return body;
+  };
+  QueryParams since;
+  since.AddEscaped("since", "0");
+  GoogleString body = history(since);
+  EXPECT_EQ(history(QueryParams()), body);  // since=0 is "everything".
+  EXPECT_NE(GoogleString::npos, body.find("msg-19-abcdefghij"));
+  EXPECT_EQ(GoogleString::npos, body.find("msg-00-"));
+  // Every returned message is a whole line: each "message" entry starts with
+  // the line header and ends with the full message tail.
+  int entries = CountSubstring(body, "\"message\":\"");
+  EXPECT_GT(entries, 1);
+  EXPECT_EQ(entries, CountSubstring(body, "\"message\":\"["));
+  EXPECT_EQ(entries, CountSubstring(body, "-abcdefghij\"}"));
+  system_message_handler_.set_buffer(&writer_);
+  options.reset();
+  SystemRewriteOptions::Terminate();
 }
 
 }  // namespace net_instaweb

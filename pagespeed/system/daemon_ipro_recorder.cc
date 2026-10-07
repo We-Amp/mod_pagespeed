@@ -68,14 +68,16 @@ DaemonIproRecorder::DaemonIproRecorder(const DaemonAbi* abi, void* cache,
                                        StringPiece socket_path,
                                        const DaemonRecordRequest& request,
                                        const HttpOptions& http_options,
-                                       Timer* timer, MessageHandler* handler)
+                                       Timer* timer, MessageHandler* handler,
+                                       RewriteStats* stats)
     : abi_(abi),
       cache_(cache),
       socket_path_(socket_path.data(), socket_path.size()),
       request_(request),
       http_options_(http_options),
       timer_(timer),
-      handler_(handler) {
+      handler_(handler),
+      stats_(stats) {
   num_constructed_.BarrierIncrement(1);
 }
 
@@ -143,6 +145,12 @@ void DaemonIproRecorder::BuildInput(const ResponseHeaders& response_headers,
     input->content_encoding = content_encoding;
   }
   const char* etag = response_headers.Lookup1(HttpAttributes::kEtag);
+  if (etag == nullptr) {
+    // One port's header table names the entity tag "E-Tag"; look the
+    // origin validator up under both spellings so that port's entries
+    // keep theirs.  The alias goes when that port's table is corrected.
+    etag = response_headers.Lookup1("E-Tag");
+  }
   if (etag != nullptr) {
     input->etag = etag;
   }
@@ -295,6 +303,15 @@ void DaemonIproRecorder::DoneAndSetHeaders(ResponseHeaders* response_headers,
     const DaemonRecordDecision decision = EvaluateDaemonRecordGate(
         *abi_, input, timer_ == nullptr ? 0 : timer_->NowMs() / 1000);
     outcome.gate_ran = true;
+    // A recorded response is a daemon fall-through that came back from the
+    // origin, and this is the first moment its content class is known for
+    // sure -- the origin's own Content-Type, classified by the peer.  The
+    // per-class fall-through counters move here rather than at the serve
+    // seam, where a cold key leaves the class unread; a fall-through that
+    // is never recorded (a HEAD request, an abort, a recorder that could
+    // not be built, a response that breaks out above before the gate)
+    // stays only in the total.
+    RecordDaemonFallthroughClass(stats_, decision.params.content_type);
     outcome.verdict = decision.verdict;
     outcome.reason = decision.reason;
     outcome.notify_mask = decision.notify_mask;
@@ -332,23 +349,56 @@ void DaemonIproRecorder::DoneAndSetHeaders(ResponseHeaders* response_headers,
   delete this;
 }
 
+namespace {
+
+// The body the two factories share, so they cannot drift: the handle is the
+// only thing they obtain differently.  A recorder is built only against a
+// handle this process holds and a bound library.
+IproRecorder* MakeDaemonIproRecorderWithHandle(
+    DaemonAdapter* adapter, const DaemonRecordRequest& request,
+    const HttpOptions& http_options, Timer* timer, MessageHandler* handler,
+    RewriteStats* stats, void* cache) {
+  // Both callers have already checked `adapter` and its health.
+  if (cache == nullptr || adapter->abi() == nullptr) {
+    return nullptr;
+  }
+  return new DaemonIproRecorder(adapter->abi(), cache, adapter->socket_path(),
+                                request, http_options, timer, handler, stats);
+}
+
+}  // namespace
+
 IproRecorder* MakeDaemonIproRecorderIfReady(DaemonAdapter* adapter,
                                             const DaemonRecordRequest& request,
                                             const HttpOptions& http_options,
                                             Timer* timer,
-                                            MessageHandler* handler) {
+                                            MessageHandler* handler,
+                                            RewriteStats* stats) {
   if (adapter == nullptr || adapter->health() != DaemonHealth::kReady) {
     return nullptr;
   }
   // Asked for BEFORE the recorder exists, not after: a recorder built against
   // a volume this process cannot open would buffer a whole response body and
   // then throw it away, once per request.
-  void* cache = adapter->RecordCache();
-  if (cache == nullptr || adapter->abi() == nullptr) {
+  return MakeDaemonIproRecorderWithHandle(adapter, request, http_options, timer,
+                                          handler, stats,
+                                          adapter->RecordCache());
+}
+
+IproRecorder* MakeDaemonIproRecorderIfOpen(DaemonAdapter* adapter,
+                                           const DaemonRecordRequest& request,
+                                           const HttpOptions& http_options,
+                                           Timer* timer,
+                                           MessageHandler* handler,
+                                           RewriteStats* stats) {
+  if (adapter == nullptr || adapter->health() != DaemonHealth::kReady) {
     return nullptr;
   }
-  return new DaemonIproRecorder(adapter->abi(), cache, adapter->socket_path(),
-                                request, http_options, timer, handler);
+  // The same question, answered without the open: nullptr whenever this
+  // process has no handle yet, and nothing is waited on or logged for it.
+  return MakeDaemonIproRecorderWithHandle(adapter, request, http_options, timer,
+                                          handler, stats,
+                                          adapter->RecordCacheIfOpen());
 }
 
 }  // namespace net_instaweb

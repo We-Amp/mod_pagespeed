@@ -221,6 +221,9 @@ class SharedMemStatistics
   // TODO(sligocki): Rename to statistics_logger().
   StatisticsLogger* console_logger() override { return console_logger_.get(); }
 
+  // Ticks this statistics' own console logger, when logging is configured.
+  void UpdateConsoleLogIfRequired() override;
+
  protected:
   Var* NewVariable(StringPiece name) override;
   UpDown* NewUpDownCounter(StringPiece name) override;

@@ -4,6 +4,8 @@
 #ifndef GLOBAL_CONSTANTS_H
 #define GLOBAL_CONSTANTS_H
 
+#include <string.h>
+
 #include "net/instaweb/public/version.h"
 // WinSock2.h must come before http.h (which also includes it).
 // _WINSOCKAPI_ is defined globally to prevent Windows.h from pulling in
@@ -168,6 +170,30 @@ static const char *HTTP_HEADER_ID_STRINGS_RESPONSE[] =
     "Vary",
     "Www-Authenticate", 
 };
+
+// The response-header names whose unknown-header leg gets an internal
+// `__x_` bookmark beside the real name (see PopulateResponseHeaders): the
+// cache-related validators a classic in-place serve replays.  One named
+// table so the minting code and the tests iterate the same set.
+static const char *UNKNOWN_HEADER_BOOKMARK_NAMES[] =
+{
+	"expires",
+	"e-tag",
+	"content-md5",
+	"last-modified",
+	"accept_ranges",
+};
+
+inline bool IsUnknownHeaderBookmarkName(const char *name)
+{
+	for (size_t i = 0; i < sizeof(UNKNOWN_HEADER_BOOKMARK_NAMES) /
+	     sizeof(UNKNOWN_HEADER_BOOKMARK_NAMES[0]); ++i) {
+		if (_stricmp(name, UNKNOWN_HEADER_BOOKMARK_NAMES[i]) == 0) {
+			return true;
+		}
+	}
+	return false;
+}
 
 static const char *HTTP_HEADER_ID_STRINGS_RESPONSE_CACHE[] =
 {

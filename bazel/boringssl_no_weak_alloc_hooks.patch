@@ -1,0 +1,38 @@
+Do not leave the allocator-override hooks as weak external references.
+
+BoringSSL declares OPENSSL_memory_alloc, OPENSSL_memory_free and
+OPENSSL_memory_get_size as weak symbols on ELF so that an embedding
+program can replace its allocator by defining them. In a shared object
+that turns into three weak undefined entries in the dynamic symbol table.
+
+This copy is linked statically into web-server modules, which are loaded
+into a process they do not own. A module must not leave any cryptographic
+symbol for the host process to resolve: whatever else is loaded there
+could define these names and take over every allocation the module's
+crypto makes. Nothing in this tree defines the hooks, so they are null in
+every build today; this patch makes them null by construction, using the
+static form BoringSSL already has for platforms without weak symbols.
+
+Only the selection of that form changes. The hook call sites are untouched.
+
+The macro this disables has one more user: the declaration of sdallocx,
+compiled only when BORINGSSL_DETECT_SDALLOCX is defined. Nothing here
+defines it, so nothing else changes today; a build that did define it
+would get a null sdallocx (plain free) instead of a weak reference.
+
+--- a/crypto/mem.cc
++++ b/crypto/mem.cc
+@@ -58,7 +58,12 @@
+ // EDK2 targets UEFI but builds as ELF and then translates the binary to
+ // COFF(!). Thus it builds with __ELF__ defined but cannot actually cope with
+ // weak symbols.
+-#if !defined(__EDK2_BORINGSSL__) && defined(__ELF__) && defined(__GNUC__)
++//
++// mod_pagespeed: always take the static-null form below. This copy is linked
++// into server modules that are loaded into another program's process; a weak
++// reference would leave these names in the module's dynamic symbol table for
++// that process to satisfy.
++#if 0
+ #define WEAK_SYMBOL_FUNC(rettype, name, args) \
+   extern "C" {                                \
+   rettype name args __attribute__((weak));    \

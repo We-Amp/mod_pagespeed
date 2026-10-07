@@ -321,9 +321,14 @@ inline constexpr uint32_t kPsImageFormatWebp = 1;
 inline constexpr uint32_t kPsImageFormatAvif = 2;
 inline constexpr uint32_t kPsImageFormatSvg = 3;
 
-// Transfer-encoding values in that field.  Only "identity" is named, because
-// it is the only value this module will serve: see ServeFormatIsAdvertised.
+// Transfer-encoding values in that field, as the peer numbers them.
+// Identity is what this module serves unless told otherwise; gzip and
+// brotli are served only as the optimizer's STORED copies, by a reader whose
+// switch is on, to a client that listed the coding (see ServeSelectionMask).
+// The fourth value is reserved: it names no coding and is never served.
 inline constexpr uint32_t kPsTransferEncodingIdentity = 0;
+inline constexpr uint32_t kPsTransferEncodingGzip = 1;
+inline constexpr uint32_t kPsTransferEncodingBrotli = 2;
 
 // The viewport field of a capability mask: bits 2-3.  Real viewports are
 // 0 (mobile), 1 (tablet) and 2 (desktop); the value 3 is NOT a viewport and
@@ -566,8 +571,13 @@ inline constexpr size_t kPsCacheControlBufferBytes = 256;
 // context exists to prevent.
 //
 // So: if a compiler ever lays these out differently, that is a build failure
-// here rather than a class of cache entry that is quietly wrong.
-#if defined(__LP64__) || defined(_LP64)
+// here rather than a class of cache entry that is quietly wrong.  The guard
+// names BOTH 64-bit data models: on LLP64 (Win64) the layouts coincide with
+// LP64 because no field's type is model-dependent -- these structs use only
+// fixed-width integers, int, size_t and pointers, never a long, a time_t or
+// an enum -- so the same numbers must hold there, and a model-dependent type
+// entering one of these structs on Win64 would fail exactly here.
+#if defined(__LP64__) || defined(_LP64) || defined(_WIN64)
 static_assert(sizeof(PsWriteParams) == 80,
               "the cache-write parameter layout no longer matches the "
               "published one; a mismatched size is silently truncated by the "
@@ -701,6 +711,13 @@ class DaemonAbi {
   // the buffer cleared and nothing written back into it -- gives "".  A
   // caller that checked only for nullptr would print a bare "()".
   virtual const char* LastErrorMessage() const = 0;
+
+  // Whether the library EXPORTS the reporter at all.  That is a different
+  // question from LastErrorMessage(): a library can export the entry point
+  // and have no pending error to report (nullptr either way then), so a
+  // call cannot tell "not exported" from "nothing to say".  Defaults false
+  // for implementations that have no symbol table to ask.
+  virtual bool PublishesLastErrorMessage() const { return false; }
 
   // ---------------------------------------------------------------------
   // The record arm.
@@ -889,6 +906,21 @@ class DaemonAbi {
                                    uint64_t original_bytes,
                                    uint64_t optimized_bytes,
                                    uint32_t mask) const = 0;
+
+  // ONE serve HIT as above, attributed to the host the response was served
+  // for (`host`: the request's host; the peer ignores a port and case).
+  // Published at 1.11, after every floor this module has had, so an older
+  // daemon lacks it: this then records nothing and returns false, and the
+  // caller records the hit with ServeStatsRecordHit instead.  The default
+  // implementation is that older daemon.
+  virtual bool ServeStatsRecordHitForHost(void* /*handle*/,
+                                          int /*content_type*/,
+                                          uint64_t /*original_bytes*/,
+                                          uint64_t /*optimized_bytes*/,
+                                          uint32_t /*mask*/,
+                                          StringPiece /*host*/) const {
+    return false;
+  }
   virtual void ServeStatsClose(void* handle) const = 0;
 
  protected:

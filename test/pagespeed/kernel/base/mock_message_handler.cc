@@ -41,9 +41,23 @@ void MockMessageHandler::MessageSImpl(MessageType type,
   if (ShouldPrintMessage(message)) {
     internal_handler_.MessageSImpl(type, message);
     GoogleString type_str = MessageTypeToString(type);
-    StrAppend(&buffer_, type_str.substr(0, 1), "[Wed Jan 01 00:00:00 2014] ");
+    StringPiece type_char(type_str.data(), 1);
+    // A message may itself contain embedded "\n"s (SystemMessageHandler's
+    // real AddMessageToBuffer joins a multi-line message into one Write());
+    // prefix every line with the type char, same as the real handler, so
+    // every buffered line -- not just the first -- starts with one, which
+    // is what ReformatMessage()/GetMessageType() assume of each split line.
+    StringPieceVector lines;
+    SplitStringPieceToVector(message, "\n", &lines, false);
+    StrAppend(&buffer_, type_char, "[Wed Jan 01 00:00:00 2014] ");
     StrAppend(&buffer_, "[", type_str, "] [00000] ");
-    StrAppend(&buffer_, message, "\n");
+    StrAppend(&buffer_, lines.empty() ? StringPiece() : lines[0], "\n");
+    int64 newline_count = 1;
+    for (int i = 1, n = lines.size(); i < n; ++i) {
+      StrAppend(&buffer_, type_char, lines[i], "\n");
+      ++newline_count;
+    }
+    lines_written_ += newline_count;
   } else {
     ++skipped_message_counts_[type];
   }
@@ -57,10 +71,19 @@ void MockMessageHandler::FileMessageSImpl(MessageType type,
   if (ShouldPrintMessage(message)) {
     internal_handler_.FileMessageSImpl(type, filename, line, message);
     GoogleString type_str = MessageTypeToString(type);
-    StrAppend(&buffer_, type_str.substr(0, 1), "[Wed Jan 01 00:00:00 2014] ");
+    StringPiece type_char(type_str.data(), 1);
+    StringPieceVector lines;
+    SplitStringPieceToVector(message, "\n", &lines, false);
+    StrAppend(&buffer_, type_char, "[Wed Jan 01 00:00:00 2014] ");
     StrAppend(&buffer_, "[", type_str, "] [00000] ");
     StrAppend(&buffer_, "[", filename, ":", IntegerToString(line), "] ");
-    StrAppend(&buffer_, message, "\n");
+    StrAppend(&buffer_, lines.empty() ? StringPiece() : lines[0], "\n");
+    int64 newline_count = 1;
+    for (int i = 1, n = lines.size(); i < n; ++i) {
+      StrAppend(&buffer_, type_char, lines[i], "\n");
+      ++newline_count;
+    }
+    lines_written_ += newline_count;
   } else {
     ++skipped_message_counts_[type];
   }
@@ -131,6 +154,14 @@ bool MockMessageHandler::Dump(Writer* writer) {
     return false;
   }
   return (writer->Write(buffer_, &internal_handler_));
+}
+
+bool MockMessageHandler::DumpWithCount(Writer* writer, int64* lines_written) {
+  {
+    ScopedMutex hold_mutex(mutex_.get());
+    *lines_written = lines_written_;
+  }
+  return Dump(writer);
 }
 
 }  // namespace net_instaweb

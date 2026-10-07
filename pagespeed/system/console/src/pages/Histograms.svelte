@@ -4,134 +4,38 @@
 -->
 
 <script lang="ts">
-  import { AdminApiClient } from "$lib/api/client";
   import { usePolling } from "$lib/api/polling.svelte";
+  import LoadError from "$lib/LoadError.svelte";
+  import PageHeader from "$lib/PageHeader.svelte";
   import RefreshNotice from "$lib/RefreshNotice.svelte";
+  import { bucketWidths, bucketShares, unitForHistogram } from "$lib/utils/histograms";
+  import { formatCount, formatPercent, formatSig } from "$lib/utils/format";
+  import type { HistogramJson } from "$lib/api/types";
+  import { useConsole } from "$lib/api/context";
 
-  const { basePath = "" }: { basePath?: string; isGlobal?: boolean } = $props();
-  const api = new AdminApiClient(basePath);
-  const histograms = usePolling(() => api.getHistograms(), 10000);
+  const { api } = useConsole();
+
+  let updatedAt = $state<number | null>(null);
+  const histograms = usePolling(
+    () =>
+      api.getHistograms().then((h) => {
+        updatedAt = Date.now();
+        return h;
+      }),
+    10000,
+  );
 
   let search = $state("");
   let selectedIndex = $state(0);
 
-  // The backend emits a -5000 sentinel for percentile stats when a histogram
-  // has too few samples to compute them. These are latency/size values that are
-  // never legitimately negative, so render an en-dash instead of "-5000".
-  function fmtStat(v: string): string {
-    const n = Number(v.replace(/,/g, ""));
-    return Number.isFinite(n) && n < 0 ? "\u2013" : v;
-  }
-
-  interface HistogramRow {
-    name: string;
-    count: string;
-    avg: string;
-    stddev: string;
-    min: string;
-    median: string;
-    max: string;
-    p90: string;
-    p95: string;
-    p99: string;
-  }
-
-  interface HistogramDetail {
-    buckets: Array<{
-      lower: string;
-      upper: string;
-      count: string;
-      pct: string;
-      cumPct: string;
-      barWidth: number;
-    }>;
-  }
-
-  /**
-   * Parse the backend HTML into structured histogram data.
-   * The backend returns an HTML string with:
-   * - A summary <table> with rows for each histogram
-   * - Hidden <div id="hist_N"> elements with bucket detail tables
-   * - A <script> block (which we discard)
-   */
-  function parseHistograms(html: string): {
-    rows: HistogramRow[];
-    details: HistogramDetail[];
-  } {
-    if (!html) return { rows: [], details: [] };
-
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(html, "text/html");
-
-    // Parse summary table rows
-    const rows: HistogramRow[] = [];
-    const tableRows = doc.querySelectorAll("tbody tr");
-    for (const tr of tableRows) {
-      const cells = tr.querySelectorAll("td");
-      if (cells.length < 10) continue;
-      // First cell contains a label with a radio + the name
-      const nameEl = cells[0]?.querySelector("label");
-      const name = nameEl?.textContent?.trim() ?? cells[0]?.textContent?.trim() ?? "";
-      rows.push({
-        name,
-        count: cells[1]?.textContent?.trim() ?? "",
-        avg: cells[2]?.textContent?.trim() ?? "",
-        stddev: cells[3]?.textContent?.trim() ?? "",
-        min: cells[4]?.textContent?.trim() ?? "",
-        median: cells[5]?.textContent?.trim() ?? "",
-        max: cells[6]?.textContent?.trim() ?? "",
-        p90: cells[7]?.textContent?.trim() ?? "",
-        p95: cells[8]?.textContent?.trim() ?? "",
-        p99: cells[9]?.textContent?.trim() ?? "",
-      });
-    }
-
-    // Parse detail divs (hist_0, hist_1, ...)
-    const details: HistogramDetail[] = [];
-    let i = 0;
-    while (true) {
-      const div = doc.getElementById(`hist_${i}`);
-      if (!div) break;
-      const buckets: HistogramDetail["buckets"] = [];
-      const detailRows = div.querySelectorAll("table tr");
-      for (const tr of detailRows) {
-        const cells = tr.querySelectorAll("td");
-        if (cells.length < 6) continue;
-        // cells: [lower-bracket, lower-val, upper-val, count, pct, cumPct, bar-div]
-        const lower = (cells[0]?.textContent ?? "") + (cells[1]?.textContent ?? "");
-        const upper = cells[2]?.textContent?.trim() ?? "";
-        const count = cells[3]?.textContent?.trim() ?? "";
-        const pct = cells[4]?.textContent?.trim() ?? "";
-        const cumPct = cells[5]?.textContent?.trim() ?? "";
-        // Extract bar width from inline style
-        const barDiv = cells[6]?.querySelector("div");
-        const widthMatch = barDiv?.getAttribute("style")?.match(/width:\s*(\d+)/);
-        const barWidth = widthMatch ? parseInt(widthMatch[1], 10) : 0;
-        buckets.push({ lower, upper, count, pct, cumPct, barWidth });
-      }
-      details.push({ buckets });
-      i++;
-    }
-
-    return { rows, details };
-  }
-
-  let parsed = $derived.by(() => {
-    const html =
-      histograms.data?.histograms ??
-      (histograms.data as Record<string, unknown>)?.raw ??
-      "";
-    return parseHistograms(String(html));
-  });
+  let rows = $derived(histograms.data?.histograms ?? []);
 
   let filteredIndices = $derived.by(() => {
-    if (!parsed.rows.length) return [];
-    const indices = parsed.rows.map((_, i) => i);
+    if (!rows.length) return [];
+    const indices = rows.map((_, i) => i);
     if (!search) return indices;
     const q = search.toLowerCase();
-    return indices.filter((i) =>
-      parsed.rows[i].name.toLowerCase().includes(q),
-    );
+    return indices.filter((i) => rows[i].name.toLowerCase().includes(q));
   });
 
   // Ensure selectedIndex is valid after filtering.
@@ -139,6 +43,14 @@
     filteredIndices.includes(selectedIndex)
       ? selectedIndex
       : (filteredIndices[0] ?? 0),
+  );
+
+  let selected = $derived.by(
+    (): HistogramJson | undefined => rows[effectiveSelected],
+  );
+  let widths = $derived.by(() => bucketWidths(selected?.buckets ?? []));
+  let shares = $derived.by(() =>
+    bucketShares(selected?.buckets ?? [], selected?.count ?? 0),
   );
 
   function selectHistogram(index: number) {
@@ -155,34 +67,34 @@
 </script>
 
 <div class="page">
-  <div class="header">
-    <h1>Histograms</h1>
-    <div class="controls">
-      <button class="btn btn-secondary" onclick={toggleAutoRefresh}>
-        {histograms.autoRefresh ? "Pause" : "Resume"} Auto-Refresh
-      </button>
-      <button class="btn btn-primary" onclick={() => histograms.refresh()}>
-        Refresh Now
-      </button>
-    </div>
-  </div>
+  <PageHeader
+    title="Histograms"
+    updatedAt={updatedAt}
+    refresh={{
+      autoRefresh: histograms.autoRefresh,
+      intervalMs: 10000,
+      onToggle: toggleAutoRefresh,
+      onRefresh: () => histograms.refresh(),
+    }}
+  >
+    {#snippet toolbar()}
+      <input
+        type="text"
+        class="search-input field field-search"
+        placeholder="Filter histograms by name..."
+        bind:value={search}
+      />
+    {/snippet}
+  </PageHeader>
 
   {#if histograms.loading}
     <p class="loading">Loading histograms...</p>
   {:else if histograms.error && !histograms.data}
-    <p class="error">{histograms.error.message}</p>
-  {:else if parsed.rows.length === 0}
+    <LoadError message={histograms.error.message} />
+  {:else if rows.length === 0}
     <p class="empty">No histogram data available.</p>
   {:else}
     <RefreshNotice error={histograms.error} />
-    <div class="toolbar">
-      <input
-        type="text"
-        class="search-input"
-        placeholder="Filter histograms by name..."
-        bind:value={search}
-      />
-    </div>
 
     {#if filteredIndices.length === 0}
       <p class="empty">No histograms match your filter.</p>
@@ -192,68 +104,75 @@
           <thead>
             <tr>
               <th>Histogram Name</th>
-              <th>Count</th>
-              <th>Avg</th>
-              <th>StdDev</th>
-              <th>Min</th>
-              <th>Median</th>
-              <th>Max</th>
-              <th>90%</th>
-              <th>95%</th>
-              <th>99%</th>
+              <th scope="col" class="num-head">Unit</th>
+              <th class="num-head">Count</th>
+              <th class="num-head">Avg</th>
+              <th class="num-head">StdDev</th>
+              <th class="num-head">Min</th>
+              <th class="num-head">Median</th>
+              <th class="num-head">Max</th>
+              <th class="num-head">90%</th>
+              <th class="num-head">95%</th>
+              <th class="num-head">99%</th>
             </tr>
           </thead>
           <tbody>
             {#each filteredIndices as idx}
-              {@const row = parsed.rows[idx]}
+              {@const row = rows[idx]}
               <tr
                 class="summary-row"
                 class:selected={effectiveSelected === idx}
                 onclick={() => selectHistogram(idx)}
               >
-                <td class="name-cell">{row.name}</td>
-                <td class="num-cell">{row.count}</td>
-                <td class="num-cell">{fmtStat(row.avg)}</td>
-                <td class="num-cell">{fmtStat(row.stddev)}</td>
-                <td class="num-cell">{fmtStat(row.min)}</td>
-                <td class="num-cell">{fmtStat(row.median)}</td>
-                <td class="num-cell">{fmtStat(row.max)}</td>
-                <td class="num-cell">{fmtStat(row.p90)}</td>
-                <td class="num-cell">{fmtStat(row.p95)}</td>
-                <td class="num-cell">{fmtStat(row.p99)}</td>
+                <td class="name-cell">
+                  <button
+                    type="button"
+                    class="row-select"
+                    aria-pressed={effectiveSelected === idx}
+                    onclick={(e) => {
+                      e.stopPropagation();
+                      selectHistogram(idx);
+                    }}
+                  >{row.name}</button>
+                </td>
+                <td class="num-cell">{unitForHistogram(row.name)}</td>
+                <td class="num-cell num">{formatCount(row.count)}</td>
+                <td class="num-cell num">{row.avg === null ? "—" : formatSig(row.avg)}</td>
+                <td class="num-cell num">{row.stddev === null ? "—" : formatSig(row.stddev)}</td>
+                <td class="num-cell num">{row.min === null ? "—" : formatSig(row.min)}</td>
+                <td class="num-cell num">{row.median === null ? "—" : formatSig(row.median)}</td>
+                <td class="num-cell num">{row.max === null ? "—" : formatSig(row.max)}</td>
+                <td class="num-cell num">{row.p90 === null ? "—" : formatSig(row.p90)}</td>
+                <td class="num-cell num">{row.p95 === null ? "—" : formatSig(row.p95)}</td>
+                <td class="num-cell num">{row.p99 === null ? "—" : formatSig(row.p99)}</td>
               </tr>
             {/each}
           </tbody>
         </table>
       </div>
 
-      {#if parsed.details[effectiveSelected]?.buckets.length}
+      {#if selected?.buckets.length}
         <div class="detail-wrapper">
-          <h3 class="detail-title">{parsed.rows[effectiveSelected]?.name}</h3>
+          <h2 class="detail-title">{selected.name}</h2>
           <table class="detail-table">
             <thead>
               <tr>
                 <th>Bucket</th>
-                <th>Count</th>
-                <th>%</th>
-                <th>Cumulative %</th>
+                <th class="num-head">Count</th>
+                <th class="num-head">%</th>
+                <th class="num-head">Cumulative %</th>
                 <th>Distribution</th>
               </tr>
             </thead>
             <tbody>
-              {#each parsed.details[effectiveSelected].buckets as bucket}
+              {#each selected.buckets as bucket, i}
                 <tr>
-                  <td class="bucket-range">{bucket.lower}{bucket.upper}</td>
+                  <td class="bucket-range">[{bucket.start}, {bucket.limit})</td>
                   <td class="num-cell">{bucket.count}</td>
-                  <td class="num-cell">{bucket.pct}</td>
-                  <td class="num-cell">{bucket.cumPct}</td>
+                  <td class="num-cell">{formatPercent(shares[i].percent)}</td>
+                  <td class="num-cell">{formatPercent(shares[i].cumulative)}</td>
                   <td class="bar-cell">
-                    <div
-                      class="bar"
-                      style="width: {Math.max(
-                        2,
-                        Math.round((bucket.barWidth / 400) * 100),
-                      )}%"
+                    <div class="bar" style="width: {Math.max(2, widths[i])}%"
                     ></div>
                   </td>
                 </tr>
@@ -267,43 +186,6 @@
 </div>
 
 <style>
-  .page {
-    max-width: 1100px;
-  }
-
-  .header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: var(--ps-space-md);
-    flex-wrap: wrap;
-    gap: var(--ps-space-sm);
-  }
-
-  h1 {
-    margin: 0;
-  }
-
-  .controls {
-    display: flex;
-    gap: var(--ps-space-sm);
-  }
-
-  .toolbar {
-    margin-bottom: var(--ps-space-md);
-  }
-
-  .search-input {
-    width: 100%;
-    max-width: 400px;
-    padding: var(--ps-space-sm) var(--ps-space-md);
-    border: 1px solid var(--ps-border);
-    border-radius: var(--ps-border-radius);
-    font-size: var(--ps-font-size-sm);
-    background: var(--ps-bg);
-    color: var(--ps-text);
-  }
-
   .search-input:focus {
     outline: none;
     border-color: var(--ps-primary);
@@ -360,7 +242,24 @@
 
   .name-cell {
     font-weight: 500;
-    word-break: break-word;
+    word-break: keep-all;
+  }
+
+  .row-select {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    font-weight: 500;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  /* A numeric column's header sits over its right-aligned values. */
+  .histogram-table th.num-head,
+  .detail-table th.num-head {
+    text-align: right;
   }
 
   .num-cell {
@@ -420,54 +319,11 @@
     min-width: 2px;
   }
 
-  .btn {
-    padding: var(--ps-space-sm) var(--ps-space-md);
-    border: 1px solid var(--ps-border);
-    border-radius: var(--ps-border-radius);
-    font-size: var(--ps-font-size-sm);
-    cursor: pointer;
-    white-space: nowrap;
-  }
-
-  .btn-primary {
-    background: var(--ps-primary);
-    color: var(--ps-text-inverse);
-    border-color: var(--ps-primary);
-  }
-
-  .btn-primary:hover {
-    background: var(--ps-primary-hover);
-  }
-
-  .btn-secondary {
-    background: var(--ps-bg);
-    color: var(--ps-text);
-  }
-
-  .btn-secondary:hover {
-    background: var(--ps-surface-hover);
-  }
-
   .loading {
     color: var(--ps-text-secondary);
   }
 
-  .error {
-    color: var(--ps-error);
-  }
-
   .empty {
-    color: var(--ps-text-tertiary);
-  }
-
-  @media (max-width: 600px) {
-    .header {
-      flex-direction: column;
-      align-items: flex-start;
-    }
-
-    .search-input {
-      max-width: unset;
-    }
+    color: var(--ps-text-secondary);
   }
 </style>

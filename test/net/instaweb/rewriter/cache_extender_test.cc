@@ -775,6 +775,25 @@ TEST_F(CacheExtenderTest, IntegrityStylesheetNotRelocatedByShardDomain) {
       << "Number of cache extended resources is wrong";
 }
 
+TEST_F(CacheExtenderTest, ScriptSrcAttributeWithoutValue) {
+  // A src attribute with no value has no URL to resolve; the element must be
+  // left untouched.
+  InitTest(kShortTtlSec);
+  ValidateNoChanges("valueless_script_src", "<script src></script>");
+  EXPECT_EQ(0, num_cache_extended_->Get())
+      << "Number of cache extended resources is wrong";
+}
+
+TEST_F(CacheExtenderTest, IntegrityScriptSrcAttributeWithoutValue) {
+  // Same, with integrity= present: there is no URL to consider for
+  // relocation, so the element must be left untouched.
+  InitTest(kShortTtlSec);
+  ValidateNoChanges("valueless_integrity_script_src",
+                    "<script src integrity=\"sha384-x\"></script>");
+  EXPECT_EQ(0, num_cache_extended_->Get())
+      << "Number of cache extended resources is wrong";
+}
+
 TEST_F(CacheExtenderTest, ExtendIfShardedToHttps) {
   InitTest(kLongTtlSec);
 

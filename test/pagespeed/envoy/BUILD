@@ -75,3 +75,17 @@ envoy_cc_test(
         "//test/pagespeed/kernel/base:kernel_test_util",
     ],
 )
+
+envoy_cc_test(
+    name = "http_filter_test",
+    srcs = ["http_filter_test.cc"],
+    copts = _PAGESPEED_TEST_COPTS,
+    repository = "@envoy",
+    tags = ["manual"],
+    deps = [
+        ":envoy_mocks",
+        "//pagespeed/envoy:http_filter_lib",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+        "@envoy//source/common/stats:isolated_store_lib",
+    ],
+)

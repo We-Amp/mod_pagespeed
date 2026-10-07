@@ -238,7 +238,7 @@ def build_urls(base_url, url_prefix, url_file=None):
 
     Default = the self-contained corpus gen-corpus writes. With url_file, pages
     and resources come from a collected corpus URL list (e.g. the
-    corpus_all_urls.txt produced by devel/loadtest_collect) — far more diverse
+    corpus_all_urls.txt produced by tools/stress/loadtest_collect) — far more diverse
     real-world content, which churns more of the rewriter. Each line is a full
     URL (used as-is) or a path (joined to base_url); lines are split into pages
     vs resources by file extension."""
@@ -479,7 +479,7 @@ def main(argv=None):
     r.add_argument("--url-prefix", default="/stress", help="URL path of the corpus")
     r.add_argument("--url-file", default=None,
                    help="replay URLs from a collected corpus list "
-                        "(e.g. corpus_all_urls.txt from devel/loadtest_collect); "
+                        "(e.g. corpus_all_urls.txt from tools/stress/loadtest_collect); "
                         "overrides the synthetic corpus for far more diverse load")
     r.add_argument("--cache-dir", default="",
                    help="comma-separated FileCachePath dir(s) for cache.flush")

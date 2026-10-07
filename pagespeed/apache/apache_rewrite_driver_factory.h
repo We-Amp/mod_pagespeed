@@ -21,6 +21,7 @@
 #define PAGESPEED_APACHE_APACHE_REWRITE_DRIVER_FACTORY_H_
 
 #include <memory>
+#include <set>
 
 // Note: We must include apache_config.h to allow using ApacheConfig*
 // return-types for functions that return RewriteOptions* in base class.
@@ -68,6 +69,23 @@ class ApacheRewriteDriverFactory : public SystemRewriteDriverFactory {
   }
 
   ApacheServerContext* MakeApacheServerContext(server_rec* server);
+
+  // The main server's record.  The factory is created once, for the first
+  // server record httpd configures -- the main server, configured before any
+  // virtual host (mod_instaweb.cc, factory()).  ApacheConfiguredHostNames
+  // compares a virtual host's name pointer against it.
+  const server_rec* main_server() const { return server_rec_; }
+
+  // The server records whose configuration states a ServerName
+  // (ApacheStatedServerNamesFromTree).  Set once by the post-config hook,
+  // after the configuration is read and before anything is served, and only
+  // read after that; empty until then, so no record has a primary name.
+  const std::set<const server_rec*>& stated_server_names() const {
+    return stated_server_names_;
+  }
+  void set_stated_server_names(std::set<const server_rec*> names) {
+    stated_server_names_ = std::move(names);
+  }
 
   // Notification of apache tearing down a context (vhost or top-level)
   // corresponding to given ApacheServerContext. Returns true if it was
@@ -147,6 +165,7 @@ class ApacheRewriteDriverFactory : public SystemRewriteDriverFactory {
  private:
   apr_pool_t* pool_;
   server_rec* server_rec_;
+  std::set<const server_rec*> stated_server_names_;
   // Event-based scheduling using LibeventDispatcher.
   // LibeventDispatcher runs its own background event loop thread; once
   // SetNeedSchedulerThread() attaches it, it drives the EventScheduler's

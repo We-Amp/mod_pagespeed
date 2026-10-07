@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import * as canonical from "./product-facts.mjs";
 import {
   CONSOLE_TITLE,
+  DOCS_URL,
   PRIVACY_URL,
   PRODUCT_DISPLAY_NAME,
   PRODUCT_NAME,
@@ -34,5 +35,11 @@ describe("product-facts-console", () => {
   it("derives bare hosts for display from the canonical URLs", () => {
     expect(VENDOR_HOST).toBe(new URL(canonical.VENDOR_URL).host);
     expect(WEBSITE_HOST).toBe(new URL(canonical.WEBSITE).host);
+  });
+});
+
+describe("DOCS_URL", () => {
+  it("is the website's admin console documentation page", () => {
+    expect(DOCS_URL).toBe(`${canonical.WEBSITE}/docs/admin-console/`);
   });
 });

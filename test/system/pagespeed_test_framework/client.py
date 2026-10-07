@@ -155,6 +155,10 @@ class Response:
     body: bytes
     url: str = ""
     _header_lookup: Dict[str, str] = field(default_factory=dict, repr=False)
+    # Every header line as received, in order, duplicates kept. The joined
+    # ``headers`` dict cannot tell one header from two, nor "Cache-Control"
+    # from "Cache-control". Empty for Responses built by hand.
+    raw_headers: List[Tuple[str, str]] = field(default_factory=list, repr=False)
 
     def __post_init__(self):
         # Build case-insensitive header lookup
@@ -176,6 +180,14 @@ class Response:
             Header value or default
         """
         return self._header_lookup.get(name.lower(), default)
+
+    def header_values(self, name: str) -> List[str]:
+        """All values of header ``name`` (case-insensitive), one per line.
+
+        Equivalent to: grep -i "^$name:" on a wget --save-headers dump.
+        """
+        wanted = name.lower()
+        return [value for key, value in self.raw_headers if key.lower() == wanted]
 
     @property
     def content_length(self) -> Optional[int]:
@@ -364,6 +376,7 @@ class PageSpeedClient:
                 headers=header_dict,
                 body=resp.read(),
                 url=path,
+                raw_headers=list(raw_headers),
             )
 
             # Handle redirects
@@ -775,6 +788,101 @@ class ProxiedPageSpeedClient(PageSpeedClient):
                 headers=header_dict,
                 body=resp.read(),
                 url=path,
+                raw_headers=list(raw_headers),
+            )
+        finally:
+            conn.close()
+
+
+class VhostClient(PageSpeedClient):
+    """HTTP client for one name-based virtual host behind the secondary port.
+
+    Equivalent to the bash suite's
+
+        http_proxy=$SECONDARY_HOSTNAME $WGET_DUMP http://<vhost>/<path>
+
+    Every request goes to the secondary server (proxy_host:proxy_port) with
+    the absolute-form target http://<vhost><path> and "Host: <vhost>" -- no
+    port -- so the server selects the <vhost> VirtualHost and PageSpeed
+    computes the same absolute URLs (http://<vhost>/...) the bash suite saw.
+    ProxiedPageSpeedClient, by contrast, always names the primary host:port
+    and so only ever reaches the secondary port's default vhost.
+
+    Redirects are never followed (allow_redirects is ignored), as in the
+    bash suite's $WGET_DUMP.
+    """
+
+    def __init__(
+        self,
+        vhost: str,
+        proxy_host: str,
+        proxy_port: int,
+        timeout: float = 30.0,
+        user_agent: str = DEFAULT_USER_AGENT,
+    ):
+        super().__init__(vhost, 80, timeout, user_agent)
+        self.vhost = vhost
+        self.proxy_host = proxy_host
+        self.proxy_port = proxy_port
+
+    @property
+    def base_url(self) -> str:
+        """http://<vhost> -- the bash suite's per-vhost URL prefix."""
+        return f"http://{self.vhost}"
+
+    def with_user_agent(self, user_agent: str) -> "VhostClient":
+        """Return a client for the same vhost that sends another User-Agent."""
+        return VhostClient(
+            self.vhost,
+            self.proxy_host,
+            self.proxy_port,
+            timeout=self._raw_timeout,
+            user_agent=user_agent,
+        )
+
+    def with_webp(self) -> "VhostClient":
+        """Same vhost, WebP-capable User-Agent (see PageSpeedClient.with_webp)."""
+        return self.with_user_agent(WEBP_USER_AGENT)
+
+    def _make_connection(self) -> http.client.HTTPConnection:
+        """Connect to the secondary server, never to the vhost name."""
+        return http.client.HTTPConnection(
+            self.proxy_host, self.proxy_port, timeout=self.timeout
+        )
+
+    def _request(
+        self,
+        method: str,
+        path: str,
+        body: Optional[bytes] = None,
+        headers: Optional[Dict[str, str]] = None,
+        allow_redirects: bool = False,
+    ) -> Response:
+        """Send METHOD http://<vhost><path> with Host: <vhost> to the secondary."""
+        if not path.startswith("/"):
+            raise ValueError(f"VhostClient paths start with '/', got {path!r}")
+        request_headers = {"User-Agent": self.user_agent, "Host": self.vhost}
+        if headers:
+            request_headers.update(headers)
+        target = f"http://{self.vhost}{path}"
+
+        conn = self._make_connection()
+        try:
+            conn.request(method, target, body=body, headers=request_headers)
+            resp = conn.getresponse()
+            raw_headers = resp.getheaders()
+            header_dict: Dict[str, str] = {}
+            for name, value in raw_headers:
+                if name in header_dict:
+                    header_dict[name] = f"{header_dict[name]}, {value}"
+                else:
+                    header_dict[name] = value
+            return Response(
+                status=resp.status,
+                headers=header_dict,
+                body=resp.read(),
+                url=target,
+                raw_headers=list(raw_headers),
             )
         finally:
             conn.close()

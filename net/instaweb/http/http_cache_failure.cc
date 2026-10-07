@@ -52,6 +52,18 @@ const int kRememberEmptyTtlSec = 300;
 // that the initial round of fetches gets some dropped.
 const int kRememberFetchDroppedTtlSec = 10;
 
+// A fetch that timed out, could not connect, or was answered 5xx describes
+// the origin's condition at that moment, not the resource, so it is only
+// remembered long enough to keep a struggling origin from being asked again
+// by every request (a fetch is coalesced per resource already; this bounds the
+// retry rate to one attempt per resource per window). A 404 or 410, by
+// contrast, is a property of the resource and keeps the five-minute memory
+// above (and RewriteOptions::metadata_input_errors_cache_ttl_ms in the
+// metadata cache). The window matches the load-shed drop window above: both
+// are "try again shortly" conditions. Before this distinction a five-second
+// origin stall turned into a five-minute 404 for the optimized resource.
+const int kRememberTransientFailureTtlSec = 10;
+
 }  // namespace
 
 HttpCacheFailurePolicy::HttpCacheFailurePolicy() {
@@ -67,6 +79,8 @@ HttpCacheFailurePolicy::HttpCacheFailurePolicy() {
   ttl_sec_for_status[kFetchStatusOtherError] = kRememberFetchFailedTtlSec;
   ttl_sec_for_status[kFetchStatusDropped] = kRememberFetchDroppedTtlSec;
   ttl_sec_for_status[kFetchStatusEmpty] = kRememberEmptyTtlSec;
+  ttl_sec_for_status[kFetchStatusTransientError] =
+      kRememberTransientFailureTtlSec;
 }
 
 FetchResponseStatus HttpCacheFailure::ClassifyFailure(
@@ -94,10 +108,17 @@ FetchResponseStatus HttpCacheFailure::ClassifyFailure(
     // 4xx, 5xx, or physical failure (which includes load-shedding drops).
     if (headers.Has(HttpAttributes::kXPsaLoadShed)) {
       classification = kFetchStatusDropped;
-    } else if (status_code >= 400 && status_code < 500) {
+    } else if (physical_fetch_success && status_code >= 400 &&
+               status_code < 500) {
+      // Only a 4xx the origin actually sent counts as one. A fetch that
+      // never completed carries whatever status its fetcher filled in (the
+      // curl fetcher writes 404 when it gives up before it has headers), and
+      // a timeout must not be remembered as if the resource were missing.
       classification = kFetchStatus4xxError;
     } else {
-      classification = kFetchStatusOtherError;
+      // 5xx, or the fetch did not complete: a timeout, a refused or reset
+      // connection, a body that stalled after the headers.
+      classification = kFetchStatusTransientError;
     }
   }
   DCHECK_NE(classification, kFetchStatusNotSet);
@@ -124,6 +145,8 @@ FetchResponseStatus HttpCacheFailure::DecodeFailureCachingStatus(
       return kFetchStatusDropped;
     case HttpStatus::kRememberEmptyStatusCode:
       return kFetchStatusEmpty;
+    case HttpStatus::kRememberTransientFailureStatusCode:
+      return kFetchStatusTransientError;
     default:
       LOG(DFATAL) << "Decode unexpected failure status code:" << code;
       return kFetchStatusNotSet;
@@ -145,6 +168,8 @@ HttpStatus::Code HttpCacheFailure::EncodeFailureCachingStatus(
       return HttpStatus::kRememberDroppedStatusCode;
     case kFetchStatusEmpty:
       return HttpStatus::kRememberEmptyStatusCode;
+    case kFetchStatusTransientError:
+      return HttpStatus::kRememberTransientFailureStatusCode;
     default:
       LOG(DFATAL) << "Encoded unexpected failure status:" << status;
       return HttpStatus::kRememberFetchFailedStatusCode;

@@ -405,11 +405,18 @@ ngx_int_t NgxBaseFetch::CopyBufferToNginx(ngx_chain_t** link_ptr) {
           pinned_pending_.NsUntilForcedWrap() <= kEmitMarginNs;
       // Downstream body filters that read, re-slice, or RETAIN a raw pointer
       // into the body keep aliasing our mmap past the buf the per-drain
-      // barrier tracks, so aliasing is unsafe when any is active; copy instead:
-      //   * sub_filter/ssi/addition/charset set filter_need_in_memory
-      //     (charset also filter_need_temporary);
-      //   * gzip/gunzip/image_filter/xslt set main_filter_need_in_memory
-      //     (gzip drives zlib from a raw mmap next_in a slow client suspends);
+      // barrier tracks, so aliasing is unsafe when any is active; copy instead.
+      // With the module in its proper chain position only the compression
+      // filters run downstream of it: gzip/brotli set
+      // main_filter_need_in_memory (gzip drives zlib from a raw mmap next_in
+      // a slow client suspends).  sub_filter/ssi/addition/charset/gunzip
+      // (filter_need_in_memory, charset also filter_need_temporary) and
+      // image_filter/xslt (main_filter_need_in_memory) all run
+      // UPSTREAM of the module now -- they see the origin's body, not ours --
+      // but their flags are request-global, so a location with ssi or sub
+      // enabled still forces the copy: the predicate errs on the safe side,
+      // and narrowing it to what can still run downstream is a possible
+      // follow-up.
       //   * a Range request drives the range filter (multipart sub-range bufs);
       //   * HTTP/2 (ngx_http_v2_send_chain) splits our buf into per-frame
       //     SHADOW bufs aliasing our mmap, sent async as the flow-control

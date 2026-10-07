@@ -15,10 +15,11 @@
     <div class="bold">
       <p>
       This filter first instruments the page to discover which CSS selectors
-      will be used by the browser.  It uses instrumentation results to select
-      the critical CSS rules from the page and inlines those in &lt;style&gt;
-      tags at the top of the document.  It lazily loads the original CSS
-      &lt;style&gt; and &lt;link&gt; tags after the page has loaded. </p>
+      match anything in it.  It uses the results to select the critical CSS
+      rules and inlines those in &lt;style&gt; tags where the stylesheet
+      &lt;link&gt; tags were.  Each full stylesheet is preloaded from that
+      same place and takes effect there as soon as it has arrived, without
+      holding up the first paint. </p>
       <p>
       When you load this page, you may see one of several things:
       <ul>
@@ -26,15 +27,34 @@
         and processing the CSS resources on the page.</li>
         <li>An unoptimized page with instrumentation code at the bottom, once
         pagespeed has obtained all the CSS resources the page contains.</li>
-        <li>A page with the critical CSS in &lt;style&gt; tags at the top of the
-        document.  The original CSS will be in a &lt;noscript&gt; block at the
-        bottom of the page, followed by a script that makes them visible to the
-        browser.  This page might also contain additional instrumentation code
-        to ensure that the critical CSS is still valid.</li>
+        <li>A page with the critical CSS in &lt;style&gt; tags.  Each of them
+        is followed by a preload &lt;link&gt; for the full stylesheet and by
+        a copy of the original &lt;link&gt; in a &lt;noscript&gt; block; a
+        small script turns the preload into the stylesheet when the file has
+        arrived.  This page might also contain additional instrumentation
+        code to ensure that the critical CSS is still valid.</li>
       </ul>
-      <p>If you see a flash of unstyled content as the page is loading, it is
-      possible the beacon results that pagespeed collected did not include rules
-      that apply to your browser. </p>
+      <p>The inlined rules cover everything in the page as browsers last
+      reported it, so the page should look the same before and after the
+      full stylesheet arrives.  There are limits: </p>
+      <ul>
+        <li>After the page's stylesheets change, pagespeed serves the page
+        unoptimized for a few views, until browsers have reported on the new
+        rules.</li>
+        <li>After the page's markup changes without its stylesheets changing,
+        rules that newly apply can be late until a visitor's browser reports
+        on the new markup; pagespeed asks for a report again after about a
+        minute by default, and the wait is longer when the visitor who is
+        asked does not report.</li>
+        <li>Content that a script adds while the page is loading takes its
+        rules from the full stylesheet.</li>
+        <li>The browser reports which rules the page uses once it has loaded.
+        Content that a script removes, hides or gives other class names
+        before then can be painted without the rules that applied only to
+        its earlier state, until the full stylesheet arrives.</li>
+        <li>For pages whose markup differs from visitor to visitor under one
+        URL, leave this filter off.</li>
+      </ul>
     </div>
   </body>
 </html>

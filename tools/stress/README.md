@@ -107,11 +107,11 @@ confirm the shutdown-UAF fix holds on real content.
 a real browser, so JS/lazy sub-resources are discovered (and slurped) too:
 
 ```bash
-devel/loadtest_collect/loadtest_collect_corpus.sh pages.txt corpus.tar.bz2
+tools/stress/loadtest_collect/loadtest_collect_corpus.sh pages.txt corpus.tar.bz2
 # -> a slurp dir + corpus_all_urls.txt (the collector's %r access log).
 ```
 
-> The collector (`devel/loadtest_collect/collect.js`, `puppeteer-core`; set
+> The collector (`tools/stress/loadtest_collect/collect.js`, `puppeteer-core`; set
 > `CHROME_PATH`) replaces the abandonware **phantomjs** driver and waits for
 > `networkidle2`. Modern-origin gotchas it handles / you must handle:
 > - It disables Chrome's http→https auto-upgrade (`HttpsUpgrades`) and scopes
@@ -136,7 +136,7 @@ the final 200, so mirror the enumerated URLs to a docroot and serve that:
 
 ```bash
 # Mirror the enumerated corpus to a docroot (curl handles 103 Early Hints):
-devel/loadtest_collect/build_docroot.sh corpus_all_urls.txt \
+tools/stress/loadtest_collect/build_docroot.sh corpus_all_urls.txt \
     https://example.com /corpus/example.com /tmp/corpus_replay_paths.txt
 # Serve /corpus/example.com with mod_pagespeed (RewriteLevel CoreFilters,
 # InPlaceResourceOptimization on, LoadFromFile mapping the serving host to the
@@ -158,7 +158,7 @@ To widen the input distribution beyond one origin's house style — and to check
 **more than ASan** — `build_internet_corpus.py` + a small matrix driver replay
 ~1000 real homepages across a sanitizer × filter-set grid.
 
-**Corpus** (`devel/loadtest_collect/build_internet_corpus.py`): fetches the
+**Corpus** (`tools/stress/loadtest_collect/build_internet_corpus.py`): fetches the
 Tranco top-N homepages ONCE (single pass, polite, identified UA) plus a few
 stylesheets/scripts each, into a **flattened** docroot one localhost vhost can
 serve (`pages/<rank>-<domain>.html`, `res/<rank>-<domain>-N.css|js`). Captured
@@ -178,7 +178,7 @@ machine-readable summary + a deduped findings file.
 
 ```bash
 # build the corpus on the test host (NOT committed):
-python3 devel/loadtest_collect/build_internet_corpus.py --out /corpus-internet --count 1500
+python3 tools/stress/loadtest_collect/build_internet_corpus.py --out /corpus-internet --count 1500
 # build extra sanitizer modules (ASan module you already have):
 bash tools/stress/build_sanitizer_module.sh ubsan   # combined ASan+UBSan, recoverable
 bash tools/stress/build_sanitizer_module.sh tsan
@@ -200,8 +200,8 @@ nohup bash tools/stress/run_matrix.sh > /tmp/matrix.log 2>&1 &
 
 ### valgrind as a non-ASan memory checker (complementary)
 Where an ASan build isn't available, run a **longer** pass with the server under
-`valgrind --tool=memcheck` and a mature load generator (`siege`, see
-`devel/siege/`). valgrind is far slower (~20–50×) but needs no instrumented
+`valgrind --tool=memcheck` and a mature load generator such as `siege`.
+valgrind is far slower (~20–50×) but needs no instrumented
 build, so it's a good nightly complement to the fast ASan run:
 
 ```bash
@@ -212,10 +212,9 @@ valgrind --tool=memcheck --leak-check=full --error-exitcode=99 \
 # that siege/valgrind alone don't), pointed at the valgrind'd server.
 ```
 
-The harness's detector already keys on the same crash signatures the upstream
-release scraper (`devel/scrape_error_log_for_crashes.sh`) uses —
-`exit signal` / `CRASH` — in addition to ASan/UBSan reports, so it catches both
-instrumentation modes.
+The harness's detector already keys on the same crash signatures the old
+release crash-scraper keyed on — `exit signal` / `CRASH` — in addition to
+ASan/UBSan reports, so it catches both instrumentation modes.
 
 ## Roadmap
 - **Manual first** (this harness) against an ASan module — Apache leg, then nginx.

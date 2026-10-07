@@ -19,6 +19,7 @@
 #include "pagespeed/iis/iis_configuration.h"
 #include "pagespeed/iis/iis_rewrite_options.h"
 #include "pagespeed/kernel/base/google_message_handler.h"
+#include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/string_util.h"
 
 // Forward declarations of test helpers (defined in iis_configuration.cpp).
@@ -227,6 +228,145 @@ TEST_F(IisConfigurationTest, ServerScopedOptionInBaseApplies) {
 
   EXPECT_EQ("/custom_stats", rwo.statistics_path())
       << "server-scope StatisticsPath applies in the base config";
+}
+
+// ==========================================================================
+// The two daemon path options (parsed and stored; the per-site startup
+// check reads them)
+// ==========================================================================
+
+// Records the parser's formatted messages, for assertions on the warning a
+// refused directive leaves.
+class RecordingMessageHandler : public net_instaweb::MessageHandler {
+ public:
+  int CountContaining(const std::string& needle) const {
+    int n = 0;
+    for (const std::string& m : messages_) {
+      if (m.find(needle) != std::string::npos) {
+        ++n;
+      }
+    }
+    return n;
+  }
+
+ protected:
+  void MessageSImpl(net_instaweb::MessageType type,
+                    const GoogleString& message) override {
+    messages_.push_back(message);
+  }
+  void FileMessageSImpl(net_instaweb::MessageType type, const char* file,
+                        int line, const GoogleString& message) override {
+    messages_.push_back(message);
+  }
+
+ private:
+  std::vector<std::string> messages_;
+};
+
+// Both options parse from a pagespeed.config line and are stored; the
+// backslash path is preserved byte for byte (the FileCachePath/LogDir
+// slash conversion is special-cased and must not leak to other options).
+TEST_F(IisConfigurationTest, DaemonOptionsParseAndStore) {
+  std::string config_text =
+      "pagespeed DaemonSocketPath C:\\daemon\\notify.sock\n"
+      "pagespeed DaemonVolumePath D:\\daemon\\volume\n";
+
+  IisRewriteOptions rwo(nullptr);
+  ParseAndGetConfig(config_text, "", &rwo);
+
+  EXPECT_EQ("C:\\daemon\\notify.sock", rwo.daemon_socket_path());
+  EXPECT_EQ("D:\\daemon\\volume", rwo.daemon_volume_path());
+}
+
+// The default for both options is empty: no daemon is configured.
+TEST_F(IisConfigurationTest, DaemonOptionsDefaultEmpty) {
+  IisRewriteOptions rwo(nullptr);
+  ParseAndGetConfig("", "", &rwo);
+
+  EXPECT_EQ("", rwo.daemon_socket_path());
+  EXPECT_EQ("", rwo.daemon_volume_path());
+}
+
+// A quoted value with spaces and a backslash path survives byte for byte:
+// the config tokenizer keeps a double-quoted token verbatim.
+TEST_F(IisConfigurationTest, DaemonOptionQuotedValueWithSpacesVerbatim) {
+  std::string config_text =
+      "pagespeed DaemonSocketPath \"C:\\Program "
+      "Files\\PageSpeed\\daemon\\notify.sock\"\n"
+      "pagespeed DaemonVolumePath \"C:\\Program "
+      "Files\\PageSpeed\\daemon\\cache volume\"\n";
+
+  IisRewriteOptions rwo(nullptr);
+  ParseAndGetConfig(config_text, "", &rwo);
+
+  EXPECT_EQ("C:\\Program Files\\PageSpeed\\daemon\\notify.sock",
+            rwo.daemon_socket_path());
+  EXPECT_EQ("C:\\Program Files\\PageSpeed\\daemon\\cache volume",
+            rwo.daemon_volume_path());
+}
+
+// Either option inside a match block is refused with the parser's existing
+// warning and leaves the value unset (both are kProcessScopeStrict).
+TEST_F(IisConfigurationTest, DaemonOptionInMatchBlockRefused) {
+  std::string config_text =
+      "host:example\\.com\n"
+      "pagespeed DaemonSocketPath C:\\daemon\\notify.sock\n"
+      "pagespeed DaemonVolumePath D:\\daemon\\volume\n";
+
+  RecordingMessageHandler recorder;
+  ConfigurationFile* cf =
+      CreateTestConfigFile(config_text, &recorder, global_config_, nullptr);
+  std::map<std::string, std::string> input;
+  input["host"] = "example.com";
+  input["config"] = "request";
+  IisRewriteOptions rwo(nullptr);
+  TestConfigFileGetConfig(cf, input, rwo);
+  TestConfigFileRelease(cf);
+
+  EXPECT_EQ("", rwo.daemon_socket_path())
+      << "process-scope DaemonSocketPath must be refused inside a match block";
+  EXPECT_EQ("", rwo.daemon_volume_path())
+      << "process-scope DaemonVolumePath must be refused inside a match block";
+  EXPECT_EQ(2, recorder.CountContaining("cannot be set inside a match block"))
+      << "each refusal must carry the parser's existing warning";
+  // Bound to the two directives, not to any two refusals.
+  EXPECT_EQ(1, recorder.CountContaining("DaemonSocketPath"));
+  EXPECT_EQ(1, recorder.CountContaining("DaemonVolumePath"));
+}
+
+// An UNQUOTED value with a space is three tokens, not one: the line is not a
+// name/value pair any more, nothing is stored, and the option stays empty.
+// A path with spaces has to be quoted (see the test above).  This pins what
+// the parser does today so an operator-facing description can say so.
+TEST_F(IisConfigurationTest, DaemonOptionUnquotedValueWithSpacesIsNotStored) {
+  std::string config_text =
+      "pagespeed DaemonVolumePath C:\\Program Files\\PageSpeed\\volume\n";
+
+  IisRewriteOptions rwo(nullptr);
+  ParseAndGetConfig(config_text, "", &rwo);
+
+  EXPECT_EQ("", rwo.daemon_volume_path());
+}
+
+// A merge where the source never set the daemon options keeps the value
+// that was already stored.  This is the generic option merge, not a
+// property of the scope: the IIS parser never merges by scope, so the
+// scope label is enforced at parse time only (the match-block test above).
+TEST_F(IisConfigurationTest, DaemonOptionMergeKeepsStoredValue) {
+  IisRewriteOptions base(nullptr);
+  ParseAndGetConfig(
+      "pagespeed DaemonSocketPath C:\\daemon\\notify.sock\n"
+      "pagespeed DaemonVolumePath D:\\daemon\\volume\n",
+      "", &base);
+
+  IisRewriteOptions site(nullptr);
+  ParseAndGetConfig("pagespeed EnableFilters combine_css\n", "", &site);
+
+  base.Merge(site);
+
+  EXPECT_EQ("C:\\daemon\\notify.sock", base.daemon_socket_path());
+  EXPECT_EQ("D:\\daemon\\volume", base.daemon_volume_path());
+  EXPECT_TRUE(base.Enabled(RewriteOptions::kCombineCss));
 }
 
 // MatchRuleNoMatch: host regex doesn't match, filter not enabled.

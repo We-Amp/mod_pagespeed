@@ -106,8 +106,8 @@ enum VHostHandling : std::uint8_t { kTolerateInVHost, kErrorInVHost };
 // TODO(sligocki): Separate options parsing from all the other stuff here.
 // Instaweb directive names -- these must match
 // install/common/pagespeed.conf.template.
-// If you add a new option, please add it to the #ALL_DIRECTIVES section of
-// install/debug.conf.template to make sure it will parse.
+// If you add a new option, exercise it in a system test under
+// test/system/ to make sure it parses correctly.
 
 const char kModPagespeedIf[] = "<ModPagespeedIf";
 
@@ -452,6 +452,15 @@ InstawebContext* build_context_for_request(request_rec* request) {
   InstawebHandler instaweb_handler(request);
   const RewriteOptions* options = instaweb_handler.options();
 
+  // The constructor above (via ComputeCustomOptions -> GetQueryOptions)
+  // already scanned and stripped any PageSpeed/ModPagespeed option headers
+  // from the in-memory response_headers_ copy, regardless of what happens
+  // next. Write that stripped state back to the real Apache request now, up
+  // front, so every early return below -- the invalid-URL one included --
+  // leaves with the option headers removed, not just the paths that go on
+  // to rewrite the response.
+  instaweb_handler.RemoveStrippedResponseHeadersFromApacheRequest();
+
   const GoogleUrl& stripped_gurl = instaweb_handler.stripped_gurl();
   if (!stripped_gurl.IsWebValid()) {
     ap_log_rerror(APLOG_MARK, APLOG_DEBUG, APR_SUCCESS, request,
@@ -479,8 +488,6 @@ InstawebContext* build_context_for_request(request_rec* request) {
                   "Request not rewritten because: ModPagespeedDisallow");
     return nullptr;
   }
-
-  instaweb_handler.RemoveStrippedResponseHeadersFromApacheRequest();
 
   InstawebContext* context = new InstawebContext(
       request, instaweb_handler.ReleaseRequestHeaders(), *content_type,
@@ -999,6 +1006,17 @@ int pagespeed_post_config(apr_pool_t* pool, apr_pool_t* plog, apr_pool_t* ptemp,
   ApacheRewriteDriverFactory* factory =
       apache_process_context.factory(server_list);
 
+  // Which server records state a ServerName in the configuration just read
+  // (rather than carry one httpd derived), read once from httpd's parsed
+  // configuration while it and the records belong to the same configuration;
+  // the serving and admin paths only look records up.  A restart re-reads
+  // the configuration and comes through here again with new records.  The
+  // walk starts at this cycle's own main record, `server_list`, which is
+  // the record the factory was created for.
+  DCHECK(server_list == factory->main_server());
+  factory->set_stated_server_names(
+      ApacheStatedServerNamesFromTree(ap_conftree, server_list));
+
   // Thread-count resolution is deferred to here: ap_mpm_query() cannot report
   // the MPM's threading model, the configured ThreadsPerChild, or the child
   // count the thread-count policy divides by until the configuration has been
@@ -1013,6 +1031,8 @@ int pagespeed_post_config(apr_pool_t* pool, apr_pool_t* plog, apr_pool_t* ptemp,
 
   std::vector<SystemServerContext*> server_contexts;
   std::set<ApacheServerContext*> server_contexts_covered;
+  ApacheServerContext* base_context =
+      InstawebContext::ServerContextFromServerRec(server_list);
   for (server_rec* server = server_list; server != nullptr;
        server = server->next) {
     ApacheServerContext* server_context =
@@ -1020,6 +1040,18 @@ int pagespeed_post_config(apr_pool_t* pool, apr_pool_t* plog, apr_pool_t* ptemp,
     if (server_contexts_covered.insert(server_context).second) {
       CHECK(server_context != nullptr);
       server_contexts.push_back(server_context);
+    }
+
+    if (factory->use_per_vhost_statistics() && server != server_list &&
+        server_context == base_context) {
+      factory->message_handler()->Message(
+          kWarning,
+          "ModPagespeedUsePerVHostStatistics is on, but virtual host %s "
+          "carries no ModPagespeed directive of its own and therefore shares "
+          "the main server's statistics; add a ModPagespeed directive (for "
+          "example 'ModPagespeed on') inside its <VirtualHost> block to give "
+          "it separate statistics.",
+          server->server_hostname != nullptr ? server->server_hostname : "?");
     }
 
     // We also want propagate all the per-process options to each vhost. The

@@ -26,6 +26,7 @@ from pagespeed_test_framework import (
     PageSpeedClient,
     assert_contains,
     assert_http_status,
+    require_status_ok,
 )
 
 
@@ -47,14 +48,14 @@ class TestKeepDataUrls:
         url = f"{rewritten_root}/styles/A.data.css.pagespeed.cf.Hash.css"
 
         response = client.get(url)
-        # The URL might be 404 if the hash doesn't match, but if it returns
-        # content, the data URL should be preserved
-        if response.status == 200:
-            assert_contains(
-                response,
-                r"data:image/png",
-                "data: URLs in CSS should be preserved",
-            )
+        # The .pagespeed. URL is served (a wrong hash is served, not 404'd)
+        # and its data: URL must survive.
+        require_status_ok(response, "A.data.css.pagespeed.cf.Hash.css")
+        assert_contains(
+            response,
+            r"data:image/png",
+            "data: URLs in CSS should be preserved",
+        )
 
 
 if __name__ == "__main__":

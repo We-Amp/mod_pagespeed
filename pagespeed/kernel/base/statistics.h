@@ -138,6 +138,14 @@ class MutexedScalar {
 
 class Histogram {
  public:
+  // Minimum number of samples required before percentile estimates
+  // (median/90/95/99) are meaningful; below this, an estimate degrades to a
+  // near-minimum bucket bound (e.g. -5000 on a negative-bucket latency
+  // histogram) rather than a real value. Shared by HtmlTableRow (the HTML
+  // admin table, below) and AdminSite::PrintHistograms (the JSON histograms
+  // endpoint), both of which omit/null the four percentile cells below it.
+  static constexpr int kMinSamplesForPercentiles = 5;
+
   virtual ~Histogram();
   // Record a value in its bucket.
   virtual void Add(double value) = 0;
@@ -410,8 +418,13 @@ class Statistics {
   virtual const std::map<GoogleString, StringVector>& TimedVariableMap() = 0;
   // Dump the variable-values to a writer.
   virtual void Dump(Writer* writer, MessageHandler* handler) = 0;
-  // Dump the variable-values in JSON format to a writer.
-  virtual void DumpJson(Writer* writer, MessageHandler* message_handler) = 0;
+  // Dump the variable-values in JSON format to a writer. Besides the values
+  // and the legacy maxlength field, the payload lists the gauges (the
+  // up/down counters, which are levels rather than ever-growing counters) and
+  // carries the scope this view is for ("global" or "vhost"), the host this
+  // instance identifies as, and the capture time in milliseconds since epoch.
+  virtual void DumpJson(StringPiece scope, StringPiece host, int64 now_ms,
+                        Writer* writer, MessageHandler* message_handler) = 0;
   virtual void RenderTimedVariables(Writer* writer, MessageHandler* handler);
   // Write all the histograms in this Statistic object to a writer.
   virtual void RenderHistograms(Writer* writer, MessageHandler* handler);
@@ -424,6 +437,16 @@ class Statistics {
   // Statistics*, rather than the specific subclass, hence its being here.
   // Return the StatisticsLogger associated with this Statistics.
   virtual StatisticsLogger* console_logger() { return NULL; }
+
+  // Advance this statistics' console log when its logging interval has
+  // elapsed; called on every request and around resource fetches. The
+  // base implementation is empty: kernel/base cannot see
+  // StatisticsLogger (util depends on base, not vice versa).
+  // SharedMemStatistics ticks its own logger, and SplitStatistics ticks
+  // the local logger AND the global statistics' logger, so the
+  // whole-server log keeps receiving samples when per-virtual-host
+  // statistics are enabled. Null loggers are tolerated by every override.
+  virtual void UpdateConsoleLogIfRequired();
 
   // Testing helper method to look up a statistics numeric value by name.
   // Please do not use this in production code.  This finds the current

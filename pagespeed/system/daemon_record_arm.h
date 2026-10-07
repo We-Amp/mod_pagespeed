@@ -301,13 +301,15 @@ DaemonRecordDecision EvaluateDaemonRecordGate(const DaemonAbi& abi,
 //                     harness's assertion table (HANDLED_VARY) and declares the
 //                     divergence from the peer's store-side gate there.
 //
-// AND ONE IGNORED CLASS: headers the serving stack stamps per response rather
-// than reproducing from an entry -- `Date`, `Server`, `Age`, `Accept-Ranges`
-// and the hop-by-hop names.  Without it the rule is vacuous in the strongest
-// sense: the seam hands this predicate the SERVER'S FINALIZED headers, so
-// every response carries a `Date` and an `Accept-Ranges`, every CDN-fronted
-// one carries an `Age`, and everything would be marked for ever.  See
-// kServeGeneratedHeaders for why each member is in that class.
+// AND TWO IGNORED CLASSES.  One: headers the serving stack stamps per
+// response rather than reproducing from an entry -- `Date`, `Server`, `Age`,
+// `Accept-Ranges` and the hop-by-hop names.  Without it the rule is vacuous
+// in the strongest sense: the seam hands this predicate the SERVER'S
+// FINALIZED headers, so every response carries a `Date` and an
+// `Accept-Ranges`, every CDN-fronted one carries an `Age`, and everything
+// would be marked for ever.  See kServeGeneratedHeaders for why each member
+// is in that class.  Two: a port's own copies of headers that are present
+// under their real names in the same set -- see kPortCopiedHeaders.
 //
 // WHAT THIS PREDICATE CANNOT SEE, stated because a reader will otherwise
 // assume it can: the list it is handed is the response as the SERVER finalized
@@ -416,6 +418,15 @@ class DaemonRecordWriter {
 int NotifyDaemon(const DaemonAbi& abi, StringPiece socket_path,
                  const DaemonRecordInput& input,
                  const DaemonRecordDecision& decision);
+
+class RewriteStats;
+
+// Moves the per-class split of the daemon fall-through counter for one
+// RECORDED origin response -- the first moment the class of that
+// fall-through is known, from the origin's own Content-Type.  css, js and
+// image each move their own counter; html, other and anything unrecognized
+// move nothing.  No-op for a null stats pointer.
+void RecordDaemonFallthroughClass(RewriteStats* stats, int ps_content_type);
 
 }  // namespace net_instaweb
 

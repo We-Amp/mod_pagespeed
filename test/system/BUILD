@@ -35,62 +35,24 @@ sh_binary(
         "//install:do_not_modify",
         "//test/system/automatic:all_test_files",
         "//test/system/pagespeed_test_framework:framework_files",
+        ":external_origin_files",
     ],
     visibility = ["//visibility:public"],
 )
 
-# =============================================================================
-# Bash System Tests (Legacy)
-# =============================================================================
-#
-# Apache mod_pagespeed system tests (bash-based)
-#
-# These tests require:
-#   - Apache installed on the system
-#   - sudo access (for Apache control)
-#   - Network access (localhost)
-#
-# Run with:
-#   bazel test //test/system:apache_system_test --test_output=streamed
-#
-# Or run a specific test:
-#   bazel test //test/system:apache_system_test --test_arg=extend_cache --test_output=streamed
-#
-# Note: These tests are tagged "manual" because they require system setup
-# that isn't available in all environments. They also require the module
-# to be built first:
-#   bazel build //:libmod_pagespeed.so
-
-sh_test(
-    name = "apache_system_test",
-    srcs = ["apache_system_test.sh"],
-    args = [],
-    data = [
-        "//:libmod_pagespeed.so",
-        "//install:mod_pagespeed_example",
-        "//install:mod_pagespeed_test",
-        "//install:do_not_modify",
-        "//pagespeed/automatic:system_test_files",
-        "//pagespeed/apache:system_test_files",
-        "//pagespeed/system:system_test_files",
-    ],
-    # These tests require system access
-    tags = [
-        "local",        # Must run locally, not remote
-        "manual",       # Don't run in default test suite
-        "no-sandbox",   # Needs network and system access
-        "requires-network",
-    ],
-    # System tests can take a long time
-    timeout = "eternal",  # No timeout limit
-    deps = ["@bazel_tools//tools/bash/runfiles"],
+# The external-origin stand-in content setup_test_content() copies into
+# /var/www/external_origin (see setup_apache_test.sh); not runfiles by
+# default, so the Bazel-run entry point needs it listed explicitly.
+filegroup(
+    name = "external_origin_files",
+    srcs = glob(["external_origin/**"]),
+    visibility = ["//visibility:public"],
 )
 
 # Filegroup for individual test scripts that can be run
 filegroup(
     name = "system_test_scripts",
     srcs = [
-        "apache_system_test.sh",
         "run_system_tests.sh",
         "setup_apache_test.sh",
     ],

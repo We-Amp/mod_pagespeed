@@ -42,12 +42,6 @@ const double kBarHeightPerBucket = 20;
 // out of total counts.
 // The width of a bucket is percentage_of_bucket_value * kBarWidthTotal.
 const double kBarWidthTotal = 400;
-// Minimum number of samples required before percentile estimates
-// (median/90/95/99) are meaningful. Below this the estimate degrades to a
-// near-minimum bucket bound (e.g. -5000 on a negative-bucket latency
-// histogram), so we omit the percentile cells rather than emit that no-data
-// value to any consumer of the histogram table.
-const double kMinSamplesForPercentiles = 5;
 }  // namespace
 
 class MessageHandler;
@@ -379,6 +373,8 @@ void Statistics::RenderTimedVariables(Writer* writer,
     writer->Write(end, message_handler);
   }
 }
+
+void Statistics::UpdateConsoleLogIfRequired() {}
 
 int64 Statistics::LookupValue(StringPiece stat_name) {
   Variable* var = FindVariable(stat_name);

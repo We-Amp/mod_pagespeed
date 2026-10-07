@@ -36,9 +36,12 @@ export const VENDOR_URL = 'https://we-amp.com/';
 // package descriptions, the admin console's chrome — derives the product name
 // from these two constants, so a product identity change is an edit HERE and
 // nowhere else. PRODUCT_NAME is the lowercase engine name as it appears in
-// directives and prose; PRODUCT_DISPLAY_NAME is the camel-cased marketing form.
+// directives and prose. Ruling (2026-08-31): the display form is lowercase
+// everywhere — titles read "… — mod_pagespeed 2.1"; the camel "ModPageSpeed"
+// survives only in historical references to the frozen 2.0 line, as a literal,
+// never via these constants.
 export const PRODUCT_NAME = 'mod_pagespeed';
-export const PRODUCT_DISPLAY_NAME = 'ModPageSpeed';
+export const PRODUCT_DISPLAY_NAME = 'mod_pagespeed';
 
 // --- Canonical site URLs ----------------------------------------------------
 // Derived from WEBSITE so a domain change flows to every link; the trailing

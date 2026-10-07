@@ -22,6 +22,19 @@
 #   justification REQUIRED when cpe == "N/A": why no CPE applies. Optional but
 #                 encouraged otherwise (e.g. to note which CPE variant was chosen
 #                 over a plausible-but-wrong alternative).
+#   osv_feed      OPTIONAL. URL of the dep's own authoritative OSV feed (a JSON
+#                 array of OSV records: CVE ids in `aliases`, affected versions
+#                 in SEMVER `affected[].ranges[].events`). cve_scan.py drops a
+#                 post-release_date finding when that feed shows the pinned
+#                 version FIXED (proper OSV range evaluation, so a backport
+#                 fixed on an older branch does not count), and lists it under
+#                 "fixed in pin per upstream feed". This retires the NVD
+#                 publish-lag over-report (NVD publishes days after upstream's
+#                 release-day advisory) without a cve-ignore.yaml entry per
+#                 CVE. The feed is captured into nvd-snapshot.json by the daily
+#                 refresh, so the per-PR scan stays offline. Missing/unparseable
+#                 feed -> the scan falls back to NVD findings + ignore list.
+#                 Only use a feed the upstream project itself publishes.
 #
 # CPE choices were verified against the live NVD CPE dictionary + CVE API on
 # 2026-05-24 (totalResults shown in comments). A WRONG CPE is a silent
@@ -172,7 +185,8 @@ deps:
 
   curl:
     cpe: "cpe:2.3:a:haxx:curl"                 # NVD: 143 CVEs (canonical; curl:curl has only 4)
-    release_date: "2026-06-24"                  # curl-8_21_0 — GitHub release published 2026-06-24. (Was 2026-04-29 = curl-8_20_0. Same discipline as before: the date tracks the PINNED release so the publish-date filter drops CVEs the pin already fixes.)
+    osv_feed: "https://curl.se/docs/vuln.json"  # curl's own vulnerability DB (OSV); retires NVD publish-lag findings the pin already fixes
+    release_date: "2026-09-02"                  # curl-8_22_0 — GitHub release published 2026-09-02. (Was 2026-06-24 = curl-8_21_0, before that 2026-04-29 = curl-8_20_0. Same discipline as before: the date tracks the PINNED release so the publish-date filter drops CVEs the pin already fixes. Bumped in the same commit as LIBCURL_VERSION in bazel/repositories.bzl — never move this date without moving the pin.)
 
   libmemcached:
     cpe: "cpe:2.3:a:awesome:libmemcached"      # NVD: 1 CVE (the awesomized fork)

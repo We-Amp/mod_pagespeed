@@ -69,18 +69,12 @@ class TestBrokenImages:
             run_wget_with_args -q $IMG_URL
             check_200_http_response_file "$WGET_OUTPUT"
         """
-        # Note: The hash in the original test may not match, but the test
-        # verifies the server doesn't crash on unoptimizable images
         img_url = f"{rewritten_root}/images/xOptPuzzle.jpg.pagespeed.ic.Zi7KMNYwzD.jpg"
 
         response = client.get(img_url)
-
-        # The server should either serve the optimized image (200)
-        # or serve the original if optimization failed (200)
-        # or return 404 if the original doesn't exist
-        # The important thing is it shouldn't return 500
-        assert response.status != 500, \
-            "Server should not return 500 for unoptimizable images"
+        # check_200_http_response_file: an image that cannot be optimized
+        # further is still served.
+        assert_http_status(response, 200)
 
 
 class TestMissingRewrittenResources:

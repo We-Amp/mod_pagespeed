@@ -9,7 +9,6 @@ build/gyp_helper.pyc
 build/landmine_utils.pyc
 out/
 tools/closure/
-!devel/Makefile
 release/
 log/
 bazel-*

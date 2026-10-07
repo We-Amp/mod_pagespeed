@@ -371,6 +371,69 @@ class TestNginxAdmin:
             "Admin cache page should mention cache"
         )
 
+    @pytest.mark.nginx_only
+    def test_handler_paths_are_case_sensitive(
+        self, client: PageSpeedClient, server_config
+    ):
+        """A handler path is matched exactly as configured.
+
+        The handler lookup is case-sensitive, like nginx `location` blocks:
+        the configured spelling is served by the handler, any other letter
+        case is not a handler request and falls through to the server (the
+        lane has no such file, so a 404). Covers the subtree handlers (admin,
+        global admin) and the exact-match handlers (statistics, global
+        statistics, console, messages; the lane sets GlobalAdminPath,
+        GlobalStatisticsPath, ConsolePath and MessagesPath in
+        run_nginx_tests.sh).
+        """
+        for configured in (
+            server_config.admin_path,
+            f"{server_config.admin_path}/statistics",
+            "/pagespeed_global_admin",
+            "/pagespeed_global_admin/statistics",
+            server_config.stats_path,
+            "/pagespeed_global_statistics",
+            "/pagespeed_console",
+            "/ngx_pagespeed_message",
+        ):
+            served = client.get(configured)
+            require_no_auth_gate(served, f"Handler {configured}")
+            assert served.status in (200, 301, 302), (
+                f"{configured} should be served by its handler, got status "
+                f"{served.status}"
+            )
+
+            for variant in (configured.upper(), configured.title()):
+                assert variant != configured
+                response = client.get(variant)
+                assert response.status == 404, (
+                    f"{variant} must not be served by the handler configured "
+                    f"at {configured}, got status {response.status}"
+                )
+
+    @pytest.mark.nginx_only
+    def test_messages_handler_json_not_cacheable(self, client: PageSpeedClient):
+        """The messages handler answers the shared JSON and is not cacheable.
+
+        Ported from: pagespeed/system/system_tests/handler_access_messages.sh
+        (the bash suite remains the developer-run equivalent). The lane sets
+        MessagesPath /ngx_pagespeed_message (run_nginx_tests.sh).
+        """
+        response = client.get("/ngx_pagespeed_message")
+
+        require_no_auth_gate(response, "Messages handler /ngx_pagespeed_message")
+        require_status_ok(response, "Messages handler")
+        assert '"messages":[' in response.text, (
+            f"Expected a JSON messages array, got: {response.text[:200]}"
+        )
+        assert '"scope":"process"' in response.text, (
+            f"Expected process scope, got: {response.text[:200]}"
+        )
+        assert_header_contains(response, "Cache-Control", "no-store")
+        assert not response.header("ETag"), (
+            f"Messages response must carry no ETag, got {response.header('ETag')!r}"
+        )
+
 
 # ============================================================================
 # TestNginxCacheHeaders: Cache header tests

@@ -161,13 +161,13 @@ package-test-test-rocky-apache:latest
 # the single place to register a new JS surface.
 #   admin-console          - the shipped admin SPA (pagespeed/system/console)
 #   browser-tests          - Playwright/browser harness (test/browser)
-#   loadtest-collect       - load-test result collector (devel/loadtest_collect)
+#   loadtest-collect       - load-test result collector (tools/stress/loadtest_collect)
 #   minify-corpus-fixtures - pinned bundler toolchain used to grow the
 #                            js-minify corpus (tools/js-minify-corpus)
 NPM_LOCKFILES="
 admin-console pagespeed/system/console/pnpm-lock.yaml
 browser-tests test/browser/package-lock.json
-loadtest-collect devel/loadtest_collect/package-lock.json
+loadtest-collect tools/stress/loadtest_collect/package-lock.json
 minify-corpus-fixtures tools/js-minify-corpus/bundle-fixtures/package-lock.json
 "
 

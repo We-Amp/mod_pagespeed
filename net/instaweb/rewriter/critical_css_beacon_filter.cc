@@ -81,6 +81,15 @@ void CriticalCssBeaconFilter::InitStats(Statistics* statistics) {
 }
 
 bool CriticalCssBeaconFilter::MustSummarize(HtmlElement* element) const {
+  // Only stylesheet links are candidates. The critical selector filter leaves
+  // inline <style> blocks as they are, so nothing needs to be known about
+  // their selectors; and blocks whose selectors differ from one response to
+  // the next (generated class names) would make every response look like a
+  // page with new rules, for which no earlier report counts.
+  if (element->keyword() != HtmlName::kLink) {
+    return false;
+  }
+
   // Don't summarize alternate stylesheets, they are clearly non-critical.
   if (element->keyword() == HtmlName::kLink &&
       CssTagScanner::IsAlternateStylesheet(
@@ -123,7 +132,9 @@ void CriticalCssBeaconFilter::AppendSelectorsInitJs(
 // Append the beacon initialization JavaScript to |script|.
 // Right now the result looks like:
 //   pagespeed.criticalCssBeaconInit('beacon_url','page_url','options_hash',
-//        pagespeed.selectors);
+//        'nonce',pagespeed.selectors);
+// with a trailing ",true" argument when only the first screen's selectors
+// are wanted.
 void CriticalCssBeaconFilter::AppendBeaconInitJs(const BeaconMetadata& metadata,
                                                  GoogleString* script) {
   const GoogleString& raw_beacon_url =
@@ -139,9 +150,11 @@ void CriticalCssBeaconFilter::AppendBeaconInitJs(const BeaconMetadata& metadata,
                           &page_url);
   Hasher* hasher = driver()->server_context()->hasher();
   GoogleString options_hash = hasher->Hash(driver()->options()->signature());
-  StrAppend(script, "pagespeed.criticalCssBeaconInit('", beacon_url, "','",
-            page_url, "','", options_hash, "','", metadata.nonce,
-            "',pagespeed.selectors);");
+  StrAppend(
+      script, "pagespeed.criticalCssBeaconInit('", beacon_url, "','", page_url,
+      "','", options_hash, "','", metadata.nonce, "',pagespeed.selectors",
+      driver()->options()->critical_css_above_the_fold_only() ? ",true" : "",
+      ");");
 }
 
 void CriticalCssBeaconFilter::SummariesDone() {

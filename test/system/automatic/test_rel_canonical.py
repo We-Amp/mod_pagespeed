@@ -22,6 +22,7 @@ headers while IPRO resources do not.
 """
 
 import random
+import re
 
 import pytest
 
@@ -91,18 +92,12 @@ class TestRelCanonicalCacheExtended:
         self, client: PageSpeedClient, rewritten_root: str
     ):
         """Cache-extended (.ce.) resources should have Link rel=canonical."""
-        # Note: The hash in the URL may not be valid, but we can test with
-        # any cache-extended resource pattern
-        url = f"{rewritten_root}/images/Puzzle.jpg.pagespeed.ce.ABCD1234.jpg"
-
+        url = f"{rewritten_root}/images/Puzzle.jpg.pagespeed.ce.HASH.jpg"
         response = client.get(url)
-
-        # Even if 404, check the headers for valid resources
-        if response.status == 200:
-            link_header = response.header("Link")
-            assert link_header, "Cache-extended resource should have Link header"
-            assert "canonical" in link_header.lower(), \
-                f"Cache-extended resource should have rel=canonical, got: {link_header}"
+        link_header = response.header("Link")
+        assert re.search(r"rel.*canonical", link_header), (
+            f"{url} (HTTP {response.status}) lacks Link rel=canonical; Link: {link_header!r}"
+        )
 
 
 class TestRelCanonicalImageCompressed:
@@ -120,16 +115,12 @@ class TestRelCanonicalImageCompressed:
         self, client: PageSpeedClient, rewritten_root: str
     ):
         """Image-compressed (.ic.) resources should have Link rel=canonical."""
-        url = f"{rewritten_root}/images/xPuzzle.jpg.pagespeed.ic.ABCD1234.jpg"
-
+        url = f"{rewritten_root}/images/xPuzzle.jpg.pagespeed.ic.HASH.jpg"
         response = client.get(url)
-
-        # Even if 404, check the headers for valid resources
-        if response.status == 200:
-            link_header = response.header("Link")
-            assert link_header, "Image-compressed resource should have Link header"
-            assert "canonical" in link_header.lower(), \
-                f"Image-compressed resource should have rel=canonical, got: {link_header}"
+        link_header = response.header("Link")
+        assert re.search(r"rel.*canonical", link_header), (
+            f"{url} (HTTP {response.status}) lacks Link rel=canonical; Link: {link_header!r}"
+        )
 
 
 if __name__ == "__main__":

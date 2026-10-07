@@ -691,8 +691,13 @@ class ServerContext {
   // remote configuration is specified in config. This can block for a maximum
   // of timeout_ms. If on_startup is true, the fetch is backgrounded and the
   // result is ignored. Startup fetches are only used for populating the cache.
+  // Only a 200 response (or a cached copy revalidated with 304) is returned;
+  // any other status yields "". If serve_stale_if_fetch_error is true and a
+  // refetch fails, the last good copy is returned for up to a day past its
+  // expiry.
   GoogleString FetchRemoteConfig(const GoogleString& url, int64 timeout_ms,
                                  bool on_startup,
+                                 bool serve_stale_if_fetch_error,
                                  const RequestContextPtr& request_ctx);
 
   // These are normally owned by the RewriteDriverFactory that made 'this'.

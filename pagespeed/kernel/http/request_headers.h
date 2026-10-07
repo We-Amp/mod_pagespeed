@@ -81,6 +81,10 @@ class RequestHeaders : public Headers<HttpRequestHeaders> {
   const char* method_string() const;
   void set_method(Method method);
 
+  // Maps an HTTP method token (any case) to Method; unknown tokens map to
+  // kError.  Used by the ports to record the native request method.
+  static Method MethodFromString(StringPiece method);
+
   // This is encoded message body, a rewriter or fetcher
   // may opt to translate to entity-body only after removing
   // header which has encoding information.

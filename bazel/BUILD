@@ -11,6 +11,7 @@ exports_files([
     "googleurl_macos_libcxx.patch",
     "curl_boringssl_ssl_connect_8_20.patch",
     "boringssl_dll_unload_tls_cleanup.patch",
+    "boringssl_no_weak_alloc_hooks.patch",
     "libavif_merge_static_libs_clang_cl.patch",
 ])
 

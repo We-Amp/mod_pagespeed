@@ -1,0 +1,6 @@
+<!--#include virtual="/mod_pagespeed_test/filter_order_ssi/fragment.html" -->
+
+<body>
+<p>Filter-order SSI probe: the module runs after SSI, so the included
+fragment's image is optimized.</p>
+</body>

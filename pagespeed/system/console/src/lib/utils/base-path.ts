@@ -30,8 +30,8 @@ export function detectBasePath(): BasePathInfo {
   const basePath = path.replace(/\/(console\/?)?$/, "");
 
   // isGlobal keys on the conventional name for the built-in paths. For a
-  // custom GlobalAdminPath this heuristic can't tell, and no admin endpoint
-  // reports the scope — the conventional name is the console's only signal.
+  // custom GlobalAdminPath this heuristic can't tell; the shell corrects it
+  // from the configuration's own scope (/config) once that answer arrives.
   const isGlobal = /(^|\/)pagespeed_global_admin(\/|$)/.test(path);
 
   // Dev mode (Vite proxy) lands here with basePath "".

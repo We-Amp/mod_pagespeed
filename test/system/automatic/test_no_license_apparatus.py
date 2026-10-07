@@ -27,20 +27,25 @@ job (Apache / nginx / Envoy / IIS):
     ``pagespeed.license`` next to FileCachePath, where earlier releases kept
     the license token (setup_apache_test.sh, run_nginx_tests.sh and
     package-test/run-nginx-tests.sh). The module must ignore it: one INFO
-    line -- read from the message history on Apache and from the error log
-    (``PAGESPEED_NGINX_ERROR_LOG``) on nginx --, never a warning, and -- the
-    rest of this suite passing with the file present -- no change in
-    behaviour.
+    line -- read from the Apache error log (``PAGESPEED_APACHE_ERROR_LOG``,
+    the lane's ``LogLevel warn pagespeed:info`` keeps it there) on Apache and
+    from the error log (``PAGESPEED_NGINX_ERROR_LOG``) on nginx --, never a
+    warning, and -- the rest of this suite passing with the file present --
+    no change in behaviour. The message history (``/mod_pagespeed_message``)
+    is not used for this: it is a size-limited ring that a long lane run can
+    evict the startup notice from before this test runs (observed: 546
+    messages, notice gone).
 """
 
 import json
 import os
+import subprocess
 from pathlib import Path
+from typing import Optional
 
 import pytest
 
 from pagespeed_test_framework import PageSpeedClient, assert_http_status
-
 
 GLOBAL_ADMIN_PATH = "/pagespeed_global_admin"
 RETIRED_LEAVES = ("status", "apply", "activate", "consent")
@@ -53,6 +58,41 @@ LICENSE_WARNING_TELLS = (
     "X-PageSpeed-Warn",
 )
 CSRF_REJECT_MESSAGE = "Missing or invalid CSRF headers"
+
+
+def _apache_error_log_path() -> str:
+    return os.environ.get("PAGESPEED_APACHE_ERROR_LOG", "/var/log/apache2/error.log")
+
+
+def _read_apache_error_log() -> Optional[str]:
+    """Return the whole decoded Apache error log, or None when it cannot be
+    read.
+
+    Whole, not tailed: the stale-license notice is emitted once, from
+    ChildInit at process startup, and a size-bounded tail can push it out
+    of the window on a lane that has since logged enough at
+    pagespeed:info -- the same reasoning as
+    automatic/test_mpm_thread_resolution.py's _read_error_log for its own
+    startup line. None -- not "" -- is the unreadable signal on purpose,
+    so a broken probe is never mistaken for a clean/absent result.
+    """
+    path = _apache_error_log_path()
+    try:
+        with open(path, "rb") as f:
+            return f.read().decode("utf-8", errors="replace")
+    except (FileNotFoundError, PermissionError):
+        try:
+            res = subprocess.run(
+                ["sudo", "-n", "cat", path],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                timeout=30,
+            )
+            if res.returncode != 0:
+                return None
+            return res.stdout.decode("utf-8", errors="replace")
+        except (subprocess.SubprocessError, OSError):
+            return None
 
 
 def _optimized_html(client: PageSpeedClient, example_root: str):
@@ -152,13 +192,17 @@ class TestStaleLicenseFileIgnored:
     ignored (the rest of the suite passing with it present is the
     no-behaviour-change half of the assertion).
 
-    Where the notice is read from differs per port. It is emitted once per
-    process at startup, so it is the oldest entry in the admin message
-    history -- a 100 KB ring (MessageBufferSize in every rig) that this suite
-    fills shortly after this test runs on a single-worker nginx, evicting it.
-    Apache keeps reading the message history (MPM children respawn and
-    re-emit); nginx reads the server error log, which both nginx rigs export
-    as PAGESPEED_NGINX_ERROR_LOG with error_log at level info.
+    Where the notice is read from differs per port, but both now read their
+    own error log rather than the admin message history: the message history
+    is a size-limited ring (MessageBufferSize) that a long lane run can evict
+    the once-per-process startup notice from before this test runs (observed:
+    546 messages, notice gone). Apache reads PAGESPEED_APACHE_ERROR_LOG whole
+    (the same reader pattern as test_mpm_thread_resolution.py, so a tail
+    window cannot push the once-per-process notice out of view); the lane's
+    `LogLevel warn pagespeed:info` (setup_apache_test.sh) is what keeps an
+    INFO-severity module message in that file at all -- Apache's default
+    LogLevel (warn) would otherwise filter it out before it reaches the file.
+    nginx reads PAGESPEED_NGINX_ERROR_LOG with error_log at level info.
     """
 
     def test_stale_file_is_noticed_once_at_info(
@@ -182,15 +226,22 @@ class TestStaleLicenseFileIgnored:
                 assert "pagespeed.license" in notice, notice
             return
 
-        messages = _message_history(client, server_config)
-        notices = [m for m in messages if STALE_NOTICE in m["message"]]
+        log_text = _read_apache_error_log()
+        assert log_text is not None, (
+            f"could not read {_apache_error_log_path()} "
+            f"(PAGESPEED_APACHE_ERROR_LOG); the reader needs either direct "
+            f"read access or passwordless sudo"
+        )
+        lines = log_text.splitlines()
+        notices = [line for line in lines if STALE_NOTICE in line]
         assert notices, (
-            "expected the stale-license INFO notice in the message history; "
-            f"got {len(messages)} messages, none matching {STALE_NOTICE!r}"
+            f"expected the stale-license INFO notice in "
+            f"{_apache_error_log_path()}; got {len(lines)} lines in the "
+            f"log, none matching {STALE_NOTICE!r}"
         )
         for notice in notices:
-            assert notice["severity"] == "info", notice
-            assert "pagespeed.license" in notice["message"], notice
+            assert "[pagespeed:info]" in notice, notice
+            assert "pagespeed.license" in notice, notice
 
     def test_message_history_has_no_license_warning(
         self, client: PageSpeedClient, server_config

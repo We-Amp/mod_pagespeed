@@ -467,12 +467,20 @@ inline bool IsAscii(char c) { return isascii(static_cast<unsigned char>(c)); }
 inline bool IsNonControlAscii(char c) { return ('\x20' <= c) && (c <= '\x7E'); }
 
 // Escape a string for embedding in JSON. Handles all required JSON escapes
-// (RFC 8259 §7) plus control characters as \u00xx.
-// Canonical source: pagespeed-optimizer lib/base/string_util.h.
+// (RFC 8259 §7) plus control characters as \u00xx, plus (defence in depth,
+// so the output can never be mistaken for markup or split a JS statement
+// even if served under the wrong content type) '<', '>', '&' and the
+// U+2028/U+2029 line separators as \uXXXX.
+// This copy and the 2.0 escaper (pagespeed-optimizer lib/base/string_util.h) have
+// diverged on purpose: 2.0 splits it into an RFC-minimal variant for pure-JSON
+// sinks and a script-safe variant, and pins '&' and U+2028/U+2029 passing
+// through; 1.x keeps this single hardened escaper because every admin handler
+// shares it. Do not "sync" the two in either direction.
 inline GoogleString JsonEscape(StringPiece s) {
   GoogleString out;
   out.reserve(s.size());
-  for (char c : s) {
+  for (size_t i = 0; i < s.size(); ++i) {
+    char c = s[i];
     switch (c) {
       case '"':
         out.append("\\\"");
@@ -494,6 +502,30 @@ inline GoogleString JsonEscape(StringPiece s) {
         break;
       case '\t':
         out.append("\\t");
+        break;
+      case '<':
+        out.append("\\u003c");
+        break;
+      case '>':
+        out.append("\\u003e");
+        break;
+      case '&':
+        out.append("\\u0026");
+        break;
+      case '\xE2':
+        // The 3-byte UTF-8 sequences for U+2028 (LINE SEPARATOR) and U+2029
+        // (PARAGRAPH SEPARATOR) are E2 80 A8 / E2 80 A9. A lone 0xE2, or
+        // 0xE2 0x80 not followed by 0xA8/0xA9, is not one of these
+        // sequences and passes through unchanged, one byte at a time.
+        if (i + 2 < s.size() && static_cast<unsigned char>(s[i + 1]) == 0x80 &&
+            (static_cast<unsigned char>(s[i + 2]) == 0xA8 ||
+             static_cast<unsigned char>(s[i + 2]) == 0xA9)) {
+          out.append(static_cast<unsigned char>(s[i + 2]) == 0xA8 ? "\\u2028"
+                                                                  : "\\u2029");
+          i += 2;
+        } else {
+          out.push_back(c);
+        }
         break;
       default:
         if (static_cast<unsigned char>(c) < 0x20) {

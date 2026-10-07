@@ -52,9 +52,10 @@ why this test matches the healthy line as a whole and asserts the degraded
 sentence is absent by its own distinct wording.
 
 On this lane ``setup_apache_test.sh`` pins the prefork MPM with
-``ServerLimit 6`` / ``MaxRequestWorkers 6``, so ``AP_MPMQ_MAX_DAEMONS`` is 6
+``MaxRequestWorkers 16`` (a fixed pool of sixteen children under a
+``ServerLimit`` of 32), so ``AP_MPMQ_MAX_DAEMONS`` is 16
 and prefork's ``AP_MPMQ_MAX_THREADS`` is a hardcoded 1. Post-fix the log must
-therefore say ``httpd children: 6`` and ``MPM: non-threaded
+therefore say ``httpd children: 16`` and ``MPM: non-threaded
 (ThreadsPerChild=1)``; pre-fix it says it could not read the count at all.
 
 Why the thread *counts* are derived from the log line
@@ -68,7 +69,7 @@ out of the very line it is asserting and feeds it back through the policy
 formula, the same trick the ``Expected()`` helper in
 ``test/pagespeed/system/system_rewrite_driver_factory_test.cc`` uses.
 
-With 6 children most runners floor to 1 + 1 anyway, so the discriminating
+With 16 children most runners floor to 1 + 1 anyway, so the discriminating
 power of the number itself is low on this lane -- the real signal is the
 healthy-vs-degraded shape and the ``httpd children``/``MPM`` fields.
 
@@ -153,7 +154,7 @@ CPU_SHARE_DENOMINATOR = 2
 # What setup_apache_test.sh pins for the prefork MPM on this lane. If those
 # values move, this test must move with them -- and so must
 # test_graceful_restart_leak.py, which depends on the same pinning.
-EXPECTED_HTTPD_CHILDREN = 6
+EXPECTED_HTTPD_CHILDREN = 16
 
 # prefork answers AP_MPMQ_IS_THREADED with AP_MPMQ_NOT_SUPPORTED, so
 # QueryMpmThreadInfo() leaves max_threads at its default of 1 and
@@ -323,8 +324,8 @@ class TestMpmThreadCountResolution:
             assert children == EXPECTED_HTTPD_CHILDREN, (
                 f"Resolution reported 'httpd children: {children}', expected "
                 f"{EXPECTED_HTTPD_CHILDREN}. setup_apache_test.sh pins the "
-                f"prefork MPM to ServerLimit/MaxRequestWorkers "
-                f"{EXPECTED_HTTPD_CHILDREN}, which is what "
+                f"prefork MPM to MaxRequestWorkers "
+                f"{EXPECTED_HTTPD_CHILDREN} (a fixed pool), which is what "
                 f"AP_MPMQ_MAX_DAEMONS must answer once check_config has run. "
                 f"A different number means either the MPM pinning moved (update "
                 f"this constant AND check test_graceful_restart_leak.py, which "

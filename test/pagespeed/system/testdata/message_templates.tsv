@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+#
+# Message history line -> template pairs (one per line: the buffered line
+# without its one-character type prefix, a TAB, the expected template).
+# Read by the module's admin_site_test (MessageTemplateTest.SharedFixture)
+# and by the admin console's message-template.test.ts, so both
+# implementations of the template rules stay identical.
+[Fri, 02 Oct 2026 10:25:51 GMT] [Warning] [12345] mod_pagespeed: admin handler 'pagespeed_global_admin' received request from 172.18.0.4; intended for loopback. Restrict access at the web-server layer (Apache: <Location> Require local; nginx: allow 127.0.0.1; deny all; IIS: InfoUrlsLocalOnly). See https://www.modpagespeed.com/1.1/docs/admin-console/#url-path-acls-are-brittle	mod_pagespeed: admin handler 'pagespeed_global_admin' received request from N.N.N.N; intended for loopback. Restrict access at the web-server layer (Apache: <Location> Require local; nginx: allow N.N.N.N; deny all; IIS: InfoUrlsLocalOnly). See URL
+[Fri, 02 Oct 2026 10:25:51 GMT] [Info] [531] No permission to rewrite 'https://umami.example.test/script.js'	No permission to rewrite 'URL'
+[Fri, 02 Oct 2026 10:25:52 GMT] [Error] [531] Fetch of https://www.example.test/a.css?v=12 failed after 3017 ms	Fetch of URL failed after N ms
+[Fri, 02 Oct 2026 10:25:53 GMT] [Info] [531] cache volume v2/cache-8-ecb2343a75c6a0b7 opened	cache volume vN/cache-N-ID opened
+[Fri, 02 Oct 2026 10:25:54 GMT] [Warning] [531] slot 0x1f3A busy for 250ms	slot ID busy for Nms
+  at frame 7 in worker	  at frame N in worker
+[Fri, 02 Oct 2026 10:25:55 GMT] [Error] [531] [net/instaweb/foo.cc:123] Parse error at offset 77	Parse error at offset N
+[Fri, 02 Oct 2026 10:25:56 GMT] [Warning] [531] Resource HTTPS://Example.test/x.png"; retry	Resource URL"; retry
+[Fri, 02 Oct 2026 10:25:57 GMT] [Info] [531] wrote 12345678 bytes	wrote N bytes
+[Fri, 02 Oct 2026 10:25:57 GMT] [Info] [531] marker deadbeef seen	marker deadbeef seen
+[not a stamp] text 5	[not a stamp] text N
+[Fri, 02 Oct 2026 10:25:58 GMT] [Notice] [531] x 1	[Fri, N Oct N N:N:N GMT] [Notice] [N] x N
+[Fri, 02 Oct 2026 10:25:59 GMT] [Warning] [531] Ungültige Größe 42	Ungültige Größe N
+[Fri, 02 Oct 2026 10:26:00 GMT] [Info] [531] (see https://a.test/b)	(see URL
+[Fri, 02 Oct 2026 10:26:01 GMT] [Error] [531] in-place optimization is OFF: the optimizer daemon publishes cache directory generation 2 (cache_dir_generation) and this module is built for generation 1. The two cache layouts share nothing; nothing was opened and nothing was created. Install a module and daemon package pair that agree.	in-place optimization is OFF: the optimizer daemon publishes cache directory generation N (cache_dir_generation) and this module is built for generation N. The two cache layouts share nothing; nothing was opened and nothing was created. Install a module and daemon package pair that agree.
+[Fri, 02 Oct 2026 10:26:02 GMT] [Warning] [531] nothing will be recorded for in-place optimization: cannot open the optimizer daemon's cache volume at /var/cache/pagespeed-optimizer/v2: permission denied (attempt 1 of 5)	nothing will be recorded for in-place optimization: cannot open the optimizer daemon's cache volume at /var/cache/pagespeed-optimizer/vN: permission denied (attempt N of N)
+[Fri, 02 Oct 2026 10:26:03 GMT] [Info] [531] <img src=x onerror=alert(1)> javascript:alert(2)	<img src=x onerror=alert(N)> javascript:alert(N)

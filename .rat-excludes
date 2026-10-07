@@ -145,3 +145,4 @@ pnpm-lock\.yaml
 docker-compose.*\.yml
 pagespeed-envoy\.yaml
 github-actions-windows\.yml
+test/pagespeed/system/testdata/stats_json.global.golden

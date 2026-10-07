@@ -31,11 +31,12 @@
 #include "pagespeed/kernel/base/time_util.h"
 #include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/base/writer.h"
+#include "pagespeed/kernel/sharedmem/shared_circular_buffer.h"
 
 namespace net_instaweb {
 
 SystemMessageHandler::SystemMessageHandler(Timer* timer, AbstractMutex* mutex)
-    : timer_(timer), mutex_(mutex), buffer_(nullptr) {
+    : timer_(timer), mutex_(mutex), buffer_(nullptr), shared_buffer_(nullptr) {
 #ifdef _WIN32
   SetPidString(static_cast<int64>(_getpid()));
 #else
@@ -48,6 +49,9 @@ SystemMessageHandler::~SystemMessageHandler() {}
 void SystemMessageHandler::set_buffer(Writer* buff) {
   ScopedMutex lock(mutex_.get());
   buffer_ = buff;
+  // In production buff is always the process's SharedCircularBuffer; tests
+  // may pass a plain StringWriter, for which this is (correctly) nullptr.
+  shared_buffer_ = dynamic_cast<SharedCircularBuffer*>(buff);
 }
 
 void SystemMessageHandler::AddMessageToBuffer(MessageType type,
@@ -108,6 +112,24 @@ bool SystemMessageHandler::Dump(Writer* writer) {
   if (buffer_ == nullptr) {
     return false;
   }
+  return buffer_->Dump(writer, &internal_handler_);
+}
+
+bool SystemMessageHandler::DumpWithCount(Writer* writer, int64* lines_written) {
+  if (buffer_ == nullptr) {
+    *lines_written = 0;
+    return false;
+  }
+  if (shared_buffer_ != nullptr) {
+    // Dump and the line count are read under the SAME lock (see
+    // SharedCircularBuffer::DumpWithCount), so `lines_written` is exactly
+    // the cursor matching what was dumped: no message can land between the
+    // two calls and be silently skipped by the next poll's `since`.
+    return shared_buffer_->DumpWithCount(writer, &internal_handler_,
+                                         lines_written);
+  }
+  // A test double (e.g. StringWriter) has no notion of a line count.
+  *lines_written = 0;
   return buffer_->Dump(writer, &internal_handler_);
 }
 

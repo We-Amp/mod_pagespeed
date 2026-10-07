@@ -102,12 +102,9 @@ void SelectSmallerImage(
 // Dividing 49152 by 5 (multiplying by 0.2) gets us just under our
 // default 10k byte threshold.
 //
-// Making this number smaller will break apache/system_test.sh with this
-// failure:
-//     failure at line 353
-// FAILed Input: /tmp/.../fetched_directory/*256x192*Puzzle* : 8251 -le 8157
-// in 'quality of jpeg output images with generic quality flag'
-// FAIL.
+// Making this number smaller will break the pytest system-test suite's
+// JPEG-quality assertions (test/system/automatic/test_image_quality_jpeg.py),
+// which bound the resized size of this same 256x192 Puzzle fixture.
 //
 // A first attempt at computing that ratio is based on an analysis of Puzzle.jpg
 // at various compression ratios.  Sized to 256x192, or 49152 pixels:

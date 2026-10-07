@@ -19,16 +19,72 @@ import type {
 
 /**
  * Whether an error from a /v1/daemon/* endpoint means "no daemon here":
- * 502 — the module could not reach the daemon (down or not configured);
- * 404 — this module build does not serve the daemon proxy endpoints.
- * Both are normal operating states; the panels render an empty state, never
- * a raw error.
+ * 404 — this module build does not serve the daemon proxy endpoints;
+ * 501 — this daemon build does not serve the specific endpoint;
+ * 502 — the module could not reach the daemon;
+ * 503 — no daemon transport is configured on this port/context.
+ * All are normal operating states; the panels render an empty state, never
+ * a raw error, with `daemonUnavailableReason()` naming which one.
  */
 export function isDaemonUnavailable(error: Error | null): boolean {
   return (
     error instanceof ApiError &&
-    (error.status === 502 || error.status === 404)
+    (error.status === 404 ||
+      error.status === 501 ||
+      error.status === 502 ||
+      error.status === 503)
   );
+}
+
+/**
+ * The backend's `error` code out of an ApiError's detail, whether that
+ * detail is already the extracted string (as AdminApiClient's
+ * errorFromResponse produces it in production) or the raw JSON body (as
+ * tests may pass directly) -- reads the `error` field when the detail
+ * parses as JSON, else takes the detail as-is.
+ */
+export function errorCode(error: Error | null): string {
+  if (!(error instanceof ApiError)) return "";
+  const prefix = `HTTP ${error.status}: `;
+  const detail = error.message.startsWith(prefix)
+    ? error.message.slice(prefix.length)
+    : error.message;
+  try {
+    const parsed = JSON.parse(detail) as { error?: unknown };
+    if (typeof parsed.error === "string") return parsed.error;
+  } catch {
+    // Not JSON: `detail` is already the extracted reason string.
+  }
+  return detail;
+}
+
+/**
+ * The module's own 403 body for a leaf gated to the whole-server console,
+ * synthesized locally with no network request involved. `errorCode()` reads
+ * it exactly like the real answer -- for a page that already knows (via
+ * `knownPerVhostScope`) that asking would only reproduce it, so the page can
+ * render the same explanation without ever sending the request.
+ */
+export function wholeServerConsoleOnlyError(): ApiError {
+  return new ApiError(403, "whole_server_console_only");
+}
+
+/**
+ * Operator-facing sentence for why a daemon panel has nothing to show,
+ * shown under the "Daemon Unreachable" heading. Maps the daemon proxy's
+ * three reason codes; anything else (including a genuine transport
+ * failure/timeout) defaults to "unreachable".
+ */
+export function daemonUnavailableReason(error: Error | null): string {
+  switch (errorCode(error)) {
+    case "daemon_not_configured":
+      return "not configured on this server";
+    case "endpoint_unsupported_by_daemon":
+      return "this optimizer version does not provide this panel";
+    case "daemon_unreachable":
+    default:
+      return "unreachable";
+  }
 }
 
 /** Object.entries for a plain object; anything else degrades to no entries. */
@@ -37,38 +93,6 @@ export function objectEntries(value: unknown): Array<[string, unknown]> {
     return [];
   }
   return Object.entries(value);
-}
-
-/** "2d 5h 3m" / "41m 9s" / "12s"; "—" when absent or not a finite number. */
-export function formatUptime(seconds: number | undefined): string {
-  if (seconds === undefined || !Number.isFinite(seconds) || seconds < 0) {
-    return "\u2014";
-  }
-  const s = Math.floor(seconds);
-  const days = Math.floor(s / 86400);
-  const hours = Math.floor((s % 86400) / 3600);
-  const minutes = Math.floor((s % 3600) / 60);
-  const secs = s % 60;
-  if (days > 0) return `${days}d ${hours}h ${minutes}m`;
-  if (hours > 0) return `${hours}h ${minutes}m`;
-  if (minutes > 0) return `${minutes}m ${secs}s`;
-  return `${secs}s`;
-}
-
-/** "12.3 MB" style; "—" when absent or not a finite number. */
-export function formatBytes(bytes: number | undefined): string {
-  if (bytes === undefined || !Number.isFinite(bytes) || bytes < 0) {
-    return "\u2014";
-  }
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  let value = bytes;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit++;
-  }
-  const rounded = unit === 0 ? String(value) : value.toFixed(1);
-  return `${rounded} ${units[unit]}`;
 }
 
 /**
@@ -103,6 +127,23 @@ export function normalizeCooldowns(
   );
 }
 
+const COOLDOWN_REASON_LABELS: Record<string, string> = {
+  processing: "Processing",
+  write_failure: "Write failed",
+  revalidation: "Revalidating",
+};
+
+/**
+ * A cooldown reason as a short operator-facing label, or null when the daemon
+ * sent nothing usable: an absent, empty or unrecognised reason is just
+ * "in cooldown" at the call site. The raw codes are daemon vocabulary and
+ * never render (a non-string would print as "[object Object]").
+ */
+export function cooldownReasonLabel(reason: unknown): string | null {
+  if (typeof reason !== "string" || reason.length === 0) return null;
+  return COOLDOWN_REASON_LABELS[reason] ?? null;
+}
+
 /**
  * Flatten the numeric leaves of a serve-savings block into name/value rows
  * for a table, dot-joining nested keys ("images.rewrites"). Non-numeric
@@ -123,4 +164,26 @@ export function counterRows(
     }
   }
   return rows;
+}
+
+/** One health check's result as a sysadmin reads it. */
+export interface CheckResult {
+  text: string;
+  /** true: passing; false: failing; null: the optimizer reported something else. */
+  pass: boolean | null;
+}
+
+export function checkResult(value: unknown): CheckResult {
+  if (typeof value === "boolean") return { text: value ? "Pass" : "Fail", pass: value };
+  if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+    const v = value as Record<string, unknown>;
+    if (typeof v.pass === "boolean") {
+      const detail = [v.detail, v.message, v.reason, v.error].find(
+        (d): d is string => typeof d === "string" && d !== "",
+      );
+      if (v.pass) return { text: "Pass", pass: true };
+      return { text: detail ? `Fail: ${detail}` : "Fail", pass: false };
+    }
+  }
+  return { text: fieldValue(value), pass: null };
 }

@@ -18,6 +18,12 @@ installs the native module (`pagespeed_iis.dll`) and registers it with IIS.
 > build toolchain (see `DEVELOPER.md`); the signed MSI is the supported path for
 > everyone else.
 
+The installer also installs the PageSpeed optimizer, a Windows service that
+takes over in-place optimization of images, stylesheets and scripts, and
+leaves it **disabled**: until you turn it on, the module behaves exactly as it
+does without it. The optimizer needs nothing beyond Windows itself. To turn it
+on, see [Running PageSpeed for IIS with the optimizer](daemon-adapter-iis.md).
+
 ## Configuration
 
 PageSpeed for IIS is configured via `web.config` XML files.

@@ -435,6 +435,45 @@ TEST_F(DaemonRecordArmTest, TheReproducibleSetIsWhatAServeCanPutBack) {
   EXPECT_TRUE(OriginHeadersAreReproducible(
       Headers({"Content-Type", "text/css", "accept-ranges", "bytes"})));
 
+  // A port's own copies of headers that are present under their real names
+  // in the same set: the IIS port bookmarks cache-related headers under
+  // these exact names while they cross its pipeline, beside the real ones.
+  // Without this class every recording that crossed such a port would be
+  // marked not reproducible and the substrate would serve nothing, while
+  // looking perfectly healthy everywhere else.  Exact names only: any other
+  // `__x_` spelling is a bookmark some port minted for a reason this
+  // predicate cannot see, and stays fail-closed (below).
+  EXPECT_TRUE(
+      OriginHeadersAreReproducible(Headers({"Content-Type",
+                                            "text/css",
+                                            "Expires",
+                                            "Tue, 11 Aug 2026 00:00:00 GMT",
+                                            "__x_expires",
+                                            "Tue, 11 Aug 2026 00:00:00 GMT",
+                                            "ETag",
+                                            "\"abc\"",
+                                            "__x_e-tag",
+                                            "\"abc\"",
+                                            "__x_content-md5",
+                                            "dGVzdA==",
+                                            "__x_last-modified",
+                                            "Mon, 10 Aug 2026 00:00:00 GMT",
+                                            "__x_accept_ranges",
+                                            "bytes",
+                                            "Cache-Control",
+                                            "max-age=600",
+                                            "__x_Cache-Control",
+                                            "max-age=600",
+                                            "Accept-Ranges",
+                                            "bytes",
+                                            "__x_Accept-Ranges",
+                                            "bytes",
+                                            "E-Tag",
+                                            "\"abc\""})));
+  // ... but a bookmark spelling the list does not know stays fail-closed.
+  EXPECT_FALSE(OriginHeadersAreReproducible(
+      Headers({"Content-Type", "text/css", "__x_something-else", "1"})));
+
   // Not reproducible.  An arbitrary header, the CORS grant, a security policy,
   // a personalised response, and a representation-level header the entry does
   // not store.

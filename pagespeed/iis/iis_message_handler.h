@@ -19,6 +19,11 @@ namespace net_instaweb {
 	class Writer;
 	extern bool logToEventLog;
 	extern bool logToEventLogSet;
+	// True once a site's configuration has been parsed in this process, so
+	// `logToEventLog` states the directive rather than the value it had
+	// before anything was read.  A site that never mentions the directive
+	// leaves `logToEventLogSet` false but still has a value: off.
+	extern bool logToEventLogParsed;
 
 	class IisMessageHandler : public SystemMessageHandler {
 	public:                                                             
@@ -39,7 +44,6 @@ namespace net_instaweb {
 	private:             
 		BOOL WriteEventViewerLog(LPCSTR szNotification, MessageType type);
 		std::string Format(const char * str, va_list args);
-		HANDLE m_hEventLog;
 		GoogleMessageHandler handler_;
 		SharedCircularBuffer* buffer_;
 		AbstractMutex* mutex_;

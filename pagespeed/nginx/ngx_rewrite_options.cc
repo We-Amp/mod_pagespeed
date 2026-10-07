@@ -45,7 +45,10 @@ const char kConsolePath[] = "ConsolePath";
 const char kMessagesPath[] = "MessagesPath";
 const char kAdminPath[] = "AdminPath";
 const char kGlobalAdminPath[] = "GlobalAdminPath";
+const char kDaemonSocketPath[] = "DaemonSocketPath";
+const char kDaemonVolumePath[] = "DaemonVolumePath";
 const char kDaemonApiSocketPath[] = "DaemonApiSocketPath";
+const char kDaemonServeStoredEncodings[] = "DaemonServeStoredEncodings";
 const char kWebBotAuth[] = "WebBotAuth";
 const char kWebBotAuthTelemetry[] = "WebBotAuthTelemetry";
 const char kWebBotAuthBotDetection[] = "WebBotAuthBotDetection";
@@ -148,12 +151,42 @@ void NgxRewriteOptions::AddProperties() {
                  kGlobalAdminPath, kProcessScopeStrict,
                  "Set the global admin path.  Ex: /pagespeed_global_admin",
                  false);
+  add_ngx_option("", &NgxRewriteOptions::daemon_socket_path_, "dmsp",
+                 kDaemonSocketPath, kServerScope,
+                 "Path of the optimizer daemon's notification socket. Set "
+                 "this together with DaemonVolumePath; leave both unset to "
+                 "keep the classic in-place path. With both set, the nginx "
+                 "port records through the daemon and serves the optimized "
+                 "copies from its shared cache. See docs/install-nginx.md.",
+                 true);
+  add_ngx_option("", &NgxRewriteOptions::daemon_volume_path_, "dmvp",
+                 kDaemonVolumePath, kServerScope,
+                 "Path of the optimizer daemon's shared cache volume. Keep "
+                 "this on a DIFFERENT path from FileCachePath. Set this "
+                 "together with DaemonSocketPath; leave both unset to keep "
+                 "the classic in-place path. With both set, the nginx port "
+                 "records through the daemon and serves the optimized copies "
+                 "from its shared cache. See docs/install-nginx.md.",
+                 true);
   add_ngx_option(
       kDefaultDaemonApiSocketPath, &NgxRewriteOptions::daemon_api_socket_path_,
       "dasp", kDaemonApiSocketPath, kServerScope,
       "Set the unix socket path of the optimizer daemon's management API, "
       "backing the /v1/daemon/* admin endpoints.  Empty disables them.",
       true);
+  add_ngx_option(false, &NgxRewriteOptions::daemon_serve_stored_encodings_,
+                 "dsse", kDaemonServeStoredEncodings, kServerScope,
+                 "Serve the optimizer daemon's stored gzip and brotli copies "
+                 "of stylesheets, scripts and SVG images to clients that "
+                 "accept them, labelled with Content-Encoding, instead of "
+                 "compressing the uncompressed copy on the way out. Default "
+                 "off.",
+                 true);
+  // It decides which stored bytes are sent, not what the optimizer
+  // produces: turning it on must not change the configuration context the
+  // optimizer files this server's work under.
+  ngx_properties_->property(ngx_properties_->size() - 1)
+      ->set_do_not_use_for_signature_computation(true);
 
   // Web-Bot-Auth (observe-only RFC 9421 verifier). All default off /
   // empty: zero behavior change unless the operator opts in.

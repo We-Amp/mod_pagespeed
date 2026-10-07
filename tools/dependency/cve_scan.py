@@ -14,7 +14,19 @@ per-dep date filtering), we
      version) and CACHE the raw response per CPE,
   4. keep only CVEs PUBLISHED AFTER the pinned version's release_date and at or
      above a severity threshold (default: CVSS >= 4.0, i.e. medium+),
-  5. minus the cve-ignore.yaml suppression list (each entry justified).
+  5. minus CVEs the dep's own authoritative OSV feed (cpe-map.yaml `osv_feed`,
+     e.g. curl's https://curl.se/docs/vuln.json) records as FIXED at or before
+     the pinned version — reported in a separate "fixed in pin per upstream
+     feed" section, never silently dropped,
+  6. minus the cve-ignore.yaml suppression list (each entry justified; an entry
+     with `fixed_in` applies only while the pinned version is >= fixed_in).
+
+Why step 5: NVD publishes upstream advisories days after the upstream release,
+so a CVE fixed BY the pinned release is PUBLISHED after its release_date and the
+date filter keeps it. The upstream feed is the authority on which versions
+carry the fix, so it retires those findings without a hand-written suppression
+per CVE. If the feed is missing from the snapshot or cannot be parsed, the
+scanner falls back to the NVD findings (+ ignore list) and says so.
 
 Report-only (v1): exits 0 by default. A per-dep findings table is printed and a
 machine-readable JSON report is written (default: tools/dependency/.cve-cache/
@@ -66,7 +78,10 @@ CACHE_DIR = os.path.join(DEP_DIR, ".cve-cache")
 DEFAULT_REPORT = os.path.join(CACHE_DIR, "report.json")
 # Committed, compact, reproducible NVD mirror the per-PR job scans offline.
 SNAPSHOT_PATH = os.path.join(DEP_DIR, "nvd-snapshot.json")
-SNAPSHOT_SCHEMA = 1
+# Schema 2 = schema 1 + the optional top-level `osv_feeds` map. A schema-1 file
+# still loads (it simply carries no feeds, so every dep falls back to NVD-only).
+SNAPSHOT_SCHEMA = 2
+SNAPSHOT_SCHEMAS_READABLE = (1, 2)
 
 NVD_API = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 # NVD asks unauthenticated callers to keep to ~5 requests per rolling 30s.
@@ -160,9 +175,11 @@ def load_cpe_map(path=CPE_MAP_PATH):
 
 
 def load_ignores(path=IGNORE_PATH):
-    """Parse cve-ignore.yaml -> {(cve, dep): justification}.
+    """Parse cve-ignore.yaml -> {(cve, dep): entry}.
 
-    Enforces that every entry carries a non-empty justification.
+    `entry` is the entry's field dict (cve, dep, justification, and the optional
+    reference / expires / fixed_in). Enforces that every entry carries a
+    non-empty justification.
     """
     ignores = {}
     cur = None
@@ -208,7 +225,7 @@ def _finish_ignore(entry, ignores, errors):
         errors.append(f"ignore entry for {cve} ({dep}) has no justification "
                       "(justification is MANDATORY)")
         return
-    ignores[(cve, dep)] = just
+    ignores[(cve, dep)] = entry
 
 
 # ---------------------------------------------------------------------------
@@ -319,6 +336,194 @@ def fetch_nvd(cpe, refresh=False, offline=False):
 
 
 # ---------------------------------------------------------------------------
+# Versions + upstream OSV feeds
+# ---------------------------------------------------------------------------
+def parse_version(text):
+    """Parse a dotted-numeric version ("8.22.0", "v1.2") -> comparable tuple.
+
+    Trailing zero components are dropped so "8.22" == "8.22.0". Returns None for
+    anything that is not purely dotted numerics (commit hashes, "2.1.12-stable",
+    dates with dashes, ...): such a version cannot be ordered, so every rule
+    that needs an ordering treats it as "unknown" and fails safe (the finding
+    stands). OSV's special `introduced: "0"` parses to (0,) -> ().
+    """
+    if not isinstance(text, str):
+        return None
+    t = text.strip()
+    if t[:1] in ("v", "V"):
+        t = t[1:]
+    parts = t.split(".")
+    if not t or any(not p.isdigit() for p in parts):
+        return None
+    nums = [int(p) for p in parts]
+    while nums and nums[-1] == 0:
+        nums.pop()
+    return tuple(nums)
+
+
+class OsvFeedError(RuntimeError):
+    """An upstream OSV feed is missing, unreachable or not in the OSV shape.
+
+    Never fatal: the scanner falls back to NVD-only findings for that dep.
+    """
+
+
+OSV_RANGE_TYPES = ("SEMVER", "ECOSYSTEM")
+OSV_EVENT_KINDS = ("introduced", "fixed", "last_affected")
+
+
+def minimize_osv_feed(raw):
+    """Prune a raw OSV feed (a JSON array of OSV records) to what we read.
+
+    Per record: `id`, the CVE ids it covers (`aliases`, plus `id` itself if it
+    is a CVE id), and every SEMVER/ECOSYSTEM range's events (introduced / fixed
+    / last_affected). GIT ranges, `versions` lists, credits and prose are
+    dropped. Records with no CVE id are dropped. Deterministic: records sorted
+    by id, aliases sorted, event order preserved (it carries meaning on ties).
+    Raises OsvFeedError if the payload is not an OSV array.
+    """
+    if not isinstance(raw, list):
+        raise OsvFeedError("OSV feed is not a JSON array of records")
+    out = []
+    for rec in raw:
+        if not isinstance(rec, dict):
+            raise OsvFeedError("OSV feed record is not an object")
+        rid = rec.get("id", "")
+        aliases = rec.get("aliases") or []
+        if not isinstance(aliases, list):
+            raise OsvFeedError(f"OSV record {rid}: aliases is not a list")
+        cves = {a for a in aliases if isinstance(a, str) and a.startswith("CVE-")}
+        if isinstance(rid, str) and rid.startswith("CVE-"):
+            cves.add(rid)
+        if not cves:
+            continue
+        ranges = []
+        affected = rec.get("affected") or []
+        if not isinstance(affected, list):
+            raise OsvFeedError(f"OSV record {rid}: affected is not a list")
+        for aff in affected:
+            if not isinstance(aff, dict):
+                raise OsvFeedError(f"OSV record {rid}: affected[] not an object")
+            for rng in aff.get("ranges") or []:
+                if not isinstance(rng, dict) or rng.get("type") not in OSV_RANGE_TYPES:
+                    continue
+                events = []
+                for ev in rng.get("events") or []:
+                    if not isinstance(ev, dict):
+                        raise OsvFeedError(f"OSV record {rid}: event not an object")
+                    for kind in OSV_EVENT_KINDS:
+                        if kind in ev:
+                            events.append({kind: str(ev[kind])})
+                ranges.append({"type": rng["type"], "events": events})
+        out.append({"id": rid, "aliases": sorted(cves), "ranges": ranges})
+    if not out:
+        raise OsvFeedError("OSV feed carries no CVE-aliased records")
+    out.sort(key=lambda r: r["id"])
+    return out
+
+
+def osv_index(entries):
+    """Minimized feed entries -> {CVE id: [entry, ...]}.
+
+    Raises OsvFeedError if the (snapshot-stored) entries are malformed, so a
+    corrupted snapshot feed falls back instead of crashing or passing.
+    """
+    if not isinstance(entries, list) or not entries:
+        raise OsvFeedError("feed entries missing or empty")
+    idx = {}
+    for e in entries:
+        if (not isinstance(e, dict) or not isinstance(e.get("aliases"), list)
+                or not isinstance(e.get("ranges"), list)):
+            raise OsvFeedError("malformed feed entry in snapshot")
+        for cve in e["aliases"]:
+            idx.setdefault(cve, []).append(e)
+    return idx
+
+
+def osv_fixed_in_pin(entries, pinned):
+    """Return the fix version if the feed shows `pinned` is FIXED, else None.
+
+    OSV range semantics (ossf.github.io/osv-schema, "Evaluation"): walk a
+    range's events in version order; `introduced` <= v marks v affected,
+    `fixed` <= v marks it not affected, `last_affected` < v marks it not
+    affected. Events at the same version keep the feed's order (curl writes an
+    empty interval as introduced X, fixed X).
+
+    Returns the highest `fixed` version <= pinned ONLY when every usable range
+    of every record for this CVE leaves `pinned` NOT affected and at least one
+    `fixed` event is <= pinned. That is stricter than "some fixed <= pinned":
+    curl backports fixes (e.g. fixed 8.20.1 on the 8.20 branch while 8.21.0 is
+    still affected), so a lower fixed event alone proves nothing. Anything the
+    rule cannot order (unparseable pin or event version, no usable range)
+    returns None: the finding stands.
+    """
+    pv = parse_version(pinned)
+    if pv is None or not entries:
+        return None
+    best = None
+    for e in entries:
+        for rng in e.get("ranges", []):
+            walked = []
+            for ev in rng.get("events", []):
+                (kind, raw), = ev.items()
+                ver = parse_version(raw)
+                if ver is None:
+                    return None  # an event we cannot order: can't prove fixed
+                walked.append((ver, kind, raw))
+            if not walked:
+                continue
+            walked.sort(key=lambda w: w[0])  # stable: ties keep feed order
+            affected = False
+            for ver, kind, _ in walked:
+                if kind == "introduced" and pv >= ver:
+                    affected = True
+                elif kind == "fixed" and pv >= ver:
+                    affected = False
+                elif kind == "last_affected" and pv > ver:
+                    affected = False
+            if affected:
+                return None
+            for ver, kind, raw in walked:
+                if kind == "fixed" and ver <= pv and (best is None or ver > best[0]):
+                    best = (ver, raw)
+    return best[1] if best else None
+
+
+def osv_cache_path(url):
+    safe = "".join(ch if ch.isalnum() else "_" for ch in url)
+    return os.path.join(CACHE_DIR, f"osv_{safe}.json")
+
+
+def fetch_osv_feed(url, refresh=False, offline=False):
+    """Fetch an upstream OSV feed (cached raw under .cve-cache/) -> minimized.
+
+    Raises OsvFeedError on any failure (network, HTTP, JSON, shape).
+    """
+    cp = osv_cache_path(url)
+    raw = None
+    if not refresh and os.path.exists(cp):
+        try:
+            with open(cp) as f:
+                raw = json.load(f)
+        except (OSError, ValueError):
+            raw = None
+    if raw is None:
+        if offline:
+            raise OsvFeedError(f"--offline and no cache for {url}")
+        req = urllib.request.Request(
+            url, headers={"User-Agent": "mod_pagespeed-cve-scan"})
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                raw = json.loads(resp.read().decode())
+        except (urllib.error.URLError, OSError, ValueError) as exc:
+            raise OsvFeedError(f"fetch {url}: {exc}") from exc
+        os.makedirs(CACHE_DIR, exist_ok=True)
+        with open(cp, "w") as f:
+            json.dump(raw, f)
+    return minimize_osv_feed(raw)
+
+
+# ---------------------------------------------------------------------------
 # Compact, committed NVD snapshot (the reproducible per-PR mirror).
 #
 # A raw NVD vulnerability object is large (configurations, references, weaknesses,
@@ -374,8 +579,15 @@ def minimize_vuln(v):
     return {"cve": out_cve}
 
 
-def build_snapshot(cpe_to_vulns, path=SNAPSHOT_PATH, allow_shrink=False):
+def build_snapshot(cpe_to_vulns, path=SNAPSHOT_PATH, allow_shrink=False,
+                   feeds=None):
     """Write the deterministic compact snapshot from {cpe: [raw vulns]}.
+
+    `feeds` is {feed_url: minimized entries, or None if this run could not
+    fetch it}. A feed that failed is CARRIED FORWARD from the existing snapshot
+    (an older copy of an upstream feed can only list fewer fixes, so it never
+    retires more findings than a fresh one would); a feed never fetched
+    successfully is simply absent, and the scan falls back to NVD-only for it.
 
     No-shrink guard: refuse to overwrite an existing snapshot with one covering
     FEWER CPEs unless allow_shrink=True. A live rebuild that lost CPEs to NVD
@@ -385,6 +597,12 @@ def build_snapshot(cpe_to_vulns, path=SNAPSHOT_PATH, allow_shrink=False):
     --allow-snapshot-shrink explicitly.
     """
     new_cpes = set(cpe_to_vulns)
+    old_feeds = {}
+    if os.path.exists(path):
+        try:
+            _, old_feeds = load_snapshot_doc(path)
+        except Exception:  # noqa: BLE001  (unreadable/old-schema -> no carry)
+            old_feeds = {}
     if not allow_shrink and os.path.exists(path):
         try:
             old_cpes = set(load_snapshot(path))
@@ -408,6 +626,18 @@ def build_snapshot(cpe_to_vulns, path=SNAPSHOT_PATH, allow_shrink=False):
         minimized = [minimize_vuln(v) for v in cpe_to_vulns[cpe]]
         minimized.sort(key=lambda m: m["cve"].get("id", ""))
         snap["cpes"][cpe] = minimized
+    out_feeds = {}
+    for url, entries in sorted((feeds or {}).items()):
+        if entries is None:
+            if url in old_feeds:
+                print(f"  WARNING: OSV feed {url} not refreshed this run — "
+                      f"carrying the previous snapshot copy forward",
+                      file=sys.stderr)
+                out_feeds[url] = old_feeds[url]
+            continue
+        out_feeds[url] = entries
+    if out_feeds:
+        snap["osv_feeds"] = out_feeds
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "w") as f:
         json.dump(snap, f, indent=1, sort_keys=True)
@@ -415,16 +645,29 @@ def build_snapshot(cpe_to_vulns, path=SNAPSHOT_PATH, allow_shrink=False):
     return snap
 
 
-def load_snapshot(path=SNAPSHOT_PATH):
-    """Load the committed snapshot -> {cpe: [vulns]} (matcher-shaped)."""
+def load_snapshot_doc(path=SNAPSHOT_PATH):
+    """Load the committed snapshot -> ({cpe: [vulns]}, {feed_url: entries}).
+
+    The feeds map is empty for a schema-1 snapshot (or one whose daily refresh
+    never captured a feed); the scan then falls back to NVD-only per dep.
+    """
     with open(path) as f:
         snap = json.load(f)
     schema = snap.get("schema")
-    if schema != SNAPSHOT_SCHEMA:
+    if schema not in SNAPSHOT_SCHEMAS_READABLE:
         raise RuntimeError(
-            f"snapshot {path} schema {schema} != expected {SNAPSHOT_SCHEMA}; "
-            f"rebuild with --refresh --build-snapshot")
-    return snap.get("cpes", {})
+            f"snapshot {path} schema {schema} not in "
+            f"{SNAPSHOT_SCHEMAS_READABLE}; rebuild with --refresh "
+            f"--build-snapshot")
+    feeds = snap.get("osv_feeds", {})
+    if not isinstance(feeds, dict):
+        feeds = {}
+    return snap.get("cpes", {}), feeds
+
+
+def load_snapshot(path=SNAPSHOT_PATH):
+    """Load the committed snapshot -> {cpe: [vulns]} (matcher-shaped)."""
+    return load_snapshot_doc(path)[0]
 
 
 # ---------------------------------------------------------------------------
@@ -467,20 +710,88 @@ def cve_description(cve):
 # ---------------------------------------------------------------------------
 # Scan
 # ---------------------------------------------------------------------------
+def ignore_applies(entry, version):
+    """Whether an ignore entry is in force for the pinned `version`.
+
+    An entry without `fixed_in` always applies. With `fixed_in`, it applies
+    only while the pinned version is >= fixed_in; an unparseable fixed_in or
+    pin cannot be ordered, so the entry does NOT apply (the finding stands and
+    validate-deps.py reports the entry as inconsistent).
+    """
+    fixed_in = entry.get("fixed_in")
+    if not fixed_in:
+        return True
+    fv, pv = parse_version(fixed_in), parse_version(version)
+    return fv is not None and pv is not None and pv >= fv
+
+
+def evaluate_dep(name, version, rel_dt, vulns, floor, ignores, feed_index=None,
+                 feed_url=None):
+    """Filter one dep's candidate CVEs. Pure: no I/O.
+
+    Order: Rejected -> severity floor -> publish-date filter -> upstream OSV
+    feed ("fixed in pin", only when `feed_index` is not None) -> ignore list.
+    Returns (findings, fixed_in_pin, ignores_used, ignores_inapplicable).
+    """
+    findings, fixed, used, inapplicable = [], [], [], []
+    for v in vulns:
+        cve = v.get("cve", {})
+        cid = cve.get("id", "")
+        if cve.get("vulnStatus") == "Rejected":
+            continue
+        score, sev = cve_severity(cve)
+        if score is None or score < floor:
+            continue
+        pub = cve_published(cve)
+        if rel_dt and pub and pub < rel_dt:
+            continue  # pre-release-date: pinned version postdates the CVE
+        row = {
+            "cve": cid,
+            "score": score,
+            "severity": sev,
+            "published": cve.get("published", ""),
+            "description": cve_description(cve)[:240],
+        }
+        if feed_index is not None:
+            fix = osv_fixed_in_pin(feed_index.get(cid), version)
+            if fix is not None:
+                fixed.append(dict(row, fixed=fix, feed=feed_url))
+                continue
+        entry = ignores.get((cid, name))
+        if entry is not None:
+            if ignore_applies(entry, version):
+                used.append(cid)
+                continue
+            inapplicable.append(cid)
+        findings.append(row)
+    findings.sort(key=lambda f: (-(f["score"] or 0), f["cve"]))
+    fixed.sort(key=lambda f: (-(f["score"] or 0), f["cve"]))
+    return findings, fixed, sorted(used), sorted(inapplicable)
+
+
 def scan(deps_subset=None, severity="medium", refresh=False, offline=False,
-         snapshot=None, collect=None):
+         snapshot=None, collect=None, snapshot_feeds=None, collect_feeds=None):
     """Match every annotated dep against NVD data and date/severity-filter.
 
     Data source per CPE:
       * snapshot is not None  -> read snapshot[cpe] (the committed mirror; offline)
       * else                  -> fetch_nvd(cpe, refresh, offline)
+    Upstream OSV feed per dep (cpe-map.yaml `osv_feed`):
+      * snapshot is not None  -> snapshot_feeds[url] (absent -> fallback)
+      * else                  -> fetch_osv_feed(url, refresh, offline)
+    A feed that is absent, unreachable or malformed never fails the scan and
+    never passes it silently: that dep falls back to NVD findings + ignore list
+    and the result carries `osv_feed_status` explaining why.
     If `collect` is a dict, the raw vulns fetched per CPE are stashed into it
-    (collect[cpe] = vulns) so the caller can build a fresh snapshot in one pass.
+    (collect[cpe] = vulns) so the caller can build a fresh snapshot in one pass;
+    `collect_feeds` likewise gets {url: minimized entries, or None on failure}.
     """
     cpe_map = load_cpe_map()
     ignores = load_ignores()
     floor = SEVERITY_FLOOR[severity]
     versions = dict(load_cpp_deps())
+    if snapshot is not None and snapshot_feeds is None:
+        snapshot_feeds = {}
 
     results = []
     for name, version in load_cpp_deps():
@@ -529,33 +840,42 @@ def scan(deps_subset=None, severity="medium", refresh=False, offline=False,
                             "findings": []})
             continue
 
-        findings = []
-        for v in vulns:
-            cve = v.get("cve", {})
-            cid = cve.get("id", "")
-            if cve.get("vulnStatus") == "Rejected":
-                continue
-            score, sev = cve_severity(cve)
-            if score is None or score < floor:
-                continue
-            pub = cve_published(cve)
-            if rel_dt and pub and pub < rel_dt:
-                continue  # pre-release-date: pinned version postdates the CVE
-            if (cid, name) in ignores:
-                continue
-            findings.append({
-                "cve": cid,
-                "score": score,
-                "severity": sev,
-                "published": cve.get("published", ""),
-                "description": cve_description(cve)[:240],
-            })
-        findings.sort(key=lambda f: (-(f["score"] or 0), f["cve"]))
-        results.append({
+        feed_url = meta.get("osv_feed") or None
+        feed_index = None
+        feed_status = None
+        if feed_url:
+            entries = None
+            try:
+                if snapshot is not None:
+                    entries = snapshot_feeds.get(feed_url)
+                    if entries is None:
+                        raise OsvFeedError("feed not in snapshot")
+                else:
+                    entries = fetch_osv_feed(feed_url, refresh=refresh,
+                                             offline=offline)
+                feed_index = osv_index(entries)
+                feed_status = "ok"
+            except OsvFeedError as exc:
+                entries = None
+                feed_status = f"unavailable ({exc}); NVD-only fallback"
+            if collect_feeds is not None and snapshot is None:
+                collect_feeds[feed_url] = entries
+
+        findings, fixed, used, inapplicable = evaluate_dep(
+            name, version, rel_dt, vulns, floor, ignores, feed_index, feed_url)
+        res = {
             "dep": name, "version": version, "cpe": cpe,
             "release_date": rel, "candidate_cves": len(vulns),
             "findings": findings,
-        })
+            "fixed_in_pin": fixed,
+            "ignores_used": used,
+        }
+        if inapplicable:
+            res["ignores_inapplicable"] = inapplicable
+        if feed_url:
+            res["osv_feed"] = feed_url
+            res["osv_feed_status"] = feed_status
+        results.append(res)
     return results, versions
 
 
@@ -580,13 +900,33 @@ def print_table(results, severity, fail_on=None):
         tag = "OK " if not fs else "!! "
         print(f"\n[{tag}] {dep} {ver}  ({r['cpe']})  "
               f"candidates={r.get('candidate_cves', 0)}  post-release-findings={len(fs)}")
+        status = r.get("osv_feed_status")
+        if status and status != "ok":
+            print(f"      WARNING: upstream OSV feed {r['osv_feed']} {status}")
         for f in fs:
             print(f"      {f['cve']}  CVSS {f['score']} ({f['severity']})  "
                   f"{f['published'][:10]}")
             if f["description"]:
                 print(f"         {f['description'][:96]}")
+        for cid in r.get("ignores_inapplicable", []):
+            print(f"      note: cve-ignore.yaml entry for {cid} not applied "
+                  f"(pinned {ver} is below its fixed_in, or unorderable)")
+    fixed_rows = [(r, f) for r in results for f in r.get("fixed_in_pin", [])]
+    if fixed_rows:
+        print("\n" + "-" * width)
+        print(f"  Fixed in pin per upstream feed ({len(fixed_rows)}): published "
+              f"after release_date, but the dep's")
+        print("  own OSV feed records the pinned version as fixed. Not counted "
+              "as findings.")
+        print("-" * width)
+        for r, f in fixed_rows:
+            print(f"      {r['dep']} {r.get('version', '?')}  {f['cve']}  "
+                  f"CVSS {f['score']} ({f['severity']})  "
+                  f"{f['published'][:10]}  fixed={f['fixed']}")
     print("\n" + "=" * width)
     print(f"  TOTAL post-release findings (severity >= {severity}): {total_findings}")
+    if fixed_rows:
+        print(f"  Fixed in pin per upstream feed (not findings): {len(fixed_rows)}")
     if fail_on:
         print(f"  Gate: --fail-on {fail_on} — nonzero exit if findings exist.")
     else:
@@ -628,20 +968,23 @@ def main():
     args = ap.parse_args()
 
     snapshot = None
+    snapshot_feeds = None
     if args.snapshot:
         try:
-            snapshot = load_snapshot(args.snapshot)
+            snapshot, snapshot_feeds = load_snapshot_doc(args.snapshot)
         except Exception as exc:  # noqa: BLE001
             print(f"ERROR: cannot load snapshot {args.snapshot}: {exc}",
                   file=sys.stderr)
             return 2
 
     collect = {} if args.build_snapshot else None
+    collect_feeds = {} if args.build_snapshot else None
     try:
         results, _ = scan(deps_subset=set(args.dep) or None,
                           severity=args.severity, refresh=args.refresh,
                           offline=args.offline, snapshot=snapshot,
-                          collect=collect)
+                          collect=collect, snapshot_feeds=snapshot_feeds,
+                          collect_feeds=collect_feeds)
     except NvdUnreachable as exc:
         # Soft-skip (exit 3): NVD was unreachable/rate-limited and the live
         # refresh could not complete. The committed snapshot is left untouched;
@@ -661,6 +1004,8 @@ def main():
             "generated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "severity_floor": args.severity,
             "total_findings": total,
+            "total_fixed_in_pin": sum(
+                len(r.get("fixed_in_pin", [])) for r in results),
             "results": results,
         }, f, indent=2)
     print(f"\nJSON report: {args.json}")
@@ -668,7 +1013,8 @@ def main():
     if args.build_snapshot:
         try:
             snap = build_snapshot(collect, args.build_snapshot,
-                                  allow_shrink=args.allow_snapshot_shrink)
+                                  allow_shrink=args.allow_snapshot_shrink,
+                                  feeds=collect_feeds)
         except NvdUnreachable as exc:  # defensive: scan() raises first in practice
             print(f"\nNVD unreachable: {exc}", file=sys.stderr)
             print("Committed snapshot retained unchanged. "
@@ -683,7 +1029,8 @@ def main():
             return 1
         n_cves = sum(len(v) for v in snap["cpes"].values())
         print(f"Snapshot written: {args.build_snapshot} "
-              f"({len(snap['cpes'])} CPEs, {n_cves} CVEs)")
+              f"({len(snap['cpes'])} CPEs, {n_cves} CVEs, "
+              f"{len(snap.get('osv_feeds', {}))} OSV feed(s))")
 
     # Ratchet: only --fail-on makes the gate blocking. Default stays report-only.
     if args.fail_on:

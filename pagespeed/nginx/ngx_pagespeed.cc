@@ -26,6 +26,7 @@
 
 #include "ngx_pagespeed.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdlib>
 #include <memory>
@@ -42,6 +43,7 @@
 #include "net/instaweb/public/version.h"
 #include "net/instaweb/rewriter/public/experiment_matcher.h"
 #include "net/instaweb/rewriter/public/experiment_util.h"
+#include "net/instaweb/rewriter/public/option_context.h"
 #include "net/instaweb/rewriter/public/process_context.h"
 #include "net/instaweb/rewriter/public/resource_fetch.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
@@ -50,14 +52,20 @@
 #include "net/instaweb/rewriter/public/rewrite_stats.h"
 #include "net/instaweb/rewriter/public/static_asset_manager.h"
 #include "net/instaweb/util/public/fallback_property_page.h"
+#include "ngx_admin_path_match.h"
 #include "ngx_base_fetch.h"
 #include "ngx_caching_headers.h"
+#include "ngx_daemon_record_completion.h"
+#include "ngx_daemon_serve_emit.h"
+#include "ngx_daemon_serve_notify.h"
+#include "ngx_etag_match.h"
 #include "ngx_gzip_setter.h"
 #include "ngx_list_iterator.h"
 #include "ngx_message_handler.h"
 #include "ngx_rewrite_driver_factory.h"
 #include "ngx_rewrite_options.h"
 #include "ngx_server_context.h"
+#include "ngx_static_asset_path.h"
 #include "ngx_webbotauth_handler.h"
 #include "pagespeed/automatic/proxy_fetch.h"
 #include "pagespeed/kernel/base/google_message_handler.h"
@@ -78,7 +86,12 @@
 #include "pagespeed/kernel/webbotauth/key_directory_warmer.h"
 #include "pagespeed/kernel/webbotauth/webbotauth_counter_store.h"
 #include "pagespeed/system/admin_site.h"
-#include "pagespeed/system/in_place_resource_recorder.h"
+#include "pagespeed/system/daemon_ipro_recorder.h"
+#include "pagespeed/system/daemon_serve_arm.h"
+#include "pagespeed/system/in_place_resource_recorder.h"  // the gate returns it
+#include "pagespeed/system/ipro_record_gate.h"
+#include "pagespeed/system/ipro_recorder.h"
+#include "pagespeed/system/serve_host_names.h"
 #include "pagespeed/system/system_caches.h"
 #include "pagespeed/system/system_request_context.h"
 #include "pagespeed/system/system_rewrite_options.h"
@@ -106,6 +119,22 @@ namespace net_instaweb {
 // when they are initialized lazily.
 ProcessContext* process_context = new ProcessContext();
 bool process_context_cleanup_hooked = false;
+
+// This worker's pool and sequence for daemon record completions: the one
+// call a recorder finishes with -- DoneAndSetHeaders -- blocks on the
+// daemon's volume, so it is carried here and run off the event thread.
+// The pool is this port's OWN, one worker, created in ps_init_child_process
+// only for a serving process with at least one server whose startup verdict
+// lets it record: a commit stalled in the daemon must never starve an image
+// rewrite on the factory's pools, and the master and nginx's cache manager
+// and loader -- which serve nothing -- get no pool at all.  ps_exit_child_process
+// shuts it down and deletes it after the factory's ShutDown() and before
+// the volume-close loop; the sequence is deleted with the pool, so there is
+// deliberately no FreeSequence anywhere.  nullptr where no pool exists,
+// which the record path reads as "no queue": such a recording is finished
+// inline as incomplete.
+QueuedWorkerPool* g_daemon_record_pool = nullptr;
+QueuedWorkerPool::Sequence* g_daemon_record_sequence = nullptr;
 
 StringPiece str_to_string_piece(ngx_str_t s) {
   return StringPiece(reinterpret_cast<char*>(s.data), s.len);
@@ -560,7 +589,11 @@ ngx_int_t ps_base_fetch_handler(ngx_http_request_t* r) {
       return NGX_DONE;
     }
 
-    if (ctx->preserve_caching_headers != kDontPreserveHeaders) {
+    if (ctx->base_fetch->base_fetch_type() == kIproLookup && !status_ok) {
+      // This pass only decides: the decline below lets the server answer
+      // the request itself.  headers_out may already carry fields set on
+      // this request, and they must survive the miss.
+    } else if (ctx->preserve_caching_headers != kDontPreserveHeaders) {
       ngx_table_elt_t* header;
       NgxListIterator it(&(r->headers_out.headers.part));
       while ((header = it.Next()) != nullptr) {
@@ -584,7 +617,14 @@ ngx_int_t ps_base_fetch_handler(ngx_http_request_t* r) {
         }
       }
     } else {
+      // The charset filter runs ahead of this module in the chain and has
+      // already made its decision; cleaning the header would silently drop
+      // it from the rewritten document's Content-Type.
+      const ngx_str_t charset = r->headers_out.charset;
       ngx_http_clean_header(r);
+      if (ctx->base_fetch->base_fetch_type() == kHtmlTransform) {
+        r->headers_out.charset = charset;
+      }
     }
     // collect response headers from pagespeed
     rc = ctx->base_fetch->CollectHeaders(&r->headers_out);
@@ -593,7 +633,41 @@ ngx_int_t ps_base_fetch_handler(ngx_http_request_t* r) {
       return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
 
+    // Headers for responses this module generates enter the chain at the
+    // module's own position, so nginx's not-modified filter (which runs
+    // ahead of it) never sees them.  Answer If-None-Match for the module's
+    // own resources here, with the weak comparison a GET calls for; the 304
+    // conversion mirrors nginx's own not-modified filter.  (The in-place
+    // path needs nothing: the optimization library answers its
+    // conditionals.)
+    if (ctx->base_fetch->base_fetch_type() == kPageSpeedResource &&
+        r->headers_out.status == NGX_HTTP_OK &&
+        r->headers_in.if_none_match != nullptr &&
+        r->headers_out.etag != nullptr &&
+        NgxIfNoneMatchMatches(
+            str_to_string_piece(r->headers_in.if_none_match->value),
+            str_to_string_piece(r->headers_out.etag->value))) {
+      r->headers_out.status = NGX_HTTP_NOT_MODIFIED;
+      r->headers_out.status_line.len = 0;
+      r->headers_out.content_type.len = 0;
+      ngx_http_clear_content_length(r);
+      ngx_http_clear_accept_ranges(r);
+      if (r->headers_out.content_encoding != nullptr) {
+        r->headers_out.content_encoding->hash = 0;
+        r->headers_out.content_encoding = nullptr;
+      }
+    }
+
     // send response headers
+    //
+    // Responses the module generates enter the chain HERE, at the module's
+    // own position: nginx's headers filter (expires, add_header) runs above
+    // it and never sees them. What they carry is INHERITED instead: a
+    // rewritten resource merges its input resource's non-caching headers
+    // (ServerContext::MergeNonCachingResponseHeaders), a recorded in-place
+    // response carries what the recorder saw, and a resource loaded from
+    // file has nothing to inherit. The operator's lever for a header on
+    // these responses is pagespeed AddResourceHeader.
     rc = ngx_http_next_header_filter(r);
 
     // standard nginx send header check see ngx_http_send_response
@@ -824,6 +898,20 @@ void copy_request_headers_from_ngx(const ngx_http_request_t* r,
   copy_headers_from_table(r->headers_in.headers, headers);
 }
 
+// Whether a Vary field value lists the Accept-Encoding token, alone or among
+// others (a comma-separated list; tokens compare case-insensitively).
+static bool ps_vary_lists_accept_encoding(const ngx_str_t& value) {
+  StringPieceVector tokens;
+  SplitStringPieceToVector(str_to_string_piece(value), ",", &tokens, true);
+  for (StringPiece token : tokens) {
+    TrimWhitespace(&token);
+    if (StringCaseEqual(token, "Accept-Encoding")) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // PSOL produces caching headers that need some changes before we can send them
 // out.  Make those changes and populate r->headers_out from pagespeed_headers.
 ngx_int_t copy_response_headers_to_ngx(
@@ -909,8 +997,11 @@ ngx_int_t copy_response_headers_to_ngx(
       continue;
     } else if (STR_EQ_LITERAL(name, "Transfer-Encoding")) {
       continue;
-    } else if (STR_EQ_LITERAL(name, "Vary") && value.len &&
-               STR_EQ_LITERAL(value, "Accept-Encoding")) {
+    } else if (STR_EQ_LITERAL(name, "Vary") &&
+               ps_vary_lists_accept_encoding(value)) {
+      // The module's own Vary already states the encoding token (alone or
+      // among others): the etag filter withdraws the compressor's stamp so
+      // the token is not stated a second time.
       ps_request_ctx_t* ctx = ps_get_request_context(r);
       ctx->psol_vary_accept_only = true;
     }
@@ -988,6 +1079,13 @@ using ps_srv_conf_t = struct {
   // likely want cfg_s->server_context->config() as options here will be NULL.
   NgxRewriteOptions* options;
   MessageHandler* handler;
+  // The names this server{} block is configured with, copied while the
+  // configuration is loaded (ps_merge_srv_conf).  nginx keeps a server
+  // block's server_names array in the configuration's TEMPORARY pool, which
+  // it destroys once the configuration is loaded, so a request must never
+  // read that array: it reads this copy.  Null for a server block without
+  // pagespeed options, which answers no request of ours.
+  ConfiguredHostNames* host_names;
 };
 
 using ps_loc_conf_t = struct {
@@ -1259,6 +1357,8 @@ void ps_cleanup_srv_conf(void* data) {
   cfg_s->handler = nullptr;
   delete cfg_s->options;
   cfg_s->options = nullptr;
+  delete cfg_s->host_names;
+  cfg_s->host_names = nullptr;
 }
 
 void ps_cleanup_main_conf(void* data) {
@@ -1395,6 +1495,41 @@ namespace {
 
 int times_ps_merge_srv_conf_called = 0;
 
+// The names a server{} block is configured with: its server_name -- nginx's
+// own primary name, a leading "." already dropped, a regular expression's
+// "~" put back -- and every server_names entry that is not a regular
+// expression, as written.  Wildcard and placeholder ("_") entries are passed
+// as they are; VouchedServeHost never treats them as exact names.
+//
+// CONFIGURATION TIME ONLY.  cscf->server_names lives in the configuration's
+// temporary pool (ngx_http_core_create_srv_conf), which nginx destroys when
+// the configuration has been loaded; at request time the array points at
+// freed memory.  The names are therefore copied here, once per server block,
+// and requests read the copy (NgxConfiguredHostNames).
+ConfiguredHostNames NgxCollectConfiguredHostNames(
+    const ngx_http_core_srv_conf_t* cscf) {
+  ConfiguredHostNames names;
+  if (cscf == nullptr) {
+    return names;
+  }
+  names.primary = str_to_string_piece(cscf->server_name).as_string();
+  const ngx_http_server_name_t* server_names =
+      static_cast<const ngx_http_server_name_t*>(cscf->server_names.elts);
+  for (ngx_uint_t i = 0; i < cscf->server_names.nelts; ++i) {
+    // nginx stores a regular-expression entry WITHOUT its "~": the stored
+    // text is a pattern that can look like a host name, never a name, so
+    // it is not passed at all.
+#if (NGX_PCRE)
+    if (server_names[i].regex != nullptr) {
+      continue;
+    }
+#endif
+    names.aliases.push_back(
+        str_to_string_piece(server_names[i].name).as_string());
+  }
+  return names;
+}
+
 }  // namespace
 
 // Called exactly once per server block to merge the main configuration with the
@@ -1424,6 +1559,14 @@ char* ps_merge_srv_conf(ngx_conf_t* cf, void* parent, void* child) {
   cfg_m->driver_factory->SetMainConf(parent_cfg_s->options);
   cfg_s->server_context =
       cfg_m->driver_factory->MakeNgxServerContext("dummy_hostname", dummy_port);
+
+  // Copy this server block's names now, while nginx's own list of them is
+  // still alive (see NgxCollectConfiguredHostNames).  The core module's
+  // merge has already run for this block, so its primary name is settled.
+  delete cfg_s->host_names;
+  cfg_s->host_names = new ConfiguredHostNames(
+      NgxCollectConfiguredHostNames(static_cast<ngx_http_core_srv_conf_t*>(
+          ngx_http_conf_get_module_srv_conf(cf, ngx_http_core_module))));
 
 #if (NGX_HTTP_V2)
   // Save the variable index of the "http2" variable, so we can use it
@@ -1713,6 +1856,47 @@ RewriteOptions* ps_determine_remote_options(ps_srv_conf_t* cfg_s) {
   return nullptr;
 }
 
+// The option scan in GetQueryOptions() strips the option headers it applied
+// (PageSpeed, ModPagespeed, PageSpeedFilters, ...) from `scanned`, the copy
+// copy_response_headers_from_ngx() made of r->headers_out, and never touches
+// r->headers_out itself.  Mark every live r->headers_out entry that no longer
+// has a name/value counterpart in `scanned` as unset (hash = 0), so the
+// shared scanner alone decides what is stripped.  Only names the scanner can
+// strip are eligible; no other header is touched.
+void ps_remove_stripped_option_headers(ngx_http_request_t* r,
+                                       int num_attributes_before_scan,
+                                       const ResponseHeaders& scanned) {
+  if (scanned.NumAttributes() >= num_attributes_before_scan) {
+    return;  // Nothing was stripped.
+  }
+  std::vector<bool> matched(scanned.NumAttributes(), false);
+  ngx_table_elt_t* header;
+  NgxListIterator it(&(r->headers_out.headers.part));
+  while ((header = it.Next()) != nullptr) {
+    if (header->hash == 0) {
+      continue;
+    }
+    const StringPiece name = str_to_string_piece(header->key);
+    if (!RewriteQuery::MightBeCustomOption(name)) {
+      continue;
+    }
+    const StringPiece value = str_to_string_piece(header->value);
+    bool kept = false;
+    for (int i = 0, n = scanned.NumAttributes(); i < n; ++i) {
+      if (!matched[i] && StringCaseEqual(scanned.Name(i), name) &&
+          scanned.Value(i) == value) {
+        matched[i] = true;
+        kept = true;
+        break;
+      }
+    }
+    if (!kept) {
+      // Response headers with hash of 0 are excluded from the response.
+      header->hash = 0;
+    }
+  }
+}
+
 // Wrapper around GetQueryOptions()
 RewriteOptions* ps_determine_request_options(
     ngx_http_request_t* r,
@@ -1723,9 +1907,15 @@ RewriteOptions* ps_determine_request_options(
     GoogleString* pagespeed_option_cookies) {
   // Sets option from request headers and url.
   RewriteQuery rewrite_query;
-  if (!cfg_s->server_context->GetQueryOptions(
-          request_context, domain_options, url, request_headers,
-          response_headers, &rewrite_query)) {
+  const int num_response_attributes = response_headers->NumAttributes();
+  const bool parsed = cfg_s->server_context->GetQueryOptions(
+      request_context, domain_options, url, request_headers, response_headers,
+      &rewrite_query);
+  // The scan stripped the option headers from the in-memory copy only; drop
+  // them from the response itself too, before any caller returns early.
+  ps_remove_stripped_option_headers(r, num_response_attributes,
+                                    *response_headers);
+  if (!parsed) {
     // Failed to parse query params or request headers.  Treat this as if there
     // were no query params given.
     ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
@@ -2008,42 +2198,99 @@ void ps_release_request_context(void* data) {
   delete ctx;
 }
 
+// Notes that a request was left to the server although a handler path
+// matched it.  Reported at most once a minute per worker, on the cycle log:
+// the request itself is deliberately not part of the message.
+void ps_note_admin_route_declined() {
+  static time_t last_report = 0;
+  static ngx_uint_t unreported = 0;
+  ++unreported;
+  const time_t now = ngx_time();
+  if (last_report != 0 && now - last_report < 60) {
+    return;
+  }
+  ngx_log_error(NGX_LOG_INFO, ngx_cycle->log, 0,
+                "pagespeed: left %ui request(s) to the server: the server "
+                "and the module did not select the same handler for them",
+                unreported);
+  last_report = now;
+  unreported = 0;
+}
+
 // Routes admin-style URLs: statistics, global statistics, console, messages,
-// admin, and global admin. Returns nullopt if the path doesn't match any.
+// admin, and global admin. Returns nullopt if the request selects none.
 std::optional<RequestRouting::Response> ps_route_admin_url(
-    const GoogleUrl& url, const NgxRewriteOptions* options,
-    bool client_is_loopback) {
-  const StringPiece path = url.PathSansQuery();
-  if (StringCaseEqual(path, options->statistics_path()) &&
-      options->StatisticsAccessAllowed(url, client_is_loopback)) {
-    return RequestRouting::kStatistics;
+    ngx_http_request_t* r, const GoogleUrl& url,
+    const NgxRewriteOptions* options, bool client_is_loopback) {
+  // The decision lives in NgxDecideAdminRoute (unit-tested).  The handler is
+  // selected from nginx's own normalized URI -- the one the `location`
+  // blocks that guard these paths were matched against -- with `location`
+  // semantics: exact for every handler, plus the subtree below the two admin
+  // handlers.  The path of the URL parsed for this request has to select the
+  // same handler; a request nginx redirected internally and a subrequest are
+  // left to the server.
+  NgxAdminHandlerPaths paths;
+  paths.statistics = options->statistics_path();
+  paths.global_statistics = options->global_statistics_path();
+  paths.console = options->console_path();
+  paths.messages = options->messages_path();
+  paths.admin = options->admin_path();
+  paths.global_admin = options->global_admin_path();
+  const StringPiece server_uri = str_to_string_piece(r->uri);
+  const StringPiece module_path = url.PathSansQuery();
+  const bool server_redirected = r->internal || r != r->main;
+
+  // A handler whose own access check refuses the request is taken out and
+  // the lookup repeated, so a later handler on a matching path still gets
+  // its turn.  Each pass removes one handler: at most six passes.
+  for (;;) {
+    const NgxAdminRoute route =
+        NgxDecideAdminRoute(server_uri, module_path, server_redirected, paths);
+    if (route.declined) {
+      ps_note_admin_route_declined();
+      return std::nullopt;
+    }
+    switch (route.handler) {
+      case NgxAdminHandler::kNone:
+        return std::nullopt;
+      case NgxAdminHandler::kStatistics:
+        if (options->StatisticsAccessAllowed(url, client_is_loopback)) {
+          return RequestRouting::kStatistics;
+        }
+        paths.statistics = StringPiece();
+        break;
+      case NgxAdminHandler::kGlobalStatistics:
+        if (options->GlobalStatisticsAccessAllowed(url, client_is_loopback)) {
+          return RequestRouting::kGlobalStatistics;
+        }
+        paths.global_statistics = StringPiece();
+        break;
+      case NgxAdminHandler::kConsole:
+        if (options->ConsoleAccessAllowed(url, client_is_loopback)) {
+          return RequestRouting::kConsole;
+        }
+        paths.console = StringPiece();
+        break;
+      case NgxAdminHandler::kMessages:
+        if (options->MessagesAccessAllowed(url, client_is_loopback)) {
+          return RequestRouting::kMessages;
+        }
+        paths.messages = StringPiece();
+        break;
+      case NgxAdminHandler::kAdmin:
+        if (options->AdminAccessAllowed(url, client_is_loopback)) {
+          return RequestRouting::kAdmin;
+        }
+        paths.admin = StringPiece();
+        break;
+      case NgxAdminHandler::kGlobalAdmin:
+        if (options->GlobalAdminAccessAllowed(url, client_is_loopback)) {
+          return RequestRouting::kGlobalAdmin;
+        }
+        paths.global_admin = StringPiece();
+        break;
+    }
   }
-  if (StringCaseEqual(path, options->global_statistics_path()) &&
-      options->GlobalStatisticsAccessAllowed(url, client_is_loopback)) {
-    return RequestRouting::kGlobalStatistics;
-  }
-  if (StringCaseEqual(path, options->console_path()) &&
-      options->ConsoleAccessAllowed(url, client_is_loopback)) {
-    return RequestRouting::kConsole;
-  }
-  if (StringCaseEqual(path, options->messages_path()) &&
-      options->MessagesAccessAllowed(url, client_is_loopback)) {
-    return RequestRouting::kMessages;
-  }
-  // The admin handlers get everything under a path (/path/*) while all the
-  // other handlers only get exact matches (/path). Match all paths starting
-  // with the handler path.
-  if (!options->admin_path().empty() &&
-      StringCaseStartsWith(path, options->admin_path()) &&
-      options->AdminAccessAllowed(url, client_is_loopback)) {
-    return RequestRouting::kAdmin;
-  }
-  if (!options->global_admin_path().empty() &&
-      StringCaseStartsWith(path, options->global_admin_path()) &&
-      options->GlobalAdminAccessAllowed(url, client_is_loopback)) {
-    return RequestRouting::kGlobalAdmin;
-  }
-  return std::nullopt;
 }
 
 bool ps_is_cache_purge_request(ngx_http_request_t* r,
@@ -2159,7 +2406,7 @@ RequestRouting::Response ps_route_request(ngx_http_request_t* r) {
   const bool client_is_loopback =
       IsLoopbackClientIp(ps_client_ip_for_admin_warning(r));
   if (auto admin_response =
-          ps_route_admin_url(url, global_options, client_is_loopback)) {
+          ps_route_admin_url(r, url, global_options, client_is_loopback)) {
     return *admin_response;
   }
   if (ps_is_cache_purge_request(r, global_options)) {
@@ -2214,6 +2461,392 @@ void ps_apply_webbotauth_verdict(ngx_http_request_t* r, ps_srv_conf_t* cfg_s,
   }
 }
 
+namespace {
+
+// The request-side strings the daemon serve request borrows from.  The
+// request outlives the one Serve() call they feed; the record arm keeps its
+// own copies for the same reason (the recorder outlives the handler).
+struct PsDaemonServeRequestStrings {
+  GoogleString url;
+  GoogleString host;
+  GoogleString scheme;
+  GoogleString accept;
+  GoogleString user_agent;
+  GoogleString save_data;
+  GoogleString accept_encoding;
+  GoogleString if_none_match;
+  GoogleString if_modified_since;
+};
+
+// Fills the daemon serve request the way the record arm fills its own: the
+// URL the rest of the module already agreed on (PageSpeed parameters
+// stripped, X-Forwarded-Proto honoured -- the SAME source the record key
+// uses), the four capability headers verbatim with absent meaning empty,
+// the client's conditionals verbatim, and the forced-reload test Apache
+// applies (a case-insensitive "no-cache" in Cache-Control or Pragma).
+//
+// The headers and the URL come in ALREADY PARSED from the resource handler:
+// re-reading them off the request would be a second RequestHeaders
+// construction and a second URL parse on every in-place request, including
+// every fall-through.
+void BuildDaemonServeRequest(const RequestHeaders& request_headers,
+                             const GoogleUrl& full_url,
+                             PsDaemonServeRequestStrings* strings,
+                             DaemonServeRequest* out) {
+  full_url.PathAndLeaf().CopyToString(&strings->url);
+  full_url.Host().CopyToString(&strings->host);
+  full_url.Scheme().CopyToString(&strings->scheme);
+
+  // LookupJoined, not Lookup1: a comma-split header is several map values,
+  // which Lookup1 reports as absent.  For the capability headers
+  // ("image/avif,image/webp,*/*", "gzip, deflate, br") the arms would
+  // classify every such request as a no-capability client; for
+  // Cache-Control ("no-cache, no-store") the forced reload would read as
+  // not asked.  EVERY request-header read in this function is joined.
+  strings->accept = request_headers.LookupJoined(HttpAttributes::kAccept);
+  strings->user_agent =
+      request_headers.LookupJoined(HttpAttributes::kUserAgent);
+  strings->save_data = request_headers.LookupJoined("Save-Data");
+  strings->accept_encoding =
+      request_headers.LookupJoined(HttpAttributes::kAcceptEncoding);
+  strings->if_none_match =
+      request_headers.LookupJoined(HttpAttributes::kIfNoneMatch);
+  strings->if_modified_since =
+      request_headers.LookupJoined(HttpAttributes::kIfModifiedSince);
+
+  out->url = strings->url;
+  out->hostname = strings->host;
+  out->scheme = strings->scheme;
+  out->accept = strings->accept;
+  out->user_agent = strings->user_agent;
+  out->save_data = strings->save_data;
+  out->accept_encoding = strings->accept_encoding;
+  out->if_none_match = strings->if_none_match;
+  out->if_modified_since = strings->if_modified_since;
+
+  // A forced reload, in both of the spellings a client still sends, found
+  // with a case-insensitive substring search over the joined value: the
+  // directive is case-insensitive, and "no-cache, no-store" or a repeated
+  // Pragma line must not read as absent.  Handed to the peer's freshness
+  // evaluator rather than acted on here, as Apache does.
+  GoogleString cache_control =
+      request_headers.LookupJoined(HttpAttributes::kCacheControl);
+  GoogleString pragma = request_headers.LookupJoined(HttpAttributes::kPragma);
+  LowerString(&cache_control);
+  LowerString(&pragma);
+  out->force_revalidate =
+      cache_control.find("no-cache") != GoogleString::npos ||
+      pragma.find("no-cache") != GoogleString::npos;
+}
+
+// The names this request's server{} block is configured with, as copied
+// when the configuration was loaded (NgxCollectConfiguredHostNames).  nginx's
+// own server_names array is gone by the time a request runs, so this never
+// touches it.  Empty for a server block without pagespeed options.
+ConfiguredHostNames NgxConfiguredHostNames(ngx_http_request_t* r) {
+  const ps_srv_conf_t* cfg_s = ps_get_srv_config(r);
+  if (cfg_s == nullptr || cfg_s->host_names == nullptr) {
+    return ConfiguredHostNames();
+  }
+  return *cfg_s->host_names;
+}
+
+// Answers an in-place request from the daemon's volume when it has one.
+// Returns NGX_DECLINED when it did not answer -- the caller then falls
+// through to the record marking, byte-for-byte as today.  Any other return
+// is the send's own result, which ps_resource_handler returns to nginx.
+//
+// The reader is constructed, used and destroyed entirely inside this call,
+// on the event thread: the volume close in the worker exit hook runs on the
+// same thread after the record pool is shut down, so no reader outlives it
+// and no factory call can be in flight at the close.  Never re-run the
+// startup check on a live adapter.
+ngx_int_t PsServeFromDaemonSubstrate(ngx_http_request_t* r,
+                                     ps_srv_conf_t* cfg_s,
+                                     const RequestHeaders& request_headers,
+                                     const GoogleUrl& full_url) {
+  // GET and HEAD only: a POST is never answered from the volume.  The
+  // handler's own gates have already excluded subrequests; retested here so
+  // the function is honest on its own.
+  if (r != r->main ||
+      (r->method != NGX_HTTP_GET && r->method != NGX_HTTP_HEAD)) {
+    return NGX_DECLINED;
+  }
+
+  NgxServerContext* server_context = cfg_s->server_context;
+  // A null reader is ordinary: no log line, no alarm.  The skew class and
+  // the fall-through counter are recorded exactly as Apache does, and the
+  // record side posts the rate-limited open when its own factory returns
+  // null -- nothing more is posted from here.
+  std::unique_ptr<DaemonServeReader> reader(
+      MakeDaemonServeReaderIfOpen(server_context->daemon_adapter()));
+  DaemonServeStats* serve_stats = server_context->daemon_serve_stats();
+  if (reader == nullptr) {
+    if (serve_stats != nullptr) {
+      serve_stats->Record(kPsServeClassOriginalSkew);
+    }
+    server_context->rewrite_stats()->ipro_daemon_fallthrough()->Add(1);
+    return NGX_DECLINED;
+  }
+
+  // The operator's switch for the optimizer's stored compressed copies
+  // (pagespeed DaemonServeStoredEncodings), per server block.  Off, the arm
+  // selects and labels exactly as it always has.
+  const NgxRewriteOptions* config = server_context->config();
+  reader->set_serve_stored_encodings(config != nullptr &&
+                                     config->daemon_serve_stored_encodings());
+  // Lets the arm notice, while it serves a stored original, that the URL's
+  // optimized copy has gone missing.  This worker process's own limiter:
+  // one look per URL per window.  The look is one more read of the mapped
+  // volume, like the selection it follows; the notification it can lead to
+  // is posted below, never sent from this thread.
+  reader->set_heal_notify_limiter(ProcessDaemonHealNotifyLimiter());
+
+  PsDaemonServeRequestStrings strings;
+  DaemonServeRequest serve_request;
+  BuildDaemonServeRequest(request_headers, full_url, &strings, &serve_request);
+  const DaemonServeDecision decision =
+      reader->Serve(serve_request, server_context->timer()->NowMs() / 1000);
+  // One serve class per consultation, including the fall-through below.
+  if (serve_stats != nullptr) {
+    serve_stats->Record(decision.serve_class);
+  }
+  if (decision.verdict == DaemonServeVerdict::kFallThrough) {
+    server_context->rewrite_stats()->ipro_daemon_fallthrough()->Add(1);
+    // An age-expired variant set must be purged before the re-record that
+    // follows this fall-through, or the URL regresses to origin serving one
+    // freshness lifetime after it was optimized (see
+    // DaemonServeOriginRefreshedNotify's header).  Posted -- never inline
+    // -- to the record arm's one-worker sequence, so it sits in that FIFO
+    // ahead of this same request's record completion; the option context
+    // is computed only now that the decision says there is something to
+    // ask for, on this thread, the way the record arm computes it.  An
+    // internal redirect can consult the arm twice and post the sentinel
+    // twice; the worker rate-limits it per URL, so that is duplicate
+    // traffic, not a defect.
+    if (decision.stale_variant_expired_by_age) {
+      DaemonAdapter* adapter = server_context->daemon_adapter();
+      const SystemRewriteOptions* options =
+          SystemRewriteOptions::DynamicCast(server_context->global_options());
+      GoogleString option_context, option_signature;
+      if (adapter != nullptr && adapter->abi() != nullptr &&
+          options != nullptr &&
+          OptionContext::Compute(*options, &option_context,
+                                 &option_signature) ==
+              OptionContextStatus::kOk) {
+        RewriteStats* stats = server_context->rewrite_stats();
+        PostDaemonServeNotify(
+            g_daemon_record_sequence, DaemonServeNotifyKind::kOriginRefreshed,
+            adapter->abi(), adapter->socket_path(), serve_request, decision,
+            option_context, option_signature,
+            stats->ipro_daemon_refresh_notified(),
+            stats->ipro_daemon_refresh_notify_failed(),
+            server_context->statistics()->FindVariable(
+                kIproDaemonNotifyDropped));
+      }
+    }
+    return NGX_DECLINED;
+  }
+
+  // The one read of the body's length, captured while the owner of the
+  // borrow is alive: every later use -- the composed Content-Length, the
+  // pool copy below, the hit record after the reader is gone -- takes this
+  // local, never the StringPiece again.
+  const size_t body_size = decision.body.size();
+
+  // The media type the response carries: the decision's own when it has
+  // one, else nginx's type-map answer for the URI -- asked on BOTH legs,
+  // because the answer feeds the Vary compressibility predicate, and the
+  // predicate's input must not depend on the leg.  The HEADER stays
+  // leg-gated: on the 304 what the type-map call put on r->headers_out is
+  // cleared again (value, length, lowcase pointer), so the 304 still
+  // carries no Content-Type.  (The type-map call may also lowercase
+  // r->exten in place; nothing downstream reads it.)
+  GoogleString request_media_type;
+  if (decision.content_type.empty() && ngx_http_set_content_type(r) == NGX_OK &&
+      r->headers_out.content_type.len > 0) {
+    request_media_type.assign(
+        reinterpret_cast<char*>(r->headers_out.content_type.data),
+        r->headers_out.content_type.len);
+    if (decision.not_modified) {
+      // Read for the composition only; a 304 invents no Content-Type.
+      ngx_str_null(&r->headers_out.content_type);
+      r->headers_out.content_type_len = 0;
+      r->headers_out.content_type_lowcase = nullptr;
+    }
+  }
+
+  // Compressible for this server = named by ContentType::IsCompressible()
+  // or present in the type list this module's own gzip setter installs
+  // (application/pdf, application/postscript, text/csv close that gap);
+  // asked about the SERVED type, the same one the compressor would see.
+  const char* served_media_type = ServeCompressorMediaType(
+      decision,
+      request_media_type.empty() ? nullptr : request_media_type.c_str());
+  const bool server_compresses_type =
+      NgxGZipSetterCompressesType(served_media_type);
+
+  // The composer writes everything into response_headers; the value it
+  // returns exists for its unit tests and is not needed here.
+  ResponseHeaders response_headers;
+  PsComposeDaemonServeHeaders(decision, request_media_type, body_size,
+                              server_compresses_type, &response_headers);
+  // Vary is the both-legs composition: the arm states the encoding token on
+  // the 200 AND the 304 for a compressible served type, with no size floor,
+  // because nginx's gzip eligibility (its floor, its type list, the
+  // operator's switches) cannot be read from here -- the core gzip filter
+  // decides after this module has composed its headers.  The two legs agree
+  // and nothing an operator configures can narrow them.  The arm's line is
+  // the only one on the wire: copying it into headers_out below marks the
+  // request, and the module's filter that runs after the compressor then
+  // withdraws the compressor's own `Vary` stamp.
+
+  ngx_buf_t* body_buf = nullptr;
+  ngx_chain_t out;
+  out.buf = nullptr;
+  out.next = nullptr;
+  if (!decision.not_modified) {
+    // The body, copied into ONE request-pool buffer before the reader that
+    // owns the borrow is released.  One buffer, not a chunked chain: nginx's
+    // range body filter slices in-memory buffers, and a multipart range
+    // across buffers is an error, so the response must be sliceable -- the
+    // copy count is still exactly one.  A HEAD copies nothing: the method
+    // has been known since the request line, its body is never sent, and
+    // the Content-Length above still states the length.
+    const bool send_body = (r->method & NGX_HTTP_HEAD) == 0;
+    u_char* body_copy = nullptr;
+    if (send_body && body_size > 0) {
+      body_copy = static_cast<u_char*>(ngx_palloc(r->pool, body_size));
+      if (body_copy == nullptr) {
+        return NGX_ERROR;
+      }
+      ngx_memcpy(body_copy, decision.body.data(), body_size);
+    }
+    body_buf = static_cast<ngx_buf_t*>(ngx_calloc_buf(r->pool));
+    if (body_buf == nullptr) {
+      return NGX_ERROR;
+    }
+    body_buf->pos = body_copy;
+    body_buf->last = body_copy == nullptr ? nullptr : body_copy + body_size;
+    // No bytes in memory is a sync buffer, exactly as
+    // string_piece_to_buffer_chain marks it: a non-special zero-size buffer
+    // trips ngx_http_write_filter's "zero size buf" alert.
+    if (body_copy == nullptr) {
+      body_buf->sync = 1;
+    } else {
+      body_buf->temporary = 1;
+    }
+    body_buf->last_buf = 1;
+    out.buf = body_buf;
+  }
+
+  // The reader -- and the peer's read result the body was borrowed from --
+  // is released here, before the first byte reaches the socket.
+  reader.reset();
+
+  if (copy_response_headers_to_ngx(r, response_headers, kDontPreserveHeaders) !=
+      NGX_OK) {
+    return NGX_ERROR;
+  }
+  if (!decision.not_modified) {
+    // Range support is nginx's: with a real Content-Length and allow_ranges
+    // set, the range filter slices the buffer and emits Accept-Ranges.
+    r->allow_ranges = 1;
+    // The arm has answered the conditionals by its own rules (a literal "*"
+    // is deliberately not honoured); nginx's own not-modified filter runs
+    // AHEAD OF this module's and sees this response first, and it must not
+    // mint a second opinion for If-None-Match: *, If-Match or
+    // If-Unmodified-Since on top of the arm's.
+    r->disable_not_modified = 1;
+  }
+
+  // Statistics exactly as Apache sets them: the serve counted once for
+  // every answered request -- 200, 304 and HEAD alike.  It sits BEFORE the
+  // send because the send's early return must not skip it; reachable only
+  // after ngx_http_output_filter is exactly where it must not be.  The hit
+  // is recorded under Apache's exact condition -- optimized, worker
+  // processed, origin length known -- on the 200 leg only, never on a 304.
+  server_context->rewrite_stats()->ipro_daemon_served()->Add(1);
+  RecordDaemonServedClass(server_context->rewrite_stats(),
+                          decision.ps_content_type);
+  if (serve_stats != nullptr && !decision.not_modified &&
+      decision.serve_class == kPsServeClassOptimized &&
+      decision.worker_processed && decision.origin_content_length > 0) {
+    // Attributed to a name this server block lists, never the request's
+    // Host value on its own; the entry was looked up for the request's host.
+    serve_stats->RecordHit(
+        decision.ps_content_type, decision.origin_content_length, body_size,
+        decision.stored_mask,
+        VouchedServeHost(serve_request.hostname, NgxConfiguredHostNames(r)));
+  }
+  // A fallback hit is SERVED, and the variant the client's mask really
+  // names is asked for with one fire-and-forget notification -- posted to
+  // the record arm's one-worker sequence, never inline on the event
+  // thread.  It sits where the served counter sits, ahead of the send: a
+  // fallback hit answered as a 304 or to a HEAD asks too (as Apache's
+  // unconditional block does), or a client holding the fallback bytes would
+  // revalidate for ever without ever asking for its own variant.  The
+  // option context is computed only now that the decision says fallback: an
+  // exact serve, the converged steady state, never pays it.  The two
+  // suppressions (the 0x04 gate, an unnameable context) stay inside
+  // DaemonServeFallbackRenotify, and a request whose configuration cannot
+  // be named asks for nothing, mirroring the record gate.
+  if (decision.fallback_hit) {
+    DaemonAdapter* adapter = server_context->daemon_adapter();
+    const SystemRewriteOptions* options =
+        SystemRewriteOptions::DynamicCast(server_context->global_options());
+    GoogleString option_context, option_signature;
+    if (adapter != nullptr && adapter->abi() != nullptr && options != nullptr &&
+        OptionContext::Compute(*options, &option_context, &option_signature) ==
+            OptionContextStatus::kOk) {
+      RewriteStats* stats = server_context->rewrite_stats();
+      PostDaemonServeNotify(
+          g_daemon_record_sequence, DaemonServeNotifyKind::kFallbackRenotify,
+          adapter->abi(), adapter->socket_path(), serve_request, decision,
+          option_context, option_signature,
+          stats->ipro_daemon_fallback_notified(),
+          stats->ipro_daemon_fallback_notify_failed(),
+          server_context->statistics()->FindVariable(kIproDaemonNotifyDropped));
+    }
+  }
+  // A stored original served for a URL whose optimized copy went missing is
+  // asked for with one fire-and-forget notification, posted like the
+  // fallback re-notify above and for the same reason placed ahead of the
+  // send: a 304 or a HEAD answered from the stored original asks too.  The
+  // arm's limiter has already held it to about once per URL per window, and
+  // its detection never fires for content the optimizer left unoptimized
+  // on purpose.  The response is not changed by this.
+  if (decision.lost_optimized_copy) {
+    DaemonAdapter* adapter = server_context->daemon_adapter();
+    const SystemRewriteOptions* options =
+        SystemRewriteOptions::DynamicCast(server_context->global_options());
+    GoogleString option_context, option_signature;
+    if (adapter != nullptr && adapter->abi() != nullptr && options != nullptr &&
+        OptionContext::Compute(*options, &option_context, &option_signature) ==
+            OptionContextStatus::kOk) {
+      RewriteStats* stats = server_context->rewrite_stats();
+      PostDaemonServeNotify(
+          g_daemon_record_sequence, DaemonServeNotifyKind::kLostCopy,
+          adapter->abi(), adapter->socket_path(), serve_request, decision,
+          option_context, option_signature, stats->ipro_daemon_heal_notified(),
+          stats->ipro_daemon_heal_notify_failed(),
+          server_context->statistics()->FindVariable(kIproDaemonNotifyDropped));
+    }
+  }
+  ngx_int_t rc = ngx_http_send_header(r);
+  if (rc == NGX_ERROR || rc > NGX_OK || r->header_only ||
+      decision.not_modified) {
+    // The 304 is headers only by design (the emit attached no body), and a
+    // HEAD skips the body through the same check send_out_headers_and_body
+    // makes.
+    return rc;
+  }
+  rc = ngx_http_output_filter(r, &out);
+  return rc;
+}
+
+}  // namespace
+
 ngx_int_t ps_resource_handler(ngx_http_request_t* r, bool html_rewrite,
                               RequestRouting::Response response_category) {
   if (r != r->main) {
@@ -2222,6 +2855,14 @@ ngx_int_t ps_resource_handler(ngx_http_request_t* r, bool html_rewrite,
 
   ps_srv_conf_t* cfg_s = ps_get_srv_config(r);
   ps_request_ctx_t* ctx = ps_get_request_context(r);
+
+  if (ctx != nullptr) {
+    // A request that comes through here again (internal redirect, or the
+    // html pass after the resource pass) starts the disposition over: a
+    // pending mark from a previous pass must not leak into this one's
+    // filters when this pass takes no record branch.
+    ctx->daemon_record_pending = false;
+  }
 
   if (ngx_terminate || ngx_exiting) {
     cfg_s->server_context->message_handler()->Message(
@@ -2343,6 +2984,9 @@ ngx_int_t ps_resource_handler(ngx_http_request_t* r, bool html_rewrite,
     }
 
     ctx->recorder = nullptr;
+    ctx->daemon_record_pending = false;
+    ctx->daemon_recorder = false;
+    ctx->daemon_body_bytes = 0;
     ctx->url_string = url_string;
     ctx->location_field_set = false;
     ctx->psol_vary_accept_only = false;
@@ -2409,11 +3053,18 @@ ngx_int_t ps_resource_handler(ngx_http_request_t* r, bool html_rewrite,
           return NGX_HTTP_REQUEST_ENTITY_TOO_LARGE;
         }
       }
+      ctx->base_fetch->request_headers()->set_method(
+          RequestHeaders::MethodFromString(
+              str_to_string_piece(r->method_name)));
+      // The host this server block records its serves under (the same rule
+      // as the serve hit): a per-host console sees that row of the
+      // optimizer's serve savings and no other site's.
       cfg_s->server_context->AdminPage(
           response_category == RequestRouting::kGlobalAdmin, url, query_params,
           custom_options == nullptr ? cfg_s->server_context->config()
                                     : custom_options.get(),
-          ctx->base_fetch, request_body);
+          ctx->base_fetch, request_body,
+          VouchedServeHost(url.Host(), NgxConfiguredHostNames(r)));
     } else if (response_category == RequestRouting::kCachePurge) {
       AdminSite* admin_site = cfg_s->server_context->admin_site();
       admin_site->PurgeHandler(url_string, cfg_s->server_context->cache_path(),
@@ -2494,35 +3145,75 @@ ngx_int_t ps_resource_handler(ngx_http_request_t* r, bool html_rewrite,
     return NGX_OK;
   }
 
+  // In-place optimization considers GET and HEAD only: those are the
+  // methods whose responses may be looked up in, and recorded into, the
+  // cache.  Any other method takes the path a request takes when in-place
+  // rewriting is disabled: no lookup, no recorder mark, and the NGX_DECLINED
+  // below lets nginx answer it itself (a POST to a static file gets the
+  // static handler's 405).  nginx's method constants are single-bit flags,
+  // so the & below tests membership of the one method the request has.
+  //
+  // In-place optimization also leaves internally redirected requests to the
+  // server: it does not look them up and does not record them (r->internal
+  // is set on the pass after an internal redirect).
   if (options->in_place_rewriting_enabled() && options->enabled() &&
-      options->IsAllowed(url.Spec())) {
-    ps_create_base_fetch(url.Spec(), ctx, request_context,
-                         request_headers.release(), kIproLookup, options);
-
-    // Do not store driver in request_context, it's not safe.
-    RewriteDriver* driver;
-    if (custom_options.get() == nullptr) {
-      driver = cfg_s->server_context->NewRewriteDriver(
-          ctx->base_fetch->request_context());
+      options->IsAllowed(url.Spec()) &&
+      (r->method & (NGX_HTTP_GET | NGX_HTTP_HEAD)) && !r->internal) {
+    const IproDisposition disposition =
+        IproDispositionFor(cfg_s->server_context->daemon_health());
+    if (disposition == IproDisposition::kDaemonSubstrate) {
+      // The daemon owns the in-place cache: FIRST ask its volume for a
+      // response.  A served request is answered here and never reaches the
+      // tail below; a declined request falls through to exactly what
+      // happens today -- the in-place header filter builds the recorder on
+      // the mark set here, and a served request never carries it.
+      // Subrequests never reach here (declined above).
+      const ngx_int_t serve_rc =
+          PsServeFromDaemonSubstrate(r, cfg_s, *request_headers, url);
+      if (serve_rc != NGX_DECLINED) {
+        return serve_rc;
+      }
+      //
+      // The method is the HEAD guard, not r->header_only: nginx sets
+      // header_only in its core header filter, downstream of this module's,
+      // so at the module's own position the flag is not set for a HEAD yet.
+      // The method has been known since the request line was parsed, and a
+      // HEAD has no body to record.
+      if (!(r->method & NGX_HTTP_HEAD)) {
+        ctx->daemon_record_pending = true;
+      }
+    } else if (disposition == IproDisposition::kOff) {
+      // A daemon was configured and is not usable: in-place optimization is
+      // off, exactly as if in_place_rewriting were disabled.
     } else {
-      // NewCustomRewriteDriver takes ownership of custom_options.
-      driver = cfg_s->server_context->NewCustomRewriteDriver(
-          custom_options.release(), ctx->base_fetch->request_context());
+      ps_create_base_fetch(url.Spec(), ctx, request_context,
+                           request_headers.release(), kIproLookup, options);
+
+      // Do not store driver in request_context, it's not safe.
+      RewriteDriver* driver;
+      if (custom_options.get() == nullptr) {
+        driver = cfg_s->server_context->NewRewriteDriver(
+            ctx->base_fetch->request_context());
+      } else {
+        // NewCustomRewriteDriver takes ownership of custom_options.
+        driver = cfg_s->server_context->NewCustomRewriteDriver(
+            custom_options.release(), ctx->base_fetch->request_context());
+      }
+
+      driver->SetRequestHeaders(*ctx->base_fetch->request_headers());
+      ps_apply_webbotauth_verdict(r, cfg_s, driver);
+      ctx->driver = driver;
+
+      cfg_s->server_context->message_handler()->Message(
+          kInfo, "Trying to serve rewritten resource in-place: %s",
+          url_string.c_str());
+
+      ctx->in_place = true;
+      ctx->driver->FetchInPlaceResource(url, false /* proxy_mode */,
+                                        ctx->base_fetch);
+
+      return ps_async_wait_response(r);
     }
-
-    driver->SetRequestHeaders(*ctx->base_fetch->request_headers());
-    ps_apply_webbotauth_verdict(r, cfg_s, driver);
-    ctx->driver = driver;
-
-    cfg_s->server_context->message_handler()->Message(
-        kInfo, "Trying to serve rewritten resource in-place: %s",
-        url_string.c_str());
-
-    ctx->in_place = true;
-    ctx->driver->FetchInPlaceResource(url, false /* proxy_mode */,
-                                      ctx->base_fetch);
-
-    return ps_async_wait_response(r);
   }
 
   // NOTE: We are using the below debug message as is for some of our system
@@ -2679,11 +3370,34 @@ ngx_int_t ps_etag_header_filter(ngx_http_request_t* r) {
   ps_request_ctx_t* ctx = ps_get_request_context(r);
 #if (NGX_HTTP_GZIP)
   if (ctx && ctx->psol_vary_accept_only) {
-    r->gzip_vary = 0;
+    // One shot, and only while the module's Vary is really on this
+    // response: a response that replaced the module's (an error page sent
+    // after the headers were cleaned) keeps the compressor's own stamp.
+    ctx->psol_vary_accept_only = false;
+    ngx_table_elt_t* header;
+    NgxListIterator it(&(r->headers_out.headers.part));
+    while ((header = it.Next()) != nullptr) {
+      if (header->hash != 0 && STR_CASE_EQ_LITERAL(header->key, "Vary") &&
+          ps_vary_lists_accept_encoding(header->value)) {
+        r->gzip_vary = 0;
+        break;
+      }
+    }
   }
 #endif
 
-  if (ctx && ctx->recorder) {
+  // The s-maxage rewrite is a classic-substrate mechanism: it shortens a
+  // downstream cache's hold on UNOPTIMIZED bytes served from this module's
+  // own cache so they are re-fetched once optimized.  A daemon-side recorder
+  // changes nothing about how this response is served -- it is the origin's
+  // answer passing through -- so its Cache-Control stays the origin's.
+  //
+  // The daemon conjunct is LOAD-BEARING: with the module in its proper chain
+  // position this filter runs after the in-place header filter, so on the
+  // daemon path the recorder already exists when this gate is evaluated, and
+  // the conjunct is the only thing that keeps the origin's Cache-Control
+  // from being rewritten here.
+  if (ctx && ctx->recorder && !ctx->daemon_recorder) {
     ps_srv_conf_t* cfg_s = ps_get_srv_config(r);
     int s_maxage_sec =
         cfg_s->server_context->global_options()->EffectiveInPlaceSMaxAgeSec();
@@ -2709,13 +3423,13 @@ ngx_int_t ps_etag_header_filter(ngx_http_request_t* r) {
   return ngx_http_ef_next_header_filter(r);
 }
 
-// Helper function to read file-based buffer into memory.
-// This is needed because nginx's static file handler may pass file buffers
-// even when filter_need_in_memory is set, depending on the request flow
-// (e.g., after IPRO lookup fails and falls back to HTML rewriting).
-// Returns NGX_OK on success, NGX_ERROR on failure.
+// Makes sure a body buffer's bytes are in memory.  A defensive fallback: see
+// the two cases inside.  Returns NGX_OK on success, NGX_ERROR on failure.
 static ngx_int_t ps_read_file_buffer(ngx_http_request_t* r, ngx_buf_t* buf) {
-  if (!buf->in_file) {
+  // With sendfile on, nginx's copy filter hands on a buffer that is in memory
+  // AND still marked as file-backed (so an untouched buffer can go out through
+  // sendfile).  Such a buffer needs no read: its bytes are already at pos.
+  if (!buf->in_file || ngx_buf_in_memory(buf)) {
     return NGX_OK;  // Already in memory
   }
 
@@ -2723,6 +3437,15 @@ static ngx_int_t ps_read_file_buffer(ngx_http_request_t* r, ngx_buf_t* buf) {
   if (size <= 0) {
     return NGX_OK;  // Empty file buffer
   }
+
+  // A buffer that is ONLY file-backed.  With the module in its proper chain
+  // position the copy filter has read static files into memory before the
+  // body filters run, so this is not expected; if some flow still hands over
+  // a pure file buffer, the read below happens synchronously on the event
+  // thread, and it must stay observable, not silent.
+  ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
+                "pagespeed: synchronous read of %O bytes for %V", size,
+                &r->uri);
 
   // Allocate memory for the file content
   u_char* data = static_cast<u_char*>(ngx_palloc(r->pool, size));
@@ -2878,9 +3601,10 @@ ngx_int_t ps_html_rewrite_body_filter(ngx_http_request_t* r, ngx_chain_t* in) {
   // that in the header filter and not initializing ctx.
   CHECK(r->err_status == 0);  // NOLINT
 
-  // Convert any file-based buffers to memory buffers.
-  // This is needed because nginx's static file handler may pass file buffers
-  // even when filter_need_in_memory is set, depending on the request flow.
+  // Convert any file-based buffers to memory buffers.  This is a defensive
+  // fallback: with the module in its proper chain position most responses
+  // arrive as memory, and any actual read is logged at info level in
+  // ps_read_file_buffer so it cannot pass silently.
   for (ngx_chain_t* cl = in; cl != nullptr; cl = cl->next) {
     if (cl->buf->in_file) {
       ngx_int_t rc = ps_read_file_buffer(r, cl->buf);
@@ -2928,6 +3652,109 @@ ngx_int_t ps_in_place_check_header_filter(ngx_http_request_t* r) {
     return ngx_http_next_header_filter(r);
   }
 
+  if (ctx->daemon_record_pending) {
+    // The daemon substrate did no in-place lookup for this request, so this
+    // pass is the only one this filter makes for it: build the recorder
+    // here, at the same point in the filter chain where the classic path
+    // hands its recorder the preliminary headers.
+    ctx->daemon_record_pending = false;
+    // NOT the HEAD guard, and not a 204/304 guard either: nginx's core
+    // header filter sets header_only for a HEAD, a 204 and a 304 DOWNSTREAM
+    // of this filter, so at this position the flag is effectively never
+    // set -- the only main-request setter that can already have run is
+    // nginx's post_action.  A HEAD never gets the mark (the method is
+    // tested there), and status filtering is the recorder's: it refuses
+    // anything but a 200.
+    if (!r->header_only) {
+      ps_srv_conf_t* cfg_s = ps_get_srv_config(r);
+      NgxServerContext* server_context = cfg_s->server_context;
+      const SystemRewriteOptions* options =
+          SystemRewriteOptions::DynamicCast(server_context->global_options());
+
+      DaemonRecordRequest record_request;
+      // The URL the rest of the module already agreed on and the classic
+      // recorder already keys on: PageSpeed control parameters stripped,
+      // X-Forwarded-Proto honoured.  The serve arm will key on the same
+      // three fields.
+      GoogleUrl full_url(ctx->url_string);
+      full_url.PathAndLeaf().CopyToString(&record_request.url);
+      full_url.Host().CopyToString(&record_request.hostname);
+      full_url.Scheme().CopyToString(&record_request.scheme);
+
+      RequestHeaders request_headers;
+      copy_request_headers_from_ngx(r, &request_headers);
+      RequestHeaders::Properties props = request_headers.GetProperties();
+      // On nginx today this OR adds nothing: headers_in.user is only ever
+      // set from a decodable Authorization: Basic header, which the header
+      // test already covers.  It stays as the counterpart of Apache's
+      // request_->user in case a module ever populates the field otherwise.
+      // The real gap, here as on the classic path, is a request
+      // authenticated WITHOUT an Authorization header -- auth_request, a
+      // session or token scheme without cookies, client-certificate TLS:
+      // such a response is recorded as unauthenticated.  Against that,
+      // nginx still runs its access phase per request before any future
+      // serve of the recorded entry.
+      props.has_authorization =
+          props.has_authorization || r->headers_in.user.len > 0;
+      record_request.request_properties = props;
+
+      // LookupJoined, not Lookup1: the capability headers are routinely
+      // multi-token ("image/avif,image/webp,*/*", "gzip, deflate, br"), and
+      // a comma-split value is several values, which Lookup1 reports as
+      // absent -- the record key would carry a no-capability mask for every
+      // such request, and the notification would ask the daemon for the
+      // wrong variant family.
+      record_request.accept =
+          request_headers.LookupJoined(HttpAttributes::kAccept);
+      record_request.user_agent =
+          request_headers.LookupJoined(HttpAttributes::kUserAgent);
+      record_request.save_data = request_headers.LookupJoined("Save-Data");
+      record_request.accept_encoding =
+          request_headers.LookupJoined(HttpAttributes::kAcceptEncoding);
+
+      // The resolved configuration, stated as a value.  This port renders it
+      // from the server-global options rather than from a per-request
+      // resolution: a request carrying its own option overrides records
+      // under the server's context, which asks the daemon for the server's
+      // variants -- a missed optimization for that request, never a wrong
+      // one.
+      if (options != nullptr &&
+          OptionContext::Compute(*options, &record_request.option_context,
+                                 &record_request.option_signature) !=
+              OptionContextStatus::kOk) {
+        record_request.option_context.clear();
+        record_request.option_signature.clear();
+      }
+
+      IproRecorder* recorder = nullptr;
+      if (options != nullptr) {
+        recorder = MakeDaemonIproRecorderIfOpen(
+            server_context->daemon_adapter(), record_request,
+            options->ComputeHttpOptions(), server_context->timer(),
+            cfg_s->handler, server_context->rewrite_stats());
+      }
+      if (recorder != nullptr) {
+        ctx->recorder = recorder;
+        ctx->daemon_recorder = true;
+        ctx->daemon_body_bytes = 0;
+        r->filter_need_in_memory = 1;
+        ResponseHeaders response_headers;
+        copy_response_headers_from_ngx(r, &response_headers);
+        recorder->ConsiderResponseHeaders(IproRecorder::kPreliminaryHeaders,
+                                          &response_headers);
+      } else if (server_context->daemon_health() == DaemonHealth::kReady &&
+                 g_daemon_record_sequence != nullptr &&
+                 ShouldPostDaemonOpenAttempt()) {
+        // The verdict says the daemon is usable but this worker has no open
+        // volume handle: record nothing for this request and ask for one
+        // open, off the event thread, at most once per latch interval.
+        PostDaemonOpenAttempt(g_daemon_record_sequence,
+                              server_context->daemon_adapter());
+      }
+    }
+    return ngx_http_next_header_filter(r);
+  }
+
   if (ctx->recorder != nullptr) {
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "ps in place check header filter recording: %V", &r->uri);
@@ -2947,8 +3774,8 @@ ngx_int_t ps_in_place_check_header_filter(ngx_http_request_t* r) {
     // The recorder will do this checking, so pass it the headers.
     ResponseHeaders response_headers;
     copy_response_headers_from_ngx(r, &response_headers);
-    ctx->recorder->ConsiderResponseHeaders(
-        InPlaceResourceRecorder::kPreliminaryHeaders, &response_headers);
+    ctx->recorder->ConsiderResponseHeaders(IproRecorder::kPreliminaryHeaders,
+                                           &response_headers);
     return ngx_http_next_header_filter(r);
   }
 
@@ -2994,6 +3821,16 @@ ngx_int_t ps_in_place_check_header_filter(ngx_http_request_t* r) {
         "Could not rewrite resource in-place "
         "because URL is not in cache: %s",
         cache_url.c_str());
+    // A HEAD is a miss like any other, but it gets no recorder: it has no
+    // body to record, so a recorder could only end in an
+    // incomplete-recording failure at teardown.  The guard is the METHOD,
+    // not r->header_only: nginx sets header_only for a HEAD in its core
+    // header filter, downstream of this one.  The header_only test above is
+    // not dead: nginx's post_action sets the flag before its internal
+    // redirect and keeps the method, and such a request has no body either.
+    if (r->method & NGX_HTTP_HEAD) {
+      return ps_decline_request(r);
+    }
     const SystemRewriteOptions* options =
         SystemRewriteOptions::DynamicCast(ctx->driver->options());
 
@@ -3005,14 +3842,25 @@ ngx_int_t ps_in_place_check_header_filter(ngx_http_request_t* r) {
     // This URL was not found in cache (neither the input resource nor
     // a ResourceNotCacheable entry) so we need to get it into cache
     // (or at least a note that it cannot be cached stored there).
-    // We do that using an Apache output filter.
-    ctx->recorder = new InPlaceResourceRecorder(
-        request_context, cache_url, ctx->driver->CacheFragment(),
-        request_headers.GetProperties(), options->ipro_max_response_bytes(),
+    // The in-place body filter feeds the recorder as the response streams
+    // through.
+    // The recorder is built through the record gate rather than here: that
+    // function is the single place in the tree allowed to construct one, and
+    // it returns nullptr for every substrate other than the classic one.
+    // nginx passes the literal kClassic, so it always constructs.
+    ctx->recorder = MakeIproRecorderIfClassic(
+        IproDisposition::kClassic, request_context, cache_url,
+        ctx->driver->CacheFragment(), request_headers.GetProperties(),
+        options->ipro_max_response_bytes(),
         options->ipro_max_concurrent_recordings(), server_context->http_cache(),
         server_context->statistics(), message_handler);
-    // set in memory flag for in_place_body_filter
-    r->filter_need_in_memory = 1;
+    // With the literal kClassic the gate always constructs, so this branch
+    // is always taken today; it exists because a disposition that returns no
+    // recorder must not force the response body into memory.
+    if (ctx->recorder != nullptr) {
+      // set in memory flag for in_place_body_filter
+      r->filter_need_in_memory = 1;
+    }
 
     // We don't have the response headers at all yet because we haven't yet gone
     // to the backend.
@@ -3029,6 +3877,7 @@ ngx_int_t ps_in_place_check_header_filter(ngx_http_request_t* r) {
 // with IPRO, then log the bytes as they come through
 ngx_int_t ps_in_place_body_filter(ngx_http_request_t* r, ngx_chain_t* in) {
   ps_request_ctx_t* ctx = ps_get_request_context(r);
+
   if (ctx == nullptr || ctx->recorder == nullptr) {
     return ngx_http_next_body_filter(r, in);
   }
@@ -3046,13 +3895,16 @@ ngx_int_t ps_in_place_body_filter(ngx_http_request_t* r, ngx_chain_t* in) {
     }
   }
 
-  InPlaceResourceRecorder* recorder = ctx->recorder;
+  IproRecorder* recorder = ctx->recorder;
   for (ngx_chain_t* cl = in; cl; cl = cl->next) {
     if (ngx_buf_size(cl->buf)) {
       CHECK(ngx_buf_in_memory(cl->buf));
       StringPiece contents(reinterpret_cast<char*>(cl->buf->pos),
                            ngx_buf_size(cl->buf));
       recorder->Write(contents, recorder->handler());
+      if (ctx->daemon_recorder) {
+        ctx->daemon_body_bytes += contents.size();
+      }
     }
 
     if (cl->buf->flush) {
@@ -3060,12 +3912,56 @@ ngx_int_t ps_in_place_body_filter(ngx_http_request_t* r, ngx_chain_t* in) {
     }
 
     if (cl->buf->last_buf || recorder->failed()) {
-      ResponseHeaders response_headers;
-      copy_response_headers_from_ngx(r, &response_headers);
-      ctx->recorder->DoneAndSetHeaders(
-          &response_headers,
-          cl->buf->last_buf /* response is complete if last_buf is set */);
-      ctx->recorder = nullptr;
+      if (ctx->daemon_recorder) {
+        // DoneAndSetHeaders opens the volume write and may notify the
+        // daemon: blocking work, so it runs on the record arm's own pool,
+        // not here.  The closure owns the recorder and the copied final
+        // headers from here on; the pool's shutdown completes the recorder
+        // even if the closure never runs.
+        ps_srv_conf_t* cfg_s = ps_get_srv_config(r);
+        ResponseHeaders* headers = new ResponseHeaders();
+        copy_response_headers_from_ngx(r, headers);
+        // The drop counter lives on this server context's statistics object,
+        // looked up per completion: there are several statistics objects
+        // (the global one and each server's), so a process-wide cached
+        // Variable* would count against whichever was registered first.
+        // FindVariable, not GetVariable: a statistics object that ever
+        // misses the registration degrades to an uncounted drop rather than
+        // aborting the worker on GetVariable's CHECK.
+        Variable* dropped = cfg_s->server_context->statistics()->FindVariable(
+            kIproDaemonRecordDropped);
+        // The queue reservation is clamped at the recorder's own content
+        // cap: Write() stops buffering there and clears, so the bytes the
+        // closure will actually hold never exceed it, and a reservation
+        // larger than that only inflates the drop counter.
+        const int64_t body_bytes =
+            std::min(ctx->daemon_body_bytes,
+                     static_cast<int64_t>(kDaemonOriginalContentCapBytes));
+        if (g_daemon_record_sequence != nullptr &&
+            TryQueueDaemonCompletion(body_bytes, dropped)) {
+          g_daemon_record_sequence->Add(new DaemonRecordCompletion(
+              recorder, headers, cl->buf->last_buf, body_bytes));
+        } else {
+          // No queue room (or no pool): the recording is finished inline as
+          // incomplete, which stores nothing.  The response is unaffected.
+          // The cap already counted the no-room case; a missing pool counts
+          // here, so every refused completion shows up in the drop counter.
+          if (g_daemon_record_sequence == nullptr && dropped != nullptr) {
+            dropped->Add(1);
+          }
+          recorder->DoneAndSetHeaders(nullptr, false);
+          delete headers;
+        }
+        ctx->recorder = nullptr;
+        ctx->daemon_recorder = false;
+      } else {
+        ResponseHeaders response_headers;
+        copy_response_headers_from_ngx(r, &response_headers);
+        ctx->recorder->DoneAndSetHeaders(
+            &response_headers,
+            cl->buf->last_buf /* response is complete if last_buf is set */);
+        ctx->recorder = nullptr;
+      }
       break;
     }
   }
@@ -3135,14 +4031,24 @@ ngx_int_t ps_simple_handler(ngx_http_request_t* r,
   HttpStatus::Code status = HttpStatus::kOK;
   ContentType content_type = kContentTypeHtml;
   StringPiece cache_control = HttpAttributes::kNoCache;
+  // Backing store for cache_control when a case below points it at a
+  // fetch's response headers, which do not outlive the switch block.
+  GoogleString fetch_cache_control;
   const char* error_message = nullptr;
 
   switch (response_category) {
     case RequestRouting::kStaticContent: {
       StringPiece file_contents;
-      if (!server_context->static_asset_manager()->GetAsset(
-              request_uri_path.substr(factory->static_asset_prefix().length()),
-              &file_contents, &content_type, &cache_control)) {
+      // Answered only when the server's path and the module's own reading of
+      // the request path name the same file under the static asset prefix;
+      // anything else is left to the server.
+      const StringPiece asset_name = NgxStaticAssetName(
+          request_uri_path,
+          url.IsWebValid() ? url.PathSansQuery() : StringPiece(),
+          factory->static_asset_prefix());
+      if (asset_name.empty() ||
+          !server_context->static_asset_manager()->GetAsset(
+              asset_name, &file_contents, &content_type, &cache_control)) {
         return NGX_DECLINED;
       }
       file_contents.CopyToString(&output);
@@ -3153,16 +4059,35 @@ ngx_int_t ps_simple_handler(ngx_http_request_t* r,
       // reaches the message-history endpoint. The web-server-layer ACL is
       // expected to gate this; we only signal that it wasn't effective.
       ps_warn_admin_exposure(r, server_context, response_category);
-      GoogleString log;
-      StringWriter log_writer(&log);
-      if (!message_handler->Dump(&log_writer)) {
-        writer.Write(
-            "Writing to ngx_pagespeed_message failed. \n"
-            "Please check if it's enabled in pagespeed.conf.\n",
-            message_handler);
-      } else {
-        HtmlKeywords::WritePre(log, "", &writer, message_handler);
+      // Same JSON as the other ports: run the shared handler into a string
+      // fetch and hand its body to nginx's writer.
+      GoogleString json;
+      RequestContextPtr request_context(server_context->NewRequestContext(r));
+      request_context->set_options(
+          server_context->config()->ComputeHttpOptions());
+      StringAsyncFetch fetch(request_context, &json);
+      fetch.request_headers()->set_method(RequestHeaders::MethodFromString(
+          str_to_string_piece(r->method_name)));
+      QueryParams message_query_params;
+      message_query_params.ParseFromUntrustedString(
+          str_to_string_piece(r->args));
+      server_context->MessageHistoryHandler(*server_context->config(),
+                                            AdminSite::kOther,
+                                            message_query_params, &fetch);
+      // ps_simple_handler's shared post-switch code pins content_type and
+      // cache_control to defaults; take the JSON type and cache policy the
+      // shared handler set instead.
+      const ContentType* fetch_content_type =
+          fetch.response_headers()->DetermineContentType();
+      if (fetch_content_type != nullptr) {
+        content_type = *fetch_content_type;
       }
+      fetch_cache_control =
+          fetch.response_headers()->LookupJoined(HttpAttributes::kCacheControl);
+      if (!fetch_cache_control.empty()) {
+        cache_control = fetch_cache_control;
+      }
+      writer.Write(json, message_handler);
       break;
     }
     default:
@@ -3815,6 +4740,53 @@ ngx_int_t ps_init_module(ngx_cycle_t* cycle) {
     return NGX_ERROR;
   }
 
+  // Resolve every server's relationship with the optimizer daemon before any
+  // worker is forked, so the serving path only ever reads a verdict.
+  //
+  // A refusal here fails the whole start, which is the point: the single
+  // condition that refuses is a cache-volume sizing divergence between this
+  // module and the daemon, and that divergence is SILENT at run time -- the
+  // two sides would open different volume files, share nothing, and look
+  // healthy while optimizing nothing.  Every other daemon problem degrades to
+  // in-place optimization off with one loud line, and the server starts.
+  //
+  // On a reload the probe runs while the previous generation still holds the
+  // volume: a peer that decides the volume needs a reset refuses the probe
+  // open against a live holder, which this module reads as kUnavailable for
+  // the whole new cycle even though the daemon is healthy.  The same overlap
+  // exists during a binary upgrade, but there the exec'd binary's first cycle
+  // IS the initial cycle, so the refusal below still fires and aborts the
+  // upgrade -- which leaves the running master untouched.
+  //
+  // A config test must not touch the daemon at all: the probe open can
+  // create a volume file, and Apache's post_config does not run under -t
+  // either.
+  if (!ngx_test_config) {
+    // A refusal is only a refusal on the initial cycle.  A reload must never
+    // exit out of a live master and orphan its workers, so on a later cycle
+    // the verdict stays not-ready -- the module records and serves nothing
+    // through a volume it did not attach to -- but the configuration keeps
+    // running.  The adapter announces each distinct condition once per
+    // process, so a refusal repeated across reloads would be silent; the
+    // module therefore says so itself, every time.
+    const bool initial_cycle =
+        (cycle->old_cycle == nullptr || cycle->old_cycle->conf_ctx == nullptr);
+    for (SystemServerContext* system_server_context : server_contexts) {
+      NgxServerContext* server_context =
+          dynamic_cast<NgxServerContext*>(system_server_context);
+      CHECK(server_context != nullptr);
+      if (!server_context->RunDaemonStartupCheck()) {
+        if (initial_cycle) {
+          return NGX_ERROR;
+        }
+        cfg_m->handler->Message(
+            kError,
+            "the optimizer daemon startup check refused this configuration; "
+            "this reload keeps running with in-place optimization off");
+      }
+    }
+  }
+
   if (!server_contexts.empty()) {
     // TODO(oschaaf): this ignores sigpipe messages from memcached.
     // however, it would be better to not have those signals generated
@@ -3924,6 +4896,60 @@ void ps_exit_child_process(ngx_cycle_t* cycle) {
   NgxBaseFetch::Terminate();
   if (cfg_m != nullptr && cfg_m->driver_factory != nullptr) {
     cfg_m->driver_factory->ShutDown();
+  }
+  // Shut down and delete the record arm's own pool HERE, between the
+  // factory's shutdown and the volume close below: it is a port-owned pool,
+  // so the factory never touches it, and the close loop's contract -- every
+  // thread that can still touch an adapter, or hold a handle it handed out,
+  // is finished or joined first -- covers it exactly.  The join is
+  // UNBOUNDED in the same way the close is: it waits out the one active
+  // item, while everything still queued is cancelled and sends nothing.
+  // That active item is bounded on every shape it can take: a record
+  // completion's volume commit is bounded by the storage layer at tens of
+  // seconds against a stopped peer, and a posted notification is the client
+  // library's notify call, which does not wait for the daemon: against a
+  // stopped daemon it returned in microseconds, and once the daemon's accept
+  // queue was full it was refused at once (both measured with the serve
+  // benchmark under tools/parity).  So the join waits out nothing that can
+  // stall.  The sequence is deleted with the pool; no FreeSequence anywhere.
+  if (g_daemon_record_pool != nullptr) {
+    g_daemon_record_pool->ShutDown();
+    delete g_daemon_record_pool;
+    g_daemon_record_pool = nullptr;
+    g_daemon_record_sequence = nullptr;
+  }
+  // Close every server context's daemon volume handle HERE rather than
+  // leaving it to the adapter's destructor.  The destructor only runs when
+  // the cycle pool is destroyed and its cleanup handler deletes the factory,
+  // an ordering this module does not control; here the close sits at a point
+  // the module does control, after the driver factory has shut down.  It is
+  // not bounded by nginx either way: the close joins the storage layer's
+  // background threads with no deadline, and the event loop (and with it
+  // worker_shutdown_timeout) is already over when exit hooks run.
+  //
+  // What the factory shutdown guarantees is that the PSOL worker pools are
+  // joined.  It does NOT cover drivers that outlive its bounded wait, nor any
+  // thread this port owns itself: anything that can still touch an adapter,
+  // or hold a handle it handed out, has to be finished or joined BEFORE this
+  // loop.  The close invalidates a raw handle that holders copied.
+  //
+  // No process-kind gate: closing is a no-op where nothing was opened.  A
+  // null driver factory means there are no server contexts, which the
+  // per-server null check below covers, and a non-null main conf for this
+  // module implies an http{} block, so the core main conf exists.
+  if (cfg_m != nullptr) {
+    ngx_http_core_main_conf_t* cmcf = static_cast<ngx_http_core_main_conf_t*>(
+        ngx_http_cycle_get_module_main_conf(cycle, ngx_http_core_module));
+    ngx_http_core_srv_conf_t** cscfp =
+        static_cast<ngx_http_core_srv_conf_t**>(cmcf->servers.elts);
+    for (ngx_uint_t s = 0; s < cmcf->servers.nelts; s++) {
+      ps_srv_conf_t* cfg_s = static_cast<ps_srv_conf_t*>(
+          cscfp[s]->ctx->srv_conf[ngx_pagespeed.ctx_index]);
+      if (cfg_s->server_context != nullptr &&
+          cfg_s->server_context->daemon_adapter() != nullptr) {
+        cfg_s->server_context->daemon_adapter()->CloseRecordCache();
+      }
+    }
   }
   // Route any further LOG() to stderr and drop the NgxGLogSink (the nginx
   // counterpart of Apache's pagespeed_child_exit shutdown ordering).
@@ -4087,6 +5113,7 @@ ngx_int_t ps_init_child_process(ngx_cycle_t* cycle) {
   // Iterate over all configured server{} blocks, and find our context in it,
   // so we can create and set a ProxyFetchFactory for it.
   std::set<GoogleString> warmer_seen;  // Dedup (host,url) per worker
+  bool any_daemon_ready = false;
   for (s = 0; s < cmcf->servers.nelts; s++) {
     ps_srv_conf_t* cfg_s = static_cast<ps_srv_conf_t*>(
         cscfp[s]->ctx->srv_conf[ngx_pagespeed.ctx_index]);
@@ -4098,6 +5125,32 @@ ngx_int_t ps_init_child_process(ngx_cycle_t* cycle) {
           cscfp[s]->ctx->loc_conf[ngx_http_core_module.ctx_index]);
       cfg_m->driver_factory->SetServerContextMessageHandler(
           cfg_s->server_context, clcf->error_log);
+
+      // The optimizer-daemon start-up check ran in the master, before the
+      // shared message buffer existed; a serving worker repeats a refusal so
+      // the admin console's message history shows it.  Not in the cache
+      // manager or loader, which run this hook too but serve nothing.
+      if ((ngx_process == NGX_PROCESS_WORKER ||
+           ngx_process == NGX_PROCESS_SINGLE) &&
+          cfg_s->server_context->daemon_adapter() != nullptr) {
+        cfg_s->server_context->daemon_adapter()->ReannounceStartupRefusal();
+      }
+
+      // Open this worker's own handle on the daemon's shared cache volume
+      // for every server whose startup verdict says the daemon is usable.
+      // The first open takes a blocking file lock and starts background
+      // threads, so it happens here -- in a serving worker, after fork and
+      // off the event loop -- never lazily inside a request, and never in
+      // the master (the master only resolved the verdict) or in nginx's
+      // cache manager and cache loader, which run this hook too but serve
+      // no request.  A null result is fine: the adapter has its own retry
+      // schedule.
+      if ((ngx_process == NGX_PROCESS_WORKER ||
+           ngx_process == NGX_PROCESS_SINGLE) &&
+          cfg_s->server_context->daemon_health() == DaemonHealth::kReady) {
+        cfg_s->server_context->daemon_adapter()->RecordCache();
+        any_daemon_ready = true;
+      }
 
       // Start the background key-directory warmer(s) for any server
       // whose feature is enabled AND has a remote directory configured. No-op
@@ -4120,6 +5173,22 @@ ngx_int_t ps_init_child_process(ngx_cycle_t* cycle) {
             opt->rsl_cap_key_directory_refresh_sec(), &warmer_seen);
       }
     }
+  }
+
+  // The record arm's own one-worker pool, created only for a serving
+  // process with at least one recordable server (any_daemon_ready is set
+  // under exactly that gate above): a commit stalled in the daemon -- a
+  // volume lock, a wedged peer -- must never starve an image rewrite on
+  // the factory's pools, and the master and nginx's cache manager and
+  // loader, which serve nothing, get no pool at all.  ps_exit_child_process
+  // shuts it down and deletes it; the sequence is deleted with the pool.
+  // The pool's single thread is created lazily, on the event thread, by the
+  // first Add -- a completion or an open attempt -- under the pool mutex:
+  // bounded, no I/O, once per pool lifetime.
+  if (any_daemon_ready) {
+    g_daemon_record_pool = new QueuedWorkerPool(
+        1, "daemon_record", cfg_m->driver_factory->thread_system());
+    g_daemon_record_sequence = g_daemon_record_pool->NewSequence();
   }
 
   cfg_m->driver_factory->StartThreads();

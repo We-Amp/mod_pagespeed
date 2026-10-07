@@ -21,8 +21,11 @@ any PageSpeed server. They can be run without any server setup.
 Run with: python -m pytest -v test_framework.py
 """
 
+import itertools
 import re
+import socketserver
 import sys
+import threading
 
 import pytest
 
@@ -46,6 +49,8 @@ from pagespeed_test_framework.stats import (
     scrape_content_length,
     extract_beacon_params,
     count_pattern_matches,
+    count_matching_lines,
+    settled_stats,
 )
 from pagespeed_test_framework.require import (
     require_match,
@@ -53,6 +58,9 @@ from pagespeed_test_framework.require import (
     require_no_auth_gate,
 )
 from pagespeed_test_framework.pytest_main import run_pytest
+from pagespeed_test_framework.client import VhostClient
+from pagespeed_test_framework import flush_origin
+from pagespeed_test_framework.streaming import fetch_chunks
 
 
 class TestResponse:
@@ -983,6 +991,502 @@ class TestPytestTimeoutScaling:
     def test_garbage_envs_leave_timeout_untouched(self, monkeypatch):
         """client.py's parsing semantics (invalid/<=0 -> default) apply."""
         assert self._configure(monkeypatch, multiplier="junk", retries="junk") is None
+
+
+class _CaptureHandler(socketserver.StreamRequestHandler):
+    """Records one raw request (request line + header lines) and answers 200."""
+
+    def handle(self):
+        lines = []
+        while True:
+            line = self.rfile.readline()
+            if line in (b"\r\n", b"\n", b""):
+                break
+            lines.append(line.decode("latin-1").rstrip("\r\n"))
+        self.server.captured.append(lines)
+        self.wfile.write(
+            b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nX-Probe: 1\r\n"
+            b"Connection: close\r\n\r\nok"
+        )
+
+
+@pytest.fixture
+def capture_server():
+    server = socketserver.ThreadingTCPServer(("127.0.0.1", 0), _CaptureHandler)
+    server.daemon_threads = True
+    server.captured = []
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    yield server
+    server.shutdown()
+    server.server_close()
+
+
+def _header_lines(request_lines, name):
+    prefix = name.lower() + ":"
+    return [line for line in request_lines[1:] if line.lower().startswith(prefix)]
+
+
+class TestVhostClient:
+    """VhostClient reproduces `http_proxy=$SECONDARY_HOSTNAME wget http://<vhost>/...`."""
+
+    def _client(self, server, vhost="signed-urls.example.com"):
+        return VhostClient(vhost, "127.0.0.1", server.server_address[1])
+
+    def test_request_line_and_host_name_the_bare_vhost(self, capture_server):
+        response = self._client(capture_server).get("/mod_pagespeed_example/index.html")
+        assert response.status == 200 and response.text == "ok"
+        assert response.header("X-Probe") == "1"
+        assert response.url == "http://signed-urls.example.com/mod_pagespeed_example/index.html"
+        request = capture_server.captured[0]
+        assert request[0] == (
+            "GET http://signed-urls.example.com/mod_pagespeed_example/index.html HTTP/1.1"
+        )
+        # No ":80": PageSpeed builds absolute URLs from this Host.
+        assert _header_lines(request, "Host") == ["Host: signed-urls.example.com"]
+
+    def test_purge_uses_the_purge_verb(self, capture_server):
+        self._client(capture_server, "purge.example.com").purge("/*")
+        assert capture_server.captured[0][0] == "PURGE http://purge.example.com/* HTTP/1.1"
+
+    def test_extra_headers_are_sent(self, capture_server):
+        self._client(capture_server).get("/x", headers={"Cookie": "PageSpeedFilters=+debug"})
+        assert _header_lines(capture_server.captured[0], "Cookie") == [
+            "Cookie: PageSpeedFilters=+debug"
+        ]
+
+    def test_with_user_agent_keeps_the_vhost(self, capture_server):
+        client = self._client(capture_server, "ipro-for-browser.example.com")
+        client.with_user_agent("webp").get("/images/Puzzle.jpg")
+        request = capture_server.captured[0]
+        assert request[0] == "GET http://ipro-for-browser.example.com/images/Puzzle.jpg HTTP/1.1"
+        assert _header_lines(request, "User-Agent") == ["User-Agent: webp"]
+
+    def test_base_url(self):
+        assert VhostClient("cdn.pm.example.com", "localhost", 8081).base_url == (
+            "http://cdn.pm.example.com"
+        )
+
+    def test_relative_path_is_rejected(self):
+        with pytest.raises(ValueError):
+            VhostClient("a.example.com", "localhost", 8081).get("mod_pagespeed_example/")
+
+
+class TestLaneFixtureGate:
+    """A lane fixture name is either known or a hard error -- never a silent skip."""
+
+    def test_known_names_are_pinned(self):
+        import conftest
+        assert conftest.KNOWN_LANE_FIXTURES == frozenset({
+            "debug_conf_dirs", "admin_handlers", "stats_log",
+            "compressed_metadata_cache", "cache_flush", "doc_root_scratch",
+            "secondary_vhosts", "external_origin", "flush_origin",
+            "experiment_framework", "remote_config", "option_response_headers",
+        })
+
+    def test_parse_ignores_blanks_and_spaces(self):
+        import conftest
+        assert conftest.parse_lane_fixtures(" stats_log, ,cache_flush,") == frozenset(
+            {"stats_log", "cache_flush"}
+        )
+
+    def test_unknown_names_are_reported(self):
+        import conftest
+        assert conftest.unknown_lane_fixtures(["secondary_vhosts", "secondary_vhost"]) == [
+            "secondary_vhost"
+        ]
+
+    def test_missing_names_are_reported_in_order(self):
+        import conftest
+        assert conftest.missing_lane_fixtures(
+            ("secondary_vhosts", "flush_origin", "stats_log"),
+            frozenset({"stats_log"}),
+        ) == ["secondary_vhosts", "flush_origin"]
+
+    def test_runner_advertising_a_typo_is_a_usage_error(self):
+        import conftest
+        with pytest.raises(pytest.UsageError):
+            conftest.validate_advertised_lane_fixtures("stats_log,flush_orgin")
+
+    def test_runner_advertising_known_names_is_accepted(self):
+        import conftest
+        conftest.validate_advertised_lane_fixtures("stats_log,flush_origin")
+        conftest.validate_advertised_lane_fixtures("")
+
+
+class _FakeClock:
+    """A wall clock that advances only by what is slept on it."""
+
+    def __init__(self, now: float, advances: bool = True):
+        self.now_value = now
+        self.advances = advances
+        self.slept = 0.0
+
+    def now(self) -> float:
+        return self.now_value
+
+    def sleep(self, seconds: float) -> None:
+        self.slept += seconds
+        if self.advances:
+            self.now_value += seconds
+
+
+class TestFlushLeavesTheFlushSecond:
+    """flush_cache must not return inside the second its stamp names.
+
+    The server treats a cache entry whose whole-second Date is <= the flush
+    stamp as stale, so a test rewriting in that second mints .pagespeed.
+    URLs that are never served from cache (test_source_maps right after
+    test_show_cache's flush).
+    """
+
+    def test_returns_at_once_when_the_second_is_over(self):
+        import conftest
+        clock = _FakeClock(1001.2)
+        assert conftest.wait_until_second_after(1000, clock.now, clock.sleep)
+        assert clock.slept == 0.0
+
+    def test_waits_for_the_next_second(self):
+        import conftest
+        clock = _FakeClock(1000.56)
+        assert conftest.wait_until_second_after(1000, clock.now, clock.sleep)
+        assert int(clock.now()) == 1001
+        assert 0.4 <= clock.slept <= 0.5
+
+    def test_waits_out_a_stamp_ahead_of_the_clock(self):
+        # flush_cache waits for the clock to reach its stamp before touching
+        # the file, so at the call site the stamp is never ahead of the
+        # clock; the helper still has to cope with one that is.
+        import conftest
+        clock = _FakeClock(1000.9)
+        assert conftest.wait_until_second_after(1001, clock.now, clock.sleep)
+        assert int(clock.now()) == 1002
+        assert 1.1 <= clock.slept <= 1.2
+
+    def test_gives_up_when_the_clock_does_not_advance(self):
+        import conftest
+        clock = _FakeClock(1000.5, advances=False)
+        assert not conftest.wait_until_second_after(
+            1000, clock.now, clock.sleep, deadline_s=1.0
+        )
+        assert clock.slept >= 1.0
+
+
+@pytest.fixture
+def origin_server(tmp_path):
+    (tmp_path / "a.jpg").write_bytes(b"\xff\xd8\xff\xe0fake-jpeg")
+    server = flush_origin.make_server(0, str(tmp_path))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    yield server
+    server.shutdown()
+    server.server_close()
+
+
+class TestFlushOriginAndFetchChunks:
+    """The PHP-free origin reproduces the PHP pages; fetch_chunks sees its flushes."""
+
+    def _fetch(self, server, route):
+        port = server.server_address[1]
+        return fetch_chunks("127.0.0.1", port, f"/{route}", f"127.0.0.1:{port}", timeout=5.0)
+
+    def test_slow_flushing_response_arrives_in_timed_chunks(self, origin_server):
+        response = self._fetch(origin_server, "slow_flushing_html_response?delay=0.2")
+        assert response.status == 200 and response.chunked
+        assert response.header("Content-Type").startswith("text/html")
+        # head, five <p>foo</p><div>bar:N</div> chunks, tail
+        assert len(response.chunks) == 7
+        assert [c.data for c in response.chunks[1:6]] == [
+            f"<p>foo</p><div>bar:{i}</div>\n".encode() for i in range(1, 6)
+        ]
+        # four 0.2 s pauses separate the first and the fifth paragraph chunk
+        assert response.chunks[5].elapsed - response.chunks[1].elapsed >= 0.75
+        assert response.body.startswith(b"<html><head></head><body>\n")
+        assert response.body.endswith(b"</body></html>\n")
+
+    def test_withoutflush_is_one_content_length_response(self, origin_server):
+        response = self._fetch(origin_server, "withoutflush")
+        assert response.status == 200 and not response.chunked
+        assert response.header("X-My-PHP-Header") == "without_flush"
+        assert int(response.header("Content-Length")) == len(response.body)
+        assert b"Content generated by PHP without a call to flush()!" in response.body
+
+    def test_withflush_flushes_the_head_first(self, origin_server):
+        response = self._fetch(origin_server, "withflush")
+        assert response.chunked and len(response.chunks) == 2
+        assert response.header("X-My-PHP-Header") == "with_flush"
+        assert response.chunks[0].data.rstrip().endswith(b"<body>")
+        assert b"Content generated by PHP with a call to flush()!" in response.chunks[1].data
+
+    def test_image_rewrite_with_flush_splits_inside_the_list_item(self, origin_server):
+        response = self._fetch(origin_server, "image_rewrite_with_flush")
+        assert response.chunked and len(response.chunks) == 2
+        assert b'<li data-thumb="a.jpg">' in response.chunks[0].data
+        assert b'<img src="a.jpg"/>' in response.chunks[1].data
+
+    def test_image_is_served_from_the_image_dir(self, origin_server):
+        response = self._fetch(origin_server, "a.jpg")
+        assert response.status == 200
+        assert response.header("Content-Type") == "image/jpeg"
+        assert response.body == b"\xff\xd8\xff\xe0fake-jpeg"
+
+    def test_gzip_css_is_pre_gzipped(self, origin_server):
+        import gzip
+        response = self._fetch(origin_server, "gzip.css")
+        assert response.header("Content-Encoding") == "gzip"
+        assert int(response.header("Content-Length")) == len(response.body)
+        css = gzip.decompress(response.body)
+        assert css.startswith(b".peachpuff {background-color: peachpuff;}\n.")
+        assert css.endswith(b" {background-color: antiquewhite;}\n")
+        assert len(css) > 10000
+
+    def test_unknown_route_is_404(self, origin_server):
+        assert self._fetch(origin_server, "nope").status == 404
+
+    def test_content_type_routes(self, origin_server):
+        present = self._fetch(origin_server, "content_type_present/")
+        assert present.status == 200
+        assert present.header("Content-Type") == "text/plain"
+        assert b"This file should be proxied" in present.body
+        absent = self._fetch(origin_server, "content_type_absent/")
+        assert absent.status == 200
+        assert absent.header("Content-Type") == ""
+        assert b"This file should not be proxied" in absent.body
+
+
+class TestResponseRawHeaders:
+    """Response keeps every header line so duplicates stay countable."""
+
+    def test_header_values_are_case_insensitive_and_keep_duplicates(self):
+        response = Response(
+            status=200,
+            headers={"Cache-Control": "max-age=1, private"},
+            body=b"",
+            raw_headers=[
+                ("Cache-Control", "max-age=1"),
+                ("cache-control", "private"),
+                ("X-Other", "1"),
+            ],
+        )
+        assert response.header_values("Cache-Control") == ["max-age=1", "private"]
+        assert response.header_values("CACHE-CONTROL") == ["max-age=1", "private"]
+        assert response.header_values("Vary") == []
+
+    def test_hand_built_response_has_no_raw_headers(self):
+        response = Response(status=200, headers={"A": "1"}, body=b"")
+        assert response.raw_headers == []
+        assert response.header_values("A") == []
+
+
+class TestCountMatchingLines:
+    """count_matching_lines is grep -c: lines, not occurrences."""
+
+    def test_counts_lines_not_occurrences(self):
+        content = "a style here\nnothing\nstyle and style\n"
+        assert count_matching_lines(content, "style") == 2
+        assert count_matching_lines(content, r"^nothing$") == 1
+        assert count_matching_lines(content, "absent") == 0
+
+
+class TestSettledStats:
+    """settled_stats returns once the named counters stop moving."""
+
+    def test_waits_until_counters_stop_moving(self):
+        snapshots = iter([
+            {"a": 1, "b": 5, "curl_fetch_active_count": 0},
+            {"a": 2, "b": 6, "curl_fetch_active_count": 0},
+            {"a": 2, "b": 7, "curl_fetch_active_count": 0},
+        ])
+        assert settled_stats(
+            lambda: next(snapshots), ["a"], interval=0, quiet_samples=2
+        ) == {
+            "a": 2,
+            "b": 7,
+            "curl_fetch_active_count": 0,
+        }
+
+    def test_needs_the_whole_quiet_run(self):
+        # A single repeat is not enough when three agreeing samples are asked
+        # for: the counter moving again restarts the run.
+        snapshots = iter([
+            {"a": 1, "n": 0}, {"a": 1, "n": 1}, {"a": 2, "n": 2},
+            {"a": 2, "n": 3}, {"a": 2, "n": 4},
+        ])
+        idle = {"curl_fetch_active_count": 0}
+        assert settled_stats(
+            lambda: dict(next(snapshots), **idle), ["a"], interval=0,
+            quiet_samples=3,
+        ) == {"a": 2, "n": 4, "curl_fetch_active_count": 0}
+
+    def test_a_fetch_in_flight_is_not_settled(self):
+        snapshots = iter([
+            {"a": 1, "curl_fetch_active_count": 1, "n": 0},
+            {"a": 1, "curl_fetch_active_count": 1, "n": 1},
+            {"a": 1, "curl_fetch_active_count": 0, "n": 2},
+            {"a": 1, "curl_fetch_active_count": 0, "n": 3},
+        ])
+        assert settled_stats(
+            lambda: next(snapshots), ["a"], interval=0, quiet_samples=2
+        )["n"] == 3
+
+    def test_fails_when_counters_keep_moving(self):
+        counter = itertools.count()
+        with pytest.raises(AssertionError, match="never settled"):
+            settled_stats(
+                lambda: {"a": next(counter), "curl_fetch_active_count": 0},
+                ["a"], interval=0, timeout=0,
+            )
+
+    def test_a_snapshot_with_the_keys_settles(self):
+        snapshots = iter([
+            {"a": 3, "curl_fetch_active_count": 0, "n": 0},
+            {"a": 3, "curl_fetch_active_count": 0, "n": 1},
+        ])
+        assert settled_stats(
+            lambda: next(snapshots), ["a"], interval=0, quiet_samples=2
+        )["n"] == 1
+
+    def test_missing_requested_counter_never_settles(self):
+        with pytest.raises(
+            AssertionError, match=r"never settled.*2 statistics.*lacks \['a'\]"
+        ):
+            settled_stats(
+                lambda: {"b": 1, "curl_fetch_active_count": 0},
+                ["a"], interval=0, timeout=0.05,
+            )
+
+    def test_a_server_without_the_gauge_settles_on_counters(self):
+        snapshots = iter([
+            {"a": 1, "n": 0}, {"a": 1, "n": 1}, {"a": 1, "n": 2},
+        ])
+        assert settled_stats(
+            lambda: next(snapshots), ["a"], interval=0, quiet_samples=3
+        )["n"] == 2
+
+    def test_counters_only_failure_says_so(self):
+        counter = itertools.count()
+        with pytest.raises(
+            AssertionError, match=r"never settled.*counters only.*exposes none"
+        ):
+            settled_stats(
+                lambda: {"a": next(counter)}, ["a"], interval=0, timeout=0.05
+            )
+
+    def test_a_present_nonzero_gauge_never_settles(self):
+        with pytest.raises(
+            AssertionError,
+            match=r"never settled.*in flight \{'curl_fetch_active_count': 2\}",
+        ):
+            settled_stats(
+                lambda: {"a": 1, "curl_fetch_active_count": 2},
+                ["a"], interval=0, timeout=0.05,
+            )
+
+    def test_a_gauge_appearing_later_must_read_zero(self):
+        snapshots = iter([
+            {"a": 1, "n": 0},
+            {"a": 1, "curl_fetch_active_count": 1, "n": 1},
+            {"a": 1, "n": 2},
+            {"a": 1, "n": 3},
+        ])
+        assert settled_stats(
+            lambda: next(snapshots), ["a"], interval=0, quiet_samples=2
+        )["n"] == 3
+
+    def test_an_exposed_gauge_that_vanishes_is_not_quiet(self):
+        with pytest.raises(
+            AssertionError,
+            match=r"never settled.*lacks \['curl_fetch_active_count'\]",
+        ):
+            first = [True]
+
+            def capture():
+                if first[0]:
+                    first[0] = False
+                    return {"a": 1, "curl_fetch_active_count": 0}
+                return {"a": 1}
+
+            settled_stats(capture, ["a"], interval=0, timeout=0.05)
+
+    def test_empty_snapshots_never_settle(self):
+        with pytest.raises(
+            AssertionError,
+            match=r"never settled.*no complete snapshot.*0 statistics.*lacks \['a'\]",
+        ):
+            settled_stats(lambda: {}, ["a"], interval=0, timeout=0.05)
+
+    def test_an_empty_snapshot_restarts_the_run(self):
+        snapshots = iter([
+            {"a": 1, "curl_fetch_active_count": 0, "n": 0},
+            {},
+            {"a": 1, "curl_fetch_active_count": 0, "n": 2},
+            {"a": 1, "curl_fetch_active_count": 0, "n": 3},
+            {"a": 1, "curl_fetch_active_count": 0, "n": 4},
+        ])
+        assert settled_stats(
+            lambda: next(snapshots), ["a"], interval=0, quiet_samples=3
+        )["n"] == 4
+
+    def test_fails_when_a_fetch_stays_in_flight(self):
+        with pytest.raises(AssertionError, match="never settled.*in flight"):
+            settled_stats(
+                lambda: {"a": 0, "curl_fetch_active_count": 1},
+                ["a"], interval=0, timeout=0,
+            )
+
+
+class _DuplicateHeaderCaptureHandler(socketserver.StreamRequestHandler):
+    """Like _CaptureHandler, but answers with two Cache-Control header lines
+    so a VhostClient response can prove it keeps duplicates too."""
+
+    def handle(self):
+        lines = []
+        while True:
+            line = self.rfile.readline()
+            if line in (b"\r\n", b"\n", b""):
+                break
+            lines.append(line.decode("latin-1").rstrip("\r\n"))
+        self.server.captured.append(lines)
+        self.wfile.write(
+            b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n"
+            b"Cache-Control: max-age=1\r\ncache-control: private\r\n"
+            b"Connection: close\r\n\r\nok"
+        )
+
+
+@pytest.fixture
+def duplicate_header_capture_server():
+    server = socketserver.ThreadingTCPServer(
+        ("127.0.0.1", 0), _DuplicateHeaderCaptureHandler
+    )
+    server.daemon_threads = True
+    server.captured = []
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    yield server
+    server.shutdown()
+    server.server_close()
+
+
+class TestVhostClientRawHeaders:
+    """VhostClient._request populates raw_headers too, duplicates preserved.
+
+    A named vhost's Response is the one every negative header check
+    (Vary == [], Set-Cookie == []) runs against in the later caching and
+    proxying ports; if VhostClient dropped raw_headers, those checks would
+    pass vacuously instead of actually checking anything.
+    """
+
+    def test_duplicate_headers_are_preserved(self, duplicate_header_capture_server):
+        client = VhostClient(
+            "signed-urls.example.com",
+            "127.0.0.1",
+            duplicate_header_capture_server.server_address[1],
+        )
+        response = client.get("/mod_pagespeed_example/index.html")
+        assert response.header_values("Cache-Control") == ["max-age=1", "private"]
+        assert response.header_values("CACHE-CONTROL") == ["max-age=1", "private"]
+        assert response.header_values("Vary") == []
 
 
 if __name__ == "__main__":

@@ -7,8 +7,9 @@
 // net/instaweb/rewriter/generated/critical_css_beacon_opt.cc — in headless
 // Chromium, and asserts on the actual beacon XHR the browser sends:
 //
-//   1. Viewport-aware criticality: only selectors with a match
-//      above the fold are reported, with conservative keeps for
+//   1. Selection: by default every selector that matches anything in the
+//      page is reported; with the above-the-fold argument only selectors
+//      with a match in the first screen are, with conservative keeps for
 //      display:none / unmeasurable matches.
 //   2. Overflow signaling: a payload that exceeds MAX_POST_SIZE
 //      is truncated to fit and flagged with &of=1.
@@ -28,7 +29,7 @@ const beaconJs = loadCompiledAsset(
          'critical_css_beacon_opt.cc'));
 
 // --- Test page: elements above, below, and outside the fold. -------------
-function testPage(selectorsJson, extraBody = '') {
+function testPage(selectorsJson, extraBody = '', aboveTheFoldOnly = false) {
   return `<!DOCTYPE html><html><head><style>
     body { margin: 0; }
     #hero { height: 300px; }
@@ -47,7 +48,7 @@ function testPage(selectorsJson, extraBody = '') {
     <script>${beaconJs}<\/script>
     <script>
       pagespeed.criticalCssBeaconInit('http://test/beacon', 'http://test/',
-          'oh123', 'n456', ${selectorsJson});
+          'oh123', 'n456', ${selectorsJson}${aboveTheFoldOnly ? ', true' : ''});
     <\/script>
   </body></html>`;
 }
@@ -80,17 +81,42 @@ function check(ok, label) {
 
 const browser = await chromium.launch();
 
-// --- 1. Viewport-aware criticality ----------------------------------------
-{
-  const selectors = ['#hero', '.mid', '.deep', '#hidden', '.everywhere', '.absent'];
-  const { body, exported } = await runBeaconPage(browser, testPage(JSON.stringify(selectors)));
-  check(body !== null, 'viewport: beacon POST captured');
-  check(body === exported, 'viewport: criticalCssBeaconData matches POST body');
+// --- 1. Selection ------------------------------------------------------------
+// '!bad!' is not a selector any browser can parse.
+const selectionSelectors =
+    ['#hero', '.mid', '.deep', '#hidden', '.everywhere', '.absent', '!bad!'];
+async function reportedSelectors(label, aboveTheFoldOnly) {
+  const { body, exported } = await runBeaconPage(
+      browser,
+      testPage(JSON.stringify(selectionSelectors), '', aboveTheFoldOnly));
+  check(body !== null, `${label}: beacon POST captured`);
+  check(body === exported, `${label}: criticalCssBeaconData matches POST body`);
   const params = new URLSearchParams(body);
   check(params.get('oh') === 'oh123' && params.get('n') === 'n456',
-        'viewport: oh/n params round-trip');
-  const got = new Set((params.get('cs') || '').split(',').filter(Boolean)
+        `${label}: oh/n params round-trip`);
+  check(params.get('of') === null, `${label}: no overflow flag on small payload`);
+  return new Set((params.get('cs') || '').split(',').filter(Boolean)
       .map(decodeURIComponent));
+}
+{
+  const got = await reportedSelectors('selection', false);
+  const expected = {
+    '#hero': true,        // in the first screen
+    '.mid': true,         // in the first screen
+    '.deep': true,        // far below the first screen: still in the page
+    '#hidden': true,      // display:none: still in the page
+    '.everywhere': true,  // matches above and below
+    '.absent': false,     // matches nothing
+    '!bad!': true,        // cannot be judged by this browser: kept
+  };
+  for (const [sel, want] of Object.entries(expected)) {
+    check(got.has(sel) === want,
+          `selection: every matching selector is reported by default — ` +
+          `${sel} critical=${want}`);
+  }
+}
+{
+  const got = await reportedSelectors('selection (first screen)', true);
   const expected = {
     '#hero': true,        // above the fold
     '.mid': true,         // top 500px < 768px viewport
@@ -98,11 +124,12 @@ const browser = await chromium.launch();
     '#hidden': true,      // zero-size rect: indeterminate, conservative keep
     '.everywhere': true,  // one match above the fold suffices
     '.absent': false,     // matches nothing
+    '!bad!': false,       // cannot be parsed: skipped, as before
   };
   for (const [sel, want] of Object.entries(expected)) {
-    check(got.has(sel) === want, `viewport: ${sel} critical=${want}`);
+    check(got.has(sel) === want,
+          `selection: above-the-fold only when asked — ${sel} critical=${want}`);
   }
-  check(params.get('of') === null, 'viewport: no overflow flag on small payload');
 }
 
 // --- 2. Overflow truncation + of=1 -----------------------------------------

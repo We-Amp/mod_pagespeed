@@ -1158,6 +1158,16 @@ TEST_F(JavascriptFilterTest, ModuleNotRelocatedByShardDomain) {
   EXPECT_EQ(0, num_uses_->Get());
 }
 
+TEST_F(JavascriptFilterTest, ModuleScriptSrcAttributeWithoutValue) {
+  // A src attribute with no value has no URL to resolve or rewrite; the
+  // element must be left untouched.
+  InitFilters();
+  ValidateNoChanges("valueless_module_src",
+                    "<script type=\"module\" src></script>");
+  EXPECT_EQ(0, blocks_minified_->Get());
+  EXPECT_EQ(0, num_uses_->Get());
+}
+
 TEST_F(JavascriptFilterTest, ClassicScriptRelocatedByMapRewriteDomain) {
   // Control: classic scripts are not CORS-mode, so relocating the rewritten
   // URL to the mapped domain remains correct and must stay byte-identical.

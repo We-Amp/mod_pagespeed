@@ -21,6 +21,7 @@
 #define PAGESPEED_APACHE_APACHE_SERVER_CONTEXT_H_
 
 #include <memory>
+#include <set>
 
 #include "net/instaweb/http/public/request_context.h"
 #include "net/instaweb/rewriter/public/rewrite_stats.h"
@@ -31,8 +32,10 @@
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/system/daemon_adapter.h"
 #include "pagespeed/system/daemon_serve_arm.h"
+#include "pagespeed/system/serve_host_names.h"
 #include "pagespeed/system/system_server_context.h"
 
+struct ap_directive_t;
 struct request_rec;
 struct server_rec;
 
@@ -92,7 +95,8 @@ class ApacheServerContext : public SystemServerContext {
   DaemonAdapter* daemon_adapter() { return daemon_adapter_.get(); }
 
   // Creates the UDS-backed DaemonReader for the /v1/daemon/* admin
-  // endpoints, from this server's DaemonApiSocketPath.  See
+  // endpoints, from this server's DaemonApiSocketPath, or
+  // nullptr when that path is empty (daemon API disabled).  See
   // SystemServerContext::NewDaemonReader().
   DaemonReader* NewDaemonReader() override;
 
@@ -210,6 +214,55 @@ class ApacheServerContext : public SystemServerContext {
   ApacheServerContext(const ApacheServerContext&) = delete;
   ApacheServerContext& operator=(const ApacheServerContext&) = delete;
 };
+
+// The names an Apache virtual host is configured with, from its own server
+// record (`server`, the request's r->server), the main server's record
+// (`main_server`) and the records whose configuration states a ServerName
+// (`stated_server_names`, ApacheStatedServerNamesFromTree): ServerName as
+// the primary name and the exact ServerAlias names (server->names).
+// Wildcard aliases (server->wild_names) are left out -- a host one of them
+// matched counts under the primary name.  There is NO primary name when
+//  - the configuration does not state a ServerName for `server`: httpd
+//    then derives one (the main server gets the machine's name, a virtual
+//    host on its own address the reverse name of that address), and a
+//    derived name can be another site's;
+//  - `server` is a virtual host whose server_hostname is the main record's
+//    pointer: httpd gives an unnamed virtual host on a default address the
+//    main server's name (server/vhost.c, ap_fini_vhost_config), and such a
+//    host must not record under -- or be shown -- the main site's row;
+//  - the name is one of httpd's placeholders for a virtual host without a
+//    usable address ("bogus_host_without_forward_dns",
+//    "bogus_host_without_reverse_dns");
+//  - the main record is unknown (nullptr, or itself a virtual host) and
+//    `server` is a virtual host: inheritance cannot be told apart.
+// Read per request, never stored on a server context: a virtual host
+// without directives of its own shares the main server's context.  nullptr
+// gives no names.
+ConfiguredHostNames ApacheConfiguredHostNames(
+    const server_rec* server, const server_rec* main_server,
+    const std::set<const server_rec*>& stated_server_names);
+
+// Whether httpd's parsed configuration (`tree`, the top level of the
+// directive tree) states a ServerName for `server`:
+//  - the main record (`server` == `main_server`, not a virtual host): a
+//    top-level ServerName directive;
+//  - a virtual host: a ServerName directive directly inside the top-level
+//    <VirtualHost> node the record was created from (the node's file name
+//    and line equal the record's defn_name and defn_line_number).
+// Directive names compare case-insensitively.  Included files and
+// conditional sections are already spliced into the tree where they were
+// read.  Anything else -- no tree, no record, no main record, a record
+// without defn_name, no matching node -- is false.
+bool ApacheConfigStatesServerName(const ap_directive_t* tree,
+                                  const server_rec* server,
+                                  const server_rec* main_server);
+
+// Every record -- the main record and the virtual hosts on its `next`
+// chain -- whose configuration states a ServerName.  Computed once per
+// configuration, while the tree and the records are those of the same
+// configuration; empty without a tree or a (non-virtual) main record.
+std::set<const server_rec*> ApacheStatedServerNamesFromTree(
+    const ap_directive_t* tree, const server_rec* main_server);
 
 }  // namespace net_instaweb
 

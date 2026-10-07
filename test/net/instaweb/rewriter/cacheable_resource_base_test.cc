@@ -348,9 +348,11 @@ TEST_F(CacheableResourceBaseTest, FetchFailure) {
   EXPECT_EQ(1, counting_url_async_fetcher()->fetch_count());
   CheckStats(resource_.get(), 0, 1, 0, 0, 1);
 
-  // Now advance time, should force a refetch.
+  // Now advance time, should force a refetch. An unset URL in the mock
+  // fetcher is a fetch that did not complete, so it is remembered for the
+  // transient window.
   int64 remember_sec = server_context()->http_cache()->failure_caching_ttl_sec(
-      kFetchStatusOtherError);
+      kFetchStatusTransientError);
   AdvanceTimeMs(2 * remember_sec * Timer::kSecondMs);
   resource_->Reset();
   MockResourceCallback callback3(ResourcePtr(resource_.get()),

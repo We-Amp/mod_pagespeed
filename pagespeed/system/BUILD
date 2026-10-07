@@ -37,6 +37,38 @@ cc_library(
 )
 
 # =============================================================================
+# The host a serve is recorded under: the optimizer's host-name rule, and the
+# rule that only a name the site's configuration lists is ever used.  Pure,
+# so it is unit-tested on its own; every port's serving and admin paths call
+# it with the names that port's own configuration record gives.
+# =============================================================================
+cc_library(
+    name = "serve_host_names",
+    srcs = ["serve_host_names.cc"],
+    hdrs = ["serve_host_names.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)
+
+# =============================================================================
+# What a per-host admin console may see of the optimizer's answers: the
+# module's strict reading of an answer, narrowed to the console's own site.
+# =============================================================================
+cc_library(
+    name = "daemon_site_filter",
+    srcs = ["daemon_site_filter.cc"],
+    hdrs = ["daemon_site_filter.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":serve_host_names",
+        "//pagespeed/kernel/base:pagespeed_base",
+        "@jsoncpp",
+    ],
+)
+
+# =============================================================================
 # The daemon health verdict, on its own, with no dependencies.
 #
 # Split out so a serving seam can read the verdict without taking on the
@@ -158,9 +190,19 @@ cc_library(
     deps = [
         ":daemon_adapter",
         ":ipro_recorder",
+        "//net/instaweb/rewriter",
         "//pagespeed/kernel/base:pagespeed_base",
         "//pagespeed/kernel/http",
     ],
+)
+
+# The root process sets the statistics start-time gauge where the shared
+# segment is created; that call site needs a live server to execute, so
+# test/pagespeed/apache/daemon_seam_test.cc reads this source to pin it.
+filegroup(
+    name = "system_rewrite_driver_factory_src",
+    srcs = ["system_rewrite_driver_factory.cc"],
+    visibility = ["//visibility:public"],
 )
 
 # =============================================================================
@@ -180,11 +222,15 @@ cc_library(
 cc_library(
     name = "daemon_serve_arm",
     srcs = ["daemon_serve_arm.cc"],
-    hdrs = ["daemon_serve_arm.h"],
+    hdrs = [
+        "daemon_serve_arm.h",
+        "siphash.h",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         ":daemon_adapter",
         ":daemon_record_arm",
+        "//net/instaweb/rewriter",
         "//pagespeed/kernel/base:pagespeed_base",
         "//pagespeed/kernel/http",
     ],
@@ -367,11 +413,3 @@ cc_library(
     ],
 )
 
-# System-level test scripts for Apache/Nginx system tests
-filegroup(
-    name = "system_test_files",
-    srcs = [
-        "system_test.sh",
-    ] + glob(["system_tests/*.sh"]),
-    visibility = ["//visibility:public"],
-)

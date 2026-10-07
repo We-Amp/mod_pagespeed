@@ -21,9 +21,15 @@
 #      same shape the daemon package rig uses; the units really run),
 #   2. installs mod_pagespeed 1.15 for Apache exactly like a customer:
 #      the public install.sh bootstrap (apt/yum source + signing key), then
-#      `apt-get install mod-pagespeed` / `dnf install mod-pagespeed`; serves a
-#      fixture page with an image and proves 1.15 optimizes (version header,
-#      rewritten resource URL in the HTML, in-place image smaller than origin),
+#      `apt-get install mod-pagespeed=V` / `dnf install mod-pagespeed-V`,
+#      where V is the newest GA mod-pagespeed the public repository
+#      publishes that is strictly older than --rc (1.15.0 while --rc is
+#      1.16.x; see BASELINE below). The pin matters once the version under
+#      test is itself published: an unpinned install would then take the
+#      target as the "baseline" and rehearse a no-op upgrade. Serves a
+#      fixture page with an image and proves the baseline optimizes (version
+#      header, rewritten resource URL in the HTML, in-place image smaller
+#      than origin),
 #   3. customizes the 1.15 config file (so the package manager must keep it),
 #   4. upgrades IN PLACE to the 1.16 pair -- by default from the GitHub
 #      release assets (downloaded by version, sha256-checked against the
@@ -84,6 +90,11 @@
 #                       the drop-in and license-file assertions strict
 #                       whatever --rc says.
 #   --arch ARCH         amd64 | arm64 (default: the docker host's)
+#   --baseline-prefix P only consider baseline versions starting with P
+#                       (e.g. 1.15). The baseline is always the newest GA
+#                       mod-pagespeed in the public repository strictly older
+#                       than --rc; this narrows the choice, it never admits a
+#                       version that is not older.
 #   --release-repo R    owner/name of the GitHub repo carrying the release
 #   --pubkey-url URL    where the public signing key is fetched from
 #   --keep              leave the container (and the work dir) in place
@@ -119,7 +130,12 @@ PUBKEY_URL="https://modpagespeed.com/releases/v1.1.0/weamp-pkg-public.asc"
 PUBKEY_ID="DA8FEBD5000BC194"
 # The public bootstrap a 1.15 customer runs today.
 INSTALL_SH_URL="https://packages.modpagespeed.com/install.sh"
-BASELINE_PREFIX="1.15"
+# BASELINE: resolved inside the container after install.sh (step 3) as the
+# newest GA mod-pagespeed the public repository publishes whose upstream
+# version is strictly older than --rc, optionally narrowed by
+# --baseline-prefix. Derived rather than hard-coded, so publishing the
+# version under test (or the next one) never turns the baseline stale.
+BASELINE_PREFIX=""
 KEEP=0
 WORK=""
 
@@ -355,7 +371,7 @@ in_ctr_env() { # in_ctr_env VAR=VAL... -- CMD
   docker exec -e DEBIAN_FRONTEND=noninteractive "${envs[@]}" "$CTR" bash -c "$1" </dev/null
 }
 
-echo "upgrade rehearsal: ${BASELINE_PREFIX}.x -> ${RC} (package ${PKGV}) on ${DISTRO} (${IMAGE_BASE}, ${ARCH})"
+echo "upgrade rehearsal: newest published GA${BASELINE_PREFIX:+ ${BASELINE_PREFIX}.x} older than ${RC} -> ${RC} (package ${PKGV}) on ${DISTRO} (${IMAGE_BASE}, ${ARCH})"
 if [[ -n "$REPO_URL" ]]; then
   echo "  upgrade source: ${REPO_URL}"
 elif [[ -n "$PKGS_DIR" ]]; then
@@ -644,30 +660,78 @@ pkg_version() { # pkg_version <name>
 # ---------------------------------------------------------------------------
 # 3. Baseline: install 1.15 like a customer, serve the fixture, prove it optimizes
 # ---------------------------------------------------------------------------
-step "installing mod_pagespeed ${BASELINE_PREFIX} from the public repository (install.sh + package manager)"
+step "configuring the public repository (install.sh)"
 in_ctr "curl -fsSL '$INSTALL_SH_URL' | sh" >"$WORK/logs/install-sh.log" 2>&1 \
   || { tail -20 "$WORK/logs/install-sh.log"; die "install.sh failed"; }
 if [[ "$FAMILY" == deb ]]; then
-  in_ctr "apt-get install -y -qq mod-pagespeed" >"$WORK/logs/install-baseline.log" 2>&1 \
-    || { tail -30 "$WORK/logs/install-baseline.log"; die "apt-get install mod-pagespeed failed"; }
   in_ctr "grep -E '^deb ' /etc/apt/sources.list.d/modpagespeed.list" | sed 's/^/  apt source: /' || true
+  # Every published version, one per line (package Version: 1.15.0-r22).
+  in_ctr "apt-cache madison mod-pagespeed | awk -F'|' '{gsub(/ /, \"\", \$2); print \$2}'" \
+    >"$WORK/logs/baseline-candidates.txt" 2>&1 || true
 else
-  in_ctr "dnf install -y -q mod-pagespeed" >"$WORK/logs/install-baseline.log" 2>&1 \
-    || { tail -30 "$WORK/logs/install-baseline.log"; die "dnf install mod-pagespeed failed"; }
   in_ctr "grep -E '^baseurl' /etc/yum.repos.d/modpagespeed.repo | head -1" | sed 's/^/  yum baseurl: /' || true
+  # Every published version, one per line (VERSION-RELEASE: 1.15.0-22; any
+  # epoch dropped). -y: repo_gpgcheck makes the first metadata fetch ask to
+  # import the repository key, and an unanswered prompt reads as a bad
+  # signature and an empty list.
+  in_ctr "dnf -y -q list --showduplicates mod-pagespeed 2>/dev/null | awk '\$1 ~ /^mod-pagespeed\\./ {v = \$2; sub(/^[0-9]+:/, \"\", v); print v}'" \
+    >"$WORK/logs/baseline-candidates.txt" 2>&1 || true
+fi
+
+# upstream_of <package version>: the SemVer spelling of a package version's
+# upstream part (1.15.0-r22 -> 1.15.0, 1.16.0~rc.13-1 -> 1.16.0-rc.13).
+upstream_of() { local u="${1%-*}"; printf '%s' "${u//$TILDE/-}"; }
+# pkg_rev <package version>: the leading number of the package revision
+# (deb r22 / rpm 22 or 22.el9 -> 22).
+pkg_rev() { local r="${1##*-}"; r="${r#r}"; r="${r%%[!0-9]*}"; printf '%s' "${r:-0}"; }
+
+# The baseline: newest GA (no prerelease) published version strictly older
+# than the version under test, optionally narrowed by --baseline-prefix.
+# Newest = highest upstream version, then highest package revision.
+BASELINE_PIN=""
+BASELINE_UPSTREAM=""
+while IFS= read -r cand; do
+  cand="${cand//[$'\r ']/}"
+  [[ -n "$cand" && "$cand" == *-* ]] || continue
+  up="$(upstream_of "$cand")"
+  [[ "$up" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || continue       # GA only
+  semver_ge "$up" "$RC" && continue                          # strictly older
+  [[ -z "$BASELINE_PREFIX" || "$up" == "$BASELINE_PREFIX"* ]] || continue
+  if [[ -z "$BASELINE_PIN" ]] || ! semver_ge "$BASELINE_UPSTREAM" "$up" \
+     || { [[ "$up" == "$BASELINE_UPSTREAM" ]] && (( $(pkg_rev "$cand") > $(pkg_rev "$BASELINE_PIN") )); }; then
+    BASELINE_PIN="$cand"; BASELINE_UPSTREAM="$up"
+  fi
+done <"$WORK/logs/baseline-candidates.txt"
+if [[ -z "$BASELINE_PIN" ]]; then
+  sed 's/^/  published: /' "$WORK/logs/baseline-candidates.txt" || true
+  die "no published GA mod-pagespeed${BASELINE_PREFIX:+ matching ${BASELINE_PREFIX}*} older than ${RC} in the public repository"
+fi
+BASELINE_LINE="${BASELINE_UPSTREAM%.*}"                      # 1.15.0 -> 1.15
+note "baseline resolved: mod-pagespeed ${BASELINE_PIN} (newest published GA older than ${RC})"
+
+step "installing mod_pagespeed ${BASELINE_PIN} from the public repository (package manager, pinned)"
+if [[ "$FAMILY" == deb ]]; then
+  in_ctr "apt-get install -y -qq mod-pagespeed=${BASELINE_PIN}" >"$WORK/logs/install-baseline.log" 2>&1 \
+    || { tail -30 "$WORK/logs/install-baseline.log"; die "apt-get install mod-pagespeed=${BASELINE_PIN} failed"; }
+else
+  in_ctr "dnf install -y -q mod-pagespeed-${BASELINE_PIN}" >"$WORK/logs/install-baseline.log" 2>&1 \
+    || { tail -30 "$WORK/logs/install-baseline.log"; die "dnf install mod-pagespeed-${BASELINE_PIN} failed"; }
 fi
 BASELINE_VERSION="$(pkg_version mod-pagespeed)"
-case "$BASELINE_VERSION" in
-  ${BASELINE_PREFIX}*) pass "baseline package installed: mod-pagespeed ${BASELINE_VERSION}" ;;
-  *) fail "baseline package version '${BASELINE_VERSION}' does not start with ${BASELINE_PREFIX}" ;;
-esac
+if [[ "$BASELINE_VERSION" != "$BASELINE_PIN" ]]; then
+  fail "baseline package version '${BASELINE_VERSION}' is not the pinned ${BASELINE_PIN}"
+elif semver_ge "$(upstream_of "$BASELINE_VERSION")" "$RC"; then
+  fail "baseline package version '${BASELINE_VERSION}' is not older than ${RC}"
+else
+  pass "baseline package installed: mod-pagespeed ${BASELINE_VERSION} (older than ${RC})"
+fi
 if in_ctr "getent group pagespeed" >/dev/null 2>&1; then
   note "group 'pagespeed' already exists before the upgrade (unexpected on a 1.15 host)"
 else
   pass "no 'pagespeed' group before the upgrade (the optimizer package creates it)"
 fi
 
-step "serving the fixture and customizing the ${BASELINE_PREFIX} configuration"
+step "serving the fixture and customizing the ${BASELINE_LINE} configuration"
 in_ctr "mkdir -p /var/www/html${FIXTURE_URL_DIR} && cp /fixture/* /var/www/html${FIXTURE_URL_DIR}/ && chmod -R a+rX /var/www/html${FIXTURE_URL_DIR}"
 # Cacheable fixture resources (in-place optimization only touches cacheable
 # responses); mod_headers is stock on both families.
@@ -703,13 +767,13 @@ else
 fi
 restart_web || die "web server did not come up after the baseline install"
 
-step "proving ${BASELINE_PREFIX} optimizes"
+step "proving ${BASELINE_LINE} optimizes"
 BASE_URL="http://localhost${FIXTURE_URL_DIR}"
 SIZE_CMD="curl -s -o /dev/null -w %{size_download} '${BASE_URL}/${IMAGE_NAME}'"
 REWRITE_CMD="curl -s -H 'Cache-Control: no-cache' '${BASE_URL}/index.html' | grep -c 'pagespeed\\.'"
 HDR="$(version_header "$BASE_URL/index.html")"
 case "$HDR" in
-  *"${BASELINE_PREFIX}"*) pass "baseline version header: ${HDR}" ;;
+  *"${BASELINE_UPSTREAM}"*) pass "baseline version header: ${HDR}" ;;
   *) fail "baseline version header missing or wrong: '${HDR}'" ;;
 esac
 # CoreFilters rewrites the image/css URLs once the resources are optimized.

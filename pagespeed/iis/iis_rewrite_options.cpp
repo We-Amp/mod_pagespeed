@@ -43,6 +43,8 @@ const char kAdminPath[] = "AdminPath";
 const char kGlobalAdminPath[] = "GlobalAdminPath";
 const char kAutoCreateCachePath[] = "AutoCreateCachePath";
 const char kAutoCreateLogDir[] = "AutoCreateLogDir";
+const char kDaemonSocketPath[] = "DaemonSocketPath";
+const char kDaemonVolumePath[] = "DaemonVolumePath";
 
 // TODO(oschaaf): 1.9 -> use these options server only stuff below.
 
@@ -147,6 +149,38 @@ void IisRewriteOptions::AddProperties() {
 		kAutoCreateLogDir, kProcessScopeStrict,
 		"Auto-create the LogDir if missing (on|off, default on).",
 		false);
+	// The two daemon path options.  The per-site daemon startup check
+	// reads them when a site sets either: both set runs the check
+	// against the daemon, one set alone is answered with the shared
+	// half-configuration line and in-place optimization off, and with
+	// either set the classic in-place recorder is not used.  Names, ids
+	// and accessor spellings are identical to the Apache and nginx
+	// ports, pinned across all three in
+	// test/pagespeed/nginx/ngx_daemon_options_pin_test.cc.
+	// kProcessScopeStrict is enforced by this port's parser in ONE place:
+	// a directive above directory scope is refused inside a match block.
+	// Nothing here merges by scope, and a per-site configuration file can
+	// still set these two, so code that reads them must not assume
+	// the value is the same for every site of the process.
+	add_iis_option(
+		"", &IisRewriteOptions::daemon_socket_path_, "dmsp",
+		kDaemonSocketPath, kProcessScopeStrict,
+		"Path of the optimizer daemon's notification pipe. Set this "
+		"together with DaemonVolumePath to have the module check the "
+		"daemon at startup; leave both unset to keep the classic "
+		"in-place path. With either of the two set, the classic "
+		"in-place recorder is not used. See docs/daemon-adapter-iis.md.",
+		true);
+	add_iis_option(
+		"", &IisRewriteOptions::daemon_volume_path_, "dmvp",
+		kDaemonVolumePath, kProcessScopeStrict,
+		"Path of the optimizer daemon's shared cache volume. Keep this "
+		"on a DIFFERENT path from FileCachePath. Set this together "
+		"with DaemonSocketPath to have the module check the daemon at "
+		"startup; leave both unset to keep the classic in-place path. "
+		"With either of the two set, the classic in-place recorder is "
+		"not used. See docs/daemon-adapter-iis.md.",
+		true);
 
 	MergeSubclassProperties(iis_properties_);
 	IisRewriteOptions dummy_config(NULL);

@@ -225,7 +225,7 @@ try {
     $script:VmTouched = $true
     Restore-VMSnapshot -VMName $VMName -Name $Snapshot -Confirm:$false -ErrorAction Stop
     Start-VM -Name $VMName -ErrorAction Stop
-    $mac = (Get-VMNetworkAdapter -VMName $VMName -ErrorAction Stop | Select-Object -First 1).MacAddress
+    $mac = Wait-VmMac -VMName $VMName
     Write-Host "Waiting for guest IP (MAC $mac) ..."
     $ip = Get-GuestIp -Mac $mac -InterfaceAlias "*$SwitchName*"
     Write-Host "Guest IP: $ip"

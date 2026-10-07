@@ -19,11 +19,15 @@
 
 #include "pagespeed/system/admin_site.h"
 
+#include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstddef>
 #include <cstring>
+#include <map>
 #include <memory>
 #include <set>
+#include <utility>
 #include <vector>
 
 #include "net/instaweb/http/public/async_fetch.h"
@@ -34,17 +38,20 @@
 #include "net/instaweb/util/public/property_store.h"
 #include "pagespeed/kernel/base/cache_interface.h"
 #include "pagespeed/kernel/base/callback.h"
+#include "pagespeed/kernel/base/md5_hasher.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/string_writer.h"
+#include "pagespeed/kernel/base/time_util.h"
 #include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/cache/purge_context.h"
 #include "pagespeed/kernel/http/content_type.h"
 #include "pagespeed/kernel/http/google_url.h"
 #include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/query_params.h"
+#include "pagespeed/kernel/http/request_headers.h"
 #include "pagespeed/kernel/http/response_headers.h"
 #include "pagespeed/kernel/util/statistics_logger.h"
 #include "pagespeed/system/admin_daemon_handler.h"
@@ -52,6 +59,7 @@
 #include "pagespeed/system/system_cache_path.h"
 #include "pagespeed/system/system_caches.h"
 #include "pagespeed/system/system_rewrite_options.h"
+#include "pagespeed/system/system_server_context.h"
 
 namespace net_instaweb {
 
@@ -62,13 +70,164 @@ namespace {
 
 void WriteJsonResponse(AsyncFetch* fetch, StringPiece json_body, Timer* timer,
                        MessageHandler* handler) {
-  fetch->response_headers()->SetStatusAndReason(HttpStatus::kOK);
-  fetch->response_headers()->Add(HttpAttributes::kContentType,
-                                 kContentTypeJson.mime_type());
-  int64 now_ms = timer->NowMs();
-  fetch->response_headers()->SetLastModified(now_ms);
+  ResponseHeaders* headers = fetch->response_headers();
+  headers->SetStatusAndReason(HttpStatus::kOK);
+  headers->Add(HttpAttributes::kContentType, kContentTypeJson.mime_type());
+  headers->Add(HttpAttributes::kCacheControl, "no-store, private");
+  headers->Add("X-Content-Type-Options", "nosniff");
   fetch->Write(json_body, handler);
   fetch->Done(true);
+}
+
+void WriteJsonError(AsyncFetch* fetch, HttpStatus::Code status,
+                    StringPiece error, MessageHandler* handler) {
+  ResponseHeaders* headers = fetch->response_headers();
+  headers->SetStatusAndReason(status);
+  headers->Add(HttpAttributes::kContentType, kContentTypeJson.mime_type());
+  headers->Add(HttpAttributes::kCacheControl, "no-store, private");
+  headers->Add("X-Content-Type-Options", "nosniff");
+  fetch->Write(
+      StrCat("{\"success\":false,\"error\":\"", JsonEscape(error), "\"}"),
+      handler);
+  fetch->Done(true);
+}
+
+// State-changing cache actions come only from the console itself: POST plus
+// the X-Requested-With header the SPA sends.  Returns true when the request
+// passed; otherwise the response is already written.
+bool GateCacheAction(AsyncFetch* fetch, MessageHandler* handler) {
+  const RequestHeaders* req = fetch->request_headers();
+  if (req == nullptr || req->method() != RequestHeaders::kPost) {
+    fetch->response_headers()->Add(HttpAttributes::kAllow, "POST");
+    WriteJsonError(fetch, HttpStatus::kMethodNotAllowed, "method not allowed",
+                   handler);
+    return false;
+  }
+  const char* xrw = req->Lookup1("X-Requested-With");
+  if (xrw == nullptr || !StringCaseEqual(xrw, "XMLHttpRequest")) {
+    WriteJsonError(fetch, HttpStatus::kForbidden,
+                   "cross-origin request refused", handler);
+    return false;
+  }
+  return true;
+}
+
+// A per-vhost console may only touch URLs of the host it serves.
+bool TargetBelongsToRequestHost(const GoogleUrl& request_url,
+                                const GoogleUrl& target) {
+  return StringCaseEqual(request_url.Host(), target.Host());
+}
+
+// Renders a double as a bare JSON number, or the JSON literal null for a
+// non-finite value (an empty histogram's percentiles are nan).
+GoogleString Num(double x) {
+  return std::isfinite(x) ? StrCat(x) : GoogleString("null");
+}
+
+const char* MessageLevelName(MessageType type) {
+  switch (type) {
+    case kError:
+      return "error";
+    case kWarning:
+      return "warning";
+    case kFatal:
+      return "fatal";
+    default:
+      return "info";
+  }
+}
+
+// A 429 in the shape of the other admin JSON errors.  HttpStatus has no
+// constant for it (the daemon proxy writes it the same way).
+void WriteJsonBusy(AsyncFetch* fetch, MessageHandler* handler) {
+  ResponseHeaders* headers = fetch->response_headers();
+  headers->set_status_code(429);
+  headers->Add(HttpAttributes::kContentType, kContentTypeJson.mime_type());
+  headers->Add(HttpAttributes::kCacheControl, "no-store, private");
+  headers->Add("X-Content-Type-Options", "nosniff");
+  fetch->Write("{\"success\":false,\"error\":\"busy\"}", handler);
+  fetch->Done(true);
+}
+
+struct MessageGroup {
+  const char* level = "info";
+  GoogleString template_text;
+  int64 count = 0;
+  int64 recent = 0;
+  int64 last_ms = 0;  // 0: no line of the group carried a readable time.
+};
+
+// The grouped answer over messages[first..]: one row per (level, template),
+// newest first, at most kMaxGroupedMessageBytes in all.  A continuation line
+// (no header) takes the time of the header line before it.  window_s <= 0
+// means no window: no "window_s" and no "recent".
+GoogleString GroupedMessagesJson(MessageHandler* handler,
+                                 const StringPieceVector& messages,
+                                 size_t first, int64 lines_written,
+                                 int64 now_ms, int64 window_s) {
+  std::map<std::pair<GoogleString, GoogleString>, MessageGroup> by_key;
+  const int64 window_start_ms = now_ms - window_s * 1000;
+  int64 current_ms = -1;
+  for (size_t i = first; i < messages.size(); ++i) {
+    if (messages[i].empty()) continue;
+    const char* level = MessageLevelName(handler->GetMessageType(messages[i]));
+    const StringPiece line = handler->ReformatMessage(messages[i]);
+    const StringPiece body = MessageLineBody(line);
+    if (body.size() < line.size()) current_ms = MessageLineTimeMs(line);
+    GoogleString text = MessageTemplate(body);
+    MessageGroup& group = by_key[std::make_pair(GoogleString(level), text)];
+    if (group.count == 0) {
+      group.level = level;
+      group.template_text = std::move(text);
+    }
+    ++group.count;
+    if (current_ms > group.last_ms) group.last_ms = current_ms;
+    if (window_s > 0 && current_ms >= 0 && current_ms >= window_start_ms) {
+      ++group.recent;
+    }
+  }
+  std::vector<const MessageGroup*> rows;
+  rows.reserve(by_key.size());
+  for (const auto& entry : by_key) rows.push_back(&entry.second);
+  std::sort(rows.begin(), rows.end(),
+            [](const MessageGroup* a, const MessageGroup* b) {
+              if (a->last_ms != b->last_ms) return a->last_ms > b->last_ms;
+              if (a->count != b->count) return a->count > b->count;
+              const int level_order = strcmp(a->level, b->level);
+              if (level_order != 0) return level_order < 0;
+              return a->template_text < b->template_text;
+            });
+  // Room for the envelope around the rows.
+  const size_t budget = kMaxGroupedMessageBytes - 256;
+  GoogleString groups;
+  bool truncated = false;
+  const char* separator = "";
+  for (const MessageGroup* group : rows) {
+    GoogleString row =
+        StrCat(separator, "{\"level\":\"", group->level, "\",\"template\":\"",
+               JsonEscape(group->template_text),
+               "\",\"count\":", Integer64ToString(group->count),
+               ",\"last_ms\":", Integer64ToString(group->last_ms));
+    if (window_s > 0) {
+      StrAppend(&row, ",\"recent\":", Integer64ToString(group->recent));
+    }
+    row += "}";
+    if (groups.size() + row.size() > budget) {
+      truncated = true;
+      break;
+    }
+    groups += row;
+    separator = ",";
+  }
+  GoogleString json = StrCat(
+      "{\"scope\":\"process\",\"next\":", Integer64ToString(lines_written),
+      ",\"now_ms\":", Integer64ToString(now_ms));
+  if (window_s > 0) {
+    StrAppend(&json, ",\"window_s\":", Integer64ToString(window_s));
+  }
+  StrAppend(&json, ",\"truncated\":", truncated ? "true" : "false",
+            ",\"groups\":[", groups, "]}");
+  return json;
 }
 
 // Provides a Done(bool, StringPiece) entry point for use as a Purge
@@ -120,12 +279,33 @@ AdminSite::AdminSite(Timer* timer, MessageHandler* message_handler,
 AdminSite::~AdminSite() = default;
 
 void AdminSite::ServeSpaConsole(AsyncFetch* fetch) {
+  static const GoogleString* const kBundleEtag = [] {
+    MD5Hasher hasher;
+    return new GoogleString(
+        StrCat("\"", hasher.Hash(HTML_admin_console), "\""));
+  }();
   ResponseHeaders* headers = fetch->response_headers();
-  headers->SetStatusAndReason(HttpStatus::kOK);
-  headers->Add(HttpAttributes::kContentType, "text/html");
+  const RequestHeaders* req = fetch->request_headers();
+  const char* inm =
+      req != nullptr ? req->Lookup1(HttpAttributes::kIfNoneMatch) : nullptr;
+  headers->Add(HttpAttributes::kEtag, *kBundleEtag);
+  headers->Add(HttpAttributes::kCacheControl, "no-cache, private");
   // Prevent PageSpeed from rewriting the admin console itself.
   headers->Add("PageSpeed", "off");
-  headers->Add("Cache-Control", "no-cache");
+  if (inm != nullptr && *kBundleEtag == inm) {
+    headers->SetStatusAndReason(HttpStatus::kNotModified);
+    fetch->Done(true);
+    return;
+  }
+  headers->SetStatusAndReason(HttpStatus::kOK);
+  headers->Add(HttpAttributes::kContentType, "text/html; charset=utf-8");
+  headers->Add("X-Content-Type-Options", "nosniff");
+  headers->Add("X-Frame-Options", "DENY");
+  headers->Add("Referrer-Policy", "no-referrer");
+  headers->Add("Content-Security-Policy",
+               "default-src 'self'; script-src 'self' 'unsafe-inline'; "
+               "style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+               "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'");
   fetch->Write(HTML_admin_console, message_handler_);
   fetch->Done(true);
 }
@@ -143,23 +323,24 @@ void AdminSite::ConsoleHandler(const SystemRewriteOptions& global_options,
   ServeSpaConsole(fetch);
 }
 
-void AdminSite::StatisticsJsonHandler(AsyncFetch* fetch, Statistics* stats) {
-  fetch->response_headers()->SetStatusAndReason(HttpStatus::kOK);
-  fetch->response_headers()->Add(HttpAttributes::kContentType,
-                                 kContentTypeJson.mime_type());
-  stats->DumpJson(fetch, message_handler_);
+void AdminSite::StatisticsJsonHandler(AsyncFetch* fetch, Statistics* stats,
+                                      bool is_global, StringPiece host) {
+  ResponseHeaders* headers = fetch->response_headers();
+  headers->SetStatusAndReason(HttpStatus::kOK);
+  headers->Add(HttpAttributes::kContentType, kContentTypeJson.mime_type());
+  headers->Add(HttpAttributes::kCacheControl, "no-store, private");
+  headers->Add("X-Content-Type-Options", "nosniff");
+  stats->DumpJson(is_global ? "global" : "vhost", host, timer_->NowMs(), fetch,
+                  message_handler_);
   fetch->Done(true);
-}
-
-void AdminSite::StatisticsJsonDump(AsyncFetch* fetch, Statistics* stats) {
-  StatisticsJsonHandler(fetch, stats);
 }
 
 void AdminSite::StatisticsHandler(const RewriteOptions& options,
                                   AdminSource source, AsyncFetch* fetch,
-                                  Statistics* stats) {
+                                  Statistics* stats, bool is_global,
+                                  StringPiece host) {
   // Delegate to StatisticsJsonHandler which returns JSON from stats->DumpJson.
-  StatisticsJsonHandler(fetch, stats);
+  StatisticsJsonHandler(fetch, stats, is_global, host);
 }
 
 void AdminSite::GraphsHandler(const RewriteOptions& options, AdminSource source,
@@ -176,20 +357,18 @@ void AdminSite::ConsoleJsonHandler(const QueryParams& params, AsyncFetch* fetch,
                                    Statistics* statistics) {
   StatisticsLogger* console_logger = statistics->console_logger();
   if (console_logger == nullptr) {
-    fetch->response_headers()->SetStatusAndReason(HttpStatus::kNotFound);
-    fetch->response_headers()->Add(HttpAttributes::kContentType,
-                                   kContentTypeJson.mime_type());
-    fetch->Write(
-        "{\"error\":\"console_logger must be enabled to use '?json' "
-        "query parameter.\"}",
-        message_handler_);
-    fetch->Done(true);
+    WriteJsonError(fetch, HttpStatus::kNotFound,
+                   "console_logger must be enabled to use '?json' "
+                   "query parameter.",
+                   message_handler_);
     return;
   }
 
-  fetch->response_headers()->SetStatusAndReason(HttpStatus::kOK);
-  fetch->response_headers()->Add(HttpAttributes::kContentType,
-                                 kContentTypeJson.mime_type());
+  ResponseHeaders* headers = fetch->response_headers();
+  headers->SetStatusAndReason(HttpStatus::kOK);
+  headers->Add(HttpAttributes::kContentType, kContentTypeJson.mime_type());
+  headers->Add(HttpAttributes::kCacheControl, "no-store, private");
+  headers->Add("X-Content-Type-Options", "nosniff");
 
   std::set<GoogleString> var_titles;
   // Default is to fetch data used on graphs page.
@@ -231,11 +410,45 @@ void AdminSite::ConsoleJsonHandler(const QueryParams& params, AsyncFetch* fetch,
 
 void AdminSite::PrintHistograms(AdminSource source, AsyncFetch* fetch,
                                 Statistics* stats) {
-  GoogleString histogram_text;
-  StringWriter writer(&histogram_text);
-  stats->RenderHistograms(&writer, message_handler_);
-  GoogleString json =
-      StrCat("{\"histograms\":\"", JsonEscape(histogram_text), "\"}");
+  GoogleString json = "{\"histograms\":[";
+  const char* separator = "";
+  const StringVector& names = stats->HistogramNames();
+  for (const GoogleString& name : names) {
+    Histogram* hist = stats->FindHistogram(name);
+    if (hist == nullptr || hist->Count() == 0) continue;
+    StrAppend(&json, separator, "{\"name\":\"", JsonEscape(name), "\"");
+    StrAppend(&json, ",\"count\":",
+              Integer64ToString(static_cast<int64>(hist->Count())),
+              ",\"avg\":", Num(hist->Average()),
+              ",\"stddev\":", Num(hist->StandardDeviation()));
+    // Percentile estimates need a meaningful number of samples; with only a
+    // handful they collapse onto a near-minimum bucket bound (e.g. -5000)
+    // that is not a real latency/size value. Below the threshold, null the
+    // four percentile fields rather than emit that no-data value.
+    const bool show_percentiles =
+        hist->Count() >= Histogram::kMinSamplesForPercentiles;
+    StrAppend(&json, ",\"min\":", Num(hist->Minimum()),
+              ",\"median\":", show_percentiles ? Num(hist->Median()) : "null",
+              ",\"max\":", Num(hist->Maximum()));
+    StrAppend(
+        &json,
+        ",\"p90\":", show_percentiles ? Num(hist->Percentile(90)) : "null",
+        ",\"p95\":", show_percentiles ? Num(hist->Percentile(95)) : "null",
+        ",\"p99\":", show_percentiles ? Num(hist->Percentile(99)) : "null",
+        ",\"buckets\":[");
+    const char* bsep = "";
+    for (int i = 0, n = hist->NumBuckets(); i < n; ++i) {
+      if (hist->BucketCount(i) == 0) continue;
+      StrAppend(&json, bsep, "{\"start\":", Num(hist->BucketStart(i)),
+                ",\"limit\":", Num(hist->BucketLimit(i)), ",\"count\":",
+                Integer64ToString(static_cast<int64>(hist->BucketCount(i))),
+                "}");
+      bsep = ",";
+    }
+    json += "]}";
+    separator = ",";
+  }
+  json += "]}";
   WriteJsonResponse(fetch, json, timer_, message_handler_);
 }
 
@@ -249,6 +462,20 @@ void AdminSite::PrintCaches(
   GoogleString url;
   if ((source == kPageSpeedAdmin) &&
       query_params.Lookup1Unescaped("url", &url)) {
+    if (query_params.Has("Delete") &&
+        !GateCacheAction(fetch, message_handler_)) {
+      return;
+    }
+    if (!is_global) {
+      GoogleUrl target(url);
+      if (!target.IsWebValid() ||
+          !TargetBelongsToRequestHost(stripped_gurl, target)) {
+        WriteJsonError(fetch, HttpStatus::kForbidden,
+                       "URL belongs to another host; use that host's console",
+                       message_handler_);
+        return;
+      }
+    }
     // Delegate to ShowCacheHandler to get the cached value for that URL.
     // Always use JSON format now.
     GoogleString ua;
@@ -264,6 +491,45 @@ void AdminSite::PrintCaches(
     WriteJsonResponse(fetch, json, timer_, message_handler_);
   } else if ((source == kPageSpeedAdmin) &&
              query_params.Lookup1Unescaped("purge", &url)) {
+    if (!GateCacheAction(fetch, message_handler_)) {
+      return;
+    }
+    // A per-vhost console is scoped to its own host: a whole-cache purge is
+    // global-only, and a single-URL purge may only target this host.  These
+    // scope checks run ahead of the "purge enabled" check below so a
+    // disabled purge does not mask a cross-scope request as a soft failure.
+    if (!is_global) {
+      if (url == "*") {
+        WriteJsonError(
+            fetch, HttpStatus::kForbidden,
+            "global purge is available from the global admin console",
+            message_handler_);
+        return;
+      }
+      if (!url.empty()) {
+        GoogleUrl origin(stripped_gurl.Origin());
+        GoogleUrl resolved(origin, url);
+        if (resolved.IsWebValid()) {
+          // PurgeHandler reads any target ending in '*' as the whole-cache
+          // purge, whatever host the URL names; judge the resolved form, the
+          // exact string the purge below would act on.
+          if (strings::EndsWith(resolved.Spec(), "*")) {
+            WriteJsonError(
+                fetch, HttpStatus::kForbidden,
+                "global purge is available from the global admin console",
+                message_handler_);
+            return;
+          }
+          if (!TargetBelongsToRequestHost(stripped_gurl, resolved)) {
+            WriteJsonError(
+                fetch, HttpStatus::kForbidden,
+                "URL belongs to another host; use that host's console",
+                message_handler_);
+            return;
+          }
+        }
+      }
+    }
     if (!options->enable_cache_purge()) {
       GoogleString json = StrCat(
           "{\"success\":false,\"error\":\"Purging not enabled: please add '",
@@ -317,15 +583,20 @@ void AdminSite::PrintCaches(
 
     // Backend stats
     if (system_caches != nullptr) {
-      int flags = SystemCaches::kDefaultStatFlags;
-      if (is_global) {
-        flags |= SystemCaches::kGlobalView;
-      }
-      flags |= SystemCaches::kIncludeMemcached;
-      flags |= SystemCaches::kIncludeRedis;
       GoogleString backend_stats;
-      system_caches->PrintCacheStats(
-          static_cast<SystemCaches::StatFlags>(flags), &backend_stats);
+      if (is_global) {
+        int flags =
+            SystemCaches::kDefaultStatFlags | SystemCaches::kGlobalView |
+            SystemCaches::kIncludeMemcached | SystemCaches::kIncludeRedis;
+        // Backend server status (memcached/redis) is a blocking per-server
+        // query; only the aggregate console pays for it.
+        system_caches->PrintCacheStats(
+            static_cast<SystemCaches::StatFlags>(flags), &backend_stats);
+      } else if (cache_path != nullptr) {
+        // Per-vhost: only this vhost's own cache path. Never enumerate the
+        // full set of declared caches here (see SystemCaches::PrintCacheStats).
+        system_caches->PrintCachePathStats(cache_path, &backend_stats);
+      }
       StrAppend(&json, ",\"backend_stats\":\"", JsonEscape(backend_stats),
                 "\"");
     }
@@ -339,47 +610,120 @@ void AdminSite::PrintCaches(
   }
 }
 
-void AdminSite::PrintConfig(
-    AdminSource source, AsyncFetch* fetch,
-    SystemRewriteOptions* global_system_rewrite_options) {
-  GoogleString config_text = global_system_rewrite_options->OptionsToString();
-  GoogleString json = StrCat("{\"config\":\"", JsonEscape(config_text), "\"}");
+void AdminSite::PrintConfig(AdminSource source, AsyncFetch* fetch,
+                            const RewriteOptions& server_config,
+                            const RewriteOptions& effective_options,
+                            bool is_global, StringPiece host) {
+  GoogleString json =
+      StrCat("{\"config\":\"", JsonEscape(server_config.OptionsToString()),
+             "\",\"effective_config\":\"",
+             JsonEscape(effective_options.OptionsToString()), "\",\"scope\":\"",
+             is_global ? "global" : "vhost", "\",\"host\":\"", JsonEscape(host),
+             "\"}");
   WriteJsonResponse(fetch, json, timer_, message_handler_);
 }
 
 void AdminSite::MessageHistoryHandler(const RewriteOptions& options,
-                                      AdminSource source, AsyncFetch* fetch) {
+                                      AdminSource source,
+                                      const QueryParams& query_params,
+                                      AsyncFetch* fetch) {
+  // grouped=1: the same lines folded into one row per message template (see
+  // GroupedMessagesJson).  Read-only and one at a time: it walks the whole
+  // retained buffer.
+  GoogleString grouped_str;
+  const bool grouped = query_params.Lookup1Unescaped("grouped", &grouped_str) &&
+                       grouped_str == "1";
+  if (grouped) {
+    const RequestHeaders* request = fetch->request_headers();
+    const RequestHeaders::Method method =
+        request != nullptr ? request->method() : RequestHeaders::kGet;
+    if (method != RequestHeaders::kGet && method != RequestHeaders::kHead) {
+      fetch->response_headers()->Add(HttpAttributes::kAllow, "GET, HEAD");
+      WriteJsonError(fetch, HttpStatus::kMethodNotAllowed, "method not allowed",
+                     message_handler_);
+      return;
+    }
+    if (grouped_in_flight_.exchange(true, std::memory_order_acq_rel)) {
+      WriteJsonBusy(fetch, message_handler_);
+      return;
+    }
+  }
+  int64 since = -1;
+  GoogleString since_str;
+  if (query_params.Lookup1Unescaped("since", &since_str)) {
+    if (!StringToInt64(since_str, &since) || since < 0) {
+      since = -1;
+    }
+  }
   GoogleString log;
   StringWriter log_writer(&log);
-  GoogleString json = "{\"messages\":[";
-  if (message_handler_->Dump(&log_writer)) {
-    StringPieceVector messages;
+  int64 lines_written = 0;
+  StringPieceVector messages;
+  if (message_handler_->DumpWithCount(&log_writer, &lines_written)) {
     message_handler_->ParseMessageDumpIntoMessages(log, &messages);
-    const char* separator = "";
-    for (int i = 0, size = messages.size(); i < size; ++i) {
-      if (messages[i].length() > 0) {
-        const char* severity = "info";
-        switch (message_handler_->GetMessageType(messages[i])) {
-          case kError:
-            severity = "error";
-            break;
-          case kWarning:
-            severity = "warning";
-            break;
-          case kFatal:
-            severity = "fatal";
-            break;
-          default:
-            severity = "info";
-            break;
-        }
-        GoogleString reformatted =
-            message_handler_->ReformatMessage(messages[i]).as_string();
-        StrAppend(&json, separator, "{\"severity\":\"", severity,
-                  "\",\"message\":\"", JsonEscape(reformatted), "\"}");
-        separator = ",";
-      }
+  }
+  // ParseMessageDumpIntoMessages always drops the first (possibly partial)
+  // line, and every buffered line ends in "\n", so splitting always yields
+  // one trailing empty entry too -- neither corresponds to a real line, so
+  // `messages.size() - 1` ("real_slots") is comparable to `lines_written`
+  // 1:1 (each split entry is exactly one line, and the counter now counts
+  // lines, not Write() calls, so a multi-line message's lines are not
+  // dropped or miscounted). Exclude that guaranteed trailing entry before
+  // comparing the retained line count against how many lines are unseen; a
+  // `since` older than what's retained (unseen >= real_slots) returns
+  // everything retained.
+  size_t first = 0;
+  if (since >= 0 && since <= lines_written) {
+    int64 unseen = lines_written - since;
+    int64 real_slots = static_cast<int64>(messages.size()) - 1;
+    if (unseen < real_slots) {
+      first = static_cast<size_t>(real_slots - unseen);
     }
+  }
+  if (grouped) {
+    // window_s: 1..kMaxMessageWindowSeconds; anything else means no window,
+    // the same leniency `since` has.
+    int64 window_s = -1;
+    GoogleString window_str;
+    if (query_params.Lookup1Unescaped("window_s", &window_str) &&
+        (!StringToInt64(window_str, &window_s) || window_s < 1 ||
+         window_s > kMaxMessageWindowSeconds)) {
+      window_s = -1;
+    }
+    WriteJsonResponse(
+        fetch,
+        GroupedMessagesJson(message_handler_, messages, first, lines_written,
+                            timer_->NowMs(), window_s),
+        timer_, message_handler_);
+    grouped_in_flight_.store(false, std::memory_order_release);
+    return;
+  }
+  GoogleString json = StrCat(
+      "{\"scope\":\"process\",\"next\":", Integer64ToString(lines_written),
+      ",\"messages\":[");
+  const char* separator = "";
+  for (size_t i = first, size = messages.size(); i < size; ++i) {
+    if (messages[i].empty()) continue;
+    const char* severity = "info";
+    switch (message_handler_->GetMessageType(messages[i])) {
+      case kError:
+        severity = "error";
+        break;
+      case kWarning:
+        severity = "warning";
+        break;
+      case kFatal:
+        severity = "fatal";
+        break;
+      default:
+        severity = "info";
+        break;
+    }
+    GoogleString reformatted =
+        message_handler_->ReformatMessage(messages[i]).as_string();
+    StrAppend(&json, separator, "{\"severity\":\"", severity,
+              "\",\"message\":\"", JsonEscape(reformatted), "\"}");
+    separator = ",";
   }
   json += "]}";
   WriteJsonResponse(fetch, json, timer_, message_handler_);
@@ -393,7 +737,7 @@ void AdminSite::AdminPage(
     CacheInterface* metadata_cache, PropertyCache* page_property_cache,
     ServerContext* server_context, Statistics* statistics, Statistics* stats,
     SystemRewriteOptions* global_system_rewrite_options,
-    StringPiece request_body) {
+    StringPiece request_body, StringPiece own_serve_host) {
   // The handler is "pagespeed_admin", so we must dispatch off of
   // the remainder of the URL.
   StringPiece path = stripped_gurl.PathSansQuery();  // "/pagespeed_admin/foo"
@@ -408,57 +752,99 @@ void AdminSite::AdminPage(
     response_headers->Add(HttpAttributes::kLocation, admin_with_slash);
     response_headers->Add(HttpAttributes::kContentType,
                           kContentTypeJson.mime_type());
+    response_headers->Add(HttpAttributes::kCacheControl, "no-store, private");
+    response_headers->Add("X-Content-Type-Options", "nosniff");
     GoogleString json =
         StrCat("{\"redirect\":\"", JsonEscape(admin_with_slash), "\"}");
     fetch->Write(json, message_handler_);
     fetch->Done(true);
   } else {
-    // The full path sans query looks like "/pagespeed_admin/v1/daemon/health".
-    StringPiece full_path = stripped_gurl.PathSansQuery();
-    // /v1/daemon/* — read-only proxy to the optimizer daemon's management
-    // API.  The leaf is exact-matched against
-    // AdminDaemonHandler's compile-time endpoint table:
-    // the upstream path comes from the table, never from the request.  A
+    // The admin path may be mounted at any depth ("pagespeed_admin",
+    // "alt/admin/path", ...), and the shared code cannot know that depth:
+    // Apache, for one, does not expose the <Location> prefix a request
+    // matched.  So dispatch is anchored on the tail of the path:
+    //   - a trailing slash (empty last segment) is the SPA console root;
+    //   - "v1/daemon/<leaf>" or "v1/daemon/<a>/<b>" at the end of the path
+    //     is the read-only daemon proxy (leaf "<leaf>" or "<a>/<b>");
+    //   - otherwise the last segment is the admin leaf.
+    StringPieceVector segments;
+    SplitStringPieceToVector(path, "/", &segments, false /* omit_empty */);
+    const StringPiece leaf = segments.back();
+    if (leaf.empty()) {
+      // Root path serves the SPA console.
+      ServeSpaConsole(fetch);
+      return;
+    }
+    // /v1/daemon/* -- read-only proxy to the optimizer daemon's management
+    // API.  Anchored on the tail like the rest of this dispatch: the
+    // daemon leaf is the one or two segments directly after a
+    // "v1/daemon" pair ("health", "cache/urls").  It is exact-matched
+    // against AdminDaemonHandler's compile-time endpoint table: the
+    // upstream path comes from the table, never from the request.  A
     // non-matching leaf gets a 404 here and never falls through to the
-    // leaf-based dispatch below (so e.g. "v1/daemon/config" cannot reach the
-    // module's config dump).
-    const char kDaemonApiPrefix[] = "/v1/daemon/";
-    StringPiece::size_type daemon_pos = full_path.find(kDaemonApiPrefix);
-    if (daemon_pos != StringPiece::npos) {
-      StringPiece leaf =
-          full_path.substr(daemon_pos + strlen(kDaemonApiPrefix));
-      if (!daemon_handler_->HandleRequest(leaf, fetch)) {
-        fetch->response_headers()->SetStatusAndReason(HttpStatus::kNotFound);
-        fetch->response_headers()->Add(HttpAttributes::kContentType,
-                                       kContentTypeJson.mime_type());
-        GoogleString json = StrCat(
-            "{\"error\":\"Unknown daemon endpoint: ", JsonEscape(leaf), "\"}");
-        fetch->Write(json, message_handler_);
+    // leaf-based dispatch below (so e.g. "v1/daemon/config" cannot
+    // reach the module's config dump).
+    const size_t n = segments.size();
+    GoogleString daemon_leaf;
+    bool is_daemon_request = false;
+    if (n >= 3 && segments[n - 3] == "v1" && segments[n - 2] == "daemon") {
+      segments[n - 1].CopyToString(&daemon_leaf);
+      is_daemon_request = true;
+    } else if (n >= 4 && segments[n - 4] == "v1" &&
+               segments[n - 3] == "daemon") {
+      daemon_leaf = StrCat(segments[n - 2], "/", segments[n - 1]);
+      is_daemon_request = true;
+    }
+    if (is_daemon_request) {
+      if (!daemon_handler_->HandleRequest(daemon_leaf, query_params, is_global,
+                                          own_serve_host, fetch)) {
+        // HandleRequest() never touched fetch, so this 404 -- the one
+        // daemon-proxy response written here rather than by
+        // AdminDaemonHandler -- is composed directly instead of through
+        // the generic WriteJsonError, so the handler's own
+        // AddProxyResponseHeaders can supply the same three headers every
+        // other daemon-proxy response carries without adding
+        // Cache-Control/X-Content-Type-Options a second time (WriteJsonError
+        // already adds those on every other admin error path and must not
+        // gain this proxy-only header).
+        ResponseHeaders* headers = fetch->response_headers();
+        headers->SetStatusAndReason(HttpStatus::kNotFound);
+        headers->Add(HttpAttributes::kContentType,
+                     kContentTypeJson.mime_type());
+        AdminDaemonHandler::AddProxyResponseHeaders(headers);
+        fetch->Write(
+            StrCat("{\"success\":false,\"error\":\"",
+                   JsonEscape(StrCat("Unknown daemon endpoint: ", daemon_leaf)),
+                   "\"}"),
+            message_handler_);
         fetch->Done(true);
       }
       return;
     }
-    StringPiece leaf = stripped_gurl.LeafSansQuery();
-    if (leaf.empty()) {
-      // Root path serves the SPA console.
-      ServeSpaConsole(fetch);
-    } else if (leaf == "statistics") {
+    if (leaf == "statistics") {
       if (query_params.Has("json")) {
         ConsoleJsonHandler(query_params, fetch, statistics);
       } else {
-        StatisticsHandler(*options, kPageSpeedAdmin, fetch, stats);
+        StatisticsHandler(*options, kPageSpeedAdmin, fetch, stats, is_global,
+                          static_cast<SystemServerContext*>(server_context)
+                              ->hostname_identifier());
       }
     } else if (leaf == "stats_json") {
-      StatisticsJsonHandler(fetch, stats);
+      StatisticsJsonHandler(fetch, stats, is_global,
+                            static_cast<SystemServerContext*>(server_context)
+                                ->hostname_identifier());
     } else if (leaf == "graphs") {
       GraphsHandler(*options, kPageSpeedAdmin, query_params, fetch, statistics);
     } else if (leaf == "config") {
-      PrintConfig(kPageSpeedAdmin, fetch, global_system_rewrite_options);
+      PrintConfig(kPageSpeedAdmin, fetch, *global_system_rewrite_options,
+                  *options, is_global,
+                  static_cast<SystemServerContext*>(server_context)
+                      ->hostname_identifier());
     } else if (leaf == "console") {
       ConsoleHandler(*global_system_rewrite_options, *options, kPageSpeedAdmin,
                      query_params, fetch, statistics);
     } else if (leaf == "message_history") {
-      MessageHistoryHandler(*options, kPageSpeedAdmin, fetch);
+      MessageHistoryHandler(*options, kPageSpeedAdmin, query_params, fetch);
     } else if (leaf == "cache") {
       PrintCaches(is_global, kPageSpeedAdmin, stripped_gurl, query_params,
                   options, cache_path, fetch, system_caches,
@@ -467,13 +853,8 @@ void AdminSite::AdminPage(
     } else if (leaf == "histograms") {
       PrintHistograms(kPageSpeedAdmin, fetch, stats);
     } else {
-      fetch->response_headers()->SetStatusAndReason(HttpStatus::kNotFound);
-      fetch->response_headers()->Add(HttpAttributes::kContentType,
-                                     kContentTypeJson.mime_type());
-      GoogleString json =
-          StrCat("{\"error\":\"Unknown admin page: ", JsonEscape(leaf), "\"}");
-      fetch->Write(json, message_handler_);
-      fetch->Done(true);
+      WriteJsonError(fetch, HttpStatus::kNotFound,
+                     StrCat("Unknown admin page: ", leaf), message_handler_);
     }
   }
 }
@@ -489,7 +870,10 @@ void AdminSite::StatisticsPage(
   if (query_params.Has("json")) {
     ConsoleJsonHandler(query_params, fetch, statistics);
   } else if (query_params.Has("config")) {
-    PrintConfig(kStatistics, fetch, global_system_rewrite_options);
+    PrintConfig(kStatistics, fetch, *global_system_rewrite_options, *options,
+                is_global,
+                static_cast<SystemServerContext*>(server_context)
+                    ->hostname_identifier());
   } else if (query_params.Has("histograms")) {
     PrintHistograms(kStatistics, fetch, stats);
   } else if (query_params.Has("graphs")) {
@@ -501,7 +885,9 @@ void AdminSite::StatisticsPage(
                 fetch, system_caches, filesystem_metadata_cache, http_cache,
                 metadata_cache, page_property_cache, server_context);
   } else {
-    StatisticsHandler(*options, kStatistics, fetch, stats);
+    StatisticsHandler(*options, kStatistics, fetch, stats, is_global,
+                      static_cast<SystemServerContext*>(server_context)
+                          ->hostname_identifier());
   }
 }
 
@@ -625,6 +1011,171 @@ void ResetAdminExposureWarningsForTesting() {
        ++i) {
     g_admin_exposure_warned[i].store(false, std::memory_order_relaxed);
   }
+}
+
+// =============================================================================
+// Message templates (see admin_site.h).  Byte-level, ASCII character classes
+// only, so the TypeScript twin in the admin console (which walks UTF-16 code
+// units) produces the same text for any input: every non-ASCII byte is copied
+// as it is.
+// =============================================================================
+// The character classes are the kernel's ASCII-only IsDecimalDigit,
+// IsHexDigit and IsAsciiAlphaNumeric (string_util.h).
+namespace {
+
+// Characters that end a URL inside a message.
+bool EndsUrl(char c) {
+  return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '"' ||
+         c == '\'' || c == '<' || c == '>' || c == '`';
+}
+
+bool AllAsciiDigits(StringPiece s) {
+  if (s.empty()) return false;
+  for (char c : s) {
+    if (!IsDecimalDigit(c)) return false;
+  }
+  return true;
+}
+
+// "0x1f" style, or at least 8 hex digits mixing digits and letters.
+bool IsHexId(StringPiece word) {
+  if (word.size() >= 3 && word[0] == '0' &&
+      (word[1] == 'x' || word[1] == 'X')) {
+    bool all_hex = true;
+    for (size_t i = 2; i < word.size(); ++i) {
+      if (!IsHexDigit(word[i])) {
+        all_hex = false;
+        break;
+      }
+    }
+    if (all_hex) return true;
+  }
+  if (word.size() < 8) return false;
+  bool digit = false;
+  bool letter = false;
+  for (char c : word) {
+    if (!IsHexDigit(c)) return false;
+    if (IsDecimalDigit(c)) {
+      digit = true;
+    } else {
+      letter = true;
+    }
+  }
+  return digit && letter;
+}
+
+// Moves *rest past a leading "[<text without ']'>] " and returns the text.
+bool TakeBracketGroup(StringPiece* rest, StringPiece* inside) {
+  if (rest->empty() || (*rest)[0] != '[') return false;
+  const size_t close = rest->find(']');
+  if (close == StringPiece::npos || close + 1 >= rest->size() ||
+      (*rest)[close + 1] != ' ') {
+    return false;
+  }
+  *inside = rest->substr(1, close - 1);
+  rest->remove_prefix(close + 2);
+  return true;
+}
+
+bool IsMessageLevelName(StringPiece s) {
+  return s == "Info" || s == "Warning" || s == "Error" || s == "Fatal";
+}
+
+// "<file>:<line>": split at the last colon, a non-empty file without spaces
+// and a line of digits.
+bool IsFileAndLine(StringPiece s) {
+  const size_t colon = s.rfind(':');
+  if (colon == StringPiece::npos || colon == 0) return false;
+  for (size_t i = 0; i < colon; ++i) {
+    if (s[i] == ' ') return false;
+  }
+  return AllAsciiDigits(s.substr(colon + 1));
+}
+
+// Moves *rest past "[<time>] [<Level>] " and returns the time text.
+bool TakeMessageHeader(StringPiece* rest, StringPiece* time_text) {
+  StringPiece after = *rest;
+  StringPiece level;
+  if (!TakeBracketGroup(&after, time_text) ||
+      !TakeBracketGroup(&after, &level) || !IsMessageLevelName(level)) {
+    return false;
+  }
+  *rest = after;
+  return true;
+}
+
+}  // namespace
+
+StringPiece MessageLineBody(StringPiece line) {
+  StringPiece rest = line;
+  StringPiece time_text;
+  if (!TakeMessageHeader(&rest, &time_text)) return line;
+  StringPiece after_pid = rest;
+  StringPiece group;
+  if (TakeBracketGroup(&after_pid, &group) && AllAsciiDigits(group)) {
+    rest = after_pid;
+    StringPiece after_file = rest;
+    if (TakeBracketGroup(&after_file, &group) && IsFileAndLine(group)) {
+      rest = after_file;
+    }
+  }
+  return rest;
+}
+
+int64 MessageLineTimeMs(StringPiece line) {
+  StringPiece rest = line;
+  StringPiece time_text;
+  int64 time_ms = 0;
+  if (!TakeMessageHeader(&rest, &time_text) ||
+      !ConvertStringToTime(time_text, &time_ms)) {
+    return -1;
+  }
+  return time_ms;
+}
+
+GoogleString MessageTemplate(StringPiece body) {
+  GoogleString out;
+  out.reserve(body.size());
+  const size_t n = body.size();
+  size_t i = 0;
+  while (i < n) {
+    const char c = body[i];
+    if ((c == 'h' || c == 'H') &&
+        (StringCaseStartsWith(body.substr(i), "http://") ||
+         StringCaseStartsWith(body.substr(i), "https://"))) {
+      size_t j = i;
+      while (j < n && !EndsUrl(body[j])) ++j;
+      out.append("URL");
+      i = j;
+    } else if (IsAsciiAlphaNumeric(c)) {
+      size_t j = i;
+      while (j < n && IsAsciiAlphaNumeric(body[j])) ++j;
+      const StringPiece word = body.substr(i, j - i);
+      if (IsHexId(word)) {
+        out.append("ID");
+      } else {
+        size_t k = 0;
+        while (k < word.size()) {
+          if (IsDecimalDigit(word[k])) {
+            while (k < word.size() && IsDecimalDigit(word[k])) ++k;
+            out.push_back('N');
+          } else {
+            out.push_back(word[k]);
+            ++k;
+          }
+        }
+      }
+      i = j;
+    } else {
+      out.push_back(c);
+      ++i;
+    }
+  }
+  while (!out.empty() &&
+         (out.back() == ' ' || out.back() == '\t' || out.back() == '\r')) {
+    out.pop_back();
+  }
+  return out;
 }
 
 }  // namespace net_instaweb

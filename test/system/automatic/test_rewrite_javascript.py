@@ -21,6 +21,7 @@ These tests verify that JavaScript minification works correctly.
 """
 
 import re
+import socket
 
 import pytest
 
@@ -279,6 +280,27 @@ class TestJavascriptRegressions:
         response = client.get(url)
         # Should return 404, not crash or leak
         assert_http_status(response, 404)
+
+    def test_same_input_twice_in_combination_fails_fast(
+        self, server_config, test_root: str
+    ):
+        """Bash original (rewrite_javascript.sh:57-65):
+
+            PAGE=_,Mco.0.css+_,Mco.0.css.pagespeed.cc.0.css
+            URL=$TEST_ROOT/$PAGE?PageSpeedFilters=combine_css,outline_css
+            check_error_code 8 \
+              $WGET -q -O /dev/null -o /dev/null --tries=1 --read-timeout=3 $URL
+        """
+        fast = PageSpeedClient(server_config.host, server_config.port, timeout=3.0)
+        url = (f"{test_root}/_,Mco.0.css+_,Mco.0.css.pagespeed.cc.0.css"
+               "?PageSpeedFilters=combine_css,outline_css")
+        try:
+            response = fast.get(url)
+        except socket.timeout as err:
+            pytest.fail(f"{url}: no answer within 3 s ({err}) -- the combination stalled")
+        assert response.status >= 400, (
+            f"{url}: expected a server-issued error status, got HTTP {response.status}"
+        )
 
 
 if __name__ == "__main__":

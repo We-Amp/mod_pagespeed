@@ -77,6 +77,8 @@
 //                                pre-H1 daemon. Bound OPTIONALLY, so this
 //                                library must still load -- the adapter
 //                                tolerates the absence as the legacy layout.
+//                                It also lacks the later, equally optional
+//                                ps_serve_stats_record_hit_host.
 //   PS_STUB_OMIT_LAST_ERROR      no ps_last_error_message: a daemon package
 //                                from before the per-failure explanation was
 //                                published. Bound OPTIONALLY, so it must
@@ -101,6 +103,15 @@
 #include <cstdlib>
 #include <cstring>
 
+#ifdef _WIN32
+// WIN32_LEAN_AND_MEAN and NOMINMAX keep the header's COM and min/max macros
+// out of this file (they collide with it, measured); they must be set before
+// the header is first pulled in.
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#endif
+
 namespace {
 
 // Layout-identical to the module's PsCacheConfig and to the daemon's real
@@ -115,8 +126,22 @@ struct StubCacheConfig {
   size_t max_metadata_size;
 };
 
+#ifdef _WIN32
+// The test's PS_STUB_* settings are written into the process environment
+// block, but this library's CRT keeps its OWN environment, so getenv() here
+// cannot see them on Windows.  The process block is the shared one: read it
+// with the OS call, never the CRT's.
+const char* StubGetenv(const char* name) {
+  static thread_local char value[4096];
+  const DWORD length = GetEnvironmentVariableA(name, value, sizeof(value));
+  return length == 0 || length >= sizeof(value) ? nullptr : value;
+}
+#else
+const char* StubGetenv(const char* name) { return getenv(name); }
+#endif
+
 long EnvOr(const char* name, long fallback) {
-  const char* v = getenv(name);
+  const char* v = StubGetenv(name);
   if (v == nullptr || *v == '\0') {
     return fallback;
   }
@@ -215,7 +240,7 @@ size_t ClampWriteParamsSize(size_t declared) {
 // costs anything here, and it keeps the object what it is meant to be -- an
 // independently built peer with no runtime of its own.
 void Log(const char* line) {
-  const char* path = getenv("PS_STUB_LOG");
+  const char* path = StubGetenv("PS_STUB_LOG");
   if (path == nullptr || *path == '\0') {
     return;
   }
@@ -541,7 +566,7 @@ struct StubReadResult {
 bool StubIsSentinel(uint8_t id) { return ((id >> 2) & 0x03) == 0x03; }
 
 size_t StubParseAlternates(StubAlternate* out, size_t capacity) {
-  const char* spec = getenv("PS_STUB_ALTERNATES");
+  const char* spec = StubGetenv("PS_STUB_ALTERNATES");
   if (spec == nullptr || *spec == '\0') {
     return 0;
   }
@@ -639,7 +664,7 @@ StubReadResult* StubMakeResult(const StubAlternate& alternate) {
   // conversion does not pay, so an entry's id and its content's format come
   // apart -- and a stand-in whose bodies are always a run of 'a' cannot put
   // a case on either side of that.
-  const char* magic = getenv("PS_STUB_BODY_MAGIC");
+  const char* magic = StubGetenv("PS_STUB_BODY_MAGIC");
   if (magic != nullptr) {
     size_t i = 0;
     while (magic[0] != '\0' && magic[1] != '\0' && i < result->body_length) {
@@ -647,6 +672,22 @@ StubReadResult* StubMakeResult(const StubAlternate& alternate) {
       result->body[i++] = static_cast<char>(strtol(pair, nullptr, 16));
       magic += 2;
     }
+  }
+  // PS_STUB_GZIP_ISIZE: the length a gzip-coded entry's stream says it
+  // compresses -- a gzip stream's last four bytes, little-endian.  The peer
+  // writes real gzip streams for its compressed copies; a stand-in whose
+  // bodies are a run of 'a' cannot put a case on either side of "compresses
+  // the original" versus "compresses something smaller".  Applies to
+  // entries whose id carries the gzip coding (bits 6-7 == 1) only.
+  const long gzip_isize = EnvOr("PS_STUB_GZIP_ISIZE", -1);
+  if (gzip_isize >= 0 && ((alternate.id >> 6) & 0x03) == 1 &&
+      result->body_length >= 4) {
+    const uint32_t value = static_cast<uint32_t>(gzip_isize);
+    char* tail = result->body + result->body_length - 4;
+    tail[0] = static_cast<char>(value & 0xFF);
+    tail[1] = static_cast<char>((value >> 8) & 0xFF);
+    tail[2] = static_cast<char>((value >> 16) & 0xFF);
+    tail[3] = static_cast<char>((value >> 24) & 0xFF);
   }
   return result;
 }
@@ -697,9 +738,11 @@ uint64_t ps_read_shared_config_volume_size(const char* cache_path) {
 #ifndef PS_STUB_OMIT_GENERATION
 // The cache-directory generation (cache_dir_generation), published since the
 // daemon's privilege drop. Bound OPTIONALLY by the module: the omit flavour
-// below is the pre-H1 daemon, whose absence must still load.
+// below is the pre-H1 daemon, whose absence must still load. The default is
+// the current generation (DaemonAdapter::kCacheDirGeneration), so a module
+// test attaching through this stub sees a daemon it agrees with.
 uint32_t ps_read_shared_config_generation(const char* cache_path) {
-  return static_cast<uint32_t>(EnvOr("PS_STUB_GENERATION", 1));
+  return static_cast<uint32_t>(EnvOr("PS_STUB_GENERATION", 2));
 }
 #endif  // PS_STUB_OMIT_GENERATION
 
@@ -1030,7 +1073,7 @@ uint32_t ps_classify(const char* accept, const char* user_agent,
   // and every other test's case) the classifier is faithful: mobile, tablet,
   // desktop, and nothing else.
   {
-    const char* v = getenv("PS_STUB_CLASSIFY_VIEWPORT");
+    const char* v = StubGetenv("PS_STUB_CLASSIFY_VIEWPORT");
     if (v != nullptr && *v != '\0') {
       viewport = static_cast<uint32_t>(strtoul(v, nullptr, 10)) & 0x03u;
     }
@@ -1501,6 +1544,29 @@ void ps_serve_stats_record_hit(void* handle, int content_type,
            static_cast<unsigned>(mask));
   Log(line);
 }
+
+#ifndef PS_STUB_OMIT_GENERATION
+// The host-aware recorder (1.11).  Bound OPTIONALLY by the module: the
+// pre-generation flavour lacks it, which is what proves an older optimizer
+// still gets the hit -- without the host.
+void ps_serve_stats_record_hit_host(void* handle, int content_type,
+                                    uint64_t original_bytes,
+                                    uint64_t optimized_bytes, uint32_t mask,
+                                    const char* host, size_t host_len) {
+  if (handle == nullptr) {
+    return;
+  }
+  const int shown = static_cast<int>(host_len > 120 ? 120 : host_len);
+  char line[256];
+  snprintf(line, sizeof(line),
+           "serve_hit_host type=%d original=%llu optimized=%llu mask=%x "
+           "host=%.*s",
+           content_type, static_cast<unsigned long long>(original_bytes),
+           static_cast<unsigned long long>(optimized_bytes),
+           static_cast<unsigned>(mask), shown, host == nullptr ? "" : host);
+  Log(line);
+}
+#endif  // PS_STUB_OMIT_GENERATION
 
 void ps_serve_stats_close(void* handle) {}
 

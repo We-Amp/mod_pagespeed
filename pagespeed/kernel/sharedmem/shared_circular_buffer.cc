@@ -107,9 +107,23 @@ bool SharedCircularBuffer::Dump(Writer* writer, MessageHandler* handler) {
   return (writer->Write(buffer_->ToString(handler), handler));
 }
 
+bool SharedCircularBuffer::DumpWithCount(Writer* writer,
+                                         MessageHandler* handler,
+                                         int64* count) {
+  ScopedMutex hold_lock(mutex_.get());
+  bool ok = writer->Write(buffer_->ToString(handler), handler);
+  *count = buffer_->lines_written();
+  return ok;
+}
+
 GoogleString SharedCircularBuffer::ToString(MessageHandler* handler) {
   ScopedMutex hold_lock(mutex_.get());
   return buffer_->ToString(handler);
+}
+
+int64 SharedCircularBuffer::lines_written() {
+  ScopedMutex hold_lock(mutex_.get());
+  return buffer_->lines_written();
 }
 
 void SharedCircularBuffer::GlobalCleanup(MessageHandler* handler) {

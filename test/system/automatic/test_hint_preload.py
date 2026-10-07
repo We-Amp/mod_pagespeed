@@ -32,6 +32,11 @@ from pagespeed_test_framework import (
 )
 
 
+def _link_values(response) -> list:
+    """Every Link header value (the client joins repeated headers with ', ')."""
+    return [value.strip() for value in response.header("Link", "").split(",") if value.strip()]
+
+
 @pytest.mark.not_iis  # Link:rel=preload headers sent after IIS collects headers (architectural)
 class TestHintPreloadSubresources:
     """Tests for the hint_preload_subresources filter.
@@ -54,19 +59,26 @@ class TestHintPreloadSubresources:
         """
         url = f"{example_root}/hint_preload_subresources.html?PageSpeedFilters=hint_preload_subresources"
 
-        # Count Link headers - the example page hints its stylesheet, the
-        # three @imported stylesheets, one @font-face woff2 font, and one
-        # script: 6 preloads.
+        # The example page hints its stylesheet, the three @imported
+        # stylesheets, one @font-face woff2 font, and one script: 6 preloads.
         response = client.fetch_until(
             url,
-            condition=lambda r: r.header("Link", "").count("rel=preload") >= 6,
+            condition=lambda r: len(_link_values(r)) == 6,
             timeout=30.0,
         )
         assert_http_status(response, 200)
 
-        link_header = response.header("Link", "")
-        link_count = link_header.count("rel=preload")
-        assert link_count >= 6, f"Expected 6 Link preload headers, got {link_count}"
+        values = _link_values(response)
+        expected = [
+            f"<{example_root}/styles/all_using_imports.css>; rel=preload; as=style; nopush",
+            f"<{example_root}/styles/example.woff2>; rel=preload; as=font; crossorigin; nopush",
+            f"<{example_root}/styles/yellow.css>; rel=preload; as=style; nopush",
+            f"<{example_root}/styles/blue.css>; rel=preload; as=style; nopush",
+            f"<{example_root}/styles/bold.css>; rel=preload; as=style; nopush",
+            f"<{example_root}/inline_javascript.js>; rel=preload; as=script; nopush",
+        ]
+        missing = [link for link in expected if link not in values]
+        assert not missing, f"missing Link values {missing}; got {values}"
 
     def test_preload_css_main(
         self, client: PageSpeedClient, example_root: str

@@ -53,14 +53,16 @@
 #include <thread>
 #include <vector>
 
-#include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/option_context.h"
+#include "net/instaweb/rewriter/public/rewrite_options.h"
+#include "net/instaweb/rewriter/public/rewrite_stats.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/util/platform.h"
 #include "pagespeed/kernel/util/simple_stats.h"
 #include "pagespeed/system/daemon_abi.h"
+#include "pagespeed/system/siphash.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 
 namespace net_instaweb {
@@ -84,6 +86,10 @@ constexpr uint32_t kMaskOriginalDesktop = 0x08;
 constexpr uint32_t kMaskWebpDesktop = 0x09;
 constexpr uint32_t kMaskAvifDesktop = 0x0A;
 
+// A stylesheet URL, for the cases about the stored compressed copies: the
+// optimizer writes those for stylesheets, scripts and SVG images.
+const char kCssUrl[] = "/a/site.css";
+
 class DaemonServeArmTest : public testing::Test {
  public:
   DaemonServeArmTest() : thread_system_(Platform::CreateThreadSystem()) {
@@ -106,6 +112,7 @@ class DaemonServeArmTest : public testing::Test {
     unsetenv("PS_STUB_BODY_MAGIC");
     unsetenv("PS_STUB_ORIGIN_CCFLAGS");
     unsetenv("PS_STUB_ORIGIN_CONTENT_LENGTH");
+    unsetenv("PS_STUB_GZIP_ISIZE");
     setenv("PS_STUB_INSERTED_AT", "1000", 1);
     setenv("PS_STUB_ORIGIN_MAXAGE", "600", 1);
     setenv("PS_STUB_ORIGIN_CT", "image/png", 1);
@@ -143,6 +150,7 @@ class DaemonServeArmTest : public testing::Test {
     unsetenv("PS_STUB_BODY_MAGIC");
     unsetenv("PS_STUB_ORIGIN_CCFLAGS");
     unsetenv("PS_STUB_ORIGIN_CONTENT_LENGTH");
+    unsetenv("PS_STUB_GZIP_ISIZE");
   }
 
   GoogleString CallLog() const {
@@ -173,6 +181,31 @@ class DaemonServeArmTest : public testing::Test {
     request.user_agent = kUaDesktop;
     request.accept_encoding = "identity";
     return request;
+  }
+
+  // A stylesheet request from a desktop browser that sends the given
+  // Accept-Encoding.  `Accept` carries */*, as a browser's stylesheet fetch
+  // does, so the stand-in classifies the image-format field as webp -- a
+  // field the arm ignores for a stylesheet.
+  DaemonServeRequest CssRequest(StringPiece accept_encoding) const {
+    DaemonServeRequest request;
+    request.url = kCssUrl;
+    request.hostname = kHost;
+    request.scheme = kScheme;
+    request.accept = "text/css,*/*;q=0.1";
+    request.user_agent = kUaDesktop;
+    request.accept_encoding = accept_encoding;
+    return request;
+  }
+
+  // A stylesheet family as the worker writes it: the identity copy (0x08),
+  // its gzip (0x48) and brotli (0x88) siblings -- same capability vector,
+  // the coding in bits 6-7 -- and the durable original (0x0c).  The
+  // stand-in's bodies are 16 + id bytes: 24, 88 and 152.
+  void UseStylesheetFamily() {
+    setenv("PS_STUB_READ_CONTENT_TYPE", "1", 1);  // kPsContentCss
+    setenv("PS_STUB_ORIGIN_CT", "text/css", 1);
+    SetAlternates("08:00:1,48:00:1,88:00:1,0c:00:0");
   }
 
   // The rig's own sniff, reproduced here so a case can assert the PAIR --
@@ -214,6 +247,44 @@ class DaemonServeArmTest : public testing::Test {
     return (*reader)->Serve(request, 1100 /* now_seconds */);
   }
 
+  // The same call through a reader whose switch for the stored compressed
+  // copies is ON, as a seam sets it from its port's directive.
+  DaemonServeDecision ServeEncoded(const DaemonServeRequest& request) {
+    DaemonServeReader reader(abi_.get(), cache_);
+    reader.set_serve_stored_encodings(true);
+    return reader.Serve(request, 1100 /* now_seconds */);
+  }
+
+  // A stylesheet entry as it looks after its optimized copy went missing, or
+  // after the optimizer judged it already minimal -- the two have the same
+  // alternates: the gzip (0x48) and brotli (0x88) copies and the durable
+  // original (0x0c), no identity copy (0x08).  What tells them apart is what
+  // the gzip copy says it compresses (`gzip_isize`) against the original's
+  // length the optimizer recorded (`origin_length`).
+  void UseStylesheetWithoutAnIdentityCopy(const char* origin_length,
+                                          const char* gzip_isize) {
+    setenv("PS_STUB_READ_CONTENT_TYPE", "1", 1);  // kPsContentCss
+    setenv("PS_STUB_ORIGIN_CT", "text/css", 1);
+    SetAlternates("48:00:1,88:00:1,0c:00:0");
+    setenv("PS_STUB_ORIGIN_CONTENT_LENGTH", origin_length, 1);
+    setenv("PS_STUB_GZIP_ISIZE", gzip_isize, 1);
+  }
+
+  // The serve a port that opted in performs: the reader is given a limiter.
+  DaemonServeDecision ServeWithLimiter(const DaemonServeRequest& request,
+                                       DaemonHealNotifyLimiter* limiter,
+                                       int64 now_seconds = 1100) {
+    DaemonServeReader reader(abi_.get(), cache_);
+    reader.set_heal_notify_limiter(limiter);
+    return reader.Serve(request, now_seconds);
+  }
+
+  // How often the stand-in handed back the gzip copy (id 0x48 = 72): the
+  // probe's read, and nothing else in these cases, selects it.
+  int GzipCopyReads() const {
+    return CountSubstring(CallLog(), "selected=72 ");
+  }
+
   // The re-notify the Apache seam issues after a served fallback hit, with
   // this fixture's valid option context.  Everything the stand-in was asked
   // is in the call log, so the cases assert on sends rather than on returns
@@ -228,10 +299,9 @@ class DaemonServeArmTest : public testing::Test {
   bool RenotifyCounted(const DaemonServeRequest& request,
                        const DaemonServeDecision& decision, Variable* notified,
                        Variable* notify_failed) {
-    return DaemonServeFallbackRenotify(*abi_, "/tmp/ps-worker.sock", request,
-                                       decision, default_context_,
-                                       default_signature_, notified,
-                                       notify_failed);
+    return DaemonServeFallbackRenotify(
+        *abi_, "/tmp/ps-worker.sock", request, decision, default_context_,
+        default_signature_, notified, notify_failed);
   }
 
   // The origin-refreshed sentinel the Apache seam issues on an age-expired
@@ -280,6 +350,49 @@ TEST_F(DaemonServeArmTest, OnlyIdentityEncodingIsServable) {
   EXPECT_TRUE(ServeEncodingIsServable(kMaskOriginalDesktop));
   EXPECT_FALSE(ServeEncodingIsServable(kMaskOriginalDesktop | 0x40));  // gzip
   EXPECT_FALSE(ServeEncodingIsServable(kMaskOriginalDesktop | 0x80));  // br
+}
+
+// ServeVaryFieldValueOnBothLegs, the composition for a port whose
+// compressor's eligibility cannot be read from the arm.  Every case asserts
+// the same value on the 200 and the 304 leg: that the two legs can never
+// disagree is the whole point of the function.
+TEST_F(DaemonServeArmTest, BothLegsVaryIsTheFullSetForACompressibleType) {
+  DaemonServeDecision decision;
+  decision.emit_vary_accept = true;
+  decision.not_modified = false;
+  EXPECT_EQ("Accept, Accept-Encoding",
+            ServeVaryFieldValueOnBothLegs(decision, true));
+  decision.not_modified = true;
+  EXPECT_EQ("Accept, Accept-Encoding",
+            ServeVaryFieldValueOnBothLegs(decision, true));
+}
+
+TEST_F(DaemonServeArmTest, BothLegsVaryIsTheEncodingAloneWithoutTheAcceptAxis) {
+  DaemonServeDecision decision;
+  decision.emit_vary_accept = false;
+  decision.not_modified = false;
+  EXPECT_EQ("Accept-Encoding", ServeVaryFieldValueOnBothLegs(decision, true));
+  decision.not_modified = true;
+  EXPECT_EQ("Accept-Encoding", ServeVaryFieldValueOnBothLegs(decision, true));
+}
+
+TEST_F(DaemonServeArmTest,
+       BothLegsVaryIsTheAcceptAxisAloneForAnUncompressible) {
+  DaemonServeDecision decision;
+  decision.emit_vary_accept = true;
+  decision.not_modified = false;
+  EXPECT_EQ("Accept", ServeVaryFieldValueOnBothLegs(decision, false));
+  decision.not_modified = true;
+  EXPECT_EQ("Accept", ServeVaryFieldValueOnBothLegs(decision, false));
+}
+
+TEST_F(DaemonServeArmTest, BothLegsVaryIsEmptyWhenNeitherAxisApplies) {
+  DaemonServeDecision decision;
+  decision.emit_vary_accept = false;
+  decision.not_modified = false;
+  EXPECT_EQ("", ServeVaryFieldValueOnBothLegs(decision, false));
+  decision.not_modified = true;
+  EXPECT_EQ("", ServeVaryFieldValueOnBothLegs(decision, false));
 }
 
 TEST_F(DaemonServeArmTest, MaskHelpersMatchThePeersLayout) {
@@ -941,7 +1054,8 @@ TEST_F(DaemonServeArmTest, TheMediaTypeAndTheServedBytesAgree) {
   EXPECT_EQ("image/webp", webp.content_type);
 }
 
-TEST_F(DaemonServeArmTest, AConvertedSlotHoldingUnconvertedBytesIsNotRelabelled) {
+TEST_F(DaemonServeArmTest,
+       AConvertedSlotHoldingUnconvertedBytesIsNotRelabelled) {
   // THE CASE THAT MAKES THE MASK THE WRONG SOURCE, and it is not
   // hypothetical: seven corpus units are exactly this.  The peer fills a
   // CONVERTED-format slot with the ORIGINAL bytes when the conversion does
@@ -1099,11 +1213,11 @@ TEST_F(DaemonServeArmTest, TheCompressorFloorIsTheCompressorsOwnArithmetic) {
   // about 68 and 69 rather than about whatever the constant happens to say.
   const GoogleString at_the_floor(68, 'a');
   const GoogleString over_the_floor(69, 'a');
-  EXPECT_EQ("", ServeVaryFieldValue(VaryDecision(false, true, at_the_floor),
-                                    true));
-  EXPECT_EQ("Accept-Encoding",
-            ServeVaryFieldValue(VaryDecision(false, true, over_the_floor),
-                                true));
+  EXPECT_EQ("",
+            ServeVaryFieldValue(VaryDecision(false, true, at_the_floor), true));
+  EXPECT_EQ(
+      "Accept-Encoding",
+      ServeVaryFieldValue(VaryDecision(false, true, over_the_floor), true));
 }
 
 TEST_F(DaemonServeArmTest, TheCompressorIsAskedAboutTheTypeGoingOut) {
@@ -1498,6 +1612,75 @@ TEST_F(DaemonServeArmTest, AServeHitIsNotRecordedWhileTheFileIsAbsent) {
   EXPECT_EQ(GoogleString::npos, CallLog().find("serve_hit"));
 }
 
+TEST_F(DaemonServeArmTest, AServeHitCarriesItsHostWhenTheOptimizerTakesOne) {
+  DaemonServeStats stats(abi_.get(), "/run/parity/cache");
+  stats.RecordHit(kPsContentImage, 4096, 1024, kMaskWebpDesktop,
+                  "www.example.test");
+  const GoogleString log = CallLog();
+  EXPECT_NE(GoogleString::npos,
+            log.find("serve_hit_host type=3 original=4096 optimized=1024 "
+                     "mask=9 host=www.example.test"));
+  // One record per serve: the host-less recorder is not called as well.
+  EXPECT_EQ(GoogleString::npos, log.find("serve_hit type=3"));
+}
+
+TEST_F(DaemonServeArmTest, AServeHitWithoutAHostUsesTheHostlessRecorder) {
+  DaemonServeStats stats(abi_.get(), "/run/parity/cache");
+  stats.RecordHit(kPsContentImage, 4096, 1024, kMaskWebpDesktop, "");
+  const GoogleString log = CallLog();
+  EXPECT_NE(GoogleString::npos,
+            log.find("serve_hit type=3 original=4096 optimized=1024 mask=9"));
+  EXPECT_EQ(GoogleString::npos, log.find("serve_hit_host"));
+}
+
+TEST_F(DaemonServeArmTest, AnOptimizerWithoutTheHostRecorderStillRecordsTheHit) {
+  // An optimizer package from before per-host serve savings: the entry point
+  // is absent, the library still loads, and the hit is recorded as before.
+  GoogleString error;
+  std::unique_ptr<DaemonAbi> older(LoadDaemonAbi(
+      StrCat(GTestSrcDir(),
+             "/test/pagespeed/system/libdaemon_stub_no_generation.so"),
+      &error));
+  ASSERT_TRUE(older != nullptr) << error;
+  DaemonServeStats stats(older.get(), "/run/parity/cache");
+  stats.RecordHit(kPsContentImage, 4096, 1024, kMaskWebpDesktop,
+                  "www.example.test");
+  const GoogleString log = CallLog();
+  EXPECT_NE(GoogleString::npos,
+            log.find("serve_hit type=3 original=4096 optimized=1024 mask=9"));
+  EXPECT_EQ(GoogleString::npos, log.find("serve_hit_host"));
+}
+
+TEST_F(DaemonServeArmTest, EveryServedContentClassIsRecordedAsItself) {
+  // Every served class is recorded as itself: an optimized, worker-produced
+  // entry of ANY class is served, and its hit is recorded under the entry's
+  // own class -- nothing here filters by class or declares one
+  // "not applicable".  Pinned for the four classes the optimizer reports,
+  // through the same decision fields every port hands the recorder.
+  setenv("PS_STUB_ORIGIN_CONTENT_LENGTH", "4096", 1);
+  SetAlternates("08:00:1,0c:00:0");
+  DaemonServeStats stats(abi_.get(), "/run/parity/cache");
+  const int kClasses[] = {kPsContentHtml, kPsContentCss, kPsContentJs,
+                          kPsContentImage};
+  for (const int content_class : kClasses) {
+    SCOPED_TRACE(content_class);
+    setenv("PS_STUB_READ_CONTENT_TYPE", IntegerToString(content_class).c_str(),
+           1);
+    const DaemonServeDecision decision = Serve(Request("*/*"));
+    ASSERT_EQ(DaemonServeVerdict::kServeOptimized, decision.verdict);
+    EXPECT_EQ(kPsServeClassOptimized, decision.serve_class);
+    EXPECT_TRUE(decision.worker_processed);
+    EXPECT_EQ(4096u, decision.origin_content_length);
+    EXPECT_EQ(content_class, decision.ps_content_type);
+    stats.RecordHit(decision.ps_content_type, decision.origin_content_length,
+                    decision.body.size(), decision.stored_mask);
+    EXPECT_NE(GoogleString::npos,
+              CallLog().find(StrCat("serve_hit type=",
+                                    IntegerToString(content_class),
+                                    " original=4096")));
+  }
+}
+
 // ---------------------------------------------------------------------------
 // The fallback re-notify.  A fallback hit is SERVED, and a serve records
 // nothing -- so the serve itself is the only signal that can ask the worker
@@ -1577,6 +1760,90 @@ TEST_F(DaemonServeArmTest, AnExactMatchServeDoesNotRenotify) {
   EXPECT_EQ(before, NotifyCount());
 }
 
+TEST_F(DaemonServeArmTest, AStylesheetServeIsNotAFallbackForTheFormatAxis) {
+  // A stylesheet variant is stored with the image-format field at original,
+  // because format is meaningless for it, while a browser's selection mask
+  // carries an image format.  Comparing that field for non-image content
+  // would class every stylesheet serve as a permanent mismatch and re-notify
+  // the worker for ever; the encoding axis was normalized away for exactly
+  // this reason, and the format axis for a stylesheet is the same non-fact.
+  // So the fallback comparison excludes the image-format field when the
+  // served entry is not an image.
+  setenv("PS_STUB_READ_CONTENT_TYPE", "1", 1);  // kPsContentCss
+  SetAlternates("08:00:1,0c:00:0");
+
+  // A webp client and an avif client: both differ from the stored original
+  // format alone, and neither is a fallback.
+  for (const char* accept : {"image/webp,*/*", "image/avif,image/webp,*/*"}) {
+    const DaemonServeRequest request = Request(accept);
+    const DaemonServeDecision decision = Serve(request);
+    ASSERT_EQ(DaemonServeVerdict::kServeOptimized, decision.verdict);
+    // Stated so the case is visibly discriminating: the stored and
+    // selection masks differ, on the format field, and that difference is
+    // not a fallback for a stylesheet.
+    ASSERT_NE(decision.stored_mask, decision.selection_mask);
+    EXPECT_FALSE(decision.fallback_hit) << accept;
+
+    SimpleStats stats(thread_system_.get());
+    Variable* notified = stats.AddVariable("ipro_daemon_fallback_notified");
+    Variable* failed = stats.AddVariable("ipro_daemon_fallback_notify_failed");
+    const int before = NotifyCount();
+    EXPECT_FALSE(RenotifyCounted(request, decision, notified, failed));
+    EXPECT_EQ(before, NotifyCount()) << accept;
+    EXPECT_EQ(0, notified->Get()) << accept;
+    EXPECT_EQ(0, failed->Get()) << accept;
+  }
+}
+
+TEST_F(DaemonServeArmTest, AScriptServeIsNotAFallbackForTheFormatAxis) {
+  // The same rule for a script: the stored variant's format field is
+  // original, the client's carries webp, and that alone is not a fallback.
+  setenv("PS_STUB_READ_CONTENT_TYPE", "2", 1);  // kPsContentJs
+  SetAlternates("08:00:1,0c:00:0");
+  const DaemonServeRequest request = Request("image/webp,*/*");
+  const DaemonServeDecision decision = Serve(request);
+  ASSERT_EQ(DaemonServeVerdict::kServeOptimized, decision.verdict);
+  ASSERT_NE(decision.stored_mask, decision.selection_mask);
+  EXPECT_FALSE(decision.fallback_hit);
+
+  const int before = NotifyCount();
+  EXPECT_FALSE(Renotify(request, decision));
+  EXPECT_EQ(before, NotifyCount());
+}
+
+TEST_F(DaemonServeArmTest,
+       AStylesheetFallbackOnTheSaveDataAxisStillRenotifies) {
+  // THE OTHER AXES ARE STILL IN THE COMPARISON, for a stylesheet exactly as
+  // for an image: the convergence the re-notify exists for is viewport,
+  // density and Save-Data.  The stored variant is a stylesheet's own shape
+  // -- original format -- WITH Save-Data (0x28), and this client sent none
+  // (0x09): with the format field out of the comparison the ONLY difference
+  // left is Save-Data, so this case fails if the comparison ever drops that
+  // axis too.  The serve IS a fallback and one re-notify goes out.
+  setenv("PS_STUB_READ_CONTENT_TYPE", "1", 1);  // kPsContentCss
+  SetAlternates("28:00:1,0c:00:0");
+  const DaemonServeRequest request = Request("image/webp");
+  const DaemonServeDecision decision = Serve(request);
+  ASSERT_EQ(DaemonServeVerdict::kServeOptimized, decision.verdict);
+  EXPECT_EQ(0x28, decision.alternate_id);
+  EXPECT_TRUE(decision.fallback_hit);
+  EXPECT_EQ(0x09u, decision.client_mask);
+
+  SimpleStats stats(thread_system_.get());
+  Variable* notified = stats.AddVariable("ipro_daemon_fallback_notified");
+  Variable* failed = stats.AddVariable("ipro_daemon_fallback_notify_failed");
+  const int before = NotifyCount();
+  EXPECT_TRUE(RenotifyCounted(request, decision, notified, failed));
+  EXPECT_EQ(before + 1, NotifyCount());
+  EXPECT_EQ(1, notified->Get());
+  EXPECT_EQ(0, failed->Get());
+}
+
+// The image half of the rule -- a stored original-format IMAGE served to a
+// webp client IS a fallback and re-notifies -- is already pinned by
+// AnOriginalFormatFallbackRenotifiesForTheClientsFormat below, whose content
+// class is the stub's image default; this change must not disturb it.
+
 TEST_F(DaemonServeArmTest, TheEncodingAxisIsNotAFallback) {
   // THE COMPARISON IS AGAINST THE SELECTION MASK, and this case is what pins
   // it.  A real browser advertises brotli, so the classifier's answer (0x89)
@@ -1617,7 +1884,8 @@ TEST_F(DaemonServeArmTest, TheRenotifySendsTheRawClientMask) {
   ASSERT_EQ(0x89u, decision.client_mask);
 
   EXPECT_TRUE(Renotify(request, decision));
-  EXPECT_NE(GoogleString::npos, CallLog().find("content_type=3 mask=137 "));  // 0x89
+  EXPECT_NE(GoogleString::npos,
+            CallLog().find("content_type=3 mask=137 "));  // 0x89
 }
 
 TEST_F(DaemonServeArmTest, TheZeroFourGateSuppressesTheRenotify) {
@@ -1651,9 +1919,9 @@ TEST_F(DaemonServeArmTest, AnUnnameableContextSkipsTheNotify) {
   ASSERT_TRUE(decision.fallback_hit);
 
   const int before = NotifyCount();
-  EXPECT_FALSE(DaemonServeFallbackRenotify(
-      *abi_, "/tmp/ps-worker.sock", request, decision, StringPiece(),
-      StringPiece(), nullptr, nullptr));
+  EXPECT_FALSE(DaemonServeFallbackRenotify(*abi_, "/tmp/ps-worker.sock",
+                                           request, decision, StringPiece(),
+                                           StringPiece(), nullptr, nullptr));
   EXPECT_EQ(before, NotifyCount());
 }
 
@@ -1906,6 +2174,1130 @@ TEST_F(DaemonServeArmTest, ConcurrentServeProbesStayIndependent) {
             CountSubstring(CallLog(), "serve_class class=1"));
 }
 
+// --- per-class split helpers -------------------------------------------------
+
+TEST_F(DaemonServeArmTest, TheServedClassSplitMovesOnlyKnownClasses) {
+  SimpleStats stats(thread_system_.get());
+  RewriteStats::InitStats(&stats);
+  RewriteStats rewrite_stats(false, &stats, thread_system_.get(), nullptr);
+
+  RecordDaemonServedClass(&rewrite_stats, kPsContentCss);
+  RecordDaemonServedClass(&rewrite_stats, kPsContentImage);
+  RecordDaemonServedClass(&rewrite_stats, kPsContentOther);
+  // html has no split counter; the caller's total covers it.
+  RecordDaemonServedClass(&rewrite_stats, kPsContentHtml);
+  // A null stats pointer (a seam without shared statistics) is a no-op.
+  RecordDaemonServedClass(nullptr, kPsContentCss);
+
+  EXPECT_EQ(1, stats.GetVariable("ipro_daemon_served_css")->Get());
+  EXPECT_EQ(0, stats.GetVariable("ipro_daemon_served_js")->Get());
+  EXPECT_EQ(1, stats.GetVariable("ipro_daemon_served_image")->Get());
+  EXPECT_EQ(1, stats.GetVariable("ipro_daemon_served_other")->Get());
+  EXPECT_EQ(0, stats.GetVariable("ipro_daemon_fallthrough_css")->Get());
+}
+
+// ---------------------------------------------------------------------------
+// Today's serve for a client that accepts compression, pinned BEFORE the
+// stored compressed copies became servable.  A reader that is not told
+// otherwise must keep producing exactly this -- the selection, the reads it
+// takes, the bytes, the validator, the freshness and the `Vary` of both
+// legs -- whatever the client's Accept-Encoding says.  This is the property
+// the directive's default rests on, and its rollback.
+// ---------------------------------------------------------------------------
+
+TEST_F(DaemonServeArmTest, ACompressionCapableClientGetsTodaysIdentityServe) {
+  UseStylesheetFamily();
+  for (const char* accept_encoding :
+       {"gzip, deflate, br", "br", "gzip", "identity", ""}) {
+    SCOPED_TRACE(accept_encoding);
+    remove(log_path_.c_str());
+    const DaemonServeDecision decision = Serve(CssRequest(accept_encoding));
+    EXPECT_EQ(DaemonServeVerdict::kServeOptimized, decision.verdict);
+    EXPECT_STREQ(daemon_serve_reason::kOptimizedVariant, decision.reason);
+    EXPECT_EQ(kPsServeClassOptimized, decision.serve_class);
+    // The read is taken at identity whatever was advertised...
+    EXPECT_EQ(0x09u, decision.selection_mask);
+    // ...so the identity copy is what is served, never a sibling.
+    EXPECT_EQ(0x08, decision.alternate_id);
+    EXPECT_EQ(0x08u, decision.stored_mask);
+    EXPECT_EQ(24u, decision.body.size());
+    EXPECT_EQ("text/css", decision.content_type);
+    EXPECT_EQ("W/\"ps-0000000800-0000000000000018\"", decision.etag);
+    EXPECT_EQ("must-revalidate, max-age=600", decision.cache_control);
+    EXPECT_EQ(100u, decision.age_seconds);
+    EXPECT_FALSE(decision.not_modified);
+    EXPECT_FALSE(decision.fallback_hit);
+    EXPECT_FALSE(decision.emit_vary_accept);
+    // Apache's per-leg composition says nothing on the 200 (the compressor
+    // states the axis there); nginx's both-legs one states it.
+    EXPECT_EQ("", ServeVaryFieldValue(decision, true));
+    EXPECT_EQ("Accept-Encoding", ServeVaryFieldValueOnBothLegs(decision, true));
+    // The exact reads: the rule-6 probe of the original, then one selection
+    // at the identity mask.  No by-id read of a coded sibling.
+    EXPECT_EQ(
+        "read_alternate url=/a/site.css id=12\n"
+        "read_best url=/a/site.css mask=9 selected=8 score=300\n",
+        CallLog());
+  }
+
+  // And the revalidation of that copy, by the same client.
+  DaemonServeRequest conditional = CssRequest("gzip, deflate, br");
+  conditional.if_none_match = "W/\"ps-0000000800-0000000000000018\"";
+  const DaemonServeDecision revalidated = Serve(conditional);
+  EXPECT_TRUE(revalidated.not_modified);
+  EXPECT_EQ(0x08, revalidated.alternate_id);
+  // 24 bytes is under the compressor's pass-through floor, so the 304 leg
+  // states no encoding axis on Apache, and the both-legs one still does.
+  EXPECT_EQ("", ServeVaryFieldValue(revalidated, true));
+  EXPECT_EQ("Accept-Encoding",
+            ServeVaryFieldValueOnBothLegs(revalidated, true));
+}
+
+// ---------------------------------------------------------------------------
+// The stored compressed copies.  The optimizer writes a gzip and a brotli
+// sibling next to each optimized stylesheet, script and SVG image; a reader
+// whose switch is on may hand one out, to a client that listed that coding,
+// labelled with the coding read off the entry.
+// ---------------------------------------------------------------------------
+
+TEST_F(DaemonServeArmTest, TheCodingIsReadOffTheStoredMask) {
+  EXPECT_EQ(1u, kPsTransferEncodingGzip);
+  EXPECT_EQ(2u, kPsTransferEncodingBrotli);
+  EXPECT_EQ("", ServeContentEncodingToken(0x08));
+  EXPECT_EQ("gzip", ServeContentEncodingToken(0x48));
+  EXPECT_EQ("br", ServeContentEncodingToken(0x88));
+  // Only bits 6-7 count; every other axis is irrelevant to the label.
+  EXPECT_EQ("br", ServeContentEncodingToken(0xBB));
+  EXPECT_EQ("gzip", ServeContentEncodingToken(0x7F));
+  // The reserved value names no coding.
+  EXPECT_EQ("", ServeContentEncodingToken(0xC8));
+}
+
+TEST_F(DaemonServeArmTest, OnlyACodingListedByNameWithAWeightCounts) {
+  struct {
+    const char* header;
+    const char* coding;
+    bool advertised;
+  } cases[] = {
+      {"gzip, deflate, br", "br", true},
+      {"gzip, deflate, br", "gzip", true},
+      {"gzip, deflate, br, zstd", "br", true},
+      {"BR", "br", true},
+      {"Gzip", "gzip", true},
+      {" br ; q=0.5 ", "br", true},
+      {"br;q=1", "br", true},
+      {"br;Q=1.000", "br", true},
+      {"br;q=0.001", "br", true},
+      {"gzip;q=0.8, br;q=0.9", "gzip", true},
+      {"br;level=5", "br", true},
+      {"", "br", false},
+      {"identity", "br", false},
+      {"gzip", "br", false},
+      {"br;q=0", "br", false},
+      {"br;q=0.0", "br", false},
+      {"br;q=0.000", "br", false},
+      {"br;q=0;level=5", "br", false},
+      {"br;q=00", "br", false},
+      {"br;q=1.5", "br", false},
+      {"br;q=0.0001", "br", false},
+      {"br;q=", "br", false},
+      {"br;q=-1", "br", false},
+      {"br;q= 1", "br", false},
+      {"br;q =0", "br", false},
+      {"br;q =1", "br", false},
+      {"br; Q =0", "br", false},
+      {"br; Q =1", "br", false},
+      {"br;q\t=0", "br", false},
+      {"br;q", "br", false},
+      {"br; q ", "br", false},
+      {"br;q=abc", "br", false},
+      {"br;q=1x", "br", false},
+      {"br, br;q=0", "br", false},
+      {"*", "br", false},
+      {"*;q=1", "gzip", false},
+      {"x-brotli", "br", false},
+      {"brotli", "br", false},
+      {"x-gzip", "gzip", false},
+      {"gzip", "", false},
+  };
+  for (const auto& c : cases) {
+    EXPECT_EQ(c.advertised,
+              ServeAcceptEncodingAdvertises(c.header, c.coding))
+        << "Accept-Encoding: \"" << c.header << "\", coding \"" << c.coding
+        << "\"";
+  }
+}
+
+TEST_F(DaemonServeArmTest,
+       TheSelectionKeepsTheClientsCodingOnlyWhenOnAndListed) {
+  // Off: identity whatever the client said -- today's selection.
+  EXPECT_EQ(0x09u, ServeSelectionMask(0x89, "gzip, deflate, br", false));
+  EXPECT_EQ(0x09u, ServeSelectionMask(0x49, "gzip", false));
+  // On: the classifier's coding, when the header lists it plainly.
+  EXPECT_EQ(0x89u, ServeSelectionMask(0x89, "gzip, deflate, br", true));
+  EXPECT_EQ(0x49u, ServeSelectionMask(0x49, "gzip", true));
+  EXPECT_EQ(0x09u, ServeSelectionMask(0x09, "identity", true));
+  // On, and the classifier answered a coding the header does not plainly
+  // list: identity.  A classifier that reads `br;q=0;level=5` or `*` as
+  // brotli does not get to decide what this module labels.
+  EXPECT_EQ(0x09u, ServeSelectionMask(0x89, "br;q=0;level=5", true));
+  EXPECT_EQ(0x09u, ServeSelectionMask(0x89, "*", true));
+  EXPECT_EQ(0x09u, ServeSelectionMask(0x89, "gzip", true));
+  EXPECT_EQ(0x09u, ServeSelectionMask(0x49, "br", true));
+  // The reserved coding is never kept.
+  EXPECT_EQ(0x09u, ServeSelectionMask(0xC9, "gzip, br", true));
+  // Every other axis is the classifier's, untouched, either way.
+  EXPECT_EQ(0xBAu, ServeSelectionMask(0xBA, "br", true));
+  EXPECT_EQ(0x3Au, ServeSelectionMask(0xBA, "br", false));
+}
+
+TEST_F(DaemonServeArmTest,
+       ACodedCopyIsServableOnlyWhenOnListedAndForItsClasses) {
+  // Identity is servable to everyone, switch or not -- the floor.
+  EXPECT_TRUE(ServeEncodingIsServable(0x08, 0x09, kPsContentCss, false));
+  EXPECT_TRUE(ServeEncodingIsServable(0x08, 0x89, kPsContentHtml, true));
+  // Off: no coded copy, for anyone.
+  EXPECT_FALSE(ServeEncodingIsServable(0x88, 0x89, kPsContentCss, false));
+  // On: exactly the coding the selection kept, for a stylesheet, a script
+  // or an image -- an image only from the original-format slot, where an
+  // SVG URL's coded copies sit.
+  EXPECT_TRUE(ServeEncodingIsServable(0x88, 0x89, kPsContentCss, true));
+  EXPECT_TRUE(ServeEncodingIsServable(0x48, 0x49, kPsContentJs, true));
+  EXPECT_TRUE(ServeEncodingIsServable(0x88, 0x89, kPsContentImage, true));
+  // A coded image in a converted-format slot (WebP, AVIF, kSvg): never.
+  // The served media type is corrected by sniffing the body, which cannot
+  // see through a content coding.
+  EXPECT_FALSE(ServeEncodingIsServable(0x89, 0x89, kPsContentImage, true));
+  EXPECT_FALSE(ServeEncodingIsServable(0x8A, 0x8A, kPsContentImage, true));
+  EXPECT_FALSE(ServeEncodingIsServable(0x8B, 0x89, kPsContentImage, true));
+  // The slot rule is the image class's alone.
+  EXPECT_TRUE(ServeEncodingIsServable(0x89, 0x89, kPsContentCss, true));
+  // Any other coding: never.
+  EXPECT_FALSE(ServeEncodingIsServable(0x48, 0x89, kPsContentCss, true));
+  EXPECT_FALSE(ServeEncodingIsServable(0x88, 0x49, kPsContentCss, true));
+  EXPECT_FALSE(ServeEncodingIsServable(0x88, 0x09, kPsContentCss, true));
+  // HTML and unclassified content stay uncoded.
+  EXPECT_FALSE(ServeEncodingIsServable(0x88, 0x89, kPsContentHtml, true));
+  EXPECT_FALSE(ServeEncodingIsServable(0x88, 0x89, kPsContentOther, true));
+  // The reserved coding is never servable.
+  EXPECT_FALSE(ServeEncodingIsServable(0xC8, 0xC9, kPsContentCss, true));
+  EXPECT_TRUE(ServeEncodedContentClass(kPsContentCss));
+  EXPECT_TRUE(ServeEncodedContentClass(kPsContentJs));
+  EXPECT_TRUE(ServeEncodedContentClass(kPsContentImage));
+  EXPECT_FALSE(ServeEncodedContentClass(kPsContentHtml));
+  EXPECT_FALSE(ServeEncodedContentClass(kPsContentOther));
+  EXPECT_FALSE(ServeEncodedContentClass(99));
+}
+
+TEST_F(DaemonServeArmTest, OnABrotliClientGetsTheStoredBrotliCopy) {
+  UseStylesheetFamily();
+  const DaemonServeRequest request = CssRequest("gzip, deflate, br");
+  const DaemonServeDecision decision = ServeEncoded(request);
+  ASSERT_EQ(DaemonServeVerdict::kServeOptimized, decision.verdict);
+  EXPECT_EQ(kPsServeClassOptimized, decision.serve_class);
+  EXPECT_EQ(0x89u, decision.selection_mask);
+  EXPECT_EQ(0x88, decision.alternate_id);
+  EXPECT_EQ(0x88u, decision.stored_mask);
+  EXPECT_EQ("br", decision.content_encoding);
+  EXPECT_EQ(152u, decision.body.size());
+  // The client's own mask is the classifier's answer, unmoved by the switch.
+  const DaemonServeDecision off = Serve(request);
+  EXPECT_EQ(off.client_mask, decision.client_mask);
+  // A served coded copy is exact on every axis that matters: no re-notify.
+  EXPECT_FALSE(decision.fallback_hit);
+  // The validator is per coding: the brotli copy's own capability field,
+  // and never the suffix the server's compressor appends to tags of the
+  // responses it compresses.
+  EXPECT_EQ("W/\"ps-0000008800-0000000000000098\"", decision.etag);
+  EXPECT_NE(off.etag, decision.etag);
+  EXPECT_FALSE(strings::EndsWith(decision.etag, "-gzip\""));
+}
+
+TEST_F(DaemonServeArmTest, OnAGzipOnlyClientGetsTheStoredGzipCopy) {
+  UseStylesheetFamily();
+  const DaemonServeDecision decision = ServeEncoded(CssRequest("gzip"));
+  ASSERT_EQ(DaemonServeVerdict::kServeOptimized, decision.verdict);
+  EXPECT_EQ(0x48, decision.alternate_id);
+  EXPECT_EQ("gzip", decision.content_encoding);
+  EXPECT_EQ(88u, decision.body.size());
+  EXPECT_EQ("W/\"ps-0000004800-0000000000000058\"", decision.etag);
+}
+
+TEST_F(DaemonServeArmTest, OnWithoutACodedCopyTheIdentityCopyIsServedAsToday) {
+  setenv("PS_STUB_READ_CONTENT_TYPE", "1", 1);  // kPsContentCss
+  setenv("PS_STUB_ORIGIN_CT", "text/css", 1);
+  SetAlternates("08:00:1,0c:00:0");
+  const DaemonServeRequest request = CssRequest("gzip, deflate, br");
+  const DaemonServeDecision decision = ServeEncoded(request);
+  ASSERT_EQ(DaemonServeVerdict::kServeOptimized, decision.verdict);
+  EXPECT_EQ(0x08, decision.alternate_id);
+  EXPECT_TRUE(decision.content_encoding.empty());
+  EXPECT_EQ("W/\"ps-0000000800-0000000000000018\"", decision.etag);
+  // NOT a fallback.  The selection kept brotli and the stored copy is
+  // identity, but the worker writes the coded siblings of every variant
+  // itself: asking it for one on every request would be permanent traffic
+  // for nothing.
+  EXPECT_NE(decision.stored_mask, decision.selection_mask);
+  EXPECT_FALSE(decision.fallback_hit);
+  const int before = NotifyCount();
+  EXPECT_FALSE(Renotify(request, decision));
+  EXPECT_EQ(before, NotifyCount());
+}
+
+TEST_F(DaemonServeArmTest, AClientThatDidNotListTheCodingIsNeverServedIt) {
+  UseStylesheetFamily();
+  // The stand-in's classifier finds `br` by substring, so it answers
+  // brotli for every one of these -- and none of them lists `br` by name
+  // with a weight above zero.  The coding on the wire is never the
+  // classifier's call alone.
+  for (const char* accept_encoding :
+       {"br;q=0", "br;q=0;level=5", "br;q=00", "br;q=0.0001", "x-brotli",
+        "brotli, gzip;q=0"}) {
+    SCOPED_TRACE(accept_encoding);
+    const DaemonServeDecision decision =
+        ServeEncoded(CssRequest(accept_encoding));
+    ASSERT_EQ(DaemonServeVerdict::kServeOptimized, decision.verdict);
+    ASSERT_EQ(kPsTransferEncodingBrotli,
+              ServeTransferEncoding(decision.client_mask));
+    EXPECT_EQ(kPsTransferEncodingIdentity,
+              ServeTransferEncoding(decision.selection_mask));
+    EXPECT_EQ(0x08, decision.alternate_id);
+    EXPECT_TRUE(decision.content_encoding.empty());
+  }
+}
+
+TEST_F(DaemonServeArmTest, AReaderServesUncodedCopiesUnlessTold) {
+  UseStylesheetFamily();
+  const DaemonServeDecision off = Serve(CssRequest("gzip, deflate, br"));
+  EXPECT_EQ(0x08, off.alternate_id);
+  EXPECT_TRUE(off.content_encoding.empty());
+  // The durable original is origin bytes: never labelled, switch or not.
+  SetAlternates("0c:00:0");
+  const DaemonServeDecision original = ServeEncoded(CssRequest("br"));
+  ASSERT_EQ(DaemonServeVerdict::kServeOriginal, original.verdict);
+  EXPECT_TRUE(original.content_encoding.empty());
+}
+
+TEST_F(DaemonServeArmTest, AnHtmlEntryIsServedUncodedEvenWhenOn) {
+  setenv("PS_STUB_READ_CONTENT_TYPE", "0", 1);  // kPsContentHtml
+  setenv("PS_STUB_ORIGIN_CT", "text/html", 1);
+  SetAlternates("08:00:1,88:00:1,0c:00:0");
+  DaemonServeRequest request = CssRequest("gzip, deflate, br");
+  request.url = "/a/page.html";
+  request.accept = "text/html";
+  const DaemonServeDecision decision = ServeEncoded(request);
+  ASSERT_EQ(DaemonServeVerdict::kServeOptimized, decision.verdict);
+  EXPECT_EQ(0x08, decision.alternate_id);
+  EXPECT_TRUE(decision.content_encoding.empty());
+  // The peer did offer the brotli copy; the refusal is this arm's.
+  const GoogleString log = CallLog();
+  EXPECT_NE(GoogleString::npos, log.find("selected=136"));
+  // And the refusal costs ONE by-id read, the uncoded sibling's: no coded
+  // id is asked for again once the class refused it, and no id twice.
+  EXPECT_EQ(GoogleString::npos,
+            log.find("read_alternate url=/a/page.html id=136"));
+  const size_t uncoded = log.find("read_alternate url=/a/page.html id=8\n");
+  ASSERT_NE(GoogleString::npos, uncoded);
+  EXPECT_EQ(GoogleString::npos,
+            log.find("read_alternate url=/a/page.html id=8", uncoded + 1));
+}
+
+TEST_F(DaemonServeArmTest, TheByIdRetryStillReachesTheUncodedSiblingWhenOn) {
+  // The vectorized-URL regime with the switch on: a brotli SVG variant
+  // outranks everything and is refused on its format; the client's format
+  // exists only as the uncoded copy.  The retry asks for the client's
+  // coding first and then for identity, so the variant is still served
+  // rather than lost to the durable original.
+  SetAlternates("8b:00:1,09:00:1,0c:00:0");
+  DaemonServeRequest request = Request("image/webp");
+  request.accept_encoding = "gzip, deflate, br";
+  const DaemonServeDecision decision = ServeEncoded(request);
+  ASSERT_EQ(DaemonServeVerdict::kServeOptimized, decision.verdict);
+  EXPECT_EQ(0x09, decision.alternate_id);
+  EXPECT_TRUE(decision.content_encoding.empty());
+  const GoogleString log = CallLog();
+  EXPECT_NE(GoogleString::npos, log.find("selected=139"));
+  EXPECT_NE(GoogleString::npos,
+            log.find("read_alternate url=/a/photo.png id=137 miss"));
+  EXPECT_NE(GoogleString::npos,
+            log.find("read_alternate url=/a/photo.png id=136 miss"));
+  EXPECT_NE(GoogleString::npos,
+            log.find("read_alternate url=/a/photo.png id=9\n"));
+}
+
+TEST_F(DaemonServeArmTest, ACodedCopyInAConvertedFormatSlotIsNeverServed) {
+  // A brotli copy in the WebP slot outranks its uncoded sibling for a
+  // brotli client.  It is refused: the served media type is corrected by
+  // sniffing the body, which cannot see through a content coding, so WebP
+  // bytes would go out under the origin's image/png.  The uncoded WebP copy
+  // is served instead, unlabelled.
+  SetAlternates("89:00:1,09:00:1,0c:00:0");
+  DaemonServeRequest request = Request("image/webp");
+  request.accept_encoding = "gzip, deflate, br";
+  const DaemonServeDecision decision = ServeEncoded(request);
+  ASSERT_EQ(DaemonServeVerdict::kServeOptimized, decision.verdict);
+  EXPECT_EQ(0x09, decision.alternate_id);
+  EXPECT_EQ(0x09u, decision.stored_mask);
+  EXPECT_TRUE(decision.content_encoding.empty());
+  EXPECT_FALSE(decision.fallback_hit);
+  const GoogleString log = CallLog();
+  // The peer did offer the coded copy; the refusal is this arm's.
+  EXPECT_NE(GoogleString::npos, log.find("selected=137"));
+  EXPECT_NE(GoogleString::npos,
+            log.find("read_alternate url=/a/photo.png id=9\n"));
+}
+
+TEST_F(DaemonServeArmTest, ACodedServeVariesOnAcceptEncodingOnBothLegs) {
+  const GoogleString small(10, 'a');
+  const GoogleString big(kServeCompressorPassThroughBytes + 1, 'a');
+  // No compressor ever sees a coded body, so the arm is the only emitter of
+  // the encoding axis -- on the 200 and the 304 alike, whatever the length
+  // and whether or not the media type is one the server compresses.
+  DaemonServeDecision decision = VaryDecision(false, false, small);
+  decision.content_encoding = kServeContentEncodingBrotli;
+  EXPECT_EQ("Accept-Encoding", ServeVaryFieldValue(decision, false));
+  EXPECT_EQ("Accept-Encoding", ServeVaryFieldValue(decision, true));
+  decision.not_modified = true;
+  EXPECT_EQ("Accept-Encoding", ServeVaryFieldValue(decision, false));
+  decision.emit_vary_accept = true;
+  EXPECT_EQ("Accept, Accept-Encoding", ServeVaryFieldValue(decision, false));
+  EXPECT_EQ("Accept, Accept-Encoding",
+            ServeVaryFieldValueOnBothLegs(decision, false));
+  decision.not_modified = false;
+  EXPECT_EQ("Accept, Accept-Encoding",
+            ServeVaryFieldValueOnBothLegs(decision, false));
+  // Stated once, even where the compressor rule would state it as well.
+  DaemonServeDecision both = VaryDecision(false, true, big);
+  both.content_encoding = kServeContentEncodingGzip;
+  EXPECT_EQ("Accept-Encoding", ServeVaryFieldValue(both, true));
+  EXPECT_EQ("Accept-Encoding", ServeVaryFieldValueOnBothLegs(both, true));
+}
+
+TEST_F(DaemonServeArmTest, TheBrotliCopysTagRevalidatesOnlyTheBrotliCopy) {
+  UseStylesheetFamily();
+  const DaemonServeDecision first =
+      ServeEncoded(CssRequest("gzip, deflate, br"));
+  ASSERT_EQ("br", first.content_encoding);
+
+  DaemonServeRequest again = CssRequest("gzip, deflate, br");
+  again.if_none_match = first.etag;
+  const DaemonServeDecision revalidated = ServeEncoded(again);
+  EXPECT_TRUE(revalidated.not_modified);
+  EXPECT_EQ(kPsServeClassOptimized, revalidated.serve_class);
+  // The 304 knows which copy it revalidates, so its `Vary` is its 200's.
+  EXPECT_EQ("br", revalidated.content_encoding);
+  EXPECT_EQ("Accept-Encoding", ServeVaryFieldValue(revalidated, true));
+
+  // The same tag from a client that is now served the gzip copy names a
+  // different representation...
+  DaemonServeRequest gzip_only = CssRequest("gzip");
+  gzip_only.if_none_match = first.etag;
+  EXPECT_FALSE(ServeEncoded(gzip_only).not_modified);
+  // ...and so it does once the switch is off and the uncoded copy goes out.
+  DaemonServeRequest off = CssRequest("gzip, deflate, br");
+  off.if_none_match = first.etag;
+  EXPECT_FALSE(Serve(off).not_modified);
+}
+
+TEST_F(DaemonServeArmTest, ACodedServeIsRecordedAtTheBytesSent) {
+  // The accounting every port performs, end to end: the hit is recorded
+  // with the bytes that go on the wire -- the coded copy's -- against the
+  // uncompressed original, under the coded copy's own mask, which is what
+  // the optimizer splits its per-coding rows on.
+  setenv("PS_STUB_ORIGIN_CONTENT_LENGTH", "4096", 1);
+  UseStylesheetFamily();
+  const DaemonServeDecision decision = ServeEncoded(CssRequest("br"));
+  ASSERT_EQ(DaemonServeVerdict::kServeOptimized, decision.verdict);
+  ASSERT_TRUE(decision.worker_processed);
+  DaemonServeStats stats(abi_.get(), "/run/parity/cache");
+  stats.RecordHit(decision.ps_content_type, decision.origin_content_length,
+                  decision.body.size(), decision.stored_mask);
+  EXPECT_NE(GoogleString::npos,
+            CallLog().find("serve_hit type=1 original=4096 optimized=152 "
+                           "mask=88"));
+}
+
 }  // namespace
+
+// ---------------------------------------------------------------------------
+// A lost optimized copy: recognised, limited, and asked for.
+// ---------------------------------------------------------------------------
+
+TEST_F(DaemonServeArmTest, AStoredOriginalBesideCopiesOfASmallerCopyIsALoss) {
+  // The original is 4307 bytes; the gzip copy compresses 3899: it is the
+  // gzip of an optimized copy, and that copy is not in the entry.
+  UseStylesheetWithoutAnIdentityCopy("4307", "3899");
+  DaemonHealNotifyLimiter limiter(1);
+  const DaemonServeDecision decision =
+      ServeWithLimiter(CssRequest("identity"), &limiter);
+  ASSERT_EQ(DaemonServeVerdict::kServeOriginal, decision.verdict);
+  EXPECT_STREQ(daemon_serve_reason::kDurableOriginal, decision.reason);
+  EXPECT_EQ(kPsServeClassOriginalPending, decision.serve_class);
+  EXPECT_TRUE(decision.lost_optimized_copy);
+  EXPECT_EQ(1, GzipCopyReads());
+}
+
+TEST_F(DaemonServeArmTest, CompressedCopiesOfTheOriginalItselfAreNotALoss) {
+  // Already minimal: the gzip copy compresses the original, all 4307 bytes
+  // of it.  Nothing was ever due, and nothing is asked for.
+  UseStylesheetWithoutAnIdentityCopy("4307", "4307");
+  DaemonHealNotifyLimiter limiter(1);
+  const DaemonServeDecision decision =
+      ServeWithLimiter(CssRequest("identity"), &limiter);
+  ASSERT_EQ(DaemonServeVerdict::kServeOriginal, decision.verdict);
+  EXPECT_FALSE(decision.lost_optimized_copy);
+}
+
+TEST_F(DaemonServeArmTest, AnOriginalWithNoOptimizerCopiesIsNotALoss) {
+  // Not optimized yet, or not optimizable: the entry is the original alone.
+  setenv("PS_STUB_READ_CONTENT_TYPE", "1", 1);
+  setenv("PS_STUB_ORIGIN_CT", "text/css", 1);
+  setenv("PS_STUB_ORIGIN_CONTENT_LENGTH", "4307", 1);
+  setenv("PS_STUB_GZIP_ISIZE", "3899", 1);
+  SetAlternates("0c:00:0");
+  DaemonHealNotifyLimiter limiter(1);
+  const DaemonServeDecision decision =
+      ServeWithLimiter(CssRequest("identity"), &limiter);
+  ASSERT_EQ(DaemonServeVerdict::kServeOriginal, decision.verdict);
+  EXPECT_FALSE(decision.lost_optimized_copy);
+}
+
+TEST_F(DaemonServeArmTest, WithoutAGzipCopyTheArmDoesNotGuess) {
+  // Only the brotli copy is there (an optimizer run without gzip).  A brotli
+  // stream does not say what it compresses, so the arm cannot tell a loss
+  // from a verdict and reports none.
+  setenv("PS_STUB_READ_CONTENT_TYPE", "1", 1);
+  setenv("PS_STUB_ORIGIN_CT", "text/css", 1);
+  setenv("PS_STUB_ORIGIN_CONTENT_LENGTH", "4307", 1);
+  setenv("PS_STUB_GZIP_ISIZE", "3899", 1);
+  SetAlternates("88:00:1,0c:00:0");
+  DaemonHealNotifyLimiter limiter(1);
+  const DaemonServeDecision decision =
+      ServeWithLimiter(CssRequest("identity"), &limiter);
+  ASSERT_EQ(DaemonServeVerdict::kServeOriginal, decision.verdict);
+  EXPECT_FALSE(decision.lost_optimized_copy);
+}
+
+TEST_F(DaemonServeArmTest, ACompressedCopyTheOptimizerDidNotWriteIsNotEvidence) {
+  // A gzip-coded entry that is not marked as the optimizer's own output
+  // says nothing about what the optimizer did with this URL.
+  setenv("PS_STUB_READ_CONTENT_TYPE", "1", 1);
+  setenv("PS_STUB_ORIGIN_CT", "text/css", 1);
+  setenv("PS_STUB_ORIGIN_CONTENT_LENGTH", "4307", 1);
+  setenv("PS_STUB_GZIP_ISIZE", "3899", 1);
+  SetAlternates("48:00:0,0c:00:0");
+  DaemonHealNotifyLimiter limiter(1);
+  const DaemonServeDecision decision =
+      ServeWithLimiter(CssRequest("identity"), &limiter);
+  ASSERT_EQ(DaemonServeVerdict::kServeOriginal, decision.verdict);
+  EXPECT_FALSE(decision.lost_optimized_copy);
+}
+
+TEST_F(DaemonServeArmTest, ACopyWithNoRecordedOriginalLengthIsNotEvidence) {
+  // Without the original's length there is nothing to compare with.
+  UseStylesheetWithoutAnIdentityCopy("0", "3899");
+  DaemonHealNotifyLimiter limiter(1);
+  const DaemonServeDecision decision =
+      ServeWithLimiter(CssRequest("identity"), &limiter);
+  ASSERT_EQ(DaemonServeVerdict::kServeOriginal, decision.verdict);
+  EXPECT_FALSE(decision.lost_optimized_copy);
+}
+
+TEST_F(DaemonServeArmTest, AnImageIsNeverAskedFor) {
+  // An image's variants can be absent for many reasons the entry does not
+  // show; the arm asks for stylesheets and scripts only, and does not even
+  // look for an image.
+  UseStylesheetWithoutAnIdentityCopy("4307", "3899");
+  setenv("PS_STUB_READ_CONTENT_TYPE", "3", 1);  // kPsContentImage
+  DaemonHealNotifyLimiter limiter(1);
+  const DaemonServeDecision decision =
+      ServeWithLimiter(CssRequest("identity"), &limiter);
+  ASSERT_EQ(DaemonServeVerdict::kServeOriginal, decision.verdict);
+  EXPECT_FALSE(decision.lost_optimized_copy);
+  EXPECT_EQ(0, GzipCopyReads());
+}
+
+TEST_F(DaemonServeArmTest, AScriptIsAskedForLikeAStylesheet) {
+  UseStylesheetWithoutAnIdentityCopy("45000", "21000");
+  setenv("PS_STUB_READ_CONTENT_TYPE", "2", 1);  // kPsContentJs
+  DaemonHealNotifyLimiter limiter(1);
+  const DaemonServeDecision decision =
+      ServeWithLimiter(CssRequest("identity"), &limiter);
+  ASSERT_EQ(DaemonServeVerdict::kServeOriginal, decision.verdict);
+  EXPECT_TRUE(decision.lost_optimized_copy);
+}
+
+TEST_F(DaemonServeArmTest, AnAcceptNegotiatingOriginIsNeverAskedFor) {
+  // The durable original carries the origin-negotiates-on-Accept mark: the
+  // optimizer never derives copies for such a URL, so there is nothing to
+  // ask for, whatever else the entry holds.
+  setenv("PS_STUB_READ_CONTENT_TYPE", "1", 1);
+  setenv("PS_STUB_ORIGIN_CT", "text/css", 1);
+  setenv("PS_STUB_ORIGIN_CONTENT_LENGTH", "4307", 1);
+  setenv("PS_STUB_GZIP_ISIZE", "3899", 1);
+  SetAlternates("48:00:1,88:00:1,0c:04:0");
+  DaemonHealNotifyLimiter limiter(1);
+  const DaemonServeDecision decision =
+      ServeWithLimiter(CssRequest("identity"), &limiter);
+  ASSERT_EQ(DaemonServeVerdict::kServeOriginal, decision.verdict);
+  ASSERT_TRUE(decision.vary_accept_origin_declared);
+  EXPECT_FALSE(decision.lost_optimized_copy);
+  EXPECT_EQ(0, GzipCopyReads());
+}
+
+TEST_F(DaemonServeArmTest, AReaderWithoutALimiterNeverProbes) {
+  // The default, and every port that has not opted in: no extra read, no
+  // flag, exactly the serve it always was.
+  UseStylesheetWithoutAnIdentityCopy("4307", "3899");
+  const DaemonServeDecision decision = Serve(CssRequest("identity"));
+  ASSERT_EQ(DaemonServeVerdict::kServeOriginal, decision.verdict);
+  EXPECT_FALSE(decision.lost_optimized_copy);
+  EXPECT_EQ(0, GzipCopyReads());
+}
+
+TEST_F(DaemonServeArmTest, AnOptimizedServeIsNeverALoss) {
+  // The whole family is there: the identity copy is served and nothing is
+  // looked for.
+  UseStylesheetFamily();
+  setenv("PS_STUB_ORIGIN_CONTENT_LENGTH", "4307", 1);
+  setenv("PS_STUB_GZIP_ISIZE", "3899", 1);
+  DaemonHealNotifyLimiter limiter(1);
+  const DaemonServeDecision decision =
+      ServeWithLimiter(CssRequest("identity"), &limiter);
+  ASSERT_EQ(DaemonServeVerdict::kServeOptimized, decision.verdict);
+  EXPECT_FALSE(decision.lost_optimized_copy);
+  EXPECT_EQ(0, GzipCopyReads());
+}
+
+TEST_F(DaemonServeArmTest, TheProbeLeavesTheServedBytesAlone) {
+  // The served body borrows from the read the reader holds.  The probe is a
+  // second read of another entry; it must not release or replace the first.
+  UseStylesheetWithoutAnIdentityCopy("4307", "3899");
+  DaemonHealNotifyLimiter limiter(1);
+  DaemonServeReader reader(abi_.get(), cache_);
+  reader.set_heal_notify_limiter(&limiter);
+  const DaemonServeDecision decision =
+      reader.Serve(CssRequest("identity"), 1100 /* now_seconds */);
+  ASSERT_EQ(DaemonServeVerdict::kServeOriginal, decision.verdict);
+  ASSERT_TRUE(decision.lost_optimized_copy);
+  // The durable original's body in the stand-in: 16 + 0x0c bytes of 'a'.
+  ASSERT_EQ(28u, decision.body.size());
+  EXPECT_EQ(GoogleString(28, 'a'), decision.body.as_string());
+  EXPECT_EQ(kPsSentinelOriginal, decision.alternate_id);
+}
+
+TEST_F(DaemonServeArmTest, TheSecondServeInsideTheWindowIsNotProbed) {
+  // One look per URL per window, however many requests arrive.
+  UseStylesheetWithoutAnIdentityCopy("4307", "3899");
+  DaemonHealNotifyLimiter limiter(1);
+  const DaemonServeRequest request = CssRequest("identity");
+  EXPECT_TRUE(ServeWithLimiter(request, &limiter, 1100).lost_optimized_copy);
+  EXPECT_EQ(1, GzipCopyReads());
+  EXPECT_FALSE(ServeWithLimiter(request, &limiter, 1105).lost_optimized_copy);
+  EXPECT_FALSE(ServeWithLimiter(request, &limiter, 1109).lost_optimized_copy);
+  EXPECT_EQ(1, GzipCopyReads()) << "a serve inside the window read again";
+  EXPECT_TRUE(ServeWithLimiter(request, &limiter, 1110).lost_optimized_copy);
+  EXPECT_EQ(2, GzipCopyReads());
+}
+
+TEST_F(DaemonServeArmTest, AnAlreadyMinimalStylesheetCostsOneLookPerWindow) {
+  // The legitimate case is looked at once per window too, and never asked
+  // for: the window is taken by the look, not by the answer.
+  UseStylesheetWithoutAnIdentityCopy("4307", "4307");
+  DaemonHealNotifyLimiter limiter(1);
+  const DaemonServeRequest request = CssRequest("identity");
+  for (int64 now = 1100; now < 1110; ++now) {
+    EXPECT_FALSE(ServeWithLimiter(request, &limiter, now).lost_optimized_copy);
+  }
+  EXPECT_EQ(1, GzipCopyReads());
+}
+
+TEST_F(DaemonServeArmTest, AFloodOfOtherUrlsDoesNotHideALostOne) {
+  // Thousands of other stylesheets are served as their stored originals in
+  // the same window -- here already minimal ones, which are looked at and
+  // found whole.  The one URL that did lose its copy is still recognised.
+  DaemonHealNotifyLimiter limiter(1);
+  UseStylesheetWithoutAnIdentityCopy("4307", "4307");
+  GoogleString url;
+  for (int i = 0; i < 3000; ++i) {
+    url = StrCat("/flood/s", IntegerToString(i), ".css");
+    DaemonServeRequest request = CssRequest("identity");
+    request.url = url;
+    ASSERT_FALSE(ServeWithLimiter(request, &limiter, 1100).lost_optimized_copy)
+        << url;
+  }
+  UseStylesheetWithoutAnIdentityCopy("4307", "3899");
+  EXPECT_TRUE(ServeWithLimiter(CssRequest("identity"), &limiter, 1100)
+                  .lost_optimized_copy)
+      << "a busy server kept a lost stylesheet from being asked for";
+}
+
+TEST_F(DaemonServeArmTest, ALostCopyIsAnsweredWithOneOrdinaryNotification) {
+  UseStylesheetWithoutAnIdentityCopy("4307", "3899");
+  DaemonHealNotifyLimiter limiter(1);
+  const DaemonServeRequest request = CssRequest("identity");
+  const DaemonServeDecision decision = ServeWithLimiter(request, &limiter);
+  ASSERT_TRUE(decision.lost_optimized_copy);
+
+  const int before = NotifyCount();
+  SimpleStats stats(thread_system_.get());
+  Variable* notified = stats.AddVariable("ipro_daemon_heal_notified");
+  Variable* failed = stats.AddVariable("ipro_daemon_heal_notify_failed");
+  EXPECT_TRUE(DaemonServeLostCopyNotify(
+      *abi_, "/tmp/ps-worker.sock", request, decision, default_context_,
+      default_signature_, notified, failed));
+  EXPECT_EQ(before + 1, NotifyCount());
+  // The stylesheet's own class and the client's raw mask -- a capability
+  // vector the classifier produced, never a reserved value.
+  EXPECT_NE(GoogleString::npos,
+            CallLog().find(StrCat("url=", kCssUrl, " host=", kHost,
+                                  " scheme=", kScheme, " content_type=1 mask=",
+                                  static_cast<uint64>(decision.client_mask),
+                                  " ")));
+  EXPECT_EQ(1, notified->Get());
+  EXPECT_EQ(0, failed->Get());
+}
+
+TEST_F(DaemonServeArmTest, AFailedHealSendMovesTheFailureCounterOnly) {
+  setenv("PS_STUB_NOTIFY_FAIL", "1", 1);
+  UseStylesheetWithoutAnIdentityCopy("4307", "3899");
+  DaemonHealNotifyLimiter limiter(1);
+  const DaemonServeRequest request = CssRequest("identity");
+  const DaemonServeDecision decision = ServeWithLimiter(request, &limiter);
+  ASSERT_TRUE(decision.lost_optimized_copy);
+
+  SimpleStats stats(thread_system_.get());
+  Variable* notified = stats.AddVariable("ipro_daemon_heal_notified");
+  Variable* failed = stats.AddVariable("ipro_daemon_heal_notify_failed");
+  const int before = NotifyCount();
+  EXPECT_FALSE(DaemonServeLostCopyNotify(
+      *abi_, "/tmp/ps-worker.sock", request, decision, default_context_,
+      default_signature_, notified, failed));
+  EXPECT_EQ(before + 1, NotifyCount());
+  EXPECT_EQ(0, notified->Get());
+  EXPECT_EQ(1, failed->Get());
+}
+
+TEST_F(DaemonServeArmTest, NothingIsAskedForWithoutTheFlagOrTheContext) {
+  UseStylesheetWithoutAnIdentityCopy("4307", "3899");
+  DaemonHealNotifyLimiter limiter(1);
+  const DaemonServeRequest request = CssRequest("identity");
+  const DaemonServeDecision lost = ServeWithLimiter(request, &limiter);
+  ASSERT_TRUE(lost.lost_optimized_copy);
+  const int before = NotifyCount();
+
+  // A decision that does not carry the flag asks for nothing.
+  DaemonServeDecision plain = lost;
+  plain.lost_optimized_copy = false;
+  EXPECT_FALSE(DaemonServeLostCopyNotify(
+      *abi_, "/tmp/ps-worker.sock", request, plain, default_context_,
+      default_signature_, nullptr, nullptr));
+  // Nor does a flag on anything but a durable-original serve.
+  DaemonServeDecision wrong_verdict = lost;
+  wrong_verdict.verdict = DaemonServeVerdict::kServeOptimized;
+  EXPECT_FALSE(DaemonServeLostCopyNotify(
+      *abi_, "/tmp/ps-worker.sock", request, wrong_verdict, default_context_,
+      default_signature_, nullptr, nullptr));
+  // Both halves of the option context, or nothing.
+  EXPECT_FALSE(DaemonServeLostCopyNotify(*abi_, "/tmp/ps-worker.sock", request,
+                                         lost, "", default_signature_, nullptr,
+                                         nullptr));
+  EXPECT_FALSE(DaemonServeLostCopyNotify(*abi_, "/tmp/ps-worker.sock", request,
+                                         lost, default_context_, "", nullptr,
+                                         nullptr));
+  EXPECT_EQ(before, NotifyCount());
+}
+
+// ---------------------------------------------------------------------------
+// The limiter on its own.
+// ---------------------------------------------------------------------------
+
+TEST(DaemonHealNotifyLimiterTest, OneLookAndOneAskPerUrlPerWindow) {
+  DaemonHealNotifyLimiter limiter(1);
+  EXPECT_TRUE(limiter.ShouldLook("http://a.test/x.css", 100));
+  EXPECT_FALSE(limiter.ShouldLook("http://a.test/x.css", 100));
+  EXPECT_FALSE(limiter.ShouldLook("http://a.test/x.css", 109));
+  EXPECT_TRUE(limiter.ShouldLook("http://a.test/x.css", 110));
+  EXPECT_FALSE(limiter.ShouldLook("http://a.test/x.css", 119));
+  // The two questions are independent: a look does not use up the ask.
+  EXPECT_TRUE(limiter.AdmitAsk("http://a.test/x.css", 110));
+  EXPECT_FALSE(limiter.AdmitAsk("http://a.test/x.css", 119));
+  EXPECT_TRUE(limiter.AdmitAsk("http://a.test/x.css", 120));
+}
+
+TEST(DaemonHealNotifyLimiterTest, AFloodOfOtherUrlsNeverRefusesAUrl) {
+  // The whole server's stylesheets and scripts pass through ShouldLook --
+  // not yet optimized, already minimal, or a visitor cycling query strings.
+  // However many there are, a URL that is asked about is never refused
+  // because of them: at worst its slot was taken over and it is looked at
+  // again.
+  DaemonHealNotifyLimiter limiter(1);
+  for (int i = 0; i < 100000; ++i) {
+    limiter.ShouldLook(StrCat("http://flood.test/s.css?v=", IntegerToString(i)),
+                       100);
+  }
+  EXPECT_TRUE(limiter.ShouldLook("http://a.test/lost.css", 100));
+  // Nothing but lost URLs ever enters the ask table, so the flood above
+  // cannot have touched it.
+  EXPECT_TRUE(limiter.AdmitAsk("http://a.test/lost.css", 100));
+  EXPECT_FALSE(limiter.AdmitAsk("http://a.test/lost.css", 105));
+  // A second flood while the window is live: the URL may be looked at again
+  // (its look slot was reused), and is still asked for at most once.
+  for (int i = 0; i < 100000; ++i) {
+    limiter.ShouldLook(StrCat("http://flood.test/t.css?v=", IntegerToString(i)),
+                       105);
+  }
+  EXPECT_FALSE(limiter.AdmitAsk("http://a.test/lost.css", 106));
+  EXPECT_TRUE(limiter.AdmitAsk("http://a.test/lost.css", 110));
+}
+
+TEST(DaemonHealNotifyLimiterTest, ItsMemoryIsFixed) {
+  // Two tables of kSlots small entries and nothing that grows: no URL text
+  // is stored, however long the URL.
+  EXPECT_LE(sizeof(DaemonHealNotifyLimiter), static_cast<size_t>(64 * 1024));
+  DaemonHealNotifyLimiter limiter(1);
+  const GoogleString long_url =
+      StrCat("http://a.test/", GoogleString(8000, 'x'), ".css");
+  EXPECT_TRUE(limiter.ShouldLook(long_url, 100));
+  EXPECT_FALSE(limiter.ShouldLook(long_url, 101));
+}
+
+TEST(DaemonHealNotifyLimiterTest, ManyLostUrlsEvictButNeverBlock) {
+  // More lost URLs than slots: every one of them is admitted when it comes
+  // (it takes its slot over), and none is refused for the others' sake.
+  DaemonHealNotifyLimiter limiter(1);
+  int admitted = 0;
+  const int kUrls = 4 * static_cast<int>(DaemonHealNotifyLimiter::kSlots);
+  for (int i = 0; i < kUrls; ++i) {
+    if (limiter.AdmitAsk(StrCat("http://a.test/", IntegerToString(i), ".css"),
+                         100)) {
+      ++admitted;
+    }
+  }
+  EXPECT_EQ(kUrls, admitted);
+}
+
+TEST(DaemonHealNotifyLimiterTest, AClockThatStepsBackAdmits) {
+  DaemonHealNotifyLimiter limiter(1);
+  EXPECT_TRUE(limiter.AdmitAsk("http://a.test/x.css", 5000));
+  // The clock was set back by an hour: the URL must not be silenced for it.
+  EXPECT_TRUE(limiter.AdmitAsk("http://a.test/x.css", 1400));
+  EXPECT_FALSE(limiter.AdmitAsk("http://a.test/x.css", 1405));
+}
+
+TEST(DaemonHealNotifyLimiterTest, ConcurrentCallersGetExactlyOneAdmission) {
+  DaemonHealNotifyLimiter limiter(1);
+  std::atomic<int> admitted{0};
+  std::vector<std::thread> threads;
+  for (int t = 0; t < 8; ++t) {
+    threads.emplace_back([&limiter, &admitted] {
+      for (int i = 0; i < 200; ++i) {
+        if (limiter.AdmitAsk("http://a.test/x.css", 100)) {
+          admitted.fetch_add(1);
+        }
+      }
+    });
+  }
+  for (std::thread& thread : threads) {
+    thread.join();
+  }
+  EXPECT_EQ(1, admitted.load());
+}
+
+TEST(DaemonHealNotifyLimiterTest, DifferentKeysPlaceUrlsDifferently) {
+  // Where a URL sits in the tables depends on the limiter's key.  Fill two
+  // limiters with different keys beyond what they hold: which URLs each one
+  // has dropped by then differs.  (That the placement cannot be worked out
+  // without the key is the keyed hash's property, not something a count
+  // can show; see the two cases below.)
+  DaemonHealNotifyLimiter one(1);
+  DaemonHealNotifyLimiter two(2);
+  std::vector<GoogleString> urls;
+  for (int i = 0; i < 3000; ++i) {
+    urls.push_back(StrCat("http://a.test/", IntegerToString(i), ".css"));
+    one.AdmitAsk(urls.back(), 100);
+    two.AdmitAsk(urls.back(), 100);
+  }
+  int differences = 0;
+  for (const GoogleString& url : urls) {
+    if (one.AdmitAsk(url, 101) != two.AdmitAsk(url, 101)) {
+      ++differences;
+    }
+  }
+  EXPECT_GT(differences, 0);
+}
+
+TEST(DaemonHealNotifyLimiterTest, TheKeyedHashMatchesItsPublishedVectors) {
+  // SipHash-2-4, 64-bit result: the reference test vectors.  Key bytes
+  // 00..0f, input the bytes 00, 01, 02, ... of each length from 0 to 63.
+  static const uint64_t kVectors[64] = {
+      0x726fdb47dd0e0e31ULL, 0x74f839c593dc67fdULL, 0x0d6c8009d9a94f5aULL,
+      0x85676696d7fb7e2dULL, 0xcf2794e0277187b7ULL, 0x18765564cd99a68dULL,
+      0xcbc9466e58fee3ceULL, 0xab0200f58b01d137ULL, 0x93f5f5799a932462ULL,
+      0x9e0082df0ba9e4b0ULL, 0x7a5dbbc594ddb9f3ULL, 0xf4b32f46226bada7ULL,
+      0x751e8fbc860ee5fbULL, 0x14ea5627c0843d90ULL, 0xf723ca908e7af2eeULL,
+      0xa129ca6149be45e5ULL, 0x3f2acc7f57c29bdbULL, 0x699ae9f52cbe4794ULL,
+      0x4bc1b3f0968dd39cULL, 0xbb6dc91da77961bdULL, 0xbed65cf21aa2ee98ULL,
+      0xd0f2cbb02e3b67c7ULL, 0x93536795e3a33e88ULL, 0xa80c038ccd5ccec8ULL,
+      0xb8ad50c6f649af94ULL, 0xbce192de8a85b8eaULL, 0x17d835b85bbb15f3ULL,
+      0x2f2e6163076bcfadULL, 0xde4daaaca71dc9a5ULL, 0xa6a2506687956571ULL,
+      0xad87a3535c49ef28ULL, 0x32d892fad841c342ULL, 0x7127512f72f27cceULL,
+      0xa7f32346f95978e3ULL, 0x12e0b01abb051238ULL, 0x15e034d40fa197aeULL,
+      0x314dffbe0815a3b4ULL, 0x027990f029623981ULL, 0xcadcd4e59ef40c4dULL,
+      0x9abfd8766a33735cULL, 0x0e3ea96b5304a7d0ULL, 0xad0c42d6fc585992ULL,
+      0x187306c89bc215a9ULL, 0xd4a60abcf3792b95ULL, 0xf935451de4f21df2ULL,
+      0xa9538f0419755787ULL, 0xdb9acddff56ca510ULL, 0xd06c98cd5c0975ebULL,
+      0xe612a3cb9ecba951ULL, 0xc766e62cfcadaf96ULL, 0xee64435a9752fe72ULL,
+      0xa192d576b245165aULL, 0x0a8787bf8ecb74b2ULL, 0x81b3e73d20b49b6fULL,
+      0x7fa8220ba3b2eceaULL, 0x245731c13ca42499ULL, 0xb78dbfaf3a8d83bdULL,
+      0xea1ad565322a1a0bULL, 0x60e61c23a3795013ULL, 0x6606d7e446282b93ULL,
+      0x6ca4ecb15c5f91e1ULL, 0x9f626da15c9625f3ULL, 0xe51b38608ef25f57ULL,
+      0x958a324ceb064572ULL};
+  const uint64_t kKey0 = 0x0706050403020100ULL;
+  const uint64_t kKey1 = 0x0f0e0d0c0b0a0908ULL;
+  char input[64];
+  for (int i = 0; i < 64; ++i) {
+    input[i] = static_cast<char>(i);
+  }
+  for (size_t length = 0; length < 64; ++length) {
+    SipHash24 whole(kKey0, kKey1);
+    whole.Update(input, length);
+    EXPECT_EQ(kVectors[length], whole.Finish()) << "length " << length;
+    // The same bytes in two pieces, split at every place.
+    for (size_t split = 0; split <= length; split += 3) {
+      SipHash24 pieces(kKey0, kKey1);
+      pieces.Update(input, split);
+      pieces.Update(input + split, length - split);
+      EXPECT_EQ(kVectors[length], pieces.Finish())
+          << "length " << length << " split at " << split;
+    }
+  }
+}
+
+// A plain hash with a seed mixed in, as a limiter might naively use: 64-bit
+// FNV-1a started from (offset basis XOR seed).  Kept here only to show what
+// the keyed hash is for.
+uint64_t SeededFnv1aForComparison(uint64_t seed, StringPiece text) {
+  uint64_t hash = 14695981039346656037ULL ^ seed;
+  for (size_t i = 0; i < text.size(); ++i) {
+    hash ^= static_cast<unsigned char>(text[i]);
+    hash *= 1099511628211ULL;
+  }
+  return hash;
+}
+
+// Builds two different 12-letter path segments that a seeded FNV-1a maps to
+// the same value whenever its running state has the low byte `low_byte` on
+// entry -- whatever the other 56 bits are.  Each step of FNV-1a changes the
+// state by (a small number decided by the low byte) times a power of the
+// multiplier; kSteps is a short solution of "those differences sum to zero
+// modulo 2^64", and the search below finds letters that realise it.
+bool BuildSeedIndependentCollision(unsigned char low_byte, size_t step,
+                                   unsigned char low_a, unsigned char low_b,
+                                   GoogleString* a, GoogleString* b) {
+  static const int kSteps[12] = {-1, -8, 2, 4, 10, 6, -14, -2, -18, -13, 15, -17};
+  static const char kLetters[] = "abcdefghijklmnopqrstuvwxyz0123456789";
+  if (step == 0) {
+    low_a = low_byte;
+    low_b = low_byte;
+  }
+  if (step == 12) {
+    return true;
+  }
+  for (const char* x = kLetters; *x != '\0'; ++x) {
+    const int change_a = static_cast<int>(low_a ^ *x) - static_cast<int>(low_a);
+    for (const char* y = kLetters; *y != '\0'; ++y) {
+      const int change_b =
+          static_cast<int>(low_b ^ *y) - static_cast<int>(low_b);
+      if (change_a - change_b != kSteps[step]) {
+        continue;
+      }
+      a->push_back(*x);
+      b->push_back(*y);
+      // The multiplier's low byte is 0xb3.
+      if (BuildSeedIndependentCollision(
+              low_byte, step + 1,
+              static_cast<unsigned char>((low_a ^ *x) * 0xb3),
+              static_cast<unsigned char>((low_b ^ *y) * 0xb3), a, b)) {
+        return true;
+      }
+      a->pop_back();
+      b->pop_back();
+    }
+  }
+  return false;
+}
+
+TEST(DaemonHealNotifyLimiterTest, UrlsBuiltToCollideWithoutTheKeyDoNot) {
+  // URLs are chosen by whoever sends the request.  With a plain seeded hash,
+  // pairs of URLs can be built that share a hash for EVERY seed with a given
+  // low byte -- 256 pairs cover every seed -- and a visitor asking for one
+  // of a pair would keep the limiter from ever looking at the other.  The
+  // limiter's hash is keyed: the same pairs are two URLs to it.
+  const GoogleString prefix = "http://a.test/";
+  for (int seed_low = 0; seed_low < 256; ++seed_low) {
+    // The low byte of the plain hash's state after the common prefix.
+    const unsigned char low_byte = static_cast<unsigned char>(
+        SeededFnv1aForComparison(static_cast<uint64_t>(seed_low), prefix));
+    GoogleString a, b;
+    ASSERT_TRUE(BuildSeedIndependentCollision(low_byte, 0, 0, 0, &a, &b))
+        << seed_low;
+    ASSERT_NE(a, b);
+    const GoogleString url_a = StrCat(prefix, a, ".css");
+    const GoogleString url_b = StrCat(prefix, b, ".css");
+    // The construction is real: the plain hash collides, whatever the rest
+    // of the seed.
+    for (uint64_t seed_high : {0ULL, 0x0123456789abcdULL, 0xffffffffffffffULL}) {
+      const uint64_t seed = (seed_high << 8) | static_cast<uint64_t>(seed_low);
+      ASSERT_EQ(SeededFnv1aForComparison(seed, url_a),
+                SeededFnv1aForComparison(seed, url_b))
+          << url_a << " " << url_b;
+    }
+    // The limiter keeps them apart, under a key whose low byte is the one
+    // the pair was built for.
+    DaemonHealNotifyLimiter limiter(static_cast<uint64>(seed_low));
+    EXPECT_NE(limiter.UrlKey("http", "a.test", StrCat("/", a, ".css")),
+              limiter.UrlKey("http", "a.test", StrCat("/", b, ".css")))
+        << url_a << " " << url_b;
+    EXPECT_TRUE(limiter.ShouldLook(url_a, 100));
+    EXPECT_TRUE(limiter.ShouldLook(url_b, 100))
+        << url_b << " was taken for " << url_a;
+    EXPECT_TRUE(limiter.AdmitAsk(url_a, 100));
+    EXPECT_TRUE(limiter.AdmitAsk(url_b, 100))
+        << url_b << " was taken for " << url_a;
+  }
+}
+
+TEST(DaemonHealNotifyLimiterTest, TheUrlKeyIsTheCacheEntrysNotTheSpellings) {
+  // One cache entry, however the request spelled its host: the cache key
+  // lowercases the host, drops one trailing dot and drops a default port.
+  // The limiter must count those spellings as one URL, or each of them buys
+  // another look and another ask.
+  DaemonHealNotifyLimiter limiter(1);
+  const uint64 key = limiter.UrlKey("http", "a.test", "/x.css");
+  EXPECT_EQ(key, limiter.UrlKey("http", "a.test.", "/x.css"));
+  EXPECT_EQ(key, limiter.UrlKey("http", "A.Test", "/x.css"));
+  EXPECT_EQ(key, limiter.UrlKey("http", "a.test:80", "/x.css"));
+  EXPECT_EQ(key, limiter.UrlKey("http", "A.TEST.:443", "/x.css"));
+  // What IS another entry stays another URL.
+  EXPECT_NE(key, limiter.UrlKey("https", "a.test", "/x.css"));
+  EXPECT_NE(key, limiter.UrlKey("http", "a.test:8080", "/x.css"));
+  EXPECT_NE(key, limiter.UrlKey("http", "a.test", "/X.css"));
+  EXPECT_NE(limiter.UrlKey("http", "[::1]:8080", "/x.css"),
+            limiter.UrlKey("http", "[::1]", "/x.css"));
+  EXPECT_EQ(limiter.UrlKey("http", "[::1]:80", "/x.css"),
+            limiter.UrlKey("http", "[::1]", "/x.css"));
+  // The text form and the pieces name the same URL.
+  EXPECT_TRUE(limiter.ShouldLook("http://a.test/x.css", 100));
+  EXPECT_FALSE(limiter.ShouldLookKey(key, 101));
+  EXPECT_TRUE(limiter.AdmitAskKey(key, 100));
+  EXPECT_FALSE(limiter.AdmitAsk("http://a.test/x.css", 101));
+}
+
+TEST(DaemonHealNotifyLimiterTest, TwoUrlsThatMeetDoNotEvictEachOther) {
+  // Each URL has two places it can sit in.  Two hundred lost URLs at once
+  // -- far more than a server is expected to have -- and all but a handful
+  // are still remembered a second later, so they are not asked for again
+  // inside their window.
+  DaemonHealNotifyLimiter limiter(1);
+  std::vector<GoogleString> urls;
+  for (int i = 0; i < 200; ++i) {
+    urls.push_back(StrCat("http://a.test/lost", IntegerToString(i), ".css"));
+    ASSERT_TRUE(limiter.AdmitAsk(urls.back(), 100));
+  }
+  int asked_again = 0;
+  for (const GoogleString& url : urls) {
+    if (limiter.AdmitAsk(url, 101)) {
+      ++asked_again;
+    }
+  }
+  EXPECT_LE(asked_again, 8);
+}
+
+TEST_F(DaemonServeArmTest, ALookRepeatedInsideTheWindowDoesNotAskAgain) {
+  // The look memo sees every stylesheet and script the server has, so a
+  // lost URL's entry in it can be pushed out long before its window ends.
+  // The URL is then looked at again -- and must NOT be asked for again:
+  // the ask has its own table, which only lost URLs enter.
+  UseStylesheetWithoutAnIdentityCopy("4307", "3899");
+  DaemonHealNotifyLimiter limiter(1);
+  const DaemonServeRequest request = CssRequest("identity");
+  EXPECT_TRUE(ServeWithLimiter(request, &limiter, 1100).lost_optimized_copy);
+  EXPECT_EQ(1, GzipCopyReads());
+
+  // A second later the rest of the site passes through the look memo.
+  for (int i = 0; i < 20000; ++i) {
+    limiter.ShouldLook(StrCat("http://example.com/other/", IntegerToString(i),
+                              ".css"),
+                       1101);
+  }
+  EXPECT_FALSE(ServeWithLimiter(request, &limiter, 1102).lost_optimized_copy)
+      << "a second ask inside the window";
+  EXPECT_EQ(2, GzipCopyReads())
+      << "the look memo still held the URL; this case proved nothing";
+
+  // Both windows over (the second look was at 1102): asked for again.
+  EXPECT_TRUE(ServeWithLimiter(request, &limiter, 1112).lost_optimized_copy);
+  EXPECT_EQ(3, GzipCopyReads());
+}
+
+TEST_F(DaemonServeArmTest, AHostSpelledAnotherWayIsTheSameUrlToTheLimiter) {
+  UseStylesheetWithoutAnIdentityCopy("4307", "3899");
+  DaemonHealNotifyLimiter limiter(1);
+  DaemonServeRequest request = CssRequest("identity");
+  EXPECT_TRUE(ServeWithLimiter(request, &limiter, 1100).lost_optimized_copy);
+  EXPECT_EQ(1, GzipCopyReads());
+  for (const char* host : {"example.com.", "EXAMPLE.com", "example.com:80"}) {
+    request.hostname = host;
+    EXPECT_FALSE(ServeWithLimiter(request, &limiter, 1101).lost_optimized_copy)
+        << host;
+  }
+  EXPECT_EQ(1, GzipCopyReads()) << "another spelling bought another look";
+}
+
+TEST_F(DaemonServeArmTest, AGzipCopyOfSomethingLargerIsNotALoss) {
+  // Only "compresses LESS than the original" says an optimized copy was
+  // made.  A copy that says it compresses more is not that, and not asked
+  // for.
+  UseStylesheetWithoutAnIdentityCopy("4307", "5000");
+  DaemonHealNotifyLimiter limiter(1);
+  const DaemonServeDecision decision =
+      ServeWithLimiter(CssRequest("identity"), &limiter);
+  ASSERT_EQ(DaemonServeVerdict::kServeOriginal, decision.verdict);
+  EXPECT_FALSE(decision.lost_optimized_copy);
+  EXPECT_EQ(1, GzipCopyReads());
+}
+
+TEST_F(DaemonServeArmTest, AnOriginalLengthTooLargeToRecordIsNotEvidence) {
+  // The largest recordable value stands for "4 GiB or more": the length is
+  // not known, so nothing can be compared with it.
+  UseStylesheetWithoutAnIdentityCopy("4294967295", "3899");
+  DaemonHealNotifyLimiter limiter(1);
+  const DaemonServeDecision decision =
+      ServeWithLimiter(CssRequest("identity"), &limiter);
+  ASSERT_EQ(DaemonServeVerdict::kServeOriginal, decision.verdict);
+  EXPECT_FALSE(decision.lost_optimized_copy);
+}
+
+TEST_F(DaemonServeArmTest, TheNotifyItselfRefusesAnAcceptNegotiatingOrigin) {
+  // The detection never flags such a URL; the send checks again, so a
+  // decision that reached it some other way still asks for nothing.
+  UseStylesheetWithoutAnIdentityCopy("4307", "3899");
+  DaemonHealNotifyLimiter limiter(1);
+  const DaemonServeRequest request = CssRequest("identity");
+  DaemonServeDecision decision = ServeWithLimiter(request, &limiter);
+  ASSERT_TRUE(decision.lost_optimized_copy);
+  decision.vary_accept_origin_declared = true;
+  const int before = NotifyCount();
+  EXPECT_FALSE(DaemonServeLostCopyNotify(
+      *abi_, "/tmp/ps-worker.sock", request, decision, default_context_,
+      default_signature_, nullptr, nullptr));
+  EXPECT_EQ(before, NotifyCount());
+}
+
+TEST(DaemonHealNotifyLimiterTest, TheProcessLimiterIsOneObject) {
+  EXPECT_TRUE(ProcessDaemonHealNotifyLimiter() != nullptr);
+  EXPECT_EQ(ProcessDaemonHealNotifyLimiter(), ProcessDaemonHealNotifyLimiter());
+}
 
 }  // namespace net_instaweb

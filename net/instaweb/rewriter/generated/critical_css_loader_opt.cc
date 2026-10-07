@@ -20,22 +20,22 @@
 namespace net_instaweb {
 
 const char* JS_critical_css_loader_opt =
-    "(function(){function c(){var a=window,e=d;if(a.addEventListe"
-    "ner)a.addEventListener(\"load\",e,!1);else if(a.attachEvent)a."
-    "attachEvent(\"onload\",e);else{var b=a.onload;a.onload=functio"
-    "n(){e.call(this);b&&b.call(this)}}};var f=!1;function d(){if"
-    "(!f){f=!0;for(var a=document.getElementsByClassName(\"psa_add"
-    "_styles\"),e=0,b;b=a[e];++e)if(b.nodeName==\"NOSCRIPT\"){var h="
-    "document.createElement(\"div\");h.innerHTML=b.textContent;b=h."
-    "childNodes;for(var g=0;g<b.length;++g)b[g].nodeType===1&&b[g"
-    "].removeAttribute(\"id\");document.body.appendChild(h)}}}\nfunc"
-    "tion k(){var a=window.requestAnimationFrame||window.webkitRe"
-    "questAnimationFrame||window.mozRequestAnimationFrame||window"
-    ".oRequestAnimationFrame||window.msRequestAnimationFrame||nul"
-    "l;c();a&&a(function(){window.setTimeout(d,0)})}var l=[\"pages"
-    "peed\",\"CriticalCssLoader\",\"Run\"],m=this||self;l[0]in m||type"
-    "of m.execScript==\"undefined\"||m.execScript(\"var \"+l[0]);for("
-    "var n;l.length&&(n=l.shift());)l.length||k===void 0?m[n]&&m["
-    "n]!==Object.prototype[n]?m=m[n]:m=m[n]={}:m[n]=k;})();\n";
+    "(function(){function b(a,c){var f=d;if(a.addEventListener)a."
+    "addEventListener(c,f,!1);else if(a.attachEvent)a.attachEvent"
+    "(\"on\"+c,f);else{var k=a[\"on\"+c];a[\"on\"+c]=function(){f.call("
+    "this);k&&k.call(this)}}};var e=!1;function g(a){a.getAttribu"
+    "te(\"rel\")==\"preload\"&&a.setAttribute(\"rel\",\"stylesheet\")}fun"
+    "ction h(a){(a=a.target)&&a.nodeName==\"LINK\"&&a.hasAttribute("
+    "\"data-pagespeed-deferred-css\")&&g(a)}function d(){for(var a="
+    "document.querySelectorAll(\"link[data-pagespeed-deferred-css]"
+    "\"),c=0;c<a.length;++c)g(a[c])}\nfunction l(){if(!e){e=!0;docu"
+    "ment.addEventListener(\"load\",h,!0);document.addEventListener"
+    "(\"error\",h,!0);var a=document.createElement(\"link\");a.relLis"
+    "t&&a.relList.supports&&a.relList.supports(\"preload\")||b(docu"
+    "ment,\"DOMContentLoaded\");b(window,\"load\");d()}}var m=[\"pages"
+    "peed\",\"CriticalCssLoader\",\"Run\"],n=this||self;m[0]in n||type"
+    "of n.execScript==\"undefined\"||n.execScript(\"var \"+m[0]);for("
+    "var p;m.length&&(p=m.shift());)m.length||l===void 0?n[p]&&n["
+    "p]!==Object.prototype[p]?n=n[p]:n=n[p]={}:n[p]=l;})();\n";
 
 }  // namespace net_instaweb

@@ -188,6 +188,24 @@ function Get-GuestIp {
     throw "Timed out after ${TimeoutSec}s waiting for a LIVE guest IP (MAC $macFmt, answering TCP/22) in the host neighbor table for '$InterfaceAlias'"
 }
 
+function Wait-VmMac {
+    # A new VM with a dynamic MAC reports 000000000000 until Hyper-V assigns
+    # the address, which happens after Start-VM returns; reading it at once
+    # sends Get-GuestIp hunting for 00-00-00-00-00-00 until it times out.
+    # Poll (bounded) until the adapter carries a real address.
+    param(
+        [Parameter(Mandatory)] [string]$VMName,
+        [int]$TimeoutSec = 60
+    )
+    $deadline = (Get-Date).AddSeconds($TimeoutSec)
+    do {
+        $mac = [string](Get-VMNetworkAdapter -VMName $VMName -ErrorAction Stop | Select-Object -First 1).MacAddress
+        if ($mac -and $mac -notmatch '^0+$') { return $mac }
+        Start-Sleep -Seconds 1
+    } while ((Get-Date) -lt $deadline)
+    throw "VM '$VMName' still has no MAC address ${TimeoutSec}s after Start-VM (got '$mac')"
+}
+
 function Wait-Ssh {
     param(
         [Parameter(Mandatory)] [string]$Ip,

@@ -165,6 +165,118 @@ TEST_F(CycloneCacheTest, Overwrite) {
   CheckGet("key1", "value2");
 }
 
+// Test-only seam exported by the Cyclone wrapper's C++23 translation unit
+// (cyclone_wrapper.cc) and deliberately not part of the vendored C ABI
+// header: arms a one-shot override that makes the next write onto an
+// existing key behave as if its pre-write remove had returned Busy (the
+// cross-process locks held by another process past the library's wait
+// cap), leaving the old entry in place.
+extern "C" void cyclone_cache_test_busy_next_pre_write_remove(void);
+
+// A write whose pre-write remove cannot complete must be dropped, not
+// stored over the live entry: overwriting in place is exactly what the
+// remove-first step exists to prevent.  The dropped write is counted as a
+// cache failure like any other, and the next uncontended write succeeds.
+TEST_F(CycloneCacheTest, BusyPreWriteRemoveDropsWrite) {
+  if (!IsHealthyTest()) {
+    GTEST_SKIP() << "CycloneCache not available";
+  }
+
+  std::unique_ptr<ThreadSystem> thread_system(Platform::CreateThreadSystem());
+  SimpleStats stats(thread_system.get());
+  CycloneCache::InitStats(&stats);
+
+  CycloneCache::Config config;
+  config.cache_path = StrCat(cache_path_, "_busy_remove");
+  config.cache_size_bytes = 10 * 1024 * 1024;
+  config.ram_cache_size_bytes = 0;
+  config.enable_checksum = true;
+  config.num_segments = 0;
+  CycloneCache cache(config, &stats, handler_.get());
+  ASSERT_TRUE(cache.IsHealthy());
+
+  CheckPut(&cache, "busy_key", "old_value");
+  CheckGet(&cache, "busy_key", "old_value");
+  EXPECT_EQ(1, stats.GetVariable(CycloneCache::kInserts)->Get());
+  EXPECT_EQ(0, stats.GetVariable(CycloneCache::kFailures)->Get());
+
+  // The next pre-write remove reports Busy, as a contended peer would
+  // cause; the remove is not performed and the entry stays live.
+  cyclone_cache_test_busy_next_pre_write_remove();
+  SharedString new_value("new_value");
+  cache.Put("busy_key", new_value);
+
+  // The write was dropped and counted, and reads still see the old entry.
+  EXPECT_EQ(1, stats.GetVariable(CycloneCache::kInserts)->Get());
+  EXPECT_EQ(1, stats.GetVariable(CycloneCache::kFailures)->Get());
+  CheckGet(&cache, "busy_key", "old_value");
+
+  // The seam is one-shot: the next overwrite takes the normal
+  // remove-then-write path and succeeds.
+  CheckPut(&cache, "busy_key", "new_value");
+  CheckGet(&cache, "busy_key", "new_value");
+  EXPECT_EQ(2, stats.GetVariable(CycloneCache::kInserts)->Get());
+  EXPECT_EQ(1, stats.GetVariable(CycloneCache::kFailures)->Get());
+
+  cache.ShutDown();
+}
+
+// Second test-only seam from the same translation unit (see the comment
+// above): arms a one-shot override that makes the next write behave as if
+// its pre-write presence check had returned Busy -- presence unknown, as
+// a writer holding the key's directory bucket past the seqlock wait
+// budget would cause.
+extern "C" void cyclone_cache_test_busy_next_pre_write_exists(void);
+
+// A write whose pre-write presence check cannot answer must also be
+// dropped, not stored blind: with presence unknown the slot may hold a
+// live entry, and overwriting in place is what the remove-first step
+// exists to prevent.  Counted as a cache failure like any other; the next
+// uncontended write succeeds.
+TEST_F(CycloneCacheTest, BusyPreWriteExistsDropsWrite) {
+  if (!IsHealthyTest()) {
+    GTEST_SKIP() << "CycloneCache not available";
+  }
+
+  std::unique_ptr<ThreadSystem> thread_system(Platform::CreateThreadSystem());
+  SimpleStats stats(thread_system.get());
+  CycloneCache::InitStats(&stats);
+
+  CycloneCache::Config config;
+  config.cache_path = StrCat(cache_path_, "_busy_exists");
+  config.cache_size_bytes = 10 * 1024 * 1024;
+  config.ram_cache_size_bytes = 0;
+  config.enable_checksum = true;
+  config.num_segments = 0;
+  CycloneCache cache(config, &stats, handler_.get());
+  ASSERT_TRUE(cache.IsHealthy());
+
+  CheckPut(&cache, "busy_key", "old_value");
+  CheckGet(&cache, "busy_key", "old_value");
+  EXPECT_EQ(1, stats.GetVariable(CycloneCache::kInserts)->Get());
+  EXPECT_EQ(0, stats.GetVariable(CycloneCache::kFailures)->Get());
+
+  // The next pre-write presence check reports Busy, as a contended writer
+  // would cause; presence is unknown and the write must be dropped.
+  cyclone_cache_test_busy_next_pre_write_exists();
+  SharedString new_value("new_value");
+  cache.Put("busy_key", new_value);
+
+  // The write was dropped and counted, and reads still see the old entry.
+  EXPECT_EQ(1, stats.GetVariable(CycloneCache::kInserts)->Get());
+  EXPECT_EQ(1, stats.GetVariable(CycloneCache::kFailures)->Get());
+  CheckGet(&cache, "busy_key", "old_value");
+
+  // The seam is one-shot: the next overwrite takes the normal
+  // exists-remove-write path and succeeds.
+  CheckPut(&cache, "busy_key", "new_value");
+  CheckGet(&cache, "busy_key", "new_value");
+  EXPECT_EQ(2, stats.GetVariable(CycloneCache::kInserts)->Get());
+  EXPECT_EQ(1, stats.GetVariable(CycloneCache::kFailures)->Get());
+
+  cache.ShutDown();
+}
+
 // Test multiple keys
 TEST_F(CycloneCacheTest, MultipleKeys) {
   if (!IsHealthyTest()) {

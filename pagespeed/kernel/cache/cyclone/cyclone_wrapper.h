@@ -310,6 +310,8 @@ CycloneError cyclone_cache_write(CycloneCacheHandle* cache, const char* key,
 //
 // Returns CYCLONE_OK on success.
 // Returns CYCLONE_NOT_FOUND if the key does not exist.
+// Returns CYCLONE_UNAVAILABLE if another process held the cache's
+// cross-process locks past the library's wait cap; nothing was removed.
 // Returns CYCLONE_NOT_INITIALIZED if the cache is not running.
 CycloneError cyclone_cache_delete(CycloneCacheHandle* cache, const char* key,
                                   size_t key_len);

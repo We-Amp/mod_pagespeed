@@ -56,11 +56,31 @@ __attribute__((visibility("default"))) ngx_module_t* ngx_modules[] = {
 __attribute__((visibility("default"))) char* ngx_module_names[] = {
     (char*)"ngx_pagespeed", (char*)"ngx_pagespeed_etag_filter", nullptr};
 
-// Module order string - determines when our filter runs relative to others.
-// This is used by nginx's dynamic module loader to insert the module
-// at the correct position in the filter chain.
-// Format: "module_name:position" where position is relative to other modules.
+// Where nginx's dynamic loader places this module's two filters relative to
+// the other filter modules. ngx_add_module scans the names listed AFTER the
+// module's own name and inserts it at the LOWEST index any of them already
+// holds (not necessarily the first one named), and filters run in reverse
+// list order. So: the rewriting filter runs immediately before the
+// compression filters -- after postpone, SSI, charset, xslt, image, sub,
+// addition, gunzip, userid and the headers filter (expires/add_header), and
+// after the copy filter has read file buffers into memory -- and the etag
+// filter runs immediately after compression, before the range header filter.
 __attribute__((visibility("default"))) char* ngx_module_order[] = {
-    (char*)"ngx_pagespeed", (char*)"ngx_pagespeed_etag_filter", nullptr};
+    (char*)"ngx_http_range_header_filter_module",
+    (char*)"ngx_pagespeed_etag_filter",
+    (char*)"ngx_http_gzip_filter_module",
+    (char*)"ngx_http_brotli_filter_module",
+    (char*)"ngx_pagespeed",
+    (char*)"ngx_http_postpone_filter_module",
+    (char*)"ngx_http_ssi_filter_module",
+    (char*)"ngx_http_charset_filter_module",
+    (char*)"ngx_http_xslt_filter_module",
+    (char*)"ngx_http_image_filter_module",
+    (char*)"ngx_http_sub_filter_module",
+    (char*)"ngx_http_addition_filter_module",
+    (char*)"ngx_http_gunzip_filter_module",
+    (char*)"ngx_http_userid_filter_module",
+    (char*)"ngx_http_headers_filter_module",
+    nullptr};
 
 }  // extern "C"

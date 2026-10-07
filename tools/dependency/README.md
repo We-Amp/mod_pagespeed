@@ -42,21 +42,64 @@ We adopt Envoy's approach (it is a large C++/Bazel project we already vendor):
    that the pinned version already contains the fix for (e.g. 47 of 54 high+ curl
    CVEs are pre-8.20.0 and filtered out).
 
-3. **Suppress** ([`cve-ignore.yaml`](cve-ignore.yaml)): a VEX-with-justification
+3. **Retire fixed-in-pin findings from the upstream feed** (`osv_feed` in
+   `cpe-map.yaml`): see [Upstream OSV feeds](#upstream-osv-feeds-fixed-in-pin)
+   below.
+
+4. **Suppress** ([`cve-ignore.yaml`](cve-ignore.yaml)): a VEX-with-justification
    ignore-list. Every entry **requires** a `justification` — the scanner rejects
    entries without one. This is the durable record of every "not affected"
-   decision for the C++ surface (the analog of `sbom/*.vex.json` for grype).
+   decision for the C++ surface (the analog of `sbom/*.vex.json` for grype). An
+   entry may carry `fixed_in: "<version>"`: it then applies only while the
+   pinned version is `>= fixed_in`.
 
-4. **Gate on completeness** ([`validate-deps.py`](validate-deps.py)): fails if any
+5. **Gate on completeness** ([`validate-deps.py`](validate-deps.py)): fails if any
    dep in `repositories.bzl` lacks a `cpe` + `release_date` (or an explicit
    `cpe: "N/A"` + justification). A new C++ dep therefore **cannot land
    unscanned**. This is the anti-drift guard, and it runs offline on every
-   PR/push.
+   PR/push. It also fails on a `fixed_in` ignore entry that is above the pin
+   (inconsistent), and on **any** ignore entry that no longer suppresses a
+   finding in the committed snapshot (stale), the same rule as a stale
+   `cpe-map.yaml` entry. A dead suppression would otherwise silently hide the
+   CVE again if NVD ever re-lists it. Prune it; the justification stays in git
+   history for re-triage.
 
 The dep enumeration and version resolution are **reused from
 `tools/generate-sbom.py`** (its `CPP_DEPS` list + `parse_bzl_constants()`), so
 the SBOM and this matcher can never disagree about which deps exist or what
 version is pinned.
+
+## Upstream OSV feeds (fixed in pin)
+
+Upstream projects often publish their advisories on release day and NVD days
+later. A CVE fixed *by* the pinned release is then published after its
+`release_date`, so the date filter keeps it, and every bump used to need one
+hand-written "fixed in the pinned version" suppression per CVE (35 of them for
+curl 8.20.0 through 8.22.0).
+
+For a dep whose upstream publishes its own OSV feed, `cpe-map.yaml` records it
+(`osv_feed: "https://curl.se/docs/vuln.json"` for curl). The scanner reads the
+feed's SEMVER ranges for the CVE (matched through `aliases`) and drops the
+finding when the pinned version is **not affected and a `fixed` event is at or
+below it**, using the OSV range evaluation rules and dotted-numeric version
+comparison. Checking only "some `fixed` <= pin" would be wrong: curl backports
+fixes (for example fixed 8.20.1 on the 8.20 branch while 8.21.0 stays
+affected). Dropped CVEs are printed in a separate **"Fixed in pin per upstream
+feed"** section and listed under `fixed_in_pin` in the JSON report; they are not
+hidden.
+
+The feed is captured into `nvd-snapshot.json` (`osv_feeds`, keyed by URL,
+pruned to each record's id, CVE aliases and SEMVER events) by the same daily
+refresh, so the per-PR scan stays offline and reproducible. If the daily fetch
+of a feed fails, the previous snapshot copy is kept. If the feed is missing from
+the snapshot or malformed, the scanner prints a warning for that dep and falls
+back to NVD findings plus the ignore list, so the blocking gate reports those
+findings rather than passing quietly.
+
+Use only a feed the upstream project itself publishes. For a dep without one,
+the `fixed_in` field on an ignore entry is the lighter tool: it stops applying
+if the pin ever drops below the fix, and `validate-deps.py` flags it once it
+suppresses nothing (as it does for every entry).
 
 ## The reproducible NVD snapshot (per-PR offline matching)
 
@@ -70,7 +113,9 @@ seconds**:
 > **[`nvd-snapshot.json`](nvd-snapshot.json)** — the only fields the matcher
 > reads, per CPE: each CVE's `id`, `published`, `vulnStatus` (only when
 > `Rejected`), the English description, and the single highest-priority CVSS
-> base score + severity. ~300 KB for the 19 CPE'd deps / ~380 CVEs. Deterministic
+> base score + severity. Since schema 2 it also carries `osv_feeds`: each
+> upstream OSV feed named in `cpe-map.yaml`, pruned to record id, CVE aliases
+> and SEMVER range events (a schema-1 file still loads, without feeds). ~300 KB for the 19 CPE'd deps / ~380 CVEs. Deterministic
 > (sorted CPE keys, CVEs sorted by id, `sort_keys`, trailing newline) so the
 > daily refresh produces a clean diff and a re-run reproduces byte-for-byte.
 
@@ -90,11 +135,20 @@ seconds**:
 ### How it refreshes
 
 The daily `nvd-scan` job (08:00 UTC + manual dispatch) hits NVD live with
-`--refresh`, rebuilds the snapshot with `--build-snapshot`, and **commits it back
-to `master`**. Because the output is deterministic, an unchanged feed is a no-op
-commit (skipped). It also still files/closes the findings issue and uploads the
-report — exactly as before. So the committed snapshot is at most ~24 h stale,
-and the per-PR job always scans current data.
+`--refresh`, rebuilds the snapshot with `--build-snapshot`, and proposes it to
+`master` as a PR from `bot/nvd-snapshot-refresh` (force-pushed by each run, one
+commit on top of master; opened with a user token, so the per-PR jobs run on
+it). Because the output is deterministic, an unchanged payload proposes nothing.
+It also files/closes the findings issue and uploads the report. The committed
+snapshot is as fresh as the last merged refresh PR.
+
+**Stale suppressions on a refresh.** New NVD data can make a `cve-ignore.yaml`
+entry stale (NVD re-maps, rejects or rescores the CVE). The refresh job runs
+`validate-deps.py` against the rebuilt snapshot and lists such entries in the
+PR body, and that PR's completeness gate fails. Prune the entry with a commit
+on `bot/nvd-snapshot-refresh` and merge the same day, before the next run
+force-pushes the branch. A pruning PR against master alone cannot pass: master's
+older snapshot still lists the CVE, so its per-PR scan would report it.
 
 ### How the PR job uses it
 
@@ -116,8 +170,9 @@ equal what a (slow) live scan would have produced from the same snapshot date.
 | `cpe-map.yaml` | curated `name → {cpe, release_date, justification?}` | committed; reviewed like code |
 | `cve_scan.py` | NVD matcher (fetch + cache + snapshot + date-filter + report) | per-PR (snapshot), **daily** (live refresh) |
 | `nvd-snapshot.json` | committed compact NVD mirror (per-CPE minimal CVE records) | **committed**; refreshed daily, scanned per-PR |
-| `cve-ignore.yaml` | VEX-style suppression list (justification mandatory) | read by `cve_scan.py` |
-| `validate-deps.py` | completeness / anti-drift gate | **every PR/push** (fast, offline) |
+| `cve-ignore.yaml` | VEX-style suppression list (justification mandatory, optional `fixed_in`) | read by `cve_scan.py` |
+| `validate-deps.py` | completeness / anti-drift gate, `fixed_in` consistency, staleness of every ignore entry | **every PR/push** (fast, offline) |
+| `../../test/tools/dependency/cve_scan_test.py` | unit tests (version order, OSV rule, fallback, `fixed_in`, stale entries) | **every PR/push** touching this surface |
 | `.cve-cache/` | cached raw NVD responses + JSON report | gitignored, never committed |
 
 ## Usage

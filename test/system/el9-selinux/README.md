@@ -167,9 +167,19 @@ also works off-host). Phases, mirroring the container rehearsal:
    auditd up, tooling; records the audit-log position.
 1. fixture — `/var/www/html/upgrade-fixture/` with an image, a stylesheet, a
    page; `restorecon` so it is `httpd_sys_content_t`.
-2. baseline — `install.sh` + `dnf install mod-pagespeed` (1.15 from the
-   public repository), a customized conffile, the web server enabled;
-   proves 1.15 optimizes (version header, rewritten URL, smaller image).
+2. baseline — `install.sh` + `dnf install mod-pagespeed-V`, where V is the
+   newest GA version the public repository publishes that is strictly older
+   than `--rc` (1.15.0 while `--rc` is 1.16.x; read with `dnf -y list
+   --showduplicates`, same rule as the container rehearsal;
+   `--baseline-prefix` narrows it), the documented EL prerequisite
+   `setsebool -P httpd_can_network_connect 1` (`docs/install-apache.md`,
+   `RELEASE_NOTES.md` "Action required when upgrading": the module's
+   fetcher reaches the server over loopback, which the stock policy denies
+   `httpd_t`; asserted `on`), a customized conffile, the web server
+   enabled; asserts the installed version is that pin and older than
+   `--rc`, and proves the baseline optimizes (version header, rewritten
+   URL, smaller image). The pin keeps the run an upgrade once the version
+   under test is itself published.
    `--baseline-selinux rw-content` (default) first labels the module's own
    cache and log directories web-server-writable (see *Findings* below for
    why); `none` keeps default labels. AVCs during this phase are reported
@@ -186,7 +196,10 @@ also works off-host). Phases, mirroring the container rehearsal:
    `notifications.received` counter moves (the module reaches the socket),
    a URL 1.15 never saw is served smaller (in-place optimization), SELinux
    still enforcing, and **zero AVC/USER_AVC denials since the upgrade began
-   for `comm=httpd` and for `comm=pagespeed-optimizer`**.
+   whose source domain is `httpd_t` or the daemon's (`pagespeed_t`)**. The
+   gate keys on `scontext=`, not on `comm=`: the module's own threads carry
+   other names (its fetcher's denials arrive as `comm="curl_poll"` in
+   `httpd_t`), which a `comm=httpd` filter misses.
 5. diagnostics into `--artifacts`: `selinux-status.txt`, `avc-since-*.txt`
    (`ausearch -i`), `audit2allow*.te` (the rules a policy would need),
    `sealert.txt` (if `setroubleshoot-server` is installed), `semodule
@@ -203,8 +216,8 @@ and end:
 
 | Check | Meaning |
 |---|---|
-| `AVC/USER_AVC denials for comm=httpd since the upgrade: 0` | `httpd_t` was never denied the cache volume (`{ read write open map }` on the volume file, `search` on the dir) or the notify socket (`write` on the notify sock_file, `connectto` on the daemon's stream socket). One measured stock class is excluded and reported separately: the root httpd parent's `SO_SNDBUFFORCE` `net_admin` denial (rehearsal §4.3: not pagespeed's, dontaudited by the distro on purpose, surfaced only because `--disable-dontaudit` disables dontaudit for the run; the shipped policy carries no allow for it — see `avc_stock_net_admin` in the driver) |
-| `... for comm=pagespeed-optimizer since the upgrade: 0` | the daemon's own domain was never denied (relevant with a policy that confines it) |
+| `AVC/USER_AVC denials for the httpd_t domain since the upgrade: 0` | `httpd_t` was never denied the cache volume (`{ read write open map }` on the volume file, `search` on the dir) or the notify socket (`write` on the notify sock_file, `connectto` on the daemon's stream socket). One measured stock class is excluded and reported separately: the root httpd parent's `SO_SNDBUFFORCE` `net_admin` denial (rehearsal §4.3: not pagespeed's, dontaudited by the distro on purpose, surfaced only because `--disable-dontaudit` disables dontaudit for the run; the shipped policy carries no allow for it — see `avc_stock_net_admin` in the driver) |
+| `... for the daemon domain (pagespeed_t) since the upgrade: 0` | the daemon's own domain was never denied (relevant with a policy that confines it) |
 | `daemon notification counter moved` | the module really reached the socket |
 | `post-upgrade in-place optimization: Puzzle-after-upgrade.jpg served at N bytes` | in-place optimization works through the daemon |
 | `web-server child still runs confined as httpd_t` | the run measured the policy, not an unconfined web server |

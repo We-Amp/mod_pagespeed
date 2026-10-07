@@ -34,6 +34,10 @@ import pathlib
 import time
 from typing import Callable, Dict, Optional
 
+# The admin console's cache actions answer only a same-origin POST that
+# carries this header; a GET answers 405.
+_SAME_ORIGIN = {"X-Requested-With": "XMLHttpRequest"}
+
 import pytest
 
 from pagespeed_test_framework import (
@@ -252,7 +256,8 @@ class TestCacheFlushStatistics:
 
         The IIS rig runs with EnableCachePurge on, so the live flush path
         is the purge machinery, not the legacy cache.flush file-watch:
-        GET /pagespeed_admin/cache?purge=* routes (the dead IisAdminHandler
+        POST /pagespeed_global_admin/cache?purge=* (whole-cache purge is
+        global-admin only) routes (the dead IisAdminHandler
         was removed, so this is the live path) through AdminSite::PurgeHandler
         -> PurgeContext::SetCachePurgeGlobalTimestampMs, and the next
         request's FlushCacheIfNecessary -> PollFileSystem applies the new
@@ -265,10 +270,10 @@ class TestCacheFlushStatistics:
         stats_before = client.get_statistics(stats_path=server_config.stats_path)
         initial_count = stats_before.get("cache_flush_count", 0)
 
-        # Drive a whole-cache purge through the live admin path.
-        purge_url = f"{server_config.admin_path}/cache?purge=*"
-        response = client.get(purge_url)
-        require_no_auth_gate(response, "Admin endpoint /pagespeed_admin")
+        # Drive a whole-cache purge through the live global admin path.
+        purge_url = f"{server_config.global_admin_path}/cache?purge=*"
+        response = client.post(purge_url, headers=_SAME_ORIGIN)
+        require_no_auth_gate(response, "Admin endpoint /pagespeed_global_admin")
         require_status_ok(response, "Cache purge endpoint")
 
         # The counter moves when the next pagespeed-handled request's
@@ -461,7 +466,9 @@ class TestCompressedCache:
 class TestCachePurge:
     """Tests for cache purge via AdminSite::PrintCaches.
 
-    Routed by GET /pagespeed_admin/cache?purge=URL. The /cache prefix in
+    Routed by a same-origin POST (X-Requested-With: XMLHttpRequest) to
+    /pagespeed_admin/cache?purge=URL; the whole-cache purge (purge=*) and
+    URLs of other hosts go to /pagespeed_global_admin. The /cache prefix in
     the path is essential -- a bare /pagespeed_admin?purge=URL hits
     AdminSite::AdminPage with an empty leaf and 301-redirects to add a
     trailing slash (admin_site.cc:404). With /cache present, PrintCaches
@@ -471,7 +478,7 @@ class TestCachePurge:
     Note: the IIS-specific POST /cache?action=purge handler in
     iis_admin_handler.cc::HandleCachePurge is dead code (it is never
     dispatched; the module calls AdminPage directly),
-    so these tests target the cross-server GET path that AdminPage
+    so these tests target the cross-server POST path that AdminPage
     actually dispatches in 1.1 today.
     """
 
@@ -481,13 +488,13 @@ class TestCachePurge:
     ):
         """Purge endpoint should respond 200 + JSON regardless of whether
         EnableCachePurge is on or off."""
-        purge_url = f"{server_config.admin_path}/cache?purge=*"
-        response = client.get(purge_url)
+        purge_url = f"{server_config.global_admin_path}/cache?purge=*"
+        response = client.post(purge_url, headers=_SAME_ORIGIN)
 
         # The lane runs the admin endpoint without auth; a 403 from the
         # admin handler is a plausible regression, not an environment
         # condition.
-        require_no_auth_gate(response, "Admin endpoint /pagespeed_admin")
+        require_no_auth_gate(response, "Admin endpoint /pagespeed_global_admin")
 
         assert_http_status(response, 200)
         content_type = response.header("Content-Type").lower()
@@ -508,16 +515,17 @@ class TestCachePurge:
         {"success":false,"error":"Purging not enabled: please add '<directive>' to your configuration file."}
         with HTTP 200.
         """
+        # example.com is not the request's host, so the global admin.
         purge_url = (
-            f"{server_config.admin_path}/cache"
+            f"{server_config.global_admin_path}/cache"
             f"?purge=http://example.com/test.css"
         )
-        response = client.get(purge_url)
+        response = client.post(purge_url, headers=_SAME_ORIGIN)
 
         # The lane runs the admin endpoint without auth; a 403 from the
         # admin handler is a plausible regression, not an environment
         # condition.
-        require_no_auth_gate(response, "Admin endpoint /pagespeed_admin")
+        require_no_auth_gate(response, "Admin endpoint /pagespeed_global_admin")
 
         assert_http_status(response, 200)
         data = json.loads(response.text)
@@ -548,8 +556,10 @@ class TestCachePurge:
         ]
 
         for test_url in test_urls:
-            purge_url = f"{server_config.admin_path}/cache?purge={test_url}"
-            response = client.get(purge_url)
+            purge_url = (
+                f"{server_config.global_admin_path}/cache?purge={test_url}"
+            )
+            response = client.post(purge_url, headers=_SAME_ORIGIN)
 
             assert response.status != 500, (
                 f"Purge URL format '{test_url}' caused server error"

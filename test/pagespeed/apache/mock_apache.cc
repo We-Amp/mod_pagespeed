@@ -330,6 +330,10 @@ char* ap_construct_url(apr_pool_t* p, const char* uri, request_rec* r) {
   return apr_pstrdup(p, uri);
 }
 
+// The hook the ap_http_scheme() macro expands to.  Linked in by tests that
+// call into the in-place handler; the mock request is always plain http.
+const char* ap_run_http_scheme(const request_rec* r) { return "http"; }
+
 const char* ap_check_cmd_context(cmd_parms* cmd, unsigned forbidden) {
   // Return nullptr to indicate no error (context is allowed).
   return nullptr;

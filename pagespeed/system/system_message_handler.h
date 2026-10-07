@@ -33,6 +33,7 @@
 namespace net_instaweb {
 
 class AbstractMutex;
+class SharedCircularBuffer;
 class Timer;
 class Writer;
 
@@ -56,6 +57,11 @@ class SystemMessageHandler : public GoogleMessageHandler {
   // Dump contents of SharedCircularBuffer.
   bool Dump(Writer* writer) override;
 
+  // Dumps the buffer and reports its line count taken under the same lock as
+  // the dump (via SharedCircularBuffer::DumpWithCount), so `lines_written`
+  // is the cursor matching exactly the dumped content.
+  bool DumpWithCount(Writer* writer, int64* lines_written) override;
+
  protected:
   // Add messages to the SharedCircularBuffer.
   void AddMessageToBuffer(MessageType type, StringPiece formatted_message);
@@ -76,6 +82,12 @@ class SystemMessageHandler : public GoogleMessageHandler {
   Timer* timer_;
   std::unique_ptr<AbstractMutex> mutex_;
   Writer* buffer_;
+  // Set from set_buffer() when buff is actually a SharedCircularBuffer (the
+  // only kind of Writer this class is ever handed in production); nullptr
+  // for a test double such as StringWriter. Lets DumpWithCount() dump and
+  // read the real line count atomically, under one lock, without widening
+  // the Writer interface.
+  SharedCircularBuffer* shared_buffer_;
   // This handler is for internal use.
   // Some functions of SharedCircularBuffer need MessageHandler as argument,
   // We do not want to pass in another SystemMessageHandler to cause infinite

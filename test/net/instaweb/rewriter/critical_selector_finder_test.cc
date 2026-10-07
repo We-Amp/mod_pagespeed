@@ -309,6 +309,171 @@ TEST_F(CriticalSelectorFinderTest, NonceTimeout) {
   EXPECT_STREQ(".a", CriticalSelectorsString());
 }
 
+// When a page gains a selector (its stylesheet was changed), a report that
+// was requested before the change says nothing about the new selector. It
+// must not count, and the page has no current data until a browser that was
+// asked about the new set reports.
+TEST_F(CriticalSelectorFinderTest,
+       AReportFromBeforeTheSelectorsChangedIsIgnored) {
+  Beacon();
+  GoogleString nonce_before(last_beacon_metadata_.nonce);
+
+  candidates_.insert(".new");
+  Beacon();
+  GoogleString nonce_after(last_beacon_metadata_.nonce);
+  EXPECT_FALSE(finder_->HasCurrentBeaconData(rewrite_driver()));
+
+  StringSet selectors;
+  selectors.insert(".foo");
+  finder_->WriteCriticalSelectorsToPropertyCache(selectors, nonce_before,
+                                                 rewrite_driver());
+  EXPECT_STREQ("", CriticalSelectorsString());
+  EXPECT_FALSE(finder_->HasCurrentBeaconData(rewrite_driver()));
+
+  finder_->WriteCriticalSelectorsToPropertyCache(selectors, nonce_after,
+                                                 rewrite_driver());
+  EXPECT_STREQ(".foo", CriticalSelectorsString());
+  EXPECT_TRUE(finder_->HasCurrentBeaconData(rewrite_driver()));
+}
+
+TEST_F(CriticalSelectorFinderTest, EverySelectorBrowsersWereAskedAboutIsKnown) {
+  Beacon();
+  StringSet selectors;
+  selectors.insert(".foo");
+  WriteCriticalSelectorsToPropertyCache(selectors);
+  EXPECT_STREQ(".foo", CriticalSelectorsString());
+  EXPECT_STREQ("#bar,#c,.a,.b,.foo",
+               JoinCollection(finder_->GetKnownSelectors(rewrite_driver()),
+                              ","));
+  EXPECT_TRUE(finder_->TracksCandidateSelectors());
+}
+
+// Reports stored by earlier releases were collected with a different rule
+// for what counts as critical. They are kept under another name and are not
+// read.
+TEST_F(CriticalSelectorFinderTest, DataCollectedUnderTheOldPropertyNameIsNotRead) {
+  CriticalKeys old_data;
+  CriticalKeys::KeyEvidence* evidence = old_data.add_key_evidence();
+  evidence->set_key(".foo");
+  evidence->set_support(10);
+  old_data.set_valid_beacons_received(3);
+  ASSERT_EQ(kPropertyCacheUpdateOk,
+            UpdateInPropertyCache(old_data, server_context()->beacon_cohort(),
+                                  "critical_selectors", true,
+                                  rewrite_driver()->property_page()));
+  EXPECT_STREQ("", CriticalSelectorsString());
+  EXPECT_FALSE(finder_->HasCurrentBeaconData(rewrite_driver()));
+}
+
+// A report that was cut short at the beacon's size limit names only part of
+// the matching selectors. Counting it would make the rest look unmatched.
+// It uses up its nonce, changes no support, and the page has no current
+// data until a complete report arrives.
+TEST_F(CriticalSelectorFinderTest, ATruncatedReportIsNotCurrent) {
+  Beacon();
+  StringSet selectors;
+  selectors.insert(".foo");
+  WriteCriticalSelectorsToPropertyCache(selectors);
+  EXPECT_STREQ(".foo", CriticalSelectorsString());
+  EXPECT_TRUE(finder_->HasCurrentBeaconData(rewrite_driver()));
+
+  Beacon();
+  GoogleString truncated_nonce(last_beacon_metadata_.nonce);
+  StringSet partial;
+  partial.insert(".a");
+  BeaconCriticalSelectorFinder::WriteCriticalSelectorsToPropertyCacheFromBeacon(
+      partial, truncated_nonce, true /* truncated */,
+      server_context()->page_property_cache(),
+      server_context()->beacon_cohort(), rewrite_driver()->property_page(),
+      message_handler(), factory()->mock_timer());
+  EXPECT_STREQ(".foo", CriticalSelectorsString());
+  EXPECT_FALSE(finder_->HasCurrentBeaconData(rewrite_driver()));
+
+  // The nonce is spent: the same report sent again as complete is refused.
+  finder_->WriteCriticalSelectorsToPropertyCache(partial, truncated_nonce,
+                                                 rewrite_driver());
+  EXPECT_STREQ(".foo", CriticalSelectorsString());
+  EXPECT_FALSE(finder_->HasCurrentBeaconData(rewrite_driver()));
+
+  // A complete report makes the data current again.
+  Beacon();
+  WriteCriticalSelectorsToPropertyCache(selectors);
+  EXPECT_STREQ(".foo", CriticalSelectorsString());
+  EXPECT_TRUE(finder_->HasCurrentBeaconData(rewrite_driver()));
+}
+
+// A selector that no report has named for a while loses its support. It
+// stays registered: the next page view must not take it for a new selector,
+// which would leave the page without current data.
+TEST_F(CriticalSelectorFinderTest,
+       ASelectorThatStopsMatchingStaysKnownAndThePageStaysCurrent) {
+  Beacon();
+  StringSet selectors;
+  selectors.insert(".a");
+  WriteCriticalSelectorsToPropertyCache(selectors);
+
+  selectors.clear();
+  selectors.insert(".b");
+  for (int i = 0; i < finder_->SupportInterval(); ++i) {
+    Beacon();
+    WriteCriticalSelectorsToPropertyCache(selectors);
+    factory()->mock_timer()->AdvanceMs(
+        options()->beacon_reinstrument_time_sec() * Timer::kSecondMs *
+        kLowFreqBeaconMult);
+  }
+  EXPECT_STREQ(".b", CriticalSelectorsString());
+  EXPECT_STREQ("#bar,#c,.a,.b,.foo",
+               JoinCollection(finder_->GetKnownSelectors(rewrite_driver()),
+                              ","));
+
+  Beacon();
+  EXPECT_TRUE(finder_->HasCurrentBeaconData(rewrite_driver()));
+}
+
+// Once reports agree, a page is asked again after twelve intervals, so a
+// page whose markup started using an existing rule is not served for long
+// without that rule in its inline CSS.
+TEST_F(CriticalSelectorFinderTest,
+       APageInSteadyStateIsAskedAgainAfterTwelveIntervals) {
+  StringSet selectors;
+  selectors.insert(".foo");
+  for (int i = 0; i < kHighFreqBeaconCount; ++i) {
+    Beacon();
+    WriteCriticalSelectorsToPropertyCache(selectors);
+  }
+  Beacon();  // This view is instrumented; the following ones wait.
+
+  const int64 interval_ms =
+      options()->beacon_reinstrument_time_sec() * Timer::kSecondMs;
+  WriteBackAndResetDriver();
+  factory()->mock_timer()->AdvanceMs(interval_ms *
+                                     (kCriticalSelectorLowFreqBeaconMult - 1));
+  VerifyNoBeaconing();
+  WriteBackAndResetDriver();
+  factory()->mock_timer()->AdvanceMs(interval_ms);
+  VerifyBeaconing();
+}
+
+// A report that names a selector which had no support is news about the
+// page's markup: the very next view is asked again, without waiting out the
+// long interval.
+TEST_F(CriticalSelectorFinderTest,
+       ANewlyMatchingSelectorPutsThePageBackOnTheShortInterval) {
+  StringSet selectors;
+  selectors.insert(".foo");
+  for (int i = 0; i < kHighFreqBeaconCount; ++i) {
+    Beacon();
+    WriteCriticalSelectorsToPropertyCache(selectors);
+  }
+  Beacon();  // Steady state: the next view would be asked much later.
+
+  selectors.insert(".a");
+  WriteCriticalSelectorsToPropertyCache(selectors);
+  EXPECT_STREQ(".a,.foo", CriticalSelectorsString());
+  EXPECT_TRUE(finder_->HasCurrentBeaconData(rewrite_driver()));
+  VerifyBeaconing();
+}
+
 // Make sure that inserting a non-candidate critical selector has no effect.
 TEST_F(CriticalSelectorFinderTest, StoreNonCandidate) {
   Beacon();

@@ -29,6 +29,7 @@
 #include "net/instaweb/rewriter/public/rewrite_driver_factory.h"
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "net/instaweb/util/public/property_cache.h"
+#include "ngx_daemon_record_completion.h"
 #include "ngx_message_handler.h"
 #include "ngx_rewrite_options.h"
 #include "ngx_server_context.h"
@@ -275,6 +276,10 @@ void NgxRewriteDriverFactory::InitStats(Statistics* statistics) {
   InPlaceResourceRecorder::InitStats(statistics);
   CurlUrlAsyncFetcher::InitStats(statistics);
   ps_webbotauth_init_stats(statistics);
+  // The daemon record arm's drop counter.  Registration has to live HERE,
+  // run for every statistics object before that object is initialised:
+  // adding a variable to an already-frozen shared-memory segment is fatal.
+  ps_daemon_record_completion_init_stats(statistics);
 }
 
 }  // namespace net_instaweb

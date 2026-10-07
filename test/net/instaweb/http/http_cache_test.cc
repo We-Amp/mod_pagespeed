@@ -580,6 +580,30 @@ TEST_F(HTTPCacheTest, RememberFetchFailed) {
       Find(kUrl, kFragment, &value, &meta_data_out));
 }
 
+// A transient failure (a fetch that did not complete, or a 5xx) is remembered
+// for seconds, not the five minutes a 404 gets.
+TEST_F(HTTPCacheTest, RememberTransientFailure) {
+  ResponseHeaders meta_data_out;
+  http_cache_->RememberFailure(kUrl, kFragment, kFetchStatusTransientError,
+                               &message_handler_);
+  HTTPValue value;
+  EXPECT_EQ(HTTPCache::FindResult(HTTPCache::kRecentFailure,
+                                  kFetchStatusTransientError),
+            Find(kUrl, kFragment, &value, &meta_data_out));
+
+  // Eleven seconds on, the cache lets us try the fetch again ...
+  mock_timer_.AdvanceMs(11 * Timer::kSecondMs);
+  EXPECT_EQ(kNotFoundResult, Find(kUrl, kFragment, &value, &meta_data_out));
+
+  // ... whereas a 4xx from the origin is still remembered at that point.
+  http_cache_->RememberFailure(kUrl, kFragment, kFetchStatus4xxError,
+                               &message_handler_);
+  mock_timer_.AdvanceMs(11 * Timer::kSecondMs);
+  EXPECT_EQ(
+      HTTPCache::FindResult(HTTPCache::kRecentFailure, kFetchStatus4xxError),
+      Find(kUrl, kFragment, &value, &meta_data_out));
+}
+
 // Verifies that the cache will 'remember' 'non-cacheable' according to the
 // appropriate policy.
 TEST_F(HTTPCacheTest, RememberNotCacheable200) {

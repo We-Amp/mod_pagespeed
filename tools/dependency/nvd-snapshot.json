@@ -1192,6 +1192,28 @@
      "descriptions": [
       {
        "lang": "en",
+       "value": "CNCF Envoy through 1.13.0 may consume excessive amounts of memory when proxying HTTP/1.1 requests or responses with many small (i.e. 1 byte) chunks."
+      }
+     ],
+     "id": "CVE-2020-8659",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 7.5,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2020-03-04T21:15:11.340"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
        "value": "CNCF Envoy through 1.13.0 TLS inspector bypass. TLS inspector could have been bypassed (not recognized as a TLS client) by a client using only TLS 1.3. Because TLS extensions (SNI, ALPN) were not inspected, those connections might have been matched to a wrong filter chain, possibly bypassing some security restrictions in the process."
       }
      ],
@@ -1214,6 +1236,28 @@
      "descriptions": [
       {
        "lang": "en",
+       "value": "CNCF Envoy through 1.13.0 may consume excessive amounts of memory when responding internally to pipelined requests."
+      }
+     ],
+     "id": "CVE-2020-8661",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 7.5,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2020-03-04T21:15:11.433"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
        "value": "Envoy version 1.14.2, 1.13.2, 1.12.4 or earlier may exhaust file descriptors and/or memory when accepting too many connections."
       }
      ],
@@ -1229,6 +1273,28 @@
       ]
      },
      "published": "2020-07-01T15:15:15.877"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "CNCF Envoy through 1.13.0 has incorrect Access Control when using SDS with Combined Validation Context. Using the same secret (e.g. trusted CA) across many resources together with the combined validation context could lead to the \u201cstatic\u201d part of the validation context to be not applied, even though it was visible in the active config dump."
+      }
+     ],
+     "id": "CVE-2020-8664",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 5.3,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2020-03-04T21:15:11.497"
     }
    },
    {
@@ -7271,7 +7337,7 @@
      "descriptions": [
       {
        "lang": "en",
-       "value": "curl's websocket code did not update the 32 bit mask pattern for each new  outgoing frame as the specification says. Instead it used a fixed mask that persisted and was used throughout the entire connection.  A predictable mask pattern allows for a malicious server to induce traffic between the two communicating parties that could be interpreted by an involved proxy (configured or transparent) as genuine, real, HTTP traffic with content and thereby poison its cache. That cached poisoned content could then be served to all users of that proxy."
+       "value": "curl's WebSocket code did not update the 32-bit mask pattern for each new outgoing frame as the specification says. Instead it used a fixed mask that persisted and was used throughout the entire connection.  A predictable mask pattern allows for a malicious server to induce traffic between the two communicating parties that could be interpreted by an involved proxy (configured or transparent) as genuine, real, HTTP traffic with content and thereby poison its cache. That cached poisoned content could then be served to all users of that proxy."
       }
      ],
      "id": "CVE-2025-10148",
@@ -7337,7 +7403,7 @@
      "descriptions": [
       {
        "lang": "en",
-       "value": "When using `CURLOPT_PINNEDPUBLICKEY` option with libcurl or `--pinnedpubkey` with the curl tool,curl should check the public key of the server certificate to verify the peer.  This check was skipped in a certain condition that would then make curl allow the connection without performing the proper check, thus not noticing a possible impostor. To skip this check, the connection had to be done with QUIC with ngtcp2 built to use GnuTLS and the user had to explicitly disable the standard certificate verification."
+       "value": "When using `CURLOPT_PINNEDPUBLICKEY` option with libcurl or `--pinnedpubkey` with the curl tool, curl should check the public key of the server certificate to verify the peer.  This check was skipped in a certain condition that would then make curl allow the connection without performing the proper check, thus not noticing a possible impostor. To skip this check, the connection had to be done with QUIC with ngtcp2 built to use GnuTLS and the user had to explicitly disable the standard certificate verification."
       }
      ],
      "id": "CVE-2025-13034",
@@ -7403,7 +7469,7 @@
      "descriptions": [
       {
        "lang": "en",
-       "value": "When doing TLS related transfers with reused easy or multi handles and altering the  `CURLSSLOPT_NO_PARTIALCHAIN` option, libcurl could accidentally reuse a CA store cached in memory for which the partial chain option was reversed. Contrary to the user's wishes and expectations. This could make libcurl find and accept a trust chain that it otherwise would not."
+       "value": "When doing TLS related transfers with reused easy or multi handles and altering the `CURLSSLOPT_NO_PARTIALCHAIN` option, libcurl could accidentally reuse a CA store cached in memory for which the partial chain option was reversed. Contrary to the user's wishes and expectations. This could make libcurl find and accept a trust chain that it otherwise would not."
       }
      ],
      "id": "CVE-2025-14819",
@@ -7535,7 +7601,7 @@
      "descriptions": [
       {
        "lang": "en",
-       "value": "1. A cookie is set using the `secure` keyword for `https://target`   2. curl is redirected to or otherwise made to speak with `http://target` (same     hostname, but using clear text HTTP) using the same cookie set   3. The same cookie name is set - but with just a slash as path (`path=\\\"/\\\",`).    Since this site is not secure, the cookie *should* just be ignored. 4. A bug in the path comparison logic makes curl read outside a heap buffer    boundary  The bug either causes a crash or it potentially makes the comparison come to the wrong conclusion and lets the clear-text site override the contents of the secure cookie, contrary to expectations and depending on the memory contents immediately following the single-byte allocation that holds the path.  The presumed and correct behavior would be to plainly ignore the second set of the cookie since it was already set as secure on a secure host so overriding it on an insecure host should not be okay."
+       "value": "1. A cookie is set using the `secure` keyword for `https://target` 2. curl is redirected to or otherwise made to speak with `http://target` (same    hostname, but using clear text HTTP) using the same cookie set 3. The same cookie name is set - but with only a slash as path (`path=\"/\"`).    Since this site is not secure, the cookie *should* be ignored. 4. A bug in the path comparison logic makes curl read outside a heap buffer    boundary  The bug either causes a crash or it potentially makes the comparison come to the wrong conclusion and lets the clear-text site override the contents of the secure cookie, contrary to expectations and depending on the memory contents immediately following the single-byte allocation that holds the path.  The presumed and correct behavior would be to plainly ignore the second set of the cookie since it was already set as secure on a secure host so overriding it on an insecure host should not be okay."
       }
      ],
      "id": "CVE-2025-9086",
@@ -7645,7 +7711,7 @@
      "descriptions": [
       {
        "lang": "en",
-       "value": "Successfully using libcurl to do a transfer to a specific HTTP origin (`hostA`) with **Digest** authentication and then changing the origin to a different one (`hostB`) for a second transfer, reusing the same handle, makes libcurl wrongly pass on the  `Authorization:` header field meant for `hostA`, to `hostB`."
+       "value": "Successfully using libcurl to do a transfer to a specific HTTP origin (`hostA`) with **Digest** authentication and then changing the origin to a different one (`hostB`) for a second transfer, reusing the same handle, makes libcurl wrongly pass on the `Authorization:` header field meant for `hostA`, to `hostB`."
       }
      ],
      "id": "CVE-2026-11856",
@@ -7689,7 +7755,51 @@
      "descriptions": [
       {
        "lang": "en",
-       "value": "libcurl can in some circumstances reuse the wrong connection when asked to do an Negotiate-authenticated HTTP or HTTPS request.  libcurl features a pool of recent connections so that subsequent requests can reuse an existing connection to avoid overhead.  When reusing a connection a range of criterion must first be met. Due to a logical error in the code, a request that was issued by an application could wrongfully reuse an existing connection to the same server that was authenticated using different credentials. One underlying reason being that Negotiate sometimes authenticates *connections* and not *requests*, contrary to how HTTP is designed to work.  An application that allows Negotiate authentication to a server (that responds wanting Negotiate) with `user1:password1` and then does another operation to the same server also using Negotiate but with `user2:password2` (while the previous connection is still alive) - the second request wrongly reused the same connection and since it then sees that the Negotiate negotiation is already made, it just sends the request over that connection thinking it uses the user2 credentials when it is in fact still using the connection authenticated for user1...  The set of authentication methods to use is set with  `CURLOPT_HTTPAUTH`.  Applications can disable libcurl's reuse of connections and thus mitigate this problem, by using one of the following libcurl options to alter how connections are or are not reused: `CURLOPT_FRESH_CONNECT`, `CURLOPT_MAXCONNECTS` and `CURLMOPT_MAX_HOST_CONNECTIONS` (if using the curl_multi API)."
+       "value": "A flaw in the libcurl SASL negotiation for LDAP authentication allows an incomplete handshake sequence to be misinterpreted as a successful cryptographic verification. An attacker executing a Man-in-the-Middle (MITM) attack can inject a premature or shortcut response that bypasses complete peer validation."
+      }
+     ],
+     "id": "CVE-2026-13608",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 7.4,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2026-09-06T18:17:19.810"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "A flaw in libcurl's handling of HTTP/2 Server Push streams, when the parent handle is set to share connections with other handles, can lead to use-after-free in the cleanup process."
+      }
+     ],
+     "id": "CVE-2026-18924",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 9.1,
+         "baseSeverity": "CRITICAL"
+        }
+       }
+      ]
+     },
+     "published": "2026-09-06T18:17:20.553"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "libcurl can in some circumstances reuse the wrong connection when asked to do an Negotiate-authenticated HTTP or HTTPS request.  libcurl features a pool of recent connections so that subsequent requests can reuse an existing connection to avoid overhead.  When reusing a connection a range of criterion must first be met. Due to a logical error in the code, a request that was issued by an application could wrongfully reuse an existing connection to the same server that was authenticated using different credentials. One underlying reason being that Negotiate sometimes authenticates *connections* and not *requests*, contrary to how HTTP is designed to work.  An application that allows Negotiate authentication to a server (that responds wanting Negotiate) with `user1:password1` and then does another operation to the same server also using Negotiate but with `user2:password2` (while the previous connection is still alive) - the second request wrongly reused the same connection and since it then sees that the Negotiate negotiation is already made, it sends the request over that connection thinking it uses the user2 credentials when it is in fact still using the connection authenticated for user1...  The set of authentication methods to use is set with `CURLOPT_HTTPAUTH`.  Applications can disable libcurl's reuse of connections and thus mitigate this problem, by using one of the following libcurl options to alter how connections are or are not reused: `CURLOPT_FRESH_CONNECT`, `CURLOPT_MAXCONNECTS` and `CURLMOPT_MAX_HOST_CONNECTIONS` (if using the curl_multi API)."
       }
      ],
      "id": "CVE-2026-1965",
@@ -7704,6 +7814,28 @@
       ]
      },
      "published": "2026-03-11T11:15:59.177"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "A flaw in libcurl makes it wrongly reuse an HTTP connection setup for a given hostname using Negotiate authentication, when the initial request is done using empty credentials. This can make user B's request get sent over user A's previously authenticated connection."
+      }
+     ],
+     "id": "CVE-2026-19931",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 9.8,
+         "baseSeverity": "CRITICAL"
+        }
+       }
+      ]
+     },
+     "published": "2026-09-06T18:17:20.733"
     }
    },
    {
@@ -7821,7 +7953,7 @@
      "descriptions": [
       {
        "lang": "en",
-       "value": "libcurl might in some circumstances reuse the wrong connection for SMB(S) transfers.  libcurl features a pool of recent connections so that subsequent requests can reuse an existing connection to avoid overhead.  When reusing a connection a range of criteria must be met. Due to a logical error in the code, a network transfer operation that was requested by an application could wrongfully reuse an existing SMB connection to the same server that was using a different 'share' than the new subsequent transfer should.  This could in unlucky situations lead to the download of the wrong file or the upload of a file to the wrong place. When this happens, the same credentials are used and the server name is the same."
+       "value": "libcurl might in some circumstances reuse the wrong connection for SMB(S) transfers.  libcurl features a pool of recent connections so that subsequent requests can reuse an existing connection to avoid overhead.  When reusing a connection a range of criteria must be met. Due to a logical error in the code, a network transfer operation that was requested by an application could wrongfully reuse an existing SMB connection to the same server that was using a different \"share\" than the new subsequent transfer should.  This could in unlucky situations lead to the download of the wrong file or the upload of a file to the wrong place. When this happens, the same credentials are used and the server name is the same."
       }
      ],
      "id": "CVE-2026-5773",
@@ -7953,6 +8085,138 @@
      "descriptions": [
       {
        "lang": "en",
+       "value": "When performing transfers via libcurl\u2019s multi interface, pooled TLS connections can outlive their originating easy handles. In OpenSSL 3 provider configurations, libcurl attaches an allocated library context to the easy handle's state and passes it to OpenSSL without acquiring an ownership reference; destroying the easy handle prematurely frees this context while the active connection retains a dangling pointer, leading to a heap-use-after-free upon subsequent I/O or post-handshake operations."
+      }
+     ],
+     "id": "CVE-2026-80229",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 7.5,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2026-09-06T18:17:22.217"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "When `CURLOPT_PINNEDPUBLICKEY` is configured alongside options that disable standard peer verification (`CURLOPT_SSL_VERIFYPEER = 0` and `CURLOPT_SSL_VERIFYHOST = 0`), libcurl fails to enforce public key pinning on connections established without a presented server certificate. Bypassing the pinning check under these disabled-verification conditions allows unauthenticated connections to succeed when they should be rejected."
+      }
+     ],
+     "id": "CVE-2026-80230",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 7.5,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2026-09-06T18:17:22.327"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "A flaw in libcurl makes it wrongly reuse an existing HTTPS connection setup for a given hostname even when using a different Native CA Store setting (`CURLSSLOPT_NATIVE_CA`) than when the connection was created."
+      }
+     ],
+     "id": "CVE-2026-80231",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 7.5,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2026-09-06T18:17:22.500"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "A `Set-Cookie:` header using tab (horizontal tab, ASCII code 9) instead of space (ascii code 32) immediately before the `Secure` attribute causes curl to store the cookie without its Secure flag. The cookie might then wrongfully be sent over plaintext HTTP on subsequent requests to the same host."
+      }
+     ],
+     "id": "CVE-2026-80255",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 7.5,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2026-09-06T18:17:22.623"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "With the wolfSSL backend, when CA caching is enabled and an `CURLOPT_SSL_CTX_FUNCTION` callback replaces the trust store, libcurl can silently reinstall the cached store after the callback returns. A certificate trusted by the cached store but rejected by the callback-selected store is then incorrectly accepted."
+      }
+     ],
+     "id": "CVE-2026-82208",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 7.5,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2026-09-06T18:17:22.733"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "When libpsl support is enabled, libcurl fails to enforce the Public Suffix List boundary check when processing a `Set-Cookie` header where the `Domain` attribute explicitly matches an origin host that is itself a public suffix (e.g., `Domain=co.uk` set by `co.uk`).  Instead of coercing it into a strict host-only cookie, libcurl saves the cookie with wildcard domain scope (`.co.uk`). Consequently, the cookie is inappropriately included in subsequent outbound requests or HTTP redirects to arbitrary sibling subdomains under the same public suffix (e.g., `attacker.co.uk`)."
+      }
+     ],
+     "id": "CVE-2026-82209",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 8.2,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2026-09-06T18:17:22.847"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
        "value": "A vulnerability exists where a new transfer that uses STARTTLS to upgrade the connection might reuse an existing live connection even though the TLS configuration mismatches so it should not."
       }
      ],
@@ -7975,7 +8239,7 @@
      "descriptions": [
       {
        "lang": "en",
-       "value": "libcurl might in some circumstances reuse the wrong connection when asked to do Negotiate-authenticated ones, even when they are set to use different 'services'.  libcurl features a pool of recent connections so that subsequent requests can reuse an existing connection to avoid overhead.  When reusing a connection a range of criteria must be met. Due to a logical error in the code, a request that was issued by an application could wrongfully reuse an existing connection to the same server that was authenticated using different services."
+       "value": "libcurl might in some circumstances reuse the wrong connection when asked to do Negotiate-authenticated ones, even when they are set to use different \"services\".  libcurl features a pool of recent connections so that subsequent requests can reuse an existing connection to avoid overhead.  When reusing a connection a range of criteria must be met. Due to a logical error in the code, a request that was issued by an application could wrongfully reuse an existing connection to the same server that was authenticated using different services."
       }
      ],
      "id": "CVE-2026-8458",
@@ -7997,7 +8261,7 @@
      "descriptions": [
       {
        "lang": "en",
-       "value": "A flaw in curl\u2019s cookie parsing logic allows a malicious HTTP server to set 'super cookies' that bypass the Public Suffix List check. This enables an attacker-controlled origin to inject cookies that curl subsequently scopes and transmits to unrelated third-party domains."
+       "value": "A flaw in curl\u2019s cookie parsing logic allows a malicious HTTP server to set \"super cookies\" that bypass the Public Suffix List check. This enables an attacker-controlled origin to inject cookies that curl subsequently scopes and transmits to unrelated third-party domains."
       }
      ],
      "id": "CVE-2026-8924",
@@ -8041,7 +8305,7 @@
      "descriptions": [
       {
        "lang": "en",
-       "value": "When asking curl to use a `.netrc` file to find credentials and at the same time specifying a URL with a username(without a password), like `https://user@example.com/`, curl could wrongly get and use the password for *another* user set in the `.netrc` file for that host if such a one exists and there is no match for the specified user."
+       "value": "When asking curl to use a `.netrc` file to find credentials and at the same time specifying a URL with a username (without a password), like `https://user@example.com/`, curl could wrongly get and use the password for *another* user set in the `.netrc` file for that host if such a one exists and there is no match for the specified user."
       }
      ],
      "id": "CVE-2026-8926",
@@ -8173,7 +8437,7 @@
      "descriptions": [
       {
        "lang": "en",
-       "value": "A vulnerability in libcurl caused the HTTP `Referer:` header to persist even when explicitly cleared. While the documentation states that passing NULL to `CURLOPT_REFERER` suppresses the header, the option failed to clear the internal state. As a result the previous referrer string was erroneously reused and sent in subsequent requests, potentially leaking sensitive information to unintended servers."
+       "value": "A vulnerability in libcurl caused the HTTP `Referer:` header to persist even when explicitly cleared. While the documentation states that passing NULL to `CURLOPT_REFERER` suppresses the header, the option failed to clear the internal state. As a result, the previous referrer string was erroneously reused and sent in subsequent requests, potentially leaking sensitive information to unintended servers."
       }
      ],
      "id": "CVE-2026-9546",
@@ -10433,7 +10697,4762 @@
    }
   ]
  },
- "generated": "2026-08-27T16:15:35Z",
- "schema": 1,
+ "generated": "2026-10-03T08:03:39Z",
+ "osv_feeds": {
+  "https://curl.se/docs/vuln.json": [
+   {
+    "aliases": [
+     "CVE-2000-0973"
+    ],
+    "id": "CURL-CVE-2000-0973",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "6.0"
+       },
+       {
+        "fixed": "7.4.1"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2003-1605"
+    ],
+    "id": "CURL-CVE-2003-1605",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "4.5"
+       },
+       {
+        "fixed": "7.10.7"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2005-0490"
+    ],
+    "id": "CURL-CVE-2005-0490",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.3"
+       },
+       {
+        "fixed": "7.13.1"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2005-3185"
+    ],
+    "id": "CURL-CVE-2005-3185",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.10.6"
+       },
+       {
+        "fixed": "7.15.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2005-4077"
+    ],
+    "id": "CURL-CVE-2005-4077",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.11.2"
+       },
+       {
+        "fixed": "7.15.1"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2006-1061"
+    ],
+    "id": "CURL-CVE-2006-1061",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.15.0"
+       },
+       {
+        "fixed": "7.15.3"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2007-3564"
+    ],
+    "id": "CURL-CVE-2007-3564",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.14.0"
+       },
+       {
+        "fixed": "7.16.4"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2009-0037"
+    ],
+    "id": "CURL-CVE-2009-0037",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "5.11"
+       },
+       {
+        "fixed": "7.19.4"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2009-2417"
+    ],
+    "id": "CURL-CVE-2009-2417",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.4"
+       },
+       {
+        "fixed": "7.19.6"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2010-0734"
+    ],
+    "id": "CURL-CVE-2010-0734",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.10.5"
+       },
+       {
+        "fixed": "7.20.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2010-3842"
+    ],
+    "id": "CURL-CVE-2010-3842",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.20.0"
+       },
+       {
+        "fixed": "7.21.2"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2011-2192"
+    ],
+    "id": "CURL-CVE-2011-2192",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.10.6"
+       },
+       {
+        "fixed": "7.21.7"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2011-3389"
+    ],
+    "id": "CURL-CVE-2011-3389",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.10.6"
+       },
+       {
+        "fixed": "7.24.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2012-0036"
+    ],
+    "id": "CURL-CVE-2012-0036",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.20.0"
+       },
+       {
+        "fixed": "7.24.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2013-0249"
+    ],
+    "id": "CURL-CVE-2013-0249",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.26.0"
+       },
+       {
+        "fixed": "7.29.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2013-1944"
+    ],
+    "id": "CURL-CVE-2013-1944",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "4.7"
+       },
+       {
+        "fixed": "7.30.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2013-2174"
+    ],
+    "id": "CURL-CVE-2013-2174",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.7"
+       },
+       {
+        "fixed": "7.31.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2013-4545"
+    ],
+    "id": "CURL-CVE-2013-4545",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.18.0"
+       },
+       {
+        "fixed": "7.33.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2013-6422"
+    ],
+    "id": "CURL-CVE-2013-6422",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.21.4"
+       },
+       {
+        "fixed": "7.34.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2014-0015"
+    ],
+    "id": "CURL-CVE-2014-0015",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.10.6"
+       },
+       {
+        "fixed": "7.35.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2014-0138"
+    ],
+    "id": "CURL-CVE-2014-0138",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.10.6"
+       },
+       {
+        "fixed": "7.36.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2014-0139"
+    ],
+    "id": "CURL-CVE-2014-0139",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.10.3"
+       },
+       {
+        "fixed": "7.36.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2014-1263"
+    ],
+    "id": "CURL-CVE-2014-1263",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.27.0"
+       },
+       {
+        "fixed": "7.36.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2014-2522"
+    ],
+    "id": "CURL-CVE-2014-2522",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.27.0"
+       },
+       {
+        "fixed": "7.36.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2014-3613"
+    ],
+    "id": "CURL-CVE-2014-3613",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "4.0"
+       },
+       {
+        "fixed": "7.38.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2014-3620"
+    ],
+    "id": "CURL-CVE-2014-3620",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.31.0"
+       },
+       {
+        "fixed": "7.38.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2014-3707"
+    ],
+    "id": "CURL-CVE-2014-3707",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.17.1"
+       },
+       {
+        "fixed": "7.39.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2014-8150"
+    ],
+    "id": "CURL-CVE-2014-8150",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "6.0"
+       },
+       {
+        "fixed": "7.40.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2014-8151"
+    ],
+    "id": "CURL-CVE-2014-8151",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.31.0"
+       },
+       {
+        "fixed": "7.40.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2015-3143"
+    ],
+    "id": "CURL-CVE-2015-3143",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.10.6"
+       },
+       {
+        "fixed": "7.42.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2015-3144"
+    ],
+    "id": "CURL-CVE-2015-3144",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.37.0"
+       },
+       {
+        "fixed": "7.42.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2015-3145"
+    ],
+    "id": "CURL-CVE-2015-3145",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.31.0"
+       },
+       {
+        "fixed": "7.42.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2015-3148"
+    ],
+    "id": "CURL-CVE-2015-3148",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.10.6"
+       },
+       {
+        "fixed": "7.42.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2015-3153"
+    ],
+    "id": "CURL-CVE-2015-3153",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "4.0"
+       },
+       {
+        "fixed": "7.42.1"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2015-3236"
+    ],
+    "id": "CURL-CVE-2015-3236",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.40.0"
+       },
+       {
+        "fixed": "7.43.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2015-3237"
+    ],
+    "id": "CURL-CVE-2015-3237",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.40.0"
+       },
+       {
+        "fixed": "7.43.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2016-0754"
+    ],
+    "id": "CURL-CVE-2016-0754",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "4.0"
+       },
+       {
+        "fixed": "7.47.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2016-0755"
+    ],
+    "id": "CURL-CVE-2016-0755",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.10.7"
+       },
+       {
+        "fixed": "7.47.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2016-3739"
+    ],
+    "id": "CURL-CVE-2016-3739",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.21.0"
+       },
+       {
+        "fixed": "7.49.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2016-4802"
+    ],
+    "id": "CURL-CVE-2016-4802",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.11.1"
+       },
+       {
+        "fixed": "7.49.1"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2016-5419"
+    ],
+    "id": "CURL-CVE-2016-5419",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "5.0"
+       },
+       {
+        "fixed": "7.50.1"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2016-5420"
+    ],
+    "id": "CURL-CVE-2016-5420",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.7"
+       },
+       {
+        "fixed": "7.50.1"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2016-5421"
+    ],
+    "id": "CURL-CVE-2016-5421",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.32.0"
+       },
+       {
+        "fixed": "7.50.1"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2016-7141"
+    ],
+    "id": "CURL-CVE-2016-7141",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.19.6"
+       },
+       {
+        "fixed": "7.50.2"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2016-7167"
+    ],
+    "id": "CURL-CVE-2016-7167",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.11.1"
+       },
+       {
+        "fixed": "7.50.3"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2016-8615"
+    ],
+    "id": "CURL-CVE-2016-8615",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "4.9"
+       },
+       {
+        "fixed": "7.51.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2016-8616"
+    ],
+    "id": "CURL-CVE-2016-8616",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.7"
+       },
+       {
+        "fixed": "7.51.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2016-8617"
+    ],
+    "id": "CURL-CVE-2016-8617",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.8.1"
+       },
+       {
+        "fixed": "7.51.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2016-8618"
+    ],
+    "id": "CURL-CVE-2016-8618",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "5.4"
+       },
+       {
+        "fixed": "7.51.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2016-8619"
+    ],
+    "id": "CURL-CVE-2016-8619",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.3"
+       },
+       {
+        "fixed": "7.51.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2016-8620"
+    ],
+    "id": "CURL-CVE-2016-8620",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.34.0"
+       },
+       {
+        "fixed": "7.51.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2016-8621"
+    ],
+    "id": "CURL-CVE-2016-8621",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.12.2"
+       },
+       {
+        "fixed": "7.51.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2016-8622"
+    ],
+    "id": "CURL-CVE-2016-8622",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.24.0"
+       },
+       {
+        "fixed": "7.51.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2016-8623"
+    ],
+    "id": "CURL-CVE-2016-8623",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.10.7"
+       },
+       {
+        "fixed": "7.51.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2016-8624"
+    ],
+    "id": "CURL-CVE-2016-8624",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "6.0"
+       },
+       {
+        "fixed": "7.51.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2016-8625"
+    ],
+    "id": "CURL-CVE-2016-8625",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.12.0"
+       },
+       {
+        "fixed": "7.51.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2016-9586"
+    ],
+    "id": "CURL-CVE-2016-9586",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "5.4"
+       },
+       {
+        "fixed": "7.52.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2016-9594"
+    ],
+    "id": "CURL-CVE-2016-9594",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.52.0"
+       },
+       {
+        "fixed": "7.52.1"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2016-9952"
+    ],
+    "id": "CURL-CVE-2016-9952",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.27.0"
+       },
+       {
+        "fixed": "7.52.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2016-9953"
+    ],
+    "id": "CURL-CVE-2016-9953",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.27.0"
+       },
+       {
+        "fixed": "7.52.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2017-1000099"
+    ],
+    "id": "CURL-CVE-2017-1000099",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.54.1"
+       },
+       {
+        "fixed": "7.55.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2017-1000100"
+    ],
+    "id": "CURL-CVE-2017-1000100",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.15.0"
+       },
+       {
+        "fixed": "7.55.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2017-1000101"
+    ],
+    "id": "CURL-CVE-2017-1000101",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.34.0"
+       },
+       {
+        "fixed": "7.55.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2017-1000254"
+    ],
+    "id": "CURL-CVE-2017-1000254",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.7"
+       },
+       {
+        "fixed": "7.56.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2017-1000257"
+    ],
+    "id": "CURL-CVE-2017-1000257",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.20.0"
+       },
+       {
+        "fixed": "7.56.1"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2017-2629"
+    ],
+    "id": "CURL-CVE-2017-2629",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.52.0"
+       },
+       {
+        "fixed": "7.53.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2017-7407"
+    ],
+    "id": "CURL-CVE-2017-7407",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "6.5"
+       },
+       {
+        "fixed": "7.54.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2017-7468"
+    ],
+    "id": "CURL-CVE-2017-7468",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.52.0"
+       },
+       {
+        "fixed": "7.54.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2017-8816"
+    ],
+    "id": "CURL-CVE-2017-8816",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.36.0"
+       },
+       {
+        "fixed": "7.57.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2017-8817"
+    ],
+    "id": "CURL-CVE-2017-8817",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.21.0"
+       },
+       {
+        "fixed": "7.57.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2017-8818"
+    ],
+    "id": "CURL-CVE-2017-8818",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.56.0"
+       },
+       {
+        "fixed": "7.57.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2017-9502"
+    ],
+    "id": "CURL-CVE-2017-9502",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.53.0"
+       },
+       {
+        "fixed": "7.54.1"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2018-0500"
+    ],
+    "id": "CURL-CVE-2018-0500",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.54.1"
+       },
+       {
+        "fixed": "7.61.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2018-1000005"
+    ],
+    "id": "CURL-CVE-2018-1000005",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.49.0"
+       },
+       {
+        "fixed": "7.58.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2018-1000007"
+    ],
+    "id": "CURL-CVE-2018-1000007",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "6.0"
+       },
+       {
+        "fixed": "7.58.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2018-1000120"
+    ],
+    "id": "CURL-CVE-2018-1000120",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.12.3"
+       },
+       {
+        "fixed": "7.59.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2018-1000121"
+    ],
+    "id": "CURL-CVE-2018-1000121",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.21.0"
+       },
+       {
+        "fixed": "7.59.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2018-1000122"
+    ],
+    "id": "CURL-CVE-2018-1000122",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.20.0"
+       },
+       {
+        "fixed": "7.59.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2018-1000300"
+    ],
+    "id": "CURL-CVE-2018-1000300",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.54.1"
+       },
+       {
+        "fixed": "7.60.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2018-1000301"
+    ],
+    "id": "CURL-CVE-2018-1000301",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.20.0"
+       },
+       {
+        "fixed": "7.60.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2018-14618"
+    ],
+    "id": "CURL-CVE-2018-14618",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.15.4"
+       },
+       {
+        "fixed": "7.61.1"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2018-16839"
+    ],
+    "id": "CURL-CVE-2018-16839",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.33.0"
+       },
+       {
+        "fixed": "7.62.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2018-16840"
+    ],
+    "id": "CURL-CVE-2018-16840",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.59.0"
+       },
+       {
+        "fixed": "7.62.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2018-16842"
+    ],
+    "id": "CURL-CVE-2018-16842",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.14.1"
+       },
+       {
+        "fixed": "7.62.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2018-16890"
+    ],
+    "id": "CURL-CVE-2018-16890",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.36.0"
+       },
+       {
+        "fixed": "7.64.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2019-3822"
+    ],
+    "id": "CURL-CVE-2019-3822",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.36.0"
+       },
+       {
+        "fixed": "7.64.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2019-3823"
+    ],
+    "id": "CURL-CVE-2019-3823",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.34.0"
+       },
+       {
+        "fixed": "7.64.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2019-5435"
+    ],
+    "id": "CURL-CVE-2019-5435",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.62.0"
+       },
+       {
+        "fixed": "7.65.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2019-5436"
+    ],
+    "id": "CURL-CVE-2019-5436",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.19.4"
+       },
+       {
+        "fixed": "7.65.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2019-5443"
+    ],
+    "id": "CURL-CVE-2019-5443",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.44.0"
+       },
+       {
+        "fixed": "7.66.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2019-5481"
+    ],
+    "id": "CURL-CVE-2019-5481",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.52.0"
+       },
+       {
+        "fixed": "7.66.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2019-5482"
+    ],
+    "id": "CURL-CVE-2019-5482",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.19.4"
+       },
+       {
+        "fixed": "7.66.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2020-8169"
+    ],
+    "id": "CURL-CVE-2020-8169",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.62.0"
+       },
+       {
+        "fixed": "7.71.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2020-8177"
+    ],
+    "id": "CURL-CVE-2020-8177",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.20.0"
+       },
+       {
+        "fixed": "7.71.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2020-8231"
+    ],
+    "id": "CURL-CVE-2020-8231",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.29.0"
+       },
+       {
+        "fixed": "7.72.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2020-8284"
+    ],
+    "id": "CURL-CVE-2020-8284",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "4.0"
+       },
+       {
+        "fixed": "7.74.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2020-8285"
+    ],
+    "id": "CURL-CVE-2020-8285",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.21.0"
+       },
+       {
+        "fixed": "7.74.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2020-8286"
+    ],
+    "id": "CURL-CVE-2020-8286",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.41.0"
+       },
+       {
+        "fixed": "7.74.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2021-22876"
+    ],
+    "id": "CURL-CVE-2021-22876",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.1.1"
+       },
+       {
+        "fixed": "7.76.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2021-22890"
+    ],
+    "id": "CURL-CVE-2021-22890",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.63.0"
+       },
+       {
+        "fixed": "7.76.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2021-22897"
+    ],
+    "id": "CURL-CVE-2021-22897",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.61.0"
+       },
+       {
+        "fixed": "7.77.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2021-22898"
+    ],
+    "id": "CURL-CVE-2021-22898",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.7"
+       },
+       {
+        "fixed": "7.77.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2021-22901"
+    ],
+    "id": "CURL-CVE-2021-22901",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.75.0"
+       },
+       {
+        "fixed": "7.77.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2021-22922"
+    ],
+    "id": "CURL-CVE-2021-22922",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.27.0"
+       },
+       {
+        "fixed": "7.78.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2021-22923"
+    ],
+    "id": "CURL-CVE-2021-22923",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.27.0"
+       },
+       {
+        "fixed": "7.78.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2021-22924"
+    ],
+    "id": "CURL-CVE-2021-22924",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.10.4"
+       },
+       {
+        "fixed": "7.78.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2021-22925"
+    ],
+    "id": "CURL-CVE-2021-22925",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.7"
+       },
+       {
+        "fixed": "7.78.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2021-22926"
+    ],
+    "id": "CURL-CVE-2021-22926",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.33.0"
+       },
+       {
+        "fixed": "7.78.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2021-22945"
+    ],
+    "id": "CURL-CVE-2021-22945",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.73.0"
+       },
+       {
+        "fixed": "7.79.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2021-22946"
+    ],
+    "id": "CURL-CVE-2021-22946",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.20.0"
+       },
+       {
+        "fixed": "7.79.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2021-22947"
+    ],
+    "id": "CURL-CVE-2021-22947",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.20.0"
+       },
+       {
+        "fixed": "7.79.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2022-22576"
+    ],
+    "id": "CURL-CVE-2022-22576",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.33.0"
+       },
+       {
+        "fixed": "7.83.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2022-27774"
+    ],
+    "id": "CURL-CVE-2022-27774",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "4.9"
+       },
+       {
+        "fixed": "7.83.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2022-27775"
+    ],
+    "id": "CURL-CVE-2022-27775",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.65.0"
+       },
+       {
+        "fixed": "7.83.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2022-27776"
+    ],
+    "id": "CURL-CVE-2022-27776",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "4.9"
+       },
+       {
+        "fixed": "7.83.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2022-27778"
+    ],
+    "id": "CURL-CVE-2022-27778",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.83.0"
+       },
+       {
+        "fixed": "7.83.1"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2022-27779"
+    ],
+    "id": "CURL-CVE-2022-27779",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.82.0"
+       },
+       {
+        "fixed": "7.83.1"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2022-27780"
+    ],
+    "id": "CURL-CVE-2022-27780",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.80.0"
+       },
+       {
+        "fixed": "7.83.1"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2022-27781"
+    ],
+    "id": "CURL-CVE-2022-27781",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.34.0"
+       },
+       {
+        "fixed": "7.83.1"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2022-27782"
+    ],
+    "id": "CURL-CVE-2022-27782",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.16.1"
+       },
+       {
+        "fixed": "7.83.1"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2022-30115"
+    ],
+    "id": "CURL-CVE-2022-30115",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.82.0"
+       },
+       {
+        "fixed": "7.83.1"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2022-32205"
+    ],
+    "id": "CURL-CVE-2022-32205",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.71.0"
+       },
+       {
+        "fixed": "7.84.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2022-32206"
+    ],
+    "id": "CURL-CVE-2022-32206",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.57.0"
+       },
+       {
+        "fixed": "7.84.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2022-32207"
+    ],
+    "id": "CURL-CVE-2022-32207",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.69.0"
+       },
+       {
+        "fixed": "7.84.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2022-32208"
+    ],
+    "id": "CURL-CVE-2022-32208",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.16.4"
+       },
+       {
+        "fixed": "7.84.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2022-32221"
+    ],
+    "id": "CURL-CVE-2022-32221",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.7"
+       },
+       {
+        "fixed": "7.86.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2022-35252"
+    ],
+    "id": "CURL-CVE-2022-35252",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "4.9"
+       },
+       {
+        "fixed": "7.85.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2022-35260"
+    ],
+    "id": "CURL-CVE-2022-35260",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.84.0"
+       },
+       {
+        "fixed": "7.86.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2022-42915"
+    ],
+    "id": "CURL-CVE-2022-42915",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.77.0"
+       },
+       {
+        "fixed": "7.86.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2022-42916"
+    ],
+    "id": "CURL-CVE-2022-42916",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.77.0"
+       },
+       {
+        "fixed": "7.86.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2022-43551"
+    ],
+    "id": "CURL-CVE-2022-43551",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.77.0"
+       },
+       {
+        "fixed": "7.87.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2022-43552"
+    ],
+    "id": "CURL-CVE-2022-43552",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.16.0"
+       },
+       {
+        "fixed": "7.87.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2023-23914"
+    ],
+    "id": "CURL-CVE-2023-23914",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.77.0"
+       },
+       {
+        "fixed": "7.88.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2023-23915"
+    ],
+    "id": "CURL-CVE-2023-23915",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.77.0"
+       },
+       {
+        "fixed": "7.88.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2023-23916"
+    ],
+    "id": "CURL-CVE-2023-23916",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.57.0"
+       },
+       {
+        "fixed": "7.88.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2023-27533"
+    ],
+    "id": "CURL-CVE-2023-27533",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.7"
+       },
+       {
+        "fixed": "8.0.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2023-27534"
+    ],
+    "id": "CURL-CVE-2023-27534",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.18.0"
+       },
+       {
+        "fixed": "8.0.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2023-27535"
+    ],
+    "id": "CURL-CVE-2023-27535",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.13.0"
+       },
+       {
+        "fixed": "8.0.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2023-27536"
+    ],
+    "id": "CURL-CVE-2023-27536",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.22.0"
+       },
+       {
+        "fixed": "8.0.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2023-27537"
+    ],
+    "id": "CURL-CVE-2023-27537",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.88.0"
+       },
+       {
+        "fixed": "8.0.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2023-27538"
+    ],
+    "id": "CURL-CVE-2023-27538",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.16.1"
+       },
+       {
+        "fixed": "8.0.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2023-28319"
+    ],
+    "id": "CURL-CVE-2023-28319",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.81.0"
+       },
+       {
+        "fixed": "8.1.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2023-28320"
+    ],
+    "id": "CURL-CVE-2023-28320",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.9.8"
+       },
+       {
+        "fixed": "8.1.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2023-28321"
+    ],
+    "id": "CURL-CVE-2023-28321",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.12.0"
+       },
+       {
+        "fixed": "8.1.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2023-28322"
+    ],
+    "id": "CURL-CVE-2023-28322",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.7"
+       },
+       {
+        "fixed": "8.1.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2023-38039"
+    ],
+    "id": "CURL-CVE-2023-38039",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.84.0"
+       },
+       {
+        "fixed": "8.3.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2023-38545"
+    ],
+    "id": "CURL-CVE-2023-38545",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.69.0"
+       },
+       {
+        "fixed": "8.4.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2023-38546"
+    ],
+    "id": "CURL-CVE-2023-38546",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.9.1"
+       },
+       {
+        "fixed": "8.4.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2023-46218"
+    ],
+    "id": "CURL-CVE-2023-46218",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.46.0"
+       },
+       {
+        "fixed": "8.5.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2023-46219"
+    ],
+    "id": "CURL-CVE-2023-46219",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.84.0"
+       },
+       {
+        "fixed": "8.5.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2024-0853"
+    ],
+    "id": "CURL-CVE-2024-0853",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "8.5.0"
+       },
+       {
+        "fixed": "8.6.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2024-11053"
+    ],
+    "id": "CURL-CVE-2024-11053",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.76.0"
+       },
+       {
+        "fixed": "8.11.1"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2024-2004"
+    ],
+    "id": "CURL-CVE-2024-2004",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.85.0"
+       },
+       {
+        "fixed": "8.7.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2024-2379"
+    ],
+    "id": "CURL-CVE-2024-2379",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "8.6.0"
+       },
+       {
+        "fixed": "8.7.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2024-2398"
+    ],
+    "id": "CURL-CVE-2024-2398",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.44.0"
+       },
+       {
+        "fixed": "8.7.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2024-2466"
+    ],
+    "id": "CURL-CVE-2024-2466",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "8.5.0"
+       },
+       {
+        "fixed": "8.7.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2024-6197"
+    ],
+    "id": "CURL-CVE-2024-6197",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "8.6.0"
+       },
+       {
+        "fixed": "8.9.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2024-6874"
+    ],
+    "id": "CURL-CVE-2024-6874",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "8.8.0"
+       },
+       {
+        "fixed": "8.9.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2024-7264"
+    ],
+    "id": "CURL-CVE-2024-7264",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.32.0"
+       },
+       {
+        "fixed": "8.9.1"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2024-8096"
+    ],
+    "id": "CURL-CVE-2024-8096",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.41.0"
+       },
+       {
+        "fixed": "8.10.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2024-9681"
+    ],
+    "id": "CURL-CVE-2024-9681",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.74.0"
+       },
+       {
+        "fixed": "8.11.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2025-0167"
+    ],
+    "id": "CURL-CVE-2025-0167",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.76.0"
+       },
+       {
+        "fixed": "8.12.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2025-0665"
+    ],
+    "id": "CURL-CVE-2025-0665",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "8.11.1"
+       },
+       {
+        "fixed": "8.12.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2025-0725"
+    ],
+    "id": "CURL-CVE-2025-0725",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.10.5"
+       },
+       {
+        "fixed": "8.12.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2025-10148"
+    ],
+    "id": "CURL-CVE-2025-10148",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "8.11.0"
+       },
+       {
+        "fixed": "8.14.2"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2025-10966"
+    ],
+    "id": "CURL-CVE-2025-10966",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.69.0"
+       },
+       {
+        "fixed": "8.14.2"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.1"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.17.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2025-13034"
+    ],
+    "id": "CURL-CVE-2025-13034",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "8.8.0"
+       },
+       {
+        "fixed": "8.14.2"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.1"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.18.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2025-14017"
+    ],
+    "id": "CURL-CVE-2025-14017",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.17.0"
+       },
+       {
+        "fixed": "8.14.2"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.1"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.18.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2025-14524"
+    ],
+    "id": "CURL-CVE-2025-14524",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.33.0"
+       },
+       {
+        "fixed": "8.14.2"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.1"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.18.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2025-14819"
+    ],
+    "id": "CURL-CVE-2025-14819",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.87.0"
+       },
+       {
+        "fixed": "8.14.2"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.1"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.18.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2025-15079"
+    ],
+    "id": "CURL-CVE-2025-15079",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.58.0"
+       },
+       {
+        "fixed": "8.14.2"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.1"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.18.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2025-15224"
+    ],
+    "id": "CURL-CVE-2025-15224",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.58.0"
+       },
+       {
+        "fixed": "8.14.2"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.1"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.18.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2025-4947"
+    ],
+    "id": "CURL-CVE-2025-4947",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "8.8.0"
+       },
+       {
+        "fixed": "8.14.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2025-5025"
+    ],
+    "id": "CURL-CVE-2025-5025",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "8.5.0"
+       },
+       {
+        "fixed": "8.14.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2025-5399"
+    ],
+    "id": "CURL-CVE-2025-5399",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "8.13.0"
+       },
+       {
+        "fixed": "8.14.1"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2025-9086"
+    ],
+    "id": "CURL-CVE-2025-9086",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "8.13.0"
+       },
+       {
+        "fixed": "8.14.2"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-10536"
+    ],
+    "id": "CURL-CVE-2026-10536",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.88.0"
+       },
+       {
+        "fixed": "8.14.2"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.1"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.1"
+       },
+       {
+        "introduced": "8.21.0"
+       },
+       {
+        "fixed": "8.21.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-11352"
+    ],
+    "id": "CURL-CVE-2026-11352",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "8.18.0"
+       },
+       {
+        "fixed": "8.20.1"
+       },
+       {
+        "introduced": "8.21.0"
+       },
+       {
+        "fixed": "8.21.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-11564"
+    ],
+    "id": "CURL-CVE-2026-11564",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.1"
+       },
+       {
+        "introduced": "8.21.0"
+       },
+       {
+        "fixed": "8.21.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-11586"
+    ],
+    "id": "CURL-CVE-2026-11586",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "8.16.0"
+       },
+       {
+        "fixed": "8.16.1"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.1"
+       },
+       {
+        "introduced": "8.21.0"
+       },
+       {
+        "fixed": "8.21.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-11856"
+    ],
+    "id": "CURL-CVE-2026-11856",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.10.6"
+       },
+       {
+        "fixed": "8.14.2"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.1"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.1"
+       },
+       {
+        "introduced": "8.21.0"
+       },
+       {
+        "fixed": "8.21.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-12064"
+    ],
+    "id": "CURL-CVE-2026-12064",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.81.0"
+       },
+       {
+        "fixed": "8.14.2"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.1"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.1"
+       },
+       {
+        "introduced": "8.21.0"
+       },
+       {
+        "fixed": "8.21.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-13608"
+    ],
+    "id": "CURL-CVE-2026-13608",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.82.0"
+       },
+       {
+        "fixed": "8.14.2"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.1"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.1"
+       },
+       {
+        "introduced": "8.21.0"
+       },
+       {
+        "fixed": "8.22.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-18924"
+    ],
+    "id": "CURL-CVE-2026-18924",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.44.0"
+       },
+       {
+        "fixed": "8.14.2"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.1"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.1"
+       },
+       {
+        "introduced": "8.21.0"
+       },
+       {
+        "fixed": "8.22.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-1965"
+    ],
+    "id": "CURL-CVE-2026-1965",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.10.6"
+       },
+       {
+        "fixed": "8.14.2"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.1"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.19.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-19931"
+    ],
+    "id": "CURL-CVE-2026-19931",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.64.1"
+       },
+       {
+        "fixed": "8.14.2"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.1"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.1"
+       },
+       {
+        "introduced": "8.21.0"
+       },
+       {
+        "fixed": "8.22.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-3783"
+    ],
+    "id": "CURL-CVE-2026-3783",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.33.0"
+       },
+       {
+        "fixed": "8.14.2"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.1"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.19.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-3784"
+    ],
+    "id": "CURL-CVE-2026-3784",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.7"
+       },
+       {
+        "fixed": "8.14.2"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.1"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.19.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-3805"
+    ],
+    "id": "CURL-CVE-2026-3805",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "8.13.0"
+       },
+       {
+        "fixed": "8.14.2"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.1"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.19.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-4873"
+    ],
+    "id": "CURL-CVE-2026-4873",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.20.0"
+       },
+       {
+        "fixed": "8.14.2"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.1"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-5545"
+    ],
+    "id": "CURL-CVE-2026-5545",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.10.6"
+       },
+       {
+        "fixed": "8.14.2"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.1"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-5773"
+    ],
+    "id": "CURL-CVE-2026-5773",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.40.0"
+       },
+       {
+        "fixed": "8.14.2"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.1"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-6253"
+    ],
+    "id": "CURL-CVE-2026-6253",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.14.1"
+       },
+       {
+        "fixed": "8.14.2"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.1"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-6276"
+    ],
+    "id": "CURL-CVE-2026-6276",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.71.0"
+       },
+       {
+        "fixed": "8.14.2"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.1"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-6429"
+    ],
+    "id": "CURL-CVE-2026-6429",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.14.0"
+       },
+       {
+        "fixed": "8.14.2"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.1"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-7009"
+    ],
+    "id": "CURL-CVE-2026-7009",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-7168"
+    ],
+    "id": "CURL-CVE-2026-7168",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.12.0"
+       },
+       {
+        "fixed": "8.14.2"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.1"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-80229"
+    ],
+    "id": "CURL-CVE-2026-80229",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "8.14.0"
+       },
+       {
+        "fixed": "8.14.2"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.1"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.1"
+       },
+       {
+        "introduced": "8.21.0"
+       },
+       {
+        "fixed": "8.22.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-80230"
+    ],
+    "id": "CURL-CVE-2026-80230",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.45.0"
+       },
+       {
+        "fixed": "8.14.2"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.1"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.1"
+       },
+       {
+        "introduced": "8.21.0"
+       },
+       {
+        "fixed": "8.22.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-80231"
+    ],
+    "id": "CURL-CVE-2026-80231",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.71.0"
+       },
+       {
+        "fixed": "8.14.2"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.1"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.1"
+       },
+       {
+        "introduced": "8.21.0"
+       },
+       {
+        "fixed": "8.22.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-80255"
+    ],
+    "id": "CURL-CVE-2026-80255",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "8.13.0"
+       },
+       {
+        "fixed": "8.14.2"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.1"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.1"
+       },
+       {
+        "introduced": "8.21.0"
+       },
+       {
+        "fixed": "8.22.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-82208"
+    ],
+    "id": "CURL-CVE-2026-82208",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "8.9.1"
+       },
+       {
+        "fixed": "8.14.2"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.1"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.1"
+       },
+       {
+        "introduced": "8.21.0"
+       },
+       {
+        "fixed": "8.22.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-82209"
+    ],
+    "id": "CURL-CVE-2026-82209",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.46.0"
+       },
+       {
+        "fixed": "8.14.2"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.1"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.1"
+       },
+       {
+        "introduced": "8.21.0"
+       },
+       {
+        "fixed": "8.22.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-8286"
+    ],
+    "id": "CURL-CVE-2026-8286",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.30.0"
+       },
+       {
+        "fixed": "8.14.2"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.1"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.1"
+       },
+       {
+        "introduced": "8.21.0"
+       },
+       {
+        "fixed": "8.21.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-8458"
+    ],
+    "id": "CURL-CVE-2026-8458",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.43.0"
+       },
+       {
+        "fixed": "8.14.2"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.1"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.1"
+       },
+       {
+        "introduced": "8.21.0"
+       },
+       {
+        "fixed": "8.21.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-8924"
+    ],
+    "id": "CURL-CVE-2026-8924",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.46.0"
+       },
+       {
+        "fixed": "8.14.2"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.1"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.1"
+       },
+       {
+        "introduced": "8.21.0"
+       },
+       {
+        "fixed": "8.21.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-8925"
+    ],
+    "id": "CURL-CVE-2026-8925",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.1"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.1"
+       },
+       {
+        "introduced": "8.21.0"
+       },
+       {
+        "fixed": "8.21.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-8926"
+    ],
+    "id": "CURL-CVE-2026-8926",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "8.11.1"
+       },
+       {
+        "fixed": "8.14.2"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.1"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.1"
+       },
+       {
+        "introduced": "8.21.0"
+       },
+       {
+        "fixed": "8.21.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-8927"
+    ],
+    "id": "CURL-CVE-2026-8927",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.12.0"
+       },
+       {
+        "fixed": "8.14.2"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.1"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.1"
+       },
+       {
+        "introduced": "8.21.0"
+       },
+       {
+        "fixed": "8.21.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-8932"
+    ],
+    "id": "CURL-CVE-2026-8932",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.7"
+       },
+       {
+        "fixed": "8.14.2"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.1"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.1"
+       },
+       {
+        "introduced": "8.21.0"
+       },
+       {
+        "fixed": "8.21.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-9079"
+    ],
+    "id": "CURL-CVE-2026-9079",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "8.8.0"
+       },
+       {
+        "fixed": "8.14.2"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.1"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.1"
+       },
+       {
+        "introduced": "8.21.0"
+       },
+       {
+        "fixed": "8.21.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-9080"
+    ],
+    "id": "CURL-CVE-2026-9080",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "8.13.0"
+       },
+       {
+        "fixed": "8.14.2"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.1"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.1"
+       },
+       {
+        "introduced": "8.21.0"
+       },
+       {
+        "fixed": "8.21.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-9545"
+    ],
+    "id": "CURL-CVE-2026-9545",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "8.11.0"
+       },
+       {
+        "fixed": "8.14.2"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.1"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.1"
+       },
+       {
+        "introduced": "8.21.0"
+       },
+       {
+        "fixed": "8.21.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-9546"
+    ],
+    "id": "CURL-CVE-2026-9546",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "8.18.0"
+       },
+       {
+        "fixed": "8.20.1"
+       },
+       {
+        "introduced": "8.21.0"
+       },
+       {
+        "fixed": "8.21.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-9547"
+    ],
+    "id": "CURL-CVE-2026-9547",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.69.0"
+       },
+       {
+        "fixed": "8.14.2"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.1"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.1"
+       },
+       {
+        "introduced": "8.21.0"
+       },
+       {
+        "fixed": "8.21.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   }
+  ]
+ },
+ "schema": 2,
  "source": "https://services.nvd.nist.gov/rest/json/cves/2.0"
 }

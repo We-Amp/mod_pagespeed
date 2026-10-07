@@ -32,7 +32,9 @@ from pagespeed_test_framework import (
     assert_not_contains,
     assert_http_status,
     assert_stat_delta,
+    require_status_ok,
 )
+from pagespeed_test_framework.stats import settled_stats
 
 
 class TestPageSpeedHeader:
@@ -147,8 +149,20 @@ class TestIproEtag:
         etag = response.header("ETag")
         assert etag, "First request should return ETag"
 
-        # Second request with If-None-Match should return 304
-        response_304 = client.get(url, headers={"If-None-Match": etag})
+        # Second request with If-None-Match should return 304. The optimized
+        # response and its cache commit are not one atomic step, so a
+        # conditional request sent right after the first optimized response
+        # is occasionally still answered 200 under load; the bash asserted
+        # the 304 in one shot, the port polls briefly for the same contract.
+        response_304 = client.fetch_until(
+            url,
+            condition=lambda r: r.status == 304,
+            timeout=15.0,
+            headers={"If-None-Match": etag},
+            detail_fn=lambda r: (
+                f"status={r.status} ETag={r.header('ETag', '')!r} expected 304 for {etag!r}"
+            ),
+        )
         assert_http_status(response_304, 304)
 
         # 304 response should not have Content-Length
@@ -181,6 +195,29 @@ class TestIproEtag:
         assert len(response_200.body) > 0, "200 response should have body"
 
 
+class TestIproFixedSize:
+    """Bash: IPRO-optimized resources should have fixed size, not chunked
+    (ipro_fixed_size.sh:15-24)."""
+
+    def test_ipro_optimized_resource_has_fixed_size(
+        self, client: PageSpeedClient, example_root: str
+    ):
+        url = f"{example_root}/images/Puzzle.jpg?PageSpeedJpegRecompressionQuality=75"
+        response = client.fetch_until(
+            url,
+            condition=lambda r: r.status == 200 and len(r.body) < 90000,
+            timeout=100.0,
+            detail_fn=lambda r: f"status={r.status} bytes={len(r.body)}",
+        )
+        require_status_ok(response, url)
+        lengths = response.header_values("Content-Length")
+        assert lengths, f"no Content-Length on the optimized response: {response.raw_headers}"
+        assert int(lengths[0]) < 90000, f"Content-Length {lengths[0]} is not < 90000"
+        assert "chunked" not in response.header("Transfer-Encoding").lower(), (
+            f"optimized response is chunked: {response.raw_headers}"
+        )
+
+
 class TestResource404:
     """Tests for 404 handling and statistics.
 
@@ -196,7 +233,7 @@ class TestResource404:
         self, client: PageSpeedClient, stats_snapshot
     ):
         """404 responses should increment resource_404_count stat."""
-        old_stats = stats_snapshot()
+        old_stats = settled_stats(stats_snapshot, ["resource_404_count"])
         old_404_count = old_stats.get("resource_404_count", 0)
 
         # Request a non-existent resource
@@ -215,7 +252,7 @@ class TestResource404:
         self, client: PageSpeedClient, example_root: str, stats_snapshot
     ):
         """200 responses should not increment resource_404_count stat."""
-        old_stats = stats_snapshot()
+        old_stats = settled_stats(stats_snapshot, ["resource_404_count"])
         old_404_count = old_stats.get("resource_404_count", 0)
 
         # Request a valid resource

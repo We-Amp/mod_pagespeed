@@ -41,8 +41,11 @@ EnvoyRewriteOptions* EnvoyServerContext::config() {
 }
 
 DaemonReader* EnvoyServerContext::NewDaemonReader() {
-  return new UdsDaemonReader(thread_system(), timer(),
-                             config()->daemon_api_socket_path(),
+  const GoogleString& socket_path = config()->daemon_api_socket_path();
+  if (socket_path.empty()) {
+    return nullptr;  // Daemon API disabled: the console says "not configured".
+  }
+  return new UdsDaemonReader(thread_system(), timer(), socket_path,
                              message_handler());
 }
 

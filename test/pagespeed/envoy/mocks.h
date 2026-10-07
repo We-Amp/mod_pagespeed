@@ -82,7 +82,8 @@ class MockStreamDecoderFilterCallbacks
               (Envoy::Http::Code code, absl::string_view body,
                std::function<void(Envoy::Http::ResponseHeaderMap& headers)>
                    modify_headers,
-               const absl::optional<Grpc::Status::GrpcStatus> grpc_status,
+               const absl::optional<Envoy::Grpc::Status::GrpcStatus>
+                   grpc_status,
                absl::string_view details));
 
   // Returns the captured response from sendLocalReply.
@@ -92,7 +93,7 @@ class MockStreamDecoderFilterCallbacks
   void CaptureLocalReply(
       Envoy::Http::Code code, absl::string_view body,
       std::function<void(Envoy::Http::ResponseHeaderMap&)> modify_headers,
-      const absl::optional<Grpc::Status::GrpcStatus> /* grpc_status */,
+      const absl::optional<Envoy::Grpc::Status::GrpcStatus> /* grpc_status */,
       absl::string_view /* details */) {
     last_reply_code_ = code;
     last_reply_body_ = std::string(body);

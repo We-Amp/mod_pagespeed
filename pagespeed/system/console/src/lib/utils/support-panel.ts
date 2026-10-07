@@ -41,3 +41,12 @@ function defaultStorage(): Storage | null {
     return null;
   }
 }
+
+/** The Support page's sentence; a vendor name that ends in "." ends the first sentence itself. */
+export function supportSentence(product: string, vendor: string): string {
+  const stop = /[.!?]$/.test(vendor) ? "" : ".";
+  return (
+    `${product} is developed and maintained by ${vendor}${stop} A support subscription funds that work; ` +
+    "the software is fully functional without one."
+  );
+}

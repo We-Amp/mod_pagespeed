@@ -98,6 +98,16 @@ class MessageHandler {
   // add a circular buffer to implement this, e.g. SharedCircularBuffer.
   virtual bool Dump(Writer* writer);
 
+  // Like Dump(), but also reports a monotonic line-count cursor taken
+  // "at the same time" as the dump, so callers can later ask for only what
+  // was written since. The default implementation has no notion of a
+  // line count, so it always reports 0; SystemMessageHandler overrides
+  // this with the real count from its SharedCircularBuffer.
+  virtual bool DumpWithCount(Writer* writer, int64* lines_written) {
+    *lines_written = 0;
+    return Dump(writer);
+  }
+
   // Parse the dumped log into messages.
   virtual void ParseMessageDumpIntoMessages(StringPiece message_dump,
                                             StringPieceVector* messages);

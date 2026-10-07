@@ -35,6 +35,7 @@ const char kMeasurementProxy[] = "ExperimentalMeasurementProxy";
 const char kDaemonSocketPath[] = "DaemonSocketPath";
 const char kDaemonVolumePath[] = "DaemonVolumePath";
 const char kDaemonApiSocketPath[] = "DaemonApiSocketPath";
+const char kDaemonServeStoredEncodings[] = "DaemonServeStoredEncodings";
 
 }  // namespace
 
@@ -114,6 +115,20 @@ void ApacheConfig::AddProperties() {
       "the /v1/daemon/* admin endpoints. Empty disables them. This is a "
       "different socket from DaemonSocketPath (the notification socket).",
       true /* safe_to_print */);
+
+  AddApacheProperty(
+      false, &ApacheConfig::daemon_serve_stored_encodings_, "dsse",
+      kDaemonServeStoredEncodings,
+      "Serve the optimizer daemon's stored gzip and brotli copies of "
+      "stylesheets, scripts and SVG images to clients that accept them, "
+      "labelled with Content-Encoding, instead of compressing the "
+      "uncompressed copy on the way out. Default off.",
+      true /* safe_to_print */);
+  // It decides which stored bytes are sent, not what the optimizer
+  // produces: turning it on must not change the configuration context the
+  // optimizer files this host's work under.
+  apache_properties_->property(apache_properties_->size() - 1)
+      ->set_do_not_use_for_signature_computation(true);
 
   // Register deprecated options.
   AddDeprecatedProperty("CollectRefererStatistics",

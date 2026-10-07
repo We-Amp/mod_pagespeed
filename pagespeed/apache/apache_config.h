@@ -81,6 +81,12 @@ class ApacheConfig : public SystemRewriteOptions {
   const GoogleString& daemon_api_socket_path() const {
     return daemon_api_socket_path_.value();
   }
+  // Whether the in-place serve hands clients the optimizer daemon's stored
+  // gzip and brotli copies (ModPagespeedDaemonServeStoredEncodings).  Off by
+  // default; per server or virtual host.
+  bool daemon_serve_stored_encodings() const {
+    return daemon_serve_stored_encodings_.value();
+  }
 
   bool force_buffering() const { return force_buffering_.value(); }
   void set_force_buffering(bool x) { set_option(x, &force_buffering_); }
@@ -142,6 +148,7 @@ class ApacheConfig : public SystemRewriteOptions {
   Option<GoogleString> daemon_socket_path_;
   Option<GoogleString> daemon_volume_path_;
   Option<GoogleString> daemon_api_socket_path_;
+  Option<bool> daemon_serve_stored_encodings_;
 
   ApacheConfig(const ApacheConfig&) = delete;
   ApacheConfig& operator=(const ApacheConfig&) = delete;

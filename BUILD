@@ -19,6 +19,10 @@ cc_binary(
         # module entry point). This prevents BoringSSL symbols linked into
         # mod_pagespeed from conflicting with system OpenSSL in mod_ssl.
         "-Wl,--version-script,$(location //pagespeed/apache:mod_pagespeed.lds)",
+        # The version script does not reach the __start_<section> /
+        # __stop_<section> bounds the linker itself creates (protobuf's
+        # pb_defaults section); without this they are exported.
+        "-Wl,-z,start-stop-visibility=hidden",
     ],
     linkshared = 1,
     linkstatic = 1,

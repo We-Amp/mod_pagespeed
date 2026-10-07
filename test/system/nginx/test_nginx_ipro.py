@@ -233,31 +233,6 @@ class TestNginxIproHeaderPreservation:
         # IPRO typically uses the origin's TTL or a reasonable default
         assert max_age > 0, f"max-age should be positive, got {max_age}"
 
-    @pytest.mark.nginx_only
-    @pytest.mark.requires_module
-    def test_ipro_no_cache_not_optimized(
-        self, client: PageSpeedClient, test_root: str
-    ):
-        """Verify IPRO respects no-cache directive.
-
-        Resources with Cache-Control: no-cache should not be optimized
-        or should preserve the no-cache directive.
-        """
-        # The cc200nc subdirectory has max-age=200,no-cache
-        url = f"{test_root}/ipro/cc200nc/example.css?r={random.randint(1, 100000)}"
-
-        response = client.get(url)
-        assert_http_status(response, 200)
-
-        # With no-cache, the response might not be cached/optimized
-        # or should preserve the no-cache directive
-        cache_control = response.header("Cache-Control")
-        if "no-cache" in cache_control:
-            # Good - directive preserved
-            pass
-        # Otherwise, the resource might still be served but with appropriate headers
-
-
 class TestNginxIproGzipHandling:
     """Tests for IPRO with gzip compression on nginx."""
 

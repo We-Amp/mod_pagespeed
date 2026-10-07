@@ -23,7 +23,7 @@
 namespace net_instaweb {
 
 class IisServerContext;
-class InPlaceResourceRecorder;
+class IproRecorder;
 
 class IisInnerRequestContext 
 {
@@ -109,8 +109,8 @@ public:
 	void set_in_place(bool x) { in_place_ = x; }
 	RewriteDriver* driver() { return driver_; }
 	void set_driver(RewriteDriver* x) { driver_ = x; }
-	void set_recorder(InPlaceResourceRecorder* x) { recorder_ = x; }
-	InPlaceResourceRecorder* recorder() { return recorder_; }
+	void set_recorder(IproRecorder* x) { recorder_ = x; }
+	IproRecorder* recorder() { return recorder_; }
 	bool experiment_classified() { return experiment_classified_;}
 	void set_experiment_classified(bool x) { experiment_classified_ = x; }
 	bool rewrite_html() { return rewrite_html_;}
@@ -147,7 +147,7 @@ private:
 	GoogleString local_scheme_;
 	bool in_place_;
 	RewriteDriver* driver_;
-	InPlaceResourceRecorder* recorder_;
+	IproRecorder* recorder_;
 	bool experiment_classified_;
 	bool rewrite_html_;
 

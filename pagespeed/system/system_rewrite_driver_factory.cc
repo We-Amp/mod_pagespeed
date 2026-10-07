@@ -35,6 +35,7 @@
 #include "net/instaweb/http/public/url_async_fetcher.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_driver_factory.h"
+#include "net/instaweb/rewriter/public/rewrite_stats.h"
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "net/instaweb/rewriter/public/static_asset_manager.h"
 #include "net/instaweb/util/public/property_cache.h"
@@ -238,6 +239,11 @@ SystemRewriteDriverFactory::AllocateAndInitSharedMemStatistics(
       file_system(), timer());
   NonStaticInitStats(stats);
   bool init_ok = stats->Init(true, message_handler());
+  // The shared statistics' time base, set once here in the root process
+  // before any child attaches: every counter in this segment counts from
+  // this moment, and the console stamps "since" with it.  Plain Set: the
+  // root is this gauge's only writer, and no child exists yet.
+  stats->GetUpDownCounter(RewriteStats::kProcessStartMs)->Set(timer()->NowMs());
   if (local && init_ok) {
     local_shm_stats_segment_names_.push_back(stats->SegmentName());
   }

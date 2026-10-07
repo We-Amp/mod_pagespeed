@@ -28,7 +28,9 @@ from pagespeed_test_framework import (
     assert_not_contains,
     assert_http_status,
     assert_file_size,
+    require_status_ok,
 )
+from pagespeed_test_framework.stats import count_matching_lines
 
 
 class TestRewriteCss:
@@ -91,17 +93,30 @@ class TestRewriteCssImages:
     """Tests for CSS with image URL rewriting."""
 
     def test_rewrite_css_images(self, client: PageSpeedClient, example_root: str):
-        """CSS with images should have URLs rewritten."""
-        url = f"{example_root}/rewrite_css_images.html?PageSpeedFilters=rewrite_css,rewrite_images"
+        """Bash original (rewrite_css_images.sh:15-22):
 
-        # Wait for CSS to be rewritten
-        response = client.fetch_until_contains(
-            url,
-            pattern=r'\.pagespeed\.',
-            timeout=60.0,
+            FILE='rewrite_css_images.html?PageSpeedFilters=rewrite_css,rewrite_images'
+            FILE+='&ModPagespeedCssImageInlineMaxBytes=2048'
+            fetch_until $URL 'grep -c url.data:image/png;base64,' 1  # image inlined
+            fetch_until $URL 'grep -c rewrite_css_images.css.pagespeed.cf.' 1
+            check run_wget_with_args $URL
+        """
+        url = (
+            f"{example_root}/rewrite_css_images.html"
+            "?PageSpeedFilters=rewrite_css,rewrite_images"
+            "&ModPagespeedCssImageInlineMaxBytes=2048"
         )
-
-        assert_http_status(response, 200)
+        for pattern in (r"url.data:image/png;base64,",
+                        r"rewrite_css_images.css.pagespeed.cf."):
+            client.fetch_until(
+                url,
+                condition=lambda r, p=pattern: count_matching_lines(r.text, p) == 1,
+                timeout=60.0,
+                detail_fn=lambda r, p=pattern: (
+                    f"lines matching {p!r}: {count_matching_lines(r.text, p)} expected=1"
+                ),
+            )
+        require_status_ok(client.get(url), "rewrite_css_images.html")
 
 
 if __name__ == "__main__":

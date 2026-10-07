@@ -88,10 +88,12 @@ SYSTEM_CORE_HDRS = [
 SYSTEM_CORE_DEPS = [
     ":daemon_health",
     ":daemon_reader",
+    ":daemon_site_filter",
     ":ipro_recorder",
     ":external_server_spec",
     ":optimization_thread_policy",
     ":redis_cache",
+    ":serve_host_names",
     "//net/instaweb/http",
     "//net/instaweb/rewriter",
     "//pagespeed/kernel/cache:cyclone_cache",

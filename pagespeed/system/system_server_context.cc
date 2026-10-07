@@ -26,6 +26,7 @@
 #include <memory>
 #include <string>
 #include <system_error>
+#include <utility>
 
 #include "base/logging.h"
 #include "net/instaweb/http/public/url_async_fetcher.h"
@@ -108,20 +109,18 @@ void SystemServerContext::FlushCacheIfNecessary() {
     CheckLegacyGlobalCacheFlushFile();
   }
 
-  // Advance the statistics log on a wall-clock cadence that does not depend on
-  // this request having driven an HTML rewrite or a pagespeed-resource fetch.
-  // Those are the only paths that otherwise call UpdateAndDumpIfRequired(), so
+  // Advance the statistics log on a wall-clock cadence that does not depend
+  // on this request having driven an HTML rewrite or a pagespeed-resource
+  // fetch. Those are the only paths that otherwise tick the console log, so
   // under pass-through/static/cached traffic the log never grows and the
   // /pagespeed_admin Graphs page flatlines even though the live Statistics
   // counters keep moving. This hook runs on every request across all ports
-  // (nginx, Apache, IIS); UpdateAndDumpIfRequired() is internally throttled to
-  // StatisticsLoggingIntervalMs via a non-blocking TryLock on the logger's own
-  // timestamp mutex, so on all but ~one request per interval it is a cheap
-  // no-op and can neither block nor contend with the cache-flush mutex above.
-  StatisticsLogger* stats_logger = statistics()->console_logger();
-  if (stats_logger != nullptr) {
-    stats_logger->UpdateAndDumpIfRequired();
-  }
+  // (nginx, Apache, IIS); the tick is internally throttled to
+  // StatisticsLoggingIntervalMs via a non-blocking TryLock on the logger's
+  // own timestamp mutex, so on all but ~one request per interval it is a
+  // cheap no-op and can neither block nor contend with the cache-flush
+  // mutex above.
+  statistics()->UpdateConsoleLogIfRequired();
 }
 
 void SystemServerContext::CheckLegacyGlobalCacheFlushFile() {
@@ -304,6 +303,11 @@ void SystemServerContext::PostInitHook() {
                              message_handler());
 }
 
+void SystemServerContext::SetAdminSiteForTesting(
+    std::unique_ptr<AdminSite> admin_site) {
+  admin_site_ = std::move(admin_site);
+}
+
 DaemonReader* SystemServerContext::NewDaemonReader() {
   // No daemon transport by default; ports with a curl-based fetcher override.
   return nullptr;
@@ -450,7 +454,8 @@ void SystemServerContext::StatisticsHandler(const RewriteOptions& options,
   }
   Statistics* stats =
       is_global_request ? factory()->statistics() : statistics();
-  admin_site_->StatisticsHandler(options, source, fetch, stats);
+  admin_site_->StatisticsHandler(options, source, fetch, stats,
+                                 is_global_request, hostname_identifier());
 }
 
 void SystemServerContext::ConsoleJsonHandler(const QueryParams& params,
@@ -480,27 +485,30 @@ void SystemServerContext::PrintCaches(bool is_global,
 
 void SystemServerContext::PrintConfig(AdminSite::AdminSource source,
                                       AsyncFetch* fetch) {
-  admin_site_->PrintConfig(source, fetch, global_system_rewrite_options());
+  admin_site_->PrintConfig(source, fetch, *global_system_rewrite_options(),
+                           *global_system_rewrite_options(), false,
+                           hostname_identifier());
 }
 
 void SystemServerContext::MessageHistoryHandler(const RewriteOptions& options,
                                                 AdminSite::AdminSource source,
+                                                const QueryParams& query_params,
                                                 AsyncFetch* fetch) {
-  admin_site_->MessageHistoryHandler(options, source, fetch);
+  admin_site_->MessageHistoryHandler(options, source, query_params, fetch);
 }
 
 void SystemServerContext::AdminPage(bool is_global,
                                     const GoogleUrl& stripped_gurl,
                                     const QueryParams& query_params,
                                     const RewriteOptions* options,
-                                    AsyncFetch* fetch,
-                                    StringPiece request_body) {
+                                    AsyncFetch* fetch, StringPiece request_body,
+                                    StringPiece own_serve_host) {
   Statistics* stats = is_global ? factory()->statistics() : statistics();
   admin_site_->AdminPage(
       is_global, stripped_gurl, query_params, options, cache_path(), fetch,
       system_caches_, filesystem_metadata_cache(), http_cache(),
-      metadata_cache(), page_property_cache(), this, statistics(), stats,
-      global_system_rewrite_options(), request_body);
+      metadata_cache(), page_property_cache(), this, stats, stats,
+      global_system_rewrite_options(), request_body, own_serve_host);
 }
 
 void SystemServerContext::StatisticsPage(bool is_global,
@@ -511,7 +519,7 @@ void SystemServerContext::StatisticsPage(bool is_global,
   admin_site_->StatisticsPage(is_global, query_params, options, fetch,
                               system_caches_, filesystem_metadata_cache(),
                               http_cache(), metadata_cache(),
-                              page_property_cache(), this, statistics(), stats,
+                              page_property_cache(), this, stats, stats,
                               global_system_rewrite_options());
 }
 

@@ -15,7 +15,9 @@ async function navigateTo(page, hash: string) {
 // ---------------------------------------------------------------------------
 test.describe("Messages page", () => {
   test("displays messages with severity badges", async ({ page }) => {
-    await navigateTo(page, "#/messages");
+    // Warning and above is the default; a fresh server may have logged only
+    // Info lines, so include Info before expecting a row.
+    await navigateTo(page, "#/messages?level=info");
     await page.waitForTimeout(3000);
 
     // Take screenshot.
@@ -47,7 +49,9 @@ test.describe("Messages page", () => {
   });
 
   test("severity filter checkboxes work", async ({ page }) => {
-    await navigateTo(page, "#/messages");
+    // Start with every level shown, so unchecking and re-checking Info
+    // returns to the same row count.
+    await navigateTo(page, "#/messages?level=info");
     await page.waitForTimeout(3000);
 
     // All four filter checkboxes should be visible.

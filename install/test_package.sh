@@ -47,6 +47,3 @@ run_with_log $verbose log/install.log \
 
 echo Test restart to make sure config file is valid ...
 run_with_log $verbose log/install.log make -C install apache_debug_restart
-
-echo Testing release ...
-run_with_log $verbose log/system_test.log make -C install apache_vm_system_tests

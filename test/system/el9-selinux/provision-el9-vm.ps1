@@ -214,9 +214,18 @@ switch ($imageRoute) {
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
         $ProgressPreference = 'SilentlyContinue'
         $sums = (Invoke-WebRequest -Uri $ChecksumUrl -UseBasicParsing -ErrorAction Stop).Content
+        # The mirror serves CHECKSUM as application/octet-stream, for which
+        # Windows PowerShell 5.1 returns Content as byte[], not a string.
+        if ($sums -is [byte[]]) { $sums = [Text.Encoding]::ASCII.GetString($sums) }
+        # AlmaLinux has published CHECKSUM in both the BSD tag format
+        # ('SHA256 (name) = hash') and the GNU coreutils format
+        # ('hash  name', or 'hash *name' in binary mode); accept either.
         $want = ''
         foreach ($line in ($sums -split "`r?`n")) {
-            if ($line -match '^SHA256 \((?<f>[^)]+)\) = (?<h>[0-9a-fA-F]{64})' -and $Matches['f'] -eq $imgName) { $want = $Matches['h'].ToLower() }
+            if ($line -match '^SHA256 \((?<f>[^)]+)\) = (?<h>[0-9a-fA-F]{64})\s*$' -or
+                $line -match '^(?<h>[0-9a-fA-F]{64}) [ *](?<f>\S+)\s*$') {
+                if ($Matches['f'] -eq $imgName) { $want = $Matches['h'].ToLower() }
+            }
         }
         if (-not $want) { Fail "no SHA256 line for $imgName in $ChecksumUrl" }
         $have = ''
@@ -269,7 +278,7 @@ Initialize-SshHelpers
 try {
     Write-Host "=== First boot ==="
     Start-VM -Name $VMName -ErrorAction Stop
-    $mac = (Get-VMNetworkAdapter -VMName $VMName -ErrorAction Stop | Select-Object -First 1).MacAddress
+    $mac = Wait-VmMac -VMName $VMName
     Write-Host "Waiting for guest IP (MAC $mac) on '*$SwitchName*' ..."
     $ip = Get-GuestIp -Mac $mac -InterfaceAlias "*$SwitchName*"
     Write-Host "Guest IP: $ip"

@@ -1147,6 +1147,114 @@ TEST_F(RewriteContextTest, TrimFetch404SeedsCache) {
   EXPECT_EQ(2, counting_url_async_fetcher()->fetch_count());
 }
 
+// A reconstruction whose input fetch did not complete must not be remembered
+// as if the input were missing. The curl fetcher fills in a 404 when it gives
+// up before it has headers, so before this a five-second origin stall was
+// classified as a 4xx and turned into a five-minute 404 for the optimized
+// resource. It is now a transient failure, remembered for seconds.
+TEST_F(RewriteContextTest, TimedOutInputFetchIsRememberedBriefly) {
+  InitTrimFilters(kRewrittenResource);
+  const int64 kTransientTtlMs =
+      http_cache()->failure_caching_ttl_sec(kFetchStatusTransientError) *
+      Timer::kSecondMs;
+  const int64 kMissingTtlMs = options()->metadata_input_errors_cache_ttl_ms();
+  ASSERT_LT(kTransientTtlMs, kMissingTtlMs / 10);
+
+  // Exactly what the fetcher hands us on a timeout: a 404 it made up, no
+  // body, and Done(false).
+  GoogleString url = AbsolutifyUrl("a.css");
+  ResponseHeaders timeout_headers;
+  SetDefaultLongCacheHeaders(&kContentTypeCss, &timeout_headers);
+  timeout_headers.SetStatusAndReason(HttpStatus::kNotFound);
+  SetFetchResponse(url, timeout_headers, "");
+  mock_url_fetcher()->SetResponseFailure(url);
+
+  GoogleString content;
+  EXPECT_FALSE(FetchResource(kTestDomain, TrimWhitespaceRewriter::kFilterId,
+                             "a.css", "css", &content));
+  EXPECT_EQ(1, counting_url_async_fetcher()->fetch_count());
+
+  // The failure is remembered: an immediate retry does not ask the origin.
+  EXPECT_FALSE(FetchResource(kTestDomain, TrimWhitespaceRewriter::kFilterId,
+                             "a.css", "css", &content));
+  EXPECT_EQ(1, counting_url_async_fetcher()->fetch_count());
+
+  // The origin recovers, but inside the window we still hold off.
+  SetResponseWithDefaultHeaders("a.css", kContentTypeCss, " a ", 100);
+  AdvanceTimeMs(kTransientTtlMs / 2);
+  EXPECT_FALSE(FetchResource(kTestDomain, TrimWhitespaceRewriter::kFilterId,
+                             "a.css", "css", &content));
+  EXPECT_EQ(1, counting_url_async_fetcher()->fetch_count());
+
+  // Once the window has passed the next request reconstructs the resource,
+  // long before the five minutes a genuine 404 would have cost.
+  AdvanceTimeMs(kTransientTtlMs / 2 + Timer::kSecondMs);
+  EXPECT_TRUE(FetchResource(kTestDomain, TrimWhitespaceRewriter::kFilterId,
+                            "a.css", "css", &content));
+  EXPECT_EQ("a", content);
+  EXPECT_EQ(2, counting_url_async_fetcher()->fetch_count());
+}
+
+// A 5xx from the origin is the same kind of condition as a timeout: it is
+// about the origin, not the resource, and is remembered for the same window.
+TEST_F(RewriteContextTest, ServerErrorInputFetchIsRememberedBriefly) {
+  InitTrimFilters(kRewrittenResource);
+  const int64 kTransientTtlMs =
+      http_cache()->failure_caching_ttl_sec(kFetchStatusTransientError) *
+      Timer::kSecondMs;
+
+  ResponseHeaders unavailable;
+  SetDefaultLongCacheHeaders(&kContentTypeCss, &unavailable);
+  unavailable.SetStatusAndReason(HttpStatus::kUnavailable);
+  SetFetchResponse(AbsolutifyUrl("a.css"), unavailable, "");
+
+  GoogleString content;
+  EXPECT_FALSE(FetchResource(kTestDomain, TrimWhitespaceRewriter::kFilterId,
+                             "a.css", "css", &content));
+  EXPECT_FALSE(FetchResource(kTestDomain, TrimWhitespaceRewriter::kFilterId,
+                             "a.css", "css", &content));
+  EXPECT_EQ(1, counting_url_async_fetcher()->fetch_count());
+
+  SetResponseWithDefaultHeaders("a.css", kContentTypeCss, " a ", 100);
+  AdvanceTimeMs(kTransientTtlMs + Timer::kSecondMs);
+  EXPECT_TRUE(FetchResource(kTestDomain, TrimWhitespaceRewriter::kFilterId,
+                            "a.css", "css", &content));
+  EXPECT_EQ("a", content);
+  EXPECT_EQ(2, counting_url_async_fetcher()->fetch_count());
+}
+
+// A 404 the origin actually sent keeps its longer memory: the resource is
+// missing, and MetadataInputErrorsCacheTtlMs (five minutes by default) says
+// how long we take its word for it.
+TEST_F(RewriteContextTest, MissingInputStaysRememberedPastTransientWindow) {
+  InitTrimFilters(kRewrittenResource);
+  const int64 kTransientTtlMs =
+      http_cache()->failure_caching_ttl_sec(kFetchStatusTransientError) *
+      Timer::kSecondMs;
+  const int64 kMissingTtlMs = options()->metadata_input_errors_cache_ttl_ms();
+  SetFetchResponse404("404.css");
+
+  GoogleString content;
+  EXPECT_FALSE(FetchResource(kTestDomain, TrimWhitespaceRewriter::kFilterId,
+                             "404.css", "css", &content));
+  EXPECT_EQ(1, counting_url_async_fetcher()->fetch_count());
+
+  // Well past the transient window the 404 is still taken at its word, even
+  // though the resource has since appeared.
+  SetResponseWithDefaultHeaders("404.css", kContentTypeCss, " a ", 100);
+  AdvanceTimeMs(2 * kTransientTtlMs);
+  EXPECT_FALSE(FetchResource(kTestDomain, TrimWhitespaceRewriter::kFilterId,
+                             "404.css", "css", &content));
+  EXPECT_EQ(1, counting_url_async_fetcher()->fetch_count());
+
+  // Only once MetadataInputErrorsCacheTtlMs has passed do we look again.
+  AdvanceTimeMs(kMissingTtlMs);
+  EXPECT_TRUE(FetchResource(kTestDomain, TrimWhitespaceRewriter::kFilterId,
+                            "404.css", "css", &content));
+  EXPECT_EQ("a", content);
+  EXPECT_EQ(2, counting_url_async_fetcher()->fetch_count());
+}
+
 // Verifies that rewriters can replace resource URLs without kicking off any
 // fetching or caching.
 TEST_F(RewriteContextTest, ClobberResourceUrlSync) {
@@ -4050,8 +4158,11 @@ TEST_F(RewriteContextTest, TestFallbackOnFetchFails) {
   bad_headers.set_first_line(1, 1, 500, "Internal Server Error");
   mock_url_fetcher()->SetResponse(AbsolutifyUrl(kPath), bad_headers, "");
 
-  // First fetch. No rewriting happens since the fetch fails. We cache that the
-  // fetch failed for kDefaultImplicitCacheTtlMs.
+  // First fetch. No rewriting happens since the fetch fails. A 5xx is a
+  // transient failure, remembered for the short transient window only.
+  const int64 kFailureTtlMs =
+      http_cache()->failure_caching_ttl_sec(kFetchStatusTransientError) *
+      Timer::kSecondMs;
   GoogleString input_html = CssLinkHref(kPath);
   GoogleString fetch_failure_html =
       StrCat(input_html, "<!--Fetch failure, preventing rewriting of ",
@@ -4064,10 +4175,10 @@ TEST_F(RewriteContextTest, TestFallbackOnFetchFails) {
       0, server_context()->rewrite_stats()->fallback_responses_served()->Get());
 
   ClearStats();
-  // Advance the timer by less than kDefaultImplicitCacheTtlMs. Since we
-  // remembered that the fetch failed, we don't trigger a fetch for the CSS and
-  // don't rewrite it either.
-  AdvanceTimeMs(kTtlMs / 2);
+  // Advance the timer by less than the transient window. Since we remembered
+  // that the fetch failed, we don't trigger a fetch for the CSS and don't
+  // rewrite it either.
+  AdvanceTimeMs(kFailureTtlMs / 2);
   ValidateExpected("forward_500", input_html, fetch_failure_html);
   EXPECT_EQ(0, trim_filter_->num_rewrites());
   EXPECT_EQ(0, counting_url_async_fetcher()->fetch_count());

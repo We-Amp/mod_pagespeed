@@ -76,6 +76,7 @@
 #include "test/net/instaweb/rewriter/custom_rewrite_test_base.h"
 #include "test/net/instaweb/rewriter/rewrite_test_base.h"
 #include "test/net/instaweb/rewriter/test_rewrite_driver_factory.h"
+#include "test/pagespeed/kernel/base/gmock.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/base/mem_file_system.h"
 #include "test/pagespeed/kernel/base/mock_message_handler.h"
@@ -1679,6 +1680,20 @@ TEST_F(SystemCachesTest, InvalidateWithPurgeDisabled) {
   EXPECT_EQ(kNotFoundResult, HttpBlockingFindWithOptions(
                                  options, kUrl2, server_context->http_cache(),
                                  &value, &headers));
+}
+
+TEST_F(SystemCachesTest, PrintCachePathStatsReportsOwnCacheOnly) {
+  PopulateCacheForPurgeTest();
+  SystemCachePath* cache_path = system_server_context_->cache_path();
+  ASSERT_TRUE(cache_path != nullptr);
+  GoogleString out;
+  system_caches_->PrintCachePathStats(cache_path, &out);
+  EXPECT_THAT(out, ::testing::HasSubstr("Cyclone cache"));
+  EXPECT_THAT(out, ::testing::HasSubstr("statistics"));
+
+  GoogleString empty;
+  system_caches_->PrintCachePathStats(nullptr, &empty);
+  EXPECT_TRUE(empty.empty());
 }
 
 TEST_F(SystemCachesTest, BrokenShmFallbackToThreadSafe) {

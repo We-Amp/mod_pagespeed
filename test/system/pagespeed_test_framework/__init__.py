@@ -31,7 +31,7 @@ Example usage::
         assert_contains(response.text, r"\\.pagespeed\\.cc\\.")
 """
 
-from pagespeed_test_framework.client import PageSpeedClient, Response
+from pagespeed_test_framework.client import PageSpeedClient, Response, VhostClient
 from pagespeed_test_framework.assertions import (
     assert_contains,
     assert_not_contains,
@@ -54,11 +54,17 @@ from pagespeed_test_framework.require import (
     require_status_ok,
     require_no_auth_gate,
 )
+from pagespeed_test_framework.streaming import (
+    Chunk,
+    ChunkedResponse,
+    fetch_chunks,
+)
 
 __all__ = [
     # Client
     "PageSpeedClient",
     "Response",
+    "VhostClient",
     # Assertions
     "assert_contains",
     "assert_not_contains",
@@ -78,4 +84,8 @@ __all__ = [
     "parse_statistics",
     "get_stat",
     "scrape_header",
+    # Streaming (chunk boundaries + timing)
+    "Chunk",
+    "ChunkedResponse",
+    "fetch_chunks",
 ]

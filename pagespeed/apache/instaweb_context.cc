@@ -293,10 +293,10 @@ void InstawebContext::BlockingPropertyCacheLookup() {
   PropertyCallback* property_callback = nullptr;
   PropertyCache* pcache = server_context_->page_property_cache();
   if (pcache->enabled()) {
-    const UserAgentMatcher* user_agent_matcher =
-        server_context_->user_agent_matcher();
+    // From the request's headers, not from the driver: the driver is given
+    // the request headers later in the constructor.
     UserAgentMatcher::DeviceType device_type =
-        user_agent_matcher->GetDeviceTypeForUA(rewrite_driver_->user_agent());
+        DeviceTypeForPropertyCacheLookup(*request_headers_, rewrite_driver_);
     GoogleString options_signature_hash =
         server_context_->GetRewriteOptionsSignatureHash(
             rewrite_driver_->options());
@@ -311,6 +311,19 @@ void InstawebContext::BlockingPropertyCacheLookup() {
     rewrite_driver_->PropertyCacheSetupDone();
     DCHECK(property_callback->done());
   }
+}
+
+UserAgentMatcher::DeviceType InstawebContext::DeviceTypeForPropertyCacheLookup(
+    const RequestHeaders& request_headers, RewriteDriver* driver) {
+  // The request's own header, as the shared lookup the other servers use
+  // reads it.  A request without one is classified from the empty string,
+  // which is desktop.
+  const char* user_agent = request_headers.Lookup1(HttpAttributes::kUserAgent);
+  UserAgentMatcher::DeviceType device_type =
+      driver->server_context()->user_agent_matcher()->GetDeviceTypeForUA(
+          user_agent != nullptr ? StringPiece(user_agent) : StringPiece());
+  driver->set_device_type(device_type);
+  return device_type;
 }
 
 ApacheServerContext* InstawebContext::ServerContextFromServerRec(

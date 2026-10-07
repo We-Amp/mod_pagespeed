@@ -208,10 +208,10 @@ else
   endif
 endif
 
-TESTS=REDIS MEMCACHED STRESS REWRITE LOADTEST PROXY SLURP SHARED_MEM_LOCKS \
+TESTS=REDIS MEMCACHED REWRITE LOADTEST PROXY SLURP SHARED_MEM_LOCKS \
       IPRO_PRESERVE_LOADTEST MEMCACHED_LOADTEST REDIS_LOADTEST \
-      PURGING_LOADTEST SPELING GZIP EXPERIMENT_GA EXPERIMENT_NO_GA HTTPS \
-      ALL_DIRECTIVES PER_VHOST_STATS NO_PER_VHOST_STATS STATS_LOGGING EXTCACHE \
+      PURGING_LOADTEST EXPERIMENT_GA EXPERIMENT_NO_GA HTTPS \
+      PER_VHOST_STATS NO_PER_VHOST_STATS EXTCACHE \
       PROCESS_SCOPE VALGRIND REMOTE_CONFIG
 
 ifeq ($(REDIS_TEST),1)
@@ -365,11 +365,6 @@ restart : stop enable_ports_and_file_access
 	    ENABLE_PROXY=$(ENABLE_PROXY)
 	sudo $(APACHE_START)
 
-# Tests that the installed mod_pagespeed server is working.
-test :
-	CACHE_FLUSH_TEST=on APACHE_DOC_ROOT=$(APACHE_DOC_ROOT) \
-		../system_test.sh localhost
-
 # Now hook in the full integration test suite. It needs to be run as root.
 apache_install_conf :
 	$(MAKE) staging_except_module $(OPTIONS)
@@ -405,9 +400,9 @@ apache_debug_stop : stop
 # http://wiki.centos.org/HowTos/
 # SELinux#head-ad837f60830442ae77a81aedd10c20305a811388
 #
-# The port-list below must be kept in sync with debug.conf.template.  1023 is
-# used to test connection-refused handling via modpagespeed.com.  We don't
-# actually create a VirtualHost on 1023.
+# 1023 is used by mod_pagespeed_test/connection_refused.html to test
+# connection-refused handling via modpagespeed.com.  We don't actually
+# create a VirtualHost on 1023.
 enable_ports_and_file_access :
 	if [[ -x /usr/sbin/semanage && ! -f /tmp/semanage.set ]]; then \
 	  set -x; \
@@ -433,9 +428,3 @@ enable_ports_and_file_access :
 apache_debug_leak_test :
 apache_debug_proxy_test :
 apache_debug_slurp_test :
-
-APACHE_HTTPS_PORT=
-APACHE_DEBUG_PAGESPEED_CONF=$(APACHE_CONF_DIR)/pagespeed.conf
-INSTALL_DATA_DIR=.
-
-include Makefile.tests

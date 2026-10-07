@@ -25,9 +25,11 @@ py_library(
         "__init__.py",
         "assertions.py",
         "client.py",
+        "flush_origin.py",
         "pytest_main.py",
         "require.py",
         "stats.py",
+        "streaming.py",
     ],
     # Put test/system/ on dependents' sys.path so tests can
     # `from pagespeed_test_framework import ...` (without this, only the

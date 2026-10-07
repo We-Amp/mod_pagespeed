@@ -330,7 +330,179 @@ APRUTIL_SHA = "804b8b276b346a69ca91bc704198de9ff4956a9a60a2f1212f350c230ee3dd03"
 # (We-Amp/cyclone-cache): content == the pre-relocation pin, comment-only
 # delta, on-disk cache format major 7 unchanged.
 # Import rewritten pre-flip (owner-ruled); new root tree byte-identical.
-CYCLONE_COMMIT = "e5503d1fff5e8faccfd95fd9fb626820dc932e0a"
+#
+# Bumped to cyclone d453fc3 (We-Amp/cyclone-cache main, 32 commits past
+# e5503d1).  Still a LOCKSTEP bump: the optimizer moves to this same commit,
+# and the pin-pair gate refuses a release until
+# install/debian/optimizer-pin.json records an optimizer release cut from
+# it.  What matters here:
+#
+# 1. BREAKING -- ON-DISK FORMAT MAJOR 8 (CRC-32C document checksums) and
+#    mmap directory version 2.  Both are in the fingerprinted filename, so
+#    ModPagespeedFileCachePath's volume starts EMPTY in a new file after the
+#    upgrade; the format-7 file is left on disk (rollback stays warm) and is
+#    the operator's to delete.  The optimizer's format move also takes its
+#    cache-directory generation from 1 to 2, and
+#    DaemonAdapter::kCacheDirGeneration moves with it.
+#
+# 2. WRAP RETENTION IS ON BY DEFAULT: after a stripe wraps, the previous
+#    pass stays readable until its bytes are overwritten.  The mode is
+#    recorded in the volume; every process of one server opens it with the
+#    same (default) config, so they agree.
+#
+# 3. CROSS-PROCESS LOCKS NO LONGER USURP A LIVE HOLDER.  A waiter used to
+#    take a lock after tens of microseconds; it now waits out a live holder,
+#    and inserts, removes, hit-count updates and write-slot reservation give
+#    up with CacheError::Busy (publishing nothing) once the holders they have
+#    seen add up to 250 ms.  The wrapper reports a busy write as a failed
+#    write (with its own last-error text) and a busy delete as
+#    CYCLONE_UNAVAILABLE, not as NOT_FOUND, so it is never counted as a
+#    delete that happened.
+#
+# 3a. WRITE-LOCK LIVENESS NO LONGER USES PIDS (since b5c31e8, #37).  Each
+#    process holds a kernel byte-range lock on its own liveness slot in the
+#    volume file (fcntl OFD locks; LockFileEx on Windows), and a waiter
+#    recovers the write lock only when no process holds the holder's slot,
+#    so a live holder never looks dead, in any PID namespace.  Older builds
+#    still judge by kill(pid, 0), so one PID namespace is only recommended
+#    while old and new builds share a volume; Apache children and nginx
+#    workers of one server share one anyway.  Open the cache after any
+#    daemonize step and never close its descriptors behind its back.  No
+#    format change; no action needed.
+#
+# 3b. COLD AND SEQUENTIAL READAHEAD FOR SMALL READS (#41): the first,
+#    CRC-verified read of a document of 16 KiB or more gets a readahead
+#    hint (cold_readahead_min_bytes), extended by up to 1 MiB for reads in
+#    insertion order (sequential_readahead_bytes).  Active only with
+#    verify_checksum_on_read, which the wrapper leaves at its default (on).
+#    No action needed.  fill_large_document_tail (#40) is new, opt-in and
+#    off by default; not enabled here.
+#
+# 3c. EVERY CACHE FILE DESCRIPTOR IS CLOSE-ON-EXEC (#44).  An exec'd child
+#    no longer inherits the volume fd, so it cannot keep a dead writer's
+#    liveness slot held (which delayed recovering its write lock from about
+#    50 ms to the 5 s fallback).  fork() still shares the fds, so Apache
+#    children and nginx workers are unaffected.  No action needed.
+#
+# 4. Chain walks reject a link pointing at or above its own node
+#    (ChainCorrupted instead of a looping listing), a lookup racing a stalled
+#    writer returns Busy after up to 5 ms instead of a false miss (the
+#    wrapper's reads already map every failure to a miss), commit_write no
+#    longer assembles a contiguous copy of the document (bytes on disk
+#    unchanged), WriteHandle::reserve() is new and unused here, and Linux
+#    readahead is chunked.  Stats fields are tail-appended.
+#
+# The build glue in //bazel:cyclone.bzl needs no change: its src/core glob
+# picks up the new src/core/crc32c.cpp, whose hardware paths use
+# per-function target attributes (no new copts or defines), and the
+# CYCLONE_PLATFORM_LINUX/MACOS defines it does not set are not read by the
+# library at this pin.  No library sources were added after b5c31e8, and the
+# liveness code needs only libc, the existing -lpthread and kernel32.
+#
+# Bumped to cyclone 97ed09e (5 commits past d453fc3), the commit the
+# optimizer pins too.  Same on-disk format as d453fc3, so
+# nothing above changes for this repo.  New and opt-in, off by default and
+# not enabled here: write_behind (#45; Linux sync_file_range after a large
+# commit, can block under device congestion) and the
+# CacheConfig::for_kv_tier() preset (#48).  CacheStats gains
+# write_behind_ranges / write_behind_us at its tail; the wrapper's
+# field-by-field stats copy is unaffected.  No new sources or link flags.
+#
+# Bumped to cyclone bb1d71a, the commit the optimizer pins too.  Two
+# processes writing alternates of one key at the same moment could lose
+# one: an alternate write resolves the key's chain before it writes and
+# publishes afterwards, and when another process published or removed the
+# same key in between, the write added a second directory entry and the
+# next write of the key cleared one of the two chains.  With the optimizer
+# sharing the volume that dropped an optimized copy written while this
+# module re-recorded the original, with no error on either side.  The
+# publish is now conditional -- for a write, and for the removal of a head
+# alternate that every re-record of an original performs -- and a write
+# resolves again until it is published, however many processes write the
+# key; it does not report CacheError::Busy for a lost race.  On-disk format
+# unchanged; no new sources or link flags; nothing to configure.  A process
+# on the previous pin still publishes unconditionally, so the loss stays
+# possible until every process sharing a volume runs this one: deploy this
+# module and the optimizer together.
+#
+# Four earlier library commits come along.  The background optimization
+# engine is now off unless the embedder enables it; the wrapper never
+# enabled or fed it, so the only effect is that an open cache no longer
+# starts its load-monitor thread and idle pool worker.  A process that
+# exits with a cache still open no longer risks terminating in a static
+# destructor.  The RAM tier's conditional put re-checks the bucket version
+# in single-process mode too (a one-step dip in the served version around a
+# re-record).  The fourth only touches the library's own sanitizer
+# suppression lists.  The public headers change in comments and in that one
+# default; the C API and the stats structs are unchanged.  The library's
+# test hooks stay out of this build (CYCLONE_TEST_SEAMS is not defined).
+#
+# Bumped to cyclone e843631 (1 commit past bb1d71a), the commit the
+# optimizer moves to as well.  The Apache parent and the nginx master open
+# and start every cache themselves (RootInit), so they run the library's
+# background threads, and those take in-process locks while they work: the
+# hit-count flush locks each of 4096 stripe mutexes once a second, the
+# directory sync holds a shard of the cache gate for its msync/fsync sweep
+# every 30 s.  A worker process forked in the middle of a pass inherited
+# such a lock held by a thread it does not have.  It then blocked for good
+# on its first read of a key on that stripe -- under Apache already in
+# child init, in the start-up remote-configuration lookup, so it never
+# reached the accept loop, kept its slot and did not go away on a graceful
+# restart -- or at exit, where CycloneCache::ShutDown stops and then
+# destroys the cache and the destructor's second stop() took the cache gate
+# exclusively.  The library's pthread_atfork prepare handler now waits for
+# a pass in flight and holds new ones off until fork() has returned, and
+# stop() in a forked child marks the inherited Cache finished, so a later
+# stop() or the destructor takes no lock.  The wait has no timeout:
+# normally microseconds, at most one fsync of the volume, so on storage
+# where fsync stalls a fork of a worker stalls with it.  A graceful restart
+# opens the new generation's caches just before it forks and sees only
+# flush sweeps.
+#
+# Nothing changes in the wrapper (cyclone_wrapper.cc): it starts a cache
+# once, never restarts one after stop(), and never touches the optimization
+# engine, which are the only two behaviours that differ in a forked child
+# (start() after stop() returns CacheError::Closed, optimization_engine()
+# returns nullptr).  A worker has no library background threads, as before:
+# its hit counts are written on thresholds and the periodic directory sync
+# stays the parent's.  IIS and Envoy do not fork; on Windows the gate
+# compiles to an always-entered stub.
+#
+# No on-disk format or shared-mapping change, so no cache reset and
+# processes on either commit can share a volume; no public API change.  No
+# new sources (one test file), no new defines or link flags; the one new
+# header, src/core/fork_gate.hpp, is matched by the src/core/*.hpp glob in
+# //bazel:cyclone.bzl, which needs no change.
+#
+# Bumped to cyclone 6e64530 (6 commits past e843631), the commit the
+# optimizer moves to as well.  Again no on-disk format or shared-mapping
+# change, no public API or ABI change (the public headers change in comments
+# only), no new source file, define or link flag; //bazel:cyclone.bzl needs
+# no change.  What is new:
+#   - stop() is ordered against handles still in use on other threads.
+#     Releasing or renewing a disk-hit read handle and committing a write
+#     handle used per-stripe state that stop() frees, unordered against a
+#     stop() on another thread.  stop() now waits for such a call already in
+#     flight (for a commit: at most one per writing thread; about 5 s behind
+#     another process stopped while it holds the cross-process write lock),
+#     and a commit that starts after stop() is refused with the existing
+#     CacheError::Closed and writes nothing.  Here that concerns
+#     CycloneCache::ShutDown, which stops the cache while a MappedSharedString
+#     on another thread may still hold a read handle.
+#   - The OpenSSL key hash no longer depends on state OpenSSL frees at exit:
+#     it now calls SHA256_Init/Update/Final from <openssl/sha.h> on a stack
+#     context instead of EVP.  This build does not define
+#     CYCLONE_USE_BUNDLED_SHA256, so it hashes through that path, served by
+#     the bundled BoringSSL (@boringssl//:crypto), which has no exit-time
+#     teardown and was not affected by the crash; the symbol check
+#     (tools/ci/assert_module_symbols.sh) judges what the module now links.
+#   - The bundled SHA-256 is the library's CMake default.  A CMake option
+#     default only; the source-level switch this build leaves unset is
+#     unchanged.
+#   - In the optional optimization engine (not used here) a result that
+#     cannot be written because the engine is stopping is reported as
+#     cancelled.  The remaining two commits change tests only.
+CYCLONE_COMMIT = "6e64530dda457d4cbfcac68fee432fc64d16d94c"
 
 # Libevent - cross-platform event notification library
 # Used by LibeventDispatcher for standalone event loop (Apache deployments)
@@ -338,8 +510,8 @@ LIBEVENT_VERSION = "2.1.12-stable"
 LIBEVENT_SHA = "92e6de1be9ec176428fd2367677e61ceffc2ee1cb119035037a27d346b0403bb"
 
 # libcurl - HTTP client library (built from source)
-LIBCURL_VERSION = "8.21.0"
-LIBCURL_SHA = "ec753aa6f408a3ca9f0d6d5f7a77417aecd1544db13c03ae5d443612bf367364"
+LIBCURL_VERSION = "8.22.0"
+LIBCURL_SHA = "222c6b5c1f368ac63aed59bce2774eb5def9e8e67e46e800be182e684d2845a3"
 
 # libmemcached - memcached client library (built from source)
 # Using awesomized/libmemcached fork which is actively maintained
@@ -445,7 +617,13 @@ def mod_pagespeed_dependencies():
         sha256 = BORINGSSL_SHA,
         # Add CRYPTO_thread_local_cleanup() so pagespeed_iis.dll can release
         # the BoringSSL TLS slot on DLL unload.
-        patches = ["@mod_pagespeed//bazel:boringssl_dll_unload_tls_cleanup.patch"],
+        # Make the allocator-override hooks null by construction instead of
+        # weak external references: a module loaded into a server process must
+        # not leave crypto symbols for that process to satisfy.
+        patches = [
+            "@mod_pagespeed//bazel:boringssl_dll_unload_tls_cleanup.patch",
+            "@mod_pagespeed//bazel:boringssl_no_weak_alloc_hooks.patch",
+        ],
         patch_args = ["-p1"],
     )
 
@@ -750,4 +928,3 @@ cc_library(
         build_file_content = ed25519_build_rule,
         sha256 = "aedb26c46d3dc3b721ab37c5248d5c923142e4d56009a9605c470383f32ce77a",
     )
-

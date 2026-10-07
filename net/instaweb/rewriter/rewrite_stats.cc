@@ -65,6 +65,27 @@ const char kIproNotRewritable[] = "ipro_not_rewritable";
 const char kIproDaemonServed[] = "ipro_daemon_served";
 const char kIproDaemonFallthrough[] = "ipro_daemon_fallthrough";
 
+// The per-class SPLITS of the two counters above -- not new partition
+// members: every count here is already inside its total.  served_<class>
+// moves on the serve leg, from the served entry's stored content class
+// (css, js, image, other; a served entry classed html has no split and
+// stays only in the total).  fallthrough_<class> moves in the record arm,
+// where the origin response's own Content-Type makes the class known for
+// sure -- at the serve seam a cold key leaves the class unread.  A
+// fall-through whose class is never learned (a HEAD request, an aborted
+// response, a recorder that could not be built, a response the gate breaks
+// on before classification) also stays only in the total, so each class
+// sum can trail its total by exactly those.  The "not optimizable"
+// remainder an operator sees is the fall-through total minus
+// css+js+image.
+const char kIproDaemonServedCss[] = "ipro_daemon_served_css";
+const char kIproDaemonServedJs[] = "ipro_daemon_served_js";
+const char kIproDaemonServedImage[] = "ipro_daemon_served_image";
+const char kIproDaemonServedOther[] = "ipro_daemon_served_other";
+const char kIproDaemonFallthroughCss[] = "ipro_daemon_fallthrough_css";
+const char kIproDaemonFallthroughJs[] = "ipro_daemon_fallthrough_js";
+const char kIproDaemonFallthroughImage[] = "ipro_daemon_fallthrough_image";
+
 // NOT PART OF THE PARTITION ABOVE, and deliberately so.  This counts the
 // worker re-notifies sent on FALLBACK HITS -- serves of a variant that is not
 // the one the client's mask names on the viewport, density, Save-Data or
@@ -100,6 +121,23 @@ const char kIproDaemonRefreshNotified[] = "ipro_daemon_refresh_notified";
 // continue, and a dead notify socket reads as this one climbing.
 const char kIproDaemonRefreshNotifyFailed[] =
     "ipro_daemon_refresh_notify_failed";
+
+// THE THIRD NOTIFICATION PAIR, and likewise NOT part of the partition: this
+// counts notifications sent after the substrate served a stylesheet's or
+// script's stored original and found that the optimized copy the optimizer
+// had written for it is gone while its compressed copies remain.  Every one
+// of those serves is already inside `ipro_daemon_served`.  It counts ASKS,
+// not heals: how often this server asked for a copy to be made again.  It
+// stays flat for content the optimizer left unoptimized on purpose, and it
+// keeps climbing -- about once per URL per window per process -- for a URL
+// whose copy the optimizer does not write back, for instance because its
+// content type was switched off after the compressed copies were stored.
+const char kIproDaemonHealNotified[] = "ipro_daemon_heal_notified";
+
+// The failure half, on the same terms as the two pairs above: only SEND
+// OUTCOMES move these two, so a dead notify socket reads as this one
+// climbing.
+const char kIproDaemonHealNotifyFailed[] = "ipro_daemon_heal_notify_failed";
 
 const char* kWaveFormCounters[RewriteDriverFactory::kNumWorkerPools] = {
     "html-worker-queue-depth", "rewrite-worker-queue-depth",
@@ -162,6 +200,7 @@ const char RewriteStats::kDownstreamCachePurgeAttempts[] =
     "downstream_cache_purge_attempts";
 const char RewriteStats::kSuccessfulDownstreamCachePurges[] =
     "successful_downstream_cache_purges";
+const char RewriteStats::kProcessStartMs[] = "process_start_ms";
 
 // In Apache, this is called in the root process to establish shared memory
 // boundaries prior to the primary initialization of RewriteDriverFactories.
@@ -203,10 +242,22 @@ void RewriteStats::InitStats(Statistics* statistics) {
   statistics->AddVariable(kIproNotRewritable);
   statistics->AddVariable(kIproDaemonServed);
   statistics->AddVariable(kIproDaemonFallthrough);
+  statistics->AddVariable(kIproDaemonServedCss);
+  statistics->AddVariable(kIproDaemonServedJs);
+  statistics->AddVariable(kIproDaemonServedImage);
+  statistics->AddVariable(kIproDaemonServedOther);
+  statistics->AddVariable(kIproDaemonFallthroughCss);
+  statistics->AddVariable(kIproDaemonFallthroughJs);
+  statistics->AddVariable(kIproDaemonFallthroughImage);
+  // A gauge, not a counter: the console reads it raw and never differences
+  // it (it rides stats_json's gauges list).
+  statistics->AddUpDownCounter(kProcessStartMs);
   statistics->AddVariable(kIproDaemonFallbackNotified);
   statistics->AddVariable(kIproDaemonFallbackNotifyFailed);
   statistics->AddVariable(kIproDaemonRefreshNotified);
   statistics->AddVariable(kIproDaemonRefreshNotifyFailed);
+  statistics->AddVariable(kIproDaemonHealNotified);
+  statistics->AddVariable(kIproDaemonHealNotifyFailed);
   statistics->AddVariable(kDownstreamCachePurgeAttempts);
   statistics->AddVariable(kSuccessfulDownstreamCachePurges);
   statistics->AddTimedVariable(kTotalFetchCount, Statistics::kDefaultGroup);
@@ -263,6 +314,15 @@ RewriteStats::RewriteStats(bool has_waveforms, Statistics* stats,
       ipro_not_rewritable_(stats->GetVariable(kIproNotRewritable)),
       ipro_daemon_served_(stats->GetVariable(kIproDaemonServed)),
       ipro_daemon_fallthrough_(stats->GetVariable(kIproDaemonFallthrough)),
+      ipro_daemon_served_css_(stats->GetVariable(kIproDaemonServedCss)),
+      ipro_daemon_served_js_(stats->GetVariable(kIproDaemonServedJs)),
+      ipro_daemon_served_image_(stats->GetVariable(kIproDaemonServedImage)),
+      ipro_daemon_served_other_(stats->GetVariable(kIproDaemonServedOther)),
+      ipro_daemon_fallthrough_css_(
+          stats->GetVariable(kIproDaemonFallthroughCss)),
+      ipro_daemon_fallthrough_js_(stats->GetVariable(kIproDaemonFallthroughJs)),
+      ipro_daemon_fallthrough_image_(
+          stats->GetVariable(kIproDaemonFallthroughImage)),
       ipro_daemon_fallback_notified_(
           stats->GetVariable(kIproDaemonFallbackNotified)),
       ipro_daemon_fallback_notify_failed_(
@@ -271,6 +331,9 @@ RewriteStats::RewriteStats(bool has_waveforms, Statistics* stats,
           stats->GetVariable(kIproDaemonRefreshNotified)),
       ipro_daemon_refresh_notify_failed_(
           stats->GetVariable(kIproDaemonRefreshNotifyFailed)),
+      ipro_daemon_heal_notified_(stats->GetVariable(kIproDaemonHealNotified)),
+      ipro_daemon_heal_notify_failed_(
+          stats->GetVariable(kIproDaemonHealNotifyFailed)),
       downstream_cache_purge_attempts_(
           stats->GetVariable(kDownstreamCachePurgeAttempts)),
       successful_downstream_cache_purges_(

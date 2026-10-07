@@ -335,3 +335,106 @@ pagespeed_cc_test(
         "//pagespeed/kernel/base:pagespeed_base_core",
     ],
 )
+
+# The message handler's event-log policy: severity filtering, the
+# off-directive notice, the distinct-text latch and the per-process cap,
+# driven through the facility's sink seam.
+pagespeed_cc_test(
+    name = "iis_event_log_test",
+    srcs = ["iis_event_log_test.cc"],
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        "//pagespeed/iis:iis_event_log",
+        "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)
+
+# The wiring leg: the port's message handler routes WARNING/ERROR to the
+# event-log policy.  Links the port library itself (the handler's
+# construction sits behind the IIS runtime headers, which the Windows lane
+# provides).
+pagespeed_cc_test(
+    name = "iis_message_handler_event_test",
+    srcs = ["iis_message_handler_event_test.cc"],
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        "//pagespeed/iis:iis_event_log",
+        "//pagespeed/iis:iis_module",
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/system:system_windows",
+    ],
+)
+
+# The daemon startup-check registry: one adapter per distinct
+# (library, socket, volume) triple for the life of the process.  The peer
+# is faked at the library binder; the volume files are real, so the
+# startup check's mirror genuinely runs.
+pagespeed_cc_test(
+    name = "iis_daemon_check_test",
+    srcs = ["iis_daemon_check_test.cc"],
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        "//pagespeed/iis:iis_daemon_check",
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/system:daemon_adapter",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+    ],
+)
+
+# The recorder seam pin: no source in the port constructs the classic
+# in-place recorder directly; the shared record gate is the one construction
+# site (same idiom as the nginx port's seam test). Reads the port's sources
+# as data, so it needs no IIS runtime headers and runs on every platform.
+pagespeed_cc_test(
+    name = "iis_recorder_gate_seam_test",
+    srcs = ["iis_recorder_gate_seam_test.cc"],
+    data = ["//pagespeed/iis:iis_module_srcs"],
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base_core",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+    ],
+)
+
+# The daemon record arm's request facts: the authorization decision and
+# the begin-time properties in their pure form (the IHttpContext plumbing
+# sits behind the IIS runtime headers; the seam pin covers the call shape).
+pagespeed_cc_test(
+    name = "iis_daemon_record_test",
+    srcs = ["iis_daemon_record_test.cc"],
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        "//pagespeed/iis:iis_daemon_record",
+        "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)
+
+# The port's header tables against the record arm's reproducibility rule
+# (the known-header bookmarks, the real header names as this port spells
+# them, the unknown-header bookmarks, and a default static-file
+# response).  Windows-only: iis_global_constants.h includes <http.h>.
+pagespeed_cc_test(
+    name = "iis_daemon_record_headers_test",
+    srcs = ["iis_daemon_record_headers_test.cc"],
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        "//pagespeed/iis:iis_daemon_record",
+        "//pagespeed/iis:iis_global_constants",
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/kernel/http",
+        "//pagespeed/system:daemon_record_arm",
+    ],
+)
+
+# The serve arm's composition, read as a header list rather than as writes
+# into an IIS response. Windows-only: the library under test is.
+pagespeed_cc_test(
+    name = "iis_daemon_serve_test",
+    srcs = ["iis_daemon_serve_test.cc"],
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        "//pagespeed/iis:iis_daemon_serve",
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/kernel/http",
+        "//pagespeed/system:daemon_serve_arm",
+    ],
+)

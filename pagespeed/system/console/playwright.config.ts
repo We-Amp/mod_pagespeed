@@ -9,12 +9,20 @@ export default defineConfig({
   retries: 0,
   use: {
     headless: true,
-    baseURL: "http://localhost:8080",
   },
   projects: [
     {
-      name: "chromium",
+      // Self-contained: the committed bundle with mocked admin endpoints
+      // (e2e/support/mock-admin.ts). No server is needed; CI runs these.
+      name: "mocked",
+      testMatch: /.*\.mock\.spec\.ts$/,
       use: { browserName: "chromium" },
+    },
+    {
+      // Against a live console on localhost:8080 (vite dev or a real server).
+      name: "live",
+      testIgnore: /.*\.mock\.spec\.ts$/,
+      use: { browserName: "chromium", baseURL: "http://localhost:8080" },
     },
   ],
 });

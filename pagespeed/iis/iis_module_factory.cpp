@@ -141,6 +141,14 @@ IisProcessContext* IisModuleFactory::GetProcessContext(const GoogleString& site_
 
 		if (cf->GetConfig(paths, input, *options, message_handler_, &global_config))
 		{
+			// A configuration has been read in this process. This parse
+			// matches with no hostname, so a directive inside a host- or
+			// path-matched block is invisible to it: only a value it
+			// actually saw ends the unknown window here. The per-site parse,
+			// which does supply a hostname, ends it either way.
+			if (logToEventLogSet) {
+				logToEventLogParsed = true;
+			}
 			process_context= new IisProcessContext(site_app_id,module_id_, m_dwPageSize, options, app_pool_name_, global_config);
 			process_context->FileID1.CreateFileID(config_path);
 			process_context->FileID2.CreateFileID(site_root );

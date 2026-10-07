@@ -290,6 +290,9 @@ function Run-Tests {
         "-m", "pytest",
         "$ScriptDir\automatic",
         "$ScriptDir\iis",
+        # Port-agnostic tests lifted out of iis\ (system\ is not collected
+        # wholesale: it also holds secondary-vhost tests this lane cannot run).
+        "$ScriptDir\system\test_admin_pages.py",
         "-v",
         "--tb=short"
     )

@@ -113,4 +113,22 @@ TEST_F(CircularBufferTest, SmallSize) {
   free(temp);
 }
 
+// Test that lines_written() counts newline-terminated lines (not Write()
+// calls -- a single Write() may carry a multi-line message), monotonically,
+// unaffected by Clear() (which resets displayed content, not history), and
+// even when the physical storage wraps or left-truncates.
+TEST_F(CircularBufferTest, LinesWrittenIsMonotonicAcrossWraps) {
+  const int capacity = 8;
+  CircularBuffer* buffer = CircularBuffer::Create(capacity);
+  EXPECT_EQ(0, buffer->lines_written());
+  buffer->Write("aaaa\n");
+  buffer->Write("bbbb\n");  // 5 + 5 bytes > capacity 8: wraps.
+  EXPECT_EQ(2, buffer->lines_written());
+  buffer->Write("cc\ndd\nee\n");  // one Write(), three lines; truncates.
+  EXPECT_EQ(5, buffer->lines_written());
+  buffer->Clear();
+  EXPECT_EQ(5, buffer->lines_written()) << "Clear drops content, not history";
+  free(buffer);
+}
+
 }  // namespace net_instaweb

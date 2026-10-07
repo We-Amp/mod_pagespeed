@@ -194,6 +194,17 @@ class TestLocalStorageCacheCookie:
         # Check that this run did NOT inline the data.
         check_not fgrep "yellow {background-color: yellow" $FETCHED
         check_not grep "src=.data:image/png;base64," $FETCHED
+        # Check that this run inserted the expected scripts.
+        check grep -q \
+          "pagespeed.localStorageCache.inlineCss(.http://.*/styles/yellow.css.);" \
+          $FETCHED
+        SEARCH_FOR="pagespeed.localStorageCache.inlineImg("
+        SEARCH_FOR+=".http://.*/images/Cuppa.png., [^,]*, "
+        SEARCH_FOR+=".alt=A cup of joe., "
+        SEARCH_FOR+=".alt=A cup of joe., "
+        SEARCH_FOR+=".alt=A cup of joe..s ..joe..., "
+        SEARCH_FOR+=".alt=A cup of joe..s ..joe...);"
+        check grep -q "$SEARCH_FOR" $FETCHED
     """
 
     def test_with_cache_cookie_skips_inlining(
@@ -245,6 +256,20 @@ class TestLocalStorageCacheCookie:
             response2,
             r'src="data:image/png;base64,',
             "Images should not be inlined when cookie indicates cached",
+        )
+
+        # Bash: instead, the page carries the local-storage cache calls.
+        assert_contains(
+            response2,
+            r"pagespeed.localStorageCache.inlineCss\(.http://.*/styles/yellow.css.\);",
+            "the cookie run must insert the inlineCss call for yellow.css",
+        )
+        assert_contains(
+            response2,
+            r"pagespeed.localStorageCache.inlineImg\(.http://.*/images/Cuppa.png., [^,]*, "
+            r".alt=A cup of joe., .alt=A cup of joe., "
+            r".alt=A cup of joe..s ..joe..., .alt=A cup of joe..s ..joe...\);",
+            "the cookie run must insert the inlineImg call for Cuppa.png",
         )
 
 

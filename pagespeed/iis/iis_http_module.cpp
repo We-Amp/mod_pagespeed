@@ -21,6 +21,7 @@
 #include "net/instaweb/rewriter/public/resource_fetch.h"
 #include "net/instaweb/rewriter/public/static_asset_manager.h"
 #include "net/instaweb/public/global_constants.h"
+#include "net/instaweb/rewriter/public/option_context.h"
 #include "pagespeed/kernel/http/google_url.h"
 #include "pagespeed/kernel/base/std_timer.h"
 #include "pagespeed/kernel/base/string_writer.h"
@@ -31,7 +32,11 @@
 #include "pagespeed/kernel/util/gzip_inflater.h"
 #include "pagespeed/kernel/http/query_params.h"
 
+#include "pagespeed/system/admin_site.h"
+#include "pagespeed/system/daemon_ipro_recorder.h"
 #include "pagespeed/system/in_place_resource_recorder.h"
+#include "pagespeed/system/ipro_record_gate.h"
+#include "pagespeed/system/serve_host_names.h"
 
 #include "pagespeed/kernel/base/stack_buffer.h"
 #include "pagespeed/kernel/util/statistics_logger.h"
@@ -40,6 +45,12 @@
 #include "pagespeed/iis/iis_global_constants.h"
 #include "pagespeed/iis/iis_config_util.h"
 #include "pagespeed/iis/iis_proxy_fetch_completion.h"
+#include "pagespeed/iis/iis_daemon_record.h"
+#include "net/instaweb/public/global_constants.h"
+#include "pagespeed/iis/iis_daemon_serve.h"
+#include "net/instaweb/rewriter/public/rewrite_stats.h"
+#include "pagespeed/kernel/base/timer.h"
+#include "pagespeed/system/daemon_serve_arm.h"
 #include "pagespeed/iis/iis_process_context.h"
 #include "pagespeed/iis/iis_rewrite_driver_factory.h"
 #include "pagespeed/iis/iis_misc.h"
@@ -118,7 +129,7 @@ namespace net_instaweb
 		GoogleString remote_ip_address = GetIPString(pHttpContext->GetRequest()->GetRemoteAddress());
 		GoogleString local_ip_address = GetIPString(pHttpContext->GetRequest()->GetLocalAddress());
 
-		return remote_ip_address == "127.0.0.1" || remote_ip_address == local_ip_address;
+		return IsLoopbackClientIp(remote_ip_address) || remote_ip_address == local_ip_address;
 	}
 	namespace RequestRouting {
 		enum Response {
@@ -279,6 +290,39 @@ namespace net_instaweb
 		return (const char*)pvRequestBody;
 	}
 
+	// Maps a RequestRouting category that is served as an admin/statistics
+	// handler to the AdminHandlerFamily + URL handler name the shared exposure
+	// warning (WarnIfNonLoopbackAdminAccess) uses. kCachePurge is ruled to the
+	// admin family: purge lives under /pagespeed_admin's authority, not its
+	// own family. Anything else falls back to kAdmin/"pagespeed_admin"
+	// defensively; only the admin/statistics/console/messages/purge
+	// categories are expected to reach here.
+	static AdminHandlerFamily AdminFamilyFor(RequestRouting::Response response_category, const char** handler_name)
+	{
+		switch (response_category) {
+		case RequestRouting::kStatistics:
+			*handler_name = "pagespeed_statistics";
+			return AdminHandlerFamily::kStatistics;
+		case RequestRouting::kGlobalStatistics:
+			*handler_name = "pagespeed_global_statistics";
+			return AdminHandlerFamily::kGlobalStatistics;
+		case RequestRouting::kConsole:
+			*handler_name = "pagespeed_console";
+			return AdminHandlerFamily::kConsole;
+		case RequestRouting::kMessages:
+			*handler_name = "pagespeed_message";
+			return AdminHandlerFamily::kMessages;
+		case RequestRouting::kGlobalAdmin:
+			*handler_name = "pagespeed_global_admin";
+			return AdminHandlerFamily::kGlobalAdmin;
+		case RequestRouting::kAdmin:
+		case RequestRouting::kCachePurge:
+		default:
+			*handler_name = "pagespeed_admin";
+			return AdminHandlerFamily::kAdmin;
+		}
+	}
+
 	REQUEST_NOTIFICATION_STATUS
 		IisHttpModule::OnBeginRequest(IN IHttpContext * pHttpContext, IN IHttpEventProvider * pProvider)
 	{
@@ -321,6 +365,203 @@ namespace net_instaweb
 	}
 
 
+
+static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
+                                        IisInnerRequestContext* request_context,
+                                        const RewriteOptions* options) {
+  IisServerContext* server_context = request_context->server_context();
+  RewriteStats* stats = server_context->rewrite_stats();
+
+  // The single construction site, asked the way the record arm asks its own:
+  // null unless the daemon owns the in-place cache for this site AND this
+  // worker process has a usable handle on its volume.
+  // Exactly one class per response reaches the peer's serve-stats mapping,
+  // this function being the only place that knows the whole outcome -- a
+  // fall-through included, which is a classified serve of origin bytes and
+  // not the absence of one.
+  DaemonServeStats* serve_stats = server_context->daemon_serve_stats();
+
+  // The reader is obtained through the factory that OPENS the volume if this
+  // process has not yet: an IIS request thread may block, as Apache's does,
+  // and the alternative accessor exists for ports whose serve runs on an
+  // event loop.
+  std::unique_ptr<DaemonServeReader> reader(
+      MakeDaemonServeReaderIfReady(server_context->daemon_adapter()));
+  if (reader == NULL) {
+    // Reaching this at all means the daemon owns the site, so a null reader
+    // is not "no daemon configured": it is this worker process having no
+    // usable handle on the volume. Counted and said, or a dead volume would
+    // be indistinguishable from no traffic.
+    server_context->message_handler()->Message(
+        kInfo,
+        "in-place serve: no usable handle on the optimizer daemon's cache "
+        "volume in this worker process: %s",
+        request_context->gurl()->spec_c_str());
+    if (serve_stats != NULL) {
+      serve_stats->Record(kPsServeClassOriginalSkew);
+    }
+    stats->ipro_daemon_fallthrough()->Add(1);
+    return false;
+  }
+
+  DaemonServeRequest serve_request;
+  BuildDaemonServeRequest(http_context, *request_context->gurl(),
+                          &serve_request);
+  const DaemonServeDecision decision =
+      reader->Serve(serve_request, server_context->timer()->NowMs() / 1000);
+
+  if (serve_stats != NULL) {
+    serve_stats->Record(decision.serve_class);
+  }
+
+  if (decision.verdict == DaemonServeVerdict::kFallThrough) {
+    // The request goes to the origin and, on a GET, to the record arm. An
+    // age-expired variant also sends the origin-refreshed sentinel, below;
+    // the fallback re-notify belongs to the served path further down.
+    server_context->message_handler()->Message(
+        kInfo,
+        "in-place serve: the optimizer daemon's cache had no answer (serve "
+        "class %d) for %s",
+        decision.serve_class, request_context->gurl()->spec_c_str());
+    stats->ipro_daemon_fallthrough()->Add(1);
+    // AN AGE-EXPIRED VARIANT IS THE ONE FALL-THROUGH THE WORKER CANNOT HEAL
+    // BY ITSELF. The request now goes to the origin and is recorded again,
+    // and that record notifies the worker -- which answers its own
+    // notification "already processed", because the URL was optimized once
+    // and nothing in the expiry lifecycle clears that. The variant would be
+    // declined on freshness on every request from then on. The sentinel is
+    // the worker's heal for exactly this transition, so it is sent before
+    // the record it precedes.
+    //
+    // Asked only when the decision says there is something to ask for: the
+    // option context is not free, and an ordinary cold miss must not pay for
+    // it. A configuration that cannot be named asks for nothing, as on the
+    // record side.
+    if (decision.stale_variant_expired_by_age) {
+      DaemonAdapter* adapter = server_context->daemon_adapter();
+      GoogleString option_context, option_signature;
+      if (adapter != NULL && adapter->abi() != NULL && options != NULL &&
+          OptionContext::Compute(*options, &option_context,
+                                 &option_signature) ==
+              OptionContextStatus::kOk) {
+        DaemonServeOriginRefreshedNotify(
+            *adapter->abi(), adapter->socket_path(), serve_request, decision,
+            option_context, option_signature,
+            stats->ipro_daemon_refresh_notified(),
+            stats->ipro_daemon_refresh_notify_failed());
+      }
+    }
+    return false;
+  }
+
+  const bool head_request =
+      StringCaseEqual(http_context->GetRequest()->GetHttpMethod(), "HEAD");
+  IisServeResponse response;
+  ComposeIisServeResponse(
+      decision,
+      IisCompressibleMediaType(ServeCompressorMediaType(decision, NULL)),
+      head_request, &response);
+
+  // The body is copied out of the peer's result before the reader goes -- the
+  // decision points into memory the READER owns -- and into request memory,
+  // not this frame: the write below hands the buffer to IIS, which may still
+  // be reading it when this function has returned, and every other write path
+  // on this port allocates the same way.
+  char* body = NULL;
+  const size_t body_size = response.has_body ? response.body.size() : 0;
+  if (response.has_body && body_size > 0) {
+    body = static_cast<char*>(http_context->AllocateRequestMemory(
+        static_cast<DWORD>(body_size)));
+    if (body == NULL) {
+      // Nothing has been written yet, so the request can still go to the
+      // origin and be recorded: decline rather than answer with nothing.
+      stats->ipro_daemon_fallthrough()->Add(1);
+      return false;
+    }
+    memcpy(body, response.body.data(), body_size);
+  }
+  reader.reset();
+
+  // Set before a byte goes out: the send notification runs on this same
+  // stack, and it must not take this response for one of its own.
+  request_context->set_leave(true);
+
+  IHttpResponse* iis_response = http_context->GetResponse();
+  // A body this module produced must never be cached by the kernel: it would
+  // be handed to every client for its lifetime with no way to invalidate it.
+  iis_response->DisableKernelCache();
+  iis_response->SetStatus(
+      static_cast<USHORT>(response.status),
+      response.status == 304 ? "Not Modified" : "OK");
+  for (size_t i = 0; i < response.headers.size(); ++i) {
+    const GoogleString& name = response.headers[i].first;
+    const GoogleString& value = response.headers[i].second;
+    iis_response->SetHeader(name.c_str(), value.c_str(),
+                            static_cast<USHORT>(value.size()), TRUE);
+  }
+  if (response.status != 304) {
+    // The module's own header, as the classic path states it: without it a
+    // response this module answered is indistinguishable from one the server
+    // produced, for an operator and for the loop check alike.
+    const GoogleString& version = options->x_header_value();
+    if (!version.empty()) {
+      iis_response->SetHeader(kPageSpeedHeader, version.c_str(),
+                              static_cast<USHORT>(version.size()), TRUE);
+    }
+    GoogleString length =
+        IntegerToString(static_cast<int>(response.content_length));
+    iis_response->SetHeader(HttpAttributes::kContentLength, length.c_str(),
+                            static_cast<USHORT>(length.size()), TRUE);
+  }
+  if (response.has_body && body != NULL) {
+    WriteResponseMessage(http_context, body, body_size, true);
+  }
+  // The peer measures its saving on the bytes that actually went out, so a
+  // hit is recorded on the body legs only, and only for an entry the worker
+  // produced with an origin length to measure against.
+  if (serve_stats != NULL && response.has_body &&
+      decision.serve_class == kPsServeClassOptimized &&
+      decision.worker_processed && decision.origin_content_length != 0) {
+    // A serve is attributed to a host name only when the site's
+    // configuration vouches for it.  This port does not read its sites'
+    // bound host names yet, so it supplies none: the serve is recorded
+    // without a host and counts under "other" -- never under a Host value a
+    // visitor chose.  The entry was looked up for the request's host.
+    serve_stats->RecordHit(decision.ps_content_type,
+                           decision.origin_content_length, body_size,
+                           decision.stored_mask,
+                           VouchedServeHost(serve_request.hostname,
+                                            ConfiguredHostNames()));
+  }
+  // One serve, counted once: a 200, a 304 and a HEAD each answered this
+  // request from the daemon's cache, and the two counters are documented as
+  // covering every in-place-eligible request between them.
+  stats->ipro_daemon_served()->Add(1);
+  RecordDaemonServedClass(stats, decision.ps_content_type);
+
+  // A FALLBACK HIT IS SERVED -- and it is also ANSWERED. The serve recorded
+  // nothing, so without this nothing would ever ask the worker for the
+  // variant this client's capabilities actually name, and the family would
+  // converge on the viewport, density and Save-Data axes only if a miss
+  // happened to come first. One notification, fire and forget; the arm's
+  // helper owns the re-check, the flag gate and the carve-out, and moves the
+  // two counters on send outcomes only -- so a suppression moves neither and
+  // a dead socket reads as the failure counter climbing.
+  if (decision.fallback_hit) {
+    DaemonAdapter* adapter = server_context->daemon_adapter();
+    GoogleString option_context, option_signature;
+    if (adapter != NULL && adapter->abi() != NULL && options != NULL &&
+        OptionContext::Compute(*options, &option_context, &option_signature) ==
+            OptionContextStatus::kOk) {
+      DaemonServeFallbackRenotify(
+          *adapter->abi(), adapter->socket_path(), serve_request, decision,
+          option_context, option_signature,
+          stats->ipro_daemon_fallback_notified(),
+          stats->ipro_daemon_fallback_notify_failed());
+    }
+  }
+  return true;
+}
 
 	REQUEST_NOTIFICATION_STATUS
 		IisHttpModule::OnBeginRequestPageSpeed(IN IHttpContext * pHttpContext, IN IHttpEventProvider * pProvider)
@@ -464,7 +705,8 @@ namespace net_instaweb
 			// exact status values are part of the test/operator contract:
 			//   cache-path-empty | cache-path-missing |
 			//   cache-path-not-writable | cache-path-create-failed |
-			//   log-dir-create-failed | post-config-failed | startup-failed
+			//   log-dir-create-failed | daemon-volume-split |
+			//   post-config-failed | startup-failed
 			GoogleString body;
 			StringWriter writer(&body);
 			GoogleMessageHandler handler;
@@ -544,6 +786,30 @@ namespace net_instaweb
 						"  icacls \"", cache_path, "\" /grant \"", identity, "\":(OI)(CI)M\n",
 						"...then recycle the application pool.\n"), &handler);
 					break;
+				case IisProcessContext::InitFailureKind::kDaemonVolumeSplit:
+					init_status = "daemon-volume-split";
+					writer.Write(StrCat(
+						"IISpeed is not running: opening the optimizer daemon's cache"
+						" volume created a second volume file instead of attaching to"
+						" the daemon's, so the site engages no PageSpeed at all rather"
+						" than risk two separate caches.\n\n",
+						"Volume path: ", cache_path, "\n\n",
+						"The usual cause is start order during an upgrade: the"
+						" optimizer daemon has a new on-disk cache format and has not"
+						" restarted onto it yet, so its new volume did not exist for"
+						" this site to attach to. Start the optimizer daemon if it is"
+						" not running and let it create its volume; the check's"
+						" report says what became of the volume file its own open"
+						" created -- removed, still there, not confirmed gone, or"
+						" left in place because another user or process holds it --"
+						" and the Application event log entry from the source"
+						" PageSpeed carries it. Then recycle the application"
+						" pool.\n\n",
+						"If the optimizer daemon is already running on its current"
+						" volume, the module and the daemon disagree about the volume:"
+						" install a module and optimizer package pair that agree.\n"),
+						&handler);
+					break;
 				case IisProcessContext::InitFailureKind::kLogDirCreateFailed: {
 					// Parallel to
 					// kCachePathCreateFailed above but for the LogDir
@@ -617,6 +883,7 @@ namespace net_instaweb
 			response_category == RequestRouting::kStatistics ||
 			response_category == RequestRouting::kGlobalStatistics ||
 			response_category == RequestRouting::kConsole ||
+			response_category == RequestRouting::kMessages ||
 			response_category == RequestRouting::kAdmin ||
 			response_category == RequestRouting::kGlobalAdmin ||
 			response_category == RequestRouting::kCachePurge;
@@ -708,6 +975,17 @@ namespace net_instaweb
 		} 
 		else if (is_an_admin_handler) {
 			log(pHttpContext, "Serving admin page");
+			if (!IsLocalRequest(pHttpContext)) {
+				// Defense-in-depth: log one warning per handler family per
+				// process lifetime if a non-loopback client reaches an
+				// admin/statistics endpoint. IIS site bindings/IP restrictions
+				// are the real gate; see pagespeed/system/admin_site.h.
+				const char* handler_name = "pagespeed_admin";
+				AdminHandlerFamily family = AdminFamilyFor(response_category, &handler_name);
+				WarnIfNonLoopbackAdminAccess(
+					GetIPString(pHttpContext->GetRequest()->GetRemoteAddress()),
+					family, handler_name, server_context->message_handler());
+			}
 			QueryParams query_params;
 			query_params.ParseFromUrl(*ctx->GetInnerContext()->gurl());
 			innerContext->set_leave(true);
@@ -734,6 +1012,15 @@ namespace net_instaweb
 					query_params,
 					ctx->base_fetch());
 			}
+			else if (response_category == RequestRouting::kMessages) {
+				ctx->base_fetch()->request_headers()->set_method(
+					RequestHeaders::MethodFromString(pHttpContext->GetRequest()->GetHttpMethod()));
+				server_context->MessageHistoryHandler(
+					*server_context->config(),
+					AdminSite::kOther,
+					query_params,
+					ctx->base_fetch());
+			}
 			else if (response_category == RequestRouting::kAdmin ||
 				response_category == RequestRouting::kGlobalAdmin) {
 				// Read POST body for JSON-API endpoints, matching the Apache,
@@ -746,6 +1033,8 @@ namespace net_instaweb
 						request_body = StringPiece(body);
 					}
 				}
+				ctx->base_fetch()->request_headers()->set_method(
+					RequestHeaders::MethodFromString(pHttpContext->GetRequest()->GetHttpMethod()));
 				server_context->AdminPage(
 					response_category == RequestRouting::kGlobalAdmin,
 					*ctx->GetInnerContext()->gurl(),
@@ -875,6 +1164,49 @@ namespace net_instaweb
 			options->IsAllowed(innerContext->gurl()->Spec()) &&
 			(StringCaseEqual(pHttpContext->GetRequest()->GetHttpMethod(), "GET") || StringCaseEqual(pHttpContext->GetRequest()->GetHttpMethod(), "HEAD"))
 			) {
+			// A daemon CONFIGURED site never enters the classic machinery
+			// below -- not the cache lookup, not the base fetch, not the
+			// pending completion.  Nothing may be served from or recorded
+			// into the classic in-place cache while the daemon owns the
+			// site, including entries left there from before the daemon
+			// options were set; and a configured-but-unavailable daemon
+			// means in-place optimization is OFF for the site, exactly as
+			// on the other ports, rather than a silent fall back to the
+			// classic cache.
+			const IproDisposition daemon_disposition =
+				IproDispositionFor(innerContext->server_context()->daemon_health());
+			if (daemon_disposition != IproDisposition::kClassic) {
+				// The daemon answers first, as on the Apache port: a request
+				// the shared cache can answer has nothing to record, and
+				// recording it would re-store an original the daemon holds.
+				if (daemon_disposition == IproDisposition::kDaemonSubstrate &&
+					ServeFromIisDaemonSubstrate(pHttpContext, innerContext, options)) {
+					// Nothing further in this request belongs to this
+					// module: the send notification runs on this same stack
+					// and must not look at a response this arm has already
+					// finished, so the flag is set BEFORE the write.
+					return RQ_NOTIFICATION_FINISH_REQUEST;
+				}
+				// A HEAD carries no body, so there is nothing to record.
+				if (daemon_disposition == IproDisposition::kDaemonSubstrate &&
+					StringCaseEqual(pHttpContext->GetRequest()->GetHttpMethod(), "GET")) {
+					DaemonRecordRequest record_request;
+					BuildDaemonRecordRequest(pHttpContext, *innerContext->gurl(),
+						options, &record_request);
+					innerContext->set_recorder(
+						MakeDaemonIproRecorderIfReady(
+							innerContext->server_context()->daemon_adapter(),
+							record_request,
+							options->ComputeHttpOptions(),
+							innerContext->server_context()->timer(),
+							innerContext->server_context()->message_handler(),
+							innerContext->server_context()->rewrite_stats()));
+					// A null recorder (no usable volume handle on the shared
+					// volume) leaves the response unrecorded; the response
+					// sites below already guard on a null recorder.
+				}
+				return RQ_NOTIFICATION_CONTINUE;
+			}
 			ctx->set_base_fetch(new IisModuleBaseFetch(pHttpContext, FetchType::kInPlace, innerContext->process_context()->handler(), innerContext->GetPagespeedRequestContext(), innerContext));
 			innerContext->base_fetch()->request_context()->set_options(options->ComputeHttpOptions());
 			// TODO(oschaaf): uncommented in 1.9
@@ -1306,6 +1638,36 @@ namespace net_instaweb
 
 
 
+			// THE AUTHORIZATION FACT IS TAKEN HERE, after IIS
+			// authentication has run: connection-based Windows
+			// authentication sends no Authorization header on follow-up
+			// requests on one keep-alive connection, so the begin-time
+			// header presence alone would read an authenticated request as
+			// anonymous and place a private response in a cache other
+			// users' requests reach.  One rule for both arms: the serve
+			// arm takes its facts at this same point.  When in doubt the
+			// request counts as authorized -- nothing is recorded.
+			// Deliberately stricter than the other ports, which fold the
+			// authentication fact into the request properties and can
+			// still record a public response to an authenticated request;
+			// this port refuses the whole recording instead.
+			if (innerContext->recorder() != NULL) {
+				if (IisRequestIsAuthorized(ReadIisAuthFacts(pHttpContext))) {
+					// One line per refused recording, through the site's
+					// handler so an operator can see why an authenticated
+					// site never records: the alternative silence looks
+					// like a broken substrate.
+					innerContext->server_context()->message_handler()->Message(
+						kInfo,
+						"in-place optimization: authorized request, "
+						"not recorded: %s",
+						innerContext->gurl()->spec_c_str());
+					innerContext->recorder()->Fail();
+					innerContext->recorder()->DoneAndSetHeaders(NULL, false);
+					innerContext->set_recorder(NULL);
+				}
+			}
+
 			if (pProvider->GetHeadersBeingSent() && innerContext->recorder() != NULL)
 			{
 				ResponseHeaders response_headers;
@@ -1316,7 +1678,12 @@ namespace net_instaweb
 				response_headers.WriteAsHttp(&sw, NULL);
 				if (response_headers.status_code() == 200) {
 					log(pHttpContext, "IPRO->consider response headers: %s", s.c_str());
-					innerContext->recorder()->ConsiderResponseHeaders(InPlaceResourceRecorder::HeadersKind::kFullHeaders, &response_headers);
+					// kFullHeaders only on this port: the headers are
+					// complete when the recorder first sees them.  The
+					// encoded-refusal therefore happens at Done, after the
+					// body has been accumulated (bounded by the recorder's
+					// content cap), not here.
+					innerContext->recorder()->ConsiderResponseHeaders(IproRecorder::kFullHeaders, &response_headers);
 				}
 				else {
 					// TODO(oschaaf): for 304, we should be able to cancel out the recorder 

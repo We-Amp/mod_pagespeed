@@ -184,7 +184,9 @@ struct DaemonServeDecision {
   // `client_mask` is the peer classifier's own answer over this request's
   // headers, unmodified.  `selection_mask` is the mask the read was actually
   // taken at -- the same thing with the transfer-encoding field normalized to
-  // identity; see ServeMaskWithIdentityEncoding.  Both are reported because
+  // identity, unless the reader's switch for the stored compressed copies is
+  // on and the request lists the classifier's coding plainly; see
+  // ServeSelectionMask.  Both are reported because
   // collapsing them would hide the one place this arm deviates from the
   // client's stated capabilities, and that deviation is load-bearing.
   uint32_t client_mask = 0;
@@ -209,20 +211,28 @@ struct DaemonServeDecision {
 
   // FALLBACK HIT: an optimized variant WAS served, but it is not the variant
   // this client's capability mask names -- the stored mask differs from the
-  // mask the selection was taken at on at least one of the viewport, density,
-  // Save-Data or image-format axes.  Only ever set on a kServeOptimized
-  // verdict; on every other outcome the field stays false and means nothing.
+  // mask the selection was taken at on at least one of the viewport, density
+  // or Save-Data axes, or on the image-format axis WHEN THE SERVED ENTRY IS
+  // AN IMAGE (the field describes an image format; for every other content
+  // class the comparison excludes it on both sides).  Only ever set on a
+  // kServeOptimized verdict; on every other outcome the field stays false
+  // and means nothing.
   //
   // THE COMPARISON IS AGAINST `selection_mask`, NOT `client_mask`, and that is
   // deliberate rather than a shorthand.  This arm normalizes the
   // transfer-encoding field to identity before selecting (see
   // ServeMaskWithIdentityEncoding), so the classifier's raw answer differs from
   // every stored mask this arm will serve on the encoding axis for EVERY real
-  // browser, permanently and by design.  Compared against `client_mask`, the
-  // predicate would fire on every optimized serve and the re-notify it feeds
-  // would be permanent per-request traffic over an axis the worker does not
-  // need to be asked about -- it derives the compressed siblings of any
-  // variant itself.  Compared against the mask the read was taken at, the
+  // browser, permanently and by design.  The image-format field gets the same
+  // treatment for content it does not describe: a stylesheet or script
+  // variant is stored with the format field at original while a browser's
+  // selection mask carries a format, so comparing it for them would fire on
+  // every stylesheet and script serve, for ever.  Compared against
+  // `client_mask`, or with the format field included for non-image content,
+  // the predicate would be permanent per-request traffic over an axis the
+  // worker does not need to be asked about -- it derives the compressed
+  // siblings of any variant itself.  Compared against the mask the read was
+  // taken at, with the format field excluded where it is not a fact, the
   // predicate names exactly the axes the worker can converge the family on,
   // and it self-terminates: once the client's variant exists, the selection
   // returns it and the masks compare equal.
@@ -265,6 +275,36 @@ struct DaemonServeDecision {
   // sentinel; see DaemonServeOriginRefreshedNotify.
   bool stale_variant_expired_by_age = false;
 
+  // LOST OPTIMIZED COPY: the durable original was served, and the entry says
+  // the optimizer HAS optimized this URL -- it holds the optimizer's gzip
+  // copy of an optimized copy that is itself no longer there.  Only ever set
+  // on a kServeOriginal verdict, for a stylesheet or a script, by a reader
+  // that was given a limiter (set_heal_notify_limiter); on every other
+  // outcome the field stays false and means nothing.
+  //
+  // WHY THIS SERVE IS SINGLED OUT.  Serving the durable original is the
+  // ordinary answer for a URL the optimizer has not got to yet, and for one
+  // it looked at and left alone.  Neither needs anyone to ask again: the
+  // first converges by the record -> notify path, the second is finished.
+  // A URL whose optimized copy has gone missing is neither.  Its entry still
+  // looks optimized -- the compressed siblings are there -- so nothing
+  // re-records it and nothing notifies, and every request is answered with
+  // origin bytes until the stored original expires.
+  //
+  // HOW A LOSS IS TOLD FROM A VERDICT, which is the whole difficulty: for a
+  // stylesheet or script that is already minimal the optimizer stores gzip
+  // and brotli copies OF THE ORIGINAL and no optimized copy, and that entry
+  // has exactly the same alternates.  The gzip copy decides it.  A gzip
+  // stream ends with the length of what it compresses, and every copy the
+  // optimizer writes records the original's length; equal means the copies
+  // are of the original (nothing was due), smaller means they are of an
+  // optimized copy (which is missing).  An entry without a gzip copy is not
+  // decided here and is not asked for.
+  //
+  // Consumed by the serving seam, which answers it with ONE ordinary
+  // notification; see DaemonServeLostCopyNotify.
+  bool lost_optimized_copy = false;
+
   // THE TWO DISJOINT REASONS `Vary: Accept` CAN BE OWED, kept apart rather
   // than folded into the boolean below.  They are different facts about the
   // response and only one of them is about anything this module did, so a
@@ -288,6 +328,17 @@ struct DaemonServeDecision {
   // actually carries.
   GoogleString etag;
   bool not_modified = false;
+
+  // The coding the served bytes are STORED in, as the `Content-Encoding`
+  // token a seam emits: "gzip", "br", or EMPTY for bytes that are not coded.
+  //
+  // READ OFF THE STORED MASK of the entry being served, never off the
+  // request: the label has to describe the bytes, and only the entry knows
+  // what they are.  Static storage.  Set on every composed decision -- the
+  // 304 included, whose `Vary` must be its 200's -- and empty on every
+  // fall-through and on every identity or durable-original serve.  Only a
+  // reader whose switch is on can produce a non-empty one.
+  StringPiece content_encoding;
 
   // The emitted `Cache-Control`, built by the peer from the stored origin
   // state.
@@ -322,6 +373,15 @@ struct DaemonServeDecision {
 
   StringPiece body;
 };
+
+class RewriteStats;
+
+// Moves the per-class split of the daemon-serve counter for one ANSWERED
+// request.  `ps_content_type` is the peer's kPsContent* numbering
+// (daemon_abi.h).  No-op for a null stats pointer.  css, js, image and
+// other each move their own counter; html and anything unrecognized move
+// nothing -- the caller's total already counted the request.
+void RecordDaemonServedClass(RewriteStats* stats, int ps_content_type);
 
 // ---------------------------------------------------------------------------
 // The pure half.  No I/O, no peer handle: every rule below is testable
@@ -384,6 +444,11 @@ uint32_t ServeMaskWithOriginalFormat(uint32_t mask);
 // The mask REPORTED for the request is still the classifier's own answer;
 // only the mask the read is taken at is normalized, and both travel in the
 // decision so a harness can see the difference.
+//
+// WITH THE READER'S SWITCH ON this normalization is skipped for a coding the
+// request lists plainly, and the peer then returns the stored coded sibling
+// when there is one and the identity sibling when there is not -- the same
+// arithmetic, with identity as the floor.  See ServeSelectionMask.
 uint32_t ServeMaskWithIdentityEncoding(uint32_t mask);
 
 // True when a stored variant's image format is one this request advertised.
@@ -525,7 +590,79 @@ StringPiece ServeMediaTypeForServedBytes(int ps_content_type, StringPiece body);
 // pre-compressed variants itself and returns the identity sibling.  Reaching
 // this predicate at all now means a by-id read produced something the peer's
 // own scoring would not have, and the cost is genuinely one serve.
+//
+// THIS IS THE SWITCH-OFF RULE, and it stays the rule for every reader whose
+// switch is off.  The four-argument overload below is the one the arm asks.
 bool ServeEncodingIsServable(uint32_t stored_mask);
+
+// The `Content-Encoding` tokens for the two stored codings.
+inline constexpr char kServeContentEncodingGzip[] = "gzip";
+inline constexpr char kServeContentEncodingBrotli[] = "br";
+
+// The `Content-Encoding` token for a stored mask's transfer-encoding field:
+// "gzip", "br", or EMPTY for identity -- and empty for the reserved value,
+// which names no coding and is never served.  The token comes from the
+// ENTRY, never from the request: it labels bytes, and only the entry knows
+// what its bytes are.
+StringPiece ServeContentEncodingToken(uint32_t stored_mask);
+
+// True when `accept_encoding` lists `coding` by NAME with a weight above
+// zero, and false otherwise -- including for every input this module cannot
+// read with certainty.
+//
+// A SECOND READING OF THE HEADER, deliberately, and only ever a narrowing
+// one.  The peer's classifier answers one coding per request and is the
+// source of the selection; this check decides whether this module may LABEL
+// bytes with that coding, which is the one place a wrong answer is
+// undecodable bytes on the wire.  The classifier at the current pin reads
+// `br;q=0;level=5` and `br;q=00` as accepting brotli and a lone `*` as
+// brotli; none of those is a client that said it decodes brotli by name.
+// Every disagreement therefore resolves to identity, which every client
+// decodes and which is exactly what this module served before it could
+// serve anything else.
+//
+// The rule: a comma-separated element whose name (trimmed, case-insensitive)
+// equals `coding`; if it carries a `q` parameter, that parameter must be an
+// RFC 9110 qvalue -- "0" with up to three decimals, or "1" with up to three
+// zero decimals -- above zero.  Any malformed or zero weight on an element
+// for `coding` makes the whole answer false, wherever else the coding is
+// listed.  The weight is the parameter whose name is `q` (case-insensitive);
+// RFC 9110 allows whitespace around the `;` before it but none around its
+// `=`, so `q =0`, `q\t=1`, a bare `q` and a `q=` without a qvalue are all
+// malformed weights, and refused.  The wildcard `*` never counts.
+bool ServeAcceptEncodingAdvertises(StringPiece accept_encoding,
+                                   StringPiece coding);
+
+// True for the content classes a stored coded copy may be served for:
+// stylesheets, scripts and images.  HTML stays uncoded: the ports' HTML
+// paths read response bodies, and they inflate gzip and deflate only.
+bool ServeEncodedContentClass(int ps_content_type);
+
+// The mask the selection is taken at.
+//
+// Switch OFF: the classifier's answer with the transfer-encoding field
+// normalized to identity, exactly as before; see
+// ServeMaskWithIdentityEncoding.  Switch ON: the classifier's answer
+// unchanged when its coding is gzip or brotli AND the request lists that
+// coding plainly (ServeAcceptEncodingAdvertises); otherwise the same
+// identity normalization.  No other axis is touched in either case.
+uint32_t ServeSelectionMask(uint32_t client_mask, StringPiece accept_encoding,
+                            bool serve_stored_encodings);
+
+// True when a stored entry's coding may go out for this selection.
+//
+// Identity, always.  A coded copy only with the switch on, only in the
+// coding the selection kept -- which is the coding the request listed --
+// and only for the classes ServeEncodedContentClass names.  An IMAGE only
+// from the original-format slot: the served media type is corrected by
+// sniffing the body (ServeMediaTypeForServedBytes), which cannot see
+// through a content coding, so a coded copy in a converted-format slot
+// would go out under the origin's media type.  The worker writes coded
+// image copies for SVG only, and an SVG URL's copies sit in that slot.
+// Anything else is refused, and the by-id retry then reaches the identity
+// sibling.
+bool ServeEncodingIsServable(uint32_t stored_mask, uint32_t selection_mask,
+                             int ps_content_type, bool serve_stored_encodings);
 
 // The largest body httpd's compressor passes through UNCOMPRESSED, and
 // therefore the largest body it says nothing about `Accept-Encoding` for.
@@ -628,6 +765,43 @@ const char* ServeCompressorMediaType(const DaemonServeDecision& decision,
 GoogleString ServeVaryFieldValue(const DaemonServeDecision& decision,
                                  bool handed_to_compressor);
 
+// The `Vary` field value for a port whose compressor's eligibility cannot be
+// read from the arm, composed ONCE and stated on BOTH legs of the response.
+//
+// WHY THIS EXISTS NEXT TO THE PER-LEG COMPOSITION ABOVE.  The per-leg shape
+// is only sound when the arm can mirror the compressor's decision exactly --
+// the media type AND the body-length floor the compressor states the
+// encoding axis for.  On nginx neither is reachable: the compressor is the
+// core gzip header filter, which decides AFTER this module has composed its
+// headers, and its eligibility rules -- `gzip_min_length` (default 20, not
+// the per-leg composition's mirrored 68), the configured `gzip_types`,
+// `gzip_vary`, an operator override of any of them -- cannot be consulted or
+// influenced from here.  Every case the mirror cannot see narrows the key on one leg against
+// the other, and narrowing is the dangerous direction (see above).
+//
+// So this composition states the encoding token on both legs whenever the
+// served media type is compressible, with NO size floor: the 200 and the
+// 304 carry the same token set by construction, independent of anything an
+// operator can configure.  The port keeps the server from stating the token
+// a second time on a gzip-eligible 200 -- on nginx the module's filter that
+// runs after the compressor withdraws the compressor's own `Vary` stamp
+// whenever the module's value already lists the token -- so the response
+// carries ONE `Vary` line on either leg.
+//
+// `compressible_media_type` is the caller's answer for the SERVED media type
+// (the decision's own, else the serving layer's), as the port defines
+// compressibility -- on nginx: named by ContentType::IsCompressible() or
+// present in the module's own gzip_types list.
+//
+// ONE ACCEPTED RESIDUAL, stated rather than left to be discovered: an
+// operator-written `gzip_types` can still name a type this predicate does
+// not, and the 200 then carries the server's token while the 304 states
+// none.  Chasing the operator's additions would reintroduce the mirroring
+// this shape exists to avoid, so it is left: the only narrowing left is one
+// the operator asked for by hand.
+GoogleString ServeVaryFieldValueOnBothLegs(const DaemonServeDecision& decision,
+                                           bool compressible_media_type);
+
 // The weak validator for a cache-HIT response.
 //
 // THE SHAPE IS THE OPTIMIZER'S, byte for byte, and it has to be: the same
@@ -688,6 +862,105 @@ bool ServeOriginDateIsUnmodified(StringPiece if_modified_since,
 // The I/O half.
 // ---------------------------------------------------------------------------
 
+// How often this process looks for a lost optimized copy of one URL, and how
+// often it asks the optimizer for one it found.
+//
+// TWO QUESTIONS, TWO TABLES, and the split is what keeps a busy server from
+// silencing a URL that really lost its copy:
+//
+//   ShouldLook  -- "has this URL been looked at during the last
+//                  kIntervalSeconds?"  Asked on every durable-original serve
+//                  of a stylesheet or script, lost or not, so it sees every
+//                  URL the server has.  It only saves work: answering "yes,
+//                  look" too often costs one extra read, never a missed one.
+//   AdmitAsk    -- "has the optimizer been asked for this URL during the
+//                  last kIntervalSeconds?"  Entered ONLY after a look found
+//                  the copy lost, so nothing but lost URLs can occupy it.
+//
+// FIXED SIZE, NO SWEEP.  Each table is kSlots entries of a 64-bit hash of the
+// URL and a second.  A URL has exactly two places it can sit in (one pair,
+// picked by its hash); a URL that is not remembered takes an empty place of
+// its pair or else replaces the entry that has been there longer.  Every
+// operation is two reads and one write under a mutex.  Memory never grows
+// with the number or length of URLs, and no URL text is stored.
+//
+// WHAT OTHER URLS CAN AND CANNOT DO TO A URL.
+//   * Push it out.  Three or more URLs live in one pair: the oldest is
+//     forgotten, and is then looked at, or asked for, again before its
+//     window ran out.  MORE looks or asks, bounded by the request rate and
+//     absorbed by the optimizer's own per-URL window; so "once per window"
+//     is the normal case, not a guarantee.
+//   * Be taken for it.  Only a URL with the SAME 64-bit hash is treated as
+//     the same URL, and would hold a look or an ask back while its own
+//     window is live.  The hash is SipHash-2-4 under a 128-bit key drawn
+//     once per process and never shown to anyone: without the key such a
+//     URL cannot be constructed, and two given URLs coincide by chance once
+//     in 2^64.  A hash that merely mixed a seed in would not do -- pairs of
+//     URLs that collide under every seed can be built for it.
+// There is no other way for one URL to affect another: no state in which a
+// URL is refused because other URLs are busy.
+//
+// The URL is hashed as the cache names it (UrlKey), so the spellings of one
+// entry's host are one URL here too.  A clock that stepped backwards admits:
+// a window is never extended by a clock change.
+//
+// Thread-safe.  One instance per process (ProcessDaemonHealNotifyLimiter);
+// tests construct their own with a fixed key.
+class DaemonHealNotifyLimiter {
+ public:
+  static constexpr int64 kIntervalSeconds = 10;
+  // Entries per table: kSlots / 2 pairs.
+  static constexpr size_t kSlots = 1024;
+
+  // Draws the hash key from the system's random source.
+  DaemonHealNotifyLimiter();
+  // A fixed key, for tests that need the same placement on every run.
+  explicit DaemonHealNotifyLimiter(uint64 test_key);
+  DaemonHealNotifyLimiter(const DaemonHealNotifyLimiter&) = delete;
+  DaemonHealNotifyLimiter& operator=(const DaemonHealNotifyLimiter&) = delete;
+
+  // The URL as this limiter knows it: the keyed hash of scheme, host and
+  // path, with the host taken the way the cache key takes it (letters
+  // lowercased, one trailing dot and a default port dropped).  Allocates
+  // nothing.
+  uint64 UrlKey(StringPiece scheme, StringPiece hostname,
+                StringPiece url) const;
+
+  // True when the URL has not been looked at during the last
+  // kIntervalSeconds (as far as its places remember), and records the look.
+  bool ShouldLookKey(uint64 url_key, int64 now_seconds);
+
+  // True when the optimizer has not been asked for the URL during the last
+  // kIntervalSeconds (as far as its places remember), and records the ask.
+  // Call it only for a URL whose optimized copy was found lost.
+  bool AdmitAskKey(uint64 url_key, int64 now_seconds);
+
+  // The same two questions for a URL given as text, hashed exactly as
+  // written ("scheme://host/path", the host already in the cache's form).
+  bool ShouldLook(StringPiece key, int64 now_seconds);
+  bool AdmitAsk(StringPiece key, int64 now_seconds);
+
+ private:
+  struct Slot {
+    uint64 key_hash = 0;
+    int64 second = 0;
+    bool used = false;
+  };
+
+  uint64 Hash(StringPiece key) const;
+  // The one operation both tables share; mutex_ must be held.
+  static bool Take(Slot* table, uint64 key_hash, int64 now_seconds);
+
+  uint64 key0_ = 0;
+  uint64 key1_ = 0;
+  std::mutex mutex_;
+  Slot looked_[kSlots];
+  Slot asked_[kSlots];
+};
+
+// The limiter every serving seam of this process shares.  Never destroyed.
+DaemonHealNotifyLimiter* ProcessDaemonHealNotifyLimiter();
+
 // Reads the shared cache for one request and composes the response state.
 //
 // Holds the peer's read result for as long as it lives, because the served
@@ -706,6 +979,23 @@ class DaemonServeReader {
   // serving clock.  Call once.
   DaemonServeDecision Serve(const DaemonServeRequest& request,
                             int64 now_seconds);
+
+  // Whether this reader may hand out the optimizer's STORED compressed
+  // copies -- the gzip and brotli siblings it writes next to each optimized
+  // stylesheet, script and image.  Off unless a seam turns it on from its
+  // port's directive, before Serve().  A reader setting rather than a
+  // request field on purpose: the request's capability fields are request
+  // headers and nothing else, and this switch moves only the coding the
+  // bytes go out in, which the response labels.
+  void set_serve_stored_encodings(bool on) { serve_stored_encodings_ = on; }
+
+  // Lets this reader recognise a lost optimized copy while it serves the
+  // durable original (DaemonServeDecision::lost_optimized_copy).  Borrowed;
+  // must outlive the reader.  Unset -- the default, and every port that has
+  // not opted in -- the reader makes no extra read and never reports one.
+  void set_heal_notify_limiter(DaemonHealNotifyLimiter* limiter) {
+    heal_limiter_ = limiter;
+  }
 
  private:
   // Frees whatever read result is held.
@@ -755,8 +1045,10 @@ class DaemonServeReader {
   // After a refusal, asks for a servable variant BY NAME rather than by
   // score.  Returns kPsOk with a usable entry held, or kPsErrNotFound with
   // nothing held.  See the kSvg discussion on ServeFormatIsAdvertised.
+  // `uncoded_only`: the floor refused the selected coded copy for its
+  // content class, so no coded id is worth a read.
   int RetryByExactId(const DaemonServeRequest& request,
-                     DaemonServeDecision* decision);
+                     DaemonServeDecision* decision, bool uncoded_only = false);
 
   // Fills the response state from the held result.
   //
@@ -772,9 +1064,22 @@ class DaemonServeReader {
                bool negotiated, uint8_t original_flags,
                DaemonServeDecision* decision);
 
+  // Whether the entry behind a durable-original serve holds the optimizer's
+  // gzip copy of an optimized copy that is itself absent, AND the optimizer
+  // has not been asked for this URL during the current window.  Reads
+  // through the peer independently of the held result, so the served body
+  // is untouched.  The read is a real one: it counts as a hit on the gzip
+  // copy and pays its checksum, normally once per URL per window per process
+  // (DaemonHealNotifyLimiter::ShouldLookKey).  See DaemonServeDecision.
+  bool LostOptimizedCopy(const DaemonServeRequest& request,
+                         const DaemonServeDecision& decision,
+                         int64 now_seconds) const;
+
   const DaemonAbi* abi_;
   void* cache_;
   void* result_ = nullptr;
+  bool serve_stored_encodings_ = false;
+  DaemonHealNotifyLimiter* heal_limiter_ = nullptr;
 };
 
 // The peer's serve-stats mmap, opened lazily and held for the process.
@@ -822,6 +1127,14 @@ class DaemonServeStats {
   void RecordHit(int content_type, uint64_t original_bytes,
                  uint64_t optimized_bytes, uint32_t mask);
 
+  // The same, attributed to `host` -- the host the response was served for
+  // -- where the installed optimizer takes one (see
+  // DaemonAbi::ServeStatsRecordHitForHost).  An empty host, or an optimizer
+  // from before per-host serve savings, records exactly what the form above
+  // records.  One record per call either way.
+  void RecordHit(int content_type, uint64_t original_bytes,
+                 uint64_t optimized_bytes, uint32_t mask, StringPiece host);
+
   // Whether the mmap is currently open.  Test seam and evidence only.
   bool open() const { return handle_ != nullptr; }
 
@@ -861,7 +1174,29 @@ class Variable;
 // in-place cache for this server AND this process has a usable handle on its
 // volume.  The caller owns the returned reader; the served bytes borrow from
 // it, so it must outlive the response.
+//
+// WHICH FACTORY FOR WHICH PORT.  MakeDaemonServeReaderIfReady obtains the
+// handle through RecordCache(), which performs the open -- blocking file
+// lock, background threads -- on the calling thread when no handle is open.
+// That is right for a port whose caller may block (Apache's request
+// threads).  MakeDaemonServeReaderIfOpen obtains it through
+// RecordCacheIfOpen(), which never opens, never waits, and logs nothing when
+// there is no handle: the only choice for a caller that must not block, like
+// nginx's event-loop thread.  The open itself stays with RecordCache(); such
+// a port primes it from a worker thread and reads the handle here.
+//
+// The returned reader BORROWS the handle; nothing in it keeps the handle
+// open.  The handle is READ here, not leased: a port that closes it
+// explicitly (the adapter's CloseRecordCache) must do so after the last
+// reader is destroyed AND with no call to this factory able to be in flight
+// -- a close that races the factory hands the next reader a closed handle.
+// On a single-threaded port both follow from closing on the same thread,
+// after the last request.  A read result must be released before the cache
+// it came from is closed (daemon_abi.h), and
+// DaemonServeReader::~DaemonServeReader is what releases it.
 DaemonServeReader* MakeDaemonServeReaderIfReady(DaemonAdapter* adapter);
+
+DaemonServeReader* MakeDaemonServeReaderIfOpen(DaemonAdapter* adapter);
 
 // Number of daemon serve readers this process has ever CONSTRUCTED.
 //
@@ -912,9 +1247,17 @@ int64 DaemonServeReadersConstructed();
 //   format the request did not advertise is refused by
 //   ServeFormatIsAdvertised and recovered by exact id, so a stored SVG mask
 //   can never be the mask this arm serves and the permanent-mismatch loop has
-//   no serve to hang on.  INHERITANCE WATCH: any FUTURE peer variant class
-//   that is permanently client-unmatchable changes that arithmetic and must
-//   be evaluated against this site before it is inherited.
+//   no serve to hang on.  THE SAME RULE NOW HOLDS BY CONSTRUCTION on the
+//   comparison itself: the image-format field is excluded from it, on both
+//   sides, for non-image content -- a stylesheet or script serve is compared
+//   without the field (see fallback_hit), so the permanent-mismatch regime
+//   the carve-out exists for cannot arise through that axis either.
+//   INHERITANCE WATCH: any FUTURE peer variant class -- or a future content
+//   class whose stored mask carries a field that class's clients never name,
+//   or a NEW content-class value for image-like content, which this
+//   comparison would treat as non-image and so stop converging on format --
+//   changes that arithmetic and must be evaluated against this site and the
+//   fallback comparison before it is inherited.
 //
 // `option_context` / `option_signature` are the resolved configuration's name,
 // computed as the record arm computes it; an empty pair SKIPS the notify,
@@ -1010,6 +1353,28 @@ bool DaemonServeOriginRefreshedNotify(
     const DaemonServeRequest& request, const DaemonServeDecision& decision,
     StringPiece option_context, StringPiece option_signature,
     Variable* notified, Variable* notify_failed);
+
+// Asks the worker to optimize a URL again after the arm served its durable
+// original and found that the optimized copy has gone missing
+// (DaemonServeDecision::lost_optimized_copy).
+//
+// AN ORDINARY NOTIFICATION, on the fallback re-notify's terms: the client's
+// raw mask, the entry's content class, both halves of the option context or
+// nothing, fire and forget, no retry.  Nothing about the response changes:
+// the original has already been served.  The worker decides what to do with
+// it; one that predates this notification's purpose treats it as a repeat
+// and drops it, which is harmless.
+//
+// The rate limit is NOT here: it is taken when the decision is made, so that
+// a decision carrying the flag is already one the limiter admitted.  Returns
+// true iff a notification was sent; `notified` and `notify_failed` move on
+// SEND OUTCOMES ONLY, exactly as the two pairs above.  Either may be null.
+bool DaemonServeLostCopyNotify(const DaemonAbi& abi, StringPiece socket_path,
+                               const DaemonServeRequest& request,
+                               const DaemonServeDecision& decision,
+                               StringPiece option_context,
+                               StringPiece option_signature, Variable* notified,
+                               Variable* notify_failed);
 
 }  // namespace net_instaweb
 

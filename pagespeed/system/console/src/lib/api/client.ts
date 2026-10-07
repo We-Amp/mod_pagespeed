@@ -13,11 +13,28 @@ import type {
   PurgeSetResponse,
   ConsoleResponse,
   MessagesResponse,
+  GroupedMessagesResponse,
   DaemonHealthResponse,
   DaemonStatsResponse,
   DaemonCooldownsResponse,
+  CacheEntryKey,
+  DaemonCacheUrlsResponse,
+  DaemonAlternatesResponse,
+  DaemonLogsResponse,
   TimeRangeParams,
 } from "./types";
+
+import { NetworkError, connection } from "./connection";
+
+// Identical GETs in flight at the same time share one request, whichever
+// page or client instance asked: the daemon proxy serves one read per
+// endpoint at a time, so two pages of one tab must not compete for it.
+// The shared answer is one object handed to every caller: callers treat it
+// as read-only (none mutates it today).
+const inflight = new Map<string, Promise<unknown>>();
+
+/** Every request is aborted after this long and reported as "no answer". */
+export const REQUEST_TIMEOUT_MS = 15_000;
 
 export class ApiError extends Error {
   status: number;
@@ -29,65 +46,88 @@ export class ApiError extends Error {
 }
 
 export class AdminApiClient {
-  private basePath: string;
+  /** The admin path the console is served under, without a trailing slash. */
+  readonly basePath: string;
 
   constructor(basePath: string) {
     this.basePath = basePath.replace(/\/$/, "");
   }
 
-  private async get<T>(path: string): Promise<T> {
+  private get<T>(path: string): Promise<T> {
     const url = `${this.basePath}${path}`;
-    const response = await fetch(url);
+    const shared = inflight.get(url);
+    if (shared !== undefined) return shared as Promise<T>;
+    const request = this.send<T>(path, url).finally(() => {
+      inflight.delete(url);
+    });
+    inflight.set(url, request);
+    return request;
+  }
 
-    if (!response.ok) {
-      throw await this.errorFromResponse(response);
+  private async send<T>(path: string, url: string, init?: RequestInit): Promise<T> {
+    let response: Response;
+    // A request that never answers (a black-holed connection, or one whose
+    // headers arrive but whose body then stalls) must not stall the poller
+    // waiting on it: abort it and report "no answer". The timer is cleared
+    // only once the body has been consumed, on every path below, so a
+    // stalled body is covered exactly like a stalled connect.
+    const abort = new AbortController();
+    const timer = setTimeout(() => abort.abort(), REQUEST_TIMEOUT_MS);
+    try {
+      response = await fetch(url, { ...init, signal: abort.signal });
+    } catch {
+      clearTimeout(timer);
+      connection.record(path, null, Date.now());
+      throw new NetworkError();
     }
-
-    // Always try JSON first — the backend may serve JSON with a wrong
-    // content-type (e.g. application/javascript instead of application/json).
-    const text = await response.text();
+    let text: string;
+    try {
+      // Always try JSON first — the backend may serve JSON with a wrong
+      // content-type (e.g. application/javascript instead of application/json).
+      text = await response.text();
+    } catch {
+      clearTimeout(timer);
+      connection.record(path, null, Date.now());
+      throw new NetworkError();
+    }
+    clearTimeout(timer);
+    connection.record(path, response.status, Date.now(), text);
+    if (!response.ok) {
+      throw this.errorFromBody(response.status, response.statusText, text);
+    }
     return this.parseResponse<T>(response.status, text);
   }
 
-  private async post<T>(
+  private post<T>(
     path: string,
     body?: Record<string, unknown>,
   ): Promise<T> {
-    const url = `${this.basePath}${path}`;
-    const response = await fetch(url, {
+    return this.send<T>(path, `${this.basePath}${path}`, {
       method: "POST",
       headers: body
         ? { "Content-Type": "application/json", "X-Requested-With": "XMLHttpRequest" }
         : { "X-Requested-With": "XMLHttpRequest" },
       body: body ? JSON.stringify(body) : undefined,
     });
-
-    if (!response.ok) {
-      throw await this.errorFromResponse(response);
-    }
-
-    const text = await response.text();
-    return this.parseResponse<T>(response.status, text);
   }
 
   /**
-   * Build an ApiError from a non-2xx response, preferring the backend's JSON
-   * `error` field over the bare status text. Admin handlers put the actionable
-   * message in the body (e.g. "console_logger must be enabled to use '?json'",
-   * CSRF/rate-limit reasons, "Unknown admin page"), so surfacing it turns
-   * "HTTP 404" into a fix.
+   * Build an ApiError from a non-2xx response's already-read body, preferring
+   * the backend's JSON `error` field over the bare status text. Admin
+   * handlers put the actionable message in the body (e.g. "console_logger
+   * must be enabled to use '?json'", CSRF/rate-limit reasons, "Unknown admin
+   * page"), so surfacing it turns "HTTP 404" into a fix.
    */
-  private async errorFromResponse(response: Response): Promise<ApiError> {
-    let detail = response.statusText;
+  private errorFromBody(status: number, statusText: string, text: string): ApiError {
+    let detail = statusText;
     try {
-      const text = await response.text();
       const stripped = text.replace(/^\)\]\}'?\s*\n/, "");
       const body = JSON.parse(stripped) as { error?: unknown };
       if (typeof body.error === "string" && body.error) detail = body.error;
     } catch {
       // Non-JSON or unreadable body: keep the status text.
     }
-    return new ApiError(response.status, detail);
+    return new ApiError(status, detail);
   }
 
   /**
@@ -207,8 +247,21 @@ export class AdminApiClient {
 
   // ── Messages ───────────────────────────────────────────────
 
-  async getMessages(): Promise<MessagesResponse> {
-    return this.get<MessagesResponse>("/message_history");
+  async getMessages(since?: number): Promise<MessagesResponse> {
+    return this.get<MessagesResponse>(
+      since === undefined ? "/message_history" : `/message_history?since=${since}`,
+    );
+  }
+
+  /**
+   * The message log grouped by message template, with each group's count
+   * within the last `windowSeconds`. A module that predates the grouped mode
+   * ignores both parameters and answers the plain list; toMessageDigest
+   * tells the two apart by shape.
+   */
+  async getMessageGroups(windowSeconds: number): Promise<GroupedMessagesResponse | MessagesResponse> {
+    const query = new URLSearchParams({ grouped: "1", window_s: String(Math.floor(windowSeconds)) });
+    return this.get<GroupedMessagesResponse | MessagesResponse>(`/message_history?${query.toString()}`);
   }
 
   // ── Graphs ─────────────────────────────────────────────────
@@ -241,5 +294,91 @@ export class AdminApiClient {
 
   async daemonCooldowns(): Promise<DaemonCooldownsResponse> {
     return this.get<DaemonCooldownsResponse>("/v1/daemon/cooldowns");
+  }
+
+  // ── Daemon: cached-URL index ─────────────────────────────
+  // Whole-server console only: the module answers 403
+  // "whole_server_console_only" on a per-vhost console, and 404 without a
+  // reason code on a module build that predates the leaves — both render
+  // as explanations, not errors. An entry is named by path + host + scheme
+  // (CacheEntryKey). cache/content serves image bytes and is addressed
+  // through daemonCacheContentUrl() as an <img> src, never fetched into JS.
+
+  async daemonCacheUrls(
+    offset: number,
+    limit: number,
+    hostname?: string,
+  ): Promise<DaemonCacheUrlsResponse> {
+    const query = new URLSearchParams();
+    if (offset > 0) query.set("offset", String(offset));
+    query.set("limit", String(limit));
+    // One host's URLs: the module's allow-listed, validated hostname
+    // parameter, filtered by the optimizer itself.
+    if (hostname !== undefined) query.set("hostname", hostname);
+    return this.get<DaemonCacheUrlsResponse>(
+      `/v1/daemon/cache/urls?${query.toString()}`,
+    );
+  }
+
+  private entryQuery(entry: CacheEntryKey): URLSearchParams {
+    return new URLSearchParams({
+      url: entry.url,
+      hostname: entry.host,
+      scheme: entry.scheme,
+    });
+  }
+
+  async daemonCacheAlternates(entry: CacheEntryKey): Promise<DaemonAlternatesResponse> {
+    return this.get<DaemonAlternatesResponse>(
+      `/v1/daemon/cache/alternates?${this.entryQuery(entry).toString()}`,
+    );
+  }
+
+  /**
+   * The URL of one variant's bytes, for use as an <img> src only: the bytes
+   * pass the module's media-type gate (image/png|jpeg|gif|webp|avif behind
+   * nosniff and a sandboxing CSP), so they are never fetched into JS.
+   */
+  daemonCacheContentUrl(entry: CacheEntryKey, alternateId: number): string {
+    const query = this.entryQuery(entry);
+    query.set("alternate_id", String(alternateId));
+    return `${this.basePath}/v1/daemon/cache/content?${query.toString()}`;
+  }
+
+  /**
+   * The HTTP status a HEAD for one variant's bytes gets — headers only, no
+   * bytes read into JS. The preview queue uses it after an <img> failed to
+   * tell "busy" (429, retry) from a permanent failure; 0 when no answer
+   * arrives.
+   */
+  async daemonCacheContentStatus(entry: CacheEntryKey, alternateId: number): Promise<number> {
+    try {
+      const response = await fetch(this.daemonCacheContentUrl(entry, alternateId), {
+        method: "HEAD",
+        cache: "no-store",
+      });
+      return response.status;
+    } catch {
+      return 0;
+    }
+  }
+
+  // ── Daemon: log ring ──────────────────────────────────────────
+  // Whole-server console only: the module answers 403
+  // "whole_server_console_only" on a per-vhost console, 404 on a module
+  // without the leaf, 501 "endpoint_unsupported_by_daemon" on an optimizer
+  // without the route, and 502 "response_too_large" for an answer over its
+  // cap — all render as explanations, not raw errors.
+
+  /**
+   * A page of the optimizer's log ring: at most 500 entries (the daemon's
+   * maximum page, which it also bounds in bytes). `since` is the last
+   * page's `next_since`, passed back verbatim; absent, the newest entries.
+   */
+  async daemonLogs(since?: number): Promise<DaemonLogsResponse> {
+    const query = new URLSearchParams();
+    if (since !== undefined) query.set("since", String(since));
+    query.set("limit", "500");
+    return this.get<DaemonLogsResponse>(`/v1/daemon/logs?${query.toString()}`);
   }
 }

@@ -1020,6 +1020,7 @@ TEST_F(RewriteOptionsTest, LookupOptionByNameTest) {
       RewriteOptions::kCombineAcrossPaths,
       RewriteOptions::kContentExperimentID,
       RewriteOptions::kContentExperimentVariantID,
+      RewriteOptions::kCriticalCssAboveTheFoldOnly,
       RewriteOptions::kCriticalImagesBeaconEnabled,
       RewriteOptions::kCssFlattenMaxBytes,
       RewriteOptions::kCssImageInlineMaxBytes,

@@ -82,6 +82,8 @@ const char RewriteOptions::kCompressMetadataCache[] = "CompressMetadataCache";
 const char RewriteOptions::kContentExperimentID[] = "ContentExperimentID";
 const char RewriteOptions::kContentExperimentVariantID[] =
     "ContentExperimentVariantID";
+const char RewriteOptions::kCriticalCssAboveTheFoldOnly[] =
+    "CriticalCssAboveTheFoldOnly";
 const char RewriteOptions::kCriticalImagesBeaconEnabled[] =
     "CriticalImagesBeaconEnabled";
 const char RewriteOptions::kCssFlattenMaxBytes[] = "CssFlattenMaxBytes";

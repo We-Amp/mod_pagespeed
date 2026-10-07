@@ -148,21 +148,22 @@ class RewriteDriverCacheUrlAsyncFetcherAsyncOpHooks
       const RewriteDriverCacheUrlAsyncFetcherAsyncOpHooks&) = delete;
 };
 
-// RAII guard that calls StatisticsLogger::UpdateAndDumpIfRequired() on
+// RAII guard that calls Statistics::UpdateConsoleLogIfRequired() on
 // destruction.  Used in Fetch methods where "this" may be deleted before
-// the function returns, so the logger pointer must be captured up front.
+// the function returns, so the statistics pointer must be captured up
+// front; the server context's statistics outlives the driver.
 class ScopedStatsLoggerUpdate {
  public:
-  explicit ScopedStatsLoggerUpdate(StatisticsLogger* logger)
-      : logger_(logger) {}
+  explicit ScopedStatsLoggerUpdate(Statistics* statistics)
+      : statistics_(statistics) {}
   ~ScopedStatsLoggerUpdate() {
-    if (logger_ != nullptr) {
-      logger_->UpdateAndDumpIfRequired();
+    if (statistics_ != nullptr) {
+      statistics_->UpdateConsoleLogIfRequired();
     }
   }
 
  private:
-  StatisticsLogger* const logger_;
+  Statistics* const statistics_;
   ScopedStatsLoggerUpdate(const ScopedStatsLoggerUpdate&) = delete;
   ScopedStatsLoggerUpdate& operator=(const ScopedStatsLoggerUpdate&) = delete;
 };
@@ -1515,8 +1516,7 @@ void RewriteDriver::FetchInPlaceResource(const GoogleUrl& gurl, bool proxy_mode,
   InPlaceRewriteContext* context = new InPlaceRewriteContext(this, gurl.Spec());
   context->set_proxy_mode(proxy_mode);
 
-  ScopedStatsLoggerUpdate stats_update(
-      server_context_->statistics()->console_logger());
+  ScopedStatsLoggerUpdate stats_update(server_context_->statistics());
 
   if (!context->Fetch(output_resource, async_fetch, message_handler())) {
     // RewriteContext::Fetch can fail if the input URLs are undecodeable
@@ -1544,8 +1544,7 @@ bool RewriteDriver::FetchOutputResource(
   // that's in the browser's cache must be correct.
   bool queued = false;
   ConstStringStarVector values;
-  ScopedStatsLoggerUpdate stats_update(
-      server_context_->statistics()->console_logger());
+  ScopedStatsLoggerUpdate stats_update(server_context_->statistics());
   if (async_fetch->request_headers()->Lookup(HttpAttributes::kIfModifiedSince,
                                              &values)) {
     async_fetch->response_headers()->SetStatusAndReason(
@@ -2146,11 +2145,7 @@ void RewriteDriver::FinishParseAfterFlush(Function* user_callback) {
   stats->total_rewrite_count()->IncBy(1);
 
   // Update statistics log.
-  StatisticsLogger* stats_logger =
-      server_context_->statistics()->console_logger();
-  if (stats_logger != nullptr) {
-    stats_logger->UpdateAndDumpIfRequired();
-  }
+  server_context_->statistics()->UpdateConsoleLogIfRequired();
 
   DropReference(kRefParsing);
   Cleanup();

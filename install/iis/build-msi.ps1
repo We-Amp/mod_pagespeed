@@ -5,6 +5,13 @@
 #
 # Usage:
 #   .\install\iis\build-msi.ps1 [-OutputDir C:\output] [-BinDir bazel-bin\pagespeed\iis]
+#       [-OptimizerDir <dir with factory_worker.exe + pagespeed.dll>]
+#
+# With -OptimizerDir the package also installs the optimizer worker as a
+# disabled Windows service and the client library the module loads for the
+# daemon path; the directory is what fetch-optimizer-windows.ps1 extracts
+# from the pinned optimizer release. Without it the package is the module
+# alone.
 #
 # Prerequisites:
 #   - .NET SDK 8+ (for dotnet tool)
@@ -14,7 +21,8 @@
 param(
     [string]$OutputDir = (Get-Location).Path,
     [string]$BinDir = "",
-    [string]$SrcDir = ""
+    [string]$SrcDir = "",
+    [string]$OptimizerDir = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -54,6 +62,19 @@ $DllPath = Join-Path $BinDir "pagespeed_iis.dll"
 if (-not (Test-Path $DllPath)) {
     Write-Error "DLL not found at $DllPath. Build it first:`n  bazel build --config=windows --config=clang-cl -c opt //pagespeed/iis:pagespeed_iis.dll"
     exit 1
+}
+
+# --- Verify the optimizer files, when given ---
+$OptimizerDefine = @()
+if ($OptimizerDir) {
+    foreach ($f in @("factory_worker.exe", "pagespeed.dll", "LICENSE", "NOTICE")) {
+        if (-not (Test-Path (Join-Path $OptimizerDir $f))) {
+            Write-Error "$f not found in $OptimizerDir (expected the pinned optimizer release's win-x64 zip, extracted)"
+            exit 1
+        }
+    }
+    $OptimizerDir = (Resolve-Path $OptimizerDir).Path
+    $OptimizerDefine = @("-d", "OptimizerDir=$OptimizerDir")
 }
 
 # --- Ensure WiX toolset v5 is installed (pinned for extension compatibility) ---
@@ -98,6 +119,7 @@ Write-Host "  DisplayVersion: $DisplayVersion"
 Write-Host "  UpgradeCode:    $UpgradeCode"
 Write-Host "  BinDir:         $BinDir"
 Write-Host "  SrcDir:         $SrcDir"
+Write-Host "  OptimizerDir:   $(if ($OptimizerDir) { $OptimizerDir } else { '(none: module only)' })"
 
 wix build $WxsPath `
     -d "ProductVersion=$ProductVersion" `
@@ -105,6 +127,7 @@ wix build $WxsPath `
     -d "UpgradeCode=$UpgradeCode" `
     -d "BinDir=$BinDir" `
     -d "SrcDir=$SrcDir" `
+    @OptimizerDefine `
     -arch x64 `
     -o $MsiPath
 

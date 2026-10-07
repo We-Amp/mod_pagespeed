@@ -169,6 +169,13 @@ const char* const kGraphsVars[] = {
     "ipro_not_rewritable",
     "ipro_daemon_served",
     "ipro_daemon_fallthrough",
+    "ipro_daemon_served_css",
+    "ipro_daemon_served_js",
+    "ipro_daemon_served_image",
+    "ipro_daemon_served_other",
+    "ipro_daemon_fallthrough_css",
+    "ipro_daemon_fallthrough_js",
+    "ipro_daemon_fallthrough_image",
     "ipro_daemon_fallback_notified",
     "ipro_daemon_fallback_notify_failed",
     "ipro_recorder_resources",
@@ -399,10 +406,11 @@ void StatisticsLogger::ParseDataFromReader(const StringSet& var_titles,
       if (value_iter != parsed_var_data.end()) {
         (*var_values)[var_title].push_back(value_iter->second.as_string());
       } else {
-        // If data is not available in this segment, we just push 0 as a place
-        // holder. We must push something or else it will be ambiguous which
-        // timestamp corresponds to which variable values.
-        (*var_values)[var_title].push_back("0");
+        // Data is not available in this segment. Serialize JSON null (not 0,
+        // which would fabricate a reading) so charts render a gap. We must
+        // push something per segment or it is ambiguous which timestamp each
+        // value belongs to.
+        (*var_values)[var_title].push_back("null");
       }
     }
   }
@@ -425,7 +433,8 @@ void StatisticsLogger::ParseDataForGraphs(StatisticsLogfileReader* reader,
         value_iter->second.CopyToString(
             StringVectorAdd(&((*var_values)[var_title])));
       } else {
-        (*var_values)[var_title].push_back("0");
+        // See ParseDataFromReader: null, not an invented 0.
+        (*var_values)[var_title].push_back("null");
       }
     }
   }

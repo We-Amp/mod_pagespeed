@@ -233,8 +233,8 @@ void InPlaceResourceRecorder::ConsiderResponseHeaders(
       }
       // DroppedAsUncacheable().  If at some point we decide to go this
       // way, we must also change the expected cache_inserts count in
-      // "Blocking rewrite enabled." in apache/system_test.sh from 3 to
-      // 2.
+      // test/system/system/test_blocking_rewrite.py's "Blocking rewrite
+      // enabled" case.
       if (headers_kind == kFullHeaders) {
         // If we have to wait till we have recorded all the bytes to learn
         // that this content-type is uninteresting, then we should cache
@@ -258,9 +258,11 @@ void InPlaceResourceRecorder::ConsiderResponseHeaders(
   full_response_headers_considered_ = true;
 
   // For 4xx and 5xx we can't IPRO, but we can also cache the failure so we
-  // don't retry recording for a bit.
+  // don't retry recording for a bit: five minutes for a 4xx, which describes
+  // the resource, and the short transient window for a 5xx, which describes
+  // the origin's condition right now.
   if (response_headers->IsErrorStatus()) {
-    FetchResponseStatus failure_kind = kFetchStatusOtherError;
+    FetchResponseStatus failure_kind = kFetchStatusTransientError;
     if (status_code_ >= 400 && status_code_ < 500) {
       failure_kind = kFetchStatus4xxError;
     }
