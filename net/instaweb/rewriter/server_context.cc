@@ -58,6 +58,7 @@
 #include "pagespeed/kernel/base/md5_hasher.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/named_lock_manager.h"
+#include "pagespeed/kernel/base/ref_counted_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/stl_util.h"  // for STLDeleteElements
 #include "pagespeed/kernel/base/string.h"
@@ -144,6 +145,7 @@ class BeaconPropertyCallback : public PropertyPage {
                          StringSet* html_critical_images_set,
                          StringSet* css_critical_images_set,
                          StringSet* critical_css_selector_set,
+                         bool critical_css_selectors_truncated,
                          RenderedImages* rendered_images_set, StringPiece nonce)
       : PropertyPage(kPropertyCachePage, url, options_signature_hash,
                      UserAgentMatcher::DeviceTypeSuffix(device_type),
@@ -154,6 +156,7 @@ class BeaconPropertyCallback : public PropertyPage {
         html_critical_images_set_(html_critical_images_set),
         css_critical_images_set_(css_critical_images_set),
         critical_css_selector_set_(critical_css_selector_set),
+        critical_css_selectors_truncated_(critical_css_selectors_truncated),
         rendered_images_set_(rendered_images_set) {
     nonce.CopyToString(&nonce_);
   }
@@ -178,6 +181,7 @@ class BeaconPropertyCallback : public PropertyPage {
       BeaconCriticalSelectorFinder::
           WriteCriticalSelectorsToPropertyCacheFromBeacon(
               *critical_css_selector_set_, nonce_,
+              critical_css_selectors_truncated_,
               server_context_->page_property_cache(),
               server_context_->beacon_cohort(), this,
               server_context_->message_handler(), server_context_->timer());
@@ -192,6 +196,7 @@ class BeaconPropertyCallback : public PropertyPage {
   std::unique_ptr<StringSet> html_critical_images_set_;
   std::unique_ptr<StringSet> css_critical_images_set_;
   std::unique_ptr<StringSet> critical_css_selector_set_;
+  bool critical_css_selectors_truncated_;
   std::unique_ptr<RenderedImages> rendered_images_set_;
   GoogleString nonce_;
   BeaconPropertyCallback(const BeaconPropertyCallback&) = delete;
@@ -310,7 +315,10 @@ ServerContext::~ServerContext() {
     deferred_release_rewrite_drivers_.clear();
   }
 
-  // We scan for "leaked_rewrite_drivers" in install/Makefile.tests
+  // A RewriteDriver leak here shows up as this "leaked_rewrite_drivers"
+  // message in the Apache error log. The retired bash system-test harness
+  // used to grep for it (install/Makefile.tests); no automated test checks
+  // for it today.
   if (!active_rewrite_drivers_.empty()) {
     message_handler_->Message(
 #ifdef NDEBUG
@@ -678,10 +686,14 @@ bool ServerContext::HandleBeacon(StringPiece params, StringPiece user_agent,
 
   // The client flags truncated payloads (e.g. the critical-CSS beacon drops
   // selectors once it overflows its POST budget) so the data loss is
-  // observable here instead of silent.
+  // observable here instead of silent. For critical CSS it also means the
+  // report must not be taken for a complete one (see
+  // CriticalSelectorFinder::RecordTruncatedReport).
+  bool beacon_truncated = false;
   if (query_params.Lookup1Unescaped(kBeaconOverflowQueryParam,
                                     &query_param_str) &&
       query_param_str == "1") {
+    beacon_truncated = true;
     rewrite_stats_->beacon_overflow_count()->Add(1);
     message_handler_->Message(
         kWarning, "Beacon reported truncated (overflowed) data for %s",
@@ -744,7 +756,7 @@ bool ServerContext::HandleBeacon(StringPiece params, StringPiece user_agent,
         this, url_query_param.Spec(), options_hash_param, device_type,
         request_context, html_critical_images_set.release(),
         css_critical_images_set.release(), critical_css_selector_set.release(),
-        rendered_images.release(), nonce);
+        beacon_truncated, rendered_images.release(), nonce);
     page_property_cache()->ReadWithCohorts(beacon_property_cb->CohortList(),
                                            beacon_property_cb);
   }
@@ -974,10 +986,10 @@ void ServerContext::GetRemoteOptions(RewriteOptions* remote_options,
   if (!remote_options->remote_configuration_url().empty()) {
     RequestContextPtr request_ctx(new RequestContext(
         fetch_options, thread_system()->NewMutex(), timer()));
-    GoogleString config =
-        FetchRemoteConfig(remote_options->remote_configuration_url(),
-                          remote_options->remote_configuration_timeout_ms(),
-                          on_startup, request_ctx);
+    GoogleString config = FetchRemoteConfig(
+        remote_options->remote_configuration_url(),
+        remote_options->remote_configuration_timeout_ms(), on_startup,
+        remote_options->serve_stale_if_fetch_error(), request_ctx);
     if (!on_startup) {
       ApplyRemoteConfig(config, remote_options);
     }
@@ -1294,21 +1306,162 @@ void ServerContext::ShowCacheHandler(Format format, StringPiece url,
   }
 }
 
+namespace {
+
+// How long past its expiry the last good remote configuration keeps being
+// applied while refetches of it fail: one day rides out a configuration
+// server outage without applying a very old configuration indefinitely; a
+// copy that expired longer ago than this is dropped (nothing is applied).
+const int64 kRemoteConfigMaxStaleMs = Timer::kDayMs;
+
+bool IsAcceptedRemoteConfigStatus(int status) {
+  return status == HttpStatus::kOK || status == HttpStatus::kNotModified;
+}
+
+// The origin fetcher handed to the remote configuration's cache fetcher, one
+// per FetchRemoteConfig call.  It wraps each origin fetch in a
+// RemoteConfigStatusFetch and records why that fetch failed, if it did, for
+// FetchRemoteConfig to report.  Reference counted: the cache lookup can
+// complete, and call Fetch(), after FetchRemoteConfig has returned (startup
+// fetches, timeouts), so each in-flight lookup holds a reference through
+// RemoteConfigFetch.
+class RemoteConfigStatusFetcher : public UrlAsyncFetcher,
+                                  public RefCounted<RemoteConfigStatusFetcher> {
+ public:
+  explicit RemoteConfigStatusFetcher(UrlAsyncFetcher* fetcher)
+      : fetcher_(fetcher) {}
+
+  bool SupportsHttps() const override { return fetcher_->SupportsHttps(); }
+
+  void Fetch(const GoogleString& url, MessageHandler* handler,
+             AsyncFetch* fetch) override;
+
+  // Why the origin fetch failed ("" if it did not fail).  Written before the
+  // fetch reports Done(), so it may be read once the fetch is done.
+  void set_failure(const GoogleString& failure) { failure_ = failure; }
+  const GoogleString& failure() const { return failure_; }
+
+ private:
+  friend class RefCounted<RemoteConfigStatusFetcher>;
+  ~RemoteConfigStatusFetcher() override {}
+
+  UrlAsyncFetcher* fetcher_;
+  GoogleString failure_;
+
+  RemoteConfigStatusFetcher(const RemoteConfigStatusFetcher&) = delete;
+  RemoteConfigStatusFetcher& operator=(const RemoteConfigStatusFetcher&) =
+      delete;
+};
+
+// Wraps the origin fetch of a remote configuration.  Any status other than
+// 200 or 304 (including a fetch that fails without a response) is turned
+// into a server error before the caching layers see it: the response is then
+// never cached nor applied, and the cache fetcher serves the last good copy
+// instead when it has one (see FallbackSharedAsyncFetch).
+class RemoteConfigStatusFetch : public SharedAsyncFetch {
+ public:
+  RemoteConfigStatusFetch(
+      AsyncFetch* base_fetch,
+      const RefCountedPtr<RemoteConfigStatusFetcher>& fetcher)
+      : SharedAsyncFetch(base_fetch), fetcher_(fetcher), origin_status_(0) {}
+
+ protected:
+  void HandleHeadersComplete() override {
+    origin_status_ = response_headers()->status_code();
+    if (!IsAcceptedRemoteConfigStatus(origin_status_)) {
+      response_headers()->Clear();
+      response_headers()->SetStatusAndReason(HttpStatus::kBadGateway);
+      response_headers()->ComputeCaching();
+    } else {
+      // The stale marker is ours to set (FetchRemoteConfig keys on it); an
+      // origin must not be able to send it.
+      if (response_headers()->Remove(
+              HttpAttributes::kWarning,
+              FallbackSharedAsyncFetch::kStaleWarningHeaderValue)) {
+        response_headers()->ComputeCaching();
+      }
+    }
+    SharedAsyncFetch::HandleHeadersComplete();
+  }
+
+  void HandleDone(bool success) override {
+    if (!success) {
+      // A fetch that fails without a response gets a status synthesized by
+      // AsyncFetch::Done(); do not report that one.
+      fetcher_->set_failure("no usable response");
+    } else if (!IsAcceptedRemoteConfigStatus(origin_status_)) {
+      fetcher_->set_failure(StrCat("status ", IntegerToString(origin_status_)));
+    }
+    SharedAsyncFetch::HandleDone(success);
+    delete this;
+  }
+
+ private:
+  RefCountedPtr<RemoteConfigStatusFetcher> fetcher_;
+  int origin_status_;
+
+  RemoteConfigStatusFetch(const RemoteConfigStatusFetch&) = delete;
+  RemoteConfigStatusFetch& operator=(const RemoteConfigStatusFetch&) = delete;
+};
+
+void RemoteConfigStatusFetcher::Fetch(const GoogleString& url,
+                                      MessageHandler* handler,
+                                      AsyncFetch* fetch) {
+  // The fetch may complete synchronously and drop the last outside
+  // reference; keep this alive until Fetch returns.
+  RefCountedPtr<RemoteConfigStatusFetcher> hold(this);
+  fetcher_->Fetch(url, handler, new RemoteConfigStatusFetch(fetch, hold));
+}
+
+// Keeps the RemoteConfigStatusFetcher alive until the cache fetcher is done
+// with this lookup.
+class RemoteConfigFetch : public SharedAsyncFetch {
+ public:
+  RemoteConfigFetch(AsyncFetch* base_fetch,
+                    const RefCountedPtr<RemoteConfigStatusFetcher>& fetcher)
+      : SharedAsyncFetch(base_fetch), fetcher_(fetcher) {}
+
+ protected:
+  void HandleDone(bool success) override {
+    SharedAsyncFetch::HandleDone(success);
+    delete this;
+  }
+
+ private:
+  RefCountedPtr<RemoteConfigStatusFetcher> fetcher_;
+
+  RemoteConfigFetch(const RemoteConfigFetch&) = delete;
+  RemoteConfigFetch& operator=(const RemoteConfigFetch&) = delete;
+};
+
+}  // namespace
+
 GoogleString ServerContext::FetchRemoteConfig(
     const GoogleString& url, int64 timeout_ms, bool on_startup,
-    const RequestContextPtr& request_ctx) {
+    bool serve_stale_if_fetch_error, const RequestContextPtr& request_ctx) {
   CHECK(!url.empty());
   // Set up the fetcher.
   GoogleString out_str;
   StringWriter out_writer(&out_str);
   SyncFetcherAdapterCallback* remote_config_fetch =
       new SyncFetcherAdapterCallback(thread_system_, &out_writer, request_ctx);
+  // Without a system fetcher, leave the lookup cache-only as before.
+  RefCountedPtr<RemoteConfigStatusFetcher> status_fetcher;
+  if (DefaultSystemFetcher() != nullptr) {
+    status_fetcher.reset(new RemoteConfigStatusFetcher(DefaultSystemFetcher()));
+  }
   CacheUrlAsyncFetcher remote_config_fetcher(
       hasher(), lock_manager(), http_cache(),
-      global_options()->cache_fragment(), nullptr, DefaultSystemFetcher());
+      global_options()->cache_fragment(), nullptr, status_fetcher.get());
   remote_config_fetcher.set_proactively_freshen_user_facing_request(true);
+  // When a refetch fails, keep applying the last good configuration (bounded
+  // by kRemoteConfigMaxStaleMs below).
+  remote_config_fetcher.set_serve_stale_if_fetch_error(
+      serve_stale_if_fetch_error);
   // Fetch to a string.
-  remote_config_fetcher.Fetch(url, message_handler_, remote_config_fetch);
+  remote_config_fetcher.Fetch(
+      url, message_handler_,
+      new RemoteConfigFetch(remote_config_fetch, status_fetcher));
   if (on_startup) {
     remote_config_fetch->Release();
     return "";
@@ -1327,15 +1480,52 @@ GoogleString ServerContext::FetchRemoteConfig(
     int64 remaining_ms = std::max(static_cast<int64>(0), end_ms - now_ms);
     remote_config_fetch->TimedWait(remaining_ms);
   }
+  const bool done = remote_config_fetch->IsDoneLockHeld();
   remote_config_fetch->Unlock();
 
-  if (!remote_config_fetch->success()) {
+  // Why the origin fetch failed, if it did; only readable once done.
+  GoogleString failure;
+  if (!done) {
+    failure = "no response in time";
+  } else if (status_fetcher.get() != nullptr) {
+    failure = status_fetcher->failure();
+  }
+  const char* reason = failure.empty() ? "no usable response" : failure.c_str();
+
+  // Exactly one warning per failed fetch.
+  const ResponseHeaders* response_headers =
+      remote_config_fetch->response_headers();
+  if (!done || !remote_config_fetch->success() ||
+      !IsAcceptedRemoteConfigStatus(response_headers->status_code())) {
+    // Only a 200 (or a cached copy revalidated with 304) is configuration.
     message_handler_->Message(
-        kWarning, "Fetching remote configuration %s failed.", url.c_str());
+        kWarning, "Fetching remote configuration %s failed (%s); not applied.",
+        url.c_str(), reason);
     remote_config_fetch->Release();
     return "";
-  } else if (remote_config_fetch->response_headers()->status_code() !=
-             HttpStatus::kNotModified) {
+  } else if (response_headers->HasValue(
+                 HttpAttributes::kWarning,
+                 FallbackSharedAsyncFetch::kStaleWarningHeaderValue)) {
+    // The refetch failed and the last good copy was served instead.
+    const int64 stale_ms =
+        timer_->NowMs() - response_headers->CacheExpirationTimeMs();
+    const long stale_sec =                               // NOLINT
+        static_cast<long>(stale_ms / Timer::kSecondMs);  // NOLINT
+    if (stale_ms > kRemoteConfigMaxStaleMs) {
+      message_handler_->Message(
+          kWarning,
+          "Fetching remote configuration %s failed (%s) and the last good "
+          "copy expired %ld seconds ago; not applied.",
+          url.c_str(), reason, stale_sec);
+      remote_config_fetch->Release();
+      return "";
+    }
+    message_handler_->Message(
+        kWarning,
+        "Fetching remote configuration %s failed (%s); applying the last "
+        "good copy, expired %ld seconds ago.",
+        url.c_str(), reason, stale_sec);
+  } else if (response_headers->status_code() != HttpStatus::kNotModified) {
     message_handler_->Message(
         kWarning,
         "Fetching remote configuration %s. Configuration was not in cache.",

@@ -19,11 +19,14 @@
 
 #include "pagespeed/system/daemon_serve_arm.h"
 
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <mutex>
+#include <random>
 
+#include "net/instaweb/rewriter/public/rewrite_stats.h"
 #include "pagespeed/kernel/base/atomic_int32.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/statistics.h"
@@ -34,6 +37,7 @@
 #include "pagespeed/system/daemon_adapter.h"
 #include "pagespeed/system/daemon_health.h"
 #include "pagespeed/system/daemon_record_arm.h"
+#include "pagespeed/system/siphash.h"
 
 namespace net_instaweb {
 
@@ -141,6 +145,31 @@ StringPiece OpaqueTag(StringPiece tag) {
   return tag;
 }
 
+// An RFC 9110 qvalue: "0" [ "." 0*3DIGIT ] / "1" [ "." 0*3("0") ].  False
+// for anything else; `*above_zero` is whether the weight is greater than 0.
+bool ParseQValue(StringPiece value, bool* above_zero) {
+  if (value.empty() || (value[0] != '0' && value[0] != '1')) {
+    return false;
+  }
+  bool positive = value[0] == '1';
+  if (value.size() > 1) {
+    if (value[1] != '.' || value.size() > 5) {
+      return false;
+    }
+    for (size_t i = 2; i < value.size(); ++i) {
+      const char c = value[i];
+      if (c < '0' || c > '9' || (value[0] == '1' && c != '0')) {
+        return false;
+      }
+      if (c != '0') {
+        positive = true;
+      }
+    }
+  }
+  *above_zero = positive;
+  return true;
+}
+
 }  // namespace
 
 uint32_t ServeImageFormat(uint32_t mask) {
@@ -225,6 +254,119 @@ bool ServeEncodingIsServable(uint32_t stored_mask) {
   return ServeTransferEncoding(stored_mask) == kPsTransferEncodingIdentity;
 }
 
+StringPiece ServeContentEncodingToken(uint32_t stored_mask) {
+  switch (ServeTransferEncoding(stored_mask)) {
+    case kPsTransferEncodingGzip:
+      return StringPiece(kServeContentEncodingGzip);
+    case kPsTransferEncodingBrotli:
+      return StringPiece(kServeContentEncodingBrotli);
+    default:
+      return StringPiece();
+  }
+}
+
+bool ServeAcceptEncodingAdvertises(StringPiece accept_encoding,
+                                   StringPiece coding) {
+  if (coding.empty()) {
+    return false;
+  }
+  bool advertised = false;
+  StringPieceVector elements;
+  SplitStringPieceToVector(accept_encoding, ",", &elements,
+                           true /* omit_empty_strings */);
+  for (StringPiece element : elements) {
+    StringPieceVector parts;
+    SplitStringPieceToVector(element, ";", &parts,
+                             false /* omit_empty_strings */);
+    if (parts.empty()) {
+      continue;
+    }
+    StringPiece name = parts[0];
+    TrimWhitespace(&name);
+    if (!StringCaseEqual(name, coding)) {
+      continue;
+    }
+    for (size_t i = 1; i < parts.size(); ++i) {
+      StringPiece parameter = parts[i];
+      TrimWhitespace(&parameter);
+      // The weight is the parameter NAMED `q`, in either case.  It is found
+      // by its name, so a weight written outside the grammar -- whitespace
+      // around its `=`, no `=` at all, no value -- is recognised as the
+      // weight and then refused as unreadable, never skipped as some other
+      // parameter.
+      const size_t equals = parameter.find('=');
+      const StringPiece raw_name =
+          equals == StringPiece::npos ? parameter : parameter.substr(0, equals);
+      StringPiece name_of_parameter = raw_name;
+      TrimWhitespace(&name_of_parameter);
+      if (!StringCaseEqual(name_of_parameter, "q")) {
+        // Not the weight.  A coding's other parameters say nothing about
+        // whether the client decodes it.
+        continue;
+      }
+      bool above_zero = false;
+      if (equals == StringPiece::npos ||
+          name_of_parameter.size() != raw_name.size() ||
+          !ParseQValue(parameter.substr(equals + 1), &above_zero) ||
+          !above_zero) {
+        // A refusal, or a weight this module cannot read: either way not a
+        // client that said it decodes this coding.
+        return false;
+      }
+    }
+    advertised = true;
+  }
+  return advertised;
+}
+
+bool ServeEncodedContentClass(int ps_content_type) {
+  return ps_content_type == kPsContentCss || ps_content_type == kPsContentJs ||
+         ps_content_type == kPsContentImage;
+}
+
+uint32_t ServeSelectionMask(uint32_t client_mask, StringPiece accept_encoding,
+                            bool serve_stored_encodings) {
+  if (serve_stored_encodings) {
+    const uint32_t coding = ServeTransferEncoding(client_mask);
+    if ((coding == kPsTransferEncodingGzip &&
+         ServeAcceptEncodingAdvertises(accept_encoding,
+                                       kServeContentEncodingGzip)) ||
+        (coding == kPsTransferEncodingBrotli &&
+         ServeAcceptEncodingAdvertises(accept_encoding,
+                                       kServeContentEncodingBrotli))) {
+      return client_mask;
+    }
+  }
+  return ServeMaskWithIdentityEncoding(client_mask);
+}
+
+bool ServeEncodingIsServable(uint32_t stored_mask, uint32_t selection_mask,
+                             int ps_content_type, bool serve_stored_encodings) {
+  const uint32_t stored = ServeTransferEncoding(stored_mask);
+  if (stored == kPsTransferEncodingIdentity) {
+    return true;
+  }
+  if (!serve_stored_encodings) {
+    return false;
+  }
+  if (stored != kPsTransferEncodingGzip &&
+      stored != kPsTransferEncodingBrotli) {
+    return false;
+  }
+  // The selection kept a coding only when the request listed it plainly
+  // (ServeSelectionMask), so equality here IS "the client advertised it".
+  if (stored != ServeTransferEncoding(selection_mask)) {
+    return false;
+  }
+  if (ps_content_type == kPsContentImage &&
+      ServeImageFormat(stored_mask) != kPsImageFormatOriginal) {
+    // The media-type sniff cannot see through the coding: only the
+    // original-format slot's media type is known without it.
+    return false;
+  }
+  return ServeEncodedContentClass(ps_content_type);
+}
+
 const char* ServeCompressorMediaType(const DaemonServeDecision& decision,
                                      const char* request_media_type) {
   return decision.content_type.empty() ? request_media_type
@@ -237,12 +379,36 @@ GoogleString ServeVaryFieldValue(const DaemonServeDecision& decision,
   if (decision.emit_vary_accept) {
     value.assign(HttpAttributes::kAccept);
   }
-  // THE 304 LEG ONLY; on the 200 the compressor is the emitter.  The
-  // predicate is the compressor's own: a media type it is given the body
+  // A STORED CODED COPY: no compressor ever sees its body, so this arm is
+  // the only emitter of the encoding axis, on the 200 and the 304 alike and
+  // whatever the length.
+  //
+  // Otherwise THE 304 LEG ONLY; on the 200 the compressor is the emitter.
+  // The predicate is the compressor's own: a media type it is given the body
   // for, and a body big enough that it does not take its pass-through
   // shortcut before stating the axis.
-  if (decision.not_modified && handed_to_compressor &&
-      decision.body.size() > kServeCompressorPassThroughBytes) {
+  const bool coded = !decision.content_encoding.empty();
+  if (coded || (decision.not_modified && handed_to_compressor &&
+                decision.body.size() > kServeCompressorPassThroughBytes)) {
+    if (!value.empty()) {
+      StrAppend(&value, ", ");
+    }
+    StrAppend(&value, HttpAttributes::kAcceptEncoding);
+  }
+  return value;
+}
+
+GoogleString ServeVaryFieldValueOnBothLegs(const DaemonServeDecision& decision,
+                                           bool compressible_media_type) {
+  GoogleString value;
+  if (decision.emit_vary_accept) {
+    value.assign(HttpAttributes::kAccept);
+  }
+  // BOTH LEGS, and no size floor: identical input on the 200 and the 304,
+  // so the two can never disagree on the wire in either direction.  A
+  // stored coded copy states it too, whatever its media type: its body
+  // varies on the request's Accept-Encoding by construction.
+  if (compressible_media_type || !decision.content_encoding.empty()) {
     if (!value.empty()) {
       StrAppend(&value, ", ");
     }
@@ -397,7 +563,8 @@ int DaemonServeReader::ProbeOriginalFlags(const DaemonServeRequest& request,
 }
 
 int DaemonServeReader::RetryByExactId(const DaemonServeRequest& request,
-                                      DaemonServeDecision* decision) {
+                                      DaemonServeDecision* decision,
+                                      bool uncoded_only) {
   // Two candidates, in preference order, both named from the SELECTION mask
   // so neither can land on a pre-compressed entry:
   //
@@ -422,12 +589,60 @@ int DaemonServeReader::RetryByExactId(const DaemonServeRequest& request,
   // guard covers both: when it fires the retry names nothing and returns
   // not-found, and the request can still reach the durable original only
   // through the origin-mode read that names it honestly.
-  const uint8_t candidates[] = {
-      ServeAlternateIdForMask(decision->selection_mask),
-      ServeAlternateIdForMask(
-          ServeMaskWithOriginalFormat(decision->selection_mask)),
-  };
-  for (uint8_t id : candidates) {
+  //
+  // WITH A CODING KEPT -- the switch on, and the request listing it -- the
+  // same two ids follow AT IDENTITY.  A coded sibling at this client's
+  // format may simply not exist (the worker writes it after the identity
+  // copy, and not at all when its compression level is 0), while the
+  // uncoded one is servable to every client: without these two, turning the
+  // switch on would lose the variant to the durable original.  With the
+  // coding at identity -- every reader whose switch is off -- the list is
+  // exactly the two ids above, in that order.
+  //
+  // With a coding kept, NO ID IS ASKED FOR TWICE (at the original format
+  // the first two coincide, and so do the last two), and with
+  // `uncoded_only` -- the floor refused the selected coded copy for its
+  // CLASS, which every sibling of this URL shares -- no coded id is asked
+  // for at all.  An HTML request from a brotli client therefore costs one
+  // by-id read, the uncoded copy's, and never more.  That read is new: with
+  // the switch off the identity selection returns the uncoded copy
+  // directly, while with it on the selection can return the coded HTML
+  // sibling, which the floor refuses, so every HTML request from a browser
+  // pays this one extra read.  A vectorized image pays up to three.
+  uint8_t candidates[4];
+  size_t count = 0;
+  if (ServeTransferEncoding(decision->selection_mask) ==
+      kPsTransferEncodingIdentity) {
+    // Today's list, exactly.
+    candidates[count++] = ServeAlternateIdForMask(decision->selection_mask);
+    candidates[count++] = ServeAlternateIdForMask(
+        ServeMaskWithOriginalFormat(decision->selection_mask));
+  } else {
+    const uint32_t uncoded =
+        ServeMaskWithIdentityEncoding(decision->selection_mask);
+    const uint32_t masks[] = {
+        decision->selection_mask,
+        ServeMaskWithOriginalFormat(decision->selection_mask),
+        uncoded,
+        ServeMaskWithOriginalFormat(uncoded),
+    };
+    for (uint32_t mask : masks) {
+      if (uncoded_only &&
+          ServeTransferEncoding(mask) != kPsTransferEncodingIdentity) {
+        continue;
+      }
+      const uint8_t id = ServeAlternateIdForMask(mask);
+      bool seen = false;
+      for (size_t j = 0; j < count; ++j) {
+        seen = seen || candidates[j] == id;
+      }
+      if (!seen) {
+        candidates[count++] = id;
+      }
+    }
+  }
+  for (size_t i = 0; i < count; ++i) {
+    const uint8_t id = candidates[i];
     if (ServeAlternateIdIsSentinel(id)) {
       continue;
     }
@@ -435,7 +650,9 @@ int DaemonServeReader::RetryByExactId(const DaemonServeRequest& request,
       continue;
     }
     const uint32_t stored_mask = abi_->ReadMask(result_);
-    if (ServeEncodingIsServable(stored_mask) &&
+    if (ServeEncodingIsServable(stored_mask, decision->selection_mask,
+                                abi_->ReadContentType(result_),
+                                serve_stored_encodings_) &&
         ServeFormatIsAdvertised(decision->client_mask, stored_mask)) {
       return kPsOk;
     }
@@ -454,6 +671,8 @@ void DaemonServeReader::Compose(const DaemonServeRequest& request,
 
   decision->selected = true;
   decision->stored_mask = stored_mask;
+  // The label for the bytes, from the entry, never from the request.
+  decision->content_encoding = ServeContentEncodingToken(stored_mask);
   decision->stored_flags = stored_flags;
   decision->alternate_id = ServeAlternateIdForMask(stored_mask);
   decision->worker_processed = abi_->ReadIsWorkerProcessed(result_) != 0;
@@ -473,6 +692,7 @@ void DaemonServeReader::Compose(const DaemonServeRequest& request,
     decision->reason = daemon_serve_reason::kReadFailed;
     decision->serve_class = kPsServeClassOriginalPending;
     decision->selected = false;
+    decision->content_encoding = StringPiece();
     return;
   }
   decision->body = StringPiece(reinterpret_cast<const char*>(data), length);
@@ -523,6 +743,7 @@ void DaemonServeReader::Compose(const DaemonServeRequest& request,
     decision->reason = daemon_serve_reason::kNeedsRevalidation;
     decision->serve_class = kPsServeClassOriginalPending;
     decision->selected = false;
+    decision->content_encoding = StringPiece();
     decision->body = StringPiece();
     // GENUINE AGE-BASED EXPIRY OF A SELECTED VARIANT, and only that, is
     // marked for the seam: the verdict alone is not enough, because the same
@@ -710,31 +931,42 @@ DaemonServeDecision DaemonServeReader::Serve(const DaemonServeRequest& request,
                      CStrOrNull(request.save_data, &save_data),
                      CStrOrNull(request.accept_encoding, &accept_encoding));
 
-  // THE MASK THE READ IS TAKEN AT is the classifier's answer with the
-  // transfer-encoding field normalized to identity.  See
-  // ServeMaskWithIdentityEncoding for why that is a correctness fix and not a
-  // preference: without it every request from a real browser -- which
-  // advertises brotli -- selects a stored brotli variant this arm must
-  // refuse, and the URL degrades to the unoptimized durable original for the
-  // whole population.
-  decision.selection_mask = ServeMaskWithIdentityEncoding(decision.client_mask);
+  // THE MASK THE READ IS TAKEN AT.  With this reader's switch off -- the
+  // default, and every port's behaviour until its operator turns the
+  // directive on -- it is the classifier's answer with the transfer-encoding
+  // field normalized to identity: see ServeMaskWithIdentityEncoding for why
+  // that is a correctness fix and not a preference.  With the switch on, the
+  // classifier's coding is kept when the request lists it plainly, and the
+  // peer then returns the stored coded sibling when there is one and the
+  // identity sibling when there is not.  See ServeSelectionMask.
+  decision.selection_mask = ServeSelectionMask(
+      decision.client_mask, request.accept_encoding, serve_stored_encodings_);
 
   // ---- variant selection ------------------------------------------------
   int status = ReadBest(request, decision.selection_mask);
   if (status == kPsOk) {
     const uint32_t stored_mask = abi_->ReadMask(result_);
-    if (!ServeEncodingIsServable(stored_mask)) {
+    const int stored_content_type = abi_->ReadContentType(result_);
+    if (!ServeEncodingIsServable(stored_mask, decision.selection_mask,
+                                 stored_content_type,
+                                 serve_stored_encodings_)) {
       // A FLOOR, not the working path.  With the selection mask normalized
       // to identity the peer hard-disqualifies every non-identity variant
       // itself, so reaching here means the peer returned something its own
       // scoring rule says it should not have.  Refuse rather than trust it:
       // emitting pre-compressed bytes the seam will not label produces a
       // response no client can decode.  The by-id retries below use the
-      // normalized mask too, so they cannot land back here.
+      // normalized mask too, so they cannot land back here.  With the switch
+      // on it is also where a coded copy of a class this arm serves uncoded
+      // (HTML), or a coded image outside the original-format slot, is
+      // refused, and the retry then reaches its identity sibling.
       Release();
       decision.reason = daemon_serve_reason::kEncodingNotServable;
       decision.serve_class = kPsServeClassOriginalPending;
-      status = RetryByExactId(request, &decision);
+      // A coded copy refused for its CLASS has no coded sibling this arm
+      // would serve either: ask for the uncoded ones only.
+      status = RetryByExactId(request, &decision,
+                              !ServeEncodedContentClass(stored_content_type));
     } else if (!ServeFormatIsAdvertised(decision.client_mask, stored_mask)) {
       // THE REFUSAL, AND THE RECOVERY IT OWES.
       //
@@ -772,8 +1004,29 @@ DaemonServeDecision DaemonServeReader::Serve(const DaemonServeRequest& request,
       // declined: the stored variant is one this client can decode, it is
       // merely not the one this client's mask names.  The comparison is
       // against the mask the read was taken at -- see the field's comment
-      // for why `client_mask` would name the wrong axis.
-      decision.fallback_hit = decision.stored_mask != decision.selection_mask;
+      // for why `client_mask` would name the wrong axis -- with ONE field
+      // excluded, on both sides, for content the field does not describe:
+      // the image-format field says nothing about a stylesheet or script,
+      // while a browser's selection mask carries an image format, so
+      // comparing the field for non-image content classes every stylesheet
+      // and script serve as a permanent mismatch and re-notifies the worker
+      // for ever.  Viewport, density and Save-Data stay in the comparison
+      // for every class; that convergence is the point of the re-notify.
+      // THE CODING AXIS IS OUT OF THE COMPARISON TOO, on both sides: the
+      // worker writes the coded siblings of every variant itself, so a
+      // client served the uncoded copy because no coded one exists yet is
+      // not a fallback, and asking for one on every request would be
+      // permanent traffic.  With the switch off both sides are identity
+      // already and this changes nothing.
+      const bool format_is_a_fact = decision.ps_content_type == kPsContentImage;
+      const uint32_t stored_for_comparison = ServeMaskWithIdentityEncoding(
+          format_is_a_fact ? decision.stored_mask
+                           : ServeMaskWithOriginalFormat(decision.stored_mask));
+      const uint32_t selected_for_comparison = ServeMaskWithIdentityEncoding(
+          format_is_a_fact
+              ? decision.selection_mask
+              : ServeMaskWithOriginalFormat(decision.selection_mask));
+      decision.fallback_hit = stored_for_comparison != selected_for_comparison;
     }
     return decision;
   }
@@ -820,6 +1073,10 @@ DaemonServeDecision DaemonServeReader::Serve(const DaemonServeRequest& request,
     // publishes for it -- reporting it as OPTIMIZED would make the
     // partition say this substrate optimized something it did not.
     decision.serve_class = kPsServeClassOriginalPending;
+    // The one durable-original serve that needs someone to ask again: see
+    // the field.  A reader with no limiter never looks.
+    decision.lost_optimized_copy =
+        LostOptimizedCopy(request, decision, now_seconds);
   }
   return decision;
 }
@@ -863,6 +1120,28 @@ void DaemonServeStats::RecordHit(int content_type, uint64_t original_bytes,
                             optimized_bytes, mask);
 }
 
+void DaemonServeStats::RecordHit(int content_type, uint64_t original_bytes,
+                                 uint64_t optimized_bytes, uint32_t mask,
+                                 StringPiece host) {
+  if (abi_ == nullptr || cache_path_.empty()) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!EnsureOpenLocked()) {
+    return;
+  }
+  // The host-aware recorder where the optimizer has one; otherwise -- an
+  // empty host, or an optimizer from before per-host serve savings -- the
+  // hit is recorded exactly as the host-less form records it.  Never both.
+  if (!host.empty() &&
+      abi_->ServeStatsRecordHitForHost(handle_, content_type, original_bytes,
+                                       optimized_bytes, mask, host)) {
+    return;
+  }
+  abi_->ServeStatsRecordHit(handle_, content_type, original_bytes,
+                            optimized_bytes, mask);
+}
+
 bool DaemonServeStats::EnsureOpenLocked() {
   if (handle_ == nullptr) {
     if (attempted_ && ++since_attempt_ < kReopenInterval) {
@@ -878,6 +1157,22 @@ bool DaemonServeStats::EnsureOpenLocked() {
   return true;
 }
 
+namespace {
+
+// The body the two factories share, so they cannot drift: the handle is the
+// only thing they obtain differently.  A reader is built only against a
+// handle this process holds and a bound library.
+DaemonServeReader* MakeDaemonServeReaderWithHandle(DaemonAdapter* adapter,
+                                                   void* cache) {
+  // Both callers have already checked `adapter` and its health.
+  if (cache == nullptr || adapter->abi() == nullptr) {
+    return nullptr;
+  }
+  return new DaemonServeReader(adapter->abi(), cache);
+}
+
+}  // namespace
+
 DaemonServeReader* MakeDaemonServeReaderIfReady(DaemonAdapter* adapter) {
   if (adapter == nullptr || adapter->health() != DaemonHealth::kReady) {
     return nullptr;
@@ -885,11 +1180,16 @@ DaemonServeReader* MakeDaemonServeReaderIfReady(DaemonAdapter* adapter) {
   // Asked for BEFORE the reader exists, not after: the volume handle is what
   // makes a reader able to answer at all, and one built without it would
   // classify every request as a cold cache.
-  void* cache = adapter->RecordCache();
-  if (cache == nullptr || adapter->abi() == nullptr) {
+  return MakeDaemonServeReaderWithHandle(adapter, adapter->RecordCache());
+}
+
+DaemonServeReader* MakeDaemonServeReaderIfOpen(DaemonAdapter* adapter) {
+  if (adapter == nullptr || adapter->health() != DaemonHealth::kReady) {
     return nullptr;
   }
-  return new DaemonServeReader(adapter->abi(), cache);
+  // The same question, answered without the open: nullptr whenever this
+  // process has no handle yet, and nothing is waited on or logged for it.
+  return MakeDaemonServeReaderWithHandle(adapter, adapter->RecordCacheIfOpen());
 }
 
 bool DaemonServeFallbackRenotify(const DaemonAbi& abi, StringPiece socket_path,
@@ -1020,8 +1320,303 @@ bool DaemonServeOriginRefreshedNotify(
   return false;
 }
 
+DaemonHealNotifyLimiter::DaemonHealNotifyLimiter() {
+  // 128 bits, drawn once.  The system's random source can throw where none
+  // is reachable; that must never take a serving process down, so the
+  // fallback mixes the clocks with this object's address.  Weaker, and
+  // still nothing a visitor can read.
+  try {
+    std::random_device device;
+    key0_ = (static_cast<uint64>(device()) << 32) ^ device();
+    key1_ = (static_cast<uint64>(device()) << 32) ^ device();
+  } catch (...) {
+    std::mt19937_64 generator(
+        static_cast<uint64>(
+            std::chrono::system_clock::now().time_since_epoch().count()) ^
+        (static_cast<uint64>(
+             std::chrono::steady_clock::now().time_since_epoch().count())
+         << 20) ^
+        static_cast<uint64>(reinterpret_cast<uintptr_t>(this)));
+    key0_ = generator();
+    key1_ = generator();
+  }
+}
+
+DaemonHealNotifyLimiter::DaemonHealNotifyLimiter(uint64 test_key)
+    : key0_(test_key), key1_(0) {}
+
+uint64 DaemonHealNotifyLimiter::Hash(StringPiece key) const {
+  SipHash24 hash(key0_, key1_);
+  hash.Update(key.data(), key.size());
+  return hash.Finish();
+}
+
+uint64 DaemonHealNotifyLimiter::UrlKey(StringPiece scheme, StringPiece hostname,
+                                       StringPiece url) const {
+  // The host as the cache key has it: a port split off (the last colon,
+  // when only digits follow; after the bracket for a bracketed address),
+  // ASCII letters lowercased, one trailing dot dropped, and the port put
+  // back unless it is 80 or 443.  Hashed piece by piece: this runs on every
+  // stored-original serve of a stylesheet or script, and builds no string.
+  StringPiece host = hostname;
+  StringPiece port;
+  if (!hostname.empty() && hostname[0] == '[') {
+    const size_t bracket_end = hostname.find(']');
+    if (bracket_end != StringPiece::npos && bracket_end + 1 < hostname.size() &&
+        hostname[bracket_end + 1] == ':') {
+      host = hostname.substr(0, bracket_end + 1);
+      port = hostname.substr(bracket_end + 2);
+    }
+  } else {
+    const size_t colon = hostname.rfind(':');
+    if (colon != StringPiece::npos) {
+      const StringPiece candidate = hostname.substr(colon + 1);
+      bool is_port = !candidate.empty();
+      for (size_t i = 0; i < candidate.size(); ++i) {
+        if (candidate[i] < '0' || candidate[i] > '9') {
+          is_port = false;
+          break;
+        }
+      }
+      if (is_port) {
+        host = hostname.substr(0, colon);
+        port = candidate;
+      }
+    }
+  }
+  if (!host.empty() && host[host.size() - 1] == '.') {
+    host.remove_suffix(1);
+  }
+
+  SipHash24 hash(key0_, key1_);
+  hash.Update(scheme.data(), scheme.size());
+  hash.Update("://", 3);
+  for (size_t i = 0; i < host.size(); ++i) {
+    const char c = host[i];
+    hash.UpdateByte(
+        static_cast<unsigned char>((c >= 'A' && c <= 'Z') ? c - 'A' + 'a' : c));
+  }
+  if (!port.empty() && port != "80" && port != "443") {
+    hash.Update(":", 1);
+    hash.Update(port.data(), port.size());
+  }
+  hash.Update(url.data(), url.size());
+  return hash.Finish();
+}
+
+bool DaemonHealNotifyLimiter::Take(Slot* table, uint64 key_hash,
+                                   int64 now_seconds) {
+  // The URL's two places.
+  Slot* places = &table[(key_hash % (kSlots / 2)) * 2];
+  for (int i = 0; i < 2; ++i) {
+    Slot* slot = &places[i];
+    if (slot->used && slot->key_hash == key_hash) {
+      const int64 elapsed = now_seconds - slot->second;
+      // Inside the window.  A NEGATIVE elapsed time is a clock that stepped
+      // back, and counts as a run-out window: a clock change must never
+      // silence a URL for as long as the step was.
+      if (elapsed >= 0 && elapsed < kIntervalSeconds) {
+        return false;
+      }
+      slot->second = now_seconds;
+      return true;
+    }
+  }
+  // Not remembered.  It takes an empty place, or else the place of the
+  // entry that has been there longer, which is forgotten.  Two reads, one
+  // write, no search -- and never a refusal.
+  Slot* slot = !places[0].used                        ? &places[0]
+               : !places[1].used                      ? &places[1]
+               : places[0].second <= places[1].second ? &places[0]
+                                                      : &places[1];
+  slot->used = true;
+  slot->key_hash = key_hash;
+  slot->second = now_seconds;
+  return true;
+}
+
+bool DaemonHealNotifyLimiter::ShouldLook(StringPiece key, int64 now_seconds) {
+  return ShouldLookKey(Hash(key), now_seconds);
+}
+
+bool DaemonHealNotifyLimiter::AdmitAsk(StringPiece key, int64 now_seconds) {
+  return AdmitAskKey(Hash(key), now_seconds);
+}
+
+bool DaemonHealNotifyLimiter::ShouldLookKey(uint64 url_key, int64 now_seconds) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return Take(looked_, url_key, now_seconds);
+}
+
+bool DaemonHealNotifyLimiter::AdmitAskKey(uint64 url_key, int64 now_seconds) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return Take(asked_, url_key, now_seconds);
+}
+
+DaemonHealNotifyLimiter* ProcessDaemonHealNotifyLimiter() {
+  // Deliberately never destroyed: serving threads may still be running when
+  // static destructors would run.
+  static DaemonHealNotifyLimiter* limiter = new DaemonHealNotifyLimiter();
+  return limiter;
+}
+
+bool DaemonServeReader::LostOptimizedCopy(const DaemonServeRequest& request,
+                                          const DaemonServeDecision& decision,
+                                          int64 now_seconds) const {
+  if (heal_limiter_ == nullptr) {
+    return false;
+  }
+  // Stylesheets and scripts only: the classes whose optimized copy is one
+  // entry with compressed siblings.  An image's variants can be absent by
+  // verdict in ways the entry does not show.
+  if (decision.ps_content_type != kPsContentCss &&
+      decision.ps_content_type != kPsContentJs) {
+    return false;
+  }
+  // The optimizer derives nothing for a URL whose origin negotiates on
+  // `Accept`; there is nothing to ask for.
+  if (decision.vary_accept_origin_declared) {
+    return false;
+  }
+  // One look per URL per window: a URL served as its stored original is
+  // served so on every request, and the read below must not be per request.
+  // This memo sees every such URL, lost or not, and can only cause an extra
+  // look, never refuse one for another URL's sake.
+  const uint64 url_key =
+      heal_limiter_->UrlKey(request.scheme, request.hostname, request.url);
+  if (!heal_limiter_->ShouldLookKey(url_key, now_seconds)) {
+    return false;
+  }
+
+  GoogleString url, hostname, scheme;
+  request.url.CopyToString(&url);
+  request.hostname.CopyToString(&hostname);
+  request.scheme.CopyToString(&scheme);
+  // The best copy for this client IF it accepted gzip: with no identity
+  // copy in the entry that is the optimizer's gzip copy, at whichever
+  // viewport, density and Save-Data it was written for.  An INDEPENDENT
+  // read: `result_` holds the durable original the served body borrows
+  // from and must not be released or replaced here.
+  const uint32_t gzip_mask =
+      (decision.selection_mask &
+       ~(kPsMaskTransferEncodingBits << kPsMaskTransferEncodingShift)) |
+      (kPsTransferEncodingGzip << kPsMaskTransferEncodingShift);
+  void* probe = nullptr;
+  if (abi_->CacheReadBest(cache_, url.c_str(), hostname.c_str(), scheme.c_str(),
+                          gzip_mask, &probe) != kPsOk ||
+      probe == nullptr) {
+    return false;
+  }
+
+  bool lost = false;
+  // Only the optimizer's own gzip copy is evidence of what it did.
+  if (ServeTransferEncoding(abi_->ReadMask(probe)) == kPsTransferEncodingGzip &&
+      abi_->ReadIsWorkerProcessed(probe) != 0) {
+    const uint32_t original_length = abi_->ReadOriginContentLength(probe);
+    const uint8_t* data = nullptr;
+    size_t length = 0;
+    // A gzip stream is at least a 10-byte header and an 8-byte trailer, and
+    // its last four bytes are the length of what it compresses,
+    // little-endian (RFC 1952).  0 is "no original length recorded" and the
+    // maximum is "4 GiB or more": neither can be compared.
+    if (original_length != 0 && original_length != UINT32_MAX &&
+        abi_->ReadContent(probe, &data, &length) == kPsOk && data != nullptr &&
+        length >= 18) {
+      const uint32_t compressed_content_length =
+          static_cast<uint32_t>(data[length - 4]) |
+          (static_cast<uint32_t>(data[length - 3]) << 8) |
+          (static_cast<uint32_t>(data[length - 2]) << 16) |
+          (static_cast<uint32_t>(data[length - 1]) << 24);
+      // Equal: the copies are of the original -- the optimizer found
+      // nothing to gain and no optimized copy was ever due.  Smaller: they
+      // are of an optimized copy, and that copy is what is missing.
+      lost = compressed_content_length < original_length;
+    }
+  }
+  abi_->ReadFree(probe);
+  // Only now -- for a URL that DID lose its copy -- is the ask limiter
+  // entered.  A server full of URLs that are merely not optimized, or
+  // already minimal, never touches it.
+  return lost && heal_limiter_->AdmitAskKey(url_key, now_seconds);
+}
+
+bool DaemonServeLostCopyNotify(const DaemonAbi& abi, StringPiece socket_path,
+                               const DaemonServeRequest& request,
+                               const DaemonServeDecision& decision,
+                               StringPiece option_context,
+                               StringPiece option_signature, Variable* notified,
+                               Variable* notify_failed) {
+  // Flagged durable-original serves only.  Every other outcome either
+  // served an optimized copy or has its own path to converge on.
+  if (decision.verdict != DaemonServeVerdict::kServeOriginal ||
+      !decision.lost_optimized_copy) {
+    return false;
+  }
+  // The same gate the detection applied, restated where the send is: a URL
+  // whose origin negotiates on `Accept` is never asked for.
+  if (decision.vary_accept_origin_declared) {
+    return false;
+  }
+  // Both halves or neither, exactly as the two notifications above.
+  if (option_context.empty() || option_signature.empty()) {
+    return false;
+  }
+
+  GoogleString socket, url, hostname, scheme, context, signature;
+  socket_path.CopyToString(&socket);
+  request.url.CopyToString(&url);
+  request.hostname.CopyToString(&hostname);
+  request.scheme.CopyToString(&scheme);
+
+  PsNotifyParams params;
+  abi.NotifyParamsInit(&params);
+  params.url = url.c_str();
+  params.hostname = hostname.c_str();
+  params.scheme = scheme.c_str();
+  params.content_type = decision.ps_content_type;
+  // THE RAW CLIENT MASK, as the fallback re-notify sends it: an ordinary
+  // capability vector, so the worker handles this exactly as it handles a
+  // repeat notification for the URL -- which is what it is.
+  params.mask = decision.client_mask;
+  params.agent_request = 0;
+  params.option_context = CStrOrNull(option_context, &context);
+  params.option_context_length = option_context.size();
+  params.option_signature = CStrOrNull(option_signature, &signature);
+  // Fire and forget, once.  The next admitted look asks again.
+  if (abi.NotifyWorker(socket.c_str(), &params) == kPsOk) {
+    if (notified != nullptr) {
+      notified->Add(1);
+    }
+    return true;
+  }
+  if (notify_failed != nullptr) {
+    notify_failed->Add(1);
+  }
+  return false;
+}
+
 int64 DaemonServeReadersConstructed() {
   return g_serve_readers_constructed.value();
+}
+
+void RecordDaemonServedClass(RewriteStats* stats, int ps_content_type) {
+  if (stats == nullptr) return;
+  switch (ps_content_type) {
+    case kPsContentCss:
+      stats->ipro_daemon_served_css()->Add(1);
+      break;
+    case kPsContentJs:
+      stats->ipro_daemon_served_js()->Add(1);
+      break;
+    case kPsContentImage:
+      stats->ipro_daemon_served_image()->Add(1);
+      break;
+    case kPsContentOther:
+      stats->ipro_daemon_served_other()->Add(1);
+      break;
+    default:
+      break;
+  }
 }
 
 }  // namespace net_instaweb

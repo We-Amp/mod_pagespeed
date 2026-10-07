@@ -34,8 +34,62 @@ enforced on IIS as on the other ports.
 - On init failure, local requests get a diagnostic page plus a
   machine-readable `X-Pagespeed-Init-Status` response header with one of:
   `cache-path-empty | cache-path-missing | cache-path-not-writable |
-  cache-path-create-failed | log-dir-create-failed | post-config-failed |
-  startup-failed` (`iis_http_module.cpp`).
+  cache-path-create-failed | log-dir-create-failed | daemon-volume-split |
+  post-config-failed | startup-failed` (`iis_http_module.cpp`).
+- `daemon-volume-split`: the site set both `DaemonSocketPath` and
+  `DaemonVolumePath`, and the module's startup check found that opening the
+  daemon's cache volume at the size the daemon published created a second
+  volume file instead of attaching to the daemon's. The site then engages no
+  PageSpeed at all — nothing silently optimizes from the wrong cache — and one
+  Windows event-log entry is written under the `PageSpeed` event source; when
+  that source is not registered on the machine, Event Viewer still shows the
+  entry, prefixed with a note that the description cannot be found. The
+  verdict lives until the application pool recycles: a configuration edit that
+  leaves both paths unchanged does not re-probe, and a daemon that is not
+  answering when the first site with this configuration starts in a worker
+  process leaves in-place optimization off for those sites until the pool
+  recycles (the other ports need a web-server restart for the same). The
+  check removes the volume file its own open created; the event-log entry's
+  appended report says so, or names the file to remove by hand when it could
+  not. Recovery: start or restart the optimizer daemon and let it create its
+  volume, then recycle the application pool. If the site still refuses after
+  that, the module and the daemon disagree about the volume: install a module
+  and optimizer package pair that agree. If the event-log entry says the file
+  could not be removed, remove it before the pool recycles: a worker process
+  that finds it attaches to it without refusing. The check runs when EITHER option is set —
+  one set alone leaves in-place optimization off, with one log line — and
+  with either option set the classic in-place recorder is not used for the
+  site, whatever the check finds; with both unset the module behaves exactly
+  as before.
+
+### Event Logging (`UseEventLog`)
+
+- `pagespeed UseEventLog on` (in `pagespeed.config`) routes the module's
+  WARNING and ERROR messages to the Windows Application event log under the
+  `PageSpeed` source. INFO messages never reach the event log (on this port
+  they are per-request volume); a FATAL is always written, whatever the
+  directive says. With the directive off or unset, the first suppressed
+  warning and the first suppressed error each write ONE entry saying
+  event-log writing is off, how to turn it on, and that the messages can
+  also be read at the admin message history path (`/pagespeed_message` by
+  default) from the local machine.
+- Messages raised before the directive's value is KNOWN in a worker process
+  are not written, whatever the directive says; a FATAL is the exception.
+  Where the directive sits at the top level of the configuration, the value
+  is known as soon as the first configuration is read, so the module's
+  start-up messages are written. Where it sits inside a host- or
+  path-matched block, the value is known when that site's configuration is
+  read, and the start-up messages before that are only in the admin message
+  history. The setting is one per worker process, so a site that sets
+  nothing follows whatever a site in the same process set.
+- Volume: at most one entry per distinct message text per worker process,
+  and a hard cap of 1000 entries per worker process; past the cap one final
+  entry says so and nothing further is written (a FATAL included) until the
+  application pool recycles.
+- The `PageSpeed` event source is not registered by the installer yet, so
+  entries appear with Event Viewer's "The description for Event ID … cannot
+  be found" preface above the message text; the message itself is intact.
+  Registering the source is a later installer change.
 
 ## Functional Limitations
 

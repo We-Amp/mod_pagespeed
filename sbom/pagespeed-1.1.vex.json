@@ -3,9 +3,20 @@
   "@id": "https://we-amp.com/vex/pagespeed-1.1",
   "author": "We-Amp B.V.",
   "role": "vendor",
-  "timestamp": "2026-07-23T00:00:00Z",
-  "version": 2,
+  "timestamp": "2026-10-03T12:00:00Z",
+  "version": 3,
   "statements": [
+    {
+      "vulnerability": {
+        "name": "GHSA-vfj7-8cjw-p6xm",
+        "aliases": ["CVE-2026-93687"]
+      },
+      "timestamp": "2026-10-03T12:00:00Z",
+      "products": [ { "@id": "pkg:npm/braces@3.0.3" } ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Expires: 2026-12-02. Surface: pagespeed/system/console/pnpm-lock.yaml only; path @pagespeed/admin-console (devDependencies) -> vite-plugin-singlefile@2.3.0 -> micromatch@4.0.8 -> braces ^3.0.3; no other consumer in the lockfile, and the shipped bundle admin_console.html contains no braces/micromatch code (build-time tooling only, run on developer and CI machines against a committed source tree). No fix exists: 3.0.3 is the latest braces release, the advisory range is <= 3.0.3 with first_patched_version null, micromatch@4.0.8 (latest) pins braces ^3.0.3, and the upstream fix (micromatch/braces PR #72 for issue #70) is open and unmerged with no maintainer commit since 2025-01-19. The vulnerable path is braces' recursive AST walkers (lib/parse.js, lib/compile.js, lib/expand.js) overflowing the call stack on a deeply nested brace PATTERN. In micromatch, braces() is reached only from micromatch.parse / micromatch.braces / micromatch.braceExpand; micromatch.isMatch — the single micromatch call in vite-plugin-singlefile (dist/esm/index.js) — goes straight to picomatch and never calls braces. That isMatch call is itself guarded by inlinePattern.length, and the console's vite.config.ts calls viteSingleFile() with no options, so inlinePattern is [] and micromatch is never invoked at all during the build. Even on the hypothetical path the only input braces would ever see is the inlinePattern glob authored in vite.config.ts, never request data or any attacker-controlled string. Re-evaluate on expiry, when vite-plugin-singlefile changes its micromatch usage or drops it, or when a patched braces (> 3.0.3) / micromatch is published (then bump via a pnpm override instead of extending this statement)."
+    },
     {
       "vulnerability": { "name": "CVE-2026-42055" },
       "products": [ { "@id": "pkg:generic/nginx@1.30.4" } ],

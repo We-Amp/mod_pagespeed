@@ -37,6 +37,7 @@ CircularBuffer* CircularBuffer::Create(const int capacity) {
   cb->capacity_ = capacity;
   cb->wrapped_ = false;
   cb->offset_ = 0;
+  cb->lines_written_ = 0;
   return cb;
 }
 
@@ -50,7 +51,11 @@ CircularBuffer* CircularBuffer::Init(bool parent, void* block,
     cb->capacity_ = capacity;
     cb->wrapped_ = false;
     cb->offset_ = 0;
+    cb->lines_written_ = 0;
   }
+  // parent == false attaches a child process to a block that a parent has
+  // already initialized; lines_written_ (like capacity_/wrapped_/offset_)
+  // must not be reset, or the child would zero the shared history.
   return cb;
 }
 
@@ -62,6 +67,16 @@ void CircularBuffer::Clear() {
 bool CircularBuffer::Write(const StringPiece& message) {
   const char* data = message.data();
   int size = message.size();
+  // Count newline-terminated lines in the message as given -- a single
+  // Write() call can carry a multi-line message (see
+  // SystemMessageHandler::AddMessageToBuffer), and every line in it is
+  // counted, atomically with the write itself.
+  int64 newline_count = 0;
+  for (int i = 0; i < size; ++i) {
+    if (data[i] == '\n') {
+      ++newline_count;
+    }
+  }
   // Left-truncate the message if its size is larger than buffer.
   if (size > capacity_) {
     data += size - capacity_;
@@ -69,6 +84,7 @@ bool CircularBuffer::Write(const StringPiece& message) {
     memcpy(buffer_, data, size);
     offset_ = 0;
     wrapped_ = true;
+    lines_written_ += newline_count;
     return true;
   }
   // Otherwise, start to write the message at offset.
@@ -87,6 +103,7 @@ bool CircularBuffer::Write(const StringPiece& message) {
     offset_ = size - len;
     wrapped_ = true;
   }
+  lines_written_ += newline_count;
   return true;
 }
 

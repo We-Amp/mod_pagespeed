@@ -37,10 +37,21 @@ enum FetchResponseStatus {
   kFetchStatusOK = 1,
   kFetchStatusUncacheable200 = 2,
   kFetchStatusUncacheableError = 3,
+  // A completed fetch whose origin answered 4xx: the resource is missing or
+  // forbidden, which is a property of the resource and worth remembering.
   kFetchStatus4xxError = 4,
+  // A completed fetch with a status that is neither 200, 4xx nor 5xx (a
+  // redirect, a 2xx other than 200, ...).
   kFetchStatusOtherError = 5,
   kFetchStatusDropped = 6,
-  kFetchStatusEmpty = 7
+  kFetchStatusEmpty = 7,
+  // The fetch did not complete (timeout, connection refused or reset, the
+  // fetcher gave up) or the origin answered 5xx. This says something about
+  // the origin's condition right now, not about the resource, so it is
+  // remembered only briefly. Note that a fetcher that gives up before it has
+  // headers may fill in a status code of its own (the curl fetcher writes
+  // 404); that code never turns an incomplete fetch into a 4xx.
+  kFetchStatusTransientError = 8
   // Make sure to expand ttl_sec_for_status in HttpCacheFailurePolicy below
   // if adding more values.
 };
@@ -48,9 +59,9 @@ enum FetchResponseStatus {
 struct HttpCacheFailurePolicy {
   HttpCacheFailurePolicy();
 
-  // FetchResponseStatus's range from 0 to 7, so we need 8 slots.
+  // FetchResponseStatus's range from 0 to 8, so we need 9 slots.
   // Adding a length enum would mess with switch exhaustiveness checking
-  int ttl_sec_for_status[8];
+  int ttl_sec_for_status[9];
 };
 
 class HttpCacheFailure {

@@ -153,14 +153,21 @@ class SystemServerContext : public ServerContext {
 
   // Displays recent Info/Warning/Error messages.
   void MessageHistoryHandler(const RewriteOptions& options,
-                             AdminSite::AdminSource source, AsyncFetch* fetch);
+                             AdminSite::AdminSource source,
+                             const QueryParams& query_params,
+                             AsyncFetch* fetch);
 
   // Handle a request for /pagespeed_admin/*, which is a launching
   // point for all the administrator pages including stats,
   // message-histogram, console, etc.
+  // `own_serve_host`: the host this request's own site records its serves
+  // under -- the port computes it with VouchedServeHost from the request's
+  // own configuration record; "" (the default) shows a per-virtual-host
+  // console no site's row of the optimizer's serve savings.
   void AdminPage(bool is_global, const GoogleUrl& stripped_gurl,
                  const QueryParams& query_params, const RewriteOptions* options,
-                 AsyncFetch* fetch, StringPiece request_body = StringPiece());
+                 AsyncFetch* fetch, StringPiece request_body = StringPiece(),
+                 StringPiece own_serve_host = StringPiece());
 
   // Handle a request for the legacy /*_pagespeed_statistics page, which also
   // serves as a launching point for a subset of the admin pages.  Because the
@@ -171,6 +178,9 @@ class SystemServerContext : public ServerContext {
                       const RewriteOptions* options, AsyncFetch* fetch);
 
   AdminSite* admin_site() { return admin_site_.get(); }
+
+  // Tests that never run PostInitHook use this to install the AdminSite.
+  void SetAdminSiteForTesting(std::unique_ptr<AdminSite> admin_site);
 
  protected:
   // Flush the cache by updating the cache flush timestamp in the global

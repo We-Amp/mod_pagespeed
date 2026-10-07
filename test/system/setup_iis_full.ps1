@@ -268,9 +268,11 @@ function Initialize-TestEnvironment {
         Write-Status "Warning: Could not set permissions: $_" "Yellow"
     }
 
-    # Remove stale web.config from previous runs. appcmd set config (called
-    # later in New-IISSite) triggers IIS to parse the site's web.config.
-    # New-WebConfig writes a fresh one after module installation.
+    # Remove stale web.config from previous runs: appcmd calls against the
+    # site make IIS parse the site's web.config, and a leftover one can carry
+    # sections this run does not register. New-WebConfig writes a fresh one
+    # (with the site's MIME types and compression switches) after module
+    # installation.
     $staleConfig = "$WebRoot\web.config"
     if (Test-Path $staleConfig) {
         Remove-Item $staleConfig -Force
@@ -390,6 +392,45 @@ function Install-IISComponents {
         } catch { }
     }
 
+    # On a client edition of Windows there is no Get-WindowsFeature; the
+    # optional-feature cmdlets install the same components there. Dynamic
+    # compression is what compresses the responses the PageSpeed module
+    # generates (rewritten resources, rewritten HTML), so make sure it is on.
+    if (-not (Get-Command Get-WindowsFeature -ErrorAction SilentlyContinue)) {
+        try {
+            $dynamicFeature = Get-WindowsOptionalFeature -Online -FeatureName IIS-HttpCompressionDynamic -ErrorAction Stop
+            if ($dynamicFeature.State -ne 'Enabled') {
+                Write-Status "Enabling IIS dynamic compression (IIS-HttpCompressionDynamic)..." "Yellow"
+                Enable-WindowsOptionalFeature -Online -FeatureName IIS-HttpCompressionDynamic -All -NoRestart | Out-Null
+            }
+        } catch {
+            Write-Status "Warning: could not enable IIS dynamic compression: $_" "Yellow"
+        }
+    }
+
+    # Say which IIS compression modules this host has. The install above only
+    # works on Windows Server (Get-WindowsFeature) and the block above covers
+    # client editions; without DynamicCompressionModule nothing the PageSpeed
+    # module generates (rewritten resources, rewritten HTML) is compressed.
+    foreach ($compressionModule in @('StaticCompressionModule', 'DynamicCompressionModule')) {
+        $state = 'absent'
+        try {
+            $listed = (Invoke-AppCmd list module $compressionModule) -join ' '
+            if ($listed -match '^MODULE "') { $state = 'present' }
+        } catch { }
+        Write-Status "IIS compression module ${compressionModule}: $state" "Gray"
+    }
+
+    # IIS stops compressing dynamic responses while the host's CPU usage is
+    # above a threshold (90% by default). A busy host would then fail the
+    # lane's compression checks for a reason that has nothing to do with the
+    # module, so move the threshold to the top of the range.
+    try {
+        Invoke-AppCmd set config /section:system.webServer/httpCompression /dynamicCompressionDisableCpuUsage:100 /dynamicCompressionEnableCpuUsage:99 /commit:apphost | Out-Null
+    } catch {
+        Write-Status "Warning: could not raise the dynamic-compression CPU threshold: $_" "Yellow"
+    }
+
     # Raise http.sys URL segment length limit. Default is 260 (MAX_PATH),
     # which is too short for PageSpeed combined resource URLs that concatenate
     # many filenames into a single path segment (e.g., a+b+c+d.pagespeed.cc.X.css).
@@ -452,29 +493,11 @@ function New-IISSite {
     # Assign app pool to site
     Invoke-AppCmd set site $SiteName /applicationDefaults.applicationPool:$AppPoolName | Out-Null
 
-    # Configure MIME types for modern formats. Delete any inherited/duplicate
-    # mapping FIRST, then re-add ours. IIS10 ships a .woff2 default
-    # (application/font-woff2) in APPHOST, so a bare /+ add throws the noisy
-    # "Cannot add duplicate collection entry" error and leaves a
-    # non-deterministic mimeType. The /- delete is a swallowed no-op when the
-    # extension is absent, so this is idempotent on a clean site too and yields
-    # a deterministic mimeType with no duplicate-entry noise.
-    Write-Status "Configuring MIME types..." "Gray"
-    foreach ($mime in @(
-        @{ Ext = '.webp';  Type = 'image/webp' },
-        @{ Ext = '.woff2'; Type = 'font/woff2' }
-    )) {
-        $delArg = "/-[fileExtension='" + $mime.Ext + "']"
-        $addArg = "/+[fileExtension='" + $mime.Ext + "',mimeType='" + $mime.Type + "']"
-        Invoke-AppCmd set config $SiteName /section:staticContent $delArg | Out-Null
-        Invoke-AppCmd set config $SiteName /section:staticContent $addArg | Out-Null
-    }
-
-    # Enable static and dynamic compression for the site
-    Write-Status "Configuring compression..." "Gray"
-    try {
-        Invoke-AppCmd set config $SiteName /section:urlCompression /doStaticCompression:true /doDynamicCompression:true 2>$null
-    } catch { }
+    # The site's MIME types and compression switches live in the site's
+    # web.config, which New-WebConfig writes whole. They used to be set here
+    # with `appcmd set config <site>`, which writes into that same file -- and
+    # New-WebConfig, running later, replaced it, so the site ran without the
+    # .webp mapping and without its compression switches.
 
     Write-Status "IIS site configured successfully" "Green"
 }
@@ -624,6 +647,21 @@ function New-WebConfig {
 
     <httpErrors errorMode="Detailed" />
 
+    <!-- MIME types for modern formats. Without .webp, IIS answers a .webp
+         request with 404.3, so the module can never fetch a .webp input.
+         Each <remove> comes first: IIS 10 ships some of these (.woff2 as
+         application/font-woff2) in applicationHost.config, and a second
+         entry for the same extension is a configuration error; a <remove>
+         of an absent entry is a no-op. -->
+    <staticContent>
+      <remove fileExtension=".webp" />
+      <mimeMap fileExtension=".webp" mimeType="image/webp" />
+      <remove fileExtension=".woff2" />
+      <mimeMap fileExtension=".woff2" mimeType="font/woff2" />
+    </staticContent>
+
+    <urlCompression doStaticCompression="true" doDynamicCompression="true" />
+
     <httpProtocol>
       <customHeaders>
         <add name="X-PageSpeed-Test" value="IIS-Full" />
@@ -660,6 +698,7 @@ pagespeed RateLimitBackgroundFetches on
 pagespeed InPlaceResourceOptimization on
 pagespeed FetchHttps enable,allow_self_signed
 pagespeed CriticalImagesBeaconEnabled false
+pagespeed CriticalCssAboveTheFoldOnly off
 pagespeed BlockingRewriteKey psatest
 pagespeed Library 43 1o978_K0_LNE5_ystNklf http://www.modpagespeed.com/rewrite_javascript.js
 # 1MB, not the usual 100KB: under the AppVerifier matrix the 100KB buffer

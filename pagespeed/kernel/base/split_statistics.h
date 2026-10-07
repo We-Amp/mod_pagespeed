@@ -172,6 +172,17 @@ class SplitStatistics
     return local_->console_logger();
   }
 
+  // Tick the local logger AND the global statistics' logger:
+  // console_logger() above returns only the local one (read access), so
+  // without this the whole-server log goes idle when per-virtual-host
+  // statistics are enabled. Null loggers are tolerated by the callees.
+  void UpdateConsoleLogIfRequired() override {
+    local_->UpdateConsoleLogIfRequired();
+    if (global_ != nullptr) {
+      global_->UpdateConsoleLogIfRequired();
+    }
+  }
+
  protected:
   SplitUpDownCounter* NewUpDownCounter(StringPiece name) override;
   SplitVariable* NewVariable(StringPiece name) override;

@@ -7,6 +7,8 @@
 #include "pagespeed/kernel/http/response_headers.h"
 #include "pagespeed/kernel/http/request_headers.h"
 #include "pagespeed/system/in_place_resource_recorder.h"
+#include "pagespeed/system/ipro_record_gate.h"
+#include "pagespeed/system/daemon_health.h"
 #include "pagespeed/system/system_rewrite_options.h"
 #include "net/instaweb/rewriter/public/rewrite_stats.h"
 #include "pagespeed/kernel/base/string_writer.h"
@@ -170,12 +172,7 @@ void IisModuleBaseFetch::PopulateResponseHeaders(IHttpContext* http_context, Res
 		}
 
 			//Add known cache headers here
-		if (_stricmp(hdr->pName, "expires")==0 ||
-			_stricmp(hdr->pName, "e-tag") == 0 ||
-			_stricmp(hdr->pName, "content-md5") == 0 ||
-			_stricmp(hdr->pName, "last-modified") == 0 ||
-			_stricmp(hdr->pName, "accept_ranges") == 0
-			) {
+		if (IsUnknownHeaderBookmarkName(hdr->pName)) {
 			response_headers->Add(std::string("__x_") + hdr->pName, hdr->pRawValue);
 		} 
 		response_headers->Add(hdr->pName, hdr->pRawValue);
@@ -771,9 +768,18 @@ int IisModuleBaseFetch::CollectHeaders()
 					ctx_->gurl()->spec_c_str());
 			const SystemRewriteOptions* options = (const SystemRewriteOptions*) ctx_->driver()->options();
 			//this->request_context()->set_options(options->ComputeHttpOptions());
+			// The gate is the one construction site for the classic
+			// recorder.  The disposition comes from this site's own
+			// daemon health: not-configured when the site set no daemon
+			// options (the gate answers classic, exactly as before the
+			// check existed), unavailable when the check found the daemon
+			// unusable, ready when the daemon owns the in-place cache.
+			// Any answer but classic hands set_recorder a null recorder,
+			// which every drive site on this port already guards.
 			this->ctx_->set_recorder(
-				new InPlaceResourceRecorder(
-				(const RequestContextPtr) this->request_context(),
+				MakeIproRecorderIfClassic(
+					IproDispositionFor(server_context->daemon_health()),
+					(const RequestContextPtr) this->request_context(),
 					ctx_->gurl()->spec_c_str(),
 					ctx_->driver()->CacheFragment(),
 					request_headers()->GetProperties(),
@@ -866,7 +872,7 @@ int IisModuleBaseFetch::CollectHeaders()
 					if (ucp && cp->IsUserCacheEnabled())
 					{
 						ucp->Policy=HttpCachePolicyTimeToLive;
-						kcp->SecondsToLive=120;
+						ucp->SecondsToLive=120;
 					}
 				}
 			}
@@ -922,7 +928,7 @@ int IisModuleBaseFetch::CollectHeaders()
 			}
 			if (ucp) {
 				ucp->Policy = HttpCachePolicyNocache;
-				kcp->SecondsToLive = 0;
+				ucp->SecondsToLive = 0;
 			}
 		} 
 	}

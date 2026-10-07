@@ -65,8 +65,17 @@ class SharedCircularBuffer : public Writer {
 
   // Write content of data in buffer to writer, without clearing the buffer.
   bool Dump(Writer* writer, MessageHandler* handler) override;
+  // Like Dump(), but also reports lines_written() read under the SAME lock
+  // as the dump, so `*count` is the cursor matching exactly the dumped
+  // content -- a message written between the dump and the count read (as
+  // would happen calling Dump() and lines_written() separately) can never
+  // land in between and be silently skipped by a client's next `since`.
+  bool DumpWithCount(Writer* writer, MessageHandler* handler, int64* count);
   // Return data content as string. This is for test purposes.
   GoogleString ToString(MessageHandler* handler);
+  // Number of newline-terminated lines ever written to the buffer
+  // (monotonic); a cheap cursor.
+  int64 lines_written();
   // This should be called from the root process as it is about to exit, when no
   // future children are expected to start.
   void GlobalCleanup(MessageHandler* handler);

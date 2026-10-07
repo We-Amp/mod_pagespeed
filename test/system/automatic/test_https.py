@@ -38,6 +38,14 @@ pytestmark = pytest.mark.skipif(
     reason="HTTPS tests require PAGESPEED_HTTPS_HOST environment variable",
 )
 
+# https.sh EXPECTED (grep basic regex: "+" is literal), matched
+# case-insensitively; accepts 'css"/>' and 'css">' (see
+# TestHttpsBasic.test_https_combined_css_with_filters).
+EXPECTED_COMBINED_CSS = (
+    r'href="styles/yellow\.css\+blue\.css\+big\.css\+bold\.css'
+    r'\.pagespeed\.cc\..*\.css"/?>'
+)
+
 
 @pytest.fixture
 def https_client():
@@ -108,6 +116,12 @@ class TestHttpsBasic:
     ):
         """Combined CSS URL should be generated correctly with filters.
 
+        Either close form of the combined <link> is accepted by design:
+        Apache does not trust the response Content-Type at its filter
+        position (pagespeed/apache/apache_server_context.cc:66) and writes
+        the XHTML-safe "/>", while the other ports (nginx, IIS) write the
+        HTML form (net/instaweb/rewriter/css_combine_filter.cc:287).
+
         Bash original::
 
             echo Checking for combined CSS URL
@@ -118,10 +132,8 @@ class TestHttpsBasic:
         """
         url = f"{https_example_root}/combine_css.html?PageSpeedFilters=combine_css,trim_urls"
 
-        response = https_client.fetch_until_contains(
-            url,
-            pattern=r'styles/yellow\.css\+blue\.css\+big\.css\+bold\.css\.pagespeed\.cc\.',
-            timeout=30.0,
+        response = https_client.fetch_until_count(
+            url, EXPECTED_COMBINED_CSS, 1, timeout=30.0, case_insensitive=True
         )
         assert_http_status(response, 200)
 
@@ -139,6 +151,9 @@ class TestHttpsBasic:
     ):
         """Combined CSS URL should preserve relativity without trim_urls.
 
+        Either close form is accepted, for the reason given in
+        test_https_combined_css_with_filters.
+
         Bash original::
 
             echo Checking for combined CSS URL without URL trimming
@@ -148,10 +163,8 @@ class TestHttpsBasic:
         """
         url = f"{https_example_root}/combine_css.html?PageSpeedFilters=combine_css"
 
-        response = https_client.fetch_until_contains(
-            url,
-            pattern=r'yellow\.css\+blue\.css\+big\.css\+bold\.css\.pagespeed\.cc\.',
-            timeout=30.0,
+        response = https_client.fetch_until_count(
+            url, EXPECTED_COMBINED_CSS, 1, timeout=30.0, case_insensitive=True
         )
         assert_http_status(response, 200)
 

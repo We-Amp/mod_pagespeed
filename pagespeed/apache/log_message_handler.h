@@ -41,6 +41,14 @@ void Install(apr_pool_t* pool);
 // Currently we set it to the min LogLevel.
 void AddServerConfig(const server_rec* server, const StringPiece& version);
 
+// Maps a base/logging.h severity to the Apache log level it is emitted at.
+// LOG(INFO/WARNING/ERROR/FATAL) keep their established levels. Severities
+// below LOG_INFO are the verbose VLOG(n) ones (glog convention: VLOG(n)
+// carries severity -n); they map to APLOG_DEBUG so that verbose
+// diagnostics only surface when the server's LogLevel is debug. Exposed
+// for unit tests.
+int GetApacheLogLevel(int severity);
+
 // Free the memory from the log message handler
 void ShutDown();
 

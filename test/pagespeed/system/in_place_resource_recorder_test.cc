@@ -381,10 +381,11 @@ TEST_F(InPlaceResourceRecorderTest, Remember500AsFetchFailed) {
 
   HTTPValue value_out;
   ResponseHeaders headers_out;
-  // For 500 we do remember fetch failed.
-  EXPECT_EQ(
-      HTTPCache::FindResult(HTTPCache::kRecentFailure, kFetchStatusOtherError),
-      HttpBlockingFind(kTestUrl, http_cache(), &value_out, &headers_out));
+  // For 500 we do remember fetch failed, as a transient failure: a 5xx says
+  // something about the origin right now, not about the resource.
+  EXPECT_EQ(HTTPCache::FindResult(HTTPCache::kRecentFailure,
+                                  kFetchStatusTransientError),
+            HttpBlockingFind(kTestUrl, http_cache(), &value_out, &headers_out));
 
   // A 5xx origin response is a broken-resource signal, counted separately
   // from genuine recorder failures.

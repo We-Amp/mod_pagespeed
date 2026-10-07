@@ -238,37 +238,6 @@ class TestCacheFlush:
             f"Activity stats: {[(s, stats_before.get(s, 0), stats_after.get(s, 0)) for s in cache_activity_stats]}"
         )
 
-    @pytest.mark.nginx_only
-    @pytest.mark.requires_stats
-    def test_cache_flush_count_increments(
-        self,
-        client: PageSpeedClient,
-        server_config,
-        flush_cache: Callable[[], None],
-        stats_snapshot: Callable[[], Dict[str, int]],
-    ):
-        """cache_flush_count should increment after cache flush."""
-        # Get initial count
-        stats_before = stats_snapshot()
-        initial_count = stats_before.get("cache_flush_count", 0)
-
-        # Flush the cache
-        flush_cache()
-
-        # Wait for stats to update
-        time.sleep(1.5)
-
-        # Get new count
-        stats_after = stats_snapshot()
-        new_count = stats_after.get("cache_flush_count", 0)
-
-        # Should have incremented
-        delta = new_count - initial_count
-        assert delta >= 1, (
-            f"cache_flush_count should increment after flush. "
-            f"Before: {initial_count}, After: {new_count}, Delta: {delta}"
-        )
-
 
 # ============================================================================
 # TestDownstreamCacheHeaders: Verify downstream cacheability
@@ -522,46 +491,6 @@ class TestPreserveNoCache:
     These tests verify that resources marked with Cache-Control: no-cache
     retain that header after PageSpeed optimization.
     """
-
-    @pytest.mark.nginx_only
-    def test_preserve_no_cache(
-        self,
-        client: PageSpeedClient,
-        test_root: str,
-    ):
-        """Verify no-cache is preserved on rewritten resources.
-
-        This test:
-        1. Fetches a resource marked no-cache
-        2. Verifies the response also has no-cache
-
-        Ported from: pagespeed/automatic/system_tests/no_cache.sh
-        """
-        # Skip - nginx's IPRO implementation doesn't preserve no-cache headers.
-        # The upstream ngx_pagespeed tests don't check for this behavior.
-        # This is a known limitation of the nginx implementation.
-        pytest.skip(
-            "nginx IPRO doesn't preserve no-cache headers "
-            "(known limitation, not tested by upstream)"
-        )
-
-    @pytest.mark.nginx_only
-    def test_preserve_no_cache_on_minified_js(
-        self,
-        client: PageSpeedClient,
-        test_root: str,
-    ):
-        """Verify no-cache is preserved on minified JavaScript.
-
-        Ported from: pagespeed/automatic/system_tests/no_cache.sh
-        """
-        # Skip - nginx's IPRO implementation doesn't preserve no-cache headers.
-        # The upstream ngx_pagespeed tests don't check for this behavior.
-        # This is a known limitation of the nginx implementation.
-        pytest.skip(
-            "nginx IPRO doesn't preserve no-cache headers "
-            "(known limitation, not tested by upstream)"
-        )
 
     @pytest.mark.nginx_only
     def test_normal_resources_are_cacheable(

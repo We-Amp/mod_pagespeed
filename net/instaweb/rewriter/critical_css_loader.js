@@ -15,9 +15,11 @@
  */
 
 /**
- * @fileoverview Lazyloads the full CSS that was delayed by the
- * CriticalSelectorFilter. This script will not work on IE8, but the
- * CriticalSelectorFilter is disabled for IE anyways.
+ * @fileoverview Turns deferred stylesheets on. The CriticalSelectorFilter
+ * replaces a stylesheet link by its critical rules plus a preload link that
+ * carries the data-pagespeed-deferred-css attribute, in the place where the
+ * stylesheet link stood. This script makes each of those preloads the
+ * stylesheet again, in that same place, as soon as the file has arrived.
  */
 
 goog.provide('pagespeed.CriticalCssLoader');
@@ -25,53 +27,99 @@ goog.provide('pagespeed.CriticalCssLoader');
 goog.require('pagespeedutils');
 
 
+/**
+ * The attribute that marks a preload link as a deferred stylesheet.
+ * @private @const {string}
+ */
+pagespeed.CriticalCssLoader.DEFERRED_ATTRIBUTE_ = 'data-pagespeed-deferred-css';
+
+
 /** @private {boolean} */
-pagespeed.CriticalCssLoader.stylesAdded_ = false;
+pagespeed.CriticalCssLoader.started_ = false;
 
 
 /**
- * Loads deferred CSS in noscript tags by copying the text of the noscript into
- * a new div element.
+ * Makes one deferred stylesheet a stylesheet again. The element keeps its
+ * position, so the order in which the page's rules apply is the page's own.
+ * @param {!Element} link A link carrying the deferred attribute.
+ * @private
  */
-pagespeed.CriticalCssLoader.addAllStyles = function() {
-  if (pagespeed.CriticalCssLoader.stylesAdded_) { return; }
-  pagespeed.CriticalCssLoader.stylesAdded_ = true;
-
-  var elements = document.getElementsByClassName('psa_add_styles');
-
-  
-  for (var i = 0, e; e = elements[i]; ++i) {
-    if (e.nodeName != 'NOSCRIPT') { continue; }
-    var div = document.createElement('div');
-    div.innerHTML = e.textContent;
-    var children = div.childNodes;
-    for (var v = 0; v < children.length; ++v) {
-      if (children[v].nodeType === 1) {
-        children[v].removeAttribute('id');
-      }
-    }
-    document.body.appendChild(div);
+pagespeed.CriticalCssLoader.apply_ = function(link) {
+  if (link.getAttribute('rel') == 'preload') {
+    link.setAttribute('rel', 'stylesheet');
   }
 };
 
 
 /**
- * Sets up the CSS style lazyloader to run at the appropriate event. Runs at
- * requestAnimationFrame if it is available, since that will ensure the page has
- * rendered before loading the CSS. Otherwise, wait until onload.
+ * Handles the load or the failure of any element in the document; acts on
+ * deferred stylesheets only.
+ * @param {!Event} event
+ * @private
+ */
+pagespeed.CriticalCssLoader.onLinkEvent_ = function(event) {
+  var target = /** @type {Element} */ (event.target);
+  if (target && target.nodeName == 'LINK' &&
+      target.hasAttribute(pagespeed.CriticalCssLoader.DEFERRED_ATTRIBUTE_)) {
+    pagespeed.CriticalCssLoader.apply_(target);
+  }
+};
+
+
+/**
+ * Makes every deferred stylesheet still waiting a stylesheet again. Covers
+ * the ones the browser did not fetch early, for example because their media
+ * does not match.
+ */
+pagespeed.CriticalCssLoader.applyAll = function() {
+  var links = document.querySelectorAll(
+      'link[' + pagespeed.CriticalCssLoader.DEFERRED_ATTRIBUTE_ + ']');
+  for (var i = 0; i < links.length; ++i) {
+    pagespeed.CriticalCssLoader.apply_(links[i]);
+  }
+};
+
+
+/**
+ * Starts watching for deferred stylesheets. The load and error events of a
+ * link do not bubble, but they do pass the document in the capture phase, so
+ * one listener serves every deferred stylesheet, including those the parser
+ * has not reached yet.
+ *
+ * A deferred stylesheet is never left as a preload:
+ *  - when the file has arrived, it becomes the stylesheet at once;
+ *  - when the request failed, it becomes an ordinary stylesheet link at
+ *    once, which is what the page would have had without this filter;
+ *  - in a browser that does not preload, where neither event will come, it
+ *    becomes the stylesheet when the document has been parsed;
+ *  - whatever is still waiting when the page has loaded (for example a
+ *    stylesheet whose media does not match) becomes the stylesheet then;
+ *  - whatever is already in the document when this script starts becomes
+ *    the stylesheet at once.
  * @export
  */
 pagespeed.CriticalCssLoader.Run = function() {
-  var raf = pagespeedutils.getRequestAnimationFrame();
-  // Always arm the onload fallback: requestAnimationFrame callbacks do not
-  // fire in background tabs, which would otherwise delay the full CSS until
-  // the tab is focused. addAllStyles is idempotent, so double delivery is
-  // harmless.
-  pagespeedutils.addHandler(
-      window, 'load', pagespeed.CriticalCssLoader.addAllStyles);
-  if (raf) {
-    raf(function() {
-      window.setTimeout(pagespeed.CriticalCssLoader.addAllStyles, 0);
-    });
+  if (pagespeed.CriticalCssLoader.started_) {
+    return;
   }
+  pagespeed.CriticalCssLoader.started_ = true;
+  document.addEventListener(
+      'load', pagespeed.CriticalCssLoader.onLinkEvent_, true);
+  document.addEventListener(
+      'error', pagespeed.CriticalCssLoader.onLinkEvent_, true);
+  var probe = document.createElement('link');
+  var supportsPreload = !!(probe.relList && probe.relList.supports &&
+                           probe.relList.supports('preload'));
+  if (!supportsPreload) {
+    pagespeedutils.addHandler(
+        document, 'DOMContentLoaded', pagespeed.CriticalCssLoader.applyAll);
+  }
+  pagespeedutils.addHandler(
+      window, 'load', pagespeed.CriticalCssLoader.applyAll);
+  // Normally this script runs before the parser has reached the first
+  // deferred stylesheet and there is nothing to do yet. If something delayed
+  // it, the events above may already have passed: turn on whatever is
+  // already in the document, whether its file has arrived, failed, or is
+  // still on its way.
+  pagespeed.CriticalCssLoader.applyAll();
 };

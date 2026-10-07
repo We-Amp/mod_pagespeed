@@ -1,0 +1,5 @@
+.ncf-card { padding: 24px; margin: 24px; border: 1px solid #888; border-radius: 8px; }
+.ncf-card h2 { font-size: 30px; margin: 0 0 12px; }
+.ncf-card p { margin: 0; }
+.ncf-unused-button { padding: 8px 16px; border-radius: 4px; background: #06c; color: #fff; }
+.ncf-unused-modal { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5); }

@@ -332,6 +332,48 @@ uint64_t cyclone_read_handle_ns_until_forced_wrap(
   return handle != nullptr ? handle->handle.ns_until_forced_wrap() : UINT64_MAX;
 }
 
+// Test-only seam for the pre-write remove in CycloneCacheWriteInternal:
+// when armed, the next write onto an existing key is judged as if the
+// library's remove had returned Busy, without touching the volume --
+// simulating a cross-process lock held by a live peer past the library's
+// wait cap.  Armed by cyclone_cache_test_busy_next_pre_write_remove(),
+// consumed by the write that performs the pre-write remove.  Not declared
+// in cyclone_wrapper.h: a unit-test hook is not part of the vendored C ABI.
+static bool g_test_busy_next_pre_write_remove = false;
+
+// The pre-write remove, with the seam above able to force its outcome so
+// tests can drive the branch that must drop the write.
+static std::expected<void, cyclone::CacheError> PreWriteRemove(
+    CycloneCacheHandle* cache, const cyclone::CacheKey& ckey,
+    cyclone::Tier tier) {
+  if (g_test_busy_next_pre_write_remove) {
+    g_test_busy_next_pre_write_remove = false;
+    return std::unexpected(cyclone::CacheError::Busy);
+  }
+  return cache->impl->remove_sync(ckey, tier);
+}
+
+// Test-only seam for the pre-write presence check in the same write path:
+// when armed, the next write's exists lookup is judged as if the library
+// had returned Busy, without touching the volume -- simulating a writer
+// that held the key's directory bucket for the whole seqlock wait budget.
+// Armed by cyclone_cache_test_busy_next_pre_write_exists(), consumed by
+// the write that performs the presence check.  Like the remove seam, not
+// declared in cyclone_wrapper.h (not part of the vendored C ABI).
+static bool g_test_busy_next_pre_write_exists = false;
+
+// The pre-write presence check, with the seam above able to force its
+// outcome so tests can drive the branch that must drop the write.
+static std::expected<bool, cyclone::CacheError> PreWriteExists(
+    CycloneCacheHandle* cache, const cyclone::CacheKey& ckey,
+    cyclone::Tier tier) {
+  if (g_test_busy_next_pre_write_exists) {
+    g_test_busy_next_pre_write_exists = false;
+    return std::unexpected(cyclone::CacheError::Busy);
+  }
+  return cache->impl->exists_sync(ckey, tier);
+}
+
 static CycloneError CycloneCacheWriteInternal(CycloneCacheHandle* cache,
                                               const char* key, size_t key_len,
                                               const char* data, size_t data_len,
@@ -353,9 +395,31 @@ static CycloneError CycloneCacheWriteInternal(CycloneCacheHandle* cache,
 
   // Always delete existing entry first - Cyclone doesn't properly handle overwrites
   // (with RAM cache enabled, overwrites cause content_length to become 0)
-  auto exists_result = cache->impl->exists_sync(ckey, tier);
-  if (exists_result && *exists_result) {
-    cache->impl->remove_sync(ckey, tier);
+  auto exists_result = PreWriteExists(cache, ckey, tier);
+  if (!exists_result) {
+    // Presence could not be determined -- at this pin an exists lookup
+    // that exhausts its seqlock wait returns Busy with the answer unknown
+    // (deliberately not NotFound).  Writing without knowing the slot is
+    // empty risks the in-place overwrite the delete-first step exists to
+    // prevent, so drop this write and report it like a busy write_sync:
+    // the caller's existing failure accounting counts it.
+    SetLastError("Cache busy (lock held by another process) - not stored");
+    return CYCLONE_RESOURCE_EXHAUSTED;
+  }
+  if (*exists_result) {
+    auto remove_result = PreWriteRemove(cache, ckey, tier);
+    if (!remove_result &&
+        remove_result.error() != cyclone::CacheError::NotFound) {
+      // The entry was NOT removed -- at this pin the remove gives up with
+      // Busy after ~250 ms when another process of this server holds the
+      // cross-process locks.  Writing now would overwrite the live entry,
+      // exactly what the delete-first step exists to prevent, so drop this
+      // write and report it like a busy write_sync: the caller's existing
+      // failure accounting counts it.  NotFound is fine: a peer removed the
+      // entry between the exists check and here, so the slot is empty.
+      SetLastError("Cache busy (lock held by another process) - not stored");
+      return CYCLONE_RESOURCE_EXHAUSTED;
+    }
   }
 
   // Now write to the (empty) slot - use pre-allocated version with size
@@ -378,6 +442,11 @@ static CycloneError CycloneCacheWriteInternal(CycloneCacheHandle* cache,
       SetLastError(
           "Object exceeds the cache's per-object size limit - not stored "
           "(enlarging the cache does not raise this limit)");
+    } else if (handle_result.error() == cyclone::CacheError::Busy) {
+      // Another process of this server kept the cache's cross-process locks
+      // for longer than the library waits; nothing was stored.  Not a full
+      // cache, so do not say so.
+      SetLastError("Cache busy (lock held by another process) - not stored");
     } else {
       SetLastError("Failed to allocate space for write - cache may be full");
     }
@@ -434,6 +503,20 @@ CycloneError cyclone_cache_write_tier(CycloneCacheHandle* cache,
                                    ToCycloneTier(tier));
 }
 
+// Arm the pre-write remove test seam (see PreWriteRemove above): the next
+// write onto an existing key behaves as if its pre-write remove had
+// returned Busy -- the remove is not performed.  Unit tests only.
+void cyclone_cache_test_busy_next_pre_write_remove(void) {
+  g_test_busy_next_pre_write_remove = true;
+}
+
+// Arm the pre-write presence-check test seam (see PreWriteExists above):
+// the next write behaves as if its pre-write exists had returned Busy
+// (presence unknown) -- the lookup is not performed.  Unit tests only.
+void cyclone_cache_test_busy_next_pre_write_exists(void) {
+  g_test_busy_next_pre_write_exists = true;
+}
+
 static CycloneError CycloneCacheDeleteInternal(CycloneCacheHandle* cache,
                                                const char* key, size_t key_len,
                                                cyclone::Tier tier) {
@@ -453,6 +536,13 @@ static CycloneError CycloneCacheDeleteInternal(CycloneCacheHandle* cache,
   auto result = cache->impl->remove_sync(ckey, tier);
 
   if (!result) {
+    if (result.error() == cyclone::CacheError::Busy) {
+      // Another process kept the cross-process locks past the library's
+      // wait cap and the entry was NOT removed.  Reporting that as
+      // NOT_FOUND would count it as a delete that happened.
+      SetLastError("Cache busy (lock held by another process) - not deleted");
+      return CYCLONE_UNAVAILABLE;
+    }
     // Key not found - return NOT_FOUND but don't set error message
     // since this is a normal condition
     return CYCLONE_NOT_FOUND;

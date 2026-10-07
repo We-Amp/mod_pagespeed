@@ -21,7 +21,9 @@
 # of tests.
 #
 # This reads environment variables APACHE_LOG and MOD_PAGESPEED_CACHE, which
-# are exported by pagespeed/install/Makefile.tests.
+# the caller is expected to set (e.g.
+# tools/stress/loadtest_collect/loadtest_collect_corpus.sh sets documented,
+# overridable defaults for both).
 
 set -u
 set -e

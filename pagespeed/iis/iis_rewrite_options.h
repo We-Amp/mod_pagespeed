@@ -78,6 +78,18 @@ class IisRewriteOptions : public SystemRewriteOptions {
   bool auto_create_log_dir() const {
 	  return auto_create_log_dir_.value();
   }
+  // Path of the optimizer daemon's notification pipe.  Empty when no
+  // daemon is configured; read by the per-site daemon startup check,
+  // which engages when a site sets either daemon option.
+  const GoogleString& daemon_socket_path() const {
+	  return daemon_socket_path_.value();
+  }
+  // Path of the optimizer daemon's shared cache volume.  Empty when no
+  // daemon is configured; read by the per-site daemon startup check,
+  // which engages when a site sets either daemon option.
+  const GoogleString& daemon_volume_path() const {
+	  return daemon_volume_path_.value();
+  }
 
  private:
   OptionSettingResult ParseAndSetOptions0(
@@ -113,6 +125,8 @@ class IisRewriteOptions : public SystemRewriteOptions {
   Option<GoogleString> global_admin_path_;
   Option<bool> auto_create_cache_path_;
   Option<bool> auto_create_log_dir_;
+  Option<GoogleString> daemon_socket_path_;
+  Option<GoogleString> daemon_volume_path_;
 
   bool IsDirective(StringPiece config_directive, StringPiece compare_directive);
 

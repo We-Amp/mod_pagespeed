@@ -217,6 +217,14 @@ class InstawebHandler {
   // A false return is the substrate declining, not an error.
   bool ServeFromDaemonSubstrate();
 
+  // Whether a response this handler writes is handed to the serving chain's
+  // compressor: a 200 of a compressible media type whose body is NOT already
+  // content-coded.  A stored compressed copy from the optimizer's cache is
+  // the coded case -- compressing it again would send bytes no client can
+  // decode.  Public and static so the rule is testable without a live httpd.
+  static bool AttachesCompressor(int status_code, const char* content_type,
+                                 bool body_already_encoded);
+
  private:
   // Evaluate custom_options based upon global_options, directory-specific
   // options and query-param/request-header options. Stores computed options
@@ -224,9 +232,14 @@ class InstawebHandler {
   // options to use.
   void ComputeCustomOptions();
 
+  // `body_already_encoded`: the body carries a content coding (a stored
+  // compressed copy, labelled by the caller), so the compressor is not
+  // attached.  Every other caller sends identity bodies and keeps the
+  // default.
   static void send_out_headers_and_body(request_rec* request,
                                         const ResponseHeaders& response_headers,
-                                        const GoogleString& output);
+                                        const GoogleString& output,
+                                        bool body_already_encoded = false);
 
   // Determines whether the url can be handled as a mod_pagespeed or in-place
   // optimized resource, and handles it, returning true.  Success status is
@@ -257,8 +270,15 @@ class InstawebHandler {
   static int log_request_headers(void* logging_data, const char* key,
                                  const char* value);
 
-  static void instaweb_static_handler(request_rec* request,
-                                      ApacheServerContext* server_context);
+  // Answers a request for one of the module's static assets.  Returns true
+  // when the request was answered (the asset itself, or the module's
+  // not-found response); returns false, without answering, when the
+  // server's path and the module's own reading of the request path do not
+  // name the same file under the static asset prefix -- the caller then
+  // returns HTTP_NOT_FOUND so the server sends its own not-found response.
+  static bool instaweb_static_handler(request_rec* request,
+                                      ApacheServerContext* server_context,
+                                      const GoogleUrl& gurl);
 
   static apr_status_t instaweb_statistics_handler(
       request_rec* request, ApacheServerContext* server_context,

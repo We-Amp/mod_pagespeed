@@ -1,107 +1,56 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2024-2026 We-Amp B.V.
 
-import type { Component } from "svelte";
+import { DEFAULT_PATH, parseHash } from "$lib/utils/hash-route";
+import { redirectTarget } from "$lib/utils/redirects";
 
-export interface Route {
-  path: string;
-  label: string;
-  icon: string;
-  component: () => Promise<{ default: Component }>;
-}
-
-export const routes: Route[] = [
-  {
-    path: "#/statistics",
-    label: "Statistics",
-    icon: "chart-bar",
-    component: () => import("../pages/Statistics.svelte"),
-  },
-  {
-    path: "#/configuration",
-    label: "Configuration",
-    icon: "cog",
-    component: () => import("../pages/Config.svelte"),
-  },
-  {
-    path: "#/histograms",
-    label: "Histograms",
-    icon: "chart-area",
-    component: () => import("../pages/Histograms.svelte"),
-  },
-  {
-    path: "#/caches",
-    label: "Caches",
-    icon: "database",
-    component: () => import("../pages/Cache.svelte"),
-  },
-  {
-    path: "#/console",
-    label: "Console",
-    icon: "terminal",
-    component: () => import("../pages/Console.svelte"),
-  },
-  {
-    path: "#/messages",
-    label: "Messages",
-    icon: "envelope",
-    component: () => import("../pages/Messages.svelte"),
-  },
-  {
-    path: "#/graphs",
-    label: "Graphs",
-    icon: "chart-line",
-    component: () => import("../pages/Graphs.svelte"),
-  },
-  {
-    path: "#/daemon/status",
-    label: "Daemon Status",
-    icon: "server",
-    component: () => import("../pages/DaemonStatus.svelte"),
-  },
-  {
-    path: "#/daemon/cache",
-    label: "Daemon Cache",
-    icon: "database",
-    component: () => import("../pages/DaemonCache.svelte"),
-  },
-  {
-    path: "#/daemon/back-pressure",
-    label: "Daemon Back-pressure",
-    icon: "gauge",
-    component: () => import("../pages/DaemonPressure.svelte"),
-  },
-  {
-    path: "#/support",
-    label: "Support",
-    icon: "heart",
-    component: () => import("../pages/Support.svelte"),
-  },
-  {
-    path: "#/about",
-    label: "About",
-    icon: "info-circle",
-    component: () => import("../pages/About.svelte"),
-  },
-];
+// The route table itself is plain data with no runes, kept in ./routes so it
+// is unit-testable without a Svelte-aware transform; re-exported here so
+// existing callers of this module see no difference.
+export { NAV_GROUPS, routes, type NavGroup, type Route } from "./routes";
+import { routes, type Route } from "./routes";
 
 function getHash(): string {
-  return window.location.hash || "#/statistics";
+  const raw = window.location.hash || DEFAULT_PATH;
+  // A retired route: swap it for its new home in place, before any page
+  // loads, so the page loads once and Back never returns to the alias.
+  const target = redirectTarget(raw);
+  if (target === null) return raw;
+  history.replaceState(history.state, "", target);
+  return target;
 }
 
 class Router {
   hash: string = $state(getHash());
+  /**
+   * Bumped on every hashchange. The shell rewrites the address in place to
+   * carry the host lens, which leaves `hash` as it was read; a later change
+   * to that same string sets an equal value, which nothing would see. A
+   * reader that must see every navigation reads this instead.
+   */
+  navigations: number = $state(0);
 
   constructor() {
     window.addEventListener("hashchange", () => {
       this.hash = getHash();
+      this.navigations += 1;
     });
+  }
+
+  /** The page part of the hash, without its "?query". */
+  get path(): string {
+    return parseHash(this.hash).path;
+  }
+
+  /** The hash's "?query" parameters (a page reads them when it mounts). */
+  get params(): URLSearchParams {
+    return parseHash(this.hash).params;
   }
 
   get currentRoute(): Route {
     // An unknown hash (stale bookmark, doc-link drift) must not leave the app
     // stuck on a permanent "Loading..." spinner. Fall back to the first route.
-    return routes.find((r) => r.path === this.hash) ?? routes[0];
+    return routes.find((r) => r.path === this.path) ?? routes[0];
   }
 
   navigate(path: string): void {

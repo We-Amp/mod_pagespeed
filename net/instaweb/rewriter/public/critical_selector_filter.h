@@ -19,15 +19,15 @@
 
 //         morlovich@google.com (Maksim Orlovich)
 //
-// This filters helps inline a subset of CSS critical to initial rendering of
+// This filter helps inline a subset of CSS critical to initial rendering of
 // the webpage by focusing only on declarations whose selectors match
-// elements critical to such rendering. The full original CSS is moved to the
-// foot of the webpage and lazy-loaded via JS.
+// elements critical to such rendering. Each stylesheet link is replaced, in
+// place, by its critical rules, a preload of the full stylesheet and a
+// <noscript> copy of the link; a small script makes the preload the
+// stylesheet again as soon as the file has arrived.
 
 #ifndef NET_INSTAWEB_REWRITER_PUBLIC_CRITICAL_SELECTOR_FILTER_H_
 #define NET_INSTAWEB_REWRITER_PUBLIC_CRITICAL_SELECTOR_FILTER_H_
-
-#include <vector>
 
 #include "net/instaweb/rewriter/public/css_summarizer_base.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
@@ -50,7 +50,9 @@ namespace net_instaweb {
 
 class CriticalSelectorFilter : public CssSummarizerBase {
  public:
-  static const char kNoscriptStylesClass[];
+  // The attribute that marks a preload link as a deferred stylesheet for the
+  // loader script.
+  static const char kDeferredCssAttribute[];
 
   explicit CriticalSelectorFilter(RewriteDriver* rewrite_driver);
   ~CriticalSelectorFilter() override;
@@ -77,11 +79,11 @@ class CriticalSelectorFilter : public CssSummarizerBase {
 
   // We replace external <link> stylesheets with inline <style> blocks, which
   // a style-src policy without 'unsafe-inline' would block -- leaving the
-  // page unstyled. We also move the non-critical CSS into <noscript> blocks and
-  // re-add it with an injected inline bootstrap <script>; a script-src policy
-  // without 'unsafe-inline' blocks that loader, stranding the deferred styles.
-  // Only render when the policy permits BOTH inline style and inline script;
-  // otherwise leave the page untouched so all its CSS still loads normally.
+  // page unstyled. The full stylesheet is then turned back on by an injected
+  // inline <script>; a script-src policy without 'unsafe-inline' blocks that
+  // script, stranding the deferred stylesheet. Only render when the policy
+  // permits BOTH inline style and inline script; otherwise leave the page
+  // untouched so all its CSS still loads normally.
   bool PolicyPermitsRendering() const override {
     return driver()->content_security_policy().PermitsInlineStyle() &&
            driver()->content_security_policy().PermitsInlineScript();
@@ -97,8 +99,6 @@ class CriticalSelectorFilter : public CssSummarizerBase {
   void RenderSummary(int pos, HtmlElement* element,
                      HtmlCharactersNode* char_node,
                      bool* is_element_deleted) override;
-  void WillNotRenderSummary(int pos, HtmlElement* element,
-                            HtmlCharactersNode* char_node) override;
 
   // Since our computation depends on the selectors that are relevant to the
   // webpage, we incorporate them into the cache key as well.
@@ -106,26 +106,17 @@ class CriticalSelectorFilter : public CssSummarizerBase {
 
   // Parser callbacks.
   void StartDocumentImpl() override;
-  void EndDocument() override;
-  void RenderDone() override;
 
   // Filter control API.
   void DetermineEnabled(GoogleString* disabled_reason) override;
 
  private:
-  class CssElement;
-  class CssStyleElement;
-  typedef std::vector<CssElement*> CssElementVector;
-
-  void RememberFullCss(int pos, HtmlElement* element,
-                       HtmlCharactersNode* char_node);
-
   // Filters one stylesheet's rulesets in place against critical_selectors_,
   // recursing into GROUP_RULE (@supports/@layer/@container) bodies. Called by
   // Summarize() on the top level; the stylesheet's font_faces() bucket is
   // never touched at any level (@font-face shapes text from the first paint
-  // on), and only Summarize() drops imports (group bodies cannot contain
-  // them).
+  // on), and only Summarize() deals with imports (group bodies cannot
+  // contain them).
   void FilterStylesheet(Css::Stylesheet* stylesheet) const;
 
   // Selectors that are critical for this page.
@@ -133,19 +124,19 @@ class CriticalSelectorFilter : public CssSummarizerBase {
   // membership checking.
   StringSet critical_selectors_;
 
+  // Every selector browsers have been asked about for this page. A selector
+  // outside this set has not been judged yet and is treated as critical.
+  StringSet known_selectors_;
+
+  // False for a finder that records only reported selectors: then a selector
+  // outside known_selectors_ is simply not critical.
+  bool keep_unknown_selectors_;
+
   // Summary of critical_selectors_ as a short string.
   GoogleString cache_key_suffix_;
 
-  // Info on all the CSS in the page, potentially as optimized by other filters.
-  // We will emit code to lazy-load it at the very end of the document.
-  // May contain NULL pointers.
-  CssElementVector css_elements_;
-
-  // True if EndDocument was called; helps us identify last flush window.
-  bool saw_end_document_;
-
-  // True if we rendered any block at all.
-  bool any_rendered_;
+  // True once the loader script has been written into this document.
+  bool loader_inserted_;
 
   CriticalSelectorFilter(const CriticalSelectorFilter&) = delete;
   CriticalSelectorFilter& operator=(const CriticalSelectorFilter&) = delete;

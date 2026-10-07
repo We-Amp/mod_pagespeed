@@ -21,7 +21,6 @@ These tests verify that IPRO correctly optimizes resources in-place
 without changing their URLs.
 """
 
-import re
 import random
 
 import pytest
@@ -30,6 +29,7 @@ from pagespeed_test_framework import (
     PageSpeedClient,
     assert_http_status,
     assert_file_size,
+    require_match,
 )
 
 
@@ -94,11 +94,10 @@ class TestIPRO:
         cache_control = response.header("Cache-Control")
         assert cache_control, "Should have Cache-Control header"
 
-        match = re.search(r"max-age=(\d+)", cache_control)
-        if match:
-            max_age = int(match.group(1))
-            assert max_age < 1000, \
-                f"IPRO resources should have short cache lifetime, got max-age={max_age}"
+        match = require_match(r"^max-age=(\d+)$", cache_control, "Cache-Control: max-age=N")
+        max_age = int(match.group(1))
+        assert max_age < 1000, \
+            f"IPRO resources should have short cache lifetime, got max-age={max_age}"
 
     def test_original_image_larger(
         self, client: PageSpeedClient, test_root: str
@@ -249,6 +248,32 @@ class TestIPROVaryParity:
         assert "accept-encoding" not in _vary_tokens(conditional), (
             "the 304 for an in-place image resource states an encoding axis "
             "its 200 never had"
+        )
+
+
+@pytest.mark.apache_only  # Apache's mod_deflate in front of the module (bash: apache/statistics.sh)
+class TestIproWithModDeflate:
+    """Bash: ipro with mod_deflate (statistics.sh:18-25). The lane's Debian
+    deflate.conf compresses the CSS instead of the template's directory block.
+
+        fetch_until -gzip $TEST_ROOT/ipro/mod_deflate/big.css gunzip_grep_0ff 0
+
+    The gzipped in-place response, once gunzipped, is the minified CSS.
+    """
+
+    def test_in_place_css_is_optimized_behind_mod_deflate(
+        self, client: PageSpeedClient, test_root: str
+    ):
+        client.fetch_until(
+            f"{test_root}/ipro/mod_deflate/big.css",
+            condition=lambda r: (
+                r.header("Content-Encoding") == "gzip" and b"color:#00f" in r.body
+            ),
+            use_gzip=True,
+            timeout=100.0,
+            detail_fn=lambda r: (
+                f"Content-Encoding={r.header('Content-Encoding')!r} body={r.body[:80]!r}"
+            ),
         )
 
 

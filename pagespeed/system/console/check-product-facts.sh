@@ -10,8 +10,12 @@
 # strong as the source it can reach:
 #   - source found    -> byte-compare, fail on drift (run sync-product-facts.sh
 #                        and rebuild the console bundle)
-#   - source not found (CI job that checks out only this repo, no sibling
-#                        checkout) -> skip with a notice; the checked-in copy
+#   - source not found in CI ($CI set, e.g. the console-drift job) -> hard
+#                        error: a silent skip here is how a real facts lag
+#                        once shipped undetected, so CI materializes the
+#                        canonical (MODPAGESPEED2_DIR) and this guard fails
+#                        closed when that did not happen.
+#   - source not found locally -> skip with a notice; the checked-in copy
 #                        still feeds the admin_console.html srchash guard, so a
 #                        facts edit without a bundle rebuild stays loud.
 set -euo pipefail
@@ -52,6 +56,14 @@ if [ ! -f "$COPY" ]; then
 fi
 
 if ! content="$(read_source)"; then
+  if [ -n "${CI:-}" ]; then
+    echo "::error::canonical $FACTS_REL not reachable — refusing to skip in CI."
+    echo "The CI job must materialize the canonical (set PRODUCT_FACTS_SOURCE or"
+    echo "MODPAGESPEED2_DIR; see the console-drift job's 'Materialize canonical"
+    echo "product facts' step). A silent skip here let a real facts lag ship"
+    echo "undetected once; it must not happen again."
+    exit 1
+  fi
   echo "NOTICE: canonical product-facts.mjs not reachable from this checkout;"
   echo "skipping upstream drift check ($COPY is present)."
   exit 0

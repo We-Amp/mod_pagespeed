@@ -22,6 +22,7 @@
 #include <cstddef>
 #include <cstring>
 #include <memory>
+#include <string>
 
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/string.h"
@@ -29,18 +30,228 @@
 
 #ifndef _WIN32
 #include <dlfcn.h>
+#else
+#include <windows.h>
 #endif
 
 namespace net_instaweb {
 
+#ifdef _WIN32
+// The FILE name of the Windows artefact.  A NAME, never a path: on this
+// platform the loader refuses anything that is not an absolute path (see
+// NativeOps::Load), so a caller must join this to a directory -- the IIS
+// port resolves it against its own module directory.
+const char kDefaultDaemonLibraryName[] = "pagespeed.dll";
+#else
 const char kDefaultDaemonLibraryName[] = "libpagespeed.so";
+#endif
 
 DaemonAbi::DaemonAbi() = default;
 DaemonAbi::~DaemonAbi() = default;
 
 namespace {
 
-#ifndef _WIN32
+// The three platform touch points of the run-time binding, in ONE place:
+// open the library, look a symbol up, and what "close" means.  Everything
+// else -- the bind order, the version gate, the layout handshakes, the
+// error texts -- is written once, below, and is the same on every platform.
+#ifdef _WIN32
+
+// UTF-8 to wide, on the caller's stack; the loader's path argument stays
+// UTF-8 everywhere else.  Returns false for invalid UTF-8 (or an empty
+// input, which the caller reports with its own message): the two are errors
+// in the path itself, not in anything the loader could answer.
+bool Utf8ToWide(StringPiece utf8, std::wstring* out) {
+  if (utf8.empty()) {
+    return false;
+  }
+  const int length =
+      MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, utf8.data(),
+                          static_cast<int>(utf8.size()), nullptr, 0);
+  if (length <= 0) {
+    return false;
+  }
+  out->assign(length, L'\0');
+  MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, utf8.data(),
+                      static_cast<int>(utf8.size()), &(*out)[0], length);
+  return true;
+}
+
+// Absolute in the forms this platform's loader fully qualifies: a
+// drive-letter root ("X:\" or "X:/") or a UNC path, in either separator
+// style ("\\host\share" or "//host/share").  A bare name and every relative
+// or drive-relative form fail this, deliberately.  This is a FORM check, not
+// a loadability guarantee: a `\\?\`-prefixed path passes it and fails at the
+// API with the path named, which is the same honesty.
+bool PathIsFullyQualified(StringPiece path) {
+  if (path.size() < 2) {
+    return false;  // also keeps the first-byte read below in bounds
+  }
+  const unsigned char drive = static_cast<unsigned char>(path[0]);
+  // Drive letters are ASCII, never locale-dependent: isalpha() on a plain
+  // char is undefined for bytes >= 0x80, and a UTF-8 path may start with one.
+  const bool is_drive_letter =
+      (drive >= 'A' && drive <= 'Z') || (drive >= 'a' && drive <= 'z');
+  return (path.size() >= 3 && is_drive_letter && path[1] == ':' &&
+          (path[2] == '\\' || path[2] == '/')) ||
+         (path.size() >= 2 && (path[0] == '\\' || path[0] == '/') &&
+          path[0] == path[1]);
+}
+
+// GetLastError() rendered as UTF-8 text, with the trailing line break
+// FormatMessage appends trimmed.
+GoogleString LastErrorText(DWORD code) {
+  wchar_t* message = nullptr;
+  const DWORD length = FormatMessageW(
+      FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
+          FORMAT_MESSAGE_IGNORE_INSERTS,
+      nullptr, code, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+      reinterpret_cast<LPWSTR>(&message), 0, nullptr);
+  GoogleString out;
+  if (length != 0 && message != nullptr) {
+    std::wstring trimmed(message, length);
+    while (!trimmed.empty() &&
+           (trimmed.back() == L'\r' || trimmed.back() == L'\n' ||
+            trimmed.back() == L' ')) {
+      trimmed.pop_back();
+    }
+    const int utf8_length = WideCharToMultiByte(
+        CP_UTF8, 0, trimmed.data(), static_cast<int>(trimmed.size()), nullptr,
+        0, nullptr, nullptr);
+    if (utf8_length > 0) {
+      out.resize(utf8_length);
+      WideCharToMultiByte(CP_UTF8, 0, trimmed.data(),
+                          static_cast<int>(trimmed.size()), &out[0],
+                          utf8_length, nullptr, nullptr);
+    }
+  }
+  if (message != nullptr) {
+    LocalFree(message);
+  }
+  if (out.empty()) {
+    out = "error " + Integer64ToString(static_cast<int64>(code));
+  }
+  return out;
+}
+
+struct NativeOps {
+  // UTF-8 path in, wide to the API.  The path must be ABSOLUTE, refused
+  // before the API is touched: with LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR a
+  // relative path fails with an opaque "parameter is incorrect", and a bare
+  // name searched anywhere is the hijack surface the flags exist to close.
+  // The two flags cover the application directory, System32 and directories
+  // added via AddDllDirectory -- never PATH, never the current directory,
+  // and never a bare LoadLibraryW.  (LoadLibraryExW is MAX_PATH-bound and
+  // takes no \\?\ prefix; an install root past 260 characters is out of
+  // scope here.)
+  static void* Load(const GoogleString& path, GoogleString* error) {
+    if (path.empty()) {
+      StrAppend(error, "the optimizer daemon library path is empty");
+      return nullptr;
+    }
+    std::wstring wide;
+    if (!Utf8ToWide(path, &wide)) {
+      StrAppend(error,
+                "the optimizer daemon library path is not valid "
+                "UTF-8: ",
+                path);
+      return nullptr;
+    }
+    if (!PathIsFullyQualified(path)) {
+      StrAppend(error,
+                "the optimizer daemon library path must be absolute "
+                "on this platform (the loader searches no "
+                "directories): ",
+                path);
+      return nullptr;
+    }
+    // Thread-scoped and restored after the call: a failed load inside the
+    // server process must never surface a dialog box, but flipping the
+    // process-wide switch is not this library's to do inside a host
+    // process.
+    DWORD previous_mode = 0;
+    const BOOL mode_changed =
+        SetThreadErrorMode(SEM_FAILCRITICALERRORS, &previous_mode);
+    HMODULE handle = LoadLibraryExW(
+        wide.c_str(), nullptr,
+        LOAD_LIBRARY_SEARCH_DEFAULT_DIRS | LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR);
+    const DWORD why = handle == nullptr ? GetLastError() : 0;
+    if (mode_changed != 0) {
+      SetThreadErrorMode(previous_mode, nullptr);
+    }
+    if (handle == nullptr) {
+      StrAppend(error, "cannot load the optimizer daemon library ", path, ": ",
+                LastErrorText(why));
+    }
+    return handle;
+  }
+
+  static void* Sym(void* handle, const char* symbol, GoogleString* error) {
+    SetLastError(0);
+    void* address = reinterpret_cast<void*>(
+        GetProcAddress(static_cast<HMODULE>(handle), symbol));
+    if (address == nullptr) {
+      const DWORD why = GetLastError();
+      StrAppend(error, "the optimizer daemon library does not export ", symbol,
+                ": ", LastErrorText(why));
+    }
+    return address;
+  }
+
+  static void Close(void* handle) {
+    // NOT FreeLibrary, deliberately: the teardown order around
+    // DLL_PROCESS_DETACH has a recycle-leak history in this module, and the
+    // module already keeps process-lifetime singletons for the same reason.
+    // The place a reader would look for the FreeLibrary is here: a
+    // successfully returned binding is the process's, for the process's
+    // lifetime.  A REJECTED library is a different operation, one call
+    // below.
+  }
+
+  static void CloseUnused(void* handle) {
+    // A REJECTED library was never accepted into use, so the never-free
+    // rationale above does not cover it: a file that failed the version
+    // gate, a required symbol or a layout handshake is freed here, so a bad
+    // file does not stay mapped -- and, on Windows, locked against
+    // replacement -- for the process's life.
+    FreeLibrary(static_cast<HMODULE>(handle));
+  }
+};
+
+#else
+
+struct NativeOps {
+  // RTLD_LOCAL: the daemon library's symbols stay private to this handle so
+  // they can never satisfy an unrelated lookup elsewhere in the server.
+  static void* Load(const GoogleString& path, GoogleString* error) {
+    void* handle = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
+    if (handle == nullptr) {
+      const char* why = dlerror();
+      StrAppend(error, "cannot load the optimizer daemon library ", path,
+                why == nullptr ? "" : ": ", why == nullptr ? "" : why);
+    }
+    return handle;
+  }
+
+  static void* Sym(void* handle, const char* symbol, GoogleString* error) {
+    dlerror();  // Clear any stale condition before the lookup.
+    void* address = dlsym(handle, symbol);
+    if (address == nullptr) {
+      const char* why = dlerror();
+      StrAppend(error, "the optimizer daemon library does not export ", symbol,
+                why == nullptr ? "" : ": ", why == nullptr ? "" : why);
+    }
+    return address;
+  }
+
+  static void Close(void* handle) { dlclose(handle); }
+
+  // Same operation as Close on this platform: a rejected library is freed,
+  // exactly as the destructor has always freed it.
+  static void CloseUnused(void* handle) { dlclose(handle); }
+};
+
+#endif  // _WIN32
 
 // Signatures of the entry points bound below.  Spelled out here rather than
 // in the header so the only thing the rest of the tree sees is the C++
@@ -91,17 +302,24 @@ using ServeStatsOpenFn = int (*)(const char*, void**);
 using ServeStatsRecordServeClassFn = void (*)(void*, int, uint32_t);
 using ServeStatsRecordHitFn = void (*)(void*, int, uint64_t, uint64_t,
                                        uint32_t);
+using ServeStatsRecordHitHostFn = void (*)(void*, int, uint64_t, uint64_t,
+                                           uint32_t, const char*, size_t);
 using ServeStatsCloseFn = void (*)(void*);
 
-class DlopenDaemonAbi : public DaemonAbi {
+class LibraryDaemonAbi : public DaemonAbi {
  public:
-  explicit DlopenDaemonAbi(void* handle) : handle_(handle) {}
+  explicit LibraryDaemonAbi(void* handle) : handle_(handle) {}
 
-  ~DlopenDaemonAbi() override {
+  ~LibraryDaemonAbi() override {
     if (handle_ != nullptr) {
-      dlclose(handle_);
+      NativeOps::Close(handle_);
     }
   }
+
+  // The loader calls this when it REJECTS the library after a successful
+  // open: the handle is freed by the caller (CloseUnused), and the
+  // destructor must not free it a second time.
+  void ForgetHandle() { handle_ = nullptr; }
 
   int VersionMajor() const override { return version_major_(); }
   int VersionMinor() const override { return version_minor_(); }
@@ -146,6 +364,10 @@ class DlopenDaemonAbi : public DaemonAbi {
 
   bool PublishesGeneration() const override {
     return shared_config_generation_ != nullptr;
+  }
+
+  bool PublishesLastErrorMessage() const override {
+    return last_error_message_ != nullptr;
   }
 
   int CacheOpen(const PsCacheConfig* config, void** out_cache) const override {
@@ -325,6 +547,19 @@ class DlopenDaemonAbi : public DaemonAbi {
                             optimized_bytes, mask);
   }
 
+  bool ServeStatsRecordHitForHost(void* handle, int content_type,
+                                  uint64_t original_bytes,
+                                  uint64_t optimized_bytes, uint32_t mask,
+                                  StringPiece host) const override {
+    if (serve_stats_record_hit_host_ == nullptr) {
+      return false;
+    }
+    serve_stats_record_hit_host_(handle, content_type, original_bytes,
+                                 optimized_bytes, mask, host.data(),
+                                 host.size());
+    return true;
+  }
+
   void ServeStatsClose(void* handle) const override {
     serve_stats_close_(handle);
   }
@@ -415,38 +650,37 @@ class DlopenDaemonAbi : public DaemonAbi {
   // what each missing capability costs, and for the volume-size reader the
   // answer is "degrade", not "fail to start".
   void BindOptional() {
-    dlerror();
+    GoogleString unused_error;
     cache_config_init_sized_ = reinterpret_cast<CacheConfigInitSizedFn>(
-        dlsym(handle_, "ps_cache_config_init_sized"));
-    dlerror();
-    shared_config_volume_size_ = reinterpret_cast<SharedConfigVolumeSizeFn>(
-        dlsym(handle_, "ps_read_shared_config_volume_size"));
-    dlerror();
-    shared_config_generation_ = reinterpret_cast<SharedConfigGenerationFn>(
-        dlsym(handle_, "ps_read_shared_config_generation"));
-    dlerror();
+        NativeOps::Sym(handle_, "ps_cache_config_init_sized", &unused_error));
+    shared_config_volume_size_ =
+        reinterpret_cast<SharedConfigVolumeSizeFn>(NativeOps::Sym(
+            handle_, "ps_read_shared_config_volume_size", &unused_error));
+    shared_config_generation_ =
+        reinterpret_cast<SharedConfigGenerationFn>(NativeOps::Sym(
+            handle_, "ps_read_shared_config_generation", &unused_error));
+    // The host-aware serve recorder (1.11).  Optional for the same reason:
+    // without it a serve is recorded exactly as before, without the host.
+    serve_stats_record_hit_host_ =
+        reinterpret_cast<ServeStatsRecordHitHostFn>(NativeOps::Sym(
+            handle_, "ps_serve_stats_record_hit_host", &unused_error));
     // The per-failure explanation.  Optional on the same terms as the two
     // above and for a smaller stake: its absence costs one clause in an error
     // line, so refusing a library over it would trade a working degrade for a
     // server that will not start.
     last_error_message_ = reinterpret_cast<LastErrorMessageFn>(
-        dlsym(handle_, "ps_last_error_message"));
-    dlerror();
+        NativeOps::Sym(handle_, "ps_last_error_message", &unused_error));
   }
 
  private:
   template <typename Fn>
   bool Bind(const char* symbol, Fn* out, GoogleString* error) {
-    dlerror();  // Clear any stale condition before the lookup.
-    void* address = dlsym(handle_, symbol);
+    void* address = NativeOps::Sym(handle_, symbol, error);
     if (address == nullptr) {
-      const char* why = dlerror();
-      StrAppend(error, "the optimizer daemon library does not export ", symbol,
-                why == nullptr ? "" : ": ", why == nullptr ? "" : why);
       return false;
     }
-    // A data pointer to function pointer conversion is what dlsym's contract
-    // is; POSIX blesses it and there is no narrower spelling available.
+    // A data pointer to function pointer conversion is what the platform's
+    // symbol lookup contracts; there is no narrower spelling available.
     *out = reinterpret_cast<Fn>(address);
     return true;
   }
@@ -498,6 +732,7 @@ class DlopenDaemonAbi : public DaemonAbi {
   ServeStatsOpenFn serve_stats_open_ = nullptr;
   ServeStatsRecordServeClassFn serve_stats_record_serve_class_ = nullptr;
   ServeStatsRecordHitFn serve_stats_record_hit_ = nullptr;
+  ServeStatsRecordHitHostFn serve_stats_record_hit_host_ = nullptr;
   ServeStatsCloseFn serve_stats_close_ = nullptr;
 };
 
@@ -553,38 +788,49 @@ bool ParamsHandshakeOk(const InitFn& init, const char* what,
   return true;
 }
 
-#endif  // !_WIN32
-
 }  // namespace
 
 DaemonAbi* LoadDaemonAbi(StringPiece library_path, GoogleString* error) {
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(_WIN64)
+  // The peer publishes a 64-bit layout only: in a 32-bit process every
+  // size_t and pointer in those structs is 4 bytes, and the layout guard is
+  // compiled out there, so binding would mis-marshal silently.  Refuse
+  // instead, with the same sentence this platform has always had.
   StrAppend(error,
             "run-time binding of the optimizer daemon library is not "
-            "implemented on this platform (requested: ",
+            "implemented on this platform (a 32-bit process: the peer's "
+            "layout is 64-bit only; requested: ",
             library_path, ")");
   return nullptr;
 #else
   const GoogleString path(library_path.data(), library_path.size());
-  // RTLD_LOCAL: the daemon library's symbols stay private to this handle so
-  // they can never satisfy an unrelated lookup elsewhere in the server.
-  void* handle = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
+  void* handle = NativeOps::Load(path, error);
   if (handle == nullptr) {
-    const char* why = dlerror();
-    StrAppend(error, "cannot load the optimizer daemon library ", path,
-              why == nullptr ? "" : ": ", why == nullptr ? "" : why);
     return nullptr;
   }
 
-  std::unique_ptr<DlopenDaemonAbi> abi =
-      std::make_unique<DlopenDaemonAbi>(handle);
+  std::unique_ptr<LibraryDaemonAbi> abi =
+      std::make_unique<LibraryDaemonAbi>(handle);
+  // Every refusal below frees the handle: a REJECTED library was never
+  // accepted into use, so it must not stay mapped (and, on Windows, locked)
+  // for the process's life.  The two operations are deliberately distinct:
+  // a successfully returned binding is never freed anywhere (Close), a
+  // rejected one is freed here (CloseUnused).  POSIX has always freed on
+  // this path, through the destructor; this is the same effect, named.
+  const auto reject = [&abi, handle]() -> DaemonAbi* {
+    // Forget first: the object must never name a freed module, even
+    // transiently.
+    abi->ForgetHandle();
+    NativeOps::CloseUnused(handle);
+    return nullptr;
+  };
 
   // The version gate runs FIRST, before the rest of the surface is bound: a
   // daemon below the floor is missing entry points by definition, and a
   // missing-symbol message about one of them describes the symptom rather
   // than the cause.  See BindVersion.
   if (!abi->BindVersion(error)) {
-    return nullptr;
+    return reject();
   }
   const int major = abi->VersionMajor();
   const int minor = abi->VersionMinor();
@@ -594,11 +840,11 @@ DaemonAbi* LoadDaemonAbi(StringPiece library_path, GoogleString* error) {
               ", which this build cannot use (needs ",
               IntegerToString(kRequiredAbiMajor), ".",
               IntegerToString(kRequiredAbiMinor), " or a later minor)");
-    return nullptr;
+    return reject();
   }
 
   if (!abi->BindAll(error)) {
-    return nullptr;
+    return reject();
   }
   abi->BindOptional();
 
@@ -623,7 +869,7 @@ DaemonAbi* LoadDaemonAbi(StringPiece library_path, GoogleString* error) {
         StrAppend(error, "the optimizer daemon library at ", path,
                   " wrote past the size it was given while initialising a "
                   "cache configuration; refusing to use it");
-        return nullptr;
+        return reject();
       }
     }
   } else if (probe->struct_size != sizeof(PsCacheConfig)) {
@@ -636,23 +882,23 @@ DaemonAbi* LoadDaemonAbi(StringPiece library_path, GoogleString* error) {
               " bytes, this build expects ",
               Integer64ToString(static_cast<int64>(sizeof(PsCacheConfig))),
               " bytes)");
-    return nullptr;
+    return reject();
   }
 
   // The record arm's parameter structs get the same treatment, once, here --
   // not on the request that first needs them.
-  DlopenDaemonAbi* bound = abi.get();
+  LibraryDaemonAbi* bound = abi.get();
   if (!ParamsHandshakeOk<PsWriteParams>(
           [bound](PsWriteParams* p) { bound->WriteParamsInit(p); },
           "cache-write parameters", path, error) ||
       !ParamsHandshakeOk<PsNotifyParams>(
           [bound](PsNotifyParams* p) { bound->NotifyParamsInit(p); },
           "notification parameters", path, error)) {
-    return nullptr;
+    return reject();
   }
 
   return abi.release();
-#endif  // _WIN32
+#endif
 }
 
 }  // namespace net_instaweb

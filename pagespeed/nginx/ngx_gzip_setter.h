@@ -117,6 +117,19 @@ class NgxGZipSetter {
 
 extern NgxGZipSetter g_gzip_setter;
 
+// True when a response of this media type is one the server's compressor is
+// handed under this module's own gzip setup.  `media_type` is the response's
+// Content-Type VERBATIM, parameters ("; charset=utf-8") and case included:
+// the match is nginx's own (ngx_http_test_content_type), parameters
+// ignored, trailing blanks trimmed, case-insensitive, with "text/html"
+// always true as the implied default.  The list is the same
+// gzip_http_types array the setter installs -- a view of it, never a copy.
+// It answers from the module's list even in a configuration where the
+// setter never installed its list (the operator wrote `gzip on` and the
+// setter rolled back): over-reporting there is the safe, widening
+// direction.
+bool NgxGZipSetterCompressesType(const char* media_type);
+
 }  // namespace net_instaweb
 
 #endif  // NGX_GZIP_SETTER_H_

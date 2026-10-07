@@ -150,6 +150,7 @@ class TestRemoveQuotes:
         assert quote_count == 2, \
             f'Expected exactly 2 quote chars (alt="") after remove_quotes, ' \
             f"found {quote_count}"
+        assert "'" not in text, "remove_quotes left an apostrophe"
 
 
 class TestTrimUrls:
@@ -195,10 +196,9 @@ class TestTrimUrls:
         if debug_start > 0:
             text = text[:debug_start]
 
-        # File should be smaller than original (157 -> <153)
-        # Check actual content size, not total response with debug info
-        assert len(text.encode('utf-8')) < 250, \
-            f"Content size {len(text.encode('utf-8'))} should be < 250 bytes"
+        # check_file_size $FETCHED -lt 153  # down from 157
+        assert len(text.encode('utf-8')) < 153, \
+            f"Content size {len(text.encode('utf-8'))} should be < 153 bytes (input is 157)"
 
 
 if __name__ == "__main__":

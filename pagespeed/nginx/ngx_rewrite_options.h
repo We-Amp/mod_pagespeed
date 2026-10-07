@@ -243,8 +243,24 @@ class NgxRewriteOptions : public SystemRewriteOptions {
   const GoogleString& global_admin_path() const {
     return global_admin_path_.value();
   }
+  // Path of the optimizer daemon's notification socket. Empty when no
+  // daemon is configured.
+  const GoogleString& daemon_socket_path() const {
+    return daemon_socket_path_.value();
+  }
+  // Path of the optimizer daemon's shared cache volume. Empty when no
+  // daemon is configured.
+  const GoogleString& daemon_volume_path() const {
+    return daemon_volume_path_.value();
+  }
   const GoogleString& daemon_api_socket_path() const {
     return daemon_api_socket_path_.value();
+  }
+  // Whether the in-place serve hands clients the optimizer daemon's stored
+  // gzip and brotli copies (pagespeed DaemonServeStoredEncodings).  Off by
+  // default; per server block.
+  bool daemon_serve_stored_encodings() const {
+    return daemon_serve_stored_encodings_.value();
   }
   const std::vector<RefCountedPtr<ScriptLine> >& script_lines() const {
     return script_lines_;
@@ -306,7 +322,10 @@ class NgxRewriteOptions : public SystemRewriteOptions {
   Option<GoogleString> messages_path_;
   Option<GoogleString> admin_path_;
   Option<GoogleString> global_admin_path_;
+  Option<GoogleString> daemon_socket_path_;
+  Option<GoogleString> daemon_volume_path_;
   Option<GoogleString> daemon_api_socket_path_;
+  Option<bool> daemon_serve_stored_encodings_;
 
   // Web-Bot-Auth options (default off / empty).
   Option<bool> web_bot_auth_;

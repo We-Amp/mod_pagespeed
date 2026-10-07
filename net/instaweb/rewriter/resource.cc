@@ -117,6 +117,7 @@ bool Resource::IsSafeToRewrite(bool rewrite_uncacheable,
         StrAppend(reason, "Resource is empty, ");
         break;
       case kFetchStatusOtherError:
+      case kFetchStatusTransientError:
         StrAppend(reason, "Fetch failure, ");
         break;
       case kFetchStatusNotSet:

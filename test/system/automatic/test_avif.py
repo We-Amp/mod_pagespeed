@@ -41,6 +41,7 @@ from pagespeed_test_framework import (
     assert_stat_increased,
     assert_stat_unchanged,
 )
+from pagespeed_test_framework.stats import settled_stats
 
 # A one-image page pointing at a large lossy photographic JPEG. Size matters:
 # the AVIF candidate is adopted via pick-smaller against the WebP/recompressed
@@ -171,7 +172,7 @@ class TestAvifContentNegotiation:
         attributable to capability detection rather than to the filter simply
         being off.
         """
-        old_stats = stats_snapshot()
+        old_stats = settled_stats(stats_snapshot, [_AVIF_REWRITES])
         response = _fetch_rewritten_image(
             client, test_root, _FILTERS_BOTH, _ACCEPT_WEBP
         )
@@ -194,7 +195,7 @@ class TestAvifContentNegotiation:
         Both conversion filters are enabled here, so capability detection is
         the only thing standing between this request and a converted image.
         """
-        old_stats = stats_snapshot()
+        old_stats = settled_stats(stats_snapshot, [_AVIF_REWRITES])
         response = _fetch_rewritten_image(
             client, test_root, _FILTERS_BOTH, _ACCEPT_LEGACY
         )

@@ -297,6 +297,7 @@ class RewriteOptions {
   static const char kCombineAcrossPaths[];
   static const char kContentExperimentID[];
   static const char kContentExperimentVariantID[];
+  static const char kCriticalCssAboveTheFoldOnly[];
   static const char kCriticalImagesBeaconEnabled[];
   static const char kCssFlattenMaxBytes[];
   static const char kCssImageInlineMaxBytes[];
@@ -2016,6 +2017,13 @@ class RewriteOptions {
   }
   bool inline_only_critical_images() const {
     return inline_only_critical_images_.value();
+  }
+
+  void set_critical_css_above_the_fold_only(bool x) {
+    set_option(x, &critical_css_above_the_fold_only_);
+  }
+  bool critical_css_above_the_fold_only() const {
+    return critical_css_above_the_fold_only_.value();
   }
 
   void set_critical_images_beacon_enabled(bool x) {
@@ -3868,6 +3876,9 @@ class RewriteOptions {
   // people may want to inline all images (both critical and non-critical). If
   // set to false, all images will be inlined within the html.
   Option<bool> inline_only_critical_images_;
+  // When set, prioritize_critical_css inlines only the rules for content in
+  // the first screen; by default it inlines the rules for the whole page.
+  Option<bool> critical_css_above_the_fold_only_;
   // Indicates whether image rewriting filters should insert the critical images
   // beacon code.
   Option<bool> critical_images_beacon_enabled_;

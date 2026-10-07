@@ -268,6 +268,14 @@ FilterHeadersStatus HttpPageSpeedDecoderFilter::MaybeHandleAdminRequest(
     return HandleStatisticsRequest(true /* global */, query_params, options);
   }
 
+  // The console's cache actions are gated on this header (see
+  // GateCacheAction in admin_site.cc), so carry it to the admin fetch.
+  StringPiece x_requested_with;
+  auto xrw_header = headers.get(LowerCaseString("x-requested-with"));
+  if (!xrw_header.empty()) {
+    x_requested_with = xrw_header[0]->value().getStringView();
+  }
+
   // Check admin path - use prefix matching to handle subpaths
   if (PathMatchesOrIsSubpath(path, options->admin_path())) {
     if (!end_stream) {
@@ -275,18 +283,26 @@ FilterHeadersStatus HttpPageSpeedDecoderFilter::MaybeHandleAdminRequest(
       pending_admin_dispatch_ = true;
       pending_admin_is_global_ = false;
       pending_admin_body_.clear();
+      pending_admin_method_ = std::string(headers.getMethodValue());
+      pending_admin_x_requested_with_ = std::string(x_requested_with);
       return FilterHeadersStatus::StopIteration;
     }
-    return HandleAdminRequest(false /* local */, gurl, query_params, options);
+    return HandleAdminRequest(false /* local */, gurl, query_params, options,
+                              StringPiece(), headers.getMethodValue(),
+                              x_requested_with);
   }
   if (PathMatchesOrIsSubpath(path, options->global_admin_path())) {
     if (!end_stream) {
       pending_admin_dispatch_ = true;
       pending_admin_is_global_ = true;
       pending_admin_body_.clear();
+      pending_admin_method_ = std::string(headers.getMethodValue());
+      pending_admin_x_requested_with_ = std::string(x_requested_with);
       return FilterHeadersStatus::StopIteration;
     }
-    return HandleAdminRequest(true /* global */, gurl, query_params, options);
+    return HandleAdminRequest(true /* global */, gurl, query_params, options,
+                              StringPiece(), headers.getMethodValue(),
+                              x_requested_with);
   }
 
   // Check console path
@@ -296,7 +312,7 @@ FilterHeadersStatus HttpPageSpeedDecoderFilter::MaybeHandleAdminRequest(
 
   // Check messages path
   if (path == options->messages_path()) {
-    return HandleMessagesRequest(options);
+    return HandleMessagesRequest(query_params, options);
   }
 
   // Check health path (no auth required for health checks).
@@ -319,8 +335,14 @@ FilterHeadersStatus HttpPageSpeedDecoderFilter::HandleStatisticsRequest(
 FilterHeadersStatus HttpPageSpeedDecoderFilter::HandleAdminRequest(
     bool is_global, const net_instaweb::GoogleUrl& stripped_gurl,
     const net_instaweb::QueryParams& query_params,
-    const net_instaweb::RewriteOptions* options, StringPiece request_body) {
+    const net_instaweb::RewriteOptions* options, StringPiece request_body,
+    StringPiece method, StringPiece x_requested_with) {
   auto* fetch = new net_instaweb::EnvoyAdminFetch(server_context_, this);
+  fetch->request_headers()->set_method(
+      net_instaweb::RequestHeaders::MethodFromString(method));
+  if (!x_requested_with.empty()) {
+    fetch->request_headers()->Add("X-Requested-With", x_requested_with);
+  }
   server_context_->AdminPage(is_global, stripped_gurl, query_params, options,
                              fetch, request_body);
   return FilterHeadersStatus::StopIteration;
@@ -336,10 +358,11 @@ FilterHeadersStatus HttpPageSpeedDecoderFilter::HandleConsoleRequest(
 }
 
 FilterHeadersStatus HttpPageSpeedDecoderFilter::HandleMessagesRequest(
+    const net_instaweb::QueryParams& query_params,
     const net_instaweb::RewriteOptions* options) {
   auto* fetch = new net_instaweb::EnvoyAdminFetch(server_context_, this);
   server_context_->MessageHistoryHandler(
-      *options, net_instaweb::AdminSite::kOther, fetch);
+      *options, net_instaweb::AdminSite::kOther, query_params, fetch);
   return FilterHeadersStatus::StopIteration;
 }
 
@@ -644,6 +667,11 @@ FilterHeadersStatus HttpPageSpeedDecoderFilter::decodeHeaders(
   if (headers.Host() != nullptr) {
     host = std::string(headers.Host()->value().getStringView());
   }
+  // A request that carries no path header matches none of the routes below;
+  // leave it to the rest of the filter chain untouched.
+  if (headers.Path() == nullptr) {
+    return FilterHeadersStatus::Continue;
+  }
   const std::string url =
       absl::StrCat("http://", host, headers.Path()->value().getStringView());
   pristine_url_ = std::make_unique<net_instaweb::GoogleUrl>(url);
@@ -818,8 +846,9 @@ FilterDataStatus HttpPageSpeedDecoderFilter::decodeData(Buffer::Instance& data,
       net_instaweb::QueryParams query_params;
       query_params.ParseFromUntrustedString(pristine_url_->Query());
       HandleAdminRequest(pending_admin_is_global_, *pristine_url_, query_params,
-                         server_context_->global_options(),
-                         pending_admin_body_);
+                         server_context_->global_options(), pending_admin_body_,
+                         pending_admin_method_,
+                         pending_admin_x_requested_with_);
       return FilterDataStatus::StopIterationNoBuffer;
     }
     return FilterDataStatus::StopIterationAndBuffer;

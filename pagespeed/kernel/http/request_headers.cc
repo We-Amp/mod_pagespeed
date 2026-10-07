@@ -162,6 +162,24 @@ const char* RequestHeaders::method_string() const {
   return nullptr;
 }
 
+RequestHeaders::Method RequestHeaders::MethodFromString(StringPiece method) {
+  static const struct {
+    const char* name;
+    Method method;
+  } kMethods[] = {
+      {"GET", kGet},     {"HEAD", kHead},       {"POST", kPost},
+      {"PUT", kPut},     {"DELETE", kDelete},   {"OPTIONS", kOptions},
+      {"TRACE", kTrace}, {"CONNECT", kConnect}, {"PATCH", kPatch},
+      {"PURGE", kPurge},
+  };
+  for (const auto& entry : kMethods) {
+    if (StringCaseEqual(method, entry.name)) {
+      return entry.method;
+    }
+  }
+  return kError;
+}
+
 const GoogleString& RequestHeaders::message_body() const {
   return proto()->message_body();
 }

@@ -226,11 +226,14 @@ Tests mirror source layout: `test/pagespeed/kernel/base/` tests `pagespeed/kerne
 
 ### System Tests (Integration)
 
-Require a running server.
+Require a running server. **The pytest suite under `test/system/` is the system-test suite**.
+The bash suite that used to live under
+`pagespeed/{automatic,system,apache}/system_tests/`, with its `system_test.sh` drivers, is retired:
+every case is ported, covered, deferred, or dropped by value, and the files are deleted. Tests of shared module
+behaviour go in `test/system/system/` or `test/system/automatic/` — a port marker (`iis_only`,
+`nginx_only`, …) is only for behaviour that exists on that one port.
 
-There are two `run_system_tests.sh`: `test/system/run_system_tests.sh` is the real
-runner (change test logic THERE); `scripts/run_system_tests.sh` is a Docker
-convenience wrapper that builds the Apache module and drives the real runner.
+`test/system/run_system_tests.sh` is the runner; change test logic there.
 
 ```bash
 # Apache system tests

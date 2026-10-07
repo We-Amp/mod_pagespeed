@@ -46,6 +46,7 @@
 #include "pagespeed/apache/apache_request_context.h"
 #include "pagespeed/apache/apache_rewrite_driver_factory.h"
 #include "pagespeed/apache/apache_server_context.h"
+#include "pagespeed/apache/apache_static_asset_path.h"
 #include "pagespeed/apache/apache_writer.h"
 #include "pagespeed/apache/apr_timer.h"
 #include "pagespeed/apache/header_util.h"
@@ -75,6 +76,7 @@
 #include "pagespeed/system/in_place_resource_recorder.h"
 #include "pagespeed/system/ipro_record_gate.h"
 #include "pagespeed/system/ipro_recorder.h"
+#include "pagespeed/system/serve_host_names.h"
 #include "util_filter.h"
 
 namespace net_instaweb {
@@ -204,18 +206,30 @@ ApacheFetch* InstawebHandler::MakeFetch(const GoogleString& url, bool buffered,
 }
 
 /* static */
+bool InstawebHandler::AttachesCompressor(int status_code,
+                                         const char* content_type,
+                                         bool body_already_encoded) {
+  return !body_already_encoded && status_code == HttpStatus::kOK &&
+         StreamingPagespeedResourceFetch::IsCompressibleContentType(
+             content_type);
+}
+
+/* static */
 void InstawebHandler::send_out_headers_and_body(
     request_rec* request, const ResponseHeaders& response_headers,
-    const GoogleString& output) {
+    const GoogleString& output, bool body_already_encoded) {
   // We always disable downstream header filters when sending out
   // pagespeed resources, since we've captured them in the origin fetch.
   ResponseHeadersToApacheRequest(response_headers, request);
   request->status = response_headers.status_code();
   DisableDownstreamHeaderFilters(request);
-  if (response_headers.status_code() == HttpStatus::kOK &&
-      StreamingPagespeedResourceFetch::IsCompressibleContentType(
-          request->content_type)) {
-    // Make sure compression is enabled for this response.
+  if (AttachesCompressor(response_headers.status_code(), request->content_type,
+                         body_already_encoded)) {
+    // Make sure compression is enabled for this response.  Never for a body
+    // that already carries a content coding: the stored compressed copy is
+    // sent as it is.  (A compressor the site configuration adds by type
+    // also leaves it alone: mod_deflate and mod_brotli skip a response whose
+    // headers already name a coding.)
     ap_add_output_filter("DEFLATE", nullptr, request, request->connection);
   }
 
@@ -590,14 +604,27 @@ void InstawebHandler::RecordDaemonServeClass(int serve_class) {
 // counters can never move here.  The GATE is the caller's; this helper
 // only translates the decision into the peer's accounting vocabulary: the
 // entry's content class, the origin length the saving is measured against,
-// the bytes actually served, and the served variant's mask (which answers the
-// SVG-served accounting on the peer's side).
+// the bytes actually served, the served variant's mask (which answers the
+// SVG-served accounting on the peer's side), and the host the serve is
+// attributed to: a name this virtual host's configuration lists, read from
+// the request's own server record, the main server's and whether the
+// configuration states the record's ServerName (VouchedServeHost,
+// ApacheConfiguredHostNames), so a Host value a visitor chose never becomes
+// a site of its own, and a virtual host without a ServerName of its own
+// never records under a name httpd gave it, in the peer's statistics.
+// The entry itself was looked up for the request's host, as before.
 void InstawebHandler::RecordDaemonServeHit(
     const DaemonServeDecision& decision) {
   if (server_context_->daemon_serve_stats() != nullptr) {
     server_context_->daemon_serve_stats()->RecordHit(
         decision.ps_content_type, decision.origin_content_length,
-        decision.body.size(), decision.stored_mask);
+        decision.body.size(), decision.stored_mask,
+        VouchedServeHost(
+            stripped_gurl_.Host(),
+            ApacheConfiguredHostNames(
+                request_->server,
+                server_context_->apache_factory()->main_server(),
+                server_context_->apache_factory()->stated_server_names())));
   }
 }
 
@@ -626,6 +653,18 @@ bool InstawebHandler::ServeFromDaemonSubstrate() {
     server_context_->rewrite_stats()->ipro_daemon_fallthrough()->Add(1);
     return false;
   }
+
+  // The operator's switch for the optimizer's stored compressed copies
+  // (ModPagespeedDaemonServeStoredEncodings), per server or virtual host.
+  // Off, the arm selects and labels exactly as it always has.
+  reader->set_serve_stored_encodings(options_ != nullptr &&
+                                     options_->daemon_serve_stored_encodings());
+
+  // Lets the arm notice, while it serves a stored original, that the URL's
+  // optimized copy has gone missing (DaemonServeDecision::lost_optimized_copy).
+  // The limiter is this process's own: one look per URL per window, however
+  // many requests and threads serve it.
+  reader->set_heal_notify_limiter(ProcessDaemonHealNotifyLimiter());
 
   DaemonServeRequest serve_request;
   BuildDaemonServeRequest(&serve_request);
@@ -680,6 +719,11 @@ bool InstawebHandler::ServeFromDaemonSubstrate() {
     return false;
   }
 
+  // A STORED COMPRESSED COPY: the coding is the entry's, read off its stored
+  // mask by the arm -- never this request's.  Only a reader whose switch is
+  // on ever produces one, and only for a client that listed the coding.
+  const bool encoded_body = !decision.content_encoding.empty();
+
   ResponseHeaders response_headers;
   response_headers.set_major_version(1);
   response_headers.set_minor_version(1);
@@ -728,6 +772,13 @@ bool InstawebHandler::ServeFromDaemonSubstrate() {
     if (!decision.content_type.empty()) {
       response_headers.Add(HttpAttributes::kContentType, decision.content_type);
     }
+    // The coding of the stored copy, on the 200 only: a 304 carries no body
+    // to decode.  Its `Vary: Accept-Encoding` is the arm's, composed above
+    // for both legs.
+    if (encoded_body) {
+      response_headers.Add(HttpAttributes::kContentEncoding,
+                           decision.content_encoding);
+    }
     // `Last-Modified` IS THE ORIGIN'S, so it goes on origin bytes and on
     // nothing else.  Putting it on an optimized variant would advertise the
     // origin's validator for a representation the origin never produced --
@@ -751,7 +802,7 @@ bool InstawebHandler::ServeFromDaemonSubstrate() {
   } else {
     GoogleString body;
     decision.body.CopyToString(&body);
-    send_out_headers_and_body(request_, response_headers, body);
+    send_out_headers_and_body(request_, response_headers, body, encoded_body);
 
     // A 200 IS A SERVE; a 304 is not, and neither is an origin-byte or
     // unoptimized answer.  Record the hit here, on the 200 leg only, gated on
@@ -767,6 +818,8 @@ bool InstawebHandler::ServeFromDaemonSubstrate() {
   }
 
   server_context_->rewrite_stats()->ipro_daemon_served()->Add(1);
+  RecordDaemonServedClass(server_context_->rewrite_stats(),
+                          decision.ps_content_type);
 
   // A FALLBACK HIT IS SERVED -- and now it is also ANSWERED.  The serve
   // recorded nothing, so without this call nothing would ever ask the worker
@@ -801,6 +854,36 @@ bool InstawebHandler::ServeFromDaemonSubstrate() {
                                   option_signature,
                                   stats->ipro_daemon_fallback_notified(),
                                   stats->ipro_daemon_fallback_notify_failed());
+    }
+  }
+
+  // A LOST OPTIMIZED COPY WAS SERVED AS THE ORIGINAL -- and is ASKED FOR.
+  // The stored original is a correct answer and the response above is
+  // unchanged by this.  But a durable-original serve records nothing and
+  // notifies nothing, and this URL's entry still looks optimized (its
+  // compressed copies are there), so nothing else would ever ask the worker
+  // to write the optimized copy again: the URL would stay unoptimized until
+  // it was purged (or, with a worker that looks for missing copies itself,
+  // until its stored original expired).  One ordinary notification, fire
+  // and forget; the arm's limiter has already held it to about once per URL
+  // per window, and its detection never fires for content the optimizer left
+  // unoptimized on purpose (DaemonServeLostCopyNotify).
+  //
+  // Asked only when the decision SAYS there is something to ask for, with
+  // the request's own configuration named, and counted on SEND OUTCOMES
+  // only -- exactly the fallback re-notify's terms.
+  if (decision.lost_optimized_copy) {
+    DaemonAdapter* adapter = server_context_->daemon_adapter();
+    GoogleString option_context, option_signature;
+    if (adapter != nullptr && adapter->abi() != nullptr &&
+        options_ != nullptr &&
+        OptionContext::Compute(*options_, &option_context, &option_signature) ==
+            OptionContextStatus::kOk) {
+      RewriteStats* stats = server_context_->rewrite_stats();
+      DaemonServeLostCopyNotify(
+          *adapter->abi(), adapter->socket_path(), serve_request, decision,
+          option_context, option_signature, stats->ipro_daemon_heal_notified(),
+          stats->ipro_daemon_heal_notify_failed());
     }
   }
   return true;
@@ -904,7 +987,7 @@ bool InstawebHandler::HandleAsInPlace() {
       IproRecorder* recorder = MakeDaemonIproRecorderIfReady(
           server_context_->daemon_adapter(), record_request,
           options_->ComputeHttpOptions(), server_context_->timer(),
-          server_context_->message_handler());
+          server_context_->message_handler(), server_context_->rewrite_stats());
       if (recorder != nullptr) {
         AttachInPlaceRecorder(recorder, false /* rewrite_caching_headers */);
       }
@@ -1164,14 +1247,20 @@ int InstawebHandler::log_request_headers(void* logging_data, const char* key,
 }
 
 /* static */
-void InstawebHandler::instaweb_static_handler(
-    request_rec* request, ApacheServerContext* server_context) {
+bool InstawebHandler::instaweb_static_handler(
+    request_rec* request, ApacheServerContext* server_context,
+    const GoogleUrl& gurl) {
+  // Answered only when the server's path and the module's own reading of the
+  // request path name the same file under the static asset prefix; anything
+  // else is left to the server.
+  const StringPiece file_name = ApacheStaticAssetName(
+      request->parsed_uri.path, gurl.PathSansQuery(),
+      server_context->apache_factory()->static_asset_prefix());
+  if (file_name.empty()) {
+    return false;
+  }
   StaticAssetManager* static_asset_manager =
       server_context->static_asset_manager();
-  StringPiece request_uri_path = request->parsed_uri.path;
-  // Strip out the common prefix url before sending to StaticAssetManager.
-  StringPiece file_name = request_uri_path.substr(
-      server_context->apache_factory()->static_asset_prefix().length());
   StringPiece file_contents;
   StringPiece cache_header;
   ContentType content_type;
@@ -1181,6 +1270,7 @@ void InstawebHandler::instaweb_static_handler(
   } else {
     server_context->ReportResourceNotFound(request->parsed_uri.path, request);
   }
+  return true;
 }
 
 // Append the query params from a request into data. This just parses the query
@@ -1502,11 +1592,23 @@ apr_status_t InstawebHandler::instaweb_handler(request_rec* request) {
     }
     // The fetch has to be buffered because if it's a cache lookup it could
     // complete asynchrously via the rewrite thread.
+    ApacheFetch* admin_fetch =
+        instaweb_handler.MakeFetch(true /* buffered */, "local-admin");
+    admin_fetch->request_headers()->set_method(
+        RequestHeaders::MethodFromString(request->method));
+    // The host this virtual host records its serves under (the same rule as
+    // the serve hit): a per-host console sees that row of the optimizer's
+    // serve savings and no other site's.
     server_context->AdminPage(
         false /* not global */, instaweb_handler.stripped_gurl(),
         instaweb_handler.query_params(), instaweb_handler.options(),
-        instaweb_handler.MakeFetch(true /* buffered */, "local-admin"),
-        request_body);
+        admin_fetch, request_body,
+        VouchedServeHost(
+            instaweb_handler.stripped_gurl().Host(),
+            ApacheConfiguredHostNames(
+                request->server,
+                server_context->apache_factory()->main_server(),
+                server_context->apache_factory()->stated_server_names())));
     ret = APACHE_OK;
   } else if (request_handler_str == kGlobalAdminHandler &&
              global_config->GlobalAdminAccessAllowed(gurl,
@@ -1529,11 +1631,14 @@ apr_status_t InstawebHandler::instaweb_handler(request_rec* request) {
     }
     // The fetch has to be buffered because if it's a cache lookup it could
     // complete asynchrously via the rewrite thread.
+    ApacheFetch* admin_fetch =
+        instaweb_handler.MakeFetch(true /* buffered */, "global-admin");
+    admin_fetch->request_headers()->set_method(
+        RequestHeaders::MethodFromString(request->method));
     server_context->AdminPage(
         true /* global */, instaweb_handler.stripped_gurl(),
         instaweb_handler.query_params(), instaweb_handler.options(),
-        instaweb_handler.MakeFetch(true /* buffered */, "global-admin"),
-        request_body);
+        admin_fetch, request_body);
     ret = APACHE_OK;
   } else if (global_config->enable_cache_purge() &&
              !global_config->purge_method().empty() &&
@@ -1569,6 +1674,7 @@ apr_status_t InstawebHandler::instaweb_handler(request_rec* request) {
     InstawebHandler instaweb_handler(request);
     server_context->MessageHistoryHandler(
         *instaweb_handler.options(), AdminSite::kOther,
+        instaweb_handler.query_params(),
         instaweb_handler.MakeFetch(false /* unbuffered */, "messages"));
     ret = APACHE_OK;
   } else if (request_handler_str == kLogRequestHeadersHandler) {
@@ -1622,16 +1728,22 @@ apr_status_t InstawebHandler::instaweb_handler(request_rec* request) {
                       gurl.spec_c_str());
       } else if (gurl.PathSansLeaf() ==
                  server_context->apache_factory()->static_asset_prefix()) {
-        instaweb_static_handler(request, server_context);
-        ret = APACHE_OK;
+        // Not answered as one of the module's static assets: the server
+        // sends its own not-found response, as nginx does.
+        if (instaweb_static_handler(request, server_context, gurl)) {
+          ret = APACHE_OK;
+        } else {
+          ret = HTTP_NOT_FOUND;
+        }
       } else if (!is_pagespeed_subrequest(request) &&
                  handle_as_resource(server_context, request, &gurl)) {
         ret = APACHE_OK;
       }
 
       // Check for HTTP_NO_CONTENT here since that's the status used for a
-      // successfully handled beacon.
-      if (ret != APACHE_OK && ret != HTTP_NO_CONTENT &&
+      // successfully handled beacon, and for HTTP_NOT_FOUND since that is
+      // the answer for a request under the static asset prefix.
+      if (ret != APACHE_OK && ret != HTTP_NO_CONTENT && ret != HTTP_NOT_FOUND &&
           gurl.Host() != "localhost" &&
           (global_config->slurping_enabled() || global_config->test_proxy() ||
            !global_config->domain_lawyer()->proxy_suffix().empty())) {

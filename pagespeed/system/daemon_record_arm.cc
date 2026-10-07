@@ -22,6 +22,7 @@
 #include <cstdint>
 #include <cstring>
 
+#include "net/instaweb/rewriter/public/rewrite_stats.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -95,8 +96,16 @@ uint32_t ClampToUint32(int64 value) {
 // D6.4 rule 6's allowlist, verbatim.  `Vary` is not here: it is allowlisted
 // conditionally, on its tokens, below.
 const char* const kReproducibleHeaders[] = {
-    "cache-control", "content-type",  "content-length",
-    "etag",          "last-modified", "expires",
+    "cache-control",
+    "content-type",
+    "content-length",
+    "etag",
+    "last-modified",
+    "expires",
+    // One port's header table names the entity tag "E-Tag"; the same
+    // header under its port spelling, so the alias.  It goes when that
+    // port's table is corrected.
+    "e-tag",
 };
 
 // Stamped per response by whatever serves it, on BOTH paths, so never a
@@ -131,6 +140,19 @@ const char* const kServeGeneratedHeaders[] = {
     "date",          "server",     "age",
     "connection",    "keep-alive", "transfer-encoding",
     "accept-ranges",
+};
+
+// A port's own copies of headers that are present under their real names in
+// the same set; never on the wire, never origin content.  The IIS port
+// bookmarks cache-related headers under these exact names while they cross
+// its pipeline, so its recording seam hands them to this predicate beside
+// the real ones.  Exact names only: any other `__x_` spelling stays
+// fail-closed, because a name this list does not know is a bookmark some
+// port minted for a reason this predicate cannot see.
+const char* const kPortCopiedHeaders[] = {
+    "__x_expires",       "__x_e-tag",         "__x_content-md5",
+    "__x_last-modified", "__x_accept_ranges", "__x_cache-control",
+    "__x_accept-ranges",
 };
 
 // The `Vary` axes a serve from this entry can honour.
@@ -183,7 +205,8 @@ bool OriginHeadersAreReproducible(
       continue;
     }
     if (NameIsIn(name, kReproducibleHeaders) ||
-        NameIsIn(name, kServeGeneratedHeaders)) {
+        NameIsIn(name, kServeGeneratedHeaders) ||
+        NameIsIn(name, kPortCopiedHeaders)) {
       continue;
     }
     // Anything not positively recognised, including a near neighbour of a
@@ -531,6 +554,23 @@ int NotifyDaemon(const DaemonAbi& abi, StringPiece socket_path,
   params.option_context_length = input.option_context.size();
   params.option_signature = CStrOrNull(input.option_signature, &signature);
   return abi.NotifyWorker(socket.c_str(), &params);
+}
+
+void RecordDaemonFallthroughClass(RewriteStats* stats, int ps_content_type) {
+  if (stats == nullptr) return;
+  switch (ps_content_type) {
+    case kPsContentCss:
+      stats->ipro_daemon_fallthrough_css()->Add(1);
+      break;
+    case kPsContentJs:
+      stats->ipro_daemon_fallthrough_js()->Add(1);
+      break;
+    case kPsContentImage:
+      stats->ipro_daemon_fallthrough_image()->Add(1);
+      break;
+    default:
+      break;
+  }
 }
 
 }  // namespace net_instaweb

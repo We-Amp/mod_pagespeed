@@ -33,25 +33,131 @@ Environment Variables:
     PAGESPEED_STATS_PATH: Path to statistics endpoint (default: /mod_pagespeed_statistics)
     PAGESPEED_ADMIN_PATH: Path to admin endpoint (default: /pagespeed_admin)
     PAGESPEED_SERVER_TYPE: Server type: apache, envoy, iis, or nginx (default: auto-detect)
+    PAGESPEED_DOC_ROOT: Document root the test runner may write scratch
+        content under (lane fixture doc_root_scratch)
+    PAGESPEED_BEACON_PATH: Beacon handler path (default: /ngx_pagespeed_beacon
+        on nginx, /mod_pagespeed_beacon elsewhere)
+    PAGESPEED_LANE_FIXTURES: Comma-separated lane fixtures the lane runner
+        provisioned (see KNOWN_LANE_FIXTURES)
 """
 
 import os
 import pathlib
 import time
 from dataclasses import dataclass
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
 import pytest
 
 from pagespeed_test_framework.client import (
     PageSpeedClient,
     ProxiedPageSpeedClient,
+    VhostClient,
     # Imported (not re-parsed here) so the poll budget in client.py and the
     # pytest cap below can never drift on parsing semantics (invalid/<=0 ->
     # default). See pytest_configure.
     _read_fetch_until_retries,
     _read_timeout_multiplier,
 )
+
+
+# ---------------------------------------------------------------------------
+# Lane fixtures
+# ---------------------------------------------------------------------------
+# A lane fixture is a named piece of test-only server configuration that a
+# lane runner provisions and advertises in PAGESPEED_LANE_FIXTURES
+# (comma-separated). Tests that depend on one carry
+# @pytest.mark.requires_fixture("<name>", ...): they run where the lane
+# provides it and skip -- a lane capability, never a product artifact --
+# where it does not. A misspelled name is a configuration error and fails
+# loudly on both sides (marker and runner), so a typo can never turn into a
+# test that silently skips on every lane.
+KNOWN_LANE_FIXTURES = frozenset({
+    # <Directory>/<Location> test blocks copied from install/debug.conf.template
+    "debug_conf_dirs",
+    # /alt/admin/path, /pagespeed_console, /mod_pagespeed_global_statistics
+    # and the server-scope ModPagespeedMessagesDomains list
+    "admin_handlers",
+    # statistics log at PAGESPEED_STATS_LOG, run start at PAGESPEED_LANE_START_MS
+    "stats_log",
+    # ModPagespeedCompressMetadataCache on the primary vhost
+    "compressed_metadata_cache",
+    # PAGESPEED_CACHE_DIR writable by the test runner (flush_cache works)
+    "cache_flush",
+    # PAGESPEED_DOC_ROOT with runner-writable purge/ and cache_flush/ trees
+    "doc_root_scratch",
+    # the named VirtualHosts on the secondary port
+    "secondary_vhosts",
+    # local stand-ins for selfsigned.modpagespeed.com, www.gstatic.com and
+    # (https) www.modpagespeed.com
+    "external_origin",
+    # chunked slow-flushing origin at /mod_pagespeed_test/flush_origin/
+    "flush_origin",
+    # the experiment.example.com vhost (formerly install/debug.conf.template's
+    # #EXPERIMENT_GA block) on the secondary port
+    "experiment_framework",
+    # the twelve remote-config vhosts (formerly install/debug.conf.template's
+    # #REMOTE_CONFIG block) plus pathological_server.py on RCPORT
+    "remote_config",
+    # option response headers (PageSpeed / ModPagespeed / PageSpeedFilters)
+    # set by the server on option_headers/{off,modpagespeed_off,on}.html
+    "option_response_headers",
+})
+
+
+def parse_lane_fixtures(raw: str) -> frozenset:
+    """Names in a comma-separated PAGESPEED_LANE_FIXTURES value."""
+    return frozenset(name.strip() for name in raw.split(",") if name.strip())
+
+
+def unknown_lane_fixtures(names: Iterable[str]) -> List[str]:
+    """The names (in order) that are not in KNOWN_LANE_FIXTURES."""
+    return [name for name in names if name not in KNOWN_LANE_FIXTURES]
+
+
+def missing_lane_fixtures(names: Iterable[str], provided: frozenset) -> List[str]:
+    """The names (in order) the lane did not provide."""
+    return [name for name in names if name not in provided]
+
+
+def validate_advertised_lane_fixtures(raw: str) -> None:
+    """Reject a runner that advertises a fixture name conftest does not know."""
+    unknown = unknown_lane_fixtures(sorted(parse_lane_fixtures(raw)))
+    if unknown:
+        raise pytest.UsageError(
+            f"PAGESPEED_LANE_FIXTURES names unknown lane fixture(s) {unknown}; "
+            f"known: {sorted(KNOWN_LANE_FIXTURES)}"
+        )
+
+
+def wait_until_second_after(
+    stamp_sec: int,
+    now: Callable[[], float] = time.time,
+    sleep: Callable[[float], None] = time.sleep,
+    deadline_s: float = 30.0,
+) -> bool:
+    """Block until the wall clock has left the whole second ``stamp_sec``.
+
+    A cache flush is stamped as a whole second, and the server declares a
+    cache entry stale when its Date header -- itself whole-second -- is <=
+    that stamp (PurgeSet::IsValid; HTTPCache::Put assumes Date > stamp).
+    So everything PageSpeed writes to its caches during the rest of the
+    flush second is stale on arrival: an HTML rewrite in that second mints
+    .pagespeed. URLs that are never served from cache, and when the page was
+    rewritten with options the bare URL does not carry (query-string
+    ``include_js_source_maps`` in test_source_maps), reconstruction yields a
+    different hash and the URL is served as ``max-age=300,private`` for good.
+    flush_cache therefore returns only once this second is over, so no
+    later cache write can share it. Returns False if ``deadline_s`` of
+    sleeping passes first (clock skew), True otherwise.
+    """
+    slept = 0.0
+    while int(now()) <= stamp_sec:
+        if slept >= deadline_s:
+            return False
+        sleep(0.05)
+        slept += 0.05
+    return True
 
 
 @dataclass
@@ -87,6 +193,17 @@ class ServerConfig:
 
     # Features
     stats_enabled: bool
+
+    # Document root the test runner may write scratch content under (lane
+    # fixture doc_root_scratch). None when PAGESPEED_DOC_ROOT is unset.
+    doc_root: Optional[str] = None
+
+    # Beacon handler path: bash $BEACON_HANDLER (mod_pagespeed_beacon on
+    # Apache, ngx_pagespeed_beacon on nginx).
+    beacon_path: str = "/mod_pagespeed_beacon"
+
+    # The whole-cache purge (purge=*) is answered only by the global admin.
+    global_admin_path: str = "/pagespeed_global_admin"
 
     @property
     def primary_url(self) -> str:
@@ -140,6 +257,10 @@ def server_config() -> ServerConfig:
         default_stats_path = "/mod_pagespeed_statistics"
         default_admin_path = "/pagespeed_admin"
 
+    default_beacon_path = (
+        "/ngx_pagespeed_beacon" if server_type == "nginx" else "/mod_pagespeed_beacon"
+    )
+
     return ServerConfig(
         host=os.environ.get("PAGESPEED_HOST", "localhost"),
         port=int(os.environ.get("PAGESPEED_PORT", "80")),
@@ -157,8 +278,13 @@ def server_config() -> ServerConfig:
         cache_dir=os.environ.get("PAGESPEED_CACHE_DIR"),
         stats_path=os.environ.get("PAGESPEED_STATS_PATH", default_stats_path),
         admin_path=os.environ.get("PAGESPEED_ADMIN_PATH", default_admin_path),
+        global_admin_path=os.environ.get(
+            "PAGESPEED_GLOBAL_ADMIN_PATH", "/pagespeed_global_admin"
+        ),
         server_type=server_type,
         stats_enabled=os.environ.get("PAGESPEED_STATS_ENABLED", "1") == "1",
+        doc_root=os.environ.get("PAGESPEED_DOC_ROOT") or None,
+        beacon_path=os.environ.get("PAGESPEED_BEACON_PATH", default_beacon_path),
     )
 
 
@@ -205,6 +331,63 @@ def secondary_client(server_config: ServerConfig) -> ProxiedPageSpeedClient:
         proxy_host=server_config.secondary_host,
         proxy_port=server_config.secondary_port,
     )
+
+
+@pytest.fixture(scope="session")
+def vhost_client(server_config: ServerConfig) -> Callable[[str], VhostClient]:
+    """Factory: a client for one name-based vhost on the secondary port.
+
+    Equivalent to: http_proxy=$SECONDARY_HOSTNAME wget http://<vhost>/...
+
+    Usage:
+        @pytest.mark.requires_fixture("secondary_vhosts")
+        def test_x(vhost_client):
+            client = vhost_client("signed-urls.example.com")
+            client.get("/mod_pagespeed_example/index.html")
+    """
+    if not server_config.secondary_host or not server_config.secondary_port:
+        pytest.skip(
+            "Secondary server not configured (set PAGESPEED_SECONDARY_HOST "
+            "and PAGESPEED_SECONDARY_PORT)"
+        )
+
+    def _make(vhost: str) -> VhostClient:
+        return VhostClient(
+            vhost=vhost,
+            proxy_host=server_config.secondary_host,
+            proxy_port=server_config.secondary_port,
+        )
+
+    return _make
+
+
+@pytest.fixture
+def vhost_stats_snapshot(
+    vhost_client: Callable[[str], VhostClient], server_config: ServerConfig
+) -> Callable[[str], Dict[str, int]]:
+    """Factory: per-vhost statistics of one named vhost.
+
+    Usage:
+        before = vhost_stats_snapshot("purge.example.com")
+    """
+    if not server_config.stats_enabled:
+        pytest.skip("Statistics not enabled (set PAGESPEED_STATS_ENABLED=1)")
+
+    def _capture(vhost: str) -> Dict[str, int]:
+        return _make_stats_capture(vhost_client(vhost), server_config)()
+
+    return _capture
+
+
+@pytest.fixture(scope="session")
+def doc_root(server_config: ServerConfig) -> pathlib.Path:
+    """The primary server's document root (lane fixture doc_root_scratch)."""
+    if not server_config.doc_root:
+        pytest.skip("Document root not configured (set PAGESPEED_DOC_ROOT)")
+    path = pathlib.Path(server_config.doc_root)
+    if not path.is_dir():
+        pytest.fail(f"PAGESPEED_DOC_ROOT={path} is not a directory")
+    return path
 
 
 @pytest.fixture
@@ -314,6 +497,27 @@ def flush_cache(server_config: ServerConfig, client: PageSpeedClient) -> Callabl
             # cache is now cleared
     """
 
+    def _flush_stats() -> Optional[Tuple[Optional[int], Optional[int]]]:
+        """(cache_flush_count, cache_flush_timestamp_ms), or None if unreadable.
+
+        Reuses the same read path as stats_snapshot/_make_stats_capture
+        (client.get_statistics against server_config.stats_path). Returns
+        None -- never raises -- on any read failure, so callers can fall back
+        to a fixed sleep instead of polling forever. Either counter may be
+        None when the server does not export it.
+        """
+        try:
+            disable_pagespeed = not (
+                server_config.is_nginx or server_config.server_type == "envoy"
+            )
+            stats = client.get_statistics(
+                stats_path=server_config.stats_path,
+                disable_pagespeed=disable_pagespeed,
+            )
+        except Exception:
+            return None
+        return stats.get("cache_flush_count"), stats.get("cache_flush_timestamp_ms")
+
     def _flush() -> None:
         cache_dir = server_config.cache_dir
         if not cache_dir:
@@ -332,10 +536,84 @@ def flush_cache(server_config: ServerConfig, client: PageSpeedClient) -> Callabl
 
         if cache_dir_exists:
             try:
-                # Touch the cache.flush file
+                # Read the statistics BEFORE touching, so any change the poll
+                # below sees is genuinely caused by this flush.
+                before = _flush_stats()
+                # The server reads cache.flush's mtime at whole-second
+                # granularity, so a touch within the same second as the
+                # previous flush is invisible to it (bash slept 2 s between
+                # touches for this reason). Give the file an mtime on a whole
+                # second strictly later than its current one, waiting for the
+                # wall clock to reach it so the stamp is never in the future.
+                previous_sec = (
+                    int(cache_flush_path.stat().st_mtime)
+                    if cache_flush_path.exists()
+                    else 0
+                )
                 cache_flush_path.touch()
-                # Wait for cache flush to be detected (poll interval)
-                time.sleep(1.5)
+                target_sec = max(int(time.time()), previous_sec + 1)
+                clock_deadline = time.monotonic() + 30.0
+                while int(time.time()) < target_sec:
+                    if time.monotonic() > clock_deadline:
+                        pytest.fail(
+                            f"the wall clock did not reach {target_sec} within 30 s "
+                            f"(cache.flush carries mtime {previous_sec}; clock skew?)"
+                        )
+                    time.sleep(0.1)
+                os.utime(cache_flush_path, (target_sec, target_sec))
+                if server_config.is_iis:
+                    # The IIS lane runs with cache purging enabled, where the
+                    # server watches cache.purge rather than cache.flush, so
+                    # the touch is not reflected in the flush statistics. Keep
+                    # the historical fixed wait there.
+                    time.sleep(1.5)
+                    return
+                if before is None:
+                    # Statistics unavailable on this lane: detection cannot be
+                    # confirmed. The lanes poll cache.flush every second, so
+                    # 2.5 s covers the interval with margin.
+                    time.sleep(2.5)
+                    return
+                # Bounded poll for the server to notice the flush. The
+                # timestamp statistic is the server's own record of the last
+                # flush it applied, so it is compared against the stamp we
+                # wrote; the count is a fallback for servers without it (it is
+                # shared across vhosts and also moves on purges).
+                before_count, _ = before
+                deadline = time.monotonic() + 15.0
+                after: Optional[Tuple[Optional[int], Optional[int]]] = before
+                recorded = False
+                while time.monotonic() < deadline:
+                    time.sleep(0.5)
+                    after = _flush_stats()
+                    if after is None:
+                        continue
+                    after_count, after_ts = after
+                    if after_ts is not None:
+                        recorded = after_ts >= target_sec * 1000
+                    else:
+                        recorded = (
+                            after_count is not None
+                            and before_count is not None
+                            and after_count > before_count
+                        )
+                    if recorded:
+                        break
+                if not recorded:
+                    pytest.fail(
+                        f"cache.flush at {cache_flush_path} was touched (mtime "
+                        f"{target_sec}) but the server did not record the flush "
+                        f"within 15 s (statistics before={before}, after={after})"
+                    )
+                # The flush is applied. Now leave its second, so no cache
+                # entry written by the rest of this test or the next one
+                # carries a Date equal to the stamp and is stale on arrival
+                # (see wait_until_second_after).
+                if not wait_until_second_after(target_sec):
+                    pytest.fail(
+                        f"the wall clock did not leave second {target_sec} within "
+                        f"30 s of the flush being recorded (clock skew?)"
+                    )
                 return
             except OSError as exc:
                 # File method didn't work, try admin API for IIS
@@ -382,6 +660,9 @@ def webp_client(client: PageSpeedClient) -> PageSpeedClient:
 # Markers for test categorization
 def pytest_configure(config):
     """Register custom markers."""
+    # A runner that advertises a misspelled fixture fails the run up front.
+    validate_advertised_lane_fixtures(os.environ.get("PAGESPEED_LANE_FIXTURES", ""))
+
     # Scale pytest's per-test timeout past fetch_until's worst-case wall
     # clock: ini timeout x PAGESPEED_TEST_TIMEOUT_MULTIPLIER x
     # (1 + PAGESPEED_TEST_FETCH_RETRIES).
@@ -449,6 +730,36 @@ def pytest_configure(config):
         "process_leak: process-level worker/child lifecycle regression test "
         "(graceful restart / reload); needs server control env vars",
     )
+    config.addinivalue_line(
+        "markers",
+        "requires_fixture(*names): test needs these lane fixtures "
+        "(PAGESPEED_LANE_FIXTURES; see conftest.KNOWN_LANE_FIXTURES)",
+    )
+
+
+# An unknown requires_fixture(...) name is a configuration error, not a
+# per-test, per-lane concern -- fail collection for every offending item
+# before any test runs, on every lane, so a requires_secondary/https/stats
+# skip in pytest_runtest_setup (which can return early) never gets a chance
+# to mask a typo'd fixture name behind a clean-looking SKIP.
+def pytest_collection_modifyitems(config, items):
+    """Hard-fail collection when requires_fixture(...) names an unknown fixture."""
+    errors = []
+    for item in items:
+        for marker in item.iter_markers("requires_fixture"):
+            names = list(marker.args)
+            unknown = unknown_lane_fixtures(names)
+            if not names or unknown:
+                errors.append(
+                    f"{item.nodeid}: requires_fixture{tuple(names)}: unknown lane "
+                    f"fixture name(s) {unknown}"
+                )
+    if errors:
+        raise pytest.UsageError(
+            "unknown requires_fixture lane fixture name(s):\n"
+            + "\n".join(errors)
+            + f"\nknown: {sorted(KNOWN_LANE_FIXTURES)}"
+        )
 
 
 # Skip tests based on server configuration
@@ -471,6 +782,13 @@ def pytest_runtest_setup(item):
     if item.get_closest_marker("requires_stats"):
         if not stats_enabled:
             pytest.skip("Statistics not enabled")
+
+    provided = parse_lane_fixtures(os.environ.get("PAGESPEED_LANE_FIXTURES", ""))
+    for marker in item.iter_markers("requires_fixture"):
+        names = list(marker.args)
+        missing = missing_lane_fixtures(names, provided)
+        if missing:
+            pytest.skip(f"Lane does not provide fixture(s): {', '.join(missing)}")
 
     # Server-type specific markers
     if item.get_closest_marker("apache_only"):

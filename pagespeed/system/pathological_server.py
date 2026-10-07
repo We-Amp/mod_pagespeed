@@ -104,7 +104,30 @@ _responses = {
         "EndRemoteConfig\n",
         _nohook),
 
-    "/fail-future": (_STANDARD_CONFIG, _fail_future_requests("/fail-future")),
+    # The test that uses this file arms the failure below, waits past this
+    # five-second lifetime, and checks that the configuration already fetched
+    # keeps applying when the refetch gets the 410.
+    "/fail-future": (
+        "HTTP/1.1 200 OK\r\n"
+        "Cache-Control: max-age=5\r\n"
+        "\r\n"
+        "EnableFilters remove_comments,collapse_whitespace\n"
+        "EndRemoteConfig\n",
+        _nohook),
+
+    # Flips /fail-future to 410 for all requests from now on. A separate
+    # control path (rather than flipping on the first /fail-future fetch)
+    # because under a multi-child server, every child fetches its own copy
+    # of /fail-future independently: flipping on first-fetch means whichever
+    # child fetches first is the only one that ever sees the real config,
+    # and every other child (including ones that haven't fetched yet) sees
+    # only the failure. Arming explicitly, once the caller knows the config
+    # is already applied, avoids that race.
+    "/fail-future/arm": (
+        "HTTP/1.1 200 OK\r\n"
+        "\r\n"
+        "armed\n",
+        _fail_future_requests("/fail-future")),
 
     "/timeout": (
         "HTTP/1.1 200 OK\r\n"
@@ -124,8 +147,8 @@ _responses = {
         "AnalyticsID UA-MyExperimentID-1\n"
         "UseAnalyticsJs false\n"
         # insert_ga is deprecated and no longer auto-enabled by experiments;
-        # enable it explicitly so remote_config_test.sh can observe the
-        # AnalyticsID being applied from remote config.
+        # enable it explicitly so test/system/system/test_remote_config.py
+        # can observe the AnalyticsID being applied from remote config.
         "EnableFilters insert_ga\n"
         "EndRemoteConfig\n",
         _nohook),
@@ -296,6 +319,9 @@ class PathologicalServer(object):
   def _handle_writing(self, soc):
     """Write as much as the socket will let us."""
     self._log("writing %r" % self._writing[soc])
+    # Responses (and anything a hook queued) are text; the socket wants bytes.
+    if isinstance(self._writing[soc], str):
+      self._writing[soc] = self._writing[soc].encode("utf-8")
     sent = soc.send(self._writing[soc])
     if not sent:
       self._handle_error(soc)

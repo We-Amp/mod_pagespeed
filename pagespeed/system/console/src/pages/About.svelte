@@ -4,37 +4,72 @@
 -->
 
 <script lang="ts">
-  // About page: build/version info and the legal links (Privacy Policy +
-  // Terms of Service). Product names and URLs come from the product-facts
-  // single source (lib/data/product-facts-console.ts), never from literals.
+  // About: the module build, the optimizer's version and commit, this
+  // console's build, where the documentation is, and the legal links. Names
+  // and URLs come from the product-facts single source. The optimizer is
+  // asked once: this page does not poll.
+  import PageHeader from "$lib/PageHeader.svelte";
+  import { useConsole } from "$lib/api/context";
+  import { DOCS_URL, PRIVACY_URL, PRODUCT_NAME, TERMS_URL } from "$lib/data/product-facts-console";
   import {
-    PRIVACY_URL,
-    PRODUCT_NAME,
-    TERMS_URL,
-  } from "$lib/data/product-facts-console";
+    isDirtyBuild,
+    optimizerVersionsStatus,
+    optimizerVersionText,
+    type OptimizerVersionsStatus,
+  } from "$lib/utils/versions";
 
+  const { api } = useConsole();
   const appVersion = import.meta.env.VITE_APP_VERSION ?? "dev";
+  const dirty = isDirtyBuild(appVersion);
+
+  let optimizer = $state<OptimizerVersionsStatus | null>(null);
+  optimizerVersionsStatus(() => api.daemonHealth()).then((status) => {
+    optimizer = status;
+  });
 </script>
 
 <div class="page">
-  <div class="header">
-    <h1>About</h1>
-  </div>
+  <PageHeader title="About" />
 
-  <!-- Section A: Version & system info -->
-  <section class="about-section">
-    <h2>{PRODUCT_NAME} {appVersion}</h2>
-    <div class="info-grid">
+  <section class="about-section" aria-labelledby="about-versions">
+    <h2 id="about-versions">Versions</h2>
+    <!-- The module and the console ship from one build, so their rows show
+         the same stamp: two labels, one source. -->
+    <dl class="info-grid">
       <div class="info-item">
-        <span class="info-label">Version</span>
-        <span class="info-value">{appVersion}</span>
+        <dt class="info-label metric-label">Module build</dt>
+        <dd
+          class="info-value metric-value mono-value num"
+          class:dirty-value={dirty}
+          data-testid="about-module-version"
+          title={appVersion}
+        >
+          {appVersion}
+          {#if dirty}
+            <span class="dirty-note">built with uncommitted changes</span>
+          {/if}
+        </dd>
       </div>
-    </div>
+      <div class="info-item">
+        <dt class="info-label metric-label">Optimizer</dt>
+        <dd class="info-value metric-value mono-value num" data-testid="about-optimizer-version">
+          {optimizerVersionText(optimizer)}
+        </dd>
+      </div>
+      <div class="info-item">
+        <dt class="info-label metric-label">{PRODUCT_NAME} console build</dt>
+        <dd class="info-value metric-value mono-value num" data-testid="about-console-version">{appVersion}</dd>
+      </div>
+    </dl>
   </section>
 
-  <!-- Section B: Legal -->
-  <section class="about-section">
-    <h2>Legal</h2>
+  <section class="about-section" aria-labelledby="about-docs">
+    <h2 id="about-docs">Documentation</h2>
+    <p><a href={DOCS_URL} target="_blank" rel="noopener noreferrer" class="legal-link">Admin console documentation</a></p>
+  </section>
+
+  <section class="about-section" aria-labelledby="about-legal">
+    <h2 id="about-legal">Legal</h2>
     <div class="legal-links">
       <a
         href={PRIVACY_URL}
@@ -57,18 +92,6 @@
 </div>
 
 <style>
-  .page {
-    max-width: 680px;
-  }
-
-  .header {
-    margin-bottom: var(--ps-space-lg);
-  }
-
-  h1 {
-    margin: 0;
-  }
-
   .about-section {
     margin-bottom: var(--ps-space-xl);
   }
@@ -93,18 +116,23 @@
     gap: 2px;
   }
 
-  .info-label {
-    font-size: var(--ps-font-size-xs);
-    font-weight: 600;
-    color: var(--ps-text-tertiary);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
+  .info-value {
+    overflow-wrap: anywhere;
   }
 
-  .info-value {
-    font-size: var(--ps-font-size-sm);
-    font-family: var(--ps-font-mono);
-    color: var(--ps-text);
+  .dirty-value {
+    color: var(--ps-warning-text);
+  }
+
+  .dirty-note {
+    display: block;
+    font-family: var(--ps-font-family);
+    font-size: var(--ps-font-size-xs);
+    font-weight: 400;
+  }
+
+  dd {
+    margin: 0;
   }
 
   .legal-links {

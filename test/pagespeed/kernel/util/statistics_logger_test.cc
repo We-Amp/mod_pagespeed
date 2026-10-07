@@ -59,6 +59,7 @@ const char kUnloggedVariable[] = "unlogged_variable_";
 class StatisticsLoggerTest : public ::testing::Test {
  protected:
   typedef StatisticsLogger::VarMap VarMap;
+  typedef StatisticsLogger::VariableInfo VariableInfo;
 
   StatisticsLoggerTest()
       : thread_system_(Platform::CreateThreadSystem()),
@@ -202,7 +203,7 @@ TEST_F(StatisticsLoggerTest, TestParseDataForGraphs) {
   VarMap parsed_var_data;
   ParseDataForGraphs(&reader, &list_of_timestamps, &parsed_var_data);
   // Though the fake log file only contains 4 variables, the method should
-  // still return all the variables needed by the graphs page with 0 as
+  // still return all the variables needed by the graphs page with null as
   // place holders.
   //
   // THE NUMBER IS THE SIZE OF THE GRAPHS PAGE'S VARIABLE LIST, and it moves
@@ -212,10 +213,71 @@ TEST_F(StatisticsLoggerTest, TestParseDataForGraphs) {
   // is file-local to the implementation; when it changes, this is the line
   // that says so, which is the intent -- a counter reaching the graphs page is
   // a user-visible surface change and should not slip in silently. Last moved
-  // when the daemon substrate's fallback re-notify failure counter was added.
-  EXPECT_EQ(92, parsed_var_data.size());
+  // when the per-class daemon-serve counter split was added.
+  EXPECT_EQ(99, parsed_var_data.size());
   EXPECT_EQ(4, list_of_timestamps.size());
   file_system_.Close(log_file, &handler_);
+}
+
+TEST_F(StatisticsLoggerTest, MissingVariableSerializesAsNullNotZero) {
+  std::set<GoogleString> var_titles;
+  int64 start_time;
+  int64 end_time;
+  int64 granularity_ms;
+  CreateFakeLogfile(&var_titles, &start_time, &end_time, &granularity_ms);
+  var_titles.insert(kUnloggedVariable);  // appears in no log segment.
+
+  FileSystem::InputFile* log_file =
+      file_system_.OpenInputFile(kStatsLogFile, &handler_);
+  ASSERT_TRUE(log_file != nullptr);
+  StatisticsLogfileReader reader(log_file, start_time, end_time,
+                                 granularity_ms, &handler_);
+  std::vector<int64> list_of_timestamps;
+  VarMap parsed_var_data;
+  ParseDataFromReader(var_titles, &reader, &list_of_timestamps,
+                      &parsed_var_data);
+  file_system_.Close(log_file, &handler_);
+
+  ASSERT_EQ(4, list_of_timestamps.size());
+  const VariableInfo& unlogged = parsed_var_data[kUnloggedVariable];
+  ASSERT_EQ(4, unlogged.size());
+  for (size_t i = 0; i < unlogged.size(); ++i) {
+    EXPECT_EQ("null", unlogged[i]);
+  }
+  const VariableInfo& flushes = parsed_var_data["num_flushes"];
+  ASSERT_EQ(4, flushes.size());
+  EXPECT_EQ("300", flushes[0]);
+}
+
+TEST_F(StatisticsLoggerTest, GraphsParseEmitsNullForMissingCounters) {
+  std::set<GoogleString> var_titles;
+  int64 start_time;
+  int64 end_time;
+  int64 granularity_ms;
+  CreateFakeLogfile(&var_titles, &start_time, &end_time, &granularity_ms);
+  FileSystem::InputFile* log_file =
+      file_system_.OpenInputFile(kStatsLogFile, &handler_);
+  ASSERT_TRUE(log_file != nullptr);
+  StatisticsLogfileReader reader(log_file, start_time, end_time,
+                                 granularity_ms, &handler_);
+  std::vector<int64> list_of_timestamps;
+  VarMap parsed_var_data;
+  ParseDataForGraphs(&reader, &list_of_timestamps, &parsed_var_data);
+  file_system_.Close(log_file, &handler_);
+
+  ASSERT_EQ(4, list_of_timestamps.size());
+  // cache_hits is a graphs variable (kGraphsVars) logged in every segment;
+  // cache_expirations is a graphs variable that never appears in the fake
+  // logfile. (num_flushes, though logged, is not in kGraphsVars, so
+  // ParseDataForGraphs never touches it.)
+  const VariableInfo& hits = parsed_var_data["cache_hits"];
+  ASSERT_EQ(4, hits.size());
+  EXPECT_EQ("400", hits[0]);
+  const VariableInfo& expirations = parsed_var_data["cache_expirations"];
+  ASSERT_EQ(4, expirations.size());
+  for (size_t i = 0; i < expirations.size(); ++i) {
+    EXPECT_EQ("null", expirations[i]);
+  }
 }
 
 // Creates fake logfile data and tests that ReadNextDataBlock accurately
@@ -481,10 +543,12 @@ TEST_F(StatisticsLoggerTest, ConsistentNumberArgs) {
   logger_.DumpJSON(false, var_titles, 1000, 4000, 1000, &writer, &handler_);
 
   // The notable check here is that all the arrays are the same length.
+  // Timestamps 1000 and 4000 have no "bar" reading, and 1000 and 3000 have
+  // no "foo" reading; those slots serialize as null, not an invented 0.
   EXPECT_EQ(
       "{\"timestamps\": [1000, 2000, 3000, 4000],\"variables\": {"
-      "\"bar\": [0, 20, 30, 0],"
-      "\"foo\": [0, 2, 0, 4]}}",
+      "\"bar\": [null, 20, 30, null],"
+      "\"foo\": [null, 2, null, 4]}}",
       json_dump);
 
   GoogleString json_dump_graphs;
@@ -494,7 +558,7 @@ TEST_F(StatisticsLoggerTest, ConsistentNumberArgs) {
   EXPECT_THAT(json_dump_graphs,
               ::testing::HasSubstr("\"timestamps\": [1000, 2000, 3000, 4000]"));
   EXPECT_THAT(json_dump_graphs,
-              ::testing::HasSubstr("\"cache_hits\": [5, 0, 1, 0]"));
+              ::testing::HasSubstr("\"cache_hits\": [5, null, 1, null]"));
 }
 
 TEST_F(StatisticsLoggerTest, FromStats) {

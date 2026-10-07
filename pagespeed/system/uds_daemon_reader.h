@@ -40,11 +40,18 @@ class Timer;
 // management socket via curl's CURLOPT_UNIX_SOCKET_PATH.
 class UdsDaemonReader : public DaemonReader {
  public:
-  // Bounds enforced on every read, independent of any fetcher configuration:
-  // the admin proxy contract puts a 5s ceiling on upstream latency and a
-  // 1 MiB ceiling on the response body.
+  // Bounds enforced on every read, independent of any fetcher
+  // configuration: the admin proxy contract puts a 5s ceiling on upstream
+  // latency; the caller states the response body cap per read.
   static constexpr int64 kUpstreamTimeoutMs = 5000;
-  static constexpr size_t kMaxResponseBodyBytes = 1024 * 1024;
+  // The transport's own abort sits this far above the caller's cap -- above
+  // curl's largest write chunk (16 KiB) -- so an over-cap body always
+  // delivers bytes past the cap to the reader's counter before the
+  // transport stops it: "too large" is observed, not inferred.
+  static constexpr size_t kTransportCapSlackBytes = 64 * 1024;
+  // A failed read that ran this close to kUpstreamTimeoutMs is reported as
+  // a timeout (curl's result code does not reach the fetch).
+  static constexpr int64 kTimeoutClassificationSlackMs = 250;
 
   // An empty `socket_path` disables the reader: every Get() then fails its
   // fetch immediately (callers map this to 502 "daemon unreachable").
@@ -53,7 +60,8 @@ class UdsDaemonReader : public DaemonReader {
                   MessageHandler* message_handler);
   ~UdsDaemonReader() override;
 
-  void Get(StringPiece daemon_path, AsyncFetch* fetch) override;
+  void Get(StringPiece daemon_path, size_t max_response_bytes,
+           AsyncFetch* fetch, DaemonReadFailure* failure) override;
 
  private:
   // Returns the curl fetcher, creating it on first use.  Lazy so a quiescent

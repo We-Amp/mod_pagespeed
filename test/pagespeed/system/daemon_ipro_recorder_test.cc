@@ -40,6 +40,7 @@
 
 #include "net/instaweb/rewriter/public/option_context.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
+#include "net/instaweb/rewriter/public/rewrite_stats.h"
 #include "pagespeed/kernel/base/null_mutex.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -49,6 +50,7 @@
 #include "pagespeed/kernel/http/request_headers.h"
 #include "pagespeed/kernel/http/response_headers.h"
 #include "pagespeed/kernel/util/platform.h"
+#include "pagespeed/kernel/util/simple_stats.h"
 #include "pagespeed/system/daemon_abi.h"
 #include "pagespeed/system/daemon_record_arm.h"
 #include "test/pagespeed/kernel/base/gtest.h"
@@ -135,12 +137,14 @@ class DaemonIproRecorderTest : public testing::Test {
                           bool entire_response_received = true,
                           const HttpOptions* http_options = nullptr,
                           ResponseHeaders* preliminary = nullptr,
-                          const char* saved_cache_control = nullptr) {
+                          const char* saved_cache_control = nullptr,
+                          RewriteStats* stats = nullptr) {
     HttpOptions defaults = kDefaultHttpOptionsForTests;
     DaemonRecordOutcome outcome;
     DaemonIproRecorder* recorder = new DaemonIproRecorder(
         abi_.get(), &cache_token_, "/tmp/socket", request_,
-        http_options == nullptr ? defaults : *http_options, &timer_, nullptr);
+        http_options == nullptr ? defaults : *http_options, &timer_, nullptr,
+        stats);
     recorder->set_outcome_sink_for_testing(&outcome);
     if (preliminary != nullptr) {
       recorder->ConsiderResponseHeaders(IproRecorder::kPreliminaryHeaders,
@@ -183,6 +187,39 @@ TEST_F(DaemonIproRecorderTest, RecordsAndNotifiesAnEligibleResponse) {
       << log;
   EXPECT_NE(GoogleString::npos, log.find("etag=\"abc\"")) << log;
   EXPECT_NE(GoogleString::npos, log.find("notify ")) << log;
+}
+
+TEST_F(DaemonIproRecorderTest, AnEntityTagUnderAPortsOwnSpellingIsStillCarried) {
+  // One port's header table names the entity tag "E-Tag", so the origin's
+  // validator arrives under that spelling and the canonical lookup finds
+  // nothing. It must still reach the peer: an entry without the origin's
+  // validator cannot be revalidated against the origin later.
+  ResponseHeaders headers;
+  MakeOkHeaders(&headers);
+  headers.RemoveAll(HttpAttributes::kEtag);
+  headers.Add("E-Tag", "\"xyz\"");
+  headers.ComputeCaching();
+
+  const DaemonRecordOutcome outcome = Run(&headers, kBody);
+
+  EXPECT_EQ(DaemonRecordVerdict::kStoreAndNotify, outcome.verdict);
+  EXPECT_TRUE(outcome.stored);
+  const GoogleString log = CallLog();
+  EXPECT_NE(GoogleString::npos, log.find("etag=\"xyz\"")) << log;
+}
+
+TEST_F(DaemonIproRecorderTest, TheCanonicalEntityTagWinsOverThePortsSpelling) {
+  // Both present: the canonical name is the one that is carried.
+  ResponseHeaders headers;
+  MakeOkHeaders(&headers);
+  headers.Add("E-Tag", "\"other\"");
+  headers.ComputeCaching();
+
+  Run(&headers, kBody);
+
+  const GoogleString log = CallLog();
+  EXPECT_NE(GoogleString::npos, log.find("etag=\"abc\"")) << log;
+  EXPECT_EQ(GoogleString::npos, log.find("etag=\"other\"")) << log;
 }
 
 TEST_F(DaemonIproRecorderTest, TheRecorderDeletesItself) {
@@ -675,6 +712,65 @@ TEST_F(DaemonIproRecorderTest, WithoutACacheTheGateIsNeverEvenConsulted) {
   EXPECT_TRUE(outcome.done);
   EXPECT_FALSE(outcome.gate_ran);
   EXPECT_EQ(GoogleString::npos, CallLog().find("write_original"));
+}
+
+// --- the per-class fall-through split ---------------------------------------
+
+TEST_F(DaemonIproRecorderTest, ARecordedFallthroughCountsItsContentClass) {
+  // A recorded response is a daemon fall-through that came back from the
+  // origin; the class is known for the first time here, from the origin's
+  // own Content-Type.
+  SimpleStats stats(thread_system_.get());
+  RewriteStats::InitStats(&stats);
+  RewriteStats rewrite_stats(false, &stats, thread_system_.get(), &timer_);
+
+  ResponseHeaders headers;
+  MakeOkHeaders(&headers);  // Content-Type: text/css
+  const DaemonRecordOutcome outcome = Run(&headers, kBody, true, nullptr,
+                                          nullptr, nullptr, &rewrite_stats);
+  EXPECT_TRUE(outcome.gate_ran);
+  EXPECT_EQ(1, stats.GetVariable("ipro_daemon_fallthrough_css")->Get());
+  EXPECT_EQ(0, stats.GetVariable("ipro_daemon_fallthrough_js")->Get());
+  EXPECT_EQ(0, stats.GetVariable("ipro_daemon_fallthrough_image")->Get());
+  EXPECT_EQ(0, stats.GetVariable("ipro_daemon_served_css")->Get());
+}
+
+TEST_F(DaemonIproRecorderTest, AnImageFallthroughCountsItsContentClass) {
+  SimpleStats stats(thread_system_.get());
+  RewriteStats::InitStats(&stats);
+  RewriteStats rewrite_stats(false, &stats, thread_system_.get(), &timer_);
+
+  ResponseHeaders headers;
+  headers.set_major_version(1);
+  headers.set_minor_version(1);
+  headers.SetStatusAndReason(HttpStatus::kOK);
+  headers.Add(HttpAttributes::kContentType, "image/png");
+  headers.Add(HttpAttributes::kCacheControl, "max-age=600, public");
+  headers.Add(HttpAttributes::kEtag, "\"abc\"");
+  headers.SetDate(timer_.NowMs());
+  headers.ComputeCaching();
+  const DaemonRecordOutcome outcome = Run(&headers, kBody, true, nullptr,
+                                          nullptr, nullptr, &rewrite_stats);
+  EXPECT_TRUE(outcome.gate_ran);
+  EXPECT_EQ(1, stats.GetVariable("ipro_daemon_fallthrough_image")->Get());
+  EXPECT_EQ(0, stats.GetVariable("ipro_daemon_fallthrough_css")->Get());
+}
+
+TEST_F(DaemonIproRecorderTest, AResponseThatBreaksBeforeTheGateCountsNothing) {
+  // A private response breaks out of DoneAndSetHeaders before the class is
+  // classified; its fall-through stays only in the serve-time total.
+  SimpleStats stats(thread_system_.get());
+  RewriteStats::InitStats(&stats);
+  RewriteStats rewrite_stats(false, &stats, thread_system_.get(), &timer_);
+
+  ResponseHeaders headers;
+  MakeOkHeaders(&headers);
+  headers.Replace(HttpAttributes::kCacheControl, "max-age=600, private");
+  headers.ComputeCaching();
+  const DaemonRecordOutcome outcome = Run(&headers, kBody, true, nullptr,
+                                          nullptr, nullptr, &rewrite_stats);
+  EXPECT_FALSE(outcome.gate_ran);
+  EXPECT_EQ(0, stats.GetVariable("ipro_daemon_fallthrough_css")->Get());
 }
 
 }  // namespace

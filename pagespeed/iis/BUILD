@@ -93,7 +93,6 @@ cc_library(
         "iis_rewrite_options.cpp",
         "iis_configuration.cpp",
         "iis_config_util.cpp",
-        "iis_global_constants.cpp",
         "iis_base_fetch.cpp",
         "iis_async_url_fetcher.cpp",
         "asyncwinhttp.cpp",
@@ -118,7 +117,6 @@ cc_library(
         "iis_rewrite_driver_factory.h",
         "iis_rewrite_options.h",
         "iis_configuration.h",
-        "iis_global_constants.h",
         "iis_base_fetch.h",
         "iis_async_url_fetcher.h",
         "asyncwinhttp.h",
@@ -136,6 +134,10 @@ cc_library(
     target_compatible_with = ["@platforms//os:windows"],
     visibility = ["//visibility:public"],
     deps = [
+        ":iis_daemon_check",
+        ":iis_daemon_record",
+        ":iis_daemon_serve",
+        ":iis_global_constants",
         ":iis_ip_string",
         ":iis_proxy_fetch_completion",
         ":iis_zerocopy_serve",
@@ -150,6 +152,11 @@ cc_library(
         "//pagespeed/kernel/image",
         "//pagespeed/kernel/sharedmem",
         "//pagespeed/kernel/thread:win_thread",
+        # The shared daemon substrate: the startup check, the record arm and
+        # the serve arm with its notifications.
+        "//pagespeed/system:daemon_adapter",
+        "//pagespeed/system:daemon_record_arm",
+        "//pagespeed/system:daemon_serve_arm",
         "//pagespeed/system:system_windows",
         "@com_googlesource_code_re2//:re2",
         "@zlib_ng//:zlib_ng",
@@ -164,6 +171,89 @@ cc_library(
         ],
         "//conditions:default": [],
     }),
+)
+
+# The Windows event-log writer (Event Viewer source "PageSpeed"), with a
+# test seam that lets unit tests count entries without writing the real log.
+# Windows-only.
+cc_library(
+    name = "iis_event_log",
+    srcs = ["iis_event_log.cc"],
+    hdrs = ["iis_event_log.h"],
+    target_compatible_with = ["@platforms//os:windows"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)
+
+# The process-wide daemon startup-check registry: one adapter per distinct
+# (library, socket, volume) triple for the life of the process, so a
+# configuration rebuild reuses the bound library instead of growing the
+# loader's reference count.  Windows-only like its port.
+cc_library(
+    name = "iis_daemon_check",
+    srcs = ["iis_daemon_check.cc"],
+    hdrs = ["iis_daemon_check.h"],
+    target_compatible_with = ["@platforms//os:windows"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":iis_event_log",
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/system:daemon_adapter",
+    ],
+)
+
+# The port's response-header name tables (known headers, their internal
+# bookmarks, the unknown-header bookmark set) and the module version
+# constant.  Split out so tests can iterate the tables without linking the
+# port.
+cc_library(
+    name = "iis_global_constants",
+    srcs = ["iis_global_constants.cpp"],
+    hdrs = ["iis_global_constants.h"],
+    target_compatible_with = ["@platforms//os:windows"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//net/instaweb:net_instaweb_lib",
+    ],
+)
+
+# The daemon record arm's request facts: the capability-header reader
+# shared by both arms, the begin-time request properties, and the
+# authorization fact re-taken after IIS authentication.  Windows-only like
+# its port.
+cc_library(
+    name = "iis_daemon_record",
+    srcs = ["iis_daemon_record.cc"],
+    hdrs = ["iis_daemon_record.h"],
+    target_compatible_with = ["@platforms//os:windows"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//net/instaweb/rewriter",
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/kernel/http",
+        "//pagespeed/system:daemon_record_arm",
+    ],
+)
+
+# The serve arm's own parts: the request facts the peer needs, the response
+# composition (pure, so the whole header list is testable without an IIS
+# request), and the write itself. Windows-only for the same reason as the
+# record arm's file: it reaches the IIS runtime headers.
+cc_library(
+    name = "iis_daemon_serve",
+    srcs = ["iis_daemon_serve.cc"],
+    hdrs = ["iis_daemon_serve.h"],
+    target_compatible_with = ["@platforms//os:windows"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":iis_daemon_record",
+        "//net/instaweb/rewriter",
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/kernel/http",
+        "//pagespeed/system:daemon_serve_arm",
+    ],
 )
 
 # Socket-address -> printable IP string helper, split out of iis_http_module.cpp
@@ -212,6 +302,31 @@ cc_binary(
 filegroup(
     name = "perf_counter_manifest",
     srcs = ["pagespeed_counters.man"],
+    visibility = ["//visibility:public"],
+)
+
+# The options registration, for the cross-port pin that asserts the three
+# ports bind the daemon options' names, ids and accessor spellings
+# identically (test/pagespeed/nginx/ngx_daemon_options_pin_test.cc).
+filegroup(
+    name = "iis_rewrite_options_src",
+    srcs = [
+        "iis_rewrite_options.cpp",
+        "iis_rewrite_options.h",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+# All port sources, as data: the recorder seam pin under test/pagespeed/iis
+# reads them as text (the port cannot be linked into a test -- it sits behind
+# the IIS runtime headers), in the same idiom as the nginx port's source
+# filegroups.
+filegroup(
+    name = "iis_module_srcs",
+    srcs = glob(
+        ["*.cpp", "*.cc", "*.h"],
+        allow_empty = False,
+    ),
     visibility = ["//visibility:public"],
 )
 

@@ -448,12 +448,14 @@ void JavascriptFilter::StartElementImpl(HtmlElement* element) {
           // MapRewriteDomain or ShardDomain would relocate the module to
           // another host. Skip the rewrite in that case; a same-host rewrite
           // keeps relative imports resolving against the right host.
-          GoogleUrl script_gurl(driver()->base_url(),
-                                script_src->DecodedValueOrNull());
           if (!options->js_preserve_urls() &&
-              options->domain_lawyer()->WillDomainChange(script_gurl)) {
-            driver()->InsertDebugComment(kModuleCrossHostMessage, element);
-            break;
+              script_src->DecodedValueOrNull() != nullptr) {
+            GoogleUrl script_gurl(driver()->base_url(),
+                                  script_src->DecodedValueOrNull());
+            if (options->domain_lawyer()->WillDomainChange(script_gurl)) {
+              driver()->InsertDebugComment(kModuleCrossHostMessage, element);
+              break;
+            }
           }
           script_type_ = kExternalScript;
           RewriteExternalScript(element, script_src);

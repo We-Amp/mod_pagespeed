@@ -1,0 +1,89 @@
+#!/bin/bash
+#
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# This script collects slurps and URLs (post-optimization, if possible), of
+# some websites with the help of phantomjs.
+
+function usage {
+  echo "Usage: loadtest_collect/loadtest_collect_corpus.sh pages.txt out.tar.bz2"
+  echo "Where pages.txt has a URL (including http://) per line"
+}
+
+set -u  # exit the script if any variable is uninitialized
+set -e
+
+# Resolve the repo root from this script's own location, before the `cd
+# tools/stress` below can change the working directory -- this must run
+# first so it works from either of this script's supported invocation
+# directories (see the `cd tools/stress` check below).
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+
+# This script drives the local Apache installation directly (the
+# install/Makefile.tests targets it used to call via `make` are gone).
+# install/clean_slate_for_tests.sh needs these two; override them if your
+# Apache install doesn't use the Debian/Ubuntu defaults.
+APACHE_LOG="${APACHE_LOG:-/var/log/apache2/error.log}"
+MOD_PAGESPEED_CACHE="${MOD_PAGESPEED_CACHE:-/var/cache/mod_pagespeed}"
+
+if [ $# -ne 2 ]; then
+  usage
+  exit 1
+fi
+
+if [ -d tools/stress ]; then
+  cd tools/stress
+fi
+if [ ! -d loadtest_collect ]; then
+  echo Run this script from the top or tools/stress/ directories
+  exit 1
+fi
+
+# Slurping is driven by headless Chrome via loadtest_collect/collect.js
+# (puppeteer-core). phantomjs (the old driver) has been unmaintained since 2018.
+if [ ! $(which node) ]; then
+  echo "node not found; install Node.js (>=18) to run the headless-Chrome" \
+       "slurp driver (loadtest_collect/collect.js)." >&2
+  exit 1
+fi
+# Install the puppeteer-core dependency on first run. Set CHROME_PATH if your
+# Chrome/Chromium binary is not in a standard location.
+if [ ! -d loadtest_collect/node_modules ]; then
+  echo "Installing collect.js dependencies (puppeteer-core)..."
+  (cd loadtest_collect && npm install --silent)
+fi
+
+SLURP_TOP_DIR=$(mktemp -d)
+SLURP_DIR=$SLURP_TOP_DIR/slurp
+mkdir $SLURP_DIR
+LOG_PATH=$SLURP_TOP_DIR/log.txt
+URLS_PATH=$SLURP_TOP_DIR/corpus_all_urls.txt
+
+APACHE_LOG="$APACHE_LOG" MOD_PAGESPEED_CACHE="$MOD_PAGESPEED_CACHE" \
+  "$ROOT/install/clean_slate_for_tests.sh"
+sudo apache2ctl stop
+
+sed -e "s^#HOME^$HOME^" -e "s^#SLURP_DIR^$SLURP_DIR^" \
+  -e "s^#LOG_PATH^$LOG_PATH^" \
+  < loadtest_collect/loadtest_collect.conf > ~/apache2/conf/pagespeed.conf
+sudo apache2ctl restart
+
+# Drive every page through the slurp proxy with headless Chrome, waiting for
+# network idle so all sub-resources are recorded.
+node loadtest_collect/collect.js "$1" 127.0.0.1:8080
+
+cat $LOG_PATH | grep ^GET | cut -d ' ' -f 2 > $URLS_PATH
+cd $SLURP_TOP_DIR
+tar cvjf $2 *
+

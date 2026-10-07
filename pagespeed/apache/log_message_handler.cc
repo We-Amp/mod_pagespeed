@@ -34,13 +34,8 @@
 #undef LOG
 #define LOG USING_LOG_HERE_WOULD_CAUSE_INFINITE_RECURSION
 
-namespace {
-
-apr_pool_t* log_pool = nullptr;
-
-const int kMaxInt = std::numeric_limits<int>::max();
-int log_level_cutoff = kMaxInt;
-GoogleString* mod_pagespeed_version = nullptr;
+namespace net_instaweb {
+namespace log_message_handler {
 
 int GetApacheLogLevel(int severity) {
   switch (severity) {
@@ -55,15 +50,30 @@ int GetApacheLogLevel(int severity) {
       return APLOG_ERR;
     case logging::LOG_FATAL:
       return APLOG_ALERT;
-    default:  // For VLOG()s
-      // TODO(sligocki): return APLOG_DEBUG;
-      return APLOG_NOTICE;
+    default:  // For VLOG()s, which carry negative severity.
+      // Verbose diagnostics surface only when the server's LogLevel is
+      // debug: LogMessageHandler gates emission on log_level_cutoff, which
+      // AddServerConfig derives from the per-module Apache LogLevel, so at
+      // the default LogLevel warn an APLOG_DEBUG entry is dropped.
+      return APLOG_DEBUG;
   }
 }
 
+}  // namespace log_message_handler
+}  // namespace net_instaweb
+
+namespace {
+
+apr_pool_t* log_pool = nullptr;
+
+const int kMaxInt = std::numeric_limits<int>::max();
+int log_level_cutoff = kMaxInt;
+GoogleString* mod_pagespeed_version = nullptr;
+
 bool LogMessageHandler(int severity, const char* file, int line,
                        const GoogleString& str) {
-  const int this_log_level = GetApacheLogLevel(severity);
+  const int this_log_level =
+      net_instaweb::log_message_handler::GetApacheLogLevel(severity);
   GoogleString message(str);
   // Trim the newline off the end of the message string.
   size_t last_msg_character_index = message.length() - 1;

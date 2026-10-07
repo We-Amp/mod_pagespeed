@@ -173,11 +173,18 @@ class CheckOpResult {
   ::pagespeed_logging::LogMessage(logging::LOG_##severity, __FILE__, __LINE__) \
       .stream()
 
-// VLOG - verbose logging (treated as INFO if verbose level is met)
-// For simplicity, always log VLOG messages as INFO
-#define VLOG(verboselevel) LOG(INFO)
+// VLOG - verbose logging. Verbose messages carry a negative severity
+// (-(verboselevel), the glog convention) so that log sinks can route them
+// to debug-level output instead of reporting them as info. They are not
+// written to any process logger (see LogMessage::~LogMessage); registered
+// sinks decide whether to keep them, e.g. the Apache module emits them
+// only when its LogLevel is debug.
+#define VLOG(verboselevel)                                                       \
+  ::pagespeed_logging::LogMessage(-(verboselevel), __FILE__, __LINE__).stream()
 
-// VLOG_IS_ON - check if verbose logging is enabled at given level
+// VLOG_IS_ON - check if verbose logging is enabled at given level.
+// Always true: every verbose message reaches the sinks, which apply their
+// own level cutoffs.
 #define VLOG_IS_ON(verboselevel) (true)
 
 // LOG_IF - conditional logging

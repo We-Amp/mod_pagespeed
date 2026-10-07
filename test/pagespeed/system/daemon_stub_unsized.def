@@ -1,0 +1,76 @@
+; Licensed to the Apache Software Foundation (ASF) under one
+; or more contributor license agreements.  See the NOTICE file
+; distributed with this work for additional information
+; regarding copyright ownership.  The ASF licenses this file
+; to you under the Apache License, Version 2.0 (the
+; "License"); you may not use this file except in compliance
+; with the License.  You may obtain a copy of the License at
+;
+;   http://www.apache.org/licenses/LICENSE-2.0
+;
+; Unless required by applicable law or agreed to in writing,
+; software distributed under the License is distributed on an
+; "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+; KIND, either express or implied.  See the License for the
+; specific language governing permissions and limitations
+; under the License.
+
+; The stub daemon's export list, spelled out by hand: a Windows linkshared
+; build exports nothing without it (the source uses plain extern "C" with
+; default visibility, POSIX-style).
+;
+; This flavour deliberately OMITS ps_cache_config_init_sized.
+;
+; THIS LIST CANNOT DRIFT SILENTLY from the surface the shared loader binds.
+; Every name here is resolved by the loader's own binding sequence when the
+; stub-binding suites run against this DLL, so a name missing from this file
+; turns those tests red with the symbol's name in the message -- see
+; daemon_adapter_test's loader cases.
+EXPORTS
+  ps_age_adjusted_insert_time
+  ps_build_cache_control
+  ps_cache_close
+  ps_cache_config_init
+  ps_cache_open
+  ps_cache_read_alternate
+  ps_cache_read_best
+  ps_cache_write_original
+  ps_classify
+  ps_classify_content_type
+  ps_evaluate_freshness
+  ps_last_error_message
+  ps_notify_params_init_sized
+  ps_notify_worker_ex
+  ps_option_context_signature
+  ps_parse_cache_control
+  ps_read_cache_inserted_at
+  ps_read_content
+  ps_read_content_type
+  ps_read_flags
+  ps_read_free
+  ps_read_is_worker_processed
+  ps_read_mask
+  ps_read_origin_cc_flags
+  ps_read_origin_content_length
+  ps_read_origin_content_type
+  ps_read_origin_etag
+  ps_read_origin_html_hash
+  ps_read_origin_last_modified
+  ps_read_origin_max_age
+  ps_read_origin_s_maxage
+  ps_read_shared_config_generation
+  ps_read_shared_config_volume_size
+  ps_serve_stats_close
+  ps_serve_stats_open
+  ps_serve_stats_record_hit
+  ps_serve_stats_record_hit_host
+  ps_serve_stats_record_serve_class
+  ps_strerror
+  ps_vary_uncacheable
+  ps_vary_varies_accept
+  ps_version_major
+  ps_version_minor
+  ps_write_abort
+  ps_write_close
+  ps_write_data
+  ps_write_params_init_sized

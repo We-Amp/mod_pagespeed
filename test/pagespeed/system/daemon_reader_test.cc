@@ -116,6 +116,9 @@ class UdsTestServer {
   GoogleString content_type_ = "application/json";
   GoogleString body_ = "{\"status\":\"ok\"}";
   bool hang_ = false;
+  // When non-empty, sent as the Content-Length instead of body_.size(): a
+  // larger value makes the server drop the connection mid-body.
+  GoogleString content_length_;
 
  private:
   void ServeLoop() {
@@ -148,12 +151,20 @@ class UdsTestServer {
       } else {
         GoogleString response = StrCat(
             "HTTP/1.1 ", status_line_, "\r\nContent-Type: ", content_type_,
-            "\r\nContent-Length: ", IntegerToString(body_.size()), "\r\n\r\n",
-            body_);
+            "\r\nContent-Length: ",
+            content_length_.empty() ? IntegerToString(body_.size())
+                                    : content_length_,
+            "\r\n\r\n", body_);
         const char* p = response.c_str();
         size_t left = response.size();
         while (left > 0) {
-          ssize_t n = write(fd, p, left);
+          // The reader may hang up mid-body (a response over its cap):
+          // send() with MSG_NOSIGNAL turns that into EPIPE (n < 0, which
+          // ends this loop) instead of a SIGPIPE that would kill the test
+          // binary.  This target is Linux-only (target_compatible_with in
+          // test/pagespeed/system/BUILD), and curl_test_server.cc uses the
+          // same flag.
+          ssize_t n = send(fd, p, left, MSG_NOSIGNAL);
           if (n <= 0) {
             break;
           }
@@ -247,8 +258,8 @@ TEST_F(UdsDaemonReaderTest, ProxyIsSuppressedForUnixSocket) {
       RequestContext::NewTestRequestContext(thread_system_.get()));
   proxied_fetcher.FetchOverUnixSocket(
       "http://localhost/v1/health", SocketPath("proxy"),
-      UdsDaemonReader::kUpstreamTimeoutMs,
-      UdsDaemonReader::kMaxResponseBodyBytes, &message_handler_, &fetch);
+      UdsDaemonReader::kUpstreamTimeoutMs, kMaxJsonResponseBytes,
+      &message_handler_, &fetch);
   WaitForDone(fetch);
   ASSERT_TRUE(fetch.done());
   EXPECT_TRUE(fetch.success());
@@ -262,10 +273,12 @@ TEST_F(UdsDaemonReaderTest, GetOverUnixSocket) {
                          SocketPath("get"), &message_handler_);
   ReaderTestFetch fetch(
       RequestContext::NewTestRequestContext(thread_system_.get()));
-  reader.Get("/v1/health", &fetch);
+  DaemonReadFailure failure = DaemonReadFailure::kTooLarge;  // overwritten
+  reader.Get("/v1/health", kMaxJsonResponseBytes, &fetch, &failure);
   WaitForDone(fetch);
   ASSERT_TRUE(fetch.done());
   EXPECT_TRUE(fetch.success());
+  EXPECT_EQ(DaemonReadFailure::kNone, failure);
   EXPECT_EQ(HttpStatus::kOK, fetch.response_headers()->status_code());
   EXPECT_EQ("{\"status\":\"ok\"}", fetch.buffer());
   const char* content_type =
@@ -286,53 +299,129 @@ TEST_F(UdsDaemonReaderTest, HeadOverUnixSocket) {
   ReaderTestFetch fetch(
       RequestContext::NewTestRequestContext(thread_system_.get()));
   fetch.request_headers()->set_method(RequestHeaders::kHead);
-  reader.Get("/v1/health", &fetch);
+  DaemonReadFailure failure = DaemonReadFailure::kTooLarge;  // overwritten
+  reader.Get("/v1/health", kMaxJsonResponseBytes, &fetch, &failure);
   WaitForDone(fetch);
   ASSERT_TRUE(fetch.done());
   EXPECT_TRUE(fetch.success());
+  EXPECT_EQ(DaemonReadFailure::kNone, failure);
   EXPECT_EQ(HttpStatus::kOK, fetch.response_headers()->status_code());
   EXPECT_TRUE(fetch.buffer().empty());
   EXPECT_THAT(server.last_request(),
               ::testing::HasSubstr("HEAD /v1/health HTTP/1.1"));
 }
 
-TEST_F(UdsDaemonReaderTest, EmptySocketPathFailsImmediately) {
+TEST_F(UdsDaemonReaderTest, EmptySocketPathIsDisabled) {
   UdsDaemonReader reader(thread_system_.get(), timer_.get(),
                          "" /* socket_path */, &message_handler_);
   ReaderTestFetch fetch(
       RequestContext::NewTestRequestContext(thread_system_.get()));
-  reader.Get("/v1/health", &fetch);
+  DaemonReadFailure failure = DaemonReadFailure::kNone;
+  reader.Get("/v1/health", kMaxJsonResponseBytes, &fetch, &failure);
   ASSERT_TRUE(fetch.done());
   EXPECT_FALSE(fetch.success());
+  EXPECT_EQ(DaemonReadFailure::kDisabled, failure);
 }
 
-TEST_F(UdsDaemonReaderTest, UnreachableSocketFails) {
+TEST_F(UdsDaemonReaderTest, UnreachableSocketIsDisconnected) {
   // No server is listening at this path.
   UdsDaemonReader reader(thread_system_.get(), timer_.get(),
                          SocketPath("absent"), &message_handler_);
   ReaderTestFetch fetch(
       RequestContext::NewTestRequestContext(thread_system_.get()));
-  reader.Get("/v1/health", &fetch);
+  DaemonReadFailure failure = DaemonReadFailure::kNone;
+  reader.Get("/v1/health", kMaxJsonResponseBytes, &fetch, &failure);
   WaitForDone(fetch);
   ASSERT_TRUE(fetch.done());
   EXPECT_FALSE(fetch.success());
+  EXPECT_EQ(DaemonReadFailure::kDisconnected, failure);
 }
 
-TEST_F(UdsDaemonReaderTest, OversizedResponseFails) {
+TEST_F(UdsDaemonReaderTest, OneByteOverTheCapIsTooLarge) {
+  // Inside the transport's slack, so the transfer itself completes: the
+  // reader's own count is what fails it -- and no byte past the cap
+  // reaches the caller's fetch.
   UdsTestServer server(SocketPath("big"));
-  server.body_ = GoogleString(UdsDaemonReader::kMaxResponseBodyBytes + 1, 'x');
+  server.body_ = GoogleString(kMaxJsonResponseBytes + 1, 'x');
   ASSERT_TRUE(server.Start());
   UdsDaemonReader reader(thread_system_.get(), timer_.get(),
                          SocketPath("big"), &message_handler_);
   ReaderTestFetch fetch(
       RequestContext::NewTestRequestContext(thread_system_.get()));
-  reader.Get("/v1/stats", &fetch);
+  DaemonReadFailure failure = DaemonReadFailure::kNone;
+  reader.Get("/v1/stats", kMaxJsonResponseBytes, &fetch, &failure);
   WaitForDone(fetch);
   ASSERT_TRUE(fetch.done());
   EXPECT_FALSE(fetch.success());
+  EXPECT_EQ(DaemonReadFailure::kTooLarge, failure);
+  EXPECT_LE(fetch.buffer().size(), kMaxJsonResponseBytes);
 }
 
-TEST_F(UdsDaemonReaderTest, TimeoutFails) {
+TEST_F(UdsDaemonReaderTest, FarOverTheCapIsTooLarge) {
+  // Past the transport's slack too: the transport aborts, and the reader
+  // still reports the reason it observed.
+  UdsTestServer server(SocketPath("huge"));
+  server.body_ = GoogleString(3 * kMaxJsonResponseBytes, 'x');
+  ASSERT_TRUE(server.Start());
+  UdsDaemonReader reader(thread_system_.get(), timer_.get(),
+                         SocketPath("huge"), &message_handler_);
+  ReaderTestFetch fetch(
+      RequestContext::NewTestRequestContext(thread_system_.get()));
+  DaemonReadFailure failure = DaemonReadFailure::kNone;
+  reader.Get("/v1/stats", kMaxJsonResponseBytes, &fetch, &failure);
+  WaitForDone(fetch);
+  ASSERT_TRUE(fetch.done());
+  EXPECT_FALSE(fetch.success());
+  EXPECT_EQ(DaemonReadFailure::kTooLarge, failure);
+  EXPECT_LE(fetch.buffer().size(), kMaxJsonResponseBytes);
+}
+
+TEST_F(UdsDaemonReaderTest, ContentCapAdmitsWhatTheJsonCapRefuses) {
+  // A 2 MiB body: a legitimate cached image, too big for a JSON answer.
+  const GoogleString body(2 * 1024 * 1024, 'x');
+  for (const size_t cap : {kMaxContentResponseBytes, kMaxJsonResponseBytes}) {
+    UdsTestServer server(SocketPath("two-mib"));
+    server.body_ = body;
+    ASSERT_TRUE(server.Start());
+    UdsDaemonReader reader(thread_system_.get(), timer_.get(),
+                           SocketPath("two-mib"), &message_handler_);
+    ReaderTestFetch fetch(
+        RequestContext::NewTestRequestContext(thread_system_.get()));
+    DaemonReadFailure failure = DaemonReadFailure::kDisabled;
+    reader.Get("/v1/cache/content", cap, &fetch, &failure);
+    WaitForDone(fetch);
+    ASSERT_TRUE(fetch.done()) << cap;
+    if (cap == kMaxContentResponseBytes) {
+      EXPECT_TRUE(fetch.success());
+      EXPECT_EQ(DaemonReadFailure::kNone, failure);
+      EXPECT_EQ(body.size(), fetch.buffer().size());
+    } else {
+      EXPECT_FALSE(fetch.success());
+      EXPECT_EQ(DaemonReadFailure::kTooLarge, failure);
+    }
+  }
+}
+
+TEST_F(UdsDaemonReaderTest, DroppedMidBodyIsDisconnectedNotTooLarge) {
+  // Headers (and a status) arrive, then the connection drops before the
+  // advertised body is complete: an ordinary failure, not "too large".
+  UdsTestServer server(SocketPath("drop"));
+  server.body_ = "0123456789";
+  server.content_length_ = "1000";
+  ASSERT_TRUE(server.Start());
+  UdsDaemonReader reader(thread_system_.get(), timer_.get(),
+                         SocketPath("drop"), &message_handler_);
+  ReaderTestFetch fetch(
+      RequestContext::NewTestRequestContext(thread_system_.get()));
+  DaemonReadFailure failure = DaemonReadFailure::kNone;
+  reader.Get("/v1/cache/content", kMaxContentResponseBytes, &fetch, &failure);
+  WaitForDone(fetch);
+  ASSERT_TRUE(fetch.done());
+  EXPECT_FALSE(fetch.success());
+  EXPECT_EQ(DaemonReadFailure::kDisconnected, failure);
+}
+
+TEST_F(UdsDaemonReaderTest, TimeoutIsTimeout) {
   UdsTestServer server(SocketPath("hang"));
   server.hang_ = true;
   ASSERT_TRUE(server.Start());
@@ -340,14 +429,16 @@ TEST_F(UdsDaemonReaderTest, TimeoutFails) {
                          SocketPath("hang"), &message_handler_);
   ReaderTestFetch fetch(
       RequestContext::NewTestRequestContext(thread_system_.get()));
+  DaemonReadFailure failure = DaemonReadFailure::kNone;
   int64 start_ms = timer_->NowMs();
-  reader.Get("/v1/stats", &fetch);
+  reader.Get("/v1/stats", kMaxJsonResponseBytes, &fetch, &failure);
   WaitForDone(fetch);
   ASSERT_TRUE(fetch.done());
   EXPECT_FALSE(fetch.success());
   // The reader's own timeout ended the fetch.
   EXPECT_GE(timer_->NowMs() - start_ms,
             UdsDaemonReader::kUpstreamTimeoutMs - 1000);
+  EXPECT_EQ(DaemonReadFailure::kTimeout, failure);
 }
 
 }  // namespace

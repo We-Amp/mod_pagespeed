@@ -1408,6 +1408,36 @@ TEST_F(BeaconTest, EmptyCriticalCss) {
   EXPECT_TRUE(critical_css_selectors_.empty());
 }
 
+// The browser marks a report it had to cut short with of=1. Such a report
+// reaches the stored data as "not current": the selectors it names are not
+// counted, and what was known before stays.
+TEST_F(BeaconTest, ATruncatedCriticalCssReportIsNotCurrent) {
+  CriticalSelectorFinder* finder = server_context()->critical_selector_finder();
+  InsertCssBeacon(UserAgentMatcherTestBase::kChromeUserAgent);
+  StringSet critical_css_selector;
+  critical_css_selector.insert(".bar");
+  TestBeacon(nullptr, &critical_css_selector, nullptr,
+             UserAgentMatcherTestBase::kChromeUserAgent);
+  EXPECT_STREQ(".bar", JoinCollection(critical_css_selectors_, ","));
+  EXPECT_TRUE(finder->HasCurrentBeaconData(rewrite_driver()));
+
+  InsertCssBeacon(UserAgentMatcherTestBase::kChromeUserAgent);
+  GoogleString beacon_url =
+      StrCat("url=http%3A%2F%2Fwww.example.com&oh=", kOptionsHash,
+             "&n=", last_beacon_metadata_.nonce, "&cs=img&of=1");
+  EXPECT_TRUE(server_context()->HandleBeacon(
+      beacon_url, UserAgentMatcherTestBase::kChromeUserAgent,
+      CreateRequestContext()));
+
+  ResetDriver();
+  rewrite_driver()->set_property_page(
+      MockPageForUA(UserAgentMatcherTestBase::kChromeUserAgent));
+  EXPECT_STREQ(".bar",
+               JoinCollection(finder->GetCriticalSelectors(rewrite_driver()),
+                              ","));
+  EXPECT_FALSE(finder->HasCurrentBeaconData(rewrite_driver()));
+}
+
 class ResourceFreshenTest : public ServerContextTest {
  protected:
   void SetUp() override {

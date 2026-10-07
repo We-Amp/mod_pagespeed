@@ -208,15 +208,16 @@ void CacheExtender::StartElementImpl(HtmlElement* element) {
         // override it, and the slot would still render the new URL.
         HtmlElement::Attribute* script_src;
         ScriptTagScanner scanner(driver());
-        GoogleUrl script_gurl(driver()->base_url(),
-                              attributes[i].url->DecodedValueOrNull());
-        if (may_load &&
+        if (may_load && attributes[i].url->DecodedValueOrNull() != nullptr &&
             scanner.ParseScriptElement(element, &script_src) ==
-                ScriptTagScanner::kJavaScriptModule &&
-            driver()->options()->domain_lawyer()->WillDomainChange(
-                script_gurl)) {
-          driver()->InsertDebugComment(kModuleCrossHostMessage, element);
-          may_load = false;
+                ScriptTagScanner::kJavaScriptModule) {
+          GoogleUrl script_gurl(driver()->base_url(),
+                                attributes[i].url->DecodedValueOrNull());
+          if (driver()->options()->domain_lawyer()->WillDomainChange(
+                  script_gurl)) {
+            driver()->InsertDebugComment(kModuleCrossHostMessage, element);
+            may_load = false;
+          }
         }
         break;
       }
@@ -242,7 +243,7 @@ void CacheExtender::StartElementImpl(HtmlElement* element) {
     // enforced — even when the bytes match. Leave a resource carrying
     // integrity= on its origin host. (Modules are handled above: their
     // fetches are CORS-mode and break for the inverse reason.)
-    if (may_load &&
+    if (may_load && attributes[i].url->DecodedValueOrNull() != nullptr &&
         (attributes[i].category == semantic_type::kScript ||
          attributes[i].category == semantic_type::kStylesheet) &&
         ScriptTagScanner::HasIntegrityAttribute(element)) {

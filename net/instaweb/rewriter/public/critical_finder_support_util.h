@@ -62,6 +62,12 @@ const int64 kHighFreqBeaconCount = 3;
 // mode.
 const int64 kLowFreqBeaconMult = 100;
 
+// The same for the critical-selector beacon. A page whose markup starts
+// using a rule that matched nothing before is served without that rule in
+// its inline CSS until a browser reports again, so the page is asked again
+// sooner: after beacon_reinstrument_time_sec x 12 (a minute by default).
+const int64 kCriticalSelectorLowFreqBeaconMult = 12;
+
 // The limit on the number of nonces that can expire before we stop trying to do
 // high frequency beaconing. This is a signal that beacons are not configured
 // correctly and so we drop into low frequency beaconing mode.
@@ -105,13 +111,29 @@ void GetCriticalKeysFromProto(int64 support_percentage,
 void UpdateCriticalKeys(bool require_prior_support, const StringSet& new_set,
                         int support_value, CriticalKeys* critical_keys);
 
+// The same for keys that are registered candidates (critical selectors):
+// support for the reported keys is added and the rest decays, but
+//  - a candidate whose support reaches 0 keeps its entry, so it is not taken
+//    for a new candidate later, and
+//  - when a reported candidate had no support, the report is news about the
+//    page: the count of agreeing reports restarts at 1 and the next page
+//    view is instrumented again, instead of waiting out the long interval.
+// Keys that are not registered are ignored.
+void UpdateCandidateSupport(const StringSet& matched, int support_value,
+                            CriticalKeys* critical_keys);
+
 bool ShouldBeacon(int64 next_beacon_timestamp_ms, const RewriteDriver& driver);
 
 enum CriticalKeysWriteFlags {
   kNoRequirementsOnPriorResult = 0,  // Nice name for lack of next two flags.
   kReplacePriorResult = 1,
   kRequirePriorSupport = 2,
-  kSkipNonceCheck = 4
+  kSkipNonceCheck = 4,
+  // The keys are registered candidates (see UpdateCandidateKeys): a
+  // candidate that is no longer reported keeps its entry with support 0
+  // instead of being forgotten, and one that is reported again after having
+  // had no support counts as news (see UpdateCandidateSupport).
+  kKeepUnmatchedCandidates = 8
 };
 
 // Update the property cache with a new set of keys. This will update the

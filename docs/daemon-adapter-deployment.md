@@ -2,17 +2,23 @@
 
 This page covers the two Apache directives that point the module at the
 optimizer daemon, the layout they are meant to be used in, and what happens
-when the daemon is missing.
+when the daemon is missing. The nginx module takes the same two directives
+(`pagespeed DaemonSocketPath` and `pagespeed DaemonVolumePath` in a `server`
+block); its set-up is in `docs/install-nginx.md`, "Using the optimizer daemon".
+IIS is covered in `docs/daemon-adapter-iis.md`.
 
 Both halves are wired now. With the directives set, a server records origin
 responses into the daemon's cache, asks the daemon to optimize them, and
 answers later in-place-eligible requests from that cache when there is
 something there to answer them with.
 
-**Leave both directives unset on a production server for now.** The cost that
-kept them off has not changed: a request the cache cannot answer is still
-recorded, so a hot URL whose optimized form does not exist yet is recorded once
-per request per process.
+The Apache module packages install `pagespeed_daemon.conf`, which sets both
+directives to the optimizer package's default paths. With them set and the
+daemon usable, in-place optimization runs over the daemon's cache: the module
+records eligible responses, the daemon optimizes them, and the module serves
+the optimized variant, or the stored original when no variant fits the
+client. With both unset, the module's own (classic) in-place path is used,
+exactly as before.
 
 One behaviour is worth knowing before it is observed. A response the module
 cannot faithfully reproduce from a cache entry — because the origin sent a
@@ -28,11 +34,14 @@ serve" below.
 |---|---|---|
 | `ModPagespeedDaemonSocketPath` | Path of the daemon's notification socket | server / virtual host |
 | `ModPagespeedDaemonVolumePath` | Path of the daemon's shared cache volume | server / virtual host |
+| `ModPagespeedDaemonServeStoredEncodings` | `on` or `off` (default `off`): serve the optimizer's stored gzip and brotli copies — see "Serving the stored compressed copies" | server / virtual host |
 
-Both are unset by default, which is the classic configuration: in-place
-optimization behaves exactly as it always has and nothing on this page
-applies. Set them together — one without the other is a configuration mistake
-and the module says so at startup.
+The two path directives are unset in the module's own defaults, which is the
+classic configuration: in-place optimization behaves exactly as it always has
+and nothing on this page applies. The Apache module packages set both in
+`pagespeed_daemon.conf` (see above); the nginx module package sets neither.
+Set them together — one without the other is a configuration mistake and the
+module says so at startup.
 
 There is no directive that switches between the classic and daemon in-place
 substrates at run time, and there will not be one. If the daemon substrate
@@ -46,7 +55,7 @@ Since the daemon's privilege drop (2.1), the optimizer daemon runs as the
 unprivileged `pagespeed` user and its artifacts are group-scoped: the cache
 volume, the notify socket and the shared configuration are mode `0660`/`0640`
 owned by `pagespeed:pagespeed`, under the versioned cold-start cache directory
-(`/var/cache/pagespeed-optimizer/v1/`) and `/run/pagespeed-optimizer/`. The
+(`/var/cache/pagespeed-optimizer/v2/`) and `/run/pagespeed-optimizer/`. The
 module reaches all three as a **group member**, never as their owner — it
 still never creates the volume, and it still refuses to start if an open
 authors a stray second volume file.
@@ -67,7 +76,7 @@ Two consequences are visible at startup:
   process, where the volume is really opened.
 * **The cache-directory generation is checked.** The daemon publishes
   `cache_dir_generation` in its shared configuration; this module is built
-  for generation 1. A daemon publishing a different generation is a loud
+  for generation 2. A daemon publishing a different generation is a loud
   handshake failure — in-place optimization off, nothing opened, never a
   silent split-brain across two layouts that share nothing. A daemon
   publishing no generation at all (a package from before the privilege drop)
@@ -134,17 +143,24 @@ the daemon's volume:
   so the extras are wasted disk rather than a split cache. They can be deleted
   while the daemon is stopped.
 * **If opening at the daemon's published size creates a second volume file**,
-  the server **refuses to start** and names the file it just created. There
-  are two ways to reach it, and the message distinguishes them.
+  the server **refuses to start**, names the file its open created, and says
+  what became of it: removed, still there, not confirmed gone, or left in
+  place because another user or process holds it. There are two ways to reach
+  the refusal, and the message distinguishes them.
 
   The common one is **start order during an upgrade to a release that changes
   the on-disk cache format**. The daemon's volume filename carries the format,
   so a daemon on a new format opens a new file; until it has restarted and
   created it, the only volume in the directory is the previous format's, and a
   web server that starts in that window creates the new file itself instead of
-  attaching to the daemon's. **Upgrade and start the optimizer daemon first,
-  let it create its volume, then start the web server.** The file the refused
-  start created can be removed once the daemon is up.
+  attaching to the daemon's. **Upgrade and start or restart the optimizer
+  daemon, let it create its volume, then start the web server.** The refused
+  start has usually removed the file it created; when the message says it
+  could not, or could not confirm it is gone, remove that file by hand before
+  the next start —
+  unless the message says the file is owned by another user or held open by
+  another process: that file is most likely the optimizer's own volume. Leave
+  it in place; once the optimizer runs on it, the next start attaches to it.
 
   **At boot, whether you need to do anything depends on your web server.**
   The optimizer's service counts as started only once its notify socket
@@ -162,8 +178,9 @@ the daemon's volume:
   starts when no web server is installed.
 
   The other is a genuine disagreement: the published size does not match the
-  volume on disk. Remove the file the start created, then install a module and
-  daemon package pair that agree.
+  volume on disk. Start or restart the optimizer daemon, let it create its
+  volume, then start the web server; if it still refuses after that, install a
+  module and daemon package pair that agree.
 
 That last one is the only condition that stops the server. It earns it because
 it is the only one an operator cannot otherwise see: everything else announces
@@ -267,17 +284,23 @@ guarantee: it is what the current code does, not a contract, and what an
 operator is told about a request answered from the cache — or declined — still
 needs its own answer.
 
-**A request the cache cannot answer re-records**, because recording is what
-happens when there is nothing there to serve. Re-recording REPLACES when a
-single process writes a URL — but a server runs many processes and each is an
-independent writer for the same URL, so superseded copies of a hot URL's body
-can accumulate under that URL until the cache's own limit on how many versions
-of one entry it will hold refuses further writes. Each copy is a whole
-response body, so this costs **disk as well as work**, and it does not shrink
-again on its own. There is no cross-process ordering available to this module
-that would prevent it. That is an accepted intermediate state, not a design
-target, and it is the main reason these directives are not ready for a
-production server.
+**A request the cache does not answer is recorded again**, on Apache and
+nginx alike, because recording is what happens when there is nothing there to
+serve. That covers a URL with no entry, an entry that has aged out, a client
+that asked for a reload, and a URL whose entry is marked because its origin
+sent headers this module cannot put back (see "Which responses this substrate
+will serve" below): such a URL is served by the ordinary path and recorded
+again on every eligible request. When no optimized variant fits the client
+but the stored original can be served, the original is served from the cache
+and nothing is recorded.
+
+Each re-record costs the work of storing the body again and one notification
+to the daemon. A re-record replaces the previous copy: the superseded copy is
+unlinked as the replacement is written, and an entry that reaches the cache's
+limit on versions of one entry resets and accepts writes again instead of
+freezing. Several server processes can still record the same URL at the same
+moment; there is no cross-process ordering available to this module that
+would prevent that.
 
 One further caveat inherited from the cache's own contract: a store that
 commits while a purge of the same URL is in flight is not fenced against it,
@@ -311,6 +334,10 @@ Reproduced, and therefore served from the cache:
   optimizer deliberately derives no optimized copies for one — they would all
   descend from whichever representation the first requester happened to
   elicit.
+- `Content-Encoding` — never the origin's (a response whose origin sends one is
+  marked, as below), but the module's own: with
+  `ModPagespeedDaemonServeStoredEncodings on` it is emitted for a stored
+  compressed copy it sends — see "Serving the stored compressed copies".
 - Headers the server itself puts on every response — `Date`, `Server`, `Age`,
   `Accept-Ranges` and the hop-by-hop names. These are added again on the way
   out, so they are never lost.
@@ -327,6 +354,68 @@ for that URL alone. Such a header is in fact reproduced — your configuration
 adds it to these responses too — but the module marks the response anyway. A
 server that sets, say, a security header site-wide will therefore get little or
 no in-place optimization from this substrate.
+
+## Serving the stored compressed copies
+
+The optimizer stores a gzip and a brotli copy next to each optimized
+stylesheet, script and SVG image. With `ModPagespeedDaemonServeStoredEncodings
+off` — the default in this release — the module serves the uncompressed
+optimized copy and the server compresses it on the way out, exactly as before.
+With it on, for that server or virtual host:
+
+* A client that lists `br` (or `gzip`) by name in `Accept-Encoding`, with a
+  weight above zero, is sent the stored copy in that coding. Brotli is
+  preferred when both are listed.
+* The response carries `Content-Encoding` naming that coding,
+  `Vary: Accept-Encoding` (on the 200 and on a 304 alike), and a
+  `Content-Length` that is the stored copy's size. Apache's own compression is
+  not applied to it: `mod_deflate` is not attached, and a compressor added by
+  site configuration (`AddOutputFilterByType DEFLATE …`, `mod_brotli`) leaves a
+  response that already names a coding alone.
+* Each coding has its own validator. The coding is part of the weak ETag's
+  first field (`W/"ps-…88…"` for the brotli copy, `…48…` for gzip, `…08…`
+  for the uncompressed one), so a 304 only ever validates the copy the client
+  holds. These tags never end in the `-gzip` suffix `mod_deflate` adds to
+  tags of responses it compresses.
+* A client that does not list the coding plainly — `br;q=0`, an unreadable
+  weight (`br;q =0`, a bare `br;q`), only the wildcard `*` — gets the
+  uncompressed copy, compressed by the server as before.
+* When no stored copy in the client's coding exists yet, the uncompressed
+  optimized copy is served exactly as with the directive off.
+* HTML is always served uncompressed from the cache and compressed by the
+  server as before.
+
+A reverse proxy in front of the server (an nginx with `gzip on`, a CDN) does
+not compress a response that already carries `Content-Encoding`, so the stored
+copy reaches the client as stored.
+
+**Your compression exclusions do not apply to these responses.** With the
+directive on, a stored copy is sent to every client that lists its coding,
+whatever `no-gzip` or `gzip-only-text/html` (set by `BrowserMatch` or
+`SetEnvIf`) say for that request: such a client did list the coding, so it can
+decode the copy, but if you rely on those exclusions, leave the directive off
+for that host. Output filters that rewrite bodies, such as `mod_substitute`,
+see the compressed bytes of these responses.
+
+**Statistics.** With the directive on, the optimizer's serve statistics count
+the bytes actually sent: for these serves `serve_savings.<type>.optimized_bytes`
+is the compressed size, measured against the uncompressed original, and
+`serve_savings.<type>.by_encoding` shows how many serves (and bytes) went out
+as `identity`, `gzip` and `br`.
+
+**Rollback.** Set the directive to `off` (or remove it) and reload: responses
+go back to exactly what the module sent before.
+
+**The default changes to `on` in a later release**, after it has run in
+production.
+
+**If no server serves the stored copies**, they are work the optimizer does
+for nothing. Setting the optimizer's `gzip_level` and `brotli_level` to `0` (in
+its configuration file, or `--gzip-level 0 --brotli-level 0` on its command
+line) stops it writing them. Leave them at their defaults on any optimizer
+that serves a server with this directive on, or there is nothing to serve.
+Raising a level from `0` again does not add copies to resources that are
+already optimized: they gain them only when they are next optimized.
 
 ## When the daemon is missing
 
@@ -368,8 +457,9 @@ costs optimization, never availability.
 
 * Start the server and read the error log once. A healthy pair logs nothing
   about the daemon; each unhealthy condition logs exactly one line.
-* If the server refuses to start, read the message: it names the volume file
-  the start created and what to do about it.
+* If the server refuses to start, read the message: it says whether the
+  start removed the volume file its open created, and names the file to
+  remove by hand before the next start when it could not.
 * A warning about extra volume files after changing the cache size is
   expected; it names the leftovers so you can delete them.
 * An older daemon release is a normal, loud, non-fatal state: in-place

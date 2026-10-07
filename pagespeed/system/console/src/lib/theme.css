@@ -12,6 +12,30 @@
   --ps-success: #1e8e3e;
   --ps-warning: #f9ab00;
   --ps-error: #d93025;
+  /* Status colours as TEXT: the fills above are too light to read on white. */
+  --ps-warning-text: #8a5a00;
+  --ps-success-text: #146c2e;
+  /*
+   * These pair a fixed background with fixed text (the Logs page's "Fatal" tag,
+   * and black text on the warning fill): the background never changes with
+   * the colour scheme, so the text token does not either. Defined only
+   * here, not repeated in the dark block below.
+   */
+  --ps-severity-fatal-bg: #8b0000;
+  --ps-severity-fatal-text: #ffffff;
+  --ps-warning-contrast-text: #000000;
+
+  /* On-image labels (the diff view's Original/Optimized chips): a fixed
+     dark scrim behind white text, the same in both schemes. */
+  --ps-scrim: #1c1917;
+  --ps-on-scrim: #ffffff;
+
+  /* Top bar: its own band, so dark mode does not turn it pale blue. */
+  --ps-topbar-bg: #1d4ed8;
+  --ps-topbar-fg: #ffffff;
+  --ps-topbar-fg-muted: #cbd5e1;
+  /* The logo's decorative chevron and cursor, tuned against the band. */
+  --ps-topbar-accent: #60a5fa;
 
   /* Surfaces */
   --ps-bg: #ffffff;
@@ -22,23 +46,35 @@
 
   /* Text */
   --ps-text: #1c1917;
-  --ps-text-secondary: #78716c;
-  --ps-text-tertiary: #a8a29e;
+  --ps-text-secondary: #6b6560;
   --ps-text-inverse: #ffffff;
 
   /* Borders */
   --ps-border: #e7e5e4;
   --ps-border-light: #f5f5f4;
 
+  /* A card whose numbers cover more than the page's scope (the per-host
+     console's whole-server optimizer card): dashed outline, and dimmed only
+     as far as its text keeps 4.5:1. Light text has no headroom for any
+     dimming, so there the card keeps full opacity on a tinted background. */
+  --ps-muted-opacity: 1;
+
+  /* Stacked-bar fills for the savings split. Its middle segment uses
+     --ps-text; these two flank it. Each clears 4.5:1 on the card and
+     3:1 against --ps-text, so neighbouring segments read apart. */
+  --ps-split-optimal: #78716c;
+  --ps-split-encoded: #15803d;
+
   /* Typography */
   --ps-font-family: 'Inter', system-ui, -apple-system, sans-serif;
-  --ps-font-mono: 'JetBrains Mono', 'Consolas', 'Courier New', monospace;
+  --ps-font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
   --ps-font-size-xs: 0.75rem;
   --ps-font-size-sm: 0.875rem;
   --ps-font-size-base: 1rem;
   --ps-font-size-lg: 1.125rem;
   --ps-font-size-xl: 1.25rem;
   --ps-font-size-2xl: 1.5rem;
+  --ps-font-size-3xl: 2rem;
 
   /* Spacing */
   --ps-space-xs: 0.25rem;
@@ -49,8 +85,36 @@
   --ps-space-2xl: 3rem;
 
   /* Layout */
+  /* The side padding of the top bar and of the content area: one value, so
+     their edges line up. */
+  --ps-gutter: var(--ps-space-lg);
   --ps-sidebar-width: 220px;
   --ps-topbar-height: 48px;
+  /* Every button, field and toggle in a row of controls is this tall.
+     Controls within a group (a label and its controls) sit
+     --ps-control-gap apart, neighbouring groups --ps-control-group-gap:
+     the top bar's rhythm. */
+  --ps-control-height: 2.25rem;
+  /* A button inside a list or table row (Acknowledge, Compare). */
+  --ps-control-height-compact: 1.75rem;
+  /* The widest a URL column grows before its URLs wrap. */
+  --ps-url-column-max: 40rem;
+  /* The host lens selector. */
+  --ps-lens-width: 10rem;
+  /* A search or filter box in a toolbar. */
+  --ps-search-width: 16rem;
+  /* A table's value column (Statistics), on a desktop and on a phone. */
+  --ps-value-column-width: 10rem;
+  --ps-value-column-width-narrow: 7.5rem;
+  --ps-control-gap: var(--ps-space-sm);
+  --ps-control-group-gap: var(--ps-space-md);
+  /* The narrowest a card in a grid gets (unless the window is narrower),
+     and the narrowest column for a stack of sections or cache cards. */
+  --ps-card-min: 20rem;
+  /* The narrowest column for a card's headline figures (side by side in a
+     wide card). */
+  --ps-figure-min: 18rem;
+  --ps-card-max: 40rem;
   --ps-border-radius: 4px;
   --ps-border-radius-lg: 8px;
 
@@ -69,6 +133,8 @@
     --ps-success: #81c995;
     --ps-warning: #fdd663;
     --ps-error: #f28b82;
+    --ps-warning-text: #fdd663;
+    --ps-success-text: #81c995;
 
     --ps-bg: #1c1917;
     --ps-bg-secondary: #292524;
@@ -78,11 +144,27 @@
 
     --ps-text: #fafaf9;
     --ps-text-secondary: #d6d3d1;
-    --ps-text-tertiary: #a8a29e;
     --ps-text-inverse: #1c1917;
 
     --ps-border: #44403c;
     --ps-border-light: #292524;
+
+    /* The card background equals the surface here, so the dimming carries
+       the muting; at 0.8 every text colour on the card stays above 4.5:1. */
+    --ps-muted-opacity: 0.8;
+
+    --ps-split-optimal: #948e89;
+    --ps-split-encoded: #22a352;
+
+    /* On-image labels (the diff view's Original/Optimized chips): a fixed
+       dark scrim behind white text, the same in both schemes. */
+    --ps-scrim: #1c1917;
+    --ps-on-scrim: #ffffff;
+
+    --ps-topbar-bg: #17263f;
+    --ps-topbar-fg: #ffffff;
+    --ps-topbar-fg-muted: #94a3b8;
+    --ps-topbar-accent: #60a5fa;
   }
 }
 
@@ -97,7 +179,7 @@
 
 html,
 body {
-  height: 100%;
+  min-height: 100%;
   font-family: var(--ps-font-family);
   font-size: var(--ps-font-size-base);
   color: var(--ps-text);
@@ -107,11 +189,347 @@ body {
 }
 
 #app {
-  height: 100%;
+  min-height: 100%;
 }
 
 code,
 pre {
   font-family: var(--ps-font-mono);
   font-size: var(--ps-font-size-sm);
+}
+
+/* A visible focus ring for keyboard users on every control. */
+:focus-visible {
+  outline: 2px solid var(--ps-primary);
+  outline-offset: 2px;
+}
+
+/* The shell focuses the page heading (or the section heading a link named)
+ * after a navigation, for screen reader and keyboard continuity. That focus
+ * is the console's, not the user's: it draws no ring, in any browser, until
+ * the user next presses a key or a pointer (programmatic-focus.ts). A
+ * pointer-made focus on those headings draws none either; keyboard Tab
+ * focus keeps the ring everywhere. */
+main h1:focus:not(:focus-visible),
+main [data-page-focus]:focus:not(:focus-visible),
+.programmatic-focus:focus {
+  outline: none;
+}
+
+/* Every link gets a themed, AA-passing colour by default; a page-local rule
+ * (for example .more a, .alert-link) may still be more specific. */
+a {
+  color: var(--ps-primary);
+}
+
+/* One type scale for numbers: metric cards and KV panels share these. */
+.metric-value {
+  font-size: var(--ps-font-size-2xl);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--ps-text);
+}
+
+.metric-label {
+  font-size: var(--ps-font-size-xs);
+  font-weight: 500;
+  color: var(--ps-text-secondary);
+}
+
+.metric-context {
+  font-size: 0.8125rem;
+  color: var(--ps-text-secondary);
+}
+
+/* An identifier shown as a metric (a version, a commit): mono face, medium
+ * weight. */
+.mono-value {
+  font-family: var(--ps-font-mono);
+  font-weight: 500;
+}
+
+/* Numeric cells and values line up their digits. */
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* A page runs from the sidebar to the window's right edge, less the
+ * gutter, so its right edge lines up with the top bar's. Within it,
+ * running text keeps a readable measure; card rows, tables and chart grids
+ * use the full width, in more columns where there are more items. */
+.page {
+  width: 100%;
+}
+
+main p {
+  max-width: 75ch;
+}
+
+/* Controls: one look, one height and one spacing on every page. A page
+ * may set a control's width or colour, never its padding or height; focus
+ * styles stay with the page that owns the control. */
+
+/* A row of controls (page toolbars, filter rows): its children are
+ * groups, or single controls that form a group of their own. Groups that
+ * wrap stack a full step apart. */
+.control-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ps-control-group-gap);
+}
+
+/* A label and its controls, or controls that belong together (pager,
+ * button pair): half a step apart, also between lines when they wrap. */
+.control-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ps-control-gap);
+  min-width: 0;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ps-space-xs);
+  min-height: var(--ps-control-height);
+  padding: 0 var(--ps-space-md);
+  border: 1px solid var(--ps-border);
+  border-radius: var(--ps-border-radius);
+  background: var(--ps-bg);
+  color: var(--ps-text);
+  font-family: inherit;
+  font-size: var(--ps-font-size-sm);
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--ps-surface-hover);
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* A toggle that is on (Auto-refresh, a comparison mode). */
+.btn-secondary[aria-pressed="true"] {
+  border-color: var(--ps-primary);
+  color: var(--ps-primary);
+}
+
+.btn-primary {
+  background: var(--ps-primary);
+  border-color: var(--ps-primary);
+  color: var(--ps-text-inverse);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--ps-primary-hover);
+}
+
+.btn-danger {
+  background: var(--ps-error);
+  border-color: var(--ps-error);
+  color: var(--ps-text-inverse);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: var(--ps-error);
+  opacity: 0.9;
+}
+
+/* The one compact size, for buttons inside list and table rows. */
+.btn-compact {
+  min-height: var(--ps-control-height-compact);
+  padding: 0 var(--ps-space-sm);
+  font-size: var(--ps-font-size-xs);
+}
+
+/* A square button holding only an icon. */
+.btn-icon {
+  width: var(--ps-control-height);
+  padding: 0;
+}
+
+/* Text inputs, search boxes and selects. */
+.field {
+  height: var(--ps-control-height);
+  min-width: 0;
+  padding: var(--ps-space-sm) var(--ps-space-md);
+  border: 1px solid var(--ps-border);
+  border-radius: var(--ps-border-radius);
+  background: var(--ps-bg);
+  color: var(--ps-text);
+  font-family: inherit;
+  font-size: var(--ps-font-size-sm);
+}
+
+/* A search or filter box in a toolbar: one width on every page. */
+.field-search {
+  width: var(--ps-search-width);
+  max-width: 100%;
+}
+
+/* A checkbox or radio button with its label. */
+.field-check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ps-space-xs);
+  min-height: var(--ps-control-height);
+  font-size: var(--ps-font-size-sm);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* On a phone, checkbox and radio lines that wrap stay compact (still a
+ * comfortable touch target). */
+@media (max-width: 640px) {
+  .field-check {
+    min-height: var(--ps-control-height-compact);
+  }
+}
+
+/* A visible label in front of its field ("Time range", "Host"). */
+.field-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ps-space-sm);
+  min-height: var(--ps-control-height);
+  font-size: var(--ps-font-size-sm);
+  white-space: nowrap;
+}
+
+/* Text that sits in a row of controls ("updated 5 s ago", a count). */
+.field-text {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--ps-control-height);
+  color: var(--ps-text-secondary);
+  white-space: nowrap;
+}
+
+/* A table that reads across: the table (its frame, header band and row
+ * lines) spans its container. Where the container is wide (it declares
+ * .reads-across-container), every column but the last keeps its content's
+ * width and its values do not wrap, and the last column takes the spare
+ * width, so short and numeric columns stay next to the text they belong
+ * to. In a narrow container the table lays out as usual and its
+ * columns give way (header words such as "Of original" wrap), so it never
+ * needs to scroll on a desktop. A page may let a text column wrap within a maximum
+ * width. */
+table.reads-across {
+  width: 100%;
+}
+
+.reads-across-container {
+  container-type: inline-size;
+}
+
+@container (min-width: 36rem) {
+  table.reads-across :where(tr > :not(:last-child)) {
+    width: 1%;
+    white-space: nowrap;
+  }
+}
+
+/* Present for assistive technology, invisible on screen. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* One level palette for the module's messages and the optimizer's log:
+ * same colours, same shape, wherever a level appears. */
+.level-badge {
+  display: inline-block;
+  padding: 1px var(--ps-space-sm);
+  border-radius: var(--ps-border-radius);
+  font-size: var(--ps-font-size-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.level-badge-error {
+  background: var(--ps-error);
+  color: var(--ps-text-inverse);
+}
+
+.level-badge-warning {
+  background: var(--ps-warning);
+  color: var(--ps-warning-contrast-text);
+}
+
+.level-badge-fatal {
+  background: var(--ps-severity-fatal-bg);
+  color: var(--ps-severity-fatal-text);
+}
+
+.level-badge-info,
+.level-badge-debug {
+  background: var(--ps-bg-tertiary);
+  color: var(--ps-text-secondary);
+}
+
+/* Phone tables: rows become label/value cards so no column is off-screen.
+ * The header is clipped, not display:none — the columns stay in the
+ * accessibility tree (opt-in: a page adds .card-table and data-labels). */
+@media (max-width: 640px) {
+  /* table-qualified so a page's own scoped "thead { position: sticky }"
+   * (equal specificity, later in the bundle) cannot re-pin the header. */
+  /* A phone's card rows span the screen (also a table that reads across). */
+  table.card-table {
+    width: 100%;
+  }
+
+  table.card-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+
+  /* Qualified like the thead rule above, and lifted with :nth-child(n),
+   * so a page's own scoped zebra and hover rows (tbody tr:nth-child(even),
+   * tbody tr:hover) cannot repaint the cards: one surface colour each. */
+  table.card-table tbody tr:nth-child(n) {
+    display: block;
+    border: 1px solid var(--ps-border);
+    border-radius: var(--ps-border-radius);
+    margin-bottom: var(--ps-space-sm);
+    background: var(--ps-surface);
+  }
+
+  .card-table td,
+  .card-table tbody th {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: var(--ps-space-md);
+    border-bottom: 1px solid var(--ps-border-light);
+  }
+
+  .card-table td::before,
+  .card-table tbody th::before {
+    content: attr(data-label);
+    font-weight: 500;
+    color: var(--ps-text-secondary);
+  }
+
+  .card-table tr td:last-child {
+    border-bottom: none;
+  }
 }

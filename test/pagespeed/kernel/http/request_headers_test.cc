@@ -190,4 +190,23 @@ TEST_F(RequestHeadersTest, HasCookie) {
   EXPECT_TRUE(request_headers_.HasCookieValue("x", "b"));
 }
 
+TEST_F(RequestHeadersTest, MethodFromStringMapsEveryMethodCaseInsensitively) {
+  EXPECT_EQ(RequestHeaders::kGet, RequestHeaders::MethodFromString("GET"));
+  EXPECT_EQ(RequestHeaders::kGet, RequestHeaders::MethodFromString("get"));
+  EXPECT_EQ(RequestHeaders::kHead, RequestHeaders::MethodFromString("HEAD"));
+  EXPECT_EQ(RequestHeaders::kPost, RequestHeaders::MethodFromString("POST"));
+  EXPECT_EQ(RequestHeaders::kPut, RequestHeaders::MethodFromString("PUT"));
+  EXPECT_EQ(RequestHeaders::kDelete,
+            RequestHeaders::MethodFromString("DELETE"));
+  EXPECT_EQ(RequestHeaders::kOptions,
+            RequestHeaders::MethodFromString("OPTIONS"));
+  EXPECT_EQ(RequestHeaders::kTrace, RequestHeaders::MethodFromString("TRACE"));
+  EXPECT_EQ(RequestHeaders::kConnect,
+            RequestHeaders::MethodFromString("CONNECT"));
+  EXPECT_EQ(RequestHeaders::kPatch, RequestHeaders::MethodFromString("PATCH"));
+  EXPECT_EQ(RequestHeaders::kPurge, RequestHeaders::MethodFromString("PURGE"));
+  EXPECT_EQ(RequestHeaders::kError, RequestHeaders::MethodFromString("BREW"));
+  EXPECT_EQ(RequestHeaders::kError, RequestHeaders::MethodFromString(""));
+}
+
 }  // namespace net_instaweb

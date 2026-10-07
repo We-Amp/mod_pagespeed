@@ -466,15 +466,18 @@ class TestServerHeader:
 
 
 @pytest.mark.nginx_only
-@pytest.mark.skip(reason="nginx PageSpeed uses chunked encoding - Content-Length not set")
 class TestContentLengthHeader:
     """Tests for Content-Length header on resources.
 
     PageSpeed resources should have Content-Length header set,
     not use chunked transfer encoding.
 
-    Note: Currently skipped because nginx PageSpeed uses chunked encoding
-    instead of Content-Length. This is a known difference from Apache behavior.
+    Note: the pre-existing skip here claimed nginx PageSpeed serves
+    .pagespeed. resources chunked without Content-Length. Verified against
+    the running lane (2026-09-27, issue #1043): that is not the current
+    behaviour -- both cases below pass for real, so this class runs
+    unconditionally instead of xfailing a claim the product does not
+    exhibit.
     """
 
     def test_resources_have_content_length(
@@ -490,12 +493,11 @@ class TestContentLengthHeader:
         )
 
         # Extract the rewritten CSS URL
-        match = re.search(
+        match = require_match(
             r'href="([^"]*\.pagespeed\.cf\.[^"]*)"',
-            response.text,
+            response,
+            "rewritten CSS URL",
         )
-        if not match:
-            pytest.skip("Could not find rewritten CSS URL")
 
         css_url = match.group(1)
         if not css_url.startswith("/"):
@@ -525,12 +527,11 @@ class TestContentLengthHeader:
         )
 
         # Extract the rewritten CSS URL
-        match = re.search(
+        match = require_match(
             r'href="([^"]*\.pagespeed\.cf\.[^"]*)"',
-            response.text,
+            response,
+            "rewritten CSS URL",
         )
-        if not match:
-            pytest.skip("Could not find rewritten CSS URL")
 
         css_url = match.group(1)
         if not css_url.startswith("/"):

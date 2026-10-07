@@ -466,6 +466,12 @@ SharedMemStatistics::SharedMemStatistics(
 
 SharedMemStatistics::~SharedMemStatistics() {}
 
+void SharedMemStatistics::UpdateConsoleLogIfRequired() {
+  if (console_logger_ != nullptr) {
+    console_logger_->UpdateAndDumpIfRequired();
+  }
+}
+
 bool SharedMemStatistics::InitMutexes(size_t per_var,
                                       MessageHandler* message_handler) {
   size_t pos = 0;

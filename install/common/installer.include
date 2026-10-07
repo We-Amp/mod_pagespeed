@@ -167,6 +167,13 @@ stage_install_common() {
     exit 1
   fi
 
+  # Refuse to package a module that would bind its crypto to the host: no
+  # crypto library in NEEDED, no undefined symbol the host would have to
+  # resolve, no exported internals. Every package that ships the module is
+  # staged here. Needs readelf (binutils) in the packaging environment.
+  bash "${SRCDIR}/tools/ci/assert_module_symbols.sh" --profile apache \
+    "${STAGEDIR}${APACHE_MODULEDIR}/mod_pagespeed.so"
+
   # The license text and the attribution notices, next to the binaries as the
   # Apache-2.0 terms ask. The statically linked BSD/MIT/Zlib/IJG-licensed
   # components ask the same of their notices, so THIRD-PARTY-NOTICES ships

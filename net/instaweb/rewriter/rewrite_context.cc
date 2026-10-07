@@ -1425,6 +1425,10 @@ void RewriteContext::AddRecheckDependency() {
       // CSS or the like.
       ttl_ms = Driver()->options()->metadata_input_errors_cache_ttl_ms();
     } else {
+      // Every other failure follows the HTTP cache's memory for that kind of
+      // failure. A transient one (a fetch that timed out or could not
+      // connect, a 5xx) is remembered for seconds, not minutes, so a stalled
+      // origin does not leave a five-minute 404 behind.
       ttl_ms = http_cache->failure_caching_ttl_sec(
                    resource->fetch_response_status()) *
                Timer::kSecondMs;

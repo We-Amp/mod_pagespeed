@@ -310,7 +310,7 @@ self_test() {
     "$(printf 'pagespeed/kernel/js/js_minify_test.cc\n')" ""
 
   check "install system test .sh             -> pass" 0 \
-    "$(printf 'install/apache_experiment_test.sh\n')" ""
+    "$(printf 'install/stress_test.sh\n')" ""
 
   check "install/mod_pagespeed_test/ fixture -> pass" 0 \
     "$(printf 'install/mod_pagespeed_test/rewrite_images.html\n')" ""

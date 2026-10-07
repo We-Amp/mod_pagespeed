@@ -21,6 +21,7 @@ These tests verify that image inlining, compression, and resizing work.
 """
 
 import re
+from urllib.parse import urlparse
 
 import pytest
 
@@ -30,8 +31,19 @@ from pagespeed_test_framework import (
     assert_not_contains,
     assert_http_status,
     assert_header_contains,
+    assert_file_size,
     require_match,
+    require_status_ok,
 )
+
+
+def _resource_path(src: str, base_dir: str) -> str:
+    """Path of an <img src> value: absolute URL, absolute path or relative leaf."""
+    if src.startswith("http://") or src.startswith("https://"):
+        return urlparse(src).path
+    if src.startswith("/"):
+        return src
+    return f"{base_dir}/{src}"
 
 
 class TestRewriteImages:
@@ -111,6 +123,29 @@ class TestRewriteImages:
             timeout=30.0,
         )
         assert_http_status(response, 200)
+
+    def test_rewritten_image_sizes(self, client: PageSpeedClient, example_root: str):
+        """Bash original (rewrite_images.sh:26-31):
+
+            start_test size of rewritten image
+            fetch_until -save -recursive $URL 'grep -c .pagespeed.ic' 2
+            check_file_size "$WGET_DIR/xBikeCrashIcn*" -lt 25000      # re-encoded
+            check_file_size "$WGET_DIR/*256x192*Puzzle*" -lt 24126    # resized
+        """
+        url = f"{example_root}/rewrite_images.html?PageSpeedFilters=rewrite_images"
+        page = client.fetch_until_count(
+            url, pattern=r"\.pagespeed\.ic", expected_count=2, timeout=60.0
+        )
+        for leaf_regex, limit, what in (
+            (r"xBikeCrashIcn\.png\.pagespeed\.ic\.[^\"']+", 25000, "re-encoded"),
+            (r"256x192xPuzzle\.jpg\.pagespeed\.ic\.[^\"']+", 24126, "resized"),
+        ):
+            src = require_match(
+                r'src="([^"]*' + leaf_regex + r')"', page, f"{what} image URL"
+            ).group(1)
+            image = client.get(_resource_path(src, example_root))
+            require_status_ok(image, src)
+            assert_file_size(image, "-lt", limit, f"{what} image {src}")
 
 
 class TestRewrittenImageHeaders:
@@ -302,6 +337,46 @@ class TestRewrittenImageHeaders:
 
         last_modified = img_response.header("Last-Modified")
         assert last_modified, "Rewritten images should have Last-Modified header"
+
+
+@pytest.mark.requires_fixture("debug_conf_dirs")
+class TestRewrittenImageExtraHeader:
+    """An origin header survives the single-resource image rewrite.
+
+    Bash original (rewrite_images.sh:34-44, 60-63):
+
+        IMG_HEADERS=$($WGET -O /dev/null -q -S \
+          --header='Accept-Encoding: gzip' $IMG_URL 2>&1)
+        # X-Extra-Header was added in debug.conf.template.
+        start_test Extra header is present
+        check_from "$IMG_HEADERS" fgrep -qi 'X-Extra-Header'
+
+    The Apache lane adds the header to /mod_pagespeed_example responses in
+    the debug_conf_dirs fixture block (its copy of the debug.conf.template
+    line), scoped to that Location rather than server-wide.
+    """
+
+    def test_rewritten_image_keeps_origin_extra_header(
+        self, client: PageSpeedClient, example_root: str
+    ):
+        url = f"{example_root}/rewrite_images.html?PageSpeedFilters=rewrite_images"
+        page = client.fetch_until(
+            url,
+            condition=lambda r: re.search(
+                r'src="[^"]*\.pagespeed\.ic[^"]*\.jpg"', r.text
+            ) is not None,
+            timeout=60.0,
+        )
+        src = require_match(
+            r'src="([^"]*\.pagespeed\.ic[^"]*\.jpg)"', page, "rewritten JPEG URL"
+        ).group(1)
+        image = client.get(
+            _resource_path(src, example_root), headers={"Accept-Encoding": "gzip"}
+        )
+        require_status_ok(image, src)
+        assert image.header_values("X-Extra-Header"), (
+            f"{src}: X-Extra-Header was not propagated; headers {image.raw_headers}"
+        )
 
 
 if __name__ == "__main__":

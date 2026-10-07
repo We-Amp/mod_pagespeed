@@ -913,6 +913,40 @@ TEST(ConstantTimeCompareTest, LengthMultipleOf256NullBytes) {
   EXPECT_FALSE(ConstantTimeCompare(StringPiece(nulls), ""));
 }
 
+TEST(JsonEscapeTest, ExistingEscapesUnchanged) {
+  // '"', '\\' and the named control chars keep their short escapes; other
+  // control characters keep going through \u00xx. Unrelated to #1058.
+  EXPECT_EQ("abc\\u0001\\u0003\\n\\t\\\"\\\\", JsonEscape("abc\1\3\n\t\"\\"));
+}
+
+TEST(JsonEscapeTest, EscapesAngleBracketsAndAmpersand) {
+  EXPECT_EQ("\\u003c", JsonEscape("<"));
+  EXPECT_EQ("\\u003e", JsonEscape(">"));
+  EXPECT_EQ("\\u0026", JsonEscape("&"));
+}
+
+TEST(JsonEscapeTest, EscapesLineSeparators) {
+  // U+2028 LINE SEPARATOR and U+2029 PARAGRAPH SEPARATOR, UTF-8 encoded as
+  // the 3-byte sequences E2 80 A8 / E2 80 A9.
+  EXPECT_EQ("\\u2028", JsonEscape("\xE2\x80\xA8"));
+  EXPECT_EQ("\\u2029", JsonEscape("\xE2\x80\xA9"));
+}
+
+TEST(JsonEscapeTest, EscapesMixedString) {
+  EXPECT_EQ("a\\u003cb\\u003e\\u0026c\\u2028\\u2029",
+            JsonEscape("a<b>&c\xE2\x80\xA8\xE2\x80\xA9"));
+}
+
+TEST(JsonEscapeTest, PassesThroughNearMissSequences) {
+  // 0xE2 0x80 0xA7 is not U+2028 or U+2029 -- the sequence is not
+  // recognized and passes through unchanged, byte for byte.
+  EXPECT_EQ("\xE2\x80\xA7", JsonEscape("\xE2\x80\xA7"));
+  // A lone trailing 0xE2 with nothing after it is not a match either.
+  EXPECT_EQ("\xE2", JsonEscape("\xE2"));
+  // 0xE2 0x80 with no third byte is not a match either.
+  EXPECT_EQ("\xE2\x80", JsonEscape("\xE2\x80"));
+}
+
 }  // namespace
 
 }  // namespace net_instaweb

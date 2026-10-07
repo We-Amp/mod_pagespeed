@@ -19,11 +19,14 @@
 
 #include "pagespeed/apache/apache_server_context.h"
 
+#include <cstring>
 #include <memory>
 
 // http_protocol.h includes httpd.h. We need to include httpd_includes.h, which
 // captures Apache's OK macro as APACHE_OK and undefines it.
 #include "http_protocol.h"  // NOLINT
+// After http_protocol.h, which brings in httpd.h: the directive tree.
+#include "http_config.h"  // NOLINT
 #include "net/instaweb/rewriter/config/measurement_proxy_rewrite_options_manager.h"
 #include "net/instaweb/rewriter/public/measurement_proxy_url_namer.h"
 #include "pagespeed/apache/apache_config.h"
@@ -106,8 +109,11 @@ ApacheConfig* ApacheServerContext::global_config() {
 }
 
 DaemonReader* ApacheServerContext::NewDaemonReader() {
-  return new UdsDaemonReader(thread_system(), timer(),
-                             global_config()->daemon_api_socket_path(),
+  const GoogleString& socket_path = global_config()->daemon_api_socket_path();
+  if (socket_path.empty()) {
+    return nullptr;  // Daemon API disabled: the console says "not configured".
+  }
+  return new UdsDaemonReader(thread_system(), timer(), socket_path,
                              message_handler());
 }
 
@@ -208,6 +214,117 @@ void ApacheServerContext::ChildInit(SystemRewriteDriverFactory* f) {
     }
   }
   SystemServerContext::ChildInit(f);
+  // The optimizer-daemon start-up check ran in the parent, before the shared
+  // message buffer existed; repeat a refusal so the admin console's message
+  // history shows it.
+  if (daemon_adapter_ != nullptr) daemon_adapter_->ReannounceStartupRefusal();
+}
+
+namespace {
+
+// httpd's names for a virtual host it could not name (server/vhost.c,
+// ap_fini_vhost_config): never a site's name.
+bool IsHttpdPlaceholderName(StringPiece name) {
+  return name == "bogus_host_without_forward_dns" ||
+         name == "bogus_host_without_reverse_dns";
+}
+
+}  // namespace
+
+namespace {
+
+bool IsDirective(const ap_directive_t* node, const char* name) {
+  return node->directive != nullptr && StringCaseEqual(node->directive, name);
+}
+
+// A ServerName directive among the siblings starting at `first`.
+bool HasServerName(const ap_directive_t* first) {
+  for (const ap_directive_t* node = first; node != nullptr; node = node->next) {
+    if (IsDirective(node, "ServerName")) {
+      return true;
+    }
+  }
+  return false;
+}
+
+}  // namespace
+
+bool ApacheConfigStatesServerName(const ap_directive_t* tree,
+                                  const server_rec* server,
+                                  const server_rec* main_server) {
+  if (tree == nullptr || server == nullptr || main_server == nullptr ||
+      main_server->is_virtual) {
+    return false;
+  }
+  if (!server->is_virtual) {
+    // Only the main record itself; any other non-virtual record is unknown.
+    return server == main_server && HasServerName(tree);
+  }
+  if (server->defn_name == nullptr) {
+    return false;
+  }
+  for (const ap_directive_t* node = tree; node != nullptr; node = node->next) {
+    if (IsDirective(node, "<VirtualHost") && node->filename != nullptr &&
+        node->line_num >= 0 &&
+        static_cast<unsigned>(node->line_num) == server->defn_line_number &&
+        strcmp(node->filename, server->defn_name) == 0) {
+      return HasServerName(node->first_child);
+    }
+  }
+  return false;
+}
+
+std::set<const server_rec*> ApacheStatedServerNamesFromTree(
+    const ap_directive_t* tree, const server_rec* main_server) {
+  std::set<const server_rec*> stated;
+  if (tree == nullptr || main_server == nullptr || main_server->is_virtual) {
+    return stated;
+  }
+  for (const server_rec* server = main_server; server != nullptr;
+       server = server->next) {
+    if (ApacheConfigStatesServerName(tree, server, main_server)) {
+      stated.insert(server);
+    }
+  }
+  return stated;
+}
+
+ConfiguredHostNames ApacheConfiguredHostNames(
+    const server_rec* server, const server_rec* main_server,
+    const std::set<const server_rec*>& stated_server_names) {
+  ConfiguredHostNames names;
+  if (server == nullptr) {
+    return names;
+  }
+  // A main record that is itself a virtual host is not one: unknown.
+  if (main_server != nullptr && main_server->is_virtual) {
+    main_server = nullptr;
+  }
+  const bool is_main = server == main_server || !server->is_virtual;
+  // A virtual host without ServerName on a default address shares the main
+  // server's server_hostname POINTER; a configured ServerName is always its
+  // own allocation, so pointer equality means "inherited".  The stated set
+  // already leaves such a host out; this stays as a second check.
+  const bool inherited =
+      !is_main && (main_server == nullptr ||
+                   server->server_hostname == main_server->server_hostname);
+  const bool stated = stated_server_names.count(server) != 0;
+  if (stated && server->server_hostname != nullptr && !inherited &&
+      !IsHttpdPlaceholderName(server->server_hostname)) {
+    names.primary = server->server_hostname;
+  }
+  // Exact ServerAlias names only -- always stated by the configuration;
+  // Apache keeps the wildcard ones apart in server->wild_names.
+  if (server->names != nullptr) {
+    const char* const* aliases =
+        reinterpret_cast<const char* const*>(server->names->elts);
+    for (int i = 0; i < server->names->nelts; ++i) {
+      if (aliases[i] != nullptr) {
+        names.aliases.push_back(aliases[i]);
+      }
+    }
+  }
+  return names;
 }
 
 }  // namespace net_instaweb

@@ -97,25 +97,6 @@ bool FilterMediaQueriesForScreen(Css::MediaQueries* media_queries) {
   return any_media_apply;
 }
 
-// Cheaply identifies @keyframes at-rules (including vendor-prefixed forms
-// like @-webkit-keyframes) held whole inside an unparsed region.
-bool IsKeyframesRegion(StringPiece bytes) {
-  TrimLeadingWhitespace(&bytes);
-  if (!bytes.starts_with("@")) {
-    return false;
-  }
-  bytes.remove_prefix(1);
-  if (bytes.starts_with("-")) {
-    // Skip a vendor prefix, e.g. the "-webkit-" in "@-webkit-keyframes".
-    stringpiece_ssize_type end_of_prefix = bytes.find('-', 1);
-    if (end_of_prefix == StringPiece::npos) {
-      return false;
-    }
-    bytes.remove_prefix(end_of_prefix + 1);
-  }
-  return StringCaseStartsWith(bytes, "keyframes");
-}
-
 // Whether a GROUP_RULE node whose body filtered down to nothing may be
 // dropped from the critical subset. Only @supports/@container preludes have
 // no declaration side effects, so only they are dead bytes when empty.
@@ -390,116 +371,111 @@ void RewriteLayeredImportRegions(Css::Stylesheet* stylesheet) {
   Compact(&rulesets);
 }
 
-}  // namespace
+// The summary of a stylesheet that must not be deferred: its <link> is left
+// exactly as it is. The summarizer cannot produce this text for a stylesheet
+// that has anything else in it.
+const char kKeepBlockingSummary[] = "@pagespeed-keep-stylesheet-blocking;";
 
-const char CriticalSelectorFilter::kNoscriptStylesClass[] = "psa_add_styles";
+// A stylesheet at least this large (minified) keeps its blocking link when
+// the inline subset would be kSubsetShareNumerator/kSubsetShareDenominator
+// of it or more: nearly the whole file would be sent inline and then again
+// as a file.
+const size_t kMinBytesToWeighSubset = 4096;
+const size_t kSubsetShareNumerator = 4;
+const size_t kSubsetShareDenominator = 5;
 
-// Wrap CSS elements to move them later in the document.
-// A simple list of elements is insufficient because link tags and style tags
-// are inserted different.
-class CriticalSelectorFilter::CssElement {
- public:
-  CssElement(HtmlParse* p, HtmlElement* e, bool inside_noscript)
-      : html_parse_(p),
-        element_(p->CloneElement(e)),
-        inside_noscript_(inside_noscript) {}
-
-  // HtmlParse deletes the element (regardless of whether it is inserted).
-  virtual ~CssElement() {}
-
-  virtual void AppendTo(HtmlElement* parent) const {
-    html_parse_->AppendChild(parent, element_);
+// Whether the stylesheet imports another one in a way a browser acts on: a
+// plain, anonymous-layer or named-layer @import at the top of the sheet.
+// The rules of an imported file are never in the inline subset (their
+// selectors are not reported on), so once the link is deferred they would
+// be in nothing that blocks rendering.
+//
+// Not counted: an import nested in a media block or placed after a rule
+// (browsers ignore both), and a layered import with conditions, which stays
+// verbatim in the inline subset and so still blocks there. An import whose
+// form this scan cannot make sense of counts: when in doubt the stylesheet
+// keeps its blocking link.
+bool HasLiveImport(const Css::Stylesheet& stylesheet) {
+  if (!stylesheet.imports().empty()) {
+    return true;
   }
-
-  bool inside_noscript() const { return inside_noscript_; }
-
- protected:
-  HtmlParse* html_parse_;
-  HtmlElement* element_;
-  bool inside_noscript_;
-
- private:
-  CssElement(const CssElement&) = delete;
-  CssElement& operator=(const CssElement&) = delete;
-};
-
-// Wrap CSS style blocks to move them later in the document.
-class CriticalSelectorFilter::CssStyleElement
-    : public CriticalSelectorFilter::CssElement {
- public:
-  CssStyleElement(HtmlParse* p, HtmlElement* e, bool inside_noscript)
-      : CssElement(p, e, inside_noscript) {}
-  ~CssStyleElement() override {}
-
-  // Call before InsertBeforeCurrent.
-  void AppendCharactersNode(HtmlCharactersNode* characters_node) {
-    characters_nodes_.push_back(
-        html_parse_->NewCharactersNode(nullptr, characters_node->contents()));
-  }
-
-  void AppendTo(HtmlElement* parent) const override {
-    HtmlElement* element = element_;
-    CssElement::AppendTo(parent);
-    for (CharactersNodeVector::const_iterator it = characters_nodes_.begin(),
-                                              end = characters_nodes_.end();
-         it != end; ++it) {
-      html_parse_->AppendChild(element, *it);
+  bool imports_valid = true;  // Nothing but statements/imports seen so far.
+  const Css::Rulesets& rulesets = stylesheet.rulesets();
+  for (int i = 0, n = rulesets.size(); i < n; ++i) {
+    const Css::Ruleset* r = rulesets.at(i);
+    if (r->type() != Css::Ruleset::UNPARSED_REGION) {
+      return false;  // An import past a rule or group is not honoured.
+    }
+    CssStringPiece region_bytes =
+        r->unparsed_region()->bytes_in_original_buffer();
+    StringPiece bytes(region_bytes.data(), region_bytes.size());
+    GoogleString layer_name;
+    ImportRegionDisposition disposition =
+        ClassifyImportRegion(bytes, &layer_name);
+    if (disposition == kNotImportRegion) {
+      if (!IsLayerStatementRegion(bytes) || !r->media_queries().empty()) {
+        imports_valid = false;
+      }
+      continue;
+    }
+    if (!imports_valid || !r->media_queries().empty()) {
+      continue;
+    }
+    if (disposition != kKeepImportRegion) {
+      return true;
     }
   }
+  return false;
+}
 
- protected:
-  using CharactersNodeVector = std::vector<HtmlCharactersNode*>;
-  CharactersNodeVector characters_nodes_;
+}  // namespace
 
- private:
-  CssStyleElement(const CssStyleElement&) = delete;
-  CssStyleElement& operator=(const CssStyleElement&) = delete;
-};
+const char CriticalSelectorFilter::kDeferredCssAttribute[] =
+    "data-pagespeed-deferred-css";
 
-// Wrap CSS related elements so they can be moved later in the document.
 CriticalSelectorFilter::CriticalSelectorFilter(RewriteDriver* driver)
     : CssSummarizerBase(driver),
-      saw_end_document_(false),
-      any_rendered_(false) {}
+      keep_unknown_selectors_(true),
+      loader_inserted_(false) {}
 
 CriticalSelectorFilter::~CriticalSelectorFilter() {}
 
 void CriticalSelectorFilter::Summarize(Css::Stylesheet* stylesheet,
                                        GoogleString* out) const {
-  // The critical subset is inlined into the page, where an @import would
-  // still trigger a synchronous, render-blocking fetch. No rule in the
-  // critical subset can depend on it: imported files' selectors were never
-  // beacon candidates. The deferred full copy of the CSS retains the import.
-  // Top level only: group bodies never contain imports (rejected at parse
-  // time), so FilterStylesheet() need not drop them on recursion.
-  //
-  // The one bucketed import form with a cascade side effect is
-  // "@import url(x) layer;", which the parser models with "layer" as its
-  // media type. That declares an ANONYMOUS layer, which has no statement
-  // form, and removing one occurrence from the layer sequence cannot
-  // reorder the remaining ones --- the drop is cascade-neutral.
-  STLDeleteElements(&stylesheet->mutable_imports());
+  // A stylesheet that still imports another one keeps its blocking link:
+  // the imported rules would otherwise be in neither the inline subset nor
+  // a request that blocks rendering. (Imports the server could flatten are
+  // gone by now; what is left could not be fetched or was too large.)
+  if (HasLiveImport(*stylesheet)) {
+    *out = kKeepBlockingSummary;
+    return;
+  }
 
-  // A NAMED-layer import ("@import url(x) layer(theme);") never reaches the
-  // bucket above: "layer(...)" is not a media query, so preservation mode
-  // keeps the whole statement verbatim as an UNPARSED_REGION in the ordered
-  // rulesets sequence --- the same representation statement-form "@layer a;"
-  // rides. Retain its layer declaration as exactly such a statement (and
-  // drop import regions that declare no named layer): kept whole, the
-  // region would leak the render-blocking fetch into the inline subset;
-  // dropped whole, it would take the declaration with it and could flip
-  // first-occurrence layer order against the deferred full copy. Imports
-  // with conditions after the layer clause keep their region verbatim
-  // instead: the declaration is subject to the conditions, which the
-  // browser must evaluate per visitor.
+  NullMessageHandler handler;
+  GoogleString whole;
+  {
+    StringWriter whole_writer(&whole);
+    CssMinify::Stylesheet(*stylesheet, &whole_writer, &handler);
+  }
+
+  // What is left of imports here is not honoured by browsers (nested in a
+  // media block, or placed after a rule) or carries conditions. The first
+  // kind is dropped; a conditioned layered import keeps its region verbatim,
+  // so the browser evaluates the conditions itself and the import blocks
+  // from inside the inline subset.
   RewriteLayeredImportRegions(stylesheet);
 
   FilterStylesheet(stylesheet);
 
   // Serialize out the remaining subset.
   StringWriter writer(out);
-  NullMessageHandler handler;
   CssMinify::Stylesheet(*stylesheet, &writer, &handler);
+
+  if (whole.size() >= kMinBytesToWeighSubset &&
+      out->size() * kSubsetShareDenominator >=
+          whole.size() * kSubsetShareNumerator) {
+    *out = kKeepBlockingSummary;
+  }
 }
 
 void CriticalSelectorFilter::FilterStylesheet(
@@ -541,11 +517,11 @@ void CriticalSelectorFilter::FilterStylesheet(
       // rejects @import inside group bodies, so none can survive to here.
       DCHECK(r->group_body().imports().empty());
       FilterStylesheet(r->mutable_group_body());
-      // The recursion filtered body rulesets by media + selectors, dropped
-      // body @keyframes regions, kept statement-form "@layer x, y;" regions
-      // (they declare layers), and left body font_faces() untouched; a
-      // font-face-only body therefore keeps its group. Depth is bounded by
-      // the parser's group-nesting cap.
+      // The recursion filtered body rulesets by media + selectors, kept
+      // every verbatim region (@keyframes, statement-form "@layer x, y;"),
+      // and left body font_faces() untouched; a font-face-only body
+      // therefore keeps its group. Depth is bounded by the parser's
+      // group-nesting cap.
       if (r->group_body().rulesets().empty() &&
           r->group_body().font_faces().empty() &&
           IsEmptyGroupDroppable(r->group_prelude())) {
@@ -560,23 +536,12 @@ void CriticalSelectorFilter::FilterStylesheet(
     }
     if (r->type() != Css::Ruleset::RULESET) {
       // Only plain rulesets are filtered by selector below (the getters
-      // CHECK on type). The keyframes-drop keys on UNPARSED_REGION:
-      // @keyframes end up there whole under preservation mode; animations
-      // don't affect first paint and their keyframe lists can be large, so
-      // drop them from the critical subset (the deferred full copy retains
-      // them) — at every nesting level, since this helper also runs on
-      // group bodies. Every other unparsed region is kept unaltered to be
-      // conservative — notably statement-form "@layer a, b;", whose layer
-      // declarations are load-bearing for cascade order.
-      if (r->type() == Css::Ruleset::UNPARSED_REGION) {
-        CssStringPiece region_bytes =
-            r->unparsed_region()->bytes_in_original_buffer();
-        if (IsKeyframesRegion(
-                StringPiece(region_bytes.data(), region_bytes.size()))) {
-          delete r;
-          stylesheet->mutable_rulesets()[ruleset_index] = nullptr;
-        }
-      }
+      // CHECK on type). Everything the parser kept verbatim stays: these are
+      // at-rules no browser report can judge --- @keyframes (a rule that
+      // names an animation is of no use without them), @property,
+      // @counter-style, @font-feature-values, @page, statement-form
+      // "@layer a, b;" (whose layer declarations are load-bearing for
+      // cascade order), and anything the parser did not understand.
       continue;
     }
 
@@ -598,9 +563,16 @@ void CriticalSelectorFilter::FilterStylesheet(
            selector_index < num_selectors; ++selector_index) {
         Css::Selector* s = r->mutable_selectors().at(selector_index);
         GoogleString portion_to_compare = css_util::JsDetectableSelector(*s);
+        // Keep a selector that is critical, and one no browser has been
+        // asked about yet: after a stylesheet change its rule must not be
+        // dropped on the strength of reports that predate it. A selector is
+        // left out only while reports show it unmatched.
         if (portion_to_compare.empty() ||
             critical_selectors_.find(portion_to_compare) !=
-                critical_selectors_.end()) {
+                critical_selectors_.end() ||
+            (keep_unknown_selectors_ &&
+             known_selectors_.find(portion_to_compare) ==
+                 known_selectors_.end())) {
           any_selectors_apply = true;
         } else {
           delete s;
@@ -625,31 +597,90 @@ void CriticalSelectorFilter::FilterStylesheet(
 void CriticalSelectorFilter::RenderSummary(int pos, HtmlElement* element,
                                            HtmlCharactersNode* char_node,
                                            bool* is_element_deleted) {
-  RememberFullCss(pos, element, char_node);
-
   const SummaryInfo& summary = GetSummaryForStyle(pos);
   DCHECK_EQ(kSummaryOk, summary.state);
+
+  // Only external stylesheets are deferred. An inline <style> block is
+  // already in the page, so there is nothing to fetch later; it stays where
+  // it is, complete, and so keeps its place in the cascade between the
+  // stylesheets around it.
+  if (char_node != nullptr || !summary.is_external) {
+    return;
+  }
+
+  // A stylesheet that must stay as it is: it imports another one, or nearly
+  // all of it would be inline (see Summarize).
+  if (summary.data == kKeepBlockingSummary) {
+    return;
+  }
+
+  // A stylesheet the page keeps for browsers without scripts, and an
+  // alternate stylesheet, do not block rendering; leave them alone.
+  if (summary.is_inside_noscript ||
+      CssTagScanner::IsAlternateStylesheet(summary.rel)) {
+    return;
+  }
+
+  // A stylesheet the page has switched off must not have its rules applied
+  // from an inline block, and a link with a title belongs to a named set of
+  // stylesheets that the browser, the visitor or a script can switch between;
+  // leave both alone.
+  if (element->FindAttribute(HtmlName::kDisabled) != nullptr ||
+      element->FindAttribute(HtmlName::kTitle) != nullptr) {
+    return;
+  }
+
+  // The preload below is a copy of the link. An event handler on it would
+  // run when the preload arrives and again when the stylesheet applies, the
+  // first time before the styles are there; leave such a link alone.
+  const HtmlElement::AttributeList& own_attrs = element->attributes();
+  for (HtmlElement::AttributeConstIterator i(own_attrs.begin());
+       i != own_attrs.end(); ++i) {
+    const HtmlElement::Attribute& attr = *i;
+    if (StringCaseStartsWith(attr.name_str(), "on")) {
+      return;
+    }
+  }
+
+  // Likewise a stylesheet none of whose media can apply to a screen.
+  StringVector all_media;
+  css_util::VectorizeMediaAttribute(summary.media_from_html, &all_media);
+  StringVector relevant_media;
+  for (int i = 0, n = all_media.size(); i < n; ++i) {
+    const GoogleString& medium = all_media[i];
+    if (css_util::CanMediaAffectScreen(medium)) {
+      relevant_media.push_back(medium);
+    }
+  }
+  if (!all_media.empty() && relevant_media.empty()) {
+    return;
+  }
+
+  // The deferred stylesheet is turned back on by an inline <script>; a
+  // script-src policy without 'unsafe-inline' would block it. The
+  // authoritative gate is PolicyPermitsRendering(), so with a forbidding
+  // policy we don't get here at all; this is a defensive backstop.
+  if (!CspPermitsInlineScript()) {
+    return;
+  }
 
   // If we're inlining an external CSS file, make sure to adjust the URLs
   // inside to the new base.
   const GoogleString* css_to_use = &summary.data;
   GoogleString resolved_css;
-  if (summary.is_external) {
-    StringWriter writer(&resolved_css);
-    GoogleUrl input_css_base(summary.base);
-    if (driver()->ResolveCssUrls(
-            input_css_base, driver()->base_url().Spec(), summary.data, &writer,
-            driver()->message_handler()) == RewriteDriver::kSuccess) {
-      css_to_use = &resolved_css;
-    }
+  StringWriter writer(&resolved_css);
+  GoogleUrl input_css_base(summary.base);
+  if (driver()->ResolveCssUrls(
+          input_css_base, driver()->base_url().Spec(), summary.data, &writer,
+          driver()->message_handler()) == RewriteDriver::kSuccess) {
+    css_to_use = &resolved_css;
   }
 
   // Inlining bytes whose charset differs from the page's can garble them
   // (e.g. non-UTF-8 content: strings) --- the equivalent of
   // CssInlineFilter::ShouldInline()'s charset check. A pure-ASCII critical
   // subset is charset-agnostic, so it is still safe. Otherwise leave this
-  // stylesheet alone; as with WillNotRenderSummary, the full CSS was
-  // remembered above so the page stays intact.
+  // stylesheet alone: its link stays in place and blocking.
   //
   // An empty summary.charset means the stylesheet declared no charset (no
   // Content-Type charset, @charset, BOM, or charset attribute). We cannot
@@ -657,9 +688,8 @@ void CriticalSelectorFilter::RenderSummary(int pos, HtmlElement* element,
   // same non-ASCII bail-out --- otherwise mismatched bytes would be inlined
   // and garbled. CssInlineFilter avoids this by defaulting the charset before
   // comparing; here we bail whenever the charset is unknown or differs.
-  if (summary.is_external &&
-      (summary.charset.empty() ||
-       !StringCaseEqual(driver()->containing_charset(), summary.charset))) {
+  if (summary.charset.empty() ||
+      !StringCaseEqual(driver()->containing_charset(), summary.charset)) {
     bool has_non_ascii = false;
     for (int i = 0, n = css_to_use->size(); i < n; ++i) {
       if (static_cast<unsigned char>((*css_to_use)[i]) >= 0x80) {
@@ -672,184 +702,56 @@ void CriticalSelectorFilter::RenderSummary(int pos, HtmlElement* element,
     }
   }
 
-  // Security: the CSS minifier decodes hex escapes (e.g. "\3C" -> '<') and
-  // Css::EscapeString does not re-escape '<', '>' or '/', so crafted CSS
-  // (e.g. content:"\3C/style\3E...") can serialize to a literal "</style>"
-  // that would break out of the inline <style> element (XSS). Mirror
-  // CssInlineFilter::HasClosingStyleTag: if the critical subset contains a
-  // closing style tag, skip inlining it. RememberFullCss() above already
-  // preserved the full CSS so the page stays intact.
+  // Security: bytes that contain a closing style tag would end the inline
+  // <style> element early and turn the rest into markup. The summarizer
+  // already refuses a summary that contains one; this checks the bytes that
+  // are actually written, after URL resolution, whatever produced them.
+  // Mirror CssInlineFilter::HasClosingStyleTag: if the critical subset
+  // contains a closing style tag, leave this stylesheet alone.
   if (FindIgnoreCase(*css_to_use, "</style") != StringPiece::npos) {
     return;
   }
 
-  // Update the DOM --- either an existing style element, or replace link
-  // with style.
-  if (char_node != nullptr) {
-    // Note: This depends upon all previous filters also mutating the contents
-    // of the original Characters Node. If any previous filters replaces the
-    // Characters Node with another one or makes some other change, this node
-    // will be out of date and the update will not do anything.
-    // TODO(sligocki): We should use a non-trivial ResourceSlot to update this
-    // instead so that it is not so delicate.
-    *char_node->mutable_contents() = *css_to_use;
-  } else {
+  HtmlElement::Attribute* rel = element->FindAttribute(HtmlName::kRel);
+  if (rel == nullptr) {
+    return;
+  }
+
+  // The critical rules, inline, where the link stood. No empty block.
+  if (!css_to_use->empty()) {
     HtmlElement* style_element =
         driver()->NewElement(nullptr, HtmlName::kStyle);
     // Carry over attributes the page may depend on: id (stylesheet toggling
-    // by script), title (stylesheet-set semantics), and data-*. media is
-    // reconstructed below; the link-specific attributes (href, rel, type,
-    // charset) don't apply to a style element.
+    // by script) and data-*. media is reconstructed below; the link-specific
+    // attributes (href, rel, type, charset) don't apply to a style element.
     const HtmlElement::AttributeList& link_attrs = element->attributes();
     for (HtmlElement::AttributeConstIterator i(link_attrs.begin());
          i != link_attrs.end(); ++i) {
       const HtmlElement::Attribute& attr = *i;
       if (attr.keyword() == HtmlName::kId ||
-          attr.keyword() == HtmlName::kTitle ||
           StringCaseStartsWith(attr.name_str(), "data-")) {
         style_element->AddAttribute(attr);
       }
     }
+    // Just the media that is relevant to screen.
+    if (!relevant_media.empty()) {
+      driver()->AddAttribute(style_element, HtmlName::kMedia,
+                             css_util::StringifyMediaVector(relevant_media));
+    }
     driver()->InsertNodeBeforeNode(element, style_element);
-
     HtmlCharactersNode* content =
         driver()->NewCharactersNode(style_element, *css_to_use);
     driver()->AppendChild(style_element, content);
-    *is_element_deleted = driver()->DeleteNode(element);
-    element = style_element;
   }
 
-  // Update the media attribute to just the media that's relevant to screen.
-  StringVector all_media;
-  css_util::VectorizeMediaAttribute(summary.media_from_html, &all_media);
-
-  element->DeleteAttribute(HtmlName::kMedia);
-  bool drop_entire_element = false;
-  if (css_to_use->empty()) {  // NOLINT(bugprone-branch-clone)
-    // Don't keep empty blocks around.
-    drop_entire_element = true;
-  } else if (summary.is_inside_noscript) {
-    // Optimize summary version for scriptable environment, since noscript
-    // environment will eagerly load the whole CSS anyway at the foot of the
-    // page.
-    drop_entire_element = true;
-  } else if (summary.is_external &&
-             CssTagScanner::IsAlternateStylesheet(summary.rel)) {
-    // Likewise drop alternate stylesheets, they're non-critical.
-    drop_entire_element = true;
-  } else if (!all_media.empty()) {
-    StringVector relevant_media;
-    for (int i = 0, n = all_media.size(); i < n; ++i) {
-      const GoogleString& medium = all_media[i];
-      if (css_util::CanMediaAffectScreen(medium)) {
-        relevant_media.push_back(medium);
-      }
-    }
-
-    if (!relevant_media.empty()) {
-      driver()->AddAttribute(element, HtmlName::kMedia,
-                             css_util::StringifyMediaVector(relevant_media));
-    } else {
-      // None of the media applied to the screen, so remove the entire element.
-      drop_entire_element = true;
-    }
-  }
-
-  if (drop_entire_element) {
-    driver()->DeleteNode(element);
-  }
-
-  // We've altered the CSS, so we should generate code to load the entire thing.
-  // TODO(morlovich): Check if we actually dropped something?
-  any_rendered_ = true;
-}
-
-void CriticalSelectorFilter::WillNotRenderSummary(
-    int pos, HtmlElement* element, HtmlCharactersNode* char_node) {
-  RememberFullCss(pos, element, char_node);
-}
-
-GoogleString CriticalSelectorFilter::CacheKeySuffix() const {
-  return cache_key_suffix_;
-}
-
-void CriticalSelectorFilter::StartDocumentImpl() {
-  CssSummarizerBase::StartDocumentImpl();
-  ServerContext* context = driver()->server_context();
-
-  // Read critical selector info from pcache.
-  critical_selectors_ =
-      context->critical_selector_finder()->GetCriticalSelectors(driver());
-
-  // Compute corresponding cache key suffix
-  GoogleString all_selectors = JoinCollection(critical_selectors_, ",");
-  cache_key_suffix_ = context->lock_hasher()->Hash(all_selectors);
-
-  // Clear state between re-uses / check to make sure we wrapped up properly.
-  DCHECK(css_elements_.empty());
-  saw_end_document_ = false;
-  any_rendered_ = false;
-}
-
-void CriticalSelectorFilter::EndDocument() {
-  CssSummarizerBase::EndDocument();
-
-  saw_end_document_ = true;
-}
-
-void CriticalSelectorFilter::RenderDone() {
-  CssSummarizerBase::RenderDone();
-
-  // Only do this on very last flush window.
-  if (!saw_end_document_) {
-    return;
-  }
-
-  if (!css_elements_.empty() && any_rendered_) {
-    HtmlElement* noscript_element = nullptr;
-    Compact(&css_elements_);
-    for (int i = 0, n = css_elements_.size(); i < n; ++i) {
-      // Insert the full CSS, but hide all the style, link tags inside noscript
-      // blocks so that look-ahead parser cannot find them; and mark the
-      // portions that were visible to scripting-aware browser with
-      // class = psa_add_styles.
-      //
-      // If the browser has scripting off, it will therefore read everything,
-      // including portions of original CSS that were in noscript block.
-      //
-      // If the browser has scripting on, the parser will not do anything, but
-      // we will add a loader script which will load things with
-      // class = psa_add_styles (thus skipping over things that were originally
-      // inside noscript).
-      if (i == 0 || (css_elements_[i]->inside_noscript() !=
-                     css_elements_[i - 1]->inside_noscript())) {
-        noscript_element = driver()->NewElement(nullptr, HtmlName::kNoscript);
-        if (!css_elements_[i]->inside_noscript()) {
-          driver()->AddAttribute(noscript_element, HtmlName::kClass,
-                                 kNoscriptStylesClass);
-        }
-        InsertNodeAtBodyEnd(noscript_element);
-      }
-      css_elements_[i]->AppendTo(noscript_element);
-    }
-
-    // The CriticalCssLoader bootstrap below is an inline <script>; a script-src
-    // policy without 'unsafe-inline' would make the browser block it, stranding
-    // the non-critical CSS we just moved into the <noscript> blocks. Mirror the
-    // sibling critical_css_beacon_filter guard and never emit a loader the CSP
-    // will block. The authoritative gate is PolicyPermitsRendering() (which now
-    // also requires inline script), so with a forbidding policy we don't get
-    // here at all; this is a defensive backstop. The ideal is for that single
-    // enable decision to remain the only place this is expressed.
-    if (!CspPermitsInlineScript()) {
-      STLDeleteElements(&css_elements_);
-      return;
-    }
-
+  // The script that turns deferred stylesheets on, once per document and
+  // ahead of the first of them, so it is listening before any can arrive.
+  if (!loader_inserted_) {
+    loader_inserted_ = true;
     HtmlElement* script = driver()->NewElement(nullptr, HtmlName::kScript);
     driver()->AddAttribute(script, HtmlName::kDataPagespeedNoDefer,
                            StringPiece());
-    InsertNodeAtBodyEnd(script);
+    driver()->InsertNodeBeforeNode(element, script);
     GoogleString js =
         driver()->server_context()->static_asset_manager()->GetAsset(
             StaticAssetEnum::CRITICAL_CSS_LOADER_JS, driver()->options());
@@ -861,21 +763,73 @@ void CriticalSelectorFilter::RenderDone() {
     AddJsToElement(js, script);
   }
 
-  STLDeleteElements(&css_elements_);
+  // The full stylesheet, as optimized by the filters that ran before us: a
+  // preload in the link's own place, which the loader makes the stylesheet
+  // again there. It carries the link's attributes so the browser reuses the
+  // preloaded file. The id goes with the inline block when there is one.
+  HtmlElement* preload = driver()->CloneElement(element);
+  if (!css_to_use->empty()) {
+    preload->DeleteAttribute(HtmlName::kId);
+  }
+  preload->DeleteAttribute(HtmlName::kAs);
+  HtmlElement::Attribute* preload_rel = preload->FindAttribute(HtmlName::kRel);
+  if (preload_rel != nullptr) {
+    preload_rel->SetValue("preload");
+  }
+  driver()->AddAttribute(preload, HtmlName::kAs, "style");
+  driver()->AddAttribute(preload, kDeferredCssAttribute, StringPiece());
+  driver()->InsertNodeBeforeNode(element, preload);
+
+  // And the link as it was, for browsers that run no scripts.
+  HtmlElement* noscript = driver()->NewElement(nullptr, HtmlName::kNoscript);
+  driver()->InsertNodeBeforeNode(element, noscript);
+  driver()->AppendChild(noscript, driver()->CloneElement(element));
+
+  *is_element_deleted = driver()->DeleteNode(element);
+}
+
+GoogleString CriticalSelectorFilter::CacheKeySuffix() const {
+  return cache_key_suffix_;
+}
+
+void CriticalSelectorFilter::StartDocumentImpl() {
+  CssSummarizerBase::StartDocumentImpl();
+  ServerContext* context = driver()->server_context();
+
+  // Read critical selector info from pcache.
+  CriticalSelectorFinder* finder = context->critical_selector_finder();
+  critical_selectors_ = finder->GetCriticalSelectors(driver());
+  known_selectors_ = finder->GetKnownSelectors(driver());
+  keep_unknown_selectors_ = finder->TracksCandidateSelectors();
+
+  // Compute corresponding cache key suffix: the inline subset depends on
+  // which selectors are critical and on which have been judged at all.
+  GoogleString all_selectors =
+      StrCat(JoinCollection(critical_selectors_, ","), "\n",
+             JoinCollection(known_selectors_, ","), "\n",
+             keep_unknown_selectors_ ? "1" : "0");
+  cache_key_suffix_ = context->lock_hasher()->Hash(all_selectors);
+
+  // Clear state between re-uses.
+  loader_inserted_ = false;
 }
 
 void CriticalSelectorFilter::DetermineEnabled(GoogleString* disabled_reason) {
   // We shouldn't do anything if there is no information on critical selectors
-  // in the property cache. Unfortunately, we also cannot run safely in case of
-  // IE, since we do not understand IE conditional comments well enough to
-  // replicate their behavior in the load-everything section.
-  const StringSet& critical_selectors = driver()
-                                            ->server_context()
-                                            ->critical_selector_finder()
-                                            ->GetCriticalSelectors(driver());
+  // in the property cache, or if that information does not describe the page
+  // as it is now (its selectors grew, or the last report was cut short) and
+  // no complete report on the current set has arrived yet: the stylesheets
+  // then stay blocking, which is always correct. Unfortunately, we also
+  // cannot run safely in case of IE, since we do not understand IE
+  // conditional comments well enough to replicate their behavior.
+  CriticalSelectorFinder* finder =
+      driver()->server_context()->critical_selector_finder();
+  const StringSet& critical_selectors = finder->GetCriticalSelectors(driver());
+  bool has_current_data = finder->HasCurrentBeaconData(driver());
   bool ua_supports_critical_css =
       driver()->request_properties()->SupportsCriticalCss();
-  bool can_run = ua_supports_critical_css && !critical_selectors.empty();
+  bool can_run = ua_supports_critical_css && !critical_selectors.empty() &&
+                 has_current_data;
   driver()->log_record()->LogRewriterHtmlStatus(
       RewriteOptions::FilterId(RewriteOptions::kPrioritizeCriticalCss),
       (can_run ? RewriterHtmlApplication::ACTIVE
@@ -886,35 +840,15 @@ void CriticalSelectorFilter::DetermineEnabled(GoogleString* disabled_reason) {
   if (!can_run) {
     if (!ua_supports_critical_css) {
       *disabled_reason = "User agent not supported";
-    } else {
+    } else if (critical_selectors.empty()) {
       *disabled_reason = "No critical selector info in cache";
+    } else {
+      *disabled_reason =
+          "Waiting for a browser to report on the page's current stylesheets";
     }
   }
 
   set_is_enabled(can_run);
-}
-
-void CriticalSelectorFilter::RememberFullCss(int pos, HtmlElement* element,
-                                             HtmlCharactersNode* char_node) {
-  // Deep copy[1] into the css_elements_ array the CSS as optimized by all the
-  // filters that ran before us and rendered their results, so that we can
-  // emit it accurately at end, as a lazy-load sequence.
-  // [1] We need a deep copy since some of the DOM data will get freed up at the
-  //     end of each flush window.
-  if (static_cast<size_t>(pos) >= css_elements_.size()) {
-    css_elements_.resize(pos + 1);
-  }
-  bool noscript = GetSummaryForStyle(pos).is_inside_noscript;
-  CssElement* save = nullptr;
-  if (char_node != nullptr) {
-    CssStyleElement* save_inline =
-        new CssStyleElement(driver(), element, noscript);
-    save_inline->AppendCharactersNode(char_node);
-    save = save_inline;
-  } else {
-    save = new CssElement(driver(), element, noscript);
-  }
-  css_elements_[pos] = save;
 }
 
 }  // namespace net_instaweb

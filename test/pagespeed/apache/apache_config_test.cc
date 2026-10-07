@@ -20,6 +20,7 @@
 #include "pagespeed/apache/apache_config.h"
 
 #include <cstddef>
+#include <memory>
 
 #include "net/instaweb/rewriter/public/option_context.h"
 #include "pagespeed/kernel/base/null_message_handler.h"
@@ -144,6 +145,62 @@ TEST_F(ApacheConfigTest, DaemonApiSocketPathDefaultAndParse) {
             config_.ParseAndSetOptionFromName1("DaemonApiSocketPath", "",
                                                &msg, &handler));
   EXPECT_TRUE(config_.daemon_api_socket_path().empty());
+}
+
+// The switch for the optimizer's stored compressed copies.  Off unless an
+// operator turns it on, per server or virtual host, and it changes which
+// stored bytes go out -- never the configuration the optimizer files its
+// work under.
+TEST_F(ApacheConfigTest, ServingStoredEncodingsIsOffByDefault) {
+  EXPECT_FALSE(config_.daemon_serve_stored_encodings());
+}
+
+TEST_F(ApacheConfigTest, ServingStoredEncodingsParsesOnAndOff) {
+  GoogleString msg;
+  NullMessageHandler handler;
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            config_.ParseAndSetOptionFromName1("DaemonServeStoredEncodings",
+                                               "on", &msg, &handler));
+  EXPECT_TRUE(config_.daemon_serve_stored_encodings());
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            config_.ParseAndSetOptionFromName1("DaemonServeStoredEncodings",
+                                               "off", &msg, &handler));
+  EXPECT_FALSE(config_.daemon_serve_stored_encodings());
+  EXPECT_EQ(RewriteOptions::kOptionValueInvalid,
+            config_.ParseAndSetOptionFromName1("DaemonServeStoredEncodings",
+                                               "sometimes", &msg, &handler));
+  EXPECT_FALSE(config_.daemon_serve_stored_encodings());
+}
+
+TEST_F(ApacheConfigTest, ServingStoredEncodingsIsPerVirtualHost) {
+  ApacheConfig vhost("vhost", &thread_system_);
+  GoogleString msg;
+  NullMessageHandler handler;
+  ASSERT_EQ(RewriteOptions::kOptionOk,
+            vhost.ParseAndSetOptionFromName1("DaemonServeStoredEncodings",
+                                             "on", &msg, &handler));
+  std::unique_ptr<ApacheConfig> merged(config_.Clone());
+  merged->Merge(vhost);
+  EXPECT_TRUE(merged->daemon_serve_stored_encodings());
+  EXPECT_FALSE(config_.daemon_serve_stored_encodings());
+}
+
+TEST_F(ApacheConfigTest, ServingStoredEncodingsDoesNotRenameTheConfiguration) {
+  // Every notification to the optimizer carries the configuration's
+  // context; turning the switch on must not file new work under a second
+  // configuration for the same host.
+  GoogleString context_off, signature_off, context_on, signature_on;
+  ASSERT_EQ(OptionContextStatus::kOk,
+            OptionContext::Compute(config_, &context_off, &signature_off));
+  GoogleString msg;
+  NullMessageHandler handler;
+  ASSERT_EQ(RewriteOptions::kOptionOk,
+            config_.ParseAndSetOptionFromName1("DaemonServeStoredEncodings",
+                                               "on", &msg, &handler));
+  ASSERT_EQ(OptionContextStatus::kOk,
+            OptionContext::Compute(config_, &context_on, &signature_on));
+  EXPECT_EQ(context_off, context_on);
+  EXPECT_EQ(signature_off, signature_on);
 }
 
 // There is no runtime substrate toggle, and there must not be one.  The

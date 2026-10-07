@@ -55,11 +55,8 @@ namespace {
 // won't have this section.
 //
 // If you change this, or the structure of the encoded string,
-// you will also need to change:
-//
-// automatic/system_test.sh
-// system/system_test.sh
-// apache/system_test.sh
+// you will also need to check the pytest system-test suite under
+// test/system/{automatic,system}/, which asserts on encoded resource names.
 //
 // Plus a few constants in _test.cc files.
 

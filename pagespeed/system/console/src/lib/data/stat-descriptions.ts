@@ -56,6 +56,22 @@ export const STAT_DESCRIPTIONS: Readonly<Record<string, string>> = {
     "In-place requests answered from the optimizer daemon's shared cache, including not-modified revalidations. This is the daemon's hit count.",
   ipro_daemon_fallthrough:
     "In-place requests the daemon declined (nothing cached, or only a stale variant) or could not be asked because this process had no usable handle on its cache volume; the ordinary path serves them.",
+  ipro_daemon_served_css:
+    "In-place CSS requests answered from the optimizer's cache since the module started.",
+  ipro_daemon_served_js:
+    "In-place JavaScript requests answered from the optimizer's cache since the module started.",
+  ipro_daemon_served_image:
+    "In-place image requests answered from the optimizer's cache since the module started.",
+  ipro_daemon_served_other:
+    "In-place requests of other optimizable types answered from the optimizer's cache since the module started.",
+  ipro_daemon_fallthrough_css:
+    "CSS requests the optimizer's cache declined; counted per class once the origin response names the type, so a decline whose type is never learned stays only in the total.",
+  ipro_daemon_fallthrough_js:
+    "JavaScript requests the optimizer's cache declined; counted per class once the origin response names the type, so a decline whose type is never learned stays only in the total.",
+  ipro_daemon_fallthrough_image:
+    "Image requests the optimizer's cache declined; counted per class once the origin response names the type, so a decline whose type is never learned stays only in the total.",
+  process_start_ms:
+    "When the module's shared statistics started counting, in milliseconds since the epoch: the window every module-side number on the console covers.",
   ipro_daemon_refresh_notified:
     "Refresh signals sent to the optimizer daemon after it offered a variant that was past its freshness lifetime, asking it to discard and rebuild that variant set.",
   ipro_daemon_refresh_notify_failed:

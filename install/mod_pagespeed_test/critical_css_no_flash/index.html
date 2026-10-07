@@ -1,0 +1,28 @@
+<!doctype html>
+<html>
+  <head>
+    <title>prioritize_critical_css: styled content below the first screen</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="base.css">
+    <link rel="stylesheet" href="layout.css">
+    <link rel="stylesheet" href="components.css">
+  </head>
+  <body>
+    <h1 class="ncf-title">Styled from the first paint</h1>
+    <p class="ncf-lede">Everything below this paragraph is more than a screen
+    away. With prioritize_critical_css it must be styled when it is first
+    painted, not when the full stylesheets arrive.</p>
+    <div class="ncf-spacer"></div>
+    <ul class="ncf-list">
+      <li>A list without bullets</li>
+      <li>with a rule under each item</li>
+      <li>from the second stylesheet</li>
+    </ul>
+    <div class="ncf-card"><h2>Card one</h2><p>Padding, border and a large
+    heading from the third stylesheet.</p></div>
+    <div class="ncf-card"><h2>Card two</h2><p>The same rules again.</p></div>
+    <div class="ncf-card"><h2>Card three</h2><p>And once more.</p></div>
+    <p class="ncf-imported">This paragraph is styled by a file the second
+    stylesheet imports.</p>
+  </body>
+</html>

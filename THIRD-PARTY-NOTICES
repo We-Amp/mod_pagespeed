@@ -1627,11 +1627,11 @@ apr-util eb1f0c8ebd
   https://github.com/apache/apr-util
   License text: Apache-2.0, shipped verbatim as LICENSE in this package.
 
-curl 8.21.0
+curl 8.22.0
   License: curl
   Copyright (c) Daniel Stenberg and contributors
   https://github.com/curl/curl
-  License text (COPYING at the pinned curl-8_21_0 tag):
+  License text (COPYING at the pinned curl-8_22_0 tag):
 
     COPYRIGHT AND PERMISSION NOTICE
 

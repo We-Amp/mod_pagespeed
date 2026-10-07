@@ -265,9 +265,8 @@ class TestDeferJsResources:
         response = client.get(url)
         assert_http_status(response, 200)
 
-        # Check cache control
         cache_control = response.header("Cache-Control")
-        assert cache_control, "Should have Cache-Control header"
+        assert "max-age=300,private" in cache_control, f"Cache-Control: {cache_control!r}"
 
     def test_defer_js_debug_versioned_returns_200(
         self, client: PageSpeedClient
@@ -286,6 +285,8 @@ class TestDeferJsResources:
 
         response = client.get(url)
         assert_http_status(response, 200)
+        cache_control = response.header("Cache-Control")
+        assert "max-age=300,private" in cache_control, f"Cache-Control: {cache_control!r}"
 
 
 class TestDeferJsWithHash:
@@ -323,9 +324,8 @@ class TestDeferJsWithHash:
         js_response = client.get(js_url)
         assert_http_status(js_response, 200)
 
-        # Check for cache control header
         cache_control = js_response.header("Cache-Control")
-        assert cache_control, "Defer JS with hash should have Cache-Control header"
+        assert "max-age=31536000" in cache_control, f"Cache-Control: {cache_control!r}"
 
 
 if __name__ == "__main__":

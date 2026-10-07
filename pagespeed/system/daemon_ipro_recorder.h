@@ -36,6 +36,7 @@ namespace net_instaweb {
 class DaemonAbi;
 class MessageHandler;
 class ResponseHeaders;
+class RewriteStats;
 class Timer;
 
 // What a serving seam must gather about the REQUEST before the response
@@ -111,10 +112,14 @@ class DaemonIproRecorder : public IproRecorder {
   //
   // Self-owned in the same way the classic recorder is: DoneAndSetHeaders
   // deletes it.
+  //
+  // `stats` is borrowed too and may be null (a seam without shared
+  // statistics): when set, a recorded response moves the per-class split of
+  // the daemon fall-through counter.
   DaemonIproRecorder(const DaemonAbi* abi, void* cache, StringPiece socket_path,
                      const DaemonRecordRequest& request,
                      const HttpOptions& http_options, Timer* timer,
-                     MessageHandler* handler);
+                     MessageHandler* handler, RewriteStats* stats = nullptr);
   ~DaemonIproRecorder() override;
 
   // Number of daemon recorders this process has ever CONSTRUCTED.  The
@@ -169,6 +174,7 @@ class DaemonIproRecorder : public IproRecorder {
   const HttpOptions http_options_;
   Timer* timer_;
   MessageHandler* handler_;
+  RewriteStats* stats_ = nullptr;
 
   GoogleString body_;
   // The response's Vary lines, joined.  A MEMBER, not a local: the gate's
@@ -207,11 +213,34 @@ class DaemonAdapter;
 // in-place cache for this server AND this process has a usable handle on its
 // volume.  The caller owns the returned recorder in the same way it owns the
 // classic one: DoneAndSetHeaders deletes it.
+//
+// WHICH FACTORY FOR WHICH PORT.  MakeDaemonIproRecorderIfReady obtains the
+// handle through RecordCache(), which performs the open -- blocking file
+// lock, background threads -- on the calling thread when no handle is open.
+// That is right for a port whose caller may block (Apache's request
+// threads).  MakeDaemonIproRecorderIfOpen obtains it through
+// RecordCacheIfOpen(), which never opens and never waits, and reports
+// nullptr whenever this process has no open handle: the only choice for a
+// caller that must not block, like nginx's event-loop thread.  The open
+// itself stays with RecordCache(); such a port primes it from a worker
+// thread and reads the handle here.
+//
+// Either way the recorder BORROWS the handle until DoneAndSetHeaders: a port
+// that closes the adapter's handle (CloseRecordCache) must have completed or
+// destroyed every recorder first.
 IproRecorder* MakeDaemonIproRecorderIfReady(DaemonAdapter* adapter,
                                             const DaemonRecordRequest& request,
                                             const HttpOptions& http_options,
                                             Timer* timer,
-                                            MessageHandler* handler);
+                                            MessageHandler* handler,
+                                            RewriteStats* stats = nullptr);
+
+IproRecorder* MakeDaemonIproRecorderIfOpen(DaemonAdapter* adapter,
+                                           const DaemonRecordRequest& request,
+                                           const HttpOptions& http_options,
+                                           Timer* timer,
+                                           MessageHandler* handler,
+                                           RewriteStats* stats = nullptr);
 
 }  // namespace net_instaweb
 

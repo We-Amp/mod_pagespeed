@@ -119,6 +119,22 @@ if ($OldMsiPath -and -not (Test-Path $OldMsiPath)) {
 }
 
 $msiName = Split-Path $MsiPath -Leaf
+
+# Does the package carry the optimizer service? Read from the package itself
+# (its ServiceInstall table), so the checks below follow what the package
+# claims rather than a flag that could disagree with it.
+$installer = New-Object -ComObject WindowsInstaller.Installer
+$db = $installer.GetType().InvokeMember('OpenDatabase', 'InvokeMethod', $null, $installer, @((Resolve-Path $MsiPath).Path, 0))
+$view = $db.GetType().InvokeMember('OpenView', 'InvokeMethod', $null, $db, @("SELECT ``Name`` FROM ``ServiceInstall``"))
+$view.GetType().InvokeMember('Execute', 'InvokeMethod', $null, $view, $null) | Out-Null
+$serviceNames = @()
+while ($record = $view.GetType().InvokeMember('Fetch', 'InvokeMethod', $null, $view, $null)) {
+    $serviceNames += $record.GetType().InvokeMember('StringData', 'GetProperty', $null, $record, 1)
+}
+$view.GetType().InvokeMember('Close', 'InvokeMethod', $null, $view, $null) | Out-Null
+[System.Runtime.InteropServices.Marshal]::ReleaseComObject($db) | Out-Null
+$expectOptimizer = $serviceNames -contains 'WeAmpPageSpeedOptimizer'
+Write-Host "Package carries the optimizer service: $expectOptimizer"
 $oldMsiName = if ($OldMsiPath) { Split-Path $OldMsiPath -Leaf } else { "" }
 $adminPass = ConvertTo-SecureString 'Hv!PassThr0w' -AsPlainText -Force
 $cred = New-Object System.Management.Automation.PSCredential("Administrator", $adminPass)
@@ -350,6 +366,23 @@ $installScript = {
         throw "$installDir\LICENSE is not the Apache License text"
     }
     Write-Host "LICENSE + NOTICE installed alongside the module"
+
+    # The optimizer, when the package carries it: installed, and off.
+    if ($using:expectOptimizer) {
+        foreach ($f in @('factory_worker.exe', 'pagespeed.dll', 'optimizer-LICENSE.txt', 'optimizer-NOTICE.txt')) {
+            if (-not (Test-Path -LiteralPath (Join-Path $installDir $f))) { throw "$f not installed in $installDir" }
+        }
+        $svc = Get-CimInstance Win32_Service -Filter "Name='WeAmpPageSpeedOptimizer'"
+        if (-not $svc) { throw "the optimizer service is not installed" }
+        if ($svc.StartMode -ne 'Disabled') { throw "the optimizer service's start type is $($svc.StartMode), not Disabled" }
+        if ($svc.State -ne 'Stopped') { throw "the optimizer service is $($svc.State) after install" }
+        if ($svc.StartName -ne 'NT SERVICE\WeAmpPageSpeedOptimizer') { throw "the optimizer service runs as $($svc.StartName)" }
+        $acl = (& icacls.exe 'C:\ProgramData\We-Amp\PageSpeed\optimizer') -join ' '
+        if (-not ($acl.Contains('NT SERVICE\WeAmpPageSpeedOptimizer:(OI)(CI)(M)') -and $acl.Contains('IIS_IUSRS:(OI)(CI)(IO)(M)') -and $acl.Contains('IIS_IUSRS:(RX,WD)')) -or $acl.Contains('(I)')) {
+            throw "optimizer volume directory ACL is not the intended one: $acl"
+        }
+        Write-Host "Optimizer installed: service Disabled under its virtual account, volume directory granted"
+    }
 }
 Invoke-Command -VMName $VMName -Credential $cred -ScriptBlock $installScript -ArgumentList $msiName
 
@@ -561,6 +594,12 @@ $uninstallScript = {
     foreach ($f in @('LICENSE', 'NOTICE')) {
         if (Test-Path -LiteralPath "C:\Program Files\We-Amp\PageSpeed\$f") {
             throw "$f still present after uninstall"
+        }
+    }
+    if ($using:expectOptimizer) {
+        if (Get-Service WeAmpPageSpeedOptimizer -ErrorAction SilentlyContinue) { throw "the optimizer service is still installed after uninstall" }
+        foreach ($f in @('factory_worker.exe', 'pagespeed.dll')) {
+            if (Test-Path -LiteralPath "C:\Program Files\We-Amp\PageSpeed\$f") { throw "$f still present after uninstall" }
         }
     }
     Write-Host "Clean uninstall verified"

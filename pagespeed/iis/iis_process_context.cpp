@@ -2,6 +2,7 @@
 // Copyright (c) 2024-2026 We-Amp B.V.
 
 #include "pagespeed/iis/iis_process_context.h"
+#include "pagespeed/iis/iis_daemon_check.h"
 
 #include <sddl.h>      // ConvertSidToStringSidW
 #include <mutex>       // std::once_flag, std::call_once
@@ -235,6 +236,10 @@ IisServerContext* IisProcessContext::GetServerContext(const GoogleString& site_a
 		delete cf;
 		if (!logToEventLogSet) 
 		logToEventLog=false; // the options parser will have set logToEventLogSet
+		// A configuration has now been read in this process: whatever
+		// `logToEventLog` says from here on is the directive's value, and a
+		// site that never mentioned it has the default, off.
+		logToEventLogParsed=true;
 
 		message_handler_->Message( kInfo, "create server context");
 
@@ -281,6 +286,45 @@ IisServerContext* IisProcessContext::GetServerContext(const GoogleString& site_a
 		driver_factory_->SetServerContextMessageHandler(server_context);
 		driver_factory_->RootInit();
 		driver_factory_->ChildInit();
+
+		// The daemon startup check.  Engages when the site set EITHER
+		// daemon option -- one alone is the shared half-configuration
+		// mistake, answered with one line and in-place optimization off,
+		// before any library loads, exactly as on the Apache port; with
+		// both unset the gate function below touches nothing at all (no
+		// adapter object, no library load, no log line, no event-log
+		// entry).  The process-wide registry owns one adapter per
+		// distinct (library, socket, volume) triple for the life of the
+		// process: the client library is never unloaded, so reusing the
+		// adapter across this context's rebuilds keeps the loader
+		// reference count and the handle count flat.  The verdict also
+		// lives until the process ends -- a configuration edit that
+		// leaves the paths unchanged does not re-probe, so every verdict,
+		// the split included, persists until the application pool
+		// recycles, and a daemon that is not answering when this site
+		// first starts in a worker process leaves in-place optimization
+		// off until then.  Every verdict except the split leaves the
+		// site serving normally.
+		{
+			IisRewriteOptions* daemon_options =
+				dynamic_cast<IisRewriteOptions*>(server_context->global_options());
+			if (daemon_options != NULL) {
+				IisDaemonCheckRegistry::Result daemon = CheckSite(
+					daemon_options->daemon_socket_path(),
+					daemon_options->daemon_volume_path(),
+					driver_factory_->message_handler());
+				daemon_handler_registered_ = (daemon.adapter != NULL);
+				server_context->set_daemon_adapter(daemon.adapter);
+				if (daemon.split) {
+					init_failure_kind_ = InitFailureKind::kDaemonVolumeSplit;
+					failed_init_path_ =
+						daemon_options->daemon_volume_path();
+					ok_ = false;
+					driver_factory_->ShutDown();
+					return NULL;
+				}
+			}
+		}
 
 		// Verify the cache path is configured, exists, and is writable by the
 		// worker identity. Each failure mode populates init_failure_kind_ +
@@ -504,8 +548,19 @@ void IisProcessContext::Shutdown()
 		if (server_context_mutex_ != NULL) server_context_mutex_->Lock();
 		message_handler_->Message( net_instaweb::kInfo, "delete driver factory");
 	
-		if (driver_factory_ != NULL) 
+		if (driver_factory_ != NULL)
 		{
+			// The process-wide registry's adapters outlive this context:
+			// a configuration edit deletes the factory (and with it the
+			// handler) while the adapters stay, so the handler this
+			// context registered with the registry comes out again
+			// before the delete.
+			if (daemon_handler_registered_)
+			{
+				IisDaemonCheckRegistry::Get()->UnregisterSiteHandler(
+					driver_factory_->message_handler());
+				daemon_handler_registered_ = false;
+			}
 			delete driver_factory_;
 			driver_factory_ = NULL;
 		}

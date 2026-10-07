@@ -4,14 +4,26 @@
 import { describe, it, expect } from "vitest";
 import { ApiError } from "$lib/api/client";
 import {
+  checkResult,
+  cooldownReasonLabel,
   counterRows,
+  daemonUnavailableReason,
+  errorCode,
   fieldValue,
-  formatBytes,
-  formatUptime,
   isDaemonUnavailable,
   normalizeCooldowns,
   objectEntries,
+  wholeServerConsoleOnlyError,
 } from "./daemon";
+
+describe("wholeServerConsoleOnlyError", () => {
+  it("reads back as the module's own whole_server_console_only 403, with no network request involved", () => {
+    const error = wholeServerConsoleOnlyError();
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).status).toBe(403);
+    expect(errorCode(error)).toBe("whole_server_console_only");
+  });
+});
 
 describe("isDaemonUnavailable", () => {
   it("treats 502 and 404 as the daemon-unavailable empty state", () => {
@@ -23,6 +35,18 @@ describe("isDaemonUnavailable", () => {
     expect(isDaemonUnavailable(new ApiError(500, "oops"))).toBe(false);
     expect(isDaemonUnavailable(new Error("network down"))).toBe(false);
     expect(isDaemonUnavailable(null)).toBe(false);
+  });
+
+  it("treats 503 not-configured and 501 unsupported as unavailable with a reason", () => {
+    expect(isDaemonUnavailable(new ApiError(503, "daemon_not_configured"))).toBe(true);
+    expect(
+      daemonUnavailableReason(new ApiError(503, "{\"error\":\"daemon_not_configured\"}")),
+    ).toBe("not configured on this server");
+    expect(
+      daemonUnavailableReason(
+        new ApiError(501, "{\"error\":\"endpoint_unsupported_by_daemon\"}"),
+      ),
+    ).toBe("this optimizer version does not provide this panel");
   });
 });
 
@@ -36,47 +60,6 @@ describe("objectEntries", () => {
     expect(objectEntries(null)).toEqual([]);
     expect(objectEntries("ok")).toEqual([]);
     expect(objectEntries([1, 2])).toEqual([]);
-  });
-});
-
-describe("formatUptime", () => {
-  it("renders days, hours and minutes", () => {
-    expect(formatUptime(2 * 86400 + 5 * 3600 + 3 * 60 + 7)).toBe("2d 5h 3m");
-  });
-
-  it("renders hours and minutes below a day", () => {
-    expect(formatUptime(3 * 3600 + 41 * 60)).toBe("3h 41m");
-  });
-
-  it("renders minutes and seconds below an hour", () => {
-    expect(formatUptime(60 + 9)).toBe("1m 9s");
-  });
-
-  it("renders bare seconds below a minute", () => {
-    expect(formatUptime(12)).toBe("12s");
-    expect(formatUptime(0)).toBe("0s");
-  });
-
-  it("renders a dash for absent or unusable input", () => {
-    expect(formatUptime(undefined)).toBe("\u2014");
-    expect(formatUptime(NaN)).toBe("\u2014");
-    expect(formatUptime(-5)).toBe("\u2014");
-  });
-});
-
-describe("formatBytes", () => {
-  it("renders small sizes in bytes", () => {
-    expect(formatBytes(512)).toBe("512 B");
-  });
-
-  it("scales to the largest whole unit", () => {
-    expect(formatBytes(2048)).toBe("2.0 KB");
-    expect(formatBytes(5 * 1024 * 1024)).toBe("5.0 MB");
-  });
-
-  it("renders a dash for absent or unusable input", () => {
-    expect(formatBytes(undefined)).toBe("\u2014");
-    expect(formatBytes(NaN)).toBe("\u2014");
   });
 });
 
@@ -130,6 +113,24 @@ describe("normalizeCooldowns", () => {
   });
 });
 
+describe("cooldownReasonLabel", () => {
+  it("maps the daemon's reason codes to short plain-language labels", () => {
+    expect(cooldownReasonLabel("processing")).toBe("Processing");
+    expect(cooldownReasonLabel("write_failure")).toBe("Write failed");
+    expect(cooldownReasonLabel("revalidation")).toBe("Revalidating");
+  });
+
+  it("has no label for an absent, empty, unrecognised or non-string reason", () => {
+    expect(cooldownReasonLabel("unknown")).toBeNull();
+    expect(cooldownReasonLabel("some_future_reason")).toBeNull();
+    expect(cooldownReasonLabel("")).toBeNull();
+    expect(cooldownReasonLabel(undefined)).toBeNull();
+    expect(cooldownReasonLabel(null)).toBeNull();
+    expect(cooldownReasonLabel({ code: "processing" })).toBeNull();
+    expect(cooldownReasonLabel(42)).toBeNull();
+  });
+});
+
 describe("counterRows", () => {
   it("flattens numeric leaves, dot-joining nested keys", () => {
     expect(
@@ -150,5 +151,25 @@ describe("counterRows", () => {
 
   it("treats an absent block as no rows", () => {
     expect(counterRows(undefined)).toEqual([]);
+  });
+});
+
+describe("checkResult", () => {
+  it("reads the optimizer's {pass} objects as Pass or Fail", () => {
+    expect(checkResult({ pass: true })).toEqual({ text: "Pass", pass: true });
+    expect(checkResult({ pass: false })).toEqual({ text: "Fail", pass: false });
+    expect(checkResult({ pass: false, detail: "cache volume not writable" })).toEqual({
+      text: "Fail: cache volume not writable",
+      pass: false,
+    });
+  });
+  it("reads a bare boolean too", () => {
+    expect(checkResult(true)).toEqual({ text: "Pass", pass: true });
+    expect(checkResult(false)).toEqual({ text: "Fail", pass: false });
+  });
+  it("anything else is shown as a value, neither pass nor fail", () => {
+    expect(checkResult("degraded")).toEqual({ text: "degraded", pass: null });
+    expect(checkResult({ pass: "yes" })).toEqual({ text: '{"pass":"yes"}', pass: null });
+    expect(checkResult(undefined)).toEqual({ text: "—", pass: null });
   });
 });

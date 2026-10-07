@@ -44,7 +44,8 @@ class EnvoyServerContext : public SystemServerContext {
   bool ProxiesHtml() const override { return false; }
 
   // Creates the UDS-backed DaemonReader for the /v1/daemon/* admin
-  // endpoints, from the configured DaemonApiSocketPath.  See
+  // endpoints, from the configured DaemonApiSocketPath, or
+  // nullptr when that path is empty (daemon API disabled).  See
   // SystemServerContext::NewDaemonReader().
   DaemonReader* NewDaemonReader() override;
 

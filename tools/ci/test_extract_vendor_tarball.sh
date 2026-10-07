@@ -38,6 +38,9 @@ command -v zstd  >/dev/null || { echo "SKIP: zstd not installed"; exit 0; }
 TEST_TMP="$(mktemp -d)"
 cleanup() { rm -rf "$TEST_TMP"; }
 trap cleanup EXIT
+# Every hub fetch below lands under this TMPDIR; check [8] asserts none of
+# them left a tarball behind (a leftover per job filled a runner's disk).
+export TMPDIR="$TEST_TMP/fetch-tmp"; mkdir -p "$TMPDIR"
 
 FAKE_BIN="$TEST_TMP/bin"
 SHARED="$TEST_TMP/hub-shared"    # stand-in for the hub's shared vendor dir
@@ -45,6 +48,9 @@ mkdir -p "$FAKE_BIN" "$SHARED"
 
 SHA="deadbee"
 NAME="mod_pagespeed-${SHA}.tar.zst"
+# The pre-fix helper left /tmp/<name> behind on shared runners; clear this
+# test's fake-SHA name so a stale copy from an old run can't fail check [8].
+rm -f "/tmp/$NAME" "/tmp/$NAME.sha256"
 
 # ---------------------------------------------------------------------------
 # Build a real, valid vendor tarball (a tiny workspace with GIT_COMMIT).
@@ -275,6 +281,18 @@ if (
   ok "local-only extract works with no hub variables set"
 else
   bad "local-only extract should not require hub variables"; cat "$TEST_TMP/out7b.log"
+fi
+
+# ===========================================================================
+echo "[8] hub fetches leave no tarball behind"
+# ===========================================================================
+left="$(find "$TMPDIR" -type f 2>/dev/null | head -5)"
+# The pre-fix helper ignored TMPDIR and wrote /tmp/<name>; catch that too.
+if [ -e "/tmp/$NAME" ]; then left="$left /tmp/$NAME"; fi
+if [ -z "$left" ]; then
+  ok "no fetched tarball or sidecar left behind"
+else
+  bad "fetched files left behind: $left"
 fi
 
 echo ""

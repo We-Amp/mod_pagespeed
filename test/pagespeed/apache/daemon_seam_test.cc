@@ -32,12 +32,16 @@
 // regression, and it does not catch a call site that runs and does nothing.
 // The behavioural half is covered where the behaviour lives.
 
+#include <cctype>
+
+#include "pagespeed/apache/instaweb_handler.h"
 #include "pagespeed/apache/streaming_pagespeed_resource_fetch.h"
 #include "pagespeed/kernel/base/file_system.h"
 #include "pagespeed/kernel/base/null_message_handler.h"
 #include "pagespeed/kernel/base/stdio_file_system.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/system/daemon_serve_arm.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 
@@ -207,6 +211,62 @@ TEST_F(DaemonSeamTest, AFallbackHitIsAnsweredWithOneWorkerRenotify) {
       << "the fallback re-notify has more than one call site";
 }
 
+TEST_F(DaemonSeamTest, ALostOptimizedCopyIsAskedForOnceAfterTheServe) {
+  // A stylesheet or script whose optimized copy has gone missing is served
+  // as its stored original, and that serve records nothing and notifies
+  // nothing -- so without this ask the URL stays unoptimized until its
+  // stored original expires.  The behaviour (what counts as a loss, the
+  // per-URL window, what the notification carries) is covered where it
+  // lives, in daemon_serve_arm_test.cc.  What is pinned here is the WIRING:
+  // the seam opts the reader in BEFORE the serve, asks AFTER the response
+  // has been served and counted, names the request's configuration, and
+  // counts the send.
+  const GoogleString source =
+      ReadSource("pagespeed/apache/instaweb_handler.cc");
+  const size_t serve = source.find(
+      "bool InstawebHandler::"
+      "ServeFromDaemonSubstrate()");
+  ASSERT_NE(GoogleString::npos, serve)
+      << "the daemon serve seam has been renamed; this pin needs updating";
+  const size_t fn_end = source.find("\n}\n", serve);
+  ASSERT_NE(GoogleString::npos, fn_end);
+  const GoogleString body = source.substr(serve, fn_end - serve);
+
+  const size_t opt_in = body.find(
+      "reader->set_heal_notify_limiter(ProcessDaemonHealNotifyLimiter());");
+  ASSERT_NE(GoogleString::npos, opt_in)
+      << "the reader is never given the limiter, so a lost copy is never "
+         "recognised on this port";
+  const size_t decided = body.find("reader->Serve(");
+  ASSERT_NE(GoogleString::npos, decided);
+  EXPECT_LT(opt_in, decided)
+      << "the limiter must be set before the serve it applies to";
+
+  const size_t served = body.find("ipro_daemon_served");
+  ASSERT_NE(GoogleString::npos, served);
+  const size_t gate = body.find("if (decision.lost_optimized_copy) {");
+  ASSERT_NE(GoogleString::npos, gate)
+      << "the ask is no longer conditioned on the arm's detection";
+  const size_t ask = body.find("DaemonServeLostCopyNotify(");
+  ASSERT_NE(GoogleString::npos, ask)
+      << "a lost optimized copy is no longer asked for";
+  EXPECT_LT(served, gate) << "the ask must follow the serve, not precede it";
+  EXPECT_LT(gate, ask) << "the ask is not inside its gate";
+  EXPECT_NE(GoogleString::npos, body.find("ipro_daemon_heal_notified"))
+      << "the ask is no longer counted";
+  EXPECT_NE(GoogleString::npos, body.find("ipro_daemon_heal_notify_failed"))
+      << "a failed ask is silent";
+  // The notification is computed under the request's own configuration:
+  // one context computation per notification site in this function.
+  EXPECT_EQ(3, CountSubstring(body, "OptionContext::Compute("))
+      << "the refresh, fallback and lost-copy notifications each name the "
+         "request's configuration exactly once";
+
+  // EXACTLY ONE send site in the whole port.
+  EXPECT_EQ(1, CountSubstring(source, "DaemonServeLostCopyNotify("))
+      << "the lost-copy notification has more than one call site";
+}
+
 TEST_F(DaemonSeamTest, AnAgeExpiredFallThroughSendsTheOriginRefreshSentinel) {
   // An age-expired VARIANT fall-through is the one decline the worker cannot
   // heal from the plain path: the re-record's notification is dedup-skipped
@@ -292,7 +352,8 @@ TEST_F(DaemonSeamTest, AnOptimizedSubstrateServeRecordsItsHit) {
   // The 200 leg, and nothing past it: the 304 leg emits no body and must
   // record no hit.
   const size_t sent = body.find(
-      "send_out_headers_and_body(request_, response_headers, body);");
+      "send_out_headers_and_body(request_, response_headers, body, "
+      "encoded_body);");
   ASSERT_NE(GoogleString::npos, sent);
   const GoogleString leg = body.substr(sent);
 
@@ -318,6 +379,125 @@ TEST_F(DaemonSeamTest, AnOptimizedSubstrateServeRecordsItsHit) {
   // spelling, which the helper's definition does not share.
   EXPECT_EQ(1, CountSubstring(source, "RecordDaemonServeHit(decision)"))
       << "the serve-hit recorder has more than one call site";
+}
+
+TEST_F(DaemonSeamTest, TheServeHitNamesAHostTheVirtualHostVouchesFor) {
+  // The optimizer attributes each recorded serve to the host the module
+  // names.  That name is one this virtual host's configuration lists --
+  // VouchedServeHost over the request's own server record -- never the
+  // request's Host value on its own; the lookup keeps using the request's
+  // host.  The rule is unit-tested in serve_host_names_test.cc and
+  // apache_host_names_test.cc; which recorder is called is pinned in
+  // daemon_serve_arm_test.cc.
+  const GoogleString source =
+      ReadSource("pagespeed/apache/instaweb_handler.cc");
+  const size_t fn = source.find("void InstawebHandler::RecordDaemonServeHit(");
+  ASSERT_NE(GoogleString::npos, fn)
+      << "the serve-hit recorder has been renamed; this pin needs updating";
+  const size_t fn_end = source.find("\n}\n", fn);
+  ASSERT_NE(GoogleString::npos, fn_end);
+  GoogleString body;
+  for (const char c : source.substr(fn, fn_end - fn)) {
+    if (!isspace(static_cast<unsigned char>(c))) body.push_back(c);
+  }
+  EXPECT_NE(GoogleString::npos,
+            body.find("decision.stored_mask,VouchedServeHost(stripped_gurl_."
+                      "Host(),ApacheConfiguredHostNames(request_->server,"
+                      "server_context_->apache_factory()->main_server(),"
+                      "server_context_->apache_factory()->"
+                      "stated_server_names())));"))
+      << "the recorded serve hit no longer names a host the virtual host's "
+         "configuration vouches for";
+  EXPECT_EQ(GoogleString::npos,
+            body.find("decision.stored_mask,daemon_serve_host_)"))
+      << "the recorded serve hit names the request's own host again";
+}
+
+TEST_F(DaemonSeamTest, ThePerHostAdminConsoleIsGivenItsOwnServeHost) {
+  // A per-host console sees only the row of the optimizer's serve savings
+  // that its own site records serves under -- the same derivation as the
+  // serve hit above.  The whole-server call passes none.
+  GoogleString flat;
+  for (const char c : ReadSource("pagespeed/apache/instaweb_handler.cc")) {
+    if (!isspace(static_cast<unsigned char>(c))) flat.push_back(c);
+  }
+  const size_t call =
+      flat.find("server_context->AdminPage(false/*notglobal*/,");
+  ASSERT_NE(GoogleString::npos, call)
+      << "the per-host admin call has been reshaped; this pin needs updating";
+  const size_t end = flat.find(";", call);
+  ASSERT_NE(GoogleString::npos, end);
+  EXPECT_NE(GoogleString::npos,
+            flat.substr(call, end - call)
+                .find("admin_fetch,request_body,VouchedServeHost(instaweb_"
+                      "handler.stripped_gurl().Host(),ApacheConfiguredHostNames("
+                      "request->server,server_context->apache_factory()->"
+                      "main_server(),server_context->apache_factory()->"
+                      "stated_server_names())))"))
+      << "the per-host admin console is not given its own serve host";
+}
+
+TEST_F(DaemonSeamTest, StatedServerNamesAreReadOnceFromTheConfiguration) {
+  // Whether a record's configuration states its ServerName is read from
+  // httpd's parsed configuration once, after the configuration is read and
+  // before anything is served, and kept on the factory; the serving and
+  // admin paths only look records up.  The global tree is read in exactly
+  // one place.
+  GoogleString flat;
+  for (const char c : ReadSource("pagespeed/apache/mod_instaweb.cc")) {
+    if (!isspace(static_cast<unsigned char>(c))) flat.push_back(c);
+  }
+  const size_t post_config = flat.find("intpagespeed_post_config(");
+  ASSERT_NE(GoogleString::npos, post_config)
+      << "the post-config hook has been renamed; this pin needs updating";
+  const size_t set = flat.find(
+      "factory->set_stated_server_names(ApacheStatedServerNamesFromTree("
+      "ap_conftree,server_list));");
+  EXPECT_NE(GoogleString::npos, set)
+      << "the stated ServerNames are not computed from the configuration";
+  EXPECT_LT(post_config, set) << "they are not computed in the post-config "
+                                 "hook";
+  EXPECT_EQ(1, CountSubstring(flat, "ap_conftree"))
+      << "the global configuration tree is read in more than one place";
+  for (const char* other :
+       {"pagespeed/apache/instaweb_handler.cc",
+        "pagespeed/apache/apache_server_context.cc",
+        "pagespeed/apache/apache_rewrite_driver_factory.cc"}) {
+    EXPECT_EQ(0, CountSubstring(ReadSource(other), "ap_conftree")) << other;
+  }
+}
+
+TEST_F(DaemonSeamTest, TheServeHitRecordsTheServedEntrysOwnClass) {
+  // Which content classes serve_savings can move for on this port is
+  // decided by what gets served, not by this seam: the recorder is handed
+  // the decision's own class, and the gate in front of it names no class.
+  const GoogleString source =
+      ReadSource("pagespeed/apache/instaweb_handler.cc");
+
+  const size_t helper = source.find(
+      "void InstawebHandler::RecordDaemonServeHit(");
+  ASSERT_NE(GoogleString::npos, helper)
+      << "the serve-hit helper has been renamed; this pin needs updating";
+  const size_t helper_end = source.find("\n}\n", helper);
+  ASSERT_NE(GoogleString::npos, helper_end);
+  const GoogleString helper_body = source.substr(helper, helper_end - helper);
+  EXPECT_NE(GoogleString::npos, helper_body.find("decision.ps_content_type"))
+      << "the recorder no longer receives the served entry's own class";
+
+  const size_t serve = source.find(
+      "bool InstawebHandler::ServeFromDaemonSubstrate()");
+  ASSERT_NE(GoogleString::npos, serve);
+  const size_t sent = source.find(
+      "send_out_headers_and_body(request_, response_headers, body, "
+      "encoded_body);",
+      serve);
+  ASSERT_NE(GoogleString::npos, sent);
+  const size_t record = source.find("RecordDaemonServeHit(decision)", sent);
+  ASSERT_NE(GoogleString::npos, record);
+  const GoogleString gate = source.substr(sent, record - sent);
+  EXPECT_EQ(GoogleString::npos, gate.find("ps_content_type"))
+      << "the serve-hit gate now filters by content class; a served entry's "
+         "class could then go unrecorded";
 }
 
 TEST_F(DaemonSeamTest, TheDaemonSubstrateDoesNotRewriteCachingHeaders) {
@@ -500,6 +680,50 @@ TEST_F(DaemonSeamTest, EverySubstrateOutcomeIsCounted) {
          "documented sum of served + fell-through is false";
 }
 
+TEST_F(DaemonSeamTest, TheSharedStatisticsGetAStartTimeOnce) {
+  const GoogleString source = ReadSource(
+      "pagespeed/system/system_rewrite_driver_factory.cc");
+  const size_t set_call =
+      source.find("GetUpDownCounter(RewriteStats::kProcessStartMs)");
+  ASSERT_NE(GoogleString::npos, set_call)
+      << "the statistics start-time gauge is no longer set where the shared "
+         "segment is created";
+  const size_t init_true = source.find("stats->Init(true, message_handler())");
+  ASSERT_NE(GoogleString::npos, init_true);
+  EXPECT_LT(init_true, set_call)
+      << "the gauge must be set after the segment exists, still in the root "
+         "process, before any child attaches";
+  const size_t second_set = source.find(
+      "GetUpDownCounter(RewriteStats::kProcessStartMs)", set_call + 1);
+  EXPECT_EQ(GoogleString::npos, second_set)
+      << "the gauge has more than one writer site";
+}
+
+TEST_F(DaemonSeamTest, TheServeLegMovesThePerClassSplit) {
+  const GoogleString source =
+      ReadSource("pagespeed/apache/instaweb_handler.cc");
+  const size_t serve =
+      source.find("InstawebHandler::ServeFromDaemonSubstrate");
+  ASSERT_NE(GoogleString::npos, serve);
+  const size_t fn_end = source.find("\n}\n", serve);
+  ASSERT_NE(GoogleString::npos, fn_end);
+  const GoogleString body = source.substr(serve, fn_end - serve);
+
+  const size_t served = body.find("ipro_daemon_served()->Add(1)");
+  ASSERT_NE(GoogleString::npos, served);
+  EXPECT_NE(GoogleString::npos, body.find("RecordDaemonServedClass("))
+      << "the per-class split of the serve counter no longer moves on the "
+         "serve leg";
+
+  // The record side hands the recorder the counters it moves per class.
+  const size_t record = source.find("MakeDaemonIproRecorderIfReady(");
+  ASSERT_NE(GoogleString::npos, record);
+  const GoogleString call = source.substr(record, 400);
+  EXPECT_NE(GoogleString::npos, call.find("rewrite_stats()"))
+      << "the recorder no longer receives the shared counters, so the "
+         "fall-through split has stopped moving";
+}
+
 TEST_F(DaemonSeamTest, TheApachePortConstructsNoDaemonRecorderOutsideTheGate) {
   // The daemon-side recorder gets the same single-owner treatment as the
   // classic one, and for the same reason: "not constructed" is the contract,
@@ -574,6 +798,112 @@ TEST_F(DaemonSeamTest, TheApachePortConstructsNoRecorderOutsideTheGate) {
   EXPECT_GT(scanned, 10) << "only " << scanned
                          << " Apache source files were scanned; the listing "
                             "looks wrong, so this pin proved nothing";
+}
+
+TEST_F(DaemonSeamTest, AnAlreadyCodedBodyIsNotHandedToTheCompressor) {
+  // The compressor is attached to a 200 of a compressible type, exactly as
+  // before -- unless the body already carries a content coding: a stored
+  // compressed copy compressed again is bytes no client decodes.
+  EXPECT_TRUE(InstawebHandler::AttachesCompressor(HttpStatus::kOK, "text/css",
+                                                  false));
+  EXPECT_TRUE(InstawebHandler::AttachesCompressor(
+      HttpStatus::kOK, "application/javascript", false));
+  EXPECT_FALSE(InstawebHandler::AttachesCompressor(HttpStatus::kOK,
+                                                   "text/css", true));
+  EXPECT_FALSE(InstawebHandler::AttachesCompressor(
+      HttpStatus::kOK, "application/javascript", true));
+  EXPECT_FALSE(InstawebHandler::AttachesCompressor(HttpStatus::kOK,
+                                                   "image/svg+xml", true));
+  // And the two old exclusions stand.
+  EXPECT_FALSE(InstawebHandler::AttachesCompressor(HttpStatus::kNotModified,
+                                                   "text/css", false));
+  EXPECT_FALSE(InstawebHandler::AttachesCompressor(HttpStatus::kOK,
+                                                   "image/png", false));
+  EXPECT_FALSE(
+      InstawebHandler::AttachesCompressor(HttpStatus::kOK, nullptr, false));
+}
+
+TEST_F(DaemonSeamTest, AStoredCodedCopyIsLabelledWithItsOwnCoding) {
+  // The behavioural half -- which coding a decision names, read off the
+  // stored entry -- is pinned where it is decided
+  // (daemon_serve_arm_test.cc).  What is pinned here is that the seam emits
+  // exactly that and nothing else: the label comes from the decision, it is
+  // on the 200 leg only, no request header names it, and the same fact
+  // keeps the compressor off the body.
+  const GoogleString source =
+      ReadSource("pagespeed/apache/instaweb_handler.cc");
+  const size_t serve =
+      source.find("bool InstawebHandler::ServeFromDaemonSubstrate()");
+  ASSERT_NE(GoogleString::npos, serve);
+  const size_t fn_end = source.find("\n}\n", serve);
+  ASSERT_NE(GoogleString::npos, fn_end);
+  const GoogleString body = source.substr(serve, fn_end - serve);
+
+  EXPECT_NE(GoogleString::npos,
+            body.find("const bool encoded_body = "
+                      "!decision.content_encoding.empty();"))
+      << "the coded-body flag is no longer the decision's own";
+
+  // EXACTLY ONE label, from the decision, inside the 200-only block.
+  EXPECT_EQ(1, CountSubstring(body, "HttpAttributes::kContentEncoding"))
+      << "the substrate states Content-Encoding in more than one place";
+  const size_t label =
+      body.find("response_headers.Add(HttpAttributes::kContentEncoding,");
+  ASSERT_NE(GoogleString::npos, label);
+  EXPECT_NE(GoogleString::npos, body.find("decision.content_encoding);", label))
+      << "the Content-Encoding value is not the decision's";
+  const size_t two_hundred = body.find("if (!decision.not_modified) {");
+  const size_t caching = body.find("response_headers.ComputeCaching();");
+  ASSERT_NE(GoogleString::npos, two_hundred);
+  ASSERT_NE(GoogleString::npos, caching);
+  EXPECT_LT(two_hundred, label)
+      << "Content-Encoding is stated outside the 200-only block";
+  EXPECT_LT(label, caching)
+      << "Content-Encoding is stated outside the 200-only block";
+  // The coding is never read off the request in the serving function.
+  EXPECT_EQ(GoogleString::npos, body.find("kAcceptEncoding"))
+      << "the serving function reads the request's Accept-Encoding itself";
+
+  // The send tells the compressor gate the body is coded, from one call.
+  EXPECT_EQ(1, CountSubstring(body,
+                              "send_out_headers_and_body(request_, "
+                              "response_headers, body, encoded_body);"));
+
+  // And the gate is the predicate, the only place DEFLATE is attached.
+  const size_t sender =
+      source.find("void InstawebHandler::send_out_headers_and_body(");
+  ASSERT_NE(GoogleString::npos, sender);
+  const size_t sender_end = source.find("\n}\n", sender);
+  ASSERT_NE(GoogleString::npos, sender_end);
+  const GoogleString sender_body = source.substr(sender, sender_end - sender);
+  EXPECT_NE(GoogleString::npos, sender_body.find("AttachesCompressor("))
+      << "the compressor is attached without asking the predicate";
+  EXPECT_EQ(1, CountSubstring(sender_body, "ap_add_output_filter(\"DEFLATE\""));
+  EXPECT_EQ(1, CountSubstring(source, "ap_add_output_filter(\"DEFLATE\""))
+      << "a second DEFLATE attach site bypasses the predicate";
+}
+
+TEST_F(DaemonSeamTest, TheReaderTakesTheHostsStoredEncodingsSwitch) {
+  // The operator's directive reaches the arm through exactly one call,
+  // made before the selection, from this request's configuration.
+  const GoogleString source =
+      ReadSource("pagespeed/apache/instaweb_handler.cc");
+  const size_t serve =
+      source.find("bool InstawebHandler::ServeFromDaemonSubstrate()");
+  ASSERT_NE(GoogleString::npos, serve);
+  const size_t fn_end = source.find("\n}\n", serve);
+  ASSERT_NE(GoogleString::npos, fn_end);
+  const GoogleString body = source.substr(serve, fn_end - serve);
+  const size_t set = body.find("reader->set_serve_stored_encodings(");
+  ASSERT_NE(GoogleString::npos, set)
+      << "the directive never reaches the serve arm";
+  EXPECT_NE(GoogleString::npos,
+            body.find("options_->daemon_serve_stored_encodings()", set))
+      << "the switch is not taken from this request's configuration";
+  const size_t selection = body.find("reader->Serve(");
+  ASSERT_NE(GoogleString::npos, selection);
+  EXPECT_LT(set, selection) << "the switch is set after the selection";
+  EXPECT_EQ(1, CountSubstring(source, "set_serve_stored_encodings("));
 }
 
 }  // namespace

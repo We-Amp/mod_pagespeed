@@ -50,6 +50,14 @@ class RewriteStats {
   // successful (200s).
   static const char kSuccessfulDownstreamCachePurges[];
 
+  // When this module's shared statistics were initialised, in epoch
+  // milliseconds -- the time base every counter in the shared set counts
+  // from.  Set once by the root process as it creates the shared segment
+  // (before any child exists); read by the admin console to stamp "since"
+  // on every headline number.  A deployment without shared statistics
+  // leaves it at zero, which reads as "since restart".
+  static const char kProcessStartMs[];
+
   RewriteStats(bool has_waveforms, Statistics* stats,
                ThreadSystem* thread_system, Timer* timer);
   ~RewriteStats();
@@ -112,6 +120,20 @@ class RewriteStats {
   Variable* ipro_daemon_served() { return ipro_daemon_served_; }
   Variable* ipro_daemon_fallthrough() { return ipro_daemon_fallthrough_; }
 
+  // Per-content-class splits of the two counters above (not partition
+  // members; see the comment beside their names in rewrite_stats.cc).
+  Variable* ipro_daemon_served_css() { return ipro_daemon_served_css_; }
+  Variable* ipro_daemon_served_js() { return ipro_daemon_served_js_; }
+  Variable* ipro_daemon_served_image() { return ipro_daemon_served_image_; }
+  Variable* ipro_daemon_served_other() { return ipro_daemon_served_other_; }
+  Variable* ipro_daemon_fallthrough_css() {
+    return ipro_daemon_fallthrough_css_;
+  }
+  Variable* ipro_daemon_fallthrough_js() { return ipro_daemon_fallthrough_js_; }
+  Variable* ipro_daemon_fallthrough_image() {
+    return ipro_daemon_fallthrough_image_;
+  }
+
   // Worker re-notifies sent on fallback hits, and sends that FAILED.  NOT
   // partition members: every fallback hit is already counted in
   // ipro_daemon_served.  Only send outcomes move these two -- see the
@@ -133,6 +155,17 @@ class RewriteStats {
   }
   Variable* ipro_daemon_refresh_notify_failed() {
     return ipro_daemon_refresh_notify_failed_;
+  }
+
+  // Notifications sent after serving a stored original whose optimized copy
+  // has gone missing (asks, not heals), and sends that FAILED.  NOT
+  // partition members either: every such serve is already counted in
+  // ipro_daemon_served.  Only send
+  // outcomes move these two -- see the comment beside their names in
+  // rewrite_stats.cc.
+  Variable* ipro_daemon_heal_notified() { return ipro_daemon_heal_notified_; }
+  Variable* ipro_daemon_heal_notify_failed() {
+    return ipro_daemon_heal_notify_failed_;
   }
 
   Variable* downstream_cache_purge_attempts() {
@@ -200,10 +233,19 @@ class RewriteStats {
   Variable* ipro_not_rewritable_;
   Variable* ipro_daemon_served_;
   Variable* ipro_daemon_fallthrough_;
+  Variable* ipro_daemon_served_css_;
+  Variable* ipro_daemon_served_js_;
+  Variable* ipro_daemon_served_image_;
+  Variable* ipro_daemon_served_other_;
+  Variable* ipro_daemon_fallthrough_css_;
+  Variable* ipro_daemon_fallthrough_js_;
+  Variable* ipro_daemon_fallthrough_image_;
   Variable* ipro_daemon_fallback_notified_;
   Variable* ipro_daemon_fallback_notify_failed_;
   Variable* ipro_daemon_refresh_notified_;
   Variable* ipro_daemon_refresh_notify_failed_;
+  Variable* ipro_daemon_heal_notified_;
+  Variable* ipro_daemon_heal_notify_failed_;
   Variable* downstream_cache_purge_attempts_;
   Variable* successful_downstream_cache_purges_;
 

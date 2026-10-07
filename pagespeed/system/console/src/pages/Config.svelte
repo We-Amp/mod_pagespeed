@@ -4,21 +4,34 @@
 -->
 
 <script lang="ts">
-  import { AdminApiClient } from "$lib/api/client";
   import type { ConfigResponse } from "$lib/api/types";
+  import LoadError from "$lib/LoadError.svelte";
+  import PageHeader from "$lib/PageHeader.svelte";
+  import Tabs from "$lib/Tabs.svelte";
+  import { displayHost, scopeLine } from "$lib/utils/config-scope";
+  import { useConsole } from "$lib/api/context";
 
-  const { basePath = "" }: { basePath?: string; isGlobal?: boolean } = $props();
-  const api = new AdminApiClient(basePath);
+  const { api } = useConsole();
 
   let data = $state<ConfigResponse | null>(null);
   let error = $state<string | null>(null);
   let loading = $state(true);
+  let updatedAt = $state<number | null>(null);
+  // Which text the config-wrapper shows: the server-wide config, or the
+  // options actually in effect for the request that hit this vhost.
+  type ConfigView = "server" | "effective";
+  let view = $state<ConfigView>("server");
+  const CONFIG_TABS: ReadonlyArray<{ id: ConfigView; label: string }> = [
+    { id: "server", label: "Server config" },
+    { id: "effective", label: "Effective for this request" },
+  ];
 
   async function fetchConfig() {
     loading = true;
     error = null;
     try {
       data = await api.getConfig();
+      updatedAt = Date.now();
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);
     } finally {
@@ -29,29 +42,55 @@
   // Fetch on mount.
   fetchConfig();
 
+  let hasEffectiveConfig = $derived(data?.effective_config !== undefined);
+
   let configText = $derived(
-    data?.config ?? (data as Record<string, unknown>)?.raw ?? "",
+    view === "effective" && data?.effective_config !== undefined
+      ? data.effective_config
+      : (data?.config ?? (data as Record<string, unknown>)?.raw ?? ""),
   );
 </script>
 
 <div class="page">
-  <div class="header">
-    <h1>Configuration</h1>
-    <button class="btn btn-primary" onclick={fetchConfig} disabled={loading}>
-      {loading ? "Loading..." : "Refresh"}
-    </button>
-  </div>
+  <PageHeader
+    title="Configuration"
+    subtitle={scopeLine(data ? { scope: data.scope, host: displayHost(data.host, window.location.host) } : {})}
+    updatedAt={updatedAt}
+  >
+    {#snippet toolbar()}
+      <button type="button" class="btn btn-secondary" onclick={fetchConfig} disabled={loading}>
+        {loading ? "Loading..." : "Refresh"}
+      </button>
+    {/snippet}
+  </PageHeader>
 
   {#if loading && !data}
     <p class="loading">Loading configuration...</p>
   {:else if error}
     <div class="error-box">
-      <p class="error">{error}</p>
+      <LoadError message={error} />
       <button class="btn btn-secondary" onclick={fetchConfig}>Retry</button>
     </div>
   {:else if configText}
-    <div class="config-wrapper">
-      <pre class="config-block">{configText}</pre>
+    {#if hasEffectiveConfig}
+      <Tabs
+        tabs={CONFIG_TABS}
+        active={view}
+        label="Configuration view"
+        idPrefix="config"
+        panelId="config-panel"
+        onselect={(id) => (view = id as ConfigView)}
+      />
+    {/if}
+    <div
+      role="tabpanel"
+      id="config-panel"
+      aria-labelledby={hasEffectiveConfig ? `config-tab-${view}` : undefined}
+      tabindex="0"
+    >
+      <div class="config-wrapper">
+        <pre class="config-block">{configText}</pre>
+      </div>
     </div>
   {:else}
     <p class="empty">No configuration data available.</p>
@@ -59,23 +98,6 @@
 </div>
 
 <style>
-  .page {
-    max-width: 960px;
-  }
-
-  .header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: var(--ps-space-md);
-    flex-wrap: wrap;
-    gap: var(--ps-space-sm);
-  }
-
-  h1 {
-    margin: 0;
-  }
-
   .config-wrapper {
     border: 1px solid var(--ps-border);
     border-radius: var(--ps-border-radius);
@@ -105,49 +127,11 @@
     border-radius: var(--ps-border-radius);
   }
 
-  .btn {
-    padding: var(--ps-space-sm) var(--ps-space-md);
-    border: 1px solid var(--ps-border);
-    border-radius: var(--ps-border-radius);
-    font-size: var(--ps-font-size-sm);
-    cursor: pointer;
-    white-space: nowrap;
-  }
-
-  .btn:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-
-  .btn-primary {
-    background: var(--ps-primary);
-    color: var(--ps-text-inverse);
-    border-color: var(--ps-primary);
-  }
-
-  .btn-primary:hover:not(:disabled) {
-    background: var(--ps-primary-hover);
-  }
-
-  .btn-secondary {
-    background: var(--ps-bg);
-    color: var(--ps-text);
-  }
-
-  .btn-secondary:hover {
-    background: var(--ps-surface-hover);
-  }
-
   .loading {
     color: var(--ps-text-secondary);
   }
 
-  .error {
-    color: var(--ps-error);
-    margin: 0;
-  }
-
   .empty {
-    color: var(--ps-text-tertiary);
+    color: var(--ps-text-secondary);
   }
 </style>

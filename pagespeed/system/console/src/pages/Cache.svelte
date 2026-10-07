@@ -4,25 +4,55 @@
 -->
 
 <script lang="ts">
-  import { AdminApiClient } from "$lib/api/client";
   import { usePolling } from "$lib/api/polling.svelte";
+  import LoadError from "$lib/LoadError.svelte";
+  import PageHeader from "$lib/PageHeader.svelte";
+  import RefreshNotice from "$lib/RefreshNotice.svelte";
+  import Tabs from "$lib/Tabs.svelte";
   import type {
     CacheEntryResponse,
     PurgeResponse,
     PurgeSetResponse,
   } from "$lib/api/types";
+  import { useConsole } from "$lib/api/context";
+  import {
+    flattenTree,
+    formatRole,
+    parseBackendStats,
+    parseCacheCohorts,
+    parseCacheSummary,
+  } from "$lib/utils/cache-summary";
+  import { formatIsoTitle, formatRelative } from "$lib/utils/format";
+  import { detailHref, entryKeyFromAbsoluteUrl } from "$lib/utils/urls-api";
 
-  const { basePath = "" }: { basePath?: string; isGlobal?: boolean } = $props();
-  const api = new AdminApiClient(basePath);
-  const cacheStructure = usePolling(() => api.getCacheStructure(), 30000);
+  const { api } = useConsole();
 
-  let activeTab = $state<"structure" | "lookup" | "purge" | "purgeset">("structure");
+  let updatedAt = $state<number | null>(null);
+  const cacheStructure = usePolling(
+    () =>
+      api.getCacheStructure().then((c) => {
+        updatedAt = Date.now();
+        return c;
+      }),
+    30000,
+  );
+
+  type CacheTab = "structure" | "lookup" | "purge" | "purgeset";
+
+  let activeTab = $state<CacheTab>("structure");
 
   // -- Cache Lookup state --
   let lookupUrl = $state("");
   let lookupResult = $state<CacheEntryResponse | null>(null);
   let lookupError = $state<string | null>(null);
   let lookupLoading = $state(false);
+
+  // The optimizer names an entry by path + host + scheme: split the
+  // looked-up URL with the URL API; no link when it is not an absolute
+  // http(s) URL.
+  let lookupEntry = $derived(
+    lookupResult ? entryKeyFromAbsoluteUrl(lookupResult.url || lookupUrl.trim()) : null,
+  );
 
   async function doLookup() {
     if (!lookupUrl.trim()) return;
@@ -109,6 +139,17 @@
     return d.purge_enabled;
   });
 
+  const TABS: ReadonlyArray<{ id: CacheTab; label: string; needsPurge: boolean }> = [
+    { id: "structure", label: "Cache Structure", needsPurge: false },
+    { id: "lookup", label: "Cache Lookup", needsPurge: false },
+    { id: "purge", label: "Purge", needsPurge: true },
+    { id: "purgeset", label: "Purge Set", needsPurge: true },
+  ];
+
+  // The purge views are offered only where purging can work.
+  let visibleTabs = $derived(TABS.filter((t) => !t.needsPurge || purgeEnabled !== false));
+  let shownTab = $derived<CacheTab>(visibleTabs.some((t) => t.id === activeTab) ? activeTab : "structure");
+
   let backendStats = $derived.by(() => {
     const d = cacheStructure.data;
     if (!d) return "";
@@ -123,277 +164,68 @@
       (d as Record<string, unknown>)?.raw ?? "";
   });
 
-  // Load purge set when switching to that tab.
-  $effect(() => {
-    if (activeTab === "purgeset") {
-      fetchPurgeSet();
+  // The purge set is read when its tab is opened (and on its Refresh
+  // button), from the click handler -- not from an effect.
+  function selectTab(tab: CacheTab) {
+    activeTab = tab;
+    if (tab === "purgeset") void fetchPurgeSet();
+  }
+
+  function toggleAutoRefresh() {
+    if (cacheStructure.autoRefresh) {
+      cacheStructure.stop();
+    } else {
+      cacheStructure.start();
     }
-  });
-
-  // ---- Cache summary parser ----
-
-  interface CacheNode {
-    type: string;
-    props: Record<string, string>;
-    children: CacheNode[];
   }
 
-  /** Parse a cache summary expression like "Compressed(Fallback(small=Stats(...)))" into a tree. */
-  function parseCacheSummary(s: string): CacheNode | null {
-    s = s.trim();
-    if (!s || s === "none") return null;
-
-    let pos = 0;
-
-    function parseNode(): CacheNode | null {
-      // Read type name (letters, digits, angle brackets for SharedMemCache<64>)
-      let name = "";
-      while (pos < s.length && s[pos] !== "(" && s[pos] !== ")" && s[pos] !== "," && s[pos] !== "=") {
-        name += s[pos];
-        pos++;
-      }
-      name = name.trim();
-      if (!name) return null;
-
-      const node: CacheNode = { type: name, props: {}, children: [] };
-
-      // If followed by '(', parse contents
-      if (pos < s.length && s[pos] === "(") {
-        pos++; // skip '('
-        // Parse comma-separated entries inside parens
-        while (pos < s.length && s[pos] !== ")") {
-          skipWhitespace();
-          // Check if this is key=value or just a positional child
-          const startPos = pos;
-          let key = "";
-          while (pos < s.length && s[pos] !== "=" && s[pos] !== "(" && s[pos] !== ")" && s[pos] !== ",") {
-            key += s[pos];
-            pos++;
-          }
-          key = key.trim();
-
-          if (pos < s.length && s[pos] === "=") {
-            pos++; // skip '='
-            // value is either a nested node or a plain string
-            const child = parseNode();
-            if (child) {
-              child.props["_key"] = key;
-              node.children.push(child);
-            } else {
-              node.props[key] = "";
-            }
-          } else {
-            // Rewind — this was a positional arg that is itself a node name
-            pos = startPos;
-            const child = parseNode();
-            if (child) {
-              node.children.push(child);
-            }
-          }
-
-          skipWhitespace();
-          if (pos < s.length && s[pos] === ",") {
-            pos++; // skip comma
-          }
-        }
-        if (pos < s.length && s[pos] === ")") {
-          pos++; // skip ')'
-        }
-      }
-
-      return node;
-    }
-
-    function skipWhitespace() {
-      while (pos < s.length && (s[pos] === " " || s[pos] === "\t")) pos++;
-    }
-
-    return parseNode();
-  }
-
-  /** Describe a cache node type with a user-friendly label. */
-  function nodeLabel(type: string): string {
-    if (type.startsWith("SharedMemCache")) {
-      const m = type.match(/<(\d+)>/);
-      return m ? `Shared Memory (${m[1]} segments)` : "Shared Memory";
-    }
-    const labels: Record<string, string> = {
-      HTTPCache: "HTTP Cache",
-      CycloneCache: "Cyclone (Disk)",
-      Compressed: "Compression Layer",
-      Fallback: "Fallback Strategy",
-      Stats: "Statistics Wrapper",
-    };
-    return labels[type] || type;
-  }
-
-  /** Get a short icon/symbol for a cache type. */
-  function nodeIcon(type: string): string {
-    if (type.startsWith("SharedMemCache")) return "\u{1F4BB}"; // memory
-    const icons: Record<string, string> = {
-      HTTPCache: "\u{1F310}",
-      CycloneCache: "\u{1F4BF}",
-      Compressed: "\u{1F5DC}",
-      Fallback: "\u{1F500}",
-      Stats: "\u{1F4CA}",
-    };
-    return icons[type] || "\u{1F4E6}";
-  }
-
-  /** Flatten cache tree into a list of layers with depth, for display. */
-  interface CacheLayer {
-    depth: number;
-    icon: string;
-    label: string;
-    role: string; // e.g. "small", "large", or ""
-    prefix: string; // stats prefix if present
-  }
-
-  function flattenTree(node: CacheNode | null, depth: number = 0, role: string = ""): CacheLayer[] {
-    if (!node) return [];
-    const layers: CacheLayer[] = [];
-    const keyRole = node.props["_key"] || role;
-
-    // For Stats nodes, extract the prefix and continue into the cache child
-    if (node.type === "Stats") {
-      // The prefix is stored as a child with _key="prefix", its type is the prefix value
-      const prefixChild = node.children.find((c) => c.props["_key"] === "prefix");
-      const prefix = prefixChild ? prefixChild.type : "";
-      const cacheChildren = node.children.filter((c) => c.props["_key"] !== "prefix");
-      // Stats wraps exactly one cache child usually
-      for (const child of cacheChildren) {
-        // Don't pass "cache" as a role — it's structural, not meaningful
-        const childRole = child.props["_key"] === "cache" ? keyRole : (child.props["_key"] || keyRole);
-        const childLayers = flattenTree(child, depth, childRole);
-        if (childLayers.length > 0) {
-          childLayers[0].prefix = prefix;
-        }
-        layers.push(...childLayers);
-      }
-      // If Stats has no cache children, show the Stats node itself
-      if (cacheChildren.length === 0) {
-        layers.push({
-          depth,
-          icon: nodeIcon(node.type),
-          label: nodeLabel(node.type),
-          role: keyRole,
-          prefix,
-        });
-      }
-      return layers;
-    }
-
-    layers.push({
-      depth,
-      icon: nodeIcon(node.type),
-      label: nodeLabel(node.type),
-      role: keyRole,
-      prefix: "",
-    });
-
-    for (const child of node.children) {
-      layers.push(...flattenTree(child, depth + 1, ""));
-    }
-
-    return layers;
-  }
-
-  /** Parse a Property Cache summary which has multiple cohorts. */
-  interface CacheCohort {
-    name: string;
-    layers: CacheLayer[];
-  }
-
-  function parseCacheCohorts(summary: string): CacheCohort[] | null {
-    const lines = summary.split("\n").filter((l) => l.trim());
-    // Check if this looks like cohorts (name:expression per line)
-    if (lines.length < 2 || !lines.every((l) => l.includes(":"))) return null;
-
-    return lines.map((line) => {
-      const colonIdx = line.indexOf(":");
-      const name = line.substring(0, colonIdx).trim();
-      const expr = line.substring(colonIdx + 1).trim();
-      const tree = parseCacheSummary(expr);
-      return { name, layers: flattenTree(tree) };
-    });
-  }
-
-  /** Parse backend_stats into key-value pairs. */
-  function parseBackendStats(raw: string): Array<{ key: string; value: string }> {
-    if (!raw || !raw.trim()) return [];
-    return raw
-      .split("\n")
-      .filter((l) => l.trim())
-      .map((line) => {
-        const eqIdx = line.indexOf(":");
-        if (eqIdx >= 0) {
-          return { key: line.substring(0, eqIdx).trim(), value: line.substring(eqIdx + 1).trim() };
-        }
-        const spIdx = line.indexOf(" ");
-        if (spIdx >= 0) {
-          return { key: line.substring(0, spIdx).trim(), value: line.substring(spIdx + 1).trim() };
-        }
-        return { key: line.trim(), value: "" };
-      });
-  }
-
-  /** Format a role label for display. */
-  function formatRole(role: string): string {
-    return role
-      .replace(/_/g, " ")
-      .replace(/\b\w/g, (c) => c.toUpperCase());
-  }
 </script>
 
 <div class="page">
-  <div class="page-header">
-    <h1>Caches</h1>
-    {#if purgeEnabled !== undefined}
-      <span class="purge-badge" class:purge-on={purgeEnabled} class:purge-off={!purgeEnabled}>
-        {purgeEnabled ? "Purge enabled" : "Purge disabled"}
-      </span>
-    {/if}
-  </div>
+  <PageHeader
+    title="Caches"
+    updatedAt={updatedAt}
+    refresh={{
+      autoRefresh: cacheStructure.autoRefresh,
+      intervalMs: 30000,
+      onToggle: toggleAutoRefresh,
+      onRefresh: () => cacheStructure.refresh(),
+    }}
+  >
+    {#snippet toolbar()}
+      {#if purgeEnabled !== undefined}
+        <span class="purge-badge" class:purge-on={purgeEnabled} class:purge-off={!purgeEnabled}>
+          {purgeEnabled ? "Purge enabled" : "Purge disabled"}
+        </span>
+      {/if}
+    {/snippet}
+  </PageHeader>
 
-  <div class="tabs">
-    <button
-      class="tab"
-      class:active={activeTab === "structure"}
-      onclick={() => (activeTab = "structure")}
-    >
-      Cache Structure
-    </button>
-    <button
-      class="tab"
-      class:active={activeTab === "lookup"}
-      onclick={() => (activeTab = "lookup")}
-    >
-      Cache Lookup
-    </button>
-    <button
-      class="tab"
-      class:active={activeTab === "purge"}
-      onclick={() => (activeTab = "purge")}
-    >
-      Purge
-    </button>
-    <button
-      class="tab"
-      class:active={activeTab === "purgeset"}
-      onclick={() => (activeTab = "purgeset")}
-    >
-      Purge Set
-    </button>
-  </div>
+  {#if purgeEnabled === false}
+    <p class="purge-note" data-testid="purge-disabled-note">
+      Purging is off on this server, so the purge views are hidden. Turn it on with
+      the EnableCachePurge option in the server's PageSpeed configuration.
+    </p>
+  {/if}
 
-  <div class="tab-content">
-    {#if activeTab === "structure"}
+  <Tabs
+    tabs={visibleTabs}
+    active={shownTab}
+    label="Cache views"
+    idPrefix="cache"
+    panelId="cache-panel"
+    onselect={(id) => selectTab(id as CacheTab)}
+  />
+
+  <div class="tab-content" role="tabpanel" id="cache-panel" aria-labelledby="cache-tab-{shownTab}" tabindex="0">
+    {#if shownTab === "structure"}
       <div class="section">
         {#if cacheStructure.loading}
           <p class="loading">Loading cache structure...</p>
-        {:else if cacheStructure.error}
-          <p class="error">{cacheStructure.error.message}</p>
+        {:else if cacheStructure.error && !cacheStructure.data}
+          <LoadError message={cacheStructure.error.message} />
         {:else if caches}
+          <RefreshNotice error={cacheStructure.error} />
           <div class="cache-list">
             {#each caches as cache}
               {@const cohorts = parseCacheCohorts(cache.summary)}
@@ -401,7 +233,7 @@
               {@const layers = tree ? flattenTree(tree) : []}
               <div class="cache-card">
                 <div class="cache-header">
-                  <h3 class="cache-name">{cache.name}</h3>
+                  <h2 class="cache-name">{cache.name}</h2>
                   {#if cache.summary === "none"}
                     <span class="cache-badge cache-badge-off">Not configured</span>
                   {/if}
@@ -421,7 +253,7 @@
                           <div class="layer-stack">
                             {#each cohort.layers as layer}
                               <div class="layer" style="--depth: {layer.depth}">
-                                <span class="layer-icon">{layer.icon}</span>
+                                <span class="layer-kind" aria-hidden="true">{layer.kind}</span>
                                 <span class="layer-label">{layer.label}</span>
                                 {#if layer.role}
                                   <span class="layer-role">{formatRole(layer.role)}</span>
@@ -442,7 +274,7 @@
                     <div class="layer-stack">
                       {#each layers as layer}
                         <div class="layer" style="--depth: {layer.depth}">
-                          <span class="layer-icon">{layer.icon}</span>
+                          <span class="layer-kind" aria-hidden="true">{layer.kind}</span>
                           <span class="layer-label">{layer.label}</span>
                           {#if layer.role}
                             <span class="layer-role">{formatRole(layer.role)}</span>
@@ -468,7 +300,7 @@
             {@const stats = parseBackendStats(backendStats)}
             <div class="cache-card">
               <div class="cache-header">
-                <h3 class="cache-name">Backend Stats</h3>
+                <h2 class="cache-name">Backend Stats</h2>
               </div>
               <div class="cache-body">
                 {#if stats.length > 0}
@@ -495,14 +327,14 @@
         {/if}
       </div>
 
-    {:else if activeTab === "lookup"}
+    {:else if shownTab === "lookup"}
       <div class="section">
         <form class="form-row" onsubmit={(e) => { e.preventDefault(); doLookup(); }}>
           <label class="form-label" for="lookup-url">URL to look up:</label>
           <input
             id="lookup-url"
             type="text"
-            class="form-input"
+            class="form-input field"
             placeholder="https://example.com/image.jpg"
             bind:value={lookupUrl}
           />
@@ -519,26 +351,31 @@
 
         {#if lookupResult}
           <div class="result-box" class:result-error={!!lookupResult.error}>
-            <h3>Result for: <code class="lookup-url-display">{lookupResult.url || lookupUrl}</code></h3>
+            <h2 class="result-title">Result for: <code class="lookup-url-display">{lookupResult.url || lookupUrl}</code></h2>
             {#if lookupResult.error}
-              <p class="error">{lookupResult.error}</p>
+              <p class="error" role="alert">{lookupResult.error}</p>
             {:else if lookupResult.value}
               <pre class="result-pre">{lookupResult.value}</pre>
             {:else}
               <p class="empty">No cache entry found for this URL.</p>
             {/if}
+            {#if lookupEntry !== null}
+              <p class="result-actions">
+                <a href={detailHref(lookupEntry)}>Inspect in the optimizer's URL index</a>
+              </p>
+            {/if}
           </div>
         {/if}
       </div>
 
-    {:else if activeTab === "purge"}
+    {:else if shownTab === "purge"}
       <div class="section">
         <form class="form-row" onsubmit={(e) => { e.preventDefault(); doPurge(); }}>
           <label class="form-label" for="purge-url">URL to purge:</label>
           <input
             id="purge-url"
             type="text"
-            class="form-input"
+            class="form-input field"
             placeholder="https://example.com/image.jpg"
             bind:value={purgeUrl}
           />
@@ -547,11 +384,11 @@
           </button>
         </form>
 
-        <div class="purge-all-row">
+        <div class="purge-all-row control-group">
           <button class="btn btn-danger" onclick={doPurgeAll} disabled={purgeLoading}>
             Purge All (*)
           </button>
-          <span class="hint">This invalidates the entire cache.</span>
+          <span class="hint field-text">This invalidates the entire cache.</span>
         </div>
 
         {#if purgeError}
@@ -577,7 +414,7 @@
         {/if}
       </div>
 
-    {:else if activeTab === "purgeset"}
+    {:else if shownTab === "purgeset"}
       <div class="section">
         <div class="section-header">
           <button class="btn btn-secondary" onclick={fetchPurgeSet} disabled={purgeSetLoading}>
@@ -586,11 +423,12 @@
         </div>
 
         {#if purgeSetError}
-          <p class="error">{purgeSetError}</p>
+          <p class="error" role="alert">{purgeSetError}</p>
         {:else if purgeSetData}
           {#if purgeSetData.global_invalidation_timestamp_ms}
             <p class="meta">
-              Global invalidation timestamp: {new Date(purgeSetData.global_invalidation_timestamp_ms).toLocaleString()}
+              Global invalidation timestamp:
+              <time title={formatIsoTitle(purgeSetData.global_invalidation_timestamp_ms)}>{formatRelative(purgeSetData.global_invalidation_timestamp_ms, Date.now())}</time>
             </p>
           {/if}
 
@@ -627,22 +465,6 @@
 </div>
 
 <style>
-  .page {
-    max-width: 960px;
-  }
-
-  .page-header {
-    display: flex;
-    align-items: center;
-    gap: var(--ps-space-md);
-    margin-bottom: var(--ps-space-md);
-    flex-wrap: wrap;
-  }
-
-  .page-header h1 {
-    margin: 0;
-  }
-
   .purge-badge {
     display: inline-flex;
     align-items: center;
@@ -656,45 +478,20 @@
 
   .purge-on {
     background: color-mix(in srgb, var(--ps-success) 12%, var(--ps-bg));
-    color: var(--ps-success);
+    color: var(--ps-success-text);
     border: 1px solid color-mix(in srgb, var(--ps-success) 30%, transparent);
   }
 
   .purge-off {
     background: color-mix(in srgb, var(--ps-warning) 12%, var(--ps-bg));
-    color: var(--ps-warning);
+    color: var(--ps-warning-text);
     border: 1px solid color-mix(in srgb, var(--ps-warning) 30%, transparent);
   }
 
-  .tabs {
-    display: flex;
-    border-bottom: 2px solid var(--ps-border);
-    margin-bottom: var(--ps-space-lg);
-    gap: 0;
-    overflow-x: auto;
-  }
-
-  .tab {
-    padding: var(--ps-space-sm) var(--ps-space-lg);
-    border: none;
-    background: none;
+  .purge-note {
+    margin: 0 0 var(--ps-space-md);
     font-size: var(--ps-font-size-sm);
     color: var(--ps-text-secondary);
-    cursor: pointer;
-    border-bottom: 2px solid transparent;
-    margin-bottom: -2px;
-    white-space: nowrap;
-  }
-
-  .tab:hover {
-    color: var(--ps-text);
-    background: var(--ps-surface-hover);
-  }
-
-  .tab.active {
-    color: var(--ps-primary);
-    border-bottom-color: var(--ps-primary);
-    font-weight: 600;
   }
 
   .tab-content {
@@ -725,13 +522,7 @@
   }
 
   .form-input {
-    padding: var(--ps-space-sm) var(--ps-space-md);
-    border: 1px solid var(--ps-border);
-    border-radius: var(--ps-border-radius);
-    font-size: var(--ps-font-size-sm);
     font-family: var(--ps-font-mono);
-    background: var(--ps-bg);
-    color: var(--ps-text);
     width: 100%;
   }
 
@@ -742,16 +533,12 @@
   }
 
   .purge-all-row {
-    display: flex;
-    align-items: center;
-    gap: var(--ps-space-md);
     padding-top: var(--ps-space-sm);
     border-top: 1px solid var(--ps-border-light);
   }
 
   .hint {
     font-size: var(--ps-font-size-xs);
-    color: var(--ps-text-tertiary);
   }
 
   .result-box {
@@ -761,7 +548,7 @@
     background: var(--ps-bg-secondary);
   }
 
-  .result-box h3 {
+  .result-box .result-title {
     font-size: var(--ps-font-size-sm);
     margin-bottom: var(--ps-space-sm);
     word-break: break-all;
@@ -792,15 +579,23 @@
     font-size: var(--ps-font-size-sm);
   }
 
+  .result-actions {
+    margin-top: var(--ps-space-sm);
+  }
+
   /* ---- Cache cards ---- */
 
+  /* One column on a laptop; more on a wide window. The cards flow down
+     the columns and never break, so a short card is followed directly by
+     the next one instead of leaving a hole beside a tall one. */
   .cache-list {
-    display: flex;
-    flex-direction: column;
-    gap: var(--ps-space-md);
+    columns: var(--ps-card-max);
+    column-gap: var(--ps-space-md);
   }
 
   .cache-card {
+    break-inside: avoid;
+    margin-bottom: var(--ps-space-md);
     border: 1px solid var(--ps-border);
     border-radius: var(--ps-border-radius-lg);
     overflow: hidden;
@@ -831,7 +626,7 @@
 
   .cache-badge-off {
     background: var(--ps-bg-secondary);
-    color: var(--ps-text-tertiary);
+    color: var(--ps-text-secondary);
     border: 1px solid var(--ps-border);
   }
 
@@ -841,7 +636,7 @@
   }
 
   .cache-empty {
-    color: var(--ps-text-tertiary);
+    color: var(--ps-text-secondary);
     font-size: var(--ps-font-size-sm);
   }
 
@@ -904,11 +699,10 @@
     background: var(--ps-border);
   }
 
-  .layer-icon {
-    font-size: var(--ps-font-size-base);
+  .layer-kind {
+    font-size: var(--ps-font-size-xs);
+    color: var(--ps-text-secondary);
     flex-shrink: 0;
-    width: 1.4em;
-    text-align: center;
   }
 
   .layer-label {
@@ -927,7 +721,7 @@
 
   .layer-prefix {
     font-size: var(--ps-font-size-xs);
-    color: var(--ps-text-tertiary);
+    color: var(--ps-text-secondary);
     font-family: var(--ps-font-mono);
     margin-left: auto;
   }
@@ -936,7 +730,7 @@
 
   .cohort-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
     gap: var(--ps-space-md);
   }
 
@@ -1039,7 +833,7 @@
 
   .row-num {
     width: 50px;
-    color: var(--ps-text-tertiary);
+    color: var(--ps-text-secondary);
   }
 
   .url-cell {
@@ -1052,48 +846,9 @@
     color: var(--ps-text-secondary);
   }
 
-  .btn {
-    padding: var(--ps-space-sm) var(--ps-space-md);
-    border: 1px solid var(--ps-border);
-    border-radius: var(--ps-border-radius);
-    font-size: var(--ps-font-size-sm);
-    cursor: pointer;
-    white-space: nowrap;
+  /* In the column forms a button keeps its own width. */
+  .form-row .btn {
     align-self: flex-start;
-  }
-
-  .btn:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-
-  .btn-primary {
-    background: var(--ps-primary);
-    color: var(--ps-text-inverse);
-    border-color: var(--ps-primary);
-  }
-
-  .btn-primary:hover:not(:disabled) {
-    background: var(--ps-primary-hover);
-  }
-
-  .btn-secondary {
-    background: var(--ps-bg);
-    color: var(--ps-text);
-  }
-
-  .btn-secondary:hover:not(:disabled) {
-    background: var(--ps-surface-hover);
-  }
-
-  .btn-danger {
-    background: var(--ps-error);
-    color: var(--ps-text-inverse);
-    border-color: var(--ps-error);
-  }
-
-  .btn-danger:hover:not(:disabled) {
-    opacity: 0.9;
   }
 
   .loading {
@@ -1105,19 +860,10 @@
   }
 
   .empty {
-    color: var(--ps-text-tertiary);
+    color: var(--ps-text-secondary);
   }
 
   @media (max-width: 600px) {
-    .tabs {
-      gap: 0;
-    }
-
-    .tab {
-      padding: var(--ps-space-sm) var(--ps-space-md);
-      font-size: var(--ps-font-size-xs);
-    }
-
     .cohort-grid {
       grid-template-columns: 1fr;
     }

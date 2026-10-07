@@ -238,6 +238,8 @@ pagespeed_cc_test(
 pagespeed_cc_test(
     name = "admin_site_test",
     srcs = ["admin_site_test.cc"],
+    # The message-template fixture shared with the admin console's tests.
+    data = ["testdata/message_templates.tsv"],
     shard_count = 1,
     deps = [
         "//test/pagespeed/system:test_base_core",
@@ -268,13 +270,43 @@ pagespeed_cc_test(
 
 # A real, dlopen-able stand-in for the daemon's client library.
 #
+# The stub daemon library's runfiles file name, in ONE place (the header is
+# the one place that fact lives).
+cc_library(
+    name = "daemon_stub_test_util",
+    testonly = True,
+    hdrs = ["daemon_stub_test_util.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//test/pagespeed/kernel/base:pagespeed_gtest",
+    ],
+)
+
+# The binding test against the SHIPPED optimizer client library, on Windows
+# only and manual on purpose: the artefact's path comes only from the
+# PAGESPEED_DAEMON_LIBRARY_UNDER_TEST environment variable, and the case
+# skips with a plain reason when it is unset or names no file, so it belongs
+# to no default CI label.
+pagespeed_cc_test(
+    name = "daemon_shipped_binding_test",
+    srcs = ["daemon_shipped_binding_test.cc"],
+    shard_count = 1,
+    tags = ["manual"],
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        "//pagespeed/system:daemon_adapter",
+    ],
+)
+
 # LoadDaemonAbi is the one part of the adapter no injected fake can reach --
 # every other test replaces the loader wholesale -- so its symbol binding,
 # version gate and layout handshake had never executed. Three flavours, because
 # a symbol cannot be un-exported at run time and each absence is a different
 # answer from the loader: the sized initializer is OPTIONAL (an older daemon
 # that lacks it must still load), and the Vary-Accept predicate is REQUIRED (a
-# library that lacks it is refused, whatever version it claims).
+# library that lacks it is refused, whatever version it claims).  Built as a
+# POSIX shared object and as a Windows DLL (exports from the .def).
 cc_binary(
     name = "libdaemon_stub.so",
     testonly = True,
@@ -282,11 +314,21 @@ cc_binary(
     # No C++ runtime: this object is dlopen()ed and dlclose()d once per test,
     # and a statically linked runtime allocates its one-time state on every
     # load without returning it on unload. See daemon_stub_lib.cc.
-    linkopts = ["-nostdlib++"],
+    linkopts = select({
+        "@platforms//os:linux": ["-nostdlib++"],
+        "//conditions:default": [],
+    }),
+    # Windows exports come from the .def (the source exports plain
+    # extern "C", POSIX-style; without it the DLL exports nothing).
     linkshared = True,
     linkstatic = True,
-    target_compatible_with = ["@platforms//os:linux"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
     visibility = ["//visibility:public"],
+    win_def_file = "daemon_stub_lib.def",
 )
 
 cc_binary(
@@ -294,11 +336,21 @@ cc_binary(
     testonly = True,
     srcs = ["daemon_stub_lib.cc"],
     defines = ["PS_STUB_OMIT_SIZED_INIT"],
-    linkopts = ["-nostdlib++"],
+    linkopts = select({
+        "@platforms//os:linux": ["-nostdlib++"],
+        "//conditions:default": [],
+    }),
+    # Windows exports come from the .def (the source exports plain
+    # extern "C", POSIX-style; without it the DLL exports nothing).
     linkshared = True,
     linkstatic = True,
-    target_compatible_with = ["@platforms//os:linux"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
     visibility = ["//visibility:public"],
+    win_def_file = "daemon_stub_unsized.def",
 )
 
 # A library that REPORTS the floor version but does not export the entry point
@@ -311,27 +363,51 @@ cc_binary(
     testonly = True,
     srcs = ["daemon_stub_lib.cc"],
     defines = ["PS_STUB_OMIT_VARIES_ACCEPT"],
-    linkopts = ["-nostdlib++"],
+    linkopts = select({
+        "@platforms//os:linux": ["-nostdlib++"],
+        "//conditions:default": [],
+    }),
+    # Windows exports come from the .def (the source exports plain
+    # extern "C", POSIX-style; without it the DLL exports nothing).
     linkshared = True,
     linkstatic = True,
-    target_compatible_with = ["@platforms//os:linux"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
     visibility = ["//visibility:public"],
+    win_def_file = "daemon_stub_no_varies_accept.def",
 )
 
 # The pre-H1 daemon: no cache_dir_generation reader. Like the sized
 # initializer this entry point is bound OPTIONALLY, so this flavour is what
 # proves its absence still loads -- the adapter's legacy-layout tolerance is a
 # claim in a comment until a library that genuinely lacks the symbol loads.
+# The flavour also lacks ps_serve_stats_record_hit_host (the later host-aware
+# serve recorder, equally optional), so it stands for "an older optimizer"
+# for both entry points; a module that bound either as required would fail to
+# load it, which is what the serve-arm test relies on.
 cc_binary(
     name = "libdaemon_stub_no_generation.so",
     testonly = True,
     srcs = ["daemon_stub_lib.cc"],
     defines = ["PS_STUB_OMIT_GENERATION"],
-    linkopts = ["-nostdlib++"],
+    linkopts = select({
+        "@platforms//os:linux": ["-nostdlib++"],
+        "//conditions:default": [],
+    }),
+    # Windows exports come from the .def (the source exports plain
+    # extern "C", POSIX-style; without it the DLL exports nothing).
     linkshared = True,
     linkstatic = True,
-    target_compatible_with = ["@platforms//os:linux"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
     visibility = ["//visibility:public"],
+    win_def_file = "daemon_stub_no_generation.def",
 )
 
 # A daemon package from before the per-failure explanation was published. Like
@@ -343,17 +419,28 @@ cc_binary(
     testonly = True,
     srcs = ["daemon_stub_lib.cc"],
     defines = ["PS_STUB_OMIT_LAST_ERROR"],
-    linkopts = ["-nostdlib++"],
+    linkopts = select({
+        "@platforms//os:linux": ["-nostdlib++"],
+        "//conditions:default": [],
+    }),
+    # Windows exports come from the .def (the source exports plain
+    # extern "C", POSIX-style; without it the DLL exports nothing).
     linkshared = True,
     linkstatic = True,
-    target_compatible_with = ["@platforms//os:linux"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
     visibility = ["//visibility:public"],
+    win_def_file = "daemon_stub_no_last_error.def",
 )
 
 # Optimizer-daemon adapter startup: the volume-sizing mirror (match starts,
 # divergence refuses), the degrade path when the daemon is absent or
 # unreachable, and the RAM-tier floor the adapter opens the shared volume
-# with. Linux-only: the reachability case binds a real AF_UNIX socket.
+# with. The reachability case binds a real endpoint per platform: an AF_UNIX
+# socket on POSIX, a named pipe on Windows.
 pagespeed_cc_test(
     name = "daemon_adapter_test",
     srcs = ["daemon_adapter_test.cc"],
@@ -365,10 +452,20 @@ pagespeed_cc_test(
         ":libdaemon_stub_unsized.so",
     ],
     shard_count = 1,
-    target_compatible_with = ["@platforms//os:linux"],
+    # One case waits out the probe's 2 s deadline live; the small/short bucket
+    # (60 s) bounds a regressed probe far tighter than the medium default.
+    size = "small",
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
     deps = [
         "//pagespeed/system:daemon_adapter",
+        "//pagespeed/system:daemon_record_arm",
+        "//pagespeed/system:daemon_serve_arm",
         "//test/pagespeed/kernel/base:kernel_test_util",
+        "//test/pagespeed/system:daemon_stub_test_util",
     ],
 )
 
@@ -420,12 +517,30 @@ pagespeed_cc_test(
 pagespeed_cc_test(
     name = "daemon_serve_arm_test",
     srcs = ["daemon_serve_arm_test.cc"],
-    data = [":libdaemon_stub.so"],
+    data = [
+        ":libdaemon_stub.so",
+        ":libdaemon_stub_no_generation.so",
+    ],
     shard_count = 1,
     target_compatible_with = ["@platforms//os:linux"],
     deps = [
         "//net/instaweb/rewriter",
         "//pagespeed/system:daemon_serve_arm",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+        "//test/pagespeed/system:test_base_core",
+    ],
+)
+
+# A byte-exact golden of the statistics JSON the admin console consumes; the
+# console's own fixtures copy the golden verbatim.
+pagespeed_cc_test(
+    name = "stats_json_dump_test",
+    srcs = ["stats_json_dump_test.cc"],
+    data = ["testdata/stats_json.global.golden"],
+    shard_count = 1,
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = [
+        "//net/instaweb/rewriter",
         "//test/pagespeed/kernel/base:kernel_test_util",
         "//test/pagespeed/system:test_base_core",
     ],
@@ -454,6 +569,31 @@ pagespeed_cc_test(
     shard_count = 1,
     deps = [
         "//pagespeed/system:optimization_thread_policy",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+    ],
+)
+
+# The host a serve is recorded under: the optimizer's host-name rule and the
+# configured-names rule, with the shapes real servers and clients produce.
+pagespeed_cc_test(
+    name = "serve_host_names_test",
+    srcs = ["serve_host_names_test.cc"],
+    shard_count = 1,
+    deps = [
+        "//pagespeed/system:serve_host_names",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+    ],
+)
+
+# What a per-host admin console may see of the optimizer's statistics: the
+# fold, the 64-bit sums and every malformed or hostile answer.
+pagespeed_cc_test(
+    name = "daemon_site_filter_test",
+    srcs = ["daemon_site_filter_test.cc"],
+    shard_count = 1,
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/system:daemon_site_filter",
         "//test/pagespeed/kernel/base:kernel_test_util",
     ],
 )

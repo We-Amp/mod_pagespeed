@@ -6,6 +6,7 @@ import {
   SUPPORT_DISMISSED_STORAGE_KEY,
   loadSupportDismissed,
   saveSupportDismissed,
+  supportSentence,
 } from "./support-panel";
 
 /** Minimal in-memory Storage stand-in. */
@@ -62,5 +63,19 @@ describe("support-panel dismissal", () => {
   it("tolerates absent storage", () => {
     expect(loadSupportDismissed(null)).toBe(false);
     expect(() => saveSupportDismissed(true, null)).not.toThrow();
+  });
+});
+
+describe("supportSentence", () => {
+  it("does not double the full stop after a vendor name that ends in one", () => {
+    const s = supportSentence("mod_pagespeed", "We-Amp B.V.");
+    expect(s).toBe(
+      "mod_pagespeed is developed and maintained by We-Amp B.V. A support subscription funds that work; " +
+        "the software is fully functional without one.",
+    );
+    expect(s).not.toContain("..");
+  });
+  it("ends the first sentence when the vendor name does not", () => {
+    expect(supportSentence("x", "Acme")).toMatch(/^x is developed and maintained by Acme\. A support/);
   });
 });

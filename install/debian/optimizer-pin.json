@@ -15,11 +15,11 @@
     "A PLACEHOLDER tag makes the release lane refuse loudly.",
     "",
     "This train's optimizer release was cut from an optimizer commit carrying the",
-    "same cache-library commit this module links (on-disk format major 7), so",
+    "same cache-library commit this module links (on-disk format major 8), so",
     "the pair speaks one cache format. The pin-pair check in CI asserts that",
     "equality; do not hand-edit this file without re-running it."
   ],
-  "tag": "optimizer-v1.16.0-rc.16",
-  "optimizer_commit": "e516aefbcfaf81d9dcb733dc3eac51575b5e9573",
-  "sha256sums_sha256": "d340c15f56e42f31160f24c4859974bdca8f88bbc222b3752293731cfde0c994"
+  "tag": "optimizer-v1.17.0",
+  "optimizer_commit": "ecc61379842fa5db32dad67a84b8338c608a39c4",
+  "sha256sums_sha256": "64f50364ef5f102c9fc4b39b628200cf499c777c9f0e5609e47efe2889bd2d1f"
 }

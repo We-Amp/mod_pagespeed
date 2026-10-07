@@ -16,6 +16,7 @@ export {
   PRODUCT_DISPLAY_NAME,
   PRODUCT_NAME,
   SUPPORT_URL,
+  SUPPORT_TERMS_URL,
   TERMS_URL,
   VENDOR,
   VENDOR_URL,
@@ -28,3 +29,9 @@ export const CONSOLE_TITLE = `${PRODUCT_DISPLAY_NAME} Admin Console`;
 /** Bare hosts for display (link text, aria labels). */
 export const VENDOR_HOST = new URL(VENDOR_URL).host;
 export const WEBSITE_HOST = new URL(WEBSITE).host;
+
+/** The admin console's page in the product documentation. */
+export const DOCS_URL = `${WEBSITE}/docs/admin-console/`;
+
+/** The module's documentation (finding links point at its pages). */
+export const MODULE_DOCS = `${WEBSITE}/1.1/docs`;

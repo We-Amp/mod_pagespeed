@@ -3,8 +3,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2024-2026 We-Amp B.V.
 #
-# el9-selinux-rehearsal.sh -- the 1.15 -> 1.16 in-place upgrade rehearsal on
-# an ENFORCING-SELinux EL9 host. Runs INSIDE the guest VM as root.
+# el9-selinux-rehearsal.sh -- the previous-release -> 1.16 in-place upgrade
+# rehearsal on an ENFORCING-SELinux EL9 host. Runs INSIDE the guest VM as root.
 #
 # WHY THIS EXISTS. A tracked gap in the container rehearsal, and a
 # GA-gate decision for 2.1 that one enforcing-EL9 VM run must close it. The
@@ -26,9 +26,14 @@
 #      up, the SELinux tooling present; records the audit-log position so
 #      every denial the run causes is attributable to a phase,
 #   1. a fixture page with an image and a stylesheet under /var/www/html,
-#   2. baseline: mod_pagespeed 1.15 from the public repository (install.sh +
-#      dnf), a customized conffile, the web server enabled; proves 1.15
-#      optimizes (version header, rewritten URL, smaller in-place image).
+#   2. baseline: mod_pagespeed from the public repository (install.sh +
+#      `dnf install mod-pagespeed-V`, where V is the newest GA version the
+#      repository publishes that is strictly older than --rc: 1.15.0 while
+#      --rc is 1.16.x; see BASELINE below), a customized conffile, the web
+#      server enabled; proves the baseline optimizes (version header,
+#      rewritten URL, smaller in-place image). The pin matters once the
+#      version under test is itself published: an unpinned install would
+#      then take the target as the baseline and rehearse a no-op upgrade.
 #      Denials during THIS phase are the 1.15 product's own SELinux story
 #      and are reported separately (a finding, not the gate),
 #   3. upgrade in place to the 1.16 pair -- from --packages-dir (rpms staged
@@ -43,8 +48,9 @@
 #      pagespeed, web-server child carries the pagespeed gid, the module
 #      reaches the notify socket (the daemon's notification counter moves),
 #      in-place optimization works for a URL 1.15 never saw, ZERO AVC /
-#      USER_AVC denials for comm=httpd and comm=pagespeed-optimizer since
-#      the upgrade began, and httpd still runs confined as httpd_t (a run
+#      USER_AVC denials whose source domain is httpd_t or the daemon's
+#      (pagespeed_t) since the upgrade began -- keyed on scontext, not
+#      comm=, so the module's own threads (curl_poll) count too, and httpd still runs confined as httpd_t (a run
 #      where it did not would prove nothing),
 #   5. diagnostics into --artifacts on every run (fuller on failure):
 #      getenforce/sestatus, ausearch -i of the denials, audit2allow of the
@@ -98,8 +104,12 @@
 #   --artifacts DIR     where diagnostics land (default: <payload>/artifacts).
 #   --dry-run           print the resolved plan and exit 0 before touching
 #                       the system (also works off-host, for a syntax check).
-#   --install-sh-url U  the public 1.15 bootstrap (default: the released one).
-#   --baseline-prefix P the version prefix the baseline must have (1.15).
+#   --install-sh-url U  the public bootstrap (default: the released one).
+#   --baseline-prefix P only consider baseline versions starting with P
+#                       (e.g. 1.15). The baseline is always the newest GA
+#                       mod-pagespeed in the public repository strictly older
+#                       than --rc; this narrows the choice, it never admits a
+#                       version that is not older.
 #
 # Exit code: 0 on PASS, 1 on any FAIL, 2 on usage/preflight errors. The
 # summary line at the end is what the runner keys on.
@@ -114,6 +124,18 @@ export LC_ALL=C
 if [[ -z "${EL9_REHEARSAL_STDBUF:-}" ]] && command -v stdbuf >/dev/null 2>&1; then
   export EL9_REHEARSAL_STDBUF=1
   exec stdbuf -oL -eL "${BASH:-bash}" "$0" "$@"
+fi
+# stdbuf works by LD_PRELOAD=libstdbuf.so, which every child inherits. A
+# child that transitions into a confined SELinux domain -- restorecon and
+# the rpm scriptlets' restorecon run as setfiles_t -- is then denied `map`
+# on /usr/libexec/coreutils/libstdbuf.so (bin_t): real AVC records the
+# driver itself would cause, noise in the "all denials" count. These tools
+# write to log files, not the live stream, so run them without the preload.
+if [[ -n "${EL9_REHEARSAL_STDBUF:-}" ]]; then
+  for _tool in dnf restorecon semanage semodule setsebool sh; do
+    eval "${_tool}() { env -u LD_PRELOAD -u _STDBUF_O -u _STDBUF_E ${_tool} \"\$@\"; }"
+  done
+  unset _tool
 fi
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -132,7 +154,12 @@ PAYLOAD="$HERE"
 ARTIFACTS=""
 DRY_RUN=0
 INSTALL_SH_URL="https://packages.modpagespeed.com/install.sh"
-BASELINE_PREFIX="1.15"
+# BASELINE: resolved after install.sh (phase 2) as the newest GA
+# mod-pagespeed the public repository publishes whose upstream version is
+# strictly older than --rc, optionally narrowed by --baseline-prefix. Derived
+# rather than hard-coded (same rule as install/upgrade_test/run_upgrade_test.sh),
+# so publishing the version under test never turns the baseline stale.
+BASELINE_PREFIX=""
 
 usage() { sed -n '/^# Usage/,/^# Exit code/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 
@@ -268,7 +295,7 @@ semver_ge() {
   return 0
 }
 
-echo "enforcing-SELinux upgrade rehearsal: ${BASELINE_PREFIX}.x -> ${RC} (package ${PKGV})"
+echo "enforcing-SELinux upgrade rehearsal: newest published GA${BASELINE_PREFIX:+ ${BASELINE_PREFIX}.x} older than ${RC} -> ${RC} (package ${PKGV})"
 if [[ -n "$PKGS_DIR" ]]; then
   echo "  upgrade source:   local rpms in ${PKGS_DIR}"
   echo "                    $(basename "${OPT_RPMS[0]}")"
@@ -323,18 +350,29 @@ restore_dontaudit() { if [[ "$DISABLE_DONTAUDIT" -eq 1 ]]; then semodule -B >/de
 
 # AVC accounting. Denials are counted from byte offsets into the audit log,
 # so each phase sees exactly the records it caused; the ausearch dumps in the
-# artifacts use a timestamp for the human-readable form.
-START_TS="$(date '+%m/%d/%Y %H:%M:%S')"
+# artifacts use a timestamp for the human-readable form. ausearch -ts parses
+# the date with the locale's %x (LC_TIME), which under the LC_ALL=C above is
+# MM/DD/YY -- a four-digit year is rejected ("Error parsing start date") and
+# leaves every ausearch/audit2allow artifact empty. Stamp with %x in the
+# same locale ausearch runs in. And every ausearch call carries
+# --input-logs: when stdin is not a terminal ausearch reads records from
+# stdin instead of the logs, and the runner drives this script over
+# `ssh -n` (stdin /dev/null), so without it every dump says <no matches>.
+ausearch_ts() { date '+%x %H:%M:%S'; }
+START_TS="$(ausearch_ts)"
 audit_offset() { stat -c %s "$AUDIT_LOG" 2>/dev/null || echo 0; }
-# avc_since <offset> [comm-regex]: raw AVC/USER_AVC records since <offset>,
-# optionally only those whose comm= matches.
+# avc_since <offset> [domain-regex]: raw AVC/USER_AVC records since <offset>,
+# optionally only those whose SOURCE domain (the type field of scontext=)
+# matches. The domain, not comm=: a confined process's threads carry their
+# own names -- the module's fetcher denials arrive as comm="curl_poll" in
+# httpd_t -- so a comm=httpd filter silently misses them.
 avc_since() {
-  local off="$1" comm="${2:-}"
+  local off="$1" dom="${2:-}"
   if [[ -f "$AUDIT_LOG" ]]; then
     tail -c +$((off + 1)) "$AUDIT_LOG" 2>/dev/null | grep -E '^type=(AVC|USER_AVC) ' || true
   else
     journalctl -k -o cat --since "@$(date -d "$START_TS" +%s)" 2>/dev/null | grep -E 'avc: +denied' || true
-  fi | { if [[ -n "$comm" ]]; then grep -E "comm=\"?(${comm})" || true; else cat; fi; }
+  fi | { if [[ -n "$dom" ]]; then grep -E "scontext=[^: ]+:[^: ]+:(${dom}):" || true; else cat; fi; }
 }
 avc_count() { avc_since "$@" | grep -c . || true; }
 # Stock-stack net_admin exclusion (rehearsal finding 4.3). The root httpd
@@ -367,18 +405,20 @@ policy_load_ts() {
     | grep -m1 -E '^type=MAC_POLICY_LOAD ' \
     | sed -E 's/.*msg=audit\(([0-9]+).*/\1/' || true
 }
-# avc_summary: one line per (comm, class, perms, target type, path) group.
+# avc_summary: one line per (source domain, comm, class, perms, target type,
+# path) group.
 avc_summary() {
   sed -E 's/.*denied +\{ ([^}]*)\}.*comm="([^"]*)".*/\2|\1|&/' \
     | awk -F'|' '{
         line=$3; comm=$1; perms=$2;
-        tcls=""; ttype=""; path="";
+        tcls=""; ttype=""; stype=""; path="";
+        if (match(line, /scontext=[^ ]+/)) { stype=substr(line, RSTART+9, RLENGTH-9); split(stype, b, ":"); stype=b[3]; }
         if (match(line, /tclass=[a-z_]+/)) tcls=substr(line, RSTART+7, RLENGTH-7);
         if (match(line, /tcontext=[^ ]+/)) { ttype=substr(line, RSTART+9, RLENGTH-9); n=split(ttype, a, ":"); ttype=a[3]; }
         if (match(line, /path="[^"]*"/)) path=substr(line, RSTART+6, RLENGTH-7);
         else if (match(line, /name="[^"]*"/)) path=substr(line, RSTART+6, RLENGTH-7);
         gsub(/ +$/, "", perms);
-        key=comm " " tcls " {" perms "} " ttype " " path;
+        key=stype " " comm " " tcls " {" perms "} " ttype " " path;
         c[key]++
       } END { for (k in c) printf "  %3d x %s\n", c[k], k }' | sort -rn
 }
@@ -390,7 +430,7 @@ avc_classes() {
   printf '%s\n' "$in" | grep -q -E "${DAEMON_RUN}|notify\.sock|pagespeed_runtime_t" && echo "  class: notify socket (${DAEMON_RUN})"
   printf '%s\n' "$in" | grep -q -E "pagespeed-optimizer/v1|pagespeed_cache_t|cache-[0-9]" && echo "  class: daemon cache volume (${DAEMON_CACHE})"
   printf '%s\n' "$in" | grep -q -E "mod_pagespeed|/var/log/pagespeed" && echo "  class: the module's own cache/log directories (1.15-era layout)"
-  printf '%s\n' "$in" | grep -q -E 'comm="pagespeed-optim' && echo "  class: the daemon itself (comm=pagespeed-optimizer)"
+  printf '%s\n' "$in" | grep -q -E 'scontext=[^: ]+:[^: ]+:pagespeed_t:' && echo "  class: the daemon itself (pagespeed_t)"
   # A record set matching none of the classes above is still a valid outcome
   # (e.g. the stock-module-stack startup denials); without this the last
   # grep's status leaks out of the function and kills the set -e/pipefail
@@ -439,9 +479,9 @@ collect_diagnostics() {
     echo "getenforce: $(getenforce 2>/dev/null || echo ?)"
     sestatus 2>/dev/null || true
   } > "$d/selinux-status.txt"
-  ausearch -m AVC,USER_AVC -ts "${START_TS% *}" "${START_TS#* }" -i > "$d/avc-since-start.txt" 2>&1 || true
+  ausearch --input-logs -m AVC,USER_AVC -ts "${START_TS% *}" "${START_TS#* }" -i > "$d/avc-since-start.txt" 2>&1 || true
   avc_since "$OFF_START" > "$d/avc-since-start.raw" 2>/dev/null || true
-  ausearch -m AVC,USER_AVC -ts "${START_TS% *}" "${START_TS#* }" 2>/dev/null | audit2allow -m pagespeed_rehearsal > "$d/audit2allow.te" 2>&1 || true
+  ausearch --input-logs -m AVC,USER_AVC -ts "${START_TS% *}" "${START_TS#* }" 2>/dev/null | audit2allow -m pagespeed_rehearsal > "$d/audit2allow.te" 2>&1 || true
   semodule -l 2>/dev/null | grep -i pagespeed > "$d/semodule-pagespeed.txt" || echo "(no pagespeed module loaded)" > "$d/semodule-pagespeed.txt"
   journalctl -u "$DAEMON_UNIT" --no-pager -n 200 > "$d/daemon-journal.log" 2>&1 || true
   $WEB_CTL -t -D DUMP_INCLUDES > "$d/httpd-dump-includes.txt" 2>&1 || true
@@ -515,19 +555,73 @@ restorecon -R "$DOCROOT" >/dev/null 2>&1 || true
 note "fixture labels: $(label_of "$DOCROOT$FIXTURE_URL_DIR/$IMAGE_NAME")"
 
 # ---------------------------------------------------------------------------
-# 2. Baseline: 1.15 like a customer, on an enforcing host
+# 2. Baseline: the previous release like a customer, on an enforcing host
 # ---------------------------------------------------------------------------
-step "installing mod_pagespeed ${BASELINE_PREFIX} from the public repository (install.sh + dnf)"
+step "configuring the public repository (install.sh)"
 curl -fsSL "$INSTALL_SH_URL" | sh >"$ARTIFACTS/install-sh.log" 2>&1 \
   || { tail -20 "$ARTIFACTS/install-sh.log"; die "install.sh failed"; }
-dnf install -y -q mod-pagespeed >"$ARTIFACTS/install-baseline.log" 2>&1 \
-  || { tail -30 "$ARTIFACTS/install-baseline.log"; die "dnf install mod-pagespeed failed"; }
 grep -E '^baseurl' /etc/yum.repos.d/modpagespeed.repo 2>/dev/null | head -1 | sed 's/^/  yum baseurl: /' || true
+# Every published version, one per line (VERSION-RELEASE: 1.15.0-22; any
+# epoch dropped). -y: repo_gpgcheck makes the first metadata fetch ask to
+# import the repository key, and an unanswered prompt reads as a bad
+# signature and an empty list.
+dnf -y -q list --showduplicates mod-pagespeed 2>/dev/null \
+  | awk '$1 ~ /^mod-pagespeed\./ {v = $2; sub(/^[0-9]+:/, "", v); print v}' \
+  >"$ARTIFACTS/baseline-candidates.txt" || true
+
+# upstream_of <package version>: the SemVer spelling of a package version's
+# upstream part (1.15.0-22 -> 1.15.0, 1.16.0~rc.13-1 -> 1.16.0-rc.13).
+upstream_of() { local u="${1%-*}"; printf '%s' "${u//$TILDE/-}"; }
+# pkg_rev <package version>: the leading number of the package release
+# (22 or 22.el9 -> 22).
+pkg_rev() { local r="${1##*-}"; r="${r#r}"; r="${r%%[!0-9]*}"; printf '%s' "${r:-0}"; }
+
+# The baseline: newest GA (no prerelease) published version strictly older
+# than the version under test, optionally narrowed by --baseline-prefix.
+# Newest = highest upstream version, then highest package release.
+BASELINE_PIN=""
+BASELINE_UPSTREAM=""
+while IFS= read -r cand; do
+  cand="${cand//[$'\r ']/}"
+  [[ -n "$cand" && "$cand" == *-* ]] || continue
+  up="$(upstream_of "$cand")"
+  [[ "$up" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || continue       # GA only
+  semver_ge "$up" "$RC" && continue                          # strictly older
+  [[ -z "$BASELINE_PREFIX" || "$up" == "$BASELINE_PREFIX"* ]] || continue
+  if [[ -z "$BASELINE_PIN" ]] || ! semver_ge "$BASELINE_UPSTREAM" "$up" \
+     || { [[ "$up" == "$BASELINE_UPSTREAM" ]] && (( $(pkg_rev "$cand") > $(pkg_rev "$BASELINE_PIN") )); }; then
+    BASELINE_PIN="$cand"; BASELINE_UPSTREAM="$up"
+  fi
+done <"$ARTIFACTS/baseline-candidates.txt"
+if [[ -z "$BASELINE_PIN" ]]; then
+  sed 's/^/  published: /' "$ARTIFACTS/baseline-candidates.txt" || true
+  die "no published GA mod-pagespeed${BASELINE_PREFIX:+ matching ${BASELINE_PREFIX}*} older than ${RC} in the public repository"
+fi
+BASELINE_LINE="${BASELINE_UPSTREAM%.*}"                      # 1.15.0 -> 1.15
+note "baseline resolved: mod-pagespeed ${BASELINE_PIN} (newest published GA older than ${RC})"
+
+step "installing mod_pagespeed ${BASELINE_PIN} from the public repository (dnf, pinned)"
+dnf install -y -q "mod-pagespeed-${BASELINE_PIN}" >"$ARTIFACTS/install-baseline.log" 2>&1 \
+  || { tail -30 "$ARTIFACTS/install-baseline.log"; die "dnf install mod-pagespeed-${BASELINE_PIN} failed"; }
 BASELINE_VERSION="$(pkg_version mod-pagespeed)"
-case "$BASELINE_VERSION" in
-  ${BASELINE_PREFIX}*) pass "baseline package installed: mod-pagespeed ${BASELINE_VERSION}" ;;
-  *) fail "baseline package version '${BASELINE_VERSION}' does not start with ${BASELINE_PREFIX}" ;;
-esac
+if [[ "$BASELINE_VERSION" != "$BASELINE_PIN" ]]; then
+  fail "baseline package version '${BASELINE_VERSION}' is not the pinned ${BASELINE_PIN}"
+elif semver_ge "$(upstream_of "$BASELINE_VERSION")" "$RC"; then
+  fail "baseline package version '${BASELINE_VERSION}' is not older than ${RC}"
+else
+  pass "baseline package installed: mod-pagespeed ${BASELINE_VERSION} (older than ${RC})"
+fi
+# The documented EL prerequisite (docs/install-apache.md, "The module's
+# fetcher needs the httpd_can_network_connect boolean"; RELEASE_NOTES.md,
+# "Action required when upgrading"): the module fetches subresources over
+# HTTP, including from this server over loopback, and the stock EL9 policy
+# denies httpd_t outbound TCP (name_connect to http_port_t, comm=curl_poll)
+# until the operator sets it. Without it 1.15 rewrites nothing and every
+# fetch is an AVC; a host following the install docs has it on.
+setsebool -P httpd_can_network_connect 1 \
+  || die "setsebool -P httpd_can_network_connect 1 failed"
+check "documented prerequisite: httpd_can_network_connect" "on" \
+  "$(getsebool httpd_can_network_connect 2>/dev/null | awk '{print $NF}')"
 if getent group pagespeed >/dev/null 2>&1; then
   note "group 'pagespeed' already exists before the upgrade (unexpected on a 1.15 host)"
 else
@@ -535,7 +629,7 @@ else
 fi
 note "module cache label as packaged: $(label_of "$MODULE_CACHE")   log dir: $(label_of "$MODULE_LOG")"
 
-step "serving the fixture and customizing the ${BASELINE_PREFIX} configuration"
+step "serving the fixture and customizing the ${BASELINE_LINE} configuration"
 cat > "$DROPIN_DIR/upgrade-fixture.conf" <<EOF
 <Directory ${DOCROOT}${FIXTURE_URL_DIR}>
     Header set Cache-Control "public, max-age=3600"
@@ -588,13 +682,13 @@ case "$HTTPD_DOMAIN" in
   *) fail "web-server child is NOT httpd_t (${HTTPD_DOMAIN:-no child}): a run in another domain proves nothing about the policy" ;;
 esac
 
-step "proving ${BASELINE_PREFIX} optimizes (enforcing)"
+step "proving ${BASELINE_LINE} optimizes (enforcing)"
 BASE_URL="http://localhost${FIXTURE_URL_DIR}"
 SIZE_CMD="curl -s -o /dev/null -w %{size_download} '${BASE_URL}/${IMAGE_NAME}'"
 REWRITE_CMD="curl -s -H 'Cache-Control: no-cache' '${BASE_URL}/index.html' | grep -c 'pagespeed\\.'"
 HDR="$(version_header "$BASE_URL/index.html")"
 case "$HDR" in
-  *"${BASELINE_PREFIX}"*) pass "baseline version header: ${HDR}" ;;
+  *"${BASELINE_UPSTREAM}"*) pass "baseline version header: ${HDR}" ;;
   *) fail "baseline version header missing or wrong: '${HDR}'" ;;
 esac
 if rewritten="$(fetch_until '-ge 1' 120 "$REWRITE_CMD")"; then
@@ -607,22 +701,22 @@ if size="$(fetch_until "-lt $ORIGIN_IMAGE_BYTES" 120 "$SIZE_CMD")"; then
 else
   fail "baseline in-place optimization: ${IMAGE_NAME} still ${size:-?} bytes after 120s (origin ${ORIGIN_IMAGE_BYTES})"
 fi
-BASELINE_AVCS="$(avc_count "$OFF_START" 'httpd')"
+BASELINE_AVCS="$(avc_count "$OFF_START" 'httpd_t')"
 if [[ "$BASELINE_AVCS" == 0 ]]; then
-  pass "no AVC denials for comm=httpd during the ${BASELINE_PREFIX} baseline"
+  pass "no AVC denials for the httpd_t domain during the ${BASELINE_LINE} baseline"
 else
   # The 1.15 product's own SELinux story (documented fix or not): a finding
   # for the record, kept apart from the gate, which is about the 1.16 pair.
-  warn "${BASELINE_AVCS} AVC denial(s) for comm=httpd during the ${BASELINE_PREFIX} baseline (not the gate's subject; see artifacts/avc-baseline.txt)"
-  avc_since "$OFF_START" 'httpd' | avc_summary | head -10
-  avc_since "$OFF_START" 'httpd' | avc_classes
+  warn "${BASELINE_AVCS} AVC denial(s) for the httpd_t domain during the ${BASELINE_LINE} baseline (not the gate's subject; see artifacts/avc-baseline.txt)"
+  avc_since "$OFF_START" 'httpd_t' | avc_summary | head -10
+  avc_since "$OFF_START" 'httpd_t' | avc_classes
 fi
 avc_since "$OFF_START" > "$ARTIFACTS/avc-baseline.raw" 2>/dev/null || true
-ausearch -m AVC,USER_AVC -ts "${START_TS% *}" "${START_TS#* }" -i > "$ARTIFACTS/avc-baseline.txt" 2>&1 || true
+ausearch --input-logs -m AVC,USER_AVC -ts "${START_TS% *}" "${START_TS#* }" -i > "$ARTIFACTS/avc-baseline.txt" 2>&1 || true
 
 # Everything from here on is the upgrade's doing.
 OFF_UPGRADE="$(audit_offset)"
-UPGRADE_TS="$(date '+%m/%d/%Y %H:%M:%S')"
+UPGRADE_TS="$(ausearch_ts)"
 
 # ---------------------------------------------------------------------------
 # 3. Upgrade in place to the 1.16 pair
@@ -774,7 +868,7 @@ check "daemon unit active" "active" "$(systemctl is-active "$DAEMON_UNIT" || tru
 DAEMON_PID="$(systemctl show -p MainPID --value "$DAEMON_UNIT" || true)"
 check "daemon runs as user pagespeed" "pagespeed" "$(ps -o user= -p "${DAEMON_PID:-0}" 2>/dev/null | tr -d ' ' || true)"
 DAEMON_DOMAIN="$(domain_of_pid "$DAEMON_PID")"
-note "daemon SELinux domain: ${DAEMON_DOMAIN:-?} (expected: unconfined_service_t with no policy, pagespeed_t with the draft)"
+note "daemon SELinux domain: ${DAEMON_DOMAIN:-?} (expected: pagespeed_t -- the optimizer rpm ships the policy; unconfined_service_t only for a pair without it)"
 groups_now="$(id -nG "$WEB_USER" || true)"
 case " $groups_now " in
   *" pagespeed "*) pass "web-server user ${WEB_USER} is in group pagespeed (groups: ${groups_now})" ;;
@@ -865,9 +959,14 @@ check "SELinux still Enforcing at the end" "Enforcing" "$ENFORCE_AT_END"
 # The gate counts httpd denials minus the excluded stock net_admin class
 # (see avc_stock_net_admin for the scoping and the reasoning); the excluded
 # records are reported, split at POLICY_TS, never silently dropped.
-STOCK_NA="$(avc_since "$OFF_UPGRADE" 'httpd' | avc_stock_net_admin)"
-HTTPD_AVCS="$(avc_since "$OFF_UPGRADE" 'httpd' | avc_drop_stock_net_admin | grep -c . || true)"
-DAEMON_AVCS="$(avc_count "$OFF_UPGRADE" 'pagespeed-optim')"
+# The daemon's domain: pagespeed_t (shipped or draft policy), plus whatever
+# domain the running daemon actually has, should it differ.
+DAEMON_DOM_RE='pagespeed_t'
+_dtype="$(printf '%s' "${DAEMON_DOMAIN:-}" | cut -d: -f3)"
+if [[ -n "$_dtype" && "$_dtype" != pagespeed_t ]]; then DAEMON_DOM_RE="pagespeed_t|${_dtype}"; fi
+STOCK_NA="$(avc_since "$OFF_UPGRADE" 'httpd_t' | avc_stock_net_admin)"
+HTTPD_AVCS="$(avc_since "$OFF_UPGRADE" 'httpd_t' | avc_drop_stock_net_admin | grep -c . || true)"
+DAEMON_AVCS="$(avc_count "$OFF_UPGRADE" "$DAEMON_DOM_RE")"
 ALL_AVCS="$(avc_count "$OFF_UPGRADE")"
 STOCK_NA_N=0 STOCK_NA_PRE=0 STOCK_NA_POST=0
 if [[ -n "$STOCK_NA" ]]; then
@@ -882,19 +981,19 @@ if [[ -n "$STOCK_NA" ]]; then
   done < <(printf '%s\n' "$STOCK_NA" | sed -E 's/.*msg=audit\(([0-9]+).*/\1/')
   note "excluded stock-stack net_admin denial(s): ${STOCK_NA_N} total, ${STOCK_NA_PRE} before the shipped policy could first exist, ${STOCK_NA_POST} after (httpd parent SO_SNDBUFFORCE, rehearsal 4.3, dontaudited by the distro; only visible under --disable-dontaudit)"
 fi
-check "AVC/USER_AVC denials for comm=httpd since the upgrade (the gate)" "0" "$HTTPD_AVCS"
-check "AVC/USER_AVC denials for comm=pagespeed-optimizer since the upgrade (the gate)" "0" "$DAEMON_AVCS"
+check "AVC/USER_AVC denials for the httpd_t domain since the upgrade (the gate)" "0" "$HTTPD_AVCS"
+check "AVC/USER_AVC denials for the daemon domain (${DAEMON_DOM_RE}) since the upgrade (the gate)" "0" "$DAEMON_AVCS"
 note "all AVC/USER_AVC denials since the upgrade, any process: ${ALL_AVCS}"
 if [[ "$HTTPD_AVCS" != 0 || "$DAEMON_AVCS" != 0 ]]; then
-  echo "  --- denial groups (count x comm class {perms} target-type path) ---"
-  avc_since "$OFF_UPGRADE" 'httpd|pagespeed-optim' | avc_summary | head -20
-  avc_since "$OFF_UPGRADE" 'httpd|pagespeed-optim' | avc_classes
+  echo "  --- denial groups (count x domain comm class {perms} target-type path) ---"
+  avc_since "$OFF_UPGRADE" "httpd_t|${DAEMON_DOM_RE}" | avc_summary | head -20
+  avc_since "$OFF_UPGRADE" "httpd_t|${DAEMON_DOM_RE}" | avc_classes
   echo "  --- the rules a policy would need (audit2allow, since the upgrade) ---"
-  ausearch -m AVC,USER_AVC -ts "${UPGRADE_TS% *}" "${UPGRADE_TS#* }" 2>/dev/null | audit2allow 2>/dev/null | sed 's/^/  /' | head -40 || true
+  ausearch --input-logs -m AVC,USER_AVC -ts "${UPGRADE_TS% *}" "${UPGRADE_TS#* }" 2>/dev/null | audit2allow 2>/dev/null | sed 's/^/  /' | head -40 || true
 fi
 avc_since "$OFF_UPGRADE" > "$ARTIFACTS/avc-since-upgrade.raw" 2>/dev/null || true
-ausearch -m AVC,USER_AVC -ts "${UPGRADE_TS% *}" "${UPGRADE_TS#* }" -i > "$ARTIFACTS/avc-since-upgrade.txt" 2>&1 || true
-ausearch -m AVC,USER_AVC -ts "${UPGRADE_TS% *}" "${UPGRADE_TS#* }" 2>/dev/null | audit2allow -m pagespeed_rehearsal > "$ARTIFACTS/audit2allow-since-upgrade.te" 2>&1 || true
+ausearch --input-logs -m AVC,USER_AVC -ts "${UPGRADE_TS% *}" "${UPGRADE_TS#* }" -i > "$ARTIFACTS/avc-since-upgrade.txt" 2>&1 || true
+ausearch --input-logs -m AVC,USER_AVC -ts "${UPGRADE_TS% *}" "${UPGRADE_TS#* }" 2>/dev/null | audit2allow -m pagespeed_rehearsal > "$ARTIFACTS/audit2allow-since-upgrade.te" 2>&1 || true
 
 # ---------------------------------------------------------------------------
 # Summary

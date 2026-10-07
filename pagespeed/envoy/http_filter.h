@@ -203,12 +203,13 @@ class HttpPageSpeedDecoderFilter : public StreamFilter {
   FilterHeadersStatus HandleAdminRequest(
       bool is_global, const net_instaweb::GoogleUrl& stripped_gurl,
       const net_instaweb::QueryParams& query_params,
-      const net_instaweb::RewriteOptions* options,
-      StringPiece request_body = StringPiece());
+      const net_instaweb::RewriteOptions* options, StringPiece request_body,
+      StringPiece method, StringPiece x_requested_with);
   FilterHeadersStatus HandleConsoleRequest(
       const net_instaweb::QueryParams& query_params,
       const net_instaweb::SystemRewriteOptions* options);
   FilterHeadersStatus HandleMessagesRequest(
+      const net_instaweb::QueryParams& query_params,
       const net_instaweb::RewriteOptions* options);
   FilterHeadersStatus HandleHealthRequest(
       const net_instaweb::EnvoyRewriteOptions* options);
@@ -288,6 +289,10 @@ class HttpPageSpeedDecoderFilter : public StreamFilter {
   bool pending_admin_dispatch_{false};
   bool pending_admin_is_global_{false};
   std::string pending_admin_body_;
+  std::string pending_admin_method_;
+  // The request's X-Requested-With value: the admin cache actions accept only
+  // a same-origin POST that carries it, so it must reach the admin fetch.
+  std::string pending_admin_x_requested_with_;
 
   // Driver used for IPRO lookup. Owned by this filter until IPRO completes.
   net_instaweb::RewriteDriver* ipro_driver_{nullptr};

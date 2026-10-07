@@ -1,3 +1,386 @@
+# mod_pagespeed 2.2.0 Release Notes
+
+**Release date:** 2026-10-06
+**Status:** Stable
+**Packages:** module `mod-pagespeed` 1.17.0-r1 + `pagespeed-optimizer` 1.17.0 (the source tree is versioned 2.2.0; the signed packages carry the 1.17.0 pairing).
+
+## Highlights
+
+- **mod_pagespeed 1.17.0 is a security and reliability update, released
+  together with the optimizer daemon and installed as a matching pair.** The
+  native packages of both parts are versioned 1.17.0; the product as a whole
+  is 2.2.0. It fixes security issues in the nginx and Apache modules, the HTML
+  rewriter, the admin console and the optimizer's management API, and it
+  updates the bundled curl. It stops a server process that dies or starts at
+  the wrong moment from hanging others or itself, and it stops optimized
+  copies from being lost from a shared cache. The nginx module can now use
+  the optimizer daemon, and `prioritize_critical_css` loads stylesheets so
+  that content is not shown without its styles. **Update recommended.**
+
+- **Security: denial of service — nginx module.** A request without
+  authentication could make an nginx worker process exit, disrupting
+  service. Affected: the nginx module, all releases up to and including
+  1.16.0. **Update recommended.**
+
+- **Security: denial of service — Apache module.** A request could make an
+  Apache child process exit, disrupting service. Affected: all releases up to
+  and including 1.16.0. **Update recommended.**
+
+- **Security: denial of service — HTML rewriter.** Some pages served through
+  the rewriter could make the server worker process handling them exit,
+  losing the requests it was serving. Affected: releases 1.15.0+r20 through
+  1.16.0. **Update recommended.**
+
+- **Security: access restrictions — nginx admin pages.** This release
+  addresses an access-restriction bypass affecting the admin, statistics,
+  console and message pages in the nginx module, and updates the
+  access-restriction example in the packaged snippet and the documentation.
+  Affected: the nginx module, all releases up to and including 1.16.0, where
+  access to these pages is restricted in the nginx configuration. **Update
+  recommended**, and after updating replace your access rules for these pages
+  with the updated example in every `server` block; see *Action required when
+  upgrading*.
+
+- **Security: information disclosure between sites — per-host admin
+  console.** On a server that hosts several sites and uses the optimizer, a
+  per-host admin console could show optimizer cache information that belongs
+  to other sites on the same server. A per-host console now receives only its
+  own site's data; the complete view stays on the whole-server console. This
+  matters where per-host consoles are given to different people. On IIS and
+  Envoy a per-host console shows none of this data for now. Affected: module
+  1.16.0 with the optimizer in use. **Update recommended.**
+
+- **Security: cache integrity — nginx in-place optimization.** A request
+  could affect what in-place optimization stores and serves to other
+  visitors. Affected: the nginx module, all releases up to and including
+  1.16.0, with in-place optimization enabled (the default). **Update
+  recommended.**
+
+- **Security: information disclosure — nginx in-place optimization.** In some
+  nginx configurations, in-place optimization could make content available
+  that the configuration does not expose directly. Affected: the nginx
+  module, all releases up to and including 1.16.0, with in-place optimization
+  enabled (the default). **Update recommended**, and flush the PageSpeed cache
+  once after updating; see *Action required when upgrading*.
+
+- **Security: request forgery — admin console.** Actions in the admin console
+  can no longer be triggered from other sites, and admin responses are
+  hardened against use from other sites. Before, a per-host admin page could
+  also act on other sites on the same server. Affected: all releases up to
+  and including 1.16.0 where the admin console is reachable beyond loopback.
+  **Update recommended.** Scripted purges and some monitoring probes need a
+  change; see *Action required when upgrading*.
+
+- **Security: denial of service — optimizer management API.** A request to
+  the management API could stop the optimizer. Affected: optimizer worker
+  2.0.0 through 2.1.0, and the optimizer packages through 1.16.0, with the
+  management API enabled. **Update recommended.**
+
+- **Security: information disclosure — optimizer management API with
+  `--api-read-open`.** With `--api-read-open`, more data could be read
+  without the API token than intended. Affected: optimizer worker 2.0.0
+  through 2.1.0, and the optimizer packages through 1.16.0, started with
+  `--api-read-open`. **Update recommended.** A read-only client that relied
+  on `--api-read-open` for anything beyond the documented read endpoints now
+  needs the API token; the unix socket and `--api-no-auth` are unchanged.
+
+- **Security: the bundled HTTPS fetch library is updated to curl 8.22.0.**
+  This addresses nine curl vulnerabilities published on 2026-09-02
+  (CVE-2026-19931, CVE-2026-18924, CVE-2026-82209, CVE-2026-80229,
+  CVE-2026-80230, CVE-2026-80231, CVE-2026-80255, CVE-2026-82208 and
+  CVE-2026-13608), every one of which curl's own vulnerability database
+  records as fixed in 8.22.0. Affected: module releases 1.1.0-beta.2 through
+  1.16.0. No exploitation is known. **Update recommended.**
+
+- **Apache and nginx: a worker process could hang right after it started and
+  keep its slot.** A worker process created at an unlucky moment could start
+  with one of the file cache's internal locks already taken, and it stopped
+  at its first cache lookup that needed that lock. On Apache that could be
+  during the worker's own start-up, and it then never served a request. It
+  was most visible after `apache2ctl graceful`, which log rotation runs: the
+  stuck worker stayed behind, and later graceful restarts did not remove it.
+  The bundled cache library now finishes its background work before a worker
+  process is created. Nothing needs configuring. Affected: the Apache and
+  nginx modules in 1.15.0 and 1.16.0; IIS and Envoy are not affected.
+  **Update recommended.**
+
+- **A server process that dies at the wrong moment no longer hangs the rest
+  of the server.** When an Apache or nginx process was killed or crashed
+  while it held one of the module's shared-memory locks, every other process
+  that needed that lock waited for good and the sites hung until the server
+  was restarted. The next process now takes the lock over and logs a warning;
+  a part of the shared metadata cache that was being changed at that moment
+  is set aside and acts as empty until the next restart. Separately, a
+  process that died while it read a value from the shared-memory cache left
+  that entry blocked, and the next write of the same entry waited forever. A
+  write now gives up after one second, logs a warning and drops the write;
+  that entry is still served from the file cache or the external cache.
+
+- **An optimized copy could be lost from a cache shared by the web server and
+  the optimizer.** When the web server recorded a URL's original at the same
+  moment the optimizer wrote the optimized copy of that URL, the optimized
+  copy could be dropped without any error, and the URL was then served in its
+  original form. The cache library now notices that another process changed
+  the entry between a write's two steps and redoes the write. A process still
+  on the older library can drop a copy the same way, so the protection is
+  complete only when the module and the optimizer are both updated.
+
+- **HTTPS fetches that failed in common configurations now work.** With
+  `ModPagespeedSslCertDirectory` set and no `ModPagespeedSslCertFile`, as in
+  the configuration the Debian and Ubuntu packages install, every HTTPS fetch
+  failed with curl error 77; the fetcher now uses the directory on its own.
+  With `ModPagespeedFetchProxy`, or a proxy from the environment, every HTTPS
+  fetch through the proxy ended with status 0; it now works. And a resource
+  the module fetches from its own server by IP address, with the site's name
+  in the `Host` header, failed certificate verification (curl error 60); the
+  fetcher now checks the certificate against the site's name and still
+  connects to that address. Fetches to a host name are unchanged.
+
+- **nginx: the module can use the optimizer daemon for in-place
+  optimization, as the Apache module does.** With `pagespeed
+  DaemonSocketPath` and `pagespeed DaemonVolumePath` both set in a `server`
+  block, the module records each eligible resource into the optimizer's
+  cache, the optimizer builds optimized variants of it, and the module serves
+  the variant that fits each client from that cache. Install the optimizer
+  package of the same release. With both directives unset, in-place
+  optimization works as before. See `docs/install-nginx.md`.
+
+- **nginx: the module's filters run at their intended place in nginx's
+  filter chain.** In earlier releases the dynamically loaded module ran ahead
+  of all of nginx's own output filters instead of immediately before
+  compression. An `expires` or `add_header Cache-Control` directive no longer
+  overrides the caching headers of rewritten HTML or of `.pagespeed.`
+  resources; responses the module serves carry one `Vary: Accept-Encoding`
+  line and no doubled `add_header` values; content brought in by SSI
+  includes, `sub_filter` and `addition` is optimized with the rest of the
+  page; and responses that in-place optimization is still working on carry
+  `s-maxage` (`InPlaceSMaxAgeSec`, default 10). Responses the module
+  generates carry the headers of the origin response they were made from,
+  including what your `add_header` directives put on it, exactly once; use
+  `pagespeed AddResourceHeader` for a header that must be on every optimized
+  resource read with `LoadFromFile`.
+
+- **`prioritize_critical_css` no longer shows part of a page without its
+  styles while the full stylesheet is still loading.** The rules for
+  everything in the page are inlined, not only the rules for the first
+  screen, so the inline block is larger. Each full stylesheet is fetched from
+  the place its `<link>` had in the page, so the order in which a page's
+  rules apply is the page's own. Only browser reports that describe the page
+  as it is now are used. Inline `<style>` blocks are left in place, and the
+  `<noscript class="psa_add_styles">` blocks are gone; a page script that
+  looked for them finds the deferred stylesheets as
+  `link[data-pagespeed-deferred-css]`. `CriticalCssAboveTheFoldOnly` (default
+  off) restores first-screen-only inlining. For pages whose markup differs
+  from visitor to visitor under one URL the filter is best left off.
+
+- **Apache: reports from phones and tablets are now used.** On Apache every
+  page view was treated as a desktop one when the data browsers report for
+  `prioritize_critical_css` and the critical-image filters was looked up, so
+  phones and tablets were served data computed from desktop browsers. nginx,
+  IIS and Envoy were not affected.
+
+- **With the optimizer in use, a stylesheet or script whose optimized copy
+  had gone missing is optimized again.** On Apache and nginx the module
+  notices when it serves the stored original of such a URL and asks the
+  optimizer for it again, about once per URL every 10 seconds per server
+  process. Images are not covered, and on IIS the module does not ask yet.
+  New counters: `ipro_daemon_heal_notified` and
+  `ipro_daemon_heal_notify_failed`.
+
+- **After a purge of the optimizer's whole cache, the web server no longer
+  keeps using the deleted cache file.** The module notices within a second
+  that the optimizer replaced its cache and opens the new one; in the
+  ordinary case no restart is needed. Every full purge keeps one more cache
+  file's worth of disk space in use until the worker processes are recycled,
+  and a worker process follows four full purges this way; sites that purge
+  the whole cache routinely should reload the web server along with it. On
+  IIS a full purge still needs an application-pool recycle.
+
+- **Under heavy write traffic, two processes' cache writes can no longer
+  overlap.** A process now waits for a live holder of a cross-process cache
+  lock; a write or removal that has waited 250 ms in total gives up, and a
+  removal that gave up is no longer counted in `cyclone_cache_deletes`. After
+  the disk cache wraps around, entries from the previous pass stay readable
+  until their bytes are actually overwritten, so hit rates no longer dip just
+  after a wrap.
+
+- **In-place serving can send the optimizer's stored gzip and brotli copies
+  (off by default).** With `ModPagespeedDaemonServeStoredEncodings on`
+  (nginx: `pagespeed DaemonServeStoredEncodings on;`), a stylesheet, script
+  or SVG image the optimizer has stored compressed is sent to a client that
+  lists `br` or `gzip` in `Accept-Encoding` as that stored copy, instead of
+  being compressed again on the way out.
+
+- **A server start or configuration test can no longer hang on the
+  optimizer's socket.** The start-up check now gives up after two seconds,
+  once per start, and the server starts with in-place optimization through
+  the optimizer off, as it already does when the optimizer is not running.
+  When the web server starts with in-place optimization off because it cannot
+  use the optimizer's cache, the reason now also appears in the admin
+  console's message history.
+
+- **Apache with the optimizer: stylesheets and scripts served from the
+  optimizer's variants no longer notify the optimizer again on every
+  request.** Responses were correct; the cost was one needless notification
+  per request and an `ipro_daemon_fallback_notified` counter that climbed
+  with traffic.
+
+- **IIS: the installer also installs the optimizer daemon, as the Windows
+  service `WeAmpPageSpeedOptimizer`, disabled, under its own virtual
+  account.** Turned on and pointed at with the `DaemonSocketPath` and
+  `DaemonVolumePath` directives, it takes over in-place optimization. An
+  upgrade or repair with the Windows installer keeps an optimizer you turned
+  on running and keeps the cache size you chose (`OPTIMIZERCACHESIZE`, 1 GiB
+  by default). Installs that do not turn it on behave as before.
+
+- **IIS fixes.** `UseEventLog on` writes the module's warnings and errors to
+  the Windows event log again, under the `PageSpeed` source; the installer
+  does not register the event source yet, so Event Viewer prefaces each entry
+  with a note that it cannot find the description. The user-mode cache
+  time-to-live for optimized resources is now applied. The installer's
+  permission grants on the cache and logs directories now take effect;
+  installing or repairing this release applies them.
+
+- **Fixes on all servers.** Option response headers such as `PageSpeed: off`
+  no longer reach the client on Apache and nginx. A resource fetch that times
+  out, cannot connect or is answered with a 5xx is remembered for ten
+  seconds, not five minutes. Remote configuration is applied only from a
+  successful response, and a failed refetch keeps the last good copy for up
+  to one day past its expiry (`ServeStaleIfFetchError off` turns that off).
+  CSS parser diagnostics for modern syntax the parser does not interpret now
+  appear at debug level only.
+
+- **The admin console opens on an Overview page and gains Savings, URLs and
+  Logs pages.** The Overview says whether the module is working and what it
+  has saved, whether the optimizer is running, and lists findings, worst
+  first, each with what is wrong and how to fix it. The Savings page shows
+  module rewrite savings and optimizer cache-serve savings; the whole-server
+  console lists them per site and has a Host selector. The console can be
+  used with a keyboard and a screen reader, refreshes more gently, and says
+  when it cannot reach the server. Tools that read the `histograms` endpoint
+  now get an array of objects instead of an HTML table wrapped in JSON.
+
+- Thanks to [@trcyberoptic](https://github.com/trcyberoptic), who contributed
+  the HTTPS fetch, shared-memory and source-build fixes in this release.
+
+## Action required when upgrading
+
+- **The disk cache starts empty once.** The cache library moves to a new
+  on-disk format. The module's own disk cache (`ModPagespeedFileCachePath`)
+  opens a new file beside the old one. The optimizer daemon's default cache
+  directory is now `/var/cache/pagespeed-optimizer/v2` (1.16.0 used `…/v1`),
+  and the packaged `pagespeed_daemon.conf` points
+  `ModPagespeedDaemonVolumePath` at `/var/cache/pagespeed-optimizer/v2/cache`.
+  If you set the cache path yourself, change `v1` to `v2`. After the upgrade
+  the cache refills as traffic arrives, so expect a lower hit rate for a
+  while. The old files are left on disk, so a rollback to 1.16.0 starts with
+  a warm cache (on nginx, only until you run the one-time flush below); delete
+  them once you will not roll back. The optimizer packages print a notice when
+  they find the `v1` directory.
+
+- **Upgrade the module and the optimizer daemon together, and start the
+  optimizer first.** A module and an optimizer on different cache formats do
+  not share a cache. The Apache module refuses to attach to the optimizer's
+  cache and says so. The nginx module, when it uses the optimizer, starts
+  with in-place optimization through the optimizer off and the reason in the
+  error log; right after an update that changes the cache format, a fresh
+  start of nginx in that window can fail instead, again with the reason in
+  the error log. Starting the optimizer and then restarting the web server
+  clears both. The fix for lost optimized copies also needs both on this
+  release. On Linux, upgrading or reinstalling the `pagespeed-optimizer`
+  package (deb or rpm) turns the optimizer service back on and restarts it
+  even if you had turned it off, as 1.16.0 already did.
+
+- **nginx: replace the access rules for the admin, statistics, console and
+  message pages.** After updating, replace your access rules for these pages
+  with the updated example, in every `server` block that serves them. The
+  update does not change rules that are already in your configuration.
+
+- **nginx: flush the PageSpeed cache once after updating** (touch
+  `cache.flush` in the `FileCachePath` directory, or purge `*` when
+  `EnableCachePurge` is on), so that entries recorded by earlier releases are
+  dropped. The flush also empties the cache that a rollback to 1.16.0 would
+  reuse, so a rollback after the flush starts with the module's own cache
+  empty (the optimizer's cache is not affected); on Apache, where no flush is
+  needed, a rollback starts with a warm cache.
+
+- **Apache and nginx: a server that is hanging when you upgrade, or that has
+  a worker process left stuck after a graceful restart, needs a full stop and
+  start.** The fixes for hangs take effect in fresh server processes; a
+  reload or graceful restart leaves processes that are already stuck waiting.
+
+- **Purging through `pagespeed_admin/cache?purge=` with a GET no longer
+  works; it answers 405.** Send a POST with the
+  `X-Requested-With: XMLHttpRequest` header, and purge the whole cache
+  (`purge=*`) from the global admin page (`pagespeed_global_admin`). Purge
+  another host's URLs through that host's admin page or the whole-server
+  admin page. Scripts that use the `PURGE` request method (`PurgeMethod`) are
+  unaffected. A monitoring probe that appends a cache-busting query string to
+  the console's `v1/daemon/health` must drop it: the console's optimizer
+  status pages answer a request with a query string with a 400.
+
+- **An HTTPS origin that the module fetches by IP address must present a
+  certificate for the site's name.** This applies to resources on the
+  server's own origin that no domain directive names, and to an origin that
+  `MapOriginDomain` maps to an IP address. A certificate that names only the
+  IP address no longer passes.
+
+- **Sites that use `prioritize_critical_css` are optimized again after the
+  update.** Reports collected by earlier releases are not reused, so each
+  page keeps ordinary blocking stylesheets until its visitors' browsers have
+  reported, normally within a few page views. On an existing Apache site,
+  phones and tablets get ordinary stylesheets and ordinary image handling
+  until the first report from a browser of that class arrives.
+
+- **The optimizer's serve statistics restart at zero once.** The serve
+  statistics, including the serve savings the admin console shows, restart
+  when an updated optimizer first starts, because the shared statistics file
+  has a new layout. A module built against the previous layout stops
+  recording into it until it is updated too.
+
+- **A replaced system-call allow-list needs `mincore(2)`.** The optimizer's
+  systemd unit now admits the `mincore(2)` system call, which the cache
+  library uses before it issues a readahead hint. A host that replaced the
+  unit's system-call allow-list with its own must add it, or the optimizer is
+  stopped with `SIGSYS`.
+
+- **Apache: remove a stray cache file left by a refused 1.16.0 start.** If a
+  start with 1.16.0 refused with "created a SECOND volume file (…)", stop the
+  optimizer, remove the file that message named, then start the optimizer
+  and then the server. A start refused this way no longer leaves such a file
+  behind.
+
+## Packaging and platform notes
+
+- **Versions.** The native packages of the module and the optimizer are
+  versioned 1.17.0; the product as a whole is 2.2.0. Install the module and
+  the optimizer daemon as the matching pair the packages already require.
+
+- **Linux.** The packaged `pagespeed_daemon.conf` points
+  `ModPagespeedDaemonVolumePath` at `/var/cache/pagespeed-optimizer/v2/cache`.
+  The nginx packages set neither `pagespeed DaemonSocketPath` nor
+  `pagespeed DaemonVolumePath`, so nothing changes for nginx until you set
+  both. The nginx filter-chain fix applies to the dynamically loaded module,
+  which is what the packages ship; a build that links the module into nginx
+  statically keeps its previous position.
+
+- **Windows and IIS.** The IIS installer also installs the optimizer daemon,
+  disabled. The Windows optimizer (`factory_worker.exe`) starts on a Windows
+  Server that has no Visual C++ runtime installed; it used to fail at once
+  with a missing-DLL error (exit code 0xC0000135) unless the Visual C++
+  2015-2022 redistributable was present. `DaemonServeStoredEncodings` is not
+  available on IIS in this release, the module does not yet ask the optimizer
+  to restore a missing optimized copy on IIS, and on IIS every optimizer
+  serve is counted under "other" in the per-site savings for now.
+
+- **Envoy.** `prioritize_critical_css` depends on browser reports and
+  therefore does nothing on Envoy.
+
+- **Source builds.** Building from the source tarball of a final release
+  works again.
+
+---
+
 # mod_pagespeed 2.1.0 Release Notes
 
 **Release date:** 2026-09-17

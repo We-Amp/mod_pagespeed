@@ -210,7 +210,55 @@ class TestLegacyUrls:
         assert_http_status(response, 200)
 
 
-@pytest.mark.skip(reason="extend_cache_pdfs count mismatch on IIS — known product defect, pending investigation")
+_PDF_COUNT_PATTERN = re.compile(r"\.pagespeed\.")
+_PDF_EXTENDED_LINK = re.compile(r'(?:href|src)="([^"]*\.pagespeed\.[^"]*\.pdf)"')
+_PDF_ELEMENT = re.compile(r"<(?:a|embed)\b[^>]*pdf[^>]*>(?:[^<]*</a>)?", re.IGNORECASE)
+_PDF_EVIDENCE_LIMIT = 2000
+
+
+def _pdf_count_evidence(html: str) -> str:
+    """Say which PDF references of extend_cache_pdfs.html were cache-extended.
+
+    Goes into the timeout message of the count poll, so a lane where the
+    count is not reached shows which reference stayed plain: the extended
+    links found, the .pagespeed. total, and the PDF-referencing <a>/<embed>
+    elements of the last page (bounded).
+    """
+    extended = _PDF_EXTENDED_LINK.findall(html)
+    total = len(_PDF_COUNT_PATTERN.findall(html))
+    elements = " | ".join(m.group(0) for m in _PDF_ELEMENT.finditer(html))
+    if len(elements) > _PDF_EVIDENCE_LIMIT:
+        elements = elements[:_PDF_EVIDENCE_LIMIT] + "...[truncated]"
+    return (f".pagespeed. total={total} expected=3; "
+            f"cache-extended PDF links={extended}; PDF elements: {elements}")
+
+
+class TestPdfCountEvidence:
+    """The count poll's failure message (no server needed)."""
+
+    def test_names_extended_and_plain_links(self):
+        html = (
+            '<a href="example.pdf.pagespeed.ce.HASH.pdf">example.pdf</a>\n'
+            '<embed src="example.pdf.pagespeed.ce.HASH.pdf" width="150">\n'
+            '<a href="example.notpdf">example.notpdf</a>\n'
+            '<a href="example.pdf?a=b">example.pdf?a=b</a>\n'
+        )
+        evidence = _pdf_count_evidence(html)
+        assert ".pagespeed. total=2 expected=3" in evidence
+        assert evidence.count("example.pdf.pagespeed.ce.HASH.pdf") == 4
+        assert '<a href="example.pdf?a=b">example.pdf?a=b</a>' in evidence
+        assert '<a href="example.notpdf">example.notpdf</a>' in evidence
+
+    def test_bounds_the_element_excerpt(self):
+        html = '<a href="x.pdf">x</a>' * 500
+        evidence = _pdf_count_evidence(html)
+        assert evidence.endswith("...[truncated]")
+        assert len(evidence) < _PDF_EVIDENCE_LIMIT + 200
+
+
+# The IIS lane runs this class too, to settle the count difference tracked in
+# issue #1044: if the count is not reached there, the timeout message names
+# the PDF reference that stayed plain.
 class TestExtendCachePdfs:
     """Tests for PDF cache extension.
 
@@ -227,18 +275,23 @@ class TestExtendCachePdfs:
         """extend_cache_pdfs should rewrite PDF URLs."""
         url = f"{example_root}/extend_cache_pdfs.html?PageSpeedFilters=extend_cache_pdfs"
 
-        # Wait for PDF URLs to be rewritten
-        response = client.fetch_until_count(
+        # Wait for PDF URLs to be rewritten. Occurrences are counted, as
+        # fetch_until_count did; each reference sits on its own line, so this
+        # equals the bash's fgrep -c line count.
+        response = client.fetch_until(
             url,
-            pattern=r'\.pagespeed\.',
-            expected_count=3,
+            condition=lambda r: len(_PDF_COUNT_PATTERN.findall(r.text)) == 3,
             timeout=120.0,
+            detail_fn=lambda r: _pdf_count_evidence(r.text),
         )
 
         assert_http_status(response, 200)
 
-        # Check for rewritten PDF link
-        assert_contains(response, r'href="[^"]*pagespeed[^"]*\.pdf')
+        # extend_cache.sh:62-65
+        assert_contains(response, r'a href=".*pagespeed.*\.pdf')
+        assert_contains(response, r'embed src=".*pagespeed.*\.pdf')
+        assert_contains(response, r'<a href="example\.notpdf">')
+        assert_contains(response, r'<a href=".*pagespeed.*\.pdf">example\.pdf\?a=b')
 
     def test_cache_extended_pdf_has_correct_mime_type(
         self, client: PageSpeedClient, example_root: str
@@ -253,9 +306,9 @@ class TestExtendCachePdfs:
         )
 
         # Extract a cache-extended PDF URL
-        match = re.search(r'href="([^"]*pagespeed[^"]*\.pdf)"', response.text)
-        if not match:
-            pytest.skip("Could not find cache-extended PDF URL")
+        match = require_match(
+            r'href="([^"]*pagespeed[^"]*\.pdf)"', response, "cache-extended PDF URL"
+        )
 
         pdf_url = match.group(1)
         if not pdf_url.startswith("http"):

@@ -7,7 +7,7 @@
 #
 # Independent, deterministic CI gate that asserts the packaged nginx
 # mod_pagespeed module (.so) does NOT leak the bundled OpenSSL/BoringSSL.
-# Two failure classes are fatal:
+# Three failure classes are fatal:
 #
 #   (1) DT_NEEDED on libssl/libcrypto — the module would dynamically link
 #       against the host's OpenSSL at runtime. mod_pagespeed statically
@@ -16,7 +16,13 @@
 #       host nginx's OpenSSL ABI. This has historically caused silent
 #       symbol interposition / crashes.
 #
-#   (2) Any *exported* (dynamic, defined) symbol other than the nginx
+#   (2) Any *undefined* dynamic symbol that is neither versioned by the
+#       C/C++ runtime nor on the shared checker's allow-list (the nginx API
+#       and a few weak runtime hooks). The module carries its own crypto;
+#       any other reference would be bound to whatever the host nginx has
+#       loaded.
+#
+#   (3) Any *exported* (dynamic, defined) symbol other than the nginx
 #       module struct(s) `ngx_module*`. An nginx dynamic module must
 #       export ONLY its module descriptor; any other global (e.g. a
 #       leaked BoringSSL/protobuf/abseil symbol) can interpose on nginx's
@@ -27,7 +33,7 @@
 # depth: the gate must catch a build script whose internal assertion was
 # accidentally disabled or which produced a package out-of-band).
 #
-# Needs only binutils (readelf, nm) + dpkg-deb/rpm2cpio for extraction.
+# Needs only binutils (readelf) + dpkg-deb/rpm2cpio for extraction.
 # NO nginx required — deterministic, fast, runs anywhere.
 #
 # Usage:
@@ -50,7 +56,7 @@ die() { echo "::error::$*" >&2; exit "${2:-1}"; }
 INPUT="$1"
 [[ -e "$INPUT" ]] || die "no such file: $INPUT" 1
 
-for tool in readelf nm; do
+for tool in readelf; do
   command -v "$tool" >/dev/null 2>&1 || die "required tool not found: $tool (install binutils)" 1
 done
 
@@ -114,56 +120,22 @@ _find_so() {
 SO="$(resolve_so)"
 echo "==> checking module: $SO"
 
-fail=0
+# ---------------------------------------------------------------------------
+# The assertions themselves live in tools/ci/assert_module_symbols.sh (shared
+# with the in-build gate and with the Apache module): no libssl/libcrypto in
+# DT_NEEDED, no undefined symbol the host process would have to resolve, and
+# no exported symbol other than ngx_module*. Its exit status 2 is this gate's exit status
+# 2; a missing checker or tool is an error, never a pass.
+# ---------------------------------------------------------------------------
+CHECKER="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/tools/ci/assert_module_symbols.sh"
+[[ -f "$CHECKER" ]] || die "shared checker not found: $CHECKER" 1
 
-# ---------------------------------------------------------------------------
-# Assertion 1: no DT_NEEDED on libssl / libcrypto.
-# ---------------------------------------------------------------------------
-echo "--- readelf -d (DT_NEEDED) ---"
-NEEDED="$(readelf -d "$SO" 2>/dev/null | awk '/\(NEEDED\)/ {print}')"
-printf '%s\n' "$NEEDED"
-if printf '%s\n' "$NEEDED" | grep -E 'lib(ssl|crypto)\.so' >/dev/null 2>&1; then
-  echo "::error::SYMBOL LEAK — module has a DT_NEEDED on libssl/libcrypto:" >&2
-  printf '%s\n' "$NEEDED" | grep -E 'lib(ssl|crypto)\.so' >&2
-  echo "         mod_pagespeed must statically link BoringSSL; a NEEDED on" >&2
-  echo "         system libssl/libcrypto means the static link broke." >&2
-  fail=1
-else
-  echo "OK: no libssl/libcrypto in DT_NEEDED"
-fi
-
-# ---------------------------------------------------------------------------
-# Assertion 2: exported dynamic symbols are ONLY ngx module descriptors.
-# `nm -D --defined-only` lists defined dynamic (exported) symbols. The only
-# legitimately-exported symbols from an nginx dynamic module are its module
-# struct(s) — conventionally named `ngx_<name>_module` (e.g.
-# `ngx_pagespeed_module`, `ngx_http_pagespeed_module`) and, on older
-# toolchains, the `ngx_modules`/`ngx_module*` table. Anything else is a leak
-# that can interpose on nginx.
-# ---------------------------------------------------------------------------
-echo "--- nm -D --defined-only (exported symbols) ---"
-# Columns: <addr> <type> <name>. We want the name (field 3) for entries that
-# have an address+type; skip undefined (U) / no-name lines defensively.
-EXPORTED="$(nm -D --defined-only "$SO" 2>/dev/null | awk 'NF>=3 {print $3}')"
-echo "exported symbols:"
-printf '%s\n' "$EXPORTED" | sed 's/^/    /'
-# Allow-list: any ngx_* symbol whose name contains "module" — covers
-# ngx_<name>_module (the module descriptor), ngx_modules, ngx_module_* tables.
-# Empty lines (no exports at all) are fine.
-LEAKED="$(printf '%s\n' "$EXPORTED" | grep -vE '^$' | grep -vE '^ngx_[A-Za-z0-9_]*module' || true)"
-if [[ -n "$LEAKED" ]]; then
-  echo "::error::SYMBOL LEAK — module exports symbols other than ngx_module*:" >&2
-  echo "$LEAKED" | sed 's/^/    /' >&2
-  echo "         An nginx dynamic module must export ONLY its ngx_module*" >&2
-  echo "         descriptor; any other exported global can interpose on" >&2
-  echo "         nginx's own symbols and corrupt the worker process." >&2
-  fail=1
-else
-  echo "OK: only ngx_module* symbols are exported"
-fi
-
-if [[ "$fail" -ne 0 ]]; then
-  die "nginx module symbol-leak gate FAILED for $SO" 2
-fi
+rc=0
+bash "$CHECKER" --profile nginx "$SO" || rc=$?
+case "$rc" in
+  0) ;;
+  2) die "nginx module symbol-leak gate FAILED for $SO" 2 ;;
+  *) die "symbol checker could not run on $SO (exit $rc)" 1 ;;
+esac
 
 echo "==> symbol-leak gate PASSED for $SO"

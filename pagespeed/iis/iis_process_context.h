@@ -74,6 +74,14 @@ namespace net_instaweb
 			// the LogDir path in this case (not a cache path).
 			kLogDirCreateFailed,
 			kPostConfigFailed,
+			// The daemon startup check refused: opening the optimizer
+			// daemon's cache volume at the size the daemon published
+			// created a SECOND volume file instead of attaching to the
+			// daemon's.  Nothing silently optimizes wrongly: the site
+			// engages no PageSpeed at all until the application pool
+			// is recycled (the check itself removes the file its open
+			// created, or says which file to remove by hand).
+			kDaemonVolumeSplit,
 			kUnknown,
 		};
 		InitFailureKind init_failure_kind() const { return init_failure_kind_; }
@@ -136,6 +144,13 @@ namespace net_instaweb
 		global_settings settings_;
 		AbstractMutex* server_context_mutex_;
 		bool ok_;
+
+		// Set when the daemon startup check registered this factory's
+		// message handler with the process-wide registry; Shutdown
+		// deregisters it again before the factory (and with it the
+		// handler) is deleted, so the registry's adapters never deliver
+		// a message to a deleted handler.
+		bool daemon_handler_registered_ = false;
 
 		// Init-failure diagnostics. Populated by GetServerContext() on the
 		// non-ok() exit paths; consumed by IisHttpModule::OnBeginRequest to

@@ -104,6 +104,27 @@ class SplitStatisticsTest : public testing::Test {
                                    &message_handler_, &fs_, &timer_);
   }
 
+  // SharedMemStatistics with console logging to `logfile` on the in-memory
+  // file system. The caller GlobalCleanup()s and deletes the stats, then
+  // deletes the store.
+  SharedMemStatistics* MakeLoggedStats(InProcessSharedMem** store_out,
+                                       const GoogleString& logfile) {
+    *store_out = new InProcessSharedMem(threads_.get());
+    SharedMemStatistics* stats = new SharedMemStatistics(
+        3000, 100000, logfile, true, "in_mem", *store_out,
+        &message_handler_, &fs_, &timer_);
+    InitStats(stats);
+    stats->Init(true, &message_handler_);
+    return stats;
+  }
+
+  void CleanupLoggedStats(SharedMemStatistics* stats,
+                          InProcessSharedMem* store) {
+    stats->GlobalCleanup(&message_handler_);
+    delete stats;
+    delete store;
+  }
+
   GoogleMessageHandler message_handler_;
   std::unique_ptr<ThreadSystem> threads_;
   MockTimer timer_;
@@ -316,6 +337,83 @@ TEST_F(SplitStatisticsTest, TimedVars) {
   EXPECT_EQ(32, local_b_tv->Get(TimedVariable::START));
 
   EXPECT_EQ(39, global_tv->Get(TimedVariable::START));
+}
+
+TEST_F(SplitStatisticsTest, ConsoleLogTickReachesLocalAndGlobalLoggers) {
+  InProcessSharedMem* global_store;
+  SharedMemStatistics* global = MakeLoggedStats(&global_store, "global.log");
+  InProcessSharedMem* local_store;
+  SharedMemStatistics* local = MakeLoggedStats(&local_store, "local.log");
+  // SplitStatistics takes ownership of local, not global. The split itself
+  // needs no variables: the tick reaches the loggers, which dump the
+  // registered variables of their own statistics.
+  std::unique_ptr<SplitStatistics> split(
+      new SplitStatistics(threads_.get(), local, global));
+
+  timer_.AdvanceMs(2 * 3000);  // past the 3000 ms logging interval
+  split->UpdateConsoleLogIfRequired();
+
+  EXPECT_TRUE(fs_.Exists("local.log", &message_handler_).is_true());
+  EXPECT_TRUE(fs_.Exists("global.log", &message_handler_).is_true());
+
+  local->GlobalCleanup(&message_handler_);
+  split.reset(nullptr);
+  delete local_store;
+  CleanupLoggedStats(global, global_store);
+}
+
+TEST_F(SplitStatisticsTest, ConsoleLogTickToleratesNullGlobalLogger) {
+  // The global side has logging off (the fixture's own global_), local logs.
+  InProcessSharedMem* local_store;
+  SharedMemStatistics* local = MakeLoggedStats(&local_store, "local.log");
+  std::unique_ptr<SplitStatistics> split(
+      new SplitStatistics(threads_.get(), local, global_.get()));
+
+  timer_.AdvanceMs(2 * 3000);
+  split->UpdateConsoleLogIfRequired();
+
+  EXPECT_TRUE(fs_.Exists("local.log", &message_handler_).is_true());
+
+  local->GlobalCleanup(&message_handler_);
+  split.reset(nullptr);
+  delete local_store;
+}
+
+TEST_F(SplitStatisticsTest, ConsoleLogTickToleratesNullLocalLogger) {
+  // The local side has logging off, global logs.
+  InProcessSharedMem* global_store;
+  SharedMemStatistics* global = MakeLoggedStats(&global_store, "global.log");
+  InProcessSharedMem* local_store;
+  SharedMemStatistics* local = MakeInMemory(&local_store);  // no logging
+  InitStats(local);
+  local->Init(true, &message_handler_);
+  std::unique_ptr<SplitStatistics> split(
+      new SplitStatistics(threads_.get(), local, global));
+
+  timer_.AdvanceMs(2 * 3000);
+  split->UpdateConsoleLogIfRequired();
+
+  EXPECT_TRUE(fs_.Exists("global.log", &message_handler_).is_true());
+
+  local->GlobalCleanup(&message_handler_);
+  split.reset(nullptr);
+  delete local_store;
+  CleanupLoggedStats(global, global_store);
+}
+
+TEST_F(SplitStatisticsTest, ConsoleLogTickWithoutSplitTicksOnlyTheOwnLogger) {
+  // The non-split path: a logging SharedMemStatistics ticks its own logger.
+  InProcessSharedMem* store;
+  SharedMemStatistics* alone = MakeLoggedStats(&store, "alone.log");
+  timer_.AdvanceMs(2 * 3000);
+  alone->UpdateConsoleLogIfRequired();
+  EXPECT_TRUE(fs_.Exists("alone.log", &message_handler_).is_true());
+  CleanupLoggedStats(alone, store);
+
+  // And a split whose BOTH sides have no logger (the fixture's own
+  // split_a_) tolerates the tick.
+  split_a_->UpdateConsoleLogIfRequired();
+  SUCCEED();
 }
 
 }  // namespace

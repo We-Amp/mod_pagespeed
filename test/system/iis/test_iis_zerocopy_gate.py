@@ -215,21 +215,46 @@ def _drain(host, port, path, *, rcvbuf=None, delay=0.0, chunk=4096, budget=30.0)
     return status, headers, payload, complete, reset
 
 
+def _find_ic_url(host, port, test_root, page, ic_re):
+    """Fetch one fixture page; return its rewritten .pagespeed.ic URL or None."""
+    status, _, body, _, _ = _drain(
+        host, port, "{r}/{p}".format(r=test_root, p=page), budget=25.0
+    )
+    if status == 200:
+        m = re.search(ic_re.encode("latin-1"), body)
+        if m:
+            return m.group(0).decode("latin-1")
+    return None
+
+
 def _resolve_ic_url(host, port, test_root):
     """Drive the fixture pages until a rewritten .pagespeed.ic URL appears.
 
-    Prefers the large multi-chunk resource; falls back to the small one.
+    Waits for the large multi-chunk resource until a bounded deadline; only
+    after that deadline does it fall back to the small one, and it says so.
+    The two images are rewritten independently, and the large one (a 4 MB
+    source resized and recompressed) routinely lands a second or so after
+    the small one: taking whichever page carried a rewritten URL first lost
+    that race and ran the gate against the single-chunk fallback.
     """
-    deadline = time.time() + 50.0 * _timeout_scale()
-    while time.time() < deadline:
-        for page, ic_re in TARGETS:
-            status, _, body, _, _ = _drain(
-                host, port, "{r}/{p}".format(r=test_root, p=page), budget=25.0
-            )
-            if status == 200:
-                m = re.search(ic_re.encode("latin-1"), body)
-                if m:
-                    return m.group(0).decode("latin-1")
+    (primary_page, primary_re), (fallback_page, fallback_re) = TARGETS
+    primary_deadline = time.time() + 50.0 * _timeout_scale()
+    while time.time() < primary_deadline:
+        url = _find_ic_url(host, port, test_root, primary_page, primary_re)
+        if url:
+            return url
+        time.sleep(1.0)
+    print(
+        "M1 gate: no rewritten URL on {p} after {s:.0f}s; falling back to "
+        "{f} (single-chunk)".format(
+            p=primary_page, s=50.0 * _timeout_scale(), f=fallback_page
+        )
+    )
+    fallback_deadline = time.time() + 20.0 * _timeout_scale()
+    while time.time() < fallback_deadline:
+        url = _find_ic_url(host, port, test_root, fallback_page, fallback_re)
+        if url:
+            return url
         time.sleep(1.0)
     return None
 
@@ -395,9 +420,9 @@ class TestZeroCopyMergeGate:
         # The gate MUST run against the multi-chunk resource (several 128 KB
         # aliased chunks) -- that is what exercises the M1 repeated
         # submit -> async-flush -> completion loop.  If rig setup failed to
-        # generate zc_noise_src.jpg, the resolver silently falls back to the
-        # small single-chunk image; a weakened nightly is false confidence,
-        # so fail loudly instead.
+        # generate zc_noise_src.jpg, the resolver falls back to the small
+        # single-chunk image once its deadline passes; a weakened nightly is
+        # false confidence, so fail loudly instead.
         assert len(reference) >= 160 * 1024, (
             "gate resource is not multi-chunk ({n} bytes < 160 KB): the rig "
             "is serving the single-chunk fallback -- check zc_noise_src.jpg "

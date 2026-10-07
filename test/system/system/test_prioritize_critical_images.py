@@ -48,6 +48,31 @@ from pagespeed_test_framework import (
 CRITICAL_IMAGE_SRC = "images/Puzzle.jpg"
 
 
+# User agents the module's own device classification maps to a phone, a
+# desktop browser and a tablet (they are in the phone, desktop and tablet
+# lists of its user-agent matcher tests). Reports and their results are kept
+# per device class.
+PHONE_USER_AGENT = (
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 5_0_1 like Mac OS X) AppleWebKit/534.46"
+    " (KHTML, like Gecko) Version/5.1 Mobile/9A405 Safari/7534.48.3"
+)
+DESKTOP_USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_6_8) AppleWebKit/534.51.22 "
+    "(KHTML, like Gecko) Version/5.1.1 Safari/534.51.22"
+)
+TABLET_USER_AGENT = (
+    "Mozilla/5.0 (iPad; U; CPU OS 3_2 like Mac OS X; en-us) "
+    "AppleWebKit/531.21.10 (KHTML, like Gecko) Version/4.0.4 "
+    "Mobile/7B334b Safari/531.21.10"
+)
+
+# The beaconed image once it has been annotated. Matched as the <img>
+# itself: the page prose mentions the attribute.
+ANNOTATED_IMG = (
+    rf'<img src="{re.escape(CRITICAL_IMAGE_SRC)}"[^>]*fetchpriority="high"'
+)
+
+
 def _instrumented_url(example_root: str) -> str:
     """Example page URL with the filter enabled and a cache-busting param.
 
@@ -96,12 +121,16 @@ def _extract_image_url_hash(html: str, src: str) -> str:
     return match.group(1)
 
 
-def _fetch_instrumented(client: PageSpeedClient, url: str):
-    """Fetch url until the critical-images beacon snippet appears."""
+def _fetch_instrumented(client: PageSpeedClient, url: str, user_agent: str = ""):
+    """Fetch url until the critical-images beacon snippet appears.
+
+    user_agent: fetch as this browser instead of the client's default.
+    """
     response = client.fetch_until_contains(
         url,
         pattern=r"pagespeed\.CriticalImages\.Run",
         timeout=60.0,
+        headers={"User-Agent": user_agent} if user_agent else None,
     )
     assert_http_status(response, 200)
     return response
@@ -163,6 +192,77 @@ class TestPrioritizeCriticalImages:
         )
         assert_http_status(response, 200)
         assert_contains(response, annotated_img)
+
+
+class TestReportsAreKeptPerDeviceClass:
+    """A browser's critical-image report counts for its own device class.
+
+    Which images are on the first screen depends on the screen, so the
+    server keeps these reports per device class (phone, tablet, desktop): a
+    report is accepted when it is posted by a browser of the class the
+    instrumented response went to, and it is used for page views of that
+    class only.
+
+    The "that class only" half is checked with a tablet. Within one device
+    class a server may reuse critical-image data between URLs that differ
+    only in their query string, and every test here fetches the same page;
+    no test reports as a tablet, so a tablet page view has no data of its
+    own class to pick up, whatever ran before.
+    """
+
+    @staticmethod
+    def _report_and_wait(client, url, user_agent):
+        """Fetch as user_agent, report the image, wait for the annotation."""
+        headers = {"User-Agent": user_agent}
+        response = _fetch_instrumented(client, url, user_agent=user_agent)
+        params = _extract_images_beacon_params(response.text)
+        image_hash = _extract_image_url_hash(response.text, CRITICAL_IMAGE_SRC)
+
+        path = (
+            f"{params['path']}"
+            f"?url={urllib.parse.quote(params['url'], safe='')}"
+        )
+        data = f"oh={params['hash']}&n={params['nonce']}&ci={image_hash}"
+        post_response = client.post(
+            path,
+            data=data,
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+                **headers,
+            },
+        )
+        assert_http_status(post_response, 204)
+
+        response = client.fetch_until_contains(
+            url, pattern=ANNOTATED_IMG, timeout=60.0, headers=headers
+        )
+        assert_http_status(response, 200)
+
+    @staticmethod
+    def _assert_tablet_not_annotated(client, url):
+        """Tablet page views have no critical-image data.
+
+        Called after another class's view has been annotated, so that
+        class's report has been stored by then.
+        """
+        for _ in range(3):
+            page = client.get(url, headers={"User-Agent": TABLET_USER_AGENT})
+            assert_http_status(page, 200)
+            assert_not_contains(page, r'<img[^>]*fetchpriority="high"')
+
+    def test_report_from_a_phone_is_used_for_phones(
+        self, client: PageSpeedClient, example_root: str
+    ):
+        url = _instrumented_url(example_root)
+        self._report_and_wait(client, url, PHONE_USER_AGENT)
+        self._assert_tablet_not_annotated(client, url)
+
+    def test_report_from_a_desktop_browser_is_not_used_for_another_class(
+        self, client: PageSpeedClient, example_root: str
+    ):
+        url = _instrumented_url(example_root)
+        self._report_and_wait(client, url, DESKTOP_USER_AGENT)
+        self._assert_tablet_not_annotated(client, url)
 
 
 if __name__ == "__main__":

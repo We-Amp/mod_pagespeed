@@ -21,6 +21,10 @@
 
 #include <ngx_conf_file.h>
 
+#include <cstring>
+
+#include "pagespeed/nginx/ngx_gzip_type_match.h"
+
 namespace net_instaweb {
 
 NgxGZipSetter g_gzip_setter;
@@ -264,6 +268,27 @@ ngx_str_t gzip_http_types[] = {
     ngx_string("text/xml"),
     ngx_null_string  // Indicates end of array.
 };
+
+bool NgxGZipSetterCompressesType(const char* media_type) {
+  // The array above is the single source of the list; ngx_string's data is
+  // a NUL-terminated literal, so the C-string view the matcher wants is
+  // built once and never copies a byte of the list itself.  The list is a
+  // compile-time constant; if it ever becomes configurable, this cached
+  // view has to be rebuilt with it.
+  static const char* const* const c_types = [] {
+    size_t n = 0;
+    while (gzip_http_types[n].data != nullptr) {
+      ++n;
+    }
+    const char** view = new const char*[n + 1];
+    for (size_t i = 0; i < n; ++i) {
+      view[i] = reinterpret_cast<const char*>(gzip_http_types[i].data);
+    }
+    view[n] = nullptr;
+    return view;
+  }();
+  return NgxGZipTypeListMatches(c_types, media_type);
+}
 
 gzs_enable_result NgxGZipSetter::SetGZipForLocation(ngx_conf_t* cf,
                                                     bool value) {

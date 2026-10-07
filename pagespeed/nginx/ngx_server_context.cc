@@ -38,6 +38,7 @@ namespace net_instaweb {
 NgxServerContext::NgxServerContext(NgxRewriteDriverFactory* factory,
                                    StringPiece hostname, int port)
     : SystemServerContext(factory, hostname, port),
+      ngx_factory_(factory),
       ngx_http2_variable_index_(NGX_ERROR) {}
 
 NgxServerContext::~NgxServerContext() {}
@@ -46,9 +47,33 @@ NgxRewriteOptions* NgxServerContext::config() {
   return NgxRewriteOptions::DynamicCast(global_options());
 }
 
+bool NgxServerContext::RunDaemonStartupCheck() {
+  const NgxRewriteOptions* config = this->config();
+  // The per-server message handler is wired in the worker at ChildInit; in
+  // the master there is none yet, and the adapter's startup check announces
+  // through the handler it is given. Use the factory's, the same handler the
+  // factory itself logs module-init messages through.
+  MessageHandler* handler = factory()->message_handler();
+  daemon_adapter_ = std::make_unique<DaemonAdapter>(
+      config->daemon_socket_path(), config->daemon_volume_path(), handler);
+  const bool ok = daemon_adapter_->StartupCheck() == DaemonStartupStatus::kOk;
+  // Built whatever the verdict, and holding nothing open.  The serve arm
+  // records exactly one class per response through it, and a null object
+  // here would make "the daemon was not usable" and "this serve was not
+  // counted" the same absence in the counters.
+  if (daemon_adapter_->abi() != nullptr) {
+    daemon_serve_stats_ = std::make_unique<DaemonServeStats>(
+        daemon_adapter_->abi(), daemon_adapter_->volume_path());
+  }
+  return ok;
+}
+
 DaemonReader* NgxServerContext::NewDaemonReader() {
-  return new UdsDaemonReader(thread_system(), timer(),
-                             config()->daemon_api_socket_path(),
+  const GoogleString& socket_path = config()->daemon_api_socket_path();
+  if (socket_path.empty()) {
+    return nullptr;  // Daemon API disabled: the console says "not configured".
+  }
+  return new UdsDaemonReader(thread_system(), timer(), socket_path,
                              message_handler());
 }
 

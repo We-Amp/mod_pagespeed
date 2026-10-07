@@ -260,6 +260,42 @@ void UpdateCriticalKeys(bool require_prior_support, const StringSet& new_set,
   WriteSupportMapToCriticalKeysProto(support_map, critical_keys);
 }
 
+void UpdateCandidateSupport(const StringSet& matched, int support_value,
+                            CriticalKeys* critical_keys) {
+  DCHECK(critical_keys != nullptr);
+  SupportMap support_map = ConvertCriticalKeysProtoToSupportMap(*critical_keys);
+  for (SupportMap::iterator entry = support_map.begin();
+       entry != support_map.end(); ++entry) {
+    entry->second = Decay(support_value, entry->second);
+  }
+  int maximum_support =
+      critical_keys->has_maximum_possible_support()
+          ? Decay(support_value, critical_keys->maximum_possible_support())
+          : 0;
+  SaturatingAddTo(support_value, &maximum_support);
+  critical_keys->set_maximum_possible_support(maximum_support);
+
+  bool newly_matching = false;
+  for (StringSet::const_iterator s = matched.begin(); s != matched.end(); ++s) {
+    SupportMap::iterator entry = support_map.find(*s);
+    if (entry != support_map.end()) {
+      if (entry->second == 0) {
+        newly_matching = true;
+      }
+      SaturatingAddTo(support_value, &entry->second);
+    }
+  }
+  if (newly_matching) {
+    critical_keys->set_valid_beacons_received(1);
+    critical_keys->clear_next_beacon_timestamp_ms();
+  } else {
+    critical_keys->set_valid_beacons_received(
+        critical_keys->valid_beacons_received() + 1);
+  }
+  critical_keys->set_nonces_recently_expired(0);
+  WriteSupportMapToCriticalKeysProto(support_map, critical_keys);
+}
+
 void WriteCriticalKeysToPropertyCache(
     const StringSet& new_keys, StringPiece nonce, int support_interval,
     CriticalKeysWriteFlags flags, StringPiece property_name,
@@ -309,8 +345,12 @@ void WriteCriticalKeysToPropertyCache(
       return;
     }
   }
-  UpdateCriticalKeys(flags & kRequirePriorSupport, new_keys, support_interval,
-                     critical_keys.get());
+  if (flags & kKeepUnmatchedCandidates) {
+    UpdateCandidateSupport(new_keys, support_interval, critical_keys.get());
+  } else {
+    UpdateCriticalKeys(flags & kRequirePriorSupport, new_keys, support_interval,
+                       critical_keys.get());
+  }
 
   PropertyCacheUpdateResult result = UpdateInPropertyCache(
       *critical_keys, cohort, property_name, false /* write_cohort */, page);

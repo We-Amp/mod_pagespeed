@@ -191,9 +191,18 @@ class StatisticsTemplate : public Statistics {
   }
 
   // The string written to the writer will be like this:
-  // {"variables": {"cache_hits": 10,"cache_misses": 5,...}, "maxlength": 50}
-  void DumpJson(Writer* writer, MessageHandler* message_handler) override {
+  // {"variables": {"cache_hits": 10,"cache_misses": 5,...}, "maxlength": 50,
+  //  "timed_variables": {"num_rewrites_executed": 42,...},   // when any exist
+  //  "gauges": ["inflight_requests",...],
+  //  "scope": "vhost", "host": "example.com:8080",
+  //  "timestamp_ms": 1727197200000}
+  void DumpJson(StringPiece scope, StringPiece host, int64 now_ms,
+                Writer* writer, MessageHandler* message_handler) override {
     int longest_string = 0;
+    // One comma rule across both loops: an entry is preceded by a comma iff
+    // it is not the first. (The old code prefixed every up/down entry with a
+    // comma, which produced invalid JSON when there were no plain variables.)
+    bool first = true;
     writer->Write("{\"variables\": {", message_handler);
     for (int i = 0, n = variables_.size(); i < n; ++i) {
       const GoogleString& var_name = variable_names_[i];
@@ -201,11 +210,10 @@ class StatisticsTemplate : public Statistics {
       int length_name = var_name.size();
       int length_number = var_as_str.size();
       longest_string = std::max(longest_string, length_name + length_number);
-      writer->Write(StrCat("\"", var_name, "\": ", var_as_str),
+      writer->Write(StrCat(first ? "\"" : ",\"", JsonEscape(var_name),
+                           "\": ", var_as_str),
                     message_handler);
-      if (i != n - 1) {
-        writer->Write(",", message_handler);
-      }
+      first = false;
     }
     for (int i = 0, n = up_downs_.size(); i < n; ++i) {
       const GoogleString& up_down_name = up_down_names_[i];
@@ -213,12 +221,41 @@ class StatisticsTemplate : public Statistics {
       int length_name = up_down_name.size();
       int length_number = up_down_as_str.size();
       longest_string = std::max(longest_string, length_name + length_number);
-      writer->Write(StrCat(",\"", up_down_name, "\": ", up_down_as_str),
+      writer->Write(StrCat(first ? "\"" : ",\"", JsonEscape(up_down_name),
+                           "\": ", up_down_as_str),
                     message_handler);
+      first = false;
     }
     writer->Write("}, \"maxlength\": ", message_handler);
     writer->Write(Integer64ToString(longest_string), message_handler);
-    writer->Write("}", message_handler);
+    if (!timed_var_map_.empty()) {
+      writer->Write(", \"timed_variables\": {", message_handler);
+      bool first_timed = true;
+      for (typename TimedVarMap::const_iterator iter = timed_var_map_.begin();
+           iter != timed_var_map_.end(); ++iter) {
+        if (!first_timed) {
+          writer->Write(",", message_handler);
+        }
+        first_timed = false;
+        writer->Write(
+            StrCat("\"", JsonEscape(iter->first), "\": ",
+                   Integer64ToString(iter->second->Get(TimedVariable::START))),
+            message_handler);
+      }
+      writer->Write("}", message_handler);
+    }
+    // The gauges: names of the up/down counters (levels, not counters).
+    writer->Write(", \"gauges\": [", message_handler);
+    for (int i = 0, n = up_down_names_.size(); i < n; ++i) {
+      writer->Write(
+          StrCat(i == 0 ? "\"" : ",\"", JsonEscape(up_down_names_[i]), "\""),
+          message_handler);
+    }
+    writer->Write(
+        StrCat("], \"scope\": \"", JsonEscape(scope), "\", \"host\": \"",
+               JsonEscape(host),
+               "\", \"timestamp_ms\": ", Integer64ToString(now_ms), "}"),
+        message_handler);
   }
 
   void Clear() override {

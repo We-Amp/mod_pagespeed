@@ -20,6 +20,7 @@ Ported from: pagespeed/system/system_tests/ipro_caching.sh
 These tests verify that IPRO flow uses the cache correctly.
 """
 
+import random
 import re
 import time
 from typing import Dict
@@ -32,8 +33,27 @@ from pagespeed_test_framework import (
     assert_stat_delta,
     assert_stat_increased,
     assert_file_size,
+    require_status_ok,
 )
-from pagespeed_test_framework.stats import scrape_header, extract_headers
+from pagespeed_test_framework.stats import (
+    extract_headers,
+    scrape_header,
+    settled_stats,
+)
+
+
+# Every counter the IPRO caching tests assert an exact first-request delta on.
+_IPRO_FIRST_REQUEST_COUNTERS = [
+    "cache_hits",
+    "cache_misses",
+    "ipro_served",
+    "ipro_not_rewritable",
+    "ipro_not_in_cache",
+    "ipro_recorder_resources",
+    "ipro_recorder_inserted_into_cache",
+    "ipro_recorder_not_cacheable",
+    "image_rewrites",
+]
 
 
 class TestIproCaching:
@@ -62,7 +82,7 @@ class TestIproCaching:
         url = f"{ipro_root}/test_image_dont_reuse2.png"
 
         # Read stats from secondary vhost (same vhost that handles IPRO requests)
-        stats_0 = secondary_stats_snapshot()
+        stats_0 = settled_stats(secondary_stats_snapshot, _IPRO_FIRST_REQUEST_COUNTERS)
 
         # First IPRO request
         response_1 = secondary_client.get(url)
@@ -126,7 +146,7 @@ class TestIproCaching:
         url = f"{ipro_root}/nocache/test_image_dont_reuse.png"
 
         # Read stats from secondary vhost (same vhost that handles IPRO requests)
-        stats_0 = secondary_stats_snapshot()
+        stats_0 = settled_stats(secondary_stats_snapshot, _IPRO_FIRST_REQUEST_COUNTERS)
 
         # First request - resource not cacheable
         response_1 = secondary_client.get(url)
@@ -274,6 +294,60 @@ class TestIproImplicitCacheTtl:
         # Should be less than original but still reasonable
         assert max_age_2 < 333, f"max-age should be reduced, got {max_age_2}"
         assert max_age_2 > 300, f"max-age should still be > 300, got {max_age_2}"
+
+
+def _wait_for_quiescence(stats_snapshot, timeout: float = 30.0) -> None:
+    """ipro_noop.sh: wait until curl_fetch_active_count is 0."""
+    deadline = time.monotonic() + timeout
+    while stats_snapshot().get("curl_fetch_active_count", 0) > 0:
+        if time.monotonic() > deadline:
+            pytest.fail(f"curl_fetch_active_count never reached 0 within {timeout}s")
+        time.sleep(0.1)
+
+
+@pytest.mark.requires_stats
+class TestIproNoop:
+    """Bash: Ipro optimization, iterating with Noop (ipro_noop.sh:15-76).
+
+    PageSpeedNoop is excluded from the signature and stripped from the
+    HTTP cache key: a second Noop value is served the same in-place
+    result (W/"PSA-aj-" ETag, image/jpeg, no Vary) without a new fetch.
+    """
+
+    def test_noop_query_param_reuses_the_optimized_result(
+        self, client: PageSpeedClient, example_root: str, stats_snapshot
+    ):
+        _wait_for_quiescence(stats_snapshot)
+        time.sleep(2)
+        first = random.randint(1, 10 ** 9)
+        url1 = f"{example_root}/images/Puzzle.jpg?PageSpeedNoop={first}"
+        url2 = f"{example_root}/images/Puzzle.jpg?PageSpeedNoop={first + 1}"
+        client.fetch_until(
+            url1,
+            condition=lambda r: r.header("ETag").startswith('W/"PSA-aj-'),
+            timeout=100.0,
+            detail_fn=lambda r: f"etag={r.header('ETag')!r}",
+        )
+        fetches_before = settled_stats(stats_snapshot, ["http_fetches"]).get(
+            "http_fetches", 0
+        )
+        second = client.get(url2)
+        require_status_ok(second, url2)
+        _wait_for_quiescence(stats_snapshot)
+        fetches_after = stats_snapshot().get("http_fetches", 0)
+        assert second.header("ETag").lower().startswith('w/"psa-aj-'), (
+            f"{url2}: ETag {second.header('ETag')!r} is not the in-place result"
+        )
+        assert second.header("Content-Type").lower().startswith("image/jpeg"), (
+            f"{url2}: Content-Type {second.header('Content-Type')!r}"
+        )
+        assert not second.header_values("Vary"), (
+            f"{url2}: in-place result carries Vary {second.header_values('Vary')}"
+        )
+        assert fetches_after == fetches_before, (
+            f"http_fetches moved {fetches_before} -> {fetches_after}: "
+            "the Noop value reached the HTTP cache key"
+        )
 
 
 if __name__ == "__main__":

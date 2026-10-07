@@ -135,7 +135,7 @@ class TestOutlineJavascript:
 class TestOutlinedResourceCompression:
     """Tests for compression and caching of outlined resources.
 
-    Bash original::
+    Bash original (outline_javascript_limit.sh:19-31)::
 
         start_test compression is enabled for rewritten JS.
         JS_URL=$(egrep -o http://.*.pagespeed.*.js $FETCHED)
@@ -143,6 +143,7 @@ class TestOutlinedResourceCompression:
           $JS_URL 2>&1)
         check_200_http_response "$JS_HEADERS"
         check_from "$JS_HEADERS" fgrep -qi 'Content-Encoding: gzip'
+        check_from "$JS_HEADERS" fgrep -qi 'Vary: Accept-Encoding'
         check_from "$JS_HEADERS" egrep -qi '(Etag: W/"0")|(Etag: W/"0-gzip")'
         check_from "$JS_HEADERS" fgrep -qi 'Last-Modified:'
     """
@@ -188,10 +189,16 @@ class TestOutlinedResourceCompression:
         )
         assert_http_status(js_response, 200)
 
-        # Check for gzip encoding (server may choose not to compress small files)
-        content_encoding = js_response.header("Content-Encoding")
-        # Some servers don't compress small responses, so we just verify it works
-        # assert_header_contains(js_response, "Content-Encoding", "gzip")
+        assert "gzip" in js_response.header("Content-Encoding").lower(), (
+            f"Content-Encoding: {js_response.header('Content-Encoding')!r}"
+        )
+        assert "accept-encoding" in js_response.header("Vary").lower(), (
+            f"Vary: {js_response.header('Vary')!r}"
+        )
+        assert re.search(r'W/"0(-gzip)?"', js_response.header("ETag"), re.IGNORECASE), (
+            f"ETag: {js_response.header('ETag')!r}"
+        )
+        assert js_response.header("Last-Modified"), "Last-Modified missing"
 
     def test_outlined_js_has_etag(
         self, client: PageSpeedClient, example_root: str
@@ -227,7 +234,9 @@ class TestOutlinedResourceCompression:
         assert_http_status(js_response, 200)
 
         etag = js_response.header("ETag")
-        assert etag, "Outlined JS should have ETag header"
+        assert re.search(r'W/"0(-gzip)?"', etag, re.IGNORECASE), (
+            f"Outlined JS ETag should be W/\"0\" (or W/\"0-gzip\"), got {etag!r}"
+        )
 
     def test_outlined_js_has_last_modified(
         self, client: PageSpeedClient, example_root: str

@@ -12,20 +12,22 @@
     "test": "vitest run"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
     "@playwright/test": "^1.58.2",
     "@sveltejs/vite-plugin-svelte": "^5.0.0",
     "@tsconfig/svelte": "^5.0.0",
+    "@types/node": "22.19.19",
     "svelte": "^5.55.9",
     "svelte-check": "^4.0.0",
     "typescript": "^5.7.0",
     "uplot": "^1.6.31",
     "vite": "^6.4.3",
     "vite-plugin-singlefile": "^2.0.0",
-    "vitest": "^4.1.8"
+    "vitest": "^4.1.11"
   },
   "pnpm": {
     "overrides": {
-      "devalue": "5.8.1",
+      "devalue": "5.9.3",
       "nanoid": "3.3.18",
       "picomatch@2": "2.3.2",
       "picomatch@4": "4.0.4",

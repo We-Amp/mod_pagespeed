@@ -47,7 +47,7 @@ class ProxyFetch;
 class RewriteDriver;
 class RequestHeaders;
 class ResponseHeaders;
-class InPlaceResourceRecorder;
+class IproRecorder;
 class MappedSharedString;
 class Variable;
 
@@ -158,8 +158,19 @@ typedef struct {
 
   // for in place resource
   RewriteDriver* driver;
-  InPlaceResourceRecorder* recorder;
+  IproRecorder* recorder;
   ResponseHeaders* ipro_response_headers;
+
+  // Daemon record arm state.  daemon_record_pending is set by the content
+  // handler when the request is one the daemon substrate records, and cleared
+  // by the in-place header filter, which builds the recorder there.
+  // daemon_recorder marks ctx->recorder as daemon-side: its completion is
+  // handed to the low-priority pool rather than run inline, and the s-maxage
+  // rewrite stays off.  daemon_body_bytes accumulates the streamed body size
+  // for the completion queue's byte cap.
+  bool daemon_record_pending;
+  bool daemon_recorder;
+  int64_t daemon_body_bytes;
 
   // We need to remember the URL here as well since we may modify what NGX
   // gets by stripping our special query params and honoring X-Forwarded-Proto.
@@ -169,6 +180,9 @@ typedef struct {
   // we should mirror that when we write it back. nginx may absolutify
   // Location: headers that start with '/' without regarding X-Forwarded-Proto.
   bool location_field_set;
+  // The module's own Vary lists the Accept-Encoding token (alone or among
+  // others): the etag filter withdraws the compressor's own Vary stamp so the
+  // token is stated once.
   bool psol_vary_accept_only;
   bool follow_flushes;
 

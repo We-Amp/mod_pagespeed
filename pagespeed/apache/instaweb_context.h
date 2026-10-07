@@ -28,6 +28,7 @@
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_writer.h"
 #include "pagespeed/kernel/http/content_type.h"
+#include "pagespeed/kernel/http/user_agent_matcher.h"
 
 // The httpd header must be after the
 // apache_rewrite_driver_factory.h. Otherwise, the compiler will
@@ -108,6 +109,21 @@ class InstawebContext {
   // Returns a fetchable URI from a request, using the request pool.
   static const char* MakeRequestUrl(const RewriteOptions& global_options,
                                     request_rec* request);
+
+  // The device class (phone, tablet, desktop) a page view's property-cache
+  // lookup is keyed by, which is also recorded on the driver.
+  //
+  // It is read from the request's own User-Agent header, the same source the
+  // beacon handler classifies the posting browser from.  The two have to
+  // agree: the nonce handed out with an instrumented page is stored in the
+  // entry this lookup reads, and a browser's report is only accepted when its
+  // nonce is found in the entry for the reporting browser's class.
+  //
+  // It must not be read from the driver: the lookup runs before the driver is
+  // given the request headers, so the driver's user agent is still empty
+  // there, and an empty user agent classifies as desktop.
+  static UserAgentMatcher::DeviceType DeviceTypeForPropertyCacheLookup(
+      const RequestHeaders& request_headers, RewriteDriver* driver);
 
  private:
   void ComputeContentEncoding(request_rec* request);

@@ -69,6 +69,13 @@ class MockMessageHandler : public MessageHandler {
   // Dumps contents of String Buffer.
   bool Dump(Writer* writer) override;
 
+  // Reports the number of newline-terminated lines ever appended to the
+  // buffer (mirrors CircularBuffer::lines_written(): a multi-line message
+  // counts once per line, matching how ParseMessageDumpIntoMessages splits
+  // the dump on "\n"). This test double never wraps or evicts, so it is
+  // exactly the analog of SystemMessageHandler's real line count.
+  bool DumpWithCount(Writer* writer, int64* lines_written) override;
+
  protected:
   void MessageSImpl(MessageType type, const GoogleString& message) override;
 
@@ -91,6 +98,9 @@ class MockMessageHandler : public MessageHandler {
   MessageCountMap skipped_message_counts_;
   FastWildcardGroup patterns_to_skip_;
   GoogleString buffer_;
+  // Number of newline-terminated lines appended to buffer_ (see
+  // DumpWithCount() above).
+  int64 lines_written_ = 0;
   // This handler is only for internal use in Dump method.
   GoogleMessageHandler internal_handler_;
 

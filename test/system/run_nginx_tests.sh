@@ -158,6 +158,26 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# The echo origin for the in-place method tests follows the port base
+# (8080 + 10019 = 18099 at the default).  Resolved after the arguments are
+# parsed, so --port=N moves it too.
+NGINX_ECHO_PORT="${NGINX_ECHO_PORT:-$((NGINX_PORT + 10019))}"
+
+# The plain origin behind the proxied filter-order test follows the port base
+# (8080 + 10018 = 18098 at the default).  Resolved after the arguments are
+# parsed, so --port=N moves it too.
+NGINX_PLAIN_PORT="${NGINX_PLAIN_PORT:-$((NGINX_PORT + 10018))}"
+
+# The origin behind the internally-redirected-request tests follows the port
+# base (8080 + 10017 = 18097 at the default).  Resolved after the arguments
+# are parsed, so --port=N moves it too.
+NGINX_REDIRECT_ORIGIN_PORT="${NGINX_REDIRECT_ORIGIN_PORT:-$((NGINX_PORT + 10017))}"
+
+# The server block behind the handler access-rule tests follows the port base
+# (8080 + 10016 = 18096 at the default).  Resolved after the arguments are
+# parsed, so --port=N moves it too.
+NGINX_HANDLER_ACL_PORT="${NGINX_HANDLER_ACL_PORT:-$((NGINX_PORT + 10016))}"
+
 # Configuration
 NGINX_BINARY="${NGINX_BINARY:-/usr/local/src/nginx/objs/nginx}"
 MODULE_PATH="${MODULE_PATH:-$PROJECT_ROOT/bazel-bin/pagespeed/nginx/ngx_pagespeed_module.so}"
@@ -267,6 +287,11 @@ setup_directories() {
     log_info "Setting up directories..."
     mkdir -p "$NGINX_CONFIG_DIR"
     mkdir -p "$NGINX_LOG_DIR"
+    # Clear any stats_log files a previous run in this same NGINX_LOG_DIR left
+    # behind (system_rewrite_driver_factory.cc writes
+    # $NGINX_LOG_DIR/stats_log_<name>), so a re-run's
+    # system/test_statistics_logging.py sees only timestamps from this run.
+    rm -f "$NGINX_LOG_DIR"/stats_log_* 2>/dev/null || true
     mkdir -p "$NGINX_CACHE_DIR"
     # Drop-in compatibility fixture: releases before 2.1 kept a license token
     # at <parent of FileCachePath>/pagespeed.license. Stage a stale one so the
@@ -402,6 +427,8 @@ EOF
     pagespeed GlobalAdminPath /pagespeed_global_admin;
     pagespeed StatisticsPath /pagespeed_statistics;
     pagespeed GlobalStatisticsPath /pagespeed_global_statistics;
+    pagespeed MessagesPath /ngx_pagespeed_message;
+    pagespeed ConsolePath /pagespeed_console;
 
     # Cache configuration - using disk cache
     pagespeed FileCachePath $NGINX_CACHE_DIR;
@@ -419,6 +446,11 @@ EOF
     # inline_preview_images, and other beacon-dependent filters work
     # without requiring real browser beacon data (matches Apache/Envoy).
     pagespeed CriticalImagesBeaconEnabled false;
+    pagespeed CriticalCssAboveTheFoldOnly off;
+
+    # Blocking rewrites for tests that send X-PSA-Blocking-Rewrite: psatest
+    # (matches the Apache lane).
+    pagespeed BlockingRewriteKey psatest;
 
     # Configure canonicalize_javascript_libraries filter (matches Apache)
     pagespeed Library 43 1o978_K0_LNE5_ystNklf http://www.modpagespeed.com/rewrite_javascript.js;
@@ -440,6 +472,56 @@ EOF
 EOF
     fi
 
+    # POST-echo origin for the in-place method tests: answers POST with a
+    # different cacheable body than GET, so a POST recorded into the
+    # in-place cache is observable from a later GET. No PageSpeed here --
+    # this is the origin, not the module under test. Only emitted with the
+    # module: its consumers are the inplace_methods locations below.
+    if [ "$NO_MODULE" = false ]; then
+        cat >> "$NGINX_CONFIG_FILE" << EOF
+    server {
+        listen 127.0.0.1:$NGINX_ECHO_PORT;
+        location / {
+            expires 1h;
+            if (\$request_method = POST) {
+                return 200 "body { color: #ff0000; content: \\"post-body-marker\\"; }";
+            }
+            return 200 "body { color: #00ff00; content: \\"get-body-marker\\"; }";
+        }
+    }
+
+EOF
+    fi
+
+    # Redirected-request origin: answers every request with an
+    # X-Accel-Redirect to the file named by the X-Variant request header
+    # (a by default, b, or hop: a target that is itself rewritten), carrying
+    # Content-Type, Cache-Control, Set-Cookie and Content-Disposition. Only
+    # emitted with the module: its consumers are the redirected_dl locations
+    # below. One access log for both front server blocks: the tests that
+    # count its lines must not run in parallel with other users of it.
+    if [ "$NO_MODULE" = false ]; then
+        cat >> "$NGINX_CONFIG_FILE" << EOF
+    server {
+        listen 127.0.0.1:$NGINX_REDIRECT_ORIGIN_PORT;
+        access_log $NGINX_LOG_DIR/redirect_origin.access.log;
+        set \$redirect_target /mod_pagespeed_test/redirected/internal/a.css;
+        if (\$http_x_variant = "b") { set \$redirect_target /mod_pagespeed_test/redirected/internal/b.css; }
+        if (\$http_x_variant = "hop") { set \$redirect_target /mod_pagespeed_test/redirected/hop/a.css; }
+        location /redirected_dl/ {
+            types { }
+            default_type "text/css; charset=utf-8";
+            add_header X-Accel-Redirect \$redirect_target;
+            add_header Cache-Control "public, max-age=600";
+            add_header Set-Cookie "session=fromorigin";
+            add_header Content-Disposition "attachment";
+            return 200 "app";
+        }
+    }
+
+EOF
+    fi
+
     cat >> "$NGINX_CONFIG_FILE" << EOF
     server {
         listen $NGINX_PORT;
@@ -456,6 +538,11 @@ EOF
         # Enable PageSpeed for this server
         pagespeed on;
         pagespeed RewriteLevel CoreFilters;
+
+        # LoadFromFile probes: resources under these prefixes are loaded
+        # from disk, so there is no fetched input to inherit headers from.
+        pagespeed LoadFromFile "http://localhost:$NGINX_PORT/mod_pagespeed_test/filter_order_lff/" "$DOC_ROOT/mod_pagespeed_test/filter_order_lff/";
+        pagespeed LoadFromFile "http://localhost:$NGINX_PORT/mod_pagespeed_test/filter_order_lff_arh/" "$DOC_ROOT/mod_pagespeed_test/filter_order_lff_arh/";
 
         # Ensure requests for pagespeed optimized resources go to the pagespeed
         # handler and no extraneous headers get set.
@@ -474,6 +561,7 @@ EOF
         location ~ "^/pagespeed_global_admin" { }
         location /pagespeed_statistics { }
         location /pagespeed_global_statistics { }
+        location /ngx_pagespeed_message { }
 
         # Serve files in no_cache/ with Cache-Control: no-cache
         # Matches Apache's debug.conf.template configuration
@@ -489,6 +577,99 @@ EOF
             pagespeed CriticalImagesBeaconEnabled true;
         }
 
+        # In-place method probe: the echo origin answers POST with a
+        # different cacheable body than GET. A POST must not be looked up in
+        # or recorded into the in-place cache -- only proxied through.
+        location ^~ /mod_pagespeed_test/inplace_methods/ {
+            proxy_pass http://127.0.0.1:$NGINX_ECHO_PORT;
+        }
+
+        # Filter-order probes. With the module in its proper chain position:
+        # rewritten HTML keeps the module's own caching headers under an
+        # expires directive, a .pagespeed. resource under the same location
+        # keeps its one-year cache extension, and add_header applies exactly
+        # once. ^~ so the generic .pagespeed. regex location above does not
+        # preempt these.
+        location ^~ /mod_pagespeed_test/filter_order/ {
+            expires 1h;
+            add_header X-Test-Order yes;
+        }
+
+        # The charset directive's decision must survive on rewritten HTML.
+        location ^~ /mod_pagespeed_test/filter_order_charset/ {
+            charset utf-8;
+        }
+
+        # A Vary that lists the encoding token among others: the token must
+        # be stated once on a compressed response.
+        location ^~ /mod_pagespeed_test/filter_order_vary/ {
+            add_header Vary "Accept-Encoding, User-Agent";
+        }
+
+        # The module runs after SSI, so an <img> inside an included fragment
+        # is optimized.
+        location ^~ /mod_pagespeed_test/filter_order_ssi/ {
+            ssi on;
+        }
+
+        # add_header on a .pagespeed. resource under LoadFromFile: ABSENT --
+        # the headers filter never runs on module-generated responses and a
+        # loaded-from-file input has no headers to inherit. The operator
+        # lever for one is AddResourceHeader (the second location).
+        location ^~ /mod_pagespeed_test/filter_order_lff/ {
+            add_header X-Test-Order yes;
+        }
+        location ^~ /mod_pagespeed_test/filter_order_lff_arh/ {
+            add_header X-Test-Order yes;
+            pagespeed AddResourceHeader X-Test-Order yes;
+        }
+
+        # proxy_pass probe: a HEAD on a proxied location must not poison
+        # the keepalive connection (the GET after it must succeed).
+        location ^~ /mod_pagespeed_test/proxied/ {
+            proxy_pass http://127.0.0.1:$NGINX_PLAIN_PORT/mod_pagespeed_example/;
+        }
+
+        # Internally redirected request probe: the origin answers with
+        # X-Accel-Redirect to a variant file under the internal location.
+        location ^~ /mod_pagespeed_test/redirected_dl/ {
+            proxy_pass http://127.0.0.1:$NGINX_REDIRECT_ORIGIN_PORT/redirected_dl/;
+        }
+        location ^~ /mod_pagespeed_test/redirected/internal/ {
+            internal;
+        }
+
+        # A resource reached through a rewrite is an internally redirected
+        # request as well: the server answers it itself.
+        location ^~ /mod_pagespeed_test/redirected_rewrite/ {
+            rewrite ^/mod_pagespeed_test/redirected_rewrite/(.*)\$ /mod_pagespeed_test/redirected/\$1 last;
+        }
+
+        # The same for a target that is itself rewritten (a chain), and for a
+        # try_files fallback into a named location.
+        location ^~ /mod_pagespeed_test/redirected/hop/ {
+            internal;
+            rewrite ^/mod_pagespeed_test/redirected/hop/(.*)\$ /mod_pagespeed_test/redirected/internal/\$1 last;
+        }
+        location ^~ /mod_pagespeed_test/redirected_named/ {
+            try_files \$uri @redirected_named;
+        }
+        location @redirected_named {
+            root $DOC_ROOT/mod_pagespeed_test/redirected/named_root;
+        }
+
+        # Lane fixture option_response_headers: option response headers set
+        # by the server configure the response and never reach the client.
+        location = /mod_pagespeed_test/option_headers/off.html {
+            add_header PageSpeed off;
+        }
+        location = /mod_pagespeed_test/option_headers/modpagespeed_off.html {
+            add_header ModPagespeed off;
+        }
+        location = /mod_pagespeed_test/option_headers/on.html {
+            add_header PageSpeedFilters +collapse_whitespace;
+        }
+
 EOF
     fi
 
@@ -500,6 +681,64 @@ EOF
     }
 
 EOF
+
+    # Plain origin for proxy_pass probes (no PageSpeed).
+    cat >> "$NGINX_CONFIG_FILE" << EOF
+    server {
+        listen 127.0.0.1:$NGINX_PLAIN_PORT;
+        root $DOC_ROOT;
+    }
+
+EOF
+
+    # Handler access rules: the admin-style handler paths restricted in the
+    # documented form -- `location = /path` for a handler's own page, plus
+    # `location ^~ /path/` for the pages below the two admin paths.
+    # 127.0.0.1 is the allowed client; the tests reach this server block from
+    # another loopback address to be a client that is not. The lane's main
+    # server block carries no access rules and serves the same http-level
+    # handler paths to any client. The two global
+    # handlers hand a refused request to a named location, which makes it an
+    # internally redirected request.
+    if [ "$NO_MODULE" = false ]; then
+        cat >> "$NGINX_CONFIG_FILE" << EOF
+    server {
+        listen 127.0.0.1:$NGINX_HANDLER_ACL_PORT;
+        server_name localhost;
+        root $DOC_ROOT;
+
+        pagespeed on;
+
+        location = /pagespeed_admin { allow 127.0.0.1; deny all; }
+        location ^~ /pagespeed_admin/ { allow 127.0.0.1; deny all; }
+        location = /pagespeed_statistics { allow 127.0.0.1; deny all; }
+        location = /pagespeed_console { allow 127.0.0.1; deny all; }
+        location = /ngx_pagespeed_message { allow 127.0.0.1; deny all; }
+
+        location = /pagespeed_global_admin {
+            allow 127.0.0.1; deny all;
+            error_page 403 = @handler_refused;
+        }
+        location ^~ /pagespeed_global_admin/ {
+            allow 127.0.0.1; deny all;
+            error_page 403 = @handler_refused;
+        }
+        location = /pagespeed_global_statistics {
+            allow 127.0.0.1; deny all;
+            error_page 403 = @handler_refused;
+        }
+        location @handler_refused { }
+
+        # A regular-expression location elsewhere in the server block.
+        location ~ "\\.(js|css)\$" { return 418; }
+
+        location / {
+            try_files \$uri \$uri/ =404;
+        }
+    }
+
+EOF
+    fi
 
     # Add HTTPS server block if TLS certs are available
     if [ -f "$TLS_CERT_FILE" ] && [ -f "$TLS_KEY_FILE" ]; then
@@ -527,6 +766,10 @@ EOF
         # Required for CSS combination over HTTPS in test environments.
         pagespeed FetchHttps enable,allow_self_signed;
 
+        # LoadFromFile probes (mirror of the HTTP block).
+        pagespeed LoadFromFile "https://localhost:$NGINX_HTTPS_PORT/mod_pagespeed_test/filter_order_lff/" "$DOC_ROOT/mod_pagespeed_test/filter_order_lff/";
+        pagespeed LoadFromFile "https://localhost:$NGINX_HTTPS_PORT/mod_pagespeed_test/filter_order_lff_arh/" "$DOC_ROOT/mod_pagespeed_test/filter_order_lff_arh/";
+
         # Ensure requests for pagespeed optimized resources go to the pagespeed
         # handler and no extraneous headers get set.
         location ~ "\.pagespeed\.([a-z]\.)?[a-z]{2}\.[^.]{10}\.[^.]+" {
@@ -545,6 +788,79 @@ EOF
         # Serve files in no_cache/ with Cache-Control: no-cache
         location ~ /no_cache/ {
             add_header Cache-Control "no-cache" always;
+        }
+
+        # In-place method probe (mirror of the HTTP block): the echo origin
+        # answers POST with a different cacheable body than GET.
+        location ^~ /mod_pagespeed_test/inplace_methods/ {
+            proxy_pass http://127.0.0.1:$NGINX_ECHO_PORT;
+        }
+
+        # Filter-order probes (mirror of the HTTP block): rewritten HTML
+        # keeps the module's caching headers under expires, a .pagespeed.
+        # resource keeps its one-year extension, add_header applies once.
+        location ^~ /mod_pagespeed_test/filter_order/ {
+            expires 1h;
+            add_header X-Test-Order yes;
+        }
+
+        # The charset directive's decision must survive on rewritten HTML.
+        location ^~ /mod_pagespeed_test/filter_order_charset/ {
+            charset utf-8;
+        }
+
+        # A Vary that lists the encoding token among others: the token must
+        # be stated once on a compressed response.
+        location ^~ /mod_pagespeed_test/filter_order_vary/ {
+            add_header Vary "Accept-Encoding, User-Agent";
+        }
+
+        # The module runs after SSI, so an <img> inside an included fragment
+        # is optimized.
+        location ^~ /mod_pagespeed_test/filter_order_ssi/ {
+            ssi on;
+        }
+
+        # add_header on a .pagespeed. resource under LoadFromFile (mirror of
+        # the HTTP block): ABSENT unless supplied by AddResourceHeader.
+        location ^~ /mod_pagespeed_test/filter_order_lff/ {
+            add_header X-Test-Order yes;
+        }
+        location ^~ /mod_pagespeed_test/filter_order_lff_arh/ {
+            add_header X-Test-Order yes;
+            pagespeed AddResourceHeader X-Test-Order yes;
+        }
+
+        # proxy_pass probe (mirror of the HTTP block).
+        location ^~ /mod_pagespeed_test/proxied/ {
+            proxy_pass http://127.0.0.1:$NGINX_PLAIN_PORT/mod_pagespeed_example/;
+        }
+
+        # Internally redirected request probe (mirror of the HTTP block).
+        location ^~ /mod_pagespeed_test/redirected_dl/ {
+            proxy_pass http://127.0.0.1:$NGINX_REDIRECT_ORIGIN_PORT/redirected_dl/;
+        }
+        location ^~ /mod_pagespeed_test/redirected/internal/ {
+            internal;
+        }
+
+        # A resource reached through a rewrite is an internally redirected
+        # request as well: the server answers it itself.
+        location ^~ /mod_pagespeed_test/redirected_rewrite/ {
+            rewrite ^/mod_pagespeed_test/redirected_rewrite/(.*)\$ /mod_pagespeed_test/redirected/\$1 last;
+        }
+
+        # The same for a target that is itself rewritten (a chain), and for a
+        # try_files fallback into a named location.
+        location ^~ /mod_pagespeed_test/redirected/hop/ {
+            internal;
+            rewrite ^/mod_pagespeed_test/redirected/hop/(.*)\$ /mod_pagespeed_test/redirected/internal/\$1 last;
+        }
+        location ^~ /mod_pagespeed_test/redirected_named/ {
+            try_files \$uri @redirected_named;
+        }
+        location @redirected_named {
+            root $DOC_ROOT/mod_pagespeed_test/redirected/named_root;
         }
 
 EOF
@@ -697,6 +1013,22 @@ run_tests() {
     # stale-license notice on nginx (the admin message history is a 100 KB
     # ring that evicts it mid-suite). Requires error_log level info.
     export PAGESPEED_NGINX_ERROR_LOG="$NGINX_LOG_DIR/error.log"
+    # Where the redirected-request tests count origin consultations.
+    export PAGESPEED_REDIRECT_ORIGIN_LOG="$NGINX_LOG_DIR/redirect_origin.access.log"
+    # Where the handler access-rule tests reach the restricted server block.
+    export PAGESPEED_HANDLER_ACL_PORT="$NGINX_HANDLER_ACL_PORT"
+
+    # Lane fixtures this lane provides (test/system/conftest.py
+    # KNOWN_LANE_FIXTURES): cache_flush -- PAGESPEED_CACHE_DIR above is the
+    # runner-owned FileCachePath; stats_log -- StatisticsLogging on with
+    # LogDir $NGINX_LOG_DIR (generate_nginx_config); option_response_headers
+    # -- the add_header option_headers/ locations (generate_nginx_config).
+    export PAGESPEED_STATS_LOG="${PAGESPEED_STATS_LOG:-$NGINX_LOG_DIR/stats_log_dummy_hostname:-3}"
+    if [ "$NO_MODULE" = true ]; then
+        export PAGESPEED_LANE_FIXTURES="${PAGESPEED_LANE_FIXTURES:-}"
+    else
+        export PAGESPEED_LANE_FIXTURES="${PAGESPEED_LANE_FIXTURES:-cache_flush,stats_log,option_response_headers}"
+    fi
 
     # HTTPS configuration for TLS tests
     if [ -f "$TLS_CERT_FILE" ] && [ -f "$TLS_KEY_FILE" ]; then
@@ -800,6 +1132,9 @@ main() {
         log_info "Build complete (--build-only specified)"
         exit 0
     fi
+
+    # Statistics-log timestamps must be from this run (statistics_logging.sh).
+    export PAGESPEED_LANE_START_MS="${PAGESPEED_LANE_START_MS:-$(date +%s)000}"
 
     # Setup cleanup trap
     trap cleanup EXIT

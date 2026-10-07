@@ -58,6 +58,12 @@ class CircularBuffer {
   bool Write(const StringPiece& message);
   // Return data content as string.
   GoogleString ToString(MessageHandler* handler);
+  // Number of newline-terminated lines ever written to this buffer via
+  // Write() (a single Write() call may carry a multi-line message, and each
+  // '\n' it contains counts). Monotonic and never reset by Clear() -- a
+  // cheap cursor for callers that want to know whether anything new has
+  // been written since they last looked.
+  int64 lines_written() const { return lines_written_; }
 
  private:
   // Can't construct -- must call Create() or Init() from a pre-allocated
@@ -75,6 +81,9 @@ class CircularBuffer {
   bool wrapped_;
   // Position to write in buffer.
   int offset_;
+  // Number of lines ever written (see lines_written() above). Must stay
+  // before buffer_, which is a flexible array member and must stay last.
+  int64 lines_written_;
   // Buffer.
   char buffer_[1];
 

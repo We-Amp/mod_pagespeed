@@ -20,6 +20,9 @@ Ported from: pagespeed/automatic/system_tests/initial_sanity_checks.sh
 These tests verify basic server functionality before running more complex tests.
 """
 
+import collections
+import os
+
 import pytest
 
 from pagespeed_test_framework import (
@@ -27,6 +30,7 @@ from pagespeed_test_framework import (
     assert_contains,
     assert_http_status,
     assert_header_contains,
+    require_status_ok,
 )
 
 
@@ -106,6 +110,76 @@ class TestPageSpeedOff:
         # Should not see any pagespeed rewriting markers
         assert ".pagespeed." not in response.text, \
             "PageSpeed=off should disable rewriting"
+
+    def test_pagespeed_off_omits_the_version_header(
+        self, client: PageSpeedClient, example_root: str
+    ):
+        """Bash original (initial_header_check.sh:51-57):
+
+            OUT=$($WGET_DUMP $EXAMPLE_ROOT/combine_css.html?PageSpeed=on)
+            check_from "$OUT" egrep -q 'X-Mod-Pagespeed|X-Page-Speed'
+            OUT=$($WGET_DUMP $EXAMPLE_ROOT/combine_css.html?PageSpeed=off)
+            check_not_from "$OUT" egrep 'X-Mod-Pagespeed|X-Page-Speed'
+        """
+        def version_headers(response):
+            return (response.header_values("X-Mod-Pagespeed")
+                    + response.header_values("X-Page-Speed"))
+
+        on = client.get(f"{example_root}/combine_css.html?PageSpeed=on")
+        require_status_ok(on, "combine_css.html?PageSpeed=on")
+        assert version_headers(on), (
+            f"PageSpeed=on: no X-Mod-Pagespeed/X-Page-Speed header: {on.raw_headers}"
+        )
+        off = client.get(f"{example_root}/combine_css.html?PageSpeed=off")
+        require_status_ok(off, "combine_css.html?PageSpeed=off")
+        assert not version_headers(off), (
+            f"PageSpeed=off still sends the version header: {version_headers(off)}"
+        )
+
+
+class TestInitialHeaders:
+    """The headers of a rewritten HTML page.
+
+    Bash original (initial_header_check.sh:15-49): exactly one
+    X-Mod-Pagespeed/X-Page-Speed header, no repeated header line, no ETag,
+    Vary: Accept-Encoding, no Last-Modified, Cache-Control: max-age=0,
+    no-cache, no X-Frame-Options.
+    """
+
+    def test_html_carries_the_expected_headers(
+        self, client: PageSpeedClient, example_root: str
+    ):
+        # The module adds Vary: Accept-Encoding on no port; the server's
+        # compressor does. Apache and nginx name it on every response of a
+        # compressible type, IIS only on a response it actually compressed,
+        # so on IIS the request has to ask for gzip to see it.
+        on_iis = os.environ.get("PAGESPEED_SERVER_TYPE") == "iis"
+        request_headers = {"Accept-Encoding": "gzip"} if on_iis else None
+        response = client.get(f"{example_root}/combine_css.html", headers=request_headers)
+        require_status_ok(response, "combine_css.html")
+        headers = response.raw_headers
+        lines = [f"{name}: {value}" for name, value in headers]
+        version = [l for l in lines if l.split(":", 1)[0].lower()
+                   in ("x-mod-pagespeed", "x-page-speed")]
+        assert len(version) == 1, f"expected one version header, got {version}"
+        repeated = [l for l, n in collections.Counter(lines).items() if n > 1]
+        assert not repeated, f"repeated header lines: {repeated}"
+        assert not response.header_values("ETag"), f"ETag present: {lines}"
+        assert any(l.lower().startswith("vary:") and "accept-encoding" in l.lower()
+                   for l in lines), f"no Vary: Accept-Encoding: {lines}"
+        assert not response.header_values("Last-Modified"), f"Last-Modified present: {lines}"
+        if on_iis:
+            # The IIS port answers rewritten HTML with a bare "no-cache"; the
+            # other ports send "max-age=0, no-cache". Both forbid reuse
+            # without revalidation.
+            cache_control = [l.split(":", 1)[1].strip().lower() for l in lines
+                             if l.lower().startswith("cache-control:")]
+            assert cache_control == ["no-cache"], f"Cache-Control on IIS: {lines}"
+        else:
+            assert any("cache-control: max-age=0, no-cache" in l.lower() for l in lines), (
+                f"no 'Cache-Control: max-age=0, no-cache': {lines}"
+            )
+        assert not response.header_values("X-Frame-Options"), f"X-Frame-Options present: {lines}"
 
 
 class TestBasicConnectivity:

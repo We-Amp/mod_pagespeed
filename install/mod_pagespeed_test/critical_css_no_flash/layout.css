@@ -1,0 +1,5 @@
+@import url(imported.css);
+.ncf-list { list-style-type: none; margin: 0; padding: 0 24px; }
+.ncf-list li { padding: 8px 0; border-bottom: 1px solid #ccc; }
+.ncf-unused-grid { display: grid; grid-template-columns: 1fr 1fr; }
+.ncf-unused-aside { float: right; width: 30%; }

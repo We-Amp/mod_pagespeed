@@ -19,6 +19,7 @@
 
 #include "net/instaweb/rewriter/public/critical_css_beacon_filter.h"
 
+#include "net/instaweb/http/public/request_context.h"
 #include "net/instaweb/rewriter/public/critical_finder_support_util.h"
 #include "net/instaweb/rewriter/public/critical_selector_finder.h"
 #include "net/instaweb/rewriter/public/css_summarizer_base.h"
@@ -50,6 +51,12 @@ const char kInlineStyle[] =
     "a:visited{color:green}"
     "p{color:green}"
     "</style>";
+// An external stylesheet with the same rules as the inline block above.
+const char kStyleI[] =
+    "a{color:red}"
+    "a:visited{color:green}"
+    "p{color:green}";
+const char kLinkI[] = "<link rel=stylesheet href=i.css>";
 const char kStyleA[] =
     "div ul:hover>li{color:red}"
     ":hover{color:red}"
@@ -61,6 +68,8 @@ const char kStyleB[] =
     "div ul > li{color:green}";
 
 // The styles above produce the following beacon initialization selector lists.
+// Inline blocks contribute nothing: the selectors named "Inline" below come
+// from i.css, the external stylesheet with the inline block's rules.
 const char kSelectorsInline[] = "\"a\",\"p\"";
 const char kSelectorsInlineWithUnauthSelectors[] = "\"a\",\"div\",\"p\"";
 const char kSelectorsA[] = "\".sec h1#id\",\"div ul > li\"";
@@ -102,6 +111,7 @@ class CriticalCssBeaconFilterTestBase : public RewriteTestBase {
         statistics());
     server_context()->set_critical_selector_finder(finder);
     // Set up contents of CSS files.
+    SetResponseWithDefaultHeaders("i.css", kContentTypeCss, kStyleI, 100);
     SetResponseWithDefaultHeaders("a.css", kContentTypeCss, kStyleA, 100);
     SetResponseWithDefaultHeaders("b.css", kContentTypeCss, kStyleB, 100);
     SetResponseWithDefaultHeaders("corrupt.css", kContentTypeCss, kStyleCorrupt,
@@ -146,6 +156,29 @@ class CriticalCssBeaconFilterTestBase : public RewriteTestBase {
     return html;
   }
 
+  // Serves |css| as g.css, parses a page that links it and expects exactly
+  // |selectors| as the candidates browsers are asked about.
+  void ExpectCandidates(StringPiece css, StringPiece selectors) {
+    SetResponseWithDefaultHeaders("g.css", kContentTypeCss, css, 100);
+    ParseUrl(kTestDomain, InputHtml(CssLinkHref("g.css")));
+    EXPECT_NE(
+        GoogleString::npos,
+        output_buffer_.find(StrCat("pagespeed.selectors=[", selectors, "];")))
+        << output_buffer_;
+  }
+
+  // The next view of the same page: a fresh driver state over the stored
+  // property data.
+  void NextView() {
+    rewrite_driver()->Clear();
+    rewrite_driver()->set_request_context(
+        RequestContext::NewTestRequestContext(factory()->thread_system()));
+    SetCurrentUserAgent(UserAgentMatcherTestBase::kChrome18UserAgent);
+    SetHtmlMimetype();
+    rewrite_driver()->set_property_page(NewMockPage(kTestDomain));
+    page_property_cache()->Read(rewrite_driver()->property_page());
+  }
+
   GoogleString SelectorsOnlyHtml(StringPiece head, StringPiece selectors) {
     return StrCat("<head>", head,
                   "</head><body><p>content</p>"
@@ -179,9 +212,54 @@ class CriticalCssBeaconFilterTest : public CriticalCssBeaconFilterTestBase {
   CriticalCssBeaconFilterTest& operator=(const CriticalCssBeaconFilterTest&) = delete;
 };
 
-TEST_F(CriticalCssBeaconFilterTest, ExtractFromInlineStyle) {
-  ValidateExpectedUrl(kTestDomain, InputHtml(kInlineStyle),
-                      BeaconHtml(kInlineStyle, kSelectorsInline));
+TEST_F(CriticalCssBeaconFilterTest, ExtractFromStylesheet) {
+  ValidateExpectedUrl(kTestDomain, InputHtml(kLinkI),
+                      BeaconHtml(kLinkI, kSelectorsInline));
+}
+
+// prioritize_critical_css leaves inline <style> blocks as they are, so no
+// browser needs to be asked about their selectors. Asking would also make
+// every response of a page whose inline blocks carry generated class names
+// look like a page with new rules.
+TEST_F(CriticalCssBeaconFilterTest, SelectorsOfInlineBlocksAreNotCandidates) {
+  GoogleString css = StrCat(CssLinkHref("a.css"), kInlineStyle);
+  ValidateExpectedUrl(kTestDomain, InputHtml(css),
+                      BeaconHtml(css, kSelectorsA));
+}
+
+TEST_F(CriticalCssBeaconFilterTest, APageWithOnlyInlineBlocksIsNotInstrumented) {
+  ValidateNoChanges("only_inline_blocks", InputHtml(kInlineStyle));
+}
+
+TEST_F(CriticalCssBeaconFilterTest, InitCallHasNoSelectionArgumentByDefault) {
+  // By default browsers report every selector that matches anything in the
+  // page; the init call says nothing about selection.
+  ParseUrl(kTestDomain, InputHtml(kLinkI));
+  EXPECT_NE(GoogleString::npos, output_buffer_.find("',pagespeed.selectors);"))
+      << output_buffer_;
+  EXPECT_EQ(GoogleString::npos, output_buffer_.find("pagespeed.selectors,"))
+      << output_buffer_;
+}
+
+// With CriticalCssAboveTheFoldOnly on, browsers are asked to report only the
+// selectors that match in the first screen.
+class CriticalCssBeaconAboveTheFoldOnlyTest
+    : public CriticalCssBeaconFilterTestBase {
+ protected:
+  void SetUp() override {
+    CriticalCssBeaconFilterTestBase::SetUp();
+    options()->set_critical_css_above_the_fold_only(true);
+    options()->EnableFilter(RewriteOptions::kPrioritizeCriticalCss);
+    rewrite_driver()->AddFilters();
+  }
+};
+
+TEST_F(CriticalCssBeaconAboveTheFoldOnlyTest,
+       InitCallAsksForAboveTheFoldSelection) {
+  ParseUrl(kTestDomain, InputHtml(kLinkI));
+  EXPECT_NE(GoogleString::npos,
+            output_buffer_.find("',pagespeed.selectors,true);"))
+      << output_buffer_;
 }
 
 TEST_F(CriticalCssBeaconFilterTest, GroupRuleSelectorsBeaconed) {
@@ -192,26 +270,19 @@ TEST_F(CriticalCssBeaconFilterTest, GroupRuleSelectorsBeaconed) {
   // survivors wrapped in their group prelude so the browser re-evaluates
   // the condition — a candidate under a false condition can only cost
   // subset bytes, never styling.
-  const char kInlineWithGroup[] =
-      "<style>"
-      "a{color:red}"
-      "@supports (display: grid){section{display:grid}}"
-      "p{color:green}"
-      "</style>";
-  ValidateExpectedUrl(kTestDomain, InputHtml(kInlineWithGroup),
-                      BeaconHtml(kInlineWithGroup, "\"a\",\"p\",\"section\""));
+  ExpectCandidates("a{color:red}"
+                   "@supports (display: grid){section{display:grid}}"
+                   "p{color:green}",
+                   "\"a\",\"p\",\"section\"");
 }
 
 TEST_F(CriticalCssBeaconFilterTest, NestedGroupSelectorsBeaconed) {
   // Selectors from nested group bodies are collected once and deduped with
   // top-level occurrences of the same selector.
-  const char kInlineNestedGroups[] =
-      "<style>"
+  ExpectCandidates(
       "a{color:red}"
-      "@layer l{@supports (display: grid){a{color:green}section{display:grid}}}"
-      "</style>";
-  ValidateExpectedUrl(kTestDomain, InputHtml(kInlineNestedGroups),
-                      BeaconHtml(kInlineNestedGroups, "\"a\",\"section\""));
+      "@layer l{@supports (display: grid){a{color:green}section{display:grid}}}",
+      "\"a\",\"section\"");
 }
 
 TEST_F(CriticalCssBeaconFilterTest, GroupMediaGatesBeaconing) {
@@ -219,41 +290,28 @@ TEST_F(CriticalCssBeaconFilterTest, GroupMediaGatesBeaconing) {
   // gates the whole body BEFORE recursion: "aside" sits under a print-only
   // @media, and the body ruleset's own empty annotation must not let it
   // leak into the candidate set.
-  const char kInlinePrintGatedGroup[] =
-      "<style>"
-      "a{color:red}"
-      "p{color:green}"
-      "@media print{@supports (display: grid){aside{color:red}}}"
-      "</style>";
-  ValidateExpectedUrl(kTestDomain, InputHtml(kInlinePrintGatedGroup),
-                      BeaconHtml(kInlinePrintGatedGroup, kSelectorsInline));
+  ExpectCandidates("a{color:red}"
+                   "p{color:green}"
+                   "@media print{@supports (display: grid){aside{color:red}}}",
+                   kSelectorsInline);
 }
 
 TEST_F(CriticalCssBeaconFilterTest, GroupUnderScreenMediaBeaconed) {
-  const char kInlineScreenGatedGroup[] =
-      "<style>"
-      "a{color:red}"
-      "p{color:green}"
-      "@media screen{@supports (display: grid){aside{color:red}}}"
-      "</style>";
-  ValidateExpectedUrl(kTestDomain, InputHtml(kInlineScreenGatedGroup),
-                      BeaconHtml(kInlineScreenGatedGroup,
-                                 "\"a\",\"aside\",\"p\""));
+  ExpectCandidates("a{color:red}"
+                   "p{color:green}"
+                   "@media screen{@supports (display: grid){aside{color:red}}}",
+                   "\"a\",\"aside\",\"p\"");
 }
 
 TEST_F(CriticalCssBeaconFilterTest, GroupUnderRawMediaQueryBeaconed) {
   // A raw MQ4 media form ("(width >= 768px)") cannot be evaluated
   // server-side; CanMediaAffectScreen treats it as screen-affecting, so the
   // gated group's selectors are conservatively collected.
-  const char kInlineRawMediaGroup[] =
-      "<style>"
+  ExpectCandidates(
       "a{color:red}"
       "p{color:green}"
-      "@media (width >= 768px){@supports (display: grid){aside{color:red}}}"
-      "</style>";
-  ValidateExpectedUrl(kTestDomain, InputHtml(kInlineRawMediaGroup),
-                      BeaconHtml(kInlineRawMediaGroup,
-                                 "\"a\",\"aside\",\"p\""));
+      "@media (width >= 768px){@supports (display: grid){aside{color:red}}}",
+      "\"a\",\"aside\",\"p\"");
 }
 
 TEST_F(CriticalCssBeaconFilterTest, PureGroupRuleArmsBeacon) {
@@ -261,9 +319,7 @@ TEST_F(CriticalCssBeaconFilterTest, PureGroupRuleArmsBeacon) {
   // output) must still produce candidates: with an empty candidate set
   // PrepareForBeaconInsertion returns kDoNotBeacon and the page would never
   // instrument, permanently disabling prioritize_critical_css for it.
-  const char kInlinePureLayer[] = "<style>@layer base{p{color:green}}</style>";
-  ValidateExpectedUrl(kTestDomain, InputHtml(kInlinePureLayer),
-                      BeaconHtml(kInlinePureLayer, "\"p\""));
+  ExpectCandidates("@layer base{p{color:green}}", "\"p\"");
 }
 
 // Regression: the beacon URL is JS-escaped (matching page_url) before it is
@@ -276,8 +332,8 @@ TEST_F(CriticalCssBeaconFilterTest, BeaconUrlJsEscaped) {
   options()->ClearSignatureForTesting();
   options()->set_beacon_url("http://test.com/beacon'x");
   options()->ComputeSignature();
-  ValidateExpectedUrl(kTestDomain, InputHtml(kInlineStyle),
-                      BeaconHtml(kInlineStyle, kSelectorsInline));
+  ValidateExpectedUrl(kTestDomain, InputHtml(kLinkI),
+                      BeaconHtml(kLinkI, kSelectorsInline));
   // The raw, unescaped single-quote form must not appear in the output.
   EXPECT_EQ(GoogleString::npos, output_buffer_.find("beacon'x"));
 }
@@ -288,7 +344,7 @@ TEST_F(CriticalCssBeaconFilterTest, CspForbidsInlineScript) {
   const char kCsp[] =
       "<meta http-equiv=\"Content-Security-Policy\" "
       "content=\"script-src *;\">";
-  ValidateNoChanges(kTestDomain, InputHtml(StrCat(kCsp, kInlineStyle)));
+  ValidateNoChanges("csp_no_inline_script", InputHtml(StrCat(kCsp, kLinkI)));
 }
 
 TEST_F(CriticalCssBeaconFilterTest, CspAllowsInlineScript) {
@@ -296,19 +352,19 @@ TEST_F(CriticalCssBeaconFilterTest, CspAllowsInlineScript) {
   const char kCsp[] =
       "<meta http-equiv=\"Content-Security-Policy\" "
       "content=\"script-src * 'unsafe-inline';\">";
-  GoogleString head = StrCat(kCsp, kInlineStyle);
+  GoogleString head = StrCat(kCsp, kLinkI);
   ValidateExpectedUrl(kTestDomain, InputHtml(head),
                       BeaconHtml(head, kSelectorsInline));
 }
 
 TEST_F(CriticalCssBeaconFilterTest, DisabledForIE) {
   SetCurrentUserAgent(UserAgentMatcherTestBase::kIe7UserAgent);
-  ValidateNoChanges(kTestDomain, InputHtml(kInlineStyle));
+  ValidateNoChanges("on_ie", InputHtml(kLinkI));
 }
 
 TEST_F(CriticalCssBeaconFilterTest, DisabledForBots) {
   SetCurrentUserAgent(UserAgentMatcherTestBase::kGooglebotUserAgent);
-  ValidateNoChanges(kTestDomain, InputHtml(kInlineStyle));
+  ValidateNoChanges("on_bot", InputHtml(kLinkI));
 }
 
 TEST_F(CriticalCssBeaconFilterTest, ExtractFromUnopt) {
@@ -318,9 +374,9 @@ TEST_F(CriticalCssBeaconFilterTest, ExtractFromUnopt) {
 
 TEST_F(CriticalCssBeaconFilterTest, ExtractFromOpt) {
   GoogleString input_html =
-      InputHtml(StrCat(CssLinkHref("b.css"), kInlineStyle));
+      InputHtml(StrCat(CssLinkHref("b.css"), kLinkI));
   GoogleString expected_html =
-      BeaconHtml(StrCat(CssLinkHrefOpt("b.css"), kInlineStyle), kSelectorsB);
+      BeaconHtml(StrCat(CssLinkHrefOpt("b.css"), kLinkI), kSelectorsB);
   ValidateExpectedUrl(kTestDomain, input_html, expected_html);
 }
 
@@ -345,7 +401,7 @@ TEST_F(CriticalCssBeaconFilterTest, DontExtractFromAlternate) {
 }
 
 TEST_F(CriticalCssBeaconFilterTest, Unauthorized) {
-  GoogleString css = StrCat(CssLinkHref(kUnauthDomainUrl), kInlineStyle);
+  GoogleString css = StrCat(CssLinkHref(kUnauthDomainUrl), kLinkI);
   ValidateExpectedUrl(kTestDomain, InputHtml(css),
                       BeaconHtml(css, kSelectorsInline));
   EXPECT_EQ(1, statistics()
@@ -363,7 +419,7 @@ TEST_F(CriticalCssBeaconFilterTest, AllowUnauthorized) {
   options()->ClearSignatureForTesting();
   options()->AddInlineUnauthorizedResourceType(semantic_type::kStylesheet);
   options()->ComputeSignature();
-  GoogleString css = StrCat(CssLinkHref(kUnauthDomainUrl), kInlineStyle);
+  GoogleString css = StrCat(CssLinkHref(kUnauthDomainUrl), kLinkI);
   ValidateExpectedUrl(kTestDomain, InputHtml(css),
                       BeaconHtml(css, kSelectorsInlineWithUnauthSelectors));
   EXPECT_EQ(2, statistics()
@@ -379,13 +435,13 @@ TEST_F(CriticalCssBeaconFilterTest, AllowUnauthorized) {
 
 TEST_F(CriticalCssBeaconFilterTest, Missing) {
   SetFetchFailOnUnexpected(false);
-  GoogleString css = StrCat(CssLinkHref("404.css"), kInlineStyle);
+  GoogleString css = StrCat(CssLinkHref("404.css"), kLinkI);
   ValidateExpectedUrl(kTestDomain, InputHtml(css),
                       BeaconHtml(css, kSelectorsInline));
 }
 
 TEST_F(CriticalCssBeaconFilterTest, Corrupt) {
-  GoogleString css = StrCat(CssLinkHref("corrupt.css"), kInlineStyle);
+  GoogleString css = StrCat(CssLinkHref("corrupt.css"), kLinkI);
   ValidateExpectedUrl(kTestDomain, InputHtml(css),
                       BeaconHtml(css, kSelectorsInline));
 }
@@ -396,9 +452,9 @@ TEST_F(CriticalCssBeaconFilterTest, EmptyCssIgnored) {
   // looked like the following: [,".sec h1#id","a","div ul > li","p"].
   // That caused the beacon JavaScript to take the length of 'undefined'.
   GoogleString input_html = InputHtml(
-      StrCat(CssLinkHref("a.css"), kInlineStyle, CssLinkHref("empty.css")));
+      StrCat(CssLinkHref("a.css"), kLinkI, CssLinkHref("empty.css")));
   GoogleString expected_html = BeaconHtml(
-      StrCat(CssLinkHref("a.css"), kInlineStyle, CssLinkHrefOpt("empty.css")),
+      StrCat(CssLinkHref("a.css"), kLinkI, CssLinkHrefOpt("empty.css")),
       kSelectorsInlineAB);
   ValidateExpectedUrl(kTestDomain, input_html, expected_html);
 }
@@ -423,11 +479,11 @@ TEST_F(CriticalCssBeaconFilterTest, MixOfGoodAndBad) {
   // Make sure we don't see any strange interactions / missed connections.
   SetFetchFailOnUnexpected(false);
   GoogleString input_html = InputHtml(
-      StrCat(CssLinkHref("a.css"), CssLinkHref("404.css"), kInlineStyle,
+      StrCat(CssLinkHref("a.css"), CssLinkHref("404.css"), kLinkI,
              CssLinkHref(kUnauthDomainUrl), CssLinkHref("corrupt.css"),
              kInlinePrint, CssLinkHref("b.css")));
   GoogleString expected_html = BeaconHtml(
-      StrCat(CssLinkHref("a.css"), CssLinkHref("404.css"), kInlineStyle,
+      StrCat(CssLinkHref("a.css"), CssLinkHref("404.css"), kLinkI,
              CssLinkHref(kUnauthDomainUrl), CssLinkHref("corrupt.css"),
              kInlinePrint, CssLinkHrefOpt("b.css")),
       kSelectorsInlineAB);
@@ -436,9 +492,9 @@ TEST_F(CriticalCssBeaconFilterTest, MixOfGoodAndBad) {
 
 TEST_F(CriticalCssBeaconFilterTest, EverythingThatParses) {
   GoogleString input_html = InputHtml(
-      StrCat(CssLinkHref("a.css"), kInlineStyle, CssLinkHref("b.css")));
+      StrCat(CssLinkHref("a.css"), kLinkI, CssLinkHref("b.css")));
   GoogleString expected_html = BeaconHtml(
-      StrCat(CssLinkHref("a.css"), kInlineStyle, CssLinkHrefOpt("b.css")),
+      StrCat(CssLinkHref("a.css"), kLinkI, CssLinkHrefOpt("b.css")),
       kSelectorsInlineAB);
   ValidateExpectedUrl(kTestDomain, input_html, expected_html);
 }
@@ -446,9 +502,9 @@ TEST_F(CriticalCssBeaconFilterTest, EverythingThatParses) {
 TEST_F(CriticalCssBeaconFilterTest, FalseBeaconResultsGivesEmptyBeaconUrl) {
   factory()->set_use_beacon_results_in_filters(false);
   GoogleString input_html = InputHtml(
-      StrCat(CssLinkHref("a.css"), kInlineStyle, CssLinkHref("b.css")));
+      StrCat(CssLinkHref("a.css"), kLinkI, CssLinkHref("b.css")));
   GoogleString expected_html = SelectorsOnlyHtml(
-      StrCat(CssLinkHref("a.css"), kInlineStyle, CssLinkHrefOpt("b.css")),
+      StrCat(CssLinkHref("a.css"), kLinkI, CssLinkHrefOpt("b.css")),
       kSelectorsInlineAB);
   ValidateExpectedUrl(kTestDomain, input_html, expected_html);
 }
@@ -504,11 +560,46 @@ TEST_F(CriticalCssBeaconOnlyTest, ExtantPCache) {
   // Now do the test.
 
   GoogleString input_html = InputHtml(
-      StrCat(CssLinkHref("a.css"), kInlineStyle, CssLinkHref("b.css")));
+      StrCat(CssLinkHref("a.css"), kLinkI, CssLinkHref("b.css")));
   GoogleString expected_html = BeaconHtml(
-      StrCat(CssLinkHref("a.css"), kInlineStyle, CssLinkHrefOpt("b.css")),
+      StrCat(CssLinkHref("a.css"), kLinkI, CssLinkHrefOpt("b.css")),
       kSelectorsInlineAB);
   ValidateExpectedUrl(kTestDomain, input_html, expected_html);
+}
+
+// Inline <style> blocks can differ from one response to the next (generated
+// class names). That must not look like a page whose rules changed: a report
+// requested by an earlier response still counts, and the page becomes
+// current.
+TEST_F(CriticalCssBeaconOnlyTest, ChangingInlineBlocksDoNotMakeAReportStale) {
+  CriticalSelectorFinder* finder = server_context()->critical_selector_finder();
+  ParseUrl(kTestDomain,
+           InputHtml(StrCat(CssLinkHref("a.css"),
+                            "<style>.generated-1{color:red}</style>")));
+  ASSERT_NE(GoogleString::npos, output_buffer_.find("criticalCssBeaconInit"))
+      << output_buffer_;
+  GoogleString nonce = ExpectedNonce();
+
+  // The next response: same stylesheet, another inline block.
+  NextView();
+  ParseUrl(kTestDomain,
+           InputHtml(StrCat(CssLinkHref("a.css"),
+                            "<style>.generated-2{color:red}</style>")));
+
+  // The browser that got the first response reports.
+  NextView();
+  StringSet reported;
+  reported.insert("div ul > li");
+  finder->WriteCriticalSelectorsToPropertyCache(reported, nonce,
+                                                rewrite_driver());
+  rewrite_driver()->property_page()->WriteCohort(
+      server_context()->beacon_cohort());
+
+  NextView();
+  EXPECT_TRUE(finder->HasCurrentBeaconData(rewrite_driver()));
+  EXPECT_STREQ("div ul > li",
+               JoinCollection(finder->GetCriticalSelectors(rewrite_driver()),
+                              ","));
 }
 
 class CriticalCssBeaconWithCombinerFilterTest

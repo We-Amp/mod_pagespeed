@@ -172,6 +172,12 @@
   X(true, combine_across_paths_, "cp", \
     kCombineAcrossPaths, kDirectoryScope, \
     "Allow combining resources from different paths", true) \
+  X(false, critical_css_above_the_fold_only_, "ccafo", \
+    kCriticalCssAboveTheFoldOnly, kDirectoryScope, \
+    "Makes prioritize_critical_css inline only the rules for content in " \
+    "the first screen instead of the rules for the whole page. The inline " \
+    "block is smaller; content further down may be shown partly styled " \
+    "until the full stylesheet has arrived.", true) \
   X(true, critical_images_beacon_enabled_, "cibe", \
     kCriticalImagesBeaconEnabled, kDirectoryScope, \
     "Enable insertion of client-side critical " \

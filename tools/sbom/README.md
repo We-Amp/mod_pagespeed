@@ -27,7 +27,7 @@ Generates SBOMs from **committed, deterministic inputs** and scans with grype:
 
 | Surface | Input (deterministic) | Status |
 |---|---|---|
-| **npm** | **every** committed lockfile — `pagespeed/system/console/pnpm-lock.yaml` (shipped admin-console SPA), `test/browser/`, `devel/loadtest_collect/`, `tools/js-minify-corpus/bundle-fixtures/` (`package-lock.json`) | covered, **blocking at medium+** |
+| **npm** | **every** committed lockfile — `pagespeed/system/console/pnpm-lock.yaml` (shipped admin-console SPA), `test/browser/`, `tools/stress/loadtest_collect/`, `tools/js-minify-corpus/bundle-fixtures/` (`package-lock.json`) | covered, **blocking at medium+** |
 | **images** (`--images`) | the **built package-test images** from the local docker cache — `mps-smoke-nginx`, `package-test-test-ubuntu-apache`, `package-test-test-rocky-apache` (a production-representative base OS + Apache/nginx with the actual shipped `.deb` / `.rpm` / `ngx_pagespeed` `.so` installed on top — `test/package-test/Dockerfile.*`) | covered, build-machine only |
 | **cargo** | — | **n/a** — 1.1 ships no Rust (no `Cargo.toml` / `Cargo.lock` in the tree) |
 | **.NET** | the shipped **`.nupkg`** / publish output (the `aspnetcore` middleware + `WeAmpSite`), **NOT** a dev-time `dotnet restore` (that undercounts and the NativeAssets are injected by the build) | **deferred** to a post-build scan |
@@ -142,7 +142,13 @@ PR. Instead:
 
 1. Land report-only; the severity table appears on each run's Summary tab.
 2. Triage findings into `sbom/*.vex.json` — `not_affected` + justification, or
-   bump the real ones.
+   bump the real ones. A `not_affected` statement for a finding that has no
+   fix yet should be time-boxed: put an `Expires: YYYY-MM-DD` marker at the
+   start of its `impact_statement` (OpenVEX has no expiry field), and
+   `tools/ci/validate-vex.py` — run before every grype invocation — fails the
+   file once that date has passed, so the suppression gets re-evaluated
+   instead of quietly outliving its evidence (`validate-vex.py --self-test`
+   pins that behaviour; same convention as pagespeed-optimizer).
 3. Once a surface is clean at medium+, flip it to blocking.
 
 **npm has completed this ratchet.** Precondition checked before the flip: the

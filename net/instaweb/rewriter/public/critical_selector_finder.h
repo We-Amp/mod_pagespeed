@@ -43,6 +43,9 @@ class Timer;
 // UpdateCriticalSelectorInfoInDriver).
 struct CriticalSelectorInfo {
   StringSet critical_selectors;
+  // Every selector browsers have been asked about for this page, critical or
+  // not.
+  StringSet known_selectors;
   CriticalKeys proto;
 };
 
@@ -69,6 +72,30 @@ class CriticalSelectorFinder {
   bool IsCriticalSelector(RewriteDriver* driver, const GoogleString& selector);
 
   const StringSet& GetCriticalSelectors(RewriteDriver* driver);
+
+  // Every selector browsers have been asked about for this page, whether
+  // they reported it as critical or not. A selector that is not in this set
+  // has not been judged by any browser yet.
+  const StringSet& GetKnownSelectors(RewriteDriver* driver);
+
+  // True when at least one complete report has arrived since the page's set
+  // of selectors last grew and since the last report that was cut short.
+  // Until then the stored reports do not describe the page.
+  bool HasCurrentBeaconData(RewriteDriver* driver);
+
+  // True when this finder registers every selector it asks browsers about
+  // (the default). A finder fed from a trusted source records only the
+  // selectors that were reported.
+  bool TracksCandidateSelectors() const { return !ShouldReplacePriorResult(); }
+
+  // Records that a report arrived cut short at the beacon's size limit: its
+  // nonce is used up, its selectors are not counted (the ones that did not
+  // fit would look unmatched), and the page has no current data until a
+  // complete report arrives.
+  static void RecordTruncatedReport(StringPiece nonce,
+                                    const PropertyCache* cache,
+                                    const PropertyCache::Cohort* cohort,
+                                    AbstractPropertyPage* page, Timer* timer);
 
   // Updates the critical selectors in the property cache. Support for the new
   // selector_set is added to the existing record of beacon support.  This
@@ -128,8 +155,10 @@ class BeaconCriticalSelectorFinder : public CriticalSelectorFinder {
                                Statistics* stats)
       : CriticalSelectorFinder(cohort, nonce_generator, stats) {}
 
+  // truncated: the browser could not fit all matching selectors in the
+  // report (see RecordTruncatedReport).
   static void WriteCriticalSelectorsToPropertyCacheFromBeacon(
-      const StringSet& selector_set, StringPiece nonce,
+      const StringSet& selector_set, StringPiece nonce, bool truncated,
       const PropertyCache* cache, const PropertyCache::Cohort* cohort,
       AbstractPropertyPage* page, MessageHandler* message_handler,
       Timer* timer);

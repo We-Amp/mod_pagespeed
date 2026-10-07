@@ -39,17 +39,6 @@ filegroup(
     visibility = ["//visibility:public"],
 )
 
-# Apache-specific system test scripts
-filegroup(
-    name = "system_test_files",
-    srcs = [
-        "gzip_test.sh",
-        "process_scope_test.sh",
-        "system_test.sh",
-    ] + glob(["system_tests/*.sh"]),
-    visibility = ["//visibility:public"],
-)
-
 # APR initialization utilities and thread-compatible pool.
 # (The APR memcached client lived here but was removed once the live
 # memcached path moved to libmemcached via //pagespeed/system MemcachedCache;
@@ -79,6 +68,22 @@ cc_library(
     ],
 )
 
+# Which static asset a request names: both readings of the request path must
+# agree and name a file directly under the static asset prefix -- a pure
+# function over StringPiece, unit tested standalone
+# (//test/pagespeed/apache:apache_static_asset_path_test). apache_core below
+# compiles apache_static_asset_path.cc directly in its srcs, the way the
+# nginx module targets compile their port's copy.
+cc_library(
+    name = "apache_static_asset_path",
+    srcs = ["apache_static_asset_path.cc"],
+    hdrs = ["apache_static_asset_path.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)
+
 # Core Apache library without mod_instaweb.cc.
 # Use this for tests to avoid the static ApacheProcessContext in mod_instaweb.cc
 # which conflicts with test infrastructure's RewriteTestBaseProcessContext.
@@ -94,6 +99,7 @@ cc_library(
         "apache_rewrite_driver_factory.cc",
         "apache_server_context.cc",
         "apache_slurp.cc",
+        "apache_static_asset_path.cc",
         "apache_thread_system.cc",
         "apache_writer.cc",
         "apr_timer.cc",
@@ -116,6 +122,7 @@ cc_library(
         "apache_request_context.h",
         "apache_rewrite_driver_factory.h",
         "apache_server_context.h",
+        "apache_static_asset_path.h",
         "apache_thread_system.h",
         "apache_writer.h",
         "apr_timer.h",
@@ -164,6 +171,7 @@ cc_library(
         # apache_mpm_detection.cc and apache_rewrite_driver_factory.cc include
         # the thread-count policy header directly.
         "//pagespeed/system:optimization_thread_policy",
+        "//pagespeed/system:serve_host_names",
         # @aprutil supplies the bucket-brigade glue (apr_brigade_create in
         # instaweb_context.cc) and the httpd util_filter API; it is no longer
         # for memcached. Declared here because apache_apr no longer pulls it.

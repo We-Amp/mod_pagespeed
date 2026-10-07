@@ -42,9 +42,13 @@ var pagespeed = window['pagespeed'];
  *     sever.
  * @param {string} nonce The nonce sent by the server.
  * @param {Array.<string>} selectors List of the selectors on the page.
+ * @param {boolean=} opt_aboveTheFoldOnly Report only the selectors that match
+ *     in the first screen, instead of every selector that matches anything in
+ *     the page.
  */
 pagespeed.CriticalCssBeacon = function(beaconUrl, htmlUrl, optionsHash,
-                                       nonce, selectors) {
+                                       nonce, selectors,
+                                       opt_aboveTheFoldOnly) {
   /**
    * We divide up the main loop of checkCssSelectors into multiple calls with
    * window.setTimeout to minimize the delay in processing other events on the
@@ -74,6 +78,7 @@ pagespeed.CriticalCssBeacon = function(beaconUrl, htmlUrl, optionsHash,
   this.optionsHash_ = optionsHash;
   this.nonce_ = nonce;
   this.selectors_ = selectors;
+  this.aboveTheFoldOnly_ = !!opt_aboveTheFoldOnly;
   this.criticalSelectors_ = [];
   this.idx_ = 0;
 };
@@ -119,13 +124,16 @@ pagespeed.CriticalCssBeacon.prototype.sendBeacon_ = function() {
 
 
 /**
- * Decide whether a selector should count as critical: it must match a DOM
- * element, and at least one match must intersect the initial viewport ---
- * otherwise the "critical" set converges on "all CSS used anywhere on the
- * page", which for long pages defeats the purpose of inlining. The bias is
- * conservative: whenever above-the-fold-ness can't be determined (viewport
- * height unknown, element not currently rendered, more matches than we are
- * willing to measure), the selector is kept.
+ * Decide whether a selector should count as critical. It must match a DOM
+ * element. By default that is all: the rules for everything in the page are
+ * critical, so no part of the page is ever shown without its styles while
+ * the full stylesheet is on its way.
+ *
+ * When only the first screen was asked for, at least one match must also
+ * intersect the initial viewport. The bias is conservative: whenever
+ * above-the-fold-ness can't be determined (viewport height unknown, element
+ * not currently rendered, more matches than we are willing to measure), the
+ * selector is kept.
  * @param {string} selector The selector to check.
  * @return {boolean} True if the selector should gain critical support.
  * @private
@@ -135,6 +143,9 @@ pagespeed.CriticalCssBeacon.prototype.isSelectorCritical_ = function(
   var elements = document.querySelectorAll(selector);
   if (elements.length == 0) {
     return false;
+  }
+  if (!this.aboveTheFoldOnly_) {
+    return true;
   }
   var viewportHeight =
       window.innerHeight || document.documentElement.clientHeight;
@@ -181,11 +192,14 @@ pagespeed.CriticalCssBeacon.prototype.checkCssSelectors_ = function(callback) {
         this.criticalSelectors_.push(this.selectors_[this.idx_]);
       }
     } catch (e) {
-      // SYNTAX_ERR is thrown if the browser can't parse a selector (eg, CSS3 in
-      // a CSS2.1 browser). Ignore these exceptions.
-      // TODO(jud): Consider if continue is the right thing to do here. It may
-      // be safer to mark this selector as critical if the browser didn't
-      // understand it.
+      // SYNTAX_ERR is thrown if the browser can't parse a selector (eg, a
+      // newer selector than the browser knows). The browser then cannot say
+      // whether the rule would apply to anything. By default such a selector
+      // is reported, so its rule stays inline; when only the first screen
+      // was asked for it is skipped, as before.
+      if (!this.aboveTheFoldOnly_) {
+        this.criticalSelectors_.push(this.selectors_[this.idx_]);
+      }
       continue;
     }
   }
@@ -205,9 +219,12 @@ pagespeed.CriticalCssBeacon.prototype.checkCssSelectors_ = function(callback) {
  * @param {string} optionsHash The hash of the rewrite options.
  * @param {string} nonce The nonce sent by the server.
  * @param {Array.<string>} selectors List of the selectors on the page.
+ * @param {boolean=} opt_aboveTheFoldOnly Report only the selectors that match
+ *     in the first screen.
  */
 pagespeed.criticalCssBeaconInit = function(beaconUrl, htmlUrl, optionsHash,
-                                           nonce, selectors) {
+                                           nonce, selectors,
+                                           opt_aboveTheFoldOnly) {
   // Verify that the browser supports the APIs we need and bail out early if we
   // don't.
   if (!document.querySelector || !document.querySelectorAll ||
@@ -216,7 +233,8 @@ pagespeed.criticalCssBeaconInit = function(beaconUrl, htmlUrl, optionsHash,
   }
 
   var temp = new pagespeed.CriticalCssBeacon(beaconUrl, htmlUrl, optionsHash,
-                                             nonce, selectors);
+                                             nonce, selectors,
+                                             opt_aboveTheFoldOnly);
   // Add event to the onload handler to scan selectors and beacon back which
   // apply to critical elements.
   var beacon_onload = function() {

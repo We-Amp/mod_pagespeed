@@ -127,6 +127,23 @@ LogMessage::~LogMessage() {
   std::string msg = stream_.str();
   const char* base_filename = GetBasename(file_);
 
+  // Verbose VLOG(n) messages carry a negative severity. They must not be
+  // written to a process logger: that output is not level-filtered by the
+  // hosting server, so mirroring it flooded server error logs at the
+  // default LogLevel. Registered sinks still receive verbose messages and
+  // apply their own cutoffs. A verbose severity is never LOG_FATAL, so no
+  // abort check is needed on this path. Once shutdown has begun the sinks
+  // may be gone (a straggling worker's host log pool is freed by then), and
+  // a verbose message is not worth a stderr line: drop it.
+  if (severity_ < 0) {
+    if (g_logging_shutdown.load(std::memory_order_acquire)) {
+      return;
+    }
+    SendToSinks(severity_, file_, base_filename, line_, msg.c_str(),
+                msg.size());
+    return;
+  }
+
   if (g_logging_shutdown.load(std::memory_order_acquire)) {
     // Process is shutting down — spdlog may already be destroyed.
     // Write to stderr instead, which is always safe.

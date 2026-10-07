@@ -7,36 +7,427 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-10-06
+
+### Security
+
+- **nginx: certain requests could make a worker process exit (denial of
+  service).** An unauthenticated request could cause an nginx worker process
+  to exit; nginx restarts the worker, but requests it was serving are lost.
+  Affects the nginx module in releases up to and including 1.16.0. **Update
+  recommended.**
+- **Apache: certain requests could make a child process exit (denial of
+  service).** A request could cause an Apache child process to exit; Apache
+  replaces it, but requests it was serving are lost. Affects releases up to
+  and including 1.16.0. **Update recommended.**
+- **Information disclosure between sites on per-host admin consoles.** A
+  per-host admin console's cache cooldown list could include entries that
+  belong to other sites on the same server. A per-host console now lists
+  only its own site's entries; the full list stays on the whole-server
+  console. This matters where per-host consoles are given to different
+  people. On IIS and Envoy a per-host console lists no cooldowns for now.
+  Affects 1.16.0 with the optimizer in use. **Update recommended.**
+- **HTML rewriter: some pages could make a server worker process exit (denial
+  of service).** Some pages served through the rewriter could make the server
+  worker process handling them exit, losing the requests it was serving.
+  Affects releases 1.15.0+r20 through 1.16.0. **Update recommended.**
+- **nginx: access restrictions on the admin, statistics, console and message
+  pages.** This release addresses an access-restriction bypass affecting these
+  pages in the nginx module and updates the access-restriction example in the
+  packaged snippet and the documentation. Affects the nginx module in releases
+  up to and including 1.16.0 where access to these paths is restricted in
+  the nginx configuration. **Update recommended.** After updating, replace your
+  access rules for these paths with the updated example, in every `server`
+  block; rules already in your configuration are not changed by the update.
+
+- **nginx: cache integrity in in-place resource optimization.** A request
+  could affect what in-place optimization stores and serves to other visitors.
+  Ordinary page and resource requests behave as before, and the admin pages,
+  beacons, cache purge, `.pagespeed.` resources and HTML rewriting are not
+  affected. Affects the nginx module in releases up to and including 1.16.0
+  with in-place optimization enabled (the default). **Update recommended.**
+
+- **nginx: information disclosure in in-place resource optimization.** In some
+  nginx configurations, in-place optimization could make content available
+  that the configuration does not expose directly. Affects the nginx module in
+  releases up to and including 1.16.0 with in-place optimization enabled (the
+  default). **Update recommended**, and flush the PageSpeed cache once after
+  updating (touch `cache.flush` in the `FileCachePath` directory, or purge `*`
+  when `EnableCachePurge` is on) so that entries recorded by earlier releases
+  are dropped.
+
+- **Admin console hardening.** Actions in the admin console can no longer be
+  triggered from other sites, and admin responses are hardened against use
+  from other sites. Affects releases up to and including 1.16.0 where the
+  admin console is reachable beyond loopback. **Update recommended.** Scripted
+  purges and some monitoring probes need a change: see the breaking-change
+  notes under Changed and the documentation.
+
+- **The bundled HTTPS fetch library is updated to curl 8.22.0.** This
+  addresses nine curl vulnerabilities published on 2026-09-02
+  (CVE-2026-19931, CVE-2026-18924, CVE-2026-82209, CVE-2026-80229,
+  CVE-2026-80230, CVE-2026-80231, CVE-2026-80255, CVE-2026-82208 and
+  CVE-2026-13608), every one of which curl's own vulnerability database
+  records as fixed in 8.22.0. No exploitation is known; update recommended.
+
 ### Fixed
+
+- Envoy: hardened the filter's request-header handling.
+- With the optimizer in use, a stylesheet or script whose optimized copy had
+  gone missing from the optimizer's cache was served unoptimized until the
+  URL was purged. On Apache and nginx the module now notices when it serves
+  the stored original of such a URL and asks the optimizer to optimize it
+  again, about once per URL every 10 seconds per server process; the
+  response itself is unchanged, and content the optimizer leaves
+  unoptimized on purpose is not asked for. On IIS nothing is asked for yet.
+  This takes effect with an optimizer that includes the matching fix, which
+  also optimizes such a URL again on its own when the stored original
+  expires; an older optimizer ignores the request. When the optimizer runs
+  with gzip compression turned off, the module cannot recognise such a URL
+  and does not ask; it is optimized again when its stored original expires.
+  Images are not covered. Two statistics count the requests:
+  `ipro_daemon_heal_notified` and `ipro_daemon_heal_notify_failed`.
+- With the optimizer in use, purging the optimizer's whole cache left the
+  web server on the deleted cache file: nothing was optimized any more, and
+  copies stored before the purge could still be served, until the web
+  server was restarted. The module now notices within a second that the
+  optimizer replaced its cache, stops using the old file at once (requests
+  are answered by the origin meanwhile) and opens the new one, at the cache
+  size the optimizer uses now. In the ordinary case no restart is needed. On
+  IIS a full purge still needs an application-pool recycle: Windows usually
+  cannot delete a cache file that worker processes hold open. A worker
+  process that starts
+  after the optimizer was given another cache size now opens the cache at
+  that size too, instead of the size the server read when it started. A
+  cache file kept from an earlier cache format is left alone and does not
+  get in the way. Whenever the module cannot be
+  sure it is on the optimizer's current cache file it does not use the
+  cache. Before every open it checks that the optimizer's cache file is
+  there, and afterwards that the open did not create one; if it did, or a
+  file changed during the open, that worker process logs one error naming
+  the files, stops using the optimizer's cache until it is recycled, and
+  leaves every file in place (the module deletes nothing). A worker process
+  also stops using the cache until it is recycled, or the web server is
+  restarted, in these cases: a second full purge lands in the few
+  milliseconds in which it is opening the cache after the first; the
+  optimizer stays unavailable after a purge for longer than the usual
+  retries; two cache files of the current format are present after a purge;
+  or it has followed four full purges (below). The old file stays open in
+  each worker process until that process ends, because a response still
+  being recorded may use it: every full purge therefore keeps one more
+  cache file's worth of disk space in use on the host, and of address
+  space in each worker process for each virtual host that uses the
+  optimizer, until the worker processes are recycled. A virtual host in a
+  worker process follows four full purges this way. At the fifth it stops
+  using the optimizer's cache in that process (requests are answered by the
+  origin) and logs one error; at that point up to five times the configured
+  cache size of disk is held, and as much address space per virtual host
+  in each worker process. Reloading or restarting the web server releases
+  it. Sites that purge the whole cache routinely should reload the web
+  server along with it.
+- With the optimizer in use, an optimized copy the optimizer wrote at the
+  same moment the module recorded the same URL's original could be dropped
+  from the shared cache without any error, and the URL was then served
+  unoptimized. The bundled cache library now notices that another process
+  changed the entry between a write's two steps and redoes the write. The
+  optimizer needs the matching version for its own writes: a process still
+  on the older library can drop a copy the same way, so update the module
+  and the optimizer together. The cache's on-disk format is unchanged and
+  nothing needs to be configured. The same library update stops every open
+  cache from starting a background monitor thread and an idle worker
+  thread that never had work, closes a moment right after an entry was
+  recorded again in which the in-memory tier could briefly serve the
+  entry's previous version, and makes it safe for a process to exit while
+  a cache is still open.
+- **Apache and nginx: a worker process could hang right after it started
+  and keep its slot.** The server's parent process keeps the module's file
+  cache open, and a worker process created at an unlucky moment could start
+  with one of the cache's internal locks already taken. Such a worker
+  stopped at its first cache lookup that needed that lock. On Apache that
+  can be during the worker's own start-up, and then it never served a
+  request. It was most visible after `apache2ctl graceful` (which log
+  rotation runs): the stuck worker stayed behind, and later graceful
+  restarts did not remove it. A full restart of the web server cleared it.
+  A worker could also stop the same way while it was shutting down. The
+  bundled cache library now finishes its background work before a worker
+  process is created. Affects the Apache and nginx modules in 1.15.0 and
+  1.16.0. Update recommended.
+  The same library update makes it safe to stop the file cache while other
+  threads are still reading from or writing to it, which in the module
+  happens only while a worker process shuts down; a write that comes too
+  late is dropped. It also fixes a crash at exit in builds that hash cache
+  keys with OpenSSL; the module's builds use the hash of their bundled TLS
+  library and were not affected. The cache's on-disk format is unchanged,
+  the existing cache is kept, and nothing needs to be configured. IIS and
+  Envoy are not affected.
+- `prioritize_critical_css` no longer trusts what browsers reported when it
+  does not describe the page any more. After a deploy that adds rules, the
+  new rules are kept in the inline block until a browser has reported on
+  them, and the page's stylesheets stay blocking until the first such
+  report arrives (a few page views); a report that was requested before the
+  change is ignored. A report that had to be cut short because the page has
+  more matching selectors than one report can carry is no longer taken for
+  a complete one: such a page keeps blocking stylesheets until a complete
+  report arrives (see the `beacon_overflow_count` statistic). Previously
+  rules could be missing from the first paint in both cases until the full
+  stylesheet arrived. After a page's markup changes without its stylesheets
+  changing, rules that newly apply can be late until a visitor's browser
+  reports on the new markup; the module now asks for a report again after
+  about a minute by default (twelve `BeaconReinstrumentTimeSec`, it was a
+  hundred), and at once after a report that shows a rule newly applying;
+  when the visitor who is asked does not report, the wait is longer.
+  Reports collected by earlier releases are not reused, so after updating
+  each page is optimized again once its visitors' browsers have reported.
+  Browsers are no longer asked about the selectors of inline `<style>`
+  blocks, which the filter leaves as they are: a page whose inline blocks
+  differ from one response to the next (generated class names) is therefore
+  optimized like any other, and a page with inline blocks only is not
+  instrumented.
+
+- **Apache: reports from phones and tablets are used.** The module keeps
+  what browsers report for `prioritize_critical_css` and for the filters
+  that use critical-image reports (such as `prioritize_critical_images`)
+  per device class: phone, tablet and desktop. On Apache every page view was
+  treated as a desktop one when that data was looked up, while a report was
+  filed under the class of the browser that sent it. Reports from phones and
+  tablets were therefore ignored, and those visitors were served
+  critical-CSS and critical-image data computed from desktop browsers; a
+  site visited mostly from phones could stay on blocking stylesheets for a
+  long time, until a desktop browser happened to report. Page views are now
+  looked up under the visitor's own device class, as on nginx, IIS and
+  Envoy, which were not affected. After updating, an existing Apache site
+  sees phones and tablets warm up once: their pages get ordinary stylesheets
+  and ordinary image handling until the first report from a browser of that
+  device class arrives, normally within a few page views. Desktop page views
+  are not affected, and no page is shown without its styles at any point.
+
+- **A refused optimizer cache now shows in the admin console's message
+  history.** When the web server starts with in-place optimization off
+  because it cannot use the optimizer daemon's cache (for example after an
+  upgrade left the two cache layouts out of step), Apache and nginx logged
+  the reason only to the web server's error log: the check runs before the
+  message history exists. Each serving process now repeats the reason once,
+  as a warning, where the admin console can see it.
+
+- **CSS parser diagnostics for unsupported modern syntax no longer flood the
+  web server's error log at the default log level.** The legacy parser emits
+  one verbose note per declaration it cannot interpret (for example
+  `color-mix()`, `calc(var(--x))` or `margin-block-*` values); those notes
+  were reported as ordinary info-level messages, so a site using modern CSS
+  could generate thousands of error-log lines per day even at `LogLevel
+  warn`. Verbose diagnostics now appear at debug level only, and only where the server provides a log sink for them.
+
+- **A resource fetch that times out, cannot connect or is answered 5xx is
+  remembered for ten seconds, not five minutes.** When the module could not
+  fetch the original of a `.pagespeed.` resource because the origin stalled,
+  the failure was recorded like a missing file: a made-up 404 from the fetcher
+  counted as a real one, so one five-second stall turned into a five-minute
+  404 for that resource (and the in-place optimizer remembered a 5xx for as
+  long). Such failures describe the origin's condition at that moment, not
+  the resource, and are now retried after ten seconds. A 404 or 410 the
+  origin actually sent is still remembered for `MetadataInputErrorsCacheTtlMs`
+  (five minutes by default).
+
+- **IIS: the user-mode cache time-to-live for optimized resources is now
+  applied.** It was left unset while the kernel-mode value was overwritten.
+
+- **Apache: option response headers such as `PageSpeed: off` no longer reach
+  the client when they switch optimization off for a response.** They are a
+  server-side control channel.
+
+- **nginx: option response headers such as `PageSpeed: off` no longer reach
+  the client.** They are a server-side control channel.
+
+- **Remote configuration is applied only from a successful response.** A
+  `RemoteConfigurationUrl` answered with any status other than 200 (or a 304
+  revalidating the cached copy), for example 403 or 410, is no longer applied,
+  even when its body is a valid configuration.
+
+- **Remote configuration keeps its last good copy when a refetch fails.**
+  Once the cached configuration expires, a refetch that fails (an error
+  status or an unreachable server) no longer drops it: the last good copy
+  keeps applying, for up to one day past its expiry, until a refetch
+  succeeds. `ServeStaleIfFetchError off` turns this off.
+
+- **The console's Graphs page no longer re-requests its data continuously.** It re-armed its own poll after every response and issued hundreds of requests per second for as long as the page was open; it now polls every 5 seconds. Update recommended where the console's Graphs page is used.
+- **The nginx module's message-history endpoint returns the same JSON as the
+  Apache and Envoy modules** instead of an HTML page.
+
+- **IIS: the message-history endpoint is served, and IPv6 loopback counts as
+  local for the admin pages.**
+
+- **The admin console's daemon panels are reached only as
+  `v1/daemon/<endpoint>` directly under the admin path, and a daemon endpoint
+  can never reach the module's own admin pages.** The admin path may be
+  mounted at any depth (for example `/alt/admin/path`).
+
+- **The admin console's daemon panels now say why the optimizer is
+  unavailable** — not configured, unreachable, or an optimizer version
+  without the endpoint — instead of one generic message.
+
+- **The global admin console's graphs and console pages now plot the
+  aggregate, not the serving vhost.**
+
+- **Apache: the module warns at startup when a virtual host cannot get its
+  own statistics** (per-vhost statistics enabled, but the host carries no
+  ModPagespeed directive) and says how to fix it.
+
+- **IIS: the installer's permission grants on the cache and logs directories
+  now take effect.** The installer is meant to give the IIS worker processes
+  (`IIS_IUSRS`, and `NETWORK SERVICE` for older application pool setups)
+  modify rights on `C:\ProgramData\We-Amp\PageSpeed\cache` and read and
+  write rights on its `logs` directory. Those grants failed silently on every
+  install, so both directories kept only the rights they inherit from
+  `C:\ProgramData`. Most installs worked anyway, because an application pool
+  identity can create files there through the inherited rights; an install
+  where those inherited rights had been tightened got the
+  `cache-path-not-writable` diagnostic page instead. Installing or repairing
+  this release applies the grants.
+
+- **Apache: a start refused because the module's cache volume did not match
+  the optimizer daemon's no longer leaves its own file behind.** When opening
+  the daemon's cache volume at the size the daemon publishes would create a
+  second volume file, the server still refuses to start — and now removes the
+  file that attempt created, or says what became of it: still there, not
+  confirmed gone, or left in place because another user or process holds it
+  (most likely the daemon's own new volume, which must not be removed).
+  Before, the file always stayed, and the next start attached to it without
+  refusing and ran on a separate cache the daemon never reads. If a start
+  with 1.16.0 refused with "created a SECOND volume file (…)", stop the
+  optimizer daemon, remove the file that message named, then start the daemon
+  and then the server.
+- **Apache with the optimizer daemon: stylesheets and scripts served from the
+  daemon's variants no longer re-notify the daemon on every request.** Every
+  such response was classed a fallback and asked the daemon again for a
+  variant it already had: one notification per request on the request path,
+  answered and logged by the daemon each time, and an
+  `ipro_daemon_fallback_notified` counter that climbed with traffic instead of
+  signalling real fallbacks. Responses were correct and do not change; images
+  were not affected. Affects the Apache module with `DaemonSocketPath` and
+  `DaemonVolumePath` set.
+- **IIS: `UseEventLog on` writes to the Windows event log again.** In
+  previous releases the directive parsed and did nothing: the module wrote
+  no entry under the `PageSpeed` source at all. It now writes the module's
+  warnings and errors there, one entry per distinct message per worker
+  process and at most a thousand of them, with informational messages left
+  out (they are per-request). A fatal is written whatever the directive
+  says. With the directive off or absent, the first suppressed warning and
+  the first suppressed error each write one entry saying so and where the
+  messages can be read instead. Messages from before the directive's value
+  is known in a worker process are not written; where the directive sits
+  inside a host- or path-matched block, that covers the module's start-up
+  messages, which the message history at `/pagespeed_message` carries as
+  before. A real fault still reaches the event log: an unreachable
+  `FileCachePath`, for instance, writes its error under the `PageSpeed`
+  source, which is how an operator tells a quiet log apart from a silent
+  one. The event source is not registered by the installer yet, so Event
+  Viewer prefaces each entry with a note that it cannot find the
+  description; the message itself is intact.
+
+- **nginx: the module's filters run at their intended place in nginx's filter
+  chain.** In previous releases the dynamically loaded module ran ahead of all
+  of nginx's own output filters instead of immediately before compression.
+  What that fixes:
+  - An `expires` or `add_header Cache-Control` directive no longer overrides
+    the caching headers of rewritten HTML (`Cache-Control: max-age=0,
+    no-cache`) or of `.pagespeed.` resources (one year, immutable). Before, a
+    location with `expires 1h` made rewritten HTML cacheable for an hour and
+    cut optimized resources down to an hour.
+  - Responses the module serves carry exactly one `Vary: Accept-Encoding`
+    line (uncompressed responses carried two), and `add_header` values are no
+    longer added to them a second time — a doubled
+    `Access-Control-Allow-Origin` is rejected by browsers. A response whose
+    own `Vary` lists `Accept-Encoding` among other tokens states that token
+    once as well.
+  - Content brought in by SSI includes, `sub_filter` and `addition` is
+    optimized with the rest of the page; the module used to see the page
+    before nginx expanded it.
+  - The module's body filters no longer read static files synchronously on
+    the event loop; nginx's copy filter delivers them in memory, as it does
+    for its own filters.
+  - Responses that in-place optimization is still working on carry
+    `s-maxage` (`InPlaceSMaxAgeSec`, default 10) so that shared caches fetch
+    them again once optimized; the old position kept this from taking effect.
+  `If-None-Match` on `.pagespeed.` resources still answers `304`, and the
+  `charset` directive still applies to rewritten HTML. The position applies
+  to the dynamically loaded module, which is what the packages ship; a build
+  that links the module into nginx statically keeps its previous position.
+
+- **A server start or configuration test can no longer hang on the optimizer
+  daemon's socket.** When the daemon directives are set, the module probes
+  the daemon's notification socket while the server starts. The probe used a
+  connect with no time limit, so a daemon that existed but was not accepting
+  connections (stopped, or overloaded) could hold the start or a config test
+  indefinitely. The probe now gives up after two seconds, reports that the
+  daemon did not accept a connection, and the server starts with in-place
+  optimization through the daemon off, as it already does for a daemon that
+  is not running. A missing socket, a permission problem and a refused
+  connection are reported at once, with the same messages as before. A
+  daemon that does not accept costs those two seconds once per start, not
+  once per virtual host: the timed-out answer is remembered per socket path
+  for ten seconds.
+
+- **Admin console text is readable in the light theme.** Secondary text
+  (timestamps, hints, empty states, table headers) and warning and success
+  text now meet the WCAG AA contrast ratio in both the light and the dark
+  theme; before, several were well below it on white.
+
+- **The Caches page cannot hang on an unusual cache description,** and it
+  describes the cache layers correctly (write-through pairs, the shared-memory
+  block size, disk-cache tiers, L1/L2 roles). Its views are proper tabs that
+  work with the arrow keys, and on a server where cache purging is off the
+  purge views are hidden and the page says how to turn purging on.
+
+- **The Graphs page says why it is empty.** It used to report a missing
+  graphs endpoint whenever it had nothing to draw. It now tells apart a server
+  without graphs, a statistics log with no samples yet, and a log with no
+  samples in the chosen range; on the global console it explains that with
+  per-virtual-host statistics enabled the whole-server log stops receiving
+  samples and links to this host's own console. With the per-interval view on,
+  graph titles name the interval (for example "per 1 min interval").
+
+- Graphs JSON reports a counter missing from a statistics-log segment as null
+  instead of an invented 0; charts show a gap rather than a dip.
+
+- With per-virtual-host statistics enabled, the whole-server statistics log
+  keeps receiving samples, so the whole-server console's Graphs page has
+  history again.
 
 - **HTTPS resources that mod_pagespeed fetches from its own server no
   longer fail certificate verification.** For a resource on an origin that
   no domain directive (such as `ModPagespeedDomain`) names, mod_pagespeed
   connects to its own server's IP address and sends the site's name in the
-  `Host` header. The serf fetcher of 1.x sent that name as SNI and checked
-  the certificate against it. The curl fetcher took both from the URL, that
-  is, the IP address: the server presented its default certificate,
-  verification failed with curl error 60, and the resource stayed
-  unoptimized. When the URL names the server by IP address, the fetcher now
-  takes the TLS server name from the `Host` header, as serf did, and still
-  connects to that address. This also applies to an HTTPS origin that
-  `MapOriginDomain` maps to an IP address. Fetches to a host name, and
-  fetches through a proxy, are unchanged.
+  `Host` header. The serf-based fetcher of earlier releases sent that name
+  as SNI and checked the certificate against it. The curl fetcher took both
+  from the URL, that is, the IP address: the server presented its default
+  certificate, verification failed with curl error 60, and the resource
+  stayed unoptimized. When the URL names the server by IP address, the
+  fetcher now takes the TLS server name from the `Host` header, as serf did,
+  and still connects to that address. This also applies to an HTTPS origin
+  that `MapOriginDomain` maps to an IP address. Such an origin must present
+  a certificate for the site's name, the name sent in the `Host` header; a
+  certificate that names only the IP address no longer passes. Fetches to a
+  host name, and fetches through a proxy, are unchanged.
+
 - **HTTPS fetches through a proxy work.** With `ModPagespeedFetchProxy`, or
   a proxy from the environment, an HTTPS fetch goes through a CONNECT
   tunnel. The fetcher took the proxy's answer to CONNECT for the origin's
   response headers and ignored the real ones, so every such fetch ended with
   status 0. The proxy's answer now stays with libcurl.
-- **The source tree builds with Bazel again.** The 2.1.0 `VERSION` file has
-  no `PRERELEASE=` line, and the genrule that writes `version.h` stopped with
-  `PRERELEASE: unbound variable`, so building the module failed on the
-  `v2.1.0` tag and on master.
+
+- **The source tree builds with Bazel when `VERSION` has no `PRERELEASE=`
+  line.** A final release's `VERSION` file can leave that line out. The step
+  that writes `version.h` then stopped with `PRERELEASE: unbound variable`,
+  and the module did not build from source. A missing line now means a final
+  release.
+
 - **HTTPS fetches work with a certificate directory alone.** With
   `ModPagespeedSslCertDirectory` set and no `ModPagespeedSslCertFile`, as in
   the configuration the Debian and Ubuntu packages install, the fetcher
   passed an empty CA file name to libcurl, and every HTTPS fetch failed with
   curl error 77 (`CURLE_SSL_CACERT_BADFILE`). The fetcher now uses the
   directory on its own.
+
 - **A server process that dies while holding a shared-memory lock no longer
   hangs every other process.** The mutexes the Apache and nginx modules keep
   in shared memory (metadata cache sectors, statistics, the message buffer,
@@ -52,14 +443,455 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the time of the upgrade needs a full stop and start: a graceful restart
   gives the new child processes robust mutexes, but the old, stuck ones keep
   waiting on the old mutexes.
+
 - **A process that dies while reading from the shared-memory cache no longer
   hangs the next writer.** A process or thread that terminated while it
   copied a value out of the cache left that entry marked as being read for
   good, and the next write or delete of the same key waited for it forever:
   the request hung, and an Apache child stuck this way did not exit on a
   graceful restart. A writer now gives up after one second, logs a warning
-  and drops the write. That key is not cached again until the server is
-  restarted.
+  and drops the write. That key is no longer kept in the shared-memory cache
+  until the server is restarted; it is still served from the file cache or
+  the external cache.
+
+- Thanks to [@trcyberoptic](https://github.com/trcyberoptic), who contributed
+  the HTTPS fetch, shared-memory and source-build fixes in this release.
+
+### Added
+
+- `CriticalCssAboveTheFoldOnly` (default off) makes
+  `prioritize_critical_css` inline only the rules for the first screen, as
+  releases since 1.15.0+r18 did. Choose it when the smallest inline block
+  matters more than content further down being styled from the first paint.
+  Apache: `ModPagespeedCriticalCssAboveTheFoldOnly on`; nginx:
+  `pagespeed CriticalCssAboveTheFoldOnly on;`; IIS:
+  `pagespeed CriticalCssAboveTheFoldOnly on`. `prioritize_critical_css`
+  depends on the beacon and therefore does nothing on Envoy, where this
+  setting has no effect either.
+
+- The whole-server admin console has a host lens: a Host selector in the
+  top bar (in the menu on a phone) narrows the URL index to one site and the
+  Logs timeline to the entries that name it. The lens follows the optimizer's
+  own rule for host names: every site the optimizer lists can be chosen —
+  names with an underscore and sites configured by address, such as
+  `[2001:db8::1]`, included — and a `lens=` link is read the way the
+  optimizer names a host (case, a port and a trailing dot do not matter); a
+  value the optimizer would never list is ignored. The choice is part of the
+  page address, so a link can be shared, and the browser remembers it: while
+  the lens is on the console's address always carries it — also after typing
+  an address or following a link without it — updated in place, so Back and
+  Forward are unaffected and a cleared lens stays cleared. Pages without
+  per-site figures say so while the lens is on. Per-host consoles are
+  unchanged.
+- A per-host console's Savings and Graphs pages show the optimizer's row
+  for the site the console belongs to — also when that is the site's
+  primary name rather than the name the console was opened under —
+  labelled with that name; when the site has no name of its own, or the
+  optimizer has no row for it yet, the card stays muted, and the Graphs
+  page says its optimizer savings chart covers the whole server. With an
+  older module the console matches its own name, as before.
+- With an optimizer that reports serve savings per host, the admin
+  console's Savings page lists them per site on the whole-server console,
+  leads with the selected site's figures when the host lens is on, and —
+  on a per-host console — shows that site's own optimizer savings instead
+  of only the server-wide total. An older optimizer is told apart and
+  nothing else changes.
+- With an optimizer package that records serve savings per host, the module
+  now names the host each response from the optimizer's cache was served
+  for, so the optimizer's statistics — and the admin console — can show
+  those savings per site. With an older optimizer package the serve is
+  recorded as before, without the host. Apache, nginx and IIS.
+
+- The admin console's Support page has a "Copy diagnostics" action: it copies
+  the module and console builds, the optimizer's version, a SHA-256
+  fingerprint of the configuration and the last 50 warnings and errors as
+  plain text, for a support request. Nothing is sent anywhere; a browser that
+  refuses the clipboard shows the text to copy by hand.
+
+- The admin message history can answer grouped by kind of message
+  (`message_history?grouped=1`): one row per message template — URLs,
+  hexadecimal identifiers and numbers folded, so repeats of one message share
+  a row — with its level, how often it was logged and when last, and with
+  `window_s=<seconds>` how often within that recent window. The ungrouped
+  answer is unchanged.
+- Every headline number on the Overview and Savings pages now states the window it counts over — since the module's restart or since the optimizer's — and a freshly restarted optimizer shows a "warming up" marker instead of percentages, with the raw counts kept. Each card carries a scope chip saying whose traffic it covers, the optimizer's server-wide cards are visibly muted on a per-host console with a link to the whole-server view, and the Overview's cache-serve figure is a link into the Savings page carrying its own percentage.
+
+- The Savings page explains each content type with a split of where its traffic went — already optimal (with the resources and original sizes behind that verdict), optimized and served, served compressed, and not yet optimized — instead of showing a bare percentage that reads as zero work; the byte figures say whether they are optimized bytes or transfer bytes of compressed copies. The cache hit rate moved to the optimizer card, is computed over optimizable types only, names how many requests it excludes (not optimizable or not recorded), and keeps the previous all-requests rate with its own label when the module is older than the split counters. A real but tiny saving reads "<1%" instead of "0%".
+
+- The statistics JSON the admin console reads now includes a start-time gauge: when the module's shared statistics were initialised, so every counter the console shows can state the window it counts over. It reads as a gauge and is set once, in the root process.
+
+- The daemon-serve statistics now split by content class: cache serves count per CSS, JavaScript, image and other, and fall-throughs per CSS, JavaScript and image (learned from the origin response, so a fall-through whose type is never known stays only in the total). The existing totals are unchanged, and a cache-serve hit rate over optimizable types can now be computed from them.
+
+- **In-place serving can send the optimizer's stored gzip and brotli copies
+  (Apache and nginx, off by default).** With
+  `ModPagespeedDaemonServeStoredEncodings on` (nginx:
+  `pagespeed DaemonServeStoredEncodings on;`), a stylesheet, script or SVG
+  image the optimizer has stored compressed is sent to a client that lists
+  `br` or `gzip` in `Accept-Encoding` as that stored copy — with
+  `Content-Encoding`, `Vary: Accept-Encoding` and a validator of its own —
+  instead of being compressed again on the way out. A client that does not
+  list the coding by name, HTML, and resources without a stored copy get
+  exactly the response they get today, and so does every request with the
+  directive off. With it on, the optimizer's serve statistics count the
+  bytes actually sent: `serve_savings.<type>.optimized_bytes` becomes the
+  compressed size for these serves, measured against the uncompressed
+  original, and `by_encoding` shows how many went out under each coding. The
+  default changes to on in a later release. Not available on IIS in this
+  release.
+
+- The whole-server admin console can read the optimizer's recent log (GET v1/daemon/logs with validated since/limit parameters); the per-virtual-host console answers it 403, an optimizer without the log endpoint answers 501 endpoint_unsupported_by_daemon, and an answer larger than the proxy accepts is 502 response_too_large.
+
+- The whole-server admin console can page the optimizer's cached-URL index (GET v1/daemon/cache/urls with validated offset/limit/hostname parameters); the per-virtual-host console answers it 403.
+
+- The whole-server admin console can read which cached variants the optimizer holds for a URL (GET v1/daemon/cache/alternates); a cached entry is named by its path, host and scheme (url, hostname, scheme — all required and validated), and a URL the optimizer holds nothing for answers 404 "not_in_index".
+
+- The whole-server admin console can read a cached image variant's bytes (GET v1/daemon/cache/content?url=…&hostname=…&scheme=…&alternate_id=…); only image/png, image/jpeg, image/gif, image/webp and image/avif are served, every response carries content-sniffing, script-execution, framing and cross-origin hardening headers, at most two reads (32 MiB) run at once per server worker process (whatever the number of virtual hosts), and a variant over the 16 MiB cap is an error, never a truncated image.
+
+- **The admin console opens on an Overview page.** One screen says whether the
+  module is working and what it has saved, whether the optimizer daemon is
+  running, not configured, unreachable or too old for this console, what the
+  optimizer saved on the responses it served, and which scope (this virtual
+  host or the whole server) the figures cover. Statistics moves to the second
+  navigation item; links lead to the detail pages.
+
+- **The Overview raises alerts.** Rules for the optimizer (failing health
+  checks, failed cache writes, new errors, compressed origin responses, busy
+  threads, saturated connections, a stopped browser, unreachable, or too old
+  for this console) and for the module (new resource fetch failures) show as
+  a ranked list, errors first, with a link to the page that has the detail.
+  Alerts based on counters fire only on an increase between two refreshes and
+  stay visible for a minute; a dismissed alert returns only after its
+  condition has cleared and come back. No optimizer configured raises nothing.
+
+- The console has a Savings page answering "how much am I saving?": module rewrite savings and optimizer cache-serve savings, each labelled, with a live chart of the savings rate per second. It is reachable at #/savings, in the navigation after Overview, and via g then v.
+
+- The Graphs page draws real time series with axes and time labels: the statistics log's history for the chosen range, with the live poll merged into the same lines. Counters show rates per second once the module names its gauges (gauges always draw raw), a counter reset shows as a gap instead of a spike, an idle or missing log no longer blanks the page while live counters exist, and long counter lists page through a "Show more" button.
+
+- The daemon cache panel's serve savings end in a total row, and the raw counters are one click away behind a disclosure.
+
+- The Statistics page shows when its counters were captured, on builds that report it.
+
+- The whole-server admin console gains a URLs page that pages the optimizer's cached-URL index, with client-side filter and sort of the current page (labelled as such), cooldown badges, and clear explanations when the module or optimizer cannot serve the index or the console is per-virtual-host.
+
+- The whole-server admin console gains a URL detail view: the optimizer's cached variants for one URL with format, quality and content-class badges, freshness, an in-cooldown banner, and image previews loaded two at a time (a busy server is retried); the URLs page rows and the Cache page's lookup result link to it.
+
+- The URL detail view can compare a cached variant with its original in an accessible before/after diff: a keyboard-operable slider (arrow keys, Home/End) and a manual blink toggle.
+
+- **IIS: the optimizer, installed with the module and off until you turn it
+  on.** The IIS installer now also installs the PageSpeed optimizer as the
+  Windows service `WeAmpPageSpeedOptimizer`, disabled, under its own virtual
+  account, with its cache volume directory and log. Turned on and pointed at
+  with the `DaemonSocketPath` and `DaemonVolumePath` directives, it takes over
+  in-place optimization: the module records each eligible resource, the
+  optimizer builds optimized variants of it, and the module serves the variant
+  that fits each client from the optimizer's volume. The optimizer needs no
+  Visual C++ runtime. An upgrade or repair keeps an optimizer you turned on
+  running, and keeps the cache size you chose (`OPTIMIZERCACHESIZE`, 1 GiB by
+  default). Existing installs that do not turn it on behave exactly as before.
+  See `docs/daemon-adapter-iis.md`.
+
+- **nginx: the module can now work with the optimizer daemon.** Point a
+  server block at the daemon with `pagespeed DaemonSocketPath` and
+  `pagespeed DaemonVolumePath` — the daemon's notification socket and its
+  shared cache volume — and the module records each eligible in-place
+  response into the optimizer's cache and answers in-place requests from
+  the optimizer's variants, as the Apache module does: the optimizer
+  builds optimized variants of the recorded resources, and the module
+  serves the variant that fits each client from the optimizer's volume.
+  The daemon relationship is resolved in the master process and the cache
+  volume is opened once per worker process; nothing on this path blocks
+  nginx's event loop. With both directives unset the classic in-place path
+  is unchanged. See `docs/install-nginx.md`.
+
+- **The admin console says when it cannot reach the server.** A banner above
+  the page names the problem, says when the figures on screen were last
+  refreshed, and offers "Retry now"; the page keeps its last data and retries
+  on its own, less often the longer the outage lasts. The top bar shows
+  "connected" or "reconnecting" instead of a fixed "running". An unreachable
+  optimizer daemon stays a panel state and does not raise the banner, while a
+  reverse proxy or load balancer answering with its own 502/503/504 counts as
+  an outage, so the banner holds steady behind a gateway too. Requests
+  that get no answer within 15 seconds count as unanswered.
+
+- **Messages can be opened filtered by severity.** A link such as
+  `#/messages?level=error` opens the Messages page showing errors and anything
+  more severe; the Overview's fetch-failure figure and alert open it at
+  warnings and worse. Each message now shows its time once (in the browser's
+  time zone, with the server's UTC time on hover) instead of twice.
+
+- **Keyboard shortcuts in the admin console.** `?` lists them (also from the
+  new button in the top bar), `r` refreshes the page's data, `/` jumps to the
+  page's search box, and `g` followed by a letter opens a page (for example
+  `g s` for Statistics, `g d` for Daemon Status). They never fire while typing
+  in a field or with Ctrl, Alt or Cmd held.
+
+- The statistics JSON now reports the console scope, the instance's host identity, a capture timestamp, and which counters are gauges; counter names are escaped, and a reply with no plain variables is no longer invalid JSON.
+
+- The statistics JSON includes the timed counters (such as num_rewrites_executed) as totals since start.
+
+- The per-vhost cache JSON reports backend statistics for the vhost's own cache path; the global view is unchanged.
+
+- Optimizer Logs page in the whole-server admin console (#/logs, "Optimizer daemon" group, shortcut g l): the optimizer's recent log, refreshed every 3 seconds and catching up when the optimizer logs faster than that, with level and text filters, follow mode with jump-to-newest, and markers where entries were dropped or the optimizer restarted. Needs an optimizer and a module that provide the log; otherwise, and on a per-host console, the page explains why it is empty. A control character embedded in a logged message (for example a line break) renders as a visible symbol instead of blank space, and each entry has a visible divider, so one entry's text can never be mistaken for another log line.
+
+- The overview's "Optimizer errors" alert links to the Optimizer Logs page filtered to errors, and the Messages and Optimizer Logs pages cross-link so an operator can tell the module's own log from the optimizer daemon's.
+
+### Changed
+
+- The Apache and nginx modules no longer leave any symbol of their bundled
+  TLS library for the web server to resolve, and no longer export internal
+  linker-section symbols. This is now verified for every release.
+
+- `prioritize_critical_css` fetches each full stylesheet from the place its
+  `<link>` had in the page instead of discovering it only after the page has
+  been parsed: the stylesheet is preloaded there and takes effect there as
+  soon as it has arrived, so the full styles land sooner and the order in
+  which a page's rules apply is exactly the page's own. A `<noscript>` copy
+  of the link follows each preload. Inline `<style>` blocks are now left in
+  place and complete (one that contains an `@import` therefore blocks as it
+  does without the filter), and alternate, print-only and `<noscript>`
+  stylesheets are no longer moved. `@keyframes` now stay in the inline
+  rules, so animations start with the first paint. A stylesheet keeps its
+  ordinary blocking `<link>` when it still has an `@import` the server could
+  not merge into it, when nearly all of it would be inline anyway, or when
+  its `<link>` carries an event-handler attribute, a `title` (a named set
+  of stylesheets) or `disabled`. The
+  `<noscript class="psa_add_styles">` blocks at the end of the body are
+  gone; a page script that looked for them finds the deferred stylesheets
+  as `link[data-pagespeed-deferred-css]`. The small inline script that
+  turns the stylesheets on now sits ahead of the first of them instead of
+  at the end of the body, and turns on whatever is in the page whenever it
+  runs; if something in front of the server delays inline scripts, the
+  full styles arrive when it does. Content a script adds while the page is
+  loading takes its rules from the full stylesheet.
+  If the stylesheet request fails, the link becomes an ordinary stylesheet
+  link at once, as on a page without the filter; a browser without preload
+  support gets the stylesheet when the document has been parsed.
+
+- `prioritize_critical_css` now inlines the rules for everything in the
+  page, not only for the first screen. Since 1.15.0+r18 only rules whose
+  selectors matched in the first screen were inlined, so on a slow
+  connection content further down could be shown partly styled, and then
+  move, while the full stylesheet was on its way. The inline block is
+  larger for it (on a long
+  page with a 110 KB stylesheet: about 58 KB instead of 46 KB, about 1.6 KB
+  more compressed, estimated). A selector a visitor's browser cannot parse
+  is now treated as needed. Pages pick the new rule up as visitors' browsers
+  report again; see `CriticalCssAboveTheFoldOnly` to keep the smaller block.
+  What the inline rules cover is the page as visitors' browsers last saw
+  it: content a script adds while the page is loading takes its rules from
+  the full stylesheet, and for pages whose markup differs from visitor to
+  visitor under one URL the filter is best left off. The browser reports
+  which rules the page uses once it has loaded, so content that a script
+  removes, hides or gives other class names before then (a loading overlay,
+  a `loading` class on the body) can be painted without the rules that
+  applied only to its earlier state, until the full stylesheet arrives.
+
+- Admin console layout: the sidebar always runs the full height of the
+  window, the top bar and every row of buttons, filters and toggles use one
+  even spacing and one control height, and "whole server" / "this host"
+  chips and the top bar's console label appear only where they tell the
+  two scopes apart.
+- Admin console pages now use the full width of the window and line up
+  with the top bar: cards, charts, statistics groups and the optimizer
+  status sections share the width in columns, tables use it in full, and
+  text keeps a readable line length. Rows of controls are grouped, the
+  sidebar highlights the whole row of the current page, and buttons inside
+  list rows use one compact size.
+- Serve savings per host now name only a host name the server's
+  configuration lists for the site that served the response: the
+  request's host when it is one of the site's exact names (Apache
+  `ServerName` or `ServerAlias`, nginx `server_name`), otherwise the site's
+  own primary name. A request that reached a site through a wildcard alias,
+  a regular expression, or because the site is the default one, counts under
+  that site's name, and a host name a visitor sends is never listed on its
+  own. A site reached under several exact names has one row per name used.
+  On Apache a site is listed under its `ServerName` only when its
+  configuration states one; a virtual host (or a main server) without a
+  `ServerName` of its own, on any address, records its serves under
+  "other", whatever name httpd derives for it (a request for one of its
+  exact `ServerAlias` names still counts under that name). The same holds
+  for any site without a usable name of its own (nginx `server_name _;`,
+  or only wildcard and regular-expression names): give each virtual host
+  its own `ServerName` to have it listed. Apache and nginx; on IIS every
+  serve is recorded under "other" for now, as the module does not yet read
+  IIS site bindings.
+- A per-host admin console now receives only its own site's row of the
+  optimizer's serve savings per host (v1/daemon/stats); every other site's
+  serves are added to "other", so the figures still add up, and the
+  whole-server console's answer is unchanged. When the optimizer's answer
+  cannot be read, a per-host console is told the optimizer is unreachable
+  instead of being sent the answer as it was. A per-host console opened
+  under one of a site's exact names sees the row of that name. On IIS and
+  Envoy a per-host console shows no per-site row.
+- The admin console's three optimizer pages (status, back-pressure, cache)
+  are one "Optimizer status" page with Health, Load and Cache sections; old
+  links and bookmarks land on the matching section.
+- The admin console's sidebar is grouped as Overview, Savings, URLs; Module
+  (Statistics, Histograms, Caches, Configuration); Optimizer (Status, Logs);
+  Help. Each entry shows its keyboard shortcut. Graphs is a view of
+  Statistics, and the old Console page's address opens Statistics with its
+  "Δ since open" column on.
+- The admin console's Messages and Optimizer Logs pages are one "Logs"
+  page: the module's messages and the optimizer's log on one timeline,
+  newest first, with a source filter, one level filter, repeats grouped per
+  source (one tick shows every entry) and dates on every time. The
+  optimizer's log on its own with grouping off is the live stream it was
+  before: oldest to newest, following the newest entry, with "Jump to
+  newest" and its restart and gap markers. Links to the old Messages page
+  keep their level and open the module's messages.
+- The admin console's Graphs view opens on six charts — in-place
+  requests, module and optimizer savings per second, the optimized-copy hit
+  rate, resource fetch failures and the optimizer's jobs in progress — with
+  history from the statistics log where it has one. "Add a counter" puts
+  any other counter next to them (the address keeps the choice), charts
+  without data yet are listed instead of drawn empty, and every counter is
+  one link away.
+- The admin console's Overview lists findings instead of a single health
+  line: each says what is wrong, how to fix it and where to read more, worst
+  first — among them the admin pages being reachable from another address,
+  the optimizer's cache not being in use, a recently started or briefly
+  unreachable optimizer, a development build, and the warnings logged in the
+  last 15 minutes, grouped by kind. A finding can be acknowledged; it then
+  waits in a collapsed group, and returns if its condition clears and comes
+  back. The summary line counts the findings, those that need action and
+  the warnings and errors logged in the last 15 minutes. With nothing to
+  report, the Overview says "No findings" and since when its counters run;
+  when the message log cannot be read it says the findings are unavailable
+  instead.
+- The admin console's Messages page shows warnings and errors by default
+  (Info is one tick away), folds repeats of one message into a single row
+  with a count and the time of the last one — the individual entries are a
+  click away —, no longer repeats the severity inside the text, and turns
+  http and https addresses in messages into links.
+- The admin console's Optimizer Logs page shows the date with each time.
+- The console now shows one consistent set of versions: the About page and the keyboard-shortcuts dialog list the module build (with a visible warning when it was built with uncommitted changes), the optimizer's version and commit, and the console build; the top bar shows the friendly tag form of the module build with the full build stamp in its tooltip, instead of the long stamp itself. Overview, Savings and About now use the same page header, content width and number formatting as the rest of the console.
+
+- The Savings chart's title now names the window and sample interval its data actually covers ("Last 6 min · 10 s samples") instead of a fixed "last hour", the y-axis carries a bytes-per-second unit, a pause in sampling breaks the line instead of bridging it with a straight segment, and the legend moved inside the card showing each series' latest value rather than placeholders under the card border. Charts also expose their summary as text for assistive technology and copy/paste.
+
+- **Breaking: purging through `pagespeed_admin/cache?purge=` with a GET no
+  longer works** (it answers 405). Send a POST with the
+  `X-Requested-With: XMLHttpRequest` header instead; purge the whole cache
+  (`purge=*`) from the global admin page (`pagespeed_global_admin`). Scripts
+  can keep using the `PURGE` request method (`PurgeMethod`), which is
+  unchanged. A per-host admin page now purges only its own host's URLs: a
+  script that purges another host's URL through it must use that host's
+  admin page or the whole-server admin page.
+
+- **Breaking for monitoring probes:** the admin console's optimizer status
+  paths (`v1/daemon/health`, `stats`, `cooldowns`) answer a request that
+  carries a query string with a 400 and a reason code instead of ignoring
+  the query string. A probe that appends a cache-buster to
+  `v1/daemon/health` must drop it.
+
+- nginx: in-place optimization no longer applies to requests that nginx
+  redirects internally. Resources referenced from rewritten HTML are
+  optimized as before.
+
+- **nginx: `add_header` and optimized resources.** Responses the module
+  generates (`.pagespeed.` resources and in-place optimized responses) do not
+  pass nginx's headers filter. They carry the headers of the origin response
+  they were made from — including what your `add_header` directives put on
+  it — exactly once. A resource read with `LoadFromFile` has no origin
+  response to inherit from: use `pagespeed AddResourceHeader` for a header
+  that must be on every optimized resource. In-place optimization records the
+  response as served, so caching headers set by `expires` or `add_header` are
+  what it sees.
+
+- **Admin console chrome now reflects the 2.1 product identity.** The console's
+  checked-in copy of the product facts (names, canonical URLs) was behind the
+  upstream single source; it is synced and the console bundle rebuilt.
+
+- **The admin console's Configuration page says which scope it shows** (this
+  virtual host or server-wide) and can show the options in effect for the
+  request, not only the server configuration. The Statistics page names the
+  host as well, and a console at a renamed global admin path says it shows
+  the whole server.
+
+- **The admin console's Messages page fetches only new messages on each
+  refresh** and says that the buffer is process-wide (all virtual hosts).
+
+- **The admin console's histograms are served as data, not as an HTML table
+  wrapped in JSON**; the page is lighter and no longer scrapes markup. Tools
+  reading the `histograms` endpoint get an array of objects.
+
+- **The admin console refreshes more gently.** Each page makes one request at
+  a time, waits longer after each failed refresh (up to a minute), makes no
+  requests while its browser tab is hidden and refreshes as soon as it is
+  shown again; the Overview does the same when the server does not answer.
+  Pages open at the same time share a read that is already under
+  way, and a busy answer from the optimizer daemon (another tab reading the
+  same panel) no longer shows as a failed refresh. The Caches page keeps
+  showing its last data when a refresh fails, like every other page.
+
+- **The admin console is easier to use with a keyboard or a screen reader.**
+  The navigation is grouped into Module, Optimizer daemon and Help pages, its
+  items are links that mark the current page, and a "Skip to content" button
+  leads the tab order. Moving to a page puts focus on its heading and names it
+  in the browser tab; every control shows a focus ring; an error that leaves a
+  page empty is announced; headings no longer skip levels. If reading the
+  configuration fails when the console first opens, it is retried once the
+  connection to the server is next seen restored.
+
+- **Daemon Cache shows serve savings per content type, as the module records
+  them.** The optimizer serves no page responses itself; the web server's
+  module serves optimized responses from the optimizer's cache and records
+  each one. The panel now says so, shows responses, original and served bytes
+  and the saving for each content type served, and names the types with
+  nothing recorded instead of listing rows of zeros. Daemon Status shows each
+  health check as "Pass" or "Fail" (with the reason when the optimizer gives
+  one) instead of raw JSON, and Daemon Back-pressure explains what the
+  "skipped" notification counts mean. A negative byte count from the optimizer
+  can no longer make the Overview's saving exceed the original size.
+
+- **Admin console tables work from the keyboard.** Sortable column headers
+  on Statistics and Console are buttons and announce the current order, and a
+  histogram can be chosen with the keyboard. Statistics shows the counter
+  descriptions by default (the choice to hide them is remembered), and on a
+  phone counter names wrap between words instead of mid-word.
+
+- **About shows the optimizer daemon's version and a documentation link;**
+  it no longer repeats the console's build version. The Support page's text no
+  longer ends in a double full stop.
+
+- **Plan for this before you upgrade: the disk cache starts empty again, and
+  the optimizer's cache directory moves to `v2`.** The cache library moves
+  to on-disk format 8 (CRC-32C checksums). The module's own cache
+  (`ModPagespeedFileCachePath`) opens a new file beside the old one, which is
+  left on disk for a warm rollback; delete it once you will not roll back.
+  The optimizer daemon moves its cache to
+  `/var/cache/pagespeed-optimizer/v2` and publishes cache-directory
+  generation 2; this module is built for generation 2 and the packaged
+  `pagespeed_daemon.conf` points `ModPagespeedDaemonVolumePath` at
+  `/var/cache/pagespeed-optimizer/v2/cache`. If you set that directive
+  yourself, change `v1` to `v2`: a module and daemon on different
+  generations refuse to attach, loudly, and in-place optimization stays off
+  until they agree. Install the module and the daemon as the matching pair
+  the packages already require.
+
+- **A cache write or delete that loses a cross-process lock wait now fails
+  instead of overlapping.** Under heavy write traffic one server process
+  could take the disk cache's lock from another process that still held it.
+  A process now waits for a live holder; a write or delete that has waited
+  250 ms in total gives up. The write is not stored (the entry is fetched
+  and written again on a later miss), and the delete is no longer counted
+  in `cyclone_cache_deletes` as if it had happened. The same applies to the
+  steps a write takes before storing: when the module cannot confirm the
+  target slot is empty, or cannot remove the entry already in it, the write
+  is dropped instead of stored over the live entry.
+
+- **After the disk cache wraps, entries from the previous lap stay readable
+  until overwritten** (wrap retention, now the default), so hit rates no
+  longer dip just past a wrap.
+- The admin console gets a shared visual foundation: one monospace stack
+  (system fonts, no more Courier fallback), tabular digits, one page width,
+  and a top bar that stays dark and legible in dark mode.
+- The console's pages share one header, width, number format and phone
+  layout: statistics group into collapsible families with an optional
+  "Δ since open" column (the old Console page now points there), histograms
+  gain a unit column and readable digits, the caches and daemon panels drop
+  icons and inverted labels for words, message and optimizer-log levels
+  share one colour palette, and phones get a closing drawer with card
+  tables and page scrolling.
 
 ## [2.1.0] - 2026-09-17
 

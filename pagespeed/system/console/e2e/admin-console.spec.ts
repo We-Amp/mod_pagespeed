@@ -19,44 +19,30 @@ test.describe("App shell", () => {
   test("loads and shows topbar with title", async ({ page }) => {
     await page.goto(BASE);
     // The chrome derives from the product facts: the product name in the
-    // logo, the vendor link, and the console-scope badge.
+    // logo and the vendor link; a per-host console carries no scope label.
     await expect(page.locator(".topbar-logo")).toContainText("mod_pagespeed");
-    await expect(page.locator(".topbar-badge")).toHaveText("Admin");
+    await expect(page.locator(".topbar-badge")).toHaveCount(0);
   });
 
-  test("sidebar has all 12 nav items", async ({ page }) => {
+  test("sidebar has all 10 nav items", async ({ page }) => {
     await page.goto(BASE);
     const items = page.locator(".nav-item");
-    await expect(items).toHaveCount(12);
+    await expect(items).toHaveCount(10);
     const labels = await items.allTextContents();
-    expect(labels).toEqual([
-      "Statistics",
-      "Configuration",
-      "Histograms",
-      "Caches",
-      "Console",
-      "Messages",
-      "Graphs",
-      "Daemon Status",
-      "Daemon Cache",
-      "Daemon Back-pressure",
-      "Support",
-      "About",
-    ]);
+    expect(labels).toEqual(["Overview", "Savings", "Statistics", "Histograms", "Caches", "Configuration", "Status", "Logs", "Support", "About"]);
   });
 
   test("clicking nav items changes the hash", async ({ page }) => {
     await page.goto(BASE);
-    await page.click('button.nav-item:has-text("Configuration")');
+    await page.click('a.nav-item:has-text("Configuration")');
     await expect(page).toHaveURL(/.*#\/configuration/);
-    await page.click('button.nav-item:has-text("Messages")');
-    await expect(page).toHaveURL(/.*#\/messages/);
+    await page.click('a.nav-item:has-text("Logs")');
+    await expect(page).toHaveURL(/.*#\/logs/);
   });
 
-  test("default route loads statistics page", async ({ page }) => {
+  test("default route loads the overview", async ({ page }) => {
     await page.goto(BASE);
-    // The default route should show the statistics page content.
-    await expect(page.locator("table tbody tr").first()).toBeVisible({
+    await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible({
       timeout: 10000,
     });
   });
@@ -224,23 +210,25 @@ test.describe("Console page", () => {
 // ---------------------------------------------------------------------------
 test.describe("Messages page", () => {
   test("shows messages with severity filters", async ({ page }) => {
-    await navigateTo(page, "#/messages");
+    // Warning and above is the default; a fresh server may have logged only
+    // Info lines, so include Info before expecting a row.
+    await navigateTo(page, "#/logs?level=info");
     // Wait for messages to load.
     await page.waitForTimeout(3000);
     // Should have filter checkboxes.
     await expect(page.locator('input[type="checkbox"]').first()).toBeVisible();
     // Should have at least one message row (startup messages).
-    const rows = page.locator(".message-row");
+    const rows = page.locator(".log-row");
     await expect(rows.first()).toBeVisible({ timeout: 10000 });
     const count = await rows.count();
     expect(count).toBeGreaterThan(0);
   });
 
   test("severity filter labels show counts", async ({ page }) => {
-    await navigateTo(page, "#/messages");
+    await navigateTo(page, "#/logs");
     await page.waitForTimeout(3000);
     // Should show "Info (N)" in one of the filter badges.
-    const infoFilter = page.locator("text=/Info \\(\\d+\\)/");
+    const infoFilter = page.locator("text=/info \\(\\d+\\)/");
     await expect(infoFilter).toBeVisible({ timeout: 5000 });
   });
 
@@ -281,6 +269,7 @@ test("no JavaScript errors navigating through all pages", async ({ page }) => {
   page.on("pageerror", (err) => errors.push(`${err.message}`));
 
   const hashes = [
+    "#/overview",
     "#/statistics",
     "#/configuration",
     "#/histograms",

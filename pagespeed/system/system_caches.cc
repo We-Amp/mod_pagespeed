@@ -854,4 +854,17 @@ void SystemCaches::PrintCacheStats(StatFlags flags, GoogleString* out) {
   }
 }
 
+void SystemCaches::PrintCachePathStats(SystemCachePath* cache_path,
+                                       GoogleString* out) {
+  if (cache_path == nullptr) {
+    return;
+  }
+  CycloneCache* cyclone_cache = cache_path->cyclone_cache();
+  if (cyclone_cache != nullptr && cyclone_cache->IsHealthy()) {
+    StrAppend(out, "\nCyclone cache '", cyclone_cache->config().cache_path,
+              "' statistics:\n");
+    cyclone_cache->PrintStats(out);
+  }
+}
+
 }  // namespace net_instaweb

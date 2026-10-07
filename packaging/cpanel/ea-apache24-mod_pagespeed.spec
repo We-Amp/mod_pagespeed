@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2024-2026 We-Amp B.V.
 
-%global mps_version 1.15.0
+%global mps_version 1.17.0
 %global mps_release 1
 %global upstream_rpm mod-pagespeed-%{mps_version}-%{mps_release}.x86_64.rpm
 # The stock upstream RPM filename carries NO dist tag (it is the same artifact
@@ -188,6 +188,14 @@ if [ "$1" = "0" ] && [ -x /scripts/restartsrv_httpd ]; then
 fi
 
 %changelog
+* Tue Oct 06 2026 Otto van der Schaaf <oschaaf@we-amp.com> - 2:1.17.0-1.cpanel
+- Repackage mod-pagespeed-1.17.0; mps_version tracks VERSION.
+
+* Thu Sep 17 2026 Otto van der Schaaf <oschaaf@we-amp.com> - 2:1.16.0-1.cpanel
+- Repackage mod-pagespeed-1.16.0 (2.1 GA). The GA-only upstream-RPM basename
+  gate caught the spec still pointing at 1.15.0 (fail-closed);
+  mps_version now tracks VERSION again.
+
 * Mon Jun 01 2026 Otto van der Schaaf <oschaaf@we-amp.com> - 2:1.15.0-2.cpanel
 - Set Epoch: 2. cPanel's EA4 repo ships ea-apache24-mod_pagespeed at Epoch=1
   (1:1.13.35.2), which outranks our epoch-less 1.15.0 in dnf — a plain

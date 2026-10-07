@@ -1,0 +1,6 @@
+body { margin: 0; font-family: sans-serif; color: #222; }
+.ncf-title { font-size: 40px; margin: 24px; }
+.ncf-lede { margin: 24px; max-width: 40em; }
+.ncf-spacer { height: 1600px; }
+.ncf-unused-banner { background: #fe9; padding: 12px 24px; }
+.ncf-unused-footer { border-top: 1px solid #ccc; padding: 24px; }

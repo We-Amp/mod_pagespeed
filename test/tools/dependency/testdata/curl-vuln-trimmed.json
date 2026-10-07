@@ -1,0 +1,277 @@
+[
+ {
+  "schema_version": "1.5.0",
+  "id": "CURL-CVE-2026-19931",
+  "aliases": [
+   "CVE-2026-19931"
+  ],
+  "summary": "Negotiate ambient user conn reuse",
+  "modified": "2026-09-07T10:34:51.00Z",
+  "database_specific": {
+   "package": "curl",
+   "affects": "both",
+   "URL": "https://curl.se/docs/CVE-2026-19931.json",
+   "www": "https://curl.se/docs/CVE-2026-19931.html",
+   "issue": "https://hackerone.com/reports/3923520",
+   "CWE": {
+    "id": "CWE-488",
+    "desc": "Exposure of Data Element to Wrong Session"
+   },
+   "last_affected": "8.21.0",
+   "severity": "Medium"
+  },
+  "published": "2026-09-02T08:00:00.00Z",
+  "affected": [
+   {
+    "ranges": [
+     {
+      "type": "SEMVER",
+      "events": [
+       {
+        "introduced": "7.64.1"
+       },
+       {
+        "fixed": "8.14.2"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.1"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.1"
+       },
+       {
+        "introduced": "8.21.0"
+       },
+       {
+        "fixed": "8.22.0"
+       }
+      ]
+     },
+     {
+      "type": "GIT",
+      "repo": "https://github.com/curl/curl.git",
+      "events": [
+       {
+        "introduced": "6c6035532383e300c712e4c1cd9fdd749ed5cf59"
+       },
+       {
+        "fixed": "7103a93b05bc69ea98ed9d05d02fa9eeba533f2f"
+       }
+      ]
+     }
+    ],
+    "versions": [
+     "8.21.0",
+     "8.20.0",
+     "8.19.0"
+    ]
+   }
+  ]
+ },
+ {
+  "schema_version": "1.5.0",
+  "id": "CURL-CVE-2026-8286",
+  "aliases": [
+   "CVE-2026-8286"
+  ],
+  "summary": "wrong STARTTLS connection reuse",
+  "modified": "2026-09-07T10:34:51.00Z",
+  "database_specific": {
+   "package": "curl",
+   "affects": "both",
+   "URL": "https://curl.se/docs/CVE-2026-8286.json",
+   "www": "https://curl.se/docs/CVE-2026-8286.html",
+   "issue": "https://hackerone.com/reports/3718195",
+   "CWE": {
+    "id": "CWE-295",
+    "desc": "Improper Certificate Validation"
+   },
+   "last_affected": "8.20.0",
+   "severity": "Low"
+  },
+  "published": "2026-06-24T08:00:00.00Z",
+  "affected": [
+   {
+    "ranges": [
+     {
+      "type": "SEMVER",
+      "events": [
+       {
+        "introduced": "7.30.0"
+       },
+       {
+        "fixed": "8.14.2"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.1"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.1"
+       },
+       {
+        "introduced": "8.21.0"
+       },
+       {
+        "fixed": "8.21.0"
+       }
+      ]
+     },
+     {
+      "type": "GIT",
+      "repo": "https://github.com/curl/curl.git",
+      "events": [
+       {
+        "introduced": "a1701eea289fe7ea80651f801cf992838a491dde"
+       },
+       {
+        "fixed": "a86efdd7ca5433de9231e650f18247de8319ad16"
+       }
+      ]
+     }
+    ],
+    "versions": [
+     "8.20.0",
+     "8.19.0",
+     "8.18.0"
+    ]
+   }
+  ]
+ },
+ {
+  "schema_version": "1.5.0",
+  "id": "CURL-CVE-2026-5773",
+  "aliases": [
+   "CVE-2026-5773"
+  ],
+  "summary": "wrong reuse of SMB connection",
+  "modified": "2026-09-07T10:34:51.00Z",
+  "database_specific": {
+   "package": "curl",
+   "affects": "both",
+   "URL": "https://curl.se/docs/CVE-2026-5773.json",
+   "www": "https://curl.se/docs/CVE-2026-5773.html",
+   "issue": "https://hackerone.com/reports/3650689",
+   "CWE": {
+    "id": "CWE-488",
+    "desc": "Exposure of Data Element to Wrong Session"
+   },
+   "last_affected": "8.19.0",
+   "severity": "Low"
+  },
+  "published": "2026-04-29T08:00:00.00Z",
+  "affected": [
+   {
+    "ranges": [
+     {
+      "type": "SEMVER",
+      "events": [
+       {
+        "introduced": "7.40.0"
+       },
+       {
+        "fixed": "8.14.2"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.1"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.0"
+       }
+      ]
+     },
+     {
+      "type": "GIT",
+      "repo": "https://github.com/curl/curl.git",
+      "events": [
+       {
+        "introduced": "aec2e865f06669b9cb5d26cc1148d70bc418b163"
+       },
+       {
+        "fixed": "74a169575d6412dc0ff532acdf94de35a6c2a571"
+       }
+      ]
+     }
+    ],
+    "versions": [
+     "8.19.0",
+     "8.18.0",
+     "8.17.0"
+    ]
+   }
+  ]
+ },
+ {
+  "schema_version": "1.5.0",
+  "id": "CURL-CVE-2000-0973",
+  "aliases": [
+   "CVE-2000-0973"
+  ],
+  "summary": "FTP Server Response Buffer Overflow",
+  "modified": "2026-04-25T17:48:46.00Z",
+  "database_specific": {
+   "package": "curl",
+   "affects": "both",
+   "URL": "https://curl.se/docs/CVE-2000-0973.json",
+   "www": "https://curl.se/docs/CVE-2000-0973.html",
+   "CWE": {
+    "id": "CWE-121",
+    "desc": "Stack-based Buffer Overflow"
+   },
+   "last_affected": "7.4",
+   "severity": "Critical"
+  },
+  "published": "2000-10-13T08:00:00.00Z",
+  "affected": [
+   {
+    "ranges": [
+     {
+      "type": "SEMVER",
+      "events": [
+       {
+        "introduced": "6.0"
+       },
+       {
+        "fixed": "7.4.1"
+       }
+      ]
+     },
+     {
+      "type": "GIT",
+      "repo": "https://github.com/curl/curl.git",
+      "events": [
+       {
+        "introduced": "ae1912cb0d494b48d514d937826c9fe83ec96c4d"
+       },
+       {
+        "fixed": "751d503f54596d6d86f969683fec2fe296d9d1f0"
+       }
+      ]
+     }
+    ],
+    "versions": [
+     "7.4",
+     "7.3",
+     "7.2.1"
+    ]
+   }
+  ]
+ }
+]

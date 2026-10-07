@@ -916,29 +916,29 @@ pagespeedutils.now = Date.now || function() {
   return +new Date();
 };
 var pagespeed = {CriticalCssLoader:{}};
-pagespeed.CriticalCssLoader.stylesAdded_ = !1;
-pagespeed.CriticalCssLoader.addAllStyles = function() {
-  if (!pagespeed.CriticalCssLoader.stylesAdded_) {
-    pagespeed.CriticalCssLoader.stylesAdded_ = !0;
-    for (var a = document.getElementsByClassName("psa_add_styles"), b = 0, c; c = a[b]; ++b) {
-      if (c.nodeName == "NOSCRIPT") {
-        var d = document.createElement("div");
-        d.innerHTML = c.textContent;
-        c = d.childNodes;
-        for (var e = 0; e < c.length; ++e) {
-          c[e].nodeType === 1 && c[e].removeAttribute("id");
-        }
-        document.body.appendChild(d);
-      }
-    }
+pagespeed.CriticalCssLoader.DEFERRED_ATTRIBUTE_ = "data-pagespeed-deferred-css";
+pagespeed.CriticalCssLoader.started_ = !1;
+pagespeed.CriticalCssLoader.apply_ = function(a) {
+  a.getAttribute("rel") == "preload" && a.setAttribute("rel", "stylesheet");
+};
+pagespeed.CriticalCssLoader.onLinkEvent_ = function(a) {
+  (a = a.target) && a.nodeName == "LINK" && a.hasAttribute(pagespeed.CriticalCssLoader.DEFERRED_ATTRIBUTE_) && pagespeed.CriticalCssLoader.apply_(a);
+};
+pagespeed.CriticalCssLoader.applyAll = function() {
+  for (var a = document.querySelectorAll("link[" + pagespeed.CriticalCssLoader.DEFERRED_ATTRIBUTE_ + "]"), b = 0; b < a.length; ++b) {
+    pagespeed.CriticalCssLoader.apply_(a[b]);
   }
 };
 pagespeed.CriticalCssLoader.Run = function() {
-  var a = pagespeedutils.getRequestAnimationFrame();
-  pagespeedutils.addHandler(window, "load", pagespeed.CriticalCssLoader.addAllStyles);
-  a && a(function() {
-    window.setTimeout(pagespeed.CriticalCssLoader.addAllStyles, 0);
-  });
+  if (!pagespeed.CriticalCssLoader.started_) {
+    pagespeed.CriticalCssLoader.started_ = !0;
+    document.addEventListener("load", pagespeed.CriticalCssLoader.onLinkEvent_, !0);
+    document.addEventListener("error", pagespeed.CriticalCssLoader.onLinkEvent_, !0);
+    var a = document.createElement("link");
+    a.relList && a.relList.supports && a.relList.supports("preload") || pagespeedutils.addHandler(document, "DOMContentLoaded", pagespeed.CriticalCssLoader.applyAll);
+    pagespeedutils.addHandler(window, "load", pagespeed.CriticalCssLoader.applyAll);
+    pagespeed.CriticalCssLoader.applyAll();
+  }
 };
 goog.exportSymbol("pagespeed.CriticalCssLoader.Run", pagespeed.CriticalCssLoader.Run);
 })();

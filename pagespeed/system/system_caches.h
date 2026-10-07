@@ -134,6 +134,12 @@ class SystemCaches {
   // Print out stats appropriate for the given flags combination.
   void PrintCacheStats(StatFlags flags, GoogleString* out);
 
+  // Prints statistics for one cache path's own Cyclone backend. Unlike
+  // PrintCacheStats this never enumerates other configured caches, so it is
+  // safe to show on a per-vhost view. Appends nothing when cache_path is null
+  // or its Cyclone backend is absent or unhealthy.
+  void PrintCachePathStats(SystemCachePath* cache_path, GoogleString* out);
+
   // For cases where the thread limit isn't known at construction time, call
   // set_thread_limit() before calling any other methods.
   void set_thread_limit(int thread_limit) { thread_limit_ = thread_limit; }

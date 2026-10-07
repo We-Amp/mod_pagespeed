@@ -97,6 +97,42 @@
     <SetProperty Id="WWWROOTDIR" Value="[IISWWWROOT]"
                  Before="CostFinalize" Sequence="both" />
 
+<?ifdef OptimizerDir ?>
+    <!-- The optimizer service's start type as the operator left it, read
+         in AppSearch, before an upgrade removes the old product and with
+         it the service. Raw REG_DWORD: "#2" automatic, "#3" manual,
+         "#4" disabled; empty on a first install. -->
+    <Property Id="OPTIMIZERSTARTTYPE">
+      <RegistrySearch Id="OptimizerStartTypeSearch" Root="HKLM"
+                      Key="SYSTEM\CurrentControlSet\Services\WeAmpPageSpeedOptimizer"
+                      Name="Start" Type="raw" />
+    </Property>
+
+    <!-- The optimizer's cache volume size in bytes: settable on the
+         msiexec command line (OPTIMIZERCACHESIZE=...), remembered in the
+         registry for later upgrades and repairs, 1 GiB when neither says
+         otherwise. The worker takes the size on its command line only,
+         so this is where it lives. A command-line value wins over the
+         remembered one: AppSearch would overwrite it, so it is saved
+         before and put back after. -->
+    <Property Id="OPTIMIZERCACHESIZE" Secure="yes">
+      <RegistrySearch Id="OptimizerCacheSizeSearch" Root="HKLM"
+                      Key="SOFTWARE\We-Amp\PageSpeed"
+                      Name="OptimizerCacheSize" Type="raw" />
+    </Property>
+    <SetProperty Id="OPTIMIZERCACHESIZECMDLINE" Value="[OPTIMIZERCACHESIZE]"
+                 Before="AppSearch" Sequence="both"
+                 Condition="OPTIMIZERCACHESIZE" />
+    <SetProperty Id="OPTIMIZERCACHESIZE" Action="RestoreCmdlineOptimizerCacheSize"
+                 Value="[OPTIMIZERCACHESIZECMDLINE]"
+                 After="AppSearch" Sequence="both"
+                 Condition="OPTIMIZERCACHESIZECMDLINE" />
+    <SetProperty Id="OPTIMIZERCACHESIZE" Action="DefaultOptimizerCacheSize"
+                 Value="1073741824"
+                 After="RestoreCmdlineOptimizerCacheSize" Sequence="both"
+                 Condition="NOT OPTIMIZERCACHESIZE" />
+<?endif ?>
+
     <!-- ================================================================ -->
     <!--  Directory layout                                                -->
     <!-- ================================================================ -->
@@ -111,6 +147,7 @@
         <Directory Id="PAGESPEEDDATA" Name="PageSpeed">
           <Directory Id="CACHEDIR" Name="cache" />
           <Directory Id="LOGDIR" Name="logs" />
+          <Directory Id="OPTIMIZERDIR" Name="optimizer" />
         </Directory>
       </Directory>
     </StandardDirectory>
@@ -286,6 +323,84 @@
             KeyPath="yes" />
     </Component>
 
+<?ifdef OptimizerDir ?>
+    <!-- ================================================================ -->
+    <!--  The optimizer worker (built when OptimizerDir is given: the     -->
+    <!--  verified contents of the pinned optimizer release's win-x64     -->
+    <!--  zip). Installed as a Windows service that is DISABLED: a fresh  -->
+    <!--  install behaves exactly as one without it until an operator     -->
+    <!--  enables the service and sets the two daemon directives.         -->
+    <!-- ================================================================ -->
+
+    <!-- The client library the module loads for the daemon path. The
+         module resolves it next to pagespeed_iis.dll (absolute path only;
+         the loader searches no directories). -->
+    <Component Id="OptimizerClientDll" Directory="INSTALLDIR" Guid="*">
+      <File Id="pagespeed.dll"
+            Source="$(var.OptimizerDir)\pagespeed.dll"
+            KeyPath="yes" />
+    </Component>
+
+    <!-- The worker and its service. Virtual account NT SERVICE\<name>:
+         no password, its own SID for the volume grant below. Arguments:
+         the pipe name and volume directory the installation guide tells
+         the operator to set in DaemonSocketPath and DaemonVolumePath (the
+         module has no defaults for them), a JSON log appended under the
+         product's logs directory. "[OPTIMIZERDIR]." rather than
+         "[OPTIMIZERDIR]": the property ends in a backslash, and a
+         backslash before the closing quote would escape it. -->
+    <Component Id="OptimizerService" Directory="INSTALLDIR" Guid="*">
+      <File Id="factory_worker.exe"
+            Source="$(var.OptimizerDir)\factory_worker.exe"
+            KeyPath="yes" />
+      <ServiceInstall Id="OptimizerServiceInstall"
+                      Name="WeAmpPageSpeedOptimizer"
+                      DisplayName="We-Amp PageSpeed Optimizer"
+                      Description="Optimizes the resources PageSpeed for IIS records, into a cache volume the IIS module reads. Disabled until you enable it; see the IIS installation guide."
+                      Type="ownProcess"
+                      Start="disabled"
+                      ErrorControl="normal"
+                      Account="NT SERVICE\WeAmpPageSpeedOptimizer"
+                      Arguments='--service --log-file "[LOGDIR]optimizer.log" --log-format json --socket pagespeed-optimizer --cache-dir "[OPTIMIZERDIR]." --cache-size [OPTIMIZERCACHESIZE]'
+                      Vital="no" />
+      <!-- Stopped before its files are replaced or removed; never started
+           by the installer (the service is disabled). -->
+      <ServiceControl Id="OptimizerServiceControl"
+                      Name="WeAmpPageSpeedOptimizer"
+                      Stop="both"
+                      Remove="uninstall"
+                      Wait="yes" />
+    </Component>
+
+    <!-- The remembered cache size. Permanent, like the volume directory:
+         a reinstall after an uninstall starts a fresh volume (the kept one
+         is moved aside, see below) at the size chosen before. -->
+    <Component Id="OptimizerCacheSizeValue" Directory="INSTALLDIR"
+               Guid="A1B2C3D4-1001-4000-8000-000000000007" Permanent="yes">
+      <RegistryValue Root="HKLM" Key="SOFTWARE\We-Amp\PageSpeed"
+                     Name="OptimizerCacheSize" Type="string"
+                     Value="[OPTIMIZERCACHESIZE]" KeyPath="yes" />
+    </Component>
+
+    <!-- The optimizer's own licence and notice files, from its zip. -->
+    <Component Id="OptimizerLicenseFile" Directory="INSTALLDIR" Guid="*">
+      <File Id="optimizer_LICENSE" Name="optimizer-LICENSE.txt"
+            Source="$(var.OptimizerDir)\LICENSE" KeyPath="yes" />
+    </Component>
+    <Component Id="OptimizerNoticeFile" Directory="INSTALLDIR" Guid="*">
+      <File Id="optimizer_NOTICE" Name="optimizer-NOTICE.txt"
+            Source="$(var.OptimizerDir)\NOTICE" KeyPath="yes" />
+    </Component>
+
+    <!-- The worker's cache volume directory. Permanent: an uninstall keeps
+         the optimized cache, as it keeps the module's own cache. -->
+    <Component Id="OptimizerVolumeDir" Directory="OPTIMIZERDIR"
+               Guid="A1B2C3D4-1001-4000-8000-000000000006"
+               KeyPath="yes" Permanent="yes">
+      <CreateFolder />
+    </Component>
+<?endif ?>
+
     <!-- ================================================================ -->
     <!--  Feature                                                         -->
     <!-- ================================================================ -->
@@ -299,6 +414,14 @@
       <ComponentRef Id="LogDirComp" />
       <ComponentRef Id="PagespeedConfig" />
       <ComponentRef Id="SitePagespeedConfig" />
+<?ifdef OptimizerDir ?>
+      <ComponentRef Id="OptimizerClientDll" />
+      <ComponentRef Id="OptimizerService" />
+      <ComponentRef Id="OptimizerVolumeDir" />
+      <ComponentRef Id="OptimizerLicenseFile" />
+      <ComponentRef Id="OptimizerNoticeFile" />
+      <ComponentRef Id="OptimizerCacheSizeValue" />
+<?endif ?>
     </Feature>
 
     <!-- ================================================================ -->
@@ -362,8 +485,12 @@
          relative to the same SystemFolder. No cmd.exe /c wrapper:
          Type-34 launches the exe directly (no shell, no extra process
          layer), same as RegisterModule. The [CACHEDIR] / [LOGDIR]
-         expansion already appends a trailing "\"; icacls accepts that
-         form, so we don't add a redundant trailing "." or anything else.
+         expansion ends in a backslash, and a backslash before the closing
+         quote escapes the quote: icacls then received the path with a
+         quote and the rest of the command line glued on, failed with
+         ERROR_INVALID_NAME (123), and Return="ignore" hid it, so the
+         grants were never applied. The trailing "." keeps the backslash
+         away from the quote and names the same directory.
          NETWORK SERVICE is granted as secondary for legacy AppPool
          models that don't run under ApplicationPoolIdentity.
 
@@ -375,13 +502,86 @@
          and leave the customer with no module at all). -->
     <CustomAction Id="GrantCacheAcl"
                   Directory="SystemFolder"
-                  ExeCommand='icacls.exe "[CACHEDIR]" /grant "*S-1-5-32-568:(OI)(CI)M" /grant "*S-1-5-20:(OI)(CI)M"'
+                  ExeCommand='icacls.exe "[CACHEDIR]." /grant "*S-1-5-32-568:(OI)(CI)M" /grant "*S-1-5-20:(OI)(CI)M"'
                   Execute="deferred" Impersonate="no" Return="ignore" />
 
     <CustomAction Id="GrantLogAcl"
                   Directory="SystemFolder"
-                  ExeCommand='icacls.exe "[LOGDIR]" /grant "*S-1-5-32-568:(OI)(CI)(RX,W)" /grant "*S-1-5-20:(OI)(CI)(RX,W)"'
+                  ExeCommand='icacls.exe "[LOGDIR]." /grant "*S-1-5-32-568:(OI)(CI)(RX,W)" /grant "*S-1-5-20:(OI)(CI)(RX,W)"'
                   Execute="deferred" Impersonate="no" Return="ignore" />
+
+<?ifdef OptimizerDir ?>
+    <!-- The volume directory. Every application pool writes into it, so
+         nothing here ever walks inside it: no recursive icacls, which would
+         follow a link a pool had planted and act, as SYSTEM, on whatever
+         it points at. Instead: on the first install that brings the
+         optimizer (including a reinstall after an uninstall, which kept
+         the directory: nothing proves it was left alone meanwhile), a
+         directory that already exists is moved aside, under a new name
+         each time, before CreateFolders makes a fresh one; the package then owns it (SYSTEM) and sets its
+         DACL on the directory alone. Inheritance removed; SYSTEM and
+         Administrators full control; the worker service's own SID modify;
+         IIS_IUSRS modify on the files inside (the pools read, record and,
+         on a refused start, remove a file they created) but on the
+         directory itself only list, read and create files, so no pool can
+         delete or replace the directory. The service SID exists only once
+         the service does, so these run after InstallServices. "NT SERVICE"
+         is not localized. -->
+    <CustomAction Id="MoveAsidePreexistingOptimizerDir"
+                  Directory="SystemFolder"
+                  ExeCommand='cmd.exe /c if exist "[PAGESPEEDDATA]optimizer" move "[PAGESPEEDDATA]optimizer" "[PAGESPEEDDATA]optimizer.pre-install-%RANDOM%%RANDOM%%RANDOM%"'
+                  Execute="deferred" Impersonate="no" Return="check" />
+    <CustomAction Id="SetOptimizerVolumeOwner"
+                  Directory="SystemFolder"
+                  ExeCommand='icacls.exe "[OPTIMIZERDIR]." /setowner "*S-1-5-18" /C'
+                  Execute="deferred" Impersonate="no" Return="ignore" />
+    <CustomAction Id="GrantOptimizerVolumeAcl"
+                  Directory="SystemFolder"
+                  ExeCommand='icacls.exe "[OPTIMIZERDIR]." /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "NT SERVICE\WeAmpPageSpeedOptimizer:(OI)(CI)M" "*S-1-5-32-568:(OI)(CI)(IO)M"'
+                  Execute="deferred" Impersonate="no" Return="ignore" />
+    <CustomAction Id="GrantOptimizerVolumeDirPools"
+                  Directory="SystemFolder"
+                  ExeCommand='icacls.exe "[OPTIMIZERDIR]." /grant "*S-1-5-32-568:(RX,WD)"'
+                  Execute="deferred" Impersonate="no" Return="ignore" />
+
+    <!-- Recovery: a crash-looping worker must not hot-loop, so restart
+         after one minute twice, then after five; the count resets after a
+         day. Set with sc.exe rather than the MsiServiceConfigFailureActions
+         table: Windows Installer opens the service without the start
+         right a restart action needs, and the install then fails with
+         access denied. -->
+    <CustomAction Id="SetOptimizerRecovery"
+                  Directory="SystemFolder"
+                  ExeCommand="sc.exe failure WeAmpPageSpeedOptimizer reset= 86400 actions= restart/60000/restart/60000/restart/300000"
+                  Execute="deferred" Impersonate="no" Return="ignore" />
+
+    <!-- An upgrade or repair installs the service Disabled again, as a
+         first install does. An operator who had enabled it gets back the
+         start type they chose, and an automatic service is started again,
+         so enabling the optimizer survives the next package. This runs
+         before StartServices brings IIS back, and net.exe start waits
+         until the worker reports RUNNING (it does so once initialized), so
+         the application pools start with the optimizer already answering. -->
+    <CustomAction Id="RestoreOptimizerAutoStart"
+                  Directory="SystemFolder"
+                  ExeCommand="sc.exe config WeAmpPageSpeedOptimizer start= auto"
+                  Execute="deferred" Impersonate="no" Return="ignore" />
+    <CustomAction Id="RestoreOptimizerManualStart"
+                  Directory="SystemFolder"
+                  ExeCommand="sc.exe config WeAmpPageSpeedOptimizer start= demand"
+                  Execute="deferred" Impersonate="no" Return="ignore" />
+    <CustomAction Id="RestartOptimizer"
+                  Directory="SystemFolder"
+                  ExeCommand="net.exe start WeAmpPageSpeedOptimizer"
+                  Execute="deferred" Impersonate="no" Return="ignore" />
+
+    <!-- The worker service appends its log in the product's logs
+         directory: read, execute and write, as the module has. -->
+    <CustomAction Id="GrantOptimizerLogAcl"
+                  Directory="SystemFolder"
+                  ExeCommand='icacls.exe "[LOGDIR]." /grant "NT SERVICE\WeAmpPageSpeedOptimizer:(OI)(CI)(RX,W)"'
+                  Execute="deferred" Impersonate="no" Return="ignore" />
+<?endif ?>
 
     <InstallExecuteSequence>
       <!-- Defensive w3wp kill: scheduled AFTER StopServices (which runs the
@@ -406,6 +606,26 @@
               Condition="NOT Installed OR REINSTALL" />
       <Custom Action="GrantLogAcl" After="GrantCacheAcl"
               Condition="NOT Installed OR REINSTALL" />
+<?ifdef OptimizerDir ?>
+      <Custom Action="MoveAsidePreexistingOptimizerDir" Before="CreateFolders"
+              Condition="NOT Installed AND NOT OPTIMIZERSTARTTYPE" />
+      <Custom Action="SetOptimizerVolumeOwner" After="InstallServices"
+              Condition="NOT Installed OR REINSTALL" />
+      <Custom Action="GrantOptimizerVolumeAcl" After="SetOptimizerVolumeOwner"
+              Condition="NOT Installed OR REINSTALL" />
+      <Custom Action="GrantOptimizerVolumeDirPools" After="GrantOptimizerVolumeAcl"
+              Condition="NOT Installed OR REINSTALL" />
+      <Custom Action="GrantOptimizerLogAcl" After="GrantOptimizerVolumeDirPools"
+              Condition="NOT Installed OR REINSTALL" />
+      <Custom Action="SetOptimizerRecovery" After="GrantOptimizerLogAcl"
+              Condition="NOT Installed OR REINSTALL" />
+      <Custom Action="RestoreOptimizerAutoStart" After="SetOptimizerRecovery"
+              Condition="OPTIMIZERSTARTTYPE=&quot;#2&quot; AND NOT REMOVE=&quot;ALL&quot;" />
+      <Custom Action="RestoreOptimizerManualStart" After="RestoreOptimizerAutoStart"
+              Condition="OPTIMIZERSTARTTYPE=&quot;#3&quot; AND NOT REMOVE=&quot;ALL&quot;" />
+      <Custom Action="RestartOptimizer" After="RestoreOptimizerManualStart"
+              Condition="OPTIMIZERSTARTTYPE=&quot;#2&quot; AND NOT REMOVE=&quot;ALL&quot;" />
+<?endif ?>
       <!-- Uninstall: remove IIS module registration before files go away. -->
       <Custom Action="UnregisterModule" Before="RemoveFiles"
               Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />

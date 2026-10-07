@@ -166,12 +166,29 @@ run_tests() {
     export PAGESPEED_SECONDARY_HOST="${PAGESPEED_SECONDARY_HOST:-localhost}"
     export PAGESPEED_SECONDARY_PORT="${PAGESPEED_SECONDARY_PORT:-8081}"
 
+    # The remote-configuration server (setup_apache_test.sh RCPORT) for
+    # system/test_remote_config.py, which arms its failure case directly.
+    # Falls back to RCPORT itself so an RCPORT override reaches the test too.
+    export PAGESPEED_REMOTE_CONFIG_PORT="${PAGESPEED_REMOTE_CONFIG_PORT:-${RCPORT:-8090}}"
+
     # Apache control + error-log paths for the graceful-restart thread-leak
     # regression test (test_graceful_restart_no_thread_leak). The test issues
     # `sudo $PAGESPEED_APACHE_CTL graceful` and greps the error log for AH03490.
     export PAGESPEED_SERVER_TYPE="${PAGESPEED_SERVER_TYPE:-apache}"
     export PAGESPEED_APACHE_CTL="${PAGESPEED_APACHE_CTL:-apache2ctl}"
     export PAGESPEED_APACHE_ERROR_LOG="${PAGESPEED_APACHE_ERROR_LOG:-/var/log/apache2/error.log}"
+
+    # Lane fixtures (test/system/conftest.py KNOWN_LANE_FIXTURES): the names
+    # setup_apache_test.sh provisioned, unless the caller pins a list.
+    if [ -z "${PAGESPEED_LANE_FIXTURES:-}" ] && [ -f /tmp/apache_pagespeed_test/lane_fixtures ]; then
+        PAGESPEED_LANE_FIXTURES="$(sort -u /tmp/apache_pagespeed_test/lane_fixtures | paste -sd, -)"
+    fi
+    export PAGESPEED_LANE_FIXTURES="${PAGESPEED_LANE_FIXTURES:-}"
+    export PAGESPEED_CACHE_DIR="${PAGESPEED_CACHE_DIR:-/var/cache/mod_pagespeed}"
+    export PAGESPEED_SECONDARY_CACHE_DIR="${PAGESPEED_SECONDARY_CACHE_DIR:-/var/cache/mod_pagespeed_secondary}"
+    export PAGESPEED_DOC_ROOT="${PAGESPEED_DOC_ROOT:-/var/www/html}"
+    export PAGESPEED_STATS_LOG="${PAGESPEED_STATS_LOG:-/var/log/pagespeed/stats_log_global}"
+    log_info "Lane fixtures: ${PAGESPEED_LANE_FIXTURES:-<none>}"
 
     log_info "Test server: http://$PAGESPEED_HOST:$PAGESPEED_PORT"
     log_info "HTTPS server: https://$PAGESPEED_HTTPS_HOST:$PAGESPEED_HTTPS_PORT"
@@ -219,6 +236,10 @@ main() {
         log_info "Build complete (--build-only specified)"
         exit 0
     fi
+
+    # Statistics-log timestamps must be from this run (statistics_logging.sh
+    # START_TIME); setup_apache_test.sh empties the log before Apache starts.
+    export PAGESPEED_LANE_START_MS="${PAGESPEED_LANE_START_MS:-$(date +%s)000}"
 
     # Setup cleanup trap
     trap cleanup EXIT

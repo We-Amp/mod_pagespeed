@@ -24,9 +24,11 @@ on full process teardown (PoolDestroyed()). On a per-child graceful recycle
 (``apache2ctl graceful``) the factory is NOT destroyed, so the joinable thread
 kept the old child alive forever.
 
-Each stuck child holds an Apache scoreboard slot. With a small MPM (this test
-relies on the prefork MPM pinned by setup_apache_test.sh with a tight
-ServerLimit/MaxRequestWorkers), the scoreboard fills within a few graceful
+Each stuck child holds an Apache scoreboard slot. This test relies on the
+fixed prefork pool pinned by setup_apache_test.sh: sixteen children and a
+ServerLimit of 32, i.e. room for exactly one extra generation while the old
+one exits. Stuck children accumulate next to each new generation until all
+32 slots are taken, so the scoreboard fills within a few graceful
 cycles and Apache logs ``AH03490: scoreboard is full, not at MaxRequestWorkers``
 and can no longer fork new workers.
 
@@ -66,16 +68,11 @@ from typing import List, Optional, Set
 
 import pytest
 
-# How many graceful cycles to run. Pre-fix, the small (ServerLimit 6) prefork
-# scoreboard is exhausted in well under this many cycles; post-fix the child set
-# returns to baseline on every cycle.
+# How many graceful cycles to run. Pre-fix, the prefork scoreboard
+# (ServerLimit 32, a fixed pool of 16 on this lane) is exhausted in well under
+# this many cycles;
+# post-fix the child set returns to baseline on every cycle.
 GRACEFUL_CYCLES = 25
-
-# Tail window (bytes) read from the Apache error log for the AH03490 probe.
-# Named so the baseline probe can refuse to reason from a SATURATED window:
-# when the pre-test log already fills it, the post-test slice of "new" lines
-# is empty by construction and the absence assertion passes vacuously.
-ERROR_LOG_TAIL_BYTES = 200_000
 
 # Per-cycle budget for old children to exit after `graceful`. Generous so the
 # assertion is robust to async graceful shutdown under load, not an instant
@@ -152,11 +149,41 @@ def _run_graceful() -> None:
     )
 
 
-def _read_error_log_tail(
-    num_bytes: int = ERROR_LOG_TAIL_BYTES,
-) -> Optional[str]:
-    """Return the decoded log tail, or None when the log cannot be read.
+def _log_size() -> Optional[int]:
+    """Return the current size of the Apache error log in bytes, or None
+    when it cannot be determined.
 
+    None -- not 0 -- is the unreadable signal, the same reasoning as
+    _read_log_from below: a probe that cannot stat the log must never be
+    mistaken for a freshly-rotated, empty one.
+    """
+    path = _error_log_path()
+    try:
+        return os.path.getsize(path)
+    except OSError:
+        try:
+            res = subprocess.run(
+                ["sudo", "-n", "stat", "-c", "%s", path],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                timeout=15,
+            )
+            if res.returncode != 0:
+                return None
+            return int(res.stdout.decode("utf-8", errors="replace").strip())
+        except (subprocess.SubprocessError, OSError, ValueError):
+            return None
+
+
+def _read_log_from(offset: int) -> Optional[str]:
+    """Return the decoded log content from `offset` onward, or None when the
+    log cannot be read.
+
+    Reading from a byte offset recorded before the graceful loop -- the
+    same pattern as system/test_encoded_absolute_urls.py's _read_log_from
+    -- measures exactly the lines the loop produced, whatever the log's
+    total size. There is no tail window to saturate: log volume built up
+    before the offset was recorded cannot decide this test either way.
     None -- not "" -- is the unreadable signal on purpose: the leak test
     asserts the ABSENCE of a needle (AH03490), and an empty string would
     satisfy that assertion vacuously, making a broken probe (for example a
@@ -167,22 +194,19 @@ def _read_error_log_tail(
     path = _error_log_path()
     try:
         with open(path, "rb") as f:
-            try:
-                f.seek(-num_bytes, os.SEEK_END)
-            except OSError:
-                f.seek(0)
+            f.seek(offset)
             return f.read().decode("utf-8", errors="replace")
     except (FileNotFoundError, PermissionError):
         # Best-effort fallback via sudo if the log isn't world-readable.
         try:
-            # Binary, not text=True: the tail window is not guaranteed to be
+            # Binary, not text=True: the read window is not guaranteed to be
             # valid UTF-8. Apache logs raw request/response fragments, so a
             # gzip or image payload puts arbitrary bytes in the file and
             # text=True's strict decode raises UnicodeDecodeError, killing
             # the test. Decode permissively -- the needle this test greps
             # for (AH03490) is plain ASCII and survives errors="replace".
             res = subprocess.run(
-                ["sudo", "-n", "tail", "-c", str(num_bytes), path],
+                ["sudo", "-n", "tail", "-c", f"+{offset + 1}", path],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
                 timeout=15,
@@ -231,7 +255,7 @@ class TestGracefulRestartThreadLeak:
         # exists() is not readability: a present-but-unreadable log whose
         # sudo fallback also fails must skip here, not sail through with a
         # vacuously-empty log.
-        if _read_error_log_tail() is None:
+        if _log_size() is None:
             pytest.skip(f"Apache error log not readable: {error_log}")
 
         # A pagespeed-enabled URL — fetching it makes the serving child touch
@@ -240,8 +264,8 @@ class TestGracefulRestartThreadLeak:
         warm_url = f"{example_root}/?PageSpeedFilters=collapse_whitespace"
 
         def warm_children() -> None:
-            # Several requests so the small prefork pool spins up workers and
-            # each that serves a request starts its Cyclone thread.
+            # Several requests so workers of the fixed prefork pool serve a
+            # pagespeed request and each such worker starts its Cyclone thread.
             for _ in range(8):
                 try:
                     client.get(warm_url)
@@ -258,32 +282,16 @@ class TestGracefulRestartThreadLeak:
             "is Apache running with a forking MPM?"
         )
 
-        # Record how much of the error log already exists so we only inspect
-        # lines produced during this test. The probe must actually run: None
-        # means unreadable, and measuring "new" lines against a failed probe
-        # would silently corrupt the absence assertion below.
-        pre_tail = _read_error_log_tail()
-        assert pre_tail is not None, (
+        # Record the log's current byte offset so we only inspect lines
+        # produced during this test, however much already existed before
+        # it -- the same pattern as system/test_encoded_absolute_urls.py.
+        # The probe must actually run: None means unreadable, and measuring
+        # "new" lines against a failed probe would silently corrupt the
+        # absence assertion below.
+        pre_offset = _log_size()
+        assert pre_offset is not None, (
             f"Apache error log at {error_log} became unreadable mid-test; "
             "refusing to measure new log lines against a failed probe"
-        )
-        pre_log_len = len(pre_tail)
-        # Fail closed on a saturated tail window. The AH03490 assertion below
-        # reasons over post_tail[pre_log_len:]; when the pre-test log already
-        # fills the tail window, pre_log_len equals the window size and that
-        # slice is EMPTY BY CONSTRUCTION -- the AH03490 absence assertion
-        # passes on an empty slice no matter what the graceful loop logged.
-        # This is not theoretical: the default probe target is the
-        # persistent system error log, which grows past the window on a
-        # reused runner. Refuse to run the absence assertion from a
-        # saturated probe.
-        assert pre_log_len < ERROR_LOG_TAIL_BYTES, (
-            f"Apache error log at {error_log} already fills the "
-            f"{ERROR_LOG_TAIL_BYTES}-byte tail window before this test runs; "
-            "the post-test slice of new lines would be empty by construction "
-            "and the AH03490 absence assertion would pass vacuously. "
-            "Truncate or rotate the log (or raise ERROR_LOG_TAIL_BYTES) to "
-            "run this test."
         )
 
         max_child_count = baseline_count
@@ -331,11 +339,12 @@ class TestGracefulRestartThreadLeak:
         )
 
         # 2. Child count did not grow monotonically / unboundedly. With a clean
-        #    recycle the count stays near baseline; allow generous slack for
-        #    transient overlap of an exiting old generation and a new one, but
-        #    catch true accumulation (pre-fix the count climbs to ServerLimit
-        #    and stays pinned there). baseline+ServerLimit headroom is a safe
-        #    upper bound; anything approaching 2x ServerLimit means leaking.
+        #    recycle the count stays at the fixed pool size (the baseline,
+        #    16); allow slack for an exiting old generation still being
+        #    counted next to the new one, but catch true accumulation: pre-fix
+        #    every child that served a pagespeed request stays behind next to
+        #    each new generation, pushing the count towards ServerLimit
+        #    (32 = baseline + 16), past this bound.
         assert max_child_count <= baseline_count + 8, (
             f"Apache child count grew to {max_child_count} (baseline "
             f"{baseline_count}); old children are accumulating instead of "
@@ -347,13 +356,12 @@ class TestGracefulRestartThreadLeak:
         #    polarity, so it is only as strong as the probe behind it: an
         #    unreadable log would satisfy it vacuously. Fail closed instead
         #    of concluding "no AH03490" from a log we could not read.
-        post_tail = _read_error_log_tail()
-        assert post_tail is not None, (
+        new_log = _read_log_from(pre_offset)
+        assert new_log is not None, (
             f"Apache error log at {error_log} unreadable after the graceful "
             "loop; refusing to conclude AH03490 is absent from a log this "
             "test could not read"
         )
-        new_log = post_tail[pre_log_len:]
         assert "AH03490" not in new_log, (
             "Apache logged AH03490 (scoreboard is full) during the graceful "
             "loop — children are not exiting, the Cyclone HitTracker thread is "
@@ -372,21 +380,22 @@ class TestGracefulRestartThreadLeak:
         )
 
 
-def test_read_error_log_tail_fallback_tolerates_binary_log_content(
+def test_read_log_from_fallback_tolerates_binary_log_content(
     monkeypatch, tmp_path
 ):
     """Unit regression for the sudo-tail fallback crashing on binary logs.
 
     The fallback used ``text=True``, whose strict UTF-8 decode raises
-    UnicodeDecodeError when the tailed window holds arbitrary bytes (a gzip
+    UnicodeDecodeError when the read window holds arbitrary bytes (a gzip
     or image payload Apache logged raw request/response fragments of).
     That exception is not a SubprocessError/OSError, so it escaped the
     fallback's own except clause and killed the test. This feeds the
     fallback a gzip-magic-bytes payload through a subprocess.run stub that
     reproduces text=True's strict-decode behaviour exactly, so the test is
-    red on the unfixed code and needs neither sudo nor a running Apache.
+    red on a ``text=True`` reimplementation and needs neither sudo nor a
+    running Apache.
     """
-    # A tailed window with gzip magic bytes (\x1f\x8b) amid plain-ASCII log
+    # A read window with gzip magic bytes (\x1f\x8b) amid plain-ASCII log
     # lines, including the needle the leak test greps for.
     needle = b"AH03490: scoreboard is full, not at MaxRequestWorkers"
     payload = (
@@ -413,7 +422,7 @@ def test_read_error_log_tail_fallback_tolerates_binary_log_content(
     )
     monkeypatch.setattr(subprocess, "run", fake_run)
 
-    tail = _read_error_log_tail()
+    tail = _read_log_from(0)
 
     assert isinstance(tail, str)
     # The ASCII needle must survive the decode...
@@ -422,9 +431,7 @@ def test_read_error_log_tail_fallback_tolerates_binary_log_content(
     assert "�" in tail
 
 
-def test_read_error_log_tail_returns_none_when_sudo_tail_fails(
-    monkeypatch, tmp_path
-):
+def test_read_log_from_returns_none_when_sudo_tail_fails(monkeypatch, tmp_path):
     """A failed sudo tail must read as "probe did not run", not as "".
 
     The leak test asserts the ABSENCE of AH03490, so a helper that reports
@@ -445,7 +452,7 @@ def test_read_error_log_tail_returns_none_when_sudo_tail_fails(
     )
     monkeypatch.setattr(subprocess, "run", fake_run)
 
-    assert _read_error_log_tail() is None
+    assert _read_log_from(0) is None
 
 
 def test_leak_test_fails_closed_on_an_unreadable_log():
@@ -461,7 +468,7 @@ def test_leak_test_fails_closed_on_an_unreadable_log():
     source = inspect.getsource(
         TestGracefulRestartThreadLeak.test_graceful_restart_no_thread_leak
     )
-    probe_check = source.find("post_tail is not None")
+    probe_check = source.find("new_log is not None")
     needle_check = source.find('"AH03490" not in')
     assert probe_check != -1, "leak test lost its probe check"
     assert needle_check != -1, "leak test lost its AH03490 absence assertion"
@@ -471,34 +478,39 @@ def test_leak_test_fails_closed_on_an_unreadable_log():
     )
 
 
-def test_leak_test_fails_closed_on_a_saturated_log_tail(monkeypatch):
-    """A pre-test log that fills the tail window must not read as green.
+def test_leak_test_measures_new_log_content_regardless_of_pre_existing_volume(
+    monkeypatch,
+):
+    """However much log already existed before the graceful loop, AH03490
+    written during the loop must still be caught.
 
-    When pre_tail saturates the tail window, post_tail[pre_log_len:] is
-    empty BY CONSTRUCTION, so "AH03490" not in "" passes even with AH03490
-    freshly logged during the graceful loop -- the same gate-cannot-go-red
-    shape as the None contract above, one level up. Drive the shipped test
-    end to end with a saturated pre-test tail and a fresh AH03490 in the
-    post-test tail: it must fail closed on the saturation assert. On code
-    without that assert the method completes green and this test is red.
+    The old fixed-size tail window failed closed once the pre-test log
+    passed the window size, so a busy lane could mask the very defect the
+    test exists to catch. The byte-offset reader has no such window: it
+    reads from the offset recorded before the loop, so a pre-test log far
+    bigger than the old 200 KB tail cannot hide a fresh AH03490. Drive the
+    shipped test end to end with a huge recorded offset and confirm the
+    AH03490 written "after" it is still caught.
     """
     this_module = sys.modules[__name__]
 
     needle = "AH03490: scoreboard is full, not at MaxRequestWorkers\n"
-    pre_tail = "x" * ERROR_LOG_TAIL_BYTES
-    post_tail = "y" * (ERROR_LOG_TAIL_BYTES - len(needle)) + needle
+    huge_pre_test_size = 5_000_000  # far bigger than the old 200 KB tail
 
     monkeypatch.setattr(this_module, "_have_sudo", lambda: True)
+    monkeypatch.setattr(this_module, "_log_size", lambda: huge_pre_test_size)
 
-    reads = []
+    reads = {"n": 0}
 
-    def fake_read(num_bytes=ERROR_LOG_TAIL_BYTES):
-        reads.append(1)
-        # Calls 1 (readability gate) and 2 (baseline) see the saturated
-        # pre-test log; call 3 (post-loop) sees a fresh AH03490 in the tail.
-        return pre_tail if len(reads) <= 2 else post_tail
+    def fake_read_log_from(offset):
+        assert offset == huge_pre_test_size, (
+            "must read from the offset recorded before the graceful loop, "
+            f"got {offset}"
+        )
+        reads["n"] += 1
+        return needle  # freshly written during the loop
 
-    monkeypatch.setattr(this_module, "_read_error_log_tail", fake_read)
+    monkeypatch.setattr(this_module, "_read_log_from", fake_read_log_from)
 
     # A fake child set that recycles cleanly on every graceful, so the ONLY
     # thing that can fail is the log reasoning under test.
@@ -524,7 +536,7 @@ def test_leak_test_fails_closed_on_a_saturated_log_tail(monkeypatch):
         def get(self, url):
             return None
 
-    with pytest.raises(AssertionError, match="tail window"):
+    with pytest.raises(AssertionError, match="AH03490"):
         TestGracefulRestartThreadLeak().test_graceful_restart_no_thread_leak(
             _Client(), _Config(), "http://example"
         )

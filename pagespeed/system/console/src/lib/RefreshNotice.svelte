@@ -32,11 +32,12 @@
     border: 1px solid var(--ps-warning);
     border-radius: var(--ps-border-radius);
     background: var(--ps-bg-secondary);
-    color: var(--ps-warning);
+    color: var(--ps-text);
     font-size: var(--ps-font-size-sm);
   }
 
   .refresh-notice-icon {
     flex-shrink: 0;
+    color: var(--ps-warning-text);
   }
 </style>

@@ -290,15 +290,25 @@ if [ -n "$CHOSEN" ]; then
 fi
 
 # 3. Fall back to the authoritative CI hub shared dir.
-FETCHED="/tmp/${BASENAME}"
+# Fetch into a private directory that is removed on exit. On a container
+# runner /tmp lives in the container's writable layer, so a copy left behind
+# by every job accumulates: one build host's runners once held 750+
+# stale ~245 MB copies, the host disk filled, and jobs failed with ENOSPC.
+# A private directory also keeps two jobs on one host from sharing a path.
+# Removed explicitly on every path below rather than by an EXIT trap: under
+# bash 3.2 (macOS runners) a trap turns a ${VAR:?} guard abort into exit 0.
+FETCH_DIR="$(mktemp -d "${TMPDIR:-/tmp}/vendor-fetch.XXXXXX")"
+FETCHED="${FETCH_DIR}/${BASENAME}"
 if fetch_from_hub "$FETCHED"; then
   # The fetched copy was verified by fetch_from_hub a moment ago, so an
   # extraction failure here is not a fetch/integrity problem; there is no
   # further fallback -- fail loud.
   if extract_workspace "$FETCHED"; then
+    rm -rf "$FETCH_DIR"
     log "Workspace extracted into ${DEST}"
     exit 0
   fi
+  rm -rf "$FETCH_DIR"
   err "Vendor tarball ${BASENAME} was fetched from the CI hub and passed integrity,"
   err "but extraction into ${DEST} still failed on $(hostname). Investigate the"
   err "runner's tar/zstd toolchain and the destination filesystem; re-running"
@@ -306,6 +316,7 @@ if fetch_from_hub "$FETCHED"; then
   exit 1
 fi
 
+rm -rf "$FETCH_DIR"
 err "Vendor tarball ${BASENAME} is unavailable on $(hostname) AND could not be"
 err "fetched/verified from the CI hub after ${FETCH_RETRIES} attempts."
 err "Most likely the producing vendor job's artifact was cleaned up by the"
