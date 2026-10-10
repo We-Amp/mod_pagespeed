@@ -104,8 +104,8 @@ RUN set -e; if [ "$(dpkg --print-architecture)" = "arm64" ]; then \
     fi
 
 # Install Python packages for system tests
-RUN pip3 install --no-cache-dir --break-system-packages requests==2.32.4 pytest==8.3.5 2>/dev/null || \
-    pip3 install --no-cache-dir requests==2.32.4 pytest==8.3.5
+RUN pip3 install --no-cache-dir --break-system-packages requests==2.32.4 pytest==9.1.1 2>/dev/null || \
+    pip3 install --no-cache-dir requests==2.32.4 pytest==9.1.1
 
 # Download and configure nginx source (required for building ngx_pagespeed)
 # The nginx_repository bazel rule looks for source at /usr/local/src/nginx
