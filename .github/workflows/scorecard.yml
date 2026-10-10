@@ -1,0 +1,49 @@
+name: Scorecard supply-chain security
+on:
+  # Re-run when the branch protection configuration changes.
+  branch_protection_rule:
+  # Weekly scan.
+  schedule:
+    - cron: '17 3 * * 2'
+  push:
+    branches: [ "master" ]
+
+# Default to no permissions; the job requests what it needs.
+permissions: read-all
+
+jobs:
+  analysis:
+    name: Scorecard analysis
+    runs-on: ubuntu-latest
+    permissions:
+      # Needed to upload results to the code scanning dashboard.
+      security-events: write
+      # Needed to publish results and get a badge (OIDC token).
+      id-token: write
+      contents: read
+      actions: read
+
+    steps:
+      - name: "Checkout code"
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: "Run analysis"
+        uses: ossf/scorecard-action@2d1146689b8cda280b9bc96326124645441f03bc # v2.4.4
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          publish_results: true
+
+      - name: "Upload artifact"
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: SARIF file
+          path: results.sarif
+          retention-days: 5
+
+      - name: "Upload to code-scanning"
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          sarif_file: results.sarif
