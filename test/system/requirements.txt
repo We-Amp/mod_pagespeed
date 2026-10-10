@@ -7,7 +7,7 @@
 
 # Testing framework
 # Pin matches docker/Dockerfile to ensure CI / local / package-test resolve the same version.
-pytest==8.3.5
+pytest==9.1.1
 
 # pytest plugins
 pytest-timeout==2.3.1    # Test timeout support
