@@ -13,11 +13,7 @@ set -e
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if [ ! -d node_modules/playwright ]; then
-  if [ -f package-lock.json ]; then
-    npm ci --no-fund --no-audit
-  else
-    npm install --no-fund --no-audit
-  fi
+  npm ci --no-fund --no-audit
 fi
 
 # Fetch the chromium binary if this machine doesn't have it yet. Skip

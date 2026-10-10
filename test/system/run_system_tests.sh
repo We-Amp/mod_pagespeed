@@ -202,7 +202,7 @@ run_tests() {
     # Install pytest if needed
     if ! python3 -c "import pytest" 2>/dev/null; then
         log_info "Installing pytest..."
-        pip3 install --user pytest requests
+        pip3 install --user pytest==8.3.5 requests==2.32.4
     fi
 
     # Run pytest
