@@ -61,7 +61,7 @@ fi
 # Chrome/Chromium binary is not in a standard location.
 if [ ! -d loadtest_collect/node_modules ]; then
   echo "Installing collect.js dependencies (puppeteer-core)..."
-  (cd loadtest_collect && npm install --silent)
+  (cd loadtest_collect && npm ci --silent)
 fi
 
 SLURP_TOP_DIR=$(mktemp -d)

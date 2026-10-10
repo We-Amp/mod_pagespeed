@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2024-2026 We-Amp B.V.
 
-FROM ubuntu:22.04
+FROM ubuntu:22.04@sha256:5ec03bb3441e8b0bf3b4f9cd4629a1ae763010dc3035bb8da3ae6cf026486401 # 22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -21,7 +21,7 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-reco
     && rm -rf /var/lib/apt/lists/*
 
 # Install pytest
-RUN pip3 install --no-cache-dir pytest pytest-timeout
+RUN pip3 install --no-cache-dir pytest==8.3.5 pytest-timeout==2.3.1
 
 # Build nginx 1.30.4 from source (must match the version the module was built
 # against — nginx ABI-pins modules to the exact version, so this MUST track the

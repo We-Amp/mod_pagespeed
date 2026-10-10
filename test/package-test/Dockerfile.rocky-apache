@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2024-2026 We-Amp B.V.
 
-FROM rockylinux:9
+FROM rockylinux:9@sha256:d7be1c094cc5845ee815d4632fe377514ee6ebcf8efaed6892889657e5ddaaa6 # 9
 
 ENV DISTRO_FAMILY=rhel
 
@@ -15,7 +15,7 @@ RUN dnf install -y --allowerasing \
     && dnf clean all
 
 # Install pytest
-RUN pip3 install --no-cache-dir pytest pytest-timeout
+RUN pip3 install --no-cache-dir pytest==8.3.5 pytest-timeout==2.3.1
 
 # Install the .rpm package
 COPY packages/*.rpm /tmp/
