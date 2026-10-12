@@ -1,0 +1,60 @@
+{
+  "pack": {
+    "id": "edge-seo",
+    "version": "0.1.0",
+    "publisher": "local",
+    "description": "Head rules for the rule_packs system test"
+  },
+  "sites": [
+    { "host": "rulepacks.example.com", "mode": "enforce" },
+    { "host": "rulepacks-report.example.com", "mode": "report" }
+  ],
+  "defaults": { "paths": ["/**"] },
+  "rules": [
+    {
+      "id": "canonical-keep",
+      "kind": "canonical",
+      "enforce": true,
+      "match": { "paths": ["/mod_pagespeed_test/rule_packs/**"] },
+      "value": { "template": "https://rulepacks.example.com{path}" },
+      "on_present": "keep"
+    },
+    {
+      "id": "canonical-repair",
+      "kind": "canonical",
+      "enforce": true,
+      "match": { "paths": ["/mod_pagespeed_test/flush_origin/split_head"] },
+      "value": { "template": "https://rulepacks.example.com{path}" },
+      "on_present": "repair",
+      "link_header": "match"
+    },
+    {
+      "id": "canonical-link-repair",
+      "kind": "canonical",
+      "enforce": true,
+      "match": { "paths": [
+          "/mod_pagespeed_test/flush_origin/link_header",
+          "/mod_pagespeed_test/flush_origin/link_header_late_body"
+        ] },
+      "value": { "template": "https://rulepacks.example.com{path}" },
+      "on_present": "repair",
+      "link_header": "match"
+    },
+    {
+      "id": "title-keep",
+      "kind": "title",
+      "enforce": true,
+      "match": { "paths": ["/mod_pagespeed_test/rule_packs/**"] },
+      "value": { "template": "Title for {path}" },
+      "on_present": "keep"
+    },
+    {
+      "id": "description-keep",
+      "kind": "description",
+      "enforce": true,
+      "match": { "paths": ["/mod_pagespeed_test/rule_packs/**"] },
+      "value": { "template": "Description for {path}" },
+      "on_present": "keep"
+    }
+  ]
+}

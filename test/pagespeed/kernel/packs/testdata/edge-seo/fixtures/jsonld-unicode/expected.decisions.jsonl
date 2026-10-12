@@ -1,0 +1,2 @@
+{"host":"fixture.test","path":"/j/u/a","rule":"canonical-jsonld","kind":"canonical","mode":"enforce","action":"insert","reason":"absent","defect":"canonical-missing","before":"","after":"https://fixture.test/j/u/a"}
+{"host":"fixture.test","path":"/j/u/a","rule":"jsonld-unicode","kind":"jsonld","mode":"enforce","action":"insert","reason":"absent","defect":"","before":"","after":"WebPage"}

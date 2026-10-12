@@ -35,6 +35,11 @@
 //   GET  /get          -> 200, small JSON body
 //   GET  /delay/<n>    -> sleeps long enough to outlast the fetcher timeout
 //                         (used by the timeout test), then 200
+//   GET  /interim/<n>  -> an interim "<n>" response (n in 100..199, with a
+//                         Link header), then the final 200 response with an
+//                         "X-Final: yes" header and the /html body. For
+//                         n == 101 only the 101 response is sent: it switches
+//                         protocols, so it is the final response.
 //   POST /post         -> 200, echoes the request body inside a JSON envelope
 //   <anything else>    -> 404
 //
@@ -84,6 +89,11 @@ class CurlTestServer : public ThreadSystem::Thread {
   CurlTestServer(Scheme scheme, TlsCert tls_cert, ThreadSystem* thread_system);
   ~CurlTestServer() override;
 
+  // Listen on the IPv6 loopback ([::1]) instead of 127.0.0.1. Must be called
+  // before StartAndWait(), which then returns false if the host has no IPv6
+  // loopback.
+  void set_ipv6(bool ipv6) { ipv6_ = ipv6; }
+
   // Starts the accept loop and blocks until the listening port is known.
   // Returns false on setup failure.
   bool StartAndWait();
@@ -94,9 +104,11 @@ class CurlTestServer : public ThreadSystem::Thread {
   // The port the server is listening on (valid after StartAndWait()).
   int port() const { return listen_port_; }
 
-  // "127.0.0.1:<port>" — convenient for building test URLs.
+  // "127.0.0.1:<port>" ("[::1]:<port>" with set_ipv6()) — convenient for
+  // building test URLs.
   GoogleString host_port() const {
-    return StrCat("127.0.0.1:", IntegerToString(listen_port_));
+    return StrCat(ipv6_ ? "[::1]:" : "127.0.0.1:",
+                  IntegerToString(listen_port_));
   }
 
   // kHttpProxy: the number of CONNECT tunnels opened so far.
@@ -128,6 +140,8 @@ class CurlTestServer : public ThreadSystem::Thread {
   int listen_port_;
   std::atomic<bool> terminating_;
   std::atomic<int> tunnels_{0};
+  bool ipv6_ = false;
+  bool listen_failed_ = false;
   bool started_;
   bool shut_down_;
 

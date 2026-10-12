@@ -39,10 +39,16 @@ Environment Variables:
         on nginx, /mod_pagespeed_beacon elsewhere)
     PAGESPEED_LANE_FIXTURES: Comma-separated lane fixtures the lane runner
         provisioned (see KNOWN_LANE_FIXTURES)
+    PAGESPEED_DAEMON_LANE: 0 (default), 1 or require; see setup_apache_test.sh.
+        Known limit: the lane cannot be restarted within about a minute of
+        stopping it (the remote-config server's port is in TIME_WAIT).
+    PAGESPEED_DAEMON_SOCKET: The optimizer worker's notification socket (lane
+        fixture daemon_arm); the fixture is dropped when nothing answers there
 """
 
 import os
 import pathlib
+import socket
 import time
 from dataclasses import dataclass
 from typing import Callable, Dict, Iterable, List, Optional, Tuple
@@ -102,6 +108,22 @@ KNOWN_LANE_FIXTURES = frozenset({
     # option response headers (PageSpeed / ModPagespeed / PageSpeedFilters)
     # set by the server on option_headers/{off,modpagespeed_off,on}.html
     "option_response_headers",
+    # the rulepacks*.example.com virtual hosts on PAGESPEED_RULE_PACKS_PORT
+    # (rule_packs on, install/mod_pagespeed_test/rule_packs/pack.json)
+    "rule_packs",
+    # the rule-pack decision log under PAGESPEED_RULE_PACK_LOG_DIR/packs/
+    "rule_pack_log",
+    # the rulepacks-signed / rulepacks-require.example.com virtual hosts:
+    # RulePackRequireSigned on, a trust key, a signed and an unsigned pack
+    "rule_pack_signing",
+    # the rulepacks-nolink.example.com virtual host: a pack with no
+    # link_header rule
+    "rule_pack_no_link_header",
+    # the optimizer daemon is configured, with its worker running, on the
+    # rulepacks.example.com and daemon.example.com virtual hosts (in-place
+    # daemon serving is on); the worker's socket is PAGESPEED_DAEMON_SOCKET
+    # and is probed before the fixture is believed
+    "daemon_arm",
 })
 
 
@@ -120,6 +142,26 @@ def missing_lane_fixtures(names: Iterable[str], provided: frozenset) -> List[str
     return [name for name in names if name not in provided]
 
 
+def daemon_worker_reachable(socket_path: str) -> bool:
+    """True when something accepts connections on the worker's unix socket.
+
+    The lane runner advertises "daemon_arm" once it started the worker; a
+    worker that died since (or a socket nobody listens on) must make the
+    cases skip, not fail, so the fixture is only believed while it answers.
+    """
+    if not socket_path:
+        return False
+    probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    probe.settimeout(2.0)
+    try:
+        probe.connect(socket_path)
+        return True
+    except OSError:
+        return False
+    finally:
+        probe.close()
+
+
 def validate_advertised_lane_fixtures(raw: str) -> None:
     """Reject a runner that advertises a fixture name conftest does not know."""
     unknown = unknown_lane_fixtures(sorted(parse_lane_fixtures(raw)))
@@ -127,6 +169,15 @@ def validate_advertised_lane_fixtures(raw: str) -> None:
         raise pytest.UsageError(
             f"PAGESPEED_LANE_FIXTURES names unknown lane fixture(s) {unknown}; "
             f"known: {sorted(KNOWN_LANE_FIXTURES)}"
+        )
+
+
+def require_daemon_lane_advertised(raw: str, lane_mode: str) -> None:
+    """PAGESPEED_DAEMON_LANE=require with no daemon_arm advertised is an error."""
+    if lane_mode == "require" and "daemon_arm" not in parse_lane_fixtures(raw):
+        raise pytest.UsageError(
+            "PAGESPEED_DAEMON_LANE=require but PAGESPEED_LANE_FIXTURES does not "
+            f"advertise daemon_arm (got: {raw or '<none>'})"
         )
 
 
@@ -662,6 +713,9 @@ def pytest_configure(config):
     """Register custom markers."""
     # A runner that advertises a misspelled fixture fails the run up front.
     validate_advertised_lane_fixtures(os.environ.get("PAGESPEED_LANE_FIXTURES", ""))
+    require_daemon_lane_advertised(
+        os.environ.get("PAGESPEED_LANE_FIXTURES", ""), os.environ.get("PAGESPEED_DAEMON_LANE", "")
+    )
 
     # Scale pytest's per-test timeout past fetch_until's worst-case wall
     # clock: ini timeout x PAGESPEED_TEST_TIMEOUT_MULTIPLIER x
@@ -784,6 +838,12 @@ def pytest_runtest_setup(item):
             pytest.skip("Statistics not enabled")
 
     provided = parse_lane_fixtures(os.environ.get("PAGESPEED_LANE_FIXTURES", ""))
+    if "daemon_arm" in provided and not daemon_worker_reachable(
+        os.environ.get("PAGESPEED_DAEMON_SOCKET", "")
+    ):
+        if os.environ.get("PAGESPEED_DAEMON_LANE") == "require":
+            pytest.fail("PAGESPEED_DAEMON_LANE=require but the optimizer worker's socket does not answer")
+        provided = provided - {"daemon_arm"}
     for marker in item.iter_markers("requires_fixture"):
         names = list(marker.args)
         missing = missing_lane_fixtures(names, provided)

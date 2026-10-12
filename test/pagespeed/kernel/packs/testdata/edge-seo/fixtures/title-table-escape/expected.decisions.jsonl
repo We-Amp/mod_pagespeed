@@ -1,0 +1,1 @@
+{"host":"fixture.test","path":"/t/table/amp","rule":"title-table","kind":"title","mode":"enforce","action":"insert","reason":"absent","defect":"title-missing","before":"","after":"Fish & Chips <b>"}

@@ -62,6 +62,34 @@ with a 5s timeout. Ports create the reader through the
 `SystemServerContext::NewDaemonReader()` hook; the socket path comes from
 the `DaemonApiSocketPath` option (Apache/nginx/Envoy; empty disables).
 
+### Early flush on rule-pack hosts (Apache, `instaweb_context.cc`, `mod_instaweb.cc`)
+
+On a host where `rule_packs` is enabled, `RulePackFile` is set and the pack has
+a canonical rule with `link_header` set to `match` (`Pack::has_link_header_rule`, set by the
+loader; `RulePackProvider::PackEditsLinkHeader()`; true until the file has been
+looked at in the process), the Apache
+output filter drops a FLUSH bucket that arrives before the first body byte has
+been seen (`InstawebContext::FlushWouldSendEditableHeaders()`): passing it on
+would make Apache send the origin's headers before the filter can repair the
+`Link` header. Response headers therefore go out with the first body bytes or
+at the end of the response, not on an early flush, so an origin that flushes
+its headers early to start browser preloads loses that head start. Once the
+body is known (HTML or not) flushes pass as usual.
+
+### The daemon serves no HTML on the 1.1 ports (`daemon_serve_arm.h`, `daemon_record_arm.h`)
+
+On Apache, nginx and IIS the daemon serve arm declines every HTML entry:
+`Serve` returns `kFallThrough` with reason `html-classic-chain` (serve class
+original-declined; the port counts it in `ipro_daemon_fallthrough` like any
+fall-through), and the module's own filter chain, which carries the rule
+pack, rewrites the origin response. The recorder refuses HTML with the same
+reason, so nothing is stored or sent to the worker for it. There is no option
+or predicate: declining HTML is the rule. CSS, JS and images are recorded and
+served by the daemon as before. In steady state nothing records HTML, so the
+serve-class breakdown shows HTML requests as cold (no entry), not declined;
+declined (`html-classic-chain`) appears only for a stale HTML entry, which
+is ignored, never served.
+
 ### Cache Path Management (`system_cache_path.cc`)
 
 `SystemCachePath` encapsulates per-virtual-host cache sharing. Each file
@@ -91,6 +119,8 @@ than making an external DNS-resolved request. Delegates to
 | `in_place_resource_recorder.cc` | Records IPRO responses into the cache |
 | `serve_host_names.cc` | The host a serve is recorded under in the optimizer's serve savings per host (`VouchedServeHost`): the request's host when it is one of the site's exact configured names, else the site's primary name, else none. Ports supply the names per request from the request's own configuration record (Apache: `ApacheConfiguredHostNames(request->server, main server, stated records)` -- a primary name counts only when the parsed configuration states a `ServerName` for that record, computed once per configuration in the post-config hook (`ApacheStatedServerNamesFromTree`); a name httpd derived, an inherited main-server name or an httpd placeholder is no name; nginx: `NgxConfiguredHostNames(r)`, the server block's server_name and its server_names entries except regular expressions). IIS supplies none yet (its sites' bindings are not read), so its serves carry no host; Envoy records no serves. |
 | `daemon_site_filter.cc` | What a per-host admin console may see of the optimizer's answers: a strict jsoncpp reading (no repeated keys, bounded nesting), only the console's own site's row of `serve_savings_by_host`, 64-bit sums checked; fails closed |
+| `rule_pack_store.cc` | `RulePackStore`, the per-process `RulePackProvider` of the `rule_packs` filter (owned by `SystemRewriteDriverFactory`, created on first use): packs read lazily in the serving process, keyed by canonical path with mtime, size and SHA-256, rechecked at most every 10 s, a failed reload keeps the last good pack; decision logs per (LogDir, pack id) |
+| `rule_pack_decision_log.cc` | The rule pack decision log: `<LogDir>/packs/<pack-id>/decisions-YYYY-MM-DD.jsonl`, one `write` per line on an append-only descriptor shared by all processes, per-process dedup, 50 MiB daily cap, 14 days kept |
 | `system_thread_system.h` | Thread system with deferred thread-start support (for fork safety) |
 
 ## Testing

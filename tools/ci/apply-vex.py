@@ -18,6 +18,11 @@ Matching is robust to two grype realities seen on the pinned SBOM:
     alias lives in ``relatedVulnerabilities`` — we match on the id OR any alias.
   * the artifact ``purl`` can be empty — we match the VEX product by package
     name (+ version when the VEX purl pins one), parsed from the product purl.
+
+Scope note: only ``products`` is read; OpenVEX ``subcomponents`` are ignored.
+A statement for a dependency therefore names the dependency's purl as the
+product (the nginx and Envoy statements), and its impact_statement must say
+that the claim is about mod_pagespeed 1.1 artefacts, not the dependency itself.
 """
 import argparse
 import json

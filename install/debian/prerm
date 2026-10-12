@@ -2,13 +2,16 @@
 
 case "$1" in
     remove)
-        test -e /etc/apache2/mods-enabled/pagespeed.load && a2dismod pagespeed
+        # -m records "disabled by the package" so a reinstall after this
+        # remove enables them again (see postinst); an administrator's own
+        # a2dismod / a2disconf is recorded differently and is left alone.
+        test -e /etc/apache2/mods-enabled/pagespeed.load && a2dismod -m -q pagespeed
         if hash a2disconf 2> /dev/null; then
           # a2disconf is available; use it.
           test -L /etc/apache2/conf-enabled/pagespeed_libraries.conf && \
-            a2disconf pagespeed_libraries
+            a2disconf -m -q pagespeed_libraries
           test -L /etc/apache2/conf-enabled/pagespeed_daemon.conf && \
-            a2disconf pagespeed_daemon
+            a2disconf -m -q pagespeed_daemon
         else
           # If we don't have a2disconf, then the symlink is in conf.d instead of
           # conf-enabled.

@@ -49,7 +49,7 @@ test("per-vhost console explains the scope and links to the whole-server console
     page.getByRole("link", { name: "whole-server console" }),
   ).toHaveAttribute("href", "/pagespeed_global_admin/#/urls");
   // The nav entry is hidden on a per-vhost console.
-  await expect(page.locator(".nav-item")).toHaveCount(10);
+  await expect(page.locator(".nav-item")).toHaveCount(11);
   await expect(page.getByRole("link", { name: "URLs", exact: true })).toHaveCount(0);
 });
 

@@ -163,6 +163,18 @@
    "output_sha256": "0175fb1091c8fbc4e48f092823b043da9699c32682261c161acc282817a35e22"
   },
   {
+   "input": "findings/repros/n5-generator-comment-await.js",
+   "input_sha256": "2cf6b7a5bd0e28ff2c204d877f12d21709efdab6eca7576f550ad7290a4ff917",
+   "status": "ok",
+   "output_sha256": "8e9505b53b84a658fbaff754740697da6f005f8f78135626fda706eb17de67b7"
+  },
+  {
+   "input": "findings/repros/n5-generator-comment-idempotence.js",
+   "input_sha256": "3483e6da412217ef1d7e84188c1d8e7bddc0325736dc15518bc4c802e192eff7",
+   "status": "ok",
+   "output_sha256": "e871ccbca6b90a771682a76d87620f391c3dacb20f9c7ace530c68e1b2b3399f"
+  },
+  {
    "input": "findings/repros/n5-shebang.js",
    "input_sha256": "50789c63662a83568bf4d19fdfff03745ce954199e8f1defa3fe6cbf71e4a445",
    "status": "ok",

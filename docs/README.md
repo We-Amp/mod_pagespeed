@@ -29,6 +29,7 @@ build/test workflow, start at the root [`CLAUDE.md`](../CLAUDE.md). Customer-fac
 | Document | Purpose |
 |----------|---------|
 | [filter-reference.md](filter-reference.md) | Filter reference. |
+| [rule-packs.md](rule-packs.md) | Rule packs: operator-written head rules (canonical, title, description, hreflang, JSON-LD), report-first workflow, decision log. |
 | [test-catalog.md](test-catalog.md) | Per-platform test pass/skip catalog. |
 | [envoy-limitations.md](envoy-limitations.md) | Known Envoy limitations. |
 | [iis-limitations.md](iis-limitations.md) | Known IIS limitations. |

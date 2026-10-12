@@ -57,6 +57,7 @@ class RewriteDriver;
 class RewriteOptions;
 class RewriteOptionsManager;
 class RewriteStats;
+class RulePackProvider;
 class SHA1Signature;
 class Scheduler;
 class StaticAssetManager;
@@ -369,6 +370,10 @@ class RewriteDriverFactory {
 
   // Base method that returns true if the given ip is a debug ip.
   virtual bool IsDebugClient(const GoogleString& ip) const { return false; }
+
+  // The per-process source of rule packs for the rule_packs filter, or null
+  // when this kind of server has none (the filter is then never built).
+  virtual RulePackProvider* rule_pack_provider() { return nullptr; }
 
   // Creates an ExperimentMatcher, which is used to match clients or sessions to
   // a specific experiment.

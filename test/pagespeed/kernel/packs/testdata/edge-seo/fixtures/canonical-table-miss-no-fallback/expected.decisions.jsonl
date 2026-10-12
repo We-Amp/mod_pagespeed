@@ -1,0 +1,1 @@
+{"host":"fixture.test","path":"/c/table/miss","rule":"canonical-table","kind":"canonical","mode":"enforce","action":"none","reason":"no_value","defect":"","before":"","after":""}

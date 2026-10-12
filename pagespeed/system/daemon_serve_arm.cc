@@ -669,6 +669,17 @@ void DaemonServeReader::Compose(const DaemonServeRequest& request,
   const uint8_t stored_flags = abi_->ReadFlags(result_);
   const int content_type = abi_->ReadContentType(result_);
 
+  if (content_type == kPsContentHtml) {
+    // The daemon serves no HTML on these ports; the classic chain rewrites
+    // this document.  The entry exists and is being declined on purpose,
+    // which is the peer's original-declined class.
+    decision->ps_content_type = content_type;
+    decision->verdict = DaemonServeVerdict::kFallThrough;
+    decision->reason = daemon_serve_reason::kHtmlClassicChain;
+    decision->serve_class = kPsServeClassOriginalDeclined;
+    return;
+  }
+
   decision->selected = true;
   decision->stored_mask = stored_mask;
   // The label for the bytes, from the entry, never from the request.

@@ -39,6 +39,35 @@ FLUSH_ORIGIN_PID="$LANE_STATE_DIR/flush_origin.pid"
 RCPORT="${RCPORT:-8090}"
 RCPORT_PID="$LANE_STATE_DIR/pathological_server.pid"
 
+# Lane fixture "daemon_arm": the optimizer daemon (worker) running next to
+# Apache, with in-place daemon serving configured on the rulepacks.example.com
+# virtual host and on the plain daemon.example.com virtual host. The worker is
+# the one the release pin names (install/debian/optimizer-pin.json), built
+# from its public source at that commit with the toolchain already in the dev
+# container (the released packages need a newer C library than the container
+# has, so they cannot be loaded there). The parity rig's
+# tools/parity/daemon-probe/build_daemon.sh is not reused: it builds a
+# different (private) commit in its own toolchain image, for a different
+# consumer. The built worker and client library are kept in
+# $DAEMON_ARTIFACT_DIR, keyed by the pinned commit.
+#
+# PAGESPEED_DAEMON_LANE: 0 (default) leaves the lane out, so the cases that
+# need it skip; 1 provides it when it can and skips otherwise; require
+# provides it or fails the run (a failed build or a missing socket is an
+# error). The build is minutes long on a cold cache, so only the nightly
+# lane asks for it.
+DAEMON_LANE="${PAGESPEED_DAEMON_LANE:-0}"
+DAEMON_PIN_FILE="$PROJECT_ROOT/install/debian/optimizer-pin.json"
+DAEMON_STATE_DIR="$LANE_STATE_DIR/daemon"
+DAEMON_SOCKET="$DAEMON_STATE_DIR/notify.sock"
+DAEMON_CACHE_ROOT="$DAEMON_STATE_DIR/cache"
+# The module's volume path is the worker's cache directory plus /cache.
+DAEMON_VOLUME="$DAEMON_CACHE_ROOT/cache"
+DAEMON_PID="$LANE_STATE_DIR/daemon_worker.pid"
+DAEMON_LOG="$LANE_STATE_DIR/daemon_worker.log"
+# Set once the worker answers on its socket; the vhost writers read it.
+DAEMON_READY=""
+
 # TLS configuration
 TLS_CERT_DIR="/tmp/apache_pagespeed_test/certs"
 TLS_CERT_FILE="$TLS_CERT_DIR/server.crt"
@@ -141,6 +170,8 @@ setup_directories() {
     # Lane fixture "stats_log": start every run with no statistics log, so
     # statistics_logging.sh's "every logged timestamp is from this run" holds.
     sudo rm -f /var/log/pagespeed/stats_log_*
+    # Lane fixture "rule_pack_log": start every run with no decision log.
+    sudo rm -rf /var/log/pagespeed/packs
     provide_fixture stats_log
 
     # FileCachePath roots of the fixture vhosts (configure_fixture_vhosts,
@@ -1636,6 +1667,106 @@ EOF
     provide_fixture experiment_framework
 }
 
+# Lane fixtures "rule_packs" and "rule_pack_log": the name-based virtual hosts
+# system/test_rule_packs.py talks to, on the secondary port. All three turn the
+# rule_packs filter on by name with the pack under
+# install/mod_pagespeed_test/rule_packs/ (the filter is in no rewrite level), and
+# run no other filter. The pack lists the first two hosts; the third is not in
+# it. RulePackFile is read by the serving process, after privileges are
+# dropped, so the pack only has to be readable by the Apache user. The decision
+# log is written under LogDir (/var/log/pagespeed, set in the server config), in
+# packs/<pack id>/.
+configure_rule_pack_vhosts() {
+    log_info "Configuring rule-pack vhosts on port $APACHE_SECONDARY_PORT..."
+    local conf="$APACHE_CONF_DIR/sites-available/pagespeed-test-rule-packs.conf"
+    sudo tee "$conf" > /dev/null << 'EOF'
+<VirtualHost *:@@APACHE_SECONDARY_PORT@@>
+  ServerName rulepacks.example.com
+  Header always set X-Test-Vhost "rulepacks.example.com"
+  DocumentRoot "/var/www/html"
+  ModPagespeedFileCachePath "/var/cache/mod_pagespeed"
+  ModPagespeedRewriteLevel PassThrough
+  ModPagespeedEnableFilters rule_packs
+  ModPagespeedRulePackFile /var/www/html/mod_pagespeed_test/rule_packs/pack.json
+  ModPagespeedRulePackMode enforce
+  #@@DAEMON@@
+</VirtualHost>
+
+<VirtualHost *:@@APACHE_SECONDARY_PORT@@>
+  ServerName rulepacks-report.example.com
+  Header always set X-Test-Vhost "rulepacks-report.example.com"
+  DocumentRoot "/var/www/html"
+  ModPagespeedFileCachePath "/var/cache/mod_pagespeed"
+  ModPagespeedRewriteLevel PassThrough
+  ModPagespeedEnableFilters rule_packs
+  ModPagespeedRulePackFile /var/www/html/mod_pagespeed_test/rule_packs/pack.json
+  ModPagespeedRulePackMode report
+</VirtualHost>
+
+<VirtualHost *:@@APACHE_SECONDARY_PORT@@>
+  ServerName rulepacks-unlisted.example.com
+  Header always set X-Test-Vhost "rulepacks-unlisted.example.com"
+  DocumentRoot "/var/www/html"
+  ModPagespeedFileCachePath "/var/cache/mod_pagespeed"
+  ModPagespeedRewriteLevel PassThrough
+  ModPagespeedEnableFilters rule_packs
+  ModPagespeedRulePackFile /var/www/html/mod_pagespeed_test/rule_packs/pack.json
+  ModPagespeedRulePackMode enforce
+</VirtualHost>
+
+# Lane fixture "rule_pack_signing": a pack signed with a throwaway key (only
+# the public half is here), and the unsigned pack refused by the same policy.
+<VirtualHost *:@@APACHE_SECONDARY_PORT@@>
+  ServerName rulepacks-signed.example.com
+  Header always set X-Test-Vhost "rulepacks-signed.example.com"
+  DocumentRoot "/var/www/html"
+  ModPagespeedFileCachePath "/var/cache/mod_pagespeed"
+  ModPagespeedRewriteLevel PassThrough
+  ModPagespeedEnableFilters rule_packs
+  ModPagespeedRulePackFile /var/www/html/mod_pagespeed_test/rule_packs/signed/pack.json
+  ModPagespeedRulePackMode enforce
+  ModPagespeedRulePackTrustKey test-publisher kmWxckbPeJHh+oHxLYsRIzee4Dtzao80H2kyiYR7NdU=
+  ModPagespeedRulePackRequireSigned on
+</VirtualHost>
+
+# Lane fixture "rule_pack_no_link_header": a pack with no link_header rule,
+# which must not hold an early flush.
+<VirtualHost *:@@APACHE_SECONDARY_PORT@@>
+  ServerName rulepacks-nolink.example.com
+  Header always set X-Test-Vhost "rulepacks-nolink.example.com"
+  DocumentRoot "/var/www/html"
+  ModPagespeedFileCachePath "/var/cache/mod_pagespeed"
+  ModPagespeedRewriteLevel PassThrough
+  ModPagespeedEnableFilters rule_packs
+  ModPagespeedRulePackFile /var/www/html/mod_pagespeed_test/rule_packs/no-link-header.json
+  ModPagespeedRulePackMode enforce
+</VirtualHost>
+
+<VirtualHost *:@@APACHE_SECONDARY_PORT@@>
+  ServerName rulepacks-require.example.com
+  Header always set X-Test-Vhost "rulepacks-require.example.com"
+  DocumentRoot "/var/www/html"
+  ModPagespeedFileCachePath "/var/cache/mod_pagespeed"
+  ModPagespeedRewriteLevel PassThrough
+  ModPagespeedEnableFilters rule_packs
+  ModPagespeedRulePackFile /var/www/html/mod_pagespeed_test/rule_packs/pack.json
+  ModPagespeedRulePackMode enforce
+  ModPagespeedRulePackTrustKey test-publisher kmWxckbPeJHh+oHxLYsRIzee4Dtzao80H2kyiYR7NdU=
+  ModPagespeedRulePackRequireSigned on
+</VirtualHost>
+EOF
+    sudo sed -i "s/@@APACHE_SECONDARY_PORT@@/$APACHE_SECONDARY_PORT/g" "$conf"
+    apply_daemon_directives "$conf" routing
+    sudo a2ensite pagespeed-test-rule-packs 2>/dev/null || true
+    provide_fixture rule_packs
+    provide_fixture rule_pack_log
+    if [ -n "$DAEMON_READY" ]; then
+        provide_fixture daemon_arm
+    fi
+    provide_fixture rule_pack_signing
+    provide_fixture rule_pack_no_link_header
+}
+
 # Lane fixture "external_origin": local stand-ins for the internet origins
 # the bash suite fetched -- @@PAGESPEED-TEST-HOST@@ (selfsigned.modpagespeed.com)
 # and www.gstatic.com. Both names resolve to this host via /etc/hosts, so
@@ -2016,6 +2147,10 @@ except OSError:
 "
 }
 
+# Known limit: pathological_server.py binds without SO_REUSEADDR, so starting
+# the lane again within about a minute of stopping it can fail here with
+# "Address already in use" (the previous run's connections are in TIME_WAIT).
+# Wait a minute between back-to-back runs.
 start_remote_config_server() {
     stop_remote_config_server
     if remote_config_port_is_bound; then
@@ -2075,6 +2210,212 @@ stop_remote_config_server() {
     if remote_config_port_is_bound; then
         log_warn "remote config port $RCPORT is still bound by a process this lane did not start; not killing it"
     fi
+}
+
+# Lane fixture "daemon_arm": build (once per pinned commit) and start the
+# optimizer worker. Failing to provide it is not an error for the rest of the
+# suite: the cases that need it skip with the standard reason.
+build_daemon_worker() {
+    local commit
+    commit="$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['optimizer_commit'])" "$DAEMON_PIN_FILE")" || return 1
+    if ! [[ "$commit" =~ ^[0-9a-f]{40}$ ]]; then
+        log_warn "optimizer pin does not name a full commit hash"
+        return 1
+    fi
+    DAEMON_ARTIFACT_DIR="${PAGESPEED_DAEMON_ARTIFACT_DIR:-${HOME:-/tmp}/.cache/pagespeed-daemon-lane}/${commit:0:12}"
+    if [ -x "$DAEMON_ARTIFACT_DIR/factory_worker" ] && [ -f "$DAEMON_ARTIFACT_DIR/libpagespeed.so" ]; then
+        log_info "Optimizer worker for ${commit:0:12} already built"
+        return 0
+    fi
+    log_info "Building the optimizer worker at ${commit:0:12} (first run on this host)..."
+    local src="$DAEMON_ARTIFACT_DIR.src" cfg="--config=docker"
+    rm -rf "${src:?}"
+    mkdir -p "$src" "$DAEMON_ARTIFACT_DIR"
+    git -C "$src" init -q \
+        && git -C "$src" fetch -q --depth 1 https://github.com/We-Amp/pagespeed-optimizer.git "$commit" \
+        && git -C "$src" checkout -q --detach FETCH_HEAD || { log_warn "cannot fetch the optimizer source"; return 1; }
+    # Share the CI build cache where the host provides one.
+    if getent hosts bazel-remote-cache > /dev/null 2>&1; then
+        cfg="$cfg --config=remote-cache"
+    fi
+    # The bundled image codec is configured by CMake, which the dev image
+    # does not carry; a hash-pinned user-level install keeps the image unchanged.
+    if ! command -v cmake > /dev/null 2>&1; then
+        pip3 install --user -q --require-hashes -r "$PROJECT_ROOT/tools/daemon-lane-requirements.txt" > /dev/null 2>&1 \
+            || { log_warn "cannot install cmake"; return 1; }
+    fi
+    (
+        cd "$src"
+        export PATH="$HOME/.local/bin:$PATH" CC=/usr/bin/clang-20 CXX=/usr/bin/clang++-20
+        bazel build $cfg --action_env=CC --action_env=CXX \
+            //src/worker:factory_worker //lib/pagespeed:libpagespeed.so \
+            > "$LANE_STATE_DIR/daemon_build.log" 2>&1
+    ) || { log_warn "optimizer worker build failed; see $LANE_STATE_DIR/daemon_build.log"; tail -20 "$LANE_STATE_DIR/daemon_build.log" || true; return 1; }
+    cp -L "$src/bazel-bin/src/worker/factory_worker" "$src/bazel-bin/lib/pagespeed/libpagespeed.so" "$DAEMON_ARTIFACT_DIR/" || return 1
+    # Stop the build's own bazel server before its directory goes away.
+    (cd "$src" && bazel shutdown > /dev/null 2>&1) || true
+    rm -rf "${src:?}"
+}
+
+# The lane could not be provided: an error in require mode, a skip otherwise.
+daemon_unavailable() {
+    if [ "$DAEMON_LANE" = "require" ]; then
+        log_error "$1 (PAGESPEED_DAEMON_LANE=require)"
+        exit 1
+    fi
+    log_warn "$1; daemon_arm lane not provided"
+}
+
+start_daemon_worker() {
+    case "$DAEMON_LANE" in
+        0)
+            log_info "daemon_arm lane disabled (PAGESPEED_DAEMON_LANE=0)"
+            # A client library left by an earlier lane run must not leak into
+            # a run that has no worker.
+            if [ -e /usr/local/lib/libpagespeed.so ]; then
+                sudo rm -f /usr/local/lib/libpagespeed.so && sudo ldconfig || true
+            fi
+            return 0
+            ;;
+        1|require) ;;
+        *) log_error "PAGESPEED_DAEMON_LANE must be 0, 1 or require"; exit 1 ;;
+    esac
+    mkdir -p "$LANE_STATE_DIR"
+    if ! build_daemon_worker; then
+        daemon_unavailable "cannot build the optimizer worker"
+        return 0
+    fi
+    stop_daemon_worker
+    # The module binds the client library by its bare name, through the loader.
+    if ! { sudo cp "$DAEMON_ARTIFACT_DIR/libpagespeed.so" /usr/local/lib/libpagespeed.so && sudo ldconfig; }; then
+        daemon_unavailable "cannot install the client library"
+        return 0
+    fi
+    sudo rm -rf "$DAEMON_STATE_DIR"
+    # Run as the web server's own user, so the volume it authors is readable
+    # and writable by the Apache children; the socket is opened up below for
+    # the test runner, which only probes it.
+    mkdir -p "$DAEMON_CACHE_ROOT"
+    sudo chown -R www-data:www-data "$DAEMON_STATE_DIR" && sudo chmod 755 "$DAEMON_STATE_DIR" "$LANE_STATE_DIR"
+    nohup sudo -u www-data "$DAEMON_ARTIFACT_DIR/factory_worker" \
+        --cache-dir "$DAEMON_CACHE_ROOT" --socket "$DAEMON_SOCKET" \
+        --cache-size 536870912 --log-level info \
+        > "$DAEMON_LOG" 2>&1 &
+    echo $! > "$DAEMON_PID"
+    local i
+    for i in $(seq 1 100); do
+        # The module reads the volume size the worker publishes while it
+        # starts, so wait for that as well as for the socket.
+        if [ -S "$DAEMON_SOCKET" ] && [ -n "$(find "$DAEMON_STATE_DIR" -name pagespeed-shared.conf 2>/dev/null)" ]; then
+            break
+        fi
+        sleep 0.2
+    done
+    if [ -S "$DAEMON_SOCKET" ]; then
+        sudo chmod 666 "$DAEMON_SOCKET"
+    else
+        tail -20 "$DAEMON_LOG" 2>/dev/null || true
+        stop_daemon_worker
+        daemon_unavailable "the optimizer worker did not open its socket"
+        return 0
+    fi
+    log_info "Optimizer worker is listening on $DAEMON_SOCKET"
+    DAEMON_READY=1
+}
+
+stop_daemon_worker() {
+    local pid=""
+    if [ -f "$DAEMON_PID" ]; then
+        pid="$(cat "$DAEMON_PID")"
+        # Only a process that is still a worker of this lane (the number may
+        # have been reused since); never kill by pattern.
+        if [ -n "$pid" ] && tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -q "factory_worker\|sudo"; then
+            # sudo does not relay the signal to the worker it started, so
+            # signal the worker itself, then the sudo that waits for it.
+            sudo pkill -TERM -P "$pid" 2>/dev/null || true
+            sudo kill -TERM "$pid" 2>/dev/null || true
+            local i
+            for i in $(seq 1 100); do
+                [ -d "/proc/$pid" ] || break
+                sleep 0.1
+            done
+        fi
+        rm -f "$DAEMON_PID"
+    fi
+    sudo rm -rf "$DAEMON_STATE_DIR"
+    if [ -e /usr/local/lib/libpagespeed.so ]; then
+        sudo rm -f /usr/local/lib/libpagespeed.so && sudo ldconfig || true
+    fi
+}
+
+# Replace the daemon placeholder line of a generated vhost file: the daemon
+# directives where the worker is up, nothing at all otherwise (so a lane-off
+# run gets the vhost exactly as it was). The daemon serves a stored copy only
+# while the origin's own freshness says it is fresh (a static file freshly
+# written by the lane has none, so state it for the stylesheets), and only for
+# a response whose headers it can reproduce, so a second argument of
+# "routing" also drops the lane's routing header from them.
+apply_daemon_directives() {
+    local conf="$1" routing="${2:-}"
+    if [ -z "$DAEMON_READY" ]; then
+        sudo sed -i '/#@@DAEMON@@/d' "$conf"
+        return 0
+    fi
+    local block
+    block="$(mktemp)"
+    {
+        echo "  ModPagespeedDaemonSocketPath $DAEMON_SOCKET"
+        echo "  ModPagespeedDaemonVolumePath $DAEMON_VOLUME"
+        echo '  <FilesMatch "\.css$">'
+        echo '    Header set Cache-Control "max-age=3600"'
+        if [ "$routing" = "routing" ]; then
+            echo '    Header always unset X-Test-Vhost'
+        fi
+        echo '  </FilesMatch>'
+    } > "$block"
+    sudo sed -i -e "/#@@DAEMON@@/{r $block" -e 'd}' "$conf"
+    rm -f "$block"
+}
+
+# Lane fixture "daemon_arm": the stylesheet the daemon cases fetch. It lives
+# outside /mod_pagespeed_test, whose responses carry an extra header the daemon
+# cannot reproduce on a stored copy.
+write_daemon_content() {
+    sudo mkdir -p /var/www/html/daemon_lane
+    printf 'body {\n  background: lightblue;\n}\n\n.lane { color: red; }\n' \
+        | sudo tee /var/www/html/daemon_lane/lane.css > /dev/null
+    # The page the daemon cases fetch to show the daemon serves no HTML: the
+    # comment is removed only by the module's own HTML rewriting.
+    printf '<!doctype html>\n<html><head><title>lane</title></head>\n<body>\n<!-- lane-comment -->\n<p>daemon lane page</p>\n</body></html>\n' \
+        | sudo tee /var/www/html/daemon_lane/lane.html > /dev/null
+    sudo chmod -R a+rX /var/www/html/daemon_lane
+}
+
+# Lane fixture "daemon_arm": a plain virtual host with in-place optimization
+# handed to the daemon (no rule packs), next to the rulepacks.example.com one.
+configure_daemon_vhost() {
+    if [ -z "$DAEMON_READY" ]; then
+        # No worker: leave no daemon host behind from an earlier run.
+        sudo a2dissite pagespeed-test-daemon > /dev/null 2>&1 || true
+        sudo rm -f "$APACHE_CONF_DIR/sites-available/pagespeed-test-daemon.conf"
+        return 0
+    fi
+    write_daemon_content
+    log_info "Configuring the daemon vhost on port $APACHE_SECONDARY_PORT..."
+    local conf="$APACHE_CONF_DIR/sites-available/pagespeed-test-daemon.conf"
+    sudo tee "$conf" > /dev/null << 'EOF'
+<VirtualHost *:@@APACHE_SECONDARY_PORT@@>
+  ServerName daemon.example.com
+  DocumentRoot "/var/www/html"
+  ModPagespeedFileCachePath "/var/cache/mod_pagespeed"
+  ModPagespeedRewriteLevel PassThrough
+  ModPagespeedInPlaceResourceOptimization on
+  #@@DAEMON@@
+</VirtualHost>
+EOF
+    sudo sed -i "s/@@APACHE_SECONDARY_PORT@@/$APACHE_SECONDARY_PORT/g" "$conf"
+    apply_daemon_directives "$conf"
+    sudo a2ensite pagespeed-test-daemon 2>/dev/null || true
 }
 
 configure_apache() {
@@ -2317,6 +2658,8 @@ EOF
 
     configure_fixture_server_scope
     configure_fixture_vhosts
+    configure_rule_pack_vhosts
+    configure_daemon_vhost
     configure_external_origin
     configure_external_origin_https
     configure_flush_origin_proxy
@@ -2424,6 +2767,7 @@ case "${1:-start}" in
         install_module
         setup_test_content
         generate_tls_certs || exit 1
+        start_daemon_worker
         configure_apache
         start_flush_origin || exit 1
         start_remote_config_server || exit 1
@@ -2433,6 +2777,7 @@ case "${1:-start}" in
         stop_apache
         stop_flush_origin
         stop_remote_config_server
+        stop_daemon_worker
         ;;
     status)
         show_status

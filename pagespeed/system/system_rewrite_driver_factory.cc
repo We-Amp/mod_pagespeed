@@ -61,11 +61,13 @@
 #if PAGESPEED_SUPPORT_POSIX_SHARED_MEM
 #include "pagespeed/kernel/thread/pthread_shared_mem.h"
 #endif
+#include "pagespeed/kernel/packs/engine_version.h"
 #include "pagespeed/kernel/thread/queued_worker_pool.h"
 #include "pagespeed/kernel/util/input_file_nonce_generator.h"
 #include "pagespeed/kernel/util/nonce_generator.h"
 #include "pagespeed/system/in_place_resource_recorder.h"
 #include "pagespeed/system/optimization_thread_policy.h"
+#include "pagespeed/system/rule_pack_store.h"
 #include "pagespeed/system/system_caches.h"
 #include "pagespeed/system/system_rewrite_options.h"
 #include "pagespeed/system/system_server_context.h"
@@ -198,6 +200,16 @@ void SystemRewriteDriverFactory::Init() {
 
 SystemRewriteDriverFactory::~SystemRewriteDriverFactory() {
   shared_mem_statistics_.reset(nullptr);
+}
+
+RulePackProvider* SystemRewriteDriverFactory::rule_pack_provider() {
+  // Created on first use, which is a document in a serving process: no pack
+  // is ever read by a parent process while it parses the configuration.
+  std::call_once(rule_pack_store_once_, [this] {
+    rule_pack_store_ = std::make_unique<RulePackStore>(
+        timer(), pagespeed::packs::EngineVersion());
+  });
+  return rule_pack_store_.get();
 }
 
 // Initializes global statistics object if needed, using factory to

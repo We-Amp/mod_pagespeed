@@ -4,7 +4,7 @@ Three layers, deliberately separate:
 
 | Layer | Mechanism | Status | Blocks build? |
 |---|---|---|---|
-| **Curated SBOM gate** | `tools/generate-sbom.py` → grype on `sbom/pagespeed-1.1.spdx.json` | shipped | **yes** (per-PR `security-gates` + release backstop) |
+| **Curated SBOM gate** | `tools/generate-sbom.py` → grype on `sbom/pagespeed-1.1.spdx.json` | shipped | **yes** (per-PR Pool guards job + release backstop) |
 | **Comprehensive scan** | `tools/sbom/dep-scan.sh` → syft + grype | this dir | **npm: yes** (`blocking-dep-scan`); images: no |
 | **Transitive C/C++ matcher** | per-dep `cpe` + `release_date` + cached NVD feed | separate work (`cpp-cve-matcher`) | tracked elsewhere |
 
@@ -172,3 +172,19 @@ toggle: the curated gate scans the curated
   Envoy/libwebp/optipng/… tree, which grype's SBOM matcher cannot see.
 - **Then:** migrate clean surfaces off the curated SBOM (the load-bearing "no
   drift" step).
+
+## Release assets: SBOM and VEX
+
+Each GitHub Release carries the SBOM and VEX as they exist at the release tag,
+named `pagespeed-1.1-<version>.spdx.json` and `pagespeed-1.1-<version>.vex.json`
+(`<version>` is the tag without the leading `v`, e.g.
+`pagespeed-1.1-1.17.0.spdx.json`). Both are listed in `SHA256SUMS` and carry a
+detached GPG signature (`.asc`) like the packages.
+
+Verify, then scan the SBOM with the VEX applied:
+
+```
+sha256sum -c --ignore-missing SHA256SUMS
+gpg --verify pagespeed-1.1-<version>.spdx.json.asc pagespeed-1.1-<version>.spdx.json
+grype sbom:pagespeed-1.1-<version>.spdx.json --vex pagespeed-1.1-<version>.vex.json
+```

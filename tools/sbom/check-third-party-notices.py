@@ -59,7 +59,7 @@ NOTICES_PATH = os.path.join(REPO_ROOT, "THIRD-PARTY-NOTICES")
 SBOM_PATH = os.path.join(REPO_ROOT, "sbom", "pagespeed-1.1.spdx.json")
 
 # SBOM packages that are the product or first-party code: no third-party notice.
-FIRST_PARTY = {"pagespeed-1.1", "cyclone"}
+FIRST_PARTY = {"pagespeed-1.1", "cyclone", "pagespeed-envoy-filter-source"}
 
 # A token that reads as a version: 1.2.3, v1.2.3, 20260107.1, 2025-11-05,
 # a 7..40 digit commit hash, or a bare major version such as "20".

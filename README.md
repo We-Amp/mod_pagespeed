@@ -126,5 +126,5 @@ lists We-Amp B.V. as a founding committer organization alongside Google,
 and
 [Google's 2013 ngx_pagespeed announcement](https://developers.googleblog.com/en/speed-up-your-sites-with-pagespeed-for-nginx/)
 named We-Amp among the module's contributors. After Google archived the
-project, We-Amp continued development — first the maintained 1.x line, and
-now the 2.x line this repository carries.
+project, We-Amp continued development in the releases this repository
+carries.

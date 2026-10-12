@@ -1,0 +1,1 @@
+{"host":"fixture.test","path":"/h/u/käse","rule":"hreflang-unicode","kind":"hreflang","mode":"enforce","action":"replace","reason":"absent","defect":"hreflang-no-self","before":"fnv1a64:392f676a3305155d","after":"de=https://fixture.test/h/u/käse, en=https://fixture.test/h/u/café"}

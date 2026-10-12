@@ -1,0 +1,3 @@
+{"host":"report.fixture.test","path":"/g/x","rule":"canonical-keep","kind":"canonical","mode":"report","action":"insert","reason":"absent","defect":"canonical-missing","before":"","after":"https://fixture.test/g/x"}
+{"host":"report.fixture.test","path":"/g/x","rule":"title-keep","kind":"title","mode":"report","action":"none","reason":"present","defect":"","before":"","after":""}
+{"host":"report.fixture.test","path":"/g/x","rule":"description-keep","kind":"description","mode":"report","action":"none","reason":"present","defect":"description-missing","before":"","after":""}

@@ -1,0 +1,1 @@
+{"host":"fixture.test","path":"/j/replace/x","rule":"jsonld-replace","kind":"jsonld","mode":"enforce","action":"none","reason":"conflict","defect":"","before":"","after":""}

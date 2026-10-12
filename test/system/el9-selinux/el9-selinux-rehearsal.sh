@@ -64,7 +64,8 @@
 #
 # Usage (as root, inside the guest):
 #   bash el9-selinux-rehearsal.sh [--rc 1.16.0-rc.14]
-#       (--packages-dir DIR | --repo-url URL)
+#       (--packages-dir DIR | --repo-url https://packages.modpagespeed.com/staging)
+#       [--revision N]
 #       [--policy none|draft] [--policy-src DIR]
 #       [--baseline-selinux rw-content|none] [--disable-dontaudit]
 #       [--payload DIR] [--artifacts DIR] [--dry-run]
@@ -78,7 +79,14 @@
 #   --repo-url URL      upgrade from this package repository instead (the
 #                       staging endpoint); credentials from PACKAGES_USER /
 #                       PACKAGES_PASS in the environment, as install.sh takes
-#                       them. Mutually exclusive with --packages-dir.
+#                       them. Mutually exclusive with --packages-dir. A
+#                       storage.googleapis.com URL is refused; the only
+#                       supported staging URL is
+#                       https://packages.modpagespeed.com/staging.
+#   --revision N        the package revision (the -rN of a +rN reship) the
+#                       repository must serve; the installed module rpm
+#                       Version-Release is then compared in full
+#                       (X.Y.Z-N), not by its X.Y.Z prefix.
 #   --policy MODE       none (default): run against what the packages ship
 #                       -- today no policy at all, so the daemon runs as
 #                       unconfined_service_t and httpd_t meets var_t files.
@@ -146,6 +154,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RC=""
 PKGS_DIR=""
 REPO_URL=""
+REVISION=""
 POLICY="none"
 POLICY_SRC=""
 BASELINE_SELINUX="rw-content"
@@ -168,6 +177,7 @@ while [[ $# -gt 0 ]]; do
     --rc) RC="$2"; shift 2 ;;
     --packages-dir) PKGS_DIR="$2"; shift 2 ;;
     --repo-url) REPO_URL="${2%/}"; shift 2 ;;
+    --revision) REVISION="${2#+}"; REVISION="${REVISION#r}"; shift 2 ;;
     --policy) POLICY="$2"; shift 2 ;;
     --policy-src) POLICY_SRC="$2"; shift 2 ;;
     --baseline-selinux) BASELINE_SELINUX="$2"; shift 2 ;;
@@ -184,6 +194,28 @@ done
 
 case "$POLICY" in none|draft) ;; *) echo "error: --policy must be none or draft" >&2; exit 2 ;; esac
 case "$BASELINE_SELINUX" in rw-content|none) ;; *) echo "error: --baseline-selinux must be rw-content or none" >&2; exit 2 ;; esac
+# --repo-url guard (#1196). The only supported staging endpoint is
+# https://packages.modpagespeed.com/staging (Basic Auth). The direct bucket
+# URL (storage.googleapis.com/...) is no longer updated and then 403s; reading
+# it can pass a reshipped (+rN) build on the previous build's bytes.
+if [[ -n "$REPO_URL" ]]; then
+  _host="${REPO_URL#*://}"; _host="${_host%%/*}"; _host="${_host##*@}"; _host="${_host%%:*}"
+  _host="$(printf '%s' "$_host" | tr '[:upper:]' '[:lower:]')"
+  case "$_host" in
+    googleapis.com|*.googleapis.com)
+      echo "error: --repo-url '$REPO_URL' points at ${_host}; direct bucket URLs go stale and then 403. The only supported staging URL is https://packages.modpagespeed.com/staging" >&2
+      exit 2 ;;
+  esac
+  if [[ "$_host" == "packages.modpagespeed.com" && "$REPO_URL" == */staging ]]; then
+    if [[ -z "${PACKAGES_USER:-}" || -z "${PACKAGES_PASS:-}" ]]; then
+      echo "error: the staging endpoint needs credentials: set PACKAGES_USER and PACKAGES_PASS (CI: the PACKAGES_STAGING_USER / PACKAGES_STAGING_PASS repository secrets)" >&2
+      exit 2
+    fi
+  fi
+fi
+if [[ -n "$REVISION" && ! "$REVISION" =~ ^[0-9]+$ ]]; then
+  echo "error: --revision must be N, rN or +rN" >&2; exit 2
+fi
 if [[ -n "$PKGS_DIR" && -n "$REPO_URL" ]]; then
   echo "error: --packages-dir and --repo-url are mutually exclusive" >&2; exit 2
 fi
@@ -742,6 +774,16 @@ case "$MOD_VERSION" in
   "${PKGV}"*) pass "module package upgraded: mod-pagespeed ${MOD_VERSION}" ;;
   *) fail "module package version '${MOD_VERSION}' does not start with ${PKGV}" ;;
 esac
+if [[ -n "$REVISION" ]]; then
+  EXPECT_MOD="${PKGV}-${REVISION}"
+  if [[ "$MOD_VERSION" == "$EXPECT_MOD" ]]; then
+    pass "module package full version: ${MOD_VERSION}"
+  else
+    fail "module package full version: expected '${EXPECT_MOD}', got '${MOD_VERSION}' (stale repository or wrong revision?)"
+  fi
+elif [[ -n "$REPO_URL" ]]; then
+  note "no --revision given: only the ${PKGV} prefix of the module version was checked, so a +rN reship is not distinguished from the previous build"
+fi
 case "$OPT_VERSION" in
   "${PKGV}"|"${PKGV}-"*) pass "optimizer package installed: pagespeed-optimizer ${OPT_VERSION}" ;;
   *) fail "optimizer package version '${OPT_VERSION}' is not ${PKGV}" ;;

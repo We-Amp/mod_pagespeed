@@ -23,7 +23,10 @@
 #include <cstddef>
 #include <memory>
 #include <new>
+#include <optional>
 #include <set>
+#include <string>
+#include <string_view>
 #include <utility>
 
 #include "base/logging.h"
@@ -172,6 +175,7 @@ const char RewriteOptions::kImageWebpAnimatedRecompressionQuality[] =
 const char RewriteOptions::kImageWebpQualityForSaveData[] =
     "WebpQualityForSaveData";
 const char RewriteOptions::kImageWebpTimeoutMs[] = "WebpTimeoutMs";
+const char RewriteOptions::kImageMaxAnimatedFrames[] = "ImageMaxAnimatedFrames";
 const char RewriteOptions::kImageAvifRecompressionQuality[] =
     "AvifRecompressionQuality";
 const char RewriteOptions::kImageAvifRecompressionQualityForSmallScreens[] =
@@ -276,6 +280,10 @@ const char RewriteOptions::kRewriteRandomDropPercentage[] =
     "RewriteRandomDropPercentage";
 const char RewriteOptions::kRewriteUncacheableResources[] =
     "RewriteUncacheableResources";
+const char RewriteOptions::kRulePackFile[] = "RulePackFile";
+const char RewriteOptions::kRulePackMode[] = "RulePackMode";
+const char RewriteOptions::kRulePackRequireSigned[] = "RulePackRequireSigned";
+const char RewriteOptions::kRulePackTrustKey[] = "RulePackTrustKey";
 const char RewriteOptions::kRunningExperiment[] = "RunExperiment";
 const char RewriteOptions::kServeStaleIfFetchError[] = "ServeStaleIfFetchError";
 const char RewriteOptions::kServeStaleWhileRevalidateThresholdSec[] =
@@ -499,6 +507,9 @@ const int64 RewriteOptions::kDefaultImageWebpQualityForSaveData = 50;
 // Timeout, in ms, for all WebP conversion attempts for each source
 // image. If negative, does not time out.
 const int64 RewriteOptions::kDefaultImageWebpTimeoutMs = -1;
+// Animations with more frames than this are served unconverted. 0 or a
+// negative value disables the cap.
+const int64 RewriteOptions::kDefaultImageMaxAnimatedFrames = 200;
 
 // AVIF quality defaults. -1 falls back to
 // ImageRecompressionQuality, mirroring the WebP defaults; the encode-side
@@ -708,6 +719,8 @@ const RewriteOptions::Filter kDangerousFilterSet[] = {
     RewriteOptions::kMakeGoogleAnalyticsAsyncDeprecated,
     RewriteOptions::kMobilize,
     RewriteOptions::kMobilizePrecomputeDeprecated,
+    // Applies an operator-written rule pack; only ever on by name.
+    RewriteOptions::kRulePacks,
     RewriteOptions::kSplitHtmlDeprecated,
     RewriteOptions::kSplitHtmlHelperDeprecated,
     RewriteOptions::kStripScripts,
@@ -891,6 +904,7 @@ const RewriteOptions::FilterEnumToIdAndNameEntry
          "Rewrite Style Attributes"},
         {RewriteOptions::kRewriteStyleAttributesWithUrl, "cu",
          "Rewrite Style Attributes With Url"},
+        {RewriteOptions::kRulePacks, "rpk", "Rule Packs"},
         {RewriteOptions::kSplitHtmlDeprecated, "sh", "Deprecated."},
         {RewriteOptions::kSplitHtmlHelperDeprecated, "se", "Deprecated."},
         {RewriteOptions::kSpriteImages, RewriteOptions::kImageCombineId,
@@ -1342,6 +1356,33 @@ void RewriteOptions::AddProperties() {
       "browser-dependent, so they are never served as Cache-Control: private "
       "and never carry a Vary header.",
       true);
+  properties_->property(properties_->size() - 1)
+      ->set_do_not_use_for_signature_computation(true);
+
+  // The rule_packs filter. Server scope: a per-directory configuration (such
+  // as .htaccess on a shared host) must not point the server process at
+  // another file; per-directory off is DisableFilters rule_packs. Neither
+  // value is part of the signature: they change HTML only, which is never
+  // cached, and the filter reads both for every document.
+  AddBaseProperty(GoogleString(), &RewriteOptions::rule_pack_file_, "rpkf",
+                  kRulePackFile, kServerScope,
+                  "Path of the rule pack file the rule_packs filter applies.",
+                  true);
+  properties_->property(properties_->size() - 1)
+      ->set_do_not_use_for_signature_computation(true);
+  AddBaseProperty(kRulePackModeReport, &RewriteOptions::rule_pack_mode_, "rpkm",
+                  kRulePackMode, kServerScope,
+                  "Mode of the rule_packs filter: report (default) records "
+                  "what the rules would do; enforce lets enforcing rules "
+                  "change the page.",
+                  true);
+  properties_->property(properties_->size() - 1)
+      ->set_do_not_use_for_signature_computation(true);
+  AddBaseProperty(false, &RewriteOptions::rule_pack_require_signed_, "rpkrs",
+                  kRulePackRequireSigned, kServerScope,
+                  "Refuse rule packs that are not signed with a key listed by "
+                  "RulePackTrustKey.",
+                  true);
   properties_->property(properties_->size() - 1)
       ->set_do_not_use_for_signature_computation(true);
 
@@ -2464,6 +2505,10 @@ RewriteOptions::OptionSettingResult RewriteOptions::ParseAndSetOptionFromName2(
     }
   } else if (StringCaseEqual(name, kCustomFetchHeader)) {
     AddCustomFetchHeader(arg1, arg2);
+  } else if (StringCaseEqual(name, kRulePackTrustKey)) {
+    if (!AddRulePackTrustKey(arg1, arg2, msg)) {
+      result = RewriteOptions::kOptionValueInvalid;
+    }
   } else if (StringCaseEqual(name, kLoadFromFile)) {
     file_load_policy()->Associate(arg1, arg2);
   } else if (StringCaseEqual(name, kLoadFromFileMatch)) {
@@ -2660,6 +2705,20 @@ bool RewriteOptions::ParseFromString(StringPiece value_string,
     *value = kLazyloadImagesModeJs;
   } else {
     // value_string is not one of "auto"/"native"/"js". Return a parse error.
+    return false;
+  }
+  return true;
+}
+
+bool RewriteOptions::ParseFromString(StringPiece value_string,
+                                     RulePackMode* value) {
+  if (StringCaseEqual(value_string, "report")) {
+    *value = kRulePackModeReport;
+  } else if (StringCaseEqual(value_string, "enforce")) {
+    *value = kRulePackModeEnforce;
+  } else {
+    // Anything else is a configuration error, so that a misspelled
+    // "enforce" cannot silently mean report (or the reverse).
     return false;
   }
   return true;
@@ -3022,6 +3081,21 @@ void RewriteOptions::Merge(const RewriteOptions& src) {
   for (int i = 0, n = src.custom_fetch_headers_.size(); i < n; ++i) {
     NameValue* nv = src.custom_fetch_headers_[i];
     AddCustomFetchHeader(nv->name, nv->value);
+  }
+  // A source key replaces the key of the same id here, or is inserted in
+  // order: a virtual host's key overrides a global one. The per-scope limit
+  // does not apply to the merged list.
+  for (const pagespeed::packs::TrustKey& key : src.rule_pack_trust_keys_) {
+    auto it = std::lower_bound(
+        rule_pack_trust_keys_.begin(), rule_pack_trust_keys_.end(), key.key_id,
+        [](const pagespeed::packs::TrustKey& k, const std::string& id) {
+          return k.key_id < id;
+        });
+    if (it != rule_pack_trust_keys_.end() && it->key_id == key.key_id) {
+      it->public_key = key.public_key;
+    } else {
+      rule_pack_trust_keys_.insert(it, key);
+    }
   }
 
   for (int i = 0, n = src.num_url_valued_attributes(); i < n; ++i) {
@@ -3417,6 +3491,16 @@ GoogleString RewriteOptions::ToString(LazyloadImagesMode mode) {
       return "native";
     case kLazyloadImagesModeJs:
       return "js";
+  }
+  return "?";
+}
+
+GoogleString RewriteOptions::ToString(RulePackMode mode) {
+  switch (mode) {
+    case kRulePackModeReport:
+      return "report";
+    case kRulePackModeEnforce:
+      return "enforce";
   }
   return "?";
 }
@@ -3864,6 +3948,43 @@ void RewriteOptions::AddResourceHeader(const StringPiece& name,
 void RewriteOptions::AddCustomFetchHeader(const StringPiece& name,
                                           const StringPiece& value) {
   custom_fetch_headers_.push_back(new NameValue(name, value));
+}
+
+bool RewriteOptions::AddRulePackTrustKey(StringPiece key_id, StringPiece base64,
+                                         GoogleString* msg) {
+  if (!pagespeed::packs::IsValidKeyId(
+          std::string_view(key_id.data(), key_id.size()))) {
+    *msg = "RulePackTrustKey: the key id must match [a-z0-9-]{1,64}";
+    return false;
+  }
+  const std::optional<std::string> key = pagespeed::packs::DecodeTrustKey(
+      std::string_view(base64.data(), base64.size()));
+  if (!key.has_value()) {
+    *msg =
+        "RulePackTrustKey: the public key must be the base64 of 32 bytes (44 "
+        "characters)";
+    return false;
+  }
+  auto it = std::lower_bound(
+      rule_pack_trust_keys_.begin(), rule_pack_trust_keys_.end(), key_id,
+      [](const pagespeed::packs::TrustKey& k, StringPiece id) {
+        return StringPiece(k.key_id) < id;
+      });
+  if (it != rule_pack_trust_keys_.end() && StringPiece(it->key_id) == key_id) {
+    if (it->public_key == *key) return true;
+    *msg = StrCat("RulePackTrustKey: key id \"", key_id,
+                  "\" is already set to another key");
+    return false;
+  }
+  if (rule_pack_trust_keys_set_here_ >=
+      pagespeed::packs::kMaxTrustKeysPerScope) {
+    *msg = "RulePackTrustKey: at most 16 keys";
+    return false;
+  }
+  ++rule_pack_trust_keys_set_here_;
+  rule_pack_trust_keys_.insert(
+      it, pagespeed::packs::TrustKey{std::string(key_id), *key});
+  return true;
 }
 
 // We expect experiment_specs_.size() to be small (not more than 2 or 3)

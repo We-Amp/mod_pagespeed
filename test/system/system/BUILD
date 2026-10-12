@@ -96,6 +96,7 @@ pagespeed_py_test_suite(
         "test_respect_custom_options.py",
         "test_response_headers.py",
         "test_rewrite_deadline_ipro.py",
+        "test_rule_packs.py",
         "test_sane_connection_header.py",
         "test_server_side_includes.py",
         "test_shard_domain.py",

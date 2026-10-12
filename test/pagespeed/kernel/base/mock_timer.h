@@ -66,8 +66,16 @@ class MockTimer : public Timer {
   // Set time advances in milliseconds for the next calls to NowUs/NowMs.
   void SetTimeDeltaMs(int64 delta_ms) { SetTimeDeltaUs(1000 * delta_ms); }
 
+  // Simulates the wall clock stepping backward (NTP, hypervisor time-sync)
+  // by delta_us without disturbing the monotonic clock: NowUs() drops by
+  // delta_us, while NowMonotonicUs() keeps advancing as if nothing happened.
+  // Pending alarms are not fired. Until this is called, NowMonotonicUs()
+  // equals NowUs(), as for any Timer without an independent monotonic source.
+  void StepWallClockBackUs(int64 delta_us);
+
   // Returns number of microseconds since 1970.
   int64 NowUs() const override;
+  int64 NowMonotonicUs() const override;
   void SleepUs(int64 us) override { AdvanceUs(us); }
   void SleepMs(int64 ms) override { AdvanceUs(1000 * ms); }
 
@@ -77,6 +85,8 @@ class MockTimer : public Timer {
     Function* callback;
   } TimeAndCallback;
   mutable int64 time_us_;
+  // Accumulated wall-clock step-back; added to NowUs() for NowMonotonicUs().
+  int64 monotonic_skew_us_;
   std::unique_ptr<AbstractMutex> mutex_;
   std::vector<TimeAndCallback> deltas_us_;
   mutable unsigned int next_delta_;

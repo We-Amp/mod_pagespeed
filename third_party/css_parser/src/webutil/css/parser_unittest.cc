@@ -19,6 +19,7 @@
 
 #include "third_party/css_parser/src/webutil/css/parser.h"
 
+#include <limits>
 #include <memory>
 
 #include "base/logging.h"
@@ -1714,6 +1715,38 @@ TEST_F(ParserTest, percentage_colors) {
   EXPECT_EQ(255, Parser::ValueToRGB(&hundred));
   Value zero(0.0, Value::PERCENT);
   EXPECT_EQ(0, Parser::ValueToRGB(&zero));
+
+  // Out-of-range numbers must saturate to the 0-255 channel range without an
+  // out-of-range double->int conversion (UBSan float-cast-overflow, #1250).
+  const double kIntMax = 2147483647.0;
+  const double kInf = std::numeric_limits<double>::infinity();
+  const double kNan = std::numeric_limits<double>::quiet_NaN();
+  const struct {
+    double number;
+    int expected;
+  } kCases[] = {
+      {kIntMax, 255}, {kIntMax + 1, 255}, {-kIntMax, 0}, {-kIntMax - 2, 0},
+      {1e308, 255},   {-1e308, 0},        {kInf, 255},   {-kInf, 0},
+      {kNan, 0},      {50, 50},
+  };
+  for (const auto& c : kCases) {
+    Value plain(c.number, Value::NO_UNIT);
+    EXPECT_EQ(c.expected, Parser::ValueToRGB(&plain)) << c.number;
+  }
+  // Percentages: scaled by 2.55, so 100% is 255.
+  const struct {
+    double number;
+    int expected;
+  } kPercentCases[] = {
+      {kIntMax, 255},    {kIntMax + 1, 255}, {1767921191.0, 255},
+      {-kIntMax - 2, 0}, {1e308, 255},       {-1e308, 0},
+      {kInf, 255},       {-kInf, 0},         {kNan, 0},
+      {50, 127},
+  };
+  for (const auto& c : kPercentCases) {
+    Value pct(c.number, Value::PERCENT);
+    EXPECT_EQ(c.expected, Parser::ValueToRGB(&pct)) << c.number;
+  }
 }
 
 TEST_F(ParserTest, value_equality) {

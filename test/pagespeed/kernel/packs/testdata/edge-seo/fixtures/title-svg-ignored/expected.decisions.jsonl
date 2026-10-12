@@ -1,0 +1,1 @@
+{"host":"fixture.test","path":"/t/keep/svg","rule":"title-keep","kind":"title","mode":"enforce","action":"insert","reason":"absent","defect":"title-missing","before":"","after":"Title for /t/keep/svg"}

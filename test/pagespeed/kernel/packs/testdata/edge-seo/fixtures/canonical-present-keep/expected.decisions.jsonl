@@ -1,0 +1,1 @@
+{"host":"fixture.test","path":"/c/keep/present","rule":"canonical-keep","kind":"canonical","mode":"enforce","action":"none","reason":"present","defect":"","before":"","after":""}

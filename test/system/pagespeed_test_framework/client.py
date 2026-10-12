@@ -281,6 +281,10 @@ class PageSpeedClient:
         """
         return self._request("GET", path, headers=headers, allow_redirects=allow_redirects)
 
+    def head(self, path: str, headers: Optional[Dict[str, str]] = None) -> Response:
+        """Perform a HEAD request."""
+        return self._request("HEAD", path, headers=headers)
+
     def post(
         self,
         path: str,

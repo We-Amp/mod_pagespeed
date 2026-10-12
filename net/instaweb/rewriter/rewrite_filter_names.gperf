@@ -152,6 +152,7 @@ struct FilterMap {
 "rewrite_javascript_inline",         RewriteOptions::kRewriteJavascriptInline
 "rewrite_style_attributes",          RewriteOptions::kRewriteStyleAttributes
 "rewrite_style_attributes_with_url", RewriteOptions::kRewriteStyleAttributesWithUrl
+"rule_packs",                        RewriteOptions::kRulePacks
 "split_html",                        RewriteOptions::kSplitHtmlDeprecated
 "split_html_helper",                 RewriteOptions::kSplitHtmlHelperDeprecated
 "sprite_images",                     RewriteOptions::kSpriteImages

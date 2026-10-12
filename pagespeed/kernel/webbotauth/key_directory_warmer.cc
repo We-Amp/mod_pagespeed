@@ -85,9 +85,9 @@ bool KeyDirectoryWarmer::WaitMsOrQuit(int64_t wait_ms) {
   if (quit_) {
     return true;
   }
-  const int64_t deadline_ms = timer_->NowMs() + wait_ms;
+  const int64_t deadline_ms = timer_->NowMonotonicMs() + wait_ms;
   while (!quit_) {
-    const int64_t remaining_ms = deadline_ms - timer_->NowMs();
+    const int64_t remaining_ms = deadline_ms - timer_->NowMonotonicMs();
     if (remaining_ms <= 0) {
       break;
     }
@@ -164,9 +164,10 @@ bool KeyDirectoryWarmer::FetchJwksBody(GoogleString* body) {
   bool done = false;
   int status_code = 0;
   if (cb->LockIfNotReleased()) {
-    int64_t now_ms = timer_->NowMs();
+    int64_t now_ms = timer_->NowMonotonicMs();
     for (int64_t end_ms = now_ms + config_.fetch_timeout_ms;
-         !cb->IsDoneLockHeld() && now_ms < end_ms; now_ms = timer_->NowMs()) {
+         !cb->IsDoneLockHeld() && now_ms < end_ms;
+         now_ms = timer_->NowMonotonicMs()) {
       cb->TimedWait(std::max(static_cast<int64_t>(0), end_ms - now_ms));
     }
     done = cb->IsDoneLockHeld();

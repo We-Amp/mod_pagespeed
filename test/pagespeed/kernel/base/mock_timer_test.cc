@@ -116,4 +116,17 @@ TEST_F(MockTimerTest, MonotonicFallsBackToNowUs) {
   EXPECT_EQ(6012, timer_.NowMonotonicUs());
 }
 
+// A simulated backward wall-clock step lowers NowUs() but leaves the monotonic
+// clock advancing, and later advances move both forward together.
+TEST_F(MockTimerTest, StepWallClockBackKeepsMonotonicAdvancing) {
+  timer_.SetTimeUs(10000);
+  const int64 mono_before = timer_.NowMonotonicUs();
+  timer_.StepWallClockBackUs(3000);
+  EXPECT_EQ(7000, timer_.NowUs());
+  EXPECT_EQ(mono_before, timer_.NowMonotonicUs());
+  timer_.AdvanceUs(500);
+  EXPECT_EQ(7500, timer_.NowUs());
+  EXPECT_EQ(mono_before + 500, timer_.NowMonotonicUs());
+}
+
 }  // namespace net_instaweb

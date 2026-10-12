@@ -49,6 +49,16 @@ New-Item -ItemType Directory -Path $PkgDir | Out-Null
 # Copy DLL
 Copy-Item $DllPath "$PkgDir\pagespeed_iis.dll"
 
+# License files, as the deb and rpm ship them
+foreach ($f in "LICENSE", "NOTICE", "THIRD-PARTY-NOTICES") {
+    $src = Join-Path $SrcDir $f
+    if (-not (Test-Path $src)) {
+        Write-Error "$src not found"
+        exit 1
+    }
+    Copy-Item $src (Join-Path $PkgDir $f)
+}
+
 # Create sample web.config
 @"
 <?xml version="1.0" encoding="utf-8"?>
@@ -128,6 +138,11 @@ Native IIS module for PageSpeed web optimization.
 
 See KNOWN_LIMITATIONS.md for details.
 
+## License
+
+LICENSE (Apache-2.0), NOTICE and THIRD-PARTY-NOTICES are in the top-level
+directory of this archive.
+
 ## More Information
 
 - https://github.com/we-amp/mod_pagespeed
@@ -138,5 +153,20 @@ $ZipPath = Join-Path $OutputDir "$PkgName-win-x64.zip"
 if (Test-Path $ZipPath) { Remove-Item $ZipPath }
 Compress-Archive -Path $PkgDir -DestinationPath $ZipPath
 Remove-Item -Recurse -Force $PkgDir
+
+# Fail if the archive is missing any of the license files
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$zip = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+try {
+    $names = $zip.Entries | ForEach-Object { $_.FullName -replace '\\', '/' }
+} finally {
+    $zip.Dispose()
+}
+foreach ($f in "LICENSE", "NOTICE", "THIRD-PARTY-NOTICES") {
+    if ($names -notcontains "$PkgName/$f") {
+        Write-Error "$ZipPath is missing $f"
+        exit 1
+    }
+}
 
 Write-Host "Package created: $ZipPath"

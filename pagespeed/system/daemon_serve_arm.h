@@ -121,6 +121,12 @@ inline constexpr char kOriginHeadersNotReproducible[] =
 // that is genuinely cold look identical in a counter and are opposite in what
 // an operator should do about them.
 inline constexpr char kSubstrateUnavailable[] = "substrate-unavailable";
+// The entry is HTML.  On the 1.1 ports the daemon serves no HTML, whatever
+// the configuration: the module's own filter chain rewrites every HTML
+// response, so there is one HTML rewriter per response.  Its own reason, not
+// `no-entry`: the entry exists (possibly stale, from an earlier store) and is
+// being declined on purpose.
+inline constexpr char kHtmlClassicChain[] = "html-classic-chain";
 }  // namespace daemon_serve_reason
 
 // Everything the arm reads about the request.  Every StringPiece is borrowed

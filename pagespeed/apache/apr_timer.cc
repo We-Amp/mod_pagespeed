@@ -19,6 +19,8 @@
 
 #include "pagespeed/apache/apr_timer.h"
 
+#include <chrono>
+
 #include "apr_time.h"
 
 namespace net_instaweb {
@@ -28,6 +30,12 @@ AprTimer::~AprTimer() {}
 int64 AprTimer::NowUs() const {
   // apr_time_now returns microseconds.
   return apr_time_now();
+}
+
+int64 AprTimer::NowMonotonicUs() const {
+  return std::chrono::duration_cast<std::chrono::microseconds>(
+             std::chrono::steady_clock::now().time_since_epoch())
+      .count();
 }
 
 void AprTimer::SleepUs(int64 us) { apr_sleep(us); }

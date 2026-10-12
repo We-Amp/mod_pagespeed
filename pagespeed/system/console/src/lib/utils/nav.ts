@@ -24,3 +24,12 @@ export function isNavActive(entry: Route, currentPath: string, all: readonly Rou
   const current = all.find((r) => r.path === currentPath);
   return current !== undefined && current.parent === entry.path;
 }
+
+/**
+ * Where a server-rendered admin page lives for the console that is open: the
+ * console's own admin path (the one its API calls use, so a renamed path and
+ * the whole-server vs per-vhost console both come out right) plus the leaf.
+ */
+export function serverPageHref(basePath: string, leaf: string): string {
+  return `${basePath.replace(/\/$/, "")}/${leaf}`;
+}

@@ -21,6 +21,7 @@
 
 #include <algorithm>  // std::min
 #include <cctype>     // isascii
+#include <cmath>      // std::isnan
 #include <memory>
 #include <string>
 #include <vector>
@@ -887,7 +888,17 @@ unsigned char Parser::ValueToRGB(Value* v) {
     toret = 0;
   } else if (v->GetLexicalUnitType() == Value::NUMBER) {
     if (v->GetDimension() == Value::PERCENT) {
-      toret = static_cast<int>(v->GetFloatValue() / 100.0 * 255.0);
+      // Clamp in double space first: converting a double outside int's range
+      // (or NaN) is undefined behaviour. The result is clipped to 0-255
+      // below anyway, so in-range values are unchanged.
+      const double scaled = v->GetFloatValue() / 100.0 * 255.0;
+      if (std::isnan(scaled) || scaled <= 0.0) {
+        toret = 0;
+      } else if (scaled >= 255.0) {
+        toret = 255;
+      } else {
+        toret = static_cast<int>(scaled);
+      }
     } else {
       toret = v->GetIntegerValue();
     }

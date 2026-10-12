@@ -56,7 +56,10 @@
 #   6. asserts the silent-degrade class is ABSENT: zero error-log lines of either
 #      signature after the restart, the daemon active as user pagespeed, the
 #      web-server user in group pagespeed, socket + cache-dir modes as
-#      designed, exactly one cache volume file, the new version in the
+#      designed, exactly one cache volume file in the optimizer cache
+#      directory of the version under test (v1 before 1.17.0, v2 from it on;
+#      across that step the baseline's v1 files must be left in place for a
+#      rollback), the new version in the
 #      response header, the 1.15 config file byte-identical and accepted by
 #      configtest, and in-place optimization PROVEN after traffic: the
 #      daemon's notification counter moved (management API over its unix
@@ -67,8 +70,8 @@
 #
 # Usage:
 #   install/upgrade_test/run_upgrade_test.sh --rc 1.16.0-rc.13 [--distro debian12]
-#       [--repo-url https://.../staging | --packages-dir DIR] [--arch amd64|arm64]
-#       [--keep] [--work DIR]
+#       [--repo-url https://packages.modpagespeed.com/staging | --packages-dir DIR]
+#       [--revision N] [--arch amd64|arm64] [--keep] [--work DIR]
 #
 #   --rc VERSION        the 1.16 upstream version under test (SemVer spelling,
 #                       e.g. 1.16.0-rc.13 or 1.16.0). Selects the release tag
@@ -80,6 +83,15 @@
 #                       endpoint). Credentials, when needed, come from the
 #                       PACKAGES_USER / PACKAGES_PASS environment (never from
 #                       the command line), exactly as install.sh takes them.
+#                       A storage.googleapis.com URL is refused: the only
+#                       supported staging URL is
+#                       https://packages.modpagespeed.com/staging, which
+#                       requires PACKAGES_USER / PACKAGES_PASS.
+#   --revision N        the package revision (the -rN of a +rN reship) the
+#                       repository must serve. The installed module package
+#                       version is then compared in full (deb X.Y.Z-rN, rpm
+#                       X.Y.Z-N, with the prerelease in tilde form), not just
+#                       by its X.Y.Z prefix, so a stale repository cannot pass.
 #   --packages-dir DIR  upgrade with the module/optimizer packages found in
 #                       this directory (locally built, e.g. by
 #                       install/debian/build.sh / install/rpm/build.sh with
@@ -116,6 +128,7 @@ REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 RC=""
 DISTRO="debian12"
 REPO_URL=""
+REVISION=""
 PKGS_DIR=""
 ARCH=""
 RELEASE_REPO="We-Amp/mod_pagespeed"
@@ -146,6 +159,7 @@ while [[ $# -gt 0 ]]; do
     --rc) RC="$2"; shift 2 ;;
     --distro) DISTRO="$2"; shift 2 ;;
     --repo-url) REPO_URL="${2%/}"; shift 2 ;;
+    --revision) REVISION="${2#+}"; REVISION="${REVISION#r}"; shift 2 ;;
     --packages-dir) PKGS_DIR="$2"; shift 2 ;;
     --arch) ARCH="$2"; shift 2 ;;
     --release-repo) RELEASE_REPO="$2"; shift 2 ;;
@@ -161,6 +175,28 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "$RC" ]] || { echo "error: --rc VERSION is required" >&2; usage; }
+# --repo-url guard (#1196). The only supported staging endpoint is
+# https://packages.modpagespeed.com/staging (Basic Auth). The direct bucket
+# URL (storage.googleapis.com/...) is no longer updated and then 403s; reading
+# it can pass a reshipped (+rN) build on the previous build's bytes.
+if [[ -n "$REPO_URL" ]]; then
+  _host="${REPO_URL#*://}"; _host="${_host%%/*}"; _host="${_host##*@}"; _host="${_host%%:*}"
+  _host="$(printf '%s' "$_host" | tr '[:upper:]' '[:lower:]')"
+  case "$_host" in
+    googleapis.com|*.googleapis.com)
+      echo "error: --repo-url '$REPO_URL' points at ${_host}; direct bucket URLs go stale and then 403. The only supported staging URL is https://packages.modpagespeed.com/staging" >&2
+      exit 2 ;;
+  esac
+  if [[ "$_host" == "packages.modpagespeed.com" && "$REPO_URL" == */staging ]]; then
+    if [[ -z "${PACKAGES_USER:-}" || -z "${PACKAGES_PASS:-}" ]]; then
+      echo "error: the staging endpoint needs credentials: set PACKAGES_USER and PACKAGES_PASS (CI: the PACKAGES_STAGING_USER / PACKAGES_STAGING_PASS repository secrets)" >&2
+      exit 2
+    fi
+  fi
+fi
+if [[ -n "$REVISION" && ! "$REVISION" =~ ^[0-9]+$ ]]; then
+  echo "error: --revision must be N, rN or +rN" >&2; exit 2
+fi
 if [[ -n "$PKGS_DIR" && -n "$REPO_URL" ]]; then
   echo "error: --packages-dir and --repo-url are mutually exclusive" >&2; exit 2
 fi
@@ -254,7 +290,14 @@ TPN_SINCE="1.16.0"
 PKG_DOCDIR=/usr/share/doc/mod-pagespeed
 DAEMON_UNIT=pagespeed-optimizer
 DAEMON_RUN=/run/pagespeed-optimizer
-DAEMON_CACHE=/var/cache/pagespeed-optimizer/v1
+# The optimizer's cache directory carries the cache directory generation in
+# its name: v1 up to 1.16.x, v2 from 1.17.0 on (cache library on-disk format 8;
+# the packaged drop-in points ModPagespeedDaemonVolumePath at v2/cache). The
+# directory under test follows the --rc version; the baseline's follows the
+# baseline version once it is resolved (step 3). An upgrade across a
+# generation leaves the old directory on disk for a rollback.
+DAEMON_CACHE_ROOT=/var/cache/pagespeed-optimizer
+CACHE_GEN2_SINCE="1.17.0"
 FIXTURE_URL_DIR=/upgrade-fixture
 IMAGE_NAME=Puzzle.jpg
 # Same bytes under a URL the 1.15 module never saw: the post-upgrade in-place
@@ -358,6 +401,14 @@ semver_ge() {
   done
   return 0
 }
+
+# cache_gen_for_version <X.Y.Z[-pre]>: the optimizer cache directory name for
+# that upstream version (v1 or v2). Compared on the X.Y.Z core so every
+# prerelease of a release takes that release's layout.
+cache_gen_for_version() {
+  if semver_ge "${1%%-*}" "$CACHE_GEN2_SINCE"; then printf 'v2'; else printf 'v1'; fi
+}
+DAEMON_CACHE="${DAEMON_CACHE_ROOT}/$(cache_gen_for_version "$RC")"
 
 # Run a command inside the container. stdin is /dev/null so a package
 # manager can never wait on a prompt (a conffile question falls back to its
@@ -500,6 +551,7 @@ echo "  license files:  ${PKG_DOCDIR}/{LICENSE,NOTICE} expected from ${LICENSE_S
 TPN_STRICT=0
 if [[ "$MODULE_IS_LOCAL" -eq 1 ]] || semver_ge "$RC" "$TPN_SINCE"; then TPN_STRICT=1; fi
 echo "  notices:        ${PKG_DOCDIR}/THIRD-PARTY-NOTICES -- strict whenever the package under test ships it; an absence fails from ${TPN_SINCE} on (currently $( [[ "$TPN_STRICT" -eq 1 ]] && echo strict || echo 'advisory (older pair)'))"
+echo "  optimizer cache: ${DAEMON_CACHE} expected after the upgrade (v2 from ${CACHE_GEN2_SINCE} on)"
 
 # ---------------------------------------------------------------------------
 # 1. Fixture: a page with an image and a stylesheet
@@ -707,12 +759,18 @@ if [[ -z "$BASELINE_PIN" ]]; then
   die "no published GA mod-pagespeed${BASELINE_PREFIX:+ matching ${BASELINE_PREFIX}*} older than ${RC} in the public repository"
 fi
 BASELINE_LINE="${BASELINE_UPSTREAM%.*}"                      # 1.15.0 -> 1.15
+BASELINE_CACHE="${DAEMON_CACHE_ROOT}/$(cache_gen_for_version "$BASELINE_UPSTREAM")"
 note "baseline resolved: mod-pagespeed ${BASELINE_PIN} (newest published GA older than ${RC})"
 
 step "installing mod_pagespeed ${BASELINE_PIN} from the public repository (package manager, pinned)"
 if [[ "$FAMILY" == deb ]]; then
-  in_ctr "apt-get install -y -qq mod-pagespeed=${BASELINE_PIN}" >"$WORK/logs/install-baseline.log" 2>&1 \
-    || { tail -30 "$WORK/logs/install-baseline.log"; die "apt-get install mod-pagespeed=${BASELINE_PIN} failed"; }
+  # Pin the optimizer the baseline module depends on (= X.Y.Z): from 1.17.0 on
+  # the repository carries several pairs and apt would otherwise pick the
+  # newest optimizer and refuse. A 1.15 baseline has no optimizer dependency.
+  BASELINE_OPT="$(in_ctr "apt-cache show mod-pagespeed=${BASELINE_PIN} 2>/dev/null | sed -n 's/^Depends:.*pagespeed-optimizer (= \\([^)]*\\)).*/\\1/p' | head -1" || true)"
+  BASELINE_OPT="${BASELINE_OPT//[$'\r ']/}"
+  in_ctr "apt-get install -y -qq mod-pagespeed=${BASELINE_PIN}${BASELINE_OPT:+ pagespeed-optimizer=${BASELINE_OPT}}" >"$WORK/logs/install-baseline.log" 2>&1 \
+    || { tail -30 "$WORK/logs/install-baseline.log"; die "apt-get install mod-pagespeed=${BASELINE_PIN}${BASELINE_OPT:+ pagespeed-optimizer=${BASELINE_OPT}} failed"; }
 else
   in_ctr "dnf install -y -q mod-pagespeed-${BASELINE_PIN}" >"$WORK/logs/install-baseline.log" 2>&1 \
     || { tail -30 "$WORK/logs/install-baseline.log"; die "dnf install mod-pagespeed-${BASELINE_PIN} failed"; }
@@ -787,6 +845,15 @@ if size="$(fetch_until "-lt $ORIGIN_IMAGE_BYTES" 120 "$SIZE_CMD")"; then
 else
   fail "baseline in-place optimization: ${IMAGE_NAME} still ${size:-?} bytes after 120s (origin ${ORIGIN_IMAGE_BYTES})"
 fi
+# The baseline optimizer's cache volumes (a 1.16 baseline pulls the optimizer
+# in through its Depends; a 1.15 one has none). An upgrade across a cache
+# directory generation must leave them in place for a rollback (step 5).
+BASELINE_VOLUMES="$(in_ctr "ls -1 ${BASELINE_CACHE}/cache-* 2>/dev/null" || true)"
+if [[ -n "$BASELINE_VOLUMES" ]]; then
+  note "baseline optimizer cache: $(printf '%s\n' "$BASELINE_VOLUMES" | grep -c .) volume file(s) under ${BASELINE_CACHE}"
+else
+  note "baseline optimizer cache: no volume file under ${BASELINE_CACHE}"
+fi
 
 # ---------------------------------------------------------------------------
 # 4. Upgrade in place to the 1.16 pair
@@ -825,6 +892,16 @@ case "$MOD_VERSION" in
   "${PKGV}"*) pass "module package upgraded: mod-pagespeed ${MOD_VERSION}" ;;
   *) fail "module package version '${MOD_VERSION}' does not start with ${PKGV}" ;;
 esac
+if [[ -n "$REVISION" ]]; then
+  if [[ "$FAMILY" == deb ]]; then EXPECT_MOD="${PKGV}-r${REVISION}"; else EXPECT_MOD="${PKGV}-${REVISION}"; fi
+  if [[ "$MOD_VERSION" == "$EXPECT_MOD" ]]; then
+    pass "module package full version: ${MOD_VERSION}"
+  else
+    fail "module package full version: expected '${EXPECT_MOD}', got '${MOD_VERSION}' (stale repository or wrong revision?)"
+  fi
+elif [[ -n "$REPO_URL" ]]; then
+  note "no --revision given: only the ${PKGV} prefix of the module version was checked, so a +rN reship is not distinguished from the previous build"
+fi
 case "$OPT_VERSION" in
   "${PKGV}"|"${PKGV}-"*) pass "optimizer package installed: pagespeed-optimizer ${OPT_VERSION}" ;;
   *) fail "optimizer package version '${OPT_VERSION}' is not ${PKGV}" ;;
@@ -1045,6 +1122,23 @@ check "exactly one cache volume file (no split cache)" "1" "$(printf '%s\n' "$vo
 for v in $volumes; do
   check "volume $(basename "$v") mode" "660" "$(in_ctr "stat -c %a $v" || true)"
 done
+# Across a cache directory generation (1.16 v1 -> 1.17 v2) the old directory
+# is left on disk for a rollback: the baseline's volume files must survive the
+# upgrade untouched by name, and v2 alone serves (one volume, checked above).
+# Removing v1 is the operator's call, so its absence is never required.
+if [[ "$BASELINE_CACHE" != "$DAEMON_CACHE" ]]; then
+  if [[ -n "$BASELINE_VOLUMES" ]]; then
+    baseline_after="$(in_ctr "ls -1 ${BASELINE_CACHE}/cache-* 2>/dev/null" || true)"
+    if [[ "$baseline_after" == "$BASELINE_VOLUMES" ]]; then
+      pass "baseline cache ${BASELINE_CACHE} left in place for a rollback ($(printf '%s\n' "$baseline_after" | grep -c .) volume file(s), same names)"
+    else
+      fail "baseline cache ${BASELINE_CACHE} changed by the upgrade (before: $(printf '%s' "$BASELINE_VOLUMES" | tr '\n' ' ') after: $(printf '%s' "${baseline_after:-<none>}" | tr '\n' ' ')): a rollback would start cold"
+    fi
+  else
+    note "baseline left no optimizer cache under ${BASELINE_CACHE}; nothing to keep for a rollback"
+  fi
+  grep -F "${BASELINE_CACHE}" "$WORK/logs/upgrade.log" | head -3 | sed 's/^/  pkgmgr notice: /' || true
+fi
 # Group membership is only real inside the serving children (the
 # silent-degrade log
 # line came from there, not from the parent).

@@ -24,12 +24,12 @@ test.describe("App shell", () => {
     await expect(page.locator(".topbar-badge")).toHaveCount(0);
   });
 
-  test("sidebar has all 10 nav items", async ({ page }) => {
+  test("sidebar has all 11 nav items", async ({ page }) => {
     await page.goto(BASE);
     const items = page.locator(".nav-item");
-    await expect(items).toHaveCount(10);
+    await expect(items).toHaveCount(11);
     const labels = await items.allTextContents();
-    expect(labels).toEqual(["Overview", "Savings", "Statistics", "Histograms", "Caches", "Configuration", "Status", "Logs", "Support", "About"]);
+    expect(labels).toEqual(["Overview", "Savings", "Statistics", "Histograms", "Caches", "Configuration", "Rule packs", "Status", "Logs", "Support", "About"]);
   });
 
   test("clicking nav items changes the hash", async ({ page }) => {

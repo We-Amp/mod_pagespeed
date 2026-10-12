@@ -1,0 +1,2 @@
+{"host":"fixture.test","path":"/t/keep/b","rule":"title-keep","kind":"title","mode":"enforce","action":"insert","reason":"absent","defect":"title-missing","before":"","after":"Title for /t/keep/b"}
+{"host":"fixture.test","path":"/t/keep/b","rule":"title-keep","kind":"title","mode":"enforce","action":"remove","reason":"late_conflict","defect":"","before":"fnv1a64:d3ab203ef903db07","after":""}

@@ -1,0 +1,1 @@
+ed25519 test-publisher wa/G5at0ZblNx4X6aVJvBWPR3DBnfuJHiTRvG1n9xGpCXacqhX5wBENwQKotlRrkasNeu0jkqNLLOEpeuEUCCw==

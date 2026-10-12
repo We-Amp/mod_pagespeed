@@ -1,0 +1,15 @@
+{
+  "url": "https://fixture.test/lh/keep/flush",
+  "pack": "pack.link-header.json",
+  "flush_every": 16,
+  "origin_headers": [
+    [
+      "Content-Type",
+      "text/html; charset=utf-8"
+    ],
+    [
+      "Link",
+      "</static/app.css>; rel=preload; as=style"
+    ]
+  ]
+}

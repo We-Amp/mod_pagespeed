@@ -1,0 +1,22 @@
+{
+  "pack": {
+    "id": "edge-seo",
+    "version": "0.1.0",
+    "publisher": "local",
+    "description": "A second pack for the IIS system test: it is never loaded when the option is refused"
+  },
+  "sites": [
+    { "host": "rulepacks-refused.example.com", "mode": "enforce" }
+  ],
+  "defaults": { "paths": ["/**"] },
+  "rules": [
+    {
+      "id": "canonical-refused",
+      "kind": "canonical",
+      "enforce": true,
+      "match": { "paths": ["/mod_pagespeed_test/rule_packs/**"] },
+      "value": { "template": "https://refused.example.com{path}" },
+      "on_present": "keep"
+    }
+  ]
+}

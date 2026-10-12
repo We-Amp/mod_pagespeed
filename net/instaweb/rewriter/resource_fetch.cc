@@ -113,9 +113,10 @@ bool ResourceFetch::BlockingFetch(const GoogleUrl& url,
   // Wait for resource fetch to complete.
   if (!callback->IsDone()) {
     int64 max_ms = driver->options()->blocking_fetch_timeout_ms();
-    for (int64 start_ms = server_context->timer()->NowMs(), now_ms = start_ms;
+    for (int64 start_ms = server_context->timer()->NowMonotonicMs(),
+               now_ms = start_ms;
          !callback->IsDone() && now_ms - start_ms < max_ms;
-         now_ms = server_context->timer()->NowMs()) {
+         now_ms = server_context->timer()->NowMonotonicMs()) {
       int64 remaining_ms = max_ms - (now_ms - start_ms);
 
       driver->BoundedWaitFor(RewriteDriver::kWaitForCompletion, remaining_ms);

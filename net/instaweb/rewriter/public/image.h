@@ -141,6 +141,7 @@ class Image {
           jpeg_num_progressive_scans(
               RewriteOptions::kDefaultImageJpegNumProgressiveScans),
           webp_conversion_timeout_ms(-1),
+          max_animated_frames(RewriteOptions::kDefaultImageMaxAnimatedFrames),
           avif_conversion_timeout_ms(-1),
           conversions_attempted(0),
           preserve_lossless(false),
@@ -194,6 +195,8 @@ class Image {
     bool use_transparent_for_blank_image;
     int64 jpeg_num_progressive_scans;
     int64 webp_conversion_timeout_ms;
+    // Animations with more frames than this are not converted. <= 0 disables.
+    int64 max_animated_frames;
     int64 avif_conversion_timeout_ms;
 
     // These fields are set by the conversion routines to report

@@ -36,6 +36,23 @@ export const NAV_GROUPS: ReadonlyArray<{ id: NavGroup; label: string; muted?: bo
   { id: "help", label: "Help", muted: true },
 ];
 
+/**
+ * A sidebar entry for a page the server renders itself (not a console
+ * route): a plain same-tab anchor to `<admin path>/<leaf>`, listed after the
+ * group's routes. Not part of `routes`: it has no hash path, component or
+ * shortcut, and never becomes the current page.
+ */
+export interface ServerPageLink {
+  label: string;
+  group: NavGroup;
+  /** The admin handler's leaf, e.g. "rule_packs" for `/pagespeed_admin/rule_packs`. */
+  leaf: string;
+}
+
+export const SERVER_PAGE_LINKS: ReadonlyArray<ServerPageLink> = [
+  { label: "Rule packs", group: "module", leaf: "rule_packs" },
+];
+
 export const routes: Route[] = [
   {
     path: "#/overview",

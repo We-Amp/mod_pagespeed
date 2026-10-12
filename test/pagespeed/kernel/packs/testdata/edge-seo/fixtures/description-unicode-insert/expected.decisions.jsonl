@@ -1,0 +1,1 @@
+{"host":"fixture.test","path":"/d/u/x","rule":"description-unicode","kind":"description","mode":"enforce","action":"insert","reason":"absent","defect":"description-missing","before":"","after":"Café crème — ok /d/u/x"}

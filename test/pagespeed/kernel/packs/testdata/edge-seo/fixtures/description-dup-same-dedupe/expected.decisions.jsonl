@@ -1,0 +1,1 @@
+{"host":"fixture.test","path":"/d/keep/dup","rule":"description-keep","kind":"description","mode":"enforce","action":"dedupe","reason":"duplicate","defect":"","before":"fnv1a64:ea1e95d626aac432","after":""}

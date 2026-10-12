@@ -1,0 +1,2 @@
+{"host":"fixture.test","path":"/hd/a","rule":"title-replace-head","kind":"title","mode":"enforce","action":"replace","reason":"present","defect":"","before":"fnv1a64:d321d294c5e49e24","after":"New title"}
+{"host":"fixture.test","path":"/hd/a","rule":"jsonld-insert-body","kind":"jsonld","mode":"enforce","action":"insert","reason":"absent","defect":"","before":"","after":"Organization"}

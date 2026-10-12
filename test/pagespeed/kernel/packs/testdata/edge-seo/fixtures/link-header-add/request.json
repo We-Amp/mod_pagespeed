@@ -1,0 +1,14 @@
+{
+  "url": "https://fixture.test/lh/keep/add",
+  "pack": "pack.link-header.json",
+  "origin_headers": [
+    [
+      "Content-Type",
+      "text/html; charset=utf-8"
+    ],
+    [
+      "Link",
+      "</static/app.css>; rel=preload; as=style"
+    ]
+  ]
+}

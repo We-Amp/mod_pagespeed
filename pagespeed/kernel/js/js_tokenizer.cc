@@ -243,6 +243,57 @@ bool IsConditionalCompilationComment(StringPiece token) {
           strings::EndsWith(token, "@*/"));
 }
 
+// Returns the index of the first byte at or after `start` that is neither
+// whitespace nor part of a comment.  Recognizes the same comment openers
+// TryConsumeComment does: `//`, `<!--` (line comments anywhere), `-->` (a line
+// comment at the start of a line) and `/* */`.  `at_line_start` tracks what
+// the tokenizer tracks in `start_of_line_`: a linebreak in skipped
+// whitespace, or in a skipped block comment that is not a conditional
+// compilation comment, puts the scan back at a line start.  An unterminated
+// block comment stops the scan AT its `/*`, so callers see a '/' and treat it
+// as a lookahead miss.  ASCII line terminators only for whitespace and line
+// comments (the tokenizer proper also honors U+2028/U+2029 and the Zs class).
+size_t SkipWhitespaceAndComments(StringPiece input, size_t start) {
+  const size_t size = input.size();
+  size_t i = start;
+  bool at_line_start = false;
+  while (i < size) {
+    const StringPiece rest = input.substr(i);
+    const char ch = rest[0];
+    if (ch == ' ' || ch == '\t' || ch == '\f' || ch == '\v' || ch == '\n' ||
+        ch == '\r') {
+      if (ch == '\n' || ch == '\r') {
+        at_line_start = true;
+      }
+      ++i;
+    } else if (strings::StartsWith(rest, "//") ||
+               strings::StartsWith(rest, "<!--") ||
+               (at_line_start && strings::StartsWith(rest, "-->"))) {
+      // Stop before the linebreak; the whitespace branch consumes it and
+      // sets at_line_start, as ConsumeLineComment leaves it to the following
+      // whitespace token.
+      while (i < size && input[i] != '\n' && input[i] != '\r') {
+        ++i;
+      }
+    } else if (strings::StartsWith(rest, "/*")) {
+      const size_t end = input.find("*/", i + 2);
+      if (end == StringPiece::npos) {
+        break;
+      }
+      const size_t comment_end = end + 2;
+      const StringPiece comment = input.substr(i, comment_end - i);
+      if (CommentHasLineTerminator(comment) &&
+          !IsConditionalCompilationComment(comment)) {
+        at_line_start = true;
+      }
+      i = comment_end;
+    } else {
+      break;
+    }
+  }
+  return i;
+}
+
 // Regex to match JavaScript identifiers.  For details, see page 18 of
 // http://www.ecma-international.org/publications/files/ECMA-ST/Ecma-262.pdf
 const char* const kIdentifierRegex =
@@ -1437,67 +1488,10 @@ bool JsTokenizer::TryConsumeIdentifierOrKeyword(JsKeywords::Type* type_out,
         // block comment stops the scan: the tokenizer will error on it
         // downstream, and a conservative identifier reading is the safe
         // fallback there.
-        // The skipper must recognize the same comment openers
-        // TryConsumeComment does, not just the two slash forms: `<!--`
-        // opens a line comment anywhere, and `-->` opens one at the start
-        // of a line.  (Only the openers -- see the terminator caveat
-        // below.)  Missing them
-        // reintroduced the RC-E defect for HTML-form comments (found
-        // by fuzzing): `let <!--c\n row\n +4;` is a valid
-        // declaration, but the identifier reading dropped the linebreak the
-        // declaration requires and emitted the syntax error `let row+4;`.
-        // `at_line_start` tracks what the tokenizer tracks in
-        // `start_of_line_`: the `let` we just matched is a real token, so
-        // the scan starts mid-line, and only a linebreak in skipped
-        // whitespace -- or in a skipped block comment that is not a
-        // conditional-compilation comment, which is the rule ConsumeSlash
-        // applies -- puts us back at a line start.
-        //
-        // The scan recognizes ASCII line terminators only.  The tokenizer
-        // proper also ends a line comment on U+2028/U+2029
-        // (kLineCommentRegex) and counts the Zl/Zp/Zs classes and the BOM
-        // as whitespace (kWhitespaceRegex).  A line comment terminated by
-        // one of those over-runs here, the scan lands past the binding, and
-        // `let` takes the identifier path -- the same pre-existing miss the
-        // `//` form has had since the original RC-E fix, not one this change
-        // introduces.  Widening the whitespace branch
-        // to the full unicode set is a separate change.
-        bool at_line_start = false;
-        while (i < size) {
-          const StringPiece rest = input_.substr(i);
-          const char ch = rest[0];
-          if (ch == ' ' || ch == '\t' || ch == '\f' || ch == '\v' ||
-              ch == '\n' || ch == '\r') {
-            if (ch == '\n' || ch == '\r') {
-              at_line_start = true;
-            }
-            ++i;
-          } else if (strings::StartsWith(rest, "//") ||
-                     strings::StartsWith(rest, "<!--") ||
-                     (at_line_start && strings::StartsWith(rest, "-->"))) {
-            // A line comment runs up to, but not including, the linebreak;
-            // the whitespace branch above then consumes that linebreak and
-            // sets at_line_start, just as ConsumeLineComment leaves it to
-            // the following whitespace token.
-            while (i < size && input_[i] != '\n' && input_[i] != '\r') {
-              ++i;
-            }
-          } else if (strings::StartsWith(rest, "/*")) {
-            const size_t end = input_.find("*/", i + 2);
-            if (end == StringPiece::npos) {
-              break;
-            }
-            const int comment_end = static_cast<int>(end) + 2;
-            const StringPiece comment = input_.substr(i, comment_end - i);
-            if (CommentHasLineTerminator(comment) &&
-                !IsConditionalCompilationComment(comment)) {
-              at_line_start = true;
-            }
-            i = comment_end;
-          } else {
-            break;
-          }
-        }
+        // Comment openers, line-start tracking (`<!--` and `-->` forms, found
+        // by fuzzing: `let <!--c\n row\n +4;`) and the ASCII-only
+        // line-terminator caveat are documented on SkipWhitespaceAndComments.
+        i = static_cast<int>(SkipWhitespaceAndComments(input_, i));
         if (i < size) {
           const char c = input_[i];
           is_declaration =
@@ -2724,11 +2718,17 @@ bool JsTokenizer::AtMemberNameAfterModifier() const {
 bool JsTokenizer::NextCharStartsIdentifier() const {
   const int size = input_.size();
   int i = 0;
-  while (i < size &&
-         (input_[i] == ' ' || input_[i] == '\t' || input_[i] == '\f' ||
-          input_[i] == '\v' || input_[i] == '\n' || input_[i] == '\r')) {
-    ++i;
-  }
+  // Skip whitespace AND comments: a comment between a generator `*` and the
+  // method name (`{ */**/m(){} }`) is grammatically inert, so it must not
+  // change how the `*` is classified.  Before this, the comment hid the name
+  // from the lookahead, the `*` took the binary-operator path, and the
+  // tokenizer's state (hence the minifier's linebreak decisions after the
+  // name) differed from the same input with the comment removed -- so
+  // minifying the comment-free output was not a fixed point.  The comment
+  // openers match the `let` lookahead's skipper; an unterminated block
+  // comment stops the scan and answers false (the tokenizer errors on it
+  // downstream).  ASCII line terminators only, as there.
+  i = static_cast<int>(SkipWhitespaceAndComments(input_, 0));
   if (i >= size) {
     return false;
   }

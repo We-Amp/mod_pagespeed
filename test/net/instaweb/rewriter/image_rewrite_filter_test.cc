@@ -4349,6 +4349,24 @@ TEST_F(ImageRewriteTest, AnimatedGifToWebpWithPlainWebpAccept) {
                           true);
 }
 
+// CradleAnimation.gif has 36 frames; with the cap below that, the animation is
+// served as-is and counted as a failed animated conversion.
+TEST_F(ImageRewriteTest, AnimatedGifOverFrameCapNotConverted) {
+  options()->EnableFilter(RewriteOptions::kInsertImageDimensions);
+  options()->EnableFilter(RewriteOptions::kConvertToWebpAnimated);
+  options()->set_image_recompress_quality(85);
+  options()->set_image_max_animated_frames(35);
+  rewrite_driver()->AddFilters();
+  SetupForWebpAnimated();
+  TestSingleRewrite(kCradleAnimation, kContentTypeGif, kContentTypeGif, "",
+                    " width=\"200\" height=\"150\"", false, false);
+  TestConversionVariables(0, 0, 0,  // gif
+                          0, 0, 0,  // png
+                          0, 0, 0,  // jpg
+                          0, 0, 1,  // gif animated
+                          true);
+}
+
 TEST_F(ImageRewriteTest, AnimatedGifToWebpNotEnabled) {
   options()->EnableFilter(RewriteOptions::kInsertImageDimensions);
   options()->EnableFilter(RewriteOptions::kConvertToWebpLossless);

@@ -40,6 +40,8 @@ AutoReqProv     : yes
 %Description
 @@FULLDESC@@
 
+Agent install recipe: https://modpagespeed.com/recipes/nginx.md
+
 %build
 
 %install

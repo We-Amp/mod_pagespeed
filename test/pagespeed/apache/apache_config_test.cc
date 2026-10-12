@@ -249,6 +249,53 @@ TEST_F(ApacheConfigTest, NoSubstrateDirectiveInTheStaticCommandTable) {
       << "mod_instaweb.cc mentions a substrate directive";
 }
 
+// The rule_packs options: per virtual host, never per directory, and out of
+// the configuration the optimizer files its work under.
+TEST_F(ApacheConfigTest, RulePackOptionsParseAndRoundTrip) {
+  EXPECT_TRUE(config_.rule_pack_file().empty());
+  EXPECT_EQ(RewriteOptions::kRulePackModeReport, config_.rule_pack_mode());
+
+  ApacheConfig vhost("vhost", &thread_system_);
+  GoogleString msg;
+  NullMessageHandler handler;
+  ASSERT_EQ(
+      RewriteOptions::kOptionOk,
+      vhost.ParseAndSetOptionFromName1(
+          "RulePackFile", "/etc/pagespeed/packs/site.json", &msg, &handler));
+  ASSERT_EQ(RewriteOptions::kOptionOk,
+            vhost.ParseAndSetOptionFromName1("RulePackMode", "enforce", &msg,
+                                             &handler));
+  EXPECT_EQ(RewriteOptions::kOptionValueInvalid,
+            vhost.ParseAndSetOptionFromName1("RulePackMode", "enforc", &msg,
+                                             &handler));
+
+  std::unique_ptr<ApacheConfig> merged(config_.Clone());
+  merged->Merge(vhost);
+  EXPECT_EQ("/etc/pagespeed/packs/site.json", merged->rule_pack_file());
+  EXPECT_EQ(RewriteOptions::kRulePackModeEnforce, merged->rule_pack_mode());
+  std::unique_ptr<ApacheConfig> clone(merged->Clone());
+  EXPECT_EQ("/etc/pagespeed/packs/site.json", clone->rule_pack_file());
+  EXPECT_EQ(RewriteOptions::kRulePackModeEnforce, clone->rule_pack_mode());
+
+  // Server scope is what keeps the directives out of .htaccess and
+  // <Directory>; a help string is what makes them directives at all.
+  for (RewriteOptions::OptionBase* option : config_.all_options()) {
+    if (StringCaseEqual(option->option_name(), "RulePackFile") ||
+        StringCaseEqual(option->option_name(), "RulePackMode")) {
+      EXPECT_EQ(RewriteOptions::kServerScope, option->scope())
+          << option->option_name();
+      EXPECT_TRUE(option->help_text() != nullptr) << option->option_name();
+    }
+  }
+
+  GoogleString context_off, signature_off, context_on, signature_on;
+  ASSERT_EQ(OptionContextStatus::kOk,
+            OptionContext::Compute(config_, &context_off, &signature_off));
+  ASSERT_EQ(OptionContextStatus::kOk,
+            OptionContext::Compute(*clone, &context_on, &signature_on));
+  EXPECT_EQ(context_off, context_on);
+}
+
 TEST_F(ApacheConfigTest, Auth) {
   StringPiece name, value, redirect;
   EXPECT_FALSE(config_.GetProxyAuth(&name, &value, &redirect));

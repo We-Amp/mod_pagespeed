@@ -150,6 +150,9 @@ const char* const kCorpus[] = {
     "a{color:rgb(99999999999,0,0)}",
     "a{color:rgb(-99999999999,0,0)}",
     "a { color: rgb(1e308, 0, 0) }",
+    // Regression (#1250): percentage scaled past INT_MAX in ValueToRGB.
+    "a{color:rgb(1767921191%8,0,0)}",
+    "a{color:rgb(1e308%,-1e308%,1e400%)}",
 
     // Functions / parens nesting (depth + unbalanced).
     "a { width: calc(",

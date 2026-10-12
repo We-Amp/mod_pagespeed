@@ -103,7 +103,7 @@ deps:
 
   envoy:
     cpe: "cpe:2.3:a:envoyproxy:envoy"          # NVD: 95 CVEs
-    release_date: "2026-06-23"                  # commit f97695a5 == v1.37.5 tag (GitHub release published 2026-06-23). Bumped from v1.37.2 (2026-04-10) for the 2026-06-26 envoy CVE batch — defense-in-depth; mpp compiles none of the affected extensions (14 entries in cve-ignore.yaml). NOTE v1.37.5 (06-23) predates the batch's 06-26 disclosure, so the date heuristic still flags those 14 — the suppressions remain required even with the fix-carrying version.
+    release_date: "2026-08-26"                  # commit cf413bdb == v1.37.6 tag (GitHub release published 2026-08-26). Bumped from v1.37.5.
 
   hiredis:
     cpe: "cpe:2.3:a:redislabs:hiredis"         # NVD: 1 CVE
@@ -213,9 +213,9 @@ deps:
   nginx:
     cpe: "cpe:2.3:a:f5:nginx"                    # NVD: nginx tracked under vendor f5 (legacy nginx:nginx also exists)
     # Bundled matched-pair nginx for the ASP.NET Core sidecar. SHIPPED version is
-    # DEF_NGINX_VER (focal path) in install/nginx/build_module_in_container.sh = 1.30.4,
+    # DEF_NGINX_VER (focal path) in install/nginx/build_module_in_container.sh = 1.30.5,
     # the 1.30 stable branch (GA bump 2026-06-03 from 1.24.0 — newer branch, smaller CVE
     # backlog). nginx is the ONE dep whose version is not a repositories.bzl constant, so
-    # generate-sbom.py pins it as {"literal": "1.30.4"}; keep that literal lockstep with
+    # generate-sbom.py pins it as {"literal": "1.30.5"}; keep that literal lockstep with
     # DEF_NGINX_VER (focal) when the bundled nginx is bumped.
-    release_date: "2026-07-15"                   # nginx 1.30.4 stable — upstream release 2026-07-15 (nginx.org download Last-Modified; security: CVE-2026-42533, CVE-2026-60005, CVE-2026-56434)
+    release_date: "2026-09-15"                   # nginx 1.30.5 stable — upstream release 2026-09-15 (nginx.org download Last-Modified; security: CVE-2026-90439)

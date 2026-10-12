@@ -1148,6 +1148,7 @@ Image::CompressionOptions* ImageRewriteFilter::ImageOptionsForLoadedResource(
   image_options->retain_color_sampling =
       !options->Enabled(RewriteOptions::kJpegSubsampling);
   image_options->webp_conversion_timeout_ms = options->image_webp_timeout_ms();
+  image_options->max_animated_frames = options->image_max_animated_frames();
   image_options->avif_conversion_timeout_ms = options->image_avif_timeout_ms();
   // Attached unconditionally, unlike the WebP family (which rides along with
   // SetWebpCompressionOptions and so is skipped when the request has no WebP

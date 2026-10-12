@@ -31,6 +31,8 @@ class AprTimer : public Timer {
  public:
   ~AprTimer() override;
   int64 NowUs() const override;
+  // APR has no monotonic clock; use std::chrono::steady_clock (as StdTimer).
+  int64 NowMonotonicUs() const override;
   void SleepUs(int64 us) override;
 };
 

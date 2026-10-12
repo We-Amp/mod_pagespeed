@@ -3260,6 +3260,28 @@
      "descriptions": [
       {
        "lang": "en",
+       "value": "Envoy is an open source edge and service proxy designed for cloud-native applications. Prior to 1.36.10, 1.37.6, 1.38.4, and 1.39.1, Envoy's ProdClusterManagerFactory::allocateConnPool dereferences transport_socket_options while selecting an HTTP/3 connection pool without first checking whether the pointer is null. LoadBalancerContext implementations used by synthetic, mirror, health-check, and async-client calls can return no transport-socket options. With auto_config and HTTP/3 enabled, routine traffic reaching one of those contexts can crash an Envoy worker. The relevant scope boundary is that the affected branch requires HTTP/3 in the protocol set and a context that supplies no transport-socket options. This issue is fixed in versions 1.36.10, 1.37.6, 1.38.4, and 1.39.1."
+      }
+     ],
+     "id": "CVE-2026-48521",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 5.9,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2026-09-21T20:17:25.463"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
        "value": "Envoy is an open source edge and service proxy designed for cloud-native applications. From 1.34.0 until 1.35.13, 1.36.9, 1.37.5, and 1.38.3, a vulnerability exists in Envoy's TCP StatsD sink (TcpStatsdSink), where the thread-local flusher buffer can be overflowed by exceptionally long statistic names (e.g., >16KiB). During formatting, TcpStatsdSink reserves a single contiguous memory slice of 16KiB (FLUSH_SLICE_SIZE_BYTES). If formatting a single metric exceeds the remaining capacity, the flusher initiates a buffer rotation but incorrectly continues to allocate another fixed 16KiB slice. If an attacker can trigger a statistic name longer than 16KiB\u2014for example, by sending an HTTP or gRPC request with an extremely long request path (:path) that is recorded by the grpc_stats filter configured with stats_for_all_methods: true\u2014the flusher will attempt to copy the metric name using memcpy operations beyond the allocated heap buffer boundaries. This leads to a heap write overflow, which can cause immediate denial-of-service (process crash) or potential remote code execution (RCE). This vulnerability is fixed in 1.35.13, 1.36.9, 1.37.5, and 1.38.3."
       }
      ],
@@ -3297,6 +3319,270 @@
       ]
      },
      "published": "2026-06-26T18:17:00.173"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Envoy is an open source edge and service proxy designed for cloud-native applications. Prior to 1.36.10, 1.37.6, 1.38.4, and 1.39.1, Envoy's HTTP external-authorization client can retain a stale request callback after a request is rejected. When RawHttpClientImpl::onSuccess later processes the authorization response, it can invoke callbacks_ after the callback owner has been destroyed, causing a use-after-free and process crash under production traffic. The relevant scope boundary is that the vulnerable path uses the HTTP ext_authz client; the advisory does not establish the same trigger for unrelated filters. This issue is fixed in versions 1.36.10, 1.37.6, 1.38.4, and 1.39.1."
+      }
+     ],
+     "id": "CVE-2026-50572",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 5.9,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2026-09-21T20:17:25.970"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Envoy is an open source edge and service proxy designed for cloud-native applications. Prior to 1.36.10, 1.37.6, 1.38.4, and 1.39.1, Envoy normally matches the raw request path, while servlet backends such as Apache Tomcat strip semicolon matrix parameters from each path segment before resolving the resource. Envoy's ignore_path_parameters_in_path_matching option instead truncates at the first semicolon and still does not match per-segment backend behavior. A remote client can use a parameterized protected segment, or a parameter on an earlier segment, to make Envoy select an unprotected fallback while the backend resolves the protected resource. The relevant scope boundary is that the bypass requires both a path-based Envoy decision and a backend that strips semicolon parameters per segment. This issue is fixed in versions 1.36.10, 1.37.6, 1.38.4, and 1.39.1."
+      }
+     ],
+     "id": "CVE-2026-73511",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 5.3,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2026-09-21T21:17:09.207"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Envoy is an open source edge and service proxy designed for cloud-native applications. Prior to 1.36.10, 1.37.6, 1.38.4, and 1.39.1, Envoy's HttpDatagramHandler caches the current RequestDecoder when Capsule Protocol is enabled. Stream recreation, including an internal redirect, replaces the ActiveStream and updates EnvoyQuicServerStream but does not update the handler's cached pointer. A subsequent HTTP/3 datagram can call decodeData through the freed decoder, causing invalid virtual dispatch and a process crash. The relevant scope boundary is that hTTP/3 datagrams and Capsule Protocol must be enabled, and the request must enter a stream-recreation path such as an internal redirect. This issue is fixed in versions 1.36.10, 1.37.6, 1.38.4, and 1.39.1."
+      }
+     ],
+     "id": "CVE-2026-73512",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 7.5,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2026-09-21T20:17:27.647"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Envoy is an open source edge and service proxy designed for cloud-native applications. Prior to 1.36.10, 1.37.6, 1.38.4, and 1.39.1, Envoy's optional oghttp2 upstream HTTP/2 codec accepts a response trailer HEADERS frame without END_STREAM. Envoy completes and deferred-deletes the ActiveRequest while oghttp2 keeps the stream open, leaving ClientStreamImpl with a dangling response_decoder_ reference. A later frame on the stream can dispatch through the freed object and crash the process. The relevant scope boundary is that the default nghttp2 codec rejects the malformed trailers, and the trigger is upstream-only with oghttp2 enabled. This issue is fixed in versions 1.36.10, 1.37.6, 1.38.4, and 1.39.1."
+      }
+     ],
+     "id": "CVE-2026-73513",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 7.5,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2026-09-21T20:17:27.820"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Envoy is an open source edge and service proxy designed for cloud-native applications. Prior to 1.36.10, 1.37.6, 1.38.4, and 1.39.1, Envoy's /stats?format=html admin endpoint uses StatsHtmlRender, which sanitizes string statistic values but emits statistic names without HTML encoding. A data-plane component such as grpc_stats with stats_for_all_methods enabled can incorporate attacker-controlled path segments into cached dynamic statistic names. When an operator views the HTML stats page, the stored name can execute script with the admin interface's origin and issue privileged same-origin requests. The relevant scope boundary is that the admin interface must be browser-accessible and an enabled component must persist attacker-influenced text in statistic names. This issue is fixed in versions 1.36.10, 1.37.6, 1.38.4, and 1.39.1."
+      }
+     ],
+     "id": "CVE-2026-73546",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 7.4,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2026-09-21T20:17:28.040"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Envoy is an open source edge and service proxy designed for cloud-native applications. Prior to 1.36.10, 1.37.6, 1.38.4, and 1.39.1, Envoy's ext_authz filter assumes that a request contains a :path pseudoheader when applying query_parameters_to_set or query_parameters_to_remove from an authorization response. A path-less CONNECT request makes request_headers_->Path() return null, and Filter::onComplete dereferences that pointer while parsing the query string. An unauthenticated downstream client can crash the Envoy process when the filter and authorization response use query-parameter mutation. The relevant scope boundary is that the deployment must accept path-less CONNECT and configure ext_authz query-parameter mutation. This issue is fixed in versions 1.36.10, 1.37.6, 1.38.4, and 1.39.1."
+      }
+     ],
+     "id": "CVE-2026-73547",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 7.5,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2026-09-21T20:17:28.230"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Envoy is an open source edge and service proxy designed for cloud-native applications. Prior to 1.36.10, 1.37.6, 1.38.4, and 1.39.1, Envoy forwards data for a configured non-WebSocket HTTP upgrade before the upstream accepts the upgrade. An unauthenticated HTTP/2 client can place a complete HTTP/1.1 request in extended CONNECT data; Envoy downgrades the request, writes the data unframed to a keep-alive HTTP/1.1 upstream, and returns the socket to the shared pool while the smuggled response remains queued. A different downstream client can then receive the attacker's response. The relevant scope boundary is that webSocket upgrades, plain CONNECT, disabled backend keep-alive, per-downstream pools, and max_requests_per_connection set to 1 are not affected by the demonstrated path. This issue is fixed in versions 1.36.10, 1.37.6, 1.38.4, and 1.39.1."
+      }
+     ],
+     "id": "CVE-2026-73548",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 7.5,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2026-09-21T20:17:28.397"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Envoy is an open source edge and service proxy designed for cloud-native applications. Prior to 1.36.10, 1.37.6, 1.38.4, and 1.39.1, Envoy's Utility::copyInternetAddressAndPort and QUIC client-address paths reconstruct scoped IPv6 addresses through addressAsString and Ipv6Instance. The string includes a percent scope identifier that inet_pton cannot parse, causing an exception or abort. Kernel-provided scoped IPv6 destinations in ORIGINAL_DST transparent-proxy deployments, and affected QUIC connection paths, can therefore terminate the process. The relevant scope boundary is that the HTTP use_http_header override rejects scoped addresses earlier; the advisory's crash path requires a kernel-provided original destination or the affected QUIC path. This issue is fixed in versions 1.36.10, 1.37.6, 1.38.4, and 1.39.1."
+      }
+     ],
+     "id": "CVE-2026-73549",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 5.3,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2026-09-21T20:17:28.567"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Envoy is an open source edge and service proxy designed for cloud-native applications. Prior to 1.36.10, 1.37.6, 1.38.4, and 1.39.1, Envoy copies every decoded HTTP/2 Host header value before discarding it when :authority is already present. The discarded value bypasses saveHeader, so its bytes and count are not charged against request header limits. An unauthenticated client can use HPACK indexing to submit many references to a large Host value across a bounded number of streams, forcing extreme header-copy allocation and causing the proxy to be out-of-memory killed. The relevant scope boundary is that the demonstrated amplification uses HTTP/2 HPACK and the duplicate Host discard behavior. This issue is fixed in versions 1.36.10, 1.37.6, 1.38.4, and 1.39.1."
+      }
+     ],
+     "id": "CVE-2026-73550",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 7.5,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2026-09-21T20:17:28.733"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Envoy is an open source edge and service proxy designed for cloud-native applications. Prior to 1.36.10, 1.37.6, 1.38.4, and 1.39.1, Envoy's URL normalization does not recognize dot and dotdot path segments when they carry semicolon parameters. A request such as /user/..;foo=bar/admin is therefore not canonicalized to /admin even when path normalization is enabled. If an upstream interprets the segment according to RFC 3986 while Envoy applies routing or RBAC to the uncollapsed path, a remote client can cause path confusion and bypass path-based security policy. The relevant scope boundary is that the security consequence depends on a downstream/upstream path interpretation mismatch or a path-based Envoy decision. This issue is fixed in versions 1.36.10, 1.37.6, 1.38.4, and 1.39.1."
+      }
+     ],
+     "id": "CVE-2026-73551",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 5.3,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2026-09-21T21:17:09.473"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Envoy is an open source edge and service proxy designed for cloud-native applications. Prior to 1.36.10, 1.37.6, 1.38.4, and 1.39.1, Envoy HTTP RBAC accepts RFC-valid opaque header bytes but evaluates safe_regex values with RE2's UTF-8 subject semantics. A downstream client can preserve a prohibited marker and add an unrelated obs-text octet, causing RE2::FullMatch to return false and a negative RBAC policy to treat the invalid subject as an ordinary no-match. A byte-oriented route matcher can still observe the marker, allowing the request to reach a route intended to be denied. The relevant scope boundary is that plain positive ALLOW regexes normally fail closed, and exact, prefix, suffix, and contains matchers are not shown to have this subject-domain failure. This issue is fixed in versions 1.36.10, 1.37.6, 1.38.4, and 1.39.1."
+      }
+     ],
+     "id": "CVE-2026-73552",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 7.5,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2026-09-21T20:17:28.900"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Envoy is an open source edge and service proxy designed for cloud-native applications. Prior to 1.36.10, 1.37.6, 1.38.4, and 1.39.1, When ignore_path_parameters_in_path_matching is enabled, Envoy's router strips the semicolon suffix before matching but the RBAC url_path matcher evaluates the raw path. A downstream request such as /admin;x can therefore miss a DENY rule for /admin while the router still selects the protected /admin backend. The inconsistent canonicalization allows an unauthenticated client to bypass path-based authorization. The relevant scope boundary is that the route option and a path-based RBAC rule must both be present, and the protected route must match after stripping. This issue is fixed in versions 1.36.10, 1.37.6, 1.38.4, and 1.39.1."
+      }
+     ],
+     "id": "CVE-2026-73553",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 7.5,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2026-09-21T21:17:09.637"
     }
    }
   ],
@@ -10697,7 +10983,7 @@
    }
   ]
  },
- "generated": "2026-10-03T08:03:39Z",
+ "generated": "2026-10-10T08:03:43Z",
  "osv_feeds": {
   "https://curl.se/docs/vuln.json": [
    {

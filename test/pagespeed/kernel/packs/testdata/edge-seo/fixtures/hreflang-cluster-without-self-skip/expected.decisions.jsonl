@@ -1,0 +1,1 @@
+{"host":"fixture.test","path":"/h/noself/page","rule":"hreflang-noself","kind":"hreflang","mode":"enforce","action":"none","reason":"cluster_without_self","defect":"","before":"","after":""}

@@ -48,6 +48,7 @@
 #include "pagespeed/kernel/util/simple_stats.h"
 #include "pagespeed/system/admin_daemon_handler.h"
 #include "pagespeed/system/daemon_reader.h"
+#include "pagespeed/system/rule_pack_decision_log.h"
 #include "pagespeed/system/system_rewrite_options.h"
 #include "pagespeed/system/system_server_context.h"
 #include "test/net/instaweb/rewriter/custom_rewrite_test_base.h"
@@ -336,6 +337,104 @@ TEST_F(AdminSiteTest, VhostConsoleConsultsLocalStatistics) {
   EXPECT_TRUE(fetch.done());
   EXPECT_TRUE(local_spy.asked_console_logger())
       << "the per-vhost console did not consult its own statistics object";
+}
+
+TEST_F(AdminSiteTest, RulePacksPageIsReadOnlyHtml) {
+  SystemServerContext* ssc =
+      static_cast<SystemServerContext*>(server_context_.get());
+  ssc->SetAdminSiteForTesting(std::make_unique<AdminSite>(
+      timer(), message_handler(), nullptr /* daemon_reader */));
+  GoogleUrl gurl("http://example.com/pagespeed_admin/rule_packs?limit=5");
+  QueryParams query_params;
+  query_params.ParseFromUrl(gurl);
+  {
+    GoogleString body;
+    StringAsyncFetch fetch(rewrite_driver()->request_context(), &body);
+    fetch.request_headers()->set_method(RequestHeaders::kGet);
+    ssc->AdminPage(false /* global */, gurl, query_params,
+                   rewrite_driver()->options(), &fetch, "");
+    EXPECT_TRUE(fetch.done());
+    EXPECT_EQ(200, fetch.response_headers()->status_code());
+    EXPECT_THAT(fetch.response_headers()->Lookup1(HttpAttributes::kContentType),
+                ::testing::StartsWith("text/html"));
+    EXPECT_NE(GoogleString::npos, body.find("<h1>Rule packs</h1>"));
+    EXPECT_NE(GoogleString::npos, body.find("RulePackMode"));
+    EXPECT_NE(GoogleString::npos,
+              body.find("href=\"https://modpagespeed.com/packs/\""));
+    EXPECT_NE(GoogleString::npos, body.find("LogDir is not set"));
+  }
+  {
+    GoogleString body;
+    StringAsyncFetch fetch(rewrite_driver()->request_context(), &body);
+    fetch.request_headers()->set_method(RequestHeaders::kPost);
+    ssc->AdminPage(false /* global */, gurl, query_params,
+                   rewrite_driver()->options(), &fetch, "");
+    EXPECT_EQ(405, fetch.response_headers()->status_code());
+  }
+}
+
+TEST_F(AdminSiteTest, RulePacksPageAnswersHead) {
+  SystemServerContext* ssc =
+      static_cast<SystemServerContext*>(server_context_.get());
+  ssc->SetAdminSiteForTesting(std::make_unique<AdminSite>(
+      timer(), message_handler(), nullptr /* daemon_reader */));
+  GoogleUrl gurl("http://example.com/pagespeed_admin/rule_packs");
+  QueryParams query_params;
+  query_params.ParseFromUrl(gurl);
+  GoogleString body;
+  StringAsyncFetch fetch(rewrite_driver()->request_context(), &body);
+  fetch.request_headers()->set_method(RequestHeaders::kHead);
+  ssc->AdminPage(false /* global */, gurl, query_params,
+                 rewrite_driver()->options(), &fetch, "");
+  EXPECT_TRUE(fetch.done());
+  EXPECT_EQ(200, fetch.response_headers()->status_code());
+}
+
+// The decision log is shared by all server processes: a process that has not
+// loaded the pack yet still shows today's rows.
+TEST_F(AdminSiteTest, RulePacksPageShowsTheSharedLogBeforeThePackIsLoaded) {
+  const std::filesystem::path log_dir =
+      std::filesystem::path(GTestTempDir()) / "rule_packs_admin_log";
+  const std::string date = RulePackDecisionLog::UtcDate(timer()->NowMs());
+  const std::filesystem::path day_dir = log_dir / "packs" / "edge-seo";
+  std::filesystem::remove_all(log_dir);
+  std::filesystem::create_directories(day_dir);
+  {
+    std::ofstream out(day_dir / RulePackDecisionLog::FileName(date));
+    out << "{\"ts\":" << timer()->NowMs()
+        << ",\"pack\":\"edge-seo@0.1.0\",\"sha256\":\"0123456789abcdef\","
+           "\"host\":\"example.com\",\"path\":\"/p?run=1\","
+           "\"rule\":\"canonical-keep\",\"kind\":\"canonical\","
+           "\"mode\":\"report\",\"action\":\"insert\","
+           "\"reason\":\"missing\",\"defect\":\"\",\"before\":\"\","
+           "\"after\":\"https://example.com/p\"}\n"
+        << "{\"ts\":" << timer()->NowMs()
+        << ",\"host\":\"other.test\",\"path\":\"/q\","
+           "\"rule\":\"canonical-keep\",\"action\":\"insert\"}\n";
+  }
+  SystemRewriteOptions options("t", thread_system_.get());
+  options.set_log_dir(log_dir.string());
+  options.set_rule_pack_file("/nonexistent/pack.json");
+
+  SystemServerContext* ssc =
+      static_cast<SystemServerContext*>(server_context_.get());
+  ssc->SetAdminSiteForTesting(std::make_unique<AdminSite>(
+      timer(), message_handler(), nullptr /* daemon_reader */));
+  // A trailing dot and upper case still name the logged (normalized) host.
+  GoogleUrl gurl("http://EXAMPLE.com./pagespeed_admin/rule_packs");
+  QueryParams query_params;
+  query_params.ParseFromUrl(gurl);
+  GoogleString body;
+  StringAsyncFetch fetch(rewrite_driver()->request_context(), &body);
+  fetch.request_headers()->set_method(RequestHeaders::kGet);
+  ssc->AdminPage(false /* global */, gurl, query_params, &options, &fetch, "");
+  EXPECT_EQ(200, fetch.response_headers()->status_code());
+  EXPECT_NE(GoogleString::npos, body.find("not yet loaded in this process"));
+  EXPECT_NE(GoogleString::npos, body.find("/p?run=1"));
+  EXPECT_NE(GoogleString::npos, body.find("edge-seo@0.1.0"));
+  // The vhost shows only its own host's rows.
+  EXPECT_EQ(GoogleString::npos, body.find("other.test</td>"));
+  EXPECT_NE(GoogleString::npos, body.find("1 matching, newest first"));
 }
 
 // =============================================================================

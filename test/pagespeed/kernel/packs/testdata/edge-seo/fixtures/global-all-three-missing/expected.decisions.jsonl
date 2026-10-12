@@ -1,0 +1,3 @@
+{"host":"fixture.test","path":"/g/all","rule":"canonical-keep","kind":"canonical","mode":"enforce","action":"insert","reason":"absent","defect":"canonical-missing","before":"","after":"https://fixture.test/g/all"}
+{"host":"fixture.test","path":"/g/all","rule":"title-keep","kind":"title","mode":"enforce","action":"insert","reason":"absent","defect":"title-missing","before":"","after":"Title for /g/all"}
+{"host":"fixture.test","path":"/g/all","rule":"description-keep","kind":"description","mode":"enforce","action":"insert","reason":"absent","defect":"description-missing","before":"","after":"Description for /g/all"}

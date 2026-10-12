@@ -1,0 +1,18 @@
+{
+  "url": "https://fixture.test/lh/repair/conflict",
+  "pack": "pack.link-header.json",
+  "origin_headers": [
+    [
+      "Content-Type",
+      "text/html; charset=utf-8"
+    ],
+    [
+      "Link",
+      "</static/app.css>; rel=preload; as=style, <https://fixture.test/stale>; rel=\"canonical\", <https://cdn.test>; rel=preconnect"
+    ],
+    [
+      "Link",
+      "<https://fixture.test/amp>; rel=amphtml"
+    ]
+  ]
+}

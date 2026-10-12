@@ -20,8 +20,6 @@
 #ifndef PAGESPEED_KERNEL_BASE_COUNTDOWN_TIMER_H_
 #define PAGESPEED_KERNEL_BASE_COUNTDOWN_TIMER_H_
 
-#include <time.h>
-
 #include "pagespeed/kernel/base/basictypes.h"
 
 namespace net_instaweb {
@@ -49,8 +47,12 @@ class CountdownTimer {
  private:
   Timer* timer_;
   void* user_data_;
-  clock_t limit_time_us_;
-  clock_t start_time_us_;
+  // 64-bit: clock_t is a 32-bit long on Windows, which holds only ~36 minutes
+  // of microseconds.
+  int64 limit_time_us_;
+  int64 start_time_us_;
+  static_assert(sizeof(limit_time_us_) == 8 && sizeof(start_time_us_) == 8,
+                "microsecond values need 64 bits");
 };
 
 }  // namespace net_instaweb

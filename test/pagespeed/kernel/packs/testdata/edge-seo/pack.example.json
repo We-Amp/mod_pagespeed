@@ -1,0 +1,51 @@
+{
+  "pack": {
+    "id": "edge-seo",
+    "version": "0.1.0",
+    "publisher": "local",
+    "engine_min": "1.18.0",
+    "description": "Head-element SEO fixes for example.com"
+  },
+  "sites": [
+    { "host": "www.example.com", "mode": "report" },
+    { "host": "*.example.org",   "mode": "enforce" }
+  ],
+  "defaults": { "paths": ["/**"], "exclude_paths": ["/admin/**", "/cart/**"] },
+  "tables": {
+    "titles":      { "/": "Example: blue widgets", "/about": "About Example" },
+    "canonicals":  { "/shop/index.php?id=12": "https://www.example.com/shop/blue-widget" },
+    "hreflang":    [ { "en": "https://www.example.com/en/", "de": "https://www.example.com/de/", "x-default": "https://www.example.com/en/" } ]
+  },
+  "rules": [
+    {
+      "id": "canonical-shop",
+      "kind": "canonical",
+      "enabled": true,
+      "enforce": false,
+      "match": { "paths": ["/shop/**"], "path_regex": "^/shop/([a-z0-9-]+)$" },
+      "value": { "table": "canonicals", "fallback_template": "https://www.example.com/shop/{1}" },
+      "on_present": "keep"
+    },
+    {
+      "id": "title-home",
+      "kind": "title",
+      "match": { "paths": ["/", "/about"] },
+      "value": { "table": "titles" },
+      "on_present": "repair"
+    },
+    {
+      "id": "hreflang-lang-tree",
+      "kind": "hreflang",
+      "match": { "path_regex": "^/(en|de)(/.*)?$" },
+      "value": { "pattern": { "en": "https://www.example.com/en{2}", "de": "https://www.example.com/de{2}", "x-default": "https://www.example.com/en{2}" } },
+      "on_present": "repair"
+    },
+    {
+      "id": "jsonld-org",
+      "kind": "jsonld",
+      "match": { "paths": ["/"] },
+      "value": { "template": "{\"@context\":\"https://schema.org\",\"@type\":\"Organization\",\"name\":\"Example\",\"url\":\"{canonical}\"}" },
+      "on_present": "keep"
+    }
+  ]
+}

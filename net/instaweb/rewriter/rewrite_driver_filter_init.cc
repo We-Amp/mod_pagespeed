@@ -81,6 +81,7 @@
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_driver_factory.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
+#include "net/instaweb/rewriter/public/rule_pack_host.h"
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "net/instaweb/rewriter/public/strip_scripts_filter.h"
 #include "net/instaweb/rewriter/public/strip_subresource_hints_filter.h"
@@ -159,6 +160,7 @@ void RewriteDriver::InitStats(Statistics* statistics) {
   MetaTagFilter::InitStats(statistics);
   PrioritizeCriticalImagesFilter::InitStats(statistics);
   RewriteContext::InitStats(statistics);
+  RewriteDriverPackHost::InitStats(statistics);
   UrlInputResource::InitStats(statistics);
   UrlLeftTrimFilter::InitStats(statistics);
 }
@@ -235,6 +237,18 @@ void RewriteDriver::AddPreRenderFilters() {
   add_event_listener(new AmpDocumentFilter(
       this, NewPermanentCallback(this, &RewriteDriver::SetIsAmpDocument)));
 
+  if (rewrite_options->Enabled(RewriteOptions::kRulePacks) &&
+      !rewrite_options->rule_pack_file().empty() &&
+      server_context_->rule_pack_provider() != nullptr) {
+    // Applies an operator-written rule pack (canonical, title, description,
+    // ...) to the document as the origin sent it, so it is the first filter
+    // of the chain: before AddHeadFilter (a document without a <head> is
+    // left alone, not given a synthesized one) and before every filter that
+    // rewrites or decodes URLs or injects scripts; those then treat what the
+    // pack inserted like origin markup. The filter fetches the pack for every
+    // document, because the driver and its chain are reused.
+    AddOwnedEarlyPreRenderFilter(new RulePackDriverFilter(this));
+  }
   if (rewrite_options->Enabled(RewriteOptions::kComputeStatistics)) {
     dom_stats_filter_ = new DomStatsFilter(this);
     AddOwnedEarlyPreRenderFilter(dom_stats_filter_);

@@ -925,6 +925,24 @@ TEST_F(RewriteDriverTest, TestComputeCurrentFlushWindowRewriteDelayMs) {
   rewrite_driver()->FinishParse();
 }
 
+// The per-page processing budget is a duration, so it is measured on the
+// monotonic clock: a backward wall-clock step must not hand the page extra
+// time.
+TEST_F(RewriteDriverTest, FlushWindowDelayIgnoresBackwardWallClockStep) {
+  options()->set_rewrite_deadline_ms(1000);
+  rewrite_driver()->AddFilters();
+  ASSERT_TRUE(rewrite_driver()->StartParseId(
+      "http://site.com/", "flush_window_clock_step", kContentTypeHtml));
+  rewrite_driver()->set_max_page_processing_delay_ms(1750);
+  EXPECT_EQ(1000, GetFlushTimeout());
+
+  factory()->mock_timer()->StepWallClockBackUs(10 * Timer::kSecondUs);
+  factory()->mock_timer()->AdvanceMs(1000);
+  EXPECT_EQ(750, GetFlushTimeout());  // 1750 - 1000 of monotonic time.
+
+  rewrite_driver()->FinishParse();
+}
+
 // Extension of above with cache invalidation.
 TEST_F(RewriteDriverTest, TestCacheUseOnTheFlyWithInvalidation) {
   AddFilter(RewriteOptions::kExtendCacheCss);

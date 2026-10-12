@@ -62,6 +62,36 @@ class TestFlushHandlingHeaders:
         )
 
 
+@pytest.mark.requires_fixture("flush_origin")
+class TestOriginHeadersWithoutBodyBytes:
+    """The output filter reaches the end of the response without having seen a
+    body byte (a HEAD request, a 200 with an empty body): the origin's headers
+    must still be written back, not replaced by an empty set."""
+
+    @pytest.mark.parametrize("method", [
+        pytest.param("get", id="empty-body-200"),
+        pytest.param("head", id="head"),
+    ])
+    def test_origin_headers_survive(self, client, method):
+        response = getattr(client, method)(f"{ROUTE}/empty_html")
+        require_status_ok(response, f"{method} empty_html")
+        if method == "get":
+            assert response.body == b"", response.body
+        assert response.header_values("Link") == [
+            "</mod_pagespeed_test/empty_html.css>; rel=preload; as=style"
+        ], response.raw_headers
+        assert any(
+            "origin_cookie=1" in v for v in response.header_values("Set-Cookie")
+        ), response.raw_headers
+        # The module replaces Cache-Control on HTML by default; the directives
+        # it does not touch (must-revalidate) are what shows the origin's
+        # header was read back rather than dropped.
+        assert response.header_values("Cache-Control") == [
+            "max-age=0, no-cache, must-revalidate"
+        ], response.raw_headers
+        assert len(response.header_values("X-Mod-Pagespeed")) == 1, response.raw_headers
+
+
 @pytest.mark.requires_secondary
 @pytest.mark.requires_fixture("flush_origin", "secondary_vhosts")
 class TestImageRewriteWithFlush:

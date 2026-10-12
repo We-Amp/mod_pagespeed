@@ -1,0 +1,3 @@
+{"host":"fixture.test","path":"/g/tpl","rule":"canonical-keep","kind":"canonical","mode":"enforce","action":"insert","reason":"absent","defect":"canonical-missing","before":"","after":"https://fixture.test/g/tpl"}
+{"host":"fixture.test","path":"/g/tpl","rule":"title-keep","kind":"title","mode":"enforce","action":"none","reason":"present","defect":"","before":"","after":""}
+{"host":"fixture.test","path":"/g/tpl","rule":"description-keep","kind":"description","mode":"enforce","action":"insert","reason":"absent","defect":"description-missing","before":"","after":"Description for /g/tpl"}

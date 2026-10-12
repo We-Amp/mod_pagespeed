@@ -277,6 +277,41 @@ TEST_F(JsMinifyTest, Es2015LetHtmlCommentIdempotent) {
   CheckNewMinification("let\nlet\nt&", "let\nlet\nt&");
 }
 
+TEST_F(JsMinifyTest, GeneratorMethodCommentBeforeName) {
+  // Fuzz triage: a comment between a generator `*` and the method name must
+  // classify the `*` exactly as the same input without the comment.  The
+  // name lookahead used to stop at the comment, so on valid input the
+  // minifier declined `{ */**/await(){} }` (a keyword method name), and on
+  // invalid input the first pass kept a linebreak that the second pass then
+  // dropped (not idempotent).
+  CheckNewMinification("x = {*/**/a(){}, b: 2}", "x={*a(){},b:2}");
+  CheckNewMinification("x = {*//c\na(){}, b: 2}", "x={*a(){},b:2}");
+  CheckNewMinification("x = {*/**/await(){}, y: 1}", "x={*await(){},y:1}");
+  CheckNewMinification("x = {*/**/yield(){}, y: 1}", "x={*yield(){},y:1}");
+  CheckNewMinification("x = {*<!--c\na(){}, b: 2}", "x={*a(){},b:2}");
+  CheckNewMinification("class C { static */**/g(){}\ny = 1 }",
+                       "class C{static*g(){}\ny=1}");
+  // The minimized fuzz artifact: invalid input, accept path.  Pass 1 and
+  // pass 2 must agree.
+  CheckNewMinification("({*/**/a\n{z", "({*a{z");
+  CheckNewMinification("({*a{z", "({*a{z");
+  CheckNewMinification("({*//c\na b\n{z", "({*a b{z");
+}
+
+TEST_F(JsMinifyTest, StarThenCommentLookaheadBoundaries) {
+  // A `*` followed by a comment is still the binary operator when it is not
+  // at a method-name position (the name lookahead is never consulted).
+  CheckNewMinification("x = a */**/ b", "x=a*b");
+  CheckNewMinification("x = {k: a */**/b}", "x={k:a*b}");
+  // A computed method name after a comment is not an identifier start, so
+  // the lookahead declines and the `*` keeps its previous classification.
+  CheckNewMinification("x = {*/**/[k](){}}", "x={*[k](){}}");
+  // An unterminated block comment after `{*` declines cleanly: the lookahead
+  // answers false and the tokenizer reports the unterminated comment.
+  CheckError("{*/*");
+  CheckError("x = {*/*");
+}
+
 TEST_F(JsMinifyTest, Es2015LetNonBindingUses) {
   // Sloppy-mode `let`-as-variable at statement position: the binding
   // lookahead takes the identifier path, so these minify exactly as before

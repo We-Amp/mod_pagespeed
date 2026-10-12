@@ -766,6 +766,24 @@ pagespeed FileCacheSizeKb 65536
             Write-Status "ZeroCopy M1 gate: CycloneZeroCopy on, 64 MB Cyclone volume, canary.js + zc_noise_src.jpg written" "Cyan"
         }
 
+        # Lane fixture "rule_packs" (system/test_rule_packs.py): the rule_packs
+        # filter on by name, with its pack and mode set at the file's top
+        # level (site scope; the options are server scoped, so a match block
+        # cannot set them). The pack lists rulepacks.example.com (enforce) and
+        # rulepacks-report.example.com (report); every other host, localhost
+        # included, is passed through. The match block sets a second pack for
+        # one more host: IIS refuses it, so that host is not rewritten
+        # (iis/test_iis_rule_packs.py).
+        $rulePackDir = "$WebRoot\mod_pagespeed_test\rule_packs"
+        $pagespeedConfig += @"
+
+pagespeed EnableFilters rule_packs
+pagespeed RulePackFile "$rulePackDir\pack.json"
+pagespeed RulePackMode enforce
+host:rulepacks-refused\.example\.com
+pagespeed RulePackFile "$rulePackDir\refused-pack.json"
+"@
+
         # Site-level config
         $pagespeedConfig | Set-Content "$WebRoot\pagespeed.config" -Encoding UTF8
         Write-Status "pagespeed.config written to $WebRoot\pagespeed.config" "Gray"

@@ -82,9 +82,9 @@ case "${DISTRO}" in
   # focal is the SIDECAR portable path ONLY (not a distro-stock package
   # target). Its nginx is bumped to the 1.30 stable branch for GA (decided
   # 2026-06-03): newer branch, smaller CVE backlog than 1.24.0 (2023).
-  # sha256 captured from nginx.org/download/nginx-1.30.4.tar.gz 2026-07-23 (security bump 1.30.3 -> 1.30.4: CVE-2026-42533, CVE-2026-60005, CVE-2026-56434).
-  focal) DEF_NGINX_VER="1.30.4"
-         DEF_NGINX_SHA256="4261dc90e9e47c1c4041276e9aaa3d48ebe2e664f728e14fa95ae6c67d57a08b" ;;
+  # sha256 captured from nginx.org/download/nginx-1.30.5.tar.gz 2026-10-10 (security bump 1.30.4 -> 1.30.5: CVE-2026-90439).
+  focal) DEF_NGINX_VER="1.30.5"
+         DEF_NGINX_SHA256="6c20565aa2325cb82216ae804f4a4ff1875179014759a381c42ddc8e11c4906d" ;;
   el9)   DEF_NGINX_VER="1.20.1"
          DEF_NGINX_SHA256="e462e11533d5c30baa05df7652160ff5979591d291736cfa5edb9fd2edb48c49" ;;
   # el10 (AlmaLinux/RHEL/Rocky/CloudLinux 10): distro-source mode like

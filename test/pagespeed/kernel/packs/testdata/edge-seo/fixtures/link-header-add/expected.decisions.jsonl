@@ -1,0 +1,2 @@
+{"host":"fixture.test","path":"/lh/keep/add","rule":"link-keep","kind":"canonical","mode":"enforce","action":"insert","reason":"absent","defect":"canonical-missing","before":"","after":"https://fixture.test/lh/keep/add"}
+{"host":"fixture.test","path":"/lh/keep/add","rule":"link-keep","kind":"canonical","mode":"enforce","action":"insert","reason":"absent","defect":"","before":"","after":"https://fixture.test/lh/keep/add","header":true}

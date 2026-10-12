@@ -229,7 +229,7 @@ bool CurlTestServer::StartAndWait() {
     return false;
   }
   ScopedMutex lock(mutex_.get());
-  while (listen_port_ == 0 && !terminating_) {
+  while (listen_port_ == 0 && !listen_failed_ && !terminating_) {
     ready_->Wait();
   }
   return listen_port_ != 0;
@@ -263,31 +263,65 @@ void CurlTestServer::ShutDown() {
 }
 
 void CurlTestServer::Run() {
-  int fd = socket(AF_INET, SOCK_STREAM, 0);
-  CHECK_GE(fd, 0);
+  int fd = socket(ipv6_ ? AF_INET6 : AF_INET, SOCK_STREAM, 0);
   int reuse = 1;
-  setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
-
   struct sockaddr_in addr;
-  memset(&addr, 0, sizeof(addr));
-  addr.sin_family = AF_INET;
-  addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-  addr.sin_port = 0;  // ephemeral
-  CHECK_EQ(0,
-           bind(fd, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)));
-  CHECK_EQ(0, listen(fd, 32));
-  socklen_t len = sizeof(addr);
-  CHECK_EQ(0, getsockname(fd, reinterpret_cast<struct sockaddr*>(&addr), &len));
+  struct sockaddr_in6 addr6;
+  bool listening = fd >= 0;
+  if (listening) {
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+    if (ipv6_) {
+      memset(&addr6, 0, sizeof(addr6));
+      addr6.sin6_family = AF_INET6;
+      addr6.sin6_addr = in6addr_loopback;
+      addr6.sin6_port = 0;  // ephemeral
+      listening = bind(fd, reinterpret_cast<struct sockaddr*>(&addr6),
+                       sizeof(addr6)) == 0 &&
+                  listen(fd, 32) == 0;
+    } else {
+      memset(&addr, 0, sizeof(addr));
+      addr.sin_family = AF_INET;
+      addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+      addr.sin_port = 0;  // ephemeral
+      listening = bind(fd, reinterpret_cast<struct sockaddr*>(&addr),
+                       sizeof(addr)) == 0 &&
+                  listen(fd, 32) == 0;
+    }
+  }
+  if (!listening) {
+    // Only reachable for the IPv6 loopback on a host that has none; the IPv4
+    // setup has always been a hard requirement.
+    CHECK(ipv6_) << "CurlTestServer: cannot listen on 127.0.0.1";
+    if (fd >= 0) {
+      close(fd);
+    }
+    ScopedMutex lock(mutex_.get());
+    listen_failed_ = true;
+    ready_->Signal();
+    return;
+  }
+  int port;
+  if (ipv6_) {
+    socklen_t len = sizeof(addr6);
+    CHECK_EQ(0,
+             getsockname(fd, reinterpret_cast<struct sockaddr*>(&addr6), &len));
+    port = ntohs(addr6.sin6_port);
+  } else {
+    socklen_t len = sizeof(addr);
+    CHECK_EQ(0,
+             getsockname(fd, reinterpret_cast<struct sockaddr*>(&addr), &len));
+    port = ntohs(addr.sin_port);
+  }
 
   {
     ScopedMutex lock(mutex_.get());
     listen_fd_ = fd;
-    listen_port_ = ntohs(addr.sin_port);
+    listen_port_ = port;
     ready_->Signal();
   }
 
   while (!terminating_) {
-    struct sockaddr_in client_addr;
+    struct sockaddr_storage client_addr;
     socklen_t client_len = sizeof(client_addr);
     int client_fd = accept(fd, reinterpret_cast<struct sockaddr*>(&client_addr),
                            &client_len);
@@ -496,6 +530,24 @@ void CurlTestServer::ServeRequest(const GoogleString& method,
       slept += 50;
     }
     respond(200, "OK", "application/json", "", "{\"delayed\": true}\n");
+  } else if (StringCaseStartsWith(path, "/interim/")) {
+    int code = 0;
+    if (!StringToInt(path.substr(strlen("/interim/")), &code) || code < 100 ||
+        code > 199) {
+      respond(404, "Not Found", "text/plain", "", "not found\n");
+      return;
+    }
+    if (code == 101) {
+      // Switching protocols: the 101 is the final response.
+      write_all(
+          "HTTP/1.1 101 Switching Protocols\r\nUpgrade: test\r\n"
+          "Connection: Upgrade\r\n\r\n");
+      return;
+    }
+    write_all(StrCat("HTTP/1.1 ", IntegerToString(code),
+                     " Interim\r\nLink: </early.css>; rel=preload\r\n\r\n"));
+    respond(200, "OK", "text/html", "X-Final: yes\r\n",
+            "<!DOCTYPE html><html><body>final</body></html>\n");
   } else if (path == "/post") {
     // Echo the request body the way httpbin does: include the raw form text
     // and a key/value rendering so the test's "a=b" / "\"a\": \"b\"" check

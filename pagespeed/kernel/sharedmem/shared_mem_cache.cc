@@ -779,8 +779,7 @@ bool SharedMemCache<kBlockSize>::EnsureReadyForWriting(
   // entry after a while. It then stays marked as being created: readers and
   // writers keep away from it, and its blocks stay in use, until the server
   // is restarted.
-  // On a timer without a monotonic clock, AprTimer among them,
-  // NowMonotonicUs() is the wall clock.
+  // On a timer without a monotonic clock NowMonotonicUs() is the wall clock.
   int64 give_up_us = timer_->NowMonotonicUs() + kMaxWaitForReadersUs;
   while (entry->open_count() > 0 && !sector->disabled()) {
     if (timer_->NowMonotonicUs() >= give_up_us) {

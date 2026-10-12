@@ -35,6 +35,8 @@ Requires        : @@DEPENDS@@
 %Description
 @@FULLDESC@@
 
+Agent install recipe: https://modpagespeed.com/recipes/apache.md
+
 #------------------------------------------------------------------------------
 #   Build rule - How to make the package
 #------------------------------------------------------------------------------

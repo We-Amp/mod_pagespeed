@@ -1,0 +1,2 @@
+{"host":"fixture.test","path":"/hdq/a","rule":"title-replace-quoted","kind":"title","mode":"enforce","action":"replace","reason":"present","defect":"","before":"fnv1a64:d321d294c5e49e24","after":"New title"}
+{"host":"fixture.test","path":"/hdq/a","rule":"jsonld-quote-title","kind":"jsonld","mode":"enforce","action":"insert","reason":"absent","defect":"","before":"","after":"WebPage"}

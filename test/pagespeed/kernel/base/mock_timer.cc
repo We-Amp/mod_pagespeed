@@ -28,7 +28,10 @@ namespace net_instaweb {
 const int64 MockTimer::kApr_5_2010_ms = 1270493486000LL;
 
 MockTimer::MockTimer(AbstractMutex* mutex, int64 time_ms)
-    : time_us_(1000 * time_ms), mutex_(mutex), next_delta_(0) {}
+    : time_us_(1000 * time_ms),
+      monotonic_skew_us_(0),
+      mutex_(mutex),
+      next_delta_(0) {}
 
 MockTimer::~MockTimer() {
   while (next_delta_ < deltas_us_.size()) {
@@ -47,6 +50,12 @@ void MockTimer::SetTimeUs(int64 new_time_us) {
     time_us_ = new_time_us;
   }
   mutex_->Unlock();
+}
+
+void MockTimer::StepWallClockBackUs(int64 delta_us) {
+  ScopedMutex lock(mutex_.get());
+  time_us_ -= delta_us;
+  monotonic_skew_us_ += delta_us;
 }
 
 void MockTimer::SetTimeDeltaUsWithCallback(int64 delta_us, Function* callback) {
@@ -69,6 +78,14 @@ int64 MockTimer::NowUs() const {
     const_cast<MockTimer*>(this)->AdvanceUs(time_and_callback.time);
   }
   return time_us_;
+}
+
+int64 MockTimer::NowMonotonicUs() const {
+  // Advance any pending SetTimeDelta steps via NowUs(), then read the time
+  // and the skew under one lock.
+  NowUs();
+  ScopedMutex lock(mutex_.get());
+  return time_us_ + monotonic_skew_us_;
 }
 
 }  // namespace net_instaweb

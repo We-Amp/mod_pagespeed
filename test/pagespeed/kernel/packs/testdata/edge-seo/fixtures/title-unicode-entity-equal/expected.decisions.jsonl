@@ -1,0 +1,1 @@
+{"host":"fixture.test","path":"/t/u/x","rule":"title-unicode","kind":"title","mode":"enforce","action":"replace","reason":"present","defect":"","before":"fnv1a64:b00c001cb8dcf1af","after":"Café — ok"}

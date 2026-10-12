@@ -1,0 +1,1 @@
+{"host":"report.fixture.test","path":"/c/keep/x","rule":"canonical-keep","kind":"canonical","mode":"report","action":"insert","reason":"absent","defect":"canonical-missing","before":"","after":"https://fixture.test/c/keep/x"}

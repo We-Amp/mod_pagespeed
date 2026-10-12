@@ -1,0 +1,1 @@
+{"host":"fixture.test","path":"/j/keep/e","rule":"jsonld-keep","kind":"jsonld","mode":"enforce","action":"none","reason":"present","defect":"jsonld-invalid","before":"","after":""}

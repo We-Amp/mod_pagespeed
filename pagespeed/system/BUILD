@@ -42,6 +42,31 @@ cc_library(
 # so it is unit-tested on its own; every port's serving and admin paths call
 # it with the names that port's own configuration record gives.
 # =============================================================================
+# The multi-process JSON-lines decision log of the rule_packs filter
+# (O_APPEND writes, daily files, per-process dedup, a daily cap, retention).
+cc_library(
+    name = "rule_pack_decision_log",
+    srcs = ["rule_pack_decision_log.cc"],
+    hdrs = ["rule_pack_decision_log.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)
+
+# Ed25519 verification of a rule pack against its signature sidecar and the
+# configured trust keys.
+cc_library(
+    name = "rule_pack_signature",
+    srcs = ["rule_pack_signature.cc"],
+    hdrs = ["rule_pack_signature.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pagespeed/kernel/packs:signature_format",
+        "@boringssl//:crypto",
+    ],
+)
+
 cc_library(
     name = "serve_host_names",
     srcs = ["serve_host_names.cc"],

@@ -418,11 +418,17 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
     // The request goes to the origin and, on a GET, to the record arm. An
     // age-expired variant also sends the origin-refreshed sentinel, below;
     // the fallback re-notify belongs to the served path further down.
-    server_context->message_handler()->Message(
-        kInfo,
-        "in-place serve: the optimizer daemon's cache had no answer (serve "
-        "class %d) for %s",
-        decision.serve_class, request_context->gurl()->spec_c_str());
+    // Routine fall-throughs are not logged per request: HTML never has an
+    // entry in steady state (nothing records it), so it arrives as no-entry,
+    // and a stale HTML entry is declined as html-classic-chain.
+    if (decision.reason != daemon_serve_reason::kHtmlClassicChain &&
+        decision.reason != daemon_serve_reason::kNoEntry) {
+      server_context->message_handler()->Message(
+          kInfo,
+          "in-place serve: the optimizer daemon's cache had no answer (serve "
+          "class %d) for %s",
+          decision.serve_class, request_context->gurl()->spec_c_str());
+    }
     stats->ipro_daemon_fallthrough()->Add(1);
     // AN AGE-EXPIRED VARIANT IS THE ONE FALL-THROUGH THE WORKER CANNOT HEAL
     // BY ITSELF. The request now goes to the origin and is recorded again,

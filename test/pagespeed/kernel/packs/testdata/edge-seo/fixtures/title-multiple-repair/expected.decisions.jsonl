@@ -1,0 +1,1 @@
+{"host":"fixture.test","path":"/t/repair/multi","rule":"title-repair","kind":"title","mode":"enforce","action":"remove","reason":"conflict","defect":"title-multiple","before":"fnv1a64:8d0259032729869d","after":""}

@@ -59,8 +59,21 @@ docker run --rm --init $PLAT_ARG \
   -e EXPECTED_XPS="$EXPECTED_XPS" \
   "$IMAGE" bash -c '
     set -e; export DEBIAN_FRONTEND=noninteractive
-    apt-get update -qq >/dev/null 2>&1
-    apt-get install -y -qq libpcre3 zlib1g curl procps >/dev/null 2>&1
+    # Debian 11 (bullseye) is past end of life: its packages are no longer on the
+    # regular mirrors, only on archive.debian.org. Point apt there for that release
+    # only; the archived Release files are no longer refreshed, so their validity
+    # window is not checked (signatures still are).
+    if grep -q "^VERSION_CODENAME=bullseye$" /etc/os-release; then
+      rm -f /etc/apt/sources.list.d/*
+      printf "%s\n" \
+        "deb http://archive.debian.org/debian bullseye main" \
+        "deb http://archive.debian.org/debian-security bullseye-security main" \
+        > /etc/apt/sources.list
+      printf "Acquire::Check-Valid-Until \"false\";\n" > /etc/apt/apt.conf.d/99archive
+    fi
+    # stdout is noise; stderr stays visible so a mirror failure shows in the log.
+    apt-get update -qq >/dev/null
+    apt-get install -y -qq libpcre3 zlib1g curl procps >/dev/null
     PN=$(grep -h "^PRETTY_NAME" /etc/os-release | cut -d= -f2)
     echo "  distro: $PN"
 

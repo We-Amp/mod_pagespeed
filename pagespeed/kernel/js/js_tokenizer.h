@@ -279,11 +279,11 @@ class JsTokenizer {
   // into a kBlockKeyword (see the `function*` precedent there).
   bool AtMemberNameAfterModifier() const;
 
-  // Returns true if the next non-whitespace character of the remaining input
-  // is an ASCII identifier-start character.  A lookahead miss (a comment, a
-  // non-ASCII byte, EOF) answers false, which every caller treats as "keep
-  // the old path" -- the same degrade-to-previous-behavior rule the `let`
-  // binding lookahead uses.
+  // Returns true if the next non-whitespace, non-comment character of the
+  // remaining input is an ASCII identifier-start character.  A lookahead miss
+  // (a non-ASCII byte, an unterminated comment, EOF) answers false, which
+  // every caller treats as "keep the old path" -- the same
+  // degrade-to-previous-behavior rule the `let` binding lookahead uses.
   bool NextCharStartsIdentifier() const;
 
   const JsTokenizerPatterns* patterns_;

@@ -15,9 +15,10 @@
   import { ConsoleScope } from "$lib/console-scope.svelte";
   import LoadError from "$lib/LoadError.svelte";
   import { NAV_GROUPS, router, routes } from "$lib/router.svelte";
+  import { SERVER_PAGE_LINKS } from "$lib/routes";
   import ShortcutHelp from "$lib/ShortcutHelp.svelte";
   import { ShortcutReader } from "$lib/shortcuts";
-  import { isNavActive, navKeyHint } from "$lib/utils/nav";
+  import { isNavActive, navKeyHint, serverPageHref } from "$lib/utils/nav";
   import { detectBasePath } from "$lib/utils/base-path";
   import { DEFAULT_PATH, LatestGate, pageTitle } from "$lib/utils/hash-route";
   import { LensFollower, lensAddressRewrite, lensFromParams, lensStorageKey, loadLens, withLens } from "$lib/utils/host-lens";
@@ -282,6 +283,12 @@
             >{route.label}</a>
             <!-- The hint sits beside the link, not in it: the link's name stays the page's name. -->
             {#if hint}<span class="nav-key" aria-hidden="true">{hint}</span>{/if}
+          </li>
+        {/each}
+        <!-- Pages the server renders itself: plain same-tab anchors, no hash route. -->
+        {#each SERVER_PAGE_LINKS.filter((l) => l.group === group.id) as link (link.leaf)}
+          <li class="nav-row">
+            <a class="nav-item" href={serverPageHref(api.basePath, link.leaf)} onclick={() => (sidebarOpen = false)}>{link.label}</a>
           </li>
         {/each}
       </ul>

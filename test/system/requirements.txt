@@ -6,7 +6,8 @@
 # They are provided for local development and testing outside of Bazel.
 
 # Testing framework
-# Pin matches docker/Dockerfile to ensure CI / local / package-test resolve the same version.
+# Pin matches docker/Dockerfile so CI and local runs resolve the same version
+# (the package-test images pin their own pytest).
 pytest==9.1.1
 
 # pytest plugins

@@ -527,7 +527,7 @@ void RewriteDriver::CheckForCompletionAsync(WaitMode wait_mode,
   if (timeout_ms <= 0) {
     end_time_ms = -1;  // Encodes unlimited
   } else {
-    end_time_ms = server_context()->timer()->NowMs() + timeout_ms;
+    end_time_ms = server_context()->timer()->NowMonotonicMs() + timeout_ms;
   }
 
   TryCheckForCompletion(wait_mode, end_time_ms, done);
@@ -537,7 +537,7 @@ void RewriteDriver::TryCheckForCompletion(WaitMode wait_mode, int64 end_time_ms,
                                           Function* done)
     NO_THREAD_SAFETY_ANALYSIS {
   scheduler_->DCheckLocked();
-  int64 now_ms = server_context_->timer()->NowMs();
+  int64 now_ms = server_context_->timer()->NowMonotonicMs();
   int64 sleep_ms;
   if (end_time_ms < 0) {
     waiting_deadline_reached_ = false;  // Unlimited wait..
@@ -706,7 +706,8 @@ int64 RewriteDriver::ComputeCurrentFlushWindowRewriteDelayMs() {
   // If we've configured a max processing delay for the entire page, enforce
   // that limit here.
   if (max_page_processing_delay_ms_ > 0) {
-    int64 ms_since_start = server_context_->timer()->NowMs() - start_time_ms_;
+    int64 ms_since_start =
+        server_context_->timer()->NowMonotonicMs() - start_time_ms_;
     int64 ms_remaining = max_page_processing_delay_ms_ - ms_since_start;
     // If the deadline for the current flush window (deadline) is less
     // than the overall time remaining (ms_remaining), we enforce the
@@ -1763,7 +1764,7 @@ bool RewriteDriver::StartParseId(const StringPiece& url, const StringPiece& id,
   if (response_headers_ != nullptr) {
     status_code_ = response_headers_->status_code();
   }
-  start_time_ms_ = server_context_->timer()->NowMs();
+  start_time_ms_ = server_context_->timer()->NowMonotonicMs();
   set_log_rewrite_timing(options()->log_rewrite_timing());
 
   if (debug_filter_ != nullptr) {
@@ -2140,8 +2141,8 @@ void RewriteDriver::FinishParseAfterFlush(Function* user_callback) {
 
   // Update stats.
   RewriteStats* stats = server_context_->rewrite_stats();
-  stats->rewrite_latency_histogram()->Add(server_context_->timer()->NowMs() -
-                                          start_time_ms_);
+  stats->rewrite_latency_histogram()->Add(std::max<int64>(
+      0, server_context_->timer()->NowMonotonicMs() - start_time_ms_));
   stats->total_rewrite_count()->IncBy(1);
 
   // Update statistics log.

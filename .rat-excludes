@@ -78,6 +78,11 @@ build\.sh
 #                     bodies feed measured baselines only the parity lane can
 #                     re-harvest. Listed by name so the headered
 #                     fixtures/gen_fixture_png.py is audited again.
+#   (...)\.bin        the hand-written malformed-head seeds of the rule-pack
+#                     filter fuzz corpus (tools/rule-pack-filter-corpus/seeds):
+#                     two raw header bytes then deliberately broken HTML. The
+#                     fixture-page seeds there carry the header and stay
+#                     audited, so these are listed by name.
 units
 goldens
 testdata
@@ -88,6 +93,7 @@ whitespace-only\.html
 text-only\.html
 whitespace\.html
 (control|cors|custom-header|notransform|varyaccept|cold|cond|neg-denied|neg-flap|neg-nonimprov|neg-refresh|nonreproducible)-1\.(css|js)
+(late-head-kinds-only|many-titles|nested-heads|split-head-every-byte|unclosed-everything|jsonld-unclosed-script|jsonld-deep-nesting|jsonld-head-and-body-blocks|jsonld-no-body|jsonld-no-html|hreflang-late-body-links|hreflang-odd-attributes)\.bin
 
 # Third-party code, its generated configuration headers, and local patches.
 third_party

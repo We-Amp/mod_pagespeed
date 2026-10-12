@@ -43,6 +43,7 @@
 // precisely because nothing there can any longer hand the module a format the
 // request did not advertise.
 
+#include "pagespeed/system/daemon_record_arm.h"
 #include "pagespeed/system/daemon_serve_arm.h"
 
 #include <atomic>
@@ -806,6 +807,46 @@ TEST_F(DaemonServeArmTest, ColdKeyIsDistinguishedFromAnUnusableEntry) {
   SetAlternates("0a:00:1");
   const DaemonServeDecision pending = Serve(Request("image/webp"));
   EXPECT_EQ(kPsServeClassOriginalPending, pending.serve_class);
+}
+
+// ---------------------------------------------------------------------------
+// HTML: the daemon serves none on the 1.1 ports; the classic chain rewrites it.
+// ---------------------------------------------------------------------------
+
+TEST_F(DaemonServeArmTest, AnHtmlVariantIsAlwaysDeclined) {
+  setenv("PS_STUB_READ_CONTENT_TYPE", "0", 1);  // kPsContentHtml
+  setenv("PS_STUB_ORIGIN_CT", "text/html", 1);
+  SetAlternates("08:00:1");
+  DaemonServeRequest request = Request("text/html,*/*");
+  const DaemonServeDecision decision = Serve(request);
+  EXPECT_EQ(DaemonServeVerdict::kFallThrough, decision.verdict);
+  EXPECT_STREQ(daemon_serve_reason::kHtmlClassicChain, decision.reason);
+  // The entry exists and is refused on purpose: the declined class, not cold.
+  EXPECT_EQ(kPsServeClassOriginalDeclined, decision.serve_class);
+  EXPECT_FALSE(decision.selected);
+  EXPECT_TRUE(decision.body.empty());
+}
+
+TEST_F(DaemonServeArmTest, ADurableHtmlOriginalIsAlwaysDeclined) {
+  setenv("PS_STUB_READ_CONTENT_TYPE", "0", 1);
+  setenv("PS_STUB_ORIGIN_CT", "text/html", 1);
+  SetAlternates("0c:00:0");
+  DaemonServeRequest request = Request("text/html,*/*");
+  const DaemonServeDecision decision = Serve(request);
+  EXPECT_EQ(DaemonServeVerdict::kFallThrough, decision.verdict);
+  EXPECT_STREQ(daemon_serve_reason::kHtmlClassicChain, decision.reason);
+  EXPECT_EQ(kPsServeClassOriginalDeclined, decision.serve_class);
+  EXPECT_FALSE(decision.selected);
+  EXPECT_TRUE(decision.body.empty());
+}
+
+TEST_F(DaemonServeArmTest, AStylesheetIsStillServed) {
+  UseStylesheetFamily();
+  DaemonServeRequest request = CssRequest("identity");
+  const DaemonServeDecision decision = Serve(request);
+  EXPECT_EQ(DaemonServeVerdict::kServeOptimized, decision.verdict);
+  EXPECT_STREQ(daemon_serve_reason::kOptimizedVariant, decision.reason);
+  EXPECT_TRUE(decision.selected);
 }
 
 // ---------------------------------------------------------------------------
@@ -1654,14 +1695,13 @@ TEST_F(DaemonServeArmTest, AnOptimizerWithoutTheHostRecorderStillRecordsTheHit) 
 TEST_F(DaemonServeArmTest, EveryServedContentClassIsRecordedAsItself) {
   // Every served class is recorded as itself: an optimized, worker-produced
   // entry of ANY class is served, and its hit is recorded under the entry's
-  // own class -- nothing here filters by class or declares one
-  // "not applicable".  Pinned for the four classes the optimizer reports,
-  // through the same decision fields every port hands the recorder.
+  // own class.  Pinned for the classes the daemon serves (CSS, JS, images;
+  // HTML is declined by design), through the same decision fields every port
+  // hands the recorder.
   setenv("PS_STUB_ORIGIN_CONTENT_LENGTH", "4096", 1);
   SetAlternates("08:00:1,0c:00:0");
   DaemonServeStats stats(abi_.get(), "/run/parity/cache");
-  const int kClasses[] = {kPsContentHtml, kPsContentCss, kPsContentJs,
-                          kPsContentImage};
+  const int kClasses[] = {kPsContentCss, kPsContentJs, kPsContentImage};
   for (const int content_class : kClasses) {
     SCOPED_TRACE(content_class);
     setenv("PS_STUB_READ_CONTENT_TYPE", IntegerToString(content_class).c_str(),
@@ -2478,7 +2518,8 @@ TEST_F(DaemonServeArmTest, AReaderServesUncodedCopiesUnlessTold) {
   EXPECT_TRUE(original.content_encoding.empty());
 }
 
-TEST_F(DaemonServeArmTest, AnHtmlEntryIsServedUncodedEvenWhenOn) {
+TEST_F(DaemonServeArmTest,
+       AnHtmlEntryFallsThroughEvenWhenStoredEncodingsAreOn) {
   setenv("PS_STUB_READ_CONTENT_TYPE", "0", 1);  // kPsContentHtml
   setenv("PS_STUB_ORIGIN_CT", "text/html", 1);
   SetAlternates("08:00:1,88:00:1,0c:00:0");
@@ -2486,20 +2527,10 @@ TEST_F(DaemonServeArmTest, AnHtmlEntryIsServedUncodedEvenWhenOn) {
   request.url = "/a/page.html";
   request.accept = "text/html";
   const DaemonServeDecision decision = ServeEncoded(request);
-  ASSERT_EQ(DaemonServeVerdict::kServeOptimized, decision.verdict);
-  EXPECT_EQ(0x08, decision.alternate_id);
-  EXPECT_TRUE(decision.content_encoding.empty());
-  // The peer did offer the brotli copy; the refusal is this arm's.
-  const GoogleString log = CallLog();
-  EXPECT_NE(GoogleString::npos, log.find("selected=136"));
-  // And the refusal costs ONE by-id read, the uncoded sibling's: no coded
-  // id is asked for again once the class refused it, and no id twice.
-  EXPECT_EQ(GoogleString::npos,
-            log.find("read_alternate url=/a/page.html id=136"));
-  const size_t uncoded = log.find("read_alternate url=/a/page.html id=8\n");
-  ASSERT_NE(GoogleString::npos, uncoded);
-  EXPECT_EQ(GoogleString::npos,
-            log.find("read_alternate url=/a/page.html id=8", uncoded + 1));
+  EXPECT_EQ(DaemonServeVerdict::kFallThrough, decision.verdict);
+  EXPECT_STREQ(daemon_serve_reason::kHtmlClassicChain, decision.reason);
+  EXPECT_FALSE(decision.selected);
+  EXPECT_TRUE(decision.body.empty());
 }
 
 TEST_F(DaemonServeArmTest, TheByIdRetryStillReachesTheUncodedSiblingWhenOn) {

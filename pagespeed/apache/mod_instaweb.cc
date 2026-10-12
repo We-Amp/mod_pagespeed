@@ -165,6 +165,7 @@ const char kModPagespeedPreserveSubresourceHints[] =
     "ModPagespeedPreserveSubresourceHints";
 const char kModPagespeedProxySuffix[] = "ModPagespeedProxySuffix";
 const char kModPagespeedRetainComment[] = "ModPagespeedRetainComment";
+const char kModPagespeedRulePackTrustKey[] = "ModPagespeedRulePackTrustKey";
 const char kModPagespeedRunExperiment[] = "ModPagespeedRunExperiment";
 const char kModPagespeedShardDomain[] = "ModPagespeedShardDomain";
 const char kModPagespeedSpeedTracking[] = "ModPagespeedIncreaseSpeedTracking";
@@ -247,6 +248,11 @@ apr_bucket* rewrite_html(InstawebContext* context, request_rec* request,
       return nullptr;
     }
   } else if (operation == FINISH) {
+    // A response that ends without a body byte (a HEAD request, or a 200 with
+    // an empty body) never ran PopulateHeaders on data, so the context's
+    // response headers are still empty. Read the origin's headers now, or the
+    // clear-and-write-back below would replace them with nothing.
+    context->PopulateHeaders(request);
     context->Finish();
   }
 
@@ -578,6 +584,15 @@ bool process_bucket(ap_filter_t* filter, request_rec* request,
     // OK, we have seen the EOS. Time to pass it along down the chain.
     *return_code = ap_pass_brigade(filter->next, context_bucket_brigade);
     return false;
+  } else if (APR_BUCKET_IS_FLUSH(bucket) &&
+             context->FlushWouldSendEditableHeaders()) {
+    // Nothing has been parsed, so there is nothing of ours to flush, and
+    // passing the bucket on would send the headers before the rule_packs
+    // filter can edit them. The next flush or the end of the response sends
+    // them, edited. The origin's headers are read now: a response that ends
+    // without a body byte must still write them back, not an empty set.
+    context->PopulateHeaders(request);
+    apr_bucket_delete(bucket);
   } else if (APR_BUCKET_IS_FLUSH(bucket)) {
     new_bucket = rewrite_html(context, request, FLUSH, nullptr, 0);
     if (new_bucket != nullptr) {
@@ -1885,6 +1900,9 @@ static const command_rec mod_pagespeed_filter_cmds[] = {
     // (Not in <Directory> blocks.)
     APACHE_CONFIG_OPTION2(kModPagespeedCreateSharedMemoryMetadataCache,
                           "name size_kb"),
+    APACHE_CONFIG_OPTION2(kModPagespeedRulePackTrustKey,
+                          "Trust rule packs signed with this key: <key id> "
+                          "<base64 Ed25519 public key>"),
     APACHE_CONFIG_OPTION2(kModPagespeedLoadFromFile,
                           "url_prefix filename_prefix"),
     APACHE_CONFIG_OPTION2(kModPagespeedLoadFromFileMatch,

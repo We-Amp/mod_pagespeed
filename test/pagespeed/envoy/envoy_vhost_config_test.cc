@@ -171,6 +171,31 @@ TEST_F(EnvoyVHostConfigTest, DaemonApiSocketPathDefaultAndParse) {
   EXPECT_STREQ("/run/custom/api.sock", options->daemon_api_socket_path());
 }
 
+// The rule_packs options parse, merge and clone on the Envoy options class.
+TEST_F(EnvoyVHostConfigTest, RulePackOptionsParseAndRoundTrip) {
+  auto options = std::make_unique<EnvoyRewriteOptions>(&thread_system_);
+  EXPECT_TRUE(options->rule_pack_file().empty());
+  EXPECT_EQ(RewriteOptions::kRulePackModeReport, options->rule_pack_mode());
+  GoogleString msg;
+  EXPECT_EQ(
+      RewriteOptions::kOptionOk,
+      options->ParseAndSetOptionFromName1(
+          "RulePackFile", "/etc/pagespeed/packs/site.json", &msg, &handler_));
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            options->ParseAndSetOptionFromName1("RulePackMode", "enforce", &msg,
+                                                &handler_));
+  EXPECT_EQ(RewriteOptions::kOptionValueInvalid,
+            options->ParseAndSetOptionFromName1("RulePackMode", "enforc", &msg,
+                                                &handler_));
+  auto merged = std::make_unique<EnvoyRewriteOptions>(&thread_system_);
+  merged->Merge(*options);
+  EXPECT_EQ("/etc/pagespeed/packs/site.json", merged->rule_pack_file());
+  EXPECT_EQ(RewriteOptions::kRulePackModeEnforce, merged->rule_pack_mode());
+  std::unique_ptr<RewriteOptions> clone(merged->Clone());
+  EXPECT_EQ("/etc/pagespeed/packs/site.json", clone->rule_pack_file());
+  EXPECT_EQ(RewriteOptions::kRulePackModeEnforce, clone->rule_pack_mode());
+}
+
 // Test that lower priority values are matched first.
 TEST_F(EnvoyVHostConfigTest, PriorityOrderingBasic) {
   EnvoyVHostConfigManager manager;

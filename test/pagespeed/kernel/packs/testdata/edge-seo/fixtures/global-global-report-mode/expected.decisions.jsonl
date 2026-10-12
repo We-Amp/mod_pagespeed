@@ -1,0 +1,3 @@
+{"host":"fixture.test","path":"/g/report","rule":"canonical-keep","kind":"canonical","mode":"report","action":"insert","reason":"absent","defect":"canonical-missing","before":"","after":"https://fixture.test/g/report"}
+{"host":"fixture.test","path":"/g/report","rule":"title-keep","kind":"title","mode":"report","action":"insert","reason":"absent","defect":"title-missing","before":"","after":"Title for /g/report"}
+{"host":"fixture.test","path":"/g/report","rule":"description-keep","kind":"description","mode":"report","action":"insert","reason":"absent","defect":"description-missing","before":"","after":"Description for /g/report"}

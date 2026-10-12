@@ -90,6 +90,9 @@ inline constexpr char kUrlNotKeySafe[] = "url-not-key-safe";
 // for optimization is not, because the peer would file the result under the
 // default context, which is a different configuration's namespace.
 inline constexpr char kNoOptionContext[] = "no-option-context";
+// HTML is never recorded: the serve arm serves none, and the classic chain
+// rewrites every HTML response.
+inline constexpr char kHtmlClassicChain[] = "html-classic-chain";
 }  // namespace daemon_record_reason
 
 // One origin response header, name and value, exactly as the origin sent it.
@@ -419,6 +422,7 @@ int NotifyDaemon(const DaemonAbi& abi, StringPiece socket_path,
                  const DaemonRecordInput& input,
                  const DaemonRecordDecision& decision);
 
+class RewriteOptions;
 class RewriteStats;
 
 // Moves the per-class split of the daemon fall-through counter for one

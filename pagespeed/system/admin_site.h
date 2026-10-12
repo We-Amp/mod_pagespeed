@@ -184,6 +184,20 @@ class AdminSite {
                       Statistics* stats,
                       SystemRewriteOptions* global_system_rewrite_options);
 
+  // The read-only "Rule packs" page (/pagespeed_admin/rule_packs): the
+  // vhost's rule-pack directives, the pack this process has loaded, the
+  // rule_pack_* counters of `stats`, and the tail of today's decision log
+  // (a bounded read of the end of the file). GET and HEAD only. HTML;
+  // ?raw=1 answers the same lines as text/plain. ?limit=, ?rule=, ?action=
+  // and ?reason= narrow the table.
+  // `request_host` narrows a per-vhost table to the rows of that host. The
+  // decision log is shared by all server processes, so its tail is shown
+  // whether or not this process has loaded the pack yet.
+  void RulePacksPage(bool is_global, StringPiece request_host,
+                     const RewriteOptions& options,
+                     const QueryParams& query_params, AsyncFetch* fetch,
+                     ServerContext* server_context, Statistics* stats);
+
   // Returns JSON used by the PageSpeed Console JavaScript.
   void ConsoleJsonHandler(const QueryParams& params, AsyncFetch* fetch,
                           Statistics* statistics);
